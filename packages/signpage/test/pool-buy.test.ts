@@ -1682,3 +1682,155 @@ test("the not-landed reads: a 503 on one RPC's height read waits the growing pau
   assert.ok(hot <= 15, `RPC 0's height read ${hot} times in 60 s of RPC 1's 503, where a second's pace is 60`);
   assert.ok(after >= 20, `${after} reads in the 40 s after RPC 1 answers: back to a second's pace`);
 });
+
+// ---- card start-reads-wait-out-a-throttle: a buy's start reads wait out a provider fault on the page's one rule ----
+// (src/read-waits.ts readWaits: from 1 s, doubling, at most 10 s, 30 s in all), each attempt from its first read, so
+// nothing signed rests on a read from before a wait; then "down", nothing taken or signed. A sign out ends the wait.
+const RENT_SYSVAR = "SysvarRent111111111111111111111111111111111";
+const POOL_ACCOUNT = POOL;
+const devnet429 = () => new SolanaRpcTransportError("http_429", "HTTP 429", 4, "api.devnet.solana.com", null);
+/** The pair with provider `bad` throwing `fault()` at each call `hit` names while `left()` is above 0 (each throw takes one). */
+function faultAt(rpcs: PoolBuyHost["rpcs"], bad: 0 | 1, hit: (m: string, q: readonly unknown[]) => boolean, times: number, fault: () => Error = devnet429) {
+  let left = times;
+  const asked: Record<string, [number, number]> = {};
+  const gate = (i: 0 | 1, rpc: SolanaRpc): SolanaRpc =>
+    (async (m: string, q: readonly unknown[]) => {
+      if (m === "getAccountInfo" && q[0] === RENT_SYSVAR) (asked[RENT_SYSVAR] ??= [0, 0])[i]++;
+      if (i === bad && left > 0 && hit(m, q)) {
+        left--;
+        throw fault();
+      }
+      return rpc(m, q);
+    }) as SolanaRpc;
+  return { rpcs: [gate(0, rpcs[0]), gate(1, rpcs[1])] as const, asked, fired: () => left < times };
+}
+const beforeSend = (w: World) => w.waits.slice(0, w.log.includes("send") ? undefined : w.waits.length);
+
+test("card start-reads-wait-out-a-throttle: a 429 or a 5xx at the buy's first (the Rent sysvar), middle (the pool's sizes) or late (the blockhash) read on either provider waits 1 s and buys; the Rent sysvar asked again only of the provider that failed", async () => {
+  const where: [string, (m: string, q: readonly unknown[]) => boolean][] = [
+    ["first: the Rent sysvar", (m, q) => m === "getAccountInfo" && q[0] === RENT_SYSVAR],
+    ["middle: the pool's sizes", (m, q) => m === "getAccountInfo" && q[0] === POOL_ACCOUNT],
+    ["late: the blockhash", (m) => m === "getLatestBlockhash" || m === "isBlockhashValid"],
+  ];
+  for (const [what, hit] of where)
+    for (const fault of ["http_429", "http_5xx"] as const)
+      for (const bad of [0, 1] as const) {
+        const w = await world();
+        const f = faultAt(w.host.rpcs, bad, hit, 1, () => new SolanaRpcTransportError(fault, fault, 4, "api.devnet.solana.com", null));
+        const sendAt = { waits: -1 };
+        const a = await runPoolBuy({ ...w.host, rpcs: f.rpcs, send: async (p, tx) => ((sendAt.waits = w.waits.length), w.host.send(p, tx)) }, ASK);
+        const label = `${what}, ${fault}, provider ${bad}`;
+        assert.ok(f.fired(), label);
+        assert.deepEqual(a, { stage: "filled", txs: [{ chain: "solana", hash: SIG }] }, label);
+        assert.deepEqual(w.waits.slice(0, sendAt.waits), [1_000], label);
+        assert.equal(f.asked[RENT_SYSVAR]![1 - bad], 1, `${label}: the Rent sysvar asked again of the provider that answered`);
+      }
+});
+
+test("card start-reads-wait-out-a-throttle: a buy's read throttled at every attempt waits 1, 2, 4, 8 and 10 s, then answers down: nothing taken, signed or sent", async () => {
+  const w = await world();
+  const f = faultAt(w.host.rpcs, 1, (m) => m === "isBlockhashValid", Infinity);
+  assert.deepEqual(await runPoolBuy({ ...w.host, rpcs: f.rpcs }, ASK), { error: "down" });
+  assert.deepEqual(w.waits, [1_000, 2_000, 4_000, 8_000, 10_000]);
+  assert.equal(w.state(), "HELD");
+  assert.ok(!w.log.includes("send") && !w.log.some((x) => x.startsWith("take")));
+});
+
+test("card start-reads-wait-out-a-throttle: a buy's error that is no provider fault answers at once, no wait", async () => {
+  const w = await world();
+  const f = faultAt(w.host.rpcs, 0, (m) => m === "getLatestBlockhash", 1, () => new TypeError("x is not a function"));
+  assert.deepEqual(await runPoolBuy({ ...w.host, rpcs: f.rpcs }, ASK), { error: "failed" });
+  assert.deepEqual(w.waits, []);
+});
+
+test("card start-reads-wait-out-a-throttle: a sign out ends a buy's wait at once; the buy never starts again, nothing taken or signed", async () => {
+  const w = await world();
+  const stop = new AbortController();
+  const f = faultAt(w.host.rpcs, 0, (m) => m === "getLatestBlockhash", 1);
+  const run = runPoolBuy({ ...w.host, rpcs: f.rpcs, signal: stop.signal, wait: () => (stop.abort(), new Promise<void>(() => {})) }, ASK);
+  const a = await Promise.race([run, new Promise<"held">((r) => setTimeout(() => r("held"), 5_000))]);
+  assert.deepEqual(a, { error: "failed" });
+  assert.ok(!w.log.includes("send") && !w.log.some((x) => x.startsWith("take")));
+});
+
+test("card start-reads-wait-out-a-throttle: a buy's bound is on the device's clock: each throttled read taking 5 s, it waits 1, 2 and 4 s and answers down by 30 s plus the attempt in flight", async () => {
+  const w = await world();
+  let t = 0n;
+  const f = faultAt(w.host.rpcs, 1, (m) => m === "isBlockhashValid", Infinity, () => ((t += 5_000n), devnet429()));
+  const waits: number[] = [];
+  assert.deepEqual(await runPoolBuy({ ...w.host, rpcs: f.rpcs, now: () => t, wait: async (ms: number) => void (waits.push(ms), (t += BigInt(ms))) }, ASK), { error: "down" });
+  assert.deepEqual(waits, [1_000, 2_000, 4_000]);
+  assert.ok(t <= 30_000n + 13_500n, `down at ${t} ms`);
+  assert.ok(!w.log.includes("send") && !w.log.some((x) => x.startsWith("take")));
+});
+
+// Card sol-buy-reads-side-by-side: the pool's time for the take is read beside the first round (the host's chainNow,
+// the wallet's chainNow on the queue's pool) and handed to the take, which uses it within NOW_REUSE_MS of its start and
+// reads again past it (packages/wallet/src/pool/queue.ts): no chain-time read waits between the signature and the send.
+test("card sol-buy-reads-side-by-side: the pool's time is read with the first round and handed to the take", async () => {
+  const w = await world();
+  const read = Promise.resolve({ ms: 1n, at: 0, wall: 0 });
+  let handed: unknown = "none";
+  const take = w.host.take;
+  const host: PoolBuyHost = {
+    ...w.host,
+    chainNow: () => (w.log.push("chainNow"), read),
+    take: (id, attempt, early) => ((handed = early), take(id, attempt)),
+  };
+  assert.equal((await runPoolBuy(host, ASK) as { stage?: string }).stage, "filled");
+  assert.equal(handed, read, "the take is handed the early read itself");
+  const at = w.log.indexOf("chainNow");
+  assert.ok(at >= 0 && at < w.log.findIndex((x) => /^[01]:/.test(x)), `read before the first round's reads: ${w.log.slice(0, 6).join(" ")}`);
+  assert.equal(w.log.filter((x) => x === "chainNow").length, 1);
+});
+
+test("card sol-buy-reads-side-by-side: an early read that fails never stops the buy (the take reads again), and one refused before the take is left handled", async () => {
+  const w = await world();
+  const host: PoolBuyHost = { ...w.host, chainNow: () => Promise.reject(new Error("rpc 1: socket hang up")) };
+  assert.equal((await runPoolBuy(host, ASK) as { stage?: string }).stage, "filled");
+  const n = await world({ slotAhead: 40 });
+  const refused: PoolBuyHost = { ...n.host, chainNow: () => Promise.reject(new Error("rpc 1: socket hang up")) };
+  assert.deepEqual(await runPoolBuy(refused, ASK), { error: "quote_check_failed" });
+});
+
+// Card sol-buy-reads-side-by-side, review of 6b3bd660 (P3-A): "sent" is the run's final progress only after the early
+// answer "sent"; the run's own end is posted once, whatever throws after it
+const lockOnce = { request: (_n: string, _o: unknown, f: () => Promise<void>) => f() } as unknown as Pick<LockManager, "request">;
+const kindRun = async (host: PoolBuyHost & { end?(): void }) => {
+  const stages: string[] = [];
+  const r = poolBuyKind(() => host, lockOnce)(ASK, { id: "r1", sha: "00", progress: (s: string) => void stages.push(s) } as never) as { running: true; after: Promise<void>; answer: () => unknown };
+  await r.after;
+  await new Promise((res) => setTimeout(res, 50));
+  return { answer: r.answer(), stages };
+};
+const throwingEnd = () => {
+  throw new Error("the host's end throws");
+};
+
+test("card sol-buy-reads-side-by-side: a run refused with nothing sent posts no sent when the host's end throws", async () => {
+  const w = await world({ blockhashReads: [{ slotAhead: 2, blockhash: BLOCKHASH }, { slotAhead: 30, blockhash: BLOCKHASH }] });
+  const c = clocked(w, holdVenue);
+  const { answer, stages } = await kindRun({ ...c.host, end: throwingEnd });
+  assert.deepEqual(answer, { error: "quote_check_failed" });
+  assert.deepEqual(stages, [], "nothing went out: no sent");
+  assert.equal(w.state(), "HELD");
+  assert.equal(w.sends.length, 0);
+});
+
+test("card sol-buy-reads-side-by-side: a run that throws past its own catch after the early answer posts sent", async () => {
+  const w = await world();
+  // the run's own finally throws (the claimed set refuses the delete): runPoolBuy throws after its early answer
+  const claimed = { has: () => false, add: () => {}, delete: () => {
+    throw new Error("the claimed set throws");
+  } } as unknown as Set<string>;
+  const { answer, stages } = await kindRun({ ...w.host, claimed });
+  assert.deepEqual(answer, { result: { stage: "sent", txs: [{ chain: "solana", hash: SIG }] } });
+  assert.deepEqual(stages, ["sent"]);
+});
+
+test("card sol-buy-reads-side-by-side: a filled run whose host's end throws posts filled once, never sent after it", async () => {
+  const w = await world();
+  const { answer, stages } = await kindRun({ ...w.host, end: throwingEnd });
+  assert.deepEqual(answer, { result: { stage: "sent", txs: [{ chain: "solana", hash: SIG }] } });
+  assert.deepEqual(stages, ["filled"]);
+});

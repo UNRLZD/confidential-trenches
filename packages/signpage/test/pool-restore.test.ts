@@ -1711,42 +1711,91 @@ test("delta P3-D: a tab whose step 5 ends never removes the marker another tab's
   assert.deepEqual(await markerOf(w.store), mine, "tab 2's marker stands: the next load reads for it");
 });
 
-// card signpage-evm-pool-sell: a wiped browser's restore writes each EVM buy's record again, its route read from the
-// buy's own transaction (src/pool-sell-evm.ts restoreEvmHoldings), so the restored W sells on the route its buy took
-test("restore: an EVM buy's record is written again from its own transaction, the route the buy took; a read that fails writes none; a written one reads its chain's positions again (card signpage-positions-evm)", async () => {
-  const { pinnedBuild } = await import("../../kit/src/trade/evm/buy-unpinned.ts");
-  const { BOUGHT, TOKEN } = await import("../../kit/test/evm-sell-quote-fx.ts");
-  const { evmBuyCalldata } = await import("../src/evm-send.ts");
+// card signpage-evm-pool-sell: the mainnet build writes no EVM buy record from a restore (the sale is the testnet
+// build's only; test/pool-restore-evm-holdings.test.ts runs the testnet build's restore of them)
+test("restore: the mainnet build reads no EVM buy's transaction and writes no buy record", async () => {
   const { EVM_POSITION_COSTS_KEY } = await import("../src/pool-buy-evm.ts");
-  const { EVM_POOL_EVENTS } = await import("../../wallet/src/pool/evm.ts");
-  const { keccak_256 } = await import("@noble/hashes/sha3.js");
-  const V = evmPoolVenues().base;
-  const POOL = V.pool!.toLowerCase();
-  const W = "0x00000000000000000000000000000000000000aa";
-  const w32 = (v: bigint) => "0x" + v.toString(16).padStart(64, "0");
-  const T_BOUGHT = "0x" + Buffer.from(keccak_256(new TextEncoder().encode(EVM_POOL_EVENTS.Bought))).toString("hex");
-  const built = pinnedBuild(evmPoolVenues(), "base", V.adapters!.v4!, BOUGHT as never, 5n, TOKEN, true);
-  const relay = { recipient: W, feeRecipient: "0x0000000000000000000000000000000000000fee", feeCap: 1n, deadlineMs: 1n, refundPrecommitment: 9n, salt: "0x" + "ab".repeat(16) };
-  const input = "0x" + Buffer.from(evmBuyCalldata(POOL, relay as never, { pi_a: ["1", "2", "1"], pi_b: [["3", "4"], ["5", "6"], ["1", "0"]], pi_c: ["7", "8", "1"] } as never, ["1", "2", "3", "4", "5", "6", "7", "8"] as never, 1n, built, new Uint8Array(65))).toString("hex");
-  const TX = "0x" + "b0".repeat(32);
-  const BH = "0x" + "cd".repeat(32);
-  const rpc = (down: boolean) => async (method: string, params: readonly unknown[]): Promise<unknown> => {
-    if (down) throw new Error("HTTP 503");
-    if (method === "eth_getLogs") return [{ address: POOL, topics: [T_BOUGHT, w32(BigInt(W))], data: "0x", blockNumber: "0x100", blockHash: BH, logIndex: "0x3", transactionHash: TX, transactionIndex: "0x0", removed: false }];
-    if (method === "eth_getBlockByNumber") return { hash: BH, transactions: [{ hash: TX, to: POOL, input }] };
-    if (method === "eth_call") return w32(18n);
-    throw new Error(`no ${method} ${JSON.stringify(params)}`);
+  const asked: string[] = [];
+  const rpc = async (m: string) => (asked.push(m), assert.fail(`no ${m} read`));
+  const pools: readonly RestorePool[] = [{ chain: "evm", pin: { network: "base", pool: "0x1", feeRecipient: "0x2", fromBlock: 1n }, scope: EVM_SCOPE, rpcs: () => [rpc, rpc] }];
+  const spends = [{ l: LABEL_E, j: 0, note: "n", w: "0x00000000000000000000000000000000000000aa", withdrawn: 1n, block: 0x100n, token: "0x1111111111111111111111111111111111111111", blockHash: "0x" + "cd".repeat(32), logIndex: 3n }];
+  const w = await world({ pools: () => pools, evm: (async () => ({ notes: notesOf(EVM_SCOPE, LABEL_E, 2000n), spends, elsewhere: [], wallets: [], block: 1n })) as never });
+  assert.equal(await w.r.auto(), "done");
+  await w.r.idle();
+  assert.equal(await w.store.get("meta", EVM_POSITION_COSTS_KEY), undefined);
+  assert.deepEqual(asked, []);
+});
+
+// card restore-first-sign-in-under-two-minutes (release 114's live run 42935167402): a sign out ends the run at once at
+// every stage, the walk's and step 5's alike: its reads in flight are let go of (the run waits on none of them), and no
+// read starts after it
+// each run below is awaited whole: a run that waits on a read past its sign out never ends, and the test's own timeout
+// fails it
+test("a sign out during the walk ends the run at once: the walk's signal ends it, nothing read after", { timeout: 5_000 }, async () => {
+  const n = nearOf();
+  let r: ReturnType<typeof poolRestore> | null = null;
+  let had: AbortSignal | undefined;
+  let entered: () => void = () => {};
+  const walking = new Promise<void>((ok) => (entered = ok));
+  // a walk that ends only at its signal, as the pool walks do since this card (they yield and check it)
+  const walk = (async (a: { signal?: AbortSignal }) => {
+    had = a.signal;
+    entered();
+    setTimeout(() => r!.signedOut(), 20);
+    return new Promise((_, no) => a.signal?.addEventListener("abort", () => no(a.signal!.reason), { once: true }));
+  }) as never;
+  const w = await world({ pools: () => SOL_ONLY, solana: walk, ids: n.ids, pausesMs: [1, 1, 1, 1] });
+  r = w.r;
+  const run = w.r.auto().catch(() => null);
+  await walking;
+  await run.then(() => w.r.idle());
+  assert.ok(had instanceof AbortSignal && had.aborted, "the walk had the run's signal, ended");
+  await new Promise((ok) => setTimeout(ok, 50));
+  assert.equal(n.log.length, 0, "no id read after it");
+});
+test("a sign out during step 5's first try ends the run at once though an id read never answers, nothing read after", { timeout: 10_000 }, async () => {
+  let r: ReturnType<typeof poolRestore> | null = null;
+  const log: string[] = [];
+  let first = true;
+  // the recorded operators, but no id read is ever answered: the sign out lands while one is in flight
+  const hang = (url: string): NearRpc => {
+    const base = replay(url, new Map(), []);
+    return {
+      name: url,
+      query: async (params) => {
+        const u = (params.request_type === "view_account" ? params.account_id : argsOf(params).account_id) as string;
+        if (u === "intents.near") return base.query(params);
+        log.push(`${url} ${u}`);
+        if (first) (first = false), setTimeout(() => r!.signedOut(), 20);
+        return new Promise(() => {});
+      },
+    } as NearRpc;
   };
-  for (const down of [false, true]) {
-    const pools: readonly RestorePool[] = [{ chain: "evm", pin: { network: "base", pool: POOL, feeRecipient: "0x2", fromBlock: 1n }, scope: EVM_SCOPE, rpcs: () => [rpc(down), rpc(down)] }];
-    const spends = [{ l: LABEL_E, j: 0, note: "n", w: W, withdrawn: 1n, block: 0x100n, token: TOKEN, blockHash: BH, logIndex: 3n }];
-    const told: string[] = [];
-    const w = await world({ pools: () => pools, evm: (async () => ({ notes: notesOf(EVM_SCOPE, LABEL_E, 2000n), spends, elsewhere: [], wallets: [], block: 1n })) as never, holdingsWritten: (chain) => void told.push(chain) });
-    assert.equal(await w.r.auto(), "done");
-    await w.r.idle();
-    assert.deepEqual(told, down ? [] : ["base"], "the chain's positions read again once its records are written, with no reload");
-    const rec = ((await w.store.get("meta", EVM_POSITION_COSTS_KEY)) ?? {}) as Record<string, { route?: unknown; state?: string; mint?: string; decimals?: number }>;
-    if (down) assert.deepEqual(rec, {}, "a read that fails writes no record: the W is not sold until a later restore reads it");
-    else assert.deepEqual(rec[W], { mint: TOKEN, decimals: 18, chain: "base", state: "filled", route: { venue: "uniswap-v4", adapter: V.adapters!.v4!.toLowerCase(), path: BOUGHT, tx: TX, block: "256" } });
-  }
+  const ids: NonNullable<PoolRestoreHost["ids"]> = { rpcs: () => [hang(FAST), hang(DRPC)], opts: { tries: 1, sleep: async () => {}, now: () => performance.now() }, read: () => {} };
+  const w = await world({ pools: () => SOL_ONLY, solana: emptyWalk, ids, pausesMs: [1, 1, 1, 1] });
+  r = w.r;
+  // the sign out lands on the run's first NEAR read, whichever step makes it
+  await w.r.auto().catch(() => null).then(() => w.r.idle());
+  assert.ok(log.length > 0, "a read was in flight");
+  const at = log.length;
+  await new Promise((ok) => setTimeout(ok, 50));
+  assert.equal(log.length, at, "no read after it");
+});
+test("a sign out while the walk's read is in flight ends the run at once though the read never answers: no seed, no read after", { timeout: 10_000 }, async () => {
+  const n = nearOf();
+  let r: ReturnType<typeof poolRestore> | null = null;
+  let entered: () => void = () => {};
+  const reading = new Promise<void>((ok) => (entered = ok));
+  // a walk whose provider read never answers and never looks at the signal (a fetch in flight)
+  const walk = (async () => (entered(), setTimeout(() => r!.signedOut(), 20), new Promise(() => {}))) as never;
+  const w = await world({ pools: () => SOL_ONLY, solana: walk, ids: n.ids, pausesMs: [1, 1, 1, 1] });
+  r = w.r;
+  const run = w.r.auto().catch(() => null);
+  await reading;
+  const seeds = w.seeds.length;
+  await run.then(() => w.r.idle());
+  await new Promise((ok) => setTimeout(ok, 50));
+  assert.equal(w.seeds.length, seeds, "no seed taken after it");
+  assert.ok(w.seeds.every((s) => s.every((b) => b === 0)), "every seed it took is zeroed");
+  assert.equal(n.log.length, 0, "no id read after it");
 });

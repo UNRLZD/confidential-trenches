@@ -18,11 +18,12 @@
 //   held to what each W holds on both RPCs, and the quote checks (min out from the device's own pool reads, the rule's
 //   checks of the signed bytes).
 // - The first read waits out a provider that fails (a throttle, a 5xx or no answer past the page client's own retry,
-//   kit send.ts SOLANA_RPC_RETRY): on the wallet's one rule (../../wallet/src/throttle.ts throttleWaitMs) inside the
-//   bounds pool-sell.ts keeps for its own reads (from POOL_SELL_WAIT_MS, doubling, a Retry-After honoured up to
-//   POOL_SELL_THROTTLE_MAX_MS, POOL_SELL_THROTTLE_WAITS waits), asking again only the provider that failed (the other's
-//   answer is still one of the two that must agree). "down" (card pool-read-down: never not_allowed) only once the
-//   bound is spent.
+//   kit send.ts SOLANA_RPC_RETRY): on the page's one rule for a kind's reads (read-waits.ts readWaits: the wallet's
+//   throttleWaitMs from 1 s, doubling, at most 10 s, a Retry-After honoured to 10 s, until READ_WAIT_TOTAL_MS),
+//   asking again only the provider that failed (the other's answer is still one of the two that must agree). "down"
+//   (card pool-read-down: never not_allowed) only once the bound is spent; any other error is down at once, as before.
+//   A sign out ends the wait, and the sell then answers failed, its flow never run (card start-reads-wait-out-a-
+//   throttle, review of 49efdb0c).
 // - On Base and Robinhood every kind goes to the flow once its pool is pinned: a pool.deposit's tx from the one-time
 //   wallet U is checked by rules/pool.ts checkEvmDeposit (card pool-deposits, src/pool-deposit-evm.ts), a pool.withdraw's
 //   onward send from W to the typed address by checkEvmOnwardSend (card signpage-pool-withdraw-form); the page's EVM
@@ -36,11 +37,9 @@
 //   block not final yet stands before the note to sign) is answered busy, a "not now" (api.ts RETRY_CODES: the same
 //   request runs again), however it fails with it: thrown at once, or its run's wait rejecting (card
 //   pool-restore-wired). Any other error is answered as before.
-import { SolanaRpcTransportError } from "../../kit/src/trade/solana/send.ts";
 import { EvmNotFinalError } from "../../wallet/src/pool/evm-restore.ts";
-import { throttleWaitMs, type ThrottleBounds } from "../../wallet/src/throttle.ts";
 import type { KindContext, Deferred, HostAnswer, HostRefusal, Running } from "./api.ts";
-import { POOL_SELL_THROTTLE_MAX_MS, POOL_SELL_THROTTLE_WAITS, POOL_SELL_WAIT_MS } from "./pool-sell.ts";
+import { afterOf, readWaits, ReadStopped, tapDone, tapWaits, waitsOn, waitUnless, type ReadWaits } from "./read-waits.ts";
 import { PoolRuleRefused, checkPoolRequest, poolTokenAddress, tokenDecimalsKeptOf, tokenDecimalsOf, type PoolAsk, type PoolChain, type PoolRequest } from "./rules/pool.ts";
 
 /** One provider's JSON-RPC call: the method's result, or a throw. */
@@ -75,16 +74,16 @@ export function tokenDecimalsKept(): TokenDecimalsKept {
 /** The page's one store: the sell's read (testnetPoolDeps), the Solana buy's (pool-testnet.ts) and the EVM buy's. */
 export const PAGE_TOKEN_DECIMALS: TokenDecimalsKept = /* @__PURE__ */ tokenDecimalsKept();
 
-/** The first read's wait after a provider fails: the wallet's one rule, in pool-sell.ts's bounds for its own reads. */
-export const TOKEN_DECIMALS_THROTTLE: ThrottleBounds = /* @__PURE__ */ Object.freeze({ firstMs: POOL_SELL_WAIT_MS, maxMs: POOL_SELL_THROTTLE_MAX_MS, afterMaxMs: POOL_SELL_THROTTLE_MAX_MS });
-
 export type TokenDecimalsRead = {
   /** The store (PAGE_TOKEN_DECIMALS otherwise). */
   kept?: TokenDecimalsKept;
-  /** How many waits before the read fails (POOL_SELL_THROTTLE_WAITS otherwise; 0: none). */
-  waits?: number;
+  /** 0: no wait at all, the first failure thrown (the EVM buy's read between its check and the signature); else the
+   *  tap's waits (read-waits.ts tapWaits: one bound for the request), a fresh bound otherwise. */
+  waits?: 0 | ReadWaits;
   /** The wait (tests replace it). */
   wait?: (ms: number) => Promise<void>;
+  /** A sign out: ends the wait, and the read throws ReadStopped. */
+  signal?: AbortSignal;
 };
 
 /** The token's decimals: kept, or read on both providers (the mint account on Solana, one eth_call of decimals() on EVM,
@@ -95,15 +94,14 @@ export async function keptTokenDecimals(chain: PoolChain, token: string, rpcs: r
   const kept = o.kept ?? PAGE_TOKEN_DECIMALS;
   const had = kept.get(chain, token);
   if (had !== undefined) return had;
-  const waits = o.waits ?? POOL_SELL_THROTTLE_WAITS;
-  const wait = o.wait ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  const waits = o.waits === 0 ? null : (o.waits ?? readWaits());
   const one = (rpc: PoolRpc) =>
     chain === "solana"
       ? rpc("getAccountInfo", [token, { encoding: "base64", commitment: "confirmed" }])
       : rpc("eth_call", [{ to: token, data: ERC20_DECIMALS }, "latest"]);
   const answers: [unknown, unknown] = [undefined, undefined];
   const answered = [false, false];
-  for (let n = 0, pause = 0; ; n++) {
+  for (;;) {
     const failed: unknown[] = [];
     await Promise.all(
       ([0, 1] as const).map(async (i) => {
@@ -117,11 +115,15 @@ export async function keptTokenDecimals(chain: PoolChain, token: string, rpcs: r
       }),
     );
     if (failed.length === 0) break;
-    if (n >= waits) throw failed[0];
-    // the longest Retry-After any failed provider named (throttleWaitMs holds it to the bounds)
-    const after = Math.max(0, ...failed.map((e) => (e instanceof SolanaRpcTransportError && e.afterMs !== null ? e.afterMs : 0)));
-    pause = throttleWaitMs(pause, after, TOKEN_DECIMALS_THROTTLE);
-    await wait(pause);
+    // only a provider's fault waits; any other error is thrown at once
+    const other = failed.find((e) => !waitsOn(e));
+    if (other !== undefined) throw other;
+    // the fault with the longest Retry-After any failed provider named
+    const fault = failed.reduce((a, e) => ((afterOf(e) ?? -1) > (afterOf(a) ?? -1) ? e : a));
+    const ms = waits === null ? null : waits.next(fault);
+    if (ms === null) throw fault;
+    await waitUnless(o.wait, ms, o.signal);
+    if (o.signal?.aborted) throw new ReadStopped();
   }
   const decimals = tokenDecimalsOf(chain, answers);
   kept.keep(chain, token, decimals);
@@ -141,6 +143,11 @@ export type PoolKindsDeps = {
   decimals?: TokenDecimalsKept;
   /** The first read's wait after a provider fails (tests replace it). */
   wait?: (ms: number) => Promise<void>;
+  /** The sign out of the session a request is asked in (the page's), read when it comes: it ends the wait, and a kind
+   *  asked before it never runs after it. */
+  stop?: () => AbortSignal;
+  /** The device's clock, ms (tests replace it): a request's one bound counts on it from its arrival. */
+  now?: () => number;
 };
 type Answer<K extends PoolKind> = HostRefusal | Deferred<K> | HostAnswer<K>;
 type Handler<K extends PoolKind> = (params: Record<string, unknown>, ctx: KindContext) => Answer<K>;
@@ -151,6 +158,8 @@ const NO: { error: "not_allowed" } = Object.freeze({ error: "not_allowed" as con
 const DOWN: { error: "down" } = Object.freeze({ error: "down" as const });
 /** evmNextNote's wait for finality: "not now" (api.ts RETRY_CODES), never failed or not_allowed. */
 const BUSY: { error: "busy" } = Object.freeze({ error: "busy" as const });
+/** A sell asked before a sign out: never run after it (read-waits.ts ReadStopped). */
+const FAILED: { error: "failed" } = Object.freeze({ error: "failed" as const });
 
 type Flow = NonNullable<PoolKindsDeps["flow"]>;
 // the flow's answer, an EvmNotFinalError busy whether thrown at once or its run's wait rejects with it; any other throw
@@ -206,8 +215,13 @@ export function poolKinds(deps: PoolKindsDeps): { [K in PoolKind]: Handler<K> } 
       const rpcs = deps.rpcs(chain);
       if (!rpcs || !poolTokenAddress(chain, p.token)) return NO;
       let answer: HostAnswer<K> | HostRefusal = NO;
-      const after = keptTokenDecimals(chain, p.token, rpcs, { kept, ...(deps.wait ? { wait: deps.wait } : {}) }).then(
+      const signal = deps.stop?.();
+      // the request's one bound starts here, at its arrival: the sell's plan and sales share it (read-waits.ts tapWaits)
+      const waits = tapWaits(ctx, deps.now);
+      const after = keptTokenDecimals(chain, p.token, rpcs, { kept, waits, ...(deps.wait ? { wait: deps.wait } : {}), ...(signal ? { signal } : {}) }).then(
         async (decimals) => {
+          // a sign out since the request came: the flow never runs for it
+          if (signal?.aborted) return void (answer = FAILED);
           const ask = checked(p, decimals);
           const got = ask && deps.flow ? runFlow(deps.flow, ask, ctx) : NO;
           if (!("after" in got)) return void (answer = "error" in got ? got : NO); // a sell's flow answers only by running
@@ -218,9 +232,9 @@ export function poolKinds(deps: PoolKindsDeps): { [K in PoolKind]: Handler<K> } 
         // two answers that do not parse or agree: not_allowed, as the rule refuses them; a provider's read that still
         // failed past the waits: down, and the same request again reads again (nothing was kept)
         (e: unknown) => {
-          answer = e instanceof PoolRuleRefused ? NO : DOWN;
+          answer = e instanceof PoolRuleRefused ? NO : e instanceof ReadStopped ? FAILED : DOWN;
         },
-      );
+      ).then(() => tapDone(ctx, waits));
       return { running: true, after, answer: () => answer };
     };
   return { "pool.deposit": handler("pool.deposit"), "pool.buy": handler("pool.buy"), "pool.sell": handler("pool.sell"), "pool.withdraw": handler("pool.withdraw") };

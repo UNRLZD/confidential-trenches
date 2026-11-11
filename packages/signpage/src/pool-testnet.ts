@@ -48,12 +48,12 @@ import { HELPER_FETCH_INIT, HELPER_V1_PATHS } from "../../kit/src/helper/v1.ts";
 import type { VaultProver } from "../../kit/src/prover/prove.ts";
 import { WALLET_SEED_LOCK, type WalletStore } from "@blindfill/wallet/store";
 import { openNoteStore, readNotes, type NoteStore } from "../../wallet/src/notes/store.ts";
-import type { Pool, ReadyProof } from "../../wallet/src/pool/pool.ts";
+import { chainNow, type Pool, type ReadyProof } from "../../wallet/src/pool/pool.ts";
 import { openProofQueue, type ProofQueue, type QueuePass } from "../../wallet/src/pool/queue.ts";
 import { poolDepositKind, type PoolDepositFrom, type PoolDepositHost } from "./pool-deposit.ts";
 import { proverHost } from "./prover-host.ts";
 import { SOLANA_PROVIDER_A, TRADE_HELPER } from "./trade.ts";
-import { SOL_POOL_TABLES, SOL_POOLS, solanaPool, solanaPoolOf, type SolanaFeeAnswer, type SolanaPoolPin, type SolanaReleaseRequest } from "../../wallet/src/pool/solana.ts";
+import { SOL_POOL_TABLES, SOL_POOLS, solanaNow, solanaPool, solanaPoolOf, type SolanaFeeAnswer, type SolanaPoolPin, type SolanaReleaseRequest } from "../../wallet/src/pool/solana.ts";
 import { SOL_MARK_READ_BATCH, SOL_MARK_READ_BATCH_MAX, solanaSettleReserved, solanaSettleSpent, type SolanaPoolCache } from "../../wallet/src/pool/solana-restore.ts";
 import { POOL_TESTNET } from "../../wallet/src/pool/network.ts";
 import { askWhileBusy, type BusyOpts } from "../../wallet/src/busy.ts";
@@ -296,7 +296,7 @@ async function moveLegacyPending(w: WalletStore, opId: string, p: PendingOnward)
 
 /** The page network's deps for poolKinds, with `flow` the ops' flow (none: every checked request is refused). Mainnet
  *  reads EVM pools on no pair yet (signpage-evm-pool-trade), as main.ts did before. */
-export function testnetPoolDeps(flow?: PoolKindsDeps["flow"]): PoolKindsDeps {
+export function testnetPoolDeps(flow?: PoolKindsDeps["flow"], stop?: PoolKindsDeps["stop"]): PoolKindsDeps {
   return {
     pinned: (chain) => (chain === "solana" ? PAGE_SOL_PIN !== undefined : EVM_POOLS[POOL_TESTNET ? EVM_TESTNET[chain] : chain] !== undefined),
     rpcs: (chain) =>
@@ -308,6 +308,7 @@ export function testnetPoolDeps(flow?: PoolKindsDeps["flow"]): PoolKindsDeps {
     // the tokens' decimals kept this session: the sell's read and both buys' own (card sell-first-read-waits-out-a-throttle)
     decimals: PAGE_TOKEN_DECIMALS,
     ...(flow ? { flow } : {}),
+    ...(stop ? { stop } : {}),
   };
 }
 
@@ -481,6 +482,8 @@ export type TestnetPool = {
   signingOut(): void;
   /** Sign out: the queue closed (its notes freed, its seed copy zeroed), its note store closed, the worker ended. */
   signedOut(): Promise<void>;
+  /** The session's sign out, aborted at the next one: a pool kind's reads read it when a request comes (pool-kinds.ts). */
+  outSignal(): AbortSignal;
   /** The pool withdraw screen's reads and run (src/withdraw/pool-form.ts) for the request's op id. */
   withdrawDeps(chain: PoolChain, opId: string): PoolWithdrawFormDeps;
   /** The withdraw run of a screen's checked answer, its op record written as it goes; settles at the run's end. */
@@ -621,6 +624,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       landed: () => void proofs(),
       settle: () => void settleSolana(),
       signal: follows.signal,
+      // the session's sign out (signingOut, at its tap): it ends a wait between the ask's attempts
+      stop: solanaStop.signal,
       end: () => {
         notes?.close();
         end?.();
@@ -728,6 +733,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         landed: () => void evmProofs(chain),
         settle: () => void settleEvm(chain),
         signal: follows.signal,
+        // the session's sign out (signingOut, at its tap): it ends a wait between the ask's attempts
+        stop: evmStop.signal,
         end: () => {
           notes?.close();
           end?.();
@@ -841,10 +848,26 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   // their buy records, the kit's sell quote and build, the helper's sell sender, the pool's pair and round; testnet build
   // only until the mainnet pins' card. One note store per run, closed at its end
   const evmSellFollowing = new Set<string>();
+  const evmSellSending = new Set<string>();
   const evmSellOf = (chain: "base" | "robinhood", e: NonNullable<ReturnType<typeof evmPool>>) => {
     let notes: Promise<NoteStore> | null = null;
+    // the store is closed once the tap has ended and every part it handed on (a send past the tap's bound, a
+    // read-back) has ended too (review P2-1: a sale that lands after the tap still writes its note)
+    let ended = false;
+    let kept = 0;
+    const close = (): void => {
+      if (ended && kept === 0) void notes?.then((n) => n.close(), () => {});
+    };
     const host = evmSellHost(chain, e.pin, e.scope, e.rpcs, {
       following: evmSellFollowing,
+      sending: evmSellSending,
+      keep: (p) => {
+        kept++;
+        void p.finally(() => {
+          kept--;
+          close();
+        });
+      },
       notes: () => (notes ??= page.store().then(openNoteStore)),
       seed64: page.seed64,
       held: () => (page.held ? page.held() : Promise.reject(new Error("no wallet store is open"))),
@@ -852,6 +875,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       testnet: POOL_TESTNET,
       fetch: over.fetch,
       signal: follows.signal,
+      // the session's sign out (signingOut, at its tap): it ends a wait between the sale's reads' attempts
+      stop: evmStop.signal,
       stopped: ((at) => () => signOuts !== at)(signOuts),
     });
     // an open sale dropped at its end (the run's or the load's follow's, followEvmSells): the chain's positions read
@@ -869,17 +894,28 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       evmSellHashes.set(chain, [...list.slice(-31), hash]);
       return hash;
     };
-    return { ...host, send, unrecord, end: () => void notes?.then((n) => n.close(), () => {}) };
+    return {
+      ...host,
+      send,
+      unrecord,
+      end: () => {
+        ended = true;
+        close();
+      },
+    };
   };
   const evmSell = (chain: "base" | "robinhood") => {
+    // first, alone: folded at build time, so the mainnet bundle carries none of the sale
+    if (!POOL_TESTNET) return null;
     const e = evmPool(chain);
-    if (e === null || !POOL_TESTNET) return null;
+    if (e === null) return null;
     return (over.tradeKinds?.evmSell ?? poolSellEvmKind)(() => evmSellOf(chain, e));
   };
   // a sale whose tab ended before its end: followed from its open record at each state read (followEvmSells)
   const evmSellFollow = (chain: "base" | "robinhood"): void => {
+    if (!POOL_TESTNET) return;
     const e = evmPool(chain);
-    if (e === null || !POOL_TESTNET) return;
+    if (e === null) return;
     const h = evmSellOf(chain, e);
     void followEvmSells(h).catch(() => {}).finally(h.end);
   };
@@ -1104,13 +1140,16 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       cluster: PAGE_CLUSTER,
       rpcs: rpcs(),
       claimed,
+      // a sign out ends the buy's waits before its signature (read-waits.ts waitUnless): this session's stop
+      signal: solanaStop.signal,
       // none ready (a page that has landed no deposit since it loaded has run no pass): a pass starts for the next tap
       ready: async () => {
         const list = (await q()).ready();
         if (list.length === 0) void proofs();
         return list;
       },
-      take: async (id, attempt) => (await q()).take(id, attempt),
+      take: async (id, attempt, early) => (await q()).take(id, attempt, early),
+      chainNow: () => chainNow(over.pool ?? { now: (signal) => solanaNow(rpcs(), signal) }),
       seed64: page.seed64,
       // W's buy mint, written before the send: the rent back after a later sell holds while W holds any of it
       bought: buyMints(page.store),
@@ -1497,6 +1536,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       // run puts its own over this one (poolSellKind)
       settled: async (signature, stage) => settleSellOps(await page.store(), signature, stage),
       stopped: () => signOuts !== outs,
+      // a sign out ends the sale's waits (read-waits.ts waitUnless)
+      signal: solanaStop.signal,
       end: () => void notes?.then((n) => n.close(), () => {}),
     };
   };
@@ -1940,6 +1981,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       evmStop = new AbortController();
     },
     signedOut,
+    // the session's sign out: aborted at the next one (this tab's or another's), as every Solana settle's stop
+    outSignal: () => solanaStop.signal,
     withdrawDeps,
     withdraw,
   };

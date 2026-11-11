@@ -33,7 +33,7 @@ import { openNoteStore, type NoteStore } from "../../wallet/src/notes/store.ts";
 import type { BuyWallet } from "../../wallet/src/pool/buy-wallets.ts";
 import { solanaPoolOf } from "../../wallet/src/pool/solana.ts";
 import { BLOCKHASH, FEE_PAYER, POOL, PROGRAM, fx, providers, rent } from "../../kit/test/solana-pool-buy-fx.ts";
-import { POOL_RENT_BACK_MS, POOL_RENT_BACK_RULES, POOL_SELL_LOCK, POOL_SELL_READS, POOL_SELL_SIZE_RETRY_MS, POOL_SELL_THROTTLE_MAX_MS, POOL_SELL_WAIT_MS, buyMints, leftAfter, owedRentBacks, planPoolSell, poolSellKind, resumeRentBacks, runPoolSell, settleDeadSellOps, settlePoolSells, settleSellOps, solanaSellAfterFull, solanaSellReserve, keptSells, stageOfLegs, type KeptSell, type OwedRentBack, type PoolSellHost, type PoolSellKindHost, type RentBackTold } from "../src/pool-sell.ts";
+import { POOL_RENT_BACK_MS, POOL_RENT_BACK_RULES, POOL_SELL_LOCK, POOL_SELL_READS, POOL_SELL_SIZE_RETRY_MS, POOL_SELL_WAIT_MS, buyMints, leftAfter, owedRentBacks, planPoolSell, poolSellKind, resumeRentBacks, runPoolSell, settleDeadSellOps, settlePoolSells, settleSellOps, solanaSellAfterFull, solanaSellReserve, keptSells, stageOfLegs, type KeptSell, type OwedRentBack, type PoolSellHost, type PoolSellKindHost, type RentBackTold } from "../src/pool-sell.ts";
 import { opOf } from "../src/state.ts";
 import { solanaCompileV0 } from "../../kit/src/trade/solana/build.ts";
 import { checkSolanaSweep, PoolRuleRefused, SOLANA_POOL_MIN_DEPOSIT, SOLANA_POOL_SELL_RESERVE_MAX, solanaDepositRents, solanaSweepFloor, solanaSweepKeep, solanaWithdrawMinPart, withdrawNoteFloor, type PoolAsk } from "../src/rules/pool.ts";
@@ -178,7 +178,7 @@ type Plant = {
   /** Provider B throttled once the sell has landed (the devnet run at 0068524a: onfinality's HTTP 429s, each call failing
    *  after page-rpc's own retries): from the first read of W's token account ("read") or the first teardown simulation
    *  ("simulate"), B's next `n` calls fail as the page's RPC fails them */
-  throttle?: { on: "read" | "simulate"; n: number };
+  throttle?: { on: "read" | "simulate"; n: number; plain?: true };
   /** The first sell's deposit meets a page another deposit filled first: it fails WrongAccount on chain (review L2),
    *  W paying its fee, nothing else moving */
   wrongAccountOnce?: boolean;
@@ -539,7 +539,7 @@ function chain(plant: Plant = {}) {
         const hit = plant.throttle.on === "read" ? list.includes(ata) : method === "simulateTransaction" && (params[1] as { accounts?: unknown }).accounts !== undefined;
         if (throttled > 0 || hit) {
           throttled++;
-          throw new SolanaRpcTransportError("http_429", "HTTP 429", 4, "solana-devnet.api.onfinality.io");
+          throw plant.throttle.plain ? new Error("an answer that does not parse") : new SolanaRpcTransportError("http_429", "HTTP 429", 4, "solana-devnet.api.onfinality.io");
         }
       }
       switch (method) {
@@ -4303,7 +4303,8 @@ test("card pool-sell-share-across-wallets review: the next sale starts once the 
 
 // the 5-wallet devnet run: one provider's 429 before any signature refused the whole sell. A rate limit as the page's
 // RPC client throws it past its retry (the kit's SolanaRpcTransportError, its Retry-After kept) is waited out and read
-// again: in the plan's reads and in a sale's own, POOL_SELL_THROTTLE_WAITS times at most, then "down" with nothing signed
+// again: in the plan's reads and in a sale's own, on the page's one rule (read-waits.ts readWaits: doubling from the
+// Retry-After to 10 s, card start-reads-wait-out-a-throttle) until its total, then "down" with nothing signed
 test("card pool-sell-share-across-wallets: a provider's rate limit before any signature never fails the sell: the plan and each sale read again after its Retry-After; a limit that stays is down, nothing signed", async () => {
   const limit = (afterMs: number | null) => new SolanaRpcTransportError("http_429", "HTTP 429", 1, "api.devnet.solana.com", afterMs);
   for (const [what, hit, err, waitsWant] of [
@@ -4334,12 +4335,13 @@ test("card pool-sell-share-across-wallets: a provider's rate limit before any si
     // the verdict reads' own waits (POOL_SELL_WAIT_MS) aside
     assert.deepEqual(waits.filter((x) => x !== POOL_SELL_WAIT_MS), [...waitsWant], what);
   }
-  // a limit on every read of the plan: three waits, then down, nothing built
+  // a limit on every read of the plan: the rule's waits (doubling from its Retry-After to 10 s, 30 s in all), then down,
+  // nothing built
   const w = await twoBuys();
   const always = (rpc: SolanaRpc): SolanaRpc => (async (m: string, p: readonly unknown[]) => { if (m === "getAccountInfo" && p[0] === MINT) throw limit(2_000); return rpc(m, p); }) as SolanaRpc;
   const waits: number[] = [];
   assert.deepEqual(await runPoolSell({ ...w.host, rpcs: [always(w.c.rpcs[0]), always(w.c.rpcs[1])] as const, wait: async (ms: number) => void waits.push(ms) }, share(10_000)), { error: "down" });
-  assert.deepEqual(waits, [2_000, 2_000, 2_000]);
+  assert.deepEqual(waits, [2_000, 4_000, 8_000, 10_000]);
   nothingBuilt(w);
 });
 
@@ -4443,7 +4445,7 @@ test("a rate limit thrown once W signed (from its signed hook, at the send on on
   }
 });
 
-test("a rate limit before W signs waits the provider's Retry-After, at least 1 s and at most 10 s, then reads again from the first read; the next attempt starts with no rate limit of its own, so a 5xx or a timeout there is down with no further wait", async () => {
+test("a rate limit before W signs waits the provider's Retry-After, at least 1 s and at most 10 s, then reads again from the first read; a 5xx or a timeout on the attempt after it waits too, twice as long (card start-reads-wait-out-a-throttle)", async () => {
   const baseline = await (async () => {
     const w = await world({ ataLamports: TOKEN_RENT });
     const waits: number[] = [];
@@ -4453,7 +4455,7 @@ test("a rate limit before W signs waits the provider's Retry-After, at least 1 s
   })();
   const count = (xs: number[], v: number) => xs.filter((x) => x === v).length;
   // one rate limit at the first simulation, then the sale as usual: the wait is its Retry-After held to [1 s, 10 s]
-  for (const [afterMs, want] of [[null, POOL_SELL_WAIT_MS], [200, POOL_SELL_WAIT_MS], [2_345, 2_345], [60_000, POOL_SELL_THROTTLE_MAX_MS]] as const) {
+  for (const [afterMs, want] of [[null, POOL_SELL_WAIT_MS], [200, POOL_SELL_WAIT_MS], [2_345, 2_345], [60_000, 10_000]] as const) {
     const w = await world({ ataLamports: TOKEN_RENT });
     let fired = false;
     const f = faulty(w, (p, method) => (!fired && p === 0 && method === "simulateTransaction" ? ((fired = true), rateLimit(afterMs)) : null));
@@ -4463,7 +4465,7 @@ test("a rate limit before W signs waits the provider's Retry-After, at least 1 s
     assert.equal(count(waits, want), count(baseline, want) + 1, `${afterMs}: one wait of ${want}`);
     assert.equal(f.sales.size, 1);
   }
-  // a rate limit, then on the attempt after its wait a 5xx or a timeout: down, nothing signed, no second wait
+  // a rate limit, then on the attempt after its wait a 5xx or a timeout: a second wait, twice the first, then the sale
   for (const fault of ["http_5xx", "timeout"] as const) {
     const w = await world({ ataLamports: TOKEN_RENT });
     let sims = 0;
@@ -4474,18 +4476,18 @@ test("a rate limit before W signs waits the provider's Retry-After, at least 1 s
     });
     const waits: number[] = [];
     const a = await runPoolSell({ ...w.host, rpcs: f.rpcs, wait: async (ms: number) => void waits.push(ms) }, ASK);
-    assert.deepEqual(a, { error: "down" }, fault);
-    assert.equal(count(waits, 2_345), 1, `${fault}: the rate limit's one wait`);
-    assert.equal(waits.filter((x) => x >= POOL_SELL_WAIT_MS && x !== 2_345).length, 0, `${fault}: no wait for it`);
-    assert.equal(f.sales.size, 0);
+    assert.equal("stage" in a && a.stage, "filled", `${fault}: ${JSON.stringify(a)}`);
+    assert.equal(count(waits, 2_345), 1, `${fault}: the rate limit's wait`);
+    assert.equal(count(waits, 4_690), 1, `${fault}: then twice it`);
+    assert.equal(f.sales.size, 1);
   }
-  // a 5xx alone, before W signs: down at once, no wait, nothing signed
+  // a 5xx that stays, before W signs: the rule's waits, then down, nothing signed
   {
     const w = await world({ ataLamports: TOKEN_RENT });
     const f = faulty(w, (p, method) => (p === 0 && method === "simulateTransaction" ? new SolanaRpcTransportError("http_5xx", "HTTP 503", 1, "rpc.example", null) : null));
     const waits: number[] = [];
     assert.deepEqual(await runPoolSell({ ...w.host, rpcs: f.rpcs, wait: async (ms: number) => void waits.push(ms) }, ASK), { error: "down" });
-    assert.deepEqual(waits.filter((x) => x >= POOL_SELL_WAIT_MS), []);
+    assert.deepEqual(waits, [1_000, 2_000, 4_000, 8_000, 10_000]);
     assert.equal(f.sales.size, 0);
   }
 });
@@ -4570,4 +4572,201 @@ test("a share sell that left out a wallet both RPCs read frozen writes short on 
   assert.equal(rec.short, true);
   assert.deepEqual(rec.legs.map((l) => l.stage), ["filled"]);
   assert.equal(rec.stage, "part_filled");
+});
+
+// ---- card start-reads-wait-out-a-throttle: the app's paid devnet run 6 (11 Nov 02:51Z) ----
+// A sell tapped 0.6 s after its buy's Final: attempt 1 ran to getFeeForMessage and met HTTP 429 past the page client's
+// retry; attempts 2 and 3 each met it on their first read after a flat 1 s; attempt 4 met it on the deposit's reads;
+// the waits were spent and it answered down at +19.9 s, nothing signed. The provider sends no Retry-After the page can
+// read (afterMs null). The waits now double from 1 s to 10 s, up to READ_WAIT_TOTAL_MS (30 s) in all.
+const RENT_SYSVAR = "SysvarRent111111111111111111111111111111111";
+const run6 = (afterMs: number | null = null) => new SolanaRpcTransportError("http_429", "HTTP 429", 4, "api.devnet.solana.com", afterMs);
+/** The waits asked before the sale's send (the verdict's own waits after it aside). */
+const waitsBeforeSend = (f: { sales: Set<string> }) => {
+  const waits: number[] = [];
+  return { waits, wait: async (ms: number) => void (f.sales.size === 0 && waits.push(ms)) };
+};
+
+test("card start-reads-wait-out-a-throttle: the run-6 sequence (429 at the fee read, then the first read of two attempts, then the deposit's reads) waits 1, 2, 4 and 8 s and sells", async () => {
+  const w = await world({ ataLamports: TOKEN_RENT });
+  // the attempt the page is on: each wait moves to the next
+  let attempt = 1;
+  let firstOfAttempt = true;
+  const f = faulty(w, (p, method, params) => {
+    if (p !== 0) return null;
+    if (attempt === 1 && method === "getFeeForMessage") return run6();
+    if ((attempt === 2 || attempt === 3) && firstOfAttempt) return ((firstOfAttempt = false), run6());
+    if (attempt === 4 && method === "getMultipleAccounts" && (params[0] as string[])[0] === POOL) return run6();
+    return null;
+  });
+  const t = waitsBeforeSend(f);
+  const a = await runPoolSell({ ...w.host, rpcs: f.rpcs, wait: async (ms: number) => (f.sales.size === 0 && ((attempt++), (firstOfAttempt = true)), t.wait(ms)) }, ASK);
+  assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
+  assert.deepEqual(t.waits, [1_000, 2_000, 4_000, 8_000], "doubling, never a flat wait");
+  assert.equal(f.sales.size, 1);
+});
+
+test("card start-reads-wait-out-a-throttle: a 429 or a 5xx at a sale's first, middle (the fee) or late (the deposit's) read on either provider waits 1 s and sells; the Rent sysvar and the mint are asked again only of the provider that failed", async () => {
+  const where: [string, (m: string, q: readonly unknown[]) => boolean][] = [
+    ["first: the Rent sysvar", (m, q) => m === "getAccountInfo" && q[0] === RENT_SYSVAR],
+    ["the plan's first: the mint", (m, q) => m === "getAccountInfo" && q[0] === MINT],
+    ["middle: the fee", (m) => m === "getFeeForMessage"],
+    // the deposit's own read of the pool and its pages (depositHeld, at pool-sell.ts's owesOn): the reference read's
+    // getMultipleAccounts before it reads again on its own (kit pool.ts readSolanaReferenceWhy)
+    ["late: the deposit's pages", (m, q) => m === "getMultipleAccounts" && (q[0] as string[])[0] === POOL],
+  ];
+  for (const [what, hit] of where)
+    for (const fault of ["http_429", "http_5xx"] as const)
+      for (const bad of [0, 1] as const) {
+        const w = await world({ ataLamports: TOKEN_RENT });
+        let fired = false;
+        const asked: Record<string, [number, number]> = {};
+        const f = faulty(w, (p, method, params) => {
+          if (method === "getAccountInfo" && (params[0] === RENT_SYSVAR || params[0] === MINT)) (asked[params[0] as string] ??= [0, 0])[p]++;
+          if (fired || p !== bad || !hit(method, params)) return null;
+          fired = true;
+          return new SolanaRpcTransportError(fault, fault, 4, "api.devnet.solana.com", null);
+        });
+        const t = waitsBeforeSend(f);
+        const a = await runPoolSell({ ...w.host, rpcs: f.rpcs, wait: t.wait }, ASK);
+        const label = `${what}, ${fault}, provider ${bad}`;
+        assert.ok(fired, label);
+        assert.equal("stage" in a && a.stage, "filled", `${label}: ${JSON.stringify(a)}`);
+        assert.deepEqual(t.waits, [1_000], label);
+        // asked once of the provider that answered, twice of the one that failed it
+        for (const k of [RENT_SYSVAR, MINT]) assert.ok(asked[k]![1 - bad]! === 1, `${label}: ${k} asked again of the provider that answered: ${JSON.stringify(asked)}`);
+      }
+});
+
+test("card start-reads-wait-out-a-throttle: a fee read throttled for good waits 1, 2, 4, 8 and 10 s (30 s in all at most), then answers down, nothing signed", async () => {
+  const w = await world({ ataLamports: TOKEN_RENT });
+  const f = faulty(w, (p, method) => (p === 1 && method === "getFeeForMessage" ? run6() : null));
+  const t = waitsBeforeSend(f);
+  assert.deepEqual(await runPoolSell({ ...w.host, rpcs: f.rpcs, wait: t.wait }, ASK), { error: "down" });
+  assert.deepEqual(t.waits, [1_000, 2_000, 4_000, 8_000, 10_000]);
+  assert.equal(f.sales.size, 0);
+});
+
+test("card start-reads-wait-out-a-throttle (review of 49efdb0c): only a provider's fault waits; any other error before W signs answers at once, no wait", async () => {
+  const w = await world({ ataLamports: TOKEN_RENT });
+  const f = faulty(w, (p, method) => (p === 0 && method === "getFeeForMessage" ? new TypeError("x is not a function") : null));
+  const t = waitsBeforeSend(f);
+  assert.deepEqual(await runPoolSell({ ...w.host, rpcs: f.rpcs, wait: t.wait }, ASK), { error: "failed" });
+  assert.deepEqual(t.waits, []);
+});
+
+test("card start-reads-wait-out-a-throttle (review of 49efdb0c): a sign out ends a sale's wait at once, in the plan or in a sale, and nothing runs after it", async () => {
+  for (const where of ["plan", "sale"] as const) {
+    const w = await world({ ataLamports: TOKEN_RENT });
+    const stop = new AbortController();
+    const f = faulty(w, (p, method, params) => (p === 0 && (where === "plan" ? method === "getAccountInfo" && params[0] === MINT : method === "getFeeForMessage") ? run6() : null));
+    let reads = 0;
+    // the wait never ends by itself: only the sign out ends it
+    const run = runPoolSell({ ...w.host, rpcs: f.rpcs, signal: stop.signal, wait: () => ((reads = w.c.log.length), stop.abort(), new Promise<void>(() => {})) }, ASK);
+    const a = await Promise.race([run, new Promise<"held">((r) => setTimeout(() => r("held"), 5_000))]);
+    assert.deepEqual(a, { error: "failed" }, `${where}: the sign out ended the wait`);
+    assert.equal(w.c.log.length, reads, `${where}: no read after the sign out`);
+    assert.equal(f.sales.size, 0);
+  }
+});
+
+test("card start-reads-wait-out-a-throttle: the rent back's tries after a provider fault wait on the page's one rule, 1 s doubling, never a flat second", async () => {
+  const w = await world({ ataLamports: TOKEN_RENT, volumes: [{ program: SOLANA_PUMP_PROGRAM }], throttle: { on: "simulate", n: 3 } });
+  const waits: number[] = [];
+  const faults = () => w.told.filter((t) => t.step === "teardown" && t.state === "fault").length;
+  // the waits from the rent back's first fault to its teardown's try that passed
+  let passed = false;
+  const a = await runPoolSell({ ...w.host, wait: async (ms: number) => void (faults() > 0 && !passed && waits.push(ms)), told: (t: RentBackTold) => (w.host.told?.(t), t.step === "teardown" && t.state === "sent" && (passed = true)) } as PoolSellHost, ASK);
+  assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
+  const n = faults();
+  assert.ok(n >= 2, `${n} faults`);
+  assert.deepEqual(waits.slice(0, n), [1_000, 2_000, 4_000, 8_000, 10_000].slice(0, n), JSON.stringify(w.told));
+  assert.equal(w.told.at(-1)?.state, "sent");
+});
+
+test("card start-reads-wait-out-a-throttle: one tap's waits share one total: a two-wallet sell whose every sale's fee read stays throttled waits 1, 2, 4, 8 and 10 s in all, never 25 s per wallet, and signs nothing", async () => {
+  const w = await twoBuys({ ataLamports: TOKEN_RENT });
+  const f = faulty(w, (p, method) => (p === 0 && method === "getFeeForMessage" ? run6() : null));
+  const t = waitsBeforeSend(f);
+  const a = await runPoolSell({ ...w.host, rpcs: f.rpcs, wait: t.wait }, share(10_000));
+  assert.deepEqual(t.waits, [1_000, 2_000, 4_000, 8_000, 10_000], JSON.stringify(a));
+  assert.equal(f.sales.size, 0);
+  assert.ok(!("stage" in a) || a.stage === "refused", JSON.stringify(a));
+});
+
+test("card start-reads-wait-out-a-throttle: the tap's bound is on the device's clock: with each throttled read taking 5 s, the waits are 1, 2 and 4 s and the sell answers down by 30 s plus the attempt in flight, nothing signed", async () => {
+  const w = await world({ ataLamports: TOKEN_RENT });
+  let t = 0n;
+  // a slow provider: each throttled fee read answers its fault 5 s on the device's clock (the host's pause and the call's bound)
+  const f = faulty(w, (p, method) => (p === 0 && method === "getFeeForMessage" ? ((t += 5_000n), run6()) : null));
+  const waits: number[] = [];
+  const a = await runPoolSell({ ...w.host, rpcs: f.rpcs, now: () => t, wait: async (ms: number) => void (waits.push(ms), (t += BigInt(ms))) }, ASK);
+  assert.deepEqual(a, { error: "down" });
+  // 5 + 1 + 5 + 2 + 5 + 4 + 5 = 27 s; the next wait (8 s) would end past 30 s
+  assert.deepEqual(waits, [1_000, 2_000, 4_000]);
+  assert.ok(t <= 30_000n + 13_500n, `down at ${t} ms`);
+  assert.equal(f.sales.size, 0);
+});
+
+test("card start-reads-wait-out-a-throttle: one bound per request: the sell's plan and sales go on from the waits its decimals read took (tapWaits by the request's id), never from 0", async () => {
+  const { tapWaits } = await import("../src/read-waits.ts");
+  let t = 0;
+  const tap = { id: "tap-shared-bound" };
+  const first = tapWaits(tap, () => t);
+  assert.equal(first.next(run6()), 1_000);
+  t += 1_000;
+  assert.equal(first.next(run6()), 2_000);
+  t += 2_000;
+  // the kind's host passes the request on as a copy: the same id is the same bound
+  const later = tapWaits({ ...tap }, () => 0);
+  assert.equal(later, first);
+  assert.equal(later.next(run6()), 4_000);
+  t += 25_000;
+  assert.equal(later.next(run6()), null, "past 30 s on the clock: down");
+  assert.notEqual(tapWaits({ id: "another" }), first);
+});
+
+test("review of f0e7bd38, P2-2: a three-wallet sell whose every sale's fee read is throttled (Retry-After an hour, each read 13.5 s): once the tap's waits are spent no further wallet starts, so no attempt starts past 30 s and it answers down by 30 s plus the attempt in flight, nothing signed", async () => {
+  const w = await world({ held: T5, ataLamports: TOKEN_RENT, others: [{ l: 8n, j: 0, held: T3 }, { l: 9n, j: 0, held: T3 }] }, [listedW(T5), walletX(T3), walletY(T3)]);
+  let t = 0n;
+  const starts: bigint[] = [];
+  const f = faulty(w, (p, method) => (p === 0 && method === "getFeeForMessage" ? (starts.push(t), (t += 13_500n), run6(3_600_000)) : null));
+  const waits: number[] = [];
+  const a = await runPoolSell({ ...w.host, rpcs: f.rpcs, now: () => t, wait: async (ms: number) => void (waits.push(ms), (t += BigInt(ms))) }, share(10_000));
+  assert.deepEqual(a, { error: "down" });
+  // wallet 1: a fault at 13.5 s, a 10 s wait (the Retry-After held to 10 s), a fault at 37 s: spent; wallets 2 and 3 never start
+  assert.deepEqual(waits, [10_000]);
+  assert.deepEqual(starts, [0n, 23_500n], "no attempt starts past 30 s");
+  assert.equal(t, 37_000n, "down at 30 s plus the attempt in flight");
+  assert.equal(f.sales.size, 0);
+});
+
+test("review of f0e7bd38, P3: the rent back's tries double only on a provider fault; any other failure waits the rule's first step each time", async () => {
+  const w = await world({ ataLamports: TOKEN_RENT, volumes: [{ program: SOLANA_PUMP_PROGRAM }], throttle: { on: "simulate", n: 3, plain: true } });
+  const waits: number[] = [];
+  const faults = () => w.told.filter((t) => t.step === "teardown" && t.state === "fault").length;
+  let passed = false;
+  const a = await runPoolSell({ ...w.host, wait: async (ms: number) => void (faults() > 0 && !passed && waits.push(ms)), told: (t: RentBackTold) => (w.host.told?.(t), t.step === "teardown" && t.state === "sent" && (passed = true)) } as PoolSellHost, ASK);
+  assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
+  const n = faults();
+  assert.ok(n >= 2, `${n} faults`);
+  assert.deepEqual(waits.slice(0, n), Array(n).fill(1_000), JSON.stringify(w.told));
+});
+
+test("review of f0e7bd38, P3: waitUnless clears its own timer at a sign out and settles when the host's wait rejects", async () => {
+  const { waitUnless } = await import("../src/read-waits.ts");
+  const c = new AbortController();
+  const cleared: unknown[] = [];
+  const real = globalThis.clearTimeout;
+  globalThis.clearTimeout = ((id: unknown) => (cleared.push(id), real(id as never))) as typeof clearTimeout;
+  try {
+    const p = waitUnless(undefined, 3_600_000, c.signal);
+    c.abort();
+    await p;
+    assert.equal(cleared.filter((x) => x !== undefined).length, 1, "its hour-long timer cleared at the abort");
+  } finally {
+    globalThis.clearTimeout = real;
+  }
+  await waitUnless(() => Promise.reject(new Error("the host's wait failed")), 1_000, new AbortController().signal);
+  await waitUnless(() => Promise.reject(new Error("the host's wait failed")), 1_000);
 });

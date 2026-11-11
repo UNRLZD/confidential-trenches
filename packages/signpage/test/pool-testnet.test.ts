@@ -510,9 +510,15 @@ test("review P2-1 and P2-2 of a34c1626, P2-1 and P3-3 of e3489b3b: every Solana 
   const calls = [...src.matchAll(/solanaSettle(?:Spent|Reserved)\(\{[^}]*\}\)/g)].map((m) => m[0]);
   assert.equal(calls.length, 4);
   for (const c of calls) assert.match(c, /, rpcs: settleRpcs\(\), lister: lister\(\), signal, cache, markBatches: PAGE_SOL_MARK_BATCHES \}\)$/, c);
-  // each site's signal is the stop's when the call began: four takes, and the stop read nowhere else
+  // each site's signal is the stop's when the call began: four takes, and the stop read elsewhere only where a trade's
+  // reads wait before a signature (card start-reads-wait-out-a-throttle): the buy's and the sell's host, each taken when
+  // the host is made, and a pool kind's request (outSignal), each ending its waits at the next sign out
   assert.equal([...src.matchAll(/const signal = solanaStop\.signal;/g)].length, 4);
-  assert.equal([...src.matchAll(/solanaStop\.signal/g)].length, 4);
+  assert.equal([...src.matchAll(/ signal: solanaStop\.signal,/g)].length, 2);
+  assert.equal([...src.matchAll(/outSignal: \(\) => solanaStop\.signal,/g)].length, 1);
+  // the Solana deposit host's stop: its waits between attempts end at a sign out's tap (review of f0e7bd38, P2-1)
+  assert.equal([...src.matchAll(/ stop: solanaStop\.signal,/g)].length, 1);
+  assert.equal([...src.matchAll(/solanaStop\.signal/g)].length, 8);
   // the settle pair: the page's two seats, the helper's with the window-long retry
   assert.match(src, /solanaPacedRpc\(pageHelperRpc\(TRADE_HELPER, SOLANA_RPC_WINDOW_RETRY\)\)\]/);
   assert.match(src, /solanaPacedRpc\(testnetRpc\(TESTNET_RPCS\.solana\[1\], SOLANA_RPC_WINDOW_RETRY\)\)\]/);
@@ -705,14 +711,18 @@ test("pool.sell on the devnet pool runs the sell kind: a page whose buys left no
   const { w } = await wallet();
   const reads: string[] = [];
   const offline = (n: string) => Object.assign(async (m: string) => (reads.push(m), Promise.reject(new Error("offline"))), { url: `https://${n}.invalid` });
-  const t = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { rpcs: [offline("a"), offline("b")] });
+  const evmSells: string[] = [];
+  const t = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { rpcs: [offline("a"), offline("b")], tradeKinds: { evmSell: () => (a) => (evmSells.push(a.chain), { running: true, after: Promise.resolve(), answer: () => ({ result: { stage: "sent", txs: [] } }) }) } });
   const ask: Ask = { kind: "pool.sell", chain: "solana", token: SOL_TOKEN, amount: 1n, slippageBps: 100, decimals: 9 };
   const r = t.flow(ask, ctx as never) as { running?: true; after: Promise<unknown>; answer: () => unknown };
   assert.equal(r.running, true, "the sell runs");
   await r.after;
   assert.deepEqual(r.answer(), { error: "not_funded" });
   assert.deepEqual(reads, [], "no W: no read");
-  assert.deepEqual(t.flow({ ...ask, chain: "base" }, ctx as never), { error: "not_allowed" });
+  // a sale on an EVM chain is the EVM sell's, never the Solana sell's (card signpage-evm-pool-sell: before it, refused)
+  assert.equal("running" in t.flow({ ...ask, chain: "base" }, ctx as never), true);
+  assert.deepEqual(evmSells, ["base"]);
+  assert.deepEqual(reads, [], "and the Solana pair read nothing for it");
 });
 
 test("a state read settles a sell a closed page left INCOMING (the review of signpage-pool-sell 4b6223a, high): its mark read on both RPCs, the note kept while they fail", async () => {
@@ -1382,4 +1392,60 @@ test("the testnet finder reads the Ws on the first devnet RPC, one try a call: a
     assert.equal(tao.length, 4, "two calls a round, two rounds: no retry of a 429");
     assert.deepEqual(tao.map((x) => x.open), [false, false, true, true], "the second round after the gate's 1 s pause");
   });
+});
+
+// Card sol-buy-reads-side-by-side: the page's buy host reads the pool's time for the take on the page's pool (its two
+// RPCs, the wallet's solanaNow: the lower finalized block time), and its take hands that read to the queue (review of
+// 6b3bd660, P3-D)
+test("card sol-buy-reads-side-by-side: the page's buy host reads the pool's time on both of the page's RPCs, the lower block time", async () => {
+  const { w } = await wallet();
+  const { poolBuyKind } = await import("../src/pool-buy.ts");
+  let buyHost: Parameters<typeof poolBuyKind>[0] | undefined;
+  const asked: [string[], string[]] = [[], []];
+  const rpcOf = (i: 0 | 1, slot: number, sec: number) => async (m: string) => {
+    asked[i].push(m);
+    if (m === "getSlot") return slot;
+    if (m === "getBlockTime") return sec;
+    throw new Error(`offline ${m}`);
+  };
+  testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { rpcs: [rpcOf(0, 100, 1_800_000_010), rpcOf(1, 99, 1_800_000_000)], tradeKinds: { buy: (mk) => ((buyHost = mk), poolBuyKind(mk)) } });
+  const b = buyHost!();
+  try {
+    const before = performance.now();
+    const n = await b.chainNow!();
+    assert.equal(n.ms, 1_800_000_000_000n, "the lower of the two RPCs' block times");
+    assert.ok(n.at >= before && n.at <= performance.now());
+    assert.equal(typeof n.wall, "number");
+    assert.deepEqual(asked, [["getSlot", "getBlockTime"], ["getSlot", "getBlockTime"]], "each RPC asked once");
+  } finally {
+    (b as { end?: () => void }).end?.();
+  }
+});
+
+test("card sol-buy-reads-side-by-side: the page's buy host hands the early read to the queue's take, which then reads no time of its own", async () => {
+  const { w, ns } = await wallet();
+  const { pool, land } = fakePool();
+  let nows = 0;
+  const counted = { ...pool, now: async () => (nows++, NOW) };
+  const { poolBuyKind } = await import("../src/pool-buy.ts");
+  let buyHost: Parameters<typeof poolBuyKind>[0] | undefined;
+  const offline = async () => {
+    throw new Error("offline");
+  };
+  const t = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { pool: counted, prover: { vault: signalsProver(), stop: () => {} }, hardwareConcurrency: 4, rpcs: [offline, async () => offline()], tradeKinds: { buy: (mk) => ((buyHost = mk), poolBuyKind(mk)) } });
+  await land(ns, await incoming(ns, null, 9));
+  await t.stateRead();
+  await t.proofs();
+  const b = buyHost!();
+  try {
+    const [r] = await b.ready();
+    assert.ok(r, "a ready proof");
+    const early = b.chainNow!();
+    await early;
+    const before = nows;
+    assert.equal((await b.take(r.noteId, r.attempt, early)).noteId, r.noteId);
+    assert.equal(nows, before, "the take used the early read");
+  } finally {
+    (b as { end?: () => void }).end?.();
+  }
 });
