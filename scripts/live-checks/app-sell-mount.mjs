@@ -167,8 +167,9 @@ async function runOne(browser, w, shots, route) {
       await page.waitForTimeout(300);
     }
     // what the app asked the shell: every kind that trades or moves money (a buy, a sell, an order, a withdraw), each with
-    // its params (an envelope carries them beside its type)
-    run.asked = await page.evaluate(() => (window.__ctShellAsked ?? []).filter((m) => /buy|sell|order|withdraw/.test(m.type)).map((m) => ({ type: m.type, params: { chain: m.chain, mint: m.token, amount: m.amount, share_bps: m.share_bps, slippage_bps: m.slippage_bps } })));
+    // its params (an envelope carries them beside its type); the sell box's preview (pool.sell.dry, card
+    // app-sell-shows-what-you-receive) signs and moves nothing, so it is no tap
+    run.asked = await page.evaluate(() => (window.__ctShellAsked ?? []).filter((m) => /buy|sell|order|withdraw/.test(m.type) && m.type !== "pool.sell.dry").map((m) => ({ type: m.type, params: { chain: m.chain, mint: m.token, amount: m.amount, share_bps: m.share_bps, slippage_bps: m.slippage_bps } })));
     run.shot = `${w.name}-sold.png`;
     await page.screenshot({ path: path.join(shots, run.shot) });
     return run;

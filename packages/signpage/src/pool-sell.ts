@@ -59,7 +59,7 @@ import { keccak_256 } from "@noble/hashes/sha3.js";
 import { simulateSolanaTeardown, solanaCompileV0, solanaTeardownChecked } from "../../kit/src/trade/solana/build.ts";
 import { readSolanaPoolBuyVenue, readSolanaRent, SOLANA_POOL_PAGE_ENTRIES, SOLANA_POOL_SELL_FEE, solanaPoolNextPage, solanaPoolPage, solanaPoolSellMinOut, solanaPoolBuySellNeed, solanaPoolSellNeed, solanaPoolSellSteps, solanaRentMin, type SolanaRent } from "../../kit/src/trade/solana/pool-buy.ts";
 import { SOLANA_POOL_NEXT_PAGE_WINDOW, solanaPoolNoteFloor, solanaPoolPreMarkOf, type SolanaPoolPreMark } from "../../kit/src/trade/solana/pool-deposit.ts";
-import { solanaDecodeTokenAccount } from "../../kit/src/trade/solana/pool.ts";
+import { solanaDecodeTokenAccount, type SolanaReference } from "../../kit/src/trade/solana/pool.ts";
 import { pageReference } from "./page-rpc.ts";
 import { SOLANA_MAX_TX_BYTES, solanaAta, solanaProgramAddress } from "../../kit/src/checks/solana/message.ts";
 import { SOLANA_PUMP_AMM_PROGRAM, SOLANA_PUMP_PROGRAM, SOLANA_SOL_MINT, SOLANA_SYSTEM_PROGRAM, SOLANA_TOKEN_2022_PROGRAM, SOLANA_TOKEN_PROGRAM, solanaTeardownAddresses, solanaTeardownPlan, solanaVolumeAccumulator, solanaVolumeClaimable, type SolanaHeldRead, type SolanaTeardownSimulation, type SolanaTeardownUnclaimed } from "../../kit/src/checks/solana/checks.ts";
@@ -247,7 +247,7 @@ async function treeSizes(rpcs: Rpcs, program: string, pool: string, wait: (ms: n
 }
 
 /** The pool account's two tree sizes. */
-function sizesOf(d: Uint8Array): { stateSize: number; labelSize: number } {
+export function sizesOf(d: Uint8Array): { stateSize: number; labelSize: number } {
   if (d.length !== POOL_LEN || !sameBytes(d.subarray(0, 8), POOL_DISC)) return no();
   const size = (at: number): number => int(Number(new DataView(d.buffer, d.byteOffset + at, 8).getBigUint64(0, true)));
   return { stateSize: size(OFF_TREES), labelSize: size(OFF_TREES + TREE_LEN) };
@@ -660,7 +660,7 @@ export async function planPoolSell(h: Pick<PoolSellHost, "rpcs" | "wallets" | "b
   const frozen = held.some((x) => "frozen" in x);
   const order = held.filter((x) => x.held > 0n).sort((x, y) => (x.held < y.held ? -1 : x.held > y.held ? 1 : x.w.address < y.w.address ? -1 : x.w.address > y.w.address ? 1 : 0));
   const total = order.reduce((t, x) => t + x.held, 0n);
-  const units = ask.shareBps === undefined ? ask.amount : ask.shareBps === 10_000 ? total : (total * BigInt(ask.shareBps)) / 10_000n;
+  const units = poolSellUnits(total, ask);
   // short of the units: a frozen account among the Ws is why (not_allowed, as one W's frozen sale is), else not_funded
   if (units <= 0n || units > total) return no(frozen ? "not_allowed" : "not_funded");
   const one = order.find((x) => x.held >= units);
@@ -674,6 +674,22 @@ export async function planPoolSell(h: Pick<PoolSellHost, "rpcs" | "wallets" | "b
     left -= take;
   }
   return { units, total, legs, frozen };
+}
+
+/** The units a sell takes of a holding of `total` base units: a share's, the total times the share in basis points,
+ *  rounded down (10,000: the whole total, every unit); a typed amount's, the amount. The plan (planPoolSell) and the
+ *  sell box's preview (pool-sell-dry.ts) both take it from here. */
+export const poolSellUnits = (total: bigint, ask: Pick<PoolAsk, "amount" | "shareBps">): bigint =>
+  ask.shareBps === undefined ? ask.amount : ask.shareBps === 10_000 ? total : (total * BigInt(ask.shareBps)) / 10_000n;
+
+/** The quote a sale of `amount` signs on: the reference for exactly this sell on both RPCs (the kit's
+ *  readSolanaReference, side "sell", through pageReference) and the venue in it that gives the most; null when there is
+ *  none. Every sale (sellRun) and the sell box's preview (pool-sell-dry.ts) read it here, so the preview is the sale's
+ *  own quote on the same reads. A provider's fault is thrown (pageReference). */
+export async function poolSellReference(rpcs: Rpcs, token: string, amount: bigint): Promise<{ reference: SolanaReference; best: SolanaReference["pools"][number] } | null> {
+  const reference = await pageReference(rpcs, { side: "sell", token, amount });
+  const best = reference?.pools.filter((p) => p.venue === "pump-curve" || p.venue === "pumpswap").sort((x, y) => (x.expectedOut > y.expectedOut ? -1 : 1))[0];
+  return reference && best ? { reference, best } : null;
 }
 
 /** What each wallet's sale is told beyond the run's host: which leg it is, for the host's record. */
@@ -831,9 +847,9 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later, w: BuyWallet
     const { ref, precommitment, planned } = await returnNote(rpcs, program, scope, store, sync, s, w.l, w.j, h.settled);
     s.fill(0);
     // last, the reads the quote's age counts from: the reference, its venue, then the device's blockhash and slot
-    const reference = await pageReference(rpcs, { side: "sell", token, amount });
-    const best = reference?.pools.filter((p) => p.venue === "pump-curve" || p.venue === "pumpswap").sort((x, y) => (x.expectedOut > y.expectedOut ? -1 : 1))[0];
-    if (!reference || !best) return no("quote_check_failed");
+    const quoted = await poolSellReference(rpcs, token, amount);
+    if (!quoted) return no("quote_check_failed");
+    const { reference, best } = quoted;
     const venue = await readSolanaPoolBuyVenue(rpcs, best.venue as "pump-curve" | "pumpswap", token, ...(h.pick ? [h.pick] : []));
     if (venue.tokenProgram !== tokens.program) return no();
     // the venue's own need up front (PumpSwap: the wrapped-SOL account its sell makes first), before anything is built
