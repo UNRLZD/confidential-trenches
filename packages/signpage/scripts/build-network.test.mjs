@@ -13,8 +13,6 @@ import { signBuilt } from "../../../scripts/signpage-built.mjs";
 
 const PKG = signBuilt(); // the page's build, made from this tree's sources first (card signpage-generated-merge-free)
 const TESTNET_ONLY = [
-  "buy((address,bytes),", // the EVM pool buy's signature, testnet only until the mainnet pins' card (src/evm-send.ts)
-  "owed/back-evm", // the EVM buy's owed-back record (src/pool-buy-evm.ts EVM_OWED_BACK_KEY)
   "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8", // the devnet pool's program (pool-sol-deploy.devnet.json)
   "9T3RgAVTNgedZhjJyC1UmyisV61pFWoU24LQHnk5W2bb", // the helper's devnet fee payer
   "C2vLuah7VtGDTVnFkBpY7DkNf135Wwu6Uv57qCXPb9qJ", // the devnet pool's curve table (wallet SOL_POOL_TABLES.devnet)
@@ -33,9 +31,13 @@ const TESTNET_ONLY = [
   "0x6c830ac1b22d96baf692af4dd17d822ba61c32ec", // the Base Sepolia pool's fee recipient (wallet EVM_POOLS, card evm-pool-pins)
   "0xe40f67e8502a3e2ebf4caf7bdee8ac8758b472a7", // the Robinhood testnet pool's fee recipient
 ];
-/** The mainnet pin (packages/wallet/src/pool/solana.ts SOL_POOLS.mainnet and SOL_MAINNET_DEPLOY, card
- *  sol-pools-mainnet-pin): the testnet build carries none of it. */
+/** The mainnet pins (packages/wallet/src/pool/solana.ts SOL_POOLS.mainnet and SOL_MAINNET_DEPLOY, card
+ *  sol-pools-mainnet-pin; packages/wallet/src/pool/evm.ts EVM_POOLS.base and .robinhood, card evm-pools-on-mainnet):
+ *  the testnet build carries none of them. Since that card the EVM pool buy and sell (src/evm-send.ts) are in both. */
 const MAINNET_ONLY = [
+  // (each pool's address is also in the kit's venue table, which both builds carry: its fee recipient is the pin's own)
+  "0x4611338bf66389a2d2d3e67301dbb7ac9fb1fb9d", // the Base mainnet pool's fee recipient
+  "0x63c4b707b319d3f1643a7d0d61c188d76ec8f23d", // the Robinhood mainnet pool's fee recipient
   "CPWhFyFL8naX5W8DEB5XTrEUR2XtkHv7kyXdavpqDTTU", // the helper's mainnet fee payer
   "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF", // the mainnet pool program
   "BShWZ8FbDPYGpoc1ebj4TiELvVFmBQwW4XMYuLtQoHYZ", // its lookup table

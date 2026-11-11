@@ -7,9 +7,9 @@
 // - The flow (card signpage-pool-notes): pool.deposit on the devnet pool (src/pool-deposit.ts), with the page's own
 //   note store and seed; on Base or Robinhood (card pool-deposits) pool.deposit goes to src/pool-deposit-evm.ts when that
 //   chain's EVM pin exists on the page's network and the page has its two RPCs (else refused not_allowed); every other
-//   op is refused until its card. On mainnet the EVM positions stay closed until the helper-route reader of a W's
-//   holdings lands (card evm-pools-on-mainnet-reader): they read every W of the device on the pool's public RPCs. A sale
-//   reads only the Ws whose buy record names its token (planEvmSell). A signed-in load
+//   op is refused until its card. On mainnet the EVM positions read each W on the helper's route alone
+//   (pageEvmPassReads), and a sale's finding reads, on the pool's two RPCs, only the Ws whose buy record names its token
+//   (planEvmSell). A signed-in load
 //   finishes the pool's INCOMING notes, and so does each state read of the page while one is open (card
 //   signpage-pool-notes-2), one pass at a time.
 // - The next buy's proof (card signpage-pool-notes-2): each landed deposit note runs a pass of the wallet's proof queue
@@ -1361,8 +1361,9 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     },
   );
   // state.positions on each EVM chain with a pool (src/positions-evm.ts, card signpage-positions-evm): each filled buy
-  // record's W read on the pool's two RPCs, in the cache Solana's runs in; each chain's pass staggered after Solana's
-  // (Base one step, Robinhood two), so the three never fire in the same tick. Where the chain's buy is (testnet build)
+  // record's W read on the pool's two RPCs (SIGN_HOST's build: on the helper's route alone, pageEvmPassReads), in the
+  // cache Solana's runs in; each chain's pass staggered after Solana's (Base one step, Robinhood two), so the three never
+  // fire in the same tick, on each build whose network pins the chain's pool
   const evmPositionsCaches = new Map<"base" | "robinhood", ReturnType<typeof positionsCache> | null>();
   // when a state read last asked a spent chain for a pass
   const evmRearmed = new Map<"base" | "robinhood", number>();
@@ -1377,7 +1378,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         chain,
         // only on a list of exactly two providers: on more, the pair's walking seats can both land on one provider, whose
         // word alone would then read as two agreeing (a stuck or throttled seat leaves the rows waiting instead)
-        e === null || !POOL_TESTNET || e.passList.length !== 2
+        e === null || e.passList.length !== 2
           ? null
           : positionsCache(
               (memo, run) =>

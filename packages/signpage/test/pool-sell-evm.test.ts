@@ -297,6 +297,23 @@ test("the sale's finding reads only the Ws whose own buy record names the token 
   assert.ok(named.every((n) => !n.includes(W2.slice(2))), "W2 is never named to a pool RPC");
 });
 
+test("a pool RPC behind a W's buy block: the plan waits until both are past it, then reads W's tokens (a 100 % sale never plans without them)", async () => {
+  const x = await world();
+  // the buy record's block is 256: provider 1 reads two blocks under it
+  x.c.lowBy[1] = x.c.head - 254n;
+  await assert.rejects(planEvmSell(x.h, { ...ASK, amount: 0n, shareBps: 10_000 }), (e: Error) => e.name === "EvmLagError" && /under the buy at block 256/.test(e.message));
+  // inside the tap's bound, a wait the provider catches up during plans W with all its units
+  let waited = 0;
+  x.h.wait = async (ms) => {
+    waited++;
+    tick(ms);
+    x.c.lowBy[1] = 0n;
+  };
+  const { plan } = await evmSellPlanQuote(x.h, { ...ASK, amount: 0n, shareBps: 10_000 });
+  assert.ok(waited >= 1, "the plan waited");
+  assert.deepEqual(plan.legs.map((l) => [l.w.w, l.units]), [[W, UNITS]]);
+});
+
 test("a W whose buy record holds no route, or no block, is refused not_allowed: nothing read past the plan, nothing sent", async () => {
   for (const holding of [{ ...ROUTE_REC, route: undefined }, { ...ROUTE_REC, route: { ...ROUTE_REC.route, block: undefined } }, { ...ROUTE_REC, state: "pending" }]) {
     const x = await world({ holding });

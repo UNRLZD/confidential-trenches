@@ -295,7 +295,12 @@ export async function planEvmSell(h: Pick<EvmSellHost, "chain" | "scope" | "rpcs
   if (ws.length === 0) return no(routeless ? "not_allowed" : "not_funded");
   // each W's balance on both RPCs at the lower newest block, one W a request, the Ws in a random order
   const heads = await Promise.all(h.rpcs.map((rpc) => evmHeadNumber(rpc)));
-  const at = hexQ(heads[0]! < heads[1]! ? heads[0]! : heads[1]!);
+  const low = heads[0]! < heads[1]! ? heads[0]! : heads[1]!;
+  // a provider behind a W's buy reads that W's tokens as none: the plan waits (patient's bound) until both are past the
+  // newest buy block of the Ws read, so a 100 % sale never leaves a W's tokens out and reads filled
+  const newest = ws.reduce((m, x) => (x.block > m ? x.block : m), 0n);
+  if (low < newest) throw new EvmLagError(`the pool's RPCs read block ${low}, under the buy at block ${newest}`);
+  const at = hexQ(low);
   const held = await Promise.all(shuffled(ws, h.random).map(async (x) => ({ ...x, held: await agreed(h.rpcs, async (rpc) => word0(await rpc("eth_call", [{ to: token, data: `${BALANCE_OF}${word(BigInt(x.w))}` }, at]), "balanceOf")) })));
   const order = held.filter((x) => x.held > 0n).sort((x, y) => (x.held < y.held ? -1 : x.held > y.held ? 1 : x.w < y.w ? -1 : x.w > y.w ? 1 : 0));
   const total = order.reduce((t, x) => t + x.held, 0n);
