@@ -891,7 +891,7 @@ test("item 6: a sale's wallet list on the mainnet pace: one finder round per pas
 }));
 
 // ---------- a W's buy from its own history (card restore-rebuilds-buy-records) ----------
-import { SOL_BUY_PAGE, SOL_BUY_PAGES, SOL_BUY_TXS, solanaBuyIn, solanaBuyReader } from "../src/pool/buy-wallets.ts";
+import { SOL_BUY_PAGE, SOL_BUY_PAGES, SOL_BUY_TXS, solanaBuyIn, solanaBuyReader, solanaHelperBuys } from "../src/pool/buy-wallets.ts";
 
 const BUY_POOL = key32(40), FEE_PAYER = key32(41), STRANGER_KEY = key32(42), VENUE = key32(43);
 const WSOL = "So11111111111111111111111111111111111111112";
@@ -967,13 +967,16 @@ test("a W's buy from its history: its oldest successful transactions, past a fai
   }
 });
 
-test("a W's history the reader cannot tell is no buy: none at all, a listed transaction the route no longer returns, past SOL_BUY_TXS sends first, past SOL_BUY_PAGES pages", async () => {
+test("a W's history the reader cannot tell is no buy: none at all, a listed transaction the route no longer returns (the read ends there, a buy after it unread), past SOL_BUY_PAGES pages; past SOL_BUY_TXS sends first is final", async () => {
   const drop = (n: number) => ({ signature: `drop${n}`, err: null });
   const dropTx = txOf({ signers: [STRANGER_KEY], keys: [W], post: [tb(2, MINT_B, W, 9n)] });
   const cases: [string, { sigs: { signature: string; err: unknown }[]; txs: Map<string, unknown> }, number][] = [
     ["no history", { sigs: [], txs: new Map() }, 1],
     ["pruned", { sigs: [{ signature: "buy", err: null }], txs: new Map() }, 2],
-    ["flooded first", { sigs: [{ signature: "buy", err: null }, ...Array.from({ length: SOL_BUY_TXS }, (_, i) => drop(i))], txs: new Map<string, unknown>([["buy", buyTx()], ...Array.from({ length: SOL_BUY_TXS }, (_, i) => [`drop${i}`, dropTx] as [string, unknown])]) }, 1 + SOL_BUY_TXS],
+    // review of 42a99f81 (b): a pruned transaction ends the read; one skipped would read the buy after it
+    ["pruned before a buy", { sigs: [{ signature: "buy", err: null }, { signature: "gone", err: null }], txs: new Map<string, unknown>([["buy", buyTx()]]) }, 2],
+    ["fewer than SOL_BUY_TXS, none a buy", { sigs: Array.from({ length: SOL_BUY_TXS - 1 }, (_, i) => drop(i)), txs: new Map<string, unknown>(Array.from({ length: SOL_BUY_TXS - 1 }, (_, i) => [`drop${i}`, dropTx] as [string, unknown])) }, SOL_BUY_TXS],
+    ["SOL_BUY_TXS sends, one pruned", { sigs: Array.from({ length: SOL_BUY_TXS }, (_, i) => drop(i)), txs: new Map<string, unknown>(Array.from({ length: SOL_BUY_TXS - 1 }, (_, i) => [`drop${i}`, dropTx] as [string, unknown])) }, 2],
     ["past the pages", { sigs: [...Array.from({ length: SOL_BUY_PAGE * SOL_BUY_PAGES }, (_, i) => drop(i)), { signature: "buy", err: null }], txs: new Map<string, unknown>([["buy", buyTx()]]) }, SOL_BUY_PAGES],
   ];
   for (const [what, h, calls] of cases) {
@@ -981,9 +984,56 @@ test("a W's history the reader cannot tell is no buy: none at all, a listed tran
     assert.equal(await solanaBuyReader(rpc, BUY_POOL).read(W), null, what);
     assert.equal(log.length, calls, `${what}: ${log.length} calls`);
   }
+  // review of 42a99f81 (a): W's whole history read and all of its oldest four returned, none a buy: final ("none"); a
+  // buy after them (flooded first) is never among them
+  const four = { sigs: Array.from({ length: SOL_BUY_TXS }, (_, i) => drop(i)), txs: new Map<string, unknown>(Array.from({ length: SOL_BUY_TXS }, (_, i) => [`drop${i}`, dropTx] as [string, unknown])) };
+  const flooded = { sigs: [{ signature: "buy", err: null }, ...four.sigs], txs: new Map<string, unknown>([["buy", buyTx()], ...four.txs]) };
+  for (const [what, h] of [["four sends", four], ["flooded first", flooded]] as const) {
+    const { rpc, log } = historyRpc(new Map([[W, h]]));
+    assert.equal(await solanaBuyReader(rpc, BUY_POOL).read(W), "none", what);
+    assert.equal(log.length, 1 + SOL_BUY_TXS, `${what}: ${log.length} calls`);
+  }
   // within the pages: the buy past a full first page is found
   const long = new Map([[W, { sigs: [...Array.from({ length: SOL_BUY_PAGE + 2 }, (_, i) => drop(i)).map((x, i) => (i === SOL_BUY_PAGE + 1 ? { signature: "buy", err: null } : x))], txs: new Map<string, unknown>([["buy", buyTx()]]) }]]);
   const l2 = historyRpc(long);
   assert.deepEqual(await solanaBuyReader(l2.rpc, BUY_POOL).read(W), { mint: MINT_A, program: SOLANA_TOKEN_PROGRAM }, "a second page read");
   assert.deepEqual(l2.log.map((l) => l.method), ["getSignaturesForAddress", "getSignaturesForAddress", "getTransaction"]);
 });
+
+// Review of 42a99f81 (c): each buy read's call is a round of its gate, and its answer clears the gate's doubt, as the
+// finder's round does; without it the gate stays in doubt after a 429 however many reads go through since
+test("a buy read's answer clears its gate's doubt after a 429", async () => {
+  let t = 0;
+  const gate = new ThrottleGate({ now: () => t });
+  let n = 0;
+  const { rpc: good } = historyRpc(new Map([[W, { sigs: [], txs: new Map() }]]));
+  const rpc = (async (m: string, p: readonly unknown[]) => (++n === 1 ? Promise.reject(new Error("HTTP 429")) : good(m, p))) as unknown as SolanaRpc;
+  const r = solanaBuyReader(rpc, BUY_POOL, { gate, sleep: async (ms) => void (t += ms) });
+  await assert.rejects(r.read(W));
+  assert.equal(gate.suspect(), true, "the 429 counted");
+  assert.equal(await r.read(W), null);
+  assert.equal(gate.suspect(), false, "the next read's answer cleared the doubt");
+});
+
+// Review of 42a99f81, P2: the buy reads share the finder's paced queue on the helper (one budget at the provider) but
+// never its gate. A 429 the rebuild met (the helper throttling the history methods) paused the finder's next read for
+// its Retry-After, so a sale's wallet list waited behind it, or was refused
+test("a 429 on a buy read pauses the buy reads only: the finder's next read on the same route goes at the queue's pace, and the next buy read waits the Retry-After", () => onTestClock(async () => {
+  const origin = "https://buy-gate.example";
+  const st = stubFetch(origin, (m, id) => (m === "getSignaturesForAddress" ? too("10") : m === "getTransaction" ? ok(id, null) : solOk(m, id)));
+  let at429 = 0, finderAt = 0;
+  try {
+    await assert.rejects(solanaHelperBuys(origin, BUY_POOL).read(W));
+    at429 = st.starts.findLast(([, m]) => m === "getSignaturesForAddress")![0];
+    const before = st.starts.length;
+    await solanaHelperHoldings(origin).read(solW(1));
+    finderAt = st.starts[before]![0];
+    const sigs = st.starts.filter(([, m]) => m === "getSignaturesForAddress").length;
+    await assert.rejects(solanaHelperBuys(origin, BUY_POOL).read(W));
+    const next = st.starts.filter(([, m]) => m === "getSignaturesForAddress")[sigs]![0];
+    assert.ok(next - at429 >= 9_990, `the next buy read waits its own gate's Retry-After: ${next - at429} ms`);
+  } finally {
+    st.restore();
+  }
+  assert.ok(finderAt - at429 <= HOLDINGS_RPC_LIMIT.windowMs + 10, `the finder's read is not held by the buy reads' 429: ${finderAt - at429} ms`);
+}));

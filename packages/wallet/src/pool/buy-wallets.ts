@@ -600,14 +600,20 @@ export function evmHelperKeyedRpc(origin: string, chain: "base" | "robinhood"): 
 // - At most SOL_BUY_PAGES pages of W's signatures and SOL_BUY_TXS of its oldest successful transactions: a history past
 //   them (a W flooded with sends), or one the route no longer returns (a signature listed with no transaction), is no
 //   record, and W stays on the finder's path as before. Never a guess.
-// - On the finder's route and gate (holdingsRoute: the helper's keyed route on mainnet, paced with the holdings reads in
-//   one queue; the testnet build's devnet RPC), each call one round of the gate. Every request names one W, or a
-//   signature of W's: no batch, no request carries two Ws.
+// - "none" only when the read is final: W's whole history was read and its oldest SOL_BUY_TXS successful transactions
+//   (all four of them, each returned) hold no buy. A finalized history's oldest transactions never change, so that W is
+//   never read again (sol-buy-records.ts). A shorter history is no answer (null): a buy landing later is still among
+//   its oldest four.
+// - On the finder's paced route (holdingsRoute: the helper's keyed route on mainnet, paced with the holdings reads in
+//   one queue, so the provider is never asked past its one budget; the testnet build's devnet RPC) with a gate of its
+//   own (buyGateOf): a throttle met here pauses these reads only, never the finder's next read or a trade's. Each call
+//   is one round of that gate. Every request names one W, or a signature of W's: no batch, no request carries two Ws.
 /** W's buy as its own transaction shows it: the mint it bought and the token program of W's account of it. */
 export type SolanaBuy = { mint: string; program: string };
-/** One W's buy read: null when W's history shows none this reader can tell (see above). */
+/** One W's buy read: "none" when W's whole history shows for good that it holds none, null when this reader cannot tell
+ *  (see above). */
 export interface SolanaBuyReader {
-  read(address: string, signal?: AbortSignal): Promise<SolanaBuy | null>;
+  read(address: string, signal?: AbortSignal): Promise<SolanaBuy | "none" | null>;
 }
 /** The most pages of W's signatures read, each of SOL_BUY_PAGE. */
 export const SOL_BUY_PAGES = 4;
@@ -669,7 +675,13 @@ export function solanaBuyReader(rpc: SolanaRpc, pool: string, o: ReaderOpts = {}
   return {
     async read(w, signal) {
       const by = Date.now() + HOLDINGS_THROTTLE_MAX_MS;
-      const ask = (method: string, params: readonly unknown[]): Promise<unknown> => inTurn(a.gate, by, sleep, signal, () => call(a, method, params, signal));
+      // one call a round: its answer clears the gate's doubt, as the finder's whole round does
+      const ask = (method: string, params: readonly unknown[]): Promise<unknown> =>
+        inTurn(a.gate, by, sleep, signal, async (sentIn) => {
+          const got = await call(a, method, params, signal);
+          a.gate.answered(sentIn);
+          return got;
+        });
       // newest first, page by page, to the oldest
       const sigs: { signature: string; err: unknown }[] = [];
       for (let page = 0; ; page++) {
@@ -688,17 +700,25 @@ export function solanaBuyReader(rpc: SolanaRpc, pool: string, o: ReaderOpts = {}
         const buy = solanaBuyIn(tx, w, pool);
         if (buy !== null) return buy;
       }
-      return null;
+      // all of W's oldest four read, none a buy: final; fewer, a buy may still land among them
+      return oldest.length === SOL_BUY_TXS ? "none" : null;
     },
   };
 }
-/** W's buy on the helper (POST /v1/rpc/solana), on the holdings readers' route: their queue and their gate. */
+/** The buy reads' own gate on a holdings route, one a route: never the route's (the finder's) nor the host's lane. */
+const buyGates = new WeakMap<Route, ThrottleGate>();
+function buyGateOf(r: Route): ThrottleGate {
+  let g = buyGates.get(r);
+  if (g === undefined) buyGates.set(r, (g = new ThrottleGate()));
+  return g;
+}
+/** W's buy on the helper (POST /v1/rpc/solana), on the holdings readers' paced queue with the buy reads' own gate. */
 export function solanaHelperBuys(origin: string, pool: string): SolanaBuyReader {
   const r = holdingsRoute((fetch) => solanaHelperRpc(origin, { fetch }));
-  return solanaBuyReader(r.rpc, pool, { wait429: r.wait429, gate: r.gate });
+  return solanaBuyReader(r.rpc, pool, { wait429: r.wait429, gate: buyGateOf(r) });
 }
 /** W's buy on a provider the device reaches directly (the testnet build's devnet RPC), on the holdings readers' route. */
 export function solanaBuysAt(url: string, pool: string): SolanaBuyReader {
   const r = holdingsRoute((fetch) => solanaJsonRpc(url, { fetch }), "url");
-  return solanaBuyReader(r.rpc, pool, { wait429: r.wait429, gate: r.gate });
+  return solanaBuyReader(r.rpc, pool, { wait429: r.wait429, gate: buyGateOf(r) });
 }

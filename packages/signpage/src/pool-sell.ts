@@ -1204,8 +1204,9 @@ type RentBack = { rpcs: Rpcs; program: string; pool: string; scope: bigint; rent
  * holding any unit of it holds the pass and keeps every lamport its sell needs (delta review 7 of 08290868). Any other
  * mint (an airdrop, a stranger's token) never holds the pass back: its account is not among the addresses the plan
  * reads, so it is never burned or closed, its tokens stay W's under the 12 words, and W's SOL is swept as usual (review 6
- * of 13898c19, F2). A W with no buy record (a buy from before the record, or a restored device) holds while the page's
- * holdings show any token the record does not name: its own coin is never stranded, at worst its rent waits.
+ * of 13898c19, F2). A W with no buy record (a buy from before the record, or a restored device, whose rebuilt record
+ * counts as none) holds while the page's holdings show any token the record does not name: its own coin is never
+ * stranded, at worst its rent waits.
  */
 async function rentBack(h: PoolSellHost, x: RentBack, hold?: Hold): Promise<Ended> {
   const seeds: Uint8Array[] = [];
@@ -1496,7 +1497,11 @@ async function heldSeen(x: RentBack): Promise<string | undefined> {
 async function rentBackOwed(h: PoolSellHost, given: RentBack, o: OwedRentBack, hold?: Hold): Promise<void> {
   // W's buy mint joins the mints the pass reads (delta review 7 of 08290868): W holding any of it holds the pass, its
   // account closed with the rest once empty; a record that cannot be read is no record (the safe side)
-  const buy = await Promise.resolve(h.bought?.get(given.w.address)).catch(() => undefined);
+  // a record a restore rebuilt from W's history (sol-buy-records.ts, `rebuilt`) is one provider's word on mainnet: it is
+  // no record here, so the pass holds and W's rent waits on W (review of 42a99f81, P1); only this device's buy, which
+  // writes the record before its send without the mark, names W's own coin to the sweep
+  const rec = await Promise.resolve(h.bought?.get(given.w.address)).catch(() => undefined);
+  const buy = rec && rec.rebuilt !== true ? rec : undefined;
   const x: RentBack = buy ? { ...given, mints: mintsOf(given.mints, [buy]), buy } : { ...given, buy: null };
   const seen = await heldSeen(x).catch(() => undefined);
   if (seen !== undefined && seen === o.seen) return;

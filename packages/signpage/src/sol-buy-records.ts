@@ -8,11 +8,18 @@
 //   Solana position and read every W through the finder until its next buy.
 // - Which Ws: the ones the pool's SPENT and RESERVED notes paid (../../wallet/src/pool/buy-wallets.ts spentNotesOf),
 //   derived by the finder's own derive (derivedBuyWallets, with no read of any W), under the seed's shared lock with the
-//   seed zeroed at once; only their addresses are kept. A W that already has a buy record is not read.
+//   seed zeroed at once; only their addresses are kept. A W that already has a buy record, or a "read, no buy" mark, is
+//   not read.
 // - What: each W's buy from its own transaction (buy-wallets.ts solanaBuyReader: W signs it, the pinned pool's tag 3
 //   names W, one mint rises in W's accounts), on the finder's route (the helper's keyed route on mainnet), one W at a
 //   time in a random order, each W's reads on the finder host's pass turn, so a trade's reads go first. A token a
 //   stranger sent to W is never a buy, so it gets no record and stays no position.
+// - The record written is marked `rebuilt`: it is one provider's word (W's history as the helper answered it), so the
+//   rent back counts it as no record and holds (pool-sell.ts rentBackOwed); the rows and which W a sale reads stay on
+//   it, and a sale sells only what both RPCs read W holds. A buy on this device writes its own record over it, unmarked.
+// - A W whose read is final with no buy (the reader's "none": its whole history read, its oldest four returned, none
+//   a buy) gets a "read, no buy" mark (BUY_NONE_KEY) and is not read again; never for a failed, cut short or pruned
+//   read, which is read again at the next run.
 // - Only the buy record is written: never a cost record (owed/cost-sol), whose amount W received would show a W that
 //   sold since at that amount. A sold W gets its buy record as any other: it holds none of the token now, so the
 //   positions show nothing for it and a sale reads 0 on it.
@@ -22,16 +29,21 @@
 //   run (the next load, or the next restore) reads only the Ws still with none.
 // - When: after a restore wrote its notes, and at every signed-in load, never inside the restore's wait or a trade.
 //   One run at a time; one asked while a run is on runs once more after it. A W whose read fails, or whose history the
-//   reader cannot tell, gets nothing this run.
+//   reader cannot tell, gets nothing this run. A sale's own read of the Ws (pool-testnet.ts wallets) holds the run off
+//   as it holds the positions' pass: the run on stops (the W it was reading gets nothing), none starts while a sale
+//   reads, and once the last sale's read ends the run starts again (review of 42a99f81, P2).
 import type { SolanaBuy, SolanaBuyReader } from "../../wallet/src/pool/buy-wallets.ts";
+
+/** The Ws whose history was read for good with no buy, in the wallet store's meta, by W's address. */
+export const BUY_NONE_KEY = "owed/buy-sol-none";
 
 export type SolBuyRecordsDeps = {
   /** The addresses of the Ws the pool's SPENT and RESERVED notes paid (see the top); nothing is read for them. */
   wallets(signal: AbortSignal): Promise<readonly string[]>;
-  /** The buy records as stored (owed/buy-sol), by W's address. */
-  records(): Promise<Readonly<Record<string, unknown>>>;
-  /** Writes W's buy record only when W has none; whether it wrote. */
-  write(address: string, buy: SolanaBuy): Promise<boolean>;
+  /** The Ws not to read: those with a buy record (owed/buy-sol) or a "read, no buy" mark (BUY_NONE_KEY). */
+  done(): Promise<ReadonlySet<string>>;
+  /** Writes W's rebuilt buy record only when W has none, or its "read, no buy" mark; whether it wrote a buy record. */
+  write(address: string, buy: SolanaBuy | "none"): Promise<boolean>;
   /** W's buy from its own history. */
   reader: SolanaBuyReader;
   /** Waits the finder host's pass turn (the page's budget for it: trades first). */
@@ -47,6 +59,9 @@ export type SolBuyRecords = {
   run(): void;
   /** A sign out: the run on stops, and writes nothing after. */
   stop(): void;
+  /** A sale's read of the Ws begins: the run on stops and none starts until the returned end; then the run starts again
+   *  when one was stopped or asked meanwhile. */
+  hold(): () => void;
   /** Settles once no run is on. */
   idle(): Promise<void>;
 };
@@ -64,12 +79,22 @@ export function solBuyRecords(d: SolBuyRecordsDeps): SolBuyRecords {
   let stop = new AbortController();
   let on: Promise<void> | null = null;
   let again = false;
+  let holds = 0;
+  // a run stopped by a hold, or asked during one: it runs once the last hold ends
+  let missed = false;
+
+  const halt = (reason: string): void => {
+    stop.abort(new Error(reason));
+    stop = new AbortController();
+    on = null;
+    again = false;
+  };
 
   const once = async (signal: AbortSignal): Promise<void> => {
     const ws = await d.wallets(signal);
     if (ws.length === 0) return;
-    const had = await d.records();
-    const todo = [...new Set(ws)].filter((a) => !Object.hasOwn(had, a));
+    const had = await d.done();
+    const todo = [...new Set(ws)].filter((a) => !had.has(a));
     for (let i = todo.length - 1; i > 0; i--) {
       const r = pick(i + 1);
       if (!Number.isInteger(r) || r < 0 || r > i) throw new Error("pick: not an index");
@@ -77,7 +102,7 @@ export function solBuyRecords(d: SolBuyRecordsDeps): SolBuyRecords {
     }
     for (const w of todo) {
       signal.throwIfAborted();
-      let buy: SolanaBuy | null;
+      let buy: SolanaBuy | "none" | null;
       try {
         await d.turn(signal);
         buy = await d.reader.read(w, signal);
@@ -105,19 +130,40 @@ export function solBuyRecords(d: SolBuyRecordsDeps): SolBuyRecords {
     return p;
   };
 
+  const run = (): void => {
+    if (holds > 0) {
+      missed = true;
+      return;
+    }
+    if (on !== null) {
+      again = true;
+      return;
+    }
+    on = start();
+  };
+
   return {
-    run() {
-      if (on !== null) {
-        again = true;
-        return;
-      }
-      on = start();
-    },
+    run,
     stop() {
-      stop.abort(new Error("signed out"));
-      stop = new AbortController();
-      on = null;
-      again = false;
+      halt("signed out");
+      missed = false;
+    },
+    hold() {
+      holds++;
+      if (on !== null) {
+        halt("a sale reads the wallets");
+        missed = true;
+      }
+      let ended = false;
+      return () => {
+        if (ended) return;
+        ended = true;
+        holds--;
+        if (holds === 0 && missed) {
+          missed = false;
+          run();
+        }
+      };
     },
     idle: () => on ?? Promise.resolve(),
   };

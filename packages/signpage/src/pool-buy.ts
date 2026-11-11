@@ -126,7 +126,9 @@ const ROUTE_OUT = new RegExp(SIGNPAGE_ROUTE_OUT.source, SIGNPAGE_ROUTE_OUT.flags
 /** W's buy mint by W's address (card sol-w-sweep, delta review 7 of 08290868): each W is one buy's, and the buy writes
  *  the mint it buys (and its token program) before its send, so the rent back after a later sell knows which of W's
  *  tokens is W's own coin. A buy whose send fails leaves the record; it can only make the rent back hold. */
-export type BuyMints = { get(address: string): Promise<{ mint: string; program: string } | undefined>; put(address: string, m: { mint: string; program: string }): Promise<void> };
+/** W's buy record. `rebuilt` is set only by a restore's rebuild from W's history (sol-buy-records.ts), never by a buy
+ *  here: put writes mint and program alone, so this device's next buy from W replaces the mark. */
+export type BuyMints = { get(address: string): Promise<{ mint: string; program: string; rebuilt?: true } | undefined>; put(address: string, m: { mint: string; program: string }): Promise<void> };
 
 export type PoolBuyHost = {
   /** The pinned pool (the wallet's SOL_POOLS of this page's network). */

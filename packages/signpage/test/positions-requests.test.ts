@@ -25,6 +25,8 @@ import { onTestClock } from "../../kit/test/test-clock.ts";
 import { SOLANA_TOKEN_2022_PROGRAM, SOLANA_TOKEN_PROGRAM } from "../../kit/src/checks/solana/checks.ts";
 import { POSITION_COSTS_KEY, type Position } from "../src/positions.ts";
 import { testnetPool } from "../src/pool-testnet.ts";
+import { poolSellKind } from "../src/pool-sell.ts";
+import { BUY_NONE_KEY, solBuyRecords } from "../src/sol-buy-records.ts";
 import { TRADE_HELPER } from "../src/trade.ts";
 
 const SEED64 = wordsToSeed64(entropyToWords(new Uint8Array(16))); // the published all-zero entropy vector (a8.json)
@@ -380,7 +382,7 @@ test("a restored device: each W's buy record back from its own buy on the helper
   await w.insertSeed({ v: 1, entropy: new Uint8Array(16), source: "code", code_saved: true, created_ms: 1 });
   const ns = await openNoteStore(w);
   const Ws: string[] = [];
-  for (let i = 0; i < 3; i++) {
+  for (let i = 0; i < 4; i++) {
     const ref = { kind: "deposit" as const, s: SCOPE, i };
     const pre = noteSecrets(SEED64, ref).precommitment;
     const label = BigInt(277 + i);
@@ -418,6 +420,8 @@ test("a restored device: each W's buy record back from its own buy on the helper
     [Ws[0]!, [{ signature: "s0drop", err: null, tx: sendOf(Ws[0]!, STRANGER) }, { signature: "s0buy", err: null, tx: buyOf(Ws[0]!, BOUGHT) }]],
     [Ws[1]!, [{ signature: "s1sell", err: null, tx: null }, { signature: "s1buy", err: null, tx: buyOf(Ws[1]!, OLD) }]],
     [Ws[2]!, [{ signature: "s2drop", err: null, tx: sendOf(Ws[2]!, STRANGER) }]],
+    // W3's oldest four are a stranger's sends: read for good, no buy (review of 42a99f81, a)
+    [Ws[3]!, [0, 1, 2, 3].map((k) => ({ signature: `s3drop${k}`, err: null, tx: sendOf(Ws[3]!, STRANGER) }))],
   ]);
   const txs = new Map([...history.values()].flat().map((x) => [x.signature, x.tx] as const));
   const mode = { failTx: "", holdTx: "" };
@@ -450,7 +454,14 @@ test("a restored device: each W's buy record back from its own buy on the helper
     if (b.method === "getAccountInfo") return ok({ context: { slot: 100 }, value: { owner: SOLANA_TOKEN_PROGRAM, lamports: 1, data: [base64.encode(mintData), "base64"] } });
     return ok(null);
   }) as typeof fetch;
-  const make = () => testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { pin: PIN, positions: { setTimer: () => 0, clearTimer: () => {} } } as never);
+  // the store while open (page.held); `closed`: another tab's sign out closed it
+  let closed = false;
+  let sellHost: Parameters<typeof poolSellKind>[0] | undefined;
+  const make = () =>
+    testnetPool(
+      { store: async () => w, held: async () => (closed ? Promise.reject(new Error("no wallet store is open")) : w), seed64: async () => SEED64.slice() },
+      { pin: PIN, positions: { setTimer: () => 0, clearTimer: () => {} }, tradeKinds: { sell: (mk: typeof sellHost) => ((sellHost = mk), poolSellKind(mk!)) } } as never,
+    );
   const show = (p: readonly Position[] | null) => p?.map((x) => [names.get(x.token), x.amount, x.wallets.map((a) => names.get(a))]);
   const until = async (f: () => boolean | Promise<boolean>) => {
     for (let i = 0; i < 1_200 && !(await f()); i++) await new Promise((r) => setTimeout(r, 50));
@@ -458,7 +469,8 @@ test("a restored device: each W's buy record back from its own buy on the helper
   };
   // a transaction this phase asked for, by its signature
   const asked = (sig: string) => sentSigs.includes(`${phase} ${sig}`);
-  const records = async () => (await w.get("meta", "owed/buy-sol")) as Record<string, { mint: string; program: string }> | undefined;
+  const records = async () => (await w.get("meta", "owed/buy-sol")) as Record<string, { mint: string; program: string; rebuilt?: true }> | undefined;
+  const asks = (sig: string) => sentSigs.filter((x) => x === `${phase} ${sig}`).length;
 
   phase = "1 the load after the restore, W1's buy unread (the route down for it)";
   mode.failTx = "s1buy";
@@ -467,8 +479,10 @@ test("a restored device: each W's buy record back from its own buy on the helper
   await tp.settle();
   await until(async () => JSON.stringify(show(await tp.positions())) === JSON.stringify([["BOUGHT", "4", ["W0"]]]));
   // every W of the run read: its end (W1's read failed, so it keeps none)
-  await until(() => asked("s0buy") && asked("s1buy") && asked("s2drop"));
-  assert.deepEqual(await records(), { [Ws[0]!]: { mint: BOUGHT, program: SOLANA_TOKEN_PROGRAM } }, "W0's record back; W1's read failed and W2 has no buy: none");
+  await until(() => asked("s0buy") && asked("s1buy") && asked("s2drop") && asked("s3drop0"));
+  await until(async () => (await w.get("meta", BUY_NONE_KEY)) !== undefined);
+  assert.deepEqual(await records(), { [Ws[0]!]: { mint: BOUGHT, program: SOLANA_TOKEN_PROGRAM, rebuilt: true } }, "W0's record back, marked rebuilt; W1's read failed and W2 has no buy: none");
+  assert.deepEqual(await w.get("meta", BUY_NONE_KEY), { [Ws[3]!]: true }, "W3 read for good with no buy; W2's one send and W1's failed read get no mark");
   phase = "1b a sign out while W1's buy is read: nothing written after it";
   mode.failTx = "";
   mode.holdTx = "s1buy";
@@ -480,6 +494,28 @@ test("a restored device: each W's buy record back from its own buy on the helper
   mode.holdTx = "";
   for (let i = 0; i < 20; i++) await new Promise((r) => setTimeout(r, 50));
   assert.equal((await records())?.[Ws[1]!], undefined, "W1's buy read after the sign out wrote nothing");
+  phase = "1c this tab's sign out at its tap (signingOut) while W1's buy is read: nothing written after it";
+  mode.holdTx = "s1buy";
+  tp = make();
+  await tp.settle();
+  await until(() => asked("s1buy"));
+  tp.signingOut();
+  release();
+  mode.holdTx = "";
+  for (let i = 0; i < 20; i++) await new Promise((r) => setTimeout(r, 50));
+  assert.equal((await records())?.[Ws[1]!], undefined, "W1's buy read after this tab's sign out wrote nothing");
+  phase = "1d another tab's sign out closed the store while W1's buy is read: the write never reaches a store made afresh";
+  mode.holdTx = "s1buy";
+  tp = make();
+  await tp.settle();
+  await until(() => asked("s1buy"));
+  closed = true;
+  release();
+  mode.holdTx = "";
+  for (let i = 0; i < 20; i++) await new Promise((r) => setTimeout(r, 50));
+  assert.equal((await records())?.[Ws[1]!], undefined, "no write through a closed store");
+  await tp.signedOut();
+  closed = false;
   phase = "2 the next load reads W1 (and W2, still with none) again, and never W0";
   mode.failTx = "";
   await w.update("meta", "owed/buy-sol", (v) => ({ ...(v as object), [Ws[0]!]: { mint: BOUGHT, program: "kept as this device wrote it" } }));
@@ -487,9 +523,9 @@ test("a restored device: each W's buy record back from its own buy on the helper
   await tp.positions();
   await tp.settle();
   await until(async () => (await records())?.[Ws[1]!] !== undefined);
-  assert.deepEqual(await records(), { [Ws[0]!]: { mint: BOUGHT, program: "kept as this device wrote it" }, [Ws[1]!]: { mint: OLD, program: SOLANA_TOKEN_PROGRAM } }, "W1's record back as sold whole (its buy's); W0's never replaced");
+  assert.deepEqual(await records(), { [Ws[0]!]: { mint: BOUGHT, program: "kept as this device wrote it" }, [Ws[1]!]: { mint: OLD, program: SOLANA_TOKEN_PROGRAM, rebuilt: true } }, "W1's record back as sold whole (its buy's); W0's never replaced");
   await until(async () => JSON.stringify(show(await tp.positions())) === JSON.stringify([["BOUGHT", "4", ["W0"]]]));
-  assert.deepEqual(log.filter((l) => l.phase === phase && l.method === "getSignaturesForAddress").map((l) => l.names).sort(), [["W1"], ["W2"]]);
+  assert.deepEqual(log.filter((l) => l.phase === phase && l.method === "getSignaturesForAddress").map((l) => l.names).sort(), [["W1"], ["W2"]], "W3's mark: never read again");
   phase = "3 a buy on this device writes W1's record while the run reads W1: the run never replaces it";
   await w.update("meta", "owed/buy-sol", (v) => {
     const all = { ...(v as Record<string, unknown>) };
@@ -506,10 +542,107 @@ test("a restored device: each W's buy record back from its own buy on the helper
   await until(() => asked("s2drop"));
   for (let i = 0; i < 20; i++) await new Promise((r) => setTimeout(r, 50));
   assert.deepEqual((await records())?.[Ws[1]!], { mint: OLD, program: "this device's buy" }, "the record written meanwhile is kept");
+  phase = "4 a sale's wallet read while the run reads W1: the run stops, writes nothing, and runs again after the sale";
+  await w.update("meta", "owed/buy-sol", (v) => {
+    const all = { ...(v as Record<string, unknown>) };
+    delete all[Ws[1]!];
+    return all;
+  });
+  mode.holdTx = "s1buy";
+  tp = make();
+  await tp.settle();
+  await until(() => asked("s1buy"));
+  const sale = sellHost!();
+  const list = sale.wallets();
+  // W1's answer comes while the sale reads: the stopped run's, never written
+  release();
+  mode.holdTx = "";
+  await list;
+  (sale as { end?: () => void }).end?.();
+  await until(() => asks("s1buy") === 2);
+  await until(async () => (await records())?.[Ws[1]!] !== undefined);
+  assert.deepEqual((await records())?.[Ws[1]!], { mint: OLD, program: SOLANA_TOKEN_PROGRAM, rebuilt: true }, "W1 read again after the sale");
 
   const at = (l: (typeof log)[number]) => `${l.phase} | ${l.to} | ${l.method} | ${l.names.join(",")}`;
   assert.deepEqual(log.filter((l) => l.to !== HELPER_RPC && l.names.some((n) => n.startsWith("W") || n.startsWith("ATA"))).map(at), [], "no W or W's token account named to a host but the helper's keyed route");
   assert.deepEqual(log.filter((l) => new Set(l.names.filter((n) => /^W\d$/.test(n))).size > 1).map(at), [], "no request names two Ws");
   assert.deepEqual(log.filter((l) => l.names.includes("STRANGER")).map(at), [], "the stranger's mint is named nowhere");
   assert.ok(log.some((l) => l.method === "getSignaturesForAddress" && l.to === HELPER_RPC), "the history read on the helper's keyed route (a sanity check of the log)");
+}));
+
+// Review of 42a99f81 (b), P2: the rebuild alone, its deps faked. Each W's read waits the finder host's pass turn (trades
+// first); the Ws are read in a shuffled order; a sale's hold stops the run and it starts again once the last hold ends.
+// On the test clock: each read takes 1 s.
+test("the buy records' rebuild: each read waits its pass turn, the Ws in a shuffled order, a sale's hold stops the run and it runs again after", () => onTestClock(async () => {
+  const reads: string[] = [];
+  const turns: string[] = [];
+  const written = new Map<string, unknown>();
+  let open: (() => void) | null = null;
+  let blockTurn = false;
+  const r = solBuyRecords({
+    wallets: async () => ["a", "b", "c"],
+    done: async () => new Set(written.keys()),
+    write: async (a, buy) => (written.set(a, buy), buy !== "none"),
+    reader: {
+      read: async (a, signal) => {
+        reads.push(a);
+        await new Promise((x) => setTimeout(x, 1_000));
+        signal?.throwIfAborted();
+        return { mint: `M-${a}`, program: "P" };
+      },
+    },
+    turn: async () => {
+      turns.push(`turn before read ${reads.length}`);
+      if (blockTurn) await new Promise<void>((x) => (open = x));
+    },
+    wrote: () => {},
+    // always the first index: [a, b, c] becomes [b, c, a]
+    pick: () => 0,
+  });
+  blockTurn = true;
+  r.run();
+  await new Promise((x) => setTimeout(x, 10));
+  assert.deepEqual(reads, [], "no read before its pass turn");
+  blockTurn = false;
+  open!();
+  await r.idle();
+  assert.deepEqual(reads, ["b", "c", "a"], "the shuffled order");
+  assert.deepEqual(turns, ["turn before read 0", "turn before read 1", "turn before read 2"], "a pass turn before every read");
+  // a sale's hold while a read is on: that read writes nothing; asked meanwhile, nothing runs; the hold's end runs again
+  written.clear();
+  reads.length = 0;
+  r.run();
+  await new Promise((x) => setTimeout(x, 10));
+  assert.deepEqual(reads, ["b"]);
+  const end = r.hold();
+  r.run();
+  await new Promise((x) => setTimeout(x, 5_000));
+  assert.deepEqual(reads, ["b"], "nothing read while the sale holds the run");
+  assert.equal(written.size, 0, "the stopped read wrote nothing");
+  end();
+  end();
+  await new Promise((x) => setTimeout(x, 10));
+  await r.idle();
+  assert.deepEqual(reads, ["b", "b", "c", "a"], "the run again after the sale");
+  assert.deepEqual([...written.keys()].sort(), ["a", "b", "c"]);
+  // two sales: the run waits for the last
+  written.clear();
+  reads.length = 0;
+  const e1 = r.hold(), e2 = r.hold();
+  r.run();
+  e1();
+  await new Promise((x) => setTimeout(x, 10));
+  assert.deepEqual(reads, [], "one sale still reads");
+  e2();
+  await r.idle();
+  assert.equal(reads.length, 3);
+  // a sign out during a hold: the hold's end runs nothing
+  written.clear();
+  reads.length = 0;
+  const e3 = r.hold();
+  r.run();
+  r.stop();
+  e3();
+  await new Promise((x) => setTimeout(x, 10));
+  assert.deepEqual(reads, [], "signed out: no run after the sale");
 }));

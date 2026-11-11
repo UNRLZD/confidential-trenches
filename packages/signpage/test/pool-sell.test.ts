@@ -214,7 +214,7 @@ type Plant = {
   insertKind?: "release" | "deposit";
   /** W's buy record (pool-buy.ts BuyMints): the venue's mint when not given; null, none (a buy from before it was
    *  written, or a restored device) */
-  buy?: { mint: string; program: string } | null;
+  buy?: { mint: string; program: string; rebuilt?: true } | null;
   /** More of the user's buy wallets holding the venue's token (card pool-sell-share-across-wallets: each buy lands in a
    *  fresh W): each at (l, j), its token account holding `held`, its lamports (ENOUGH when not given) */
   others?: { l: bigint; j: number; held: bigint; lamports?: number }[];
@@ -2563,6 +2563,39 @@ test("no buy record, the helper's holdings leaving out W's own coin, a fully sol
   assert.equal(w.c.deposits.filter((d) => d.sweep).length, 0, "no sweep");
   assert.ok((w.c.accounts.get(W.address)?.lamports ?? 0) > 0, "W keeps its SOL for its coin's sell");
   assert.deepEqual(w.told.filter((t) => t.step === "rent_back").map((t) => [t.state, t.detail]), [["holds", "no buy of W's is recorded"]]);
+});
+
+// Card restore-rebuilds-buy-records, review of 42a99f81, P1 (the reviewer's probe): a record a restore rebuilt is one
+// provider's word (W's history as the helper answered it), so a lie in it could name a stranger's mint as W's buy. With
+// W holding its own coin and that mint, a full sell of the mint swept W to 0 and stranded the coin. A rebuilt record is
+// no record to the rent back: it holds, as on a restored device before the rebuild; a record this device's buy wrote
+// sweeps as it always has.
+test("a rebuilt buy record naming a stranger's mint, W holding its own coin beside it, a full sell of that mint: the rent back holds, W keeps its SOL and its coin; the same record written by this device's buy sweeps as before", async () => {
+  const air = VF.pumpswap.mint;
+  const own = solanaAta(W.address, MINT, TOKEN_PROGRAM);
+  const holding: BuyWallet = { ...wallet(AMOUNT, false, air), holdings: { native: 0n, tokens: new Map([[air, { amount: AMOUNT, frozen: false }]]), unreadable: [] } };
+  const run = async (buy: { mint: string; program: string; rebuilt?: true }) => {
+    const w = await world({ venue: "pumpswap", ataLamports: TOKEN_RENT, buy }, [holding]);
+    w.c.accounts.set(own, { owner: TOKEN_PROGRAM, lamports: TOKEN_RENT, data: tokenAccount(5n, 1, MINT) });
+    const a = await runPoolSell(w.host, { ...ASK, token: air });
+    assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
+    return w;
+  };
+  const rebuilt = await run({ mint: air, program: TOKEN_PROGRAM, rebuilt: true });
+  assert.equal(rebuilt.c.deposits.filter((d) => d.sweep).length, 0, "no sweep on a rebuilt record");
+  assert.ok((rebuilt.c.accounts.get(W.address)?.lamports ?? 0) > 0, "W keeps its SOL for its coin's sell");
+  assert.deepEqual(rebuilt.told.filter((t) => t.step === "rent_back").map((t) => [t.state, t.detail]), [["holds", "no buy of W's is recorded"]]);
+  const device = await run({ mint: air, program: TOKEN_PROGRAM });
+  assert.equal(device.c.deposits.filter((d) => d.sweep).length, 1, "this device's own record sweeps W as before");
+});
+
+test("a buy on this device writes its record over a rebuilt one, the mark gone; nothing else writes the mark", async () => {
+  let stored: unknown = { [W.address]: { mint: VF.pumpswap.mint, program: TOKEN_PROGRAM, rebuilt: true } };
+  const store = { get: async () => stored, update: async (_s: string, _k: string, f: (v: unknown) => unknown) => { const n = f(stored); if (n !== undefined) stored = n; return n; } };
+  const b = buyMints(async () => store as never);
+  assert.deepEqual(await b.get(W.address), { mint: VF.pumpswap.mint, program: TOKEN_PROGRAM, rebuilt: true });
+  await b.put(W.address, { mint: MINT, program: TOKEN_PROGRAM, ...({ rebuilt: true } as object) } as never);
+  assert.deepEqual(await b.get(W.address), { mint: MINT, program: TOKEN_PROGRAM }, "the buy's own write: mint and program, no mark");
 });
 
 // Delta review 8, F2: a buy record that cannot be read is no record, so the pass holds; it never faults the sell

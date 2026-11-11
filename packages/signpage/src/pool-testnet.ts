@@ -80,7 +80,7 @@ import { finishPoolOnward, runPoolWithdraw, solanaOnwardFee, solanaWithdrawMinPa
 import type { PoolFunds, PoolReady, PoolWithdrawFormDeps } from "./withdraw/pool-form.ts";
 import { EVM_POOL_HISTORY } from "../../kit/src/trade/evm/buy-unpinned.ts";
 import { solanaBuysAt, solanaHelperBuys } from "../../wallet/src/pool/buy-wallets.ts";
-import { solBuyRecords } from "./sol-buy-records.ts";
+import { BUY_NONE_KEY, solBuyRecords } from "./sol-buy-records.ts";
 
 // The freezes are marked pure, so SIGN_HOST's build, which never reads these, drops them whole (scripts/build-network.test.mjs).
 /** Each chain's two testnet RPCs, as the app names the chain. Solana's are mainnet's shape (main.ts: a public provider
@@ -1530,15 +1530,27 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       if (got.failed.length > 0) throw new Error("the buy wallets could not be derived");
       return got.wallets.map((w) => w.address);
     },
-    records: async () => asRecord(await (await page.store()).get("meta", BUY_MINTS_KEY)),
+    done: async () => {
+      const st = await page.store();
+      return new Set([...Object.keys(asRecord(await st.get("meta", BUY_MINTS_KEY))), ...Object.keys(asRecord(await st.get("meta", BUY_NONE_KEY)))]);
+    },
+    // through the store only while it is open (page.held): another tab's sign out never lands a write in a store made
+    // afresh (review of 42a99f81, d)
     write: async (address, buy) => {
+      if (!page.held) throw new Error("no wallet store is open");
+      const st = await page.held();
+      if (buy === "none") {
+        await st.update("meta", BUY_NONE_KEY, (v) => ({ ...asRecord(v), [address]: true }));
+        return false;
+      }
       let wrote = false;
-      await (await page.store()).update("meta", BUY_MINTS_KEY, (v) => {
+      await st.update("meta", BUY_MINTS_KEY, (v) => {
         // the store may run this again on a race: each run decides afresh
         const all = asRecord(v);
         wrote = !Object.hasOwn(all, address);
         if (!wrote) return undefined;
-        return { ...all, [address]: { mint: buy.mint, program: buy.program } };
+        // marked rebuilt: one provider's word, which the rent back counts as no record (pool-sell.ts rentBackOwed)
+        return { ...all, [address]: { mint: buy.mint, program: buy.program, rebuilt: true } };
       });
       return wrote;
     },
@@ -1659,6 +1671,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       // fails still ends the hold, and the next pass reads the finder (a rent back at load reads here too)
       wallets: async () => {
         const hold = positions.preempt();
+        // the buy records' rebuild stops too and starts again after (its reads share the finder's queue)
+        const rebuild = buyRecords.hold();
         let found: FoundWallet[] | null = null;
         try {
           const got = await poolBuyWallets(await store(), r);
@@ -1668,6 +1682,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
           // read: the next pass's read; failed (the sell refuses, or a rent back at load waits): the next pass reads
           if (found === null) hold.release();
           else hold.feed(found);
+          rebuild();
         }
       },
       // the rent backs owed (card sol-buy-rent-back), run again at the next load while owed
@@ -2130,6 +2145,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     },
     watch: (fn) => void watchers.add(fn),
     signingOut: () => {
+      buyRecords.stop();
       stopTurn();
       stopHostLaneWaits();
       signOuts++;
