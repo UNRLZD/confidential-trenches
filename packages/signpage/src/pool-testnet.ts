@@ -60,7 +60,7 @@ import { POOL_TESTNET } from "../../wallet/src/pool/network.ts";
 import { askWhileBusy, type BusyOpts } from "../../wallet/src/busy.ts";
 import { POOL_SEND_BUSY_WAIT_MS, PoolSendBusy, poolBuyKind, type PoolBuyHost } from "./pool-buy.ts";
 import { BUY_MINTS_KEY, buyMints, keptSells, owedRentBacks, poolSellKind, resumeRentBacks, settleDeadSellOps, settlePoolSells, settleSellOps, type PoolSellKindHost } from "./pool-sell.ts";
-import { buyWallets, buyWalletsOf, derivedBuyWallets, evmHelperKeyedRpc, type BuyWallet, solanaHelperHoldings, solanaHoldingsAt, spentNotesOf, type HoldingsReader } from "../../wallet/src/pool/buy-wallets.ts";
+import { buyWallets, buyWalletsOf, derivedBuyWallets, evmHelperKeyedRpc, evmHelperRpc, type BuyWallet, solanaHelperHoldings, solanaHoldingsAt, spentNotesOf, type HoldingsReader } from "../../wallet/src/pool/buy-wallets.ts";
 import { keptListed, keptPositions, POSITION_COSTS_KEY, POSITIONS_KEPT_KEY, POSITIONS_SOLD_KEY, POSITIONS_SOLD_TX_KEY, POSITIONS_UNLANDED_KEY, positionsCache, positionsPass, recordBoughtOut, recordPoolBuy, routeInto, type BuyRecordStore, type FoundWallet, type PoolBuyFacts, type Position, type PositionCosts } from "./positions.ts";
 import { evmStoredHold } from "../../wallet/src/pool/evm-hold-store.ts";
 import { EVM_CHAIN_IDS, EVM_EPOCH_MS, EVM_POOLS, evmNow, evmPair, evmRetryLag, evmPool as walletEvmPool, evmPoolScopeOf, evmTreeSync, type EvmFeeAnswer, type EvmPoolOf, type EvmPoolPin, type EvmPoolRequest, type EvmRpc, type EvmSyncHold, type EvmTreeSync } from "../../wallet/src/pool/evm.ts";
@@ -130,6 +130,21 @@ export const pageEvmHistory = (pin: EvmPoolPin): readonly EvmRpc[] => {
   if (h === undefined) HISTORY.set(pin.network, (h = Object.freeze([evmHelperKeyedRpc(TRADE_HELPER, pin.network), ...MAINNET_POOL_HISTORY[pin.network].map((u) => pageRpc(u))])));
   return h;
 };
+/** Where a mainnet W's balance is read, for its positions and for a sale's finding (decision M359): the helper's route
+ *  alone (POST /v1/rpc/{chain}, the wallet's evmHelperRpc, the holdings readers' one paced queue, which the restore's W
+ *  reads share), so a provider the device reaches itself is never named a W of it, nor two in one burst; a sale's own
+ *  pre-signature reads stay on the pool's two RPCs (src/pool-sell-evm.ts). None in the testnet build, whose helper has no
+ *  route for the chain: there the pool's two RPCs read each W, as before. */
+export const pageEvmWalletRpc = (chain: "base" | "robinhood"): EvmRpc | undefined => {
+  if (POOL_TESTNET) return undefined;
+  let r = WALLET_RPCS.get(chain);
+  if (r === undefined) {
+    const route = evmHelperRpc(TRADE_HELPER, chain);
+    WALLET_RPCS.set(chain, (r = Object.assign((method: string, params: readonly unknown[]) => route(method, params), { url: `${TRADE_HELPER}/v1/rpc/${chain}` }) as EvmRpc));
+  }
+  return r;
+};
+const WALLET_RPCS = new Map<"base" | "robinhood", EvmRpc>();
 /** Tests only: forget this page's hold objects (EVM_HOLDS; each pool's record stays in the wallet store, as on a new
  *  page). */
 export const resetPageEvmHolds = (): void => EVM_HOLDS.clear();
@@ -907,6 +922,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       held: () => (page.held ? page.held() : Promise.reject(new Error("no wallet store is open"))),
       round: () => e.sync.events(),
       testnet: POOL_TESTNET,
+      ...((f) => (f ? { finder: f } : {}))(pageEvmWalletRpc(chain)),
       fetch: over.fetch,
       signal: follows.signal,
       // the session's sign out (signingOut, at its tap): it ends a wait between the sale's reads' attempts
@@ -1362,9 +1378,11 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
                   const g = hs.gen();
                   const st = await page.store();
                   // a background read: the pass pair, which waits while a trade holds the hosts (page-rpc.ts)
+                  const one = pageEvmWalletRpc(chain);
                   const got = await evmPositionsPass({
                     chain,
                     rpcs: e.passRpcs,
+                    ...(one ? { one } : {}),
                     signal: run.signal,
                     // the open sales: this page's, and the records a load finds
                     holds: async (heads) => {
