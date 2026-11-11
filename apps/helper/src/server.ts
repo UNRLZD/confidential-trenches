@@ -780,10 +780,11 @@ export function evmSwapsFromEnv(env: Record<string, string | undefined>, evmList
       // every token an answer of the last SERVED_MS held, not only the newest answer's: a user taps what they read, and a
       // refresh between drops tokens (card robinhood-listed-tape-opens)
       listed: lists.listed,
-      // a hint only: swaps.ts fromHint takes it once the chain says the pool is the token's
+      // a hint only: swaps.ts fromHint takes it once the chain says the pool is the token's; the pool the last answer that
+      // held the token named (lists.pool), so a token a refresh dropped opens from it, not the whole discovery
       hint: async (token) => {
         const s = await snapshot();
-        return s !== null && Object.hasOwn(s.pools, token) ? s.pools[token]! : null;
+        return s !== null && Object.hasOwn(s.pools, token) ? s.pools[token]! : (lists.pool?.(token) ?? null);
       },
       // the same rows' price_usd, as the last answer read held it: a book off it by SCALE_BOUND is not served as ours
       price: (token) => seen?.prices.get(token) ?? null,
