@@ -509,7 +509,8 @@ test("review P2-1 and P2-2 of a34c1626, P2-1 and P3-3 of e3489b3b: every Solana 
   const src = readFileSync(new URL("../src/pool-testnet.ts", import.meta.url), "utf8");
   const calls = [...src.matchAll(/solanaSettle(?:Spent|Reserved)\(\{[^}]*\}\)/g)].map((m) => m[0]);
   assert.equal(calls.length, 4);
-  for (const c of calls) assert.match(c, /, rpcs: settleRpcs\(\), lister: lister\(\), signal, cache, markBatches: PAGE_SOL_MARK_BATCHES \}\)$/, c);
+  // the reserved pass's on the pair's pass reads (card signpage-passes-yield-to-a-trade), the buy's and the rest on its trade reads
+  for (const c of calls) assert.match(c, /, rpcs: settleRpcs\((?:"pass")?\), lister: lister\((?:"pass")?\), signal, cache, markBatches: PAGE_SOL_MARK_BATCHES \}\)$/, c);
   // each site's signal is the stop's when the call began: four takes, and the stop read elsewhere only where a trade's
   // reads wait before a signature (card start-reads-wait-out-a-throttle): the buy's and the sell's host, each taken when
   // the host is made, and a pool kind's request (outSignal), each ending its waits at the next sign out
@@ -520,8 +521,8 @@ test("review P2-1 and P2-2 of a34c1626, P2-1 and P3-3 of e3489b3b: every Solana 
   assert.equal([...src.matchAll(/ stop: solanaStop\.signal,/g)].length, 1);
   assert.equal([...src.matchAll(/solanaStop\.signal/g)].length, 8);
   // the settle pair: the page's two seats, the helper's with the window-long retry
-  assert.match(src, /solanaPacedRpc\(pageHelperRpc\(TRADE_HELPER, SOLANA_RPC_WINDOW_RETRY\)\)\]/);
-  assert.match(src, /solanaPacedRpc\(testnetRpc\(TESTNET_RPCS\.solana\[1\], SOLANA_RPC_WINDOW_RETRY\)\)\]/);
+  assert.match(src, /solanaPacedRpc\(pageHelperRpc\(TRADE_HELPER, SOLANA_RPC_WINDOW_RETRY, kind\)\)\]/);
+  assert.match(src, /solanaPacedRpc\(testnetRpc\(TESTNET_RPCS\.solana\[1\], SOLANA_RPC_WINDOW_RETRY, kind\)\)\]/);
   assert.deepEqual(PAGE_SOL_MARK_BATCHES, [10, 100]);
 });
 

@@ -250,18 +250,26 @@ test("the positions across a buy with no record, a sell, a sign out mid-pass and
   let sellEnd: (() => void) | null = null;
   let sellRead: Promise<unknown> = Promise.resolve();
   // the buy as runPoolBuy runs it: W's buy mint written before its send; then a fill whose amount it could not tell
-  const buy = (host: () => { bought?: { put(a: string, m: { mint: string; program: string }): Promise<void> } }) => (_ask: unknown, ctx: { route(r: unknown): void; progress(s: string): void }) => {
+  // the host ended at the run's end, as poolBuyKind and poolSellKind end theirs (card signpage-passes-yield-to-a-trade:
+  // a host holds the page's hosts for the trade until then)
+  const buy = (host: () => { bought?: { put(a: string, m: { mint: string; program: string }): Promise<void> }; end?(): void }) => (_ask: unknown, ctx: { route(r: unknown): void; progress(s: string): void }) => {
     const ran = (async () => {
-      await host().bought!.put(A.Ws[3]!, { mint: NEW, program: SOLANA_TOKEN_PROGRAM });
-      ctx.route({ wallet: A.Ws[3]! });
-      holds.set(A.Ws[3]!, [[NEW, 2_500_000_000n]]);
+      const h = host();
+      try {
+        await h.bought!.put(A.Ws[3]!, { mint: NEW, program: SOLANA_TOKEN_PROGRAM });
+        ctx.route({ wallet: A.Ws[3]! });
+        holds.set(A.Ws[3]!, [[NEW, 2_500_000_000n]]);
+      } finally {
+        h.end?.();
+      }
       ctx.progress("filled");
     })();
     return { running: true as const, after: ran, answer: () => ({ result: { stage: "filled", txs: [] } }) };
   };
-  const sell = (host: () => { wallets(): Promise<unknown> }) => () => {
-    sellRead = host().wallets().catch(() => {});
-    return { running: true as const, after: new Promise<void>((r) => (sellEnd = r)), answer: () => ({ result: { stage: "filled", txs: [] } }) };
+  const sell = (host: () => { wallets(): Promise<unknown>; end?(): void }) => () => {
+    const h = host();
+    sellRead = h.wallets().catch(() => {});
+    return { running: true as const, after: new Promise<void>((r) => (sellEnd = () => (h.end?.(), r()))), answer: () => ({ result: { stage: "filled", txs: [] } }) };
   };
   const tp = testnetPool(
     { store: async () => cur, seed64: async () => (seed === null ? Promise.reject(new Error("no seed is stored")) : seed.slice()) },
