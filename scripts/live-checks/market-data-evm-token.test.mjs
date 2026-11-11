@@ -6,6 +6,9 @@
 // field, a row with an extra field, the other chain's tag, a launchpad other than the lists', a Risk field not a Field,
 // holders missing `top_bps`, an unlisted address answered 200, a stale read and no CORS echo: each FAIL. Holders dated
 // 50 min before the read PASS and 71 min FAIL (card market-data-evm-capacity: the helper serves a held count an hour).
+// Card token-page-data-complete-and-fast: the page now carries `links`; every recorded page was recorded before it, so
+// `links: {}` was added to each by hand (GeckoTerminal's info, its source, was not part of those runs); re-record from the
+// first deploy that serves it. A page with no `links`, or a link that is not http(s), FAILs.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -99,6 +102,8 @@ test("made from the good answer: each fault FAILs, naming it", async () => {
   const cases = [
     [edit("base", "token", (b) => delete b.decimals), /base token: .*page: missing decimals/],
     [edit("robinhood", "token", (b) => delete b.filling), /robinhood token: .*page: missing filling/],
+    [edit("base", "token", (b) => delete b.links), /base token: .*page: missing links/],
+    [edit("robinhood", "token", (b) => (b.links = { site: "javascript:alert(1)" })), /robinhood token: .*links/],
     [edit("base", "token", (b) => (b.row.extra = 1)), /base token: .*row: extra extra/],
     [edit("base", "token", (b) => delete b.row.launchpad), /base token: .*row: missing launchpad/],
     [edit("robinhood", "token", (b) => (b.row.chain = "base")), /robinhood token: .*row.chain "base"/],

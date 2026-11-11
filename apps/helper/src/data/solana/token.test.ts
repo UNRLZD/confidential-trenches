@@ -26,7 +26,7 @@ const clone = <T>(v: T): T => structuredClone(v);
 
 type RpcCall = { method: string; params: unknown[] };
 /** A fake RPC path answering from the recording; `largest` and `owners` answer getTokenLargestAccounts. */
-function fakeRpc(opts: { accounts?: (mint: string) => unknown; largest?: unknown; owners?: unknown; down?: boolean } = {}) {
+function fakeRpc(opts: { accounts?: (mint: string) => unknown; largest?: unknown; owners?: unknown; down?: boolean; byOwner?: (owner: string, mint: string) => unknown } = {}) {
   const calls: RpcCall[] = [];
   return {
     calls,
@@ -34,6 +34,10 @@ function fakeRpc(opts: { accounts?: (mint: string) => unknown; largest?: unknown
       const r = JSON.parse(body) as RpcCall;
       calls.push(r);
       if (opts.down) return { status: 503, body: '{"error":{"code":"upstream"}}' };
+      if (r.method === "getTokenAccountsByOwner") {
+        const [owner, f] = r.params as [string, { mint: string }];
+        return opts.byOwner === undefined ? { status: 503, body: '{"error":{"code":"upstream"}}' } : { status: 200, body: JSON.stringify({ jsonrpc: "2.0", id: 1, result: { context: { slot: 1 }, value: opts.byOwner(owner, f.mint) } }) };
+      }
       if (r.method === "getTokenLargestAccounts") return opts.largest === undefined ? { status: 503, body: '{"error":{"code":"upstream"}}' } : { status: 200, body: JSON.stringify({ jsonrpc: "2.0", id: 1, result: opts.largest }) };
       const keys = r.params[0] as string[];
       if ((r.params[1] as { encoding?: string }).encoding === "base64") {
@@ -113,11 +117,11 @@ test("fold 6 (re-check 4 P5b): the token page's chain reads draw the share of th
   const spy = { handle: (c: string, ct: string | undefined, body: string, client?: string) => (seen.push(client), rpc.handle(c, ct, body)) };
   const t = createSolanaToken(fakeProxy(), spy, { now: () => NOW });
   assert.equal((await t.page(PUMP, "198.51.100.9")).status, 200);
-  assert.deepEqual(seen, ["198.51.100.9", "198.51.100.9"], "the mint read and the launch read carried the caller");
+  assert.deepEqual(seen, ["198.51.100.9", "198.51.100.9", "198.51.100.9"], "the mint read, the launch read and the creator's share read carried the caller");
   assert.equal((await t.page(PUMP, "198.51.100.10")).status, 200);
-  assert.equal(seen.length, 2, "a cache hit reaches no provider and draws nothing");
+  assert.equal(seen.length, 3, "a cache hit reaches no provider and draws nothing");
   await t.holders(PUMP, "198.51.100.11");
-  assert.deepEqual(seen.slice(2), ["198.51.100.11"], "the holders' mint read carries its caller too");
+  assert.deepEqual(seen.slice(3), ["198.51.100.11"], "the holders' mint read carries its caller too");
 });
 
 test("page: a Token-2022 mint off any curve, in 06b's TokenPage fields, the chain's authorities and fee, Jupiter's row", async () => {
@@ -817,4 +821,26 @@ test("fold 3 (card helper-ready-gate): the walks at full draw and the provider's
   assert.deepEqual([a.status, a.headers?.["Retry-After"]], [429, "7"]);
   assert.equal(once.background("solana", PUBLIC, "getTransaction"), 7);
   assert.equal(lines.at(-1), "rpc hold solana caller 7 s");
+});
+
+// card token-page-data-complete-and-fast: 9 of 10 pages read 11 Nov had no dev share (Jupiter's row lacks it); the
+// creator's own token accounts of the mint are read on chain
+test("a page whose Jupiter row has no dev share takes the creator's share read on chain, and none from a wrong answer", async () => {
+  const row = clone((FX.tokens[PUMP]!.search as Record<string, unknown>[])[0]!);
+  delete (row.audit as Record<string, unknown>).devBalancePercentage;
+  const creator = row.dev as string;
+  const supply = BigInt(((FX.tokens[PUMP]!.accounts as { result: { value: { data: { parsed: { info: { supply: string } } } }[] } }).result.value[0]!).data.parsed.info.supply);
+  const acct = (mint: string, amount: bigint) => ({ pubkey: "x", account: { data: { parsed: { info: { mint, tokenAmount: { amount: String(amount) } } } } } });
+  const asked: string[] = [];
+  const t = createSolanaToken(fakeProxy({ search: (m) => (m === PUMP ? [row] : []) }), fakeRpc({ byOwner: (o, m) => (asked.push(`${o}:${m}`), [acct(PUMP, supply / 50n), acct(PUMP, supply / 100n)]) }), { now: () => NOW });
+  const p = JSON.parse((await t.page(PUMP)).body);
+  assert.deepEqual(asked, [`${creator}:${PUMP}`]);
+  const want = Number(((supply / 50n + supply / 100n) * 10_000n) / supply); // 2% + 1% of the supply, floored
+  assert.ok(want === 299 || want === 300);
+  assert.equal(p.row.dev_bps, want);
+  assert.deepEqual([p.risk.dev_bps.v, p.risk.dev_bps.src], [want, "chain"]);
+  // an account of another mint in the answer: no share at all, never a made-up one
+  const t2 = createSolanaToken(fakeProxy({ search: (m) => (m === PUMP ? [row] : []) }), fakeRpc({ byOwner: () => [acct(PUMP, 1n), acct("So11111111111111111111111111111111111111112", 5n)] }), { now: () => NOW });
+  const p2 = JSON.parse((await t2.page(PUMP)).body);
+  assert.deepEqual([p2.row.dev_bps, p2.risk.dev_bps.v], [null, null]);
 });
