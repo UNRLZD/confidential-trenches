@@ -1763,3 +1763,26 @@ test("card start-reads-wait-out-a-throttle: a buy's bound is on the device's clo
   assert.ok(t <= 30_000n + 13_500n, `down at ${t} ms`);
   assert.ok(!w.log.includes("send") && !w.log.some((x) => x.startsWith("take")));
 });
+
+test("card pool-sell-legs-side-by-side: blockhashOf, split into its read and its check for the sell, asks the buy's calls in the buy's order and refuses as before", async () => {
+  const run = async (answers: { latest?: unknown; valid?: unknown; height?: unknown }) => {
+    const asked: string[] = [];
+    const at = (p: 0 | 1): SolanaRpc =>
+      (async (m: string) => {
+        asked.push(`${p}:${m}`);
+        return m === "getLatestBlockhash" ? answers.latest : m === "isBlockhashValid" ? answers.valid : answers.height;
+      }) as SolanaRpc;
+    const got = await poolBuy.blockhashOf([at(0), at(1)]).then((x) => x, (e: unknown) => ({ refused: String(e) }));
+    return { asked, got };
+  };
+  const ok = await run({ latest: { context: { slot: 9 }, value: { blockhash: "B", lastValidBlockHeight: 100 } }, valid: { value: true }, height: 10 });
+  assert.deepEqual(ok.asked, ["0:getLatestBlockhash", "1:isBlockhashValid", "1:getBlockHeight"]);
+  assert.deepEqual(ok.got, { blockhash: "B", lastValidBlockHeight: 100, slot: 9, lastHeight: 161 });
+  // no blockhash: refused with nothing asked of RPC 1; RPC 1 calling it invalid: refused
+  const none = await run({ latest: { context: { slot: 9 }, value: {} } });
+  assert.deepEqual(none.asked, ["0:getLatestBlockhash"]);
+  assert.ok("refused" in none.got);
+  const invalid = await run({ latest: { context: { slot: 9 }, value: { blockhash: "B", lastValidBlockHeight: 100 } }, valid: { value: false }, height: 10 });
+  assert.deepEqual(invalid.asked, ["0:getLatestBlockhash", "1:isBlockhashValid", "1:getBlockHeight"]);
+  assert.ok("refused" in invalid.got);
+});
