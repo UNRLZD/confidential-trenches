@@ -19,9 +19,14 @@
 // Since card sign-live-checks-read-a-pinned-page the page reaches the pinned pool's own hosts (PINNED_HOSTS: the
 // helper, the Solana pair and the U_X pair, the NEAR pair step 5 reads ids on), each of them in the page's own
 // connect-src as served; any other host is refused and fails the check. A stalled run prints the page's own reason
-// (main.ts's "restore stalled: ..." console line). The wait (WAIT_MS) and the done rule are as before: step 5 reads
-// RESTORE_LANES x DEPOSIT_ID_MARGIN ids at the providers' pace, minutes on mainnet, so the check stays red on the live
-// page until card restore-first-sign-in-under-two-minutes sets the restore's time and this wait from its measure.
+// (main.ts's "restore stalled: ..." console line).
+// WAIT_MS, the bound on the run with no tap from Continue to its end (card restore-first-sign-in-under-two-minutes), set
+// from its measure on 11 Nov 02:22-02:28Z: this checkout's build at e15c836d served as SIGN_HOST with the pinned hosts on
+// the network (the live shape), the published vector, a fresh Chrome 157 profile on the Mac, two runs at each speed. The
+// run ended 19.1 and 20.5 s after Continue at 1x CPU (its walk about 15 s of it) and 75.9 and 76.3 s at 4x (DevTools CPU
+// throttling), with no main-thread task of the walk's past 50 ms at either. The 20 s this check waited before was under
+// the 1x run itself. WAIT_MS is the card's two minutes, about 1.6 times the 4x run, for a runner slower than a 4x Mac (the
+// walk held release 114's runners 29 to 69 s against the Mac's 15 s, live run 42935167402); a run past it fails.
 // Since that card a restore is done at the walk's end and step 5 reads on after it, so on the live page the check also
 // sees step 5 go on: after the run with no tap is done, id reads (idReadOf: a NEAR `query` naming a 64-hex implicit id,
 // never the pass's own view of intents.near) reach both NEAR operators the page reads ids on (NEAR_OPS). The check waits
@@ -49,7 +54,7 @@ const SIGN_HOST = "confidential.unrealized.trade";
 const APP_HOST = "ct-app.unrealized.trade";
 const SIGN = `https://${SIGN_HOST}`;
 const START = "/portfolio";
-const WAIT_MS = 20_000;
+export const WAIT_MS = 120_000;
 const PROTECT_MS = 500; // the page's activation guard (packages/signpage/src/guard.ts)
 // the NEAR operators step 5 reads deposit ids on (src/pool-restore.ts pageIdReads on mainnet), both pinned hosts
 export const NEAR_OPS = Object.freeze(["rpc.mainnet.fastnear.com", "near.drpc.org"]);
@@ -99,6 +104,8 @@ export function judge(rec) {
   say(s.signedIn?.signed_in === true && s.signedIn?.way === "words", `the recorded seed's 12 words sign SIGN_HOST in (${JSON.stringify(s.signedIn ?? null)})`);
   const auto = restoreOps(s.auto?.state);
   say(auto.length === 1 && auto[0].stage === "done", `the sign-in on an empty store ran one restore with no tap, and it ended done (${JSON.stringify(auto)})`);
+  // and within WAIT_MS of Continue (card restore-first-sign-in-under-two-minutes); a record from before it has no ms
+  if (isObj(s.auto) && "ms" in s.auto) say(Number.isFinite(s.auto.ms) && s.auto.ms >= 0 && s.auto.ms <= WAIT_MS, `it ended within ${WAIT_MS / 1000} s of Continue (${s.auto.ms === null ? "never" : `${s.auto.ms} ms`})`);
   const a = s.asked?.answer;
   say(isObj(a) && a.ok === true && JSON.stringify(a.result) === JSON.stringify({ stage: "started" }), `restore is answered started (${JSON.stringify(a ?? null)})`);
   const stages = Array.isArray(s.asked?.stages) ? s.asked.stages : [];
@@ -240,7 +247,8 @@ export async function collect({ local }) {
       const s = await state();
       return restoreOps(s).some((o) => o.stage === "done" || o.stage === "stalled") ? s : null;
     });
-    rec.steps.auto = { state: ended ? { ops: restoreOps(ended) } : { ops: restoreOps(await state()) } };
+    // its time from Continue to the state that shows it ended (to the state poll's 100 ms), or null when it never did
+    rec.steps.auto = { state: ended ? { ops: restoreOps(ended) } : { ops: restoreOps(await state()) }, ms: ended ? Date.now() - t1 : null };
     done = restoreOps(ended).some((o) => o.stage === "done");
     // 4. asked: the answer, then its progress to the end
     const id = await send("restore");
