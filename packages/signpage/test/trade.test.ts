@@ -458,8 +458,39 @@ test("SIGN_HOST's CSP lets the page reach every host its release trade deps call
   const connect = (csp: string) => csp.split(";").map((d) => d.trim()).find((d) => d.startsWith("connect-src "))!.split(/\s+/).slice(1);
   const pinned = CSP.find(([k]) => k === "connect-src")![1].split(/\s+/);
   assert.deepEqual(connect(site), pinned, "public/_headers and the skeleton check's pin are one policy");
-  assert.ok(seen.size >= 5, [...seen].join(" "));
+  // provider A, the helper, Sender and Jito (the public send path is provider A: the test below)
+  assert.ok(seen.size >= 4, [...seen].join(" "));
   for (const o of seen) assert.ok(pinned.includes(o), `${o} is reached by the trade and missing from connect-src`);
+});
+
+// Card signpage-throttled-provider-has-a-spare: a browser is refused by Solana's own public RPC. From Chrome on
+// 2026-11-11T05:18:53Z, api.mainnet-beta.solana.com answered getSlot 403 {"code":403,"message":"Access forbidden"} (and
+// api.mainnet.solana.com the same); publicnode answered. Every send path of the mainnet page's set goes to a host the
+// page is answered by, so no tx's rebroadcast spends a request on a refused one.
+test("the mainnet page's send set names no host a browser is refused by: its public path is provider A, never api.mainnet-beta", async () => {
+  const refused = new Set(["https://api.mainnet-beta.solana.com", "https://api.mainnet.solana.com"]);
+  const answered = new Set([SOLANA_PROVIDER_A, TRADE_HELPER, "https://sender.helius-rpc.com", "https://mainnet.block-engine.jito.wtf"]);
+  const seen = new Map<string, string>();
+  const real = globalThis.fetch;
+  globalThis.fetch = (async (u: string | URL | Request) => {
+    seen.set(new URL(u instanceof Request ? u.url : String(u)).origin, "");
+    throw new Error("no network in this test");
+  }) as typeof fetch;
+  try {
+    for (const p of releaseTradeDeps().paths) {
+      const before = new Set(seen.keys());
+      await p.send("AA==").catch(() => {});
+      for (const o of seen.keys()) if (!before.has(o)) seen.set(o, p.name);
+    }
+  } finally {
+    globalThis.fetch = real;
+  }
+  assert.deepEqual([...seen.values()].sort(), ["helper", "jito", "rpc", "sender"], "each path sent once");
+  for (const [o, path] of seen) {
+    assert.ok(!refused.has(o), `the ${path} path sends to ${o}, which refuses a browser`);
+    assert.ok(answered.has(o), `the ${path} path sends to ${o}, not a host this page is answered by`);
+  }
+  assert.equal([...seen].find(([, p]) => p === "rpc")![0], SOLANA_PROVIDER_A);
 });
 
 test("a running trade's wallets are not picked by a second trade; one whose tx is still unknown stays out after it ends", async () => {

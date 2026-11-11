@@ -37,7 +37,7 @@ import { base58 } from "@scure/base";
 import { solanaAta, SOLANA_TOKEN_2022_PROGRAM, SOLANA_TOKEN_PROGRAM } from "../../kit/src/checks/solana/index.ts";
 import { runSolanaTrade, type SolanaTradeDeps, type SolanaTradeLeg, type SolanaTradeRecord, type SolanaTradeRequest, type SolanaTradeStage } from "../../kit/src/trade/solana/flow.ts";
 import { readSolanaTxEnd, solanaHelperRpc, solanaPacedRpc, solanaSendPaths, solanaWrappedRpc, SolanaRpcTransportError, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
-import { pageHelperRpc, pageReference, pageRpc } from "./page-rpc.ts";
+import { pageHelperRpc, pageReference, seatRpc } from "./page-rpc.ts";
 import type { ErrorCode, SignpageResults, TradeStage, TxRef } from "../../kit/src/signpage/messages.ts";
 import { ladderSplit } from "@blindfill/wallet/arming/ladder";
 import { ArmRefused, armRecordOf, armRecords, claimArm, settleArm, solanaArmedSigner, type ArmRecord } from "@blindfill/wallet/arming/records";
@@ -90,21 +90,31 @@ export const TRADE_HELPER = "https://ct-api.unrealized.trade";
 
 /** Provider A of LD1, reached from the device: PublicNode's keyless Solana RPC (the kit's dry run's, solana-flow-dry.ts). */
 export const SOLANA_PROVIDER_A = "https://solana-rpc.publicnode.com";
+/** The mainnet page's public seat, provider A first and its spare after it (card signpage-throttled-provider-has-a-spare,
+ *  src/page-rpc.ts seatRpc): Pocket's keyless gateway. Read from Chrome on 2026-11-11 05:26-05:31Z: CORS open; the same
+ *  bytes as publicnode on getAccountInfo, getMultipleAccounts, getMinimumBalanceForRentExemption, getSignatureStatuses,
+ *  getTransaction and getBlockTime of a fresh transaction; 40 getAccountInfo in 10 s, 40 answered. Of the other keyless
+ *  mainnet providers a page can reach, none answers: api.mainnet-beta and api.mainnet 403, dRPC's free plan 400, Ankr a
+ *  key, OnFinality 429, solanavibestation 429 from its third read (11 of 40 in 10 s). In SIGN_HOST's connect-src; the
+ *  live check scripts/live-checks/signpage-throttled-provider-has-a-spare.mjs reads both seats' bytes after each deploy. */
+export const SOLANA_PUBLIC_SEAT: readonly string[] = Object.freeze([SOLANA_PROVIDER_A, "https://solana.api.pocket.network"]);
 
 /** The release's trade deps: provider A device-direct and provider B the helper's /v1/rpc/solana (LD1), E(A) from the
  * device's own pool reads on both, and the kit's send paths with the helper's. */
 export function releaseTradeDeps(): TradeHost["deps"] {
   // the page's one RPC client (src/page-rpc.ts): a throttled read is tried again within its bounds, never a failed trade;
   // each provider paced where it is made, so every read on it takes its turn in the provider's one queue
-  const providers = [solanaPacedRpc(pageRpc(SOLANA_PROVIDER_A)), solanaPacedRpc(pageHelperRpc(TRADE_HELPER))] as const;
+  const providers = [solanaPacedRpc(seatRpc(SOLANA_PUBLIC_SEAT)), solanaPacedRpc(pageHelperRpc(TRADE_HELPER))] as const;
   return {
     helper: TRADE_HELPER,
     providers,
     // read on the pair the kit hands it (its paced providers, flow.ts pacedDeps), never on one outside the trade's pace;
     // a provider read that fails past its retry rejects (pageReference), never reads as "no reference pool"
     reference: (q, paced) => pageReference(paced, q),
-    // every send path's requests counted on its host's lane, the helper's among them (../../wallet/src/throttle.ts laneFetch)
-    paths: solanaSendPaths({ helper: solanaHelperRpc(TRADE_HELPER, { fetch: laneFetch() }), fetch: laneFetch() }),
+    // every send path's requests counted on its host's lane, the helper's among them (../../wallet/src/throttle.ts laneFetch);
+    // the public path is provider A, never the kit's default api.mainnet-beta.solana.com, which answers a browser 403
+    // "Access forbidden" (Chrome, 2026-11-11T05:18:53Z; test/trade.test.ts holds the set's hosts)
+    paths: solanaSendPaths({ helper: solanaHelperRpc(TRADE_HELPER, { fetch: laneFetch() }), rpcUrl: SOLANA_PROVIDER_A, fetch: laneFetch() }),
   };
 }
 

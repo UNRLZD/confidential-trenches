@@ -3,10 +3,12 @@
 // that answers failed (run 6: a devnet provider's 429 burst).
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { SolanaRpcTransportError, solanaPacedRpc } from "../../kit/src/trade/solana/send.ts";
-import { pageHelperRpc, pageHelperRpcStopped, pageRpc } from "../src/page-rpc.ts";
-import { pageSolanaLister, pageSolanaRpcs, testnetPoolDeps } from "../src/pool-testnet.ts";
-import { SOLANA_PROVIDER_A, TRADE_HELPER, releaseTradeDeps } from "../src/trade.ts";
+import { SolanaRpcTransportError, solanaPacedRpc, solanaSameProvider } from "../../kit/src/trade/solana/send.ts";
+import { pageHelperRpc, pageHelperRpcStopped, pageRpc, seatHosts } from "../src/page-rpc.ts";
+import { pageSolanaLister, pageSolanaRpcs, pageSolanaSettleRpcs, testnetPoolDeps } from "../src/pool-testnet.ts";
+import { SOLANA_PROVIDER_A, SOLANA_PUBLIC_SEAT, TRADE_HELPER, releaseTradeDeps } from "../src/trade.ts";
+import { hostLane, resetHostLanes } from "../../wallet/src/throttle.ts";
+import { onTestClock } from "../../kit/test/test-clock.ts";
 import { readdirSync, readFileSync } from "node:fs";
 import { HELPER_RPC_METHODS } from "../../kit/src/helper/v1.ts";
 
@@ -14,6 +16,7 @@ import { HELPER_RPC_METHODS } from "../../kit/src/helper/v1.ts";
 async function withThrottledOnce(run: (seen: Map<string, number>) => Promise<void>): Promise<void> {
   const real = globalThis.fetch;
   const seen = new Map<string, number>();
+  resetHostLanes();
   globalThis.fetch = (async (u: string | URL | Request, init?: RequestInit) => {
     const url = String(u);
     const n = (seen.get(url) ?? 0) + 1;
@@ -34,7 +37,9 @@ test("the mainnet build's pool RPCs (src/pool-testnet.ts on SIGN_HOST's build): 
   await withThrottledOnce(async (seen) => {
     const deps = testnetPoolDeps();
     for (const r of deps.rpcs("solana")!) assert.equal(await (r as unknown as (m: string, p: unknown[]) => Promise<unknown>)("getSlot", []), 42);
-    assert.equal(seen.get(SOLANA_PROVIDER_A), 2);
+    // the public seat: provider A's 429 sends the read to its spare at once, the spare (the last) asked again once
+    assert.equal(seen.get(SOLANA_PROVIDER_A), 1);
+    assert.equal(seen.get(SOLANA_PUBLIC_SEAT[1]!), 2);
     assert.equal(seen.get(`${TRADE_HELPER}/v1/rpc/solana`), 2);
     assert.equal(deps.rpcs("base"), null);
     assert.equal(deps.rpcs("robinhood"), null);
@@ -117,8 +122,97 @@ test("the page's trade path (src/trade.ts releaseTradeDeps): both providers read
   await withThrottledOnce(async (seen) => {
     const d = releaseTradeDeps();
     for (const p of d.providers) assert.equal(await p("getSlot", []), 42);
-    assert.equal(seen.get(SOLANA_PROVIDER_A), 2);
+    assert.equal(seen.get(SOLANA_PROVIDER_A), 1);
+    assert.equal(seen.get(SOLANA_PUBLIC_SEAT[1]!), 2);
     assert.equal(seen.get(`${TRADE_HELPER}/v1/rpc/solana`), 2);
+  });
+});
+
+// Card signpage-throttled-provider-has-a-spare: the mainnet page's public seat is a list, provider A and Pocket's
+// gateway (src/trade.ts SOLANA_PUBLIC_SEAT). These run on fake providers on the test clock: each host answers as told
+// after 20 ms, and every request is logged with its host, method, params and its send's and answer's order.
+type SeatLog = { host: string; method: string; params: string; start: number; end: number; status: number };
+const onSeat = (answer: (host: string, n: number) => { status: number; result?: unknown; error?: unknown }, run: (log: SeatLog[]) => Promise<void>): Promise<void> =>
+  onTestClock(() => onSeatNow(answer, run));
+let order = 0;
+async function onSeatNow(answer: (host: string, n: number) => { status: number; result?: unknown; error?: unknown }, run: (log: SeatLog[]) => Promise<void>): Promise<void> {
+  const real = globalThis.fetch;
+  const log: SeatLog[] = [];
+  const per = new Map<string, number>();
+  resetHostLanes();
+  globalThis.fetch = (async (u: string | URL | Request, init?: RequestInit) => {
+    const host = new URL(String(u)).host;
+    const n = (per.get(host) ?? 0) + 1;
+    per.set(host, n);
+    const q = JSON.parse(String(init?.body)) as { id: string; method: string; params: unknown };
+    const row: SeatLog = { host, method: q.method, params: JSON.stringify(q.params), start: order++, end: 0, status: 0 };
+    log.push(row);
+    await new Promise((r) => setTimeout(r, 20));
+    const a = answer(host, n);
+    row.end = order++;
+    row.status = a.status;
+    if (a.status !== 200) return new Response("Too Many Requests", { status: a.status });
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id: q.id, ...(a.error === undefined ? { result: a.result ?? host } : { error: a.error }) }), { status: 200 });
+  }) as typeof fetch;
+  try {
+    await run(log);
+  } finally {
+    globalThis.fetch = real;
+    resetHostLanes();
+  }
+}
+const A_HOST = new URL(SOLANA_PROVIDER_A).host;
+const SPARE = SOLANA_PUBLIC_SEAT[1]!;
+const SPARE_HOST = new URL(SPARE).host;
+const W = "9T3RgAVTNgedZhjJyC1UmyisV61pFWoU24LQHnk5W2bb";
+
+test("a public seat whose first provider throttles reads on its spare at once: one ask of provider A, the same request on the spare after A's answer, never both at once", async () => {
+  // each pair made on the test's fresh lanes (a page RPC holds its host's lane from its making)
+  for (const make of [() => pageSolanaRpcs("trade"), () => pageSolanaSettleRpcs("pass"), () => releaseTradeDeps().providers]) {
+    await onSeat((host) => (host === A_HOST ? { status: 429 } : { status: 200 }), async (log) => {
+      const pair = make();
+      assert.equal(await pair[0]("getAccountInfo", [W, { encoding: "base64" }]), SPARE_HOST);
+      assert.ok(hostLane(SOLANA_PROVIDER_A).gate.left() > 900, "answered while A's 1 s pause is still on: never waited out");
+      assert.deepEqual(log.map((r) => r.host), [A_HOST, SPARE_HOST]);
+      assert.equal(log[1]!.params, log[0]!.params, "the spare is asked the same request, one wallet in it");
+      assert.ok(log[1]!.start >= log[0]!.end, "the spare is asked only after A answered");
+      // A's host is paused now: the next read goes to the spare alone
+      assert.equal(await pair[0]("getSlot", []), SPARE_HOST);
+      assert.deepEqual(log.map((r) => r.host), [A_HOST, SPARE_HOST, SPARE_HOST], "a paused provider is not asked");
+      assert.ok(hostLane(SOLANA_PROVIDER_A).gate.left() > 0);
+    });
+  }
+});
+
+test("a seat's answer is the read's: a provider that answers, whatever it answers, is never asked past to the spare", async () => {
+  // A answers bytes of its own: they are the seat's answer (the check, which holds them to the helper's, fails on them)
+  await onSeat(() => ({ status: 200 }), async (log) => {
+    assert.equal(await pageSolanaRpcs("trade")[0]("getAccountInfo", [W]), A_HOST);
+    assert.deepEqual(log.map((r) => r.host), [A_HOST]);
+  });
+  // A answers a JSON-RPC error that is no throttle: the read's fault, the spare not asked
+  await onSeat((host) => (host === A_HOST ? { status: 200, error: { code: -32602, message: "invalid params" } } : { status: 200 }), async (log) => {
+    await assert.rejects(pageSolanaRpcs("trade")[0]("getAccountInfo", [W]));
+    assert.deepEqual(log.map((r) => r.host), [A_HOST]);
+  });
+});
+
+test("the seat is one provider to its pair: the helper is no member, the pair still two providers, and a trade's hosts are every member's", () => {
+  for (const pair of [pageSolanaRpcs("trade"), pageSolanaSettleRpcs("trade"), releaseTradeDeps().providers]) {
+    assert.equal(pair[0].url, new URL(SOLANA_PROVIDER_A).href);
+    assert.deepEqual(seatHosts(pair[0]), SOLANA_PUBLIC_SEAT.map((u) => new URL(u).href));
+    assert.ok(!seatHosts(pair[0]).some((u) => u.startsWith(TRADE_HELPER)), "the helper is never a public seat's member");
+    assert.equal(solanaSameProvider(pair[0], pair[1]), false);
+    assert.deepEqual(seatHosts(pair[1]), [pair[1].url]);
+  }
+});
+
+test("every public provider throttled: the read rejects with the throttle in its bound, each provider asked at most twice", async () => {
+  await onSeat((host) => (host === TRADE_HELPER.slice(8) ? { status: 200 } : { status: 429 }), async (log) => {
+    const e = await pageSolanaRpcs("trade")[0]("getAccountInfo", [W]).catch((x: unknown) => x);
+    assert.ok(e instanceof SolanaRpcTransportError && e.fault === "http_429", String(e));
+    assert.equal(log.filter((r) => r.host === A_HOST).length, 1);
+    assert.ok(log.filter((r) => r.host === SPARE_HOST).length <= 2);
   });
 });
 
