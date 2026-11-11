@@ -55,6 +55,9 @@ export function appSrc(loc: { pathname: string; search: string }): string {
  */
 export const FRAME_LEAVE_MS = 100;
 
+/** How long the sheet's dim may wait over a new frame for its load before it fades all the same (src/shell.ts close). */
+export const VEIL_CAP_MS = 2_000;
+
 /**
  * Every path SIGN_HOST's build serves as a file, not as the shell: nav may not put one in the top window's address,
  * where a reload would show that file instead of the shell. The deploy's build output (scripts/deploy.mjs build(),
@@ -167,6 +170,18 @@ export function mountShell(doc: Document, host: Omit<ApiHost, "parent" | "listen
   let peer: PostTarget = NO_FRAME;
   let onLoad: () => void = () => {};
   let veiled: HTMLIFrameElement | null = null;
+  let veilCap: ReturnType<typeof setTimeout> | null = null;
+  // the veil fades: the new frame has painted, or VEIL_CAP_MS passed with no load (a frame that never loads is shown as
+  // it is, undimmed, rather than dimmed for good over an app that takes taps)
+  const lift = (f: HTMLIFrameElement): void => {
+    if (veiled !== f) return;
+    veiled = null;
+    if (veilCap !== null) clearTimeout(veilCap);
+    veilCap = null;
+    if (frame !== f || !layer.hidden) return;
+    veil.style.opacity = "0";
+    setTimeout(() => layer.hidden && (veil.hidden = true), 200);
+  };
   const add = (): void => {
     const f = doc.createElement("iframe");
     f.id = "app";
@@ -179,13 +194,7 @@ export function mountShell(doc: Document, host: Omit<ApiHost, "parent" | "listen
       if (frame !== f) return;
       onLoad();
       // the frame made at a typed screen's close has loaded: the veil fades once its first screen has painted
-      if (veiled !== f) return;
-      veiled = null;
-      painted(() => {
-        if (frame !== f || !layer.hidden) return;
-        veil.style.opacity = "0";
-        setTimeout(() => layer.hidden && (veil.hidden = true), 200);
-      });
+      if (veiled === f) painted(() => lift(f));
     });
     doc.body.insertBefore(f, layer);
     // contentWindow exists once the frame is in the document, and stays the same object across its loads
@@ -212,12 +221,14 @@ export function mountShell(doc: Document, host: Omit<ApiHost, "parent" | "listen
           return { result: {} };
         },
         // a running trade settles first (src/trade.ts idle): its marks are written either way, but no reload cuts it
-        reload: () => (!layer.hidden ? null : { result: {}, then: () => void (host.settle?.() ?? Promise.resolve()).then(() => view.location.reload()) }),
+        // ...and a reload answered before a sheet opened does not fire under it
+        reload: () => (!layer.hidden ? null : { result: {}, then: () => void (host.settle?.() ?? Promise.resolve()).then(() => layer.hidden && view.location.reload()) }),
       },
     },
   );
   add();
   let leaving: ReturnType<typeof setTimeout> | null = null;
+  let waking: ReturnType<typeof setTimeout> | null = null;
   let openedAt = 0;
   const leave = (): void => {
     if (layer.hidden || !frame) return;
@@ -232,6 +243,8 @@ export function mountShell(doc: Document, host: Omit<ApiHost, "parent" | "listen
     open(typed = false) {
       layer.hidden = false;
       veil.hidden = true;
+      if (waking !== null) clearTimeout(waking);
+      waking = null;
       openedAt = view.performance?.now?.() ?? Date.now();
       sheet.box.focus?.();
       if (!frame) return;
@@ -255,17 +268,27 @@ export function mountShell(doc: Document, host: Omit<ApiHost, "parent" | "listen
       layer.hidden = true;
       if (leaving !== null) clearTimeout(leaving);
       leaving = null;
-      // a kept frame is live again and takes the keyboard's focus back, as a sheet gives it back to what opened it
-      if (frame) {
-        frame.inert = false;
-        frame.focus?.();
-        return;
+      // a kept frame stays inert for PROTECT_MS after the close (the second tap of a double tap on Cancel, Saved, the x or
+      // the scrim lands on no app control there), then is live again and takes the keyboard's focus back; a frame taken
+      // out comes back new, as inert for the same time, under the sheet's dim until it has painted
+      if (!frame) {
+        veil.style.background = sheet.scrim.style.background;
+        veil.style.opacity = "1";
+        veil.hidden = false;
+        add();
+        const f = frame as unknown as HTMLIFrameElement;
+        veiled = f;
+        veilCap = setTimeout(() => lift(f), VEIL_CAP_MS);
       }
-      veil.style.background = sheet.scrim.style.background;
-      veil.style.opacity = "1";
-      veil.hidden = false;
-      add();
-      veiled = frame;
+      const f = frame as unknown as HTMLIFrameElement;
+      f.inert = true;
+      if (waking !== null) clearTimeout(waking);
+      waking = setTimeout(() => {
+        waking = null;
+        if (frame !== f || !layer.hidden) return;
+        f.inert = false;
+        f.focus?.();
+      }, PROTECT_MS);
     },
     dismissible(may) {
       sheet.close.hidden = !may;
@@ -284,7 +307,8 @@ export function mountShell(doc: Document, host: Omit<ApiHost, "parent" | "listen
   };
   sheet.close.addEventListener("click", dismiss);
   sheet.scrim.addEventListener("click", dismiss);
-  view.addEventListener("keydown", (e: Event) => (e as KeyboardEvent).key === "Escape" && dismiss(e));
+  // a key held down repeats: only a press of its own is the user's Esc
+  view.addEventListener("keydown", (e: Event) => (e as KeyboardEvent).key === "Escape" && !(e as KeyboardEvent).repeat && dismiss(e));
   // while a sheet shows over a kept frame, the frame does not keep the keyboard's focus: focus that went into it (a
   // frame calling focus() under an inert attribute some engine lets through) comes back to the sheet in the next task
   view.addEventListener("blur", () => {
