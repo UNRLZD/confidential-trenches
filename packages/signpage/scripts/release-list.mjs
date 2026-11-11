@@ -21,7 +21,7 @@
 // written, a list missing from the ledger and a ledger entry whose list is gone, on every branch (release.test.mjs);
 // the verify gate refuses a change to a list or a ledger entry on main. A card cuts no release (card
 // signpage-release-at-deploy): a release is cut once per sign deploy, and the sign deploy (deploy.mjs) serves only
-// origin/main's head with a passed ci.yml push run, and only a build the newest committed list names (unreleasedProblems:
+// origin/main's head with a passed full ci.yml run (the merge queue's on that commit), and only a build the newest committed list names (unreleasedProblems:
 // every SIGN_HOST file, every header, the _headers file), so every build SIGN_HOST serves is a release on main. The flow:
 //   1. cut release-<N> on a branch from origin/main's head (git worktree add -b card/<key> ... origin/main, a clean
 //      tree, pnpm install --frozen-lockfile): node packages/signpage/scripts/release-list.mjs release-<N>, N exactly one
@@ -31,7 +31,7 @@
 //   2. push it with push-card (the team's push script, card/<key>);
 //   3. merge it (the verify gate holds the new list's tree to the base's or the pull request's, with the head's
 //      SIGN_HOST build inputs, and refuses a name main already holds with other bytes);
-//   4. deploy main at that merge, once its ci.yml push run passed: scripts/deploy/pages.sh node
+//   4. deploy main at that merge, once its full ci.yml run (the merge queue's, read by its sha) passed: scripts/deploy/pages.sh node
 //      packages/signpage/scripts/deploy.mjs, then its live run; signpage-release-at-deploy reads SIGN_HOST against the
 //      newest committed list. A change that lands on main after the cut and touches SIGN_HOST's build inputs makes the
 //      deploy refuse: cut release-<N+1> the same way.
@@ -359,7 +359,7 @@ export function newestReleaseOnHead(dir = RELEASES, ledger = RELEASED, head = "H
 
 /**
  * Review P1: what the sign deploy is held to beside unreleasedProblems: the newest list's tree has HEAD's SIGN_BUILD_INPUTS.
- * Only then did HEAD's passed push run hold that list to a clean build (newestReleaseOnHead); a list whose inputs are not
+ * Only then did HEAD's passed full ci.yml run hold that list to a clean build (newestReleaseOnHead); a list whose inputs are not
  * HEAD's was never compared to one, whatever bytes it names. Empty = fine.
  */
 export function releaseTreeProblems(dir = RELEASES, head = "HEAD") {
