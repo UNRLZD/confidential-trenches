@@ -40,7 +40,11 @@ function rpc(sigs: { signature: string; slot: number; err?: unknown }[], txs: Re
       const from = before === undefined ? 0 : sigs.findIndex((s) => s.signature === before) + 1;
       return sigs.slice(from, from + SIG_PAGE).map((s) => ({ err: null, ...s }));
     }
-    if (method === "getTransaction") return { meta: { err: null, logMessages: txs[params[0] as string] ?? [] } };
+    if (method === "getTransaction") {
+      // the node refuses a version 1 transaction to a client that names a lower version (-32015, mainnet 11 Nov 18:51Z)
+      if ((params[1] as { maxSupportedTransactionVersion?: number }).maxSupportedTransactionVersion !== 1) throw new Error("-32015 Transaction version (1) is not supported by the requesting client");
+      return { meta: { err: null, logMessages: txs[params[0] as string] ?? [] } };
+    }
     if (method === "getMultipleAccounts") return (params[0] as string[]).map((a) => accounts[a] ?? null);
     throw new Error(method);
   };

@@ -86,7 +86,8 @@ export async function readFirstBuys(call: Call, mint: string, creator: string | 
   for (const s of ok) {
     if (anchor !== null && s.slot >= anchor + SNIPER_SLOTS) break;
     if (read++ === TX_MAX) return null;
-    const tx = obj(await call("getTransaction", [s.signature, { encoding: "json", maxSupportedTransactionVersion: 0, commitment: "confirmed" }]));
+    // version 1 transactions are on mainnet (as trades.ts reads them): a client that names 0 is refused (-32015)
+    const tx = obj(await call("getTransaction", [s.signature, { encoding: "json", maxSupportedTransactionVersion: 1, commitment: "confirmed" }]));
     if (obj(tx.meta).err != null) continue;
     const logs = fromLogs(obj(tx.meta).logMessages);
     const got = (logs.truncated ? fromInner(tx) : logs.trades).filter((t) => t.mint === null || t.mint === mint);
