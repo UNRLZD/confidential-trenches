@@ -43,7 +43,7 @@
 //   behind POOL_TESTNET, folded at build time, so SIGN_HOST's bundle carries none of them.
 import { base58, base64 } from "@scure/base";
 import { SOLANA_RPC_RETRY, SOLANA_RPC_WINDOW_RETRY, solanaJsonRpc, solanaPacedRpc, type SolanaRpc, type SolanaRpcRetry } from "../../kit/src/trade/solana/send.ts";
-import { lanedRpc, pageHelperRpc, pageHelperRpcStopped, pageRpc, type ReadKind } from "./page-rpc.ts";
+import { lanedRpc, pageHelperRpc, pageHelperRpcStopped, pageRpc, seatHosts, seatRpc, type ReadKind } from "./page-rpc.ts";
 import { holdHosts, hostLane, laneFetch, stopHostLaneWaits } from "../../wallet/src/throttle.ts";
 import { HELPER_FETCH_INIT, HELPER_V1_PATHS } from "../../kit/src/helper/v1.ts";
 import type { VaultProver } from "../../kit/src/prover/prove.ts";
@@ -53,7 +53,7 @@ import { chainNow, type Pool, type ReadyProof } from "../../wallet/src/pool/pool
 import { openProofQueue, type ProofQueue, type QueuePass } from "../../wallet/src/pool/queue.ts";
 import { poolDepositKind, type PoolDepositFrom, type PoolDepositHost } from "./pool-deposit.ts";
 import { proverHost } from "./prover-host.ts";
-import { SOLANA_PROVIDER_A, TRADE_HELPER } from "./trade.ts";
+import { SOLANA_PUBLIC_SEAT, TRADE_HELPER } from "./trade.ts";
 import { SOL_POOL_TABLES, SOL_POOLS, solanaNow, solanaPool, solanaPoolOf, type SolanaFeeAnswer, type SolanaPoolPin, type SolanaReleaseRequest } from "../../wallet/src/pool/solana.ts";
 import { SOL_MARK_READ_BATCH, SOL_MARK_READ_BATCH_MAX, solanaSettleReserved, solanaSettleSpent, type SolanaPoolCache } from "../../wallet/src/pool/solana-restore.ts";
 import { POOL_TESTNET } from "../../wallet/src/pool/network.ts";
@@ -82,7 +82,10 @@ import { EVM_POOL_HISTORY } from "../../kit/src/trade/evm/buy-unpinned.ts";
 /** Each chain's two testnet RPCs, as the app names the chain. Solana's are mainnet's shape (main.ts: a public provider
  *  and the helper's /v1/rpc/solana): the public devnet endpoint and the helper's /v1/rpc/solana-devnet, whose keyed
  *  provider is another operator's (card pool-buy-send-fast: the public second provider before it, onfinality, answers 1
- *  request a second and 1000 a day per IP, and held the 5 Nov 13:50:55Z buy 11.2 s in these reads). */
+ *  request a second and 1000 a day per IP, and held the 5 Nov 13:50:55Z buy 11.2 s in these reads). Devnet's public seat
+ *  is api.devnet alone, with no spare as mainnet's has (src/trade.ts SOLANA_PUBLIC_SEAT): read from Chrome on 2026-11-11
+ *  05:19Z, Tatum's devnet gateway answered 5 reads, then 429 to each; PublicNode's devnet RPC refuses a page's CORS;
+ *  Ankr asks a key and dRPC a paid plan. The spare's tests run on fake providers (test/page-rpc.test.ts). */
 export const TESTNET_RPCS: Readonly<Record<PoolChain, readonly [string, string]>> = /* @__PURE__ */ Object.freeze({
   solana: /* @__PURE__ */ Object.freeze(["https://api.devnet.solana.com", `${TRADE_HELPER}/v1/rpc/solana-devnet`] as const),
   // the kit's Base Sepolia pool pair (evmPoolVenues()["base-sepolia"].providers, card notes-per-pool-evm-base-hang):
@@ -183,7 +186,7 @@ export const MAINNET_MARKS_ROUTE = `${TRADE_HELPER}/v1/rpc/solana-marks`;
 export const pageSolanaRpcs = (kind: ReadKind = "trade"): readonly [SolanaRpc, SolanaRpc] =>
   POOL_TESTNET
     ? [solanaPacedRpc(testnetRpc(TESTNET_RPCS.solana[0], SOLANA_RPC_RETRY, kind)), solanaPacedRpc(testnetRpc(TESTNET_RPCS.solana[1], SOLANA_RPC_RETRY, kind))]
-    : [solanaPacedRpc(pageRpc(SOLANA_PROVIDER_A, kind)), solanaPacedRpc(pageHelperRpc(TRADE_HELPER, SOLANA_RPC_RETRY, kind))];
+    : [solanaPacedRpc(seatRpc(SOLANA_PUBLIC_SEAT, kind)), solanaPacedRpc(pageHelperRpc(TRADE_HELPER, SOLANA_RPC_RETRY, kind))];
 /** The page's mark lister (the wallet's solanaMarksListed): MAINNET_MARKS_ROUTE, paced, on mainnet; none in the testnet
  *  build, where the wallet lists on the pair's first devnet RPC. It only names addresses: the pair reads each. */
 export const pageSolanaLister = (kind: ReadKind = "trade"): SolanaRpc | undefined => (POOL_TESTNET ? undefined : solanaPacedRpc(testnetRpc(MAINNET_MARKS_ROUTE, SOLANA_RPC_RETRY, kind)));
@@ -195,7 +198,7 @@ export const pageSolanaLister = (kind: ReadKind = "trade"): SolanaRpc | undefine
 export const pageSolanaSettleRpcs = (kind: ReadKind = "trade"): readonly [SolanaRpc, SolanaRpc] =>
   POOL_TESTNET
     ? [solanaPacedRpc(testnetRpc(TESTNET_RPCS.solana[0], SOLANA_RPC_RETRY, kind)), solanaPacedRpc(testnetRpc(TESTNET_RPCS.solana[1], SOLANA_RPC_WINDOW_RETRY, kind))]
-    : [solanaPacedRpc(pageRpc(SOLANA_PROVIDER_A, kind)), solanaPacedRpc(pageHelperRpc(TRADE_HELPER, SOLANA_RPC_WINDOW_RETRY, kind))];
+    : [solanaPacedRpc(seatRpc(SOLANA_PUBLIC_SEAT, kind)), solanaPacedRpc(pageHelperRpc(TRADE_HELPER, SOLANA_RPC_WINDOW_RETRY, kind))];
 /** Marks per getMultipleAccounts on pageSolanaSettleRpcs' two seats (the wallet's solanaMarksListed batches): the public
  *  provider's 10 (publicnode's cap; api.devnet.solana.com held to the same), the helper's route getMultipleAccounts' own
  *  100, so a cold read draws a tenth of the calls from the helper's share a user's trade reads also draw on. */
@@ -530,7 +533,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   const lister = (kind: ReadKind = "trade"): SolanaRpc | undefined => over.lister ?? (over.rpcs === undefined ? pageSolanaLister(kind) : undefined);
   // a trade's hold on the hosts its reads go to, from its host's making to its run's end (the host's end): every pass
   // read on those hosts waits for it
-  const holdTrade = (): (() => void) => holdHosts([...rpcs(), ...settleRpcs(), lister()].map((r) => r?.url));
+  const holdTrade = (): (() => void) => holdHosts([...rpcs(), ...settleRpcs(), lister()].flatMap((r) => seatHosts(r)));
   // a pass's turn on every host of `list`, once no trade holds any of them
   const passTurn = async (list: readonly { url?: string }[], signal?: AbortSignal): Promise<void> => {
     for (const r of list) if (r.url !== undefined) await hostLane(r.url).turn("pass", signal);

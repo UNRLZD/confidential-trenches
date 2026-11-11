@@ -5,9 +5,11 @@
 // as minified, the holdings readers' throttle rule (packages/wallet/src/throttle.ts, src/pool/buy-wallets.ts):
 //   - rule: the wait after a throttle is a pause doubling from 1 s to 10 s, a Retry-After the wait only when longer,
 //     finite and above 0, held to 10 s (throttleWaitMs and its bounds);
-//   - gate: one provider's gate on that rule, whose round's throttles count once (by epoch), whose pause goes back to
-//     none only after a whole round, whose time is performance.now with left() held to the longest wait, and whose turn
-//     goes to one caller at a time, given on when a waiter is stopped (ThrottleGate);
+//   - gate: one provider's gate on that rule, whose round's throttles count once (by epoch), whose pause keeps doubling
+//     until the provider has been open its quiet time (10 s) since the pause's end, an answer only clearing its doubt
+//     (card signpage-throttled-provider-has-a-spare: run 9's one or two 200s set the pause back to 1 s, and every
+//     parked read left at once into the next 429), whose time is performance.now with left() held to the longest wait,
+//     and whose turn goes to one caller at a time, given on when a waiter is stopped (ThrottleGate);
 //   - held: before each round a reader waits the gate until it is open, and refuses, asking nothing, a wait that would
 //     end past its read's bound, which is 30 s (HOLDINGS_THROTTLE_MAX_MS);
 //   - turn: each round runs in the gate's turn: taken before the wait, given back however the round ends;
@@ -49,14 +51,16 @@ const esc = (n) => n.replace(/\$/g, "\\$");
 const BOUNDS = new RegExp(String.raw`(?<b>${I})=Object\.freeze\(\{firstMs:1e3,maxMs:1e4,afterMaxMs:1e4\}\)`);
 const RULE = (b) => new RegExp(String.raw`function (?<f>${I})\((${I}),(${I}),(${I})=${esc(b)}\)\{let (${I})=Number\.isFinite\(\2\)&&\2>0\?Math\.min\(\2\*2,\4\.maxMs\):\4\.firstMs,(${I})=typeof \3==\`number\`&&Number\.isFinite\(\3\)&&\3>0\?Math\.min\(\3,\4\.afterMaxMs\):0;return Math\.max\(\5,\6\)\}`);
 // the gate: its time performance.now; left() the time to its opening, never past the longest wait; turn() one caller at
-// a time, given on at once when a waiter is stopped; a throttle of the current epoch moves the epoch and grows the
-// pause by the rule; answered() of the current epoch sets the pause to none
-// groups: 1 the class, 2 until, 3 pause, 4 epoch, 5 the turn's tail, 6 the clock, 7 the bounds, 8 the options; turn:
-// 9 its stop, 10 the give-back, 11 its own promise, 13 the turn before, 14 and 15 the wait's ends, 16 its stop handler,
-// 17 the caught stop; 18 and 19 a throttle's epoch and Retry-After; 20 an answer's epoch
-const GATE = (b, f) => new RegExp(String.raw`(?<g>${I})=class\{#(${I})=0;#(${I})=0;#(${I})=0;#(${I})=Promise\.resolve\(\);#(${I});#(${I});constructor\((${I})=\{\}\)\{this\.#\6=\8\.now\?\?\(\(\)=>performance\.now\(\)\),this\.#\7=\8\.bounds\?\?${esc(b)}\}left\(\)\{return Math\.min\(Math\.max\(0,this\.#\2-this\.#\6\(\)\),Math\.max\(this\.#\7\.maxMs,this\.#\7\.afterMaxMs\)\)\}`
-  + String.raw`async turn\((${I})\)\{let (${I}),(${I})=new Promise\((${I})=>\10=\12\),(${I})=this\.#\5;if\(this\.#\5=\13\.then\(\(\)=>\11\),\9===void 0\)return \13\.then\(\(\)=>\10\);try\{\9\.throwIfAborted\(\),await new Promise\(\((${I}),(${I})\)=>\{let (${I})=\(\)=>\15\(\9\.reason\);\9\.addEventListener\(\`abort\`,\16,\{once:!0\}\),\13\.then\(\(\)=>\(\9\.removeEventListener\(\`abort\`,\16\),\14\(\)\)\)\}\)\}catch\((${I})\)\{throw \10\(\),\17\}return \10\}`
-  + String.raw`epoch\(\)\{return this\.#\4\}throttled\((${I}),(${I})\)\{if\(\18===this\.#\4\)\{this\.#\4\+\+,this\.#\3=${esc(f)}\(this\.#\3,\19,this\.#\7\),this\.#\2=Math\.max\(this\.#\2,this\.#\6\(\)\+this\.#\3\);return\}[^]{0,200}?\}answered\((${I})\)\{\20===this\.#\4&&\(this\.#\3=0\)\}\}`);
+// a time, given on at once when a waiter is stopped; a throttle marks the gate in doubt and, of the current epoch, moves
+// the epoch and grows the pause by the rule from the last pause while the provider has been open less than its quiet
+// time (bounds.quietMs, else 10 s), from none after it; answered() of the current epoch clears the doubt only
+// groups: 1 the class, 2 until, 3 pause, 4 epoch, 5 doubt, 6 the turn's tail, 7 the clock, 8 the bounds, 9 the options;
+// turn: 10 its stop, 11 the give-back, 12 its own promise, 14 the turn before, 15 and 16 the wait's ends, 17 its stop
+// handler, 18 the caught stop; 19 and 20 a throttle's epoch and Retry-After, 21 its now, 22 the pause it grows from; 23
+// an answer's epoch
+const GATE = (b, f) => new RegExp(String.raw`(?<g>${I})=class\{#(${I})=0;#(${I})=0;#(${I})=0;#(${I})=!1;#(${I})=Promise\.resolve\(\);#(${I});#(${I});constructor\((${I})=\{\}\)\{this\.#\7=\9\.now\?\?\(\(\)=>performance\.now\(\)\),this\.#\8=\9\.bounds\?\?${esc(b)}\}left\(\)\{return Math\.min\(Math\.max\(0,this\.#\2-this\.#\7\(\)\),Math\.max\(this\.#\8\.maxMs,this\.#\8\.afterMaxMs\)\)\}`
+  + String.raw`async turn\((${I})\)\{let (${I}),(${I})=new Promise\((${I})=>\11=\13\),(${I})=this\.#\6;if\(this\.#\6=\14\.then\(\(\)=>\12\),\10===void 0\)return \14\.then\(\(\)=>\11\);try\{\10\.throwIfAborted\(\),await new Promise\(\((${I}),(${I})\)=>\{let (${I})=\(\)=>\16\(\10\.reason\);\10\.addEventListener\(\`abort\`,\17,\{once:!0\}\),\14\.then\(\(\)=>\(\10\.removeEventListener\(\`abort\`,\17\),\15\(\)\)\)\}\)\}catch\((${I})\)\{throw \11\(\),\18\}return \11\}`
+  + String.raw`epoch\(\)\{return this\.#\4\}throttled\((${I}),(${I})\)\{if\(this\.#\5=!0,\19===this\.#\4\)\{this\.#\4\+\+;let (${I})=this\.#\7\(\),(${I})=\21-this\.#\2<\(this\.#\8\.quietMs\?\?1e4\)\?this\.#\3:0;this\.#\3=${esc(f)}\(\22,\20,this\.#\8\),this\.#\2=Math\.max\(this\.#\2,\21\+this\.#\3\);return\}[^]{0,200}?\}answered\((${I})\)\{\23===this\.#\4&&\(this\.#\5=!1\)\}suspect\(\)\{return this\.#\5\}\}`);
 // held: `async function h(gate, by, sleep, signal) { for (let w = gate.left(); w > 0; w = gate.left()) { if (Date.now() +
 // w > by) throw Error(past M/1e3 s); await sleep(w, signal), signal?.throwIfAborted() } }`, with M = 3e4
 const HELD = new RegExp(String.raw`async function (?<h>${I})\((${I}),(${I}),(${I}),(${I})\)\{for\(let (${I})=\2\.left\(\);\6>0;\6=\2\.left\(\)\)\{if\(Date\.now\(\)\+\6>\3\)throw Error\(\`its reads drew the provider's 429 past \$\{(?<m>${I})\/1e3\} s\`\);await \4\(\6,\5\),\5\?\.throwIfAborted\(\)\}\}`);

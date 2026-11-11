@@ -51,8 +51,8 @@ test("the facts read from a bundle", () => {
     "function Rv(e){let t;try{t=e instanceof Error?e.message:e}catch{return`the call failed`}if(typeof t!=`string`)return`the call failed`;let n=/\\bHTTP (\\d{3})\\b/.exec(t);if(n)return`HTTP ${n[1]}`;let r=/\\bRPC error (-?\\d{1,6})\\b/.exec(t);if(r)return`RPC error ${r[1]}`;let i=/\\bno answer in (\\d{1,7}) ms\\b/.exec(t);return i?`no answer in ${i[1]} ms`:`the call failed`}" +
     "a=t=>Promise.all(e.map(e=>Promise.resolve().then(()=>wm(e,Dg)(`getMultipleAccounts`,[t,{encoding:`base64`,commitment:`confirmed`}])).then(e=>({read:p_(e,t.length),fault:null}),e=>({read:null,fault:Rv(e)}))));" +
     "let t=(await Promise.resolve().then(()=>wm(e,Wv)(`getAccountInfo`,[dv,{encoding:`base64`,commitment:`confirmed`}])))?.value;" +
-    "var GM=`https://ct-api.unrealized.trade`,KM=`https://solana-rpc.publicnode.com`;function qM(){return{helper:GM,providers:[Cm(hk(KM)),Cm(gk(GM))],reference:(e,t)=>_k(t,e),paths:Vm({helper:Rm(GM)})}}" +
-    "var pI=yE.mainnet,mI=`mainnet`,BV=`${GM}/v1/rpc/solana-marks`,hI=(e=`trade`)=>[Cm(hk(KM,e)),Cm(gk(GM,Hh,e))],LI=(e=`trade`)=>Cm(jV(BV,Hh,e)),zH=(e=`trade`)=>[Cm(hk(KM,e)),Cm(gk(GM,Uh,e))],BH=Object.freeze([10,100]),qV={proving:0};";
+    "var GM=`https://ct-api.unrealized.trade`,KM=`https://solana-rpc.publicnode.com`,SE=Object.freeze([KM,`https://solana.api.pocket.network`]);function qM(){return{helper:GM,providers:[Cm(hk(SE)),Cm(gk(GM))],reference:(e,t)=>_k(t,e),paths:Vm({helper:Rm(GM)})}}" +
+    "var pI=yE.mainnet,mI=`mainnet`,BV=`${GM}/v1/rpc/solana-marks`,hI=(e=`trade`)=>[Cm(hk(SE,e)),Cm(gk(GM,Hh,e))],LI=(e=`trade`)=>Cm(jV(BV,Hh,e)),zH=(e=`trade`)=>[Cm(hk(SE,e)),Cm(gk(GM,Uh,e))],BH=Object.freeze([10,100]),qV={proving:0};";
   const f = facts("", js);
   assert.deepEqual({ ...f, sha384: null }, { index: "", sha384: null, release: true, pair: true, timed: true, price: true });
   // each mark changed in place, once (a mark found twice or not at all is a broken test, never a pass)
@@ -68,27 +68,36 @@ test("the facts read from a bundle", () => {
   assert.equal(planted("reference:(e,t)=>_k(t,e)", "reference:t=>_k(e,t)").release, false);
   assert.equal(planted("reference:(e,t)=>_k(t,e)", "reference:(e,t)=>_k(e,t)").release, false);
   // either provider of the release's pair unpaced, or provider A not PublicNode: FAIL
-  assert.equal(planted("providers:[Cm(hk(KM)),", "providers:[hk(KM),").release, false);
+  assert.equal(planted("providers:[Cm(hk(SE)),", "providers:[hk(SE),").release, false);
   assert.equal(planted("Cm(gk(GM))],reference", "gk(GM)],reference").release, false);
   assert.equal(planted("KM=`https://solana-rpc.publicnode.com`", "KM=`https://api.mainnet-beta.solana.com`").release, false);
+  // card signpage-throttled-provider-has-a-spare: the seat lost (provider A alone, so a throttle stops the read), its
+  // spare another host, or its first member not provider A: FAIL
+  assert.equal(planted("providers:[Cm(hk(SE)),", "providers:[Cm(hk(KM)),").release, false);
+  assert.equal(planted("hI=(e=`trade`)=>[Cm(hk(SE,e)),", "hI=(e=`trade`)=>[Cm(hk(KM,e)),").pair, false);
+  assert.equal(planted("zH=(e=`trade`)=>[Cm(hk(SE,e)),", "zH=(e=`trade`)=>[Cm(hk(KM,e)),").pair, false);
+  const other = planted("SE=Object.freeze([KM,`https://solana.api.pocket.network`])", "SE=Object.freeze([KM,`https://solana.example.org`])");
+  assert.deepEqual([other.release, other.pair], [false, false]);
+  const first = planted("SE=Object.freeze([KM,`https://solana.api.pocket.network`])", "SE=Object.freeze([`https://solana.example.org`,`https://solana.api.pocket.network`])");
+  assert.deepEqual([first.release, first.pair], [false, false]);
   // either provider of the page's pair unpaced, the lister unpaced or not the marks route: FAIL
-  assert.equal(planted("hI=(e=`trade`)=>[Cm(hk(KM,e)),", "hI=(e=`trade`)=>[hk(KM,e),").pair, false);
+  assert.equal(planted("hI=(e=`trade`)=>[Cm(hk(SE,e)),", "hI=(e=`trade`)=>[hk(SE,e),").pair, false);
   assert.equal(planted("Cm(gk(GM,Hh,e))],LI", "gk(GM,Hh,e)],LI").pair, false);
   assert.equal(planted("LI=(e=`trade`)=>Cm(jV(BV,Hh,e))", "LI=(e=`trade`)=>jV(BV,Hh,e)").pair, false);
   assert.equal(planted("LI=(e=`trade`)=>Cm(jV(BV,Hh,e))", "LI=(e=`trade`)=>Cm(jV(GM,Hh,e))").pair, false);
   assert.equal(planted("BV=`${GM}/v1/rpc/solana-marks`", "BV=`${GM}/v1/rpc/solana`").pair, false);
   // review P2-1 of e3489b3b: the settle and restore pair, either seat unpaced, provider A not PublicNode or wrapped onto
   // the marks route, or the pair left out: FAIL
-  assert.equal(planted("zH=(e=`trade`)=>[Cm(hk(KM,e)),", "zH=(e=`trade`)=>[hk(KM,e),").pair, false);
+  assert.equal(planted("zH=(e=`trade`)=>[Cm(hk(SE,e)),", "zH=(e=`trade`)=>[hk(SE,e),").pair, false);
   assert.equal(planted("Cm(gk(GM,Uh,e))]", "gk(GM,Uh,e)]").pair, false);
-  assert.equal(planted("zH=(e=`trade`)=>[Cm(hk(KM,e)),", "zH=(e=`trade`)=>[Cm(hk(BV,e)),").pair, false);
-  assert.equal(planted("zH=(e=`trade`)=>[Cm(hk(KM,e)),Cm(gk(GM,Uh,e))],", "").pair, false);
+  assert.equal(planted("zH=(e=`trade`)=>[Cm(hk(SE,e)),", "zH=(e=`trade`)=>[Cm(hk(BV,e)),").pair, false);
+  assert.equal(planted("zH=(e=`trade`)=>[Cm(hk(SE,e)),Cm(gk(GM,Uh,e))],", "").pair, false);
   // review of 369a87a8 P1: provider A's place wrapped onto the marks route (369a87a8's own pair), so its reads of a
   // listed mark by address go through the helper: FAIL
-  assert.equal(planted("hI=(e=`trade`)=>[Cm(hk(KM,e)),Cm(gk(GM,Hh,e))]", "hI=(n=`trade`)=>{let e=Cm(hk(KM,n)),t=Cm(jV(BV,Hh,n));return[yh(e,(n,r)=>(n===`getProgramAccounts`?t:e)(n,r)),Cm(gk(GM,Hh,n))]}").pair, false);
+  assert.equal(planted("hI=(e=`trade`)=>[Cm(hk(SE,e)),Cm(gk(GM,Hh,e))]", "hI=(n=`trade`)=>{let e=Cm(hk(SE,n)),t=Cm(jV(BV,Hh,n));return[yh(e,(n,r)=>(n===`getProgramAccounts`?t:e)(n,r)),Cm(gk(GM,Hh,n))]}").pair, false);
   // card signpage-passes-yield-to-a-trade: a seat made without its arrow's kind (its reads off their host's lane rule): FAIL
   assert.equal(planted("Cm(gk(GM,Hh,e))],LI", "Cm(gk(GM,Hh))],LI").pair, false);
-  assert.equal(planted("zH=(e=`trade`)=>[Cm(hk(KM,e)),", "zH=(e=`trade`)=>[Cm(hk(KM,`pass`)),").pair, false);
+  assert.equal(planted("zH=(e=`trade`)=>[Cm(hk(SE,e)),", "zH=(e=`trade`)=>[Cm(hk(SE,`pass`)),").pair, false);
   // the timed read pacing the provider under it, so its wait counts against its timeout: FAIL
   assert.equal(planted("return a?Cm(r,a):r}", "return a?Cm(e,a):r}").timed, false);
   // the provider called after a turn (a microtask), not inside it, so a paced provider would queue twice: FAIL

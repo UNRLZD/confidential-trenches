@@ -448,7 +448,7 @@ test("a start with a keyed Solana URL whose operator is the signing page's direc
     c.on("exit", (n) => (clearTimeout(timer), done(n ?? "signal")));
   });
   assert.equal(code, 2, `exit ${code}; stderr: ${err.replace(/\(node:\d+\) ExperimentalWarning[^\n]*\n(\(Use[^\n]*\n)?/g, "")}`);
-  assert.match(err, /helper: SOLANA_RPC_URL_QUICKNODE: its operator publicnode\.com is the signing page's direct Solana seat/);
+  assert.match(err, /helper: SOLANA_RPC_URL_QUICKNODE: its operator publicnode\.com runs a member of the signing page's public Solana seat/);
   assert.ok(!err.includes("FAKEKEY123"), "the key was printed");
 });
 
