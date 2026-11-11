@@ -23,7 +23,9 @@ import type { PoolAsk, PoolChain } from "../src/rules/pool.ts";
 
 const SOL_TOKEN = "So11111111111111111111111111111111111111112";
 const EVM_TOKEN = "0xF111111111111111111111111111111111111111";
-const ctx = { id: "r1", sha: "00", progress: () => {} };
+// each request its own id, as the page's are: a request's one bound (src/read-waits.ts tapWaits) is by its id
+let requests = 0;
+const ctx = { get id() { return `r${++requests}`; }, sha: "00", progress: () => {} };
 const mint = (dec: number) => {
   const d = new Uint8Array(82);
   d[44] = dec;
@@ -217,3 +219,15 @@ for (const [chain, token] of CHAINS)
     assert.deepEqual(asks, [3, 2], "read again: a disagreement is never kept");
     assert.equal(s.flows.length, 0);
   });
+
+test("(g) one bound per request: the sell's flow goes on from the waits its decimals read took (card start-reads-wait-out-a-throttle)", async () => {
+  const { tapWaits } = await import("../src/read-waits.ts");
+  const p = pair(mint(6), 0, 2);
+  const s = deps(p.pair);
+  let next: number | null = -1;
+  const one = { id: "r-shared-bound", sha: "00", progress: () => {} };
+  const d: PoolKindsDeps = { ...s.deps, flow: (_ask, c) => ((next = tapWaits(c).next(throttle())), { error: "busy" as const }) };
+  assert.deepEqual(await settle(poolKinds(d)["pool.sell"](SELL("solana", SOL_TOKEN), one)), { error: "busy" });
+  assert.deepEqual(s.waits, [1_000, 2_000]);
+  assert.equal(next, 4_000, "the flow's next wait doubles on from the decimals read's");
+});

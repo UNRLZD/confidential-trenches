@@ -73,7 +73,7 @@ import type { BuyWallet } from "../../wallet/src/pool/buy-wallets.ts";
 import { solanaPoolOf, solanaTreeSync, type SolanaPoolPin, type SolanaTreeSync } from "../../wallet/src/pool/solana.ts";
 import { WALLET_SEED_LOCK } from "@blindfill/wallet/store";
 import { blockhashOf, blockhashRead, blockhashValid, pastOnBoth, readBack, readBackFailure, readBackMeta, type BuyMints } from "./pool-buy.ts";
-import { afterOf, keptReads, READ_WAIT, readWaits, solanaStableReads, waitsOn, waitUnless, type ReadWaits } from "./read-waits.ts";
+import { afterOf, clockOf, keptReads, READ_WAIT, readWaits, solanaStableReads, tapWaits, waitsOn, waitUnless, type ReadWaits } from "./read-waits.ts";
 import { throttleWaitMs } from "../../wallet/src/throttle.ts";
 import { fromRecord, timedStore, TRADE_STORE_MS, tradeLock, type TradeStore } from "./trade.ts";
 import { checkSolanaSell, checkSolanaSweep, checkSolanaTeardownFrames, PoolRuleRefused, poolUnits, signSolana, SOLANA_POOL_MIN_DEPOSIT, SOLANA_POOL_SELL_RESERVE_MAX, SOLANA_SWEEP_OWED_MAX, solanaDepositRents, solanaSellAfterFull, solanaSweepFloor, solanaSweepKeep, type PoolAsk, type SolanaDepositHeld } from "./rules/pool.ts";
@@ -650,30 +650,38 @@ export async function planPoolSell(h: Pick<PoolSellHost, "rpcs" | "wallets" | "b
 }
 
 /** planPoolSell, with each W's read (wHeld) by address, and `listed` told the Ws it reads before it reads them (sellAll
- *  starts a lone W's own sale reads beside them). The mint is read beside h.wallets(), and awaited only when some W is
- *  to be read, so a sell with no W is refused not_funded whatever the mint's read. */
+ *  starts a lone W's own sale reads beside them). No W: no read at all. Else the mint is read beside each W's own
+ *  accounts, under the program W's own buy record names for the token (pool-buy.ts BuyMints) when it names one: the
+ *  mint's program on both RPCs decides, and a W read under another program is read again under the mint's (card
+ *  pool-sell-legs-side-by-side: one round for the plan's reads). */
 async function planReads(h: Pick<PoolSellHost, "rpcs" | "wallets" | "bought">, ask: PoolAsk, listed?: (ws: readonly BuyWallet[]) => void): Promise<{ plan: PoolSellPlan; seen: ReadonlyMap<string, WHeld> }> {
   if (ask.kind !== "pool.sell" || ask.chain !== "solana" || ask.token === null) return no("not_allowed");
   const token = ask.token;
-  const mint = mintProgram(h.rpcs, token);
-  mint.catch(() => {});
   const all = (await h.wallets()).filter((x) => x.chain === "sol");
   const seen = new Set<string>();
-  const ws: BuyWallet[] = [];
+  const ws: { w: BuyWallet; guess: string | null }[] = [];
   for (const x of all) {
     if (seen.has(x.address)) continue;
     const bought = await Promise.resolve(h.bought?.get(x.address)).catch(() => undefined);
     if (bought?.mint !== token && !x.holdings.tokens.has(token)) continue;
     seen.add(x.address);
-    ws.push(x);
+    ws.push({ w: x, guess: bought?.mint === token && typeof bought.program === "string" ? bought.program : null });
   }
-  listed?.(ws);
-  const program = ws.length === 0 ? null : await mint;
+  listed?.(ws.map((x) => x.w));
+  const mint = ws.length === 0 ? null : mintProgram(h.rpcs, token);
+  mint?.catch(() => {});
   const reads = new Map<string, WHeld>();
   const held = await Promise.all(
-    ws.map(async (w) => {
+    ws.map(async ({ w, guess }) => {
       try {
-        const r = await wHeld(h.rpcs, w.address, token, program!);
+        let r: WHeld;
+        if (guess === null) r = await wHeld(h.rpcs, w.address, token, await mint!);
+        else {
+          const g = wHeld(h.rpcs, w.address, token, guess);
+          g.catch(() => {});
+          const program = await mint!;
+          r = program === guess ? await g : (await g.catch(() => null), await wHeld(h.rpcs, w.address, token, program));
+        }
         reads.set(w.address, r);
         return { w, held: r.amount };
       } catch (e) {
@@ -739,19 +747,18 @@ export function stageOfLegs(legs: readonly Pick<PoolSellLeg, "stage" | "error">[
  * side by side. A leg that fails ends alone: nothing is retried, the others' results stand, and the answer names every
  * leg. One leg's refusal before it signed, with no other leg, is the sell's own refusal, as before.
  */
-async function sellAll(host: PoolSellHost, ask: PoolAsk, laters: Later[], hooks: LegHooks = {}): Promise<PoolSellAnswer> {
+async function sellAll(host: PoolSellHost, ask: PoolAsk, laters: Later[], hooks: LegHooks = {}, waits: ReadWaits = readWaits(clockOf(host))): Promise<PoolSellAnswer> {
   let plan: PoolSellPlan;
   // the sell's reads that cannot change while it waits, kept per provider across its attempts (read-waits.ts)
   const h: PoolSellHost = Object.assign(Object.create(host) as PoolSellHost, { rpcs: keptReads(host.rpcs, solanaStableReads(ask.token)) });
   const wait = h.wait ?? ((ms: number) => new Promise<void>((res) => setTimeout(res, ms)));
-  // one tap's waits: its plan's and every sale's share the rule's one total (READ_WAIT_TOTAL_MS)
-  const waits = readWaits();
-  // the first sale's reads that need no plan, started beside it in each attempt (card pool-sell-legs-side-by-side): the
-  // Rent sysvar and the pool's sizes; for a lone W (the only one the plan can sell from), its note and the price
-  // reference at the units the plan gives when the reads agree (a typed amount; a share of the listed holding), so its
-  // sale's first round is the plan's own. A sale's units other than the guess read their reference again
+  // one tap's waits: its plan's and every sale's share the rule's one bound (READ_WAIT_TOTAL_MS on the clock)
   // an ask that is not a Solana sell of a token: refused before any read (planPoolSell's own refusal)
   if (ask.kind !== "pool.sell" || ask.chain !== "solana" || ask.token === null) return { error: "not_allowed" };
+  // the first sale's reads that need no plan, started beside the plan's own once it has a W to read (card
+  // pool-sell-legs-side-by-side): the Rent sysvar and the pool's sizes; for a lone W (the only one the plan can sell from), its note and the price
+  // reference at the units the plan gives when the reads agree (a typed amount; a share of the listed holding), so its
+  // sale's first round is the plan's own. A sale's units other than the guess read their reference again
   let early: Early = {};
   let lone: string | null = null;
   const quiet = <T>(p: Promise<T>): Promise<T> => (p.catch(() => {}), p);
@@ -762,8 +769,11 @@ async function sellAll(host: PoolSellHost, ask: PoolAsk, laters: Later[], hooks:
       const program = h.pin.program;
       const { pool, scope } = solanaPoolOf(program);
       lone = null;
-      early = { program, rent: quiet(readSolanaRent(h.rpcs)), sizes: quiet(treeSizes(h.rpcs, program, pool, wait)) };
+      early = { program };
       const got = await planReads(h, ask, (ws) => {
+        if (ws.length === 0) return;
+        early.rent = quiet(readSolanaRent(h.rpcs));
+        early.sizes = quiet(treeSizes(h.rpcs, program, pool, wait));
         const w = ws[0];
         if (ws.length !== 1 || ask.token === null) return;
         lone = w!.address;
@@ -851,9 +861,9 @@ const shortOf = (stage: TradeStage, short: boolean): TradeStage => (short && sta
 /** One pool.sell: the ask is the user's own (rules/pool.ts checkPoolRequest passed it, with the token's decimals): its
  *  units, or its share of the whole holding (planPoolSell). After the sales, each full sale's rent back (rentBack) runs,
  *  one W after another, before this answers; none changes the answer. */
-export async function runPoolSell(h: PoolSellHost, ask: PoolAsk): Promise<PoolSellAnswer> {
+export async function runPoolSell(h: PoolSellHost, ask: PoolAsk, waits?: ReadWaits): Promise<PoolSellAnswer> {
   const laters: Later[] = [];
-  const a = await sellAll(h, ask, laters);
+  const a = await sellAll(h, ask, laters, {}, waits);
   for (const later of laters) await later.back?.(null);
   return a;
 }
@@ -1907,7 +1917,7 @@ export function poolSellKind(host: () => PoolSellKindHost, locks: Locks | null =
                   give();
                 },
                 ended: (i, leg) => setLeg(i, leg.error !== undefined ? { tx: null, stage: "refused", code: leg.error } : { tx: leg.tx, stage: leg.stage ?? "refused" }),
-              });
+              }, tapWaits(ctx, clockOf(h)));
               if ("error" in a) write({ stage: "refused", code: a.error });
               else write({ stage: a.stage, txs: a.txs });
               await writes;

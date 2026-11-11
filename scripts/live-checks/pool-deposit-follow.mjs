@@ -86,7 +86,7 @@ const FIXED = new RegExp(
     `[^]{0,4000}?if\\(\\1===void 0&&${N}===0&&\\4\\.i===${N}&&${N}\\.ref\\.kind===${Q}second${Q}\\)\\{\\4=null,\\5=null;continue\\}`,
 );
 // pool-deposit.ts poolDepositKind: the kind's third parameter (the fixed source) is the run's third argument (review 2 L1)
-const KIND = new RegExp(`return\\((${N}),(${N}),(${N})\\)=>\\{if\\(\\1!==null&&\\(\\1\\.kind!==${Q}pool\\.deposit${Q}[^]{0,1600}?=await ${N}\\(${N},\\1,\\3\\)\\}finally\\{`);
+const KIND = new RegExp(`return\\((${N}),(${N}),(${N})\\)=>\\{if\\(\\1!==null&&\\(\\1\\.kind!==${Q}pool\\.deposit${Q}[^]{0,1600}?=await ${N}\\(${N},\\1,\\3(?:,${N}\\(${N},${N}\\(${N}\\)\\))?\\)\\}finally\\{`);
 const FROM_ENTRY = new RegExp(
   `depositFrom:\\((${N}),(${N}),(${N})\\)=>\\{let (${N});try\\{\\4=${N}\\(\\{\\.\\.\\.\\1,kind:${Q}pool\\.deposit${Q}\\}\\)\\}catch\\{return\\{error:${Q}not_allowed${Q}\\}\\}` +
     `return \\4\\.chain!==${Q}solana${Q}\\|\\|${N}===void 0\\?\\{error:${Q}not_allowed${Q}\\}:${N}\\(\\4,\\3,\\2\\)\\}`,

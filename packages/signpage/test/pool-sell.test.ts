@@ -861,12 +861,10 @@ test("an amount over W's holding as both RPCs read it is not_funded; two RPCs th
     assert.ok(x.seeds.length <= 1 && x.seeds.every((s) => s.every((b) => b === 0)), "the seed read for the note alone, zeroed");
     assert.ok(!x.c.log.some((l) => /simulateTransaction|sendTransaction/.test(l)));
   }
-  // no W at all: not_funded, no read naming any W (card pool-sell-legs-side-by-side: only the mint, the Rent sysvar and
-  // the pool, read beside the page's list of Ws), nothing built
+  // no W at all: not_funded with no read at all
   const none = await world({}, []);
   assert.deepEqual(await runPoolSell(none.host, ASK), { error: "not_funded" });
-  assert.deepEqual(new Set(none.c.calls.map((c) => `${c.method} ${c.params[0]}`)), new Set(["getAccountInfo " + MINT, "getAccountInfo " + fx.rent.account, "getAccountInfo " + POOL]), "only the token's, the rent's and the pool's");
-  nothingBuilt(none);
+  assert.deepEqual(none.c.log, [], "no read");
   // card pool-sell-share-across-wallets: the page's listed holdings (on mainnet the helper's one read) saying short or
   // frozen change nothing: W, named by its own buy record, is read on both RPCs, and what they read sells
   for (const ws of [[wallet(AMOUNT - 1n)], [wallet(AMOUNT, true)]]) {
@@ -4736,12 +4734,12 @@ async function rounds(w: World, ask: PoolAsk = ASK): Promise<{ rounds: number; a
 /** Each provider's calls before W's first signature. */
 const before = (w: World, at: number) => w.c.calls.slice(0, at);
 
-test("card pool-sell-legs-side-by-side: one wallet's sale signs after four read rounds (the plan's two, the venue and blockhash, the fee beside both simulations)", async () => {
+test("card pool-sell-legs-side-by-side: one wallet's sale signs after three read rounds past the list of Ws (the plan's with the sale's first, the venue with the blockhash and the deposit's pages, the fee beside both simulations)", async () => {
   for (const ask of [ASK, share(10_000)]) {
     const w = await world();
     const r = await rounds(w, ask);
     assert.equal("stage" in r.a && r.a.stage, "filled", JSON.stringify(r.a));
-    assert.equal(r.rounds, 4, JSON.stringify(before(w, r.signedAt).map((c) => `${c.p}:${c.method}`)));
+    assert.equal(r.rounds, 3, JSON.stringify(before(w, r.signedAt).map((c) => `${c.p}:${c.method}`)));
   }
 });
 
@@ -4839,4 +4837,46 @@ test("card pool-sell-legs-side-by-side: after a wait for a throttle, the sale re
     assert.ok(after.some((c) => c.p === p && c.method === "getMultipleAccounts" && Object.keys(fx.pump.reads[p]).includes(JSON.stringify(c.params[0]))), `the reference again on ${p}`);
   }
   assert.ok(after.some((c) => c.p === 0 && c.method === "getLatestBlockhash") && after.some((c) => c.p === 1 && c.method === "isBlockhashValid"));
+});
+
+test("card start-reads-wait-out-a-throttle: the tap's bound is on the device's clock: with each throttled read taking 5 s, the waits are 1, 2 and 4 s and the sell answers down by 30 s plus the read in flight, nothing signed", async () => {
+  const w = await world({ ataLamports: TOKEN_RENT });
+  let t = 0n;
+  // a slow provider: each throttled fee read answers its fault 5 s on the device's clock (the host's pause and the call's bound)
+  const f = faulty(w, (p, method) => (p === 0 && method === "getFeeForMessage" ? ((t += 5_000n), run6()) : null));
+  const waits: number[] = [];
+  const a = await runPoolSell({ ...w.host, rpcs: f.rpcs, now: () => t, wait: async (ms: number) => void (waits.push(ms), (t += BigInt(ms))) }, ASK);
+  assert.deepEqual(a, { error: "down" });
+  // 5 + 1 + 5 + 2 + 5 + 4 + 5 = 27 s; the next wait (8 s) would end past 30 s
+  assert.deepEqual(waits, [1_000, 2_000, 4_000]);
+  assert.ok(t <= 30_000n + 13_500n, `down at ${t} ms`);
+  assert.equal(f.sales.size, 0);
+});
+
+test("card start-reads-wait-out-a-throttle: one bound per request: the sell's plan and sales go on from the waits its decimals read took (tapWaits by the request's id), never from 0", async () => {
+  const { tapWaits } = await import("../src/read-waits.ts");
+  let t = 0;
+  const tap = { id: "tap-shared-bound" };
+  const first = tapWaits(tap, () => t);
+  assert.equal(first.next(run6()), 1_000);
+  t += 1_000;
+  assert.equal(first.next(run6()), 2_000);
+  t += 2_000;
+  // the kind's host passes the request on as a copy: the same id is the same bound
+  const later = tapWaits({ ...tap }, () => 0);
+  assert.equal(later, first);
+  assert.equal(later.next(run6()), 4_000);
+  t += 25_000;
+  assert.equal(later.next(run6()), null, "past 30 s on the clock: down");
+  assert.notEqual(tapWaits({ id: "another" }), first);
+});
+
+test("card pool-sell-legs-side-by-side: W's own accounts are read beside the mint under the program its buy record names; a record naming another program is read again under the mint's, and the sale sells what that read holds", async () => {
+  const other = TOKEN_PROGRAM === TOKEN_2022 ? SOLANA_TOKEN_PROGRAM : TOKEN_2022;
+  const w = await world({ buy: { mint: MINT, program: other } });
+  const a = await runPoolSell(w.host, ASK);
+  assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
+  const wrong = solanaAta(W.address, MINT, other);
+  for (const p of [0, 1] as const) assert.deepEqual([wrong, ATA].map((x) => w.c.calls.filter((c) => c.p === p && namesIn(c.method, c.params, x)).length >= 1), [true, true], String(p));
+  assert.deepEqual(w.c.deposits.map((d) => d.value), [FULL]);
 });
