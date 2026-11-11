@@ -176,6 +176,8 @@ type Plant = {
   curveCashback?: boolean;
   /** a Mayhem coin: the bonding curve's is_mayhem_mode byte (81) or the PumpSwap Pool's (243) set in the recorded reads */
   mayhem?: boolean;
+  /** the bonding curve's real SOL (bytes 32..40) in the recorded reads: what the curve can pay a sale */
+  curveRealSol?: bigint;
   /** of W's PumpSwap cashback accounts, only these (W's PumpSwap volume account, its wrapped-SOL account) */
   ammOnly?: "volume" | "ata";
   /** RPC 1 never shows W's PumpSwap cashback accounts (a lagging RPC) */
@@ -574,6 +576,17 @@ function chain(plant: Plant = {}) {
               if (at < 0) continue;
               d![at] = 1;
               a!.data[0] = base64.encode(d!);
+            }
+            return r;
+          }
+          if (recorded && plant.curveRealSol !== undefined) {
+            // the bonding curve (owned by pump, under 300 bytes): its real SOL set
+            const r = structuredClone(recorded) as { value: ({ owner: string; data: [string, string] } | null)[] };
+            for (const a of r.value) {
+              const d = a?.owner === SOLANA_PUMP_PROGRAM ? base64.decode(a.data[0]) : null;
+              if (!d || d.length < 83 || d.length >= 300) continue;
+              new DataView(d.buffer, d.byteOffset).setBigUint64(32, plant.curveRealSol, true);
+              a!.data[0] = base64.encode(d);
             }
             return r;
           }
@@ -1319,6 +1332,28 @@ test("a Mayhem coin's sale goes through on the curve and on PumpSwap, paying the
     const sells = w.c.calls.filter((c) => c.method === "sendTransaction").map((c) => Buffer.from(base64.decode(c.params[0] as string)));
     assert.ok(sells.length > 0 && sells.some((t) => t.includes(reserved)), `${venue}: the sent sell names the reserved fee recipient`);
   }
+});
+
+// Card sol-pool-buys-mayhem-coins: a curve that holds less real SOL than a sale's gross cannot pay it (the program fails
+// it whole, Overflow 6024; a Mayhem curve, its agent's tokens never bought, can): the kit's quote pays nothing there, so
+// the sale has no reference, as a coin with no market, and is refused before anything is built. 2 lamports is what
+// 8ZrvYMy1...pump's curve held at 15:02Z; a lamport under the sale's gross is refused the same, and at its gross it fills
+test("a sale the curve cannot pay from its real SOL is quote_check_failed before anything is built; with enough it fills", async () => {
+  const drained = await world({ venue: "pump", curveRealSol: 2n });
+  assert.deepEqual(await runPoolSell(drained.host, ASK), { error: "quote_check_failed" });
+  nothingBuilt(drained);
+  assert.deepEqual(drained.sent, []);
+  // the sale's gross on the recorded curve: amount × virtual SOL (bytes 16..24) / (virtual tokens (8..16) + amount)
+  const curveRead = Object.values(fx.pump.reads[0] as Record<string, { value: ({ owner: string; data: [string, string] } | null)[] }>)
+    .flatMap((ans) => ans.value).find((a) => a?.owner === SOLANA_PUMP_PROGRAM && base64.decode(a.data[0]).length < 300)!;
+  const u = base64.decode(curveRead.data[0]);
+  const dv = new DataView(u.buffer, u.byteOffset);
+  const gross = (AMOUNT * dv.getBigUint64(16, true)) / (dv.getBigUint64(8, true) + AMOUNT);
+  const short = await world({ venue: "pump", curveRealSol: gross - 1n });
+  assert.deepEqual(await runPoolSell(short.host, ASK), { error: "quote_check_failed" });
+  const enough = await world({ venue: "pump", curveRealSol: gross });
+  const a = await runPoolSell(enough.host, ASK);
+  assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
 });
 
 test("PumpSwap: W at exactly rent(165), the old max-spend buy's W, cannot pay the fee and the wrapped-SOL account its sell makes first: not_funded before anything is built", async () => {
