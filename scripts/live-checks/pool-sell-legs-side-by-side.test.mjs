@@ -4,7 +4,7 @@
 // another /app.js, no pin, each mark taken away: each FAIL. Planted in the bundle's own excerpt
 // (pool-sell-legs-side-by-side.excerpt.txt, cut from this card's public/app.js): the turn not awaited, a sign out not
 // checked after it, the tap's spent waits not checked after it, the blockhash read before it, the finder read for every
-// sale, the seed copy not zeroed: each FAIL.
+// sale, the seed read with no W, the seed copy not zeroed: each FAIL.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
@@ -46,6 +46,7 @@ test("planted in the bundle's excerpt: each break in place FAILs", () => {
     ["the blockhash read whatever the turn", "if(T){D=", "{D=", "turn"],
     ["the finder for every sale", "let r=t?", "let r=!1?", "listed"],
     ["the seed copy not zeroed", "finally{i.fill(0)}", "finally{}", "listed"],
+    ["the seed read with no W", "if(t.length===0)return a=[];", "", "listed"],
   ]) {
     const bad = js.replace(from, to);
     assert.notEqual(bad, js, what);
