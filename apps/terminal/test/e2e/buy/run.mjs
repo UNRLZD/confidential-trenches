@@ -111,13 +111,16 @@ const ALLOWED = new Set([REAL.app, REAL.sign, REAL.api, new URL(DEVNET_RPC).host
 
 // ------------------------------------------------------------------------------------------------ devnet reads and the fund wait
 /** One read, asked again after a rate limit (HTTP 429 or a JSON-RPC 429: the public devnet RPC limits per connection;
- *  the first paid run lost its post-buy read to one, 10 Nov 21:30Z), up to RATE_TRIES times with a growing pause. */
-export async function rpc(url, method, params, { tries = RATE_TRIES, pauseMs = 1_500, fetchFn = fetch } = {}) {
+ *  the first paid run lost its post-buy read to one, 10 Nov 21:30Z) or a 5xx, up to RATE_TRIES times: an HTTP 429 waits
+ *  the provider's Retry-After, at most RETRY_AFTER_MAX_MS (run 3 of card sol-buy-reads-side-by-side: 10 s, while the
+ *  page's own reads kept the limit hot), else a growing pause. */
+export async function rpc(url, method, params, { tries = RATE_TRIES, pauseMs = 1_500, fetchFn = fetch, sleep = (ms) => new Promise((ok) => setTimeout(ok, ms)) } = {}) {
   for (let i = 1; ; i++) {
     const r = await fetchFn(url, { method: "POST", headers: { "content-type": "application/json", origin: `https://${REAL.sign}` }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) });
-    const j = r.status === 429 ? { error: { code: 429 } } : await r.json();
-    if (j.error?.code === 429 && i < tries) {
-      await new Promise((ok) => setTimeout(ok, pauseMs * i));
+    const j = r.status === 429 ? { error: { code: 429 } } : r.status >= 500 ? { error: { code: r.status } } : await r.json();
+    if ((j.error?.code === 429 || r.status >= 500) && i < tries) {
+      const after = r.status === 429 ? Number(r.headers?.get?.("retry-after")) * 1_000 : NaN;
+      await sleep(Number.isFinite(after) && after > 0 ? Math.min(after, RETRY_AFTER_MAX_MS) : pauseMs * i);
       continue;
     }
     if (j.error) throw new Error(`${method}: ${JSON.stringify(j.error).slice(0, 160)}`);
@@ -125,6 +128,7 @@ export async function rpc(url, method, params, { tries = RATE_TRIES, pauseMs = 1
   }
 }
 const RATE_TRIES = 8;
+const RETRY_AFTER_MAX_MS = 15_000;
 const both = (method, params) => Promise.all([DEVNET_RPC, HELPER_RPC].map((u) => rpc(u, method, params)));
 const B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 export function b58(bytes) {
