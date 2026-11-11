@@ -21,8 +21,9 @@
 //   pass not whole, so a retry is booked). The floor is the block of the sale's Deposited, the one the read-back's
 //   verdict read the same on both RPCs (pool-sell-evm.ts evmSellVerdict, its `deposited` hook); before it, once the
 //   send has ended (the helper's hash or no answer), one past the lower newest block of a pass that started after the
-//   send ended; for an open record a load finds, the same from EVM_SALE_FLOOR_MS past its deadline. A floor above both
-//   RPCs' newest blocks EVM_SALE_FLOOR_MS after it was set is dropped. A record dropped with no Deposited read (not
+//   send ended; for an open record a load finds, the same from EVM_SALE_FLOOR_MS past its deadline. Such a floor (no
+//   Deposited's) above both RPCs' newest blocks EVM_SALE_FLOOR_MS after it was set is dropped; a Deposited's stands,
+//   both RPCs having named it. A record dropped with no Deposited read (not
 //   landed, nothing sent) holds nothing more. The page hides a sale's token in rows a pass read before the sale's
 //   record (src/pool-testnet.ts evmShownGen).
 // - The token's decimals: decimals() on both RPCs, the same (keptTokenDecimals, kept for the page), else the token is
@@ -227,8 +228,8 @@ export async function evmPositionsPass(r: EvmPositionsReads, memo: PassMemo): Pr
   return { positions: out, whole };
 }
 
-/** A floor above both RPCs' newest blocks this long after it was set is dropped; an open sale a load found, with no
- *  floor, takes one this long past its deadline (no later block can hold it: SellDelegate.sol refuses a block past it). */
+/** A floor no Deposited named, above both RPCs' newest blocks this long after it was set, is dropped; an open sale a
+ *  load found, with no floor, takes one this long past its deadline (no later block can hold it: SellDelegate.sol refuses a block past it). */
 export const EVM_SALE_FLOOR_MS = 60_000;
 
 const DIGITS = /^[0-9]{1,20}$/;
@@ -288,7 +289,9 @@ export function evmSaleHolds(chain: "base" | "robinhood") {
         if (h.lapsed) continue;
         const ripe = h.sentMs === null ? h.deadlineMs + EVM_SALE_FLOOR_MS : Math.min(h.sentMs, h.deadlineMs + EVM_SALE_FLOOR_MS);
         if (h.floor === null && heads !== null && ripe <= started) Object.assign(h, { floor: (heads[0] < heads[1] ? heads[0] : heads[1]) + 1n, set: now });
-        if (h.floor !== null && heads !== null && h.floor > heads[0] && h.floor > heads[1] && now - h.set >= EVM_SALE_FLOOR_MS) {
+        // a floor no Deposited named (one past a pass's lower newest block) above both heads for 60 s: dropped; a
+        // Deposited's is both RPCs' own read, and stands
+        if (!h.verdict && h.floor !== null && heads !== null && h.floor > heads[0] && h.floor > heads[1] && now - h.set >= EVM_SALE_FLOOR_MS) {
           h.lapsed = true;
           continue;
         }

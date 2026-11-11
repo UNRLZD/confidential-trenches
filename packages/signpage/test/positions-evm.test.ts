@@ -298,7 +298,7 @@ for (const chain of CHAINS) {
   });
 }
 
-test("the sale holds: no floor until the send ends (a pass started after it takes one past its lower newest block), the Deposited's block then; not landed holds nothing; a load's record takes one 60 s past its deadline; two sales of one token, the higher floor and none while either has none; a floor above both heads dropped once 60 s old", () => {
+test("the sale holds: no floor until the send ends (a pass started after it takes one past its lower newest block), the Deposited's block then; not landed holds nothing; a load's record takes one 60 s past its deadline; two sales of one token, the higher floor and none while either has none; a floor with no Deposited above both heads dropped once 60 s old, a Deposited's never", () => {
   const sale = (note: string, deadline: string, token = TOKEN) => ({ note, chain: "base", w: W1, token, deadline });
   const h = evmSaleHolds("base");
   const heads = [100n, 103n] as const;
@@ -328,14 +328,19 @@ test("the sale holds: no floor until the send ends (a pass started after it take
   assert.deepEqual(l.at(open, heads, 1_060_000, 1_060_000), new Map([[TOKEN, null]]));
   l.deposited(sale("d", "2000"), 99n, 1_061_000);
   assert.deepEqual(l.at(open, heads, 1_061_000, 1_061_000), new Map([[TOKEN, 101n]]));
-  // a floor above both heads: held until it is 60 s old, then dropped; the same Deposited read again keeps it dropped
+  // a floor with no Deposited above both heads (both stalled at the block it was taken past): held until it is 60 s
+  // old, then dropped; a Deposited's floor above both heads is never dropped
   const t = evmSaleHolds("base");
-  t.deposited(sale("e", "1000", OTHER), 2n ** 64n - 1n, 0);
-  assert.deepEqual(t.at({}, heads, 0, EVM_SALE_FLOOR_MS - 1), new Map([[OTHER, 2n ** 64n - 1n]]));
-  assert.deepEqual(t.at({}, heads, 0, EVM_SALE_FLOOR_MS), new Map());
-  t.deposited(sale("e", "1000", OTHER), 2n ** 64n - 1n, EVM_SALE_FLOOR_MS);
-  assert.deepEqual(t.at({}, heads, 0, EVM_SALE_FLOOR_MS), new Map());
+  t.record(sale("e", "1000", OTHER));
+  t.sendEnded(W1, 0);
+  const flat = [100n, 100n] as const;
+  assert.deepEqual(t.at({}, flat, 0, 0), new Map([[OTHER, 101n]]));
+  assert.deepEqual(t.at({}, flat, 0, EVM_SALE_FLOOR_MS - 1), new Map([[OTHER, 101n]]));
+  assert.deepEqual(t.at({}, flat, 0, EVM_SALE_FLOOR_MS), new Map());
   assert.deepEqual([...t.newer(0)], []);
+  const v = evmSaleHolds("base");
+  v.deposited(sale("f", "1000", OTHER), 2n ** 64n - 1n, 0);
+  assert.deepEqual(v.at({}, heads, 0, 10 * EVM_SALE_FLOOR_MS), new Map([[OTHER, 2n ** 64n - 1n]]), "a Deposited's floor stands");
 });
 
 test("a pass stopped while its calls wait their turn ends, and sends none of them", async () => {
@@ -701,28 +706,22 @@ async function salePage(send: () => Promise<Response>) {
   return { w, ch, clock, t, rows, sell };
 }
 
-test("P2-2a: a sale's floor above both RPCs' newest blocks (one RPC's receipt of its hash at 2^64-1, a Deposited at 2^64-1): the rows come back once it is 60 s old, and a later filled buy shows", async () => {
+test("P2-2a: one RPC's receipt of the sale's hash at 2^64-1 holds nothing: the rows come back once both RPCs are past the Deposited's block, and a later filled buy shows", async () => {
   const SALE = "0x" + "5b".repeat(32);
   const { w, ch, clock, t, rows, sell } = await salePage(async () => new Response(JSON.stringify({ hash: SALE }), { status: 200 }));
-  const TOP = 2n ** 64n - 1n;
   const { host, progress } = await sell();
   const sale = openSale("n-top", clock.now());
   await host.record(sale);
   assert.equal(await host.send(sendBody), SALE);
-  ch.base.receipts[1]!.set(SALE, TOP);
-  // a part sale: 5 to 2, read on both RPCs at their newest blocks
+  ch.base.receipts[1]!.set(SALE, 2n ** 64n - 1n);
+  // a part sale, 5 to 2, in block 102: its Deposited the same on both RPCs
+  ch.base.head[0] = 102n;
+  ch.base.head[1] = 103n;
   ch.base.set(W1, 2_000_000n);
-  host.deposited?.(sale, TOP);
+  host.deposited?.(sale, 102n);
   progress("part_filled");
   await clock.go(1_000);
-  assert.deepEqual(await rows(), [], "held while its floor is new");
-  await clock.go(30_000);
-  assert.deepEqual(await rows(), [], "still held at 31 s");
-  // past the bound: the next pass (a retry, or a state read once the round is spent) shows what W holds now
-  await clock.go(30_000);
-  await t.positions();
-  await clock.go(21_000);
-  assert.deepEqual(await rows(), ["token 2"], "the rows come back within the bound and a pass");
+  assert.deepEqual(await rows(), ["token 2"], "read at the lower newest block, past the sale");
   // a later buy, filled at block 95 (both RPCs past it): shown
   const W3 = "0x" + "a3".repeat(20);
   ch.base.set(W3, 7_000_000n);
@@ -730,6 +729,36 @@ test("P2-2a: a sale's floor above both RPCs' newest blocks (one RPC's receipt of
   t.evmHoldingsRestored("base");
   await clock.go(1_000);
   assert.deepEqual((await rows()).sort(), ["other 7", "token 2"], "a later filled buy shows");
+  await t.signedOut();
+});
+
+test("P3-2: a floor the Deposited named never lapses: read at 1002 on both RPCs, both heads at 990 for 120 s (the old amount still on them), then 1010: never the old amount, the sold row gone", async () => {
+  const { ch, clock, t, rows, sell } = await salePage(async () => new Response(JSON.stringify({ hash: "0x" + "5c".repeat(32) }), { status: 200 }));
+  const seen: string[][] = [];
+  const look = async () => (seen.push(await rows()), seen.at(-1)!);
+  const { host, progress } = await sell();
+  const sale = openSale("n-1002", clock.now());
+  await host.record(sale);
+  await host.send(sendBody);
+  host.deposited?.(sale, 1002n);
+  progress("filled");
+  ch.base.head[0] = 990n;
+  ch.base.head[1] = 990n;
+  for (let s = 0; s < 120; s++) {
+    await t.positions();
+    await clock.go(1_000);
+    await look();
+  }
+  ch.base.head[0] = 1010n;
+  ch.base.head[1] = 1010n;
+  ch.base.set(W1, 0n);
+  for (let s = 0; s < 40; s++) {
+    await t.positions();
+    await clock.go(1_000);
+    await look();
+  }
+  assert.ok(seen.every((r) => !r.includes("token 5")), `never the old amount: ${seen.findIndex((r) => r.includes("token 5"))} s`);
+  assert.deepEqual(seen.at(-1), []);
   await t.signedOut();
 });
 
