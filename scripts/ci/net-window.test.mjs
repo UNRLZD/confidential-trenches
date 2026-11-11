@@ -59,6 +59,7 @@ export const CHANGED = [
   "scripts/live-checks/evm-fee-quiet-epoch.mjs",
   "scripts/live-checks/evm-mainnet-senders.mjs",
   "scripts/live-checks/device-evm-fee-read-walks-operators.mjs",
+  "scripts/live-checks/evm-device-reads-need-no-old-state.mjs",
   "scripts/live-checks/evm-pool-index.mjs",
   "scripts/live-checks/evm-pool-pins.mjs",
   "scripts/live-checks/evm-quote-lag-held.mjs",
