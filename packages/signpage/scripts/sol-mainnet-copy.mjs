@@ -305,7 +305,8 @@ const runNode = (args, env) =>
     let out = "";
     p.stdout.on("data", (b) => ((out += b), process.stdout.write(b)));
     p.stderr.on("data", (b) => ((out += b), process.stderr.write(b)));
-    p.on("exit", (code) => done({ code, out }));
+    // the record names files from the checkout's root, never the machine's own folders
+    p.on("exit", (code) => done({ code, out: out.replaceAll(`file://${ROOT}`, "").replaceAll(ROOT, "") }));
   });
 for (const kind of KINDS) {
   const c = coins[kind];
