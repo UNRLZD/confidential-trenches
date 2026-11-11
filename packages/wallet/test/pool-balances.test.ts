@@ -34,18 +34,36 @@ function note(scope: bigint, state: NoteState, value: bigint, attempt?: string):
 }
 const proof = (pool: BalancePool, x: NoteRecord, chunk: bigint, attempt = x.attempt!, feeCap = 0n): BalanceProof => ({ noteId: x.id, attempt, poolId: pool.id, chunk, binding: { feeCap } });
 
-test("balance: UNSPENT and HELD notes count; PLANNED, INCOMING, RESERVED, SPENT and TAKEN do not", () => {
+test("balance: UNSPENT, HELD and RESERVED notes count; PLANNED, INCOMING, SPENT and TAKEN do not", () => {
   const notes = [
     note(SOL.scope, "UNSPENT", 10n * LAMPORTS),
     note(SOL.scope, "HELD", 2_500_000_000n),
-    note(SOL.scope, "RESERVED", 5n * LAMPORTS), // a proof already sent: the buy's op shows it
+    note(SOL.scope, "RESERVED", 5n * LAMPORTS), // a proof already sent: still in the pool until the chain spends it
     note(SOL.scope, "SPENT", 100n * LAMPORTS),
     note(SOL.scope, "INCOMING", 0n), // no value until it lands
     note(SOL.scope, "PLANNED", 0n),
     note(SOL.scope, "TAKEN", 0n),
     note(BASE.scope, "UNSPENT", 1n), // another pool's
   ];
-  assert.deepEqual(poolBalances(notes, [SOL]), [{ chain: "solana", asset: "SOL", balance: "12.5" }]);
+  assert.deepEqual(poolBalances(notes, [SOL]), [{ chain: "solana", asset: "SOL", balance: "17.5" }]);
+});
+
+test("balance: a buy in flight never reads its money gone; once its release is read landed the RESERVED note counts only its change (card pool-buy-record-never-stays-sent)", () => {
+  const only = note(SOL.scope, "RESERVED", 3n * LAMPORTS, "a-buy"); // the user's one note, its buy in flight
+  // in flight: the whole note is still in the pool, so the balance is not 0 and nothing is ready
+  assert.deepEqual(poolBalances([only], [SOL], []), [{ chain: "solana", asset: "SOL", balance: "3", ready: "0" }]);
+  // the release read landed on both RPCs, withdrawing 2 SOL: the note's change, 1 SOL, before the settle writes it
+  assert.deepEqual(poolBalances([only], [SOL], [], undefined, new Map([[only.id, { attempt: "a-buy", withdrawn: 2n * LAMPORTS }]])), [{ chain: "solana", asset: "SOL", balance: "1", ready: "0" }]);
+  // a landing read for another attempt of the note, or for a note no longer RESERVED, changes nothing
+  assert.deepEqual(poolBalances([only], [SOL], [], undefined, new Map([[only.id, { attempt: "a-old", withdrawn: 2n * LAMPORTS }]])), [{ chain: "solana", asset: "SOL", balance: "3", ready: "0" }]);
+  const back = { ...only, state: "UNSPENT" as const };
+  delete (back as Partial<NoteRecord>).attempt;
+  assert.deepEqual(poolBalances([back], [SOL], undefined, undefined, new Map([[only.id, { attempt: "a-buy", withdrawn: 2n * LAMPORTS }]])), [{ chain: "solana", asset: "SOL", balance: "3" }]);
+  // the settle wrote the change: the note SPENT and its change UNSPENT, the same balance as just before
+  const change = { ...note(SOL.scope, "UNSPENT", 1n * LAMPORTS), parent: only.id };
+  assert.deepEqual(poolBalances([{ ...back, state: "SPENT" }, change], [SOL]), [{ chain: "solana", asset: "SOL", balance: "1" }]);
+  // a withdrawn value over the note is refused, never a negative balance
+  assert.throws(() => poolBalances([only], [SOL], undefined, undefined, new Map([[only.id, { attempt: "a-buy", withdrawn: 4n * LAMPORTS }]])), /withdrew more than it holds/);
 });
 
 test("ready: the chunks of ready proofs whose note is still HELD by the same attempt, in that pool", () => {
@@ -65,7 +83,7 @@ test("ready: the chunks of ready proofs whose note is still HELD by the same att
     proof(SOL, baseHeld, WEI / 2n), // names the Solana pool, but its note is Base's
   ];
   assert.deepEqual(poolBalances([held, moved, sent, freed, baseHeld], [SOL, BASE], ready), [
-    { chain: "solana", asset: "SOL", balance: "42", ready: "20" },
+    { chain: "solana", asset: "SOL", balance: "47", ready: "20" },
     { chain: "base", asset: "ETH", balance: "0.5", ready: "0.25" },
   ]);
 });
@@ -125,7 +143,7 @@ test("tap_max: the most one ready proof can spend at the tap, the largest of the
     proof(S1, e, 60n * LAMPORTS), // names the Solana pool, but its note is Base's
   ];
   assert.deepEqual(poolBalances([a, b, c, moved, sent, e], [S1, B, S2], ready), [
-    { chain: "solana", asset: "SOL", balance: "130", ready: "32", tap_max: "9.998699" }, // 10 SOL - 1,300,000 - 1,000
+    { chain: "solana", asset: "SOL", balance: "210", ready: "32", tap_max: "9.998699" }, // 10 SOL - 1,300,000 - 1,000
     { chain: "base", asset: "ETH", balance: "1", ready: "0.001000000000000001", tap_max: "0.001" },
   ]);
   // never below 0: a proof its fee and accounts eat spends 0

@@ -127,7 +127,7 @@ test("a position whose price reads zero has no value: the dash, never $0.00; a r
   for (const r of portfolio(snap(STATE), NO_DATA, NOW).rows) assert.equal(r.value, null, r.token);
 });
 
-// Card sol-pool-buys-mayhem-coins: a sale the pool cannot make on this token (venue_not_built: a Mayhem coin) is the buy
+// Card sol-pool-buys-mayhem-coins: a sale the pool cannot make on this token (venue_not_built: a curve quoted in another mint) is the buy
 // side's Unavailable on the sell side too: its EndLine draws the trade box's word, no Retry, and the box's Sell and its
 // presets stay off, since the same sale would be refused again
 test("the sell box keeps Sell and its presets off after an Unavailable sale", async () => {

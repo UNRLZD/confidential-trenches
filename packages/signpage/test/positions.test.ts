@@ -4,7 +4,7 @@
 // The page's requests on the mainnet build are test/positions-requests.test.ts.
 //   node --test test/positions.test.ts
 import assert from "node:assert/strict";
-import { after, beforeEach, test } from "node:test";
+import { after, afterEach, beforeEach, test } from "node:test";
 import { readFileSync, writeFileSync } from "node:fs";
 import { base58, base64 } from "@scure/base";
 import { IDBFactory } from "fake-indexeddb";
@@ -23,13 +23,24 @@ import { freshWallet } from "../../wallet/src/derive/keys.ts";
 import { jOf } from "../../wallet/src/pool/queue.ts";
 import { keptPositions, passMemo, POSITION_COSTS_KEY, positionCost, POSITIONS_KEPT_KEY, POSITIONS_RETRIES, POSITIONS_SOLD_KEY, POSITIONS_SOLD_TX_KEY, POSITIONS_UNLANDED_KEY, positionsCache, positionsPass, recordBoughtOut, recordPoolBuy, usdOf, withPositions, type KeptPass, type PassMemo, type PassResult, type FoundWallet, type PassRun, type Position, type PositionCosts, type PositionsReads } from "../src/positions.ts";
 import { stateFor } from "../src/kit-version.ts";
-import { testnetPool, testnetPoolDeps } from "../src/pool-testnet.ts";
+import { testnetPool as makePool, testnetPoolDeps } from "../src/pool-testnet.ts";
 import { poolKinds, type PoolRpc } from "../src/pool-kinds.ts";
 import { tokenDecimalsShown } from "../src/rules/pool.ts";
 import { BUY_MINTS_KEY, buyMints } from "../src/pool-sell.ts";
 import { resetHostLanes } from "../../wallet/src/throttle.ts";
 // each test a page of its own: no host's budget carried from the test before (card signpage-passes-yield-to-a-trade)
 beforeEach(() => resetHostLanes());
+// Every page a test makes signs out at the test's end, as main.ts's sign out does (signingOut: its turn timer cleared).
+// A state read arms the page's EVM turn (src/pool-testnet.ts armTurn) on whichever clock is in place; a page left signed
+// in on the real clock can fire its turn inside a later test's test clock, which re-arms it there for good ("the test
+// left 1 timer(s) that never stop", test/passes-yield.test.ts in CI, 11 Nov).
+const pages: { signingOut(): void }[] = [];
+afterEach(() => pages.splice(0).forEach((p) => p.signingOut()));
+const testnetPool = ((...a: Parameters<typeof makePool>) => {
+  const t = makePool(...a);
+  pages.push(t);
+  return t;
+}) as typeof makePool;
 
 const MINT = base58.encode(Uint8Array.from({ length: 32 }, (_, i) => (i === 31 ? 7 : 0))); // a 32-byte key, as a mint is (low entropy: gitleaks reads a recorded "token" as a key otherwise)
 const MINT2 = "Mint2222222222222222222222222222222222222222";
