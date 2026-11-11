@@ -11,7 +11,11 @@
 //   F3), and a quote without it could be steered to a seeded pool. When the Ws with a route do not hold the units, the
 //   sell is refused not_allowed, nothing read past the plan. Each W's balance is balanceOf(W) on both pool RPCs at the
 //   lower of their two newest blocks, the same on both (read again once). The units and legs are pool-sell.ts's rule:
-//   one W holding them all (the smallest), else smallest first, the last W in part.
+//   one W holding them all (the smallest), else smallest first, the last W in part. The finding gates the signature
+//   (a sale by share is sized on its total), so on mainnet too it reads on the pool's two RPCs, never the helper's route
+//   (decision M359 (2)): what narrows the reads is which Ws are asked, never whose word is believed. Only the Ws whose
+//   own buy record on this device names this token are read, one W a request, in a random order, so the pair is named
+//   only Ws that bought the token sold, which each leg's own reads name anyway, and never the user's other Ws.
 // - Each leg's plan and quote (evmSellQuoteLeg, which a read-only kind can call with no key: it then signs no sim):
 //   the return note (the wallet's evmNextNote over the pool's round from (return, evm, l, j): a deposit already naming one
 //   is the user's own, written by evmClaimTaken, and the walk goes on), W's sell nonce (SellDelegate.nonce() called on W,
@@ -78,6 +82,7 @@ import { ERC20_DECIMALS, keptTokenDecimals, type PoolRpc } from "./pool-kinds.ts
 import { stageOfLegs, type PoolSellAnswer, type PoolSellLeg } from "./pool-sell.ts";
 import { clockOf as readClockOf, readWaits, stopOf, tapDone, tapWaits, waitsOn, waitUnless, type ReadWaits } from "./read-waits.ts";
 import { TRADE_HELPER } from "./trade.ts";
+import { shuffled } from "./positions-evm.ts";
 import type { HostAnswer, HostRefusal, KindContext, Running } from "./api.ts";
 
 type Chain = "base" | "robinhood";
@@ -139,6 +144,8 @@ export type EvmSellHost = {
   venues: EvmPoolVenueList;
   /** The pool's two RPCs, of two operators. */
   rpcs: readonly [EvmRpc, EvmRpc];
+  /** The random source the plan's reads are ordered by (crypto.getRandomValues when not given). */
+  random?: (out: Uint32Array<ArrayBuffer>) => void;
   /** The pool's round (the page's evmTreeSync events()): its events up to the newest agreed block and its final block. */
   round(): Promise<{ events: readonly EvmPoolEvent[]; fin: { number: bigint } }>;
   notes(): Promise<NoteStore>;
@@ -253,7 +260,7 @@ export function holdingRoute(rec: unknown, chain: Chain, token: string): { route
 }
 
 /** The sell's plan (see the header): the Ws with a route, each one's balance on both RPCs, and the legs. */
-export async function planEvmSell(h: Pick<EvmSellHost, "chain" | "scope" | "rpcs" | "notes" | "seed64" | "holdings">, ask: PoolAsk): Promise<EvmSellPlan> {
+export async function planEvmSell(h: Pick<EvmSellHost, "chain" | "scope" | "rpcs" | "random" | "notes" | "seed64" | "holdings">, ask: PoolAsk): Promise<EvmSellPlan> {
   if (ask.kind !== "pool.sell" || ask.chain !== h.chain || ask.token === null) return no("not_allowed");
   const token = ask.token;
   const all = await h.holdings();
@@ -286,10 +293,10 @@ export async function planEvmSell(h: Pick<EvmSellHost, "chain" | "scope" | "rpcs
     seed.fill(0);
   }
   if (ws.length === 0) return no(routeless ? "not_allowed" : "not_funded");
-  // each W's balance on both RPCs at the lower newest block
+  // each W's balance on both RPCs at the lower newest block, one W a request, the Ws in a random order
   const heads = await Promise.all(h.rpcs.map((rpc) => evmHeadNumber(rpc)));
   const at = hexQ(heads[0]! < heads[1]! ? heads[0]! : heads[1]!);
-  const held = await Promise.all(ws.map(async (x) => ({ ...x, held: await agreed(h.rpcs, async (rpc) => word0(await rpc("eth_call", [{ to: token, data: `${BALANCE_OF}${word(BigInt(x.w))}` }, at]), "balanceOf")) })));
+  const held = await Promise.all(shuffled(ws, h.random).map(async (x) => ({ ...x, held: await agreed(h.rpcs, async (rpc) => word0(await rpc("eth_call", [{ to: token, data: `${BALANCE_OF}${word(BigInt(x.w))}` }, at]), "balanceOf")) })));
   const order = held.filter((x) => x.held > 0n).sort((x, y) => (x.held < y.held ? -1 : x.held > y.held ? 1 : x.w < y.w ? -1 : x.w > y.w ? 1 : 0));
   const total = order.reduce((t, x) => t + x.held, 0n);
   const units = ask.shareBps === undefined ? ask.amount : ask.shareBps === 10_000 ? total : (total * BigInt(ask.shareBps)) / 10_000n;
