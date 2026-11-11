@@ -221,9 +221,12 @@ export const MUTANTS = [
   // the EVM buy's floor, the check's own from the device's quote (card signpage-evm-pool-buy)
   ['if (lower(agreed.token) !== lower(ask.token ?? "")) return refuse("token");', "", EBUY],
   ['ctx.feeCap >= ask.amount || agreed.amountIn !== ask.amount - ctx.feeCap)', "ctx.feeCap >= ask.amount)", EBUY],
-  ['if (!Number.isInteger(ask.slippageBps) || ask.slippageBps < 0 || ask.slippageBps >= 10_000) return refuse("slippage");', "", EBUY],
-  ['const floor = (agreed.amountOut * BigInt(10_000 - ask.slippageBps)) / 10_000n;', "const floor = 1n;", EBUY],
-  ['if (typeof floor !== "bigint" || floor <= 0n || built.minOut < floor) return refuse("min_out");\n  passed("evm.sell"', 'passed("evm.sell"', ESELL],
+  // the buy's and the sell's slippage and floor lines read the same: each row names its own by the line beside it
+  ['return refuse("amount");\n  if (!Number.isInteger(ask.slippageBps) || ask.slippageBps < 0 || ask.slippageBps >= 10_000) return refuse("slippage");', 'return refuse("amount");', EBUY],
+  ['const floor = (agreed.amountOut * BigInt(10_000 - ask.slippageBps)) / 10_000n;\n  if (floor <= 0n || built.minOut < floor) return refuse("min_out");\n  checkRelay', 'const floor = 1n;\n  if (floor <= 0n || built.minOut < floor) return refuse("min_out");\n  checkRelay', EBUY],
+  ['if (floor <= 0n || built.minOut < floor) return refuse("min_out");\n  passed("evm.sell"', 'passed("evm.sell"', ESELL],
+  ['return refuse("deadline_past");\n  if (!Number.isInteger(ask.slippageBps) || ask.slippageBps < 0 || ask.slippageBps >= 10_000) return refuse("slippage");', 'return refuse("deadline_past");', ESELL],
+  ['const floor = (agreed.amountOut * BigInt(10_000 - ask.slippageBps)) / 10_000n;\n  if (floor <= 0n || built.minOut < floor) return refuse("min_out");\n  passed("evm.sell"', 'const floor = 1n;\n  if (floor <= 0n || built.minOut < floor) return refuse("min_out");\n  passed("evm.sell"', ESELL],
   // only what a check passed is signed
   ['if (!read || read.length !== wire.length || read.some((b, i) => b !== wire[i])) return refuse("unchecked");', "", "Solana deposit: the pinned pool's tag 1"],
   ['if (!read || read.length !== wire.length || read.some((b, i) => b !== wire[i])) return refuse("unchecked");', 'if (!read) return refuse("unchecked");', "Solana deposit: the pinned pool's tag 1"],
