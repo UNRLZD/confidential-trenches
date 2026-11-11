@@ -3,11 +3,11 @@
 // that answers failed (run 6: a devnet provider's 429 burst).
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { SolanaRpcTransportError, solanaPacedRpc, solanaSameProvider } from "../../kit/src/trade/solana/send.ts";
+import { SOLANA_RPC_RETRY, SolanaRpcTransportError, solanaPacedRpc, solanaSameProvider } from "../../kit/src/trade/solana/send.ts";
 import { pageHelperRpc, pageHelperRpcStopped, pageRpc, seatHosts } from "../src/page-rpc.ts";
 import { pageSolanaLister, pageSolanaRpcs, pageSolanaSettleRpcs, testnetPool, testnetPoolDeps } from "../src/pool-testnet.ts";
 import { SOLANA_PROVIDER_A, SOLANA_PUBLIC_SEAT, TRADE_HELPER, releaseTradeDeps } from "../src/trade.ts";
-import { hostLane, resetHostLanes } from "../../wallet/src/throttle.ts";
+import { hostLane, PROBE_HELD_MAX_MS, resetHostLanes, TRADE_TURN_MAX_MS } from "../../wallet/src/throttle.ts";
 import { onTestClock } from "../../kit/test/test-clock.ts";
 import { readdirSync, readFileSync } from "node:fs";
 import { HELPER_RPC_METHODS } from "../../kit/src/helper/v1.ts";
@@ -294,6 +294,37 @@ test("the mainnet buy and sell hosts hold every host of the public seat, and the
       for (const u of hosts) assert.equal(hostLane(u).trading(), false, `${name}: ${u} given back`);
     }
   });
+});
+
+// The review of 3d0d131b, item 2: one 429, then the host stalls, with 8 trade reads parked on its pause. Each read
+// parked ahead may be one probe that stalls to its try's 3.5 s timeout, so a held wait with no bound of its own grew one
+// try per read ahead (the last read ended at 29 s). A trade's turn ends TRADE_TURN_MAX_MS + PROBE_HELD_MAX_MS from its
+// start at most: every read has left or been refused by then, and ends within its own try's bound after.
+test("a host that answers one 429 and then stalls: 8 trade reads parked on its pause each end within the turn's bound and one try", async () => {
+  const real = globalThis.fetch;
+  const sent: number[] = [];
+  let n = 0;
+  globalThis.fetch = ((_u: string | URL | Request, init?: RequestInit) => {
+    sent.push(performance.now());
+    if (++n === 1) return new Promise<Response>((ok) => setTimeout(() => ok(new Response("", { status: 429, headers: { "retry-after": "1" } })), 100));
+    return new Promise<Response>((_, no) => init?.signal?.addEventListener("abort", () => no(init.signal!.reason), { once: true }));
+  }) as typeof fetch;
+  try {
+    await onTestClock(async () => {
+      resetHostLanes();
+      const t0 = performance.now();
+      const rpc = pageHelperRpc("https://stall-after-429.example", SOLANA_RPC_RETRY, "trade");
+      const one = (delay: number) => new Promise((r) => setTimeout(r, delay)).then(() => rpc("getAccountInfo", [W])).then(() => assert.fail("a stalled host answers nothing"), () => performance.now() - t0);
+      const ended = await Promise.all([one(0), ...Array.from({ length: 8 }, () => one(105))]);
+      const turn = 105 + TRADE_TURN_MAX_MS + PROBE_HELD_MAX_MS;
+      assert.ok(sent.every((at) => at - t0 <= turn + 50), `a request left past the turn's bound: ${sent.map((at) => Math.round(at - t0)).join(", ")}`);
+      const last = Math.max(...ended);
+      assert.ok(last <= turn + SOLANA_RPC_RETRY.deadlineMs + 50, `the last read ended at ${Math.round(last)} ms`);
+    });
+  } finally {
+    globalThis.fetch = real;
+    resetHostLanes();
+  }
 });
 
 test("a page RPC that stays throttled rejects naming the fault and the host, never a bare failure", async () => {

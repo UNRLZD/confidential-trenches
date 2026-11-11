@@ -324,9 +324,9 @@ export class HostLane {
   /** A read's turn (see the header). The read is counted as sent once it ends: the caller sends it in the same tick.
    *  `reports`: the caller reports the read's outcome (answered, throttled, failed), so it may be the probe. `by`: the
    *  reader's bound on this lane's clock, on every wait. A trade's known waits (the host's pause) are also held to
-   *  TRADE_TURN_MAX_MS from its start; its wait for a probe to settle is not (a read that waited a 10 s pause out is asked
-   *  once the probe settles, held to PROBE_HELD_MAX_MS by the probe's own). A known wait past its bound is refused at
-   *  once (HostPaused), a held one at its bound; nothing counted. A sign out's stopHostLaneWaits ends it as `signal` does. */
+   *  TRADE_TURN_MAX_MS from its start, and its wait for a probe to settle to PROBE_HELD_MAX_MS past that (a read that
+   *  waited a 10 s pause out is asked once the probe settles). A known wait past its bound is refused at once
+   *  (HostPaused), a held one at its bound; nothing counted. A sign out's stopHostLaneWaits ends it as `signal` does. */
   async turn(kind: "trade" | "pass", given?: AbortSignal, count = true, o: { reports?: boolean; by?: number } = {}): Promise<void> {
     const signal = laneSignal(given);
     const by = o.by ?? Infinity;
@@ -337,7 +337,9 @@ export class HostLane {
         signal.throwIfAborted();
         const { ms, held } = this.#waitOf(kind);
         if (ms <= 0) return void this.#go(kind, count, o.reports === true);
-        const left = (held ? by : capped) - this.#now();
+        // a trade's held wait ends PROBE_HELD_MAX_MS past its known waits' bound: each read parked ahead of it may be one
+        // probe that stalls to its try's timeout, so an unbounded held wait grew one try per read ahead
+        const left = (held ? Math.min(by, capped + PROBE_HELD_MAX_MS) : capped) - this.#now();
         // a known wait past the bound is refused now: never waited out to be dropped at its end
         if (left <= 0 || (!held && ms > left)) throw new HostPaused(this.host);
         // the floor, the window, the pause (at most 10 s), the probe's settle or a trade's start, whichever comes first
@@ -416,25 +418,6 @@ export function laneFetch(f?: (url: string, init?: RequestInit) => Promise<Respo
   return ((url: string | URL | Request, init?: RequestInit) => {
     hostLane(url instanceof Request ? url.url : String(url)).count();
     return (f ?? globalThis.fetch)(url as string, init);
-  }) as typeof fetch;
-}
-/** `f` for a trade's send paths (card signpage-throttled-provider-has-a-spare, the review of 507431c0 item 8): the send
- *  set rebroadcasts every tx every 2 s on its unlimited paths, among them provider A, whose reads the same trade makes.
- *  A request to a host in its pause is not sent (the set's other paths carry the tx; a path's failure is only noted), so
- *  the rebroadcast never draws a 429 the trade's reads then wait out; one sent is counted, and its 429 or 5xx pauses the
- *  host for every reader, as a read's does. An answer is not reported: a send is never a probe. */
-export function laneSendFetch(f?: (url: string, init?: RequestInit) => Promise<Response>): typeof fetch {
-  return (async (url: string | URL | Request, init?: RequestInit) => {
-    const l = hostLane(url instanceof Request ? url.url : String(url));
-    if (l.gate.left() > 0) throw new Error(`not sent: ${l.host} is paused after a throttle`);
-    const sentIn = l.gate.epoch();
-    l.count();
-    const r = await (f ?? globalThis.fetch)(url as string, init);
-    if (r.status === 429 || (r.status >= 500 && r.status <= 599)) {
-      const s = Number(r.headers.get("retry-after"));
-      l.throttled(sentIn, Number.isFinite(s) && s > 0 ? s * 1_000 : null);
-    }
-    return r;
   }) as typeof fetch;
 }
 /** Forgets every host's lane (tests: each test's clock starts at its own zero). */

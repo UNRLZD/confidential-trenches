@@ -9,7 +9,7 @@ import { solanaJsonRpc, solanaPacedRpc } from "@blindfill/kit";
 import { SOLANA_KEYLESS_RPC_LIMIT } from "../../kit/src/trade/solana/send.ts";
 import { onTestClock } from "../../kit/test/test-clock.ts";
 import * as d from "../src/derive/index.ts";
-import { HOST_WINDOW_MS, HostLane, HostPaused, PROBE_HELD_MAX_MS, THROTTLE_QUIET_MS, holdHosts, hostLane, laneSendFetch, PASS_BUDGET, PASS_BUDGET_TRADING, PASS_FLOOR_MS, resetHostLanes, stopHostLaneWaits, THROTTLE_BOUNDS, THROTTLE_PAUSE_FIRST_MS, THROTTLE_PAUSE_MAX_MS, THROTTLE_RETRY_AFTER_MAX_MS, ThrottleGate, throttleWaitMs, TRADE_HOLD_MAX_MS, TRADE_TURN_MAX_MS } from "../src/throttle.ts";
+import { HOST_WINDOW_MS, HostLane, HostPaused, PROBE_HELD_MAX_MS, THROTTLE_QUIET_MS, holdHosts, hostLane, PASS_BUDGET, PASS_BUDGET_TRADING, PASS_FLOOR_MS, resetHostLanes, stopHostLaneWaits, THROTTLE_BOUNDS, THROTTLE_PAUSE_FIRST_MS, THROTTLE_PAUSE_MAX_MS, THROTTLE_RETRY_AFTER_MAX_MS, ThrottleGate, throttleWaitMs, TRADE_HOLD_MAX_MS, TRADE_TURN_MAX_MS } from "../src/throttle.ts";
 import { buyWallets, evmHoldingsReader, HOLDINGS_THROTTLE_MAX_MS, HOLDINGS_THROTTLED_ROUNDS_60S, solanaHelperHoldings, solanaHoldingsAt, solanaHoldingsReader, type HoldingsReader } from "../src/pool/buy-wallets.ts";
 
 const SEED = d.wordsToSeed64(d.entropyToWords(new Uint8Array(16)));
@@ -763,27 +763,4 @@ test("HostLane: a probe that fails any other way settles it (the host still in d
   await advance(1_000 + PROBE_HELD_MAX_MS);
   assert.deepEqual(order, ["a", "b", "c"], "a lost probe is given up at its try's timeout");
   await Promise.all([a, b, c]);
-});
-
-// The review of 507431c0, item 8: the send set's 2 s rebroadcast to provider A honours the host's pause and reports
-// its throttles, so it never keeps a host in 429 that the same trade's reads use.
-test("laneSendFetch: a request to a paused host is not sent or counted; one sent is counted, and its 429 pauses the host for every reader", async () => {
-  resetHostLanes();
-  const url = "https://send-lane.example/";
-  const sent: string[] = [];
-  let status = 429;
-  const f = laneSendFetch(async (u: string) => (sent.push(u), new Response("", { status, headers: { "retry-after": "2" } })));
-  const r = await f(url, { method: "POST" });
-  assert.equal(r.status, 429);
-  assert.deepEqual(sent, [url]);
-  assert.equal(hostLane(url).inWindow(), 1, "counted");
-  assert.equal(hostLane(url).gate.left() > 1_900, true, "the 429's Retry-After pauses the host");
-  await assert.rejects(f(url, { method: "POST" }), /not sent: send-lane\.example is paused/);
-  assert.deepEqual(sent, [url], "nothing sent in the pause");
-  assert.equal(hostLane(url).inWindow(), 1, "nothing counted in the pause");
-  resetHostLanes();
-  status = 200;
-  await f(url, { method: "POST" });
-  assert.equal(hostLane(url).gate.suspect(), false, "an answer is not reported");
-  resetHostLanes();
 });

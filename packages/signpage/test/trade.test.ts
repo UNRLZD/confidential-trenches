@@ -890,26 +890,6 @@ for (const [name, pair, paused] of [
   });
 }
 
-// The review of 507431c0, item 8: the send set's rebroadcast to provider A (its "rpc" path, every 2 s) honours provider
-// A's pause: nothing is sent to it while the trade's reads wait that pause out, and a 429 it answers pauses it.
-test("review of 507431c0: the release's send to provider A is not sent while provider A is paused, and its 429 pauses provider A", async () => {
-  const real = globalThis.fetch;
-  const asked: string[] = [];
-  globalThis.fetch = (async (u: string | URL | Request) => (asked.push(new URL(u instanceof Request ? u.url : String(u)).host), new Response("", { status: 429 }))) as typeof fetch;
-  try {
-    resetHostLanes();
-    const rpc = releaseTradeDeps().paths!.find((x) => x.name === "rpc")!;
-    await assert.rejects(rpc.send("AAAA"));
-    assert.deepEqual(asked, [new URL(SOLANA_PROVIDER_A).host]);
-    assert.ok(hostLane(SOLANA_PROVIDER_A).gate.left() > 0, "the send's 429 paused provider A");
-    await assert.rejects(rpc.send("AAAA"), /not sent/);
-    assert.deepEqual(asked, [new URL(SOLANA_PROVIDER_A).host], "nothing sent to provider A in its pause");
-  } finally {
-    globalThis.fetch = real;
-    resetHostLanes();
-  }
-});
-
 // Card solana-release-reads-paced: the release's reference reads on the pair the kit hands it (flow.ts gives its paced
 // providers, pacedDeps), never on a pair of its own that the trade's pace does not hold.
 test("card solana-release-reads-paced: the release's reference reads on the providers the kit hands it, and on no other", async () => {

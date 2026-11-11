@@ -11,9 +11,10 @@
 //   is asked again once, after that pause; an answer that is not JSON, a stall or a dropped connection is asked again
 //   once after the retry's backoff. A sign out ends every wait on every host at once (stopHostLaneWaits). Never a third ask, and never a wait that would end past the call's bound: the call
 //   then rejects naming its fault (SolanaRpcTransportError). So a trade's read waits for its turn at most
-//   TRADE_TURN_MAX_MS (10 s) on the host's pause, plus PROBE_HELD_MAX_MS (5 s) on the probe after it, then its bound
-//   (3.5 s; 12 s for a settle's SOLANA_RPC_WINDOW_RETRY), whatever the host answers; a seat (seatRpc) adds its next
-//   member's own once a member faults.
+//   TRADE_TURN_MAX_MS + PROBE_HELD_MAX_MS (15 s) from the turn's start, the host's pause (at most 10 s) and the probes
+//   after it (each read parked ahead may be one) together, then its bound (3.5 s; 12 s for a settle's
+//   SOLANA_RPC_WINDOW_RETRY), whatever the host answers; a seat (seatRpc) adds its next member's own once a member
+//   faults.
 import { readSolanaReference, type SolanaReference, type SolanaReferenceRequest } from "../../kit/src/trade/solana/pool.ts";
 import { HELPER_FETCH_INIT } from "../../kit/src/helper/v1.ts";
 import { SOLANA_RPC_RETRY, SolanaRpcTransportError, solanaHelperRpc, solanaJsonRpc, solanaSameProvider, solanaWrappedRpc, type SolanaFetch, type SolanaRpc, type SolanaRpcRetry } from "../../kit/src/trade/solana/send.ts";

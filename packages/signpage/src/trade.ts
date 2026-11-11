@@ -42,7 +42,7 @@ import type { ErrorCode, SignpageResults, TradeStage, TxRef } from "../../kit/sr
 import { ladderSplit } from "@blindfill/wallet/arming/ladder";
 import { ArmRefused, armRecordOf, armRecords, claimArm, settleArm, solanaArmedSigner, type ArmRecord } from "@blindfill/wallet/arming/records";
 import { WALLET_SEED_LOCK, type WalletStore } from "@blindfill/wallet/store";
-import { laneFetch, laneSendFetch } from "../../wallet/src/throttle.ts";
+import { laneFetch } from "../../wallet/src/throttle.ts";
 import type { HostAnswer, KindContext, Running } from "./api.ts";
 
 export type TradeStore = Pick<WalletStore, "get" | "put" | "keys" | "update">;
@@ -112,11 +112,9 @@ export function releaseTradeDeps(): TradeHost["deps"] {
     // a provider read that fails past its retry rejects (pageReference), never reads as "no reference pool"
     reference: (q, paced) => pageReference(paced, q),
     // every send path's requests counted on its host's lane, the helper's among them (../../wallet/src/throttle.ts laneFetch);
-    // the device's paths (Sender, Jito, provider A) honour their host's pause and report its throttles (laneSendFetch):
-    // the 2 s rebroadcast to provider A never draws a 429 the same trade's reads then wait out. The public path is
-    // provider A, never the kit's default api.mainnet-beta.solana.com, which answers a browser 403 "Access forbidden"
-    // (Chrome, 2026-11-11T05:18:53Z; test/trade.test.ts holds the set's hosts)
-    paths: solanaSendPaths({ helper: solanaHelperRpc(TRADE_HELPER, { fetch: laneFetch() }), rpcUrl: SOLANA_PROVIDER_A, fetch: laneSendFetch() }),
+    // the public path is provider A, never the kit's default api.mainnet-beta.solana.com, which answers a browser 403
+    // "Access forbidden" (Chrome, 2026-11-11T05:18:53Z; test/trade.test.ts holds the set's hosts)
+    paths: solanaSendPaths({ helper: solanaHelperRpc(TRADE_HELPER, { fetch: laneFetch() }), rpcUrl: SOLANA_PROVIDER_A, fetch: laneFetch() }),
   };
 }
 

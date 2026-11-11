@@ -33,7 +33,7 @@ export const READ_WAIT: ThrottleBounds = /* @__PURE__ */ Object.freeze({ firstMs
 /** One tap's bound, on the device's clock from the request's arrival: the tap answers down once the next wait would end
  *  past it, and starts no attempt after that (another wallet's sale included). The worst a throttled tap takes before
  *  down is this plus the one attempt in flight, each of whose reads waits as page-rpc.ts's header bounds it (its turn:
- *  the host's pause, at most 10 s, plus a probe's verdict, at most 5 s; then the call's 3.5 s bound; a seat's next member
+ *  the host's pause and the probes after it, at most 15 s together; then the call's 3.5 s bound; a seat's next member
  *  its own after a member faults). A sale that never met a fault is never cut by it. */
 export const READ_WAIT_TOTAL_MS = 30_000;
 /** The device's clock, ms. */
