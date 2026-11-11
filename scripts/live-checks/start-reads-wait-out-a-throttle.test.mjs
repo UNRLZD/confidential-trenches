@@ -116,3 +116,16 @@ test("planted on the bundle: a flat wait, another bound, no clock, any error wai
   assert.equal(off("n>0&&await u(PV(i)?r=cV(r,OV(i),EV):EV.firstMs)", "n>0&&await u(1e3)").rentBack, false, "the rent back's flat second");
   assert.equal(off("n>0&&await u(PV(i)?r=cV(r,OV(i),EV):EV.firstMs)", "n>0&&await u(r=cV(r,OV(i),EV))").rentBack, false, "the rent back doubling on any failure");
 });
+
+// card pool-sell-legs-side-by-side hands each wallet's sale more after the waits (its earlier reads and its turn): the
+// spent mark reads that shape, cut from that card's public/app.js (start-reads-wait-out-a-throttle.side.excerpt.txt),
+// and the shape before it; the check taken away from either FAILs
+test("the spent mark on the side-by-side sell's shape and on the shape before it; the check taken away FAILs", async () => {
+  const { SPENT } = await import("./start-reads-wait-out-a-throttle.mjs");
+  const side = readFileSync(new URL("./start-reads-wait-out-a-throttle.side.excerpt.txt", import.meta.url), "utf8");
+  const before = ".then(()=>o.stopped?.()?{error:`failed`}:i.spent()?{error:`down`}:hU(g,{...t,amount:e.units,shareBps:void 0},s,e.w,i)))";
+  for (const js of [side, before]) {
+    assert.equal(SPENT.test(js), true, js.slice(0, 80));
+    assert.equal(SPENT.test(js.replace("i.spent()?{error:`down`}:", "")), false, "no spent check: FAIL");
+  }
+});

@@ -1,0 +1,1 @@
+.then(()=>o.stopped?.()?{error:`failed`}:i.spent()?{error:`down`}:hU(g,{...t,amount:e.units,shareBps:void 0},s,e.w,i,a===0?u:m,a===0?{venues:p,spent:()=>i.spent()}:{opened:h,venues:p,spent:()=>i.spent()})).catch(()=>({error:`failed`})).then(e=>(c(),d[a]=`error`in e?{...d[a],tx:null,stage:null,error:

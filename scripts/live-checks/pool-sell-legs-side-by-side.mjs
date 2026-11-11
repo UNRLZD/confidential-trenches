@@ -20,9 +20,9 @@ export const SIGN = "https://confidential.unrealized.trade";
 const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}`;
 
 const N = "[\\w$]+";
-// the leg's turn awaited, a sign out after it refused, then (its venue reader between) the blockhash and the deposit's
-// pages started only when there was a turn
-const TURN = new RegExp(`(${N})=${N}\\?\\.opened;if\\(\\1&&\\(await \\1,${N}\\.stopped\\?\\.\\(\\)\\)\\)return\\{error:\`failed\`\\};[^;]{0,200};if\\(\\1\\)\\{${N}=${N}\\(${N}\\(${N}\\)\\),${N}=${N}\\(Promise\\.all\\(\\[${N},${N}\\]\\)\\.then\\(`);
+// the leg's turn awaited, a sign out after it refused and the tap's waits spent meanwhile answered down, then (its venue
+// reader between) the blockhash and the deposit's pages started only when there was a turn
+const TURN = new RegExp(`(${N})=${N}\\?\\.opened;if\\(\\1\\)\\{if\\(await \\1,${N}\\.stopped\\?\\.\\(\\)\\)return\\{error:\`failed\`\\};if\\(${N}\\.spent\\?\\.\\(\\)\\)return\\{error:\`down\`\\}\\}[^;]{0,200};if\\(\\1\\)\\{${N}=${N}\\(${N}\\(${N}\\)\\),${N}=${N}\\(Promise\\.all\\(\\[${N},${N}\\]\\)\\.then\\(`);
 // the sale's wallets: the passes held off, then (for a sale) the kept pass's listing read; a listing: the Ws derived from
 // the spent notes with no read
 const LISTED = new RegExp(`wallets:async\\(\\)=>\\{let ${N}=${N}\\.preempt\\(\\),${N}=null;try\\{let (${N})=${N}\\?${N}\\(await\\(await ${N}\\.store\\(\\)\\)\\.get\\(\`meta\`,${N}\\)\\):null;if\\(\\1!==null\\)\\{let ${N}=await ${N}\\(await ${N}\\(\\),${N}\\),${N}=await ${N}\\.seed64\\(\\),${N};try\\{${N}=${N}\\(${N},\\[\\{id:${N}\\.program,chain:\`sol\`,spent:${N}\\}\\]\\)\\}finally\\{${N}\\.fill\\(0\\)\\}`);

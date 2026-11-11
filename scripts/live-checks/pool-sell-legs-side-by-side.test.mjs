@@ -3,7 +3,8 @@
 // (a leg's whole sale after its turn, the finder read at the tap): FAIL, each fact named. Planted on the good one:
 // another /app.js, no pin, each mark taken away: each FAIL. Planted in the bundle's own excerpt
 // (pool-sell-legs-side-by-side.excerpt.txt, cut from this card's public/app.js): the turn not awaited, a sign out not
-// checked after it, the blockhash read before it, the finder read for every sale, the seed copy not zeroed: each FAIL.
+// checked after it, the tap's spent waits not checked after it, the blockhash read before it, the finder read for every
+// sale, the seed copy not zeroed: each FAIL.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
@@ -41,8 +42,9 @@ test("planted in the bundle's excerpt: each break in place FAILs", () => {
   for (const [what, from, to, key] of [
     ["the turn not awaited", "(await T,e.stopped?.())", "(e.stopped?.())", "turn"],
     ["no sign out checked after the turn", "(await T,e.stopped?.())", "(await T,!1)", "turn"],
+    ["the tap's waits not checked after the turn", "if(a.spent?.())return{error:`down`}", "", "turn"],
     ["the blockhash read whatever the turn", "if(T){D=", "{D=", "turn"],
-    ["the finder for every sale", "let r=t?GN(", "let r=!1?GN(", "listed"],
+    ["the finder for every sale", "let r=t?", "let r=!1?", "listed"],
     ["the seed copy not zeroed", "finally{i.fill(0)}", "finally{}", "listed"],
   ]) {
     const bad = js.replace(from, to);

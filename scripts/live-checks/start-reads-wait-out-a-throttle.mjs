@@ -36,6 +36,10 @@ const esc = (s) => s.replace(/[$]/g, "\\$");
 const count = (re, s) => [...s.matchAll(new RegExp(re.source, "g"))].length;
 
 /** What the check keeps of the reads: the index, the served bundle's sha384, and which marks the bundle holds. */
+// a sell's next wallet whose turn comes once the waits are spent answers down without starting (its sale may be handed
+// more after the waits: card pool-sell-legs-side-by-side's earlier reads and turn)
+export const SPENT = new RegExp(`\\.then\\(\\(\\)=>(${N})\\.stopped\\?\\.\\(\\)\\?\\{error:${Q}failed${Q}\\}:(${N})\\.spent\\(\\)\\?\\{error:${Q}down${Q}\\}:${N}\\(${N},\\{\\.\\.\\.${N},amount:${N}\\.units,shareBps:void 0\\},${N},${N}\\.w,\\2(?:,[^;]{0,240}?)?\\)\\)`);
+
 export function facts(index, js) {
   const out = { index, sha384: sha384(js), rule: false, faults: false, stop: false, wired: { decimals: false, sell: false, spent: false, buy: false, deposits: 0, stops: 0, taps: 0 }, rentBack: false };
   // the bounds, the device's clock, the Retry-After of the transport fault, and the rule: next(e) = T(pause, A(e), B),
@@ -74,7 +78,7 @@ export function facts(index, js) {
     // the sell: its plan and sales on one bound (a host's clock by default), each wait ended by the sign out
     sell: new RegExp(`async function ${N}\\(${N},${N},${N},${N}=\\{\\},(${N})=${esc(R)}\\(${esc(TL)}\\(${N}\\)\\)\\)\\{let ${N},${N}=Object\\.assign`).test(js) && count(new RegExp(`await ${esc(C)}\\((${N})\\.wait,${N},\\1\\.signal\\),\\1\\.stopped\\?\\.\\(\\)\\|\\|\\1\\.signal\\?\\.aborted\\)return\\{error:${Q}failed${Q}\\}`), js) >= 2,
     // a wallet whose turn comes once the waits are spent answers down without starting
-    spent: new RegExp(`\\.then\\(\\(\\)=>(${N})\\.stopped\\?\\.\\(\\)\\?\\{error:${Q}failed${Q}\\}:(${N})\\.spent\\(\\)\\?\\{error:${Q}down${Q}\\}:${N}\\(${N},\\{\\.\\.\\.${N},amount:${N}\\.units,shareBps:void 0\\},${N},${N}\\.w,\\2\\)\\)`).test(js),
+    spent: SPENT.test(js),
     // the buy and both deposits: the attempts loop on the host's wait, sign out and the bound
     buy: new RegExp(`async function ${N}\\(${N},${N},(${N})=${esc(R)}\\(${esc(TL)}\\(${N}\\)\\)\\)\\{let (${N})=Object\\.assign\\(Object\\.create\\(${N}\\),\\{rpcs:${N}\\(${N}\\.rpcs,${N}\\(null\\)\\)\\}\\);return ${esc(L)}\\(${N}=>${N}\\(\\2,${N},${N}\\),\\2\\.wait,\\2\\.signal,\\1\\)\\}async function ${N}\\(${N},${N},${N}\\)\\{let ${N}=null,${N}=null,${N}=null,${N}=!1`).test(js),
     // the deposits wait on both their stops (stopOf)
