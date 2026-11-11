@@ -2,7 +2,7 @@
 // and the same transaction, signed by W alone, puts what the sale gives back into the pinned pool as a note of the
 // user's own; the note is written INCOMING before the send and lands UNSPENT once both RPCs show its deposit.
 //
-// - W: one of the page's buy wallets (../../wallet/src/pool/buy-wallets.ts BuyWallet: its l, j, address and holdings),
+// - W: one of the page's buy wallets (../../wallet/src/pool/buy-wallets.ts ListedBuyWallet: its l, j, address and holdings),
 //   the one holding the token, not frozen, with the smallest holding that covers the amount. The pick reads nothing;
 //   none: not_funded with no read at all.
 // - The gating reads, each on both RPCs: the Rent sysvar; the pool account (the same bytes on both, read again once
@@ -32,7 +32,10 @@
 //   (pool-buy.ts blockhashOf: its slot is the device's own). Min out is the kit's solanaPoolSellMinOut.
 // - The reserve, the lamports W keeps out of the deposit: the costs (the tx fee both RPCs price the message at, the
 //   mark's rent and each tree page's growth, as pool-deposit.ts counts them) and an empty account's rent W must keep,
-//   less what W holds. No compute budget instruction: no priority fee. A reserve over SOLANA_POOL_SELL_RESERVE_MAX or
+//   less what W holds. On devnet no compute budget instruction: no priority fee; on mainnet a limit and a price
+//   (solanaSellBudget: SOLANA_POOL_SELL_PRIORITY in all, or what W holds beyond the sell's need under it, none at 0;
+//   only on a form with room for it under 1,232 bytes, solanaSellBudgetFits; the limit sized from the simulation), in
+//   the fee both RPCs price, so the reserve, the funds check and the rule count it; a partial sell keeps it on W too. A reserve over SOLANA_POOL_SELL_RESERVE_MAX or
 //   at least min out is refused.
 // - Built here (the kit's solanaPoolSellSteps, then the tag 1 deposit of min out less the reserve with the return note's
 //   precommitment, last), checked by the rule (rules/pool.ts checkSolanaSell, against the page's pin read at the check),
@@ -57,26 +60,26 @@
 import { base58, base64 } from "@scure/base";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { simulateSolanaTeardown, solanaCompileV0, solanaTeardownChecked } from "../../kit/src/trade/solana/build.ts";
-import { readSolanaPoolBuyVenue, readSolanaRent, SOLANA_POOL_PAGE_ENTRIES, SOLANA_POOL_QUOTE_MAX_AGE_SLOTS, SOLANA_POOL_SELL_FEE, solanaPoolNextPage, solanaPoolPage, solanaPoolSellMinOut, solanaPoolBuySellNeed, solanaPoolSellNeed, solanaPoolSellSteps, solanaRentMin, type SolanaPoolBuyVenue, type SolanaRent } from "../../kit/src/trade/solana/pool-buy.ts";
+import { readSolanaPoolBuyVenue, readSolanaRent, SolanaPoolBuyError, SOLANA_POOL_PAGE_ENTRIES, SOLANA_POOL_QUOTE_MAX_AGE_SLOTS, SOLANA_POOL_SELL_FEE, solanaPoolNextPage, solanaPoolPage, solanaPoolSellMinOut, solanaPoolBuySellNeed, solanaPoolSellNeed, solanaPoolSellSteps, solanaRentMin, type SolanaPoolBuyVenue, type SolanaRent } from "../../kit/src/trade/solana/pool-buy.ts";
 import { SOLANA_POOL_NEXT_PAGE_WINDOW, solanaPoolNoteFloor, solanaPoolPreMarkOf, type SolanaPoolPreMark } from "../../kit/src/trade/solana/pool-deposit.ts";
 import { solanaDecodeTokenAccount, type SolanaReference } from "../../kit/src/trade/solana/pool.ts";
 import { pageReference } from "./page-rpc.ts";
-import { SOLANA_MAX_TX_BYTES, solanaAta, solanaProgramAddress } from "../../kit/src/checks/solana/message.ts";
-import { SOLANA_PUMP_AMM_PROGRAM, SOLANA_PUMP_PROGRAM, SOLANA_SOL_MINT, SOLANA_SYSTEM_PROGRAM, SOLANA_TOKEN_2022_PROGRAM, SOLANA_TOKEN_PROGRAM, solanaTeardownAddresses, solanaTeardownPlan, solanaVolumeAccumulator, solanaVolumeClaimable, type SolanaHeldRead, type SolanaTeardownSimulation, type SolanaTeardownUnclaimed } from "../../kit/src/checks/solana/checks.ts";
+import { SOLANA_MAX_TX_BYTES, solanaAta, solanaDecodeMessage, solanaProgramAddress } from "../../kit/src/checks/solana/message.ts";
+import { SOLANA_COMPUTE_BUDGET_PROGRAM, SOLANA_CU_PRICE_MAX, SOLANA_PUMP_AMM_PROGRAM, SOLANA_PUMP_PROGRAM, SOLANA_SOL_MINT, SOLANA_SYSTEM_PROGRAM, SOLANA_TOKEN_2022_PROGRAM, SOLANA_TOKEN_PROGRAM, solanaTeardownAddresses, solanaTeardownPlan, solanaVolumeAccumulator, solanaVolumeClaimable, type SolanaHeldRead, type SolanaTeardownSimulation, type SolanaTeardownUnclaimed } from "../../kit/src/checks/solana/checks.ts";
 import { SolanaRpcTransportError, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import { vaultLabelOf } from "../../kit/src/vault/shapes.ts";
 import type { ErrorCode, TradeStage, TxRef } from "../../kit/src/signpage/messages.ts";
 import { freshWallet } from "../../wallet/src/derive/keys.ts";
 import { noteCommitment, noteSecrets, type NoteRef } from "../../wallet/src/notes/secrets.ts";
 import { refKey, type Leaf, type NoteRecord, type NoteStore } from "../../wallet/src/notes/store.ts";
-import type { BuyWallet } from "../../wallet/src/pool/buy-wallets.ts";
+import type { ListedBuyWallet } from "../../wallet/src/pool/buy-wallets.ts";
 import { solanaPoolOf, solanaTreeSync, type SolanaPoolPin, type SolanaTreeSync } from "../../wallet/src/pool/solana.ts";
 import { WALLET_SEED_LOCK } from "@blindfill/wallet/store";
 import { blockhashOf, blockhashRead, blockhashValid, pastOnBoth, readBack, readBackFailure, readBackMeta, type BuyMints } from "./pool-buy.ts";
 import { afterOf, clockOf, keptReads, READ_WAIT, readWaits, forgetYoung, solanaSaleReads, solanaStableReads, tapDone, tapWaits, waitsOn, waitUnless, youngReads, type ReadWaits } from "./read-waits.ts";
 import { throttleWaitMs } from "../../wallet/src/throttle.ts";
 import { fromRecord, timedStore, TRADE_STORE_MS, tradeLock, type TradeStore } from "./trade.ts";
-import { checkSolanaSell, checkSolanaSweep, checkSolanaTeardownFrames, PoolRuleRefused, poolUnits, signSolana, SOLANA_POOL_MIN_DEPOSIT, SOLANA_POOL_SELL_RESERVE_MAX, SOLANA_SWEEP_OWED_MAX, solanaDepositRents, solanaSellAfterFull, solanaSweepFloor, solanaSweepKeep, type PoolAsk, type SolanaDepositHeld } from "./rules/pool.ts";
+import { checkSolanaSell, checkSolanaSweep, checkSolanaTeardownFrames, PoolRuleRefused, poolUnits, signSolana, SOLANA_POOL_CU_LIMIT_MAX, SOLANA_POOL_MIN_DEPOSIT, SOLANA_POOL_SELL_RESERVE_MAX, SOLANA_SWEEP_OWED_MAX, solanaDepositRents, solanaSellAfterFull, solanaSweepFloor, solanaSweepKeep, type PoolAsk, type SolanaDepositHeld } from "./rules/pool.ts";
 // the full sell's keep is priced by the sell's rule too (rules/pool.ts checkSolanaSell, review L1 of 38faee89)
 export { solanaSellAfterFull };
 import type { HostAnswer, HostRefusal, KindContext, Running } from "./api.ts";
@@ -85,6 +88,8 @@ import type { HostAnswer, HostRefusal, KindContext, Running } from "./api.ts";
 export type PoolSellHost = {
   /** The pinned pool (the wallet's SOL_POOLS of this page's network). */
   pin: SolanaPoolPin;
+  /** The pool's cluster (pool-testnet.ts PAGE_CLUSTER): on mainnet W's sell pays a priority fee (solanaSellBudget). */
+  cluster?: "mainnet" | "devnet";
   /** W's buy mint, as the buy wrote it (pool-buy.ts BuyMints): read by the rent back. */
   bought?: BuyMints;
   /** Two RPCs of different operators. */
@@ -93,8 +98,10 @@ export type PoolSellHost = {
   notes(): Promise<NoteStore>;
   /** The 64-byte seed; each copy is zeroed here. */
   seed64(): Promise<Uint8Array>;
-  /** The page's buy wallets with their holdings (shown, never signed on: the run reads again on both RPCs). */
-  wallets(): Promise<readonly BuyWallet[]>;
+  /** The page's buy wallets, each with its holdings as the finder read it when `read` asks for it (with no `read`, the
+   *  Ws neither a buy record nor the last whole positions pass names), else as that pass listed it, else holdings null:
+   *  not read (shown, never signed on: the run reads again on both RPCs). */
+  wallets(read?: (address: string) => boolean | Promise<boolean>): Promise<readonly ListedBuyWallet[]>;
   /** The transaction is signed and about to leave the device (its note already INCOMING with it): W's signature. The
    *  send waits for it; a throw sends nothing. */
   signed?(signature: string): Promise<void> | void;
@@ -134,7 +141,7 @@ export type PoolSellHost = {
  *  decimal string, as an answer carries it), its transaction's signature once W signed (null: it ended before signing),
  *  and how it ended: its stage, or the refusal before it signed. */
 export type PoolSellLeg = { wallet: string; amount: string; tx: string | null; stage: TradeStage | null; error?: PoolSellError; cause?: string };
-type PoolSellError = "not_allowed" | "not_funded" | "quote_check_failed" | "failed" | "down";
+type PoolSellError = "not_allowed" | "not_funded" | "quote_check_failed" | "venue_not_built" | "failed" | "down";
 /** A sell's answer: its stage over every wallet's sale (filled when each filled, part_filled when some did), each sale's
  *  transaction in `txs`, and every sale in `legs`; or a refusal, nothing signed. */
 export type PoolSellAnswer = { stage: TradeStage; txs: TxRef[]; legs?: readonly PoolSellLeg[] } | { error: PoolSellError };
@@ -312,7 +319,7 @@ async function mintProgram(rpcs: Rpcs, mint: string): Promise<string> {
 
 /** What W holds, as a sale prices it: the token's program, W's token amount, W's lamports (the lower of the two RPCs'),
  *  and for pump and PumpSwap in that order whether W's volume account there owes a claim on either RPC's read. */
-type WHeld = { program: string; amount: bigint; lamports: bigint; owes: readonly [boolean, boolean] };
+export type WHeld = { program: string; amount: bigint; lamports: bigint; owes: readonly [boolean, boolean] };
 
 /** W's own accounts in one getMultipleAccounts call on each RPC (card pool-sell-legs-side-by-side; every address in it
  *  is W's, so a read still names one W of the user's at most): its associated token account of `mint` under `program`,
@@ -356,6 +363,19 @@ async function wHeld(rpcs: Rpcs, w: string, mint: string, program: string, wait:
     wait,
     "held_split",
   );
+}
+/** W's own read as a sale's plan takes it (wHeld), for the sell box's preview (pool-sell-dry.ts, card
+ *  app-sell-shows-what-you-receive): the same call, W's addresses only; with no wait, so two RPCs that answer apart end it
+ *  at once ("split", the preview's "not now"); frozen on both: "frozen", which the plan counts as nothing held. */
+export async function wHeldNow(rpcs: Rpcs, w: string, mint: string, program: string): Promise<WHeld | "split" | "frozen"> {
+  const now = new Error("split");
+  try {
+    return await wHeld(rpcs, w, mint, program, () => Promise.reject(now));
+  } catch (e) {
+    if (e === now) return "split";
+    if (e instanceof Refused && e.code === "not_allowed") return "frozen";
+    throw e;
+  }
 }
 
 type Mark = { value: bigint; nonce: bigint; slot: number };
@@ -653,7 +673,7 @@ export function legVenue<V>(guess: { kind: "pump-curve" | "pumpswap"; read: Prom
 }
 
 /** One W's sale, built again (POOL_SELL_REBUILDS at most) while its deposit meets a page another deposit filled first. */
-async function sellRuns(h: PoolSellHost, ask: PoolAsk, later: Later, w: BuyWallet, waits: ReadWaits, early?: Early, turn?: LegTurn): Promise<LegAnswer> {
+async function sellRuns(h: PoolSellHost, ask: PoolAsk, later: Later, w: ListedBuyWallet, waits: ReadWaits, early?: Early, turn?: LegTurn): Promise<LegAnswer> {
   for (let i = 0; ; ) {
     delete later.rebuild;
     delete later.fault;
@@ -713,14 +733,20 @@ export function legCause(e: unknown): string {
 
 /** A sell's plan: the units it sells over every wallet, and each wallet's sale in the order they run. `frozen`: a W
  *  both RPCs read frozen was left out, so a share of the holding never sells all of it. */
-export type PoolSellPlan = { units: bigint; total: bigint; legs: readonly { w: BuyWallet; units: bigint; held: bigint }[]; frozen: boolean };
+export type PoolSellPlan = { units: bigint; total: bigint; legs: readonly { w: ListedBuyWallet; units: bigint; held: bigint }[]; frozen: boolean };
 
 /**
  * The sell's plan (card pool-sell-share-across-wallets), from the device's own reads alone. Every buy of a token lands in
  * its own fresh wallet W, so the user's holding of it is spread over several.
  * - The Ws: the page's buy wallets (h.wallets(): every W the pool's spent notes paid, derived from the seed) that its own
  *   buy record names for this token (h.bought, written by the buy before its send) or that the listed holdings show
- *   holding it. The listed holdings (on mainnet the helper's one read) only add a W to read; no amount of theirs is used.
+ *   holding it: the last whole positions pass's listing, and the finder's read (on mainnet the helper's one read,
+ *   paced) of only the Ws neither names (a buy from before the record, a restored device). The fast path, so a token
+ *   held in 1 W of 100 past buys costs that one W's reads (card wallets-found-in-one-read). When those do not cover the
+ *   sale (none holds the token, or a typed amount is past what they hold), the finder reads every other W, one per
+ *   request, and those it lists holding the token join (a token sent to a W whose record names another: an airdrop).
+ *   The listed holdings only add a W to read; no amount of theirs is used. A W whose record could not be read is the
+ *   finder's to read even when the others cover the sale, never left out in silence. A W listed twice is read once.
  * - Each W's holding: its token account on both RPCs, the same on both (ataHeld: read again once, then failed), each W
  *   in requests of its own (a read names one W of the user's at most); the mint once, on both RPCs. An account both
  *   RPCs read frozen is not sold (holds 0 here; a sell it leaves short is not_allowed; a share then ends part_filled at
@@ -750,26 +776,30 @@ export const PLAN_STEP_MS = 1_000;
  *  accounts, under the program W's own buy record names for the token (pool-buy.ts BuyMints) when it names one: the
  *  mint's program on both RPCs decides, and a W read under another program is read again under the mint's (card
  *  pool-sell-legs-side-by-side: one round for the plan's reads). */
-async function planReads(h: Pick<PoolSellHost, "rpcs" | "wallets" | "bought" | "wait" | "signal" | "stopped">, ask: PoolAsk, listed?: (ws: readonly BuyWallet[]) => void, wait?: (ms: number) => Promise<void>): Promise<{ plan: PoolSellPlan; seen: ReadonlyMap<string, WHeld> }> {
+async function planReads(h: Pick<PoolSellHost, "rpcs" | "wallets" | "bought" | "wait" | "signal" | "stopped">, ask: PoolAsk, listed?: (ws: readonly ListedBuyWallet[]) => void, wait?: (ms: number) => Promise<void>): Promise<{ plan: PoolSellPlan; seen: ReadonlyMap<string, WHeld> }> {
   if (ask.kind !== "pool.sell" || ask.chain !== "solana" || ask.token === null) return no("not_allowed");
   const token = ask.token;
-  const all = (await h.wallets()).filter((x) => x.chain === "sol");
+  // each W's buy record, read once; one that does not read is unknown, never empty: the finder reads that W
+  const unknown = new Set<string>();
   const seen = new Set<string>();
-  const ws: { w: BuyWallet; guess: string | null }[] = [];
-  for (const x of all) {
-    if (seen.has(x.address)) continue;
-    const bought = await Promise.resolve(h.bought?.get(x.address)).catch(() => undefined);
-    if (bought?.mint !== token && !x.holdings.tokens.has(token)) continue;
-    seen.add(x.address);
-    ws.push({ w: x, guess: bought?.mint === token && typeof bought.program === "string" ? bought.program : null });
-  }
-  listed?.(ws.map((x) => x.w));
+  // the Ws of a list to read: those a buy record names for the token, or that the list shows holding it; each W once,
+  // however often a list names it
+  const pick = async (xs: readonly ListedBuyWallet[]): Promise<{ w: ListedBuyWallet; guess: string | null }[]> => {
+    const ws: { w: ListedBuyWallet; guess: string | null }[] = [];
+    for (const x of xs) {
+      if (x.chain !== "sol" || seen.has(x.address)) continue;
+      const bought = await Promise.resolve(h.bought?.get(x.address)).catch(() => void unknown.add(x.address));
+      if (bought?.mint !== token && !x.holdings?.tokens.has(token)) continue;
+      seen.add(x.address);
+      ws.push({ w: x, guess: bought?.mint === token && typeof bought.program === "string" ? bought.program : null });
+    }
+    return ws;
+  };
   // a read the two providers answer apart waits on the sale's own wait, ended by a sign out
   const planWait = wait ?? ((ms: number) => waitUnless(h.wait, ms, h.signal));
-  const mint = ws.length === 0 ? null : mintProgram(h.rpcs, token);
-  mint?.catch(() => {});
+  let mint: Promise<string> | null = null;
   const reads = new Map<string, WHeld>();
-  const one = async ({ w, guess }: (typeof ws)[number]): Promise<{ w: BuyWallet; held: bigint; frozen?: true }> => {
+  const one = async ({ w, guess }: { w: ListedBuyWallet; guess: string | null }): Promise<{ w: ListedBuyWallet; held: bigint; frozen?: true }> => {
     try {
       let r: WHeld;
       if (guess === null) r = await wHeld(h.rpcs, w.address, token, await mint!, planWait);
@@ -792,27 +822,46 @@ async function planReads(h: Pick<PoolSellHost, "rpcs" | "wallets" | "bought" | "
   // mint, rent and sizes reads beside the first step; a sale of up to PLAN_W_STEP Ws is one step. A step starts once
   // the wait has passed and the step before it answered, so a read that failed starts no later step; a sign out at the
   // wait asks nothing more (review of 55d4c6eb, P3-C).
-  const asked: Promise<{ w: BuyWallet; held: bigint; frozen?: true }>[] = [];
-  let failed = false;
-  for (let i = 0; i < ws.length && !failed; i += PLAN_W_STEP) {
-    if (i > 0) {
-      await Promise.all([waitUnless(h.wait, PLAN_STEP_MS, h.signal), Promise.allSettled(asked)]);
-      if (h.signal?.aborted || h.stopped?.()) return no();
-      if (failed) break;
+  const readAll = async (ws: readonly { w: ListedBuyWallet; guess: string | null }[]): Promise<{ w: ListedBuyWallet; held: bigint; frozen?: true }[]> => {
+    if (ws.length === 0) return [];
+    if (mint === null) {
+      mint = mintProgram(h.rpcs, token);
+      mint.catch(() => {});
     }
-    for (const x of ws.slice(i, i + PLAN_W_STEP)) {
-      const p = one(x);
-      p.catch(() => void (failed = true));
-      asked.push(p);
+    const asked: Promise<{ w: ListedBuyWallet; held: bigint; frozen?: true }>[] = [];
+    let failed = false;
+    for (let i = 0; i < ws.length && !failed; i += PLAN_W_STEP) {
+      if (i > 0) {
+        await Promise.all([waitUnless(h.wait, PLAN_STEP_MS, h.signal), Promise.allSettled(asked)]);
+        if (h.signal?.aborted || h.stopped?.()) return no();
+        if (failed) break;
+      }
+      for (const x of ws.slice(i, i + PLAN_W_STEP)) {
+        const p = one(x);
+        p.catch(() => void (failed = true));
+        asked.push(p);
+      }
     }
-  }
-  const held = await Promise.all(asked);
+    return Promise.all(asked);
+  };
+  // the fast path (card wallets-found-in-one-read): every W from the device, the finder reading only those no buy record
+  // or kept pass names (the host's list, h.wallets()), each W picked read here on both RPCs
+  const first = await pick(await h.wallets());
+  listed?.(first.map((x) => x.w));
+  const held = await readAll(first);
+  const total0 = held.reduce((t, x) => t + x.held, 0n);
+  // not covered (no W read holds it, or they hold less than a typed amount): every other W through the finder, one per
+  // request, and each it lists holding the token is read and added (an airdrop to a W recorded for another mint): what
+  // that cost before, never a refusal. Covered: only the Ws whose record could not be read, so a share is never taken
+  // of a total that misses one in silence
+  const covered = total0 > 0n && poolSellUnits(total0, ask) <= total0;
+  if (!covered || unknown.size > 0) held.push(...(await readAll(await pick(await h.wallets((a) => (covered ? unknown.has(a) : !seen.has(a)))))));
   const plan = planOf(ask, held);
   return { plan, seen: reads };
 }
 
 /** The plan from each W's holding (planPoolSell's rules). */
-function planOf(ask: PoolAsk, held: readonly { w: BuyWallet; held: bigint; frozen?: true }[]): PoolSellPlan {
+function planOf(ask: PoolAsk, held: readonly { w: ListedBuyWallet; held: bigint; frozen?: true }[]): PoolSellPlan {
   const frozen = held.some((x) => "frozen" in x);
   const order = held.filter((x) => x.held > 0n).sort((x, y) => (x.held < y.held ? -1 : x.held > y.held ? 1 : x.w.address < y.w.address ? -1 : x.w.address > y.w.address ? 1 : 0));
   const total = order.reduce((t, x) => t + x.held, 0n);
@@ -821,7 +870,7 @@ function planOf(ask: PoolAsk, held: readonly { w: BuyWallet; held: bigint; froze
   if (units <= 0n || units > total) return no(frozen ? "not_allowed" : "not_funded");
   const one = order.find((x) => x.held >= units);
   if (one) return { units, total, legs: [{ w: one.w, units, held: one.held }], frozen };
-  const legs: { w: BuyWallet; units: bigint; held: bigint }[] = [];
+  const legs: { w: ListedBuyWallet; units: bigint; held: bigint }[] = [];
   let left = units;
   for (const x of order) {
     if (left === 0n) break;
@@ -919,7 +968,7 @@ async function sellAll(host: PoolSellHost, ask: PoolAsk, laters: Later[], hooks:
         const w = ws[0];
         if (ws.length !== 1 || ask.token === null) return;
         lone = w!.address;
-        const listed = w!.holdings.tokens.get(ask.token)?.amount;
+        const listed = w!.holdings?.tokens.get(ask.token)?.amount;
         const units = ask.shareBps === undefined ? ask.amount : listed === undefined ? 0n : ask.shareBps === 10_000 ? listed : (listed * BigInt(ask.shareBps)) / 10_000n;
         const seeds: Uint8Array[] = [];
         const seed = async (): Promise<Uint8Array> => {
@@ -1036,7 +1085,7 @@ type Early = {
 };
 
 /** W's note for the sale's deposit (returnNote), the seed copy for its precommitment zeroed at once. */
-async function noteFor(h: Pick<PoolSellHost, "settled" | "stopped">, rpcs: Rpcs, program: string, scope: bigint, store: NoteStore, sync: SolanaTreeSync, w: BuyWallet, seed: () => Promise<Uint8Array>): Promise<{ ref: NoteRef; precommitment: bigint; planned: string | null }> {
+async function noteFor(h: Pick<PoolSellHost, "settled" | "stopped">, rpcs: Rpcs, program: string, scope: bigint, store: NoteStore, sync: SolanaTreeSync, w: ListedBuyWallet, seed: () => Promise<Uint8Array>): Promise<{ ref: NoteRef; precommitment: bigint; planned: string | null }> {
   const s = await seed();
   try {
     // a sign out while the seed was read: the note's reads are never asked
@@ -1058,7 +1107,7 @@ const simError = (v: { logs?: unknown } | null | undefined): string => {
   return line === undefined ? "" : ` ${safeDetail(line)}`;
 };
 
-async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later, w: BuyWallet, waits: ReadWaits, early?: Early, turn?: LegTurn): Promise<LegAnswer> {
+async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later, w: ListedBuyWallet, waits: ReadWaits, early?: Early, turn?: LegTurn): Promise<LegAnswer> {
   const seeds: Uint8Array[] = [];
   let key: Uint8Array | null = null;
   let sent: string | null = null;
@@ -1223,8 +1272,18 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later, w: BuyWallet
     // a sell that empties W's holding keeps what lets the rent back's sweep reach the floor (solanaSellAfterFull, card
     // sol-w-sweep): every lamport over it goes into this sell's note
     const after = keeps ? solanaPoolBuySellNeed(venue, rent) : solanaSellAfterFull(rent, owed);
+    // on mainnet a partial sell keeps the next sell's priority on W too, so the rest sells with it
+    const keepPriority = keeps && h.cluster === "mainnet" ? SOLANA_POOL_SELL_PRIORITY : 0n;
     const holds = deposit.held;
     sizes = deposit.sizes;
+    // mainnet: W's compute budget first (solanaSellBudget), its limit sized once the simulation has read the units, for
+    // what W holds beyond the sell's need, at most SOLANA_POOL_SELL_PRIORITY (never a reason to refuse: none, no budget),
+    // and only on a form with room for it (solanaSellBudgetFits, the preview's decision too)
+    const room = h.cluster === "mainnet" && solanaSellBudgetFits(venue.kind, venue.cashback) ? lamports - need : 0n;
+    let budget = solanaSellBudget(null, solanaSellPriority(room));
+    const cap = budget === null ? 0n : solanaSellPriority(room);
+    // the largest form decides (above); this sell's own six, compiled, never over the size with it either
+    if (budget !== null && wireOf(solanaCompileV0(w.address, [...budgetIxs(budget), ...steps, depositIx(program, pool, w.address, sizes, pre, minOut, false)], bh.blockhash, []).message).length > SOLANA_MAX_TX_BYTES) budget = null;
     // the deposit's form: the eight names each tree's next page, so it lands when inserts that land first carry an entry
     // onto that page; the six (as before d3edab1) then fails WrongAccount and is rebuilt from new reads (below). The
     // eight only when the transaction still fits 1,232 bytes with it (a PumpSwap cashback sell with no lookup table
@@ -1232,7 +1291,7 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later, w: BuyWallet
     // SOLANA_POOL_NEXT_PAGE_WINDOW of their page's end: the reserve prices a next page's opening only there, and a tree
     // further out that more inserts turn would open its next page out of what W keeps for its next sell (review LOW 1)
     const near = (size: number): boolean => SOLANA_POOL_PAGE_ENTRIES - (size % SOLANA_POOL_PAGE_ENTRIES) <= SOLANA_POOL_NEXT_PAGE_WINDOW;
-    const fits = wireOf(solanaCompileV0(w.address, [...steps, depositIx(program, pool, w.address, sizes, pre, minOut, true)], bh.blockhash, []).message).length <= SOLANA_MAX_TX_BYTES;
+    const fits = wireOf(solanaCompileV0(w.address, [...budgetIxs(budget), ...steps, depositIx(program, pool, w.address, sizes, pre, minOut, true)], bh.blockhash, []).message).length <= SOLANA_MAX_TX_BYTES;
     const eight = fits && (!keeps || (near(sizes.stateSize) && near(sizes.labelSize)));
     const floor = solanaSweepFloor(rent) > SOLANA_POOL_MIN_DEPOSIT ? solanaSweepFloor(rent) : SOLANA_POOL_MIN_DEPOSIT;
     // the smallest note the deposit back makes (the kit's solanaPoolNoteFloor at the rent both RPCs read, card
@@ -1240,7 +1299,7 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later, w: BuyWallet
     const noteFloor = solanaPoolNoteFloor(rent);
     const ctx = { nowMs: h.now?.() ?? BigInt(Date.now()), wallet: w.address, feeCap: 0n, solana: h.pin, precommitment };
     const build = (next: boolean, value: bigint): { message: Uint8Array; wire: Uint8Array } => {
-      const { message } = solanaCompileV0(w.address, value === 0n ? steps : [...steps, depositIx(program, pool, w.address, sizes, pre, value, next)], bh.blockhash, []);
+      const { message } = solanaCompileV0(w.address, [...budgetIxs(budget), ...(value === 0n ? steps : [...steps, depositIx(program, pool, w.address, sizes, pre, value, next)])], bh.blockhash, []);
       return { message, wire: wireOf(message) };
     };
     /** The sell with the deposit in form `next` (the eight, or the six), its reserve priced for that form at fee `fa`,
@@ -1254,7 +1313,7 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later, w: BuyWallet
       // the eight priced at the kit's window (an insert landing first can carry an entry onto the next page, which the
       // deposit then opens at W's cost); what it does not spend stays on W for its next sell or the sweep
       const r0 = solanaRentMin(rent, 0);
-      const r = solanaSellReserve({ fee: fa, made, rents: solanaDepositRents(rent, sizes, holds, next), after, lamports, minOut, keeps, noteFloor, ...(keeps ? {} : { swept: after - r0, base: r0, floor }) });
+      const r = solanaSellReserve({ fee: fa, made, rents: solanaDepositRents(rent, sizes, holds, next), after: after + keepPriority, lamports, minOut, keeps, noteFloor, ...(keeps ? {} : { swept: after - r0, base: r0, floor }) });
       if ("refused" in r) return no(r.refused);
       // the eight's deposit back under noteFloor: refused here, so the six, priced exactly, is tried for a note
       if (next && r.value === 0n) return no("quote_check_failed");
@@ -1275,8 +1334,9 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later, w: BuyWallet
     // back under noteFloor), the six priced exactly, so no sell the six carries is refused (review LOW 3) and no note the
     // six can make is left on W
     let next = eight;
-    let fee = SOLANA_POOL_SELL_FEE;
+    let fee = SOLANA_POOL_SELL_FEE + (budget?.priority ?? 0n);
     let built: { wire: Uint8Array; value: bigint };
+    let sized = budget === null;
     for (let moved = 0; ; ) {
       let b: { wire: Uint8Array; value: bigint } | null = null;
       try {
@@ -1307,6 +1367,17 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later, w: BuyWallet
         // the cause names each provider whose simulation refused it and what it said (public data, kept on the device)
         return no("failed", "sim", sims.flatMap((v, k) => (v !== undefined && v !== null && v.err === null ? [] : [`RPC ${k} ${safeDetail(v?.err ?? null)}${simError(v)}`])).join("; "));
       }
+      // mainnet: the limit sized from the units both simulations used, then built, priced and simulated again at it
+      if (!sized) {
+        sized = true;
+        const units = sims.map((v) => (v as { unitsConsumed?: unknown }).unitsConsumed);
+        const again = solanaSellBudget(units.every((u) => Number.isSafeInteger(u)) ? Math.max(...(units as number[])) : null, cap);
+        if (again?.limit !== budget?.limit || again?.price !== budget?.price) {
+          budget = again;
+          fee = SOLANA_POOL_SELL_FEE + (again?.priority ?? 0n);
+          continue;
+        }
+      }
       built = b;
       break;
     }
@@ -1327,6 +1398,8 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later, w: BuyWallet
     const signed = wire.slice();
     signed.set(sig, 1);
     const signature = base58.encode(sig);
+    // the form sent, for the page's console: the priority it pays (none: no compute budget) and the deposit's accounts
+    if (h.cluster === "mainnet") console.info(`sell form: priority ${budget?.priority ?? 0n}${budget === null ? " (no compute budget)" : ""}, deposit ${value === 0n ? "none" : next ? "eight" : "six"}`);
     // written before the signed transaction leaves the device: the note INCOMING with W's send, so a page closed or
     // reloaded from here on leaves a record its next load settles (settlePoolSells) by the same verdict rules. No
     // deposit back (value 0, under noteFloor): no note, the return note left as it was for the next sell
@@ -1382,11 +1455,13 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later, w: BuyWallet
       const dead = got[0].got === "failed" && got[1].got === "failed";
       // the request's stage before the note leaves INCOMING (a write that fails throws, answered "sent" below, the
       // note settled at the next load), but for a sell built again: the next attempt's record names its own signature
-      const again = dead && !later.last && got.every((g) => wrongAccount(g.err, steps.length));
+      // the deposit's index, read from the message W signed: the last instruction, when it is the pool's deposit
+      const depositAt = depositIndex(signed, program);
+      const again = dead && !later.last && got.every((g) => wrongAccount(g.err, depositAt));
       const { end } = await settleSellNote(rpcs, program, scope, sync, store, note, dead, (sig, stage, e) => (again && e === "dropped" ? undefined : h.settled?.(sig, stage)));
       // its deposit (the last instruction) met a page another deposit filled first, and its note is PLANNED again (the
       // settle dropped it, review L-A): built again from new reads
-      if (dead && end === "dropped" && got.every((g) => wrongAccount(g.err, steps.length))) later.rebuild = true;
+      if (dead && end === "dropped" && got.every((g) => wrongAccount(g.err, depositAt))) later.rebuild = true;
       if (end === "filled" && !keeps) later.back = back;
       if (end !== "pending") return { stage: stageOf(end, dead), txs };
       // failed on both, its note's mark on one RPC only: refused; the note settles at the next load or sell
@@ -1400,6 +1475,8 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later, w: BuyWallet
     const cause = legCause(e);
     if (e instanceof Refused) return { error: e.code, cause };
     if (e instanceof PoolRuleRefused) return { error: "quote_check_failed", cause };
+    // both RPCs read a coin this build does not trade (a Mayhem curve or pool): by name, nothing built
+    if (e instanceof SolanaPoolBuyError && e.code === "venue_not_built") return { error: "venue_not_built", cause };
     // a provider read that still fails after the page's own retry, before W signs: "not now" (card pool-read-down)
     if (!signing && e instanceof SolanaRpcTransportError) {
       later.fault = e;
@@ -1411,6 +1488,59 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later, w: BuyWallet
     key?.fill(0);
   }
 }
+
+/** W's priority fee on a mainnet sell, lamports (card sol-pool-buy-lands-on-mainnet): a sell with none can sit unlanded on
+ *  a busy leader while the blockhash dies. W pays it up front from what it holds beyond the sell's need: a mainnet buy
+ *  leaves W the sell's need on every venue (solanaPoolBuySellNeed) and what the proof's tip cap held beyond the tip it
+ *  paid (1,000,000 less 100,000), and a partial sell keeps it on W for the next. Never a reason to refuse: a W with less
+ *  pays that, one with none sends without it, as before (solanaSellPriority); the reserve takes it back out of the sale. */
+export const SOLANA_POOL_SELL_PRIORITY = 100_000n;
+/** A mainnet sell's compute budget for a priority of at most `cap` lamports: the limit 1.2x the units its simulation used
+ *  (the larger of both RPCs'; unread, the runtime's most, SOLANA_POOL_CU_LIMIT_MAX), never under SOLANA_POOL_SELL_CU_MIN,
+ *  and the price that makes limit x price `cap` at most (never over SOLANA_CU_PRICE_MAX), with the priority fee the
+ *  runtime charges for them (rounded up): `cap` itself at any limit up to 1,000,000, a lamport under it at most past
+ *  that. null when it buys no price (a `cap` of 0): the sell goes without a compute budget. */
+export function solanaSellBudget(units: number | null, cap: bigint = SOLANA_POOL_SELL_PRIORITY): { limit: number; price: bigint; priority: bigint } | null {
+  const sized = units !== null && Number.isSafeInteger(units) && units > 0 ? Math.ceil((units * 6) / 5) : SOLANA_POOL_CU_LIMIT_MAX;
+  const limit = Math.min(Math.max(sized, SOLANA_POOL_SELL_CU_MIN), SOLANA_POOL_CU_LIMIT_MAX);
+  const fit = cap > 0n ? (cap * 1_000_000n) / BigInt(limit) : 0n;
+  const price = fit < SOLANA_CU_PRICE_MAX ? fit : SOLANA_CU_PRICE_MAX;
+  return price === 0n ? null : { limit, price, priority: (BigInt(limit) * price + 999_999n) / 1_000_000n };
+}
+/** The priority a mainnet sell from a W holding `room` lamports beyond the sell's need pays, on a form with room for the
+ *  compute budget (solanaSellBudgetFits): SOLANA_POOL_SELL_PRIORITY, or all of `room` under it, or none when that buys
+ *  no price (solanaSellBudget). The sale pays it (to the lamport at any limit up to 1,000,000) and the preview counts it. */
+export function solanaSellPriority(room: bigint): bigint {
+  const cap = room <= 0n ? 0n : room < SOLANA_POOL_SELL_PRIORITY ? room : SOLANA_POOL_SELL_PRIORITY;
+  return solanaSellBudget(null, cap) === null ? 0n : cap;
+}
+/** The least compute unit limit a sell's budget asks: at a limit of at least SOLANA_POOL_SELL_PRIORITY's count the price
+ *  is under SOLANA_CU_PRICE_MAX, so the priority is the cap the preview counts, not the limit. */
+export const SOLANA_POOL_SELL_CU_MIN = Number(SOLANA_POOL_SELL_PRIORITY);
+/** Whether a sell on `kind` (a `cashback` coin's or not) has room under 1,232 bytes for the compute budget: its largest
+ *  form, the six-account deposit with Token-2022, every account its own, compiled with the budget. The sale and the
+ *  preview both decide on it, so You receive counts the priority exactly where the sale pays it. A PumpSwap cashback
+ *  coin's sell has none (it compiles to 1,268 bytes with it). */
+export function solanaSellBudgetFits(kind: "pump-curve" | "pumpswap", cashback: boolean): boolean {
+  const key = (k: number): string => base58.encode(Uint8Array.from({ length: 32 }, (_, i) => (i === 0 ? k : i === 1 ? 0xb5 : 3)));
+  const v: SolanaPoolBuyVenue =
+    kind === "pump-curve"
+      ? { kind, mint: key(1), tokenProgram: SOLANA_TOKEN_2022_PROGRAM, tokenAccountSize: 165, curve: key(2), creator: key(3), feeRecipient: key(4), cashback, buybackFeeRecipients: [key(5)], buybackFeeRecipient: key(5) }
+      : { kind, mint: key(1), tokenProgram: SOLANA_TOKEN_2022_PROGRAM, tokenAccountSize: 165, pool: key(2), baseVault: key(3), quoteVault: key(4), coinCreator: key(6), cashback, protocolFeeRecipient: key(7), buybackFeeRecipients: [key(5)], buybackFeeRecipient: key(5) };
+  const w = key(8);
+  const deposit = { program: key(9), accounts: [key(10), w, key(11), key(12), key(13), SOLANA_SYSTEM_PROGRAM].map((k, i) => ({ key: k, signer: i === 1, writable: i !== 5 })), data: new Uint8Array(1 + 8 + 32) };
+  const budget = budgetIxs({ limit: SOLANA_POOL_CU_LIMIT_MAX, price: SOLANA_CU_PRICE_MAX });
+  return wireOf(solanaCompileV0(w, [...budget, ...solanaPoolSellSteps(v, w, 1n, 1n), deposit], key(14), []).message).length <= SOLANA_MAX_TX_BYTES;
+}
+/** The compute budget instruction `tag` with `n` in `width` little-endian bytes. */
+const le = (tag: number, n: number | bigint, width: number): Uint8Array => Uint8Array.from([tag, ...Array.from({ length: width }, (_, i) => Number((BigInt(n) >> BigInt(8 * i)) & 0xffn))]);
+const budgetIxs = (b: { limit: number; price: bigint } | null) =>
+  b === null
+    ? []
+    : [
+        { program: SOLANA_COMPUTE_BUDGET_PROGRAM, accounts: [], data: le(2, b.limit, 4) },
+        { program: SOLANA_COMPUTE_BUDGET_PROGRAM, accounts: [], data: le(3, b.price, 8) },
+      ];
 
 /**
  * A sell's reserve for one deposit form and the deposit's value (review LOW 3): what W lacks, on top of what it holds,
@@ -1444,6 +1574,13 @@ export function solanaSellReserve(p: { fee: bigint; made: bigint; rents: bigint;
   return { reserve, value: p.minOut - reserve < p.noteFloor ? 0n : p.minOut - reserve };
 }
 
+/** The index of the pool's deposit in the message `wire` carries: its last instruction when that is `program`'s, else -1
+ *  (a sell with no deposit back). */
+const depositIndex = (wire: Uint8Array, program: string): number => {
+  const m = solanaDecodeMessage(wire.subarray(65));
+  const last = m.instructions.at(-1);
+  return last !== undefined && m.staticKeys[last.programIndex] === program ? m.instructions.length - 1 : -1;
+};
 /** A transaction error that is the pool program's WrongAccount at instruction `ix`. */
 const wrongAccount = (err: unknown, ix: number): boolean => {
   const e = (err as { InstructionError?: unknown } | null | undefined)?.InstructionError;
@@ -1517,7 +1654,7 @@ const wireOf = (message: Uint8Array): Uint8Array => {
   return wire;
 };
 
-type RentBack = { rpcs: Rpcs; program: string; pool: string; scope: bigint; rent: SolanaRent; store: NoteStore; sync: SolanaTreeSync; w: BuyWallet; mints: readonly { mint: string; program: string }[]; wait: (ms: number) => Promise<void>; sell?: Readonly<Record<string, SoldBy>>; buy?: { mint: string; program: string } | null };
+type RentBack = { rpcs: Rpcs; program: string; pool: string; scope: bigint; rent: SolanaRent; store: NoteStore; sync: SolanaTreeSync; w: ListedBuyWallet; mints: readonly { mint: string; program: string }[]; wait: (ms: number) => Promise<void>; sell?: Readonly<Record<string, SoldBy>>; buy?: { mint: string; program: string } | null };
 
 /**
  * W's rent back (card sol-buy-rent-back), after a full sell filled or at a later load while it is owed: what W's
@@ -1889,9 +2026,9 @@ export async function resumeRentBacks(h: PoolSellHost, locks: Locks | null = glo
   const { pool, scope } = solanaPoolOf(program);
   const rpcs = h.rpcs;
   const wait = h.wait ?? ((ms: number) => new Promise<void>((res) => setTimeout(res, ms)));
-  let setup: { store: NoteStore; sync: SolanaTreeSync; rent: SolanaRent; wallets: readonly BuyWallet[] };
+  let setup: { store: NoteStore; sync: SolanaTreeSync; rent: SolanaRent; wallets: readonly ListedBuyWallet[] };
   try {
-    setup = { store: await h.notes(), sync: solanaTreeSync(rpcs, program), rent: await readSolanaRent(rpcs), wallets: await h.wallets() };
+    setup = { store: await h.notes(), sync: solanaTreeSync(rpcs, program), rent: await readSolanaRent(rpcs), wallets: await h.wallets(() => false) };
   } catch (e) {
     // this load's own reads failed (a provider down): told, each record kept for the next load, written under the sell
     // lock from the record as it is then (review 5 of 38e59182, info)

@@ -1,0 +1,46 @@
+{
+ "good": {
+  "source": "a local build read from dist",
+  "at": "2026-11-11T15:31:40.986Z",
+  "pageStatus": 200,
+  "js": [
+   {
+    "url": "/assets/index-DRJlYT2A.js",
+    "status": 200,
+    "rescale": true,
+    "view": true
+   }
+  ],
+  "css": [
+   {
+    "url": "/assets/style-DYpeTXYn.css",
+    "status": 200,
+    "tm": [
+     "none"
+    ]
+   }
+  ]
+ },
+ "bad": {
+  "source": "https://ct-app.unrealized.trade/",
+  "at": "2026-11-11T15:31:43.446Z",
+  "pageStatus": 200,
+  "js": [
+   {
+    "url": "/assets/index-CEl9qRtg.js",
+    "status": 200,
+    "rescale": false,
+    "view": false
+   }
+  ],
+  "css": [
+   {
+    "url": "/assets/style-CiU3Q6lX.css",
+    "status": 200,
+    "tm": [
+     "auto"
+    ]
+   }
+  ]
+ }
+}

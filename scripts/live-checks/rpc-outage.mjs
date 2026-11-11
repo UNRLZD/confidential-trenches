@@ -335,9 +335,11 @@ export const VERIFY_DOM = () => {
   if (!panel) return null;
   const status = (sel) => panel.querySelector(sel)?.dataset.status ?? null;
   const pools = {};
-  // each pool row's hosts, as it names them (an EVM row read on two operators of its list)
+  // each pool row's hosts, as it names them (an EVM row read on two operators of its list): its data-rpcs, set open or
+  // closed; a page before it draws them only in an open row (.rpcline), so a closed row there names none (live run
+  // 43027406881: robinhood.drpc.org walked past, the row ok and closed, "ok on 0 host(s)")
   const poolRpcs = {};
-  for (const e of panel.querySelectorAll("[data-pool]")) (pools[e.dataset.pool] = e.dataset.status), (poolRpcs[e.dataset.pool] = [...e.querySelectorAll(".rpcline")].map((x) => x.textContent.trim()).filter(Boolean));
+  for (const e of panel.querySelectorAll("[data-pool]")) (pools[e.dataset.pool] = e.dataset.status), (poolRpcs[e.dataset.pool] = (e.dataset.rpcs !== undefined ? e.dataset.rpcs.split(" ") : [...e.querySelectorAll(".rpcline")].map((x) => x.textContent.trim())).filter(Boolean));
   return { state: panel.dataset.state, code: status("[data-row=code]"), funds: status("[data-row=funds]"), pools, poolRpcs };
 };
 
