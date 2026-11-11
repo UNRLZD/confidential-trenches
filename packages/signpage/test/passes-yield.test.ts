@@ -13,7 +13,7 @@ import { after, test } from "node:test";
 import { IDBFactory } from "fake-indexeddb";
 import { entropyToWords, wordsToSeed64 } from "@blindfill/wallet/derive";
 import { openWalletStore, type WalletStore } from "@blindfill/wallet/store";
-import { noteSecrets, type NoteRef } from "../../wallet/src/notes/secrets.ts";
+import { noteCommitment, noteSecrets, type NoteRef } from "../../wallet/src/notes/secrets.ts";
 import { openNoteStore, type NoteStore } from "../../wallet/src/notes/store.ts";
 import { signalsProver } from "../../wallet/test/withdraw-fixture.ts";
 import { onTestClock } from "../../kit/test/test-clock.ts";
@@ -229,6 +229,63 @@ test("the buy's host gives its hosts back at its release, once: its end after it
     failed.end?.();
     failed.end?.();
     assert.equal(hostLane(DEVNET).trading(), false, "a buy with no sent: given back at its end, once");
+  });
+});
+
+// Card sell-right-after-a-buy (devnet run 11): the buy's reads to Final went as a trade's, never on the host's budget, and
+// drew the 20 throttles a sell tapped 1 s after Filled met. The same release that gives its hosts back switches them, once:
+// its pair and its settle (its pair and lister) read as a background pass's from then on.
+test("card sell-right-after-a-buy: the buy's host reads as a trade's to its release, then as a pass's: its pair and its settle, once", async () => {
+  const { w, ns } = await wallet();
+  // a landed note for the settle to read (its reads are what is timed here; their answers end it)
+  const ref: NoteRef = { kind: "deposit", s: SCOPE, i: 0 };
+  const pre = noteSecrets(SEED64, ref).precommitment;
+  const n = await ns.add({ ref, scope: SCOPE, precommitment: pre, state: "UNSPENT", leaf: { value: 5_000_000n, label: 9n, commitment: noteCommitment(5_000_000n, 9n, pre), leafIndex: 0n } });
+  await onProvider(() => 200, async (sent, t0) => {
+    const made: { buy?: () => { rpcs: readonly [(m: string, p: unknown[]) => Promise<unknown>, (m: string, p: unknown[]) => Promise<unknown>]; settle(id: string): Promise<unknown>; release(): void; end(): void } } = {};
+    testnetPool(
+      { store: async () => w, seed64: async () => SEED64.slice() },
+      { evmPin: () => undefined, cache: {}, tradeKinds: { buy: ((h: never) => ((made.buy = h), () => ({ error: "not_allowed" }))) as never } } as never,
+    );
+    const h = made.buy!();
+    // a sale holds both hosts, a pass just went on each, and the sale's reads fill each window: a pass waits for the floor
+    const sale = holdHosts([DEVNET, HELPER]);
+    await Promise.all([pageSolanaRpcs("pass")[0]("getSlot", []), pageSolanaRpcs("pass")[1]("getSlot", [])]);
+    fill(DEVNET, 100);
+    fill(HELPER, 100);
+    const at = () => performance.now() - t0;
+    const t1 = at();
+    await Promise.all([h.rpcs[0]("getSlot", []), h.rpcs[1]("getSlot", [])]);
+    assert.ok(at() - t1 < 100, "before its release: its reads a trade's, at once past every budget");
+    // the settle's first request on api.devnet, timed from its call (its note store opens first: fake IndexedDB)
+    const firstOf = async (from: number, t: number): Promise<number> => {
+      for (let i = 0; i < 2_000 && !sent.slice(from).some((x) => x.host === new URL(DEVNET).host); i++) await tick(5);
+      return sent.slice(from).find((x) => x.host === new URL(DEVNET).host)!.at - t;
+    };
+    let n1 = sent.length;
+    let t = at();
+    void h.settle(n.id).catch(() => {});
+    const before = await firstOf(n1, t);
+    assert.ok(before < 1_000, `a settle before its release: a trade's, at once (${before.toFixed(0)} ms)`);
+    h.release();
+    assert.equal(hostLane(DEVNET).trading(), true, "the sale's hold stands");
+    // a pass on each host now, so the next pass there waits PASS_FLOOR_MS
+    await Promise.all([pageSolanaRpcs("pass")[0]("getSlot", []), pageSolanaRpcs("pass")[1]("getSlot", [])]);
+    fill(DEVNET, 100);
+    fill(HELPER, 100);
+    const t2 = at();
+    await h.rpcs[0]("getSlot", []);
+    assert.ok(at() - t2 >= PASS_FLOOR_MS - 100, `after its release: a pass's, at the floor (${(at() - t2).toFixed(0)} ms)`);
+    n1 = sent.length;
+    t = at();
+    void h.settle(n.id).catch(() => {});
+    const afterMs = await firstOf(n1, t);
+    assert.ok(afterMs >= PASS_FLOOR_MS - 1_000, `its settle after its release: a pass's, at the floor (${afterMs.toFixed(0)} ms)`);
+    h.release();
+    h.end();
+    assert.equal(hostLane(DEVNET).trading(), true, "given back once: the sale's hold stands");
+    sale();
+    resetHostLanes();
   });
 });
 

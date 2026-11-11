@@ -25,7 +25,10 @@ import { SolanaRpcTransportError } from "../../kit/src/trade/solana/send.ts";
 import type { PoolAsk } from "../src/rules/pool.ts";
 import { SIGNPAGE_KIT_VERSION, type TxRef } from "../../kit/src/signpage/messages.ts";
 import { pairDown } from "./outage.ts";
-import { holdHosts, hostLane, resetHostLanes } from "../../wallet/src/throttle.ts";
+import { holdHosts, hostLane, PASS_BUDGET, PASS_FLOOR_MS, resetHostLanes } from "../../wallet/src/throttle.ts";
+import { onTestClock } from "../../kit/test/test-clock.ts";
+import { kindSwitched } from "../src/pool-testnet.ts";
+import type { ReadKind } from "../src/page-rpc.ts";
 import { liveRuns } from "../src/pool-sell-dry.ts";
 import { APP_ORIGIN, signedOutState, startApi } from "../src/api.ts";
 import type { IncomingMessage } from "../src/api.ts";
@@ -1914,4 +1917,140 @@ test("card sol-buy-reads-side-by-side: a filled run whose host's end throws post
   const { answer, stages } = await kindRun({ ...w.host, end: throwingEnd });
   assert.deepEqual(answer, { result: { stage: "sent", txs: [{ chain: "solana", hash: SIG }] } });
   assert.deepEqual(stages, ["filled"]);
+});
+
+// Card sell-right-after-a-buy (devnet run 11, 11 Nov): a sell tapped 1 s after a buy's Filled met 20 throttles in 16.3 s,
+// all drawn by the buy's own reads to Final, which went as a trade's (never waiting on the host's budget) to its end.
+// From its release (its early "sent") they go as a background pass's (pool-testnet.ts buyHost: kindSwitched, its
+// settle's pair and lister too): on the host's budget, at least one each PASS_FLOOR_MS while a trade holds the host.
+// The run here is the real one (poolBuyKind, runPoolBuy) on this file's recorded world, every read and the settle taking
+// its turn on its host's lane, the release as buyHost's; on the test clock, so each time is the clock's.
+/** The world's host on two lanes: each read and the settle as `kind()` says at its call; the release as buyHost's. */
+function onLanes(w: Awaited<ReturnType<typeof world>>, log: { host: number; kind: ReadKind; at: number; inWindow: number }[]) {
+  let kind: ReadKind = "trade";
+  const laned = (i: 0 | 1, k: ReadKind): SolanaRpc => (async (m: string, p: readonly unknown[]) => {
+    await hostLane(LANE_URLS[i]).turn(k);
+    log.push({ host: i, kind: k, at: performance.now(), inWindow: hostLane(LANE_URLS[i]).inWindow() });
+    return w.host.rpcs[i](m, p);
+  }) as SolanaRpc;
+  const give = holdHosts(LANE_URLS);
+  const release = (): void => {
+    kind = "pass";
+    give();
+  };
+  const host = {
+    ...w.host,
+    rpcs: kindSwitched({ trade: [laned(0, "trade"), laned(1, "trade")], pass: [laned(0, "pass"), laned(1, "pass")] }, () => kind),
+    // the settle's reads: one on each seat, as `kind` says at its call (solanaSettleSpent on settleRpcs(kind))
+    settle: async (id: string, s?: readonly [number, number]) => {
+      const k = kind;
+      await laned(0, k)("getSlot", []);
+      await laned(1, k)("getSlot", []);
+      return w.host.settle(id, s);
+    },
+    now: undefined,
+    wait: undefined,
+    reads: undefined,
+    release,
+    end: release,
+  };
+  return { host, kind: () => kind };
+}
+/** One buy tapped at the clock's now: when its amount out was told (the app's Filled) and when its end stage came. */
+async function tapOnLanes(host: Parameters<typeof poolBuyKind>[0]): Promise<{ t0: number; out: number; final: number; stages: string[] }> {
+  const t0 = performance.now();
+  let out = -1;
+  const stages: string[] = [];
+  let ended!: () => void;
+  const end = new Promise<void>((r) => (ended = r));
+  poolBuyKind(host, passLocks)(ASK, { id: "r1", sha: "00", progress: (s: string) => void (stages.push(s), ended()), route: (x: { out?: string }) => void (x.out !== undefined && (out = performance.now())) } as never);
+  await end;
+  return { t0, out, final: performance.now(), stages };
+}
+
+test("card sell-right-after-a-buy: a sale holding the hosts for 60 s with its reads past the trading budget: the buy's Filled comes as before, its reads past its sent go as a pass's at the floor, and it reaches Final", async () => {
+  const w0 = await world();
+  const run = (sale: boolean) =>
+    onTestClock(async () => {
+      resetHostLanes();
+      try {
+        const log: Parameters<typeof onLanes>[1] = [];
+        const lanes = onLanes(await world({ received: [w0.E, w0.E] }), log);
+        // a sale tapped with the buy: it holds both hosts 60 s, and its own reads keep each host's window past
+        // PASS_BUDGET_TRADING (40 in any 10 s), so a pass goes only at the floor
+        let stop = (): void => {};
+        if (sale) {
+          const give = holdHosts(LANE_URLS);
+          for (let k = 0; k < 40; k++) LANE_URLS.forEach((u) => hostLane(u).sent("trade"));
+          // the test clock's own timers (it holds setTimeout, not setInterval)
+          let t: ReturnType<typeof setTimeout> | undefined;
+          const reads = (): void => {
+            LANE_URLS.forEach((u) => hostLane(u).sent("trade"));
+            t = setTimeout(reads, 250);
+          };
+          reads();
+          const off = setTimeout(() => stop(), 60_000);
+          stop = () => (clearTimeout(t), clearTimeout(off), give());
+        }
+        const r = await tapOnLanes(() => lanes.host);
+        stop();
+        return { ...r, log };
+      } finally {
+        resetHostLanes();
+      }
+    });
+  const alone = await run(false);
+  const held = await run(true);
+  for (const r of [alone, held]) {
+    assert.deepEqual(r.stages, ["filled"], "Final");
+    assert.ok(r.out >= 0, "the amount out told");
+    // Filled: every read before it a trade's, none waited on the budget or the floor
+    const before = r.log.filter((x) => x.at <= r.out);
+    assert.ok(before.length > 0 && before.every((x) => x.kind === "trade"), "the reads to Filled are a trade's");
+  }
+  assert.ok(Math.abs(held.out - held.t0 - (alone.out - alone.t0)) < 50, `Filled as without the sale: ${(held.out - held.t0).toFixed(0)} ms, ${(alone.out - alone.t0).toFixed(0)} ms alone`);
+  // past the sent: a pass's, on each host one per PASS_FLOOR_MS at most while the sale fills its window
+  const after = held.log.filter((x) => x.at > held.out);
+  assert.ok(after.length > 0 && after.every((x) => x.kind === "pass"), "the reads past its sent are a pass's");
+  for (const h of [0, 1]) {
+    const at = after.filter((x) => x.host === h).map((x) => x.at);
+    for (let k = 1; k < at.length; k++) assert.ok(at[k]! - at[k - 1]! >= PASS_FLOOR_MS - 1, `host ${h}: a pass each ${PASS_FLOOR_MS} ms at the floor`);
+  }
+  const perHost = Math.max(...[0, 1].map((h) => after.filter((x) => x.host === h).length));
+  const finalMs = held.final - held.t0;
+  // the bound: its reads past the sent, one per host each PASS_FLOOR_MS, inside the run's own bound
+  assert.ok(finalMs <= (perHost + 1) * PASS_FLOOR_MS && finalMs < POOL_BUY_SETTLE_MS, `Final at ${finalMs.toFixed(0)} ms with ${perHost} reads per host past the sent`);
+  console.log(`sell-right-after-a-buy C: Filled ${(alone.out - alone.t0).toFixed(0)} ms alone, ${(held.out - held.t0).toFixed(0)} ms with the sale; Final ${(alone.final - alone.t0).toFixed(0)} ms alone, ${finalMs.toFixed(0)} ms with the sale holding 60 s; ${perHost} reads per host past the sent`);
+});
+
+test("card sell-right-after-a-buy: no trade holds the hosts and the page's passes fill each window to PASS_BUDGET: the buy's reads past its sent wait for room, never a read past the budget", async () => {
+  const w0 = await world();
+  const r = await onTestClock(async () => {
+    resetHostLanes();
+    try {
+      const log: Parameters<typeof onLanes>[1] = [];
+      const lanes = onLanes(await world({ received: [w0.E, w0.E] }), log);
+      // the page's background passes: PASS_BUDGET on each host in the window, again each 10 s
+      const fillPasses = () => LANE_URLS.forEach((u) => { while (hostLane(u).inWindow() < PASS_BUDGET) hostLane(u).sent("pass"); });
+      let t: ReturnType<typeof setTimeout> | undefined;
+      const again = (): void => {
+        fillPasses();
+        t = setTimeout(again, 1_000);
+      };
+      again();
+      try {
+        const got = await tapOnLanes(() => lanes.host);
+        // its sent given back the hold: the passes' window filled now, so each read past it waits for room
+        return { ...got, log };
+      } finally {
+        clearTimeout(t);
+      }
+    } finally {
+      resetHostLanes();
+    }
+  });
+  assert.deepEqual(r.stages, ["filled"]);
+  const after = r.log.filter((x) => x.at > r.out);
+  assert.ok(after.length > 0 && after.every((x) => x.kind === "pass"));
+  assert.ok(after.every((x) => x.inWindow <= PASS_BUDGET), `inside the budget: ${after.map((x) => x.inWindow).join(", ")}`);
 });

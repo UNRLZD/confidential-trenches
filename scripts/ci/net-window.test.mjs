@@ -160,6 +160,7 @@ export const CHANGED = [
   "scripts/live-checks/sol-settle-failed-is-not-unspent.mjs",
   "scripts/live-checks/signpage-throttled-read-is-not-asked-again-at-once.mjs",
   "scripts/live-checks/sell-first-read-waits-out-a-throttle.mjs",
+  "scripts/live-checks/sell-right-after-a-buy.mjs",
   "scripts/live-checks/start-reads-wait-out-a-throttle.mjs",
   "scripts/live-checks/precommit-taken-recover.mjs",
   "scripts/live-checks/relayer-cost-guards.mjs",

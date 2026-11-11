@@ -42,7 +42,7 @@
 //   nothing is read: the state read, the queue and the flow all stop at the missing pin. The testnet constants sit
 //   behind POOL_TESTNET, folded at build time, so SIGN_HOST's bundle carries none of them.
 import { base58, base64 } from "@scure/base";
-import { SOLANA_RPC_RETRY, SOLANA_RPC_WINDOW_RETRY, solanaJsonRpc, solanaPacedRpc, type SolanaRpc, type SolanaRpcRetry } from "../../kit/src/trade/solana/send.ts";
+import { SOLANA_RPC_RETRY, SOLANA_RPC_WINDOW_RETRY, solanaJsonRpc, solanaPacedRpc, solanaWrappedRpc, type SolanaRpc, type SolanaRpcRetry } from "../../kit/src/trade/solana/send.ts";
 import { lanedRpc, pageHelperRpc, pageHelperRpcStopped, pageRpc, type ReadKind } from "./page-rpc.ts";
 import { holdHosts, hostLane, laneFetch, stopHostLaneWaits } from "../../wallet/src/throttle.ts";
 import { HELPER_FETCH_INIT, HELPER_V1_PATHS } from "../../kit/src/helper/v1.ts";
@@ -61,7 +61,7 @@ import { askWhileBusy, type BusyOpts } from "../../wallet/src/busy.ts";
 import { POOL_SEND_BUSY_WAIT_MS, PoolSendBusy, poolBuyKind, type PoolBuyHost } from "./pool-buy.ts";
 import { BUY_MINTS_KEY, buyMints, keptSells, owedRentBacks, poolSellKind, resumeRentBacks, settleDeadSellOps, settlePoolSells, settleSellOps, type PoolSellKindHost } from "./pool-sell.ts";
 import { buyWallets, derivedBuyWallets, evmHelperKeyedRpc, solanaHelperHoldings, solanaHoldingsAt, spentNotesOf, type HoldingsReader } from "../../wallet/src/pool/buy-wallets.ts";
-import { keptPositions, POSITION_COSTS_KEY, POSITIONS_KEPT_KEY, POSITIONS_SOLD_KEY, POSITIONS_SOLD_TX_KEY, POSITIONS_UNLANDED_KEY, positionsCache, positionsPass, recordPoolBuy, routeInto, type BuyRecordStore, type FoundWallet, type PoolBuyFacts, type Position, type PositionCosts } from "./positions.ts";
+import { keptPositions, POSITION_COSTS_KEY, POSITIONS_KEPT_KEY, POSITIONS_SOLD_KEY, POSITIONS_SOLD_TX_KEY, POSITIONS_UNLANDED_KEY, positionsCache, positionsPass, recordBoughtOut, recordPoolBuy, routeInto, type BuyRecordStore, type FoundWallet, type PoolBuyFacts, type Position, type PositionCosts } from "./positions.ts";
 import { evmStoredHold } from "../../wallet/src/pool/evm-hold-store.ts";
 import { EVM_CHAIN_IDS, EVM_EPOCH_MS, EVM_POOLS, evmNow, evmPair, evmRetryLag, evmPool as walletEvmPool, evmPoolScopeOf, evmTreeSync, type EvmFeeAnswer, type EvmPoolOf, type EvmPoolPin, type EvmPoolRequest, type EvmRpc, type EvmSyncHold, type EvmTreeSync } from "../../wallet/src/pool/evm.ts";
 import { evmSettleReserved } from "../../wallet/src/pool/evm-settle.ts";
@@ -206,6 +206,12 @@ export const PAGE_SOL_MARK_BATCHES: readonly [number, number] = Object.freeze([S
  *  a34c1626: 510 getMultipleAccounts per seat at 5,000 marks on every settle before). Public chain data only: every
  *  mark of the pool, never which are the user's, so it is kept across a sign out. */
 export const PAGE_SOL_CACHE: SolanaPoolCache = {};
+/** One pair whose every call goes as `kind()` says at that call: `of.trade`'s or `of.pass`'s seat (card
+ *  sell-right-after-a-buy: a pool buy's reads are a trade's to its early "sent", a background pass's after it). Each seat
+ *  stays its provider to the kit (solanaWrappedRpc: its URL, its one queue, solanaSameProvider). */
+export function kindSwitched(of: Readonly<Record<ReadKind, readonly [SolanaRpc, SolanaRpc]>>, kind: () => ReadKind): readonly [SolanaRpc, SolanaRpc] {
+  return [0, 1].map((i) => solanaWrappedRpc(of.trade[i]!, (method, params) => of[kind()][i]!(method, params))) as unknown as readonly [SolanaRpc, SolanaRpc];
+}
 
 /** A withdraw stage's order: a write never moves an op back (review #232b LOW 1). A stale finish's stopped never
  *  overwrites sent, nor a later part's proving its earlier part's in_transit. */
@@ -1070,8 +1076,17 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   const buyHost = (): PoolBuyHost & { release(): void; end(): void } => {
     let notes: NoteStore | null = null;
     // the buy holds its hosts from its run's start to its early "sent" (pool-buy.ts poolBuyKind: release), else its
-    // end: the passes' reads wait, the buy's own go first; given back once (holdHosts), whichever comes first
-    const release = holdTrade();
+    // end: the passes' reads wait, the buy's own go first; given back once (holdHosts), whichever comes first. From
+    // then its reads to Final (the read-backs, the settle and its lister) are a background pass's, on the host's budget
+    // and its floor (card sell-right-after-a-buy: run 11's 20 throttles at a sell tapped 1 s after Filled were these
+    // reads as a trade's), so a trade tapped then reads first
+    let kind: ReadKind = "trade";
+    const give = holdTrade();
+    const release = (): void => {
+      kind = "pass";
+      give();
+    };
+    const pair = kindSwitched({ trade: rpcs("trade"), pass: rpcs("pass") }, () => kind);
     // the queue, opened when it is not; one that cannot open (signed out) is dropped, so the next tap opens it again
     const q = async (): Promise<ProofQueue<SolanaReleaseRequest>> => {
       const p = (open ??= openQueue());
@@ -1086,7 +1101,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       pin: pin!,
       tables,
       cluster: PAGE_CLUSTER,
-      rpcs: rpcs(),
+      rpcs: pair,
       claimed,
       // a sign out ends the buy's waits before its signature (read-waits.ts waitUnless): this session's stop
       signal: solanaStop.signal,
@@ -1115,7 +1130,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         const seed64 = await page.seed64();
         try {
           notes ??= await openNoteStore(await page.store());
-          return await solanaSettleSpent({ seed64, notes, noteId, program: pin!.program, minSlots, rpcs: settleRpcs(), lister: lister(), signal, cache, markBatches: PAGE_SOL_MARK_BATCHES });
+          return await solanaSettleSpent({ seed64, notes, noteId, program: pin!.program, minSlots, rpcs: settleRpcs(kind), lister: lister(kind), signal, cache, markBatches: PAGE_SOL_MARK_BATCHES });
         } finally {
           seed64.fill(0);
         }
@@ -1339,15 +1354,28 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     const facts: PoolBuyFacts = { token: ask.token!, spend: ask.amount, spendDecimals: ask.decimals, price: page.price?.("solana") ?? null, createdMs: Date.now() };
     let done = false;
     let r: ReturnType<typeof buy> | null = null;
+    // W's buy record from the read-back on (card sell-right-after-a-buy): written once the run tells the amount W
+    // received, so the sale's plan, the sell box's preview and the positions have W's token before the buy is final;
+    // the end's records are written after it, so a not_landed end takes it back
+    let early: Promise<void> = Promise.resolve();
+    const out = (): void => {
+      if (done || facts.wallet === undefined || facts.out === undefined) return;
+      facts.decimals ??= boughtDecimals.get(facts.wallet);
+      const f = { ...facts };
+      early = (async () => recordBoughtOut((await page.store()) as unknown as BuyRecordStore, f))()
+        .catch(() => {})
+        .finally(() => positions.refresh());
+    };
     const finish = (end: Parameters<typeof recordPoolBuy>[3]): void => {
       if (done) return;
       done = true;
       if (facts.wallet !== undefined) {
-        facts.decimals = boughtDecimals.get(facts.wallet);
+        facts.decimals = boughtDecimals.get(facts.wallet) ?? facts.decimals;
         boughtDecimals.delete(facts.wallet);
         if (end !== null && "result" in end && end.result.stage !== "not_landed") awaited.set(facts.wallet, ctx.id);
       }
-      void (async () => recordPoolBuy((await page.store()) as unknown as BuyRecordStore, ctx.id, facts, end))()
+      void early
+        .then(async () => recordPoolBuy((await page.store()) as unknown as BuyRecordStore, ctx.id, facts, end))
         .catch(() => {})
         .finally(() => positions.refresh());
     };
@@ -1365,7 +1393,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         positions.refresh();
       }
     };
-    r = buy(ask, { ...ctx, progress, route: routeInto(facts, ctx.route) });
+    const into = routeInto(facts, ctx.route);
+    r = buy(ask, { ...ctx, progress, route: (x) => (into(x), "out" in x && out()) });
     const run = r;
     if ("after" in run)
       void run.after.then(() => {
