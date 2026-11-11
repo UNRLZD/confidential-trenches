@@ -20,9 +20,12 @@
 //   send; once DEPOSIT_ID_MARGIN reads of a lane fail with no read showing history between them (so DEPOSIT_ID_MARGIN
 //   in a row among them), step 5 stops with an error naming the lane, so a provider that keeps failing ends the
 //   restore, to be retried, instead of reading on toward 2^32. The pair disagreeing on an id at its block (PairDisagrees)
-//   stops step 5 at that id, naming the provider that would read on: one liar never moves a lane. Ids with history (or unread) past the note walk's end
+//   leaves that id unread, both answers named, and the lane reads on past it as past any unread id (it counts toward
+//   the lane's highest and its failed reads): one liar never moves a lane and never stops the ids after it. Ids with history (or unread) past the note walk's end
 //   (NoteRestore laneWalked) end that lane's reads there: the lane returns the index as its `reach`, and restoring
 //   again with it (restoreNotes `reach`) walks the notes to it and reads the ids on from there. Nothing loops on its own.
+//   The lanes are read one after another, the caller's `first` lane (the device's own) first, and `laneRead` hears each
+//   lane once read, so step 7's counter on the device's own lane is known before the other lanes are read.
 // - Step 7, after the restore: the new store draws its own lane when it opens (../store/index.ts). Its deposit counter
 //   for the scope is raised past the lost store's possible index, to its lane's highest with a note or any history plus
 //   two of the lane (in an empty lane, its second index). For 72 h of NEAR block time after the restore, every open
@@ -76,8 +79,8 @@ export type HistoryReader = (chain: HistoryChain, address: string) => Promise<bo
  *   proof (true for every implicit id, D15), nor is is_nonce_used (intents.near prunes V1 nonces past their deadline),
  *   nor a token listed at 0 (intents.near deletes a balance that falls to 0).
  * - Both providers are read, each id at one block. Two answers that differ there throw PairDisagrees (one of the pair
- *   is wrong at one block): step 5 stops at once, naming the provider that would have read on (card
- *   wallet-id-reader-paced). One provider failing while the other shows money is money.
+ *   is wrong at one block): that id is unread, named with both answers, and step 5 reads on past it (card
+ *   restore-first-sign-in-under-two-minutes; before, card wallet-id-reader-paced stopped step 5 there). One provider failing while the other shows money is money.
  * - "unused": only when both providers answer that no read shows money or a trace.
  * - An indexer is a server's word: it may say used, never unused.
  * - Throws when it cannot tell (after its retries): step 5 counts the id as failed, never as unused.
@@ -204,10 +207,26 @@ export async function restoreDepositIds(
   scope: bigint,
   r: Pick<NoteRestore, "notes" | "laneHighest" | "laneWalked">,
   holds: IdReader,
-  opts: { margin?: number } = {},
+  opts: {
+    margin?: number;
+    /** the lane read first (the device's own, so step 7's counter is known soonest); the others follow in order */
+    first?: number;
+    /** each lane's ids once read, before the next lane is read (step 7's counter on the device's own lane) */
+    laneRead?: (x: LaneIds) => Promise<void>;
+    /**
+     * lanes an earlier run read whole, each with the index it read to: a lane is not read again (nor returned) while
+     * that index is at or past the bound its notes give it now (more notes since, past it, and the lane is read whole
+     * again)
+     */
+    done?: ReadonlyMap<number, number>;
+    /** the run's signal: a read that throws after it ended stops the lanes (never an id unread) */
+    signal?: AbortSignal;
+  } = {},
 ): Promise<DepositIds> {
   const margin = opts.margin ?? DEPOSIT_ID_MARGIN;
   if (!Number.isSafeInteger(margin) || margin < 1) throw new Error("margin is a count above 0");
+  const first = opts.first ?? 0;
+  if (!Number.isInteger(first) || first < 0 || first >= RESTORE_LANES) throw new Error("first is a lane, 0-7");
   if (!Array.isArray(r.laneHighest) || r.laneHighest.length !== RESTORE_LANES) throw new Error("laneHighest: one per lane");
   // where the note walk (step 3) ended in each lane, from the restore itself (its gap and reach included, review F4):
   // ids with history past it may hold notes it never matched
@@ -215,7 +234,8 @@ export async function restoreDepositIds(
   const noted = new Set<number>();
   for (const n of r.notes) if (n.ref.kind === "deposit" && n.ref.s === scope) noted.add(n.ref.i);
   const out: LaneIds[] = [];
-  for (let lane = 0; lane < RESTORE_LANES; lane++) {
+  const order = [first, ...Array.from({ length: RESTORE_LANES }, (_, k) => k).filter((k) => k !== first)];
+  for (const lane of order) {
     const notes = [...noted].filter((i) => i % RESTORE_LANES === lane).sort((x, y) => x - y);
     const h = r.laneHighest[lane];
     // the walk's highest must be the highest note of this lane the restore holds: else the lane's ids are read short
@@ -239,6 +259,8 @@ export async function restoreDepositIds(
     // for that alone; the bound is still checked at each index
     let win = new Map<number, string>();
     const bound = (): number => Math.min(U32, (highest ?? lane - RESTORE_LANES) + RESTORE_LANES * margin);
+    const was = opts.done?.get(lane);
+    if (was !== undefined && was >= bound()) continue;
     for (let i = lane; i <= U32 && i <= bound(); i += RESTORE_LANES) {
       readTo = i;
       if (!win.has(i)) {
@@ -255,10 +277,11 @@ export async function restoreDepositIds(
         state = await holds(id, i);
         if (state !== "money" && state !== "used" && state !== "unused") throw new Error("the read answered neither money, used nor unused");
       } catch (e) {
-        // the pair disagrees at one block: one of them is wrong, so nothing either says is taken and the restore stops
-        // here, naming it, never reading on at one liar's word (card wallet-id-reader-paced)
-        if (e instanceof PairDisagrees) throw new PairDisagrees(e.stronger, `lane ${lane}: at index ${i}, ${e.message}, to be retried`);
-        unread.push({ i, id, error: why(e) });
+        if (opts.signal?.aborted) throw e;
+        // the pair disagrees at one block: one of them is wrong, so nothing either says is taken: the id is unread, named
+        // with both answers, and the lane reads on past it on both providers (card restore-first-sign-in-under-two-
+        // minutes, review P2-2: one provider's answer on one id never stops the ids after it from being read)
+        unread.push({ i, id, error: e instanceof PairDisagrees ? `${e.message}, read again` : why(e) });
         highest = Math.max(highest ?? i, i);
         if (++failed >= margin) throw new Error(`lane ${lane}: ${failed} id reads failed with none showing history between them (the last at index ${i}: ${why(e)}); the restore stops, to be retried`);
         if (highest > walked) {
@@ -276,8 +299,11 @@ export async function restoreDepositIds(
         break;
       }
     }
-    out.push({ lane, notes, money, used, unread, highest, readTo, reach });
+    const x: LaneIds = { lane, notes, money, used, unread, highest, readTo, reach };
+    out.push(x);
+    await opts.laneRead?.(x);
   }
+  out.sort((a, b) => a.lane - b.lane);
   return { lanes: out, complete: out.every((x) => x.reach === null) };
 }
 
@@ -287,8 +313,9 @@ export async function restoreDepositIds(
  */
 export type AfterRestore = { scope: bigint; lane: number; next: number; after: number; rereads: { lane: number; i: number; id: string }[] };
 
-/** The last index step 7 covers in a lane: its highest with a note or any history plus two of the lane (empty: its second). */
-const coverTo = (x: LaneIds): number => (x.highest === null ? x.lane + RESTORE_LANES : x.highest + 2 * RESTORE_LANES);
+/** The last index step 7 covers in a lane: its highest with a note or any history plus two of the lane (empty: its second).
+ *  Exported for the page's restore (packages/signpage/src/pool-restore.ts), which raises its own lane's counter to it. */
+export const coverTo = (x: Pick<LaneIds, "lane" | "highest">): number => (x.highest === null ? x.lane + RESTORE_LANES : x.highest + 2 * RESTORE_LANES);
 
 /**
  * Step 7: raises the store's deposit counter for the scope past the lost store's possible index in the store's lane,

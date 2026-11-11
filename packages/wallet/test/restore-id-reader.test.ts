@@ -723,16 +723,19 @@ test("a provider always down ends the restore with the lane's named error; so do
 });
 
 // review N2 (the reviewer's Q3): one provider fakes money on a used, empty id; the other answers used, so the pair
-// disagrees at one block: never money on one word, and step 5 stops at that id naming the faker (card
-// wallet-id-reader-paced: before, the id was unread and the lane read on)
-test("a faked money on a used, empty id stops step 5 at that id, naming the provider that faked it", async () => {
+// disagrees at one block: never money on one word. The id is unread, named with both answers, and the lane reads on
+// past it (card restore-first-sign-in-under-two-minutes, review P2-2 of 53f5e92f; card wallet-id-reader-paced had
+// stopped step 5 there, so one provider's lie on one id left every id after it unread)
+test("a faked money on a used, empty id is that id unread, naming the provider that faked it, and the ids after it are read", async () => {
   const u = at(3, 1);
   const world = W({ [id(u)]: { storage: true } });
   const fake = (p: Record<string, unknown>) => (argsOf(p).account_id === id(u) && p.method_name === "ft_balance_of" ? view("5") : undefined);
-  await assert.rejects(
-    restoreDepositIds(SEED, SCOPE, R, nearIdReader("mainnet", [provider(FAST, world, fake), provider(DRPC, world)], { first: () => 0, ...noWait(), tries: 1 })),
-    new RegExp(`^PairDisagrees: lane 3: at index ${u}, https://rpc\\.mainnet\\.fastnear\\.com answered money where https://near\\.drpc\\.org answered used at block 1: one of the pair is wrong at one block, so the restore stops, to be retried$`),
-  );
+  const r = await restoreDepositIds(SEED, SCOPE, R, nearIdReader("mainnet", [provider(FAST, world, fake), provider(DRPC, world)], { first: () => 0, ...noWait(), tries: 1 }));
+  const lane = r.find((x) => x.lane === 3)!;
+  assert.deepEqual(lane.money, []);
+  assert.deepEqual(lane.unread.map((x) => x.i), [u]);
+  assert.match(lane.unread[0]!.error, /^https:\/\/rpc\.mainnet\.fastnear\.com answered money where https:\/\/near\.drpc\.org answered used at block 1: one of the pair is wrong at one block, so the restore stops, read again$/);
+  assert.ok(lane.readTo > u, `lane 3 read on past ${u} (to ${lane.readTo})`);
 });
 
 // ---- card wallet-id-reader-paced: busy providers, the pace, both at once, the signal, a liar, a Retry's progress ----
@@ -877,7 +880,7 @@ test("the signal aborts the view in flight and the busy wait: the read throws it
   await assert.rejects(guard(q), /^Error: signed out$/);
 });
 
-test("a liar over a whole scope: one provider answering used, or money, on every id stops step 5 at the first id it lies on, naming it", async () => {
+test("a liar over a whole scope: one provider answering used, or money, on every id: no id taken on its word, each lie unread and named, the reads bounded", async () => {
   const everywhere = (x: Id) => ({ get: () => x }) as unknown as Map<string, Id>;
   for (const [lie, said] of [[{ account: true }, "used"], [{ usdc: 7n }, "money"]] as const) {
     for (const liarAt of [0, 1] as const) {
@@ -885,12 +888,14 @@ test("a liar over a whole scope: one provider answering used, or money, on every
       const liar = provider(liarAt === 0 ? FAST : DRPC, everywhere(lie), undefined, count);
       const honest = provider(liarAt === 0 ? DRPC : FAST, WORLD, undefined, count);
       const rpcs = (liarAt === 0 ? [liar, honest] : [honest, liar]) as [NearRpc, NearRpc];
+      // every id the liar answers apart is unread, so DEPOSIT_ID_MARGIN of them in a row end step 5 with the lane's
+      // margin error, naming the pair's answers: bounded, no id taken on the liar's word, told as a read to retry
       await assert.rejects(
         restoreDepositIds(SEED, SCOPE, R, nearIdReader("mainnet", rpcs, { ...noWait() })),
-        (e: unknown) => isPair(e, liar.name) && new RegExp(`^lane 0: at index 0, ${liar.name.replaceAll(".", "\\.")} answered ${said} where ${honest.name.replaceAll(".", "\\.")} answered unused at block 1: `).test((e as Error).message),
+        new RegExp(`^Error: lane 0: ${DEPOSIT_ID_MARGIN} id reads failed with none showing history between them \\(the last at index \\d+: ${liar.name.replaceAll(".", "\\.")} answered ${said} where ${honest.name.replaceAll(".", "\\.")} answered \\w+ at block 1: one of the pair is wrong at one block, so the restore stops\\); the restore stops, to be retried$`),
       );
-      // the pass's reads and one id's views on each side: the liar never moves a lane on
-      assert.ok(count.n <= 20, `${said} on ${liar.name}: ${count.n} queries`);
+      // the pass's reads and at most each id's three views on both providers, for the margin's ids: never further
+      assert.ok(count.n <= DEPOSIT_ID_MARGIN * 3 * 2 + 8, `${said} on ${liar.name}: ${count.n} queries`);
     }
   }
 });
