@@ -95,7 +95,14 @@ test("no ops to give and a held list that fills the cap to within 2 bytes: the s
   const cap = SIGNPAGE_MAX_ANSWER_BYTES - ANSWER_ROOM;
   const entry = (i: number, n: number) => ({ id: `h${String(i).padStart(5, "0")}${"x".repeat(n)}`, asset: "usdc", amount: "1" });
   const held: { id: string; asset: string; amount: string }[] = []; // SignpageState["held"] is read-only
-  while (bytes({ ...SIGNED_IN, held }) < cap - 2 - 900) held.push(entry(held.length, 500));
+  // the answer's size kept as a running sum (the empty list's size, each entry's bytes and one comma between entries): the
+  // loop stringified the whole growing state per entry, 11 s; the exact check below reads the real size once
+  let size = bytes({ ...SIGNED_IN, held });
+  while (size < cap - 2 - 900) {
+    const e = entry(held.length, 500);
+    size += bytes(e) + (held.length > 0 ? 1 : 0);
+    held.push(e);
+  }
   // two last entries take the rest (an id is at most 512 characters), so the state leaves exactly 2 bytes of the cap
   held.push(entry(held.length, 0), entry(held.length + 1, 0));
   let rest = cap - 2 - bytes({ ...SIGNED_IN, held });

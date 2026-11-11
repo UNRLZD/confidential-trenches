@@ -34,7 +34,14 @@ const logOf = (p: Pool) => ({
   topics: [INIT, p.id ?? evmPoolIdOf(p.key), "0x" + w(BigInt(p.key.currency0)), "0x" + w(BigInt(p.key.currency1))],
   data: "0x" + w(BigInt(p.key.fee)) + w(BigInt(p.key.tickSpacing)) + w(BigInt(p.key.hooks)) + w(79228162514264337593543950336n) + w(0n),
 });
-const slotOf = (id: string) => "0x" + bytesToHex(keccak_256(hexToBytes(id.slice(2) + w(6n))));
+// the slot is a pure function of the id, read for every held pool on every state call: hashed once per id (card
+// ci-fresh-run-ends-with-room; S1's 2,000 pools hashed 2,000 x 2,000 times)
+const slots = new Map<string, string>();
+const slotOf = (id: string) => {
+  let s = slots.get(id);
+  if (s === undefined) slots.set(id, (s = "0x" + bytesToHex(keccak_256(hexToBytes(id.slice(2) + w(6n))))));
+  return s;
+};
 
 type Reader = {
   head: number;

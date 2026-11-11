@@ -20,6 +20,7 @@ import { freshWallet } from "../../wallet/src/derive/keys.ts";
 import { jOf } from "../../wallet/src/pool/queue.ts";
 import { POOL_TESTNET } from "../../wallet/src/pool/network.ts";
 import { solanaAta } from "../../kit/src/checks/solana/message.ts";
+import { onTestClock } from "../../kit/test/test-clock.ts";
 import { SOLANA_TOKEN_2022_PROGRAM, SOLANA_TOKEN_PROGRAM } from "../../kit/src/checks/solana/checks.ts";
 import { POSITION_COSTS_KEY, type Position } from "../src/positions.ts";
 import { testnetPool } from "../src/pool-testnet.ts";
@@ -36,7 +37,7 @@ const HELPER_RPC = `${new URL(TRADE_HELPER).host}/v1/rpc/solana`;
 const realFetch = globalThis.fetch;
 after(() => void (globalThis.fetch = realFetch));
 
-test("the positions on the mainnet build: no request names a W to any host but the helper's keyed route, none names a W or a mint no buy record names, and a load asks no decimals a buy record or the kept pass names", { timeout: 300_000 }, async () => {
+test("the positions on the mainnet build: no request names a W to any host but the helper's keyed route, none names a W or a mint no buy record names, and a load asks no decimals a buy record or the kept pass names", { timeout: 300_000 }, () => onTestClock(async () => {
   assert.equal(POOL_TESTNET, false, "the mainnet build");
   const w = await openWalletStore({ indexedDB: new IDBFactory() });
   after(() => w.close());
@@ -151,7 +152,7 @@ test("the positions on the mainnet build: no request names a W to any host but t
   const old = log.filter((l) => l.names.includes("OLD")).map((l) => `${l.phase} | ${l.to} | ${l.method}`);
   assert.deepEqual(old, [`1 a load | ${HELPER_RPC} | getAccountInfo`], "a record from before decimals were kept: its mint once, on the helper's keyed route only, then the kept pass names them");
   assert.ok(log.some((l) => l.to === HELPER_RPC && l.names.includes("W0")), "the finder read the Ws (a sanity check of the log)");
-});
+}));
 
 // The second review's request log (of c5a61ca5), on the same transport: account A's load, a buy that wrote no buy record
 // (W's buy mint only, its run told no amount), a sell's read and end, a sign out while a pass reads, then account B on
@@ -159,7 +160,7 @@ test("the positions on the mainnet build: no request names a W to any host but t
 // - none names a W, a W's token account or a mint only this device's buys name to any host but the helper's keyed route;
 // - none names a stranger's mint (one sent to a W) anywhere;
 // - none names account A's Ws, token accounts or mints once B signed in.
-test("the positions across a buy with no record, a sell, a sign out mid-pass and the next account: no W, token account or bought mint named past the helper's keyed route, no stranger's mint anywhere, nothing of A's after B signs in", { timeout: 600_000 }, async () => {
+test("the positions across a buy with no record, a sell, a sign out mid-pass and the next account: no W, token account or bought mint named past the helper's keyed route, no stranger's mint anywhere, nothing of A's after B signs in", { timeout: 600_000 }, () => onTestClock(async () => {
   assert.equal(POOL_TESTNET, false, "the mainnet build");
   const NEW = key(11); // bought into A's W3 during the test, its run telling no amount
   const BMINT = key(12); // account B's buy
@@ -314,4 +315,4 @@ test("the positions across a buy with no record, a sell, a sign out mid-pass and
   assert.deepEqual(log.filter((l) => l.b && l.names.some((n) => n.startsWith("A.") || n.includes("(A.") || ["BOUGHT", "OLD", "NEW"].includes(n))).map(row), [], "nothing of A's after B signed in");
   assert.ok(log.some((l) => l.phase.startsWith("2") && l.names.includes("NEW") && l.method === "getAccountInfo"), "the buy with no record: its mint's decimals read once, on the helper's keyed route (a sanity check of the log)");
   assert.ok(log.some((l) => l.b && l.names.includes("B.X0")), "B's Ws read (a sanity check of the log)");
-});
+}));
