@@ -24,13 +24,24 @@
 // that changes or a provider that stops serving traces would turn Robinhood's trace evidence off without a sound.
 // After: app
 //   node scripts/live-checks/evm-sell-hook-intrablock.mjs [--record <file>]
-// PASS exit 0, FAIL exit 1, error exit 2. Reads only.
+// A provider that does not know the transaction or its block yet (Robinhood makes a block every 0.1 s, and the newest
+// transactions are a second or so old: a trace answered null or "not found", a replay seat's "header not found" or
+// "unknown block") is read again, LAG_TRIES times LAG_WAIT_MS apart, and still behind on the last read is INCONCLUSIVE
+// naming it (`lagging`), never FAIL; a provider that knows them and answers wrong still fails.
+// PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3. Reads only.
 import "../net-window.mjs";
 import { createHash } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import { evmRpcOperator } from "../../packages/kit/src/index.ts";
 
 const KEY = "evm-sell-hook-intrablock";
+/** A provider behind the transaction or its block: read again this often, this far apart (the wallet's EVM_LAG_TRIES and
+ *  EVM_LAG_WAIT_MS). */
+export const LAG_TRIES = 5;
+export const LAG_WAIT_MS = 2_000;
+const NOT_KNOWN = /not found|unknown block|unknown transaction|header not found/i;
+/** An answer (a JSON-RPC answer, or a batch of them) from a provider that does not hold the transaction or block yet. */
+export const notKnown = (a) => [a].flat().some((x) => x && typeof x === "object" && (("result" in x && x.result === null) || NOT_KNOWN.test(String(x.error?.message ?? ""))));
 const ARBOS = "0xa4b05fffffffffffffffffffffffffffffffffff";
 const COUNT = 3;
 
@@ -77,6 +88,9 @@ const ranOf = (a) => typeof a?.result === "string" || (a?.error?.code === 3 && /
 const STATE_REFUSED = /unknown state|historical state \S* ?is not available|missing trie node|header not found/i;
 const seatRefused = (a) => !ranOf(a) && (a?.http !== undefined || a?.error === undefined ? a?.result === undefined : STATE_REFUSED.test(String(a.error?.message ?? "")));
 
+/** A replay seat still behind the block on its last read: walked past, as a seat's own refusal. */
+const behindOf = (r) => r?.lagging === true && notKnown(r.answer);
+
 /** The verdict on a run { trace: [url, url], quote: [url, url], txs: [{ hash, traces: [{ url, digest }], replays: [{ url, answer }] }] }. */
 export function judge(run) {
   const lines = [];
@@ -87,6 +101,12 @@ export function judge(run) {
   for (const t of txs) {
     const h = String(t.hash).slice(0, 10);
     const tr = Array.isArray(t.traces) ? t.traces : [];
+    const behind = tr.filter((x) => x.digest?.ok !== true && x.lagging === true);
+    if (behind.length > 0) {
+      for (const x of behind) lines.push(`--  [${h}] ${hostOf(x.url)} did not know the transaction yet after ${LAG_TRIES} reads ${LAG_WAIT_MS} ms apart: INCONCLUSIVE`);
+      for (const x of tr.filter((y) => !behind.includes(y))) say(x.digest?.ok === true, `[${h}] ${x.url} answers both traces: ${x.digest?.ok === true ? "yes" : x.digest?.answer}`);
+      continue;
+    }
     for (const x of tr) say(x.digest?.ok === true, `[${h}] ${x.url} answers both traces: ${x.digest?.ok === true ? "yes" : x.digest?.answer}`);
     const d = tr.map((x) => (x.digest?.ok === true ? x.digest : null));
     say(tr.length === 2 && d.every((x) => x !== null) && d[0].pre === d[1].pre, `[${h}] the two prestates are equal as JSON`);
@@ -95,7 +115,7 @@ export function judge(run) {
     const replays = Array.isArray(t.replays) ? t.replays : [];
     for (const r of replays) {
       const a = r.answer ?? {};
-      if (!ranOf(a) && seatRefused(a)) {
+      if (!ranOf(a) && (seatRefused(a) || behindOf(r))) {
         lines.push(`ok  [${h}] walked past ${hostOf(r.url)}: ${JSON.stringify(a).slice(0, 120)}`);
         continue;
       }
@@ -103,13 +123,28 @@ export function judge(run) {
     }
     const ran = replays.filter((r) => ranOf(r.answer));
     const ops = new Set(ran.map((r) => evmRpcOperator(r.url)));
-    say(ran.length === 2 && ops.size === 2 && !ops.has(null), `[${h}] replayed on two operators: ${ran.map((r) => hostOf(r.url)).join(" and ") || "none"}`);
+    const two = ran.length === 2 && ops.size === 2 && !ops.has(null);
+    const lagged = replays.filter((r) => r.lagging === true && !ranOf(r.answer));
+    if (!two && lagged.length > 0 && replays.every((r) => ranOf(r.answer) || seatRefused(r.answer ?? {}) || behindOf(r))) lines.push(`--  [${h}] replayed on ${ran.length} operator(s): ${lagged.map((r) => hostOf(r.url)).join(" and ")} did not know the block yet after ${LAG_TRIES} reads ${LAG_WAIT_MS} ms apart: INCONCLUSIVE`);
+    else say(two, `[${h}] replayed on two operators: ${ran.map((r) => hostOf(r.url)).join(" and ") || "none"}`);
   }
-  return { ok: lines.length > 0 && lines.every((l) => l.startsWith("ok ")), lines };
+  const ok = lines.length > 0 && lines.every((l) => l.startsWith("ok ") || (l.startsWith("-- ") && l.endsWith(": INCONCLUSIVE")));
+  const verdict = !ok ? "FAIL" : lines.some((l) => l.startsWith("-- ")) ? "INCONCLUSIVE" : "PASS";
+  return { ok: verdict === "PASS", verdict, lines };
 }
 
 /** The run: the kit's own pins, the newest Robinhood transactions that call a contract. */
-export async function read(fetchFn = fetch, over = overOf) {
+export async function read(fetchFn = fetch, over = overOf, sleep = (ms) => new Promise((ok) => setTimeout(ok, ms))) {
+  // a read again while its provider does not know the transaction or block yet: { answer, lagging }
+  const untilKnown = async (f) => {
+    let answer;
+    for (let t = 1; t <= LAG_TRIES; t++) {
+      answer = await f();
+      if (!notKnown(answer)) return { answer, lagging: false };
+      if (t < LAG_TRIES) await sleep(LAG_WAIT_MS);
+    }
+    return { answer, lagging: true };
+  };
   const { evmPoolVenues, evmReadProvidersOf } = await import("../../packages/kit/src/index.ts");
   const v = evmPoolVenues().robinhood;
   const trace = [...(v.traceProviders ?? [])];
@@ -127,9 +162,10 @@ export async function read(fetchFn = fetch, over = overOf) {
       const answers = [];
       for (const url of trace) {
         const one = async (id, tracer) => ({ ...(await post(url, { jsonrpc: "2.0", id, method: "debug_traceTransaction", params: [tx.hash, tracer] }, fetchFn)), id });
-        answers.push({ url, answer: [await one(1, { tracer: "prestateTracer", tracerConfig: { disableCode: true } }), await one(2, { tracer: "callTracer" })] });
+        const got = await untilKnown(async () => [await one(1, { tracer: "prestateTracer", tracerConfig: { disableCode: true } }), await one(2, { tracer: "callTracer" })]);
+        answers.push({ url, ...got });
       }
-      for (const { url, answer } of answers) traces.push({ url, digest: digestOf(answer) });
+      for (const { url, answer, lagging } of answers) traces.push({ url, digest: digestOf(answer), ...(lagging ? { lagging } : {}) });
       const pre = Array.isArray(answers[0]?.answer) ? answers[0].answer.find((x) => x.id === 1)?.result : undefined;
       const call = { from: tx.from, to: tx.to, data: tx.input, gas: tx.gas, value: tx.value, ...(tx.maxFeePerGas ? { maxFeePerGas: tx.maxFeePerGas, maxPriorityFeePerGas: tx.maxPriorityFeePerGas } : { gasPrice: tx.gasPrice }) };
       const env = { number: b.number, time: b.timestamp, baseFeePerGas: b.baseFeePerGas };
@@ -141,10 +177,10 @@ export async function read(fetchFn = fetch, over = overOf) {
         if (ran.size === 2) break;
         const op = evmRpcOperator(url);
         if (ran.has(op)) continue;
-        const answer = await rpc(url, "eth_call", [call, { blockHash: b.parentHash }, over(pre), env]).catch((e) => ({ http: 0, body: String(e?.message ?? e).slice(0, 120) }));
-        replays.push({ url, answer });
+        const { answer, lagging } = await untilKnown(() => rpc(url, "eth_call", [call, { blockHash: b.parentHash }, over(pre), env]).catch((e) => ({ http: 0, body: String(e?.message ?? e).slice(0, 120) })));
+        replays.push({ url, answer, ...(lagging ? { lagging } : {}) });
         if (ranOf(answer)) ran.add(op);
-        else if (!seatRefused(answer)) break;
+        else if (!seatRefused(answer) && !lagging) break;
       }
       txs.push({ hash: tx.hash, block: b.number, readAt: new Date().toISOString(), traces, replays });
     }
@@ -160,8 +196,8 @@ if (import.meta.main) {
     if (i >= 0) writeFileSync(args[i + 1], `${JSON.stringify(run, null, 1)}\n`);
     const r = judge(run);
     for (const l of r.lines) console.log(l);
-    console.log(r.ok ? `PASS ${KEY}` : `FAIL ${KEY}`);
-    process.exit(r.ok ? 0 : 1);
+    console.log(`${r.verdict} ${KEY}`);
+    process.exit({ PASS: 0, FAIL: 1, INCONCLUSIVE: 3 }[r.verdict]);
   } catch (e) {
     console.error(`${KEY}: ${e.message}`);
     process.exit(2);

@@ -103,7 +103,7 @@ import {
 } from "../../kit/src/trade/solana/pool-buy.ts";
 import { pageReference } from "./page-rpc.ts";
 import { solanaDecodeLookupTable, type SolanaLookupTable } from "../../kit/src/checks/solana/message.ts";
-import { SOLANA_CU_PRICE_MAX, SOLANA_JITO_TIP_MIN } from "../../kit/src/checks/solana/checks.ts";
+import { SOLANA_CU_PRICE_MAX, SOLANA_POOL_JITO_TIP } from "../../kit/src/checks/solana/checks.ts";
 import { SolanaRpcTransportError, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import type { VaultSnarkjsProof } from "../../kit/src/vault/shapes.ts";
 import type { BuyRoute, TradeStage, TxRef } from "../../kit/src/signpage/messages.ts";
@@ -187,7 +187,7 @@ export type PoolBuyHost = {
   signal?: AbortSignal;
 };
 
-export type PoolBuyAnswer = { stage: TradeStage; txs: TxRef[] } | { error: "not_allowed" | "not_funded" | "quote_check_failed" | "venue_not_pinned" | "no_table_fits" | "failed" | "down" };
+export type PoolBuyAnswer = { stage: TradeStage; txs: TxRef[] } | { error: "not_allowed" | "not_funded" | "quote_check_failed" | "venue_not_pinned" | "no_table_fits" | "venue_not_built" | "failed" | "down" };
 
 /** The helper's busy answer to a send (its 429: rate_limited when a pool provider throttled a read, in_flight when this
  *  caller holds too many sends open, or its per-caller throttle), with the wait its Retry-After names. The send is
@@ -587,7 +587,9 @@ async function buyRun(h: PoolBuyHost, ask: PoolAsk, at: { fault?: unknown }): Pr
     // not awaited here: the buy waits on its own venue's reads only (below, once the reference names the venue), so a
     // slow or hung read of another venue's table never holds it; a rejection no buy awaits is marked handled
     for (const r of tableReads.values()) r.catch(() => {});
-    const tip = h.cluster === "mainnet" ? SOLANA_JITO_TIP_MIN : 0n;
+    // on mainnet the helper sends the tag 3 to Jito bundle-only, so it tips enough to win the auction (the kit's
+    // SOLANA_POOL_JITO_TIP); devnet has no block engine, so no tip
+    const tip = h.cluster === "mainnet" ? SOLANA_POOL_JITO_TIP : 0n;
     // each root's leaf index, found once: absent when it is on no page or not on both RPCs at one index
     const roots = new Map<string, number | null>();
     const rootKey = (tree: 0 | 1, root: string): string => `${tree}:${root}`;
@@ -694,6 +696,9 @@ async function buyRun(h: PoolBuyHost, ask: PoolAsk, at: { fault?: unknown }): Pr
   } catch (e) {
     if (e instanceof Refused) return { error: e.code };
     if (e instanceof PoolRuleRefused) return { error: "quote_check_failed" };
+    // both RPCs read a coin this build does not trade (a Mayhem curve or pool): refused by name at the venue's read,
+    // before the claim, so the app shows it as one the pool cannot buy, never a Retry that cannot work
+    if (e instanceof SolanaPoolBuyError && e.code === "venue_not_built") return { error: "venue_not_built" };
     // a provider read that still fails after the page's own retry, before W signs: "not now" (card pool-read-down),
     // after the rule's waits (runPoolBuy)
     if (!signing && waitsOn(e)) {

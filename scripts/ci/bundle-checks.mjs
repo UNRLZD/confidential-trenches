@@ -33,6 +33,7 @@ const viaRead = (key, load) => ({ key, host: "sign", load, run: async (m, f) => 
 export const IN_PROCESS = [
   viaRead("signpage-withdraw-own-spend", () => import("../live-checks/signpage-withdraw-own-spend.mjs")),
   viaRead("signpage-buy-own-spend", () => import("../live-checks/signpage-buy-own-spend.mjs")),
+  viaRead("sol-pool-buy-lands-on-mainnet", () => import("../live-checks/sol-pool-buy-lands-on-mainnet.mjs")),
   viaRead("signpage-sent-read-back", () => import("../live-checks/signpage-sent-read-back.mjs")),
   viaRead("pool-buy-filled-2s", () => import("../live-checks/pool-buy-filled-2s.mjs")),
   viaRead("sol-buy-reads-side-by-side", () => import("../live-checks/sol-buy-reads-side-by-side.mjs")),
@@ -75,6 +76,7 @@ export const IN_PROCESS = [
   { key: "sol-sell-deposit-back-floor", host: "sign", load: () => import("../live-checks/sol-sell-deposit-back-floor.mjs"), run: async (m, f) => m.judge(await m.read(f), { ledger: false }) },
   { key: "app-holding-follows-a-fill", host: "app", load: () => import("../live-checks/app-holding-follows-a-fill.mjs"), run: async (m, f) => m.judge(await m.read(f)) },
   { key: "app-sell-shows-what-you-receive", host: "app", load: () => import("../live-checks/app-sell-shows-what-you-receive.mjs"), run: async (m, f) => m.judge(await m.read(f)) },
+  { key: "sol-pool-buys-mayhem-coins", host: "app", load: () => import("../live-checks/sol-pool-buys-mayhem-coins.mjs"), run: async (m, f) => m.judge(await m.read(f)) },
   { key: "pool-sell-share-across-wallets", host: "sign", load: () => import("../live-checks/pool-sell-share-across-wallets.mjs"), run: async (m, f) => m.judge(await m.read(f), { ledger: false }) },
   // the bundle part only: the chain part reads the helper and two RPCs, past the build
   { key: "wallet-mainnet-relayer-pins", host: "sign", load: () => import("../live-checks/wallet-mainnet-relayer-pins.mjs"), run: async (m, f) => m.judgeBundle(await m.readBundle(f)) },
@@ -103,6 +105,7 @@ export const CHILD_RUNS = [
   { key: "app-three-owner-labels", host: "app", args: ["--root", "apps/terminal/dist"] },
   { key: "app-toast-clears-sheet-head", host: "app", args: ["--root", "apps/terminal/dist"] },
   { key: "app-chart-controls", host: "app", args: ["--root", "apps/terminal/dist"] },
+  { key: "chart-drags-and-tracks-the-pointer", host: "app", args: ["--root", "apps/terminal/dist"] },
   { key: "app-header-first-paint-auth", host: "app", args: ["--root", "apps/terminal/dist"] },
   { key: "app-orders-coming-soon", host: "app", args: ["--root", "apps/terminal/dist"] },
   { key: "words-nov8-final", host: "sign", args: ["--local", "--host", "sign"] },

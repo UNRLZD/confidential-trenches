@@ -44,3 +44,28 @@ test("each rule alone on the good answer", () => {
   assert.equal(one((g) => (g.chains.base.hold = { ok: false, atMs: 9000, name: "Error", error: "HTTP 429" })).verdict, "INCONCLUSIVE", "no answer alone: never a pass");
   assert.equal(one((g) => delete g.chains.robinhood).verdict, "FAIL", "a chain not read");
 });
+
+// Release 116's sign live run 43024665974 (job 130536379249): "BAD base: the pool's root time at a fresh block was not
+// read (rpc 1 does not know block 56057679 yet)", a Base provider behind a block the other just reported. The child now
+// reads it under the wallet's lag retries and names a provider still behind on the last as `lagging`.
+const LAG = { ok: false, name: "EvmLagError", error: "rpc 1 does not know block 56057679 yet", lagging: ["base-rpc.publicnode.com"] };
+
+test("a provider still behind a fresh block on the last lag retry is INCONCLUSIVE, named", () => {
+  for (const [step, f] of [
+    ["the root time", (g) => (g.chains.base.times = { ...LAG })],
+    ["the hold", (g) => (g.chains.base.hold = { ...LAG, atMs: 13_000 })],
+    ["the bind", (g) => (g.chains.robinhood.bind = { ...LAG, stateReads: 0, lagging: ["robinhood.api.pocket.network"] })],
+  ]) {
+    const r = one(f);
+    assert.equal(r.verdict, "INCONCLUSIVE", `${step}: ${r.lines.join("\n")}`);
+    assert.ok(r.lines.some((l) => /^-- .* (base-rpc\.publicnode\.com|robinhood\.api\.pocket\.network) did not know the fresh block yet/.test(l)), `${step}: names the provider`);
+  }
+});
+
+test("a wrong answer about a block the provider knows still fails, a lag beside it too", () => {
+  assert.equal(one((g) => (g.chains.base.times = { ok: false, name: "EvmOperatorsDiffer", error: "base stateRootTimes(root) at 56057679: a and b answered differently" })).verdict, "FAIL", "two operators that differ at a known block");
+  assert.equal(one((g) => (g.chains.base.times = { ok: false, name: "EvmLagError", error: "rpc 1 does not know block 56057679 yet" })).verdict, "FAIL", "a lag the child names no provider for (the record before this change) is not let through");
+  assert.equal(one((g) => (g.chains.base.times = { ...LAG, lagging: [] })).verdict, "FAIL", "an empty lagging list names no provider");
+  assert.equal(one((g) => (g.chains.base.times = { ...LAG, ok: true, empty: false, value: "0x" + "0".repeat(64) })).verdict, "FAIL", "a read that answered is judged on its answer");
+  assert.equal(one((g) => ((g.chains.base.times = { ...LAG }), (g.chains.robinhood.hold.feeAgeMs = 10_000))).verdict, "FAIL", "a real FAIL beside a lag");
+});
