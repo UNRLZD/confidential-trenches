@@ -92,6 +92,13 @@ export type BuyPool = {
 /** A fresh wallet a buy used, and what it holds now. */
 export type BuyWallet = { pool: string; chain: BuyChain; note: string; l: bigint; j: number; path: string; address: string; holdings: Holdings };
 export type BuyWallets = { wallets: BuyWallet[]; failed: { pool: string; error: string }[] };
+/** A W as derived, before any read: no holdings, so nothing reads as empty that was never read. */
+export type BuyWalletKey = Omit<BuyWallet, "holdings">;
+/** A W of a list read in part (wantedBuyWallets): its holdings, or null when it was not asked for (unknown, never empty). */
+export type ListedBuyWallet = BuyWalletKey & { holdings: Holdings | null };
+/** The Ws derived from the seed now (`wallets`: every pool's that derived; `failed`: the pools that did not), read when
+ *  asked; a read of `only` some Ws reads and answers only those. */
+export type DerivedBuyWallets = { wallets: readonly BuyWalletKey[]; failed: BuyWallets["failed"]; read(opts?: BuyWalletsRead): Promise<BuyWallets> };
 
 /** A Solana W's three reads are made again at the highest slot at most this many times before a refusal: about a third
  * of mainnet-beta's rounds answer from backends at different slots, and a W took up to 4 rounds live (M367; see
@@ -161,7 +168,7 @@ export type BuyWalletsRead = { signal?: AbortSignal; pick?: (n: number) => numbe
 
 /** buyWallets in two steps: the Ws derived from the seed now, which the result keeps no copy of (the caller zeroes its
  *  seed at once), then read when asked; a read of `only` some Ws reads and answers only those. */
-export function derivedBuyWallets(seed64: Uint8Array, pools: readonly BuyPool[]): { read(opts?: BuyWalletsRead): Promise<BuyWallets> } {
+export function derivedBuyWallets(seed64: Uint8Array, pools: readonly BuyPool[]): DerivedBuyWallets {
   const failed = new Map<number, string>();
   const found: (BuyWallet | undefined)[][] = pools.map(() => []);
   const jobs: { p: number; k: number; address: string }[] = [];
@@ -184,7 +191,26 @@ export function derivedBuyWallets(seed64: Uint8Array, pools: readonly BuyPool[])
       failed.set(pi, msg(e));
     }
   });
-  return { read: (opts = {}) => readDerived(pools, found, jobs, new Map(failed), opts) };
+  return {
+    wallets: found.flatMap((ws, p) => (failed.has(p) ? [] : ws.flatMap((w) => (w === undefined ? [] : [(({ holdings: _, ...k }) => k)(w)])))),
+    failed: [...failed].sort(([a], [b]) => a - b).map(([p, error]) => ({ pool: pools[p]!.id, error })),
+    read: (opts = {}) => readDerived(pools, found, jobs, new Map(failed), opts),
+  };
+}
+
+/**
+ * The derived Ws, each read only when `want` says so, every other answered with holdings null (not read: unknown,
+ * never empty). A sell's list (card wallets-found-in-one-read): a W its buy record names is read on both RPCs by the
+ * sell itself, a W whose record names another mint is no seller of this one, so the finder reads only the Ws with no
+ * record (a buy from before the record, a restored device), as every W was read before. One W per request, as ever.
+ */
+export async function wantedBuyWallets(d: DerivedBuyWallets, want: (address: string) => boolean | Promise<boolean>, opts: Omit<BuyWalletsRead, "only"> = {}): Promise<{ wallets: ListedBuyWallet[]; failed: BuyWallets["failed"] }> {
+  const only = new Set<string>();
+  for (const w of d.wallets) if (await want(w.address)) only.add(w.address);
+  const got = only.size === 0 ? { wallets: [], failed: d.failed } : await d.read({ ...opts, only });
+  const read = new Map(got.wallets.map((w) => [`${w.pool} ${w.address}`, w.holdings] as const));
+  const failed = new Set(got.failed.map((f) => f.pool));
+  return { wallets: d.wallets.filter((w) => !failed.has(w.pool)).map((w) => ({ ...w, holdings: read.get(`${w.pool} ${w.address}`) ?? null })), failed: got.failed };
 }
 
 async function readDerived(pools: readonly BuyPool[], derived: readonly (BuyWallet | undefined)[][], all: readonly { p: number; k: number; address: string }[], failed: Map<number, string>, opts: BuyWalletsRead): Promise<BuyWallets> {

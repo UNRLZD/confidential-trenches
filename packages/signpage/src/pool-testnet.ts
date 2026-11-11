@@ -25,8 +25,9 @@
 //   accounts from its venue's pinned lookup table (PAGE_TABLES, the wallet's SOL_POOL_TABLES; card sol-pool-venue-tables). Each state read also settles the pool's RESERVED notes (solanaSettleReserved:
 //   spent, freed past the deadline, or held), so no outcome of a send leaves a note RESERVED for good.
 // - pool.sell (card signpage-pool-sell): src/pool-sell.ts on the devnet pool, W one of the page's buy wallets: the Ws
-//   of the pool's SPENT and RESERVED notes (../../wallet/src/pool/buy-wallets.ts spentNotesOf, buyWallets) with their
-//   holdings. A testnet-only choice: those holdings are read on ONE devnet RPC (solanaHoldingsAt on the first),
+//   of the pool's SPENT and RESERVED notes (../../wallet/src/pool/buy-wallets.ts spentNotesOf, derivedBuyWallets), the
+//   holdings read only of the Ws with no buy record (wantedBuyWallets; a recorded W is its mint's seller or no seller:
+//   pool-sell.ts planPoolSell, card wallets-found-in-one-read). A testnet-only choice: those holdings are read on ONE devnet RPC (solanaHoldingsAt on the first),
 //   since devnet has no helper route, and a read naming W reaches that public RPC (mainnet reads them on the helper's
 //   keyed route, buy-wallets.ts). They pick W and nothing more: the sell reads W's token account and lamports again on
 //   both RPCs, and the rent back after it runs only on W's buy record (pool-buy.ts BuyMints, written by the buy before
@@ -60,7 +61,7 @@ import { POOL_TESTNET } from "../../wallet/src/pool/network.ts";
 import { askWhileBusy, type BusyOpts } from "../../wallet/src/busy.ts";
 import { POOL_SEND_BUSY_WAIT_MS, PoolSendBusy, poolBuyKind, type PoolBuyHost } from "./pool-buy.ts";
 import { BUY_MINTS_KEY, buyMints, keptSells, owedRentBacks, poolSellKind, resumeRentBacks, settleDeadSellOps, settlePoolSells, settleSellOps, type PoolSellKindHost } from "./pool-sell.ts";
-import { buyWallets, derivedBuyWallets, evmHelperKeyedRpc, solanaHelperHoldings, solanaHoldingsAt, spentNotesOf, type HoldingsReader } from "../../wallet/src/pool/buy-wallets.ts";
+import { derivedBuyWallets, evmHelperKeyedRpc, solanaHelperHoldings, solanaHoldingsAt, spentNotesOf, wantedBuyWallets, type HoldingsReader, type ListedBuyWallet } from "../../wallet/src/pool/buy-wallets.ts";
 import { keptPositions, POSITION_COSTS_KEY, POSITIONS_KEPT_KEY, POSITIONS_SOLD_KEY, POSITIONS_SOLD_TX_KEY, POSITIONS_UNLANDED_KEY, positionsCache, positionsPass, recordPoolBuy, routeInto, type BuyRecordStore, type FoundWallet, type PoolBuyFacts, type Position, type PositionCosts } from "./positions.ts";
 import { evmStoredHold } from "../../wallet/src/pool/evm-hold-store.ts";
 import { EVM_CHAIN_IDS, EVM_EPOCH_MS, EVM_POOLS, evmNow, evmPair, evmRetryLag, evmPool as walletEvmPool, evmPoolScopeOf, evmTreeSync, type EvmFeeAnswer, type EvmPoolOf, type EvmPoolPin, type EvmPoolRequest, type EvmRpc, type EvmSyncHold, type EvmTreeSync } from "../../wallet/src/pool/evm.ts";
@@ -1243,17 +1244,20 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   // route, in the testnet build on one devnet RPC (the header's testnet-only choice); none: no read
   const FINDER_HOST = POOL_TESTNET ? TESTNET_RPCS.solana[0] : TRADE_HELPER;
   const finderOf = (r: readonly [SolanaRpc, SolanaRpc]): HoldingsReader => over.holdings?.(r) ?? (POOL_TESTNET ? solanaHoldingsAt(TESTNET_RPCS.solana[0]) : solanaHelperHoldings(TRADE_HELPER));
-  const poolBuyWallets = async (notes: NoteStore, r: readonly [SolanaRpc, SolanaRpc], reader: HoldingsReader = finderOf(r)) => {
+  // a sell's list: every W derived, the finder reading only those `read` asks for (buy-wallets.ts wantedBuyWallets)
+  const poolBuyWallets = async (notes: NoteStore, r: readonly [SolanaRpc, SolanaRpc], read: (address: string) => boolean | Promise<boolean> = () => true): Promise<ListedBuyWallet[]> => {
     const spent = await spentNotesOf(notes, scope!);
     if (spent.length === 0) return [];
     const seed64 = await page.seed64();
+    let derived: ReturnType<typeof derivedBuyWallets>;
     try {
-      const got = await buyWallets(seed64, [{ id: pin!.program, chain: "sol", spent, reader }]);
-      if (got.failed.length > 0) throw new Error("the buy wallets' holdings could not be read");
-      return got.wallets;
+      derived = derivedBuyWallets(seed64, [{ id: pin!.program, chain: "sol", spent, reader: finderOf(r) }]);
     } finally {
       seed64.fill(0);
     }
+    const got = await wantedBuyWallets(derived, read);
+    if (got.failed.length > 0) throw new Error("the buy wallets' holdings could not be read");
+    return got.wallets;
   };
   // the Ws of the buys this page ran to filled or sent, this sign-in: the finder reads at finalized, so one it does not
   // list yet is looked for again (src/positions.ts awaited)
@@ -1274,8 +1278,13 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       };
       return await positionsPass({
         signal: run.signal,
-        // the sell's own read when one was fed, else the finder's read of the Ws with a buy record
-        wallets: async (only) => (run.found ?? (await recordedWallets(st, r, only, run.signal))).filter((w) => only.has(w.address)),
+        // the sell's own read of the Ws it read when one was fed, the finder's read of the rest with a buy record (a sell
+        // reads only the Ws that can hold its token: card wallets-found-in-one-read)
+        wallets: async (only) => {
+          const fed = (run.found ?? []).filter((w) => only.has(w.address));
+          const rest = new Set([...only].filter((a) => !fed.some((w) => w.address === a)));
+          return [...fed, ...(rest.size === 0 ? [] : await recordedWallets(st, r, rest, run.signal))];
+        },
         bought: async () => meta(BUY_MINTS_KEY),
         costs: async () => (await meta(POSITION_COSTS_KEY)) as PositionCosts,
         awaited: () => awaited,
@@ -1563,12 +1572,13 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       // the sell's own read holds the positions' passes off while it runs (the running one stopped, a booked retry
       // dropped: one finder queue, so it never waits behind the display), then is the next pass's read; a read that
       // fails still ends the hold, and the next pass reads the finder (a rent back at load reads here too)
-      wallets: async () => {
+      wallets: async (read) => {
         const hold = positions.preempt();
         let found: FoundWallet[] | null = null;
         try {
-          const got = await poolBuyWallets(await store(), r);
-          found = got.map((w) => ({ address: w.address, tokens: new Map([...w.holdings.tokens].map(([m, h]) => [m, h.amount] as const)) }));
+          const got = await poolBuyWallets(await store(), r, read);
+          // only the Ws the finder read: the pass reads the rest itself
+          found = got.flatMap((w) => (w.holdings === null ? [] : [{ address: w.address, tokens: new Map([...w.holdings.tokens].map(([m, h]) => [m, h.amount] as const)) }]));
           return got;
         } finally {
           // read: the next pass's read; failed (the sell refuses, or a rent back at load waits): the next pass reads

@@ -30,7 +30,8 @@ import { pairDown } from "./outage.ts";
 import { vaultLabelOf } from "../../kit/src/vault/shapes.ts";
 import { noteCommitment, noteSecrets, type NoteRef } from "../../wallet/src/notes/secrets.ts";
 import { openNoteStore, type NoteStore } from "../../wallet/src/notes/store.ts";
-import type { BuyWallet } from "../../wallet/src/pool/buy-wallets.ts";
+import { buyWallets, HOLDINGS_RPC_LIMIT, type BuyWallet, type HoldingsReader } from "../../wallet/src/pool/buy-wallets.ts";
+import { onTestClock } from "../../kit/test/test-clock.ts";
 import { solanaPoolOf } from "../../wallet/src/pool/solana.ts";
 import { BLOCKHASH, FEE_PAYER, POOL, PROGRAM, fx, providers, rent } from "../../kit/test/solana-pool-buy-fx.ts";
 import { POOL_RENT_BACK_MS, POOL_RENT_BACK_RULES, POOL_SELL_LOCK, POOL_SELL_READS, POOL_SELL_SIZE_RETRY_MS, POOL_SELL_WAIT_MS, buyMints, leftAfter, owedRentBacks, planPoolSell, poolSellKind, resumeRentBacks, runPoolSell, settleDeadSellOps, settlePoolSells, settleSellOps, solanaSellAfterFull, solanaSellReserve, keptSells, stageOfLegs, type KeptSell, type OwedRentBack, type PoolSellHost, type PoolSellKindHost, type RentBackTold } from "../src/pool-sell.ts";
@@ -2506,19 +2507,22 @@ test("a stranger's unit at W's account of the sold mint made again after W was s
 // Delta review 7 of 08290868 (item 1): W's own coin is the mint its one buy bought (the buy's record). A full sell of
 // an airdropped mint while W still holds its own coin swept W to 0, and any later sell of that coin was refused
 // not_funded (W pays its fee up front). The rent back now holds while W holds any unit of its buy mint.
-test("W's own unsold coin and a fully sold airdrop: the rent back holds, W keeps its SOL and its coin's account", async () => {
+// card wallets-found-in-one-read: a W whose buy record names another mint is no seller of an airdrop (each W takes one
+// buy, and positions.ts lists no token its record does not name), so the sell of a fully held airdrop that this test
+// once ran from W (its rent back then held for W's own unsold coin) is refused before anything is read or signed
+test("an airdrop in a W whose buy record names its own unsold coin: the sell of the airdrop is refused not_funded, nothing signed, W's accounts as they were", async () => {
   const air = VF.pumpswap.mint;
   const own = solanaAta(W.address, MINT, TOKEN_PROGRAM);
   const holding: BuyWallet = { ...wallet(AMOUNT, false, air), holdings: { native: 0n, tokens: new Map([[air, { amount: AMOUNT, frozen: false }], [MINT, { amount: 5n, frozen: false }]]), unreadable: [] } };
   const w = await world({ venue: "pumpswap", ataLamports: TOKEN_RENT, buy: { mint: MINT, program: TOKEN_PROGRAM } }, [holding]);
   const before = { owner: TOKEN_PROGRAM, lamports: TOKEN_RENT, data: tokenAccount(5n, 1, MINT) };
   w.c.accounts.set(own, before);
+  const lamports = w.c.accounts.get(W.address)?.lamports;
   const a = await runPoolSell(w.host, { ...ASK, token: air });
-  assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
+  assert.deepEqual(a, { error: "not_funded" });
+  assert.equal(sends(w).length, 0, "nothing sent");
   assert.deepEqual(w.c.accounts.get(own), before, "W's own coin's account as it was");
-  assert.equal(w.c.deposits.filter((d) => d.sweep).length, 0, "no sweep");
-  assert.ok((w.c.accounts.get(W.address)?.lamports ?? 0) > 0, "W keeps its SOL for its coin's sell");
-  assert.equal(w.told.at(-1)?.state, "holds", JSON.stringify(w.told));
+  assert.equal(w.c.accounts.get(W.address)?.lamports, lamports, "W's SOL as it was");
 });
 
 // With no buy record (a buy from before it was written, or a restored device), the pass holds (delta review 8 of
@@ -4769,4 +4773,113 @@ test("review of f0e7bd38, P3: waitUnless clears its own timer at a sign out and 
   }
   await waitUnless(() => Promise.reject(new Error("the host's wait failed")), 1_000, new AbortController().signal);
   await waitUnless(() => Promise.reject(new Error("the host's wait failed")), 1_000);
+});
+
+// ---------- card wallets-found-in-one-read: a sale reads the Ws that can hold its token, not every past buy's ----------
+
+/** The page's finder on the test clock at its real pace (buy-wallets.ts HOLDINGS_RPC_LIMIT: one W's round in each
+ *  window, the first at once), over the Ws of these labels (each a deposit note's, so j 0): `lists` is what it reads in
+ *  a W. Its `wallets` answers as the page's sell host does: every W, the finder reading only those `read` asks for
+ *  (all, when no `read` is given), the rest with holdings null. */
+function finder(labels: readonly bigint[], lists: (address: string) => [string, bigint][] = () => []) {
+  const reads: string[] = [];
+  let turn = Promise.resolve();
+  const reader: HoldingsReader = {
+    chain: "sol",
+    read: async (address) => {
+      const mine = turn;
+      let free!: () => void;
+      turn = new Promise<void>((r) => (free = r));
+      await mine;
+      setTimeout(free, HOLDINGS_RPC_LIMIT.windowMs);
+      reads.push(address);
+      return { native: 0n, tokens: new Map(lists(address).map(([m, a]) => [m, { amount: a, frozen: false }] as const)), unreadable: [] };
+    },
+  };
+  const spent = labels.map((label, i) => ({ ref: { kind: "deposit" as const, s: 1n, i }, label }));
+  const keys = labels.map((l, i) => {
+    const x = freshWallet(SEED64, "sol", l, 0);
+    x.secretKey.fill(0);
+    return { pool: PROGRAM, chain: "sol" as const, note: `n${i}`, l, j: 0, path: x.path, address: x.address };
+  });
+  const wallets = async (read?: (address: string) => boolean | Promise<boolean>) => {
+    const only = new Set<string>();
+    for (const k of keys) if (!read || (await read(k.address))) only.add(k.address);
+    const got = only.size === 0 ? [] : (await buyWallets(SEED64.slice(), [{ id: PROGRAM, chain: "sol", spent, reader }], { only })).wallets;
+    return keys.map((k) => ({ ...k, holdings: got.find((w) => w.address === k.address)?.holdings ?? null }));
+  };
+  return { reads, wallets, addressOf: (l: bigint) => keys[labels.indexOf(l)]!.address };
+}
+/** The labels of n past buys: W's own (L) first, then 100, 101, ... */
+const pastBuys = (n: number): bigint[] => [L, ...Array.from({ length: n - 1 }, (_, i) => 100n + BigInt(i))];
+const OTHER_MINT = "So11111111111111111111111111111111111111112";
+/** The plan of a sell of `ask` on a world whose sell host lists these past buys through the finder, every W's buy record
+ *  as `record` names it (undefined: none), on the test clock: its plan and the clock time it took. */
+async function planOver(w: World, f: ReturnType<typeof finder>, record: (address: string) => string | undefined, ask: PoolAsk = share(10_000)) {
+  const host: PoolSellHost = { ...w.host, wallets: f.wallets, bought: { get: async (a) => (record(a) === undefined ? undefined : { mint: record(a)!, program: TOKEN_PROGRAM }), put: async () => {} } };
+  let plan: Awaited<ReturnType<typeof planPoolSell>> | undefined;
+  let ms = 0;
+  await onTestClock(async () => {
+    const t0 = performance.now();
+    plan = await planPoolSell(host, ask);
+    ms = performance.now() - t0;
+  });
+  return { plan: plan!, ms };
+}
+
+test("card wallets-found-in-one-read: a token held in 1 W among 20 or 100 past buys, each recorded, is planned as fast as with 1 past buy, the finder reading none", async () => {
+  const times: number[] = [];
+  for (const n of [1, 20, 100]) {
+    const w = await world();
+    // every other W's record names another mint, and the finder would list this one in each: never read, never sold
+    const f = finder(pastBuys(n), () => [[MINT, T3]]);
+    const { plan, ms } = await planOver(w, f, (a) => (a === W.address ? MINT : OTHER_MINT));
+    times.push(ms);
+    assert.deepEqual(plan.legs.map((x) => [x.w.address, x.held]), [[W.address, AMOUNT]], `${n} past buys`);
+    assert.deepEqual(f.reads, [], `${n} past buys: the finder read ${f.reads.length} Ws in ${ms} ms`);
+  }
+  // no finder round at all: under one window of the pace whatever the count (before: (n - 1) windows, 297 s at 100)
+  for (const ms of times) assert.ok(ms < HOLDINGS_RPC_LIMIT.windowMs, `${times.join(", ")} ms`);
+});
+
+test("card wallets-found-in-one-read: a token held in 5 recorded Ws among 20 sells from all 5, each read on both RPCs once, with no finder round", async () => {
+  const held = [T3, T5, T3, T5];
+  const w = await world({ others: held.map((h, i) => ({ l: 100n + BigInt(i), j: 0, held: h })) });
+  const f = finder(pastBuys(20));
+  const holders = new Set([W.address, ...held.map((_, i) => f.addressOf(100n + BigInt(i)))]);
+  const { plan, ms } = await planOver(w, f, (a) => (holders.has(a) ? MINT : OTHER_MINT));
+  assert.equal(plan.legs.length, 5);
+  assert.equal(plan.total, AMOUNT + 2n * T3 + 2n * T5);
+  assert.deepEqual(new Set(plan.legs.map((x) => x.w.address)), holders);
+  assert.deepEqual(f.reads, []);
+  assert.ok(ms < HOLDINGS_RPC_LIMIT.windowMs, `${ms} ms`);
+});
+
+test("card wallets-found-in-one-read: no buy records (a restored device): every W is read by the finder, as before, and the one holding the token is sold from", async () => {
+  const w = await world({ buy: null });
+  const f = finder(pastBuys(20), (a) => (a === W.address ? [[MINT, AMOUNT]] : []));
+  const { plan, ms } = await planOver(w, f, () => undefined);
+  assert.deepEqual(plan.legs.map((x) => [x.w.address, x.held]), [[W.address, AMOUNT]]);
+  assert.equal(new Set(f.reads).size, 20);
+  // the full pass at the pace: one W's round a window, the first at once
+  assert.ok(ms >= 19 * HOLDINGS_RPC_LIMIT.windowMs, `${ms} ms`);
+});
+
+test("card wallets-found-in-one-read: a W whose record names the token but whose account reads empty on both RPCs is not sold from", async () => {
+  const w = await world({ held: 0n, others: [{ l: 100n, j: 0, held: T3 }] });
+  const f = finder(pastBuys(2));
+  const { plan } = await planOver(w, f, () => MINT);
+  assert.deepEqual(plan.legs.map((x) => [x.w.address, x.held]), [[f.addressOf(100n), T3]]);
+  assert.equal(plan.total, T3);
+});
+
+test("card wallets-found-in-one-read: a W holding the token with no buy record among recorded ones is found by the finder's read of the unrecorded Ws alone, and sold from", async () => {
+  const w = await world({ others: [{ l: 100n, j: 0, held: T3 }] });
+  const f = finder(pastBuys(20), () => [[MINT, T3]]);
+  const unrecorded = f.addressOf(100n);
+  const { plan } = await planOver(w, f, (a) => (a === unrecorded ? undefined : a === W.address ? MINT : OTHER_MINT));
+  assert.deepEqual(new Set(plan.legs.map((x) => x.w.address)), new Set([W.address, unrecorded]));
+  assert.equal(plan.total, AMOUNT + T3);
+  // the finder read the one W with no record, and no other
+  assert.deepEqual(f.reads, [unrecorded]);
 });

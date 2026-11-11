@@ -17,7 +17,7 @@ import { openNoteStore, refKey, type NoteStore } from "../src/notes/store.ts";
 import { openWalletStore, type WalletStore } from "../src/store/index.ts";
 import { SOL_LAG_SLOTS, SOL_LAG_WAIT_MS } from "../src/pool/solana.ts";
 import { ThrottleGate } from "../src/throttle.ts";
-import { type ReaderOpts, buyWallets, derivedBuyWallets, EVM_HOLDINGS_ROUNDS, evmHelperHoldings, HOLDINGS_RPC_LIMIT, evmHoldingsReader, RETRY_AFTER_DEFAULT_MS, RETRY_AFTER_MAX_MS, retryAfterMs, SOL_HOLDINGS_ROUNDS, solanaHelperHoldings, solanaHoldingsReader, solanaSpentNotes, spentNotesOf, type BuyPool, type HoldingsReader, type JsonRpc } from "../src/pool/buy-wallets.ts";
+import { type ReaderOpts, buyWallets, derivedBuyWallets, wantedBuyWallets, EVM_HOLDINGS_ROUNDS, evmHelperHoldings, HOLDINGS_RPC_LIMIT, evmHoldingsReader, RETRY_AFTER_DEFAULT_MS, RETRY_AFTER_MAX_MS, retryAfterMs, SOL_HOLDINGS_ROUNDS, solanaHelperHoldings, solanaHoldingsReader, solanaSpentNotes, spentNotesOf, type BuyPool, type HoldingsReader, type JsonRpc } from "../src/pool/buy-wallets.ts";
 
 const A8 = JSON.parse(readFileSync(new URL("./vectors/a8.json", import.meta.url), "utf8")) as { inputs: { entropy: string }; l: string; wallets: { name: string; c: string; l: string; j: number; path: string; address: string }[] };
 const SEED = d.wordsToSeed64(d.entropyToWords(new Uint8Array(Buffer.from(A8.inputs.entropy, "hex"))));
@@ -311,6 +311,30 @@ test("derived first, read later: the Ws come from the seed at once, so the calle
   const stop = new AbortController();
   stop.abort();
   await assert.rejects(derived.read({ signal: stop.signal }), { name: "AbortError" });
+});
+
+test("card wallets-found-in-one-read: a list read in part reads only the Ws asked for, one per request, and answers every other with holdings null, never empty; a pool that does not derive fails with none asked", async () => {
+  const spent = [0, 1, 2].map((j) => (j === 0 ? { ref: DEP, label: L } : { ref: { kind: "change", l: L, j: j - 1 } as NoteRef, label: L }));
+  const seed = SEED.slice();
+  const derived = derivedBuyWallets(seed, [{ id: "sol", chain: "sol", spent, reader: solReader() }]);
+  seed.fill(0);
+  const [w0, w1, w2] = derived.wallets.map((w) => w.address);
+  assert.deepEqual([w0, w1, derived.wallets.length], [solW(0), solW(1), 3]);
+  assert.ok(derived.wallets.every((w) => !("holdings" in w)), "a derived W has no holdings to read as empty");
+  log.length = 0;
+  const asked: string[] = [];
+  const got = await wantedBuyWallets(derived, async (a) => (asked.push(a), a === solW(1)));
+  assert.deepEqual(asked, [w0, w1, w2]);
+  assert.deepEqual([...new Set(log.map(([, p]) => JSON.parse(p)[0] as string))], [solW(1)], "no other W is read");
+  assert.deepEqual(got.wallets.map((w) => [w.address, w.holdings === null]), [[w0, true], [w1, false], [w2, true]]);
+  assert.deepEqual(got.failed, []);
+  log.length = 0;
+  const none = await wantedBuyWallets(derived, () => false);
+  assert.equal(log.length, 0);
+  assert.ok(none.wallets.every((w) => w.holdings === null));
+  // a pool whose reader is not of its chain derives nothing: failed, whatever is asked
+  const bad = derivedBuyWallets(SEED, [{ id: "x", chain: "evm", spent, reader: solReader() }]);
+  assert.deepEqual(await wantedBuyWallets(bad, () => false), { wallets: [], failed: [{ pool: "x", error: "the reader is not of chain evm" }] });
 });
 
 test("a Solana restore's spends must be its spent notes, each at the queue's (l, j)", () => {
