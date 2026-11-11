@@ -1,0 +1,17 @@
+{
+ "_note": "good: SIGN_HOST's mainnet build of card/sol-pool-buy-lands-on-mainnet at 9a6d6f33 (packages/signpage/scripts/build-app.mjs bundle, network mainnet; its index pins its /app.js): the buy tips 100000, the sell builds its compute budget and the preview counts 100000. bad: SIGN_HOST as served 11 Nov 14:5xZ, release 116 (the helper's /v1/health release 116, commit b19f7723): the buy tips Jito's 1000 minimum, no sell priority fee.",
+ "good": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-54yeOBuZhV3uS8WuTV2im2mZKL1CKwe/rfJkBAZj7OOqxaW2b31BhYmvc3bX+Quu\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-54yeOBuZhV3uS8WuTV2im2mZKL1CKwe/rfJkBAZj7OOqxaW2b31BhYmvc3bX+Quu",
+  "buyTip": "100000",
+  "sellBudget": true,
+  "sellPriority": "100000"
+ },
+ "bad": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-pqqrny464Eb17q2bKMSCZglUxvY9bJqd5vOYfKxSfEd1w/pxF752KjWfWI0Xglj0\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-pqqrny464Eb17q2bKMSCZglUxvY9bJqd5vOYfKxSfEd1w/pxF752KjWfWI0Xglj0",
+  "buyTip": "1000",
+  "sellBudget": false,
+  "sellPriority": null
+ }
+}
