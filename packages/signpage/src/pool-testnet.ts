@@ -68,6 +68,7 @@ import { evmSettleReserved } from "../../wallet/src/pool/evm-settle.ts";
 import { evmPoolFee, evmPoolGas } from "../../kit/src/trade/evm/pool-fee.ts";
 import { poolDepositEvmKind, type EvmDepositRound } from "./pool-deposit-evm.ts";
 import { evmBuyHost, followPendingEvmBuys, poolBuyEvmKind, type EvmBuyPage } from "./pool-buy-evm.ts";
+import { evmSellHost, followEvmSells, poolSellEvmKind } from "./pool-sell-evm.ts";
 import { PAGE_TOKEN_DECIMALS, type PoolKindsDeps, type PoolRpc } from "./pool-kinds.ts";
 import { checkPoolRequest, tokenDecimalsShown, type PoolAsk, type PoolChain, type PoolRequest } from "./rules/pool.ts";
 import type { HostAnswer, HostRefusal, KindContext, Running } from "./api.ts";
@@ -365,7 +366,7 @@ export type TestnetOver = {
   depositKinds?: { solana?: typeof poolDepositKind; evm?: typeof poolDepositEvmKind };
   /** The trade kinds (poolBuyKind, poolSellKind otherwise): a test reads the hosts this page wires into them (W's buy
    *  record, written by the buy host and read by the sell host; delta review 8 of 5697d7a1). */
-  tradeKinds?: { buy?: typeof poolBuyKind; sell?: typeof poolSellKind; evmBuy?: typeof poolBuyEvmKind };
+  tradeKinds?: { buy?: typeof poolBuyKind; sell?: typeof poolSellKind; evmBuy?: typeof poolBuyEvmKind; evmSell?: typeof poolSellEvmKind };
   /** The buy wallets' finder reader for the page's RPCs (the helper's or a devnet RPC's otherwise; tests). */
   holdings?: (rpcs: readonly [SolanaRpc, SolanaRpc]) => HoldingsReader;
   /** The positions cache's retry and timers (src/positions.ts; tests). */
@@ -804,6 +805,64 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     if (e === null || !POOL_TESTNET) return;
     void followPendingEvmBuys(evmBuyHost(chain, e.pin, e.rpcs, evmBuyClaims, evmBuyPage(chain))).catch(() => {});
   };
+  // pool.sell on an EVM chain (card signpage-evm-pool-sell, src/pool-sell-evm.ts): the Ws the chain's spent notes pay,
+  // their buy records, the kit's sell quote and build, the helper's sell sender, the pool's pair and round; testnet build
+  // only until the mainnet pins' card. One note store per run, closed at its end
+  const evmSellFollowing = new Set<string>();
+  const evmSellSending = new Set<string>();
+  const evmSellOf = (chain: "base" | "robinhood", e: NonNullable<ReturnType<typeof evmPool>>) => {
+    let notes: Promise<NoteStore> | null = null;
+    // the store is closed once the tap has ended and every part it handed on (a send past the tap's bound, a
+    // read-back) has ended too (review P2-1: a sale that lands after the tap still writes its note)
+    let ended = false;
+    let kept = 0;
+    const close = (): void => {
+      if (ended && kept === 0) void notes?.then((n) => n.close(), () => {});
+    };
+    const host = evmSellHost(chain, e.pin, e.scope, e.rpcs, {
+      following: evmSellFollowing,
+      sending: evmSellSending,
+      keep: (p) => {
+        kept++;
+        void p.finally(() => {
+          kept--;
+          close();
+        });
+      },
+      notes: () => (notes ??= page.store().then(openNoteStore)),
+      seed64: page.seed64,
+      held: () => (page.held ? page.held() : Promise.reject(new Error("no wallet store is open"))),
+      round: () => e.sync.events(),
+      testnet: POOL_TESTNET,
+      fetch: over.fetch,
+      signal: follows.signal,
+      // the session's sign out (signingOut, at its tap): it ends a wait between the sale's reads' attempts
+      stop: evmStop.signal,
+      stopped: ((at) => () => signOuts !== at)(signOuts),
+    });
+    return {
+      ...host,
+      end: () => {
+        ended = true;
+        close();
+      },
+    };
+  };
+  const evmSell = (chain: "base" | "robinhood") => {
+    // first, alone: folded at build time, so the mainnet bundle carries none of the sale
+    if (!POOL_TESTNET) return null;
+    const e = evmPool(chain);
+    if (e === null) return null;
+    return (over.tradeKinds?.evmSell ?? poolSellEvmKind)(() => evmSellOf(chain, e));
+  };
+  // a sale whose tab ended before its end: followed from its open record at each state read (followEvmSells)
+  const evmSellFollow = (chain: "base" | "robinhood"): void => {
+    if (!POOL_TESTNET) return;
+    const e = evmPool(chain);
+    if (e === null) return;
+    const h = evmSellOf(chain, e);
+    void followEvmSells(h).catch(() => {}).finally(h.end);
+  };
   // an EVM pool's INCOMING notes finished with no ask (src/pool-deposit-evm.ts, the Solana pass's rule), one pass per
   // chain at a time: on a signed-in load and on each state read while such a note is open
   const evmSettling = new Map<"base" | "robinhood", Promise<void>>();
@@ -889,6 +948,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     if (chains.length === 0) return;
     // each chain's buys whose tab ended before their end, from their pending records (never awaited)
     for (const chain of chains) evmBuyFollow(chain);
+    // and each chain's sales whose tab ended before their end, from their open records (never awaited)
+    for (const chain of chains) evmSellFollow(chain);
     const all = await readNotes(await page.store());
     await Promise.all(
       chains.map(async (chain) => {
@@ -1749,7 +1810,9 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
           ? (evmDeposit(ask.chain)?.(ask, ctx) ?? { error: "not_allowed" })
           : ask.kind === "pool.buy"
             ? (evmBuy(ask.chain)?.(ask, ctx) ?? { error: "not_allowed" })
-            : { error: "not_allowed" }
+            : ask.kind === "pool.sell"
+              ? (evmSell(ask.chain)?.(ask, ctx) ?? { error: "not_allowed" })
+              : { error: "not_allowed" }
         : pin === undefined
         ? { error: "not_allowed" }
         : ask.kind === "pool.deposit"

@@ -24,6 +24,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { EXIT, MAX_READS, MIN_BARS, MIN_TEXTS, collect, crosshairTexts, judge, pickLines, pickToken } from "./app-legend-holds-still.mjs";
+import * as legend from "./app-legend-holds-still.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ANSWERS = JSON.parse(readFileSync(path.join(HERE, "app-legend-holds-still.answers.json"), "utf8"));
@@ -206,4 +207,28 @@ test("the recorded live run that picked its token: PASS, the picked token printe
   assert.equal(r.verdict, "PASS", r.lines.join("\n"));
   assert.match(r.lines[0], /^ok {2}picked solana\/\w+, 500 bars at 15m \(24 needed\), read 1 token for it, none skipped \(solana 99 Trending\)$/);
   assert.equal(ANSWERS.picked.route, `/token/${ANSWERS.picked.pick.picked.chain}/${ANSWERS.picked.pick.picked.addr}`);
+});
+
+
+// card app-live-run-judges-the-build: live 11 Nov 06:47Z (/token/solana/uHMWNFjUNxbPy1q43WrdbzygmJwdeh6AiQm1NKdxPAY, 142
+// bars) the newest bars' trade marks sat under the phone's rest tap: each rest read the point before it (0 crosshair
+// texts of 12 points) and the mark's opened card moved (div.tm-card 162,279 -> 162,251)
+test("a phone's tap meant for the chart lands clear of the trade marks' 44 px areas: the nearest clear height in the pane's middle 80 %, null when none is clear", async () => {
+  const clearY = legend.clearY;
+  assert.equal(typeof clearY, "function");
+  const marks = (lo, hi) => async (y) => y >= lo && y <= hi;
+  assert.equal(await clearY(150, 300, marks(1000, 1001)), 150, "nothing under it: where it was asked");
+  assert.equal(await clearY(150, 300, marks(128, 172)), 126, "a mark's 44 px area under it: the nearest clear height");
+  assert.equal(await clearY(40, 300, marks(30, 50)), 56, "never above the pane's top tenth (30): 32 and 48 covered, 24 above it, 56 clear");
+  assert.equal(await clearY(150, 300, marks(0, 300)), null, "every height covered");
+});
+
+test("recorded live answers on one token (PAYDAY, 142 bars): the rest tap on a trade mark's area FAILs on the phone; the tap clear of the marks PASSes", () => {
+  const before = judge(ANSWERS.badMarkUnderTap);
+  assert.equal(before.verdict, "FAIL");
+  assert.ok(bad(before).some((l) => l.startsWith("BAD phone: the crosshair moved the legend through 0 text(s) of its own in 12 point(s) over 142 bar(s)")), before.lines.join("\n"));
+  assert.ok(bad(before).some((l) => l.includes("div.tm-card")), "the opened mark card's move, named");
+  const after = judge(ANSWERS.goodClearTap);
+  assert.equal(after.verdict, "PASS", after.lines.join("\n"));
+  assert.equal(ANSWERS.goodClearTap.route, ANSWERS.badMarkUnderTap.route, "the same token");
 });

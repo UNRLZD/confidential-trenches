@@ -377,6 +377,68 @@ test("pool.buy on a chain with its EVM pin goes to the EVM buy on that chain's q
   await t.signedOut();
 });
 
+test("pool.sell on a chain with its EVM pin goes to the EVM sell on that chain's pool, by the testnet rule; a chain with none is refused not_allowed (card signpage-evm-pool-sell)", async () => {
+  const { w } = await wallet();
+  const hosts: { chain: string; network: string; testnet: boolean }[] = [];
+  const t = testnetPool(page(w), {
+    prover: { vault: signalsProver(), stop: () => {} },
+    evmPin: (c) => (c === "base" ? PIN : undefined),
+    evmRpcs: unread,
+    evmSync: () => ({ events: async () => assert.fail("no sync read") }),
+    evmQueuePool: () => fakeEvmPool() as Pool<unknown>,
+    tradeKinds: {
+      evmSell: (host) => () => {
+        const h = host();
+        hosts.push({ chain: h.chain, network: h.pin.network, testnet: h.testnet });
+        h.end?.();
+        return { running: true, after: Promise.resolve(), answer: () => ({ result: { stage: "sent", txs: [] } }) };
+      },
+    },
+  });
+  const ask = { kind: "pool.sell", chain: "base", token: SEPOLIA_USDC, amount: 10n ** 6n, slippageBps: 100, decimals: 6 } as const;
+  const got = t.flow(ask, null as never);
+  assert.ok("after" in got, "the base sell runs");
+  assert.deepEqual(hosts, [{ chain: "base", network: "base-sepolia", testnet: true }]);
+  assert.deepEqual(t.flow({ ...ask, chain: "robinhood" }, null as never), { error: "not_allowed" });
+  await t.signedOut();
+});
+
+test("the EVM sell's host keeps the note store open past the tap while a part it handed on runs, and closes it once that ends (card signpage-evm-pool-sell review P2-1)", async () => {
+  const { w } = await wallet();
+  let release!: () => void;
+  const steps: string[] = [];
+  let done!: Promise<void>;
+  const state = async (h: { notes(): Promise<{ list(): Promise<unknown> }> }) => (await h.notes()).list().then(() => "open", () => "closed");
+  const t = testnetPool(page(w), {
+    prover: { vault: signalsProver(), stop: () => {} },
+    evmPin: (c) => (c === "base" ? PIN : undefined),
+    evmRpcs: unread,
+    evmSync: () => ({ events: async () => assert.fail("no sync read") }),
+    evmQueuePool: () => fakeEvmPool() as Pool<unknown>,
+    tradeKinds: {
+      evmSell: (host) => () => {
+        const h = host();
+        assert.equal(typeof h.keep, "function", "the page takes the parts a tap hands on");
+        h.keep!(new Promise<void>((r) => (release = r)));
+        h.end?.();
+        done = (async () => {
+          await new Promise((r) => setTimeout(r, 20));
+          steps.push(`after the tap: ${await state(h)}`);
+          release();
+          await new Promise((r) => setTimeout(r, 20));
+          steps.push(`after its part: ${await state(h)}`);
+        })();
+        return { running: true, after: Promise.resolve(), answer: () => ({ result: { stage: "sent", txs: [] } }) };
+      },
+    },
+  });
+  const got = t.flow({ kind: "pool.sell", chain: "base", token: SEPOLIA_USDC, amount: 10n ** 6n, slippageBps: 100, decimals: 6 } as const, null as never);
+  assert.ok("after" in got);
+  await done;
+  assert.deepEqual(steps, ["after the tap: open", "after its part: closed"]);
+  await t.signedOut();
+});
+
 test("the EVM buy's host on the testnet page: the testnet rule, one claim set for every tap, its settle the chain's RESERVED pass, and a queue that could not open is opened again on the next tap (review P3-8, t02-t04)", async () => {
   const { w, ns } = await wallet();
   let signedIn = false;
