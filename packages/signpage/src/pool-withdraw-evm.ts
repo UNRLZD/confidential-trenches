@@ -48,7 +48,7 @@ import { EVM_CHAIN_IDS, EVM_SEND_MARGIN_MS, evmAgreedBlock, evmRetryLag, type Ev
 import { checkBinding, type Pool } from "../../wallet/src/pool/pool.ts";
 import { jOf } from "../../wallet/src/pool/queue.ts";
 import { EVM_BUY_LAG_BLOCKS, EVM_BUY_LAG_MS } from "./pool-buy-evm.ts";
-import { EvmSendBusy, EvmSendRefused, evmBuyVerdict, evmHeadNumber, evmReleaseRead, evmWithdrawCalldata, type EvmReleaseRead } from "./evm-send.ts";
+import { EVM_WITHDRAW_SIGNATURE, EvmSendBusy, EvmSendRefused, evmBuyVerdict, evmHeadNumber, evmReleaseRead, evmWithdrawCalldata, type EvmReleaseRead } from "./evm-send.ts";
 import { planPoolWithdraw, withdrawSources, type Arrivals, type PendingOnward, type WithdrawPart } from "./pool-withdraw.ts";
 import {
   checkEvmOnwardSend, checkEvmWithdraw, EVM_ONWARD_GAS, EVM_ONWARD_GAS_MAX, EVM_PRECOMPILE_TOP, evmOnwardCodeGas, PoolRuleRefused, signEvmOnwardSend, signEvmWithdraw,
@@ -229,17 +229,16 @@ const seedUse = async <T>(h: Pick<EvmWithdrawHost, "seed64">, f: (seed: Uint8Arr
 export const evmToRefused = (to: string, pin: EvmPoolPin, ws: readonly string[]): boolean =>
   !/^0x[0-9a-fA-F]{40}$/.test(to) || BigInt(to) < EVM_PRECOMPILE_TOP || [pin.pool, pin.feeRecipient, ...ws].some((x) => lower(x) === lower(to));
 
-/** The context a release's calldata carries (its proof's eighth public signal: the head's word 16), or null when it is
- *  not a withdraw or buy of this layout. */
+/** The context a withdraw's calldata carries (its proof's eighth public signal: the head's word 16), or null when it is
+ *  not a withdraw of this layout (a buy of the nullifier is another release: never this one's). */
 export function releaseContextOf(input: unknown): bigint | null {
   if (typeof input !== "string" || !/^0x([0-9a-fA-F]{2})*$/.test(input) || input.length < 2 + 2 * (4 + 32 * 17)) return null;
   const sel = lower(input.slice(2, 10));
-  if (sel !== WITHDRAW_SEL && sel !== BUY_SEL) return null;
+  if (sel !== WITHDRAW_SEL) return null;
   return BigInt(`0x${input.slice(2 + 8 + 64 * 16, 2 + 8 + 64 * 17)}`);
 }
 const selOf = (s: string): string => Array.from(keccak_256(new TextEncoder().encode(s)).subarray(0, 4), (x) => x.toString(16).padStart(2, "0")).join("");
-const WITHDRAW_SEL = /* @__PURE__ */ selOf("withdraw((address,bytes),(uint256[2],uint256[2][2],uint256[2],uint256[8]),uint256,bytes)");
-const BUY_SEL = /* @__PURE__ */ selOf("buy((address,bytes),(uint256[2],uint256[2][2],uint256[2],uint256[8]),uint256,(address,bytes,uint256,address),bytes)");
+const WITHDRAW_SEL = /* @__PURE__ */ selOf(EVM_WITHDRAW_SIGNATURE);
 
 /** A release's verdict for an owed part: "mine" (both RPCs read one Withdrawn of the nullifier paying W the chunk at a
  *  fee up to the cap, and its transaction's calldata, on both, carries this attempt's context), "other" (another

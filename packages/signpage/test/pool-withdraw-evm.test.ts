@@ -218,3 +218,16 @@ test("a reload whose kept send is not read on both RPCs yet, nor the release: re
   const host = { ...fullHost(noteOf("RESERVED"), one), rpcs: [rpcOf(one, []), rpcOf({}, [])] } as unknown as EvmWithdrawHost;
   assert.equal(await finishEvmOnward(host, pendingOf({ onward: ONWARD })), null);
 });
+
+test("the withdraw's live check reads what the page sends: the release's selector, the pool's Withdrawn topic and the bundle marks this code carries (scripts/live-checks/evm-withdraw-mainnet.mjs)", async () => {
+  const { keccak_256 } = await import("@noble/hashes/sha3.js");
+  const { EVM_WITHDRAW_SIGNATURE } = await import("../src/evm-send.ts");
+  const { EVM_POOL_EVENTS } = await import("../../wallet/src/pool/evm.ts");
+  const { readFileSync } = await import("node:fs");
+  const lc = (await import(new URL("../../../scripts/live-checks/evm-withdraw-mainnet.mjs", import.meta.url).href)) as { WITHDRAW_SELECTOR: string; WITHDRAWN: string; WITHDRAW_MARKS: readonly string[] };
+  const k = (s: string) => hex(keccak_256(new TextEncoder().encode(s)));
+  assert.equal(lc.WITHDRAW_SELECTOR, "0x" + k(EVM_WITHDRAW_SIGNATURE).slice(0, 8));
+  assert.equal(lc.WITHDRAWN, "0x" + k(EVM_POOL_EVENTS.Withdrawn));
+  assert.equal(lc.WITHDRAW_MARKS[0], EVM_WITHDRAW_SIGNATURE);
+  assert.ok(readFileSync(new URL("../src/pool-withdraw-evm.ts", import.meta.url), "utf8").includes(lc.WITHDRAW_MARKS[1]!), "the probe key's hex, as the source writes it");
+});

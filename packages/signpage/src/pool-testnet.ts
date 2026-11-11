@@ -1808,7 +1808,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         }
         const evmChain = (pending as Partial<EvmPendingOnward>).chain;
         // an EVM pool's owed send: its chain's finish (src/pool-withdraw-evm.ts); a chain with no pool here is read again
-        if (evmChain === "base" || evmChain === "robinhood") {
+        if (POOL_TESTNET && (evmChain === "base" || evmChain === "robinhood")) {
           const eh = evmWithdrawHost(evmChain, notes);
           const got = eh === null ? null : await locks.request(WALLET_SEED_LOCK, { mode: "shared" }, () => finishEvmOnward(eh, pending as EvmPendingOnward, evmStopsOf(k)));
           if (got?.feeNeeded !== undefined) await ops.update("ops", k, (v) => mergeWithdrawOp(v, { feeNeeded: got.feeNeeded! }));
@@ -1933,7 +1933,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     }
   };
   const withdraw = async (ready: PoolReady, opId: string): Promise<void> => {
-    if (!locks || (ready.chain === "solana" ? pin === undefined : evmPool(ready.chain) === null)) return;
+    if (!locks || (ready.chain === "solana" ? pin === undefined : !POOL_TESTNET || evmPool(ready.chain) === null)) return;
     withdrawing.add(opId);
     try {
       await (ready.chain === "solana" ? withdrawRun(ready, opId) : evmWithdrawRun(ready.chain, ready, opId));
@@ -1951,6 +1951,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     return s;
   };
   const evmWithdrawHost = (chain: "base" | "robinhood", notes: NoteStore): EvmWithdrawHost | null => {
+    // folded at build time, as the EVM buy and sale: the mainnet bundle carries none of the withdraw
+    if (!POOL_TESTNET) return null;
     const e = evmPool(chain);
     if (e === null) return null;
     const pool =
@@ -1986,6 +1988,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     return q ? (((await q.catch(() => null))?.queue as ProofQueue<EvmPoolRequest> | undefined) ?? null) : null;
   };
   const evmFunds = async (chain: "base" | "robinhood", to?: string): Promise<PoolFunds> => {
+    if (!POOL_TESTNET) throw new Error("no flow for this chain");
     const notes = await openNoteStore(await page.store());
     try {
       const h = evmWithdrawHost(chain, notes);
@@ -2006,7 +2009,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       return { ...r, [q.noteId]: q };
     });
   const evmWithdrawRun = async (chain: "base" | "robinhood", ready: PoolReady, opId: string): Promise<void> => {
-    if (!locks) return;
+    if (!POOL_TESTNET || !locks) return;
     const ops = await page.store();
     const created_ms = Date.now();
     let writes: Promise<unknown> = ops.put("ops", opId, { kind: "withdraw", stage: "proving", txs: [], created_ms }).catch(() => {});
@@ -2054,7 +2057,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     if (evmQueues.has(chain)) void evmProofs(chain);
   };
   const evmWithdrawDeps = (chain: "base" | "robinhood", opId: string): PoolWithdrawFormDeps => {
-    const e = evmPool(chain);
+    const e = POOL_TESTNET ? evmPool(chain) : null;
     return {
       chain,
       keys: { pool: e?.pin.pool ?? "" },
@@ -2192,7 +2195,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
             ? evmRun(ask.chain, ask, ctx, evmBuy(ask.chain) ?? undefined)
             : ask.kind === "pool.sell"
               ? evmRun(ask.chain, ask, ctx, evmSell(ask.chain) ?? undefined)
-              : ask.kind === "pool.withdraw" && page.openWithdraw && evmPool(ask.chain) !== null
+              : ask.kind === "pool.withdraw" && POOL_TESTNET && page.openWithdraw && evmPool(ask.chain) !== null
                 ? (page.openWithdraw(ask.chain, ctx) ?? { error: "not_allowed" })
                 : { error: "not_allowed" }
         : pin === undefined
