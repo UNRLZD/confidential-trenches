@@ -107,6 +107,7 @@ export const CHILD_RUNS = [
   { key: "app-orders-coming-soon", host: "app", args: ["--root", "apps/terminal/dist"] },
   { key: "words-nov8-final", host: "sign", args: ["--local", "--host", "sign"] },
   { key: "words-nov8-final", host: "app", args: ["--local", "--host", "app"] },
+  { key: "signing-views-open-over-the-app", host: "sign", args: ["--local"] },
 ];
 /** The deploys' checks left out, with the reason. */
 export const OUT = {
