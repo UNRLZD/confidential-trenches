@@ -159,19 +159,6 @@ export const POOL_SELL_SIZE_RETRY_MS = 500;
  *  SOLANA_POOL_QUOTE_MAX_AGE_SLOTS (25) at 400 ms a slot: two providers that do not agree that long refuse the sale,
  *  which is never priced on one provider's word.] */
 export const POOL_SELL_AGREE_WAIT_MS = SOLANA_POOL_QUOTE_MAX_AGE_SLOTS * 400;
-/** A read the two providers answer apart: read again after a wait (agreed). */
-const SPLIT = Symbol("split");
-/** `read` again POOL_SELL_SIZE_RETRY_MS on while it answers SPLIT, up to POOL_SELL_AGREE_WAIT_MS of waits in all, then
- *  refused failed with `check`: what both providers answer alike, never one provider's word alone. */
-async function agreed<T>(read: () => Promise<T | typeof SPLIT>, wait: (ms: number) => Promise<void>, check: Check): Promise<T> {
-  for (let waited = 0; ; ) {
-    const r = await read();
-    if (r !== SPLIT) return r;
-    if (waited >= POOL_SELL_AGREE_WAIT_MS) return no("failed", check);
-    waited += POOL_SELL_SIZE_RETRY_MS;
-    await wait(POOL_SELL_SIZE_RETRY_MS);
-  }
-}
 /** One sell at a time on this device, every tab: two runs never pick one return note. */
 export const POOL_SELL_LOCK = "ct-pool/sell";
 /** The rent back's tries at each step: a provider's throttle, stall or lag is read again from the top (the devnet run at
@@ -263,7 +250,21 @@ async function accountsOf(rpc: SolanaRpc, addresses: readonly string[]): Promise
   return (await accountsRaw(rpc, addresses)).map((a) => (a === null ? null : { ...a, lamports: BigInt(int(a.lamports)) }));
 }
 
-/** The pool account on both RPCs, the same bytes (read again once when they differ): its two tree sizes. */
+/** A read the two providers answer apart: read again after a wait (agreed). */
+const SPLIT = Symbol("split");
+/** `read` again POOL_SELL_SIZE_RETRY_MS on while it answers SPLIT, up to POOL_SELL_AGREE_WAIT_MS of waits in all, then
+ *  refused failed with `check`: what both providers answer alike, never one provider's word alone. */
+async function agreed<T>(read: () => Promise<T | typeof SPLIT>, wait: (ms: number) => Promise<void>, check: Check): Promise<T> {
+  for (let waited = 0; ; ) {
+    const r = await read();
+    if (r !== SPLIT) return r;
+    if (waited >= POOL_SELL_AGREE_WAIT_MS) return no("failed", check);
+    waited += POOL_SELL_SIZE_RETRY_MS;
+    await wait(POOL_SELL_SIZE_RETRY_MS);
+  }
+}
+
+/** The pool account on both RPCs, the same bytes (two that differ read again until they agree, agreed): its two tree sizes. */
 async function treeSizes(rpcs: Rpcs, program: string, pool: string, wait: (ms: number) => Promise<void>): Promise<{ stateSize: number; labelSize: number }> {
   return agreed(
     async () => {
