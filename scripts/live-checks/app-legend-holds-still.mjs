@@ -40,7 +40,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { columnRows } from "../../apps/terminal/src/screens/discover/model.ts";
-import { CANDLES_URL, DEFAULT_TF, THROTTLE_RETRIES, THROTTLE_WAIT_MAX_S, toCandleData } from "../../apps/terminal/src/screens/token/candles.ts";
+import { CANDLES_URL, DEFAULT_TF, throttleWaitMs, toCandleData } from "../../apps/terminal/src/screens/token/candles.ts";
 import { INIT, WIDTHS } from "./app-shell.mjs";
 import { launchBrowser } from "../browsers.mjs";
 import { named } from "./record-names.mjs";
@@ -203,9 +203,8 @@ export async function pickToken({ fetchFn = fetch, chains = CHAINS, max = MAX_RE
       try {
         // a 429 is read again after its Retry-After, as the page does (candles.ts loadCandles)
         let r = await asked(CANDLES_URL(chain, row.token, DEFAULT_TF));
-        for (let i = 0; r.status === 429 && i < THROTTLE_RETRIES; i++) {
-          const after = Number(r.headers.get("Retry-After"));
-          await wait(1000 * (Number.isFinite(after) && after > 0 ? Math.min(after, THROTTLE_WAIT_MAX_S) : 1));
+        for (let waited = 0, w; r.status === 429 && (w = throttleWaitMs(r.headers.get("Retry-After"), waited)) !== null; waited += w) {
+          await wait(w);
           r = await asked(CANDLES_URL(chain, row.token, DEFAULT_TF));
         }
         one.status = r.status;

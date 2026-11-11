@@ -156,10 +156,11 @@ test("the top token's chart holds 3 bars and a 111-bar token is below it: the se
   assert.equal(rec.route, null);
 });
 
-test("a 429 on a token is read again after its Retry-After (as the page does), then skipped with its status; the token below it is picked", async () => {
+test("a 429 on a token is read again at each Retry-After for one budget window (as the page does), then skipped with its status; the token below it is picked", async () => {
   const waits = [];
   const pick = await pickToken({ fetchFn: helper(ANSWERS.pick.throttled), chains: ["solana"], wait: (ms) => (waits.push(ms), Promise.resolve()) });
-  assert.deepEqual(waits, [2000, 2000]);
+  // Retry-After 2 s each time: 37 waits of 2 s and the window's last second (candles.ts THROTTLE_SPAN_S, 75 s)
+  assert.deepEqual(waits, [...Array(37).fill(2000), 1000]);
   assert.equal(pick.read[0].bars, null);
   assert.equal(pick.read[0].why, "bars 429");
   assert.equal(pick.picked.bars, 30);
