@@ -66,8 +66,11 @@ function chain(ws: readonly string[], held: ReadonlyMap<string, bigint>, program
   const named: [Set<string>, Set<string>] = [new Set(), new Set()];
   const calls: [string[], string[]] = [[], []];
   const open = { now: 0, most: 0 };
+  const clock = { t: 0 };
+  const at: [number[], number[]] = [[], []];
   const rpc = (k: number) => async (method: string, params: readonly unknown[]): Promise<unknown> => {
     calls[k]!.push(method);
+    at[k]!.push(clock.t);
     if (method === "getAccountInfo") {
       assert.equal(params[0], MINT, "the only lone account read is the mint");
       return { context: { slot: 10 }, value: { owner: program, lamports: 1, data: [base64.encode(new Uint8Array(82)), "base64"] } };
@@ -86,7 +89,7 @@ function chain(ws: readonly string[], held: ReadonlyMap<string, bigint>, program
     const amount = held.get(w) ?? 0n;
     return { context: { slot: 10 }, value: keys.map((a, i) => (i === 0 && amount > 0n ? { owner: program, lamports: 2_039_280, data: [tokenAccount(MINT, w, amount), "base64"] } : i === 1 ? { owner: "11111111111111111111111111111111", lamports: 50_000_000, data: ["", "base64"] } : null)) };
   };
-  return { rpcs: [rpc(0), rpc(1)] as const, named, calls, open };
+  return { rpcs: [rpc(0), rpc(1)] as const, named, calls, open, clock, at };
 }
 
 /** The page's sell host on `w` (the sell kind's own, taken when a sell is asked), with a finder that counts its reads. */
@@ -164,20 +167,31 @@ test("a restored device (no buy record): with a whole pass kept the pass lists t
   }
 });
 
-test("thirty Ws listed: thirty requests on each provider, each naming one W, all asked at once", async () => {
-  const N = 30;
-  const w = await spentWallet(N);
-  const ws = Array.from({ length: N }, (_, i) => wOf(i));
-  await w.update("meta", BUY_MINTS_KEY, () => Object.fromEntries(ws.map((a) => [a, { mint: MINT, program: SOLANA_TOKEN_PROGRAM }])));
-  await w.put("meta", POSITIONS_KEPT_KEY, kept({}));
-  const c = chain(ws, new Map(ws.map((a, i) => [a, BigInt(i + 1)])));
-  const { host } = await sellHostOf(w, c);
-  const plan = await planPoolSell(host, ALL);
-  host.end();
-  assert.equal(plan.total, BigInt((N * (N + 1)) / 2));
-  for (const k of [0, 1] as const) {
-    assert.equal(c.calls[k].filter((m) => m === "getMultipleAccounts").length, N);
-    assert.equal(c.named[k].size, N);
+/** The most reads one provider was asked inside any 1 s on the test's clock. */
+const busiest = (at: readonly number[]): number => Math.max(0, ...at.map((s) => at.filter((t) => t >= s && t < s + 1_000).length));
+
+test("thirty Ws listed: each named in a request of its own on each provider, in steps a second apart, never more than 20 reads on one provider inside 1 s; ten Ws stay one step", async () => {
+  for (const N of [30, 10]) {
+    const w = await spentWallet(N);
+    const ws = Array.from({ length: N }, (_, i) => wOf(i));
+    await w.update("meta", BUY_MINTS_KEY, () => Object.fromEntries(ws.map((a) => [a, { mint: MINT, program: SOLANA_TOKEN_PROGRAM }])));
+    await w.put("meta", POSITIONS_KEPT_KEY, kept({}));
+    const c = chain(ws, new Map(ws.map((a, i) => [a, BigInt(i + 1)])));
+    const { host } = await sellHostOf(w, c);
+    const waits: number[] = [];
+    const plan = await planPoolSell({ ...host, wait: async (ms: number) => void (waits.push(ms), (c.clock.t += ms)) }, ALL);
+    host.end();
+    assert.equal(plan.total, BigInt((N * (N + 1)) / 2));
+    for (const k of [0, 1] as const) {
+      assert.equal(c.calls[k].filter((m) => m === "getMultipleAccounts").length, N);
+      assert.equal(c.named[k].size, N);
+      assert.ok(busiest(c.at[k]) <= 20, `provider ${k}: ${busiest(c.at[k])} reads inside 1 s`);
+    }
+    if (N === 30) {
+      assert.ok(waits.length >= 1 && waits.length <= 2 && waits.every((ms) => ms === 1_000), `30 Ws: two or three steps a second apart (${waits.join(", ")})`);
+    } else {
+      assert.deepEqual(waits, [], "ten Ws: one step, no wait");
+      assert.equal(c.open.most, 2 * N, "ten Ws: every request in flight at once, on both providers");
+    }
   }
-  assert.equal(c.open.most, 2 * N, "every W's request in flight at once, on both providers");
 });

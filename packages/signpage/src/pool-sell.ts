@@ -644,16 +644,20 @@ export type PoolSellPlan = { units: bigint; total: bigint; legs: readonly { w: B
  *   not cover is sold in part, and the walk ends. Smallest first closes the most Ws and leaves the one part sale where
  *   the most is held.
  */
-export async function planPoolSell(h: Pick<PoolSellHost, "rpcs" | "wallets" | "bought">, ask: PoolAsk): Promise<PoolSellPlan> {
+export async function planPoolSell(h: Pick<PoolSellHost, "rpcs" | "wallets" | "bought" | "wait" | "signal">, ask: PoolAsk): Promise<PoolSellPlan> {
   return (await planReads(h, ask)).plan;
 }
+
+/** The Ws a sale's plan reads at once, and the time between its steps (planReads). */
+export const PLAN_W_STEP = 12;
+export const PLAN_STEP_MS = 1_000;
 
 /** planPoolSell, with each W's read (wHeld) by address, and `listed` told the Ws it reads before it reads them (sellAll
  *  starts a lone W's own sale reads beside them). No W: no read at all. Else the mint is read beside each W's own
  *  accounts, under the program W's own buy record names for the token (pool-buy.ts BuyMints) when it names one: the
  *  mint's program on both RPCs decides, and a W read under another program is read again under the mint's (card
  *  pool-sell-legs-side-by-side: one round for the plan's reads). */
-async function planReads(h: Pick<PoolSellHost, "rpcs" | "wallets" | "bought">, ask: PoolAsk, listed?: (ws: readonly BuyWallet[]) => void): Promise<{ plan: PoolSellPlan; seen: ReadonlyMap<string, WHeld> }> {
+async function planReads(h: Pick<PoolSellHost, "rpcs" | "wallets" | "bought" | "wait" | "signal">, ask: PoolAsk, listed?: (ws: readonly BuyWallet[]) => void): Promise<{ plan: PoolSellPlan; seen: ReadonlyMap<string, WHeld> }> {
   if (ask.kind !== "pool.sell" || ask.chain !== "solana" || ask.token === null) return no("not_allowed");
   const token = ask.token;
   const all = (await h.wallets()).filter((x) => x.chain === "sol");
@@ -670,26 +674,39 @@ async function planReads(h: Pick<PoolSellHost, "rpcs" | "wallets" | "bought">, a
   const mint = ws.length === 0 ? null : mintProgram(h.rpcs, token);
   mint?.catch(() => {});
   const reads = new Map<string, WHeld>();
-  const held = await Promise.all(
-    ws.map(async ({ w, guess }) => {
-      try {
-        let r: WHeld;
-        if (guess === null) r = await wHeld(h.rpcs, w.address, token, await mint!);
-        else {
-          const g = wHeld(h.rpcs, w.address, token, guess);
-          g.catch(() => {});
-          const program = await mint!;
-          r = program === guess ? await g : (await g.catch(() => null), await wHeld(h.rpcs, w.address, token, program));
-        }
-        reads.set(w.address, r);
-        return { w, held: r.amount };
-      } catch (e) {
-        // frozen on both RPCs: never sold, so none of it counts
-        if (e instanceof Refused && e.code === "not_allowed") return { w, held: 0n, frozen: true as const };
-        throw e;
+  const one = async ({ w, guess }: (typeof ws)[number]): Promise<{ w: BuyWallet; held: bigint; frozen?: true }> => {
+    try {
+      let r: WHeld;
+      if (guess === null) r = await wHeld(h.rpcs, w.address, token, await mint!);
+      else {
+        const g = wHeld(h.rpcs, w.address, token, guess);
+        g.catch(() => {});
+        const program = await mint!;
+        r = program === guess ? await g : (await g.catch(() => null), await wHeld(h.rpcs, w.address, token, program));
       }
-    }),
-  );
+      reads.set(w.address, r);
+      return { w, held: r.amount };
+    } catch (e) {
+      // frozen on both RPCs: never sold, so none of it counts
+      if (e instanceof Refused && e.code === "not_allowed") return { w, held: 0n, frozen: true as const };
+      throw e;
+    }
+  };
+  // the Ws' reads in steps of PLAN_W_STEP a PLAN_STEP_MS apart: one sale never puts more than 20 reads on one provider
+  // inside 1 s (the helper's keyed provider is paced at 10 a second upstream; a public one counts connections), with the
+  // mint, rent and sizes reads beside the first step; a sale of up to PLAN_W_STEP Ws is one step. A read that failed
+  // starts no later step.
+  const asked: Promise<{ w: BuyWallet; held: bigint; frozen?: true }>[] = [];
+  let failed = false;
+  for (let i = 0; i < ws.length && !failed; i += PLAN_W_STEP) {
+    if (i > 0) await waitUnless(h.wait, PLAN_STEP_MS, h.signal);
+    for (const x of ws.slice(i, i + PLAN_W_STEP)) {
+      const p = one(x);
+      p.catch(() => void (failed = true));
+      asked.push(p);
+    }
+  }
+  const held = await Promise.all(asked);
   const plan = planOf(ask, held);
   return { plan, seen: reads };
 }
