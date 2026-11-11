@@ -1,0 +1,20 @@
+// The wallet's typecheck (pnpm run typecheck): every source, test and script, found by rule, so a new file needs no edit.
+// Not named tsconfig.json: the bundler applies the nearest tsconfig.json to SIGN_HOST's build, which this file must never
+// change.
+{
+  "compilerOptions": {
+    "noEmit": true,
+    "strict": true,
+    "target": "es2023",
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true,
+    "skipLibCheck": true,
+    "types": ["node"]
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts", "scripts/**/*.ts"],
+  // imports two .mjs sweeps that carry no types (../../../scripts/mutant-part.mjs, ../scripts/held-moveout-mutants.mjs):
+  // checked when it runs, as before this file, when the typecheck named no such file
+  "exclude": ["test/held-moveout-parts.test.ts"]
+}
