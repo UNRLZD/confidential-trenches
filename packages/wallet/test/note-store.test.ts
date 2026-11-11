@@ -409,6 +409,31 @@ test("F1: RESERVED goes back to UNSPENT only once block time is past its deadlin
   assert.equal((await t.ns.move(Y.id, "RESERVED", "UNSPENT", { blockTimeMs: 6_001n })).state, "UNSPENT");
 });
 
+test("F1b: a RESERVED note whose one signed Solana transaction names its last block height goes back to UNSPENT once both RPCs' finalized height is past it, before its deadline; never on a height at it, nor without one", async () => {
+  const t = await tab();
+  const X = await landed(t.ns, 903n, 9003n, 100n);
+  const h = await t.ns.move(X.id, "UNSPENT", "HELD", { deadlineMs: 900_000n, context: String(contexts++) });
+  const r = await t.ns.move(X.id, "HELD", "RESERVED", { attempt: h.attempt, lastHeight: 1_000n });
+  assert.equal(r.lastHeight, 1_000n, "written with the take, before the transaction leaves");
+  assert.equal((await t.ns.get(X.id))?.lastHeight, 1_000n, "read back as stored");
+  const puts = t.puts();
+  await assert.rejects(t.ns.move(X.id, "RESERVED", "UNSPENT", { finalHeight: 1_000n }), /can still land/, "at its last height it can still land");
+  await assert.rejects(t.ns.move(X.id, "RESERVED", "UNSPENT", { finalHeight: 1 as unknown as bigint }), /finalHeight/);
+  await assert.rejects(t.ns.move(X.id, "RESERVED", "UNSPENT", { blockTimeMs: 900_000n }), /can still land/, "the deadline rule holds as before");
+  assert.equal(t.puts(), puts);
+  const back = await t.ns.move(X.id, "RESERVED", "UNSPENT", { finalHeight: 1_001n });
+  assert.equal(back.state, "UNSPENT");
+  assert.equal(back.lastHeight, undefined, "the height goes with the attempt");
+  // a note reserved with no height (an EVM proof, or a send that names none) is freed only past its deadline
+  const Y = await landed(t.ns, 904n, 9004n, 7n);
+  await reserved(t.ns, Y, 6_000n);
+  await assert.rejects(t.ns.move(Y.id, "RESERVED", "UNSPENT", { finalHeight: 10n ** 9n }), /can still land/);
+  // the height is written with HELD -> RESERVED only
+  const Z = await landed(t.ns, 905n, 9005n, 7n);
+  const hz = await t.ns.move(Z.id, "UNSPENT", "HELD", { deadlineMs: 6_000n, context: String(contexts++) });
+  await assert.rejects(t.ns.move(Z.id, "HELD", "UNSPENT", { attempt: hz.attempt, lastHeight: 5n }), /HELD -> RESERVED only/);
+});
+
 test("F2: the parent comes from the child's (l, j): a wrong parent, j, label or scope is refused; an unnamed parent is found", async () => {
   const t = await tab();
   const X = await landed(t.ns, 911n, 9101n, 100n);

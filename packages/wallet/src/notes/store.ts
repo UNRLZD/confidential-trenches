@@ -130,6 +130,11 @@ export type NoteRecord = {
   evmSpent?: EvmSpent; // INCOMING with evmSends only: the block U's last send's nonce was read used at (card evm-deposit-note-stays-incoming)
   contexts?: AttemptContext[]; // from its first HELD on: every attempt's context and deadline_ms, in the order written
   request?: string; // RESERVED: the vault withdrawal's request body as sent (JSON), written with HELD -> RESERVED, so a later page sends the same bytes again
+  // RESERVED: the block height past which the attempt's one signed Solana transaction can no longer land (its
+  // blockhash's last valid height, the higher of two RPCs' words), written with HELD -> RESERVED before it leaves. W must
+  // sign every release (contracts/pool-solana src/release.rs row 2) and signs one transaction per attempt, so once both
+  // RPCs' finalized height is past it with no spent mark the proof can never be spent: freed then, not at deadline_ms
+  lastHeight?: bigint;
 };
 
 /** A withdrawal attempt's context (a canonical decimal below p) and its deadline_ms, written with the move to HELD. */
@@ -176,7 +181,9 @@ export type NewNote = {
 // attempt: the holder's HELD -> RESERVED, HELD -> HELD or HELD -> UNSPENT. blockTimeMs: RESERVED -> UNSPENT (past deadline_ms), or another tab's HELD -> UNSPENT (past
 // deadline_ms - margin).
 // request: the holder's HELD -> RESERVED only (the vault withdrawal's body, card signpage-withdraw-handoff).
-export type MoveFields = { leaf?: Leaf; deadlineMs?: bigint; context?: string; attempt?: string; blockTimeMs?: bigint; send?: PoolSend; evmSend?: EvmPoolSend; request?: string };
+// lastHeight: the holder's HELD -> RESERVED only. finalHeight: RESERVED -> UNSPENT, the lower of both RPCs' finalized
+// block heights, past the note's lastHeight (card pool-buy-record-never-stays-sent).
+export type MoveFields = { leaf?: Leaf; deadlineMs?: bigint; context?: string; attempt?: string; blockTimeMs?: bigint; send?: PoolSend; evmSend?: EvmPoolSend; request?: string; lastHeight?: bigint; finalHeight?: bigint };
 /** The longest request body a RESERVED note holds: the helper's POST /v1/withdraw limit (8 KiB). */
 export const NOTE_REQUEST_MAX = 8_192;
 
@@ -448,7 +455,7 @@ function checkRequest(r: unknown, what: string): string {
 function checkRecord(id: string, r: unknown): NoteRecord {
   if (r === null || typeof r !== "object") throw new Error(`note ${id} is not a record`);
   const n = r as NoteRecord;
-  onlyKeys(n, ["id", "ref", "scope", "precommitment", "state", "parent", "leaf", "deadlineMs", "attempt", "tab", "calls", "searchFrom", "sends", "evmSends", "evmSpent", "contexts", "request"], `note ${id}`);
+  onlyKeys(n, ["id", "ref", "scope", "precommitment", "state", "parent", "leaf", "deadlineMs", "attempt", "tab", "calls", "searchFrom", "sends", "evmSends", "evmSpent", "contexts", "request", "lastHeight"], `note ${id}`);
   if (n.id !== id) throw new Error(`note ${id} names another id`);
   refKey(n.ref);
   field(n.scope, "scope");
@@ -466,6 +473,10 @@ function checkRecord(id: string, r: unknown): NoteRecord {
   if (n.request !== undefined) {
     if (n.state !== "RESERVED") throw new Error(`note ${id}: a request in RESERVED only`);
     checkRequest(n.request, `note ${id}: request`);
+  }
+  if (n.lastHeight !== undefined) {
+    if (n.state !== "RESERVED") throw new Error(`note ${id}: a last height in RESERVED only`);
+    u64(n.lastHeight, `note ${id}: lastHeight`);
   }
   if (n.parent !== undefined && (typeof n.parent !== "string" || (n.ref.kind !== "change" && n.ref.kind !== "refund"))) throw new Error(`note ${id}: only a change or refund note has a parent`);
   if (n.calls !== undefined) {
@@ -517,6 +528,7 @@ function record(n: NoteRecord): NoteRecord {
   if (n.evmSpent !== undefined) out.evmSpent = n.evmSpent;
   if (n.contexts !== undefined) out.contexts = n.contexts;
   if (n.request !== undefined) out.request = n.request;
+  if (n.lastHeight !== undefined) out.lastHeight = n.lastHeight;
   return out;
 }
 
@@ -555,7 +567,7 @@ export async function readNotes(store: Pick<WalletStore, "get" | "keys">): Promi
   return all.map((n) => {
     if (!parents.has(n.id) || n.state === "SPENT") return n;
     // settle's put(p, "SPENT"): no tab, no deadline, no attempt
-    const { tab: _tab, deadlineMs: _deadline, attempt: _attempt, request: _request, ...spent } = n;
+    const { tab: _tab, deadlineMs: _deadline, attempt: _attempt, request: _request, lastHeight: _lastHeight, ...spent } = n;
     return { ...spent, state: "SPENT" };
   });
 }
@@ -595,7 +607,7 @@ export async function openNoteStore(store: WalletStore, opts: NoteStoreOptions =
   };
 
   // The one write of a state change: shape and fields checked, then one put. The callers check edge and ownership.
-  async function put(cur: NoteRecord, to: NoteState, fields: Pick<MoveFields, "leaf" | "deadlineMs" | "context" | "request"> = {}): Promise<NoteRecord> {
+  async function put(cur: NoteRecord, to: NoteState, fields: Pick<MoveFields, "leaf" | "deadlineMs" | "context" | "request" | "lastHeight"> = {}): Promise<NoteRecord> {
     const next: NoteRecord = { ...cur, state: to };
     if (to !== "INCOMING") delete next.evmSpent;
     if (cur.state === "INCOMING" && to === "UNSPENT") next.leaf = checkLeaf(fields.leaf, cur.precommitment);
@@ -622,7 +634,11 @@ export async function openNoteStore(store: WalletStore, opts: NoteStoreOptions =
         delete next.deadlineMs;
         delete next.attempt;
         delete next.request;
-      } else if (fields.request !== undefined) next.request = checkRequest(fields.request, "request");
+        delete next.lastHeight;
+      } else {
+        if (fields.request !== undefined) next.request = checkRequest(fields.request, "request");
+        if (fields.lastHeight !== undefined) next.lastHeight = u64(fields.lastHeight, "lastHeight");
+      }
       // a sell's deposit planned again: its dropped sends go with it, of either shape (the next send is written with the
       // next move); a PLANNED note holds none, so one left would make every read of the store throw
       if (to === "PLANNED") {
@@ -652,7 +668,7 @@ export async function openNoteStore(store: WalletStore, opts: NoteStoreOptions =
   async function moveLocked(id: string, from: NoteState, to: NoteState, fields: MoveFields = {}): Promise<NoteRecord> {
     if (!NOTE_STATES.includes(from) || !NOTE_STATES.includes(to)) throw new Error("unknown note state");
     if (fields === null || typeof fields !== "object") throw new Error("fields is an object");
-    onlyKeys(fields, ["leaf", "deadlineMs", "context", "attempt", "blockTimeMs", "send", "evmSend", "request"], "a move");
+    onlyKeys(fields, ["leaf", "deadlineMs", "context", "attempt", "blockTimeMs", "send", "evmSend", "request", "lastHeight", "finalHeight"], "a move");
     const all = await settle();
     const cur = all.find((n) => n.id === id);
     if (cur === undefined) throw new Error(`no note ${id}`);
@@ -666,17 +682,19 @@ export async function openNoteStore(store: WalletStore, opts: NoteStoreOptions =
     if (fields.evmSend !== undefined && !(from === "PLANNED" && to === "INCOMING")) throw new Error("a send is written with the move PLANNED -> INCOMING only");
     if (fields.send !== undefined && fields.evmSend !== undefined) throw new Error("a note's sends are one shape");
     if (fields.request !== undefined && !(from === "HELD" && to === "RESERVED")) throw new Error("a request is written with the move HELD -> RESERVED only");
+    if (fields.lastHeight !== undefined && !(from === "HELD" && to === "RESERVED")) throw new Error("a last height is written with the move HELD -> RESERVED only");
     const time = fields.blockTimeMs === undefined ? undefined : u64(fields.blockTimeMs, "blockTimeMs");
+    const height = fields.finalHeight === undefined ? undefined : u64(fields.finalHeight, "finalHeight");
     const own = fields.attempt !== undefined && fields.attempt === cur.attempt && cur.tab === tab;
     if (from === "HELD" && to === "HELD" && !own) throw new Error(`note ${id} is held by another attempt: only the attempt that holds it replaces its proof`);
     if (from === "HELD" && to === "RESERVED" && !own) throw new Error(`note ${id} is held by another attempt: only the attempt that holds it sends it`);
     if (from === "HELD" && to === "UNSPENT" && !own && !(time !== undefined && time > cur.deadlineMs! - SEND_MARGIN_MS))
       throw new Error(`note ${id} is held by another attempt: freed only by that attempt, or once block time is past deadline_ms - ${SEND_MARGIN_MS} ms`);
-    if (from === "RESERVED" && to === "UNSPENT" && !(time !== undefined && time > cur.deadlineMs!))
-      throw new Error(`note ${id} is RESERVED until block time is past its deadline_ms: its proof can still land`);
+    if (from === "RESERVED" && to === "UNSPENT" && !(time !== undefined && time > cur.deadlineMs!) && !(height !== undefined && cur.lastHeight !== undefined && height > cur.lastHeight))
+      throw new Error(`note ${id} is RESERVED until block time is past its deadline_ms, or the finalized height past its last height: its proof can still land`);
     if (fields.send !== undefined) return put({ ...cur, sends: checkSends([checkSend(fields.send, "a send")], id) }, to, {});
     if (fields.evmSend !== undefined) return put({ ...cur, evmSends: checkEvmSends([checkEvmSend(fields.evmSend, "a send")], id) }, to, {});
-    return put(cur, to, { leaf: fields.leaf, deadlineMs: fields.deadlineMs, context: fields.context, request: fields.request });
+    return put(cur, to, { leaf: fields.leaf, deadlineMs: fields.deadlineMs, context: fields.context, request: fields.request, lastHeight: fields.lastHeight });
   }
 
   async function addLocked(note: NewNote): Promise<NoteRecord> {

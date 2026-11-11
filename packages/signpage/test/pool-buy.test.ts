@@ -20,7 +20,7 @@ import type { VaultSnarkjsProof, VaultWithdrawSignals } from "../../kit/src/vaul
 import type { ReadyProof } from "../../wallet/src/pool/pool.ts";
 import { solanaContextOf, solanaPoolOf, type SolanaReleaseRequest } from "../../wallet/src/pool/solana.ts";
 import { ALT, BLOCKHASH, FEE_PAYER, POOL, PROGRAM, fx, rent, replay, setup, unhex } from "../../kit/test/solana-pool-buy-fx.ts";
-import { POOL_BLOCKHASH_LIFE_MS, POOL_BUY_READS, POOL_BUY_SETTLE_MS, PoolSendBusy, poolBuyKind, readBack, runPoolBuy, solanaProofBytes, type PoolBuyHost } from "../src/pool-buy.ts";
+import { lateBuyEnd, POOL_BLOCKHASH_LIFE_MS, POOL_BUY_READS, POOL_BUY_SETTLE_MS, PoolSendBusy, poolBuyKind, readBack, runPoolBuy, solanaProofBytes, type PoolBuyHost } from "../src/pool-buy.ts";
 import * as poolBuy from "../src/pool-buy.ts";
 import { SolanaRpcTransportError } from "../../kit/src/trade/solana/send.ts";
 import type { PoolAsk } from "../src/rules/pool.ts";
@@ -343,8 +343,9 @@ async function world(plant: Plant = {}, proof = readyProof()): Promise<World> {
     ready: async () => (st === "HELD" ? readies[Math.min(readyCalls++, readies.length - 1)]! : []),
     // the queue's take (../../wallet/src/pool/queue.ts): with an attempt, refused inside the note's turn, before any
     // write, unless it is the note's ready one; without one (012b565's call), the ready one is taken, whatever it is
-    take: async (id: string, attempt?: string) => {
+    take: async (id: string, attempt?: string, _early?: unknown, lastHeight?: bigint) => {
       log.push(`take:${id}`);
+      if (lastHeight !== undefined) log.push(`take-height:${lastHeight}`);
       assert.equal(st, "HELD");
       if (attempt !== undefined && attempt !== current.attempt) throw new Error(`note ${id}'s ready proof is another attempt`);
       st = "RESERVED";
@@ -587,7 +588,10 @@ test("fold 2 (1): a transaction that never lands is not_landed only once both RP
   const w = await world({ helper: "502", landsAtSettle: "never", finalHeight: (p, i) => (p === 0 || i >= 2 ? 1_000 : 50) });
   assert.deepEqual(await runPoolBuy(w.host, ASK), { stage: "not_landed", txs: [] });
   assert.equal(w.log.filter((x) => x === "settle:note-1").length, 3);
-  assert.equal(w.state(), "RESERVED", "the state reads' pass frees it past its deadline");
+  // the take wrote the signed transaction's last height on the note, before the send (card
+  // pool-buy-record-never-stays-sent): the state reads' pass frees the note once both RPCs' finalized height is past it
+  assert.deepEqual(w.log.filter((x) => x.startsWith("take") || x === "send").slice(0, 3), ["take:note-1", "take-height:151", "send"]);
+  assert.equal(w.state(), "RESERVED", "the state reads' pass frees it (solanaSettleReserved: its last height past on both RPCs)");
   // the last height is the higher of RPC 0's word (100) and RPC 1's height + 151 (151): 120 on both is not past it
   const x = await world({ helper: "502", landsAtSettle: "never", finalHeight: () => 120 });
   assert.deepEqual(await runPoolBuy(x.host, ASK), { stage: "sent", txs: [] }, "never past within the reads: sent, not not_landed");
@@ -700,6 +704,48 @@ test("the kind answers sent with its signature once it read back on both RPCs as
   assert.equal(ended, 1);
   assert.deepEqual(modes, ["ct-wallet/seed:shared"]);
   assert.equal(w.state(), "SPENT");
+});
+
+test("a run that ends sent (its end not known) hands the page a follow, and the end the page's reads find goes out as the kind's progress, once (card pool-buy-record-never-stays-sent)", async () => {
+  const locks = { request: (_n: string, _o: unknown, f: () => Promise<void>) => f() } as unknown as Pick<LockManager, "request">;
+  for (const late of ["filled", "not_landed"] as const) {
+    // never past within the reads: the run's end is "sent"
+    const w = await world({ helper: "502", landsAtSettle: "never", finalHeight: () => 120 });
+    const stages: string[] = [];
+    const got: { post?: (s: "filled" | "not_landed") => void } = {};
+    const r = poolBuyKind(() => ({ ...w.host, follow: (p) => void (got.post = p) }), locks)(ASK, { id: "r1", sha: "00", progress: (x: string) => void stages.push(x) } as never) as { running: true; after: Promise<void>; answer: () => unknown };
+    await r.after;
+    await new Promise((res) => setTimeout(res, 50));
+    assert.deepEqual(stages, ["sent"], late);
+    assert.ok(got.post, "the page is handed the follow");
+    got.post(late);
+    assert.deepEqual(stages, ["sent", late], "the page's end posted as progress");
+    got.post(late === "filled" ? "not_landed" : "filled");
+    assert.deepEqual(stages, ["sent", late], "once");
+  }
+  // a run with its own end: no follow
+  const w = await world();
+  let follows = 0;
+  const r = poolBuyKind(() => ({ ...w.host, follow: () => void follows++ }), locks)(ASK, { id: "r1", sha: "00", progress: () => {} } as never) as { running: true; after: Promise<void> };
+  await r.after;
+  await new Promise((res) => setTimeout(res, 50));
+  assert.equal(follows, 0);
+});
+
+test("a followed buy's end from its note and whose spend it is: RESERVED by its attempt not known; freed not_landed; SPENT filled only as this attempt's (card pool-buy-record-never-stays-sent)", async () => {
+  let asked = 0;
+  const owner = (o: Awaited<ReturnType<Parameters<typeof lateBuyEnd>[2]>> | Error) => async () => (asked++, o instanceof Error ? Promise.reject(o) : o);
+  const mine = { mine: SIG, accounts: [] };
+  assert.equal(await lateBuyEnd(undefined, "a1", owner(mine)), null, "no note read");
+  assert.equal(await lateBuyEnd({ state: "RESERVED", attempt: "a1" }, "a1", owner(mine)), null, "still in flight");
+  assert.equal(asked, 0, "no owner read before the note is SPENT");
+  for (const state of ["UNSPENT", "HELD"]) assert.equal(await lateBuyEnd({ state, attempt: "a2" }, "a1", owner(mine)), "not_landed", `freed, then ${state}`);
+  assert.equal(await lateBuyEnd({ state: "RESERVED", attempt: "a2" }, "a1", owner(mine)), "not_landed", "freed and taken again by another tap");
+  assert.equal(asked, 0);
+  assert.equal(await lateBuyEnd({ state: "SPENT" }, "a1", owner(mine)), "filled");
+  assert.equal(await lateBuyEnd({ state: "SPENT" }, "a1", owner("other")), "not_landed", "another device's spend of the note");
+  assert.equal(await lateBuyEnd({ state: "SPENT" }, "a1", owner(null)), null, "whose spend not read yet");
+  assert.equal(await lateBuyEnd({ state: "SPENT" }, "a1", owner(new Error("429"))), null, "a read that throws decides nothing");
 });
 
 // Card app-sell-shows-what-you-receive (devnet run 11, 11 Nov): the sell box's preview was busy from a buy's tap to its

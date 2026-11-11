@@ -633,8 +633,8 @@ async function onePart(h: PoolWithdrawHost, ask: PoolAsk, notes: NoteStore, p: W
       },
       // RESERVED, then the onward send owed, both written before anything leaves the device (review #232b HIGH 1):
       // a crash between the two leaves a RESERVED note with nothing sent, which the reserved pass frees
-      take: async () => {
-        await notes.move(p.noteId, "HELD", "RESERVED", { attempt: attempt! });
+      take: async (_id: string, _attempt: string, _early?: unknown, lastHeight?: bigint) => {
+        await notes.move(p.noteId, "HELD", "RESERVED", { attempt: attempt!, ...(lastHeight === undefined ? {} : { lastHeight }) });
         reserved = true;
         const owed: PendingOnward = { noteId: p.noteId, attempt: attempt!, context: binding.context.toString(), ...base };
         owedNow = owed;
