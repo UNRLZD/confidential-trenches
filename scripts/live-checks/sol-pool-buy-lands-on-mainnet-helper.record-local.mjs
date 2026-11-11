@@ -1,8 +1,8 @@
 // The recorded answers of sol-pool-buy-lands-on-mainnet-helper.answers.json: the live check's own read() of each pool it
 // reads (poolsToRead: both pools of the devnet move) against this tree's helper senders in process (apps/helper/src/pool/
 // solana.ts solanaPoolSender, one per program), devnet, a throwaway fee payer made here, the fee 1,300,000, and RPCs that
-// answer a simulation as a public mainnet RPC did (read 11 Nov 18:10Z, sigVerify true, replaceRecentBlockhash false):
-// "SignatureFailure" when a signature does not hold, "BlockhashNotFound" for a blockhash they never made, and a
+// answer a simulation as a public mainnet RPC did (read 11 Nov 18:10Z, replaceRecentBlockhash false): with sigVerify,
+// "SignatureFailure" when a signature does not hold; "BlockhashNotFound" for a blockhash they never made; and a
 // blockhash read. Each answer carries the given commit in X-Helper-Commit, as server.ts sets it.
 //   node scripts/live-checks/sol-pool-buy-lands-on-mainnet-helper.record-local.mjs <commit> > <file>
 // Runs: once, it records the check's answers from a tree's helper in process (good: the card's; bad: c338a184's solana.ts); the check itself runs after every helper deploy

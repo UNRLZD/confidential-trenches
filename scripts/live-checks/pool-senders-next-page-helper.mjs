@@ -12,10 +12,11 @@
 //     System transfer from W;
 //   - "ten_tag2": tag 2 with a tenth account, which no form of the program takes.
 // The two next-page forms pass every check the helper makes on the bytes and reach its simulation, which refuses the
-// junk proof (422 simulation_failed), or, since the helper simulates the signed bytes on their own blockhash (card
+// junk proof (422 simulation_failed), or, since the helper names a blockhash its provider does not know (card
 // sol-pool-buy-lands-on-mainnet), the plant's junk blockhash (422 blockhash_not_found): either is the simulation reached;
 // a helper that predates the card refuses them on the bytes (422 not_pool). The
-// tenth account is refused on the bytes (422 not_pool) by both. Nothing is signed by the fee payer and nothing is sent.
+// tenth account is refused on the bytes (422 not_pool) by both. The fee payer signs nothing that is refused, and nothing
+// is sent.
 // After: helper
 //   node scripts/live-checks/pool-senders-next-page-helper.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2.

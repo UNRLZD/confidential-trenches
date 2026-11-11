@@ -1,13 +1,12 @@
 #!/usr/bin/env node
-// Live check of card sol-pool-buy-lands-on-mainnet on HELPER_HOST: the Solana pool sender proves the bytes it would send
-// before it sends them (apps/helper/src/pool/solana.ts simulateSignSend): it adds the fee payer's signature first and
-// simulates the transaction as sent, every signature checked, on its own blockhash, so a blockhash the cluster does not
-// know is refused by name (422 blockhash_not_found) and nothing is sent. For each pool the helper must serve (poolsToRead
+// Live check of card sol-pool-buy-lands-on-mainnet on HELPER_HOST: the Solana pool sender names a blockhash its provider
+// does not know before it signs or sends (apps/helper/src/pool/solana.ts simulateSignSend: W's bytes simulated on their
+// own blockhash, slot 0 empty), so such a release is refused by name (422 blockhash_not_found) and nothing is sent. For each pool the helper must serve (poolsToRead
 // of pool-senders-next-page-helper.mjs: each Solana cluster's deploy record pool, and on devnet each pool of the move) it
 // reads GET /v1/pool/fee and POSTs that check's three plants, each signed by a throwaway W on a blockhash no cluster
 // made; the tag 2 and the tag 3 pass every check on the bytes and must answer 422 blockhash_not_found. A helper before
-// the card simulated W's bytes alone and answered them 422 simulation_failed, and FAILs. Nothing is sent and no fee
-// payer signature leaves the helper. It does not prove a buy lands, nor the plain copy beside the bundle, nor the send
+// the card answered them 422 simulation_failed, and FAILs. Nothing is sent, and the fee payer signs none of them (a
+// refused simulation comes before its signature). It does not prove a buy lands, nor the plain copy beside the bundle, nor the send
 // line's new fields: only a mainnet tap does, read on the helper's log and on two RPCs.
 // After: helper
 //   node scripts/live-checks/sol-pool-buy-lands-on-mainnet-helper.mjs [--base <url>] [--record <file>]
