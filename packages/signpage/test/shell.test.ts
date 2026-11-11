@@ -9,6 +9,7 @@ import { readdirSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { mock, test } from "node:test";
 import { enableTimers, resetTimers } from "./mock-timers.ts";
+import { PROTECT_MS } from "../src/guard.ts";
 import { APP_ORIGIN, RELEASE, signedOutState, type IncomingMessage } from "../src/api.ts";
 import { appSrc, FRAME_LEAVE_MS, FRAME_SANDBOX, mountShell, navUrl, SERVED_FILES, wireShell } from "../src/shell.ts";
 // @ts-expect-error: the deploy script is plain JavaScript, with no types
@@ -91,7 +92,7 @@ type FakeEl = {
   contentWindow: { postMessage(m: unknown, o: string): void } | null;
   setAttribute(k: string, v: string): void; getAttribute(k: string): string | null; attributes(): string[];
   addEventListener(t: string, fn: (e?: unknown) => void): void; fire(t: string, e?: unknown): void; remove(): void;
-  dataset: Record<string, string>; append(...xs: unknown[]): void; inert?: boolean;
+  dataset: Record<string, string>; append(...xs: unknown[]): void; inert?: boolean; focus(): void;
 };
 function fakeDom(href = `${SIGN_ORIGIN}/token/solana/So111?tab=trades`) {
   const loc = new URL(href);
@@ -99,6 +100,8 @@ function fakeDom(href = `${SIGN_ORIGIN}/token/solana/So111?tab=trades`) {
   const posted: { msg: unknown; to: string; win: unknown }[] = [];
   const listeners: ((e: IncomingMessage) => void)[] = [];
   const keys: ((e: unknown) => void)[] = [];
+  const blurs: (() => void)[] = [];
+  const focused: FakeEl[] = [];
   const children: FakeEl[] = [];
   const createElement = (tag: string): FakeEl => {
     const attrs = new Map<string, string>();
@@ -112,6 +115,7 @@ function fakeDom(href = `${SIGN_ORIGIN}/token/solana/So111?tab=trades`) {
       fire: (t, ev) => on.get(t)?.(ev),
       dataset: {},
       append: () => {},
+      focus: () => void focused.push(e),
       remove: () => void (children.includes(e) && children.splice(children.indexOf(e), 1)),
     };
     if (tag === "iframe") {
@@ -130,14 +134,14 @@ function fakeDom(href = `${SIGN_ORIGIN}/token/solana/So111?tab=trades`) {
         calls.replace.push(u.href);
       },
     },
-    addEventListener: (t: string, fn: (e: IncomingMessage) => void) => void (t === "message" ? listeners.push(fn) : t === "keydown" && keys.push(fn as unknown as (e: unknown) => void)),
+    addEventListener: (t: string, fn: (e: IncomingMessage) => void) => void (t === "message" ? listeners.push(fn) : t === "keydown" ? keys.push(fn as unknown as (e: unknown) => void) : t === "blur" && blurs.push(fn as unknown as () => void)),
   };
   const body = {
     style: {},
     append: (...xs: FakeEl[]) => void children.push(...xs),
     insertBefore: (x: FakeEl, ref: FakeEl) => void children.splice(children.indexOf(ref), 0, x),
   };
-  const doc = { defaultView: view, createElement, body } as unknown as Document;
+  const doc = { defaultView: view, createElement, body, activeElement: null as unknown } as unknown as Document;
   const frames = () => children.filter((c) => c.tagName === "iframe");
   const send = (data: unknown, source: unknown) => {
     for (const fn of listeners) fn({ origin: APP_ORIGIN, source, data });
@@ -145,7 +149,10 @@ function fakeDom(href = `${SIGN_ORIGIN}/token/solana/So111?tab=trades`) {
   const key = (k: string, isTrusted = true) => {
     for (const fn of keys) fn({ key: k, isTrusted });
   };
-  return { doc, loc, calls, posted, children, frames, send, key };
+  const blur = () => {
+    for (const fn of blurs) fn();
+  };
+  return { doc, loc, calls, posted, children, frames, send, key, blur, focused };
 }
 // The shell answers after an off-thread SHA-256 of each message (src/api.ts), so on a loaded runner an answer comes when
 // it comes: every wait below waits until its condition holds, bounded at 2 s with a named failure, never for a set time.
@@ -300,12 +307,15 @@ test("open: the sheet over the app keeps the frame in the page, inert, with its 
 
 test("dismiss: the user's own Esc acts only on a sheet whose screen may be left, and never on an untrusted event", () => {
   const d = fakeDom();
+  let now = 1_000;
+  (d.doc.defaultView as unknown as { performance: { now(): number } }).performance = { now: () => now };
   const sh = mountShell(d.doc, { state: () => signedOutState() });
   let n = 0;
   sh.onDismiss = () => void n++;
   d.key("Escape");
   assert.equal(n, 0, "no sheet shown");
   sh.open();
+  now += PROTECT_MS;
   d.key("Escape");
   assert.equal(n, 0, "a screen that may not be left (the 12 words before Saved)");
   sh.dismissible(true);
@@ -314,6 +324,83 @@ test("dismiss: the user's own Esc acts only on a sheet whose screen may be left,
   assert.equal(n, 0, "an untrusted Esc, another key");
   d.key("Escape");
   assert.equal(n, 1);
+  // within the activation guard's window of the open (the second tap of the double tap that opened it): not a close
+  sh.close();
+  sh.open();
+  now += PROTECT_MS - 1;
+  d.key("Escape");
+  assert.equal(n, 1, "an Esc within PROTECT_MS of the open");
+  now += 1;
+  d.key("Escape");
+  assert.equal(n, 2);
+});
+
+test("a typed screen's close keeps the sheet's dim over the new frame until it has loaded and painted, then fades it", () => {
+  enableTimers(mock.timers, { apis: ["setTimeout"] });
+  try {
+    const d = fakeDom();
+    const sh = mountShell(d.doc, { state: () => signedOutState() });
+    const veil = d.children.find((c) => c.dataset.sheet === "veil")!;
+    assert.ok(veil && veil.hidden, "no veil before a close");
+    sh.open(true);
+    mock.timers.tick(FRAME_LEAVE_MS);
+    assert.equal(d.frames().length, 0);
+    sh.close();
+    assert.equal(sh.layer.hidden, true);
+    assert.equal(veil.hidden, false, "the dim stays as the sheet goes");
+    assert.equal(veil.style.opacity, "1");
+    assert.equal(veil.style.pointerEvents, "none", "it takes no tap");
+    const f = d.frames()[0]!;
+    assert.ok(d.children.indexOf(f) < d.children.indexOf(sh.layer as unknown as (typeof d.children)[number]));
+    mock.timers.tick(5_000);
+    assert.equal(veil.style.opacity, "1", "kept until the new frame loads");
+    f.fire("load");
+    mock.timers.tick(1);
+    assert.equal(veil.style.opacity, "0", "faded once the frame painted");
+    mock.timers.tick(200);
+    assert.equal(veil.hidden, true);
+    // an untyped sheet's close: the same frame, no veil
+    sh.open();
+    sh.close();
+    assert.equal(veil.hidden, true);
+  } finally {
+    resetTimers(mock.timers);
+  }
+});
+
+test("focus the frame takes while a sheet shows over it comes back to the sheet; none is taken from the frame otherwise", () => {
+  enableTimers(mock.timers, { apis: ["setTimeout"] });
+  try {
+    const d = fakeDom();
+    const sh = mountShell(d.doc, { state: () => signedOutState() });
+    const f = d.frames()[0]!;
+    const doc = d.doc as unknown as { activeElement: unknown };
+    const boxFocus = () => d.focused.filter((e) => e.tagName === "aside").length;
+    // no sheet: the window's blur into the frame is the app's own focus
+    doc.activeElement = f;
+    d.blur();
+    mock.timers.tick(1);
+    assert.equal(boxFocus(), 0);
+    sh.open();
+    assert.equal(boxFocus(), 1, "the sheet takes the focus as it opens");
+    // the window lost focus to something else (another app): left as it is
+    doc.activeElement = null;
+    d.blur();
+    mock.timers.tick(1);
+    assert.equal(boxFocus(), 1);
+    // the frame took it under the sheet: back to the sheet
+    doc.activeElement = f;
+    d.blur();
+    mock.timers.tick(1);
+    assert.equal(boxFocus(), 2, "the focus the frame took came back to the sheet");
+    sh.close();
+    doc.activeElement = f;
+    d.blur();
+    mock.timers.tick(1);
+    assert.equal(boxFocus(), 2, "after close the frame keeps its focus");
+  } finally {
+    resetTimers(mock.timers);
+  }
 });
 
 test("nav refuses every file SIGN_HOST's build serves, in any spelling, and the list is the deploy build's own output", () => {

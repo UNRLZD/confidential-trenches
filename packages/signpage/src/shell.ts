@@ -29,6 +29,7 @@
 // - DOM by createElement and the CSSOM only: the CSP allows no inline style and requires Trusted Types for every sink.
 import { SIGNPAGE_MAX_NAV_BYTES } from "../../kit/src/signpage/schema.ts";
 import { APP_ORIGIN, startApi, type ApiHost, type PostTarget } from "./api.ts";
+import { PROTECT_MS } from "./guard.ts";
 import { drawSheet } from "./sheet.ts";
 
 export const FRAME_SANDBOX = "allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox";
@@ -149,10 +150,23 @@ export function mountShell(doc: Document, host: Omit<ApiHost, "parent" | "listen
   const layer = sheet.layer;
   Object.assign(doc.body.style, { margin: "0", background: "#0a0a0a" });
   doc.body.append(layer);
+  // the sheet's dim, kept over a new frame after a typed screen closes until that frame has loaded and painted, then faded:
+  // the close shows no undimmed backdrop between the sheet and the app's first screen. It takes no tap (pointer-events none).
+  const veil = doc.createElement("div");
+  veil.dataset.sheet = "veil";
+  Object.assign(veil.style, { position: "fixed", inset: "0", zIndex: "1", pointerEvents: "none", transition: "opacity 160ms ease-out" });
+  veil.hidden = true;
+  doc.body.insertBefore(veil, layer);
+  const painted = (fn: () => void): void => {
+    const raf = view.requestAnimationFrame?.bind(view);
+    if (raf) raf(() => raf(fn));
+    else setTimeout(fn, 0);
+  };
 
   let frame: HTMLIFrameElement | null = null;
   let peer: PostTarget = NO_FRAME;
   let onLoad: () => void = () => {};
+  let veiled: HTMLIFrameElement | null = null;
   const add = (): void => {
     const f = doc.createElement("iframe");
     f.id = "app";
@@ -161,7 +175,18 @@ export function mountShell(doc: Document, host: Omit<ApiHost, "parent" | "listen
     Object.assign(f.style, { position: "fixed", inset: "0", width: "100%", height: "100%", border: "0", display: "block" });
     // the src before the frame is in the document: it never loads about:blank first, so its one load is APP_HOST's
     f.src = appSrc(view.location);
-    f.addEventListener("load", () => frame === f && onLoad());
+    f.addEventListener("load", () => {
+      if (frame !== f) return;
+      onLoad();
+      // the frame made at a typed screen's close has loaded: the veil fades once its first screen has painted
+      if (veiled !== f) return;
+      veiled = null;
+      painted(() => {
+        if (frame !== f || !layer.hidden) return;
+        veil.style.opacity = "0";
+        setTimeout(() => layer.hidden && (veil.hidden = true), 200);
+      });
+    });
     doc.body.insertBefore(f, layer);
     // contentWindow exists once the frame is in the document, and stays the same object across its loads
     const win = f.contentWindow;
@@ -206,6 +231,7 @@ export function mountShell(doc: Document, host: Omit<ApiHost, "parent" | "listen
     onDismiss: null,
     open(typed = false) {
       layer.hidden = false;
+      veil.hidden = true;
       openedAt = view.performance?.now?.() ?? Date.now();
       sheet.box.focus?.();
       if (!frame) return;
@@ -233,7 +259,13 @@ export function mountShell(doc: Document, host: Omit<ApiHost, "parent" | "listen
       if (frame) {
         frame.inert = false;
         frame.focus?.();
-      } else add();
+        return;
+      }
+      veil.style.background = sheet.scrim.style.background;
+      veil.style.opacity = "1";
+      veil.hidden = false;
+      add();
+      veiled = frame;
     },
     dismissible(may) {
       sheet.close.hidden = !may;
@@ -244,11 +276,23 @@ export function mountShell(doc: Document, host: Omit<ApiHost, "parent" | "listen
   let dismissOk = false;
   const dismiss = (e: Event): void => {
     if (!e.isTrusted || layer.hidden || !dismissOk) return;
+    // a tap or key that comes with the open (the second tap of a double tap that opened it, a key held down) is not the
+    // user's close: the activation guard's window (src/guard.ts), on the event's own clock
+    const at = typeof e.timeStamp === "number" && e.timeStamp > 0 ? e.timeStamp : (view.performance?.now?.() ?? Date.now());
+    if (at - openedAt < PROTECT_MS) return;
     shell.onDismiss?.();
   };
   sheet.close.addEventListener("click", dismiss);
   sheet.scrim.addEventListener("click", dismiss);
   view.addEventListener("keydown", (e: Event) => (e as KeyboardEvent).key === "Escape" && dismiss(e));
+  // while a sheet shows over a kept frame, the frame does not keep the keyboard's focus: focus that went into it (a
+  // frame calling focus() under an inert attribute some engine lets through) comes back to the sheet in the next task
+  view.addEventListener("blur", () => {
+    if (layer.hidden || !frame) return;
+    setTimeout(() => {
+      if (!layer.hidden && frame && doc.activeElement === frame) sheet.box.focus?.();
+    }, 0);
+  });
   shell.dismissible(false);
   return shell;
 }
