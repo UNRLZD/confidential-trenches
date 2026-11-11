@@ -241,7 +241,7 @@ async function treeSizes(rpcs: Rpcs, program: string, pool: string, wait: (ms: n
 }
 
 /** The pool account's two tree sizes. */
-function sizesOf(d: Uint8Array): { stateSize: number; labelSize: number } {
+export function sizesOf(d: Uint8Array): { stateSize: number; labelSize: number } {
   if (d.length !== POOL_LEN || !sameBytes(d.subarray(0, 8), POOL_DISC)) return no();
   const size = (at: number): number => int(Number(new DataView(d.buffer, d.byteOffset + at, 8).getBigUint64(0, true)));
   return { stateSize: size(OFF_TREES), labelSize: size(OFF_TREES + TREE_LEN) };

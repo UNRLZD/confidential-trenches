@@ -237,7 +237,7 @@ else {
   const poolSellDry = poolSellDryKind({
     pinned: (chain) => poolDeps.pinned(chain),
     rpcs: dryPair,
-    positions: () => testnet?.positionsNow() ?? null,
+    positions: () => testnet?.positionsNow() ?? null, pin: () => PAGE_SOL_PIN ?? null,
     decimals: PAGE_TOKEN_DECIMALS,
     // the Rent sysvar state.pools' tap_max already reads, once; none yet: the preview reads it on both
     rent: () => (hasSolana ? rent.get() : null),

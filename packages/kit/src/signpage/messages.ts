@@ -223,11 +223,12 @@ export interface SignpageResults {
 
 /**
  * pool.sell.dry's answer (card app-sell-shows-what-you-receive), each amount a decimal string in whole units of the
- * chain pool's asset (POOL_ASSET_DECIMALS: SOL on Solana, ETH on Base and Robinhood). `out`: the sale's expected out by
- * the device's own quote (the venue's fees taken, before slippage) less the most the sale keeps out of the user's money
- * (its fee, the deposit's rents and what the sale wallet keeps, less what it holds), so at the quote's own price it is
- * never above what the sale pays into the user's notes. `min_out`: the same at the asked slippage (the floor the sale
- * signs, less the same), at most `out`. `network`: what the chain charges the sale, inside `out`'s taking already.
+ * chain pool's asset (POOL_ASSET_DECIMALS: SOL on Solana, ETH on Base and Robinhood). `out`: what a sale at the
+ * device's own quote's expected out (the venue's fees taken, before slippage) pays into the user's notes as the sale's
+ * rule prices it (its fee, the deposit's rents and what the sale wallet keeps, less what it holds; a full sale's wallet
+ * sweeps the rest in after it). On a partial sale the notes get `min_out` now and the rest when the wallet's last sale
+ * sweeps it. `min_out`: the same at the asked slippage (the floor the sale signs), at most `out`. `network`: what the
+ * chain charges the sale, inside `out`'s taking already.
  * `fee_bps`: the platform's fee in basis points. Numbers only: never a wallet, a note or a route. Display only: no
  * request takes them. The kit's client drops an answer with a field not named here (SIGNPAGE_RESULT_SCHEMAS).
  */

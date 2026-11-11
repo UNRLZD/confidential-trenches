@@ -1,7 +1,7 @@
 // Card app-sell-shows-what-you-receive: pool.sell.dry (src/pool-sell-dry.ts), the sell box's preview. Its out is the
 // quote the sale signs on, on the same reads (pool-sell.ts poolSellReference, the one reference read in pool-sell.ts),
-// less the most the sale's reserve can be (poolSellReserveBound), never under the reserve the sale's own rule takes
-// (solanaSellReserve), so at the quote's price it is never above what the sale pays into the user's money; it reads the
+// priced as the sale's own rule prices it (poolSellPays: solanaSellReserve, and a full sale's sweep), so at the quote's
+// price it is never above what the sale pays into the user's notes; it reads the
 // holding from the positions pass, asks the providers the reference's reads and the Ws' lamports only (never a send, a
 // simulation, a blockhash or a fee), writes nothing (its deps hold no store), and waits while a trade's reads hold the
 // providers. The venue's answers are the kit's recorded reads (packages/kit/test/fixtures/solana-pool-buy.json).
@@ -13,12 +13,16 @@ import { readSolanaReference } from "../../kit/src/trade/solana/pool.ts";
 import { SolanaRpcTransportError, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import { SIGNPAGE_RESULT_SCHEMAS } from "../../kit/src/signpage/schema.ts";
 import { fx, providers, rent as RENT } from "../../kit/test/solana-pool-buy-fx.ts";
-import { solanaPoolBuySellNeed, solanaPoolSellNeed } from "../../kit/src/trade/solana/pool-buy.ts";
+import { solanaPoolBuySellNeed, solanaPoolSellNeed, solanaRentMin, solanaSellFloor, SOLANA_POOL_PAGE_ENTRIES } from "../../kit/src/trade/solana/pool-buy.ts";
+import { SOLANA_POOL_PAGE_ENTRY, SOLANA_POOL_PAGE_HEADER } from "../../kit/src/trade/solana/pool-deposit.ts";
+import { solanaPacedRpc, solanaTimedRpc } from "../../kit/src/trade/solana/send.ts";
+import { SOLANA_PUMP_AMM_PROGRAM, SOLANA_PUMP_PROGRAM, solanaVolumeAccumulator } from "../../kit/src/checks/solana/checks.ts";
+import { solanaPoolOf } from "../../wallet/src/pool/solana.ts";
 import { tokenDecimalsKept } from "../src/pool-kinds.ts";
-import { liveRuns, POOL_SELL_DRY_CALLS, POOL_SELL_DRY_KEEP_MS, POOL_SELL_DRY_START_MS, POOL_SELL_DRY_WINDOW_MS, poolSellDry, poolSellDryKind, poolSellReserveBound, type PoolSellDryDeps } from "../src/pool-sell-dry.ts";
+import { liveRuns, POOL_SELL_DRY_ANSWER_MS, POOL_SELL_DRY_CALLS, POOL_SELL_DRY_KEEP_MS, POOL_SELL_DRY_WINDOW_MS, poolSellDry, poolSellDryKind, poolSellPays, type DryWallet, type PoolSellDryDeps } from "../src/pool-sell-dry.ts";
 import { solanaSellReserve } from "../src/pool-sell.ts";
 import type { Position } from "../src/positions.ts";
-import { poolUnits, solanaDepositRents, solanaSellAfterFull, SOLANA_POOL_SELL_RESERVE_MAX } from "../src/rules/pool.ts";
+import { poolUnits, SOLANA_POOL_MIN_DEPOSIT, solanaDepositRents, solanaSellAfterFull, solanaSweepFloor, solanaSweepKeep } from "../src/rules/pool.ts";
 import { solanaPoolNoteFloor } from "../../kit/src/trade/solana/pool-deposit.ts";
 
 const MINT = fx.pump.mint as string;
@@ -27,18 +31,34 @@ const SWAP_MINT = fx.pumpswap.mint as string;
 const HELD = 4_000_000_000_000n;
 /** W's lamports as both RPCs read them: pool-sell.test.ts's ENOUGH (a reserve of 0 on a partial sale). */
 const ENOUGH = 1_000_000_000n;
-const pos = (token = MINT, amount = "4000000", decimals: number | null = 6, wallets = ["W1"]): Position => ({ chain: "solana", token, amount, cost: "0", wallets, ...(decimals === null ? {} : { decimals }) });
+/** Two sale wallets (any valid addresses: their volume accounts are derived from them). */
+const W1 = "So11111111111111111111111111111111111111112";
+const W2 = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
+/** The page's pool program, and its pool account at `sizes` (the layout pool-sell.ts sizesOf reads). */
+const PROGRAM = "BPFLoaderUpgradeab1e11111111111111111111111";
+const POOL = solanaPoolOf(PROGRAM).pool;
+const poolBytes = (state: number, label: number): string => {
+  const d = new Uint8Array(2179);
+  d.set(new TextEncoder().encode("bfpool01"), 0);
+  const v = new DataView(d.buffer);
+  v.setBigUint64(49, BigInt(state), true);
+  v.setBigUint64(49 + 1065, BigInt(label), true);
+  return Buffer.from(d).toString("base64");
+};
+/** The recorded pool's trees, mid-page: one entry's growth each. */
+const SIZES = [100, 100] as const;
+const pos = (token = MINT, amount = "4000000", decimals: number | null = 6, wallets = [W1]): Position => ({ chain: "solana", token, amount, cost: "0", wallets, ...(decimals === null ? {} : { decimals }) });
 const share = (token: string, share_bps: number) => ({ chain: "solana", token, share_bps, slippage_bps: 1000 });
 
-/** The recorded pair, every call logged; the mint's getAccountInfo answered as both providers answered it, the Ws'
- *  lamports from `lamports` (an address not in it: no account). */
-function pair(v: "pump" | "pumpswap" = "pump", log: string[] = [], lamports: Record<string, bigint> = { W1: ENOUGH, W2: ENOUGH }): readonly [SolanaRpc, SolanaRpc] {
+/** The recorded pair, every call logged; the mint's getAccountInfo answered as both providers answered it; the Ws'
+ *  call: their lamports from `lamports` (an address not in it: no account), no volume accounts, the pool at `sizes`. */
+function pair(v: "pump" | "pumpswap" = "pump", log: string[] = [], lamports: Record<string, bigint> = { [W1]: ENOUGH, [W2]: ENOUGH }, sizes: readonly [number, number] | null = SIZES): readonly [SolanaRpc, SolanaRpc] {
   const mintRead = (Object.entries(fx[v].reads[0]).find(([k]) => JSON.parse(k)[0] === fx[v].mint)![1] as { context: unknown; value: unknown[] });
   return providers(v).map((rpc) => (async (method: string, params: readonly unknown[]) => {
     log.push(method);
     if (method === "getAccountInfo") return { context: mintRead.context, value: mintRead.value[0] };
     const list = params[0] as string[];
-    if (list.every((a) => /^W\d$/.test(a))) return { context: { slot: 1 }, value: list.map((a) => (lamports[a] === undefined ? null : { lamports: Number(lamports[a]), owner: "11111111111111111111111111111111", data: ["", "base64"] })) };
+    if (list.includes(W1) || list.includes(W2)) return { context: { slot: 1 }, value: list.map((a) => (a === POOL ? (sizes === null ? null : { lamports: 1, owner: PROGRAM, data: [poolBytes(...sizes), "base64"] }) : lamports[a] === undefined || ![W1, W2].includes(a) ? null : { lamports: Number(lamports[a]), owner: "11111111111111111111111111111111", data: ["", "base64"] })) };
     return rpc(method, params);
   }) as SolanaRpc) as unknown as readonly [SolanaRpc, SolanaRpc];
 }
@@ -46,10 +66,10 @@ const deps = (o: Partial<PoolSellDryDeps> & { log?: string[]; v?: "pump" | "pump
   pinned: () => true,
   rpcs: () => pair(o.v, o.log),
   positions: () => [pos(), pos(SWAP_MINT)],
+  pin: () => ({ program: PROGRAM }),
   rent: () => RENT,
   decimals: tokenDecimalsKept(),
   trading: () => false,
-  wait: async () => {},
   ...o,
 });
 /** What the sale's own read gives for `units`: the venue in the reference that gives the most (pool-sell.ts sellRun). */
@@ -66,11 +86,13 @@ test("the preview's out is the sale's own quote for the units pool.sell would se
       assert.ok("result" in a, `${v} ${JSON.stringify(params)}: ${JSON.stringify(a)}`);
       const { e, cashback } = await saleOut(v, token, units);
       assert.equal(cashback, false, "the recorded coins are plain: the reference read the flag");
-      const reserve = poolSellReserveBound(RENT, v === "pump" ? "pump-curve" : "pumpswap", [ENOUGH], units === HELD, cashback);
+      const pays = poolSellPays(RENT, v === "pump" ? "pump-curve" : "pumpswap", [{ lamports: ENOUGH, claim: [false, false] }], units === HELD, e, solanaSellFloor(e, params.slippage_bps), cashback, { stateSize: SIZES[0], labelSize: SIZES[1] });
+      assert.ok(!("refused" in pays));
       // a partial sale from a W that holds ENOUGH keeps nothing out of the note; a full one puts W's surplus in it too
-      assert.equal(units === HELD ? reserve < 0n : reserve === 0n, true, `${v} reserve ${reserve}`);
-      assert.equal(a.result.out, poolUnits(e - reserve, 9), `${v} ${JSON.stringify(params)}`);
-      assert.equal(a.result.min_out, poolUnits((e * BigInt(10_000 - params.slippage_bps)) / 10_000n - reserve, 9), "the floor the sale signs, less the same");
+      if (units === HELD) assert.ok(pays.out > e, `${v} full: W's surplus and its sweep go in`);
+      else assert.equal(pays.out, e, `${v} partial: the expected out`);
+      assert.equal(a.result.out, poolUnits(pays.out, 9), `${v} ${JSON.stringify(params)}`);
+      assert.equal(a.result.min_out, poolUnits(pays.minOut, 9), "the same at the floor the sale signs");
       assert.equal(a.result.network, "0.000005", "one signature, no priority fee");
       assert.equal(a.result.fee_bps, 0, "no platform fee on a Solana pool sale");
       assert.equal(SIGNPAGE_RESULT_SCHEMAS["pool.sell.dry"](a.result), true, "the kit's client takes it");
@@ -87,7 +109,7 @@ test("one code path: every sale reads its quote through poolSellReference, the o
   for (const word of ["readSolanaReference(", "pageReference(", "expectedOut *", "solanaPoolSellMinOut", "seed64", "notes(", "ops(", "sendTransaction", "simulate"]) assert.equal(dry.includes(word), false, `the preview has no ${word}`);
 });
 
-test("a preview asks the providers three getMultipleAccounts each: the reference's two and the Ws' lamports; no send, no simulation, no blockhash, no fee", async () => {
+test("a preview asks the providers three getMultipleAccounts each: the reference's two and the Ws' (lamports, volume accounts, the pool's sizes); no send, no simulation, no blockhash, no fee", async () => {
   const log: string[] = [];
   const a = await poolSellDry(deps({ log }), share(MINT, 5_000));
   assert.ok("result" in a);
@@ -103,49 +125,111 @@ test("a preview asks the providers three getMultipleAccounts each: the reference
   assert.equal(cold.filter((m) => m === "rent").length, 2);
 });
 
-// the reserve's inputs the sale's rule takes (pool-sell.ts sellRun: solanaSellReserve), each at every value the chain can
-// give it: the deposit's rents from a page's one-entry growth to its opening, with or without the window; the cashback
-// accounts made or there; W's keep for 0 to 2 volume accounts owed; W's lamports from nothing to plenty
-test("never above: at the quote's price, the preview's reserve is at least the one the sale's own rule takes, partial and full, on every input the chain can give", () => {
-  const none = [null, null] as const;
-  const grown = (size: number) => [solanaDepositRents(RENT, { stateSize: size, labelSize: size }, { mark: none, state: none, label: none }, true)];
+// What a sale pays into the user's notes, by the sale's own rule (pool-sell.ts sellRun: solanaSellReserve, and on a full
+// sale the sweep after it, rules/pool.ts solanaSellAfterFull), at every value the chain can give the inputs the preview
+// does not read: the cashback accounts made or there, the pages topped up past their rent, the coin's flag known or not.
+const none = [null, null] as const;
+const SIG = 5_000n;
+const heldAt = (size: number, topUp: bigint): readonly [bigint | null, bigint | null] => {
+  const k = size % SOLANA_POOL_PAGE_ENTRIES;
+  if (k === 0) return none;
+  const h = solanaRentMin(RENT, SOLANA_POOL_PAGE_HEADER + k * SOLANA_POOL_PAGE_ENTRY) + topUp;
+  return [h, h];
+};
+const rentsAt = (st: number, lb: number, topUp: bigint) => solanaDepositRents(RENT, { stateSize: st, labelSize: lb }, { mark: none, state: heldAt(st, topUp), label: heldAt(lb, topUp) }, true);
+/** A full sale's pay-in at the quote's price `e`: its note, and on the sweep's path the sweep's note (W's keep, the token
+ *  account's rent back, less the teardown's and the sweep's fees, the sweep's deposit rents and the owed claims' keep). */
+function fullLands(o: { made: bigint; owed: number; lamports: bigint; st: number; lb: number; topUp: bigint; e: bigint; minOut: bigint }): bigint | null {
+  const r0 = solanaRentMin(RENT, 0);
+  const floor = solanaSweepFloor(RENT) > SOLANA_POOL_MIN_DEPOSIT ? solanaSweepFloor(RENT) : SOLANA_POOL_MIN_DEPOSIT;
+  const after = solanaSellAfterFull(RENT, o.owed);
+  const p = { fee: SIG, made: o.made, rents: rentsAt(o.st, o.lb, o.topUp), after, lamports: o.lamports, minOut: o.minOut, keeps: false, noteFloor: solanaPoolNoteFloor(RENT) };
+  const r = solanaSellReserve({ ...p, swept: after - r0, base: r0, floor });
+  if ("refused" in r) return null;
+  const own = solanaSellReserve(p);
+  if ("refused" in own || own.value < floor) return r.value;
+  const sweep = after + solanaRentMin(RENT, 165) - 2n * SIG - rentsAt(o.st + 1, o.lb + 1, o.topUp) - solanaSweepKeep(RENT, o.owed);
+  return o.e - r.reserve + (sweep > 0n ? sweep : 0n);
+}
+const CLAIMS: readonly (readonly [boolean, boolean])[] = [[false, false], [true, false], [false, true], [true, true]];
+const TREES: readonly (readonly [number, number])[] = [[0, 0], [100, 100], [1_023, 1_023], [1_000, 5], [2_051, 77]];
+
+test("never above, full sales: at the quote's price the preview's out is at most what the sale and its sweep pay into the notes, on every input the chain can give", () => {
   let checked = 0;
   for (const venue of ["pump-curve", "pumpswap"] as const)
     for (const cashback of [false, true])
       for (const has of [{ ammVolume: false, ammVolumeAta: false }, { ammVolume: true, ammVolumeAta: true }])
-        for (const owed of [0, 1, 2])
-          for (const lamports of [0n, 1_000_000n, 3_000_000n, 5_000_000n, 10_000_000n, ENOUGH])
-            for (const rents of [...grown(0), 731_520n, 365_760n + 214_320n])
-              for (const full of [false, true]) {
-                const v = { kind: venue, cashback };
-                const made = solanaPoolSellNeed(v, RENT, has) - solanaPoolSellNeed(v, RENT, { ammVolume: true, ammVolumeAta: true });
-                const after = full ? solanaSellAfterFull(RENT, owed) : solanaPoolBuySellNeed(v, RENT);
-                const minOut = 200_000_000n;
-                const real = solanaSellReserve({ fee: 5_000n, made, rents, after, lamports, minOut, keeps: !full, noteFloor: solanaPoolNoteFloor(RENT) });
-                if ("refused" in real) continue; // refused: nothing is sold, nothing to preview against
-                const bound = poolSellReserveBound(RENT, venue, [lamports], full);
-                assert.ok(bound >= real.reserve, `${venue} cashback ${cashback} owed ${owed} lamports ${lamports} rents ${rents} full ${full}: bound ${bound} < ${real.reserve}`);
-                // the coin's flag known (the reference's): still never under the sale's rule
-                const known = poolSellReserveBound(RENT, venue, [lamports], full, cashback);
-                assert.ok(known >= real.reserve && known <= bound, `${venue} cashback ${cashback} known: ${known} vs ${real.reserve}`);
+        for (const claim of CLAIMS)
+          for (const lamports of [0n, 1_000_000n, 5_000_000n, ENOUGH])
+            for (const [st, lb] of TREES)
+              for (const topUp of [0n, 500_000n])
+                for (const e of [2_800_000n, 6_000_000n, 200_000_000n]) {
+                  const v = { kind: venue, cashback };
+                  const made = solanaPoolSellNeed(v, RENT, has) - solanaPoolSellNeed(v, RENT, { ammVolume: true, ammVolumeAta: true });
+                  const owed = claim.filter((c, i) => c || (cashback && i === (venue === "pumpswap" ? 1 : 0))).length;
+                  const minOut = solanaSellFloor(e, 1_000);
+                  const lands = fullLands({ made, owed, lamports, st, lb, topUp, e, minOut });
+                  for (const flag of [cashback, undefined]) {
+                    const w: DryWallet = { lamports, claim };
+                    const pays = poolSellPays(RENT, venue, [w], true, e, minOut, flag, { stateSize: st, labelSize: lb });
+                    if ("refused" in pays) continue; // refused: no number shown
+                    assert.ok(lands !== null, `${venue} ${cashback} ${claim} ${lamports} ${st}/${lb} ${e}: the preview answers a sale the rule refuses`);
+                    assert.ok(pays.out <= lands, `${venue} cashback ${cashback} flag ${flag} claim ${claim} lamports ${lamports} trees ${st}/${lb} top ${topUp} e ${e}: out ${pays.out} > ${lands}`);
+                    // the trees and the claims unread (a page's opening, both claims owed): never above either
+                    const cold = poolSellPays(RENT, venue, [{ lamports }], true, e, minOut, flag, null);
+                    if (!("refused" in cold)) assert.ok(cold.out <= lands, `unread ${venue} cb ${cashback} flag ${flag} has ${has.ammVolume} claim ${claim} l ${lamports} trees ${st}/${lb} top ${topUp} e ${e}: out ${cold.out} > ${lands} (read ${pays.out})`);
+                    checked++;
+                  }
+                }
+  assert.ok(checked > 1_000, `checked ${checked}`);
+});
+
+test("the gap on recorded full sales is about nothing: a plain coin, no claims, the trees mid-page, the pages at their rent", () => {
+  for (const [e, lamports] of [[200_000_000n, ENOUGH], [2_800_000n, 5_000_000n], [6_000_000n, 0n]] as const) {
+    const minOut = solanaSellFloor(e, 1_000);
+    const lands = fullLands({ made: 0n, owed: 0, lamports, st: SIZES[0], lb: SIZES[1], topUp: 0n, e, minOut })!;
+    const pays = poolSellPays(RENT, "pump-curve", [{ lamports, claim: [false, false] }], true, e, minOut, false, { stateSize: SIZES[0], labelSize: SIZES[1] });
+    assert.ok(!("refused" in pays));
+    const gap = lands - pays.out;
+    assert.ok(gap >= 0n && gap <= SIG, `e ${e} lamports ${lamports}: gap ${gap}`);
+    console.log(`# full sale of ${poolUnits(e, 9)} SOL, W ${poolUnits(lamports, 9)}: out ${poolUnits(pays.out, 9)}, into the notes ${poolUnits(lands, 9)}, gap ${poolUnits(gap, 9)} SOL`);
+  }
+});
+
+test("partial sales: out is at most the expected out less the reserve the sale's rule takes, on every input", () => {
+  let checked = 0;
+  for (const venue of ["pump-curve", "pumpswap"] as const)
+    for (const cashback of [false, true])
+      for (const has of [{ ammVolume: false, ammVolumeAta: false }, { ammVolume: true, ammVolumeAta: true }])
+        for (const lamports of [0n, 1_000_000n, 3_000_000n, 5_000_000n, 10_000_000n, ENOUGH])
+          for (const [st, lb] of TREES)
+            for (const topUp of [0n, 500_000n]) {
+              const v = { kind: venue, cashback };
+              const made = solanaPoolSellNeed(v, RENT, has) - solanaPoolSellNeed(v, RENT, { ammVolume: true, ammVolumeAta: true });
+              const e = 200_000_000n;
+              const minOut = solanaSellFloor(e, 1_000);
+              const real = solanaSellReserve({ fee: SIG, made, rents: rentsAt(st, lb, topUp), after: solanaPoolBuySellNeed(v, RENT), lamports, minOut, keeps: true, noteFloor: solanaPoolNoteFloor(RENT) });
+              if ("refused" in real) continue;
+              for (const flag of [cashback, undefined]) {
+                const pays = poolSellPays(RENT, venue, [{ lamports }], false, e, minOut, flag, { stateSize: st, labelSize: lb });
+                assert.ok(!("refused" in pays) && pays.out <= e - real.reserve && pays.minOut <= minOut - real.reserve, `${venue} ${cashback} ${lamports} ${st}/${lb}`);
                 checked++;
               }
+            }
   assert.ok(checked > 300, `checked ${checked}`);
 });
 
-test("the gap on a single-wallet sale: on the recorded sells (W holds ENOUGH) none; on a W that holds only its sale's need, at most both pages' opening over their growth, the cashback accounts and the owed keep", () => {
-  // the recorded sells: a partial sale's reserve is 0 both ways
-  assert.equal(poolSellReserveBound(RENT, "pump-curve", [ENOUGH], false), 0n);
-  const real = solanaSellReserve({ fee: 5_000n, made: 0n, rents: 731_520n, after: solanaPoolBuySellNeed({ kind: "pump-curve", cashback: false }, RENT), lamports: solanaPoolSellNeed({ kind: "pump-curve", cashback: false }, RENT), minOut: 200_000_000n, keeps: true, noteFloor: solanaPoolNoteFloor(RENT) });
-  assert.ok("reserve" in real);
-  const bound = poolSellReserveBound(RENT, "pump-curve", [solanaPoolSellNeed({ kind: "pump-curve", cashback: false }, RENT)], false);
-  const gap = bound - real.reserve;
-  assert.ok(gap >= 0n && gap < SOLANA_POOL_SELL_RESERVE_MAX, `gap ${gap}`);
-  console.log(`# single-wallet gap on a lean W, flag unknown: ${poolUnits(gap, 9)} SOL (bound ${poolUnits(bound, 9)}, rule ${poolUnits(real.reserve, 9)})`);
-  // the reference names the flag (a plain coin): only the pages' opening over their growth is left
-  const known = poolSellReserveBound(RENT, "pump-curve", [solanaPoolSellNeed({ kind: "pump-curve", cashback: false }, RENT)], false, false);
-  assert.ok(known - real.reserve >= 0n && known < bound);
-  console.log(`# single-wallet gap on a lean W, flag read: ${poolUnits(known - real.reserve, 9)} SOL`);
+// Today a partial sale's note gets the floor less the reserve and the rest waits on W for its last sale's sweep, so
+// `out` (the expected amount) is above that note by the slippage share; card partial-sell-pays-all-into-cash makes the
+// sale pay it all in, and this turns on there.
+test("partial sales: out is at most what reaches the notes at the sale", { todo: "card partial-sell-pays-all-into-cash" }, () => {
+  const e = 200_000_000n;
+  const minOut = solanaSellFloor(e, 300);
+  const real = solanaSellReserve({ fee: SIG, made: 0n, rents: rentsAt(100, 100, 0n), after: solanaPoolBuySellNeed({ kind: "pump-curve", cashback: false }, RENT), lamports: ENOUGH, minOut, keeps: true, noteFloor: solanaPoolNoteFloor(RENT) });
+  assert.ok(!("refused" in real));
+  const pays = poolSellPays(RENT, "pump-curve", [{ lamports: ENOUGH }], false, e, minOut, false, { stateSize: 100, labelSize: 100 });
+  assert.ok(!("refused" in pays));
+  assert.ok(pays.out <= real.value, `out ${pays.out} > note ${real.value}`);
 });
 
 test("the decimals: the positions pass's, else the page's kept ones, else one read on both providers (then kept)", async () => {
@@ -179,63 +263,91 @@ test("refusals before any provider read: another chain, no pin, no position, mor
   assert.deepEqual(log, []);
 });
 
-/** A page clock the waits move (each wait its own ms). */
+/** A page clock. */
 const clock = () => {
   let t = 0;
-  return { now: () => t, wait: async (ms: number) => void (t += ms), at: () => t, add: (ms: number) => void (t += ms) };
+  return { now: () => t, at: () => t, add: (ms: number) => void (t += ms) };
 };
 
-test("the trades first: no read while a trade runs on the page or holds a host; reads once it ends; busy, with no read, once its start bound passes", async () => {
-  const c = clock();
-  let trading = 3;
-  const log: string[] = [];
-  const a = await poolSellDry(deps({ log, now: c.now, wait: c.wait, trading: () => trading-- > 0 }), share(MINT, 5_000));
-  assert.ok("result" in a, JSON.stringify(a));
-  assert.equal(log.length, 6, "read once the trade ended");
+test("decided before any read: while a trade runs or holds a host, busy at once with no read; a sign out before its turn: not_funded, no read", async () => {
   const never: string[] = [];
-  const c2 = clock();
-  assert.deepEqual(await poolSellDry(deps({ log: never, now: c2.now, wait: c2.wait, trading: () => true }), share(MINT, 5_000)), { error: "busy" });
+  assert.deepEqual(await poolSellDry(deps({ log: never, trading: () => true }), share(MINT, 5_000)), { error: "busy" });
   assert.deepEqual(never, [], "no provider read while a trade runs");
-  assert.ok(c2.at() >= POOL_SELL_DRY_START_MS && c2.at() < POOL_SELL_DRY_START_MS + 500, `gave up at ${c2.at()} ms, inside the client's 10 s`);
-});
-
-test("a sign out during the wait ends it: no read, the old holding not answered", async () => {
-  const c = clock();
-  let signedIn = true;
   const log: string[] = [];
+  assert.ok("result" in (await poolSellDry(deps({ log }), share(MINT, 5_000))));
+  assert.equal(log.length, 6, "read once no trade runs");
   let looks = 0;
-  const a = await poolSellDry(deps({ log, now: c.now, wait: async (ms) => void (c.wait(ms), looks++ === 1 && (signedIn = false)), trading: () => true, positions: () => (signedIn ? [pos()] : null) }), share(MINT, 5_000));
-  assert.deepEqual(a, { error: "not_funded" });
-  assert.deepEqual(log, []);
-  assert.ok(c.at() < 1_000, "ended at the sign out, not at its bound");
+  const out: string[] = [];
+  assert.deepEqual(await poolSellDry(deps({ log: out, positions: () => (looks++ === 0 ? [pos()] : null) }), share(MINT, 5_000)), { error: "not_funded" });
+  assert.deepEqual(out, []);
 });
 
-test("the budget: at most POOL_SELL_DRY_CALLS calls per host in any window; past it a preview waits for the window, or answers busy at once when it frees past its start bound", async () => {
+test("the budget: at most POOL_SELL_DRY_CALLS calls per host in any window; past it busy at once, no read and no wait", async () => {
   const c = clock();
   const log: string[] = [];
-  const k = poolSellDryKind(deps({ log, now: c.now, wait: c.wait }));
+  const k = poolSellDryKind(deps({ log, now: c.now }));
   const answers: unknown[] = [];
   for (const bps of [1_000, 2_000, 3_000]) {
     const r = k(share(MINT, bps));
     await r.after;
     answers.push(r.answer());
-    c.add(POOL_SELL_DRY_KEEP_MS); // past the kept answers' age: each reads
+    c.add(POOL_SELL_DRY_KEEP_MS); // past the kept answers' age: each would read
   }
   assert.ok("result" in (answers[0] as object) && "result" in (answers[1] as object), JSON.stringify(answers));
-  assert.deepEqual(answers[2], { error: "busy" }, "the third in 10 s: its host's budget frees past its start bound");
+  assert.deepEqual(answers[2], { error: "busy" }, "the third in 10 s");
   assert.equal(log.length, 2 * POOL_SELL_DRY_CALLS, "six calls per host, no more");
-  assert.ok(c.at() < 3 * POOL_SELL_DRY_KEEP_MS + 500, "answered busy at once, no wait");
   c.add(POOL_SELL_DRY_WINDOW_MS);
   const r = k(share(MINT, 3_000));
   await r.after;
   assert.ok("result" in r.answer()!, "the next window");
 });
 
-test("one preview at a time: a newer ask stops an older one before its next read; asks for what the running one reads share its answer", async () => {
+test("answered inside the client's 10 s: a read its host holds answers by POOL_SELL_DRY_ANSWER_MS, never later", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const held = [async () => new Promise(() => {}), async () => new Promise(() => {})] as unknown as readonly [SolanaRpc, SolanaRpc];
+  let answer: unknown = null;
+  void poolSellDry(deps({ rpcs: () => held }), share(MINT, 5_000)).then((a) => (answer = a));
+  for (let i = 0; i < 5; i++) await null;
+  t.mock.timers.tick(POOL_SELL_DRY_ANSWER_MS - 1);
+  for (let i = 0; i < 5; i++) await null;
+  assert.equal(answer, null);
+  t.mock.timers.tick(1);
+  for (let i = 0; i < 20; i++) await null;
+  assert.ok(answer !== null && "error" in (answer as object), JSON.stringify(answer));
+});
+
+test("a stopped preview books nothing: N asks with changing shares, then a trade's getMultipleAccounts on the same providers goes out within their answer time (N = 12, 30)", async () => {
+  for (const n of [12, 30]) {
+    const rec = pair("pump", []);
+    const out: { trade: number[] } = { trade: [] };
+    const ANSWER = 20;
+    // two providers by URL, answering in ANSWER ms; the page's pass pair and a trade's pair share their queues
+    const bare = rec.map((rpc, i) => Object.assign(async (m: string, p: readonly unknown[]) => {
+      if ((p[0] as string[])[0] === "TRADE") return (out.trade.push(performance.now()), { context: { slot: 1 }, value: [null] });
+      await new Promise((r) => setTimeout(r, ANSWER));
+      return rpc(m, p);
+    }, { url: `https://load-${n}-${i}.example/` })) as unknown as SolanaRpc[];
+    const pass = bare.map((r) => solanaPacedRpc(r)) as unknown as readonly [SolanaRpc, SolanaRpc];
+    const trade = bare.map((r) => solanaPacedRpc(r));
+    const k = poolSellDryKind(deps({ rpcs: () => pass }));
+    const asks = [];
+    for (let i = 0; i < n; i++) {
+      asks.push(k(share(MINT, 100 + i)));
+      await new Promise((r) => setTimeout(r, 1));
+    }
+    const t0 = performance.now();
+    await Promise.all(trade.map((r) => solanaTimedRpc(r, 5_000)("getMultipleAccounts", [["TRADE"], { encoding: "base64" }])));
+    const waited = Math.max(...out.trade) - t0;
+    assert.ok(waited < ANSWER + 30, `N ${n}: the trade's call went out ${waited.toFixed(0)} ms after it was asked`);
+    await Promise.all(asks.map((r) => r.after));
+  }
+});
+
+test("one preview at a time: a newer ask stops an older one before it reads; asks for what the running one reads share its answer", async () => {
   const log: string[] = [];
   let release!: () => void;
   const gate = new Promise<void>((r) => (release = r));
-  const k = poolSellDryKind(deps({ log, trading: () => false, wait: async () => {} , rpcs: () => pair("pump", log).map((rpc) => (async (m: string, p: readonly unknown[]) => (await gate, rpc(m, p))) as SolanaRpc) as unknown as readonly [SolanaRpc, SolanaRpc] }));
+  const k = poolSellDryKind(deps({ log, trading: () => false, rpcs: () => pair("pump", log).map((rpc) => (async (m: string, p: readonly unknown[]) => (await gate, rpc(m, p))) as SolanaRpc) as unknown as readonly [SolanaRpc, SolanaRpc] }));
   // a hundred asks for one share: one run
   const same = Array.from({ length: 100 }, () => k(share(MINT, 5_000)));
   release();
@@ -249,7 +361,7 @@ test("one preview at a time: a newer ask stops an older one before its next read
   await Promise.all(many.map((r) => r.after));
   assert.ok("result" in many[29]!.answer()!, JSON.stringify(many[29]!.answer()));
   assert.equal(many.slice(0, 29).filter((r) => JSON.stringify(r.answer()) === '{"error":"busy"}').length, 29);
-  assert.equal(log2.length, 6, "the older asks stop before their first read");
+  assert.equal(log2.length, 6, "the older asks stop before any read");
   // thirty asks a turn apart on providers that answer late: never more than the budget on a host
   const log3: string[] = [];
   let open!: () => void;
@@ -289,7 +401,7 @@ test("the page answers it (src/main.ts): the kind on the trades' paced pair as b
   const main = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
   assert.match(main, /"pool\.sell\.dry": \(params\) => poolSellDry\(params\),/);
   assert.match(main, /PAGE_SOL_PIN === undefined \? null : pageSolanaRpcs\("pass"\)/, "the trades' own paced pair, each read a background one on its host's lane");
-  assert.match(main, /positions: \(\) => testnet\?\.positionsNow\(\) \?\? null,/, "the held positions: no pass, no seed read, no write");
+  assert.match(main, /positions: \(\) => testnet\?\.positionsNow\(\) \?\? null, pin: \(\) => PAGE_SOL_PIN \?\? null,/, "the held positions: no pass, no seed read, no write; the page's pool");
   assert.match(main, /rent: \(\) => \(hasSolana \? rent\.get\(\) : null\),/, "the page's own Rent sysvar read");
   assert.match(main, /const buys = liveRuns\(poolKindMap\["pool\.buy"\], "final"\);\n  poolKindMap\["pool\.buy"\] = buys\.kind;/);
   assert.match(main, /const sells = liveRuns\(poolKindMap\["pool\.sell"\], "after"\);\n  poolKindMap\["pool\.sell"\] = sells\.kind;/);
@@ -298,7 +410,7 @@ test("the page answers it (src/main.ts): the kind on the trades' paced pair as b
   assert.match(tp, /positionsNow: \(\) => positions\.get\(\),/);
 });
 
-test("a pool buy runs from its tap to its final stage, through an early \"sent\" answer; a sell to its run's end; a refusal ends either; the backstop ends one with no end", async () => {
+test("a pool buy runs from its tap to its run's end (its one progress post, \"sent\" included), through an early \"sent\" answer; a sell to its run's end; a refusal ends either; the backstop ends one with no end", async () => {
   type Ctx = Parameters<ReturnType<typeof liveRuns>["kind"]>[1];
   const ctx = (seen: string[]) => ({ id: "b1", sha: "s", progress: (s: string) => void seen.push(s) }) as unknown as Ctx;
   let post!: (s: string) => void;
@@ -313,9 +425,9 @@ test("a pool buy runs from its tap to its final stage, through an early \"sent\"
   answered();
   await new Promise((r) => setTimeout(r, 0));
   assert.equal(b.live(), 1, "answered sent: its read-backs still run");
-  post("filled");
-  assert.equal(b.live(), 0, "its final stage");
-  assert.deepEqual(seen, ["filled"], "progress passes through");
+  post("sent");
+  assert.equal(b.live(), 0, "its run's end, though its last stage is sent (no 150 s count)");
+  assert.deepEqual(seen, ["sent"], "progress passes through");
   let ran!: () => void;
   const s = liveRuns(() => ({ running: true, after: new Promise<void>((r) => (ran = r)), answer: () => ({ result: { stage: "sent", txs: [] } }) }), "after");
   s.kind({}, ctx([]));
@@ -342,7 +454,7 @@ test("the kept answers: four shares inside 2 s make three calls per provider in 
   const log: string[] = [];
   let trading = false;
   let signedIn = true;
-  const k = poolSellDryKind(deps({ log, now: c.now, wait: c.wait, trading: () => trading, positions: () => (signedIn ? [pos(), pos(SWAP_MINT)] : null) }));
+  const k = poolSellDryKind(deps({ log, now: c.now, trading: () => trading, positions: () => (signedIn ? [pos(), pos(SWAP_MINT)] : null) }));
   const ask = async (bps: number) => {
     const r = k(share(MINT, bps));
     await r.after;
@@ -369,7 +481,7 @@ test("the kept answers: four shares inside 2 s make three calls per provider in 
   // a sign out drops them: on a page with its budget free, signed in again inside the age, the next ask reads
   const c2 = clock();
   const log2: string[] = [];
-  const k2 = poolSellDryKind(deps({ log: log2, now: c2.now, wait: c2.wait, positions: () => (signedIn ? [pos()] : null) }));
+  const k2 = poolSellDryKind(deps({ log: log2, now: c2.now, positions: () => (signedIn ? [pos()] : null) }));
   const ask2 = async (bps: number) => {
     const r = k2(share(MINT, bps));
     await r.after;
