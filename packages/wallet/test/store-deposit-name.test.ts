@@ -216,3 +216,69 @@ test("an EVM pool's record: the EIP-55 address beside the 64-hex id, read back a
   // a later naming of the same index with another address is a new record, never the old one kept
   assert.deepEqual(await s.nameDeposit({ entropy: new Uint8Array(16).fill(0x7f) }, { scope: 9n, index: 0, id: id(0), evm: EVM2 }), { v: 1, scope: "9", index: 0, id: id(0), evm: EVM2 });
 });
+
+// Card deposit-landing-does-not-queue-a-trade: a trade holds the seed lock shared for its run; a seed write asked
+// exclusive waited for it, and Web Locks grant in request order, so the next trade's shared request waited behind that
+// write until the first trade ended. Every seed write takes it shared; only a sign out asks it exclusive.
+/** Polls (no clock) until `f` holds or `n` turns of the event loop pass; whether it held. */
+const until = async (f: () => Promise<boolean>, n = 2_000): Promise<boolean> => {
+  for (let i = 0; i < n; i++) {
+    if (await f()) return true;
+    await new Promise((r) => setImmediate(r));
+  }
+  return false;
+};
+test("every seed write ends beside a trade's shared hold: none queues an exclusive request, and the next trade's shared request is granted at once; a sign out still waits for the trade", async () => {
+  const name = `deposit-name-shared-${process.pid}`;
+  const lock = `ct-wallet/seed/${name}`;
+  const s = await openWalletStore({ indexedDB: new IDBFactory(), name });
+  closers.push(s);
+  let give!: () => void;
+  await new Promise<void>((on) => void navigator.locks.request(lock, { mode: "shared" }, () => (on(), new Promise<void>((r) => (give = r)))));
+  const exclusivePending = async () => ((await navigator.locks.query()).pending ?? []).some((l) => l.name === lock && l.mode === "exclusive");
+  const writes: [string, () => Promise<unknown>][] = [
+    ["insertSeed", () => s.insertSeed({ ...SEED(), code_saved: false })],
+    ["setCodeSaved", () => s.setCodeSaved({ entropy: new Uint8Array(16).fill(0x7f) })],
+    ["nameDeposit", () => s.nameDeposit({ entropy: new Uint8Array(16).fill(0x7f) }, { scope: 5n, index: s.lane, id: id(3) })],
+  ];
+  try {
+    for (const [what, write] of writes) {
+      let ended = false;
+      const p = write().then(() => (ended = true));
+      assert.ok(await until(async () => ended || (await exclusivePending())), what);
+      assert.equal(await exclusivePending(), false, `${what}: no exclusive request queued behind the trade's hold`);
+      const next = await navigator.locks.request(lock, { mode: "shared", ifAvailable: true }, async (l) => l !== null);
+      assert.equal(next, true, `${what}: the next trade's shared request is granted at once`);
+      await p;
+    }
+    assert.equal(((await s.get("meta", "seed")) as { code_saved?: unknown }).code_saved, true);
+    assert.deepEqual(await s.get("meta", "deposit/5"), { v: 1, scope: "5", index: s.lane, id: id(3) });
+    // a sign out still waits for the trade: it asks exclusive
+    let out = false;
+    const signedOut = s.signOut().then(() => (out = true));
+    assert.ok(await until(exclusivePending), "the sign out asks the seed lock exclusive");
+    assert.equal(out, false, "signed out under a trade's hold");
+    give();
+    await signedOut;
+  } finally {
+    give();
+  }
+});
+
+test("two tabs naming one scope at once, a lower index and a higher one: the higher one stays, in every order", async () => {
+  const idb = new IDBFactory();
+  const name = `deposit-name-order-${process.pid}`;
+  const a = await openWalletStore({ indexedDB: idb, name });
+  const b = await openWalletStore({ indexedDB: idb, name });
+  closers.push(a, b);
+  await a.insertSeed(SEED());
+  const entropy = () => new Uint8Array(16).fill(0x7f);
+  for (let round = 0; round < 40; round++) {
+    const scope = 2000n + BigInt(round);
+    const low = { scope, index: 0, id: id(0) };
+    const high = { scope, index: 8, id: id(8) };
+    const [x, y] = round % 2 === 0 ? [a, b] : [b, a];
+    await Promise.all([x.nameDeposit({ entropy: entropy() }, high), y.nameDeposit({ entropy: entropy() }, low)]);
+    assert.deepEqual(await a.get("meta", `deposit/${scope}`), { v: 1, scope: scope.toString(), index: 8, id: id(8) }, `round ${round}`);
+  }
+});

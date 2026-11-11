@@ -106,9 +106,12 @@ test("a trade's hold leaves a pass its budget: a pass read goes at once while th
     const release = holdHosts([DEVNET, HELPER]);
     assert.equal(await pageSolanaRpcs("pass")[0]("getProgramAccounts", []), 7, "room in the window: not parked on the hold");
     fill(DEVNET, 100);
-    const t = performance.now();
+    // what was sent when a 1 ms timer set just before the trade's read fires: any wait on the budget comes after it
+    let atFirstMs: string[] = [];
+    setTimeout(() => (atFirstMs = sent.map((s) => s.method)), 1);
     assert.equal(await pageSolanaRpcs("trade")[0]("getSlot", []), 7);
-    assert.ok(performance.now() - t < 100, "a trade's read past every budget goes at once");
+    await tick(1);
+    assert.deepEqual(atFirstMs, ["getProgramAccounts", "getSlot"], "a trade's read past every budget goes at once: sent before the first timer fires");
     assert.deepEqual(sent.map((s) => s.method), ["getProgramAccounts", "getSlot"]);
     release();
   });
@@ -288,10 +291,15 @@ test("a sign out ends every wait on every host at once: a pass's read waiting fo
     await tick(100);
     const paused = pageSolanaRpcs("trade")[0]("getBlockHeight", []).catch((e: unknown) => e);
     await tick(50);
-    const t = performance.now();
+    // how many of the three had settled when a 1 ms timer set at the sign out fires: the pause's end comes long after
+    let ended = 0;
+    let atFirstMs = -1;
+    for (const p of [pass, throttled, paused]) void p.then(() => ended++);
     stopHostLaneWaits(new Error("signed out"));
+    setTimeout(() => (atFirstMs = ended), 1);
     for (const p of [pass, throttled, paused]) assert.match(String(await p), /signed out/);
-    assert.ok(performance.now() - t < 100, "at once, not at the pause's end");
+    await tick(1);
+    assert.equal(atFirstMs, 3, "at once, not at the pause's end: all three ended before the first timer fired");
     await tick(1_100);
     assert.deepEqual(sent.map((x) => x.method), ["getSlot"], "only the first read went out: nothing after the sign out");
   });

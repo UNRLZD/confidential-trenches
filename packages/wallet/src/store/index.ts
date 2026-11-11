@@ -20,10 +20,15 @@
 // - Sign out: broadcast "signout" on BroadcastChannel "ct-wallet", then delete the database (06b:1235, wallet.md:156);
 //   other tabs close their connection on the delete's versionchange, so the delete is not blocked. A store that is
 //   already closed refuses to sign out, so a stale tab never deletes a newer account's database.
-// - The seed lock: sign out (from reading the seed until its delete has succeeded or failed), insertSeed and
-//   setCodeSaved each run under the store's exclusive Web Lock "ct-wallet/seed". An earlier tab's sign out holds it until
-//   its database is gone, so a stale tab's sign out then fails its liveness check and never deletes, and no seed insert
-//   can run between a sign out's check and its delete. The lock is not given back when the delete reports blocked:
+// - The seed lock: sign out (from reading the seed until its delete has succeeded or failed) runs under the store's
+//   exclusive Web Lock "ct-wallet/seed"; insertSeed, setCodeSaved and nameDeposit each run under it shared, as every
+//   trade does. An earlier tab's sign out holds it until its database is gone, so a stale tab's sign out then fails its
+//   liveness check and never deletes, and no seed write can run between a sign out's check and its delete. A seed write
+//   needs no more than shared: each lands only by a compare-and-set in one IndexedDB transaction (casPut), which IndexedDB
+//   runs one at a time across tabs, so two writes never interleave. An exclusive one would wait for every trade's shared
+//   hold, and Web Locks grant in request order, so the next trade's shared request would wait behind it for the whole
+//   trade (card deposit-landing-does-not-queue-a-trade: a deposit landing during a buy held the next sell to the buy's
+//   end). The lock is not given back when the delete reports blocked:
 //   Chromium fires blocked as soon as one connection reports it ignored the versionchange
 //   (connection_coordinator.cc:102-105, :700-705), which a tab our own "signout" broadcast closed mid-transaction reports
 //   at once (idb_database.cc:301-305), so blocked does not mean every other tab has closed; the spec, Firefox and WebKit
@@ -105,7 +110,7 @@ export interface WalletStore {
   // one when inserted, the other tab's when it lost.
   insertSeed(seed: unknown): Promise<{ inserted: boolean; seed: unknown }>;
   // Sets the stored seed's code_saved to true (the backup's "Saved", 06b ses.5) and nothing else, only while the stored
-  // seed is the one whose 12 words were shown (`shown.entropy`, compared under the seed lock): a seed another tab stored
+  // seed is the one whose 12 words were shown (`shown.entropy`, compared in the write's own transaction): a seed another tab stored
   // since is refused with SeedChanged and left as it is, so a Saved never marks words the user never saw.
   setCodeSaved(shown: { entropy: Uint8Array }): Promise<void>;
   // Writes meta/"status" from the stored seed when it is missing or behind (a database from before the status record);
@@ -116,9 +121,10 @@ export interface WalletStore {
   // index is the note store's PLANNED deposit note's (../notes/store.ts planDeposit, the one place an index is picked);
   // this reserves nothing. `id` is U_{scope,index}'s, derived by the caller from the seed `shown`; `evm`, on an EVM
   // pool's scope only, is U^evm_{scope,index}'s EIP-55 address (card pool-deposit-address), where 1Click sends the coin. Written under the seed
-  // lock in one transaction with a compare on the seed record this call read and checked, only while the stored seed
-  // is the one `shown` (else SeedChanged), so no U is named for a seed that is not stored; a record already equal is
-  // left as it is (nothing written). The store's copy of the entropy and the seed it decrypts are zeroed.
+  // lock (shared) in one transaction with a compare on the seed record and on this scope's record this call read and
+  // checked, only while the stored seed is the one `shown` (else SeedChanged), so no U is named for a seed that is not
+  // stored and no lower index replaces one another tab named meanwhile; a record already equal is left as it is
+  // (nothing written). The store's copy of the entropy and the seed it decrypts are zeroed.
   nameDeposit(shown: { entropy: Uint8Array }, rec: { scope: bigint; index: number; id: string; evm?: string }): Promise<DepositRecord>;
   // Deletes the database. Refuses while the stored seed's 12 words are its only copy and not saved (backupFirst).
   signOut(): Promise<void>;
@@ -340,9 +346,10 @@ export async function openWalletStore(opts: WalletStoreOptions = {}): Promise<Wa
   const locked = <T>(fn: () => Promise<T>): Promise<T> =>
     locks ? (locks.request(WALLET_LOCK, { mode: "exclusive" }, fn) as Promise<T>) : fn();
   const seedLock = name === WALLET_DB ? WALLET_SEED_LOCK : `${WALLET_SEED_LOCK}/${name}`;
-  const seedLocked = async <T>(fn: () => Promise<T>): Promise<T> => {
+  // sign out: exclusive; every seed write: shared, as a trade (see the top)
+  const seedLocked = async <T>(fn: () => Promise<T>, mode: "exclusive" | "shared"): Promise<T> => {
     if (!locks) throw new Error("no Web Locks: the seed is written and signed out only under the seed lock");
-    return locks.request(seedLock, { mode: "exclusive" }, fn) as Promise<T>;
+    return locks.request(seedLock, { mode }, fn) as Promise<T>;
   };
 
   async function getRaw(store: WalletStoreName, key: string): Promise<unknown> {
@@ -353,13 +360,16 @@ export async function openWalletStore(opts: WalletStoreOptions = {}): Promise<Wa
   // durability; resolves after the commit. false: another tab wrote first.
   // `also`: more records of the same store written in the same transaction, only when the compare holds; `next`
   // undefined writes `also` alone, the record under `key` left as it is.
-  async function casPut(store: WalletStoreName, key: string, before: unknown, next: unknown, also: [string, unknown][] = []): Promise<boolean> {
+  // `also`: records written in the same transaction; `same`: records of the store that must still be as read too
+  async function casPut(store: WalletStoreName, key: string, before: unknown, next: unknown, also: [string, unknown][] = [], same: [string, unknown][] = []): Promise<boolean> {
     const tx = live().transaction(store, "readwrite", { durability: "strict" });
     const os = tx.objectStore(store);
     const finished = done(tx);
     finished.catch(() => {}); // handled below; a get that fails first must not leave it unhandled
     const now = await req(os.get(key));
-    if (!sameRaw(now, before)) {
+    let held = sameRaw(now, before);
+    for (const [k, was] of same) if (held) held = sameRaw(await req(os.get(k)), was);
+    if (!held) {
       tx.abort();
       await finished.catch(() => {});
       return false;
@@ -475,7 +485,7 @@ export async function openWalletStore(opts: WalletStoreOptions = {}): Promise<Wa
         const inserted = await casPut("meta", "seed", undefined, await wrap("meta", "seed", seed), status);
         if (inserted) notify(["meta"]);
         return { inserted, seed: await unwrap("meta", "seed", await getRaw("meta", "seed")) };
-      });
+      }, "shared");
     },
     setCodeSaved(shown) {
       if (!(shown?.entropy instanceof Uint8Array) || shown.entropy.length !== 16) return Promise.reject(new Error("setCodeSaved needs the seed shown"));
@@ -497,7 +507,7 @@ export async function openWalletStore(opts: WalletStoreOptions = {}): Promise<Wa
           wipe(seed);
         }
       }
-      }).finally(() => want.fill(0));
+      }, "shared").finally(() => want.fill(0));
     },
     async syncStatus() {
       for (;;) {
@@ -531,18 +541,20 @@ export async function openWalletStore(opts: WalletStoreOptions = {}): Promise<Wa
           const same = sameBytes((seed as { entropy?: unknown } | undefined)?.entropy, want);
           wipe(seed);
           if (!same) throw new SeedChanged("the stored seed is not the seed shown");
-          const had = depositRecordOf(await unwrap("meta", key, await getRaw("meta", key)).catch(() => undefined));
+          const hadRaw = await getRaw("meta", key);
+          const had = depositRecordOf(await unwrap("meta", key, hadRaw).catch(() => undefined));
           if (had && had.scope === rec.scope && had.index === rec.index && had.id === rec.id && had.evm === rec.evm) return had;
           // planned indices only grow (planDeposit): a lower one is a naming that planned before money reached its
           // index, and never replaces the newer one another tab named since (wallet.md W:355-358)
           if (had && had.scope === rec.scope && had.index > rec.index) return had;
-          // the compare is on the seed record read and checked above: a seed written since gets no record
-          if (await casPut("meta", "seed", before, undefined, [[key, await wrap("meta", key, rec)]])) {
+          // the compare is on the seed record and this scope's record read and checked above: a seed written since gets
+          // no record, and a record another tab wrote since is read again (the lock is shared: see the top)
+          if (await casPut("meta", "seed", before, undefined, [[key, await wrap("meta", key, rec)]], [[key, hadRaw]])) {
             notify(["meta"]);
             return rec;
           }
         }
-      }).finally(() => want.fill(0));
+      }, "shared").finally(() => want.fill(0));
     },
     async delete(store, key) {
       checkCallerKey(store, key);
@@ -594,7 +606,7 @@ export async function openWalletStore(opts: WalletStoreOptions = {}): Promise<Wa
           r.onsuccess = () => ok();
           r.onerror = () => no(r.error);
         });
-      });
+      }, "exclusive");
     },
     close() {
       shut();
