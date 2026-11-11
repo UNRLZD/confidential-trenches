@@ -1,0 +1,5 @@
+var zz=Object.freeze({firstMs:1e3,maxMs:1e4,afterMaxMs:1e4});function Bz(e,t,n=zz){let r=Number.isFinite(e)&&e>0?Math.min(e*2,n.maxMs):n.firstMs,i=typeof t==`number`&&Number.isFinite(t)&&t>0?Math.min(t,n.afterMaxMs):0;return Math.max(r,i)}var Vz=class{#e=0;#t=0;#n=0;#r;#i;constructor(e={}){this.#r=e.now??Date.now,this.#i=e.bounds??zz}left(){return Math.max(0,this.#e-this.#r())}epoch(){return this.#n}throttled(e,t){if(e===this.#n){this.#n++,this.#t=Bz(this.#t,t,this.#i),this.#e=Math.max(this.#e,this.#r()+this.#t);return}let n=Bz(0,t,{...this.#i,firstMs:0});this.#e=Math.max(this.#e,this.#r()+n)}answered(e){e===this.#n&&(this.#t=0)}}
+async function TB(e,t,n,r){let i=e.left();if(i!==0){if(Date.now()+i>t)throw Error(`its reads drew the provider's 429 past ${uB/1e3} s`);await n(i,r),r?.throwIfAborted()}}
+async read(e,t,i=Date.now()+uB){let s=n=>Promise.all([a(e,n,t),o(e,W,n,t),o(e,fd,n,t)]),c,l;for(let e=1,a=0;;){t?.throwIfAborted(),await TB(r.gate,i,n,t)
+wait429:t.wait429,gate:new Vz}
+ uB=3e4,

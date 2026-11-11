@@ -150,6 +150,7 @@ export const CHANGED = [
   "scripts/live-checks/pool-senders-next-page-helper.mjs",
   "scripts/live-checks/pool-usd-price-never-stale.mjs",
   "scripts/live-checks/sol-settle-failed-is-not-unspent.mjs",
+  "scripts/live-checks/signpage-throttled-read-is-not-asked-again-at-once.mjs",
   "scripts/live-checks/precommit-taken-recover.mjs",
   "scripts/live-checks/relayer-cost-guards.mjs",
   "scripts/live-checks/relayer-withdraw-fee.mjs",
