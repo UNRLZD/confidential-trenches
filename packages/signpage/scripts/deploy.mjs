@@ -12,8 +12,10 @@
 // and the worker and the thread file against a fresh build of the kit's.
 // A deploy is main's head, released (card signpage-release-at-deploy): it reads main's head from GitHub itself
 // (git ls-remote on the repository's URL, never a local origin/main ref, which a fork, a mirror or a refspec can leave
-// stale) and refuses unless HEAD is that head and its push run of ci.yml passed (the read scripts/deploy/hosts-cutover.sh
-// makes; a cancelled or failed run is named, with the gh run rerun that redoes it), once before the build and again
+// stale) and refuses unless HEAD is that head and its full run of ci.yml passed: the merge queue's run on that very commit,
+// read by its sha (scripts/ci/ci-runs-once.mjs ciProblems, card main-ci-runs-once: main has no push run since; a push run
+// of an older commit, or one by hand, counts too, a scheduled one never; a cancelled or failed run is named, with the gh
+// run rerun that redoes it, one still going is waited for), once before the build and again
 // right before the upload, so a merge that lands meanwhile refuses it,
 // and unless the newest committed release list (packages/signpage/releases, newest by N) names the build, file for file
 // and header for header, with the ledger holding every list as written (release-list.mjs unreleasedProblems). So every
@@ -21,7 +23,7 @@
 // check signpage-release-at-deploy reads SIGN_HOST against that list after the deploy. It also refuses an uncommitted
 // change anywhere in the tree (the build carries the kit's prover too), no HEAD, a newest list whose tree has other
 // SIGN_HOST build inputs than HEAD (release-list.mjs releaseTreeProblems: only a list cut from HEAD's inputs was held to
-// a clean build by HEAD's push run, review P1), or a failed install. The upload is named by HEAD's commit, so it is HEAD's
+// a clean build by HEAD's full ci.yml run, review P1), or a failed install. The upload is named by HEAD's commit, so it is HEAD's
 // build, made in a clean checkout of the HEAD commit it read (the sha main is held to before the build and again right
 // before the upload), never from this checkout's node_modules (review P2-1: an extra file in a dependency or a
 // re-pointed symlink changes app.js and passes pnpm store status): git worktree add --detach <tmp> <sha>,
@@ -58,6 +60,7 @@ import { facts as pinFacts, judge as judgePins } from "../../../scripts/live-che
 import { proverThreadSource, proverWorkerSource } from "../../kit/src/prover/build.mjs";
 import { SERVED, copyServed, pinProblems } from "./build-app.mjs";
 import { hostList } from "../../../scripts/ci/live-after.mjs";
+import { REPO_SLUG as CI_SLUG, ciProblems, runsArgs } from "../../../scripts/ci/ci-runs-once.mjs";
 
 /** Every live check that reads SIGN_HOST, run after each deploy (a failing one undoes it): each check's `// After: sign`
  *  lines (scripts/ci/live-after.mjs), one run for each, each its own job in live.yml. A run's arguments are on its line:
@@ -272,32 +275,28 @@ export function checkProver(dir) {
   return p;
 }
 
-/** The repository whose main a sign deploy must be, and whose ci.yml push run on that commit must have passed. */
-export const REPO_SLUG = "UNRLZD/confidential-trenches";
+/** The repository whose main a sign deploy must be, and whose full ci.yml run on that commit must have passed. */
+export const REPO_SLUG = CI_SLUG;
 export const REPO_URL = `https://github.com/${REPO_SLUG}`;
 
 /** Why HEAD `sha` is not a commit a sign deploy may serve (empty = none): it must be main's head as GitHub answers it
- *  now (git ls-remote on REPO_URL, whatever this clone's remotes and refspecs say), with a passed push run of ci.yml on
- *  main (a pull request's checks ran on its own tree, not the merge's); a cancelled or failed run names its rerun. */
+ *  now (git ls-remote on REPO_URL, whatever this clone's remotes and refspecs say), with a passed full run of ci.yml on
+ *  that commit (ciProblems: the merge queue's, which tested the very commit main points to; a pull request's checks ran
+ *  on its own tree, not the merge's); a cancelled or failed run names its rerun. */
 export function mainProblems(sha, run = spawnSync) {
   const ls = run("git", ["ls-remote", REPO_URL, "refs/heads/main"], { encoding: "utf8" });
   const main = ls.status === 0 ? /^([0-9a-f]{40})\trefs\/heads\/main$/m.exec(ls.stdout ?? "")?.[1] : null;
   if (!main) return [`git ls-remote ${REPO_URL} refs/heads/main ${ls.status === 0 ? "named no main" : `failed (exit ${ls.status ?? ls.signal})`}: the deploy reads main's head from GitHub`];
   const p = [];
   if (!sha || main !== sha) p.push(`HEAD ${sha || "(none)"} is not main's head ${main} on ${REPO_URL}: a sign deploy is main's head, at the merge that holds its release`);
-  const ci = run("gh", ["run", "list", "-R", REPO_SLUG, "--branch", "main", "--workflow", "ci.yml", "--event", "push", "-L", "200", "--json", "headSha,status,conclusion,databaseId"], { encoding: "utf8" });
+  if (!sha) return p;
+  const ci = run("gh", runsArgs(sha, REPO_SLUG), { encoding: "utf8" });
   let runs = null;
   try {
     runs = ci.status === 0 ? JSON.parse(ci.stdout) : null;
   } catch {}
-  if (!Array.isArray(runs)) return [...p, `gh did not read ci.yml's push runs on main (exit ${ci.status ?? ci.signal})`];
-  const mine = runs.filter((r) => sha && r.headSha === sha);
-  if (mine.some((r) => r.conclusion === "success")) return p;
-  const last = mine[0];
-  if (!last) p.push(`HEAD ${sha || "(none)"} has no push run of ci.yml on main`);
-  else if (last.status !== "completed") p.push(`HEAD ${sha}'s push run of ci.yml on main (${last.databaseId}) is ${last.status}: wait for it to pass`);
-  else p.push(`HEAD ${sha}'s push run of ci.yml on main (${last.databaseId}) ended ${last.conclusion}: rerun it (gh run rerun ${last.databaseId} -R ${REPO_SLUG}) and deploy once it passes`);
-  return p;
+  if (!Array.isArray(runs)) return [...p, `gh did not read ci.yml's runs on ${sha} (exit ${ci.status ?? ci.signal})`];
+  return [...p, ...ciProblems(sha, runs, REPO_SLUG).map((l) => `HEAD ${l}`)];
 }
 
 const USAGE = "usage: node packages/signpage/scripts/deploy.mjs [--dry-run | --build]";

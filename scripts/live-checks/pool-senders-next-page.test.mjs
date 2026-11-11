@@ -70,3 +70,20 @@ test("planted in the bundle's excerpt: the window rule or the fallback broken in
   };
   for (const [name, [from, to]] of Object.entries(breaks)) assert.equal(facts(index, js.replace(from, to)).fallback, false, name);
 });
+
+// card pool-sell-legs-side-by-side: the fallback in the fee's loop, cut from that card's build of public/app.js
+// (pool-senders-next-page.side.excerpt.txt): it holds; broken in place (every error caught, the six's own refusal
+// swallowed, no six after the catch): each FAIL
+test("the side-by-side sell's fallback holds, and each break of it in place FAILs", () => {
+  const ex = readFileSync(new URL("./pool-senders-next-page.side.excerpt.txt", import.meta.url), "utf8");
+  assert.equal(facts("", ex).fallback, true);
+  for (const [what, from, to] of [
+    ["every error caught", /if\(!(\w+)\|\|!\(e instanceof \w+\|\|e instanceof \w+\)\)throw e/, "if(!$1)throw e"],
+    ["the six's own refusal swallowed", /if\(!(\w+)\|\|!\(/, "if(!("],
+    ["no six after the catch", /=!1;continue\}/, ";continue}"],
+  ]) {
+    const bad = ex.replace(from, to);
+    assert.notEqual(bad, ex, what);
+    assert.equal(facts("", bad).fallback, false, what);
+  }
+});

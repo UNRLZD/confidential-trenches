@@ -54,7 +54,7 @@
 // - Errors carry a wallet's index in its pool, never a note's ref, label, W or path; an RPC's error is cut to its code.
 // - Not here: a full EVM restore from the 12 words alone (the EVM pool's notes, and W's tokens found from its Transfer
 //   logs) is card notes-per-pool-evm; until then the EVM side takes its spent notes as input.
-import { HELPER_FETCH_INIT, HELPER_V1_PREFIX, SOLANA_TOKEN_2022_PROGRAM, SOLANA_TOKEN_PROGRAM, solanaDecodeTokenAccount, solanaHelperRpc, solanaJsonRpc, solanaPacedRpc, type SolanaFetch, type SolanaRpc, type SolanaRpcLimit } from "@blindfill/kit";
+import { HELPER_FETCH_INIT, HELPER_V1_PREFIX, SOLANA_TOKEN_2022_PROGRAM, SOLANA_TOKEN_PROGRAM, solanaDecodeTokenAccount, solanaHelperRpc, solanaJsonRpc, solanaPacedRpc, SolanaRpcTransportError, type SolanaFetch, type SolanaRpc, type SolanaRpcLimit } from "@blindfill/kit";
 import { base64 } from "@scure/base";
 import { freshWallet, toChecksum } from "../derive/index.ts";
 import type { NoteRef } from "../notes/secrets.ts";
@@ -96,14 +96,9 @@ export type BuyPool = {
 
 /** A fresh wallet a buy used, and what it holds now. */
 export type BuyWallet = { pool: string; chain: BuyChain; note: string; l: bigint; j: number; path: string; address: string; holdings: Holdings };
-export type BuyWallets = { wallets: BuyWallet[]; failed: { pool: string; error: string }[] };
-/** A W as derived, before any read: no holdings, so nothing reads as empty that was never read. */
-export type BuyWalletKey = Omit<BuyWallet, "holdings">;
-/** A W of a list read in part (wantedBuyWallets): its holdings, or null when it was not asked for (unknown, never empty). */
-export type ListedBuyWallet = BuyWalletKey & { holdings: Holdings | null };
-/** The Ws derived from the seed now (`wallets`: every pool's that derived; `failed`: the pools that did not), read when
- *  asked; a read of `only` some Ws reads and answers only those. */
-export type DerivedBuyWallets = { wallets: readonly BuyWalletKey[]; failed: BuyWallets["failed"]; read(opts?: BuyWalletsRead): Promise<BuyWallets> };
+/** `fault`: when a read failed for its provider (a 429 past the bound, a 5xx, no connection), the first such, as the
+ *  kit's transport fault, so a sale's waits count it as the provider's (the sell then answers "down"). */
+export type BuyWallets = { wallets: BuyWallet[]; failed: { pool: string; error: string }[]; fault?: SolanaRpcTransportError };
 
 /** A Solana W's three reads are made again at the highest slot at most this many times before a refusal: about a third
  * of mainnet-beta's rounds answer from backends at different slots, and a W took up to 4 rounds live (M367; see
@@ -185,20 +180,40 @@ export async function buyWallets(seed64: Uint8Array, pools: readonly BuyPool[], 
   return derivedBuyWallets(seed64, pools).read(opts);
 }
 
-/** How derived buy wallets are read: `only` the Ws of these addresses (none else read or answered), when given; the
- *  Ws of `first` before every other (each group in its own random order), and `each` told each W once it is read. */
-export type BuyWalletsRead = { signal?: AbortSignal; pick?: (n: number) => number; only?: ReadonlySet<string>; first?: ReadonlySet<string>; each?: (w: BuyWallet) => void };
+/** How derived buy wallets are read: `only` the Ws of these addresses (none else read or answered), when given;
+ *  `together`, every W asked at once (a sale's list), else one W after another (the positions' passes, which a stop
+ *  ends between two Ws). */
+export type BuyWalletsRead = { signal?: AbortSignal; pick?: (n: number) => number; only?: ReadonlySet<string>; together?: true; wait?: (ms: number) => Promise<void> };
+/** A sale's finder (`together`) asks this many Ws at once, FINDER_STEP_MS apart: a W's read is one round of three calls
+ *  (getBalance and both getTokenAccountsByOwner), so a step is 18 calls and one sale never puts more than 20 reads on
+ *  one host inside 1 s (the helper's keyed provider is paced at 10 a second upstream; a public one counts connections).
+ *  A paid devnet pass of 5 Ws (11 Nov 05:52Z) asked its 15 at once and drew six HTTP 429s at 0.5 s. */
+export const FINDER_W_STEP = 6;
+export const FINDER_STEP_MS = 1_000;
 
 /** buyWallets in two steps: the Ws derived from the seed now, which the result keeps no copy of (the caller zeroes its
  *  seed at once), then read when asked; a read of `only` some Ws reads and answers only those. */
-export function derivedBuyWallets(seed64: Uint8Array, pools: readonly BuyPool[]): DerivedBuyWallets {
+export function derivedBuyWallets(seed64: Uint8Array, pools: readonly BuyPool[]): { read(opts?: BuyWalletsRead): Promise<BuyWallets> } {
+  const { failed, found, jobs } = derive(seed64, pools, true);
+  return { read: (opts = {}) => readDerived(pools, found, jobs, new Map(failed), opts) };
+}
+
+/** The Ws the pools' spent notes paid, derived from the seed as derivedBuyWallets does (the same refusals), with no read:
+ *  each with no holdings (card pool-sell-legs-side-by-side: a sale lists its Ws from the device alone, and reads each
+ *  one itself). */
+export function buyWalletsOf(seed64: Uint8Array, pools: readonly Omit<BuyPool, "reader">[]): BuyWallets {
+  const { failed, found } = derive(seed64, pools, false);
+  return { wallets: found.flatMap((ws, pi) => (failed.has(pi) ? [] : ws.filter((w): w is BuyWallet => w !== undefined))), failed: [...failed].map(([pi, error]) => ({ pool: pools[pi]!.id, error })) };
+}
+
+function derive(seed64: Uint8Array, pools: readonly (Omit<BuyPool, "reader"> & { reader?: HoldingsReader })[], read: boolean) {
   const failed = new Map<number, string>();
   const found: (BuyWallet | undefined)[][] = pools.map(() => []);
   const jobs: { p: number; k: number; address: string }[] = [];
   const seen = new Map<string, [number, number]>(); // a W -> its pool and wallet index, across every pool
   pools.forEach((p, pi) => {
     try {
-      if (p.reader?.chain !== p.chain || typeof p.reader.read !== "function") throw new Error(`the reader is not of chain ${p.chain}`);
+      if (read && (p.reader?.chain !== p.chain || typeof p.reader.read !== "function")) throw new Error(`the reader is not of chain ${p.chain}`);
       p.spent.forEach((s, k) => {
         const j = jOf(s.ref);
         const w = freshWallet(seed64, p.chain, s.label, j);
@@ -214,26 +229,7 @@ export function derivedBuyWallets(seed64: Uint8Array, pools: readonly BuyPool[])
       failed.set(pi, msg(e));
     }
   });
-  return {
-    wallets: found.flatMap((ws, p) => (failed.has(p) ? [] : ws.flatMap((w) => (w === undefined ? [] : [(({ holdings: _, ...k }) => k)(w)])))),
-    failed: [...failed].sort(([a], [b]) => a - b).map(([p, error]) => ({ pool: pools[p]!.id, error })),
-    read: (opts = {}) => readDerived(pools, found, jobs, new Map(failed), opts),
-  };
-}
-
-/**
- * The derived Ws, each read only when `want` says so, every other answered with holdings null (not read: unknown,
- * never empty). A sell's list (card wallets-found-in-one-read): a W its buy record names is read on both RPCs by the
- * sell itself, a W whose record names another mint is no seller of this one, so the finder reads only the Ws with no
- * record (a buy from before the record, a restored device), as every W was read before. One W per request, as ever.
- */
-export async function wantedBuyWallets(d: DerivedBuyWallets, want: (address: string) => boolean | Promise<boolean>, opts: Omit<BuyWalletsRead, "only"> = {}): Promise<{ wallets: ListedBuyWallet[]; failed: BuyWallets["failed"] }> {
-  const only = new Set<string>();
-  for (const w of d.wallets) if (await want(w.address)) only.add(w.address);
-  const got = only.size === 0 ? { wallets: [], failed: d.failed } : await d.read({ ...opts, only });
-  const read = new Map(got.wallets.map((w) => [`${w.pool} ${w.address}`, w.holdings] as const));
-  const failed = new Set(got.failed.map((f) => f.pool));
-  return { wallets: d.wallets.filter((w) => !failed.has(w.pool)).map((w) => ({ ...w, holdings: read.get(`${w.pool} ${w.address}`) ?? null })), failed: got.failed };
+  return { failed, found, jobs };
 }
 
 async function readDerived(pools: readonly BuyPool[], derived: readonly (BuyWallet | undefined)[][], all: readonly { p: number; k: number; address: string }[], failed: Map<number, string>, opts: BuyWalletsRead): Promise<BuyWallets> {
@@ -243,37 +239,81 @@ async function readDerived(pools: readonly BuyPool[], derived: readonly (BuyWall
   // each read's own copies: a read again starts from no holdings
   const found = derived.map((ws) => ws.map((w): BuyWallet | undefined => (w === undefined ? undefined : { ...w, holdings: { native: 0n, tokens: new Map(), unreadable: [] } })));
   const jobs = all.filter((j) => only === undefined || only.has(j.address));
-  // no bound from the list's start (card wallets-found-in-one-read): a list at the pace takes longer than one (100 Ws:
-  // 165 s), and a 429 met late in it was refused though nothing before had waited. The route's own bound holds instead:
-  // a route in doubt for HOLDINGS_THROTTLE_MAX_MS (throttling for good) is not waited, whoever asks
-  const by = Infinity;
+  // the first read failed for its provider, as the kit's transport fault
+  let fault: SolanaRpcTransportError | undefined;
+  const faultOf = (e: unknown): void => void (fault ??= transportOf(e) ?? undefined);
+  // the whole list's bound on a throttled route, from its start (a sell's from its tap)
+  const by = Date.now() + HOLDINGS_THROTTLE_MAX_MS;
   // Fisher-Yates over every pool's Ws
   for (let i = jobs.length - 1; i > 0; i--) {
     const r = pick(i + 1);
     if (!Number.isInteger(r) || r < 0 || r > i) throw new Error("pick: not an index");
     [jobs[i], jobs[r]] = [jobs[r]!, jobs[i]!];
   }
-  // `first`'s Ws ahead, each group still in the shuffle's order (card wallets-found-in-one-read: a positions pass reads
-  // the Ws of open buys before those it sold)
-  if (opts.first) {
-    const f = opts.first;
-    jobs.sort((x, y) => Number(f.has(y.address)) - Number(f.has(x.address)));
-  }
-  for (const { p, k, address } of jobs) {
-    if (failed.has(p)) continue;
+  if (opts.together) {
+    // a sale's list (card pool-sell-legs-side-by-side): the Ws read side by side, asked in that order; the reader's
+    // route paces its calls within the provider's budget (holdingsRoute), so no W waits on another's answers. A pool's
+    // first failure, in the order the answers come, fails it
+    // in steps of FINDER_W_STEP Ws, FINDER_STEP_MS apart; a failed read starts no later step, and every pool a later
+    // step would have read fails (none answers with a W left unread)
     opts.signal?.throwIfAborted();
-    try {
-      found[p]![k]!.holdings = await pools[p]!.reader.read(address, opts.signal, by);
-      opts.each?.(found[p]![k]!);
-    } catch (e) {
-      opts.signal?.throwIfAborted();
-      failed.set(p, `wallet ${k}: ${msg(e)}`);
+    const wait = opts.wait ?? ((ms: number) => new Promise<void>((res) => setTimeout(res, ms)));
+    let readFailed = false;
+    const asked: Promise<void>[] = [];
+    let i = 0;
+    for (; i < jobs.length && !readFailed; i += FINDER_W_STEP) {
+      // a step starts once the wait has passed and the step before it answered, so a read that failed starts no
+      // later step, whenever it answers (review of 55d4c6eb, P3-C)
+      if (i > 0) {
+        await Promise.all([wait(FINDER_STEP_MS), Promise.allSettled(asked)]);
+        opts.signal?.throwIfAborted();
+        if (readFailed) break;
+      }
+      for (const { p, k, address } of jobs.slice(i, i + FINDER_W_STEP))
+        asked.push(
+          (async () => {
+            try {
+              found[p]![k]!.holdings = await pools[p]!.reader.read(address, opts.signal, by);
+            } catch (e) {
+              readFailed = true;
+              faultOf(e);
+              if (!failed.has(p)) failed.set(p, `wallet ${k}: ${msg(e)}`);
+            }
+          })(),
+        );
     }
-  }
+    for (const { p, k } of jobs.slice(i)) if (!failed.has(p)) failed.set(p, `wallet ${k}: not read, an earlier read failed`);
+    await Promise.all(asked);
+    opts.signal?.throwIfAborted();
+  } else
+    for (const { p, k, address } of jobs) {
+      if (failed.has(p)) continue;
+      opts.signal?.throwIfAborted();
+      try {
+        found[p]![k]!.holdings = await pools[p]!.reader.read(address, opts.signal, by);
+      } catch (e) {
+        opts.signal?.throwIfAborted();
+        faultOf(e);
+        failed.set(p, `wallet ${k}: ${msg(e)}`);
+      }
+    }
   return {
     wallets: found.flatMap((ws, p) => (failed.has(p) ? [] : ws.filter(kept))),
     failed: [...failed].sort(([a], [b]) => a - b).map(([p, error]) => ({ pool: pools[p]!.id, error })),
+    ...(fault === undefined ? {} : { fault }),
   };
+}
+
+/** A read's failure as the kit's transport fault when it is the provider's: the kit's own; a reader's call refused with
+ *  a 429 (its Retry-After kept), a 5xx, or no answer at all (no code, no status). A JSON-RPC error the provider answered
+ *  with, or any check of ours, is none. */
+function transportOf(e: unknown): SolanaRpcTransportError | null {
+  if (e instanceof SolanaRpcTransportError) return e;
+  if (!(e instanceof RpcFailed)) return null;
+  if (e.http === 429) return new SolanaRpcTransportError("http_429", e.message, 1, "the holdings route", e.afterMs);
+  if (e.http !== undefined && e.http >= 500) return new SolanaRpcTransportError("http_5xx", e.message, 1, "the holdings route");
+  if (e.http === undefined && e.code === undefined) return new SolanaRpcTransportError("network", e.message, 1, "the holdings route");
+  return null;
 }
 
 // ---------- transport ----------
@@ -334,7 +374,9 @@ const is429 = (e: unknown): e is RpcFailed => e instanceof RpcFailed && e.http =
  *  `by`, or with the provider in doubt past HOLDINGS_THROTTLE_MAX_MS (then refused, nothing asked). */
 async function held(gate: ThrottleGate, by: number, sleep: Sleep, signal?: AbortSignal): Promise<void> {
   for (let w = gate.left(); w > 0; w = gate.left()) {
-    if (Date.now() + w > by || gate.doubtMs() + w > HOLDINGS_THROTTLE_MAX_MS) throw new Error(`its reads drew the provider's 429 past ${HOLDINGS_THROTTLE_MAX_MS / 1_000} s`);
+    // the provider's refusal, as the kit names one (its Retry-After: the gate's wait left), so a sale counts it as the
+    // provider's fault and answers "down" (card pool-sell-legs-side-by-side)
+    if (Date.now() + w > by) throw new SolanaRpcTransportError("http_429", `its reads drew the provider's 429 past ${HOLDINGS_THROTTLE_MAX_MS / 1_000} s`, 1, "the holdings route", w);
     await sleep(w, signal);
     signal?.throwIfAborted();
   }

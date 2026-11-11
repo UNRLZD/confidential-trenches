@@ -21,7 +21,7 @@
 // written, a list missing from the ledger and a ledger entry whose list is gone, on every branch (release.test.mjs);
 // the verify gate refuses a change to a list or a ledger entry on main. A card cuts no release (card
 // signpage-release-at-deploy): a release is cut once per sign deploy, and the sign deploy (deploy.mjs) serves only
-// origin/main's head with a passed ci.yml push run, and only a build the newest committed list names (unreleasedProblems:
+// origin/main's head with a passed full ci.yml run (the merge queue's on that commit), and only a build the newest committed list names (unreleasedProblems:
 // every SIGN_HOST file, every header, the _headers file), so every build SIGN_HOST serves is a release on main. The flow:
 //   1. cut release-<N> on a branch from origin/main's head (git worktree add -b card/<key> ... origin/main, a clean
 //      tree, pnpm install --frozen-lockfile): node packages/signpage/scripts/release-list.mjs release-<N>, N exactly one
@@ -31,7 +31,7 @@
 //   2. push it with push-card (the team's push script, card/<key>);
 //   3. merge it (the verify gate holds the new list's tree to the base's or the pull request's, with the head's
 //      SIGN_HOST build inputs, and refuses a name main already holds with other bytes);
-//   4. deploy main at that merge, once its ci.yml push run passed: scripts/deploy/pages.sh node
+//   4. deploy main at that merge, once its full ci.yml run (the merge queue's, read by its sha) passed: scripts/deploy/pages.sh node
 //      packages/signpage/scripts/deploy.mjs, then its live run; signpage-release-at-deploy reads SIGN_HOST against the
 //      newest committed list. A change that lands on main after the cut and touches SIGN_HOST's build inputs makes the
 //      deploy refuse: cut release-<N+1> the same way.
@@ -286,6 +286,7 @@ export const RELEASED = Object.freeze({
   "release-113": "b0d4cf9d0238f3647bef5d062a28d8dcf8b6917f8dce68f83740a8ab99eeb3e1",
   "release-114": "211a91cd1c352df3f1320217c2c5764a333af9abf3badb3542272c62cb5d52d1",
   "release-115": "0c509f06335f1ebd92ce78065adb399cf0c7cd4824daa0ef72c667f872336e65",
+  "release-116": "5b68b2cc33d562c000af22966f1cdd635f945671623a1f5c1fb939a33d850836",
 });
 
 const tagsIn = (dir) => readdirSync(dir).map((f) => /^(release-[1-9][0-9]*)\.json$/.exec(f)?.[1]).filter(Boolean);
@@ -359,7 +360,7 @@ export function newestReleaseOnHead(dir = RELEASES, ledger = RELEASED, head = "H
 
 /**
  * Review P1: what the sign deploy is held to beside unreleasedProblems: the newest list's tree has HEAD's SIGN_BUILD_INPUTS.
- * Only then did HEAD's passed push run hold that list to a clean build (newestReleaseOnHead); a list whose inputs are not
+ * Only then did HEAD's passed full ci.yml run hold that list to a clean build (newestReleaseOnHead); a list whose inputs are not
  * HEAD's was never compared to one, whatever bytes it names. Empty = fine.
  */
 export function releaseTreeProblems(dir = RELEASES, head = "HEAD") {

@@ -19,7 +19,7 @@ import { facts, fixedReleases, judge } from "./signpage-throttled-read-is-not-as
 const A = JSON.parse(readFileSync(new URL("./signpage-throttled-read-is-not-asked-again-at-once.answers.json", import.meta.url), "utf8"));
 const RULE = "BAD the wait after a throttle is not a pause doubling from 1 s to 10 s with a capped, finite Retry-After when longer";
 const GATE = "BAD no provider gate on that rule: a round's throttles not counted once, its pause set back by one call's answer, its time the wall clock, or no turn given on when a waiter stops";
-const HELD = "BAD a reader does not wait the gate until it opens before a round, or waits past its read's bound or 30 s of the route in doubt";
+const HELD = "BAD a reader does not wait the gate until it opens before a round, or waits past its read's 30 s bound, or refuses past it as anything but the provider's 429";
 const TURN = "BAD a round does not run in the gate's turn, taken before its wait and given back however it ends: two reads at once ask past the gate";
 const READER = "BAD the holdings reader does not run each round in its gate's turn with its read's bound, or the helper's route gives it no gate of its own";
 const THROTTLED = "BAD a call that draws a 429 does not tell its gate: the gate never closes";
@@ -101,6 +101,7 @@ test("planted in the bundle's excerpt: each rule broken in place FAILs", () => {
     "the reader's round given no bound of its read": [at(/await [\w$]+\([\w$]+\.gate,[\w$]+,/), (s) => s.replace(/\.gate,[\w$]+,/, ".gate,1/0,"), "reader"],
     "a wait past the read's bound": [at(/if\(Date\.now\(\)\+[\w$]+>[\w$]+\|\|/), (s) => s.replace(/>[\w$]+\|\|$/, ">1/0||"), "held"],
     "a bound of 60 s": [at(/[\w$]+=3e4[,;]/), (s) => s.replace("3e4", "6e4"), "held"],
+    "the refusal past the bound a bare error": [at(/throw new [\w$]+\(`http_429`,`[^`]*`,1,`the holdings route`,[\w$]+\)/), (s) => s.replace(/throw new [\w$]+\(`http_429`,(`[^`]*`),1,`the holdings route`,[\w$]+\)/, "throw Error($1)"), "held"],
     "the reader's round outside the turn": [at(/await [\w$]+\(([\w$]+)\.gate,/), (s) => s.replace(/\(([\w$]+)\.gate,/, "($1.other,"), "reader"],
     "the route gives no gate": [at(/,gate:new [\w$]+,lane:[^}]*\}/), () => "}", "reader"],
     "the route's gate the host's lane's": [at(/,gate:new [\w$]+,lane:([^}]*)\}/), (s) => s.replace(/gate:new [\w$]+,lane:([^}]*)\}$/, "gate:$1.gate,lane:$1}"), "reader"],

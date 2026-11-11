@@ -79,7 +79,7 @@ import {
   type SolanaPoolVenue,
   type SolanaReference,
 } from "./pool.ts";
-import { solanaSameProvider, solanaTimedRpc, type SolanaRpc } from "./send.ts";
+import { SolanaRpcTransportError, solanaSameProvider, solanaTimedRpc, type SolanaRpc } from "./send.ts";
 import { deepFreeze } from "../../freeze.ts";
 
 export const SOLANA_POOL_TAG_RELEASE = 2;
@@ -455,7 +455,7 @@ export const solanaRentMin = (rent: SolanaRent, size: number): bigint => (RENT_O
 export async function readSolanaRent(providers: readonly [SolanaRpc, SolanaRpc]): Promise<SolanaRent> {
   if (!Array.isArray(providers) || providers.length !== 2 || solanaSameProvider(providers[0], providers[1])) throw new Error("two different providers are needed");
   const rents = await Promise.all(providers.map(async (rpc) => {
-    const r = await Promise.resolve().then(() => solanaTimedRpc(rpc, READ_TIMEOUT_MS)("getAccountInfo", [SOLANA_RENT_SYSVAR, { encoding: "base64", commitment: "confirmed" }]));
+    const r = await Promise.resolve().then(() => solanaTimedRpc(rpc, READ_TIMEOUT_MS, late)("getAccountInfo", [SOLANA_RENT_SYSVAR, { encoding: "base64", commitment: "confirmed" }]));
     const value = (r as { value?: { owner?: unknown; data?: unknown } } | null)?.value;
     const d = value?.data;
     if (!value || typeof value.owner !== "string" || !Array.isArray(d) || typeof d[0] !== "string" || d[1] !== "base64") throw new Error("a provider's answer is not an account read");
@@ -870,6 +870,9 @@ export function buildSolanaPoolBuyOnTables(
 // ------------------------------------------------------------------------------------------------- the reads
 
 const READ_TIMEOUT_MS = 5_000;
+/** A read past READ_TIMEOUT_MS: the provider answered nothing in time (or its page client was still retrying a
+ *  throttle), the kit's transport fault "timeout", so a sale or a buy counts it as the provider's ("down"). */
+const late = (ms: number): Error => new SolanaRpcTransportError("timeout", `no answer in ${ms} ms`, 1, "the read's bound");
 
 /** pump Global and PumpSwap GlobalConfig sizes, read on mainnet-beta and publicnode 2026-11-02 21:00Z; the offsets above
  * hold only on these layouts, so any other size is refused. */
@@ -946,7 +949,7 @@ export async function readSolanaPoolBuyVenue(providers: readonly [SolanaRpc, Sol
   if (!Array.isArray(providers) || providers.length !== 2 || solanaSameProvider(providers[0], providers[1])) throw new Error("two different providers are needed");
   const addr = solanaPoolAddresses(mint);
   const list = kind === "pump-curve" ? [mint, addr.curve, PUMP_GLOBAL] : [mint, addr.pool, AMM_GLOBAL_CONFIG];
-  const reads = await Promise.all(providers.map((rpc) => Promise.resolve().then(() => solanaTimedRpc(rpc, READ_TIMEOUT_MS)("getMultipleAccounts", [list, { encoding: "base64", commitment: "confirmed" }]))));
+  const reads = await Promise.all(providers.map((rpc) => Promise.resolve().then(() => solanaTimedRpc(rpc, READ_TIMEOUT_MS, late)("getMultipleAccounts", [list, { encoding: "base64", commitment: "confirmed" }]))));
   const i = pick(8); // one buyback recipient for both reads, so they compare equal
   const venues = reads.map((r) => {
     const parsed = solanaParseAccountsAnswer(r, list.length);
@@ -985,7 +988,7 @@ export async function readSolanaPoolTableVenue(providers: readonly [SolanaRpc, S
   if (!SOLANA_POOL_BUY_VENUES.includes(kind)) throw new Error(`no such venue ${String(kind).slice(0, 40)}`);
   const at = kind === "pump-curve" ? PUMP_GLOBAL : AMM_GLOBAL_CONFIG;
   const name = kind === "pump-curve" ? "pump Global" : "PumpSwap GlobalConfig";
-  const reads = await Promise.all(providers.map((rpc) => Promise.resolve().then(() => solanaTimedRpc(rpc, READ_TIMEOUT_MS)("getMultipleAccounts", [[at], { encoding: "base64", commitment: "finalized" }]))));
+  const reads = await Promise.all(providers.map((rpc) => Promise.resolve().then(() => solanaTimedRpc(rpc, READ_TIMEOUT_MS, late)("getMultipleAccounts", [[at], { encoding: "base64", commitment: "finalized" }]))));
   const globals = reads.map((r) => {
     const g = solanaParseAccountsAnswer(r, 1)?.accounts[0];
     if (!g) throw new Error(`a provider's answer is not ${name}`);

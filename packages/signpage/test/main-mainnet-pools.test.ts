@@ -246,23 +246,7 @@ test("with a mainnet pin, pool.deposit, pool.buy, pool.sell and pool.withdraw re
   await ns.move(p.id, "PLANNED", "INCOMING", { send: { signature: "2".repeat(64), value: CHUNK, last_valid_block_height: 1n } });
   await ns.move(p.id, "INCOMING", "UNSPENT", { leaf: { value: CHUNK, label: 2n, commitment: noteCommitment(CHUNK, 2n, p.precommitment), leafIndex: 1n } });
   await ns.move(p.id, "UNSPENT", "SPENT", {});
-  const from = calls.length;
-  // each answer is the flow's own (src/pool-testnet.ts): the deposit's reads fail on this test's RPCs, the buy finds no
-  // proof it may spend and the sell no W holding the token, and the withdraw opens the page's screen
-  for (const [data, want] of [
-    [{ type: "pool.deposit", chain: "solana", amount: "0.02" }, { ok: false, error: { code: "failed" } }],
-    [{ type: "pool.buy", chain: "solana", token: "So11111111111111111111111111111111111111112", amount: "0.001", slippage_bps: 100 }, { ok: false, error: { code: "not_funded" } }],
-    [{ type: "pool.sell", chain: "solana", token: SELL_MINT, amount: "1", slippage_bps: 100 }, { ok: false, error: { code: "not_funded" } }],
-    [{ type: "pool.withdraw", chain: "solana", return_key: "portfolio" }, { ok: true, result: { pending: true } }],
-  ] as const) {
-    // pool.withdraw's flow opens the page's screen only as withdraw.open does, on the signed-in page (main.ts
-    // openPoolWithdraw): the page is set to it here, since this DOM draws no page
-    if (data.type === "pool.withdraw") {
-      const find = (el: El): El | undefined => (el.id === "signin" ? el : el.children.map(find).find((x) => x !== undefined));
-      const root = find(doc.body);
-      assert.ok(root, "the page's root is in the document");
-      root.dataset.signin = "signed-in";
-    }
+  const ask = async (data: Record<string, unknown>): Promise<Record<string, unknown>> => {
     const id = crypto.randomUUID();
     const e = new Event("message");
     Object.defineProperties(e, { origin: { value: APP_ORIGIN }, source: { value: frameWindow }, data: { value: { v: 1, id, ...data } } });
@@ -272,16 +256,45 @@ test("with a mainnet pin, pool.deposit, pool.buy, pool.sell and pool.withdraw re
       a = posted.find((m) => m.id === id) as typeof a;
       if (!a) await new Promise((ok) => setTimeout(ok, 10));
     }
-    assert.ok(a, `${data.type}: answered`);
-    assert.notEqual(a?.error?.code, "not_allowed", `${data.type} was refused not_allowed: it never reached the flow`);
+    assert.ok(a, `${String(data.type)}: answered`);
+    assert.notEqual(a?.error?.code, "not_allowed", `${String(data.type)} was refused not_allowed: it never reached the flow`);
     const { v: _v, id: _id, ...got } = a as Record<string, unknown>;
-    assert.deepEqual(got, want, `${data.type}: the flow's own answer`);
+    return got;
+  };
+  let from = calls.length;
+  // each answer is the flow's own (src/pool-testnet.ts): the deposit's reads fail on this test's RPCs, the buy finds no
+  // proof it may spend and the sell no W holding the token, and the withdraw opens the page's screen
+  for (const [data, want] of [
+    [{ type: "pool.deposit", chain: "solana", amount: "0.02" }, { ok: false, error: { code: "failed" } }],
+    [{ type: "pool.buy", chain: "solana", token: "So11111111111111111111111111111111111111112", amount: "0.001", slippage_bps: 100 }, { ok: false, error: { code: "not_funded" } }],
+    [{ type: "pool.sell", chain: "solana", token: SELL_MINT, amount: "1", slippage_bps: 100 }, { ok: false, error: { code: "not_funded" } }],
+  ] as const) {
+    assert.deepEqual(await ask(data), want, `${data.type}: the flow's own answer`);
   }
-  // the sell read its W's holdings, and only through the helper's keyed route: never on the public provider, which
-  // would see the user's W asked from the user's own address
+  // the page's own positions pass at sign in kept a whole pass that lists no W (card pool-sell-legs-side-by-side):
+  // this device has no buy record of its W, so the sell reads that W through the finder, on the helper's keyed route
+  // only (review of 55d4c6eb, P2-A: a W from before a sign out); no provider is asked for any W's accounts
+  const reads = (c: { method: string }) => c.method === "getBalance" || c.method === "getTokenAccountsByOwner" || c.method === "getMultipleAccounts";
+  const kept = calls.slice(from).filter(reads);
+  assert.ok(kept.some((c) => c.method === "getTokenAccountsByOwner"), "the unrecorded W read through the finder");
+  assert.deepEqual([...new Set(kept.map((c) => c.url))], ["https://ct-api.unrealized.trade/v1/rpc/solana"], "a kept pass and an unrecorded W: the W's reads on the helper's route only");
+  // with no pass kept (a device whose passes have not run), the sell finds its Ws by their holdings, and only through
+  // the helper's keyed route: never on the public provider, which would see the user's W asked from the user's own address
+  await w.delete("meta", "owed/positions-sol");
+  from = calls.length;
+  const sell = { type: "pool.sell", chain: "solana", token: SELL_MINT, amount: "1", slippage_bps: 100 } as const;
+  assert.deepEqual(await ask(sell), { ok: false, error: { code: "not_funded" } }, "pool.sell with no pass kept: the flow's own answer");
   const holdings = calls.slice(from).filter((c) => c.method === "getBalance" || c.method === "getTokenAccountsByOwner");
   assert.ok(holdings.length >= 3, `the sell's W holdings were read: ${holdings.length} call(s)`);
   assert.deepEqual([...new Set(holdings.map((c) => c.url))], ["https://ct-api.unrealized.trade/v1/rpc/solana"], "the W's holdings on the helper's route only");
+  // pool.withdraw last: its flow opens the page's screen, which takes the app's frame away (shell.ts open, after
+  // FRAME_LEAVE_MS), so an answer after it reaches no frame; its flow opens the screen only as withdraw.open does, on the
+  // signed-in page (main.ts openPoolWithdraw): the page is set to it here, since this DOM draws no page
+  const find = (el: El): El | undefined => (el.id === "signin" ? el : el.children.map(find).find((x) => x !== undefined));
+  const root = find(doc.body);
+  assert.ok(root, "the page's root is in the document");
+  root.dataset.signin = "signed-in";
+  assert.deepEqual(await ask({ type: "pool.withdraw", chain: "solana", return_key: "portfolio" }), { ok: true, result: { pending: true } }, "pool.withdraw: the flow's own answer");
   ns.close();
   w.close();
 });

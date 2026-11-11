@@ -36,12 +36,14 @@ function pkgWith(headers, extra = {}) {
 
 // a spawnSync stand-in that records every call: git answers HEAD `head` and the tree's status `status`; git ls-remote on
 // the repository answers main's head `main` (HEAD's by default; a list is one head per read, the last kept), with exit
-// `lsRemote`; gh answers main's ci.yml push runs `runs` (one passed run of HEAD by default). `uploads` are the calls that
+// `lsRemote`; gh answers the commit's ci.yml runs `runs` (HEAD's passed merge queue run by default: card
+// main-ci-runs-once, main has no push run). `uploads` are the calls that
 // would send bytes (the reads any run may make)
 // HEAD is this checkout's real commit: the deploy checks out the sha it read (delta review 2), so the stand-in names one
 const HEAD = execFileSync("git", ["-C", PKG, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
 const OTHER = "b".repeat(40);
-const passed = (sha = HEAD, id = 1) => ({ headSha: sha, status: "completed", conclusion: "success", databaseId: id });
+const QUEUE = "gh-readonly-queue/main/pr-628-7e673a4613cdb8f1be4aa2c1068c4edeee4fa9d2";
+const passed = (sha = HEAD, id = 1, o = {}) => ({ headSha: sha, headBranch: QUEUE, event: "merge_group", status: "completed", conclusion: "success", databaseId: id, ...o });
 // The clean checkout a deploy builds in (review P2-1) is made for real: git worktree add and remove, and its install
 // (--prefer-offline, about 1 s from the store), run as asked; the install in the repository (--build's) is answered.
 // `add` is git worktree add's exit (0: run for real); `checkedOut` the commits each clean checkout holds once added.
@@ -660,12 +662,17 @@ test("planted: a deploy of a build no committed release names is refused before 
 
 // Card signpage-release-at-deploy, review P1 and delta P2-1: the deploy knows main as GitHub answers it, not this
 // checkout's lists or its origin/main ref (a fork, a mirror or a refspec that maps no main can leave that ref stale)
-test("planted: a deploy is refused unless HEAD is main's head on GitHub, read twice, with a passed ci.yml push run on main", async () => {
+test("planted: a deploy is refused unless HEAD is main's head on GitHub, read twice, with a passed full ci.yml run on that commit", async () => {
   const cases = {
     "a checkout behind main": [{ main: OTHER }, new RegExp(`^REFUSED HEAD ${HEAD} is not main's head ${OTHER} on https://github\\.com/UNRLZD/confidential-trenches: a sign deploy is main's head`)],
-    "main's head with no push run": [{ runs: [passed(OTHER)] }, new RegExp(`^REFUSED HEAD ${HEAD} has no push run of ci\\.yml on main$`)],
-    "a push run cancelled": [{ runs: [{ headSha: HEAD, status: "completed", conclusion: "cancelled", databaseId: 19876 }] }, new RegExp(`^REFUSED HEAD ${HEAD}'s push run of ci\\.yml on main \\(19876\\) ended cancelled: rerun it \\(gh run rerun 19876 -R UNRLZD/confidential-trenches\\)`)],
-    "a push run still going": [{ runs: [{ headSha: HEAD, status: "in_progress", conclusion: "", databaseId: 7 }] }, /\(7\) is in_progress: wait for it to pass$/],
+    // card main-ci-runs-once: the merge queue's run on the commit is its one full run
+    "main's head with no run of its own": [{ runs: [passed(OTHER)] }, new RegExp(`^REFUSED HEAD ${HEAD} has no full ci\\.yml run .*gh workflow run ci\\.yml --ref main -R UNRLZD/confidential-trenches`)],
+    "main's head with no run at all": [{ runs: [] }, new RegExp(`^REFUSED HEAD ${HEAD} has no full ci\\.yml run`)],
+    "a merge queue run that failed": [{ runs: [passed(HEAD, 43008967616, { conclusion: "failure" })] }, new RegExp(`^REFUSED HEAD ${HEAD}'s merge queue run of ci\\.yml \\(43008967616\\) ended failure: rerun it \\(gh run rerun 43008967616 -R UNRLZD/confidential-trenches\\)`)],
+    "a merge queue run cancelled": [{ runs: [passed(HEAD, 19876, { conclusion: "cancelled" })] }, new RegExp(`^REFUSED HEAD ${HEAD}'s merge queue run of ci\\.yml \\(19876\\) ended cancelled: rerun it`)],
+    "a merge queue run still going (the queue lands a group once its required jobs pass)": [{ runs: [passed(HEAD, 7, { status: "in_progress", conclusion: "" })] }, /merge queue run of ci\.yml \(7\) is in_progress: wait for it to pass$/],
+    "a push run still going": [{ runs: [passed(HEAD, 8, { event: "push", headBranch: "main", status: "in_progress", conclusion: "" })] }, /push run of ci\.yml \(8\) is in_progress: wait for it to pass$/],
+    "only a scheduled run passed (the vault sandbox alone)": [{ runs: [passed(HEAD, 9, { event: "schedule", headBranch: "main" })] }, /has no full ci\.yml run .*a scheduled run checks the vault sandbox alone/],
     "an ls-remote that fails": [{ lsRemote: 128 }, /^REFUSED git ls-remote https:\/\/github\.com\/UNRLZD\/confidential-trenches refs\/heads\/main failed \(exit 128\)/],
     "an ls-remote that names no main": [{ main: "" }, /refs\/heads\/main named no main: the deploy reads main's head from GitHub$/],
   };
@@ -687,13 +694,16 @@ test("planted: a deploy is refused unless HEAD is main's head on GitHub, read tw
   assert.equal(m.code, 1, (m.out ?? []).join("\n"));
   assert.ok(m.err.some((l) => l.startsWith(`REFUSED HEAD ${HEAD} is not main's head ${OTHER}`)), m.err.join("\n"));
   assert.deepEqual([moved.installs().length, moved.uploads().length], [1, 0], "read again after the build, before the upload");
-  // the reads it makes: main's head from the repository's URL (never origin/main), and main's ci.yml push runs
+  // a commit from before card main-ci-runs-once goes on its passed push run, as before
+  const old = recorder({ runs: [passed(HEAD, 3, { event: "push", headBranch: "main" })] });
+  assert.equal((await deploy([], ENV, old.run, undefined, signHost(old).net, RELEASED_TREE())).code, 0);
+  // the reads it makes: main's head from the repository's URL (never origin/main), and the commit's ci.yml runs by its sha
   const rec = recorder();
   assert.equal((await deploy([], ENV, rec.run, undefined, signHost(rec).net, RELEASED_TREE())).code, 0);
   assert.deepEqual(rec.calls.filter((c) => c.cmd === "git" && c.args[0] === "ls-remote").map((c) => c.args), [["ls-remote", "https://github.com/UNRLZD/confidential-trenches", "refs/heads/main"], ["ls-remote", "https://github.com/UNRLZD/confidential-trenches", "refs/heads/main"]]);
   assert.ok(!rec.calls.some((c) => c.args.includes("origin/main") || c.args.includes("fetch")), "no local origin/main ref is read");
   const gh = rec.calls.find((c) => c.cmd === "gh");
-  assert.deepEqual(gh.args, ["run", "list", "-R", "UNRLZD/confidential-trenches", "--branch", "main", "--workflow", "ci.yml", "--event", "push", "-L", "200", "--json", "headSha,status,conclusion,databaseId"]);
+  assert.deepEqual(gh.args, ["run", "list", "-R", "UNRLZD/confidential-trenches", "--workflow", "ci.yml", "--commit", HEAD, "-L", "50", "--json", "headSha,headBranch,event,status,conclusion,databaseId"]);
 });
 
 // The folders a run leaves in a temp folder of its own: TMPDIR is a private folder for the run (os.tmpdir() reads it at each
@@ -824,7 +834,7 @@ test("planted: a build whose app.js names a harness 1Click key, or leaves a pin 
 // back, so a main block that awaits deploy() at the top level never settles once the late import starts (Node exits 13,
 // "unsettled top-level await"). Every path runs the real script on this tree with stand-ins on PATH for the reads that
 // leave the machine: git ls-remote answers HEAD as main's head and git status a clean tree (every other git call is git's),
-// gh a passed ci.yml push run of HEAD, pnpm an install that did nothing (the clean checkout's is pnpm's own); no CLOUDFLARE_* is set, so nothing is uploaded.
+// gh HEAD's passed merge queue run of ci.yml, pnpm an install that did nothing (the clean checkout's is pnpm's own); no CLOUDFLARE_* is set, so nothing is uploaded.
 test("deploy.mjs run as the main module reaches its gate on every path: --dry-run and a deploy through the late import of release-list.mjs, --build, --live-runs", () => {
   const repo = dirname(dirname(PKG));
   const head = execFileSync("git", ["-C", repo, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();

@@ -460,24 +460,36 @@ test("a naming that would change nothing asks no exclusive seed lock: a trade's 
   }
 });
 
-test("a naming that does change the record still takes the seed lock and writes it once", async () => {
+// Card deposit-landing-does-not-queue-a-trade: a deposit landing during a buy (a sale's money coming back) moves the
+// named note out of PLANNED, so the naming writes; it asked the seed lock exclusive, which queued behind the buy's
+// shared hold, and every later shared request (the next sell's) queued behind it until the buy ended.
+test("a deposit landing during a buy: the naming writes the next index while the buy holds the seed lock, queues nothing on it, and a sell's shared request is granted in the same turn", async () => {
   const { w, ns } = await signedIn();
   const n = namerOn(w);
   n.name(ENTROPY());
   await n.named();
-  // money reached the named index: the next naming names a new one
   const first = (await deposits(ns)).find((x) => x.state === "PLANNED")!;
-  await ns.move(first.id, "PLANNED", "INCOMING");
   const c = counted(w);
   const give = await tradeHold();
-  n.name(ENTROPY());
-  const done = n.named();
-  assert.ok(await until(exclusivePending), "the change asks the seed lock exclusive, behind the trade's hold");
-  give();
-  await done;
-  assert.equal(c.calls.length, 1, "nameDeposit asked once");
-  const next = (await deposits(ns)).find((x) => x.state === "PLANNED")!;
-  assert.deepEqual(await w.get("meta", `deposit/${SCOPE}`), { v: 1, scope: SCOPE.toString(), index: indexOf(next.ref), id: U(indexOf(next.ref)) });
+  try {
+    // the deposit lands: its note leaves PLANNED, and the page names again
+    await ns.move(first.id, "PLANNED", "INCOMING");
+    n.name(ENTROPY());
+    const done = n.named().then(() => true);
+    const settled = await until(async () => (await Promise.race([done, Promise.resolve(false)])) || (await exclusivePending()));
+    assert.ok(settled);
+    assert.equal(await exclusivePending(), false, "no exclusive request on the seed lock is queued behind the buy's hold");
+    const sell = await navigator.locks.request(WALLET_SEED_LOCK, { mode: "shared", ifAvailable: true }, async (l) => l !== null);
+    assert.equal(sell, true, "the sell's shared request is granted at once");
+    assert.equal(await done, true, "the naming ended while the buy still held the lock");
+    assert.equal(c.calls.length, 1, "nameDeposit asked once");
+    // the record names the next index already, inside the buy: no address shown for the used note past the naming
+    const next = (await deposits(ns)).find((x) => x.state === "PLANNED")!;
+    assert.notEqual(indexOf(next.ref), indexOf(first.ref));
+    assert.deepEqual(await w.get("meta", `deposit/${SCOPE}`), { v: 1, scope: SCOPE.toString(), index: indexOf(next.ref), id: U(indexOf(next.ref)) });
+  } finally {
+    give();
+  }
 });
 
 test("a seed changed between the lock-free read and the lock: nameDeposit still refuses with SeedChanged and nothing is written", async () => {

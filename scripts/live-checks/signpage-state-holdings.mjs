@@ -96,9 +96,9 @@ export const RUN = /[\w$]+\([\w$]+,\{signal:[\w$]+\.signal,(?:shown:[\w$]+=>\{[^
  *  `.wallets(new Set(l.map(({address:e})=>e)),{first:p,...h?{each:h}:{}})`. */
 export const RECORDS = /\.wallets\(new Set\([\w$]+\.map\(\(\{address:[\w$]+\}\)=>[\w$]+\)\)(?:,\{first:[\w$]+(?:,\.\.\.[\w$]+\?\{each:[\w$]+\}:\{\})?\})?\)/g;
 /** The sell host's read holds the passes off first, then feeds or releases them in a finally: `wallets:async()=>{let
- *  e=c.preempt(),t=null;try{...}finally{t===null?e.release():e.feed(t)}`; since card wallets-found-in-one-read it takes
- *  which Ws the finder reads: `wallets:async e=>{let t=c.preempt(),...`. */
-export const PREEMPT = /wallets:async(?:\(\)| [\w$]+|\([\w$]+\))=>\{let ([\w$]+)=[\w$]+\.preempt\(\),([\w$]+)=null;try\{[^]{0,400}?\}finally\{\2===null\?\1\.release\(\):\1\.feed\(\2\)\}/g;
+ *  e=c.preempt(),t=null;try{...}finally{t===null?e.release():e.feed(t)}` (since card pool-sell-legs-side-by-side the try
+ *  holds a sale's list made with no read from the kept pass too, which feeds the pass the same way). */
+export const PREEMPT = /wallets:async\(\)=>\{let ([\w$]+)=[\w$]+\.preempt\(\),([\w$]+)=null;try\{[^]{0,2400}?\}finally\{\2===null\?\1\.release\(\):\1\.feed\(\2\)\}/g;
 const countOf = (text, k) => (k instanceof RegExp ? [...text.matchAll(k)].length : text.split(k).length - 1);
 
 /** The verdict on a record: { pass, lines }, against the release lists' /app.js files (none with `ledger: false`). */

@@ -61,6 +61,7 @@ export const IN_PROCESS = [
   viaRead("solana-legs-checked", () => import("../live-checks/solana-legs-checked.mjs")),
   viaRead("signers-own-bytes", () => import("../live-checks/signers-own-bytes.mjs")),
   viaRead("solana-written-accounts-whole", () => import("../live-checks/solana-written-accounts-whole.mjs")),
+  viaRead("pool-sell-legs-side-by-side", () => import("../live-checks/pool-sell-legs-side-by-side.mjs")),
   // the PR's build is cut as a release only after its merge, so its run reads the marks and the pin, not the ledger
   { key: "pool-senders-next-page", host: "sign", load: () => import("../live-checks/pool-senders-next-page.mjs"), run: async (m, f) => m.judge(await m.read(f), { ledger: false }) },
   { key: "sol-settle-failed-is-not-unspent", host: "sign", load: () => import("../live-checks/sol-settle-failed-is-not-unspent.mjs"), run: async (m, f) => m.judge(await m.read(f), { ledger: false }) },
