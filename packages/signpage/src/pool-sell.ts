@@ -57,7 +57,7 @@
 import { base58, base64 } from "@scure/base";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { simulateSolanaTeardown, solanaCompileV0, solanaTeardownChecked } from "../../kit/src/trade/solana/build.ts";
-import { readSolanaPoolBuyVenue, readSolanaRent, SOLANA_POOL_PAGE_ENTRIES, SOLANA_POOL_SELL_FEE, solanaPoolNextPage, solanaPoolPage, solanaPoolSellMinOut, solanaPoolBuySellNeed, solanaPoolSellNeed, solanaPoolSellSteps, solanaRentMin, type SolanaPoolBuyVenue, type SolanaRent } from "../../kit/src/trade/solana/pool-buy.ts";
+import { readSolanaPoolBuyVenue, readSolanaRent, SOLANA_POOL_PAGE_ENTRIES, SOLANA_POOL_QUOTE_MAX_AGE_SLOTS, SOLANA_POOL_SELL_FEE, solanaPoolNextPage, solanaPoolPage, solanaPoolSellMinOut, solanaPoolBuySellNeed, solanaPoolSellNeed, solanaPoolSellSteps, solanaRentMin, type SolanaPoolBuyVenue, type SolanaRent } from "../../kit/src/trade/solana/pool-buy.ts";
 import { SOLANA_POOL_NEXT_PAGE_WINDOW, solanaPoolNoteFloor, solanaPoolPreMarkOf, type SolanaPoolPreMark } from "../../kit/src/trade/solana/pool-deposit.ts";
 import { solanaDecodeTokenAccount, type SolanaReference } from "../../kit/src/trade/solana/pool.ts";
 import { pageReference } from "./page-rpc.ts";
@@ -148,8 +148,15 @@ export const POOL_SELL_WAIT_MS = 1_000;
  *  made before an earlier leg's sell landed prices the coin higher than it now is, so the leg's floor can only be
  *  stricter: its simulation on both RPCs refuses it, or the chain does, never a sale below the user's slippage. */
 export const POOL_SELL_SHARED_READ_MS = 4_000;
-/** Two providers a slot apart read the pool account at two states: read again once, this long after. */
+/** Two providers a slot apart read the pool account at two states, or the trees grew again since the last read: read
+ *  again this long after. */
 export const POOL_SELL_SIZE_RETRY_MS = 500;
+/** How long a sale's deposit reads wait for the pool's trees to hold still on both providers (card
+ *  pool-sell-legs-side-by-side, the finder pass of 11 Nov 09:39Z: the fifth leg of five was refused when the trees moved
+ *  under its reads, by the earlier legs' own deposits; on mainnet anyone's deposit moves them). [design: 10 s, the
+ *  quote's age bound SOLANA_POOL_QUOTE_MAX_AGE_SLOTS (25) at 400 ms a slot: a sale whose pages do not hold still that
+ *  long is refused, never priced on one provider's sizes.] */
+export const POOL_SELL_SIZES_WAIT_MS = SOLANA_POOL_QUOTE_MAX_AGE_SLOTS * 400;
 /** One sell at a time on this device, every tab: two runs never pick one return note. */
 export const POOL_SELL_LOCK = "ct-pool/sell";
 /** The rent back's tries at each step: a provider's throttle, stall or lag is read again from the top (the devnet run at
@@ -1331,11 +1338,14 @@ const markAddress = (program: string, pre: Uint8Array): string => solanaProgramA
 
 /** The pool's two tree sizes and the lamports the deposit's mark and the two pages at those sizes hold, in one
  *  getMultipleAccounts call on each RPC (one slot each), the same on both (review P2-1 of 77055f4e: sizes read before an
- *  earlier sale's deposit landed priced pages read after it). Sizes other than the ones asked: read again at them, at
- *  once; two RPCs that differ: read again once, POOL_SELL_SIZE_RETRY_MS on (two RPCs a slot apart); then failed. */
+ *  earlier sale's deposit landed priced pages read after it). Sizes other than the ones asked, the same on both: read
+ *  again at them, at once the first time, then POOL_SELL_SIZE_RETRY_MS on each time they move again (an earlier leg's
+ *  deposit or anyone's landing between the reads); two RPCs that differ: read again POOL_SELL_SIZE_RETRY_MS on (two RPCs
+ *  a slot apart). The waits stop at POOL_SELL_SIZES_WAIT_MS in all, then failed. What it gives back is one read that
+ *  both RPCs answer alike, at the sizes that read names: the deposit is priced and its pages named from it alone. */
 async function depositHeld(rpcs: Rpcs, program: string, pool: string, sizes: { stateSize: number; labelSize: number }, pre: Uint8Array, wait: (ms: number) => Promise<void>): Promise<{ held: SolanaDepositHeld; sizes: { stateSize: number; labelSize: number } }> {
   let at = sizes;
-  for (let moved = 0, split = 0; ; ) {
+  for (let moved = 0, waited = 0; ; ) {
     const keys = [pool, solanaPoolPage(program, 0, at.stateSize), solanaPoolPage(program, 1, at.labelSize), markAddress(program, pre)];
     // the pool's balance is never priced (card pool-answer-unknown F5: past 2^53 it is never parsed)
     const [a, b] = await both(rpcs, (r) => accountsRaw(r, keys));
@@ -1346,12 +1356,12 @@ async function depositHeld(rpcs: Rpcs, program: string, pool: string, sizes: { s
     const agree = pa!.stateSize === pb!.stateSize && pa!.labelSize === pb!.labelSize && [held.state, held.label, held.mark].every(([x, y]) => x === y);
     if (agree && pa!.stateSize === at.stateSize && pa!.labelSize === at.labelSize) return { held, sizes: at };
     if (agree) {
-      // both RPCs read the trees at other sizes: the pages at those
-      if (moved++ > 0) return no("failed", "sizes_moved");
+      // both RPCs read the trees at other sizes: the pages at those, at once the first time, then after a wait
       at = pa!;
-      continue;
-    }
-    if (split++ > 0) return no("failed", "sizes_split");
+      if (moved++ === 0) continue;
+      if (waited >= POOL_SELL_SIZES_WAIT_MS) return no("failed", "sizes_moved");
+    } else if (waited >= POOL_SELL_SIZES_WAIT_MS) return no("failed", "sizes_split");
+    waited += POOL_SELL_SIZE_RETRY_MS;
     await wait(POOL_SELL_SIZE_RETRY_MS);
   }
 }

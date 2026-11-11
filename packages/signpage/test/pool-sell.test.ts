@@ -33,7 +33,7 @@ import { openNoteStore, type NoteStore } from "../../wallet/src/notes/store.ts";
 import type { BuyWallet } from "../../wallet/src/pool/buy-wallets.ts";
 import { solanaPoolOf } from "../../wallet/src/pool/solana.ts";
 import { BLOCKHASH, FEE_PAYER, POOL, PROGRAM, fx, providers, rent } from "../../kit/test/solana-pool-buy-fx.ts";
-import { POOL_RENT_BACK_MS, POOL_RENT_BACK_RULES, POOL_SELL_LOCK, POOL_SELL_READS, POOL_SELL_SHARED_READ_MS, POOL_SELL_SIZE_RETRY_MS, POOL_SELL_WAIT_MS, buyMints, leftAfter, owedRentBacks, planPoolSell, poolSellKind, resumeRentBacks, runPoolSell, settleDeadSellOps, settlePoolSells, settleSellOps, solanaSellAfterFull, solanaSellReserve, keptSells, stageOfLegs, type KeptSell, type OwedRentBack, type PoolSellHost, type PoolSellKindHost, type RentBackTold } from "../src/pool-sell.ts";
+import { POOL_RENT_BACK_MS, POOL_RENT_BACK_RULES, POOL_SELL_LOCK, POOL_SELL_READS, POOL_SELL_SHARED_READ_MS, POOL_SELL_SIZE_RETRY_MS, POOL_SELL_SIZES_WAIT_MS, POOL_SELL_WAIT_MS, buyMints, leftAfter, owedRentBacks, planPoolSell, poolSellKind, resumeRentBacks, runPoolSell, settleDeadSellOps, settlePoolSells, settleSellOps, solanaSellAfterFull, solanaSellReserve, keptSells, stageOfLegs, type KeptSell, type OwedRentBack, type PoolSellHost, type PoolSellKindHost, type RentBackTold } from "../src/pool-sell.ts";
 import { opOf } from "../src/state.ts";
 import { solanaCompileV0 } from "../../kit/src/trade/solana/build.ts";
 import { checkSolanaSweep, PoolRuleRefused, SOLANA_POOL_MIN_DEPOSIT, SOLANA_POOL_SELL_RESERVE_MAX, solanaDepositRents, solanaSweepFloor, solanaSweepKeep, solanaWithdrawMinPart, withdrawNoteFloor, type PoolAsk } from "../src/rules/pool.ts";
@@ -5133,6 +5133,91 @@ test("each plain refusal of a sale names its check in the leg's cause: fee_split
   // a sign out asked before W signs
   const o = await world();
   check((await saleCause(o, { stopped: () => o.c.calls.some((c) => c.method === "simulateTransaction") })).cause, "stopped");
+});
+
+// card pool-sell-legs-side-by-side, the finder pass of 11 Nov 09:39Z: leg 5 of five was refused (check sizes_moved or
+// sizes_split) as the earlier legs' deposits landed under its deposit reads; on mainnet anyone's deposits move the
+// trees all the time. The deposit's reads follow the trees as long as both providers agree on them, and wait out a
+// split between the two, up to POOL_SELL_SIZES_WAIT_MS in all; the deposit names the pages of its last read alone
+/** The deposit's read (the pool, its two pages, the mark) as `on` changes it, by provider and that provider's read count. */
+const depositReads = (w: World, on: (p: 0 | 1, n: number, read: () => Promise<unknown>) => Promise<unknown>) => {
+  const n = [0, 0];
+  return ([0, 1] as const).map((p) => (async (m: string, q: readonly unknown[]) => {
+    const keys = q[0] as string[];
+    if (m !== "getMultipleAccounts" || keys.length !== 4 || keys[0] !== POOL) return w.c.rpcs[p](m, q);
+    return on(p, n[p]!++, () => w.c.rpcs[p](m, q));
+  }) as SolanaRpc) as unknown as readonly [SolanaRpc, SolanaRpc];
+};
+/** The tree pages the landed sale's deposit named (accounts 2 and 3 of its last instruction). */
+const pagesNamed = (w: World): string[] => {
+  const sale = [...w.c.txs.values()].map((x) => solanaDecodeMessage((x.tx as Uint8Array).subarray(1 + 64 * (x.tx as Uint8Array)[0]!))).find((m) => m.staticKeys[m.instructions.at(-1)!.programIndex] === PROGRAM && m.instructions.some((i) => i.data.length === 24));
+  assert.ok(sale, "a sale landed");
+  const ix = sale!.instructions.at(-1)!;
+  return [2, 3].map((k) => sale!.staticKeys[ix.accounts[k]!]!);
+};
+const sizesNow = (w: World): [number, number] => {
+  const d = w.c.accounts.get(POOL)!.data;
+  const v = new DataView(d.buffer, d.byteOffset, d.length);
+  return [Number(v.getBigUint64(49, true)), Number(v.getBigUint64(49 + 1065, true))];
+};
+
+test("the trees grow under a sale's deposit reads four times (four earlier legs' deposits landing between them): each read again at the sizes both providers agree on, the deposit naming the last read's pages", async () => {
+  const w = await world({ ataLamports: TOKEN_RENT, leaves: 1_022, labelLeaves: 1_022 });
+  const waits: number[] = [];
+  // one deposit lands before each of the first four reads, seen by both providers
+  const rpcs = depositReads(w, (p, n, read) => {
+    if (p === 0 && n < 4) w.c.deposit(800_000n + BigInt(n), 1_000_000n);
+    return read();
+  });
+  const x = await saleCause(w, { rpcs, wait: async (ms: number) => void waits.push(ms) });
+  assert.equal(x.rec.stage, "filled", `${x.cause} ${JSON.stringify(x.answer)}`);
+  const [s, l] = sizesNow(w);
+  assert.deepEqual([s, l], [1_027, 1_027], "four deposits and the sale's own");
+  assert.deepEqual(pagesNamed(w), [solanaPoolPage(PROGRAM, 0, 1_026), solanaPoolPage(PROGRAM, 1, 1_026)], "the pages at the sizes of the last read, after the fourth deposit");
+  assert.ok(waits.filter((ms) => ms === POOL_SELL_SIZE_RETRY_MS).length <= 3, `the waits: ${waits.join(", ")}`);
+});
+
+test("another user's deposit that one provider sees three reads before the other: the split is waited out, and the deposit names the pages both then agree on", async () => {
+  const w = await world({ ataLamports: TOKEN_RENT, leaves: 1_023, labelLeaves: 1_023 });
+  const waits: number[] = [];
+  let stale: Promise<unknown> | null = null;
+  let first!: () => void;
+  const p0read = new Promise<void>((r) => (first = r));
+  const rpcs = depositReads(w, async (p, n, read) => {
+    if (p === 0) {
+      // provider 0: its first answer, from before the stranger's deposit, three more times
+      if (n === 0) {
+        stale = read();
+        await stale;
+        first();
+      }
+      return n <= 3 ? stale : read();
+    }
+    // provider 1: the stranger's deposit has landed once provider 0 has read
+    if (n === 0) {
+      await p0read;
+      w.c.deposit(700_000n, 1_000_000n);
+    }
+    return read();
+  });
+  const x = await saleCause(w, { rpcs, wait: async (ms: number) => void waits.push(ms) });
+  assert.equal(x.rec.stage, "filled", `${x.cause} ${JSON.stringify(x.answer)}`);
+  assert.deepEqual(pagesNamed(w), [solanaPoolPage(PROGRAM, 0, 1_024), solanaPoolPage(PROGRAM, 1, 1_024)], "the pages at the sizes both read, after the stranger's deposit");
+  assert.ok(waits.filter((ms) => ms === POOL_SELL_SIZE_RETRY_MS).length >= 3, `the split waited out: ${waits.join(", ")}`);
+});
+
+test("trees that never hold still, or two providers that never agree: the reads stop after POOL_SELL_SIZES_WAIT_MS of waits, refused before W signs", async () => {
+  for (const [name, on] of [
+    ["sizes_moved", (w: World) => depositReads(w, (p, n, read) => (p === 0 && n < 100 && w.c.deposit(600_000n + BigInt(n), 1_000_000n), read()))],
+    ["sizes_split", (w: World) => { let s: Promise<unknown> | null = null; return depositReads(w, async (p, n, read) => (p === 0 ? (s ??= read()) : (w.c.deposit(500_000n + BigInt(n), 1_000_000n), read()))); }],
+  ] as const) {
+    const w = await world({ ataLamports: TOKEN_RENT, leaves: 1_025, labelLeaves: 1_025 });
+    const waits: number[] = [];
+    const x = await saleCause(w, { rpcs: on(w), wait: async (ms: number) => void waits.push(ms) });
+    assert.match(x.cause, new RegExp(`check ${name}`), x.cause);
+    assert.equal(waits.filter((ms) => ms === POOL_SELL_SIZE_RETRY_MS).reduce((a, b) => a + b, 0), POOL_SELL_SIZES_WAIT_MS, `${name}: ${waits.join(", ")}`);
+    assert.equal(w.c.calls.filter((c) => c.method === "sendTransaction").length, 0);
+  }
 });
 
 test("every plain refusal in sellRun, depositHeld and treeSizes names its check (the ones no fixture reaches: venue_program, wallet, pool_owner)", () => {
