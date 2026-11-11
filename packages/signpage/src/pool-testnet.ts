@@ -44,7 +44,7 @@
 import { base58, base64 } from "@scure/base";
 import { SOLANA_RPC_RETRY, SOLANA_RPC_WINDOW_RETRY, solanaJsonRpc, solanaPacedRpc, type SolanaRpc, type SolanaRpcRetry } from "../../kit/src/trade/solana/send.ts";
 import { lanedRpc, pageHelperRpc, pageHelperRpcStopped, pageRpc, type ReadKind } from "./page-rpc.ts";
-import { holdHosts, hostLane, stopHostLaneWaits } from "../../wallet/src/throttle.ts";
+import { holdHosts, hostLane, laneFetch, stopHostLaneWaits } from "../../wallet/src/throttle.ts";
 import { HELPER_FETCH_INIT, HELPER_V1_PATHS } from "../../kit/src/helper/v1.ts";
 import type { VaultProver } from "../../kit/src/prover/prove.ts";
 import { WALLET_SEED_LOCK, type WalletStore } from "@blindfill/wallet/store";
@@ -382,7 +382,7 @@ export const PAGE_TABLES: Readonly<Partial<Record<"pump-curve" | "pumpswap", rea
 export const POOL_SEND_TIMEOUT_MS = 120_000;
 
 /** POST /v1/pool/solana/send: the helper's answer as it came (pool-buy.ts reads it back on two RPCs). */
-export async function helperPoolSend(pool: string, tx: Uint8Array, fetchFn: typeof fetch = fetch): Promise<unknown> {
+export async function helperPoolSend(pool: string, tx: Uint8Array, fetchFn: typeof fetch = laneFetch()): Promise<unknown> {
   const window = new AbortController();
   const t = setTimeout(() => window.abort(new DOMException(`pool send: no answer in ${POOL_SEND_TIMEOUT_MS} ms`, "TimeoutError")), POOL_SEND_TIMEOUT_MS);
   try {
@@ -426,13 +426,13 @@ const FEE_TIMEOUT_MS = 10_000;
  *  solanaPool's bind refuses unless every field is this pool's, this epoch's and the fee the device computes. A busy
  *  helper (429 rate_limited, 503 upstream) is waited out and asked again, bounded (wallet busy.ts, card
  *  withdraw-fee-busy-waits); any other status refuses at once. */
-export async function poolRelayFee(pool: string, epochStartMs: bigint, signal?: AbortSignal, fetchFn: typeof fetch = fetch, sleep?: BusyOpts["sleep"]): Promise<SolanaFeeAnswer> {
+export async function poolRelayFee(pool: string, epochStartMs: bigint, signal?: AbortSignal, fetchFn: typeof fetch = laneFetch(), sleep?: BusyOpts["sleep"]): Promise<SolanaFeeAnswer> {
   return (await helperFee(`${TRADE_HELPER}/v1/pool/fee?cluster=${PAGE_CLUSTER}&pool=${encodeURIComponent(pool)}&epoch=${epochStartMs}`, signal, fetchFn, sleep)) as SolanaFeeAnswer;
 }
 /** GET /v1/pool/fee for an EVM pool (the helper keys it by the pool's lowercase address) and one epoch, as evmPool's
  *  relayFee: the answer as the helper gave it, which evmPool's bind refuses unless every field is this pool's, this
  *  epoch's and the fee the device computes from its own reads. The same waits and refusals as poolRelayFee. */
-export async function evmPoolRelayFee(pool: string, epochStartMs: bigint, signal?: AbortSignal, fetchFn: typeof fetch = fetch, sleep?: BusyOpts["sleep"]): Promise<EvmFeeAnswer> {
+export async function evmPoolRelayFee(pool: string, epochStartMs: bigint, signal?: AbortSignal, fetchFn: typeof fetch = laneFetch(), sleep?: BusyOpts["sleep"]): Promise<EvmFeeAnswer> {
   return (await helperFee(`${TRADE_HELPER}/v1/pool/fee?pool=${encodeURIComponent(pool.toLowerCase())}&epoch=${epochStartMs}`, signal, fetchFn, sleep)) as EvmFeeAnswer;
 }
 async function helperFee(url: string, signal: AbortSignal | undefined, fetchFn: typeof fetch, sleep: BusyOpts["sleep"] | undefined): Promise<unknown> {
@@ -1165,7 +1165,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       read: async (address, s, by) => {
         try {
           // a pass's read on the finder's host: on its budget (the finder is its own transport)
-          await hostLane(FINDER_HOST).turn("pass", s);
+          // its requests counted by the finder's own transport (laneFetch), so the turn counts none
+          await hostLane(FINDER_HOST).turn("pass", s, false);
           // the list's bound from its start (buy-wallets.ts readDerived's `by`), as a sell's read keeps it
           return await inner.read(address, s, by);
         } catch (e) {

@@ -602,3 +602,15 @@ test("HostLane: a sign out ends a waiting turn at once with its reason, and a tu
   await assert.rejects(next, /stopped/, "the next sign-in's waits are not ended by the last sign out");
   resetHostLanes();
 });
+
+// The delta review of ed85d367 (P2-A): a pass asleep for room when a trade starts slept on to its room's end (10 s
+// measured), so the floor (one every PASS_FLOOR_MS) did not hold from the trade's start.
+test("HostLane: a pass asleep for room learns of a trade's start at once, and goes by the floor", async () => {
+  const l = new HostLane();
+  for (let i = 0; i < PASS_BUDGET; i++) l.sent("trade");
+  const t0 = performance.now();
+  const pass = l.turn("pass");
+  setTimeout(() => l.trade(1_000), 100);
+  const ms = await Promise.race([pass.then(() => performance.now() - t0), new Promise<null>((r) => setTimeout(() => r(null), 3_000))]);
+  assert.ok(ms !== null && ms < 1_000, `the pass went ${ms === null ? "after 3 s or never" : `${Math.round(ms)} ms`} after its turn, a trade started at 100 ms`);
+});

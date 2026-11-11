@@ -39,7 +39,13 @@ async function onProvider(answer: (host: string, n: number, method: string) => A
     const host = new URL(u instanceof Request ? u.url : String(u)).host;
     const n = (per.get(host) ?? 0) + 1;
     per.set(host, n);
-    const q = JSON.parse(String(init?.body)) as { id: string; method: string };
+    // a JSON-RPC call's method, or the HTTP method and path of a helper route (its fee route is a GET)
+    let q: { id: string; method: string };
+    try {
+      q = JSON.parse(String(init?.body)) as { id: string; method: string };
+    } catch {
+      q = { id: "0", method: `${init?.method ?? "GET"} ${new URL(u instanceof Request ? u.url : String(u)).pathname}` };
+    }
     const a = answer(host, n, q.method);
     const { status = 200, result = 7, ms = 0, retryAfter } = typeof a === "number" ? { status: a } : a;
     sent.push({ host, method: q.method, at: performance.now() - t0, status });
@@ -369,5 +375,32 @@ test("a deposit's read and a settle's read both meet 429 on one host: neither re
     assert.equal(again, "answered", `the deposit's read: ${d}; asked again: ${again}; ${line()}`);
     assert.equal(s, "answered", `the settle's read: ${s}; ${line()}`);
     assert.ok(performance.now() - t0 < 30_000);
+  });
+});
+
+// The delta review of ed85d367 (P2-A): requests the page sends a host through no laned RPC were not counted in its
+// budget, so the passes took room the host had already spent (the helper's route allows 16 a caller in 10 s).
+test("every request the page sends a host counts in that host's lane: the helper's sends, its fee route, the holdings and keyed routes, every send path", async () => {
+  const { helperPoolSend, poolRelayFee } = await import("../src/pool-testnet.ts");
+  const { evmPoolSend } = await import("../src/evm-send.ts");
+  const { releaseTradeDeps, TRADE_HELPER } = await import("../src/trade.ts");
+  const { solanaHelperHoldings, evmHelperKeyedRpc } = await import("../../wallet/src/pool/buy-wallets.ts");
+  await onProvider(() => 200, async (sent) => {
+    const counted = (): number => hostLane(TRADE_HELPER).inWindow();
+    const steps: [string, () => Promise<unknown>][] = [
+      ["helperPoolSend", () => helperPoolSend("p", new Uint8Array(1))],
+      ["poolRelayFee", () => poolRelayFee("p", 1n)],
+      ["evmPoolSend", () => evmPoolSend(TRADE_HELPER, { pool: "0x00", data: new Uint8Array(1), epoch: 1n })],
+      ["solanaHelperHoldings", () => solanaHelperHoldings(TRADE_HELPER).read("11111111111111111111111111111111")],
+      ["evmHelperKeyedRpc", () => evmHelperKeyedRpc(TRADE_HELPER, "base")("eth_blockNumber", [])],
+      ["the helper's send path", () => releaseTradeDeps().paths.find((p) => p.name === "helper")!.send("AA==")],
+    ];
+    for (const [name, step] of steps) {
+      const [before, out] = [counted(), sent.filter((x) => x.host === new URL(TRADE_HELPER).host).length];
+      await step().catch(() => {});
+      const went = sent.filter((x) => x.host === new URL(TRADE_HELPER).host).length - out;
+      assert.ok(went > 0, `${name}: sent nothing to the helper`);
+      assert.equal(counted() - before, went, `${name}: ${went} request(s) sent to the helper, ${counted() - before} counted on its lane`);
+    }
   });
 });

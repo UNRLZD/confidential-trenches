@@ -107,12 +107,14 @@ export class ThrottleGate {
 //   Its `gate` is the one rule above (ThrottleGate): a throttle any reader meets pauses the host for every reader, from
 //   1 s, doubling to 10 s, the provider's Retry-After when longer (held to 10 s), back to none once a read sent after it
 //   goes through.
-// - Its budget: every request the page sends the host is counted (sent()), a trade's with the rest. A background read
+// - Its budget: every request the page sends the host is counted (sent(); laneFetch for those that go through no laned
+//   RPC: the helper's sends and fee route, the holdings and keyed routes, every send path), a trade's with the rest. A background read
 //   ("pass") goes only while the page has sent the host fewer than PASS_BUDGET in the last HOST_WINDOW_MS, which leaves
 //   a trade tapped next the rest of the host's limit; while a trade holds the host, fewer than PASS_BUDGET_TRADING, its
 //   own reads counted in it, so the passes take only what the trade leaves; and at least one every PASS_FLOOR_MS
-//   whatever trades hold or send, so no pass ever parks for long (the review of a1a6bad6, P1 and P2: a
-//   pass parked to a trade's end while it held what that trade waited for). A trade's read ("trade") never waits on the
+//   whatever trades hold or send, so no pass ever parks for long (the review of a1a6bad6, P1 and P2: a pass parked to
+//   a trade's end while it held what that trade waited for); a pass asleep for room is woken when a trade starts, so the
+//   floor holds from its start (the delta review of ed85d367). A trade's read ("trade") never waits on the
 //   budget, only on the host's pause, and on that at most TRADE_TURN_MAX_MS: its turn has a deadline.
 // - A trade (a buy or a sell, from its host's making to its run's end, at most TRADE_HOLD_MAX_MS) holds the lanes of the
 //   hosts it reads (trade()).
@@ -143,6 +145,9 @@ export class HostLane {
   #trades = 0;
   #sent: number[] = [];
   #lastPass = -Infinity;
+  // the passes waiting now: woken when a trade starts, so the floor holds from its start (a pass asleep for room learns
+  // of it at once, not at its wake)
+  readonly #wakers = new Set<() => void>();
   readonly #now: () => number;
   readonly #sleep: (ms: number, signal?: AbortSignal) => Promise<void>;
   constructor(o: { now?: () => number; bounds?: ThrottleBounds; sleep?: (ms: number, signal?: AbortSignal) => Promise<void> } = {}) {
@@ -157,6 +162,7 @@ export class HostLane {
   /** A trade on this host, held until its give-back (called once; a second call does nothing) or `maxMs`. */
   trade(maxMs: number = TRADE_HOLD_MAX_MS): () => void {
     this.#trades++;
+    for (const w of this.#wakers) w();
     let given = false;
     const give = (): void => {
       if (given) return;
@@ -168,11 +174,12 @@ export class HostLane {
     bound.unref?.();
     return give;
   }
-  /** A request sent to this host now, of either kind: counted in its budget. */
-  sent(kind: "trade" | "pass"): void {
+  /** A request sent to this host now, of either kind: counted in its budget. `count` false: a pass's turn whose
+   *  requests its own transport counts (laneFetch), so only the floor's clock moves. */
+  sent(kind: "trade" | "pass", count = true): void {
     const t = this.#now();
     this.inWindow(); // the window's old requests dropped, so a host only trades read never keeps them all
-    this.#sent.push(t);
+    if (count) this.#sent.push(t);
     if (kind === "pass") this.#lastPass = t;
   }
   /** Requests sent to this host in the last HOST_WINDOW_MS. */
@@ -201,15 +208,22 @@ export class HostLane {
   }
   /** A read's turn (see the header); a trade's at most TRADE_TURN_MAX_MS. The read is counted as sent once it ends: the
    *  caller sends it in the same tick. A sign out's stopHostLaneWaits ends it as `signal` does. */
-  async turn(kind: "trade" | "pass", given?: AbortSignal): Promise<void> {
+  async turn(kind: "trade" | "pass", given?: AbortSignal, count = true): Promise<void> {
     const signal = laneSignal(given);
     const end = this.#now() + TRADE_TURN_MAX_MS;
     for (;;) {
       signal.throwIfAborted();
       const ms = kind === "trade" ? Math.min(this.#waitMs(kind), end - this.#now()) : this.#waitMs(kind);
-      if (ms <= 0) return void this.sent(kind);
-      // each wait at most the floor, the window or the pause (10 s): a trade's start or end is read at the next look
-      await this.#sleep(ms, signal);
+      if (ms <= 0) return void this.sent(kind, count);
+      // the floor, the window or the pause (at most 10 s), or a trade's start, whichever comes first
+      let wake!: () => void;
+      const woken = new Promise<void>((r) => (wake = r));
+      this.#wakers.add(wake);
+      try {
+        await Promise.race([this.#sleep(ms, signal), woken]);
+      } finally {
+        this.#wakers.delete(wake);
+      }
     }
   }
 }
@@ -266,6 +280,15 @@ export function holdHosts(urls: Iterable<string | undefined>): () => void {
   return () => {
     for (const g of gives) g();
   };
+}
+/** `f` (the page's fetch at each call, when none) with every request counted on its host's lane: the page's requests
+ *  that go through no laned RPC (the helper's sends, its fee route, the holdings and keyed routes) count in the same
+ *  budget as the rest, as the host counts them. */
+export function laneFetch(f?: (url: string, init?: RequestInit) => Promise<Response>): typeof fetch {
+  return ((url: string | URL | Request, init?: RequestInit) => {
+    hostLane(url instanceof Request ? url.url : String(url)).sent("trade");
+    return (f ?? globalThis.fetch)(url as string, init);
+  }) as typeof fetch;
 }
 /** Forgets every host's lane (tests: each test's clock starts at its own zero). */
 export function resetHostLanes(): void {
