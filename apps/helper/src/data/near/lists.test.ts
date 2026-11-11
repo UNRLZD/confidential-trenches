@@ -7,7 +7,7 @@ import { ROW_FIELDS } from "../../../../terminal/src/screens/discover/fields.ts"
 import { PAGE_FIELDS, RISK_FIELDS } from "../solana/token.ts";
 import { chgBps, createNearLists, liqOf, mainsOf, parsePools, priceOf, priceText, toMeta, usdText, wnearFlow } from "./lists.ts";
 import { createNearToken } from "./token.ts";
-import { nearAccount, NEAR_RPCS, PAST_RPCS } from "./views.ts";
+import { HOST_GAP_MS, nearAccount, NEAR_RPCS, PAST_RPCS, pacedFetch, WAIT_MAX_MS } from "./views.ts";
 import { fixtureFetch } from "./fixtures/replay.ts";
 
 const FX = JSON.parse(readFileSync(new URL("./fixtures/rhea-reads-2026-11-11.json", import.meta.url), "utf8")) as { rpc: { body: { params: Record<string, unknown> }; view?: unknown; answer?: { result: unknown } }[] };
@@ -140,4 +140,21 @@ test("the token page: any token with a Rhea wNEAR pool, the 06b fields, null wit
   const h = await t.holders("token.rhealab.near");
   assert.deepEqual({ ...JSON.parse(h.body), as_of_ms: 0 }, { holders: [], total: null, top_bps: null, src: "none", as_of_ms: 0 });
   for (const bad of ["no-pool-token.near", "Bad", "a..near"]) assert.equal((await t.page(bad)).status, 404, bad);
+});
+
+test("pacedFetch: one host's calls start HOST_GAP_MS apart, one past WAIT_MAX_MS fails with nothing sent, and a 429 holds the host", async () => {
+  let sent = 0;
+  const f = pacedFetch(async () => (sent++, new Response("{}", { status: 200 })));
+  const n = Math.ceil(WAIT_MAX_MS / HOST_GAP_MS) + 10;
+  const t0 = Date.now();
+  const got = await Promise.allSettled(Array.from({ length: n }, () => f("https://pace.test/", {})));
+  const refused = got.filter((g) => g.status === "rejected").length;
+  assert.ok(refused >= 9 && refused <= 11, `refused ${refused} of ${n}`);
+  assert.equal(sent, n - refused);
+  assert.ok(Date.now() - t0 >= (sent - 1) * HOST_GAP_MS - 50, "spaced");
+  let asked = 0;
+  const g = pacedFetch(async () => (asked++, new Response("busy", { status: 429 })));
+  assert.equal((await g("https://held.test/", {})).status, 429);
+  await assert.rejects(g("https://held.test/", {}), /host held/);
+  assert.equal(asked, 1);
 });

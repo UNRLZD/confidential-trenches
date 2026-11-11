@@ -306,6 +306,7 @@ export function createNearLists(deps: NearDeps = {}) {
     const lists = { new: newRows, trending, trending_5m: [] as Row[], trending_1h: trending, graduating: [] as Row[] };
     const body = JSON.stringify({ chain: "near", lists, as_of_ms: s.t_ms, unsettled: [], pools });
     last = { status: 200, body, gzip: gzipSync(body), asOfMs: s.t_ms };
+    built();
   }
 
   async function refresh(): Promise<void> {
@@ -328,13 +329,15 @@ export function createNearLists(deps: NearDeps = {}) {
 
   /** One refresh at a time; a failure keeps the last good answer. */
   const run = (): Promise<void> => (running ??= refresh().catch(() => undefined).finally(() => (running = null)));
-  /** Resolves once an answer is held or the refresh under way ends. */
+  /** Resolves once an answer is held or the refresh under way ends (build() calls `built`). */
+  const waiting = new Set<() => void>();
+  const built = () => {
+    for (const ok of waiting) ok();
+    waiting.clear();
+  };
   const answered = (): Promise<void> => {
     const r = run();
-    return new Promise<void>((ok) => {
-      const t = setInterval(() => last !== null && (clearInterval(t), ok()), 50);
-      void r.finally(() => (clearInterval(t), ok()));
-    });
+    return last !== null ? Promise.resolve() : Promise.race([r, new Promise<void>((ok) => waiting.add(ok))]);
   };
 
   return {

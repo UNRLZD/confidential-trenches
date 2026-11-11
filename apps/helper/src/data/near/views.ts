@@ -16,6 +16,9 @@ export const PAST_RPCS = ["https://near.drpc.org", "https://archival-rpc.mainnet
  *  18:30Z), and the helper's vault token reads (token-status/status.ts) ask the same companies: the market reads stay
  *  near 6 a second a host at most, and far under it on their cadence (lists.ts)]. */
 export const HOST_GAP_MS = 150;
+/** A call whose turn at its host is further off than this fails at once, nothing sent, so a burst of new tokens never
+ *  queues calls the callers stopped waiting for [design: a cold page's reads answer in about a second]. */
+export const WAIT_MAX_MS = 4_000;
 /** A host that answers 429 is not asked again for this long; the other host answers meanwhile. */
 export const HOLD_MS = 60_000;
 const ANSWER_MAX = 4 * 1024 * 1024;
@@ -36,6 +39,7 @@ export function pacedFetch(base: Fetch = (u, i) => fetch(u, i)): Fetch {
     const host = new URL(url).host;
     if ((heldUntil.get(host) ?? 0) > Date.now()) throw new Error("host held");
     const at = Math.max(Date.now(), next.get(host) ?? 0);
+    if (at - Date.now() > WAIT_MAX_MS) throw new Error("host busy");
     next.set(host, at + HOST_GAP_MS);
     if (at > Date.now()) await wait(at - Date.now());
     const r = await base(url, init);
