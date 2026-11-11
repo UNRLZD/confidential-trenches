@@ -87,7 +87,8 @@ const JS =
 test("the facts read from a bundle", () => {
   const f = facts("", JS);
   assert.deepEqual({ ...f, sha384: null }, { index: "", sha384: null, rule: true, faults: true, stop: true, wired: { decimals: true, sell: true, spent: true, buy: true, deposits: 2, stops: 2, taps: 4 }, rentBack: true, evmSale: false });
-  assert.equal(facts("", JS + "const K=`owed/sell-evm`;").evmSale, true, "the EVM sale's key read in a bundle");
+  assert.equal(facts("", JS + "const K=`nonce()`;").evmSale, true, "the EVM sale's nonce() read in a bundle");
+  assert.equal(facts("", JS + "const K=`owed/sell-evm`;").evmSale, false, "the open-sales key alone is the positions pass's, not the sale");
 });
 
 test("planted on the bundle: a flat wait, another bound, no clock, any error waiting, no sign out, a kind off the rule or off its request's bound: each read as not held", () => {

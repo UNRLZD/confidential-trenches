@@ -514,7 +514,7 @@ test("restore: the route read back from the buy's own transaction on two RPCs eq
   await assert.rejects(evmBuyRouteRead([rpc(), rpc(true)], "base", POOL, { w: W, token: TOKEN, block: 0x100n, blockHash: BH, logIndex: 3n }), /another buy/);
 });
 
-test("the live check's own constants are the page's: the sell selector, the Deposited topic, the testnet RPC pairs and chain ids, each testnet's sell delegate and sender, the open sale's key", async () => {
+test("the live check's own constants are the page's: the sell selector, the Deposited topic, the testnet RPC pairs and chain ids, each testnet's sell delegate and sender, the sale's mark", async () => {
   const lc = (await import(new URL("../../../scripts/live-checks/signpage-evm-pool-sell.mjs", import.meta.url).href)) as Record<string, unknown>;
   const { EVM_SELL_SIGNATURE } = await import("../src/evm-send.ts");
   const { TESTNET_RPCS } = await import("../src/pool-testnet.ts");
@@ -525,8 +525,10 @@ test("the live check's own constants are the page's: the sell selector, the Depo
   assert.deepEqual(lc.CHAIN_IDS, { "base-sepolia": EVM_CHAIN_IDS["base-sepolia"], "robinhood-testnet": EVM_CHAIN_IDS["robinhood-testnet"] });
   const v = evmPoolVenues();
   for (const n of ["base-sepolia", "robinhood-testnet"] as const) assert.deepEqual((lc.SELL_PINS as Record<string, unknown>)[n], { sellDelegate: v[n]!.sellDelegate!.toLowerCase(), sellSender: v[n]!.sellSender!.toLowerCase() });
-  assert.ok((lc.EVM_SELL_MARKS as string[]).includes(EVM_OPEN_SELLS_KEY));
-  assert.ok((lc.EVM_SELL_MARKS as string[]).includes(EVM_POSITION_COSTS_KEY), "the buy records' key: no mainnet bundle carries it");
+  // the open sales' and the buy records' keys are no marks: the mainnet positions pass reads both (card evm-pools-on-mainnet)
+  assert.ok(!(lc.EVM_SELL_MARKS as string[]).includes(EVM_OPEN_SELLS_KEY));
+  assert.ok(!(lc.EVM_SELL_MARKS as string[]).includes(EVM_POSITION_COSTS_KEY));
+  assert.deepEqual(lc.EVM_SELL_MARKS, ["nonce()"]);
 });
 
 // ---- the review of 1004e598..617fcd62 (card signpage-evm-pool-sell) ----

@@ -545,7 +545,7 @@ export type PoolRestoreHost = {
   /** A pool chain's U_X reads and carry (the pool follow's own, src/main.ts), or null when the page has none there: that
    *  pool's scope then ends stalled, POOL_CHAIN_UNREAD. None given: null on every chain. */
   ux?: (chain: PoolChain) => PoolUxReads | null;
-  /** Whether this build gives a deposit address on a pool chain (pool.address: main.ts pagePoolScopes). A chain it gives
+  /** Whether this build gives a deposit address on a pool chain (pool.address: main.ts pageAddressPools). A chain it gives
    *  none on has no deposit id nor U_X that money could have reached, so its ids and U_X are not read and are no reason
    *  the restore is not done; its pool's notes are walked as any other's. None given: every chain. */
   addressed?: (chain: PoolChain) => boolean;

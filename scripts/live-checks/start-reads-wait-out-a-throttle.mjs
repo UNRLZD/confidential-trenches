@@ -42,9 +42,9 @@ export const SPENT = new RegExp(`\\.then\\(\\(\\)=>(${N})\\.stopped\\?\\.\\(\\)\
 
 export function facts(index, js) {
   const out = { index, sha384: sha384(js), rule: false, faults: false, stop: false, wired: { decimals: false, sell: false, spent: false, buy: false, deposits: 0, stops: 0, taps: 0 }, rentBack: false, evmSale: false };
-  // the EVM sale (src/pool-sell-evm.ts, its open-sales key): in SIGN_HOST's build since card evm-pools-on-mainnet, a
-  // fifth kind on its request's one bound
-  out.evmSale = /["'`]owed\/sell-evm["'`]/.test(js);
+  // the EVM sale (src/pool-sell-evm.ts, its read of W's SellDelegate nonce(), which only the sale carries; the positions
+  // pass reads its open-sales key in SIGN_HOST's build too): a fifth kind on its request's one bound wherever it is built
+  out.evmSale = /["'`]nonce\(\)["'`]/.test(js);
   // the bounds, the device's clock, the Retry-After of the transport fault, and the rule: next(e) = T(pause, A(e), B),
   // null (and spent from then on) once max(the clock since the tap began, the waits so far) + the pause passes 30 s;
   // hold(ms), a wait that is not a fault's (card pool-sell-legs-side-by-side: a sale's agree waits), on the same bound

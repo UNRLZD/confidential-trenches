@@ -158,8 +158,8 @@ const restore = !framed
         s?.entropy.fill(0);
         return s !== undefined;
       },
-      // a chain this build gives no deposit address on (pagePoolScopes): no U_X there to read, so no stall reason
-      addressed: (chain) => pagePoolScopes().some((p) => p.chain === chain),
+      // a chain this build gives no deposit address on (pageAddressPools): no U_X there to read, so no stall reason
+      addressed: (chain) => pageAddressPools().some((p) => p.chain === chain),
       // a chain's buy records written (card signpage-positions-evm): its positions read again, with no reload; ahead of
       // `written`, whose neighbours wallet-restore-reads-ux's bundle check reads
       holdingsWritten: (chain) => testnet?.evmHoldingsRestored(chain),
@@ -352,7 +352,7 @@ else {
       // where money for a pool goes (src/pool-deposit-address.ts): U_X from its scope's public record, named ahead by this
       // page; a quote from another chain at the device's own price reads and floor, its address only once the follow
       // took it (src/pool-deposit-follow.ts), on mainnet only
-      "pool.address": poolAddressHost({ pools: pagePoolScopes, network: PAGE_NETWORK, read: fs.depositRead, named: () => namer.named(), priced: pricedFor, floor: floorFor, checked: (id, chain, quote, u) => poolFollow!.quoted(id, chain, quote, u) }),
+      "pool.address": poolAddressHost({ pools: pageAddressPools, network: PAGE_NETWORK, read: fs.depositRead, named: () => namer.named(), priced: pricedFor, floor: floorFor, checked: (id, chain, quote, u) => poolFollow!.quoted(id, chain, quote, u) }),
       buy: trades,
       // the pool kinds (src/pool-kinds.ts): each checked by src/rules/pool.ts, answered only on a pool this page's
       // network pins (src/pool-testnet.ts, whose flow runs deposit, buy, sell and withdraw on every build; a network with
@@ -780,10 +780,14 @@ function pageScope(): bigint | null {
   return vaultScope(PAGE_NETWORK);
 }
 // each pool the network pins is named the same way, under its own scope (card pool-deposit-address): pool.address
-// answers its U_X from that record. On mainnet, Solana's alone: a Base or Robinhood pool there has no carry from U_X
-// into the pool nor a way out of it yet, so its U_X is neither named nor given, and money sent there has no address
+// answers its U_X from that record
 function pagePoolScopes(): { chain: PoolChain; scope: bigint }[] {
-  return PAGE_POOLS.flatMap((p) => (p.chain === "near" || (PAGE_NETWORK === "mainnet" && p.chain !== "solana") ? [] : [{ chain: p.chain, scope: p.scope }]));
+  return PAGE_POOLS.flatMap((p) => (p.chain === "near" ? [] : [{ chain: p.chain, scope: p.scope }]));
+}
+// the pools pool.address gives a U_X for: on mainnet Solana's alone (card evm-pools-on-mainnet), as a Base or Robinhood
+// pool there has no carry from U_X into the pool nor a way out of it yet, so money is never sent to an address there
+function pageAddressPools(): { chain: PoolChain; scope: bigint }[] {
+  return pagePoolScopes().filter((p) => PAGE_NETWORK !== "mainnet" || p.chain === "solana");
 }
 const namer = depositNamer({
   top: !framed,
