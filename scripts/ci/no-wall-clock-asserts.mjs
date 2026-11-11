@@ -16,6 +16,13 @@
 // a difference of two variables read from the real clock. Two places may still read one: the condition of a `while` or
 // `for` that polls for something to happen (it ends on that, the time only caps it), and the arguments of a console
 // call. Strings and comments are left out, so a message may print one.
+//
+// And a second form of the same fault, which reads no clock in the test's text (card ci-fresh-run-ends-with-room): a test that
+// runs the kit's EVM pool-buy quote on its default monotonic clock (`evmPoolBuyQuoteWith(...)` with no sixth argument, the
+// `mono`), outside `onTestClock(...)`, hands the quote's 30 s age rule and 60 s scan bound the machine's speed. KB1, KB3 and
+// KB4 (a quote over 65,000 made-up pools) refused stale_quote at 37 to 47 s when the packages' tests ran side by side, and
+// the rule above could not see it: the clock is read inside the code under test. A call passes `mono` (a fixed clock when
+// the test is pure work: quoteOnStill) or runs on the test clock; QUOTE_LISTED counts the calls still to convert, never a place for a new one.
 //   node scripts/ci/no-wall-clock-asserts.mjs    lists what it refuses in the tracked unit tests, exit 1 on any
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -67,6 +74,48 @@ export const LISTED = {
   "scripts/ci/quote-speed.test.mjs": { count: 1, why: "to convert (card quote-speed-preflight-busy)" },
   "scripts/ci/readme-fresh-run.test.mjs": { count: 1, why: "to convert" },
 };
+
+// Calls of evmPoolBuyQuoteWith on the real monotonic clock, per file (the count of calls still to convert). A file may make
+// no more than its count; a new call passes `mono` or runs inside onTestClock.
+export const QUOTE_LISTED = {
+  "packages/kit/test/evm-quote-attacks.test.ts": { count: 153, why: "to convert" },
+  "packages/kit/test/evm-quote-head.test.ts": { count: 15, why: "to convert" },
+  "packages/kit/test/evm-quote.test.ts": { count: 5, why: "to convert" },
+  "packages/signpage/test/pool-buy-evm-kind.test.ts": { count: 1, why: "to convert" },
+  "packages/signpage/test/pool-buy-evm.test.ts": { count: 2, why: "to convert" },
+  "packages/signpage/test/rules-pool-attacks.test.ts": { count: 1, why: "to convert" },
+  "packages/signpage/test/rules-pool.test.ts": { count: 1, why: "to convert" },
+};
+const QUOTE_CALL = /\b(evmPoolBuyQuoteWith|quoteOn)\(/g; // quoteOn: the attack tests' helper that calls it on the real clock (quoteOnStill does not)
+
+/** The index just past the bracket that closes the one opened at `open`, and how many commas sit at its top level. */
+function closeOf(src, open) {
+  let depth = 0;
+  let commas = 0;
+  for (let i = open; i < src.length; i++) {
+    const c = src[i];
+    if (c === "(" || c === "[" || c === "{") depth++;
+    else if (c === ")" || c === "]" || c === "}") {
+      depth--;
+      if (depth === 0) return { end: i + 1, commas };
+    } else if (c === "," && depth === 1) commas++;
+  }
+  return { end: src.length, commas };
+}
+
+/** Every call of evmPoolBuyQuoteWith with fewer than six arguments (or of the attack tests' quoteOn), outside an onTestClock( ... ) call: [{ line, text }]. */
+export function quoteFindings(text) {
+  const src = code(text);
+  const clocks = [...src.matchAll(/\bonTestClock\(/g)].map((m) => [m.index, closeOf(src, m.index + m[0].length - 1).end]);
+  const out = [];
+  for (const m of src.matchAll(QUOTE_CALL)) {
+    if (m[1] === "evmPoolBuyQuoteWith" && closeOf(src, m.index + m[0].length - 1).commas + 1 >= 6) continue; // `mono` passed
+    if (clocks.some(([a, b]) => m.index > a && m.index < b)) continue;
+    const line = src.slice(0, m.index).split("\n").length;
+    out.push({ line, text: text.split("\n")[line - 1].trim().slice(0, 160) });
+  }
+  return out;
+}
 
 const CLOCK = String.raw`(?:performance|Date)\.now\(\)`;
 const NAME = String.raw`[A-Za-z_$][\w$]*`;
@@ -129,25 +178,25 @@ export function findings(text) {
   return out;
 }
 
-/** Every tracked unit test in SCOPE with what it reads. */
-export function scan(root = ROOT) {
+/** Every tracked unit test in SCOPE with what it reads (`quote`: [{ line, text }] per file, its quote calls on the real clock). */
+export function scan(root = ROOT, finder = findings) {
   const files = execFileSync("git", ["ls-files", "-z", "--", ...SCOPE.map((g) => `:(glob)${g}`)], { cwd: root, encoding: "utf8" })
     .split("\0")
     .filter((f) => UNIT_TEST.test(f));
   const out = {};
   for (const f of files) {
-    const found = findings(readFileSync(path.join(root, f), "utf8"));
+    const found = finder(readFileSync(path.join(root, f), "utf8"));
     if (found.length > 0) out[f] = found;
   }
   return out;
 }
 
 /** What the rule refuses: a file outside LISTED that reads one, or a file reading more than LISTED lists for it. */
-export function refusals(found, before = LISTED) {
+export function refusals(found, before = LISTED, what = "real elapsed time") {
   const out = [];
   for (const [f, list] of Object.entries(found)) {
     const allowed = before[f]?.count ?? 0;
-    if (list.length > allowed) out.push(`${f}: ${list.length} real elapsed time${list.length === 1 ? "" : "s"} (${allowed} listed): ${list.map((x) => `line ${x.line}`).join(", ")}`);
+    if (list.length > allowed) out.push(`${f}: ${list.length} ${what}${list.length === 1 ? "" : "s"} (${allowed} listed): ${list.map((x) => `line ${x.line}`).join(", ")}`);
   }
   return out;
 }
@@ -161,7 +210,9 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const found = scan();
   for (const [f, list] of Object.entries(found)) for (const x of list) console.log(`${f}:${x.line}  ${x.text}`);
   for (const x of stale(found)) console.log(`LISTED can be lowered: ${x}`);
-  const bad = refusals(found);
+  const quote = scan(ROOT, quoteFindings);
+  for (const [f, list] of Object.entries(quote)) for (const x of list) console.log(`${f}:${x.line}  (quote on the real clock) ${x.text}`);
+  const bad = [...refusals(found), ...refusals(quote, QUOTE_LISTED, "quote on the real monotonic clock")];
   if (bad.length > 0) {
     console.error(`\n${bad.join("\n")}\n\nAssert what the time stood for: work counted, waits asked of an injected sleep, an injected clock, t.mock.timers, or the test's own { timeout }.`);
     process.exit(1);
