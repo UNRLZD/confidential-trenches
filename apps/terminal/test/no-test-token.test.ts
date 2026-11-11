@@ -20,6 +20,7 @@ import lists from "./discover-data/helper-lists-2026-11-01.json" with { type: "j
 import tokenRead from "./token-source/helper-token-2026-11-03.json" with { type: "json" };
 import baseLists from "./chains-evm/lists-base-2026-11-09.json" with { type: "json" };
 import robinhoodLists from "./chains-evm/lists-robinhood-2026-11-09.json" with { type: "json" };
+import nearLists from "./chains-near/lists-near-planted-2026-11-12.json" with { type: "json" };
 import baseToken from "./chains-evm/token-base-2026-11-09.json" with { type: "json" };
 import robinhoodToken from "./chains-evm/token-robinhood-2026-11-09.json" with { type: "json" };
 
@@ -37,17 +38,25 @@ type Rec = { chain: string; as_of_ms: number; fields: string[]; lists: Record<st
 const listsOf = (rec: Rec) => ({ chain: rec.chain, as_of_ms: rec.as_of_ms, lists: Object.fromEntries(Object.entries(rec.lists).map(([k, rows]) => [k, rows.map((v) => Object.fromEntries(rec.fields.map((f, i) => [f, v[i]])))])) });
 const tokenOf = (t: { fields: string[]; row: unknown[]; rest: Obj }) => ({ ...t.rest, row: Object.fromEntries(t.fields.map((f, i) => [f, t.row[i]])) as Obj & { token: string; symbol: string; chain: string } });
 /** Base's and Robinhood's recorded lists and a recorded token answer of each. */
+const NEAR_LISTS = listsOf(nearLists as Rec);
 const EVM = { base: { lists: listsOf(baseLists as Rec), token: tokenOf(baseToken) }, robinhood: { lists: listsOf(robinhoodLists as Rec), token: tokenOf(robinhoodToken) } };
 
 /** A fetch that answers Solana's lists URL and one token URL from the given bodies, and records every URL it was asked;
  *  `evm` answers Base's and Robinhood's lists and token reads from their recordings too (else those chains fail). */
-function helper(o: { lists?: unknown; listsStatus?: number; token?: unknown; tokenStatus?: number; evm?: boolean } = {}) {
+function helper(o: { lists?: unknown; listsStatus?: number; token?: unknown; tokenStatus?: number; evm?: boolean; near?: boolean } = {}) {
   const calls: { url: string; init: RequestInit | undefined }[] = [];
   const send = (body: unknown, status: number) => new Response(typeof body === "string" ? body : JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
   const fetchFn: typeof fetch = async (input, init) => {
     const url = String(input);
     calls.push({ url, init });
     const chain = new URL(url).searchParams.get("chain");
+    if (o.near && chain === "near") {
+      if (url === listsUrl("near")) return send(NEAR_LISTS, 200);
+      const id = new URL(url).searchParams.get("token") ?? "";
+      const listed = Object.values(NEAR_LISTS.lists).flat().find((r) => r.token === id);
+      if (url === source.TOKEN_URL(id, "near") && listed) return send({ ...EVM.base.token, row: { ...EVM.base.token.row, chain: "near", token: id, symbol: listed.symbol } }, 200);
+      return send({ error: { code: "not_found" } }, 404);
+    }
     if (o.evm && (chain === "base" || chain === "robinhood")) {
       const e = EVM[chain];
       if (url === listsUrl(chain)) return send(e.lists, 200);
@@ -69,7 +78,7 @@ const load = (fetchFn: typeof fetch, pick: Parameters<typeof source.loadTopToken
   assert.equal(typeof source.loadTopToken, "function", "source.ts exports loadTopToken (the live read), not a fixture switch");
   return source.loadTopToken!(fetchFn, pick, allListsReader());
 };
-const LISTS_URLS = ["solana", "base", "robinhood"].map((c) => listsUrl(c as "solana"));
+const LISTS_URLS = ["solana", "base", "robinhood", "near"].map((c) => listsUrl(c as "solana"));
 
 // ---------------------------------------------------------------------------------------------- what ships
 /** Every module of src/ that src/main.tsx reaches through relative imports (static, re-exports and dynamic). */
@@ -144,7 +153,7 @@ test("loadTopToken: the top follows the lists (a different top Trending token is
   const { fetchFn, calls } = helper({ lists: a, token: { ...token.answer, row } });
   const d = await load(fetchFn);
   assert.equal(d.status === "ready" && d.row.token, second.token);
-  assert.equal(calls[3]!.url.endsWith(`token=${second.token}`), true);
+  assert.equal(calls[LISTS_URLS.length]!.url.endsWith(`token=${second.token}`), true);
 });
 
 test("loadTopToken: an empty Trending column is the empty state, and no token is read", async () => {
@@ -153,7 +162,7 @@ test("loadTopToken: an empty Trending column is the empty state, and no token is
   a.lists.trending_1h = [];
   const { fetchFn, calls } = helper({ lists: a });
   assert.deepEqual(await load(fetchFn), { status: "empty" });
-  assert.equal(calls.length, 3, "the three lists reads, no token read");
+  assert.equal(calls.length, LISTS_URLS.length, "the lists reads, no token read");
 });
 
 test("loadTopToken: on All the top of every chain's merged Trending column (Discover's order), read on its own chain", async () => {
@@ -182,6 +191,16 @@ test("loadTopToken: on a pick, that chain's top Trending token, read on that cha
   // a pick whose chain answered nothing is the empty state, never another chain's token
   const { fetchFn: solOnly } = helper();
   assert.deepEqual(await load(solOnly, "base"), { status: "empty" });
+});
+
+test("loadTopToken: on the NEAR pick, NEAR's top Trending token, read on NEAR by its account id", async () => {
+  const top = columnRows(NEAR_LISTS as unknown as MarketSnapshot, "trending")[0]!;
+  const { fetchFn, calls } = helper({ near: true });
+  const d = await load(fetchFn, "near");
+  assert.equal(d.status === "ready" && d.row.token, top.token);
+  assert.equal(d.status === "ready" && d.row.chain, "near");
+  assert.equal(calls.at(-1)!.url, source.TOKEN_URL(top.token, "near"));
+  assert.equal(calls.at(-1)!.url, `https://ct-api.unrealized.trade/v1/market/token?chain=near&token=${top.token}`);
 });
 
 test("loadTopToken: every failed or wrong read is the error state, never a token", async () => {

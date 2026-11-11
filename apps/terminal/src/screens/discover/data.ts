@@ -1,10 +1,10 @@
-// Where Discover's data comes from: GET /v1/market/lists?chain=<chain> on HELPER_HOST for Solana, Base and Robinhood
+// Where Discover's data comes from: GET /v1/market/lists?chain=<chain> on HELPER_HOST for Solana, Base, Robinhood and NEAR
 // (card app-discover-live for Solana, apps/helper/src/data/solana/lists.ts; card app-chains-evm for Base and Robinhood,
-// apps/helper/src/data/evm/lists.ts), merged in the browser into one snapshot (09-design-brief S1 Chain filter: "`All`
+// apps/helper/src/data/evm/lists.ts; card helper-near-lists-and-token for NEAR), merged in the browser into one snapshot (09-design-brief S1 Chain filter: "`All`
 // merges the four chains' served lists in the browser"); the shell's chain filter narrows it to one chain (pickSnapshot).
 // Each answer is 06b's `snapshot` of `Row`s (fields.ts), 38 fields a row, every chain the same list. Display only: nothing
-// here feeds a signature, so a row that is not a row is dropped and the rest is drawn as the helper sent it. NEAR joins
-// when the helper serves its lists (it answers chain=near 404 today).
+// here feeds a signature, so a row that is not a row is dropped and the rest is drawn as the helper sent it. A field NEAR
+// lacks is null in its rows, as on EVM.
 // The helper refreshes the lists every 12 s; since app-console-429 it answers its last good read, dated by as_of_ms, on a
 // 200 however old it is, and never a 503 once it has one. So the screen reads on that cadence and shows two separate
 // things: how old the data is, as the list's age once its read is older than 60 s (model.ts listAge, card app-list-age);
@@ -19,7 +19,7 @@ import type { MarketChain, MarketRow, MarketSnapshot } from "./fields.ts";
 import { SNAPSHOT_LISTS } from "./fields.ts";
 
 /** The chains whose lists the helper serves, in the chain filter's order (routes.ts TOKEN_CHAINS). */
-export const LIST_CHAINS = ["solana", "base", "robinhood"] as const satisfies readonly MarketChain[];
+export const LIST_CHAINS = ["solana", "base", "robinhood", "near"] as const satisfies readonly MarketChain[];
 export type ListChain = (typeof LIST_CHAINS)[number];
 
 /** HELPER_HOST: the helper the CSP's connect-src names (public/_headers). */

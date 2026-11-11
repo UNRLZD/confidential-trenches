@@ -131,6 +131,7 @@ export const CHANGED = [
   "scripts/live-checks/kit-renewal-read-bounded.mjs",
   "scripts/live-checks/market-data-evm.mjs",
   "scripts/live-checks/market-data-evm-token.mjs",
+  "scripts/live-checks/helper-near-lists-and-token.mjs",
   "scripts/live-checks/market-data-push.mjs",
   "scripts/live-checks/market-data-solana-lists.mjs",
   "scripts/live-checks/market-data-solana-token.mjs",
