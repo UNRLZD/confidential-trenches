@@ -164,13 +164,26 @@ export type BuyWalletsRead = { signal?: AbortSignal; pick?: (n: number) => numbe
 /** buyWallets in two steps: the Ws derived from the seed now, which the result keeps no copy of (the caller zeroes its
  *  seed at once), then read when asked; a read of `only` some Ws reads and answers only those. */
 export function derivedBuyWallets(seed64: Uint8Array, pools: readonly BuyPool[]): { read(opts?: BuyWalletsRead): Promise<BuyWallets> } {
+  const { failed, found, jobs } = derive(seed64, pools, true);
+  return { read: (opts = {}) => readDerived(pools, found, jobs, new Map(failed), opts) };
+}
+
+/** The Ws the pools' spent notes paid, derived from the seed as derivedBuyWallets does (the same refusals), with no read:
+ *  each with no holdings (card pool-sell-legs-side-by-side: a sale lists its Ws from the device alone, and reads each
+ *  one itself). */
+export function buyWalletsOf(seed64: Uint8Array, pools: readonly Omit<BuyPool, "reader">[]): BuyWallets {
+  const { failed, found } = derive(seed64, pools, false);
+  return { wallets: found.flatMap((ws, pi) => (failed.has(pi) ? [] : ws.filter((w): w is BuyWallet => w !== undefined))), failed: [...failed].map(([pi, error]) => ({ pool: pools[pi]!.id, error })) };
+}
+
+function derive(seed64: Uint8Array, pools: readonly (Omit<BuyPool, "reader"> & { reader?: HoldingsReader })[], read: boolean) {
   const failed = new Map<number, string>();
   const found: (BuyWallet | undefined)[][] = pools.map(() => []);
   const jobs: { p: number; k: number; address: string }[] = [];
   const seen = new Map<string, [number, number]>(); // a W -> its pool and wallet index, across every pool
   pools.forEach((p, pi) => {
     try {
-      if (p.reader?.chain !== p.chain || typeof p.reader.read !== "function") throw new Error(`the reader is not of chain ${p.chain}`);
+      if (read && (p.reader?.chain !== p.chain || typeof p.reader.read !== "function")) throw new Error(`the reader is not of chain ${p.chain}`);
       p.spent.forEach((s, k) => {
         const j = jOf(s.ref);
         const w = freshWallet(seed64, p.chain, s.label, j);
@@ -186,7 +199,7 @@ export function derivedBuyWallets(seed64: Uint8Array, pools: readonly BuyPool[])
       failed.set(pi, msg(e));
     }
   });
-  return { read: (opts = {}) => readDerived(pools, found, jobs, new Map(failed), opts) };
+  return { failed, found, jobs };
 }
 
 async function readDerived(pools: readonly BuyPool[], derived: readonly (BuyWallet | undefined)[][], all: readonly { p: number; k: number; address: string }[], failed: Map<number, string>, opts: BuyWalletsRead): Promise<BuyWallets> {

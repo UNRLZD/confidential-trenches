@@ -59,8 +59,8 @@ import { POOL_TESTNET } from "../../wallet/src/pool/network.ts";
 import { askWhileBusy, type BusyOpts } from "../../wallet/src/busy.ts";
 import { POOL_SEND_BUSY_WAIT_MS, PoolSendBusy, poolBuyKind, type PoolBuyHost } from "./pool-buy.ts";
 import { BUY_MINTS_KEY, buyMints, keptSells, owedRentBacks, poolSellKind, resumeRentBacks, settleDeadSellOps, settlePoolSells, settleSellOps, type PoolSellKindHost } from "./pool-sell.ts";
-import { buyWallets, derivedBuyWallets, evmHelperKeyedRpc, solanaHelperHoldings, solanaHoldingsAt, spentNotesOf, type HoldingsReader } from "../../wallet/src/pool/buy-wallets.ts";
-import { keptPositions, POSITION_COSTS_KEY, POSITIONS_KEPT_KEY, POSITIONS_SOLD_KEY, POSITIONS_SOLD_TX_KEY, POSITIONS_UNLANDED_KEY, positionsCache, positionsPass, recordPoolBuy, routeInto, type BuyRecordStore, type FoundWallet, type PoolBuyFacts, type Position, type PositionCosts } from "./positions.ts";
+import { buyWallets, buyWalletsOf, derivedBuyWallets, evmHelperKeyedRpc, solanaHelperHoldings, solanaHoldingsAt, spentNotesOf, type HoldingsReader } from "../../wallet/src/pool/buy-wallets.ts";
+import { keptListed, keptPositions, POSITION_COSTS_KEY, POSITIONS_KEPT_KEY, POSITIONS_SOLD_KEY, POSITIONS_SOLD_TX_KEY, POSITIONS_UNLANDED_KEY, positionsCache, positionsPass, recordPoolBuy, routeInto, type BuyRecordStore, type FoundWallet, type PoolBuyFacts, type Position, type PositionCosts } from "./positions.ts";
 import { evmStoredHold } from "../../wallet/src/pool/evm-hold-store.ts";
 import { EVM_CHAIN_IDS, EVM_EPOCH_MS, EVM_POOLS, evmPair, evmPool as walletEvmPool, evmPoolScopeOf, evmTreeSync, type EvmFeeAnswer, type EvmPoolOf, type EvmPoolPin, type EvmPoolRequest, type EvmRpc, type EvmSyncHold, type EvmTreeSync } from "../../wallet/src/pool/evm.ts";
 import { evmSettleReserved } from "../../wallet/src/pool/evm-settle.ts";
@@ -1294,13 +1294,15 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     return run;
   };
   // pool.sell: W from the page's buy wallets; one run per tap, one at a time (the sell kind's lock)
-  const sellHost = (): PoolSellKindHost & { end(): void } => {
+  const sellHost = (sale = false): PoolSellKindHost & { end(): void } => {
     const r = rpcs();
     // the sign outs asked before this host: one asked after it stops its sales before their signatures (review P3-5 of
     // 77055f4e)
     const outs = signOuts;
     let notes: Promise<NoteStore> | null = null;
     const store = (): Promise<NoteStore> => (notes ??= page.store().then((w) => openNoteStore(w)));
+    // the positions' passes held off by a sale that listed its Ws with no read, until the run ends
+    let held: ReturnType<typeof positions.preempt> | null = null;
     return {
       pin: pin!,
       rpcs: r,
@@ -1313,14 +1315,38 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       wallets: async () => {
         const hold = positions.preempt();
         let found: FoundWallet[] | null = null;
+        let listedOnly = false;
         try {
+          // a sale's list with no read at the tap (card pool-sell-legs-side-by-side): every W the pool's spent notes
+          // paid, derived from the seed, each with the tokens the last whole positions pass listed it holding; the sale
+          // reads each W it sells from itself (pool-sell.ts planReads: the Ws a buy record or this listing names for the
+          // token, one W per request), and the passes stay held off until the run's end. No whole pass kept yet (a
+          // restored device before its first pass), or a load's rent back: the finder's read, as before
+          const listed = sale ? keptListed(await (await page.store()).get("meta", POSITIONS_KEPT_KEY)) : null;
+          if (listed !== null) {
+            const spent = await spentNotesOf(await store(), scope!);
+            const seed64 = await page.seed64();
+            let got: ReturnType<typeof buyWalletsOf>;
+            try {
+              got = buyWalletsOf(seed64, [{ id: pin!.program, chain: "sol", spent }]);
+            } finally {
+              seed64.fill(0);
+            }
+            if (got.failed.length > 0) throw new Error("the buy wallets could not be derived");
+            listedOnly = true;
+            return got.wallets.map((w) => ({ ...w, holdings: { native: 0n, tokens: new Map([...(listed.get(w.address) ?? [])].map(([m, a]) => [m, { amount: a, frozen: false }] as const)), unreadable: [] } }));
+          }
           // a sale's list: its Ws asked side by side (card pool-sell-legs-side-by-side)
           const got = await poolBuyWallets(await store(), r, undefined, true);
           found = got.map((w) => ({ address: w.address, tokens: new Map([...w.holdings.tokens].map(([m, h]) => [m, h.amount] as const)) }));
           return got;
         } finally {
-          // read: the next pass's read; failed (the sell refuses, or a rent back at load waits): the next pass reads
-          if (found === null) hold.release();
+          // listed with no read: held until the run ends; read: the next pass's read; failed (the sell refuses, or a
+          // rent back at load waits): the next pass reads
+          if (listedOnly) {
+            held?.release();
+            held = hold;
+          } else if (found === null) hold.release();
           else hold.feed(found);
         }
       },
@@ -1338,10 +1364,14 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       stopped: () => signOuts !== outs,
       // a sign out ends the sale's waits (read-waits.ts waitUnless)
       signal: solanaStop.signal,
-      end: () => void notes?.then((n) => n.close(), () => {}),
+      end: () => {
+        held?.release();
+        held = null;
+        void notes?.then((n) => n.close(), () => {});
+      },
     };
   };
-  const sell = (over.tradeKinds?.sell ?? poolSellKind)(() => sellHost());
+  const sell = (over.tradeKinds?.sell ?? poolSellKind)(() => sellHost(true));
   // the sells a closed or reloaded page left INCOMING: each settled by the run's own verdict rules, its ops record's
   // stage written; under the seed's shared lock, as every pass that writes the store (a sign out waits for it)
   const settleSells = async (): Promise<void> => {

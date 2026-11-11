@@ -1399,6 +1399,9 @@ test("P2-2 (PROBE A, the page): a sell whose own read of the Ws fails still ends
   };
   const tp = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { pin: PIN, rpcs: c.rpcs, holdings: () => c.finder, tradeKinds: { sell }, positions: { setTimer: (f: () => void) => (timers.push(f), f), clearTimer: (t: unknown) => void timers.splice(timers.indexOf(t as () => void) >>> 0, timers.includes(t as () => void) ? 1 : 0) } } as never);
   await until(async () => ((await tp.positions()) ?? []).length === 1);
+  // no whole pass kept (a restored device before its first): the sale lists its Ws through the finder (card
+  // pool-sell-legs-side-by-side: with one kept, it reads none)
+  await w.delete("meta", POSITIONS_KEPT_KEY);
   c.state.fail = true;
   const before = c.calls.finder;
   tp.flow({ kind: "pool.sell", chain: "solana", token: MINT, amount: 1n, slippageBps: 100, decimals: 6 }, { id: "s", sha: "00", progress: () => {} } as never);

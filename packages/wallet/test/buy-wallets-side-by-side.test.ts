@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { entropyToWords, wordsToSeed64 } from "../src/derive/index.ts";
-import { buyWallets, type Holdings, type HoldingsReader } from "../src/pool/buy-wallets.ts";
+import { buyWallets, buyWalletsOf, type Holdings, type HoldingsReader } from "../src/pool/buy-wallets.ts";
 
 // the all-zero entropy, a published vector (test/vectors/a8.json's kind of seed): no key of anyone's
 const SEED = wordsToSeed64(entropyToWords(new Uint8Array(16)));
@@ -62,4 +62,19 @@ test("without together (the positions' passes) the Ws are read one after another
     await drain();
   }
   assert.equal((await got).wallets.length, 3);
+});
+
+test("buyWalletsOf: the same Ws as the finder's derivation, each with no holdings, and nothing read; a W twice fails its pool", async () => {
+  const r = held();
+  const read = buyWallets(SEED, [{ id: "sol", chain: "sol", spent, reader: r.reader }], { pick: () => 0, together: true });
+  await drain();
+  r.waiting.forEach((x) => x.go(none));
+  const a = await read;
+  const b = buyWalletsOf(SEED, [{ id: "sol", chain: "sol", spent }]);
+  assert.deepEqual(b.failed, []);
+  assert.deepEqual(b.wallets.map((w) => [w.address, w.l, w.j, w.note, w.path]).sort(), a.wallets.map((w) => [w.address, w.l, w.j, w.note, w.path]).sort());
+  assert.ok(b.wallets.every((w) => w.holdings.native === 0n && w.holdings.tokens.size === 0));
+  const twice = buyWalletsOf(SEED, [{ id: "sol", chain: "sol", spent: [spent[0]!, spent[0]!] }]);
+  assert.deepEqual(twice.wallets, []);
+  assert.equal(twice.failed.length, 1);
 });
