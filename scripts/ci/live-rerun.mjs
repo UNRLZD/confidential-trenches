@@ -6,11 +6,16 @@
 //     Brooker, "Exponential Backoff And Jitter", AWS Architecture Blog, 4 Mar 2015: the pause is half of
 //     min(cap, base * 2^n) plus a random part of the other half, so it is never short and parallel jobs do not ask the
 //     same provider again in step; Google Cloud Storage's retry strategy retries a 429 the same way);
-//   - a run still INCONCLUSIVE after the last one exits 3, red, and its last line names the providers that did not
-//     answer (the hosts in the no-answer lines provider-answer.mjs writes). It is never a pass;
-//   - exit 0 passes; exit 1 (FAIL), exit 2 (ERROR) and any other code end the job at once, never run again: a wrong
-//     answer is the deploy's, and a check that maps its own INCONCLUSIVE to 2 (hosts-main-on-top, solana-mint-supply-moves:
-//     waits measured in hours) keeps that.
+//   - a run still INCONCLUSIVE after the last one is its own result (card live-run-red-means-the-build): never a pass and
+//     never a FAIL. Its last line names the providers that did not answer (the hosts in the no-answer lines
+//     provider-answer.mjs writes), the job prints a notice with that reason, writes it to the job's verdict file, and
+//     exits 0, so the run is red only when a check judged the build bad; the live job lists every inconclusive check by
+//     key with its reason on every run (scripts/ci/live-verdicts.mjs), so one that never judges is seen;
+//   - a check that maps its own INCONCLUSIVE to exit 2 so that it is never run again (hosts-main-on-top,
+//     solana-mint-supply-moves: waits measured in minutes to hours) is read by its last verdict line: exit 2 whose last
+//     `live-check <key>: <VERDICT>` line is INCONCLUSIVE is inconclusive, never run again; any other exit 2 is an ERROR;
+//   - exit 0 passes; exit 1 (FAIL), exit 2 (ERROR) and any other code end the job at once, red, never run again: a wrong
+//     answer is the deploy's, and a check that crashed may be (a helper answer it could not read).
 // Some checks end INCONCLUSIVE for something other than a silent provider: app-discover-rows-hold (no refresh reordered
 // a list in its window), deposit-sheet-oneclick-budget (its rerun spends 1Click's budget again), the browser checks that
 // saw no event to judge. A rerun is sound for them too: it can turn exit 3 into a PASS or a FAIL that it read, never a
@@ -23,7 +28,7 @@
 // could change it (review of 9eaf059a, P2-1).
 //   node <runner>/scripts/ci/live-rerun.mjs --log <file> <key> [args...]      the check's own exit code, after the reruns
 import { spawn } from "node:child_process";
-import { closeSync, existsSync, openSync, realpathSync, writeSync } from "node:fs";
+import { closeSync, existsSync, openSync, realpathSync, writeFileSync, writeSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -53,30 +58,91 @@ export function noAnswerHosts(output) {
   return [...new Set([...String(output).matchAll(NO_ANSWER)].map((m) => m[1].toLowerCase()))].sort();
 }
 
+/** A run's result: pass, fail, inconclusive or error (see the header). */
+export const VERDICTS = Object.freeze(["pass", "fail", "inconclusive", "error"]);
+
+/** The last `live-check <key>: <VERDICT>` line of a check's output: { verdict, line }, or null. */
+export function verdictLine(key, output) {
+  const re = new RegExp(`^live-check ${key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}: (PASS|FAIL|INCONCLUSIVE|ERROR)\\b.*$`, "gm");
+  const all = [...String(output).matchAll(re)];
+  return all.length ? { verdict: all.at(-1)[1], line: all.at(-1)[0].trim() } : null;
+}
+
+/** A run's verdict from its exit code and output (see the header). */
+export function verdictOf(key, code, output = "") {
+  if (code === 0) return "pass";
+  if (code === 1) return "fail";
+  if (code === INCONCLUSIVE) return "inconclusive";
+  if (code === 2 && verdictLine(key, output)?.verdict === "INCONCLUSIVE") return "inconclusive";
+  return "error";
+}
+
+/** Why a run was inconclusive, in one line: the check's own last INCONCLUSIVE or `--` line before its verdict line (the
+ *  line that says why), else its verdict line, then the providers that did not answer when it named any. */
+export function reasonOf(key, output = "", hosts = noAnswerHosts(output)) {
+  const lines = String(output).split("\n").map((l) => l.trim()).filter(Boolean);
+  const v = verdictLine(key, output);
+  const at = v ? lines.lastIndexOf(v.line) : lines.length;
+  const why = lines.slice(0, at < 0 ? lines.length : at).reverse().find((l) => /^(?:INCONCLUSIVE\b|--\s)/.test(l));
+  const base = (why ?? v?.line ?? "no verdict line in its output").replace(/^--\s+/, "").slice(0, 300);
+  return hosts.length ? `${base}; no answer from: ${hosts.join(", ")}` : base;
+}
+
+/** The job's exit for a result: 0 on a pass or an inconclusive, 1 on a FAIL, the check's own code (2 when none) on an
+ *  error. */
+export const exitOf = (verdict, code) => (verdict === "pass" || verdict === "inconclusive" ? 0 : verdict === "fail" ? 1 : Number.isInteger(code) && code > 1 && code !== INCONCLUSIVE ? code : 2);
+
+/** A GitHub notice for an inconclusive check, its title and message escaped as the workflow command reads them. */
+export function noticeLine(key, reason) {
+  const esc = (t) => String(t).replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A");
+  return `::notice title=${esc(`inconclusive ${key}`).replace(/:/g, "%3A").replace(/,/g, "%2C")}::${esc(reason)}`;
+}
+
+/** The job's verdict file beside its log (`<id>.log` -> `<id>.verdict.json`), which the live job reads. */
+export const verdictFile = (log) => (log ? `${log.replace(/\.log$/, "")}.verdict.json` : null);
+/** Writes `results` ([{ key, verdict, reason, runs }]) to the verdict file of `log`, when there is one. */
+export function writeVerdicts(log, results) {
+  const f = verdictFile(log);
+  if (f) writeFileSync(f, `${JSON.stringify({ results })}\n`);
+}
+
 const named = (hosts) => (hosts.length ? hosts.join(", ") : "none named in its output (its INCONCLUSIVE lines above say why)");
 
 /**
  * Runs `key` through `run(key, args)` ({ code, output }, or a bare exit code), again on exit 3 after `sleep(pauseMs)`,
  * up to policy.runs runs. `before(n)` (optional) is awaited before run n and returns false to stop there (a serial
- * group's budget that is not idle). Returns { code, runs, stopped }: `code` the last run's (null when none ran).
+ * group's budget that is not idle). Returns { code, runs, stopped, verdict, reason, exit }: `code` the last run's (null
+ * when none ran), `verdict` the last run's (verdictOf; "error" when stopped before any ran), `reason` why it was not a
+ * pass, `exit` the job's (exitOf).
  */
 export async function rerun(key, args, { run, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), say = console.log, random = Math.random, policy = RERUN, before = async () => true }) {
   let code = null;
+  let last = { verdict: "error", reason: "not run" };
   const quiet = [];
+  const end = (runs, stopped) => ({ code, runs, stopped, ...last, exit: exitOf(last.verdict, code) });
   for (let n = 1; ; n++) {
-    if (!(await before(n))) return { code, runs: n - 1, stopped: true };
-    const r = await run(key, args);
-    code = typeof r === "number" ? r : (r?.code ?? 2);
-    if (code !== INCONCLUSIVE) {
-      if (n > 1) say(`live-rerun ${key}: run ${n} of ${policy.runs} ended exit ${code}${code === 0 ? " PASS" : code === 1 ? " FAIL" : " ERROR"}; runs before it were INCONCLUSIVE (no answer from: ${named(quiet)})`);
-      else if (code !== 0) say(`live-rerun ${key}: exit ${code}${code === 1 ? " FAIL" : " ERROR"}, never run again`);
-      return { code, runs: n, stopped: false };
+    if (!(await before(n))) {
+      if (n === 1) last = { verdict: "error", reason: "not run: the run before it could not start" };
+      return end(n - 1, true);
     }
-    const hosts = noAnswerHosts(typeof r === "number" ? "" : r?.output ?? "");
+    const r = await run(key, args);
+    code = typeof r === "number" ? r : Number.isInteger(r?.code) ? r.code : 2;
+    const output = typeof r === "number" ? "" : (r?.output ?? "");
+    const verdict = verdictOf(key, code, output);
+    const own = verdictLine(key, output)?.line;
+    last = { verdict, reason: verdict === "pass" ? "" : verdict === "inconclusive" ? reasonOf(key, output) : (own ?? `exit ${code}`) };
+    if (code !== INCONCLUSIVE) {
+      if (n > 1) say(`live-rerun ${key}: run ${n} of ${policy.runs} ended exit ${code}${code === 0 ? " PASS" : code === 1 ? " FAIL" : verdict === "inconclusive" ? " INCONCLUSIVE" : " ERROR"}; runs before it were INCONCLUSIVE (no answer from: ${named(quiet)})`);
+      else if (verdict === "inconclusive") say(`live-rerun ${key}: exit ${code} INCONCLUSIVE (its last verdict line), never run again: ${last.reason}`);
+      else if (code !== 0) say(`live-rerun ${key}: exit ${code}${code === 1 ? " FAIL" : " ERROR"}, never run again`);
+      return end(n, false);
+    }
+    const hosts = noAnswerHosts(output);
     for (const h of hosts) if (!quiet.includes(h)) quiet.push(h);
     if (n >= policy.runs) {
       say(`live-rerun ${key}: INCONCLUSIVE after ${n} runs, never a pass; no answer from: ${named(hosts)}`);
-      return { code, runs: n, stopped: false };
+      last = { verdict, reason: `after ${n} runs: ${reasonOf(key, output, hosts)}` };
+      return end(n, false);
     }
     const ms = pauseMs(n - 1, policy, random);
     say(`live-rerun ${key}: run ${n} of ${policy.runs} INCONCLUSIVE (no answer from: ${named(hosts)}); run again in ${Math.round(ms / 1000)} s`);
@@ -125,10 +191,14 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
   if (!key || !isCheck(key, root)) {
     const line = `live-rerun: ERROR: ${key ? `no such check: ${key} in ${root}/scripts/live-checks` : "no check named"}`;
     out.say(line);
+    writeVerdicts(log, [{ key: key ?? "", verdict: "error", reason: line, runs: 0 }]);
     out.close();
     process.exit(2);
   }
   const r = await rerun(key, args, { run: (k, a) => runCheck(k, a, root, out.write), say: out.say });
+  writeVerdicts(log, [{ key, verdict: r.verdict, reason: r.reason, runs: r.runs }]);
+  if (r.verdict === "inconclusive") out.say(noticeLine(key, r.reason));
+  out.say(`live-rerun ${key}: ${r.verdict.toUpperCase()}${r.reason ? `: ${r.reason}` : ""}`);
   out.close();
-  process.exitCode = r.code;
+  process.exitCode = r.exit;
 }

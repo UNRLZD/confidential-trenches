@@ -81,7 +81,10 @@ test("live-inconclusive-rerun: both runners hold every rerun case, and live.yml 
   const { rerunProblems, RERUN_CASES } = await gate();
   assert.deepEqual(await rerunProblems(), []);
   assert.ok(LIVE.includes('          node .live-runner/scripts/ci/live-rerun.mjs --log "$out/$ID.log" "$KEY" $ARGS\n'), "the single-check step");
-  assert.deepEqual(RERUN_CASES.map((c) => c.codes.join(",")), ["0", "3,0", "3", "3,1", "1", "2"]);
+  assert.deepEqual(RERUN_CASES.map((c) => c.codes.join(",")), ["0", "3,0", "3", "3,1", "1", "2", "2", "2", ""]);
+  // card live-run-red-means-the-build: each result in the cases, and a FAIL and a crash red in every one that has them
+  assert.deepEqual([...new Set(RERUN_CASES.map((c) => c.verdict))].sort(), ["error", "fail", "inconclusive", "pass"]);
+  assert.ok(RERUN_CASES.every((c) => (c.verdict === "fail" || c.verdict === "error" ? c.pass === false : c.pass === true)));
 });
 
 test("planted (live-inconclusive-rerun): a single-check step that runs the check itself, read once, is refused", () => {
@@ -90,16 +93,25 @@ test("planted (live-inconclusive-rerun): a single-check step that runs the check
   assert.ok(has(liveProblems(direct), /single-check step is not the one the gate holds/));
 });
 
-// stand-in runners that each break one rule, on the single-check path; the group path is planted in live-serial.test.mjs
-const STANDIN = (single) => ({ single, group: async (keys, o) => ({ ok: (await single(keys[0], o)).code === 0 }) });
-const loop = (decide) => async (key, o) => {
+// stand-in runners that each break one rule, on the single-check path; the group path is planted in live-serial.test.mjs.
+// `judge` maps the last run's code and output to the job's exit and recorded verdict; by default the rule before card
+// live-run-red-means-the-build: the exit is the check's own code (3 red at the bound), the verdict read from the code alone
+const byCode = (code) => (code === 0 ? "pass" : code === 1 ? "fail" : code === 3 ? "inconclusive" : "error");
+const OLD = (code) => ({ exit: code ?? 2, verdict: byCode(code) });
+const STANDIN = (single) => ({ single, group: async (keys, o) => {
+  const r = await single(keys[0], o);
+  return { ok: r.exit === 0, results: [{ key: keys[0], verdict: r.verdict }] };
+} });
+const loop = (decide, judge = OLD) => async (key, o) => {
   let code;
+  let output = "";
   for (let n = 1; ; n++) {
     const r = await o.run(key, []);
     code = typeof r === "number" ? r : r.code;
+    output = typeof r === "number" ? "" : (r.output ?? "");
     const next = decide(code, n);
-    if (next === "stop") return { code };
-    if (next === "pass") return { code: 0 };
+    if (next === "stop") return { code, ...judge(code, output) };
+    if (next === "pass") return { code: 0, exit: 0, verdict: "pass" };
     await o.sleep(next);
   }
 };
@@ -108,20 +120,25 @@ test("planted (live-inconclusive-rerun): exit 3 then exit 0 must pass: a runner 
   const { rerunProblems } = await gate();
   const p = await rerunProblems(STANDIN(loop(() => "stop")));
   assert.ok(has(p, /a single check\): exit 3 then exit 0 passes on the rerun: was red, want a pass/), p.join("\n"));
-  assert.ok(has(p, /exit 3 throughout is red at the bound and names the providers: ran 1 times, want 3/));
+  assert.ok(has(p, /exit 3 throughout is inconclusive at the bound, green, and names the providers: ran 1 times, want 3/));
 });
 
-test("planted (live-inconclusive-rerun): exit 3 throughout must stay red and name the providers", async () => {
+// card live-run-red-means-the-build: an inconclusive check is its own result, green and named, never a pass
+const GREEN_INC = (code) => ({ exit: code === 3 ? 0 : (code ?? 2), verdict: byCode(code) });
+test("planted (live-run-red-means-the-build): exit 3 throughout must be inconclusive, green at the bound, and name the providers", async () => {
   const { rerunProblems } = await gate();
-  // passes once the bound is spent
+  // the rule before this card: red at the bound
+  const old = await rerunProblems(STANDIN(loop((c, n) => (c !== 3 || n >= 3 ? "stop" : 30_000))));
+  assert.ok(has(old, /a single check\): exit 3 throughout is inconclusive at the bound, green, and names the providers: was red, want a pass/), old.join("\n"));
+  // a pass once the bound is spent: an inconclusive check counted as one that judged
   const lenient = await rerunProblems(STANDIN(loop((c, n) => (c !== 3 ? "stop" : n >= 3 ? "pass" : 30_000))));
-  assert.ok(has(lenient, /exit 3 throughout is red at the bound and names the providers: passed, want red/), lenient.join("\n"));
-  // red, but names no provider
-  const mute = await rerunProblems(STANDIN(loop((c, n) => (c !== 3 || n >= 3 ? "stop" : 30_000))));
+  assert.ok(has(lenient, /exit 3 throughout is inconclusive at the bound, green, and names the providers: recorded pass, want inconclusive/), lenient.join("\n"));
+  // green, but names no provider
+  const mute = await rerunProblems(STANDIN(loop((c, n) => (c !== 3 || n >= 3 ? "stop" : 30_000), GREEN_INC)));
   assert.ok(has(mute, /does not name the providers that did not answer \(rpc-a\.example\.org, rpc-b\.example\.org\)/), mute.join("\n"));
   // no bound
-  const endless = await rerunProblems(STANDIN(loop((c, n) => (c !== 3 || n > 8 ? "stop" : 30_000))));
-  assert.ok(has(endless, /exit 3 throughout is red at the bound and names the providers: ran 9 times, want 3/), endless.join("\n"));
+  const endless = await rerunProblems(STANDIN(loop((c, n) => (c !== 3 || n > 8 ? "stop" : 30_000), GREEN_INC)));
+  assert.ok(has(endless, /exit 3 throughout is inconclusive at the bound, green, and names the providers: ran 9 times, want 3/), endless.join("\n"));
   // no pause, or a short one
   const eager = await rerunProblems(STANDIN(loop((c, n) => (c !== 3 || n >= 3 ? "stop" : 1000))));
   assert.ok(has(eager, /a pause of 1000 ms, under half the base/), eager.join("\n"));
@@ -133,6 +150,25 @@ test("planted (live-inconclusive-rerun): exit 1 and exit 2 must never run again"
   assert.ok(has(p, /exit 1 \(FAIL\) is never run again: ran 3 times, want 1/), p.join("\n"));
   assert.ok(has(p, /exit 2 \(ERROR\) is never run again: ran 3 times, want 1/), p.join("\n"));
   assert.ok(has(p, /exit 3 then exit 1 is red and not run again: ran 3 times, want 2/), p.join("\n"));
+});
+
+test("planted (live-run-red-means-the-build): an exit 2 is read by its last verdict line, and a FAIL or a crash stays red", async () => {
+  const { rerunProblems } = await gate();
+  const once = (c, n) => (c !== 3 || n >= 3 ? "stop" : 30_000);
+  // the code alone: a check's own INCONCLUSIVE (exit 2) read as an ERROR, red
+  const codeOnly = await rerunProblems(STANDIN(loop(once, GREEN_INC)));
+  assert.ok(has(codeOnly, /exit 2 whose last verdict line is INCONCLUSIVE is inconclusive, green, never run again: was red, want a pass/), codeOnly.join("\n"));
+  assert.ok(has(codeOnly, /exit 2 whose last verdict line is INCONCLUSIVE is inconclusive, green, never run again: recorded error, want inconclusive/), codeOnly.join("\n"));
+  // every exit 2 green: an ERROR, or a FAIL line after an INCONCLUSIVE one, let through
+  const every2 = await rerunProblems(STANDIN(loop(once, (code) => (code === 2 ? { exit: 0, verdict: "inconclusive" } : GREEN_INC(code)))));
+  assert.ok(has(every2, /exit 2 \(ERROR\) is never run again: passed, want red/), every2.join("\n"));
+  assert.ok(has(every2, /exit 2 whose last verdict line is FAIL after an INCONCLUSIVE one is an ERROR, red: passed, want red/), every2.join("\n"));
+  // a FAIL green
+  const failGreen = await rerunProblems(STANDIN(loop(once, (code) => ({ exit: code === 1 ? 0 : GREEN_INC(code).exit, verdict: byCode(code) }))));
+  assert.ok(has(failGreen, /exit 1 \(FAIL\) is never run again: passed, want red/), failGreen.join("\n"));
+  // a crash (no exit code) read as a pass
+  const crashGreen = await rerunProblems(STANDIN(loop(once, (code) => (code === null ? { exit: 0, verdict: "pass" } : GREEN_INC(code)))));
+  assert.ok(has(crashGreen, /a check that crashed \(no exit code: killed by a signal\) is an ERROR, red, never run again: passed, want red/), crashGreen.join("\n"));
 });
 
 test("planted (live-inconclusive-rerun): a bound or a pause out of reason is refused", async () => {
@@ -468,7 +504,8 @@ test("helper-evm-sender-2 runs on the PrivacyPoolSimple each EVM network's deplo
 
 // ---- card helper-live-jup-serial: the checks that spend the helper's Jupiter budget run one after another in one job ----
 
-const BUDGET_KEYS = ["helper-token-page-cold", "market-data-solana-token", "helper-page-jup-429", "solana-legs-share-wait", "solana-mint-supply-moves", "solana-jupiter-build", "app-a2-e2e"];
+// solana-mint-supply-moves first: it lets the next check start once its dry builds are made (card live-run-red-means-the-build)
+const BUDGET_KEYS = ["solana-mint-supply-moves", "helper-token-page-cold", "market-data-solana-token", "helper-page-jup-429", "solana-legs-share-wait", "solana-jupiter-build", "app-a2-e2e"];
 
 test("the helper's plan runs the seven checks that spend the Jupiter budget as ONE matrix entry, in order, and every other check as its own", async () => {
   const plan = await planFor("helper", { commit: COMMIT });
@@ -658,4 +695,28 @@ test("planted (re-check P3-c): NODE_OPTIONS, or a write to GITHUB_ENV or GITHUB_
   assert.ok(has(plant("  check:\n    needs: plan\n", "  check:\n    needs: plan\n    env:\n      NODE_OPTIONS: --require ./pass.cjs\n"), env), "NODE_OPTIONS on the job");
   assert.ok(has(plant("      - name: Google Chrome stable, and its sandbox comes up\n        if: matrix.chrome", "      - run: echo \"NODE_OPTIONS=--import ./pass.mjs\" >> \"$GITHUB_ENV\"\n      - name: Google Chrome stable, and its sandbox comes up\n        if: matrix.chrome"), env), "a GITHUB_ENV write");
   assert.ok(has(plant("      - name: Google Chrome stable, and its sandbox comes up\n        if: matrix.chrome", "      - run: echo \"$PWD/fake-node\" >> $GITHUB_PATH\n      - name: Google Chrome stable, and its sandbox comes up\n        if: matrix.chrome"), env), "a GITHUB_PATH write, a node of its own first");
+});
+
+// card live-run-red-means-the-build: the live job reads every job's verdicts, and each job uploads its own
+test("live-run-red-means-the-build: live.yml's live job reads every check job's verdicts through the workflow's own reader", async () => {
+  const { VERDICTS_LINE } = await gate();
+  assert.ok(LIVE.includes(`          ${VERDICTS_LINE}\n`));
+  assert.deepEqual(liveProblems(LIVE), []);
+});
+test("planted (live-run-red-means-the-build): a live job that skips the verdicts, reads them after the jobs' result, or a job that uploads none is refused", async () => {
+  const { VERDICTS_LINE } = await gate();
+  const gone = LIVE.replace(`          ${VERDICTS_LINE}\n`, "");
+  assert.ok(has(liveProblems(gone), /the live job does not read every check job's verdicts/));
+  const late = LIVE.replace(`          ${VERDICTS_LINE}\n`, "").replace('          echo "all $COUNT live runs', `          ${VERDICTS_LINE}\n          echo "all $COUNT live runs`);
+  assert.notEqual(late, LIVE);
+  assert.ok(has(liveProblems(late), /the live job does not read every check job's verdicts/));
+  const masked = LIVE.replace(`          ${VERDICTS_LINE}\n`, `          ${VERDICTS_LINE} || true\n`);
+  assert.ok(has(liveProblems(masked), /the live job does not read every check job's verdicts/), "a reader whose exit is swallowed");
+  const noUpload = LIVE.replace("        if: always()\n        with:\n          name: verdict-", "        with:\n          name: verdict-");
+  assert.notEqual(noUpload, LIVE);
+  assert.ok(has(liveProblems(noUpload), /the check job does not upload its verdict file/));
+  const noDownload = LIVE.replace("          pattern: verdict-*\n", "          pattern: live-*\n");
+  assert.ok(has(liveProblems(noDownload), /the live job does not download every check job's verdict artifact/));
+  const oldReader = LIVE.replace("          ref: ${{ github.workflow_sha }}\n          path: .live-verdicts", "          ref: ${{ inputs.commit }}\n          path: .live-verdicts");
+  assert.ok(has(liveProblems(oldReader), /checkout of the verdicts' reader is not the one the gate holds/));
 });
