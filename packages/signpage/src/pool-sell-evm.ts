@@ -177,6 +177,8 @@ export type EvmSellHost = {
   hold?<T>(f: () => Promise<T>): Promise<T>;
   sent?(): void;
   late?(a: { stage: TradeStage; txs: TxRef[] }): void;
+  /** The sale's Deposited, the same on both RPCs (evmSellVerdict), and its block: the page's positions read at no lower one. */
+  deposited?(o: EvmOpenSell, block: bigint): void;
   signal?: AbortSignal;
   /** The session's sign out, aborted at its tap: it ends a wait between the reads' attempts (read-waits.ts waitUnless). */
   stop?: AbortSignal;
@@ -665,6 +667,7 @@ async function watch(h: EvmSellHost, x: Watch, more: () => boolean, wait: (ms: n
       await h.unrecord(x.open.note, x.open.deadline).catch(() => {});
       return { stage: "not_landed", txs: [] };
     }
+    h.deposited?.(x.open, v.deposit.block);
     // the deposit is another signature's (review P2-A): this sale was signed again since (a newer record follows it), or
     // its transaction carries none of this run's signatures (another device's sale on the same nonce and note): this
     // one never ran, and it answers so, never filled; the note is the user's all the same and lands
