@@ -223,4 +223,15 @@ test("a sale the recorded Mayhem curve cannot pay from its real SOL has no refer
   const ref = await readSolanaReference([funded(0), funded(1)], sale);
   assert.ok(ref && ref.expectedOut > 0n && ref.expectedOuts.length === 2 && ref.expectedOuts.every((x) => x > 0n));
   assert.equal(ref.pools[0]!.venue, "pump-curve");
+  // the boundary (the review of 6eb64bdb): a curve holding exactly the sale's gross quotes it, one lamport less is null.
+  // That equality pays is what the code does today, and what pump-public-docs says of a sell (PUMP_PROGRAM_README:
+  // real_sol_reserves "decrease with the same lamports amount", 0 left): pump's program source is not public, so the
+  // exact on-chain comparison (its lib.rs:1037 Overflow) is not read here
+  const v = curveOf(0);
+  const gross = (sale.amount * v.getBigUint64(16, true)) / (v.getBigUint64(8, true) + sale.amount);
+  const holding = (sol: bigint) => (p: 0 | 1) => replay(p, (a, d) => { if (a === MX.curve) new DataView(d.buffer, d.byteOffset).setBigUint64(32, sol, true); });
+  const one = { side: "sell" as const, token: MX.mint, amount: sale.amount };
+  const at = await readSolanaReference([holding(gross)(0), holding(gross)(1)], one);
+  assert.ok(at && at.expectedOut > 0n && at.expectedOut < gross, `at its gross (${gross}) the sale is quoted`);
+  assert.equal(await readSolanaReference([holding(gross - 1n)(0), holding(gross - 1n)(1)], one), null);
 });
