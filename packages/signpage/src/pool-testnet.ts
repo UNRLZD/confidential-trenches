@@ -481,7 +481,7 @@ export type TestnetPool = {
 
 /** The testnet build's devnet pool on this page: the deposit flow, its settling and the next buy's proofs. */
 /** An open proof queue, its note store and the id of the pool it proves for. */
-type OpenQueue = { queue: ProofQueue<unknown>; notes: NoteStore; poolId: string; hold?: (signal?: AbortSignal) => Promise<void> };
+type OpenQueue = { queue: ProofQueue<unknown>; notes: NoteStore; poolId: string; hold?: (signal?: AbortSignal) => Promise<bigint> };
 
 /** The EVM turn pass (card evm-device-reads-need-no-old-state): this long past each period's turn, plus the page's
  *  spread, the period's first block is in on both seats (Base makes one every 2 s, Robinhood several a second) and still
@@ -657,9 +657,11 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       const hardwareConcurrency = over.hardwareConcurrency ?? globalThis.navigator?.hardwareConcurrency;
       // the period's fee held at the turn (the wallet's evmPool holdFee), at the pool's own time's period
       const holdFee = (pool as Partial<Pick<EvmPoolOf, "holdFee">>).holdFee;
-      const hold = typeof holdFee === "function" ? async (s?: AbortSignal) => {
+      // it answers the pool's time it read, the newest block's, which the turn's timer takes its offset from
+      const hold = typeof holdFee === "function" ? async (s?: AbortSignal): Promise<bigint> => {
         const now = await pool.now(s);
         await holdFee.call(pool, now - (now % pool.epochMs), s);
+        return now;
       } : undefined;
       return { queue: openProofQueue({ seed64, notes, pool, provers: [prover.vault], hardwareConcurrency, skip: owedNotes }), notes, poolId: pool.id, ...(hold ? { hold } : {}) };
     } catch (err) {
@@ -796,10 +798,12 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   // the sign outs asked on this page (signingOut): a Solana sell's host stops its sales at the next one, and an EVM
   // buy's busy wait ends at once on one started after its tap (review P3-5)
   let signOuts = 0;
-  const settleEvmReserved = async (chain: "base" | "robinhood"): Promise<void> => {
+  // `stop`: the sign-out signal as it was when the state read began (review of 7fbf2af3, P3-a): one read after an await
+  // takes the controller a sign out made since, and runs on
+  const settleEvmReserved = async (chain: "base" | "robinhood", stop?: AbortSignal): Promise<void> => {
     const e = evmPool(chain);
     if (e === null || !locks) return;
-    const signal = evmStop.signal;
+    const signal = stop ?? evmStop.signal;
     await locks.request(WALLET_SEED_LOCK, { mode: "shared", signal }, async () => {
       const notes = await openNoteStore(await page.store());
       let seed64: Uint8Array | null = null;
@@ -814,10 +818,10 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     });
   };
   const evmReserving = new Map<"base" | "robinhood", Promise<void>>();
-  const reserveEvm = (chain: "base" | "robinhood"): Promise<void> => {
+  const reserveEvm = (chain: "base" | "robinhood", stop?: AbortSignal): Promise<void> => {
     let p = evmReserving.get(chain);
     if (p === undefined) {
-      const run: Promise<void> = settleEvmReserved(chain).finally(() => {
+      const run: Promise<void> = settleEvmReserved(chain, stop).finally(() => {
         if (evmReserving.get(chain) === run) evmReserving.delete(chain);
       });
       evmReserving.set(chain, (p = run));
@@ -828,6 +832,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   // a time per chain) while the queue is open or the chain's notes are landed, and its RESERVED notes' settle
   const evmPassing = new Map<"base" | "robinhood", Promise<unknown>>();
   const evmRead = async (): Promise<void> => {
+    const stop = evmStop.signal;
     await settleEvmOpen().catch(() => {});
     const chains = (["base", "robinhood"] as const).filter((c) => evmPool(c) !== null);
     if (chains.length === 0) return;
@@ -837,9 +842,10 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     await Promise.all(
       chains.map(async (chain) => {
         const mine = all.filter((n) => n.scope === evmPool(chain)!.scope);
+        if (stop.aborted) return;
         if (!evmPassing.has(chain) && (evmQueues.has(chain) || mine.some((n) => n.state === "UNSPENT" || n.state === "HELD")))
           evmPassing.set(chain, evmProofs(chain).finally(() => evmPassing.delete(chain)));
-        if (mine.some((n) => n.state === "RESERVED")) await reserveEvm(chain).catch(() => {});
+        if (mine.some((n) => n.state === "RESERVED")) await reserveEvm(chain, stop).catch(() => {});
       }),
     );
   };
@@ -867,25 +873,54 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   let turnTimer: unknown = null;
   let turnMissed = false;
   let turnShowOn = false;
+  // the pool's time less the device's, ms, from the newest block's time at the last hold (review P3-c): the timer is
+  // armed on the pool's time, so a device clock minutes off still fires a few seconds past the pool's turn
+  let turnOffset = 0;
+  // the period (on the pool's time) the turn's pass last ran for: one a period, however early or late a timer fires
+  // (review P3-b)
+  let turnRan: number | null = null;
   const evmTurnPass = async (): Promise<void> => {
+    // the sign-out signal before any await (review P3-a)
+    const signal = evmStop.signal;
     const chains = (["base", "robinhood"] as const).filter((c) => evmPool(c) !== null);
     if (chains.length === 0) return;
     const all = await readNotes(await page.store());
-    const signal = evmStop.signal;
     await Promise.all(
       chains.map(async (chain) => {
         const mine = all.filter((n) => n.scope === evmPool(chain)!.scope);
-        if (!(evmQueues.has(chain) || mine.some((n) => n.state === "UNSPENT" || n.state === "HELD"))) return;
+        if (signal.aborted || !(evmQueues.has(chain) || mine.some((n) => n.state === "UNSPENT" || n.state === "HELD"))) return;
         let p = evmQueues.get(chain);
         if (p === undefined) evmQueues.set(chain, (p = openEvmQueue(chain)));
         const q = await p.catch(() => null);
         // the fee first, then the pass: a read that fails leaves the pass to read it as before
-        await q?.hold?.(signal).catch(() => {});
+        const now = await q?.hold?.(signal).catch(() => undefined);
+        if (typeof now === "bigint") {
+          const before = turnOffset;
+          turnOffset = Number(now) - turnNow();
+          // the timer armed on the old offset is armed again on the pool's time
+          if (Math.abs(turnOffset - before) > 1_000 && turnTimer !== null && !signal.aborted) {
+            turnClear(turnTimer);
+            turnTimer = null;
+            armTurn();
+          }
+        }
+        // a pass already running (begun before the turn, its binds of the period before) ends first; then this one,
+        // unless this tab signed out meanwhile
+        await evmPassing.get(chain)?.catch(() => {});
         if (signal.aborted) return;
         if (!evmPassing.has(chain)) evmPassing.set(chain, evmProofs(chain).finally(() => evmPassing.delete(chain)));
         await evmPassing.get(chain);
       }),
     );
+  };
+  const E_MS = Number(EVM_EPOCH_MS);
+  // the turn's pass, once for the period it is in on the pool's time
+  const runTurn = (): Promise<void> | undefined => {
+    const t = turnNow() + turnOffset;
+    const period = t - (t % E_MS);
+    if (turnRan === period) return undefined;
+    turnRan = period;
+    return evmTurnPass().catch(() => {});
   };
   const armTurn = (): void => {
     if (turnTimer !== null) return;
@@ -894,13 +929,13 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       turnSeen.onShow(() => {
         if (!turnMissed || turnTimer === null) return;
         turnMissed = false;
-        return evmTurnPass().catch(() => {});
+        return runTurn();
       });
     }
-    const now = turnNow();
-    const e = Number(EVM_EPOCH_MS);
-    let at = now - (now % e) + EVM_TURN_PASS_MS + turnSpread;
-    if (at <= now) at += e;
+    // the pool's time: the device's plus the offset the last hold read
+    const now = turnNow() + turnOffset;
+    let at = now - (now % E_MS) + EVM_TURN_PASS_MS + turnSpread;
+    if (at <= now) at += E_MS;
     turnTimer = turnSet(() => {
       turnTimer = null;
       armTurn();
@@ -908,7 +943,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         turnMissed = true;
         return;
       }
-      return evmTurnPass().catch(() => {});
+      return runTurn();
     }, at - now);
   };
   const stopTurn = (): void => {

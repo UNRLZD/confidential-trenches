@@ -542,39 +542,170 @@ function emptyChain(asked: string[]) {
   return { pair: [mk("https://a.example"), mk("https://b.example")] as const, fees: [mk("https://c.example"), mk("https://d.example")] };
 }
 
-test("the turn pass: armed at a state read for turn + 3 s + this page's spread (0 to 2 s, drawn once), and only for a chain with its queue open or its notes landed", async () => {
+test("the turn pass: armed at a state read for turn + 3 s + this page's spread (0 to 2 s, drawn once), once a period, and only for a chain with its queue open or its notes landed", async () => {
   const { w, ns } = await wallet();
   const START = 1_800_000_000_000; // a period's start
-  const tt = turnTimers({ now: START + 20_000, random: () => 0.25 });
-  let pools = 0, holds = 0, binds = 0;
+  const o = { now: START + 20_000, random: () => 0.25 };
+  const tt = turnTimers(o);
+  let pools = 0;
+  const holds: bigint[] = [];
+  let binds = 0;
   const pool = () => {
     pools++;
     const p = fakeEvmPool();
-    return Object.assign(p, { holdFee: async (e: bigint) => (assert.equal(e, BigInt(START)), void holds++), bind: async (b: Parameters<typeof p.bind>[0]) => (binds++, fakeEvmPool().bind(b)) }) as Pool<unknown>;
+    return Object.assign(p, { now: async () => BigInt(o.now), holdFee: async (e: bigint) => void holds.push(e), bind: async (b: Parameters<typeof p.bind>[0]) => (binds++, fakeEvmPool().bind(b)) }) as Pool<unknown>;
   };
   const t = testnetPool(page(w), { prover: { vault: signalsProver(), stop: () => {} }, evmPin: (c) => (c === "base" ? PIN : undefined), evmRpcs: unread, evmSync: () => ({ events: async () => assert.fail("no sync read") }), evmQueuePool: pool, evmTurn: tt.evmTurn } as Parameters<typeof testnetPool>[1]);
   assert.equal(EVM_TURN_PASS_MS, 3_000);
   assert.equal(EVM_TURN_SPREAD_MS, 2_000);
   await t.stateRead();
-  assert.equal(tt.set.length, 1);
+  await t.stateRead();
+  assert.equal(tt.set.length, 1, "one timer however many state reads");
   assert.equal(tt.set[0]!.ms, 60_000 - 20_000 + 3_000 + 500, "the next turn + 3 s + 0.25 x 2 s");
   // nothing on the chain: the turn reads nothing and opens no queue, and the next turn is armed
+  o.now = START + 63_500;
   await tt.set[0]!.f();
-  assert.deepEqual([pools, holds], [0, 0]);
+  assert.deepEqual([pools, holds.length], [0, 0]);
   assert.equal(tt.set.length, 2);
   // a landed note: the fee held first, then the queue's pass, which binds
   await landed(ns);
+  o.now = START + 123_500;
   await tt.set[1]!.f();
   for (let i = 0; i < 50 && binds === 0; i++) await new Promise((r) => setTimeout(r, 10));
-  assert.deepEqual([pools, holds], [1, 1]);
+  assert.equal(pools, 1);
+  assert.deepEqual(holds, [BigInt(START + 120_000)]);
   assert.ok(binds >= 1, "the queue's pass ran");
-  // the spread is drawn once a page load: every turn of this page waits the same 500 ms past turn + 3 s
-  assert.equal(tt.set[2]!.ms % 60_000, (60_000 - 20_000 + 3_500) % 60_000);
-  // sign out: the armed turn is cleared and none is armed after it
+  // the spread is drawn once a page load: the next turn waits the same 500 ms past turn + 3 s
+  assert.equal(tt.set[2]!.ms, 60_000);
+  // once a period: the same timer again, or one 1 ms early, runs nothing; the next period's runs
+  await tt.set[1]!.f();
+  o.now = START + 179_999;
+  await tt.set[2]!.f();
+  assert.equal(holds.length, 1, "one pass a period");
+  o.now = START + 183_500;
+  await tt.set.at(-1)!.f();
+  assert.deepEqual(holds, [BigInt(START + 120_000), BigInt(START + 180_000)]);
+  // sign out (this tab's): the armed turn is cleared and none is armed after it
   const armed = tt.set.length;
+  t.signingOut();
+  assert.ok(tt.set[armed - 1]!.cleared, "cleared at signingOut");
   await t.signedOut();
-  assert.ok(tt.set[armed - 1]!.cleared, "cleared at sign out");
   assert.equal(tt.set.length, armed);
+});
+
+test("the turn pass: a device clock minutes off holds the pool's period and arms the next turn on the pool's time", async () => {
+  const { w, ns } = await wallet();
+  const CHAIN = 1_800_000_020_000; // the pool's time: 20 s into a period
+  const o = { now: CHAIN - 205_000 }; // the device 3 min 25 s behind: 55 s into its own period
+  const tt = turnTimers(o);
+  const holds: bigint[] = [];
+  const t = testnetPool(page(w), { prover: { vault: signalsProver(), stop: () => {} }, evmPin: (c) => (c === "base" ? PIN : undefined), evmRpcs: unread, evmSync: () => ({ events: async () => assert.fail("no sync read") }), evmQueuePool: () => Object.assign(fakeEvmPool(), { now: async () => BigInt(o.now + 205_000), holdFee: async (e: bigint) => void holds.push(e) }) as Pool<unknown>, evmTurn: tt.evmTurn } as Parameters<typeof testnetPool>[1]);
+  await landed(ns);
+  await t.stateRead();
+  await tt.set[0]!.f();
+  assert.deepEqual(holds, [1_800_000_000_000n], "the pool's period, whatever the device's clock");
+  // armed again on the pool's time: 3 s past the pool's next turn
+  assert.equal(o.now + 205_000 + tt.set.at(-1)!.ms, 1_800_000_060_000 + 3_000);
+  assert.ok(tt.set[0]!.cleared === false && tt.set.length >= 2);
+  await t.signedOut();
+});
+
+test("the turn pass waits for a pass already running, and runs nothing after a sign out", async () => {
+  const { w, ns } = await wallet();
+  const o = { now: 1_800_000_010_000 };
+  const tt = turnTimers(o);
+  let trees = 0;
+  let free: () => void = () => {};
+  let gate = new Promise<void>((r) => (free = r));
+  let holdGate: Promise<void> = Promise.resolve();
+  const t = testnetPool(page(w), {
+    prover: { vault: signalsProver(), stop: () => {} },
+    evmPin: (c) => (c === "base" ? PIN : undefined),
+    evmRpcs: unread,
+    evmSync: () => ({ events: async () => assert.fail("no sync read") }),
+    evmQueuePool: () => {
+      const p = fakeEvmPool();
+      const own = p.trees.bind(p);
+      return Object.assign(p, { now: async () => BigInt(o.now), holdFee: async () => holdGate, trees: async (...x: Parameters<typeof p.trees>) => (trees++, await gate, own(...x)) }) as Pool<unknown>;
+    },
+    evmTurn: tt.evmTurn,
+  } as Parameters<typeof testnetPool>[1]);
+  await landed(ns);
+  void t.stateRead(); // its pass hangs in trees
+  for (let i = 0; i < 50 && trees === 0; i++) await new Promise((r) => setTimeout(r, 10));
+  assert.equal(trees, 1);
+  o.now = 1_800_000_063_500;
+  const turn = tt.set[0]!.f() as Promise<void>;
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(trees, 1, "never beside the running pass");
+  free();
+  await turn;
+  assert.equal(trees, 2, "its own pass once the running one ended");
+  // a sign out while the turn's hold runs: no pass after it
+  let release: () => void = () => {};
+  holdGate = new Promise<void>((r) => (release = r));
+  gate = Promise.resolve();
+  o.now = 1_800_000_123_500;
+  const late = tt.set.at(-1)!.f() as Promise<void>;
+  await new Promise((r) => setTimeout(r, 20));
+  t.signingOut();
+  release();
+  await late;
+  assert.equal(trees, 2, "nothing run after the stop");
+  await t.signedOut();
+});
+
+test("a sign out right after a turn fires or a state read begins stops it, and one while the turn waits on a running pass too", async () => {
+  const { w, ns } = await wallet();
+  const o = { now: 1_800_000_010_000 };
+  const tt = turnTimers(o);
+  let trees = 0, holds = 0;
+  let free: () => void = () => {};
+  let gate: Promise<void> = Promise.resolve();
+  const t = testnetPool(page(w), {
+    prover: { vault: signalsProver(), stop: () => {} },
+    evmPin: (c) => (c === "base" ? PIN : undefined),
+    evmRpcs: unread,
+    evmSync: () => ({ events: async () => assert.fail("no sync read") }),
+    evmQueuePool: () => {
+      const p = fakeEvmPool();
+      const own = p.trees.bind(p);
+      return Object.assign(p, { now: async () => BigInt(o.now), holdFee: async () => void holds++, trees: async (...x: Parameters<typeof p.trees>) => (trees++, await gate, own(...x)) }) as Pool<unknown>;
+    },
+    evmTurn: tt.evmTurn,
+  } as Parameters<typeof testnetPool>[1]);
+  await t.stateRead(); // arms the turn; no note yet
+  await landed(ns);
+  // a state read, then this tab's sign out before its first read is in: its EVM pass never starts (review P3-a)
+  const read = t.stateRead();
+  t.signingOut();
+  await read;
+  await new Promise((r) => setTimeout(r, 30));
+  assert.equal(trees, 0, "the state read's pass stopped");
+  // the turn fires, then the sign out before its first read is in: no hold, no pass
+  o.now = 1_800_000_063_500;
+  await t.stateRead();
+  await new Promise((r) => setTimeout(r, 30));
+  const before = [holds, trees];
+  o.now = 1_800_000_123_500;
+  const turn = tt.set.at(-1)!.f() as Promise<void>;
+  t.signingOut();
+  await turn;
+  assert.deepEqual([holds, trees], before, "the turn stopped before its reads");
+  // a pass running (begun before the turn), the turn waiting on it, a sign out meanwhile: no pass after it ends
+  await t.stateRead();
+  gate = new Promise<void>((r) => (free = r));
+  o.now = 1_800_000_183_500;
+  const running = t.stateRead();
+  for (let i = 0; i < 50 && trees === before[1]; i++) await new Promise((r) => setTimeout(r, 10));
+  const busy = trees;
+  const turn2 = tt.set.at(-1)!.f() as Promise<void>;
+  await new Promise((r) => setTimeout(r, 30));
+  t.signingOut();
+  free();
+  await Promise.all([turn2, running]);
+  assert.equal(trees, busy, "nothing run after the stop");
+  await t.signedOut();
 });
 
 test("the turn pass: a hidden tab reads nothing at the turn and runs it once when shown again", async () => {
@@ -624,3 +755,97 @@ test("the turn pass's reads name nothing of the user: block headers, the pool's 
   await t.signedOut();
 });
 const w64 = (v: bigint) => v.toString(16).padStart(64, "0");
+
+/** The pool on emptyChain's fake chain with deposit leaves: Deposited logs at their blocks, and the pool's views (its
+ *  trees after every leaf, each root's block time) at any block, the chain's head 101, and a base fee of 0.1 gwei. */
+function leafChain(asked: string[], deps: { block: number; leaf: bigint; label: bigint; pre: bigint }[]) {
+  const c = emptyChain(asked);
+  const T = 1_800_000_000 - 200;
+  const h = (n: number) => `0x${(n + 1).toString(16).padStart(64, "0")}`;
+  const sel = (s: string) => "0x" + Buffer.from(keccak_256(new TextEncoder().encode(s)).subarray(0, 4)).toString("hex");
+  const topic = "0x" + Buffer.from(keccak_256(new TextEncoder().encode(EVM_POOL_EVENTS.Deposited))).toString("hex");
+  const st = new VaultTree(), lt = new VaultTree();
+  const times = new Map<bigint, number>(), ltimes = new Map<bigint, number>();
+  for (const d of deps) (st.append([d.leaf]), lt.append([d.label]), times.set(st.root!, T + 2 * d.block), ltimes.set(lt.root!, T + 2 * d.block));
+  const word = (v: bigint | number) => `0x${BigInt(v).toString(16).padStart(64, "0")}`;
+  const views: Record<string, bigint> = { [sel("currentRoot()")]: st.root!, [sel("currentTreeSize()")]: BigInt(st.size), [sel("currentLabelRoot()")]: lt.root!, [sel("currentLabelTreeSize()")]: BigInt(lt.size) };
+  const wrap = (r: EvmRpc): EvmRpc =>
+    Object.assign(async (method: string, params: readonly unknown[]) => {
+      if (method === "eth_getLogs") {
+        asked.push(`${(r as { url?: string }).url} ${method} ${JSON.stringify(params)}`);
+        const [{ fromBlock, toBlock }] = params as [{ fromBlock: string; toBlock: string }];
+        return deps.flatMap((d, i) =>
+          d.block < Number(BigInt(fromBlock)) || d.block > Number(BigInt(toBlock)) ? [] : [{ address: PIN.pool.toLowerCase(), topics: [topic, `0x${"d0d0".padStart(64, "0")}`], data: `0x${w64(d.leaf)}${w64(d.label)}${w64(RUNG)}${w64(d.pre)}`, blockNumber: `0x${d.block.toString(16)}`, blockHash: h(d.block), logIndex: "0x0", transactionHash: `0x${(0xabc0 + i).toString(16).padStart(64, "0")}`, transactionIndex: "0x0", removed: false }],
+        );
+      }
+      if (method === "eth_call") {
+        const [{ to, data }] = params as [{ to: string; data: string }];
+        if (to.toLowerCase() === PIN.pool.toLowerCase()) {
+          asked.push(`${(r as { url?: string }).url} ${method} ${JSON.stringify(params)}`);
+          const s = data.slice(0, 10);
+          if (views[s] !== undefined) return word(views[s]!);
+          if (s === sel("stateRootTimes(uint256)")) return word(times.get(BigInt("0x" + data.slice(10))) ?? 0);
+          if (s === sel("labelRootTimes(uint256)")) return word(ltimes.get(BigInt("0x" + data.slice(10))) ?? 0);
+        }
+      }
+      const v = await r(method, params);
+      // a base fee of 0.1 gwei: the period's fee under the pool's backstop for the ladder's least chunk
+      return method.startsWith("eth_getBlockBy") && v !== null ? { ...(v as object), baseFeePerGas: "0x5f5e100" } : v;
+    }, { url: (r as { url?: string }).url });
+  return { pair: c.pair.map(wrap) as unknown as readonly [EvmRpc, EvmRpc], fees: c.fees.map(wrap) };
+}
+
+// review of 7fbf2af3, P3-e: on a pool with leaves, the turn's pass also binds, proves and asks the helper for the fee;
+// every request still names nothing of the user, and the helper's carries only the pool and the period
+test("the turn pass on a pool with leaves binds, proves and asks the helper, and its requests name nothing of the user", async () => {
+  const { w, ns } = await wallet();
+  const asked: string[] = [];
+  const fetched: string[] = [];
+  const mineLeaf = noteCommitment(RUNG, L0, P(D0));
+  // two other deposits before this user's (leaf 2): no root the pass reads is this user's leaf alone
+  const c = leafChain(asked, [
+    { block: 90, leaf: 0x1111n, label: 0x2221n, pre: 0x3331n },
+    { block: 92, leaf: 0x1112n, label: 0x2222n, pre: 0x3332n },
+    { block: 95, leaf: mineLeaf, label: L0, pre: P(D0) },
+  ]);
+  const START = 1_800_000_000_000;
+  const tt = turnTimers({ now: START + 2_000 });
+  const helperAsked: string[] = [];
+  const helper = (u: string) => {
+    const q = new URL(u);
+    const e = Number(q.searchParams.get("epoch"));
+    const fee = evmPoolFee({ gas: evmPoolGas(2), gasPrice: 100_000_000n, chainFee: 7917n });
+    return { chain: "evm", network: "base-sepolia", pool: PIN.pool.toLowerCase(), fee_recipient: PIN.feeRecipient, epoch_ms: 60_000, epoch_start_ms: e, block: "0x64", fee: fee.toString(), step: "0" };
+  };
+  // the page's one fetch: the helper's fee answer for /v1/pool/fee, nothing else answered
+  const pageFetch = (async (u: string) => {
+    if (new URL(String(u)).pathname === "/v1/pool/fee") return (helperAsked.push(String(u)), new Response(JSON.stringify(helper(String(u))), { status: 200 }));
+    return (fetched.push(String(u)), new Response("{}", { status: 404 }));
+  }) as unknown as typeof fetch;
+  const t = testnetPool(page(w), {
+    prover: { vault: signalsProver(), stop: () => {} },
+    evmPin: (x) => (x === "base" ? PIN : undefined),
+    evmRpcs: () => [...c.pair],
+    evmSync: () => ({ events: async () => assert.fail("no RESERVED note") }),
+    evmQueuePool: () => walletEvmPool({ pin: PIN, rpcs: c.pair, feeRpcs: c.fees, relayFee: (ep: bigint, s?: AbortSignal) => evmPoolRelayFee(PIN.pool, ep, s, pageFetch), epochFee: evmEpochFee, sleep: async () => {} }) as Pool<unknown>,
+    fetch: pageFetch,
+    evmTurn: tt.evmTurn,
+  } as Parameters<typeof testnetPool>[1]);
+  await ns.add({ ref: D0, scope: SCOPE, precommitment: P(D0), state: "UNSPENT", leaf: { value: RUNG, label: L0, commitment: mineLeaf, leafIndex: 2n } });
+  await t.stateRead();
+  await tt.set[0]!.f();
+  for (let i = 0; i < 100 && !(await ns.list()).some((n) => n.state === "HELD"); i++) await new Promise((r) => setTimeout(r, 10));
+  assert.ok((await ns.list()).some((n) => n.state === "HELD"), "the pass bound and proved: the note is held for its proof");
+  assert.ok(helperAsked.length >= 1, "the helper was asked for the period's fee");
+  for (const u of helperAsked) {
+    const q = new URL(u);
+    assert.deepEqual([...q.searchParams.keys()].sort(), ["epoch", "pool"], `only the pool and the period: ${u}`);
+    assert.equal(q.searchParams.get("pool"), PIN.pool.toLowerCase());
+    assert.equal(Number(q.searchParams.get("epoch")) % 60_000, 0);
+  }
+  const W = freshWallet(SEED64, "evm", L0, 0).address.toLowerCase().slice(2);
+  const mine = [W, w64(mineLeaf), w64(P(D0)), w64(L0), w64(noteSecrets(SEED64, D0).nullifierHash)];
+  for (const x of [...asked, ...fetched, ...helperAsked]) for (const m of mine) assert.ok(!x.toLowerCase().includes(m.toLowerCase()), `no user value in ${x.slice(0, 160)}`);
+  assert.ok(asked.every((x) => / eth_(chainId|getBlockByNumber|getBlockByHash|getLogs|call) /.test(x)), "headers, logs and views only");
+  await t.signedOut();
+});
