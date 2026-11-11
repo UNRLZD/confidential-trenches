@@ -131,6 +131,7 @@ export const CHANGED = [
   "scripts/live-checks/oneclick-fee-path-own-key.mjs",
   "scripts/live-checks/oneclick-partner-fee-live.mjs",
   "scripts/live-checks/pool-answer-unknown.mjs",
+  "scripts/live-checks/pool-buy-filled-2s.mjs",
   "scripts/live-checks/pool-buy-send-fast.mjs",
   "scripts/live-checks/pool-deposit-address.mjs",
   "scripts/live-checks/pool-deposit-follow.mjs",
