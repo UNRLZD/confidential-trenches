@@ -15,7 +15,7 @@ import { SIGNPAGE_RESULT_SCHEMAS } from "../../kit/src/signpage/schema.ts";
 import { fx, providers, rent as RENT } from "../../kit/test/solana-pool-buy-fx.ts";
 import { solanaPoolBuySellNeed, solanaPoolSellNeed } from "../../kit/src/trade/solana/pool-buy.ts";
 import { tokenDecimalsKept } from "../src/pool-kinds.ts";
-import { liveRuns, POOL_SELL_DRY_CALLS, POOL_SELL_DRY_START_MS, POOL_SELL_DRY_WINDOW_MS, poolSellDry, poolSellDryKind, poolSellReserveBound, type PoolSellDryDeps } from "../src/pool-sell-dry.ts";
+import { liveRuns, POOL_SELL_DRY_CALLS, POOL_SELL_DRY_KEEP_MS, POOL_SELL_DRY_START_MS, POOL_SELL_DRY_WINDOW_MS, poolSellDry, poolSellDryKind, poolSellReserveBound, type PoolSellDryDeps } from "../src/pool-sell-dry.ts";
 import { solanaSellReserve } from "../src/pool-sell.ts";
 import type { Position } from "../src/positions.ts";
 import { poolUnits, solanaDepositRents, solanaSellAfterFull, SOLANA_POOL_SELL_RESERVE_MAX } from "../src/rules/pool.ts";
@@ -219,11 +219,12 @@ test("the budget: at most POOL_SELL_DRY_CALLS calls per host in any window; past
     const r = k(share(MINT, bps));
     await r.after;
     answers.push(r.answer());
+    c.add(POOL_SELL_DRY_KEEP_MS); // past the kept answers' age: each reads
   }
   assert.ok("result" in (answers[0] as object) && "result" in (answers[1] as object), JSON.stringify(answers));
   assert.deepEqual(answers[2], { error: "busy" }, "the third in 10 s: its host's budget frees past its start bound");
   assert.equal(log.length, 2 * POOL_SELL_DRY_CALLS, "six calls per host, no more");
-  assert.ok(c.at() < 500, "answered busy at once, no wait");
+  assert.ok(c.at() < 3 * POOL_SELL_DRY_KEEP_MS + 500, "answered busy at once, no wait");
   c.add(POOL_SELL_DRY_WINDOW_MS);
   const r = k(share(MINT, 3_000));
   await r.after;
@@ -334,4 +335,67 @@ test("a pool buy runs from its tap to its final stage, through an early \"sent\"
   assert.equal(late.live(), 1);
   await new Promise((r) => setTimeout(r, 20));
   assert.equal(late.live(), 0, "the backstop");
+});
+
+test("the kept answers: four shares inside 2 s make three calls per provider in all and four answers; a trade meanwhile costs nothing; past the age one read again; a sign out drops them", async () => {
+  const c = clock();
+  const log: string[] = [];
+  let trading = false;
+  let signedIn = true;
+  const k = poolSellDryKind(deps({ log, now: c.now, wait: c.wait, trading: () => trading, positions: () => (signedIn ? [pos(), pos(SWAP_MINT)] : null) }));
+  const ask = async (bps: number) => {
+    const r = k(share(MINT, bps));
+    await r.after;
+    return r.answer() as { result?: { out: string }; error?: string };
+  };
+  const shares = [2_500, 5_000, 7_500, 10_000];
+  const outs: string[] = [];
+  for (const bps of shares) {
+    outs.push((await ask(bps)).result!.out);
+    c.add(400);
+  }
+  assert.equal(log.length, 6, "three calls per provider for the four");
+  assert.equal(new Set(outs).size, 4, `four answers ${outs}`);
+  for (const [i, bps] of shares.entries()) assert.equal(((await poolSellDry(deps(), share(MINT, bps))) as { result: { out: string } }).result.out, outs[i], "each share's own answer, as a preview of it alone");
+  // a trade tapped meanwhile (1.6 s in): the ask reads nothing, so the trade's reads wait on nothing of it
+  trading = true;
+  assert.ok((await ask(3_000)).result);
+  assert.equal(log.length, 6, "no call while the trade runs");
+  trading = false;
+  // past the age: one read again
+  c.add(POOL_SELL_DRY_KEEP_MS);
+  assert.ok((await ask(2_000)).result);
+  assert.equal(log.length, 12);
+  // a sign out drops them: on a page with its budget free, signed in again inside the age, the next ask reads
+  const c2 = clock();
+  const log2: string[] = [];
+  const k2 = poolSellDryKind(deps({ log: log2, now: c2.now, wait: c2.wait, positions: () => (signedIn ? [pos()] : null) }));
+  const ask2 = async (bps: number) => {
+    const r = k2(share(MINT, bps));
+    await r.after;
+    return r.answer() as { result?: unknown; error?: string };
+  };
+  assert.ok((await ask2(2_500)).result);
+  signedIn = false;
+  assert.equal((await ask2(5_000)).error, "not_funded");
+  signedIn = true;
+  c2.add(100);
+  assert.ok((await ask2(7_500)).result);
+  assert.equal(log2.length, 12, "read again after the sign out");
+});
+
+test("the kept answers are the preview's only: a sale's reference after a preview reads the providers itself", async () => {
+  const log: string[] = [];
+  const shared = pair("pump", log);
+  const k = poolSellDryKind(deps({ rpcs: () => shared }));
+  const r = k(share(MINT, 5_000));
+  await r.after;
+  const n = log.length;
+  assert.ok(n > 0);
+  // as sellRun reads its quote: poolSellReference on the page's pair
+  const { poolSellReference } = await import("../src/pool-sell.ts");
+  assert.ok(await poolSellReference(shared, MINT, HELD / 2n));
+  assert.ok(log.length >= n + 4, `the sale's own reads: ${log.length - n}`);
+  const main = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
+  assert.match(main, /const dryPair = \(\): readonly \[SolanaRpc, SolanaRpc\] \| null => \(PAGE_SOL_PIN === undefined \? null : pageSolanaRpcs\("pass"\)\);/, "the preview's pair is its own, made per ask");
 });

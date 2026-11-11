@@ -22,6 +22,9 @@
 //   POOL_SELL_DRY_START_MS after the ask, so the answer comes inside the kit client's 10 s; past it, busy. A sign out
 //   ends the wait: no holding, not_funded. A provider that fails is not asked again: down. busy and down are "not now"
 //   (api.ts RETRY_CODES): the app's next ask runs again.
+// - The reads do not depend on the share: a preview's provider answers are kept POOL_SELL_DRY_KEEP_MS (2 s) for the
+//   same holding, so the next preview of another share inside it reads nothing and costs no budget (keptAnswers). Kept
+//   for previews only: pool.sell reads its own reference.
 // - Solana only here. Base and Robinhood answer not_allowed until the page sells there (card signpage-evm-pool-sell),
 //   whose handler answers the same shape: amounts in whole units of the pool's asset, the platform fee in basis points.
 // - The answer: `out`, the best venue's expected out for the units (the venue's fees taken, before slippage) less the
@@ -55,6 +58,11 @@ export const POOL_SELL_DRY_WINDOW_MS = 10_000;
 export const POOL_SELL_DRY_START_MS = 6_000;
 /** How often a waiting preview looks again. */
 export const POOL_SELL_DRY_LOOK_MS = 250;
+/** How long a preview's provider answers are kept for the next preview of the same holding (each answer as both
+ *  providers gave it, for the same call): the reads do not depend on the share, so a user tapping 25%, 50%, 75% and
+ *  100% in a row costs one read, not four; 2 s, a few Solana slots, so a price is never older than a quote the sale
+ *  itself would take (it reads its own, never these). */
+export const POOL_SELL_DRY_KEEP_MS = 2_000;
 
 export type PoolSellDryDeps = {
   /** Whether this page's network pins the chain's pool. */
@@ -73,8 +81,31 @@ export type PoolSellDryDeps = {
   wait?(ms: number): Promise<void>;
 };
 
-/** One preview's turn: whether it is still the page's newest ask, and the page's calls per host. */
-type Turn = { newest(): boolean; calls: [number[], number[]] };
+/** One preview's turn: whether it is still the page's newest ask, the page's calls per host, and the page's kept answers
+ *  (keep: `read` unless the same call on the same provider for the same holding answered within POOL_SELL_DRY_KEEP_MS;
+ *  drop: forget them, a sign out). */
+type Turn = { newest(): boolean; calls: [number[], number[]]; keep(scope: string, key: string, read: () => Promise<unknown>): Promise<unknown>; drop(): void };
+
+/** The page's kept preview answers, one holding at a time (a new scope forgets the last). Only a preview's own wrapped
+ *  pair reads them: pool.sell never does. */
+function keptAnswers(now: () => number): Pick<Turn, "keep" | "drop"> {
+  let scope = "";
+  const kept = new Map<string, { at: number; p: Promise<unknown> }>();
+  const keep = (sc: string, key: string, read: () => Promise<unknown>): Promise<unknown> => {
+    if (sc !== scope) {
+      kept.clear();
+      scope = sc;
+    }
+    const e = kept.get(key);
+    if (e && now() - e.at < POOL_SELL_DRY_KEEP_MS) return e.p.catch((err: unknown) => (err instanceof Stop ? keep(sc, key, read) : Promise.reject(err)));
+    const p = read();
+    const entry = { at: now(), p };
+    kept.set(key, entry);
+    p.catch(() => void (kept.get(key) === entry && kept.delete(key)));
+    return p;
+  };
+  return { keep, drop: () => (kept.clear(), void (scope = "")) };
+}
 
 type DryAnswer = { result: PoolSellDry } | { error: ErrorCode };
 
@@ -146,7 +177,7 @@ export function poolSellReserveBound(rent: SolanaRent, venue: "pump-curve" | "pu
 const holding = (d: PoolSellDryDeps, token: unknown): Position | undefined => d.positions()?.find((p) => p.chain === "solana" && p.token === token);
 
 /** pool.sell.dry's answer for `params` (the kit's schema passed them: pool.sell's own). `turn`: the page's (the kind's). */
-export async function poolSellDry(d: PoolSellDryDeps, params: Record<string, unknown>, turn: Turn = { newest: () => true, calls: [[], []] }): Promise<DryAnswer> {
+export async function poolSellDry(d: PoolSellDryDeps, params: Record<string, unknown>, turn: Turn = { newest: () => true, calls: [[], []], ...keptAnswers(d.now ?? (() => performance.now())) }): Promise<DryAnswer> {
   const chain = params.chain;
   if (chain !== "solana" || !d.pinned("solana")) return { error: "not_allowed" };
   const bare = d.rpcs();
@@ -154,7 +185,11 @@ export async function poolSellDry(d: PoolSellDryDeps, params: Record<string, unk
   if (bare === null || !poolTokenAddress("solana", token)) return { error: "not_allowed" };
   // the holding the positions pass read: over every W that holds the token
   const pos = holding(d, token);
-  if (!pos) return { error: "not_funded" };
+  if (!pos) {
+    // signed out (or sold out): nothing kept outlives the holding
+    if (d.positions() === null) turn.drop();
+    return { error: "not_funded" };
+  }
   const now = d.now ?? (() => performance.now());
   const wait = d.wait ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const last = now() + POOL_SELL_DRY_START_MS;
@@ -166,12 +201,15 @@ export async function poolSellDry(d: PoolSellDryDeps, params: Record<string, unk
     for (;;) {
       if (stop) throw stop;
       if (!turn.newest() || now() >= last) throw (stop = new Stop("busy"));
-      if (holding(d, token) === undefined) throw (stop = new Stop("not_funded"));
+      if (holding(d, token) === undefined) {
+        turn.drop();
+        throw (stop = new Stop("not_funded"));
+      }
       const t = now();
       const calls = turn.calls[i];
       while (calls.length > 0 && calls[0]! <= t - POOL_SELL_DRY_WINDOW_MS) calls.shift();
       // the host's budget frees only past the last start: no wait for it
-      if (calls.length >= POOL_SELL_DRY_CALLS && calls[0]! + POOL_SELL_DRY_WINDOW_MS > last) throw (stop = new Stop("busy"));
+      if (calls.length >= POOL_SELL_DRY_CALLS && calls[0]! + POOL_SELL_DRY_WINDOW_MS >= last) throw (stop = new Stop("busy"));
       if (!d.trading() && calls.length < POOL_SELL_DRY_CALLS) {
         calls.push(t);
         return;
@@ -179,7 +217,10 @@ export async function poolSellDry(d: PoolSellDryDeps, params: Record<string, unk
       await wait(POOL_SELL_DRY_LOOK_MS);
     }
   };
-  const rpcs = bare.map((rpc, i) => solanaWrappedRpc(rpc, (m, p) => gate(i as 0 | 1).then(() => rpc(m, p)))) as unknown as readonly [SolanaRpc, SolanaRpc];
+  // each call answered from the kept answers of this holding when they are young enough (no read, no budget), else read
+  // once its gate lets it
+  const scope = JSON.stringify([token, pos.amount, pos.wallets]);
+  const rpcs = bare.map((rpc, i) => solanaWrappedRpc(rpc, (m, p) => turn.keep(scope, JSON.stringify([i, m, p]), () => gate(i as 0 | 1).then(() => rpc(m, p))))) as unknown as readonly [SolanaRpc, SolanaRpc];
   const fault = (e: unknown, other: ErrorCode): DryAnswer => ({ error: stop ? stop.code : e instanceof SolanaRpcTransportError ? "down" : other });
   let decimals = pos.decimals ?? d.decimals?.get("solana", token);
   try {
@@ -214,7 +255,10 @@ export async function poolSellDry(d: PoolSellDryDeps, params: Record<string, unk
   const venue = quoted.best.venue;
   if (venue !== "pump-curve" && venue !== "pumpswap") return { error: "quote_check_failed" };
   // a sign out while it read: the old holding is not answered
-  if (holding(d, token) === undefined) return { error: "not_funded" };
+  if (holding(d, token) === undefined) {
+    turn.drop();
+    return { error: "not_funded" };
+  }
   // what the sale keeps out of the user's money (poolSellReserveBound), the coin's cashback flag where the reference read it
   const reserve = poolSellReserveBound(rent, venue, lamports, ws.length === 1 && units === total, quoted.best.cashback);
   const sol = POOL_ASSET_DECIMALS_OF.solana;
@@ -228,6 +272,7 @@ export async function poolSellDry(d: PoolSellDryDeps, params: Record<string, unk
  *  one reads shares its answer, any other makes it the newest. */
 export function poolSellDryKind(d: PoolSellDryDeps): (params: Record<string, unknown>) => Running<"pool.sell.dry"> {
   const calls: [number[], number[]] = [[], []];
+  const kept = keptAnswers(d.now ?? (() => performance.now()));
   let newest = 0;
   let running: { key: string; after: Promise<DryAnswer> } | null = null;
   return (params) => {
@@ -242,7 +287,7 @@ export function poolSellDryKind(d: PoolSellDryDeps): (params: Record<string, unk
     if (running?.key === key) after = running.after;
     else {
       const me = ++newest;
-      after = poolSellDry(d, params, { newest: () => newest === me, calls }).catch((): DryAnswer => ({ error: "down" }));
+      after = poolSellDry(d, params, { newest: () => newest === me, calls, ...kept }).catch((): DryAnswer => ({ error: "down" }));
       const run = (running = { key, after });
       void after.then(() => void (running === run && (running = null)));
     }
