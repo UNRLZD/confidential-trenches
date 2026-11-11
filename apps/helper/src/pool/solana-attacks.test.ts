@@ -1153,24 +1153,30 @@ test("R4: the end simulation of a send that did not fill is of W's bytes (slot 0
   assert.deepEqual(sims[1]!.p[1], { encoding: "base64", sigVerify: false, replaceRecentBlockhash: true, commitment: "processed" });
 });
 
-// delta review P3 (1): the plain copy goes at 0 ms. The bundle's first send answers only 1,500 ms later (a gated engine
-// stand-in): both providers hold the plain copy before the engine answers, and the fill read then answers 200
-/** An engine stand-in whose first sendTransaction answers only when `open()` is called; every method it was asked. */
+// delta review P3 (1): the plain copy goes at 0 ms. The bundle's first send is held unanswered (a gated engine stand-in)
+// until the test opens it: both providers hold the plain copy while it is unanswered (event order, no clock read), and
+// the fill read then answers 200
+/** An engine stand-in whose first sendTransaction answers only when `open()` is called; every method it was asked, and
+ *  whether that first send has answered. */
 const gatedEngine = (id: string) => {
   const seen: string[] = [];
   let open!: () => void;
   const gate = new Promise<void>((r) => (open = r));
   let firsts = 0;
+  const state = { answered: false };
   const inner = engineWith(id);
   const fetchFn: JitoFetch = async (url, init) => {
     const m = JSON.parse(String(init.body)).method;
     seen.push(m);
-    if (m === "sendTransaction" && firsts++ === 0) await gate;
+    if (m === "sendTransaction" && firsts++ === 0) {
+      await gate;
+      state.answered = true;
+    }
     return inner.fetchFn(url, init);
   };
-  return { seen, fetchFn, open };
+  return { seen, fetchFn, open, state };
 };
-test("P3 (1): with the bundle's first send 1,500 ms slow, both providers have the plain copy before the engine answers; a fill answers 200", async () => {
+test("P3 (1): with the bundle's first send held unanswered, both providers have the plain copy before the engine answers; a fill answers 200", async () => {
   const e = gatedEngine("e0".repeat(32));
   const order: string[] = [];
   const pa: Calls = [];
@@ -1188,13 +1194,11 @@ test("P3 (1): with the bundle's first send 1,500 ms slow, both providers have th
       }) as never,
   });
   const p = s.carry(body(tipped({ r: { existingNullifierHash: f32(170) } })));
-  const t0 = Date.now();
   for (let k = 0; k < 100 && order.length < 2; k++) await new Promise((r) => setImmediate(r));
   assert.deepEqual(order.sort(), ["rpc0", "rpc1"], "both providers took the plain copy");
   assert.ok(pa.includes("sendTransaction") && pb.includes("sendTransaction"));
-  assert.ok(Date.now() - t0 < 1_500, "before the engine answered");
+  assert.equal(e.state.answered, false, "the engine has not answered the bundle's first send");
   assert.equal(e.seen.filter((m) => m === "sendTransaction").length, 1, "the bundle's first send is still waiting on the engine");
-  await sleep(1_500);
   e.open();
   fill();
   const a = await p;
