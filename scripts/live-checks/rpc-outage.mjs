@@ -29,12 +29,19 @@
 // says the read came from, its path no file's (an app script printing the same words is an error).
 // The footer's clock (FOOTER_DOM ms) is read last, as the load's error list closes, so a footer read after the first DOM
 // read is counted by the cap.
+// A walked-past EVM read (card device-evm-fee-read-walks-operators): Verify reads each EVM pool on two operators of the
+// kit's read list, walking past one that fails (an HTTP status, 400 included: dRPC's code 27 "Unknown state", 10 Nov),
+// so a failed load of one listed host (a 4xx too) is let through when, and only when, that chain's row shows ok on two
+// other hosts of its list, of two operators (the kit's evmRpcOperator), neither of which failed a load in the same load
+// (a check that records the reads, verify-pools, also holds each of the two to every read 200). Ok shown on the host
+// that failed, a host the list does not name, one host, two of one operator: refused.
 // Not a check of its own; scripts/live-checks/app-shell.test.mjs holds it.
 // Runs: once, no check of its own: the shared judgment of a down RPC (app-shell.test.mjs holds it)
 import { BLOCK_EVERY_MS } from "../../apps/terminal/src/shell/footer.ts";
 import { EVM_READS } from "../../apps/terminal/src/screens/verify/pools.ts";
 import { VERIFY_READS } from "../../apps/terminal/src/screens/verify/read.ts";
 import { VERIFY_RELEASES } from "../../apps/terminal/src/screens/verify/release.ts";
+import { evmRpcOperator } from "../../packages/kit/src/index.ts";
 
 const originOf = (u) => {
   try {
@@ -100,6 +107,29 @@ const FOOTER_TAGGED = / \[footer read\]$/;
 
 /** The origin a failed-load line names, "" for any other line. */
 const failedOrigin = (line) => originOf((FAILED_LOAD.exec(line)?.[1] ?? preflightOf(line)) ?? "") ?? "";
+// a load an RPC answered with a 4xx other than 429: an error, except a walked-past EVM read's (above)
+const FAILED_4XX = new RegExp(`^Failed to load resource: the server responded with a status of 4(?!29)\\d\\d(?: \\([^()]*\\))? \\((https?:\\/\\/[^\\s()]+)\\)${TAG}$`);
+const failed4xxOrigin = (line) => originOf(FAILED_4XX.exec(line)?.[1] ?? "") ?? "";
+
+/** The EVM chains whose row reads two operators of a list (the kit's read list): each chain, to its list's origins. */
+const evmLists = (network) => {
+  const out = new Map();
+  for (const [chain, pool] of Object.entries(VERIFY_RELEASES[network]?.pools ?? {})) if (pool && chain !== "solana") out.set(chain, pool.rpcs.map(originOf));
+  return out;
+};
+/** Why a failed load of `origin` (a host of `chain`'s list) is no walked-past read, or null when it is one: the row shows
+ *  ok on two other hosts of the list, of two operators, neither failing a load in this load. */
+const notWalkedPast = (origin, chain, list, verify, failedAt) => {
+  if (shownRow(verify, chain) !== "ok") return `${chain} ${shownRow(verify, chain)}`;
+  const hosts = verify?.poolRpcs?.[chain] ?? [];
+  const named = hosts.map((h) => originOf(`https://${h}`));
+  if (named.length !== 2) return `${chain} ok on ${named.length} host(s), not two`;
+  if (named.some((o) => !list.includes(o))) return `${chain} ok on a host its list does not name (${hosts.join(", ")})`;
+  if (named.includes(origin)) return `${chain} ok on the host that failed`;
+  if (evmRpcOperator(named[0]) === evmRpcOperator(named[1])) return `${chain} ok on two hosts of one operator`;
+  if (named.some((o) => failedAt.has(o))) return `${chain} ok on a host that also failed a load`;
+  return null;
+};
 
 /** What the same load's DOM shows for one row: its data-status (ok, warn, danger, loading), or "not drawn". */
 const shownRow = (verify, row) => (row === "code" || row === "funds" ? verify?.[row] : verify?.pools?.[row]) ?? "not drawn";
@@ -240,7 +270,9 @@ function pairsOf(network) {
 export function outages(lines, verify, network = "mainnet", footer = null) {
   const rows = rpcRows(network);
   const near = new Set((VERIFY_RELEASES[network]?.rpcs ?? []).map(originOf));
-  const failedAt = new Set(lines.map(failedOrigin).filter(Boolean));
+  const failedAt = new Set(lines.flatMap((l) => [failedOrigin(l), failed4xxOrigin(l)]).filter(Boolean));
+  const lists = evmLists(network);
+  const chainOf = (origin) => [...lists].find(([, l]) => l.includes(origin))?.[0];
   const pairs = pairsOf(network);
   const pairDown = (origin) => pairs.some((p) => p.includes(origin) && p.every((o) => failedAt.has(o)));
   // the footer's reads of each origin: its failed loads, or its preflights when the load lines are not kept
@@ -263,9 +295,15 @@ export function outages(lines, verify, network = "mainnet", footer = null) {
     kept.push(refused.at(-1));
   };
   for (const line of lines) {
-    const origin = failedOrigin(line);
+    const origin = failedOrigin(line) || failed4xxOrigin(line);
     const named = origin && rows.get(origin);
-    if (!named) kept.push(line);
+    const chain = origin ? chainOf(origin) : undefined;
+    const walked = chain === undefined ? "not a list" : notWalkedPast(origin, chain, lists.get(chain), verify, failedAt);
+    if (named && walked === null && !pairDown(origin)) down.add(origin);
+    else if (failed4xxOrigin(line)) {
+      if (named && chain !== undefined) refuse(line, origin, `a 4xx, not walked past: ${walked}`);
+      else kept.push(line);
+    } else if (!named) kept.push(line);
     else if (pairDown(origin)) refuse(line, origin, "and every RPC of its pair failed a load");
     else if (FOOTER_TAGGED.test(line) && near.has(origin)) {
       if (!footerAnswered(footer)) refuse(line, origin, `a footer read, and the footer shows ${footer ? `${footer.conn ?? "no connection"}, block ${footer.block || "not drawn"}` : "not drawn"}, not the pair answered`);
@@ -297,8 +335,10 @@ export const VERIFY_DOM = () => {
   if (!panel) return null;
   const status = (sel) => panel.querySelector(sel)?.dataset.status ?? null;
   const pools = {};
-  for (const e of panel.querySelectorAll("[data-pool]")) pools[e.dataset.pool] = e.dataset.status;
-  return { state: panel.dataset.state, code: status("[data-row=code]"), funds: status("[data-row=funds]"), pools };
+  // each pool row's hosts, as it names them (an EVM row read on two operators of its list)
+  const poolRpcs = {};
+  for (const e of panel.querySelectorAll("[data-pool]")) (pools[e.dataset.pool] = e.dataset.status), (poolRpcs[e.dataset.pool] = [...e.querySelectorAll(".rpcline")].map((x) => x.textContent.trim()).filter(Boolean));
+  return { state: panel.dataset.state, code: status("[data-row=code]"), funds: status("[data-row=funds]"), pools, poolRpcs };
 };
 
 /** Runs in the page: what the footer shows, its connection (data-conn: wait, on, off) and its block (data-block, "" with

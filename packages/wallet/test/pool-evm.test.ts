@@ -11,14 +11,14 @@ import { test } from "node:test";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { createHash } from "node:crypto";
-import { evmPoolFee, evmPoolGas, evmPoolProvidersOf, evmPoolVenues, evmRpcOperator, SOLANA_RPC_RETRY, SolanaRpcTransportError, solanaSameProvider, VaultTree } from "@blindfill/kit";
+import { EvmOperatorsDiffer, EvmOperatorsUnanswered, evmPoolFee, evmPoolGas, evmPoolProvidersOf, evmPoolVenues, evmRpcOperator, SOLANA_RPC_RETRY, SolanaRpcTransportError, solanaSameProvider, VaultTree } from "@blindfill/kit";
 import { evmPoolSender } from "../../../apps/helper/src/pool/evm.ts";
 import { evmAddress } from "../src/derive/index.ts";
 import { checkPool, TAKE_SLACK_MS } from "../src/pool/pool.ts";
 import { SOL_LADDER } from "../src/pool/solana.ts";
 import { evmRestoreNotes } from "../src/pool/evm-restore.ts";
 import {
-  EvmLagError, EVM_CHAIN_IDS, EVM_EPOCH_MS, EVM_LADDER, EVM_TRANSFER_RPCS, EVM_LAG_TRIES, EVM_LIFE_MS, EVM_LOG_CEILING_PAGES, EVM_LOG_THROTTLE_TRIES, EVM_POOL_EVENTS, EVM_POOL_READ_BOUND_MS, EVM_POOL_READ_TRIES, EVM_POOL_READ_WAIT_MS, EVM_READ_TRY_MS, EVM_SEND_MARGIN_MS, EVM_SPARE_REST_MS,
+  EvmLagError, EVM_LAG_WAIT_MS, EVM_CHAIN_IDS, EVM_EPOCH_MS, EVM_LADDER, EVM_TRANSFER_RPCS, EVM_LAG_TRIES, EVM_LIFE_MS, EVM_LOG_CEILING_PAGES, EVM_LOG_THROTTLE_TRIES, EVM_POOL_EVENTS, EVM_POOL_READ_BOUND_MS, EVM_POOL_READ_TRIES, EVM_POOL_READ_WAIT_MS, EVM_READ_TRY_MS, EVM_SEND_MARGIN_MS, EVM_SPARE_REST_MS,
   EvmUnansweredError, evmAgreedLogs, evmAgreedRead, evmAnswered, evmContextPreimage, evmEpochBlock, evmLatestHigh, evmMemoryHold, evmNow, EVM_SOURCE_CALLS, evmPair, evmPool, evmPoolContextOf, evmPoolLogPager, evmPoolScopeOf, evmTreeSync,
   type EvmFeeAnswer, type EvmPoolPin, type EvmPoolRequest, type EvmRpc, type EvmSyncHeld, type EvmSyncHold,
 } from "../src/pool/evm.ts";
@@ -464,8 +464,11 @@ test("L1 bind's fee takes the chain fee read at the epoch's first block's hash o
   assert.ok(calls.every((l) => l.includes(c.hashOf(30))), "at the epoch's first block's hash");
   assert.ok(calls.some((l) => l.includes("0xf1c7a58b" + w64(2_600n))), "the L1 fee bound of 2,600 bytes");
   assert.ok(calls.some((l) => l.includes("0x275aedd2" + w64(evmPoolGas(2)))), "the operator fee of G at the depth there");
-  // one RPC's other answer is no fee
-  await assert.rejects(mk({ chainFee: () => 1n }).bind(bindArgs()), /differ on the chain fee/);
+  // one RPC's other answer is no fee: refused by name, never a lag retry (no EVM_LAG_WAIT_MS wait)
+  const waits: number[] = [];
+  const differ = evmPool({ pin: PIN, ...pairs(pair(c, c, { chainFee: () => 1n })), relayFee: async () => answer(), epochFee: feeRule([]), salt: () => new Uint8Array(16), sleep: async (ms: number) => void waits.push(ms) });
+  await assert.rejects(differ.bind(bindArgs()), (e: unknown) => e instanceof EvmOperatorsDiffer && /the chain fee at block 30 .*answered differently/.test(e.message));
+  assert.equal(waits.filter((ms) => ms === EVM_LAG_WAIT_MS).length, 0);
 });
 
 // ---- the helper's answer is the device's fee (card evm-buy-hookdata-fee, review fold 2 MEDIUM-1) ----
@@ -560,6 +563,81 @@ test("MEDIUM-A bind reads the chain fee on feeRpcs, never on the sync's pair, wh
     assert.throws(() => evmPool({ pin: PIN, rpcs: pair(c, c), feeRpcs, relayFee: async () => answer(), epochFee: feeRule([]) } as unknown as Parameters<typeof evmPool>[0]), /^Error: feeRpcs: two or more$/, String(feeRpcs));
   // a fee pair of one provider twice is one read
   assert.throws(() => evmPool({ pin: PIN, rpcs: pair(c, c), feeRpcs: [pair(c, c)[0], pair(c, c)[0]] as unknown as [EvmRpc, EvmRpc], relayFee: async () => answer(), epochFee: feeRule([]) }), /one provider twice/);
+  // card device-evm-fee-read-walks-operators: a fee RPC with no URL has no operator, so it cannot count as one
+  assert.throws(() => evmPool({ pin: PIN, rpcs: pair(c, c), feeRpcs: [async () => null, async () => null] as unknown as [EvmRpc, EvmRpc], relayFee: async () => answer(), epochFee: feeRule([]) }), /each with its url/);
+});
+
+// card device-evm-fee-read-walks-operators: robinhood.drpc.org answered the bind's fee read HTTP 400 code 27 "Unknown
+// state" at blocks 5 to 120 s back for minutes at a time (read 2026-11-10 20:44Z); the fee list walks past it to two
+// operators that answer, and never binds on one operator's word or on two that differ
+test("bind walks the fee list past an operator that refuses the block's state for a whole period, hangs, or answers HTTP 400", async () => {
+  const c = CB();
+  const refusals: Record<string, Over> = {
+    state: { chainFee: () => { throw new Error('HTTP 400 {"message":"Unknown state. First available state is 1","code":27}'); } },
+    http400: { chainFee: () => { throw new Error("HTTP 400"); } },
+  };
+  for (const [name, bad] of Object.entries(refusals)) {
+    const logs: string[][] = [[], [], []];
+    const fees = [rpc(c, { url: "https://robinhood.drpc.org", log: logs[0], ...bad }), rpc(c, { url: "https://rpc.mainnet.chain.robinhood.com", log: logs[1] }), rpc(c, { url: "https://robinhood-rpc.publicnode.com", log: logs[2] })];
+    const seen: unknown[] = [];
+    const p = evmPool({ pin: PIN, rpcs: pair(c, c), feeRpcs: fees, relayFee: async () => answer(), epochFee: feeRule(seen), salt: () => new Uint8Array(16), sleep: async () => undefined });
+    // a whole period: every bind in it binds, the refusing operator asked in the first alone and rested after
+    const fee = (l: string[]) => l.filter((x) => x.includes("0x420000000000000000000000000000000000000f")).length;
+    await p.bind(bindArgs());
+    const first = fee(logs[0]);
+    assert.ok(first >= 1, name);
+    for (let i = 0; i < 4; i++) await p.bind(bindArgs());
+    assert.equal(seen.length, 5, name);
+    assert.ok(seen.every((x) => (x as { chainFee: bigint }).chainFee === 7_917n), name);
+    assert.equal(fee(logs[0]), first, `${name}: the refusing operator asked in the first bind alone, then rested`);
+    assert.ok(fee(logs[1]) >= 5 && fee(logs[2]) >= 5, `${name}: the other two answer every bind`);
+  }
+  // one whose fee read hangs (a promise that never settles): the walk's own cut (feeRead.callMs here, EVM_READ_CALL_MS
+  // live) ends it, and the bind binds on the other two; with no cut this bind never ends
+  {
+    let hung = 0;
+    const base = rpc(c, { url: "https://robinhood.drpc.org" });
+    const hangs = Object.assign((m: string, p: readonly unknown[]) => (m === "eth_call" ? (hung++, new Promise<never>(() => {})) : base(m, p)), { url: "https://robinhood.drpc.org" }) as EvmRpc;
+    const fees = [hangs, rpc(c, { url: "https://rpc.mainnet.chain.robinhood.com" }), rpc(c, { url: "https://robinhood-rpc.publicnode.com" })];
+    const seen: unknown[] = [];
+    await evmPool({ pin: PIN, rpcs: pair(c, c), feeRpcs: fees, feeRead: { callMs: 50 }, relayFee: async () => answer(), epochFee: feeRule(seen), salt: () => new Uint8Array(16), sleep: async () => undefined }).bind(bindArgs());
+    assert.equal(seen.length, 1);
+    assert.ok(hung >= 1, "the hanging seat was asked");
+  }
+  // two operators that answer and differ: refused, never asked of a third until two match
+  {
+    const logs: string[] = [];
+    const other: Over = { chainFee: () => 1n };
+    const fees = [rpc(c, { url: "https://rpc.mainnet.chain.robinhood.com" }), rpc(c, { url: "https://robinhood-rpc.publicnode.com", ...other }), rpc(c, { url: "https://robinhood.api.pocket.network", log: logs })];
+    const waits: number[] = [];
+    await assert.rejects(evmPool({ pin: PIN, rpcs: pair(c, c), feeRpcs: fees, relayFee: async () => answer(), epochFee: feeRule([]), salt: () => new Uint8Array(16), sleep: async (ms: number) => void waits.push(ms) }).bind(bindArgs()), (e: unknown) => e instanceof EvmOperatorsDiffer && /answered differently/.test(e.message));
+    assert.equal(waits.filter((ms) => ms === EVM_LAG_WAIT_MS).length, 0, "a disagreement is never a lag retry");
+    assert.equal(logs.filter((x) => x.includes("0x420000000000000000000000000000000000000f")).length, 0, "the third is never asked");
+  }
+  // no two answer: a lag retry only when every seat the refusing side asked lagged, in either order; else refused at
+  // once by name, every host and the read in its words
+  {
+    const internal: Over = { chainFee: () => { throw new Error("RPC error -32603: internal error"); } };
+    for (const [name, order] of [["[lag, error]", [refusals.state!, internal]], ["[error, lag]", [internal, refusals.state!]]] as const) {
+      const waits: number[] = [];
+      const fees = [rpc(c, { url: "https://rpc.mainnet.chain.robinhood.com" }), rpc(c, { url: "https://robinhood.drpc.org", ...order[0] }), rpc(c, { url: "https://robinhood.api.pocket.network", ...order[1] })];
+      await assert.rejects(evmPool({ pin: PIN, rpcs: pair(c, c), feeRpcs: fees, relayFee: async () => answer(), epochFee: feeRule([]), salt: () => new Uint8Array(16), sleep: async (ms: number) => void waits.push(ms) }).bind(bindArgs()), (e: unknown) => {
+        assert.ok(e instanceof EvmOperatorsUnanswered, `${name}: ${String(e)}`);
+        assert.match(e.message, /the chain fee at block 30 .*robinhood\.drpc\.org.*robinhood\.api\.pocket\.network/, name);
+        return true;
+      });
+      assert.equal(waits.filter((ms) => ms === EVM_LAG_WAIT_MS).length, 0, `${name}: no lag retry`);
+    }
+    const waits: number[] = [];
+    const fees = [rpc(c, { url: "https://rpc.mainnet.chain.robinhood.com" }), rpc(c, { url: "https://robinhood.drpc.org", ...refusals.state! }), rpc(c, { url: "https://robinhood.api.pocket.network", ...refusals.state! })];
+    await assert.rejects(evmPool({ pin: PIN, rpcs: pair(c, c), feeRpcs: fees, feeRead: { restMs: 0 }, relayFee: async () => answer(), epochFee: feeRule([]), salt: () => new Uint8Array(16), sleep: async (ms: number) => void waits.push(ms) }).bind(bindArgs()), (e: unknown) => e instanceof EvmLagError && /robinhood\.drpc\.org/.test(e.message));
+    assert.equal(waits.filter((ms) => ms === EVM_LAG_WAIT_MS).length, EVM_LAG_TRIES - 1, "every seat lagged: retried");
+  }
+  // one operator alone (every other refusing): a lag, then refused; two seats of one operator never count as two
+  {
+    const fees = [rpc(c, { url: "https://rpc.mainnet.chain.robinhood.com" }), rpc(c, { url: "https://robinhood.drpc.org", ...refusals.state! }), rpc(c, { url: "https://customer-origin.offchainlabs.com" })];
+    await assert.rejects(evmPool({ pin: PIN, rpcs: pair(c, c), feeRpcs: fees, relayFee: async () => answer(), epochFee: feeRule([]), salt: () => new Uint8Array(16), sleep: async () => undefined }).bind(bindArgs()), /one operator alone never passes/);
+  }
 });
 
 test("bind refuses the helper's fee unless it is the device's, for this pool and epoch, and a W, chunk or deadline the pool would not take", async () => {
@@ -1476,7 +1554,7 @@ const READS: Read[] = [
   { name: "bind's evmLatestHigh", side: 1, hit: byNumber("latest"), what: /^rpc 1 latest block: /, run: (r, s) => bindOn(r, r, s) },
 ];
 /** The fee pair's chain fee view in bind (Base's GasPriceOracle), on CB. */
-const FEE_READ = { hit: viewCall("getL1FeeUpperBound(uint256)", "0x420000000000000000000000000000000000000f"), what: /^fee rpc 1 chain fee: / };
+const FEE_READ = { hit: viewCall("getL1FeeUpperBound(uint256)", "0x420000000000000000000000000000000000000f"), what: /^fee rpc b\.example chain fee: / };
 const chainOf = (rd: Read): Chain => (rd.name.startsWith("bind") ? cb : c3);
 
 test("the pool read bound comes from the life: half of what a pass at its epoch's end has before take() refuses its proof; 4 tries and their waits fit, a fifth does not", () => {
@@ -1560,7 +1638,7 @@ test("bind's chain fee view on the fee pair: a 429 then an answer passes; a time
   const f = flaky(fee[1], FEE_READ.hit, Array(100).fill(TIMED_OUT));
   fee[1] = f;
   const waits: number[] = [];
-  await assert.rejects(bindOn(pair(cb, cb), fee, async (ms) => void waits.push(ms)), (e: Error) => e instanceof EvmUnansweredError && FEE_READ.what.test(e.message) && /no answer in 4 tries \(no answer in 3500 ms \(timeout/.test(e.message));
+  await assert.rejects(bindOn(pair(cb, cb), fee, async (ms) => void waits.push(ms)), (e: Error) => e instanceof EvmOperatorsUnanswered && e.errors.at(-1) instanceof EvmUnansweredError && FEE_READ.what.test((e.errors.at(-1) as Error).message) && /^the chain fee at block 30 .*b\.example: fee rpc b\.example chain fee: no answer in 4 tries \(no answer in 3500 ms \(timeout/.test(e.message));
   assert.equal(f.hits, EVM_POOL_READ_TRIES);
   assert.deepEqual(waits, [1_000, 2_000, 4_000]);
 });

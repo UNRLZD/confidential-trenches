@@ -21,6 +21,7 @@ export {
   EvmPoolBuyError,
   evmBuyRouteOf,
   evmPoolProvidersOf,
+  evmReadProvidersOf,
   evmPoolRouteData,
   evmPoolVenues,
   type EvmPoolBuy,

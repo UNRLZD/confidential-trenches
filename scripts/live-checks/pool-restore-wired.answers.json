@@ -217,5 +217,38 @@
   "stray": [],
   "console": [],
   "errors": []
+ },
+ "afterDonePlanted": {
+  "_": "delta review P3-C: step 5's reads after done, laid on live111 made done; a told try is no read",
+  "pausedHealthy": {
+   "afterDone": {
+    "rpc.mainnet.fastnear.com": 3,
+    "near.drpc.org": 7
+   },
+   "toldAfterDone": 1,
+   "console": [
+    "warning: restore ids unread: try 1, asked again: step 5 did not finish: HTTP 503"
+   ]
+  },
+  "toldNoReads": {
+   "afterDone": {
+    "rpc.mainnet.fastnear.com": 0,
+    "near.drpc.org": 0
+   },
+   "toldAfterDone": 1,
+   "console": [
+    "warning: restore ids unread: try 1, asked again: step 5 did not finish: HTTP 503"
+   ]
+  },
+  "toldOneOp": {
+   "afterDone": {
+    "rpc.mainnet.fastnear.com": 3,
+    "near.drpc.org": 0
+   },
+   "toldAfterDone": 1,
+   "console": [
+    "warning: restore ids unread: try 1, asked again: step 5 did not finish: HTTP 503"
+   ]
+  }
  }
 }

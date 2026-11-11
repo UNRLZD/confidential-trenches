@@ -14,8 +14,9 @@
 // browser on the app's origin: Solana's publicnode (the signing page's SOLANA_PROVIDER_A, a side of the pool deploy
 // check's pair) and Pocket's gateway (whose Base and Robinhood gateways are in the kit's lists); Solana's own
 // api.mainnet-beta.solana.com answers any request with an Origin header 403 "Access forbidden" (read 2026-11-08 20:10Z
-// from the app's origin and in the harness), so a page cannot read it. Each EVM chain's pair is its feeProviders
-// (evmPoolVenues()), which keep state back.
+// from the app's origin and in the harness), so a page cannot read it. Each EVM chain's list is the kit's read list
+// (evmReadProvidersOf(evmPoolVenues()[chain]), copied so the app bundles no venue table; test/verify-pools.test.ts holds
+// each equal to the kit's), two operators of it read (card device-evm-fee-read-walks-operators).
 import { VAULT_TOKEN_CODE_HASH, type NearNetwork } from "@blindfill/kit";
 import type { PoolPins } from "./pools.ts";
 import type { VerifyPins } from "./read.ts";
@@ -58,7 +59,7 @@ export const VERIFY_RELEASES: Readonly<Record<NearNetwork, VerifyRelease>> = {
       },
       base: {
         chain: "base",
-        rpcs: ["https://mainnet.base.org", "https://base-rpc.publicnode.com"],
+        rpcs: ["https://mainnet.base.org", "https://base-rpc.publicnode.com", "https://base.api.pocket.network", "https://base.gateway.tenderly.co"],
         pin: {
           address: "0xaa080e74ec99cf5c684548c77ca145edfcf899cf", // gitleaks:allow (a public contract address)
           codeHash: "0xcac5a62a0ac95b9dd1323c57a2561fe3eb56292c82c5d3a5390c95e522ff786d", // gitleaks:allow (a public code hash)
@@ -66,7 +67,7 @@ export const VERIFY_RELEASES: Readonly<Record<NearNetwork, VerifyRelease>> = {
       },
       robinhood: {
         chain: "robinhood",
-        rpcs: ["https://robinhood.drpc.org", "https://rpc.mainnet.chain.robinhood.com"],
+        rpcs: ["https://rpc.mainnet.chain.robinhood.com", "https://robinhood.drpc.org", "https://robinhood.api.pocket.network", "https://robinhood-rpc.publicnode.com"],
         pin: {
           address: "0x9306359433127c4f3be426f6faeb00a3c41f66db", // gitleaks:allow (a public contract address)
           codeHash: "0x4052383ebda1543cc4e9d8f51a03cdc631f4562d763c60508ef870189f8747c7", // gitleaks:allow (a public code hash)

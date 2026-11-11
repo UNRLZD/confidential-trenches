@@ -241,7 +241,7 @@ test("at a boundary the old proofs stay ready while the new ones are made: a tap
   gate = new Promise<void>((ok) => (open_ = ok));
   pool.t.now = START + E + 10n; // 10 ms after the boundary
   const pass = q.refresh();
-  for (let k = 0; entered < 1 && k < 2_000; k++) await new Promise((ok) => setImmediate(ok));
+  for (let k = 0; entered < 1 && k < 2_000; k++) await new Promise((ok) => setTimeout(ok, 1)); // a millisecond a turn, as the HELD wait below: 2,000 bare turns ran out in 25 ms on a slow runner (main CI 42915855008)
   assert.equal(entered, 1, "one note is being made again: one prover at a time");
   assert.deepEqual(q.ready(), [x, y], "the ready set keeps the previous epoch's proofs during the remake");
   const timeout = new Promise<never>((_, no) => setTimeout(() => no(new Error("take waited for the prover")), 1_000).unref());
@@ -429,7 +429,7 @@ test("a newest-root proof is handed out in the next epoch only until its replace
   gate = new Promise<void>((ok) => (open_ = ok));
   pool2.t.now = START + E + 5_000n;
   const pass = q2.refresh();
-  for (let k = 0; entered < 1 && k < 2_000; k++) await new Promise((ok) => setImmediate(ok));
+  for (let k = 0; entered < 1 && k < 2_000; k++) await new Promise((ok) => setTimeout(ok, 1)); // a millisecond a turn, as the HELD wait below: 2,000 bare turns ran out in 25 ms on a slow runner (main CI 42915855008)
   assert.equal(entered, 1); // one prover at a time: the deposit's note, largest chunk, first
   const t = await q2.take(dep2.id);
   assert.equal(t.root, "newest");
@@ -463,7 +463,7 @@ test("close waits for a proof being made: when it resolves, that proof's note is
   const sp = signalsProver();
   const q = queue(v, pool, [{ load: sp.load, prove: async (c, i) => (entered++, await gate, sp.prove(c, i)) }]);
   const pass = q.refresh();
-  for (let k = 0; entered < 1 && k < 2_000; k++) await new Promise((ok) => setImmediate(ok));
+  for (let k = 0; entered < 1 && k < 2_000; k++) await new Promise((ok) => setTimeout(ok, 1)); // a millisecond a turn, as the HELD wait below: 2,000 bare turns ran out in 25 ms on a slow runner (main CI 42915855008)
   assert.equal(entered, 1);
   const closing = q.close();
   open_();

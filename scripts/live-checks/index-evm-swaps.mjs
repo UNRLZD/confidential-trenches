@@ -16,9 +16,15 @@
 //   - the newest trades are on chain (RPC: SWAP_RPCS, two providers that agree on every answer): each receipt succeeded,
 //     sits in the block whose Base clock time is the trade's, was sent by the trade's trader (for a bundle sent to an
 //     ERC-4337 EntryPoint, the account of the user operation whose run holds the trade's swap, read from the receipt
-//     here, never the helper's code), and carries a Transfer of
-//     the token for exactly `amt` to the pool (a sell) or from it (a buy), the pool being the emitter of the Swap log
-//     every sampled receipt shares;
+//     here, never the helper's code); the pool being the emitter (and for v4 the pool id) of the Swap log every sampled
+//     receipt shares, a v4 trade's `amt` is exactly this pool's own Swap leg of the token in the receipt the two
+//     providers agreed on (two that answered and differ fail, naming each one's leg), less a hook's cut where one is
+//     read: what the trade's sender, whose one swap it is, moved with the PoolManager (helper-v4-hook-liquidity's
+//     judgeable), or for a route, whose sender swaps more than once and nets the token inside the PoolManager, one take
+//     of the token out of the PoolManager by an address that sent no swap (live run 42908764691: two such routes had no
+//     Transfer of their amt and failed). Each v2, v3 or curve trade, and each v4 trade of a sender's one swap, is
+//     asked a Transfer of the token for exactly `amt` to the pool (a sell) or from it (a buy), and at least half of
+//     those asked carry one;
 //   - no swap is missing: every swap of that pool in the blocks the tape covers, up to 120 blocks (24 s) behind the
 //     providers' newest, is on the tape.
 // On Robinhood (--chain robinhood), which has no fixed block clock, a trade's time must be its block's own time and the
@@ -38,6 +44,7 @@ import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
 import { BLOCK_CLOCK, blockAt } from "../../apps/helper/src/data/evm/lists.ts";
 import { HEADER_TIMED, SWAP_RPCS, TOPIC, VENUES } from "../../apps/helper/src/data/evm/swaps.ts";
+import { judgeable } from "./helper-v4-hook-liquidity.mjs";
 
 const KEY = "index-evm-swaps";
 export const BASE = "https://ct-api.unrealized.trade";
@@ -146,6 +153,44 @@ const isAmount = (data, want) => /^0x[0-9a-f]{64}$/.test(data ?? "") && BigInt(d
 const topicAddr = (t) => (typeof t === "string" && /^0x0{24}[0-9a-f]{40}$/.test(t) ? `0x${t.slice(26)}` : null);
 /** The pool key of a Swap log: its emitter, and for the PoolManager the pool id. */
 const poolKey = (l, net = "base") => (l.address === VENUES[net].poolManager ? `${l.address}:${l.topics[1]}` : l.address);
+/**
+ * The token legs of pool `key`'s v4 Swap logs in receipt `r` on a trade's side, with each log's place and sender. The
+ * PoolManager logs Swap(id, sender, int128 amount0, int128 amount1, ...) from the swapper's side (v4-core PoolManager.swap
+ * emits the caller's BalanceDelta: what it got is positive, what it owes negative), so a buy's token leg is the one
+ * positive amount and a sell's the one negative one: Robinhood tx 0x2c7930a7 (block 111207407) logs +476842127889091326311
+ * of the token for the router's buy on pool 0x1fa1e9b5, tx 0xcdc53645 (block 111207737) -106651292978592276941884 for its
+ * sell (read on two providers, 2026-11-10 22:3xZ).
+ */
+export function poolLegs(r, key, net, side) {
+  const out = [];
+  for (const [i, l] of (r?.logs ?? []).entries()) {
+    if (l.topics?.[0] !== TOPIC.swap4 || poolKey(l, net) !== key || !/^0x[0-9a-f]{128}/.test(l.data ?? "")) continue;
+    const [a0, a1] = [0, 1].map((k) => BigInt.asIntN(128, BigInt(`0x${l.data.slice(2 + 64 * k, 66 + 64 * k)}`)));
+    const leg = side === "b" ? [a0, a1].filter((v) => v > 0n) : [a0, a1].filter((v) => v < 0n).map((v) => -v);
+    if (leg.length === 1) out.push({ i, sender: topicAddr(l.topics[2]), leg: leg[0] });
+  }
+  return out;
+}
+/** The takes of `coin` out of PoolManager `pm` in receipt `r` by an address that sent none of its v4 swaps `swaps4` (a
+ *  hook's cut: Robinhood tx 0x8b878e95's Transfer of 21.761233208384569447 to the hook 0xe5e70264 right after the pool's
+ *  Swap of 2,176.123320838456944793, its router taking 2,154.362087630072375346), as Transfers or ERC-6909 claims minted. */
+function outsideTakes(r, coin, pm, swaps4) {
+  const senders = new Set(swaps4.map((l) => topicAddr(l.topics?.[2])));
+  const out = [];
+  for (const l of r?.logs ?? []) {
+    const t = l.topics ?? [];
+    if (l.address === coin && t.length === 3 && t[0] === TOPIC.transfer && topicAddr(t[1]) === pm && /^0x[0-9a-f]{64}$/.test(l.data ?? "")) {
+      const to = topicAddr(t[2]);
+      if (to !== null && to !== pm && !senders.has(to)) out.push(BigInt(l.data));
+    } else if (l.address === pm && t.length === 4 && t[0] === TOPIC.claims && t[1] === `0x${"0".repeat(64)}` && t[3] === `0x${coin.slice(2).padStart(64, "0")}` && /^0x[0-9a-f]{128}$/.test(l.data ?? "")) {
+      const to = topicAddr(t[2]);
+      if (to !== null && !senders.has(to)) out.push(BigInt(`0x${l.data.slice(66)}`));
+    }
+  }
+  return out;
+}
+/** Token units in decimals, for a line: `[a, b]` of the smallest unit. */
+const legText = (vs, dec) => (vs.length === 0 ? "none" : vs.map((v) => (dec === null ? `${v} units` : `${v / 10n ** BigInt(dec)}${v % 10n ** BigInt(dec) === 0n ? "" : `.${(v % 10n ** BigInt(dec)).toString().padStart(dec, "0").replace(/0+$/, "")}`}`)).join(" and "));
 
 /** The most an answer's X-Fetched-At may lie after the answer arrived: the helper's and the check's clocks apart (both
  *  NTP-kept) [design: 2 s]. */
@@ -223,6 +268,11 @@ export function judge(run) {
   for (const t of sample) {
     const r = c.receipts?.[t.tx];
     const name = `trade ${t.tx.slice(0, 10)}`;
+    // two providers that answered with different receipts: judged by the pool's Swap leg on each, once the pool is known
+    if (isObj(r) && Array.isArray(r.differ)) {
+      keys.push(new Set((r.differ[0]?.logs ?? []).filter((l) => SWAP_TOPICS.includes(l.topics?.[0])).map((l) => poolKey(l, net))));
+      continue;
+    }
     if (!isObj(r)) {
       say(false, `${name}: no receipt on two agreeing providers`);
       continue;
@@ -242,20 +292,77 @@ export function judge(run) {
   say(common.length >= 1, `the sampled trades share a pool: ${show(common)}`);
   const pool = common[0];
   const poolAddr = pool === undefined ? null : pool.split(":")[0];
+  const agreedReceipt = (t) => (isObj(c.receipts?.[t.tx]) && !Array.isArray(c.receipts[t.tx].differ) ? c.receipts[t.tx] : null);
+  const v4 = pool !== undefined && poolAddr === VENUES[net].poolManager;
+  const dec = Number.isSafeInteger(c.decimals) ? c.decimals : null;
+  for (const t of sample) {
+    const d = c.receipts?.[t.tx]?.differ;
+    if (!Array.isArray(d)) continue;
+    const [a, b] = d.map((r) => (v4 ? poolLegs(r, pool, net, t.side).map((x) => x.leg) : []));
+    say(false, a.join() === b.join() ? `trade ${t.tx.slice(0, 10)}: the two providers' receipts differ` : `trade ${t.tx.slice(0, 10)}: this pool's Swap leg differs on the two providers: ${legText(a, dec)} on one, ${legText(b, dec)} on the other`);
+  }
   // each trade's sender: the receipt's, or for a bundle the account whose operation ran the trade's swap of the pool
   for (const t of sample) {
-    const r = c.receipts?.[t.tx];
-    if (!isObj(r)) continue;
+    const r = agreedReceipt(t);
+    if (r === null) continue;
     const { bundle, senders } = swapSenders(r, (l) => SWAP_TOPICS.includes(l.topics?.[0]) && (pool === undefined || poolKey(l, net) === pool));
     say(senders.includes(t.trader), `trade ${t.tx.slice(0, 10)}: sent by ${show(t.trader)}, ${bundle ? `the account of the user operation whose run holds its swap ${show(senders)} (a bundle to ${r.to}, sent by ${r.from})` : `the receipt's sender ${show(r.from)}`}`);
   }
+  // a v4 trade: its amt is this pool's own Swap leg (the receipt two providers agreed on), less a hook's cut where its
+  // sender's move of the token with the PoolManager is read (helper-v4-hook-liquidity's reading, judgeable). A route
+  // whose sender swaps more than once nets the token inside the PoolManager: no Transfer is its trade's, so only the
+  // Transfer match of a sender's one swap is asked
+  const asked = [];
+  let routed = 0;
+  const pm = VENUES[net].poolManager;
+  const used = new Map();
   for (const t of sample) {
+    const r = agreedReceipt(t);
+    if (r === null) continue;
+    if (!v4) {
+      asked.push(t);
+      continue;
+    }
+    const name = `trade ${t.tx.slice(0, 10)}`;
+    const want = dec === null ? null : units(t.amt, dec);
+    const legs = poolLegs(r, pool, net, t.side).filter((x) => !(used.get(t.tx) ?? new Set()).has(x.i));
+    const swaps4 = (r.logs ?? []).filter((l) => l.address === pm && l.topics?.[0] === TOPIC.swap4);
+    // the pool's swap of the trade: the one whose leg less its cut is the amt, else the first, whose numbers the line names
+    const takes = outsideTakes(r, run.coin, pm, swaps4);
+    const judged = legs.map((x) => {
+      const one = swaps4.filter((l) => topicAddr(l.topics?.[2]) === x.sender).length === 1;
+      const m = one ? judgeable(r, run.coin, pm, t.side) : null;
+      const move = m !== null && (m.sender === x.sender || swaps4.length === 1) ? (m.net < 0n ? -m.net : m.net) : null;
+      // no move of its sender read (a route): the leg, or the leg less one take of the token out of the PoolManager by an
+      // address that sent no swap (the hook's), exactly
+      const off = want === null ? null : t.side === "b" ? x.leg - want : want - x.leg;
+      const cut = move !== null ? (t.side === "b" ? x.leg - move : move - x.leg) : off !== null && off > 0n && takes.includes(off) ? off : 0n;
+      return { ...x, one, move, cut, ok: want !== null && (move === null ? off === cut : cut >= 0n && want === move) };
+    });
+    const x = judged.find((j) => j.ok) ?? judged[0];
+    if (x === undefined) {
+      say(false, `${name}: no Swap of this pool ${t.side === "b" ? "paying out" : "taking in"} the token in its receipt`);
+      continue;
+    }
+    if (x.ok) used.set(t.tx, (used.get(t.tx) ?? new Set()).add(x.i));
+    if (x.one) asked.push(t);
+    else routed++;
+    const legT = legText([x.leg], dec);
+    const many = x.one ? "" : ` (its sender's ${swaps4.filter((l) => topicAddr(l.topics?.[2]) === x.sender).length} swaps net the token in the PoolManager)`;
+    const moved = x.move === null ? "" : legText([x.move], dec);
+    if (x.ok) say(true, `${name}: amt ${t.amt} is this pool's Swap leg ${legT}${x.cut === 0n ? "" : ` less the hook's cut ${legText([x.cut], dec)}`}, read on two providers${x.move === null ? (x.cut === 0n ? "" : ": the cut a take of the token out of the PoolManager by an address that sent no swap") : ": what its sender, whose one swap this is, moved with the PoolManager"}${many}`);
+    else if (x.move !== null && x.cut < 0n) say(false, `${name}: its sender's move of the token with the PoolManager, ${moved}, is ${t.side === "b" ? "more" : "less"} than this pool's Swap leg ${legT}, read on two providers`);
+    else if (x.move !== null) say(false, `${name}: amt ${t.amt} is not the ${moved} its sender, whose one swap this is, moved with the PoolManager (a Transfer or claims of the token; this pool's Swap leg ${legT}, read on two providers)`);
+    else say(false, `${name}: amt ${t.amt} is not this pool's Swap leg ${legT}, read on two providers, nor that leg less one take of the token out of the PoolManager by an address that sent no swap${many}`);
+  }
+  for (const t of asked) {
     // a buy: the pool (or the PoolManager) sends the token; a sell: it receives it. The token leg is exactly `amt`.
     const ok = poolAddr !== null && (t.moves ?? []).some(([from, to]) => (t.side === "b" ? from === poolAddr : to === poolAddr));
     if (ok) matched++;
-    else if (c.receipts?.[t.tx]) lines.push(`--  trade ${t.tx.slice(0, 10)}: no Transfer of exactly ${t.amt} ${t.side === "b" ? "from" : "to"} the pool (a token with a fee on transfer moves less)`);
+    else lines.push(`--  trade ${t.tx.slice(0, 10)}: no Transfer of exactly ${t.amt} ${t.side === "b" ? "from" : "to"} the pool`);
   }
-  say(sample.length > 0 && matched * 2 >= sample.length, `${matched} of ${sample.length} sampled trades carry a Transfer of the token for exactly their amt, ${show(sample.map((t) => t.side).join(""))} against the pool`);
+  const routedText = `${routed} routed v4 trade${routed === 1 ? "" : "s"} judged by the pool's Swap leg alone`;
+  say(sample.length > 0 && matched * 2 >= asked.length, asked.length === 0 ? `no sampled trade is asked a Transfer of the token for its amt: ${routedText}` : `${matched} of ${asked.length} sampled trades carry a Transfer of the token for exactly their amt, ${show(asked.map((t) => t.side).join(""))} against the pool${routed === 0 ? "" : `; ${routedText}`}`);
 
   // no swap missing
   const pl = c.poolLogs;
@@ -312,8 +419,9 @@ async function single(method, params, fetchFn, url) {
   }
 }
 
-/** One JSON-RPC call on the first two providers that answer, which must agree on the result: the result, or null. */
-async function agreed(method, params, fetchFn, rpcs = SWAP_RPCS.base, pick = (x) => x) {
+/** One JSON-RPC call on the first two providers that answer, which must agree on the result: the result, or null; with
+ *  `both`, two that answered and differ are `{ differ: [a, b] }`, each answer's `pick`. */
+async function agreed(method, params, fetchFn, rpcs = SWAP_RPCS.base, pick = (x) => x, both = false) {
   const got = [];
   for (const url of rpcs) {
     try {
@@ -325,6 +433,7 @@ async function agreed(method, params, fetchFn, rpcs = SWAP_RPCS.base, pick = (x)
     }
     if (got.length === 2) break;
   }
+  if (got.length === 2 && got[0] !== got[1] && both && !got.includes("null")) return { differ: got.map((g) => JSON.parse(g)) };
   return got.length === 2 && got[0] === got[1] ? JSON.parse(got[0]) : null;
 }
 
@@ -401,9 +510,10 @@ export async function read(base = BASE, token, fetchFn = fetch, rpcs, net = "bas
   const dec = await agreed("eth_call", [{ to: t, data: "0x313ce567" }, "latest"], fetchFn, rpcs);
   run.chain.decimals = typeof dec === "string" && /^0x[0-9a-f]{64}$/.test(dec) ? Number.parseInt(dec, 16) : null;
   run.chain.receipts = {};
-  for (const tr of tape) run.chain.receipts[tr.tx] = await agreed("eth_getTransactionReceipt", [tr.tx], fetchFn, rpcs, receiptOf);
+  // two providers' receipts that differ are both kept, so the check names how (the pool's Swap leg, or else)
+  for (const tr of tape) run.chain.receipts[tr.tx] = await agreed("eth_getTransactionReceipt", [tr.tx], fetchFn, rpcs, receiptOf, true);
   // the pool: the Swap-log key every sampled receipt holds, then its logs over the blocks the tape covers
-  const keys = tape.map((tr) => new Set((run.chain.receipts[tr.tx]?.logs ?? []).filter((l) => SWAP_TOPICS.includes(l.topics?.[0])).map((l) => poolKey(l, net))));
+  const keys = tape.map((tr) => new Set((one(run.chain.receipts[tr.tx])?.logs ?? []).filter((l) => SWAP_TOPICS.includes(l.topics?.[0])).map((l) => poolKey(l, net))));
   const pool = keys.length === 0 ? undefined : [...keys[0]].find((k) => keys.every((s) => s.has(k)));
   run.chain.poolLogs = null;
   if (pool !== undefined && heads.length === 2) {
@@ -411,7 +521,7 @@ export async function read(base = BASE, token, fetchFn = fetch, rpcs, net = "bas
     const [address, id] = pool.split(":");
     const oldest = net === "base" ? blockOf(JSON.parse(reads.trades.body).trades.at(-1).t_ms / 1000) : -Infinity;
     const from = Math.max(oldest - 1, last - BACK[net]);
-    const topic0 = (run.chain.receipts[tape[0].tx].logs ?? []).find((l) => poolKey(l, net) === pool).topics[0];
+    const topic0 = (one(run.chain.receipts[tape[0].tx]).logs ?? []).find((l) => poolKey(l, net) === pool).topics[0];
     const topics = id === undefined ? [topic0 === TOPIC.curveBuy || topic0 === TOPIC.curveSell ? [TOPIC.curveBuy, TOPIC.curveSell] : topic0] : [TOPIC.swap4, id];
     const all = [];
     // on Robinhood each log's time is part of what two providers must agree on, so only providers that log it pair:
@@ -431,7 +541,7 @@ export async function read(base = BASE, token, fetchFn = fetch, rpcs, net = "bas
   }
   if (net !== "base") {
     // the block times the check needs: the heads', the sampled trades', and the pool read's first block
-    const ns = new Set([...heads, ...Object.values(run.chain.receipts).filter(isObj).map((r) => Number.parseInt(r.blockNumber, 16)), ...(run.chain.poolLogs ? [run.chain.poolLogs.from] : [])]);
+    const ns = new Set([...heads, ...Object.values(run.chain.receipts).map(one).filter(isObj).map((r) => Number.parseInt(r.blockNumber, 16)), ...(run.chain.poolLogs ? [run.chain.poolLogs.from] : [])]);
     run.chain.blockTimes = {};
     for (const n of ns) {
       const ts = await agreed("eth_getBlockByNumber", [hex(n), false], fetchFn, rpcs, (b) => b.timestamp);
@@ -441,6 +551,8 @@ export async function read(base = BASE, token, fetchFn = fetch, rpcs, net = "bas
   return run;
 }
 
+/** A receipt as read: two providers' that differ, the first's. */
+const one = (r) => (Array.isArray(r?.differ) ? r.differ[0] : r);
 /** What the check reads of a receipt, the same on every provider (their extra fields differ). */
 const receiptOf = (r) => ({ status: r.status, blockNumber: r.blockNumber, from: r.from, to: r.to, logs: (r.logs ?? []).map((l) => ({ address: l.address, topics: l.topics, data: l.data })) });
 

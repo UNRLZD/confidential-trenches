@@ -326,13 +326,13 @@ test("a withdraw whose read one operator fails is read on another operator and s
   const seat = (r: EvmRpc, i: number) => ({ name: `p${i}.example`, url: `https://p${i}.example`, operator: `p${i}.example`, rpc: r });
   const pairOf = (rs: EvmRpc[]) => evmReadPair(rs.map(seat), ["p0.example", "p1.example"], { log });
   const b: Calls = [];
-  const s = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, feeRecipient: FEE_TO, log, readyProviders: [rpc([]), rpc([])] }, pairOf([down(rpc([])), rpc(b), rpc([])]), () => NOW);
+  const s = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, feeRecipient: FEE_TO, log }, pairOf([down(rpc([])), rpc(b), rpc([])]), () => NOW);
   assert.equal(code(await s.carry(req())), "ok");
   assert.equal(sends(b).length, 1);
   assert.deepEqual(lines, ["eth_getTransactionCount failed at p0.example: HTTP 502; p2.example answered", "eth_getTransactionCount failed at p0.example: HTTP 502; p2.example answered"]);
   lines.length = 0;
   const b2: Calls = [];
-  const t = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, feeRecipient: FEE_TO, log, readyProviders: [rpc([]), rpc([])] }, pairOf([down(rpc([])), rpc(b2)]), () => NOW);
+  const t = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, feeRecipient: FEE_TO, log }, pairOf([down(rpc([])), rpc(b2)]), () => NOW);
   assert.equal(code(await t.carry(req())), "upstream");
   assert.equal(sends(b2).length, 0);
   assert.equal(lines.length, 1, lines.join("\n"));
@@ -597,6 +597,7 @@ async function nodes(keepFrom: bigint, http429 = 0): Promise<{ urls: [string, st
         const block = (n: bigint) => ({ number: `0x${n.toString(16)}`, timestamp: `0x${(T0 + 2n * n).toString(16)}`, hash: `0x${n.toString(16).padStart(64, "0")}`, baseFeePerGas: "0x3b9aca00" });
         let out: object;
         if (method === "eth_getBlockByNumber") out = { result: block(params[0] === "latest" ? 600n : BigInt(params[0] as string)) };
+        else if (method === "eth_chainId") out = { result: "0x14a34" }; // Base Sepolia, the kit's pin
         else if (method === "eth_call") {
           const at = BigInt((params[1] as { blockHash: string }).blockHash);
           out = at < keep ? { error: { code: -32000, message: `historical state ${"ab".repeat(32)} is not available` } } : { result: `0x${"0".repeat(63)}2` };
@@ -611,7 +612,13 @@ async function nodes(keepFrom: bigint, http429 = 0): Promise<{ urls: [string, st
   return { urls, calls, close: () => servers.forEach((s) => s.close()) };
 }
 
-test("MEDIUM-A the start refuses an env RPC that cannot answer the fee's state reads at the block POOL_LIFE_MAX_MS old, naming the variable and the host", async (t) => {
+/** ready()'s waits, as evm.ts sets them (EVM_READY_WAIT_MS doubling to EVM_READY_WAIT_MAX_MS, EVM_READY_MISS_MS of
+ *  them at most; literals here, so this file links at a base without them): a try every operator fails, every time. */
+const READY_WAITS = [1_000, 2_000, 4_000, ...Array(10).fill(8_000)];
+/** The kit's venues with no quote providers for Base Sepolia: the seat list is the pair alone (two loopback nodes). */
+const PAIR_ONLY = { ...evmPoolVenues(), "base-sepolia": { ...evmPoolVenues()["base-sepolia"], providers: [] as readonly string[] } };
+
+test("MEDIUM-A the start reads the fee's state at the block POOL_LIFE_MAX_MS old on two operators; one that cannot answer it is asked again for the bound, then refused naming the variable and the host", async (t) => {
   const realNow = Date.now;
   t.after(() => void (Date.now = realNow));
   Date.now = () => Number(T0 + 1_200n) * 1000; // block 600's time, the newest
@@ -620,47 +627,50 @@ test("MEDIUM-A the start refuses an env RPC that cannot answer the fee's state r
     POOL_EVM_SENDER_KEY_BASE_SEPOLIA: "0x" + Buffer.from(KEY).toString("hex"),
     POOL_EVM_RPCS_BASE_SEPOLIA: urls.join(","),
   });
-  // both keep every block: ready, every read at block 300 (600 s old), on both
+  const at300 = `0x${(300n).toString(16).padStart(64, "0")}`;
+  // both keep every block: ready, the depth and the two chain fee reads at block 300 (600 s old) on both, then the
+  // running period's fee (at its first block) in memory
   const good = await nodes(0n);
   try {
-    await evmPoolSendersFromEnv(envOf(good.urls)).get(PIN)!.ready();
+    await evmPoolSendersFromEnv(envOf(good.urls), PAIR_ONLY).get(PIN)!.ready();
     for (const u of [0, 1]) {
       const at = good.calls.filter((c) => c.url === u && c.method === "eth_call").map((c) => (c.params[1] as { blockHash: string }).blockHash);
-      assert.deepEqual(at, Array(3).fill(`0x${(300n).toString(16).padStart(64, "0")}`), `rpc ${u + 1}: the depth and the two chain fee reads at block 300`);
+      assert.deepEqual(at.slice(0, 3), Array(3).fill(at300), `rpc ${u + 1}: the depth and the two chain fee reads at block 300`);
+      assert.ok(at.length === 6 && at.slice(3).every((h) => h !== at300), `rpc ${u + 1}: then the period's fee reads: ${at.join(",")}`);
     }
   } finally {
     good.close();
   }
-  // the second keeps the last 15 s (blocks 593 on): refused at once (no wait: a missing state is never asked again),
-  // naming the variable and the second provider's host only, never its URL's path or query (a key may sit there)
+  // the second keeps the last 15 s (blocks 593 on): every try fails on it, asked again after each wait until the bound,
+  // then refused, naming the variable and the second provider's host only, never its URL's path or query
   const pruned = await nodes(593n);
   try {
     const keyed = pruned.urls.map((u) => `${u}/v2/s3cr3tKEY?apikey=s3cr3tKEY`) as [string, string];
     const waits: number[] = [];
-    await assert.rejects(evmPoolSendersFromEnv(envOf(keyed)).get(PIN)!.ready(async (ms) => void waits.push(ms)), (e: Error) => {
-      assert.match(e.message, /^POOL_EVM_RPCS_BASE_SEPOLIA: 127\.0\.0\.1:\d+: no answer to 0x[0-9a-f]{8} at 0x[0-9a-f]{40} at block 300, 600 s old \(a proof's fee is read up to 600 s back\): .*historical state/);
-      assert.ok(e.message.includes(new URL(pruned.urls[1]).host) && !e.message.includes(new URL(pruned.urls[0]).host), e.message);
+    await assert.rejects(evmPoolSendersFromEnv(envOf(keyed), PAIR_ONLY).get(PIN)!.ready(async (ms) => void waits.push(ms)), (e: Error) => {
+      assert.match(e.message, /^POOL_EVM_RPCS_BASE_SEPOLIA: the fee's state at block 300, 600 s old \(a proof's fee is read up to 600 s back\), 14 tries over 87 s: .*historical state/);
+      assert.ok(e.message.includes(new URL(pruned.urls[1]).host) && !e.message.includes(`${new URL(pruned.urls[0]).host}:`), e.message);
       assert.ok(!e.message.includes("s3cr3tKEY") && !e.message.includes("/v2/"), e.message);
       return true;
     });
-    assert.deepEqual(waits, [], "a missing state is not asked again");
+    assert.deepEqual(waits, READY_WAITS);
   } finally {
     pruned.close();
   }
-  // the second answers HTTP 429 to its first two state reads: asked again through the env's own client, then ready
+  // the second answers HTTP 429 to its first two state reads: the check is tried again after 1 s, then 2 s, then ready
   const busy = await nodes(0n, 2);
   try {
     const waits: number[] = [];
-    await evmPoolSendersFromEnv(envOf(busy.urls)).get(PIN)!.ready(async (ms) => void waits.push(ms));
+    await evmPoolSendersFromEnv(envOf(busy.urls), PAIR_ONLY).get(PIN)!.ready(async (ms) => void waits.push(ms));
     assert.deepEqual(waits, [1_000, 2_000]);
-    assert.equal(busy.calls.filter((c) => c.url === 1 && c.method === "eth_call").length, 3 + 2);
+    assert.equal(busy.calls.filter((c) => c.url === 1 && c.method === "eth_call" && (c.params[1] as { blockHash: string }).blockHash === at300).length, 2 + 3);
   } finally {
     busy.close();
   }
   // one that keeps 600 s exactly (block 300 on) is ready
   const edge = await nodes(300n);
   try {
-    await evmPoolSendersFromEnv(envOf(edge.urls)).get(PIN)!.ready();
+    await evmPoolSendersFromEnv(envOf(edge.urls), PAIR_ONLY).get(PIN)!.ready();
   } finally {
     edge.close();
   }
@@ -760,12 +770,10 @@ test("fold A: with the callers' room kept full by /v1/rpc callers, a pool sender
   assert.ok(callers >= 1, "the callers took the room first");
 });
 
-// card evm-buy-hookdata-fee, review of 0b18a71 (b): a 429 or a timeout at the start is asked again, bounded; a
-// missing state never is
-/** ready()'s bound, as evm.ts sets it (literals here, so this file links at a base without them). */
-const EVM_READY_TRIES = 3;
-const EVM_READY_WAIT_MS = 1_000;
-test("ready() asks a throttled or timed-out call again, EVM_READY_TRIES times at most, and a missing state not at all", async () => {
+// card evm-buy-hookdata-fee, review of 0b18a71 (b); card helper-evm-ready-holds-a-fee: a try of the start's check that
+// two operators do not answer (a throttle, a timeout, a missing state, a provider's error) is made again, bounded by its
+// waits; the chain's own answer never is
+test("ready() makes a try two operators do not answer again, 1 s then doubling to 8 s apart, up to 90 s of waits; the chain's answer is refused at once", async () => {
   /** The test mock's provider, its eth_calls at a hash answered first by `fails` (one a call, in order). */
   const flaky = (failsIn: (() => Error)[], calls: string[] = []): EvmRpc => {
     const fails = [...failsIn];
@@ -784,34 +792,36 @@ test("ready() asks a throttled or timed-out call again, EVM_READY_TRIES times at
   const timeout = () => Object.assign(new Error("The operation was aborted due to timeout"), { name: "TimeoutError" });
   const limited = () => new Error("RPC error -32005: project ID request rate exceeded");
   const missing = () => new Error("RPC error -32000: historical state ab is not available");
-  // a 429, a timeout and a -32005 on one call each: each asked again after 1 s, then 2 s
-  for (const [what, fail] of [["429", http429], ["timeout", timeout], ["-32005", limited]] as const) {
+  const internal = () => new Error("RPC error -32603: internal error");
+  const unknown = () => new Error("HTTP 400: RPC error 27: Unknown state. First available state is 1");
+  // each on one call, twice: the check tried again after 1 s, then 2 s, then ready
+  for (const [what, fail] of [["429", http429], ["timeout", timeout], ["-32005", limited], ["missing", missing], ["-32603", internal], ["dRPC", unknown]] as const) {
     const waits: number[] = [];
     await s(flaky([fail, fail])).ready(async (ms) => void waits.push(ms));
-    assert.deepEqual(waits, [EVM_READY_WAIT_MS, 2 * EVM_READY_WAIT_MS], what);
+    assert.deepEqual(waits, [1_000, 2_000], what);
   }
-  // throttled on every try: refused after EVM_READY_TRIES, naming the throttle
+  // failed on every try: refused once the next wait would pass 90 s of waits, naming the last answer
   const calls: string[] = [];
   const waits: number[] = [];
-  await assert.rejects(s(flaky(Array(9).fill(http429), calls)).ready(async (ms) => void waits.push(ms)), /^Error: rpc 2: no answer to .*HTTP 429$/);
-  assert.equal(calls.filter((m) => m === "eth_call").length, EVM_READY_TRIES);
-  assert.deepEqual(waits, [1_000, 2_000]);
-  // a missing state: refused at once, one call, no wait, even after a throttle on the same call
-  for (const fails of [[missing], [http429, missing]]) {
-    const c: string[] = [];
+  await assert.rejects(s(flaky(Array(99).fill(missing), calls)).ready(async (ms) => void waits.push(ms)), /^Error: the fee's state at block \d+, \d+ s old \(a proof's fee is read up to 600 s back\), 14 tries over 87 s: RPC error -32000: historical state ab is not available$/);
+  assert.deepEqual(waits, READY_WAITS);
+  assert.ok(waits.reduce((x, y) => x + y) <= 90_000);
+  assert.equal(calls.filter((m) => m === "eth_call").length, 14);
+  // the chain's answer (a revert): refused at once, no wait, even after a throttle on the try before
+  for (const fails of [[() => new Error("RPC error 3: execution reverted")], [http429, () => new Error("RPC error -32000: execution reverted")]]) {
     const w: number[] = [];
-    await assert.rejects(s(flaky(fails, c)).ready(async (ms) => void w.push(ms)), /historical state ab is not available/);
-    assert.equal(c.filter((m) => m === "eth_call").length, fails.length);
+    await assert.rejects(s(flaky(fails)).ready(async (ms) => void w.push(ms)), /execution reverted$/);
     assert.equal(w.length, fails.length - 1);
   }
 });
 
-// card evm-buy-hookdata-fee, review fold 4 LOW-2: one case for each of ready()'s throttle codes and refusals
-test("LOW-2 ready(): each throttle code on its list is asked again and a code off it is not; an answer that is not a 32-byte word (not hex, '0x', 31 bytes) and another block at the same number are refused", async () => {
+// card evm-buy-hookdata-fee, review fold 4 LOW-2; card helper-evm-ready-holds-a-fee, review P2-1, P3-1, P3-3: what
+// ready() refuses at once, each refusal naming the seats, and an odd answer it asks again
+test("LOW-2 ready(): two chains, a chain not the kit's pin, two values for one read and another block at the same number are refused at once naming each seat; an answer that is not a 32-byte word is asked again", async () => {
   const s = (b: EvmRpc, a: EvmRpc = rpc([])) => evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY }, [a, b], () => NOW);
   /** The mock's provider, its n-th eth_call at a hash answered by `answer(n)` (an Error is thrown, undefined: the mock). */
-  const onCall = (answer: (n: number) => unknown, c: Chain = chainOf()): EvmRpc => {
-    const inner = rpc([], {}, c);
+  const onCall = (answer: (n: number) => unknown, c: Chain = chainOf(), opts = {}): EvmRpc => {
+    const inner = rpc([], opts, c);
     let n = 0;
     return async (method, params) => {
       if (method === "eth_call") {
@@ -822,34 +832,40 @@ test("LOW-2 ready(): each throttle code on its list is asked again and a code of
       return inner(method, params);
     };
   };
-  // the kit client's other throttle codes: each asked again once, then ready
-  for (const c of ["-32029", "-32429", "-429", "15"]) {
+  const once = async (b: EvmRpc, re: RegExp, what: string) => {
     const waits: number[] = [];
-    await s(onCall((n) => (n === 0 ? new Error(`RPC error ${c}: slow down`) : undefined))).ready(async (ms) => void waits.push(ms));
-    assert.deepEqual(waits, [EVM_READY_WAIT_MS], c);
-  }
-  // a code off the list (an internal error; codes that only start like one on it): refused at once
-  for (const c of ["-32603", "150", "-3202", "-42"]) {
+    await assert.rejects(s(b).ready(async (ms) => void waits.push(ms)), re, what);
+    assert.deepEqual(waits, [], what);
+  };
+  // not hex, or hex but not a 32-byte word, which feeOf's viewAt refuses too: on every try, refused at the bound naming
+  // the seat; once only, asked again and ready
+  for (const v of ["0xzz", 7, null, "0x", `0x${"0".repeat(62)}`]) {
     const waits: number[] = [];
-    await assert.rejects(s(onCall((n) => (n === 0 ? new Error(`RPC error ${c}: no`) : undefined))).ready(async (ms) => void waits.push(ms)), new RegExp(`RPC error ${c}: no$`), c);
-    assert.deepEqual(waits, [], c);
+    await assert.rejects(s(onCall(() => v)).ready(async (ms) => void waits.push(ms)), /^Error: the fee's state at block \d+, .*14 tries over 87 s: b answered 0x[0-9a-f]{8} at 0x[0-9a-f]{40} with no 32-byte word$/, String(v));
+    assert.deepEqual(waits, READY_WAITS, String(v));
+    const w1: number[] = [];
+    await s(onCall((n) => (n === 0 ? v : undefined))).ready(async (ms) => void w1.push(ms));
+    assert.deepEqual(w1, [1_000], String(v));
   }
-  // not hex: refused
-  for (const v of ["0xzz", 7, null]) await assert.rejects(s(onCall(() => v)).ready(), /^Error: rpc 2: no answer to 0x[0-9a-f]{8} at 0x[0-9a-f]{40} at block \d+, .*: not (hex|a word)$/, String(v));
-  // hex but not a 32-byte word, which feeOf's viewAt refuses too: refused at the start, not at the first bind
-  for (const v of ["0x", `0x${"0".repeat(62)}`]) await assert.rejects(s(onCall(() => v)).ready(), /: not a word$/, v);
-  // a word and more (viewAt reads the first): ready
-  await s(onCall(() => `0x${"0".repeat(63)}2${"f".repeat(64)}`)).ready();
+  // a word and more (viewAt reads the first), on both: ready
+  const more = () => onCall(() => `0x${"0".repeat(63)}2${"f".repeat(64)}`);
+  await s(more(), more()).ready();
+  // two values for one read
+  await once(onCall(() => `0x${"0".repeat(63)}3`), /: 0x[0-9a-f]{8} at 0x[0-9a-f]{40}: a answers 0x0{63}2, b 0x0{63}3$/, "differ");
   // the second provider holds another block at the number the first found: refused before any state read
   let stateReads = 0;
   const other = onCall(() => void stateReads++, chainOf({ hash: (n) => `0x${(n + 1n).toString(16).padStart(64, "0")}` }));
-  await assert.rejects(s(other).ready(), /^Error: rpc 2: another block at \d+$/);
+  await once(other, /^Error: the fee's state at block \d+, .*1 try over 0 s: two blocks at \d+: the search found 0x[0-9a-f]{64}, b holds 0x[0-9a-f]{64}$/, "another block");
   assert.equal(stateReads, 0);
+  // review P2-1: a seat on another chain (its blocks under ours) and two seats on a chain that is not the pin, refused
+  // before any block read
+  await once(onCall(() => undefined, chainOf(), { chain: "0x1" }), /^Error: the fee's state, 1 try over 0 s: two chains: a names chain 84532, b chain 1$/, "two chains");
+  await assert.rejects(s(onCall(() => undefined, chainOf(), { chain: "0x1" }), onCall(() => undefined, chainOf(), { chain: "0x1" })).ready(async () => assert.fail("no wait")), /: a and b name chain 1, not base-sepolia's 84532$/);
 });
 
 // card evm-quote-warm-round fold 8: every read the sender makes is at a past block, so with no RPCs set it reads the
 // kit's fee pair (feeProviders, each holding state 600 s back), never the quote's providers
-test("fold 8 a sender with no POOL_EVM_RPCS_* reads only the kit's feeProviders for its network, and with neither set it does not start", async () => {
+test("fold 8 a sender with no POOL_EVM_RPCS_* reads the kit's feeProviders for its network first, the quote's providers only past them, and with neither set it does not start", async () => {
   const env = {
     POOL_EVM_ADDRESS_BASE_SEPOLIA: PIN,
     POOL_EVM_SENDER_KEY_BASE_SEPOLIA: "0x" + Buffer.from(KEY).toString("hex"),
@@ -869,7 +885,10 @@ test("fold 8 a sender with no POOL_EVM_RPCS_* reads only the kit's feeProviders 
     globalThis.fetch = real;
   }
   assert.ok(asked.length > 0, "no read made");
-  assert.deepEqual([...new Set(asked)].filter((o) => !fee.includes(o as (typeof fee)[number])), [], asked.join(", "));
+  // card helper-evm-ready-holds-a-fee: the start reads the seat list (the fee pair, then the quote's providers), each
+  // try's first read on the fee pair's first; the quote's providers answer only for a fee provider that did not
+  assert.equal(asked[0], fee[0], asked.join(", "));
+  assert.ok(asked.includes(fee[1]) && asked.indexOf(fee[0]) < asked.indexOf("https://quote-a.fold8.test"), asked.join(", "));
   const { feeProviders: _, ...none } = kit["base-sepolia"];
   assert.throws(() => evmPoolSendersFromEnv(env, { ...kit, "base-sepolia": none }), /POOL_EVM_RPCS_BASE_SEPOLIA must be set: the kit lists no fee providers for base-sepolia/);
 });

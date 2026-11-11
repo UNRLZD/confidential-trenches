@@ -1,0 +1,206 @@
+{
+  "good": {
+    "at": "2026-11-10T21:29:51.321Z",
+    "helper": "https://ct-api.unrealized.trade",
+    "as": null,
+    "app": {
+      "status": 200,
+      "type": "text/html; charset=utf-8",
+      "csp": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://ct-api.unrealized.trade; font-src 'self'; connect-src 'self' https://ct-api.unrealized.trade wss://ct-api.unrealized.trade https://confidential.unrealized.trade https://base-rpc.publicnode.com https://base-mainnet.public.blastapi.io https://mainnet.base.org https://base.api.pocket.network https://base.gateway.tenderly.co https://rpc.sentio.xyz https://robinhood-rpc.publicnode.com https://robinhood.drpc.org https://rpc.mainnet.chain.robinhood.com https://robinhood.rpc.blxrbdn.com https://rpc-robinhood.globalstake.io https://robinhood.api.pocket.network https://robinhood.daybreak-rpc.network https://base-sepolia-rpc.publicnode.com https://base-testnet.api.pocket.network https://sepolia.base.org https://rpc.testnet.chain.robinhood.com https://robinhood-sepolia-rpc.publicnode.com https://robinhood-testnet.drpc.org https://solana-rpc.publicnode.com https://solana.api.pocket.network https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src 'none'; frame-ancestors https://confidential.unrealized.trade; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
+      "js": [
+        {
+          "url": "https://ct-app.unrealized.trade/assets/index-BMYsuZR3.js",
+          "status": 200,
+          "marks": {
+            "trade-box": 1,
+            "trade-proof": 1,
+            "trade-max": 1,
+            "trade-cta": 1,
+            "trade-side-sell": 1,
+            "sell-box": 1,
+            "sell-cta": 1,
+            "trb-amount": 2,
+            "trb-input": 2
+          }
+        }
+      ]
+    },
+    "market": {
+      "status": 200,
+      "cors": "https://ct-app.unrealized.trade",
+      "shape": {
+        "top": [
+          "decimals",
+          "filling",
+          "pool",
+          "risk",
+          "route",
+          "row"
+        ],
+        "row": [
+          "as_of_ms",
+          "buys_1h",
+          "buys_24h",
+          "buys_5m",
+          "chain",
+          "chg_1h_bps",
+          "chg_24h_bps",
+          "chg_4h_bps",
+          "chg_5m_bps",
+          "created_s",
+          "creator",
+          "creator_sold_bps",
+          "curve_bps",
+          "dev_bps",
+          "freeze_auth",
+          "holders",
+          "icon",
+          "label",
+          "launchpad",
+          "liq_usd",
+          "mc_usd",
+          "mint_auth",
+          "name",
+          "net_5m_usd",
+          "price_usd",
+          "risk_src",
+          "sells_1h",
+          "sells_24h",
+          "sells_5m",
+          "snipers_bps",
+          "src",
+          "symbol",
+          "token",
+          "top10_bps",
+          "venue",
+          "vol_1h_usd",
+          "vol_24h_usd",
+          "vol_5m_usd"
+        ],
+        "risk": [
+          "age_s",
+          "bundlers_bps",
+          "dev_bps",
+          "freeze_auth",
+          "fresh_bps",
+          "holders",
+          "honeypot",
+          "insiders_bps",
+          "liq_usd",
+          "lp",
+          "mint_auth",
+          "snipers_bps",
+          "tax",
+          "top10_bps"
+        ]
+      }
+    },
+    "devnet": {
+      "status": 200,
+      "cors": "https://confidential.unrealized.trade",
+      "blockhash": true
+    }
+  },
+  "bad": {
+    "at": "2026-11-10T21:29:53.001Z",
+    "helper": "https://ct-api.unrealized.trade",
+    "as": "https://example.com",
+    "app": {
+      "status": 200,
+      "type": "text/html; charset=utf-8",
+      "csp": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://ct-api.unrealized.trade; font-src 'self'; connect-src 'self' https://ct-api.unrealized.trade wss://ct-api.unrealized.trade https://confidential.unrealized.trade https://base-rpc.publicnode.com https://base-mainnet.public.blastapi.io https://mainnet.base.org https://base.api.pocket.network https://base.gateway.tenderly.co https://rpc.sentio.xyz https://robinhood-rpc.publicnode.com https://robinhood.drpc.org https://rpc.mainnet.chain.robinhood.com https://robinhood.rpc.blxrbdn.com https://rpc-robinhood.globalstake.io https://robinhood.api.pocket.network https://robinhood.daybreak-rpc.network https://base-sepolia-rpc.publicnode.com https://base-testnet.api.pocket.network https://sepolia.base.org https://rpc.testnet.chain.robinhood.com https://robinhood-sepolia-rpc.publicnode.com https://robinhood-testnet.drpc.org https://solana-rpc.publicnode.com https://solana.api.pocket.network https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src 'none'; frame-ancestors https://confidential.unrealized.trade; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
+      "js": [
+        {
+          "url": "https://ct-app.unrealized.trade/assets/index-BMYsuZR3.js",
+          "status": 200,
+          "marks": {
+            "trade-box": 1,
+            "trade-proof": 1,
+            "trade-max": 1,
+            "trade-cta": 1,
+            "trade-side-sell": 1,
+            "sell-box": 1,
+            "sell-cta": 1,
+            "trb-amount": 2,
+            "trb-input": 2
+          }
+        }
+      ]
+    },
+    "market": {
+      "status": 200,
+      "cors": null,
+      "shape": {
+        "top": [
+          "decimals",
+          "filling",
+          "pool",
+          "risk",
+          "route",
+          "row"
+        ],
+        "row": [
+          "as_of_ms",
+          "buys_1h",
+          "buys_24h",
+          "buys_5m",
+          "chain",
+          "chg_1h_bps",
+          "chg_24h_bps",
+          "chg_4h_bps",
+          "chg_5m_bps",
+          "created_s",
+          "creator",
+          "creator_sold_bps",
+          "curve_bps",
+          "dev_bps",
+          "freeze_auth",
+          "holders",
+          "icon",
+          "label",
+          "launchpad",
+          "liq_usd",
+          "mc_usd",
+          "mint_auth",
+          "name",
+          "net_5m_usd",
+          "price_usd",
+          "risk_src",
+          "sells_1h",
+          "sells_24h",
+          "sells_5m",
+          "snipers_bps",
+          "src",
+          "symbol",
+          "token",
+          "top10_bps",
+          "venue",
+          "vol_1h_usd",
+          "vol_24h_usd",
+          "vol_5m_usd"
+        ],
+        "risk": [
+          "age_s",
+          "bundlers_bps",
+          "dev_bps",
+          "freeze_auth",
+          "fresh_bps",
+          "holders",
+          "honeypot",
+          "insiders_bps",
+          "liq_usd",
+          "lp",
+          "mint_auth",
+          "snipers_bps",
+          "tax",
+          "top10_bps"
+        ]
+      }
+    },
+    "devnet": {
+      "status": 200,
+      "cors": null,
+      "blockhash": true
+    }
+  }
+}

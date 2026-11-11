@@ -48,6 +48,8 @@ export * from "./trade/solana/pool-buy.ts";
 // the same-chain pool deposit of one note of the ladder plan (card pool-deposits)
 export * from "./trade/solana/pool-deposit.ts";
 export * from "./trade/evm/pool-fee.ts";
+// one read on two operators from a list (card device-evm-fee-read-walks-operators)
+export * from "./trade/evm/read-two.ts";
 export * from "./trade/evm/buy.ts";
 export * from "./trade/evm/sell.ts";
 // W's releases at a sell (card evm-sell-no-release-in-flight, audit E-01): the sell builder takes only a verdict this

@@ -99,6 +99,7 @@ import type { TradeStage, TxRef } from "../../kit/src/signpage/messages.ts";
 import { depositId } from "../../wallet/src/derive/keys.ts";
 import { noteCommitment, noteSecrets, type NoteRef } from "../../wallet/src/notes/secrets.ts";
 import type { Leaf, NoteRecord, NoteStore, PoolSend } from "../../wallet/src/notes/store.ts";
+import { landNote } from "../../wallet/src/notes/restore.ts";
 import { ladderSplit } from "../../wallet/src/pool/ladder.ts";
 import { SOL_LADDER, solanaPoolOf, solanaTreeSync, type SolanaPoolPin } from "../../wallet/src/pool/solana.ts";
 import { WALLET_SEED_LOCK } from "@blindfill/wallet/store";
@@ -577,9 +578,9 @@ export async function runPoolDeposit(h: PoolDepositHost, ask: PoolAsk | null, fi
     // carried, whatever it is (MIN_DEPOSIT, or more); its pass starts like any landed note's
     const restore = async (n: NoteRecord, m: { value: bigint; nonce: bigint; slot: number }): Promise<void> => {
       const leaf = await leafOf(sync, scope, n.precommitment, m);
-      const incoming = n.state === "PLANNED" ? await store.move(n.id, "PLANNED", "INCOMING") : n;
-      // the move outside the optional call: `h.landed?.(x)` never evaluates x on a host with no landed hook
-      const done = await store.move(incoming.id, "INCOMING", "UNSPENT", { leaf });
+      // the move outside the optional call: `h.landed?.(x)` never evaluates x on a host with no landed hook; one move
+      // for a note landed by another deposit, the restore's own (../../wallet/src/notes/restore.ts landNote)
+      const done = await landNote(store, n, leaf);
       h.landed?.(done);
     };
 

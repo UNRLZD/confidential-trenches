@@ -43,7 +43,14 @@ const M = [
   ["no hop target read", WAL, [["await readAll(hops.flat());", ""]], RW, "step 4"],
   ["one arm per label", WAL, [["    const k = `${s.l}:${s.j}`;", "    const k = `${s.l}`;"]], RW, "step 4"],
   ["the deposit ids read one short of the margin", WAL, [["(highest ?? lane - RESTORE_LANES) + RESTORE_LANES * margin);", "(highest ?? lane - RESTORE_LANES) + RESTORE_LANES * (margin - 1));"]], RW, "step 5"],
-  ["a failed id read is not money", WAL, [["        unread.push({ i, id, error: why(e) });\n        highest = Math.max(highest ?? i, i);", "        unread.push({ i, id, error: why(e) });"]], RW, "step 5"],
+  ["a failed id read is not money", WAL, [["        unread.push({ i, id, error: e instanceof PairDisagrees ? `${e.message}, read again` : why(e) });\n        highest = Math.max(highest ?? i, i);", "        unread.push({ i, id, error: e instanceof PairDisagrees ? `${e.message}, read again` : why(e) });"]], RW, "step 5"],
+  // review P2-2 of 53f5e92f: a pair that disagrees on an id is that id unread, the lane reading on past it; the run's
+  // signal ended stops the lanes
+  ["a pair disagreeing on an id is taken as unused", WAL, [["        unread.push({ i, id, error: e instanceof PairDisagrees", "        if (e instanceof PairDisagrees) continue;\n        unread.push({ i, id, error: e instanceof PairDisagrees"]], ["wallet", "test/restore-id-reader.test.ts"], "a faked money on a used, empty id is that id unread"],
+  ["a read after the run's signal ended is counted unread", WAL, [["        if (opts.signal?.aborted) throw e;\n", ""]], RW, "once the run's signal ended"],
+  // review P2-3 of 53f5e92f: a lane an earlier run read whole is skipped only while its read reaches the bound now
+  ["a lane kept is skipped past its bound", WAL, [["    if (was !== undefined && was >= bound()) continue;", "    if (was !== undefined) continue;"]], RW, "step 5"],
+  ["a lane kept is never skipped", WAL, [["    if (was !== undefined && was >= bound()) continue;", "    void was;"]], RW, "step 5"],
   ["history does not move the lane's highest", WAL, [['      (state === "money" ? money : used).push(i);\n      highest = Math.max(highest ?? i, i);', '      (state === "money" ? money : used).push(i);']], RW, "step 5"],
   ["a used id does not reset the margin (review: money past 21 used ids)", WAL, [['      if (state === "unused") continue;', '      if (state !== "money") continue;']], RW, "step 5"],
   ["failed id reads never end a lane (review: a reader that always rejects)", WAL, [["if (++failed >= margin) throw", "if (++failed >= Infinity) throw"]], RW, "step 5"],
@@ -52,7 +59,11 @@ const M = [
   ["review F4: the walk's end taken from the default gap, not the restore's laneWalked", WAL, [["const walked = r.laneWalked[lane]!;", "const walked = (h ?? lane - RESTORE_LANES) + RESTORE_LANES * 10_000;"]], RW, "step 5"],
   ["review F4: a walk end that is not the lane's, or below its highest note, taken", WAL, [["      throw new Error(`lane ${lane}: its walk end", "      void new Error(`lane ${lane}: its walk end"]], RW, "step 5"],
   ["review F5: a lane past its walk's end stops the restore instead of returning what it found", WAL, [["        reach = highest;\n        break;\n      }\n    }", "        throw new Error(`lane ${lane}: past the walk's end`);\n      }\n    }"]], RW, "step 5"],
-  ["review F5: the lane's reach not returned", WAL, [["highest, readTo, reach });", "highest, readTo, reach: null });"]], RW, "step 5"],
+  ["review F5: the lane's reach not returned", WAL, [["highest, readTo, reach };", "highest, readTo, reach: null };"]], RW, "step 5"],
+  // card restore-first-sign-in-under-two-minutes: the device's own lane read first, and each lane heard once read
+  ["the device's own lane not read first", WAL, [["const order = [first, ...Array.from({ length: RESTORE_LANES }, (_, k) => k).filter((k) => k !== first)];", "const order = Array.from({ length: RESTORE_LANES }, (_, k) => k);"]], RW, "laneRead hears"],
+  ["a lane read not heard by the caller", WAL, [["    await opts.laneRead?.(x);\n", ""]], RW, "laneRead hears"],
+  ["a lane heard before its ids are read", WAL, [["    await opts.laneRead?.(x);\n", ""], ["  for (const lane of order) {\n", "  for (const lane of order) {\n    await opts.laneRead?.({ lane } as LaneIds);\n"]], RW, "laneRead hears"],
   ["R29: a failed id read past the walk's end does not stop the lane", WAL, [["to be retried`);\n        if (highest > walked) {", "to be retried`);\n        if (false) {"]], RW, "step 5"],
   ["review 2 R27: a never-used id restarts the failure count", WAL, [['      if (state === "unused") continue;', '      if (state === "unused") { failed = 0; continue; }']], RW, "step 5"],
   ["review 2 R28: history at the walk's last index stops", WAL, [["      failed = 0;\n      if (highest > walked) {", "      failed = 0;\n      if (highest >= walked) {"]], RW, "step 5"],
