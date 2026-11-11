@@ -9,7 +9,7 @@
 // clock (onProviderNow) and read no time: each holds its flow to a hang bound of 8 s (`within`), against the 150 s their
 // regression took.
 import assert from "node:assert/strict";
-import { after, test } from "node:test";
+import { after, afterEach, test } from "node:test";
 import { IDBFactory } from "fake-indexeddb";
 import { entropyToWords, wordsToSeed64 } from "@blindfill/wallet/derive";
 import { openWalletStore, type WalletStore } from "@blindfill/wallet/store";
@@ -19,7 +19,18 @@ import { signalsProver } from "../../wallet/test/withdraw-fixture.ts";
 import { onTestClock } from "../../kit/test/test-clock.ts";
 
 (globalThis as { __SIGN_NETWORK__?: string }).__SIGN_NETWORK__ = "testnet";
-const { TESTNET_RPCS, pageEvmPoolRpcs, pageSolanaRpcs, pageSolanaSettleRpcs, testnetPool } = await import("../src/pool-testnet.ts");
+const { TESTNET_RPCS, pageEvmPoolRpcs, pageSolanaRpcs, pageSolanaSettleRpcs, testnetPool: makePool } = await import("../src/pool-testnet.ts");
+// Every page a test makes signs out at the test's end, as main.ts's sign out does (signingOut: its turn timer cleared). A
+// state read arms the page's EVM turn (src/pool-testnet.ts armTurn) on whichever clock is in place; a page that A, A2
+// or D left signed in on the real clock fired its turn inside a later test's test clock, which re-armed it there for
+// good (CI, 11 Nov: "the test left 1 timer(s) that never stop").
+const pages: { signingOut(): void }[] = [];
+afterEach(() => pages.splice(0).forEach((p) => p.signingOut()));
+const testnetPool = ((...a: Parameters<typeof makePool>) => {
+  const t = makePool(...a);
+  pages.push(t);
+  return t;
+}) as typeof makePool;
 const { EVM_LADDER } = await import("../../wallet/src/pool/evm.ts");
 const { holdHosts, hostLane, resetHostLanes, stopHostLaneWaits, PASS_BUDGET_TRADING, PASS_FLOOR_MS, TRADE_TURN_MAX_MS } = await import("../../wallet/src/throttle.ts");
 const { SOL_POOLS, solanaPoolOf } = await import("../../wallet/src/pool/solana.ts");
