@@ -7,8 +7,3 @@ minimumReleaseAge: 10080
 # 2b2abd45; 8.21.1, a2f4e7c0): its copy is the helper's, so the tree holds one ws, the fixed one
 overrides:
   "ethers>ws": 8.22.1
-
-# Packages run in the order of their names, up to the job's concurrency, never after the packages they import (card
-# ci-fresh-run-ends-with-room): on the README's `pnpm -r --if-present --no-bail run test` the kit, the wallet and the signing
-# page were three stages in a row, each leaving cores idle. scripts/ci/pnpm-run-order.test.mjs holds it.
-sort: false
