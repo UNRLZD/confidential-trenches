@@ -24,6 +24,7 @@ import {
   type SolanaPoolBuyVenue,
   type SolanaRpc,
 } from "../src/index.ts";
+import { readSolanaReferenceWhy } from "../src/trade/solana/pool.ts";
 import { ALT, BLOCKHASH, FEE_PAYER, PROGRAM, W, cfg, release, rent } from "./solana-pool-buy-fx.ts";
 
 const MX = JSON.parse(readFileSync(new URL("./fixtures/solana-pool-buy-mayhem.json", import.meta.url), "utf8"));
@@ -199,4 +200,38 @@ test("the recorded Mayhem PumpSwap pool: GlobalConfig's reserved fee recipient a
   // a pool that is not Mayhem pays protocol_fee_recipients[0] (57), as before this card
   const plain = await readSolanaPoolBuyVenue([poolReplay(0, (a, d) => void (a === POOL.pool && (d[243] = 0))), poolReplay(1, (a, d) => void (a === POOL.pool && (d[243] = 0)))], "pumpswap", POOL.mint, () => 0);
   assert.equal(plain.kind === "pumpswap" && plain.protocolFeeRecipient, base58.encode(g.subarray(57, 89)));
+});
+
+// Card sol-pool-buys-mayhem-coins: a curve sale is priced only up to the SOL the curve really holds. The recorded
+// curve's real_quote_reserves (bytes 32..40) is 2 lamports: the Mayhem agent's tokens drained it, and the program
+// fails a sale past it whole (Overflow 6024, as the mainnet simulation of 15:30Z read). The sell quote now pays
+// nothing there, so the reference is the one a coin with no market gets (null: the page answers it quote_check_failed);
+// the same sale on the same curve holding 1 SOL is priced as before
+test("a sale the recorded Mayhem curve cannot pay from its real SOL has no reference, as a coin with no market", async () => {
+  const curveOf = (p: 0 | 1) => {
+    const list = Object.keys(MX.reads[p]).map((k) => JSON.parse(k) as string[]).find((l) => l.length === 6 && l[1] === MX.curve)!;
+    return new DataView(base64.decode(MX.reads[p][JSON.stringify(list)].value[1].data[0]).buffer);
+  };
+  for (const p of [0, 1] as const) assert.equal(curveOf(p).getBigUint64(32, true), 2n, "the recorded curve holds 2 lamports of real SOL");
+  const sale = { side: "sell" as const, token: MX.mint, amount: 1_000_000_000n, amounts: [400_000_000n, 600_000_000n] };
+  assert.equal(await readSolanaReference(providers(), sale), null);
+  assert.deepEqual(await readSolanaReferenceWhy(providers(), sale), { refused: "no pool pays out for this amount" });
+  // a sale whose gross is within the 2 lamports still pays nothing once its fees are taken
+  assert.equal(await readSolanaReference(providers(), { side: "sell", token: MX.mint, amount: 400_000n }), null);
+  // the same curve holding 1 SOL of real SOL: the same sale is priced, gross less its fees, each leg too
+  const funded = (p: 0 | 1) => replay(p, (a, d) => { if (a === MX.curve) new DataView(d.buffer, d.byteOffset).setBigUint64(32, 1_000_000_000n, true); });
+  const ref = await readSolanaReference([funded(0), funded(1)], sale);
+  assert.ok(ref && ref.expectedOut > 0n && ref.expectedOuts.length === 2 && ref.expectedOuts.every((x) => x > 0n));
+  assert.equal(ref.pools[0]!.venue, "pump-curve");
+  // the boundary (the review of 6eb64bdb): a curve holding exactly the sale's gross quotes it, one lamport less is null.
+  // That equality pays is what the code does today, and what pump-public-docs says of a sell (PUMP_PROGRAM_README:
+  // real_sol_reserves "decrease with the same lamports amount", 0 left): pump's program source is not public, so the
+  // exact on-chain comparison (its lib.rs:1037 Overflow) is not read here
+  const v = curveOf(0);
+  const gross = (sale.amount * v.getBigUint64(16, true)) / (v.getBigUint64(8, true) + sale.amount);
+  const holding = (sol: bigint) => (p: 0 | 1) => replay(p, (a, d) => { if (a === MX.curve) new DataView(d.buffer, d.byteOffset).setBigUint64(32, sol, true); });
+  const one = { side: "sell" as const, token: MX.mint, amount: sale.amount };
+  const at = await readSolanaReference([holding(gross)(0), holding(gross)(1)], one);
+  assert.ok(at && at.expectedOut > 0n && at.expectedOut < gross, `at its gross (${gross}) the sale is quoted`);
+  assert.equal(await readSolanaReference([holding(gross - 1n)(0), holding(gross - 1n)(1)], one), null);
 });

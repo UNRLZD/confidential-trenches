@@ -2,9 +2,13 @@
 // balances-per-chain; the signing page's state.pools, @blindfill/kit SignpageState). Pure: no store, no network, no
 // clock; the caller reads the notes and hands them in.
 //
-// - balance: the leaf values of the pool's notes (scope === pool.scope) in UNSPENT or HELD. Not counted: PLANNED and
-//   INCOMING (no value until the leaf lands; an incoming deposit shows as its op), RESERVED (its proof has left the
-//   device: the buy's op shows it), SPENT and TAKEN.
+// - balance: the leaf values of the pool's notes (scope === pool.scope) in UNSPENT, HELD or RESERVED: what the pool
+//   holds for the user until the chain spends it (card pool-buy-record-never-stays-sent: a RESERVED note counted
+//   nothing, so a buy in flight read the money gone, and a buy not landed read 0 until its note was freed). A RESERVED
+//   note whose release the device read landed (`landed`: its attempt and the value it withdrew, both RPCs reading this
+//   very transaction succeeded) counts only its change, value less that, until the settle writes the change UNSPENT and
+//   the note SPENT, so a bought token is never counted twice. Not counted: PLANNED and INCOMING (no value until the leaf
+//   lands; an incoming deposit shows as its op), SPENT and TAKEN. `ready` still counts HELD proofs only.
 // - ready: the chunks of the proof queue's ready proofs for the pool whose note is still in the store, HELD by the same
 //   attempt (a proof whose note moved is not ready), each note counted once. Absent from every entry when no ready list
 //   is given (no queue runs), never "0" in its place; with `open` (the pool ids whose queue runs), absent from each chain
@@ -47,6 +51,8 @@ export type BalancePool = { id: string; chain: Chain; scope: bigint; asset: Pool
 /** What poolBalances reads of a ready proof. */
 export type BalanceProof = Pick<ReadyProof, "noteId" | "attempt" | "poolId" | "chunk"> & { binding: Pick<ReadyProof["binding"], "feeCap"> & { request?: unknown } };
 export type PoolBalance = { chain: Chain; asset: PoolAsset; balance: string; ready?: string; tap_max?: string };
+/** A RESERVED note's release the device read landed, by note id: the attempt that sent it and the value it withdrew. */
+export type LandedRelease = { attempt: string; withdrawn: bigint };
 
 /** The Solana pool's table entry: it holds SOL (the wrapped-SOL mint its scope hashes, ./solana.ts SOL_NATIVE_MINT). */
 export function solanaBalancePool(id: string, scope: bigint, spendOf?: TapSpendOf): BalancePool {
@@ -133,7 +139,7 @@ function decimal(units: bigint, d: number): string {
   return frac === "" ? int : `${int}.${frac}`;
 }
 
-export function poolBalances(notes: readonly NoteRecord[], pools: readonly BalancePool[], ready?: readonly BalanceProof[], open?: ReadonlySet<string>): PoolBalance[] {
+export function poolBalances(notes: readonly NoteRecord[], pools: readonly BalancePool[], ready?: readonly BalanceProof[], open?: ReadonlySet<string>, landed?: ReadonlyMap<string, LandedRelease>): PoolBalance[] {
   const ids = new Set<string>();
   const scopes = new Set<bigint>();
   // per chain, in table order: its asset's decimals, then the sums in base units
@@ -162,10 +168,13 @@ export function poolBalances(notes: readonly NoteRecord[], pools: readonly Balan
   for (const p of pools) {
     const c = chains.get(p.chain)!;
     for (const n of notes) {
-      if (n.scope !== p.scope || (n.state !== "UNSPENT" && n.state !== "HELD")) continue;
+      if (n.scope !== p.scope || (n.state !== "UNSPENT" && n.state !== "HELD" && n.state !== "RESERVED")) continue;
       const v = n.leaf?.value;
       if (typeof v !== "bigint" || v < 0n) throw new Error(`note ${n.id}: ${n.state} with no leaf value`);
-      c.balance += v;
+      const out = n.state === "RESERVED" ? landed?.get(n.id) : undefined;
+      const w = out !== undefined && out.attempt === n.attempt ? out.withdrawn : 0n;
+      if (typeof w !== "bigint" || w < 0n || w > v) throw new Error(`note ${n.id}: its landed release withdrew more than it holds`);
+      c.balance += v - w;
     }
     for (const r of ready ?? []) {
       if (r.poolId !== p.id || counted.has(r.noteId)) continue;
