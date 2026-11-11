@@ -144,8 +144,9 @@ export type EvmSellHost = {
   holdings(): Promise<Record<string, unknown>>;
   /** The kit's evmPoolSellQuote. */
   quote(req: EvmPoolSellQuoteRequest): Promise<EvmPoolSellQuote>;
-  /** The kit's evmPoolBuildSell. */
-  build(q: EvmPoolSellQuote, f: EvmPoolSellFields): EvmPoolSell;
+  /** A builder in the kit's evmPoolBuildSell's place, for a test that plants a bad one; the page sets none, and the
+   *  kit's is called by name after the sale's evmNextNote pick (the signer guard, test/pool-kinds.test.ts). */
+  build?(q: EvmPoolSellQuote, f: EvmPoolSellFields): EvmPoolSell;
   /** The pools banned for the token (evmSellBanned), and a ban (evmSellBan). */
   banned(token: string): Promise<string[]>;
   ban(token: string, pools: readonly string[]): Promise<void>;
@@ -305,14 +306,14 @@ export type EvmSellLegQuote = { q: EvmPoolSellQuote; note: { ref: NoteRef; preco
 /** `opens`: the open sales; a note held INCOMING whose sale of this W is open, not on chain and not being sent by this
  *  page is that sale's to sign again (`resume`: its Sell nonce and precommitment, card signpage-evm-pool-sell review
  *  P2-4: a helper's refusal or no answer never locks W's sale until its deadline). `own`: this run's own note. */
-export async function evmSellQuoteLeg(h: Omit<EvmSellHost, "send" | "record" | "unrecord" | "open">, ask: PoolAsk, w: EvmSellWallet, seed64: Uint8Array, sim?: (s: EvmSellSim, blockTimestamp: bigint) => Uint8Array, own?: string, opens?: Record<string, EvmOpenSell>): Promise<EvmSellLegQuote> {
+/** `pick`: the signer's own evmNextNote pick over its round (signPicked's); the read-only plan picks here. */
+export async function evmSellQuoteLeg(h: Omit<EvmSellHost, "send" | "record" | "unrecord" | "open">, ask: PoolAsk, w: EvmSellWallet, seed64: Uint8Array, sim?: (s: EvmSellSim, blockTimestamp: bigint) => Uint8Array, own?: string, opens?: Record<string, EvmOpenSell>, pick?: EvmSellPick): Promise<EvmSellLegQuote> {
   const token = ask.token!;
   const store = await h.notes();
-  const round = await h.round();
+  const round = pick?.round ?? (await h.round());
   // the return note: the first of (return, evm, l, j) and R's second arrivals no deposit names; a taken one before it is
   // the user's own, written so
-  const first: NoteRef = { kind: "return", c: "evm", l: w.l, j: w.j };
-  const walk = evmNextNote(seed64, h.scope, round.events, first, round.fin.number);
+  const walk = pick?.walk ?? evmNextNote(seed64, h.scope, round.events, returnOf(w), round.fin.number);
   if (walk.taken.length > 0) await evmClaimTaken(store, walk.taken);
   const held = (await store.list()).find((n) => n.scope === h.scope && n.precommitment === walk.next.precommitment);
   // the note to sign is the first one no deposit names: one held INCOMING is a sale signed on it that is not on chain.
@@ -333,51 +334,65 @@ export async function evmSellQuoteLeg(h: Omit<EvmSellHost, "send" | "record" | "
   return { q, note: { ref: walk.next.ref, precommitment: walk.next.precommitment, held, ...(resume && !mine ? { resume } : {}) }, nonce, authNonce: authReads[0], authReads };
 }
 
+/** The return note's chain for W: (return, evm, l, j), then R's second arrivals. */
+const returnOf = (w: EvmSellWallet): NoteRef => ({ kind: "return", c: "evm", l: w.l, j: w.j });
+type EvmSellPick = { round: Awaited<ReturnType<EvmSellHost["round"]>>; walk: ReturnType<typeof evmNextNote> };
+
 /** A leg signed: the calldata, the authorization, what the record and the read-back need. */
 type Signed = { q: EvmPoolSellQuote; built: EvmPoolSell; data: Uint8Array; authorization: EvmSellAuthorization };
 
 /** One leg's quote, build, checks and W's signatures, on `nonce` and `precommitment` when given (a second signature of
  *  the same sale). W's key and every seed copy are zeroed before this returns. */
 async function signLeg(h: EvmSellHost, ask: PoolAsk, w: EvmSellWallet, same: { nonce: bigint; precommitment: bigint; note: string } | null): Promise<{ s: Signed; leg: EvmSellLegQuote }> {
-  const clock = clockOf(h);
   return patient(h, async () => {
     const seed = await h.seed64();
-    let key: Uint8Array | null = null;
+    const held: { key: Uint8Array | null } = { key: null };
     try {
-      const k = freshWallet(seed, "evm", w.l, w.j);
-      key = k.secretKey;
-      if (lower(k.address) !== lower(w.w)) return no();
-      const pins = venuePins(h.venues, networkOf(h));
-      if (pins.feeCollector === undefined || pins.pool === undefined || lower(pins.pool) !== lower(h.pin.pool)) return no("not_allowed");
-      const sellAsk: PoolAsk = { ...ask, shareBps: undefined };
-      const ctxOf = (feeCap: bigint): PoolContext => ({ nowMs: clock(), wallet: w.w, feeCap, evm: { venues: h.venues, feeRecipient: h.pin.feeRecipient } });
-      const signSim = (sim: EvmSellSim, blockTimestamp: bigint): Uint8Array => {
-        const ctx = ctxOf(0n);
-        checkEvmSellSim(sim, blockTimestamp, sellAsk, ctx, h.testnet);
-        return signEvmSellSim(key!, ctx, sim);
-      };
-      const leg = await evmSellQuoteLeg(h, sellAsk, w, seed, signSim, same?.note, await h.open());
-      seed.fill(0);
-      // a second signature of one sale (this run's, or an open sale's signed again): W's same Sell nonce and the same
-      // precommitment, so at most one of the two lands
-      const fix = same ?? (leg.note.resume ? { nonce: BigInt(leg.note.resume.nonce), precommitment: BigInt(leg.note.resume.precommitment) } : null);
-      if (fix !== null && (leg.nonce !== fix.nonce || leg.note.precommitment !== fix.precommitment)) return no();
-      const deadline = clock() / 1000n + BigInt(EVM_SELL_DEADLINE_S);
-      const built = h.build(leg.q, { precommitment: leg.note.precommitment, feeRecipient: pins.feeCollector, deadline, nonce: leg.nonce });
-      const ctx = { ...ctxOf(leg.q.feeMax), precommitment: leg.note.precommitment };
-      // the floor is the rule's own: the quote's amount out less the ask's slippage (review P3-1)
-      checkEvmSell(built, sellAsk, ctx, { amountOut: leg.q.amountOut }, h.testnet);
-      const auth = checkEvmAuthorization(sellAsk, ctx, leg.authNonce, leg.authReads, h.testnet);
-      const signature = signEvmSell(key, ctx, built);
-      const authorization = signEvmAuthorization(key, ctx, auth);
-      key.fill(0);
-      const data = evmSellCalldata(built, built.feeCap, signature);
-      return { s: { q: leg.q, built, data, authorization }, leg };
+      return await signPicked(h, ask, w, same, seed, held);
     } finally {
       seed.fill(0);
-      key?.fill(0);
+      held.key?.fill(0);
     }
   });
+}
+
+/** signLeg's part under its seed copy: W's return note picked through the wallet's evmNextNote first, then every
+ *  signature on that pick (W's key in `held`, zeroed by signLeg). */
+async function signPicked(h: EvmSellHost, ask: PoolAsk, w: EvmSellWallet, same: { nonce: bigint; precommitment: bigint; note: string } | null, seed: Uint8Array, held: { key: Uint8Array | null }): Promise<{ s: Signed; leg: EvmSellLegQuote }> {
+  const clock = clockOf(h);
+  const round = await h.round();
+  const walk = evmNextNote(seed, h.scope, round.events, returnOf(w), round.fin.number);
+  const k = freshWallet(seed, "evm", w.l, w.j);
+  const key = k.secretKey;
+  held.key = key;
+  if (lower(k.address) !== lower(w.w)) return no();
+  const pins = venuePins(h.venues, networkOf(h));
+  if (pins.feeCollector === undefined || pins.pool === undefined || lower(pins.pool) !== lower(h.pin.pool)) return no("not_allowed");
+  const sellAsk: PoolAsk = { ...ask, shareBps: undefined };
+  const ctxOf = (feeCap: bigint): PoolContext => ({ nowMs: clock(), wallet: w.w, feeCap, evm: { venues: h.venues, feeRecipient: h.pin.feeRecipient } });
+  const signSim = (sim: EvmSellSim, blockTimestamp: bigint): Uint8Array => {
+    const ctx = ctxOf(0n);
+    checkEvmSellSim(sim, blockTimestamp, sellAsk, ctx, h.testnet);
+    return signEvmSellSim(key, ctx, sim);
+  };
+  const leg = await evmSellQuoteLeg(h, sellAsk, w, seed, signSim, same?.note, await h.open(), { round, walk });
+  seed.fill(0);
+  // a second signature of one sale (this run's, or an open sale's signed again): W's same Sell nonce and the same
+  // precommitment, so at most one of the two lands
+  const fix = same ?? (leg.note.resume ? { nonce: BigInt(leg.note.resume.nonce), precommitment: BigInt(leg.note.resume.precommitment) } : null);
+  if (fix !== null && (leg.nonce !== fix.nonce || leg.note.precommitment !== fix.precommitment)) return no();
+  const deadline = clock() / 1000n + BigInt(EVM_SELL_DEADLINE_S);
+  const fields: EvmPoolSellFields = { precommitment: leg.note.precommitment, feeRecipient: pins.feeCollector, deadline, nonce: leg.nonce };
+  const built = h.build ? h.build(leg.q, fields) : evmPoolBuildSell(leg.q, fields);
+  const ctx = { ...ctxOf(leg.q.feeMax), precommitment: leg.note.precommitment };
+  // the floor is the rule's own: the quote's amount out less the ask's slippage (review P3-1)
+  checkEvmSell(built, sellAsk, ctx, { amountOut: leg.q.amountOut }, h.testnet);
+  const auth = checkEvmAuthorization(sellAsk, ctx, leg.authNonce, leg.authReads, h.testnet);
+  const signature = signEvmSell(key, ctx, built);
+  const authorization = signEvmAuthorization(key, ctx, auth);
+  key.fill(0);
+  const data = evmSellCalldata(built, built.feeCap, signature);
+  return { s: { q: leg.q, built, data, authorization }, leg };
 }
 
 /** The read-back's state: each RPC's `stop`, and the round's want. */
@@ -839,7 +854,6 @@ export function evmSellHost(chain: Chain, pin: EvmPoolPin, scope: bigint, rpcs: 
     seed64: page.seed64,
     holdings: async () => recordsOf(await (await page.held()).get("meta", EVM_POSITION_COSTS_KEY)),
     quote: evmPoolSellQuote,
-    build: evmPoolBuildSell,
     banned: async (token) => evmSellBanned(await page.held(), networkOf({ chain, testnet: page.testnet }), token),
     ban: async (token, pools) => void (await evmSellBan(await page.held(), networkOf({ chain, testnet: page.testnet }), token, pools)),
     reverted: evmSellRevertedPools,

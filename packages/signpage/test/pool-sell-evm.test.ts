@@ -197,7 +197,7 @@ async function world(o: { send?: (n: number, body: { data: Uint8Array }) => Prom
     seed64: async () => SEED.slice(),
     holdings: async () => ((await md.get("meta", EVM_POSITION_COSTS_KEY)) ?? {}) as Record<string, unknown>,
     quote: (req: EvmPoolSellQuoteRequest) => sellQuoteWith(req, [provider(model), provider(model)], Date.now()),
-    build: o.build ?? evmPoolBuildSell,
+    ...(o.build ? { build: o.build } : {}),
     banned: async () => [],
     ban: async () => {},
     reverted: async () => [],
