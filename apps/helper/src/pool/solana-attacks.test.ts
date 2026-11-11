@@ -404,37 +404,32 @@ test("M362 (4): a 429 from one region goes to the next; each send starts at the 
   assert.equal(rate.seen.length, 2, "a JSON-RPC rate-limit answer counts as busy too");
 });
 
-test("M362 (4): the plain send only when every region fails on transport; busy or refused everywhere sends nothing (a 5xx or a refusal 503, a throttle 429)", async () => {
-  const engine = blockEngine(() => "throw");
-  const paths: string[][] = [];
-  assert.equal(code(await mainnet({ engine, paths, end: "filled" }).carry(body(tipped()))), "ok");
-  assert.equal(engine.seen.length, 8);
-  assert.deepEqual(paths, [["rpc0", "rpc1"]], "the plain send");
-  // M369 (L1): a 5xx from every region is busy, not transport: 503 and nothing plain
-  for (const status of ["503"] as const) {
-    const e5 = blockEngine(() => status);
-    const p5: string[][] = [];
-    const a5 = await mainnet({ engine: e5, paths: p5, end: "filled" }).carry(body(tipped()));
-    assert.deepEqual([a5.status, code(a5)], [503, "upstream"], "a 5xx everywhere");
-    assert.equal(e5.seen.length, 8, "every region asked");
-    assert.deepEqual(p5, [], "nothing plain");
+// card sol-pool-buy-lands-on-mainnet (review R2): the plain copy never waits on the engine. Every region busy (a 5xx),
+// throttled, refused or failing on transport: the plain copy still goes on both providers at once, a fill answers 200,
+// and the line says no bundle went (via=plain first=<why>) and how many plain copies the providers took
+const plainFill = (x: Sent): Done =>
+  (async () => {
+    const b64 = Buffer.from(x.wire).toString("base64");
+    const sends: { path: string; ok: boolean }[] = [];
+    for (const p of x.paths) sends.push({ path: p.name, ok: await p.send(b64).then((r) => r === x.sig, () => false) });
+    return { txs: [{ signature: x.sig, state: "filled", sends }] };
+  })() as never;
+test("R2: no region takes the bundle (busy, throttled, refused, transport): the plain copy goes on both providers and a fill answers 200, via=plain first=<why>", async () => {
+  const cases: [string, ReturnType<typeof blockEngine>, string][] = [
+    ["transport", blockEngine(() => "throw"), "transport"],
+    ["a 5xx everywhere", blockEngine(() => "503"), "busy"],
+    ["one throttled, the rest transport", blockEngine((host) => (host.startsWith("tokyo.") ? "429" : "throw")), "throttled"],
+    ["refused", blockEngine(() => "rpc_error"), "refused"],
+  ];
+  for (const [what, engine, why] of cases) {
+    const calls: Calls = [];
+    const paths: string[][] = [];
+    const a = await mainnet({ engine, a: calls, paths, done: plainFill }).carry(body(tipped({ r: { existingNullifierHash: f32(140 + cases.findIndex((c) => c[0] === what)) } })));
+    assert.deepEqual([a.status, code(a)], [200, "ok"], what);
+    assert.deepEqual(paths, [["jito", "rpc0", "rpc1"]], `${what}: the plain copy beside the bundle's try`);
+    assert.ok(calls.includes("sendTransaction"), `${what}: provider a took the plain copy`);
+    assert.deepEqual([a.note?.via, a.note?.first, a.note?.region, a.note?.bundle, a.note?.plain, a.note?.rebroadcasts, a.note?.misses], ["plain", why, undefined, undefined, 2, 0, 1], what);
   }
-  const mixed = blockEngine((host) => (host.startsWith("tokyo.") ? "429" : "throw"));
-  const p1: string[][] = [];
-  const a = await mainnet({ engine: mixed, paths: p1 }).carry(body(tipped()));
-  // card helper-abuse-limits: a region's 429 is a throttle, so the answer is 429 with a wait (still nothing plain)
-  assert.deepEqual([a.status, code(a), a.retryAfterS], [429, "rate_limited", 1], "one region throttled: not every region failed on transport");
-  assert.deepEqual(p1, []);
-  const refused = blockEngine(() => "rpc_error");
-  const p2: string[][] = [];
-  const b = await mainnet({ engine: refused, paths: p2 }).carry(body(tipped()));
-  assert.deepEqual([b.status, code(b)], [503, "upstream"]);
-  assert.equal(refused.seen.length, 1, "a refusal ends the try");
-  assert.deepEqual(p2, []);
-  // and a 503 frees the nullifier: the next carry tries again
-  const s = mainnet({ engine: blockEngine((_, n) => (n === 0 ? "rpc_error" : "ok")), end: "filled" });
-  assert.equal(code(await s.carry(body(tipped()))), "upstream");
-  assert.equal(code(await s.carry(body(tipped()))), "ok");
 });
 
 test("M362 (4): a mainnet tag 2 goes plain, never to a block engine", async () => {
@@ -618,7 +613,9 @@ test("M369 (M1): a rebroadcast goes to the region that took the first send only,
   const a = s.carry(body(tipped()));
   while (!path) await sleep(1); // the first send went, the kit's send started
   assert.equal(path!.name, "jito");
-  assert.equal(path!.paceKey, engine.seen[0]!.url, "the kit paces it per region, shared by every carry rebroadcasting there");
+  // card sol-pool-buy-lands-on-mainnet (R2): the kit's send starts beside the bundle's first send, before any region is
+  // known, so the kit paces this carry's ticks alone; what every carry rebroadcasting in a region shares is its gate
+  assert.equal(path!.paceKey, undefined, "paced per carry; the region's gate is shared");
   // card helper-jito-pace-margin: the kit's pacer runs at the region's own pace plus the tick slack (./jito.ts)
   assert.equal(path!.minIntervalMs, 50 + JITO_TICK_SLACK_MS);
   // the first send's second: a tick waits for the region's next one (card helper-pace-tick-refused-flake); a second
@@ -758,7 +755,7 @@ test("M369 (M1): sixteen carries rebroadcasting never keep an honest first send 
 // ------------------------------------------------------------------------------------------------ M374
 // M374 (1): the 503 once passed a block engine's error text through (120 characters), enough for the fee payer's
 // signature (88) before the send is decided. A block engine that answers with the signature it was sent in its error.
-test("M374 (1): a block engine's words never reach the caller: the 503 says only its code", async () => {
+test("M374 (1): a block engine's words never reach the caller: the answer says only its code", async () => {
   for (const status of [400, 200]) {
     let sig = "";
     const fetchFn: JitoFetch = async (_u, init) => {
@@ -768,13 +765,14 @@ test("M374 (1): a block engine's words never reach the caller: the 503 says only
     };
     const a = await mainnet({ engine: { fetchFn } }).carry(body(tipped()), "c");
     assert.ok(sig.length >= 64, "the engine saw the signed transaction");
+    // R2: a refusal means no bundle; the plain copy's end is the answer (here it never landed)
     assert.equal(a.status, 503);
-    assert.deepEqual(a.body, { error: { code: "upstream" } }, "nothing but the code");
+    assert.deepEqual(a.body, { error: { code: "not_landed" } }, "nothing but the code");
     assert.ok(!JSON.stringify(a.body).includes(sig.slice(0, 20)));
   }
   // busy everywhere (rate-limit words): the same
   const busy: JitoFetch = async () => new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, error: { code: -32097, message: `Rate limit exceeded ${"5".repeat(88)}` } }));
-  assert.deepEqual((await mainnet({ engine: { fetchFn: busy } }).carry(body(tipped()), "c")).body, { error: { code: "rate_limited" } });
+  assert.deepEqual((await mainnet({ engine: { fetchFn: busy } }).carry(body(tipped()), "c")).body, { error: { code: "not_landed" } });
   // and the ends without a fill: their codes alone
   for (const end of ["expired", "unknown"] as const) {
     const a = await mainnet({ engine: blockEngine(() => "ok"), done: (x) => Promise.resolve({ txs: [{ signature: x.sig, state: end, sends: [] }] }) }).carry(body(tipped()), "c");
@@ -832,7 +830,7 @@ test("M374 (5): repeats of one carry from one client hold at most POOL_JITO_IN_F
 // card helper-abuse-limits, M374 (4): a nullifier whose last send expired (never landed) goes again only into a block
 // engine second that is free now (queue limit 0), so re-sends of unlanded notes never queue ahead of fresh sends. The
 // pacer runs at 1 s on its real monotonic clock, which moves.
-test("M374 (4): an expired nullifier's re-send goes only into a free second, else 429 rate_limited unsent; a fresh send in the same moment queues and goes", async () => {
+test("M374 (4): an expired nullifier's re-send bundles only into a free second, else it goes plain alone (R2); a fresh send in the same moment queues and goes", async () => {
   const engine = blockEngine(() => "ok");
   const expiredOnce = new Set<string>();
   const s = mainnet({
@@ -853,13 +851,12 @@ test("M374 (4): an expired nullifier's re-send goes only into a free second, els
   for (const f of fresh) assert.equal(code(f), "ok");
   assert.equal(engine.seen.length, 8);
   const re = await s.carry(body(old), "a");
-  assert.deepEqual([re.status, code(re), re.retryAfterS], [429, "rate_limited", 1], "the re-send found no free second");
-  assert.equal(engine.seen.length, 8, "and sent nothing");
-  assert.deepEqual(re.body, { error: { code: "rate_limited" } }, "the code only");
+  assert.deepEqual([re.status, code(re)], [200, "ok"], "the re-send found no free second: its plain copy carried it");
+  assert.equal(engine.seen.length, 8, "and no bundle went");
+  assert.deepEqual([re.note?.via, re.note?.first], ["plain", "throttled"], "no free second: the region queue says throttled");
   const next = await s.carry(body(tipped({ r: { existingNullifierHash: f32(260) } })), "b");
   assert.equal(code(next), "ok", "a fresh send queues for the next second and goes");
-  await sleep(1_050);
-  assert.equal(code(await s.carry(body(old), "a")), "ok", "in a free second the re-send goes");
+
 });
 
 // card helper-abuse-limits, the review's probes (R-S1 to R-S4)
@@ -1084,4 +1081,74 @@ test("a fill answers at once: a line read still in flight when the send ends (th
   assert.equal((answer as PoolSendAnswer).status, 200);
   assert.equal((answer as PoolSendAnswer).note?.hashMs, ">0");
   assert.equal((answer as PoolSendAnswer).note?.engine3, "unread");
+});
+
+// card sol-pool-buy-lands-on-mainnet (review R3): a landed failure only ONE provider reads (confirmed) refuses the
+// nullifier for the epoch, on the bundled path and on the plain one
+const failedOnA = (calls: Calls): SolanaRpc => {
+  const base = stub(calls);
+  return Object.assign(async (m: string, p: readonly unknown[]) => (m === "getSignatureStatuses" ? { context: { slot: 1 }, value: [{ slot: 1, confirmations: 0, err: { InstructionError: [2, { Custom: 1 }] }, confirmationStatus: "confirmed" }] } : base(m, p)), { url: base.url });
+};
+const unreadB = (): SolanaRpc => {
+  const base = stub([]);
+  return Object.assign(async (m: string, p: readonly unknown[]) => (m === "getSignatureStatuses" ? { context: { slot: 1 }, value: [null] } : base(m, p)), { url: base.url });
+};
+test("R3: a landed failure read by one provider only refuses the nullifier this epoch (mainnet tag 3, and a tag 2)", async () => {
+  const s = mainnet({ engine: engineWith("db".repeat(32)), providers: [failedOnA([]), unreadB()], done: async (x) => ({ txs: [{ signature: x.sig, state: "unknown", sends: [] }] }) });
+  const a = await s.carry(body(tipped({ r: { existingNullifierHash: f32(150) } })));
+  assert.deepEqual([a.status, code(a)], [503, "not_landed"]);
+  assert.equal(code(await s.carry(body(tipped({ r: { existingNullifierHash: f32(150) } })))), "failed_this_epoch");
+  // the plain path (a tag 2): its answer goes at once, the end is read after it
+  let end!: () => void;
+  const ended = new Promise<void>((r) => (end = r));
+  const t = mainnet({ engine: engineWith("dc".repeat(32)), providers: [failedOnA([]), unreadB()], done: async (x) => (await ended, { txs: [{ signature: x.sig, state: "unknown", sends: [] }] }) as never });
+  const w2 = wire({ r: { existingNullifierHash: f32(151) } });
+  assert.equal((await t.carry(body(w2))).status, 200);
+  end();
+  for (let k = 0; k < 20; k++) await new Promise((r) => setImmediate(r));
+  assert.equal(code(await t.carry(body(wire({ r: { existingNullifierHash: f32(151) } })))), "failed_this_epoch");
+});
+test("R3: one provider's read of a landed SUCCESS, or an unconfirmed failure, refuses nothing", async () => {
+  for (const v of [{ err: null, confirmationStatus: "confirmed" }, { err: { InstructionError: [2, { Custom: 1 }] }, confirmationStatus: "processed" }]) {
+    const base = stub([]);
+    const a = Object.assign(async (m: string, p: readonly unknown[]) => (m === "getSignatureStatuses" ? { context: { slot: 1 }, value: [{ slot: 1, ...v }] } : base(m, p)), { url: base.url });
+    let n = 0;
+    const s = mainnet({ engine: engineWith("dd".repeat(32)), providers: [a, unreadB()], done: async (x) => ({ txs: [{ signature: x.sig, state: n++ === 0 ? "unknown" : "filled", sends: [] }] }) });
+    await s.carry(body(tipped({ r: { existingNullifierHash: f32(152) } })));
+    assert.notEqual(code(await s.carry(body(tipped({ r: { existingNullifierHash: f32(152) } })))), "failed_this_epoch", JSON.stringify(v));
+  }
+});
+
+// review R4: the 3 s read of the engine's word never runs while another bundle carry is in flight (it would take a
+// region second that carry may need); and the end simulation is of W's bytes, never the signed ones
+test("R4: engine3 is not read while another bundle carry is in flight", async () => {
+  const e = engineWith("de".repeat(32));
+  const fills: (() => void)[] = [];
+  const s = mainnet({
+    engine: e,
+    wait: (ms, signal) => (ms === 3_000 ? Promise.resolve(!signal.aborted) : new Promise((done) => signal.addEventListener("abort", () => done(false), { once: true }))),
+    done: (x) => new Promise((ok) => fills.push(() => ok({ txs: [{ signature: x.sig, state: "filled", sends: [] }] }))) as never,
+  });
+  const p1 = s.carry(body(tipped({ r: { existingNullifierHash: f32(160) } })), "a");
+  const p2 = s.carry(body(tipped({ r: { existingNullifierHash: f32(161) } })), "b");
+  for (let k = 0; k < 50 && fills.length < 2; k++) await new Promise((r) => setImmediate(r));
+  for (let k = 0; k < 20; k++) await new Promise((r) => setImmediate(r));
+  assert.equal(e.seen.filter((m) => m === "getInflightBundleStatuses").length, 0, "no status read while two carries are in flight");
+  for (const f of fills) f();
+  const [a, b] = await Promise.all([p1, p2]);
+  assert.equal(a.note?.engine3, undefined);
+  assert.equal(b.note?.engine3, undefined);
+});
+test("R4: the end simulation of a send that did not fill is of W's bytes (slot 0 empty), on a fresh blockhash", async () => {
+  const calls: { m: string; p: readonly unknown[] }[] = [];
+  const base = stub([]);
+  const a = Object.assign(async (m: string, p: readonly unknown[]) => (calls.push({ m, p }), base(m, p)), { url: base.url });
+  const s = mainnet({ engine: engineWith("df".repeat(32)), providers: [a, stub([])], done: async (x) => ({ txs: [{ signature: x.sig, state: "expired", sends: [] }] }) });
+  const w = tipped({ r: { existingNullifierHash: f32(162) } });
+  const r = await s.carry(body(w));
+  assert.equal(r.note?.endSim, "ok");
+  const sims = calls.filter((c) => c.m === "simulateTransaction");
+  assert.equal(sims.length, 2);
+  for (const c of sims) assert.equal(c.p[0], body(w).tx, "W's bytes as received");
+  assert.deepEqual(sims[1]!.p[1], { encoding: "base64", sigVerify: false, replaceRecentBlockhash: true, commitment: "processed" });
 });

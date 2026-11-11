@@ -20,7 +20,8 @@ import {
 import { base58 } from "../bind/checks.ts";
 import { solanaPoolFee, solanaPoolPageReserve, solanaPoolPriorityBudget, solanaPoolReleaseCost, solanaRentMin, type SolanaRent } from "@blindfill/kit";
 import { POOL_EPOCH_MS } from "./fee.ts";
-import { checkSolanaPoolTx, feePayerKey, solanaPoolSender, solanaPoolSendersFromEnv, type PoolSendAnswer } from "./solana.ts";
+import { checkSolanaPoolTx, feePayerKey, signAsFeePayer, solanaPoolSender, solanaPoolSendersFromEnv, solanaPoolSignaturesHold, type PoolSendAnswer } from "./solana.ts";
+import { poolSendLine } from "./send-log.ts";
 
 const testKey = (name: string) => {
   const seed = new Uint8Array(createHash("sha256").update(`helper-pool-senders/test-key/${name}`).digest());
@@ -195,9 +196,10 @@ function rpcStub(simErr: unknown = null, calls: Calls = []): SolanaRpc {
       calls.push({ method, params });
       if (method === "simulateTransaction") {
         const opts = params[1] as { sigVerify?: boolean };
-        // sigVerify as a public mainnet RPC answers it (11 Nov 18:10Z): value.err "SignatureFailure"; "sigVerify" plants a
-        // provider whose own check refuses the signatures, whatever they are
-        if (opts.sigVerify && (simErr === "sigVerify" || !signaturesHold(Buffer.from(params[0] as string, "base64")))) return { context: { slot: 1 }, value: { err: "SignatureFailure", logs: [] } };
+        // sigVerify as a public mainnet RPC answers it (11 Nov 18:10Z): value.err "SignatureFailure"
+        if (opts.sigVerify && !signaturesHold(Buffer.from(params[0] as string, "base64"))) return { context: { slot: 1 }, value: { err: "SignatureFailure", logs: [] } };
+        // "echo": a provider that puts whatever it is given in its error
+        if (simErr === "echo") return { context: { slot: 1 }, value: { err: { InstructionError: [0, { BorshIoError: params[0] }] }, logs: [] } };
         return { context: { slot: 1 }, value: { err: simErr, logs: [] } };
       }
       if (method === "getLatestBlockhash") return { context: { slot: 1 }, value: { blockhash: BLOCKHASH, lastValidBlockHeight: 1000 } };
@@ -227,7 +229,7 @@ function sender(simErr: unknown = null, calls: Calls = [], sent: Uint8Array[] = 
 const body = (wire: Uint8Array) => ({ pool: POOL, tx: Buffer.from(wire).toString("base64") });
 const code = (a: PoolSendAnswer) => ("error" in a.body ? a.body.error.code : "ok");
 
-test("the carry adds the fee payer's signature and nothing else, simulates the signed bytes as they will be sent, and sends", async () => {
+test("the carry simulates W's bytes, adds the fee payer's signature and nothing else, verifies both, and sends", async () => {
   const calls: Calls = [];
   const sent: Uint8Array[] = [];
   const wire = build({ tag: 3 });
@@ -239,29 +241,62 @@ test("the carry adds the fee payer's signature and nothing else, simulates the s
   assert.deepEqual(out.subarray(65), wire.subarray(65), "every byte after slot 0 is W's");
   assert.ok(ed25519.verify(out.subarray(1, 65), wire.subarray(129), ed25519.getPublicKey(FP.seed)), "slot 0 is the fee payer's signature");
   assert.deepEqual(a.body, { signature: base58(out.subarray(1, 65)) });
-  // card sol-pool-buy-lands-on-mainnet: one simulation, of the bytes as sent (both signatures in, checked), on their own
-  // blockhash
+  // card sol-pool-buy-lands-on-mainnet (review R1): one simulation, of W's bytes as received (slot 0 empty), on their own
+  // blockhash; the signed bytes leave only in the send
   const sims = calls.filter((c) => c.method === "simulateTransaction");
   assert.equal(sims.length, 1, "one simulation round");
-  assert.equal(sims[0]!.params[0], Buffer.from(out).toString("base64"), "the simulation ran on the signed bytes");
-  assert.deepEqual(sims[0]!.params[1], { encoding: "base64", sigVerify: true, replaceRecentBlockhash: false, commitment: "processed" });
+  assert.equal(sims[0]!.params[0], body(wire).tx, "the simulation ran on W's bytes as received");
+  assert.deepEqual(sims[0]!.params[1], { encoding: "base64", sigVerify: false, replaceRecentBlockhash: false, commitment: "processed" });
 });
 
-// card sol-pool-buy-lands-on-mainnet: the signed bytes are proven before any send. A signature that does not hold, or a
-// blockhash the provider does not know, is a 422 naming it; nothing leaves, and no signature is in the answer
-test("a wire whose signatures do not hold as sent is refused signature_failed, nothing sent, no signature in the answer", async () => {
+// card sol-pool-buy-lands-on-mainnet (review R1): both signatures of the bytes as sent are verified here, before any
+// send; a wire whose fee-payer or W signature does not verify is refused, and no provider call ever carries signed bytes
+test("both signatures of the bytes as sent are verified here: a wrong fee-payer or W signature does not hold", () => {
   for (const tag of [2, 3] as const) {
-    // W's own signature wrong: the checks refuse it before any read (bad_signature), as before
+    const c = checkSolanaPoolTx(build({ tag }), CFG);
+    assert.ok(c.ok);
+    const signed = signAsFeePayer(c.tx, FP.seed);
+    assert.equal(solanaPoolSignaturesHold(signed, c.tx), true, `tag ${tag}`);
+    for (const at of [3, 70]) {
+      const bad = signed.slice();
+      bad[at]! ^= 1; // slot 0 (the fee payer's), slot 1 (W's)
+      assert.equal(solanaPoolSignaturesHold(bad, c.tx), false, `tag ${tag}, byte ${at}`);
+    }
+    // a fee payer key that is not the message's payer: its signature does not hold
+    assert.equal(solanaPoolSignaturesHold(signAsFeePayer(c.tx, W.seed), c.tx), false);
+  }
+});
+test("a wire whose W signature does not verify is refused before any provider call; no provider call carries a signed slot 0", async () => {
+  for (const tag of [2, 3] as const) {
+    const calls: Calls = [];
     const bad = build({ tag });
     bad[70]! ^= 1;
-    assert.equal(code(await sender(null, [], []).carry(body(bad))), "bad_signature");
-    // the provider's signature check refuses the bytes as sent (both signatures in)
-    const sent: Uint8Array[] = [];
-    const a = await sender("sigVerify", [], sent).carry(body(build({ tag })));
-    assert.deepEqual([a.status, code(a)], [422, "signature_failed"], `tag ${tag}`);
-    assert.equal(sent.length, 0);
-    assert.equal(a.note?.err, "signature");
-    assert.ok(!JSON.stringify(a.body).match(/[1-9A-HJ-NP-Za-km-z]{80,}/), JSON.stringify(a.body));
+    assert.equal(code(await sender(null, calls, []).carry(body(bad))), "bad_signature");
+    assert.equal(calls.length, 0, "no provider call");
+    const all: Calls = [];
+    await sender(null, all, []).carry(body(build({ tag })));
+    for (const c of all.filter((x) => typeof x.params[0] === "string")) {
+      const w = Buffer.from(c.params[0] as string, "base64");
+      if (w.length > 65 && w[0] === 2) assert.ok(w.subarray(1, 65).every((x) => x === 0), `${c.method} carried a signed slot 0`);
+    }
+  }
+});
+test("a provider that echoes what it is given never puts the fee payer's signature in an answer or a log line", async () => {
+  for (const tag of [2, 3] as const) {
+    const wire = build({ tag });
+    const c = checkSolanaPoolTx(wire, CFG);
+    assert.ok(c.ok);
+    const fp = Buffer.from(signAsFeePayer(c.tx, FP.seed).subarray(1, 65));
+    // base58, hex, and base64 at each of the three byte alignments it can sit at inside a longer base64 text
+    const forms = [base58(fp), fp.toString("hex").slice(0, 40), ...[0, 1, 2].map((k) => Buffer.concat([Buffer.alloc(k), fp]).toString("base64").slice(4, 44))];
+    for (const err of ["echo", "BlockhashNotFound"]) {
+      const sent: Uint8Array[] = [];
+      const a = await sender(err, [], sent).carry(body(wire));
+      assert.equal(sent.length, 0);
+      assert.ok(a.status === 422, `${err}: ${a.status}`);
+      const line = poolSendLine({ chain: "solana", net: "devnet", route: "send", status: a.status, body: a.body, ms: 1, note: a.note });
+      for (const f of forms) assert.ok(!JSON.stringify(a.body).includes(f) && !line.includes(f), `${err}: the fee payer's signature in ${JSON.stringify(a.body)} / ${line}`);
+    }
   }
 });
 test("a blockhash the provider does not know is refused blockhash_not_found, nothing sent", async () => {

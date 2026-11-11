@@ -100,3 +100,9 @@ test("the line's reads of why a bundle did not land: engine3, engine, plain, has
   assert.equal(poolSendLine({ chain: "solana", net: "mainnet", route: "send", status: 200, body: { signature: SIG }, ms: 900, note: { tag: 3, end: "filled", plain: 2, hashMs: "41000" } }), "pool send solana mainnet send outcome=filled status=200 ms=900 tag=3 end=filled plain=2 hash_ms=41000");
   assert.doesNotMatch(poolSendLine({ chain: "solana", net: "mainnet", route: "send", status: 200, body: {}, ms: 1, note: { hashMs: ADDR } }), /hash_ms/);
 });
+
+test("review R4: end_sim is ok, unread or one of simErrText's shapes; anything else is dropped", () => {
+  const line = (endSim: string) => poolSendLine({ chain: "solana", net: "mainnet", route: "send", status: 503, body: { error: { code: "not_landed" } }, ms: 1, note: { endSim } });
+  for (const good of ["ok", "unread", '{"InstructionError":[2,{"Custom":6004}]}', '"BlockhashNotFound"']) assert.match(line(good), new RegExp(`end_sim=${good.replace(/[[\]{}]/g, "\\$&")}$`), good);
+  for (const bad of [SIG, ADDR, `"${SIG}"`, '{"InstructionError":[2,{"Custom":6004},123456]}', "ok extra", '{"a b":1}', "x".repeat(130)]) assert.doesNotMatch(line(bad), /end_sim=/, bad);
+});

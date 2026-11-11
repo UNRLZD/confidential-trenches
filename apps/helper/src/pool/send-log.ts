@@ -12,7 +12,7 @@ export type PoolSendNote = {
   via?: "jito" | "plain";
   /** A Jito first send that no region took: every region busy, one refused it, or every region failed on transport
    *  (then the plain send). */
-  first?: "busy" | "throttled" | "refused" | "transport";
+  first?: "busy" | "throttled" | "refused" | "transport" | "queued";
   /** The region (its host's first label) whose block engine took the first send. */
   region?: string;
   /** Whether that engine named the bundle it made (its x-bundle-id header). */
@@ -62,7 +62,8 @@ export function poolSendLine(l: { chain: "solana" | "evm" | "unknown"; net: stri
   if (n.status !== undefined) out.push(`engine=${n.status}`);
   if (n.plain !== undefined) out.push(`plain=${n.plain}`);
   if (n.hashMs !== undefined && /^>?\d{1,9}$/.test(n.hashMs)) out.push(`hash_ms=${n.hashMs}`);
-  if (n.endSim !== undefined) out.push(`end_sim=${n.endSim}`);
+  // ok, unread, or a shape simErrText gives back unchanged (variant names, keys, two small integers, "?"); else dropped
+  if (n.endSim !== undefined && (n.endSim === "ok" || n.endSim === "unread" || isErrShape(n.endSim))) out.push(`end_sim=${n.endSim}`);
   if (n.err !== undefined) out.push(`err=${n.err}`);
   return out.join(" ");
 }
@@ -96,6 +97,14 @@ function shape(v: unknown, depth: number, kept: { n: number }): unknown {
   if (Array.isArray(v)) return v.slice(0, 4).map((x) => shape(x, depth + 1, kept));
   if (typeof v === "object" && v !== null) return Object.fromEntries(Object.entries(v).slice(0, 4).map(([k, x]) => [k.length <= 48 && KEY.test(k) ? k : "?", shape(x, depth + 1, kept)]));
   return "?";
+}
+/** Whether `t` is already one of simErrText's shapes (reshaping it changes nothing). */
+function isErrShape(t: string): boolean {
+  try {
+    return t.length <= 120 && /^["{[]/.test(t) && simErrText(JSON.parse(t)) === t;
+  } catch {
+    return false;
+  }
 }
 /** A Solana simulation's err for the line: its shape (variant names, indexes, codes), free text dropped, at most 120
  *  characters, with no space so the line stays one field a word. */
