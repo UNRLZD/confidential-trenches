@@ -64,14 +64,30 @@ export const RPC_TIMEOUT_MS = 10_000; // NEAR send_tx waits for execution; the s
  */
 export const RPC_CHAIN_MAX = 100;
 /**
- * Requests one caller draws per chain per window, unless RPC_BUDGET_<CHAIN> says: what a device's one-transaction
- * trade asks of one provider when it fills within its read burst, from the kit's own pattern
+ * Requests one caller draws per chain per window on a public endpoint, and on our keyed providers for a route the
+ * signing page does not read (NEAR; RPC_PAGE_NEED names the others): what a device's
+ * one-transaction trade asks of one provider when it fills within its read burst, from the kit's own pattern
  * (packages/kit/src/trade/solana/send.ts): the send (l.6-8), the burst of C = B/5 = 8 status reads over the keyless
- * B = 40 (l.190-193), and a blockhash read, about 11, rounded up to 16. Six callers at their full share fill the public
- * 100; a trade left undecided past its burst reads up to B - C = 32 statuses in a window (l.197-198), which only a
- * keyed provider's larger RPC_BUDGET_<CHAIN> serves.
+ * B = 40 (l.190-193), and a blockhash read, about 11, rounded up to 16.
  */
 export const RPC_CLIENT_MAX = 16;
+/**
+ * The most one signing page draws from a route in its busiest 10 s, each route's share at least this, whatever
+ * RPC_BUDGET_<CHAIN> says (card helper-gives-a-trade-its-reads: on 11 Nov 05:09Z /v1/rpc/solana answered 16 getSlot of
+ * one address and refused the 17th, 429 retry-after 6, while a page reads it as its seat B):
+ *   - solana (the page's seat B, packages/signpage/src/trade.ts) and solana-devnet (the testnet build's, so a devnet
+ *     run meets the mainnet share): 42. The app's recorded devnet runs (apps/terminal/test/e2e/buy/run.answers.json on
+ *     card app-sell-e2e-in-the-app) drew the route 33 in their busiest 10 s (run 8, 04:37Z, the buy) and 42 (run 9,
+ *     05:03Z, the buy, its seat A throttled); the page's budget per host (packages/wallet/src/throttle.ts PASS_BUDGET
+ *     30, PASS_BUDGET_TRADING 20 beside a trade's own reads, card signpage-passes-yield-to-a-trade) is 30 with no trade
+ *     and 20 plus a trade's 22 helper reads with one: 42.
+ *   - solana-marks (the mark lister) and base, robinhood (the EVM pools' holdings and history reads): 30. Only the
+ *     page's background passes read them, never a trade's reads, and the page's budget per host holds those to 30.
+ *   - near: none; the page reads NEAR on its own providers, so its share stays RPC_CLIENT_MAX.
+ * The share of a chain on our keyed providers (keyedBudget) and the least RPC_BUDGET_<CHAIN> may name. Callers at their
+ * full share at once: (the total less RPC_RESERVE) / this; at Helius free's 100 per 10 s (the header), two on Solana.
+ */
+export const RPC_PAGE_NEED: Readonly<Partial<Record<RpcChain, number>>> = { solana: 42, "solana-devnet": 42, "solana-marks": 30, base: 30, robinhood: 30 };
 /**
  * Requests of one method the public Solana endpoint takes in 10 s from every caller together: "Maximum number of
  * requests per 10 seconds per IP for a single RPC: 40" (clusters.mdx:154, the same "Mainnet rate limits" list as
@@ -80,8 +96,8 @@ export const RPC_CLIENT_MAX = 16;
  * number of RPC_BUDGET_SOLANA, or none (two numbers: no limit per method).
  */
 export const RPC_METHOD_MAX = 40;
-/** The longest a send waits for a keyed provider's second to have room. [design: 2 s: one caller's whole share at
- *  Helius free (RPC_CLIENT_MAX 16 at 10 a second) is two seconds' room, so a caller behind a full share still goes.] */
+/** The longest a send waits for a keyed provider's second to have room. [design: 2 s: at Helius free's 10 a second a
+ *  burst sent at once gets 20 in, and a page's reads, spread over its window (RPC_PAGE_NEED), never wait that long.] */
 export const PACE_MAX_MS = 2_000;
 /** A keyed provider's second as paced: a provider counts sends as they arrive, and our timers and the network move
  *  them by a few ms to tens of ms, so two seconds' sends must leave more than 1 s apart. [design: 100 ms margin.] */
@@ -174,11 +190,13 @@ export const RPC_RESERVE: Readonly<Record<RpcChain, number>> = { solana: 3, base
  * helper-ready-gate): the trade walks and the SOL price reads (data/solana/trades.ts) go only while half stays free,
  * whatever callers drew, so a walk that would take the whole budget leaves a caller's read its room (4 Nov 06:24-06:30Z:
  * the walks, outside this budget, drew the public endpoint's 100 and every token read answered 429 for six minutes).
- * [design: half: the public 100 keeps 50 for callers, three at their full RPC_CLIENT_MAX share; the walks keep 47, a cold
+ * [design: half: the public 100 keeps 50 for callers, three at their full RPC_CLIENT_MAX share (on a keyed plan of 100,
+ * one page at its RPC_PAGE_NEED share while the walks hold their half, two once they do not); the walks keep 47, a cold
  * read of COLD_SIGS transactions a few seconds, and move to their next provider when it is spent.]
  */
 export const userRoomOf = (limit: number): number => Math.ceil(limit / 2);
-/** Each chain's budget unless RPC_BUDGET_<CHAIN> says; only Solana's public endpoint publishes a limit per method. */
+/** Each chain's budget on its public endpoint unless RPC_BUDGET_<CHAIN> says; only Solana's public endpoint publishes a
+ *  limit per method. A chain on our keyed providers draws keyedBudget instead. */
 export const RPC_BUDGETS: Readonly<Record<RpcChain, BudgetLimits & { perMethod?: number }>> = {
   solana: { total: RPC_CHAIN_MAX, perClient: RPC_CLIENT_MAX, perMethod: RPC_METHOD_MAX },
   base: { total: RPC_CHAIN_MAX, perClient: RPC_CLIENT_MAX },
@@ -281,6 +299,12 @@ function evmCapSpan(chain: RpcChain, answer: unknown): bigint | null {
 }
 /** The environment variable naming a chain's budget, "<total>,<per client>[,<per method>]" per 10 s; the share at
  * least RPC_BATCH_MAX, so a full batch can be served, and a method's at least that and at most the total. */
+/** A chain's budget on our keyed providers unless RPC_BUDGET_<CHAIN> names the plan's: the chain's total (Helius free's
+ *  100 per 10 s on Solana, the rpc.ts header) and one page's share (RPC_PAGE_NEED), no limit per method (a keyed plan
+ *  names its own as a third number). Not the public endpoint's share: there 42 of one method would leave others none. */
+export const keyedBudget = (chain: RpcChain): BudgetLimits => ({ total: RPC_BUDGETS[chain].total, perClient: RPC_PAGE_NEED[chain] ?? RPC_CLIENT_MAX });
+/** The least share RPC_BUDGET_<CHAIN> (a keyed plan's) may name: a full batch, and what one page draws (RPC_PAGE_NEED). */
+export const rpcLeastShare = (chain: RpcChain): number => Math.max(RPC_BATCH_MAX, RPC_PAGE_NEED[chain] ?? 0);
 export const rpcBudgetEnv = (chain: RpcChain): string => `RPC_BUDGET_${chain.toUpperCase().replace(/-/g, "_")}`;
 const ID_MAX = 128;
 
@@ -573,7 +597,8 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
   const publicLimits = { ...RPC_BUDGETS.solana, reserve: RPC_RESERVE.solana, userRoom: userRoomOf(RPC_BUDGETS.solana.total) };
   const limits = Object.fromEntries(
     RPC_CHAINS.map((ch) => {
-      const b = budgetFromEnv(env, rpcBudgetEnv(ch), RPC_BUDGETS[ch], { minShare: RPC_BATCH_MAX, perMethod: true, reserve: RPC_RESERVE[ch] });
+      // a share under what one page draws is refused (RPC_PAGE_NEED), as deploy/redeploy.sh budget_ok refuses it first
+      const b = budgetFromEnv(env, rpcBudgetEnv(ch), upstreams[ch].keyed.length > 0 ? keyedBudget(ch) : RPC_BUDGETS[ch], { minShare: rpcLeastShare(ch), perMethod: true, reserve: RPC_RESERVE[ch] });
       return [ch, { ...b, reserve: RPC_RESERVE[ch], userRoom: userRoomOf(b.total) }];
     }),
   ) as Record<RpcChain, BudgetLimits & { perMethod?: number }>;

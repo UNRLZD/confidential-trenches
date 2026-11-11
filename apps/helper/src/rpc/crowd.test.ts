@@ -43,7 +43,7 @@ const peak = (sent: number[]): number => Math.max(0, ...sent.map((t) => sent.fil
 test("card helper-crowd-429: the trade walks' sends to the keyed provider callers use are paced with the callers' own, behind them, so a crowd of callers and walks at once never passes the provider's second and no caller gets a 429", async () => {
   const pv = provider(10);
   const lines: string[] = [];
-  const r = createRpc({ SOLANA_RPC_URL: URL_KEYED, RPC_BUDGET_SOLANA: "100,16" }, { fetch: pv.fetch as never, log: (l) => lines.push(l), now: mono });
+  const r = createRpc({ SOLANA_RPC_URL: URL_KEYED, RPC_BUDGET_SOLANA: "100,42" }, { fetch: pv.fetch as never, log: (l) => lines.push(l), now: mono });
   // a walk as data/solana/trades.ts sends it: the budget's word first (a wait skips this provider for the next, the
   // public one, not counted here), then its own fetch of the same URL, its 429 told back
   const walk = async (i: number): Promise<number | "skipped"> => {
@@ -69,7 +69,7 @@ test("card helper-crowd-429: a provider's 1 s hold is waited out by every caller
   // the first send is throttled (Retry-After none: 1 s), as at 20:57:50.951Z; then Helius free's 10 a second
   const pv = provider(10, 1);
   const lines: string[] = [];
-  const r = createRpc({ SOLANA_RPC_URL: URL_KEYED, RPC_BUDGET_SOLANA: "100,16" }, { fetch: pv.fetch as never, log: (l) => lines.push(l), now: mono });
+  const r = createRpc({ SOLANA_RPC_URL: URL_KEYED, RPC_BUDGET_SOLANA: "100,42" }, { fetch: pv.fetch as never, log: (l) => lines.push(l), now: mono });
   const t0 = mono();
   const first = r.handle("solana", JSON_T, read(1), "198.51.100.200");
   await new Promise((ok) => setTimeout(ok, 50)); // its 429 is in: the chain is held
@@ -86,7 +86,7 @@ test("card helper-crowd-429: a provider's 1 s hold is waited out by every caller
 
 test("card helper-crowd-429: a hold past PACE_MAX_MS is still the caller's 429 with its seconds, never a wait past the route's time", async () => {
   const fetch = async (): Promise<Response> => new Response("{}", { status: 429, headers: { "retry-after": "30" } });
-  const r = createRpc({ SOLANA_RPC_URL: URL_KEYED, RPC_BUDGET_SOLANA: "100,16" }, { fetch: fetch as never, log: () => {}, now: mono });
+  const r = createRpc({ SOLANA_RPC_URL: URL_KEYED, RPC_BUDGET_SOLANA: "100,42" }, { fetch: fetch as never, log: () => {}, now: mono });
   const t0 = mono();
   const a = await r.handle("solana", JSON_T, read(1), "198.51.100.1");
   const b = await r.handle("solana", JSON_T, read(2), "198.51.100.2");
@@ -97,7 +97,7 @@ test("card helper-crowd-429: a hold past PACE_MAX_MS is still the caller's 429 w
 
 test("card helper-crowd-429: two RPC clients on one keyed URL (SOLANA_HOLDERS_RPC_URL set to SOLANA_RPC_URL's key) share one pacer, so together they keep its second", async () => {
   const pv = provider(10);
-  const main = createRpc({ SOLANA_RPC_URL: URL_KEYED, RPC_BUDGET_SOLANA: "100,16" }, { fetch: pv.fetch as never, log: () => {}, now: mono });
+  const main = createRpc({ SOLANA_RPC_URL: URL_KEYED, RPC_BUDGET_SOLANA: "100,42" }, { fetch: pv.fetch as never, log: () => {}, now: mono });
   const holders = createRpc({ SOLANA_RPC_URL: URL_KEYED }, { fetch: pv.fetch as never, log: () => {}, slot: "holders", publicFallback: false, pacer: main.pacer, now: mono });
   const all = await Promise.all([
     ...Array.from({ length: 8 }, (_, i) => main.handle("solana", JSON_T, read(i + 1), `198.51.100.${i}`)),
