@@ -9,9 +9,10 @@
 //   - every row whose launchpad the terminal's table knows (apps/terminal/src/screens/market/pads.ts padRing) draws that
 //     pad's ring colour; a row with no known pad a stage colour; the rows drawn at 1440 hold at least three pad colours
 //     whenever the lists hold three pads with a colour;
-//   - a row in view the helper serves `icon: true` for: its logo route answered 200 with a PNG, JPEG, WebP or GIF and the
-//     logo is drawn; a row served `icon: false` asks for no logo; every row without a drawn logo draws its initials; no
-//     row draws a broken image;
+//   - a row in view the helper serves `icon: true` for: its logo route answered within 30 s; a 200 PNG, JPEG, WebP or GIF
+//     is drawn, any other answer (a source file the helper refused, or busy) draws initials and is named; at least one
+//     such row draws its logo; a row served `icon: false` asks for no logo; every row without a drawn logo draws its
+//     initials; no row draws a broken image;
 //   - at 1024 the four columns sit in one row.
 // While the helper serves no logo (icon false on every row) the logo part is named and passes on the initials.
 // After: app
@@ -58,7 +59,7 @@ export function judge(rec) {
       bad(`${w.name}: no row drawn`);
       continue;
     }
-    let ringBad = 0, logoBad = 0, broken = 0;
+    let ringBad = 0, logoBad = 0, broken = 0, drawn = 0, refused = 0, servedInView = 0;
     for (const r of w.rows) {
       const want = padRing(r.pad);
       if (want ? r.ring !== want : !STAGE.has(r.ring)) {
@@ -67,10 +68,17 @@ export function judge(rec) {
       }
       if (r.broken) broken++;
       const icon = icons[r.id];
-      // served icon true: in view, its logo route answered 200 with an image and the logo is drawn
-      if (icon === true && r.inView && !(r.logo?.status === 200 && IMAGE.test(r.logo?.type ?? "") && r.logo?.drawn === true)) {
-        logoBad++;
-        if (logoBad <= 3) bad(`${w.name} ${r.chain}:${r.id}: served icon true, logo ${JSON.stringify(r.logo)}`);
+      // served icon true, in view: its logo route answered; a 200 image is drawn, any other answer (the helper refused
+      // the source's file, or was busy) draws initials and is named
+      if (icon === true && r.inView) {
+        servedInView++;
+        const image = r.logo?.status === 200 && IMAGE.test(r.logo?.type ?? "");
+        if (image && r.logo.drawn === true) drawn++;
+        else if (Number.isInteger(r.logo?.status) && !image && r.logo.drawn === false && r.initials) refused++;
+        else {
+          logoBad++;
+          if (logoBad <= 3) bad(`${w.name} ${r.chain}:${r.id}: served icon true, logo ${JSON.stringify(r.logo)}`);
+        }
       }
       // served icon false: no logo asked for or drawn
       if (icon === false && r.logo !== null) {
@@ -82,7 +90,8 @@ export function judge(rec) {
     if (broken) bad(`${w.name}: ${broken} broken images`);
     if (ringBad) bad(`${w.name}: ${ringBad} of ${w.rows.length} rings off their launchpad's colour`);
     else ok(`${w.name}: ${w.rows.length} rows, every ring its launchpad's colour or a stage colour`);
-    if (!logoBad) ok(`${w.name}: logos as served (${served} tokens served with a logo)`);
+    if (servedInView > 0 && drawn === 0) bad(`${w.name}: ${servedInView} rows in view served a logo and none drew one`);
+    else if (!logoBad) ok(`${w.name}: logos as served (${served} tokens served with a logo; in view ${drawn} drawn${refused ? `, ${refused} answered with no image and drew initials` : ""})`);
     if (w.name === "1440") {
       const pads = new Set(w.rows.map((r) => padRing(r.pad)).filter(Boolean));
       const listed = new Set((rec.pads ?? []).map(padRing).filter(Boolean));
@@ -155,7 +164,7 @@ async function readWidth(browser, w, harness, shots) {
     const until = Date.now() + READY_MS;
     while (Date.now() < until && !(await f.evaluate(ROWS, scope).catch(() => [])).length) await page.waitForTimeout(250);
     // the logos in view answer (loaded or failed)
-    await f.waitForFunction((s) => [...document.querySelectorAll(`${s} img.tok-logo`)].every((i) => i.complete || i.getBoundingClientRect().top > innerHeight), scope, { timeout: 10_000 }).catch(() => {});
+    await f.waitForFunction((s) => [...document.querySelectorAll(`${s} img.tok-logo`)].every((i) => i.complete || i.getBoundingClientRect().top > innerHeight), scope, { timeout: 30_000 }).catch(() => {});
     await page.waitForTimeout(300);
     const rows = (await f.evaluate(ROWS, scope)).map(({ drawn, ...r }) => ({ ...r, logo: drawn === null && !answers.has(r.id) ? null : { ...(answers.get(r.id) ?? { status: null, type: null }), drawn: drawn === true } }));
     const cols = w.name === "1024" ? await f.evaluate(() => [...document.querySelectorAll(".dsc-grid .dsc-col")].map((c) => c.getBoundingClientRect()).map((b) => ({ x: Math.round(b.x), y: Math.round(b.y) }))) : undefined;

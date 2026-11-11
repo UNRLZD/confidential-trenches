@@ -3,9 +3,10 @@
 //   good: this card's terminal build at APP_HOST's name in the stand-in shell, the helper live: every ring its pad's
 //         colour, ten pad colours at 1440, four columns at 1024, logos as served: PASS;
 //   bad:  APP_HOST as deployed before this card (release 116): every ring a stage colour, 2 x 2 at 1024: FAIL.
-// Planted from the good answer: a ring off its pad's colour, a row served a logo whose route did not answer 200 with an
-// image or that is not drawn, a row served none that asks for one, a broken image, three columns at 1024, or a page
-// error fails. The record holds no name or symbol.
+// Planted from the good answer: a ring off its pad's colour, a row served a logo with no answer, a 200 image not drawn
+// or a non-image drawn, served rows none of which draws, a row served none that asks for one, a broken image, three
+// columns at 1024, or a page error fails; a served row whose answer is no image and draws initials passes, named. The
+// record holds no name or symbol.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -45,21 +46,30 @@ test("planted: a row with no known pad drawn in a pad's colour fails", () => {
   assert.equal(mut((rec) => (w(rec, "1440").rows.find((r) => r.pad === null).ring = "oklch(0.76 0.12 154)")).verdict, "FAIL");
 });
 
-test("planted: a row served a logo whose route did not answer 200 with an image, or that is not drawn, fails; one that did passes", () => {
-  const row = (rec) => w(rec, "1440").rows.find((r) => r.inView);
-  // the token served a logo, its answer the same at every width it is drawn in
-  const served = (logo) =>
+test("planted: a served logo with no answer, a 200 image not drawn, or a non-image drawn fails; one drawn passes; an answer with no image drawn as initials passes, named, unless no served row draws", () => {
+  // tokens in view at every width, so a plant reads the same at each
+  const inAll = (rec) => w(rec, "1440").rows.filter((r) => r.inView && rec.widths.every((x) => x.rows.some((q) => q.id === r.id && q.inView))).map((r) => r.id);
+  // each token named served a logo, its answer the same at every width it is drawn in
+  const served = (...logos) =>
     mut((rec) => {
-      const id = row(rec).id;
-      rec.icons[id] = true;
-      for (const x of rec.widths) for (const r of x.rows) if (r.id === id) r.logo = logo;
+      const ids = inAll(rec);
+      assert.ok(ids.length >= logos.length, "too few rows in view at every width");
+      logos.forEach((logo, i) => {
+        rec.icons[ids[i]] = true;
+        for (const x of rec.widths) for (const r of x.rows) if (r.id === ids[i]) r.logo = logo;
+      });
     });
-  assert.equal(mut((rec) => (rec.icons[row(rec).id] = true)).verdict, "FAIL");
-  assert.equal(served({ status: 404, type: "application/json", drawn: false }).verdict, "FAIL");
-  assert.equal(served({ status: 200, type: "image/svg+xml", drawn: true }).verdict, "FAIL");
+  const png = { status: 200, type: "image/png", drawn: true };
+  assert.equal(served(null).verdict, "FAIL");
+  assert.equal(served({ status: null, type: null, drawn: false }).verdict, "FAIL");
   assert.equal(served({ status: 200, type: "image/png", drawn: false }).verdict, "FAIL");
-  const r = served({ status: 200, type: "image/png", drawn: true });
-  assert.equal(r.verdict, "PASS", r.lines.join("\n"));
+  assert.equal(served({ status: 200, type: "image/svg+xml", drawn: true }).verdict, "FAIL");
+  assert.equal(served({ status: 404, type: null, drawn: false }).verdict, "FAIL", "none of the served rows drew");
+  const one = served(png);
+  assert.equal(one.verdict, "PASS", one.lines.join("\n"));
+  const two = served(png, { status: 404, type: null, drawn: false }, { status: 503, type: null, drawn: false });
+  assert.equal(two.verdict, "PASS", two.lines.join("\n"));
+  assert.ok(two.lines.some((l) => /2 answered with no image and drew initials/.test(l)), two.lines.join("\n"));
 });
 
 test("planted: a row served no logo that asks for one, a broken image, no initials under no logo fail", () => {
