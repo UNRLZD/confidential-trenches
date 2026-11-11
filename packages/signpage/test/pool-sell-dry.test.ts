@@ -24,6 +24,7 @@ import { solanaSellReserve } from "../src/pool-sell.ts";
 import type { Position } from "../src/positions.ts";
 import { poolUnits, SOLANA_POOL_MIN_DEPOSIT, solanaDepositRents, solanaSellAfterFull, solanaSweepFloor, solanaSweepKeep } from "../src/rules/pool.ts";
 import { solanaPoolNoteFloor } from "../../kit/src/trade/solana/pool-deposit.ts";
+import { enableTimers, resetTimers } from "./mock-timers.ts";
 
 const MINT = fx.pump.mint as string;
 const SWAP_MINT = fx.pumpswap.mint as string;
@@ -303,17 +304,21 @@ test("the budget: at most POOL_SELL_DRY_CALLS calls per host in any window; past
 });
 
 test("answered inside the client's 10 s: a read its host holds answers by POOL_SELL_DRY_ANSWER_MS, never later", async (t) => {
-  t.mock.timers.enable({ apis: ["setTimeout"] });
-  const held = [async () => new Promise(() => {}), async () => new Promise(() => {})] as unknown as readonly [SolanaRpc, SolanaRpc];
-  let answer: unknown = null;
-  void poolSellDry(deps({ rpcs: () => held }), share(MINT, 5_000)).then((a) => (answer = a));
-  for (let i = 0; i < 5; i++) await null;
-  t.mock.timers.tick(POOL_SELL_DRY_ANSWER_MS - 1);
-  for (let i = 0; i < 5; i++) await null;
-  assert.equal(answer, null);
-  t.mock.timers.tick(1);
-  for (let i = 0; i < 20; i++) await null;
-  assert.ok(answer !== null && "error" in (answer as object), JSON.stringify(answer));
+  enableTimers(t.mock.timers, { apis: ["setTimeout"] });
+  try {
+    const held = [async () => new Promise(() => {}), async () => new Promise(() => {})] as unknown as readonly [SolanaRpc, SolanaRpc];
+    let answer: unknown = null;
+    void poolSellDry(deps({ rpcs: () => held }), share(MINT, 5_000)).then((a) => (answer = a));
+    for (let i = 0; i < 5; i++) await null;
+    t.mock.timers.tick(POOL_SELL_DRY_ANSWER_MS - 1);
+    for (let i = 0; i < 5; i++) await null;
+    assert.equal(answer, null);
+    t.mock.timers.tick(1);
+    for (let i = 0; i < 20; i++) await null;
+    assert.ok(answer !== null && "error" in (answer as object), JSON.stringify(answer));
+  } finally {
+    resetTimers(t.mock.timers);
+  }
 });
 
 test("a stopped preview books nothing: N asks with changing shares, then a trade's getMultipleAccounts on the same providers goes out within their answer time (N = 12, 30)", async () => {
