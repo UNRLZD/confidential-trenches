@@ -371,13 +371,14 @@ const passLists = async (holding, sold) => {
   }
   return null;
 };
-// every buy Final (its record's stage filled) before any sale's tap: a buy's reads after its early "sent" share the
-// host's budget, so a sale tapped while they run is throttled by them, not by its own reads
-const buysFinal = rounds.filter((r) => r.buy).map((r) => r.buy.record?.stage ?? null);
-if (ok && !buysFinal.every((x) => x === "filled")) {
+// every buy Final (the kit's stage filled, its time from the tap) before any sale's tap: a buy's reads after its early
+// "sent" share the host's budget, so a sale tapped while they run is throttled by them, not by its own reads. A buy
+// keeps no ops record (its record field is empty), so its Final is its progress stage. A resumed run has no buy here
+const buysFinal = rounds.filter((r) => r.buy).map((r) => r.buy.times?.filled ?? null);
+if (ok && !buysFinal.every((x) => typeof x === "number")) {
   log(`BAD a buy not Final before the first sale: ${JSON.stringify(buysFinal)}`);
   ok = false;
-} else if (ok) log(`every buy Final before the first sale (${buysFinal.length} records at stage filled)`);
+} else if (ok) log(`every buy Final before the first sale (${buysFinal.length} buys, Final at ${JSON.stringify(buysFinal)} ms from their taps)`);
 if (ok && ONE_FIRST) {
   if (FINDER || rounds.length < 2) throw new Error("FLOW_ONE_FIRST takes the kept listing path and two buys at least");
   const listed = keptListed(await w.get("meta", POSITIONS_KEPT_KEY));
