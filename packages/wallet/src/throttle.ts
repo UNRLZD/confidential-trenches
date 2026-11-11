@@ -112,8 +112,9 @@ export class ThrottleGate {
 //   pace the gate leaves.
 // - A hold is given back at the trade's end, and at TRADE_HOLD_MAX_MS at the latest, so a run that never ends (a fault
 //   past its own bounds) never stops the passes for good.
-// - A wait for the turn ends at once with a stop's reason (`signal`), and never holds a turn for anyone: no reader waits
-//   on another reader, only on a trade's end or the clock.
+// - A wait for the turn ends at once with a stop's reason (`signal`), and every wait on every lane at a sign out
+//   (stopHostLaneWaits); a wait never holds a turn for anyone: no reader waits on another reader, only on a trade's end
+//   or the clock.
 
 /** The longest a trade holds its hosts: the buy's read-back bound (pool-buy.ts POOL_BUY_SETTLE_MS, EVM_BUY_SETTLE_MS:
  *  120 s) and 30 s of its reads before the send. A run past it (a sell's rent backs after its fill) goes on unheld. */
@@ -152,8 +153,10 @@ export class HostLane {
   open(kind: "trade" | "pass"): boolean {
     return (kind === "trade" || this.#trades === 0) && this.gate.left() <= 0;
   }
-  /** A read's turn: a trade's once the host's pause is over; a background read's once no trade holds the host too. */
-  async turn(kind: "trade" | "pass", signal?: AbortSignal): Promise<void> {
+  /** A read's turn: a trade's once the host's pause is over; a background read's once no trade holds the host too. A
+   *  sign out's stopHostLaneWaits ends it as `signal` does. */
+  async turn(kind: "trade" | "pass", given?: AbortSignal): Promise<void> {
+    const signal = laneSignal(given);
     for (;;) {
       signal?.throwIfAborted();
       if (kind === "pass" && this.#trades > 0) {
@@ -178,6 +181,18 @@ function stoppable(p: Promise<void>, signal?: AbortSignal): Promise<void> {
     signal.addEventListener("abort", off, { once: true });
     void p.then(() => (signal.removeEventListener("abort", off), ok()));
   });
+}
+
+// every lane's waits end at a sign out: this controller aborted, a new one made for the next sign-in
+let laneStop = new AbortController();
+/** Ends every wait for a turn or a pause on every lane now (a sign out), with `reason`. */
+export function stopHostLaneWaits(reason: unknown = new Error("signed out")): void {
+  laneStop.abort(reason);
+  laneStop = new AbortController();
+}
+/** `given` with the lanes' sign-out stop: a wait on it ends at either. */
+export function laneSignal(given?: AbortSignal): AbortSignal {
+  return given === undefined ? laneStop.signal : AbortSignal.any([given, laneStop.signal]);
 }
 
 const LANES = new Map<string, HostLane>();

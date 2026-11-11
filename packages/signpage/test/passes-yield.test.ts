@@ -9,7 +9,7 @@ import { test } from "node:test";
 (globalThis as { __SIGN_NETWORK__?: string }).__SIGN_NETWORK__ = "testnet";
 const { TESTNET_RPCS, pageEvmPoolRpcs, pageSolanaRpcs, pageSolanaSettleRpcs, testnetPool } = await import("../src/pool-testnet.ts");
 const { EVM_LADDER } = await import("../../wallet/src/pool/evm.ts");
-const { holdHosts, hostLane, resetHostLanes } = await import("../../wallet/src/throttle.ts");
+const { holdHosts, hostLane, resetHostLanes, stopHostLaneWaits } = await import("../../wallet/src/throttle.ts");
 
 const DEVNET = TESTNET_RPCS.solana[0];
 // Circle's USDC on Base Sepolia, as test/pool-testnet-evm-queue.test.ts names it
@@ -177,5 +177,24 @@ test("the EVM buy kind's host holds its chain's pool list hosts from its making 
     assert.equal(hostLane(DEVNET).trading(), false, "another chain's host is not held");
     made.h!.end?.();
     for (const u of TESTNET_RPCS.base) assert.equal(hostLane(u).trading(), false, u);
+  });
+});
+
+test("a sign out ends every wait on every host at once: a pass's read waiting for a trade and a trade's read waiting the host's pause both reject, unsent", async () => {
+  await onProvider((host, n) => (host === "api.devnet.solana.com" && n === 1 ? 429 : 200), async (sent) => {
+    // the helper's route held by a trade; api.devnet paused by a 429
+    const release = holdHosts([HELPER]);
+    const pass = pageSolanaRpcs("pass")[1]("getSlot", []).catch((e: unknown) => e);
+    const throttled = pageSolanaRpcs("trade")[0]("getSlot", []).catch((e: unknown) => e);
+    await tick(100);
+    const paused = pageSolanaRpcs("trade")[0]("getBlockHeight", []).catch((e: unknown) => e);
+    await tick(50);
+    const t = performance.now();
+    stopHostLaneWaits(new Error("signed out"));
+    for (const p of [pass, throttled, paused]) assert.match(String(await p), /signed out/);
+    assert.ok(performance.now() - t < 100, "at once, not at the pause's end");
+    await tick(1_100);
+    assert.deepEqual(sent.map((x) => x.method), ["getSlot"], "only the first read went out: nothing after the sign out");
+    release();
   });
 });

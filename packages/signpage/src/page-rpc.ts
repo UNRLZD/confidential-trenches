@@ -8,14 +8,14 @@
 // - A throttle (HTTP 429, a 5xx, -32029 or -32429 in a 200) pauses the host for every reader by the one rule (from 1 s,
 //   doubling to 10 s, a Retry-After when longer; api.devnet.solana.com exposes none to a page), and the read that met it
 //   is asked again once, after that pause; an answer that is not JSON, a stall or a dropped connection is asked again
-//   once after the retry's backoff. Never a third ask, and never a wait that would end past the call's bound: the call
+//   once after the retry's backoff. A sign out ends every wait on every host at once (stopHostLaneWaits). Never a third ask, and never a wait that would end past the call's bound: the call
 //   then rejects naming its fault (SolanaRpcTransportError). So a trade's read waits at most the host's pause
 //   (THROTTLE_PAUSE_MAX_MS or THROTTLE_RETRY_AFTER_MAX_MS, 10 s) and then its bound (3.5 s; 12 s for a settle's
 //   SOLANA_RPC_WINDOW_RETRY): 13.5 s at most, 22 s on a settle's seat.
 import { readSolanaReference, type SolanaReference, type SolanaReferenceRequest } from "../../kit/src/trade/solana/pool.ts";
 import { HELPER_FETCH_INIT } from "../../kit/src/helper/v1.ts";
 import { SOLANA_RPC_RETRY, SolanaRpcTransportError, solanaHelperRpc, solanaJsonRpc, solanaSameProvider, solanaWrappedRpc, type SolanaFetch, type SolanaRpc, type SolanaRpcRetry } from "../../kit/src/trade/solana/send.ts";
-import { hostLane } from "../../wallet/src/throttle.ts";
+import { hostLane, laneSignal } from "../../wallet/src/throttle.ts";
 
 /** Whose read it is: a trade's own (first on its host) or a background pass's (after every trade on its host). */
 export type ReadKind = "trade" | "pass";
@@ -56,7 +56,7 @@ export function lanedRpc(url: string, o: { kind?: ReadKind; retry?: SolanaRpcRet
     if (!(e instanceof SolanaRpcTransportError)) throw e;
     const wait = throttles(e) ? lane.gate.left() : retry.backoffMs;
     if (performance.now() + wait >= end) throw e;
-    await sleep(wait, o.signal);
+    await sleep(wait, laneSignal(o.signal));
     await lane.turn(kind, o.signal);
     if (performance.now() >= end) throw e;
     return ask(end, method, params);

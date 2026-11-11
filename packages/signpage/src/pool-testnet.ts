@@ -44,7 +44,7 @@
 import { base58, base64 } from "@scure/base";
 import { SOLANA_RPC_RETRY, SOLANA_RPC_WINDOW_RETRY, solanaJsonRpc, solanaPacedRpc, type SolanaRpc, type SolanaRpcRetry } from "../../kit/src/trade/solana/send.ts";
 import { lanedRpc, pageHelperRpc, pageHelperRpcStopped, pageRpc, type ReadKind } from "./page-rpc.ts";
-import { holdHosts, hostLane } from "../../wallet/src/throttle.ts";
+import { holdHosts, hostLane, stopHostLaneWaits } from "../../wallet/src/throttle.ts";
 import { HELPER_FETCH_INIT, HELPER_V1_PATHS } from "../../kit/src/helper/v1.ts";
 import type { VaultProver } from "../../kit/src/prover/prove.ts";
 import { WALLET_SEED_LOCK, type WalletStore } from "@blindfill/wallet/store";
@@ -593,6 +593,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   let follows = new AbortController();
   const signedOut = async (): Promise<void> => {
     stopTurn();
+    // every read waiting for its turn on a host ends (card signpage-passes-yield-to-a-trade)
+    stopHostLaneWaits();
     positions.clear();
     awaited.clear();
     follows.abort();
@@ -1789,6 +1791,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     watch: (fn) => void watchers.add(fn),
     signingOut: () => {
       stopTurn();
+      stopHostLaneWaits();
       signOuts++;
       stopSolana();
       evmStop.abort();
