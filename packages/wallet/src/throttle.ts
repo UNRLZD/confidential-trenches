@@ -14,6 +14,13 @@
 //   was sent in, so a round of three 429s grows the pause once. A round that goes through whole, sent after the last
 //   counted throttle, sets the pause back to none (answered); one call's answer does not, since a provider that
 //   throttles one method (Solana's public RPC limits each method) still answers the others.
+// - One round at a time (turn): a caller takes the gate's turn before it waits the gate and gives it back once its
+//   round's calls settle (an answer, a throw or a stop alike), so two list reads at once on one route ask it no faster
+//   than one: each round goes out on an open gate, sent in the epoch it is counted in. The turn is the page's own: two
+//   tabs each hold their own gate, so two tabs ask a route that throttles for good at most twice the one tab's rounds
+//   (2 x 9 = 18 a minute); no gate spans tabs.
+// - The gate's time is performance.now, which a wall clock set back or on cannot move; left() is held to the longest
+//   wait the bounds allow, whatever the clock given says.
 
 /** The first pause after a throttle that names no longer Retry-After. */
 export const THROTTLE_PAUSE_FIRST_MS = 1_000;
@@ -37,15 +44,37 @@ export class ThrottleGate {
   #until = 0;
   #pause = 0;
   #epoch = 0;
+  #tail: Promise<void> = Promise.resolve();
   readonly #now: () => number;
   readonly #bounds: ThrottleBounds;
   constructor(o: { now?: () => number; bounds?: ThrottleBounds } = {}) {
-    this.#now = o.now ?? Date.now;
+    this.#now = o.now ?? (() => performance.now());
     this.#bounds = o.bounds ?? THROTTLE_BOUNDS;
   }
-  /** How long until the provider may be asked again, ms; 0 now. */
+  /** How long until the provider may be asked again, ms; 0 now. Never past the longest wait the bounds allow. */
   left(): number {
-    return Math.max(0, this.#until - this.#now());
+    return Math.min(Math.max(0, this.#until - this.#now()), Math.max(this.#bounds.maxMs, this.#bounds.afterMaxMs));
+  }
+  /** The gate's turn, one caller at a time in the order asked: resolves with the give-back once every caller before has
+   *  given theirs back. A stop while waiting gives the turn on at once and rejects with the stop's reason. */
+  async turn(signal?: AbortSignal): Promise<() => void> {
+    let give!: () => void;
+    const mine = new Promise<void>((r) => (give = r));
+    const before = this.#tail;
+    this.#tail = before.then(() => mine);
+    if (signal === undefined) return before.then(() => give);
+    try {
+      signal.throwIfAborted();
+      await new Promise<void>((ok, stop) => {
+        const off = (): void => stop(signal.reason);
+        signal.addEventListener("abort", off, { once: true });
+        void before.then(() => (signal.removeEventListener("abort", off), ok()));
+      });
+    } catch (e) {
+      give();
+      throw e;
+    }
+    return give;
   }
   /** The epoch a call is sent in: read it when the call goes out, and give it back with its outcome. */
   epoch(): number {

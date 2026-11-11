@@ -1300,3 +1300,51 @@ test("the helper's start check names this page's direct Solana seat (SOLANA_PROV
   const helper = readFileSync(new URL("../../../apps/helper/src/env-check.ts", import.meta.url), "utf8");
   assert.equal(/export const PAGE_SOLANA_DIRECT = "([^"]+)";/.exec(helper)?.[1], SOLANA_PROVIDER_A);
 });
+
+// The review of 8522bdf8, F6: the testnet build's finder (pool-testnet.ts finderOf, no holdings given) reads the Ws on
+// the pair's first devnet RPC with one try a call and the route's gate: a 429 is not asked again by a retry, and the
+// next round waits the gate (1 s), where the pair's own client asked again within its 3.5 s retry. Read by the
+// positions pass, which takes the same finder as a sell.
+test("the testnet finder reads the Ws on the first devnet RPC, one try a call: a 429 waits the route's gate, never a retry", async () => {
+  const { onTestClock } = await import("../../kit/test/test-clock.ts");
+  const { freshWallet } = await import("../../wallet/src/derive/keys.ts");
+  const { jOf } = await import("../../wallet/src/pool/queue.ts");
+  const { POSITION_COSTS_KEY } = await import("../src/positions.ts");
+  await onTestClock(async () => {
+    const { w, ns } = await wallet();
+    const ref = { kind: "deposit" as const, s: SCOPE, i: 0 };
+    const pre = noteSecrets(SEED64, ref).precommitment;
+    const label = 991n;
+    const r = await ns.add({ ref, scope: SCOPE, precommitment: pre, state: "UNSPENT", leaf: { value: 10_000_000n, label, commitment: noteCommitment(10_000_000n, label, pre), leafIndex: 0n } });
+    await ns.move(r.id, "UNSPENT", "SPENT");
+    const fw = freshWallet(SEED64, "sol", label, jOf(ref));
+    fw.secretKey.fill(0);
+    await w.put("meta", POSITION_COSTS_KEY, { [fw.address]: { mint: SOL_TOKEN, received: "5", decimals: 9 } });
+    const host = new URL(TESTNET_RPCS.solana[0]).host;
+    // the gate's first pause on the test clock, from the first 429: a call before its timer fires came before the gate opened
+    const seen: { host: string; method: string; open: boolean }[] = [];
+    let hot = 2, open = false, timed = false;
+    const real = globalThis.fetch;
+    globalThis.fetch = (async (u: string | URL | Request, init?: RequestInit) => {
+      const b = JSON.parse(String(init?.body)) as { id: string; method: string; params: unknown[] };
+      if (b.params?.[0] !== fw.address) return new Response("offline", { status: 503 });
+      seen.push({ host: new URL(String(u)).host, method: b.method, open });
+      if (b.method === "getTokenAccountsByOwner" && hot > 0) {
+        if (!timed) (timed = true), setTimeout(() => (open = true), 999);
+        return hot--, new Response("slow down", { status: 429 });
+      }
+      return new Response(JSON.stringify({ jsonrpc: "2.0", id: b.id, result: { context: { slot: 1 }, value: b.method === "getBalance" ? 0 : [] } }), { headers: { "content-type": "application/json" } });
+    }) as typeof fetch;
+    try {
+      const t = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { positions: { setTimer: () => 0, clearTimer: () => {} } } as never);
+      await t.positions();
+      for (let i = 0; i < 200 && seen.filter((x) => x.method === "getTokenAccountsByOwner").length < 4; i++) await new Promise((ok) => setTimeout(ok, 50));
+    } finally {
+      globalThis.fetch = real;
+    }
+    assert.ok(seen.length > 0 && seen.every((x) => x.host === host), seen.map((x) => x.host).join(" "));
+    const tao = seen.filter((x) => x.method === "getTokenAccountsByOwner");
+    assert.equal(tao.length, 4, "two calls a round, two rounds: no retry of a 429");
+    assert.deepEqual(tao.map((x) => x.open), [false, false, true, true], "the second round after the gate's 1 s pause");
+  });
+});

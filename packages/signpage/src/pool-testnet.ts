@@ -26,7 +26,7 @@
 //   spent, freed past the deadline, or held), so no outcome of a send leaves a note RESERVED for good.
 // - pool.sell (card signpage-pool-sell): src/pool-sell.ts on the devnet pool, W one of the page's buy wallets: the Ws
 //   of the pool's SPENT and RESERVED notes (../../wallet/src/pool/buy-wallets.ts spentNotesOf, buyWallets) with their
-//   holdings. A testnet-only choice: those holdings are read on ONE devnet RPC (solanaHoldingsReader on the first),
+//   holdings. A testnet-only choice: those holdings are read on ONE devnet RPC (solanaHoldingsAt on the first),
 //   since devnet has no helper route, and a read naming W reaches that public RPC (mainnet reads them on the helper's
 //   keyed route, buy-wallets.ts). They pick W and nothing more: the sell reads W's token account and lamports again on
 //   both RPCs, and the rent back after it runs only on W's buy record (pool-buy.ts BuyMints, written by the buy before
@@ -968,9 +968,10 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     const unread = new Set<string>();
     const reader: HoldingsReader = {
       chain: inner.chain,
-      read: async (address, s) => {
+      read: async (address, s, by) => {
         try {
-          return await inner.read(address, s);
+          // the list's bound from its start (buy-wallets.ts readDerived's `by`), as a sell's read keeps it
+          return await inner.read(address, s, by);
         } catch (e) {
           if (s?.aborted) throw e;
           unread.add(address);

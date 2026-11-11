@@ -4,12 +4,16 @@
     "bad": "the SIGN_HOST build of main at eebfdc88 (build-app.mjs), before this card: the holdings readers wait a flat Retry-After or 1 s after every 429, with no gate"
   },
   "good": {
-    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-/aFTs68JnOpyub6MBNVLxHaYx0Oeq1vshZknp+2IG8bWDJAvJl32pThXvlP/00i4\"></script>\n  </head>\n  <body></body>\n</html>\n",
-    "sha384": "sha384-/aFTs68JnOpyub6MBNVLxHaYx0Oeq1vshZknp+2IG8bWDJAvJl32pThXvlP/00i4",
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-5qtc262f1oWlOsKE09jCBwXhGns3RRYKt2Cf7knylk1fxQyPeFl23byaFNcx65Kq\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-5qtc262f1oWlOsKE09jCBwXhGns3RRYKt2Cf7knylk1fxQyPeFl23byaFNcx65Kq",
     "rule": true,
     "gate": true,
     "held": true,
+    "turn": true,
     "reader": true,
+    "throttled": true,
+    "answered": true,
+    "by": true,
     "old": false
   },
   "bad": {
@@ -18,7 +22,11 @@
     "rule": false,
     "gate": false,
     "held": false,
+    "turn": false,
     "reader": false,
+    "throttled": false,
+    "answered": false,
+    "by": false,
     "old": true
   }
 }
