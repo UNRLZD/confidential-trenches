@@ -98,6 +98,7 @@ export const CHANGED = [
   "scripts/live-checks/helper-rpc-proxy.mjs",
   "scripts/live-checks/helper-rpc-sell-methods.mjs",
   "scripts/live-checks/helper-serves-many-users-at-once.mjs",
+  "scripts/live-checks/evm-chart-opens-without-a-vendor-call.mjs",
   "scripts/live-checks/helper-sol-fee-payer-mainnet.mjs",
   "scripts/live-checks/helper-solana-failover.mjs",
   "scripts/live-checks/helper-token-page-cold.mjs",
