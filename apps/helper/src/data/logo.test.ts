@@ -77,7 +77,7 @@ test("fetchLogo checks every redirect hop by the same rules, and follows at most
   // to plain http, to an IP literal, to the cloud metadata address, to a relative path that is fine
   await assert.rejects(fetchLogo(start, { resolve: PUBLIC, get: fakeGet({ [start.href]: to("http://a.example/y") }) }), refusedAs("redirect target"));
   await assert.rejects(fetchLogo(start, { resolve: PUBLIC, get: fakeGet({ [start.href]: to("https://169.254.169.254/latest") }) }), refusedAs("redirect target"));
-  const toPrivate: Resolve = async (h) => (h === "inner.example" ? [{ address: "192.168.0.10", family: 4 }] : PUBLIC(h));
+  const toPrivate: Resolve = async (h, sig) => (h === "inner.example" ? [{ address: "192.168.0.10", family: 4 }] : PUBLIC(h, sig));
   const seen: { url: string; address: string }[] = [];
   await assert.rejects(fetchLogo(start, { resolve: toPrivate, get: fakeGet({ [start.href]: to("https://inner.example/y") }, seen) }), refusedAs("address"));
   assert.deepEqual(seen.map((s) => s.url), [start.href], "the private hop is never connected to");
@@ -127,12 +127,13 @@ test("createLogos fetches only URLs the lists gave, once in flight per token, an
   await logos.read("solana", "Mint111");
   assert.equal(calls, 1, "cached");
   let bad = 0;
-  const refusing = createLogos({ resolve: async () => [{ address: "127.0.0.1", family: 4 }], get: async () => (bad++, got(200, {}, PNG)) });
+  const lines: string[] = [];
+  const refusing = createLogos({ resolve: async () => [{ address: "127.0.0.1", family: 4 }], get: async () => (bad++, got(200, {}, PNG)), log: (l) => lines.push(l) });
   refusing.remember("base", "0xabc", "https://evil.example/x.png");
   assert.equal(await refusing.read("base", "0xabc"), null);
   assert.equal(await refusing.read("base", "0xabc"), null);
   assert.equal(bad, 0);
-  assert.equal(refusing.refusals(), "address 1", "one refusal logged by rule, the second read served from the cache");
+  assert.deepEqual(lines, ["logo refusals: address 1"], "one refusal logged by rule, the second read served from the cache");
 });
 
 test("a Solana list row has icon true exactly when Jupiter gave it an icon URL that passes the rules", () => {
@@ -181,6 +182,136 @@ test("GET /v1/logo/{chain}/{token} serves a listed token's logo with the kit's h
     }
     assert.equal((await call(port, `/v1/logo/solana/${MINT}`, "POST")).status, 405);
     assert.deepEqual(seen.map((x) => x.url), ["https://arweave.net/logo", "https://assets.example/e.png"], "the caller's path never named a URL fetched");
+  } finally {
+    s.closeAllConnections();
+    await new Promise<void>((ok) => s.close(() => ok()));
+  }
+});
+
+// The security read of 815b0078: DNS with no deadline on libuv's pool, the real request's pin and signal untested, three
+// address forms, the env proxy, a full queue cached as a 404, and the refusal line never written.
+import * as L from "./logo.ts";
+import { createServer as tcpServer, type Server as TcpServer, type Socket } from "node:net";
+import { createSocket } from "node:dgram";
+import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
+
+const within = <T>(p: Promise<T>, ms: number, what: string) =>
+  Promise.race([p, new Promise<never>((_, no) => setTimeout(() => no(new Error(`${what}: still running after ${ms} ms`)), ms).unref())]);
+
+test("a lookup that never answers ends at the fetch's deadline, and logo lookups in flight never pass DNS_PARALLEL", async () => {
+  let open = 0;
+  let most = 0;
+  const hang: Resolve = (_h, signal) => {
+    open++;
+    most = Math.max(most, open);
+    signal?.addEventListener("abort", () => open--, { once: true });
+    return new Promise(() => {});
+  };
+  const t0 = Date.now();
+  const runs = Array.from({ length: 6 }, () => fetchLogo(new URL("https://never.example/x.png"), { resolve: hang, timeoutMs: 300 }).then(() => "ok", (e: unknown) => (e as Error).message));
+  const why = await within(Promise.all(runs), 1_500, "six hanging lookups");
+  assert.ok(Date.now() - t0 < 1_000, `ended in ${Date.now() - t0} ms`);
+  assert.deepEqual([...new Set(why)], ["timeout"]);
+  assert.ok(most <= 2, `${most} lookups in flight at once`);
+  assert.equal(L.DNS_PARALLEL, 2);
+  // the slots are free again: a lookup that answers runs at once
+  const seen: { url: string; address: string }[] = [];
+  const logo = await fetchLogo(new URL("https://arweave.net/a"), { resolve: PUBLIC, get: fakeGet({ "https://arweave.net/a": () => got(200, { "content-type": "image/png" }, PNG) }, seen) });
+  assert.equal(logo.type, "image/png");
+});
+
+test("the helper's own lookup goes through c-ares with a deadline: a name server that never answers is cut by the signal", async () => {
+  const silent = createSocket("udp4");
+  let asked = 0;
+  silent.on("message", () => asked++);
+  await new Promise<void>((ok) => silent.bind(0, "127.0.0.1", ok));
+  try {
+    assert.equal(typeof L.systemResolve, "function", "logo.ts exports systemResolve");
+    const t0 = Date.now();
+    const r = await within(L.systemResolve("never.example", AbortSignal.timeout(300), [`127.0.0.1:${silent.address().port}`]).then(() => "answered", (e: unknown) => String((e as { code?: string }).code ?? (e as Error).name)), 1_500, "a silent name server");
+    assert.notEqual(r, "answered");
+    assert.ok(Date.now() - t0 < 1_000, `ended in ${Date.now() - t0} ms`);
+    assert.ok(asked >= 1, "the lookup asked the given name server");
+  } finally {
+    silent.close();
+  }
+});
+
+/** A TCP server standing in for a TLS host: it reads the ClientHello and never answers it. */
+async function helloServer(): Promise<{ s: TcpServer; port: number; hellos: Buffer[]; socks: Socket[] }> {
+  const hellos: Buffer[] = [];
+  const socks: Socket[] = [];
+  const s = tcpServer((c) => {
+    socks.push(c);
+    c.once("data", (d) => hellos.push(d));
+    c.on("error", () => {});
+  });
+  await new Promise<void>((ok) => s.listen(0, "127.0.0.1", ok));
+  return { s, port: (s.address() as { port: number }).port, hellos, socks };
+}
+const closeAll = async (x: { s: TcpServer; socks: Socket[] }) => {
+  for (const c of x.socks) c.destroy();
+  await new Promise<void>((ok) => x.s.close(() => ok()));
+};
+
+test("the real request connects to the checked address for a name DNS cannot resolve, with that name in SNI, and its signal cuts a stalled host", async () => {
+  const srv = await helloServer();
+  try {
+    assert.equal(typeof L.httpsGet, "function", "logo.ts exports httpsGet");
+    const t0 = Date.now();
+    const why = await within(L.httpsGet(new URL(`https://pinned.invalid:${srv.port}/x.png`), [{ address: "127.0.0.1", family: 4 }], AbortSignal.timeout(400)).then(() => "ok", (e: unknown) => (e as Error).name), 2_000, "a stalled host");
+    assert.equal(srv.hellos.length, 1, "the pinned address got the connection (an unresolvable name: no pin, no connection)");
+    assert.ok(srv.hellos[0]!.includes(Buffer.from("pinned.invalid")), "SNI is the URL's name");
+    assert.equal(why, "AbortError");
+    assert.ok(Date.now() - t0 < 1_500, `cut in ${Date.now() - t0} ms`);
+  } finally {
+    await closeAll(srv);
+  }
+});
+
+test("the logo request never takes the environment's proxy (NODE_USE_ENV_PROXY with HTTPS_PROXY set)", async () => {
+  const srv = await helloServer();
+  const proxy = await helloServer();
+  try {
+    const mod = new URL("./logo.ts", import.meta.url).href;
+    const code = `const L = await import(${JSON.stringify(mod)}); await L.httpsGet(new URL("https://pinned.invalid:${srv.port}/x.png"), [{ address: "127.0.0.1", family: 4 }], AbortSignal.timeout(600)).catch(() => {}); process.exit(0);`;
+    const env = { ...process.env, NODE_USE_ENV_PROXY: "1", HTTPS_PROXY: `http://127.0.0.1:${proxy.port}`, NO_PROXY: "" };
+    const status = await within(new Promise<number | null>((ok) => spawn(process.execPath, ["--input-type=module", "-e", code], { cwd: fileURLToPath(new URL(".", import.meta.url)), env, stdio: "ignore" }).on("exit", ok)), 10_000, "the child");
+    assert.equal(status, 0);
+    assert.equal(proxy.hellos.length, 0, "nothing went to the proxy");
+    assert.equal(srv.hellos.length, 1, "the pinned address got the connection");
+  } finally {
+    await closeAll(srv);
+    await closeAll(proxy);
+  }
+});
+
+test("blockedAddress refuses the IPv4-compatible, IPv4-translated and NAT64 forms of a private address", () => {
+  for (const ip of ["::7f00:1", "::127.0.0.1", "::ffff:0:7f00:1", "::ffff:0:127.0.0.1", "64:ff9b::1", "64:ff9b::7f00:1", "64:ff9b::a00:1"]) assert.equal(blockedAddress(ip), true, ip);
+  for (const ip of ["2606:4700::6810:84e5", "93.184.216.34", "::ffff:93.184.216.34"]) assert.equal(blockedAddress(ip), false, ip);
+});
+
+test("a full fetch queue answers 503 with no-store, never a cached 404; a refusal is logged by rule with no URL", async () => {
+  const lines: string[] = [];
+  const logos = createLogos({ resolve: async () => [{ address: "10.0.0.1", family: 4 }], log: (l) => lines.push(l) });
+  logos.remember("solana", "MintA", "https://evil.example/a.png");
+  logos.remember("solana", "MintB", "https://evil.example/b.png");
+  assert.equal(await logos.read("solana", "MintA"), null);
+  assert.equal(await logos.read("solana", "MintB"), null);
+  assert.equal(lines.length, 1, "one line per window");
+  assert.match(lines[0]!, /^logo refusals: address 1$/);
+  assert.ok(!lines.join("").includes("evil") && !lines.join("").includes("Mint"));
+  // the route: a busy registry answers 503 no-store
+  const busy = { ...createLogos(), read: async () => "busy" as const } as unknown as Parameters<typeof handler>[21];
+  const h = handler(COMMIT, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, busy);
+  const s = createServer(h);
+  await new Promise<void>((ok) => s.listen(0, "127.0.0.1", ok));
+  try {
+    const r = await call((s.address() as { port: number }).port, "/v1/logo/solana/6p6xgHyF7AeE6TZkSmFsko444wqoP15icUSqi2jfGiPN");
+    assert.equal(r.status, 503);
+    assert.equal(r.headers["cache-control"], "no-store");
+    assert.equal(r.body.length, 0);
   } finally {
     s.closeAllConnections();
     await new Promise<void>((ok) => s.close(() => ok()));

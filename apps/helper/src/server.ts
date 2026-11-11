@@ -337,6 +337,7 @@ export function handler(
         void logos
           .read(chain as LogoChain, id)
           .then((logo) => {
+            if (logo === "busy") return send(503, undefined, { ...cors(req), "Cache-Control": "no-store" }); // never cached: one caller filling the queue must not blank logos for everyone
             if (logo === null) return send(404, undefined, none);
             res.writeHead(200, { ...base, ...cors(req), "Content-Type": logo.type, "Content-Length": String(logo.bytes.length), "Cache-Control": "public, max-age=86400", "Content-Security-Policy": "default-src 'none'; sandbox" });
             res.end(req.method === "HEAD" ? undefined : logo.bytes);
