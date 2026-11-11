@@ -1151,9 +1151,10 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   // pool.buy: the open queue's ready proofs; one run per tap, each picking a proof no other run of this page holds
   const tables = over.tables === undefined ? PAGE_TABLES : over.tables;
   const claimed = new Set<string>();
-  const buyHost = (): PoolBuyHost & { end(): void } => {
+  const buyHost = (): PoolBuyHost & { release(): void; end(): void } => {
     let notes: NoteStore | null = null;
-    // the buy holds its hosts from its run's start to its end: the passes' reads wait, the buy's own go first
+    // the buy holds its hosts from its run's start to its early "sent" (pool-buy.ts poolBuyKind: release), else its
+    // end: the passes' reads wait, the buy's own go first; given back once (holdHosts), whichever comes first
     const release = holdTrade();
     // the queue, opened when it is not; one that cannot open (signed out) is dropped, so the next tap opens it again
     const q = async (): Promise<ProofQueue<SolanaReleaseRequest>> => {
@@ -1203,6 +1204,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
           seed64.fill(0);
         }
       },
+      release,
       end: () => {
         release();
         notes?.close();

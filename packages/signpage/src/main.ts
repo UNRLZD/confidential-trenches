@@ -230,11 +230,12 @@ else {
   const hasSolana = PAGE_POOLS.some((p) => p.chain === "solana");
   const poolKindMap = poolKinds(poolDeps);
   // the sell box's preview (src/pool-sell-dry.ts): the positions pass's holding as held, the sale's own quote on the
-  // trades' paced pair as background reads, never while a trade runs: a pool buy from its tap to its run's final stage,
-  // a pool sell from its tap to its run's end (liveRuns), or a trade holds a host of the pair (the lanes)
-  const buys = liveRuns(poolKindMap["pool.buy"], "final");
+  // trades' paced pair as background reads, never while a trade runs: a pool buy from its tap to its first answer (its
+  // early "sent", the app's Filled; its read-backs to Final hold no host), a pool sell from its tap to its run's end
+  // (liveRuns), or a trade holds a host of the pair (the lanes)
+  const buys = liveRuns(poolKindMap["pool.buy"]);
   poolKindMap["pool.buy"] = buys.kind;
-  const sells = liveRuns(poolKindMap["pool.sell"], "after");
+  const sells = liveRuns(poolKindMap["pool.sell"]);
   poolKindMap["pool.sell"] = sells.kind;
   const dryPair = (): readonly [SolanaRpc, SolanaRpc] | null => (PAGE_SOL_PIN === undefined ? null : pageSolanaRpcs("pass"));
   const poolSellDry = poolSellDryKind({

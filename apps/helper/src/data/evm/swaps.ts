@@ -28,6 +28,18 @@
 //   - Aerodrome Slipstream: CLFactory 0x5e7bb104... (VELVET/USDC), 0x9cb22058... (SNDKc/USDC) and 0xf8f2eb49... (Paper/USDC);
 //     the same `Swap` as Uniswap v3.
 //   - Aerodrome v2: PoolFactory 0x420dd381... (VVV/WETH); `Swap` has amounts in and out.
+//   - PancakeSwap v3: factory 0x0bfbcf9f... (card evm-chart-opens-without-a-vendor-call). Read 2026-11-11 07:34Z at block
+//     55960544 on base-rpc.publicnode.com and mainnet.base.org alike: GeckoTerminal's pancakeswap-v3-base ELSA / USDC
+//     pool 0x83f3aca29bc79b048b99c56013475570acc97ccf answers factory() 0x0bfbcf9fa4f9c56b0f40a671ad40e0805a091865,
+//     token0() ELSA 0x29cc30f9..., token1() USDC, fee() 100, and the factory's getPool(token0, token1, 100) names the
+//     pool back. PancakeV3Pool's `Swap` carries two more fields than Uniswap v3's (uint128 protocolFeesToken0,
+//     protocolFeesToken1; pancake-v3-contracts@98684794 projects/v3-core/contracts/interfaces/pool/
+//     IPancakeV3PoolEvents.sol:74-84), so its topic is its own (TOPIC.swapPancake): all 100 of the pool's logs over the
+//     1,000 blocks before were it (fixtures/swaps-pancake-base.json holds one). A pool of it is Pool.log "pancake".
+//     GeckoTerminal's aerodrome-slipstream-3 is the third Slipstream factory above: its RSC / WETH 0.04% pool
+//     0x6cda37ddb9e099bb49495a9ca7df9cd445a6965f answered factory() 0xf8f2eb49... and that factory's
+//     getPool(WETH, RSC, tickSpacing() 50) named it back, on both providers, the same read; its swaps log Uniswap v3's
+//     topic (2 of its 7 logs over those 1,000 blocks).
 // The kit pins none of Aerodrome, Slipstream or the v4 PoolManager on Base mainnet (packages/kit/src/trade/evm/
 // buy-unpinned.ts holds WETH, USDC and the v3 router); these are the helper's own, for display, never a signature.
 //
@@ -53,8 +65,8 @@
 // opposite signs; counts, ranges and the books are bounded.
 import { AsyncLocalStorage } from "node:async_hooks";
 import { keccak_256 } from "@noble/hashes/sha3.js";
-import { createBook, TFS, type Book, type Candle, type Event, type Ref, type Swap, type Tf } from "../candles.ts";
-import { GT_PAGE_WAIT_MS, GT_SERVE_MS, refreshLane, SEED_LANE, takeOrWait, throttledUntil, type GeckoBudget } from "../gecko.ts";
+import { createBook, fixed, PRICE_SCALE, TFS, type Book, type Candle, type Event, type Ref, type Swap, type Tf } from "../candles.ts";
+import { createWanted, GT_PAGE_WAIT_MS, GT_SERVE_MS, refreshLane, SEED_LANE, takeOrWait, throttledUntil, type GeckoBudget, type Later } from "../gecko.ts";
 import { CALLER_ROOM, evmThrottleS, LOGS_REFUSED, providerHolds, RETRY_AFTER_MAX_S, upstreamRetryAfterS, type ProviderHolds } from "../../limits/limits.ts";
 import { operatorOf } from "../../rpc/rpc.ts";
 import { isBars, KEPT_HANDOVER_MS, toCandles, TF as GT_TF, type DataAnswer } from "../solana/token.ts";
@@ -71,6 +83,8 @@ const topic = (sig: string): string => `0x${Buffer.from(keccak_256(new TextEncod
 export const TOPIC = {
   swap4: topic("Swap(bytes32,address,int128,int128,uint160,uint128,int24,uint24)"),
   swap3: topic("Swap(address,address,int256,int256,uint160,uint128,int24)"),
+  // PancakeV3Pool's: Uniswap v3's and its two protocol-fee fields (the venues above)
+  swapPancake: topic("Swap(address,address,int256,int256,uint160,uint128,int24,uint128,uint128)"),
   swap2: topic("Swap(address,address,uint256,uint256,uint256,uint256)"),
   curveBuy: topic("CurveBuy(address,address,uint256,uint256,uint256,uint256)"),
   curveSell: topic("CurveSell(address,address,uint256,uint256,uint256,uint256)"),
@@ -93,6 +107,7 @@ export const BASE_VENUES = {
   uniswapV3: "0x33128a8fc17869897dce68ed026d694621f6fdfd",
   slipstream: ["0x5e7bb104d84c7cb9b682aac2f3d509f5f406809a", "0x9cb220581b91b0c83223012fe69688b92ad07a76", "0xf8f2eb4940cfe7d13603dddd87f123820fc061ef"],
   aerodromeV2: "0x420dd381b31aef6683db6b902084cb0ffece40da",
+  pancakeV3: "0x0bfbcf9fa4f9c56b0f40a671ad40e0805a091865",
   usdc: "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
   weth: "0x4200000000000000000000000000000000000006",
 } as const;
@@ -152,6 +167,8 @@ export type Venues = {
    *  a Slipstream-kind CL factory's int24 tickSpacing(), Aerodrome v2's bool stable(). A pool is read only once its
    *  factory names it by that call (confirmed), never by the factory() it claims alone: any contract can claim one. */
   getPool: Readonly<Record<string, "fee" | "tickSpacing" | "stable">>;
+  /** The v3 factories whose pools log PancakeV3Pool's `Swap` (TOPIC.swapPancake), not Uniswap v3's. */
+  pancake: readonly string[];
   usd: string;
   weth: string;
   refPoolId: string;
@@ -171,13 +188,15 @@ export const VENUES: Readonly<Record<EvmChain, Venues>> = {
   base: {
     poolManager: BASE_VENUES.poolManager,
     positionManager: BASE_VENUES.positionManager,
-    v3: [BASE_VENUES.uniswapV3, ...BASE_VENUES.slipstream],
+    v3: [BASE_VENUES.uniswapV3, ...BASE_VENUES.slipstream, BASE_VENUES.pancakeV3],
     v2: [BASE_VENUES.aerodromeV2],
     // read 2026-11-05 04:5xZ on mainnet.base.org: getPool(token0, token1, fee() 500) of 0x33128a8f names the ICNT/USDC
     // pool 0x9331f571; getPool(.., stable() false) of 0x420dd381 names VVV/WETH 0x01784ef3; each Slipstream factory's
     // getPool(WETH, USDC, tickSpacing) names a pool whose tickSpacing() and tokens give it back (0xb2cc224c, 0x2a430beb,
     // 0x4e392fbf)
-    getPool: { [BASE_VENUES.uniswapV3]: "fee", [BASE_VENUES.aerodromeV2]: "stable", ...Object.fromEntries(BASE_VENUES.slipstream.map((f) => [f, "tickSpacing" as const])) },
+    // (and PancakeSwap v3's getPool(token0, token1, fee() 100) names ELSA / USDC, 2026-11-11 07:34Z, the header)
+    getPool: { [BASE_VENUES.uniswapV3]: "fee", [BASE_VENUES.aerodromeV2]: "stable", [BASE_VENUES.pancakeV3]: "fee", ...Object.fromEntries(BASE_VENUES.slipstream.map((f) => [f, "tickSpacing" as const])) },
+    pancake: [BASE_VENUES.pancakeV3],
     usd: BASE_VENUES.usdc,
     weth: BASE_VENUES.weth,
     refPoolId: REF_POOL_ID,
@@ -209,6 +228,7 @@ export const VENUES: Readonly<Record<EvmChain, Venues>> = {
     // read 2026-11-05 04:5xZ on rpc-robinhood.blockmachine.io: getPool(token0, token1, fee() 3000) of 0x1f7d7550 names
     // 0x020bfc65's pool 0xd42a4910; the CL factory's getPool(.., tickSpacing() 50) names 0x39dbed3a's 0xf2a0be59
     getPool: { [ROBINHOOD_VENUES.uniswapV3]: "fee", [ROBINHOOD_VENUES.cl]: "tickSpacing" },
+    pancake: [],
     usd: ROBINHOOD_VENUES.usdg,
     weth: ROBINHOOD_VENUES.weth,
     refPoolId: ROBINHOOD_REF_POOL_ID,
@@ -296,7 +316,7 @@ const INDEX_FOLLOW_MS = 5_000;
  *  2026-11-05 03:3xZ)] */
 const INDEX_SLACK = 500;
 /** The swap events the index holds: every venue's a tape reads (swapFilter, refFilter). */
-const INDEX_TOPICS = [TOPIC.swap4, TOPIC.swap3, TOPIC.swap2, TOPIC.curveBuy, TOPIC.curveSell, ...POOL_CALLS];
+const INDEX_TOPICS = [TOPIC.swap4, TOPIC.swap3, TOPIC.swapPancake, TOPIC.swap2, TOPIC.curveBuy, TOPIC.curveSell, ...POOL_CALLS];
 
 /** Providers whose logs carry no block time on a chain timed by them (Robinhood): their logs are timed by their own
  *  `eth_getBlockByNumber` of each log's block, and count for a swap's time only where another provider logged the same. */
@@ -551,6 +571,8 @@ export type Pool = {
   /** A hooked v4 pool's: the token's other v4 pools the discovery found, whose swaps are read with this pool's only so
    *  hookTakes can tell a sender that swapped the token once in the transaction (card helper-v4-hook-liquidity). */
   siblings?: readonly string[];
+  /** A v3 pool whose factory is one of Venues.pancake: it logs PancakeV3Pool's `Swap` (TOPIC.swapPancake). */
+  log?: "pancake";
 };
 
 /** v4-core Hooks.sol: BEFORE_SWAP_RETURNS_DELTA_FLAG (1 << 3) and AFTER_SWAP_RETURNS_DELTA_FLAG (1 << 2), read in the
@@ -579,7 +601,7 @@ export function hookOf(key: string): string | undefined {
  *  third read a span (card helper-robinhood-capacity fold 8: the third sent a cold dozen's reads past the wide
  *  providers' paces to drpc's 100-block spans). One address a filter, never a list: api.blockvectra.com refuses an
  *  address list (-32602, 2026-11-04 20:2xZ). */
-export function poolFilters(pool: Pick<Pool, "venue" | "id" | "token" | "hook" | "siblings">, from: number, to: number, chain: EvmChain = "base"): Record<string, unknown>[] {
+export function poolFilters(pool: Pick<Pool, "venue" | "id" | "token" | "hook" | "siblings" | "log">, from: number, to: number, chain: EvmChain = "base"): Record<string, unknown>[] {
   const swaps = swapFilter(pool, from, to, chain);
   if (pool.venue !== "v4" || pool.hook === undefined) return [swaps];
   return [
@@ -590,11 +612,11 @@ export function poolFilters(pool: Pick<Pool, "venue" | "id" | "token" | "hook" |
 }
 
 /** The `eth_getLogs` filter for a pool's swaps over blocks `from` to `to`. */
-export function swapFilter(pool: Pick<Pool, "venue" | "id">, from: number, to: number, chain: EvmChain = "base"): Record<string, unknown> {
+export function swapFilter(pool: Pick<Pool, "venue" | "id" | "log">, from: number, to: number, chain: EvmChain = "base"): Record<string, unknown> {
   const range = { fromBlock: `0x${from.toString(16)}`, toBlock: `0x${to.toString(16)}` };
   if (pool.venue === "v4") return { address: VENUES[chain].poolManager, topics: [TOPIC.swap4, pool.id], ...range };
   if (pool.venue === "curve") return { address: pool.id, topics: [[TOPIC.curveBuy, TOPIC.curveSell]], ...range };
-  return { address: pool.id, topics: [pool.venue === "v3" ? TOPIC.swap3 : TOPIC.swap2], ...range };
+  return { address: pool.id, topics: [pool.venue === "v3" ? (pool.log === "pancake" ? TOPIC.swapPancake : TOPIC.swap3) : TOPIC.swap2], ...range };
 }
 const refFilter = (from: number, to: number, chain: EvmChain) => swapFilter({ venue: "v4", id: VENUES[chain].refPoolId }, from, to, chain);
 
@@ -604,12 +626,15 @@ const TWO_192 = 1n << 192n;
 export function decodeRef(l: Log, chain: EvmChain = "base"): Ref | null {
   const V = VENUES[chain];
   if (l.address !== V.poolManager || l.topics.length !== 3 || l.topics[0] !== TOPIC.swap4 || l.topics[1] !== V.refPoolId || l.data.length !== 2 + 64 * 6) return null;
-  const sqrt = unsigned(word(l.data, 2), 160);
+  const ethUsd = ethUsdOf(unsigned(word(l.data, 2), 160));
+  return ethUsd === null ? null : { kind: "ref", block: l.block, index: l.index, ethUsd };
+}
+/** The ETH price pool's sqrtPriceX96 (native ETH currency0, the 6-decimal dollar currency1) as USD per ETH times
+ *  10^18, or null for none or a price outside 1 to 10,000,000 USD per ETH (not ETH's). */
+function ethUsdOf(sqrt: bigint | null): bigint | null {
   if (sqrt === null || sqrt === 0n) return null;
   const ethUsd = (sqrt * sqrt * 10n ** 30n) / TWO_192;
-  // 1 to 10,000,000 USD per ETH: outside is not ETH's price
-  if (ethUsd < 10n ** 18n || ethUsd > 10n ** 25n) return null;
-  return { kind: "ref", block: l.block, index: l.index, ethUsd };
+  return ethUsd < 10n ** 18n || ethUsd > 10n ** 25n ? null : ethUsd;
 }
 
 /** A swap log of `pool` as a Swap (its `t` is set by the caller), or null when it is not one. The pool's deltas: v3 as
@@ -631,7 +656,9 @@ export function decodeSwap(pool: Pool, l: Log, chain: EvmChain = "base"): Omit<S
     const [a0, a1] = [signed(word(l.data, 0), 128), signed(word(l.data, 1), 128)];
     [d0, d1] = [a0 === null ? null : -a0, a1 === null ? null : -a1];
   } else if (pool.venue === "v3") {
-    if (l.address !== pool.id || l.topics.length !== 3 || l.topics[0] !== TOPIC.swap3 || l.data.length !== 2 + 64 * 5) return null;
+    // PancakeV3Pool's two protocol-fee words follow Uniswap v3's five
+    const pancake = pool.log === "pancake";
+    if (l.address !== pool.id || l.topics.length !== 3 || l.topics[0] !== (pancake ? TOPIC.swapPancake : TOPIC.swap3) || l.data.length !== 2 + 64 * (pancake ? 7 : 5)) return null;
     [d0, d1] = [signed(word(l.data, 0), 256), signed(word(l.data, 1), 256)];
   } else {
     if (l.address !== pool.id || l.topics.length !== 3 || l.topics[0] !== TOPIC.swap2 || l.data.length !== 2 + 64 * 4) return null;
@@ -763,6 +790,78 @@ export function traderLeg(s: Pick<Swap, "side" | "amt">, take: bigint | undefine
 }
 
 // ---------------------------------------------------------------------------------------------------------------
+// A quiet pool's own state (card evm-chart-opens-without-a-vendor-call)
+// ---------------------------------------------------------------------------------------------------------------
+
+/** Selectors: slot0(), the PoolManager's extsload(bytes32), getReserves() (keccak-256 of the signatures, checked in
+ *  swaps-quiet.test.ts by the answers planted for them). */
+const STATE_SEL = { slot0: "0x3850c7bd", extsload: "0x1e2eaeaf", getReserves: "0x0902f1ac" } as const;
+/** v4-core StateLibrary.POOLS_SLOT: the PoolManager's `_pools` mapping's slot (v4-core@v4.0.0
+ *  src/libraries/StateLibrary.sol:11; the mapping at src/PoolManager.sol:92). */
+const POOLS_SLOT = 6n;
+const MASK_160 = (1n << 160n) - 1n;
+
+/** The PoolManager's storage slot holding a v4 pool's Slot0: keccak256(abi.encodePacked(poolId, POOLS_SLOT))
+ *  (StateLibrary.sol:324-325 _getPoolStateSlot, read by getSlot0 at :40-58), the first word of its Pool.State. Read
+ *  2026-11-11 07:37Z on base-rpc.publicnode.com: extsload of the ETH price pool's slot at block 55960906 answered the
+ *  sqrtPriceX96 3597025213628878668095763 that pool's Swap logged in that block. */
+export function v4StateSlot(id: string): string {
+  return keccakHex(`${id}${POOLS_SLOT.toString(16).padStart(64, "0")}`);
+}
+
+/**
+ * The calls whose answers at one block are a pool's price now, or null for a pool whose spot is no ratio of them: a
+ * Pons curve's price is its bonding curve's, and an Aerodrome stable pool's (its stable() answer, read here) is the
+ * x^3y + y^3x curve's slope, not its reserves' ratio (aerodrome-finance/contracts@1ba30815 contracts/Pool.sol).
+ *   - v3, Slipstream, PancakeSwap v3: slot0(), sqrtPriceX96 its first word (Uniswap v3-core@v1.0.0
+ *     contracts/UniswapV3Pool.sol:56-58 struct Slot0, :74; slipstream@f8717faa contracts/core/CLPool.sol:53-55, :69, six
+ *     words; pancake-v3-contracts@98684794 projects/v3-core/contracts/PancakeV3Pool.sol:60-62, :78, seven words).
+ *   - v4: the PoolManager's extsload(v4StateSlot(id)) (v4-core@v4.0.0 src/Extsload.sol:10), sqrtPriceX96 its low 160
+ *     bits (src/types/Slot0.sol:33 MASK_160_BITS, :41-43; StateLibrary.sol:55).
+ *   - Aerodrome v2: stable() and getReserves() (contracts/Pool.sol:27 and :212: reserve0, reserve1, blockTimestampLast).
+ */
+export function poolStateCalls(pool: Pick<Pool, "venue" | "id">, chain: EvmChain = "base"): { to: string; data: string }[] | null {
+  if (pool.venue === "v3") return [{ to: pool.id, data: STATE_SEL.slot0 }];
+  if (pool.venue === "v4") return [{ to: VENUES[chain].poolManager, data: `${STATE_SEL.extsload}${v4StateSlot(pool.id).slice(2)}` }];
+  if (pool.venue === "v2") return [{ to: pool.id, data: PARAM_SEL.stable }, { to: pool.id, data: STATE_SEL.getReserves }];
+  return null;
+}
+
+/** The ETH price pool's Slot0 call (poolStateCalls of the chain's reference v4 pool) and its answer as USD per ETH
+ *  times 10^18 (decodeRef's rule), null when it is not one. */
+const refStateCall = (chain: EvmChain) => poolStateCalls({ venue: "v4", id: VENUES[chain].refPoolId }, chain)![0]!;
+const refStateUsd = (a: string | undefined): bigint | null => (a !== undefined && WORD.test(a) ? ethUsdOf(BigInt(a) & MASK_160) : null);
+
+/**
+ * poolStateCalls' answers as two legs, token and quote in their smallest units, whose ratio is the pool's price: a
+ * mark (../candles.ts header), priced as a swap of them. sqrtPriceX96 is sqrt(token1 / token0) times 2^96, so token1
+ * per token0 is sqrtPriceX96^2 over 2^192: the token as token0 has 2^192 of it against sqrtPriceX96^2 of the quote,
+ * as token1 the other way about. Aerodrome v2's legs are its reserves. Null when an answer is not of its shape, a price
+ * or a reserve is 0, or the pool is a stable one.
+ */
+export function poolStateLegs(pool: Pick<Pool, "venue" | "tokenIs0">, answers: readonly (string | undefined)[]): { amt: bigint; quote: bigint } | null {
+  const a = answers[0];
+  let sqrt: bigint | null = null;
+  if (pool.venue === "v3") sqrt = a !== undefined && /^0x([0-9a-f]{64}){6,7}$/.test(a) ? unsigned(word(a, 0), 160) : null;
+  else if (pool.venue === "v4") sqrt = a !== undefined && WORD.test(a) ? BigInt(a) & MASK_160 : null;
+  else if (pool.venue === "v2") {
+    const r = answers[1];
+    if (a !== `0x${"0".repeat(64)}` || r === undefined || !/^0x([0-9a-f]{64}){3}$/.test(r)) return null;
+    const [r0, r1] = [BigInt(`0x${word(r, 0)}`), BigInt(`0x${word(r, 1)}`)];
+    if (r0 === 0n || r1 === 0n) return null;
+    return pool.tokenIs0 ? { amt: r0, quote: r1 } : { amt: r1, quote: r0 };
+  }
+  if (sqrt === null || sqrt === 0n) return null;
+  return pool.tokenIs0 ? { amt: TWO_192, quote: sqrt * sqrt } : { amt: sqrt * sqrt, quote: TWO_192 };
+}
+
+/** A book whose newest close is more than this many times over or under its list row's price_usd is not served as
+ *  ours (createSwaps' candles): a pool read wrong (a quote of another scale, a decimals slip) answers what a token
+ *  with no pool of ours answers. [design: 100, two orders of magnitude: far past any spread between a pool's own price
+ *  and the list's; a 6-decimal quote's decimals taken for an 18-decimal token's are off by 10^12.] */
+export const SCALE_BOUND = 100;
+
+// ---------------------------------------------------------------------------------------------------------------
 // The providers
 // ---------------------------------------------------------------------------------------------------------------
 
@@ -779,8 +878,9 @@ const isRevert = (e: unknown): boolean => {
  *  no value (undefined), as a call not agreed is. */
 const REVERTED = "reverted";
 
-export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => number; listed: (token: string) => Promise<boolean>; hint?: (token: string) => Promise<string | null>; gecko?: GeckoBudget; sleep?: (ms: number) => Promise<unknown>; rpcs?: readonly string[]; headerTimed?: ReadonlySet<string>; pools?: ReadonlyMap<string, { pool: Pool; decimals: number }>; tickMs?: number; holds?: ProviderHolds; index?: readonly string[] }) {
+export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => number; listed: (token: string) => Promise<boolean>; hint?: (token: string) => Promise<string | null>; price?: (token: string) => number | null; log?: (line: string) => void; gecko?: GeckoBudget; sleep?: (ms: number) => Promise<unknown>; later?: Later; rpcs?: readonly string[]; headerTimed?: ReadonlySet<string>; pools?: ReadonlyMap<string, { pool: Pool; decimals: number }>; tickMs?: number; holds?: ProviderHolds; index?: readonly string[] }) {
   const now = deps.now ?? Date.now;
+  const log = deps.log ?? ((line: string) => console.log(`helper: ${line}`));
   const doFetch = deps.fetch ?? fetch;
   const rpcs = deps.rpcs ?? SWAP_RPCS[chain];
   const headerTimed = deps.headerTimed ?? HEADER_TIMED;
@@ -1362,7 +1462,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     const tokenIs0 = t0 === token;
     if (!tokenIs0 && t1 !== token) return null;
     const quote = quoteOf(tokenIs0 ? t1 : t0, false);
-    return quote === null ? null : { venue: V.v2.includes(f) ? "v2" : "v3", id: a, token, tokenIs0, quote };
+    return quote === null ? null : { venue: V.v2.includes(f) ? "v2" : "v3", id: a, token, tokenIs0, quote, ...(V.pancake.includes(f) ? { log: "pancake" as const } : {}) };
   }
   /** A v2 or v3 candidate of the token from its factory, two tokens and Venues.getPool parameter answers, with what its
    *  factory's getPool asks. */
@@ -1473,7 +1573,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     return seen;
   }
 
-  async function findPool(token: string): Promise<Found | null> {
+  async function findPool(token: string, hint: string | null = null): Promise<Found | null> {
     const head = await agreedHead();
     if (head === null) throw new Error("no agreed head");
     // each read is asked with every other no answer it waits for names, and no read more (card
@@ -1561,11 +1661,16 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     if (score.every((x) => x < 0)) throw new Error("swaps not agreed");
     // a candidate whose swaps went unread may be the main pool: no "no pool" from the rest
     if (score.some((x) => x < 0)) missed.any = true;
-    const best = cands.map((c, i) => ({ c, i, n: score[i]! })).sort((x, y) => y.n - x.n || (x.c.id < y.c.id ? -1 : 1))[0]!;
-    // no swap in the window on the pools found: "no pool" only when no candidate went unread
-    if (best.n <= 0 && from === head.n - V.cold + 1) {
+    let best = cands.map((c, i) => ({ c, i, n: score[i]! })).sort((x, y) => y.n - x.n || (x.c.id < y.c.id ? -1 : 1))[0]!;
+    // no swap in the window on the pools found: a pool its factory or key confirmed is still the token's, its book's
+    // price the pool's own state (markQuiet; card evm-chart-opens-without-a-vendor-call: 10 of the 20 GeckoTerminal
+    // trending Base pools had no swap in the 1,500-block window, 2026-11-11 07:3xZ, and each was "none"). The list's
+    // pool when it is among them, else the first in the order found (the top transfer counterparties first). A candidate
+    // read not agreed may be the main pool: no answer, never a book or "no pool" from the rest
+    if (best.n <= 0) {
       if (missed.any) throw new Error("pools not read");
-      return null;
+      const i = Math.max(0, cands.findIndex((c) => c.id === hint));
+      best = { c: cands[i]!, i, n: 0 };
     }
     // a hooked v4 pool reads the token's other v4 pools' swaps with its own (Pool.siblings), so hookTakes counts a
     // sender's swaps of the token in all of them; their swaps already read join the first read's logs
@@ -1583,10 +1688,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       n += w.logs.filter((l) => decodeSwap(best.c, l, chain) !== null).length;
       from = w.from;
     }
-    if (n <= 0) {
-      if (missed.any) throw new Error("pools not read");
-      return null;
-    }
+    if (n <= 0 && missed.any) throw new Error("pools not read");
     const ref = best.c.quote.kind === "eth" ? await readRef(head.with, head.n, from) : true;
     const decimals = decimalsOf(d);
     if (decimals === null) throw new Error("decimals not agreed");
@@ -1608,7 +1710,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       p = lanes
         .run(lane, async () => {
           const hint = (await deps.hint?.(token)) ?? null;
-          return (hint !== null ? await fromHint(token, hint) : null) ?? findPool(token);
+          return (hint !== null ? await fromHint(token, hint) : null) ?? findPool(token, hint);
         })
         .finally(() => (resolving.delete(token), resolvingLane.delete(token)));
       resolving.set(token, p);
@@ -1674,7 +1776,9 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   // The books
   // -------------------------------------------------------------------------------------------------------------
 
-  type Entry = { pool: Pool; decimals: number; book: Book; touched: number; readAt: number | null; headN: number; first?: Promise<void> };
+  /** `marking`: its mark's read in flight (markQuiet); `noMark`: its pool gives none; `offLogged`: its close off the
+   *  list's price is logged (offScale). */
+  type Entry = { pool: Pool; decimals: number; book: Book; touched: number; readAt: number | null; headN: number; first?: Promise<void>; marking?: Promise<void>; noMark?: boolean; offLogged?: boolean };
   const books = new Map<string, Entry>();
   // the ETH price: its swaps over the blocks the books need
   let refEvents: Ref[] = [];
@@ -1841,6 +1945,31 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     return e.first;
   }
 
+  /** A book that holds no bar (its pool's reads held no swap): its pool's own state at the agreed head, read with
+   *  callsAgreed (two providers alike, never one's word), as its mark (../candles.ts header), at the head block's time.
+   *  An ETH-quoted pool's needs the ETH price at the same block: the reference pool's Slot0, read in the same round. A
+   *  read not agreed is read again at the next open; a pool that gives no mark (a Pons curve, a stable pool, a price
+   *  out of range) is asked no more. One read in flight per book. */
+  function markQuiet(e: Entry): Promise<void> {
+    if (e.noMark === true || e.book.close() !== null) return Promise.resolve();
+    const calls = poolStateCalls(e.pool, chain);
+    if (calls === null) return (e.noMark = true), Promise.resolve();
+    e.marking ??= (async () => {
+      const head = await agreedHead();
+      if (head === null) return;
+      const eth = e.pool.quote.kind === "eth";
+      const missed = { any: false };
+      const got = await callsAgreed(head.n, eth ? [...calls, refStateCall(chain)] : calls, missed);
+      if (missed.any) return;
+      const legs = poolStateLegs(e.pool, got.slice(0, calls.length));
+      const ethUsd = eth ? refStateUsd(got.at(-1)) : null;
+      if (legs === null || (eth && ethUsd === null) || !e.book.mark({ block: head.n, t: head.t, ...legs, ethUsd })) e.noMark = true;
+    })()
+      .catch(() => undefined)
+      .finally(() => (e.marking = undefined));
+    return e.marking;
+  }
+
   let running: Promise<void> | null = null;
   /** The timer fired while a tick ran: the next starts as soon as it ends, never a skipped period. */
   let again = false;
@@ -1932,6 +2061,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     if (e.readAt === null) await firstRead(e);
     for (let attempt = 0; e.readAt === null && attempt < 2; attempt++) await start();
     if (e.readAt === null) return UPSTREAM;
+    await markQuiet(e);
     // a book not read for STALE_MS starts a read and is served as held, dated by its last read (readAt, the answer's
     // as_of_ms and X-Fetched-At), never a 503: the page prints a failed load for every non-2xx answer (card
     // helper-live-bars-no-503: 6 of 100 Base live reads 503 at 12:00Z); 503 is for a token with nothing held
@@ -1969,44 +2099,66 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   async function noneCandles(token: string, tf: Tf, to: number | null, limit: number, client?: string): Promise<DataAnswer> {
     const none = empty({ tf, candles: [] });
     if (deps.gecko === undefined || !Object.hasOwn(GT_TF, tf)) return none;
-    const gecko = deps.gecko;
     let p = gtPools.get(token);
     if (p === undefined || now() - p.at >= GT_POOL_FRESH_MS) {
-      // a held pool's re-read is a refresh: refused, the pool held serves. With none held, a refused, throttled or
-      // failed read is the 429 or 503, never an empty 200 (card market-reads-hold-under-load)
+      // a held pool's re-read is a refresh: refused, the pool held serves. With none held, a refused read is queued
+      // (wantPool) and the page answered from our own reads, an empty chart it reads again (AWAY_MS), never a 429 (card
+      // evm-chart-opens-without-a-vendor-call: Base candles 429 on every cold token read, the helper's live run at
+      // 06:58Z); a read that fails is the 503
       const cold = p === undefined;
-      const waitOf = (why: string) => limited(Math.min(Math.max(Math.ceil((gecko.retryAt("pages") - now()) / 1000), 1), RETRY_AFTER_MAX_S), why);
-      let fail: DataAnswer | undefined = waitOf("geckoterminal budget");
-      if (await gtTake(cold ? "pages" : "refresh", `${chain} pool`, client)) {
-        fail = UPSTREAM;
-        try {
-          const r = await doFetch(`${GT_BASE}/networks/${chain}/tokens/${token}/pools?page=1`, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(TIMEOUT_MS), redirect: "error" });
-          if (r.status === 429) fail = (throttledUntil(gecko, r.headers.get("retry-after"), now()), waitOf("geckoterminal 429"));
-          // GeckoTerminal names no such token: nothing to chart, the empty answer below
-          if (r.status === 404) fail = undefined;
-          if (r.status === 200 && Number(r.headers.get("content-length") ?? "0") <= ANSWER_MAX) {
-            const text = await r.text();
-            const id = text.length > ANSWER_MAX ? undefined : (JSON.parse(text) as { data?: { attributes?: { address?: unknown } }[] })?.data?.[0]?.attributes?.address;
-            p = { id: typeof id === "string" && /^0x[0-9a-f]{40}([0-9a-f]{24})?$/.test(id.toLowerCase()) ? id.toLowerCase() : null, at: now() };
-            if (gtPools.size >= POOLS_MAX) gtPools.delete(gtPools.keys().next().value!);
-            gtPools.set(token, p);
-          } else await r.body?.cancel();
-        } catch {
-          // GeckoTerminal did not answer: the pool held, if any
-        }
+      if (cold && wanted !== undefined && wanted.size() > 0) {
+        wantPool(token, tf);
+        return none;
       }
-      if (p === undefined && fail !== undefined) return fail;
+      if (await gtTake(cold ? "pages" : "refresh", `${chain} pool`, client)) {
+        const got = await readPool(token);
+        if (got !== "throttled" && got !== "failed") p = got ?? undefined;
+        if (cold && got === "throttled") wantPool(token, tf);
+        if (p === undefined && got === "failed") return UPSTREAM;
+        // GeckoTerminal names no such token (null): nothing to chart, the empty answer below
+        if (got === null) return none;
+      } else if (cold) wantPool(token, tf);
+      if (p === undefined) return none;
     }
-    if (p === undefined || p.id === null) return none;
+    if (p.id === null) return none;
     const got = await geckoBars({ pool: { id: p.id, token } } as Entry, tf, to, true, client);
-    // GeckoTerminal refused or failed with nothing to serve: its 429 (with the wait) or 503, so the page retries, never
-    // an empty 200 for a token it names a pool of (card helper-restart-fresh)
-    if (!Array.isArray(got)) return got;
+    // GeckoTerminal refused with nothing to serve: the read is queued (geckoBars) and the page answered from our own
+    // reads, never a 429 (card evm-chart-opens-without-a-vendor-call); a read that failed is the 503, so the page retries
+    if (!Array.isArray(got)) return got.status === 429 ? none : got;
     const bars = got.filter((c) => to === null || c[0] < to).slice(-limit);
     if (bars.length === 0) return none;
     const at = history.get(`${p.id}:${tf}:${to ?? ""}`)?.at ?? kept.get(`${p.id}:${tf}`)?.at ?? now();
     const body = { tf, candles: bars, src: "geckoterminal", as_of_ms: at };
     return { status: 200, body: JSON.stringify(body), src: "geckoterminal", asOfMs: at };
+  }
+
+  /** GeckoTerminal's top pool of a token, its call already taken, held in gtPools: the pool, null when GeckoTerminal
+   *  names no such token, "throttled" on its 429, else "failed". */
+  async function readPool(token: string): Promise<{ id: string | null; at: number } | null | "throttled" | "failed"> {
+    try {
+      const r = await doFetch(`${GT_BASE}/networks/${chain}/tokens/${token}/pools?page=1`, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(TIMEOUT_MS), redirect: "error" });
+      if (r.status === 429) {
+        await r.body?.cancel();
+        throttledUntil(deps.gecko!, r.headers.get("retry-after"), now());
+        return "throttled";
+      }
+      if (r.status === 404) {
+        await r.body?.cancel();
+        return null;
+      }
+      if (r.status !== 200 || Number(r.headers.get("content-length") ?? "0") > ANSWER_MAX) {
+        await r.body?.cancel();
+        return "failed";
+      }
+      const text = await r.text();
+      const id = text.length > ANSWER_MAX ? undefined : (JSON.parse(text) as { data?: { attributes?: { address?: unknown } }[] })?.data?.[0]?.attributes?.address;
+      const p = { id: typeof id === "string" && /^0x[0-9a-f]{40}([0-9a-f]{24})?$/.test(id.toLowerCase()) ? id.toLowerCase() : null, at: now() };
+      if (gtPools.size >= POOLS_MAX) gtPools.delete(gtPools.keys().next().value!);
+      gtPools.set(token, p);
+      return p;
+    } catch {
+      return "failed";
+    }
   }
 
   /** The last good bars per pool and tf (the newest range read): served when a read is throttled or fails. */
@@ -2039,27 +2191,42 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     // the history before a book of ours (not `alone`) is an optional seed, the answer our chain bars without it: a stale
     // read, so it never takes the call a chart with nothing to serve needs (card helper-crowd-429)
     const lane = before === null ? refreshLane(kept.get(`${e.pool.id}:${tf}`)?.at ?? fresh?.at ?? null, now()) : fresh !== undefined ? "refresh" : alone ? "pages" : SEED_LANE;
-    if (!(await gtTake(lane, `${chain} bars`, client))) return fallback(wait(lane === "pages" ? undefined : `geckoterminal ${lane}`));
+    // a read a page asked for with nothing held to serve waits in the queue for the next free call, behind those queued
+    // before it (card evm-chart-opens-without-a-vendor-call); the page is answered now from our own bars, never a 429
+    const nothing = fresh === undefined && fallback(UPSTREAM) === UPSTREAM;
+    const queued = nothing && wanted !== undefined && (wanted.has(k) || wanted.size() > 0);
+    if (queued || !(await gtTake(lane, `${chain} bars`, client))) {
+      if (nothing) wantBars(e.pool.id, e.pool.token, tf, before, k);
+      return fallback(wait(lane === "pages" ? undefined : `geckoterminal ${lane}`));
+    }
+    const got = await readBars(e.pool.id, e.pool.token, tf, before, k);
+    if (got === "throttled" && nothing) wantBars(e.pool.id, e.pool.token, tf, before, k);
+    return Array.isArray(got) ? got : fallback(got === "throttled" ? wait("geckoterminal 429") : UPSTREAM);
+  }
+
+  /** One GeckoTerminal OHLCV read of a pool, its call already taken: the bars (held under `k`, and as the pool's newest
+   *  when they are), "throttled" on its 429 (every lane paused for its Retry-After), else "failed". */
+  async function readBars(pool: string, token: string, tf: Tf, before: number | null, k: string): Promise<Candle[] | "throttled" | "failed"> {
     try {
       const g = GT_TF[tf as keyof typeof GT_TF];
-      const url = `${GT_BASE}/networks/${chain}/pools/${e.pool.id}/ohlcv/${g.period}?aggregate=${g.aggregate}&limit=1000&currency=usd&token=${e.pool.token}${before === null ? "" : `&before_timestamp=${before}`}`;
+      const url = `${GT_BASE}/networks/${chain}/pools/${pool}/ohlcv/${g.period}?aggregate=${g.aggregate}&limit=1000&currency=usd&token=${token}${before === null ? "" : `&before_timestamp=${before}`}`;
       const r = await doFetch(url, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(TIMEOUT_MS), redirect: "error" });
       if (r.status === 429) {
         await r.body?.cancel();
-        throttledUntil(gecko, r.headers.get("retry-after"), now());
-        return fallback(wait("geckoterminal 429"));
+        throttledUntil(deps.gecko!, r.headers.get("retry-after"), now());
+        return "throttled";
       }
       if (r.status !== 200 || Number(r.headers.get("content-length") ?? "0") > ANSWER_MAX) {
         await r.body?.cancel();
-        return fallback(UPSTREAM);
+        return "failed";
       }
       const text = await r.text();
-      if (text.length > ANSWER_MAX) return fallback(UPSTREAM);
+      if (text.length > ANSWER_MAX) return "failed";
       const bars = toCandles(JSON.parse(text), tf as keyof typeof GT_TF, 1_000, now());
-      if (bars === null) return fallback(UPSTREAM);
+      if (bars === null) return "failed";
       if (history.size >= 500) history.delete(history.keys().next().value!);
       history.set(k, { at: now(), bars });
-      const kk = `${e.pool.id}:${tf}`;
+      const kk = `${pool}:${tf}`;
       const had = kept.get(kk);
       if (bars.length > 0 && (had === undefined || bars.at(-1)![0] >= had.bars.at(-1)![0])) {
         kept.delete(kk);
@@ -2068,8 +2235,27 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       }
       return bars;
     } catch {
-      return fallback(UPSTREAM);
+      return "failed";
     }
+  }
+
+  /** The reads pages asked for and the budget refused (../gecko.ts createWanted): each in its turn, the page's next read
+   *  then served from what it got (the app reads its chart in full every RESYNC_MS, 60 s, and a chart with no bars of
+   *  ours AWAY_MS, 45 s: apps/terminal/src/screens/token/candles.ts). */
+  const wanted = deps.gecko === undefined ? undefined : createWanted(deps.gecko, `${chain} bars`, now, deps.later);
+  function wantBars(pool: string, token: string, tf: Tf, before: number | null, k: string, first = false): void {
+    wanted?.want(k, { done: () => history.has(k), run: async () => ((await readBars(pool, token, tf, before, k)) === "throttled" ? "again" : undefined) }, first);
+  }
+  /** A listed token our reads find no pool of: GeckoTerminal's top pool for it, then that pool's newest bars, first. */
+  function wantPool(token: string, tf: Tf): void {
+    wanted?.want(`pool:${token}`, {
+      done: () => gtPools.has(token) && now() - gtPools.get(token)!.at < GT_POOL_FRESH_MS,
+      run: async () => {
+        const got = await readPool(token);
+        if (got === "throttled") return "again";
+        if (typeof got === "object" && got !== null && got.id !== null) wantBars(got.id, token, tf, null, `${got.id}:${tf}:`, true);
+      },
+    });
   }
 
   // -------------------------------------------------------------------------------------------------------------
@@ -2172,6 +2358,21 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     );
   }
 
+  /** Whether the book's newest close and the token's list price (deps.price) differ by more than SCALE_BOUND times
+   *  either way: its bars are then not served as ours. Logged once per book with both prices. No list price, no bound. */
+  function offScale(e: Entry, token: string): boolean {
+    const listed = deps.price?.(token) ?? null;
+    const close = e.book.close();
+    if (listed === null || !Number.isFinite(listed) || listed <= 0 || close === null) return false;
+    const ours = Number(fixed(close, PRICE_SCALE));
+    if (ours <= listed * SCALE_BOUND && ours * SCALE_BOUND >= listed) return false;
+    if (e.offLogged !== true) {
+      e.offLogged = true;
+      log(`${chain} candles ${token}: our close ${ours} USD and the list's ${listed} USD differ past ${SCALE_BOUND} times; answered as a token with no pool of ours (pool ${e.pool.id})`);
+    }
+    return true;
+  }
+
   /** A GeckoTerminal pool id (a pool's address or a v4 pool id) as gtPools and the bars' keys hold it. */
   const POOL_ID = /^0x[0-9a-f]{40}([0-9a-f]{24})?$/;
   const barsKey = (k: string, withBefore: boolean): boolean => {
@@ -2246,6 +2447,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     tick: start,
     stop(): void {
       aheadQueue.clear();
+      wanted?.stop();
       if (timer !== null) clearInterval(timer);
       timer = null;
       if (follower !== null) clearInterval(follower);
@@ -2279,6 +2481,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       if (e === LATE) return timed(UPSTREAM);
       if (e === "none") return timed(await noneCandles(t, tf as Tf, to, limit, client));
       if (!("book" in e)) return timed(e);
+      if (offScale(e, t)) return timed(await noneCandles(t, tf as Tf, to, limit, client));
       const own = e.book.candles(tf as Tf, to, limit);
       const ownFrom = e.book.ownFrom(tf as Tf);
       let bars: Candle[] = own;
@@ -2288,11 +2491,12 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
         const before = ownFrom === null ? (to ?? Math.floor(now() / 1000)) : Math.min(ownFrom, to ?? ownFrom);
         // GeckoTerminal's history is an optional seed (card helper-crowd-429): refused or failed, the answer is our
         // chain bars alone, never its 429 (index-evm-swaps at 22:12Z: a Robinhood 1m chart answered 429 for the seed).
-        // With no bar of ours to serve, its 429 (with the wait) or 503 is the answer, so the page reads again, never a
-        // 200 with no bars for a token that has them (card market-reads-hold-under-load: Base 0xfbb75a59's 1h answered
-        // 200 [] at 19:55Z on a book opened a minute before, its seed refused by the budget; 356 bars at 20:11Z)
+        // With no bar of ours to serve, a refused read is queued (geckoBars) and the answer our own reads' empty chart,
+        // which the page reads again (AWAY_MS), never a 429 (card evm-chart-opens-without-a-vendor-call: at
+        // market-reads-hold-under-load it was the 429, and the helper's live run at 06:58Z read 429 on every cold Base
+        // token); a read that failed with nothing held is the 503, so the page retries
         const got = await geckoBars(e, tf as Tf, ownFrom === null ? to : before, false, client);
-        if (own.length === 0 && !Array.isArray(got)) return timed(got);
+        if (own.length === 0 && !Array.isArray(got) && got.status !== 429) return timed(got);
         const old = (Array.isArray(got) ? got : []).filter((c) => c[0] < before);
         if (old.length > 0) {
           bars = old.concat(own).slice(-limit);

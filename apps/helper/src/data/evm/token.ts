@@ -32,7 +32,7 @@
 import type { Row } from "../solana/lists.ts";
 import type { ListsAnswer } from "../solana/lists.ts";
 import { CACHE_MAX, NOT_FOUND, RISK_FIELDS, UPSTREAM, type DataAnswer, type Field } from "../solana/token.ts";
-import { GT_PAGE_WAIT_MS, takeOrWait, throttledUntil, WINDOW_MS, type GeckoBudget } from "../gecko.ts";
+import { createWanted, GT_PAGE_WAIT_MS, takeOrWait, throttledUntil, type GeckoBudget, type Later } from "../gecko.ts";
 import { evmAddress, GT_BASE, GT_NETWORK, type EvmChain } from "./lists.ts";
 
 /** A token's GeckoTerminal info is read again once this old [design: the holder count moves slowly (GeckoTerminal's own
@@ -152,7 +152,7 @@ function bounded<V>(max: number) {
  *  swap reads' pool and decimals for a token, when held (swaps.ts kept). */
 export function createEvmToken(
   chain: EvmChain,
-  deps: { lists: { get(): Promise<ListsAnswer>; listed(token: string): Promise<boolean> }; gecko: GeckoBudget; kept?: (token: string) => { pool: string; decimals: number } | undefined; fetch?: Fetch; now?: () => number; sleep?: (ms: number) => Promise<unknown> },
+  deps: { lists: { get(): Promise<ListsAnswer>; listed(token: string): Promise<boolean> }; gecko: GeckoBudget; kept?: (token: string) => { pool: string; decimals: number } | undefined; fetch?: Fetch; now?: () => number; sleep?: (ms: number) => Promise<unknown>; later?: Later },
 ) {
   const now = deps.now ?? Date.now;
   const sleep = deps.sleep ?? ((ms: number) => new Promise((ok) => setTimeout(ok, ms)));
@@ -180,6 +180,11 @@ export function createEvmToken(
 
   async function readInfo(token: string, lane: "pages" | "stale" | "refresh", client?: string): Promise<Read> {
     if ((await takeOrWait(deps.gecko, lane, `${chain} info`, now() + GT_PAGE_WAIT_MS, now, sleep, client)) !== null) return "refused";
+    return fetchInfo(token);
+  }
+
+  /** One GeckoTerminal info read, its call already taken. */
+  async function fetchInfo(token: string): Promise<Read> {
     try {
       const r = await doFetch(`${GT_BASE}/networks/${GT_NETWORK[chain]}/tokens/${token}/info`, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(TIMEOUT_MS), redirect: "error" });
       if (r.status === 429) {
@@ -222,6 +227,23 @@ export function createEvmToken(
       running.set(token, p);
     }
     return { held: servable && h !== undefined ? h.info : undefined, read: p };
+  }
+
+  /** The info reads pages asked for and the budget refused, each in its turn (../gecko.ts createWanted). */
+  const wanted = createWanted(deps.gecko, `${chain} info`, now, deps.later);
+  function wantInfo(token: string): void {
+    wanted.want(token, {
+      done: () => {
+        const h = infos.get(token);
+        return h !== undefined && now() - h.at < INFO_FRESH_MS;
+      },
+      run: async () => {
+        const started = now();
+        const x = await fetchInfo(token);
+        if (x === "refused") return "again";
+        if (x !== "failed") infos.set(token, { info: x, at: started });
+      },
+    });
   }
 
   const LATE = Symbol("late");
@@ -269,8 +291,8 @@ export function createEvmToken(
       const page = toPage(row, info, deps.kept?.(t));
       return { status: 200, body: JSON.stringify(page), src: "geckoterminal", asOfMs: row.as_of_ms as number };
     },
-    /** 06b Holders: no rows, GeckoTerminal's count and top 10 share; 429 when the budget refuses a token nothing is held
-     *  for (or held past INFO_SERVE_MS), 503 when GeckoTerminal fails it. */
+    /** 06b Holders: no rows, GeckoTerminal's count and top 10 share; no count (src "none", the read queued) when the
+     *  budget refuses a token nothing is held for (or held past INFO_SERVE_MS), 503 when GeckoTerminal fails it. */
     async holders(token: string, client?: string): Promise<DataAnswer> {
       const t = evmAddress(token);
       if (t === null) return NOT_FOUND;
@@ -281,7 +303,15 @@ export function createEvmToken(
       const got: Read | undefined = read === undefined ? held : await read;
       const info: Info | "none" | undefined = got === "refused" || got === "failed" ? held : got;
       if (info === undefined) {
-        if (got === "refused") return { status: 429, body: JSON.stringify({ error: { code: "rate_limited" } }), retryAfterS: Math.min(Math.max(Math.ceil((deps.gecko.retryAt("pages") - now()) / 1000), 1), WINDOW_MS / 1000), why: "geckoterminal budget" };
+        // refused with nothing held: the read waits in the queue for the next free call (../gecko.ts createWanted) and
+        // the page is answered with no count from no source, never a 429 (card evm-chart-opens-without-a-vendor-call:
+        // the helper's live run at 06:58Z read 429 for a Robinhood token's holders); no keyless source counts an EVM
+        // token's holders (above), so nothing of ours stands in for it
+        if (got === "refused") {
+          wantInfo(t);
+          const at = now();
+          return { status: 200, body: JSON.stringify({ holders: [], total: null, top_bps: null, src: "none", as_of_ms: at }), src: "none", asOfMs: at };
+        }
         return UPSTREAM;
       }
       const i = info === "none" ? null : info;
