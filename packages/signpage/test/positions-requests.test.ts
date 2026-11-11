@@ -472,6 +472,10 @@ test("a restored device: each W's buy record back from its own buy on the helper
   const records = async () => (await w.get("meta", "owed/buy-sol")) as Record<string, { mint: string; program: string; rebuilt?: true }> | undefined;
   const asks = (sig: string) => sentSigs.filter((x) => x === `${phase} ${sig}`).length;
 
+  // the test before this one leaves the helper route's finder throttled and in doubt (a provider throttling for good),
+  // so its next read is refused without asking while the pause runs; the pause (10 s at most) waited out on the clock,
+  // this test's first round goes and clears the doubt
+  await new Promise((r) => setTimeout(r, 11_000));
   phase = "1 the load after the restore, W1's buy unread (the route down for it)";
   mode.failTx = "s1buy";
   let tp = make();
