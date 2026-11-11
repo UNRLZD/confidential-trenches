@@ -150,6 +150,7 @@ export const CHANGED = [
   "scripts/live-checks/pool-sol-deploy.mjs",
   "scripts/live-checks/pool-senders-next-page.mjs",
   "scripts/live-checks/pool-senders-next-page-helper.mjs",
+  "scripts/live-checks/pool-sell-legs-side-by-side.mjs",
   "scripts/live-checks/pool-usd-price-never-stale.mjs",
   "scripts/live-checks/sol-settle-failed-is-not-unspent.mjs",
   "scripts/live-checks/signpage-throttled-read-is-not-asked-again-at-once.mjs",

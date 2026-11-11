@@ -159,3 +159,19 @@ test("the check has the shape scripts/ci/bundle-checks.mjs runs: read(fetch) on 
   assert.deepEqual([...new Set(asked)], [SIGN_ORIGIN]);
   assert.equal(judge(rec, NO_LEDGER).pass, true, judge(rec, NO_LEDGER).lines.join("\n"));
 });
+
+// card pool-sell-legs-side-by-side: the sell host's read as that card's build has it (signpage-state-holdings.side.excerpt.txt):
+// a sale that lists its Ws with no read keeps the hold until its run ends; the earlier hold not let go, or no hold
+// taken first: each FAILs
+test("the side-by-side sale's hold: it holds, and each break in place FAILs", () => {
+  const ex = readFileSync(new URL("./signpage-state-holdings.side.excerpt.txt", import.meta.url), "utf8");
+  assert.equal((ex.match(PREEMPT) ?? []).length, 1);
+  for (const [what, from, to] of [
+    ["the earlier hold not let go", "o?(l?.release(),l=r):", "o?(l=r):"],
+    ["no hold taken first", "let r=Pe.preempt(),", "let r=null,"],
+  ]) {
+    const bad = ex.replace(from, to);
+    assert.notEqual(bad, ex, what);
+    assert.equal((bad.match(PREEMPT) ?? []).length, 0, what);
+  }
+});
