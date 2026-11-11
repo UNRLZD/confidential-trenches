@@ -408,14 +408,36 @@ test("the page answers it (src/main.ts): the kind on the trades' paced pair as b
   assert.match(main, /PAGE_SOL_PIN === undefined \? null : pageSolanaRpcs\("pass"\)/, "the trades' own paced pair, each read a background one on its host's lane");
   assert.match(main, /positions: \(\) => testnet\?\.positionsNow\(\) \?\? null, pin: \(\) => PAGE_SOL_PIN \?\? null,/, "the held positions: no pass, no seed read, no write; the page's pool");
   assert.match(main, /rent: \(\) => \(hasSolana \? rent\.get\(\) : null\),/, "the page's own Rent sysvar read");
-  assert.match(main, /const buys = liveRuns\(poolKindMap\["pool\.buy"\], "final"\);\n  poolKindMap\["pool\.buy"\] = buys\.kind;/);
-  assert.match(main, /const sells = liveRuns\(poolKindMap\["pool\.sell"\], "after"\);\n  poolKindMap\["pool\.sell"\] = sells\.kind;/);
+  assert.match(main, /const buys = liveRuns\(poolKindMap\["pool\.buy"\]\);\n  poolKindMap\["pool\.buy"\] = buys\.kind;/, "a buy counted to its first answer, its early sent (devnet run 11: to Final it kept the preview busy 33.8 s)");
+  assert.match(main, /const sells = liveRuns\(poolKindMap\["pool\.sell"\]\);\n  poolKindMap\["pool\.sell"\] = sells\.kind;/);
+  assert.doesNotMatch(main, /liveRuns\([^)]*"final"/, "no trade counted to its final progress post");
   assert.match(main, /trading: \(\) => buys\.live\(\) \+ sells\.live\(\) > 0 \|\| \(dryPair\(\) \?\? \[\]\)\.some\(\(r\) => r\.url !== undefined && hostLane\(r\.url\)\.trading\(\)\),/);
   const tp = readFileSync(new URL("../src/pool-testnet.ts", import.meta.url), "utf8");
   assert.match(tp, /positionsNow: \(\) => positions\.get\(\),/);
 });
 
-test("a pool buy runs from its tap to its run's end (its one progress post, \"sent\" included), through an early \"sent\" answer; a sell to its run's end; a refusal ends either; the backstop ends one with no end", async () => {
+// devnet run 11 (11 Nov): a buy's hold on the pair's hosts lasted to its Final, so every preview asked after its Filled
+// answered busy. With main's rule over the page's real lanes: busy while a trade holds a host of the pair, a number the
+// moment the hold is given back (a buy gives it back at its early "sent": pool-buy.test.ts)
+test("main's trading rule on the page's lanes: a preview is busy while a trade holds a host of the pair and answers a number once the hold is given back", async () => {
+  const { holdHosts, hostLane, resetHostLanes } = await import("../../wallet/src/throttle.ts");
+  resetHostLanes();
+  try {
+    const urls = ["https://dry-0.example/", "https://dry-1.example/"] as const;
+    const rpcs = pair().map((r, i) => Object.assign(r, { url: urls[i] })) as unknown as readonly [SolanaRpc, SolanaRpc];
+    const live = { buys: 0, sells: 0 };
+    const d = deps({ rpcs: () => rpcs, trading: () => live.buys + live.sells > 0 || rpcs.some((r) => r.url !== undefined && hostLane(r.url).trading()) });
+    const give = holdHosts([urls[1]]);
+    assert.deepEqual(await poolSellDry(d, share(MINT, 5_000)), { error: "busy" }, "one host of the pair held");
+    give();
+    const a = await poolSellDry(d, share(MINT, 5_000));
+    assert.ok("result" in a, JSON.stringify(a));
+  } finally {
+    resetHostLanes();
+  }
+});
+
+test("a pool buy runs from its tap to its first answer, its early \"sent\", while its read-backs go on to Final; a sell to its run's end; a refusal ends either; the backstop ends one with no end", async () => {
   type Ctx = Parameters<ReturnType<typeof liveRuns>["kind"]>[1];
   const ctx = (seen: string[]) => ({ id: "b1", sha: "s", progress: (s: string) => void seen.push(s) }) as unknown as Ctx;
   let post!: (s: string) => void;
@@ -423,31 +445,31 @@ test("a pool buy runs from its tap to its run's end (its one progress post, \"se
   const b = liveRuns((_p, c) => {
     post = (s) => c.progress(s as never);
     return { running: true, after: new Promise<void>((r) => (answered = r)), answer: () => ({ result: { stage: "sent", txs: [] } }) };
-  }, "final");
+  });
   const seen: string[] = [];
   b.kind({}, ctx(seen));
   assert.equal(b.live(), 1);
   answered();
   await new Promise((r) => setTimeout(r, 0));
-  assert.equal(b.live(), 1, "answered sent: its read-backs still run");
-  post("sent");
-  assert.equal(b.live(), 0, "its run's end, though its last stage is sent (no 150 s count)");
-  assert.deepEqual(seen, ["sent"], "progress passes through");
+  assert.equal(b.live(), 0, "answered sent: no longer running, though its read-backs go on");
+  post("filled");
+  assert.equal(b.live(), 0);
+  assert.deepEqual(seen, ["filled"], "progress passes through");
   let ran!: () => void;
-  const s = liveRuns(() => ({ running: true, after: new Promise<void>((r) => (ran = r)), answer: () => ({ result: { stage: "sent", txs: [] } }) }), "after");
+  const s = liveRuns(() => ({ running: true, after: new Promise<void>((r) => (ran = r)), answer: () => ({ result: { stage: "sent", txs: [] } }) }));
   s.kind({}, ctx([]));
   assert.equal(s.live(), 1, "a sell from its tap");
   ran();
   await new Promise((r) => setTimeout(r, 0));
   assert.equal(s.live(), 0, "to its run's end");
-  const refused = liveRuns(() => ({ error: "not_allowed" }), "final");
+  const refused = liveRuns(() => ({ error: "not_allowed" }));
   refused.kind({}, ctx([]));
   assert.equal(refused.live(), 0);
-  const rejects = liveRuns(() => ({ running: true, after: Promise.reject(new Error("x")), answer: () => null }), "final");
+  const rejects = liveRuns(() => ({ running: true, after: Promise.reject(new Error("x")), answer: () => null }));
   rejects.kind({}, ctx([]));
   await new Promise((r) => setTimeout(r, 0));
   assert.equal(rejects.live(), 0, "a run whose after rejects ends, nothing unhandled");
-  const late = liveRuns(() => ({ running: true, after: new Promise<void>(() => {}), answer: () => null }), "final", 5);
+  const late = liveRuns(() => ({ running: true, after: new Promise<void>(() => {}), answer: () => null }), 5);
   late.kind({}, ctx([]));
   assert.equal(late.live(), 1);
   await new Promise((r) => setTimeout(r, 20));
