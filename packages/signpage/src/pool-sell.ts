@@ -133,7 +133,7 @@ export type PoolSellHost = {
 /** One wallet's sale in a sell (card pool-sell-share-across-wallets): W's address, the token's base units it sells (a
  *  decimal string, as an answer carries it), its transaction's signature once W signed (null: it ended before signing),
  *  and how it ended: its stage, or the refusal before it signed. */
-export type PoolSellLeg = { wallet: string; amount: string; tx: string | null; stage: TradeStage | null; error?: PoolSellError };
+export type PoolSellLeg = { wallet: string; amount: string; tx: string | null; stage: TradeStage | null; error?: PoolSellError; cause?: string };
 type PoolSellError = "not_allowed" | "not_funded" | "quote_check_failed" | "failed" | "down";
 /** A sell's answer: its stage over every wallet's sale (filled when each filled, part_filled when some did), each sale's
  *  transaction in `txs`, and every sale in `legs`; or a refusal, nothing signed. */
@@ -624,7 +624,26 @@ async function sellRuns(h: PoolSellHost, ask: PoolAsk, later: Later, w: BuyWalle
 }
 
 /** One wallet's sale as its run answers it. */
-type LegAnswer = { stage: TradeStage; txs: TxRef[] } | { error: PoolSellError };
+type LegAnswer = { stage: TradeStage; txs: TxRef[] } | { error: PoolSellError; cause?: string };
+
+/** Why a leg was refused, in public words only (card pool-sell-legs-side-by-side: the paid pass of 11 Nov 07:36Z ended
+ *  a leg "failed" and nothing kept why): the error's name; its code (a refusal's, a provider fault's, or the JSON-RPC or
+ *  HTTP code its text names, digits only); and the two functions it was thrown in, from its stack. Never its text, which can
+ *  name a URL or a key. */
+export function legCause(e: unknown): string {
+  try {
+    const x = e as { name?: unknown; code?: unknown; fault?: unknown; message?: unknown; stack?: unknown } | null;
+    const name = typeof x?.name === "string" && /^[\w$]{1,40}$/.test(x.name) ? x.name : "thrown";
+    const text = typeof x?.message === "string" ? x.message : "";
+    const own = typeof x?.code === "string" || typeof x?.code === "number" ? String(x.code) : typeof x?.fault === "string" ? x.fault : undefined;
+    const code = own !== undefined && /^[\w-]{1,40}$/.test(own) ? own : (/RPC error (-?\d{1,6})\b/.exec(text)?.[1] ?? /\bHTTP (\d{3})\b/.exec(text)?.[1]);
+    // the two innermost named frames (a refusal is thrown in its helper, no(): the second is where it was refused)
+    const frames = typeof x?.stack === "string" ? [...x.stack.matchAll(/\n\s*at (?:async )?([\w$.]{1,60}) \(/g)].slice(0, 2).map((m) => m[1]) : [];
+    return [name, code, frames.length === 0 ? undefined : `at ${frames.join(" < ")}`].filter((v) => v !== undefined).join(" ");
+  } catch {
+    return "thrown";
+  }
+}
 
 /** A sell's plan: the units it sells over every wallet, and each wallet's sale in the order they run. `frozen`: a W
  *  both RPCs read frozen was left out, so a share of the holding never sells all of it. */
@@ -875,17 +894,18 @@ async function sellAll(host: PoolSellHost, ask: PoolAsk, laters: Later[], hooks:
       // a wallet whose turn comes once the tap's waits are spent (another wallet's sale was refused its next wait):
       // down without its priced reads, nothing signed (review of f0e7bd38, P2-2; sellRun checks again at its turn)
       .then((): Promise<LegAnswer> | LegAnswer => (h.stopped?.() ? { error: "failed" } : waits.spent() ? { error: "down" } : sellRuns(leg, { ...ask, amount: l.units, shareBps: undefined }, later, l.w, waits, i === 0 ? first : shared, i === 0 ? { venues, spent: () => waits.spent() } : { opened: prior, venues, spent: () => waits.spent() })))
-      .catch((): LegAnswer => ({ error: "failed" }))
+      .catch((e: unknown): LegAnswer => ({ error: "failed", cause: legCause(e) }))
       .then((a) => {
         open();
-        legs[i] = "error" in a ? { ...legs[i]!, tx: null, stage: null, error: a.error } : { ...legs[i]!, tx: a.txs.at(-1)?.hash ?? legs[i]!.tx, stage: a.stage };
+        legs[i] = "error" in a ? { ...legs[i]!, tx: null, stage: null, error: a.error, ...(a.cause === undefined ? {} : { cause: a.cause }) } : { ...legs[i]!, tx: a.txs.at(-1)?.hash ?? legs[i]!.tx, stage: a.stage };
         hooks.ended?.(i, legs[i]!);
         return a;
       });
   });
   const got = await Promise.all(runs);
-  if (got.length === 1 && "error" in got[0]!) return got[0]!;
-  if (got.every((a) => "error" in a)) return got[0]!;
+  // a refusal's cause stays on its leg (the record's, the console's): the sale's answer is its code alone
+  if (got.length === 1 && "error" in got[0]!) return { error: got[0].error };
+  if (got.every((a) => "error" in a)) return { error: (got[0] as { error: PoolSellError }).error };
   const txs: TxRef[] = legs.flatMap((l) => (l.tx === null ? [] : [{ chain: "solana" as const, hash: l.tx }]));
   return { stage: shortOf(stageOfLegs(legs), plan.frozen && ask.shareBps !== undefined), txs, legs };
 }
@@ -1235,14 +1255,15 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later, w: BuyWallet
     // past the send nothing is refused: the transaction may land, so the answer is "sent" with its signature, and the
     // note, INCOMING, settles at the next load or sell
     if (sent !== null) return { stage: "sent", txs: [{ chain: "solana", hash: sent }] };
-    if (e instanceof Refused) return { error: e.code };
-    if (e instanceof PoolRuleRefused) return { error: "quote_check_failed" };
+    const cause = legCause(e);
+    if (e instanceof Refused) return { error: e.code, cause };
+    if (e instanceof PoolRuleRefused) return { error: "quote_check_failed", cause };
     // a provider read that still fails after the page's own retry, before W signs: "not now" (card pool-read-down)
     if (!signing && e instanceof SolanaRpcTransportError) {
       later.fault = e;
-      return { error: "down" };
+      return { error: "down", cause };
     }
-    return { error: "failed" };
+    return { error: "failed", cause };
   } finally {
     for (const x of seeds) x.fill(0);
     key?.fill(0);
@@ -1835,7 +1856,7 @@ type SellOp = { kind: "sell"; pool: "sol"; sha: string; stage: "pending" | Trade
 /** One wallet's sale as the record keeps it (card pool-sell-share-across-wallets; never sent to the app: state.ts reads
  *  only the op contract's keys): W, the units it sells in whole units, its signature once signed, and its stage
  *  ("pending" until it runs; refused with the code of a refusal before it signed). */
-type SellOpLeg = { wallet: string; units: string; tx: string | null; stage: "pending" | TradeStage; code?: ErrorCode };
+type SellOpLeg = { wallet: string; units: string; tx: string | null; stage: "pending" | TradeStage; code?: ErrorCode; cause?: string };
 /** The record's stage over its legs (stageOfLegs): a leg still "pending" is one that never ran when `dead`; `short`, a
  *  share that left a frozen W out (shortOf). */
 const recordStage = (legs: readonly SellOpLeg[], dead: boolean, short = false): TradeStage =>
@@ -1996,7 +2017,11 @@ export function poolSellKind(host: () => PoolSellKindHost, locks: Locks | null =
                   if (!answer || sentAnswer(answer)) answer = { result: { stage: "sent", txs: legTxs() } };
                   give();
                 },
-                ended: (i, leg) => setLeg(i, leg.error !== undefined ? { tx: null, stage: "refused", code: leg.error } : { tx: leg.tx, stage: leg.stage ?? "refused" }),
+                ended: (i, leg) => {
+                  // a refusal's cause, on the record and the page's console (public words only: legCause)
+                  if (leg.error !== undefined) console.warn(`sell leg ${i + 1} refused ${leg.error}${leg.cause === undefined ? "" : `: ${leg.cause}`}`);
+                  setLeg(i, leg.error !== undefined ? { tx: null, stage: "refused", code: leg.error, ...(leg.cause === undefined ? {} : { cause: leg.cause }) } : { tx: leg.tx, stage: leg.stage ?? "refused" });
+                },
               }, waits);
               if ("error" in a) write({ stage: "refused", code: a.error });
               else write({ stage: a.stage, txs: a.txs });

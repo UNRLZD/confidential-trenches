@@ -3897,6 +3897,9 @@ test("card pool-sell-share-across-wallets: one sale that fails leaves the other'
   const w = await twoBuys({ others: [{ l: 8n, j: 0, held: T3, lamports: 0 }] });
   const a = await runPoolSell(w.host, share(10_000));
   const sw = saleSigs(a)[0]!;
+  // the refused leg's cause (legCause, card pool-sell-legs-side-by-side): its refusal's name and code, where thrown
+  assert.match(("legs" in a && a.legs?.[0]?.cause) || JSON.stringify(a), /^Error not_funded at no < [\w$.]+$/);
+  if ("legs" in a) for (const l of a.legs ?? []) delete l.cause;
   assert.deepEqual(a, { stage: "part_filled", txs: [{ chain: "solana", hash: sw }], legs: [{ wallet: X.address, amount: String(T3), tx: null, stage: null, error: "not_funded" }, { wallet: W.address, amount: String(T5), tx: sw, stage: "filled" }] });
   const xa = w.c.accounts.get(ataOfW(X.address))!;
   assert.equal(new DataView(xa.data.buffer, xa.data.byteOffset + 64, 8).getBigUint64(0, true), T3, "X still holds its tokens");
@@ -5042,4 +5045,33 @@ test("review of 55d4c6eb, P2-B: the plan's pool bytes apart on both providers on
   assert.equal(apart, 2, "the plan's two reads of the pool read apart");
   const sold = w.sent.length;
   assert.ok(sold >= 6, `${sold} sales sent of 7: ${JSON.stringify(a)}`);
+});
+
+// Card pool-sell-legs-side-by-side, the paid pass of 11 Nov 07:36Z: its fifth leg ended "failed" before it signed, and
+// nothing kept why. Each leg's refusal keeps its cause in the sale's record and on the console, in public words only:
+// the error's name, its code (a refusal's, a provider fault's, a JSON-RPC or HTTP code its text names) and where it was
+// thrown; never a URL, a key or an address beyond the leg's own wallet the record already holds
+test("a leg refused before it signed keeps its cause in the record and on the console: the error's name, its code and where", async (t) => {
+  const w = await twoBuys({ ataLamports: TOKEN_RENT });
+  let sends = 0;
+  let fired = false;
+  const f = faulty(w, (p, method) => {
+    if (method === "sendTransaction") sends++;
+    if (!fired && sends > 0 && p === 0 && method === "getFeeForMessage") return ((fired = true), new Error("RPC error -32016: Minimum context slot has not been reached (https://rpc.example/?api-key=secret)"));
+    return null;
+  });
+  (w.host as { rpcs: unknown }).rpcs = f.rpcs;
+  const warned: string[] = [];
+  t.mock.method(console, "warn", (...a: unknown[]) => void warned.push(a.map(String).join(" ")));
+  const r = poolSellKind(kindHost(w), fakeLocks())(share(10_000), ctxOf("c9", "aa")) as KindAnswer;
+  await r.after;
+  await until(async () => ((await w.store.get("ops", "c9")) as Rec | undefined)?.stage === "part_filled");
+  assert.ok(fired);
+  const rec = (await w.store.get("ops", "c9")) as Rec;
+  const bad = rec.legs.find((l) => l.stage === "refused")! as Rec["legs"][number] & { cause?: string };
+  assert.equal(bad.code, "failed");
+  assert.match(bad.cause ?? "", /^Error -32016 at [\w$.]+( < [\w$.]+)?$/, `the cause: ${bad.cause}`);
+  const line = warned.find((x) => x.includes("-32016"));
+  assert.ok(line, `the console: ${warned.join(" | ")}`);
+  for (const x of [bad.cause!, line!]) assert.ok(!/https?:|api-key|secret|rpc\.example/.test(x), `public words only: ${x}`);
 });
