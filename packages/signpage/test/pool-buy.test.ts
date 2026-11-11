@@ -5,6 +5,7 @@
 // copies of mainnet's pump program and accounts, both providers' answers, the Rent sysvar as both answered it, and the
 // pool fixture's real release proof); the pool's own account and pages are planted around that release. The seed is the
 // published all-zero entropy vector (packages/wallet/test/vectors/a8.json).
+import { enableTimers, resetTimers } from "./mock-timers.ts";
 import assert from "node:assert/strict";
 import { throughApi } from "./api-ends.ts";
 import { test } from "node:test";
@@ -1862,7 +1863,8 @@ test("card sol-buy-reads-side-by-side: a filled run whose host's end throws post
 // their 5 s bound are the provider's fault ("timeout"), so a buy waits it out as any other provider fault and buys, never
 // a bare "failed"
 test("a buy's Rent or venue read with no answer in its 5 s bound once waits 1 s and buys", async (t) => {
-  t.mock.timers.enable({ apis: ["setTimeout"] });
+  enableTimers(t.mock.timers, { apis: ["setTimeout"] });
+  t.after(() => resetTimers(t.mock.timers));
   const reads: [string, (m: string, q: readonly unknown[]) => boolean][] = [
     ["the Rent sysvar", (m, q) => m === "getAccountInfo" && q[0] === RENT_SYSVAR],
     ["the venue's accounts", (m, q) => m === "getMultipleAccounts" && Array.isArray(q[0]) && q[0].length === 3 && q[0][0] === fx.pump.mint],

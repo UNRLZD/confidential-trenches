@@ -5,10 +5,12 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readSolanaPoolBuyVenue, readSolanaPoolTableVenue, readSolanaRent } from "../src/trade/solana/pool-buy.ts";
 import { SolanaRpcTransportError, type SolanaRpc } from "../src/trade/solana/send.ts";
+import { enableTimers, resetTimers } from "./mock-timers.ts";
 
 const MINT = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
 test("the Rent read and the venue reads with no answer in their bound throw the kit's timeout fault", async (t) => {
-  t.mock.timers.enable({ apis: ["setTimeout"] });
+  enableTimers(t.mock.timers, { apis: ["setTimeout"] });
+  t.after(() => resetTimers(t.mock.timers));
   const silent = (): SolanaRpc => (() => new Promise(() => {})) as unknown as SolanaRpc;
   for (const [what, read] of [
     ["the Rent", () => readSolanaRent([silent(), silent()])],

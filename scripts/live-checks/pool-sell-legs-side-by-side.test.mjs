@@ -4,7 +4,8 @@
 // another /app.js, no pin, each mark taken away: each FAIL. Planted in the bundle's own excerpt
 // (pool-sell-legs-side-by-side.excerpt.txt, cut from this card's public/app.js): the turn not awaited, a sign out not
 // checked after it, the tap's spent waits not checked after it, the blockhash read before it, the finder read for every
-// sale, the seed read with no W, the seed copy not zeroed: each FAIL.
+// sale, the seed read with no W, the seed copy not zeroed, a W no record names left unread, read whatever its record,
+// or the finder asked for every W: each FAIL.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
@@ -45,7 +46,10 @@ test("planted in the bundle's excerpt: each break in place FAILs", () => {
     ["the tap's waits not checked after the turn", "if(a.spent?.())return{error:`down`}", "", "turn"],
     ["the blockhash read whatever the turn", "if(T){D=", "{D=", "turn"],
     ["the finder for every sale", "let r=t?", "let r=!1?", "listed"],
-    ["the seed copy not zeroed", "finally{i.fill(0)}", "finally{}", "listed"],
+    ["the seed copy not zeroed", "finally{s.fill(0)}", "finally{}", "listed"],
+    ["an unrecorded W never read (review of 55d4c6eb, P2-A)", "l.failed.length===0&&u.size>0&&(d=", "!1&&(d=", "listed"],
+    ["every W read through the finder, recorded or not", "!Object.hasOwn(o,e)&&!r.has(e)", "!0", "listed"],
+    ["the finder asked for every W, not the unrecorded ones only", "{only:u,together:!0}", "{together:!0}", "listed"],
     ["the seed read with no W", "if(t.length===0)return a=[];", "", "listed"],
   ]) {
     const bad = js.replace(from, to);

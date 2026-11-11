@@ -97,7 +97,8 @@ export function facts(index, js) {
     // readSolanaReferenceWhy, card solana-reference-read-holds-a-slot-apart)
     new RegExp(`\\.map\\((${N})=>Promise\\.resolve\\(\\)\\.then\\(\\(\\)=>${esc(t)}\\(\\1,${N}\\)\\(${Q}getMultipleAccounts${Q},\\[${N},\\{encoding:${Q}base64${Q},commitment:${Q}confirmed${Q}\\}\\]\\)\\)\\.then\\((${N})=>\\(\\{read:${N}\\(\\2,${N}\\.length\\),fault:null\\}\\),(${N})=>\\(\\{read:null,fault:${esc(f)}\\(\\3\\)\\}\\)\\)`).test(js) &&
     // the rent read (pool-buy.ts readSolanaRent)
-    new RegExp(`${esc(t)}\\(${N},${N}\\)\\(${Q}getAccountInfo${Q},\\[${N},\\{encoding:${Q}base64${Q},commitment:${Q}confirmed${Q}\\}\\]\\)`).test(js) &&
+    // (its third argument since card pool-sell-legs-side-by-side: past the bound, the kit's "timeout" transport fault)
+    new RegExp(`${esc(t)}\\(${N},${N}(?:,${N})?\\)\\(${Q}getAccountInfo${Q},\\[${N},\\{encoding:${Q}base64${Q},commitment:${Q}confirmed${Q}\\}\\]\\)`).test(js) &&
     // the tx-end reads (send.ts readSolanaTxEnd)
     new RegExp(`let (${N})=${esc(t)}\\(${N},${N}\\),${N}=\\((${N}),(${N})\\)=>Promise\\.resolve\\(\\)\\.then\\(\\(\\)=>\\1\\(\\2,\\3\\)\\)`).test(js);
   // the price read (kit price/pool-usd.ts call): each try through the timed read, its bound taken at its turn and none

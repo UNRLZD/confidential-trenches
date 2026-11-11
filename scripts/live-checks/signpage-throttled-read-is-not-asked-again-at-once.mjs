@@ -74,7 +74,7 @@ const ANSWERED = (m, t) => new RegExp(READS(m, t).source + String.raw`,\4\.gate\
 // 429 && x.gate.throttled(e, Math.max(f.afterMs ?? 0, x.hint?.() ?? 0)), ...`
 const THROTTLED = new RegExp(String.raw`let (${I})=(${I})\.gate\.epoch\(\);try\{return await \2\.rpc\((${I}),(${I})\)\}catch\((${I})\)\{let (${I})=${I}\(\3,\5\);throw \6\.http===429&&\2\.gate\.throttled\(\1,Math\.max\(\6\.afterMs\?\?0,\2\.hint\?\.\(\)\?\?0\)\)`);
 // the list: `u = Date.now() + M; ...; x.holdings = await pools[p].reader.read(address, opts.signal, u)`
-const BY = (m) => new RegExp(String.raw`[,\s;](${I})=Date\.now\(\)\+${esc(m)};[^]{0,400}?\.reader\.read\(${I},${I}\.signal,\1\)`);
+const BY = (m) => new RegExp(String.raw`[,\s;](${I})=Date\.now\(\)\+${esc(m)};[^]{0,800}?\.reader\.read\(${I},${I}\.signal,\1\)`);
 // the helper's route: its own gate, made with its paced transport
 const ROUTE = (g) => new RegExp(String.raw`wait429:${I}\.wait429,gate:new ${esc(g)}\}`);
 // the old shape: a flat wait after a 429, `Math.max(wait429(), Math.min(e instanceof RpcFailed && e.afterMs !== null ? ...`
