@@ -486,6 +486,13 @@ type OpenQueue = { queue: ProofQueue<unknown>; notes: NoteStore; poolId: string;
 /** The EVM turn pass (card evm-device-reads-need-no-old-state): this long past each period's turn, plus the page's
  *  spread, the period's first block is in on both seats (Base makes one every 2 s, Robinhood several a second) and still
  *  fresh: Pocket and publicnode refused its state 15 to 242 s back (read 2026-11-10 21:50-22:30Z). */
+//  A page loaded mid-period binds at the period's first block too, on the walk of the kit's read list; where no two
+//  operators still keep that block's state it waits for the next turn, at most 60 s + EVM_TURN_PASS_MS +
+//  EVM_TURN_SPREAD_MS (65 s) after a load just past a turn, on the screen's "Making proof", never an error and never a
+//  proof of the period before (a measured residue, removed by card device-evm-read-residuals). Robinhood at +55 s, 3
+//  periods read 2026-11-10 23:20-23:29Z: two operators kept the block in 2 (robinhood.com with drpc.org, then with
+//  pocket.network), robinhood.com alone in 1 (drpc.org "Unknown state", pocket.network and publicnode.com "historical
+//  state ... is not available"); Base's four kept it in 5 of 5. The wait itself was bounded in a test, not timed live.
 export const EVM_TURN_PASS_MS = 3_000;
 /** Each page adds 0 to this to EVM_TURN_PASS_MS, drawn once a page load, so the open pages do not ask the same public
  *  operators in the same second. */

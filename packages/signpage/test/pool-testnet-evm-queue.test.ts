@@ -849,3 +849,56 @@ test("the turn pass on a pool with leaves binds, proves and asks the helper, and
   assert.ok(asked.every((x) => / eth_(chainId|getBlockByNumber|getBlockByHash|getLogs|call) /.test(x)), "headers, logs and views only");
   await t.signedOut();
 });
+
+// the ruling on review P3-d: a page loaded mid-period whose period's first block no two operators still hold (Robinhood
+// at +55 s, 1 of 3 periods read 2026-11-10 23:20-23:29Z) waits for the next turn: no proof and no error in between,
+// never one of the old period, and the proof at the turn's pass, never later
+test("a load mid-period whose first block no two operators hold: no proof and no error until the next turn, then the turn's proof", async () => {
+  const { EvmLagError } = await import("../../wallet/src/pool/evm.ts");
+  const { w, ns } = await wallet();
+  const START = 1_800_000_000_000;
+  const o = { now: START + 30_000 }; // loaded 30 s into the period
+  const tt = turnTimers(o);
+  const binds: bigint[] = [];
+  const t = testnetPool(page(w), {
+    prover: { vault: signalsProver(), stop: () => {} },
+    evmPin: (c) => (c === "base" ? PIN : undefined),
+    evmRpcs: unread,
+    evmSync: () => ({ events: async () => assert.fail("no sync read") }),
+    evmQueuePool: () => {
+      const p = fakeEvmPool();
+      const own = p.bind.bind(p);
+      return Object.assign(p, {
+        now: async () => BigInt(o.now),
+        holdFee: async () => undefined,
+        bind: async (b: Parameters<typeof p.bind>[0]) => {
+          binds.push(b.epochStartMs);
+          // the load's period: every operator but one dropped its first block's state
+          if (b.epochStartMs === BigInt(START)) throw new EvmLagError(`the chain fee at block 100: one operator alone never passes`);
+          return own(b);
+        },
+      }) as Pool<unknown>;
+    },
+    evmTurn: tt.evmTurn,
+  } as Parameters<typeof testnetPool>[1]);
+  await landed(ns);
+  await t.stateRead(); // the load
+  for (let i = 0; i < 50 && binds.length === 0; i++) await new Promise((r) => setTimeout(r, 10));
+  await new Promise((r) => setTimeout(r, 30));
+  assert.deepEqual(binds, [BigInt(START)], "the load's pass tried its own period");
+  // in between: the page answers with no proof, never an error, and no proof of the old period
+  const between = await t.readyWith(async () => "between");
+  assert.equal(between.value, "between");
+  assert.equal((between.ready ?? []).length, 0);
+  await t.stateRead(); // a state read in between: still no proof, no throw
+  assert.equal(tt.set.length, 1, "one turn armed");
+  assert.equal(o.now + tt.set[0]!.ms, START + 60_000 + 3_000, "the next turn + 3 s, never later");
+  // the turn: its pass binds the new period and the proof is ready
+  o.now = START + 63_000;
+  await tt.set[0]!.f();
+  for (let i = 0; i < 50 && !binds.includes(BigInt(START + 60_000)); i++) await new Promise((r) => setTimeout(r, 10));
+  const after = await t.readyWith(async () => null);
+  assert.equal(after.ready?.length, 1, "the turn's proof");
+  assert.equal(after.ready![0]!.epochStartMs, BigInt(START + 60_000));
+  await t.signedOut();
+});
