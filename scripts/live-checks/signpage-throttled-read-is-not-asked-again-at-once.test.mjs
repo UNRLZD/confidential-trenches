@@ -1,8 +1,8 @@
 // node --test scripts/live-checks/signpage-throttled-read-is-not-asked-again-at-once.test.mjs: the live check replays
 // its recorded answers (signpage-throttled-read-is-not-asked-again-at-once.answers.json). good: this card's SIGN_HOST
-// build, judged as the PR's bundle checks judge it (no ledger until release-114 is cut), and with a ledger that names
+// build, judged as the PR's bundle checks judge it (no ledger until release-115 is cut), and with a ledger that names
 // it: PASS. bad: the SIGN_HOST build of main before this card (a flat wait after every 429, no gate): FAIL, each fact
-// named. Planted on the good one: another /app.js, no pin, each mark taken away, a bundle no release list from 114 on
+// named. Planted on the good one: another /app.js, no pin, each mark taken away, a bundle no release list from 115 on
 // names: each FAIL. Planted in the bundle's own excerpt (the .excerpt.txt, five pieces cut from the good build's
 // public/app.js: the rule and the gate, the wait before a round, the Solana reader's round, the helper route's gate,
 // the read's bound): each rule broken in place FAILs.
@@ -17,7 +17,7 @@ const GATE = "BAD no provider gate on that rule: a round's throttles not counted
 const HELD = "BAD a reader does not wait the gate before a round, or waits past its read's 30 s bound";
 const READER = "BAD the holdings reader does not wait the gate before each round, or the helper's route gives it no gate of its own";
 const OLD = "BAD the bundle still waits a flat Retry-After or 1 s after every 429: a throttled provider is asked again at once";
-const notFixed = (sha) => `BAD SIGN_HOST's /app.js is not a release-114-or-later build: ${sha}`;
+const notFixed = (sha) => `BAD SIGN_HOST's /app.js is not a release-115-or-later build: ${sha}`;
 
 test("recorded good answer: this card's build: PASS as the PR's bundle checks judge it, and PASS with a ledger that names it", () => {
   assert.deepEqual(judge(A.good, { ledger: false }), { ok: true, lines: [] });
@@ -45,7 +45,7 @@ test("planted on the good answer: each fact taken away FAILs", () => {
   assert.equal(judge(null).ok, false);
 });
 
-test("the ledger: no release list from 114 on names either recorded bundle yet", () => {
+test("the ledger: no release list from 115 on names either recorded bundle yet", () => {
   const listed = fixedReleases();
   assert.ok(!listed.has(A.bad.sha384));
   assert.ok(!listed.has(A.good.sha384), "this branch's build is cut as a release only after its merge");

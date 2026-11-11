@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Live check of card signpage-throttled-read-is-not-asked-again-at-once on SIGN_HOST (https://confidential.unrealized.trade).
 // What it holds, and only that: the served /app.js is the one index.html pins (its sha384), it is a released build from
-// release-114 on (a packages/signpage/releases/release-<N>.json, N >= 114, names its sha384 for SIGN_HOST), and in it,
+// release-115 on (a packages/signpage/releases/release-<N>.json, N >= 115, names its sha384 for SIGN_HOST), and in it,
 // as minified, the holdings readers' throttle rule (packages/wallet/src/throttle.ts, src/pool/buy-wallets.ts):
 //   - rule: the wait after a throttle is a pause doubling from 1 s to 10 s, a Retry-After the wait only when longer,
 //     finite and above 0, held to 10 s (throttleWaitMs and its bounds);
@@ -30,8 +30,8 @@ import { fileURLToPath } from "node:url";
 
 const KEY = "signpage-throttled-read-is-not-asked-again-at-once";
 export const SIGN = "https://confidential.unrealized.trade";
-/** The first release whose holdings readers hold the rule: release-113 is the last cut before it. */
-export const FIXED_FROM = 114;
+/** The first release whose holdings readers hold the rule: release-114 (main 0cf81828) is the last cut before it. */
+export const FIXED_FROM = 115;
 const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}`;
 
 const I = "[\\w$]+"; // a minified name

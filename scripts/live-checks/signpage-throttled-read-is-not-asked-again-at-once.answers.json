@@ -1,6 +1,6 @@
 {
   "_note": {
-    "good": "this card's SIGN_HOST build (mainnet): packages/signpage/index.html and public/app.js on this card's branch (build-app.mjs); a PR build, judged as scripts/ci/bundle-checks.mjs judges it (ledger: false) until release-114 is cut and its list names the served bundle",
+    "good": "this card's SIGN_HOST build (mainnet): packages/signpage/index.html and public/app.js on this card's branch (build-app.mjs); a PR build, judged as scripts/ci/bundle-checks.mjs judges it (ledger: false) until release-115 is cut and its list names the served bundle",
     "bad": "the SIGN_HOST build of main at eebfdc88 (build-app.mjs), before this card: the holdings readers wait a flat Retry-After or 1 s after every 429, with no gate"
   },
   "good": {
