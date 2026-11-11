@@ -388,35 +388,48 @@ export type LeftAlone = {
   vault: "UNSPENT" | "SPENT";
   /**
    * taken: an index this store marked TAKEN that the vault holds a note on (another device's deposit on this seed);
-   * incoming or planned: a note in flight in this store that the vault shows landed (the deposit's own confirm moves
-   * it; INCOMING has no edge to SPENT, so a spent one is reported here); parent: its parent is PLANNED or INCOMING and
-   * it waits for that note to land
+   * incoming: a note in flight in this store that the vault shows landed (the deposit's own confirm moves it; INCOMING
+   * has no edge to SPENT, so a spent one is reported here); parent: its parent is INCOMING and it waits for that note to
+   * land. A PLANNED note the vault shows landed is never left alone: writeRestored lands it (E5)
    */
-  why: "taken" | "incoming" | "planned" | "parent";
+  why: "taken" | "incoming" | "parent";
 };
 export type RestoreWrite = { notes: NoteRecord[]; leftAlone: LeftAlone[] };
 
 /**
  * Writes what a restore found into the note store, parents first, so each change and refund note names its parent and
  * the parent goes to SPENT with it (store.add); a spent note with no child found (a ragequit) is moved to SPENT. A note
- * the store already holds as landed is kept, unless the vault shows it spent; one it holds PLANNED, INCOMING or TAKEN
- * is left as it is and returned in leftAlone. The notes below a PLANNED or INCOMING one are held back with it (returned
- * as "parent"); those below a TAKEN one are written. Returns the store's notes and those left alone. Its notes may be the
- * vault's (restoreNotes) or a pool's (../pool/solana-restore.ts, ../pool/evm-restore.ts): one shape, one write.
+ * the store already holds as landed is kept, unless the vault shows it spent; one it holds INCOMING or TAKEN is left as
+ * it is and returned in leftAlone. The notes below an INCOMING one are held back with it (returned as "parent"); those
+ * below a TAKEN one are written. Returns the store's notes and those left alone. Its notes may be the vault's
+ * (restoreNotes) or a pool's (../pool/solana-restore.ts, ../pool/evm-restore.ts): one shape, one write.
+ *
+ * A note the store holds PLANNED that the restore found (card restore-first-sign-in-under-two-minutes, E5): the page
+ * names a deposit index at the sign-in, before the walk, so a new lane that is one the lost store used names an index
+ * the lost store funded. The restore found it on the same reads every note it writes rests on (both RPCs of the pair
+ * agreeing, at finalized on Solana, its commitment the state tree's leaf at its index: restoreNotes, solana-restore.ts,
+ * evm-restore.ts), so it is landed: it is moved as any landing moves it (landNote, the pool deposit's own for a taken
+ * precommitment, src/pool-deposit.ts), and its children are written below it. Left PLANNED, it and every note below it
+ * stayed unshown and unspendable until a deposit of that index happened to find the precommitment taken.
  */
 export async function writeRestored(store: NoteStore, r: Pick<NoteRestore, "notes">): Promise<RestoreWrite> {
   const have = new Map((await store.list()).map((n) => [refKey(n.ref), n]));
   const leftAlone: LeftAlone[] = [];
   const blocked = new Set<string>();
-  const WHY: Partial<Record<NoteState, LeftAlone["why"]>> = { TAKEN: "taken", INCOMING: "incoming", PLANNED: "planned" };
-  // the notes below a PLANNED or INCOMING note wait for it to land (store.add needs a landed parent); TAKEN is terminal,
-  // so the notes below it are written with no parent, else the other device's change would stay out of reach for good
-  const HOLDS: readonly NoteState[] = ["PLANNED", "INCOMING"];
+  const WHY: Partial<Record<NoteState, LeftAlone["why"]>> = { TAKEN: "taken", INCOMING: "incoming" };
+  // the notes below an INCOMING note wait for it to land (store.add needs a landed parent); TAKEN is terminal, so the
+  // notes below it are written with no parent, else the other device's change would stay out of reach for good
+  const HOLDS: readonly NoteState[] = ["INCOMING"];
   for (const n of r.notes) {
     const key = refKey(n.ref);
     const cur = have.get(key);
     if (cur !== undefined) {
       if (cur.precommitment !== n.precommitment) throw new Error(`note ${key} in the store has another precommitment`);
+      // a PLANNED index the restore found landed (E5, above): landed now, with the leaf the restore read
+      if (cur.state === "PLANNED") {
+        have.set(key, await landNote(store, cur, n.leaf));
+        continue;
+      }
       const why = WHY[cur.state];
       if (why !== undefined) {
         leftAlone.push({ key, ref: n.ref, stored: cur.state, vault: n.state, why });
@@ -438,4 +451,15 @@ export async function writeRestored(store: NoteStore, r: Pick<NoteRestore, "note
     if (cur.state === "UNSPENT" || cur.state === "HELD" || cur.state === "RESERVED") await store.move(cur.id, cur.state, "SPENT");
   }
   return { notes: await store.list(), leftAlone };
+}
+
+/**
+ * A note whose precommitment the chain shows landed, at `leaf`, moved to UNSPENT as a landing moves it: PLANNED to
+ * INCOMING first (the only edge out of PLANNED to a landing), then INCOMING to UNSPENT with the leaf, which the store
+ * checks against the note's precommitment. The one move for a note landed by another deposit than its own send: the
+ * pool deposit's taken precommitment (src/pool-deposit.ts) and the restore's PLANNED index (writeRestored).
+ */
+export async function landNote(store: Pick<NoteStore, "move">, n: NoteRecord, leaf: Leaf): Promise<NoteRecord> {
+  const incoming = n.state === "PLANNED" ? await store.move(n.id, "PLANNED", "INCOMING") : n;
+  return store.move(incoming.id, "INCOMING", "UNSPENT", { leaf });
 }

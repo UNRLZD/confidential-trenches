@@ -524,7 +524,9 @@ function poolAnswers() {
       if (!p) continue;
       const r = rec[c];
       const names = r?.rpcs?.map((x) => x.name);
-      if (JSON.stringify(names) !== JSON.stringify(p.rpcs)) throw new Error(`${KEY}: pool-reads.json's ${c} pair ${names} is not the release's ${p.rpcs}; re-record`);
+      // the seats the page asks while both answer: Solana's pair, an EVM list's first two operators (card
+      // device-evm-fee-read-walks-operators: two operators of the kit's read list)
+      if (JSON.stringify(names) !== JSON.stringify(p.rpcs.slice(0, 2))) throw new Error(`${KEY}: pool-reads.json's ${c} pair ${names} is not the release's first two ${p.rpcs.slice(0, 2)}; re-record`);
       await readPool(p, async (url, method, params) => {
         const answer =
           method === "eth_blockNumber" && Number.isSafeInteger(r.height)

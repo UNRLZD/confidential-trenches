@@ -128,6 +128,7 @@ export const SERIAL_GROUPS = {
     "solana-legs-share-wait",
     "solana-mint-supply-moves",
     "solana-jupiter-build",
+    "app-a2-e2e",
   ],
 };
 

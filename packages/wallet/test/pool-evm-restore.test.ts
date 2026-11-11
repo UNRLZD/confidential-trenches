@@ -1284,3 +1284,44 @@ test("card helper-evm-range-cap-walk: a read no provider refuses pages at its wi
   const pages = await readCapped(95_001n, 1_000_000, "unused");
   assert.deepEqual(pages.map(([n]) => n), [...Array(9).fill(10_000), 5_001]);
 });
+
+// review P3-4 of 53f5e92f (card restore-first-sign-in-under-two-minutes): the restore writes a note only from a block
+// that never moves, as the deposit path does (evmNextNote's finalBlock): one whose leaf is above the round's finalized
+// anchor is left to a later restore with its spend, so the page never lands a PLANNED note on a block a reorg can drop
+test("P3-4: a note whose leaf is in a block above the finalized anchor is not restored this round, nor its spend; once final it is", async () => {
+  const { world } = seeded();
+  const all = await clean();
+  // at 30 the buy (block 20) is final and the withdraw (block 40) is not; at 15 neither, nor the buy's change note
+  for (const [fin, spent] of [[30, 1], [15, 0]] as const) {
+    const low = { ...world, finalized: fin };
+    const r = await restore(pair(low, low), wpair(low));
+    const final = all.notes.filter((n) => world.pool[Number(n.leaf.leafIndex)]!.block <= fin);
+    assert.ok(final.length > 0 && final.length < all.notes.length, `${fin}: ${final.length} of ${all.notes.length} final`);
+    assert.deepEqual(r.notes.map((n) => refKey(n.ref)), final.map((n) => refKey(n.ref)), String(fin));
+    assert.equal(r.spends.length, spent, String(fin));
+    assert.deepEqual(r.wallets.map((s) => s.note), r.spends.map((s) => s.note), String(fin));
+  }
+});
+
+// delta review P3-E: the round restores what a chain ending at its finalized block gives: a spend above it is no spend
+// yet, so its note stays UNSPENT and its change is not dropped (a filter after the whole restore wrote the deposit at
+// block 10 SPENT on its spend at block 20, at fin 10)
+test("P3-E: at a finalized block below a spend, the restore is the one of a chain ending there: the note UNSPENT, no spend, the change kept", async () => {
+  const { world } = seeded();
+  const unspent = (r: Awaited<ReturnType<typeof restore>>) => r.notes.filter((n) => n.state === "UNSPENT").reduce((a, n) => a + n.leaf.value, 0n);
+  for (const fin of [30, 19, 15, 10]) {
+    const low = { ...world, finalized: fin };
+    const r = await restore(pair(low, low), wpair(low));
+    const cut = { ...world, pool: world.pool.filter((e) => e.block <= fin), finalized: fin };
+    const want = await restore(pair(cut, cut), wpair(cut));
+    assert.ok(want.notes.length > 0, `${fin}: a note at or below it`);
+    assert.deepEqual(r.notes.map((n) => [refKey(n.ref), n.state]), want.notes.map((n) => [refKey(n.ref), n.state]), `${fin}: the notes`);
+    assert.deepEqual(r.spends.map((x) => [x.note, x.block]), want.spends.map((x) => [x.note, x.block]), `${fin}: the spends`);
+    assert.deepEqual(r.elsewhere.map((x) => x.note), want.elsewhere.map((x) => x.note), `${fin}: elsewhere`);
+    assert.equal(unspent(r), unspent(want), `${fin}: unspent`);
+    if (fin === 10) {
+      assert.ok(r.notes.every((n) => n.state === "UNSPENT"), "10: the deposit at block 10 UNSPENT");
+      assert.equal(r.spends.length, 0, "10: no spend");
+    }
+  }
+});

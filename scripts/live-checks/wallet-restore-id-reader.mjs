@@ -19,7 +19,10 @@
 //     deposit note of another scope stalls by name, and the seed is opened per use, only while still stored; since card
 //     wallet-id-reader-paced: a busy provider (HTTP 429 or 5xx, its JSON -429, dRPC's code 30, no answer in time) is
 //     waited out at its pace and asked again within BUSY_WAIT_MAX_MS (busy_wait), and two providers that answer
-//     differently at one block stop the read and step 5, naming the stronger (pair_wrong);
+//     differently at one block stop the read and step 5, naming the stronger (pair_wrong); since card
+//     restore-first-sign-in-under-two-minutes (review P2-2 of 53f5e92f): an id unread, a disagreement of the pair
+//     included, is named unread and the lane reads on past it (ids_stop, pair_wrong), and a read still unanswered on
+//     the last try is told as a finding (ids_end);
 //   - each provider, asked with Origin SIGN_ORIGIN as the page asks (a POST with content-type application/json, so its
 //     preflight first), answers with CORS for the page's origin, and answers what the IdReader decides on:
 //       a registered id (REGISTERED, a NearBlocks USDC holder read 8 Nov 2026, registered on USDC) reads registered
@@ -146,13 +149,16 @@ const pairClass = (text) => {
 /**
  * pair_wrong: PairDisagrees (`P=class extends Error{stronger;constructor(e,t){super(t),this.name=`PairDisagrees`,
  * this.stronger=e}}`); the IdReader whole (readerOf: readId called by the read closure, RANK by name, both answers
- * needed); and step 5's catch, whose first statement throws P on at once, naming its lane and index, before an id is
- * counted unread. The IdReader's setup is the one busy_wait binds. The count is 1 when all hold, else 0.
+ * needed); and step 5's catch, which passes on a throw only once the run's signal ended and otherwise counts the id
+ * unread, a P naming both answers (`${e.message}, read again`), never as an answer (card
+ * restore-first-sign-in-under-two-minutes, review P2-2 of 53f5e92f: one provider's word on one id never stops the ids
+ * after it; before, the catch threw P on at once). The IdReader's setup is the one busy_wait binds. The count is 1 when
+ * all hold, else 0.
  */
 export const PAIR_WRONG = (text) => {
   const P = pairClass(text);
   if (P === null) return 0;
-  const stop = all(text, new RegExp(String.raw`\}catch\((${N})\)\{if\(\1 instanceof ${P}\)throw new ${P}\(\1\.stronger,` + "`" + String.raw`lane \$\{(${N})\}: at index \$\{(${N})\}, \$\{\1\.message\}, to be retried` + "`" + String.raw`\);if\((${N})\.push\(\{i:\3,id:(${N}),error:(${N})\(\1\)\}\),`, "g"));
+  const stop = all(text, new RegExp(String.raw`\}catch\((${N})\)\{if\((${N})\.signal\?\.aborted\)throw \1;if\((${N})\.push\(\{i:(${N}),id:(${N}),error:\1 instanceof ${P}\?` + "`" + String.raw`\$\{\1\.message\}, read again` + "`" + String.raw`:(${N})\(\1\)\}\),`, "g"));
   if (stop.length < 1) return 0;
   const r = readerOf(text, P);
   return r !== null && all(text, rx(String.raw`function ${esc(r.SETUP)}\(`)).length === 1 ? 1 : 0;
@@ -190,6 +196,22 @@ export const ID_SIGNOUT = (text) => {
   const [a, o] = [init[0].groups.a, init[0].groups.o].map(esc);
   return all(text, rx(String.raw`signedOut:\(\)=>\{${a}\?\.abort\(\),${o}=${k.IK}\(\)\}`)).length === 1 ? 1 : 0;
 };
+/**
+ * ids_end, three lines of the build each exactly once (review P3-5 of 53f5e92f: a build whose walk's end is always done,
+ * whose finding writes done, or that never retries, passed the one-line marker):
+ * - IDS_END_TRY, each try's end of step 5 (below, at MARK.ids_end), through its pause before the next try
+ *   (`if(u)return;await mG(c[n-1],t)}`): a build with no retry has no pause;
+ * - IDS_WALK_END, the walk's end told off its reasons (`let S=f.length>0?`stalled`:`done`;m(S),`);
+ * - IDS_TELL, a finding that marks the run and writes a stalled restore op when the newest is not one, under the seed
+ *   lock, and the run's last try with nothing to tell after one writing the done op (delta review P3-B); the try's end
+ *   removes only its own run's marker (delta review P3-D) (`t.named.length!==0&&(s.finding=!0,await _(async()=>{...!==`stalled`&&await t.put(`ops`,crypto.randomUUID(),
+ *   {kind:`restore`,stage:`stalled`,txs:[],created_ms:n()})}))`).
+ * The count is 1 when all three hold, else 0.
+ */
+export const IDS_END_TRY = /\.catch\(([\w$]+)=>\{if\(\1 instanceof ([\w$]+)\|\|([\w$]+)\.aborted\)throw \1;([\w$]+)\.retry\.push\(`step 5 did not finish: \$\{\1 instanceof Error\?\1\.message:`it threw`\}`\)\}\),\3\.throwIfAborted\(\);let ([\w$]+)=\4\.retry\.length===0&&\4\.held\.length===0,([\w$]+)=\5\|\|([\w$]+)>([\w$]+)\.length;if\(await [\w$]+\(\6\?\{retry:\[\],held:\[\],named:\[\.\.\.\4\.named,\.\.\.\4\.held,\.\.\.\4\.retry\],tries:\7,last:\6\}:\{\.\.\.\4,tries:\7,last:\6\}\),\5\)\{![\w$]+&&\4\.named\.length===0&&await [\w$]+\(async\(\)=>\{let ([\w$]+)=await [\w$]+\.store\(\);[\w$]+\(await \9\.get\(`meta`,(?:`owed\/restore-ids`|[\w$]+)\)\)\?\.run===[\w$]+&&await \9\.delete\(`meta`,[\w$]+\)\}\);return\}if\(\6\)return;await [\w$]+\(\8\[\7-1\],\3\)\}/g;
+export const IDS_WALK_END = /let ([\w$]+)=([\w$]+)\.length>0\?`stalled`:`done`;([\w$]+)\(\1\),/g;
+export const IDS_TELL = /\.named\.length===0\)\{if\(!([\w$]+)\.last\|\|!([\w$]+)\.finding\)return;\2\.finding=!1,await ([\w$]+)\(async\(\)=>\(await [\w$]+\.store\(\)\)\.put\(`ops`,crypto\.randomUUID\(\),\{kind:`restore`,stage:`done`,txs:\[\],created_ms:[\w$]+\(\)\}\)\)\}else \2\.finding=!0,await \3\(async\(\)=>\{[\s\S]{0,400}?!==`stalled`&&await [\w$]+\.put\(`ops`,crypto\.randomUUID\(\),\{kind:`restore`,stage:`stalled`,txs:\[\],created_ms:[\w$]+\(\)\}\)\}\)/g;
+export const IDS_END = (text) => ([IDS_END_TRY, IDS_WALK_END, IDS_TELL].every((re) => [...text.matchAll(re)].length === 1) ? 1 : 0);
 /** The card's strings in the bundle, as the minifier writes them. The four functions bind the minifier's names. */
 export const MARK = Object.freeze({
   reach_error: "reach: not an index of lane",
@@ -207,10 +229,11 @@ export const MARK = Object.freeze({
   id_pass_meet: "did not meet; the restore does not start",
   id_pass_stale: "blocks past it; open a fresh pass",
   ids_margin: "id reads failed with none showing history between them",
-  // the page's wiring (src/pool-restore.ts readDepositIds): the first unread id stops every read after it,
-  // `if(r.throwIfAborted(),o!==void 0)throw o;try{return await a(e,t)}catch(e){throw o??=e,e}` (the id and its index,
-  // card wallet-restore-reads-ux)
-  ids_stop: /\.throwIfAborted\(\),([\w$]+)!==void 0\)throw \1;try\{return await [\w$]+\(([\w$]+),[\w$]+\)\}catch\(([\w$]+)\)\{throw \1\?\?=\3,\3\}/g,
+  // the page's wiring (src/pool-restore.ts readDepositIds): each id read through keptIdReader's reader on the run's
+  // own signal, the id and its index handed on, nothing kept between reads, so an unread id never stops the ids after
+  // it (card restore-first-sign-in-under-two-minutes, review P2-2 of 53f5e92f; before, the first unread id stopped
+  // every read after it): `reader:u}=await zW(Nw,n.rpcs,r,{...n.opts,signal:i}),d=await BW(...),f=async(e,t)=>(i.throwIfAborted(),u(e,t))`
+  ids_stop: /reader:([\w$]+)\}=await [\w$]+\([\w$]+,[\w$]+\.rpcs,[\w$]+,\{\.\.\.[\w$]+\.opts,signal:([\w$]+)\}\),[\w$]+=await [\w$]+\([^()]*\),[\w$]+=async\(([\w$]+),([\w$]+)\)=>\(\2\.throwIfAborted\(\),\1\(\3,\4\)\)/g,
   // and a lane unfinished ends the run stalled by name (src/pool-restore.ts idsUndone)
   ids_undone: "past the note walk's end: restore again from there",
   // a pool scope is never done while its U_X on the pool's chain is unread (POOL_CHAIN_UNREAD)
@@ -221,27 +244,35 @@ export const MARK = Object.freeze({
   ids_drift: "; its ids are not read",
   // the seed opened per use, under the seed lock, only while still stored
   seed_per_use: "signed out during the restore",
-  // review of e31892ef (P3-3): the end stage is read off the very array step 5's catch pushes to (a stage line that
-  // drops some reasons, as `why.some((y)=>!y.endsWith(U_X))?"stalled":"done"`, holds none),
-  // `.catch(e=>void s.push(`step 5 did not finish: ${e instanceof Error?e.message:`it threw`}`)),t.throwIfAborted(),l(s.length>0?`stalled`:`done`)`
-  ids_end: /\.catch\(([\w$]+)=>void ([\w$]+)\.push\(`step 5 did not finish: \$\{\1 instanceof Error\?\1\.message:`it threw`\}`\)\),[\w$]+\.throwIfAborted\(\),[\w$]+\(\2\.length>0\?`stalled`:`done`\)/g,
+  // review of e31892ef (P3-3), as card restore-first-sign-in-under-two-minutes made it: step 5 runs after the walk's
+  // end, and each try's end is told off the very lists its catch pushes to: a throw goes on `retry` unless the run's
+  // seed is gone (SeedGone, the class the seed lock throws) or its signal ended; a try is answered only with `retry`
+  // and `held` both empty; on its last try `held` and `retry` are told as `named` (a finding: review P2-2 of 53f5e92f,
+  // never silent), on the others as it is; an answered try removes the marker only when the walk failed nowhere and it
+  // found nothing (review P2-1: a finding keeps step 5 owed) (an end that drops a list, calls a try answered with
+  // reasons left, or removes the marker with a finding, holds none),
+  // `.catch(e=>{if(e instanceof sG||t.aborted)throw e;r.retry.push(`step 5 did not finish: ${...}`)}),t.throwIfAborted();let i=r.retry.length===0&&r.held.length===0,a=i||n>x.length;if(await v(a?{retry:[],held:[],named:[...r.named,...r.held,...r.retry],tries:n,last:a}:{...r,tries:n,last:a}),i){!g&&r.named.length===0&&await _(async()=>(await e.store()).delete(`meta`,fG));return}`
+  ids_end: IDS_END,
   // each pool scope whose chain has no U_X reads on the page (its walked entry's `ux` null; card
   // wallet-restore-reads-ux) pushes the very constant that holds the U_X text (POOL_CHAIN_UNREAD), which the build
   // places before readDepositIds, as the statement right after its reasons' push to the same array, with nothing between
   // (delta review 2: no condition in front of it but that one), then goes to the next pool:
-  // `var hV=`the pool's own chain is not read ...`; ... let o=a.ux;if(o===null){let t=...;for(let e of gV(t))i.push(`${a.label}: ${e}`);i.push(`${a.label}: ${hV}`);continue}`
-  ids_ux_push: /var ([\w$]+)=`the pool's own chain is not read for a deposit's money[^`]*`;[\s\S]*?let ([\w$]+)=([\w$]+)\.ux;if\(\2===null\)\{[\s\S]{0,400}?\)([\w$]+)\.push\(`\$\{\3\.label\}: \$\{[\w$]+\}`\);\4\.push\(`\$\{\3\.label\}: \$\{\1\}`\);continue\}/g,
+  // (card restore-first-sign-in-under-two-minutes: the reasons go through one helper by their kind, and the constant on
+  // the try's `named` list, a finding):
+  // `var WW=`the pool's own chain is not read ...`; ... let s=r.ux;if(s===null){let t=await BW(...);n.read?.(r.scope,t),m(r.label,t),a.named.push(`${r.label}: ${WW}`);continue}`
+  ids_ux_push: /var ([\w$]+)=`the pool's own chain is not read for a deposit's money[^`]*`[;,][\s\S]*?let ([\w$]+)=([\w$]+)\.ux;if\(\2===null\)\{[\s\S]{0,400}?\),[\w$]+\(\3\.label,[\w$]+\),([\w$]+)\.named\.push\(`\$\{\3\.label\}: \$\{\1\}`\);continue\}/g,
   // the seed per use, bound: the seed read inside one shared seed-lock request after the signed-in check, its HMAC kept
   // as the run's mark at the first use and compared byte by byte at every use after (delta review 2: the exact shape, so
   // a compare that is always true holds none), handed to that one use and zeroed when it ends; and the run's SeedUse is
   // that request per use (a run-long lock, with the run inside one request, holds none)
+  // (card restore-first-sign-in-under-two-minutes: both throws are one class, SeedGone, the one a try's catch passes on)
   // card wallet-id-reader-paced: busy waited out (BUSY_WAIT), one of the pair is wrong at one block (PAIR_WRONG)
   busy_wait: BUSY_WAIT,
   pair_wrong: PAIR_WRONG,
   // review of 31be751d (P2-2, P2-3): what a Retry keeps, and signing out drops it (ID_KEEP, ID_SIGNOUT)
   id_keep: ID_KEEP,
   id_signout: ID_SIGNOUT,
-  seed_per_use_lock: /([\w$]+)=([\w$]+)=>[\w$]+\(\)\.request\([\w$]+,\{mode:`shared`,signal:[\w$]+\},async\(\)=>\{if\([\w$]+\.throwIfAborted\(\),!await [\w$]+\.signedIn\(\)\)throw Error\(`signed out during the restore`\);let ([\w$]+)=await [\w$]+\.seed64\(\);try\{let ([\w$]+)=[\w$]+\([\w$]+,[\w$]+,\3\);if\(([\w$]+)===null\)\5=\4;else\{let ([\w$]+)=\4\.length===\5\.length&&\4\.every\(\(([\w$]+),([\w$]+)\)=>\7===\5\[\8\]\);if\(\4\.fill\(0\),!\6\)throw Error\(`other words were signed in during the restore`\)\}return await \2\(\3\)\}finally\{\3\.fill\(0\)\}\}\),([\w$]+)=([\w$]+)=>\1\(async ([\w$]+)=>\10\(\11\)\)/g,
+  seed_per_use_lock: /([\w$]+)=([\w$]+)=>[\w$]+\(\)\.request\([\w$]+,\{mode:`shared`,signal:[\w$]+\},async\(\)=>\{if\([\w$]+\.throwIfAborted\(\),!await [\w$]+\.signedIn\(\)\)throw new ([\w$]+)\(`signed out during the restore`\);let ([\w$]+)=await [\w$]+\.seed64\(\);try\{let ([\w$]+)=[\w$]+\([\w$]+,[\w$]+,\4\);if\(([\w$]+)===null\)\6=\5;else\{let ([\w$]+)=\5\.length===\6\.length&&\5\.every\(\(([\w$]+),([\w$]+)\)=>\8===\6\[\9\]\);if\(\5\.fill\(0\),!\7\)throw new \3\(`other words were signed in during the restore`\)\}return await \2\(\4\)\}finally\{\4\.fill\(0\)\}\}\),([\w$]+)=([\w$]+)=>\1\(async ([\w$]+)=>\11\(\12\)\)/g,
 });
 /** The markers' names, as the record keys their counts. */
 export const MARKERS = Object.keys(MARK);

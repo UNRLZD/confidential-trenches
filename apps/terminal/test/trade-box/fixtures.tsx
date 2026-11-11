@@ -120,12 +120,19 @@ const kit: TradeKit = {
         emit("sent");
         resolve({ ok: true, result: { stage: "sent", txs: routeFeed ? [{ chain: "solana", hash: SIG }] : [] } });
       }, 150);
-      if (routeFeed) setTimeout(() => feed({ out: "10600" }), 1_099);
+      // the route's amount out is a pool buy's Filled (card pool-buy-filled-2s: read at confirmed on both RPCs), the stage
+      // filled 50 ms later its Final; a buy with no fill tells none. forked: Filled, then the run ends not_landed at 3 s;
+      // unsure: Filled, then the run ends not known (its final progress "sent") at 3 s
+      const filledAt = f === "slow" ? 8_000 : 1_100;
+      const fills = f === "ready" || f === "slow" || f === "forked" || f === "unsure";
+      if (routeFeed && fills) setTimeout(() => feed({ out: "10600" }), filledAt);
+      const finalAt = routeFeed ? filledAt + 50 : filledAt;
       // slow: still landing past 5 s, filled at 8 s; notlanded: the deadline's re-read at 3 s; partial: 1 of 2 slices
-      if (f === "slow") setTimeout(() => emit("filled"), 8_000);
-      else if (f === "notlanded") setTimeout(() => emit("not_landed"), 3_000);
+      if (f === "slow") setTimeout(() => emit("filled"), finalAt);
+      else if (f === "notlanded" || f === "forked") setTimeout(() => emit("not_landed"), 3_000);
+      else if (f === "unsure") setTimeout(() => emit("sent"), 3_000);
       else if (f === "partial" || f === "partial-nocount") setTimeout(() => emit("part_filled"), 1_100);
-      else setTimeout(() => emit("filled"), 1_100);
+      else setTimeout(() => emit("filled"), finalAt);
     });
     return { id, outcome };
   }) as TradeKit["request"],

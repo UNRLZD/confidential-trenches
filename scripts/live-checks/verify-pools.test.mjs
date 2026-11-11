@@ -52,6 +52,37 @@ test("a row amber or red, another RPC named, an explorer link off, the rows neve
   assert.match(bad(never).join("\n"), /desktop \/verify: the pool rows stayed loading/);
 });
 
+// card device-evm-fee-read-walks-operators: the 10 Nov 20:30Z run (42895457692) failed on robinhood.drpc.org's 400
+// "Unknown state"; the page now walks past it to two other operators of the kit's list, and the check holds the row to
+// two operators of the list, each read with every read 200
+test("planted on the good answer: dRPC answering 400 and the Robinhood row ok on two other operators of its list: PASS; ok on dRPC, one operator twice, or a named RPC not all 200: FAIL", () => {
+  const LIST = ["https://rpc.mainnet.chain.robinhood.com", "https://robinhood.drpc.org", "https://robinhood.api.pocket.network", "https://robinhood-rpc.publicnode.com"];
+  const walked = (names, also = () => {}) =>
+    mutate((r) => {
+      r.release.robinhood.rpcs = LIST;
+      for (const run of r.runs) {
+        run.pools.rows.robinhood.rpcs = names;
+        const rh = run.requests.filter((x) => x.url.startsWith("https://rpc.mainnet.chain.robinhood.com"));
+        for (const x of run.requests) if (x.url.startsWith("https://robinhood.drpc.org")) x.status = 400;
+        run.requests.push(...rh.map((x) => ({ ...x, url: "https://robinhood.api.pocket.network/" })));
+        run.errors = [...(run.errors ?? []), "Failed to load resource: the server responded with a status of 400 () (https://robinhood.drpc.org/)"];
+        run.dom.verify.poolRpcs = { ...(run.dom.verify.poolRpcs ?? {}), robinhood: names };
+        also(run);
+      }
+    });
+  const good = walked(["rpc.mainnet.chain.robinhood.com", "robinhood.api.pocket.network"]);
+  assert.equal(judge(good).ok, true, judge(good).lines.filter((l) => l.startsWith("BAD")).join("\n"));
+  assert.ok(judge(good).lines.some((l) => /desktop \/verify robinhood: this page read rpc\.mainnet\.chain\.robinhood\.com \d+ time\(s\), all 200 and robinhood\.api\.pocket\.network \d+ time\(s\), all 200; walked past or not asked: robinhood\.drpc\.org \d+ time\(s\), robinhood-rpc\.publicnode\.com 0 time\(s\)/.test(l)));
+  // ok shown on the host that answered 400
+  assert.ok(bad(walked(["robinhood.drpc.org", "robinhood.api.pocket.network"])).length > 0);
+  // one operator twice
+  assert.ok(bad(walked(["rpc.mainnet.chain.robinhood.com", "customer-origin.offchainlabs.com"])).some((l) => /the row names .* want two operators of/.test(l)));
+  // a named RPC with a read not 200
+  assert.ok(bad(walked(["rpc.mainnet.chain.robinhood.com", "robinhood.api.pocket.network"], (run) => (run.requests.find((x) => x.url.startsWith("https://robinhood.api.pocket.network")).status = 502))).some((l) => /not all 200/.test(l)));
+  // the page's DOM naming no hosts for the row: the outage judge cannot see the walk, FAIL
+  assert.ok(bad(walked(["rpc.mainnet.chain.robinhood.com", "robinhood.api.pocket.network"], (run) => delete run.dom.verify.poolRpcs)).length > 0);
+});
+
 test("pins: release.ts's pools are the deploy records' (mainnet), none on testnet; a pin off by one: FAIL", () => {
   const pins = (net) => Object.fromEntries(CHAINS.map((c) => [c, VERIFY_RELEASES[net].pools[c]?.pin ?? null]));
   assert.deepEqual(pinsProblems("mainnet", pins("mainnet"), recordPins("mainnet")), []);
@@ -197,5 +228,6 @@ test("a pool RPC's reads in one open are what the recorded good run made: Solana
   const x = A.good.runs[0];
   const n = (u) => x.requests.filter((q) => q.method === "POST" && q.phase === "open" && q.url.startsWith(new URL(u).origin)).length;
   for (const u of VERIFY_RELEASES.mainnet.pools.solana.rpcs) assert.equal(n(u), READS_PER_OPEN.solana, u);
-  for (const c of ["base", "robinhood"]) for (const u of VERIFY_RELEASES.mainnet.pools[c].rpcs) assert.equal(n(u), READS_PER_OPEN.evm, u);
+  // each EVM RPC the recorded run's row named (a walk asks the list's first two while both answer)
+  for (const c of ["base", "robinhood"]) for (const h of x.pools.rows[c].rpcs) assert.equal(n(`https://${h}`), READS_PER_OPEN.evm, h);
 });

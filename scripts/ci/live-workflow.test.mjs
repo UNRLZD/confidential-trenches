@@ -468,9 +468,9 @@ test("helper-evm-sender-2 runs on the PrivacyPoolSimple each EVM network's deplo
 
 // ---- card helper-live-jup-serial: the checks that spend the helper's Jupiter budget run one after another in one job ----
 
-const BUDGET_KEYS = ["helper-token-page-cold", "market-data-solana-token", "helper-page-jup-429", "solana-legs-share-wait", "solana-mint-supply-moves", "solana-jupiter-build"];
+const BUDGET_KEYS = ["helper-token-page-cold", "market-data-solana-token", "helper-page-jup-429", "solana-legs-share-wait", "solana-mint-supply-moves", "solana-jupiter-build", "app-a2-e2e"];
 
-test("the helper's plan runs the six checks that spend the Jupiter budget as ONE matrix entry, in order, and every other check as its own", async () => {
+test("the helper's plan runs the seven checks that spend the Jupiter budget as ONE matrix entry, in order, and every other check as its own", async () => {
   const plan = await planFor("helper", { commit: COMMIT });
   const groups = plan.include.filter((e) => e.group !== "");
   assert.equal(groups.length, 1);
@@ -479,7 +479,7 @@ test("the helper's plan runs the six checks that spend the Jupiter budget as ONE
   assert.equal(groups[0].args, "");
   assert.deepEqual(keysOf(groups[0]), BUDGET_KEYS);
   assert.equal(groups[0].chrome, false);
-  assert.match(groups[0].name, /^jupiter-budget \(6 checks, one after another\)$/);
+  assert.match(groups[0].name, /^jupiter-budget \(7 checks, one after another\)$/);
   for (const k of BUDGET_KEYS) assert.ok(!plan.include.some((e) => e.group === "" && e.key === k), `${k} has no job of its own`);
   assert.ok(plan.include.every((e) => typeof e.group === "string"), "every entry says its group, '' for none, so the workflow's if reads one value");
   assert.ok(plan.include.some((e) => e.key === "app-console-429" && e.group === ""), "app-console-429 reads a listed token's page, no Jupiter call: its own job");
