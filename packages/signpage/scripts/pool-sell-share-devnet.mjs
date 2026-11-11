@@ -26,6 +26,12 @@
 //   reads it (state.ops: the stage, and each leg's), read every 200 ms; each provider's JSON-RPC calls while the sell
 //   runs, against the page's limit (the kit's SOLANA_KEYLESS_RPC_LIMIT per provider, which these RPCs are paced by, as
 //   the page's are: pageSolanaRpcs); and any sale refused for its quote (quote_check_failed).
+// - Before the tap the page's positions pass runs, as the app's does at sign in, until the whole pass it keeps lists
+//   every W holding the coin: the sale lists its Ws from it (card pool-sell-legs-side-by-side). FLOW_FINDER=1: no pass
+//   kept, the sale's finder reads them (a restored device before its first whole pass). The path the sale took is read
+//   from its own calls (the finder's getBalance and getTokenAccountsByOwner after the tap) and printed; a run whose
+//   sale took the other path fails. Every provider refusal from the tap is kept by host and time, and each leg's time
+//   from the send before it.
 // - It writes the answers, the stages, the notes, each leg, the times and every tx to <out.json>; exit 0 only when every
 //   deposit landed, every buy filled, the sell answered sent and ended filled with a leg per W and its return notes.
 import { randomBytes, createHash } from "node:crypto";
@@ -53,6 +59,7 @@ const { TESTNET_RPCS, testnetPool, testnetPoolDeps, testnetRpc } = await import(
 const { solanaPacedRpc, SOLANA_KEYLESS_RPC_LIMIT } = await import("../../kit/src/trade/solana/send.ts");
 const { POOL_TESTNET } = await import("../../wallet/src/pool/network.ts");
 const { WALLET_SEED_LOCK } = await import("@blindfill/wallet/store");
+const { POSITIONS_KEPT_KEY, keptListed } = await import("../src/positions.ts");
 if (POOL_TESTNET !== true || SOL_POOLS.devnet === undefined) throw new Error("not the testnet build's pins");
 
 const [TABLE, MINT, NS, BPS, OUT] = process.argv.slice(2);
@@ -70,6 +77,8 @@ const sentTxs = [];
 // each JSON-RPC call on a devnet RPC: its host, method and time (performance.now()); each send's first time, by signature
 const calls = [];
 const sentAt = new Map();
+// each provider refusal (429 or 5xx) on a devnet RPC: its host, status and time (performance.now())
+const refusedAt = [];
 const realFetch = globalThis.fetch;
 globalThis.fetch = async (u, init) => {
   if (RPC_HOSTS.has(new URL(String(u)).host)) {
@@ -86,7 +95,10 @@ globalThis.fetch = async (u, init) => {
     } catch {}
   }
   const r = await realFetch(u, init);
-  if (RPC_HOSTS.has(new URL(String(u)).host) && (r.status === 429 || r.status >= 500)) log(`rpc ${new URL(String(u)).host}: HTTP ${r.status} from the provider`);
+  if (RPC_HOSTS.has(new URL(String(u)).host) && (r.status === 429 || r.status >= 500)) {
+    refusedAt.push({ host: new URL(String(u)).host, status: r.status, t: performance.now() });
+    log(`rpc ${new URL(String(u)).host}: HTTP ${r.status} from the provider`);
+  }
   return r;
 };
 // paced as the page's pair is (pool-testnet.ts pageSolanaRpcs)
@@ -289,6 +301,30 @@ for (let i = 0; i < N && ok; i++) {
 
 let sell = null;
 let after = null;
+// the sale's path, as the app's: the page's positions pass runs at sign in (positions(), its first pass), so the sale
+// lists its Ws from the whole pass it kept; FLOW_FINDER=1: no pass kept, the sale finds its Ws (a restored device
+// before its first whole pass). Which path the sale took is read from its own calls after it (`path`)
+const FINDER = process.env.FLOW_FINDER === "1";
+let path = null;
+if (ok) {
+  if (FINDER) {
+    await w.delete("meta", POSITIONS_KEPT_KEY);
+    log("path before the tap: finder (FLOW_FINDER=1, no pass kept)");
+  } else {
+    await t.positions();
+    let listed = null;
+    for (let i = 0; i < 90; i++) {
+      listed = keptListed(await w.get("meta", POSITIONS_KEPT_KEY));
+      if (listed !== null && rounds.every((r) => (listed.get(r.W)?.get(MINT) ?? 0n) > 0n)) break;
+      listed = null;
+      await sleep(2_000);
+    }
+    if (listed === null) {
+      log("path before the tap: BAD no whole positions pass listing every W in 180 s");
+      ok = false;
+    } else log(`path before the tap: kept listing (a whole pass lists ${rounds.length} W(s) holding the coin)`);
+  }
+}
 if (ok) {
   log(`pool.sell of ${SHARE} bps of ${MINT} across ${rounds.map((r) => r.W).join(", ")}`);
   sell = await once("pool.sell", { chain: "solana", token: MINT, share_bps: SHARE, slippage_bps: 300 });
@@ -332,7 +368,17 @@ if (sell?.times?.tap !== undefined) {
     perHost[host] = { calls: mine.length, maxIn10s: maxTotal, maxOneMethodIn10s: maxMethod, limit: SOLANA_KEYLESS_RPC_LIMIT, methods };
   }
   const quoteAge = legs.filter((l) => l.code === "quote_check_failed").map((l) => l.leg);
-  report = { legs, timeline: sell.times.timeline, perHost, quoteAgeRefused: quoteAge };
+  // the path the sale took, from its calls: the finder reads W's holdings (getBalance, getTokenAccountsByOwner); the
+  // kept listing reads none
+  const finderCalls = during.filter((c) => c.method === "getBalance" || c.method === "getTokenAccountsByOwner").length;
+  path = finderCalls > 0 ? "finder" : "kept listing";
+  log(`path the sale took: ${path} (${finderCalls} finder call(s) after the tap)`);
+  if (path !== (FINDER ? "finder" : "kept listing")) log(`BAD the sale took the ${path} path, not the ${FINDER ? "finder" : "kept listing"} this run asked for`);
+  // each refusal from the tap, by host
+  const refused = refusedAt.filter((x) => x.t >= tap && x.t <= end).map((x) => ({ host: x.host, status: x.status, ms: Math.round(x.t - tap) }));
+  // each leg's time waiting its turn: from the send before it to its own
+  for (let i = 1; i < legs.length; i++) if (legs[i].sentMs !== null && legs[i - 1].sentMs !== null) legs[i].afterPriorSentMs = legs[i].sentMs - legs[i - 1].sentMs;
+  report = { path, legs, timeline: sell.times.timeline, perHost, refused, quoteAgeRefused: quoteAge };
   log(`sell report ${JSON.stringify(report)}`);
 }
 // every transaction, F's payments, the page's own sends and each buy (sent through the helper), read back on both RPCs
@@ -357,7 +403,8 @@ const filled =
   legTxs.length === rounds.length &&
   notes.filter((n) => n.ref === "return" && n.state === "UNSPENT" && n.leafIndex !== null).length === rounds.length &&
   !stages.some((x) => x.kind !== "pool.deposit" && x.stage !== "sent" && x.stage !== "filled") &&
-  Object.values(readBack).every((r) => r.every((x) => x !== null && x.err === null));
+  Object.values(readBack).every((r) => r.every((x) => x !== null && x.err === null)) &&
+  path === (FINDER ? "finder" : "kept listing");
 log(`notes ${JSON.stringify(notes)}; sell times ${JSON.stringify(sell?.times ?? null)}; filled ${filled}`);
 seed64.fill(0);
 fKey.fill(0);
