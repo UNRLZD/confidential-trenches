@@ -29,6 +29,7 @@ import { EVM_OPEN_SELLS_KEY, evmBuyRouteRead, evmSellPlanQuote, followEvmSells, 
 import type { PoolAsk } from "../src/rules/pool.ts";
 import { SolanaRpcTransportError } from "../../kit/src/trade/solana/send.ts";
 import { READ_WAIT_TOTAL_MS } from "../src/read-waits.ts";
+import { enableTimers, resetTimers } from "./mock-timers.ts";
 
 const LIB = new URL("../../../contracts/pool-evm/script/testnet-run-lib.mjs", import.meta.url).href;
 const { sellData } = (await import(LIB)) as { sellData: (...a: unknown[]) => string };
@@ -58,10 +59,10 @@ const NONCE_SEL = topic("nonce()").slice(0, 10);
 const closers: (() => void)[] = [];
 after(() => closers.forEach((f) => f()));
 beforeEach(() => {
-  mock.timers.enable({ apis: ["Date"], now: Date.now() });
+  enableTimers(mock.timers, { apis: ["Date"], now: Date.now() });
   refreshHead();
 });
-afterEach(() => mock.timers.reset());
+afterEach(() => resetTimers(mock.timers));
 /** The device's clock moves by `ms` (Date.now with it, and the modelled chain's head time). */
 const tick = (ms: number) => {
   mock.timers.setTime(Date.now() + ms);
