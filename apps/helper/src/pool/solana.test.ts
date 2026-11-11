@@ -181,11 +181,24 @@ test("not a v0 transaction of the fee payer and W, or a fee payer slot already f
 // ---- the carry: simulation, signature, send ----
 
 type Calls = { method: string; params: readonly unknown[] }[];
+/** Every signature of `wire` checked over its message against the signer keys, as an RPC's sigVerify does. */
+const signaturesHold = (wire: Uint8Array): boolean => {
+  const n = wire[0]!;
+  const message = wire.subarray(1 + 64 * n);
+  // v0: prefix, header (3), compact-u16 key count (one byte here), then the keys; the first n sign
+  const keys = Array.from({ length: n }, (_, i) => message.subarray(5 + 32 * i, 5 + 32 * (i + 1)));
+  return keys.every((k, i) => ed25519.verify(wire.subarray(1 + 64 * i, 1 + 64 * (i + 1)), message, k));
+};
 function rpcStub(simErr: unknown = null, calls: Calls = []): SolanaRpc {
   return Object.assign(
     async (method: string, params: readonly unknown[]) => {
       calls.push({ method, params });
-      if (method === "simulateTransaction") return { context: { slot: 1 }, value: { err: simErr, logs: [] } };
+      if (method === "simulateTransaction") {
+        const opts = params[1] as { sigVerify?: boolean };
+        // "sigVerify": a provider whose own check refuses the signatures, whatever they are
+        if (opts.sigVerify && (simErr === "sigVerify" || !signaturesHold(Buffer.from(params[0] as string, "base64")))) throw new Error("RPC error -32003: Transaction signature verification failure");
+        return { context: { slot: 1 }, value: { err: simErr, logs: [] } };
+      }
       if (method === "getLatestBlockhash") return { context: { slot: 1 }, value: { blockhash: BLOCKHASH, lastValidBlockHeight: 1000 } };
       throw new Error(`unexpected ${method}`);
     },
@@ -213,7 +226,7 @@ function sender(simErr: unknown = null, calls: Calls = [], sent: Uint8Array[] = 
 const body = (wire: Uint8Array) => ({ pool: POOL, tx: Buffer.from(wire).toString("base64") });
 const code = (a: PoolSendAnswer) => ("error" in a.body ? a.body.error.code : "ok");
 
-test("the carry simulates W's bytes, adds the fee payer's signature and nothing else, and sends", async () => {
+test("the carry adds the fee payer's signature and nothing else, simulates the signed bytes as they will be sent, and sends", async () => {
   const calls: Calls = [];
   const sent: Uint8Array[] = [];
   const wire = build({ tag: 3 });
@@ -225,9 +238,37 @@ test("the carry simulates W's bytes, adds the fee payer's signature and nothing 
   assert.deepEqual(out.subarray(65), wire.subarray(65), "every byte after slot 0 is W's");
   assert.ok(ed25519.verify(out.subarray(1, 65), wire.subarray(129), ed25519.getPublicKey(FP.seed)), "slot 0 is the fee payer's signature");
   assert.deepEqual(a.body, { signature: base58(out.subarray(1, 65)) });
-  const sim = calls.find((c) => c.method === "simulateTransaction")!;
-  assert.equal(sim.params[0], body(wire).tx, "the simulation ran on W's bytes as received");
-  assert.deepEqual(sim.params[1], { encoding: "base64", sigVerify: false, replaceRecentBlockhash: false, commitment: "processed" });
+  // card sol-pool-buy-lands-on-mainnet: one simulation, of the bytes as sent (both signatures in, checked), on their own
+  // blockhash
+  const sims = calls.filter((c) => c.method === "simulateTransaction");
+  assert.equal(sims.length, 1, "one simulation round");
+  assert.equal(sims[0]!.params[0], Buffer.from(out).toString("base64"), "the simulation ran on the signed bytes");
+  assert.deepEqual(sims[0]!.params[1], { encoding: "base64", sigVerify: true, replaceRecentBlockhash: false, commitment: "processed" });
+});
+
+// card sol-pool-buy-lands-on-mainnet: the signed bytes are proven before any send. A signature that does not hold, or a
+// blockhash the provider does not know, is a 422 naming it; nothing leaves, and no signature is in the answer
+test("a wire whose signatures do not hold as sent is refused signature_failed, nothing sent, no signature in the answer", async () => {
+  for (const tag of [2, 3] as const) {
+    // W's own signature wrong: the checks refuse it before any read (bad_signature), as before
+    const bad = build({ tag });
+    bad[70] ^= 1;
+    assert.equal(code(await sender(null, [], []).carry(body(bad))), "bad_signature");
+    // the provider's signature check refuses the bytes as sent (both signatures in)
+    const sent: Uint8Array[] = [];
+    const a = await sender("sigVerify", [], sent).carry(body(build({ tag })));
+    assert.deepEqual([a.status, code(a)], [422, "signature_failed"], `tag ${tag}`);
+    assert.equal(sent.length, 0);
+    assert.equal(a.note?.err, "signature");
+    assert.ok(!JSON.stringify(a.body).match(/[1-9A-HJ-NP-Za-km-z]{80,}/), JSON.stringify(a.body));
+  }
+});
+test("a blockhash the provider does not know is refused blockhash_not_found, nothing sent", async () => {
+  const sent: Uint8Array[] = [];
+  const a = await sender("BlockhashNotFound", [], sent).carry(body(build({ tag: 3 })));
+  assert.deepEqual([a.status, code(a)], [422, "blockhash_not_found"]);
+  assert.equal(sent.length, 0);
+  assert.equal(a.note?.err, '"BlockhashNotFound"');
 });
 
 test("a failed simulation is refused before any signature or send (simulation_failed)", async () => {

@@ -37,7 +37,10 @@
 //                       every index used (read only when the message has lookups; at most SOLANA_POOL_LOOKUPS_MAX);
 //   failed_this_epoch   this nullifier's send already failed on chain in this epoch (M356 (1): at most one paid
 //                       failure per nullifier per epoch);
-//   simulation_failed   the simulation of W's transaction (no signature check, its own blockhash) failed;
+//   signature_failed    a signature of the bytes as sent (the fee payer's added, W's as received) does not hold in
+//                       the simulation (sigVerify), so nothing is sent;
+//   blockhash_not_found the provider does not know the transaction's own blockhash (simulated without replacing it);
+//   simulation_failed   the simulation of the transaction as sent (both signatures checked, its own blockhash) failed;
 //   upstream (503)      the simulation or the blockhash read could not be made, this epoch's rent could not be read,
 //                       or (mainnet tag 3) every block engine failed (a 5xx) or refused it; a provider that throttled
 //                       one of those reads (its HTTP 429, a rate-limit error) is rate_limited (429) instead, never 503;
@@ -574,23 +577,32 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
         const k = checkSolanaPoolKeys(tx, { pool }, tables);
         if (!k.ok) return no(422, k.code, k.detail);
       }
+      // the bytes as they will be sent: the fee payer's signature added, then simulated once with every signature checked
+      // (sigVerify) on their own blockhash, so a send never carries bytes the runtime would refuse unread (card
+      // sol-pool-buy-lands-on-mainnet); the answer names a signature or a blockhash failure, never the signature itself
+      const signedWire = signAsFeePayer(tx, seed);
+      const signedB64 = Buffer.from(signedWire).toString("base64");
       let sim: unknown;
       let height: number;
       try {
         const [s, h] = await Promise.all([
-          a("simulateTransaction", [raw, { encoding: "base64", sigVerify: false, replaceRecentBlockhash: false, commitment: "processed" }]),
+          a("simulateTransaction", [signedB64, { encoding: "base64", sigVerify: true, replaceRecentBlockhash: false, commitment: "processed" }]),
           a("getLatestBlockhash", [{ commitment: "processed" }]),
         ]);
         sim = s;
         height = (h as { value?: { lastValidBlockHeight?: unknown } })?.value?.lastValidBlockHeight as number;
       } catch (e) {
+        // the provider's signature verification failure (JSON-RPC -32003, agave rpc custom error): named, nothing sent
+        if (/^RPC error -32003\b/.test(String((e as Error)?.message ?? ""))) return { ...no(422, "signature_failed"), note: { err: "signature" } };
         return unread(e);
       }
       const v = (sim as { value?: { err?: unknown } } | null)?.value;
       if (typeof v !== "object" || v === null || !("err" in v)) return no(503, "upstream");
+      if (v.err === "SignatureFailure") return { ...no(422, "signature_failed"), note: { err: "signature" } };
+      if (v.err === "BlockhashNotFound") return { ...no(422, "blockhash_not_found"), note: { err: simErrText(v.err) } };
       if (v.err !== null) return { ...no(422, "simulation_failed", JSON.stringify(v.err).slice(0, 200)), note: { err: simErrText(v.err) } };
       if (!Number.isSafeInteger(height) || height <= 0) return no(503, "upstream");
-      const signed: SolanaSignedTx = { wire: signAsFeePayer(tx, seed), lastValidBlockHeight: height };
+      const signed: SolanaSignedTx = { wire: signedWire, lastValidBlockHeight: height };
       let through = paths;
       // the log line's note (./send-log.ts): how it went out, and for a bundle the region that took it
       let note: PoolSendNote = { via: "plain" };
