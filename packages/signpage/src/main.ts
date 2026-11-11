@@ -206,7 +206,7 @@ else {
   // under the APP_HOST frame: the app's boot frame as shapes, for the moment before a new frame paints (src/backdrop.ts)
   document.body.append(drawBackdrop(document));
   // the pool kinds' deps: the network's pins and each chain's two RPCs, which the price reads use too (src/pool-price.ts)
-  const poolDeps = testnetPoolDeps(testnet?.flow);
+  const poolDeps = testnetPoolDeps(testnet?.flow, testnet ? () => testnet.outSignal() : undefined);
   const prices = poolPrices({ rpcs: (chain) => poolDeps.rpcs(chain) as readonly [SolanaRpc, SolanaRpc] | null });
   // a page shown again reads its prices at once: hidden, it read only every 15 s (src/pool-price.ts)
   wakeWhenShown(document, prices);

@@ -42,6 +42,7 @@ import type { ErrorCode, SignpageResults, TradeStage, TxRef } from "../../kit/sr
 import { ladderSplit } from "@blindfill/wallet/arming/ladder";
 import { ArmRefused, armRecordOf, armRecords, claimArm, settleArm, solanaArmedSigner, type ArmRecord } from "@blindfill/wallet/arming/records";
 import { WALLET_SEED_LOCK, type WalletStore } from "@blindfill/wallet/store";
+import { laneFetch } from "../../wallet/src/throttle.ts";
 import type { HostAnswer, KindContext, Running } from "./api.ts";
 
 export type TradeStore = Pick<WalletStore, "get" | "put" | "keys" | "update">;
@@ -102,7 +103,8 @@ export function releaseTradeDeps(): TradeHost["deps"] {
     // read on the pair the kit hands it (its paced providers, flow.ts pacedDeps), never on one outside the trade's pace;
     // a provider read that fails past its retry rejects (pageReference), never reads as "no reference pool"
     reference: (q, paced) => pageReference(paced, q),
-    paths: solanaSendPaths({ helper: solanaHelperRpc(TRADE_HELPER) }),
+    // every send path's requests counted on its host's lane, the helper's among them (../../wallet/src/throttle.ts laneFetch)
+    paths: solanaSendPaths({ helper: solanaHelperRpc(TRADE_HELPER, { fetch: laneFetch() }), fetch: laneFetch() }),
   };
 }
 

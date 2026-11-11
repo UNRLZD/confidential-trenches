@@ -1,8 +1,9 @@
 // Every tracked test file runs in CI: each *.test.mjs and *.test.ts that git tracks is named, by path or by glob, by a
 // `node --test` command in a ci.yml run: line, in a root script such a line runs (`pnpm run <name>`), or in a workspace
 // package's script (resolved from the package's folder) while a ci.yml line runs `pnpm ... run <that script>` for that
-// package (`-r`, or a --filter that selects it): `test`, or `test:mutants`, the sweeps CI runs after the tests and the
-// README's fresh run leaves out (card fresh-run-margin). A ci.yml line that runs `node scripts/ci/test-shards.mjs
+// package (`-r`, or a --filter that selects it): `test`, or `test:mutants`, the sweeps CI runs nightly on main (card
+// ci-fast-checks-on-the-pr; a nightly line counts as a run) and the README's fresh run leaves out (card
+// fresh-run-margin). A ci.yml line that runs `node scripts/ci/test-shards.mjs
 // mutants` runs every command that script's split shares out, each in its package's folder (card ci-mutants-sharded;
 // scripts/ci/test-shards.test.mjs holds that the parts together run each one). Each tracked Foundry test (*.t.sol) is
 // under the test/ folder of a `forge test` that names no filter, at its --root or else its folder. A test file that nothing runs passes review as
@@ -272,6 +273,10 @@ test("planted: a sweep in test:mutants that no ci.yml line runs fails; run by -r
     const tests = "pnpm -r --if-present --no-bail run test";
     const shard = 'node scripts/ci/test-shards.mjs mutants "$INDEX" "$TOTAL"';
     assert.deepEqual(unrunWith(ci(tests, shard)), []);
+    // card ci-fast-checks-on-the-pr: the split in a job that runs only nightly and by hand still runs every sweep
+    const nightly = ["jobs:", "  t:", "    steps:", `      - run: ${tests}`, "  test-mutants:", "    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'", "    steps:", "      - name: the sweeps", `        run: ${shard}`, ""].join("\n");
+    assert.deepEqual(unrunWith(nightly), []);
+    assert.deepEqual(unrunWith(nightly.replace(`        run: ${shard}`, `        run: echo ${shard}`)), ["packages/k/test/mutants/m.test.mjs", "packages/w/test/mutants/wm.test.mjs"]);
     assert.deepEqual(unrunWith(ci(tests, "pnpm --filter @blindfill/wallet run test:mutants")), ["packages/k/test/mutants/m.test.mjs"]);
     assert.deepEqual(unrunWith(ci(tests, `echo ${shard}`)), ["packages/k/test/mutants/m.test.mjs", "packages/w/test/mutants/wm.test.mjs"]);
     assert.deepEqual(unrunWith(ci(tests, "node scripts/ci/test-shards.mjs e2e \"$INDEX\" \"$TOTAL\"")), ["packages/k/test/mutants/m.test.mjs", "packages/w/test/mutants/wm.test.mjs"]);

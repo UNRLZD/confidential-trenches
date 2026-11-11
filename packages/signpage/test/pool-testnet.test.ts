@@ -511,9 +511,15 @@ test("review P2-1 and P2-2 of a34c1626, P2-1 and P3-3 of e3489b3b: every Solana 
   assert.equal(calls.length, 4);
   // the reserved pass's on the pair's pass reads (card signpage-passes-yield-to-a-trade), the buy's and the rest on its trade reads
   for (const c of calls) assert.match(c, /, rpcs: settleRpcs\((?:"pass")?\), lister: lister\((?:"pass")?\), signal, cache, markBatches: PAGE_SOL_MARK_BATCHES \}\)$/, c);
-  // each site's signal is the stop's when the call began: four takes, and the stop read nowhere else
+  // each site's signal is the stop's when the call began: four takes, and the stop read elsewhere only where a trade's
+  // reads wait before a signature (card start-reads-wait-out-a-throttle): the buy's and the sell's host, each taken when
+  // the host is made, and a pool kind's request (outSignal), each ending its waits at the next sign out
   assert.equal([...src.matchAll(/const signal = solanaStop\.signal;/g)].length, 4);
-  assert.equal([...src.matchAll(/solanaStop\.signal/g)].length, 4);
+  assert.equal([...src.matchAll(/ signal: solanaStop\.signal,/g)].length, 2);
+  assert.equal([...src.matchAll(/outSignal: \(\) => solanaStop\.signal,/g)].length, 1);
+  // the Solana deposit host's stop: its waits between attempts end at a sign out's tap (review of f0e7bd38, P2-1)
+  assert.equal([...src.matchAll(/ stop: solanaStop\.signal,/g)].length, 1);
+  assert.equal([...src.matchAll(/solanaStop\.signal/g)].length, 8);
   // the settle pair: the page's two seats, the helper's with the window-long retry
   assert.match(src, /solanaPacedRpc\(pageHelperRpc\(TRADE_HELPER, SOLANA_RPC_WINDOW_RETRY, kind\)\)\]/);
   assert.match(src, /solanaPacedRpc\(testnetRpc\(TESTNET_RPCS\.solana\[1\], SOLANA_RPC_WINDOW_RETRY, kind\)\)\]/);
@@ -1383,4 +1389,60 @@ test("the testnet finder reads the Ws on the first devnet RPC, one try a call: a
     assert.equal(tao.length, 4, "two calls a round, two rounds: no retry of a 429");
     assert.deepEqual(tao.map((x) => x.open), [false, false, true, true], "the second round after the gate's 1 s pause");
   });
+});
+
+// Card sol-buy-reads-side-by-side: the page's buy host reads the pool's time for the take on the page's pool (its two
+// RPCs, the wallet's solanaNow: the lower finalized block time), and its take hands that read to the queue (review of
+// 6b3bd660, P3-D)
+test("card sol-buy-reads-side-by-side: the page's buy host reads the pool's time on both of the page's RPCs, the lower block time", async () => {
+  const { w } = await wallet();
+  const { poolBuyKind } = await import("../src/pool-buy.ts");
+  let buyHost: Parameters<typeof poolBuyKind>[0] | undefined;
+  const asked: [string[], string[]] = [[], []];
+  const rpcOf = (i: 0 | 1, slot: number, sec: number) => async (m: string) => {
+    asked[i].push(m);
+    if (m === "getSlot") return slot;
+    if (m === "getBlockTime") return sec;
+    throw new Error(`offline ${m}`);
+  };
+  testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { rpcs: [rpcOf(0, 100, 1_800_000_010), rpcOf(1, 99, 1_800_000_000)], tradeKinds: { buy: (mk) => ((buyHost = mk), poolBuyKind(mk)) } });
+  const b = buyHost!();
+  try {
+    const before = performance.now();
+    const n = await b.chainNow!();
+    assert.equal(n.ms, 1_800_000_000_000n, "the lower of the two RPCs' block times");
+    assert.ok(n.at >= before && n.at <= performance.now());
+    assert.equal(typeof n.wall, "number");
+    assert.deepEqual(asked, [["getSlot", "getBlockTime"], ["getSlot", "getBlockTime"]], "each RPC asked once");
+  } finally {
+    (b as { end?: () => void }).end?.();
+  }
+});
+
+test("card sol-buy-reads-side-by-side: the page's buy host hands the early read to the queue's take, which then reads no time of its own", async () => {
+  const { w, ns } = await wallet();
+  const { pool, land } = fakePool();
+  let nows = 0;
+  const counted = { ...pool, now: async () => (nows++, NOW) };
+  const { poolBuyKind } = await import("../src/pool-buy.ts");
+  let buyHost: Parameters<typeof poolBuyKind>[0] | undefined;
+  const offline = async () => {
+    throw new Error("offline");
+  };
+  const t = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { pool: counted, prover: { vault: signalsProver(), stop: () => {} }, hardwareConcurrency: 4, rpcs: [offline, async () => offline()], tradeKinds: { buy: (mk) => ((buyHost = mk), poolBuyKind(mk)) } });
+  await land(ns, await incoming(ns, null, 9));
+  await t.stateRead();
+  await t.proofs();
+  const b = buyHost!();
+  try {
+    const [r] = await b.ready();
+    assert.ok(r, "a ready proof");
+    const early = b.chainNow!();
+    await early;
+    const before = nows;
+    assert.equal((await b.take(r.noteId, r.attempt, early)).noteId, r.noteId);
+    assert.equal(nows, before, "the take used the early read");
+  } finally {
+    (b as { end?: () => void }).end?.();
+  }
 });

@@ -261,3 +261,11 @@ test("the rate-limit, not-yet and stateless words are the kit's own", () => {
   assert.deepEqual(words("notYet"), [String(NOT_YET)]);
   assert.deepEqual(words("stateless"), [String(STATELESS)]);
 });
+
+test("keep: the named answer headers come back beside the answer, each its value or null; without keep nothing is added", async () => {
+  const fetchFn = async () => new Response('{"jsonrpc":"2.0","id":1,"result":7}', { status: 200, headers: { "content-type": "application/json", "ratelimit-policy": '"chain";q=135;w=10' } });
+  const a = await rpcAnswer("https://h.example/v1/rpc/solana", "getSlot", [], { fetchFn, headers: { origin: "https://s.example" }, keep: ["ratelimit-policy", "retry-after"] });
+  assert.deepEqual(a.kept, { "ratelimit-policy": '"chain";q=135;w=10', "retry-after": null });
+  assert.equal(a.result, 7);
+  assert.equal("kept" in (await rpcAnswer("https://h.example/v1/rpc/solana", "getSlot", [], { fetchFn })), false);
+});
