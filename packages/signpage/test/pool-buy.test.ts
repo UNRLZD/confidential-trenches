@@ -1537,3 +1537,32 @@ test("review P3e of 1caf0b17: a Retry-After that is no number (NaN) never become
   assert.equal((await runPoolBuy({ ...w.host, reads: 10 }, ASK) as { stage?: string }).stage, "filled");
   assert.deepEqual(w.waits, [800]);
 });
+
+// Card sol-buy-reads-side-by-side: the pool's time for the take is read beside the first round (the host's chainNow,
+// the wallet's chainNow on the queue's pool) and handed to the take, which uses it within NOW_REUSE_MS of its start and
+// reads again past it (packages/wallet/src/pool/queue.ts): no chain-time read waits between the signature and the send.
+test("card sol-buy-reads-side-by-side: the pool's time is read with the first round and handed to the take", async () => {
+  const w = await world();
+  const read = Promise.resolve({ ms: 1n, at: 0 });
+  let handed: unknown = "none";
+  const take = w.host.take;
+  const host: PoolBuyHost = {
+    ...w.host,
+    chainNow: () => (w.log.push("chainNow"), read),
+    take: (id, attempt, early) => ((handed = early), take(id, attempt)),
+  };
+  assert.equal((await runPoolBuy(host, ASK) as { stage?: string }).stage, "filled");
+  assert.equal(handed, read, "the take is handed the early read itself");
+  const at = w.log.indexOf("chainNow");
+  assert.ok(at >= 0 && at < w.log.findIndex((x) => /^[01]:/.test(x)), `read before the first round's reads: ${w.log.slice(0, 6).join(" ")}`);
+  assert.equal(w.log.filter((x) => x === "chainNow").length, 1);
+});
+
+test("card sol-buy-reads-side-by-side: an early read that fails never stops the buy (the take reads again), and one refused before the take is left handled", async () => {
+  const w = await world();
+  const host: PoolBuyHost = { ...w.host, chainNow: () => Promise.reject(new Error("rpc 1: socket hang up")) };
+  assert.equal((await runPoolBuy(host, ASK) as { stage?: string }).stage, "filled");
+  const n = await world({ slotAhead: 40 });
+  const refused: PoolBuyHost = { ...n.host, chainNow: () => Promise.reject(new Error("rpc 1: socket hang up")) };
+  assert.deepEqual(await runPoolBuy(refused, ASK), { error: "quote_check_failed" });
+});

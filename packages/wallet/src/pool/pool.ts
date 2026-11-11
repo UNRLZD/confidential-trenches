@@ -119,6 +119,23 @@ export const TAKE_SLACK_MS = 15_000n;
  * never past the next boundary + this: it bounds how long the root right after the deposit stays in use. */
 export const NEWEST_GRACE_MS = 15_000n;
 
+/**
+ * The pool's time read before the take (card sol-buy-reads-side-by-side): its ms, and the device's monotonic clock
+ * (performance.now, never the wall clock, which a user or an NTP fix may set back or forward) when the read started.
+ * take() uses it as `ms` plus the time since `at`, within NOW_REUSE_MS of it, instead of a read of its own. Every check
+ * of the take is a "too late" bound, so the time since counted from the read's start (more than since its answer) only
+ * makes "now" later: stricter, never looser.
+ */
+export type ChainNow = { readonly ms: bigint; readonly at: number };
+/** How long after its start a read of the pool's time stands for the take's own. [design: 5 s: a buy's reads before its
+ *  take end within about 1.5 s; past this (a slow round, a tab frozen in the background) the take reads it again.] */
+export const NOW_REUSE_MS = 5_000;
+/** The pool's time read now, for a take a moment later (ChainNow). */
+export async function chainNow(pool: Pick<Pool<unknown>, "now">, signal?: AbortSignal): Promise<ChainNow> {
+  const at = performance.now();
+  return { ms: await pool.now(signal), at };
+}
+
 const field = (x: unknown): boolean => typeof x === "bigint" && x >= 0n && x < VAULT_FIELD_P;
 
 /** Refuses a pool whose fixed fields are not what the queue relies on. */

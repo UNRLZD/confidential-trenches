@@ -53,6 +53,7 @@ import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { createRequire } from "node:module";
+import { h2Fetch } from "./h2-fetch.mjs";
 import { IDBFactory } from "fake-indexeddb";
 import { base58, base64 } from "@scure/base";
 import { ed25519 } from "@noble/curves/ed25519.js";
@@ -106,8 +107,10 @@ const sentOf = (init) => {
 // FLOW_DUST: the stranger S and its unit (set below); dust.armed is sentTxs' length before the sell's send
 const DUST = process.env.FLOW_DUST === "1";
 let dust = null;
-// every devnet RPC answer of 429 or 5xx is logged (the page retries it); FLOW_BURST injects the bursts above
-const realFetch = globalThis.fetch;
+// every devnet RPC answer of 429 or 5xx is logged (the page retries it); FLOW_BURST injects the bursts above. The reads
+// go as a browser sends them, side by side on one HTTP/2 connection per origin (h2-fetch.mjs, card
+// sol-buy-reads-side-by-side), never Node's HTTP/1.1 socket a read
+const realFetch = h2Fetch();
 globalThis.fetch = async (u, init) => {
   const host = new URL(String(u)).host;
   if (!RPC_HOSTS.has(host)) return realFetch(u, init);

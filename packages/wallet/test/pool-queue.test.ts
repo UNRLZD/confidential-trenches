@@ -10,7 +10,7 @@ import * as d from "../src/derive/index.ts";
 import { noteCommitment, noteSecrets, type NoteRef } from "../src/notes/secrets.ts";
 import type { NoteRecord } from "../src/notes/store.ts";
 import { NEAR_EPOCH_MS, NEAR_LIFE_MS, USDC_LADDER, nearVaultPool } from "../src/pool/near.ts";
-import { NEWEST_GRACE_MS, TAKE_SLACK_MS, type Pool, type PoolBindArgs, type PoolTrees, type ReadyProof } from "../src/pool/pool.ts";
+import { NEWEST_GRACE_MS, NOW_REUSE_MS, TAKE_SLACK_MS, type ChainNow, type Pool, type PoolBindArgs, type PoolTrees, type ReadyProof } from "../src/pool/pool.ts";
 import { openProofQueue, proofPoolSize, readySetSize, type ProofQueue } from "../src/pool/queue.ts";
 import { poolBalances, type BalancePool } from "../src/pool/balances.ts";
 import {
@@ -1076,4 +1076,97 @@ test("skip: a note the page's withdraw still owes a send for is never proved nor
   owed = new Set();
   await q.refresh();
   assert.deepEqual(q.ready().map((r) => r.noteId).sort(), [...ids].sort());
+});
+
+// Card sol-buy-reads-side-by-side: the take accepts the pool's time read earlier (a buy starts it beside its first
+// reads), as that read's ms plus the device's monotonic time since the read started (performance.now, never the wall
+// clock); past NOW_REUSE_MS, or when the early read failed, it reads the pool's time again. Every check of the take is
+// a "too late" bound (past the previous epoch, past the newest root's grace, under the send margin + slack before the
+// deadline), so a later "now" only refuses more: an estimate that runs ahead of the chain's own block time never lets
+// a take through that a fresh read would refuse.
+const early = (ms: bigint, ago = 0): Promise<ChainNow> => Promise.resolve({ ms, at: performance.now() - ago });
+const counted = (pool: Fake) => {
+  let reads = 0;
+  const now = pool.now;
+  pool.now = (s) => (reads++, now(s));
+  return () => reads;
+};
+
+test("card sol-buy-reads-side-by-side: an early read within NOW_REUSE_MS is the take's time, its ms plus the time since; no read at the take", async () => {
+  assert.equal(NOW_REUSE_MS, 5_000);
+  const v = await vaultWith([usd(5), usd(10)]);
+  const tight = { ...fakePool(v), lifeMs: 2n * E + MARGIN };
+  const q = queue(v, tight);
+  await q.refresh();
+  const [a, b] = q.ready();
+  const reads = counted(tight);
+  const edge = START + tight.lifeMs - MARGIN - TAKE_SLACK_MS; // deadline - now = margin + 15 s: the last ms taken
+  // a fresh read at the edge would take it; read 1 s before the edge and 1 s ago, the estimate is the edge itself
+  tight.t.now = edge + 60_000n; // the pool's own read would refuse: it is never asked
+  await assert.rejects(q.take(b!.noteId, undefined, early(edge - 1_000n, 1_000)), /send margin/, "the time since the read counts");
+  assert.equal(reads(), 0);
+  assert.equal((await q.take(a!.noteId, undefined, early(edge - 2_000n, 1_000))).noteId, a!.noteId);
+  assert.equal(reads(), 0, "no read at the take");
+});
+
+test("card sol-buy-reads-side-by-side: an early read past NOW_REUSE_MS, a tab frozen 60 s between the read and the take, or a read that failed: the pool's time is read again", async () => {
+  const v = await vaultWith([usd(5), usd(10), usd(20)]);
+  const pool = fakePool(v);
+  const q = queue(v, pool);
+  await q.refresh();
+  const [a, b, c] = q.ready();
+  const reads = counted(pool);
+  const stale = START; // far behind: taken if it were used, refused by nothing
+  pool.t.now = START + 2n * E; // two epochs on: the fresh read refuses every proof
+  await assert.rejects(q.take(a!.noteId, undefined, early(stale, NOW_REUSE_MS + 1)), /before the previous epoch/);
+  await assert.rejects(q.take(b!.noteId, undefined, early(stale, 60_000)), /before the previous epoch/);
+  await assert.rejects(q.take(c!.noteId, undefined, Promise.reject(new Error("rpc 1: socket hang up"))), /before the previous epoch/);
+  assert.equal(reads(), 3);
+});
+
+test("card sol-buy-reads-side-by-side: the wall clock set back or forward between the read and the take changes nothing", async () => {
+  const v = await vaultWith([usd(5), usd(10)]);
+  const tight = { ...fakePool(v), lifeMs: 2n * E + MARGIN };
+  const q = queue(v, tight);
+  await q.refresh();
+  const [a, b] = q.ready();
+  const reads = counted(tight);
+  const edge = START + tight.lifeMs - MARGIN - TAKE_SLACK_MS;
+  const real = Date.now;
+  try {
+    Date.now = () => real() - 3_600_000; // an hour back: an estimate on the wall clock would take a proof past its edge
+    await assert.rejects(q.take(b!.noteId, undefined, early(edge - 1_000n, 1_000)), /send margin/);
+    Date.now = () => real() + 3_600_000; // an hour on: an estimate on the wall clock would refuse a proof inside it
+    assert.equal((await q.take(a!.noteId, undefined, early(edge - 2_000n, 1_000))).noteId, a!.noteId);
+  } finally {
+    Date.now = real;
+  }
+  assert.equal(reads(), 0);
+});
+
+test("card sol-buy-reads-side-by-side: each check of the take refuses at least where a fresh read refuses when the estimate runs ahead of block time by up to 2 s", async () => {
+  for (const ahead of [0n, 1_000n, 2_000n]) {
+    // the deadline: a fresh read at edge + 1 refuses; the estimate at edge + 1 + ahead refuses too
+    const v = await vaultWith([usd(5)]);
+    const tight = { ...fakePool(v), lifeMs: 2n * E + MARGIN };
+    const q = queue(v, tight);
+    await q.refresh();
+    const edge = START + tight.lifeMs - MARGIN - TAKE_SLACK_MS;
+    await assert.rejects(q.take(q.ready()[0]!.noteId, undefined, early(edge + 1n + ahead)), /send margin/, `deadline, ${ahead} ahead`);
+    // the previous epoch: a fresh read two epochs on refuses; so does the estimate ahead of it
+    const v2 = await vaultWith([usd(5)]);
+    const p2 = fakePool(v2);
+    const q2 = queue(v2, p2);
+    await q2.refresh();
+    await assert.rejects(q2.take(q2.ready()[0]!.noteId, undefined, early(START + 2n * E + ahead)), /before the previous epoch/, `epoch, ${ahead} ahead`);
+  }
+  // the newest root's grace: refused at the boundary + 15 s, and so at any estimate past it
+  const v3 = await vaultWith([usd(2)]);
+  const p3 = fakePool(v3);
+  const q3 = queue(v3, p3);
+  p3.t.now += 10_000n;
+  const dep = await landDeposit(v3, p3, usd(50), 1000n);
+  await q3.refresh();
+  assert.equal(q3.ready().find((r) => r.noteId === dep.id)!.root, "newest");
+  await assert.rejects(q3.take(dep.id, undefined, early(START + E + NEWEST_GRACE_MS + 2_000n)), /newest root/);
 });
