@@ -409,7 +409,9 @@ export function solanaRestore(a: SolanaRestoreArgs): { notes: SolanaRestoredNote
 /**
  * What a page keeps across its reads of one Solana pool on one pair of RPCs (its settles and its restore): `marks`,
  * every mark read the same on both (solanaMarksListed's held: none is read again, and a bucket all held is not listed
- * again), and `pages`, the pool's tree sync on that pair (a full page is read once). Only public chain data: every mark
+ * again), and `pages`, the pool's tree sync on that pair (a full page is read once), each caller's page reads on its own
+ * transports of the pair (card signpage-passes-yield-to-a-trade: a trade's settle never reads through a pass's, nor a pass
+ * through a trade's). Only public chain data: every mark
  * of the pool, never which are the user's. Give one cache only with the same two RPCs.
  */
 export type SolanaPoolCache = { marks?: SolanaMarks; pages?: SolanaTreeSync };
@@ -514,7 +516,7 @@ export async function solanaRestoreNotes(a: {
   try {
     let marks: SolanaMarks = await marksAt();
     for (;;) {
-      const leaves = await sync.leaves(marks.slot, a.signal);
+      const leaves = await sync.leaves(marks.slot, a.signal, a.rpcs);
       const read = await marksAt(leaves.slots);
       const again = solanaMarksUnion(marks, read);
       // the one rule, on the RPCs' answers alone: walk at the first read with no new mark; else read again past it
@@ -571,7 +573,7 @@ export async function solanaSettleSpent(a: { seed64: Uint8Array; notes: NoteStor
   let leaves: Awaited<ReturnType<SolanaTreeSync["leaves"]>>;
   try {
     marks = await marksAt(a.minSlots);
-    leaves = await sync.leaves(marks.slot, a.signal);
+    leaves = await sync.leaves(marks.slot, a.signal, a.rpcs);
     // review P2-1 and P1 of 369a87a8: no decision on a list alone; each RPC's own pages, publicnode's among them on mainnet
     for (let round = 1; !markCountsClose(marks, leaves.counts); round++) {
       // the last round, or a read again with no new mark: the count cannot close here, refused with its numbers
@@ -579,7 +581,7 @@ export async function solanaSettleSpent(a: { seed64: Uint8Array; notes: NoteStor
       const again = solanaMarksUnion(marks, await marksAt(leaves.slots));
       if (again.spent.size === marks.spent.size && again.pre.size === marks.pre.size) solanaMarkCounts(marks, leaves.counts);
       marks = again;
-      leaves = await sync.leaves(marks.slot, a.signal);
+      leaves = await sync.leaves(marks.slot, a.signal, a.rpcs);
     }
   } catch (e) {
     forgetSlots(cache, sync);

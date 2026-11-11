@@ -564,7 +564,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     let seed64: Uint8Array | null = null;
     try {
       seed64 = await page.seed64();
-      // the pass's reads wait for a trade; the time a buy's take reads is the trade's own, so a buy never waits on itself
+      // the pass's reads on their hosts' budget; the time a buy's take reads is the trade's own, so a buy never waits on itself
       const passPool = solanaPool({ pin: pin!, rpcs: rpcs("pass"), relayFee: (e, s) => poolRelayFee(solanaPoolOf(pin!.program).pool, e, s, over.fetch) });
       const pool = over.pool ?? { ...passPool, now: (signal?: AbortSignal) => solanaNow(rpcs(), signal) };
       const hardwareConcurrency = over.hardwareConcurrency ?? globalThis.navigator?.hardwareConcurrency;
@@ -617,12 +617,14 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     }
   };
 
-  // a deposit's own run reads as a trade; the state reads' settle of the INCOMING notes (settleSolana) as a pass
-  const host = (end?: () => void, kind: ReadKind = "trade"): PoolDepositHost => {
+  // a deposit's own run reads as a trade, and so does the state reads' settle of the INCOMING notes (settleSolana): it
+  // holds POOL_DEPOSIT_LOCK, which a deposit tapped meanwhile waits for (a reader that holds what a trade can wait for
+  // never reads as a pass, ../../wallet/src/throttle.ts HostLane)
+  const host = (end?: () => void): PoolDepositHost => {
     let notes: NoteStore | null = null;
     return {
       pin: pin!,
-      rpcs: rpcs(kind),
+      rpcs: rpcs(),
       notes: async () => (notes = await openNoteStore(await page.store())),
       records: async () => readNotes(await page.store()),
       seed64: page.seed64,
@@ -677,7 +679,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     let seed64: Uint8Array | null = null;
     try {
       seed64 = await page.seed64();
-      // the pass's reads wait for a trade; the time a buy's take reads is the trade's own, so a buy never waits on itself
+      // the pass's reads on their hosts' budget; the time a buy's take reads is the trade's own, so a buy never waits on itself
       const passPool =
         over.evmQueuePool?.(chain) ??
         walletEvmPool({
@@ -1069,7 +1071,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       if (settling === p) settling = null;
     });
     settling = p;
-    const r = solanaDepositKind(() => host(done, "pass"))(null, null);
+    const r = solanaDepositKind(() => host(done))(null, null);
     // refused before it ran (no Web Locks), or failed before its host was made: no end will come
     if ("error" in r) done();
     else
@@ -1158,7 +1160,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       chain: inner.chain,
       read: async (address, s, by) => {
         try {
-          // a pass's read on the finder's host: after every trade on it (the finder is its own transport)
+          // a pass's read on the finder's host: on its budget (the finder is its own transport)
           await hostLane(FINDER_HOST).turn("pass", s);
           // the list's bound from its start (buy-wallets.ts readDerived's `by`), as a sell's read keeps it
           return await inner.read(address, s, by);
@@ -1391,7 +1393,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       try {
         const ops = await page.store();
         // each sell's stage written before its record goes (a write that fails keeps it for the next read)
-        await settlePoolSells({ pin: pin!, rpcs: rpcs("pass"), notes: async () => notes, kept: keptSells(page.store), settled: async (signature, stage) => {
+        // a trade's reads: it holds POOL_SELL_LOCK, which a sell tapped meanwhile waits for
+        await settlePoolSells({ pin: pin!, rpcs: rpcs(), notes: async () => notes, kept: keptSells(page.store), settled: async (signature, stage) => {
           await settleSellOps(ops, signature, stage);
           // a sell's end, written: its tokens read again (card signpage-state-holdings), a not landed one's marks back
           if (stage === "not_landed") await unsold(signature).catch(() => {});

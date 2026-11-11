@@ -361,7 +361,7 @@ export type SolanaTreeSync = {
    * each RPC's own state and label leaf counts at that slot, in rpcs order, since the agreed part is the shorter of the
    * two and an RPC that returns a short page would otherwise hide a leaf from a count.
    */
-  leaves(minContextSlot: number, signal?: AbortSignal): Promise<{ state: bigint[]; label: bigint[]; slots: [number, number]; counts: [[number, number], [number, number]] }>;
+  leaves(minContextSlot: number, signal?: AbortSignal, on?: readonly [SolanaRpc, SolanaRpc]): Promise<{ state: bigint[]; label: bigint[]; slots: [number, number]; counts: [[number, number], [number, number]] }>;
 };
 
 export function solanaTreeSync(rpcs: readonly [SolanaRpc, SolanaRpc], program: string, lagWait?: SolanaLagWait): SolanaTreeSync {
@@ -369,10 +369,13 @@ export function solanaTreeSync(rpcs: readonly [SolanaRpc, SolanaRpc], program: s
   const held: [Entry[], Entry[]] = [[], []];
   const lastSlot = [0, 0];
   // beforeMs null: no cut, no reached check, every agreed entry
-  async function run(beforeMs: bigint | null, commitment: Commitment, minSlot: number, signal?: AbortSignal): Promise<{ lists: Entry[][]; tops: [number, number]; counts: [[number, number], [number, number]] }> {
+  async function run(beforeMs: bigint | null, commitment: Commitment, minSlot: number, signal?: AbortSignal, on: readonly [SolanaRpc, SolanaRpc] = rpcs): Promise<{ lists: Entry[][]; tops: [number, number]; counts: [[number, number], [number, number]] }> {
+    // the caller's own transports of the same two providers, in the same order (card signpage-passes-yield-to-a-trade:
+    // a sync kept in a page's cache is its pages, never its maker's transports)
+    if (on !== rpcs && !(solanaSameProvider(on[0], rpcs[0]) && solanaSameProvider(on[1], rpcs[1]))) throw new Error("the tree sync's reads go to its own two providers only");
     const base = [held[0], held[1]] as const;
     const from = [Math.floor(base[0].length / SOL_PAGE_ENTRIES), Math.floor(base[1].length / SOL_PAGE_ENTRIES)] as const;
-    const reads = await both(rpcs, async (rpc, k) => {
+    const reads = await both(on, async (rpc, k) => {
       const r = await readPages(rpc, program, from, commitment, Math.max(minSlot, lastSlot[k]!), signal, lagWait);
       // every leaf under the cut is in only once the block read at is at or past beforeMs: a later block's time is too
       if (beforeMs !== null) {
@@ -427,9 +430,9 @@ export function solanaTreeSync(rpcs: readonly [SolanaRpc, SolanaRpc], program: s
       });
       return { stateTree: out[0]!.tree, labelTree: out[1]!.tree, stateRoot: out[0]!.root, labelRoot: out[1]!.root };
     },
-    async leaves(minContextSlot, signal) {
+    async leaves(minContextSlot, signal, on) {
       if (!Number.isSafeInteger(minContextSlot) || minContextSlot < 0) throw new Error("minContextSlot: a slot");
-      const { lists: [state, label], tops, counts } = await run(null, "finalized", minContextSlot, signal);
+      const { lists: [state, label], tops, counts } = await run(null, "finalized", minContextSlot, signal, on);
       return { state: state!.map((e) => e.leaf), label: label!.map((e) => e.leaf), slots: tops, counts };
     },
   };
