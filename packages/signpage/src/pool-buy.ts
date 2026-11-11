@@ -166,9 +166,10 @@ export type PoolBuyHost = {
    *  passed and W derived to the proof's recipient, then the amount W received once the transaction read back on both
    *  RPCs as the same. Each once, in that order; a throw here never stops the buy. */
   route?(r: BuyRoute): void;
-  /** W's address and the decimals of the token it received, read with that amount on both RPCs: told just before the
-   *  route's amount, for the device's buy record (src/positions.ts); a throw here never stops the buy. */
-  outDecimals?(wallet: string, decimals: number): void;
+  /** W's address, the decimals of the token it received, read with that amount on both RPCs, and the token's mint:
+   *  told just before the route's amount, for the device's buy record (src/positions.ts) and the page's kept decimals
+   *  (pool-kinds.ts PAGE_TOKEN_DECIMALS); a throw here never stops the buy. */
+  outDecimals?(wallet: string, decimals: number, mint: string): void;
   /** The notes a run on this page has picked and not finished: a second tap picks another ready proof. */
   claimed?: Set<string>;
   /** Tests only: the venue's fee recipient and the Jito tip account, else random. */
@@ -643,7 +644,7 @@ export async function runPoolBuy(h: PoolBuyHost, ask: PoolAsk): Promise<PoolBuyA
       const decimals = (d: number): void => {
         // a record's decimals never stop a buy: a listener that throws, or rejects
         try {
-          void Promise.resolve(h.outDecimals?.(w.address, d)).catch(() => {});
+          void Promise.resolve(h.outDecimals?.(w.address, d, token)).catch(() => {});
         } catch {
           /* thrown */
         }

@@ -59,7 +59,9 @@ export const MUTANTS = [
   ['if (p.kind !== "pool.deposit" && (typeof token !== "string" || !(chain === "solana" ? SOL_KEY(token) : EVM_ADDRESS.test(token)))) return refuse("token");', 'if (p.kind !== "pool.deposit" && typeof token !== "string") return refuse("token");', REQ],
   // the decimals: the pool asset's, or the token's from two agreeing reads, never the caller's
   ["Object.freeze({ solana: 9, base: 18, robinhood: 18 })", "Object.freeze({ solana: 9, base: 18, robinhood: 9 })", DEC],
-  ['const decimals = p.kind === "pool.sell" ? tokenDecimalsOf(chain, tokenReads as TokenDecimalsReads) : asset;', "const decimals = asset;", DEC],
+  ['const decimals = p.kind === "pool.sell" ? (typeof tokenReads === "number" ? tokenDecimalsKeptOf(tokenReads) : tokenDecimalsOf(chain, tokenReads as TokenDecimalsReads)) : asset;', "const decimals = asset;", DEC],
+  ['typeof tokenReads === "number" ? tokenDecimalsKeptOf(tokenReads) :', 'typeof tokenReads === "number" ? tokenReads :', DEC],
+  ['if (!Number.isInteger(d) || d < 0 || d > TOKEN_DECIMALS_MAX) return refuse("decimals");', 'if (d > TOKEN_DECIMALS_MAX) return refuse("decimals");', DEC],
   ['if (!Array.isArray(reads) || reads.length !== 2) return refuse("decimals");', "", DEC],
   ['if (decimalsAnswer(chain, reads[1]) !== a) return refuse("decimals");', "", DEC],
   ["o.owner === SOLANA_TOKEN_PROGRAM ? d.length === 82 :", "o.owner === SOLANA_TOKEN_PROGRAM ? d.length >= 82 :", DEC],

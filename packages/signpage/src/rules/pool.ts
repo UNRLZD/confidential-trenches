@@ -251,11 +251,19 @@ export function tokenDecimalsOf(chain: PoolChain, reads: TokenDecimalsReads): nu
   if (decimalsAnswer(chain, reads[1]) !== a) return refuse("decimals");
   return a;
 }
+/** The token's decimals the device already agreed on two providers this session (src/pool-kinds.ts keptTokenDecimals:
+ *  tokenDecimalsOf on its own two reads, or a buy's own read of them with its amount on both): an integer 0 to
+ *  TOKEN_DECIMALS_MAX, else refused "decimals". */
+export function tokenDecimalsKeptOf(d: number): number {
+  if (!Number.isInteger(d) || d < 0 || d > TOKEN_DECIMALS_MAX) return refuse("decimals");
+  return d;
+}
 
 /** The request checked against its kind: the chain a pool chain, the token an address of that chain (buy and sell),
  *  the amount a decimal above 0 within its decimals (the pool asset's for a deposit or a buy, the token's from the
- *  device's two reads for a sell: never the caller's), the slippage in range; withdraw takes nothing but its chain. */
-export function checkPoolRequest(p: PoolRequest, tokenReads?: TokenDecimalsReads): PoolAsk {
+ *  device's two reads for a sell, or the number those reads agreed on earlier this session: never the caller's), the
+ *  slippage in range; withdraw takes nothing but its chain. */
+export function checkPoolRequest(p: PoolRequest, tokenReads?: TokenDecimalsReads | number): PoolAsk {
   if (typeof p !== "object" || p === null || !(POOL_KINDS as readonly string[]).includes(p.kind)) return refuse("kind");
   if (!(POOL_CHAINS as readonly string[]).includes(p.chain)) return refuse("chain");
   const chain = p.chain as PoolChain;
@@ -263,7 +271,7 @@ export function checkPoolRequest(p: PoolRequest, tokenReads?: TokenDecimalsReads
   if (p.kind === "pool.withdraw") return { kind: p.kind, chain, token: null, amount: 0n, slippageBps: 0, decimals: asset };
   const token = p.token;
   if (p.kind !== "pool.deposit" && (typeof token !== "string" || !(chain === "solana" ? SOL_KEY(token) : EVM_ADDRESS.test(token)))) return refuse("token");
-  const decimals = p.kind === "pool.sell" ? tokenDecimalsOf(chain, tokenReads as TokenDecimalsReads) : asset;
+  const decimals = p.kind === "pool.sell" ? (typeof tokenReads === "number" ? tokenDecimalsKeptOf(tokenReads) : tokenDecimalsOf(chain, tokenReads as TokenDecimalsReads)) : asset;
   // a sell by share: a whole number of basis points, 1 to 10,000, and no amount beside it (the kit's schema refuses both
   // or neither; checked again here, the page's own rule); any other kind takes none
   if (p.share_bps !== undefined) {

@@ -3,8 +3,26 @@
 // network pins (the wallet's SOL_POOLS and EVM_POOLS: on mainnet the Solana pool since card sol-pools-mainnet-pin, no
 // EVM pool yet; a kind on a chain with no pin is refused not_allowed, and no read is made for a refused one).
 // - A sell's amount is in the token's decimals: the device reads the mint (Solana) or decimals() (EVM) on two
-//   providers here and the rule parses both answers (tokenDecimalsOf); the app never names a number of decimals. A
-//   read that fails on either provider is "down" (card pool-read-down), never not_allowed.
+//   providers here and the rule parses both answers (tokenDecimalsOf); the app never names a number of decimals. Two
+//   answers that do not parse or do not agree are refused not_allowed, and nothing is kept.
+// - Kept for the session (card sell-first-read-waits-out-a-throttle; the app's devnet run 5, 11 Nov 02:24Z: a sell
+//   tapped 2.3 s after a buy met four HTTP 429s to the mint's getAccountInfo and answered down, nothing signed): the
+//   number two providers agreed on is kept per chain and token (PAGE_TOKEN_DECIMALS, the page's one store) and never
+//   read again on this page. A buy's own read counts: the Solana buy's amount W received, read on both RPCs with its
+//   decimals the same (pool-buy.ts outDecimals), and the EVM buy's decimals() on both (pool-buy-evm.ts evmBuyHost), so
+//   a sell after a buy asks no decimals read. What the kept number assumes: on Solana that a mint's decimals never
+//   change (no SPL Token or Token-2022 instruction sets them after InitializeMint; a mint closed and made again at the
+//   same address, which Token-2022 allows only at zero supply with a close authority, is read again by its next buy);
+//   on Base and Robinhood that the token's decimals() answers the same all session (a token behind a proxy could change
+//   it). What still checks the amounts before any signature is unchanged and reads afresh each time: the units are
+//   held to what each W holds on both RPCs, and the quote checks (min out from the device's own pool reads, the rule's
+//   checks of the signed bytes).
+// - The first read waits out a provider that fails (a throttle, a 5xx or no answer past the page client's own retry,
+//   kit send.ts SOLANA_RPC_RETRY): on the wallet's one rule (../../wallet/src/throttle.ts throttleWaitMs) inside the
+//   bounds pool-sell.ts keeps for its own reads (from POOL_SELL_WAIT_MS, doubling, a Retry-After honoured up to
+//   POOL_SELL_THROTTLE_MAX_MS, POOL_SELL_THROTTLE_WAITS waits), asking again only the provider that failed (the other's
+//   answer is still one of the two that must agree). "down" (card pool-read-down: never not_allowed) only once the
+//   bound is spent.
 // - On Base and Robinhood every kind goes to the flow once its pool is pinned: a pool.deposit's tx from the one-time
 //   wallet U is checked by rules/pool.ts checkEvmDeposit (card pool-deposits, src/pool-deposit-evm.ts), a pool.withdraw's
 //   onward send from W to the typed address by checkEvmOnwardSend (card signpage-pool-withdraw-form); the page's EVM
@@ -18,9 +36,12 @@
 //   block not final yet stands before the note to sign) is answered busy, a "not now" (api.ts RETRY_CODES: the same
 //   request runs again), however it fails with it: thrown at once, or its run's wait rejecting (card
 //   pool-restore-wired). Any other error is answered as before.
+import { SolanaRpcTransportError } from "../../kit/src/trade/solana/send.ts";
 import { EvmNotFinalError } from "../../wallet/src/pool/evm-restore.ts";
+import { throttleWaitMs, type ThrottleBounds } from "../../wallet/src/throttle.ts";
 import type { KindContext, Deferred, HostAnswer, HostRefusal, Running } from "./api.ts";
-import { PoolRuleRefused, checkPoolRequest, poolTokenAddress, type PoolAsk, type PoolChain, type PoolRequest, type TokenDecimalsReads } from "./rules/pool.ts";
+import { POOL_SELL_THROTTLE_MAX_MS, POOL_SELL_THROTTLE_WAITS, POOL_SELL_WAIT_MS } from "./pool-sell.ts";
+import { PoolRuleRefused, checkPoolRequest, poolTokenAddress, tokenDecimalsKeptOf, tokenDecimalsOf, type PoolAsk, type PoolChain, type PoolRequest } from "./rules/pool.ts";
 
 /** One provider's JSON-RPC call: the method's result, or a throw. */
 export type PoolRpc = (method: string, params: readonly unknown[]) => Promise<unknown>;
@@ -28,15 +49,83 @@ export type PoolRpc = (method: string, params: readonly unknown[]) => Promise<un
 /** ERC-20 decimals(): its selector, keccak256("decimals()")[0..4]. */
 export const ERC20_DECIMALS = "0x313ce567";
 
-/** The token's decimals as each of two providers answers the device's own read: the mint account on Solana, one
- *  eth_call of decimals() on EVM, one address per request (the token's: never a wallet of the user's). */
-export async function readTokenDecimals(chain: PoolChain, token: string, rpcs: readonly [PoolRpc, PoolRpc]): Promise<TokenDecimalsReads> {
+/** The decimals the device agreed on two providers, per chain and token (see the header). */
+export type TokenDecimalsKept = {
+  get(chain: PoolChain, token: string): number | undefined;
+  /** Kept only for an address of the chain and a number the rule takes (tokenDecimalsKeptOf); anything else is not kept. */
+  keep(chain: PoolChain, token: string, decimals: number): void;
+};
+/** A new store: each page has one (PAGE_TOKEN_DECIMALS); a poolKinds made with none has its own. */
+export function tokenDecimalsKept(): TokenDecimalsKept {
+  const kept = new Map<string, number>();
+  // an EVM address in any case is one token; a Solana key is case-sensitive
+  const key = (chain: PoolChain, token: string): string => `${chain} ${chain === "solana" ? token : token.toLowerCase()}`;
+  return {
+    get: (chain, token) => kept.get(key(chain, token)),
+    keep: (chain, token, decimals) => {
+      if (!poolTokenAddress(chain, token)) return;
+      try {
+        kept.set(key(chain, token), tokenDecimalsKeptOf(decimals));
+      } catch {
+        /* not a token's decimals: not kept */
+      }
+    },
+  };
+}
+/** The page's one store: the sell's read (testnetPoolDeps), the Solana buy's (pool-testnet.ts) and the EVM buy's. */
+export const PAGE_TOKEN_DECIMALS: TokenDecimalsKept = /* @__PURE__ */ tokenDecimalsKept();
+
+/** The first read's wait after a provider fails: the wallet's one rule, in pool-sell.ts's bounds for its own reads. */
+export const TOKEN_DECIMALS_THROTTLE: ThrottleBounds = /* @__PURE__ */ Object.freeze({ firstMs: POOL_SELL_WAIT_MS, maxMs: POOL_SELL_THROTTLE_MAX_MS, afterMaxMs: POOL_SELL_THROTTLE_MAX_MS });
+
+export type TokenDecimalsRead = {
+  /** The store (PAGE_TOKEN_DECIMALS otherwise). */
+  kept?: TokenDecimalsKept;
+  /** How many waits before the read fails (POOL_SELL_THROTTLE_WAITS otherwise; 0: none). */
+  waits?: number;
+  /** The wait (tests replace it). */
+  wait?: (ms: number) => Promise<void>;
+};
+
+/** The token's decimals: kept, or read on both providers (the mint account on Solana, one eth_call of decimals() on EVM,
+ *  one address per request: the token's, never a wallet of the user's), both answers parsed and the same
+ *  (tokenDecimalsOf: else PoolRuleRefused, nothing kept), then kept. A provider whose read fails is asked again alone
+ *  after the wait (see the header); past `waits` waits the last failure is thrown. */
+export async function keptTokenDecimals(chain: PoolChain, token: string, rpcs: readonly [PoolRpc, PoolRpc], o: TokenDecimalsRead = {}): Promise<number> {
+  const kept = o.kept ?? PAGE_TOKEN_DECIMALS;
+  const had = kept.get(chain, token);
+  if (had !== undefined) return had;
+  const waits = o.waits ?? POOL_SELL_THROTTLE_WAITS;
+  const wait = o.wait ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const one = (rpc: PoolRpc) =>
     chain === "solana"
       ? rpc("getAccountInfo", [token, { encoding: "base64", commitment: "confirmed" }])
       : rpc("eth_call", [{ to: token, data: ERC20_DECIMALS }, "latest"]);
-  const [a, b] = await Promise.all([one(rpcs[0]), one(rpcs[1])]);
-  return [a, b];
+  const answers: [unknown, unknown] = [undefined, undefined];
+  const answered = [false, false];
+  for (let n = 0, pause = 0; ; n++) {
+    const failed: unknown[] = [];
+    await Promise.all(
+      ([0, 1] as const).map(async (i) => {
+        if (answered[i]) return;
+        try {
+          answers[i] = await one(rpcs[i]);
+          answered[i] = true;
+        } catch (e) {
+          failed.push(e);
+        }
+      }),
+    );
+    if (failed.length === 0) break;
+    if (n >= waits) throw failed[0];
+    // the longest Retry-After any failed provider named (throttleWaitMs holds it to the bounds)
+    const after = Math.max(0, ...failed.map((e) => (e instanceof SolanaRpcTransportError && e.afterMs !== null ? e.afterMs : 0)));
+    pause = throttleWaitMs(pause, after, TOKEN_DECIMALS_THROTTLE);
+    await wait(pause);
+  }
+  const decimals = tokenDecimalsOf(chain, answers);
+  kept.keep(chain, token, decimals);
+  return decimals;
 }
 
 type PoolKind = "pool.deposit" | "pool.buy" | "pool.sell" | "pool.withdraw";
@@ -48,6 +137,10 @@ export type PoolKindsDeps = {
   rpcs(chain: PoolChain): readonly [PoolRpc, PoolRpc] | null;
   /** The ops' flow once their pool is pinned (src/pool-testnet.ts testnetPoolFlow); with none a checked request is refused. */
   flow?: (ask: PoolAsk, ctx: KindContext) => HostRefusal | Running<PoolKind> | HostAnswer<"pool.withdraw">;
+  /** The tokens' decimals kept this session (the page's PAGE_TOKEN_DECIMALS); none: a store of this poolKinds' own. */
+  decimals?: TokenDecimalsKept;
+  /** The first read's wait after a provider fails (tests replace it). */
+  wait?: (ms: number) => Promise<void>;
 };
 type Answer<K extends PoolKind> = HostRefusal | Deferred<K> | HostAnswer<K>;
 type Handler<K extends PoolKind> = (params: Record<string, unknown>, ctx: KindContext) => Answer<K>;
@@ -84,9 +177,9 @@ const runFlow = (flow: Flow, ask: PoolAsk, ctx: KindContext): ReturnType<Flow> |
   return "running" in got ? { running: true, after, answer } : { after, answer };
 };
 
-const checked = (p: PoolRequest, reads?: TokenDecimalsReads): PoolAsk | null => {
+const checked = (p: PoolRequest, decimals?: number): PoolAsk | null => {
   try {
-    return checkPoolRequest(p, reads);
+    return checkPoolRequest(p, decimals);
   } catch (e) {
     if (e instanceof PoolRuleRefused) return null;
     throw e;
@@ -95,6 +188,7 @@ const checked = (p: PoolRequest, reads?: TokenDecimalsReads): PoolAsk | null => 
 
 /** The four kinds' handlers for the page's api host. */
 export function poolKinds(deps: PoolKindsDeps): { [K in PoolKind]: Handler<K> } {
+  const kept = deps.decimals ?? tokenDecimalsKept();
   const handler =
     <K extends PoolKind>(kind: K): Handler<K> =>
     (params, ctx) => {
@@ -106,24 +200,25 @@ export function poolKinds(deps: PoolKindsDeps): { [K in PoolKind]: Handler<K> } 
         if (!deps.pinned(ask.chain) || !deps.flow) return NO;
         return runFlow(deps.flow, ask, ctx) as Answer<K>;
       }
-      // a sell: on a pinned pool's chain only, for a token that is an address of that chain, the token's decimals read
-      // on two providers, then the whole request checked with them; no read is made for any other string
+      // a sell: on a pinned pool's chain only, for a token that is an address of that chain, the token's decimals (kept,
+      // or read on two providers), then the whole request checked with them; no read is made for any other string
       if (!(["solana", "base", "robinhood"] as const).includes(chain as never) || !deps.pinned(chain)) return NO;
       const rpcs = deps.rpcs(chain);
       if (!rpcs || !poolTokenAddress(chain, p.token)) return NO;
       let answer: HostAnswer<K> | HostRefusal = NO;
-      const after = readTokenDecimals(chain, p.token, rpcs).then(
-        async (reads) => {
-          const ask = checked(p, reads);
+      const after = keptTokenDecimals(chain, p.token, rpcs, { kept, ...(deps.wait ? { wait: deps.wait } : {}) }).then(
+        async (decimals) => {
+          const ask = checked(p, decimals);
           const got = ask && deps.flow ? runFlow(deps.flow, ask, ctx) : NO;
           if (!("after" in got)) return void (answer = "error" in got ? got : NO); // a sell's flow answers only by running
           // the flow runs: its answer once its own wait settles (the send, or the run's end)
           await got.after.catch(() => {});
           answer = (got.answer() ?? NO) as HostAnswer<K> | HostRefusal;
         },
-        // either provider's read failed: down, and both reads are asked again with the request (one alone sets nothing)
-        () => {
-          answer = DOWN;
+        // two answers that do not parse or agree: not_allowed, as the rule refuses them; a provider's read that still
+        // failed past the waits: down, and the same request again reads again (nothing was kept)
+        (e: unknown) => {
+          answer = e instanceof PoolRuleRefused ? NO : DOWN;
         },
       );
       return { running: true, after, answer: () => answer };
