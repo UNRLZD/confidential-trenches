@@ -10,6 +10,10 @@
 // - To: an address made for the run from the seed (keccak of the seed and "withdraw-to"), a key no one uses again.
 // - What differs from the page in a browser, and only that: the prover is snarkjs's fullProve in this process on the
 //   pinned withdraw files, and the wallet store is fake-indexeddb in memory.
+// - FLOW_LOSE_SEND=1: W's onward send is lost (this process's every eth_sendRawTransaction is dropped before it leaves)
+//   until the run ends with the part owed on W. Then a restore from the words alone finds W and the part on it, and two
+//   page loads on the same store (a reload, and another tab beside it) each run the state reads' finish: W's one send
+//   leaves once, and the op ends sent.
 // - It reads To's and W's balances before and after on both RPCs, and every transaction's receipt on both, and writes
 //   them with the op record and the owed record to <out.json>. Nothing here logs a key or the words.
 import { createHash } from "node:crypto";
@@ -20,6 +24,19 @@ import { keccak_256 } from "@noble/hashes/sha3.js";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 
 globalThis.__SIGN_NETWORK__ = "testnet";
+// FLOW_LOSE_SEND: this process's raw sends dropped while `losing` (the page's only raw send is W's: the release goes
+// through the helper)
+const LOSE = process.env.FLOW_LOSE_SEND === "1";
+let losing = LOSE;
+let lost = 0;
+const realFetch = globalThis.fetch;
+globalThis.fetch = async (url, init) => {
+  if (losing && typeof init?.body === "string" && init.body.includes("eth_sendRawTransaction")) {
+    lost++;
+    throw new TypeError("fetch failed");
+  }
+  return realFetch(url, init);
+};
 const { entropyToWords, wordsToSeed64 } = await import("../../wallet/src/derive/index.ts");
 const { evmAddress, freshWallet } = await import("../../wallet/src/derive/keys.ts");
 const { openWalletStore } = await import("../../wallet/src/store/index.ts");
@@ -109,9 +126,29 @@ log(`ready: To ${ready.to}, amount ${ready.amount} wei, ${m.parts} part(s), Max 
 
 const toBefore = await balances(TO);
 const t0 = Date.now();
+const loseLog = {};
 // the screen's handoff is `void withdraw(ready, op id)`; the same call here, awaited, so the run's end is read after it
 if (typeof deps.handoff !== "function") throw new Error("the screen has no run for this chain");
 await t.withdraw(ready, OP);
+if (LOSE) {
+  const first = await w.get("ops", OP);
+  loseLog.first = { op: first, owed: (await w.get("meta", `owed/${OP}`)) ?? null, lost };
+  log(`lost send: the run ended ${JSON.stringify(first, big)}; ${lost} raw sends dropped; owed ${JSON.stringify(loseLog.first.owed)}`);
+  // a restore from the words alone (a fresh device): the spent note's W, and what it holds
+  const back = await evmRestoreNotes({ seed64: seed64.slice(), pin: PIN, rpcs, wallets: false });
+  loseLog.restore = await Promise.all(back.spends.map(async (sp) => ({ w: sp.w, balance: (await balances(sp.w)).map(String) })));
+  log(`restore from the words: ${back.notes.length} note(s), spends ${JSON.stringify(loseLog.restore)}`);
+  losing = false;
+  // a reload and another tab: two page loads on the same store, each one's state read runs the owed send's finish
+  const reload = testnetPool(page, { prover: { vault, stop: () => {} }, fetch: helperFetch });
+  const tab = testnetPool(page, { prover: { vault, stop: () => {} }, fetch: helperFetch });
+  for (let i = 0; i < 60 && (await w.get("ops", OP))?.stage !== "sent"; i++) {
+    await Promise.all([reload.stateRead(), tab.stateRead()]);
+    await new Promise((r) => setTimeout(r, 3_000));
+  }
+  await reload.signedOut();
+  await tab.signedOut();
+}
 const ms = Date.now() - t0;
 const op = await w.get("ops", OP);
 const owed = await w.get("meta", `owed/${OP}`);
@@ -137,7 +174,7 @@ for (const tx of op?.txs ?? []) {
 const arrived = toAfter.map((a, k) => (a - toBefore[k]).toString());
 log(`To ${TO}: before ${toBefore.join("/")}, after ${toAfter.join("/")}, arrived ${arrived.join("/")} (asked ${ready.amount}); W ${wAddr} left ${wLeft?.join("/")}`);
 const notes = (await ns.list()).map((n) => ({ id: n.id, ref: n.ref.kind, state: n.state, value: n.leaf ? String(n.leaf.value) : null }));
-writeFileSync(OUT, JSON.stringify({ by: "packages/signpage/scripts/pool-withdraw-evm-testnet.mjs", network: NETWORK, pool: PIN.pool, rpcs: RPCS, to: TO, amount: ready.amount, maxFee: ready.maxFee, funds: { fee: funds.fee, wFee: funds.wFee, minPart: funds.minPart }, op, owed: owed ?? null, ms, toBefore, toAfter, arrived, w: wAddr, wLeft, reads, notes, helper: helperLog }, big, 2) + "\n");
+writeFileSync(OUT, JSON.stringify({ by: "packages/signpage/scripts/pool-withdraw-evm-testnet.mjs", network: NETWORK, pool: PIN.pool, rpcs: RPCS, to: TO, amount: ready.amount, maxFee: ready.maxFee, funds: { fee: funds.fee, wFee: funds.wFee, minPart: funds.minPart }, op, owed: owed ?? null, ms, lose: LOSE ? loseLog : null, toBefore, toAfter, arrived, w: wAddr, wLeft, reads, notes, helper: helperLog }, big, 2) + "\n");
 log(`wrote ${OUT}`);
 await t.signedOut();
 seed64.fill(0);
