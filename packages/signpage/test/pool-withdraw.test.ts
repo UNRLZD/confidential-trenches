@@ -22,7 +22,7 @@ import { SolanaRpcTransportError, type SolanaRpc } from "../../kit/src/trade/sol
 import { noteCommitment, noteSecrets } from "../../wallet/src/notes/secrets.ts";
 import { openNoteStore, type NoteStore } from "../../wallet/src/notes/store.ts";
 import type { Pool } from "../../wallet/src/pool/pool.ts";
-import { SOL_EPOCH_MS, SOL_LADDER, SOL_LIFE_MS, SOL_SEND_MARGIN_MS, solanaContextOf, solanaPoolOf, type SolanaReleaseRequest } from "../../wallet/src/pool/solana.ts";
+import { SOL_EPOCH_MS, SOL_LADDER, SOL_LAG_WAIT_MS, SOL_LIFE_MS, SOL_REACH_WAITS, SOL_SEND_MARGIN_MS, solanaContextOf, solanaPageOf, solanaPoolOf, solanaTreeSync, type SolanaReleaseRequest } from "../../wallet/src/pool/solana.ts";
 import { signalsProver } from "../../wallet/test/withdraw-fixture.ts";
 import { BLOCKHASH, FEE_PAYER, POOL, PROGRAM, fx, rent } from "../../kit/test/solana-pool-buy-fx.ts";
 import { buildSolanaPoolBuy, type SolanaPoolRelease } from "../../kit/src/trade/solana/pool-buy.ts";
@@ -101,6 +101,63 @@ test("the plan finds an exact plan the largest-first walk misses, and names the 
 });
 
 // ---------- the run ----------
+
+// card pool-tree-read-waits-for-its-second: the wallet's real tree sync on two providers whose confirmed block is the
+// finalized one (mainnet, 12 Nov 19:00Z): leaf 0 landed before the epoch, leaf 1 (the note withdrawn) in now's own
+// block-second, so the epoch cut lacks it and the newest read at now + 1 must wait for the chain's next second
+function syncedTrees(advance: () => boolean, waits: number[]) {
+  return (state: readonly bigint[], labels: readonly bigint[]) => {
+    const nowS = NOW / 1000n;
+    const times = state.map((_, i) => (i === 0 ? nowS - 30n : nowS));
+    const pageOf = (tree: number, leaves: readonly bigint[]): Uint8Array => {
+      const d = new Uint8Array(16 + 72 * leaves.length);
+      d.set(new TextEncoder().encode("bfpage01"));
+      d[8] = tree;
+      leaves.forEach((leaf, i) => {
+        const b = (x: bigint) => Buffer.from(x.toString(16).padStart(64, "0"), "hex");
+        d.set(b(leaf), 16 + 72 * i);
+        d.set(b(new VaultTree(leaves.slice(0, i + 1)).root!), 16 + 72 * i + 32);
+        new DataView(d.buffer).setBigInt64(16 + 72 * i + 64, times[i]!, true);
+      });
+      return d;
+    };
+    const pages = new Map([[solanaPageOf(PROGRAM, 0, 0), pageOf(0, state)], [solanaPageOf(PROGRAM, 1, 0), pageOf(1, labels)]]);
+    const at = (url: string): SolanaRpc => Object.assign(async (m: string, p: readonly unknown[]): Promise<unknown> => {
+      if (m === "getBlockTime") return Number(nowS + (advance() ? 1n : 0n));
+      if (m !== "getMultipleAccounts") throw new Error(`no ${m}`);
+      return { context: { slot: 500 }, value: (p[0] as string[]).map((k) => (pages.has(k) ? { owner: PROGRAM, lamports: 1, executable: false, rentEpoch: 0, data: [base64.encode(pages.get(k)!), "base64"] } : null)) };
+    }, { url });
+    const sync = solanaTreeSync([at("https://a.example"), at("https://b.example")], PROGRAM, async (ms) => void waits.push(ms));
+    return sync.trees;
+  };
+}
+
+test("a withdraw of a note that landed in now's block-second waits for the chain's next second and proves it in the tree", async () => {
+  const waits: number[] = [];
+  const wd = await world([1_000n, 30_000_000n], { trees: syncedTrees(() => waits.length > 0, waits) });
+  const amount = 2_000_000n + MIN;
+  const a = await runPoolWithdraw(wd.host, ASK, TO, amount, COST);
+  assert.equal(a.stage, "sent");
+  assert.equal(a.cause, undefined);
+  assert.equal(wd.balance.get(TO), amount);
+  assert.ok(waits.length >= 1 && waits.length <= 2 && waits.every((ms) => ms === SOL_LAG_WAIT_MS), `a slot's wait a provider at most: ${waits}`);
+  // the proof's state root: the tree of both leaves, the note's own leaf 1 in it
+  assert.equal(solanaDecodePoolRelease(read(wd.releases[0]!).ixs.at(-1)!.data).stateRootIndex, 1, "the proof's root holds leaf 1");
+});
+
+test("a withdraw whose providers never reach now + 1 ends stopped after the cap, its cause kept", async () => {
+  const waits: number[] = [];
+  const wd = await world([1_000n, 30_000_000n], { trees: syncedTrees(() => false, waits) });
+  const a = await runPoolWithdraw(wd.host, ASK, TO, 2_000_000n + MIN, COST);
+  assert.equal(a.stage, "stopped");
+  assert.equal(wd.releases.length, 0, "nothing sent");
+  assert.ok(waits.length >= SOL_REACH_WAITS, `${waits.length} waits`);
+  assert.match(a.cause ?? "", /^SolanaNotReachedError not_reached\b/);
+  // the note is back to UNSPENT, for the next try
+  assert.equal((await wd.ns.get(wd.ids[1]!))?.state, "UNSPENT");
+  // the op's record keeps it
+  assert.equal(mergeWithdrawOp({ stage: "proving" }, { stage: "stopped", cause: a.cause! }).cause, a.cause);
+});
 
 test("a withdraw sends exactly the typed amount to To from one note: the release alone to W, then W's own send of all it holds, W at 0", async () => {
   const wd = await world([30_000_000n]);

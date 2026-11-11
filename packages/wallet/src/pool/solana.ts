@@ -233,6 +233,8 @@ export type SolanaPoolArgs = {
   relayFee: (epochStartMs: bigint, signal?: AbortSignal) => Promise<SolanaFeeAnswer>;
   /** tests only: the salt source (16 random bytes unless given) */
   salt?: () => Uint8Array;
+  /** tests only: the tree sync's wait between two reads (a slot's sleep unless given) */
+  lagWait?: SolanaLagWait;
 };
 
 type Rpcs = readonly [SolanaRpc, SolanaRpc];
@@ -250,13 +252,23 @@ const int = (x: unknown, what: string): number => {
   return x as number;
 };
 
-/** One slot's block time, ms. */
-async function blockTime(rpc: SolanaRpc, slot: number): Promise<{ slot: number; ms: bigint }> {
-  const t = await rpc("getBlockTime", [slot]);
-  return { slot, ms: BigInt(int(t, `getBlockTime(${slot})`)) * 1000n };
+/** One slot's block time, ms. A node that names a slot can answer its block time -32004 ("Block not available for
+ * slot", api.mainnet-beta on a slot it had just named finalized, 12 Nov 19:20Z): a moment behind its own slot, so read
+ * again a slot apart, at most SOL_REACH_WAITS times. Any other error is thrown as it came. */
+async function blockTime(rpc: SolanaRpc, slot: number, wait: SolanaLagWait = slotWait, signal?: AbortSignal): Promise<{ slot: number; ms: bigint }> {
+  for (let waits = 0; ; waits++) {
+    try {
+      const t = await rpc("getBlockTime", [slot]);
+      return { slot, ms: BigInt(int(t, `getBlockTime(${slot})`)) * 1000n };
+    } catch (e) {
+      if (waits >= SOL_REACH_WAITS || !(e instanceof Error) || !NOT_YET.test(e.message)) throw e;
+    }
+    await wait(SOL_LAG_WAIT_MS);
+    signal?.throwIfAborted();
+  }
 }
 /** One RPC's finalized slot and its block time, ms. */
-const finalTime = async (rpc: SolanaRpc): Promise<{ slot: number; ms: bigint }> => blockTime(rpc, int(await rpc("getSlot", [FINAL]), "getSlot"));
+const finalTime = async (rpc: SolanaRpc, signal?: AbortSignal): Promise<{ slot: number; ms: bigint }> => blockTime(rpc, int(await rpc("getSlot", [FINAL]), "getSlot"), slotWait, signal);
 
 /** One page entry, as stored. */
 type Entry = { leaf: bigint; root: bigint; t: bigint; bytes: Uint8Array };
@@ -291,10 +303,18 @@ type Commitment = "finalized" | "confirmed";
  * is thrown as it came (the kit's JSON-RPC client throws "RPC error <code>: <message>", trade/solana/send.ts). */
 export const SOL_LAG_SLOTS = 32;
 export const SOL_LAG_WAIT_MS = 400;
+/** A tree read whose block has not reached its cut is read again, a slot apart, at most this many times: 4 s. The
+ * cut a caller can ask beyond its chain's time is now + 1 (a note that landed in now's block-second), at most one
+ * block-second past a block both RPCs read finalized; mainnet's confirmed slot read equal to its finalized slot on two
+ * providers (12 Nov 19:00Z), so that second is about one second of chain time away, and a provider a few slots behind
+ * the other (up to 4 on 3 Nov, 1.6 s) adds that. 4 s covers both with room; past it a provider is stalled, and the read
+ * is refused as before rather than eat the send's margin (SOL_SEND_MARGIN_MS, 90 s). */
+export const SOL_REACH_WAITS = 10;
 /** The wait between two calls of a lagging read; tests pass one that returns at once. */
 export type SolanaLagWait = (ms: number) => Promise<void>;
 const slotWait: SolanaLagWait = (ms) => new Promise((ok) => setTimeout(ok, ms));
 const LAGGING = /RPC error -32016\b/;
+const NOT_YET = /RPC error -32004\b/;
 export async function solanaLagRetry<T>(f: () => Promise<T>, wait: SolanaLagWait = slotWait, signal?: AbortSignal): Promise<T> {
   for (let slots = 0; ; slots++) {
     try {
@@ -342,6 +362,16 @@ async function readPages(rpc: SolanaRpc, program: string, from: readonly [number
   return { pages, slot, top };
 }
 
+/** A tree read refused because one RPC's block never reached the cut within SOL_REACH_WAITS waits; `code` names it in
+ * an op's cause (public words only). */
+export class SolanaNotReachedError extends Error {
+  readonly code = "not_reached";
+  constructor(m: string) {
+    super(m);
+    this.name = "SolanaNotReachedError";
+  }
+}
+
 /** What a trees() call may ask beyond the cut: the newest root of a deposit's own note, read at confirmed (M355 (5)). */
 export type SolanaTreesOpts = { newest?: boolean };
 
@@ -376,13 +406,23 @@ export function solanaTreeSync(rpcs: readonly [SolanaRpc, SolanaRpc], program: s
     const base = [held[0], held[1]] as const;
     const from = [Math.floor(base[0].length / SOL_PAGE_ENTRIES), Math.floor(base[1].length / SOL_PAGE_ENTRIES)] as const;
     const reads = await both(on, async (rpc, k) => {
-      const r = await readPages(rpc, program, from, commitment, Math.max(minSlot, lastSlot[k]!), signal, lagWait);
-      // every leaf under the cut is in only once the block read at is at or past beforeMs: a later block's time is too
-      if (beforeMs !== null) {
-        const { ms } = await blockTime(rpc, r.slot);
-        if (ms < beforeMs) throw new Error(`rpc ${k}: its read at slot ${r.slot} (${ms} ms) has not reached ${beforeMs}`);
+      // The cut keeps every entry whose block time (whole seconds, the Clock's) is below beforeMs. It holds every such
+      // leaf only once this RPC's read is at a block whose time is at or past beforeMs: block times never go back, so a
+      // leaf not in the read lands at that time or later, outside the cut. A read short of it is read again, a slot
+      // apart, at or past the slot it read at (a wait on chain time alone, never a cut moved), at most SOL_REACH_WAITS
+      // times; then refused. This is the one place every caller's cut is checked (now + 1 for a note that landed in
+      // now's second: the queue's first proof, a withdraw; the epoch's start for every other).
+      let min = Math.max(minSlot, lastSlot[k]!);
+      for (let waits = 0; ; waits++) {
+        const r = await readPages(rpc, program, from, commitment, min, signal, lagWait);
+        if (beforeMs === null) return r;
+        const { ms } = await blockTime(rpc, r.slot, lagWait, signal);
+        if (ms >= beforeMs) return r;
+        if (waits >= SOL_REACH_WAITS) throw new SolanaNotReachedError(`rpc ${k}: its read at slot ${r.slot} (${ms} ms) has not reached ${beforeMs} after ${waits} waits`);
+        await (lagWait ?? slotWait)(SOL_LAG_WAIT_MS);
+        signal?.throwIfAborted();
+        min = Math.max(min, r.slot);
       }
-      return r;
     }, signal);
     const next: Entry[][] = [];
     const cuts: Entry[][] = [];
@@ -446,7 +486,7 @@ export function solanaPoolTrees(rpcs: readonly [SolanaRpc, SolanaRpc], program: 
 /** Each of two RPCs' finalized slot and that block's time, ms. */
 export async function solanaFinalTimes(rpcs: readonly [SolanaRpc, SolanaRpc], signal?: AbortSignal): Promise<[{ slot: number; ms: bigint }, { slot: number; ms: bigint }]> {
   checkSolanaRpcs(rpcs);
-  return both(rpcs, (rpc) => finalTime(rpc), signal);
+  return both(rpcs, (rpc) => finalTime(rpc, signal), signal);
 }
 
 /** The pool's time: the lower of two RPCs' finalized block times, ms. */
@@ -496,7 +536,7 @@ export function solanaPool(a: SolanaPoolArgs): Pool<SolanaReleaseRequest> {
   const { program, feePayer } = a.pin;
   const { pool, scope } = solanaPoolOf(program);
   if (feePayer === pool) throw new Error("feePayer: the pool");
-  const sync = solanaTreeSync(a.rpcs, program);
+  const sync = solanaTreeSync(a.rpcs, program, a.lagWait);
   // the epoch's fee, computed once per epoch from the device's own reads
   const fees = new Map<bigint, Promise<{ rent: SolanaRent; cost: bigint; fee: bigint }>>();
   const feeOf = (epochStartMs: bigint, signal?: AbortSignal) => {

@@ -58,6 +58,7 @@ import { checkSolanaOnwardSend, checkSolanaWithdraw, PoolRuleRefused, signSolana
 // moved to rules/pool.ts (card sol-buy-rent-back: the sweep's floor is the withdraw's note floor); named here still
 export { solanaWithdrawMinPart, withdrawNoteFloor, type WithdrawCosts } from "./rules/pool.ts";
 import { spendOwner, type HistoryPlaces } from "./pool-spend.ts";
+import { legCause } from "./pool-sell.ts";
 // moved to pool-spend.ts (card signpage-buy-own-spend: pool-buy.ts reads them too, with no import cycle); named here still
 export { HISTORY_PAGE, HISTORY_PASS, spendOwner, type HistoryPlaces } from "./pool-spend.ts";
 
@@ -206,11 +207,20 @@ export type PendingOnward = { noteId: string; attempt: string; context: string; 
 export type Arrivals = Record<string, string>;
 /** feeNeeded: W's fee the network reads now when it is over the part's ceiling (lamports, a decimal): the send stays
  *  owed until the Max fee is drawn again. */
-export type PoolWithdrawAnswer = { stage: WithdrawStage; txs: TxRef[]; pending: PendingOnward | null; arrived: Arrivals; feeNeeded?: string };
+/** `cause`: why a run ended on a throw, in public words only (pool-sell.ts legCause: the error's name, its code, where
+ *  it was thrown, never its text); for the op's record and the page's console, never a screen. */
+export type PoolWithdrawAnswer = { stage: WithdrawStage; txs: TxRef[]; pending: PendingOnward | null; arrived: Arrivals; feeNeeded?: string; cause?: string };
 /** A finish's verdict: the op's stage and what its send added; feeNeeded set keeps the send owed. */
 export type PoolOnwardFinish = { stage: WithdrawStage; txs: TxRef[]; arrived: Arrivals; feeNeeded?: string };
 
-class Stop extends Error {}
+/** A run's own refusal, its word in `code` (an op's cause names it, legCause). */
+class Stop extends Error {
+  readonly code: string;
+  constructor(why: string) {
+    super(why);
+    this.code = why;
+  }
+}
 const stop = (why: string): never => {
   throw new Stop(why);
 };
@@ -378,8 +388,8 @@ export async function runPoolWithdraw(h: PoolWithdrawHost, ask: PoolAsk, to: str
       if (i < plan!.length - 1) say("submitted");
     }
     return end("sent");
-  } catch {
-    return end(pending ? "in_transit" : "stopped");
+  } catch (e) {
+    return { ...end(pending ? "in_transit" : "stopped"), cause: legCause(e) };
   }
 }
 

@@ -13,6 +13,8 @@ import { NEAR_EPOCH_MS, NEAR_LIFE_MS, USDC_LADDER, nearVaultPool } from "../src/
 import { chainNow, NEWEST_GRACE_MS, NOW_REUSE_MS, TAKE_SLACK_MS, type ChainNow, type Pool, type PoolBindArgs, type PoolTrees, type ReadyProof } from "../src/pool/pool.ts";
 import { openProofQueue, proofPoolSize, readySetSize, type ProofQueue } from "../src/pool/queue.ts";
 import { poolBalances, type BalancePool } from "../src/pool/balances.ts";
+import { solanaPageOf, solanaTreeSync } from "../src/pool/solana.ts";
+import { base58, base64 } from "@scure/base";
 import {
   BLOCK_MS, BLOCK_NS, closeVaults, FEE_MAX, FEE_RECIPIENT, feeReplay, REGISTER_DEPOSIT, SCOPE, SEED, signalsProver, TOKEN, VAULT, vaultWith, type Vault,
 } from "./withdraw-fixture.ts";
@@ -325,6 +327,50 @@ test("a deposit's own note is proved at once on the newest root, and on the epoc
   const again = q.ready().find((r) => r.noteId === dep.id)!;
   assert.equal(again.root, "epoch");
   assert.equal(again.publicSignals[3], pool.rootAt(START + E).state.toString());
+});
+
+// card pool-tree-read-waits-for-its-second: the wallet's real Solana tree sync on two providers whose confirmed block is
+// the finalized one (mainnet, 12 Nov 19:00Z): a pass reads now, then the newest trees at now + 1 a few ms later, in the
+// same block-second; on mainnet copy runs the buy's first proof failed 15 and 30 passes in a row
+test("a deposit's own note landed in now's block-second is proved in one pass: the newest read waits for the chain's next second", async () => {
+  const v = await vaultWith([usd(2)]);
+  const pool = fakePool(v);
+  pool.t.now += 10_000n;
+  const before = v.stateLeaves.length;
+  const dep = await landDeposit(v, pool, usd(50), 1000n);
+  const program = base58.encode(new Uint8Array(32).fill(3));
+  const waits: number[] = [];
+  const sec = (ms: bigint) => ms / 1000n;
+  // leaves before the deposit landed an hour ago (T0), the deposit's in now's second
+  const pageOf = (tree: number, leaves: readonly bigint[], landedFrom: number): Uint8Array => {
+    const d = new Uint8Array(16 + 72 * leaves.length);
+    d.set(new TextEncoder().encode("bfpage01"));
+    d[8] = tree;
+    const b = (x: bigint) => Buffer.from(x.toString(16).padStart(64, "0"), "hex");
+    leaves.forEach((leaf, i) => {
+      d.set(b(leaf), 16 + 72 * i);
+      d.set(b(new VaultTree(leaves.slice(0, i + 1)).root!), 16 + 72 * i + 32);
+      new DataView(d.buffer).setBigInt64(16 + 72 * i + 64, i < landedFrom ? sec(T0) : sec(pool.t.now), true);
+    });
+    return d;
+  };
+  const pages = new Map([[solanaPageOf(program, 0, 0), pageOf(0, v.stateLeaves, before)], [solanaPageOf(program, 1, 0), pageOf(1, v.labelLeaves, v.labelLeaves.length - 1)]]);
+  const at = (url: string) => Object.assign(async (m: string, p: readonly unknown[]): Promise<unknown> => {
+    if (m === "getBlockTime") return Number(sec(pool.t.now) + (waits.length > 0 ? 1n : 0n));
+    if (m !== "getMultipleAccounts") throw new Error(`no ${m}`);
+    return { context: { slot: 500 }, value: (p[0] as string[]).map((k) => (pages.has(k) ? { owner: program, lamports: 1, executable: false, rentEpoch: 0, data: [base64.encode(pages.get(k)!), "base64"] } : null)) };
+  }, { url });
+  const sync = solanaTreeSync([at("https://a.example"), at("https://b.example")], program, async (ms) => void waits.push(ms));
+  pool.trees = sync.trees;
+  const q = queue(v, pool);
+  let passes = 0;
+  const out = await q.refresh().finally(() => passes++);
+  assert.deepEqual(out.failed, [], "no note failed its pass");
+  assert.equal(passes, 1);
+  const fresh = q.ready().find((r) => r.noteId === dep.id);
+  assert.equal(fresh?.root, "newest", "the deposit's note is ready after one pass");
+  assert.equal(fresh!.publicSignals[3], v.stateTree.root!.toString(), "on the newest root, its own leaf in it");
+  assert.ok(waits.length >= 1 && waits.length <= 2, `a slot's wait a provider at most: ${waits}`);
 });
 
 test("a failed newest read fails only the deposit note waiting on it: the epoch's notes are still made, and the newest read asks newest (M355 (5))", async () => {

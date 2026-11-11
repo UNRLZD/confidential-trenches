@@ -252,13 +252,14 @@ const STAGE_RANK: Readonly<Record<WithdrawStage, number>> = { proving: 0, submit
  *  the op names only the note's random id. */
 export function mergeWithdrawOp(
   v: unknown,
-  w: { stage?: WithdrawStage; txs?: readonly TxRef[]; arrived?: Arrivals; owe?: string; clear?: string; feeNeeded?: string },
+  w: { stage?: WithdrawStage; txs?: readonly TxRef[]; arrived?: Arrivals; owe?: string; clear?: string; feeNeeded?: string; cause?: string },
 ): Record<string, unknown> {
   const r = { ...(v as Record<string, unknown>) };
   const was = STAGE_RANK[r.stage as WithdrawStage] ?? -1;
   const ours = w.clear === undefined || r.owed === undefined || r.owed === w.clear;
   if (w.stage !== undefined && STAGE_RANK[w.stage] >= was && ours) r.stage = w.stage;
   if (w.feeNeeded !== undefined) r.fee_needed = w.feeNeeded;
+  if (w.cause !== undefined) r.cause = w.cause;
   const txs = [...((r.txs as TxRef[] | undefined) ?? [])];
   for (const t of w.txs ?? []) if (!txs.some((x) => x.hash === t.hash)) txs.push(t);
   r.txs = txs;
@@ -2047,6 +2048,11 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         );
         write(end.stage, end.txs, end.pending, end.arrived);
         if (end.feeNeeded !== undefined) void (writes = writes.then(() => ops.update("ops", opId, (v) => mergeWithdrawOp(v, { feeNeeded: end.feeNeeded! }))).catch(() => {}));
+        // why a run ended on a throw, on the record and the page's console (public words only: legCause)
+        if (end.cause !== undefined) {
+          console.warn(`withdraw ${end.stage}: ${end.cause}`);
+          void (writes = writes.then(() => ops.update("ops", opId, (v) => mergeWithdrawOp(v, { cause: end.cause! }))).catch(() => {}));
+        }
         if (end.pending) owedScan = true;
       } finally {
         notes.close();

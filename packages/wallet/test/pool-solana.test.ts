@@ -21,7 +21,7 @@ import { refKey } from "../src/notes/store.ts";
 import { checkPool } from "../src/pool/pool.ts";
 import { RESTORE_LANES, WALK_SLICE_MS } from "../src/notes/restore.ts";
 import {
-  SOL_LAG_SLOTS, SOL_LAG_WAIT_MS, SOL_PAGES_A_CALL, SOL_LIFE_MS, type SolanaLagWait, solanaLagRetry, SOL_TIP_CAP, solanaContextOf, solanaEpochFee, solanaNow, solanaPageOf, solanaPool, solanaPoolOf, solanaTreeSync, type SolanaFeeAnswer,
+  SOL_LAG_SLOTS, SOL_LAG_WAIT_MS, SOL_REACH_WAITS, SOL_PAGES_A_CALL, SOL_LIFE_MS, type SolanaLagWait, solanaLagRetry, SOL_TIP_CAP, solanaContextOf, solanaEpochFee, solanaNow, solanaPageOf, solanaPool, solanaPoolOf, solanaTreeSync, type SolanaFeeAnswer,
 } from "../src/pool/solana.ts";
 
 type Spend = { name: string; note: number; new_commitment: string; withdrawn: string; state_root_index: number; label_root_index: number; salt: string; public_signals: string[] };
@@ -172,7 +172,7 @@ const feeAnswer = (epochStartMs: bigint, fee = "1300000", over: Partial<SolanaFe
   chain: "solana", program: PROGRAM, pool: POOL, fee_payer: FEE_PAYER, epoch_ms: 60_000, epoch_start_ms: Number(epochStartMs), fee, step: "100000", ...over,
 });
 const poolWith = (rpcs: [SolanaRpc, SolanaRpc], fee: (e: bigint) => SolanaFeeAnswer = (e) => feeAnswer(e)) =>
-  solanaPool({ pin: PIN, rpcs, relayFee: async (e) => fee(e), salt: () => unhex(R.spends[0]!.salt) });
+  solanaPool({ pin: PIN, rpcs, relayFee: async (e) => fee(e), salt: () => unhex(R.spends[0]!.salt), lagWait: async () => {} });
 
 test("the pool's address and scope are the program's (deposit.rs init, context.rs scope_of)", () => {
   assert.deepEqual(solanaPoolOf(PROGRAM), { pool: POOL, scope: SCOPE });
@@ -971,6 +971,63 @@ test("RV9: the newest read (trees(now + 1), right after now) is at confirmed on 
   const newest = await p.trees(nowMs + 1n, undefined, { newest: true });
   assert.equal(newest.stateTree.size, 7, "the confirmed read reaches now + 1, without the deposit 13 s later");
   assert.equal((await p.trees(nowMs)).stateTree.size, 6, "the epoch read is finalized and held nothing from the confirmed one");
+});
+
+// card pool-tree-read-waits-for-its-second: mainnet's confirmed slot read equal to its finalized slot (19:00Z, 12 Nov), so
+// a newest read right after now (now + 1) is in now's own block-second until the chain makes its next one
+test("the newest read at now + 1 waits a slot at a time for the chain's next block-second, the note that landed now in its tree", async () => {
+  const fin = relChain();
+  let waits = 0;
+  // confirmed is finalized: one chain, its block time the release's second until a wait, one second later after it
+  const at = (url: string): SolanaRpc => Object.assign(async (m: string, p: readonly unknown[]) => rpc({ ...fin, time: () => REL_RELEASE_T + (waits > 0 ? 1n : 0n) }, MAINNET)(m, p), { url });
+  const rs: [SolanaRpc, SolanaRpc] = [at("https://a.example"), at("https://b.example")];
+  const asked: number[] = [];
+  const sync = solanaTreeSync(rs, PROGRAM, async (ms) => void (asked.push(ms), waits++));
+  const nowMs = await solanaNow(rs);
+  assert.equal(nowMs, REL_RELEASE_T * 1000n);
+  const newest = await sync.trees(nowMs + 1n, undefined, { newest: true });
+  assert.equal(newest.stateTree.size, 7, "the release's change note, landed in now's second, is in the tree");
+  assert.equal(newest.stateRoot, new VaultTree([...REL_DEP.map((e) => e.leaf), big(R.spends[0]!.new_commitment)]).root, "its 7th leaf the release's change note");
+  assert.equal((await sync.trees(nowMs)).stateTree.size, 6, "a cut at now itself leaves it out");
+  assert.ok(waits >= 1 && waits <= 2, `one wait a provider at most (${waits})`);
+  assert.ok(asked.every((ms) => ms === SOL_LAG_WAIT_MS), "each wait a slot");
+});
+
+test("a read that never reaches the cut is refused after SOL_REACH_WAITS waits of a slot on that provider, the reached check kept", async () => {
+  const fin = relChain();
+  let waits = 0;
+  const at = (url: string): SolanaRpc => Object.assign(async (m: string, p: readonly unknown[]) => rpc({ ...fin, time: () => REL_RELEASE_T }, MAINNET)(m, p), { url });
+  const sync = solanaTreeSync([at("https://a.example"), at("https://b.example")], PROGRAM, async () => void waits++);
+  await assert.rejects(sync.trees(REL_RELEASE_T * 1000n + 1n, undefined, { newest: true }), { name: "SolanaNotReachedError", message: /^rpc [01]: its read at slot 500 \(1800000100000 ms\) has not reached 1800000100001 after 10 waits$/ });
+  assert.ok(waits >= SOL_REACH_WAITS, `${waits} waits`);
+  assert.equal(SOL_REACH_WAITS * SOL_LAG_WAIT_MS, 4_000, "the cap: 4 s");
+  // an abort during a wait stops the read at once, no read after it
+  const ctl = new AbortController();
+  const stopped = solanaTreeSync([at("https://a.example"), at("https://b.example")], PROGRAM, async () => ctl.abort());
+  await assert.rejects(stopped.trees(REL_RELEASE_T * 1000n + 1n, ctl.signal, { newest: true }), { name: "AbortError" });
+});
+
+// read on mainnet 12 Nov 19:20Z: api.mainnet-beta answered getBlockTime of a slot it had just named finalized with
+// -32004 "Block not available for slot": a node a moment behind its own slot, read again a slot apart like -32016
+test("a block time not available yet (-32004) is read again a slot apart, for now and for the reached check; another error is thrown", async () => {
+  const fin = relChain();
+  const asked = new Map<number, number>();
+  const at = (url: string, code = -32004): SolanaRpc => Object.assign(async (m: string, p: readonly unknown[]) => {
+    if (m === "getBlockTime") {
+      const n = (asked.get(p[0] as number) ?? 0) + 1;
+      asked.set(p[0] as number, n);
+      if (n === 1) throw new Error(`RPC error ${code}: Block not available for slot ${p[0]}`);
+    }
+    return rpc({ ...fin, time: () => REL_RELEASE_T }, MAINNET)(m, p);
+  }, { url });
+  let waits = 0;
+  const sync = solanaTreeSync([at("https://a.example"), at("https://b.example")], PROGRAM, async () => void waits++);
+  assert.equal((await sync.trees(REL_RELEASE_T * 1000n)).stateTree.size, 6);
+  assert.ok(waits >= 1, "a wait before the read again");
+  asked.clear();
+  assert.equal(await solanaNow([at("https://a.example"), at("https://b.example")]), REL_RELEASE_T * 1000n);
+  asked.clear();
+  await assert.rejects(solanaTreeSync([at("https://a.example", -32005), at("https://b.example", -32005)], PROGRAM, async () => {}).trees(REL_RELEASE_T * 1000n), /RPC error -32005/);
 });
 
 test("RV11: an RPC behind what the sync holds, but past the cut, is read at its last slot and not refused as changed", async () => {

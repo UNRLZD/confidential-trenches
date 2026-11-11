@@ -85,6 +85,8 @@ export type Plant = {
   helper502?: boolean;
   /** both RPCs' finalized block height (1,000, past every blockhash, when not given) */
   finalHeight?: number;
+  /** the pool's trees from the world's leaves (the wallet's real tree sync, say); the world's whole trees when not given */
+  trees?: (state: readonly bigint[], labels: readonly bigint[]) => Pool<SolanaReleaseRequest>["trees"];
 };
 /** Both RPCs' finalized slot in the world. */
 export const FINAL_SLOT = 20;
@@ -116,7 +118,7 @@ export async function world(values: readonly bigint[], plant: Plant = {}) {
   const pool: Pool<SolanaReleaseRequest> = {
     id: `sol:${PROGRAM}`, chain: "sol", scope: SCOPE, ladder: SOL_LADDER, epochMs: SOL_EPOCH_MS, lifeMs: SOL_LIFE_MS, sendMarginMs: SOL_SEND_MARGIN_MS,
     now: async () => NOW,
-    trees: async () => ({ stateTree: tree(state), labelTree: tree(labels), stateRoot: tree(state).root!, labelRoot: tree(labels).root! }),
+    trees: plant.trees?.(state, labels) ?? (async () => ({ stateTree: tree(state), labelTree: tree(labels), stateRoot: tree(state).root!, labelRoot: tree(labels).root! })),
     // the wallet's solanaPool bind, with the helper's fee as planted (the real one refuses a fee not the device's)
     bind: async (b) => {
       const fee = plant.helperFee ?? FEE;
