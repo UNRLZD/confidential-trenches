@@ -420,6 +420,8 @@ test("the page answers it (src/main.ts): the kind on the trades' paced pair as b
   assert.match(main, /const buys = liveRuns\(poolKindMap\["pool\.buy"\]\);\n  poolKindMap\["pool\.buy"\] = buys\.kind;/, "a buy counted to its first answer, its early sent (devnet run 11: to Final it kept the preview busy 33.8 s)");
   assert.match(main, /const sells = liveRuns\(poolKindMap\["pool\.sell"\]\);\n  poolKindMap\["pool\.sell"\] = sells\.kind;/);
   assert.doesNotMatch(main, /liveRuns\([^)]*"final"/, "no trade counted to its final progress post");
+  assert.match(main, /const deposits = liveRuns\(poolKindMap\["pool\.deposit"\]\);\n  poolKindMap\["pool\.deposit"\] = deposits\.kind;\n  const withdraws = liveRuns\(poolKindMap\["pool\.withdraw"\]\);\n  poolKindMap\["pool\.withdraw"\] = withdraws\.kind;/);
+  assert.match(main, /trades: \(\) => buys\.edges\(\) \+ sells\.edges\(\) \+ deposits\.edges\(\) \+ withdraws\.edges\(\),/, "every pool trade's start and end drops the kept reads (review of be303082, P1)");
   assert.match(main, /trading: \(\) => buys\.live\(\) \+ sells\.live\(\) > 0 \|\| \(dryPair\(\) \?\? \[\]\)\.some\(\(r\) => r\.url !== undefined && hostLane\(r\.url\)\.trading\(\)\),/);
   const tp = readFileSync(new URL("../src/pool-testnet.ts", import.meta.url), "utf8");
   assert.match(tp, /positionsNow: \(\) => positions\.get\(\),/);
@@ -460,9 +462,11 @@ test("a pool buy runs from its tap to its first answer, its early \"sent\", whil
   const seen: string[] = [];
   b.kind({}, ctx(seen));
   assert.equal(b.live(), 1);
+  assert.equal(b.edges(), 1, "its start");
   answered();
   await new Promise((r) => setTimeout(r, 0));
   assert.equal(b.live(), 0, "answered sent: no longer running, though its read-backs go on");
+  assert.equal(b.edges(), 2, "and its end");
   post("filled");
   assert.equal(b.live(), 0);
   assert.deepEqual(seen, ["filled"], "progress passes through");
@@ -487,7 +491,7 @@ test("a pool buy runs from its tap to its first answer, its early \"sent\", whil
   assert.equal(late.live(), 0, "the backstop");
 });
 
-test("the kept answers: four shares inside 2 s make three calls per provider in all and four answers; a trade meanwhile costs nothing; past the age one read again; a sign out drops them", async () => {
+test("the kept answers: four shares inside 2 s make three calls per provider in all and four answers; a trade meanwhile: busy, no call, nothing kept taken; past the age one read again; a sign out drops them", async () => {
   const c = clock();
   const log: string[] = [];
   let trading = false;
@@ -507,9 +511,10 @@ test("the kept answers: four shares inside 2 s make three calls per provider in 
   assert.equal(log.length, 6, "three calls per provider for the four");
   assert.equal(new Set(outs).size, 4, `four answers ${outs}`);
   for (const [i, bps] of shares.entries()) assert.equal(((await poolSellDry(deps(), share(MINT, bps))) as { result: { out: string } }).result.out, outs[i], "each share's own answer, as a preview of it alone");
-  // a trade tapped meanwhile (1.6 s in): the ask reads nothing, so the trade's reads wait on nothing of it
+  // a trade tapped meanwhile (1.6 s in): busy, as before the kept answers (the trade may change what they read), and the
+  // ask reads nothing, so the trade's reads wait on nothing of it
   trading = true;
-  assert.ok((await ask(3_000)).result);
+  assert.deepEqual(await ask(3_000), { error: "busy" });
   assert.equal(log.length, 6, "no call while the trade runs");
   trading = false;
   // past the age: one read again
@@ -878,4 +883,121 @@ test("the Ws bought since are read before the pass's (their tokens count only wh
   assert.deepEqual(await poolSellDry(d5(), { chain: "solana", token: MINT, amount: "5", slippage_bps: 1000 }), { error: "busy" }, "past what was read: not now");
   assert.ok("result" in (await poolSellDry(d5(), { chain: "solana", token: MINT, amount: "3", slippage_bps: 1000 })), "within what was read: a number");
   assert.ok("result" in (await poolSellDry(d5(), share(MINT, 10_000))), "a share: a number on what was read");
+});
+
+// The review of be303082 (P1): the kept answers outlived the page's own trades, so a preview right after a sale was
+// priced on reads from before it (a W of the pass sold half: a number with no fresh read; a W bought since halved: 1.1087
+// kept against 1.0537 read). They are dropped at every start and end of a pool trade of this page (deps.trades), and
+// taken only after the trading check.
+type TState = { passWs: string[]; since: Map<string, bigint>; fail: boolean; calls: number };
+/** A pair for the Ws of `st`: the pass's at ENOUGH lamports, each bought since holding `st.since`; failing every call
+ *  while `st.fail`; host 1's calls counted. */
+function tradePair(st: TState): readonly [SolanaRpc, SolanaRpc] {
+  return pair("pump").map((rpc, i) => (async (method: string, params: readonly unknown[]) => {
+    if (i === 0) st.calls++;
+    if (st.fail) throw new Error("a fresh read");
+    const l = params[0] as string[];
+    const sys = { lamports: Number(ENOUGH), owner: "11111111111111111111111111111111", data: ["", "base64"] };
+    if (method === "getMultipleAccounts" && Array.isArray(l)) {
+      for (const [w, h] of st.since) if (l[0] === solanaAta(w, MINT, MINT_PROGRAM)) return { context: { slot: 1 }, value: [{ lamports: 2_039_280, owner: MINT_PROGRAM, data: [tokenBytes(h, w), "base64"] }, sys, null, null] };
+      if (st.passWs.includes(l[0]!) || (l.length === 1 && l[0] === POOL)) return { context: { slot: 1 }, value: l.map((a) => (a === POOL ? { lamports: 1, owner: PROGRAM, data: [poolBytes(...SIZES), "base64"] } : st.passWs.includes(a) ? sys : null)) };
+    }
+    return rpc(method, params);
+  }) as SolanaRpc) as unknown as readonly [SolanaRpc, SolanaRpc];
+}
+
+test("a sale on this page: the next preview reads again, never the reads from before it (a W of the pass sold half, every fresh read failing: no number)", async () => {
+  const st: TState = { passWs: [MANY[0]!], since: new Map(), fail: false, calls: 0 };
+  let amount = "4000000";
+  let trades = 0;
+  let trading = false;
+  const k = poolSellDryKind(deps({ rpcs: () => tradePair(st), trading: () => trading, trades: () => trades, positions: () => [pos(MINT, amount, 6, st.passWs)], bought: async () => sw([], new Map([[MANY[0]!, HELD]])) }));
+  const ask = async (bps: number): Promise<object> => {
+    const r = k(share(MINT, bps));
+    await r.after;
+    return r.answer() as object;
+  };
+  assert.ok("result" in (await ask(5_000)));
+  // the sale starts: busy while it runs, as before, and the kept reads not taken
+  trades++;
+  trading = true;
+  assert.deepEqual(await ask(5_000), { error: "busy" }, "while the sale runs");
+  trading = false;
+  trades++;
+  amount = "2000000";
+  st.fail = true;
+  const c0 = st.calls;
+  const after = await ask(10_000);
+  assert.ok(!("result" in after), `no number on the reads from before the sale: ${JSON.stringify(after)}`);
+  assert.ok(st.calls > c0, "read again");
+});
+
+test("a W bought since, half sold on this page: the next preview prices what it holds now, never the kept half more", async () => {
+  const W = MANY[5]!;
+  const st: TState = { passWs: [], since: new Map([[W, HELD]]), fail: false, calls: 0 };
+  const since = [{ address: W, program: MINT_PROGRAM, decimals: 6, received: "4000000" }];
+  let trades = 0;
+  const c = clock();
+  const k = poolSellDryKind(deps({ now: c.now, rpcs: () => tradePair(st), trades: () => trades, positions: () => [], bought: async () => sw(since) }));
+  const ask = async (): Promise<{ result?: { out: string } }> => {
+    const r = k(share(MINT, 10_000));
+    await r.after;
+    return r.answer() as { result?: { out: string } };
+  };
+  const first = await ask();
+  assert.ok(first.result, JSON.stringify(first));
+  trades += 2;
+  st.since.set(W, HELD / 2n);
+  // right after the sale, the window still spent by the first preview's reads: busy (the box keeps its last number
+  // dimmed), never the kept one; past it, read again
+  assert.deepEqual(await ask(), { error: "busy" }, "inside the window: not now, not the kept number");
+  c.add(POOL_SELL_DRY_WINDOW_MS);
+  const kept = await ask();
+  const fresh = await poolSellDry(deps({ rpcs: () => tradePair(st), positions: () => [], bought: async () => sw(since) }), share(MINT, 10_000));
+  assert.ok("result" in fresh && kept.result, JSON.stringify([kept, fresh]));
+  assert.equal(kept.result.out, fresh.result.out, "what W holds now");
+  assert.ok(Number(kept.result.out) < Number(first.result!.out), "less than before the sale");
+});
+
+test("a buy of the same token inside the window: the next preview reads again, the new W with it", async () => {
+  const st: TState = { passWs: [MANY[0]!], since: new Map(), fail: false, calls: 0 };
+  let trades = 0;
+  let since: BoughtW[] = [];
+  const c = clock();
+  const k = poolSellDryKind(deps({ now: c.now, rpcs: () => tradePair(st), trades: () => trades, positions: () => [pos(MINT, "4000000", 6, st.passWs)], bought: async () => sw(since, new Map([[MANY[0]!, HELD]])) }));
+  const ask = async (): Promise<{ result?: { out: string }; error?: string }> => {
+    const r = k(share(MINT, 10_000));
+    await r.after;
+    return r.answer() as { result?: { out: string }; error?: string };
+  };
+  const first = await ask();
+  assert.ok(first.result, JSON.stringify(first));
+  // the buy: W 2 bought since, holding as much again; the window spent by the first preview's reads is past
+  trades += 2;
+  st.since.set(MANY[1]!, HELD);
+  since = [{ address: MANY[1]!, program: MINT_PROGRAM, decimals: 6, received: "4000000" }];
+  c.add(POOL_SELL_DRY_WINDOW_MS);
+  const c0 = st.calls;
+  const after = await ask();
+  assert.ok(after.result, JSON.stringify(after));
+  assert.ok(st.calls > c0, "read again");
+  const fresh = await poolSellDry(deps({ rpcs: () => tradePair(st), positions: () => [pos(MINT, "4000000", 6, st.passWs)], bought: async () => sw(since, new Map([[MANY[0]!, HELD]])) }), share(MINT, 10_000));
+  const out = after.result!.out;
+  assert.deepEqual(after, fresh, "both Ws, as a preview of them alone");
+  assert.notEqual(out, first.result!.out, "not the one W's number");
+});
+
+test("the kept reads are one token's: another token's preview, every fresh read failing, is never answered on them", async () => {
+  const c = clock();
+  let fail = false;
+  const k = poolSellDryKind(deps({ now: c.now, rpcs: () => pair("pump").map((rpc) => ((m: string, p: readonly unknown[]) => (fail ? Promise.reject(new Error("a fresh read")) : rpc(m, p))) as SolanaRpc) as unknown as readonly [SolanaRpc, SolanaRpc] }));
+  const ask = async (t: string): Promise<object> => {
+    const r = k(share(t, 5_000));
+    await r.after;
+    return r.answer() as object;
+  };
+  assert.ok("result" in (await ask(MINT)));
+  fail = true;
+  assert.ok(!("result" in (await ask(SWAP_MINT))), "SWAP_MINT not on MINT's reads");
+  assert.ok("result" in (await ask(MINT)), "MINT's still kept");
 });

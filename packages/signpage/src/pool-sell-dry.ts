@@ -102,6 +102,9 @@ export type PoolSellDryDeps = {
   bought?(token: string): Promise<StoreWs | undefined>;
   /** True while a trade runs on the page or holds a host of the pair (main.ts: liveRuns and the lanes). */
   trading(): boolean;
+  /** A count that moves at every start and end of a pool trade of this page (deposit, buy, sell, withdraw: liveRuns
+   *  edges): a preview's kept reads are taken only while it has not moved since they were read. None: 0. */
+  trades?(): number;
   now?(): number;
 };
 
@@ -122,7 +125,7 @@ export function keptHeldOf(token: string, kept: unknown): Map<string, bigint> {
 export function readFirst(held: readonly { address: string; held: bigint }[], units: bigint | null): string[] {
   const order = [...held].sort((x, y) => (x.held < y.held ? -1 : x.held > y.held ? 1 : x.address < y.address ? -1 : x.address > y.address ? 1 : 0));
   const one = units === null ? undefined : order.find((x) => x.held >= units && x.held > 0n);
-  return (one ? [one, ...order.filter((x) => x !== one)] : order).map((x) => x.address);
+  return order.map((x) => x.address);
 }
 /** The Ws bought since the last whole pass, by the pass's own rule (positions.ts positionsPass: a recorded token the
  *  finder never listed shows at the record's amount): W's buy mint (pool-sell.ts BUY_MINTS_KEY, the sale plan's
@@ -158,15 +161,15 @@ type Pick = { pass: readonly string[]; since: readonly BoughtW[] };
  *  answered, read only by previews (as a pair of plain answer lists, outside the providers' queues), gone past their
  *  age (so at most the cold previews one window holds: POOL_SELL_DRY_CALLS / 3), a token's dropped when a preview
  *  misses a call in them, all at a sign out. */
-type KeptReads = { get(token: string): { answers: Answers; pick: Pick } | null; put(token: string, answers: Answers, at: number, pick: Pick): void; drop(token?: string): void };
+type KeptReads = { get(token: string): { answers: Answers; pick: Pick; trades: number } | null; put(token: string, answers: Answers, at: number, pick: Pick, trades: number): void; drop(token?: string): void };
 function keptReads(now: () => number): KeptReads {
-  const held = new Map<string, { answers: Answers; at: number; pick: Pick }>();
+  const held = new Map<string, { answers: Answers; at: number; pick: Pick; trades: number }>();
   const prune = (): void => {
     for (const [k, v] of held) if (now() - v.at >= POOL_SELL_DRY_KEEP_MS) held.delete(k);
   };
   return {
     get: (token) => (prune(), held.get(token) ?? null),
-    put: (token, answers, at, pick) => void (prune(), held.set(token, { answers, at, pick })),
+    put: (token, answers, at, pick, trades) => void (prune(), held.set(token, { answers, at, pick, trades })),
     drop: (token) => void (token === undefined ? held.clear() : held.delete(token)),
   };
 }
@@ -349,12 +352,21 @@ export async function poolSellDry(d: PoolSellDryDeps, params: Record<string, unk
     turn.kept.drop();
     return { error: "not_funded" };
   }
-  // the Ws read: the ones the last preview of this token read in the window, while each is still where it was (a W of
-  // the pass, or one bought since), so the window is never spent twice for the same Ws and a W now in neither (sold, or
-  // counted twice) is never read; else as many as fit, one call each, in the order the sale would sell them
-  const kept = turn.kept.get(token);
+  // a trade of this page holds its hosts (and changes what its Ws hold): busy, as before, and nothing kept is taken
+  if (d.trading()) return { error: "busy" };
+  // the Ws read: the ones the last preview of this token read in the window, while no trade of this page started or
+  // ended since (a sale, a buy, a withdraw or a deposit changes what a W holds, or the trees' sizes) and each W is still
+  // where it was (a W of the pass, or one bought since), so the window is never spent twice for the same Ws, a W now in
+  // neither (sold, or counted twice) is never read and nothing read before a trade is used after it; else as many as
+  // fit, one call each, in the order the sale would sell them
+  const trades = d.trades?.() ?? 0;
+  let kept = turn.kept.get(token);
+  if (kept !== null && kept.trades !== trades) {
+    turn.kept.drop(token);
+    kept = null;
+  }
   const still = kept !== null && kept.pick.pass.every((w) => pos?.wallets.includes(w)) && kept.pick.since.every((b) => extra.some((x) => x.address === b.address && x.program === b.program));
-  const pick: Pick = still ? kept.pick : readsOf(d, params, pos, extra, stored?.held ?? new Map());
+  const pick: Pick = kept !== null && still ? kept.pick : readsOf(d, params, pos, extra, stored?.held ?? new Map());
   if (kept !== null && still) {
     // the kept answers, as two plain answer lists outside the providers' queues: no call, no budget, no wait on a trade
     let missed = false;
@@ -370,7 +382,6 @@ export async function poolSellDry(d: PoolSellDryDeps, params: Record<string, unk
     if (!missed) return a;
     turn.kept.drop(token);
   }
-  if (d.trading()) return { error: "busy" };
   const t = now();
   for (const c of turn.calls) while (c.length > 0 && c[0]! <= t - POOL_SELL_DRY_WINDOW_MS) c.shift();
   // one call per W read: the pass's (walletReads) and each bought since (wHeldNow)
@@ -386,7 +397,8 @@ export async function poolSellDry(d: PoolSellDryDeps, params: Record<string, unk
   const late = new Promise<DryAnswer>((r) => (timer = setTimeout(() => r({ error: "busy" }), POOL_SELL_DRY_ANSWER_MS)));
   try {
     const a = await Promise.race([previewOn(d, params, pos, extra, pick, rpcs), late]);
-    if ("result" in a) turn.kept.put(token, answers, t, pick);
+    // kept only when no trade of this page started or ended while it read
+    if ("result" in a && (d.trades?.() ?? 0) === trades) turn.kept.put(token, answers, t, pick, trades);
     return a;
   } finally {
     clearTimeout(timer);
@@ -516,17 +528,22 @@ export function poolSellDryKind(d: PoolSellDryDeps): (params: Record<string, unk
  *  its transaction read back on both RPCs, after which its read-backs to Final need no host of its own (it gives its
  *  hold back then); else its run's end. A pool sell's is its run's end (its verdict and its rent backs, pool-sell.ts
  *  poolSellKind). The kind's answers and progress pass through unchanged. */
-export function liveRuns<A>(kind: (params: Record<string, unknown>, ctx: KindContext) => A, maxMs = TRADE_LIVE_MAX_MS): { kind: (params: Record<string, unknown>, ctx: KindContext) => A; live(): number } {
+export function liveRuns<A>(kind: (params: Record<string, unknown>, ctx: KindContext) => A, maxMs = TRADE_LIVE_MAX_MS): { kind: (params: Record<string, unknown>, ctx: KindContext) => A; live(): number; edges(): number } {
   let n = 0;
+  // every start and every end: the preview's kept reads are taken only while it has not moved (PoolSellDryDeps.trades)
+  let edges = 0;
   return {
     live: () => n,
+    edges: () => edges,
     kind: (params, ctx) => {
       let on = true;
       n++;
+      edges++;
       const done = (): void => {
         if (!on) return;
         on = false;
         n--;
+        edges++;
         clearTimeout(backstop);
       };
       const backstop = setTimeout(done, maxMs);

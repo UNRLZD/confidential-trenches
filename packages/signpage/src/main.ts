@@ -237,6 +237,12 @@ else {
   poolKindMap["pool.buy"] = buys.kind;
   const sells = liveRuns(poolKindMap["pool.sell"]);
   poolKindMap["pool.sell"] = sells.kind;
+  // a deposit and a withdraw do not hold the hosts as a trade does, but each changes what the preview read (the trees'
+  // sizes, which price the sale's deposit rents; a W's lamports): their starts and ends are counted with the trades'
+  const deposits = liveRuns(poolKindMap["pool.deposit"]);
+  poolKindMap["pool.deposit"] = deposits.kind;
+  const withdraws = liveRuns(poolKindMap["pool.withdraw"]);
+  poolKindMap["pool.withdraw"] = withdraws.kind;
   const dryPair = (): readonly [SolanaRpc, SolanaRpc] | null => (PAGE_SOL_PIN === undefined ? null : pageSolanaRpcs("pass"));
   const poolSellDry = poolSellDryKind({
     pinned: (chain) => poolDeps.pinned(chain),
@@ -248,6 +254,8 @@ else {
     // the Rent sysvar state.pools' tap_max already reads, once; none yet: the preview reads it on both
     rent: () => (hasSolana ? rent.get() : null),
     trading: () => buys.live() + sells.live() > 0 || (dryPair() ?? []).some((r) => r.url !== undefined && hostLane(r.url).trading()),
+    // every start and end of a pool trade of this page: nothing a preview read before it is used after it
+    trades: () => buys.edges() + sells.edges() + deposits.edges() + withdraws.edges(),
   });
   // a pool quote's price reads (pool-deposit-address.ts priced): USDC in at 1 USD on both reads, X's coin at the page's
   // own Pyth read on its two RPCs (src/pool-price.ts); any other origin has none yet, so it gets no quote
