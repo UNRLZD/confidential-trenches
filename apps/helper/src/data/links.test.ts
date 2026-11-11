@@ -26,3 +26,11 @@ test("a Solana token's page carries the links its Jupiter row gives, and none it
   assert.deepEqual(toPage(mint, toRow(none, Date.now())!, null, null, true, Date.now(), Date.now()).links, {});
   assert.deepEqual(LINKS.of("solana", "So11111111111111111111111111111111111111112"), {});
 });
+
+test("a Base or Robinhood page takes its links from GeckoTerminal's info: the first website, the X and Telegram handles as their pages", async () => {
+  const { infoLinks } = await import("./evm/token.ts");
+  const info = (a: Record<string, unknown>) => ({ data: { type: "token", attributes: { address: "0x" + "ab".repeat(20), ...a } } });
+  assert.deepEqual(infoLinks(info({ websites: ["https://brett.based/", "https://second.site"], twitter_handle: "BasedBrett", telegram_handle: "basedbrett" })), { site: "https://brett.based/", x: "https://x.com/BasedBrett", telegram: "https://t.me/basedbrett" });
+  assert.deepEqual(infoLinks(info({ websites: [], twitter_handle: null, telegram_handle: null })), {});
+  assert.deepEqual(infoLinks(info({ websites: ["javascript:alert(1)"], twitter_handle: "a/../../evil", telegram_handle: "x y" })), {}, "a handle is a handle, never a path");
+});
