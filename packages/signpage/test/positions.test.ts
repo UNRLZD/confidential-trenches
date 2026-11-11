@@ -929,6 +929,38 @@ test("card wallets-found-in-one-read, the page: a sale tapped while a pass reads
   }
 });
 
+test("card wallets-found-in-one-read, the page: a sale tapped while the first pass reads the kept pass gets the kept pass's listing, never an empty one (the memo counts as loaded only once that read is in it)", async () => {
+  const w = await spentWallet();
+  const W = solanaWallet();
+  await recorded(w, { [W]: rec(MINT, "2") });
+  await w.put("meta", POSITIONS_KEPT_KEY, { positions: [{ chain: "solana", token: MINT, amount: "2", cost: "0", wallets: [W], decimals: 6 }], held: { [`${W} ${MINT}`]: "2000000" }, listed: [`${W} ${MINT}`] } satisfies KeptPass);
+  // the kept pass's reads: the state read's first (ready) answers; the first pass's own waits on `letKept`; any after it answers
+  let keptReads = 0;
+  let letKept!: () => void;
+  const keptGate = new Promise<void>((r) => (letKept = r));
+  let passAtKept = false;
+  const st = new Proxy(w, { get: (t, k) => (k === "get" ? async (s: string, key: string) => {
+    if (s === "meta" && key === POSITIONS_KEPT_KEY && ++keptReads === 2) (passAtKept = true), await keptGate;
+    return t.get(s as never, key);
+  } : Reflect.get(t, k, t)) });
+  let finder = 0;
+  const reader: HoldingsReader = { chain: "sol", read: async () => (finder++, { native: 0n, tokens: new Map([[MINT, { amount: 7_000_000n, frozen: false }]]), unreadable: [] }) };
+  let list: Promise<readonly { address: string; holdings: { tokens: ReadonlyMap<string, { amount: bigint }> } | null }[]> | null = null;
+  const sell = (host: () => { wallets(): Promise<readonly { address: string; holdings: { tokens: ReadonlyMap<string, { amount: bigint }> } | null }[]> }) => () => {
+    list = host().wallets();
+    return { running: true as const, after: new Promise<void>(() => {}), answer: () => ({ result: { stage: "sent", txs: [] } }) };
+  };
+  const tp = testnetPool({ store: async () => st as WalletStore, seed64: async () => SEED64.slice() }, { pin: PIN, rpcs: chain().rpcs, holdings: () => reader, tradeKinds: { sell }, positions: { setTimer: () => 0, clearTimer: () => {} } } as never);
+  void tp.positions();
+  await until(() => passAtKept);
+  tp.flow({ kind: "pool.sell", chain: "solana", token: MINT, amount: 1n, slippageBps: 100, decimals: 6 }, { id: "s", sha: "00", progress: () => {} } as never);
+  await until(() => list !== null);
+  const got = await list!;
+  assert.equal(got.find((x) => x.address === W)?.holdings?.tokens.get(MINT)?.amount, 2_000_000n, "W as the kept pass lists it");
+  assert.equal(finder, 0, "no finder read at the tap");
+  letKept();
+});
+
 test("card wallets-found-in-one-read, the page: a sign out stops the sale's finder list, each of its reads carrying the sign out's stop", async () => {
   // no buy record: the sale's list reads both Ws on the finder
   const w = await spentWallet(2);
