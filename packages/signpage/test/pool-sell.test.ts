@@ -4722,10 +4722,17 @@ test("card start-reads-wait-out-a-throttle: one tap's waits share one total: a t
 function ticked(rpcs: readonly [SolanaRpc, SolanaRpc]) {
   const queue: (() => void)[] = [];
   const wrap = (rpc: SolanaRpc): SolanaRpc => (async (m: string, p: readonly unknown[]) => (await new Promise<void>((r) => void queue.push(r)), rpc(m, p))) as SolanaRpc;
-  return { rpcs: [wrap(rpcs[0]), wrap(rpcs[1])] as const, queue };
+  return { rpcs: [wrap(rpcs[0]), wrap(rpcs[1])] as readonly [SolanaRpc, SolanaRpc], queue };
 }
+/** Every task the last answers started has run: the loop holds no immediate (the store's writes, the checks, the
+ *  signature and its record run on immediates and microtasks), however many turns that takes on this machine; a
+ *  fixed count of turns ended a tick early on a slower runner and counted a round that read nothing (CI, 11 Nov: the
+ *  later leg's signature record still writing when the tick ended, so its signature fell in the next tick). */
 const drain = async (): Promise<void> => {
-  for (let i = 0; i < 30; i++) await new Promise((r) => setImmediate(r));
+  for (let i = 0; i < 30 || process.getActiveResourcesInfo().includes("Immediate"); i++) {
+    if (i > 100_000) throw new Error("the loop never went quiet");
+    await new Promise((r) => setImmediate(r));
+  }
 };
 /** The sale run on ticked RPCs: the rounds before W's first signature, and the answer. */
 async function rounds(w: World, ask: PoolAsk = ASK): Promise<{ rounds: number; a: Awaited<ReturnType<typeof runPoolSell>>; signedAt: number }> {
@@ -4914,6 +4921,19 @@ async function legRounds(w: World, ask: PoolAsk, plant?: (t: ReturnType<typeof t
   }
   return { a: await run, signedAt, sentAt, callsAtSend };
 }
+
+// the count is the rounds: a read held one tick more before the later leg's signature is a fourth
+test("card pool-sell-legs-side-by-side: the leg rounds count a planted round: the later leg's fee read answered a tick late signs four rounds after the leg before it sent", async () => {
+  const w = await twoBuys({ ataLamports: TOKEN_RENT });
+  (w.host as { back?: unknown }).back = undefined;
+  const r = await legRounds(w, share(10_000), (t) => {
+    let fees = 0;
+    const late = (rpc: SolanaRpc): SolanaRpc => (async (m: string, p: readonly unknown[]) => (m === "getFeeForMessage" && ++fees === 2 && (await new Promise<void>((res) => void t.queue.push(res))), rpc(m, p))) as SolanaRpc;
+    t.rpcs = [late(t.rpcs[0]), t.rpcs[1]] as const;
+  });
+  assert.equal("stage" in r.a && r.a.stage, "filled", JSON.stringify(r.a));
+  assert.equal(r.signedAt[1]! - r.sentAt[0]!, 4, JSON.stringify(r));
+});
 
 test("card pool-sell-legs-side-by-side: a later leg reads before its turn only what no other sale changes, and signs three read rounds after the leg before it sent (W's accounts and the deposit's pages read after that send; its quote, blockhash and venue the sale's young reads)", async () => {
   const w = await twoBuys({ ataLamports: TOKEN_RENT });
