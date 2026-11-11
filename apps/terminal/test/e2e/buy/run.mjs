@@ -490,6 +490,18 @@ export async function run({ plant = null, shots = null } = {}) {
     rec.buy.end = label;
     rec.buy.seen = seen;
     rec.buy.timing = timing(tapAt, sentAt.buy, events.slice(answersBefore), label);
+    // card sol-buy-reads-side-by-side: a pool buy reads Filled at confirmed and Final once settled; the time to Final is
+    // read too (null when it never came within END_MS)
+    if (/^Filled\b/.test(label)) {
+      rec.buy.timing.finalMs = null;
+      while (Date.now() - tapAt < END_MS) {
+        if (/\bFinal\b/.test(await vis('[data-testid="trade-cta"]').innerText())) {
+          rec.buy.timing.finalMs = Date.now() - tapAt;
+          break;
+        }
+        await page.waitForTimeout(100);
+      }
+    }
     const asks = events.filter((e) => e.kind === "ask").slice(asksBefore).filter((e) => e.type.startsWith("pool.buy") || e.type === "buy");
     rec.buy.asks = asks.length;
     rec.buy.kind = asks[0]?.type ?? null;
