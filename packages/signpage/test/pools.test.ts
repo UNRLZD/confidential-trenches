@@ -71,6 +71,13 @@ test("ready: passed through when given, absent when not", async () => {
   assert.deepEqual((await withPools(SIGNED_IN, async () => [held], [priced], ready)).pools, [{ chain: "solana", asset: "SOL", balance: "20", ready: "20", tap_max: "19.9987" }]);
 });
 
+test("a buy in flight keeps its note in the balance; once its release reads landed, the note counts its change (card pool-buy-record-never-stays-sent)", async () => {
+  const sent: NoteRecord = { ...note("r", SOL.scope, 3_000_000_000n), state: "RESERVED", attempt: "a1", deadlineMs: 1n };
+  assert.deepEqual((await withPools(SIGNED_IN, async () => [sent], [SOL], [])).pools, [{ chain: "solana", asset: "SOL", balance: "3", ready: "0" }]);
+  const landed = new Map([["r", { attempt: "a1", withdrawn: 2_000_000_000n }]]);
+  assert.deepEqual((await withPools(SIGNED_IN, async () => [sent], [SOL], [], undefined, undefined, landed)).pools, [{ chain: "solana", asset: "SOL", balance: "1", ready: "0" }]);
+});
+
 test("a state whose ops already fill the answer cap: the oldest ops give way to pools, so the answer still fits", async () => {
   const rows = Array.from({ length: 9_000 }, (_, i) => ({
     op: { id: `op-${String(i).padStart(5, "0")}-${"x".repeat(450)}`, kind: "deposit" as const, stage: "done" as const, txs: [] },

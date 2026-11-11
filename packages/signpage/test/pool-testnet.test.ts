@@ -1130,6 +1130,32 @@ test("a withdraw on the page, the helper's 502 after the release landed, every s
   assert.ok(asked.length > 0 && asked.every((s) => s === undefined || s === FINAL_SLOT) && asked.includes(FINAL_SLOT), `asked at ${asked.join(",")}`);
 });
 
+// card pool-buy-record-never-stays-sent: a withdraw's release read landed writes its withdrawn value on the note's mark
+// and pings the page's watchers, so the app's read right after counts only the note's change, with no other write
+test("a withdraw on the page whose release lands, its spend not read in time: the watchers are told once its withdrawn value is on the note's mark", async () => {
+  const { world, TO, COST } = WORLD;
+  const wd = await world([30_000_000n], { settleUnspent: true });
+  const fetchFn = (async (_url: string, init: { body: string }) => {
+    const { pool, tx } = JSON.parse(init.body) as { pool: string; tx: string };
+    return new Response(JSON.stringify(await wd.host.send(pool, base64.decode(tx))), { status: 200 });
+  }) as unknown as typeof fetch;
+  const over = { pin: wd.host.pin, rpcs: wd.host.rpcs, pool: wd.host.pool as never, prover: { vault: signalsProver(), stop: () => {} }, fetch: fetchFn, ...quickClock() };
+  const t = testnetPool({ store: async () => wd.w, seed64: async () => SEED64.slice() }, over);
+  // what each ping of the watchers reads, as the app reads the state again on it
+  const reads: Promise<unknown>[] = [];
+  t.watch(() => void reads.push(t.readyWith(async () => null).then((v) => [...(v.landed ?? [])])));
+  await t.withdraw({ chain: "solana", to: TO, amount: 5_000_000n, maxFee: COST }, "op-w");
+  const id = wd.ids[0]!;
+  assert.equal((await wd.ns.get(id))!.state, "RESERVED", "its spend not read yet");
+  const mark = (await wd.ns.marks()).get(id);
+  assert.ok(mark?.withdrawn !== undefined && mark.withdrawn > 0n, "the release's withdrawn value on the note's mark");
+  for (let i = 0; i < 200 && reads.length === 0; i++) await new Promise((r) => setTimeout(r, 5));
+  const want = [[id, { attempt: mark.attempt, withdrawn: mark.withdrawn }]];
+  const seen = await Promise.all(reads);
+  assert.ok(seen.some((l) => { try { assert.deepEqual(l, want); return true; } catch { return false; } }), `a ping reads the landed release (${seen.length} pings)`);
+  await t.signedOut();
+});
+
 test("an owed send with no release signature under 2,500 newer entries of W's history, the page's RPC functions new on every pass: the next finish reads on from the last one's place and sends it (fold 4, review HIGH)", async () => {
   const { wd, over, page, TO, end } = await hungWithdraw();
   const id = wd.ids[0]!;
@@ -1491,4 +1517,54 @@ test("card sol-buy-reads-side-by-side: the page's buy host hands the early read 
   } finally {
     (b as { end?: () => void }).end?.();
   }
+});
+
+// card pool-buy-record-never-stays-sent, on the page: the buy host's take writes the last height, its landed reaches the
+// state's view (readyWith's landed, which state.pools counts) and the watchers, and a run that ended "sent" is followed by
+// the page's state reads: its end posted once, to that run, once its note is out of RESERVED
+test("card pool-buy-record-never-stays-sent: the page's buy host writes the take's last height, tells the state a landed release (read by another tab too), and posts a followed buy's end once", async () => {
+  const { w, ns } = await wallet();
+  const { pool, land } = fakePool();
+  const offline = async () => {
+    throw new Error("offline");
+  };
+  type Host = ReturnType<Parameters<typeof import("../src/pool-buy.ts").poolBuyKind>[0]>;
+  let hostOf: (() => Host) | null = null;
+  const buy = ((h: () => Host) => ((hostOf = h), () => ({ error: "not_allowed" }))) as unknown as typeof import("../src/pool-buy.ts").poolBuyKind;
+  const t = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { pool, prover: { vault: signalsProver(), stop: () => {} }, hardwareConcurrency: 4, rpcs: [offline, async () => offline()], tradeKinds: { buy } });
+  let heard = 0;
+  t.watch(() => heard++);
+  await land(ns, await incoming(ns, null, 9));
+  await t.stateRead();
+  await t.proofs();
+  const r = (await t.readyWith(async () => null)).ready![0]!;
+  const h = hostOf!() as Host & { follow(post: (s: "filled" | "not_landed") => void): void };
+  await h.take(r.noteId, r.attempt, undefined, 151n);
+  const taken = await ns.get(r.noteId);
+  assert.equal(taken?.state, "RESERVED");
+  assert.equal((taken as Record<string, unknown> | undefined)?.lastHeight, undefined, "never in the note");
+  assert.equal((await ns.marks()).get(r.noteId)?.lastHeight, 151n, "the take writes the signed transaction's last height on the note's mark");
+  const before = heard;
+  h.landed!(r.noteId, r.attempt, 4n);
+  const want = [[r.noteId, { attempt: r.attempt, withdrawn: 4n }]];
+  const landedOf = async (p: typeof t) => [...((await p.readyWith(async () => null)).landed ?? [])];
+  for (let i = 0; i < 200 && heard === before; i++) await new Promise((r) => setTimeout(r, 5));
+  assert.deepEqual(await landedOf(t), want, "the state's view carries the landed release");
+  assert.ok(heard > before, "the watchers hear it, so the app reads the state again");
+  // another tab on the same store (and this one after a reload) counts it too: the landed value is on the note's mark
+  const t2 = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { pool, prover: { vault: signalsProver(), stop: () => {} }, hardwareConcurrency: 4, rpcs: [offline, async () => offline()] });
+  assert.deepEqual(await landedOf(t2), want, "another tab's state view");
+  await t2.signedOut();
+  const posts: string[] = [];
+  h.follow((s) => void posts.push(s));
+  // still RESERVED (the pass's reads offline): its end is not known, nothing posted
+  await t.stateRead();
+  assert.deepEqual(posts, []);
+  // the pass frees it (both RPCs' finalized height past 151, no spent mark): not_landed, once
+  await ns.move(r.noteId, "RESERVED", "UNSPENT", { finalHeight: 152n });
+  await t.stateRead();
+  assert.deepEqual(posts, ["not_landed"]);
+  await t.stateRead();
+  assert.deepEqual(posts, ["not_landed"], "posted once");
+  await t.signedOut();
 });

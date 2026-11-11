@@ -183,6 +183,9 @@ export type PoolWithdrawHost = Pick<PoolBuyHost, "send" | "now" | "reads" | "wai
   /** The onward send a part owes, written once its note is RESERVED and before its release leaves (awaited): a crash
    *  from there on leaves the op owing it, for the state reads' finishPoolOnward. */
   owe?(pending: PendingOnward): Promise<void>;
+  /** A part's release read landed and its withdrawn value written on the note's mark: the page's balance reads it now
+   *  (an owed/ write tells no store listener; card pool-buy-record-never-stays-sent). */
+  marked?(noteId: string): void;
   /** The release's own signature, added to the owed send `noteId` of `attempt` only while it is still stored: never
    *  bringing back a send another tab has dropped, nor its old fee ceiling, and never touching the op (fold 4, LOW). */
   keepRelease?(noteId: string, attempt: string, release: string): Promise<void>;
@@ -633,8 +636,8 @@ async function onePart(h: PoolWithdrawHost, ask: PoolAsk, notes: NoteStore, p: W
       },
       // RESERVED, then the onward send owed, both written before anything leaves the device (review #232b HIGH 1):
       // a crash between the two leaves a RESERVED note with nothing sent, which the reserved pass frees
-      take: async () => {
-        await notes.move(p.noteId, "HELD", "RESERVED", { attempt: attempt! });
+      take: async (_id: string, _attempt: string, _early?: unknown, lastHeight?: bigint) => {
+        await notes.move(p.noteId, "HELD", "RESERVED", { attempt: attempt!, ...(lastHeight === undefined ? {} : { lastHeight }) });
         reserved = true;
         const owed: PendingOnward = { noteId: p.noteId, attempt: attempt!, context: binding.context.toString(), ...base };
         owedNow = owed;
@@ -642,6 +645,9 @@ async function onePart(h: PoolWithdrawHost, ask: PoolAsk, notes: NoteStore, p: W
         await h.owe?.(owed);
         return r;
       },
+      // the release read landed on both RPCs: the note's mark holds what it took out, so the balance counts only the
+      // change until the settle writes it, as a buy's (card pool-buy-record-never-stays-sent)
+      landed: (noteId: string, at: string, withdrawn: bigint) => void notes.landed(noteId, at, withdrawn).then(() => h.marked?.(noteId)).catch(() => {}),
     };
     const a = await sendAndSettle(host, r, release, pool, signed, bh.lastHeight, wait);
     if ("error" in a) return stop("send");

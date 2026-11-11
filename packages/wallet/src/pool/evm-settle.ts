@@ -91,7 +91,13 @@ async function settleOne(a: EvmSettleArgs, n: NoteRecord, r: EvmSettleRound, rel
   if (r.events[Number(leaf.leafIndex)]?.state !== leaf.commitment) throw new Error(`${refKey(n.ref)}: its leaf is not the round's`);
   const at = releases.get(noteSecrets(a.seed64, n.ref).nullifierHash);
   if (at === undefined) {
-    if (finMs <= n.deadlineMs) return "held"; // its release can still land
+    if (finMs <= n.deadlineMs) {
+      // a release this device read landed (on the note's mark) in a block now final, yet not in the round: a reorg
+      // dropped it, so the balance counts the whole note again (card pool-buy-record-never-stays-sent)
+      const m = (await a.notes.marks()).get(n.id);
+      if (m !== undefined && m.attempt === n.attempt && m.withdrawn !== undefined && m.block !== undefined && m.block <= r.fin.number) await a.notes.unlanded(n.id, m.attempt);
+      return "held"; // its release can still land
+    }
     await a.notes.move(n.id, "RESERVED", "UNSPENT", { blockTimeMs: finMs });
     return "freed";
   }

@@ -74,8 +74,8 @@
 //   W's record: the buy wallets list (../../wallet/src/pool/buy-wallets.ts spentNotesOf) finds W and reads its holdings.
 //   Not settled within the reads (or not landed, or refused): the note stays RESERVED, and each state read of the page
 //   settles it (../../wallet/src/pool/solana-restore.ts solanaSettleReserved: SPENT once its spent mark and change read
-//   on both RPCs, UNSPENT once both RPCs' block time is past its deadline with no spent mark, so the queue proves it
-//   again).
+//   on both RPCs, UNSPENT once both RPCs' finalized height is past its signed transaction's last height, or their block
+//   time past its deadline, with no spent mark, so the queue proves it again).
 // - The route (card signpage-buy-route-events): the run tells the app, through the kind's route events (messages.ts
 //   BuyRoute), only what it bound or read itself: W and the venue with its pool once the check passed, W derived to the
 //   proof's recipient and signed, and the take holds the note, before the transaction leaves; then the transaction's
@@ -142,9 +142,9 @@ export type PoolBuyHost = {
   rpcs: readonly [SolanaRpc, SolanaRpc];
   /** The queue's ready proofs (never taken by reading them); the queue is opened first when it is not. */
   ready(): Promise<readonly ReadyProof<SolanaReleaseRequest>[]>;
-  /** The queue's take of this attempt: HELD -> RESERVED, written before it returns; refused, the note HELD, when the
-   *  note's ready proof is another attempt. */
-  take(noteId: string, attempt: string, early?: Promise<ChainNow>): Promise<ReadyProof<SolanaReleaseRequest>>;
+  /** The queue's take of this attempt: HELD -> RESERVED, written before it returns, with the signed transaction's last
+   *  block height (blockhashOf's lastHeight); refused, the note HELD, when the note's ready proof is another attempt. */
+  take(noteId: string, attempt: string, early?: Promise<ChainNow>, lastHeight?: bigint): Promise<ReadyProof<SolanaReleaseRequest>>;
   /** The pool's time read now, for the take (the wallet's chainNow on the queue's pool; card sol-buy-reads-side-by-side):
    *  a buy starts it with its first round, so the take, which uses it within NOW_REUSE_MS of its start, waits on no read
    *  of its own between the signature and the send. */
@@ -169,8 +169,10 @@ export type PoolBuyHost = {
   sent?(signature: string): void | Promise<void>;
   /** This very transaction landed: both RPCs read it back as succeeded, the amount out told when it reads the same. Once,
    *  after sent; never for one that did not land. The reads from here to Final are the host's to pace (card
-   *  sell-right-after-a-buy: a background pass's), every read before it a trade's, the ones that tell Filled among them. */
-  landed?(): void;
+   *  sell-right-after-a-buy: a background pass's), every read before it a trade's, the ones that tell Filled among them.
+   *  Names the note, its attempt and the value the release withdrew, so the balance counts only the note's change from
+   *  here to the settle (../../wallet/src/pool/balances.ts landed). */
+  landed?(noteId: string, attempt: string, withdrawn: bigint): void;
   /** The buy's route as the run binds and reads it (messages.ts BuyRoute): W and the venue with its pool once the check
    *  passed and W derived to the proof's recipient, then the amount W received once the transaction read back on both
    *  RPCs as the same. Each once, in that order; a throw here never stops the buy. */
@@ -408,13 +410,26 @@ export async function blockhashRead(rpcs: readonly [SolanaRpc, SolanaRpc]): Prom
   return { blockhash, lastValidBlockHeight: int(r.value!.lastValidBlockHeight), slot: int(r.context?.slot) };
 }
 
-/** blockhashOf's check: RPC 0's blockhash valid on RPC 1, and the last height from RPC 1's height (read after it). */
+/** blockhashOf's check: RPC 0's blockhash valid on RPC 1, and the last height from RPC 1's height at a slot at or past
+ *  the one RPC 1 judged the blockhash valid at: RPC 1 has then seen the blockhash's block, so its height is at least
+ *  that block's and the last height is never under the true one, whatever RPC 0 said (a last height too low would free
+ *  the note while its transaction can still land: card pool-buy-record-never-stays-sent). The height and its slot come
+ *  in one read beside the check (getEpochInfo). A bank k slots behind the check's slot (k at most BLOCKHASH_LIFE) is
+ *  taken as its height + k: a slot adds at most one block, so that is never under the height at the check's slot, and
+ *  only holds a note RESERVED a little longer. A bank further behind, or an answer with no whole height and slot, is
+ *  read again at the check's slot (minContextSlot). */
 export async function blockhashValid(rpcs: readonly [SolanaRpc, SolanaRpc], r: { blockhash: string; lastValidBlockHeight: number; slot: number }): Promise<{ blockhash: string; lastValidBlockHeight: number; slot: number; lastHeight: number }> {
-  const [ok, height] = await Promise.all([
-    rpcs[1]("isBlockhashValid", [r.blockhash, { commitment: "confirmed" }]) as Promise<{ value?: unknown }>,
-    rpcs[1]("getBlockHeight", [{ commitment: "confirmed" }]),
+  const [ok, info] = await Promise.all([
+    rpcs[1]("isBlockhashValid", [r.blockhash, { commitment: "confirmed" }]) as Promise<{ context?: { slot?: unknown }; value?: unknown }>,
+    rpcs[1]("getEpochInfo", [{ commitment: "confirmed" }]) as Promise<{ blockHeight?: unknown; absoluteSlot?: unknown }>,
   ]);
   if (ok?.value !== true) return no();
+  const seen = int(ok.context?.slot);
+  if (seen === 0) return no();
+  const at = info?.absoluteSlot, bh = info?.blockHeight;
+  const whole = Number.isSafeInteger(at) && Number.isSafeInteger(bh) && (at as number) >= 0 && (bh as number) >= 0;
+  const behind = whole ? Math.max(0, seen - (at as number)) : Infinity;
+  const height = behind <= BLOCKHASH_LIFE ? (bh as number) + behind : await rpcs[1]("getBlockHeight", [{ commitment: "confirmed", minContextSlot: seen }]);
   const said = r.lastValidBlockHeight;
   const cap = int(height) + BLOCKHASH_LIFE;
   return { blockhash: r.blockhash, lastValidBlockHeight: said, slot: r.slot, lastHeight: said > cap ? said : cap };
@@ -723,7 +738,9 @@ export async function sendAndSettle(
 ): Promise<PoolBuyAnswer> {
   // the take, awaited before anything leaves: the queue hands out this very attempt, or refuses with the note HELD; a
   // buy's early read of the pool's time is its time when still fresh
-  const taken = await h.take(r.noteId, r.attempt, fill?.early);
+  // with the one signed transaction's last height: once both RPCs' finalized height is past it with no spent mark, the
+  // state reads free the note at once (solana-restore.ts solanaSettleReserved), not at the proof's deadline
+  const taken = await h.take(r.noteId, r.attempt, fill?.early, BigInt(lastHeight));
   if (taken.attempt !== r.attempt || !sameBytes(solanaProofBytes(taken.proof), release.proof)) return no();
   // the take holds the note for this very transaction: W and the venue with its pool, told before it leaves
   if (fill) for (const x of fill.bound) fill.tell(x);
@@ -888,7 +905,7 @@ export async function sendAndSettle(
     }
   }
   if (!landed) return unlanded(ours ? txs : [], signature);
-  h.landed?.();
+  h.landed?.(r.noteId, r.attempt, release.withdrawnValue);
   // only now: the note SPENT, its change written (solanaSettleSpent reads the spent mark at finalized), then filled
   // only once both RPCs read the spend as this attempt's. The settle lists every mark of the pool, so it is asked only
   // once each RPC's finalized slot reaches the slot it read this transaction at (card pool-buy-filled-2s: run 3 asked
@@ -935,12 +952,27 @@ export async function sendAndSettle(
   return { stage: "sent", txs };
 }
 
+/** A followed buy's end (card pool-buy-record-never-stays-sent), from its note as the page's settle pass left it and,
+ *  once SPENT, whose spend it is: still RESERVED by its attempt (or no note read), not known yet (null); out of RESERVED
+ *  and not SPENT, not_landed, since only the pass frees a RESERVED note and only once its transaction can never land
+ *  (both RPCs past its last height, or its deadline, with no spent mark); SPENT, filled only when `owner` (pool-spend.ts
+ *  spendOwner on both RPCs at finalized) reads the spend as this attempt's, not_landed for another's, and null when it
+ *  cannot tell or its read throws. */
+export async function lateBuyEnd(n: { state: string; attempt?: string } | undefined, attempt: string, owner: () => Promise<SpendOwner>): Promise<"filled" | "not_landed" | null> {
+  if (n === undefined || (n.state === "RESERVED" && n.attempt === attempt)) return null;
+  if (n.state !== "SPENT") return "not_landed";
+  const o = await owner().catch(() => null);
+  return o === null ? null : o === "other" ? "not_landed" : "filled";
+}
+
 type Locks = Pick<LockManager, "request">;
 
 /** The pool.buy kind: one run per tap under the seed's shared lock (sign out waits for it), answered "sent" with its
  *  signature once that reads back on both RPCs as this very transaction (sendAndSettle's sent), or at the run's end
- *  with the run's own answer; the run's final stage is always posted as progress as well. */
-export function poolBuyKind(host: () => PoolBuyHost & { release?(): void; end?(): void }, locks: Locks | null = globalThis.navigator?.locks ?? null) {
+ *  with the run's own answer; the run's final stage is always posted as progress as well. A run that ends "sent" (its
+ *  end not known: the reads ran out, or a throw after its early answer) hands the page `follow`, and the end the page's
+ *  own reads of its note find later goes out as progress too, once (card pool-buy-record-never-stays-sent). */
+export function poolBuyKind(host: () => PoolBuyHost & { release?(): void; end?(): void; follow?(post: (stage: "filled" | "not_landed") => void): void }, locks: Locks | null = globalThis.navigator?.locks ?? null) {
   return (ask: PoolAsk, ctx: KindContext | null): HostRefusal | Running<"pool.buy"> => {
     if (ask.kind !== "pool.buy" || ask.chain !== "solana" || !locks) return { error: "not_allowed" };
     // the tap's one bound, from its arrival (before its locks)
@@ -951,23 +983,36 @@ export function poolBuyKind(host: () => PoolBuyHost & { release?(): void; end?()
     let early = false;
     // the run's final stage, posted once
     let ended = false;
+    let h: ReturnType<typeof host> | null = null;
     const end = (stage: TradeStage): void => {
       if (ended) return;
       ended = true;
       ctx?.progress(stage);
+      // not known: the page follows the note, and its end is posted once
+      if (stage !== "sent") return;
+      let late = false;
+      try {
+        h?.follow?.((x) => {
+          if (late) return;
+          late = true;
+          ctx?.progress(x);
+        });
+      } catch {
+        /* the follow never stops the run's end */
+      }
     };
     let give!: () => void;
     const answered = new Promise<void>((r) => (give = r));
     const run = locks
       .request(WALLET_SEED_LOCK, { mode: "shared" }, async () => {
-        const h = host();
+        const h0 = (h = host());
         try {
-          const a = await runPoolBuy({ ...h, sent: (signature) => {
+          const a = await runPoolBuy({ ...h0, sent: (signature) => {
             if (!answer) (answer = { result: { stage: "sent", txs: [{ chain: "solana", hash: signature }] } }), (early = true);
             give();
             // its transaction read back: its hosts go back now (the read-backs to Final are a trade's reads, first on
             // their host all the same), so the page's background reads and the sell box's preview go on beside them
-            h.release?.();
+            h0.release?.();
           }, route: (x) => ctx?.route?.(x) }, ask, waits);
           if (!answer) answer = "error" in a ? { error: a.error } : { result: a };
           // the run's stage goes out as progress too, answered early or not: an answer that comes only at the run's end
@@ -978,7 +1023,7 @@ export function poolBuyKind(host: () => PoolBuyHost & { release?(): void; end?()
           if ("stage" in a) end(a.stage);
           else if (early) end("sent");
         } finally {
-          h.end?.();
+          h0.end?.();
         }
       })
       .catch(() => {
