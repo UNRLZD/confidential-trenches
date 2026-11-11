@@ -1,6 +1,7 @@
 import type { Chain, SignpageClient, SignpageClientSnapshot } from "@blindfill/kit";
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { useSignpage } from "../../shell/signpage-frame.tsx";
+import { useFilled } from "../portfolio/fills.ts";
 import { poolPriceEnd, statePoolPrice, type PoolPrice, type Slice } from "./model.ts";
 import { liveRoute, type RouteData } from "./route.ts";
 import type { PartCount } from "./States.tsx";
@@ -101,5 +102,8 @@ export function useTradeSource(): TradeSource {
     }),
     [client, pools],
   );
-  return fixture ?? { snapshot, moneyOn, kit, now: Date.now };
+  const base = fixture ?? { snapshot, moneyOn, kit, now: Date.now };
+  // the trades' fills no holdings read shows yet (portfolio/fills.ts): the holding a fill left, the moment it filled
+  const filled = useFilled(base.snapshot, base.now);
+  return filled === base.snapshot ? base : { ...base, snapshot: filled };
 }

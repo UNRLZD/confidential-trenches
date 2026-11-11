@@ -808,3 +808,52 @@ test("card solana-release-reads-paced: with a provider's pace full the reference
   assert.equal(show(await ref), show(unpaced), "the reference, read after its wait");
   assert.ok(sentA.length >= 2 && sentA.every((t) => t - full >= 5_500), `each read on A went out once the pace let it: ${sentA.map((t) => Math.round(t - full)).join(", ")} ms`);
 });
+
+// Card app-sell-shows-what-you-receive: the reference names each venue's cashback flag, the one the sale's venue read
+// takes (the curve's is_cashback_coin, byte 82, solanaDecodeBondingCurve; the pool's, byte 244, solanaPumpSwapCashback,
+// which readSolanaPoolBuyVenue reads too), on recorded bytes: the plain recorded curve and pool (fixtures/
+// solana-pool-buy.json), the cashback pool the pool's LiteSVM test ran (contracts/pool-solana/fixtures/venues/
+// pumpswap-cashback.json, byte 244 = 1), and the recorded curve with its byte 82 set (no cashback curve is recorded).
+// Additive: nothing else in the reference changes, and a pool byte that is no bool names no flag (the sale refuses it).
+test("the reference names the venue's cashback flag from the same bytes and parse the sale's venue read takes", async () => {
+  const { fx, providers } = await import("./solana-pool-buy-fx.ts");
+  const { readSolanaPoolBuyVenue } = await import("../src/trade/solana/pool-buy.ts");
+  const { solanaPumpSwapCashback } = await import("../src/trade/solana/pool.ts");
+  const { readFileSync } = await import("node:fs");
+  const flags = async (rpcs: readonly [SolanaRpc, SolanaRpc], token: string) => (await readSolanaReference(rpcs, { side: "sell", token, amount: 1_000_000n }))!.pools.map((p) => [p.venue, p.cashback]);
+  // plain: the recorded pump curve and PumpSwap pool, each as the sale reads it
+  assert.deepEqual(await flags(providers("pump"), fx.pump.mint), [["pump-curve", false]]);
+  assert.equal((await readSolanaPoolBuyVenue(providers("pump"), "pump-curve", fx.pump.mint, () => 0)).cashback, false);
+  assert.deepEqual(await flags(providers("pumpswap"), fx.pumpswap.mint), [["pumpswap", false]]);
+  assert.equal((await readSolanaPoolBuyVenue(providers("pumpswap"), "pumpswap", fx.pumpswap.mint, () => 0)).cashback, false);
+  // a cashback pool: the LiteSVM fixture's accounts on both providers
+  const ran = JSON.parse(readFileSync(new URL("../../../contracts/pool-solana/fixtures/venues/pumpswap-cashback.json", import.meta.url), "utf8"));
+  const byKey = new Map<string, { owner: string; lamports: string; data: string }>(ran.accounts.map((a: { address: string }) => [a.address, a]));
+  const value = (k: string) => { const a = byKey.get(k); return a ? { owner: a.owner, lamports: Number(a.lamports), data: [a.data, "base64"], executable: false, rentEpoch: 0, space: Buffer.from(a.data, "base64").length } : null; };
+  const at = (): SolanaRpc => (async (m: string, p: readonly unknown[]) => ({ context: { slot: Number(ran.slot) }, value: m === "getMultipleAccounts" ? (p[0] as string[]).map(value) : value(p[0] as string) })) as unknown as SolanaRpc;
+  const pair = [at(), at()] as const;
+  const pool = solanaPoolAddresses(ran.mint).pool;
+  assert.equal(Buffer.from(byKey.get(pool)!.data, "base64")[244], 1, "the fixture's pool is a cashback coin's");
+  assert.equal((await readSolanaPoolBuyVenue(pair, "pumpswap", ran.mint, () => 0)).cashback, true);
+  const ref = await readSolanaReference(pair, { side: "sell", token: ran.mint, amount: 1_000_000n });
+  assert.equal(ref?.pools.find((p) => p.venue === "pumpswap")?.cashback, true);
+  // a cashback curve: the recorded curve with byte 82 set, on both providers
+  const curve = solanaPoolAddresses(fx.pump.mint).curve;
+  const set82 = providers("pump").map((rpc) => (async (m: string, p: readonly unknown[]) => {
+    const r = (await rpc(m, p)) as { value: ({ data: [string, string] } | null)[] };
+    const i = m === "getMultipleAccounts" ? (p[0] as string[]).indexOf(curve) : -1;
+    if (i < 0 || !r.value[i]) return r;
+    const d = Buffer.from(r.value[i]!.data[0], "base64");
+    d[82] = 1;
+    return { ...r, value: r.value.map((v, j) => (j === i ? { ...v!, data: [d.toString("base64"), "base64"] } : v)) };
+  }) as SolanaRpc) as unknown as readonly [SolanaRpc, SolanaRpc];
+  assert.deepEqual(await flags(set82, fx.pump.mint), [["pump-curve", true]]);
+  assert.equal((await readSolanaPoolBuyVenue(set82, "pump-curve", fx.pump.mint, () => 0)).cashback, true);
+  // the one parse: 0, 1, anything else none
+  assert.deepEqual([0, 1, 2, 255].map((b) => solanaPumpSwapCashback(Object.assign(new Uint8Array(245), { [244]: b }))), [false, true, null, null]);
+  assert.equal(solanaPumpSwapCashback(new Uint8Array(244)), null);
+  // the sale's venue read takes its flag from that parse, never its own byte
+  const buy = readFileSync(new URL("../src/trade/solana/pool-buy.ts", import.meta.url), "utf8");
+  assert.match(buy, /const cashback = solanaPumpSwapCashback\(main\.data\);/);
+  assert.doesNotMatch(buy, /data\[244\]|AMM_POOL_CASHBACK/);
+});

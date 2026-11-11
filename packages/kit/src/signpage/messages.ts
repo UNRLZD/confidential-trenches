@@ -11,10 +11,10 @@ import type { Chain, OrderTrigger } from "../orders/record.ts";
 import { deepFreeze } from "../freeze.ts";
 
 /**
- * The twenty-four request kinds, app to page. nav and reload are to SIGN_HOST's shell (card signpage-shell); the four
+ * The twenty-five request kinds, app to page. nav and reload are to SIGN_HOST's shell (card signpage-shell); the four
  * pool kinds (card signpage-pool-kinds), the two deposit sheet reads, deposit.assets and deposit.dry (card
- * kit-deposit-assets-dry), and pool.address (card pool-deposit-address) were added after kit-v1 without changing any
- * other kind. A page of an earlier release refuses a kind it does not have "not_allowed".
+ * kit-deposit-assets-dry), pool.address (card pool-deposit-address) and pool.sell.dry (card
+ * app-sell-shows-what-you-receive) were added after kit-v1 without changing any other kind. A page of an earlier release refuses a kind it does not have "not_allowed".
  */
 export const SIGNPAGE_KINDS = [
   "deposit.quote",
@@ -41,6 +41,7 @@ export const SIGNPAGE_KINDS = [
   "deposit.assets",
   "deposit.dry",
   "pool.address",
+  "pool.sell.dry",
 ] as const;
 deepFreeze(SIGNPAGE_KINDS);
 
@@ -161,6 +162,15 @@ export interface SignpageParams {
    * card carries money that reaches U_X on into X's pool with no tap. The request's id is the deposit's op id in state.ops.
    */
   "pool.address": { chain: PoolChain; origin_asset?: string; amount?: string };
+  /**
+   * What a pool.sell of these same params would give (card app-sell-shows-what-you-receive): the sell box's preview,
+   * from the device's own pool reads on two providers. Signs nothing, writes nothing and sends nothing. Display only: a
+   * pool.sell never takes its numbers (the sell reads and checks its own quote before W signs), and an app never puts
+   * them in a request. Its refusals: not_allowed (a chain, token or amount the page does not sell), not_funded (no such
+   * holding, or signed out), quote_check_failed (no reference the two providers agree on), down (a provider failed),
+   * and busy (a trade runs, the page's preview budget is spent, or a newer ask came first); busy and down are "not now".
+   */
+  "pool.sell.dry": SignpageParams["pool.sell"];
 }
 
 export interface TxRef {
@@ -208,6 +218,25 @@ export interface SignpageResults {
   "deposit.assets": { assets: DepositAsset[] };
   "deposit.dry": DepositDry;
   "pool.address": PoolAddress;
+  "pool.sell.dry": PoolSellDry;
+}
+
+/**
+ * pool.sell.dry's answer (card app-sell-shows-what-you-receive), each amount a decimal string in whole units of the
+ * chain pool's asset (POOL_ASSET_DECIMALS: SOL on Solana, ETH on Base and Robinhood). `out`: what a sale at the
+ * device's own quote's expected out (the venue's fees taken, before slippage) pays into the user's notes as the sale's
+ * rule prices it (its fee, the deposit's rents and what the sale wallet keeps, less what it holds; a full sale's wallet
+ * sweeps the rest in after it). On a partial sale the notes get `min_out` now and the rest when the wallet's last sale
+ * sweeps it. `min_out`: the same at the asked slippage (the floor the sale signs), at most `out`. `network`: what the
+ * chain charges the sale, inside `out`'s taking already.
+ * `fee_bps`: the platform's fee in basis points. Numbers only: never a wallet, a note or a route. Display only: no
+ * request takes them. The kit's client drops an answer with a field not named here (SIGNPAGE_RESULT_SCHEMAS).
+ */
+export interface PoolSellDry {
+  out: string;
+  min_out: string;
+  network: string;
+  fee_bps: number;
 }
 
 /**

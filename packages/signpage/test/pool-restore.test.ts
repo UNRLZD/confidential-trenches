@@ -1716,6 +1716,21 @@ test("delta P3-D: a tab whose step 5 ends never removes the marker another tab's
   assert.deepEqual(await markerOf(w.store), mine, "tab 2's marker stands: the next load reads for it");
 });
 
+// card signpage-evm-pool-sell: the mainnet build writes no EVM buy record from a restore (the sale is the testnet
+// build's only; test/pool-restore-evm-holdings.test.ts runs the testnet build's restore of them)
+test("restore: the mainnet build reads no EVM buy's transaction and writes no buy record", async () => {
+  const { EVM_POSITION_COSTS_KEY } = await import("../src/pool-buy-evm.ts");
+  const asked: string[] = [];
+  const rpc = async (m: string) => (asked.push(m), assert.fail(`no ${m} read`));
+  const pools: readonly RestorePool[] = [{ chain: "evm", pin: { network: "base", pool: "0x1", feeRecipient: "0x2", fromBlock: 1n }, scope: EVM_SCOPE, rpcs: () => [rpc, rpc] }];
+  const spends = [{ l: LABEL_E, j: 0, note: "n", w: "0x00000000000000000000000000000000000000aa", withdrawn: 1n, block: 0x100n, token: "0x1111111111111111111111111111111111111111", blockHash: "0x" + "cd".repeat(32), logIndex: 3n }];
+  const w = await world({ pools: () => pools, evm: (async () => ({ notes: notesOf(EVM_SCOPE, LABEL_E, 2000n), spends, elsewhere: [], wallets: [], block: 1n })) as never });
+  assert.equal(await w.r.auto(), "done");
+  await w.r.idle();
+  assert.equal(await w.store.get("meta", EVM_POSITION_COSTS_KEY), undefined);
+  assert.deepEqual(asked, []);
+});
+
 // card restore-first-sign-in-under-two-minutes (release 114's live run 42935167402): a sign out ends the run at once at
 // every stage, the walk's and step 5's alike: its reads in flight are let go of (the run waits on none of them), and no
 // read starts after it

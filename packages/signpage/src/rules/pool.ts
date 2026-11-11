@@ -876,10 +876,11 @@ export function checkEvmWithdraw(pool: string, given: EvmPoolProofBinding, relay
   return { chain: ask.chain, op: ask.kind, token: null, amount: proof.value, feeCap: relay.feeCap, pool: pins.pool, to: ctx.wallet, decimals: ask.decimals, back: null };
 }
 
-/** An EVM pool sell: W's own Sell into the pinned pool, the request's token and amount, a min out at least `floor` (the
- *  device's own, from its two-RPC pool reads), within the fee cap, its fee paid to the venue's pinned FeeCollector,
- *  unexpired. */
-export function checkEvmSell(built: EvmPoolSell, ask: PoolAsk, ctx: PoolContext & { precommitment: bigint }, floor: bigint, testnet = false): PoolDraw {
+/** An EVM pool sell: W's own Sell into the pinned pool, the request's token and amount, a min out at least the ask's
+ *  slippage under `agreed.amountOut` (the device's own quote of the route, from its two-RPC pool reads: the floor is
+ *  made here, as checkEvmBuy makes it, never taken from the quote's own minOut), within the fee cap, its fee paid to the
+ *  venue's pinned FeeCollector, unexpired. */
+export function checkEvmSell(built: EvmPoolSell, ask: PoolAsk, ctx: PoolContext & { precommitment: bigint }, agreed: { amountOut: bigint }, testnet = false): PoolDraw {
   if (ask.kind !== "pool.sell") return refuse("kind");
   // a share is turned into units before any sale is built; a share ask never reaches signed bytes
   if (ask.shareBps !== undefined) return refuse("amount");
@@ -900,7 +901,10 @@ export function checkEvmSell(built: EvmPoolSell, ask: PoolAsk, ctx: PoolContext 
   if (pins.feeCollector === undefined) return refuse("evm_not_pinned");
   if (lower(built.feeRecipient) !== lower(pins.feeCollector)) return refuse("fee_recipient");
   if (built.deadline * 1000n <= ctx.nowMs) return refuse("deadline_past");
-  if (typeof floor !== "bigint" || floor <= 0n || built.minOut < floor) return refuse("min_out");
+  if (!Number.isInteger(ask.slippageBps) || ask.slippageBps < 0 || ask.slippageBps >= 10_000) return refuse("slippage");
+  if (typeof agreed?.amountOut !== "bigint" || agreed.amountOut <= 0n) return refuse("min_out");
+  const floor = (agreed.amountOut * BigInt(10_000 - ask.slippageBps)) / 10_000n;
+  if (floor <= 0n || built.minOut < floor) return refuse("min_out");
   passed("evm.sell", built, { venues: pins.venues, pool: pins.pool, chainId: pins.chainId });
   return { chain: ask.chain, op: ask.kind, token: built.token, amount: built.amount, feeCap: built.feeCap, pool: pins.pool, to: pins.pool, decimals: ask.decimals, back: built.minOut };
 }

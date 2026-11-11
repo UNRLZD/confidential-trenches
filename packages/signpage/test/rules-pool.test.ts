@@ -715,30 +715,34 @@ test("EVM sell and authorization: W's own Sell, built from the device's sell quo
   const X = q.token;
   const ask: PoolAsk = { kind: "pool.sell", chain: "base", token: X, amount: q.amountIn, slippageBps: 100, decimals: 18 };
   const ctx = { ...evmCtx({ nowMs: t * 1000n }), precommitment: 5n };
-  const d = checkEvmSell(built, ask, ctx, req.minOut);
+  const d = checkEvmSell(built, ask, ctx, { amountOut: q.amountOut });
   assert.deepEqual([d.pool, d.amount, d.feeCap], [EVM_POOL, req.amount, req.feeCap]);
   assert.equal(signEvmSell(EVM_SECRET, ctx, built).length, 65);
   const other = "0x2222222222222222222222222222222222222222";
   for (const [f, rule] of [
-    [() => checkEvmSell(built, ask, { ...ctx, wallet: other }, 1n), "wallet"],
-    [() => checkEvmSell(built, { ...ask, token: other }, ctx, 1n), "token"],
-    [() => checkEvmSell(built, { ...ask, amount: 1n }, ctx, 1n), "amount"],
+    [() => checkEvmSell(built, ask, { ...ctx, wallet: other }, { amountOut: 1n }), "wallet"],
+    [() => checkEvmSell(built, { ...ask, token: other }, ctx, { amountOut: 1n }), "token"],
+    [() => checkEvmSell(built, { ...ask, amount: 1n }, ctx, { amountOut: 1n }), "amount"],
     // a share is turned into units before any sale is built (card pool-sell-share-across-wallets): a share ask is refused
-    [() => checkEvmSell(built, { ...ask, shareBps: 10_000 }, ctx, 1n), "amount"],
-    [() => checkEvmSell(built, ask, { ...ctx, feeCap: req.feeCap - 1n }, 1n), "fee_cap_over_device_cap"],
-    [() => checkEvmSell(built, ask, { ...ctx, nowMs: req.deadline * 1000n }, 1n), "deadline_past"],
-    [() => checkEvmSell(built, ask, { ...ctx, evm: { venues: { base: pin(B, { pool: other }) }, feeRecipient: FEE_TO } }, 1n), "pool"],
-    [() => checkEvmSell(built, { ...ask, kind: "pool.buy" }, ctx, 1n), "kind"],
-    [() => checkEvmSell(built, ask, ctx, req.minOut + 1n), "min_out"],
+    [() => checkEvmSell(built, { ...ask, shareBps: 10_000 }, ctx, { amountOut: 1n }), "amount"],
+    [() => checkEvmSell(built, ask, { ...ctx, feeCap: req.feeCap - 1n }, { amountOut: 1n }), "fee_cap_over_device_cap"],
+    [() => checkEvmSell(built, ask, { ...ctx, nowMs: req.deadline * 1000n }, { amountOut: 1n }), "deadline_past"],
+    [() => checkEvmSell(built, ask, { ...ctx, evm: { venues: { base: pin(B, { pool: other }) }, feeRecipient: FEE_TO } }, { amountOut: 1n }), "pool"],
+    [() => checkEvmSell(built, { ...ask, kind: "pool.buy" }, ctx, { amountOut: 1n }), "kind"],
+    [() => checkEvmSell(built, ask, ctx, { amountOut: q.amountOut * 2n }), "min_out"],
+    // the floor is the rule's own, from the quote's amount out and the ask's slippage (card signpage-evm-pool-sell): a
+    // sell whose min out was made with more slippage than the user asked is refused, whatever the quote's own minOut
+    [() => checkEvmSell(built, { ...ask, slippageBps: 50 }, ctx, { amountOut: q.amountOut }), "min_out"],
+    [() => checkEvmSell(built, { ...ask, slippageBps: 10_000 }, ctx, { amountOut: q.amountOut }), "slippage"],
     // the proceeds go into the pool under the device's own precommitment only, never another's note
-    [() => checkEvmSell(built, ask, { ...ctx, precommitment: 6n }, 1n), "precommitment"],
+    [() => checkEvmSell(built, ask, { ...ctx, precommitment: 6n }, { amountOut: 1n }), "precommitment"],
     // the fee goes to the Sell's signed recipient (card pool-review-3, L-1)
     // the fee goes to the venue's pinned FeeCollector (card evm-testnet-delegate-review3): a sell paying another address
     // (built under a list that pins it), or a page that pins another collector, is refused
-    [() => checkEvmSell(evmQuotedSell(Object.freeze({ base: pin(VENUES.base, { feeCollector: other }) }), q, { feeRecipient: other, precommitment: 5n, feeCap: req.feeCap, deadline: req.deadline, nonce: 0n }, Date.now()), ask, ctx, 1n), "fee_recipient"],
-    [() => checkEvmSell(built, ask, { ...ctx, evm: { venues: Object.freeze({ base: pin(VENUES.base, { feeCollector: other }) }), feeRecipient: FEE_TO } }, 1n), "fee_recipient"],
+    [() => checkEvmSell(evmQuotedSell(Object.freeze({ base: pin(VENUES.base, { feeCollector: other }) }), q, { feeRecipient: other, precommitment: 5n, feeCap: req.feeCap, deadline: req.deadline, nonce: 0n }, Date.now()), ask, ctx, { amountOut: 1n }), "fee_recipient"],
+    [() => checkEvmSell(built, ask, { ...ctx, evm: { venues: Object.freeze({ base: pin(VENUES.base, { feeCollector: other }) }), feeRecipient: FEE_TO } }, { amountOut: 1n }), "fee_recipient"],
     // the kit's unquoted pinned builder, of the same route and min out: not the device's quote
-    [() => checkEvmSell(pinnedBuildSell(VENUES, "base", { w: EVM_W, token: X, amount: q.amountIn, target: q.target, route: q.route, minOut: q.minOut, feeRecipient: COLLECTOR, precommitment: 5n, feeCap: req.feeCap, deadline: req.deadline, nonce: 0n }), ask, ctx, 1n), "not_quoted"],
+    [() => checkEvmSell(pinnedBuildSell(VENUES, "base", { w: EVM_W, token: X, amount: q.amountIn, target: q.target, route: q.route, minOut: q.minOut, feeRecipient: COLLECTOR, precommitment: 5n, feeCap: req.feeCap, deadline: req.deadline, nonce: 0n }), ask, ctx, { amountOut: 1n }), "not_quoted"],
   ] as const) {
     assert.throws(f, refusedAs(rule), rule);
   }
@@ -769,17 +773,17 @@ test("card evm-testnet-delegate-review3: an EVM sell pays its fee only to the ve
   const ctx = { ...evmCtx({ nowMs: t * 1000n, evm: { venues, feeRecipient: FEE_TO } }), precommitment: 5n };
   // the collector's sell passes and signs
   const good = evmQuotedSell(venues, q, fields(COLL), Date.now());
-  assert.equal(checkEvmSell(good, ask, ctx, q.minOut).pool, EVM_POOL);
+  assert.equal(checkEvmSell(good, ask, ctx, { amountOut: q.amountOut }).pool, EVM_POOL);
   assert.equal(signEvmSell(EVM_SECRET, ctx, good).length, 65);
   // a sell paying the withdraw relayer's fee recipient (the device's quote, built under a list that pins it as the
   // collector): the page refuses it, so the helper's fee_recipient refusal is never the first to see it
   const relayerPaid = evmQuotedSell(Object.freeze({ base: pin(venues.base, { feeCollector: FEE_TO }) }), q, fields(FEE_TO), Date.now());
-  assert.throws(() => checkEvmSell(relayerPaid, ask, ctx, q.minOut), refusedAs("fee_recipient"));
+  assert.throws(() => checkEvmSell(relayerPaid, ask, ctx, { amountOut: q.amountOut }), refusedAs("fee_recipient"));
   // the withdraw relayer's fee recipient is not a sell's: another one changes nothing
-  assert.equal(checkEvmSell(good, ask, { ...ctx, evm: { venues, feeRecipient: "0x2222222222222222222222222222222222222222" } }, q.minOut).pool, EVM_POOL);
+  assert.equal(checkEvmSell(good, ask, { ...ctx, evm: { venues, feeRecipient: "0x2222222222222222222222222222222222222222" } }, { amountOut: q.amountOut }).pool, EVM_POOL);
   // a venue that pins no collector takes no sell
   const none = Object.freeze({ base: pin(B, { pool: EVM_POOL, adapters: Object.freeze({ v3: A_V3, v4: A_V4 }), sellDelegate: DELEGATE }) });
-  assert.throws(() => checkEvmSell(good, ask, { ...ctx, evm: { venues: none, feeRecipient: FEE_TO } }, q.minOut), refusedAs("evm_not_pinned"));
+  assert.throws(() => checkEvmSell(good, ask, { ...ctx, evm: { venues: none, feeRecipient: FEE_TO } }, { amountOut: q.amountOut }), refusedAs("evm_not_pinned"));
 });
 
 test("EVM sim sell: W signs a sim only into EVM_SELL_SIM, deadline at most the agreed block's time, that time at most the device's clock; each planted attack is refused", async () => {
@@ -818,7 +822,7 @@ test("EVM sim sell: W signs a sim only into EVM_SELL_SIM, deadline at most the a
   const realAsk: PoolAsk = { ...ask, token: q.token, amount: q.amountIn };
   assert.throws(() => checkEvmSellSim(real as never, t, realAsk, ctx), refusedAs("sim_pool"));
   assert.throws(() => signEvmSellSim(EVM_SECRET, ctx, real as never), refusedAs("unchecked"));
-  checkEvmSell(real, realAsk, { ...ctx, precommitment: 5n }, q.minOut);
+  checkEvmSell(real, realAsk, { ...ctx, precommitment: 5n }, { amountOut: q.amountOut });
   assert.throws(() => signEvmSellSim(EVM_SECRET, ctx, real as never), refusedAs("unchecked"));
 });
 

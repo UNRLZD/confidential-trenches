@@ -1,46 +1,64 @@
 import type { Chain } from "@blindfill/kit";
-import { createContext, useContext, useEffect, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { fillOf, fillStore } from "../portfolio/fills.ts";
 import { busy, outcome, poolSellAsk, progress, READY, tap } from "../trade/model.ts";
 import type { Phase } from "../trade/model.ts";
 import { useTradeSource } from "../trade/source.tsx";
 import type { PartCount } from "../trade/States.tsx";
-import { baseUnits, sellLocked } from "./model.ts";
+import { askSellPreview, baseUnits, sellLocked } from "./model.ts";
 import type { Tapped } from "./model.ts";
 
 // What the sell side reads and does. The sell is the kit's own `buy` request with `side: "sell"` (messages.ts
 // SignpageParams.buy) through the trade box's source (src/screens/trade/source.tsx: the same TradeKit stub, `request`
-// and `onProgress`), so the buy and the sell share one kit seam. Not in the kit yet, so typed here as the stub the screen
-// is built on, as the buy side's set preview is: the sell preview (what the share sells for, from the device's own quote
-// and pool reads). The live source answers none, so `You receive` draws a dash until the kit has it. The fixture page
-// passes the stub through SellKitProvider.
+// and `onProgress`), so the buy and the sell share one kit seam. The sell preview (what the share sells for) is the
+// signing page's pool.sell.dry (card app-sell-shows-what-you-receive: the sale's own quote on the device's pool reads),
+// asked through the same client for exactly what the tap would ask, in USD at the page's own pool price (model.ts
+// askSellPreview). The live source gives it with no provider; a fixture passes its own stub through SellKitProvider.
 
-/** Not in the kit: what the sell preview is asked for. `amount` is in the token's units (decimal string). */
+/** What the sell preview is asked for: `amount` the share's token units (decimal string), `share_bps` the share. */
 export interface SellPreviewRequest {
   chain: Chain;
   token: string;
   amount: string;
+  share_bps: number;
   slippage_bps: number;
 }
 
-/** Not in the kit: the sell preview for one amount. USD values are decimal strings, as every kit amount. */
+/** The sell preview for one share. USD values are decimal strings, as every kit amount. */
 export interface SellPreview {
-  /** The expected USD out, after the platform fee, before slippage. */
+  /** The expected USD out, the venue's fees taken, before slippage. */
   out_usd: string;
   fee_bps: number;
   network_usd: string;
-  route: string;
 }
 
 export type SellPreviewAnswer = { ok: true; preview: SellPreview } | { ok: false; code: string };
 
 export interface SellKit {
-  /** Missing kit call: the sell preview for a token amount. Null on the live source. */
+  /** The sell preview for a share. Null while the signing page has no client yet. */
   sellPreview: ((req: SellPreviewRequest) => Promise<SellPreviewAnswer>) | null;
 }
 
-const Kit = createContext<SellKit>({ sellPreview: null });
+const Kit = createContext<SellKit | null>(null);
 export const SellKitProvider = Kit.Provider;
-export const useSellKit = (): SellKit => useContext(Kit);
+
+/** The fixture's stub, else the live source: pool.sell.dry through the trade box's client (askSellPreview). The call
+ *  reads the newest state and price when it runs, and changes only when the client comes or a chain's pool or price
+ *  comes or goes, so a state event never asks again (the page's reads are paced; card app-sell-shows-what-you-receive). */
+export function useSellKit(): SellKit {
+  const fixture = useContext(Kit);
+  const { snapshot, kit } = useTradeSource();
+  const pools = snapshot.state?.pools;
+  const latest = useRef({ pools, kit });
+  latest.current = { pools, kit };
+  const on = kit.request !== null;
+  const key = (pools ?? []).map((p) => `${p.chain}:${p.price ? 1 : 0}`).join(",");
+  const live = useMemo<SellKit>(
+    () => ({ sellPreview: on ? (req) => askSellPreview(latest.current.kit.request, latest.current.pools, (c) => latest.current.kit.poolPrice(c), req) : null }),
+    [on, key],
+  );
+  return fixture ?? live;
+}
 
 /** One position's sell: the buy side's button states, one request for a double tap, shared by the box and the panel. */
 export interface Sell {
@@ -65,6 +83,10 @@ export interface Sell {
  *  reads them (sellLocked). A refused sell leaves it; a reload starts it empty. */
 const TAPPED = new Map<string, Tapped>();
 let refusedHere = 0;
+
+/** What each sell tapped on this page sells (its holding's chain and token, the units) and the holding as shown at its
+ *  tap, by request id, until its Filled. */
+const SOLD = new Map<string, { chain: string; token: string; amount: string; held: { amount: string; cost: string } | null; was: string | null | undefined }>();
 
 /** `units` is the row's units now (null with no row): the sell's lock reads it (model.ts sellLocked). */
 export function useSell(chain: Chain, token: string, slippageBps = 1000, units: string | null = null): Sell {
@@ -91,6 +113,16 @@ export function useSell(chain: Chain, token: string, slippageBps = 1000, units: 
     const t = setInterval(() => tick((n) => n + 1), 100);
     return () => clearInterval(t);
   }, [phase.k]);
+
+  // a sell's Filled: it sold its units whole, so the holding less them is the shown holding from now until a holdings
+  // read shows it (portfolio/fills.ts)
+  useEffect(() => {
+    if (phase.k !== "filled") return;
+    const t = SOLD.get(phase.id);
+    if (!t) return;
+    SOLD.delete(phase.id);
+    fillStore.note(fillOf({ id: phase.id, chain: t.chain, token: t.token, side: "sell", amount: t.amount, at: phase.at + phase.ms, was: t.was }, t.held));
+  }, [phase]);
 
   // a tapped sell the record has shown once is the record's from then on (sellLocked)
   for (const o of src.snapshot.state?.ops ?? []) {
@@ -126,6 +158,7 @@ export function useSell(chain: Chain, token: string, slippageBps = 1000, units: 
       }
       const h = ask ? kit.request!(ask.kind, ask.params) : kit.request!("buy", { chain, token, side: "sell", amount: base!, slippage_bps: slippageBps });
       TAPPED.set(h.id, { chain, token, units });
+      SOLD.set(h.id, { chain, token, amount, held: src.snapshot.state?.positions.find((x) => x.chain === chain && x.token === token) ?? null, was: fillStore.readOf(chain, token) });
       const next = tap(ref.current, h.id, src.now());
       ref.current = next;
       setPhase(next);
@@ -133,6 +166,7 @@ export function useSell(chain: Chain, token: string, slippageBps = 1000, units: 
       void h.outcome.then((o) => {
         // a refusal sold nothing: its holding is not held for it (a client timeout says nothing yet, so it stays)
         if (!o.ok && o.error.code !== "client_timeout") TAPPED.delete(h.id);
+        if (!o.ok && o.error.code !== "client_timeout") SOLD.delete(h.id);
         const at = src.now();
         setPhase((p) => outcome(p, h.id, o, at));
       });

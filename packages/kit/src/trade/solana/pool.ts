@@ -88,7 +88,10 @@ export type SolanaReference = {
   /** E(a_k) for each of the request's `amounts`, in order, from the read that gave `expectedOut`; [] without them. */
   expectedOuts: bigint[];
   spotOut: bigint | null;
-  pools: { venue: SolanaPoolVenue; address: string; depth: readonly [bigint, bigint]; expectedOut: bigint }[];
+  /** `cashback`: the coin's is_cashback_coin as the venue's own account holds it (the curve's byte 82, the PumpSwap
+   *  pool's byte 244, solanaPumpSwapCashback), the flag the sale's venue read takes too; absent when not read. For a
+   *  preview's bound only (card app-sell-shows-what-you-receive): no check before signing reads it. */
+  pools: { venue: SolanaPoolVenue; address: string; depth: readonly [bigint, bigint]; expectedOut: bigint; cashback?: boolean }[];
   /** The oldest slot of the reads it rests on (readSolanaReference), so a check can bound its age. */
   slot?: number;
 };
@@ -235,6 +238,13 @@ export type SolanaPumpSwapPool = {
  * 139, pool_quote_token_account 171, lp_supply 203, coin_creator 211, is_mayhem_mode 243, is_cashback_coin 244,
  * virtual_quote_reserves i128 245, creator_fee_bps 261, can_edit 269, is_holder_reward 270, protocol_fees 271,
  * creator_fees 279. */
+/** The PumpSwap Pool's is_cashback_coin (byte 244): true or false, null when the byte is not a bool or not there. The
+ *  one parse of it: the sale's venue read (pool-buy.ts readSolanaPoolBuyVenue) refuses a null, the reference names the
+ *  flag (SolanaReference pools[].cashback) only when it is one. */
+export function solanaPumpSwapCashback(d: Uint8Array): boolean | null {
+  const v = d.length > 244 ? d[244] : undefined;
+  return v === 0 ? false : v === 1 ? true : null;
+}
 export function solanaDecodePumpSwapPool(acc: SolanaPoolAccount): SolanaPumpSwapPool {
   if (acc.owner !== SOLANA_PUMP_AMM_PROGRAM) throw new Error(`pool owned by ${acc.owner}`);
   const d = acc.data;
@@ -427,6 +437,8 @@ export type SolanaAgreedCandidate = {
   venue: SolanaPoolVenue;
   address: string;
   reads: readonly [SolanaCandidateRead, SolanaCandidateRead];
+  /** The coin's cashback flag, from the venue's static bytes (the same on both providers); absent when not read. */
+  cashback?: boolean;
 };
 
 /** The reference set over the agreed candidates (§2.0 LD1): the cutoff from the smaller read of each, every
@@ -443,7 +455,7 @@ export function solanaReferenceSet(candidates: readonly SolanaAgreedCandidate[])
   const pools: SolanaReference["pools"] = [];
   for (const c of inSet) {
     const r = c.reads[0].out >= c.reads[1].out ? c.reads[0] : c.reads[1];
-    pools.push({ venue: c.venue, address: c.address, depth: [c.reads[0].depth, c.reads[1].depth], expectedOut: r.out });
+    pools.push({ venue: c.venue, address: c.address, depth: [c.reads[0].depth, c.reads[1].depth], expectedOut: r.out, ...(c.cashback === undefined ? {} : { cashback: c.cashback }) });
     if (!best || r.out > best.out) best = r;
   }
   if (!best || best.out <= 0n) return null;
@@ -584,7 +596,7 @@ function judge(venue: SolanaPoolVenue, req: SolanaReferenceRequest, addr: Return
         ...solanaCurveOut(req.side, req.amount, c, global, feeConfig, supply, balance),
         outs: amounts.map((x) => solanaCurveOut(req.side, x, c, global, feeConfig, supply, balance).out),
       });
-      return { kind: "ok", candidate: { venue, address: addr.curve, reads: [one(curves[0], balances[0], ms[0].supply), one(curves[1], balances[1], ms[1].supply)] } };
+      return { kind: "ok", candidate: { venue, address: addr.curve, reads: [one(curves[0], balances[0], ms[0].supply), one(curves[1], balances[1], ms[1].supply)], cashback: curves[0].isCashbackCoin } };
     }
     const pa = at(A, PI.pool);
     const pb = at(B, PI.pool);
@@ -616,7 +628,8 @@ function judge(venue: SolanaPoolVenue, req: SolanaReferenceRequest, addr: Return
       ...solanaPumpSwapOut(req.side, req.amount, p, cfg, feeConfig, supply, base, quote),
       outs: amounts.map((x) => solanaPumpSwapOut(req.side, x, p, cfg, feeConfig, supply, base, quote).out),
     });
-    return { kind: "ok", candidate: { venue, address: addr.pool, reads: [one(pool, bases[0], quotes[0], ms[0].supply), one(poolB, bases[1], quotes[1], ms[1].supply)] } };
+    const cashback = solanaPumpSwapCashback(pa!.data);
+    return { kind: "ok", candidate: { venue, address: addr.pool, reads: [one(pool, bases[0], quotes[0], ms[0].supply), one(poolB, bases[1], quotes[1], ms[1].supply)], ...(cashback === null ? {} : { cashback }) } };
   } catch (e) {
     return { kind: "bad", why: String(e instanceof Error ? e.message : e).slice(0, 200) };
   }

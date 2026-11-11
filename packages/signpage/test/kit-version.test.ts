@@ -190,7 +190,7 @@ function page(opts: { readyOnLoad?: boolean } = {}) {
 const hello = (kit: unknown) => ({ v: 1, type: "hello", kit });
 
 /** True when a client of that schema module reads `msg` as a state answer, deposit.confirm answer, state or progress event. */
-function reads(S: typeof NOW | typeof V14, msg: unknown, kind?: "state" | "deposit.confirm"): boolean {
+function reads(S: typeof NOW | typeof V14 | typeof V17 | typeof V18, msg: unknown, kind?: "state" | "deposit.confirm"): boolean {
   if (!S.signpageIsPlainMessage(msg)) return false;
   const m = msg as Record<string, unknown>;
   if (Object.hasOwn(m, "ok")) return S.signpageAnswerOkSchema(m) && kind !== undefined && S.SIGNPAGE_RESULT_SCHEMAS[kind](m.result);

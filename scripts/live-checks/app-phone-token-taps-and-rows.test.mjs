@@ -66,3 +66,11 @@ test("planted on the good answer: a load missing, not inside the shell, the wron
   assert.match(bad(mutate((r) => (load(r, "phone", "/").route = "discover")))[0], /^BAD phone \/ \(token\): drew discover$/);
   assert.equal(judge({ loads: [] }).ok, false);
 });
+
+// goodOneBar: APP_HOST live, 11 Nov 06:42Z, the top Trending token with one 15m bar (a Base token two hours old): the tape
+// planted on that bar, marks 12 x 12 px with every tap 44 px or more, rows and pushed trades: PASS
+test("recorded good answer on a one-bar top token: PASS", () => {
+  const r = judge(A.goodOneBar);
+  assert.equal(r.ok, true, r.lines.join("\n"));
+  assert.equal(r.lines.length, LOADS.length);
+});
