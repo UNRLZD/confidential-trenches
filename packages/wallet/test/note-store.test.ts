@@ -437,6 +437,19 @@ test("F1b: a RESERVED note whose one signed Solana transaction names its last bl
   await assert.rejects(t.ns.move(Z.id, "HELD", "UNSPENT", { attempt: hz.attempt, nullifier: 5n }), /HELD -> RESERVED only/);
 });
 
+// card pool-buy-record-never-stays-sent: a mark of another attempt (a tab on release 116 freed the note and took it
+// again, writing no mark; the old mark left over) names a height the note's own transaction never signed: never freed by it
+test("a RESERVED note whose mark is another attempt's is never freed by that mark's height, only past its deadline", async () => {
+  const t = await tab();
+  const X = await landed(t.ns, 908n, 9009n, 100n);
+  const h = await t.ns.move(X.id, "UNSPENT", "HELD", { deadlineMs: 900_000n, context: String(contexts++) });
+  await t.ns.move(X.id, "HELD", "RESERVED", { attempt: h.attempt! });
+  await t.w.update("meta", RESERVED_MARKS_KEY, () => ({ [X.id]: { attempt: "other", lastHeight: 1n } }));
+  await assert.rejects(t.ns.move(X.id, "RESERVED", "UNSPENT", { finalHeight: 10n ** 9n }), /can still land/, "another attempt's height frees nothing");
+  assert.equal((await t.ns.get(X.id))?.state, "RESERVED");
+  assert.equal((await t.ns.move(X.id, "RESERVED", "UNSPENT", { blockTimeMs: 900_001n })).state, "UNSPENT", "its deadline frees it");
+});
+
 // card pool-buy-record-never-stays-sent: a tab still on release 116 reads every note record this build writes. Its reader
 // (test/note-store-116.ts, 314835ca's store.ts) refuses any key off its list, so the last height, the nullifier and the
 // landed value live on the note's mark (meta owed/reserved-notes), which no reader lists (store keys() leaves owed/ out)

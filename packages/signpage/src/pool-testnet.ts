@@ -2029,6 +2029,10 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
             ...(over.wait ? { wait: over.wait } : {}),
             keepRelease: async (noteId, attempt, release) => void (await keepRelease(ops, opId, noteId, attempt, release)),
             owedNotes,
+            // the release's withdrawn value is on the note's mark: the app reads the state again, as after a buy's
+            marked: () => {
+              for (const f of watchers) f();
+            },
           },
           { ...ask },
           ready.to,

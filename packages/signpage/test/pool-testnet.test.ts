@@ -1103,6 +1103,32 @@ test("a withdraw on the page, the helper's 502 after the release landed, every s
   assert.ok(asked.length > 0 && asked.every((s) => s === undefined || s === FINAL_SLOT) && asked.includes(FINAL_SLOT), `asked at ${asked.join(",")}`);
 });
 
+// card pool-buy-record-never-stays-sent: a withdraw's release read landed writes its withdrawn value on the note's mark
+// and pings the page's watchers, so the app's read right after counts only the note's change, with no other write
+test("a withdraw on the page whose release lands, its spend not read in time: the watchers are told once its withdrawn value is on the note's mark", async () => {
+  const { world, TO, COST } = WORLD;
+  const wd = await world([30_000_000n], { settleUnspent: true });
+  const fetchFn = (async (_url: string, init: { body: string }) => {
+    const { pool, tx } = JSON.parse(init.body) as { pool: string; tx: string };
+    return new Response(JSON.stringify(await wd.host.send(pool, base64.decode(tx))), { status: 200 });
+  }) as unknown as typeof fetch;
+  const over = { pin: wd.host.pin, rpcs: wd.host.rpcs, pool: wd.host.pool as never, prover: { vault: signalsProver(), stop: () => {} }, fetch: fetchFn, ...quickClock() };
+  const t = testnetPool({ store: async () => wd.w, seed64: async () => SEED64.slice() }, over);
+  // what each ping of the watchers reads, as the app reads the state again on it
+  const reads: Promise<unknown>[] = [];
+  t.watch(() => void reads.push(t.readyWith(async () => null).then((v) => [...(v.landed ?? [])])));
+  await t.withdraw({ chain: "solana", to: TO, amount: 5_000_000n, maxFee: COST }, "op-w");
+  const id = wd.ids[0]!;
+  assert.equal((await wd.ns.get(id))!.state, "RESERVED", "its spend not read yet");
+  const mark = (await wd.ns.marks()).get(id);
+  assert.ok(mark?.withdrawn !== undefined && mark.withdrawn > 0n, "the release's withdrawn value on the note's mark");
+  for (let i = 0; i < 200 && reads.length === 0; i++) await new Promise((r) => setTimeout(r, 5));
+  const want = [[id, { attempt: mark.attempt, withdrawn: mark.withdrawn }]];
+  const seen = await Promise.all(reads);
+  assert.ok(seen.some((l) => { try { assert.deepEqual(l, want); return true; } catch { return false; } }), `a ping reads the landed release (${seen.length} pings)`);
+  await t.signedOut();
+});
+
 test("an owed send with no release signature under 2,500 newer entries of W's history, the page's RPC functions new on every pass: the next finish reads on from the last one's place and sends it (fold 4, review HIGH)", async () => {
   const { wd, over, page, TO, end } = await hungWithdraw();
   const id = wd.ids[0]!;

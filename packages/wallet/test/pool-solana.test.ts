@@ -15,8 +15,8 @@ import { SOL_MARK_BUCKET, SOL_MARK_READ_BATCH, SOL_MARK_READ_BATCH_MAX, SOL_MARK
 import { IDBFactory } from "fake-indexeddb";
 import { createRpc as createHelperRpc } from "../../../apps/helper/src/rpc/rpc.ts";
 import { SOLANA_RPC_WINDOW_RETRY, solanaHelperRpc, solanaPacedRpc } from "../../kit/src/trade/solana/send.ts";
-import { openNoteStore, type NoteStore } from "../src/notes/store.ts";
-import { openWalletStore } from "../src/store/index.ts";
+import { RESERVED_MARKS_KEY, openNoteStore, readReservedMarks, type NoteStore } from "../src/notes/store.ts";
+import { openWalletStore, type WalletStore } from "../src/store/index.ts";
 import { refKey } from "../src/notes/store.ts";
 import { checkPool } from "../src/pool/pool.ts";
 import { RESTORE_LANES, WALK_SLICE_MS } from "../src/notes/restore.ts";
@@ -1302,7 +1302,7 @@ test("N1 union: two reads of one mark with other records are refused (the union 
 // comes back refused as already spent.
 const stores: { close(): void }[] = [];
 after(() => { for (const x of stores.splice(0)) x.close(); });
-async function reservedDeposit0(l0: bigint, lastHeight?: bigint): Promise<{ ns: NoteStore; id: string }> {
+async function reservedDeposit0(l0: bigint, lastHeight?: bigint): Promise<{ ns: NoteStore; id: string; w: WalletStore }> {
   const w = await openWalletStore({ indexedDB: new IDBFactory() });
   const ns = await openNoteStore(w);
   stores.push(ns, w);
@@ -1311,7 +1311,7 @@ async function reservedDeposit0(l0: bigint, lastHeight?: bigint): Promise<{ ns: 
   let n = await ns.add({ ref, scope: SCOPE, precommitment: P0, state: "UNSPENT", leaf: { value: 50_000_000n, label: l0, commitment: noteCommitment(50_000_000n, l0, P0), leafIndex: 1n } });
   n = await ns.move(n.id, "UNSPENT", "HELD", { deadlineMs: 1_800_000_200_000n, context: "1" });
   n = await ns.move(n.id, "HELD", "RESERVED", { attempt: n.attempt!, ...(lastHeight === undefined ? {} : { lastHeight }) });
-  return { ns, id: n.id };
+  return { ns, id: n.id, w };
 }
 
 test("already spent: a send refused as spent marks the note SPENT with its change, only from the chain's marks and pages on two RPCs", async () => {
@@ -1420,6 +1420,16 @@ test("a pass frees a RESERVED note whose signed transaction can no longer land: 
   // the chain holds the spend: settled SPENT with its change, whatever the heights say
   const c = await reservedDeposit0(l0, LAST);
   assert.deepEqual(await pass(c.ns, pair(at(chain, EARLY_S, 1_001), at(chain, EARLY_S, 1_001))), { spent: [c.id], freed: [], held: [] });
+  // a note whose mark is another attempt's (a tab on release 116 freed it and took it again; the old mark left over):
+  // that mark's height is never the note's, so the pass reads no height for it and moves nothing, even when the marks it
+  // is handed are the store's as written (no sweep)
+  const o = await reservedDeposit0(l0);
+  await o.w.update("meta", RESERVED_MARKS_KEY, () => ({ [o.id]: { attempt: "other", lastHeight: 1n } }));
+  let moves = 0;
+  const raw: NoteStore = { ...o.ns, marks: () => readReservedMarks(o.w), move: (...x: Parameters<NoteStore["move"]>) => (moves++, o.ns.move(...x)) };
+  assert.deepEqual(await pass(raw, pair(at(beforeSpend, EARLY_S, 10 ** 9), at(beforeSpend, EARLY_S, 10 ** 9))), { spent: [], freed: [], held: [o.id] });
+  assert.equal(moves, 0, "no free tried on another attempt's height");
+  assert.equal((await o.ns.get(o.id))!.state, "RESERVED");
   // a note reserved with no last height is never freed by a height, only past its deadline
   const d = await reservedDeposit0(l0);
   assert.deepEqual(await pass(d.ns, pair(at(beforeSpend, EARLY_S, 10 ** 9), at(beforeSpend, EARLY_S, 10 ** 9))), { spent: [], freed: [], held: [d.id] });
