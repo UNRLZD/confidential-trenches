@@ -9,6 +9,15 @@
 // quote is anything else, is never an input here: the caller refuses the token. A swap with a zero leg, or a price that
 // floors to zero, is dropped (never a candle of 0).
 //
+// A MARK is the main pool's own state at one block, for a book whose pool held no swap in what was read (card
+// evm-chart-opens-without-a-vendor-call: a quiet pool on Base answered no bar, and GeckoTerminal's keyless budget refused
+// its chart). It is two legs, token and quote in their smallest units, whose ratio is the pool's price (evm/swaps.ts
+// poolStateLegs: v3's and Slipstream's sqrtPriceX96, v4's Slot0, Aerodrome v2's reserves), so it is priced by the rule
+// above exactly as a swap of those legs would be: the same token/quote orientation and decimals, the ETH price of the
+// same block (carried by the mark, from the reference pool's own state), bigint math, flooring, a zero price dropped.
+// It is one bar of zero volume in its bucket of every timeframe, counts for ownFrom, gives way to a real swap's bar in
+// the same bucket, and is never on the tape: it is no trade.
+//
 // Input: events in (block, index) order, each a `swap` or a `ref`. Output: bars [t_s, open, high, low, close, vol_usd]
 // (USD decimal strings) per timeframe, oldest first, one per bucket that held a swap, and the tape, newest first.
 //
@@ -66,6 +75,9 @@ export type BookConfig = {
   quote: { kind: "usd" | "eth"; decimals: number };
 };
 
+/** A pool's own state at `block` (time `t`, whole seconds) as two legs, priced as a swap of them (the header's MARK). */
+export type Mark = { block: number; t: number; amt: bigint; quote: bigint; ethUsd: bigint | null };
+
 /** One bar, in integers: prices scaled by 10^PRICE_SCALE, volume by 10^VALUE_SCALE. */
 type Bar = { o: bigint; h: bigint; l: bigint; c: bigint; v: bigint };
 /** A swap with its USD value and price worked out. */
@@ -89,15 +101,20 @@ export function fixed(v: bigint, scale: number): string {
 /** The swap's USD value (times 10^VALUE_SCALE) and price, or null when it cannot be priced: an ETH quote with no
  *  ETH price yet, a zero leg, or a price that floors to zero. */
 export function price(cfg: BookConfig, swap: Swap, ethUsd: bigint | null): Priced | null {
-  if (swap.amt <= 0n || swap.quote <= 0n) return null;
+  const v = legs(cfg, swap.amt, swap.quote, ethUsd);
+  return v === null ? null : { swap, ...v };
+}
+/** The one rule on two legs (a swap's, or a mark's): their USD value and the token's price, null when not priced. */
+function legs(cfg: BookConfig, amt: bigint, quote: bigint, ethUsd: bigint | null): { usd: bigint; price: bigint } | null {
+  if (amt <= 0n || quote <= 0n) return null;
   let usd: bigint;
-  if (cfg.quote.kind === "usd") usd = swap.quote * pow10(VALUE_SCALE) / pow10(cfg.quote.decimals);
+  if (cfg.quote.kind === "usd") usd = quote * pow10(VALUE_SCALE) / pow10(cfg.quote.decimals);
   else {
     if (ethUsd === null) return null;
-    usd = swap.quote * ethUsd / pow10(cfg.quote.decimals);
+    usd = quote * ethUsd / pow10(cfg.quote.decimals);
   }
-  const p = usd * pow10(cfg.decimals) * pow10(PRICE_SCALE - VALUE_SCALE) / swap.amt;
-  return usd > 0n && p > 0n ? { swap, usd, price: p } : null;
+  const p = usd * pow10(cfg.decimals) * pow10(PRICE_SCALE - VALUE_SCALE) / amt;
+  return usd > 0n && p > 0n ? { usd, price: p } : null;
 }
 
 const order = (a: { block: number; index: number }, b: { block: number; index: number }) => a.block - b.block || a.index - b.index;
@@ -126,6 +143,15 @@ export function createBook(cfg: BookConfig) {
   let ethUsd: bigint | null = null;
   let settledTape: Priced[] = [];
   let tail: Event[] = [];
+  let marked: { t: number; price: bigint } | null = null;
+  /** The mark's bucket of `tf` when it is a bar there: none in its bucket already, and within the buckets kept (a mark
+   *  is older than every bar, so it goes first once BUCKETS_MAX of them are held). */
+  const markAt = (tf: Tf, has: (k: number) => boolean): number | null => {
+    if (marked === null) return null;
+    const k = marked.t - (marked.t % TF_SECONDS[tf]);
+    const oldest = bars[tf].keys().next().value;
+    return has(k) || (bars[tf].size >= BUCKETS_MAX[tf] && oldest !== undefined && k < oldest) ? null : k;
+  };
 
   /** The tail's events, priced from the price in force at the settled point. */
   function tailPriced(): Priced[] {
@@ -187,17 +213,33 @@ export function createBook(cfg: BookConfig) {
       const touched = new Set(live.map((p) => p.swap.t - (p.swap.t % step)));
       for (const [k, b] of bars[tf]) view.set(k, touched.has(k) ? copy(b) : b);
       for (const p of live) add(view, step, p);
+      const m = markAt(tf, (k) => view.has(k));
+      if (m !== null) view.set(m, { o: marked!.price, h: marked!.price, l: marked!.price, c: marked!.price, v: 0n });
       const rows = [...view].sort((a, b) => a[0] - b[0]).filter(([k]) => to === null || k < to);
       return rows.slice(-limit).map(([k, b]) => [k, fixed(b.o, PRICE_SCALE), fixed(b.h, PRICE_SCALE), fixed(b.l, PRICE_SCALE), fixed(b.c, PRICE_SCALE), fixed(b.v, VALUE_SCALE)]);
     },
 
     /** The first bucket start of `tf` this book holds, or null. */
     ownFrom(tf: Tf): number | null {
+      const step = TF_SECONDS[tf];
       const first = bars[tf].keys().next().value;
       const live = tailPriced();
-      const t0 = live.length === 0 ? null : live[0]!.swap.t - (live[0]!.swap.t % TF_SECONDS[tf]);
-      if (first === undefined) return t0;
-      return t0 === null ? first : Math.min(first, t0);
+      const t0 = live.length === 0 ? null : live[0]!.swap.t - (live[0]!.swap.t % step);
+      const own = first === undefined ? t0 : t0 === null ? first : Math.min(first, t0);
+      const m = markAt(tf, (k) => bars[tf].has(k) || live.some((p) => p.swap.t - (p.swap.t % step) === k));
+      return m === null ? own : own === null ? m : Math.min(own, m);
+    },
+
+    /** Sets the book's mark (the header's MARK), replacing any before; false, and none held, when it cannot be priced. */
+    mark(m: Mark): boolean {
+      const v = legs(cfg, m.amt, m.quote, m.ethUsd);
+      marked = v === null ? null : { t: m.t, price: v.price };
+      return marked !== null;
+    },
+
+    /** The newest close: the newest priced swap's, else the mark's; null when the book holds neither. */
+    close(): bigint | null {
+      return (tailPriced().at(-1) ?? settledTape.at(-1))?.price ?? marked?.price ?? null;
     },
 
     /** The newest `limit` swaps, newest first; `trader` is filled by the caller (null here). */
