@@ -1752,3 +1752,14 @@ test("card start-reads-wait-out-a-throttle: a sign out ends a buy's wait at once
   assert.deepEqual(a, { error: "failed" });
   assert.ok(!w.log.includes("send") && !w.log.some((x) => x.startsWith("take")));
 });
+
+test("card start-reads-wait-out-a-throttle: a buy's bound is on the device's clock: each throttled read taking 5 s, it waits 1, 2 and 4 s and answers down by 30 s plus the read in flight", async () => {
+  const w = await world();
+  let t = 0n;
+  const f = faultAt(w.host.rpcs, 1, (m) => m === "isBlockhashValid", Infinity, () => ((t += 5_000n), devnet429()));
+  const waits: number[] = [];
+  assert.deepEqual(await runPoolBuy({ ...w.host, rpcs: f.rpcs, now: () => t, wait: async (ms: number) => void (waits.push(ms), (t += BigInt(ms))) }, ASK), { error: "down" });
+  assert.deepEqual(waits, [1_000, 2_000, 4_000]);
+  assert.ok(t <= 30_000n + 13_500n, `down at ${t} ms`);
+  assert.ok(!w.log.includes("send") && !w.log.some((x) => x.startsWith("take")));
+});

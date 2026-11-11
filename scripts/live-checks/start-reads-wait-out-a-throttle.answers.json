@@ -6,8 +6,8 @@
     "badTestnet": "the base f5fff9cc testnet build: FAIL"
   },
   "good": {
-    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-N8oqUe5sMKIcll0/CY/ITO/APc5YlOjYS17StyPPr5r7zHIfHlvNHyLO0JaNvXPi\"></script>\n  </head>\n  <body></body>\n</html>\n",
-    "sha384": "sha384-N8oqUe5sMKIcll0/CY/ITO/APc5YlOjYS17StyPPr5r7zHIfHlvNHyLO0JaNvXPi",
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-L6S0ZlSvYfzdU9Pcl8eSKGfCNM3NtN7w3N3Lj1lsBBiHcGQjIeQ/g8Q7FvphGJSZ\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-L6S0ZlSvYfzdU9Pcl8eSKGfCNM3NtN7w3N3Lj1lsBBiHcGQjIeQ/g8Q7FvphGJSZ",
     "rule": true,
     "faults": true,
     "stop": true,
@@ -15,7 +15,8 @@
       "decimals": true,
       "sell": true,
       "buy": true,
-      "deposits": 2
+      "deposits": 2,
+      "taps": 4
     },
     "rentBack": true
   },
@@ -29,13 +30,14 @@
       "decimals": false,
       "sell": false,
       "buy": false,
-      "deposits": 0
+      "deposits": 0,
+      "taps": 0
     },
     "rentBack": false
   },
   "goodTestnet": {
-    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-yuXrFXT1CmZjYwCovqWMscYNCNjhH2GkyvRFLk0CGRLdZasbnRQnKSltqF/QQcIU\"></script>\n  </head>\n  <body></body>\n</html>\n",
-    "sha384": "sha384-yuXrFXT1CmZjYwCovqWMscYNCNjhH2GkyvRFLk0CGRLdZasbnRQnKSltqF/QQcIU",
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-VNB4I8PWWWQ+fduK19/2xF3OjtyjRZms/yTqTf++J8Oo38nBfktZoODtB/eQtQI2\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-VNB4I8PWWWQ+fduK19/2xF3OjtyjRZms/yTqTf++J8Oo38nBfktZoODtB/eQtQI2",
     "rule": true,
     "faults": true,
     "stop": true,
@@ -43,7 +45,8 @@
       "decimals": true,
       "sell": true,
       "buy": true,
-      "deposits": 2
+      "deposits": 2,
+      "taps": 4
     },
     "rentBack": true
   },
@@ -57,7 +60,8 @@
       "decimals": false,
       "sell": false,
       "buy": false,
-      "deposits": 0
+      "deposits": 0,
+      "taps": 0
     },
     "rentBack": false
   }

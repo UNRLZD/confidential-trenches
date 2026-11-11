@@ -39,7 +39,7 @@
 //   pool-restore-wired). Any other error is answered as before.
 import { EvmNotFinalError } from "../../wallet/src/pool/evm-restore.ts";
 import type { KindContext, Deferred, HostAnswer, HostRefusal, Running } from "./api.ts";
-import { afterOf, readWaits, ReadStopped, waitsOn, waitUnless } from "./read-waits.ts";
+import { afterOf, readWaits, ReadStopped, tapWaits, waitsOn, waitUnless, type ReadWaits } from "./read-waits.ts";
 import { PoolRuleRefused, checkPoolRequest, poolTokenAddress, tokenDecimalsKeptOf, tokenDecimalsOf, type PoolAsk, type PoolChain, type PoolRequest } from "./rules/pool.ts";
 
 /** One provider's JSON-RPC call: the method's result, or a throw. */
@@ -77,8 +77,9 @@ export const PAGE_TOKEN_DECIMALS: TokenDecimalsKept = /* @__PURE__ */ tokenDecim
 export type TokenDecimalsRead = {
   /** The store (PAGE_TOKEN_DECIMALS otherwise). */
   kept?: TokenDecimalsKept;
-  /** 0: no wait at all, the first failure thrown (the EVM buy's read between its check and the signature). */
-  waits?: 0;
+  /** 0: no wait at all, the first failure thrown (the EVM buy's read between its check and the signature); else the
+   *  tap's waits (read-waits.ts tapWaits: one bound for the request), a fresh bound otherwise. */
+  waits?: 0 | ReadWaits;
   /** The wait (tests replace it). */
   wait?: (ms: number) => Promise<void>;
   /** A sign out: ends the wait, and the read throws ReadStopped. */
@@ -93,7 +94,7 @@ export async function keptTokenDecimals(chain: PoolChain, token: string, rpcs: r
   const kept = o.kept ?? PAGE_TOKEN_DECIMALS;
   const had = kept.get(chain, token);
   if (had !== undefined) return had;
-  const waits = o.waits === 0 ? null : readWaits();
+  const waits = o.waits === 0 ? null : (o.waits ?? readWaits());
   const wait = o.wait ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const one = (rpc: PoolRpc) =>
     chain === "solana"
@@ -146,6 +147,8 @@ export type PoolKindsDeps = {
   /** The sign out of the session a request is asked in (the page's), read when it comes: it ends the wait, and a kind
    *  asked before it never runs after it. */
   stop?: () => AbortSignal;
+  /** The device's clock, ms (tests replace it): a request's one bound counts on it from its arrival. */
+  now?: () => number;
 };
 type Answer<K extends PoolKind> = HostRefusal | Deferred<K> | HostAnswer<K>;
 type Handler<K extends PoolKind> = (params: Record<string, unknown>, ctx: KindContext) => Answer<K>;
@@ -214,7 +217,9 @@ export function poolKinds(deps: PoolKindsDeps): { [K in PoolKind]: Handler<K> } 
       if (!rpcs || !poolTokenAddress(chain, p.token)) return NO;
       let answer: HostAnswer<K> | HostRefusal = NO;
       const signal = deps.stop?.();
-      const after = keptTokenDecimals(chain, p.token, rpcs, { kept, ...(deps.wait ? { wait: deps.wait } : {}), ...(signal ? { signal } : {}) }).then(
+      // the request's one bound starts here, at its arrival: the sell's plan and sales share it (read-waits.ts tapWaits)
+      const waits = tapWaits(ctx, deps.now);
+      const after = keptTokenDecimals(chain, p.token, rpcs, { kept, waits, ...(deps.wait ? { wait: deps.wait } : {}), ...(signal ? { signal } : {}) }).then(
         async (decimals) => {
           // a sign out since the request came: the flow never runs for it
           if (signal?.aborted) return void (answer = FAILED);
