@@ -371,6 +371,13 @@ const passLists = async (holding, sold) => {
   }
   return null;
 };
+// every buy Final (its record's stage filled) before any sale's tap: a buy's reads after its early "sent" share the
+// host's budget, so a sale tapped while they run is throttled by them, not by its own reads
+const buysFinal = rounds.filter((r) => r.buy).map((r) => r.buy.record?.stage ?? null);
+if (ok && !buysFinal.every((x) => x === "filled")) {
+  log(`BAD a buy not Final before the first sale: ${JSON.stringify(buysFinal)}`);
+  ok = false;
+} else if (ok) log(`every buy Final before the first sale (${buysFinal.length} records at stage filled)`);
 if (ok && ONE_FIRST) {
   if (FINDER || rounds.length < 2) throw new Error("FLOW_ONE_FIRST takes the kept listing path and two buys at least");
   const listed = keptListed(await w.get("meta", POSITIONS_KEPT_KEY));
@@ -487,7 +494,7 @@ const filled =
 log(`notes ${JSON.stringify(notes)}; sell times ${JSON.stringify(sell?.times ?? null)}; filled ${filled}`);
 seed64.fill(0);
 fKey.fill(0);
-writeFileSync(OUT, JSON.stringify({ at: new Date().toISOString(), cluster: "devnet", program: SOL_POOLS.devnet.program, table: TABLE, mint: MINT, n: N, share_bps: SHARE, F, need: String(NEED), fundTxs, rounds, one: one && { W: oneW, ...one }, oneReport, sell, report, after, sentTxs, readBack, stages, notes, filled }, null, 2) + "\n");
+writeFileSync(OUT, JSON.stringify({ at: new Date().toISOString(), cluster: "devnet", program: SOL_POOLS.devnet.program, table: TABLE, mint: MINT, n: N, share_bps: SHARE, F, need: String(NEED), fundTxs, rounds, buysFinal, one: one && { W: oneW, ...one }, oneReport, sell, report, after, sentTxs, readBack, stages, notes, filled }, null, 2) + "\n");
 await t.signedOut();
 ns.close();
 w.close();
