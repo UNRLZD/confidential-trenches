@@ -31,6 +31,9 @@ export const PREVIEW_SETTLE_MS = 250;
 /** A "not now" preview answer (the signing page's RETRY_CODES) is asked again once, this long after. */
 export const PREVIEW_AGAIN_MS = 3_000;
 const NOT_NOW: ReadonlySet<string> = new Set(["busy", "down"]);
+/** A share's last number is shown again for a "not now" answer this long after it came, so a shown number never flips
+ *  to a dash and back while the page is busy. */
+export const PREVIEW_KEEP_MS = 10_000;
 
 /** The amount box takes a percent: digits and one point with up to two decimals, at most 100. */
 const TYPING = /^\d{0,3}(?:\.\d{0,2})?$/;
@@ -58,8 +61,10 @@ export function SellBox({ row, s, slippageBps = 1000, initialPercent = "50", onB
   const decimals = row.decimals;
   const kit = useSellKit();
   const [text, setText] = useState(initialPercent);
-  // the last answer and the amount it was for: a preview, or none (the page refused, or its reads could not be had)
+  // the last answer and the amount it was for: a preview, or none (a dash: the page refused, or its reads could not be had)
   const [preview, setPreview] = useState<{ amount: string; p: SellPreview | null } | null>(null);
+  // each share's last number, by token and amount, with when it came (PREVIEW_KEEP_MS)
+  const recent = useRef(new Map<string, { p: SellPreview; at: number }>());
   const [tab, setTab] = useState<OrderTab>("market");
 
   const bps = parsePercent(text);
@@ -70,8 +75,8 @@ export function SellBox({ row, s, slippageBps = 1000, initialPercent = "50", onB
 
   // the sell preview for the share in the box: asked at once when the box opens, then once a changed share has settled
   // (PREVIEW_SETTLE_MS: one ask per typed percent, never per key); the last numbers stay, dimmed, until a change
-  // answers. A "not now"
-  // answer (busy: a trade runs or the page's preview budget is spent; down) is asked again once, PREVIEW_AGAIN_MS later
+  // answers. A "not now" answer (busy: a trade runs or the page's preview budget is spent; down) is asked again once,
+  // PREVIEW_AGAIN_MS later; still not now, the share's own number from the last PREVIEW_KEEP_MS shows, else the dash
   const sellPreview = kit.sellPreview;
   const asked = useRef(false);
   useEffect(() => {
@@ -82,8 +87,15 @@ export function SellBox({ row, s, slippageBps = 1000, initialPercent = "50", onB
       void sellPreview({ chain: row.chain, token: row.token, amount, share_bps: bps, slippage_bps: slippageBps }).then(
         (a) => {
           if (!live) return;
-          if (!a.ok && again && NOT_NOW.has(a.code)) t = setTimeout(() => ask(false), PREVIEW_AGAIN_MS);
-          else setPreview({ amount, p: a.ok ? a.preview : null });
+          const key = `${row.token}|${amount}`;
+          if (a.ok) {
+            recent.current.set(key, { p: a.preview, at: s.now() });
+            setPreview({ amount, p: a.preview });
+          } else if (again && NOT_NOW.has(a.code)) t = setTimeout(() => ask(false), PREVIEW_AGAIN_MS);
+          else {
+            const kept = NOT_NOW.has(a.code) ? recent.current.get(key) : undefined;
+            setPreview({ amount, p: kept && s.now() - kept.at <= PREVIEW_KEEP_MS ? kept.p : null });
+          }
         },
         () => live && setPreview({ amount, p: null }),
       );
@@ -105,15 +117,10 @@ export function SellBox({ row, s, slippageBps = 1000, initialPercent = "50", onB
   }
   const canSellAt = (b: number) => s.ready && !running && !noRoute && sellAmount(row.units, b, decimals) !== null;
 
-  // a dash only before the first answer; Unavailable once the newest answer is none (the trade box's word), a "not now"
-  // answer (busy, down) asked again once first
   const shown = preview && preview.amount === amount ? preview.p : null;
   const last = preview?.p ?? null;
-  const pending = preview !== null && preview.amount !== amount;
-  const none = preview !== null && preview.p === null;
-  const p = shown ?? last;
-  const outC = p ? cents(p.out_usd) : null;
-  const dash = (v: ReactNode): ReactNode => (none ? <W id="unavailable" /> : v);
+  const pending = shown === null && last !== null;
+  const outC = (shown ?? last) ? cents((shown ?? last)!.out_usd) : null;
   const share = bps === null ? null : shareCents(row.value, bps);
   const now = s.now();
   const state = stateId(s.phase, now, "sell") ?? (noRoute ? "S8.33" : "S8.29");
@@ -179,7 +186,7 @@ export function SellBox({ row, s, slippageBps = 1000, initialPercent = "50", onB
       </div>
       <div className="trb-receive">
         <span><W id="receive" /></span>
-        <span data-pending={pending || undefined} data-none={none || undefined} data-testid="sell-receive">{dash(outC === null ? "—" : `≈ ${usd(outC)}`)}</span>
+        <span data-pending={pending || undefined} data-testid="sell-receive">{outC === null ? "—" : `≈ ${usd(outC)}`}</span>
       </div>
       <div className="trb-warn" data-testid="sell-line">
         {s.phase.k === "ended" ? (
@@ -212,13 +219,8 @@ export function SellBox({ row, s, slippageBps = 1000, initialPercent = "50", onB
         </button>
         <div className="trb-row trb-set" data-pending={pending || undefined}>
           <span className="trb-pair" title={WORDS.slippage.text}><Sliders /><span>≤{pct(slippageBps)}</span></span>
-          {/* no preview to be had: You receive says so once; Network and Fee have no number to draw */}
-          {none ? null : (
-            <>
-              <span className="trb-pair" title={WORDS.network.text}><Flame /><span data-testid="sell-network">{p ? usd(cents(p.network_usd) ?? 0n) : "—"}</span></span>
-              <span className="trb-pair" title={WORDS.fee.text}><Coins /><span data-testid="sell-fee">{p ? pct(p.fee_bps) : "—"}</span></span>
-            </>
-          )}
+          <span className="trb-pair" title={WORDS.network.text}><Flame /><span data-testid="sell-network">{(shown ?? last) ? usd(cents((shown ?? last)!.network_usd) ?? 0n) : "—"}</span></span>
+          <span className="trb-pair" title={WORDS.fee.text}><Coins /><span data-testid="sell-fee">{(shown ?? last) ? pct((shown ?? last)!.fee_bps) : "—"}</span></span>
         </div>
       </div>
       </>)}

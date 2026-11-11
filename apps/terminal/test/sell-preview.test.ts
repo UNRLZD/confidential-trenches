@@ -48,12 +48,13 @@ test("no preview to draw: no client, no pool on the chain, no fresh price, the p
   assert.equal((await askSellPreview(page({ ok: true, result: { out: "0.1234567891", min_out: "0", network: "0", fee_bps: 0 } }).request, POOLS, () => SOL_150, req)).ok, false, "finer than SOL's 9");
 });
 
-test("the live source in src gives the preview (no fixture needed), and the box says Unavailable once an answer is a refusal, a dash only before the first", () => {
+test("the live source in src gives the preview (no fixture needed); with none to be had the box is main's: an unread value is a dash, no new word", () => {
   const src = readFileSync(new URL("../src/screens/positions/source.tsx", import.meta.url), "utf8");
   assert.doesNotMatch(src, /createContext<SellKit>\(\{ sellPreview: null \}\)/, "the default is no longer a null preview");
   assert.match(src, /askSellPreview\(/);
   const box = readFileSync(new URL("../src/screens/positions/SellBox.tsx", import.meta.url), "utf8");
-  assert.match(box, /<W id="unavailable" \/>/);
+  assert.doesNotMatch(box, /unavailable/i, "an unread value shows a dash (owner 10 Nov)");
+  assert.match(box, /data-testid="sell-receive">\{outC === null \? "—" : `≈ \$\{usd\(outC\)\}`\}<\/span>/);
   const words = readFileSync(new URL("../src/screens/positions/words.ts", import.meta.url), "utf8");
-  assert.match(words, /unavailable: TR\.unavailable,/, "the trade box's own word (owner 10 Nov 18:12Z), no new copy");
+  assert.doesNotMatch(words, /unavailable/, "no new word on the sell box");
 });

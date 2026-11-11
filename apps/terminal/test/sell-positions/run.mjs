@@ -11,7 +11,8 @@
 // mount. Then the box as the app mounts it (?kit=live, no SellKitProvider; card app-sell-shows-what-you-receive): the
 // signing page's pool.sell.dry asked once on open, for the tap's own share, its out, network and fee drawn at the page's
 // price within 1 s of the Sell side opening, one more ask per settled share (a quick "2" then "25" asks once), and
-// Unavailable on You receive when the page refuses (Network and Fee drawn with no number), a busy answer asked again once.
+// the dashes when the page refuses (main's state before any preview), a busy answer asked again once, and still busy the
+// share's own number from the last 10 s or the dash.
 //   node apps/terminal/test/sell-positions/run.mjs [--shots <dir>] [--plant tap|clock] [--slow-cpu <rate>] [--slow-commit]
 // PASS exit 0, FAIL exit 1. --plant runs the same checks on a planted fault (tap: the quick sells 36 px tall on the
 // phone, R5's desktop height; clock: the screen's clock 25% fast) and must FAIL. --slow-cpu slows the page's CPU by the
@@ -355,14 +356,13 @@ try {
       const { ctx, page, dialogs } = await open(browser, w, "up", "&kit=live&dry=refuse");
       const text = async (id) => norm(await page.locator(`[data-testid="${id}"]`).innerText());
       await page.clock.runFor(490);
-      const got = await settle(() => text("sell-receive"), "Unavailable");
-      check(got === "Unavailable", `@${w.name} live refused: You receive "${got}", want Unavailable`);
-      check((await page.locator('[data-testid="sell-network"], [data-testid="sell-fee"]').count()) === 0, `@${w.name} live refused: Network and Fee drawn with no number`);
+      // an unread value: the dash, as on main before any preview (owner 10 Nov), nothing hidden
+      for (const id of ["sell-receive", "sell-network", "sell-fee"]) check((await text(id)) === "—", `@${w.name} live refused: ${id} "${await text(id)}", want —`);
       check((await text("sell-cta")) === "Sell 50%", `@${w.name} live refused: the button "${await text("sell-cta")}" (the sale's own checks judge the tap)`);
       const m = await measure(page, w);
       check(!m.hscroll && m.smallText.length === 0, `@${w.name} live refused: ${JSON.stringify(m)}`);
       check(dialogs.length === 0, `@${w.name} live refused: a dialog`);
-      if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `live-unavailable-${w.name}.png`), fullPage: true });
+      if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `live-dash-${w.name}.png`), fullPage: true });
       await ctx.close();
     }
     // a "not now" answer is asked again once, 3 s later: the numbers come, never Unavailable
@@ -375,6 +375,22 @@ try {
       const got = await settle(() => text("sell-receive"), "≈ $108.00");
       check(got === "≈ $108.00", `@${w.name} live busy: You receive "${got}" after the second ask`);
       check((await page.evaluate(() => window.__dry.length)) === 2, `@${w.name} live busy: asked ${await page.evaluate(() => window.__dry.length)} times`);
+      await ctx.close();
+    }
+    // still not now after the second ask: the share's own number from the last 10 s, else the dash; never a shown
+    // number flipped to a dash and back
+    {
+      const { ctx, page } = await open(browser, w, "up", "&kit=live&dry=busyafter");
+      const text = async (id) => norm(await page.locator(`[data-testid="${id}"]`).innerText());
+      await page.clock.runFor(490);
+      check((await settle(() => text("sell-receive"), "≈ $108.00")) === "≈ $108.00", `@${w.name} busyafter: 50% "${await text("sell-receive")}"`);
+      const input = page.locator('[data-testid="sell-box"] .trb-input');
+      await input.fill("25");
+      await page.clock.runFor(3_700); // settle, busy, 3 s, busy again
+      check((await settle(() => text("sell-receive"), "—")) === "—", `@${w.name} busyafter: 25%, never read, "${await text("sell-receive")}", want —`);
+      await input.fill("50");
+      await page.clock.runFor(3_700);
+      check((await settle(() => text("sell-receive"), "≈ $108.00")) === "≈ $108.00", `@${w.name} busyafter: back to 50% inside 10 s "${await text("sell-receive")}", want its own number`);
       await ctx.close();
     }
     // Share goes to the mount

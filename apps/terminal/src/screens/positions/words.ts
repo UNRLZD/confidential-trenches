@@ -42,8 +42,6 @@ export const WORDS = {
   initials: PF.initials,
   share: PF.share,
   noRoute: PF.noRoute,
-  // the trade box's own (owner 10 Nov 18:12Z): the sell preview's reads cannot be had
-  unavailable: TR.unavailable,
   // new here
   // the pool path (card trade-box-pool): the sell's proceeds go back into the chain's pool, the user's Cash
   toPool: ok("Back to Cash", "owner 8 Nov 07:55Z, kept; drafted on card trade-box-pool (plan v2 A2): pool.sell deposits the proceeds into the pool in the same transaction"),
