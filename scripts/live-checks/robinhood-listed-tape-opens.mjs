@@ -21,6 +21,7 @@
 //   PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3. --record writes what the run read, for the test.
 import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
+import { FILL_POLL_MS, FILLED_MS, fillingOf, filledVerdict, readFilled } from "./tape-read.mjs";
 
 const KEY = "robinhood-listed-tape-opens";
 export const BASE = "https://ct-api.unrealized.trade";
@@ -35,12 +36,7 @@ export const DROPPED_MAX = 6;
  *  trades.ts TIMEOUT_MS); past it the page shows no tape whatever the helper answers. The route answers at its bound
  *  (apps/helper/src/data/evm/swaps.ts OPEN_BOUND_MS, 8 s) with what it holds. */
 export const ANSWER_MS = 10_000;
-/** A filling tape is filled within this of its first read [design: over twice the slowest measured, ten cold Base tapes
- *  and their charts opened at once on the public providers from the Mac: at a 12 s bound (17:47Z) eight filled 1.0 to
- *  20.2 s after their first answer; at the 8 s bound (17:56Z) three filled 4.3 to 5.9 s after it, and ten Robinhood ones
- *  answered whole by 7.8 s]. */
-export const FILLED_MS = 45_000;
-export const FILL_POLL_MS = 2_000;
+export { FILL_POLL_MS, FILLED_MS } from "./tape-read.mjs";
 const ADDRESS = { robinhood: /^0x[0-9a-f]{40}$/, base: /^0x[0-9a-f]{40}$/, solana: /^[1-9A-HJ-NP-Za-km-z]{32,44}$/ };
 
 async function get(base, path, fetchFn) {
@@ -74,13 +70,6 @@ const shapeOf = (body) => {
     return "not JSON";
   }
 };
-const fillingOf = (body) => {
-  try {
-    return JSON.parse(body).filling === true;
-  } catch {
-    return false;
-  }
-};
 
 /** One chain: its lists, read again until a token of the first answer is gone, then those tokens' tapes. */
 async function chainRun(base, chain, fetchFn, waitMs, pollMs, sleep, filledMs, fillPollMs) {
@@ -105,16 +94,9 @@ async function chainRun(base, chain, fetchFn, waitMs, pollMs, sleep, filledMs, f
       const a = await get(base, path, fetchFn);
       const d = { address: t, status: a.status, ms: a.ms, shape: a.status === 200 ? shapeOf(a.body) : null, ...(a.error ? { error: a.error } : {}), ...(a.status !== 200 ? { body: a.body.slice(0, 120) } : {}) };
       if (a.status !== 200 || !fillingOf(a.body)) return d;
-      // filling: read again until the mark goes, a read fails, or FILLED_MS from the first read
+      // filling: read again until the mark goes, a read fails, or FILLED_MS from the first read (tape-read.mjs)
       d.filling = true;
-      const t0 = performance.now();
-      let last = { status: 200, filling: true, ms: 0, reads: 0 };
-      while (last.status === 200 && last.filling && performance.now() - t0 < filledMs) {
-        await sleep(fillPollMs);
-        const b = await get(base, path, fetchFn);
-        last = { status: b.status, filling: b.status === 200 && fillingOf(b.body), shape: b.status === 200 ? shapeOf(b.body) : null, ms: Math.round(performance.now() - t0), reads: last.reads + 1, ...(b.status !== 200 ? { body: b.body.slice(0, 120) } : {}) };
-      }
-      d.filled = last;
+      d.filled = await readFilled(() => get(base, path, fetchFn), shapeOf, { sleep, filledMs, pollMs: fillPollMs });
       return d;
     }),
   );
@@ -154,10 +136,9 @@ export function judge(run) {
       lines.push(`${ok ? "ok " : "BAD"} ${c} trades ${d.address} (dropped): ${d.status}${d.status === 200 ? ` ${d.shape}${d.filling ? " filling" : ""}` : ` ${d.body ?? ""}`}${d.error ? ` ${d.error}` : ""} in ${d.ms} ms${d.status === 200 && !inTime ? `, past ${ANSWER_MS} ms` : ""}`);
       if (!ok || d.filling !== true) continue;
       // a filling first answer: filled (a 200 tape with no mark) within FILLED_MS, never still filling or a failed read
-      const f = d.filled;
-      const filled = f?.status === 200 && f.filling === false && f.shape === "tape" && Number.isSafeInteger(f.ms) && f.ms <= FILLED_MS;
-      if (!filled) bad = true;
-      lines.push(`${filled ? "ok " : "BAD"} ${c} trades ${d.address} (dropped): ${f === undefined ? "filling, never read again" : f.status !== 200 ? `${f.status} ${f.body ?? ""} on read ${f.reads} after filling` : f.filling ? `still filling ${f.ms} ms after its first read (${f.reads} reads), past ${FILLED_MS} ms` : `filled ${f.ms} ms after its first read (${f.reads} reads)`}`);
+      const v = filledVerdict(d.filled);
+      if (!v.ok) bad = true;
+      lines.push(`${v.ok ? "ok " : "BAD"} ${c} trades ${d.address} (dropped): ${v.text}`);
     }
   }
   return { verdict: bad ? "FAIL" : seen === 0 ? "INCONCLUSIVE" : "PASS", lines };
