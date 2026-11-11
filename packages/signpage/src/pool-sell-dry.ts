@@ -30,10 +30,19 @@
 //   ("pass", src/page-rpc.ts: they wait while a trade holds the host, and a trade never waits for them), answered
 //   within POOL_SELL_DRY_ANSWER_MS, else busy. A sign out: not_funded. A provider that fails is not asked again: down.
 //   busy and down are "not now" (api.ts RETRY_CODES): the app's next ask runs again.
-// - The reads do not depend on the share: a cold preview's answers are kept POOL_SELL_DRY_KEEP_MS (2 s) for the same
-//   holding, and a preview inside it runs on them as two plain answer lists outside the providers' queues: no call, no
-//   budget, no wait on a trade (keptReads). Kept for previews only: pool.sell reads its own reference. A sign out drops
-//   them.
+// - At most POOL_SELL_DRY_CALLS - 2 Ws read, one per call (drySellCalls within POOL_SELL_DRY_CALLS): the Ws bought
+//   since first (what each holds counts only when read; the pass's amount already holds its Ws'), then the ones the sale
+//   would sell first (readFirst, as pool-sell.ts planOf takes them: the smallest W that holds the sale's units alone,
+//   else the smallest first), by each W's amount as the kept pass holds it (a W bought since: its buy record's). A W not
+//   read is priced at lamports 0 with its claims unread, so poolSellPays takes its lowest pay-in for it: the number can
+//   be low, never high. A W bought since not read adds none of its tokens: an amount past what was read is busy (not
+//   now: the pass lists it within seconds), never not_funded. The review of 6446ec37: with one call per W, five Ws or
+//   more were busy on every ask.
+// - The reads do not depend on the share: a cold preview's answers are kept POOL_SELL_DRY_KEEP_MS (the budget's window)
+//   for the same token and the same Ws read, and a preview inside it runs on them as two plain answer lists outside the
+//   providers' queues: no call, no budget, no wait on a trade (keptReads), so a preview never spends the window twice
+//   for the same Ws (the review of 6446ec37: a second preview inside 10 s answered busy). At most 10 s old: the sale
+//   reads its own before it signs (pool.sell reads its own reference). A sign out drops them.
 // - Solana only here. Base and Robinhood answer not_allowed until the page sells there (card signpage-evm-pool-sell),
 //   whose handler answers the same shape: amounts in whole units of the pool's asset, the platform fee in basis points.
 // - The answer (poolSellPays): `out`, what a sale at the best venue's expected out (its fees taken, before slippage)
@@ -69,10 +78,10 @@ export const drySellCalls = (passWs: number, since: number): number => 2 + Math.
 /** A preview answers within this of its ask, else busy: a read's bound (SOLANA_RPC_RETRY, 3.5 s) and a margin under the
  *  kit client's 10 s for the kind (SIGNPAGE_TIMEOUT_MS), so no answer comes for an ask the app gave up on. */
 export const POOL_SELL_DRY_ANSWER_MS = 6_000;
-/** How long a preview's provider answers are kept for the next preview of the same holding: the reads do not depend on
- *  the share, so a user tapping 25%, 50%, 75% and 100% in a row costs one read, not four; 2 s, a few Solana slots, so a
- *  price is never older than a quote the sale itself would take (it reads its own, never these). */
-export const POOL_SELL_DRY_KEEP_MS = 2_000;
+/** How long a preview's provider answers are kept for the next preview of the same token and Ws: the reads do not depend
+ *  on the share, so a user tapping 25%, 50%, 75% and 100% in a row costs one read, not four; the budget's window, so a
+ *  preview never spends it twice for the same Ws. A sale never takes these: it reads its own before it signs. */
+export const POOL_SELL_DRY_KEEP_MS = POOL_SELL_DRY_WINDOW_MS;
 
 export type PoolSellDryDeps = {
   /** Whether this page's network pins the chain's pool. */
@@ -88,8 +97,9 @@ export type PoolSellDryDeps = {
   rent?(): SolanaRent | null;
   /** The page's kept decimals (PAGE_TOKEN_DECIMALS). */
   decimals?: TokenDecimalsKept;
-  /** The Ws bought since the last whole pass that name `token` (boughtSincePass on the page's store); none: []. */
-  bought?(token: string): Promise<readonly BoughtW[]>;
+  /** From the page's store for `token`: the Ws bought since the last whole pass (boughtSincePass), and each W's amount as
+   *  the kept pass holds it (keptHeldOf), the order a sale takes them in. */
+  bought?(token: string): Promise<StoreWs | undefined>;
   /** True while a trade runs on the page or holds a host of the pair (main.ts: liveRuns and the lanes). */
   trading(): boolean;
   now?(): number;
@@ -97,7 +107,23 @@ export type PoolSellDryDeps = {
 
 /** A W bought since the last whole pass: its address, its token's program as its buy mint names it, and the token's
  *  decimals as W's buy record holds them. */
-export type BoughtW = { address: string; program: string; decimals?: number };
+export type BoughtW = { address: string; program: string; decimals?: number; received?: string };
+/** What the preview takes from the page's store for a token (PoolSellDryDeps.bought). */
+export type StoreWs = { since: readonly BoughtW[]; held: ReadonlyMap<string, bigint> };
+/** Each W's amount of `token` as the kept pass (positions.ts POSITIONS_KEPT_KEY) holds it, base units. */
+export function keptHeldOf(token: string, kept: unknown): Map<string, bigint> {
+  const out = new Map<string, bigint>();
+  for (const [w, ms] of keptListed(kept) ?? []) if (ms.has(token)) out.set(w, ms.get(token)!);
+  return out;
+}
+/** The Ws in the order a sale of `units` takes them (pool-sell.ts planOf, on `held`, each W's amount as known): the
+ *  smallest W holding the units alone first, else the smallest first, ties by address; then the rest, smallest first.
+ *  `units` null (the decimals not known yet): the smallest first. */
+export function readFirst(held: readonly { address: string; held: bigint }[], units: bigint | null): string[] {
+  const order = [...held].sort((x, y) => (x.held < y.held ? -1 : x.held > y.held ? 1 : x.address < y.address ? -1 : x.address > y.address ? 1 : 0));
+  const one = units === null ? undefined : order.find((x) => x.held >= units && x.held > 0n);
+  return (one ? [one, ...order.filter((x) => x !== one)] : order).map((x) => x.address);
+}
 /** The Ws bought since the last whole pass, by the pass's own rule (positions.ts positionsPass: a recorded token the
  *  finder never listed shows at the record's amount): W's buy mint (pool-sell.ts BUY_MINTS_KEY, the sale plan's
  *  `bought`) names `token` with its program, W's buy record (POSITION_COSTS_KEY) names it with what W received (a buy
@@ -117,7 +143,7 @@ export function boughtSincePass(token: string, mints: unknown, kept: unknown, co
     const gone = (sold as Record<string, unknown> | null | undefined)?.[address];
     if (Array.isArray(gone) && gone.includes(token)) continue;
     const d = c.decimals;
-    out.push({ address, program: b.program, ...(Number.isInteger(d) && (d as number) >= 0 && (d as number) <= 255 ? { decimals: d as number } : {}) });
+    out.push({ address, program: b.program, ...(Number.isInteger(d) && (d as number) >= 0 && (d as number) <= 255 ? { decimals: d as number } : {}), received: c.received });
   }
   return out;
 }
@@ -126,15 +152,22 @@ export function boughtSincePass(token: string, mints: unknown, kept: unknown, co
 type Answers = readonly [Map<string, unknown>, Map<string, unknown>];
 const callKey = (method: string, params: readonly unknown[]): string => JSON.stringify([method, params]);
 
-/** The page's kept preview answers (POOL_SELL_DRY_KEEP_MS), one holding at a time: put once a cold preview answered,
- *  read only by previews (as a pair of plain answer lists, outside the providers' queues), dropped at a sign out. */
-type KeptReads = { get(scope: string): Answers | null; put(scope: string, answers: Answers, at: number): void; drop(): void };
+/** The Ws a preview reads: those of the pass (walletReads) and those bought since (wHeldNow), one call each. */
+type Pick = { pass: readonly string[]; since: readonly BoughtW[] };
+/** The page's kept preview answers (POOL_SELL_DRY_KEEP_MS), by token, with the Ws they read: put once a cold preview
+ *  answered, read only by previews (as a pair of plain answer lists, outside the providers' queues), gone past their
+ *  age (so at most the cold previews one window holds: POOL_SELL_DRY_CALLS / 3), a token's dropped when a preview
+ *  misses a call in them, all at a sign out. */
+type KeptReads = { get(token: string): { answers: Answers; pick: Pick } | null; put(token: string, answers: Answers, at: number, pick: Pick): void; drop(token?: string): void };
 function keptReads(now: () => number): KeptReads {
-  let held: { scope: string; answers: Answers; at: number } | null = null;
+  const held = new Map<string, { answers: Answers; at: number; pick: Pick }>();
+  const prune = (): void => {
+    for (const [k, v] of held) if (now() - v.at >= POOL_SELL_DRY_KEEP_MS) held.delete(k);
+  };
   return {
-    get: (scope) => (held !== null && held.scope === scope && now() - held.at < POOL_SELL_DRY_KEEP_MS ? held.answers : null),
-    put: (scope, answers, at) => void (held = { scope, answers, at }),
-    drop: () => void (held = null),
+    get: (token) => (prune(), held.get(token) ?? null),
+    put: (token, answers, at, pick) => void (prune(), held.set(token, { answers, at, pick })),
+    drop: (token) => void (token === undefined ? held.clear() : held.delete(token)),
   };
 }
 
@@ -299,7 +332,8 @@ export async function poolSellDry(d: PoolSellDryDeps, params: Record<string, unk
   // sale plans before the pass lists them (pool-sell.ts planReads), each read below as the sale reads it
   const pos = holding(d, token);
   // a store that cannot be read (signed out meanwhile): none, so the pass's holding alone, as before
-  const since = d.positions() === null ? [] : ((await (async () => d.bought?.(token as string))().catch(() => undefined)) ?? []);
+  const stored = d.positions() === null ? undefined : await (async () => d.bought?.(token as string))().catch(() => undefined);
+  const since = stored?.since ?? [];
   const extra = since.filter((b) => !pos?.wallets.includes(b.address));
   if (!pos && extra.length === 0) {
     // signed out (or sold out): nothing kept outlives the holding
@@ -315,12 +349,16 @@ export async function poolSellDry(d: PoolSellDryDeps, params: Record<string, unk
     turn.kept.drop();
     return { error: "not_funded" };
   }
-  const scope = JSON.stringify([token, pos?.amount ?? null, pos?.wallets ?? [], extra.map((b) => b.address)]);
-  const kept = turn.kept.get(scope);
-  if (kept !== null) {
+  // the Ws read: the ones the last preview of this token read in the window, while each is still where it was (a W of
+  // the pass, or one bought since), so the window is never spent twice for the same Ws and a W now in neither (sold, or
+  // counted twice) is never read; else as many as fit, one call each, in the order the sale would sell them
+  const kept = turn.kept.get(token);
+  const still = kept !== null && kept.pick.pass.every((w) => pos?.wallets.includes(w)) && kept.pick.since.every((b) => extra.some((x) => x.address === b.address && x.program === b.program));
+  const pick: Pick = still ? kept.pick : readsOf(d, params, pos, extra, stored?.held ?? new Map());
+  if (kept !== null && still) {
     // the kept answers, as two plain answer lists outside the providers' queues: no call, no budget, no wait on a trade
     let missed = false;
-    const replay = kept.map((m) => ((method: string, p: readonly unknown[]) => {
+    const replay = kept.answers.map((m) => ((method: string, p: readonly unknown[]) => {
       const k = callKey(method, p);
       if (!m.has(k)) {
         missed = true;
@@ -328,15 +366,15 @@ export async function poolSellDry(d: PoolSellDryDeps, params: Record<string, unk
       }
       return Promise.resolve(m.get(k));
     }) as SolanaRpc) as unknown as readonly [SolanaRpc, SolanaRpc];
-    const a = await previewOn(d, params, pos, extra, replay);
+    const a = await previewOn(d, params, pos, extra, pick, replay);
     if (!missed) return a;
-    turn.kept.drop();
+    turn.kept.drop(token);
   }
   if (d.trading()) return { error: "busy" };
   const t = now();
   for (const c of turn.calls) while (c.length > 0 && c[0]! <= t - POOL_SELL_DRY_WINDOW_MS) c.shift();
-  // one call per W: the pass's (walletReads) and each bought since (wHeldNow)
-  const need = drySellCalls(pos?.wallets.length ?? 0, extra.length);
+  // one call per W read: the pass's (walletReads) and each bought since (wHeldNow)
+  const need = drySellCalls(pick.pass.length, pick.since.length);
   if (turn.calls.some((c) => c.length + need > POOL_SELL_DRY_CALLS)) return { error: "busy" };
   const answers: Answers = [new Map(), new Map()];
   const rpcs = bare.map((rpc, i) => solanaWrappedRpc(rpc, (m, p) => {
@@ -347,16 +385,46 @@ export async function poolSellDry(d: PoolSellDryDeps, params: Record<string, unk
   let timer: ReturnType<typeof setTimeout> | undefined;
   const late = new Promise<DryAnswer>((r) => (timer = setTimeout(() => r({ error: "busy" }), POOL_SELL_DRY_ANSWER_MS)));
   try {
-    const a = await Promise.race([previewOn(d, params, pos, extra, rpcs), late]);
-    if ("result" in a) turn.kept.put(scope, answers, t);
+    const a = await Promise.race([previewOn(d, params, pos, extra, pick, rpcs), late]);
+    if ("result" in a) turn.kept.put(token, answers, t, pick);
     return a;
   } finally {
     clearTimeout(timer);
   }
 }
 
-/** The preview on `rpcs` (the gated pair, or the kept answers): the pass's holding `pos` and the Ws bought since it. */
-async function previewOn(d: PoolSellDryDeps, params: Record<string, unknown>, pos: Position | undefined, extra: readonly BoughtW[], rpcs: readonly [SolanaRpc, SolanaRpc]): Promise<DryAnswer> {
+/** The Ws a preview reads: those bought since first, then the pass's, each in the order the sale would sell them
+ *  (readFirst, on the kept pass's amounts and the buy records'), as many as fit POOL_SELL_DRY_CALLS one call each
+ *  (drySellCalls). */
+function readsOf(d: PoolSellDryDeps, params: Record<string, unknown>, pos: Position | undefined, extra: readonly BoughtW[], kept: ReadonlyMap<string, bigint>): Pick {
+  const decimals = pos?.decimals ?? extra.find((b) => b.decimals !== undefined)?.decimals ?? d.decimals?.get("solana", params.token as string);
+  const recorded = (b: BoughtW): bigint => (decimals === undefined || b.received === undefined ? 0n : (baseUnits(b.received, decimals) ?? 0n));
+  const held = [...(pos?.wallets ?? []).map((w) => ({ address: w, held: kept.get(w) ?? 0n })), ...extra.map((b) => ({ address: b.address, held: recorded(b) }))];
+  let units: bigint | null = null;
+  if (decimals !== undefined) {
+    try {
+      const total = pos === undefined ? held.reduce((t, h) => t + h.held, 0n) : (baseUnits(pos.amount, decimals) ?? 0n) + extra.reduce((t, b) => t + recorded(b), 0n);
+      units = poolSellUnits(total, checkPoolRequest({ ...(params as object), kind: "pool.sell", chain: "solana" }, decimals));
+    } catch {
+      // a bad request: refused below, before any read
+    }
+  }
+  const pass: string[] = [];
+  const since: BoughtW[] = [];
+  const order = readFirst(held, units);
+  const first = (a: string): boolean => extra.some((x) => x.address === a);
+  for (const a of [...order.filter(first), ...order.filter((a) => !first(a))]) {
+    const b = extra.find((x) => x.address === a);
+    if (drySellCalls(pass.length + (b ? 0 : 1), since.length + (b ? 1 : 0)) > POOL_SELL_DRY_CALLS) continue;
+    if (b) since.push(b);
+    else pass.push(a);
+  }
+  return { pass, since };
+}
+
+/** The preview on `rpcs` (the gated pair, or the kept answers): the pass's holding `pos` and the Ws bought since it, the
+ *  Ws `pick` names read, the others priced at lamports 0 with their claims unread. */
+async function previewOn(d: PoolSellDryDeps, params: Record<string, unknown>, pos: Position | undefined, extra: readonly BoughtW[], pick: Pick, rpcs: readonly [SolanaRpc, SolanaRpc]): Promise<DryAnswer> {
   const token = params.token as string;
   const fault = (e: unknown, other: ErrorCode): DryAnswer => ({ error: e instanceof SolanaRpcTransportError ? "down" : other });
   let decimals = pos?.decimals ?? extra.find((b) => b.decimals !== undefined)?.decimals ?? d.decimals?.get("solana", token);
@@ -376,7 +444,7 @@ async function previewOn(d: PoolSellDryDeps, params: Record<string, unknown>, po
   // providers apart (its token account on one only, right after its buy): not now; frozen on both: nothing held
   let own: (WHeld | "split" | "frozen")[];
   try {
-    own = await Promise.all(extra.map((b) => wHeldNow(rpcs, b.address, token, b.program)));
+    own = await Promise.all(pick.since.map((b) => wHeldNow(rpcs, b.address, token, b.program)));
   } catch (e) {
     return fault(e, "quote_check_failed");
   }
@@ -386,7 +454,8 @@ async function previewOn(d: PoolSellDryDeps, params: Record<string, unknown>, po
   if (passed === null) return { error: "not_allowed" };
   const total = mine.reduce((t, o) => t + o.amount, passed);
   const units = poolSellUnits(total, ask);
-  if (units <= 0n || units > total) return { error: "not_funded" };
+  // short of what was read while a W bought since was not: not now, as it may hold the rest
+  if (units <= 0n || units > total) return { error: pick.since.length < extra.length ? "busy" : "not_funded" };
   const ws = pos?.wallets ?? [];
   if (ws.length + mine.length === 0) return { error: "not_funded" };
   // the sale's quote, and the Ws (lamports, volume accounts) with the pool's sizes and the Rent sysvar, side by side
@@ -394,7 +463,7 @@ async function previewOn(d: PoolSellDryDeps, params: Record<string, unknown>, po
   let read: Awaited<ReturnType<typeof walletReads>>;
   let rent: SolanaRent;
   try {
-    [quoted, [rent, read]] = await Promise.all([poolSellReference(rpcs, token, units), Promise.all([d.rent?.() ?? readSolanaRent(rpcs), walletReads(rpcs, ws, d.pin?.()?.program ?? null)])]);
+    [quoted, [rent, read]] = await Promise.all([poolSellReference(rpcs, token, units), Promise.all([d.rent?.() ?? readSolanaRent(rpcs), walletReads(rpcs, pick.pass, d.pin?.()?.program ?? null)])]);
   } catch (e) {
     return fault(e, "quote_check_failed");
   }
@@ -404,7 +473,9 @@ async function previewOn(d: PoolSellDryDeps, params: Record<string, unknown>, po
   // a sign out while it read: the old holding is not answered
   if (d.positions() === null || (pos !== undefined && holding(d, token) === undefined)) return { error: "not_funded" };
   const e = quoted.best.expectedOut;
-  const wallets = [...read.wallets, ...mine.map((o): DryWallet => ({ lamports: o.lamports, claim: o.owes }))];
+  // a W not read (more Ws than fit): lamports 0, its claims unread, so the lowest pay-in for it
+  const unread = ws.length - pick.pass.length + (extra.length - pick.since.length);
+  const wallets = [...read.wallets, ...mine.map((o): DryWallet => ({ lamports: o.lamports, claim: o.owes })), ...Array.from({ length: unread }, (): DryWallet => ({ lamports: 0n }))];
   const pays = poolSellPays(rent, venue, wallets, wallets.length === 1 && units === total, e, solanaSellFloor(e, ask.slippageBps), quoted.best.cashback, read.sizes);
   if ("refused" in pays) return { error: pays.refused };
   const sol = POOL_ASSET_DECIMALS_OF.solana;

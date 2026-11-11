@@ -59,7 +59,7 @@ import { SOL_MARK_READ_BATCH, SOL_MARK_READ_BATCH_MAX, solanaSettleReserved, sol
 import { POOL_TESTNET } from "../../wallet/src/pool/network.ts";
 import { askWhileBusy, type BusyOpts } from "../../wallet/src/busy.ts";
 import { POOL_SEND_BUSY_WAIT_MS, PoolSendBusy, poolBuyKind, type PoolBuyHost } from "./pool-buy.ts";
-import { boughtSincePass, type BoughtW } from "./pool-sell-dry.ts";
+import { boughtSincePass, keptHeldOf, type StoreWs } from "./pool-sell-dry.ts";
 import { BUY_MINTS_KEY, buyMints, keptSells, owedRentBacks, poolSellKind, resumeRentBacks, settleDeadSellOps, settlePoolSells, settleSellOps, type PoolSellKindHost } from "./pool-sell.ts";
 import { buyWallets, buyWalletsOf, derivedBuyWallets, evmHelperKeyedRpc, type BuyWallet, solanaHelperHoldings, solanaHoldingsAt, spentNotesOf, type HoldingsReader } from "../../wallet/src/pool/buy-wallets.ts";
 import { keptListed, keptPositions, POSITION_COSTS_KEY, POSITIONS_KEPT_KEY, POSITIONS_SOLD_KEY, POSITIONS_SOLD_TX_KEY, POSITIONS_UNLANDED_KEY, positionsCache, positionsPass, recordBoughtOut, recordPoolBuy, routeInto, type BuyRecordStore, type FoundWallet, type PoolBuyFacts, type Position, type PositionCosts } from "./positions.ts";
@@ -500,9 +500,10 @@ export type TestnetPool = {
    *  signed out. Starts nothing: no pass, no seed read, no store write (the sell box's preview, src/pool-sell-dry.ts). */
   positionsNow(): readonly Position[] | null;
   /** The Ws bought since the last whole pass that name `token` (pool-sell-dry.ts boughtSincePass: W's buy mint, the kept
-   *  pass, W's buy record, the full sells noted), from the store alone: no read, no seed; the store as held (page.held),
+   *  pass, W's buy record, the full sells noted) and each W's amount as the kept pass holds it (keptHeldOf: the order a
+   *  sale takes them in), from the store alone: no read, no seed; the store as held (page.held),
    *  never opened again for it (another tab's sign out may have closed it). Signed out: none. */
-  boughtSince(token: string): Promise<readonly BoughtW[]>;
+  boughtSince(token: string): Promise<StoreWs>;
   /** The proof queue's pass, the queue opened first when none is: what each landed note runs. */
   proofs(): Promise<QueuePass | null>;
   /** state.pools' `ready` (src/pools.ts) with `read`'s notes, in one turn of the queue's view (queue.ts readyWith), so
@@ -2100,7 +2101,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     boughtSince: async (token: string) => {
       const st = await (page.held ? page.held() : page.store());
       const [mints, kept, costs, sold] = await Promise.all([st.get("meta", BUY_MINTS_KEY), st.get("meta", POSITIONS_KEPT_KEY), st.get("meta", POSITION_COSTS_KEY), st.get("meta", POSITIONS_SOLD_KEY)]);
-      return boughtSincePass(token, mints, kept, costs, sold);
+      return { since: boughtSincePass(token, mints, kept, costs, sold), held: keptHeldOf(token, kept) };
     },
     proofs,
     // every open queue's ready list (Solana's, then each EVM pool's; each proof names its pool) with `read`, in one turn

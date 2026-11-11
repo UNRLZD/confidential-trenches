@@ -23,7 +23,7 @@ import { freshWallet } from "../../wallet/src/derive/keys.ts";
 import { jOf } from "../../wallet/src/pool/queue.ts";
 import { POSITION_COSTS_KEY, positionsPass, type FoundWallet } from "../src/positions.ts";
 import { testnetPool } from "../src/pool-testnet.ts";
-import { planPoolSell, runPoolSell, type PoolSellHost } from "../src/pool-sell.ts";
+import { BUY_MINTS_KEY, planPoolSell, runPoolSell, type PoolSellHost } from "../src/pool-sell.ts";
 import { poolSellDry } from "../src/pool-sell-dry.ts";
 import { tokenDecimalsKept } from "../src/pool-kinds.ts";
 
@@ -360,8 +360,8 @@ test("the preview right after a buy's read-back, the pass's finder read still he
     const rec = providers("pump").map((rpc, k) => (async (method: string, params: readonly unknown[]) => {
       if (method === "getAccountInfo") return { context: mintRead.context, value: mintRead.value[0] };
       const list = params[0] as string[];
-      // W's own read, as the sale's plan reads it: its token account first
-      if (list[0] === ATA) return own[k as 0 | 1]!(method, params);
+      // W's own read, as the sale's plan reads it (its token account first), and the pass's read of W (W first)
+      if (list[0] === ATA || list[0] === W) return own[k as 0 | 1]!(method, params);
       if (list.length === 1 && list[0] === solanaPoolOf(PIN.program).pool) return { context: { slot: 1 }, value: [null] };
       return rpc(method, params);
     }) as SolanaRpc) as unknown as readonly [SolanaRpc, SolanaRpc];
@@ -372,5 +372,29 @@ test("the preview right after a buy's read-back, the pass's finder read still he
   assert.ok(a.result && Number(a.result.out) > 0, `a number on the first ask: ${JSON.stringify(a)}`);
   assert.equal(f.st.reads, reads, "the preview reads no finder");
   assert.deepEqual(await ask([null, null]), { error: "not_funded" }, "W holds nothing on both: as the sale, nothing");
+  // the pass's finder read freed, listing W's token: the pass's holding, the same number, W no longer one bought since
+  f.st.listed = OUT_UNITS;
   free();
+  f.st.held = null;
+  await until(() => (tp.positionsNow() ?? []).some((p) => p.token === MINT), "the pass lists W's token");
+  assert.deepEqual((await tp.boughtSince(MINT)).since, [], "listed by the pass: not one bought since");
+  const listed = (await ask([OUT_UNITS, OUT_UNITS])) as { result?: { out: string } };
+  assert.equal(listed.result?.out, a.result!.out, `the pass's holding, the same number: ${JSON.stringify(listed)}`);
+});
+
+test("the Ws bought since are read from the page's open store (held), the one the buy wrote, never a second store opened", async () => {
+  const w = await sentWallet();
+  await w.put("meta", BUY_MINTS_KEY, { [W]: { mint: MINT, program: SOLANA_TOKEN_PROGRAM } });
+  await w.put("meta", POSITION_COSTS_KEY, { [W]: { mint: MINT, received: "2", decimals: 6 } });
+  let opened = 0;
+  const other = await openWalletStore({ indexedDB: new IDBFactory() });
+  closers.push(() => other.close());
+  const tp = testnetPool(
+    { store: async () => (opened++, other), held: async () => w, seed64: async () => SEED64.slice(), price: () => PRICE },
+    { pin: PIN, rpcs: pair([OUT_UNITS, OUT_UNITS]), table: "Table111111111111111111111111111111111111111", holdings: () => finder().reader, tradeKinds: {}, positions: { setTimer: () => {}, clearTimer: () => {} } } as never,
+  );
+  const before = opened;
+  const got = await tp.boughtSince(MINT);
+  assert.deepEqual(got.since, [{ address: W, program: SOLANA_TOKEN_PROGRAM, decimals: 6, received: "2" }], "W, from the held store");
+  assert.equal(opened, before, "no second store opened");
 });
