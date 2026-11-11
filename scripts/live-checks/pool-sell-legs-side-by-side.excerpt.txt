@@ -1,2 +1,2 @@
 ),T=a?.opened;if(T&&(await T,e.stopped?.()))return{error:`failed`};let E=t=>xb(_,t,f,...e.pick?[e.pick]:[]),D=null,O=null,k=null;if(T){D=b(pR(_)),O=b(Promise.all([S,C]).then(
-wallets:async()=>{let r=Pe.preempt(),a=null,o=!1;try{let r=t?GN(await(await e.store()).get(`meta`,PN)):null;if(r!==null){let t=await HB(await c(),Ae),i=await e.seed64(),a;try{a=qB(i,[{id:n.program,chain:`sol`,spent:t}])}finally{i.fill(0)}
+wallets:async()=>{let r=Pe.preempt(),a=null;try{let r=t?GN(await(await e.store()).get(`meta`,PN)):null;if(r!==null){let t=await HB(await c(),Ae),i=await e.seed64(),o;try{o=qB(i,[{id:n.program,chain:`sol`,spent:t}])}finally{i.fill(0)}

@@ -1301,8 +1301,6 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     const outs = signOuts;
     let notes: Promise<NoteStore> | null = null;
     const store = (): Promise<NoteStore> => (notes ??= page.store().then((w) => openNoteStore(w)));
-    // the positions' passes held off by a sale that listed its Ws with no read, until the run ends
-    let held: ReturnType<typeof positions.preempt> | null = null;
     return {
       pin: pin!,
       rpcs: r,
@@ -1315,13 +1313,13 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       wallets: async () => {
         const hold = positions.preempt();
         let found: FoundWallet[] | null = null;
-        let listedOnly = false;
         try {
           // a sale's list with no read at the tap (card pool-sell-legs-side-by-side): every W the pool's spent notes
           // paid, derived from the seed, each with the tokens the last whole positions pass listed it holding; the sale
           // reads each W it sells from itself (pool-sell.ts planReads: the Ws a buy record or this listing names for the
-          // token, one W per request), and the passes stay held off until the run's end. No whole pass kept yet (a
-          // restored device before its first pass), or a load's rent back: the finder's read, as before
+          // token, one W per request); the passes' next read is the kept pass itself (a W it did not list: unread, so
+          // it keeps its last), so no finder read starts beside the sale. No whole pass kept yet (a restored device
+          // before its first pass), or a load's rent back: the finder's read, as before
           const listed = sale ? keptListed(await (await page.store()).get("meta", POSITIONS_KEPT_KEY)) : null;
           if (listed !== null) {
             const spent = await spentNotesOf(await store(), scope!);
@@ -1333,7 +1331,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
               seed64.fill(0);
             }
             if (got.failed.length > 0) throw new Error("the buy wallets could not be derived");
-            listedOnly = true;
+            found = got.wallets.map((w) => ({ address: w.address, tokens: listed.has(w.address) ? new Map(listed.get(w.address)) : null }));
             return got.wallets.map((w) => ({ ...w, holdings: { native: 0n, tokens: new Map([...(listed.get(w.address) ?? [])].map(([m, a]) => [m, { amount: a, frozen: false }] as const)), unreadable: [] } }));
           }
           // a sale's list: its Ws asked side by side (card pool-sell-legs-side-by-side)
@@ -1341,12 +1339,9 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
           found = got.map((w) => ({ address: w.address, tokens: new Map([...w.holdings.tokens].map(([m, h]) => [m, h.amount] as const)) }));
           return got;
         } finally {
-          // listed with no read: held until the run ends; read: the next pass's read; failed (the sell refuses, or a
-          // rent back at load waits): the next pass reads
-          if (listedOnly) {
-            held?.release();
-            held = hold;
-          } else if (found === null) hold.release();
+          // read, or listed from the kept pass: the next pass's read; failed (the sell refuses, or a rent back at load
+          // waits): the next pass reads
+          if (found === null) hold.release();
           else hold.feed(found);
         }
       },
@@ -1364,11 +1359,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       stopped: () => signOuts !== outs,
       // a sign out ends the sale's waits (read-waits.ts waitUnless)
       signal: solanaStop.signal,
-      end: () => {
-        held?.release();
-        held = null;
-        void notes?.then((n) => n.close(), () => {});
-      },
+      end: () => void notes?.then((n) => n.close(), () => {}),
     };
   };
   const sell = (over.tradeKinds?.sell ?? poolSellKind)(() => sellHost(true));

@@ -161,13 +161,13 @@ test("the check has the shape scripts/ci/bundle-checks.mjs runs: read(fetch) on 
 });
 
 // card pool-sell-legs-side-by-side: the sell host's read as that card's build has it (signpage-state-holdings.side.excerpt.txt):
-// a sale that lists its Ws with no read keeps the hold until its run ends; the earlier hold not let go, or no hold
-// taken first: each FAILs
+// a sale that lists its Ws from the kept pass feeds the pass as a read does; the pass released instead, or no hold taken
+// first: each FAILs
 test("the side-by-side sale's hold: it holds, and each break in place FAILs", () => {
   const ex = readFileSync(new URL("./signpage-state-holdings.side.excerpt.txt", import.meta.url), "utf8");
   assert.equal((ex.match(PREEMPT) ?? []).length, 1);
   for (const [what, from, to] of [
-    ["the earlier hold not let go", "o?(l?.release(),l=r):", "o?(l=r):"],
+    ["the pass released, never fed", /:([\w$]+)\.feed\(([\w$]+)\)\}$/m, ":$1.release()}"],
     ["no hold taken first", "let r=Pe.preempt(),", "let r=null,"],
   ]) {
     const bad = ex.replace(from, to);
