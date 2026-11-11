@@ -66,3 +66,20 @@ test("the facts read from a bundle, each mark its own code", () => {
   assert.equal(facts("", js.replace("if(t.shareBps!==void 0)return X(`amount`);", "")).rule, false, "the rule refuses a share");
   assert.equal(facts("", js.replace("if(t.shareBps!==void 0)", "if(!1&&t.shareBps!==void 0)")).rule, false, "never unreached");
 });
+
+// card app-sell-shows-what-you-receive: the sell box's preview shares pool.sell's schema validator and units function, so
+// the build names them (its own bytes, packages/signpage/public/app.js of that card's build)
+test("the facts read from a bundle where the schema validator and the units are named and shared", () => {
+  const js =
+    "fl=e=>dl(e)&&Object.hasOwn(e,`amount`)!==Object.hasOwn(e,`share_bps`),pl={" + '"pool.sell":fl,"pool.sell.dry":fl};' +
+    "var vH=(e,t)=>t.shareBps===void 0?t.amount:t.shareBps===1e4?e:e*BigInt(t.shareBps)/10000n;" +
+    "u=l.reduce((e,t)=>e+t.held,0n),d=vH(u,t);if(d<=0n||d>u)return $(c?`not_allowed`:`not_funded`);" +
+    "iV(f,{...t,amount:i.units,shareBps:void 0},c,i.w);" +
+    "function ID(e,t){if(t.kind!==`pool.sell`||t.chain!==`solana`)return X(`kind`);if(t.shareBps!==void 0)return X(`amount`);}";
+  assert.deepEqual(facts("", js), { index: "", sha384: facts("", js).sha384, schema: true, units: true, legs: true, rule: true });
+  assert.equal(facts("", js.replace("!==Object.hasOwn(e,`share_bps`)", "")).schema, false, "exactly one of the two");
+  assert.equal(facts("", js.replace('"pool.sell":fl,', '"pool.sell":gl,')).schema, false, "the validator pool.sell names");
+  assert.equal(facts("", js.replace("if(d<=0n||d>u)", "if(d<=0n)")).units, false, "an amount over the total refused");
+  assert.equal(facts("", js.replace("===1e4?e:", "===1e4?t:")).units, false, "all of it is the total read");
+  assert.equal(facts("", js.replace("d=vH(u,t)", "d=wH(u,t)")).units, false, "the units function the sale calls");
+});

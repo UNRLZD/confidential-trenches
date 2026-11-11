@@ -41,6 +41,7 @@ export const CHANGED = [
   "scripts/live-checks/app-quick-buy-one-tap.mjs",
   "scripts/live-checks/app-release-sri.mjs",
   "scripts/live-checks/app-sell-mount.mjs",
+  "scripts/live-checks/app-sell-shows-what-you-receive.mjs",
   "scripts/live-checks/app-shell.mjs",
   "scripts/live-checks/app-three-owner-labels.mjs",
   "scripts/live-checks/app-toast-clears-sheet-head.mjs",

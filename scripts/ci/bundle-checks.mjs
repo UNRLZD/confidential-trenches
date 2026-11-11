@@ -69,6 +69,7 @@ export const IN_PROCESS = [
   viaRead("sol-rent-back-dust-burn", () => import("../live-checks/sol-rent-back-dust-burn.mjs")),
   // cut as a release only after its merge: the marks and the pin, not the ledger
   { key: "sol-sell-deposit-back-floor", host: "sign", load: () => import("../live-checks/sol-sell-deposit-back-floor.mjs"), run: async (m, f) => m.judge(await m.read(f), { ledger: false }) },
+  { key: "app-sell-shows-what-you-receive", host: "app", load: () => import("../live-checks/app-sell-shows-what-you-receive.mjs"), run: async (m, f) => m.judge(await m.read(f)) },
   { key: "pool-sell-share-across-wallets", host: "sign", load: () => import("../live-checks/pool-sell-share-across-wallets.mjs"), run: async (m, f) => m.judge(await m.read(f), { ledger: false }) },
   // the bundle part only: the chain part reads the helper and two RPCs, past the build
   { key: "wallet-mainnet-relayer-pins", host: "sign", load: () => import("../live-checks/wallet-mainnet-relayer-pins.mjs"), run: async (m, f) => m.judgeBundle(await m.readBundle(f)) },
