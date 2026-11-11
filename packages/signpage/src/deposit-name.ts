@@ -28,6 +28,10 @@
 //   lock, and nameDeposit is asked only when it would write (another scope, index, id or address, and not an index
 //   below the one named: nameDeposit's own rule); nameDeposit reads and compares again under its lock, so a naming that
 //   races another tab's, or a seed changed meanwhile, still ends as nameDeposit decides.
+// - A naming that does change it asks no exclusive lock either (card deposit-landing-does-not-queue-a-trade: a deposit
+//   landing during a buy moved the note out of PLANNED, and its naming held the next sell to the buy's end):
+//   nameDeposit takes the seed lock shared, as a trade does, and lands by its compare-and-set (../../wallet/src/store),
+//   so the record names the next index as soon as the landing is read, inside the buy.
 import { depositId as uOf, entropyToWords, wordsToSeed64 } from "@blindfill/wallet/derive";
 import { depositIdEvm } from "../../wallet/src/derive/keys.ts";
 import type { PoolChain } from "../../kit/src/signpage/messages.ts";
