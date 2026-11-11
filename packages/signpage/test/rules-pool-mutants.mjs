@@ -38,7 +38,9 @@ const ESELL = "EVM sell and authorization";
 const ONW = "Solana withdraw onward: a fee payer of ours";
 const ONTO = "Solana withdraw onward: To that is W";
 const ONR = "Solana withdraw onward: reads the two RPCs";
-const ONC = "EVM onward send: W's whole balance";
+const ONC = "EVM onward send: a send of the part";
+const ONP = "EVM onward send: the value is the part";
+const ONK = "EVM onward send: a To with code";
 const ONRH = "EVM onward send: on Robinhood";
 const ONF = "EVM onward send: a max fee under";
 const ONS = "EVM onward send: signs as W";
@@ -171,6 +173,12 @@ export const MUTANTS = [
   ['if (relay.deadlineMs <= ctx.nowMs) refuse("deadline_past");', "", EWD],
   ['if (proof.context !== context) refuse("context");', "", EBUY],
   ['if (proof.context !== context) refuse("context");', "", EWD],
+  ['if (lower(relay.feeRecipient) !== lower(pins.feeRecipient)) refuse("fee_recipient");', "", EWD],
+  ["if (relay.feeCap > ctx.feeCap) refuse", "if (relay.feeCap >= ctx.feeCap) refuse", EWD],
+  ["if (relay.deadlineMs <= ctx.nowMs) refuse", "if (relay.deadlineMs < ctx.nowMs) refuse", EWD],
+  ["evmPoolScopeOf(pins.pool, pins.chainId)", "evmPoolScopeOf(pins.pool, 1n)", EWD],
+  ['if (proof.value === 0n) return refuse("amount");', "", EWD],
+  ['if (lower(pool) !== lower(read.pool)) return refuse("pool");', "", EWD],
   // the EVM buy and withdraw
   ['if (lower(pool) !== lower(pins.pool)) return refuse("pool");\n  if (![pins.v3', "if (![pins.v3", EBUY],
   ['if (![pins.v3, pins.v4].some((a) => a !== undefined && lower(a) === lower(built.adapter))) return refuse("adapter");', "", EBUY],
@@ -213,9 +221,12 @@ export const MUTANTS = [
   // the EVM buy's floor, the check's own from the device's quote (card signpage-evm-pool-buy)
   ['if (lower(agreed.token) !== lower(ask.token ?? "")) return refuse("token");', "", EBUY],
   ['ctx.feeCap >= ask.amount || agreed.amountIn !== ask.amount - ctx.feeCap)', "ctx.feeCap >= ask.amount)", EBUY],
-  ['if (!Number.isInteger(ask.slippageBps) || ask.slippageBps < 0 || ask.slippageBps >= 10_000) return refuse("slippage");', "", EBUY],
-  ['const floor = (agreed.amountOut * BigInt(10_000 - ask.slippageBps)) / 10_000n;', "const floor = 1n;", EBUY],
-  ['if (typeof floor !== "bigint" || floor <= 0n || built.minOut < floor) return refuse("min_out");\n  passed("evm.sell"', 'passed("evm.sell"', ESELL],
+  // the buy's and the sell's slippage and floor lines read the same: each row names its own by the line beside it
+  ['return refuse("amount");\n  if (!Number.isInteger(ask.slippageBps) || ask.slippageBps < 0 || ask.slippageBps >= 10_000) return refuse("slippage");', 'return refuse("amount");', EBUY],
+  ['const floor = (agreed.amountOut * BigInt(10_000 - ask.slippageBps)) / 10_000n;\n  if (floor <= 0n || built.minOut < floor) return refuse("min_out");\n  checkRelay', 'const floor = 1n;\n  if (floor <= 0n || built.minOut < floor) return refuse("min_out");\n  checkRelay', EBUY],
+  ['if (floor <= 0n || built.minOut < floor) return refuse("min_out");\n  passed("evm.sell"', 'passed("evm.sell"', ESELL],
+  ['return refuse("deadline_past");\n  if (!Number.isInteger(ask.slippageBps) || ask.slippageBps < 0 || ask.slippageBps >= 10_000) return refuse("slippage");', 'return refuse("deadline_past");', ESELL],
+  ['const floor = (agreed.amountOut * BigInt(10_000 - ask.slippageBps)) / 10_000n;\n  if (floor <= 0n || built.minOut < floor) return refuse("min_out");\n  passed("evm.sell"', 'const floor = 1n;\n  if (floor <= 0n || built.minOut < floor) return refuse("min_out");\n  passed("evm.sell"', ESELL],
   // only what a check passed is signed
   ['if (!read || read.length !== wire.length || read.some((b, i) => b !== wire[i])) return refuse("unchecked");', "", "Solana deposit: the pinned pool's tag 1"],
   ['if (!read || read.length !== wire.length || read.some((b, i) => b !== wire[i])) return refuse("unchecked");', 'if (!read) return refuse("unchecked");', "Solana deposit: the pinned pool's tag 1"],
@@ -258,8 +269,12 @@ export const MUTANTS = [
   ['const nitro = ask.chain === "robinhood";', "const nitro = false;", ONRH, ONWARD],
   ['if (nitro && l1Fee !== 0n) return refuse("l1_fee");', "", ONRH, ONWARD],
   ['if (t.chainId !== pins.chainId) return refuse("chain_id");', "", ONC, ONWARD],
-  ["!EVM_ADDRESS.test(to) || lower(to) === ZERO_ADDRESS", "lower(to) === ZERO_ADDRESS", ONC, ONWARD],
-  [" || lower(to) === ZERO_ADDRESS", "", ONC, ONWARD],
+  ["!EVM_ADDRESS.test(to) || BigInt(to) < EVM_PRECOMPILE_TOP", "BigInt(to) < EVM_PRECOMPILE_TOP", ONC, ONWARD],
+  // the zero address and every precompile: the bound gone, lowered, raised, or taken as inclusive
+  [" || BigInt(to) < EVM_PRECOMPILE_TOP", "", ONC, ONWARD],
+  ["export const EVM_PRECOMPILE_TOP = 1n << 16n;", "export const EVM_PRECOMPILE_TOP = 1n << 8n;", ONC, ONWARD],
+  ["export const EVM_PRECOMPILE_TOP = 1n << 16n;", "export const EVM_PRECOMPILE_TOP = 1n << 17n;", ONC, ONWARD],
+  ["BigInt(to) < EVM_PRECOMPILE_TOP", "BigInt(to) <= EVM_PRECOMPILE_TOP", ONC, ONWARD],
   [" || lower(to) === lower(pins.pool)", "", ONC, ONWARD],
   [' || lower(to) === lower(ctx.wallet)) return refuse("to");', ') return refuse("to");', ONC, ONWARD],
   ['if (lower(t.to) !== lower(to)) return refuse("transfer_to");', "", ONC, ONWARD],
@@ -267,18 +282,45 @@ export const MUTANTS = [
   ['if (t.data !== "0x") return refuse("data");', "", ONC, ONWARD],
   ['if (t.accessList.length !== 0) return refuse("access_list");', "", ONC, ONWARD],
   ['if (t.gasLimit !== EVM_ONWARD_GAS) return refuse("gas_limit");', "", ONC, ONWARD],
-  ['if (t.gasLimit !== estimate) return refuse("gas_estimate");', "", ONC, ONWARD],
-  ['if (t.gasLimit > EVM_ONWARD_GAS_MAX) return refuse("gas_over_cap");', "", ONC, ONWARD],
-  ["export const EVM_ONWARD_GAS_MAX = 100_000n;", "export const EVM_ONWARD_GAS_MAX = 100_001n;", ONC, ONWARD],
+  // a To with code: its estimate and the margin, exactly; on Nitro with no code the estimate alone
+  ['if (t.gasLimit !== (hasCode ? evmOnwardCodeGas(estimate) : estimate)) return refuse("gas_estimate");', "", ONK, ONWARD],
+  ["(hasCode ? evmOnwardCodeGas(estimate) : estimate)", "estimate", ONK, ONWARD],
+  ["(hasCode ? evmOnwardCodeGas(estimate) : estimate)", "evmOnwardCodeGas(estimate)", ONRH, ONWARD],
+  ["if (t.gasLimit !== (hasCode ?", "if (t.gasLimit > (hasCode ?", ONK, ONWARD],
+  ["if (t.gasLimit !== (hasCode ?", "if (t.gasLimit < (hasCode ?", ONK, ONWARD],
+  ["=> estimate + estimate / 5n;", "=> estimate + estimate / 4n;", ONK, ONWARD],
+  ["=> estimate + estimate / 5n;", "=> estimate;", ONK, ONWARD],
+  ['if (t.gasLimit > EVM_ONWARD_GAS_MAX) return refuse("gas_over_cap");', "", ONK, ONWARD],
+  ["export const EVM_ONWARD_GAS_MAX = 100_000n;", "export const EVM_ONWARD_GAS_MAX = 100_001n;", ONRH, ONWARD],
+  // the very send run on both RPCs before a To with code takes it: gone, or one RPC's answer alone
+  ['  if (hasCode && agreed(reads.simulated, (x) => typeof x === "boolean") !== true) return refuse("simulation");\n', "", ONK, ONWARD],
+  ['agreed(reads.simulated, (x) => typeof x === "boolean")', "reads.simulated?.[0]", ONK, ONWARD],
+  ['agreed(reads.simulated, (x) => typeof x === "boolean") !== true', 'agreed(reads.simulated, (x) => typeof x === "boolean") === undefined', ONK, ONWARD],
   ['if (t.maxPriorityFeePerGas > reads.priorityCap || t.maxPriorityFeePerGas > t.maxFeePerGas) return refuse("priority_fee");', "", ONC, ONWARD],
   [" || t.maxPriorityFeePerGas > t.maxFeePerGas) return", ") return", ONF, ONWARD],
   ['if (t.maxFeePerGas > 2n * baseFee + reads.priorityCap || t.maxFeePerGas < baseFee) return refuse("max_fee");', "", ONC, ONWARD],
   [" || t.maxFeePerGas < baseFee) return", ") return", ONF, ONWARD],
   ["t.maxFeePerGas > 2n * baseFee", "t.maxFeePerGas > 3n * baseFee", ONC, ONWARD],
-  ["t.value + feeBound !== balance", "t.value + feeBound > balance", ONC, ONWARD],
-  ["t.value + feeBound !== balance", "t.value + feeBound < balance", ONC, ONWARD],
-  ['if (t.value === 0n || t.value', "if (t.value", ONC, ONWARD],
-  ["const feeBound = t.gasLimit * t.maxFeePerGas + l1Fee;", "const feeBound = t.gasLimit * t.maxFeePerGas;", ONC, ONWARD],
+  // the fee bound within the Max fee drawn: gone, a wei of slack, at the cap refused, no Max fee let through
+  ['if (typeof ctx.feeCap !== "bigint" || feeBound > ctx.feeCap) return refuse("fee_cap");', "", ONP, ONWARD],
+  ["feeBound > ctx.feeCap) return refuse", "feeBound > ctx.feeCap + 1n) return refuse", ONP, ONWARD],
+  ["feeBound > ctx.feeCap) return refuse", "feeBound >= ctx.feeCap) return refuse", ONP, ONWARD],
+  ['typeof ctx.feeCap !== "bigint" || feeBound', "feeBound", ONP, ONWARD],
+  ["const feeBound = t.gasLimit * t.maxFeePerGas + l1Fee;", "const feeBound = t.gasLimit * t.maxFeePerGas;", ONP, ONWARD],
+  // the part: a read, never 0
+  ['if (!uint(reads.part) || reads.part === 0n) return refuse("reads");', "", ONP, ONWARD],
+  ['if (!uint(reads.part) || reads.part', "if (reads.part", ONP, ONWARD],
+  [' || reads.part === 0n) return refuse("reads");', ') return refuse("reads");', ONP, ONWARD],
+  // the value: the part, or W's balance less the bound when that is less; exactly it, never nothing
+  ["const want = balance - feeBound < reads.part ? balance - feeBound : reads.part;", "const want = reads.part;", ONP, ONWARD],
+  ["const want = balance - feeBound < reads.part ? balance - feeBound : reads.part;", "const want = balance - feeBound;", ONP, ONWARD],
+  ["const want = balance - feeBound < reads.part ?", "const want = balance - feeBound > reads.part ?", ONP, ONWARD],
+  ["const want = balance - feeBound < reads.part ? balance - feeBound : reads.part;", "const want = balance < reads.part ? balance : reads.part;", ONP, ONWARD],
+  ['if (want <= 0n || t.value !== want) return refuse("value");', 'if (t.value !== want) return refuse("value");', ONP, ONWARD],
+  ['if (want <= 0n || t.value !== want) return refuse("value");', 'if (want < 0n || t.value !== want) return refuse("value");', ONP, ONWARD],
+  ["|| t.value !== want) return refuse", "|| t.value > want) return refuse", ONP, ONWARD],
+  ["|| t.value !== want) return refuse", "|| t.value < want) return refuse", ONP, ONWARD],
+  ['if (want <= 0n || t.value !== want) return refuse("value");', "", ONP, ONWARD],
   ["  ONWARD_CHECKED.set(tx, Object.freeze({ ...t, wallet: lower(ctx.wallet) }));\n", "", ONS, ONWARD],
   ['if (!read) return refuse("unchecked");', "", ONS, ONWARD],
   ['    return refuse("unchecked");\n  }\n  const fields', "    now = read;\n  }\n  const fields", ONS, ONWARD],
