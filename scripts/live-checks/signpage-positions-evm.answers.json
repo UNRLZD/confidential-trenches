@@ -787,8 +787,8 @@
    }
   ],
   "page": {
-   "pin": "sha384-HnkVdAOS6xySTjcsiIUo21OEIPOOv14FwqnDowHIJG3a3DhGamuY3sb6X3IsC4Ba",
-   "sha384": "sha384-HnkVdAOS6xySTjcsiIUo21OEIPOOv14FwqnDowHIJG3a3DhGamuY3sb6X3IsC4Ba",
+   "pin": "sha384-bEUwzsHsi7ni86xGdk4Jm5rAu1D/mbSdMYRyWB5aIjV0ttdon92LOVYPWoT/n2hS",
+   "sha384": "sha384-bEUwzsHsi7ni86xGdk4Jm5rAu1D/mbSdMYRyWB5aIjV0ttdon92LOVYPWoT/n2hS",
    "marks": {
     "pass": 1,
     "join": 1

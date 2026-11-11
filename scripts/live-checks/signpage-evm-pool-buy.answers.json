@@ -1101,8 +1101,8 @@
    }
   ],
   "page": {
-   "pin": "sha384-HnkVdAOS6xySTjcsiIUo21OEIPOOv14FwqnDowHIJG3a3DhGamuY3sb6X3IsC4Ba",
-   "sha384": "sha384-HnkVdAOS6xySTjcsiIUo21OEIPOOv14FwqnDowHIJG3a3DhGamuY3sb6X3IsC4Ba",
+   "pin": "sha384-bEUwzsHsi7ni86xGdk4Jm5rAu1D/mbSdMYRyWB5aIjV0ttdon92LOVYPWoT/n2hS",
+   "sha384": "sha384-bEUwzsHsi7ni86xGdk4Jm5rAu1D/mbSdMYRyWB5aIjV0ttdon92LOVYPWoT/n2hS",
    "marks": []
   }
  },
@@ -2097,8 +2097,8 @@
    }
   ],
   "page": {
-   "pin": "sha384-qcD0xh5XOmWsbHy/zRF0G7owQnODS5tOhQa0DjwJIViNcn7DW4pftWeOeGF8blW2",
-   "sha384": "sha384-qcD0xh5XOmWsbHy/zRF0G7owQnODS5tOhQa0DjwJIViNcn7DW4pftWeOeGF8blW2",
+   "pin": "sha384-8+LhWQD+9uzovEEtKR3j9MsAn3T2bJUmWzcKOqGA3hMOcTCTpiJiwfefJZ07SkBa",
+   "sha384": "sha384-8+LhWQD+9uzovEEtKR3j9MsAn3T2bJUmWzcKOqGA3hMOcTCTpiJiwfefJZ07SkBa",
    "marks": [
     "uniswap-v4",
     "owed/back-evm"
