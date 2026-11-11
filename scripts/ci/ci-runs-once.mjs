@@ -11,8 +11,15 @@
 //     queue did not test, which the ruleset leaves no way to make) is named with the run by hand that gives it one.
 // The queue can land a group once the required jobs pass, while the run's other jobs still go: that run is still the
 // commit's one run, and a reader waits for its end, so a job that fails after main moved is read as red on that commit.
-//   node scripts/ci/ci-runs-once.mjs [<ci.yml>]    exit 0 when ci.yml has no push trigger and keeps pull_request,
-//                                                 merge_group and workflow_dispatch; 1 otherwise
+// Caches: GitHub scopes a cache to the ref whose run saved it, and only main's are read by every pull request and queue
+// group, so a cache a push run used to save on main is saved there by .github/workflows/ci-cache.yml (push to main, no
+// test, never read as CI), each only when main lacks its key; the vault sandbox's by ci.yml's nightly. cacheProblems
+// holds every cache ci.yml saves outside the nightly's jobs saved there with the same path and key, the test-vault job's
+// steps up to its registry fetch equal (rust-cache keys on the job id, the toolchains and the env), no test run there,
+// and that workflow on push to main and by hand alone.
+//   node scripts/ci/ci-runs-once.mjs [<ci.yml> [<ci-cache.yml>]]   exit 0 when ci.yml has no push trigger and keeps
+//                                                 pull_request, merge_group and workflow_dispatch, and ci-cache.yml
+//                                                 saves its caches on main; 1 otherwise
 import { readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -68,10 +75,79 @@ export function ciProblems(sha, runs, slug = REPO_SLUG) {
   return [`${sha}'s ${what(last)} ended ${last.conclusion}: rerun it (gh run rerun ${last.databaseId} -R ${slug}) and go once it passes`];
 }
 
+/** The jobs of a workflow: { id: body }. */
+export function jobs(yml) {
+  const out = {};
+  const body = String(yml).split(/^jobs:\n/m)[1] ?? "";
+  for (const part of body.split(/^(?= {2}[a-z][\w-]*:\n)/m)) {
+    const m = /^ {2}([a-z][\w-]*):\n/.exec(part);
+    if (m) out[m[1]] = part;
+  }
+  return out;
+}
+
+/** A job's steps, each its text from its `- ` line (comment lines dropped, so a comment never makes two steps differ). */
+export const steps = (job) => String(job).split("\n").filter((l) => !/^\s*#/.test(l)).join("\n").split(/^(?= {6}- )/m).slice(1).map((x) => `${x.trimEnd()}\n`);
+
+/** A cache step's { uses, path, key, lookup } (path: its lines, trimmed), or null when the step is no actions/cache one. */
+export function cacheStep(step) {
+  const uses = /uses: actions\/cache(\/restore|\/save)?@/.exec(step);
+  if (!uses) return null;
+  const lines = step.split("\n");
+  const at = lines.findIndex((l) => /^ {10}path:/.test(l));
+  let p = "";
+  if (at >= 0) {
+    const inline = lines[at].replace(/^ {10}path:\s*/, "");
+    if (inline && inline !== "|") p = inline;
+    else for (let i = at + 1; i < lines.length && /^ {12}\S/.test(lines[i]); i++) p += `${p ? "\n" : ""}${lines[i].trim()}`;
+  }
+  return { uses: uses[1] ?? "", path: p, key: /^ {10}key: (.*)$/m.exec(step)?.[1] ?? "", lookup: /^ {10}lookup-only: true$/m.test(step) };
+}
+
+// the jobs ci.yml's nightly runs on main, whose caches it saves there itself (vault-sandbox-*, test-mutants, the alarm)
+const NIGHTLY = (id) => /^vault-sandbox/.test(id) || id === "test-mutants" || id === "venue-table-alarm";
+// a run line that runs a test: cargo test without --no-run, node --test, forge test, a pnpm or npm script, run.sh
+const RUNS_A_TEST = (l) => (/\bcargo\b.*\btest\b/.test(l) && !/--no-run\b/.test(l)) || /node\s+--test|forge\s+test|\bpnpm\b|\bnpm\b|run\.sh/.test(l);
+
+/** Why ci-cache.yml does not keep main's caches as ci.yml's push run did (empty = none). */
+export function cacheProblems(ciYml, cacheYml) {
+  const p = [];
+  const t = triggers(cacheYml);
+  if (!t) return ["ci-cache.yml has no `on:` block in the form this gate reads"];
+  const keys = Object.keys(t).sort().join(",");
+  if (keys !== "push,workflow_dispatch" || !/^\nbranches: \[main\]$/.test(t.push ?? "")) p.push(`ci-cache.yml runs on ${keys || "nothing"}${t.push !== undefined ? ` (push: ${t.push.trim() || "any branch"})` : ""}: it runs on a push to main and by hand alone, so it saves into main's scope and never stands in a pull request's or the queue's way`);
+  if (/^name: ci$/m.test(cacheYml)) p.push("ci-cache.yml is named ci: a reader of ci.yml's runs could take it for one");
+  const want = [];
+  for (const [id, job] of Object.entries(jobs(ciYml))) {
+    if (NIGHTLY(id)) continue;
+    for (const s of steps(job)) {
+      const c = cacheStep(s);
+      if (c && c.uses !== "/restore") want.push({ id, ...c });
+    }
+  }
+  const have = Object.values(jobs(cacheYml)).flatMap((j) => steps(j).map(cacheStep).filter((c) => c && c.uses === "/save"));
+  for (const w of want) if (!have.some((h) => h.key === w.key && h.path === w.path)) p.push(`ci.yml's ${w.id} saves ${w.key} (${w.path}), and ci-cache.yml does not save it with that key and path: a pull request reads it cold until a run on main saves it`);
+  // the test-vault job: rust-cache keys on the job id, so ci-cache.yml's job of that id has ci.yml's steps through its fetch
+  const ciVault = steps(jobs(ciYml)["test-vault"] ?? "");
+  const upTo = ciVault.findIndex((s) => /cargo \+\S+ fetch/.test(s));
+  if (upTo < 0) p.push("ci.yml's test-vault has no registry fetch this gate reads");
+  else if (steps(jobs(cacheYml)["test-vault"] ?? "").slice(0, upTo + 1).join("") !== ciVault.slice(0, upTo + 1).join("")) p.push("ci-cache.yml's test-vault job does not have ci.yml's test-vault steps through its fetch, as written: rust-cache keys on the job id, the toolchains and the env, so its save would be another key");
+  for (const [id, job] of Object.entries(jobs(cacheYml))) {
+    for (const line of job.split("\n")) if (!/^\s*#/.test(line) && RUNS_A_TEST(line)) p.push(`ci-cache.yml's ${id} runs a test (${line.trim()}): it saves caches, and a test there would be a second run read nowhere`);
+    for (const s of steps(job)) {
+      const c = cacheStep(s);
+      if (c?.uses === "/save" && !/^(?: {6}- | {8})if: steps\.[\w-]+\.outputs\.cache-hit != 'true'(?: && steps\.[\w-]+\.outputs\.cache-hit != 'true')*$/m.test(s)) p.push(`ci-cache.yml's ${id} saves ${c.key} on every run, not only when main lacks it`);
+    }
+  }
+  return p;
+}
+
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const file = process.argv[2] ?? path.join(ROOT, ".github/workflows/ci.yml");
-  const p = triggerProblems(readFileSync(file, "utf8"));
+  const cacheFile = process.argv[3] ?? path.join(ROOT, ".github/workflows/ci-cache.yml");
+  const ci = readFileSync(file, "utf8");
+  const p = [...triggerProblems(ci), ...cacheProblems(ci, readFileSync(cacheFile, "utf8"))];
   for (const l of p) console.log(`ci-runs-once: ${l}`);
-  console.log(p.length ? `ci-runs-once: FAIL ${p.length} problems` : "ci-runs-once: PASS ci.yml runs once per merged commit (the queue's run), on pull requests, nightly and by hand");
+  console.log(p.length ? `ci-runs-once: FAIL ${p.length} problems` : "ci-runs-once: PASS ci.yml runs once per merged commit (the queue's run), on pull requests, nightly and by hand; ci-cache.yml saves main's caches");
   process.exit(p.length ? 1 : 0);
 }

@@ -283,8 +283,6 @@ jobs:
           PR_HEAD: ${{ github.event.pull_request.head.sha }}
           MQ_HEAD: ${{ github.event.merge_group.head_sha }}
           MQ_BASE_REF: ${{ github.event.merge_group.base_ref }}
-          BEFORE: ${{ github.event.before }}
-          AFTER: ${{ github.sha }}
         run: |
           # a merge queue group runs as a pull request from main to the group's head (see the merge_group trigger above)
           if [ "$EVENT" = merge_group ]; then [ "$MQ_BASE_REF" = refs/heads/main ] || { echo "a merge queue group into $MQ_BASE_REF: only main's queue is judged"; exit 1; }; EVENT=pull_request; PR_HEAD="$MQ_HEAD"; PR_BASE="$(git merge-base refs/remotes/origin/main "$MQ_HEAD")"; fi
@@ -294,12 +292,7 @@ jobs:
               mkdir -p "$RUNNER_TEMP/base"
               git archive "$PR_BASE" scripts | tar -x -f - -C "$RUNNER_TEMP/base"
               node "$RUNNER_TEMP/base/scripts/ci/money-gate.mjs" "$PR_BASE" "$PR_HEAD" ;;
-            push)
-              if [ -z "$BEFORE" ] || [ "$BEFORE" = 0000000000000000000000000000000000000000 ]; then
-                node scripts/ci/money-gate.mjs --all
-              else
-                node scripts/ci/money-gate.mjs "$BEFORE" "$AFTER"
-              fi ;;
+            # by hand: every record (no push run since card main-ci-runs-once)
             *) node scripts/ci/money-gate.mjs --all ;;
           esac
 
@@ -724,7 +717,7 @@ jobs:
         id: decide
         env:
           EVENT: ${{ github.event_name }}
-          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          BASE: ${{ github.event.pull_request.base.sha }}
           HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
           MQ_HEAD: ${{ github.event.merge_group.head_sha }}
           MQ_BASE_REF: ${{ github.event.merge_group.base_ref }}

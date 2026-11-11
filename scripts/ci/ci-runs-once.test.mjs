@@ -8,10 +8,11 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { ciProblems, fullRun, runsArgs, triggerProblems } from "./ci-runs-once.mjs";
+import { cacheProblems, ciProblems, fullRun, runsArgs, triggerProblems } from "./ci-runs-once.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CI = readFileSync(path.join(HERE, "../../.github/workflows/ci.yml"), "utf8");
+const CACHE = readFileSync(path.join(HERE, "../../.github/workflows/ci-cache.yml"), "utf8");
 const has = (p, re) => p.some((l) => re.test(l));
 
 test("the real ci.yml runs on pull requests, the merge queue, nightly and by hand, and never on push", () => {
@@ -92,10 +93,56 @@ test("the command: exit 0 on the real ci.yml, 1 on one with a push trigger", () 
   try {
     const f = path.join(dir, "ci.yml");
     writeFileSync(f, CI.replace("  workflow_dispatch:\n", "  workflow_dispatch:\n  push:\n    branches: [main]\n"));
-    const r = spawnSync(process.execPath, [cli, f], { encoding: "utf8" });
+    const r = spawnSync(process.execPath, [cli, f, path.join(HERE, "../../.github/workflows/ci-cache.yml")], { encoding: "utf8" });
     assert.equal(r.status, 1);
     assert.match(r.stdout, /ci-runs-once: ci\.yml runs on push/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// main's caches: with no push run, ci-cache.yml saves on main each cache ci.yml's pull request and queue runs read
+test("the real ci-cache.yml saves every cache ci.yml saves outside the nightly's jobs, with its key and path, on a miss", () => {
+  assert.deepEqual(cacheProblems(CI, CACHE), []);
+});
+
+test("planted: a cache ci-cache.yml does not save, a key or path that drifted, a new ci.yml cache, a test, a save on every run, or other triggers are refused", () => {
+  const FOUNDRY = "download-foundry-1.7.1-cf7e688ed0c4c48adffca788b496076e31060b67ac5afe1e43dbb5499c20c88b";
+  // a key bumped in ci.yml (a version) and not here
+  const bumped = CI.replaceAll(FOUNDRY, FOUNDRY.replace("1.7.1", "1.7.2"));
+  assert.ok(has(cacheProblems(bumped, CACHE), /ci\.yml's test-scripts saves download-foundry-1\.7\.2-.*ci-cache\.yml does not save it/), "the queue would read 1.7.2 cold until a run on main saved it");
+  assert.ok(has(cacheProblems(bumped, CACHE), /ci\.yml's slither saves download-foundry-1\.7\.2/));
+  // a path that drifted
+  const moved = CACHE.replaceAll("~/.cache/ci-downloads/gitleaks-8.30.1.tgz", "~/.cache/gitleaks.tgz");
+  assert.ok(has(cacheProblems(CI, moved), /ci\.yml's gitleaks saves download-gitleaks-8\.30\.1-/));
+  // the pool's build cache with one path fewer
+  const fewer = CACHE.replaceAll("            ~/.cache/solana\n", "");
+  assert.ok(has(cacheProblems(CI, fewer), /ci\.yml's pool-solana saves pool-solana-rustc-/));
+  // a save step gone
+  const gone = CACHE.replace(/      - if: steps\.agave-tar\.outputs\.cache-hit != 'true'\n        uses: actions\/cache\/save@[^\n]*\n        with:\n          path: ~\/\.cache\/ci-downloads\/agave-4\.4\.0\.tar\.bz2\n          key: [^\n]*\n/, "");
+  assert.notEqual(gone, CACHE);
+  assert.ok(cacheProblems(CI, gone).length === 0, "agave is still saved by the pool job's miss path");
+  const noAgave = gone.replace(/      - if: steps\.pool-cache\.outputs\.cache-hit != 'true' && steps\.agave-tar\.outputs\.cache-hit != 'true'\n        uses: actions\/cache\/save@[^\n]*\n        with:\n          path: ~\/\.cache\/ci-downloads\/agave-4\.4\.0\.tar\.bz2\n          key: [^\n]*\n/, "");
+  assert.notEqual(noAgave, gone);
+  assert.ok(has(cacheProblems(CI, noAgave), /ci\.yml's pool-solana saves download-agave-4\.4\.0-/));
+  // the test-vault steps drifted (another toolchain: rust-cache's key differs)
+  const drift = CACHE.replace("rustup toolchain install 1.96.0 --profile minimal\n      - uses: Swatinem", "rustup toolchain install 1.97.1 --profile minimal\n      - uses: Swatinem");
+  assert.notEqual(drift, CACHE);
+  assert.ok(has(cacheProblems(CI, drift), /test-vault job does not have ci\.yml's test-vault steps/));
+  // a test run in it
+  for (const t of ["cargo +1.96.0 test --locked --manifest-path contracts/pool-solana/Cargo.toml", "node --test scripts/ci/x.test.mjs", "pnpm -r test", "forge test --root contracts/pool-evm"]) {
+    const ran = CACHE.replace("        run: cargo +1.96.0 test --locked --manifest-path contracts/pool-solana/Cargo.toml --no-run", `        run: ${t}`);
+    assert.notEqual(ran, CACHE);
+    assert.ok(has(cacheProblems(CI, ran), /ci-cache\.yml's pool-solana runs a test/), t);
+  }
+  // a save on every run
+  const always = CACHE.replace("      - if: steps.gitleaks-tgz.outputs.cache-hit != 'true'\n        uses: actions/cache/save", "      - uses: actions/cache/save");
+  assert.notEqual(always, CACHE);
+  assert.ok(has(cacheProblems(CI, always), /saves download-gitleaks-.* on every run/));
+  // other triggers: a pull request's or the queue's run would save into its own scope and wait in their way
+  for (const extra of ["  pull_request:\n", "  merge_group:\n"]) assert.ok(has(cacheProblems(CI, CACHE.replace("  workflow_dispatch:\n", `  workflow_dispatch:\n${extra}`)), /it runs on a push to main and by hand alone/), extra);
+  assert.ok(has(cacheProblems(CI, CACHE.replace("    branches: [main]\n  workflow_dispatch:", "  workflow_dispatch:")), /push: any branch/));
+  assert.ok(has(cacheProblems(CI, CACHE.replace("name: ci-cache", "name: ci")), /named ci/));
+  // the nightly's jobs save their own on main: a new cache in a vault-sandbox job needs no entry here
+  assert.deepEqual(cacheProblems(CI.replace("          shared-key: vault-sandbox\n          workspaces: |", "          shared-key: vault-sandbox-2\n          workspaces: |"), CACHE), []);
 });
