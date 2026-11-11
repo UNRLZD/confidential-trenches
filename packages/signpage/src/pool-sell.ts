@@ -57,7 +57,7 @@
 import { base58, base64 } from "@scure/base";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { simulateSolanaTeardown, solanaCompileV0, solanaTeardownChecked } from "../../kit/src/trade/solana/build.ts";
-import { readSolanaPoolBuyVenue, readSolanaRent, SOLANA_POOL_PAGE_ENTRIES, SOLANA_POOL_QUOTE_MAX_AGE_SLOTS, SOLANA_POOL_SELL_FEE, solanaPoolNextPage, solanaPoolPage, solanaPoolSellMinOut, solanaPoolBuySellNeed, solanaPoolSellNeed, solanaPoolSellSteps, solanaRentMin, type SolanaPoolBuyVenue, type SolanaRent } from "../../kit/src/trade/solana/pool-buy.ts";
+import { readSolanaPoolBuyVenue, readSolanaRent, SolanaPoolBuyError, SOLANA_POOL_PAGE_ENTRIES, SOLANA_POOL_QUOTE_MAX_AGE_SLOTS, SOLANA_POOL_SELL_FEE, solanaPoolNextPage, solanaPoolPage, solanaPoolSellMinOut, solanaPoolBuySellNeed, solanaPoolSellNeed, solanaPoolSellSteps, solanaRentMin, type SolanaPoolBuyVenue, type SolanaRent } from "../../kit/src/trade/solana/pool-buy.ts";
 import { SOLANA_POOL_NEXT_PAGE_WINDOW, solanaPoolNoteFloor, solanaPoolPreMarkOf, type SolanaPoolPreMark } from "../../kit/src/trade/solana/pool-deposit.ts";
 import { solanaDecodeTokenAccount, type SolanaReference } from "../../kit/src/trade/solana/pool.ts";
 import { pageReference } from "./page-rpc.ts";
@@ -134,7 +134,7 @@ export type PoolSellHost = {
  *  decimal string, as an answer carries it), its transaction's signature once W signed (null: it ended before signing),
  *  and how it ended: its stage, or the refusal before it signed. */
 export type PoolSellLeg = { wallet: string; amount: string; tx: string | null; stage: TradeStage | null; error?: PoolSellError; cause?: string };
-type PoolSellError = "not_allowed" | "not_funded" | "quote_check_failed" | "failed" | "down";
+type PoolSellError = "not_allowed" | "not_funded" | "quote_check_failed" | "venue_not_built" | "failed" | "down";
 /** A sell's answer: its stage over every wallet's sale (filled when each filled, part_filled when some did), each sale's
  *  transaction in `txs`, and every sale in `legs`; or a refusal, nothing signed. */
 export type PoolSellAnswer = { stage: TradeStage; txs: TxRef[]; legs?: readonly PoolSellLeg[] } | { error: PoolSellError };
@@ -1400,6 +1400,8 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later, w: BuyWallet
     const cause = legCause(e);
     if (e instanceof Refused) return { error: e.code, cause };
     if (e instanceof PoolRuleRefused) return { error: "quote_check_failed", cause };
+    // both RPCs read a coin this build does not trade (a Mayhem curve or pool): by name, nothing built
+    if (e instanceof SolanaPoolBuyError && e.code === "venue_not_built") return { error: "venue_not_built", cause };
     // a provider read that still fails after the page's own retry, before W signs: "not now" (card pool-read-down)
     if (!signing && e instanceof SolanaRpcTransportError) {
       later.fault = e;
