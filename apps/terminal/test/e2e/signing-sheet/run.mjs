@@ -8,7 +8,13 @@
 //   backup   Create passkey: the 12 words (masked in the shot), then Saved
 //   backup2  the account's Backup: the 12 words again, left by Esc
 //   signout  the account's Sign out: the sign-out screen
+//   choose   the app's sign-in sheet, the wallet way: New account or I already have one
+//   existing I already have one: Use passkey or Recovery code; Esc back
 //   withdraw the account's Withdraw: the withdraw form
+//   poolwithdraw  pool.withdraw as the portfolio's pool row sends it (PortfolioMount.tsx), posted from the app's own
+//            document: the pool withdraw form (the harness holds no pool balance to draw the row)
+// held (DepositSheet's Withdraw on a held deposit) is not driven: it opens only on a held deposit in SIGN_HOST's own
+// store, which the harness has none of; it is the withdraw form's path with the held op (src/main.ts openKind).
 // Per view it records: the sheet's box on screen, the frame #app still in the page and visible (its box the window's)
 // or out of it, the top window's path (never a bare page: the app's own route), the app's own document (a mark set in
 // it before the first view) and its open sheet after the close. The verdict: every view draws in the sheet, the top
@@ -28,8 +34,8 @@ export const WIDTHS = [
   { name: "1440", viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, isMobile: false, hasTouch: false },
 ];
 /** The views with a field typed into: the frame is out of the page while they show. */
-export const TYPED = new Set(["words", "withdraw"]);
-export const VIEWS = ["signin", "words", "backup", "backup2", "signout", "withdraw"];
+export const TYPED = new Set(["words", "withdraw", "poolwithdraw"]);
+export const VIEWS = ["signin", "words", "choose", "existing", "backup", "backup2", "signout", "withdraw", "poolwithdraw"];
 const ROUTE = "/discover";
 const GUARD_MS = 600; // past SIGN_HOST's 500 ms activation guard (packages/signpage/src/guard.ts)
 const WAIT_MS = 15_000;
@@ -54,10 +60,13 @@ export function judge(rec) {
       if (v.closed) {
         if (!v.closed.hidden) bad.push("the sheet did not close");
         if (!TYPED.has(name) && !v.closed.sameDoc) bad.push("a new app document after close: state lost");
+        // a typed view's close: the sheet's dim stays until the new app document has painted, then fades
+        const p = v.closed.paint;
+        if (TYPED.has(name) && v.closed.hidden && (!p?.veil || p.fadeMs == null || p.firstPaintMs == null || p.fadeMs < p.firstPaintMs)) bad.push(`the dim faded before the app painted (${JSON.stringify(p ?? null)})`);
         if (!TYPED.has(name) && v.closed.appSheet !== v.appSheet) bad.push(`the app's sheet ${v.appSheet} became ${v.closed.appSheet}`);
         if (v.closed.topPath !== v.topPath) bad.push(`after close the top path is ${v.closed.topPath}`);
       }
-      lines.push(`${bad.length ? "FAIL" : "ok  "} ${tag}: frame ${v.frame}, top ${v.topPath}${v.closed ? `, closed by ${v.closed.by}${v.closed.sameDoc ? " to the same app document" : " to a new app document"}` : ""}${bad.length ? ` (${bad.join("; ")})` : ""}`);
+      lines.push(`${bad.length ? "FAIL" : "ok  "} ${tag}: frame ${v.frame}, top ${v.topPath}${v.closed ? `, closed by ${v.closed.by}${v.closed.sameDoc ? " to the same app document" : " to a new app document"}` : ""}${v.closed?.paint ? `, app painted ${v.closed.paint.firstPaintMs} ms (content ${v.closed.paint.contentPaintMs} ms) after the close, dim faded at ${v.closed.paint.fadeMs} ms` : ""}${bad.length ? ` (${bad.join("; ")})` : ""}`);
     }
   }
   return { ok: lines.every((l) => !l.startsWith("FAIL")), lines };
@@ -105,6 +114,21 @@ async function oneWidth(h, w, shotDir) {
   };
   const closed = async (name, by) => {
     const v = out.views[name];
+    // past the activation guard's window from the open: a close within it is the opening tap's own (src/shell.ts dismiss)
+    await page.waitForTimeout(GUARD_MS);
+    // a typed view's close: when the sheet went, when its dim faded, measured against the new app document's first paint
+    if (TYPED.has(name))
+      await page.evaluate(() => {
+        const t = () => performance.timeOrigin + performance.now();
+        const at = (window.__closeAt = {});
+        const screen = document.querySelector("#screen");
+        const veil = document.querySelector('[data-sheet="veil"]');
+        new MutationObserver(() => {
+          if (screen.hidden && at.sheet === undefined) at.sheet = t();
+          if (veil && !veil.hidden && veil.style.opacity === "1" && at.veil === undefined) at.veil = t();
+          if (veil && veil.style.opacity === "0" && at.fade === undefined) at.fade = t();
+        }).observe(document.body, { attributes: true, subtree: true, attributeFilter: ["hidden", "style"] });
+      });
     if (by === "esc") await page.keyboard.press("Escape");
     else if (by === "x") await tap(top('#screen [data-sheet="close"]')).catch(() => {});
     else await page.mouse.click(4, Math.round(w.viewport.height / 2));
@@ -123,6 +147,17 @@ async function oneWidth(h, w, shotDir) {
     await page.waitForTimeout(400);
     const d = await appDoc();
     v.closed = { by, hidden: await top("#screen").isHidden(), sameDoc: d?.mark === v.mark, appSheet: d?.sheet ?? null, topPath: new URL(page.url()).pathname };
+    if (TYPED.has(name)) {
+      const at = await page.evaluate(() => window.__closeAt ?? {});
+      const paint = await app.locator(":root").evaluate(() => {
+        const p = (n) => performance.getEntriesByName(n)[0]?.startTime;
+        const fp = p("first-paint");
+        const fcp = p("first-contentful-paint");
+        return { fp: fp === undefined ? null : performance.timeOrigin + fp, fcp: fcp === undefined ? null : performance.timeOrigin + fcp };
+      });
+      const ms = (x) => (x == null || at.sheet == null ? null : Math.round(x - at.sheet));
+      v.closed.paint = { veil: at.veil != null, firstPaintMs: ms(paint.fp), contentPaintMs: ms(paint.fcp), fadeMs: ms(at.fade) };
+    }
     await shot(`${name}-closed`);
   };
   const account = async (control) => {
@@ -159,6 +194,18 @@ async function oneWidth(h, w, shotDir) {
     await top('#signin[data-signin="words"]').waitFor({ timeout: WAIT_MS });
     await look("words", m);
     await closed("words", "x");
+
+    // choose and existing: the wallet way, then I already have one; Esc back
+    m = await newMark();
+    if (!(await vis('.sgn-opt[data-way="wallet"]').isVisible().catch(() => false))) await tap(signIn);
+    await tap(vis('.sgn-opt[data-way="wallet"]'));
+    await top('#screen:not([hidden]) #signin[data-signin="choose"]').waitFor({ timeout: WAIT_MS });
+    await look("choose", m);
+    await page.waitForTimeout(GUARD_MS);
+    await tap(top('#signin[data-signin="choose"] button[data-action="have-one"]'));
+    await top('#screen:not([hidden]) #signin[data-signin="existing"]').waitFor({ timeout: WAIT_MS });
+    await look("existing", m);
+    await closed("existing", "esc");
 
     // backup: the passkey way, Create passkey (no PRF): the 12 words, masked; Saved back, signed in
     m = await newMark();
@@ -202,6 +249,14 @@ async function oneWidth(h, w, shotDir) {
     await top('#screen:not([hidden]) #signin[data-signin="withdraw"]').waitFor({ timeout: WAIT_MS });
     await look("withdraw", m);
     await closed("withdraw", "esc");
+
+    // poolwithdraw: pool.withdraw from the app's own document, as the portfolio's pool row sends it; the x back
+    await page.waitForTimeout(400);
+    m = await newMark();
+    await app.locator(":root").evaluate(() => window.parent.postMessage({ v: 1, id: crypto.randomUUID(), type: "pool.withdraw", chain: "solana", return_key: "portfolio" }, "*"));
+    await top('#screen:not([hidden]) #signin[data-signin="pool-withdraw"]').waitFor({ timeout: WAIT_MS });
+    await look("poolwithdraw", m);
+    await closed("poolwithdraw", "x");
   } catch (e) {
     out.error = String(e.message ?? e).split("\n")[0];
     await shot("error").catch(() => {});

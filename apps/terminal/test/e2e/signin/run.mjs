@@ -133,7 +133,7 @@ export function judge(rec) {
     if (b.hops?.length) lines.push(`note ${at} BAR-03 hop back: the app's first paint ${b.hops.join(", ")} ms after SIGN_HOST's layer closed`);
     // BAR-04: CLS per page load, and none inside a step on a READY APP_HOST page
     for (const p of w.cls?.pages ?? []) say(p.sum <= BOUND.clsPage, `${at} BAR-04 CLS ${p.host}${p.top ? " (top)" : ""} doc ${p.doc}: ${p.sum.toFixed(4)}${p.sum > 0 && p.sources?.length ? ` (${p.sources.join("; ")})` : ""}`);
-    for (const s of w.cls?.steps ?? []) say(s.sum === 0, `${at} BAR-04 CLS in step ${s.step}: ${s.sum.toFixed(4)}`);
+    for (const s of w.cls?.steps ?? []) say(s.sum === 0, `${at} BAR-04 CLS in step ${s.step}: ${s.sum.toFixed(4)}${s.sum > 0 && s.sources?.length ? ` (${s.sources.join("; ")})` : ""}`);
     // BAR-06: the last action to the first paint of the signed-in header
     say(typeof w.landMs === "number" && w.landMs <= BOUND.landMs, `${at} BAR-06 to signed in: ${w.landMs ?? "-"} ms`);
     // BAR-07: taps
@@ -491,11 +491,12 @@ async function oneWidth(h, runName, w, { plant, shotDir, cpu }) {
     const [a, b] = [marks[i], marks[i + 1]];
     if (a.step === "P0") continue;
     let sum = 0;
+    const sources = [];
     for (const [id, d] of docs) {
       if (d.host !== REAL.app || !(readyAt.get(id) <= a.t)) continue;
-      for (const s of d.shifts) if (s.t >= a.t && s.t < b.t) sum += s.value;
+      for (const s of d.shifts) if (s.t >= a.t && s.t < b.t) (sum += s.value), sources.push(...(s.sources ?? []));
     }
-    steps.push({ step: a.step, sum });
+    steps.push({ step: a.step, sum, sources: sources.slice(0, 6) });
   }
   out.cls = {
     pages: [...docs.entries()].filter(([, d]) => d.host === REAL.app || d.host === REAL.sign).map(([id, d]) => ({ doc: id, host: d.host, top: d.top, sum: d.sum, sources: d.shifts.flatMap((x) => x.sources ?? []).slice(0, 6) })),
