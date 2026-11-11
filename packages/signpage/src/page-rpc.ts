@@ -79,6 +79,11 @@ export function lanedRpc(url: string, o: { kind?: ReadKind; retry?: SolanaRpcRet
   return Object.assign(rpc, { url: href });
 }
 
+/** The calls the helper serves one caller per 10 s on its Solana routes (apps/helper/src/rpc/rpc.ts RPC_PAGE_NEED: solana
+ *  and solana-devnet, 42), and the public endpoint's 40 of one method (RPC_METHOD_MAX). Every seat of the page on the
+ *  helper is paced to it (card pool-sell-legs-side-by-side: the paid devnet pass of 11 Nov 07:36Z, paced at the keyless
+ *  100, drew 59 in 10 s from the helper and its legs waited out the 429s): a call past it waits its turn here. */
+export const HELPER_SOLANA_LIMIT = { windowMs: 10_000, total: 42, perMethod: 40 } as const;
 /** A provider the device reaches directly. */
 export const pageRpc = (url: string, kind: ReadKind = "trade"): SolanaRpc => lanedRpc(url, { kind });
 /** The helper's POST /v1/rpc/solana, `origin` the helper's origin only; the page's retry unless a read names its own

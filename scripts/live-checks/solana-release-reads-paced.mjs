@@ -79,7 +79,9 @@ export function facts(index, js) {
   const f = FAULT.exec(js)?.groups?.F;
   const release =
     !!(p && a && h) &&
-    new RegExp(`providers:\\[${esc(p)}\\(${N}\\(${a}\\)\\),${esc(p)}\\(${N}\\(${h}\\)\\)\\],reference:\\((${N}),(${N})\\)=>${N}\\(\\2,\\1\\)`).test(js);
+    new RegExp(`providers:\\[${esc(p)}\\(${N}\\(${a}\\)\\),${esc(p)}\\(${N}\\(${h}\\)(?:,${N})?\\)\\],reference:\\((${N}),(${N})\\)=>${N}\\(\\2,\\1\\)`).test(js);
+  // (the helper's seat paced under the helper's own share too since card pool-sell-legs-side-by-side, a limit named
+  // as the pacer's second argument; that card's live check reads the limit)
   // card sol-pools-mainnet-pin: the pair is provider A and the helper's route, each paced and nothing else (provider A
   // never wrapped onto another route: a mark the helper makes up would count, review of 369a87a8 P1); the lister is the
   // helper's solana-marks route, paced
@@ -90,7 +92,7 @@ export function facts(index, js) {
     // MAINNET_MARKS_ROUTE, pageSolanaRpcs, pageSolanaLister, pageSolanaSettleRpcs (the helper's seat with its retry) and
     // PAGE_SOL_MARK_BATCHES, as pool-testnet.ts declares them in turn; each of the three takes its reads' kind on its
     // host's lane (card signpage-passes-yield-to-a-trade: `(e="trade")=>`), and hands it to every seat it makes
-    new RegExp(`(?<![\\w$])${m}=${Q}\\$\\{${h}\\}/v1/rpc/solana-marks${Q},${N}=\\((${N})=${Q}trade${Q}\\)=>\\[${esc(p)}\\(${N}\\(${a},\\1\\)\\),${esc(p)}\\(${N}\\(${h},${N},\\1\\)\\)\\],${N}=\\((${N})=${Q}trade${Q}\\)=>${esc(p)}\\(${N}\\(${m},${N},\\2\\)\\),${N}=\\((${N})=${Q}trade${Q}\\)=>\\[${esc(p)}\\(${N}\\(${a},\\3\\)\\),${esc(p)}\\(${N}\\(${h},${N},\\3\\)\\)\\],${N}=Object\\.freeze\\(\\[\\d+,\\d+\\]\\)[,;]`).test(js);
+    new RegExp(`(?<![\\w$])${m}=${Q}\\$\\{${h}\\}/v1/rpc/solana-marks${Q},${N}=\\((${N})=${Q}trade${Q}\\)=>\\[${esc(p)}\\(${N}\\(${a},\\1\\)\\),${esc(p)}\\(${N}\\(${h},${N},\\1\\)(?:,${N})?\\)\\],${N}=\\((${N})=${Q}trade${Q}\\)=>${esc(p)}\\(${N}\\(${m},${N},\\2\\)\\),${N}=\\((${N})=${Q}trade${Q}\\)=>\\[${esc(p)}\\(${N}\\(${a},\\3\\)\\),${esc(p)}\\(${N}\\(${h},${N},\\3\\)(?:,${N})?\\)\\],${N}=Object\\.freeze\\(\\[\\d+,\\d+\\]\\)[,;]`).test(js);
   const timed =
     !!t &&
     !!f &&
