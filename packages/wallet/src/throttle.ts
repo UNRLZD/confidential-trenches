@@ -52,6 +52,8 @@ export class ThrottleGate {
   #pause = 0;
   #epoch = 0;
   #suspect = false;
+  // when the throttle that made the provider suspect came: the doubt's start
+  #since = 0;
   #tail: Promise<void> = Promise.resolve();
   readonly #now: () => number;
   readonly #bounds: ThrottleBounds;
@@ -90,6 +92,7 @@ export class ThrottleGate {
   }
   /** A call sent in `sentIn` drew a throttle, with the provider's Retry-After (ms, any value). */
   throttled(sentIn: number, afterMs: unknown): void {
+    if (!this.#suspect) this.#since = this.#now();
     this.#suspect = true;
     if (sentIn === this.#epoch) {
       this.#epoch++;
@@ -112,6 +115,11 @@ export class ThrottleGate {
   /** Whether a throttle is the provider's last word: no call sent after the last counted one has gone through yet. */
   suspect(): boolean {
     return this.#suspect;
+  }
+  /** How long the provider has been in doubt, ms: since the throttle that began it, while no round sent after has gone
+   *  through; 0 when it is not. A provider throttling for good is in doubt from its first throttle on, whoever asks. */
+  doubtMs(): number {
+    return this.#suspect ? this.#now() - this.#since : 0;
   }
 }
 

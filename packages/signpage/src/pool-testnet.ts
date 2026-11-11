@@ -1242,7 +1242,6 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   const scope = pin === undefined ? null : solanaPoolOf(pin.program).scope;
   // the pool's Ws with their holdings, the one finder a sell and the positions use: on mainnet through the helper's keyed
   // route, in the testnet build on one devnet RPC (the header's testnet-only choice); none: no read
-  const FINDER_HOST = POOL_TESTNET ? TESTNET_RPCS.solana[0] : TRADE_HELPER;
   const finderOf = (r: readonly [SolanaRpc, SolanaRpc]): HoldingsReader => over.holdings?.(r) ?? (POOL_TESTNET ? solanaHoldingsAt(TESTNET_RPCS.solana[0]) : solanaHelperHoldings(TRADE_HELPER));
   // a sell's list: every W derived, the finder reading only those `read` asks for (buy-wallets.ts wantedBuyWallets)
   const poolBuyWallets = async (notes: NoteStore, r: readonly [SolanaRpc, SolanaRpc], read: (address: string) => boolean | Promise<boolean> = () => true): Promise<ListedBuyWallet[]> => {
@@ -1381,10 +1380,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       chain: inner.chain,
       read: async (address, s, by) => {
         try {
-          // a pass's read on the finder's host: on its budget (the finder is its own transport)
-          // its requests counted by the finder's own transport (laneFetch), so the turn counts none
-          await hostLane(FINDER_HOST).turn("pass", s, false);
-          // the list's bound from its start (buy-wallets.ts readDerived's `by`), as a sell's read keeps it
+          // the finder takes the host's pass turn at each of its rounds (buy-wallets.ts inTurn), and the list's budget of
+          // throttled waits (readDerived's `by`) is passed on, as a sell's read keeps it
           return await inner.read(address, s, by);
         } catch (e) {
           if (s?.aborted) throw e;
