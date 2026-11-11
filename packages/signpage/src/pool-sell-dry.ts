@@ -31,7 +31,8 @@
 // - The answer (poolSellPays): `out`, what a sale at the best venue's expected out (its fees taken, before slippage)
 //   pays into the user's notes as the sale's own rule prices it (solanaSellReserve), on a full sale with the sweep's
 //   note after it; `min_out`, the same at the user's slippage floor (the floor the sale signs, solanaSellFloor);
-//   `network`, the sale's one signature fee (SOLANA_POOL_SELL_FEE: no compute budget instruction, so no priority fee),
+//   `network`, the sale's one signature fee (SOLANA_POOL_SELL_FEE) and on mainnet its priority fee at the most it pays
+//   (pool-sell.ts SOLANA_POOL_SELL_PRIORITY),
 //   inside both already; `fee_bps` 0: a Solana pool sale is the venue's sell and the deposit back, nothing else
 //   (rules/pool.ts checkSolanaSell).
 import { SOLANA_LAMPORTS_PER_SIGNATURE, SOLANA_PUMP_AMM_PROGRAM, SOLANA_PUMP_PROGRAM, solanaVolumeAccumulator, solanaVolumeClaimable } from "../../kit/src/checks/solana/checks.ts";
@@ -44,7 +45,7 @@ import { solanaPoolOf } from "../../wallet/src/pool/solana.ts";
 import { TRADE_HOLD_MAX_MS } from "../../wallet/src/throttle.ts";
 import type { KindContext, Running } from "./api.ts";
 import { keptTokenDecimals, type PoolRpc, type TokenDecimalsKept } from "./pool-kinds.ts";
-import { poolSellReference, poolSellUnits, sizesOf as poolTreeSizes, solanaSellReserve } from "./pool-sell.ts";
+import { poolSellReference, poolSellUnits, sizesOf as poolTreeSizes, SOLANA_POOL_SELL_PRIORITY, solanaSellReserve } from "./pool-sell.ts";
 import type { Position } from "./positions.ts";
 import { checkPoolRequest, POOL_ASSET_DECIMALS_OF, poolTokenAddress, poolUnits, SOLANA_POOL_MIN_DEPOSIT, solanaDepositRents, solanaSellAfterFull, SOLANA_SWEEP_OWED_MAX, solanaSweepFloor, solanaSweepKeep, type PoolAsk, type PoolChain } from "./rules/pool.ts";
 
@@ -77,6 +78,9 @@ export type PoolSellDryDeps = {
   pin?(): { readonly program: string } | null;
   /** The Rent sysvar the page already read (main.ts rentOnce, state.pools' tap_max); null: read here on both. */
   rent?(): SolanaRent | null;
+  /** The page's cluster (pool-testnet.ts PAGE_CLUSTER): on mainnet the sale pays its priority fee, at most
+   *  SOLANA_POOL_SELL_PRIORITY (pool-sell.ts solanaSellBudget), counted in out, min_out and network. */
+  cluster?: "mainnet" | "devnet";
   /** The page's kept decimals (PAGE_TOKEN_DECIMALS). */
   decimals?: TokenDecimalsKept;
   /** True while a trade runs on the page or holds a host of the pair (main.ts: liveRuns and the lanes). */
@@ -172,7 +176,7 @@ async function walletReads(rpcs: readonly [SolanaRpc, SolanaRpc], ws: readonly s
  * - More than one W: the plan's legs are not known here, so each W's reserve at the larger of a partial and a full
  *   sale's keep, at 0 at least, is summed.
  */
-export function poolSellPays(rent: SolanaRent, venue: "pump-curve" | "pumpswap", wallets: readonly DryWallet[], full: boolean, e: bigint, minOut: bigint, cashback?: boolean, sizes: Sizes | null = null): { out: bigint; minOut: bigint } | { refused: "not_funded" | "quote_check_failed" } {
+export function poolSellPays(rent: SolanaRent, venue: "pump-curve" | "pumpswap", wallets: readonly DryWallet[], full: boolean, e: bigint, minOut: bigint, cashback?: boolean, sizes: Sizes | null = null, fee: bigint = SOLANA_POOL_SELL_FEE): { out: bigint; minOut: bigint } | { refused: "not_funded" | "quote_check_failed" } {
   const cb = cashback ?? true;
   const made = solanaPoolSellNeed({ kind: venue, cashback: cb }, rent) - solanaPoolSellNeed({ kind: venue, cashback: cb }, rent, { ammVolume: true, ammVolumeAta: true });
   const none = [null, null] as const;
@@ -202,7 +206,7 @@ export function poolSellPays(rent: SolanaRent, venue: "pump-curve" | "pumpswap",
       let refusal: { refused: "not_funded" | "quote_check_failed" } | null = null;
       for (const o of counts) {
         const after = solanaSellAfterFull(rent, o);
-        const p = { fee: SOLANA_POOL_SELL_FEE, made, rents, after, lamports: w.lamports, minOut: m, keeps: false, noteFloor: solanaPoolNoteFloor(rent) };
+        const p = { fee, made, rents, after, lamports: w.lamports, minOut: m, keeps: false, noteFloor: solanaPoolNoteFloor(rent) };
         const r = solanaSellReserve({ ...p, swept: after - r0, base: r0, floor });
         if ("refused" in r) {
           refusal ??= r;
@@ -212,7 +216,7 @@ export function poolSellPays(rent: SolanaRent, venue: "pump-curve" | "pumpswap",
         // rent back, less the teardown's first frame and the sweep's fee, the sweep's deposit rents with the trees one
         // entry on and what W keeps for its owed claims)
         const sweep = after + solanaRentMin(rent, 165) - 2n * SOLANA_LAMPORTS_PER_SIGNATURE - rentsAt(sizes && { stateSize: sizes.stateSize + 1, labelSize: sizes.labelSize + 1 }) - solanaSweepKeep(rent, o);
-        const swept = net(x, SOLANA_POOL_SELL_FEE + made + rents + after - w.lamports) + (sweep > 0n ? sweep : 0n);
+        const swept = net(x, fee + made + rents + after - w.lamports) + (sweep > 0n ? sweep : 0n);
         // the rent(0) path (the note alone) here: the sale's own costs are at most these, so it may still take the sweep's
         const own = solanaSellReserve(p);
         const v = !("refused" in own) && own.value >= floor ? swept : r.value < swept ? r.value : swept;
@@ -227,7 +231,7 @@ export function poolSellPays(rent: SolanaRent, venue: "pump-curve" | "pumpswap",
     return { out, minOut: floorOut };
   }
   const one = (w: DryWallet, keep: bigint): bigint => {
-    const r = SOLANA_POOL_SELL_FEE + made + rents + keep - w.lamports;
+    const r = fee + made + rents + keep - w.lamports;
     return r > 0n ? r : 0n;
   };
   const reserve = wallets.length === 1 ? one(wallets[0]!, keepPart) : wallets.reduce((t, w) => {
@@ -338,10 +342,12 @@ async function previewOn(d: PoolSellDryDeps, params: Record<string, unknown>, po
   // a sign out while it read: the old holding is not answered
   if (holding(d, token) === undefined) return { error: "not_funded" };
   const e = quoted.best.expectedOut;
-  const pays = poolSellPays(rent, venue, read.wallets, ws.length === 1 && units === total, e, solanaSellFloor(e, ask.slippageBps), quoted.best.cashback, read.sizes);
+  // the sale's fee: its signature's, and on mainnet its priority at the most it pays (pool-sell.ts solanaSellBudget)
+  const fee = SOLANA_POOL_SELL_FEE + (d.cluster === "mainnet" ? SOLANA_POOL_SELL_PRIORITY : 0n);
+  const pays = poolSellPays(rent, venue, read.wallets, ws.length === 1 && units === total, e, solanaSellFloor(e, ask.slippageBps), quoted.best.cashback, read.sizes, fee);
   if ("refused" in pays) return { error: pays.refused };
   const sol = POOL_ASSET_DECIMALS_OF.solana;
-  return { result: { out: poolUnits(pays.out, sol), min_out: poolUnits(pays.minOut, sol), network: poolUnits(SOLANA_POOL_SELL_FEE, sol), fee_bps: 0 } };
+  return { result: { out: poolUnits(pays.out, sol), min_out: poolUnits(pays.minOut, sol), network: poolUnits(fee, sol), fee_bps: 0 } };
 }
 
 /** The kind for ApiHost.kinds: answered as a read that runs (Running), so `state`, nav and an open kind never wait for

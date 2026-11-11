@@ -34,7 +34,7 @@ import type { BuyWallet } from "../../wallet/src/pool/buy-wallets.ts";
 import { solanaPoolOf } from "../../wallet/src/pool/solana.ts";
 import { BLOCKHASH, FEE_PAYER, POOL, PROGRAM, fx, providers, rent } from "../../kit/test/solana-pool-buy-fx.ts";
 import { READ_WAIT_TOTAL_MS } from "../src/read-waits.ts";
-import { POOL_RENT_BACK_MS, POOL_RENT_BACK_RULES, POOL_SELL_LOCK, POOL_SELL_READS, POOL_SELL_SHARED_READ_MS, POOL_SELL_SIZE_RETRY_MS, POOL_SELL_AGREE_WAIT_MS, POOL_SELL_WAIT_MS, buyMints, leftAfter, owedRentBacks, planPoolSell, poolSellKind, resumeRentBacks, runPoolSell, settleDeadSellOps, settlePoolSells, settleSellOps, solanaSellAfterFull, solanaSellReserve, keptSells, stageOfLegs, type KeptSell, type OwedRentBack, type PoolSellHost, type PoolSellKindHost, type RentBackTold } from "../src/pool-sell.ts";
+import { POOL_RENT_BACK_MS, POOL_RENT_BACK_RULES, POOL_SELL_LOCK, POOL_SELL_READS, POOL_SELL_SHARED_READ_MS, POOL_SELL_SIZE_RETRY_MS, POOL_SELL_AGREE_WAIT_MS, POOL_SELL_WAIT_MS, buyMints, leftAfter, owedRentBacks, planPoolSell, poolSellKind, resumeRentBacks, runPoolSell, settleDeadSellOps, settlePoolSells, settleSellOps, solanaSellAfterFull, solanaSellBudget, solanaSellReserve, SOLANA_POOL_SELL_PRIORITY, keptSells, stageOfLegs, type KeptSell, type OwedRentBack, type PoolSellHost, type PoolSellKindHost, type RentBackTold } from "../src/pool-sell.ts";
 import { opOf } from "../src/state.ts";
 import { solanaCompileV0 } from "../../kit/src/trade/solana/build.ts";
 import { checkSolanaSweep, PoolRuleRefused, SOLANA_POOL_MIN_DEPOSIT, SOLANA_POOL_SELL_RESERVE_MAX, solanaDepositRents, solanaSweepFloor, solanaSweepKeep, solanaWithdrawMinPart, withdrawNoteFloor, type PoolAsk } from "../src/rules/pool.ts";
@@ -59,6 +59,18 @@ const ASK: PoolAsk = { kind: "pool.sell", chain: "solana", token: MINT, amount: 
 /** ASK's amount in whole units at its decimals, as its ops record names it (card kit-portfolio-reads). */
 const UNITS = "4000000";
 const FEE = 5_000;
+/** The fee the runtime charges a message: FEE (one signature) and its priority, compute unit limit x price, rounded up. */
+const feeOf = (m: ReturnType<typeof solanaDecodeMessage>): bigint => {
+  let limit = 0n;
+  let price = 0n;
+  for (const x of m.instructions) {
+    if (m.staticKeys[x.programIndex] !== SOLANA_COMPUTE_BUDGET_PROGRAM) continue;
+    const dv = new DataView(x.data.buffer, x.data.byteOffset, x.data.byteLength);
+    if (x.data[0] === 2) limit = BigInt(dv.getUint32(1, true));
+    if (x.data[0] === 3) price = dv.getBigUint64(1, true);
+  }
+  return BigInt(FEE) + (limit * price + 999_999n) / 1_000_000n;
+};
 const N = 6; // leaves on each tree before the sell
 const ENOUGH = 1_000_000_000; // W's lamports: a reserve of 0
 const enc = new TextEncoder();
@@ -118,6 +130,10 @@ const pageBytes = (tree: 0 | 1, leaves: bigint[], pageNo = 0): Uint8Array => {
 };
 
 type Plant = {
+  /** the page's cluster (devnet, no priority fee, when not given); on mainnet the sell pays one (solanaSellBudget) */
+  cluster?: "mainnet" | "devnet";
+  /** the units each simulation answers it used (none when not given) */
+  units?: number;
   /** the recorded venue the sell goes to (pump's curve when not given) */
   venue?: Venue;
   /** W's lamports (ENOUGH when not given) */
@@ -441,7 +457,7 @@ function chain(plant: Plant = {}) {
       let got = new DataView(venueSell.data.buffer, venueSell.data.byteOffset + 16, 8).getBigUint64(0, true);
       const made: [string, string, number][] = m.staticKeys[venueSell.programIndex] === SOLANA_PUMP_AMM_PROGRAM && plant.cashback ? ([[ammVol, SOLANA_PUMP_AMM_PROGRAM, 137], [ammAta, SOLANA_TOKEN_PROGRAM, 165]] as [string, string, number][]).filter(([x, owner]) => accounts.get(x)?.owner !== owner) : [];
       for (const [, , size] of made) got -= solanaRentMin(rent, size);
-      const ends = BigInt(accounts.get(signer)?.lamports ?? 0) + got - BigInt(FEE);
+      const ends = BigInt(accounts.get(signer)?.lamports ?? 0) + got - feeOf(m);
       if (ends < 0n) throw new Error("InsufficientFunds");
       if (ends > 0n && ends < solanaRentMin(rent, 0)) throw new Error("InsufficientFundsForRent");
       if (dry) return;
@@ -469,7 +485,7 @@ function chain(plant: Plant = {}) {
       const at = solanaPoolPage(PROGRAM, tree, Number(pv.getBigUint64(tree === 0 ? 49 : 49 + 1065, true)));
       if (keys[2 + tree] !== at && !(keys.length === 8 && keys[6 + tree] === at)) throw new Error("WrongAccount");
     }
-    const cost = BigInt(FEE) + rentsOf(pre);
+    const cost = feeOf(m) + rentsOf(pre);
     // the venue's sell first: what W gets, less the cashback accounts it makes at W's cost
     const sellIx = m.instructions.find((x) => x.data.length === 24);
     let gets = 0n;
@@ -587,7 +603,7 @@ function chain(plant: Plant = {}) {
           assert.equal((params[0] as { commitment: string }).commitment, "finalized");
           return { blockHeight: plant.finalHeight ?? 1_000, absoluteSlot: VF[v].slot + 10 + p, epoch: 1, slotIndex: 0, slotsInEpoch: 432_000 };
         case "getFeeForMessage":
-          return { ...ctx, value: FEE };
+          return { ...ctx, value: Number(feeOf(solanaDecodeMessage(base64.decode(params[0] as string)))) };
         case "simulateTransaction": {
           const tx = base64.decode(params[0] as string);
           assert.equal((params[1] as { sigVerify: boolean }).sigVerify, false);
@@ -608,9 +624,9 @@ function chain(plant: Plant = {}) {
                 const a = after.get(x);
                 return a ? { owner: a.owner, lamports: a.lamports, data: [base64.encode(a.data), "base64"], executable: false, rentEpoch: 0, space: a.data.length } : null;
               };
-              return { ...ctx, value: { err: null, logs: [], accounts: want.map(read) } };
+              return { ...ctx, value: { err: null, logs: [], accounts: want.map(read), ...(plant.units === undefined ? {} : { unitsConsumed: plant.units }) } };
             }
-            return { ...ctx, value: { err: null, logs: [] } };
+            return { ...ctx, value: { err: null, logs: [], ...(plant.units === undefined ? {} : { unitsConsumed: plant.units }) } };
           } catch (e) {
             return { ...ctx, value: { err: String(e), logs: [] } };
           }
@@ -756,6 +772,7 @@ async function world(plant: Plant = {}, wallets: BuyWallet[] = [wallet(AMOUNT, f
   for (const o of plant.others ?? []) bought.set(freshWallet(SEED64, "sol", o.l, o.j).address, { mint: VF[plant.venue ?? "pump"].mint, program: VF[plant.venue ?? "pump"].mintRead.owner });
   const host: PoolSellHost = {
     pin: PIN,
+    ...(plant.cluster === undefined ? {} : { cluster: plant.cluster }),
     bought: { get: async (a) => bought.get(a), put: async (a, m) => void bought.set(a, m) },
     rpcs: c.rpcs,
     notes: async () => ns,
@@ -899,6 +916,50 @@ test("proceeds bent to any pool but the pinned one are refused by the rule befor
   assert.ok(w.seeds.every((s) => s.every((b) => b === 0)));
   assert.deepEqual(w.sent, []);
   assert.deepEqual(await ours(w.ns), []);
+});
+
+// card sol-pool-buy-lands-on-mainnet: a mainnet sell pays a priority fee so a busy leader includes it: a compute unit
+// limit 1.2x the units both simulations used, a price that makes about SOLANA_POOL_SELL_PRIORITY in all, priced by both
+// RPCs into the fee the reserve, the funds check and the rule count; devnet's sell stays without one
+test("a mainnet sell carries a compute unit limit sized from its simulation and a price of about 100,000 lamports in all, counted in its reserve", async () => {
+  assert.equal(SOLANA_POOL_SELL_PRIORITY, 100_000n);
+  const w = await world({ cluster: "mainnet", units: 90_000 });
+  const a = await runPoolSell(w.host, ASK);
+  assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a, (_, v) => (typeof v === "bigint" ? String(v) : v)));
+  const sig = (a as { txs: { hash: string }[] }).txs[0]!.hash;
+  const m = solanaDecodeMessage(w.c.txs.get(sig)!.tx.subarray(65));
+  const [lim, pri] = m.instructions.slice(0, 2);
+  assert.equal(m.staticKeys[lim!.programIndex], SOLANA_COMPUTE_BUDGET_PROGRAM);
+  assert.equal(m.staticKeys[pri!.programIndex], SOLANA_COMPUTE_BUDGET_PROGRAM);
+  const limit = new DataView(lim!.data.buffer, lim!.data.byteOffset, lim!.data.byteLength).getUint32(1, true);
+  const price = new DataView(pri!.data.buffer, pri!.data.byteOffset, pri!.data.byteLength).getBigUint64(1, true);
+  assert.deepEqual([lim!.data[0], pri!.data[0]], [2, 3]);
+  assert.equal(limit, 108_000, "1.2x the 90,000 units the simulations used");
+  const priority = (BigInt(limit) * price + 999_999n) / 1_000_000n;
+  assert.ok(priority <= SOLANA_POOL_SELL_PRIORITY && priority > SOLANA_POOL_SELL_PRIORITY - 2n, String(priority));
+  assert.deepEqual(solanaSellBudget(90_000), { limit, price, priority });
+  // the deposit back is the devnet sell's less the priority: the reserve took it out of the sale, W ends where it would
+  const dep = m.instructions.at(-1)!;
+  assert.equal(m.staticKeys[dep.programIndex], PROGRAM);
+  assert.equal(new DataView(dep.data.buffer, dep.data.byteOffset + 1, 8).getBigUint64(0, true), FULL - priority);
+  // devnet: no compute budget, as before
+  const d = await world({ units: 90_000 });
+  const b = await runPoolSell(d.host, ASK);
+  const dm = solanaDecodeMessage(d.c.txs.get((b as { txs: { hash: string }[] }).txs[0]!.hash)!.tx.subarray(65));
+  assert.ok(!dm.staticKeys.includes(SOLANA_COMPUTE_BUDGET_PROGRAM));
+  // the budget's bounds: unread units take the runtime's most at about the same priority; a tiny sell's price stops at
+  // the kit's cap
+  assert.deepEqual(solanaSellBudget(null).limit, 1_400_000);
+  assert.ok(solanaSellBudget(null).priority <= SOLANA_POOL_SELL_PRIORITY);
+  assert.equal(solanaSellBudget(10).price, 1_000_000n);
+});
+
+test("a mainnet sell from a W that cannot pay the priority fee up front is refused not_funded, nothing signed", async () => {
+  const need = BigInt(FEE) + rentMin(0);
+  const w = await world({ cluster: "mainnet", units: 90_000, lamports: Number(need + 50_000n) });
+  const a = await runPoolSell(w.host, ASK);
+  assert.deepEqual(a, { error: "not_funded" });
+  assert.ok(!w.c.log.some((x) => x.endsWith("sendTransaction")), w.c.log.join(" "));
 });
 
 test("a sell that never reads back, its blockhash never past on both RPCs, is sent: its note INCOMING with W's send (written before the send), for the next load to settle", async () => {

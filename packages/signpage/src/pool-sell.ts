@@ -32,7 +32,9 @@
 //   (pool-buy.ts blockhashOf: its slot is the device's own). Min out is the kit's solanaPoolSellMinOut.
 // - The reserve, the lamports W keeps out of the deposit: the costs (the tx fee both RPCs price the message at, the
 //   mark's rent and each tree page's growth, as pool-deposit.ts counts them) and an empty account's rent W must keep,
-//   less what W holds. No compute budget instruction: no priority fee. A reserve over SOLANA_POOL_SELL_RESERVE_MAX or
+//   less what W holds. On devnet no compute budget instruction: no priority fee; on mainnet a limit and a price
+//   (solanaSellBudget: about SOLANA_POOL_SELL_PRIORITY in all, the limit sized from the simulation), in the fee both
+//   RPCs price, so the reserve, the funds check and the rule count it. A reserve over SOLANA_POOL_SELL_RESERVE_MAX or
 //   at least min out is refused.
 // - Built here (the kit's solanaPoolSellSteps, then the tag 1 deposit of min out less the reserve with the return note's
 //   precommitment, last), checked by the rule (rules/pool.ts checkSolanaSell, against the page's pin read at the check),
@@ -62,7 +64,7 @@ import { SOLANA_POOL_NEXT_PAGE_WINDOW, solanaPoolNoteFloor, solanaPoolPreMarkOf,
 import { solanaDecodeTokenAccount, type SolanaReference } from "../../kit/src/trade/solana/pool.ts";
 import { pageReference } from "./page-rpc.ts";
 import { SOLANA_MAX_TX_BYTES, solanaAta, solanaProgramAddress } from "../../kit/src/checks/solana/message.ts";
-import { SOLANA_PUMP_AMM_PROGRAM, SOLANA_PUMP_PROGRAM, SOLANA_SOL_MINT, SOLANA_SYSTEM_PROGRAM, SOLANA_TOKEN_2022_PROGRAM, SOLANA_TOKEN_PROGRAM, solanaTeardownAddresses, solanaTeardownPlan, solanaVolumeAccumulator, solanaVolumeClaimable, type SolanaHeldRead, type SolanaTeardownSimulation, type SolanaTeardownUnclaimed } from "../../kit/src/checks/solana/checks.ts";
+import { SOLANA_COMPUTE_BUDGET_PROGRAM, SOLANA_CU_PRICE_MAX, SOLANA_PUMP_AMM_PROGRAM, SOLANA_PUMP_PROGRAM, SOLANA_SOL_MINT, SOLANA_SYSTEM_PROGRAM, SOLANA_TOKEN_2022_PROGRAM, SOLANA_TOKEN_PROGRAM, solanaTeardownAddresses, solanaTeardownPlan, solanaVolumeAccumulator, solanaVolumeClaimable, type SolanaHeldRead, type SolanaTeardownSimulation, type SolanaTeardownUnclaimed } from "../../kit/src/checks/solana/checks.ts";
 import { SolanaRpcTransportError, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import { vaultLabelOf } from "../../kit/src/vault/shapes.ts";
 import type { ErrorCode, TradeStage, TxRef } from "../../kit/src/signpage/messages.ts";
@@ -76,7 +78,7 @@ import { blockhashOf, blockhashRead, blockhashValid, pastOnBoth, readBack, readB
 import { afterOf, clockOf, keptReads, READ_WAIT, readWaits, forgetYoung, solanaSaleReads, solanaStableReads, tapDone, tapWaits, waitsOn, waitUnless, youngReads, type ReadWaits } from "./read-waits.ts";
 import { throttleWaitMs } from "../../wallet/src/throttle.ts";
 import { fromRecord, timedStore, TRADE_STORE_MS, tradeLock, type TradeStore } from "./trade.ts";
-import { checkSolanaSell, checkSolanaSweep, checkSolanaTeardownFrames, PoolRuleRefused, poolUnits, signSolana, SOLANA_POOL_MIN_DEPOSIT, SOLANA_POOL_SELL_RESERVE_MAX, SOLANA_SWEEP_OWED_MAX, solanaDepositRents, solanaSellAfterFull, solanaSweepFloor, solanaSweepKeep, type PoolAsk, type SolanaDepositHeld } from "./rules/pool.ts";
+import { checkSolanaSell, checkSolanaSweep, checkSolanaTeardownFrames, PoolRuleRefused, poolUnits, signSolana, SOLANA_POOL_CU_LIMIT_MAX, SOLANA_POOL_MIN_DEPOSIT, SOLANA_POOL_SELL_RESERVE_MAX, SOLANA_SWEEP_OWED_MAX, solanaDepositRents, solanaSellAfterFull, solanaSweepFloor, solanaSweepKeep, type PoolAsk, type SolanaDepositHeld } from "./rules/pool.ts";
 // the full sell's keep is priced by the sell's rule too (rules/pool.ts checkSolanaSell, review L1 of 38faee89)
 export { solanaSellAfterFull };
 import type { HostAnswer, HostRefusal, KindContext, Running } from "./api.ts";
@@ -85,6 +87,8 @@ import type { HostAnswer, HostRefusal, KindContext, Running } from "./api.ts";
 export type PoolSellHost = {
   /** The pinned pool (the wallet's SOL_POOLS of this page's network). */
   pin: SolanaPoolPin;
+  /** The pool's cluster (pool-testnet.ts PAGE_CLUSTER): on mainnet W's sell pays a priority fee (solanaSellBudget). */
+  cluster?: "mainnet" | "devnet";
   /** W's buy mint, as the buy wrote it (pool-buy.ts BuyMints): read by the rent back. */
   bought?: BuyMints;
   /** Two RPCs of different operators. */
@@ -1232,7 +1236,9 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later, w: BuyWallet
     // SOLANA_POOL_NEXT_PAGE_WINDOW of their page's end: the reserve prices a next page's opening only there, and a tree
     // further out that more inserts turn would open its next page out of what W keeps for its next sell (review LOW 1)
     const near = (size: number): boolean => SOLANA_POOL_PAGE_ENTRIES - (size % SOLANA_POOL_PAGE_ENTRIES) <= SOLANA_POOL_NEXT_PAGE_WINDOW;
-    const fits = wireOf(solanaCompileV0(w.address, [...steps, depositIx(program, pool, w.address, sizes, pre, minOut, true)], bh.blockhash, []).message).length <= SOLANA_MAX_TX_BYTES;
+    // mainnet: W's compute budget first (solanaSellBudget), its limit sized once the simulation has read the units
+    let budget = h.cluster === "mainnet" ? solanaSellBudget(null) : null;
+    const fits = wireOf(solanaCompileV0(w.address, [...budgetIxs(budget), ...steps, depositIx(program, pool, w.address, sizes, pre, minOut, true)], bh.blockhash, []).message).length <= SOLANA_MAX_TX_BYTES;
     const eight = fits && (!keeps || (near(sizes.stateSize) && near(sizes.labelSize)));
     const floor = solanaSweepFloor(rent) > SOLANA_POOL_MIN_DEPOSIT ? solanaSweepFloor(rent) : SOLANA_POOL_MIN_DEPOSIT;
     // the smallest note the deposit back makes (the kit's solanaPoolNoteFloor at the rent both RPCs read, card
@@ -1240,7 +1246,7 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later, w: BuyWallet
     const noteFloor = solanaPoolNoteFloor(rent);
     const ctx = { nowMs: h.now?.() ?? BigInt(Date.now()), wallet: w.address, feeCap: 0n, solana: h.pin, precommitment };
     const build = (next: boolean, value: bigint): { message: Uint8Array; wire: Uint8Array } => {
-      const { message } = solanaCompileV0(w.address, value === 0n ? steps : [...steps, depositIx(program, pool, w.address, sizes, pre, value, next)], bh.blockhash, []);
+      const { message } = solanaCompileV0(w.address, [...budgetIxs(budget), ...(value === 0n ? steps : [...steps, depositIx(program, pool, w.address, sizes, pre, value, next)])], bh.blockhash, []);
       return { message, wire: wireOf(message) };
     };
     /** The sell with the deposit in form `next` (the eight, or the six), its reserve priced for that form at fee `fa`,
@@ -1275,8 +1281,9 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later, w: BuyWallet
     // back under noteFloor), the six priced exactly, so no sell the six carries is refused (review LOW 3) and no note the
     // six can make is left on W
     let next = eight;
-    let fee = SOLANA_POOL_SELL_FEE;
+    let fee = SOLANA_POOL_SELL_FEE + (budget?.priority ?? 0n);
     let built: { wire: Uint8Array; value: bigint };
+    let sized = budget === null;
     for (let moved = 0; ; ) {
       let b: { wire: Uint8Array; value: bigint } | null = null;
       try {
@@ -1306,6 +1313,17 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later, w: BuyWallet
         }
         // the cause names each provider whose simulation refused it and what it said (public data, kept on the device)
         return no("failed", "sim", sims.flatMap((v, k) => (v !== undefined && v !== null && v.err === null ? [] : [`RPC ${k} ${safeDetail(v?.err ?? null)}${simError(v)}`])).join("; "));
+      }
+      // mainnet: the limit sized from the units both simulations used, then built, priced and simulated again at it
+      if (!sized) {
+        sized = true;
+        const units = sims.map((v) => (v as { unitsConsumed?: unknown }).unitsConsumed);
+        const again = solanaSellBudget(units.every((u) => Number.isSafeInteger(u)) ? Math.max(...(units as number[])) : null);
+        if (again.limit !== budget!.limit) {
+          budget = again;
+          fee = SOLANA_POOL_SELL_FEE + again.priority;
+          continue;
+        }
       }
       built = b;
       break;
@@ -1411,6 +1429,31 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later, w: BuyWallet
     key?.fill(0);
   }
 }
+
+/** W's priority fee on a mainnet sell, lamports (card sol-pool-buy-lands-on-mainnet): a sell with none can sit unlanded on
+ *  a busy leader while the blockhash dies. W holds it up front: a mainnet buy leaves W the sell's need on every venue
+ *  (solanaPoolBuySellNeed) and what the proof's tip cap held beyond the tip it paid (1,000,000 less 100,000), and the
+ *  sell refuses a W short of the fee both RPCs price (not_funded); the reserve takes it back out of the sale. */
+export const SOLANA_POOL_SELL_PRIORITY = 100_000n;
+/** A mainnet sell's compute budget: the limit 1.2x the units its simulation used (the larger of both RPCs'; unread, the
+ *  runtime's most, SOLANA_POOL_CU_LIMIT_MAX), the price that makes limit x price SOLANA_POOL_SELL_PRIORITY at most
+ *  (never over SOLANA_CU_PRICE_MAX), and the priority fee the runtime charges for them (rounded up). */
+export function solanaSellBudget(units: number | null): { limit: number; price: bigint; priority: bigint } {
+  const sized = units !== null && Number.isSafeInteger(units) && units > 0 ? Math.ceil((units * 6) / 5) : SOLANA_POOL_CU_LIMIT_MAX;
+  const limit = Math.min(sized, SOLANA_POOL_CU_LIMIT_MAX);
+  const fit = (SOLANA_POOL_SELL_PRIORITY * 1_000_000n) / BigInt(limit);
+  const price = fit < SOLANA_CU_PRICE_MAX ? fit : SOLANA_CU_PRICE_MAX;
+  return { limit, price, priority: (BigInt(limit) * price + 999_999n) / 1_000_000n };
+}
+/** The compute budget instruction `tag` with `n` in `width` little-endian bytes. */
+const le = (tag: number, n: number | bigint, width: number): Uint8Array => Uint8Array.from([tag, ...Array.from({ length: width }, (_, i) => Number((BigInt(n) >> BigInt(8 * i)) & 0xffn))]);
+const budgetIxs = (b: { limit: number; price: bigint } | null) =>
+  b === null
+    ? []
+    : [
+        { program: SOLANA_COMPUTE_BUDGET_PROGRAM, accounts: [], data: le(2, b.limit, 4) },
+        { program: SOLANA_COMPUTE_BUDGET_PROGRAM, accounts: [], data: le(3, b.price, 8) },
+      ];
 
 /**
  * A sell's reserve for one deposit form and the deposit's value (review LOW 3): what W lacks, on top of what it holds,
