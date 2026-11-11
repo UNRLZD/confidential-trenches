@@ -37,10 +37,15 @@ const POOLS_FN = new RegExp(`function (${N})\\(\\)\\{return ${N}\\.flatMap\\(${N
 // deposit-name.ts nameNow: the vault's scope, then each pool's (EVM unless Solana), each named in its own try.
 const SCOPES = new RegExp(`\\.\\.\\.\\(${N}\\.pools\\?\\.\\(\\)\\?\\?\\[\\]\\)\\.map\\(${N}=>\\(\\{scope:${N}\\.scope,evm:${N}\\.chain!==${Q}solana${Q}\\}\\)\\)`);
 const EACH = new RegExp(`for\\(let\\{scope:${N},evm:${N}\\}of ${N}\\)try\\{await ${N}\\(${N},${N},${N},${N},${N}\\)\\}catch\\{\\}`);
-// deposit-name.ts nameScope: the planned index of the scope, the id, the EVM address (key zeroed), then the record.
+// deposit-name.ts nameScope: the planned index of the scope, the id, the EVM address (key zeroed), then the record: read
+// first with no lock, and nameDeposit asked unless it already holds this scope's index, id and address or a higher
+// index (card signpage-passes-yield-to-a-trade: a naming that changes nothing asks no exclusive seed lock).
 const PLAN = new RegExp(`\\.planDeposit\\((${N}),${N}=>${N}\\(${N},${N}\\)\\.precommitment\\);if\\(${N}\\.ref\\.kind!==${Q}deposit${Q}\\|\\|${N}\\.scope!==\\1\\)throw`);
 const EVM_NAME = new RegExp(
-  `if\\((${N})\\)\\{let (${N})=${N}\\(${N},${N},${N}\\);\\2\\.secretKey\\.fill\\(0\\),(${N})=\\2\\.address\\}await ${N}\\.nameDeposit\\(\\{entropy:${N}\\},\\{scope:${N},index:${N},id:${N}\\.id,\\.\\.\\.\\3===void 0\\?\\{\\}:\\{evm:\\3\\}\\}\\)`,
+  `if\\((${N})\\)\\{let (${N})=${N}\\(${N},${N},(${N})\\);\\2\\.secretKey\\.fill\\(0\\),(${N})=\\2\\.address\\}` +
+    `let (${N})=${N}\\(await (${N})\\.get\\(${Q}meta${Q},${N}\\((${N})\\)\\)\\.catch\\(\\(\\)=>void 0\\)\\);` +
+    `\\5!==void 0&&\\5\\.scope===\\7\\.toString\\(\\)&&\\(\\5\\.index>\\3\\|\\|\\5\\.index===\\3&&\\5\\.id===(${N})\\.id&&\\5\\.evm===\\4\\)\\|\\|` +
+    `await \\6\\.nameDeposit\\(\\{entropy:${N}\\},\\{scope:\\7,index:\\3,id:\\8\\.id,\\.\\.\\.\\4===void 0\\?\\{\\}:\\{evm:\\4\\}\\}\\)`,
 );
 // pool-deposit-address.ts walletOf and the record read.
 const WALLET_FN = new RegExp(`function (${N})\\(${N},${N}\\)\\{return ${N}===${Q}solana${Q}\\?${N}\\.evm===void 0\\?${N}\\.encode\\(${N}\\.decode\\(${N}\\.id\\)\\):null:${N}\\.evm\\?\\?null\\}`);

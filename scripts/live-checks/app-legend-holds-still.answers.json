@@ -4638,5 +4638,1408 @@
     "errors": []
    }
   ]
+ },
+ "badMarkUnderTap": {
+  "source": "live",
+  "route": "/token/solana/uHMWNFjUNxbPy1q43WrdbzygmJwdeh6AiQm1NKdxPAY",
+  "pick": {
+   "tf": "15m",
+   "lists": [
+    {
+     "chain": "solana",
+     "status": 200,
+     "rows": 100
+    }
+   ],
+   "read": [
+    {
+     "chain": "solana",
+     "addr": "uHMWNFjUNxbPy1q43WrdbzygmJwdeh6AiQm1NKdxPAY",
+     "status": 200,
+     "bars": 142,
+     "why": "not read"
+    }
+   ],
+   "picked": {
+    "chain": "solana",
+    "addr": "uHMWNFjUNxbPy1q43WrdbzygmJwdeh6AiQm1NKdxPAY",
+    "bars": 142
+   }
+  },
+  "at": "2026-11-11T06:39:15.700Z",
+  "browser": "157.0.8103.38",
+  "loads": [
+   {
+    "width": "phone",
+    "legend": true,
+    "toggled": false,
+    "heldMs": 32193,
+    "bars": 142,
+    "reads": [
+     {
+      "kind": "rest",
+      "at": 910,
+      "text": "PAYDAY · 15 · UNRLZDC $561.2K−$143.2K (−20.33%)Vol $308.09"
+     },
+     {
+      "kind": "point",
+      "at": 2210,
+      "text": "PAYDAY · 15 · UNRLZDC $41.9K−$11.1K (−20.97%)Vol $3.09K"
+     },
+     {
+      "kind": "rest",
+      "at": 3514,
+      "text": "PAYDAY · 15 · UNRLZDC $41.9K−$11.1K (−20.97%)Vol $3.09K"
+     },
+     {
+      "kind": "point",
+      "at": 4816,
+      "text": "PAYDAY · 15 · UNRLZDC $249.4K+$81.2K (+48.30%)Vol $80.5K"
+     },
+     {
+      "kind": "rest",
+      "at": 6118,
+      "text": "PAYDAY · 15 · UNRLZDC $249.4K+$81.2K (+48.30%)Vol $80.5K"
+     },
+     {
+      "kind": "point",
+      "at": 7422,
+      "text": "PAYDAY · 15 · UNRLZDC $77.7K−$307.98 (−0.40%)Vol $2.57K"
+     },
+     {
+      "kind": "rest",
+      "at": 8725,
+      "text": "PAYDAY · 15 · UNRLZDC $77.7K−$307.98 (−0.40%)Vol $2.57K"
+     },
+     {
+      "kind": "point",
+      "at": 10026,
+      "text": "PAYDAY · 15 · UNRLZDC $324.2K−$75.8K (−18.94%)Vol $27.5K"
+     },
+     {
+      "kind": "rest",
+      "at": 11330,
+      "text": "PAYDAY · 15 · UNRLZDC $324.2K−$75.8K (−18.94%)Vol $27.5K"
+     },
+     {
+      "kind": "point",
+      "at": 12635,
+      "text": "PAYDAY · 15 · UNRLZDC $79.4K+$5.93K (+8.07%)Vol $1.56K"
+     },
+     {
+      "kind": "rest",
+      "at": 13937,
+      "text": "PAYDAY · 15 · UNRLZDC $79.4K+$5.93K (+8.07%)Vol $1.56K"
+     },
+     {
+      "kind": "point",
+      "at": 15241,
+      "text": "PAYDAY · 15 · UNRLZDC $38.9K+$4.62K (+13.49%)Vol $1.10K"
+     },
+     {
+      "kind": "rest",
+      "at": 16545,
+      "text": "PAYDAY · 15 · UNRLZDC $38.9K+$4.62K (+13.49%)Vol $1.10K"
+     },
+     {
+      "kind": "point",
+      "at": 17850,
+      "text": "PAYDAY · 15 · UNRLZDC $257.1K+$79.9K (+45.09%)Vol $27.0K"
+     },
+     {
+      "kind": "rest",
+      "at": 19152,
+      "text": "PAYDAY · 15 · UNRLZDC $257.1K+$79.9K (+45.09%)Vol $27.0K"
+     },
+     {
+      "kind": "point",
+      "at": 20455,
+      "text": "PAYDAY · 15 · UNRLZDC $86.1K−$11.1K (−11.38%)Vol $8.22K"
+     },
+     {
+      "kind": "rest",
+      "at": 21761,
+      "text": "PAYDAY · 15 · UNRLZDC $86.1K−$11.1K (−11.38%)Vol $8.22K"
+     },
+     {
+      "kind": "point",
+      "at": 23066,
+      "text": "PAYDAY · 15 · UNRLZDC $401.2K+$10.7K (+2.74%)Vol $84.4K"
+     },
+     {
+      "kind": "rest",
+      "at": 24369,
+      "text": "PAYDAY · 15 · UNRLZDC $401.2K+$10.7K (+2.74%)Vol $84.4K"
+     },
+     {
+      "kind": "point",
+      "at": 25672,
+      "text": "PAYDAY · 15 · UNRLZDC $168.2K+$93.1K (+124.01%)Vol $24.3K"
+     },
+     {
+      "kind": "rest",
+      "at": 26976,
+      "text": "PAYDAY · 15 · UNRLZDC $168.2K+$93.1K (+124.01%)Vol $24.3K"
+     },
+     {
+      "kind": "point",
+      "at": 28279,
+      "text": "PAYDAY · 15 · UNRLZDC $82.1K+$28.3K (+52.67%)Vol $4.65K"
+     },
+     {
+      "kind": "rest",
+      "at": 29586,
+      "text": "PAYDAY · 15 · UNRLZDC $82.1K+$28.3K (+52.67%)Vol $4.65K"
+     },
+     {
+      "kind": "point",
+      "at": 30889,
+      "text": "PAYDAY · 15 · UNRLZDC $400.0K+$7.62K (+1.94%)Vol $57.8K"
+     },
+     {
+      "kind": "rest",
+      "at": 32193,
+      "text": "PAYDAY · 15 · UNRLZDC $400.0K+$7.62K (+1.94%)Vol $57.8K"
+     }
+    ],
+    "shifts": [
+     {
+      "at": 14333,
+      "value": 0.001184056616324535,
+      "input": true,
+      "sources": [
+       "div.tm-card 162,279 134x60 -> 162,251 134x60"
+      ]
+     }
+    ],
+    "errors": []
+   },
+   {
+    "width": "desktop",
+    "legend": true,
+    "toggled": true,
+    "heldMs": 30800,
+    "bars": 142,
+    "reads": [
+     {
+      "kind": "rest",
+      "at": 301,
+      "text": "PAYDAY · 15 · UNRLZDO $41.9KH $42.5KL $32.3KC $35.7K−$6.21K (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 601,
+      "text": "PAYDAY · 15 · UNRLZDO $33.4KH $61.9KL $33.4KC $57.7K+$24.3K (+72.74%)Vol $5.70K"
+     },
+     {
+      "kind": "rest",
+      "at": 899,
+      "text": "PAYDAY · 15 · UNRLZDO $41.9KH $42.5KL $32.3KC $35.7K−$6.21K (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 1205,
+      "text": "PAYDAY · 15 · UNRLZDO $41.9KH $42.0KL $40.4KC $40.4K−$1.42K (−3.39%)Vol $170.51"
+     },
+     {
+      "kind": "rest",
+      "at": 1533,
+      "text": "PAYDAY · 15 · UNRLZDO $41.9KH $42.5KL $32.3KC $35.7K−$6.21K (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 1849,
+      "text": "PAYDAY · 15 · UNRLZDO $41.0KH $44.0KL $39.5KC $40.6K−$422.68 (−1.03%)Vol $1.34K"
+     },
+     {
+      "kind": "rest",
+      "at": 2152,
+      "text": "PAYDAY · 15 · UNRLZDO $41.9KH $42.5KL $32.3KC $35.7K−$6.21K (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 2470,
+      "text": "PAYDAY · 15 · UNRLZDO $39.2KH $39.2KL $36.2KC $36.9K−$2.34K (−5.98%)Vol $570.55"
+     },
+     {
+      "kind": "rest",
+      "at": 2767,
+      "text": "PAYDAY · 15 · UNRLZDO $41.9KH $42.5KL $32.3KC $35.7K−$6.21K (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 3078,
+      "text": "PAYDAY · 15 · UNRLZDO $40.0KH $40.1KL $38.4KC $38.5K−$1.53K (−3.83%)Vol $135.58"
+     },
+     {
+      "kind": "rest",
+      "at": 3384,
+      "text": "PAYDAY · 15 · UNRLZDO $41.9KH $42.5KL $32.3KC $35.7K−$6.21K (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 3683,
+      "text": "PAYDAY · 15 · UNRLZDO $42.4KH $49.9KL $38.1KC $43.0K+$592.43 (+1.40%)Vol $3.74K"
+     },
+     {
+      "kind": "rest",
+      "at": 3983,
+      "text": "PAYDAY · 15 · UNRLZDO $41.9KH $42.5KL $32.3KC $35.7K−$6.21K (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 4298,
+      "text": "PAYDAY · 15 · UNRLZDO $32.2KH $34.3KL $31.7KC $33.9K+$1.73K (+5.37%)Vol $390.11"
+     },
+     {
+      "kind": "rest",
+      "at": 4602,
+      "text": "PAYDAY · 15 · UNRLZDO $41.9KH $42.5KL $32.3KC $35.7K−$6.21K (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 4902,
+      "text": "PAYDAY · 15 · UNRLZDO $37.0KH $37.0KL $34.6KC $34.8K−$2.24K (−6.06%)Vol $290.23"
+     },
+     {
+      "kind": "rest",
+      "at": 5220,
+      "text": "PAYDAY · 15 · UNRLZDO $41.9KH $42.5KL $32.3KC $35.7K−$6.21K (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 5524,
+      "text": "PAYDAY · 15 · UNRLZDO $25.9KH $27.7KL $25.6KC $27.7K+$1.84K (+7.13%)Vol $304.29"
+     },
+     {
+      "kind": "rest",
+      "at": 5816,
+      "text": "PAYDAY · 15 · UNRLZDO $41.9KH $42.5KL $32.3KC $35.7K−$6.21K (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 6128,
+      "text": "PAYDAY · 15 · UNRLZDO $53.8KH $57.6KL $53.8KC $55.1K+$1.27K (+2.36%)Vol $787.78"
+     },
+     {
+      "kind": "rest",
+      "at": 6436,
+      "text": "PAYDAY · 15 · UNRLZDO $41.9KH $42.5KL $32.3KC $35.7K−$6.21K (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 6736,
+      "text": "PAYDAY · 15 · UNRLZDO $33.7KH $33.7KL $30.6KC $30.6K−$3.12K (−9.26%)Vol $1.45K"
+     },
+     {
+      "kind": "rest",
+      "at": 7037,
+      "text": "PAYDAY · 15 · UNRLZDO $41.9KH $42.5KL $32.3KC $35.7K−$6.21K (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 7335,
+      "text": "PAYDAY · 15 · UNRLZDO $36.3KH $40.6KL $36.3KC $40.1K+$3.79K (+10.44%)Vol $602.85"
+     },
+     {
+      "kind": "rest",
+      "at": 7652,
+      "text": "PAYDAY · 15 · UNRLZDO $41.9KH $42.5KL $32.3KC $35.7K−$6.21K (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 7967,
+      "text": "PAYDAY · 15 · UNRLZDO $36.6KH $36.6KL $35.0KC $36.6K−$85.42 (−0.23%)Vol $248.32"
+     },
+     {
+      "kind": "rest",
+      "at": 8271,
+      "text": "PAYDAY · 15 · UNRLZDO $41.9KH $42.5KL $32.3KC $35.7K−$6.21K (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 8568,
+      "text": "PAYDAY · 15 · UNRLZDO $44.1KH $47.3KL $37.7KC $47.2K+$3.11K (+7.04%)Vol $2.48K"
+     },
+     {
+      "kind": "rest",
+      "at": 8867,
+      "text": "PAYDAY · 15 · UNRLZDO $41.9KH $42.5KL $32.3KC $35.7K−$6.21K (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 9186,
+      "text": "PAYDAY · 15 · UNRLZDO $38.9KH $39.4KL $37.1KC $37.1K−$1.78K (−4.58%)Vol $409.07"
+     },
+     {
+      "kind": "rest",
+      "at": 9488,
+      "text": "PAYDAY · 15 · UNRLZDO $41.9KH $42.5KL $32.3KC $35.7K−$6.21K (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 9788,
+      "text": "PAYDAY · 15 · UNRLZDO $40.3KH $40.8KL $39.1KC $39.1K−$1.10K (−2.74%)Vol $135.80"
+     },
+     {
+      "kind": "rest",
+      "at": 10104,
+      "text": "PAYDAY · 15 · UNRLZDO $41.9KH $42.5KL $32.3KC $35.7K−$6.21K (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 10400,
+      "text": "PAYDAY · 15 · UNRLZDO $31.1KH $31.1KL $30.4KC $30.4K−$751.38 (−2.41%)Vol $50.76"
+     },
+     {
+      "kind": "rest",
+      "at": 10701,
+      "text": "PAYDAY · 15 · UNRLZDO $41.9KH $42.5KL $32.3KC $35.7K−$6.21K (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 11013,
+      "text": "PAYDAY · 15 · UNRLZDO $46.3KH $46.4KL $44.8KC $44.8K−$1.53K (−3.31%)Vol $121.15"
+     },
+     {
+      "kind": "rest",
+      "at": 11318,
+      "text": "PAYDAY · 15 · UNRLZDO $41.9KH $42.5KL $32.3KC $35.7K−$6.21K (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 11618,
+      "text": "PAYDAY · 15 · UNRLZDO $32.1KH $32.4KL $29.4KC $30.7K−$1.46K (−4.55%)Vol $950.03"
+     },
+     {
+      "kind": "rest",
+      "at": 11916,
+      "text": "PAYDAY · 15 · UNRLZDO $41.9KH $42.5KL $32.3KC $35.7K−$6.21K (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 12224,
+      "text": "PAYDAY · 15 · UNRLZDO $32.7KH $33.6KL $31.7KC $33.1K+$411.17 (+1.26%)Vol $381.40"
+     },
+     {
+      "kind": "rest",
+      "at": 12533,
+      "text": "PAYDAY · 15 · UNRLZDO $41.9KH $42.5KL $32.3KC $35.7K−$6.21K (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 12834,
+      "text": "PAYDAY · 15 · UNRLZDO $35.0KH $35.0KL $33.9KC $33.9K−$1.10K (−3.16%)Vol $204.85"
+     },
+     {
+      "kind": "rest",
+      "at": 13151,
+      "text": "PAYDAY · 15 · UNRLZDO $41.9KH $42.5KL $32.3KC $35.7K−$6.21K (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 13470,
+      "text": "PAYDAY · 15 · UNRLZDO $28.3KH $30.4KL $27.9KC $30.0K+$1.75K (+6.19%)Vol $371.64"
+     },
+     {
+      "kind": "rest",
+      "at": 13766,
+      "text": "PAYDAY · 15 · UNRLZDO $41.9KH $42.5KL $32.3KC $35.7K−$6.21K (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 14068,
+      "text": "PAYDAY · 15 · UNRLZDO $43.3KH $43.4KL $42.3KC $42.3K−$1.02K (−2.36%)Vol $116.99"
+     },
+     {
+      "kind": "rest",
+      "at": 14368,
+      "text": "PAYDAY · 15 · UNRLZDO $41.9KH $42.5KL $32.3KC $35.7K−$6.21K (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 14667,
+      "text": "PAYDAY · 15 · UNRLZDO $40.8KH $41.2KL $36.9KC $41.2K+$334.75 (+0.82%)Vol $1.23K"
+     },
+     {
+      "kind": "rest",
+      "at": 14965,
+      "text": "PAYDAY · 15 · UNRLZDO $41.9KH $42.5KL $32.3KC $35.7K−$6.21K (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 15264,
+      "text": "PAYDAY · 15 · UNRLZDO $38.8KH $40.3KL $38.8KC $39.0K+$208.20 (+0.54%)Vol $407.04"
+     },
+     {
+      "kind": "rest",
+      "at": 15632,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄432H $0.0₄438L $0.0₄332C $0.0₄368−$0.0₅64 (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 15933,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄433H $0.0₄435L $0.0₄407C $0.0₄412−$0.0₅207 (−4.77%)Vol $309.82"
+     },
+     {
+      "kind": "rest",
+      "at": 16249,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄432H $0.0₄438L $0.0₄332C $0.0₄368−$0.0₅64 (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 16565,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄433H $0.0₄451L $0.0₄43C $0.0₄437+$0.0₆35 (+0.80%)Vol $470.65"
+     },
+     {
+      "kind": "rest",
+      "at": 16865,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄432H $0.0₄438L $0.0₄332C $0.0₄368−$0.0₅64 (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 17192,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄376H $0.0₄376L $0.0₄354C $0.0₄356−$0.0₅203 (−5.38%)Vol $309.70"
+     },
+     {
+      "kind": "rest",
+      "at": 17499,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄432H $0.0₄438L $0.0₄332C $0.0₄368−$0.0₅64 (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 17798,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄385H $0.0₄394L $0.0₄382C $0.0₄382−$0.0₆35 (−0.91%)Vol $150.61"
+     },
+     {
+      "kind": "rest",
+      "at": 18099,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄432H $0.0₄438L $0.0₄332C $0.0₄368−$0.0₅64 (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 18399,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄263H $0.0₄268L $0.0₄263C $0.0₄266+$0.0₆29 (+1.08%)Vol $48.15"
+     },
+     {
+      "kind": "rest",
+      "at": 18717,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄432H $0.0₄438L $0.0₄332C $0.0₄368−$0.0₅64 (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 19034,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄453H $0.0₄555L $0.0₄451C $0.0₄555+$0.0₄101 (+22.43%)Vol $900.53"
+     },
+     {
+      "kind": "rest",
+      "at": 19334,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄432H $0.0₄438L $0.0₄332C $0.0₄368−$0.0₅64 (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 19633,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄359H $0.0₄393L $0.0₄342C $0.0₄348−$0.0₅117 (−3.25%)Vol $1.46K"
+     },
+     {
+      "kind": "rest",
+      "at": 19951,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄432H $0.0₄438L $0.0₄332C $0.0₄368−$0.0₅64 (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 20249,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄361H $0.0₄381L $0.0₄355C $0.0₄366+$0.0₆56 (+1.56%)Vol $583.23"
+     },
+     {
+      "kind": "rest",
+      "at": 20551,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄432H $0.0₄438L $0.0₄332C $0.0₄368−$0.0₅64 (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 20849,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄373H $0.0₄377L $0.0₄373C $0.0₄377+$0.0₆41 (+1.10%)Vol $14.24"
+     },
+     {
+      "kind": "rest",
+      "at": 21148,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄432H $0.0₄438L $0.0₄332C $0.0₄368−$0.0₅64 (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 21450,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄561H $0.0₄561L $0.0₄453C $0.0₄454−$0.0₄106 (−18.97%)Vol $1.09K"
+     },
+     {
+      "kind": "rest",
+      "at": 21748,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄432H $0.0₄438L $0.0₄332C $0.0₄368−$0.0₅64 (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 22069,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄417H $0.0₄417L $0.0₄399C $0.0₄401−$0.0₅156 (−3.74%)Vol $220.99"
+     },
+     {
+      "kind": "rest",
+      "at": 22365,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄432H $0.0₄438L $0.0₄332C $0.0₄368−$0.0₅64 (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 22665,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄418H $0.0₄427L $0.0₄41C $0.0₄415−$0.0₆38 (−0.91%)Vol $259.28"
+     },
+     {
+      "kind": "rest",
+      "at": 22965,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄432H $0.0₄438L $0.0₄332C $0.0₄368−$0.0₅64 (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 23284,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄38H $0.0₄386L $0.0₄351C $0.0₄352−$0.0₅28 (−7.36%)Vol $794.36"
+     },
+     {
+      "kind": "rest",
+      "at": 23584,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄432H $0.0₄438L $0.0₄332C $0.0₄368−$0.0₅64 (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 23881,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄425H $0.0₄477L $0.0₄425C $0.0₄477+$0.0₅519 (+12.19%)Vol $466.13"
+     },
+     {
+      "kind": "rest",
+      "at": 24183,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄432H $0.0₄438L $0.0₄332C $0.0₄368−$0.0₅64 (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 24483,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄464H $0.0₄479L $0.0₄319C $0.0₄331−$0.0₄133 (−28.65%)Vol $3.11K"
+     },
+     {
+      "kind": "rest",
+      "at": 24782,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄432H $0.0₄438L $0.0₄332C $0.0₄368−$0.0₅64 (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 25083,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄35H $0.0₄354L $0.0₄332C $0.0₄337−$0.0₅131 (−3.74%)Vol $394.17"
+     },
+     {
+      "kind": "rest",
+      "at": 25383,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄432H $0.0₄438L $0.0₄332C $0.0₄368−$0.0₅64 (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 25682,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄358H $0.0₄365L $0.0₄358C $0.0₄36+$0.0₆16 (+0.45%)Vol $105.06"
+     },
+     {
+      "kind": "rest",
+      "at": 25981,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄432H $0.0₄438L $0.0₄332C $0.0₄368−$0.0₅64 (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 26281,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄285H $0.0₄299L $0.0₄281C $0.0₄293+$0.0₆83 (+2.90%)Vol $348.06"
+     },
+     {
+      "kind": "rest",
+      "at": 26583,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄432H $0.0₄438L $0.0₄332C $0.0₄368−$0.0₅64 (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 26883,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄446H $0.0₄446L $0.0₄435C $0.0₄446+$0.0₇3 (+0.06%)Vol $275.58"
+     },
+     {
+      "kind": "rest",
+      "at": 27183,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄432H $0.0₄438L $0.0₄332C $0.0₄368−$0.0₅64 (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 27481,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄343H $0.0₄421L $0.0₄343C $0.0₄421+$0.0₅774 (+22.50%)Vol $1.60K"
+     },
+     {
+      "kind": "rest",
+      "at": 27781,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄432H $0.0₄438L $0.0₄332C $0.0₄368−$0.0₅64 (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 28084,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄413H $0.0₄42L $0.0₄4C $0.0₄4−$0.0₅127 (−3.08%)Vol $378.29"
+     },
+     {
+      "kind": "rest",
+      "at": 28384,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄432H $0.0₄438L $0.0₄332C $0.0₄368−$0.0₅64 (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 28682,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄376H $0.0₄38L $0.0₄373C $0.0₄374−$0.0₆24 (−0.63%)Vol $57.97"
+     },
+     {
+      "kind": "rest",
+      "at": 28983,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄432H $0.0₄438L $0.0₄332C $0.0₄368−$0.0₅64 (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 29283,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄483H $0.0₄499L $0.0₄428C $0.0₄433−$0.0₅496 (−10.27%)Vol $986.96"
+     },
+     {
+      "kind": "rest",
+      "at": 29583,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄432H $0.0₄438L $0.0₄332C $0.0₄368−$0.0₅64 (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 29883,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄398H $0.0₄398L $0.0₄375C $0.0₄376−$0.0₅215 (−5.40%)Vol $300.92"
+     },
+     {
+      "kind": "rest",
+      "at": 30181,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄432H $0.0₄438L $0.0₄332C $0.0₄368−$0.0₅64 (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 30483,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄398H $0.0₄408L $0.0₄393C $0.0₄399+$0.0₆13 (+0.32%)Vol $185.75"
+     },
+     {
+      "kind": "rest",
+      "at": 30800,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄432H $0.0₄438L $0.0₄332C $0.0₄368−$0.0₅64 (−14.80%)Vol $1.70K"
+     }
+    ],
+    "shifts": [
+     {
+      "at": 17011,
+      "value": 0.0002575654457626029,
+      "input": true,
+      "sources": [
+       "canvas 1047,140 50x261 -> 1041,140 56x261",
+       "canvas 1047,402 50x83 -> 1041,402 56x83",
+       "span.tkp-lgkv 419,145 97x10 -> 441,145 108x10",
+       "span.tkp-lgkv 363,145 49x10 -> 379,145 54x10",
+       "span.tkp-lgkv 307,145 49x10 -> 318,145 54x10"
+      ]
+     }
+    ],
+    "errors": []
+   }
+  ]
+ },
+ "goodClearTap": {
+  "source": "live",
+  "route": "/token/solana/uHMWNFjUNxbPy1q43WrdbzygmJwdeh6AiQm1NKdxPAY",
+  "pick": {
+   "tf": "15m",
+   "lists": [
+    {
+     "chain": "solana",
+     "status": 200,
+     "rows": 100
+    }
+   ],
+   "read": [
+    {
+     "chain": "solana",
+     "addr": "uHMWNFjUNxbPy1q43WrdbzygmJwdeh6AiQm1NKdxPAY",
+     "status": 200,
+     "bars": 142,
+     "why": "not read"
+    }
+   ],
+   "picked": {
+    "chain": "solana",
+    "addr": "uHMWNFjUNxbPy1q43WrdbzygmJwdeh6AiQm1NKdxPAY",
+    "bars": 142
+   }
+  },
+  "at": "2026-11-11T06:42:20.290Z",
+  "browser": "157.0.8103.38",
+  "loads": [
+   {
+    "width": "phone",
+    "legend": true,
+    "toggled": false,
+    "heldMs": 32200,
+    "bars": 142,
+    "reads": [
+     {
+      "kind": "rest",
+      "at": 909,
+      "text": "PAYDAY · 15 · UNRLZDC $585.3K−$119.1K (−16.91%)Vol $552.42"
+     },
+     {
+      "kind": "point",
+      "at": 2213,
+      "text": "PAYDAY · 15 · UNRLZDC $41.9K−$11.1K (−20.97%)Vol $3.09K"
+     },
+     {
+      "kind": "rest",
+      "at": 3516,
+      "text": "PAYDAY · 15 · UNRLZDC $577.8K−$126.6K (−17.97%)Vol $772.60"
+     },
+     {
+      "kind": "point",
+      "at": 4820,
+      "text": "PAYDAY · 15 · UNRLZDC $249.4K+$81.2K (+48.30%)Vol $80.5K"
+     },
+     {
+      "kind": "rest",
+      "at": 6126,
+      "text": "PAYDAY · 15 · UNRLZDC $575.8K−$128.6K (−18.25%)Vol $810.53"
+     },
+     {
+      "kind": "point",
+      "at": 7429,
+      "text": "PAYDAY · 15 · UNRLZDC $77.6K−$307.96 (−0.40%)Vol $2.57K"
+     },
+     {
+      "kind": "rest",
+      "at": 8733,
+      "text": "PAYDAY · 15 · UNRLZDC $580.4K−$124.0K (−17.60%)Vol $942.33"
+     },
+     {
+      "kind": "point",
+      "at": 10041,
+      "text": "PAYDAY · 15 · UNRLZDC $324.2K−$75.8K (−18.94%)Vol $27.5K"
+     },
+     {
+      "kind": "rest",
+      "at": 11342,
+      "text": "PAYDAY · 15 · UNRLZDC $583.6K−$120.8K (−17.15%)Vol $1.08K"
+     },
+     {
+      "kind": "point",
+      "at": 12645,
+      "text": "PAYDAY · 15 · UNRLZDC $79.4K+$5.93K (+8.07%)Vol $1.56K"
+     },
+     {
+      "kind": "rest",
+      "at": 13947,
+      "text": "PAYDAY · 15 · UNRLZDC $577.4K−$126.9K (−18.02%)Vol $1.42K"
+     },
+     {
+      "kind": "point",
+      "at": 15253,
+      "text": "PAYDAY · 15 · UNRLZDC $38.9K+$4.62K (+13.49%)Vol $1.10K"
+     },
+     {
+      "kind": "rest",
+      "at": 16558,
+      "text": "PAYDAY · 15 · UNRLZDC $573.9K−$130.4K (−18.52%)Vol $1.60K"
+     },
+     {
+      "kind": "point",
+      "at": 17862,
+      "text": "PAYDAY · 15 · UNRLZDC $257.1K+$79.9K (+45.09%)Vol $27.0K"
+     },
+     {
+      "kind": "rest",
+      "at": 19163,
+      "text": "PAYDAY · 15 · UNRLZDC $571.9K−$132.5K (−18.81%)Vol $1.71K"
+     },
+     {
+      "kind": "point",
+      "at": 20467,
+      "text": "PAYDAY · 15 · UNRLZDC $86.1K−$11.1K (−11.38%)Vol $8.22K"
+     },
+     {
+      "kind": "rest",
+      "at": 21769,
+      "text": "PAYDAY · 15 · UNRLZDC $569.8K−$134.5K (−19.10%)Vol $1.71K"
+     },
+     {
+      "kind": "point",
+      "at": 23070,
+      "text": "PAYDAY · 15 · UNRLZDC $401.2K+$10.7K (+2.74%)Vol $84.4K"
+     },
+     {
+      "kind": "rest",
+      "at": 24374,
+      "text": "PAYDAY · 15 · UNRLZDC $580.6K−$123.8K (−17.57%)Vol $1.87K"
+     },
+     {
+      "kind": "point",
+      "at": 25679,
+      "text": "PAYDAY · 15 · UNRLZDC $168.2K+$93.1K (+124.01%)Vol $24.3K"
+     },
+     {
+      "kind": "rest",
+      "at": 26983,
+      "text": "PAYDAY · 15 · UNRLZDC $574.8K−$129.5K (−18.39%)Vol $1.88K"
+     },
+     {
+      "kind": "point",
+      "at": 28287,
+      "text": "PAYDAY · 15 · UNRLZDC $82.1K+$28.3K (+52.67%)Vol $4.65K"
+     },
+     {
+      "kind": "rest",
+      "at": 29593,
+      "text": "PAYDAY · 15 · UNRLZDC $569.4K−$134.9K (−19.15%)Vol $2.22K"
+     },
+     {
+      "kind": "point",
+      "at": 30895,
+      "text": "PAYDAY · 15 · UNRLZDC $400.0K+$7.62K (+1.94%)Vol $57.8K"
+     },
+     {
+      "kind": "rest",
+      "at": 32200,
+      "text": "PAYDAY · 15 · UNRLZDC $570.2K−$134.1K (−19.04%)Vol $2.42K"
+     }
+    ],
+    "shifts": [],
+    "errors": []
+   },
+   {
+    "width": "desktop",
+    "legend": true,
+    "toggled": true,
+    "heldMs": 30692,
+    "bars": 142,
+    "reads": [
+     {
+      "kind": "rest",
+      "at": 293,
+      "text": "PAYDAY · 15 · UNRLZDO $41.9KH $42.5KL $32.3KC $35.7K−$6.21K (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 593,
+      "text": "PAYDAY · 15 · UNRLZDO $33.4KH $61.9KL $33.4KC $57.7K+$24.3K (+72.74%)Vol $5.70K"
+     },
+     {
+      "kind": "rest",
+      "at": 894,
+      "text": "PAYDAY · 15 · UNRLZDO $41.9KH $42.5KL $32.3KC $35.7K−$6.21K (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 1193,
+      "text": "PAYDAY · 15 · UNRLZDO $41.9KH $42.0KL $40.4KC $40.4K−$1.42K (−3.39%)Vol $170.51"
+     },
+     {
+      "kind": "rest",
+      "at": 1494,
+      "text": "PAYDAY · 15 · UNRLZDO $41.9KH $42.5KL $32.3KC $35.7K−$6.21K (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 1809,
+      "text": "PAYDAY · 15 · UNRLZDO $41.0KH $44.0KL $39.5KC $40.6K−$422.66 (−1.03%)Vol $1.34K"
+     },
+     {
+      "kind": "rest",
+      "at": 2109,
+      "text": "PAYDAY · 15 · UNRLZDO $41.9KH $42.5KL $32.3KC $35.7K−$6.21K (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 2410,
+      "text": "PAYDAY · 15 · UNRLZDO $39.2KH $39.2KL $36.2KC $36.9K−$2.34K (−5.98%)Vol $570.55"
+     },
+     {
+      "kind": "rest",
+      "at": 2709,
+      "text": "PAYDAY · 15 · UNRLZDO $41.9KH $42.5KL $32.3KC $35.7K−$6.21K (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 3009,
+      "text": "PAYDAY · 15 · UNRLZDO $40.0KH $40.1KL $38.4KC $38.5K−$1.53K (−3.83%)Vol $135.58"
+     },
+     {
+      "kind": "rest",
+      "at": 3310,
+      "text": "PAYDAY · 15 · UNRLZDO $41.9KH $42.5KL $32.3KC $35.7K−$6.21K (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 3609,
+      "text": "PAYDAY · 15 · UNRLZDO $42.4KH $49.9KL $38.1KC $43.0K+$592.40 (+1.40%)Vol $3.74K"
+     },
+     {
+      "kind": "rest",
+      "at": 3908,
+      "text": "PAYDAY · 15 · UNRLZDO $41.9KH $42.5KL $32.3KC $35.7K−$6.21K (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 4209,
+      "text": "PAYDAY · 15 · UNRLZDO $32.2KH $34.3KL $31.7KC $33.9K+$1.73K (+5.37%)Vol $390.11"
+     },
+     {
+      "kind": "rest",
+      "at": 4508,
+      "text": "PAYDAY · 15 · UNRLZDO $41.9KH $42.5KL $32.3KC $35.7K−$6.21K (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 4809,
+      "text": "PAYDAY · 15 · UNRLZDO $37.0KH $37.0KL $34.6KC $34.8K−$2.24K (−6.06%)Vol $290.23"
+     },
+     {
+      "kind": "rest",
+      "at": 5110,
+      "text": "PAYDAY · 15 · UNRLZDO $41.9KH $42.5KL $32.3KC $35.7K−$6.21K (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 5409,
+      "text": "PAYDAY · 15 · UNRLZDO $25.9KH $27.7KL $25.5KC $27.7K+$1.84K (+7.13%)Vol $304.29"
+     },
+     {
+      "kind": "rest",
+      "at": 5710,
+      "text": "PAYDAY · 15 · UNRLZDO $41.9KH $42.5KL $32.3KC $35.7K−$6.21K (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 6009,
+      "text": "PAYDAY · 15 · UNRLZDO $53.8KH $57.6KL $53.8KC $55.1K+$1.27K (+2.36%)Vol $787.78"
+     },
+     {
+      "kind": "rest",
+      "at": 6309,
+      "text": "PAYDAY · 15 · UNRLZDO $41.9KH $42.5KL $32.3KC $35.7K−$6.21K (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 6609,
+      "text": "PAYDAY · 15 · UNRLZDO $33.7KH $33.7KL $30.6KC $30.6K−$3.12K (−9.26%)Vol $1.45K"
+     },
+     {
+      "kind": "rest",
+      "at": 6907,
+      "text": "PAYDAY · 15 · UNRLZDO $41.9KH $42.5KL $32.3KC $35.7K−$6.21K (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 7210,
+      "text": "PAYDAY · 15 · UNRLZDO $36.3KH $40.6KL $36.3KC $40.1K+$3.79K (+10.44%)Vol $602.85"
+     },
+     {
+      "kind": "rest",
+      "at": 7510,
+      "text": "PAYDAY · 15 · UNRLZDO $41.9KH $42.5KL $32.3KC $35.7K−$6.21K (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 7809,
+      "text": "PAYDAY · 15 · UNRLZDO $36.6KH $36.6KL $35.0KC $36.6K−$85.42 (−0.23%)Vol $248.32"
+     },
+     {
+      "kind": "rest",
+      "at": 8109,
+      "text": "PAYDAY · 15 · UNRLZDO $41.9KH $42.5KL $32.3KC $35.7K−$6.21K (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 8409,
+      "text": "PAYDAY · 15 · UNRLZDO $44.1KH $47.3KL $37.7KC $47.2K+$3.11K (+7.04%)Vol $2.48K"
+     },
+     {
+      "kind": "rest",
+      "at": 8709,
+      "text": "PAYDAY · 15 · UNRLZDO $41.9KH $42.5KL $32.3KC $35.7K−$6.21K (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 9009,
+      "text": "PAYDAY · 15 · UNRLZDO $38.9KH $39.4KL $37.1KC $37.1K−$1.78K (−4.58%)Vol $409.07"
+     },
+     {
+      "kind": "rest",
+      "at": 9308,
+      "text": "PAYDAY · 15 · UNRLZDO $41.9KH $42.5KL $32.3KC $35.7K−$6.21K (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 9610,
+      "text": "PAYDAY · 15 · UNRLZDO $40.2KH $40.8KL $39.1KC $39.1K−$1.10K (−2.74%)Vol $135.80"
+     },
+     {
+      "kind": "rest",
+      "at": 9909,
+      "text": "PAYDAY · 15 · UNRLZDO $41.9KH $42.5KL $32.3KC $35.7K−$6.21K (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 10210,
+      "text": "PAYDAY · 15 · UNRLZDO $31.1KH $31.1KL $30.4KC $30.4K−$751.34 (−2.41%)Vol $50.76"
+     },
+     {
+      "kind": "rest",
+      "at": 10508,
+      "text": "PAYDAY · 15 · UNRLZDO $41.9KH $42.5KL $32.3KC $35.7K−$6.21K (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 10809,
+      "text": "PAYDAY · 15 · UNRLZDO $46.3KH $46.4KL $44.8KC $44.8K−$1.53K (−3.31%)Vol $121.15"
+     },
+     {
+      "kind": "rest",
+      "at": 11109,
+      "text": "PAYDAY · 15 · UNRLZDO $41.9KH $42.5KL $32.3KC $35.7K−$6.21K (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 11410,
+      "text": "PAYDAY · 15 · UNRLZDO $32.1KH $32.4KL $29.4KC $30.7K−$1.46K (−4.55%)Vol $950.03"
+     },
+     {
+      "kind": "rest",
+      "at": 11710,
+      "text": "PAYDAY · 15 · UNRLZDO $41.9KH $42.5KL $32.3KC $35.7K−$6.21K (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 12010,
+      "text": "PAYDAY · 15 · UNRLZDO $32.7KH $33.6KL $31.7KC $33.1K+$411.15 (+1.26%)Vol $381.40"
+     },
+     {
+      "kind": "rest",
+      "at": 12309,
+      "text": "PAYDAY · 15 · UNRLZDO $41.9KH $42.5KL $32.3KC $35.7K−$6.21K (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 12609,
+      "text": "PAYDAY · 15 · UNRLZDO $35.0KH $35.0KL $33.8KC $33.8K−$1.10K (−3.16%)Vol $204.85"
+     },
+     {
+      "kind": "rest",
+      "at": 12909,
+      "text": "PAYDAY · 15 · UNRLZDO $41.9KH $42.5KL $32.3KC $35.7K−$6.21K (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 13209,
+      "text": "PAYDAY · 15 · UNRLZDO $28.3KH $30.4KL $27.9KC $30.0K+$1.75K (+6.19%)Vol $371.64"
+     },
+     {
+      "kind": "rest",
+      "at": 13510,
+      "text": "PAYDAY · 15 · UNRLZDO $41.9KH $42.5KL $32.3KC $35.7K−$6.21K (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 13810,
+      "text": "PAYDAY · 15 · UNRLZDO $43.3KH $43.4KL $42.3KC $42.3K−$1.02K (−2.36%)Vol $116.99"
+     },
+     {
+      "kind": "rest",
+      "at": 14108,
+      "text": "PAYDAY · 15 · UNRLZDO $41.9KH $42.5KL $32.3KC $35.7K−$6.21K (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 14427,
+      "text": "PAYDAY · 15 · UNRLZDO $40.8KH $41.2KL $36.9KC $41.2K+$334.73 (+0.82%)Vol $1.23K"
+     },
+     {
+      "kind": "rest",
+      "at": 14725,
+      "text": "PAYDAY · 15 · UNRLZDO $41.9KH $42.5KL $32.3KC $35.7K−$6.21K (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 15027,
+      "text": "PAYDAY · 15 · UNRLZDO $38.8KH $40.3KL $38.8KC $39.0K+$208.19 (+0.54%)Vol $407.04"
+     },
+     {
+      "kind": "rest",
+      "at": 15408,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄432H $0.0₄438L $0.0₄332C $0.0₄368−$0.0₅64 (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 15709,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄433H $0.0₄435L $0.0₄407C $0.0₄412−$0.0₅207 (−4.77%)Vol $309.82"
+     },
+     {
+      "kind": "rest",
+      "at": 16008,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄432H $0.0₄438L $0.0₄332C $0.0₄368−$0.0₅64 (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 16308,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄433H $0.0₄451L $0.0₄43C $0.0₄437+$0.0₆35 (+0.80%)Vol $470.65"
+     },
+     {
+      "kind": "rest",
+      "at": 16609,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄432H $0.0₄438L $0.0₄332C $0.0₄368−$0.0₅64 (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 16927,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄376H $0.0₄376L $0.0₄354C $0.0₄356−$0.0₅203 (−5.38%)Vol $309.70"
+     },
+     {
+      "kind": "rest",
+      "at": 17225,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄432H $0.0₄438L $0.0₄332C $0.0₄368−$0.0₅64 (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 17544,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄385H $0.0₄394L $0.0₄382C $0.0₄382−$0.0₆35 (−0.91%)Vol $150.61"
+     },
+     {
+      "kind": "rest",
+      "at": 17858,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄432H $0.0₄438L $0.0₄332C $0.0₄368−$0.0₅64 (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 18165,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄263H $0.0₄268L $0.0₄263C $0.0₄266+$0.0₆29 (+1.08%)Vol $48.15"
+     },
+     {
+      "kind": "rest",
+      "at": 18484,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄432H $0.0₄438L $0.0₄332C $0.0₄368−$0.0₅64 (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 18779,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄453H $0.0₄555L $0.0₄451C $0.0₄555+$0.0₄101 (+22.43%)Vol $900.53"
+     },
+     {
+      "kind": "rest",
+      "at": 19073,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄432H $0.0₄438L $0.0₄332C $0.0₄368−$0.0₅64 (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 19394,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄359H $0.0₄393L $0.0₄342C $0.0₄348−$0.0₅117 (−3.25%)Vol $1.46K"
+     },
+     {
+      "kind": "rest",
+      "at": 19696,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄432H $0.0₄438L $0.0₄332C $0.0₄368−$0.0₅64 (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 19992,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄361H $0.0₄381L $0.0₄355C $0.0₄366+$0.0₆56 (+1.56%)Vol $583.23"
+     },
+     {
+      "kind": "rest",
+      "at": 20294,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄432H $0.0₄438L $0.0₄332C $0.0₄368−$0.0₅64 (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 20619,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄373H $0.0₄377L $0.0₄373C $0.0₄377+$0.0₆41 (+1.10%)Vol $14.24"
+     },
+     {
+      "kind": "rest",
+      "at": 20944,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄432H $0.0₄438L $0.0₄332C $0.0₄368−$0.0₅64 (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 21242,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄561H $0.0₄561L $0.0₄453C $0.0₄454−$0.0₄106 (−18.97%)Vol $1.09K"
+     },
+     {
+      "kind": "rest",
+      "at": 21553,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄432H $0.0₄438L $0.0₄332C $0.0₄368−$0.0₅64 (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 21863,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄417H $0.0₄417L $0.0₄399C $0.0₄401−$0.0₅156 (−3.74%)Vol $220.99"
+     },
+     {
+      "kind": "rest",
+      "at": 22164,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄432H $0.0₄438L $0.0₄332C $0.0₄368−$0.0₅64 (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 22483,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄418H $0.0₄427L $0.0₄41C $0.0₄415−$0.0₆38 (−0.91%)Vol $259.28"
+     },
+     {
+      "kind": "rest",
+      "at": 22776,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄432H $0.0₄438L $0.0₄332C $0.0₄368−$0.0₅64 (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 23074,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄38H $0.0₄386L $0.0₄351C $0.0₄352−$0.0₅28 (−7.36%)Vol $794.36"
+     },
+     {
+      "kind": "rest",
+      "at": 23375,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄432H $0.0₄438L $0.0₄332C $0.0₄368−$0.0₅64 (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 23677,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄425H $0.0₄477L $0.0₄425C $0.0₄477+$0.0₅519 (+12.19%)Vol $466.13"
+     },
+     {
+      "kind": "rest",
+      "at": 23984,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄432H $0.0₄438L $0.0₄332C $0.0₄368−$0.0₅64 (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 24292,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄464H $0.0₄479L $0.0₄319C $0.0₄331−$0.0₄133 (−28.65%)Vol $3.11K"
+     },
+     {
+      "kind": "rest",
+      "at": 24593,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄432H $0.0₄438L $0.0₄332C $0.0₄368−$0.0₅64 (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 24894,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄35H $0.0₄354L $0.0₄332C $0.0₄337−$0.0₅131 (−3.74%)Vol $394.17"
+     },
+     {
+      "kind": "rest",
+      "at": 25203,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄432H $0.0₄438L $0.0₄332C $0.0₄368−$0.0₅64 (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 25510,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄358H $0.0₄365L $0.0₄358C $0.0₄36+$0.0₆16 (+0.45%)Vol $105.06"
+     },
+     {
+      "kind": "rest",
+      "at": 25819,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄432H $0.0₄438L $0.0₄332C $0.0₄368−$0.0₅64 (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 26129,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄285H $0.0₄299L $0.0₄281C $0.0₄293+$0.0₆83 (+2.90%)Vol $348.06"
+     },
+     {
+      "kind": "rest",
+      "at": 26423,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄432H $0.0₄438L $0.0₄332C $0.0₄368−$0.0₅64 (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 26743,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄446H $0.0₄446L $0.0₄435C $0.0₄446+$0.0₇3 (+0.06%)Vol $275.58"
+     },
+     {
+      "kind": "rest",
+      "at": 27043,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄432H $0.0₄438L $0.0₄332C $0.0₄368−$0.0₅64 (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 27342,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄343H $0.0₄421L $0.0₄343C $0.0₄421+$0.0₅774 (+22.50%)Vol $1.60K"
+     },
+     {
+      "kind": "rest",
+      "at": 27641,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄432H $0.0₄438L $0.0₄332C $0.0₄368−$0.0₅64 (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 27944,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄413H $0.0₄42L $0.0₄4C $0.0₄4−$0.0₅127 (−3.08%)Vol $378.29"
+     },
+     {
+      "kind": "rest",
+      "at": 28247,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄432H $0.0₄438L $0.0₄332C $0.0₄368−$0.0₅64 (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 28559,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄376H $0.0₄38L $0.0₄373C $0.0₄374−$0.0₆24 (−0.63%)Vol $57.97"
+     },
+     {
+      "kind": "rest",
+      "at": 28859,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄432H $0.0₄438L $0.0₄332C $0.0₄368−$0.0₅64 (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 29161,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄483H $0.0₄499L $0.0₄428C $0.0₄433−$0.0₅496 (−10.27%)Vol $986.96"
+     },
+     {
+      "kind": "rest",
+      "at": 29459,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄432H $0.0₄438L $0.0₄332C $0.0₄368−$0.0₅64 (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 29769,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄398H $0.0₄398L $0.0₄375C $0.0₄376−$0.0₅215 (−5.40%)Vol $300.92"
+     },
+     {
+      "kind": "rest",
+      "at": 30074,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄432H $0.0₄438L $0.0₄332C $0.0₄368−$0.0₅64 (−14.80%)Vol $1.70K"
+     },
+     {
+      "kind": "point",
+      "at": 30394,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄398H $0.0₄408L $0.0₄393C $0.0₄399+$0.0₆13 (+0.32%)Vol $185.75"
+     },
+     {
+      "kind": "rest",
+      "at": 30692,
+      "text": "PAYDAY · 15 · UNRLZDO $0.0₄432H $0.0₄438L $0.0₄332C $0.0₄368−$0.0₅64 (−14.80%)Vol $1.70K"
+     }
+    ],
+    "shifts": [
+     {
+      "at": 16665,
+      "value": 0.00025775168252743487,
+      "input": true,
+      "sources": [
+       "canvas 1047,140 50x261 -> 1041,140 56x261",
+       "canvas 1047,402 50x83 -> 1041,402 56x83",
+       "span.tkp-lgkv 419,145 97x10 -> 441,145 108x10",
+       "span.tkp-lgkv 363,145 49x10 -> 379,145 54x10",
+       "span.tkp-lgkv 307,145 49x10 -> 318,145 54x10"
+      ]
+     }
+    ],
+    "errors": []
+   }
+  ]
  }
 }

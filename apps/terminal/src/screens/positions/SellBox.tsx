@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { cents, units, usd } from "../portfolio/model.ts";
 import type { Row } from "../portfolio/model.ts";
@@ -26,6 +26,15 @@ import "./positions.css";
 
 const pct = (bps: number) => `${(bps / 100).toFixed(bps % 100 === 0 ? 0 : 1)}%`;
 
+/** How long the share in the box holds still before its preview is asked: a typed "50" asks once, not for "5" too. */
+export const PREVIEW_SETTLE_MS = 250;
+/** A "not now" preview answer (the signing page's RETRY_CODES) is asked again once, this long after. */
+export const PREVIEW_AGAIN_MS = 3_000;
+const NOT_NOW: ReadonlySet<string> = new Set(["busy", "down"]);
+/** A share's last number is shown again for a "not now" answer this long after it came, so a shown number never flips
+ *  to a dash and back while the page is busy. */
+export const PREVIEW_KEEP_MS = 10_000;
+
 /** The amount box takes a percent: digits and one point with up to two decimals, at most 100. */
 const TYPING = /^\d{0,3}(?:\.\d{0,2})?$/;
 
@@ -52,7 +61,10 @@ export function SellBox({ row, s, slippageBps = 1000, initialPercent = "50", onB
   const decimals = row.decimals;
   const kit = useSellKit();
   const [text, setText] = useState(initialPercent);
-  const [preview, setPreview] = useState<{ amount: string; p: SellPreview } | null>(null);
+  // the last answer and the amount it was for: a preview, or none (a dash: the page refused, or its reads could not be had)
+  const [preview, setPreview] = useState<{ amount: string; p: SellPreview | null } | null>(null);
+  // each share's last number, by token and amount, with when it came (PREVIEW_KEEP_MS)
+  const recent = useRef(new Map<string, { p: SellPreview; at: number }>());
   const [tab, setTab] = useState<OrderTab>("market");
 
   const bps = parsePercent(text);
@@ -61,18 +73,38 @@ export function SellBox({ row, s, slippageBps = 1000, initialPercent = "50", onB
   const running = busy(s.phase);
   const canSell = s.ready && !running && !noRoute && amount !== null;
 
-  // the sell preview for the share in the box; the last numbers stay, dimmed, until a change answers
+  // the sell preview for the share in the box: asked at once when the box opens, then once a changed share has settled
+  // (PREVIEW_SETTLE_MS: one ask per typed percent, never per key); the last numbers stay, dimmed, until a change
+  // answers. A "not now" answer (busy: a trade runs or the page's preview budget is spent; down) is asked again once,
+  // PREVIEW_AGAIN_MS later; still not now, the share's own number from the last PREVIEW_KEEP_MS shows, else the dash
+  const sellPreview = kit.sellPreview;
+  const asked = useRef(false);
   useEffect(() => {
-    if (!kit.sellPreview || amount === null) return;
+    if (!sellPreview || amount === null || bps === null) return;
     let live = true;
-    kit.sellPreview({ chain: row.chain, token: row.token, amount, slippage_bps: slippageBps }).then(
-      (a) => live && setPreview(a.ok ? { amount, p: a.preview } : null),
-      () => live && setPreview(null),
-    );
+    let t: ReturnType<typeof setTimeout>;
+    const ask = (again: boolean): void =>
+      void sellPreview({ chain: row.chain, token: row.token, amount, share_bps: bps, slippage_bps: slippageBps }).then(
+        (a) => {
+          if (!live) return;
+          const key = `${row.token}|${amount}`;
+          if (a.ok) {
+            recent.current.set(key, { p: a.preview, at: s.now() });
+            setPreview({ amount, p: a.preview });
+          } else if (again && NOT_NOW.has(a.code)) t = setTimeout(() => ask(false), PREVIEW_AGAIN_MS);
+          else {
+            const kept = NOT_NOW.has(a.code) ? recent.current.get(key) : undefined;
+            setPreview({ amount, p: kept && s.now() - kept.at <= PREVIEW_KEEP_MS ? kept.p : null });
+          }
+        },
+        () => live && setPreview({ amount, p: null }),
+      );
+    t = setTimeout(() => ((asked.current = true), ask(true)), asked.current ? PREVIEW_SETTLE_MS : 0);
     return () => {
       live = false;
+      clearTimeout(t);
     };
-  }, [kit.sellPreview, row.chain, row.token, amount, slippageBps]);
+  }, [sellPreview, row.chain, row.token, amount, bps, slippageBps]);
 
   // a sell started from Your position's quick sells shows its percent here, so the box never names another share
   useEffect(() => {

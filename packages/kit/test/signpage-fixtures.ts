@@ -68,5 +68,6 @@ export const FIXTURES = {
     result: { amount_out_usd: "24.94", min_amount_out_usd: "24.6906", fee_usd: "0.06", time_estimate_s: 20 },
   },
   "pool.address": { params: { chain: "solana" }, result: { chain: "solana", address: "4Nd1mBQtrMJVYVfKf2PJy9NZUZdTAsp7D4xWLs4gDB4T", asset: "SOL" } },
+  "pool.sell.dry": { params: { chain: "solana", token: "Tok", share_bps: 5000, slippage_bps: 1000 }, result: { out: "0.123456789", min_out: "0.11111111", network: "0.000005", fee_bps: 0 } },
 } satisfies { [K in SignpageKind]: { params: SignpageParams[K]; result: SignpageResults[K] } };
 

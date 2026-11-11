@@ -60,6 +60,7 @@ export const LISTED = {
   "packages/kit/test/vault-sync.test.ts": { count: 1, why: "to convert" },
   "packages/signpage/test/api.test.ts": { count: 2, why: "to convert" },
   "packages/signpage/test/deposit-dry.test.ts": { count: 1, why: "to convert" },
+  "packages/signpage/test/passes-yield.test.ts": { count: 6, why: "performance.now is the test clock here (onProvider runs each of these tests in onTestClock); A, A2 and D, on the real clock, read none" },
   "packages/signpage/test/pool-deposit-evm.test.ts": { count: 1, why: "to convert" },
   "packages/signpage/test/pool-deposit.test.ts": { count: 1, why: "to convert" },
   "packages/signpage/test/pool-restore.test.ts": { count: 2, why: "to convert" },

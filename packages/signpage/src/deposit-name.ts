@@ -21,10 +21,17 @@
 //   U_X itself; everywhere the ed25519 id a 1Click refund lands under, the key the refund move signs with), and on Base
 //   and Robinhood U^evm_{s,i}'s EIP-55 address as `evm`, where 1Click sends the coin. One scope at a time, in order;
 //   one that fails leaves its record as it was and the others are still named. Pools are named with no vault named.
+// - A naming that would change nothing takes no lock (card signpage-passes-yield-to-a-trade, devnet run 10 of 11 Nov: a
+//   sell tapped 3 s after a buy sent nothing for 12.7 s). A trade holds the seed lock shared for its run; its own note
+//   writes post "changed", and every naming asked the seed lock exclusive: Web Locks grant in request order, so the
+//   sell's shared request queued behind that exclusive one, which waited for the buy. The record is read first with no
+//   lock, and nameDeposit is asked only when it would write (another scope, index, id or address, and not an index
+//   below the one named: nameDeposit's own rule); nameDeposit reads and compares again under its lock, so a naming that
+//   races another tab's, or a seed changed meanwhile, still ends as nameDeposit decides.
 import { depositId as uOf, entropyToWords, wordsToSeed64 } from "@blindfill/wallet/derive";
 import { depositIdEvm } from "../../wallet/src/derive/keys.ts";
 import type { PoolChain } from "../../kit/src/signpage/messages.ts";
-import type { WalletStore } from "@blindfill/wallet/store";
+import { depositKey, depositRecordOf, type WalletStore } from "@blindfill/wallet/store";
 import { noteSecrets, type NoteRef } from "../../wallet/src/notes/secrets.ts";
 import { openNoteStore, type NoteStore } from "../../wallet/src/notes/store.ts";
 
@@ -114,6 +121,9 @@ export function depositNamer(deps: DepositNamerDeps): DepositNamer {
       e.secretKey.fill(0);
       address = e.address;
     }
+    // the record as stored, read with no lock: a naming that would write nothing asks no exclusive lock (see the top)
+    const had = depositRecordOf(await st.get("meta", depositKey(scope)).catch(() => undefined));
+    if (had !== undefined && had.scope === scope.toString() && (had.index > index || (had.index === index && had.id === u.id && had.evm === address))) return;
     await st.nameDeposit({ entropy }, { scope, index, id: u.id, ...(address === undefined ? {} : { evm: address }) });
   }
 

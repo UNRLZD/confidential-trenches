@@ -9,7 +9,7 @@ import { solanaJsonRpc, solanaPacedRpc } from "@blindfill/kit";
 import { SOLANA_KEYLESS_RPC_LIMIT } from "../../kit/src/trade/solana/send.ts";
 import { onTestClock } from "../../kit/test/test-clock.ts";
 import * as d from "../src/derive/index.ts";
-import { THROTTLE_BOUNDS, THROTTLE_PAUSE_FIRST_MS, THROTTLE_PAUSE_MAX_MS, THROTTLE_RETRY_AFTER_MAX_MS, ThrottleGate, throttleWaitMs } from "../src/throttle.ts";
+import { HOST_WINDOW_MS, HostLane, holdHosts, hostLane, PASS_BUDGET, PASS_BUDGET_TRADING, PASS_FLOOR_MS, resetHostLanes, stopHostLaneWaits, THROTTLE_BOUNDS, THROTTLE_PAUSE_FIRST_MS, THROTTLE_PAUSE_MAX_MS, THROTTLE_RETRY_AFTER_MAX_MS, ThrottleGate, throttleWaitMs, TRADE_HOLD_MAX_MS, TRADE_TURN_MAX_MS } from "../src/throttle.ts";
 import { buyWallets, evmHoldingsReader, HOLDINGS_THROTTLE_MAX_MS, HOLDINGS_THROTTLED_ROUNDS_60S, solanaHelperHoldings, solanaHoldingsAt, solanaHoldingsReader, type HoldingsReader } from "../src/pool/buy-wallets.ts";
 
 const SEED = d.wordsToSeed64(d.entropyToWords(new Uint8Array(16)));
@@ -513,4 +513,113 @@ test("a round ends once all its calls settle: a call that fails at once never le
     }
     assert.ok(most <= 3, `${most} calls out at once`);
   });
+});
+
+// HostLane (card signpage-passes-yield-to-a-trade): one provider host's budget for the whole page, on a clock of its own.
+/** A lane on a test clock: `sleep` moves the clock, so a wait shows as time passed, at once. */
+function lane(): { l: HostLane; clock: { t: number } } {
+  const clock = { t: 0 };
+  const l = new HostLane({ now: () => clock.t, sleep: async (ms, signal) => { signal?.throwIfAborted(); clock.t += ms; } });
+  return { l, clock };
+}
+
+test("HostLane: a pass goes while the host's window holds fewer than PASS_BUDGET requests, else when the oldest leaves it; a trade's read never waits on the budget", async () => {
+  const { l, clock } = lane();
+  for (let i = 0; i < PASS_BUDGET; i++) l.sent("trade");
+  assert.equal(l.open("pass"), false);
+  assert.equal(l.open("trade"), true);
+  await l.turn("pass");
+  assert.equal(clock.t, HOST_WINDOW_MS, "room once the first request left the window");
+  assert.equal(l.inWindow(), 1, "the pass counted, the rest gone");
+});
+
+test("HostLane: while a trade holds the host, passes take what its reads leave of PASS_BUDGET_TRADING, and at least one every PASS_FLOOR_MS", async () => {
+  const { l, clock } = lane();
+  const give = l.trade();
+  for (let i = 0; i < 100; i++) l.sent("trade");
+  // the first pass goes at once (none went before), the next at the floor, whatever the window holds
+  await l.turn("pass");
+  assert.equal(clock.t, 0);
+  await l.turn("pass");
+  assert.equal(clock.t, PASS_FLOOR_MS);
+  for (let i = 0; i < 100; i++) l.sent("trade");
+  await l.turn("pass");
+  assert.equal(clock.t, 2 * PASS_FLOOR_MS);
+  // the trade's reads past PASS_BUDGET_TRADING in the window: the floor; under it, at once
+  give();
+  assert.equal(l.trading(), false);
+  // no trade: no floor, the plain budget: room once all but PASS_BUDGET - 1 of the window's requests left it
+  await l.turn("pass");
+  assert.equal(clock.t, PASS_FLOOR_MS + HOST_WINDOW_MS, "the second hundred's turn to leave, not the floor");
+  const { l: m } = lane();
+  m.trade();
+  for (let i = 0; i < PASS_BUDGET_TRADING - 1; i++) m.sent("trade");
+  m.sent("pass");
+  assert.equal(m.open("pass"), false, "a trade's reads and a pass at PASS_BUDGET_TRADING: the next waits for the floor");
+});
+
+test("HostLane: a trade's turn waits the host's pause, at most TRADE_TURN_MAX_MS however often the pause is renewed", async () => {
+  const clock = { t: 0 };
+  // another reader's 429 (a Retry-After of an hour) renews the pause each time this one wakes
+  const l: HostLane = new HostLane({ now: () => clock.t, sleep: async (ms) => { clock.t += ms; l.gate.throttled(l.gate.epoch(), 3_600_000); } });
+  l.gate.throttled(l.gate.epoch(), 3_600_000);
+  await l.turn("trade");
+  assert.equal(clock.t, TRADE_TURN_MAX_MS, "its turn's deadline, the pause still on");
+  assert.ok(l.gate.left() > 0);
+});
+
+test("HostLane: a hold is counted, given back once, ends at its bound; holdHosts holds each host once, whatever its spelling", async () => {
+  resetHostLanes();
+  const a = new HostLane();
+  const g1 = a.trade();
+  const g2 = a.trade();
+  g1();
+  g1();
+  assert.equal(a.trading(), true, "a second give-back of one hold does nothing");
+  g2();
+  assert.equal(a.trading(), false);
+  a.trade(20);
+  await new Promise((r) => setTimeout(r, 40));
+  assert.equal(a.trading(), false, "given back at its bound");
+  assert.ok(TRADE_HOLD_MAX_MS >= 120_000);
+  const release = holdHosts(["https://API.devnet.solana.com/", "https://api.devnet.solana.com/x", undefined]);
+  assert.equal(hostLane("https://api.devnet.solana.com").trading(), true);
+  release();
+  assert.equal(hostLane("https://api.devnet.solana.com").trading(), false);
+  resetHostLanes();
+});
+
+test("HostLane: a sign out ends a waiting turn at once with its reason, and a turn after it waits as before", async () => {
+  resetHostLanes();
+  const l = hostLane("https://api.devnet.solana.com");
+  for (let i = 0; i < PASS_BUDGET; i++) l.sent("trade");
+  const waiting = l.turn("pass");
+  stopHostLaneWaits(new Error("signed out"));
+  await assert.rejects(waiting, /signed out/);
+  const a = new AbortController();
+  const next = l.turn("pass", a.signal);
+  a.abort(new Error("stopped"));
+  await assert.rejects(next, /stopped/, "the next sign-in's waits are not ended by the last sign out");
+  resetHostLanes();
+});
+
+// The delta review of ed85d367 (P2-A): a pass asleep for room when a trade starts slept on to its room's end (10 s
+// measured), so the floor (one every PASS_FLOOR_MS) did not hold from the trade's start.
+test("HostLane: a pass asleep for room learns of a trade's start at once, and goes by the floor", async () => {
+  // a planted clock and a sleep that never ends by itself: only a wake moves the pass on
+  const clock = { t: 0 };
+  const slept: number[] = [];
+  const l = new HostLane({ now: () => clock.t, sleep: (ms) => (slept.push(ms), new Promise<void>(() => {})) });
+  for (let i = 0; i < PASS_BUDGET; i++) l.sent("trade");
+  let went = false;
+  const pass = l.turn("pass").then(() => (went = true));
+  await new Promise((r) => setImmediate(r));
+  assert.deepEqual(slept, [HOST_WINDOW_MS], "asleep for the window's room, no trade yet");
+  assert.equal(went, false);
+  clock.t = 100;
+  const give = l.trade(1_000);
+  await pass;
+  assert.equal(went, true, "the trade's start woke it, and the floor let it go");
+  assert.deepEqual(slept, [HOST_WINDOW_MS], "it slept no more: woken at the trade's start, not at its room's end");
+  give();
 });

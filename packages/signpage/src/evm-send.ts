@@ -20,6 +20,7 @@ import { HELPER_FETCH_INIT, HELPER_V1_PATHS } from "../../kit/src/helper/v1.ts";
 import type { VaultSnarkjsProof, VaultWithdrawSignals } from "../../kit/src/vault/shapes.ts";
 import type { EvmPoolBuy } from "../../kit/src/trade/evm/buy-unpinned.ts";
 import { EVM_POOL_EVENTS, evmRelayDataBytes, type EvmRelayData, type EvmRpc } from "../../wallet/src/pool/evm.ts";
+import { laneFetch } from "../../wallet/src/throttle.ts";
 
 const enc = /* @__PURE__ */ new TextEncoder();
 const hexOf = (b: Uint8Array): string => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
@@ -128,7 +129,7 @@ const CODE = /^[a-z_]{1,40}$/;
 
 /** POST /v1/pool/evm/send: the hash the helper names (lowercase, a hint only), or a throw: EvmSendBusy, EvmSendRefused or
  *  EvmSendNoAnswer. The body names the pool, the calldata and the epoch whose fee the proof binds. */
-export async function evmPoolSend(helper: string, body: { pool: string; data: Uint8Array; epoch: bigint }, fetchFn: typeof fetch = fetch): Promise<string> {
+export async function evmPoolSend(helper: string, body: { pool: string; data: Uint8Array; epoch: bigint }, fetchFn: typeof fetch = laneFetch()): Promise<string> {
   const window = new AbortController();
   const t = setTimeout(() => window.abort(new DOMException(`pool evm send: no answer in ${EVM_SEND_TIMEOUT_MS} ms`, "TimeoutError")), EVM_SEND_TIMEOUT_MS);
   try {
