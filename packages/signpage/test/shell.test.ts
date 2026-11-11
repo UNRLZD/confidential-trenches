@@ -86,6 +86,8 @@ test("ready goes to the frame's window once on each load of the frame, never bef
 });
 
 // ------------------------------------------------------------------------------------------------ mountShell on a fake DOM
+/** The kit client's report, in parent mode, that its document has had its first content paint (messages.ts PaintedMessage). */
+const PAINTED = { v: 1, type: "painted" } as const;
 const SIGN_ORIGIN = "https://confidential.unrealized.trade";
 type FakeEl = {
   tagName: string; id: string; hidden: boolean; style: Record<string, string>; src: string;
@@ -340,7 +342,7 @@ test("dismiss: the user's own Esc acts only on a sheet whose screen may be left,
   assert.equal(n, 2);
 });
 
-test("a typed screen's close keeps the sheet's dim over the new frame until it has loaded and painted, then fades it", () => {
+test("a typed screen's close keeps the sheet's dim over the new frame until that frame's document reports its first content paint, then fades it", () => {
   enableTimers(mock.timers, { apis: ["setTimeout"] });
   try {
     const d = fakeDom();
@@ -357,11 +359,19 @@ test("a typed screen's close keeps the sheet's dim over the new frame until it h
     assert.equal(veil.style.pointerEvents, "none", "it takes no tap");
     const f = d.frames()[0]!;
     assert.ok(d.children.indexOf(f) < d.children.indexOf(sh.layer as unknown as (typeof d.children)[number]));
-    mock.timers.tick(VEIL_CAP_MS - 1);
-    assert.equal(veil.style.opacity, "1", "kept until the new frame loads");
+    mock.timers.tick(100);
+    assert.equal(veil.style.opacity, "1", "kept until the new frame paints");
+    // the frame's load is not its paint (an APP_HOST frame in a process of its own paints when it paints): still dim
     f.fire("load");
-    mock.timers.tick(1);
-    assert.equal(veil.style.opacity, "0", "faded once the frame painted");
+    mock.timers.tick(300);
+    assert.equal(veil.style.opacity, "1", "kept over a loaded frame that has not painted");
+    // a painted from anything but the new frame's window, or not exactly the kit's, changes nothing
+    d.send(PAINTED, {});
+    d.send({ ...PAINTED, extra: 1 }, f.contentWindow);
+    d.send({ v: 1, type: "painted", id: crypto.randomUUID() }, f.contentWindow);
+    assert.equal(veil.style.opacity, "1", "kept: no painted from the new frame yet");
+    d.send(PAINTED, f.contentWindow);
+    assert.equal(veil.style.opacity, "0", "faded in the task the frame's painted came");
     mock.timers.tick(200);
     assert.equal(veil.hidden, true);
     // an untyped sheet's close: the same frame, no veil

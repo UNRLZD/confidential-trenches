@@ -30,7 +30,7 @@
 // earlier release drops the hello unanswered. A state's op this client cannot read is left out, never the whole state.
 
 import { OPEN_KINDS, SIGNPAGE_KIT_VERSION } from "./messages.ts";
-import type { BuyRoute, HelloMessage, ErrorCode, SignpageKind, SignpageParams, SignpageRequest, SignpageResults, SignpageState, Stage } from "./messages.ts";
+import type { BuyRoute, HelloMessage, PaintedMessage, ErrorCode, SignpageKind, SignpageParams, SignpageRequest, SignpageResults, SignpageState, Stage } from "./messages.ts";
 import {
   SIGNPAGE_MAX_REQUEST_BYTES,
   SIGNPAGE_PARAM_SCHEMAS,
@@ -574,6 +574,32 @@ export function createSignpageClient(opts: SignpageClientOptions): SignpageClien
   host.window.addEventListener("message", onMessage);
   host.window.addEventListener("online", wake);
   host.window.addEventListener("visibilitychange", wake);
+  // parent mode: the shell keeps a closed sheet's dim over this document until it says it has painted (PaintedMessage)
+  if (shell !== null) {
+    onFirstContentPaint(host.window, () => {
+      if (destroyed) return;
+      const msg: PaintedMessage = { v: 1, type: "painted" };
+      shell.postMessage(msg, origin);
+    });
+  }
   mountFrame();
   return client;
+}
+
+/**
+ * Calls `fn` once, when `win`'s document has its first-contentful-paint entry (at once when it has one already). The
+ * browser queues that entry once the paint is on screen, so `fn` runs after it. Nothing where paint timing is not
+ * reported (the shell's dim then fades at its upper bound).
+ */
+function onFirstContentPaint(win: object, fn: () => void): void {
+  const PO = (win as { PerformanceObserver?: typeof PerformanceObserver }).PerformanceObserver;
+  if (typeof PO !== "function" || !PO.supportedEntryTypes?.includes("paint")) return;
+  let done = false;
+  const o = new PO((list) => {
+    if (done || list.getEntriesByName("first-contentful-paint").length === 0) return;
+    done = true;
+    o.disconnect();
+    fn();
+  });
+  o.observe({ type: "paint", buffered: true });
 }

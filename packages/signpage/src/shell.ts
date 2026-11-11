@@ -55,7 +55,7 @@ export function appSrc(loc: { pathname: string; search: string }): string {
  */
 export const FRAME_LEAVE_MS = 100;
 
-/** How long the sheet's dim may wait over a new frame for its load before it fades all the same (src/shell.ts close). */
+/** How long the sheet's dim may wait over a new frame for its painted before it fades all the same (src/shell.ts close). */
 export const VEIL_CAP_MS = 2_000;
 
 /**
@@ -76,6 +76,15 @@ function servedFile(pathname: string): boolean {
   }
   p = p.toLowerCase().replace(/\/+$/, "");
   return SERVED_FILES.some((f) => (f.endsWith("/") ? `${p}/`.startsWith(f) : p === f));
+}
+
+/** True when `m` is exactly the kit's painted ({ v: 1, type: "painted" }, messages.ts PaintedMessage). */
+function isPainted(m: unknown): boolean {
+  if (typeof m !== "object" || m === null || Array.isArray(m)) return false;
+  const proto: unknown = Object.getPrototypeOf(m);
+  if (proto !== Object.prototype && proto !== null) return false;
+  const p = m as Record<string, unknown>;
+  return Reflect.ownKeys(p).length === 2 && p.v === 1 && p.type === "painted";
 }
 
 /** No frame: a post goes nowhere, and no message's source is ever this object. */
@@ -153,26 +162,24 @@ export function mountShell(doc: Document, host: Omit<ApiHost, "parent" | "listen
   const layer = sheet.layer;
   Object.assign(doc.body.style, { margin: "0", background: "#0a0a0a" });
   doc.body.append(layer);
-  // the sheet's dim, kept over a new frame after a typed screen closes until that frame has loaded and painted, then faded:
-  // the close shows no undimmed backdrop between the sheet and the app's first screen. It takes no tap (pointer-events none).
+  // the sheet's dim, kept over a new frame after a typed screen closes until that frame's document reports its first
+  // content paint (the kit's painted, messages.ts PaintedMessage), then faded: the close shows no undimmed backdrop between
+  // the sheet and the app's first screen. The frame's load is not its paint: an APP_HOST frame in a process of its own
+  // paints on its own frames, after this document's (the e2e measured a fade 1-7 ms before the frame's first paint when
+  // the fade waited for the load and two of this window's frames). It takes no tap (pointer-events none).
   const veil = doc.createElement("div");
   veil.dataset.sheet = "veil";
   Object.assign(veil.style, { position: "fixed", inset: "0", zIndex: "1", pointerEvents: "none", transition: "opacity 160ms ease-out" });
   veil.hidden = true;
   doc.body.insertBefore(veil, layer);
-  const painted = (fn: () => void): void => {
-    const raf = view.requestAnimationFrame?.bind(view);
-    if (raf) raf(() => raf(fn));
-    else setTimeout(fn, 0);
-  };
 
   let frame: HTMLIFrameElement | null = null;
   let peer: PostTarget = NO_FRAME;
   let onLoad: () => void = () => {};
   let veiled: HTMLIFrameElement | null = null;
   let veilCap: ReturnType<typeof setTimeout> | null = null;
-  // the veil fades: the new frame has painted, or VEIL_CAP_MS passed with no load (a frame that never loads is shown as
-  // it is, undimmed, rather than dimmed for good over an app that takes taps)
+  // the veil fades: the new frame's document has painted, or VEIL_CAP_MS passed with no painted (a frame that never
+  // loads or never says so is shown as it is, undimmed, rather than dimmed for good over an app that takes taps)
   const lift = (f: HTMLIFrameElement): void => {
     if (veiled !== f) return;
     veiled = null;
@@ -193,8 +200,6 @@ export function mountShell(doc: Document, host: Omit<ApiHost, "parent" | "listen
     f.addEventListener("load", () => {
       if (frame !== f) return;
       onLoad();
-      // the frame made at a typed screen's close has loaded: the veil fades once its first screen has painted
-      if (veiled === f) painted(() => lift(f));
     });
     doc.body.insertBefore(f, layer);
     // contentWindow exists once the frame is in the document, and stays the same object across its loads
@@ -204,6 +209,11 @@ export function mountShell(doc: Document, host: Omit<ApiHost, "parent" | "listen
     peer = win;
   };
 
+  // the painted of the frame made at a typed screen's close: from that frame's window and APP_HOST only, exactly the kit's
+  view.addEventListener("message", (e: MessageEvent) => {
+    const f = veiled;
+    if (f !== null && e.origin === APP_ORIGIN && e.source === f.contentWindow && isPainted(e.data)) lift(f);
+  });
   wireShell(
     { window: () => peer, onLoad: (fn) => (onLoad = fn) },
     {
