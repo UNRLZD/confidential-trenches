@@ -7,10 +7,13 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 (globalThis as { __SIGN_NETWORK__?: string }).__SIGN_NETWORK__ = "testnet";
-const { TESTNET_RPCS, pageSolanaRpcs, pageSolanaSettleRpcs, testnetPool } = await import("../src/pool-testnet.ts");
+const { TESTNET_RPCS, pageEvmPoolRpcs, pageSolanaRpcs, pageSolanaSettleRpcs, testnetPool } = await import("../src/pool-testnet.ts");
+const { EVM_LADDER } = await import("../../wallet/src/pool/evm.ts");
 const { holdHosts, hostLane, resetHostLanes } = await import("../../wallet/src/throttle.ts");
 
 const DEVNET = TESTNET_RPCS.solana[0];
+// Circle's USDC on Base Sepolia, as test/pool-testnet-evm-queue.test.ts names it
+const SEPOLIA_USDC = "0x036cbd53842c5426634e7929541ec2318f3dcf7e";
 const HELPER = TESTNET_RPCS.solana[1];
 
 type Sent = { host: string; method: string; at: number; status: number };
@@ -140,5 +143,39 @@ test("the buy and sell kinds' hosts hold the page's Solana hosts from their maki
       assert.equal(hostLane(DEVNET).trading(), false, `${name}: given back at its end, once`);
       assert.equal(hostLane(HELPER).trading(), false);
     }
+  });
+});
+
+test("Base and Robinhood: the same rule; a pass's read of a chain's pool list waits while a trade holds its hosts, the trade's own go, and a 429 pauses the host for both", async () => {
+  await onProvider((host, n) => (host === "rpc.testnet.chain.robinhood.com" && n === 1 ? 429 : 200), async (sent) => {
+    for (const chain of ["base", "robinhood"] as const) {
+      const release = holdHosts(TESTNET_RPCS[chain]);
+      const pass = pageEvmPoolRpcs(chain, "pass")!.map((r) => r("eth_blockNumber", []));
+      const before = sent.length;
+      assert.equal(await pageEvmPoolRpcs(chain, "trade")![1]!("eth_chainId", []), 7);
+      await tick(200);
+      assert.deepEqual(sent.slice(before).map((x) => x.method), ["eth_chainId"], `${chain}: only the trade's read while it holds`);
+      release();
+      assert.deepEqual(await Promise.all(pass), [7, 7]);
+    }
+    const rh = sent.filter((x) => x.host === "rpc.testnet.chain.robinhood.com");
+    assert.equal(rh.length, 2, "the throttled read asked again once");
+    assert.ok(rh[1]!.at - rh[0]!.at >= 990, "after the host's 1 s pause");
+  });
+});
+
+test("the EVM buy kind's host holds its chain's pool list hosts from its making to its end", async () => {
+  await onProvider(() => 200, async () => {
+    const made: { h?: { end?(): void } } = {};
+    const t = testnetPool(
+      { store: async () => assert.fail("no store read"), seed64: async () => assert.fail("no seed read") },
+      { evmSync: () => ({ events: async () => assert.fail("no sync read") }), tradeKinds: { evmBuy: ((host: () => { end?(): void }) => () => ((made.h = host()), { error: "not_allowed" })) as never } } as never,
+    );
+    t.flow({ kind: "pool.buy", chain: "base", token: SEPOLIA_USDC, amount: EVM_LADDER.min, slippageBps: 100, decimals: 18 } as never, null as never);
+    assert.ok(made.h, "the base buy made its host");
+    for (const u of TESTNET_RPCS.base) assert.equal(hostLane(u).trading(), true, u);
+    assert.equal(hostLane(DEVNET).trading(), false, "another chain's host is not held");
+    made.h!.end?.();
+    for (const u of TESTNET_RPCS.base) assert.equal(hostLane(u).trading(), false, u);
   });
 });

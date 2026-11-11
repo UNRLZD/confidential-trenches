@@ -353,7 +353,12 @@ test("pool.buy on a chain with its EVM pin goes to the EVM buy on that chain's q
       evmBuy: (host) => (ask) => {
         const after = (async () => {
           const h = host();
-          hosts.push({ chain: h.chain, network: h.pin.network, ready: (await h.ready()).length });
+          try {
+            hosts.push({ chain: h.chain, network: h.pin.network, ready: (await h.ready()).length });
+          } finally {
+            // ended at the run's end, as poolBuyEvmKind ends its host (a host holds the list's hosts until then)
+            h.end?.();
+          }
         })();
         return { running: true, after, answer: () => ({ result: { stage: "sent", txs: [] } }) };
       },
@@ -385,7 +390,10 @@ test("the EVM buy's host on the testnet page: the testnet rule, one claim set fo
     evmQueuePool: () => fakeEvmPool() as Pool<unknown>,
     tradeKinds: {
       evmBuy: (host) => () => {
-        made.push(host());
+        // the run ends at once: its host ended, as poolBuyEvmKind ends it (a host holds the list's hosts until then)
+        const h = host();
+        h.end?.();
+        made.push(h);
         return { running: true, after: Promise.resolve(), answer: () => ({ result: { stage: "sent", txs: [] } }) };
       },
     },
@@ -422,7 +430,10 @@ test("the EVM buy's host on the testnet page: a sign out reaches its run (the fo
     evmQueuePool: () => fakeEvmPool() as Pool<unknown>,
     tradeKinds: {
       evmBuy: (host) => () => {
-        made.push(host());
+        // the run ends at once: its host ended, as poolBuyEvmKind ends it (a host holds the list's hosts until then)
+        const h = host();
+        h.end?.();
+        made.push(h);
         return { running: true, after: Promise.resolve(), answer: () => ({ result: { stage: "sent", txs: [] } }) };
       },
     },
