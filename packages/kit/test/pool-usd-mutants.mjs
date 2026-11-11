@@ -245,7 +245,9 @@ export const MUTANTS = [
   [S6, "m.fill(0, o + 4 + 64, o + 4 + 72);", "m.fill(0, o + 4, o + 4 + 108);", "refused: S10 the providers disagree on the mint's transfer fee", S10_TEST],
   [S6, "m.fill(0, o + 4 + 64, o + 4 + 72);", "m.fill(0, o + 4 + 64, o + 4 + 108);", "refused: S10 the providers disagree on the mint's transfer fee", S10_TEST],
   [S6, "m.fill(0, o + 4 + 64, o + 4 + 72);", "m.fill(0, o + 4, o + 4 + 72);", "refused: S10 the providers disagree on the mint's transfer fee authority", S10_TEST],
-  [S6, "m.fill(0, o + 4 + 64, o + 4 + 72);", "", "accepted: S10 the providers' mint reads differ in a transfer-fee mint's withheld fees only", S10_TEST],
+  // the mask dropped as an empty statement: "" would make the next line, o += 4 + len, the if's body, so the walk would
+  // never end and the run would only fail at RUN_MS (300 s of the part's time)
+  [S6, "m.fill(0, o + 4 + 64, o + 4 + 72);", ";", "accepted: S10 the providers' mint reads differ in a transfer-fee mint's withheld fees only", S10_TEST],
   [S6, "if (type === EXT_TRANSFER_FEE_CONFIG && len === 108) m.fill(", "if (len === 108) m.fill(", "refused: S10 the providers disagree inside a 108-byte extension", S10_TEST],
   [S6, "if (type === EXT_TRANSFER_FEE_CONFIG && len === 108) m.fill(", "if (type === EXT_TRANSFER_FEE_CONFIG) m.fill(", "refused: S10 the providers disagree inside a fee config shorter than 108 bytes", S10_TEST],
   [S6, "  if (d.length === 82) return null;\n", "", "S6 pass: every", S6_TEST],
