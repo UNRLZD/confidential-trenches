@@ -14,8 +14,10 @@
 //   with no tap (src/main.ts), under an op id of its own, so the app's sign-in sheet shows it (S19).
 // - It runs on every pool the page's network pins (pagePools): the Solana pool through the wallet's solanaRestoreNotes
 //   on the page's Solana pair, each EVM pool through evmRestoreNotes on its pool list, notes only (wallets: false: no W
-//   is named to any provider, since the page keeps no W record). A pin with no reads on this page (an EVM pin on
-//   mainnet, which has no EVM pool list yet) is a failed pool, never skipped: the run ends stalled, so "done" always
+//   is named to any provider, since the page keeps no W record; each Solana W's buy record comes back after the notes
+//   are written, in the background, outside the restore's wait: src/sol-buy-records.ts, run by the notes' write). A pin
+//   with no reads on this page (an EVM pin on mainnet, which has no EVM pool list yet) is a failed pool, never skipped:
+//   the run ends stalled, so "done" always
 //   means every pinned pool was read.
 // - What they find goes to the note store through the wallet's writeRestored (parents first; a note the store holds in
 //   flight is left as it is; an index this page planned that the walk finds landed is landed, E5), the pools' notes

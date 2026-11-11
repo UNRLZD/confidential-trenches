@@ -83,6 +83,8 @@ import type { PoolStatePrice, TxRef, WithdrawStage } from "../../kit/src/signpag
 import { finishPoolOnward, runPoolWithdraw, solanaOnwardFee, solanaWithdrawMinPart, withdrawSources, type Arrivals, type HistoryPlaces, type PendingOnward } from "./pool-withdraw.ts";
 import type { PoolFunds, PoolReady, PoolWithdrawFormDeps } from "./withdraw/pool-form.ts";
 import { EVM_POOL_HISTORY } from "../../kit/src/trade/evm/buy-unpinned.ts";
+import { solanaBuysAt, solanaHelperBuys } from "../../wallet/src/pool/buy-wallets.ts";
+import { BUY_NONE_KEY, solBuyRecords } from "./sol-buy-records.ts";
 
 // The freezes are marked pure, so SIGN_HOST's build, which never reads these, drops them whole (scripts/build-network.test.mjs).
 /** Each chain's two testnet RPCs, as the app names the chain. Solana's are mainnet's shape (main.ts: a public provider
@@ -507,7 +509,8 @@ export type TestnetPool = {
    *  sale takes them in), from the store alone: no read, no seed; the store as held (page.held),
    *  never opened again for it (another tab's sign out may have closed it). Signed out: none. */
   boughtSince(token: string): Promise<StoreWs>;
-  /** The proof queue's pass, the queue opened first when none is: what each landed note runs. */
+  /** The proof queue's pass, the queue opened first when none is: what each landed note runs. Called by the restore once
+   *  it wrote its notes (src/main.ts `written`), so it also starts the buy records' rebuild (src/sol-buy-records.ts). */
   proofs(): Promise<QueuePass | null>;
   /** state.pools' `ready` (src/pools.ts) with `read`'s notes, in one turn of the queue's view (queue.ts readyWith), so
    * a remake's swap never falls between the two (card pool-ready-no-flicker); `ready` undefined while no queue is open.
@@ -650,6 +653,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   let follows = new AbortController();
   const signedOut = async (): Promise<void> => {
     stopTurn();
+    buyRecords.stop();
     clears++;
     // every read waiting for its turn on a host ends (card signpage-passes-yield-to-a-trade)
     stopHostLaneWaits();
@@ -1309,7 +1313,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   };
   const buy = (over.tradeKinds?.buy ?? poolBuyKind)(() => buyHost());
   let settling: Promise<void> | null = null;
-  const settle = (): Promise<void> => Promise.all([settleSolana(), settleEvmOpen().catch(() => {})]).then(() => {});
+  // a signed-in load also gets back the buy records a restore left owed, in the background (src/sol-buy-records.ts)
+  const settle = (): Promise<void> => (buyRecords.run(), Promise.all([settleSolana(), settleEvmOpen().catch(() => {})]).then(() => {}));
   const settleSolana = (): Promise<void> => {
     if (pin === undefined) return Promise.resolve();
     if (settling) return settling;
@@ -1401,6 +1406,9 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     },
     {
       ...over.positions,
+      // a sale's own read of the Ws stops the buy records' rebuild too, which runs again after it (its reads share the
+      // finder's queue: review of 42a99f81, P2)
+      preempted: () => buyRecords.hold(),
       kept: async () => {
         if (scope === null) return null;
         const st = await page.store();
@@ -1570,6 +1578,64 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       },
     };
   };
+  // W's buy records back after a restore (card restore-rebuilds-buy-records, src/sol-buy-records.ts): the Ws of the
+  // pool's SPENT and RESERVED notes, each read on the finder's paced route with its own gate, each call on the host's
+  // pass turn (buy-wallets.ts solanaHelperBuys), one W a request
+  const buyRecords = solBuyRecords({
+    // the finder's derive with a reader that reads nothing: the addresses only, the seed zeroed as soon as they are
+    wallets: async (signal) => {
+      if (scope === null) return [];
+      if (!locks) throw new Error("no Web Locks: the seed is not read");
+      const notes = await openNoteStore(await page.store());
+      let spent: Awaited<ReturnType<typeof spentNotesOf>>;
+      try {
+        spent = await spentNotesOf(notes, scope);
+      } finally {
+        notes.close();
+      }
+      if (spent.length === 0) return [];
+      const none: HoldingsReader = { chain: "sol", read: async () => ({ native: 0n, tokens: new Map(), unreadable: [] }) };
+      const derived = await locks.request(WALLET_SEED_LOCK, { mode: "shared", signal }, async () => {
+        const seed64 = await page.seed64();
+        try {
+          return derivedBuyWallets(seed64, [{ id: pin!.program, chain: "sol", spent, reader: none }]);
+        } finally {
+          seed64.fill(0);
+        }
+      });
+      const got = await derived.read({ signal });
+      if (got.failed.length > 0) throw new Error("the buy wallets could not be derived");
+      return got.wallets.map((w) => w.address);
+    },
+    done: async () => {
+      const st = await page.store();
+      return new Set([...Object.keys(asRecord(await st.get("meta", BUY_MINTS_KEY))), ...Object.keys(asRecord(await st.get("meta", BUY_NONE_KEY)))]);
+    },
+    // through the store only while it is open (page.held): another tab's sign out never lands a write in a store made
+    // afresh (review of 42a99f81, d)
+    write: async (address, buy) => {
+      if (!page.held) throw new Error("no wallet store is open");
+      const st = await page.held();
+      if (buy === "none") {
+        await st.update("meta", BUY_NONE_KEY, (v) => ({ ...asRecord(v), [address]: true }));
+        return false;
+      }
+      let wrote = false;
+      await st.update("meta", BUY_MINTS_KEY, (v) => {
+        // the store may run this again on a race: each run decides afresh
+        const all = asRecord(v);
+        wrote = !Object.hasOwn(all, address);
+        if (!wrote) return undefined;
+        // marked rebuilt: one provider's word, which the rent back counts as no record (pool-sell.ts rentBackOwed)
+        return { ...all, [address]: { mint: buy.mint, program: buy.program, rebuilt: true } };
+      });
+      return wrote;
+    },
+    reader: {
+      read: (address, signal) => (POOL_TESTNET ? solanaBuysAt(TESTNET_RPCS.solana[0], pin!.program) : solanaHelperBuys(TRADE_HELPER, pin!.program)).read(address, signal),
+    },
+    wrote: () => positions.refresh(),
+  });
   positions.watch(() => {
     for (const f of watchers) f();
   });
@@ -2163,7 +2229,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       const [mints, kept, costs, sold] = await Promise.all([st.get("meta", BUY_MINTS_KEY), st.get("meta", POSITIONS_KEPT_KEY), st.get("meta", POSITION_COSTS_KEY), st.get("meta", POSITIONS_SOLD_KEY)]);
       return { since: boughtSincePass(token, mints, kept, costs, sold), held: keptHeldOf(token, kept) };
     },
-    proofs,
+    // the restore's notes written: each Solana W with no buy record gets it back from its own buy, in the background
+    proofs: () => (buyRecords.run(), proofs()),
     // every open queue's ready list (Solana's, then each EVM pool's; each proof names its pool) with `read`, in one turn
     // of every queue's view: each queue's readyWith holds its view while the next one's and then `read` run, always in
     // the same order, so no swap of any queue falls between its list and the notes
@@ -2199,6 +2266,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     },
     watch: (fn) => void watchers.add(fn),
     signingOut: () => {
+      buyRecords.stop();
       lateBuys.clear();
       stopTurn();
       stopHostLaneWaits();
