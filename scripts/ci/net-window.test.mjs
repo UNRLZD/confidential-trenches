@@ -164,6 +164,7 @@ export const CHANGED = [
   "scripts/live-checks/signpage-buy-own-spend.mjs",
   "scripts/live-checks/signpage-error-after-timeout.mjs",
   "scripts/live-checks/signpage-evm-pool-buy.mjs",
+  "scripts/live-checks/signpage-positions-evm.mjs",
   "scripts/live-checks/evm-pool-sync-wide-pages.mjs",
   "scripts/live-checks/wallet-near-prepay-taken.mjs",
   "scripts/live-checks/held-deposit-way-out.mjs",

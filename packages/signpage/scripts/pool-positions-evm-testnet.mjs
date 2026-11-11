@@ -18,6 +18,18 @@ import { createRequire } from "node:module";
 import { IDBFactory } from "fake-indexeddb";
 
 globalThis.__SIGN_NETWORK__ = "testnet";
+// each request's host, JSON-RPC method and answer status, logged as it ends (never a body)
+const realFetch = globalThis.fetch;
+globalThis.fetch = async (url, init) => {
+  const u = new URL(String(url instanceof Request ? url.url : url));
+  let method = "";
+  try {
+    method = [JSON.parse(String(init?.body ?? "null"))].flat().map((x) => x?.method).filter(Boolean).join(",");
+  } catch {}
+  const r = await realFetch(url, init);
+  if (r.status !== 200) console.log(`${new Date().toISOString()} request ${init?.method ?? "GET"} ${u.host}${u.pathname} ${method}: HTTP ${r.status}`);
+  return r;
+};
 const { entropyToWords, wordsToSeed64 } = await import("../../wallet/src/derive/index.ts");
 const { openWalletStore, WALLET_SEED_LOCK } = await import("../../wallet/src/store/index.ts");
 const { openNoteStore } = await import("../../wallet/src/notes/store.ts");
@@ -98,6 +110,8 @@ async function tap(kind, params) {
   await r.after;
   const first = r.answer();
   log(`${kind} answered ${JSON.stringify(first)} in ${Date.now() - at} ms; waiting for the end`);
+  // a refusal ran to no send: it has no end to wait for
+  if (first !== null && "error" in first) return { first, end: null, ms: Date.now() - at };
   await navigator.locks.request(WALLET_SEED_LOCK, { mode: "exclusive" }, () => {});
   for (let i = 0; i < 360 && !ENDS.includes(stages.at(-1)); i++) await sleep(2_000);
   return { first, end: stages.at(-1) ?? null, ms: Date.now() - at };
@@ -139,6 +153,7 @@ const holding = (await w.get("meta", EVM_POSITION_COSTS_KEY))?.[W] ?? null;
 const buyTx = holding?.route?.tx ?? null;
 const buyReads = await receipts(buyTx);
 log(`buy end ${buy.end}; tx ${buyTx}; reads ${JSON.stringify(buyReads)}; holding ${JSON.stringify(holding, big)}`);
+if (buy.end !== "filled") throw new Error(`the buy ended ${buy.end ?? JSON.stringify(buy.first)}: no position to read`);
 // 2. the position, from the page's own pass: W's amount as both pool RPCs read it
 const held = await positionsUntil((ps) => ps.length === 1 && ps[0].wallets.map(lower).includes(lower(W)));
 log(`positions after the buy: ${JSON.stringify(held)}`);
@@ -146,8 +161,10 @@ log(`positions after the buy: ${JSON.stringify(held)}`);
 const opened = [];
 const sell = await tap("pool.sell", { chain: CHAIN, token: TOKEN, share_bps: 10_000, slippage_bps: 300 });
 for (const o of Object.values((await w.get("meta", EVM_OPEN_SELLS_KEY)) ?? {})) opened.push(o);
-const ops = await w.get("ops", "pool.sell");
-const sellTx = ops?.txs?.at(-1)?.hash ?? sell.first?.result?.txs?.at(-1)?.hash ?? null;
+// the sale's transaction: the pool's Deposited from W since the buy's block, the same on both pool RPCs
+const DEPOSITED = "0xe3b53cd1a44fbf11535e145d80b8ef1ed6d57a73bf5daa7e939b6b01657d6549";
+const sold = await Promise.all(rpcs.map(async (rpc) => ((await rpc("eth_getLogs", [{ address: PIN.pool, fromBlock: `0x${BigInt(buyReads[0]?.block ?? 0).toString(16)}`, toBlock: "latest", topics: [DEPOSITED, `0x${W.slice(2).toLowerCase().padStart(64, "0")}`] }])) ?? []).map((l) => l.transactionHash)));
+const sellTx = sold[0]?.length === 1 && sold[1]?.length === 1 && sold[0][0] === sold[1][0] ? sold[0][0] : null;
 const sellReads = await receipts(sellTx);
 log(`sell end ${sell.end}; tx ${sellTx}; reads ${JSON.stringify(sellReads)}`);
 // 4. the position gone, from the page's own pass
