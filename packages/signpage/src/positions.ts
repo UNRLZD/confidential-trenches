@@ -379,6 +379,11 @@ export type PositionsCache = {
   clear(): void;
   /** Settles once no pass runs (tests). */
   idle(): Promise<void>;
+  /** The last pass was not whole and its round of retries is spent: no pass runs or is booked, so only a refresh() or
+   *  once() reads again. */
+  spent(): boolean;
+  /** One pass, the round of retries left as it is (a spent round books none after it). */
+  once(): void;
 };
 
 /** A sell's read of the Ws, holding the passes off until it ends, once: fed, the Ws as it read them are the next pass's
@@ -390,8 +395,9 @@ export type PassHold = { feed(found: readonly FoundWallet[]): void; release(): v
 export type PassRun = { signal: AbortSignal; found?: readonly FoundWallet[] };
 
 /** The positions of `pass`, one pass at a time, kept between passes. */
-export function positionsCache(pass: (memo: PassMemo, run: PassRun) => Promise<PassResult>, o: { kept?: () => Promise<readonly Position[] | null>; retryMs?: number; retries?: number; setTimer?: (f: () => void, ms: number) => unknown; clearTimer?: (t: unknown) => void } = {}): PositionsCache {
-  const retryMs = o.retryMs ?? POSITIONS_RETRY_MS;
+export function positionsCache(pass: (memo: PassMemo, run: PassRun) => Promise<PassResult>, o: { kept?: () => Promise<readonly Position[] | null>; retryMs?: number | ((tries: number) => number); retries?: number; setTimer?: (f: () => void, ms: number) => unknown; clearTimer?: (t: unknown) => void } = {}): PositionsCache {
+  // a fixed wait, or the wait before the try after `tries` tries (a back off)
+  const retryMs = (tries: number): number => (typeof o.retryMs === "function" ? o.retryMs(tries) : (o.retryMs ?? POSITIONS_RETRY_MS));
   const retries = o.retries ?? POSITIONS_RETRIES;
   // a retry never holds a process open (Node's unref; a browser's timer has none)
   const setTimer = o.setTimer ?? ((f, ms) => {
@@ -415,6 +421,8 @@ export function positionsCache(pass: (memo: PassMemo, run: PassRun) => Promise<P
   let timer: unknown = null;
   let started = false;
   let loading: Promise<void> | null = null;
+  // the last pass's answer was whole (and looks for nothing again)
+  let whole = true;
   const run = (): void => {
     if (timer !== null) clearTimer(timer), (timer = null);
     if (running || holds > 0) return void (again = true);
@@ -428,14 +436,15 @@ export function positionsCache(pass: (memo: PassMemo, run: PassRun) => Promise<P
     // booked unless the round of retries has run out (false then)
     const retry = (): boolean => {
       if (!live() || tries >= retries) return false;
+      timer = setTimer(() => ((timer = null), run()), retryMs(tries));
       tries++;
-      timer = setTimer(() => ((timer = null), run()), retryMs);
       return true;
     };
     const m = memo;
     running = pass(m, { signal: stop.signal, ...(found === null ? {} : { found }) }).then(
       (got) => {
         if (!live()) return;
+        whole = got.whole && (got.wait?.length ?? 0) === 0;
         const changed = JSON.stringify(got.positions) !== JSON.stringify(last);
         last = got.positions;
         if (changed) for (const f of watchers) f();
@@ -443,7 +452,10 @@ export function positionsCache(pass: (memo: PassMemo, run: PassRun) => Promise<P
         // looks for, a round of retries in vain ends (PassResult)
         if ((!got.whole || (got.wait?.length ?? 0) > 0) && !retry() && got.whole) for (const k of got.wait ?? []) m.waited.add(k);
       },
-      () => void retry(),
+      () => {
+        if (live()) whole = false;
+        void retry();
+      },
     ).finally(() => {
       running = null;
       if (current === stop) current = null;
@@ -518,10 +530,15 @@ export function positionsCache(pass: (memo: PassMemo, run: PassRun) => Promise<P
       fed = null;
       holds = 0;
       tries = 0;
+      whole = true;
       if (timer !== null) clearTimer(timer), (timer = null);
     },
     idle: async () => {
       while (running) await running;
+    },
+    spent: () => started && !whole && running === null && timer === null && holds === 0,
+    once: () => {
+      if (started) run();
     },
   };
   return cache;

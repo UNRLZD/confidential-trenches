@@ -67,7 +67,7 @@ import { evmSettleReserved } from "../../wallet/src/pool/evm-settle.ts";
 import { evmPoolFee, evmPoolGas } from "../../kit/src/trade/evm/pool-fee.ts";
 import { poolDepositEvmKind, type EvmDepositRound } from "./pool-deposit-evm.ts";
 import { EVM_POSITION_COSTS_KEY, evmBuyHost, followPendingEvmBuys, poolBuyEvmKind, type EvmBuyPage } from "./pool-buy-evm.ts";
-import { EVM_POSITIONS_STAGGER_MS, evmPositionsPass, staggered } from "./positions-evm.ts";
+import { EVM_POSITIONS_REARM_MS, EVM_POSITIONS_STAGGER_MS, evmPositionsPass, evmPositionsRetryMs, staggered } from "./positions-evm.ts";
 import { evmSellHost, followEvmSells, poolSellEvmKind } from "./pool-sell-evm.ts";
 import { keptTokenDecimals, PAGE_TOKEN_DECIMALS, type PoolKindsDeps, type PoolRpc } from "./pool-kinds.ts";
 import { checkPoolRequest, tokenDecimalsShown, type PoolAsk, type PoolChain, type PoolRequest } from "./rules/pool.ts";
@@ -369,6 +369,8 @@ export type TestnetOver = {
   holdings?: (rpcs: readonly [SolanaRpc, SolanaRpc]) => HoldingsReader;
   /** The positions cache's retry and timers (src/positions.ts; tests). */
   positions?: Parameters<typeof positionsCache>[1];
+  /** The clock of a state read's ask of a spent EVM chain's pass (Date.now otherwise; tests). */
+  positionsNow?: () => number;
 };
 
 /** The page network's lookup tables by venue (the wallet's SOL_POOL_TABLES of PAGE_CLUSTER): a pool buy loads one of
@@ -462,6 +464,8 @@ export type TestnetPool = {
   /** state.positions (src/positions.ts): the last pass, or the kept one before it, null before either; the first
    *  signed-in read starts a pass. */
   positions(): Promise<readonly Position[] | null>;
+  /** A restore wrote buy records of `chain`: its positions read again. */
+  evmHoldingsRestored(chain: "base" | "robinhood"): void;
   /** The proof queue's pass, the queue opened first when none is: what each landed note runs. */
   proofs(): Promise<QueuePass | null>;
   /** state.pools' `ready` (src/pools.ts) with `read`'s notes, in one turn of the queue's view (queue.ts readyWith), so
@@ -578,8 +582,13 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   let follows = new AbortController();
   const signedOut = async (): Promise<void> => {
     stopTurn();
+    clears++;
     positions.clear();
     for (const c of evmPositionsCaches.values()) c?.clear();
+    evmSellHashes.clear();
+    evmSoldTokens.clear();
+    evmFloors.clear();
+    evmRearmed.clear();
     awaited.clear();
     follows.abort();
     follows = new AbortController();
@@ -767,15 +776,60 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     return (over.tradeKinds?.evmBuy ?? poolBuyEvmKind)(() => evmBuyHost(chain, e.pin, e.rpcs, evmBuyClaims, evmBuyPage(chain)));
   };
   // an EVM buy's or sell's run: the chain's positions read again at its end stage (both kinds post it as progress, the
-  // late one too), as Solana's are (recordedBuy, recordedSell)
-  const evmEnds = (chain: "base" | "robinhood", ctx: KindContext): KindContext => ({
+  // late one too), as Solana's are (recordedBuy, recordedSell). A sale that filled: its token's last agreed amounts
+  // dropped, and the pass reads at no block under the sale's own (evmSaleFloor), so a sold row never stays on a provider
+  // behind the sale. A sale refused not_funded: read again, since the row it sold from may be one a spent round left
+  const evmEnds = (chain: "base" | "robinhood", ask: PoolAsk, ctx: KindContext): KindContext => ({
     ...ctx,
     progress: (stage) => {
       ctx.progress(stage);
-      if (EVM_TRADE_ENDS.has(stage)) evmPositions(chain)?.refresh();
+      if (!EVM_TRADE_ENDS.has(stage)) return;
+      if (ask.kind === "pool.sell" && stage !== "not_landed") {
+        if (ask.token !== null) evmSold(chain).add(ask.token.toLowerCase());
+        // every hash sent since the last sale's end: the newest block of any of them is the floor
+        const sent = evmSellHashes.get(chain) ?? [];
+        evmSellHashes.delete(chain);
+        void Promise.all(sent.map((x) => evmSaleFloor(chain, x).catch(() => {}))).finally(() => evmPositions(chain)?.refresh());
+      } else evmPositions(chain)?.refresh();
     },
   });
+  const evmRun = <R,>(chain: "base" | "robinhood", ask: PoolAsk, ctx: KindContext, kind: ((a: PoolAsk, c: KindContext) => R) | undefined): R | { error: "not_allowed" } => {
+    if (kind === undefined) return { error: "not_allowed" };
+    const run = kind(ask, evmEnds(chain, ask, ctx)) as R;
+    const r = run as { after?: Promise<void>; answer?: () => unknown } & { error?: string };
+    const refused = (a: unknown): boolean => typeof a === "object" && a !== null && (a as { error?: unknown }).error === "not_funded";
+    if (ask.kind === "pool.sell") {
+      if (refused(r)) evmPositions(chain)?.refresh();
+      else if (r.after) void r.after.then(() => (refused(r.answer?.()) ? evmPositions(chain)?.refresh() : undefined));
+    }
+    return run;
+  };
   const EVM_TRADE_ENDS: ReadonlySet<string> = new Set(["filled", "part_filled", "not_landed"]);
+  // each chain's sale state for its positions: the hashes the helper named for this page's sales since the last sale's
+  // end, the tokens sold since the last pass, and the floor (the newest sale's block, either pool RPC's receipt of it: a
+  // provider that has it shows the sale happened by then; a hash never mined reads none)
+  const evmSellHashes = new Map<"base" | "robinhood", string[]>();
+  const evmSoldTokens = new Map<"base" | "robinhood", Set<string>>();
+  const evmFloors = new Map<"base" | "robinhood", bigint>();
+  const evmSold = (chain: "base" | "robinhood"): Set<string> => {
+    let s = evmSoldTokens.get(chain);
+    if (s === undefined) evmSoldTokens.set(chain, (s = new Set()));
+    return s;
+  };
+  const evmSaleFloor = async (chain: "base" | "robinhood", hash: string | null | undefined): Promise<void> => {
+    const e = evmPool(chain);
+    if (e === null || typeof hash !== "string" || !/^0x[0-9a-fA-F]{64}$/.test(hash)) return;
+    const blocks = await Promise.all(e.rpcs.map(async (rpc) => {
+      try {
+        const rc = (await rpc("eth_getTransactionReceipt", [hash])) as { blockNumber?: unknown } | null;
+        return typeof rc?.blockNumber === "string" && /^0x[0-9a-fA-F]{1,16}$/.test(rc.blockNumber) ? BigInt(rc.blockNumber) : 0n;
+      } catch {
+        return 0n;
+      }
+    }));
+    const b = blocks.reduce((m, x) => (x > m ? x : m), 0n);
+    if (b > (evmFloors.get(chain) ?? 0n)) evmFloors.set(chain, b);
+  };
   // a buy whose tab ended before its end (the pending record's own follow died with it): followed from its record at
   // each state read, until filled, withdrawn or not_landed (src/pool-buy-evm.ts followPendingEvmBuys); testnet build only
   const evmBuyFollow = (chain: "base" | "robinhood"): void => {
@@ -800,12 +854,22 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       signal: follows.signal,
       stopped: ((at) => () => signOuts !== at)(signOuts),
     });
-    // an open sale dropped at its end (the run's or the load's follow's, followEvmSells): the chain's positions read again
+    // an open sale dropped at its end (the run's or the load's follow's, followEvmSells): the chain's positions read
+    // again, at no block under the sale's own when the record names its transaction
     const unrecord: typeof host.unrecord = async (note, deadline) => {
+      const tx = (await host.open().catch(() => ({}) as Record<string, { tx?: string }>))[note]?.tx;
       await host.unrecord(note, deadline);
+      await evmSaleFloor(chain, tx).catch(() => {});
       evmPositions(chain)?.refresh();
     };
-    return { ...host, unrecord, end: () => void notes?.then((n) => n.close(), () => {}) };
+    // each hash the helper names for a sale, kept for the sale's floor (evmEnds)
+    const send: typeof host.send = async (body) => {
+      const hash = await host.send(body);
+      const list = evmSellHashes.get(chain) ?? [];
+      evmSellHashes.set(chain, [...list.slice(-31), hash]);
+      return hash;
+    };
+    return { ...host, send, unrecord, end: () => void notes?.then((n) => n.close(), () => {}) };
   };
   const evmSell = (chain: "base" | "robinhood") => {
     const e = evmPool(chain);
@@ -1167,6 +1231,10 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   // record's W read on the pool's two RPCs, in the cache Solana's runs in; each chain's pass staggered after Solana's
   // (Base one step, Robinhood two), so the three never fire in the same tick. Where the chain's buy is (testnet build)
   const evmPositionsCaches = new Map<"base" | "robinhood", ReturnType<typeof positionsCache> | null>();
+  // when a state read last asked a spent chain for a pass
+  const evmRearmed = new Map<"base" | "robinhood", number>();
+  // the sign outs' clears of the positions (signedOut), so a read they overtook answers null
+  let clears = 0;
   const evmPositions = (chain: "base" | "robinhood"): ReturnType<typeof positionsCache> | null => {
     if (!evmPositionsCaches.has(chain)) {
       const e = evmPool(chain);
@@ -1180,18 +1248,24 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
               (memo, run) =>
                 staggered(EVM_POSITIONS_STAGGER_MS * step, run.signal, async () => {
                   const st = await page.store();
+                  // the tokens sold since the last pass, taken by this one
+                  const dropped = evmSoldTokens.get(chain);
+                  evmSoldTokens.delete(chain);
                   return evmPositionsPass({
                     chain,
                     rpcs: e.rpcs,
                     signal: run.signal,
+                    floor: evmFloors.get(chain) ?? 0n,
+                    spares: e.list,
+                    ...(dropped === undefined ? {} : { dropped }),
                     holdings: async () => {
                       const v = await st.get("meta", EVM_POSITION_COSTS_KEY);
                       return typeof v === "object" && v !== null ? (v as Record<string, unknown>) : {};
                     },
-                    decimals: (token) => keptTokenDecimals(chain, token, e.rpcs, { waits: 0 }),
+                    decimals: (token, rpcs) => keptTokenDecimals(chain, token, rpcs, { waits: 0 }),
                   }, memo);
                 }, timer),
-              { ...over.positions, kept: undefined },
+              { retryMs: evmPositionsRetryMs, ...over.positions, kept: undefined },
             ),
       );
       // a change of this chain's positions reads the page's state again, as Solana's does (positions.watch below)
@@ -1782,9 +1856,9 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         ? ask.kind === "pool.deposit"
           ? (evmDeposit(ask.chain)?.(ask, ctx) ?? { error: "not_allowed" })
           : ask.kind === "pool.buy"
-            ? (evmBuy(ask.chain)?.(ask, evmEnds(ask.chain, ctx)) ?? { error: "not_allowed" })
+            ? evmRun(ask.chain, ask, ctx, evmBuy(ask.chain) ?? undefined)
             : ask.kind === "pool.sell"
-              ? (evmSell(ask.chain)?.(ask, evmEnds(ask.chain, ctx)) ?? { error: "not_allowed" })
+              ? evmRun(ask.chain, ask, ctx, evmSell(ask.chain) ?? undefined)
               : { error: "not_allowed" }
         : pin === undefined
         ? { error: "not_allowed" }
@@ -1809,12 +1883,29 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     host: () => host(),
     settle,
     stateRead,
-    // Solana's, then Base's and Robinhood's; null when a sign out overtook the read
+    // Solana's, then Base's and Robinhood's; null when a sign out overtook the read, or when no chain has a row yet and
+    // Solana's first pass has not answered (the state keeps its own [] then, as before any pass). An EVM row is never
+    // held back for Solana's first pass: the state then sends [] for Solana, as it did before any pass, and Solana's
+    // rows once it answers. An EVM chain whose last pass was not whole and whose round
+    // of retries is spent is asked one more pass (not a new round), at most once per EVM_POSITIONS_REARM_MS
     positions: async () => {
+      const outs = signOuts;
+      const was = clears;
       const [sol, ...evm] = await Promise.all([positions.read(), ...(["base", "robinhood"] as const).map((c) => evmPositions(c)?.read() ?? Promise.resolve([]))]);
-      // an EVM chain with no pass yet is read as holding nothing until its first pass (it keeps none for a load)
-      return sol === null ? null : [...sol, ...evm.flatMap((x) => x ?? [])];
+      if (signOuts !== outs || clears !== was) return null;
+      const now = (over.positionsNow ?? Date.now)();
+      for (const c of ["base", "robinhood"] as const) {
+        const cache = evmPositions(c);
+        if (cache?.spent() && now - (evmRearmed.get(c) ?? -Infinity) >= EVM_POSITIONS_REARM_MS) {
+          evmRearmed.set(c, now);
+          cache.once();
+        }
+      }
+      const rows = evm.flatMap((x) => x ?? []);
+      return sol === null && rows.length === 0 ? null : [...(sol ?? []), ...rows];
     },
+    // a restore wrote buy records of `chain` (src/pool-restore.ts, restoreEvmHoldings): its positions read again
+    evmHoldingsRestored: (chain: "base" | "robinhood") => void evmPositions(chain)?.refresh(),
     proofs,
     // every open queue's ready list (Solana's, then each EVM pool's; each proof names its pool) with `read`, in one turn
     // of every queue's view: each queue's readyWith holds its view while the next one's and then `read` run, always in

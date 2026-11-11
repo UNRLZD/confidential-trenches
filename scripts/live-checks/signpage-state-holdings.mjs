@@ -86,7 +86,7 @@ export const SOLD = "owed/sold-sol";
  *  (src/positions.ts), and the page's `positions:()=>c.read()` (src/pool-testnet.ts), or since card
  *  signpage-positions-evm the same read first in the page's join of Solana's and each EVM chain's:
  *  `positions:async()=>{let[e,...t]=await Promise.all([c.read(),...`. */
-export const FIRST = /positions:\(\)=>[\w$]+\.read\(\)|positions:async\(\)=>\{let\[[\w$]+,\.\.\.[\w$]+\]=await Promise\.all\(\[[\w$]+\.read\(\),/g;
+export const FIRST = /positions:\(\)=>[\w$]+\.read\(\)|positions:async\(\)=>\{let ?(?:[\w$]+=[\w$]+,)*\[[\w$]+,\.\.\.[\w$]+\]=await Promise\.all\(\[[\w$]+\.read\(\),/g;
 /** positionsCache's run calls the pass with its stop and a fed read: `e(c,{signal:g.signal,..._===null?{}:{found:_}})`. */
 export const RUN = /[\w$]+\([\w$]+,\{signal:[\w$]+\.signal,\.\.\.[\w$]+===null\?\{\}:\{found:[\w$]+\}\}\)/g;
 /** positionsPass asks the finder for the Ws this device bought only: `.wallets(new Set(c.map(({address:e})=>e)))`. */

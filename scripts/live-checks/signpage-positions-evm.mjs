@@ -39,7 +39,7 @@ export const SIGN = "https://confidential.unrealized.trade";
 export const PASS_MARK = "balanceOf: the two RPCs differ";
 /** src/pool-testnet.ts's state read, as minified: Solana's read first, then each EVM chain's,
  *  `positions:async()=>{let[e,...t]=await Promise.all([c.read(),...[`base`,`robinhood`].map(`. */
-export const JOIN = /positions:async\(\)=>\{let\[[\w$]+,\.\.\.[\w$]+\]=await Promise\.all\(\[[\w$]+\.read\(\),\.\.\.\[[`"]base[`"],[`"]robinhood[`"]\]\.map\(/g;
+export const JOIN = /positions:async\(\)=>\{let ?(?:[\w$]+=[\w$]+,)*\[[\w$]+,\.\.\.[\w$]+\]=await Promise\.all\(\[[\w$]+\.read\(\),\.\.\.\[[`"]base[`"],[`"]robinhood[`"]\]\.map\(/g;
 const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}`;
 /** What the check keeps of SIGN_HOST: its index's /app.js pin, the served bundle's sha384, and the two marks' counts. */
 export function pageFacts(index, js) {

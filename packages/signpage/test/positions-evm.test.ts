@@ -21,8 +21,8 @@ import type { EvmPositionsReads } from "../src/positions-evm.ts";
 const { testnetPool } = await import("../src/pool-testnet.ts");
 const { EVM_POSITION_COSTS_KEY } = await import("../src/pool-buy-evm.ts");
 const { PAGE_POOLS, withPools } = await import("../src/pools.ts");
-const { EVM_POSITIONS_STAGGER_MS, evmPositionsPass, staggered } = await import("../src/positions-evm.ts");
-const { passMemo, withPositions } = await import("../src/positions.ts");
+const { EVM_POSITIONS_IN_FLIGHT, EVM_POSITIONS_REARM_MS, EVM_POSITIONS_STAGGER_MS, evmPositionsPass, evmPositionsRetryMs, staggered } = await import("../src/positions-evm.ts");
+const { passMemo, positionsCache, withPositions } = await import("../src/positions.ts");
 type EvmRpc = import("../../wallet/src/pool/evm.ts").EvmRpc;
 type EvmPoolPin = import("../../wallet/src/pool/evm.ts").EvmPoolPin;
 
@@ -46,29 +46,43 @@ const until = async (f: () => boolean | Promise<boolean>) => {
 
 /** W's buy record as the buy's read-back (filled) or the run before its send (pending) writes it; its `decimals` the
  *  buy's own, which the pass never takes alone. */
-const rec = (chain: string, state: "pending" | "filled" | "withdrawn", mint = TOKEN, decimals = 6) => ({
+const rec = (chain: string, state: "pending" | "filled" | "withdrawn", mint = TOKEN, decimals = 6, block = "90") => ({
   mint,
   decimals,
   chain,
   state,
-  route: { venue: "uniswap-v3", adapter: "0x" + "ad".repeat(20), path: { kind: "v3", fee: 500 }, ...(state === "filled" ? { tx: "0x" + "11".repeat(32), block: "120" } : {}) },
+  route: { venue: "uniswap-v3", adapter: "0x" + "ad".repeat(20), path: { kind: "v3", fee: 500 }, ...(state === "filled" ? { tx: "0x" + "11".repeat(32), block } : {}) },
   ...(state === "filled" ? { received: "999000000" } : {}),
   ...(state === "pending" ? { buy: { nullifier: "1", from: "100", deadlineMs: "1", minOut: "1", value: "1", feeCap: "1", feeRecipient: "0x0" } } : {}),
 });
 
-/** Two RPCs of one chain: each its own balances (by W, lower case), newest block, decimals and failure; every call kept. */
+/** Two RPCs of one chain: each its own balances (by W, lower case), newest block, decimals, failure and receipts (by
+ *  hash: a block); every call kept with the clock's time; `slow` answers a turn later, `most` the calls in flight at
+ *  once over both. */
 function fakeChain() {
   const bal = [new Map<string, bigint>(), new Map<string, bigint>()];
   const head = [100n, 101n];
   const decimals = [6, 6];
   const down = [false, false];
-  const calls: { method: string; data?: string; at?: unknown }[][] = [[], []];
+  const receipts = new Map<string, bigint>();
+  const calls: { method: string; data?: string; at?: unknown; t: number }[][] = [[], []];
+  const o = { slow: false, busy: 0, most: 0, clock: () => 0 };
   const rpc = (i: 0 | 1): EvmRpc =>
     Object.assign(
       async (method: string, params: readonly unknown[]) => {
         const c = params[0] as { to?: string; data?: string } | undefined;
-        calls[i].push({ method, ...(c?.data ? { data: c.data, at: params[1] } : {}) });
+        calls[i].push({ method, ...(c?.data ? { data: c.data, at: params[1] } : {}), t: o.clock() });
+        o.most = Math.max(o.most, ++o.busy);
+        try {
+          if (o.slow) await new Promise((r) => setTimeout(r, 1));
+        } finally {
+          o.busy--;
+        }
         if (down[i]) throw new Error("the RPC did not answer");
+        if (method === "eth_getTransactionReceipt") {
+          const b = receipts.get(String(params[0]));
+          return b === undefined ? null : { blockNumber: hex(b), status: "0x1" };
+        }
         if (method === "eth_blockNumber") return hex(head[i]!);
         if (method === "eth_call" && c?.data === "0x313ce567") return word(decimals[i]!);
         if (method === "eth_call" && c?.data?.startsWith("0x70a08231")) return word(bal[i]!.get(`0x${c.data.slice(-40)}`) ?? 0n);
@@ -77,17 +91,18 @@ function fakeChain() {
       { url: i === 0 ? "https://a.example" : "https://b.example" },
     );
   const set = (w: string, a: bigint, b = a) => (bal[0].set(w.toLowerCase(), a), bal[1].set(w.toLowerCase(), b));
-  return { rpcs: [rpc(0), rpc(1)] as const, bal, head, decimals, down, calls, set };
+  return Object.assign(o, { rpcs: [rpc(0), rpc(1)] as const, bal, head, decimals, down, calls, set, receipts });
 }
 
 /** The pass's reads over `c` with `records` as the store holds them; decimals on both RPCs, the same, else thrown. */
-const reads = (chain: "base" | "robinhood", c: ReturnType<typeof fakeChain>, records: Record<string, unknown>): EvmPositionsReads => ({
+const reads = (chain: "base" | "robinhood", c: ReturnType<typeof fakeChain>, records: Record<string, unknown>, more: Partial<EvmPositionsReads> = {}): EvmPositionsReads => ({
+  ...more,
   chain,
   rpcs: c.rpcs,
   signal: new AbortController().signal,
   holdings: async () => records,
-  decimals: async (token) => {
-    const [a, b] = await Promise.all(c.rpcs.map(async (rpc) => Number(BigInt((await rpc("eth_call", [{ to: token, data: "0x313ce567" }, "latest"])) as string))));
+  decimals: async (token, rpcs) => {
+    const [a, b] = await Promise.all((rpcs ?? c.rpcs).map(async (rpc) => Number(BigInt((await rpc("eth_call", [{ to: token, data: "0x313ce567" }, "latest"])) as string))));
     if (a !== b) throw new Error("decimals differ");
     return a!;
   },
@@ -138,7 +153,7 @@ for (const chain of CHAINS) {
     const memo = passMemo();
     const records = { [W1]: rec(chain, "filled") };
     assert.deepEqual(await evmPositionsPass(reads(chain, c, records), memo), { positions: [], whole: false });
-    assert.deepEqual([per(c, 0).balanceOf, per(c, 1).balanceOf], [2, 2], "read again once, then failed");
+    assert.deepEqual([per(c, 0).balanceOf, per(c, 1).balanceOf], [1, 1], "read once: the pass's retry is the re-read, none within the pass");
     // they agree: shown
     c.set(W1, 5_000_000n);
     assert.deepEqual((await evmPositionsPass(reads(chain, c, records), memo)).positions.map((p) => p.amount), ["5"]);
@@ -184,7 +199,128 @@ for (const chain of CHAINS) {
     await evmPositionsPass(reads(chain, c, { [W1]: rec(chain, "pending") }), memo);
     assert.deepEqual(c.calls, [[], []]);
   });
+
+  test(`(${chain}) the floor, a buy: filled at block 120 and read at heads 125/118, nothing from before it is shown and the pass is not whole (tried again); at 125/121 it shows`, async () => {
+    const c = fakeChain();
+    c.head[0] = 125n;
+    c.head[1] = 118n;
+    c.set(W1, 5_000_000n);
+    const records = { [W1]: rec(chain, "filled", TOKEN, 6, "120") };
+    const memo = passMemo();
+    assert.deepEqual(await evmPositionsPass(reads(chain, c, records), memo), { positions: [], whole: false });
+    assert.equal(per(c, 0).balanceOf ?? 0, 0, "no balance read under the floor");
+    c.head[1] = 121n;
+    assert.deepEqual(await evmPositionsPass(reads(chain, c, records), memo), { positions: [{ chain, token: TOKEN, amount: "5", cost: "0", wallets: [W1], decimals: 6 }], whole: true });
+    assert.ok(c.calls[0]!.filter((x) => x.data?.startsWith("0x70a08231")).every((x) => x.at === hex(121n)));
+  });
+
+  test(`(${chain}) the floor, a full sell: sold at block 200 and read at heads 205/197, the sold row is not shown and the pass is not whole (tried again); at 205/201 it reads none`, async () => {
+    const c = fakeChain();
+    c.head[0] = 191n;
+    c.head[1] = 190n;
+    c.set(W1, 5_000_000n);
+    const records = { [W1]: rec(chain, "filled") };
+    const memo = passMemo();
+    assert.deepEqual((await evmPositionsPass(reads(chain, c, records), memo)).positions.map((p) => p.amount), ["5"]);
+    // the sale at block 200: the provider behind it still answers the holding from before it
+    c.head[0] = 205n;
+    c.head[1] = 197n;
+    c.set(W1, 0n, 5_000_000n);
+    assert.deepEqual(await evmPositionsPass(reads(chain, c, records, { floor: 200n, dropped: new Set([TOKEN]) }), memo), { positions: [], whole: false });
+    c.head[1] = 201n;
+    c.set(W1, 0n);
+    assert.deepEqual(await evmPositionsPass(reads(chain, c, records, { floor: 200n }), memo), { positions: [], whole: true });
+    // a pass never reads under the block a pass before it read at (a provider that falls behind)
+    c.head[0] = 199n;
+    c.set(W1, 0n, 5_000_000n);
+    assert.deepEqual(await evmPositionsPass(reads(chain, c, records), memo), { positions: [], whole: false });
+  });
+
+  test(`(${chain}) a provider stuck 50 blocks back: alone it never stops a pass being whole; past a buy it is read past on a spare of the pool's list that neither seat holds, and with none the last agreed rows stay`, async () => {
+    const c = fakeChain();
+    c.head[0] = 150n;
+    c.head[1] = 200n;
+    c.set(W1, 5_000_000n);
+    const memo = passMemo();
+    // stuck, nothing past it: whole, at the stuck block (both answer for it)
+    assert.deepEqual((await evmPositionsPass(reads(chain, c, { [W1]: rec(chain, "filled", TOKEN, 6, "140") }), memo)).whole, true);
+    // a buy at 190, past the stuck provider: with no spare, not whole, the last agreed row kept
+    c.set(W1, 7_000_000n);
+    const records = { [W1]: rec(chain, "filled", TOKEN, 6, "190") };
+    assert.deepEqual(await evmPositionsPass(reads(chain, c, records), memo), { positions: [{ chain, token: TOKEN, amount: "5", cost: "0", wallets: [W1], decimals: 6 }], whole: false });
+    // a spare on a seat's own provider is not one; a spare that is behind too is passed over; the next one reads
+    const calls: string[] = [];
+    const spare = (url: string, head: bigint): EvmRpc =>
+      Object.assign(
+        async (method: string, params: readonly unknown[]) => {
+          calls.push(`${new URL(url).host} ${method}`);
+          if (method === "eth_blockNumber") return hex(head);
+          const d = (params[0] as { data?: string }).data!;
+          return word(d === "0x313ce567" ? 6 : 7_000_000n);
+        },
+        { url },
+      );
+    const spares = [spare("https://a.example/v2", 300n), spare("https://c.example", 160n), spare("https://d.example", 201n), spare("https://e.example", 999n)];
+    c.calls[0] = [];
+    c.calls[1] = [];
+    const got = await evmPositionsPass(reads(chain, c, records, { spares }), memo);
+    assert.deepEqual(got, { positions: [{ chain, token: TOKEN, amount: "7", cost: "0", wallets: [W1], decimals: 6 }], whole: true });
+    assert.deepEqual(calls, ["c.example eth_blockNumber", "d.example eth_blockNumber", "d.example eth_call"], "the seat's own provider never asked, the first spare past the floor read, none after it");
+    assert.ok(c.calls[1]!.filter((x) => x.data?.startsWith("0x70a08231")).every((x) => x.at === hex(200n)), "at the lower of the two that read");
+    assert.deepEqual(per(c, 0), { eth_blockNumber: 1 }, "the stuck provider is asked its head only");
+  });
+
+  test(`(${chain}) ten holdings: at most ${EVM_POSITIONS_IN_FLIGHT} of a pass's calls in flight at once over both RPCs, each RPC one eth_blockNumber, ten balanceOf, one decimals`, async () => {
+    const c = fakeChain();
+    c.slow = true;
+    const ws = Array.from({ length: 10 }, (_, i) => "0x" + (i + 1).toString(16).padStart(2, "0").repeat(20));
+    for (const w of ws) c.set(w, 1_000_000n);
+    const got = await evmPositionsPass(reads(chain, c, Object.fromEntries(ws.map((w) => [w, rec(chain, "filled")]))), passMemo());
+    assert.equal(got.positions[0]?.amount, "10");
+    assert.ok(c.most <= EVM_POSITIONS_IN_FLIGHT && c.most > 1, `in flight at once: ${c.most}`);
+    for (const i of [0, 1] as const) assert.deepEqual(per(c, i), { eth_blockNumber: 1, balanceOf: 10, decimals: 1 });
+  });
 }
+
+test("a pass stopped while its calls wait their turn ends, and sends none of them", async () => {
+  const c = fakeChain();
+  c.slow = true;
+  const ws = Array.from({ length: 10 }, (_, i) => "0x" + (i + 0x41).toString(16).padStart(2, "0").repeat(20));
+  for (const x of ws) c.set(x, 1n);
+  const stop = new AbortController();
+  let ended = false;
+  const p = evmPositionsPass({ ...reads("base", c, Object.fromEntries(ws.map((x) => [x, rec("base", "filled")]))), signal: stop.signal }, passMemo()).finally(() => (ended = true));
+  p.catch(() => {});
+  await until(() => per(c, 0).balanceOf !== undefined);
+  stop.abort();
+  const sent = c.calls[0]!.length + c.calls[1]!.length;
+  await until(() => ended);
+  assert.ok(c.calls[0]!.length + c.calls[1]!.length <= sent + EVM_POSITIONS_IN_FLIGHT, "only the calls already in flight");
+});
+
+test("the retries back off 5, 10, 20 s, then 20 s each; a pass under the floor books one; a round spent books none, and spent() says so", async () => {
+  assert.deepEqual([0, 1, 2, 3, 11].map(evmPositionsRetryMs), [5_000, 10_000, 20_000, 20_000, 20_000]);
+  const c = fakeChain();
+  c.head[0] = 125n;
+  c.head[1] = 118n;
+  c.set(W1, 5_000_000n);
+  const timers: { f: () => void; ms: number }[] = [];
+  const cache = positionsCache((memo) => evmPositionsPass(reads("base", c, { [W1]: rec("base", "filled", TOKEN, 6, "120") }), memo), { retryMs: evmPositionsRetryMs, retries: 4, setTimer: (f, ms) => (timers.push({ f, ms }), f), clearTimer: () => {} });
+  cache.first();
+  await cache.idle();
+  assert.deepEqual(timers.map((t) => t.ms), [5_000], "a pass under the floor is tried again");
+  for (let i = 0; i < 4; i++) {
+    timers.at(-1)!.f();
+    await cache.idle();
+  }
+  assert.deepEqual(timers.map((t) => t.ms), [5_000, 10_000, 20_000, 20_000]);
+  assert.equal(cache.spent(), true, "the round is spent: nothing booked");
+  c.head[1] = 121n;
+  cache.refresh();
+  await cache.idle();
+  assert.equal(cache.spent(), false);
+  assert.deepEqual(((await cache.read()) ?? []).map((p) => p.amount), ["5"]);
+});
 
 test("the live check's Deposited topic and pool RPCs are the page's own (scripts/live-checks/signpage-positions-evm.mjs reaches no package code)", async () => {
   const { keccak_256 } = await import("@noble/hashes/sha3.js");
@@ -315,4 +451,176 @@ test("the page: Base's and Robinhood's positions beside Solana's, staggered; a b
   for (const x of timers.splice(0)) x.f();
   await run();
   assert.equal(ch.base.calls[0]!.length, reads0, "a pass a sign out stopped reads nothing");
+});
+
+// the page's own clock for the positions: every timer the caches book (their stagger and retries) and the re-arm's
+// clock; `go(ms)` moves the clock on and runs every timer due by then, in order
+function pageClock() {
+  let now = 0;
+  const due: { at: number; f: () => void; ms: number }[] = [];
+  const setTimer = (f: () => void, ms: number) => (due.push({ at: now + ms, f, ms }), f);
+  const go = async (ms: number) => {
+    const end = now + ms;
+    for (;;) {
+      for (let i = 0; i < 20; i++) await tick();
+      due.sort((a, b) => a.at - b.at);
+      if (due.length === 0 || due[0]!.at > end) break;
+      const x = due.shift()!;
+      now = x.at;
+      x.f();
+    }
+    now = end;
+  };
+  return { setTimer, go, now: () => now, due };
+}
+
+test("the page: Solana's first pass never holds back the EVM rows; a spent round is asked one pass per 30 s from a state read; a sale refused not_funded and a restore read the chain again; a filled sale reads at no block under its own and drops the sold row", async () => {
+  const w = await wallet();
+  const ch = { base: fakeChain(), robinhood: fakeChain() };
+  ch.base.set(W1, 5_000_000n);
+  await w.update("meta", EVM_POSITION_COSTS_KEY, () => ({ [W1]: rec("base", "filled") }));
+  const { POSITIONS_SOLD_TX_KEY } = await import("../src/positions.ts");
+  const clock = pageClock();
+  // Solana's pass's read of its sold marks never answers: its first pass never ends (the EVM pass reads its own records)
+  const held = new Proxy(w, {
+    get(o, k) {
+      if (k === "get") return (store: string, key: string) => (key === POSITIONS_SOLD_TX_KEY ? new Promise(() => {}) : o.get(store as never, key as never));
+      const v = Reflect.get(o, k);
+      return typeof v === "function" ? v.bind(o) : v;
+    },
+  });
+  const SALE = "0x" + "5a".repeat(32);
+  let sellAnswer: () => unknown = () => ({ error: "not_funded" });
+  let progress: ((stage: string) => void) | null = null;
+  const hosts: { send: (b: never) => Promise<string> }[] = [];
+  const t = testnetPool({ store: async () => held, held: async () => w, seed64: async () => SEED64.slice() }, {
+    prover: { vault: signalsProver(), stop: () => {} },
+    evmPin: (c) => PINS[c],
+    evmRpcs: (c) => ch[c].rpcs,
+    evmSync: () => ({ events: async () => assert.fail("no sync read") }),
+    evmQueuePool: () => fakeEvmPool(),
+    fetch: (async () => new Response(JSON.stringify({ hash: SALE }), { status: 200 })) as typeof fetch,
+    positions: { setTimer: clock.setTimer, clearTimer: () => {}, retries: 2 },
+    positionsNow: clock.now,
+    tradeKinds: {
+      evmBuy: () => () => ({ error: "not_allowed" }),
+      evmSell: (host) => (_ask, ctx) => {
+        hosts.push(host());
+        progress = (ctx as { progress: (s: string) => void }).progress;
+        const a = sellAnswer();
+        return a !== null && typeof a === "object" && "error" in a ? (a as never) : { running: true, after: Promise.resolve(), answer: () => a as never };
+      },
+    },
+  });
+  const baseOf = async () => ((await t.positions()) ?? []).filter((p) => p.chain === "base").map((p) => p.amount);
+  const balanceReads = () => per(ch.base, 0).balanceOf ?? 0;
+
+  // Small-2: Solana's first pass still runs; Base's row is there all the same, and Solana's is none yet
+  await t.positions();
+  await clock.go(1_000);
+  assert.deepEqual(await baseOf(), ["5"], "the EVM rows while Solana's first pass runs");
+  assert.equal(((await t.positions()) ?? []).filter((p) => p.chain === "solana").length, 0);
+
+  // a restore wrote Base's records: Base read again
+  const r0 = balanceReads();
+  t.evmHoldingsRestored("base");
+  await clock.go(1_000);
+  assert.equal(balanceReads(), r0 + 1, "a restore's records read at once");
+
+  // P2-a: one RPC down; a refresh, then its round of 2 retries (5 s, 10 s) spent; the last agreed row kept
+  ch.base.down[1] = true;
+  t.evmHoldingsRestored("base");
+  await clock.go(60_000);
+  const spentAt = ch.base.calls[0]!.length;
+  assert.deepEqual(await baseOf(), ["5"], "the last agreed amount while the RPC is down");
+  // the RPC is back: a state read asks one pass (the round is spent), the next within 30 s none, the one after 30 s one
+  ch.base.down[1] = false;
+  ch.base.set(W1, 6_000_000n);
+  await t.positions();
+  await clock.go(1_000);
+  assert.deepEqual(await baseOf(), ["6"], "a spent round is asked one pass from a state read");
+  ch.base.down[1] = true;
+  t.evmHoldingsRestored("base");
+  await clock.go(60_000);
+  const n0 = ch.base.calls[0]!.length;
+  await t.positions();
+  await clock.go(1_000);
+  const n1 = ch.base.calls[0]!.length;
+  assert.equal(n1, n0 + 1, "one pass asked (its eth_blockNumber fails: the RPC is down), no new round");
+  await t.positions();
+  await clock.go(20_000);
+  await t.positions();
+  await clock.go(1_000);
+  assert.equal(ch.base.calls[0]!.length, n1, "no second ask within 30 s, and no retry of the asked pass");
+  await clock.go(EVM_POSITIONS_REARM_MS);
+  await t.positions();
+  await clock.go(1_000);
+  assert.equal(ch.base.calls[0]!.length, n1 + 1, "one ask again after 30 s");
+  assert.ok(spentAt > 0);
+  ch.base.down[1] = false;
+
+  // a sale refused not_funded (the row it sold from may be a spent round's): Base read again
+  sellAnswer = () => ({ error: "not_funded" });
+  const r1 = balanceReads();
+  const refused = t.flow({ kind: "pool.sell", chain: "base", token: TOKEN, amount: 1n, slippageBps: 100, decimals: 6 }, { id: "s1", sha: "00", progress: () => {} } as never);
+  assert.deepEqual(refused, { error: "not_funded" });
+  await clock.go(1_000);
+  assert.equal(balanceReads(), r1 + 1, "not_funded reads the chain again");
+
+  // P1: a full sale that lands at block 200, read at heads 205/197: the sold row goes at once, nothing is shown from
+  // the provider behind it, and the pass is tried again until both are past it
+  sellAnswer = () => ({ result: { stage: "sent", txs: [] } });
+  const s2 = t.flow({ kind: "pool.sell", chain: "base", token: TOKEN, amount: 1n, slippageBps: 100, decimals: 6 }, { id: "s2", sha: "00", progress: () => {} } as never);
+  assert.ok("running" in s2);
+  assert.equal(await hosts.at(-1)!.send({ pool: PINS.base.pool, w: W1, data: new Uint8Array(1), authorization: { chainId: 84532, address: "0x" + "ee".repeat(20), nonce: 0n, yParity: 0, r: "0x1", s: "0x1" } } as never), SALE);
+  ch.base.receipts.set(SALE, 200n);
+  ch.base.head[0] = 205n;
+  ch.base.head[1] = 197n;
+  ch.base.set(W1, 0n, 6_000_000n);
+  const r2 = balanceReads();
+  progress!("filled");
+  await clock.go(1_000);
+  assert.deepEqual(await baseOf(), [], "the sold row is not shown on a provider behind the sale");
+  assert.equal(balanceReads(), r2, "no balance read under the sale's block");
+  assert.ok(clock.due.some((x) => x.ms === 5_000), "the pass under the floor is tried again");
+  ch.base.head[1] = 201n;
+  ch.base.set(W1, 0n);
+  await clock.go(6_000);
+  assert.deepEqual(await baseOf(), []);
+  assert.equal(balanceReads(), r2 + 1, "read once both are past the sale");
+  await t.signedOut();
+});
+
+test("the worst minute: ten holdings whose two RPCs disagree, a state read every second for ten minutes, the busiest 60 s on one Base RPC", async () => {
+  const w = await wallet();
+  const ch = { base: fakeChain(), robinhood: fakeChain() };
+  const T10 = "0x" + "0d".repeat(20); // a token no other test's page read the decimals of (they are kept page-wide)
+  const ws = Array.from({ length: 10 }, (_, i) => "0x" + (i + 0x31).toString(16).padStart(2, "0").repeat(20));
+  for (const x of ws) ch.base.set(x, 1n, 2n);
+  await w.update("meta", EVM_POSITION_COSTS_KEY, () => Object.fromEntries(ws.map((x) => [x, rec("base", "filled", T10)])));
+  const clock = pageClock();
+  ch.base.clock = clock.now;
+  const t = testnetPool({ store: async () => w, held: async () => w, seed64: async () => SEED64.slice() }, {
+    prover: { vault: signalsProver(), stop: () => {} },
+    evmPin: (c) => PINS[c],
+    evmRpcs: (c) => ch[c].rpcs,
+    evmSync: () => ({ events: async () => assert.fail("no sync read") }),
+    evmQueuePool: () => fakeEvmPool(),
+    positions: { setTimer: clock.setTimer, clearTimer: () => {} },
+    positionsNow: clock.now,
+  });
+  for (let s = 0; s < 600; s++) {
+    await t.positions();
+    await clock.go(1_000);
+  }
+  await t.signedOut();
+  const times = ch.base.calls[0]!.map((x) => x.t);
+  let worst = 0;
+  for (const a of times) worst = Math.max(worst, times.filter((b) => b >= a && b < a + 60_000).length);
+  const tail = times.filter((b) => b >= 300_000).length / 5;
+  console.log(`worst minute, 10 holdings, one Base RPC: ${worst} requests; a minute once the round is spent: ${tail}`);
+  // the first minute: passes at 0.3, 5.3, 15.3, 35.3 and 55.3 s, each one eth_blockNumber and ten balanceOf, and the
+  // token's decimals once; once the round is spent, one pass per 30 s from the state reads
+  assert.equal(worst, 5 * 11 + 1);
+  assert.equal(tail, 2 * 11);
 });

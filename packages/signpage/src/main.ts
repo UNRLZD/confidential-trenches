@@ -157,6 +157,7 @@ const restore = !framed
         return s !== undefined;
       },
       written: () => void testnet?.proofs().catch(() => {}),
+      holdingsWritten: (chain) => testnet?.evmHoldingsRestored(chain),
       // a pool's U_X reads and carry on its chain (card wallet-restore-reads-ux, src/pool-restore.ts restoreUxOf): the
       // follow's own reader on the restore's two public operators (never our helper relay), and the follow's own deposit
       // (poolFollowDeps below), so a restore and a live pool deposit read U_X and carry it the same way; null on a chain
