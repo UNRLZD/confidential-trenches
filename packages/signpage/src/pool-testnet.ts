@@ -45,7 +45,6 @@ import { base58, base64 } from "@scure/base";
 import { SOLANA_RPC_RETRY, SOLANA_RPC_WINDOW_RETRY, solanaJsonRpc, solanaPacedRpc, type SolanaRpc, type SolanaRpcRetry } from "../../kit/src/trade/solana/send.ts";
 import { lanedRpc, pageHelperRpc, pageHelperRpcStopped, pageRpc, type ReadKind } from "./page-rpc.ts";
 import { holdHosts, hostLane } from "../../wallet/src/throttle.ts";
-import { solanaNow } from "../../wallet/src/pool/solana.ts";
 import { HELPER_FETCH_INIT, HELPER_V1_PATHS } from "../../kit/src/helper/v1.ts";
 import type { VaultProver } from "../../kit/src/prover/prove.ts";
 import { WALLET_SEED_LOCK, type WalletStore } from "@blindfill/wallet/store";
@@ -69,7 +68,7 @@ import { evmSettleReserved } from "../../wallet/src/pool/evm-settle.ts";
 import { evmPoolFee, evmPoolGas } from "../../kit/src/trade/evm/pool-fee.ts";
 import { poolDepositEvmKind, type EvmDepositRound } from "./pool-deposit-evm.ts";
 import { evmBuyHost, followPendingEvmBuys, poolBuyEvmKind, type EvmBuyPage } from "./pool-buy-evm.ts";
-import type { PoolKindsDeps, PoolRpc } from "./pool-kinds.ts";
+import { PAGE_TOKEN_DECIMALS, type PoolKindsDeps, type PoolRpc } from "./pool-kinds.ts";
 import { checkPoolRequest, tokenDecimalsShown, type PoolAsk, type PoolChain, type PoolRequest } from "./rules/pool.ts";
 import type { HostAnswer, HostRefusal, KindContext, Running } from "./api.ts";
 import { readSolanaRent, solanaPoolFee } from "../../kit/src/trade/solana/pool-buy.ts";
@@ -297,7 +296,7 @@ async function moveLegacyPending(w: WalletStore, opId: string, p: PendingOnward)
 
 /** The page network's deps for poolKinds, with `flow` the ops' flow (none: every checked request is refused). Mainnet
  *  reads EVM pools on no pair yet (signpage-evm-pool-trade), as main.ts did before. */
-export function testnetPoolDeps(flow?: PoolKindsDeps["flow"]): PoolKindsDeps {
+export function testnetPoolDeps(flow?: PoolKindsDeps["flow"], stop?: PoolKindsDeps["stop"]): PoolKindsDeps {
   return {
     pinned: (chain) => (chain === "solana" ? PAGE_SOL_PIN !== undefined : EVM_POOLS[POOL_TESTNET ? EVM_TESTNET[chain] : chain] !== undefined),
     rpcs: (chain) =>
@@ -306,7 +305,10 @@ export function testnetPoolDeps(flow?: PoolKindsDeps["flow"]): PoolKindsDeps {
         : POOL_TESTNET
           ? (TESTNET_RPCS[chain].map((u) => testnetRpc(u) as PoolRpc) as unknown as readonly [PoolRpc, PoolRpc])
           : null,
+    // the tokens' decimals kept this session: the sell's read and both buys' own (card sell-first-read-waits-out-a-throttle)
+    decimals: PAGE_TOKEN_DECIMALS,
     ...(flow ? { flow } : {}),
+    ...(stop ? { stop } : {}),
   };
 }
 
@@ -476,6 +478,8 @@ export type TestnetPool = {
   signingOut(): void;
   /** Sign out: the queue closed (its notes freed, its seed copy zeroed), its note store closed, the worker ended. */
   signedOut(): Promise<void>;
+  /** The session's sign out, aborted at the next one: a pool kind's reads read it when a request comes (pool-kinds.ts). */
+  outSignal(): AbortSignal;
   /** The pool withdraw screen's reads and run (src/withdraw/pool-form.ts) for the request's op id. */
   withdrawDeps(chain: PoolChain, opId: string): PoolWithdrawFormDeps;
   /** The withdraw run of a screen's checked answer, its op record written as it goes; settles at the run's end. */
@@ -1011,6 +1015,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       cluster: PAGE_CLUSTER,
       rpcs: rpcs(),
       claimed,
+      // a sign out ends the buy's waits before its signature (read-waits.ts waitUnless): this session's stop
+      signal: solanaStop.signal,
       // none ready (a page that has landed no deposit since it loaded has run no pass): a pass starts for the next tap
       ready: async () => {
         const list = (await q()).ready();
@@ -1023,8 +1029,12 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       // W's buy mint, written before the send: the rent back after a later sell holds while W holds any of it
       bought: buyMints(page.store),
       send: (pool, tx) => helperPoolSend(pool, tx, over.fetch),
-      // the received token's decimals, for W's buy record (src/positions.ts recordPoolBuy)
-      outDecimals: (wallet, d) => void boughtDecimals.set(wallet, d),
+      // the received token's decimals, for W's buy record (src/positions.ts recordPoolBuy), and kept for the session: read
+      // on both RPCs with the amount, so a sell of it asks no decimals read (card sell-first-read-waits-out-a-throttle)
+      outDecimals: (wallet, d, mint) => {
+        boughtDecimals.set(wallet, d);
+        PAGE_TOKEN_DECIMALS.keep("solana", mint, d);
+      },
       // minSlots: the not_landed verdict's slots (pool-buy.ts pastAt), every read at or past them
       settle: async (noteId, minSlots) => {
         // the stop's signal of this call, taken before its first wait: a sign out during the seed read stops it
@@ -1361,6 +1371,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       // run puts its own over this one (poolSellKind)
       settled: async (signature, stage) => settleSellOps(await page.store(), signature, stage),
       stopped: () => signOuts !== outs,
+      // a sign out ends the sale's waits (read-waits.ts waitUnless)
+      signal: solanaStop.signal,
       end: () => {
         release();
         void notes?.then((n) => n.close(), () => {});
@@ -1783,6 +1795,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       evmStop = new AbortController();
     },
     signedOut,
+    // the session's sign out: aborted at the next one (this tab's or another's), as every Solana settle's stop
+    outSignal: () => solanaStop.signal,
     withdrawDeps,
     withdraw,
   };

@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { throughApi } from "./api-ends.ts";
-import { ERC20_DECIMALS, poolKinds, readTokenDecimals, type PoolKindsDeps, type PoolRpc } from "../src/pool-kinds.ts";
+import { ERC20_DECIMALS, keptTokenDecimals, poolKinds, tokenDecimalsKept, type PoolKindsDeps, type PoolRpc } from "../src/pool-kinds.ts";
 import { SOLANA_TOKEN_PROGRAM } from "../../kit/src/checks/solana/checks.ts";
 import type { PoolAsk, PoolChain } from "../src/rules/pool.ts";
 import { SolanaRpcTransportError } from "../../kit/src/trade/solana/send.ts";
@@ -16,6 +16,8 @@ import { buildEntry, EXEMPT, NON_SIGNERS, ROOT, SIGNER_DEFS, signerGuard } from 
 const SOL_TOKEN = "So11111111111111111111111111111111111111112";
 const EVM_TOKEN = "0xF111111111111111111111111111111111111111";
 const ctx = { id: "r1", sha: "00", progress: () => {} };
+// a decimals read that fails waits before it is asked again (card sell-first-read-waits-out-a-throttle): the test's own
+const noWait = async () => {};
 const mint = (dec: number) => {
   const d = new Uint8Array(82);
   d[44] = dec;
@@ -102,7 +104,7 @@ test("a sell's decimals are the token's, read on two providers by the device: th
     ["eth_call", [{ to: EVM_TOKEN, data: ERC20_DECIMALS }, "latest"]],
   ]);
   // an amount finer than the token's decimals, two providers that disagree, or no providers: refused; a provider that
-  // fails: down (card pool-read-down), which the app may ask again
+  // fails past its waits: down (card pool-read-down), which the app may ask again
   assert.deepEqual(await settle(k["pool.sell"]({ chain: "solana", token: SOL_TOKEN, amount: "0.0000001", slippage_bps: 100 }, ctx)), { error: "not_allowed" });
   let n = 0;
   const split = providers(() => mint(n++ === 0 ? 6 : 9));
@@ -110,15 +112,24 @@ test("a sell's decimals are the token's, read on two providers by the device: th
   const down: PoolRpc = async () => {
     throw new Error("down");
   };
-  assert.deepEqual(await settle(poolKinds({ ...deps, rpcs: () => [down, down] })["pool.sell"]({ chain: "base", token: EVM_TOKEN, amount: "1", slippage_bps: 100 }, ctx)), { error: "down" });
+  assert.deepEqual(await settle(poolKinds({ ...deps, rpcs: () => [down, down], wait: noWait })["pool.sell"]({ chain: "base", token: EVM_TOKEN, amount: "1", slippage_bps: 100 }, ctx)), { error: "down" });
   assert.deepEqual(await settle(poolKinds({ ...deps, rpcs: () => null })["pool.sell"]({ chain: "base", token: EVM_TOKEN, amount: "1", slippage_bps: 100 }, ctx)), { error: "not_allowed" });
   assert.equal(flows.length, 2);
 });
 
-test("readTokenDecimals asks each provider once, for the token's address only", async () => {
+test("keptTokenDecimals asks each provider once, for the token's address only, and keeps what they agree on", async () => {
   const p = providers(() => word(6));
-  assert.deepEqual(await readTokenDecimals("robinhood", EVM_TOKEN, p.pair), [word(6), word(6)]);
+  const kept = tokenDecimalsKept();
+  assert.equal(await keptTokenDecimals("robinhood", EVM_TOKEN, p.pair, { kept }), 6);
+  assert.equal(await keptTokenDecimals("robinhood", EVM_TOKEN, p.pair, { kept }), 6);
   assert.equal(p.calls.length, 2);
+  assert.equal(kept.get("robinhood", EVM_TOKEN), 6);
+  assert.equal(kept.get("base", EVM_TOKEN), undefined, "per chain");
+  // only an address of the chain and a number the rule takes are kept
+  for (const [c, t, d] of [["solana", EVM_TOKEN, 6], ["base", "0x12", 6], ["base", EVM_TOKEN, 256], ["base", EVM_TOKEN, -1], ["base", EVM_TOKEN, 1.5]] as const) {
+    kept.keep(c, t, d);
+    assert.equal(kept.get(c, t), undefined, `${c} ${t} ${d}`);
+  }
   assert.ok(p.calls.every(([, params]) => JSON.stringify(params) === JSON.stringify([{ to: EVM_TOKEN, data: "0x313ce567" }, "latest"])));
 });
 
@@ -163,18 +174,19 @@ test("a pool.sell refused after its decimals reads (both providers down) reaches
   const down: PoolRpc = async () => {
     throw new Error("down");
   };
-  const k = poolKinds({ pinned: () => true, rpcs: () => [down, down], flow: () => ({ error: "busy" }) });
+  const k = poolKinds({ pinned: () => true, rpcs: () => [down, down], flow: () => ({ error: "busy" }), wait: noWait });
   const r = await throughApi("pool.sell", k["pool.sell"] as never, { chain: "solana", token: SOL_TOKEN, amount: "1", slippage_bps: 100 });
   assert.deepEqual((r.answer as { error: unknown }).error, { code: "down" });
   assert.deepEqual(r.stages, ["refused"]);
 });
 
 // Card pool-read-down: the devnet run at 967c52d6, where OnFinality's getAccountInfo of the mint still failed after the
-// page's four tries and the sell was refused not_allowed. One provider's read that fails is "down" (api.ts RETRY_CODES:
-// not kept, so the same request again runs again), never not_allowed, on either provider and on every chain; the two
-// reads are still both required, so the flow is never asked on one provider's word.
+// page's four tries and the sell was refused not_allowed. One provider's read that still fails past its waits (card
+// sell-first-read-waits-out-a-throttle, test/pool-kinds-decimals.test.ts) is "down" (api.ts RETRY_CODES: not kept, so
+// the same request again runs again), never not_allowed, on either provider and on every chain; the two reads are still
+// both required, so the flow is never asked on one provider's word.
 for (const p of [0, 1] as const) {
-  test(`card pool-read-down: a sell whose decimals read fails on provider ${p} after the page's retry answers down, and its flow is never asked`, async () => {
+  test(`card pool-read-down: a sell whose decimals read fails on provider ${p} after the page's retry and its waits answers down, and its flow is never asked`, async () => {
     const flows: PoolAsk[] = [];
     const throttled = (ok: unknown): readonly [PoolRpc, PoolRpc] => {
       const good: PoolRpc = async () => ok;
@@ -184,12 +196,12 @@ for (const p of [0, 1] as const) {
       return p === 0 ? [bad, good] : [good, bad];
     };
     for (const [chain, token, ok] of [["solana", SOL_TOKEN, mint(6)], ["base", EVM_TOKEN, word(18)], ["robinhood", EVM_TOKEN, word(18)]] as const) {
-      const k = poolKinds({ pinned: () => true, rpcs: () => throttled(ok), flow: (ask) => (flows.push(ask), { error: "busy" }) });
+      const k = poolKinds({ pinned: () => true, rpcs: () => throttled(ok), flow: (ask) => (flows.push(ask), { error: "busy" }), wait: noWait });
       assert.deepEqual(await settle(k["pool.sell"]({ chain, token, amount: "1", slippage_bps: 100 }, ctx)), { error: "down" }, chain);
     }
     assert.equal(flows.length, 0);
     // through the api: answered down (not kept for its id: test/api.test.ts holds RETRY_CODES), ended as progress refused
-    const k = poolKinds({ pinned: () => true, rpcs: () => throttled(mint(6)), flow: () => ({ error: "busy" }) });
+    const k = poolKinds({ pinned: () => true, rpcs: () => throttled(mint(6)), flow: () => ({ error: "busy" }), wait: noWait });
     const r = await throughApi("pool.sell", k["pool.sell"] as never, { chain: "solana", token: SOL_TOKEN, amount: "1", slippage_bps: 100 });
     assert.deepEqual((r.answer as { error: unknown }).error, { code: "down" });
     assert.deepEqual(r.stages, ["refused"]);

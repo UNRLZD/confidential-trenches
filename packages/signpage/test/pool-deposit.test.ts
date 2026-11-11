@@ -2494,3 +2494,76 @@ test("S-01 review: the rent both RPCs read is the rent the kit's builder holds t
   c.fund((await plannedU(ns)).address, 1_000_000_000);
   assert.equal(((await runPoolDeposit(host(c, ns), ask(RUNG))) as { stage: string }).stage, "filled");
 });
+
+// ---- card start-reads-wait-out-a-throttle: a deposit's reads before U signs wait out a provider fault on the page's one
+// rule (src/read-waits.ts readWaits: from 1 s, doubling, at most 10 s, 30 s in all), each attempt from its first read,
+// then "down" with nothing sent and the note PLANNED; any other error answers at once; a sign out ends the wait ----
+test("card start-reads-wait-out-a-throttle: a 429 or a 5xx at a deposit's first (the pool and rent), middle (the fee) or late (the simulation) read on either provider waits 1 s and deposits", async () => {
+  const where: [string, (m: string, q: readonly unknown[]) => boolean][] = [
+    ["first: the pool and the rent", (m, q) => m === "getMultipleAccounts" && (q[0] as string[]).includes(RENT_SYSVAR)],
+    ["middle: the fee", (m) => m === "getFeeForMessage"],
+    ["late: the simulation", (m) => m === "simulateTransaction"],
+  ];
+  for (const [what, hit] of where)
+    for (const fault of ["http_429", "http_5xx"] as const)
+      for (const bad of [0, 1] as const) {
+        const c = chain();
+        const ns = await notes();
+        c.fund((await plannedU(ns)).address, Number(RUNG) + COST);
+        let fired = false;
+        const gate = (i: 0 | 1, rpc: SolanaRpc): SolanaRpc => async (m, q) => {
+          if (!fired && i === bad && hit(m, q)) {
+            fired = true;
+            throw new SolanaRpcTransportError(fault, fault, 4, "api.devnet.solana.com", null);
+          }
+          return rpc(m, q);
+        };
+        const waits: number[] = [];
+        const label = `${what}, ${fault}, provider ${bad}`;
+        const a = await runPoolDeposit(host(c, ns, { rpcs: [gate(0, c.rpc()), gate(1, c.rpc())], wait: async (ms) => void (c.sent.length === 0 && waits.push(ms)) }), ask(RUNG));
+        assert.ok(fired, label);
+        assert.equal((a as { stage?: string }).stage, "filled", `${label}: ${JSON.stringify(a)}`);
+        assert.deepEqual(waits, [1_000], label);
+        assert.equal(c.sent.length, 1, label);
+      }
+});
+
+test("card start-reads-wait-out-a-throttle: a deposit's read throttled at every attempt waits 1, 2, 4, 8 and 10 s, then answers down: nothing sent, the note PLANNED; any other error answers at once", async () => {
+  {
+    const c = chain();
+    const ns = await notes();
+    c.fund((await plannedU(ns)).address, Number(RUNG) + COST);
+    const base = c.rpc();
+    const waits: number[] = [];
+    const always: SolanaRpc = async (m, q) => (m === "getFeeForMessage" ? Promise.reject(down()) : base(m, q));
+    assert.deepEqual(await runPoolDeposit(host(c, ns, { rpcs: [c.rpc(), always], wait: async (ms) => void waits.push(ms) }), ask(RUNG)), { error: "down" });
+    assert.deepEqual(waits, [1_000, 2_000, 4_000, 8_000, 10_000]);
+    assert.equal(c.sent.length, 0);
+    assert.deepEqual((await ours(ns)).map((n) => n.state), ["PLANNED"]);
+  }
+  {
+    const c = chain();
+    const ns = await notes();
+    c.fund((await plannedU(ns)).address, Number(RUNG) + COST);
+    const base = c.rpc();
+    const waits: number[] = [];
+    const broken: SolanaRpc = async (m, q) => (m === "getFeeForMessage" ? Promise.reject(new TypeError("x is not a function")) : base(m, q));
+    await runPoolDeposit(host(c, ns, { rpcs: [c.rpc(), broken], wait: async (ms) => void waits.push(ms) }), ask(RUNG)).catch(() => {});
+    assert.deepEqual(waits, []);
+    assert.equal(c.sent.length, 0);
+  }
+});
+
+test("card start-reads-wait-out-a-throttle: a sign out ends a deposit's wait at once; nothing is sent after it", async () => {
+  const c = chain();
+  const ns = await notes();
+  c.fund((await plannedU(ns)).address, Number(RUNG) + COST);
+  const base = c.rpc();
+  let once = false;
+  const fails: SolanaRpc = async (m, q) => (m === "getFeeForMessage" && !once ? ((once = true), Promise.reject(down())) : base(m, q));
+  const stop = new AbortController();
+  const run = runPoolDeposit(host(c, ns, { rpcs: [c.rpc(), fails], signal: stop.signal, wait: () => (stop.abort(), new Promise<void>(() => {})) }), ask(RUNG));
+  const a = await Promise.race([run, new Promise<"held">((r) => setTimeout(() => r("held"), 5_000))]);
+  assert.deepEqual(a, { error: "failed" });
+  assert.equal(c.sent.length, 0);
+});

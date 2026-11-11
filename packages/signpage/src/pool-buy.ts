@@ -115,6 +115,7 @@ import { solanaContextOf, solanaPoolOf, type SolanaPoolPin, type SolanaReleaseRe
 import { WALLET_SEED_LOCK } from "@blindfill/wallet/store";
 import { checkSolanaBuy, PoolRuleRefused, signSolana, type PoolAsk } from "./rules/pool.ts";
 import { spendOwner, type HistoryPlaces, type SpendOwner } from "./pool-spend.ts";
+import { keptReads, readsWaited, solanaStableReads, waitsOn } from "./read-waits.ts";
 import type { HostAnswer, HostRefusal, KindContext, Running } from "./api.ts";
 
 /** The page's own copy of the kit's route bound: a frozen RegExp's matcher can still be swapped
@@ -170,13 +171,16 @@ export type PoolBuyHost = {
    *  passed and W derived to the proof's recipient, then the amount W received once the transaction read back on both
    *  RPCs as the same. Each once, in that order; a throw here never stops the buy. */
   route?(r: BuyRoute): void;
-  /** W's address and the decimals of the token it received, read with that amount on both RPCs: told just before the
-   *  route's amount, for the device's buy record (src/positions.ts); a throw here never stops the buy. */
-  outDecimals?(wallet: string, decimals: number): void;
+  /** W's address, the decimals of the token it received, read with that amount on both RPCs, and the token's mint:
+   *  told just before the route's amount, for the device's buy record (src/positions.ts) and the page's kept decimals
+   *  (pool-kinds.ts PAGE_TOKEN_DECIMALS); a throw here never stops the buy. */
+  outDecimals?(wallet: string, decimals: number, mint: string): void;
   /** The notes a run on this page has picked and not finished: a second tap picks another ready proof. */
   claimed?: Set<string>;
   /** Tests only: the venue's fee recipient and the Jito tip account, else random. */
   pick?: (n: number) => number;
+  /** The session's sign out: it ends a wait before the buy's next attempt, and the buy never starts again after it. */
+  signal?: AbortSignal;
 };
 
 export type PoolBuyAnswer = { stage: TradeStage; txs: TxRef[] } | { error: "not_allowed" | "not_funded" | "quote_check_failed" | "venue_not_pinned" | "no_table_fits" | "failed" | "down" };
@@ -511,8 +515,18 @@ export function unitsOf(raw: bigint, decimals: number): string {
 type Ready = ReadyProof<SolanaReleaseRequest>;
 type Got = "none" | "ok" | "failed" | "other";
 
-/** One pool.buy: the ask is the user's own (rules/pool.ts checkPoolRequest passed it). */
-export async function runPoolBuy(h: PoolBuyHost, ask: PoolAsk): Promise<PoolBuyAnswer> {
+/** One pool.buy: the ask is the user's own (rules/pool.ts checkPoolRequest passed it). A provider read that still fails
+ *  past the page's own retry before W signs makes the buy again from its first read after a wait on the page's one rule
+ *  (read-waits.ts readWaits: from 1 s, doubling, at most 10 s, until READ_WAIT_TOTAL_MS), then "down" (card
+ *  start-reads-wait-out-a-throttle): each attempt reads its reference, venue, sizes and blockhash again, so nothing it
+ *  signs rests on a read from before a wait; the Rent sysvar is kept per provider across the attempts (keptReads). A
+ *  sign out ends the wait, and the buy answers failed, nothing taken or signed. */
+export async function runPoolBuy(host: PoolBuyHost, ask: PoolAsk): Promise<PoolBuyAnswer> {
+  const h: PoolBuyHost = Object.assign(Object.create(host) as PoolBuyHost, { rpcs: keptReads(host.rpcs, solanaStableReads(null)) });
+  return readsWaited((at) => buyRun(h, ask, at), h.wait, h.signal);
+}
+
+async function buyRun(h: PoolBuyHost, ask: PoolAsk, at: { fault?: unknown }): Promise<PoolBuyAnswer> {
   let seed: Uint8Array | null = null;
   let key: Uint8Array | null = null;
   let claim: string | null = null;
@@ -651,7 +665,7 @@ export async function runPoolBuy(h: PoolBuyHost, ask: PoolAsk): Promise<PoolBuyA
       const decimals = (d: number): void => {
         // a record's decimals never stop a buy: a listener that throws, or rejects
         try {
-          void Promise.resolve(h.outDecimals?.(w.address, d)).catch(() => {});
+          void Promise.resolve(h.outDecimals?.(w.address, d, token)).catch(() => {});
         } catch {
           /* thrown */
         }
@@ -661,8 +675,12 @@ export async function runPoolBuy(h: PoolBuyHost, ask: PoolAsk): Promise<PoolBuyA
   } catch (e) {
     if (e instanceof Refused) return { error: e.code };
     if (e instanceof PoolRuleRefused) return { error: "quote_check_failed" };
-    // a provider read that still fails after the page's own retry, before W signs: "not now" (card pool-read-down)
-    if (!signing && e instanceof SolanaRpcTransportError) return { error: "down" };
+    // a provider read that still fails after the page's own retry, before W signs: "not now" (card pool-read-down),
+    // after the rule's waits (runPoolBuy)
+    if (!signing && waitsOn(e)) {
+      at.fault = e;
+      return { error: "down" };
+    }
     return { error: "failed" };
   } finally {
     seed?.fill(0);

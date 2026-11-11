@@ -63,6 +63,7 @@ import { evmSameChainDeposit } from "../../wallet/src/pool/same-chain.ts";
 import { ladderSplit } from "../../wallet/src/pool/ladder.ts";
 import { WALLET_SEED_LOCK } from "@blindfill/wallet/store";
 import { checkEvmDeposit, EVM_DEPOSIT_GAS_MAX, evmDepositHeadroom, PoolRuleRefused, signEvmDeposit, type EvmOnwardSend, type PoolAsk } from "./rules/pool.ts";
+import { readsWaited } from "./read-waits.ts";
 import { followWait, POOL_DEPOSIT_FOLLOW_MAX_MS, POOL_DEPOSIT_LOCK, stopped, type PoolDepositAnswer } from "./pool-deposit.ts";
 import type { HostAnswer, HostRefusal, KindContext, Running } from "./api.ts";
 
@@ -556,6 +557,13 @@ export async function followPoolDepositEvm(h: PoolDepositEvmHost, left: PoolDepo
 
 /** The run: an ask (pool.deposit on an EVM chain), or null to settle the scope's open notes only. */
 export async function runPoolDepositEvm(h: PoolDepositEvmHost, ask: PoolAsk | null): Promise<PoolDepositAnswer> {
+  // an ask's provider read that still fails before U signs: the run again from its first read after a wait on the
+  // page's one rule (read-waits.ts readWaits), then "down" (card start-reads-wait-out-a-throttle); a sign out ends it
+  if (ask === null) return depositRunEvm(h, ask, {});
+  return readsWaited((at) => depositRunEvm(h, ask, at), h.wait, h.signal);
+}
+
+async function depositRunEvm(h: PoolDepositEvmHost, ask: PoolAsk | null, at: { fault?: unknown }): Promise<PoolDepositAnswer> {
   if (ask !== null && (ask.kind !== "pool.deposit" || ask.chain === "solana")) return { error: "not_allowed" };
   const seed = await h.seed64();
   const keys: Uint8Array[] = [];
@@ -701,7 +709,7 @@ export async function runPoolDepositEvm(h: PoolDepositEvmHost, ask: PoolAsk | nu
     // a provider read that still fails after the page's own retry (or a lag past its tries), before U signs: "not now"
     // (card pool-read-down); any other fault before a send (two RPCs that read apart, an answer out of shape): failed,
     // except past a send of the pass, which may land: not_landed
-    if (e instanceof SolanaRpcTransportError || e instanceof EvmUnansweredError || e instanceof EvmLagError) return { error: "down" };
+    if (e instanceof SolanaRpcTransportError || e instanceof EvmUnansweredError || e instanceof EvmLagError) return ((at.fault = e), { error: "down" });
     if (passSent) return { stage: "not_landed", txs: [] };
     return { error: "failed" };
   } finally {

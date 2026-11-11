@@ -104,6 +104,7 @@ import { ladderSplit } from "../../wallet/src/pool/ladder.ts";
 import { SOL_LADDER, solanaPoolOf, solanaTreeSync, type SolanaPoolPin } from "../../wallet/src/pool/solana.ts";
 import { WALLET_SEED_LOCK } from "@blindfill/wallet/store";
 import { checkSolanaDeposit, PoolRuleRefused, signSolana, type PoolAsk } from "./rules/pool.ts";
+import { keptReads, readsWaited, solanaStableReads } from "./read-waits.ts";
 import type { HostAnswer, HostRefusal, KindContext, Running } from "./api.ts";
 
 export type PoolDepositHost = {
@@ -475,7 +476,16 @@ function uOf(ref: NoteRef): { s: bigint; i: number } | null {
  *  next second arrival; never the newest-used-or-planned pick, so money a quote sent to an older U_X goes in from U_X.
  *  `u` is the op's U_X: U_{s,i}'s own address must be it (review 2 L2), so an op naming another index never pays from it. */
 export type PoolDepositFrom = { s: bigint; i: number; u: string };
-export async function runPoolDeposit(h: PoolDepositHost, ask: PoolAsk | null, fixed?: PoolDepositFrom): Promise<PoolDepositAnswer> {
+export async function runPoolDeposit(host: PoolDepositHost, ask: PoolAsk | null, fixed?: PoolDepositFrom): Promise<PoolDepositAnswer> {
+  if (ask === null) return depositRun(host, ask, fixed, {});
+  // an ask's provider read that still fails past the page's own retry, with nothing of it sent: the run again from its
+  // first read after a wait on the page's one rule (read-waits.ts readWaits), then "down" (card start-reads-wait-out-a-
+  // throttle); the Rent sysvar kept per provider across the attempts; a sign out ends the wait, nothing signed after it
+  const h: PoolDepositHost = Object.assign(Object.create(host) as PoolDepositHost, { rpcs: keptReads(host.rpcs, solanaStableReads(null)) });
+  return readsWaited((at) => depositRun(h, ask, fixed, at), h.wait, h.signal);
+}
+
+async function depositRun(h: PoolDepositHost, ask: PoolAsk | null, fixed: PoolDepositFrom | undefined, at: { fault?: unknown }): Promise<PoolDepositAnswer> {
   if (ask !== null && (ask.kind !== "pool.deposit" || ask.chain !== "solana")) return { error: "not_allowed" };
   const { pool, scope } = solanaPoolOf(h.pin.program);
   const store = await h.notes();
@@ -817,8 +827,9 @@ export async function runPoolDeposit(h: PoolDepositHost, ask: PoolAsk | null, fi
     if (landed) return { stage: "part_filled", txs: landedTxs };
     if (open().length) return { stage: "sent", txs: open() };
     // a provider read that still fails after the page's own retry, with nothing of the ask landed and no send of it that
-    // may still land (none signed, or each one taken): "not now", and the user can ask again (card pool-read-down)
-    if (e instanceof SolanaRpcTransportError) return { error: "down" };
+    // may still land (none signed, or each one taken): "not now", and the user can ask again (card pool-read-down),
+    // after the rule's waits (runPoolDeposit)
+    if (e instanceof SolanaRpcTransportError) return ((at.fault = e), { error: "down" });
     throw e;
   } finally {
     for (const k of keys) k.fill(0);
