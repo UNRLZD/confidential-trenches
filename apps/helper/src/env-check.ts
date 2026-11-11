@@ -52,21 +52,23 @@ export function checkPoolRpcOperators(env: Record<string, string | undefined>): 
   }
 }
 
-/** The signing page's direct Solana seat (packages/signpage/src/trade.ts SOLANA_PROVIDER_A; the helper imports no page
- *  code, so packages/signpage/test/pool-testnet.test.ts reads this file's constant and holds the two equal). */
-export const PAGE_SOLANA_DIRECT = "https://solana-rpc.publicnode.com";
+/** The signing page's public Solana seat, every member (packages/signpage/src/trade.ts SOLANA_PUBLIC_SEAT: provider A,
+ *  then its spare; card signpage-throttled-provider-has-a-spare). The helper imports no page code, so
+ *  packages/signpage/test/pool-testnet.test.ts reads this file's constant and holds the two equal. */
+export const PAGE_SOLANA_PUBLIC_SEAT: readonly string[] = Object.freeze(["https://solana-rpc.publicnode.com", "https://solana.api.pocket.network"]);
 
 /**
  * Throws when a keyed Solana URL the helper would read /v1/rpc/solana from (rpc/rpc.ts RPC_UPSTREAMS.solana keyed
- * names) is run by the operator of the signing page's direct Solana seat (PAGE_SOLANA_DIRECT), or has no operator (not
- * an http(s) URL): the page reads every Solana pool mark and page on its pair, that seat directly and this helper's
+ * names) is run by the operator of any member of the signing page's public Solana seat (PAGE_SOLANA_PUBLIC_SEAT: a read
+ * provider A throttles goes to its spare, so either may be the pair's public side), or has no operator (not an http(s)
+ * URL): the page reads every Solana pool mark and page on its pair, that seat directly and this helper's
  * /v1/rpc/solana as the other (packages/signpage/src/pool-testnet.ts pageSolanaRpcs), and a mark counts only when both
  * give it the same bytes, so the two seats must be two operators (card sol-pools-mainnet-pin, review P3-6 of
  * a34c1626). The operator is rpc/rpc.ts operatorOf's. Names the variable and the operator, never the URL or any part
  * of it: a keyed URL carries its key.
  */
 export function checkSolanaPairOperators(env: Record<string, string | undefined>): void {
-  const direct = operatorOf(PAGE_SOLANA_DIRECT);
+  const seat = new Set(PAGE_SOLANA_PUBLIC_SEAT.map(operatorOf));
   for (const name of RPC_UPSTREAMS.solana.keyed) {
     const url = env[name];
     if (url === undefined || url === "") continue;
@@ -74,8 +76,8 @@ export function checkSolanaPairOperators(env: Record<string, string | undefined>
     try {
       op = /^https?:$/.test(new URL(url).protocol) ? operatorOf(url) : null;
     } catch {}
-    if (op === null) throw new Error(`${name}: not an http(s) URL, so no operator apart from the page's direct Solana seat`);
-    if (op === direct) throw new Error(`${name}: its operator ${op} is the signing page's direct Solana seat, so the page's pair would read one operator twice`);
+    if (op === null) throw new Error(`${name}: not an http(s) URL, so no operator apart from the page's public Solana seat`);
+    if (seat.has(op)) throw new Error(`${name}: its operator ${op} runs a member of the signing page's public Solana seat, so the page's pair would read one operator twice`);
   }
 }
 

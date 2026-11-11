@@ -122,8 +122,8 @@ export class ThrottleGate {
 // and a sell tapped then was refused down. The page sent 39 and 38 requests in the 10 s before each first 429 there.
 // - HostLane: one provider host's state, shared by every reader of that host on the page, whatever its route or object.
 //   Its `gate` is the one rule above (ThrottleGate): a throttle any reader meets pauses the host for every reader, from
-//   1 s, doubling to 10 s, the provider's Retry-After when longer (held to 10 s), back to none once a read sent after it
-//   goes through.
+//   1 s, doubling to 10 s, the provider's Retry-After when longer (held to 10 s); the doubling is kept until the host
+//   has been open THROTTLE_QUIET_MS, and a read sent after the throttle that goes through only clears its doubt.
 // - Its budget: every request the page sends the host is counted (sent(); laneFetch for those that go through no laned
 //   RPC: the helper's sends and fee route, the holdings and keyed routes, every send path), a trade's with the rest. A background read
 //   ("pass") goes only while the page has sent the host fewer than PASS_BUDGET in the last HOST_WINDOW_MS, which leaves
@@ -132,7 +132,8 @@ export class ThrottleGate {
 //   whatever trades hold or send, so no pass ever parks for long (the review of a1a6bad6, P1 and P2: a pass parked to
 //   a trade's end while it held what that trade waited for); a pass asleep for room is woken when a trade starts, so the
 //   floor holds from its start (the delta review of ed85d367). A trade's read ("trade") never waits on the
-//   budget, only on the host's pause, and on that at most TRADE_TURN_MAX_MS: its turn has a deadline.
+//   budget, only on the host's pause, and on that at most TRADE_TURN_MAX_MS from its start (a pause it cannot wait out
+//   inside that is refused at once, HostPaused); then on the probe after the pause, at most PROBE_HELD_MAX_MS.
 // - A trade (a buy or a sell, from its host's making to its run's end, at most TRADE_HOLD_MAX_MS) holds the lanes of the
 //   hosts it reads (trade()).
 // - A reader that holds anything a trade can wait for (a lock a trade takes) reads as a trade, never as a pass: the
@@ -144,7 +145,8 @@ export class ThrottleGate {
 //   429 again. Now, once a pause ends on a host whose last word was a throttle (gate.suspect()), one read goes (a
 //   trade's when one is parked) and every other waits until it settles: its answer opens the host to all of them, its
 //   throttle starts the next pause, any other fault lets the next read probe. Only the page's own reads that report
-//   their outcome (lanedRpc: answered, throttled, failed) probe; a turn that reports none never takes the probe.
+//   their outcome (lanedRpc: answered, throttled, failed) probe; a turn that reports none never takes the probe. A
+//   probe out past PROBE_HELD_MAX_MS (its try's own timeout) is lost, and the next read probes.
 // - Trades first: while a trade's read waits its turn on a host, no pass leaves it; the passes go after, on the budget.
 // - A wait is held to the reader's bound (`by`, and a trade's TRADE_TURN_MAX_MS): a wait known to pass it (the pause,
 //   the window's room) is refused at once (HostPaused), and one held for the probe is refused at the bound, never sent
@@ -163,7 +165,8 @@ export const PASS_BUDGET = 30;
 export const PASS_BUDGET_TRADING = 20;
 /** A background read goes at least this often on a host, whatever trades hold it or send: 2 in any 10 s at most. */
 export const PASS_FLOOR_MS = 5_000;
-/** The longest a trade's read waits for the host's pause before it is asked anyway (its turn's deadline). */
+/** The longest a trade's read waits for the host's pause, from its turn's start: a pause that would end past it is
+ *  refused at once (HostPaused), never asked anyway. */
 export const TRADE_TURN_MAX_MS = 10_000;
 
 /** A turn refused: the host's wait would pass the reader's bound (see the header). Nothing was sent or counted. */
@@ -175,8 +178,13 @@ export class HostPaused extends Error {
     this.host = host;
   }
 }
-// a wait for the probe to settle: no time is known, the probe's settle wakes it (a re-check at most this late)
-const HELD_MS = HOST_WINDOW_MS;
+// a held wait (the probe out, or trades parked ahead of a pass): no time is known, a settle or a trade's end wakes it; it
+// re-checks at most this late
+const HELD_RECHECK_MS = HOST_WINDOW_MS;
+/** The longest one probe is waited for: a page read's one try ends by then (packages/kit/src/trade/solana/send.ts
+ *  SOLANA_CALL_TIMEOUT_MS, 5 s, every try's timeout). A probe out longer has stalled past its own timeout's report, so
+ *  the next read probes (no host ever waits on a lost probe). */
+export const PROBE_HELD_MAX_MS = 5_000;
 
 /** One provider host's budget on this page (see the header). `now` is the clock, `sleep` the wait (tests replace them). */
 export class HostLane {
@@ -186,6 +194,7 @@ export class HostLane {
   #lastPass = -Infinity;
   // a read that reports its outcome is out after a pause on a host in doubt: every other waits for it to settle
   #probeOut = false;
+  #probeAt = -Infinity;
   // trades' reads waiting their turn now: no pass leaves while one does
   #parked = 0;
   // the passes waiting now: woken when a trade starts, so the floor holds from its start (a pass asleep for room learns
@@ -257,7 +266,7 @@ export class HostLane {
   // a read leaves now: counted (unless its transport counts it), the pass's floor clock moved, and the probe taken by a
   // read that reports its outcome when the host is in doubt
   #go(kind: "trade" | "pass", count: boolean, reports: boolean): void {
-    if (reports && this.gate.suspect()) this.#probeOut = true;
+    if (reports && this.gate.suspect()) (this.#probeOut = true), (this.#probeAt = this.#now());
     this.sent(kind, count);
   }
   /** A read that reports its outcome leaves now, after open(kind) said it may (lanedRpc's synchronous send). */
@@ -278,52 +287,59 @@ export class HostLane {
     while (this.#sent.length > 0 && this.#sent[0]! <= from) this.#sent.shift();
     return this.#sent.length;
   }
-  /** How long until a read of `kind` may go (0: now). */
-  #waitMs(kind: "trade" | "pass"): number {
+  /** How long until a read of `kind` may go (ms 0: now). `held`: no time is known (the probe out, or trades parked
+   *  ahead of a pass): a settle or a trade's end wakes it, `ms` a re-check. */
+  #waitOf(kind: "trade" | "pass"): { ms: number; held: boolean } {
     const pause = this.gate.left();
-    if (pause > 0) return pause;
+    if (pause > 0) return { ms: pause, held: false };
     if (this.gate.suspect()) {
+      // a probe out past its own try's timeout is lost: the next read probes
+      if (this.#probeOut && this.#now() - this.#probeAt >= PROBE_HELD_MAX_MS) this.#probeOut = false;
       // after a pause: one probe, a trade's when one waits; the rest wait for it to settle
-      if (this.#probeOut || (kind === "pass" && this.#parked > 0)) return HELD_MS;
-      return 0;
+      if (this.#probeOut) return { ms: Math.max(1, Math.min(HELD_RECHECK_MS, this.#probeAt + PROBE_HELD_MAX_MS - this.#now())), held: true };
+      if (kind === "pass" && this.#parked > 0) return { ms: HELD_RECHECK_MS, held: true };
+      return { ms: 0, held: false };
     }
-    if (kind === "trade") return 0;
+    if (kind === "trade") return { ms: 0, held: false };
     // trades first: no pass leaves while a trade's read waits its turn here
-    if (this.#parked > 0) return HELD_MS;
+    if (this.#parked > 0) return { ms: HELD_RECHECK_MS, held: true };
     const cap = this.#trades > 0 ? PASS_BUDGET_TRADING : PASS_BUDGET;
     const n = this.inWindow();
-    if (n < cap) return 0;
+    if (n < cap) return { ms: 0, held: false };
     // the floor holds only while a trade holds the host: with none, the window's own room comes
     const floor = this.#trades > 0 ? this.#lastPass + PASS_FLOOR_MS - this.#now() : Infinity;
-    if (floor <= 0) return 0;
+    if (floor <= 0) return { ms: 0, held: false };
     // room once the oldest requests past the cap leave the window
     const room = this.#sent[n - cap]! + HOST_WINDOW_MS - this.#now();
-    return Math.max(1, Math.min(floor, room));
+    return { ms: Math.max(1, Math.min(floor, room)), held: false };
   }
   /** How long a read of `kind` would wait now, ms (0: it may go); a seat picks the member that opens first by it. */
   wait(kind: "trade" | "pass"): number {
-    return this.#waitMs(kind);
+    return this.#waitOf(kind).ms;
   }
   /** Whether a read of `kind` may go now, with no wait (a synchronous call keeps a paced queue's slot its own). */
   open(kind: "trade" | "pass"): boolean {
-    return this.#waitMs(kind) <= 0;
+    return this.#waitOf(kind).ms <= 0;
   }
   /** A read's turn (see the header). The read is counted as sent once it ends: the caller sends it in the same tick.
    *  `reports`: the caller reports the read's outcome (answered, throttled, failed), so it may be the probe. `by`: the
-   *  reader's bound on this lane's clock; a trade's is also TRADE_TURN_MAX_MS from now. A wait past either is refused
-   *  (HostPaused), nothing counted. A sign out's stopHostLaneWaits ends it as `signal` does. */
+   *  reader's bound on this lane's clock, on every wait. A trade's known waits (the host's pause) are also held to
+   *  TRADE_TURN_MAX_MS from its start; its wait for a probe to settle is not (a read that waited a 10 s pause out is asked
+   *  once the probe settles, held to PROBE_HELD_MAX_MS by the probe's own). A known wait past its bound is refused at
+   *  once (HostPaused), a held one at its bound; nothing counted. A sign out's stopHostLaneWaits ends it as `signal` does. */
   async turn(kind: "trade" | "pass", given?: AbortSignal, count = true, o: { reports?: boolean; by?: number } = {}): Promise<void> {
     const signal = laneSignal(given);
-    const limit = Math.min(o.by ?? Infinity, kind === "trade" ? this.#now() + TRADE_TURN_MAX_MS : Infinity);
+    const by = o.by ?? Infinity;
+    const capped = Math.min(by, kind === "trade" ? this.#now() + TRADE_TURN_MAX_MS : Infinity);
     if (kind === "trade") this.#parked++;
     try {
       for (;;) {
         signal.throwIfAborted();
-        const ms = this.#waitMs(kind);
+        const { ms, held } = this.#waitOf(kind);
         if (ms <= 0) return void this.#go(kind, count, o.reports === true);
-        const left = limit - this.#now();
+        const left = (held ? by : capped) - this.#now();
         // a known wait past the bound is refused now: never waited out to be dropped at its end
-        if (left <= 0 || (ms !== HELD_MS && ms > left)) throw new HostPaused(this.host);
+        if (left <= 0 || (!held && ms > left)) throw new HostPaused(this.host);
         // the floor, the window, the pause (at most 10 s), the probe's settle or a trade's start, whichever comes first
         let wake!: () => void;
         const woken = new Promise<void>((r) => (wake = r));
@@ -400,6 +416,25 @@ export function laneFetch(f?: (url: string, init?: RequestInit) => Promise<Respo
   return ((url: string | URL | Request, init?: RequestInit) => {
     hostLane(url instanceof Request ? url.url : String(url)).count();
     return (f ?? globalThis.fetch)(url as string, init);
+  }) as typeof fetch;
+}
+/** `f` for a trade's send paths (card signpage-throttled-provider-has-a-spare, the review of 507431c0 item 8): the send
+ *  set rebroadcasts every tx every 2 s on its unlimited paths, among them provider A, whose reads the same trade makes.
+ *  A request to a host in its pause is not sent (the set's other paths carry the tx; a path's failure is only noted), so
+ *  the rebroadcast never draws a 429 the trade's reads then wait out; one sent is counted, and its 429 or 5xx pauses the
+ *  host for every reader, as a read's does. An answer is not reported: a send is never a probe. */
+export function laneSendFetch(f?: (url: string, init?: RequestInit) => Promise<Response>): typeof fetch {
+  return (async (url: string | URL | Request, init?: RequestInit) => {
+    const l = hostLane(url instanceof Request ? url.url : String(url));
+    if (l.gate.left() > 0) throw new Error(`not sent: ${l.host} is paused after a throttle`);
+    const sentIn = l.gate.epoch();
+    l.count();
+    const r = await (f ?? globalThis.fetch)(url as string, init);
+    if (r.status === 429 || (r.status >= 500 && r.status <= 599)) {
+      const s = Number(r.headers.get("retry-after"));
+      l.throttled(sentIn, Number.isFinite(s) && s > 0 ? s * 1_000 : null);
+    }
+    return r;
   }) as typeof fetch;
 }
 /** Forgets every host's lane (tests: each test's clock starts at its own zero). */

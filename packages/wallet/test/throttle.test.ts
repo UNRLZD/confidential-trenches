@@ -9,7 +9,7 @@ import { solanaJsonRpc, solanaPacedRpc } from "@blindfill/kit";
 import { SOLANA_KEYLESS_RPC_LIMIT } from "../../kit/src/trade/solana/send.ts";
 import { onTestClock } from "../../kit/test/test-clock.ts";
 import * as d from "../src/derive/index.ts";
-import { HOST_WINDOW_MS, HostLane, HostPaused, THROTTLE_QUIET_MS, holdHosts, hostLane, PASS_BUDGET, PASS_BUDGET_TRADING, PASS_FLOOR_MS, resetHostLanes, stopHostLaneWaits, THROTTLE_BOUNDS, THROTTLE_PAUSE_FIRST_MS, THROTTLE_PAUSE_MAX_MS, THROTTLE_RETRY_AFTER_MAX_MS, ThrottleGate, throttleWaitMs, TRADE_HOLD_MAX_MS, TRADE_TURN_MAX_MS } from "../src/throttle.ts";
+import { HOST_WINDOW_MS, HostLane, HostPaused, PROBE_HELD_MAX_MS, THROTTLE_QUIET_MS, holdHosts, hostLane, laneSendFetch, PASS_BUDGET, PASS_BUDGET_TRADING, PASS_FLOOR_MS, resetHostLanes, stopHostLaneWaits, THROTTLE_BOUNDS, THROTTLE_PAUSE_FIRST_MS, THROTTLE_PAUSE_MAX_MS, THROTTLE_RETRY_AFTER_MAX_MS, ThrottleGate, throttleWaitMs, TRADE_HOLD_MAX_MS, TRADE_TURN_MAX_MS } from "../src/throttle.ts";
 import { buyWallets, evmHoldingsReader, HOLDINGS_THROTTLE_MAX_MS, HOLDINGS_THROTTLED_ROUNDS_60S, solanaHelperHoldings, solanaHoldingsAt, solanaHoldingsReader, type HoldingsReader } from "../src/pool/buy-wallets.ts";
 
 const SEED = d.wordsToSeed64(d.entropyToWords(new Uint8Array(16)));
@@ -707,4 +707,83 @@ test("HostLane: with a trade parked, a pass never leaves before it, and a turn t
   await m.flush();
   assert.equal(probed, true, "the probe was not taken by a turn that reports no outcome");
   await next;
+});
+
+// The review of 507431c0, P2: a 10 s pause (the doubling's cap, the helper's own Retry-After ceiling) is as long as a
+// trade's turn, so every parked trade read but the probe was refused unsent at the pause's end. The wait for the probe's
+// verdict has its own bound: each read that waited the pause out goes once the probe settles.
+test("HostLane: after a 10 s pause, every trade read that waited it out goes once the probe answers, none refused", async () => {
+  const { l, advance, flush } = plantedLane();
+  l.throttled(l.gate.epoch(), 10_000);
+  assert.equal(l.gate.left(), 10_000);
+  await advance(5);
+  const out: string[] = [];
+  const turn = (n: string) => l.turn("trade", undefined, true, { reports: true }).then(() => void out.push(`${n}:sent`), (e: unknown) => void out.push(`${n}:${e instanceof HostPaused ? "HostPaused" : String(e)}`));
+  const all = [turn("t1"), turn("t2"), turn("t3")];
+  await flush();
+  await advance(10_000);
+  assert.deepEqual(out, ["t1:sent"], "the probe alone at the pause's end");
+  const probe = l.gate.epoch();
+  await advance(10_100);
+  assert.deepEqual(out, ["t1:sent"], "the rest wait for the probe, past the turn's 10 s from their start");
+  l.answered(probe);
+  await Promise.all(all);
+  assert.deepEqual(out, ["t1:sent", "t2:sent", "t3:sent"]);
+  assert.equal(l.inWindow(), 3);
+});
+
+test("HostLane: a known 10 s pause against a 3.5 s bound is refused at once, nothing sent or counted", async () => {
+  const { l, flush } = plantedLane();
+  l.throttled(l.gate.epoch(), 10_000);
+  let err: unknown = null;
+  const p = l.turn("trade", undefined, true, { reports: true, by: 3_500 }).catch((e: unknown) => void (err = e));
+  await flush();
+  assert.ok(err instanceof HostPaused, "refused at once, not at 3.5 s");
+  await p;
+  assert.equal(l.inWindow(), 0);
+});
+
+test("HostLane: a probe that fails any other way settles it (the host still in doubt, the next read probes); a lost probe is given up at PROBE_HELD_MAX_MS", async () => {
+  const { l, advance, flush } = plantedLane();
+  l.throttled(l.gate.epoch(), null);
+  const order: string[] = [];
+  const t = (n: string) => l.turn("trade", undefined, true, { reports: true }).then(() => void order.push(n));
+  const a = t("a");
+  const b = t("b");
+  const c = t("c");
+  await advance(1_000);
+  assert.deepEqual(order, ["a"]);
+  // a's read stalled and was dropped: failed() settles the probe, so b probes at once (no dead lane)
+  l.failed(l.gate.epoch());
+  await flush();
+  assert.deepEqual(order, ["a", "b"], "the next read probes after a failed probe");
+  // b's read is never reported: c waits PROBE_HELD_MAX_MS for it, then probes in its place
+  await advance(1_000 + PROBE_HELD_MAX_MS - 1);
+  assert.deepEqual(order, ["a", "b"]);
+  await advance(1_000 + PROBE_HELD_MAX_MS);
+  assert.deepEqual(order, ["a", "b", "c"], "a lost probe is given up at its try's timeout");
+  await Promise.all([a, b, c]);
+});
+
+// The review of 507431c0, item 8: the send set's 2 s rebroadcast to provider A honours the host's pause and reports
+// its throttles, so it never keeps a host in 429 that the same trade's reads use.
+test("laneSendFetch: a request to a paused host is not sent or counted; one sent is counted, and its 429 pauses the host for every reader", async () => {
+  resetHostLanes();
+  const url = "https://send-lane.example/";
+  const sent: string[] = [];
+  let status = 429;
+  const f = laneSendFetch(async (u: string) => (sent.push(u), new Response("", { status, headers: { "retry-after": "2" } })));
+  const r = await f(url, { method: "POST" });
+  assert.equal(r.status, 429);
+  assert.deepEqual(sent, [url]);
+  assert.equal(hostLane(url).inWindow(), 1, "counted");
+  assert.equal(hostLane(url).gate.left() > 1_900, true, "the 429's Retry-After pauses the host");
+  await assert.rejects(f(url, { method: "POST" }), /not sent: send-lane\.example is paused/);
+  assert.deepEqual(sent, [url], "nothing sent in the pause");
+  assert.equal(hostLane(url).inWindow(), 1, "nothing counted in the pause");
+  resetHostLanes();
+  status = 200;
+  await f(url, { method: "POST" });
+  assert.equal(hostLane(url).gate.suspect(), false, "an answer is not reported");
+  resetHostLanes();
 });

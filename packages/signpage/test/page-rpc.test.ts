@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { SolanaRpcTransportError, solanaPacedRpc, solanaSameProvider } from "../../kit/src/trade/solana/send.ts";
 import { pageHelperRpc, pageHelperRpcStopped, pageRpc, seatHosts } from "../src/page-rpc.ts";
-import { pageSolanaLister, pageSolanaRpcs, pageSolanaSettleRpcs, testnetPoolDeps } from "../src/pool-testnet.ts";
+import { pageSolanaLister, pageSolanaRpcs, pageSolanaSettleRpcs, testnetPool, testnetPoolDeps } from "../src/pool-testnet.ts";
 import { SOLANA_PROVIDER_A, SOLANA_PUBLIC_SEAT, TRADE_HELPER, releaseTradeDeps } from "../src/trade.ts";
 import { hostLane, resetHostLanes } from "../../wallet/src/throttle.ts";
 import { onTestClock } from "../../kit/test/test-clock.ts";
@@ -131,11 +131,12 @@ test("the page's trade path (src/trade.ts releaseTradeDeps): both providers read
 // Card signpage-throttled-provider-has-a-spare: the mainnet page's public seat is a list, provider A and Pocket's
 // gateway (src/trade.ts SOLANA_PUBLIC_SEAT). These run on fake providers on the test clock: each host answers as told
 // after 20 ms, and every request is logged with its host, method, params and its send's and answer's order.
-type SeatLog = { host: string; method: string; params: string; start: number; end: number; status: number };
-const onSeat = (answer: (host: string, n: number) => { status: number; result?: unknown; error?: unknown }, run: (log: SeatLog[]) => Promise<void>): Promise<void> =>
+type SeatLog = { host: string; method: string; params: string; start: number; end: number; status: number; endAt: number };
+type SeatAnswer = { status: number; result?: unknown; error?: unknown; down?: "throw" | "stall" };
+const onSeat = (answer: (host: string, n: number) => SeatAnswer, run: (log: SeatLog[]) => Promise<void>): Promise<void> =>
   onTestClock(() => onSeatNow(answer, run));
 let order = 0;
-async function onSeatNow(answer: (host: string, n: number) => { status: number; result?: unknown; error?: unknown }, run: (log: SeatLog[]) => Promise<void>): Promise<void> {
+async function onSeatNow(answer: (host: string, n: number) => SeatAnswer, run: (log: SeatLog[]) => Promise<void>): Promise<void> {
   const real = globalThis.fetch;
   const log: SeatLog[] = [];
   const per = new Map<string, number>();
@@ -145,11 +146,19 @@ async function onSeatNow(answer: (host: string, n: number) => { status: number; 
     const n = (per.get(host) ?? 0) + 1;
     per.set(host, n);
     const q = JSON.parse(String(init?.body)) as { id: string; method: string; params: unknown };
-    const row: SeatLog = { host, method: q.method, params: JSON.stringify(q.params), start: order++, end: 0, status: 0 };
+    const row: SeatLog = { host, method: q.method, params: JSON.stringify(q.params), start: order++, end: 0, status: 0, endAt: 0 };
     log.push(row);
-    await new Promise((r) => setTimeout(r, 20));
     const a = answer(host, n);
+    // no connection (a browser's TypeError, as a 429 with no CORS header reads), or no answer until the read's own stop
+    if (a.down === "throw") throw new TypeError("Failed to fetch");
+    if (a.down === "stall")
+      return new Promise<Response>((_, no) => {
+        if (init?.signal?.aborted) return no(init.signal.reason);
+        init?.signal?.addEventListener("abort", () => ((row.end = order++), no(init.signal!.reason)), { once: true });
+      });
+    await new Promise((r) => setTimeout(r, 20));
     row.end = order++;
+    row.endAt = performance.now();
     row.status = a.status;
     if (a.status !== 200) return new Response("Too Many Requests", { status: a.status });
     return new Response(JSON.stringify({ jsonrpc: "2.0", id: q.id, ...(a.error === undefined ? { result: a.result ?? host } : { error: a.error }) }), { status: 200 });
@@ -172,7 +181,9 @@ test("a public seat whose first provider throttles reads on its spare at once: o
     await onSeat((host) => (host === A_HOST ? { status: 429 } : { status: 200 }), async (log) => {
       const pair = make();
       assert.equal(await pair[0]("getAccountInfo", [W, { encoding: "base64" }]), SPARE_HOST);
-      assert.ok(hostLane(SOLANA_PROVIDER_A).gate.left() > 900, "answered while A's 1 s pause is still on: never waited out");
+      // on the test clock, which jumps over any wait: the spare answered inside A's 1 s pause, never after waiting it out
+      assert.ok(performance.now() - log[0]!.endAt < 1_000, `the spare answered ${Math.round(performance.now() - log[0]!.endAt)} ms after A's 429`);
+      assert.ok(hostLane(SOLANA_PROVIDER_A).gate.left() > 0, "A's pause still on");
       assert.deepEqual(log.map((r) => r.host), [A_HOST, SPARE_HOST]);
       assert.equal(log[1]!.params, log[0]!.params, "the spare is asked the same request, one wallet in it");
       assert.ok(log[1]!.start >= log[0]!.end, "the spare is asked only after A answered");
@@ -213,6 +224,75 @@ test("every public provider throttled: the read rejects with the throttle in its
     assert.ok(e instanceof SolanaRpcTransportError && e.fault === "http_429", String(e));
     assert.equal(log.filter((r) => r.host === A_HOST).length, 1);
     assert.ok(log.filter((r) => r.host === SPARE_HOST).length <= 2);
+  });
+});
+
+// The review of 507431c0, item 4: provider A with no connection, or stalled to the read's bound, fails the read over to
+// the spare once (a browser reads a 429 with no CORS header as no connection); A is not asked again by the read.
+test("a public seat whose first provider has no connection, or stalls to the read's bound, reads on its spare: A asked once", async () => {
+  for (const down of ["throw", "stall"] as const) {
+    await onSeat((host) => (host === A_HOST ? { status: 0, down } : { status: 200 }), async (log) => {
+      const t0 = performance.now();
+      assert.equal(await pageSolanaRpcs("trade")[0]("getAccountInfo", [W]), SPARE_HOST, down);
+      assert.deepEqual(log.map((r) => r.host), [A_HOST, SPARE_HOST], `${down}: A once, then the spare`);
+      assert.equal(log[1]!.params, log[0]!.params);
+      assert.ok(log[1]!.start > log[0]!.end || down === "throw", "never both at once");
+      // a stall fails over at A's try's bound (3.5 s), a dropped connection at once
+      const ms = performance.now() - t0;
+      assert.ok(down === "throw" ? ms < 100 : ms >= 3_400 && ms < 3_700, `${down}: the spare answered at ${Math.round(ms)} ms`);
+    });
+  }
+});
+
+// The review of 507431c0, item 5: with no member open, the seat asks the member whose host opens first.
+test("a public seat with every member paused asks the one whose pause ends first", async () => {
+  await onSeat(() => ({ status: 200 }), async (log) => {
+    const pair = pageSolanaRpcs("trade");
+    const a = hostLane(SOLANA_PROVIDER_A);
+    const sp = hostLane(SPARE);
+    a.throttled(a.gate.epoch(), 3_000);
+    sp.throttled(sp.gate.epoch(), null);
+    assert.ok(sp.gate.left() < a.gate.left());
+    const t0 = performance.now();
+    assert.equal(await pair[0]("getSlot", []), SPARE_HOST);
+    assert.deepEqual(log.map((r) => r.host), [SPARE_HOST], "the spare alone, A never asked");
+    const ms = performance.now() - t0;
+    assert.ok(ms >= 1_000 && ms < 1_200, `asked at the spare's 1 s, not A's 3 s: ${Math.round(ms)} ms`);
+  });
+  // the other way round: A opens first
+  await onSeat(() => ({ status: 200 }), async (log) => {
+    const pair = pageSolanaRpcs("trade");
+    const a = hostLane(SOLANA_PROVIDER_A);
+    const sp = hostLane(SPARE);
+    a.throttled(a.gate.epoch(), null);
+    sp.throttled(sp.gate.epoch(), 3_000);
+    assert.equal(await pair[0]("getSlot", []), A_HOST);
+    assert.deepEqual(log.map((r) => r.host), [A_HOST]);
+  });
+});
+
+// The review of 507431c0, item 5: a trade holds every member of the public seat, not only its first.
+test("the mainnet buy and sell hosts hold every host of the public seat, and the helper's, until their end", async () => {
+  await onSeat(() => ({ status: 200 }), async () => {
+    const made: { buy?: () => { end?(): void }; sell?: () => { end?(): void } } = {};
+    testnetPool(
+      { store: async () => assert.fail("no store read"), seed64: async () => assert.fail("no seed read") },
+      {
+        evmPin: () => undefined,
+        tradeKinds: {
+          buy: ((h: () => { end?(): void }) => ((made.buy = h), () => ({ error: "not_allowed" }))) as never,
+          sell: ((h: () => { end?(): void }) => ((made.sell = h), () => ({ error: "not_allowed" }))) as never,
+        },
+      },
+    );
+    const hosts = [...SOLANA_PUBLIC_SEAT, `${TRADE_HELPER}/v1/rpc/solana`];
+    for (const [name, make] of [["buy", made.buy], ["sell", made.sell]] as const) {
+      for (const u of hosts) assert.equal(hostLane(u).trading(), false, `${name} ${u}`);
+      const h = make!();
+      for (const u of hosts) assert.equal(hostLane(u).trading(), true, `${name}: ${u} held`);
+      h.end?.();
+      for (const u of hosts) assert.equal(hostLane(u).trading(), false, `${name}: ${u} given back`);
+    }
   });
 });
 

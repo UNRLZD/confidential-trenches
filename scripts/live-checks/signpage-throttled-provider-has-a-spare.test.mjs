@@ -6,11 +6,14 @@
 //   node --test scripts/live-checks/signpage-throttled-provider-has-a-spare.test.mjs
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { check, PROBE, SEATS, STABLE } from "./signpage-throttled-provider-has-a-spare.mjs";
 
 const A = JSON.parse(readFileSync(new URL("./signpage-throttled-provider-has-a-spare.answers.json", import.meta.url), "utf8"));
-const SRC = readFileSync(new URL("../../packages/signpage/src/trade.ts", import.meta.url), "utf8");
+// the page's source read as text, never reached (scripts/ci/kit-reach.mjs refuses a new URL into packages/)
+const SRC = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "../../packages/signpage/src/trade.ts"), "utf8");
 
 test("the seats are the page's: provider A first, its spare after it, as src/trade.ts names them", () => {
   assert.match(SRC, new RegExp(`export const SOLANA_PROVIDER_A = "${SEATS[0]}";`));

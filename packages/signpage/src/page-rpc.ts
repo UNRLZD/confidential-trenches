@@ -10,9 +10,10 @@
 //   doubling to 10 s, a Retry-After when longer; api.devnet.solana.com exposes none to a page), and the read that met it
 //   is asked again once, after that pause; an answer that is not JSON, a stall or a dropped connection is asked again
 //   once after the retry's backoff. A sign out ends every wait on every host at once (stopHostLaneWaits). Never a third ask, and never a wait that would end past the call's bound: the call
-//   then rejects naming its fault (SolanaRpcTransportError). So a trade's read waits at most TRADE_TURN_MAX_MS
-//   (10 s) for its turn and then its bound (3.5 s; 12 s for a settle's SOLANA_RPC_WINDOW_RETRY): 13.5 s at most, 22 s
-//   on a settle's seat, whatever the host answers.
+//   then rejects naming its fault (SolanaRpcTransportError). So a trade's read waits for its turn at most
+//   TRADE_TURN_MAX_MS (10 s) on the host's pause, plus PROBE_HELD_MAX_MS (5 s) on the probe after it, then its bound
+//   (3.5 s; 12 s for a settle's SOLANA_RPC_WINDOW_RETRY), whatever the host answers; a seat (seatRpc) adds its next
+//   member's own once a member faults.
 import { readSolanaReference, type SolanaReference, type SolanaReferenceRequest } from "../../kit/src/trade/solana/pool.ts";
 import { HELPER_FETCH_INIT } from "../../kit/src/helper/v1.ts";
 import { SOLANA_RPC_RETRY, SolanaRpcTransportError, solanaHelperRpc, solanaJsonRpc, solanaSameProvider, solanaWrappedRpc, type SolanaFetch, type SolanaRpc, type SolanaRpcRetry } from "../../kit/src/trade/solana/send.ts";
@@ -76,8 +77,9 @@ export function lanedRpc(url: string, o: { kind?: ReadKind; retry?: SolanaRpcRet
   // its bound from its turn on
   const go = (method: string, params: readonly unknown[]): Promise<unknown> => {
     const end = performance.now() + retry.deadlineMs;
-    // a seat's member with a spare after it (seatRpc) is not asked again after a throttle: the read goes to the spare
-    return ask(end, method, params).catch((e: unknown) => (o.spare === true && e instanceof SolanaRpcTransportError && throttles(e) ? Promise.reject(e) : again(end, e, method, params)));
+    // a seat's member with a spare after it (seatRpc) is not asked again after any provider fault (a throttle, a 5xx, no
+    // connection, a stall to its bound, an answer that is no JSON): the read goes to the spare
+    return ask(end, method, params).catch((e: unknown) => (o.spare === true && e instanceof SolanaRpcTransportError ? Promise.reject(e) : again(end, e, method, params)));
   };
   // a read whose turn is open now goes out in this tick (a paced queue's slot calls it as its own)
   // (a trade's turn refused past its TRADE_TURN_MAX_MS is the host's throttle, never sent: HostPaused)
@@ -106,7 +108,9 @@ export const seatHosts = (r: { readonly url?: string } | undefined): readonly st
  * - the first member whose host is open now (its turn needs no wait), in the list's order, called in this tick (a paced
  *   queue's slot calls it as its own);
  * - a member that answers a throttle (429, a 5xx, -32029, -32429) is paused by its host's lane and not asked again by this
- *   read: the read goes to the next open member at once;
+ *   read: the read goes to the next open member at once; so does one with no connection, one that stalls to the read's
+ *   bound, or one whose answer is no JSON (a browser reports a 429 with no CORS header as no connection) (the review of
+ *   507431c0, item 4), not paused, the host left in doubt;
  * - with no member open, the one whose host opens first, asked as any page RPC (its turn, one re-ask after its pause).
  * An answer, any answer, is the read's: a member that answers differently from the helper fails the check, and the seat
  * never asks another member for a better one. The helper is never a member.
@@ -128,7 +132,7 @@ export function seatRpc(urls: readonly string[], kind: ReadKind = "trade", retry
     // the last member left is asked as any page RPC; one with members after it fails over on a throttle
     if (left.length === 1) return members[i]!.last(method, params);
     return members[i]!.fast(method, params).catch((e: unknown) => {
-      if (!(e instanceof SolanaRpcTransportError) || !throttles(e)) throw e;
+      if (!(e instanceof SolanaRpcTransportError)) throw e;
       return read(method, params, new Set([...tried, i]));
     });
   };
@@ -158,21 +162,33 @@ export const pageHelperRpcStopped = (origin: string, signal: AbortSignal, kind: 
  * own retry is that fault, thrown, never "no reference" (card pool-read-down): the kit answers a failed read and a pool
  * that is not there alike, as null, and the pool kinds answer null quote_check_failed. Both providers' reads are still
  * the reference's, and only a null with a failed read is the fault's; the kit's one-provider refusal is held here first,
- * since the watch wraps each provider.
+ * since the watch wraps each provider. A read the kit gave up on while it was still in flight (its 5 s cut,
+ * READ_TIMEOUT_MS in kit pool.ts, met while the page's lane held it for a paused host: the review of 507431c0, P2) is a
+ * failed read too: a null resting on it is that provider's no answer, a timeout fault, never "no reference pool".
  */
 export async function pageReference(rpcs: readonly [SolanaRpc, SolanaRpc], req: SolanaReferenceRequest): Promise<SolanaReference | null> {
   if (solanaSameProvider(rpcs[0], rpcs[1])) throw new Error("the two providers are the same provider: a reference must never rest on one provider's word");
   let fault: SolanaRpcTransportError | null = null;
-  const watch = (rpc: SolanaRpc): SolanaRpc =>
-    solanaWrappedRpc(rpc, async (method, params) => {
+  // the calls still in flight, by the provider's host
+  const inFlight = new Map<string, number>();
+  const watch = (rpc: SolanaRpc): SolanaRpc => {
+    const host = rpc.url === undefined ? "a provider" : new URL(rpc.url).host;
+    return solanaWrappedRpc(rpc, async (method, params) => {
+      inFlight.set(host, (inFlight.get(host) ?? 0) + 1);
       try {
         return await rpc(method, params);
       } catch (e) {
         if (e instanceof SolanaRpcTransportError) fault ??= e;
         throw e;
+      } finally {
+        inFlight.set(host, inFlight.get(host)! - 1);
       }
     });
+  };
   const ref = await readSolanaReference([watch(rpcs[0]), watch(rpcs[1])], req);
-  if (ref === null && fault !== null) throw fault;
-  return ref;
+  if (ref !== null) return ref;
+  if (fault !== null) throw fault;
+  const waiting = [...inFlight].find(([, n]) => n > 0)?.[0];
+  if (waiting !== undefined) throw new SolanaRpcTransportError("timeout", "no answer before the reference's read was given up", 1, waiting);
+  return null;
 }

@@ -19,6 +19,10 @@ import type { SolanaTradeDeps, SolanaTradeRecord, SolanaTradeRequest } from "../
 import { SolanaRpcTransportError, solanaSameProvider, solanaPacedRpc, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import type { Stage } from "../../kit/src/signpage/messages.ts";
 import { RELEASE_HELPER } from "../../wallet/src/withdraw/relay.ts";
+import { hostLane, resetHostLanes } from "../../wallet/src/throttle.ts";
+import { onTestClock } from "../../kit/test/test-clock.ts";
+import { pageReference } from "../src/page-rpc.ts";
+import { pageSolanaRpcs } from "../src/pool-testnet.ts";
 import { readFileSync } from "node:fs";
 import { SOLANA_PROVIDER_A, SOLANA_PUBLIC_SEAT, TRADE_HELPER, TRADE_PICK_LOCK, tradeLock, buyLegs, refusalCode, releaseTradeDeps, sellSplit, settleTradeOps, tradeKind, tradeSettleDue } from "../src/trade.ts";
 
@@ -841,6 +845,68 @@ test("card signpage-throttled-provider-has-a-spare: provider A down, its spare u
     assert.ok(asked.includes(spare), "the spare was asked");
   } finally {
     globalThis.fetch = real;
+  }
+});
+
+// The review of 507431c0, P2: the kit gives a reference read up at its 5 s cut (kit pool.ts READ_TIMEOUT_MS) and answers
+// null; while the page's lane still held that read for a paused host, the page read the null as "no reference pool"
+// (quote_check_failed). A null resting on a read still in flight is that provider's no answer: "down". The same rule
+// on every way in: the release's seat (one member paused by another reader, the other throttling) and the pool kinds'
+// pair (src/pool-testnet.ts pageSolanaRpcs, which pool.buy and pool.sell read the reference on), provider A paused 10 s.
+for (const [name, pair, paused] of [
+  ["the release's public seat, its spare paused 10 s by another reader and provider A throttling", () => releaseTradeDeps().providers, SOLANA_PUBLIC_SEAT[1]!],
+  ["the pool kinds' pair, provider A paused 10 s by another reader and the spare throttling", () => pageSolanaRpcs("trade"), SOLANA_PROVIDER_A],
+] as const) {
+  test(`review of 507431c0: ${name}: the reference read ends down (the fault), never null`, async () => {
+    const real = globalThis.fetch;
+    const helper = new URL(TRADE_HELPER).origin;
+    globalThis.fetch = (async (u: string | URL | Request, init?: RequestInit) => {
+      const o = new URL(u instanceof Request ? u.url : String(u)).origin;
+      await new Promise((r) => setTimeout(r, 20));
+      if (o !== helper) return new Response("no", { status: 429 });
+      const { id, params } = JSON.parse(String(init?.body)) as { id: string; params: [string[]] };
+      return Response.json({ jsonrpc: "2.0", id, result: { context: { slot: 1 }, value: params[0].map(() => null) } });
+    }) as typeof fetch;
+    try {
+      await onTestClock(async () => {
+        resetHostLanes();
+        const rpcs = pair();
+        const l = hostLane(paused);
+        l.throttled(l.gate.epoch(), 10_000);
+        const t0 = performance.now();
+        const got = await pageReference(rpcs as readonly [SolanaRpc, SolanaRpc], { side: "buy", token: MINT, amount: 10_000_000n, amounts: [10_000_000n] }).then(
+          (r) => ({ resolved: r }),
+          (e: unknown) => ({ rejected: e }),
+        );
+        assert.ok("rejected" in got && got.rejected instanceof SolanaRpcTransportError, JSON.stringify(got));
+        assert.ok(SOLANA_PUBLIC_SEAT.map((x) => new URL(x).host).includes(got.rejected.host), got.rejected.host);
+        // the release path's worst case to down here, measured on the test clock
+        assert.ok(performance.now() - t0 < 10_500, `down at ${Math.round(performance.now() - t0)} ms`);
+      });
+    } finally {
+      globalThis.fetch = real;
+      resetHostLanes();
+    }
+  });
+}
+
+// The review of 507431c0, item 8: the send set's rebroadcast to provider A (its "rpc" path, every 2 s) honours provider
+// A's pause: nothing is sent to it while the trade's reads wait that pause out, and a 429 it answers pauses it.
+test("review of 507431c0: the release's send to provider A is not sent while provider A is paused, and its 429 pauses provider A", async () => {
+  const real = globalThis.fetch;
+  const asked: string[] = [];
+  globalThis.fetch = (async (u: string | URL | Request) => (asked.push(new URL(u instanceof Request ? u.url : String(u)).host), new Response("", { status: 429 }))) as typeof fetch;
+  try {
+    resetHostLanes();
+    const rpc = releaseTradeDeps().paths!.find((x) => x.name === "rpc")!;
+    await assert.rejects(rpc.send("AAAA"));
+    assert.deepEqual(asked, [new URL(SOLANA_PROVIDER_A).host]);
+    assert.ok(hostLane(SOLANA_PROVIDER_A).gate.left() > 0, "the send's 429 paused provider A");
+    await assert.rejects(rpc.send("AAAA"), /not sent/);
+    assert.deepEqual(asked, [new URL(SOLANA_PROVIDER_A).host], "nothing sent to provider A in its pause");
+  } finally {
+    globalThis.fetch = real;
+    resetHostLanes();
   }
 });
 
