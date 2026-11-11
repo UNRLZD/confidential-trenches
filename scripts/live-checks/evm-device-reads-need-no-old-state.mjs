@@ -13,7 +13,10 @@
 //       a bind 30 s in finds the same first block by headers and asks no state (stateReads 0);
 //       the pool's root time read at a fresh block on two operators of the list agrees and is non-zero (0 only for a
 //       pool with no leaf yet, whose root 0 the pool never timed).
-// A seat that gives no answer (a 429, a timeout) alone is INCONCLUSIVE, never a pass; two operators that differ fail.
+// A seat that gives no answer (a 429, a timeout) alone is INCONCLUSIVE, never a pass; two operators that differ fail. A
+// provider that does not know a fresh block yet is read again under the wallet's lag retries (the child reads every step
+// under evmRetryLag, 5 reads 2 s apart, as the page does) and, still behind on the last, is INCONCLUSIVE naming it
+// (lagging, provider-answer.mjs laggingOf); one that knows the block and answers wrong still fails.
 // The residue it does not check (removed by card device-evm-read-residuals): a page loaded mid-period whose first
 // block no two operators still keep waits for the next turn, at most 65 s on "Making proof" with no error; Robinhood
 // at +55 s, 1 of 3 periods read 2026-11-10 23:20-23:29Z (robinhood.com alone kept it; drpc.org, pocket.network and
@@ -27,7 +30,7 @@ import { execFile } from "node:child_process";
 import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { EXIT, verdictOf } from "./provider-answer.mjs";
+import { EXIT, laggingLine, laggingOf, verdictOf } from "./provider-answer.mjs";
 
 const KEY = "evm-device-reads-need-no-old-state";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -51,6 +54,11 @@ export function judge(run) {
   let quiet = false;
   const say = (ok, s) => (lines.push(`${ok ? "ok " : "BAD"} ${s}`), ok || (bad = true));
   const two = (x) => Array.isArray(x?.operators) && x.operators.length === 2 && x.operators[0] !== x.operators[1];
+  const lagged = (x, what) => {
+    const hosts = x?.ok === true ? null : laggingOf(x);
+    if (hosts) (quiet = true), lines.push(laggingLine(what, hosts));
+    return hosts !== null;
+  };
   say(run?.sign?.marker === true, `SIGN_HOST /app.js (${run?.sign?.bytes ?? "?"} bytes) holds the sync's fresh-block root-time read ("${MARKER}")`);
   for (const chain of ["base", "robinhood"]) {
     const c = run?.chains?.[chain];
@@ -63,17 +71,23 @@ export function judge(run) {
       say(two(h), `${chain}: the period's fee held at its turn (block ${h.block}, ${h.atMs} ms past the turn) on ${h.hosts?.join(" and ") ?? "?"}`);
       say(Number.isFinite(h.feeAgeMs) && h.feeAgeMs >= 0 && h.feeAgeMs < FEE_AGE_BOUND_MS, `${chain}: the fee read while the period's first block was ${h.feeAgeMs ?? "?"} ms old (under ${FEE_AGE_BOUND_MS} ms)`);
     }
+    else if (lagged(h, `${chain}: the hold at the turn`)) {
+      // a provider behind the fresh block on the last lag retry: INCONCLUSIVE, named
+    }
     else if (NO_ANSWER.test(String(h.error)) && !/answered differently/.test(String(h.error))) {
       quiet = true;
       lines.push(`--  ${chain}: the hold's reads gave no answer (${String(h.error).slice(0, 160)}): INCONCLUSIVE`);
     } else say(false, `${chain}: the period's fee was not held at its turn (${h.name ?? "Error"}: ${String(h.error).slice(0, 200)})`);
     if (h.ok === true) {
       const b = c.bind ?? {};
-      say(b.ok === true && b.sameHash === true && b.stateReads === 0, `${chain}: a bind 30 s in found the same first block by headers and asked no state (${b.stateReads ?? "?"} state reads${b.error ? `; ${String(b.error).slice(0, 120)}` : ""})`);
+      if (!lagged(b, `${chain}: the bind 30 s in`)) say(b.ok === true && b.sameHash === true && b.stateReads === 0, `${chain}: a bind 30 s in found the same first block by headers and asked no state (${b.stateReads ?? "?"} state reads${b.error ? `; ${String(b.error).slice(0, 120)}` : ""})`);
     }
     const t = c.times ?? {};
     if (t.ok === true && t.empty === true) say(two(t) && /^0x0*$/.test(String(t.value)), `${chain}: the pool holds no leaf yet (root 0, never timed): its time read at a fresh block on ${t.hosts?.join(" and ") ?? "?"}, 0 on both`);
     else if (t.ok === true) say(two(t) && !/^0x0*$/.test(String(t.value)), `${chain}: the pool's root time read at a fresh block on ${t.hosts?.join(" and ") ?? "?"}`);
+    else if (lagged(t, `${chain}: the pool's root time at a fresh block`)) {
+      // a provider behind the fresh block on the last lag retry: INCONCLUSIVE, named
+    }
     else if (NO_ANSWER.test(String(t.error))) {
       quiet = true;
       lines.push(`--  ${chain}: the root time read gave no answer: INCONCLUSIVE`);

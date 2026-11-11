@@ -55,3 +55,14 @@ test("each rule alone on the good answer", () => {
   // no answers alone: never a pass
   assert.equal(one((g) => (g.chains.base.bind.tries = [{ start: "x", ok: false, name: "noAnswer", error: "HTTP 429" }])).verdict, "INCONCLUSIVE");
 });
+
+// The bind's tries read the period's first block on the pool pair under the wallet's lag retries; a provider still
+// behind it on the last (the child's `lagging`, the pattern of release 116's sign live run 43024665974) is no FAIL.
+test("bind tries that a provider lagged on are INCONCLUSIVE, named; a wrong answer beside them still fails", () => {
+  const lag = (host) => ({ start: "x", ok: false, name: "EvmLagError", error: "rpc 1 does not know block 56057679 yet", lagging: [host] });
+  const r = one((g) => (g.chains.base.bind.tries = [lag("base-rpc.publicnode.com"), { start: "y", ok: false, name: "noAnswer", error: "HTTP 429" }]));
+  assert.equal(r.verdict, "INCONCLUSIVE", r.lines.join("\n"));
+  assert.ok(r.lines.some((l) => /^-- +base: the bind: base-rpc\.publicnode\.com did not know the fresh block yet/.test(l)), r.lines.join("\n"));
+  assert.equal(one((g) => (g.chains.base.bind.tries = [lag("base-rpc.publicnode.com"), { start: "y", ok: false, name: "EvmOperatorsDiffer", error: "a and b answered differently" }])).verdict, "FAIL", "two operators that differ at a block they know");
+  assert.equal(one((g) => (g.chains.base.bind.tries = [{ ...lag("x"), lagging: undefined }, { ...lag("x"), lagging: undefined }])).verdict, "FAIL", "a lag that names no provider (the record before this change)");
+});

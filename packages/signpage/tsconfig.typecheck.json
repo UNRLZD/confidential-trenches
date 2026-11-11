@@ -1,0 +1,18 @@
+// The signing page's typecheck (pnpm run typecheck): every source and every test at test/'s top level, found by rule, so
+// a new file needs no edit here. test/fixtures holds the guard's planted bad files and stays out. Not named tsconfig.json:
+// the bundler applies the nearest tsconfig.json to SIGN_HOST's build, which this file must never change.
+{
+  "compilerOptions": {
+    "noEmit": true,
+    "strict": true,
+    "target": "es2023",
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true,
+    "skipLibCheck": true,
+    "lib": ["es2023", "dom", "dom.iterable"],
+    "types": ["node"]
+  },
+  "include": ["src/**/*.ts", "test/*.ts"]
+}

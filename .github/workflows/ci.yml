@@ -672,7 +672,7 @@ jobs:
   # job's plain cargo test builds empty. It runs when a change touches a file the suite reads (scripts/ci/vault-sandbox.mjs,
   # whose planted tests fail on a file the suite reads and the rule misses), on every queue group that does, nightly
   # and by hand; otherwise vault-sandbox passes with a printed skip. vault-sandbox-build builds the four wasm once
-  # (run.sh --reproducible --build-only) and hands them, with the pinned two, to the four shards as one artifact; the
+  # (run.sh --reproducible --build-only) and hands them, with the pinned two, to every shard as one artifact; the
   # targets run on the shards (vault-sandbox.mjs SHARDS, each target in exactly one), which build no wasm. vault-sandbox
   # is the one check to require.
   #
@@ -822,7 +822,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: [1, 2, 3, 4, 5]
     # the same env as vault-sandbox-build's (rust-cache's key)
     env:
       CARGO_INCREMENTAL: "0"

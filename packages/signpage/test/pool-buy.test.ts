@@ -425,6 +425,22 @@ test("a buy: checked, signed by W in slot 1, taken before it leaves, read back o
   assert.equal(m.blockhash, BLOCKHASH);
 });
 
+// card sol-pool-buy-lands-on-mainnet: a mainnet tag 3 tips 100,000 lamports, over Jito's landed tips' 95th percentile
+// of 11 Nov 14:08Z (59,990) and inside the proof's tip cap; 1,000, Jito's minimum, never landed on mainnet
+test("a mainnet buy tips the kit's SOLANA_POOL_JITO_TIP (100,000 lamports) to a Jito tip account, inside the proof's tip cap", async () => {
+  const w = await world();
+  const a = await runPoolBuy(w.host, ASK);
+  assert.deepEqual(a, { stage: "filled", txs: [{ chain: "solana", hash: SIG }] });
+  const m = solanaDecodeMessage(w.sentTx()!.subarray(129));
+  const d = m.instructions.at(-1)!.data;
+  assert.equal(d[0], 3, "a tag 3");
+  // TAG3.md: tag, flags, the proof (128 bytes compressed, 256 raw), the 130 bytes of fields, then the tip (u64 LE)
+  const at = 2 + (d[1]! & 1 ? 128 : 256) + 130;
+  const tip = new DataView(d.buffer, d.byteOffset, d.byteLength).getBigUint64(at, true);
+  assert.equal(tip, 100_000n);
+  assert.ok(tip <= BigInt(fx.tip_cap), "inside the proof's tip cap");
+});
+
 // Card sol-pool-venue-tables: the page pins a list of table generations per venue and builds on the buy's venue's
 // generation that makes the smallest transaction; a venue with no pinned table is refused venue_not_pinned after the
 // reads and before the pick, and a buy no generation fits is refused no_table_fits before the claim: neither claims,

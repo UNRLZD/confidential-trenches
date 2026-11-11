@@ -90,11 +90,17 @@ export function matches(file, paths = PATHS) {
 // p02 (VT-P02, 24 cases of 48 steps, real proofs in the mocked VM) joins shard 1, then the lightest at 430. Its long
 // run took 402 s on the box (debug build, 2026-11-07, card vault-final-sha) and its other four tests 39 s, in
 // parallel with it; CI run #406's shard 1 took 16m47s with the long run before that card (about 560 s on the box).
+// CI run 43049054505 (682cd56, 2026-11-11), each shard job's wall time: 997, 511, 539 and 473 s, about 42 s
+// of setup and 60 to 85 s of compile in each. p02 ran 577 s on its own there (the box's 402 s is no guide to CI), and
+// shard 1's other targets 301 (s10 139, withdraw_spend 66, s14 33, s13 30, s01 19, withdraw_context 12, vkey 0). p02
+// moves to a fifth shard of its own, since any target beside it only lengthens the longest job: about 410, 511, 539,
+// 473 and 650 s (42 + about 30 of compile + 577).
 export const SHARDS = [
-  ["s10", "s01", "withdraw_spend", "withdraw_context", "vkey", "s14", "s13", "p02"],
+  ["s10", "s01", "withdraw_spend", "withdraw_context", "vkey", "s14", "s13"],
   ["s04", "relayer_send", "groth16", "events", "poseidon", "s17", "prepay", "s16", "exit_out"],
   ["payouts", "s20", "s02", "withdraw_vectors", "s15", "s12"],
   ["lib", "deposit_msg", "ragequit", "settle", "real_token", "smoke", "tree_prop", "relayer_withdraw", "s19"],
+  ["p02"],
 ];
 
 // Every test target of contracts/vault: the lib's unit tests and one per tests/*.rs.
