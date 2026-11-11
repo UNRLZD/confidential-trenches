@@ -80,6 +80,10 @@ test("the tape's wire form: oldest first or an extra field fails", () => {
   assert.match(tradesFault({ trades: rows, src: "chain", as_of_ms: 1 }), /newer/);
   assert.match(tradesFault({ trades: [{ ...rows[0], extra: 1 }], src: "chain", as_of_ms: 1 }), /keys/);
   assert.equal(tradesFault({ trades: rows.slice().reverse(), src: "chain", as_of_ms: 1 }), null);
+  // a tape still filling carries `filling: true` between trades and src; any other value or place is a fault
+  assert.equal(tradesFault({ trades: rows.slice().reverse(), filling: true, src: "chain", as_of_ms: 1 }), null);
+  assert.match(tradesFault({ trades: rows.slice().reverse(), filling: false, src: "chain", as_of_ms: 1 }), /keys/);
+  assert.match(tradesFault({ trades: rows.slice().reverse(), src: "chain", filling: true, as_of_ms: 1 }), /keys/);
 });
 
 test("a request that times out is named in the error, with its path and the 10 s bound", async () => {

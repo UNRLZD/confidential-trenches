@@ -2074,6 +2074,11 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   const withTiming = (a: DataAnswer, timing: string): DataAnswer => (a.status === 429 ? a : { ...a, timing: a.timing === undefined ? timing : `${timing}, ${a.timing}` });
   const NOT_FOUND = err(404, "not_found");
   const UPSTREAM = err(503, "upstream");
+  /** Tokens whose last open failed (UPSTREAM), and when: a tape past its bound answers 503 within FAILED_MS of that,
+   *  else 200 filling. Bounded as the books are (OPEN_MAX), the oldest out first. [design: a minute, the time a failed
+   *  open's retries and the providers' holds clear in.] */
+  const failedOpen = new Map<string, number>();
+  const FAILED_MS = 60_000;
   const limited = (s: number, why: string): DataAnswer => ({ ...err(429, "rate_limited"), retryAfterS: s, why });
   /** One GeckoTerminal call in `lane`: a caller's cold read ("pages") waits its turn for the budget's next free call up to
    *  GT_PAGE_WAIT_MS (../gecko.ts takeOrWait), as the Solana path's and the EVM token info's do; any other lane never
@@ -2517,11 +2522,30 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       // a caller's reads, in the foreground lane, their wait named in the answer (as candles)
       const lane = newLane(true);
       const began = performance.now();
-      const e = await within(lanes.run(lane, () => open(t)), OPEN_BOUND_MS);
+      const opened = lanes.run(lane, () => open(t));
+      // how this token's last open ended, read by the next answer past its bound (a filling tape or a failed one)
+      const failed = () => {
+        failedOpen.delete(t);
+        failedOpen.set(t, now());
+        while (failedOpen.size > OPEN_MAX) failedOpen.delete(failedOpen.keys().next().value!);
+      };
+      void opened.then((r) => (r === UPSTREAM ? failed() : failedOpen.delete(t)), failed);
+      const e = await within(opened, OPEN_BOUND_MS);
       const openMs = performance.now() - began;
       // the queue wait counts the traders' lookups below too: the answer waits on them
       const timed = (a: DataAnswer): DataAnswer => withTiming(a, laneTiming(lane, openMs));
-      if (e === LATE) return timed(UPSTREAM);
+      // past the bound with this token's last open failed within FAILED_MS: the providers failed, not a cold tape
+      if (e === LATE && now() - (failedOpen.get(t) ?? -Infinity) <= FAILED_MS) return timed(UPSTREAM);
+      if (e === LATE) {
+        // a cold tape past its bound is filling, not failed (card token-page-data-complete-and-fast: release 117's
+        // helper live run read three Base tapes 503 at 12.1-12.6 s, and ten cold opens at once from the Mac 503 in 6 of
+        // 10 on the providers' paces alone): 200 with what is held, the discovery's agreed seed or nothing, and
+        // `filling` true; the open goes on and the next read gets the rows. 503 is only a read that failed.
+        const held = books.get(t);
+        const at = now();
+        const trades = (held?.book.tape(limit) ?? []).map((r) => ({ t_ms: r.t_ms, side: r.side, usd: r.usd, amt: r.amt, trader: traderAt(traders.get(r.tx), r.index), tx: r.tx }));
+        return timed({ status: 200, body: JSON.stringify({ trades, filling: true, src: "chain", as_of_ms: at }), src: "chain", asOfMs: at });
+      }
       if (e === "none") return timed(empty({ trades: [] }));
       if (!("book" in e)) return timed(e);
       const rows = e.book.tape(limit);

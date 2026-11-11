@@ -818,7 +818,10 @@ export function createSolanaTrades(deps: {
       const rows = e.book === null ? [] : e.book.tape(limit);
       const at = e.readAt ?? now();
       const trades = rows.map((r) => ({ t_ms: r.t_ms, side: r.side, usd: r.usd, amt: r.amt, trader: traders.get(r.tx) ?? null, tx: r.tx }));
-      return { status: 200, body: JSON.stringify({ trades, src: "chain", as_of_ms: at }), src: "chain", asOfMs: at };
+      // `filling` while the cold walk still reads the token's older trades (first() answered at COLD_WAIT_MS or its first
+      // round): the rows so far, more to come; the Base and Robinhood tapes answer the same at their bound (../evm/swaps.ts)
+      const fill = e.state === "cold" && rows.length < limit ? { filling: true } : {};
+      return { status: 200, body: JSON.stringify({ trades, ...fill, src: "chain", as_of_ms: at }), src: "chain", asOfMs: at };
     },
   };
 

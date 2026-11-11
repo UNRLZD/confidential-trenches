@@ -8,8 +8,13 @@
 // them again every POLL_MS until a token of the first answer is gone from the newest (at most WAIT_MS), and reads
 // GET /v1/market/trades?chain=<chain>&token=<t>&limit=50 for up to DROPPED_MAX such tokens. A chain whose lists drop
 // none in WAIT_MS is named and proves nothing.
-// PASS when at least one chain dropped a token and every dropped token's tape answers 200 JSON { trades: [...] }; FAIL
-// when one answers otherwise (a 404 is the bug) or a lists read fails; INCONCLUSIVE (exit 3) when no chain dropped one.
+// A cold tape answers at the route's bound with what it holds and `filling: true` while its reads go on (card
+// token-page-data-complete-and-fast: release 117's helper live run read three Base tapes 503 at 12.1-12.6 s), so a tape
+// that answers filling is read again every FILL_POLL_MS until the mark goes, for FILLED_MS at most from its first read.
+// PASS when at least one chain dropped a token and every dropped token's tape answers 200 JSON { trades: [...] } within
+// ANSWER_MS and, when it answered filling, is filled within FILLED_MS; FAIL when one answers otherwise (a 404 is the
+// bug, a 503 a failed read), answers past ANSWER_MS, is still filling at FILLED_MS, or a lists read fails; INCONCLUSIVE
+// (exit 3) when no chain dropped one.
 // After: helper
 //   node scripts/live-checks/robinhood-listed-tape-opens.mjs [--base <url>] [--wait-ms <n>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3. --record writes what the run read, for the test.
@@ -25,6 +30,14 @@ export const CHAINS = ["robinhood", "base", "solana"];
 export const WAIT_MS = 300_000;
 export const POLL_MS = 15_000;
 export const DROPPED_MAX = 6;
+/** A tape's first answer: the route's bound (apps/helper/src/data/evm/swaps.ts OPEN_BOUND_MS, 12 s) and its transit, as
+ *  helper-robinhood-search-ahead.mjs ANSWER_MS. */
+export const ANSWER_MS = 15_000;
+/** A filling tape is filled within this of its first read [design: over twice the slowest measured: ten cold Base tapes
+ *  opened at once on the public providers from the Mac, 2026-11-11 17:45Z, filled at 13.0-19.1 s, ten Robinhood ones all
+ *  answered whole by 11.0 s]. */
+export const FILLED_MS = 45_000;
+export const FILL_POLL_MS = 2_000;
 const ADDRESS = { robinhood: /^0x[0-9a-f]{40}$/, base: /^0x[0-9a-f]{40}$/, solana: /^[1-9A-HJ-NP-Za-km-z]{32,44}$/ };
 
 async function get(base, path, fetchFn) {
@@ -58,9 +71,16 @@ const shapeOf = (body) => {
     return "not JSON";
   }
 };
+const fillingOf = (body) => {
+  try {
+    return JSON.parse(body).filling === true;
+  } catch {
+    return false;
+  }
+};
 
 /** One chain: its lists, read again until a token of the first answer is gone, then those tokens' tapes. */
-async function chainRun(base, chain, fetchFn, waitMs, pollMs, sleep) {
+async function chainRun(base, chain, fetchFn, waitMs, pollMs, sleep, filledMs, fillPollMs) {
   const first = await get(base, `/v1/market/lists?chain=${chain}`, fetchFn);
   const held = first.status === 200 ? tokensOf(chain, first.body) : [];
   const run = { lists: { status: first.status, tokens: held.length }, reads: 1, waitedMs: 0, dropped: [] };
@@ -78,8 +98,21 @@ async function chainRun(base, chain, fetchFn, waitMs, pollMs, sleep) {
   run.waitedMs = Math.round(performance.now() - t0);
   run.dropped = await Promise.all(
     gone.map(async (t) => {
-      const a = await get(base, `/v1/market/trades?chain=${chain}&token=${t}&limit=50`, fetchFn);
-      return { address: t, status: a.status, ms: a.ms, shape: a.status === 200 ? shapeOf(a.body) : null, ...(a.error ? { error: a.error } : {}), ...(a.status !== 200 ? { body: a.body.slice(0, 120) } : {}) };
+      const path = `/v1/market/trades?chain=${chain}&token=${t}&limit=50`;
+      const a = await get(base, path, fetchFn);
+      const d = { address: t, status: a.status, ms: a.ms, shape: a.status === 200 ? shapeOf(a.body) : null, ...(a.error ? { error: a.error } : {}), ...(a.status !== 200 ? { body: a.body.slice(0, 120) } : {}) };
+      if (a.status !== 200 || !fillingOf(a.body)) return d;
+      // filling: read again until the mark goes, a read fails, or FILLED_MS from the first read
+      d.filling = true;
+      const t0 = performance.now();
+      let last = { status: 200, filling: true, ms: 0, reads: 0 };
+      while (last.status === 200 && last.filling && performance.now() - t0 < filledMs) {
+        await sleep(fillPollMs);
+        const b = await get(base, path, fetchFn);
+        last = { status: b.status, filling: b.status === 200 && fillingOf(b.body), shape: b.status === 200 ? shapeOf(b.body) : null, ms: Math.round(performance.now() - t0), reads: last.reads + 1, ...(b.status !== 200 ? { body: b.body.slice(0, 120) } : {}) };
+      }
+      d.filled = last;
+      return d;
     }),
   );
   return run;
@@ -88,7 +121,7 @@ async function chainRun(base, chain, fetchFn, waitMs, pollMs, sleep) {
 export async function read(base = BASE, fetchFn = fetch, o = {}) {
   const at = new Date().toISOString();
   const sleep = o.sleep ?? ((ms) => new Promise((ok) => setTimeout(ok, ms)));
-  const runs = await Promise.all(CHAINS.map((c) => chainRun(base, c, fetchFn, o.waitMs ?? WAIT_MS, o.pollMs ?? POLL_MS, sleep)));
+  const runs = await Promise.all(CHAINS.map((c) => chainRun(base, c, fetchFn, o.waitMs ?? WAIT_MS, o.pollMs ?? POLL_MS, sleep, o.filledMs ?? FILLED_MS, o.fillPollMs ?? FILL_POLL_MS)));
   return { base, at, chains: Object.fromEntries(CHAINS.map((c, i) => [c, runs[i]])) };
 }
 
@@ -112,9 +145,16 @@ export function judge(run) {
     seen++;
     lines.push(`ok  ${c}: ${dropped.length} of the first answer's ${r.lists.tokens} tokens gone from the lists after ${Math.round(r.waitedMs / 1000)} s`);
     for (const d of dropped) {
-      const ok = d.status === 200 && d.shape === "tape";
+      const inTime = Number.isSafeInteger(d.ms) && d.ms <= ANSWER_MS;
+      const ok = d.status === 200 && d.shape === "tape" && inTime;
       if (!ok) bad = true;
-      lines.push(`${ok ? "ok " : "BAD"} ${c} trades ${d.address} (dropped): ${d.status}${d.status === 200 ? ` ${d.shape}` : ` ${d.body ?? ""}`}${d.error ? ` ${d.error}` : ""} in ${d.ms} ms`);
+      lines.push(`${ok ? "ok " : "BAD"} ${c} trades ${d.address} (dropped): ${d.status}${d.status === 200 ? ` ${d.shape}${d.filling ? " filling" : ""}` : ` ${d.body ?? ""}`}${d.error ? ` ${d.error}` : ""} in ${d.ms} ms${d.status === 200 && !inTime ? `, past ${ANSWER_MS} ms` : ""}`);
+      if (!ok || d.filling !== true) continue;
+      // a filling first answer: filled (a 200 tape with no mark) within FILLED_MS, never still filling or a failed read
+      const f = d.filled;
+      const filled = f?.status === 200 && f.filling === false && f.shape === "tape" && Number.isSafeInteger(f.ms) && f.ms <= FILLED_MS;
+      if (!filled) bad = true;
+      lines.push(`${filled ? "ok " : "BAD"} ${c} trades ${d.address} (dropped): ${f === undefined ? "filling, never read again" : f.status !== 200 ? `${f.status} ${f.body ?? ""} on read ${f.reads} after filling` : f.filling ? `still filling ${f.ms} ms after its first read (${f.reads} reads), past ${FILLED_MS} ms` : `filled ${f.ms} ms after its first read (${f.reads} reads)`}`);
     }
   }
   return { verdict: bad ? "FAIL" : seen === 0 ? "INCONCLUSIVE" : "PASS", lines };
