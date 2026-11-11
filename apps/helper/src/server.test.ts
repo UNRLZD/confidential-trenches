@@ -1126,3 +1126,21 @@ test("card helper-page-jup-429: POST /v1/proxy names a 503's cause in Server-Tim
   assert.equal(b.status, 200);
   assert.match(String(b.headers["server-timing"]), /^budget;dur=\d+, turn;dur=\d+, send;dur=\d+$/);
 });
+
+test("card helper-serves-many-users-at-once: every /v1/rpc answer of a chain, a 429 included, carries the chain's budget in RateLimit-Policy (the total every caller may draw and one caller's share, a 10 s window); an unknown chain carries none", async () => {
+  const rpc = createRpc({ SOLANA_RPC_URL: "https://mainnet.helius-rpc.invalid/?api-key=fake-helius-key-0123456789abcdef", SOLANA_RPC_URL_QUICKNODE: "https://solana-mainnet.quiknode.invalid/fake0123456789abcdef/" }, { now: () => 1_800_000_000_000, fetch: async () => new Response('{"jsonrpc":"2.0","id":1,"result":1}', { status: 200, headers: { "content-type": "application/json" } }), log: () => {} });
+  const L = await limited({ rpc });
+  try {
+    const ok = await call("POST", "/v1/rpc/solana", { ...JSON_H, "x-forwarded-for": IP_A }, rpcBody("getBalance"), L.to);
+    assert.equal(ok.status, 200);
+    assert.equal(ok.headers["ratelimit-policy"], '"chain";q=135;w=10, "client";q=42;w=10');
+    let last = ok;
+    for (let i = 0; i < 42 && last.status === 200; i++) last = await call("POST", "/v1/rpc/solana", { ...JSON_H, "x-forwarded-for": IP_A }, rpcBody("getBalance"), L.to);
+    assert.equal(last.status, 429);
+    assert.equal(last.headers["ratelimit-policy"], '"chain";q=135;w=10, "client";q=42;w=10', "on the refusal too");
+    const none = await call("POST", "/v1/rpc/ethereum", { ...JSON_H, "x-forwarded-for": IP_A }, rpcBody("getBalance"), L.to);
+    assert.equal(none.headers["ratelimit-policy"], undefined);
+  } finally {
+    await L.close();
+  }
+});

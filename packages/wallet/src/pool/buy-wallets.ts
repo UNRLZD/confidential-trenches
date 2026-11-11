@@ -58,7 +58,7 @@ import { refKey, type NoteStore } from "../notes/store.ts";
 import { evmRpcHex } from "./evm.ts";
 import { jOf } from "./queue.ts";
 import { sleepFor } from "../busy.ts";
-import { ThrottleGate } from "../throttle.ts";
+import { laneFetch, ThrottleGate } from "../throttle.ts";
 import { solanaRestoreNotes, type SolanaRestoredNote, type SolanaRestoredSpend } from "./solana-restore.ts";
 import { SOL_LAG_SLOTS, SOL_LAG_WAIT_MS } from "./solana.ts";
 
@@ -401,7 +401,8 @@ function retryAfterFetch(): { fetch: SolanaFetch; wait429: () => number } {
   let next = RETRY_AFTER_DEFAULT_MS;
   return {
     fetch: async (url, init) => {
-      const r = await globalThis.fetch(url, init);
+      // counted on its host's lane, as every request of the page is (../throttle.ts laneFetch)
+      const r = await laneFetch()(url, init);
       if (r.status === 429) next = retryAfterMs(r.headers.get("retry-after"), Date.now());
       return r;
     },

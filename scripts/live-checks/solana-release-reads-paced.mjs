@@ -88,8 +88,9 @@ export function facts(index, js) {
   const pair =
     !!(p && a && h && m) &&
     // MAINNET_MARKS_ROUTE, pageSolanaRpcs, pageSolanaLister, pageSolanaSettleRpcs (the helper's seat with its retry) and
-    // PAGE_SOL_MARK_BATCHES, as pool-testnet.ts declares them in turn
-    new RegExp(`(?<![\\w$])${m}=${Q}\\$\\{${h}\\}/v1/rpc/solana-marks${Q},${N}=\\(\\)=>\\[${esc(p)}\\(${N}\\(${a}\\)\\),${esc(p)}\\(${N}\\(${h}\\)\\)\\],${N}=\\(\\)=>${esc(p)}\\(${N}\\(${m}\\)\\),${N}=\\(\\)=>\\[${esc(p)}\\(${N}\\(${a}\\)\\),${esc(p)}\\(${N}\\(${h},${N}\\)\\)\\],${N}=Object\\.freeze\\(\\[\\d+,\\d+\\]\\)[,;]`).test(js);
+    // PAGE_SOL_MARK_BATCHES, as pool-testnet.ts declares them in turn; each of the three takes its reads' kind on its
+    // host's lane (card signpage-passes-yield-to-a-trade: `(e="trade")=>`), and hands it to every seat it makes
+    new RegExp(`(?<![\\w$])${m}=${Q}\\$\\{${h}\\}/v1/rpc/solana-marks${Q},${N}=\\((${N})=${Q}trade${Q}\\)=>\\[${esc(p)}\\(${N}\\(${a},\\1\\)\\),${esc(p)}\\(${N}\\(${h},${N},\\1\\)\\)\\],${N}=\\((${N})=${Q}trade${Q}\\)=>${esc(p)}\\(${N}\\(${m},${N},\\2\\)\\),${N}=\\((${N})=${Q}trade${Q}\\)=>\\[${esc(p)}\\(${N}\\(${a},\\3\\)\\),${esc(p)}\\(${N}\\(${h},${N},\\3\\)\\)\\],${N}=Object\\.freeze\\(\\[\\d+,\\d+\\]\\)[,;]`).test(js);
   const timed =
     !!t &&
     !!f &&

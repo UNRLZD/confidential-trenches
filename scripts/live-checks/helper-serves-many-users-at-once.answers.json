@@ -1,0 +1,38 @@
+{
+ "good": {
+  "at": "2026-11-11T06:03:32Z",
+  "helper": "apps/helper on card/helper-serves-many-users-at-once (the real server and RPC part on the deployed provider list: Solana Helius then QuickNode; Base and Robinhood QuickNode and three dRPC keys; every provider stubbed), from a Mac",
+  "routes": {
+   "solana": {
+    "status": 200,
+    "policy": "\"chain\";q=135;w=10, \"client\";q=42;w=10"
+   },
+   "base": {
+    "status": 200,
+    "policy": "\"chain\";q=155;w=10, \"client\";q=30;w=10"
+   },
+   "robinhood": {
+    "status": 200,
+    "policy": "\"chain\";q=155;w=10, \"client\";q=30;w=10"
+   }
+  }
+ },
+ "bad": {
+  "at": "2026-11-11T06:03:21Z",
+  "helper": "https://ct-api.unrealized.trade, the deployed helper before this card (no budget reported), one run from a Mac",
+  "routes": {
+   "solana": {
+    "status": 200,
+    "policy": null
+   },
+   "base": {
+    "status": 200,
+    "policy": null
+   },
+   "robinhood": {
+    "status": 200,
+    "policy": null
+   }
+  }
+ }
+}
