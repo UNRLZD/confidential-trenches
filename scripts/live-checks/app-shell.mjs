@@ -261,6 +261,9 @@ export async function open(page, url, origin) {
 
 /** The planted tape: `first` trades on the page's read, then one more every `everyMs` on its push socket. */
 export const TAPE = { first: 8, everyMs: 400, max: 50 };
+/** Each timeframe the token page asks the helper's candles for, in seconds: one bar's length (apps/helper/src/data/candles.ts
+ *  TF_SECONDS; app-shell.test.mjs holds the two equal). */
+export const TF_SECONDS = Object.freeze({ "1s": 1, "1m": 60, "5m": 300, "15m": 900, "1h": 3_600, "4h": 14_400, "1d": 86_400 });
 const HELPER = "https://ct-api.unrealized.trade";
 const helperPath = (p) => (u) => u.origin === HELPER && u.pathname === p;
 
@@ -275,7 +278,8 @@ const plantedTrade = (k, tMs, c) => {
 
 /**
  * The token page's tape on every load of `ctx`, live or harness (card app-phone-token-taps-and-rows): each token's first
- * candle answer (any tf, 2 bars or more, read from the page's own response) sets the bars; the trades read is answered
+ * candle answer (any tf, 1 bar or more, read from the page's own response) sets the bars, each bar as long as the tf its
+ * request asked (TF_SECONDS: a token an hour old has one 15m bar, card app-live-run-judges-the-build); the trades read is answered
  * with TAPE.first trades, one in each of the last 6 bars and two more in the last, so the chart draws marks; the push socket
  * (a later routeWebSocket wins over the harness's) sends the whole tape, newest first, with one more trade every
  * TAPE.everyMs, inside the last bar (at most TAPE.max rows). `sent` counts the tapes pushed, which a load reads before
@@ -289,7 +293,8 @@ export async function plantTape(ctx, origin) {
     const u = new URL(r.url());
     if (!helperPath("/v1/market/candles")(u) || !r.ok() || bars.has(u.searchParams.get("token"))) return;
     const b = await r.json().catch(() => null);
-    if (Array.isArray(b?.candles) && b.candles.length >= 2 && !bars.has(u.searchParams.get("token"))) bars.set(u.searchParams.get("token"), b.candles);
+    const step = TF_SECONDS[u.searchParams.get("tf")];
+    if (Array.isArray(b?.candles) && b.candles.length >= 1 && step !== undefined && !bars.has(u.searchParams.get("token"))) bars.set(u.searchParams.get("token"), Object.assign(b.candles, { step }));
   });
   const barsOf = async (token) => {
     for (const until = Date.now() + 8_000; !bars.has(token) && Date.now() < until; ) await new Promise((r) => setTimeout(r, 50));
@@ -315,7 +320,7 @@ export async function plantTape(ctx, origin) {
     if (!c) return;
     const trades = start(c);
     const last = c.at(-1);
-    const end = (Number(last[0]) + (Number(last[0]) - Number(c.at(-2)[0]))) * 1000 - 1;
+    const end = (Number(last[0]) + c.step) * 1000 - 1;
     const timer = setInterval(() => {
       const k = trades.length;
       trades.push(plantedTrade(k, Math.max(trades.at(-1).t_ms + 1, Math.min(Date.now(), end)), Number(last[4])));
