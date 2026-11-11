@@ -10,8 +10,9 @@
 // - trees(beforeMs), duty 2 of pool.ts: the pages ["page", tree, page_no u32 LE] of both trees, read on two RPCs at
 //   finalized commitment and kept once both agree (finalized entries never change): a full page is read once, and each
 //   call reads the newest page held and any after it, refusing one whose entries held before have changed. Each entry is (leaf, root, unix_timestamp i64 LE) in insert order (src/state.rs); the cut
-//   keeps the entries with unix_timestamp * 1000 below beforeMs. It refuses when either RPC's read is at a block whose
-//   time is below beforeMs (a later insert could still land under the cut), when the two cuts differ in any byte, when
+//   keeps the entries with unix_timestamp * 1000 below beforeMs. A read at a block whose time is below beforeMs (a later
+//   insert could still land under the cut) is read again a slot apart, up to SOL_REACH_WAITS times (card
+//   pool-tree-read-waits-for-its-second); it refuses when either RPC's read still has not reached it, when the two cuts differ in any byte, when
 //   times go back, and when the root the device builds from the cut's leaves is not the root the page holds at the
 //   cut's last entry: the root the program reads by index at the tap.
 // - bind: the program's context (src/context.rs context_of): keccak256(program ‖ pool ‖ W ‖ fee payer ‖ relay_fee_cap
