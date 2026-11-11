@@ -7,10 +7,13 @@
 //     54 s after Filled);
 //   - takes that record back at a not_landed or refused end, only when it is this buy's own (src/positions.ts
 //     recordPoolBuy, as minified: `r?.mint===s.mint&&r.received===s.received&&delete t[n.wallet]`);
-//   - reads the buy as a trade's to its release and as a background pass's after it, the hold given back in the same
-//     call (pool-testnet.ts buyHost, as minified: `u=`trade`,d=o(),f=()=>{u=`pass`,d()}`), on one pair whose each call
-//     goes as that kind says (kindSwitched, as minified: `[0,1].map(n=>Lh(e.trade[n],(r,i)=>e[t()][n](r,i)))`), so a
-//     sale tapped after Filled reads first (devnet run 11: 20 throttles in 16.3 s, drawn by the buy's reads to Final).
+//   - reads the buy as a trade's to its land and as a background pass's after it, its hosts' hold given back at its
+//     early sent (pool-testnet.ts buyReads, as minified: `let n=`trade`;return{rpcs:KG(e,()=>n),kind:()=>n,release:t,
+//     landed:()=>{n=`pass`}}`), on one pair whose each call goes as that kind says (kindSwitched, as minified:
+//     `[0,1].map(n=>Lh(e.trade[n],(r,i)=>e[t()][n](r,i)))`), the land told by the run once its read-back landed
+//     (pool-buy.ts, as minified: `if(!F)return k(P?M:[],j);e.landed?.()`), so the reads that tell Filled are a trade's
+//     and a sale tapped after Filled reads first (devnet run 11: 20 throttles in 16.3 s, drawn by the buy's reads to
+//     Final).
 // The behaviour itself is held by the tests that build it (packages/signpage/test/sell-right-after-a-buy.test.ts,
 // positions.test.ts, passes-yield.test.ts and pool-buy.test.ts). The recorded answers are facts() over the signing
 // page's build (build-app.mjs, the build the deploy makes): good at this card's head, before at its base.
@@ -31,8 +34,10 @@ const Q = "[`\"']";
 const EARLY = new RegExp(`route:(${N})=>\\((${N})\\(\\1\\),${Q}out${Q}in \\1&&${N}\\(\\)\\)`);
 /** The end's take-back: W's record deleted only when it is this buy's token and amount. */
 const TAKE_BACK = new RegExp(`(${N})\\?\\.mint===(${N})\\.mint&&\\1\\.received===\\2\\.received&&delete ${N}\\[`);
-/** The release: the kind set to pass and the hold given back, in one function, the kind a trade's before it. */
-const RELEASE = new RegExp(`(${N})=${Q}trade${Q},(${N})=${N}\\(\\),${N}=\\(\\)=>\\{\\1=${Q}pass${Q},\\2\\(\\)\\}`);
+/** The buy's reads: a trade's at first, the hold given back at the release, the kind set to pass at the land alone. */
+const RELEASE = new RegExp(`let (${N})=${Q}trade${Q};return\\{rpcs:${N}\\(${N},\\(\\)=>\\1\\),kind:\\(\\)=>\\1,release:${N},landed:\\(\\)=>\\{\\1=${Q}pass${Q}\\}\\}`);
+/** The run's land: told once the read-back loop has landed, right after its not-landed return. */
+const LANDED = new RegExp(`return ${N}\\(${N}\\?${N}:\\[\\],${N}\\);${N}\\.landed\\?\\.\\(\\)`);
 /** The pair: each seat the trade pair's provider, each call on the kind's pair at that call. */
 const SWITCH = new RegExp(`\\[0,1\\]\\.map\\((${N})=>${N}\\((${N})\\.trade\\[\\1\\],\\((${N}),(${N})\\)=>\\2\\[${N}\\(\\)\\]\\[\\1\\]\\(\\3,\\4\\)\\)\\)`);
 
@@ -45,10 +50,10 @@ const pinned = (index) => {
 
 /** What the check keeps of the read: the index, its served script's sha384, and each mark read from it. */
 export function facts(sign) {
-  return { index: sign.index, sha384: sha384(sign.js), early: EARLY.test(sign.js), takeBack: TAKE_BACK.test(sign.js), release: RELEASE.test(sign.js), pair: SWITCH.test(sign.js) };
+  return { index: sign.index, sha384: sha384(sign.js), early: EARLY.test(sign.js), takeBack: TAKE_BACK.test(sign.js), release: RELEASE.test(sign.js), pair: SWITCH.test(sign.js), landed: LANDED.test(sign.js) };
 }
 
-/** The verdict on an answer { index, sha384, early, takeBack, release, pair }. */
+/** The verdict on an answer { index, sha384, early, takeBack, release, pair, landed }. */
 export function judge(a) {
   const lines = [];
   const bad = (m) => lines.push(`BAD ${m}`);
@@ -57,8 +62,9 @@ export function judge(a) {
   else if (pin.integrity !== a.sha384) bad("SIGN_HOST's served script is not the one index.html pins");
   if (a?.early !== true) bad("the buy's record is written only at its end: a sale, the preview and the positions do not have W's token at Filled");
   if (a?.takeBack !== true) bad("a buy that did not land keeps its record: a position shows that was never bought");
-  if (a?.release !== true) bad("the buy's release does not switch its reads to the background's: they keep a sale tapped after Filled waiting");
+  if (a?.release !== true) bad("the buy's reads do not go as the background's from its land, or switch at its sent: a sale tapped after Filled waits, or Filled does");
   if (a?.pair !== true) bad("the buy's pair does not read as its kind says at each call");
+  if (a?.landed !== true) bad("the buy's run does not tell its land: its reads stay a trade's to Final");
   return { ok: lines.length === 0, lines };
 }
 

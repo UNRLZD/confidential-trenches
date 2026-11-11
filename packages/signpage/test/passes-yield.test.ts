@@ -265,15 +265,17 @@ test("the buy's host gives its hosts back at its release, once: its end after it
 
 // Card sell-right-after-a-buy (devnet run 11): the buy's reads to Final went as a trade's, never on the host's budget, and
 // drew the 20 throttles a sell tapped 1 s after Filled met. The same release that gives its hosts back switches them, once:
-// its pair and its settle (its pair and lister) read as a background pass's from then on.
-test("card sell-right-after-a-buy: the buy's host reads as a trade's to its release, then as a pass's: its pair and its settle, once", async () => {
+// its pair and its settle (its pair and lister) read as a background pass's from its land on (pool-buy.ts landed), never
+// at its sent alone: sent can come before both RPCs report it succeeded, and the reads to Filled are a trade's (review of
+// 29a9e506, P2).
+test("card sell-right-after-a-buy: the buy's host reads as a trade's to its land, past its release too, then as a pass's: its pair and its settle, once", async () => {
   const { w, ns } = await wallet();
   // a landed note for the settle to read (its reads are what is timed here; their answers end it)
   const ref: NoteRef = { kind: "deposit", s: SCOPE, i: 0 };
   const pre = noteSecrets(SEED64, ref).precommitment;
   const n = await ns.add({ ref, scope: SCOPE, precommitment: pre, state: "UNSPENT", leaf: { value: 5_000_000n, label: 9n, commitment: noteCommitment(5_000_000n, 9n, pre), leafIndex: 0n } });
   await onProvider(() => 200, async (sent) => {
-    const made: { buy?: () => { rpcs: readonly [(m: string, p: unknown[]) => Promise<unknown>, (m: string, p: unknown[]) => Promise<unknown>]; settle(id: string): Promise<unknown>; release(): void; end(): void } } = {};
+    const made: { buy?: () => { rpcs: readonly [(m: string, p: unknown[]) => Promise<unknown>, (m: string, p: unknown[]) => Promise<unknown>]; settle(id: string): Promise<unknown>; release(): void; landed(): void; end(): void } } = {};
     testnetPool(
       { store: async () => w, seed64: async () => SEED64.slice() },
       { evmPin: () => undefined, cache: {}, tradeKinds: { buy: ((h: never) => ((made.buy = h), () => ({ error: "not_allowed" }))) as never } } as never,
@@ -301,17 +303,22 @@ test("card sell-right-after-a-buy: the buy's host reads as a trade's to its rele
     assert.ok(settleBefore < 1_000, `a settle before its release: a trade's, at once (${settleBefore.toFixed(0)} ms)`);
     h.release();
     assert.equal(hostLane(DEVNET).trading(), true, "the sale's hold stands");
+    // released, not landed (its sent before both RPCs report it succeeded): still a trade's, at once
+    const released = lastOn(devnet);
+    await Promise.all([h.rpcs[0]("getSlot", []), h.rpcs[1]("getSlot", [])]);
+    assert.ok(lastOn(devnet) - released < 100, "after its release alone: a trade's, at once");
+    h.landed();
     // a pass on each host now, so the next pass there waits PASS_FLOOR_MS
     await Promise.all([pageSolanaRpcs("pass")[0]("getSlot", []), pageSolanaRpcs("pass")[1]("getSlot", [])]);
     fill(DEVNET, 100);
     fill(HELPER, 100);
     const pass2 = lastOn(devnet);
     await h.rpcs[0]("getSlot", []);
-    assert.ok(lastOn(devnet) - pass2 >= PASS_FLOOR_MS - 100, `after its release: a pass's, at the floor (${(lastOn(devnet) - pass2).toFixed(0)} ms)`);
+    assert.ok(lastOn(devnet) - pass2 >= PASS_FLOOR_MS - 100, `after its land: a pass's, at the floor (${(lastOn(devnet) - pass2).toFixed(0)} ms)`);
     n1 = sent.length;
     void h.settle(n.id).catch(() => {});
     const afterMs = await firstFrom(n1);
-    assert.ok(afterMs >= PASS_FLOOR_MS - 1_000, `its settle after its release: a pass's, at the floor (${afterMs.toFixed(0)} ms)`);
+    assert.ok(afterMs >= PASS_FLOOR_MS - 1_000, `its settle after its land: a pass's, at the floor (${afterMs.toFixed(0)} ms)`);
     h.release();
     h.end();
     assert.equal(hostLane(DEVNET).trading(), true, "given back once: the sale's hold stands");

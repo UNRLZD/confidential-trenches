@@ -27,7 +27,7 @@ import { SIGNPAGE_KIT_VERSION, type TxRef } from "../../kit/src/signpage/message
 import { pairDown } from "./outage.ts";
 import { holdHosts, hostLane, PASS_BUDGET, PASS_FLOOR_MS, resetHostLanes } from "../../wallet/src/throttle.ts";
 import { onTestClock } from "../../kit/test/test-clock.ts";
-import { kindSwitched } from "../src/pool-testnet.ts";
+import { buyReads } from "../src/pool-testnet.ts";
 import type { ReadKind } from "../src/page-rpc.ts";
 import { liveRuns } from "../src/pool-sell-dry.ts";
 import { APP_ORIGIN, signedOutState, startApi } from "../src/api.ts";
@@ -1925,25 +1925,21 @@ test("card sol-buy-reads-side-by-side: a filled run whose host's end throws post
 // settle's pair and lister too): on the host's budget, at least one each PASS_FLOOR_MS while a trade holds the host.
 // The run here is the real one (poolBuyKind, runPoolBuy) on this file's recorded world, every read and the settle taking
 // its turn on its host's lane, the release as buyHost's; on the test clock, so each time is the clock's.
-/** The world's host on two lanes: each read and the settle as `kind()` says at its call; the release as buyHost's. */
+/** The world's host on two lanes, its reads buyHost's (pool-testnet.ts buyReads): each read and the settle as its kind
+ *  says at its call, the hold given back at its release, the kind switched at its land. */
 function onLanes(w: Awaited<ReturnType<typeof world>>, log: { host: number; kind: ReadKind; at: number; inWindow: number }[]) {
-  let kind: ReadKind = "trade";
   const laned = (i: 0 | 1, k: ReadKind): SolanaRpc => (async (m: string, p: readonly unknown[]) => {
     await hostLane(LANE_URLS[i]).turn(k);
     log.push({ host: i, kind: k, at: performance.now(), inWindow: hostLane(LANE_URLS[i]).inWindow() });
     return w.host.rpcs[i](m, p);
   }) as SolanaRpc;
-  const give = holdHosts(LANE_URLS);
-  const release = (): void => {
-    kind = "pass";
-    give();
-  };
+  const reads = buyReads({ trade: [laned(0, "trade"), laned(1, "trade")], pass: [laned(0, "pass"), laned(1, "pass")] }, holdHosts(LANE_URLS));
   const host = {
     ...w.host,
-    rpcs: kindSwitched({ trade: [laned(0, "trade"), laned(1, "trade")], pass: [laned(0, "pass"), laned(1, "pass")] }, () => kind),
+    rpcs: reads.rpcs,
     // the settle's reads: one on each seat, as `kind` says at its call (solanaSettleSpent on settleRpcs(kind))
     settle: async (id: string, s?: readonly [number, number]) => {
-      const k = kind;
+      const k = reads.kind();
       await laned(0, k)("getSlot", []);
       await laned(1, k)("getSlot", []);
       return w.host.settle(id, s);
@@ -1951,10 +1947,11 @@ function onLanes(w: Awaited<ReturnType<typeof world>>, log: { host: number; kind
     now: undefined,
     wait: undefined,
     reads: undefined,
-    release,
-    end: release,
+    release: reads.release,
+    landed: reads.landed,
+    end: reads.release,
   };
-  return { host, kind: () => kind };
+  return { host, kind: reads.kind };
 }
 /** One buy tapped at the clock's now: when its amount out was told (the app's Filled) and when its end stage came. */
 async function tapOnLanes(host: Parameters<typeof poolBuyKind>[0]): Promise<{ t0: number; out: number; final: number; stages: string[] }> {
@@ -1968,14 +1965,13 @@ async function tapOnLanes(host: Parameters<typeof poolBuyKind>[0]): Promise<{ t0
   return { t0, out, final: performance.now(), stages };
 }
 
-test("card sell-right-after-a-buy: a sale holding the hosts for 60 s with its reads past the trading budget: the buy's Filled comes as before, its reads past its sent go as a pass's at the floor, and it reaches Final", async () => {
-  const w0 = await world();
-  const run = (sale: boolean) =>
+/** One buy on the lanes in `plant`'s world, on the test clock; `sale`: a sale tapped with it holds both hosts 60 s. */
+const laneRun = (plant: Plant, sale: boolean) =>
     onTestClock(async () => {
       resetHostLanes();
       try {
         const log: Parameters<typeof onLanes>[1] = [];
-        const lanes = onLanes(await world({ received: [w0.E, w0.E] }), log);
+        const lanes = onLanes(await world(plant), log);
         // a sale tapped with the buy: it holds both hosts 60 s, and its own reads keep each host's window past
         // PASS_BUDGET_TRADING (40 in any 10 s), so a pass goes only at the floor
         let stop = (): void => {};
@@ -1999,6 +1995,10 @@ test("card sell-right-after-a-buy: a sale holding the hosts for 60 s with its re
         resetHostLanes();
       }
     });
+
+test("card sell-right-after-a-buy: a sale holding the hosts for 60 s with its reads past the trading budget: the buy's Filled comes as before, its reads past its sent go as a pass's at the floor, and it reaches Final", async () => {
+  const w0 = await world();
+  const run = (sale: boolean) => laneRun({ received: [w0.E, w0.E] }, sale);
   const alone = await run(false);
   const held = await run(true);
   for (const r of [alone, held]) {
@@ -2053,4 +2053,24 @@ test("card sell-right-after-a-buy: no trade holds the hosts and the page's passe
   const after = r.log.filter((x) => x.at > r.out);
   assert.ok(after.length > 0 && after.every((x) => x.kind === "pass"));
   assert.ok(after.every((x) => x.inWindow <= PASS_BUDGET), `inside the budget: ${after.map((x) => x.inWindow).join(", ")}`);
+});
+
+// The review of 29a9e506 (P2): sent fires once both RPCs return this transaction's bytes, which can come before both
+// report it succeeded (a meta not yet whole); the read-backs that tell the amount out come after it. They are a trade's
+// all the same: the kind switches only once the read-back has landed, while the hosts are given back at sent.
+test("card sell-right-after-a-buy: a read-back that sees its transaction before its meta (1, 2, 3 rounds): Filled as soon as alone with a sale holding the hosts, every read to it a trade's", async () => {
+  const w0 = await world();
+  for (const n of [1, 2, 3]) {
+    const plant = { received: [w0.E, w0.E] as [bigint, bigint], metaJunkReads: n };
+    const alone = await laneRun(plant, false);
+    const held = await laneRun(plant, true);
+    for (const r of [alone, held]) {
+      assert.deepEqual(r.stages, ["filled"], `${n}: Final`);
+      assert.ok(r.out >= 0, `${n}: the amount out told`);
+      const before = r.log.filter((x) => x.at <= r.out);
+      assert.ok(before.length > 0 && before.every((x) => x.kind === "trade"), `${n}: the reads to Filled are a trade's: ${before.map((x) => x.kind).join(",")}`);
+      assert.ok(r.log.some((x) => x.kind === "pass"), `${n}: the reads past the land a pass's`);
+    }
+    assert.ok(held.out - held.t0 <= alone.out - alone.t0 + 100, `${n}: Filled ${(held.out - held.t0).toFixed(0)} ms with the sale, ${(alone.out - alone.t0).toFixed(0)} ms alone`);
+  }
 });

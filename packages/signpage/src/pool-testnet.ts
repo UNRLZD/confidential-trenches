@@ -217,6 +217,22 @@ export const PAGE_SOL_CACHE: SolanaPoolCache = {};
 export function kindSwitched(of: Readonly<Record<ReadKind, readonly [SolanaRpc, SolanaRpc]>>, kind: () => ReadKind): readonly [SolanaRpc, SolanaRpc] {
   return [0, 1].map((i) => solanaWrappedRpc(of.trade[i]!, (method, params) => of[kind()][i]!(method, params))) as unknown as readonly [SolanaRpc, SolanaRpc];
 }
+/** A pool buy's reads (card sell-right-after-a-buy): one pair, each call a trade's until its transaction landed (both
+ *  RPCs read it back as succeeded, the reads that tell Filled among them: pool-buy.ts landed) and a background pass's
+ *  from then on, `kind()` the same for its settle; its hosts' hold (`give`, once) given back at its early "sent"
+ *  (release), else its end. Sent can come before landed (a meta not yet whole on one RPC, review of 29a9e506 P2), so the
+ *  two are apart. */
+export function buyReads(of: Readonly<Record<ReadKind, readonly [SolanaRpc, SolanaRpc]>>, give: () => void): { rpcs: readonly [SolanaRpc, SolanaRpc]; kind(): ReadKind; release(): void; landed(): void } {
+  let kind: ReadKind = "trade";
+  return {
+    rpcs: kindSwitched(of, () => kind),
+    kind: () => kind,
+    release: give,
+    landed: () => {
+      kind = "pass";
+    },
+  };
+}
 
 /** A withdraw stage's order: a write never moves an op back (review #232b LOW 1). A stale finish's stopped never
  *  overwrites sent, nor a later part's proving its earlier part's in_transit. */
@@ -1163,17 +1179,12 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   const buyHost = (): PoolBuyHost & { release(): void; end(): void } => {
     let notes: NoteStore | null = null;
     // the buy holds its hosts from its run's start to its early "sent" (pool-buy.ts poolBuyKind: release), else its
-    // end: the passes' reads wait, the buy's own go first; given back once (holdHosts), whichever comes first. From
-    // then its reads to Final (the read-backs, the settle and its lister) are a background pass's, on the host's budget
-    // and its floor (card sell-right-after-a-buy: run 11's 20 throttles at a sell tapped 1 s after Filled were these
-    // reads as a trade's), so a trade tapped then reads first
-    let kind: ReadKind = "trade";
-    const give = holdTrade();
-    const release = (): void => {
-      kind = "pass";
-      give();
-    };
-    const pair = kindSwitched({ trade: rpcs("trade"), pass: rpcs("pass") }, () => kind);
+    // end: the passes' reads wait, the buy's own go first; given back once (holdHosts), whichever comes first. From its
+    // land on (pool-buy.ts landed) its reads to Final (the read-backs, the settle and its lister) are a background
+    // pass's, on the host's budget and its floor (card sell-right-after-a-buy: run 11's 20 throttles at a sell tapped
+    // 1 s after Filled were these reads as a trade's), so a trade tapped then reads first (buyReads)
+    const reads = buyReads({ trade: rpcs("trade"), pass: rpcs("pass") }, holdTrade());
+    const release = reads.release;
     // the queue, opened when it is not; one that cannot open (signed out) is dropped, so the next tap opens it again
     const q = async (): Promise<ProofQueue<SolanaReleaseRequest>> => {
       const p = (open ??= openQueue());
@@ -1188,7 +1199,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       pin: pin!,
       tables,
       cluster: PAGE_CLUSTER,
-      rpcs: pair,
+      rpcs: reads.rpcs,
       claimed,
       // a sign out ends the buy's waits before its signature (read-waits.ts waitUnless): this session's stop
       signal: solanaStop.signal,
@@ -1217,12 +1228,14 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         const seed64 = await page.seed64();
         try {
           notes ??= await openNoteStore(await page.store());
+          const kind = reads.kind();
           return await solanaSettleSpent({ seed64, notes, noteId, program: pin!.program, minSlots, rpcs: settleRpcs(kind), lister: lister(kind), signal, cache, markBatches: PAGE_SOL_MARK_BATCHES });
         } finally {
           seed64.fill(0);
         }
       },
       release,
+      landed: reads.landed,
       end: () => {
         release();
         notes?.close();
