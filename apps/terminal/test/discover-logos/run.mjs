@@ -17,7 +17,8 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { browserLabel, launchBrowser } from "../../../../scripts/browsers.mjs";
+import { browserLabel } from "../../../../scripts/browsers.mjs";
+import { launchHarnessBrowser } from "../../../../scripts/harness-sockets.mjs";
 import { padRing } from "../../src/screens/market/pads.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -115,7 +116,7 @@ let BASE;
 const dir = await build();
 const server = await serve(dir);
 BASE = `http://127.0.0.1:${server.address().port}`;
-const browser = await launchBrowser("chromium");
+const browser = await launchHarnessBrowser("chromium");
 try {
   for (const w of WIDTHS) {
     const scope = scopeOf(w.name);

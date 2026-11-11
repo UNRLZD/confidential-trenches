@@ -117,6 +117,10 @@ function Row({ v, win, href }: { v: RowView; win: Win; href: string }) {
           <span className="dsc-l1">
             <span className="dsc-sym" title={v.symbol}>{v.symbol}</span>
             <span className="dsc-name" title={v.name}>{v.name}</span>
+            <span className="dsc-mcin" title={`${WORDS.price.text} ${v.price}`}>
+              <span className="dsc-lbl">{WORDS.mc.text}</span>
+              {v.mc}
+            </span>
           </span>
           <span className="dsc-l2">
             <span className="dsc-age" data-fresh={v.fresh}>{v.age}</span>

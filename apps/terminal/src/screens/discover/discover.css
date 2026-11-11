@@ -192,6 +192,16 @@
 @media (max-width: 1099.98px) {
   .dsc-chips { display: none; }
 }
+/* the compact row of a narrow column (UNRLZD Discover.module.css `@container dcol`): the market block goes and the MC
+   moves to the end of line 1, so nothing in the row draws over another part of it */
+.dsc-col { container: dcol / inline-size; }
+.dsc-mcin { display: none; flex: none; margin-left: auto; font: 13px var(--font-num); color: var(--text-1); white-space: nowrap; }
+@container dcol (width < 340px) {
+  .dsc-row { grid-template-columns: 68px minmax(0, 1fr); gap: 12px; padding: 13px 12px; }
+  .dsc-row .dsc-mkt { display: none; }
+  .dsc-row .dsc-mcin { display: inline; }
+  .dsc-row .dsc-l2, .dsc-row .dsc-l3 { overflow: hidden; }
+}
 /* four columns in a row from 1024 px, as the main app's Discover (UNRLZD Discover.module.css: @container app
    (min-width: 1024px) .body[data-hot="true"] .grid, repeat(4)); two below it, down to the phone's one list */
 @media (max-width: 1023.98px) {
