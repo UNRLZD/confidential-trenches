@@ -72,9 +72,14 @@ export const MUTANT_SECONDS = {
   // row, 559.4 s in all, half of each in a part: 280 s (PR run, job 129680697348)
   "packages/kit: MUTANT_PART=1/2 node --test test/mutants/evm-pool-mutants.test.mjs": 280,
   "packages/kit: MUTANT_PART=2/2 node --test test/mutants/evm-pool-mutants.test.mjs": 280,
-  // pool-usd-mutants.test.mjs: 125 mutants in 482.1 s (3.86 s each), 63 and 62 to a part (PR run, job 129680697348)
-  "packages/kit: MUTANT_PART=1/2 node --test test/mutants/pool-usd-mutants.test.mjs": 244,
-  "packages/kit: MUTANT_PART=2/2 node --test test/mutants/pool-usd-mutants.test.mjs": 240,
+  // pool-usd-mutants.test.mjs (card solana-reference-read-holds-a-slot-apart): on main's 134 mutants, 67 to a part, part
+  // 1/2 took 41 s and 48.2 s and part 2/2 347 s and 352.8 s (runs 42930005546 and 42928442142, jobs 130230098228,
+  // 130230098304, 130220829639, 130220829714). 300 s of part 2/2 was one mutant (the S6 withheld-fee mask removed as "",
+  // which made the walk's next line the if's body: it never ended and was killed at the sweep's RUN_MS); that row is now
+  // ";" and dies in under a second. Net of it, the slowest rate is 52.8 s / 66 = 0.80 s a mutant. The sweep now holds
+  // 173 mutants, 87 and 86 to a part: 70 s and 69 s at that rate (on the Mac, 11 Nov 01:44Z: 42.5 s and 50.4 s)
+  "packages/kit: MUTANT_PART=1/2 node --test test/mutants/pool-usd-mutants.test.mjs": 70,
+  "packages/kit: MUTANT_PART=2/2 node --test test/mutants/pool-usd-mutants.test.mjs": 69,
   "packages/kit: node --test test/mutants/pool-deposit-mutants.test.mjs": 11,
   "packages/kit: node --test test/mutants/vault-settle-mutants.test.mjs": 14,
   // the quote sweep: 733 mutants and 340 named tests, 488.3 s in all on the queue's runner (job 129687360144): 150.3 s
