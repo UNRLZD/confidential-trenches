@@ -156,8 +156,10 @@ export async function buyWallets(seed64: Uint8Array, pools: readonly BuyPool[], 
   return derivedBuyWallets(seed64, pools).read(opts);
 }
 
-/** How derived buy wallets are read: `only` the Ws of these addresses (none else read or answered), when given. */
-export type BuyWalletsRead = { signal?: AbortSignal; pick?: (n: number) => number; only?: ReadonlySet<string> };
+/** How derived buy wallets are read: `only` the Ws of these addresses (none else read or answered), when given;
+ *  `together`, every W asked at once (a sale's list), else one W after another (the positions' passes, which a stop
+ *  ends between two Ws). */
+export type BuyWalletsRead = { signal?: AbortSignal; pick?: (n: number) => number; only?: ReadonlySet<string>; together?: true };
 
 /** buyWallets in two steps: the Ws derived from the seed now, which the result keeps no copy of (the caller zeroes its
  *  seed at once), then read when asked; a read of `only` some Ws reads and answers only those. */
@@ -202,16 +204,33 @@ async function readDerived(pools: readonly BuyPool[], derived: readonly (BuyWall
     if (!Number.isInteger(r) || r < 0 || r > i) throw new Error("pick: not an index");
     [jobs[i], jobs[r]] = [jobs[r]!, jobs[i]!];
   }
-  for (const { p, k, address } of jobs) {
-    if (failed.has(p)) continue;
+  if (opts.together) {
+    // a sale's list (card pool-sell-legs-side-by-side): the Ws read side by side, asked in that order; the reader's
+    // route paces its calls within the provider's budget (holdingsRoute), so no W waits on another's answers. A pool's
+    // first failure, in the order the answers come, fails it
     opts.signal?.throwIfAborted();
-    try {
-      found[p]![k]!.holdings = await pools[p]!.reader.read(address, opts.signal, by);
-    } catch (e) {
+    await Promise.all(
+      jobs.map(async ({ p, k, address }) => {
+        try {
+          const holdings = await pools[p]!.reader.read(address, opts.signal, by);
+          found[p]![k]!.holdings = holdings;
+        } catch (e) {
+          if (!failed.has(p)) failed.set(p, `wallet ${k}: ${msg(e)}`);
+        }
+      }),
+    );
+    opts.signal?.throwIfAborted();
+  } else
+    for (const { p, k, address } of jobs) {
+      if (failed.has(p)) continue;
       opts.signal?.throwIfAborted();
-      failed.set(p, `wallet ${k}: ${msg(e)}`);
+      try {
+        found[p]![k]!.holdings = await pools[p]!.reader.read(address, opts.signal, by);
+      } catch (e) {
+        opts.signal?.throwIfAborted();
+        failed.set(p, `wallet ${k}: ${msg(e)}`);
+      }
     }
-  }
   return {
     wallets: found.flatMap((ws, p) => (failed.has(p) ? [] : ws.filter(kept))),
     failed: [...failed].sort(([a], [b]) => a - b).map(([p, error]) => ({ pool: pools[p]!.id, error })),

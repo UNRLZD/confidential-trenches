@@ -1369,7 +1369,8 @@ test("P2-2 (ZZPAGE 1): a retry booked before a sell, firing while the sell reads
   clock.ms = 0;
   const readsBefore = order.length;
   tp.flow({ kind: "pool.sell", chain: "solana", token: MINT, amount: 1n, slippageBps: 100, decimals: 6 }, { id: "s", sha: "00", progress: () => {} } as never);
-  await until(() => queue.length === 1);
+  // the sell's Ws asked together (card pool-sell-legs-side-by-side), the queue still serving one a turn
+  await until(() => queue.length >= 1);
   timers.shift()!(); // the retry, 5 s on, the sell still reading
   for (let i = 0; i < 6 * N && sellReadAt < 0; i++) {
     await until(() => queue.length > 0 || sellReadAt >= 0);

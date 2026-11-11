@@ -1050,12 +1050,12 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   // the pool's Ws with their holdings, the one finder a sell and the positions use: on mainnet through the helper's keyed
   // route, in the testnet build on one devnet RPC (the header's testnet-only choice); none: no read
   const finderOf = (r: readonly [SolanaRpc, SolanaRpc]): HoldingsReader => over.holdings?.(r) ?? (POOL_TESTNET ? solanaHoldingsAt(TESTNET_RPCS.solana[0]) : solanaHelperHoldings(TRADE_HELPER));
-  const poolBuyWallets = async (notes: NoteStore, r: readonly [SolanaRpc, SolanaRpc], reader: HoldingsReader = finderOf(r)) => {
+  const poolBuyWallets = async (notes: NoteStore, r: readonly [SolanaRpc, SolanaRpc], reader: HoldingsReader = finderOf(r), together?: true) => {
     const spent = await spentNotesOf(notes, scope!);
     if (spent.length === 0) return [];
     const seed64 = await page.seed64();
     try {
-      const got = await buyWallets(seed64, [{ id: pin!.program, chain: "sol", spent, reader }]);
+      const got = await buyWallets(seed64, [{ id: pin!.program, chain: "sol", spent, reader }], together ? { together } : {});
       if (got.failed.length > 0) throw new Error("the buy wallets' holdings could not be read");
       return got.wallets;
     } finally {
@@ -1314,7 +1314,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         const hold = positions.preempt();
         let found: FoundWallet[] | null = null;
         try {
-          const got = await poolBuyWallets(await store(), r);
+          // a sale's list: its Ws asked side by side (card pool-sell-legs-side-by-side)
+          const got = await poolBuyWallets(await store(), r, undefined, true);
           found = got.map((w) => ({ address: w.address, tokens: new Map([...w.holdings.tokens].map(([m, h]) => [m, h.amount] as const)) }));
           return got;
         } finally {
