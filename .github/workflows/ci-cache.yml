@@ -1,0 +1,197 @@
+# Main's caches after a merge (card main-ci-runs-once). GitHub scopes an Actions cache to the ref whose run saved it: one
+# saved on main is read by every pull request and queue group, one saved by a pull request's or a queue group's run
+# (gh-readonly-queue/main/...) by no other. ci.yml has no push run (the queue's run is a merged commit's one full run),
+# so this saves, on main, each ci.yml cache whose key main does not hold yet: the four downloads, the test-vault job's
+# cargo registry and the Solana pool's build cache. It runs no test and is no CI verdict: readers take a commit's ci.yml
+# runs alone (scripts/ci/ci-runs-once.mjs fullRun). Each job first looks the key up without a download (lookup-only),
+# so a merge that changes no key costs three short jobs; the vault sandbox's cache is saved on main by ci.yml's nightly.
+# scripts/ci/ci-runs-once.mjs cacheProblems holds every key and path here equal to ci.yml's, the test-vault steps up to
+# its cache equal to ci.yml's (rust-cache keys on the job id, the toolchains and the env), and no test step.
+name: ci-cache
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-cache-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  downloads:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: gitleaks-tgz
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ci-downloads/gitleaks-8.30.1.tgz
+          key: download-gitleaks-8.30.1-551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+          lookup-only: true
+      - if: steps.gitleaks-tgz.outputs.cache-hit != 'true'
+        run: |
+          bash scripts/ci/fetch.sh ~/.cache/ci-downloads/gitleaks-8.30.1.tgz 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb \
+            https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz
+      - if: steps.gitleaks-tgz.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ci-downloads/gitleaks-8.30.1.tgz
+          key: download-gitleaks-8.30.1-551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+      - id: foundry-tgz
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ci-downloads/foundry-1.7.1.tar.gz
+          key: download-foundry-1.7.1-cf7e688ed0c4c48adffca788b496076e31060b67ac5afe1e43dbb5499c20c88b
+          lookup-only: true
+      - if: steps.foundry-tgz.outputs.cache-hit != 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          bash scripts/ci/fetch.sh ~/.cache/ci-downloads/foundry-1.7.1.tar.gz cf7e688ed0c4c48adffca788b496076e31060b67ac5afe1e43dbb5499c20c88b \
+            https://api.github.com/repos/foundry-rs/foundry/releases/assets/415095756
+      - if: steps.foundry-tgz.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ci-downloads/foundry-1.7.1.tar.gz
+          key: download-foundry-1.7.1-cf7e688ed0c4c48adffca788b496076e31060b67ac5afe1e43dbb5499c20c88b
+      - id: cargo-near-tgz
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ci-downloads/cargo-near-0.22.0.tgz
+          key: download-cargo-near-0.22.0-9429064e30a427e96523f539cb255f3688d2345e5000d7d4e4873a8247247d1a
+          lookup-only: true
+      - if: steps.cargo-near-tgz.outputs.cache-hit != 'true'
+        run: |
+          bash scripts/ci/fetch.sh ~/.cache/ci-downloads/cargo-near-0.22.0.tgz 9429064e30a427e96523f539cb255f3688d2345e5000d7d4e4873a8247247d1a \
+            https://github.com/near/cargo-near/releases/download/cargo-near-v0.22.0/cargo-near-x86_64-unknown-linux-gnu.tar.gz
+      - if: steps.cargo-near-tgz.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ci-downloads/cargo-near-0.22.0.tgz
+          key: download-cargo-near-0.22.0-9429064e30a427e96523f539cb255f3688d2345e5000d7d4e4873a8247247d1a
+      - id: agave-tar
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ci-downloads/agave-4.4.0.tar.bz2
+          key: download-agave-4.4.0-3363f4728fe786ac7036e342a20df928aa2e3e43f807fbdce67814840538c574
+          lookup-only: true
+      - if: steps.agave-tar.outputs.cache-hit != 'true'
+        run: |
+          bash scripts/ci/fetch.sh ~/.cache/ci-downloads/agave-4.4.0.tar.bz2 3363f4728fe786ac7036e342a20df928aa2e3e43f807fbdce67814840538c574 \
+            https://github.com/anza-xyz/agave/releases/download/v4.4.0/solana-release-x86_64-unknown-linux-gnu.tar.bz2
+      - if: steps.agave-tar.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ci-downloads/agave-4.4.0.tar.bz2
+          key: download-agave-4.4.0-3363f4728fe786ac7036e342a20df928aa2e3e43f807fbdce67814840538c574
+
+  # the test-vault job's cargo registry: rust-cache keys on the job id, the installed toolchains, the CARGO_*/RUST* env
+  # and the locks, so this job is named test-vault and its steps up to the fetch are ci.yml's own; it saves only on a miss
+  test-vault:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: rust 1.96.0
+        run: bash scripts/ci/retry.sh rustup toolchain install 1.96.0 --profile minimal
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: contracts/vault -> target
+          cache-targets: "false"
+          cache-bin: "false"
+      - name: the vault's crates
+        run: bash scripts/ci/retry.sh cargo +1.96.0 fetch --locked --manifest-path contracts/vault/Cargo.toml
+
+  # the Solana pool's build cache (its registry and the two target dirs), built on a miss as ci.yml's pool-solana job
+  # builds them, with no test run (cargo test --no-run compiles the test binaries and runs none)
+  pool-solana:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: pool-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cache/solana
+            contracts/pool-solana/target
+            contracts/pool-solana/svm-tests/target
+          key: pool-solana-rustc-1.96.0-1.97.1-agave-4.4.0-${{ hashFiles('contracts/pool-solana/Cargo.lock', 'contracts/pool-solana/svm-tests/Cargo.lock') }}
+          lookup-only: true
+      - if: steps.pool-cache.outputs.cache-hit != 'true'
+        name: rust 1.96.0 and 1.97.1
+        run: bash scripts/ci/retry.sh rustup toolchain install 1.96.0 1.97.1 --profile minimal
+      - if: steps.pool-cache.outputs.cache-hit != 'true'
+        id: agave-tar
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ci-downloads/agave-4.4.0.tar.bz2
+          key: download-agave-4.4.0-3363f4728fe786ac7036e342a20df928aa2e3e43f807fbdce67814840538c574
+      - if: steps.pool-cache.outputs.cache-hit != 'true'
+        name: install the Solana build tools (agave v4.4.0)
+        run: |
+          bash scripts/ci/fetch.sh ~/.cache/ci-downloads/agave-4.4.0.tar.bz2 3363f4728fe786ac7036e342a20df928aa2e3e43f807fbdce67814840538c574 \
+            https://github.com/anza-xyz/agave/releases/download/v4.4.0/solana-release-x86_64-unknown-linux-gnu.tar.bz2
+          tar -xjf ~/.cache/ci-downloads/agave-4.4.0.tar.bz2 -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/solana-release/bin" >> "$GITHUB_PATH"
+      - if: steps.pool-cache.outputs.cache-hit != 'true' && steps.agave-tar.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ci-downloads/agave-4.4.0.tar.bz2
+          key: download-agave-4.4.0-3363f4728fe786ac7036e342a20df928aa2e3e43f807fbdce67814840538c574
+      # the newest entry main holds, as ci.yml's restore-keys reads it, so only what changed is built
+      - if: steps.pool-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cache/solana
+            contracts/pool-solana/target
+            contracts/pool-solana/svm-tests/target
+          key: pool-solana-rustc-1.96.0-1.97.1-agave-4.4.0-${{ hashFiles('contracts/pool-solana/Cargo.lock', 'contracts/pool-solana/svm-tests/Cargo.lock') }}
+          restore-keys: |
+            pool-solana-
+      - if: steps.pool-cache.outputs.cache-hit != 'true'
+        name: the pool program's crates
+        run: |
+          bash scripts/ci/retry.sh cargo +1.96.0 fetch --locked --manifest-path contracts/pool-solana/Cargo.toml
+          bash scripts/ci/retry.sh cargo +1.96.0 fetch --locked --manifest-path contracts/pool-solana/svm-tests/evil-venue/Cargo.toml
+          bash scripts/ci/retry.sh cargo +1.97.1 fetch --locked --manifest-path contracts/pool-solana/svm-tests/Cargo.toml
+      - if: steps.pool-cache.outputs.cache-hit != 'true'
+        name: the pool program's unit tests, built and not run
+        run: cargo +1.96.0 test --locked --manifest-path contracts/pool-solana/Cargo.toml --no-run
+      - if: steps.pool-cache.outputs.cache-hit != 'true'
+        name: the pool program's build
+        working-directory: contracts/pool-solana
+        run: cargo-build-sbf --sbf-out-dir out -- --locked
+      - if: steps.pool-cache.outputs.cache-hit != 'true'
+        name: the hostile test venue's build
+        working-directory: contracts/pool-solana/svm-tests/evil-venue
+        run: cargo-build-sbf --sbf-out-dir ../../out -- --locked
+      - if: steps.pool-cache.outputs.cache-hit != 'true'
+        name: the LiteSVM tests, built and not run
+        run: cargo +1.97.1 test --locked --manifest-path contracts/pool-solana/svm-tests/Cargo.toml --no-run
+      - if: steps.pool-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cache/solana
+            contracts/pool-solana/target
+            contracts/pool-solana/svm-tests/target
+          key: pool-solana-rustc-1.96.0-1.97.1-agave-4.4.0-${{ hashFiles('contracts/pool-solana/Cargo.lock', 'contracts/pool-solana/svm-tests/Cargo.lock') }}

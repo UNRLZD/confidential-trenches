@@ -26,8 +26,22 @@
 //   reads it (state.ops: the stage, and each leg's), read every 200 ms; each provider's JSON-RPC calls while the sell
 //   runs, against the page's limit (the kit's SOLANA_KEYLESS_RPC_LIMIT per provider, which these RPCs are paced by, as
 //   the page's are: pageSolanaRpcs); and any sale refused for its quote (quote_check_failed).
+// - Before the tap the page's positions pass runs, as the app's does at sign in, until the whole pass it keeps lists
+//   every W holding the coin: the sale lists its Ws from it (card pool-sell-legs-side-by-side). FLOW_FINDER=1: no pass
+//   kept, the sale's finder reads them (a restored device before its first whole pass). The path the sale took is read
+//   from its own calls (the finder's getBalance and getTokenAccountsByOwner after the tap) and printed; a run whose
+//   sale took the other path fails. Every provider refusal from the tap is kept by host and time, and each leg's time
+//   from the send before it.
 // - It writes the answers, the stages, the notes, each leg, the times and every tx to <out.json>; exit 0 only when every
 //   deposit landed, every buy filled, the sell answered sent and ended filled with a leg per W and its return notes.
+// - FLOW_RESUME=<run.seed> with <n> 0 and FLOW_FINDER=1: no deposit or buy; the kept words of an earlier run are signed in
+//   to a fresh store, the page's restore rebuilds its notes, and the sale sells every W of theirs that still holds the
+//   coin (a W an earlier run left unsold). Each refused leg's cause (its record's, card pool-sell-legs-side-by-side) is
+//   in the report.
+// - FLOW_ONE_FIRST=1 (kept listing path, <n> at least 2): before the share, one pool.sell of the whole holding of the W
+//   holding least, which sells from that W alone (the plan sells the smallest first), its own report beside the share's;
+//   then, once a whole positions pass lists that W at 0, the share across the other Ws. Each report holds every JSON-RPC
+//   call from its tap (ms, host, method) and every provider refusal by host and time.
 import { randomBytes, createHash } from "node:crypto";
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -53,12 +67,14 @@ const { TESTNET_RPCS, testnetPool, testnetPoolDeps, testnetRpc } = await import(
 const { solanaPacedRpc, SOLANA_KEYLESS_RPC_LIMIT } = await import("../../kit/src/trade/solana/send.ts");
 const { POOL_TESTNET } = await import("../../wallet/src/pool/network.ts");
 const { WALLET_SEED_LOCK } = await import("@blindfill/wallet/store");
+const { POSITIONS_KEPT_KEY, keptListed } = await import("../src/positions.ts");
 if (POOL_TESTNET !== true || SOL_POOLS.devnet === undefined) throw new Error("not the testnet build's pins");
 
 const [TABLE, MINT, NS, BPS, OUT] = process.argv.slice(2);
 const N = Number(NS);
 const SHARE = Number(BPS);
-if (!OUT || !Number.isInteger(N) || N < 1 || !Number.isInteger(SHARE) || SHARE < 1 || SHARE > 10_000) throw new Error("usage: pool-sell-share-devnet.mjs <table> <mint> <n buys> <share bps> <out.json>");
+const RESUME = process.env.FLOW_RESUME;
+if (!OUT || !Number.isInteger(N) || N < (RESUME ? 0 : 1) || (RESUME && N !== 0) || !Number.isInteger(SHARE) || SHARE < 1 || SHARE > 10_000) throw new Error("usage: pool-sell-share-devnet.mjs <table> <mint> <n buys> <share bps> <out.json>");
 const RUNG = 10_000_000n;
 const FEE = 5_000n;
 const SYSTEM = "11111111111111111111111111111111";
@@ -70,6 +86,8 @@ const sentTxs = [];
 // each JSON-RPC call on a devnet RPC: its host, method and time (performance.now()); each send's first time, by signature
 const calls = [];
 const sentAt = new Map();
+// each provider refusal (429 or 5xx) on a devnet RPC: its host, status and time (performance.now())
+const refusedAt = [];
 const realFetch = globalThis.fetch;
 globalThis.fetch = async (u, init) => {
   if (RPC_HOSTS.has(new URL(String(u)).host)) {
@@ -86,7 +104,10 @@ globalThis.fetch = async (u, init) => {
     } catch {}
   }
   const r = await realFetch(u, init);
-  if (RPC_HOSTS.has(new URL(String(u)).host) && (r.status === 429 || r.status >= 500)) log(`rpc ${new URL(String(u)).host}: HTTP ${r.status} from the provider`);
+  if (RPC_HOSTS.has(new URL(String(u)).host) && (r.status === 429 || r.status >= 500)) {
+    refusedAt.push({ host: new URL(String(u)).host, status: r.status, t: performance.now() });
+    log(`rpc ${new URL(String(u)).host}: HTTP ${r.status} from the provider`);
+  }
   return r;
 };
 // paced as the page's pair is (pool-testnet.ts pageSolanaRpcs)
@@ -128,9 +149,10 @@ const DIR = join(homedir(), ".ct-devnet-runs");
 mkdirSync(DIR, { recursive: true, mode: 0o700 });
 chmodSync(DIR, 0o700);
 const STAMP = new Date().toISOString().replace(/[:.]/g, "-");
-const entropy = randomBytes(16);
-writeFileSync(join(DIR, `run-${STAMP}.seed`), entropy.toString("hex") + "\n", { mode: 0o600, flag: "wx" });
-log(`the run's seed is kept at ${join(DIR, `run-${STAMP}.seed`)}`);
+const entropy = RESUME ? Buffer.from(readFileSync(RESUME, "utf8").trim(), "hex") : randomBytes(16);
+if (entropy.length !== 16) throw new Error("the seed file holds no 16-byte seed");
+if (!RESUME) writeFileSync(join(DIR, `run-${STAMP}.seed`), entropy.toString("hex") + "\n", { mode: 0o600, flag: "wx" });
+log(RESUME ? `the words of ${RESUME}, signed in to a fresh store` : `the run's seed is kept at ${join(DIR, `run-${STAMP}.seed`)}`);
 const keptF = process.env.FLOW_FUNDER;
 const fKey = keptF ? Uint8Array.from(Buffer.from(readFileSync(keptF, "utf8").trim(), "hex")) : Uint8Array.from(randomBytes(32));
 if (fKey.length !== 32) throw new Error("the funder's file holds no 32-byte key");
@@ -287,10 +309,117 @@ for (let i = 0; i < N && ok; i++) {
   if (!W) ok = false;
 }
 
+// FLOW_RESUME: the page's restore rebuilds the words' notes; each spent note's W that still holds the coin is a round
+if (RESUME && ok) {
+  const { poolRestore } = await import("../src/pool-restore.ts");
+  const { freshWallet } = await import("../../wallet/src/derive/keys.ts");
+  const { jOf } = await import("../../wallet/src/pool/queue.ts");
+  const restore = poolRestore({ store: async () => w, seed64: async () => seed64.slice(), signedIn: async () => true, ended: () => {} });
+  log(`the restore ended ${await restore.auto()}`);
+  const owner = (await again(() => rpcs[0]("getAccountInfo", [MINT, { encoding: "base64", commitment: "finalized" }]))).value.owner;
+  for (const n of (await ns.list()).filter((x) => x.state === "SPENT" && x.leaf)) {
+    const fw = freshWallet(seed64, "sol", n.leaf.label, jOf(n.ref));
+    fw.secretKey.fill(0);
+    const ata = (await again(() => rpcs[0]("getAccountInfo", [solanaAta(fw.address, MINT, owner), { encoding: "base64", commitment: "finalized" }]))).value;
+    const units = ata ? Buffer.from(ata.data[0], "base64").readBigUInt64LE(64) : 0n;
+    log(`W ${fw.address} holds ${units} units of the coin`);
+    if (units > 0n) rounds.push({ W: fw.address, resumed: true, units: String(units), ata: solanaAta(fw.address, MINT, owner) });
+  }
+  if (rounds.length === 0) ok = false;
+}
+// the return notes the store held before the tap (a resumed run's restore rebuilds the earlier run's)
+const returnsOf = (ns_) => ns_.filter((n) => n.ref === "return" && n.state === "UNSPENT" && n.leafIndex !== null).length;
+let returnsBefore = returnsOf(await noteList());
+const ONE_FIRST = process.env.FLOW_ONE_FIRST === "1";
+// FLOW_ONE_FIRST: the W sold alone first, and the share's Ws (every other round)
+let one = null;
+let oneW = null;
+let shareRounds = rounds;
 let sell = null;
 let after = null;
+// the sale's path, as the app's: the page's positions pass runs at sign in (positions(), its first pass), so the sale
+// lists its Ws from the whole pass it kept; FLOW_FINDER=1: no pass kept, the sale finds its Ws (a restored device
+// before its first whole pass). Which path the sale took is read from its own calls after it (`path`)
+const FINDER = process.env.FLOW_FINDER === "1";
+let path = null;
 if (ok) {
-  log(`pool.sell of ${SHARE} bps of ${MINT} across ${rounds.map((r) => r.W).join(", ")}`);
+  if (FINDER) {
+    await w.delete("meta", POSITIONS_KEPT_KEY);
+    log("path before the tap: finder (FLOW_FINDER=1, no pass kept)");
+  } else {
+    await t.positions();
+    let listed = null;
+    for (let i = 0; i < 90; i++) {
+      listed = keptListed(await w.get("meta", POSITIONS_KEPT_KEY));
+      if (listed !== null && rounds.every((r) => (listed.get(r.W)?.get(MINT) ?? 0n) > 0n)) break;
+      listed = null;
+      await sleep(2_000);
+    }
+    if (listed === null) {
+      log("path before the tap: BAD no whole positions pass listing every W in 180 s");
+      ok = false;
+    } else log(`path before the tap: kept listing (a whole pass lists ${rounds.length} W(s) holding the coin)`);
+  }
+}
+// a whole positions pass that lists each W in `holding` with the coin and each in `sold` with none (180 s at most)
+const passLists = async (holding, sold) => {
+  await t.positions();
+  for (let i = 0; i < 90; i++) {
+    const l = keptListed(await w.get("meta", POSITIONS_KEPT_KEY));
+    if (l !== null && holding.every((x) => (l.get(x)?.get(MINT) ?? 0n) > 0n) && sold.every((x) => (l.get(x)?.get(MINT) ?? 0n) === 0n)) return l;
+    await sleep(2_000);
+  }
+  return null;
+};
+// every buy Final (the kit's stage filled, its time from the tap) before any sale's tap: a buy's reads after its early
+// "sent" share the host's budget, so a sale tapped while they run is throttled by them, not by its own reads. A buy
+// keeps no ops record (its record field is empty), so its Final is its progress stage. A resumed run has no buy here
+const buysFinal = rounds.filter((r) => r.buy).map((r) => r.buy.times?.filled ?? null);
+if (ok && !buysFinal.every((x) => typeof x === "number")) {
+  log(`BAD a buy not Final before the first sale: ${JSON.stringify(buysFinal)}`);
+  ok = false;
+} else if (ok) log(`every buy Final before the first sale (${buysFinal.length} buys, Final at ${JSON.stringify(buysFinal)} ms from their taps)`);
+if (ok && ONE_FIRST) {
+  // on the finder path (a resumed run: a restored store holds no buy mints, so no pass lists its Ws) each W's holding
+  // is the restore's own read of its token account at finalized
+  if (rounds.length < 2 || (FINDER && !RESUME)) throw new Error("FLOW_ONE_FIRST takes two buys at least, and the finder path only on a resumed run");
+  const listed = FINDER ? null : keptListed(await w.get("meta", POSITIONS_KEPT_KEY));
+  const held = rounds.map((r) => ({ W: r.W, units: FINDER ? BigInt(r.units) : listed.get(r.W).get(MINT) })).sort((a, b) => (a.units < b.units ? -1 : a.units > b.units ? 1 : 0));
+  oneW = held[0].W;
+  const dec = 6;
+  const s_ = held[0].units.toString().padStart(dec + 1, "0");
+  const amount = `${s_.slice(0, -dec)}.${s_.slice(-dec)}`;
+  log(`pool.sell of ${amount} of ${MINT}: the whole holding of ${oneW}, the W holding least, alone`);
+  one = await once("pool.sell", { chain: "solana", token: MINT, amount, slippage_bps: 300 });
+  log(`one ${JSON.stringify(one)}`);
+  const legs = one.record?.legs ?? [];
+  if (one.record?.stage !== "filled" || legs.length !== 1 || legs[0].wallet !== oneW) {
+    log("BAD the one-wallet sale did not fill from that W alone");
+    ok = false;
+  }
+  shareRounds = rounds.filter((r) => r.W !== oneW);
+  // finder path: the sold W's token account reads empty or gone on both RPCs at finalized (180 s at most), and the
+  // share again starts with no pass kept; kept listing path: a whole pass lists it at 0
+  const soldOut = async () => {
+    const ata = rounds.find((r) => r.W === oneW).ata;
+    for (let i = 0; i < 90; i++) {
+      const got = await Promise.all(rpcs.map(async (r) => (await again(() => r("getAccountInfo", [ata, { encoding: "base64", commitment: "finalized" }]))).value));
+      if (got.every((v) => v === null || Buffer.from(v.data[0], "base64").readBigUInt64LE(64) === 0n)) {
+        await w.delete("meta", POSITIONS_KEPT_KEY);
+        return true;
+      }
+      await sleep(2_000);
+    }
+    return null;
+  };
+  if (ok && (FINDER ? await soldOut() : await passLists(shareRounds.map((r) => r.W), [oneW])) === null) {
+    log("BAD no whole positions pass listing the sold W at 0 and the others holding in 180 s");
+    ok = false;
+  }
+  returnsBefore = returnsOf(await noteList());
+}
+if (ok) {
+  log(`pool.sell of ${SHARE} bps of ${MINT} across ${shareRounds.map((r) => r.W).join(", ")}`);
   sell = await once("pool.sell", { chain: "solana", token: MINT, share_bps: SHARE, slippage_bps: 300 });
   log(`sell ${JSON.stringify(sell)}`);
   for (let i = 0; i < 45; i++) {
@@ -306,13 +435,14 @@ if (ok) {
   log(`after the run ${JSON.stringify(after)}`);
 }
 // the sell's numbers: each sale's send and end from the tap, each provider's calls against the page's limit
-let report = null;
-if (sell?.times?.tap !== undefined) {
+// a sell's numbers: each sale's send and end from its tap, each provider's calls against the page's limit, every call
+// and refusal from the tap
+const reportOf = (sell, want) => {
   const tap = sell.times.tap;
   const end = tap + sell.times.ended;
   const legs = (sell.record?.legs ?? []).map((l, i) => {
     const endAt = sell.times.timeline.find((x) => x.legs[i] && x.legs[i][1] !== "pending" && x.legs[i][1] !== "signed" && x.legs[i][1] !== "sent");
-    return { leg: i + 1, wallet: l.wallet, units: l.units, tx: l.tx, stage: l.stage, code: l.code ?? null, sentMs: l.tx && sentAt.has(l.tx) ? Math.round(sentAt.get(l.tx) - tap) : null, endedMs: endAt?.ms ?? null };
+    return { leg: i + 1, wallet: l.wallet, units: l.units, tx: l.tx, stage: l.stage, code: l.code ?? null, cause: l.cause ?? null, sentMs: l.tx && sentAt.has(l.tx) ? Math.round(sentAt.get(l.tx) - tap) : null, endedMs: endAt?.ms ?? null };
   });
   const during = calls.filter((c) => c.t >= tap && c.t <= end);
   const perHost = {};
@@ -332,9 +462,27 @@ if (sell?.times?.tap !== undefined) {
     perHost[host] = { calls: mine.length, maxIn10s: maxTotal, maxOneMethodIn10s: maxMethod, limit: SOLANA_KEYLESS_RPC_LIMIT, methods };
   }
   const quoteAge = legs.filter((l) => l.code === "quote_check_failed").map((l) => l.leg);
-  report = { legs, timeline: sell.times.timeline, perHost, quoteAgeRefused: quoteAge };
-  log(`sell report ${JSON.stringify(report)}`);
+  // the path the sale took, from its calls: the finder reads W's holdings (getBalance, getTokenAccountsByOwner); the
+  // kept listing reads none
+  const finderCalls = during.filter((c) => c.method === "getBalance" || c.method === "getTokenAccountsByOwner").length;
+  path = finderCalls > 0 ? "finder" : "kept listing";
+  log(`path the sale took: ${path} (${finderCalls} finder call(s) after the tap)`);
+  if (path !== want) log(`BAD the sale took the ${path} path, not the ${want} this run asked for`);
+  // each refusal from the tap, by host
+  const refused = refusedAt.filter((x) => x.t >= tap && x.t <= end).map((x) => ({ host: x.host, status: x.status, ms: Math.round(x.t - tap) }));
+  // each leg's time waiting its turn: from the send before it to its own
+  for (let i = 1; i < legs.length; i++) if (legs[i].sentMs !== null && legs[i - 1].sentMs !== null) legs[i].afterPriorSentMs = legs[i].sentMs - legs[i - 1].sentMs;
+  const report = { path, legs, timeline: sell.times.timeline, perHost, refused, quoteAgeRefused: quoteAge, calls: during.map((c) => [Math.round(c.t - tap), c.host, c.method]) };
+  log(`sell report ${JSON.stringify({ ...report, calls: report.calls.length })}`);
+  return report;
+};
+let report = null;
+let oneReport = null;
+if (sell?.times?.tap !== undefined) {
+  report = reportOf(sell, FINDER ? "finder" : "kept listing");
+  path = report.path;
 }
+if (one?.times?.tap !== undefined) oneReport = reportOf(one, FINDER ? "finder" : "kept listing");
 // every transaction, F's payments, the page's own sends and each buy (sent through the helper), read back on both RPCs
 const all = [...new Set([...fundTxs, ...sentTxs, ...rounds.map((r) => r.buy?.answer?.result?.txs?.[0]?.hash).filter(Boolean)])];
 const readBack = {};
@@ -350,18 +498,20 @@ const filled =
   ok &&
   sell?.answer?.result !== undefined &&
   sell.record?.stage === "filled" &&
-  sell.record.legs?.length === rounds.length &&
+  sell.record.legs?.length === shareRounds.length &&
   sell.record.legs.every((l) => l.stage === "filled" && legTxs.includes(l.tx)) &&
-  [...new Set(sell.record.legs.map((l) => l.wallet))].sort().join() === rounds.map((r) => r.W).sort().join() &&
+  [...new Set(sell.record.legs.map((l) => l.wallet))].sort().join() === shareRounds.map((r) => r.W).sort().join() &&
   sell.times.filled !== undefined &&
-  legTxs.length === rounds.length &&
-  notes.filter((n) => n.ref === "return" && n.state === "UNSPENT" && n.leafIndex !== null).length === rounds.length &&
+  legTxs.length === shareRounds.length &&
+  returnsOf(notes) - returnsBefore === shareRounds.length &&
   !stages.some((x) => x.kind !== "pool.deposit" && x.stage !== "sent" && x.stage !== "filled") &&
-  Object.values(readBack).every((r) => r.every((x) => x !== null && x.err === null));
+  Object.values(readBack).every((r) => r.every((x) => x !== null && x.err === null)) &&
+  path === (FINDER ? "finder" : "kept listing") &&
+  (!ONE_FIRST || (oneReport?.path === (FINDER ? "finder" : "kept listing") && one?.record?.stage === "filled"));
 log(`notes ${JSON.stringify(notes)}; sell times ${JSON.stringify(sell?.times ?? null)}; filled ${filled}`);
 seed64.fill(0);
 fKey.fill(0);
-writeFileSync(OUT, JSON.stringify({ at: new Date().toISOString(), cluster: "devnet", program: SOL_POOLS.devnet.program, table: TABLE, mint: MINT, n: N, share_bps: SHARE, F, need: String(NEED), fundTxs, rounds, sell, report, after, sentTxs, readBack, stages, notes, filled }, null, 2) + "\n");
+writeFileSync(OUT, JSON.stringify({ at: new Date().toISOString(), cluster: "devnet", program: SOL_POOLS.devnet.program, table: TABLE, mint: MINT, n: N, share_bps: SHARE, F, need: String(NEED), fundTxs, rounds, buysFinal, one: one && { W: oneW, ...one }, oneReport, sell, report, after, sentTxs, readBack, stages, notes, filled }, null, 2) + "\n");
 await t.signedOut();
 ns.close();
 w.close();

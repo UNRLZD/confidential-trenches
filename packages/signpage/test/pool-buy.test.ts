@@ -5,6 +5,7 @@
 // copies of mainnet's pump program and accounts, both providers' answers, the Rent sysvar as both answered it, and the
 // pool fixture's real release proof); the pool's own account and pages are planted around that release. The seed is the
 // published all-zero entropy vector (packages/wallet/test/vectors/a8.json).
+import { enableTimers, resetTimers } from "./mock-timers.ts";
 import assert from "node:assert/strict";
 import { throughApi } from "./api-ends.ts";
 import { test } from "node:test";
@@ -1848,6 +1849,29 @@ test("card start-reads-wait-out-a-throttle: a buy's bound is on the device's clo
   assert.ok(!w.log.includes("send") && !w.log.some((x) => x.startsWith("take")));
 });
 
+test("card pool-sell-legs-side-by-side: blockhashOf, split into its read and its check for the sell, asks the buy's calls in the buy's order and refuses as before", async () => {
+  const run = async (answers: { latest?: unknown; valid?: unknown; height?: unknown }) => {
+    const asked: string[] = [];
+    const at = (p: 0 | 1): SolanaRpc =>
+      (async (m: string) => {
+        asked.push(`${p}:${m}`);
+        return m === "getLatestBlockhash" ? answers.latest : m === "isBlockhashValid" ? answers.valid : answers.height;
+      }) as SolanaRpc;
+    const got = await poolBuy.blockhashOf([at(0), at(1)]).then((x) => x, (e: unknown) => ({ refused: String(e) }));
+    return { asked, got };
+  };
+  const ok = await run({ latest: { context: { slot: 9 }, value: { blockhash: "B", lastValidBlockHeight: 100 } }, valid: { value: true }, height: 10 });
+  assert.deepEqual(ok.asked, ["0:getLatestBlockhash", "1:isBlockhashValid", "1:getBlockHeight"]);
+  assert.deepEqual(ok.got, { blockhash: "B", lastValidBlockHeight: 100, slot: 9, lastHeight: 161 });
+  // no blockhash: refused with nothing asked of RPC 1; RPC 1 calling it invalid: refused
+  const none = await run({ latest: { context: { slot: 9 }, value: {} } });
+  assert.deepEqual(none.asked, ["0:getLatestBlockhash"]);
+  assert.ok("refused" in none.got);
+  const invalid = await run({ latest: { context: { slot: 9 }, value: { blockhash: "B", lastValidBlockHeight: 100 } }, valid: { value: false }, height: 10 });
+  assert.deepEqual(invalid.asked, ["0:getLatestBlockhash", "1:isBlockhashValid", "1:getBlockHeight"]);
+  assert.ok("refused" in invalid.got);
+});
+
 // Card sol-buy-reads-side-by-side: the pool's time for the take is read beside the first round (the host's chainNow,
 // the wallet's chainNow on the queue's pool) and handed to the take, which uses it within NOW_REUSE_MS of its start and
 // reads again past it (packages/wallet/src/pool/queue.ts): no chain-time read waits between the signature and the send.
@@ -1917,6 +1941,34 @@ test("card sol-buy-reads-side-by-side: a filled run whose host's end throws post
   const { answer, stages } = await kindRun({ ...w.host, end: throwingEnd });
   assert.deepEqual(answer, { result: { stage: "sent", txs: [{ chain: "solana", hash: SIG }] } });
   assert.deepEqual(stages, ["filled"]);
+});
+
+// Card pool-sell-legs-side-by-side: the kit's bounded reads (the Rent sysvar, the venue's accounts) with no answer in
+// their 5 s bound are the provider's fault ("timeout"), so a buy waits it out as any other provider fault and buys, never
+// a bare "failed"
+test("a buy's Rent or venue read with no answer in its 5 s bound once waits 1 s and buys", async (t) => {
+  enableTimers(t.mock.timers, { apis: ["setTimeout"] });
+  t.after(() => resetTimers(t.mock.timers));
+  const reads: [string, (m: string, q: readonly unknown[]) => boolean][] = [
+    ["the Rent sysvar", (m, q) => m === "getAccountInfo" && q[0] === RENT_SYSVAR],
+    ["the venue's accounts", (m, q) => m === "getMultipleAccounts" && Array.isArray(q[0]) && q[0].length === 3 && q[0][0] === fx.pump.mint],
+  ];
+  for (const [what, hit] of reads) {
+    const w = await world();
+    let left = 1;
+    const hang = (i: 0 | 1, rpc: SolanaRpc): SolanaRpc =>
+      (async (m: string, q: readonly unknown[]) => (i === 1 && left > 0 && hit(m, q) ? (left--, new Promise(() => {})) : rpc(m, q))) as SolanaRpc;
+    let done = false;
+    const run = runPoolBuy({ ...w.host, rpcs: [hang(0, w.host.rpcs[0]), hang(1, w.host.rpcs[1])] as const }, ASK).finally(() => (done = true));
+    for (let i = 0; i < 200 && !done; i++) {
+      await new Promise((r) => setImmediate(r));
+      t.mock.timers.tick(500);
+    }
+    const a = await run;
+    assert.equal(left, 0, `${what}: the read hung`);
+    assert.deepEqual(a, { stage: "filled", txs: [{ chain: "solana", hash: SIG }] }, what);
+    assert.deepEqual(beforeSend(w), [1_000], `${what}: one wait`);
+  }
 });
 
 // Card sell-right-after-a-buy (devnet run 11, 11 Nov): a sell tapped 1 s after a buy's Filled met 20 throttles in 16.3 s,

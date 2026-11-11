@@ -62,8 +62,10 @@ const GATE = (b, f) => new RegExp(String.raw`(?<g>${I})=class\{#(${I})=0;#(${I})
   + String.raw`async turn\((${I})\)\{let (${I}),(${I})=new Promise\((${I})=>\11=\13\),(${I})=this\.#\6;if\(this\.#\6=\14\.then\(\(\)=>\12\),\10===void 0\)return \14\.then\(\(\)=>\11\);try\{\10\.throwIfAborted\(\),await new Promise\(\((${I}),(${I})\)=>\{let (${I})=\(\)=>\16\(\10\.reason\);\10\.addEventListener\(\`abort\`,\17,\{once:!0\}\),\14\.then\(\(\)=>\(\10\.removeEventListener\(\`abort\`,\17\),\15\(\)\)\)\}\)\}catch\((${I})\)\{throw \11\(\),\18\}return \11\}`
   + String.raw`epoch\(\)\{return this\.#\4\}throttled\((${I}),(${I})\)\{if\(this\.#\5=!0,\19===this\.#\4\)\{this\.#\4\+\+;let (${I})=this\.#\7\(\),(${I})=\21-this\.#\2<\(this\.#\8\.quietMs\?\?1e4\)\?this\.#\3:0;this\.#\3=${esc(f)}\(\22,\20,this\.#\8\),this\.#\2=Math\.max\(this\.#\2,\21\+this\.#\3\);return\}[^]{0,200}?\}answered\((${I})\)\{\23===this\.#\4&&\(this\.#\5=!1\)\}suspect\(\)\{return this\.#\5\}\}`);
 // held: `async function h(gate, by, sleep, signal) { for (let w = gate.left(); w > 0; w = gate.left()) { if (Date.now() +
-// w > by) throw Error(past M/1e3 s); await sleep(w, signal), signal?.throwIfAborted() } }`, with M = 3e4
-const HELD = new RegExp(String.raw`async function (?<h>${I})\((${I}),(${I}),(${I}),(${I})\)\{for\(let (${I})=\2\.left\(\);\6>0;\6=\2\.left\(\)\)\{if\(Date\.now\(\)\+\6>\3\)throw Error\(\`its reads drew the provider's 429 past \$\{(?<m>${I})\/1e3\} s\`\);await \4\(\6,\5\),\5\?\.throwIfAborted\(\)\}\}`);
+// w > by) throw new SolanaRpcTransportError("http_429", past M/1e3 s, 1, route, w); await sleep(w, signal),
+// signal?.throwIfAborted() } }`, with M = 3e4: past the bound, the provider's 429 as the kit's transport fault, so a sale
+// counts it as the provider's (card pool-sell-legs-side-by-side)
+const HELD = new RegExp(String.raw`async function (?<h>${I})\((${I}),(${I}),(${I}),(${I})\)\{for\(let (${I})=\2\.left\(\);\6>0;\6=\2\.left\(\)\)\{if\(Date\.now\(\)\+\6>\3\)throw new ${I}\(\`http_429\`,\`its reads drew the provider's 429 past \$\{(?<m>${I})\/1e3\} s\`,1,\`the holdings route\`,\6\);await \4\(\6,\5\),\5\?\.throwIfAborted\(\)\}\}`);
 const BOUND = (m) => new RegExp(String.raw`[,\s;]${esc(m)}=3e4[,;]`);
 // a round in the gate's turn: `async function t(gate, by, sleep, signal, round) { let give = await gate.turn(signal);
 // try { return await h(gate, by, sleep, signal), await round(gate.epoch()) } finally { give() } }`
@@ -76,7 +78,7 @@ const ANSWERED = (m, t) => new RegExp(READS(m, t).source + String.raw`,\4\.gate\
 // 429 && x.gate.throttled(e, Math.max(f.afterMs ?? 0, x.hint?.() ?? 0)), ...`
 const THROTTLED = new RegExp(String.raw`let (${I})=(${I})\.gate\.epoch\(\);try\{return await \2\.rpc\((${I}),(${I})\)\}catch\((${I})\)\{let (${I})=${I}\(\3,\5\);throw \6\.http===429&&\2\.gate\.throttled\(\1,Math\.max\(\6\.afterMs\?\?0,\2\.hint\?\.\(\)\?\?0\)\)`);
 // the list: `u = Date.now() + M; ...; x.holdings = await pools[p].reader.read(address, opts.signal, u)`
-const BY = (m) => new RegExp(String.raw`[,\s;](${I})=Date\.now\(\)\+${esc(m)};[^]{0,400}?\.reader\.read\(${I},${I}\.signal,\1\)`);
+const BY = (m) => new RegExp(String.raw`[,\s;](${I})=Date\.now\(\)\+${esc(m)};[^]{0,800}?\.reader\.read\(${I},${I}\.signal,\1\)`);
 // the helper's route: its own gate, made with its paced transport
 const ROUTE = (g) => new RegExp(String.raw`wait429:${I}\.wait429,gate:new ${esc(g)}\}`);
 // the old shape: a flat wait after a 429, `Math.max(wait429(), Math.min(e instanceof RpcFailed && e.afterMs !== null ? ...`
@@ -127,7 +129,7 @@ export function judge(a, { ledger = true, fixed = ledger ? fixedReleases() : nul
   else if (pin !== a.sha384) bad("SIGN_HOST's served /app.js is not the one index.html pins");
   if (a?.rule !== true) bad("the wait after a throttle is not a pause doubling from 1 s to 10 s with a capped, finite Retry-After when longer");
   if (a?.gate !== true) bad("no provider gate on that rule: a round's throttles not counted once, its pause set back by one call's answer, its time the wall clock, or no turn given on when a waiter stops");
-  if (a?.held !== true) bad("a reader does not wait the gate until it opens before a round, or waits past its read's 30 s bound");
+  if (a?.held !== true) bad("a reader does not wait the gate until it opens before a round, or waits past its read's 30 s bound, or refuses past it as anything but the provider's 429");
   if (a?.turn !== true) bad("a round does not run in the gate's turn, taken before its wait and given back however it ends: two reads at once ask past the gate");
   if (a?.reader !== true) bad("the holdings reader does not run each round in its gate's turn with its read's bound, or the helper's route gives it no gate of its own");
   if (a?.throttled !== true) bad("a call that draws a 429 does not tell its gate: the gate never closes");

@@ -222,7 +222,7 @@ test("a sell's read during a throttle that ends inside its bound waits and reads
     try {
       const r = await buyWallets(SEED, [{ id: "sol", chain: "sol", spent: spent(2), reader: solanaHelperHoldings("https://sell-hot.example") }]);
       assert.equal(r.failed.length, 1);
-      assert.match(r.failed[0]!.error, /its reads drew the provider's 429 past 30 s$/);
+      assert.match(r.failed[0]!.error, /its reads drew the provider's 429 past 30 s \(http_429, 1 try at the holdings route\)$/);
       assert.equal(pastBound, 0, "no call after the bound");
     } finally {
       f.restore();

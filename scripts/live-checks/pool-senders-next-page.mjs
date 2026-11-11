@@ -7,7 +7,8 @@
 //     SOLANA_POOL_NEXT_PAGE_WINDOW (64) entries of a page's end, `!keeps || near(stateSize) && near(labelSize)`; a
 //     sell further from it sends the six, whose deposit a page opened meanwhile fails WrongAccount, and is rebuilt;
 //   - fallback: when the eight is refused (its reserve over the cap, or a pool rule), the sell is built again as the six,
-//     `built ?? await form(false)`, and any other error still throws.
+//     `built ?? await form(false)`, and any other error still throws (since card pool-sell-legs-side-by-side the same
+//     rule in the fee's loop: the eight's refusal caught, `next = false; continue`).
 // What each does is held by the card's tests (packages/signpage/test/pool-sell.test.ts, T1, T2, the window's edge, one
 // tree in and one out, the band edges at 2,473,120 and 3,936,160); the recorded answers are facts() over a tree's
 // packages/signpage/index.html and public/app.js, or SIGN_HOST's own page. A build of release-91 or earlier carries
@@ -35,10 +36,13 @@ const N = "[\\w$]+";
 const WINDOW = new RegExp(`(${N})=(${N})=>${N}-\\2%${N}<=64,${N}=${N}\\(${N}\\(${N}\\.address,\\[[^\\]]{0,200}\\],${N}\\.blockhash,\\[\\]\\)\\.message\\)\\.length<=1232&&\\(!${N}\\|\\|\\1\\(${N}\\.stateSize\\)&&\\1\\(${N}\\.labelSize\\)\\)`);
 // the eight tried, a refusal of it caught (two refusal classes, any other error thrown), then the six
 const FALLBACK = new RegExp(`if\\((${N})\\)try\\{(${N})=await (${N})\\(!0\\)\\}catch\\((${N})\\)\\{if\\(!\\(\\4 instanceof ${N}\\|\\|\\4 instanceof ${N}\\)\\)throw \\4\\}let\\{wire:${N},value:${N}\\}=\\2\\?\\?await \\3\\(!1\\)`);
+// since card pool-sell-legs-side-by-side (its fee read beside the simulations): the form tried, the eight's refusal
+// caught (two refusal classes; any other error, or the six's own refusal, thrown), then the six
+const FALLBACK_SIDE = new RegExp(`let (${N})=null;try\\{\\1=(${N})\\((${N}),(${N})\\)\\}catch\\((${N})\\)\\{if\\(!\\3\\|\\|!\\(\\5 instanceof ${N}\\|\\|\\5 instanceof ${N}\\)\\)throw \\5\\}if\\(\\1===null\\)\\{\\3=!1;continue\\}`);
 
 /** What the check keeps of SIGN_HOST's page: the index, the served bundle's sha384, and which marks the bundle holds. */
 export function facts(index, js) {
-  return { index, sha384: sha384(js), window: WINDOW.test(js), fallback: FALLBACK.test(js) };
+  return { index, sha384: sha384(js), window: WINDOW.test(js), fallback: FALLBACK.test(js) || FALLBACK_SIDE.test(js) };
 }
 
 /** SIGN_HOST's /app.js sha384 in every release list from FOLDED_FROM on (packages/signpage/releases/). */
