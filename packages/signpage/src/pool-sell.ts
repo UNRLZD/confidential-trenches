@@ -652,7 +652,7 @@ export type PoolSellPlan = { units: bigint; total: bigint; legs: readonly { w: B
  *   not cover is sold in part, and the walk ends. Smallest first closes the most Ws and leaves the one part sale where
  *   the most is held.
  */
-export async function planPoolSell(h: Pick<PoolSellHost, "rpcs" | "wallets" | "bought" | "wait" | "signal">, ask: PoolAsk): Promise<PoolSellPlan> {
+export async function planPoolSell(h: Pick<PoolSellHost, "rpcs" | "wallets" | "bought" | "wait" | "signal" | "stopped">, ask: PoolAsk): Promise<PoolSellPlan> {
   return (await planReads(h, ask)).plan;
 }
 
@@ -665,7 +665,7 @@ export const PLAN_STEP_MS = 1_000;
  *  accounts, under the program W's own buy record names for the token (pool-buy.ts BuyMints) when it names one: the
  *  mint's program on both RPCs decides, and a W read under another program is read again under the mint's (card
  *  pool-sell-legs-side-by-side: one round for the plan's reads). */
-async function planReads(h: Pick<PoolSellHost, "rpcs" | "wallets" | "bought" | "wait" | "signal">, ask: PoolAsk, listed?: (ws: readonly BuyWallet[]) => void): Promise<{ plan: PoolSellPlan; seen: ReadonlyMap<string, WHeld> }> {
+async function planReads(h: Pick<PoolSellHost, "rpcs" | "wallets" | "bought" | "wait" | "signal" | "stopped">, ask: PoolAsk, listed?: (ws: readonly BuyWallet[]) => void): Promise<{ plan: PoolSellPlan; seen: ReadonlyMap<string, WHeld> }> {
   if (ask.kind !== "pool.sell" || ask.chain !== "solana" || ask.token === null) return no("not_allowed");
   const token = ask.token;
   const all = (await h.wallets()).filter((x) => x.chain === "sol");
@@ -702,12 +702,17 @@ async function planReads(h: Pick<PoolSellHost, "rpcs" | "wallets" | "bought" | "
   };
   // the Ws' reads in steps of PLAN_W_STEP a PLAN_STEP_MS apart: one sale never puts more than 20 reads on one provider
   // inside 1 s (the helper's keyed provider is paced at 10 a second upstream; a public one counts connections), with the
-  // mint, rent and sizes reads beside the first step; a sale of up to PLAN_W_STEP Ws is one step. A read that failed
-  // starts no later step.
+  // mint, rent and sizes reads beside the first step; a sale of up to PLAN_W_STEP Ws is one step. A step starts once
+  // the wait has passed and the step before it answered, so a read that failed starts no later step; a sign out at the
+  // wait asks nothing more (review of 55d4c6eb, P3-C).
   const asked: Promise<{ w: BuyWallet; held: bigint; frozen?: true }>[] = [];
   let failed = false;
   for (let i = 0; i < ws.length && !failed; i += PLAN_W_STEP) {
-    if (i > 0) await waitUnless(h.wait, PLAN_STEP_MS, h.signal);
+    if (i > 0) {
+      await Promise.all([waitUnless(h.wait, PLAN_STEP_MS, h.signal), Promise.allSettled(asked)]);
+      if (h.signal?.aborted || h.stopped?.()) return no();
+      if (failed) break;
+    }
     for (const x of ws.slice(i, i + PLAN_W_STEP)) {
       const p = one(x);
       p.catch(() => void (failed = true));
@@ -952,8 +957,12 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later, w: BuyWallet
     const quiet = <T>(p: Promise<T>): Promise<T> => (p.catch(() => {}), p);
     // before the leg's turn: what no other leg's sale changes (the Rent sysvar; the pool's sizes, read again with the
     // deposit's pages after the turn, depositHeld; W's note; the mint's program)
-    const rentP = quiet(early?.rent ?? readSolanaRent(rpcs));
-    const sizesP = quiet(early?.sizes ?? treeSizes(rpcs, program, pool, wait));
+    // a later leg's Rent and pool sizes are the plan's when they were read; when the plan's read failed, its own read
+    // again, never the plan's failure (review of 55d4c6eb, P2-B: one 429 there was every leg's fault); the first leg's
+    // are its own attempt's, as before
+    const own = turn?.opened !== undefined;
+    const rentP = quiet(early?.rent ? (own ? early.rent.catch(() => readSolanaRent(rpcs)) : early.rent) : readSolanaRent(rpcs));
+    const sizesP = quiet(early?.sizes ? (own ? early.sizes.catch(() => treeSizes(rpcs, program, pool, wait)) : early.sizes) : treeSizes(rpcs, program, pool, wait));
     const noteP = quiet(early?.note ?? noteFor(h, rpcs, program, scope, store, sync, w, seed));
     const mintP = early?.held ? null : quiet(mintProgram(rpcs, token));
     // a leg after the first: every read its sale prices on (W's accounts, the reference, the blockhash, the deposit's

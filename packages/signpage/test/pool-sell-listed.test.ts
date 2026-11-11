@@ -13,13 +13,14 @@ import { SOLANA_TOKEN_2022_PROGRAM, SOLANA_TOKEN_PROGRAM } from "../../kit/src/c
 import { solanaAta } from "../../kit/src/checks/solana/message.ts";
 import { noteCommitment, noteSecrets } from "../../wallet/src/notes/secrets.ts";
 import { openNoteStore } from "../../wallet/src/notes/store.ts";
-import type { HoldingsReader } from "../../wallet/src/pool/buy-wallets.ts";
+import { solanaHoldingsReader, type HoldingsReader } from "../../wallet/src/pool/buy-wallets.ts";
+import { ThrottleGate } from "../../wallet/src/throttle.ts";
 import { solanaPoolOf } from "../../wallet/src/pool/solana.ts";
 import { freshWallet } from "../../wallet/src/derive/keys.ts";
 import { jOf } from "../../wallet/src/pool/queue.ts";
 import { POSITIONS_KEPT_KEY } from "../src/positions.ts";
 import { testnetPool } from "../src/pool-testnet.ts";
-import { BUY_MINTS_KEY, planPoolSell } from "../src/pool-sell.ts";
+import { BUY_MINTS_KEY, planPoolSell, runPoolSell } from "../src/pool-sell.ts";
 
 const SEED64 = wordsToSeed64(entropyToWords(new Uint8Array(16)));
 const PIN = { program: "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8", feePayer: "9T3RgAVTNgedZhjJyC1UmyisV61pFWoU24LQHnk5W2bb" };
@@ -61,7 +62,7 @@ const tokenAccount = (mint: string, owner: string, amount: bigint): string => {
 
 /** Both providers: the mint under `program`; each W's four accounts (its ATA under `program` holding `held`'s amount,
  *  W, its two volume accounts: none). Every getMultipleAccounts is checked to name one W, and each W named is kept. */
-function chain(ws: readonly string[], held: ReadonlyMap<string, bigint>, program = SOLANA_TOKEN_PROGRAM) {
+function chain(ws: readonly string[], held: ReadonlyMap<string, bigint>, program = SOLANA_TOKEN_PROGRAM, failW?: string) {
   const ataOf = new Map(ws.map((w) => [solanaAta(w, MINT, program), w] as const));
   const named: [Set<string>, Set<string>] = [new Set(), new Set()];
   const calls: [string[], string[]] = [[], []];
@@ -73,7 +74,11 @@ function chain(ws: readonly string[], held: ReadonlyMap<string, bigint>, program
     at[k]!.push(clock.t);
     if (method === "getAccountInfo") {
       assert.equal(params[0], MINT, "the only lone account read is the mint");
-      return { context: { slot: 10 }, value: { owner: program, lamports: 1, data: [base64.encode(new Uint8Array(82)), "base64"] } };
+      // an initialized mint of 6 decimals (the page's pass reads its decimals)
+      const m = new Uint8Array(82);
+      m[44] = 6;
+      m[45] = 1;
+      return { context: { slot: 10 }, value: { owner: program, lamports: 1, data: [base64.encode(m), "base64"] } };
     }
     assert.equal(method, "getMultipleAccounts");
     const keys = params[0] as string[];
@@ -82,6 +87,11 @@ function chain(ws: readonly string[], held: ReadonlyMap<string, bigint>, program
     const w = [...theirs][0]!;
     assert.equal(keys[1], w);
     named[k]!.add(w);
+    // a W whose read fails, its answer slower than the step's wait on the test's clock
+    if (w === failW) {
+      await new Promise((r) => setTimeout(r, 20));
+      throw new Error("HTTP 503");
+    }
     open.now++;
     open.most = Math.max(open.most, open.now);
     await new Promise((r) => setTimeout(r, 1));
@@ -93,15 +103,22 @@ function chain(ws: readonly string[], held: ReadonlyMap<string, bigint>, program
 }
 
 /** The page's sell host on `w` (the sell kind's own, taken when a sell is asked), with a finder that counts its reads. */
-async function sellHostOf(w: WalletStore, c: ReturnType<typeof chain>, finderHeld: ReadonlyMap<string, bigint> = new Map()) {
+async function sellHostOf(w: WalletStore, c: ReturnType<typeof chain>, finderHeld: ReadonlyMap<string, bigint> = new Map(), firstPass = false, finderReader?: HoldingsReader) {
   const finder = { reads: 0 };
-  const reader: HoldingsReader = { chain: "sol", read: async (address) => (finder.reads++, { native: 0n, tokens: new Map((finderHeld.get(address) ?? 0n) > 0n ? [[MINT, { amount: finderHeld.get(address)!, frozen: false }]] : []), unreadable: [] }) };
+  const reader: HoldingsReader = finderReader ?? { chain: "sol", read: async (address) => (finder.reads++, { native: 0n, tokens: new Map((finderHeld.get(address) ?? 0n) > 0n ? [[MINT, { amount: finderHeld.get(address)!, frozen: false }]] : []), unreadable: [] }) };
   let host: unknown = null;
   const sell = (make: () => unknown) => () => {
     host = make();
     return { running: true as const, after: new Promise<void>(() => {}), answer: () => ({ result: { stage: "sent", txs: [] } }) };
   };
   const tp = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { pin: PIN, rpcs: c.rpcs, holdings: () => reader, tradeKinds: { sell }, positions: { setTimer: () => 0, clearTimer: () => {} } } as never);
+  // the page's own first pass (the load's), run to its end and kept, before the tap
+  if (firstPass) {
+    (tp as unknown as { positions(): unknown }).positions();
+    for (let i = 0; i < 500 && (await w.get("meta", POSITIONS_KEPT_KEY)) === undefined; i++) await new Promise((r) => setTimeout(r, 2));
+    assert.notEqual(await w.get("meta", POSITIONS_KEPT_KEY), undefined, "the first pass kept");
+    finder.reads = 0;
+  }
   tp.flow({ kind: "pool.sell", chain: "solana", token: MINT, amount: 1n, slippageBps: 100, decimals: 6 }, { id: "s", sha: "00", progress: () => {} } as never);
   for (let i = 0; i < 200 && host === null; i++) await new Promise((r) => setTimeout(r, 2));
   assert.ok(host !== null);
@@ -113,7 +130,7 @@ const kept = (listed: Record<string, bigint>) => ({ positions: [], held: Object.
 test("with a whole pass kept: no finder read; the Ws a buy record or the pass names for the token, each in a request of its own on each provider; no other W named to either", async () => {
   const w = await spentWallet(4);
   const [w0, w1, w2, w3] = [0, 1, 2, 3].map(wOf) as [string, string, string, string];
-  await w.update("meta", BUY_MINTS_KEY, () => ({ [w0]: { mint: MINT, program: SOLANA_TOKEN_PROGRAM }, [w1]: { mint: MINT2, program: SOLANA_TOKEN_PROGRAM } }));
+  await w.update("meta", BUY_MINTS_KEY, () => ({ [w0]: { mint: MINT, program: SOLANA_TOKEN_PROGRAM }, [w1]: { mint: MINT2, program: SOLANA_TOKEN_PROGRAM }, [w3]: { mint: MINT2, program: SOLANA_TOKEN_PROGRAM } }));
   await w.put("meta", POSITIONS_KEPT_KEY, kept({ [w2]: 7n }));
   const c = chain([w0, w1, w2, w3], new Map([[w0, 5n], [w2, 7n]]));
   const { host, finder } = await sellHostOf(w, c);
@@ -122,7 +139,7 @@ test("with a whole pass kept: no finder read; the Ws a buy record or the pass na
   assert.equal(finder.reads, 0, "no finder read at the tap");
   assert.equal(plan.total, 12n);
   assert.deepEqual(plan.legs.map((l) => l.w.address).sort(), [w0, w2].sort());
-  for (const k of [0, 1] as const) assert.deepEqual([...c.named[k]].sort(), [w0, w2].sort(), "W1 (another mint's buy) and W3 (nothing) are never named");
+  for (const k of [0, 1] as const) assert.deepEqual([...c.named[k]].sort(), [w0, w2].sort(), "W1 and W3 (another mint's buys) are never named");
   assert.equal(c.calls[0].filter((m) => m === "getMultipleAccounts").length, 2, "one request per W on provider A");
   assert.ok(!c.calls[0].includes("getTokenAccountsByOwner") && !c.calls[0].includes("getBalance"));
 });
@@ -152,19 +169,33 @@ test("a Token-2022 mint: W's account under that program is found (no buy record 
   assert.equal(plan.legs[0]!.w.address, w0);
 });
 
-test("a restored device (no buy record): with a whole pass kept the pass lists the Ws; with none yet, the finder does, and the sale is the same", async () => {
+test("a restored device (no buy record), after the load's own first pass: the finder reads the unrecorded Ws (those only) and the sale is the same as with no pass", async () => {
   for (const pass of [true, false]) {
     const w = await spentWallet(2);
     const [w0, w1] = [wOf(0), wOf(1)];
-    if (pass) await w.put("meta", POSITIONS_KEPT_KEY, kept({ [w1]: 4n }));
     const c = chain([w0, w1], new Map([[w1, 4n]]));
-    const { host, finder } = await sellHostOf(w, c, new Map([[w1, 4n]]));
+    const { host, finder } = await sellHostOf(w, c, new Map([[w1, 4n]]), pass);
+    if (pass) assert.deepEqual(await w.get("meta", POSITIONS_KEPT_KEY), { positions: [], held: {}, listed: [] }, "the pass lists no W of a device with no record");
     const plan = await planPoolSell(host, ALL);
     host.end();
     assert.deepEqual(plan.legs.map((l) => l.w.address), [w1], `pass kept: ${pass}`);
-    assert.equal(finder.reads, pass ? 0 : 2, "the finder only when no pass is kept");
+    assert.equal(plan.total, 4n);
+    assert.equal(finder.reads, 2, "both Ws read through the finder");
     assert.deepEqual([...c.named[0]], [w1]);
   }
+});
+
+test("review of 55d4c6eb, P2-A: a recorded W (5) and an unrecorded W (4), Sell 100% after the first pass: both sold, total 9, the finder asked the unrecorded W only", async () => {
+  const w = await spentWallet(2);
+  const [w0, w1] = [wOf(0), wOf(1)];
+  await w.update("meta", BUY_MINTS_KEY, () => ({ [w0]: { mint: MINT, program: SOLANA_TOKEN_PROGRAM } }));
+  const c = chain([w0, w1], new Map([[w0, 5n], [w1, 4n]]));
+  const { host, finder } = await sellHostOf(w, c, new Map([[w0, 5n], [w1, 4n]]), true);
+  const plan = await planPoolSell(host, ALL);
+  host.end();
+  assert.equal(plan.total, 9n);
+  assert.deepEqual(plan.legs.map((l) => l.w.address).sort(), [w0, w1].sort());
+  assert.equal(finder.reads, 1, "the finder reads W1 alone at the tap");
 });
 
 /** The most reads one provider was asked inside any 1 s on the test's clock. */
@@ -199,7 +230,7 @@ test("thirty Ws listed: each named in a request of its own on each provider, in 
 test("the seed on the listing's every exit: never read with no W; read once and its copy zeroed when the Ws are listed, and when they cannot be derived", async () => {
   for (const [n, bad] of [[0, false], [2, false], [2, true]] as const) {
     const w = await spentWallet(n);
-    if (n > 0) await w.update("meta", BUY_MINTS_KEY, () => ({ [wOf(0)]: { mint: MINT, program: SOLANA_TOKEN_PROGRAM } }));
+    if (n > 0) await w.update("meta", BUY_MINTS_KEY, () => ({ [wOf(0)]: { mint: MINT, program: SOLANA_TOKEN_PROGRAM }, [wOf(1)]: { mint: MINT2, program: SOLANA_TOKEN_PROGRAM } }));
     await w.put("meta", POSITIONS_KEPT_KEY, kept({}));
     const c = chain(n > 0 ? [wOf(0), wOf(1)] : [], new Map(n > 0 ? [[wOf(0), 5n]] : []));
     const copies: Uint8Array[] = [];
@@ -220,4 +251,55 @@ test("the seed on the listing's every exit: never read with no W; read once and 
     else if (!bad) assert.equal(got, 5n);
     else assert.match(String(got), /could not be derived/);
   }
+});
+
+// Review of 55d4c6eb, P3-C: a sign out between the plan's steps ends its reads, not only its pacing; and a read that
+// failed starts no later step even when it answers after the step's wait (the next step waits for the last one's answers)
+test("the plan's steps: a sign out at a step's wait asks no read after it; a failed read slower than the wait starts no later step", async () => {
+  const N = 60;
+  const w = await spentWallet(N);
+  const ws = Array.from({ length: N }, (_, i) => wOf(i));
+  await w.update("meta", BUY_MINTS_KEY, () => Object.fromEntries(ws.map((a) => [a, { mint: MINT, program: SOLANA_TOKEN_PROGRAM }])));
+  await w.put("meta", POSITIONS_KEPT_KEY, kept({}));
+  {
+    const c = chain(ws, new Map(ws.map((a) => [a, 1n])));
+    const { host } = await sellHostOf(w, c);
+    const stop = new AbortController();
+    let before = -1;
+    const got = await planPoolSell({ ...host, signal: stop.signal, stopped: () => stop.signal.aborted, wait: async () => void ((before = c.calls[0].length), stop.abort()) }, ALL).then(() => "planned", (e: unknown) => String(e));
+    host.end();
+    assert.notEqual(got, "planned", "a plan signed out at its first step's wait is refused");
+    assert.equal(c.calls[0].length, before, `provider 0: ${c.calls[0].length - before} read(s) after the sign out`);
+  }
+  {
+    const c = chain(ws, new Map(ws.map((a) => [a, 1n])), SOLANA_TOKEN_PROGRAM, ws[0]);
+    const { host } = await sellHostOf(w, c);
+    const got = await planPoolSell({ ...host, wait: async () => {} }, ALL).then(() => "planned", (e: unknown) => String(e));
+    host.end();
+    assert.notEqual(got, "planned");
+    assert.ok(c.named[0].size <= 12, `Ws named to provider 0: ${c.named[0].size} of ${N}`);
+  }
+});
+
+// The finder refused by its provider past its bound before any leg priced (the paid 5-wallet pass of 11 Nov 05:52Z: its
+// 429s past 30 s answered "failed"): the kit's transport fault from its source (buy-wallets.ts held), so the sale's
+// waits count it: "down", nothing signed, nothing recorded; a second tap waits afresh
+test("the finder refused past its bound before any leg priced: the tap answers down, nothing signed or recorded, and a second tap gets a fresh bound", async () => {
+  const w = await spentWallet(2);
+  const c = chain([wOf(0), wOf(1)], new Map([[wOf(1), 4n]]));
+  // the finder's route throttled for an hour: each read refused at once, past the list's bound, nothing asked
+  const gate = new ThrottleGate();
+  gate.throttled(gate.epoch(), 3_600_000);
+  const route = solanaHoldingsReader((async () => assert.fail("nothing asked of a throttled route")) as never, { gate });
+  const before = new Set(await w.keys("ops"));
+  for (const tap of [1, 2]) {
+    const { host } = await sellHostOf(w, c, new Map(), false, route);
+    const waits: number[] = [];
+    const a = await runPoolSell({ ...host, wait: async (ms: number) => void waits.push(ms) } as never, ALL);
+    host.end();
+    assert.deepEqual(a, { error: "down" }, `tap ${tap}`);
+    assert.deepEqual(waits, [1_000, 2_000, 4_000, 8_000, 10_000], `tap ${tap}: its own waits, from the first`);
+  }
+  for (const k of [0, 1] as const) assert.ok(c.calls[k].length === 0, `nothing read or sent on provider ${k}: ${c.calls[k].join(",")}`);
+  assert.deepEqual(new Set(await w.keys("ops")), before, "no sale recorded");
 });

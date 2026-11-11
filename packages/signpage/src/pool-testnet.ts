@@ -59,7 +59,7 @@ import { POOL_TESTNET } from "../../wallet/src/pool/network.ts";
 import { askWhileBusy, type BusyOpts } from "../../wallet/src/busy.ts";
 import { POOL_SEND_BUSY_WAIT_MS, PoolSendBusy, poolBuyKind, type PoolBuyHost } from "./pool-buy.ts";
 import { BUY_MINTS_KEY, buyMints, keptSells, owedRentBacks, poolSellKind, resumeRentBacks, settleDeadSellOps, settlePoolSells, settleSellOps, type PoolSellKindHost } from "./pool-sell.ts";
-import { buyWallets, buyWalletsOf, derivedBuyWallets, evmHelperKeyedRpc, solanaHelperHoldings, solanaHoldingsAt, spentNotesOf, type HoldingsReader } from "../../wallet/src/pool/buy-wallets.ts";
+import { buyWallets, buyWalletsOf, derivedBuyWallets, evmHelperKeyedRpc, type BuyWallet, solanaHelperHoldings, solanaHoldingsAt, spentNotesOf, type HoldingsReader } from "../../wallet/src/pool/buy-wallets.ts";
 import { keptListed, keptPositions, POSITION_COSTS_KEY, POSITIONS_KEPT_KEY, POSITIONS_SOLD_KEY, POSITIONS_SOLD_TX_KEY, POSITIONS_UNLANDED_KEY, positionsCache, positionsPass, recordPoolBuy, routeInto, type BuyRecordStore, type FoundWallet, type PoolBuyFacts, type Position, type PositionCosts } from "./positions.ts";
 import { evmStoredHold } from "../../wallet/src/pool/evm-hold-store.ts";
 import { EVM_CHAIN_IDS, EVM_EPOCH_MS, EVM_POOLS, evmPair, evmPool as walletEvmPool, evmPoolScopeOf, evmTreeSync, type EvmFeeAnswer, type EvmPoolOf, type EvmPoolPin, type EvmPoolRequest, type EvmRpc, type EvmSyncHold, type EvmTreeSync } from "../../wallet/src/pool/evm.ts";
@@ -1061,7 +1061,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     const seed64 = await page.seed64();
     try {
       const got = await buyWallets(seed64, [{ id: pin!.program, chain: "sol", spent, reader }], together ? { together } : {});
-      if (got.failed.length > 0) throw new Error("the buy wallets' holdings could not be read");
+      // a read refused by its provider: its transport fault, so the sale answers "down" (its waits count it)
+      if (got.failed.length > 0) throw got.fault ?? new Error("the buy wallets' holdings could not be read");
       return got.wallets;
     } finally {
       seed64.fill(0);
@@ -1330,16 +1331,33 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
             const spent = await spentNotesOf(await store(), scope!);
             // no W: no seed read (each exit after a read zeroes its copy)
             if (spent.length === 0) return (found = []);
+            // a W that neither a buy record nor the kept pass names (a buy from before a sign out or a restore: the
+            // store is new, so no pass lists it) is read through the finder, those Ws only, in its steps; with every W
+            // recorded, no finder read at the tap (review of 55d4c6eb, P2-A)
+            const records = ((await (await page.store()).get("meta", BUY_MINTS_KEY)) as Record<string, unknown> | undefined) ?? {};
             const seed64 = await page.seed64();
             let got: ReturnType<typeof buyWalletsOf>;
+            let unrecorded: Set<string>;
+            let finder: ReturnType<typeof derivedBuyWallets> | null = null;
             try {
               got = buyWalletsOf(seed64, [{ id: pin!.program, chain: "sol", spent }]);
+              unrecorded = new Set(got.wallets.map((w) => w.address).filter((a) => !Object.hasOwn(records, a) && !listed.has(a)));
+              if (got.failed.length === 0 && unrecorded.size > 0) finder = derivedBuyWallets(seed64, [{ id: pin!.program, chain: "sol", spent, reader: finderOf(r) }]);
             } finally {
               seed64.fill(0);
             }
             if (got.failed.length > 0) throw new Error("the buy wallets could not be derived");
-            found = got.wallets.map((w) => ({ address: w.address, tokens: listed.has(w.address) ? new Map(listed.get(w.address)) : null }));
-            return got.wallets.map((w) => ({ ...w, holdings: { native: 0n, tokens: new Map([...(listed.get(w.address) ?? [])].map(([m, a]) => [m, { amount: a, frozen: false }] as const)), unreadable: [] } }));
+            const read = new Map<string, BuyWallet["holdings"]>();
+            if (finder !== null) {
+              const f = await finder.read({ only: unrecorded, together: true });
+              if (f.failed.length > 0) throw f.fault ?? new Error("the buy wallets' holdings could not be read");
+              for (const w of f.wallets) read.set(w.address, w.holdings);
+            }
+            found = got.wallets.map((w) => {
+              const h = read.get(w.address);
+              return { address: w.address, tokens: h !== undefined ? new Map([...h.tokens].map(([m, t]) => [m, t.amount] as const)) : listed.has(w.address) ? new Map(listed.get(w.address)) : null };
+            });
+            return got.wallets.map((w) => ({ ...w, holdings: read.get(w.address) ?? { native: 0n, tokens: new Map([...(listed.get(w.address) ?? [])].map(([m, a]) => [m, { amount: a, frozen: false }] as const)), unreadable: [] } }));
           }
           // a sale's list: its Ws asked side by side (card pool-sell-legs-side-by-side)
           const got = await poolBuyWallets(await store(), r, undefined, true);

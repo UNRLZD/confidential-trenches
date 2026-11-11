@@ -50,7 +50,7 @@
 // - Errors carry a wallet's index in its pool, never a note's ref, label, W or path; an RPC's error is cut to its code.
 // - Not here: a full EVM restore from the 12 words alone (the EVM pool's notes, and W's tokens found from its Transfer
 //   logs) is card notes-per-pool-evm; until then the EVM side takes its spent notes as input.
-import { HELPER_FETCH_INIT, HELPER_V1_PREFIX, SOLANA_TOKEN_2022_PROGRAM, SOLANA_TOKEN_PROGRAM, solanaDecodeTokenAccount, solanaHelperRpc, solanaJsonRpc, solanaPacedRpc, type SolanaFetch, type SolanaRpc, type SolanaRpcLimit } from "@blindfill/kit";
+import { HELPER_FETCH_INIT, HELPER_V1_PREFIX, SOLANA_TOKEN_2022_PROGRAM, SOLANA_TOKEN_PROGRAM, solanaDecodeTokenAccount, solanaHelperRpc, solanaJsonRpc, solanaPacedRpc, SolanaRpcTransportError, type SolanaFetch, type SolanaRpc, type SolanaRpcLimit } from "@blindfill/kit";
 import { base64 } from "@scure/base";
 import { freshWallet, toChecksum } from "../derive/index.ts";
 import type { NoteRef } from "../notes/secrets.ts";
@@ -91,7 +91,9 @@ export type BuyPool = {
 
 /** A fresh wallet a buy used, and what it holds now. */
 export type BuyWallet = { pool: string; chain: BuyChain; note: string; l: bigint; j: number; path: string; address: string; holdings: Holdings };
-export type BuyWallets = { wallets: BuyWallet[]; failed: { pool: string; error: string }[] };
+/** `fault`: when a read failed for its provider (a 429 past the bound, a 5xx, no connection), the first such, as the
+ *  kit's transport fault, so a sale's waits count it as the provider's (the sell then answers "down"). */
+export type BuyWallets = { wallets: BuyWallet[]; failed: { pool: string; error: string }[]; fault?: SolanaRpcTransportError };
 
 /** A Solana W's three reads are made again at the highest slot at most this many times before a refusal: about a third
  * of mainnet-beta's rounds answer from backends at different slots, and a W took up to 4 rounds live (M367; see
@@ -215,6 +217,9 @@ async function readDerived(pools: readonly BuyPool[], derived: readonly (BuyWall
   // each read's own copies: a read again starts from no holdings
   const found = derived.map((ws) => ws.map((w): BuyWallet | undefined => (w === undefined ? undefined : { ...w, holdings: { native: 0n, tokens: new Map(), unreadable: [] } })));
   const jobs = all.filter((j) => only === undefined || only.has(j.address));
+  // the first read failed for its provider, as the kit's transport fault
+  let fault: SolanaRpcTransportError | undefined;
+  const faultOf = (e: unknown): void => void (fault ??= transportOf(e) ?? undefined);
   // the whole list's bound on a throttled route, from its start (a sell's from its tap)
   const by = Date.now() + HOLDINGS_THROTTLE_MAX_MS;
   // Fisher-Yates over every pool's Ws
@@ -235,8 +240,10 @@ async function readDerived(pools: readonly BuyPool[], derived: readonly (BuyWall
     const asked: Promise<void>[] = [];
     let i = 0;
     for (; i < jobs.length && !readFailed; i += FINDER_W_STEP) {
+      // a step starts once the wait has passed and the step before it answered, so a read that failed starts no
+      // later step, whenever it answers (review of 55d4c6eb, P3-C)
       if (i > 0) {
-        await wait(FINDER_STEP_MS);
+        await Promise.all([wait(FINDER_STEP_MS), Promise.allSettled(asked)]);
         opts.signal?.throwIfAborted();
         if (readFailed) break;
       }
@@ -247,6 +254,7 @@ async function readDerived(pools: readonly BuyPool[], derived: readonly (BuyWall
               found[p]![k]!.holdings = await pools[p]!.reader.read(address, opts.signal, by);
             } catch (e) {
               readFailed = true;
+              faultOf(e);
               if (!failed.has(p)) failed.set(p, `wallet ${k}: ${msg(e)}`);
             }
           })(),
@@ -263,13 +271,27 @@ async function readDerived(pools: readonly BuyPool[], derived: readonly (BuyWall
         found[p]![k]!.holdings = await pools[p]!.reader.read(address, opts.signal, by);
       } catch (e) {
         opts.signal?.throwIfAborted();
+        faultOf(e);
         failed.set(p, `wallet ${k}: ${msg(e)}`);
       }
     }
   return {
     wallets: found.flatMap((ws, p) => (failed.has(p) ? [] : ws.filter(kept))),
     failed: [...failed].sort(([a], [b]) => a - b).map(([p, error]) => ({ pool: pools[p]!.id, error })),
+    ...(fault === undefined ? {} : { fault }),
   };
+}
+
+/** A read's failure as the kit's transport fault when it is the provider's: the kit's own; a reader's call refused with
+ *  a 429 (its Retry-After kept), a 5xx, or no answer at all (no code, no status). A JSON-RPC error the provider answered
+ *  with, or any check of ours, is none. */
+function transportOf(e: unknown): SolanaRpcTransportError | null {
+  if (e instanceof SolanaRpcTransportError) return e;
+  if (!(e instanceof RpcFailed)) return null;
+  if (e.http === 429) return new SolanaRpcTransportError("http_429", e.message, 1, "the holdings route", e.afterMs);
+  if (e.http !== undefined && e.http >= 500) return new SolanaRpcTransportError("http_5xx", e.message, 1, "the holdings route");
+  if (e.http === undefined && e.code === undefined) return new SolanaRpcTransportError("network", e.message, 1, "the holdings route");
+  return null;
 }
 
 // ---------- transport ----------
@@ -330,7 +352,9 @@ const is429 = (e: unknown): e is RpcFailed => e instanceof RpcFailed && e.http =
  *  `by` (then refused, nothing asked). */
 async function held(gate: ThrottleGate, by: number, sleep: Sleep, signal?: AbortSignal): Promise<void> {
   for (let w = gate.left(); w > 0; w = gate.left()) {
-    if (Date.now() + w > by) throw new Error(`its reads drew the provider's 429 past ${HOLDINGS_THROTTLE_MAX_MS / 1_000} s`);
+    // the provider's refusal, as the kit names one (its Retry-After: the gate's wait left), so a sale counts it as the
+    // provider's fault and answers "down" (card pool-sell-legs-side-by-side)
+    if (Date.now() + w > by) throw new SolanaRpcTransportError("http_429", `its reads drew the provider's 429 past ${HOLDINGS_THROTTLE_MAX_MS / 1_000} s`, 1, "the holdings route", w);
     await sleep(w, signal);
     signal?.throwIfAborted();
   }

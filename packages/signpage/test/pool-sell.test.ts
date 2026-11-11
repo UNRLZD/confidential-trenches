@@ -4998,3 +4998,48 @@ test("a later leg's guessed venue its reference does not confirm is read again a
   assert.equal(await legVenue(null, "pump-curve", venueOf), "read pump-curve now");
   assert.deepEqual(asked, ["pumpswap", "pump-curve"]);
 });
+
+// Review of 55d4c6eb, P2-B: the plan's Rent and pool-size reads are handed to every leg; one that failed is a later
+// leg's own to read again, never its fault (a later leg reads them before its turn: no other sale changes them)
+const walletAt = (l: bigint, amount: bigint): BuyWallet => {
+  const f = freshWallet(SEED64, "sol", l, 0);
+  f.secretKey.fill(0);
+  return { pool: PROGRAM, chain: "sol", note: `n${l}`, l, j: 0, path: f.path, address: f.address, holdings: { native: 0n, tokens: new Map([[MINT, { amount, frozen: false }]]), unreadable: [] } };
+};
+const sevenBuys = () => {
+  const ls = [8n, 9n, 10n, 11n, 12n, 13n];
+  return world({ held: T5, ataLamports: TOKEN_RENT, others: ls.map((l) => ({ l, j: 0, held: T3 })) }, [listedW(T5), ...ls.map((l) => walletAt(l, T3))]);
+};
+const POOL_ADDRESS = solanaPoolOf(PROGRAM).pool;
+
+test("review of 55d4c6eb, P2-B: one 429 on the plan's pool read, seven wallets: the later legs read the sizes themselves, every leg fills and the tap waits one step", async () => {
+  const w = await sevenBuys();
+  let fired = false;
+  const f = faulty(w, (p, method, params) => (!fired && p === 0 && method === "getAccountInfo" && params[0] === POOL_ADDRESS ? ((fired = true), rateLimit(null)) : null));
+  const waits: number[] = [];
+  const a = await runPoolSell({ ...w.host, rpcs: f.rpcs, wait: async (ms: number) => void waits.push(ms) }, share(10_000));
+  assert.ok(fired);
+  assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
+  assert.equal(f.sales.size, 7, "every leg's sale sent");
+  assert.ok(waits.filter((ms) => ms >= 1_000).length <= 1, `the tap's waits: ${waits.join(", ")}`);
+});
+
+test("review of 55d4c6eb, P2-B: the plan's pool bytes apart on both providers on both its reads, seven wallets: the first leg fails as before the card, every later leg reads the sizes itself and sells", async () => {
+  const w = await sevenBuys();
+  let apart = 0;
+  const flip = (rpc: SolanaRpc): SolanaRpc =>
+    (async (method: string, params: readonly unknown[]) => {
+      const r = (await rpc(method, params)) as { value?: { data?: [string, string] } };
+      if (method === "getAccountInfo" && params[0] === POOL_ADDRESS && apart < 2 && r?.value?.data) {
+        apart++;
+        const d = base64.decode(r.value.data[0]);
+        d[d.length - 1] ^= 1;
+        return { ...r, value: { ...r.value, data: [base64.encode(d), "base64"] } };
+      }
+      return r;
+    }) as SolanaRpc;
+  const a = await runPoolSell({ ...w.host, rpcs: [w.c.rpcs[0], flip(w.c.rpcs[1])] as const, wait: async () => {} }, share(10_000));
+  assert.equal(apart, 2, "the plan's two reads of the pool read apart");
+  const sold = w.sent.length;
+  assert.ok(sold >= 6, `${sold} sales sent of 7: ${JSON.stringify(a)}`);
+});

@@ -114,3 +114,45 @@ test("the finder reads 30 Ws in steps of 6 a second apart (never over 20 calls o
     }
   }
 });
+
+// Review of 55d4c6eb, P3-C: the finder's steps as the plan's: a sign out at a step's wait asks no read after it, and a
+// failed read slower than the wait starts no later step (the next step waits for the last one's answers)
+test("the finder's steps: a failed read slower than the wait starts no later step; a sign out at the wait asks nothing more", async () => {
+  const many = Array.from({ length: 30 }, (_, i) => ({ ref: { kind: "deposit" as const, s: 1001n, i }, label: 10n + BigInt(i) }));
+  {
+    let n = 0;
+    const reader: HoldingsReader = { chain: "sol", read: async () => (++n === 1 ? (await new Promise((r) => setTimeout(r, 20)), Promise.reject(new Error("getBalance: http 503"))) : none) };
+    const got = await buyWallets(SEED, [{ id: "sol", chain: "sol", spent: many, reader }], { pick: () => 0, together: true, wait: async () => {} });
+    assert.equal(n, 6, `${n} Ws read`);
+    assert.equal(got.failed.length, 1);
+  }
+  {
+    let n = 0;
+    const stop = new AbortController();
+    const reader: HoldingsReader = { chain: "sol", read: async () => (n++, none) };
+    const got = await buyWallets(SEED, [{ id: "sol", chain: "sol", spent: many, reader }], { pick: () => 0, together: true, signal: stop.signal, wait: async () => void stop.abort() }).then(() => "read", (e: unknown) => String(e));
+    assert.notEqual(got, "read");
+    assert.equal(n, 6, "the first step only");
+  }
+});
+
+// A finder refused by its provider (its gate's 429 past the list's bound, or a read's 429, 5xx or no connection) is the
+// kit's transport fault, kept on the answer (`fault`), so a sale's waits count it as the provider's: "down", never a
+// bare "failed" (card pool-sell-legs-side-by-side)
+test("a finder refused by its provider answers the kit's transport fault: the gate's 429 past the bound, and a read's own", async () => {
+  const { SolanaRpcTransportError } = await import("@blindfill/kit");
+  const { ThrottleGate } = await import("../src/throttle.ts");
+  const { solanaHoldingsReader } = await import("../src/pool/buy-wallets.ts");
+  const gate = new ThrottleGate();
+  gate.throttled(gate.epoch(), 3_600_000);
+  const reader = solanaHoldingsReader((async () => assert.fail("nothing asked past the bound")) as never, { gate });
+  const past = await reader.read("11111111111111111111111111111111", undefined, Date.now() + 1_000).then(() => null, (e: unknown) => e);
+  assert.ok(past instanceof SolanaRpcTransportError, String(past));
+  assert.equal((past as InstanceType<typeof SolanaRpcTransportError>).fault, "http_429");
+  for (const thrown of [new SolanaRpcTransportError("http_429", "HTTP 429", 1, "rpc.example", 2_000), past]) {
+    const r: HoldingsReader = { chain: "sol", read: async () => Promise.reject(thrown) };
+    const got = await buyWallets(SEED, [{ id: "sol", chain: "sol", spent, reader: r }], { pick: () => 0, together: true });
+    assert.equal(got.failed.length, 1);
+    assert.ok(got.fault instanceof SolanaRpcTransportError, "the answer keeps the provider's fault");
+  }
+});
