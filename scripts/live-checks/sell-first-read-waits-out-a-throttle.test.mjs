@@ -46,7 +46,7 @@ const JS =
   "var sV=1e3,cV=`ct-pool/sell`;var UV=1e4,WV=0;" +
   "var JI=Object.freeze({firstMs:1e3,maxMs:1e4,afterMaxMs:1e4});function YI(e,t,n=JI){let r=Number.isFinite(e)&&e>0?Math.min(e*2,n.maxMs):n.firstMs,i=typeof t==`number`&&Number.isFinite(t)&&t>0?Math.min(t,n.afterMaxMs):0;return Math.max(r,i)}" +
   "function kH(){let e=new Map,t=(e,t)=>`${e} ${e===`solana`?t:t.toLowerCase()}`;return{get:(n,r)=>e.get(t(n,r)),keep:(n,r,i)=>{if(MD(n,r))try{e.set(t(n,r),UD(i))}catch{}}}}" +
-  "var AH=kH(),jH=Object.freeze({firstMs:sV,maxMs:UV,afterMaxMs:UV}),zL=()=>Date.now(),yL=e=>e instanceof Wh?e.afterMs:null;function bL(e=zL){let t=e(),n=0,r=0;return{next(i){let a=YI(n,yL(i),jH);return Math.max(e()-t,r)+a>3e4?null:(n=a,r+=a,a)}}}" +
+  "var AH=kH(),jH=Object.freeze({firstMs:sV,maxMs:UV,afterMaxMs:UV}),zL=()=>Date.now(),yL=e=>e instanceof Wh?e.afterMs:null;function bL(e=zL){let t=e(),n=0,r=0,o=!1;return{next(i){let a=YI(n,yL(i),jH);return o||Math.max(e()-t,r)+a>3e4?(o=!0,null):(n=a,r+=a,a)},spent:()=>o}}" +
   "async function MH(e,t,n,r={}){let i=r.kept??AH,a=i.get(e,t);if(a!==void 0)return a;let o=r.waits===0?null:r.waits??bL(),s=r.wait??(e=>new Promise(t=>setTimeout(t,e))),c=n=>0,l=[void 0,void 0],u=[!1,!1];" +
   "for(;;){let e=[];if(await Promise.all([0,1].map(async t=>{if(!u[t])try{l[t]=await c(n[t]),u[t]=!0}catch(t){e.push(t)}})),e.length===0)break;let t=e.find(e=>!xL(e));if(t!==void 0)throw t;let i=e.reduce((e,t)=>t),a=o===null?null:o.next(i);if(a===null)throw i;if(await CL(s,a,r.signal),r.signal?.aborted)throw new SL}let d=HD(e,l);return i.keep(e,t,d),d}" +
   "var NH=Object.freeze({error:`not_allowed`}),PH=Object.freeze({error:`down`});" +

@@ -1753,7 +1753,7 @@ test("card start-reads-wait-out-a-throttle: a sign out ends a buy's wait at once
   assert.ok(!w.log.includes("send") && !w.log.some((x) => x.startsWith("take")));
 });
 
-test("card start-reads-wait-out-a-throttle: a buy's bound is on the device's clock: each throttled read taking 5 s, it waits 1, 2 and 4 s and answers down by 30 s plus the read in flight", async () => {
+test("card start-reads-wait-out-a-throttle: a buy's bound is on the device's clock: each throttled read taking 5 s, it waits 1, 2 and 4 s and answers down by 30 s plus the attempt in flight", async () => {
   const w = await world();
   let t = 0n;
   const f = faultAt(w.host.rpcs, 1, (m) => m === "isBlockhashValid", Infinity, () => ((t += 5_000n), devnet429()));

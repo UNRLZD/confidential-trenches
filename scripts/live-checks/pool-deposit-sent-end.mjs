@@ -99,7 +99,7 @@ const AFTER = `\\.then\\(\\(\\)=>\\{let (${N})=${N};if\\(\\1!==null&&(${N})!==nu
 // fixed source as a third argument since card pool-deposit-follow
 // answered, an end goes as the run's own stage (filled or part_filled), once
 const POSTED = `;${N}\\?${N}\\?${N}\\?\\.progress\\(\\1\\.stage\\):`;
-const SOL_KIND = [new RegExp(`${N}=null;try\\{${N}=await ${N}\\(${N},${N}(?:,${N})?(?:,${N}\\(${N},${N}\\(${N}\\)\\))?\\)\\}finally\\{try\\{let ${N}=${N},${N}=${N}!==null&&${ENDED}${POSTED}`), new RegExp(`\\.finally\\(${N}\\)${AFTER}`)];
+const SOL_KIND = [new RegExp(`${N}=null;try\\{${N}=await ${N}\\(${N},${N}(?:,${N})?(?:,${N})?\\)\\}finally\\{try\\{let ${N}=${N},${N}=${N}!==null&&${ENDED}${POSTED}`), new RegExp(`\\.finally\\(${N}\\)${AFTER}`)];
 const EVM_KIND = [new RegExp(`${N}=${ENDED}${POSTED}`), new RegExp(`${Q}failed${Q}\\},${N}\\(\\)\\}\\)${AFTER}`)];
 // a run's landing posts no stage: the Solana rung's landing returns at its proof's start; the EVM note's goes on
 const SOL_RUNG = new RegExp(`[,{ ;](${N})=await ${N}\\.move\\(${N}\\.id,${Q}INCOMING${Q},${Q}UNSPENT${Q},\\{leaf:${N}\\}\\);for\\(let ${N} of ${N}\\)${N}\\.add\\(${N}\\.signature\\);let ${N}=${N}\\?await ${N}\\(${N},${N}\\):null;return [^;]{0,80}?,${N}&&${N}\\+\\+,${N}\\.landed\\?\\.\\(\\1\\),${Q}landed${Q}\\}`);

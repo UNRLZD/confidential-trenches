@@ -425,3 +425,31 @@ test("review of 39a4c67a, P3-1: a round that reads on past a sign out (no signal
   assert.equal(again, null, "no store opened again after the sign out");
   assert.deepEqual((await idb.databases()).map((d) => d.name), [], "no wallet database made again after the sign out");
 });
+
+test("review of f0e7bd38, P2-1: a sign out's tap (signingOut, before it asks the seed lock a deposit holds) ends the Solana and the EVM deposit's waits between attempts: each host's stop is the session's, aborted there", async () => {
+  type SolHost = import("../src/pool-deposit.ts").PoolDepositHost;
+  type EvmHost = import("../src/pool-deposit-evm.ts").PoolDepositEvmHost;
+  const sol: (() => SolHost)[] = [];
+  const evm: (() => EvmHost)[] = [];
+  const r = rpcs();
+  const t = testnetPool(page(), {
+    evmPin: (c) => (c === "base" ? PIN : undefined),
+    evmRpcs: () => r.pair,
+    evmRound: () => async () => ({ events: [], finalBlock: 100n }),
+    depositKinds: { solana: (host) => () => (sol.push(host), { error: "not_allowed" }), evm: (host) => () => (evm.push(host), { error: "not_allowed" }) },
+  });
+  t.flow({ ...ASK, chain: "solana", decimals: 9, amount: 10_000_000n }, ctx);
+  t.flow(ASK, ctx);
+  const hs = sol[0]!();
+  const he = evm[0]!();
+  // what the deposits wait on (read-waits.ts stopOf): the page leaving the deposit or the session's sign out
+  const stopped = (h: { signal?: AbortSignal; stop?: AbortSignal }) => h.signal?.aborted === true || h.stop?.aborted === true;
+  assert.ok(!stopped(hs) && !stopped(he), "not stopped before the sign out");
+  t.signingOut();
+  assert.ok(stopped(hs), "the Solana deposit's wait ends at the sign out's tap");
+  assert.ok(stopped(he), "the EVM deposit's wait ends at the sign out's tap");
+  // a deposit asked after the sign out runs on a stop of its own, not the one aborted
+  t.flow({ ...ASK, chain: "solana", decimals: 9, amount: 10_000_000n }, ctx);
+  t.flow(ASK, ctx);
+  assert.ok(!stopped(sol[1]!()) && !stopped(evm[1]!()), "the next session's deposits are not stopped");
+});

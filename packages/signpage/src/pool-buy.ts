@@ -909,6 +909,8 @@ type Locks = Pick<LockManager, "request">;
 export function poolBuyKind(host: () => PoolBuyHost & { end?(): void }, locks: Locks | null = globalThis.navigator?.locks ?? null) {
   return (ask: PoolAsk, ctx: KindContext | null): HostRefusal | Running<"pool.buy"> => {
     if (ask.kind !== "pool.buy" || ask.chain !== "solana" || !locks) return { error: "not_allowed" };
+    // the tap's one bound, from its arrival (before its locks)
+    const waits = tapWaits(ctx);
     let answer: HostAnswer<"pool.buy"> | HostRefusal | null = null;
     // the run's final stage, posted once
     let ended = false;
@@ -926,7 +928,7 @@ export function poolBuyKind(host: () => PoolBuyHost & { end?(): void }, locks: L
           const a = await runPoolBuy({ ...h, sent: (signature) => {
             if (!answer) answer = { result: { stage: "sent", txs: [{ chain: "solana", hash: signature }] } };
             give();
-          }, route: (x) => ctx?.route?.(x) }, ask, tapWaits(ctx, clockOf(h)));
+          }, route: (x) => ctx?.route?.(x) }, ask, waits);
           const early = answer !== null;
           if (!answer) answer = "error" in a ? { error: a.error } : { result: a };
           // the run's stage goes out as progress too, answered early or not: an answer that comes only at the run's end

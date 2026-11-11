@@ -104,7 +104,7 @@ import { ladderSplit } from "../../wallet/src/pool/ladder.ts";
 import { SOL_LADDER, solanaPoolOf, solanaTreeSync, type SolanaPoolPin } from "../../wallet/src/pool/solana.ts";
 import { WALLET_SEED_LOCK } from "@blindfill/wallet/store";
 import { checkSolanaDeposit, PoolRuleRefused, signSolana, type PoolAsk } from "./rules/pool.ts";
-import { clockOf, keptReads, readsWaited, readWaits, solanaStableReads, tapWaits, type ReadWaits } from "./read-waits.ts";
+import { clockOf, readsWaited, readWaits, stopOf, tapWaits, type ReadWaits } from "./read-waits.ts";
 import type { HostAnswer, HostRefusal, KindContext, Running } from "./api.ts";
 
 export type PoolDepositHost = {
@@ -140,6 +140,9 @@ export type PoolDepositHost = {
   settle?(): void;
   /** Aborted when the page leaves the deposit (sign out): the end's reads stop, telling nothing. */
   signal?: AbortSignal;
+  /** The session's sign out, aborted at its tap (before the seed lock this run holds): it ends a wait between an ask's
+   *  attempts, and none starts after it (review of f0e7bd38, P2-1). */
+  stop?: AbortSignal;
 };
 
 /** An ask's notes none of whose sends a run settled (each with the sends the ask made of it), whether any note of the
@@ -480,9 +483,8 @@ export async function runPoolDeposit(host: PoolDepositHost, ask: PoolAsk | null,
   if (ask === null) return depositRun(host, ask, fixed, {});
   // an ask's provider read that still fails past the page's own retry, with nothing of it sent: the run again from its
   // first read after a wait on the page's one rule (read-waits.ts readWaits), then "down" (card start-reads-wait-out-a-
-  // throttle); the Rent sysvar kept per provider across the attempts; a sign out ends the wait, nothing signed after it
-  const h: PoolDepositHost = Object.assign(Object.create(host) as PoolDepositHost, { rpcs: keptReads(host.rpcs, solanaStableReads(null)) });
-  return readsWaited((at) => depositRun(h, ask, fixed, at), h.wait, h.signal, waits);
+  // throttle); a sign out ends the wait, nothing signed after it
+  return readsWaited((at) => depositRun(host, ask, fixed, at), host.wait, stopOf(host), waits);
 }
 
 async function depositRun(h: PoolDepositHost, ask: PoolAsk | null, fixed: PoolDepositFrom | undefined, at: { fault?: unknown }): Promise<PoolDepositAnswer> {
@@ -865,6 +867,8 @@ type Locks = Pick<LockManager, "request">;
 export function poolDepositKind(host: () => PoolDepositHost, locks: Locks | null = globalThis.navigator?.locks ?? null) {
   return (ask: PoolAsk | null, ctx: KindContext | null, from?: PoolDepositFrom): HostRefusal | Running<"pool.deposit"> => {
     if ((ask !== null && (ask.kind !== "pool.deposit" || ask.chain !== "solana")) || !locks) return { error: "not_allowed" };
+    // the tap's one bound, from its arrival (before its locks)
+    const waits = tapWaits(ctx);
     let answer: HostAnswer<"pool.deposit"> | HostRefusal | null = null;
     let give!: () => void;
     const answered = new Promise<void>((r) => (give = r));
@@ -891,7 +895,7 @@ export function poolDepositKind(host: () => PoolDepositHost, locks: Locks | null
           // null: the run threw (review 5: its `left` is still read, so a throw past a send never leaves the app at sent)
           let a: PoolDepositAnswer | null = null;
           try {
-            a = await runPoolDeposit(run, ask, from, tapWaits(ctx, clockOf(run)));
+            a = await runPoolDeposit(run, ask, from, waits);
           } finally {
             try {
               const l = left as PoolDepositLeft | null;

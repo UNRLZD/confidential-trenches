@@ -95,7 +95,6 @@ export async function keptTokenDecimals(chain: PoolChain, token: string, rpcs: r
   const had = kept.get(chain, token);
   if (had !== undefined) return had;
   const waits = o.waits === 0 ? null : (o.waits ?? readWaits());
-  const wait = o.wait ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const one = (rpc: PoolRpc) =>
     chain === "solana"
       ? rpc("getAccountInfo", [token, { encoding: "base64", commitment: "confirmed" }])
@@ -123,7 +122,7 @@ export async function keptTokenDecimals(chain: PoolChain, token: string, rpcs: r
     const fault = failed.reduce((a, e) => ((afterOf(e) ?? -1) > (afterOf(a) ?? -1) ? e : a));
     const ms = waits === null ? null : waits.next(fault);
     if (ms === null) throw fault;
-    await waitUnless(wait, ms, o.signal);
+    await waitUnless(o.wait, ms, o.signal);
     if (o.signal?.aborted) throw new ReadStopped();
   }
   const decimals = tokenDecimalsOf(chain, answers);
