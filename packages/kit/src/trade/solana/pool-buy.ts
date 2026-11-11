@@ -74,6 +74,7 @@ import {
   solanaDecodePumpSwapPool,
   solanaParseAccountsAnswer,
   solanaPoolAddresses,
+  solanaPumpSwapCashback,
   type SolanaPoolAccount,
   type SolanaPoolVenue,
   type SolanaReference,
@@ -265,8 +266,6 @@ const PUMP_GLOBAL_BUYBACK_RECIPIENTS = 741;
  * keys at 643, before buyback_basis_points at 899 (read on both providers 2026-11-02 21:02Z). */
 const AMM_PROTOCOL_FEE_RECIPIENTS = 57;
 const AMM_GLOBAL_BUYBACK_RECIPIENTS = 643;
-/** PumpSwap Pool: is_cashback_coin at 244 (pool.ts's layout note). */
-const AMM_POOL_CASHBACK = 244;
 const DEFAULT_KEY = SOLANA_SYSTEM_PROGRAM;
 
 /** The pool's pages up to the one holding entry `size` of each tree: shared by every release. A frozen table holds the
@@ -934,10 +933,10 @@ export function solanaPoolBuyVenueOf(kind: SolanaPoolVenue, mint: string, accoun
   const t22 = m.owner === SOLANA_TOKEN_2022_PROGRAM;
   if (p.baseVault !== (t22 ? addr.baseVaultToken2022 : addr.baseVaultToken) || p.quoteVault !== addr.quoteVault) throw new Error("the pool's vaults are not its token accounts");
   const protocolFeeRecipient = ammConfigFeeRecipient(global);
-  const cashback = main.data[AMM_POOL_CASHBACK];
-  if (cashback !== 0 && cashback !== 1) throw new Error("the pool's cashback flag is not a bool");
+  const cashback = solanaPumpSwapCashback(main.data);
+  if (cashback === null) throw new Error("the pool's cashback flag is not a bool");
   return {
-    kind, mint, tokenProgram: m.owner, tokenAccountSize: solanaTokenAccountSize(m), pool: addr.pool, baseVault: p.baseVault, quoteVault: p.quoteVault, coinCreator: p.coinCreator, cashback: cashback === 1,
+    kind, mint, tokenProgram: m.owner, tokenAccountSize: solanaTokenAccountSize(m), pool: addr.pool, baseVault: p.baseVault, quoteVault: p.quoteVault, coinCreator: p.coinCreator, cashback,
     protocolFeeRecipient, ...buyback(global.data, AMM_GLOBAL_BUYBACK_RECIPIENTS),
   };
 }
