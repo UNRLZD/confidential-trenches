@@ -130,7 +130,11 @@ export const EVM_HOLDINGS_ROUNDS = 4;
  * 6 or 7 of 9 are refused (02:10Z, 02:12Z); 1.1 s apart, 27 of 27 answer (02:15Z). So about 10 of it in 10 s, never in
  * a burst: a round's two in 3 s keep it at 6.7. A JSON-RPC batch of the three is no fix: its answers came from
  * backends of two versions, and batches drew a 429 at one in 2.2 s (03:47-03:49Z). */
-export const HOLDINGS_RPC_LIMIT: SolanaRpcLimit = /* @__PURE__ */ Object.freeze({ windowMs: 3_000, total: 3, perMethod: 2 });
+/* Since the helper's keyed route serves one caller 42 Solana calls in 10 s (card helper-serves-many-users-at-once,
+ * RateLimit-Policy "client";q=42;w=10, read live 11 Nov 06:58Z), one round in 2 s: 15 of those 42, the rest the trade's
+ * own reads on that route (a 5-W sale peaked at 43 in 10 s on the devnet pass of 11 Nov 05:52Z, about 20 a filled leg),
+ * and a round's two getTokenAccountsByOwner in 2 s keep it at 10 in 10 s, never in a burst (above). */
+export const HOLDINGS_RPC_LIMIT: SolanaRpcLimit = /* @__PURE__ */ Object.freeze({ windowMs: 2_000, total: 3, perMethod: 2 });
 /** Solana's JSON-RPC code for a minContextSlot the node has not reached. */
 const MIN_CONTEXT_SLOT_NOT_REACHED = "-32016";
 /** The JSON-RPC code of an eth_call that reverted ("execution reverted"); every other error is the provider's. */
