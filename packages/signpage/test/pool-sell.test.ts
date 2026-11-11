@@ -4757,7 +4757,7 @@ test("card pool-sell-legs-side-by-side: one wallet's sale asks each provider few
   const asked = calls.map((c) => `${c.p} ${c.method} ${JSON.stringify(c.params)}`);
   assert.deepEqual(asked.filter((x, i) => asked.indexOf(x) !== i), [], "no read asked twice before W signs");
 });
-/** The calls each provider gets before W signs one wallet's whole sale (measured at this head; 88c100f3: 19 and 20). */
+/** The calls each provider gets before W signs one wallet's whole sale (38684593, before the side-by-side reads: 16 and 17, in 14 rounds). */
 const SELL_CALLS = [12, 13] as const;
 
 test("card pool-sell-legs-side-by-side: a share's guessed units (the listed holding) that the chain does not hold read the reference again at the real units; the sale signs on that quote alone", async () => {
