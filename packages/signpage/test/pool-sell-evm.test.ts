@@ -728,3 +728,136 @@ test("the authorization's r and s go to the helper as 32-byte words, a zero firs
   assert.equal(BigInt(j.s), 1n << 247n);
   assert.deepEqual([j.chainId, j.nonce, j.yParity], ["0x14a34", "0x0", "0x1"], "the rest stay quantities");
 });
+
+// ---- the delta review of 2c3760a5 (card signpage-evm-pool-sell) ----
+
+test("P2-A: a second tap while the first sale is with the helper (its hash in the record, not mined) answers failed and sends nothing; the first's own follow tells its fill", async () => {
+  let x!: World;
+  x = await world({ send: async () => "0x" + "aa".repeat(32) });
+  let fast = true;
+  x.h.wait = (ms) => (fast ? (tick(ms), Promise.resolve()) : new Promise((r) => setTimeout(r, 1)));
+  const kept: Promise<unknown>[] = [];
+  const lates: string[] = [];
+  x.h.keep = (p) => void kept.push(p);
+  x.h.late = (a) => void lates.push(a.stage);
+  x.h.following = new Set();
+  x.h.sending = new Set();
+  assert.deepEqual(await runEvmPoolSell(x.h, HALF), { stage: "sent", txs: [] }, "not mined in the tap's settle");
+  fast = false;
+  assert.equal((await openOf(x))[0]?.tx, "0x" + "aa".repeat(32), "the helper's hash in the record");
+  tick(2_000);
+  assert.deepEqual(await runEvmPoolSell(x.h, HALF), { error: "failed" });
+  assert.equal(x.posts.length, 1, "one POST");
+  const s = sellOf(x.posts[0]!.data);
+  x.c.txs.set("0x" + "aa".repeat(32), { input: "0x" + Buffer.from(x.posts[0]!.data).toString("hex") });
+  x.land(s.minOut - s.fee, s.precommitment, W, "0x" + "aa".repeat(32));
+  for (let i = 0; i < 3; i++) await Promise.all(kept);
+  assert.deepEqual(lates, ["filled"], "one fill, the first tap's");
+});
+
+test("P2-A: two devices on one nonce and note: the device whose signature did not land answers failed, never filled; the note lands", async () => {
+  let x!: World;
+  const OTHER = "0x" + "bb".repeat(32);
+  x = await world({
+    send: async (_n, body) => {
+      const s = sellOf(body.data);
+      // the other device's Sell of the same note won the nonce: its transaction, with its own signature
+      x.c.txs.set(OTHER, { to: W, input: "0x0c2cb9ca" + "11".repeat(400) });
+      x.land(s.minOut - s.fee, s.precommitment, W, OTHER);
+      return "0x" + "aa".repeat(32);
+    },
+  });
+  x.h.keep = () => {};
+  assert.deepEqual(await runEvmPoolSell(x.h, ASK), { error: "failed" });
+  assert.equal((await returnNote(x.store))?.state, "UNSPENT", "the user's note all the same");
+  // and the device whose own signature it is answers filled
+  let y!: World;
+  y = await world({
+    send: async (_n, body) => {
+      const s = sellOf(body.data);
+      y.c.txs.set(OTHER, { to: W, input: "0x" + Buffer.from(body.data).toString("hex") });
+      y.land(s.minOut - s.fee, s.precommitment, W, OTHER);
+      return "0x" + "aa".repeat(32);
+    },
+  });
+  y.h.keep = () => {};
+  const b = await runEvmPoolSell(y.h, ASK);
+  assert.equal("stage" in b && b.stage, "filled", JSON.stringify(b));
+});
+
+test("P2-A: a refused sale signed again is that sale: another amount waits (failed, nothing sent); the same amount is signed on its amount and floor", async () => {
+  let x!: World;
+  x = await world({
+    send: async (n, body) => {
+      if (n === 1) throw new EvmSendRefused(422, "fee_low");
+      const s = sellOf(body.data);
+      x.land(s.minOut - s.fee);
+      return "0x" + "aa".repeat(32);
+    },
+  });
+  x.h.keep = () => {};
+  x.h.following = new Set();
+  x.h.wait = () => new Promise((r) => setTimeout(r, 1));
+  assert.deepEqual(await runEvmPoolSell(x.h, HALF), { stage: "refused", txs: [] });
+  const first = (await openOf(x))[0]!;
+  assert.deepEqual(await runEvmPoolSell(x.h, ASK), { error: "failed" }, "another amount than the open sale's");
+  assert.equal(x.posts.length, 1);
+  const a = await runEvmPoolSell(x.h, HALF);
+  assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
+  const [s1, s2] = x.posts.map((p) => sellOf(p.data));
+  assert.equal(s2!.amount, s1!.amount);
+  assert.ok(s2!.minOut - s2!.fee >= BigInt(first.least), "a floor no lower than the first's");
+});
+
+test("review F4: a refusal that comes past the tap's bound is told as a late stage", async () => {
+  let x!: World;
+  let n = 0;
+  x = await world({
+    send: async () => {
+      if (++n < 3) throw new EvmSendBusy(5_000);
+      throw new EvmSendRefused(422, "fee_low");
+    },
+  });
+  const kept: Promise<unknown>[] = [];
+  const lates: string[] = [];
+  x.h.keep = (p) => void kept.push(p);
+  x.h.late = (a) => void lates.push(a.stage);
+  x.h.sendTapMs = 0;
+  x.h.wait = (ms) => new Promise((r) => setTimeout(() => (tick(ms), r()), 5));
+  assert.deepEqual(await runEvmPoolSell(x.h, ASK), { stage: "sent", txs: [] });
+  for (let i = 0; i < 100 && !lates.includes("refused"); i++) await new Promise((r) => setTimeout(r, 5));
+  assert.equal(lates[0], "refused");
+  // its follow reads on to the deadline (a signed Sell can still be sent until it), then ends with no fill told
+  for (let i = 0; i < 3; i++) await Promise.all(kept);
+  assert.deepEqual(lates, ["refused"]);
+});
+
+test("review D1: logs trailing past the lag with W's Sell nonce taken: read on, the deposit lands, never put back PLANNED", async () => {
+  const x = await world();
+  const n = await x.store.add({ ref: RETURN, scope: SCOPE, precommitment: P, state: "PLANNED" });
+  await x.store.move(n.id, "PLANNED", "INCOMING");
+  const o: EvmOpenSell = { note: n.id, chain: "base", w: W, token: TOKEN, amount: "1", precommitment: P.toString(), nonce: "0", deadline: (BigInt(Math.floor(Date.now() / 1000)) - 100n).toString(), from: "900", least: "1" };
+  await x.h.record(o);
+  x.land(10n ** 15n);
+  x.c.deposits.at(-1)!.block = x.c.head - 60n;
+  // the logs answer empty for two minutes, far past the two rounds' lag
+  x.c.hideUntil = Date.now() + 120_000;
+  await followEvmSells(x.h);
+  assert.equal((await returnNote(x.store))?.state, "UNSPENT");
+  assert.deepEqual(await openOf(x), []);
+});
+
+test("review F3b: a sign out during a send past the tap's bound frees the note's follow mark", async () => {
+  const stop = new AbortController();
+  const x = await world({ send: () => new Promise<string>((_r, no) => stop.signal.addEventListener("abort", () => no(new EvmSendNoAnswer(null, "fault")), { once: true })) });
+  const kept: Promise<unknown>[] = [];
+  x.h.keep = (p) => void kept.push(p);
+  x.h.following = new Set();
+  x.h.signal = stop.signal;
+  x.h.sendTapMs = 0;
+  assert.deepEqual(await runEvmPoolSell(x.h, ASK), { stage: "sent", txs: [] });
+  assert.equal(x.h.following.size, 1);
+  stop.abort();
+  for (let i = 0; i < 3; i++) await Promise.all(kept);
+  assert.equal(x.h.following.size, 0);
+});

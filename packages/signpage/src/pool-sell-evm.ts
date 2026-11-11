@@ -98,6 +98,9 @@ export const EVM_SELL_SETTLE_MS = 120_000;
 export const EVM_SELL_SEND_TAP_MS = 20_000;
 /** Between two rounds of reads (each four requests on each pool RPC). */
 export const EVM_SELL_WAIT_MS = 2_000;
+/** A sale whose Sell nonce W has used, with no deposit of it read yet, is read on this long past its deadline (logs
+ *  trailing their headers) before it ends not_landed. */
+export const EVM_SELL_USED_GRACE_MS = 600_000;
 /** Past every deadline the reads slow to this, until an end. */
 export const EVM_SELL_SLOW_WAIT_MS = 30_000;
 /** The read-back starts this many blocks under the lower newest block read before the send (the buy's margin). */
@@ -319,7 +322,9 @@ export async function evmSellQuoteLeg(h: Omit<EvmSellHost, "send" | "record" | "
   // the note to sign is the first one no deposit names: one held INCOMING is a sale signed on it that is not on chain.
   // Its open sale of this W is signed again on its own nonce and note (at most one of the two lands); one another tap of
   // this page is sending now, or one with no open sale of W, is not
-  const resume = held?.state === "INCOMING" ? Object.values(opens ?? {}).find((o) => o?.note === held.id && o.chain === h.chain && lower(String(o.w)) === lower(w.w) && BigInt(o.precommitment) === walk.next.precommitment) : undefined;
+  // (only one the helper refused or never answered: a sale whose hash the helper gave is on its way, review P2-A, and a
+  // second tap meanwhile answers failed)
+  const resume = held?.state === "INCOMING" ? Object.values(opens ?? {}).find((o) => o?.note === held.id && o.chain === h.chain && lower(String(o.w)) === lower(w.w) && BigInt(o.precommitment) === walk.next.precommitment && o.tx === undefined) : undefined;
   const mine = held !== undefined && held.id === own;
   // one held INCOMING with no open sale at all and no deposit naming it: a pending take a sale wrote that a reorg dropped
   // (below); no signature of the device's is out on it (a sale's record outlives its signatures), so it is signed on
@@ -346,7 +351,7 @@ const returnOf = (w: EvmSellWallet): NoteRef => ({ kind: "return", c: "evm", l: 
 type EvmSellPick = { round: Awaited<ReturnType<EvmSellHost["round"]>>; walk: ReturnType<typeof evmNextNote> };
 
 /** A leg signed: the calldata, the authorization, what the record and the read-back need. */
-type Signed = { q: EvmPoolSellQuote; built: EvmPoolSell; data: Uint8Array; authorization: EvmSellAuthorization };
+type Signed = { q: EvmPoolSellQuote; built: EvmPoolSell; data: Uint8Array; authorization: EvmSellAuthorization; sig: string };
 
 /** One leg's quote, build, checks and W's signatures, on `nonce` and `precommitment` when given (a second signature of
  *  the same sale). W's key and every seed copy are zeroed before this returns. */
@@ -394,16 +399,22 @@ async function signPicked(h: EvmSellHost, ask: PoolAsk, w: EvmSellWallet, same: 
   const ctx = { ...ctxOf(leg.q.feeMax), precommitment: leg.note.precommitment };
   // the floor is the rule's own: the quote's amount out less the ask's slippage (review P3-1)
   checkEvmSell(built, sellAsk, ctx, { amountOut: leg.q.amountOut }, h.testnet);
+  // an open sale signed again is that sale: its amount, and a floor no lower than its record's (review P2-A); another
+  // amount, or a price under that floor, waits for the open sale's end
+  const r = leg.note.resume;
+  if (r !== undefined && (built.amount !== BigInt(r.amount) || built.minOut - built.feeCap < BigInt(r.least))) return no("failed");
   const auth = checkEvmAuthorization(sellAsk, ctx, leg.authNonce, leg.authReads, h.testnet);
   const signature = signEvmSell(key, ctx, built);
   const authorization = signEvmAuthorization(key, ctx, auth);
   key.fill(0);
   const data = evmSellCalldata(built, built.feeCap, signature);
-  return { s: { q: leg.q, built, data, authorization }, leg };
+  return { s: { q: leg.q, built, data, authorization, sig: Array.from(signature, (b) => b.toString(16).padStart(2, "0")).join("") }, leg };
 }
 
 /** The read-back's state: each RPC's `stop`, and the round's want. */
-type Watch = { open: EvmOpenSell; stops: [bigint | null, bigint | null]; hint: string | null; q: EvmPoolSellQuote | null; none: bigint | null };
+/** `mine`: the run's own Sell signatures (hex), each one it sent: a deposit whose transaction carries none of them is
+ *  another signature's of the same nonce and note (another device's), never this run's fill. */
+type Watch = { open: EvmOpenSell; stops: [bigint | null, bigint | null]; hint: string | null; q: EvmPoolSellQuote | null; none: bigint | null; mine?: string[] };
 
 /** One leg of one sell: signed, recorded, sent, read back. The tap waits on the send at most EVM_SELL_SEND_TAP_MS (a
  *  busy helper's waits and the second signature run on past it, kept by the page) and on the read-back at most
@@ -455,9 +466,9 @@ async function sellLeg(h: EvmSellHost, ask: PoolAsk, w: EvmSellWallet, on: { sen
         precommitment: leg.note.precommitment.toString(),
         nonce: s.built.nonce.toString(),
         deadline: s.built.deadline.toString(),
-        // an open sale signed again keeps its first start, and the lower of the two floors (either may land)
+        // an open sale signed again keeps its first start and floor (signPicked holds the new one no lower)
         from: resume ? resume.from : (lo > EVM_SELL_LAG_BLOCKS ? lo - EVM_SELL_LAG_BLOCKS : 0n).toString(),
-        least: (resume && BigInt(resume.least) < least ? BigInt(resume.least) : least).toString(),
+        least: resume ? resume.least : least.toString(),
       };
       if (h.following !== undefined && !h.following.has(note.id)) {
         h.following.add(note.id);
@@ -478,19 +489,22 @@ async function sellLeg(h: EvmSellHost, ask: PoolAsk, w: EvmSellWallet, on: { sen
     });
     const { open } = start;
     let s = start.s;
+    const mine = [s.sig];
     // the send: the same bytes after a busy helper's wait while the deadline leaves the helper its send margin; past it,
     // once, the sale signed again on the same nonce and note (under the seed's lock), its deadline raised in the record
     const sending = (async (): Promise<Sent> => {
       let resigned = false;
-      let busied = false;
       for (;;) {
         try {
           const hint = await h.send({ pool: h.pin.pool, w: w.w, data: s.data, authorization: s.authorization });
-          return { watch: { open, stops: [null, null], hint, q: s.q, none: null } };
+          // the helper took it: its hash in the record, so no tap signs this sale again while it is on its way
+          open.tx = hint;
+          await h.record(open).catch(() => {});
+          return { watch: { open, stops: [null, null], hint, q: s.q, none: null, mine } };
         } catch (e) {
-          if (e instanceof EvmSendRefused && !busied) return { refused: { open, stops: [null, null], hint: null, q: s.q, none: null } };
+          // a refusal, after busy answers too (a 503 took nothing): no signature of it was sent
+          if (e instanceof EvmSendRefused) return { refused: { open, stops: [null, null], hint: null, q: s.q, none: null, mine } };
           if (!(e instanceof EvmSendBusy) || stopped()) break;
-          busied = true;
           const after = Math.max(e.retryAfterMs, 1_000);
           if (clock() + BigInt(after) < s.built.deadline * 1000n - EVM_SEND_MARGIN_MS) {
             for (let left = after; left > 0 && !stopped(); left -= STOP_POLL_MS) await wait(Math.min(STOP_POLL_MS, left));
@@ -504,6 +518,7 @@ async function sellLeg(h: EvmSellHost, ask: PoolAsk, w: EvmSellWallet, on: { sen
           const again = await hold(() => signLeg(h, ask, w, { nonce: s.built.nonce, precommitment: s.built.precommitment, note: start.note })).catch(() => null);
           if (again === null || stopped()) break;
           s = again.s;
+          mine.push(s.sig);
           open.deadline = s.built.deadline.toString();
           const least = s.built.minOut - s.built.feeCap;
           if (least < BigInt(open.least)) open.least = least.toString();
@@ -512,7 +527,7 @@ async function sellLeg(h: EvmSellHost, ask: PoolAsk, w: EvmSellWallet, on: { sen
       }
       // no answer, a busy helper past both deadlines, or a sign out: the bytes may be on their way
       if (stopped()) return { answer: { stage: "sent", txs: [] } };
-      return { watch: { open, stops: [null, null], hint: null, q: s.q, none: null } };
+      return { watch: { open, stops: [null, null], hint: null, q: s.q, none: null, mine } };
     })().finally(() => {
       if (sendingNote !== null) h.sending?.delete(sendingNote);
       sendingNote = null;
@@ -524,18 +539,22 @@ async function sellLeg(h: EvmSellHost, ask: PoolAsk, w: EvmSellWallet, on: { sen
         watch(h, x, live, (ms) => wait(clock() > BigInt(x.open.deadline) * 1000n + 60_000n ? EVM_SELL_SLOW_WAIT_MS : ms), clock, live)
           .finally(() => void (mine !== null && h.following?.delete(mine)))
           .then((a) => {
-            if (a === null || !live()) return;
-            if (!refused || a.stage !== "not_landed") h.late?.(a);
+            if (a === null || "lost" in a || !live()) return;
+            // a refused send never left the helper: a deposit later is another signature's, which its own tap tells
+            if (!refused) h.late?.(a);
           }),
       );
     };
     const after = (out: Sent): void => {
-      if ("answer" in out) {
+      // a sign out (this tab's, or the page's) frees the note's follow mark at once (review F3b)
+      if ("answer" in out || !live()) {
         if (followed !== null) h.following?.delete(followed);
         followed = null;
         return;
       }
-      if (live()) follow("refused" in out ? out.refused : out.watch, "refused" in out);
+      // a refusal that comes past the tap's bound is told as a late stage (review F4)
+      if ("refused" in out && background) h.late?.({ stage: "refused", txs: [] });
+      follow("refused" in out ? out.refused : out.watch, "refused" in out);
     };
     // the tap's bound on the send (review P3-3): past it, answered "sent", the send and its read-back run on
     let bound: ReturnType<typeof setTimeout> | undefined;
@@ -553,6 +572,7 @@ async function sellLeg(h: EvmSellHost, ask: PoolAsk, w: EvmSellWallet, on: { sen
     }
     const sentAt = clock();
     const tap = await watch(h, out.watch, () => live() && clock() - sentAt < BigInt(EVM_SELL_SETTLE_MS), wait, clock, live, true);
+    if (tap !== null && "lost" in tap) return { error: "failed" };
     if (tap !== null && tap.stage !== "sent") {
       // the tap's end; a refused one (the hint's receipt failed) still reads on to the deadline
       if (tap.stage === "refused" && live()) follow(out.watch, true);
@@ -593,7 +613,7 @@ async function revertedOnBoth(rpcs: readonly [EvmRpc, EvmRpc], tx: string, o: Ev
 
 /** The read-back's rounds while `more()` (see the header): the end's answer, or null (none in time, or a sign out),
  *  after which nothing is written. `tap`: the tap's own reads, which answer refused once the hint's receipt failed. */
-async function watch(h: EvmSellHost, x: Watch, more: () => boolean, wait: (ms: number) => Promise<void>, clock: () => bigint, live: () => boolean, tap = false): Promise<{ stage: TradeStage; txs: TxRef[] } | null> {
+async function watch(h: EvmSellHost, x: Watch, more: () => boolean, wait: (ms: number) => Promise<void>, clock: () => bigint, live: () => boolean, tap = false): Promise<{ stage: TradeStage; txs: TxRef[] } | { lost: true } | null> {
   let reverted = false;
   for (let i = 0; i === 0 || more(); i++) {
     if (i > 0) await wait(EVM_SELL_WAIT_MS);
@@ -626,6 +646,11 @@ async function watch(h: EvmSellHost, x: Watch, more: () => boolean, wait: (ms: n
       const at = clock();
       if (x.none === null) x.none = at;
       if (at - x.none < BigInt(EVM_BUY_LAG_MS)) continue;
+      // and W's Sell nonce not taken on either RPC: a nonce past the sale's is a Sell that ran, its logs trailing (review
+      // D1), read on until EVM_SELL_USED_GRACE_MS past the deadline
+      const used = await Promise.all(h.rpcs.map(async (rpc) => word0(await rpc("eth_call", [{ to: x.open.w, data: nonceCall() }, "latest"]), "nonce", true))).catch(() => null);
+      if (used === null) continue;
+      if (used.some((n) => n > BigInt(x.open.nonce)) && at < deadlineMs + BigInt(EVM_SELL_USED_GRACE_MS)) continue;
       // a sale signed again since (its record's deadline raised): the newer signature's run follows it, not this one
       const now = (await h.open())[x.open.note];
       if (now !== undefined && now.deadline !== x.open.deadline) return null;
@@ -636,9 +661,19 @@ async function watch(h: EvmSellHost, x: Watch, more: () => boolean, wait: (ms: n
       await h.unrecord(x.open.note, x.open.deadline).catch(() => {});
       return { stage: "not_landed", txs: [] };
     }
+    // the deposit is another signature's (review P2-A): this sale was signed again since (a newer record follows it), or
+    // its transaction carries none of this run's signatures (another device's sale on the same nonce and note): this
+    // one never ran, and it answers so, never filled; the note is the user's all the same and lands
+    const now = (await h.open().catch(() => ({}) as Record<string, EvmOpenSell>))[x.open.note];
+    if (now !== undefined && now.deadline !== x.open.deadline) return { lost: true };
     const txs: TxRef[] = [{ chain: h.chain, hash: v.deposit.tx }];
     // the note lands from the pool's round once its block is final (a later round's, on a load, when not yet)
     await land(h, x.open).catch(() => {});
+    if (x.mine !== undefined && x.mine.length > 0) {
+      const inputs = await Promise.all(h.rpcs.map((rpc) => rpc("eth_getTransactionByHash", [v.deposit.tx]).then((t) => (t as { input?: unknown } | null)?.input, () => undefined)));
+      // both read and neither carries one of them; a read that fails tells nothing, and the fill stands
+      if (inputs.every((i) => typeof i === "string") && !inputs.some((i) => x.mine!.some((m) => lower(i as string).includes(m)))) return { lost: true };
+    }
     return { stage: v.end === "filled" ? "filled" : "refused", txs };
   }
   return null;
