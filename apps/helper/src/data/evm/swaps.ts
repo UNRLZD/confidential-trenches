@@ -65,7 +65,7 @@
 // opposite signs; counts, ranges and the books are bounded.
 import { AsyncLocalStorage } from "node:async_hooks";
 import { keccak_256 } from "@noble/hashes/sha3.js";
-import { createBook, fixed, PRICE_SCALE, TFS, type Book, type Candle, type Event, type Ref, type Swap, type Tf } from "../candles.ts";
+import { change4h, createBook, fixed, PRICE_SCALE, TFS, type Book, type Candle, type Event, type Ref, type Swap, type Tf } from "../candles.ts";
 import { createWanted, GT_PAGE_WAIT_MS, GT_SERVE_MS, refreshLane, SEED_LANE, takeOrWait, throttledUntil, type GeckoBudget, type Later } from "../gecko.ts";
 import { CALLER_ROOM, evmThrottleS, LOGS_REFUSED, providerHolds, RETRY_AFTER_MAX_S, upstreamRetryAfterS, type ProviderHolds } from "../../limits/limits.ts";
 import { operatorOf } from "../../rpc/rpc.ts";
@@ -2487,6 +2487,13 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       return k?.found != null && now() - k.at < POOL_KEEP_MS ? { pool: k.found.pool.id, decimals: k.found.decimals } : undefined;
     },
     /** 06b Candles for a listed Base token: our own bars, and GeckoTerminal's before our first. */
+    /** The 4h change from our own bars of a token whose book is open (candles.ts change4h); null otherwise, never an
+     *  open of its own. */
+    change4h(token: string): number | null {
+      const t = evmAddress(token);
+      const e = t === null ? undefined : books.get(t);
+      return e === undefined ? null : change4h(e.book, Math.floor(now() / 1000));
+    },
     async candles(token: string, tf: string, to: number | null, limit: number, client?: string): Promise<DataAnswer> {
       const t = evmAddress(token);
       if (t === null || !(TFS as readonly string[]).includes(tf) || tf === "1s" || !Number.isSafeInteger(limit) || limit < 1 || limit > CANDLES_MAX) return NOT_FOUND;

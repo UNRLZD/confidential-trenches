@@ -262,3 +262,34 @@ export function createBook(cfg: BookConfig) {
   };
 }
 export type Book = ReturnType<typeof createBook>;
+
+export const CHANGE_4H_S = 4 * 3_600;
+/**
+ * The 4h change from our own bars (card token-page-data-complete-and-fast), as the main product computes it ("NEAR
+ * trading terminal" services/engine/src/core/stats.ts:356-405): the price now over the last priced trade before the
+ * window, less one, in basis points. The reference is the close of the last 1m bar that ends at or before now - 4h; with
+ * no bar of ours that old (the book began inside the window), null: the change is not known, never guessed.
+ */
+export function change4h(b: Pick<Book, "candles" | "ownFrom">, nowS: number): number | null {
+  const cut = nowS - CHANGE_4H_S;
+  const from = b.ownFrom("1m");
+  if (from === null || from + 60 > cut) return null;
+  const ref = b.candles("1m", cut - 59, 1)[0];
+  const cur = b.candles("1m", null, 1)[0];
+  if (ref === undefined || cur === undefined) return null;
+  const r = Number(ref[4]);
+  const c = Number(cur[4]);
+  if (!(r > 0) || !Number.isFinite(c)) return null;
+  const bps = Math.round((c / r - 1) * 10_000);
+  return Number.isSafeInteger(bps) ? bps : null;
+}
+
+/** A token page answer with the 4h change set where the page has none (its row's chg_4h_bps null): the same answer
+ *  otherwise. */
+export function withChange4h(a: { status: number; body: string }, bps: number | null): typeof a {
+  if (a.status !== 200 || bps === null) return a;
+  const j = JSON.parse(a.body) as { row?: Record<string, unknown> };
+  if (typeof j.row !== "object" || j.row === null || (j.row.chg_4h_bps !== null && j.row.chg_4h_bps !== undefined)) return a;
+  j.row.chg_4h_bps = bps;
+  return { ...a, body: JSON.stringify(j) };
+}

@@ -273,3 +273,28 @@ test("a mark is priced as a swap is: ETH legs at the ETH price it carries, the t
   assert.equal(zero.ownFrom("1m"), null);
   assert.equal(createBook(USD).mark({ block: 1, t: 1_000_000, amt: 0n, quote: E6, ethUsd: null }), false, "a zero leg");
 });
+
+// card token-page-data-complete-and-fast: the 4h change from our own bars, the main product's definition (candles.ts)
+test("change4h: now over the close of the last 1m bar ending by now - 4h; null when our bars begin inside the window", async () => {
+  const { change4h, withChange4h, CHANGE_4H_S } = await import("./candles.ts");
+  const NOW = 1_800_000_000;
+  const cut = NOW - CHANGE_4H_S;
+  // bars: one ending well before the cut at 1.0, one ending exactly at the cut at 2.0, one inside at 9.0, now at 3.0
+  const bars: [number, string][] = [[cut - 600, "1"], [cut - 60, "2"], [cut + 60, "9"], [NOW - 60, "3"]];
+  const book = (bs: [number, string][]) => ({
+    ownFrom: () => (bs.length === 0 ? null : bs[0]![0]),
+    candles: (_tf: unknown, to: number | null, limit: number) => bs.filter(([k]) => to === null || k < to).slice(-limit).map(([k, c]) => [k, c, c, c, c, "0"] as never),
+  });
+  assert.equal(change4h(book(bars), NOW), 5_000, "3 over 2: +50%");
+  assert.equal(change4h(book(bars.slice(2)), NOW), null, "no bar of ours before the window");
+  assert.equal(change4h(book([[cut - 30, "2"], [NOW - 60, "3"]]), NOW), null, "a bar that ends after the cut is no reference");
+  assert.equal(change4h(book([]), NOW), null);
+  assert.equal(change4h(book([[cut - 600, "0"], [NOW - 60, "3"]]), NOW), null, "a zero price is no reference");
+  const page = { status: 200, body: JSON.stringify({ row: { chg_4h_bps: null, symbol: "X" } }) };
+  assert.deepEqual(JSON.parse(withChange4h(page, 5_000).body).row, { chg_4h_bps: 5_000, symbol: "X" });
+  assert.equal(withChange4h(page, null), page);
+  const has = { status: 200, body: JSON.stringify({ row: { chg_4h_bps: 12 } }) };
+  assert.equal(withChange4h(has, 5_000), has, "the source's own value stands");
+  const miss = { status: 503, body: "{}" };
+  assert.equal(withChange4h(miss, 5_000), miss);
+});

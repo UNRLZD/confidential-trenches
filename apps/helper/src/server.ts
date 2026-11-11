@@ -23,6 +23,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { setDefaultAutoSelectFamilyAttemptTimeout } from "node:net";
 import { HELPER_BIND_ANSWER_MS, HELPER_CODE_STATUS, HELPER_COMMIT_HEADER, HELPER_CORS, HELPER_FETCHED_AT_HEADER, HELPER_SOURCE_HEADER } from "@blindfill/kit";
+import { withChange4h } from "./data/candles.ts";
 import { address as solanaAddress, createSolanaLists } from "./data/solana/lists.ts";
 import { LOGO_NONE_MS, LOGOS, type LogoChain, type Logos } from "./data/logo.ts";
 import { createEvmLists, type EvmChain } from "./data/evm/lists.ts";
@@ -622,6 +623,9 @@ export function handler(
           read = swaps !== undefined ? swaps.candles(mint, tf, to === "" ? null : Number(to), limit === "" ? CANDLES_MAX : Number(limit), clientOf(req)) : token.candles(mint, tf, to === "" ? null : Number(to), limit === "" ? CANDLES_MAX : Number(limit), clientOf(req));
         } else if (evmToken !== undefined) read = path === MARKET_TOKEN ? evmToken.page(mint, clientOf(req)) : evmToken.holders(mint, clientOf(req));
         else read = path === MARKET_TOKEN ? token.page(mint, clientOf(req)) : token.holders(mint, clientOf(req));
+        // the 4h change from our own bars where the page's source has none (card token-page-data-complete-and-fast:
+        // Jupiter and the EVM lists carry no 4h window), read when the page answers, so it is as fresh as the tape
+        if (path === MARKET_TOKEN && swaps !== undefined) read = read.then((a) => withChange4h(a, swaps.change4h(mint)));
         settle(read, began);
         return;
       }
