@@ -1594,7 +1594,7 @@ test("review P3e of 1caf0b17: a Retry-After that is no number (NaN) never become
 // reads again past it (packages/wallet/src/pool/queue.ts): no chain-time read waits between the signature and the send.
 test("card sol-buy-reads-side-by-side: the pool's time is read with the first round and handed to the take", async () => {
   const w = await world();
-  const read = Promise.resolve({ ms: 1n, at: 0 });
+  const read = Promise.resolve({ ms: 1n, at: 0, wall: 0 });
   let handed: unknown = "none";
   const take = w.host.take;
   const host: PoolBuyHost = {
