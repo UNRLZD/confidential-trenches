@@ -19,8 +19,12 @@ import type { SolanaTradeDeps, SolanaTradeRecord, SolanaTradeRequest } from "../
 import { SolanaRpcTransportError, solanaSameProvider, solanaPacedRpc, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import type { Stage } from "../../kit/src/signpage/messages.ts";
 import { RELEASE_HELPER } from "../../wallet/src/withdraw/relay.ts";
+import { hostLane, resetHostLanes } from "../../wallet/src/throttle.ts";
+import { onTestClock } from "../../kit/test/test-clock.ts";
+import { pageReference } from "../src/page-rpc.ts";
+import { pageSolanaRpcs } from "../src/pool-testnet.ts";
 import { readFileSync } from "node:fs";
-import { SOLANA_PROVIDER_A, TRADE_HELPER, TRADE_PICK_LOCK, tradeLock, buyLegs, refusalCode, releaseTradeDeps, sellSplit, settleTradeOps, tradeKind, tradeSettleDue } from "../src/trade.ts";
+import { SOLANA_PROVIDER_A, SOLANA_PUBLIC_SEAT, TRADE_HELPER, TRADE_PICK_LOCK, tradeLock, buyLegs, refusalCode, releaseTradeDeps, sellSplit, settleTradeOps, tradeKind, tradeSettleDue } from "../src/trade.ts";
 
 // the skeleton check's pinned policy (an .mjs with no types: imported by a plain string)
 const SKELETON: string = "../../../scripts/live-checks/signpage-skeleton.mjs";
@@ -458,8 +462,39 @@ test("SIGN_HOST's CSP lets the page reach every host its release trade deps call
   const connect = (csp: string) => csp.split(";").map((d) => d.trim()).find((d) => d.startsWith("connect-src "))!.split(/\s+/).slice(1);
   const pinned = CSP.find(([k]) => k === "connect-src")![1].split(/\s+/);
   assert.deepEqual(connect(site), pinned, "public/_headers and the skeleton check's pin are one policy");
-  assert.ok(seen.size >= 5, [...seen].join(" "));
+  // provider A, the helper, Sender and Jito (the public send path is provider A: the test below)
+  assert.ok(seen.size >= 4, [...seen].join(" "));
   for (const o of seen) assert.ok(pinned.includes(o), `${o} is reached by the trade and missing from connect-src`);
+});
+
+// Card signpage-throttled-provider-has-a-spare: a browser is refused by Solana's own public RPC. From Chrome on
+// 2026-11-11T05:18:53Z, api.mainnet-beta.solana.com answered getSlot 403 {"code":403,"message":"Access forbidden"} (and
+// api.mainnet.solana.com the same); publicnode answered. Every send path of the mainnet page's set goes to a host the
+// page is answered by, so no tx's rebroadcast spends a request on a refused one.
+test("the mainnet page's send set names no host a browser is refused by: its public path is provider A, never api.mainnet-beta", async () => {
+  const refused = new Set(["https://api.mainnet-beta.solana.com", "https://api.mainnet.solana.com"]);
+  const answered = new Set([SOLANA_PROVIDER_A, TRADE_HELPER, "https://sender.helius-rpc.com", "https://mainnet.block-engine.jito.wtf"]);
+  const seen = new Map<string, string>();
+  const real = globalThis.fetch;
+  globalThis.fetch = (async (u: string | URL | Request) => {
+    seen.set(new URL(u instanceof Request ? u.url : String(u)).origin, "");
+    throw new Error("no network in this test");
+  }) as typeof fetch;
+  try {
+    for (const p of releaseTradeDeps().paths) {
+      const before = new Set(seen.keys());
+      await p.send("AA==").catch(() => {});
+      for (const o of seen.keys()) if (!before.has(o)) seen.set(o, p.name);
+    }
+  } finally {
+    globalThis.fetch = real;
+  }
+  assert.deepEqual([...seen.values()].sort(), ["helper", "jito", "rpc", "sender"], "each path sent once");
+  for (const [o, path] of seen) {
+    assert.ok(!refused.has(o), `the ${path} path sends to ${o}, which refuses a browser`);
+    assert.ok(answered.has(o), `the ${path} path sends to ${o}, not a host this page is answered by`);
+  }
+  assert.equal([...seen].find(([, p]) => p === "rpc")![0], SOLANA_PROVIDER_A);
 });
 
 test("a running trade's wallets are not picked by a second trade; one whose tx is still unknown stays out after it ends", async () => {
@@ -761,13 +796,15 @@ test("a buy refused (no ready set) reaches the app as progress refused after its
 
 // Card pool-read-down: the release's reference read (releaseTradeDeps) on either provider down past the page's retry is
 // that fault, never "no reference pool" (quote_check_failed); the trade is then "down" before a leg is signed, never after.
+// Provider 0 is the public seat (card signpage-throttled-provider-has-a-spare): down is every member of it down, since a
+// read provider A throttles goes to its spare, which then answers it.
 for (const p of [0, 1] as const) {
   test(`card pool-read-down: provider ${p} down past its retry: the release's reference read rejects with the fault, never null`, async () => {
     const real = globalThis.fetch;
     const deps = releaseTradeDeps();
-    const downOrigin = p === 0 ? new URL(SOLANA_PROVIDER_A).origin : new URL(TRADE_HELPER).origin;
+    const down = p === 0 ? SOLANA_PUBLIC_SEAT.map((u) => new URL(u).origin) : [new URL(TRADE_HELPER).origin];
     globalThis.fetch = (async (u: string | URL | Request, init?: RequestInit) => {
-      if (new URL(u instanceof Request ? u.url : String(u)).origin === downOrigin) return new Response("", { status: 429, headers: { "retry-after": "0" } });
+      if (down.includes(new URL(u instanceof Request ? u.url : String(u)).origin)) return new Response("", { status: 429, headers: { "retry-after": "0" } });
       const { id } = JSON.parse(String(init?.body)) as { id: string };
       return Response.json({ jsonrpc: "2.0", id, result: { context: { slot: 1 }, value: null } });
     }) as typeof fetch;
@@ -777,9 +814,78 @@ for (const p of [0, 1] as const) {
         (e: unknown) => ({ rejected: e }),
       );
       assert.ok("rejected" in got && got.rejected instanceof SolanaRpcTransportError, JSON.stringify(got, (_k, v) => (typeof v === "bigint" ? String(v) : v)));
-      assert.equal(got.rejected.host, new URL(downOrigin).host);
+      assert.ok(down.map((o) => new URL(o).host).includes(got.rejected.host), got.rejected.host);
     } finally {
       globalThis.fetch = real;
+    }
+  });
+}
+
+// Card signpage-throttled-provider-has-a-spare: provider A down past its retry, its spare up: the release's reference
+// read is the spare's answer, and provider A is asked no more than its first try (its pause sends the rest on at once).
+test("card signpage-throttled-provider-has-a-spare: provider A down, its spare up: the release's reference read answers from the spare", async () => {
+  const real = globalThis.fetch;
+  const deps = releaseTradeDeps();
+  const a = new URL(SOLANA_PROVIDER_A).origin;
+  const spare = new URL(SOLANA_PUBLIC_SEAT[1]!).origin;
+  const asked: string[] = [];
+  globalThis.fetch = (async (u: string | URL | Request, init?: RequestInit) => {
+    const o = new URL(u instanceof Request ? u.url : String(u)).origin;
+    asked.push(o);
+    if (o === a) return new Response("", { status: 429, headers: { "retry-after": "0" } });
+    const { id } = JSON.parse(String(init?.body)) as { id: string };
+    return Response.json({ jsonrpc: "2.0", id, result: { context: { slot: 1 }, value: null } });
+  }) as typeof fetch;
+  try {
+    const got = await deps.reference({ side: "buy", token: MINT, amount: 10_000_000n, amounts: [10_000_000n] }, deps.providers).then(
+      (r) => ({ resolved: r }),
+      (e: unknown) => ({ rejected: String(e) }),
+    );
+    assert.deepEqual(got, { resolved: null }, "the spare's answer (no pool for the token) is the read's");
+    assert.ok(asked.includes(spare), "the spare was asked");
+  } finally {
+    globalThis.fetch = real;
+  }
+});
+
+// The review of 507431c0, P2: the kit gives a reference read up at its 5 s cut (kit pool.ts READ_TIMEOUT_MS) and answers
+// null; while the page's lane still held that read for a paused host, the page read the null as "no reference pool"
+// (quote_check_failed). A null resting on a read still in flight is that provider's no answer: "down". The same rule
+// on every way in: the release's seat (one member paused by another reader, the other throttling) and the pool kinds'
+// pair (src/pool-testnet.ts pageSolanaRpcs, which pool.buy and pool.sell read the reference on), provider A paused 10 s.
+for (const [name, pair, paused] of [
+  ["the release's public seat, its spare paused 10 s by another reader and provider A throttling", () => releaseTradeDeps().providers, SOLANA_PUBLIC_SEAT[1]!],
+  ["the pool kinds' pair, provider A paused 10 s by another reader and the spare throttling", () => pageSolanaRpcs("trade"), SOLANA_PROVIDER_A],
+] as const) {
+  test(`review of 507431c0: ${name}: the reference read ends down (the fault), never null`, async () => {
+    const real = globalThis.fetch;
+    const helper = new URL(TRADE_HELPER).origin;
+    globalThis.fetch = (async (u: string | URL | Request, init?: RequestInit) => {
+      const o = new URL(u instanceof Request ? u.url : String(u)).origin;
+      await new Promise((r) => setTimeout(r, 20));
+      if (o !== helper) return new Response("no", { status: 429 });
+      const { id, params } = JSON.parse(String(init?.body)) as { id: string; params: [string[]] };
+      return Response.json({ jsonrpc: "2.0", id, result: { context: { slot: 1 }, value: params[0].map(() => null) } });
+    }) as typeof fetch;
+    try {
+      await onTestClock(async () => {
+        resetHostLanes();
+        const rpcs = pair();
+        const l = hostLane(paused);
+        l.throttled(l.gate.epoch(), 10_000);
+        const t0 = performance.now();
+        const got = await pageReference(rpcs as readonly [SolanaRpc, SolanaRpc], { side: "buy", token: MINT, amount: 10_000_000n, amounts: [10_000_000n] }).then(
+          (r) => ({ resolved: r }),
+          (e: unknown) => ({ rejected: e }),
+        );
+        assert.ok("rejected" in got && got.rejected instanceof SolanaRpcTransportError, JSON.stringify(got));
+        assert.ok(SOLANA_PUBLIC_SEAT.map((x) => new URL(x).host).includes(got.rejected.host), got.rejected.host);
+        // the release path's worst case to down here, measured on the test clock
+        assert.ok(performance.now() - t0 < 10_500, `down at ${Math.round(performance.now() - t0)} ms`);
+      });
+    } finally {
+      globalThis.fetch = real;
+      resetHostLanes();
     }
   });
 }

@@ -31,7 +31,7 @@ const DEVNET = TESTNET_RPCS.solana[0];
 const SEPOLIA_USDC = "0x036cbd53842c5426634e7929541ec2318f3dcf7e";
 const HELPER = TESTNET_RPCS.solana[1];
 
-type Sent = { host: string; method: string; at: number; status: number };
+type Sent = { host: string; method: string; at: number; status: number; /** its answer's time: `at` and the fake's delay */ end: number };
 type Answer = number | { status?: number; result?: unknown; ms?: number; retryAfter?: string };
 /** A fake provider as globalThis.fetch: every request counted per host; `answer` says the status of each (429 or 200),
  *  or its status, result, delay and Retry-After. On the test clock: performance.now and every timer are its. */
@@ -55,7 +55,8 @@ async function onProviderNow(answer: (host: string, n: number, method: string) =
     }
     const a = answer(host, n, q.method);
     const { status = 200, result = 7, ms = 0, retryAfter } = typeof a === "number" ? { status: a } : a;
-    sent.push({ host, method: q.method, at: performance.now() - t0, status });
+    const at = performance.now() - t0;
+    sent.push({ host, method: q.method, at, status, end: at + ms });
     if (ms > 0) await new Promise((r) => setTimeout(r, ms));
     if (status === 429) return new Response("Too Many Requests", { status: 429, headers: retryAfter === undefined ? {} : { "retry-after": retryAfter } });
     return new Response(JSON.stringify({ jsonrpc: "2.0", id: q.id, result }), { status: 200 });
@@ -200,6 +201,36 @@ test("Base and Robinhood: the same rule; a pass's read of a chain's pool list wa
     const rh = sent.filter((x) => x.host === "rpc.testnet.chain.robinhood.com" && x.method === "eth_gasPrice");
     assert.equal(rh.length, 2, "the throttled read asked again once");
     assert.ok(rh[1]!.at - rh[0]!.at >= 990, "after the host's 1 s pause");
+  });
+});
+
+test("Base's positions pass reads on the pass pair: while a trade holds the chain's hosts and fills their windows it sends nothing, and it reads once they are free", async () => {
+  const word = (n: number) => "0x" + n.toString(16).padStart(64, "0");
+  await onProviderNow((_host, _n, method) => ({ result: method === "eth_blockNumber" ? "0x64" : method === "eth_call" ? word(6) : 7 }), async (sent) => {
+    const { w } = await wallet();
+    const W = "0x" + "a1".repeat(20);
+    const { EVM_POSITION_COSTS_KEY } = await import("../src/pool-buy-evm.ts");
+    await w.update("meta", EVM_POSITION_COSTS_KEY, () => ({ [W]: { mint: SEPOLIA_USDC, decimals: 6, chain: "base", state: "filled", route: { venue: "uniswap-v3", adapter: "0x" + "ad".repeat(20), path: { kind: "v3", fee: 500 }, tx: "0x" + "11".repeat(32), block: "90" }, received: "1" } }));
+    const t = testnetPool({ store: async () => w, held: async () => w, seed64: async () => SEED64.slice() }, { prover: { vault: signalsProver(), stop: () => {} }, evmSync: () => ({ events: async () => assert.fail("no sync read") }) } as never);
+    const base = new Set(TESTNET_RPCS.base.map((u) => new URL(u).host));
+    const reads = () => sent.filter((x) => base.has(x.host) && (x.method === "eth_blockNumber" || x.method === "eth_call"));
+    // a trade holds Base's hosts: the floor's pass read spent, then its reads fill the windows
+    const release = holdHosts(TESTNET_RPCS.base);
+    await Promise.all(pageEvmPoolRpcs("base", "pass")!.map((r) => r("eth_gasPrice", [])));
+    for (const u of TESTNET_RPCS.base) fill(u);
+    await t.positions();
+    await tick(1_500);
+    assert.deepEqual(reads(), [], "no positions read while the trade holds the hosts");
+    release();
+    resetHostLanes();
+    let rows: unknown[] = [];
+    for (let i = 0; i < 100 && rows.length === 0; i++) {
+      await tick(50);
+      rows = ((await t.positions()) ?? []).filter((p) => (p as { chain: string }).chain === "base");
+    }
+    assert.ok(reads().some((x) => x.method === "eth_blockNumber"), "read once the hosts are free");
+    assert.deepEqual(rows.map((p) => (p as { amount: string }).amount), ["0.000006"]);
+    await t.signedOut();
   });
 });
 
@@ -429,7 +460,8 @@ test("a host that throttles for good with Retry-After 3600: a trade's read ends 
     const t = performance.now();
     const seat0 = await b[0]("getBlockHeight", []).then(() => "answered", (e: unknown) => String(e));
     const ms = performance.now() - t;
-    assert.match(seat0, /HTTP 429/);
+    // its own 429, or its turn refused unsent while the pause outlasts it (the host paused: http_429, 0 tries)
+    assert.match(seat0, /HTTP 429|http_429/);
     assert.ok(ms <= TRADE_TURN_MAX_MS + 3_500, `the trade's read ended ${Math.round(ms)} ms after its call`);
     assert.equal(await b[1]("getBlockHeight", []), 7, "the other seat reads and answers");
     await renew;
@@ -512,5 +544,70 @@ test("every request the device's own send paths send counts in its host's lane: 
         assert.equal(hostLane(`https://${host}/`).inWindow(), mine.filter((x) => x.host === host).length, `${name}: every request to ${host} counted on its lane`);
       }
     }
+  });
+});
+
+// Card signpage-throttled-provider-has-a-spare, run 9 of 11 Nov (a devnet buy, scratchpad record run9-buy-calls.txt):
+// api.devnet answered 84 of the page's 86 reads with 429 in 21 s, two 200s at +6.46 s; the helper's route answered
+// every one. Each pause ended with every parked read leaving within 3 ms, 10 to 15 at a time, and the two 200s put the
+// pause back to 1 s. Replayed here: the buy's rounds (each 6 getAccountInfo, 3 getMultipleAccounts and 2 getSlot on
+// both seats, as run 9's) under the tap's waits (read-waits.ts), api.devnet refusing until 21.8 s but for two answers
+// between 6 and 8 s. While its last word is a 429, the host gets one read at a time: the probe.
+test("run 9 replayed: a host that refuses nearly everything gets one read at a time while its last word is a 429, never a burst at a pause's end, and the buy goes on inside its tap's 30 s once it answers", async () => {
+  const OK_AT = 21_800;
+  let okLeft = 2;
+  let t0 = 0;
+  await onProvider((host) => {
+    if (host !== "api.devnet.solana.com") return { ms: 300 };
+    const now = performance.now();
+    if (now >= t0 + OK_AT) return { ms: 60 };
+    if (now >= t0 + 6_000 && now < t0 + 8_000 && okLeft > 0) return (okLeft--, { ms: 60 });
+    return { status: 429, ms: 60 };
+  }, async (sent, start) => {
+    t0 = start;
+    const { readWaits, readsWaited } = await import("../src/read-waits.ts");
+    const ROUND = [...Array(6).fill("getAccountInfo"), ...Array(3).fill("getMultipleAccounts"), ...Array(2).fill("getSlot")] as string[];
+    const give = holdHosts([DEVNET, HELPER]);
+    const out = await readsWaited(async (at) => {
+      const pair = pageSolanaRpcs("trade");
+      const got = await Promise.allSettled(ROUND.flatMap((m) => [pair[0](m, []), pair[1](m, [])]));
+      const bad = got.find((g) => g.status === "rejected");
+      if (bad !== undefined) return ((at.fault = (bad as PromiseRejectedResult).reason), "down");
+      return "filled";
+    }, undefined, undefined, readWaits());
+    give();
+    const dev = sent.filter((x) => x.host === "api.devnet.solana.com").sort((a, b) => a.at - b.at);
+    const line = dev.map((x) => `${Math.round(x.at)}:${x.status}`).join(" ");
+    // in doubt: sent after a 429 answer and before any 200 answer that followed it
+    const inDoubt = dev.filter((x) => {
+      const before = dev.filter((y) => y.end <= x.at).sort((a, b) => a.end - b.end).at(-1);
+      return before !== undefined && before.status === 429;
+    });
+    for (let i = 1; i < inDoubt.length; i++) assert.ok(inDoubt[i]!.at >= inDoubt[i - 1]!.end, `two reads in flight on a host in doubt at ${Math.round(inDoubt[i]!.at)} ms: ${line}`);
+    assert.ok(dev.length <= 40, `${dev.length} reads to the refusing host: ${line}`);
+    assert.equal(out, "filled", `the buy: ${String(out)}; ${line}`);
+    const last = Math.max(...sent.map((x) => x.end));
+    assert.ok(last > OK_AT && last < 30_000, `the buy's last read answered at ${Math.round(last)} ms: ${line}`);
+  });
+});
+
+// The review of 321509e2: a read's re-ask turn was not held to the read's own bound. A read of 3.5 s met a 429 and slept
+// the 1 s pause; another reader's 429 with a Retry-After of 9 s moved the pause on meanwhile; the read then waited the
+// whole pause and threw its old 429 at 9.4 s, its dropped turn counted on the lane (3 counted for 2 sent). Now the turn
+// is held to the read's end: a pause past it is refused at once, nothing sent or counted, and the read ends on its 429
+// while the pause is still on (another provider's time, when the seat has one).
+test("a re-ask whose host's pause moves past the read's bound ends at once on its 429, not at the pause's end, and counts nothing it did not send", async () => {
+  // the read's 429 at 60 ms; the other reader's, sent beside it, at 500 ms with a Retry-After of 9 s
+  await onProvider((host, n) => (host !== "api.devnet.solana.com" ? 200 : n === 2 ? { status: 429, ms: 500, retryAfter: "9" } : { status: 429, ms: 60 }), async (sent) => {
+    const first = pageSolanaRpcs("trade")[0]("getSlot", []).then(() => "answered", (e: unknown) => e);
+    const other = pageSolanaRpcs("trade")[0]("getBlockHeight", []).then(() => "answered", (e: unknown) => e);
+    const e = await first;
+    const leftAtEnd = hostLane(DEVNET).gate.left();
+    assert.ok(e instanceof Error && /HTTP 429|http_429/.test(String(e)), String(e));
+    assert.ok(leftAtEnd > 7_000, `the read ended with ${Math.round(leftAtEnd)} ms of the 9 s pause left: it never waited it out`);
+    await other;
+    const dev = sent.filter((x) => x.host === "api.devnet.solana.com");
+    assert.equal(dev.length, 2, `no re-ask sent into the pause: ${dev.map((x) => `${x.method}@${Math.round(x.at)}:${x.status}`).join(" ")}`);
+    assert.equal(hostLane(DEVNET).inWindow(), dev.length, "the lane counts what was sent, nothing more");
   });
 });

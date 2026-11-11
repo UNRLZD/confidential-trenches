@@ -1,6 +1,8 @@
 // The testnet build's restore of EVM buy records (card signpage-evm-pool-sell, src/pool-restore.ts with
 // src/pool-sell-evm.ts restoreEvmHoldings): a wiped browser's restore writes each EVM buy's record again, its route read
-// from the buy's own transaction on the pool's two RPCs, so the restored W sells on the route its buy took. Its own
+// from the buy's own transaction on the pool's two RPCs, so the restored W sells on the route its buy took, and a W
+// written tells the page its chain (holdingsWritten), which reads that chain's positions again with no reload (card
+// signpage-positions-evm: these lines came in at its merge of 534c703a, and are its own). Its own
 // file: the network is read once, at import, so this process runs as the testnet build does
 // (test/pool-restore.test.ts runs the mainnet one, which writes none).
 //   node --test test/pool-restore-evm-holdings.test.ts      (from packages/signpage)
@@ -30,7 +32,7 @@ const BH = "0x" + "cd".repeat(32);
 const w32 = (v: bigint) => "0x" + v.toString(16).padStart(64, "0");
 const T_BOUGHT = "0x" + Buffer.from(keccak_256(new TextEncoder().encode(EVM_POOL_EVENTS.Bought))).toString("hex");
 
-test("restore: an EVM buy's record is written again from its own transaction, the route the buy took; a read that fails writes none; a W with a route keeps it", async () => {
+test("restore: an EVM buy's record is written again from its own transaction, the route the buy took; a read that fails writes none; a W with a route keeps it; a written one reads its chain's positions again (card signpage-positions-evm)", async () => {
   const built = pinnedBuild(evmPoolVenues(), "base-sepolia", V.adapters!.v4!, BOUGHT as never, 5n, TOKEN, true);
   const relay = { recipient: W, feeRecipient: "0x0000000000000000000000000000000000000fee", feeCap: 1n, deadlineMs: 1n, refundPrecommitment: 9n, salt: "0x" + "ab".repeat(16) };
   const proof = { pi_a: ["1", "2", "1"], pi_b: [["3", "4"], ["5", "6"], ["1", "0"]], pi_c: ["7", "8", "1"] };
@@ -54,6 +56,7 @@ test("restore: an EVM buy's record is written again from its own transaction, th
     closers.push(() => store.close());
     if (had) await store.update("meta", EVM_POSITION_COSTS_KEY, () => ({ [W]: had }));
     const ends: string[] = [];
+    const told: string[] = [];
     const spends = [{ l: 202n, j: 0, note: "n", w: W, withdrawn: 1n, block: 0x100n, token: TOKEN, blockHash: BH, logIndex: 3n }];
     const host: Host = {
       store: async () => store,
@@ -62,6 +65,7 @@ test("restore: an EVM buy's record is written again from its own transaction, th
       pools: () => [{ chain: "evm", pin: { network: "base-sepolia", pool: POOL, feeRecipient: "0x0000000000000000000000000000000000000fee", fromBlock: 1n }, scope: 22n, rpcs: () => [rpc(down), rpc(down)] }],
       ids: null,
       ended: (stage, why) => void ends.push(`${stage} ${why.join(",")}`),
+      holdingsWritten: (chain) => void told.push(chain),
       step5: () => {},
       pausesMs: [],
       solana: (async () => ({ notes: [], spends: [] })) as never,
@@ -77,6 +81,7 @@ test("restore: an EVM buy's record is written again from its own transaction, th
     if (what === "read") assert.deepEqual(rec?.[W], { mint: TOKEN, decimals: 18, chain: "base", state: "filled", route: ROUTE }, "the restored route is the one the buy stored");
     if (what === "down") assert.equal(rec, undefined, "a read that fails writes no record: the W is not sold until a later restore reads it");
     if (what === "kept") assert.deepEqual(rec?.[W], had, "a record with a route is never replaced");
+    assert.deepEqual(told, what === "read" ? ["base"] : [], `${what}: the chain's positions read again once its records are written, with no reload`);
   }
   assert.ok(asked.every((a) => !a.includes(W.slice(2)) && !a.includes(TX.slice(2))), "no read names W or the transaction");
 });

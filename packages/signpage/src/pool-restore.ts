@@ -536,6 +536,8 @@ export type PoolRestoreHost = {
   locks?: Pick<LockManager, "request" | "query">;
   /** After the notes are written: the page's proof queue's pass, so a restored note can pay the next buy. */
   written?: () => void;
+  /** After a chain's buy records are written (any W): that chain's positions read again, so they show with no reload. */
+  holdingsWritten?: (chain: "base" | "robinhood") => void;
   /** Step 5's reads (pageIdReads unless given; null: no deposit id is read). */
   ids?: IdReads | null;
   /** A pool chain's U_X reads and carry (the pool follow's own, src/main.ts), or null when the page has none there: that
@@ -724,8 +726,10 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
         // restore reads it
         if (POOL_TESTNET) for (const o of evmHoldingsOwed) {
           signal.throwIfAborted();
-          // the run's signal ends it at once, as every read of the run (letGo)
-          await letGo(restoreEvmHoldings({ chain: o.chain, testnet: POOL_TESTNET, pin: o.pin, rpcs: evmPair(o.list), store: await (h.held ? h.held() : h.store()), spends: o.buys, signal }).catch(() => {}), signal);
+          // the run's signal ends it at once, as every read of the run (letGo); a chain whose records it wrote reads its
+          // positions again (card signpage-positions-evm)
+          const wrote = await letGo(restoreEvmHoldings({ chain: o.chain, testnet: POOL_TESTNET, pin: o.pin, rpcs: evmPair(o.list), store: await (h.held ? h.held() : h.store()), spends: o.buys, signal }).catch((): string[] => []), signal);
+          if (wrote.length > 0) h.holdingsWritten?.(o.chain);
         }
         // step 5 is owed from here until a try reads every id (the marker, the pools' scopes alone)
         const owes = ids !== null && pools.length > 0;
