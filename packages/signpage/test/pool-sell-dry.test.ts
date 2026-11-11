@@ -20,7 +20,7 @@ import { SOLANA_PUMP_AMM_PROGRAM, SOLANA_PUMP_PROGRAM, solanaVolumeAccumulator }
 import { solanaPoolOf } from "../../wallet/src/pool/solana.ts";
 import { tokenDecimalsKept } from "../src/pool-kinds.ts";
 import { liveRuns, POOL_SELL_DRY_ANSWER_MS, POOL_SELL_DRY_CALLS, POOL_SELL_DRY_KEEP_MS, POOL_SELL_DRY_WINDOW_MS, poolSellDry, poolSellDryKind, poolSellPays, type DryWallet, type PoolSellDryDeps } from "../src/pool-sell-dry.ts";
-import { solanaSellReserve } from "../src/pool-sell.ts";
+import { SOLANA_POOL_SELL_PRIORITY, solanaSellReserve } from "../src/pool-sell.ts";
 import type { Position } from "../src/positions.ts";
 import { poolUnits, SOLANA_POOL_MIN_DEPOSIT, solanaDepositRents, solanaSellAfterFull, solanaSweepFloor, solanaSweepKeep } from "../src/rules/pool.ts";
 import { solanaPoolNoteFloor } from "../../kit/src/trade/solana/pool-deposit.ts";
@@ -99,6 +99,47 @@ test("the preview's out is the sale's own quote for the units pool.sell would se
       assert.equal(SIGNPAGE_RESULT_SCHEMAS["pool.sell.dry"](a.result), true, "the kit's client takes it");
     }
   }
+});
+
+// card sol-pool-buy-lands-on-mainnet: on mainnet the sale pays its priority fee (pool-sell.ts solanaSellBudget, at most
+// SOLANA_POOL_SELL_PRIORITY): You receive and Network count it at that most
+test("on mainnet the preview counts the sale's priority fee in out, min_out and network", async () => {
+  const params = share(MINT, 10_000);
+  const dev = await poolSellDry(deps({ v: "pump" }), params);
+  const main = await poolSellDry(deps({ v: "pump", cluster: "mainnet" }), params);
+  assert.ok("result" in dev && "result" in main, JSON.stringify([dev, main]));
+  assert.equal(main.result.network, "0.000105", "one signature and the priority fee");
+  const { e, cashback } = await saleOut("pump", MINT, HELD);
+  const pays = poolSellPays(RENT, "pump-curve", [{ lamports: ENOUGH, claim: [false, false] }], true, e, solanaSellFloor(e, params.slippage_bps), cashback, { stateSize: SIZES[0], labelSize: SIZES[1] }, true);
+  assert.ok(!("refused" in pays));
+  assert.equal(pays.priority, SOLANA_POOL_SELL_PRIORITY);
+  assert.equal(main.result.out, poolUnits(pays.out, 9));
+  assert.equal(main.result.min_out, poolUnits(pays.minOut, 9));
+  assert.notEqual(main.result.out, dev.result.out, "the priority comes out of what the sale pays in");
+});
+
+// the review of 6d76212d: the preview follows the sale's decision: a PumpSwap cashback coin's sale has no room for the
+// compute budget, so no priority; a W with less than the priority beyond the sale's need pays that, down to none; a
+// partial sale keeps the next sale's priority on W
+test("on mainnet the preview counts the priority the sale pays: none on a PumpSwap cashback coin, what W holds beyond the need, kept on a partial sale", () => {
+  const e = 50_000_000n;
+  const sz = { stateSize: SIZES[0], labelSize: SIZES[1] };
+  const main = (venue: "pump-curve" | "pumpswap", cashback: boolean | undefined, lamports: bigint, full = true) => poolSellPays(RENT, venue, [{ lamports, claim: [false, false] }], full, e, e, cashback, sz, true);
+  const dev = (venue: "pump-curve" | "pumpswap", cashback: boolean | undefined, lamports: bigint, full = true) => poolSellPays(RENT, venue, [{ lamports, claim: [false, false] }], full, e, e, cashback, sz, false);
+  const ok = (x: ReturnType<typeof poolSellPays>): { out: bigint; minOut: bigint; priority: bigint } => {
+    if ("refused" in x) assert.fail(x.refused);
+    return x;
+  };
+  // no room: exactly the devnet sale
+  assert.deepEqual(ok(main("pumpswap", true, ENOUGH)), { ...ok(dev("pumpswap", true, ENOUGH)), priority: 0n });
+  assert.equal(ok(main("pumpswap", false, ENOUGH)).priority, SOLANA_POOL_SELL_PRIORITY);
+  // a W 30,000 over the curve sale's need pays 30,000 of priority; one at the need pays none
+  const need = solanaPoolSellNeed({ kind: "pump-curve", cashback: false }, RENT);
+  assert.equal(ok(main("pump-curve", false, need + 30_000n)).priority, 30_000n);
+  assert.equal(ok(main("pump-curve", false, need)).priority, 0n);
+  // a partial sale from a tight W: W keeps the next sale's need and its priority, out of what the sale pays in
+  const tight = solanaPoolBuySellNeed({ kind: "pump-curve", cashback: false }, RENT);
+  assert.equal(ok(dev("pump-curve", false, tight, false)).out - ok(main("pump-curve", false, tight, false)).out, SOLANA_POOL_SELL_PRIORITY + ok(main("pump-curve", false, tight, false)).priority);
 });
 
 test("one code path: every sale reads its quote through poolSellReference, the one reference read in pool-sell.ts", () => {
@@ -906,12 +947,13 @@ function tradePair(st: TState): readonly [SolanaRpc, SolanaRpc] {
   }) as SolanaRpc) as unknown as readonly [SolanaRpc, SolanaRpc];
 }
 
-test("a sale on this page: the next preview reads again, never the reads from before it (a W of the pass sold half, every fresh read failing: no number)", async () => {
+test("a sale on this page: the next preview reads again, never the reads from before it (a W of the pass sold half, every fresh read failing: no number); on devnet and on mainnet", async () => {
+ for (const cluster of [undefined, "mainnet"] as const) {
   const st: TState = { passWs: [MANY[0]!], since: new Map(), fail: false, calls: 0 };
   let amount = "4000000";
   let trades = 0;
   let trading = false;
-  const k = poolSellDryKind(deps({ rpcs: () => tradePair(st), trading: () => trading, trades: () => trades, positions: () => [pos(MINT, amount, 6, st.passWs)], bought: async () => sw([], new Map([[MANY[0]!, HELD]])) }));
+  const k = poolSellDryKind(deps({ ...(cluster ? { cluster } : {}), rpcs: () => tradePair(st), trading: () => trading, trades: () => trades, positions: () => [pos(MINT, amount, 6, st.passWs)], bought: async () => sw([], new Map([[MANY[0]!, HELD]])) }));
   const ask = async (bps: number): Promise<object> => {
     const r = k(share(MINT, bps));
     await r.after;
@@ -928,8 +970,9 @@ test("a sale on this page: the next preview reads again, never the reads from be
   st.fail = true;
   const c0 = st.calls;
   const after = await ask(10_000);
-  assert.ok(!("result" in after), `no number on the reads from before the sale: ${JSON.stringify(after)}`);
+  assert.ok(!("result" in after), `${cluster}: no number on the reads from before the sale: ${JSON.stringify(after)}`);
   assert.ok(st.calls > c0, "read again");
+ }
 });
 
 test("a W bought since, half sold on this page: the next preview prices what it holds now, never the kept half more", async () => {
@@ -1000,4 +1043,50 @@ test("the kept reads are one token's: another token's preview, every fresh read 
   fail = true;
   assert.ok(!("result" in (await ask(SWAP_MINT))), "SWAP_MINT not on MINT's reads");
   assert.ok("result" in (await ask(MINT)), "MINT's still kept");
+});
+
+// The merge with the mainnet buy fix (sol-pool-buy-lands-on-mainnet): on mainnet each W's sale pays its priority fee
+// (pool-sell.ts solanaSellPriority: min(SOLANA_POOL_SELL_PRIORITY, what W holds beyond the sale's need)). A W's reserve,
+// fee + priority + costs - lamports, never grows with W's lamports (priority grows at most one for one), so a W priced
+// at fewer lamports than it holds (an unread W at 0: priority 0) is priced at the same pay-in or less: never high.
+test("on mainnet the pay-in never falls as a W's lamports grow, for one W (partial and full) and for several: a W priced at fewer lamports is never high", () => {
+  const need = solanaPoolSellNeed({ kind: "pump-curve", cashback: true }, RENT);
+  const ls = [0n, need - 1n, need, need + 1n, need + 50_000n, need + 100_000n, need + 100_001n, need + 300_000n, ENOUGH];
+  const e = 2_000_000_000n;
+  for (const venue of ["pump-curve", "pumpswap"] as const)
+    for (const cashback of [undefined, false, true])
+      for (const [n, full] of [[1, false], [1, true], [3, false]] as const) {
+        let last: bigint | null = null;
+        for (const l of ls) {
+          const ws: DryWallet[] = [{ lamports: l }, ...Array.from({ length: n - 1 }, (): DryWallet => ({ lamports: ENOUGH, claim: [false, false] }))];
+          const p = poolSellPays(RENT, venue, ws, full, e, solanaSellFloor(e, 1000), cashback, { stateSize: SIZES[0], labelSize: SIZES[1] }, true);
+          const out = "refused" in p ? -1n : p.out;
+          if (last !== null) assert.ok(out >= last, `${venue} ${cashback} ${n} ${full}: ${l} lamports pays ${out}, fewer paid ${last}`);
+          last = out;
+        }
+      }
+});
+
+test("on mainnet a preview over a W of the pass, a W bought since and Ws not read is never above all of them read, one W per request", async () => {
+  const pass = MANY.slice(0, 4);
+  const bought = MANY.slice(4, 6);
+  const since = bought.map((w) => ({ address: w, program: MINT_PROGRAM, decimals: 6, received: "1" }));
+  const held = new Map(pass.map((w, i) => [w, BigInt(i + 1) * M] as const));
+  const all = [...pass, ...bought];
+  for (const bps of [1_000, 10_000]) {
+    const lists: string[][] = [];
+    const got = await poolSellDry(deps({ cluster: "mainnet", rpcs: () => manyPair(all, Object.fromEntries(bought.map((w) => [w, M])), lists), positions: () => [pos(MINT, "10", 6, pass)], bought: async () => sw(since, held) }), share(MINT, bps));
+    assert.ok("result" in got, JSON.stringify(got));
+    assert.deepEqual(wsRead(lists, all), [pass[0], pass[1], ...bought], "the two bought since, then the pass's smallest two; two of the pass not read");
+    assert.deepEqual(twoNamed(lists), [], "one W per request");
+    const units = (12n * M * BigInt(bps)) / 10_000n;
+    const { e, cashback } = await saleOut("pump", MINT, units);
+    for (const claim of [[true, true], [false, false]] as const) {
+      const truth = poolSellPays(RENT, "pump-curve", all.map((): DryWallet => ({ lamports: ENOUGH, claim })), false, e, solanaSellFloor(e, 1000), cashback, { stateSize: SIZES[0], labelSize: SIZES[1] }, true);
+      assert.ok(!("refused" in truth));
+      const [whole, frac = ""] = String(got.result.out).split(".");
+      const out = BigInt(whole!) * 1_000_000_000n + BigInt(frac.padEnd(9, "0"));
+      assert.ok(out <= truth.out, `${bps}: ${out} at most ${truth.out}`);
+    }
+  }
 });

@@ -96,7 +96,7 @@ import { releaseTradeDeps, tradeKind } from "./trade.ts";
 import { settleTradeOps, timedStore, TRADE_STORE_MS, tradeSettleDue } from "./trade.ts";
 import { PAGE_TOKEN_DECIMALS, poolKinds } from "./pool-kinds.ts";
 import { liveRuns, poolSellDryKind } from "./pool-sell-dry.ts";
-import { PAGE_SOL_PIN, pageSolanaRpcs, testnetPool, testnetPoolDeps } from "./pool-testnet.ts";
+import { PAGE_CLUSTER, PAGE_SOL_PIN, pageSolanaRpcs, testnetPool, testnetPoolDeps } from "./pool-testnet.ts";
 import { hostLane } from "../../wallet/src/throttle.ts";
 import { poolRestore, restoreUxOf } from "./pool-restore.ts";
 import type { PoolChain } from "./rules/pool.ts";
@@ -251,6 +251,8 @@ else {
     // the Ws bought since the last whole pass, as the sale's plan finds them (the preview reads each as the sale does)
     bought: (token) => testnet?.boughtSince(token) ?? Promise.resolve(undefined),
     decimals: PAGE_TOKEN_DECIMALS,
+    // the sale's priority fee on mainnet (pool-sell.ts solanaSellBudget), in You receive and Network
+    cluster: PAGE_CLUSTER,
     // the Rent sysvar state.pools' tap_max already reads, once; none yet: the preview reads it on both
     rent: () => (hasSolana ? rent.get() : null),
     trading: () => buys.live() + sells.live() > 0 || (dryPair() ?? []).some((r) => r.url !== undefined && hostLane(r.url).trading()),

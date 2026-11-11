@@ -459,3 +459,79 @@ test("200 kit ticks at the path's pace, each stamped by the gate up to 500 ms la
   assert.equal(f.at.length, 200);
   for (const g of gaps(f.at)) assert.ok(g >= JITO_REGION_INTERVAL_MS, `two sends ${g} ms apart`);
 });
+
+// card sol-pool-buy-lands-on-mainnet (review of 40afe385): the bundle status read after a send that did not fill is a
+// request to the region like any other, so it keeps the region's pace and books its second; it never waits past one
+// interval, never holds the region's place a rebroadcast waits in, and gives the second up to a rebroadcast waiting for it.
+const BID = "ab".repeat(32);
+function engineAt(f: ReturnType<typeof fakeTime>) {
+  const at: [number, string][] = [];
+  const fetch = async (u: string, i: RequestInit) => {
+    const m = (JSON.parse(String(i.body)) as { method: string }).method;
+    at.push([f.now(), m]);
+    if (m === "getInflightBundleStatuses") return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: { context: { slot: 1 }, value: [{ bundle_id: BID, status: "Pending", landed_slot: null }] } }));
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: SIG }));
+  };
+  return { at, fetch };
+}
+
+test("the status read keeps the region's pace: it waits for the second after the last request, and books it, so the next request waits for the one after", async () => {
+  const f = fakeTime();
+  const e = engineAt(f);
+  const j = jitoSender({ fetch: e.fetch, regions: [R0], clock: f.clock, sleep: f.sleep });
+  const I = JITO_REGION_INTERVAL_MS;
+  assert.equal((await j.rebroadcast(R0, "AA==", SIG)).kind, "ok"); // at 0
+  await f.advance(400);
+  const read = j.status(R0, BID);
+  await f.advance(0);
+  assert.equal(e.at.length, 1, "the status read went inside the region's interval");
+  await f.advance(I - 400 - 1);
+  assert.equal(e.at.length, 1, "1 ms before the region's second");
+  await f.advance(1);
+  assert.equal(await read, "pending");
+  // the read took the region's second: a rebroadcast half an interval later waits for the one after
+  await f.advance(I / 2);
+  const next = j.rebroadcast(R0, "AA==", SIG);
+  await f.advance(I / 2 - 1);
+  assert.equal(e.at.length, 2, "a rebroadcast went inside the status read's interval");
+  await f.advance(1);
+  assert.equal((await next).kind, "ok");
+  assert.deepEqual(e.at, [[0, "sendTransaction"], [I, "getInflightBundleStatuses"], [2 * I, "sendTransaction"]]);
+});
+
+test("the status read never waits past one interval: a region whose second another send takes each time it wakes answers unread, unasked", async () => {
+  const f = fakeTime();
+  const e = engineAt(f);
+  let rival = false;
+  let j: ReturnType<typeof jitoSender>;
+  // another carry's on-time rebroadcast takes the region's second each time the read's wait ends, before it goes
+  const sleep: JitoSleep = (ms, signal) => f.sleep(ms, signal).then(async (v) => (v && rival && (await j.rebroadcast(R0, "AA==", SIG)), v));
+  j = jitoSender({ fetch: e.fetch, regions: [R0], clock: f.clock, sleep });
+  const I = JITO_REGION_INTERVAL_MS;
+  assert.equal((await j.rebroadcast(R0, "AA==", SIG)).kind, "ok"); // at 0
+  rival = true;
+  let end = -1;
+  const read = j.status(R0, BID).then((w) => ((end = f.now()), w));
+  await f.advance(30 * I);
+  rival = false;
+  assert.notEqual(end, -1, "the status read was still waiting after 30 intervals");
+  assert.ok(end <= I, `it answered at ${end} ms`);
+  assert.equal(await read, "unread");
+  assert.deepEqual(e.at.filter(([, m]) => m === "getInflightBundleStatuses"), [], "the engine was asked");
+});
+
+test("the status read never refuses or delays a rebroadcast: one waiting for the region's second takes it, and the read answers unread", async () => {
+  const f = fakeTime();
+  const e = engineAt(f);
+  const j = jitoSender({ fetch: e.fetch, regions: [R0], clock: f.clock, sleep: f.sleep });
+  const I = JITO_REGION_INTERVAL_MS;
+  assert.equal((await j.rebroadcast(R0, "AA==", SIG)).kind, "ok"); // at 0
+  await f.advance(300);
+  const read = j.status(R0, BID); // waits for 1,000
+  await f.advance(100);
+  const tick = j.rebroadcast(R0, "AA==", SIG); // an early tick at 400: it waits for 1,000 too
+  await f.advance(I - 400);
+  assert.equal((await tick).kind, "ok", "the rebroadcast was refused");
+  assert.equal(await read, "unread");
+  assert.deepEqual(e.at, [[0, "sendTransaction"], [I, "sendTransaction"]], "the read took the rebroadcast's second");
+});
