@@ -17,7 +17,7 @@
 //      - pool.sell, pool.deposit and pool.buy reach the pinned pool's flow: each is answered, and never not_allowed
 //        (the answer a missing pin gives, src/pool-kinds.ts deps.pinned; a buy with no lookup table is refused too);
 //      - the sell reads its token's mint (getAccountInfo of USDC_MINT) on both of the page's pair before anything else
-//        (src/pool-kinds.ts readTokenDecimals), seed or not: the pin is what lets it through;
+//        (src/pool-kinds.ts keptTokenDecimals: no kept value in a fresh browser), seed or not: the pin is what lets it through;
 //      - pool.withdraw is refused not_allowed: it opens the page's own withdraw screen, which needs a stored seed
 //        (src/main.ts openPoolWithdraw, src/pages/open.ts takes: withdraw.open only on a signed-in page), and this
 //        browser has none; the three above show the pin is not why;

@@ -4669,3 +4669,17 @@ test("card start-reads-wait-out-a-throttle (review of 49efdb0c): a sign out ends
     assert.equal(f.sales.size, 0);
   }
 });
+
+test("card start-reads-wait-out-a-throttle: the rent back's tries after a provider fault wait on the page's one rule, 1 s doubling, never a flat second", async () => {
+  const w = await world({ ataLamports: TOKEN_RENT, volumes: [{ program: SOLANA_PUMP_PROGRAM }], throttle: { on: "simulate", n: 3 } });
+  const waits: number[] = [];
+  const faults = () => w.told.filter((t) => t.step === "teardown" && t.state === "fault").length;
+  // the waits from the rent back's first fault to its teardown's try that passed
+  let passed = false;
+  const a = await runPoolSell({ ...w.host, wait: async (ms: number) => void (faults() > 0 && !passed && waits.push(ms)), told: (t: RentBackTold) => (w.host.told?.(t), t.step === "teardown" && t.state === "sent" && (passed = true)) } as PoolSellHost, ASK);
+  assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
+  const n = faults();
+  assert.ok(n >= 2, `${n} faults`);
+  assert.deepEqual(waits.slice(0, n), [1_000, 2_000, 4_000, 8_000, 10_000].slice(0, n), JSON.stringify(w.told));
+  assert.equal(w.told.at(-1)?.state, "sent");
+});

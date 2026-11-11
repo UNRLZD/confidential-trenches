@@ -73,7 +73,8 @@ import type { BuyWallet } from "../../wallet/src/pool/buy-wallets.ts";
 import { solanaPoolOf, solanaTreeSync, type SolanaPoolPin, type SolanaTreeSync } from "../../wallet/src/pool/solana.ts";
 import { WALLET_SEED_LOCK } from "@blindfill/wallet/store";
 import { blockhashOf, pastOnBoth, readBack, readBackFailure, readBackMeta, type BuyMints } from "./pool-buy.ts";
-import { keptReads, readWaits, solanaStableReads, waitsOn, waitUnless } from "./read-waits.ts";
+import { afterOf, keptReads, READ_WAIT, readWaits, solanaStableReads, waitsOn, waitUnless } from "./read-waits.ts";
+import { throttleWaitMs } from "../../wallet/src/throttle.ts";
 import { fromRecord, timedStore, TRADE_STORE_MS, tradeLock, type TradeStore } from "./trade.ts";
 import { checkSolanaSell, checkSolanaSweep, checkSolanaTeardownFrames, PoolRuleRefused, poolUnits, signSolana, SOLANA_POOL_MIN_DEPOSIT, SOLANA_POOL_SELL_RESERVE_MAX, SOLANA_SWEEP_OWED_MAX, solanaDepositRents, solanaSellAfterFull, solanaSweepFloor, solanaSweepKeep, type PoolAsk, type SolanaDepositHeld } from "./rules/pool.ts";
 // the full sell's keep is priced by the sell's rule too (rules/pool.ts checkSolanaSell, review L1 of 38faee89)
@@ -145,8 +146,10 @@ export const POOL_SELL_WAIT_MS = 1_000;
 export const POOL_SELL_SIZE_RETRY_MS = 500;
 /** One sell at a time on this device, every tab: two runs never pick one return note. */
 export const POOL_SELL_LOCK = "ct-pool/sell";
-/** The rent back's tries at each step, POOL_SELL_WAIT_MS apart: a provider's throttle, stall or lag is read again from
- *  the top (the devnet run at 0068524a lost its whole rent back to one provider's HTTP 429s). */
+/** The rent back's tries at each step: a provider's throttle, stall or lag is read again from the top (the devnet run at
+ *  0068524a lost its whole rent back to one provider's HTTP 429s), after a wait on the page's one rule (read-waits.ts
+ *  READ_WAIT: from 1 s, doubling, at most 10 s, a Retry-After honoured to 10 s; card start-reads-wait-out-a-throttle),
+ *  within POOL_RENT_BACK_MS. */
 export const POOL_RENT_BACK_TRIES = 30;
 /** The rent back's one wall-clock bound, every step and read-back in it (review M2): the sell's own verdict budget. */
 export const POOL_RENT_BACK_MS = POOL_SELL_READS * POOL_SELL_WAIT_MS;
@@ -1156,7 +1159,8 @@ type RentBack = { rpcs: Rpcs; program: string; pool: string; scope: bigint; rent
  * load; review 5 of 38e59182, M1: a tap waits for one try at most, never a sleep), never throws, and ends in a RentBackEnd the host is told, as it is told each step's fault: the sell has
  * landed, and whatever this does not finish stays on W, W's own, and owed (resumeRentBacks).
  * Each step up to its send is tried again from its first read on any fault (a provider's throttle, stall, or a slot's
- * lag between the two), POOL_SELL_WAIT_MS apart, POOL_RENT_BACK_TRIES times, and the whole rent back, read-backs
+ * lag between the two), after the page's one wait (READ_WAIT: 1 s, doubling to 10 s), POOL_RENT_BACK_TRIES times at
+ * most, and the whole rent back, read-backs
  * included, ends at POOL_RENT_BACK_MS on the wall clock; nothing is signed before every check passes on that try's reads,
  * and each key is zeroed the moment its signing ends, a signing that throws included.
  * 1. The teardown (06c A9: no sell transaction closes an account; the closes are their own frames, after the fill, so a
@@ -1245,12 +1249,13 @@ async function rentBack(h: PoolSellHost, x: RentBack, hold?: Hold): Promise<Ende
   };
   // a step up to its send, again from its first read on a fault, each fault told; null: it gave up
   const again = async <T>(step: "teardown" | "sweep", f: () => Promise<T>): Promise<{ ok: T } | null> => {
-    for (let i = 0; i < POOL_RENT_BACK_TRIES && (i === 0 || clock() < deadline); i++) {
-      if (i > 0) await wait(POOL_SELL_WAIT_MS);
+    for (let i = 0, pause = 0, last: unknown = null; i < POOL_RENT_BACK_TRIES && (i === 0 || clock() < deadline); i++) {
+      if (i > 0) await wait((pause = throttleWaitMs(pause, afterOf(last), READ_WAIT)));
       try {
         return { ok: await f() };
       } catch (e) {
         if (e === BUSY) throw e;
+        last = e;
         tell(step, "fault", faultOf(e));
       }
     }
