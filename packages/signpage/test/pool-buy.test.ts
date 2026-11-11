@@ -1857,3 +1857,30 @@ test("card sol-buy-reads-side-by-side: a filled run whose host's end throws post
   assert.deepEqual(answer, { result: { stage: "sent", txs: [{ chain: "solana", hash: SIG }] } });
   assert.deepEqual(stages, ["filled"]);
 });
+
+// Card pool-sell-legs-side-by-side: the kit's bounded reads (the Rent sysvar, the venue's accounts) with no answer in
+// their 5 s bound are the provider's fault ("timeout"), so a buy waits it out as any other provider fault and buys, never
+// a bare "failed"
+test("a buy's Rent or venue read with no answer in its 5 s bound once waits 1 s and buys", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const reads: [string, (m: string, q: readonly unknown[]) => boolean][] = [
+    ["the Rent sysvar", (m, q) => m === "getAccountInfo" && q[0] === RENT_SYSVAR],
+    ["the venue's accounts", (m, q) => m === "getMultipleAccounts" && Array.isArray(q[0]) && q[0].length === 3 && q[0][0] === fx.pump.mint],
+  ];
+  for (const [what, hit] of reads) {
+    const w = await world();
+    let left = 1;
+    const hang = (i: 0 | 1, rpc: SolanaRpc): SolanaRpc =>
+      (async (m: string, q: readonly unknown[]) => (i === 1 && left > 0 && hit(m, q) ? (left--, new Promise(() => {})) : rpc(m, q))) as SolanaRpc;
+    let done = false;
+    const run = runPoolBuy({ ...w.host, rpcs: [hang(0, w.host.rpcs[0]), hang(1, w.host.rpcs[1])] as const }, ASK).finally(() => (done = true));
+    for (let i = 0; i < 200 && !done; i++) {
+      await new Promise((r) => setImmediate(r));
+      t.mock.timers.tick(500);
+    }
+    const a = await run;
+    assert.equal(left, 0, `${what}: the read hung`);
+    assert.deepEqual(a, { stage: "filled", txs: [{ chain: "solana", hash: SIG }] }, what);
+    assert.deepEqual(beforeSend(w), [1_000], `${what}: one wait`);
+  }
+});
