@@ -203,6 +203,35 @@ test("Base and Robinhood: the same rule; a pass's read of a chain's pool list wa
   });
 });
 
+// devnet run 11 (11 Nov): the buy held its hosts to its Final, 33.8 s past its Filled. The buy kind gives them back at
+// its early "sent" through the host's release (pool-buy.ts poolBuyKind); its end then gives back nothing more, and a
+// buy that never answers "sent" gives them back at its end, once
+test("the buy's host gives its hosts back at its release, once: its end after it leaves another trade's hold standing; with no release its end gives them back", async () => {
+  await onProvider(() => 200, async () => {
+    const made: { buy?: () => { release?(): void; end?(): void } } = {};
+    testnetPool(
+      { store: async () => assert.fail("no store read"), seed64: async () => assert.fail("no seed read") },
+      { evmPin: () => undefined, tradeKinds: { buy: ((h: () => { release?(): void; end?(): void }) => ((made.buy = h), () => ({ error: "not_allowed" }))) as never } },
+    );
+    const h = made.buy!();
+    assert.equal(hostLane(DEVNET).trading(), true);
+    assert.equal(typeof h.release, "function", "the buy's host gives its hosts back early");
+    h.release!();
+    assert.equal(hostLane(DEVNET).trading(), false, "api.devnet given back at the release");
+    assert.equal(hostLane(HELPER).trading(), false, "the helper's devnet route too");
+    const other = holdHosts([DEVNET, HELPER]);
+    h.release!();
+    h.end?.();
+    assert.equal(hostLane(DEVNET).trading(), true, "another trade's hold stands: given back once");
+    other();
+    const failed = made.buy!();
+    assert.equal(hostLane(DEVNET).trading(), true);
+    failed.end?.();
+    failed.end?.();
+    assert.equal(hostLane(DEVNET).trading(), false, "a buy with no sent: given back at its end, once");
+  });
+});
+
 test("the EVM buy kind's host holds its chain's pool list hosts from its making to its end", async () => {
   await onProvider(() => 200, async () => {
     const made: { h?: { end?(): void } } = {};

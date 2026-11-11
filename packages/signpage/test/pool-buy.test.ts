@@ -25,6 +25,8 @@ import { SolanaRpcTransportError } from "../../kit/src/trade/solana/send.ts";
 import type { PoolAsk } from "../src/rules/pool.ts";
 import { SIGNPAGE_KIT_VERSION, type TxRef } from "../../kit/src/signpage/messages.ts";
 import { pairDown } from "./outage.ts";
+import { holdHosts, hostLane, resetHostLanes } from "../../wallet/src/throttle.ts";
+import { liveRuns } from "../src/pool-sell-dry.ts";
 import { APP_ORIGIN, signedOutState, startApi } from "../src/api.ts";
 import type { IncomingMessage } from "../src/api.ts";
 
@@ -694,6 +696,85 @@ test("the kind answers sent with its signature once it read back on both RPCs as
   assert.equal(ended, 1);
   assert.deepEqual(modes, ["ct-wallet/seed:shared"]);
   assert.equal(w.state(), "SPENT");
+});
+
+// Card app-sell-shows-what-you-receive (devnet run 11, 11 Nov): the sell box's preview was busy from a buy's tap to its
+// Final (33.8 s on devnet), since the buy's hold on its hosts and its count as a running trade both lasted to its run's
+// end. Both end at its early "sent" (the app's Filled) now: the run goes on to Final with the page's background reads
+// beside it, and a buy that ends before any "sent" gives its hosts back once, at its end.
+const LANE_URLS = ["https://rpc-0.example/", "https://rpc-1.example/"] as const;
+const passLocks = { request: (_n: string, _o: unknown, f: () => Promise<void>) => f() } as unknown as Pick<LockManager, "request">;
+test("a buy answered sent gives its hosts back then, once, and counts as running no more; its read-backs reach Final with background reads beside them", async () => {
+  resetHostLanes();
+  try {
+    const w = await world();
+    // the read-backs past "sent" (the settle to finalized) wait on this gate, so the test sees them still running
+    let open!: () => void;
+    const gate = new Promise<void>((r) => (open = r));
+    const give = holdHosts(LANE_URLS);
+    let released = 0;
+    let ended = 0;
+    const stages: string[] = [];
+    const host = { ...w.host, settle: async (id: string, s?: readonly [number, number]) => (await gate, w.host.settle(id, s)), release: () => (released++, give()), end: () => (ended++, give()) };
+    const buys = liveRuns((_p, ctx) => poolBuyKind(() => host, passLocks)(ASK, ctx));
+    const r = buys.kind({}, { id: "r1", sha: "00", progress: (s: string) => void stages.push(s) } as never) as unknown as { after: Promise<void>; answer: () => unknown };
+    assert.equal(buys.live(), 1, "from its tap");
+    assert.ok(LANE_URLS.every((u) => hostLane(u).trading()), "its hosts held from its start");
+    await r.after;
+    assert.deepEqual(r.answer(), { result: { stage: "sent", txs: [{ chain: "solana", hash: SIG }] } });
+    assert.deepEqual(stages, [], "its read-backs still run");
+    assert.equal(released, 1, "its hosts given back at its sent");
+    assert.ok(LANE_URLS.every((u) => !hostLane(u).trading()), "no host of the pair held");
+    await new Promise((res) => setTimeout(res, 0));
+    assert.equal(buys.live(), 0, "no running trade past its sent: the sell box's preview may read");
+    // background reads on the same hosts and the same chain while the read-backs wait, each on its lane's budget
+    let passes = 0;
+    for (const [i, u] of LANE_URLS.entries()) {
+      for (let k = 0; k < 3; k++) {
+        await hostLane(u).turn("pass");
+        hostLane(u).sent("pass");
+        await w.host.rpcs[i as 0 | 1]("getSlot", [{ commitment: "finalized" }]);
+        passes++;
+      }
+    }
+    assert.equal(passes, 6);
+    open();
+    for (let i = 0; i < 50 && stages.length === 0; i++) await new Promise((res) => setTimeout(res, 10));
+    assert.deepEqual(stages, ["filled"], "Final reached with the background reads beside it");
+    assert.equal(w.state(), "SPENT");
+    assert.equal(ended, 1);
+    assert.equal(released, 1, "given back once");
+    // its end gives back nothing more: another trade's hold on the same hosts stands
+    const other = holdHosts(LANE_URLS);
+    host.end();
+    assert.ok(LANE_URLS.every((u) => hostLane(u).trading()), "another trade's hold is not given back by this buy");
+    other();
+  } finally {
+    resetHostLanes();
+  }
+});
+
+test("a buy that ends before any sent gives its hosts back once, at its end, and is not running after", async () => {
+  resetHostLanes();
+  try {
+    const w = await world();
+    w.host.claimed = new Set(["note-1"]);
+    const give = holdHosts(LANE_URLS);
+    let released = 0;
+    let ended = 0;
+    const host = { ...w.host, release: () => (released++, give()), end: () => (ended++, give()) };
+    const buys = liveRuns((_p, ctx) => poolBuyKind(() => host, passLocks)(ASK, ctx));
+    const r = buys.kind({}, { id: "r1", sha: "00", progress: () => {} } as never) as unknown as { after: Promise<void>; answer: () => unknown };
+    await r.after;
+    await new Promise((res) => setTimeout(res, 0));
+    assert.deepEqual(r.answer(), { error: "not_funded" });
+    assert.equal(released, 0, "nothing sent: no early give-back");
+    assert.equal(ended, 1, "its end gives the hosts back");
+    assert.ok(LANE_URLS.every((u) => !hostLane(u).trading()));
+    assert.equal(buys.live(), 0);
+  } finally {
+    resetHostLanes();
+  }
 });
 
 // The card signpage-pool-flow-run, run 6 (12:41Z): the helper answered the send 429 rate_limited, Retry-After 1 (a

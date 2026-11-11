@@ -915,7 +915,7 @@ type Locks = Pick<LockManager, "request">;
 /** The pool.buy kind: one run per tap under the seed's shared lock (sign out waits for it), answered "sent" with its
  *  signature once that reads back on both RPCs as this very transaction (sendAndSettle's sent), or at the run's end
  *  with the run's own answer; the run's final stage is always posted as progress as well. */
-export function poolBuyKind(host: () => PoolBuyHost & { end?(): void }, locks: Locks | null = globalThis.navigator?.locks ?? null) {
+export function poolBuyKind(host: () => PoolBuyHost & { release?(): void; end?(): void }, locks: Locks | null = globalThis.navigator?.locks ?? null) {
   return (ask: PoolAsk, ctx: KindContext | null): HostRefusal | Running<"pool.buy"> => {
     if (ask.kind !== "pool.buy" || ask.chain !== "solana" || !locks) return { error: "not_allowed" };
     // the tap's one bound, from its arrival (before its locks)
@@ -940,6 +940,9 @@ export function poolBuyKind(host: () => PoolBuyHost & { end?(): void }, locks: L
           const a = await runPoolBuy({ ...h, sent: (signature) => {
             if (!answer) (answer = { result: { stage: "sent", txs: [{ chain: "solana", hash: signature }] } }), (early = true);
             give();
+            // its transaction read back: its hosts go back now (the read-backs to Final are a trade's reads, first on
+            // their host all the same), so the page's background reads and the sell box's preview go on beside them
+            h.release?.();
           }, route: (x) => ctx?.route?.(x) }, ask, waits);
           if (!answer) answer = "error" in a ? { error: a.error } : { result: a };
           // the run's stage goes out as progress too, answered early or not: an answer that comes only at the run's end

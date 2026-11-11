@@ -5,7 +5,12 @@
 //   - APP_HOST's asks the signing page's pool.sell.dry for the sell box's preview (src/screens/positions/model.ts
 //     askSellPreview, as minified: `e(`pool.sell.dry`,i.params).outcome`), so the box's You receive, Network and Fee
 //     come from the page, never a dash that stays;
-//   - SIGN_HOST's answers the kind (src/main.ts, as minified: `"pool.sell.dry":e=>d(e)` in the page's kinds).
+//   - SIGN_HOST's answers the kind (src/main.ts, as minified: `"pool.sell.dry":e=>d(e)` in the page's kinds);
+//   - APP_HOST's box asks again each second on busy or not_funded (src/screens/positions/SellBox.tsx NOT_YET, as
+//     minified: `new Set([`busy`,`not_funded`])`), so a preview asked while a buy runs or before the page's read has the
+//     fill's holding comes as soon as the page has it (devnet runs 11 and 12, 11 Nov: the dash for good);
+//   - SIGN_HOST's buy gives its hosts back at its early "sent" (packages/signpage/src/pool-buy.ts, as minified:
+//     `h.release?.()`), so the preview's reads are not held to the buy's Final (33.8 s on devnet run 11).
 // The numbers themselves are held by the tests that build them (packages/signpage/test/pool-sell-dry.test.ts on the
 // recorded venues, apps/terminal/test/sell-positions/run.mjs in a browser). The recorded answers are facts() over each
 // host's build (apps/terminal/dist; packages/signpage index.html and public/app.js, the build the deploy makes).
@@ -27,6 +32,10 @@ const Q = "[`\"']";
 const ASK = new RegExp(`${N}\\(${Q}pool\\.sell\\.dry${Q},${N}\\.params\\)\\.outcome`);
 /** The page's kind: pool.sell.dry in the kinds the api answers, a function of the request's params. */
 const KIND = new RegExp(`${Q}pool\\.sell\\.dry${Q}:(${N})=>${N}\\(\\1\\)`);
+/** The box's codes asked again each second: busy and not_funded, in that order, one set. */
+const AGAIN = new RegExp(`new Set\\(\\[${Q}busy${Q},${Q}not_funded${Q}\\]\\)`);
+/** The buy's host given back at its early sent: an optional call of the host's release. */
+const RELEASE = new RegExp(`${N}\\.release\\?\\.\\(\\)`);
 
 /** The script an index.html pins, and its integrity. */
 const pinned = (index) => {
@@ -38,12 +47,12 @@ const pinned = (index) => {
 /** What the check keeps of the reads: each host's index, its served script's sha384, and the mark read from it. */
 export function facts(app, sign) {
   return {
-    app: { index: app.index, sha384: sha384(app.js), ask: ASK.test(app.js) },
-    sign: { index: sign.index, sha384: sha384(sign.js), kind: KIND.test(sign.js) },
+    app: { index: app.index, sha384: sha384(app.js), ask: ASK.test(app.js), again: AGAIN.test(app.js) },
+    sign: { index: sign.index, sha384: sha384(sign.js), kind: KIND.test(sign.js), release: RELEASE.test(sign.js) },
   };
 }
 
-/** The verdict on an answer { app: { index, sha384, ask }, sign: { index, sha384, kind } }. */
+/** The verdict on an answer { app: { index, sha384, ask, again }, sign: { index, sha384, kind, release } }. */
 export function judge(a) {
   const lines = [];
   const bad = (m) => lines.push(`BAD ${m}`);
@@ -54,6 +63,8 @@ export function judge(a) {
   }
   if (a?.app?.ask !== true) bad("the app does not ask the signing page's pool.sell.dry: the sell box shows no You receive");
   if (a?.sign?.kind !== true) bad("the signing page does not answer pool.sell.dry: the sell box's preview is refused");
+  if (a?.app?.again !== true) bad("the sell box does not ask again on busy or not_funded: a preview asked during or just after a buy stays a dash");
+  if (a?.sign?.release !== true) bad("the signing page's buy holds its hosts to its Final: the sell box's preview is busy until then");
   return { ok: lines.length === 0, lines };
 }
 

@@ -20,7 +20,9 @@
 // scripts/live-checks/signpage-pool-notes.run.json), so the sell goes into the pool (pool.sell). ?kit=live mounts no
 // SellKitProvider, as the app does (card app-sell-shows-what-you-receive): the box's preview is the live source's, the
 // stub's request answering pool.sell.dry at 200 ms (0.72 SOL out, 0.000005 network, no fee; ?dry=refuse:
-// quote_check_failed; ?dry=busy: busy first, then the numbers; ?dry=busyafter: the numbers first, then busy) at the page's pool price of $150 a SOL, with the pool in the state; each ask is in window.__dry.
+// quote_check_failed; ?dry=busy: busy first, then the numbers; ?dry=busyafter: the numbers first, then busy; ?dry=busyfor,
+// unfunded or downfor with &n=N: busy, not_funded or down for the first N asks, then the numbers) at the page's pool price
+// of $150 a SOL, with the pool in the state; each ask is in window.__dry, its time (Date.now) in window.__dryAt.
 // Test only.
 import type { SignpageClientSnapshot, SignpageOutcome, SignpageState, Stage } from "@blindfill/kit";
 import { StrictMode, useState } from "react";
@@ -46,11 +48,13 @@ declare global {
     __calls: unknown[];
     __shares: number;
     __dry: unknown[];
+    __dryAt: number[];
   }
 }
 window.__calls = [];
 window.__shares = 0;
 window.__dry = [];
+window.__dryAt = [];
 
 const q = new URLSearchParams(location.search);
 const f = q.get("f") ?? "up";
@@ -141,13 +145,16 @@ const kit: TradeKit = {
   request: ((kind: string, params: unknown) => {
     if (kind === "pool.sell.dry") {
       window.__dry.push({ kind, params });
+      window.__dryAt.push(Date.now());
       const dry = q.get("dry");
       const n = window.__dry.length;
-      const busy = (dry === "busy" && n === 1) || (dry === "busyafter" && n > 1);
+      const first = n <= Number(q.get("n") ?? 0);
+      const busy = (dry === "busy" && n === 1) || (dry === "busyafter" && n > 1) || (dry === "busyfor" && first);
+      const code = dry === "unfunded" && first ? "not_funded" : dry === "downfor" && first ? "down" : null;
       const share = (params as { share_bps?: number }).share_bps ?? 5_000;
       // each share its own number: 0.72 SOL at 50%, in proportion
       const out = ((72 * share) / 5_000 / 100).toFixed(4);
-      const answer = dry === "refuse" ? { ok: false, error: { code: "quote_check_failed" } } : busy ? { ok: false, error: { code: "busy" } } : { ok: true, result: { out, min_out: "0", network: "0.000005", fee_bps: 0 } };
+      const answer = dry === "refuse" ? { ok: false, error: { code: "quote_check_failed" } } : code ? { ok: false, error: { code } } : busy ? { ok: false, error: { code: "busy" } } : { ok: true, result: { out, min_out: "0", network: "0.000005", fee_bps: 0 } };
       return { id: `dry-${window.__dry.length}`, outcome: new Promise((r) => setTimeout(() => r(answer), 200)) };
     }
     const id = `sell-${++n}`;

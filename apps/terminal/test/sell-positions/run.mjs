@@ -414,6 +414,48 @@ try {
       check((await settle(() => text("sell-receive"), "≈ $108.00")) === "≈ $108.00", `@${w.name} busyafter: back to 50% inside 10 s "${await text("sell-receive")}", want its own number`);
       await ctx.close();
     }
+    // devnet runs 11 and 12 (11 Nov): busy while a buy ran, not_funded before the page's read had the just-filled
+    // holding; the box asked once more (busy) or never (not_funded) and showed the dash for good. Both are asked again
+    // every second while the box shows the holding, so the number comes about a second after the page has it
+    for (const [dry, code] of [["busyfor", "busy"], ["unfunded", "not_funded"]]) {
+      const { ctx, page } = await open(browser, w, "up", `&kit=live&dry=${dry}&n=4`);
+      const text = async (id) => norm(await page.locator(`[data-testid="${id}"]`).innerText());
+      await page.clock.runFor(490);
+      check((await text("sell-receive")) === "—", `@${w.name} ${code} x4: You receive "${await text("sell-receive")}" before any number`);
+      await page.clock.runFor(5_000);
+      const got = await settle(() => text("sell-receive"), "≈ $108.00");
+      const at = await page.evaluate(() => window.__dryAt);
+      const gaps = at.slice(1).map((x, i) => x - at[i]);
+      check(got === "≈ $108.00", `@${w.name} ${code} x4: You receive "${got}" 5.5 s after the open, want the number (asks at ${JSON.stringify(gaps)} ms apart)`);
+      check(at.length === 5 && gaps.every((g) => g <= 1_300), `@${w.name} ${code} x4: ${at.length} asks ${JSON.stringify(gaps)} ms apart, want 5, each within 1.3 s of the last`);
+      await ctx.close();
+    }
+    // a down answer (a provider failed: a re-ask reads again) keeps its one re-ask, 3 s later
+    {
+      const { ctx, page } = await open(browser, w, "up", "&kit=live&dry=downfor&n=99");
+      await page.clock.runFor(10_000);
+      const at = await page.evaluate(() => window.__dryAt);
+      check(at.length === 2 && at[1] - at[0] >= 3_000, `@${w.name} down: ${at.length} asks ${JSON.stringify(at.slice(1).map((x, i) => x - at[i]))} apart in 10 s, want 2, 3 s apart`);
+      check(norm(await page.locator('[data-testid="sell-receive"]').innerText()) === "—", `@${w.name} down: want the dash`);
+      await ctx.close();
+    }
+    // devnet run 11: a share typed just before the tap was asked 152 ms after it, while the sale ran. Nothing is asked
+    // while a sale runs; the last number stays, dimmed
+    {
+      const { ctx, page } = await open(browser, w, "slow", "&kit=live");
+      const text = async (id) => norm(await page.locator(`[data-testid="${id}"]`).innerText());
+      await page.clock.runFor(490);
+      check((await settle(() => text("sell-receive"), "≈ $108.00")) === "≈ $108.00", `@${w.name} sale: the number before the tap "${await text("sell-receive")}"`);
+      await page.locator('[data-testid="sell-box"] .trb-input').fill("100");
+      await page.clock.runFor(100);
+      await page.locator('[data-testid="sell-cta"]').click();
+      await page.clock.runFor(3_000);
+      const asks = await page.evaluate(() => window.__dry.map((d) => d.params.share_bps));
+      check(JSON.stringify(asks) === "[5000]", `@${w.name} sale: asked ${JSON.stringify(asks)} with the sale running, want [5000]`);
+      check((await text("sell-receive")) === "≈ $108.00", `@${w.name} sale: You receive "${await text("sell-receive")}" while it runs, want the last number`);
+      check((await page.locator('[data-testid="sell-receive"]').getAttribute("data-pending")) === "true", `@${w.name} sale: the last number not dimmed while the sale runs`);
+      await ctx.close();
+    }
     // Share goes to the mount
     {
       const { ctx, page } = await open(browser, w, "up");

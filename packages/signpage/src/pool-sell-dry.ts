@@ -15,8 +15,8 @@
 // - Decided before any read: a provider's shared queue books a call's turn when it is asked (send.ts rpcSlot), so a
 //   preview decides whether it goes before it asks anything, and one that does not go books nothing. It goes only as
 //   the page's newest ask (one preview at a time; asks posted in one turn: the last; an ask for what the running one
-//   reads gets its answer), while no trade runs on the page (a pool buy or sell from its tap to its run's end, main.ts
-//   liveRuns) and no trade holds either host (the lanes), and with POOL_SELL_DRY_READ_CALLS left of
+//   reads gets its answer), while no trade runs on the page (a pool buy from its tap to its early "sent", a sell from
+//   its tap to its run's end, main.ts liveRuns) and no trade holds either host (the lanes), and with POOL_SELL_DRY_READ_CALLS left of
 //   POOL_SELL_DRY_CALLS per host in any POOL_SELL_DRY_WINDOW_MS (the helper gives one caller 16 in 10 s,
 //   apps/helper/src/rpc/rpc.ts); else busy at once, never a wait. Its reads are background ones on its host's lane
 //   ("pass", src/page-rpc.ts: they wait while a trade holds the host, and a trade never waits for them), answered
@@ -373,11 +373,12 @@ export function poolSellDryKind(d: PoolSellDryDeps): (params: Record<string, unk
   };
 }
 
-/** A trade kind with a count of its runs (trading above): each from its tap to its run's end, or its refusal, at most
- *  `maxMs`. A pool buy's end is its one progress post, whatever its stage ("sent" included): pool-buy.ts poolBuyKind
- *  posts it once, at its run's end, after its read-backs (its first answer can be "sent" while they go on); a pool
- *  sell's is its run's `after` (its verdict and its rent backs, pool-sell.ts poolSellKind). The kind's answers and progress pass through unchanged. */
-export function liveRuns<A>(kind: (params: Record<string, unknown>, ctx: KindContext) => A, end: "final" | "after", maxMs = TRADE_LIVE_MAX_MS): { kind: (params: Record<string, unknown>, ctx: KindContext) => A; live(): number } {
+/** A trade kind with a count of its runs (trading above): each from its tap to its `after`, or its refusal, at most
+ *  `maxMs`. A pool buy's `after` is its first answer (pool-buy.ts poolBuyKind): its early "sent", the app's Filled, once
+ *  its transaction read back on both RPCs, after which its read-backs to Final need no host of its own (it gives its
+ *  hold back then); else its run's end. A pool sell's is its run's end (its verdict and its rent backs, pool-sell.ts
+ *  poolSellKind). The kind's answers and progress pass through unchanged. */
+export function liveRuns<A>(kind: (params: Record<string, unknown>, ctx: KindContext) => A, maxMs = TRADE_LIVE_MAX_MS): { kind: (params: Record<string, unknown>, ctx: KindContext) => A; live(): number } {
   let n = 0;
   return {
     live: () => n,
@@ -391,10 +392,10 @@ export function liveRuns<A>(kind: (params: Record<string, unknown>, ctx: KindCon
         clearTimeout(backstop);
       };
       const backstop = setTimeout(done, maxMs);
-      const r = kind(params, end === "final" ? { ...ctx, progress: (stage) => (ctx.progress(stage), done()) } : ctx) as unknown;
+      const r = kind(params, ctx) as unknown;
       const run = r as { after?: Promise<unknown>; answer?: () => unknown } | null;
       if (run === null || typeof run !== "object" || !(run.after instanceof Promise) || typeof run.answer !== "function") done();
-      else void run.after.then(() => (end === "after" || (run.answer!() as { error?: unknown } | null)?.error !== undefined) && done(), done);
+      else void run.after.then(done, done);
       return r as A;
     },
   };
