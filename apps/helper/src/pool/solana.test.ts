@@ -252,7 +252,7 @@ test("a wire whose signatures do not hold as sent is refused signature_failed, n
   for (const tag of [2, 3] as const) {
     // W's own signature wrong: the checks refuse it before any read (bad_signature), as before
     const bad = build({ tag });
-    bad[70] ^= 1;
+    bad[70]! ^= 1;
     assert.equal(code(await sender(null, [], []).carry(body(bad))), "bad_signature");
     // the provider's signature check refuses the bytes as sent (both signatures in)
     const sent: Uint8Array[] = [];

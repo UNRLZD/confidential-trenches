@@ -144,6 +144,8 @@ export type PoolSendCode =
   | "not_landed"
   | "bad_table"
   | "failed_this_epoch"
+  | "signature_failed"
+  | "blockhash_not_found"
   | "simulation_failed"
   | "upstream";
 /** `retryAfterS` on a 429 only: the whole seconds the route names in Retry-After (card helper-abuse-limits). */
