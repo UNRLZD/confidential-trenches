@@ -32,6 +32,8 @@ test("Activity: a refused or not-landed buy or sell is failed, with the trade bo
       op("a", "buy", "refused", "quote_check_failed"),
       op("b", "buy", "refused", "venue_not_pinned"),
       op("c", "buy", "refused", "no_table_fits"),
+      op("k", "buy", "refused", "venue_not_built"),
+      op("l", "sell", "refused", "venue_not_built"),
       op("d", "sell", "refused", "something_new"),
       op("e", "buy", "refused"),
       op("f", "sell", "not_landed"),
@@ -47,6 +49,8 @@ test("Activity: a refused or not-landed buy or sell is failed, with the trade bo
     a: { reason: "priceCheck" },
     b: { reason: "unavailable" },
     c: { reason: "unavailable" },
+    k: { reason: "unavailable" },
+    l: { reason: "unavailable" },
     d: { reason: null },
     e: { reason: null },
     f: { reason: "notLanded" },
@@ -64,8 +68,8 @@ test("a code named after Object.prototype is no reason", () => {
   assert.equal(reasonOf(undefined), null);
 });
 
-test("the trade box: venue_not_pinned and no_table_fits end the buy as Unavailable, with no Retry; other refusals keep Retry", () => {
-  for (const code of ["venue_not_pinned", "no_table_fits"]) {
+test("the trade box: venue_not_pinned, no_table_fits and venue_not_built end the trade as Unavailable, with no Retry; other refusals keep Retry", () => {
+  for (const code of ["venue_not_pinned", "no_table_fits", "venue_not_built"]) {
     const p = outcome(tap(READY, "b1", NOW), "b1", { ok: false, error: { code } }, NOW + 300);
     assert.deepEqual(endView(p), { k: "failed", reason: "unavailable" }, code);
     assert.equal(unavailable(p), true, code);
@@ -121,4 +125,18 @@ test("a position whose price reads zero has no value: the dash, never $0.00; a r
   assert.equal(t.partial, true);
   // before any market read (the first seconds after load) every value is the dash
   for (const r of portfolio(snap(STATE), NO_DATA, NOW).rows) assert.equal(r.value, null, r.token);
+});
+
+// Card sol-pool-buys-mayhem-coins: a sale the pool cannot make on this token (venue_not_built: a Mayhem coin) is the buy
+// side's Unavailable on the sell side too: its EndLine draws the trade box's word, no Retry, and the box's Sell and its
+// presets stay off, since the same sale would be refused again
+test("the sell box keeps Sell and its presets off after an Unavailable sale", async () => {
+  const { readFileSync } = await import("node:fs");
+  const box = readFileSync(new URL("../src/screens/positions/SellBox.tsx", import.meta.url), "utf8");
+  assert.match(box, /const off = unavailable\(s\.phase\);/);
+  assert.match(box, /const canSell = s\.ready && !running && !off && !noRoute && amount !== null;/);
+  assert.match(box, /const canSellAt = \(b: number\) => s\.ready && !running && !off && !noRoute && sellAmount\(row\.units, b, decimals\) !== null;/);
+  const p = outcome(tap(READY, "s1", NOW), "s1", { ok: false, error: { code: "venue_not_built" } }, NOW + 300);
+  assert.equal(unavailable(p), true);
+  assert.equal(showsRetry(p), false);
 });

@@ -61,6 +61,7 @@ export const IN_PROCESS = [
   viaRead("solana-legs-checked", () => import("../live-checks/solana-legs-checked.mjs")),
   viaRead("signers-own-bytes", () => import("../live-checks/signers-own-bytes.mjs")),
   viaRead("solana-written-accounts-whole", () => import("../live-checks/solana-written-accounts-whole.mjs")),
+  viaRead("pool-sell-legs-side-by-side", () => import("../live-checks/pool-sell-legs-side-by-side.mjs")),
   // the PR's build is cut as a release only after its merge, so its run reads the marks and the pin, not the ledger
   { key: "pool-senders-next-page", host: "sign", load: () => import("../live-checks/pool-senders-next-page.mjs"), run: async (m, f) => m.judge(await m.read(f), { ledger: false }) },
   { key: "sol-settle-failed-is-not-unspent", host: "sign", load: () => import("../live-checks/sol-settle-failed-is-not-unspent.mjs"), run: async (m, f) => m.judge(await m.read(f), { ledger: false }) },
@@ -74,6 +75,7 @@ export const IN_PROCESS = [
   { key: "sol-sell-deposit-back-floor", host: "sign", load: () => import("../live-checks/sol-sell-deposit-back-floor.mjs"), run: async (m, f) => m.judge(await m.read(f), { ledger: false }) },
   { key: "app-holding-follows-a-fill", host: "app", load: () => import("../live-checks/app-holding-follows-a-fill.mjs"), run: async (m, f) => m.judge(await m.read(f)) },
   { key: "app-sell-shows-what-you-receive", host: "app", load: () => import("../live-checks/app-sell-shows-what-you-receive.mjs"), run: async (m, f) => m.judge(await m.read(f)) },
+  { key: "sol-pool-buys-mayhem-coins", host: "app", load: () => import("../live-checks/sol-pool-buys-mayhem-coins.mjs"), run: async (m, f) => m.judge(await m.read(f)) },
   { key: "pool-sell-share-across-wallets", host: "sign", load: () => import("../live-checks/pool-sell-share-across-wallets.mjs"), run: async (m, f) => m.judge(await m.read(f), { ledger: false }) },
   // the bundle part only: the chain part reads the helper and two RPCs, past the build
   { key: "wallet-mainnet-relayer-pins", host: "sign", load: () => import("../live-checks/wallet-mainnet-relayer-pins.mjs"), run: async (m, f) => m.judgeBundle(await m.readBundle(f)) },

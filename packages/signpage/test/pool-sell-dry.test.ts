@@ -104,7 +104,8 @@ test("the preview's out is the sale's own quote for the units pool.sell would se
 test("one code path: every sale reads its quote through poolSellReference, the one reference read in pool-sell.ts", () => {
   const src = readFileSync(new URL("../src/pool-sell.ts", import.meta.url), "utf8");
   assert.equal(src.match(/pageReference\(/g)?.length, 1, "pageReference is called once, inside poolSellReference");
-  assert.match(src, /const quoted = await poolSellReference\(rpcs, token, amount\);/, "sellRun quotes through it");
+  // sellRun asks it beside its other first-round reads (card pool-sell-legs-side-by-side)
+  assert.match(src, /: poolSellReference\(rpcs, token, amount\),\n/, "sellRun quotes through it");
   assert.match(src, /const units = poolSellUnits\(total, ask\);/, "planPoolSell's units are poolSellUnits");
   const dry = readFileSync(new URL("../src/pool-sell-dry.ts", import.meta.url), "utf8");
   for (const word of ["readSolanaReference(", "pageReference(", "expectedOut *", "solanaPoolSellMinOut", "seed64", "notes(", "ops(", "sendTransaction", "simulate"]) assert.equal(dry.includes(word), false, `the preview has no ${word}`);

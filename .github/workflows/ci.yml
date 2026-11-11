@@ -20,13 +20,19 @@ name: ci
 # gate. Main is refs/remotes/origin/main in full (a bare origin/main reads a tag of that name first, and the checkout
 # fetches every tag), and a group into any other branch runs no gate and fails. verify-gate judges each queued pull request on its own (verify-gate.mjs --group). base-gate.test.mjs replays
 # every gate step as a pull request and as a group, each with the head's gates tampered.
+# No push trigger (card main-ci-runs-once): main's ruleset (26292755) lets a commit onto main only through the merge
+# queue (its pull_request and merge_queue rules, no bypass actor), and the queue lands the very commit its group's run
+# tested, so that merge_group run is the commit's one full run. A push run on the same commit ran every job a second
+# time, held runners open pull requests waited for, and every reader of "main's CI" waited about 20 minutes for an
+# answer the queue had given. The readers (packages/signpage/scripts/deploy.mjs ciProblems and the release scripts)
+# take a commit's ci.yml runs by its sha: its merge_group run, a push run (commits from before this card) or one by hand,
+# never a scheduled one; a commit with none of them is refused, and `gh workflow run ci.yml --ref main` gives it the
+# full run. A push trigger here, or no merge_group one, fails scripts/ci/ci-runs-once.mjs.
 on:
   pull_request:
     branches: [main]
   merge_group:
     types: [checks_requested]
-  push:
-    branches: [main]
   # nightly on main: the vault's sandbox suite, the mutant sweeps (test-mutants) and the venue tables' alarm; every
   # other job skips a scheduled run
   schedule:
@@ -36,7 +42,7 @@ on:
 permissions:
   contents: read
 
-# a newer push to a pull request cancels its older run; every run on main finishes (the money re-read included). A merge
+# a newer push to a pull request cancels its older run; every run on main (nightly, by hand) finishes. A merge
 # queue group's run is keyed on its group's ref (merge_group.head_ref, the gh-readonly-queue branch), which
 # ci-queue-drop.yml's run takes the moment GitHub destroys a group it did not merge, cancelling this run (card
 # ci-pr-light; ci-queue-drop.test.mjs reads both keys on recorded payloads)
@@ -277,8 +283,6 @@ jobs:
           PR_HEAD: ${{ github.event.pull_request.head.sha }}
           MQ_HEAD: ${{ github.event.merge_group.head_sha }}
           MQ_BASE_REF: ${{ github.event.merge_group.base_ref }}
-          BEFORE: ${{ github.event.before }}
-          AFTER: ${{ github.sha }}
         run: |
           # a merge queue group runs as a pull request from main to the group's head (see the merge_group trigger above)
           if [ "$EVENT" = merge_group ]; then [ "$MQ_BASE_REF" = refs/heads/main ] || { echo "a merge queue group into $MQ_BASE_REF: only main's queue is judged"; exit 1; }; EVENT=pull_request; PR_HEAD="$MQ_HEAD"; PR_BASE="$(git merge-base refs/remotes/origin/main "$MQ_HEAD")"; fi
@@ -288,12 +292,7 @@ jobs:
               mkdir -p "$RUNNER_TEMP/base"
               git archive "$PR_BASE" scripts | tar -x -f - -C "$RUNNER_TEMP/base"
               node "$RUNNER_TEMP/base/scripts/ci/money-gate.mjs" "$PR_BASE" "$PR_HEAD" ;;
-            push)
-              if [ -z "$BEFORE" ] || [ "$BEFORE" = 0000000000000000000000000000000000000000 ]; then
-                node scripts/ci/money-gate.mjs --all
-              else
-                node scripts/ci/money-gate.mjs "$BEFORE" "$AFTER"
-              fi ;;
+            # by hand: every record (no push run since card main-ci-runs-once)
             *) node scripts/ci/money-gate.mjs --all ;;
           esac
 
@@ -671,7 +670,7 @@ jobs:
   # The vault's near-sandbox suite (contracts/vault/tests/harness/run.sh: the vault, the mock token and the harness's
   # probe built with cargo-near, the pinned mainnet USDC and intents.near wasm, near-sandbox 2.13.4), which the test
   # job's plain cargo test builds empty. It runs when a change touches a file the suite reads (scripts/ci/vault-sandbox.mjs,
-  # whose planted tests fail on a file the suite reads and the rule misses), on every push to main that does, nightly
+  # whose planted tests fail on a file the suite reads and the rule misses), on every queue group that does, nightly
   # and by hand; otherwise vault-sandbox passes with a printed skip. vault-sandbox-build builds the four wasm once
   # (run.sh --reproducible --build-only) and hands them, with the pinned two, to the four shards as one artifact; the
   # targets run on the shards (vault-sandbox.mjs SHARDS, each target in exactly one), which build no wasm. vault-sandbox
@@ -718,7 +717,7 @@ jobs:
         id: decide
         env:
           EVENT: ${{ github.event_name }}
-          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          BASE: ${{ github.event.pull_request.base.sha }}
           HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
           MQ_HEAD: ${{ github.event.merge_group.head_sha }}
           MQ_BASE_REF: ${{ github.event.merge_group.base_ref }}

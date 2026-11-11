@@ -79,7 +79,7 @@ import {
   type SolanaPoolVenue,
   type SolanaReference,
 } from "./pool.ts";
-import { solanaSameProvider, solanaTimedRpc, type SolanaRpc } from "./send.ts";
+import { SolanaRpcTransportError, solanaSameProvider, solanaTimedRpc, type SolanaRpc } from "./send.ts";
 import { deepFreeze } from "../../freeze.ts";
 
 export const SOLANA_POOL_TAG_RELEASE = 2;
@@ -455,7 +455,7 @@ export const solanaRentMin = (rent: SolanaRent, size: number): bigint => (RENT_O
 export async function readSolanaRent(providers: readonly [SolanaRpc, SolanaRpc]): Promise<SolanaRent> {
   if (!Array.isArray(providers) || providers.length !== 2 || solanaSameProvider(providers[0], providers[1])) throw new Error("two different providers are needed");
   const rents = await Promise.all(providers.map(async (rpc) => {
-    const r = await Promise.resolve().then(() => solanaTimedRpc(rpc, READ_TIMEOUT_MS)("getAccountInfo", [SOLANA_RENT_SYSVAR, { encoding: "base64", commitment: "confirmed" }]));
+    const r = await Promise.resolve().then(() => solanaTimedRpc(rpc, READ_TIMEOUT_MS, late)("getAccountInfo", [SOLANA_RENT_SYSVAR, { encoding: "base64", commitment: "confirmed" }]));
     const value = (r as { value?: { owner?: unknown; data?: unknown } } | null)?.value;
     const d = value?.data;
     if (!value || typeof value.owner !== "string" || !Array.isArray(d) || typeof d[0] !== "string" || d[1] !== "base64") throw new Error("a provider's answer is not an account read");
@@ -797,7 +797,9 @@ export function solanaPoolBuyInstructions(cfg: SolanaPoolConfig, release: Solana
   ];
 }
 
-export type SolanaPoolBuyErrorCode = "venue_not_in_table"; // our lookup table is not made for the buy's venue (none of its program's accounts)
+// venue_not_in_table: our lookup table is not made for the buy's venue (none of its program's accounts);
+// venue_not_built: both providers read a venue this build does not trade (a Mayhem curve or pool, a curve not in SOL)
+export type SolanaPoolBuyErrorCode = "venue_not_in_table" | "venue_not_built";
 export class SolanaPoolBuyError extends Error {
   readonly code: SolanaPoolBuyErrorCode;
   constructor(code: SolanaPoolBuyErrorCode, message: string) {
@@ -870,6 +872,9 @@ export function buildSolanaPoolBuyOnTables(
 // ------------------------------------------------------------------------------------------------- the reads
 
 const READ_TIMEOUT_MS = 5_000;
+/** A read past READ_TIMEOUT_MS: the provider answered nothing in time (or its page client was still retrying a
+ *  throttle), the kit's transport fault "timeout", so a sale or a buy counts it as the provider's ("down"). */
+const late = (ms: number): Error => new SolanaRpcTransportError("timeout", `no answer in ${ms} ms`, 1, "the read's bound");
 
 /** pump Global and PumpSwap GlobalConfig sizes, read on mainnet-beta and publicnode 2026-11-02 21:00Z; the offsets above
  * hold only on these layouts, so any other size is refused. */
@@ -922,14 +927,14 @@ export function solanaPoolBuyVenueOf(kind: SolanaPoolVenue, mint: string, accoun
   if (kind === "pump-curve") {
     const c = solanaDecodeBondingCurve(main);
     if (c.complete) throw new Error("the curve is complete");
-    if (c.isMayhemMode) throw new Error("a Mayhem curve pays its reserved fee recipients, not built here");
-    if (c.quoteMint !== SOLANA_SYSTEM_PROGRAM && c.quoteMint !== SOLANA_SOL_MINT) throw new Error("the curve is not quoted in SOL");
+    if (c.isMayhemMode) throw new SolanaPoolBuyError("venue_not_built", "a Mayhem curve pays its reserved fee recipients, not built here");
+    if (c.quoteMint !== SOLANA_SYSTEM_PROGRAM && c.quoteMint !== SOLANA_SOL_MINT) throw new SolanaPoolBuyError("venue_not_built", "the curve is not quoted in SOL");
     const feeRecipient = pumpGlobalFeeRecipient(global);
     return { kind, mint, tokenProgram: m.owner, tokenAccountSize: solanaTokenAccountSize(m), curve: addr.curve, creator: c.creator, feeRecipient, cashback: c.isCashbackCoin, ...buyback(global.data, PUMP_GLOBAL_BUYBACK_RECIPIENTS) };
   }
   const p = solanaDecodePumpSwapPool(main);
   if (p.index !== 0 || p.creator !== addr.poolAuthority || p.baseMint !== mint || p.quoteMint !== SOLANA_SOL_MINT) throw new Error("the pool is not the mint's canonical pool");
-  if (p.isMayhemMode) throw new Error("a Mayhem pool pays its reserved fee recipients, not built here");
+  if (p.isMayhemMode) throw new SolanaPoolBuyError("venue_not_built", "a Mayhem pool pays its reserved fee recipients, not built here");
   const t22 = m.owner === SOLANA_TOKEN_2022_PROGRAM;
   if (p.baseVault !== (t22 ? addr.baseVaultToken2022 : addr.baseVaultToken) || p.quoteVault !== addr.quoteVault) throw new Error("the pool's vaults are not its token accounts");
   const protocolFeeRecipient = ammConfigFeeRecipient(global);
@@ -941,18 +946,30 @@ export function solanaPoolBuyVenueOf(kind: SolanaPoolVenue, mint: string, accoun
   };
 }
 
-/** The venue's buy accounts read on both providers; throws unless both give the same accounts. */
+/** The venue's buy accounts read on both providers; throws unless both give the same accounts. A venue this build does
+ *  not trade is SolanaPoolBuyError venue_not_built only when both providers read it so: one provider's word alone is a
+ *  disagreement, as any other. */
 export async function readSolanaPoolBuyVenue(providers: readonly [SolanaRpc, SolanaRpc], kind: SolanaPoolVenue, mint: string, pick: (n: number) => number = randomIndex): Promise<SolanaPoolBuyVenue> {
   if (!Array.isArray(providers) || providers.length !== 2 || solanaSameProvider(providers[0], providers[1])) throw new Error("two different providers are needed");
   const addr = solanaPoolAddresses(mint);
   const list = kind === "pump-curve" ? [mint, addr.curve, PUMP_GLOBAL] : [mint, addr.pool, AMM_GLOBAL_CONFIG];
-  const reads = await Promise.all(providers.map((rpc) => Promise.resolve().then(() => solanaTimedRpc(rpc, READ_TIMEOUT_MS)("getMultipleAccounts", [list, { encoding: "base64", commitment: "confirmed" }]))));
+  const reads = await Promise.all(providers.map((rpc) => Promise.resolve().then(() => solanaTimedRpc(rpc, READ_TIMEOUT_MS, late)("getMultipleAccounts", [list, { encoding: "base64", commitment: "confirmed" }]))));
   const i = pick(8); // one buyback recipient for both reads, so they compare equal
-  const venues = reads.map((r) => {
+  const notBuilt = (e: unknown): boolean => e instanceof SolanaPoolBuyError && e.code === "venue_not_built";
+  const got = reads.map((r): { venue: SolanaPoolBuyVenue } | { error: unknown } => {
     const parsed = solanaParseAccountsAnswer(r, list.length);
     if (!parsed) throw new Error("a provider's answer is not an accounts read");
-    return solanaPoolBuyVenueOf(kind, mint, parsed.accounts, () => i);
+    try {
+      return { venue: solanaPoolBuyVenueOf(kind, mint, parsed.accounts, () => i) };
+    } catch (e) {
+      if (notBuilt(e)) return { error: e };
+      throw e;
+    }
   });
+  const built = got.filter((g) => "venue" in g).length;
+  if (built === 0) throw (got[0] as { error: unknown }).error;
+  if (built === 1) throw new Error("the providers disagree on the venue's accounts");
+  const venues = got.map((g) => (g as { venue: SolanaPoolBuyVenue }).venue);
   if (JSON.stringify(venues[0]) !== JSON.stringify(venues[1])) throw new Error("the providers disagree on the venue's accounts");
   return venues[0] as SolanaPoolBuyVenue;
 }
@@ -985,7 +1002,7 @@ export async function readSolanaPoolTableVenue(providers: readonly [SolanaRpc, S
   if (!SOLANA_POOL_BUY_VENUES.includes(kind)) throw new Error(`no such venue ${String(kind).slice(0, 40)}`);
   const at = kind === "pump-curve" ? PUMP_GLOBAL : AMM_GLOBAL_CONFIG;
   const name = kind === "pump-curve" ? "pump Global" : "PumpSwap GlobalConfig";
-  const reads = await Promise.all(providers.map((rpc) => Promise.resolve().then(() => solanaTimedRpc(rpc, READ_TIMEOUT_MS)("getMultipleAccounts", [[at], { encoding: "base64", commitment: "finalized" }]))));
+  const reads = await Promise.all(providers.map((rpc) => Promise.resolve().then(() => solanaTimedRpc(rpc, READ_TIMEOUT_MS, late)("getMultipleAccounts", [[at], { encoding: "base64", commitment: "finalized" }]))));
   const globals = reads.map((r) => {
     const g = solanaParseAccountsAnswer(r, 1)?.accounts[0];
     if (!g) throw new Error(`a provider's answer is not ${name}`);

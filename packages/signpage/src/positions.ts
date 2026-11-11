@@ -23,6 +23,10 @@
 //   mainnet, a devnet RPC in the testnet build. No read of this pass names a W to a public provider (buy-wallets.ts
 //   header), and none names a mint W's buy did not: a mint's decimals come from its buy record, else from the kept
 //   pass, else from one read on the finder's own route (the helper's keyed route on mainnet), once.
+// - Open buys first, each row as it is read (card wallets-found-in-one-read): the Ws of buys this device has not sold in
+//   full are read before the sold ones, and the state's positions take each W's read as it comes, every W not read yet
+//   on the rule for a W unread below (its last amount, else its record's), so no row moves or goes before its own W is
+//   read, and the whole pass's end confirms the last rows shown. Only a whole pass is kept.
 // - One W at a time: a W whose read fails keeps its last amount (or, never listed and not sold, its record's) while
 //   every other W updates, and the pass counts as failed so it runs again; a finder that cannot list at all keeps every
 //   W's last. Once the finder listed a token in W and lists it no more (or at 0), it is gone, and an unread W or a
@@ -79,8 +83,12 @@ export type FoundWallet = { address: string; tokens: ReadonlyMap<string, bigint>
 /** What a pass reads, every read the device's own. */
 export type PositionsReads = {
   /** The Ws of these addresses (each with a buy mint or record), each as the finder read it, a W it does not know left
-   *  out; throws when it cannot list. */
-  wallets(only: ReadonlySet<string>): Promise<readonly FoundWallet[]>;
+   *  out; throws when it cannot list. The Ws of `first` are read before the rest, and `each` is told each W as it is
+   *  read (card wallets-found-in-one-read). */
+  wallets(only: ReadonlySet<string>, o?: { first?: ReadonlySet<string>; each?: (w: FoundWallet) => void }): Promise<readonly FoundWallet[]>;
+  /** The positions as the pass has read them so far: each W not read yet on the rule for a W unread (its last amount,
+   *  else its record's), so a row holds steady until its W is read. Never kept; the pass's end gives the whole. */
+  shown?(positions: Position[]): void;
   /** The mint's decimals, one read on the finder's own route; throws when it does not read. Asked only for a mint W
    *  holds whose record and kept pass name none. */
   decimals(mint: string): Promise<number>;
@@ -181,6 +189,35 @@ export function keptPositions(v: unknown, ...bought: unknown[]): Position[] | nu
   const mints = new Set(bought.flatMap((b) => [...mintsOf(b).values()]));
   return (k.positions as Position[]).filter((p) => mints.has(p?.token));
 }
+/** A kept pass's listing (KeptPass `listed`, each "W mint" the finder listed), by W: each mint with its kept amount
+ *  (`held`; 0 when none kept). Null when `v` is not a kept pass (no whole pass yet). Card pool-sell-legs-side-by-side:
+ *  a sale adds a W to read from it, never an amount. */
+export function keptListed(v: unknown): Map<string, Map<string, bigint>> | null {
+  const k = v as Partial<KeptPass> | null;
+  if (typeof k !== "object" || k === null || !Array.isArray(k.listed)) return null;
+  return listingOf(k.listed, (key) => {
+    const a = (k.held as Record<string, unknown> | undefined)?.[key];
+    return typeof a === "string" && BASE.test(a) ? BigInt(a) : undefined;
+  });
+}
+/** The memo's listing, as keptListed reads a kept pass: each "W mint" the finder listed, at the amount this tab last
+ *  read (0 when gone). Null before the memo has loaded the kept pass. The memo is loaded from the kept pass and every
+ *  read of this tab writes it before the tab keeps a pass (each W's read as it comes; a pass's end), so it is never older
+ *  than the kept pass, and a read made after that pass stands over it (review P2 of 8da6b97f). */
+export function memoListed(memo: PassMemo): Map<string, Map<string, bigint>> | null {
+  return memo.loaded ? listingOf(memo.listed, (key) => memo.held.get(key)) : null;
+}
+function listingOf(keys: Iterable<unknown>, held: (key: string) => bigint | undefined): Map<string, Map<string, bigint>> {
+  const out = new Map<string, Map<string, bigint>>();
+  for (const key of keys) {
+    if (typeof key !== "string") continue;
+    const [w, m, ...rest] = key.split(" ");
+    if (!w || !m || rest.length > 0) continue;
+    if (!out.has(w)) out.set(w, new Map());
+    out.get(w)!.set(m, held(key) ?? 0n);
+  }
+  return out;
+}
 function loadMemo(memo: PassMemo, v: unknown): void {
   const k = v as Partial<KeptPass> | null;
   if (typeof k !== "object" || k === null) return;
@@ -196,17 +233,14 @@ function loadMemo(memo: PassMemo, v: unknown): void {
 /** One pass: the positions of this device's buys, each from the finder's read of its W (see the header). */
 export async function positionsPass(r: PositionsReads, memo: PassMemo = passMemo()): Promise<PassResult> {
   const stop = (): void => r.signal?.throwIfAborted();
+  // loaded once the kept pass is in it, so memoListed never gives a memo half loaded
   if (!memo.loaded) {
-    memo.loaded = true;
     loadMemo(memo, await r.kept?.().catch(() => null));
+    memo.loaded = true;
   }
   let whole = true;
+  // each looked for by its trade: "W mint" and the sell or run that asks for it (tally's `look`)
   const wait: string[] = [];
-  // each looked for by its trade: "W mint" and the sell or run that asks for it
-  const look = (k: string, by: ReadonlySet<string> | ReadonlyMap<string, string>, at: string): void => {
-    const v = `${k} ${by instanceof Map ? (by.get(at) ?? "") : ""}`;
-    if (!memo.waited.has(v)) wait.push(v);
-  };
   const bought = r.bought ? await r.bought().catch(() => ((whole = false), {})) : {};
   const costs: PositionCosts = r.costs ? await r.costs().catch(() => ((whole = false), {})) : {};
   const sold: ReadonlySet<string> | ReadonlyMap<string, string> = r.sold ? await r.sold().catch(() => ((whole = false), new Set<string>())) : new Set<string>();
@@ -220,10 +254,106 @@ export async function positionsPass(r: PositionsReads, memo: PassMemo = passMemo
     if (c !== null && isDecimals(c.decimals) && !memo.decimals.has(mint)) memo.decimals.set(mint, c.decimals);
     records.push({ address, mint, ...(c !== null && typeof c.received === "string" && DEC.test(c.received) ? { received: c.received } : {}) });
   }
+  // each "W mint": its amount in base units, or the recorded amount (a decimal) until the mint's decimals are known.
+  // `read`: each W's tokens as read, null when its read failed or has not come yet; `answered`: the finder listed, so a
+  // W it left out is one it does not know
+  const tally = (read: ReadonlyMap<string, ReadonlyMap<string, bigint> | null>, answered: boolean) => {
+    let whole = true;
+    const waits: string[] = [];
+    const look = (k: string, by: ReadonlySet<string> | ReadonlyMap<string, string>, at: string): void => {
+      const v = `${k} ${by instanceof Map ? (by.get(at) ?? "") : ""}`;
+      if (!memo.waited.has(v)) waits.push(v);
+    };
+    const held = new Map<string, { address: string; mint: string; amount: bigint | string }>();
+    const listed = new Set(memo.listed);
+    for (const { address, mint, received } of records) {
+      const k = KEY(address, mint);
+      const tokens = read.get(address);
+      if (tokens) {
+        const a = tokens.get(mint);
+        // listed: the finder's amount stands (0: gone); a token this device sold in full that is still listed may be the
+        // finder behind the sell, so the pass runs again
+        if (a !== undefined) {
+          listed.add(k);
+          if (a > 0n) {
+            held.set(k, { address, mint, amount: a });
+            if (sold.has(k)) look(k, sold, k);
+          }
+          continue;
+        }
+        // read whole, not listed: gone once it was listed before or this device sold it all, else the record's amount;
+        // with no record, a buy this page ran is looked for again
+        if (listed.has(k) || sold.has(k)) continue;
+        if (received !== undefined) held.set(k, { address, mint, amount: received });
+        else if (awaited.has(address)) look(k, awaited, address);
+        continue;
+      }
+      // a W the finder answered without (its list whole: every W whose note is SPENT or RESERVED is in it): its note never
+      // spent or was freed (a buy refused or not landed), so nothing to show, its record's amount included, and nothing
+      // to wait for but a buy this page ran with no record yet
+      if (answered && tokens === undefined) {
+        if (!awaited.has(address) || received !== undefined) continue;
+        // a buy this page ran whose W the finder does not know yet: looked for again, its last amount while it is
+        look(k, awaited, address);
+        const last = memo.held.get(k);
+        if (last !== undefined) held.set(k, { address, mint, amount: last });
+        continue;
+      }
+      // W unread, the finder down or not knowing W yet: W's last, else (never listed, not sold) the record's
+      whole = false;
+      const last = memo.held.get(k);
+      if (last !== undefined) held.set(k, { address, mint, amount: last });
+      else if (received !== undefined && !listed.has(k) && !sold.has(k)) held.set(k, { address, mint, amount: received });
+    }
+    return { held, listed, whole, waits };
+  };
+  // one position per mint, at its known decimals; an amount whose decimals are not known yet left for the end
+  const positionsOf = (held: ReadonlyMap<string, { address: string; mint: string; amount: bigint | string }>): Position[] => {
+    const by = new Map<string, { amount: bigint; wallets: string[]; held: { address: string; amount: bigint }[] }>();
+    for (const h of held.values()) {
+      const d = memo.decimals.get(h.mint);
+      if (d === undefined) continue;
+      const amount = typeof h.amount === "bigint" ? h.amount : base(h.amount, d);
+      if (amount === null || amount <= 0n) continue;
+      const q = by.get(h.mint) ?? { amount: 0n, wallets: [], held: [] };
+      q.amount += amount;
+      q.wallets.push(h.address);
+      q.held.push({ address: h.address, amount });
+      by.set(h.mint, q);
+    }
+    return [...by].map(([mint, p]) => {
+      const decimals = memo.decimals.get(mint)!;
+      return { chain: "solana" as const, token: mint, amount: poolUnits(p.amount, decimals), cost: positionCost(mint, decimals, p.held, costs), wallets: p.wallets, decimals };
+    });
+  };
   stop();
+  // the Ws of open buys first (a record this device has not sold in full), the sold ones behind; each W's row shown as
+  // its read comes, every other on the rule for a W unread
+  const first = new Set(records.filter(({ address, mint }) => !sold.has(KEY(address, mint))).map(({ address }) => address));
+  const soFar = new Map<string, ReadonlyMap<string, bigint> | null>(records.map(({ address }) => [address, null]));
+  const each = r.shown
+    ? (w: FoundWallet): void => {
+        if (r.signal?.aborted || !soFar.has(w.address)) return;
+        soFar.set(w.address, w.tokens);
+        const t = tally(soFar, true);
+        // W's read is the memo's at once, so a pass stopped after it (a sale's read preempts the pass) leaves the next
+        // pass W's amount as read, never an older one before W is read again
+        if (w.tokens !== null) for (const { address, mint } of records) {
+          if (address !== w.address) continue;
+          const k = KEY(address, mint);
+          const h = t.held.get(k);
+          const d = memo.decimals.get(mint);
+          const a = h === undefined ? null : typeof h.amount === "bigint" ? h.amount : d === undefined ? null : base(h.amount, d);
+          if (a !== null && a > 0n) memo.held.set(k, a);
+          else if (h === undefined || a !== null) memo.held.delete(k);
+          if (t.listed.has(k)) memo.listed.add(k);
+        }
+        r.shown!(positionsOf(t.held));
+      }
+    : undefined;
   let found: readonly FoundWallet[] | null = null;
   try {
-    found = records.length === 0 ? [] : await r.wallets(new Set(records.map(({ address }) => address)));
+    found = records.length === 0 ? [] : await r.wallets(new Set(records.map(({ address }) => address)), { first, ...(each ? { each } : {}) });
   } catch {
     stop();
     whole = false;
@@ -231,48 +361,11 @@ export async function positionsPass(r: PositionsReads, memo: PassMemo = passMemo
   stop();
   const read = new Map<string, ReadonlyMap<string, bigint> | null>();
   for (const w of found ?? []) read.set(w.address, w.tokens);
-  // each "W mint": its amount in base units, or the recorded amount (a decimal) until the mint's decimals are known
-  const held = new Map<string, { address: string; mint: string; amount: bigint | string }>();
-  const listed = new Set(memo.listed);
-  for (const { address, mint, received } of records) {
-    const k = KEY(address, mint);
-    const tokens = read.get(address);
-    if (tokens) {
-      const a = tokens.get(mint);
-      // listed: the finder's amount stands (0: gone); a token this device sold in full that is still listed may be the
-      // finder behind the sell, so the pass runs again
-      if (a !== undefined) {
-        listed.add(k);
-        if (a > 0n) {
-          held.set(k, { address, mint, amount: a });
-          if (sold.has(k)) look(k, sold, k);
-        }
-        continue;
-      }
-      // read whole, not listed: gone once it was listed before or this device sold it all, else the record's amount;
-      // with no record, a buy this page ran is looked for again
-      if (listed.has(k) || sold.has(k)) continue;
-      if (received !== undefined) held.set(k, { address, mint, amount: received });
-      else if (awaited.has(address)) look(k, awaited, address);
-      continue;
-    }
-    // a W the finder answered without (its list whole: every W whose note is SPENT or RESERVED is in it): its note never
-    // spent or was freed (a buy refused or not landed), so nothing to show, its record's amount included, and nothing
-    // to wait for but a buy this page ran with no record yet
-    if (found !== null && tokens === undefined) {
-      if (!awaited.has(address) || received !== undefined) continue;
-      // a buy this page ran whose W the finder does not know yet: looked for again, its last amount while it is
-      look(k, awaited, address);
-      const last = memo.held.get(k);
-      if (last !== undefined) held.set(k, { address, mint, amount: last });
-      continue;
-    }
-    // W unread, the finder down or not knowing W yet: W's last, else (never listed, not sold) the record's
-    whole = false;
-    const last = memo.held.get(k);
-    if (last !== undefined) held.set(k, { address, mint, amount: last });
-    else if (received !== undefined && !listed.has(k) && !sold.has(k)) held.set(k, { address, mint, amount: received });
-  }
+  const t = tally(read, found !== null);
+  if (!t.whole) whole = false;
+  wait.push(...t.waits);
+  const held = t.held;
+  const listed = t.listed;
   // a mint W holds whose record and kept pass name no decimals (no record, or one from before decimals were kept): one
   // read on the finder's own route, once
   for (const m of new Set([...held.values()].map((h) => h.mint))) {
@@ -286,7 +379,6 @@ export async function positionsPass(r: PositionsReads, memo: PassMemo = passMemo
     }
   }
   stop();
-  const by = new Map<string, { amount: bigint; wallets: string[]; held: { address: string; amount: bigint }[] }>();
   const nextHeld = new Map<string, bigint>();
   for (const [k, h] of held) {
     const d = memo.decimals.get(h.mint);
@@ -297,19 +389,9 @@ export async function positionsPass(r: PositionsReads, memo: PassMemo = passMemo
       continue;
     }
     const amount = typeof h.amount === "bigint" ? h.amount : base(h.amount, d);
-    if (amount === null || amount <= 0n) continue;
-    nextHeld.set(k, amount);
-    const q = by.get(h.mint) ?? { amount: 0n, wallets: [], held: [] };
-    q.amount += amount;
-    q.wallets.push(h.address);
-    q.held.push({ address: h.address, amount });
-    by.set(h.mint, q);
+    if (amount !== null && amount > 0n) nextHeld.set(k, amount);
   }
-  const out: Position[] = [];
-  for (const [mint, p] of by) {
-    const decimals = memo.decimals.get(mint)!;
-    out.push({ chain: "solana", token: mint, amount: poolUnits(p.amount, decimals), cost: positionCost(mint, decimals, p.held, costs), wallets: p.wallets, decimals });
-  }
+  const out = positionsOf(held);
   memo.held = nextHeld;
   memo.listed = listed;
   // only a whole pass is kept, never one a sign out overtook (its store is gone)
@@ -404,6 +486,8 @@ export type PositionsCache = {
   /** A sell's own read of the Ws begins: the running pass stops, a booked retry is dropped, and no pass runs until the
    *  hold ends (its reads never share the finder's queue with the sell's). See PassHold. */
   preempt(): PassHold;
+  /** What this tab last read of each W the finder listed (memoListed); null before the kept pass is loaded. */
+  listed(): Map<string, Map<string, bigint>> | null;
   /** `fn` runs when a pass changes the positions. */
   watch(fn: () => void): void;
   /** Sign out: the running pass stopped and its answer ignored, the positions and what the passes kept dropped, no
@@ -423,8 +507,9 @@ export type PositionsCache = {
  *  once no other sell's read holds; a hold from before a sign out ends nothing. */
 export type PassHold = { feed(found: readonly FoundWallet[]): void; release(): void };
 
-/** How the cache runs one pass: its stop signal, and the sell's read to use when one was fed. */
-export type PassRun = { signal: AbortSignal; found?: readonly FoundWallet[] };
+/** How the cache runs one pass: its stop signal, the sell's read to use when one was fed, and where the pass shows its
+ *  rows as its Ws are read (PositionsReads.shown: the positions read gives them at once; never kept). */
+export type PassRun = { signal: AbortSignal; found?: readonly FoundWallet[]; shown?: (positions: Position[]) => void };
 
 /** The positions of `pass`, one pass at a time, kept between passes. */
 export function positionsCache(pass: (memo: PassMemo, run: PassRun) => Promise<PassResult>, o: { kept?: () => Promise<readonly Position[] | null>; retryMs?: number | ((tries: number) => number); retries?: number; setTimer?: (f: () => void, ms: number) => unknown; clearTimer?: (t: unknown) => void } = {}): PositionsCache {
@@ -473,7 +558,14 @@ export function positionsCache(pass: (memo: PassMemo, run: PassRun) => Promise<P
       return true;
     };
     const m = memo;
-    running = pass(m, { signal: stop.signal, ...(found === null ? {} : { found }) }).then(
+    // a row as soon as its W is read (card wallets-found-in-one-read): the rest on the rule for a W unread, so nothing
+    // the last pass showed moves until its W is read again
+    const shown = (ps: Position[]): void => {
+      if (!live() || JSON.stringify(ps) === JSON.stringify(last)) return;
+      last = ps;
+      for (const f of watchers) f();
+    };
+    running = pass(m, { signal: stop.signal, shown, ...(found === null ? {} : { found }) }).then(
       (got) => {
         if (!live()) return;
         whole = got.whole && (got.wait?.length ?? 0) === 0;
@@ -548,6 +640,7 @@ export function positionsCache(pass: (memo: PassMemo, run: PassRun) => Promise<P
       };
       return { feed: (found) => end(found), release: () => end(null) };
     },
+    listed: () => memoListed(memo),
     watch: (fn) => void watchers.add(fn),
     clear: () => {
       gen++;

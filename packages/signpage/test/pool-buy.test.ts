@@ -5,6 +5,7 @@
 // copies of mainnet's pump program and accounts, both providers' answers, the Rent sysvar as both answered it, and the
 // pool fixture's real release proof); the pool's own account and pages are planted around that release. The seed is the
 // published all-zero entropy vector (packages/wallet/test/vectors/a8.json).
+import { enableTimers, resetTimers } from "./mock-timers.ts";
 import assert from "node:assert/strict";
 import { throughApi } from "./api-ends.ts";
 import { test } from "node:test";
@@ -175,6 +176,9 @@ type Plant = {
   sizeSkewAlways?: boolean;
   /** RPC p's finalized slot at its i-th getSlot (500 when not given; the buy's transaction lands at TX_SLOT) */
   finalizedSlot?: (p: 0 | 1, i: number) => number;
+  /** the coin is a Mayhem coin on these RPCs: its curve's is_mayhem_mode (byte 81) or its PumpSwap pool's (byte 243)
+   *  set in every read of it */
+  mayhemOn?: readonly (0 | 1)[];
 };
 /** The slot the buy's transaction lands at, as getTransaction names it. */
 const TX_SLOT = 400;
@@ -237,7 +241,17 @@ async function world(plant: Plant = {}, proof = readyProof()): Promise<World> {
   });
   const txSlot = (p: 0 | 1): number | undefined => (p === 1 ? (plant.noTxSlotOn1 ? undefined : plant.txSlotOn1 ?? TX_SLOT) : TX_SLOT);
   const rpc = (p: 0 | 1): SolanaRpc => {
-    const venue = replay(fx[coin], p, plant.venueOff && p === 1 ? (list, ans) => {
+    const mayhem = plant.mayhemOn?.includes(p) ? (list: string[], ans: any) => {
+      for (const [k, a] of list.entries()) {
+        const at = s.venue.kind === "pump-curve" && a === s.venue.curve ? 81 : s.venue.kind === "pumpswap" && a === s.venue.pool ? 243 : -1;
+        if (at < 0 || !ans.value[k]) continue;
+        const d = base64.decode(ans.value[k].data[0]);
+        d[at] = 1;
+        ans.value[k].data[0] = base64.encode(d);
+      }
+      return ans;
+    } : undefined;
+    const venue = replay(fx[coin], p, mayhem ?? (plant.venueOff && p === 1 ? (list, ans) => {
       const k = list.indexOf(s.venue.kind === "pump-curve" ? s.venue.curve : "");
       if (k >= 0 && ans.value[k]) {
         const d = base64.decode(ans.value[k].data[0]);
@@ -245,7 +259,7 @@ async function world(plant: Plant = {}, proof = readyProof()): Promise<World> {
         ans.value[k].data[0] = base64.encode(d);
       }
       return ans;
-    } : undefined);
+    } : undefined));
     return (async (method: string, params: readonly unknown[]) => {
       const finalized = (params[1] as { commitment?: string } | undefined)?.commitment === "finalized";
       // the own-spend reads at finalized (pool-withdraw.ts spendOwner) are logged apart from the read-back's
@@ -489,6 +503,23 @@ test("a venue with no pinned table is refused venue_not_pinned once the referenc
   // venue's read on both RPCs after them)
   assert.equal(w.multi.length, 4, JSON.stringify(w.multi));
   assert.equal(new Set(w.multi.map((l) => l.join())).size, 2);
+});
+// Card sol-pool-buys-mayhem-coins: a coin this build cannot trade (a Mayhem curve or pool, as the first mainnet buy met
+// on 11 Nov 13:43Z) is refused venue_not_built once both RPCs read it so, before the claim: never "failed", nothing
+// claimed, taken, seeded, signed or sent. One RPC's word alone is a disagreement, refused as before (the reference's two
+// reads already differ: quote_check_failed), never venue_not_built
+test("a Mayhem coin, on the curve or on PumpSwap, is refused venue_not_built before the claim; one RPC's word alone is not", async () => {
+  for (const coin of ["pump", "pumpswap"] as const) {
+    const ask = coin === "pump" ? ASK : ASK_PS;
+    const w = await world({ coin, mayhemOn: [0, 1] });
+    assert.deepEqual(await runPoolBuy(w.host, ask), { error: "venue_not_built" }, coin);
+    nothingMoved(w);
+    for (const one of [0, 1] as const) {
+      const x = await world({ coin, mayhemOn: [one] });
+      assert.deepEqual(await runPoolBuy(x.host, ask), { error: "quote_check_failed" }, `${coin} on RPC ${one}`);
+      nothingMoved(x);
+    }
+  }
 });
 test("no table pinned, or a pin that is not a list of addresses: refused not_allowed before any read (mutant A2)", async () => {
   for (const tables of [{}, Object.create({ "pump-curve": [s0.tableAddr] }), { "pump-curve": s0.tableAddr }, { "pump-curve": [] }, { "pump-curve": [7] }, { "pump-curve": [s0.tableAddr], pumpswap: [{}] }, { "pump-curve": [s0.tableAddr], pumpswap: [] }]) {
@@ -1848,6 +1879,29 @@ test("card start-reads-wait-out-a-throttle: a buy's bound is on the device's clo
   assert.ok(!w.log.includes("send") && !w.log.some((x) => x.startsWith("take")));
 });
 
+test("card pool-sell-legs-side-by-side: blockhashOf, split into its read and its check for the sell, asks the buy's calls in the buy's order and refuses as before", async () => {
+  const run = async (answers: { latest?: unknown; valid?: unknown; height?: unknown }) => {
+    const asked: string[] = [];
+    const at = (p: 0 | 1): SolanaRpc =>
+      (async (m: string) => {
+        asked.push(`${p}:${m}`);
+        return m === "getLatestBlockhash" ? answers.latest : m === "isBlockhashValid" ? answers.valid : answers.height;
+      }) as SolanaRpc;
+    const got = await poolBuy.blockhashOf([at(0), at(1)]).then((x) => x, (e: unknown) => ({ refused: String(e) }));
+    return { asked, got };
+  };
+  const ok = await run({ latest: { context: { slot: 9 }, value: { blockhash: "B", lastValidBlockHeight: 100 } }, valid: { value: true }, height: 10 });
+  assert.deepEqual(ok.asked, ["0:getLatestBlockhash", "1:isBlockhashValid", "1:getBlockHeight"]);
+  assert.deepEqual(ok.got, { blockhash: "B", lastValidBlockHeight: 100, slot: 9, lastHeight: 161 });
+  // no blockhash: refused with nothing asked of RPC 1; RPC 1 calling it invalid: refused
+  const none = await run({ latest: { context: { slot: 9 }, value: {} } });
+  assert.deepEqual(none.asked, ["0:getLatestBlockhash"]);
+  assert.ok("refused" in none.got);
+  const invalid = await run({ latest: { context: { slot: 9 }, value: { blockhash: "B", lastValidBlockHeight: 100 } }, valid: { value: false }, height: 10 });
+  assert.deepEqual(invalid.asked, ["0:getLatestBlockhash", "1:isBlockhashValid", "1:getBlockHeight"]);
+  assert.ok("refused" in invalid.got);
+});
+
 // Card sol-buy-reads-side-by-side: the pool's time for the take is read beside the first round (the host's chainNow,
 // the wallet's chainNow on the queue's pool) and handed to the take, which uses it within NOW_REUSE_MS of its start and
 // reads again past it (packages/wallet/src/pool/queue.ts): no chain-time read waits between the signature and the send.
@@ -1917,6 +1971,34 @@ test("card sol-buy-reads-side-by-side: a filled run whose host's end throws post
   const { answer, stages } = await kindRun({ ...w.host, end: throwingEnd });
   assert.deepEqual(answer, { result: { stage: "sent", txs: [{ chain: "solana", hash: SIG }] } });
   assert.deepEqual(stages, ["filled"]);
+});
+
+// Card pool-sell-legs-side-by-side: the kit's bounded reads (the Rent sysvar, the venue's accounts) with no answer in
+// their 5 s bound are the provider's fault ("timeout"), so a buy waits it out as any other provider fault and buys, never
+// a bare "failed"
+test("a buy's Rent or venue read with no answer in its 5 s bound once waits 1 s and buys", async (t) => {
+  enableTimers(t.mock.timers, { apis: ["setTimeout"] });
+  t.after(() => resetTimers(t.mock.timers));
+  const reads: [string, (m: string, q: readonly unknown[]) => boolean][] = [
+    ["the Rent sysvar", (m, q) => m === "getAccountInfo" && q[0] === RENT_SYSVAR],
+    ["the venue's accounts", (m, q) => m === "getMultipleAccounts" && Array.isArray(q[0]) && q[0].length === 3 && q[0][0] === fx.pump.mint],
+  ];
+  for (const [what, hit] of reads) {
+    const w = await world();
+    let left = 1;
+    const hang = (i: 0 | 1, rpc: SolanaRpc): SolanaRpc =>
+      (async (m: string, q: readonly unknown[]) => (i === 1 && left > 0 && hit(m, q) ? (left--, new Promise(() => {})) : rpc(m, q))) as SolanaRpc;
+    let done = false;
+    const run = runPoolBuy({ ...w.host, rpcs: [hang(0, w.host.rpcs[0]), hang(1, w.host.rpcs[1])] as const }, ASK).finally(() => (done = true));
+    for (let i = 0; i < 200 && !done; i++) {
+      await new Promise((r) => setImmediate(r));
+      t.mock.timers.tick(500);
+    }
+    const a = await run;
+    assert.equal(left, 0, `${what}: the read hung`);
+    assert.deepEqual(a, { stage: "filled", txs: [{ chain: "solana", hash: SIG }] }, what);
+    assert.deepEqual(beforeSend(w), [1_000], `${what}: one wait`);
+  }
 });
 
 // Card sell-right-after-a-buy (devnet run 11, 11 Nov): a sell tapped 1 s after a buy's Filled met 20 throttles in 16.3 s,

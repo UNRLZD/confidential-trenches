@@ -269,14 +269,34 @@ test("the sale's plan right after the read-back: the finder lists no token in W,
   page(w, f, pair([OUT_UNITS, OUT_UNITS]), { buy: b.kind, sell: (mk: () => PoolSellHost) => ((made = mk), () => ({ error: "busy" })) });
   await buyKindMint(w);
   const ask = { kind: "pool.sell", chain: "solana", token: MINT, amount: 0n, shareBps: 10_000, slippageBps: 1000, decimals: 6 } as const;
+  const before = f.st.reads;
   const plan = await planPoolSell(made(), ask);
   assert.deepEqual(plan.legs.map((l) => [l.w.address, l.units]), [[W, OUT_UNITS]], "W found, its units both RPCs' read");
-  assert.equal(f.st.reads >= 1, true, "the finder was read, and listed no token in W");
+  assert.equal(f.st.reads - before, 0, "W's buy mint names the token: the plan reads the finder for no W (card wallets-found-in-one-read)");
   // the buy did not stay: both RPCs read no token account of W's
   const log: string[] = [];
   const gone = Object.assign(Object.create(made()) as PoolSellHost, { rpcs: pair([null, null], log) });
   assert.deepEqual(await runPoolSell(gone, ask), { error: "not_funded" });
   assert.ok(!log.some((x) => /simulateTransaction|sendTransaction|getLatestBlockhash|getFeeForMessage/.test(x)), `nothing built or sent: ${log.join(", ")}`);
+});
+// Card wallets-found-in-one-read: the sale reads only the Ws whose buy record names its token, so a W bought a moment
+// ago (its buy mint written before the send, its record at the read-back) is planned with no finder read at all.
+test("a sale tapped right after a buy's read-back plans W from its records alone: 0 finder reads, W's units both RPCs' read", async () => {
+  const w = await sentWallet();
+  const f = finder();
+  const b = buyKind();
+  let made!: () => PoolSellHost;
+  const tp = page(w, f, pair([OUT_UNITS, OUT_UNITS]), { buy: b.kind, sell: (mk: () => PoolSellHost) => ((made = mk), () => ({ error: "busy" })) });
+  assert.ok("running" in tapBuy(tp));
+  await until(() => b.run.told, "the run told its amount");
+  await until(async () => (await rowOf(tp)) !== undefined, "W's row from the read-back: its record is written");
+  assert.equal(await w.get("ops", "pb1"), undefined, "the buy is not final yet");
+  const before = f.st.reads;
+  f.st.fail = true; // a finder read now fails the test's count below, and would leave W unread
+  const ask = { kind: "pool.sell", chain: "solana", token: MINT, amount: 0n, shareBps: 10_000, slippageBps: 1000, decimals: 6 } as const;
+  const plan = await planPoolSell(made(), ask);
+  assert.deepEqual(plan.legs.map((l) => [l.w.address, l.units]), [[W, OUT_UNITS]], "W planned, at what both RPCs read");
+  assert.equal(f.st.reads - before, 0, "no finder read: the fast path");
 });
 /** W's buy mint, as the buy writes it before its send (pool-buy.ts h.bought.put). */
 async function buyKindMint(w: WalletStore): Promise<void> {

@@ -1,0 +1,14 @@
+),O=o?.opened;if(O){if(await O,e.stopped?.())return{error:`failed`};if(o.spent?.())return{error:`down`};nR(y)}f=!0;let k=t=>Sb(y,t,i,...e.pick?[e.pick]:[]),A=null,j=null,M=null;if(O){A=S(zR(y)),j=S(Promise.all([T,E]).then(([e,t])=>aW(y,g,_,e,gU(t.precommitment),m)));let e=o.venues.
+wallets:async n=>{let r=He.preempt(),a=null;try{let r=t?He.listed()??ZN(await(await e.store()).get(`meta`,`owed/positions-sol`)):null,o=n;if(o===void 0){let t=await(await e.store()).get(`meta`,`owed/buy-sol`)??{};o=e=>!Object.hasOwn(t,e)&&r?.has(e)!==!0}let s=await Be(await d(),i,o,c),l=e=>r?.has(e)?new Map(r.get(e)):null;
+,Be=async(t,r,i=()=>!0,a)=>{let o=await IV(t,Re);if(o.length===0)return[];let s=await e.seed64(),c;try{c=BV(s,[{id:n.program,chain:`sol`,spent:o,reader:ze(r)}])}finally{s.fill(0)}if(c.failed.length>0)throw Error(`the buy wallets could not be derived`);let l=await HV(c,i,{together:!0,...a?{signal:a}:{}})
+function tR(e,t,n,r){let i=[],a=e=>{let a=new Map;return i.push(a),Ph(e,(i,o)=>{if(!t(i,o))return e(i,o);let s=`${i} ${JSON.stringify(o)}`,c=r(),l=a.get(s);if(l&&c-l.at<n)return l.read;let u=Promise.resolve(e(i,o)),d={at:c,read:u};return a.set(s,d),u.catch(()=>{a.get(s)===d&&a.delete(s)}),u})};return Object.assign([a(e[0]),a(e[1])],{forget:()=>i.forEach(e=>e.clear())})}var nR=e=>e.forget?.(),rR=e=>(t,n)=>t===`getLatestBlockhash`||t===`isBlockhashValid`||e!==null&&t===`getMultipleAccounts`&&Array.isArray(n[0])&&n[0].includes(e),
+,nU=4e3,
+rpcs:tR(eR(e.rpcs,iR(t.token)),rR(t.token),nU,()=>Number(e.now?.()??BigInt(Date.now())))
+.signal?.aborted)return{error:`failed`};nR(e.rpcs);continue}
+}if(!n.rebuild||s>=2)return c;nR(e.rpcs),s++}}func
+.signal?.aborted)return{error:`failed`};nR(o.rpcs);continue}
+,m=async t=>{if(!i.hold(t))return $(`failed`,`tap_bound`);if(f&&(p=!0),await ZL(e.wait,t,e.signal),e.stopped?.()||e.signal?.aborted)return $(`failed`,`stopped`)};
+,u=async e=>{if(!i.hold(e))return $(`failed`,`tap_bound`);if(l=!0,await ZL(o.wait,e,o.signal),o.stopped?.()||o.signal?.aborted)return $(`failed`,`stopped`)},
+{if(a=void 0,n.reprice&&!e.stopped?.())nR(e.rpcs);
+if(p||a?.waited?.())return n.reprice=!0,{error:`failed`};let pe=ce,me={amount:
+return o?.inFlight?.()&&(n.simWaited??0)<rU?(n.simWaited=(n.simWaited??0)+500,await m(500),n.reprice=!0,{error:`failed`}):$(`failed`,`sim`,a.flatMap((e,t)=>e!=null&&e.err===null?[]:[`RPC ${

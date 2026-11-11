@@ -16,8 +16,8 @@ import { noteCommitment, noteSecrets, type NoteRef } from "../src/notes/secrets.
 import { openNoteStore, refKey, type NoteStore } from "../src/notes/store.ts";
 import { openWalletStore, type WalletStore } from "../src/store/index.ts";
 import { SOL_LAG_SLOTS, SOL_LAG_WAIT_MS } from "../src/pool/solana.ts";
-import { ThrottleGate } from "../src/throttle.ts";
-import { type ReaderOpts, buyWallets, derivedBuyWallets, EVM_HOLDINGS_ROUNDS, evmHelperHoldings, HOLDINGS_RPC_LIMIT, evmHoldingsReader, RETRY_AFTER_DEFAULT_MS, RETRY_AFTER_MAX_MS, retryAfterMs, SOL_HOLDINGS_ROUNDS, solanaHelperHoldings, solanaHoldingsReader, solanaSpentNotes, spentNotesOf, type BuyPool, type HoldingsReader, type JsonRpc } from "../src/pool/buy-wallets.ts";
+import { hostLane, PASS_BUDGET, ThrottleGate } from "../src/throttle.ts";
+import { type ReaderOpts, buyWallets, derivedBuyWallets, wantedBuyWallets, EVM_HOLDINGS_ROUNDS, evmHelperHoldings, HOLDINGS_RPC_LIMIT, HOLDINGS_THROTTLE_MAX_MS, evmHoldingsReader, RETRY_AFTER_DEFAULT_MS, RETRY_AFTER_MAX_MS, retryAfterMs, SOL_HOLDINGS_ROUNDS, solanaHelperHoldings, solanaHoldingsReader, solanaSpentNotes, spentNotesOf, type BuyPool, type HoldingsReader, type JsonRpc } from "../src/pool/buy-wallets.ts";
 
 const A8 = JSON.parse(readFileSync(new URL("./vectors/a8.json", import.meta.url), "utf8")) as { inputs: { entropy: string }; l: string; wallets: { name: string; c: string; l: string; j: number; path: string; address: string }[] };
 const SEED = d.wordsToSeed64(d.entropyToWords(new Uint8Array(Buffer.from(A8.inputs.entropy, "hex"))));
@@ -313,6 +313,45 @@ test("derived first, read later: the Ws come from the seed at once, so the calle
   await assert.rejects(derived.read({ signal: stop.signal }), { name: "AbortError" });
 });
 
+test("card wallets-found-in-one-read: a list read in part reads only the Ws asked for, one per request, and answers every other with holdings null, never empty; a pool that does not derive fails with none asked", async () => {
+  const spent = [0, 1, 2].map((j) => (j === 0 ? { ref: DEP, label: L } : { ref: { kind: "change", l: L, j: j - 1 } as NoteRef, label: L }));
+  const seed = SEED.slice();
+  const derived = derivedBuyWallets(seed, [{ id: "sol", chain: "sol", spent, reader: solReader() }]);
+  seed.fill(0);
+  const [w0, w1, w2] = derived.wallets.map((w) => w.address);
+  assert.deepEqual([w0, w1, derived.wallets.length], [solW(0), solW(1), 3]);
+  assert.ok(derived.wallets.every((w) => !("holdings" in w)), "a derived W has no holdings to read as empty");
+  log.length = 0;
+  const asked: string[] = [];
+  const got = await wantedBuyWallets(derived, async (a) => (asked.push(a), a === solW(1)));
+  assert.deepEqual(asked, [w0, w1, w2]);
+  assert.deepEqual([...new Set(log.map(([, p]) => JSON.parse(p)[0] as string))], [solW(1)], "no other W is read");
+  assert.deepEqual(got.wallets.map((w) => [w.address, w.holdings === null]), [[w0, true], [w1, false], [w2, true]]);
+  assert.deepEqual(got.failed, []);
+  log.length = 0;
+  const none = await wantedBuyWallets(derived, () => false);
+  assert.equal(log.length, 0);
+  assert.ok(none.wallets.every((w) => w.holdings === null));
+  // a pool whose reader is not of its chain derives nothing: failed, whatever is asked
+  const bad = derivedBuyWallets(SEED, [{ id: "x", chain: "evm", spent, reader: solReader() }]);
+  assert.deepEqual(await wantedBuyWallets(bad, () => false), { wallets: [], failed: [{ pool: "x", error: "the reader is not of chain evm" }] });
+});
+
+test("card wallets-found-in-one-read: a read's `first` Ws go before the rest, whatever the shuffle, and `each` is told every W as it is read, in that order", async () => {
+  const spent = [0, 1, 2].map((j) => (j === 0 ? { ref: DEP, label: L } : { ref: { kind: "change", l: L, j: j - 1 } as NoteRef, label: L }));
+  const d = derivedBuyWallets(SEED, [{ id: "sol", chain: "sol", spent, reader: solReader() }]);
+  const [w0, w1, w2] = d.wallets.map((w) => w.address);
+  for (const pick of [() => 0, (n: number) => n - 1]) {
+    log.length = 0;
+    const told: string[] = [];
+    await d.read({ pick, first: new Set([w2!]), each: (w) => void told.push(w.address) });
+    const order = [...new Set(log.map(([, p]) => JSON.parse(p)[0] as string))];
+    assert.equal(order[0], w2);
+    assert.deepEqual(new Set(order), new Set([w0, w1, w2]));
+    assert.deepEqual(told, order);
+  }
+});
+
 test("a Solana restore's spends must be its spent notes, each at the queue's (l, j)", () => {
   const leaf = (label: bigint) => ({ value: 1n, label, commitment: 1n, leafIndex: 0n });
   const chg: NoteRef = { kind: "change", l: L, j: 0 };
@@ -485,6 +524,95 @@ test("the helper's Solana reader is paced in the kit's provider queue: a burst o
   assert.ok(starts[3]! - starts[0]! >= HOLDINGS_RPC_LIMIT.windowMs, `the second W's reads wait for the window: ${starts[3]! - starts[0]!} ms`);
 }));
 
+test("card wallets-found-in-one-read: the finder's rounds are held by the host's pass budget: with the page's window full, a round waits for room instead of only being counted", () => onTestClock(async () => {
+  const sol = stubFetch("https://lane-sol.example", (m, id) => solOk(m, id));
+  try {
+    // the page has sent the host its passes' budget in this window
+    const lane = hostLane("https://lane-sol.example");
+    for (let i = 0; i < PASS_BUDGET; i++) lane.count();
+    const t0 = Date.now();
+    await solanaHelperHoldings("https://lane-sol.example").read(solW(0));
+    // the round left once the window's oldest requests did (10 s), never at once
+    assert.ok(sol.starts[0]![0] - t0 >= 9_000, `${sol.starts[0]![0] - t0} ms`);
+  } finally {
+    sol.restore();
+  }
+}));
+
+test("card wallets-found-in-one-read: on a provider that takes about 10 getTokenAccountsByOwner in 10 s (mainnet-beta, the helper's fallback), 20 Ws at the pace all read: each 429 is waited out on the one throttle rule, never a failed list", () => onTestClock(async () => {
+  // a sliding window of 10 getTokenAccountsByOwner in any 10 s, as measured; past it a 429 with no Retry-After
+  const taken: number[] = [];
+  let n429 = 0;
+  const sol = stubFetch("https://fallback-sol.example", (m, id) => {
+    if (m !== "getTokenAccountsByOwner") return solOk(m, id);
+    const now = Date.now();
+    while (taken.length > 0 && taken[0]! <= now - 10_000) taken.shift();
+    if (taken.length >= 10) return n429++, too();
+    taken.push(now);
+    return solOk(m, id);
+  });
+  try {
+    const spent = Array.from({ length: 20 }, (_, i) => ({ ref: { kind: "deposit", s: 1n, i } as NoteRef, label: 500n + BigInt(i) }));
+    const r = await buyWallets(SEED, [{ id: "sol", chain: "sol", spent, reader: solanaHelperHoldings("https://fallback-sol.example") }]);
+    assert.deepEqual(r.failed, []);
+    assert.equal(r.wallets.length, 20);
+    assert.ok(n429 > 0, "the pace is past this provider's: it throttled");
+  } finally {
+    sol.restore();
+  }
+}));
+
+test("card wallets-found-in-one-read: a finder 429 never pauses a trade: the finder's throttle is its route's own, the host's lane stays open for a trade's read", () => onTestClock(async () => {
+  const origin = "https://finder-429.example";
+  const sol = stubFetch(origin, (m, id) => (m === "getTokenAccountsByOwner" ? too("10") : solOk(m, id)));
+  try {
+    const stop = new AbortController();
+    const read = solanaHelperHoldings(origin).read(solW(0), stop.signal).catch(() => "stopped");
+    while (sol.starts.length < 3) await new Promise((r) => setTimeout(r, 10));
+    await new Promise((r) => setTimeout(r, 50)); // the round's 429s are in
+    const lane = hostLane(`${origin}/v1/rpc/solana`);
+    assert.equal(lane.gate.left(), 0, "the host's lane is not paused by the finder's 429");
+    const went = await Promise.race([lane.turn("trade").then(() => "went"), new Promise((r) => setTimeout(() => r("held"), 1))]);
+    assert.equal(went, "went", "a trade's read goes at once");
+    stop.abort();
+    await read;
+  } finally {
+    sol.restore();
+  }
+}));
+
+test("card wallets-found-in-one-read: a provider refusing one method for good (getTokenAccountsByOwner always 429, Retry-After 10) while it answers the rest, and a trade's reads on the host going through: the list ends at the bound, nothing asked past 30 s", () => onTestClock(async () => {
+  const origin = "https://one-method-429.example";
+  // a call asked past the bound, and the list's end past it with a second of room
+  let pastBound = false, late = false, past = 0;
+  const bound = setTimeout(() => (pastBound = true), HOLDINGS_THROTTLE_MAX_MS);
+  const ends = setTimeout(() => (late = true), HOLDINGS_THROTTLE_MAX_MS + 1_000);
+  const sol = stubFetch(origin, (m, id) => (pastBound && past++, m === "getTokenAccountsByOwner" ? too("10") : solOk(m, id)));
+  // a trade's reads on the same host answer every second, as page-rpc.ts reports them to the host's lane
+  const lane = hostLane(`${origin}/v1/rpc/solana`);
+  let trading = true;
+  const trade = (async () => {
+    while (trading) {
+      lane.answered(lane.gate.epoch());
+      await new Promise((r) => setTimeout(r, 1_000));
+    }
+  })();
+  try {
+    const spent = Array.from({ length: 5 }, (_, i) => ({ ref: { kind: "deposit", s: 1n, i } as NoteRef, label: 700n + BigInt(i) }));
+    const r = await buyWallets(SEED, [{ id: "sol", chain: "sol", spent, reader: solanaHelperHoldings(origin) }]);
+    assert.equal(r.failed.length, 1, "refused, with its cause");
+    assert.match(r.failed[0]!.error, /429/);
+    assert.equal(past, 0, "no call past the bound");
+    assert.equal(late, false, "the list ended at the bound");
+  } finally {
+    clearTimeout(bound);
+    clearTimeout(ends);
+    trading = false;
+    await trade;
+    sol.restore();
+  }
+}));
+
 test("one pool given twice: its W is listed once, and the later pool is refused", async () => {
   const p: BuyPool = { id: "sol", chain: "sol", spent: [{ ref: DEP, label: L }], reader: solReader() };
   const r = await buyWallets(SEED, [p, { ...p, id: "sol-again" }]);
@@ -520,8 +648,8 @@ const rounds = (starts: readonly [number, string][]): number[][] => {
 };
 const spread = (r: readonly number[]): number => Math.max(...r) - Math.min(...r);
 
-test("HOLDINGS_RPC_LIMIT is the measured pace: a Solana round's three calls start at one instant, one round in 3 s; every reader of a route on one queue", () => onTestClock(async () => {
-  assert.deepEqual({ ...HOLDINGS_RPC_LIMIT }, { windowMs: 3_000, total: 3, perMethod: 2 });
+test("HOLDINGS_RPC_LIMIT is the reader's part of the helper's route: a Solana round's three calls start at one instant, one round in 1,667 ms (6 in 10 s); every reader of a route on one queue", () => onTestClock(async () => {
+  assert.deepEqual({ ...HOLDINGS_RPC_LIMIT }, { windowMs: 1_667, total: 3, perMethod: 2 });
   // two Solana readers of one route (two pools) read a W each, and an EVM reader two Ws (two calls a W)
   const sol = stubFetch("https://pace-sol.example", (m, id) => solOk(m, id));
   const evm = stubFetch("https://pace-evm.example", (m, id) => evmOk(m, id));
@@ -757,14 +885,18 @@ test("a 429 on every round is a refusal at the bound, after a growing wait betwe
     let t = 0;
     return { wait429: () => 1234, sleep: async (ms: number) => void (waits.push(ms), (t += ms)), gate: new ThrottleGate({ now: () => t }) };
   };
+  // Solana: the gate's own bound comes first (card wallets-found-in-one-read: a provider in doubt for
+  // HOLDINGS_THROTTLE_MAX_MS on the gate's clock is not waited: 18.5 s of waits, then a 10 s one would end at 28.5 s, the
+  // next past 30 s); EVM's 4 rounds come before it
   const runs = [
-    ["sol", solanaHoldingsReader(always429(), own()), SOL_HOLDINGS_ROUNDS, [1234, 2468, 4936, 9872, 10_000, 10_000, 10_000]],
-    ["evm", evmHoldingsReader(always429(), [], own()), EVM_HOLDINGS_ROUNDS, [1234, 2468, 4936]],
+    // the refusal as the kit's transport fault (card pool-sell-legs-side-by-side: a sale counts it as the provider's)
+    ["sol", solanaHoldingsReader(always429(), own()), "its reads drew the provider's 429 past 30 s (http_429, 1 try at the holdings route)", [1234, 2468, 4936, 9872, 10_000]],
+    ["evm", evmHoldingsReader(always429(), [], own()), `its reads drew the helper's 429 in ${EVM_HOLDINGS_ROUNDS} rounds`, [1234, 2468, 4936]],
   ] as const;
-  for (const [chain, reader, rounds, want] of runs) {
+  for (const [chain, reader, error, want] of runs) {
     waits.length = 0;
     const r = await buyWallets(SEED, [{ id: chain, chain, spent: [{ ref: chain === "sol" ? DEP : { kind: "deposit", s: EVM_SCOPE, i: 0 }, label: L }], reader }]);
-    assert.deepEqual(r.failed, [{ pool: chain, error: `wallet 0: its reads drew the helper's 429 in ${rounds} rounds` }], chain);
+    assert.deepEqual(r.failed, [{ pool: chain, error: `wallet 0: ${error}` }], chain);
     assert.deepEqual(waits, want, `${chain}: a growing wait between rounds, none after the last`);
   }
   // a 429 in a later round, after reads at different slots, is still a failed round and the next reads again

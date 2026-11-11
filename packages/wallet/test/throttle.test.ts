@@ -68,6 +68,23 @@ test("the gate: one round's throttles count once, an answer never sets the pause
   assert.equal(g.left(), 1_000, "after the quiet time, the first pause again");
 });
 
+test("card wallets-found-in-one-read: the doubt runs while the route is throttled, and a gate left in doubt, then open past its quiet time with nothing asked, starts it again at its next throttle", () => {
+  let now = 0;
+  const g = new ThrottleGate({ now: () => now });
+  g.throttled(g.epoch(), null);
+  now = 1_000;
+  g.throttled(g.epoch(), null);
+  now = 3_000;
+  assert.equal(g.doubtMs(), 3_000, "throttled since 0, no round through");
+  // a list refused at its bound leaves the gate in doubt; minutes later, nothing asked meanwhile, a new list's first 429
+  now = 120_000;
+  g.throttled(g.epoch(), null);
+  assert.equal(g.doubtMs(), 0, "the old doubt is not this one's: the new list waits its own 30 s");
+  now = 121_000;
+  g.answered(g.epoch());
+  assert.equal(g.doubtMs(), 0);
+});
+
 test("HOLDINGS_THROTTLED_ROUNDS_60S is the rule's count: rounds whose start falls in the first 60 s of 429s", () => {
   let at = 0, pause = 0, rounds = 0;
   while (at < 60_000) {
@@ -222,7 +239,7 @@ test("a sell's read during a throttle that ends inside its bound waits and reads
     try {
       const r = await buyWallets(SEED, [{ id: "sol", chain: "sol", spent: spent(2), reader: solanaHelperHoldings("https://sell-hot.example") }]);
       assert.equal(r.failed.length, 1);
-      assert.match(r.failed[0]!.error, /its reads drew the provider's 429 past 30 s$/);
+      assert.match(r.failed[0]!.error, /its reads drew the provider's 429 past 30 s \(http_429, 1 try at the holdings route\)$/);
       assert.equal(pastBound, 0, "no call after the bound");
     } finally {
       f.restore();
