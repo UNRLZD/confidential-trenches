@@ -2857,6 +2857,36 @@ const settleOut = (p: Promise<SolanaSettled>): Promise<string> => p.then((r) => 
 const pagesAsked = (m: string, p: readonly unknown[]): boolean => m === "getMultipleAccounts" && (p[0] as string[]).includes(solanaPageOf(PROGRAM, 0, 0));
 const minAsked = (p: readonly unknown[]): number => (p[1] as { minContextSlot?: number } | undefined)?.minContextSlot ?? 0;
 
+// card signpage-passes-yield-to-a-trade (the review of a1a6bad6, P1-2): the page keeps one cache for its settles of
+// every kind, and its tree sync was its maker's: a buy's settle after a background pass made it read the pages through
+// the pass's transports (on the signing page, behind the buy's own hold). Each caller's page reads go on its own pair.
+test("one cache, two callers of the same two providers: the second settle's reads all go on its own transports, none on the first's", { timeout: 60_000 }, async () => {
+  const { chain, label } = bigPool(200, 200);
+  const pass: string[][] = [[], []];
+  const trade: string[][] = [[], []];
+  const passRpcs: [SolanaRpc, SolanaRpc] = [counted(chain, "https://a.example", pass[0]!), counted(chain, "https://b.example", pass[1]!)];
+  const tradeRpcs: [SolanaRpc, SolanaRpc] = [counted(chain, "https://a.example", trade[0]!), counted(chain, "https://b.example", trade[1]!)];
+  const l = counted(chain, "https://l.example", []);
+  const w = await openWalletStore({ indexedDB: new IDBFactory() });
+  const ns = await openNoteStore(w);
+  stores.push(ns, w);
+  const ref = { kind: "deposit", s: SCOPE, i: 0 } as const;
+  const P0 = noteSecrets(SEED, ref).precommitment;
+  let n = await ns.add({ ref, scope: SCOPE, precommitment: P0, state: "UNSPENT", leaf: { value: 50_000_000n, label, commitment: noteCommitment(50_000_000n, label, P0), leafIndex: BigInt(199 + 199) } });
+  n = await ns.move(n.id, "UNSPENT", "HELD", { deadlineMs: 1_800_000_200_000n, context: "1" });
+  n = await ns.move(n.id, "HELD", "RESERVED", { attempt: n.attempt! });
+  const cache: SolanaPoolCache = {};
+  assert.equal((await solanaSettleSpent({ seed64: SEED, notes: ns, noteId: n.id, program: PROGRAM, lister: l, rpcs: passRpcs, cache })).kind, "spent");
+  const after1 = [pass[0]!.length, pass[1]!.length];
+  assert.ok(cache.pages !== undefined, "the first settle made the cache's tree sync");
+  assert.equal((await solanaSettleSpent({ seed64: SEED, notes: ns, noteId: n.id, program: PROGRAM, lister: l, rpcs: tradeRpcs, cache })).kind, "spent");
+  assert.deepEqual([pass[0]!.length, pass[1]!.length], after1, "the second settle read nothing through the first's transports");
+  assert.ok(trade[0]!.length > 0 && trade[1]!.length > 0, "its reads went on its own");
+  // a pair of other providers is refused, never read through the cache's
+  const other: [SolanaRpc, SolanaRpc] = [counted(chain, "https://c.example", []), counted(chain, "https://d.example", [])];
+  await assert.rejects(cache.pages!.leaves(0, undefined, other), /its own two providers only/);
+});
+
 test("review P3-1 of e3489b3b: two settles on one cache, every party honest: the second, whose every listed mark the first already holds, reads the pages at or past the held marks' slot, so it waits for them and settles, never refused", { timeout: 20_000 }, async () => {
   const { chain, l0, withDeposit } = restorePool();
   const w1 = withDeposit(big(R.deposits[1]!.precommitment), 10_000_000n, chain.slot + 1);

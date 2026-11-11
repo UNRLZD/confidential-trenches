@@ -45,8 +45,8 @@ async function serve(rpc: ReturnType<typeof createRpc>) {
 }
 
 test("a paced burst on the first key: every 200 names rpc-wait, rpc and SOLANA_RPC_URL; a later one waited for its second", async () => {
-  // 30 a 10 s: 3 sends a second on the first key (rpc.ts pacedOf)
-  const rpc = createRpc({ SOLANA_RPC_URL: MAIN, RPC_BUDGET_SOLANA: "30,20" }, { fetch: async (_u, i) => ok(JSON.parse(String(i!.body)).id), log: () => undefined });
+  // 50 a 10 s: 5 sends a second on the first key (rpc.ts pacedOf); the share at least one page's (RPC_PAGE_NEED 42)
+  const rpc = createRpc({ SOLANA_RPC_URL: MAIN, RPC_BUDGET_SOLANA: "50,45" }, { fetch: async (_u, i) => ok(JSON.parse(String(i!.body)).id), log: () => undefined });
   const S = await serve(rpc);
   try {
     const all = await Promise.all(Array.from({ length: 6 }, (_, k) => S.post(`203.0.113.${10 + k}`)));

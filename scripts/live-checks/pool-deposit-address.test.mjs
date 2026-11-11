@@ -5,7 +5,8 @@
 // (pool-deposit-address.excerpt.txt, cut from this build's public/app.js: the pools' list and the namer, the namer, the
 // record read, the host and its wiring): each rule the card adds taken away, and
 // pool.address wired with no follow or no floor read, the network or floor-read gate, or the pool floor taken away
-// (review F2, F3): the mark it rests on FAILs. good: re-recorded at card pool-deposit-follow's build.
+// (review F2, F3): the mark it rests on FAILs. good: re-recorded at card pool-deposit-follow's build. The namer's line
+// re-cut from card signpage-passes-yield-to-a-trade's build (its lock-free read before nameDeposit), its name kept.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
@@ -51,6 +52,10 @@ const PLANTED = [
   ["every pool named as Solana", new RegExp(`evm:(${N})\\.chain!==\`solana\``), "evm:!1", ["namesEach"]],
   ["the EVM key not zeroed", new RegExp(`(\\{let (${N})=${N}\\(${N},${N},${N}\\);)\\2\\.secretKey\\.fill\\(0\\),`), "$1", ["namesRecord"]],
   ["the EVM record with no address", new RegExp(`,\\.\\.\\.${N}===void 0\\?\\{\\}:\\{evm:${N}\\}\\}\\)`), "})", ["namesRecord"]],
+  // card signpage-passes-yield-to-a-trade: the record read with no lock first, nameDeposit asked only for a change
+  ["every naming asks nameDeposit (its exclusive seed lock), the record not read first", new RegExp(`let ${N}=${N}\\(await ${N}\\.get\\(\`meta\`,${N}\\(${N}\\)\\)\\.catch\\(\\(\\)=>void 0\\)\\);${N}!==void 0&&[^;]*?\\)\\|\\|(?=await )`), "", ["namesRecord"]],
+  ["a naming skipped on its scope alone, whatever its index", new RegExp(`&&\\((${N})\\.index>${N}\\|\\|${N}\\.index===${N}&&${N}\\.id===${N}\\.id&&${N}\\.evm===${N}\\)\\|\\|`), "||", ["namesRecord"]],
+  ["a naming skipped with no compare of the EVM address", new RegExp(`&&(${N})\\.evm===${N}\\)\\|\\|`), ")||", ["namesRecord"]],
   ["a Solana wallet read from the record's EVM address", new RegExp(`\\?(${N})\\.evm===void 0\\?${N}\\.encode\\(${N}\\.decode\\(${N}\\.id\\)\\):null:`), "?$1.evm:", ["sameChain"]],
   ["the first pool, not the asked chain's", new RegExp(`\\.pools\\(\\)\\.find\\(${N}=>${N}\\.chain===${N}\\)`), ".pools()[0]", ["sameChain", "unfollowed"]],
   ["no follow gate", new RegExp(`(if\\()${N}===void 0\\|\\|${N}\\.checked===void 0\\|\\|`), "$1", ["unfollowed"]],

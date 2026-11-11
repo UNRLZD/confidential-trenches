@@ -269,14 +269,19 @@ plain_value() {
 # Whether VALUE is one the helper's start takes for budget NAME (src/limits/limits.ts budgetFromEnv; empty: the
 # default): "<total>,<per client>" with the share under the total less the helper's own-read reserve (src/rpc/rpc.ts
 # RPC_RESERVE: Solana 3; src/proxy/proxy.ts PROXY_RESERVE: Jupiter 34; every other 0); for RPC_BUDGET_* the share at
-# least a full batch (RPC_BATCH_MAX, 10) and an optional third number, one method's limit, from 10 plus the reserve to
-# the total; for PROXY_BUDGET_ONECLICK the share at least one deposit sheet open (src/proxy/proxy.ts PROXY_MIN_SHARE,
+# least what one signing page draws from the route in its busiest 10 s (src/rpc/rpc.ts rpcLeastShare, RPC_PAGE_NEED:
+# Solana and its devnet 42, the mark list, Base and Robinhood 30, NEAR a full batch, RPC_BATCH_MAX 10; card
+# helper-gives-a-trade-its-reads) and an optional third number, one method's limit, from that share plus the reserve
+# to the total; for PROXY_BUDGET_ONECLICK the share at least one deposit sheet open (src/proxy/proxy.ts PROXY_MIN_SHARE,
 # DEPOSIT_SHEET_CALLS: 5).
 budget_ok() {
   local name="$1" v="$2" n='[123456789][0123456789]{0,6}' reserve=0 least=1
   [[ -z "$v" ]] && return 0
   case "$name" in
-    RPC_BUDGET_SOLANA) reserve=3 ;;
+    RPC_BUDGET_SOLANA) reserve=3 least=42 ;;
+    RPC_BUDGET_SOLANA_DEVNET) least=42 ;;
+    RPC_BUDGET_SOLANA_MARKS | RPC_BUDGET_BASE | RPC_BUDGET_ROBINHOOD) least=30 ;;
+    RPC_BUDGET_*) least=10 ;;
     PROXY_BUDGET_JUPITER) reserve=34 ;;
     PROXY_BUDGET_ONECLICK) least=5 ;;
   esac
@@ -284,8 +289,8 @@ budget_ok() {
     local re="^($n),($n)(,($n))?\$"
     [[ "$v" =~ $re ]] || return 1
     local total="${BASH_REMATCH[1]}" share="${BASH_REMATCH[2]}" method="${BASH_REMATCH[4]}"
-    ((share < total - reserve && share >= 10)) || return 1
-    [[ -z "$method" ]] || ((method >= 10 + reserve && method <= total))
+    ((share < total - reserve && share >= least)) || return 1
+    [[ -z "$method" ]] || ((method >= least + reserve && method <= total))
   else
     local re="^($n),($n)\$"
     [[ "$v" =~ $re ]] || return 1

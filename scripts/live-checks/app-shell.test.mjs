@@ -33,7 +33,9 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { consoleLine } from "./console-errors.mjs";
 import { footerUrl, FOOTER_QUERY } from "../../apps/terminal/src/shell/footer.ts";
-import { judge, onConsole, outages, rpcRows, ROUTES, WIDTHS } from "./app-shell.mjs";
+import * as shell from "./app-shell.mjs";
+import { judge, onConsole, outages, plantTape, rpcRows, ROUTES, TAPE, WIDTHS } from "./app-shell.mjs";
+import { TF_SECONDS as HELPER_TF_SECONDS } from "../../apps/helper/src/data/candles.ts";
 import { VERIFY_RELEASES } from "../../apps/terminal/src/screens/verify/release.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -507,4 +509,75 @@ test("planted: a preflight line is Chrome's own only when it is located at the p
   assert.equal(kept(consoleLine(words, "https://evil.example/verify")), 1, "located at another site");
   assert.equal(kept(words), 1, "no location at all");
   assert.equal(kept(consoleLine(words.replace(`from origin '${app}'`, "from origin 'https://evil.example'"), `${app}/verify`)), 1, "a read said to come from another origin");
+});
+
+
+// -- card app-live-run-judges-the-build: the tape is planted on a token with one bar --------------------------------
+
+/** A browser context in memory: the page's candles answer is emitted as a response, the trades read and the push
+ *  socket are answered by what plantTape routed. */
+function fakeContext() {
+  const on = {};
+  const routes = [];
+  let socket = null;
+  const ctx = {
+    on: (name, fn) => (on[name] = fn),
+    route: async (match, fn) => routes.push({ match, fn }),
+    routeWebSocket: async (_url, fn) => (socket = fn),
+  };
+  const candles = (token, tf, bars) =>
+    on.response({ url: () => `https://ct-api.unrealized.trade/v1/market/candles?chain=base&token=${token}&tf=${tf}&limit=300`, ok: () => true, json: async () => ({ candles: bars }) });
+  const trades = async (token) => {
+    let body = null;
+    const url = `https://ct-api.unrealized.trade/v1/market/trades?chain=base&token=${token}&limit=50`;
+    const r = routes.find((x) => x.match(new URL(url)));
+    await r.fn({ request: () => ({ url: () => url }), fulfill: async (a) => (body = JSON.parse(a.body)) });
+    return body.trades;
+  };
+  const pushed = (token) =>
+    new Promise((ok) => {
+      const ws = { url: () => `wss://ct-api.unrealized.trade/v1/market/push?chain=base&token=${token}`, send: (b) => ok(JSON.parse(b).trades), onClose: () => {} };
+      void socket(ws);
+    });
+  return { ctx, candles, trades, pushed };
+}
+const ONE_BAR = [[1_800_000_000, "1", "1.2", "0.9", "1.1", "500"]];
+
+test("plantTape: a token with one bar (an hour-old token's one 15m bar) gets its tape: the first trades inside that bar, a pushed trade inside it too, the bar's length from the requested tf", async () => {
+  const f = fakeContext();
+  const tape = await plantTape(f.ctx, "https://ct-app.unrealized.trade");
+  await f.candles("tok1", "15m", ONE_BAR);
+  const first = await f.trades("tok1");
+  assert.equal(first.length, TAPE.first, "the first trades");
+  const barMs = [1_800_000_000_000, 1_800_000_000_000 + 900_000];
+  for (const t of first) assert.ok(t.t_ms >= barMs[0] && t.t_ms < barMs[1], `a trade at ${t.t_ms} inside the one bar`);
+  const push = await f.pushed("tok1");
+  assert.equal(push.length, TAPE.first + 1, "one more trade pushed");
+  assert.ok(push[0].t_ms < barMs[1], "the pushed trade inside the bar's 15 minutes");
+  assert.equal(tape.sent, 1);
+});
+
+test("plantTape: zero bars, or a tf with no known length, plants nothing (no trades answered, no push)", async () => {
+  const f = fakeContext();
+  await plantTape(f.ctx, "https://ct-app.unrealized.trade");
+  await f.candles("tok0", "15m", []);
+  await f.candles("tokX", "2m", ONE_BAR);
+  assert.deepEqual(await f.trades("tok0"), []);
+  assert.deepEqual(await f.trades("tokX"), []);
+});
+
+test("TF_SECONDS: each timeframe's length is the helper's own", () => {
+  assert.deepEqual({ ...shell.TF_SECONDS }, { ...HELPER_TF_SECONDS });
+});
+
+// goodOneBar: APP_HOST live, 11 Nov 06:41Z, the page's top Trending token a Base token two hours old with one 15m bar
+// (0xb51d897806ed81a483fb778ebba54f6179753d5f): its tape planted on that one bar (marks, rows, trades pushed): PASS. The
+// same token at 05:50Z, before the plant took one bar, read marks 0, rows 0, pushed 0 (run 42970713123).
+test("recorded good answer on a one-bar top token: the tape planted on its one bar, marks, rows and pushed trades at both widths: PASS", () => {
+  const r = judge(ANSWERS.goodOneBar);
+  assert.equal(r.ok, true, r.lines.join("\n"));
+  for (const w of WIDTHS) {
+    const t = ANSWERS.goodOneBar.loads.find((l) => l.width === w.name && l.expect === "token").tape;
+    assert.ok(t.marks > 0 && t.rows > 0 && t.pushed >= 2, `${w.name}: ${JSON.stringify(t)}`);
+  }
 });

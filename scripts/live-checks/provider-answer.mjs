@@ -83,8 +83,10 @@ export const RETRY = { ms: 1000 };
 /** One JSON-RPC read of `method` on `url`, read again once on a no-answer. A read with its own `headers` (a page's
  *  Origin: wallet-restore-reads-ux.mjs asks as SIGN_HOST's page does) and `redirect` rule sends them, and gets the HTTP
  *  answer's `status` and Access-Control-Allow-Origin (`acao`) back beside it, for pageRefuses, and its answer is read in
- *  page mode (classify); a read without is as before. */
-export async function rpcAnswer(url, method, params, { fetchFn = fetch, timeoutMs = RPC_TIMEOUT_MS, nullNoAnswer = false, judgeStateMiss = false, headers, redirect } = {}) {
+ *  page mode (classify); a read without is as before. `keep`: answer header names (lower case) returned beside it as
+ *  `kept`, each its value or null (helper-serves-many-users-at-once reads the helper's RateLimit-Policy); none: as
+ *  before. */
+export async function rpcAnswer(url, method, params, { fetchFn = fetch, timeoutMs = RPC_TIMEOUT_MS, nullNoAnswer = false, judgeStateMiss = false, headers, redirect, keep } = {}) {
   const host = new URL(url).host;
   const once = async () => {
     let r;
@@ -101,7 +103,8 @@ export async function rpcAnswer(url, method, params, { fetchFn = fetch, timeoutM
     }
     const text = await r.text().catch(() => "");
     const a = classify(host, r.status, text, { nullNoAnswer, judgeStateMiss, page: headers !== undefined });
-    return headers === undefined ? a : { ...a, status: r.status, acao: r.headers.get("access-control-allow-origin") };
+    const k = keep === undefined ? a : { ...a, kept: Object.fromEntries(keep.map((n) => [n, r.headers.get(n)])) };
+    return headers === undefined ? k : { ...k, status: r.status, acao: r.headers.get("access-control-allow-origin") };
   };
   const a = await once();
   if (a.noAnswer === undefined) return a;

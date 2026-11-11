@@ -292,7 +292,9 @@ test("PINNED_HOSTS is exactly the hosts the page's sources name for the mainnet 
     new URL(near[2]).host,
   ];
   assert.deepEqual([...PINNED_HOSTS].sort(), [...new Set(want)].sort());
-  assert.match(src("packages/signpage/src/pool-testnet.ts"), /: \[solanaPacedRpc\(pageRpc\(SOLANA_PROVIDER_A\)\), solanaPacedRpc\(pageHelperRpc\(TRADE_HELPER\)\)\];/);
+  // the mainnet pair: provider A and the helper's route, both paced, nothing else; each seat with its read's kind (and
+  // the helper's its retry: the page's, or a settle's window), card signpage-passes-yield-to-a-trade
+  assert.match(src("packages/signpage/src/pool-testnet.ts"), /: \[solanaPacedRpc\(pageRpc\(SOLANA_PROVIDER_A, kind\)\), solanaPacedRpc\(pageHelperRpc\(TRADE_HELPER, SOLANA_RPC(?:_WINDOW)?_RETRY, kind\)\)\];/);
   assert.match(src("packages/signpage/src/pool-restore.ts"), /return \{ rpcs: \(\) => \[relayRpc\(net\.fastnear\[0\]\), relayRpc\(net\.drpc\)\] \};/);
   // and each is in the page's own connect-src as committed
   const csp = /Content-Security-Policy: (.+)/.exec(src("packages/signpage/public/_headers"))[1];

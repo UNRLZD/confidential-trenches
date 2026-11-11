@@ -61,6 +61,23 @@ export const MAX_READS = 30;
 const SOURCE_HEADER = "x-helper-source";
 /** A tap after the library's 500 ms double-tap window closed (Delay.ResetClick); the desktop's mouse has none. */
 const TAP_MS = 650;
+/** The step between the heights a phone's tap tries, px. */
+const CLEAR_STEP_PX = 8;
+
+/**
+ * Where a phone's tap meant for the chart lands clear of the trade marks (card app-live-run-judges-the-build): on a phone
+ * each mark takes a tap through a 44 px area round it (apps/terminal/src/screens/token/marks.css, the tm-layer's phone
+ * rule; TradeMarks.tsx opens the mark's card), so a tap there leaves the crosshair where it was. Live 11 Nov 06:47Z the
+ * newest bars' marks sat at the pane's middle, under the walk's rest tap: every rest read the point before it, 0
+ * crosshair texts of the check's own, and the opened card's move read as a shift. The height nearest `y` in the pane's
+ * middle 80 %, CLEAR_STEP_PX apart, whose point `covered(y)` says no mark covers; null when every one is covered.
+ */
+export async function clearY(y, h, covered) {
+  const lo = h * 0.1;
+  const hi = h * 0.9;
+  for (let d = 0; d <= h; d += CLEAR_STEP_PX) for (const at of d === 0 ? [y] : [y - d, y + d]) if (at >= lo && at <= hi && !(await covered(at))) return at;
+  return null;
+}
 const READ_MS = 250;
 const READY_MS = 30_000;
 // a first visit: no account (app-hop-sync-lock.mjs SIGNED_OUT), so no sheet covers the plot
@@ -235,8 +252,11 @@ async function watch(browser, w, harness, shots, route) {
     // the crosshair to (x, y) in the main canvas's own px: the desktop's mouse; the phone's two taps, each after the
     // library's double-tap window, the first hiding a crosshair shown elsewhere, the second showing it here
     const to = async (x, y) => {
-      const at = { x: off.x + lg.main.x + x, y: off.y + lg.main.y + y };
-      if (!w.hasTouch) return page.mouse.move(at.x, at.y, { steps: 4 });
+      if (!w.hasTouch) return page.mouse.move(off.x + lg.main.x + x, off.y + lg.main.y + y, { steps: 4 });
+      // a tap clear of the trade marks' tap areas (clearY), read in the frame where it lands
+      const clear = await clearY(y, lg.main.h, (yy) => f.evaluate(([px, py]) => Boolean(document.elementFromPoint(px, py)?.closest(".tm")), [lg.main.x + x, lg.main.y + yy]).catch(() => false));
+      if (clear === null) load.covered = (load.covered ?? 0) + 1;
+      const at = { x: off.x + lg.main.x + x, y: off.y + lg.main.y + (clear ?? y) };
       for (let n = 0; n < 2; n++) {
         await page.waitForTimeout(Math.max(0, tapped + TAP_MS - Date.now()));
         tapped = Date.now();

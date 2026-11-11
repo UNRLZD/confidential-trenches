@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { after, test } from "node:test";
 import { IDBFactory } from "fake-indexeddb";
 import { depositId, entropyToWords, wordsToSeed64 } from "@blindfill/wallet/derive";
-import { openWalletStore, type WalletStore } from "@blindfill/wallet/store";
+import { openWalletStore, SeedChanged, WALLET_SEED_LOCK, type WalletStore } from "@blindfill/wallet/store";
 import { noteSecrets, type NoteRef } from "../../wallet/src/notes/secrets.ts";
 import { openNoteStore, type NoteStore } from "../../wallet/src/notes/store.ts";
 import { depositNamer, type DepositNamerDeps } from "../src/deposit-name.ts";
@@ -400,4 +400,102 @@ test("one pool's naming that fails leaves the others named", async () => {
   assert.ok(await w.get("meta", `deposit/${BASE_SCOPE}`));
   assert.ok(await w.get("meta", `deposit/${SCOPE}`));
   void ns;
+});
+
+// Card signpage-passes-yield-to-a-trade, devnet run 10 of 11 Nov: a sell tapped 3 s after a buy sent nothing for 12.7 s.
+// The buy holds the seed lock shared to its Final; its note writes post "changed", the page names the deposit again,
+// and every naming asked the seed lock exclusive. Web Locks grant in request order (Node's navigator.locks, as a
+// browser's), so the sell's shared request queued behind that exclusive one, itself waiting for the buy.
+/** Polls (no clock) until `f` holds or `n` turns of the event loop pass; whether it held. */
+const until = async (f: () => Promise<boolean>, n = 2_000): Promise<boolean> => {
+  for (let i = 0; i < n; i++) {
+    if (await f()) return true;
+    await new Promise((r) => setImmediate(r));
+  }
+  return false;
+};
+const exclusivePending = async (): Promise<boolean> => ((await navigator.locks.query()).pending ?? []).some((l) => l.name === WALLET_SEED_LOCK && l.mode === "exclusive");
+/** A trade's hold on the seed lock (shared) until the give-back is called. */
+const tradeHold = async (): Promise<() => void> => {
+  let give!: () => void;
+  const granted = new Promise<void>((on) => void navigator.locks.request(WALLET_SEED_LOCK, { mode: "shared" }, () => (on(), new Promise<void>((r) => (give = r)))));
+  await granted;
+  return () => give();
+};
+/** Counts the store's nameDeposit calls, each one's outcome kept. */
+const counted = (w: WalletStore): { calls: unknown[] } => {
+  const real = w.nameDeposit.bind(w);
+  const out = { calls: [] as unknown[] };
+  w.nameDeposit = (shown, r) => {
+    const p = real(shown, r);
+    p.then((x) => out.calls.push(x), (e: unknown) => out.calls.push(e));
+    return p;
+  };
+  return out;
+};
+
+test("a naming that would change nothing asks no exclusive seed lock: a trade's shared hold stays the only holder, and a second trade's shared request is granted at once", async () => {
+  const { w } = await signedIn();
+  const n = namerOn(w);
+  n.name(ENTROPY());
+  await n.named();
+  const named = await w.get("meta", `deposit/${SCOPE}`);
+  const c = counted(w);
+  const give = await tradeHold();
+  try {
+    // a note write of the trade's posts "changed": the page names again
+    n.name(ENTROPY());
+    const done = n.named().then(() => true);
+    const settled = await until(async () => (await Promise.race([done, Promise.resolve(false)])) || (await exclusivePending()));
+    assert.ok(settled);
+    assert.equal(await exclusivePending(), false, "no exclusive request on the seed lock is queued behind the trade's hold");
+    // the second trade (a sell): its shared request is granted now, not queued
+    const now = await navigator.locks.request(WALLET_SEED_LOCK, { mode: "shared", ifAvailable: true }, async (l) => l !== null);
+    assert.equal(now, true, "the sell's shared request is granted at once");
+    assert.equal(await done, true, "the naming ended while the trade still held the lock");
+    assert.equal(c.calls.length, 0, "nameDeposit not asked");
+    assert.deepEqual(await w.get("meta", `deposit/${SCOPE}`), named);
+  } finally {
+    give();
+  }
+});
+
+test("a naming that does change the record still takes the seed lock and writes it once", async () => {
+  const { w, ns } = await signedIn();
+  const n = namerOn(w);
+  n.name(ENTROPY());
+  await n.named();
+  // money reached the named index: the next naming names a new one
+  const first = (await deposits(ns)).find((x) => x.state === "PLANNED")!;
+  await ns.move(first.id, "PLANNED", "INCOMING");
+  const c = counted(w);
+  const give = await tradeHold();
+  n.name(ENTROPY());
+  const done = n.named();
+  assert.ok(await until(exclusivePending), "the change asks the seed lock exclusive, behind the trade's hold");
+  give();
+  await done;
+  assert.equal(c.calls.length, 1, "nameDeposit asked once");
+  const next = (await deposits(ns)).find((x) => x.state === "PLANNED")!;
+  assert.deepEqual(await w.get("meta", `deposit/${SCOPE}`), { v: 1, scope: SCOPE.toString(), index: indexOf(next.ref), id: U(indexOf(next.ref)) });
+});
+
+test("a seed changed between the lock-free read and the lock: nameDeposit still refuses with SeedChanged and nothing is written", async () => {
+  // the store holds the 7f..7f seed; the namer's own read of it answers the seed it was given (all zero), as a read
+  // made before another tab's sign out and sign in would
+  const { w } = await signedIn(new Uint8Array(16).fill(0x7f));
+  const seen = new Proxy(w, {
+    get(t, p) {
+      if (p === "get") return async (store: string, key: string) => (store === "meta" && key === "seed" ? { entropy: ENTROPY() } : t.get(store as never, key));
+      const v = (t as unknown as Record<string | symbol, unknown>)[p];
+      return typeof v === "function" ? (v as (...a: unknown[]) => unknown).bind(t) : v;
+    },
+  });
+  const c = counted(w);
+  const n = namerOn(seen as WalletStore);
+  n.name(ENTROPY());
+  await n.named();
+  assert.equal(c.calls.length, 1, "the record would change: nameDeposit asked");
+  assert.ok(c.calls[0] instanceof SeedChanged, String(c.calls[0]));
+  assert.equal(await w.get("meta", `deposit/${SCOPE}`), undefined, "nothing written");
 });

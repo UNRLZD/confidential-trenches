@@ -1639,5 +1639,699 @@
    }
   ],
   "shots": "<shots>"
+ },
+ "goodOneBar": {
+  "url": "https://ct-app.unrealized.trade",
+  "network": "mainnet",
+  "source": "live",
+  "at": "2026-11-11T06:42:13.070Z",
+  "browser": "157.0.8103.38",
+  "headers": {
+   "csp": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://ct-api.unrealized.trade; font-src 'self'; connect-src 'self' https://ct-api.unrealized.trade wss://ct-api.unrealized.trade https://confidential.unrealized.trade https://base-rpc.publicnode.com https://base-mainnet.public.blastapi.io https://mainnet.base.org https://base.api.pocket.network https://base.gateway.tenderly.co https://rpc.sentio.xyz https://robinhood-rpc.publicnode.com https://robinhood.drpc.org https://rpc.mainnet.chain.robinhood.com https://robinhood.rpc.blxrbdn.com https://rpc-robinhood.globalstake.io https://robinhood.api.pocket.network https://robinhood.daybreak-rpc.network https://base-sepolia-rpc.publicnode.com https://base-testnet.api.pocket.network https://sepolia.base.org https://rpc.testnet.chain.robinhood.com https://robinhood-sepolia-rpc.publicnode.com https://robinhood-testnet.drpc.org https://solana-rpc.publicnode.com https://solana.api.pocket.network https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src 'none'; frame-ancestors https://confidential.unrealized.trade; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
+   "integrityPolicy": "blocked-destinations=(script)"
+  },
+  "scripts": [
+   {
+    "src": "https://ct-app.unrealized.trade/assets/index-Cxu_m1it.js",
+    "integrity": "sha384-PwAFz0eCufPI0d+4Dhx5f9erswQc35fubHbF3Qha89oK2VOp8n8usEo5ALYuUxht",
+    "served": "sha384-PwAFz0eCufPI0d+4Dhx5f9erswQc35fubHbF3Qha89oK2VOp8n8usEo5ALYuUxht"
+   }
+  ],
+  "loadedScripts": [
+   {
+    "url": "https://ct-app.unrealized.trade/assets/index-Cxu_m1it.js",
+    "frame": "https://ct-app.unrealized.trade/",
+    "app": true
+   },
+   {
+    "url": "https://confidential.unrealized.trade/app.js",
+    "frame": "https://confidential.unrealized.trade/",
+    "app": false
+   },
+   {
+    "url": "https://ct-app.unrealized.trade/assets/index-Cxu_m1it.js",
+    "frame": "https://ct-app.unrealized.trade/discover",
+    "app": true
+   },
+   {
+    "url": "https://confidential.unrealized.trade/app.js",
+    "frame": "https://confidential.unrealized.trade/discover",
+    "app": false
+   },
+   {
+    "url": "https://ct-app.unrealized.trade/assets/index-Cxu_m1it.js",
+    "frame": "https://ct-app.unrealized.trade/portfolio",
+    "app": true
+   },
+   {
+    "url": "https://confidential.unrealized.trade/app.js",
+    "frame": "https://confidential.unrealized.trade/portfolio",
+    "app": false
+   },
+   {
+    "url": "https://ct-app.unrealized.trade/assets/index-Cxu_m1it.js",
+    "frame": "https://ct-app.unrealized.trade/orders",
+    "app": true
+   },
+   {
+    "url": "https://confidential.unrealized.trade/app.js",
+    "frame": "https://confidential.unrealized.trade/orders",
+    "app": false
+   },
+   {
+    "url": "https://ct-app.unrealized.trade/assets/index-Cxu_m1it.js",
+    "frame": "https://ct-app.unrealized.trade/profile",
+    "app": true
+   },
+   {
+    "url": "https://confidential.unrealized.trade/app.js",
+    "frame": "https://confidential.unrealized.trade/profile",
+    "app": false
+   },
+   {
+    "url": "https://ct-app.unrealized.trade/assets/index-Cxu_m1it.js",
+    "frame": "https://ct-app.unrealized.trade/verify",
+    "app": true
+   },
+   {
+    "url": "https://confidential.unrealized.trade/app.js",
+    "frame": "https://confidential.unrealized.trade/verify",
+    "app": false
+   },
+   {
+    "url": "https://ct-app.unrealized.trade/assets/index-Cxu_m1it.js",
+    "frame": "https://ct-app.unrealized.trade/privacy",
+    "app": true
+   },
+   {
+    "url": "https://confidential.unrealized.trade/app.js",
+    "frame": "https://confidential.unrealized.trade/privacy",
+    "app": false
+   },
+   {
+    "url": "https://ct-app.unrealized.trade/assets/index-Cxu_m1it.js",
+    "frame": "https://ct-app.unrealized.trade/terms",
+    "app": true
+   },
+   {
+    "url": "https://confidential.unrealized.trade/app.js",
+    "frame": "https://confidential.unrealized.trade/terms",
+    "app": false
+   }
+  ],
+  "loads": [
+   {
+    "width": "phone",
+    "path": "/",
+    "expect": "token",
+    "framed": true,
+    "top": "https://confidential.unrealized.trade/",
+    "route": "token",
+    "violations": [],
+    "consoleErrors": [],
+    "verify": null,
+    "footer": {
+     "conn": "wait",
+     "block": "",
+     "ms": 2804
+    },
+    "cls": 0,
+    "shiftCount": 0,
+    "shifts": [],
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "tape": {
+     "marks": 3,
+     "rows": 10,
+     "pushed": 2,
+     "markPx": [
+      12,
+      12
+     ]
+    },
+    "shot": "phone-token.png"
+   },
+   {
+    "width": "phone",
+    "path": "/discover",
+    "expect": "discover",
+    "framed": true,
+    "top": "https://confidential.unrealized.trade/discover",
+    "route": "discover",
+    "violations": [],
+    "consoleErrors": [],
+    "verify": null,
+    "footer": {
+     "conn": "wait",
+     "block": "",
+     "ms": 2537
+    },
+    "cls": 0,
+    "shiftCount": 0,
+    "shifts": [],
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "tape": {
+     "marks": 0,
+     "rows": 0,
+     "pushed": 0,
+     "markPx": null
+    },
+    "shot": "phone-discover.png"
+   },
+   {
+    "width": "phone",
+    "path": "/portfolio",
+    "expect": "portfolio",
+    "framed": true,
+    "top": "https://confidential.unrealized.trade/portfolio",
+    "route": "portfolio",
+    "violations": [],
+    "consoleErrors": [],
+    "verify": null,
+    "footer": {
+     "conn": "wait",
+     "block": "",
+     "ms": 2335
+    },
+    "cls": 0,
+    "shiftCount": 0,
+    "shifts": [],
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "tape": {
+     "marks": 0,
+     "rows": 0,
+     "pushed": 0,
+     "markPx": null
+    },
+    "shot": "phone-portfolio.png"
+   },
+   {
+    "width": "phone",
+    "path": "/orders",
+    "expect": "orders",
+    "framed": true,
+    "top": "https://confidential.unrealized.trade/orders",
+    "route": "orders",
+    "violations": [],
+    "consoleErrors": [],
+    "verify": null,
+    "footer": {
+     "conn": "wait",
+     "block": "",
+     "ms": 2383
+    },
+    "cls": 0,
+    "shiftCount": 0,
+    "shifts": [],
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "tape": {
+     "marks": 0,
+     "rows": 0,
+     "pushed": 0,
+     "markPx": null
+    },
+    "shot": "phone-orders.png"
+   },
+   {
+    "width": "phone",
+    "path": "/profile",
+    "expect": "profile",
+    "framed": true,
+    "top": "https://confidential.unrealized.trade/profile",
+    "route": "profile",
+    "violations": [],
+    "consoleErrors": [],
+    "verify": null,
+    "footer": {
+     "conn": "wait",
+     "block": "",
+     "ms": 2246
+    },
+    "cls": 0,
+    "shiftCount": 0,
+    "shifts": [],
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "tape": {
+     "marks": 0,
+     "rows": 0,
+     "pushed": 0,
+     "markPx": null
+    },
+    "shot": "phone-profile.png"
+   },
+   {
+    "width": "phone",
+    "path": "/verify",
+    "expect": "verify",
+    "framed": true,
+    "top": "https://confidential.unrealized.trade/verify",
+    "route": "verify",
+    "violations": [],
+    "consoleErrors": [],
+    "verify": {
+     "state": "read",
+     "code": "ok",
+     "funds": "ok",
+     "pools": {
+      "solana": "ok",
+      "base": "ok",
+      "robinhood": "ok"
+     },
+     "poolRpcs": {
+      "solana": [],
+      "base": [],
+      "robinhood": []
+     }
+    },
+    "footer": {
+     "conn": "wait",
+     "block": "",
+     "ms": 2297
+    },
+    "cls": 0,
+    "shiftCount": 0,
+    "shifts": [],
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "tape": {
+     "marks": 3,
+     "rows": 11,
+     "pushed": 3,
+     "markPx": [
+      12,
+      12
+     ]
+    },
+    "shot": "phone-verify.png"
+   },
+   {
+    "width": "phone",
+    "path": "/privacy",
+    "expect": "privacy",
+    "framed": true,
+    "top": "https://confidential.unrealized.trade/privacy",
+    "route": "privacy",
+    "violations": [],
+    "consoleErrors": [],
+    "verify": null,
+    "footer": {
+     "conn": "wait",
+     "block": "",
+     "ms": 2355
+    },
+    "cls": 0,
+    "shiftCount": 0,
+    "shifts": [],
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "tape": {
+     "marks": 0,
+     "rows": 0,
+     "pushed": 0,
+     "markPx": null
+    },
+    "shot": "phone-privacy.png"
+   },
+   {
+    "width": "phone",
+    "path": "/terms",
+    "expect": "terms",
+    "framed": true,
+    "top": "https://confidential.unrealized.trade/terms",
+    "route": "terms",
+    "violations": [],
+    "consoleErrors": [],
+    "verify": null,
+    "footer": {
+     "conn": "wait",
+     "block": "",
+     "ms": 2318
+    },
+    "cls": 0,
+    "shiftCount": 0,
+    "shifts": [],
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "tape": {
+     "marks": 0,
+     "rows": 0,
+     "pushed": 0,
+     "markPx": null
+    },
+    "shot": "phone-terms.png"
+   },
+   {
+    "width": "desktop",
+    "path": "/",
+    "expect": "token",
+    "framed": true,
+    "top": "https://confidential.unrealized.trade/",
+    "route": "token",
+    "violations": [],
+    "consoleErrors": [],
+    "verify": null,
+    "footer": {
+     "conn": "on",
+     "block": "224029874",
+     "ms": 2747
+    },
+    "cls": 0,
+    "shiftCount": 0,
+    "shifts": [],
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "tape": {
+     "marks": 3,
+     "rows": 10,
+     "pushed": 2,
+     "markPx": [
+      12,
+      12
+     ]
+    },
+    "shot": "desktop-token.png"
+   },
+   {
+    "width": "desktop",
+    "path": "/discover",
+    "expect": "discover",
+    "framed": true,
+    "top": "https://confidential.unrealized.trade/discover",
+    "route": "discover",
+    "violations": [],
+    "consoleErrors": [],
+    "verify": null,
+    "footer": {
+     "conn": "on",
+     "block": "224029879",
+     "ms": 2367
+    },
+    "cls": 0,
+    "shiftCount": 0,
+    "shifts": [],
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "tape": {
+     "marks": 0,
+     "rows": 0,
+     "pushed": 0,
+     "markPx": null
+    },
+    "shot": "desktop-discover.png"
+   },
+   {
+    "width": "desktop",
+    "path": "/portfolio",
+    "expect": "portfolio",
+    "framed": true,
+    "top": "https://confidential.unrealized.trade/portfolio",
+    "route": "portfolio",
+    "violations": [],
+    "consoleErrors": [],
+    "verify": null,
+    "footer": {
+     "conn": "on",
+     "block": "224029884",
+     "ms": 2274
+    },
+    "cls": 0,
+    "shiftCount": 0,
+    "shifts": [],
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "tape": {
+     "marks": 0,
+     "rows": 0,
+     "pushed": 0,
+     "markPx": null
+    },
+    "shot": "desktop-portfolio.png"
+   },
+   {
+    "width": "desktop",
+    "path": "/orders",
+    "expect": "orders",
+    "framed": true,
+    "top": "https://confidential.unrealized.trade/orders",
+    "route": "orders",
+    "violations": [],
+    "consoleErrors": [],
+    "verify": null,
+    "footer": {
+     "conn": "on",
+     "block": "224029888",
+     "ms": 2281
+    },
+    "cls": 0,
+    "shiftCount": 0,
+    "shifts": [],
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "tape": {
+     "marks": 0,
+     "rows": 0,
+     "pushed": 0,
+     "markPx": null
+    },
+    "shot": "desktop-orders.png"
+   },
+   {
+    "width": "desktop",
+    "path": "/profile",
+    "expect": "profile",
+    "framed": true,
+    "top": "https://confidential.unrealized.trade/profile",
+    "route": "profile",
+    "violations": [],
+    "consoleErrors": [],
+    "verify": null,
+    "footer": {
+     "conn": "on",
+     "block": "224029893",
+     "ms": 2265
+    },
+    "cls": 0,
+    "shiftCount": 0,
+    "shifts": [],
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "tape": {
+     "marks": 0,
+     "rows": 0,
+     "pushed": 0,
+     "markPx": null
+    },
+    "shot": "desktop-profile.png"
+   },
+   {
+    "width": "desktop",
+    "path": "/verify",
+    "expect": "verify",
+    "framed": true,
+    "top": "https://confidential.unrealized.trade/verify",
+    "route": "verify",
+    "violations": [],
+    "consoleErrors": [],
+    "verify": {
+     "state": "read",
+     "code": "ok",
+     "funds": "ok",
+     "pools": {
+      "solana": "ok",
+      "base": "ok",
+      "robinhood": "ok"
+     },
+     "poolRpcs": {
+      "solana": [],
+      "base": [],
+      "robinhood": []
+     }
+    },
+    "footer": {
+     "conn": "on",
+     "block": "224029898",
+     "ms": 2235
+    },
+    "cls": 0,
+    "shiftCount": 0,
+    "shifts": [],
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "tape": {
+     "marks": 3,
+     "rows": 11,
+     "pushed": 3,
+     "markPx": [
+      12,
+      12
+     ]
+    },
+    "shot": "desktop-verify.png"
+   },
+   {
+    "width": "desktop",
+    "path": "/privacy",
+    "expect": "privacy",
+    "framed": true,
+    "top": "https://confidential.unrealized.trade/privacy",
+    "route": "privacy",
+    "violations": [],
+    "consoleErrors": [],
+    "verify": null,
+    "footer": {
+     "conn": "on",
+     "block": "224029903",
+     "ms": 2226
+    },
+    "cls": 0,
+    "shiftCount": 0,
+    "shifts": [],
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "tape": {
+     "marks": 0,
+     "rows": 0,
+     "pushed": 0,
+     "markPx": null
+    },
+    "shot": "desktop-privacy.png"
+   },
+   {
+    "width": "desktop",
+    "path": "/terms",
+    "expect": "terms",
+    "framed": true,
+    "top": "https://confidential.unrealized.trade/terms",
+    "route": "terms",
+    "violations": [],
+    "consoleErrors": [],
+    "verify": null,
+    "footer": {
+     "conn": "on",
+     "block": "224029907",
+     "ms": 2293
+    },
+    "cls": 0,
+    "shiftCount": 0,
+    "shifts": [],
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "tape": {
+     "marks": 0,
+     "rows": 0,
+     "pushed": 0,
+     "markPx": null
+    },
+    "shot": "desktop-terms.png"
+   }
+  ],
+  "inShell": [
+   {
+    "width": "phone",
+    "framed": true,
+    "steps": [
+     {
+      "href": "/discover",
+      "expect": "discover",
+      "route": "discover",
+      "reloaded": false
+     },
+     {
+      "href": "/portfolio",
+      "expect": "portfolio",
+      "route": "portfolio",
+      "reloaded": false
+     },
+     {
+      "href": "/profile",
+      "expect": "profile",
+      "route": "profile",
+      "reloaded": false
+     },
+     {
+      "href": "/",
+      "expect": "token",
+      "route": "token",
+      "reloaded": false
+     }
+    ],
+    "cls": 0,
+    "shifts": [],
+    "violations": [],
+    "consoleErrors": [],
+    "verify": null,
+    "footer": {
+     "conn": "wait",
+     "block": "",
+     "ms": 4113
+    }
+   },
+   {
+    "width": "desktop",
+    "framed": true,
+    "steps": [
+     {
+      "href": "/discover",
+      "expect": "discover",
+      "route": "discover",
+      "reloaded": false
+     },
+     {
+      "href": "/portfolio",
+      "expect": "portfolio",
+      "route": "portfolio",
+      "reloaded": false
+     },
+     {
+      "href": "/terms",
+      "expect": "terms",
+      "route": "terms",
+      "reloaded": false
+     },
+     {
+      "href": "/privacy",
+      "expect": "privacy",
+      "route": "privacy",
+      "reloaded": false
+     },
+     {
+      "href": "/",
+      "expect": "token",
+      "route": "token",
+      "reloaded": false
+     }
+    ],
+    "cls": 0,
+    "shifts": [],
+    "violations": [],
+    "consoleErrors": [],
+    "verify": null,
+    "footer": {
+     "conn": "on",
+     "block": "224029917",
+     "ms": 4443
+    }
+   }
+  ]
  }
 }
