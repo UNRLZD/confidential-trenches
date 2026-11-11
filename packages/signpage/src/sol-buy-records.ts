@@ -11,9 +11,10 @@
 //   seed zeroed at once; only their addresses are kept. A W that already has a buy record, or a "read, no buy" mark, is
 //   not read.
 // - What: each W's buy from its own transaction (buy-wallets.ts solanaBuyReader: W signs it, the pinned pool's tag 3
-//   names W, one mint rises in W's accounts), on the finder's route (the helper's keyed route on mainnet), one W at a
-//   time in a random order, each W's reads on the finder host's pass turn, so a trade's reads go first. A token a
-//   stranger sent to W is never a buy, so it gets no record and stays no position.
+//   names W, one mint rises in W's accounts), on the finder's paced route (the helper's keyed route on mainnet) with a
+//   gate of its own, one W at a time in a random order, each call on the host's pass turn (the reader's lane, as the
+//   finder's rounds), so a trade's reads go first. A token a stranger sent to W is never a buy, so it gets no record and
+//   stays no position.
 // - The record written is marked `rebuilt`: it is one provider's word (W's history as the helper answered it), so the
 //   rent back counts it as no record and holds (pool-sell.ts rentBackOwed); the rows and which W a sale reads stay on
 //   it, and a sale sells only what both RPCs read W holds. A buy on this device writes its own record over it, unmarked.
@@ -44,10 +45,8 @@ export type SolBuyRecordsDeps = {
   done(): Promise<ReadonlySet<string>>;
   /** Writes W's rebuilt buy record only when W has none, or its "read, no buy" mark; whether it wrote a buy record. */
   write(address: string, buy: SolanaBuy | "none"): Promise<boolean>;
-  /** W's buy from its own history. */
+  /** W's buy from its own history, each call on the host's pass turn. */
   reader: SolanaBuyReader;
-  /** Waits the finder host's pass turn (the page's budget for it: trades first). */
-  turn(signal: AbortSignal): Promise<void>;
   /** A W's record was written: the positions read again. */
   wrote(): void;
   /** Tests only: the order the Ws are read in. */
@@ -104,7 +103,6 @@ export function solBuyRecords(d: SolBuyRecordsDeps): SolBuyRecords {
       signal.throwIfAborted();
       let buy: SolanaBuy | "none" | null;
       try {
-        await d.turn(signal);
         buy = await d.reader.read(w, signal);
       } catch {
         signal.throwIfAborted();

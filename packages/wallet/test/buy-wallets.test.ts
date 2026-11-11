@@ -1168,4 +1168,21 @@ test("a 429 on a buy read pauses the buy reads only: the finder's next read on t
     st.restore();
   }
   assert.ok(finderAt - at429 <= HOLDINGS_RPC_LIMIT.windowMs + 10, `the finder's read is not held by the buy reads' 429: ${finderAt - at429} ms`);
+  assert.equal(hostLane(`${origin}/v1/rpc/solana`).gate.left(), 0, "nor the host's lane");
+}));
+
+// Review of 42a99f81 (b): each buy read's call takes the host's pass turn (inTurn's lane), as the finder's rounds do, so
+// a trade's reads go first: with the page's window full, the read waits for room
+test("a buy read's calls are held by the host's pass budget: with the page's window full, the read waits for room", () => onTestClock(async () => {
+  const origin = "https://buy-lane.example";
+  const st = stubFetch(origin, (m, id) => (m === "getSignaturesForAddress" ? ok(id, []) : solOk(m, id)));
+  try {
+    const lane = hostLane(`${origin}/v1/rpc/solana`);
+    for (let i = 0; i < PASS_BUDGET; i++) lane.count();
+    const t0 = Date.now();
+    assert.equal(await solanaHelperBuys(origin, BUY_POOL).read(W), null);
+    assert.ok(st.starts[0]![0] - t0 >= 9_000, `${st.starts[0]![0] - t0} ms`);
+  } finally {
+    st.restore();
+  }
 }));

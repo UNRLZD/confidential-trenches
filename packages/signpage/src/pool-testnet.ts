@@ -1516,7 +1516,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     };
   };
   // W's buy records back after a restore (card restore-rebuilds-buy-records, src/sol-buy-records.ts): the Ws of the
-  // pool's SPENT and RESERVED notes, each read on the finder's route and the finder host's pass turn, one W a request
+  // pool's SPENT and RESERVED notes, each read on the finder's paced route with its own gate, each call on the host's
+  // pass turn (buy-wallets.ts solanaHelperBuys), one W a request
   const buyRecords = solBuyRecords({
     // the finder's derive with a reader that reads nothing: the addresses only, the seed zeroed as soon as they are
     wallets: async (signal) => {
@@ -1570,7 +1571,6 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     reader: {
       read: (address, signal) => (POOL_TESTNET ? solanaBuysAt(TESTNET_RPCS.solana[0], pin!.program) : solanaHelperBuys(TRADE_HELPER, pin!.program)).read(address, signal),
     },
-    turn: (signal) => hostLane(FINDER_HOST).turn("pass", signal, false),
     wrote: () => positions.refresh(),
   });
   positions.watch(() => {

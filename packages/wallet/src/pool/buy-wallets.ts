@@ -750,7 +750,8 @@ export function evmHelperKeyedRpc(origin: string, chain: "base" | "robinhood"): 
 // - On the finder's paced route (holdingsRoute: the helper's keyed route on mainnet, paced with the holdings reads in
 //   one queue, so the provider is never asked past its one budget; the testnet build's devnet RPC) with a gate of its
 //   own (buyGateOf): a throttle met here pauses these reads only, never the finder's next read or a trade's. Each call
-//   is one round of that gate. Every request names one W, or a signature of W's: no batch, no request carries two Ws.
+//   is one round of that gate and takes the host's pass turn (inTurn's lane), so the lane's pause and budget hold it.
+//   Every request names one W, or a signature of W's: no batch, no request carries two Ws.
 /** W's buy as its own transaction shows it: the mint it bought and the token program of W's account of it. */
 export type SolanaBuy = { mint: string; program: string };
 /** One W's buy read: "none" when W's whole history shows for good that it holds none, null when this reader cannot tell
@@ -814,7 +815,7 @@ export function solanaBuyIn(tx: unknown, w: string, pool: string): SolanaBuy | n
 /** W's buy on one Solana route (production: solanaHelperBuys, solanaBuysAt), each call a round of the route's gate. */
 export function solanaBuyReader(rpc: SolanaRpc, pool: string, o: ReaderOpts = {}): SolanaBuyReader {
   const sleep = o.sleep ?? sleepFor;
-  const a: Asker = { rpc, gate: o.gate ?? gateOf(rpc), ...(o.wait429 ? { hint: o.wait429 } : {}) };
+  const a: Asker = { rpc, gate: o.gate ?? gateOf(rpc), ...(o.wait429 ? { hint: o.wait429 } : {}), ...(o.lane ? { lane: o.lane } : {}) };
   return {
     async read(w, signal) {
       const by = Date.now() + HOLDINGS_THROTTLE_MAX_MS;
@@ -824,7 +825,7 @@ export function solanaBuyReader(rpc: SolanaRpc, pool: string, o: ReaderOpts = {}
           const got = await call(a, method, params, signal);
           a.gate.answered(sentIn);
           return got;
-        });
+        }, a.lane);
       // newest first, page by page, to the oldest
       const sigs: { signature: string; err: unknown }[] = [];
       for (let page = 0; ; page++) {
@@ -858,10 +859,10 @@ function buyGateOf(r: Route): ThrottleGate {
 /** W's buy on the helper (POST /v1/rpc/solana), on the holdings readers' paced queue with the buy reads' own gate. */
 export function solanaHelperBuys(origin: string, pool: string): SolanaBuyReader {
   const r = holdingsRoute((fetch) => solanaHelperRpc(origin, { fetch }));
-  return solanaBuyReader(r.rpc, pool, { wait429: r.wait429, gate: buyGateOf(r) });
+  return solanaBuyReader(r.rpc, pool, { wait429: r.wait429, gate: buyGateOf(r), lane: r.lane });
 }
 /** W's buy on a provider the device reaches directly (the testnet build's devnet RPC), on the holdings readers' route. */
 export function solanaBuysAt(url: string, pool: string): SolanaBuyReader {
   const r = holdingsRoute((fetch) => solanaJsonRpc(url, { fetch }), "url");
-  return solanaBuyReader(r.rpc, pool, { wait429: r.wait429, gate: buyGateOf(r) });
+  return solanaBuyReader(r.rpc, pool, { wait429: r.wait429, gate: buyGateOf(r), lane: r.lane });
 }

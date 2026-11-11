@@ -570,15 +570,12 @@ test("a restored device: each W's buy record back from its own buy on the helper
   assert.ok(log.some((l) => l.method === "getSignaturesForAddress" && l.to === HELPER_RPC), "the history read on the helper's keyed route (a sanity check of the log)");
 }));
 
-// Review of 42a99f81 (b), P2: the rebuild alone, its deps faked. Each W's read waits the finder host's pass turn (trades
-// first); the Ws are read in a shuffled order; a sale's hold stops the run and it starts again once the last hold ends.
+// Review of 42a99f81 (b), P2: the rebuild alone, its deps faked. The Ws are read in a shuffled order; a sale's hold
+// stops the run and it starts again once the last hold ends (each call's pass turn is the reader's: buy-wallets.test.ts).
 // On the test clock: each read takes 1 s.
-test("the buy records' rebuild: each read waits its pass turn, the Ws in a shuffled order, a sale's hold stops the run and it runs again after", () => onTestClock(async () => {
+test("the buy records' rebuild: the Ws in a shuffled order, a sale's hold stops the run and it runs again after", () => onTestClock(async () => {
   const reads: string[] = [];
-  const turns: string[] = [];
   const written = new Map<string, unknown>();
-  let open: (() => void) | null = null;
-  let blockTurn = false;
   const r = solBuyRecords({
     wallets: async () => ["a", "b", "c"],
     done: async () => new Set(written.keys()),
@@ -591,23 +588,13 @@ test("the buy records' rebuild: each read waits its pass turn, the Ws in a shuff
         return { mint: `M-${a}`, program: "P" };
       },
     },
-    turn: async () => {
-      turns.push(`turn before read ${reads.length}`);
-      if (blockTurn) await new Promise<void>((x) => (open = x));
-    },
     wrote: () => {},
     // always the first index: [a, b, c] becomes [b, c, a]
     pick: () => 0,
   });
-  blockTurn = true;
   r.run();
-  await new Promise((x) => setTimeout(x, 10));
-  assert.deepEqual(reads, [], "no read before its pass turn");
-  blockTurn = false;
-  open!();
   await r.idle();
   assert.deepEqual(reads, ["b", "c", "a"], "the shuffled order");
-  assert.deepEqual(turns, ["turn before read 0", "turn before read 1", "turn before read 2"], "a pass turn before every read");
   // a sale's hold while a read is on: that read writes nothing; asked meanwhile, nothing runs; the hold's end runs again
   written.clear();
   reads.length = 0;
