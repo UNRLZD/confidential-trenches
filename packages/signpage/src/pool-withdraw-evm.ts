@@ -179,9 +179,10 @@ async function simulate(rpcs: readonly [EvmRpc, EvmRpc], from: string, to: strin
 
 /** This chain's costs for a part, read now: the epoch fee, W's gas (21,000, Robinhood's agreed estimate, or a To with
  *  code's estimate and margin, its run on both RPCs), its max fee and tip, the L1 bound, W's fee bound and the smallest
- *  part. `to` and `from`: To and the first part's W when known (the screen before To is typed reads a plain send). */
-export async function evmWithdrawCosts(h: Pick<EvmWithdrawHost, "chain" | "pin" | "rpcs" | "pool">, to?: { to: string; from: string; value: bigint }): Promise<EvmWithdrawCosts> {
-  const { fee } = await evmEpochFeeNow(h.pool);
+ *  part. `to` and `from`: To and the first part's W when known (the screen before To is typed reads a plain send);
+ *  `known`: the epoch fee this run already read (one helper read less; a bind under another fee stops the part). */
+export async function evmWithdrawCosts(h: Pick<EvmWithdrawHost, "chain" | "pin" | "rpcs" | "pool">, to?: { to: string; from: string; value: bigint }, known?: bigint): Promise<EvmWithdrawCosts> {
+  const fee = known ?? (await evmEpochFeeNow(h.pool)).fee;
   const blk = await latest(h.rpcs);
   const tag = qty(blk.number);
   const baseFee = blk.baseFeePerGas ?? stop("read");
@@ -386,7 +387,7 @@ export async function runEvmPoolWithdraw(h: EvmWithdrawHost, ask: PoolAsk, to: s
     });
     if (evmToRefused(to, h.pin, ws)) stop("to");
     // To read on both RPCs before any note moves: a To with code is run from the first part's W, or refused
-    const costs = await evmWithdrawCosts(h, { to, from: ws[0]!, value: plan0![0]!.part });
+    const costs = await evmWithdrawCosts(h, { to, from: ws[0]!, value: plan0![0]!.part }, first.fee);
     const plan = costs.wFee === first.wFee && costs.fee === first.fee ? plan0! : planPoolWithdraw(sources, amount, costs);
     if (plan === null) stop("plan");
     if (BigInt(plan!.length) * (costs.fee + costs.wFee) > maxFee) stop("max_fee");
@@ -601,7 +602,7 @@ export async function evmWithdrawFunds(h: Pick<EvmWithdrawHost, "chain" | "pin" 
     const first = plan[0];
     if (first !== undefined) {
       const w = await seedUse(h, async (seed) => spendOf(seed, (await notes.get(first.noteId))!).w);
-      c = await evmWithdrawCosts(h, { to, from: w, value: first.part });
+      c = await evmWithdrawCosts(h, { to, from: w, value: first.part }, c.fee);
     }
   }
   return { notes: list, fee: c.fee, wFee: c.wFee, minPart: c.minPart };
