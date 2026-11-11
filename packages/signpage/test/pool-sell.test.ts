@@ -1164,14 +1164,16 @@ test("W at 0 lamports (no account) cannot pay its sell's fee: not_funded before 
   }
 });
 
-// Card sol-pool-buys-mayhem-coins: a sale of a coin this build cannot trade (a Mayhem curve or pool) is refused
-// venue_not_built at its venue's read, nothing built, signed or sent, so the app shows it as one the pool cannot sell
-test("a Mayhem coin's sale, on the curve or on PumpSwap, is refused venue_not_built before anything is built", async () => {
+// Card sol-pool-buys-mayhem-coins: a Mayhem coin's sale goes through on the curve and on PumpSwap, paying the reserved
+// fee recipient its venue's read named on both RPCs (pump Global 483, PumpSwap GlobalConfig 385)
+test("a Mayhem coin's sale goes through on the curve and on PumpSwap, paying the reserved fee recipient", async () => {
+  const reserved = Buffer.from(base58.decode("GesfTA3X2arioaHp8bbKdjG9vJtskViWACZoYvxp4twS"));
   for (const venue of ["pump", "pumpswap"] as const) {
     const w = await world({ venue, mayhem: true });
-    assert.deepEqual(await runPoolSell(w.host, { ...ASK, token: VF[venue].mint }), { error: "venue_not_built" }, venue);
-    nothingBuilt(w);
-    assert.deepEqual(w.sent, [], venue);
+    const a = await runPoolSell(w.host, { ...ASK, token: VF[venue].mint });
+    assert.ok(!("error" in a), `${venue}: ${JSON.stringify(a)}`);
+    const sells = w.c.calls.filter((c) => c.method === "sendTransaction").map((c) => Buffer.from(base64.decode(c.params[0] as string)));
+    assert.ok(sells.length > 0 && sells.some((t) => t.includes(reserved)), `${venue}: the sent sell names the reserved fee recipient`);
   }
 });
 

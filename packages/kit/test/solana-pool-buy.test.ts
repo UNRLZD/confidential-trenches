@@ -37,6 +37,7 @@ import {
   solanaDecodeLookupTable,
   solanaPoolSellMinOut,
   solanaPoolSellSteps,
+  solanaPoolVenueBuy,
   solanaPoolPage,
   solanaPoolReleaseAccounts,
   solanaPoolSpentMark,
@@ -519,7 +520,7 @@ test("the build refuses a pool that is not the program's, W as the fee payer and
   assert.throws(() => buildSolanaPoolBuy(cfg, release, venue, { ...req, cuPrice: 10n ** 12n }, chain), /CU price/);
 });
 
-test("the venue read refuses a Mayhem curve, a complete curve, an unset buyback recipient and a PumpSwap pool that is not the mint's", async () => {
+test("the venue read builds a Mayhem curve with Global's reserved fee recipient (unset: refused); refuses a complete curve, an unset buyback recipient and a PumpSwap pool that is not the mint's", async () => {
   const flip = (v: "pump" | "pumpswap", i: number, at: number, byte: number) => (p: 0 | 1) => replay(fx[v], p, (_list, ans) => {
     const d = Buffer.from(ans.value[i].data[0], "base64");
     if (byte < 0) d.fill(0, at, at + 32);
@@ -528,26 +529,48 @@ test("the venue read refuses a Mayhem curve, a complete curve, an unset buyback 
     return ans;
   });
   const read = (v: "pump" | "pumpswap", f: (p: 0 | 1) => SolanaRpc) => readSolanaPoolBuyVenue([f(0), f(1)], v === "pump" ? "pump-curve" : "pumpswap", fx[v].mint, () => 0);
-  await assert.rejects(read("pump", flip("pump", 1, 81, 1)), (e: unknown) => e instanceof SolanaPoolBuyError && e.code === "venue_not_built" && /Mayhem/.test(e.message));
+  // card sol-pool-buys-mayhem-coins: a Mayhem curve (byte 81) pays Global's reserved_fee_recipient (483), not its
+  // fee_recipient (41): pump refuses the other (NotAuthorized, fee_recipient.rs, simulated on mainnet 11 Nov 15:1xZ)
+  const mayhem = await read("pump", flip("pump", 1, 81, 1));
+  assert.equal(mayhem.kind === "pump-curve" && mayhem.feeRecipient, "GesfTA3X2arioaHp8bbKdjG9vJtskViWACZoYvxp4twS");
+  const plain = await read("pump", (p) => replay(fx.pump, p));
+  assert.equal(plain.kind === "pump-curve" && plain.feeRecipient, "62qc2CNXwrYqQScmEdiZFFAnJR262PxWEuNQtxfafNgV");
+  const both = (p: 0 | 1) => replay(fx.pump, p, (_list, ans) => {
+    for (const [i, f] of [[1, (d: Buffer) => { d[81] = 1; }], [2, (d: Buffer) => d.fill(0, 483, 515)]] as const) {
+      const d = Buffer.from(ans.value[i].data[0], "base64");
+      f(d);
+      ans.value[i].data[0] = d.toString("base64");
+    }
+    return ans;
+  });
+  await assert.rejects(read("pump", both), /no reserved fee recipient/);
   await assert.rejects(read("pump", flip("pump", 1, 48, 1)), /complete/);
   await assert.rejects(read("pump", flip("pump", 2, 741 + 32 * 5, -1)), /buyback recipient is unset/);
   await assert.rejects(read("pumpswap", flip("pumpswap", 1, 9, 1)), /canonical pool/);
 });
 
 test("a venue the build cannot trade is venue_not_built only when both providers read it so; one provider's word is a disagreement", async () => {
-  const mayhem = (v: "pump" | "pumpswap", at: number) => (p: 0 | 1) => replay(fx[v], p, (_list, ans) => {
+  // a curve not quoted in SOL (its quote mint at 83); a Mayhem flag on one provider only is a disagreement too
+  const bent = (at: number, bytes: number[]) => (p: 0 | 1) => replay(fx.pump, p, (_list, ans) => {
     const d = Buffer.from(ans.value[1].data[0], "base64");
-    d[at] = 1;
+    d.set(bytes, at);
     ans.value[1].data[0] = d.toString("base64");
     return ans;
   });
-  for (const [v, kind, at] of [["pump", "pump-curve", 81], ["pumpswap", "pumpswap", 243]] as const) {
-    const plain = (p: 0 | 1) => replay(fx[v], p);
-    for (const pair of [[mayhem(v, at)(0), plain(1)], [plain(0), mayhem(v, at)(1)]] as const) {
-      await assert.rejects(readSolanaPoolBuyVenue(pair, kind, fx[v].mint, () => 0), (e: unknown) => !(e instanceof SolanaPoolBuyError) && /disagree/.test((e as Error).message), v);
+  const plain = (p: 0 | 1) => replay(fx.pump, p);
+  for (const [at, bytes] of [[83, Array(32).fill(5)], [81, [1]]] as const) {
+    for (const pair of [[bent(at, [...bytes])(0), plain(1)], [plain(0), bent(at, [...bytes])(1)]] as const) {
+      await assert.rejects(readSolanaPoolBuyVenue(pair, "pump-curve", fx.pump.mint, () => 0), (e: unknown) => !(e instanceof SolanaPoolBuyError) && /disagree/.test((e as Error).message), String(at));
     }
-    await assert.rejects(readSolanaPoolBuyVenue([mayhem(v, at)(0), mayhem(v, at)(1)], kind, fx[v].mint, () => 0), (e: unknown) => e instanceof SolanaPoolBuyError && e.code === "venue_not_built", v);
   }
+  await assert.rejects(readSolanaPoolBuyVenue([bent(83, Array(32).fill(5))(0), bent(83, Array(32).fill(5))(1)], "pump-curve", fx.pump.mint, () => 0), (e: unknown) => e instanceof SolanaPoolBuyError && e.code === "venue_not_built");
+  const pool = (p: 0 | 1) => replay(fx.pumpswap, p, (_list, ans) => {
+    const d = Buffer.from(ans.value[1].data[0], "base64");
+    d[243] = 1;
+    ans.value[1].data[0] = d.toString("base64");
+    return ans;
+  });
+  await assert.rejects(readSolanaPoolBuyVenue([pool(0), replay(fx.pumpswap, 1)], "pumpswap", fx.pumpswap.mint, () => 0), /disagree/);
 });
 
 test("the check refuses a deactivated table or one not owned by the table program, and a wire without two signature slots", async () => {
@@ -669,7 +692,7 @@ test("pump's cashback flag is the curve's own is_cashback_coin byte (82): a cash
   }
 });
 
-test("the venue read refuses a Mayhem PumpSwap pool, vaults that are not the pool's, a cashback byte that is not a bool, a curve not in SOL, unset fee recipients", async () => {
+test("the venue read builds a Mayhem PumpSwap pool with GlobalConfig's reserved fee recipient; refuses vaults that are not the pool's, a cashback byte that is not a bool, a curve not in SOL, unset fee recipients", async () => {
   const edit = (v: "pump" | "pumpswap", i: number, at: number, bytes: number[]) => (p: 0 | 1) => replay(fx[v], p, (_list, ans) => {
     const d = Buffer.from(ans.value[i].data[0], "base64");
     d.set(bytes, at);
@@ -680,7 +703,23 @@ test("the venue read refuses a Mayhem PumpSwap pool, vaults that are not the poo
   const zeros = Array(32).fill(0);
   const key5 = Array(32).fill(5);
   const notBuilt = (e: unknown) => e instanceof SolanaPoolBuyError && e.code === "venue_not_built";
-  await assert.rejects(read("pumpswap", edit("pumpswap", 1, 243, [1])), (e: unknown) => notBuilt(e) && /Mayhem/.test((e as Error).message));
+  // card sol-pool-buys-mayhem-coins: a Mayhem pool (byte 243) pays GlobalConfig's reserved_fee_recipient (385) and its
+  // wSOL account, not protocol_fee_recipients[0] (57), as real Mayhem pool trades on mainnet do (pool GtpyFuro...)
+  const mayhem = await read("pumpswap", edit("pumpswap", 1, 243, [1]));
+  assert.equal(mayhem.kind === "pumpswap" && mayhem.protocolFeeRecipient, "GesfTA3X2arioaHp8bbKdjG9vJtskViWACZoYvxp4twS");
+  const buy = solanaPoolVenueBuy(mayhem, W, 1_000n, 1n);
+  const [reserved, itsWsol] = ["GesfTA3X2arioaHp8bbKdjG9vJtskViWACZoYvxp4twS", "C93K8DX4YsABYJtHX9awzgZW3LWzBqBVezEbbLJH4yet"];
+  assert.deepEqual([buy.accounts[9]!.key, buy.accounts[10]!.key], [reserved, itsWsol]);
+  const unset = (p: 0 | 1) => replay(fx.pumpswap, p, (_list, ans) => {
+    const pool = Buffer.from(ans.value[1].data[0], "base64");
+    pool[243] = 1;
+    ans.value[1].data[0] = pool.toString("base64");
+    const g = Buffer.from(ans.value[2].data[0], "base64");
+    g.fill(0, 385, 417);
+    ans.value[2].data[0] = g.toString("base64");
+    return ans;
+  });
+  await assert.rejects(read("pumpswap", unset), /no reserved fee recipient/);
   await assert.rejects(read("pumpswap", edit("pumpswap", 1, 139, key5)), /vaults/);
   await assert.rejects(read("pumpswap", edit("pumpswap", 1, 171, key5)), /vaults/);
   await assert.rejects(read("pumpswap", edit("pumpswap", 1, 244, [2])), /not a bool/);

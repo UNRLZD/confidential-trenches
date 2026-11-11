@@ -504,16 +504,19 @@ test("a venue with no pinned table is refused venue_not_pinned once the referenc
   assert.equal(w.multi.length, 4, JSON.stringify(w.multi));
   assert.equal(new Set(w.multi.map((l) => l.join())).size, 2);
 });
-// Card sol-pool-buys-mayhem-coins: a coin this build cannot trade (a Mayhem curve or pool, as the first mainnet buy met
-// on 11 Nov 13:43Z) is refused venue_not_built once both RPCs read it so, before the claim: never "failed", nothing
-// claimed, taken, seeded, signed or sent. One RPC's word alone is a disagreement, refused as before (the reference's two
-// reads already differ: quote_check_failed), never venue_not_built
-test("a Mayhem coin, on the curve or on PumpSwap, is refused venue_not_built before the claim; one RPC's word alone is not", async () => {
+// Card sol-pool-buys-mayhem-coins: a Mayhem coin (the first mainnet buy met one on 11 Nov 13:43Z) is bought on the
+// curve and on PumpSwap, its fee paid to the reserved recipient the device read in pump Global (483) or PumpSwap
+// GlobalConfig (385) on both RPCs. One RPC's word alone is a disagreement, refused as before (the reference's two reads
+// already differ: quote_check_failed), nothing claimed, taken, seeded, signed or sent
+const RESERVED = "GesfTA3X2arioaHp8bbKdjG9vJtskViWACZoYvxp4twS";
+test("a Mayhem coin is bought on the curve and on PumpSwap, paying the reserved fee recipient; one RPC's word alone is refused", async () => {
   for (const coin of ["pump", "pumpswap"] as const) {
     const ask = coin === "pump" ? ASK : ASK_PS;
     const w = await world({ coin, mayhemOn: [0, 1] });
-    assert.deepEqual(await runPoolBuy(w.host, ask), { error: "venue_not_built" }, coin);
-    nothingMoved(w);
+    assert.deepEqual(await runPoolBuy(w.host, ask), { stage: "filled", txs: [{ chain: "solana", hash: SIG }] }, coin);
+    const tx = w.sentTx()!;
+    const has = (k: string) => Buffer.from(tx).includes(Buffer.from(base58.decode(k)));
+    assert.ok(has(RESERVED), `${coin}: the sent buy names the reserved fee recipient as a static key`);
     for (const one of [0, 1] as const) {
       const x = await world({ coin, mayhemOn: [one] });
       assert.deepEqual(await runPoolBuy(x.host, ask), { error: "quote_check_failed" }, `${coin} on RPC ${one}`);
