@@ -1710,3 +1710,41 @@ test("delta P3-D: a tab whose step 5 ends never removes the marker another tab's
   await w.r.idle();
   assert.deepEqual(await markerOf(w.store), mine, "tab 2's marker stands: the next load reads for it");
 });
+
+// card signpage-evm-pool-sell: a wiped browser's restore writes each EVM buy's record again, its route read from the
+// buy's own transaction (src/pool-sell-evm.ts restoreEvmHoldings), so the restored W sells on the route its buy took
+test("restore: an EVM buy's record is written again from its own transaction, the route the buy took; a read that fails writes none", async () => {
+  const { pinnedBuild } = await import("../../kit/src/trade/evm/buy-unpinned.ts");
+  const { BOUGHT, TOKEN } = await import("../../kit/test/evm-sell-quote-fx.ts");
+  const { evmBuyCalldata } = await import("../src/evm-send.ts");
+  const { EVM_POSITION_COSTS_KEY } = await import("../src/pool-buy-evm.ts");
+  const { EVM_POOL_EVENTS } = await import("../../wallet/src/pool/evm.ts");
+  const { keccak_256 } = await import("@noble/hashes/sha3.js");
+  const V = evmPoolVenues().base;
+  const POOL = V.pool!.toLowerCase();
+  const W = "0x00000000000000000000000000000000000000aa";
+  const w32 = (v: bigint) => "0x" + v.toString(16).padStart(64, "0");
+  const T_BOUGHT = "0x" + Buffer.from(keccak_256(new TextEncoder().encode(EVM_POOL_EVENTS.Bought))).toString("hex");
+  const built = pinnedBuild(evmPoolVenues(), "base", V.adapters!.v4!, BOUGHT as never, 5n, TOKEN, true);
+  const relay = { recipient: W, feeRecipient: "0x0000000000000000000000000000000000000fee", feeCap: 1n, deadlineMs: 1n, refundPrecommitment: 9n, salt: "0x" + "ab".repeat(16) };
+  const input = "0x" + Buffer.from(evmBuyCalldata(POOL, relay as never, { pi_a: ["1", "2", "1"], pi_b: [["3", "4"], ["5", "6"], ["1", "0"]], pi_c: ["7", "8", "1"] } as never, ["1", "2", "3", "4", "5", "6", "7", "8"] as never, 1n, built, new Uint8Array(65))).toString("hex");
+  const TX = "0x" + "b0".repeat(32);
+  const BH = "0x" + "cd".repeat(32);
+  const rpc = (down: boolean) => async (method: string, params: readonly unknown[]): Promise<unknown> => {
+    if (down) throw new Error("HTTP 503");
+    if (method === "eth_getLogs") return [{ address: POOL, topics: [T_BOUGHT, w32(BigInt(W))], data: "0x", blockNumber: "0x100", blockHash: BH, logIndex: "0x3", transactionHash: TX, transactionIndex: "0x0", removed: false }];
+    if (method === "eth_getBlockByNumber") return { hash: BH, transactions: [{ hash: TX, to: POOL, input }] };
+    if (method === "eth_call") return w32(18n);
+    throw new Error(`no ${method} ${JSON.stringify(params)}`);
+  };
+  for (const down of [false, true]) {
+    const pools: readonly RestorePool[] = [{ chain: "evm", pin: { network: "base", pool: POOL, feeRecipient: "0x2", fromBlock: 1n }, scope: EVM_SCOPE, rpcs: () => [rpc(down), rpc(down)] }];
+    const spends = [{ l: LABEL_E, j: 0, note: "n", w: W, withdrawn: 1n, block: 0x100n, token: TOKEN, blockHash: BH, logIndex: 3n }];
+    const w = await world({ pools: () => pools, evm: (async () => ({ notes: notesOf(EVM_SCOPE, LABEL_E, 2000n), spends, elsewhere: [], wallets: [], block: 1n })) as never });
+    assert.equal(await w.r.auto(), "done");
+    await w.r.idle();
+    const rec = ((await w.store.get("meta", EVM_POSITION_COSTS_KEY)) ?? {}) as Record<string, { route?: unknown; state?: string; mint?: string; decimals?: number }>;
+    if (down) assert.deepEqual(rec, {}, "a read that fails writes no record: the W is not sold until a later restore reads it");
+    else assert.deepEqual(rec[W], { mint: TOKEN, decimals: 18, chain: "base", state: "filled", route: { venue: "uniswap-v4", adapter: V.adapters!.v4!.toLowerCase(), path: BOUGHT, tx: TX, block: "256" } });
+  }
+});

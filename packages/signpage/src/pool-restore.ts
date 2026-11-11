@@ -115,7 +115,8 @@ import { POOL_DEPOSIT_NETWORK } from "../../wallet/src/deposit/quote.ts";
 import { RESTORE_GAP, RESTORE_LANES, walkEnd, writeRestored, type RestoredNote, type SeedUse } from "../../wallet/src/notes/restore.ts";
 import { openNoteStore } from "../../wallet/src/notes/store.ts";
 import { evmRestoreNotes } from "../../wallet/src/pool/evm-restore.ts";
-import { EVM_CHAIN_IDS, EVM_POOLS, evmPoolScopeOf, type EvmNetwork, type EvmPoolPin, type EvmRpc } from "../../wallet/src/pool/evm.ts";
+import { EVM_CHAIN_IDS, EVM_POOLS, evmPair, evmPoolScopeOf, type EvmNetwork, type EvmPoolPin, type EvmRpc } from "../../wallet/src/pool/evm.ts";
+import { restoreEvmHoldings, type EvmBuySpend } from "./pool-sell-evm.ts";
 import { POOL_TESTNET } from "../../wallet/src/pool/network.ts";
 import { solanaPoolOf } from "../../wallet/src/pool/solana.ts";
 import { solanaRestoreNotes, type SolanaPoolCache } from "../../wallet/src/pool/solana-restore.ts";
@@ -645,15 +646,22 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
         const found: RestoredNote[] = [];
         // each pool on its own: one that fails leaves the others' notes found
         const label = (p: RestorePool): string => (p.chain === "solana" ? "solana" : p.pin.network);
+        const evmHoldingsOwed: { chain: "base" | "robinhood"; pin: EvmPoolPin; list: readonly EvmRpc[]; buys: EvmBuySpend[] }[] = [];
         const reads = pools.map(async (p): Promise<RestoredNote[]> => {
           if (p.rpcs === null) throw new Error("no reads on this page");
           if (p.chain === "solana") {
             const lister = p.lister?.();
             return (await solana({ seed64: seed, program: p.program, rpcs: p.rpcs(), ...(lister ? { lister } : {}), ...(p.cache ? { cache: p.cache } : {}), ...(p.markBatches ? { markBatches: p.markBatches } : {}), signal })).notes;
           }
-          // the notes only: no W is read or named to a provider for a record the page keeps none of
+          // the notes only: no W's Transfer logs are read (wallets: false)
           // the page's hold (the deposit's sync's too) and its history sources (card evm-pool-leaves-any-source)
-          return (await evm({ seed64: seed, pin: p.pin, rpcs: p.rpcs(), signal, wallets: false, held: pageEvmHold(p.pin, () => h.held ? h.held() : h.store()), history: pageEvmHistory(p.pin) })).notes;
+          const r = await evm({ seed64: seed, pin: p.pin, rpcs: p.rpcs(), signal, wallets: false, held: pageEvmHold(p.pin, () => h.held ? h.held() : h.store()), history: pageEvmHistory(p.pin) });
+          // each buy's record again from its own transaction, so a restored W sells on its buy's route (card
+          // signpage-evm-pool-sell, pool-sell-evm.ts restoreEvmHoldings: no read names W or a transaction)
+          const buys = r.spends.flatMap((x) => (x.token === null ? [] : [{ w: x.w, token: x.token, block: x.block, blockHash: x.blockHash, logIndex: x.logIndex }]));
+          const chain = chainOf(p);
+          if (buys.length > 0 && chain !== "solana") evmHoldingsOwed.push({ chain, pin: p.pin, list: p.rpcs(), buys });
+          return r.notes;
         });
         const walked: Walked[] = [];
         (await Promise.allSettled(reads)).forEach((r, k) => {
@@ -692,6 +700,12 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
             }
           });
           if (found.length > 0) h.written?.();
+        }
+        // the buy records, once the notes are written: a W whose read fails keeps none, and is not sold until a later
+        // restore reads it
+        for (const o of evmHoldingsOwed) {
+          signal.throwIfAborted();
+          await restoreEvmHoldings({ chain: o.chain, testnet: POOL_TESTNET, pin: o.pin, rpcs: evmPair(o.list), store: await (h.held ? h.held() : h.store()), spends: o.buys }).catch(() => {});
         }
         // step 5 is owed from here until a try reads every id (the marker, the pools' scopes alone)
         const owes = ids !== null && pools.length > 0;
