@@ -387,7 +387,9 @@ test("POST /v1/withdraw: the body parsed and handed to the sender, its status an
   assert.equal(main.match(/const holds = providerHolds\(undefined, \{ \.\.\.PROVIDER_PACE, \.\.\.keyedPaces\(process\.env\) \}, dayFiles\(storeDir, id\)\);/g)?.length, 1);
   assert.match(main, /const rpc = createRpc\(process\.env, \{ holds, pinned: SWAP_RPCS \}\);/);
   assert.match(main, /setInterval\(\(\) => void rpc\.probe\(\)\.catch\(\(\) => undefined\), KEYED_RETRY_MS\)\.unref\(\);/);
-  assert.match(main, /server = start\(commit, port, proxy, rpc, watches, lists, fee, withdraw, token, bind, pools, evmLists, swaps, ready, senders\.held, \(\) => Object\.fromEntries\(\[\.\.\.slots\]\.map\(\(\[k, v\]\) => \[k, v\.state\(\)\]\)\), release, evmPools, evmTokens, held\);/);
+  assert.match(main, /server = start\(commit, port, proxy, rpc, watches, lists, fee, withdraw, token, bind, pools, evmLists, swaps, ready, senders\.held, \(\) => Object\.fromEntries\(\[\.\.\.slots\]\.map\(\(\[k, v\]\) => \[k, v\.state\(\)\]\)\), release, evmPools, evmTokens, held, near\);/);
+  // card helper-near-lists-and-token: chain=near's reads mounted, its lists warmed at the start
+  assert.match(main, /const near: NearMarket = \{ lists: nearLists, token: createNearToken\(nearLists\), trades: createNearTrades\(nearLists\) \};\n    nearLists\.warm\(\);/);
   // card market-token-reads: the held tokens' read takes the Solana token page and the EVM chains' lists, and DexScreener on
   // its own budget for a token no list carries, never the GeckoTerminal budget
   assert.match(main, /const held = heldFrom\(token, evmLists\);/);
