@@ -4043,11 +4043,14 @@ test("card pool-sell-share-across-wallets review P2-1: a later sale prices its d
       const last: (unknown | null)[] = [null, null];
       const sent = [0, 0];
       const served = [false, false];
+      const after = [0, 0];
       // the second sale's first read of the pool answers as the pool was before the first sale landed
       const gate = (p: 0 | 1, rpc: SolanaRpc): SolanaRpc =>
         (async (method: string, params: readonly unknown[]) => {
           if (method === "sendTransaction") sent[p]!++;
           if (stale && method === "getAccountInfo" && params[0] === POOL && (params[1] as { commitment?: string }).commitment === "confirmed") {
+            // between the first sale's send and the second's: where a later sale read its sizes before
+            if (sent[p] === 1) after[p]!++;
             if (sent[p] === 1 && !served[p] && last[p] !== null) {
               served[p] = true;
               return structuredClone(last[p]);
@@ -4061,7 +4064,9 @@ test("card pool-sell-share-across-wallets review P2-1: a later sale prices its d
       (w.host as { rpcs: unknown }).rpcs = [gate(0, w.c.rpcs[0]), gate(1, w.c.rpcs[1])];
       (w.host as { back?: unknown }).back = undefined;
       const a = await runPoolSell({ ...w.host, owed: undefined }, ask);
-      return { stage: "stage" in a ? a.stage : a, wLamports: w.c.accounts.get(W.address)?.lamports ?? 0, served: served.every(Boolean) };
+      // card pool-sell-legs-side-by-side: the pool's sizes are read once for every leg before the first sale is sent, so
+      // the later sale's sizes are always from before the earlier sale landed (no pool read after a send to serve stale)
+      return { stage: "stage" in a ? a.stage : a, wLamports: w.c.accounts.get(W.address)?.lamports ?? 0, served: served.every(Boolean) || after.every((n) => n === 0) };
     };
     const fresh = await run(false);
     const stale = await run(true);
@@ -4879,4 +4884,47 @@ test("card pool-sell-legs-side-by-side: W's own accounts are read beside the min
   const wrong = solanaAta(W.address, MINT, other);
   for (const p of [0, 1] as const) assert.deepEqual([wrong, ATA].map((x) => w.c.calls.filter((c) => c.p === p && namesIn(c.method, c.params, x)).length >= 1), [true, true], String(p));
   assert.deepEqual(w.c.deposits.map((d) => d.value), [FULL]);
+});
+
+/** A sale of several Ws on ticked RPCs: the round at each signature and each send, and the answer. */
+async function legRounds(w: World, ask: PoolAsk, plant?: (t: ReturnType<typeof ticked>) => void) {
+  const t = ticked(w.c.rpcs);
+  plant?.(t);
+  const signedAt: number[] = [];
+  const sentAt: number[] = [];
+  const callsAtSend: number[] = [];
+  let n = 0;
+  let done = false;
+  const host: PoolSellHost = { ...w.host, rpcs: t.rpcs, signed: async () => void signedAt.push(n), sent: (s) => (sentAt.push(n), callsAtSend.push(w.c.calls.length), void w.sent.push(s)) };
+  const run = runPoolSell(host, ask).finally(() => (done = true));
+  while (!done) {
+    await drain();
+    if (t.queue.length === 0) continue;
+    for (const r of t.queue.splice(0)) r();
+    n++;
+  }
+  return { a: await run, signedAt, sentAt, callsAtSend };
+}
+
+test("card pool-sell-legs-side-by-side: a later leg reads before its turn only what no other sale changes, and signs three read rounds after the leg before it sent (its quote, blockhash, W's accounts, the deposit's pages and the venue all read after that send)", async () => {
+  const w = await twoBuys({ ataLamports: TOKEN_RENT });
+  (w.host as { back?: unknown }).back = undefined;
+  const r = await legRounds(w, share(10_000));
+  assert.equal("stage" in r.a && r.a.stage, "filled", JSON.stringify(r.a));
+  assert.equal(r.signedAt.length, 2);
+
+  // X (the smaller) first, W second
+  // three: its one round (quote, W's accounts, blockhash, the deposit's pages, the venue), the deposit's pages read again
+  // once (depositHeld: the first sale's deposit landed at once on this fake chain), the fee beside both simulations.
+  // 38684593, a leg's whole sale after its turn: 11
+  assert.equal(r.signedAt[1]! - r.sentAt[0]!, 3, `rounds from the first send to the second signature: ${JSON.stringify(r)}`);
+  const at = r.callsAtSend[0]!;
+  const later = w.c.calls.slice(at);
+  const earlier = w.c.calls.slice(0, at);
+  for (const p of [0, 1] as const) {
+    assert.ok(later.some((c) => c.p === p && namesIn(c.method, c.params, ataOfW(W.address))), "W's accounts read again after the first send");
+    assert.ok(later.some((c) => c.p === p && (c.method === "getLatestBlockhash" || c.method === "isBlockhashValid")), "the second leg's blockhash after the first send");
+  }
+  // before the first send, W's sale asked no blockhash, quote or venue of its own: one getLatestBlockhash (X's) on RPC 0
+  assert.equal(earlier.filter((c) => c.method === "getLatestBlockhash").length, 1);
 });

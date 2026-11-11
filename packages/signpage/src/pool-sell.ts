@@ -57,7 +57,7 @@
 import { base58, base64 } from "@scure/base";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { simulateSolanaTeardown, solanaCompileV0, solanaTeardownChecked } from "../../kit/src/trade/solana/build.ts";
-import { readSolanaPoolBuyVenue, readSolanaRent, SOLANA_POOL_PAGE_ENTRIES, SOLANA_POOL_SELL_FEE, solanaPoolNextPage, solanaPoolPage, solanaPoolSellMinOut, solanaPoolBuySellNeed, solanaPoolSellNeed, solanaPoolSellSteps, solanaRentMin, type SolanaRent } from "../../kit/src/trade/solana/pool-buy.ts";
+import { readSolanaPoolBuyVenue, readSolanaRent, SOLANA_POOL_PAGE_ENTRIES, SOLANA_POOL_SELL_FEE, solanaPoolNextPage, solanaPoolPage, solanaPoolSellMinOut, solanaPoolBuySellNeed, solanaPoolSellNeed, solanaPoolSellSteps, solanaRentMin, type SolanaPoolBuyVenue, type SolanaRent } from "../../kit/src/trade/solana/pool-buy.ts";
 import { SOLANA_POOL_NEXT_PAGE_WINDOW, solanaPoolNoteFloor, solanaPoolPreMarkOf, type SolanaPoolPreMark } from "../../kit/src/trade/solana/pool-deposit.ts";
 import { solanaDecodeTokenAccount, type SolanaReference } from "../../kit/src/trade/solana/pool.ts";
 import { pageReference } from "./page-rpc.ts";
@@ -592,14 +592,14 @@ export const buyMints = (store: () => Promise<Pick<TradeStore, "get" | "update">
 };
 
 /** One W's sale, built again (POOL_SELL_REBUILDS at most) while its deposit meets a page another deposit filled first. */
-async function sellRuns(h: PoolSellHost, ask: PoolAsk, later: Later, w: BuyWallet, waits: ReadWaits, early?: Early): Promise<LegAnswer> {
+async function sellRuns(h: PoolSellHost, ask: PoolAsk, later: Later, w: BuyWallet, waits: ReadWaits, early?: Early, turn?: LegTurn): Promise<LegAnswer> {
   const wait = h.wait ?? ((ms: number) => new Promise<void>((res) => setTimeout(res, ms)));
   for (let i = 0; ; ) {
     delete later.rebuild;
     delete later.fault;
     later.last = i >= POOL_SELL_REBUILDS;
     // the sell's earlier reads are the first attempt's alone: every attempt after it reads from its first read
-    const a = await sellRun(h, ask, later, w, early);
+    const a = await sellRun(h, ask, later, w, early, turn);
     early = undefined;
     // a provider read that failed before W signed: the sale again from its first read, after the rule's wait
     if ("error" in a && "fault" in later && !h.stopped?.()) {
@@ -813,8 +813,14 @@ async function sellAll(host: PoolSellHost, ask: PoolAsk, laters: Later[], hooks:
   const first: Early = { ...early, ...(early.note && lone !== plan.legs[0]!.w.address ? { note: undefined } : {}) };
   await hooks.planned?.(plan);
   const legs: PoolSellLeg[] = plan.legs.map((l) => ({ wallet: l.w.address, amount: l.units.toString(), tx: null, stage: null }));
-  // each leg's turn: the one before it sent, or ended before sending
+  // each leg's turn: the one before it sent, or ended before sending. Every leg starts at once (card
+  // pool-sell-legs-side-by-side): its reads that no other leg's sale changes (the Rent sysvar and the pool's sizes,
+  // read once for every leg's first attempt; its own note; the mint's program) before its turn, every read its sale
+  // prices on after it (sellRun)
   let turn: Promise<void> = Promise.resolve();
+  // the venue the last leg's reference chose, so a leg after it reads that venue beside its own reference
+  const venues: { kind?: "pump-curve" | "pumpswap" } = {};
+  const shared: Early = { ...(first.program === undefined ? {} : { program: first.program }), ...(first.rent ? { rent: first.rent } : {}), ...(first.sizes ? { sizes: first.sizes } : {}) };
   const runs = plan.legs.map((l, i) => {
     const later: Later = {};
     laters.push(later);
@@ -837,8 +843,8 @@ async function sellAll(host: PoolSellHost, ask: PoolAsk, laters: Later[], hooks:
         h.sent?.(signature);
       },
     });
-    return prior
-      .then((): Promise<LegAnswer> | LegAnswer => (h.stopped?.() ? { error: "failed" } : sellRuns(leg, { ...ask, amount: l.units, shareBps: undefined }, later, l.w, waits, i === 0 ? first : undefined)))
+    return Promise.resolve()
+      .then((): Promise<LegAnswer> | LegAnswer => (h.stopped?.() ? { error: "failed" } : sellRuns(leg, { ...ask, amount: l.units, shareBps: undefined }, later, l.w, waits, i === 0 ? first : shared, i === 0 ? { venues } : { opened: prior, venues })))
       .catch((): LegAnswer => ({ error: "failed" }))
       .then((a) => {
         open();
@@ -891,7 +897,11 @@ async function noteFor(h: Pick<PoolSellHost, "settled">, rpcs: Rpcs, program: st
   }
 }
 
-async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later, w: BuyWallet, early?: Early): Promise<LegAnswer> {
+/** A leg's turn (sellAll): `opened` once the leg before it sent or ended (none for the first leg); `venues`, the venue the
+ *  last leg's reference chose, which a leg after it reads beside its own reference and keeps only when its own chose it. */
+type LegTurn = { opened?: Promise<void>; venues: { kind?: "pump-curve" | "pumpswap" } };
+
+async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later, w: BuyWallet, early?: Early, turn?: LegTurn): Promise<LegAnswer> {
   const seeds: Uint8Array[] = [];
   let key: Uint8Array | null = null;
   let sent: string | null = null;
@@ -914,6 +924,33 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later, w: BuyWallet
     const rpcs = h.rpcs;
     const store = await h.notes();
     const sync = solanaTreeSync(rpcs, program);
+    const quiet = <T>(p: Promise<T>): Promise<T> => (p.catch(() => {}), p);
+    // before the leg's turn: what no other leg's sale changes (the Rent sysvar; the pool's sizes, read again with the
+    // deposit's pages after the turn, depositHeld; W's note; the mint's program)
+    const rentP = quiet(early?.rent ?? readSolanaRent(rpcs));
+    const sizesP = quiet(early?.sizes ?? treeSizes(rpcs, program, pool, wait));
+    const noteP = quiet(early?.note ?? noteFor(h, rpcs, program, scope, store, sync, w, seed));
+    const mintP = early?.held ? null : quiet(mintProgram(rpcs, token));
+    // a leg after the first: every read its sale prices on (W's accounts, the reference, the blockhash, the deposit's
+    // pages, the venue) only once the leg before it sent or ended, so the quote, the blockhash and W's balance it signs
+    // on are read after that wait; a sign out asked meanwhile ends it, nothing read past it
+    const opened = turn?.opened;
+    if (opened) {
+      await opened;
+      if (h.stopped?.()) return { error: "failed" };
+    }
+    const venueOf = (kind: "pump-curve" | "pumpswap") => readSolanaPoolBuyVenue(rpcs, kind, token, ...(h.pick ? [h.pick] : []));
+    // after its turn, a leg after the first asks all of them in one round: the blockhash (its check on RPC 1 as soon as
+    // RPC 0 answered), the deposit's pages at the sizes read before the turn, and the venue the last leg chose
+    let first: Promise<{ blockhash: string; lastValidBlockHeight: number; slot: number }> | null = null;
+    let depositP: ReturnType<typeof depositHeld> | null = null;
+    let guess: { kind: "pump-curve" | "pumpswap"; read: Promise<SolanaPoolBuyVenue> } | null = null;
+    if (opened) {
+      first = quiet(blockhashRead(rpcs));
+      depositP = quiet(Promise.all([sizesP, noteP]).then(([s, n]) => depositHeld(rpcs, program, pool, s, be32(n.precommitment), wait)));
+      const kind = turn!.venues.kind;
+      if (kind) guess = { kind, read: quiet(venueOf(kind)) };
+    }
     // the reads side by side (card pool-sell-legs-side-by-side), in three rounds, each on both RPCs; a read the sell
     // made earlier in this very attempt, with no wait since (`early`, sellAll's), is taken, never asked again:
     // 1. the Rent sysvar; the pool there, the same on both RPCs (the sizes the deposit is priced on are read again with
@@ -922,10 +959,10 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later, w: BuyWallet
     //    note the deposit makes (returnNote; the seed copy for its precommitment zeroed at once); the price reference at
     //    the sale's units
     const [rent, sizes0, tokens, rn, reference] = await Promise.all([
-      early?.rent ?? readSolanaRent(rpcs),
-      early?.sizes ?? treeSizes(rpcs, program, pool, wait),
-      early?.held ?? mintProgram(rpcs, token).then((p) => wHeld(rpcs, w.address, token, p)),
-      early?.note ?? noteFor(h, rpcs, program, scope, store, sync, w, seed),
+      rentP,
+      sizesP,
+      early?.held ?? mintP!.then((p) => wHeld(rpcs, w.address, token, p)),
+      noteP,
       // a reference read at other units (sellAll's guess for a lone W's share) is never this sale's: read at its units
       early?.reference?.amount === amount ? early.reference.read : pageReference(rpcs, { side: "sell", token, amount }),
     ]);
@@ -939,13 +976,16 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later, w: BuyWallet
     const pre = be32(precommitment);
     const best = reference?.pools.filter((p) => p.venue === "pump-curve" || p.venue === "pumpswap").sort((x, y) => (x.expectedOut > y.expectedOut ? -1 : 1))[0];
     if (!reference || !best) return no("quote_check_failed");
-    // 2. after the reference (the quote's age counts from it): its venue, the device's blockhash and slot on RPC 0, and
-    //    the lamports the deposit's mark and both pages hold with the pool's sizes (depositHeld); the blockhash's check on
+    const chose = best.venue as "pump-curve" | "pumpswap";
+    if (turn) turn.venues.kind = chose;
+    // 2. after the reference (the quote's age counts from it): its venue (a leg after the first: the one read beside its
+    //    reference when the reference chose it, else read now), the device's blockhash and slot on RPC 0, and the
+    //    lamports the deposit's mark and both pages hold with the pool's sizes (depositHeld); the blockhash's check on
     //    RPC 1 starts as soon as RPC 0 answered and is awaited before W signs
-    const first = blockhashRead(rpcs);
+    first ??= blockhashRead(rpcs);
     const valid = first.then((r) => blockhashValid(rpcs, r));
     valid.catch(() => {});
-    const [venue, bh0, deposit] = await Promise.all([readSolanaPoolBuyVenue(rpcs, best.venue as "pump-curve" | "pumpswap", token, ...(h.pick ? [h.pick] : [])), first, depositHeld(rpcs, program, pool, sizes, pre, wait)]);
+    const [venue, bh0, deposit] = await Promise.all([guess?.kind === chose ? guess.read : venueOf(chose), first, depositP ?? depositHeld(rpcs, program, pool, sizes, pre, wait)]);
     if (venue.tokenProgram !== tokens.program) return no();
     // the venue's own need up front (PumpSwap: the wrapped-SOL account its sell makes first), before anything is built
     // a cashback coin on PumpSwap: the sell names W's PumpSwap volume account and its wrapped-SOL account, which a curve
