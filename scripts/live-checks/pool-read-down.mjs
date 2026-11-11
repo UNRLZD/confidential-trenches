@@ -30,7 +30,8 @@ const Q = "[`\"']";
 const KINDS = new RegExp(`Object\\.freeze\\(\\{error:${Q}down${Q}\\}\\)`);
 // since card start-reads-wait-out-a-throttle each names its fault for the wait before it answers down (read-waits.ts:
 // the fault the page's transport class, or waitsOn of it): `instanceof X)return a.fault=e,{error:"down"}`
-const FLOWS = new RegExp(`(?:instanceof [\\w$]+|[\\w$]+\\([\\w$]+\\))(\\?|\\)return)\\(?(?:[\\w$]+\\.fault=[\\w$]+,)?\\{error:${Q}down${Q}\\}`, "g");
+// (a sell leg's down keeps its cause beside it since card pool-sell-legs-side-by-side: pool-sell.ts legCause)
+const FLOWS = new RegExp(`(?:instanceof [\\w$]+|[\\w$]+\\([\\w$]+\\))(\\?|\\)return)\\(?(?:[\\w$]+\\.fault=[\\w$]+,)?\\{error:${Q}down${Q}(?:,cause:[\\w$]+)?\\}`, "g");
 const WIRE = new RegExp(`\\.catch\\(\\(\\)=>\\{[\\w$]+=\\{error:${Q}down${Q}\\}\\}\\)`);
 const REFERENCE = /a reference must never rest on one provider's word/g;
 // what landed (the list's length, or card pool-answer-unknown's count: never the list itself, an array always true),
