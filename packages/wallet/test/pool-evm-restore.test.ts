@@ -1023,7 +1023,7 @@ async function withFetch<T>(f: typeof fetch, run: () => Promise<T>): Promise<T> 
   }
 }
 /** `run` with setTimeout, clearTimeout and performance.now on a clock of the test's own (card fresh-run-margin). The
- *  helper's route is paced (HOLDINGS_RPC_LIMIT, 3 calls in 2 s, through the kit's solanaPacedRpc, which waits on
+ *  helper's route is paced (HOLDINGS_RPC_LIMIT, 3 calls in 3 s, through the kit's solanaPacedRpc, which waits on
  *  setTimeout and reads performance.now), so its reads waited in real time, 1.5 s a call. Here a timer fires once the
  *  work before it has settled (the next setImmediate), in the order of its time, ties in the order set, and the clock
  *  jumps to that time: every call still waits its turn under the limit, in no real time. Each M test's route origin is

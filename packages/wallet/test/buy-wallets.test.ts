@@ -516,8 +516,8 @@ const rounds = (starts: readonly [number, string][]): number[][] => {
 };
 const spread = (r: readonly number[]): number => Math.max(...r) - Math.min(...r);
 
-test("HOLDINGS_RPC_LIMIT is the helper's pace: a Solana round's three calls start at one instant, one round in 2 s (15 calls in 10 s of one caller's 42); every reader of a route on one queue", () => onTestClock(async () => {
-  assert.deepEqual({ ...HOLDINGS_RPC_LIMIT }, { windowMs: 2_000, total: 3, perMethod: 2 });
+test("HOLDINGS_RPC_LIMIT is the measured pace: a Solana round's three calls start at one instant, one round in 3 s; every reader of a route on one queue", () => onTestClock(async () => {
+  assert.deepEqual({ ...HOLDINGS_RPC_LIMIT }, { windowMs: 3_000, total: 3, perMethod: 2 });
   // two Solana readers of one route (two pools) read a W each, and an EVM reader two Ws (two calls a W)
   const sol = stubFetch("https://pace-sol.example", (m, id) => solOk(m, id));
   const evm = stubFetch("https://pace-evm.example", (m, id) => evmOk(m, id));
@@ -535,7 +535,7 @@ test("HOLDINGS_RPC_LIMIT is the helper's pace: a Solana round's three calls star
   assert.equal(r.length, 2);
   for (const x of r) assert.ok(spread(x) < 50, `a round's three calls start at one instant: ${spread(x)} ms`);
   assert.ok(r[1]![0]! - r[0]![0]! >= HOLDINGS_RPC_LIMIT.windowMs, `the second reader's round waits the window: ${r[1]![0]! - r[0]![0]!} ms`);
-  // EVM: four calls, at most three in any 2 s
+  // EVM: four calls, at most three in any 3 s
   assert.equal(evm.starts.length, 4);
   assert.ok(evm.starts[3]![0] - evm.starts[0]![0] >= HOLDINGS_RPC_LIMIT.windowMs, `EVM: the fourth call waits the window`);
 }));
