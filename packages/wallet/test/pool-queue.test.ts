@@ -1262,3 +1262,20 @@ test("card sol-buy-reads-side-by-side: each check of the take refuses at least w
   assert.equal(q3.ready().find((r) => r.noteId === dep.id)!.root, "newest");
   await assert.rejects(q3.take(dep.id, undefined, early(START + E + NEWEST_GRACE_MS + 2_000n)), /newest root/);
 }));
+
+// card pool-buy-record-never-stays-sent: the take writes the signed transaction's last height on the RESERVED note, so
+// the settle pass can free it once both RPCs' finalized height is past it; a take with none writes none
+test("take writes the last height it is handed on the RESERVED note, and none when handed none", async () => {
+  const v = await vaultWith([usd(5), usd(10)]);
+  const q = queue(v, fakePool(v));
+  await q.refresh();
+  const [a, b] = q.ready();
+  await q.take(a!.noteId, a!.attempt, undefined, 151n);
+  const ra = await state(v, a!.noteId);
+  assert.equal(ra.state, "RESERVED");
+  assert.equal((ra as { lastHeight?: bigint }).lastHeight, 151n);
+  await q.take(b!.noteId, b!.attempt);
+  const rb = await state(v, b!.noteId);
+  assert.equal(rb.state, "RESERVED");
+  assert.equal((rb as { lastHeight?: bigint }).lastHeight, undefined);
+});

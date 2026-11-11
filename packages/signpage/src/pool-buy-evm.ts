@@ -135,6 +135,9 @@ export type EvmPoolBuyHost = {
   hold?<T>(f: () => Promise<T>): Promise<T>;
   /** The bytes have left the device: told once. */
   sent?(): void;
+  /** The note's release read on both RPCs (filled or withdrawn): the chunk left the pool, so the balance counts the
+   *  note's change only until the settle writes it (../../wallet/src/pool/balances.ts landed). */
+  landed?(noteId: string, attempt: string, withdrawn: bigint): void;
   /** An end the reads found after the tap's run answered "sent" at its bound. */
   late?(a: { stage: TradeStage; txs: TxRef[] }): void;
   /** The notes a run on this page has picked and not finished. */
@@ -295,6 +298,7 @@ export async function runEvmPoolBuy(h: EvmPoolBuyHost, ask: PoolAsk): Promise<Ev
       const got = await h.take(r.noteId, r.attempt);
       taken = true;
       if (got.attempt !== r.attempt) return no();
+      const mine = { noteId: r.noteId, attempt: r.attempt, chunk: r.chunk };
       // the send: a busy helper waited out while the proof has more than the send margin left and no sign out started
       posted = true;
       let busied = false;
@@ -310,7 +314,7 @@ export async function runEvmPoolBuy(h: EvmPoolBuyHost, ask: PoolAsk): Promise<Ev
             // a refusal is the helper's word, and the device never drops what it may own on a server's word: the run
             // answers refused, its pending record stays, and the chain ends it (the follow below: a Bought fills W's
             // holding, no release by the two-round safe rule removes it, as the note's settle frees the note)
-            return { refused: { want, from, holding, w: w.address, stops: [null, null], none: null } };
+            return { refused: { want, from, holding, w: w.address, stops: [null, null], none: null, mine } };
           }
           if (e instanceof EvmSendBusy && !stopped() && clock() + BigInt(e.retryAfterMs) < r.deadlineMs - EVM_SEND_MARGIN_MS) {
             busied = true;
@@ -326,7 +330,7 @@ export async function runEvmPoolBuy(h: EvmPoolBuyHost, ask: PoolAsk): Promise<Ev
       h.sent?.();
       // a sign out started during the busy wait: the run ends "sent", and the settle pass decides at the next sign in
       if (stopped()) return { answer: { stage: "sent", txs: [] } };
-      return { watch: { want, from, holding, w: w.address, stops: [null, null], none: null } };
+      return { watch: { want, from, holding, w: w.address, stops: [null, null], none: null, mine } };
     });
     if ("answer" in out) return out.answer;
     // on past the answer with no answer owed: W's reads until the chain ends the pending record
@@ -382,7 +386,7 @@ export async function runEvmPoolBuy(h: EvmPoolBuyHost, ask: PoolAsk): Promise<Ev
 
 /** The read-back's state, the tap's and the follow's: each RPC's `stop` (EvmReleaseRead), and when the first round of
  *  "no release, past the deadline" in a row was read. */
-type Watch = { want: EvmBuyWant; from: bigint; holding: EvmHolding; w: string; stops: [bigint | null, bigint | null]; none: bigint | null };
+type Watch = { want: EvmBuyWant; from: bigint; holding: EvmHolding; w: string; stops: [bigint | null, bigint | null]; none: bigint | null; mine?: { noteId: string; attempt: string; chunk: bigint } };
 
 /** The read-back's rounds while `more()`: the pool's releases on both RPCs, the verdict on them, and its records: the
  *  end's answer, or null when none came in time or a sign out (`live`) ended the reads, after which nothing is
@@ -420,6 +424,8 @@ async function watch(h: EvmPoolBuyHost, x: Watch, more: () => boolean, wait: (ms
     }
     const txs: TxRef[] = [{ chain: h.chain, hash: v.release.tx }];
     const at = { ...x.holding.route, tx: v.release.tx, block: v.release.block.toString() };
+    // this run's own release landed: its note's chunk (the device's, never the chain's word) is out of the pool
+    if (x.mine !== undefined) h.landed?.(x.mine.noteId, x.mine.attempt, x.mine.chunk);
     if (v.end === "filled") {
       await h.record(x.w, { ...x.holding, state: "filled", received: poolUnits(v.release.out, x.holding.decimals), route: at }).catch(() => {});
       return { stage: "filled", txs };
@@ -496,6 +502,8 @@ export type EvmBuyPage = {
   fetch?: typeof fetch;
   signal?: AbortSignal;
   stopped?(): boolean;
+  /** EvmPoolBuyHost.landed: the page's balance counts the note's change from here. */
+  landed?(noteId: string, attempt: string, withdrawn: bigint): void;
 };
 
 /** A W that already has a holding: the pending write is refused, so nothing is sent (review P3-7). */
@@ -563,6 +571,7 @@ export function evmBuyHost(chain: Chain, pin: EvmPoolPin, rpcs: readonly [EvmRpc
     claimed,
     signal: page.signal,
     stopped: page.stopped,
+    landed: page.landed,
   };
 }
 

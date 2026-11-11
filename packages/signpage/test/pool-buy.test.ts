@@ -291,7 +291,7 @@ async function world(plant: Plant = {}, proof = readyProof()): Promise<World> {
         return { context: { slot: s.ref.slot! + b.slotAhead }, value: { blockhash: b.blockhash, lastValidBlockHeight: 100 } };
       }
       if (method === "getLatestBlockhash") return { context: { slot: s.ref.slot! + (plant.slotAhead ?? 2) }, value: { blockhash: BLOCKHASH, lastValidBlockHeight: 100 } };
-      if (method === "isBlockhashValid") return { value: !plant.blockhashInvalid };
+      if (method === "isBlockhashValid") return { context: { slot: s.ref.slot! + 3 }, value: !plant.blockhashInvalid };
       if (method === "getBlockHeight") {
         // confirmed: RPC 1's height beside the blockhash, so the last height is max(100, 0 + 151) = 151
         if ((params[0] as { commitment: string }).commitment === "confirmed") return 0;
@@ -1434,7 +1434,7 @@ async function roundsToSend(w: World): Promise<{ rounds: string[][]; answer: unk
   return { rounds, answer };
 }
 
-test("card pool-buy-filled-2s: the checks' reads go out in three rounds by their inputs (8 serial rounds before), every read on both RPCs as before", async () => {
+test("card pool-buy-filled-2s: the checks' reads go out in four rounds by their inputs (8 serial rounds before; the fourth RPC 1's height, card pool-buy-record-never-stays-sent), every read on both RPCs as before", async () => {
   const w = await world();
   const { rounds, answer } = await roundsToSend(w);
   assert.equal((answer as { stage?: string }).stage, "filled");
@@ -1445,7 +1445,9 @@ test("card pool-buy-filled-2s: the checks' reads go out in three rounds by their
     // the two root pages (the sizes name them), the venue (the reference names it), then the device's blockhash and slot
     ["0:getAccountInfo", "0:getAccountInfo", "0:getLatestBlockhash", "0:getMultipleAccounts", "1:getAccountInfo", "1:getAccountInfo", "1:getMultipleAccounts"],
     // the blockhash on RPC 1, which needs RPC 0's
-    ["1:getBlockHeight", "1:isBlockhashValid"],
+    ["1:isBlockhashValid"],
+    // RPC 1's height, at or past the slot it called the blockhash valid at (card pool-buy-record-never-stays-sent)
+    ["1:getBlockHeight"],
   ]);
 });
 
@@ -1906,16 +1908,38 @@ test("card pool-sell-legs-side-by-side: blockhashOf, split into its read and its
     const got = await poolBuy.blockhashOf([at(0), at(1)]).then((x) => x, (e: unknown) => ({ refused: String(e) }));
     return { asked, got };
   };
-  const ok = await run({ latest: { context: { slot: 9 }, value: { blockhash: "B", lastValidBlockHeight: 100 } }, valid: { value: true }, height: 10 });
+  const ok = await run({ latest: { context: { slot: 9 }, value: { blockhash: "B", lastValidBlockHeight: 100 } }, valid: { context: { slot: 11 }, value: true }, height: 10 });
   assert.deepEqual(ok.asked, ["0:getLatestBlockhash", "1:isBlockhashValid", "1:getBlockHeight"]);
   assert.deepEqual(ok.got, { blockhash: "B", lastValidBlockHeight: 100, slot: 9, lastHeight: 161 });
   // no blockhash: refused with nothing asked of RPC 1; RPC 1 calling it invalid: refused
   const none = await run({ latest: { context: { slot: 9 }, value: {} } });
   assert.deepEqual(none.asked, ["0:getLatestBlockhash"]);
   assert.ok("refused" in none.got);
-  const invalid = await run({ latest: { context: { slot: 9 }, value: { blockhash: "B", lastValidBlockHeight: 100 } }, valid: { value: false }, height: 10 });
-  assert.deepEqual(invalid.asked, ["0:getLatestBlockhash", "1:isBlockhashValid", "1:getBlockHeight"]);
+  const invalid = await run({ latest: { context: { slot: 9 }, value: { blockhash: "B", lastValidBlockHeight: 100 } }, valid: { context: { slot: 11 }, value: false }, height: 10 });
+  assert.deepEqual(invalid.asked, ["0:getLatestBlockhash", "1:isBlockhashValid"], "the height is read only once RPC 1 called the blockhash valid");
   assert.ok("refused" in invalid.got);
+  // valid with no slot of its own: refused, its height never read
+  const noSlot = await run({ latest: { context: { slot: 9 }, value: { blockhash: "B", lastValidBlockHeight: 100 } }, valid: { value: true }, height: 10 });
+  assert.deepEqual(noSlot.asked, ["0:getLatestBlockhash", "1:isBlockhashValid"]);
+  assert.ok("refused" in noSlot.got);
+});
+
+// card pool-buy-record-never-stays-sent: the last height frees the note once both RPCs' finalized height is past it, so
+// it must never come out under the true one. RPC 0 lying low on lastValidBlockHeight and RPC 1's height answer lagging
+// the blockhash's block would set it low; RPC 1's height is read at or past the slot it judged the blockhash valid at.
+test("the last height: RPC 1's height is read at or past the slot RPC 1 called the blockhash valid at, so a lying RPC 0 and a lagging height answer never set it low", async () => {
+  const heights: unknown[] = [];
+  const rpc0: SolanaRpc = (async () => ({ context: { slot: 9 }, value: { blockhash: "B", lastValidBlockHeight: 10 } })) as SolanaRpc;
+  const rpc1: SolanaRpc = (async (m: string, p: readonly unknown[]) => {
+    if (m === "isBlockhashValid") return { context: { slot: 500 }, value: true };
+    heights.push(p[0]);
+    // a node behind the blockhash's block answers 5; one at slot 500 or past, the blockhash's block's height or more
+    const at = (p[0] as { minContextSlot?: number }).minContextSlot ?? 0;
+    return at >= 500 ? 200 : 5;
+  }) as SolanaRpc;
+  const got = await poolBuy.blockhashOf([rpc0, rpc1]);
+  assert.deepEqual(heights, [{ commitment: "confirmed", minContextSlot: 500 }]);
+  assert.equal(got.lastHeight, 351);
 });
 
 // Card sol-buy-reads-side-by-side: the pool's time for the take is read beside the first round (the host's chainNow,

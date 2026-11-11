@@ -28,7 +28,7 @@ registerHooks({
   load(url, context, next) {
     const r = next(url, context);
     if (url.endsWith("/signpage/src/pool-testnet.ts"))
-      return { ...r, source: wrap(String(r.source), "testnetPool", "export function testnetPool(page, over) { return { ...testnetPool__real(page, over), readyWith: async (read) => ({ ready: globalThis.__ctReady, value: await read() }) }; }") };
+      return { ...r, source: wrap(String(r.source), "testnetPool", "export function testnetPool(page, over) { return { ...testnetPool__real(page, over), readyWith: async (read) => ({ ready: globalThis.__ctReady, value: await read(), landed: globalThis.__ctLanded }) }; }") };
     if (url.endsWith("/signpage/src/pool-price.ts"))
       return { ...r, source: wrap(String(r.source), "poolPrices", "export function poolPrices(deps) { return poolPrices__real({ ...deps, read: globalThis.__ctPriceRead, after: (ms, fn) => void setTimeout(fn, ms).unref() }); }") };
     return r;
@@ -147,7 +147,7 @@ async function askKind(type: string, params: Record<string, unknown>): Promise<{
   throw new Error(`no answer to ${type}`);
 }
 
-async function askState(): Promise<{ signed_in: boolean; pools?: { chain: string; ready?: string; tap_max?: string; price?: { price: string; expo: number } }[] }> {
+async function askState(): Promise<{ signed_in: boolean; pools?: { chain: string; balance?: string; ready?: string; tap_max?: string; price?: { price: string; expo: number } }[] }> {
   const id = crypto.randomUUID();
   // the app on this kit names its version before it asks, as the kit's client does (card kit-frame-version)
   const hello = new Event("message");
@@ -220,6 +220,16 @@ test("the testnet build's state: the devnet pool with the queue's ready proof as
   assert.ok(rhRec?.evm !== undefined && rhRec.scope === rhScope.toString(), "the page named the Robinhood pool's U_X under its scope");
   assert.equal(rh.ok, true, JSON.stringify(rh));
   assert.deepEqual(rh.result, { chain: "robinhood", address: rhRec.evm, asset: "ETH" });
+
+  // card pool-buy-record-never-stays-sent: the note taken for a buy stays in the balance at full value while the buy is
+  // in flight, and from its release's read-back (the queue's view's `landed`) counts only its change
+  await ns.move(held.id, "HELD", "RESERVED", { attempt: held.attempt });
+  g.__ctReady = [];
+  const balance = async () => (await askState()).pools?.find((x) => x.chain === "solana")?.balance;
+  assert.equal(await balance(), "0.05", "a buy in flight never reads its money gone");
+  g.__ctLanded = new Map([[held.id, { attempt: held.attempt, withdrawn: CHUNK - 10_000_000n }]]);
+  assert.equal(await balance(), "0.01", "its landed release: the note's change only, never the bought tokens twice");
+  g.__ctLanded = undefined;
 
   // a notes read that fails (a record the store refuses) still answers the state, signed in and without pools,
   // as withPools answers any failed read: the read inside the queue's readyWith never throws past it

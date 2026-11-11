@@ -830,6 +830,12 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     testnet: POOL_TESTNET,
     signal: follows.signal,
     stopped: ((at) => () => signOuts !== at)(signOuts),
+    // as the Solana buy's: the balance counts the note's change from its release's read-back (card
+    // pool-buy-record-never-stays-sent)
+    landed: (noteId, attempt, withdrawn) => {
+      landedReleases.set(noteId, { attempt, withdrawn });
+      for (const f of watchers) f();
+    },
   });
   const evmBuy = (chain: "base" | "robinhood") => {
     const e = evmPool(chain);
@@ -1755,8 +1761,9 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   let deadSettled = false;
   let backsResumed = false;
   // the RESERVED notes a buy left (filled, refused, never answered, or its page closed mid-send): settled spent, freed
-  // once both RPCs' block time is past their deadline with no spent mark, or held (../../wallet/src/pool/solana-restore.ts
-  // solanaSettleReserved); a freed note is proved again by the open queue's next pass
+  // once both RPCs' finalized height is past the signed transaction's last height, or their block time past the
+  // deadline, with no spent mark, or held (../../wallet/src/pool/solana-restore.ts solanaSettleReserved); a freed note is
+  // proved again by the open queue's next pass
   // It holds a seed copy, so it runs under the seed's shared lock, as every run that does (a sign out, in any tab, waits
   // for it; one that came first leaves no seed, and the pass ends at its seed read). No Web Locks: no pass.
   const locks = over.locks === undefined ? (globalThis.navigator?.locks ?? null) : over.locks;

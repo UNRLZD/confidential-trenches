@@ -165,7 +165,7 @@ export async function world(values: readonly bigint[], plant: Plant = {}) {
         return { context: { slot: 10 }, value: null };
       }
       if (method === "getLatestBlockhash") return { context: { slot: 12 }, value: { blockhash: BLOCKHASH, lastValidBlockHeight: 100 } };
-      if (method === "isBlockhashValid") return { value: true };
+      if (method === "isBlockhashValid") return { context: { slot: 1 }, value: true };
       if (method === "getBlockHeight") return (params[0] as { commitment: string }).commitment === "confirmed" ? 0 : (plant.finalHeight ?? 1_000);
       // the not_landed verdict's read (pool-buy.ts pastAt): the finalized bank's height and its slot
       if (method === "getEpochInfo") return { blockHeight: plant.finalHeight ?? 1_000, absoluteSlot: FINAL_SLOT, epoch: 1, slotIndex: 0, slotsInEpoch: 432_000 };

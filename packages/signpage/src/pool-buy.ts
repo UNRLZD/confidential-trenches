@@ -74,8 +74,8 @@
 //   W's record: the buy wallets list (../../wallet/src/pool/buy-wallets.ts spentNotesOf) finds W and reads its holdings.
 //   Not settled within the reads (or not landed, or refused): the note stays RESERVED, and each state read of the page
 //   settles it (../../wallet/src/pool/solana-restore.ts solanaSettleReserved: SPENT once its spent mark and change read
-//   on both RPCs, UNSPENT once both RPCs' block time is past its deadline with no spent mark, so the queue proves it
-//   again).
+//   on both RPCs, UNSPENT once both RPCs' finalized height is past its signed transaction's last height, or their block
+//   time past its deadline, with no spent mark, so the queue proves it again).
 // - The route (card signpage-buy-route-events): the run tells the app, through the kind's route events (messages.ts
 //   BuyRoute), only what it bound or read itself: W and the venue with its pool once the check passed, W derived to the
 //   proof's recipient and signed, and the take holds the note, before the transaction leaves; then the transaction's
@@ -410,13 +410,16 @@ export async function blockhashRead(rpcs: readonly [SolanaRpc, SolanaRpc]): Prom
   return { blockhash, lastValidBlockHeight: int(r.value!.lastValidBlockHeight), slot: int(r.context?.slot) };
 }
 
-/** blockhashOf's check: RPC 0's blockhash valid on RPC 1, and the last height from RPC 1's height (read after it). */
+/** blockhashOf's check: RPC 0's blockhash valid on RPC 1, and the last height from RPC 1's height, read at or past the
+ *  slot RPC 1 judged the blockhash valid at (minContextSlot): RPC 1 has then seen the blockhash's block, so its height
+ *  is at least that block's and the last height is never under the true one, whatever RPC 0 said (a last height too low
+ *  would free the note while its transaction can still land: card pool-buy-record-never-stays-sent). */
 export async function blockhashValid(rpcs: readonly [SolanaRpc, SolanaRpc], r: { blockhash: string; lastValidBlockHeight: number; slot: number }): Promise<{ blockhash: string; lastValidBlockHeight: number; slot: number; lastHeight: number }> {
-  const [ok, height] = await Promise.all([
-    rpcs[1]("isBlockhashValid", [r.blockhash, { commitment: "confirmed" }]) as Promise<{ value?: unknown }>,
-    rpcs[1]("getBlockHeight", [{ commitment: "confirmed" }]),
-  ]);
+  const ok = (await rpcs[1]("isBlockhashValid", [r.blockhash, { commitment: "confirmed" }])) as { context?: { slot?: unknown }; value?: unknown };
   if (ok?.value !== true) return no();
+  const seen = int(ok.context?.slot);
+  if (seen === 0) return no();
+  const height = await rpcs[1]("getBlockHeight", [{ commitment: "confirmed", minContextSlot: seen }]);
   const said = r.lastValidBlockHeight;
   const cap = int(height) + BLOCKHASH_LIFE;
   return { blockhash: r.blockhash, lastValidBlockHeight: said, slot: r.slot, lastHeight: said > cap ? said : cap };
