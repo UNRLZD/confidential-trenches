@@ -748,8 +748,11 @@ export function evmHelperKeyedRpc(origin: string, chain: "base" | "robinhood"): 
 //   them (a W flooded with sends), one the route no longer returns (a signature listed with no transaction), or one
 //   with no pool release among those read (a shortened list included) is no answer (null), and W stays on the finder's
 //   path as before; it is read again at a later page load (sol-buy-records.ts). Never a guess.
-// - "none" only when the pool's release naming W was read and it is no buy (a plain release, tag 2): final, as the
+// - "none" only when the pool's release naming W was read and it is a plain release (tag 2, no tag 3): final, as the
 //   note is spent, so that W is never read again (review of ae2cfe28, P2: four sends before a buy are never "none").
+//   A landed tag 3 always ran its venue buy (contracts/pool-solana/src/buy.rs: a failing inner call fails the whole
+//   transaction), so a tag 3 whose buy this reader cannot read (balances it cannot parse) is no answer (null), never
+//   "none" (review of 0430db23, P2).
 // - On the finder's paced route (holdingsRoute: the helper's keyed route on mainnet, paced with the holdings reads in
 //   one queue, so the provider is never asked past its one budget; the testnet build's devnet RPC) with a gate of its
 //   own (buyGateOf): a throttle met here pauses these reads only, never the finder's next read or a trade's. Each call
@@ -800,8 +803,13 @@ function releaseTags(t: Tx, w: string, pool: string): Set<number> {
   }
   return tags;
 }
-/** Whether a transaction of W's is the pinned pool's release naming W (see above). */
-export const solanaReleaseIn = (tx: unknown, w: string, pool: string): boolean => releaseTags(tx as Tx, w, pool).size > 0;
+/** Whether a transaction of W's is the pinned pool's plain release naming W, with no buy (tag 2, no tag 3; see above). */
+export const solanaReleaseIn = (tx: unknown, w: string, pool: string): boolean => {
+  const tags = releaseTags(tx as Tx, w, pool);
+  return tags.has(TAG_RELEASE) && !tags.has(TAG_RELEASE_AND_BUY);
+};
+/** Whether a transaction of W's holds the pinned pool's release naming W, either tag (see above). */
+const releaseIn = (tx: unknown, w: string, pool: string): boolean => releaseTags(tx as Tx, w, pool).size > 0;
 /** The buy a transaction of W's is, or null when it is no buy of W's from `pool` (see above). */
 export function solanaBuyIn(tx: unknown, w: string, pool: string): SolanaBuy | null {
   const t = tx as Tx;
@@ -856,8 +864,9 @@ export function solanaBuyReader(rpc: SolanaRpc, pool: string, o: ReaderOpts = {}
         if (tx === null) return done(null);
         const buy = solanaBuyIn(tx, w, pool);
         if (buy !== null) return done(buy);
-        // the pool's release naming W, no buy: W's note is spent, it has none for good
-        if (solanaReleaseIn(tx, w, pool)) return done("none");
+        // the pool's plain release naming W: W's note is spent with no buy, it has none for good; a tag 3 whose buy was
+        // not read: no answer
+        if (releaseIn(tx, w, pool)) return done(solanaReleaseIn(tx, w, pool) ? "none" : null);
       }
       // no release of W's among those read (none yet, past the bound, or a list cut short): no answer
       return done(null);

@@ -1058,9 +1058,10 @@ test("a W's buy is read from its own transaction: W signs it, the pinned pool's 
   assert.equal(solanaBuyIn(txOf({ signers: [FEE_PAYER, W], ix: [{ program: BUY_POOL, to: W, tag: 3 }], post: [tb(4, MINT_A, W, 5n, VENUE)] }), W, BUY_POOL), null, "not a token program");
   assert.equal(solanaBuyIn(txOf({ signers: [FEE_PAYER, W], ix: [{ program: BUY_POOL, to: W, tag: 3 }], pre: [tb(4, MINT_A, W, 9n)], post: [tb(4, MINT_A, W, 5n)] }), W, BUY_POOL), null, "a sale: the token falls");
   assert.equal(solanaBuyIn(null, W, BUY_POOL), null);
-  // the pool's release naming W: tag 2 or 3, landed, W a signer
+  // the pool's plain release naming W: tag 2 with no tag 3, landed, W a signer
   assert.equal(solanaReleaseIn(txOf({ signers: [FEE_PAYER, W], ix: [{ program: BUY_POOL, to: W, tag: 2 }], post: [] }), W, BUY_POOL), true, "a plain release");
-  assert.equal(solanaReleaseIn(buyTx(), W, BUY_POOL), true, "a release and buy");
+  assert.equal(solanaReleaseIn(buyTx(), W, BUY_POOL), false, "a release and buy is no plain release");
+  assert.equal(solanaReleaseIn(txOf({ signers: [FEE_PAYER, W], ix: [{ program: BUY_POOL, to: W, tag: 2 }, { program: BUY_POOL, to: W, tag: 3 }], post: [] }), W, BUY_POOL), false, "a tag 2 beside a tag 3");
   assert.equal(solanaReleaseIn(txOf({ signers: [STRANGER_KEY], keys: [W], ix: [{ program: BUY_POOL, to: W, tag: 2 }], post: [] }), W, BUY_POOL), false, "a stranger's tx dressed as one");
   assert.equal(solanaReleaseIn({ ...buyTx(), meta: { ...buyTx().meta, err: { x: 1 } } }, W, BUY_POOL), false, "failed");
   assert.equal(solanaReleaseIn(txOf({ signers: [FEE_PAYER, W], ix: [{ program: BUY_POOL, to: W, tag: 1 }], post: [] }), W, BUY_POOL), false, "another tag");
@@ -1141,6 +1142,25 @@ test("a W's history the reader cannot tell is no buy: none at all, a listed tran
   assert.deepEqual(await readOf(after(sends(SOL_BUY_TXS), "buy", buyTx())), { got: null, calls: 1 + SOL_BUY_TXS }, "the buy past the bound");
   // the pool's plain release naming W, after two sends: W's note spent with no buy, for good
   assert.deepEqual(await readOf(after(sends(2), "release", plainRelease)), { got: "none", calls: 1 + 3 }, "the release, no buy");
+  // review of 0430db23, P2: a landed tag 3 always ran its buy, so one whose buy is not read is no answer, never "none"
+  const tag3 = (post: unknown[] | undefined, pre: unknown[] = []) => {
+    const t = txOf({ signers: [FEE_PAYER, W], ix: [{ program: BUY_POOL, to: W, tag: 3 }], pre, post: post ?? [] });
+    return post === undefined ? { ...t, meta: { err: null, preTokenBalances: pre } } : t;
+  };
+  const { owner: _o, ...noOwner } = tb(4, MINT_A, W, 5n);
+  const { programId: _p, ...noProgram } = tb(4, MINT_A, W, 5n);
+  for (const [what, tx] of [
+    ["no owner", tag3([noOwner])],
+    ["no programId", tag3([noProgram])],
+    ["no postTokenBalances", tag3(undefined)],
+    ["two mints rise", tag3([tb(4, MINT_A, W, 5n), tb(6, MINT_B, W, 5n)])],
+  ] as const) {
+    assert.equal(solanaBuyIn(tx, W, BUY_POOL), null, `${what}: no buy read`);
+    assert.deepEqual(await readOf(after(sends(1), "t3", tx)), { got: null, calls: 1 + 2 }, `${what}: a landed tag 3 unread is no answer`);
+  }
+  // the read stops at that tag 3: W's one note is spent there, so nothing after it is read
+  const later = after(after(sends(1), "t3", tag3(undefined)), "drop9", dropTx);
+  assert.deepEqual(await readOf(later), { got: null, calls: 1 + 2 }, "nothing read past the release");
   // within the pages: the buy past a full first page is found
   const long = new Map([[W, { sigs: [...Array.from({ length: SOL_BUY_PAGE + 2 }, (_, i) => drop(i)).map((x, i) => (i === SOL_BUY_PAGE + 1 ? { signature: "buy", err: null } : x))], txs: new Map<string, unknown>([["buy", buyTx()]]) }]]);
   const l2 = historyRpc(long);

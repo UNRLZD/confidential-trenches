@@ -668,6 +668,30 @@ test("the buy records' rebuild: the Ws in a shuffled order, a sale's hold stops 
   once.run();
   await once.idle();
   assert.equal(asks.filter((a) => a === "n").length, 2, "read again after a sign out");
+  // review of 0430db23, P3: a sale's hold keeps the load's no-answer Ws (a sale changes what W holds, never W's oldest
+  // transactions): a hold that stops a run on reads only the rest again once it ends
+  const asked2: string[] = [];
+  const turns = async (f: () => boolean) => {
+    for (let i = 0; i < 200 && !f(); i++) await new Promise((r) => setImmediate(r));
+    assert.ok(f());
+  };
+  let unblock = (): void => {};
+  const held2 = solBuyRecords({
+    wallets: async () => ["n", "s"],
+    done: async () => new Set(),
+    write: async () => true,
+    reader: { read: async (a, signal) => (asked2.push(a), a === "n" ? null : new Promise<never>((_, no) => ((unblock = () => no(new Error("x"))), signal?.addEventListener("abort", () => no(signal.reason))))) },
+    wrote: () => {},
+    pick: (n) => n - 1,
+  });
+  held2.run();
+  await turns(() => asked2.length === 2);
+  const e5 = held2.hold();
+  e5();
+  await turns(() => asked2.length >= 3);
+  unblock();
+  await held2.idle();
+  assert.deepEqual(asked2, ["n", "s", "s"], "n not read again after the hold");
   // a sign out during a hold: the hold's end runs nothing
   written.clear();
   reads.length = 0;
