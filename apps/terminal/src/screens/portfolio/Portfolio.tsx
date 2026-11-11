@@ -532,7 +532,7 @@ function PosTr({ r, now, menu, setMenu, act }: { r: Row; now: number; menu: "mor
   return (
     <tr className={menu || r.selling ? "hov" : ""} data-pos={r.key}>
       <td className="l">
-        <div className="tok"><Avatar symbol={r.symbol} size={34} logo={{ chain: r.chain, token: r.token }} /><div className="ell"><div className="sy">{r.symbol}<MarkTag r={r} /></div><div className="s2 ui ell">{r.name}</div></div></div>
+        <div className="tok"><Avatar symbol={r.symbol} size={34} /><div className="ell"><div className="sy">{r.symbol}<MarkTag r={r} /></div><div className="s2 ui ell">{r.name}</div></div></div>
       </td>
       <td>{usd(r.bought)}</td>
       <td>{r.sold ? usd(r.sold) : DASH}</td>
@@ -585,7 +585,7 @@ function PosTr({ r, now, menu, setMenu, act }: { r: Row; now: number; menu: "mor
 function ClosedTr({ c }: { c: ClosedRow }) {
   return (
     <tr data-closed={c.key}>
-      <td className="l"><div className="tok"><Avatar symbol={c.symbol} size={34} logo={{ chain: c.chain, token: c.token }} /><div className="ell"><div className="sy">{c.symbol}</div><div className="s2 ui ell">{c.name}</div></div></div></td>
+      <td className="l"><div className="tok"><Avatar symbol={c.symbol} size={34} /><div className="ell"><div className="sy">{c.symbol}</div><div className="s2 ui ell">{c.name}</div></div></div></td>
       <td>{usd(c.bought)}</td>
       <td>{usd(c.sold)}</td>
       <td>0</td>
@@ -633,7 +633,7 @@ function Allocation({ rows, loading }: { rows: Row[]; loading: boolean }) {
         const big = w > 19 && h > 15;
         return (
           <div className="at" key={r.key} style={{ left: `${x}%`, top: `${y}%`, width: `calc(${w}% - 4px)`, height: `calc(${h}% - 4px)`, background: bg }}>
-            <div className="row-flex">{big && <Avatar symbol={r.symbol} size={32} logo={{ chain: r.chain, token: r.token }} />}{w > 13 && <span className="as ell">{r.symbol}</span>}</div>
+            <div className="row-flex">{big && <Avatar symbol={r.symbol} size={32} />}{w > 13 && <span className="as ell">{r.symbol}</span>}</div>
             {big && <div className="av3 num">{usd(r.value!)}<div className={sgn(r.pnl)}>{pct(r.pnlBps)}</div></div>}
           </div>
         );
@@ -723,7 +723,7 @@ function DotLine({ pts }: { pts: [number, bigint][] }) {
 function PhoneRow({ r, onOpen, act }: { r: Row; onOpen(): void; act(a: PortfolioAction): void }) {
   return (
     <div className="mpr" data-pos={r.key} role="button" tabIndex={0} onClick={onOpen} onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && onOpen()}>
-      <Avatar symbol={r.symbol} size={44} logo={{ chain: r.chain, token: r.token }} />
+      <Avatar symbol={r.symbol} size={44} />
       <div className="mn">
         <div className="sy">{r.symbol}{r.exit && <span className="t3"><Ic name="target" size={12} /></span>}<MarkTag r={r} /></div>
         <div className="h num">{units(r.units)}</div>
@@ -752,7 +752,7 @@ function Sheet({ r, close, act }: { r: Row; close(): void; act(a: PortfolioActio
       <div className="msheet" role="dialog" aria-label={r.symbol} data-sheet="position">
         <div className="grab"><i /></div>
         <div className="shb">
-          <div className="shh"><Avatar symbol={r.symbol} size={44} logo={{ chain: r.chain, token: r.token }} /><div className="grow"><div className="sy">{r.symbol}</div><div className="h num">{units(r.units)} · {r.value === null ? "—" : usd(r.value)}</div></div><span className={`cpill num ${r.pnl === null ? "" : r.pnl >= 0n ? "g" : "r"}`}>{pct(r.pnlBps)}</span></div>
+          <div className="shh"><Avatar symbol={r.symbol} size={44} /><div className="grow"><div className="sy">{r.symbol}</div><div className="h num">{units(r.units)} · {r.value === null ? "—" : usd(r.value)}</div></div><span className={`cpill num ${r.pnl === null ? "" : r.pnl >= 0n ? "g" : "r"}`}>{pct(r.pnlBps)}</span></div>
           <div className="sheetgrid">
             {(["25", "50", "100"] as const).map((p) => <button type="button" key={p} className="num" data-control={`sheet-sell-${p}`} onClick={() => go({ kind: "sell", ...at, part: p })}>{p}%</button>)}
             <button type="button" className="n" data-control="sheet-initials" onClick={() => go({ kind: "sell", ...at, part: "initials" })}><W id="initials" /></button>

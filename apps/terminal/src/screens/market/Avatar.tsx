@@ -7,9 +7,9 @@ import { badgeSize, chainOf, padOf } from "./pads.ts";
  *  at (the main app does the same through its engine's /api/icon/:id). */
 export const logoUrl = (chain: string, token: string): string => `https://ct-api.unrealized.trade/v1/logo/${encodeURIComponent(chain)}/${encodeURIComponent(token)}`;
 
-/** Whose logo an avatar draws: a row's `icon` false means the helper has none (no request is made); true, or absent
- *  where the caller holds no row (Portfolio), asks for it and keeps the initials on any failure. */
-export type Logo = { chain: string; token: string; icon?: boolean };
+/** Whose logo an avatar draws: the helper's `icon` for the token. True asks for it (and keeps the initials on any
+ *  failure); false asks for nothing. */
+export type Logo = { chain: string; token: string; icon: boolean };
 
 /** The logo over the initials: hidden until it has loaded, so the avatar never shows a broken image or a blank, and it
  *  sits absolutely in the avatar's fixed box, so its arrival moves nothing. Off-screen rows load it when they come near. */
@@ -41,7 +41,7 @@ export function Avatar({ symbol, size, pad, chain, logo }: { symbol: string; siz
   let h = 7;
   for (const ch of symbol) h = (h * 31 + ch.charCodeAt(0)) % 360;
   const letters = Array.from(symbol.replace(/^\$/, "").normalize("NFKC").replace(/\p{M}/gu, "")).slice(0, 2).join("");
-  const src = logo && logo.icon !== false && logo.token ? logoUrl(logo.chain, logo.token) : null;
+  const src = logo?.icon === true && logo.token ? logoUrl(logo.chain, logo.token) : null;
   const av = (
     <span className="tok-av" aria-hidden="true" style={{ width: size, height: size, background: `conic-gradient(from ${h}deg at 35% 30%, oklch(0.62 0.15 ${h}), oklch(0.34 0.09 ${(h + 70) % 360}), oklch(0.5 0.13 ${h}), oklch(0.62 0.15 ${h}))`, color: `oklch(0.97 0.03 ${h})`, fontSize: Math.round(size * 0.36) }}>
       {letters}
