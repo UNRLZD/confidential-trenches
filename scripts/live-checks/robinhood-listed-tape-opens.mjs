@@ -36,8 +36,8 @@ export const DROPPED_MAX = 6;
  *  (apps/helper/src/data/evm/swaps.ts OPEN_BOUND_MS, 8 s) with what it holds. */
 export const ANSWER_MS = 10_000;
 /** A filling tape is filled within this of its first read [design: over twice the slowest measured, ten cold Base tapes
- *  and their charts opened at once on the public providers from the Mac: at a 12 s bound (17:50Z) eight filled 1.0 to
- *  20.2 s after their first answer; at the 8 s bound (17:58Z) three filled 4.3 to 5.9 s after it, and ten Robinhood ones
+ *  and their charts opened at once on the public providers from the Mac: at a 12 s bound (17:47Z) eight filled 1.0 to
+ *  20.2 s after their first answer; at the 8 s bound (17:56Z) three filled 4.3 to 5.9 s after it, and ten Robinhood ones
  *  answered whole by 7.8 s]. */
 export const FILLED_MS = 45_000;
 export const FILL_POLL_MS = 2_000;
