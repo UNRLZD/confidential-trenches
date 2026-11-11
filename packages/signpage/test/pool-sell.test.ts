@@ -33,6 +33,7 @@ import { openNoteStore, type NoteStore } from "../../wallet/src/notes/store.ts";
 import type { BuyWallet } from "../../wallet/src/pool/buy-wallets.ts";
 import { solanaPoolOf } from "../../wallet/src/pool/solana.ts";
 import { BLOCKHASH, FEE_PAYER, POOL, PROGRAM, fx, providers, rent } from "../../kit/test/solana-pool-buy-fx.ts";
+import { READ_WAIT_TOTAL_MS } from "../src/read-waits.ts";
 import { POOL_RENT_BACK_MS, POOL_RENT_BACK_RULES, POOL_SELL_LOCK, POOL_SELL_READS, POOL_SELL_SHARED_READ_MS, POOL_SELL_SIZE_RETRY_MS, POOL_SELL_AGREE_WAIT_MS, POOL_SELL_WAIT_MS, buyMints, leftAfter, owedRentBacks, planPoolSell, poolSellKind, resumeRentBacks, runPoolSell, settleDeadSellOps, settlePoolSells, settleSellOps, solanaSellAfterFull, solanaSellReserve, keptSells, stageOfLegs, type KeptSell, type OwedRentBack, type PoolSellHost, type PoolSellKindHost, type RentBackTold } from "../src/pool-sell.ts";
 import { opOf } from "../src/state.ts";
 import { solanaCompileV0 } from "../../kit/src/trade/solana/build.ts";
@@ -4933,7 +4934,8 @@ test("card pool-sell-legs-side-by-side: a later leg reads before its turn only w
     assert.ok(later.some((c) => c.p === p && namesIn(c.method, c.params, ataOfW(W.address))), "W's accounts read again after the first send");
     // the blockhash, its check and the coin's market: the sale's young reads (POOL_SELL_SHARED_READ_MS on this fake
     // chain's fixed clock), none of the second leg's own; past the bound it reads its own (the test of the shared reads)
-    assert.ok(!later.some((c) => c.p === p && (c.method === "getLatestBlockhash" || c.method === "isBlockhashValid")), "the second leg takes the sale's young blockhash");
+    // review of 55d4c6eb..dbf63c98 (P2-1): its own, read after the first send (the sale's young reads are forgotten at its turn)
+    assert.ok(later.some((c) => c.p === p && (c.method === (p === 0 ? "getLatestBlockhash" : "isBlockhashValid"))), "the second leg reads its own blockhash after the first send");
   }
   // before the first send, W's sale asked no blockhash, quote or venue of its own: one getLatestBlockhash (X's) on RPC 0
   assert.equal(earlier.filter((c) => c.method === "getLatestBlockhash").length, 1);
@@ -5124,7 +5126,7 @@ test("each plain refusal of a sale names its check in the leg's cause: fee_split
   }
   // a simulation that fails on one provider
   const s = await world({ simFailOn1: true });
-  check((await saleCause(s)).cause, "sim");
+  check((await saleCause(s)).cause, 'sim RPC 1 "Error: InsufficientFunds"');
   // W's PumpSwap cashback accounts on one provider only, read twice
   const need = BigInt(FEE) + rentMin(165) + rentMin(137) + rentMin(165);
   const v = await world({ venue: "pumpswap", cashback: true, ammCashback: true, ammHiddenOn1: true, held: 2n * AMOUNT, lamports: Number(need) }, [wallet(2n * AMOUNT, false, VF.pumpswap.mint)]);
@@ -5317,7 +5319,9 @@ test("every plain refusal in sellRun, depositHeld and treeSizes names its check 
 // caller's 42. Each leg after the first asked again the reads that are the same for every leg of the sale: the coin's
 // market (the reference's curve and PumpSwap reads, the venue's) and the blockhash. A later leg takes the sale's read
 // while it is under POOL_SELL_SHARED_READ_MS old, and reads its own past that.
-test("a sale's legs share its market and blockhash reads while they are young, and a leg past the bound reads its own", async () => {
+// review of 55d4c6eb..dbf63c98 (P2-1): a later leg signed on the sale's young read from before the earlier leg's sale; the
+// plan's reads stay its first leg's, and a later leg reads its own once the leg before it sent, young or not
+test("a sale's first leg shares the plan's market and blockhash reads; a later leg reads its own after the leg before it sent, young or not", async () => {
   for (const late of [false, true]) {
     const w = await twoBuys();
     let now = 1_000n;
@@ -5343,13 +5347,13 @@ test("a sale's legs share its market and blockhash reads while they are young, a
     assert.deepEqual("legs" in a && a.legs!.map((l) => l.stage), ["filled", "filled"], `late ${late}`);
     const n = (k: string) => asked.filter((x) => x === k).length;
     // the plan's and the first leg's: the reference's two market reads and the venue's on each RPC, one blockhash read
-    // and its check; the second leg: none of its own while young, all of them again past the bound
-    const legs = late ? 2 : 1;
+    // and its check; the second leg: all of them again
+    const legs = 2;
     assert.deepEqual([n("0:market"), n("1:market"), n("0:getLatestBlockhash"), n("1:isBlockhashValid")], [3 * legs, 3 * legs, legs, legs], `late ${late}: ${asked.join(" ")}`);
   }
 });
 
-test("a leg priced on the sale's shared read after an earlier leg's sell moved the curve signs a floor no lower than its own fresh read gives: only stricter, never below the user's slippage", async () => {
+test("a leg after an earlier leg's sell moved the curve signs the floor of its own read after that sell, however young the sale's read", async () => {
   // the first leg's send moves the curve's virtual SOL reserves down a tenth (its sell landed: the coin is cheaper), and
   // the clock on by `step`: 0, the second leg takes the sale's young read (priced before the move); past the bound, its own
   const floorOf = async (step: number): Promise<bigint> => {
@@ -5388,9 +5392,135 @@ test("a leg priced on the sale's shared read after an earlier leg's sell moved t
     const ix = m.instructions.find((x) => x.data.length === 24)!;
     return new DataView(ix.data.buffer, ix.data.byteOffset + 16, 8).getBigUint64(0, true);
   };
-  const shared = await floorOf(0);
+  const young = await floorOf(0);
   const own = await floorOf(POOL_SELL_SHARED_READ_MS + 1);
-  // the shared read's floor is above the fresh one's: on the chain the venue refuses a sell under it (the leg is refused,
-  // its W keeps its tokens), and no read makes a floor under the fresh read's price less the user's slippage
-  assert.ok(shared > own, `shared ${shared}, own ${own}`);
+  // the second leg reads the market after the first leg's send, young or not: its floor is the moved curve's price less
+  // the user's slippage either way (review of 55d4c6eb..dbf63c98, P2-1)
+  assert.equal(young, own);
+});
+
+// card pool-sell-legs-side-by-side, review of 55d4c6eb..dbf63c98 (P2-1): a sale that waited for its two providers to
+// agree (W's own accounts, the deposit's reads, the cashback accounts) signed on the market and blockhash it read before
+// the wait, so the quote's age rule judged a slot from before it: up to 20 s older than the rule's 25 slots. A leg's
+// price must be new: a wait after its quote was asked reads the market and the blockhash again before the rule judges
+// them; one path for it, also taken by a leg whose simulation an earlier leg of the same sale still in flight refused
+/** A host wait that marks the call log, so a test reads what the sale asked after its last wait. */
+const markedWait = (w: World) => async (ms: number) => void w.c.calls.push({ p: 0, method: `wait ${ms}`, params: [] });
+const sigOfSend = (c: { params: readonly unknown[] }): string => base58.encode(base64.decode(c.params[0] as string).subarray(1, 65));
+/** What the sale asked after its last wait before `sig`'s first send (the first send when none): the market on each
+ *  provider, RPC 0's blockhash; and whether any wait came before it at all. */
+const afterLastWait = (w: World, sig?: string) => {
+  const c = w.c.calls;
+  const end = c.findIndex((x) => x.method === "sendTransaction" && (sig === undefined || sigOfSend(x) === sig));
+  assert.ok(end > 0, "a send");
+  const from = c.slice(0, end).findLastIndex((x) => x.method.startsWith("wait "));
+  const tail = c.slice(from + 1, end);
+  const market = ([0, 1] as const).map((p) => tail.some((x) => x.p === p && x.method === "getMultipleAccounts" && (x.params[0] as string[])[0] === MINT));
+  return { waited: from >= 0, market, blockhash: tail.some((x) => x.p === 0 && x.method === "getLatestBlockhash") };
+};
+
+test("a sale that waits for its providers to agree after its quote was asked reads the market and the blockhash again before it signs: W's own accounts, the deposit's reads", async () => {
+  // W's token account on RPC 1 three reads late (round 1, beside the reference)
+  const a = await world({ ataLamports: TOKEN_RENT });
+  const x = await saleCause(a, { rpcs: heldHidden(a, (n) => n < 3), wait: markedWait(a) });
+  assert.equal(x.rec.stage, "filled", `${x.cause} ${JSON.stringify(x.answer)}`);
+  assert.deepEqual(afterLastWait(a), { waited: true, market: [true, true], blockhash: true }, "held");
+  // a stranger's deposit RPC 0 sees three reads late (round 2, after the reference)
+  const b = await world({ ataLamports: TOKEN_RENT, leaves: 1_023, labelLeaves: 1_023 });
+  let stale: Promise<unknown> | null = null;
+  const rpcs = depositReads(b, async (p, n, read) => {
+    if (p === 0) return n <= 3 ? (stale ??= read()) : read();
+    if (n === 0) {
+      await stale;
+      b.c.deposit(700_000n, 1_000_000n);
+    }
+    return read();
+  });
+  const y = await saleCause(b, { rpcs, wait: markedWait(b) });
+  assert.equal(y.rec.stage, "filled", `${y.cause} ${JSON.stringify(y.answer)}`);
+  assert.deepEqual(afterLastWait(b), { waited: true, market: [true, true], blockhash: true }, "deposit");
+});
+
+test("a later leg prices on reads made after the leg before it sent, and a wait at its turn reads them again: no leg signs on a market or blockhash read before the earlier leg's send", async () => {
+  const w = await twoBuys({ ataLamports: TOKEN_RENT });
+  // W (the second leg: X's 3 sells first) hidden on RPC 1 for three reads once X's sale is sent
+  let k = 0;
+  const sentOnce = () => w.c.calls.some((c) => c.method === "sendTransaction");
+  const x = await saleCause(w, { rpcs: heldHidden(w, () => sentOnce() && k++ < 3), wait: markedWait(w) }, share(10_000));
+  assert.deepEqual(x.rec.legs.map((l) => l.stage), ["filled", "filled"], JSON.stringify(x.rec.legs));
+  const wSig = x.rec.legs[1]!.tx!;
+  assert.deepEqual(afterLastWait(w, wSig), { waited: true, market: [true, true], blockhash: true });
+  // with no wait at all, a later leg's market and blockhash are still read after the earlier leg's send
+  const v = await twoBuys({ ataLamports: TOKEN_RENT });
+  const y = await saleCause(v, {}, share(10_000), "nw");
+  const c = v.c.calls;
+  const firstSend = c.findIndex((q) => q.method === "sendTransaction");
+  const second = c.findIndex((q) => q.method === "sendTransaction" && sigOfSend(q) === y.rec.legs[1]!.tx);
+  const between = c.slice(firstSend, second);
+  assert.ok(([0, 1] as const).every((p) => between.some((q) => q.p === p && q.method === "getMultipleAccounts" && (q.params[0] as string[])[0] === MINT)), "the market read again after the first send");
+  assert.ok(between.some((q) => q.p === 0 && q.method === "getLatestBlockhash"), "the blockhash read again after the first send");
+});
+
+test("a sign out during the agree waits ends them: no provider is asked again, nothing signed", async () => {
+  for (const at of ["held", "deposit"] as const) {
+    const w = await world({ ataLamports: TOKEN_RENT, leaves: 1_025, labelLeaves: 1_025 });
+    let out = false;
+    const rpcs = at === "held" ? heldHidden(w, () => true) : (() => { let s: Promise<unknown> | null = null; return depositReads(w, async (p, _n, read) => (p === 0 ? (s ??= read()) : (w.c.deposit(500_000n + BigInt(w.c.calls.length), 1_000_000n), read()))); })();
+    const a = await runPoolSell({ ...w.host, rpcs, stopped: () => out, wait: async (ms: number) => {
+      w.c.calls.push({ p: 0, method: `wait ${ms}`, params: [] });
+      out = true;
+    } }, ASK);
+    assert.deepEqual(a, { error: "failed" }, at);
+    const first = w.c.calls.findIndex((c) => c.method.startsWith("wait "));
+    assert.ok(first > 0, at);
+    // nothing read before the sign out is asked again; a read already on its way when it came (the note's mark, once
+    // per provider) is the most that follows it
+    const key = (c: { p: number; method: string; params: readonly unknown[] }) => `${c.p}:${c.method}:${JSON.stringify(c.params[0])}`;
+    const before = new Set(w.c.calls.slice(0, first).map(key));
+    const after = w.c.calls.slice(first + 1);
+    assert.deepEqual(after.filter((c) => before.has(key(c))).map(key), [], `${at}: asked again after the sign out`);
+    assert.ok(after.length <= 2, `${at}: ${after.map(key).join(" ")}`);
+    assert.equal(w.c.calls.filter((c) => c.method === "sendTransaction").length, 0);
+  }
+});
+
+test("a provider that agrees only now and then cannot hold a tap past its one bound: every wait a sale takes counts on the tap's READ_WAIT_TOTAL_MS", async () => {
+  const w = await world({ ataLamports: TOKEN_RENT });
+  const waits: number[] = [];
+  // RPC 1 shows W's token account on every 19th read only: each attempt waits out its split, then its quote is old
+  const a = await runPoolSell({ ...w.host, rpcs: heldHidden(w, (n) => n % 19 !== 18), wait: async (ms: number) => void waits.push(ms) }, ASK);
+  assert.ok("error" in a, JSON.stringify(a));
+  assert.equal(w.c.calls.filter((c) => c.method === "sendTransaction").length, 0);
+  const sum = waits.reduce((s, ms) => s + ms, 0);
+  assert.ok(sum > POOL_SELL_AGREE_WAIT_MS && sum <= READ_WAIT_TOTAL_MS, `waited ${sum}`);
+});
+
+test("a simulation refused names the provider and the program's error in the leg's cause; refused while an earlier leg of the sale is in flight, the leg is read and priced again and sells", async () => {
+  const s = await world({ simFailOn1: true });
+  const x = await saleCause(s);
+  assert.match(x.cause, /check sim RPC 1 "Error: InsufficientFunds"/, x.cause);
+  assert.deepEqual(x.answer, { error: "failed" });
+  // two legs: W's first simulation fails while X's sale (sent first) is not yet read back
+  const w = await twoBuys({ ataLamports: TOKEN_RENT });
+  let failed = false;
+  let release!: () => void;
+  const held = new Promise<void>((r) => (release = r));
+  const gate = (p: 0 | 1): SolanaRpc =>
+    (async (m: string, q: readonly unknown[]) => {
+      if (m === "getSignatureStatuses" || m === "getTransaction") await held;
+      if (m === "simulateTransaction" && !failed) {
+        const sm = solanaDecodeMessage(base64.decode(q[0] as string).subarray(65));
+        if (sm.staticKeys[0] === W.address) {
+          if (p === 1) {
+            failed = true;
+            setTimeout(release, 0);
+          }
+          return { context: { slot: 1 }, value: { err: { InstructionError: [0, { Custom: 6003 }] }, logs: ["Program log: Error Code: TooLittleSolReceived"] } };
+        }
+      }
+      return w.c.rpcs[p](m, q);
+    }) as SolanaRpc;
+  const y = await saleCause(w, { rpcs: [gate(0), gate(1)] as never, wait: markedWait(w) }, share(10_000), "sf");
+  assert.deepEqual(y.rec.legs.map((l) => l.stage), ["filled", "filled"], JSON.stringify(y.rec.legs));
+  assert.deepEqual(afterLastWait(w, y.rec.legs[1]!.tx!), { waited: true, market: [true, true], blockhash: true });
 });

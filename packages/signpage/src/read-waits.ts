@@ -47,6 +47,9 @@ export type ReadWaits = {
   next(e: unknown): number | null;
   /** Whether a wait was refused (`next` gave null): the tap is down, and no attempt starts again. */
   spent(): boolean;
+  /** A wait of `ms` that is not a fault's (a sale waiting for its two providers to agree), counted on the same bound:
+   *  false, and nothing counted, when it would end past it (the caller refuses what it waited for). */
+  hold(ms: number): boolean;
 };
 /** One tap's waits, its bound counted on `clock` from now. */
 export function readWaits(clock: ReadClock = deviceClock): ReadWaits {
@@ -64,6 +67,11 @@ export function readWaits(clock: ReadClock = deviceClock): ReadWaits {
       return p;
     },
     spent: () => spent,
+    hold(ms) {
+      if (spent || Math.max(clock() - start, waited) + ms > READ_WAIT_TOTAL_MS) return false;
+      waited += ms;
+      return true;
+    },
   };
 }
 // each request's bound by its id (a kind's host passes the request's context on as a copy, so the id names it), dropped
