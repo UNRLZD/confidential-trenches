@@ -445,9 +445,11 @@ const input = (e: Event): void => {
 addEventListener("pointerdown", input, true);
 addEventListener("keydown", input, true);
 
-// The screens with a field typed into (the 12 words, the withdraw forms' address and amount): the APP_HOST frame leaves
-// the document before they show (src/shell.ts seal), so no key typed or pasted there can reach it.
-const TYPED = new Set<string>(["words", "invalid-code", "withdraw", "pool-withdraw", "held"]);
+// The screens the APP_HOST frame must not sit under (src/shell.ts seal: it leaves the document before they show): those
+// with a field typed into (the 12 words, the withdraw forms' address and amount), so no key typed or pasted there can
+// reach it; and the 12 words shown (backup), since a frame under them keeps the opening tap's activation for seconds and
+// could put its own words on the clipboard over the user's Copy, or float a Picture-in-Picture window over them.
+const TYPED = new Set<string>(["words", "invalid-code", "withdraw", "pool-withdraw", "held", "backup"]);
 const GUARDED = new Set(["signout", "saved", "backup", "copy", "withdraw", "move-out"]);
 function button(action: string, label: string, onClick: () => void): HTMLButtonElement {
   const b = document.createElement("button");
