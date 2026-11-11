@@ -257,10 +257,11 @@ export async function positionsPass(r: PositionsReads, memo: PassMemo = passMemo
         else if (awaited.has(address)) look(k, awaited, address);
         continue;
       }
-      // a W the finder answered without, with no record and no buy this page ran: its note never spent (a buy refused or
-      // not landed), so nothing to show and nothing to wait for
-      if (answered && tokens === undefined && received === undefined) {
-        if (!awaited.has(address)) continue;
+      // a W the finder answered without (its list whole: every W whose note is SPENT or RESERVED is in it): its note never
+      // spent or was freed (a buy refused or not landed), so nothing to show, its record's amount included, and nothing
+      // to wait for but a buy this page ran with no record yet
+      if (answered && tokens === undefined) {
+        if (!awaited.has(address) || received !== undefined) continue;
         // a buy this page ran whose W the finder does not know yet: looked for again, its last amount while it is
         look(k, awaited, address);
         const last = memo.held.get(k);
