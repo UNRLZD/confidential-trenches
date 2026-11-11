@@ -34,16 +34,17 @@ const wait = (ms: number) => new Promise((ok) => setTimeout(ok, ms));
 
 /** `fetch` paced per host (HOST_GAP_MS between call starts, one schedule for the whole process) and held for HOLD_MS
  *  after a 429 (a held host's call fails at once, so the other host answers): the NEAR market reads' default fetch. */
-export function pacedFetch(base: Fetch = (u, i) => fetch(u, i)): Fetch {
+export function pacedFetch(base: Fetch = (u, i) => fetch(u, i), clock: { now: () => number; sleep: (ms: number) => Promise<unknown> } = { now: Date.now, sleep: wait }): Fetch {
   return async (url, init) => {
     const host = new URL(url).host;
-    if ((heldUntil.get(host) ?? 0) > Date.now()) throw new Error("host held");
-    const at = Math.max(Date.now(), next.get(host) ?? 0);
-    if (at - Date.now() > WAIT_MAX_MS) throw new Error("host busy");
+    const t = clock.now();
+    if ((heldUntil.get(host) ?? 0) > t) throw new Error("host held");
+    const at = Math.max(t, next.get(host) ?? 0);
+    if (at - t > WAIT_MAX_MS) throw new Error("host busy");
     next.set(host, at + HOST_GAP_MS);
-    if (at > Date.now()) await wait(at - Date.now());
+    if (at > t) await clock.sleep(at - t);
     const r = await base(url, init);
-    if (r.status === 429) heldUntil.set(host, Date.now() + HOLD_MS);
+    if (r.status === 429) heldUntil.set(host, clock.now() + HOLD_MS);
     return r;
   };
 }
