@@ -73,7 +73,7 @@ import type { BuyWallet } from "../../wallet/src/pool/buy-wallets.ts";
 import { solanaPoolOf, solanaTreeSync, type SolanaPoolPin, type SolanaTreeSync } from "../../wallet/src/pool/solana.ts";
 import { WALLET_SEED_LOCK } from "@blindfill/wallet/store";
 import { blockhashOf, pastOnBoth, readBack, readBackFailure, readBackMeta, type BuyMints } from "./pool-buy.ts";
-import { afterOf, keptReads, READ_WAIT, readWaits, solanaStableReads, waitsOn, waitUnless } from "./read-waits.ts";
+import { afterOf, keptReads, READ_WAIT, readWaits, solanaStableReads, waitsOn, waitUnless, type ReadWaits } from "./read-waits.ts";
 import { throttleWaitMs } from "../../wallet/src/throttle.ts";
 import { fromRecord, timedStore, TRADE_STORE_MS, tradeLock, type TradeStore } from "./trade.ts";
 import { checkSolanaSell, checkSolanaSweep, checkSolanaTeardownFrames, PoolRuleRefused, poolUnits, signSolana, SOLANA_POOL_MIN_DEPOSIT, SOLANA_POOL_SELL_RESERVE_MAX, SOLANA_SWEEP_OWED_MAX, solanaDepositRents, solanaSellAfterFull, solanaSweepFloor, solanaSweepKeep, type PoolAsk, type SolanaDepositHeld } from "./rules/pool.ts";
@@ -582,9 +582,8 @@ export const buyMints = (store: () => Promise<Pick<TradeStore, "get" | "update">
 };
 
 /** One W's sale, built again (POOL_SELL_REBUILDS at most) while its deposit meets a page another deposit filled first. */
-async function sellRuns(h: PoolSellHost, ask: PoolAsk, later: Later, w: BuyWallet): Promise<LegAnswer> {
+async function sellRuns(h: PoolSellHost, ask: PoolAsk, later: Later, w: BuyWallet, waits: ReadWaits): Promise<LegAnswer> {
   const wait = h.wait ?? ((ms: number) => new Promise<void>((res) => setTimeout(res, ms)));
-  const waits = readWaits();
   for (let i = 0; ; ) {
     delete later.rebuild;
     delete later.fault;
@@ -714,6 +713,7 @@ async function sellAll(host: PoolSellHost, ask: PoolAsk, laters: Later[], hooks:
   // the sell's reads that cannot change while it waits, kept per provider across its attempts (read-waits.ts)
   const h: PoolSellHost = Object.assign(Object.create(host) as PoolSellHost, { rpcs: keptReads(host.rpcs, solanaStableReads(ask.token)) });
   const wait = h.wait ?? ((ms: number) => new Promise<void>((res) => setTimeout(res, ms)));
+  // one tap's waits: its plan's and every sale's share the rule's one total (READ_WAIT_TOTAL_MS)
   const waits = readWaits();
   for (;;) {
     try {
@@ -760,7 +760,7 @@ async function sellAll(host: PoolSellHost, ask: PoolAsk, laters: Later[], hooks:
       },
     });
     return prior
-      .then((): Promise<LegAnswer> | LegAnswer => (h.stopped?.() ? { error: "failed" } : sellRuns(leg, { ...ask, amount: l.units, shareBps: undefined }, later, l.w)))
+      .then((): Promise<LegAnswer> | LegAnswer => (h.stopped?.() ? { error: "failed" } : sellRuns(leg, { ...ask, amount: l.units, shareBps: undefined }, later, l.w, waits)))
       .catch((): LegAnswer => ({ error: "failed" }))
       .then((a) => {
         open();

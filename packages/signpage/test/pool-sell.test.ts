@@ -4683,3 +4683,13 @@ test("card start-reads-wait-out-a-throttle: the rent back's tries after a provid
   assert.deepEqual(waits.slice(0, n), [1_000, 2_000, 4_000, 8_000, 10_000].slice(0, n), JSON.stringify(w.told));
   assert.equal(w.told.at(-1)?.state, "sent");
 });
+
+test("card start-reads-wait-out-a-throttle: one tap's waits share one total: a two-wallet sell whose every sale's fee read stays throttled waits 1, 2, 4, 8 and 10 s in all, never 25 s per wallet, and signs nothing", async () => {
+  const w = await twoBuys({ ataLamports: TOKEN_RENT });
+  const f = faulty(w, (p, method) => (p === 0 && method === "getFeeForMessage" ? run6() : null));
+  const t = waitsBeforeSend(f);
+  const a = await runPoolSell({ ...w.host, rpcs: f.rpcs, wait: t.wait }, share(10_000));
+  assert.deepEqual(t.waits, [1_000, 2_000, 4_000, 8_000, 10_000], JSON.stringify(a));
+  assert.equal(f.sales.size, 0);
+  assert.ok(!("stage" in a) || a.stage === "refused", JSON.stringify(a));
+});

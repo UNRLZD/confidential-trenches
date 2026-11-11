@@ -6,8 +6,9 @@
 //   - wired: that store is the page's one (testnetPoolDeps' decimals), the Solana buy keeps its own read in it (the buy
 //     host's outDecimals), the EVM buy reads through it with no wait (waits:0; the EVM buy is in the testnet build only,
 //     so on SIGN_HOST's mainnet build its host is absent: "none"), and the sell reads through it;
-//   - wait: a provider that fails is asked again only after the wallet's throttleWaitMs (from 1 s, doubling, up to
-//     10 s, a Retry-After to 10 s: the bounds pool-sell.ts keeps), three waits by default, then the failure is thrown;
+//   - wait: a provider that fails is asked again only after the page's one wait rule (read-waits.ts readWaits, card
+//     start-reads-wait-out-a-throttle: the wallet's throttleWaitMs from 1 s, doubling, up to 10 s, a Retry-After to
+//     10 s), none with waits 0; past the rule's total the failure is thrown;
 //   - down: the sell answers down only for a failed read, not_allowed for two answers that disagree.
 // What each does is held by the card's tests (packages/signpage/test/pool-kinds-decimals.test.ts, the page's buy-then-
 // sell test in positions.test.ts); the recorded answers are facts() over each tree's packages/signpage/index.html and
@@ -52,17 +53,19 @@ export function facts(index, js) {
     evmBuy: new RegExp(`decimals:${N}=>${esc(F)}\\([^)]{0,80}\\{waits:0\\}\\)`).test(js) || (EVM_BUY_HOST.test(js) ? false : "none"),
     sell: new RegExp(`after:${esc(F)}\\(${N},${N}\\.token,${N},\\{kept:`).test(js),
   };
-  // the wait: past `waits` (3 by default) the failure is thrown; else pause = T(pause, after, B), then the wait of it
-  const loop = new RegExp(`(${N})=${N}\\.waits\\?\\?3,[^]*?if\\((${N})>=\\1\\)throw (${N})\\[0\\];let (${N})=Math\\.max\\(0,\\.\\.\\.\\3\\.map\\([^]{0,80}?afterMs[^]{0,40}?\\)\\);(${N})=(${N})\\(\\5,\\4,(${N})\\),await ${N}\\(\\5\\)\\}`).exec(body);
-  if (loop) {
-    const [, , , , , , T, B] = loop;
+  // the wait: none with waits 0, else the rule's next; null (its total spent): the failure thrown
+  const loop = new RegExp(`(${N})=${N}\\.waits===0\\?null:(${N})\\(\\)[^]*?(${N})=\\1===null\\?null:\\1\\.next\\((${N})\\);if\\(\\3===null\\)throw \\4;`).exec(body);
+  // the rule: next(e) = T(pause, Retry-After of e, B)
+  const def = loop ? new RegExp(`[,; ](${N})=Object\\.freeze\\(\\{firstMs:(${N}),maxMs:(${N}),afterMaxMs:\\3\\}\\),(${N})=[^;]{0,80};function ${esc(loop[2])}\\(\\)\\{let (${N})=0,(${N})=0;return\\{next\\((${N})\\)\\{let (${N})=(${N})\\(\\5,\\4\\(\\7\\),\\1\\);`).exec(js) : null;
+  if (def) {
+    const T = def[9];
     const rule = new RegExp(`function ${esc(T)}\\((${N}),(${N}),(${N})=${N}\\)\\{let ${N}=Number\\.isFinite\\(\\1\\)&&\\1>0\\?Math\\.min\\(\\1\\*2,\\3\\.maxMs\\):\\3\\.firstMs,${N}=typeof \\2==${Q}number${Q}&&Number\\.isFinite\\(\\2\\)&&\\2>0\\?Math\\.min\\(\\2,\\3\\.afterMaxMs\\):0;return Math\\.max\\(`).test(js);
-    const bounds = new RegExp(`[,; ]${esc(B)}=Object\\.freeze\\(\\{firstMs:(${N}),maxMs:(${N}),afterMaxMs:\\2\\}\\)`).exec(js);
-    const value = (name) => new RegExp(`[,; ]${esc(name)}=([\\d.e]+)[,;]`).exec(js)?.[1];
-    out.wait = rule && bounds !== null && Number(value(bounds[1])) === 1_000 && Number(value(bounds[2])) === 10_000;
+    const value = (name) => (/^[\d.e]+$/.test(name) ? name : new RegExp(`[,; ]${esc(name)}=([\\d.e]+)[,;]`).exec(js)?.[1]);
+    out.wait = rule && Number(value(def[2])) === 1_000 && Number(value(def[3])) === 10_000;
   }
-  // down only for a failed read: a rule's refusal (two answers that disagree) is not_allowed
-  const no = new RegExp(`,(${N})=>\\{(${N})=\\1 instanceof ${N}\\?(${N}):(${N})\\}\\),answer:\\(\\)=>\\2\\}`).exec(js.slice(js.indexOf(`after:${F}(`)));
+  // down only for a failed read: a rule's refusal (two answers that disagree) is not_allowed (a sign out's stop, since
+  // card start-reads-wait-out-a-throttle, failed)
+  const no = new RegExp(`,(${N})=>\\{(${N})=\\1 instanceof ${N}\\?(${N}):(?:\\1 instanceof ${N}\\?${N}:)?(${N})\\}\\),answer:\\(\\)=>\\2\\}`).exec(js.slice(js.indexOf(`after:${F}(`)));
   if (no) out.down = new RegExp(`[,; ]${esc(no[4])}=Object\\.freeze\\(\\{error:${Q}down${Q}\\}\\)`).test(js) && new RegExp(`[,; ]${esc(no[3])}=Object\\.freeze\\(\\{error:${Q}not_allowed${Q}\\}\\)`).test(js);
   return out;
 }
