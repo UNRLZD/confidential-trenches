@@ -360,13 +360,23 @@ test("past the deadline's margin the sale is signed once more on the same nonce 
   assert.deepEqual(await openOf(x), []);
 });
 
+/** A closed page's tap: the device's timers mocked as well as its clock, so the tap's bound on the send (its 20 s
+ *  timer) never passes while the test runs, and resetTimers clears it at the test's end; the order of the run's steps is
+ *  the test's own, never a race with a real timer. */
+const closedPageTimers = () => {
+  resetTimers(mock.timers);
+  enableTimers(mock.timers, { apis: ["Date", "setTimeout"], now: Date.now() });
+};
+
 test("a page closed between the record and the send: a reload's follow puts the note back PLANNED past the deadline, record dropped", async () => {
-  const x = await world({ send: () => new Promise<string>(() => {}) });
-  // the closed page's tap: its bound on the send the test's own, so its timer does not hold the test's process 20 s
-  x.h.sendTapMs = 1;
+  closedPageTimers();
+  // the send is asked (the record and the note INCOMING before it), and never answers: the page closed
+  let posted!: () => void;
+  const asked = new Promise<void>((r) => (posted = r));
+  const x = await world({ send: () => (posted(), new Promise<string>(() => {})) });
   void runEvmPoolSell(x.h, ASK);
-  for (let i = 0; i < 200 && (await openOf(x)).length === 0; i++) await new Promise((r) => setImmediate(r));
-  for (let i = 0; i < 200 && x.posts.length === 0; i++) await new Promise((r) => setImmediate(r));
+  await asked;
+  assert.equal((await openOf(x)).length, 1);
   assert.equal((await returnNote(x.store))?.state, "INCOMING");
   // the reload: a new host on the same store and records, nothing of the closed run's in memory; the chain moves past
   const { h } = await world({ store: x.store, md: x.md });
@@ -380,18 +390,21 @@ test("a page closed between the record and the send: a reload's follow puts the 
 });
 
 test("a page closed between the send and the read-back: a reload's follow lands the one note UNSPENT, record dropped", async () => {
+  closedPageTimers();
+  // the send is asked and its deposit lands, and the answer never comes: the page closed
+  let posted!: () => void;
+  const asked = new Promise<void>((r) => (posted = r));
   let x!: World;
   x = await world({
     send: (_n, body) => {
       const s = sellOf(body.data);
       x.land(s.minOut - s.fee);
+      posted();
       return new Promise<string>(() => {});
     },
   });
-  // the closed page's tap: its bound on the send the test's own, so its timer does not hold the test's process 20 s
-  x.h.sendTapMs = 1;
   void runEvmPoolSell(x.h, ASK);
-  for (let i = 0; i < 400 && x.posts.length === 0; i++) await new Promise((r) => setImmediate(r));
+  await asked;
   assert.equal(x.posts.length, 1);
   const { h } = await world({ store: x.store, md: x.md });
   h.rpcs = x.h.rpcs;
