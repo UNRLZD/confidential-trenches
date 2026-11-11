@@ -4,8 +4,10 @@
 // the bundle where the buy picks it (`<cluster> === "mainnet" ? TIP : 0n`, src/pool-buy.ts), is over Jito's 1,000
 // lamport minimum (two buys at it were taken by a block engine and never landed, 11 Nov) and at most the proof's tip
 // cap, 1,000,000 (packages/wallet SOL_TIP_CAP); and the pool sell pays a priority fee on mainnet: the bundle builds its
-// compute budget there (src/pool-sell.ts solanaSellBudget) and the sell box's preview counts a priority of more than 0
-// (src/pool-sell-dry.ts). It does not prove a buy or a sell lands: only a mainnet tap does, read back on two RPCs.
+// compute budget there for what W holds beyond the sell's need on a form with room for it (src/pool-sell.ts
+// solanaSellBudget, solanaSellBudgetFits), a partial sell keeps a priority of more than 0 on W for the next one, and the
+// sell box's preview prices the sale on mainnet the same way (src/pool-sell-dry.ts poolSellPays, its network the fee
+// and the priority). It does not prove a buy or a sell lands: only a mainnet tap does, read back on two RPCs.
 // After: sign
 //   node scripts/live-checks/sol-pool-buy-lands-on-mainnet.mjs [--record <file>] [--answer <file>]
 // PASS exit 0, FAIL exit 1, error exit 2.
@@ -27,9 +29,14 @@ const valueOf = (js, name) => {
 /** What the check keeps of the reads: the index, the bundle's sha384, the buy's mainnet tip and the sell's priority. */
 export function facts(index, js) {
   const buy = new RegExp(`let ${ID}=${ID}\\.cluster===\`mainnet\`\\?(${ID}):0n,${ID}=new Map`).exec(js);
-  const sellBuilds = new RegExp(`${ID}\\.cluster===\`mainnet\`\\?${ID}\\(null\\):null`).test(js);
-  const preview = new RegExp(`${ID}\\+\\(${ID}\\.cluster===\`mainnet\`\\?(${ID}):0n\\)`).exec(js);
-  return { index, sha384: sha384(js), buyTip: buy ? valueOf(js, buy[1]) : null, sellBudget: sellBuilds, sellPriority: preview ? valueOf(js, preview[1]) : null };
+  // the sale: on mainnet, on a form with room, the budget for what W holds beyond the need (`c===mainnet&&fits(kind,
+  // cashback)?lamports-need:0n,budget=solanaSellBudget(null,solanaSellPriority(room))`); the preview priced on mainnet
+  // (`poolSellPays(..., sizes, c===mainnet)`) with network the fee plus its priority
+  const sellBuilds = new RegExp(`${ID}\\.cluster===\`mainnet\`&&${ID}\\(${ID}\\.kind,${ID}\\.cashback\\)\\?${ID}-${ID}:0n,${ID}=${ID}\\(null,${ID}\\(${ID}\\)\\)`).test(js);
+  const previewPriced = new RegExp(`${ID}\\.sizes,${ID}\\.cluster===\`mainnet\`\\)`).test(js) && new RegExp(`network:${ID}\\(${ID}\\+${ID}\\.priority,`).test(js);
+  // a partial sell's keep: the next sell's need plus the priority on mainnet (`need+(c===mainnet?PRIORITY:0n)`)
+  const kept = new RegExp(`\\)\\+\\(${ID}\\.cluster===\`mainnet\`\\?(${ID}):0n\\)`).exec(js);
+  return { index, sha384: sha384(js), buyTip: buy ? valueOf(js, buy[1]) : null, sellBudget: sellBuilds && previewPriced, sellPriority: kept ? valueOf(js, kept[1]) : null };
 }
 
 /** The verdict on an answer { index, sha384, buyTip, sellBudget, sellPriority }. */
@@ -43,9 +50,9 @@ export function judge(a) {
   if (tip === null) bad("the bundle's mainnet buy tip is not read");
   else if (tip <= 1_000n) bad(`the mainnet buy tips ${tip} lamports, not over Jito's 1,000 minimum`);
   else if (tip > 1_000_000n) bad(`the mainnet buy tips ${tip} lamports, over the proof's tip cap 1,000,000`);
-  if (a?.sellBudget !== true) bad("the bundle builds no compute budget for a mainnet sell");
+  if (a?.sellBudget !== true) bad("the bundle builds no compute budget for a mainnet sell, or its preview does not price it");
   const pri = typeof a?.sellPriority === "string" && /^\d{1,19}$/.test(a.sellPriority) ? BigInt(a.sellPriority) : null;
-  if (pri === null || pri === 0n) bad("the sell box's preview counts no mainnet priority fee");
+  if (pri === null || pri === 0n) bad("a mainnet partial sell keeps no priority fee on W for the next sell");
   return { ok: !lines.some((l) => l.startsWith("BAD")), lines };
 }
 

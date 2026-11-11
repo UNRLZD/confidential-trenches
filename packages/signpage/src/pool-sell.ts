@@ -33,8 +33,9 @@
 // - The reserve, the lamports W keeps out of the deposit: the costs (the tx fee both RPCs price the message at, the
 //   mark's rent and each tree page's growth, as pool-deposit.ts counts them) and an empty account's rent W must keep,
 //   less what W holds. On devnet no compute budget instruction: no priority fee; on mainnet a limit and a price
-//   (solanaSellBudget: about SOLANA_POOL_SELL_PRIORITY in all, the limit sized from the simulation), in the fee both
-//   RPCs price, so the reserve, the funds check and the rule count it. A reserve over SOLANA_POOL_SELL_RESERVE_MAX or
+//   (solanaSellBudget: SOLANA_POOL_SELL_PRIORITY in all, or what W holds beyond the sell's need under it, none at 0;
+//   only on a form with room for it under 1,232 bytes, solanaSellBudgetFits; the limit sized from the simulation), in
+//   the fee both RPCs price, so the reserve, the funds check and the rule count it; a partial sell keeps it on W too. A reserve over SOLANA_POOL_SELL_RESERVE_MAX or
 //   at least min out is refused.
 // - Built here (the kit's solanaPoolSellSteps, then the tag 1 deposit of min out less the reserve with the return note's
 //   precommitment, last), checked by the rule (rules/pool.ts checkSolanaSell, against the page's pin read at the check),
@@ -63,7 +64,7 @@ import { readSolanaPoolBuyVenue, readSolanaRent, SOLANA_POOL_PAGE_ENTRIES, SOLAN
 import { SOLANA_POOL_NEXT_PAGE_WINDOW, solanaPoolNoteFloor, solanaPoolPreMarkOf, type SolanaPoolPreMark } from "../../kit/src/trade/solana/pool-deposit.ts";
 import { solanaDecodeTokenAccount, type SolanaReference } from "../../kit/src/trade/solana/pool.ts";
 import { pageReference } from "./page-rpc.ts";
-import { SOLANA_MAX_TX_BYTES, solanaAta, solanaProgramAddress } from "../../kit/src/checks/solana/message.ts";
+import { SOLANA_MAX_TX_BYTES, solanaAta, solanaDecodeMessage, solanaProgramAddress } from "../../kit/src/checks/solana/message.ts";
 import { SOLANA_COMPUTE_BUDGET_PROGRAM, SOLANA_CU_PRICE_MAX, SOLANA_PUMP_AMM_PROGRAM, SOLANA_PUMP_PROGRAM, SOLANA_SOL_MINT, SOLANA_SYSTEM_PROGRAM, SOLANA_TOKEN_2022_PROGRAM, SOLANA_TOKEN_PROGRAM, solanaTeardownAddresses, solanaTeardownPlan, solanaVolumeAccumulator, solanaVolumeClaimable, type SolanaHeldRead, type SolanaTeardownSimulation, type SolanaTeardownUnclaimed } from "../../kit/src/checks/solana/checks.ts";
 import { SolanaRpcTransportError, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import { vaultLabelOf } from "../../kit/src/vault/shapes.ts";
@@ -1226,7 +1227,7 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later, w: BuyWallet
     const owed = [SOLANA_PUMP_PROGRAM, SOLANA_PUMP_AMM_PROGRAM].filter((vp, k) => (venue.cashback && vp === venueProgram) || tokens.owes[k]).length;
     // a sell that empties W's holding keeps what lets the rent back's sweep reach the floor (solanaSellAfterFull, card
     // sol-w-sweep): every lamport over it goes into this sell's note
-    const after = keeps ? solanaPoolBuySellNeed(venue, rent) : solanaSellAfterFull(rent, owed);
+    const after = keeps ? solanaPoolBuySellNeed(venue, rent) + (h.cluster === "mainnet" ? SOLANA_POOL_SELL_PRIORITY : 0n) : solanaSellAfterFull(rent, owed);
     const holds = deposit.held;
     sizes = deposit.sizes;
     // the deposit's form: the eight names each tree's next page, so it lands when inserts that land first carry an entry
@@ -1236,8 +1237,14 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later, w: BuyWallet
     // SOLANA_POOL_NEXT_PAGE_WINDOW of their page's end: the reserve prices a next page's opening only there, and a tree
     // further out that more inserts turn would open its next page out of what W keeps for its next sell (review LOW 1)
     const near = (size: number): boolean => SOLANA_POOL_PAGE_ENTRIES - (size % SOLANA_POOL_PAGE_ENTRIES) <= SOLANA_POOL_NEXT_PAGE_WINDOW;
-    // mainnet: W's compute budget first (solanaSellBudget), its limit sized once the simulation has read the units
-    let budget = h.cluster === "mainnet" ? solanaSellBudget(null) : null;
+    // mainnet: W's compute budget first (solanaSellBudget), its limit sized once the simulation has read the units, for
+    // what W holds beyond the sell's need, at most SOLANA_POOL_SELL_PRIORITY (never a reason to refuse: none, no budget),
+    // and only on a form with room for it (solanaSellBudgetFits, the preview's decision too)
+    const room = h.cluster === "mainnet" && solanaSellBudgetFits(venue.kind, venue.cashback) ? lamports - need : 0n;
+    let budget = solanaSellBudget(null, solanaSellPriority(room));
+    const cap = budget === null ? 0n : solanaSellPriority(room);
+    // the largest form decides (above); this sell's own six, compiled, never over the size with it either
+    if (budget !== null && wireOf(solanaCompileV0(w.address, [...budgetIxs(budget), ...steps, depositIx(program, pool, w.address, sizes, pre, minOut, false)], bh.blockhash, []).message).length > SOLANA_MAX_TX_BYTES) budget = null;
     const fits = wireOf(solanaCompileV0(w.address, [...budgetIxs(budget), ...steps, depositIx(program, pool, w.address, sizes, pre, minOut, true)], bh.blockhash, []).message).length <= SOLANA_MAX_TX_BYTES;
     const eight = fits && (!keeps || (near(sizes.stateSize) && near(sizes.labelSize)));
     const floor = solanaSweepFloor(rent) > SOLANA_POOL_MIN_DEPOSIT ? solanaSweepFloor(rent) : SOLANA_POOL_MIN_DEPOSIT;
@@ -1318,10 +1325,10 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later, w: BuyWallet
       if (!sized) {
         sized = true;
         const units = sims.map((v) => (v as { unitsConsumed?: unknown }).unitsConsumed);
-        const again = solanaSellBudget(units.every((u) => Number.isSafeInteger(u)) ? Math.max(...(units as number[])) : null);
-        if (again.limit !== budget!.limit) {
+        const again = solanaSellBudget(units.every((u) => Number.isSafeInteger(u)) ? Math.max(...(units as number[])) : null, cap);
+        if (again?.limit !== budget?.limit || again?.price !== budget?.price) {
           budget = again;
-          fee = SOLANA_POOL_SELL_FEE + again.priority;
+          fee = SOLANA_POOL_SELL_FEE + (again?.priority ?? 0n);
           continue;
         }
       }
@@ -1345,6 +1352,8 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later, w: BuyWallet
     const signed = wire.slice();
     signed.set(sig, 1);
     const signature = base58.encode(sig);
+    // the form sent, for the page's console: the priority it pays (none: no compute budget) and the deposit's accounts
+    if (h.cluster === "mainnet") console.info(`sell form: priority ${budget?.priority ?? 0n}${budget === null ? " (no compute budget)" : ""}, deposit ${value === 0n ? "none" : next ? "eight" : "six"}`);
     // written before the signed transaction leaves the device: the note INCOMING with W's send, so a page closed or
     // reloaded from here on leaves a record its next load settles (settlePoolSells) by the same verdict rules. No
     // deposit back (value 0, under noteFloor): no note, the return note left as it was for the next sell
@@ -1400,11 +1409,13 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later, w: BuyWallet
       const dead = got[0].got === "failed" && got[1].got === "failed";
       // the request's stage before the note leaves INCOMING (a write that fails throws, answered "sent" below, the
       // note settled at the next load), but for a sell built again: the next attempt's record names its own signature
-      const again = dead && !later.last && got.every((g) => wrongAccount(g.err, steps.length));
+      // the deposit's index, read from the message W signed: the last instruction, when it is the pool's deposit
+      const depositAt = depositIndex(signed, program);
+      const again = dead && !later.last && got.every((g) => wrongAccount(g.err, depositAt));
       const { end } = await settleSellNote(rpcs, program, scope, sync, store, note, dead, (sig, stage, e) => (again && e === "dropped" ? undefined : h.settled?.(sig, stage)));
       // its deposit (the last instruction) met a page another deposit filled first, and its note is PLANNED again (the
       // settle dropped it, review L-A): built again from new reads
-      if (dead && end === "dropped" && got.every((g) => wrongAccount(g.err, steps.length))) later.rebuild = true;
+      if (dead && end === "dropped" && got.every((g) => wrongAccount(g.err, depositAt))) later.rebuild = true;
       if (end === "filled" && !keeps) later.back = back;
       if (end !== "pending") return { stage: stageOf(end, dead), txs };
       // failed on both, its note's mark on one RPC only: refused; the note settles at the next load or sell
@@ -1431,19 +1442,47 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later, w: BuyWallet
 }
 
 /** W's priority fee on a mainnet sell, lamports (card sol-pool-buy-lands-on-mainnet): a sell with none can sit unlanded on
- *  a busy leader while the blockhash dies. W holds it up front: a mainnet buy leaves W the sell's need on every venue
- *  (solanaPoolBuySellNeed) and what the proof's tip cap held beyond the tip it paid (1,000,000 less 100,000), and the
- *  sell refuses a W short of the fee both RPCs price (not_funded); the reserve takes it back out of the sale. */
+ *  a busy leader while the blockhash dies. W pays it up front from what it holds beyond the sell's need: a mainnet buy
+ *  leaves W the sell's need on every venue (solanaPoolBuySellNeed) and what the proof's tip cap held beyond the tip it
+ *  paid (1,000,000 less 100,000), and a partial sell keeps it on W for the next. Never a reason to refuse: a W with less
+ *  pays that, one with none sends without it, as before (solanaSellPriority); the reserve takes it back out of the sale. */
 export const SOLANA_POOL_SELL_PRIORITY = 100_000n;
-/** A mainnet sell's compute budget: the limit 1.2x the units its simulation used (the larger of both RPCs'; unread, the
- *  runtime's most, SOLANA_POOL_CU_LIMIT_MAX), the price that makes limit x price SOLANA_POOL_SELL_PRIORITY at most
- *  (never over SOLANA_CU_PRICE_MAX), and the priority fee the runtime charges for them (rounded up). */
-export function solanaSellBudget(units: number | null): { limit: number; price: bigint; priority: bigint } {
+/** A mainnet sell's compute budget for a priority of at most `cap` lamports: the limit 1.2x the units its simulation used
+ *  (the larger of both RPCs'; unread, the runtime's most, SOLANA_POOL_CU_LIMIT_MAX), never under SOLANA_POOL_SELL_CU_MIN,
+ *  and the price that makes limit x price `cap` at most (never over SOLANA_CU_PRICE_MAX), with the priority fee the
+ *  runtime charges for them (rounded up): `cap` itself at any limit up to 1,000,000, a lamport under it at most past
+ *  that. null when it buys no price (a `cap` of 0): the sell goes without a compute budget. */
+export function solanaSellBudget(units: number | null, cap: bigint = SOLANA_POOL_SELL_PRIORITY): { limit: number; price: bigint; priority: bigint } | null {
   const sized = units !== null && Number.isSafeInteger(units) && units > 0 ? Math.ceil((units * 6) / 5) : SOLANA_POOL_CU_LIMIT_MAX;
-  const limit = Math.min(sized, SOLANA_POOL_CU_LIMIT_MAX);
-  const fit = (SOLANA_POOL_SELL_PRIORITY * 1_000_000n) / BigInt(limit);
+  const limit = Math.min(Math.max(sized, SOLANA_POOL_SELL_CU_MIN), SOLANA_POOL_CU_LIMIT_MAX);
+  const fit = cap > 0n ? (cap * 1_000_000n) / BigInt(limit) : 0n;
   const price = fit < SOLANA_CU_PRICE_MAX ? fit : SOLANA_CU_PRICE_MAX;
-  return { limit, price, priority: (BigInt(limit) * price + 999_999n) / 1_000_000n };
+  return price === 0n ? null : { limit, price, priority: (BigInt(limit) * price + 999_999n) / 1_000_000n };
+}
+/** The priority a mainnet sell from a W holding `room` lamports beyond the sell's need pays, on a form with room for the
+ *  compute budget (solanaSellBudgetFits): SOLANA_POOL_SELL_PRIORITY, or all of `room` under it, or none when that buys
+ *  no price (solanaSellBudget). The sale pays it (to the lamport at any limit up to 1,000,000) and the preview counts it. */
+export function solanaSellPriority(room: bigint): bigint {
+  const cap = room <= 0n ? 0n : room < SOLANA_POOL_SELL_PRIORITY ? room : SOLANA_POOL_SELL_PRIORITY;
+  return solanaSellBudget(null, cap) === null ? 0n : cap;
+}
+/** The least compute unit limit a sell's budget asks: at a limit of at least SOLANA_POOL_SELL_PRIORITY's count the price
+ *  is under SOLANA_CU_PRICE_MAX, so the priority is the cap the preview counts, not the limit. */
+export const SOLANA_POOL_SELL_CU_MIN = Number(SOLANA_POOL_SELL_PRIORITY);
+/** Whether a sell on `kind` (a `cashback` coin's or not) has room under 1,232 bytes for the compute budget: its largest
+ *  form, the six-account deposit with Token-2022, every account its own, compiled with the budget. The sale and the
+ *  preview both decide on it, so You receive counts the priority exactly where the sale pays it. A PumpSwap cashback
+ *  coin's sell has none (it compiles to 1,268 bytes with it). */
+export function solanaSellBudgetFits(kind: "pump-curve" | "pumpswap", cashback: boolean): boolean {
+  const key = (k: number): string => base58.encode(Uint8Array.from({ length: 32 }, (_, i) => (i === 0 ? k : i === 1 ? 0xb5 : 3)));
+  const v: SolanaPoolBuyVenue =
+    kind === "pump-curve"
+      ? { kind, mint: key(1), tokenProgram: SOLANA_TOKEN_2022_PROGRAM, tokenAccountSize: 165, curve: key(2), creator: key(3), feeRecipient: key(4), cashback, buybackFeeRecipients: [key(5)], buybackFeeRecipient: key(5) }
+      : { kind, mint: key(1), tokenProgram: SOLANA_TOKEN_2022_PROGRAM, tokenAccountSize: 165, pool: key(2), baseVault: key(3), quoteVault: key(4), coinCreator: key(6), cashback, protocolFeeRecipient: key(7), buybackFeeRecipients: [key(5)], buybackFeeRecipient: key(5) };
+  const w = key(8);
+  const deposit = { program: key(9), accounts: [key(10), w, key(11), key(12), key(13), SOLANA_SYSTEM_PROGRAM].map((k, i) => ({ key: k, signer: i === 1, writable: i !== 5 })), data: new Uint8Array(1 + 8 + 32) };
+  const budget = budgetIxs({ limit: SOLANA_POOL_CU_LIMIT_MAX, price: SOLANA_CU_PRICE_MAX });
+  return wireOf(solanaCompileV0(w, [...budget, ...solanaPoolSellSteps(v, w, 1n, 1n), deposit], key(14), []).message).length <= SOLANA_MAX_TX_BYTES;
 }
 /** The compute budget instruction `tag` with `n` in `width` little-endian bytes. */
 const le = (tag: number, n: number | bigint, width: number): Uint8Array => Uint8Array.from([tag, ...Array.from({ length: width }, (_, i) => Number((BigInt(n) >> BigInt(8 * i)) & 0xffn))]);
@@ -1487,6 +1526,13 @@ export function solanaSellReserve(p: { fee: bigint; made: bigint; rents: bigint;
   return { reserve, value: p.minOut - reserve < p.noteFloor ? 0n : p.minOut - reserve };
 }
 
+/** The index of the pool's deposit in the message `wire` carries: its last instruction when that is `program`'s, else -1
+ *  (a sell with no deposit back). */
+const depositIndex = (wire: Uint8Array, program: string): number => {
+  const m = solanaDecodeMessage(wire.subarray(65));
+  const last = m.instructions.at(-1);
+  return last !== undefined && m.staticKeys[last.programIndex] === program ? m.instructions.length - 1 : -1;
+};
 /** A transaction error that is the pool program's WrongAccount at instruction `ix`. */
 const wrongAccount = (err: unknown, ix: number): boolean => {
   const e = (err as { InstructionError?: unknown } | null | undefined)?.InstructionError;

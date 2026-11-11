@@ -22,8 +22,8 @@ test("recorded bad answer: release 116 as served: FAIL, the 1,000 tip and the se
   assert.equal(v.ok, false);
   assert.deepEqual(v.lines, [
     "BAD the mainnet buy tips 1000 lamports, not over Jito's 1,000 minimum",
-    "BAD the bundle builds no compute budget for a mainnet sell",
-    "BAD the sell box's preview counts no mainnet priority fee",
+    "BAD the bundle builds no compute budget for a mainnet sell, or its preview does not price it",
+    "BAD a mainnet partial sell keeps no priority fee on W for the next sell",
   ]);
 });
 
@@ -43,10 +43,13 @@ test("planted on the good answer: each fact taken away FAILs", () => {
   assert.equal(judge({ ...g, buyTip: "1000000" }).ok, true, "the cap itself passes");
 });
 
-test("facts read the minified shapes: the buy's pick, the sell's budget, the preview's sum", () => {
-  const js = "var Sd=1000n,Cd=100000n,HU=100000n;let v=e.cluster===`mainnet`?Cd:0n,y=new Map;Te=e.cluster===`mainnet`?UU(null):null;g=Qy+(e.cluster===`mainnet`?HU:0n)";
+test("facts read the minified shapes: the buy's pick, the sell's budget and the preview priced on mainnet, the partial sell's keep", () => {
+  const js = "var Sd=1000n,Cd=100000n,HU=100000n;let v=e.cluster===`mainnet`?Cd:0n,y=new Map;Se=ye?nb(le,N)+(e.cluster===`mainnet`?HU:0n):AO(N,xe),Te=e.cluster===`mainnet`&&KU(le.kind,le.cashback)?R-pe:0n,Ee=UU(null,WU(Te));g=kW(p,m,f.wallets,h,f.sizes,e.cluster===`mainnet`);x={network:ik(Qy+g.priority,_)}";
   const f = facts("", js);
   assert.deepEqual([f.buyTip, f.sellBudget, f.sellPriority], ["100000", true, "100000"]);
+  // the sale's budget without the preview priced on mainnet, or the other way: no
+  assert.equal(facts("", js.replace("f.sizes,e.cluster===`mainnet`)", "f.sizes,!1)")).sellBudget, false);
+  assert.equal(facts("", js.replace("?R-pe:0n", "?1n:0n")).sellBudget, false);
   const none = facts("", "let v=e.cluster===`mainnet`?Sd:0n,y=new Map;var Sd=1000n;");
   assert.deepEqual([none.buyTip, none.sellBudget, none.sellPriority], ["1000", false, null]);
 });

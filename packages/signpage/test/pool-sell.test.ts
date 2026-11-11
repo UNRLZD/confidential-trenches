@@ -34,7 +34,7 @@ import type { BuyWallet } from "../../wallet/src/pool/buy-wallets.ts";
 import { solanaPoolOf } from "../../wallet/src/pool/solana.ts";
 import { BLOCKHASH, FEE_PAYER, POOL, PROGRAM, fx, providers, rent } from "../../kit/test/solana-pool-buy-fx.ts";
 import { READ_WAIT_TOTAL_MS } from "../src/read-waits.ts";
-import { POOL_RENT_BACK_MS, POOL_RENT_BACK_RULES, POOL_SELL_LOCK, POOL_SELL_READS, POOL_SELL_SHARED_READ_MS, POOL_SELL_SIZE_RETRY_MS, POOL_SELL_AGREE_WAIT_MS, POOL_SELL_WAIT_MS, buyMints, leftAfter, owedRentBacks, planPoolSell, poolSellKind, resumeRentBacks, runPoolSell, settleDeadSellOps, settlePoolSells, settleSellOps, solanaSellAfterFull, solanaSellBudget, solanaSellReserve, SOLANA_POOL_SELL_PRIORITY, keptSells, stageOfLegs, type KeptSell, type OwedRentBack, type PoolSellHost, type PoolSellKindHost, type RentBackTold } from "../src/pool-sell.ts";
+import { POOL_RENT_BACK_MS, POOL_RENT_BACK_RULES, POOL_SELL_LOCK, POOL_SELL_READS, POOL_SELL_SHARED_READ_MS, POOL_SELL_SIZE_RETRY_MS, POOL_SELL_AGREE_WAIT_MS, POOL_SELL_WAIT_MS, buyMints, leftAfter, owedRentBacks, planPoolSell, poolSellKind, resumeRentBacks, runPoolSell, settleDeadSellOps, settlePoolSells, settleSellOps, solanaSellAfterFull, solanaSellBudget, solanaSellBudgetFits, solanaSellReserve, SOLANA_POOL_SELL_PRIORITY, keptSells, stageOfLegs, type KeptSell, type OwedRentBack, type PoolSellHost, type PoolSellKindHost, type RentBackTold } from "../src/pool-sell.ts";
 import { opOf } from "../src/state.ts";
 import { solanaCompileV0 } from "../../kit/src/trade/solana/build.ts";
 import { checkSolanaSweep, PoolRuleRefused, SOLANA_POOL_MIN_DEPOSIT, SOLANA_POOL_SELL_RESERVE_MAX, solanaDepositRents, solanaSweepFloor, solanaSweepKeep, solanaWithdrawMinPart, withdrawNoteFloor, type PoolAsk } from "../src/rules/pool.ts";
@@ -947,19 +947,100 @@ test("a mainnet sell carries a compute unit limit sized from its simulation and 
   const b = await runPoolSell(d.host, ASK);
   const dm = solanaDecodeMessage(d.c.txs.get((b as { txs: { hash: string }[] }).txs[0]!.hash)!.tx.subarray(65));
   assert.ok(!dm.staticKeys.includes(SOLANA_COMPUTE_BUDGET_PROGRAM));
-  // the budget's bounds: unread units take the runtime's most at about the same priority; a tiny sell's price stops at
-  // the kit's cap
-  assert.deepEqual(solanaSellBudget(null).limit, 1_400_000);
-  assert.ok(solanaSellBudget(null).priority <= SOLANA_POOL_SELL_PRIORITY);
-  assert.equal(solanaSellBudget(10).price, 1_000_000n);
+  // the budget's bounds: unread units take the runtime's most at about the same priority; a tiny sell's limit stops at
+  // 100,000, so its priority is the cap the preview counts, its price the kit's cap; a cap of 0 buys none
+  assert.deepEqual(solanaSellBudget(null)!.limit, 1_400_000);
+  assert.ok(solanaSellBudget(null)!.priority <= SOLANA_POOL_SELL_PRIORITY);
+  assert.deepEqual(solanaSellBudget(10), { limit: 100_000, price: 1_000_000n, priority: SOLANA_POOL_SELL_PRIORITY });
+  for (const units of [1, 50_000, 83_333, 90_000, 500_000, 833_333]) for (const cap of [1n, 777n, 50_000n, SOLANA_POOL_SELL_PRIORITY]) assert.equal(solanaSellBudget(units, cap)!.priority, cap, `${units} ${cap}`);
+  assert.equal(solanaSellBudget(90_000, 0n), null);
 });
 
-test("a mainnet sell from a W that cannot pay the priority fee up front is refused not_funded, nothing signed", async () => {
+// the review of 6d76212d: the priority is never a reason to refuse. A sell that could be sent without it is sent: W pays
+// what it holds beyond the sell's need, at most SOLANA_POOL_SELL_PRIORITY, down to none (then no compute budget at all)
+const budgetOf = (w: World, a: unknown): { limit: number; price: bigint; priority: bigint } | null => {
+  const sig = (a as { txs: { hash: string }[] }).txs[0]!.hash;
+  const m = solanaDecodeMessage(w.c.txs.get(sig)!.tx.subarray(65));
+  const at = m.instructions.filter((x) => m.staticKeys[x.programIndex] === SOLANA_COMPUTE_BUDGET_PROGRAM);
+  if (at.length === 0) return null;
+  const dv = (d: Uint8Array) => new DataView(d.buffer, d.byteOffset, d.byteLength);
+  const limit = dv(at[0]!.data).getUint32(1, true);
+  const price = dv(at[1]!.data).getBigUint64(1, true);
+  return { limit, price, priority: (BigInt(limit) * price + 999_999n) / 1_000_000n };
+};
+const sentWire = (w: World, a: unknown): Uint8Array => w.c.txs.get((a as { txs: { hash: string }[] }).txs[0]!.hash)!.tx;
+test("a mainnet sell from a W short of the priority fee pays what W holds beyond the sell's need, down to none: sent either way", async () => {
   const need = BigInt(FEE) + rentMin(0);
-  const w = await world({ cluster: "mainnet", units: 90_000, lamports: Number(need + 50_000n) });
+  for (const [room, want] of [[50_000n, 50_000n], [1n, null], [0n, null], [SOLANA_POOL_SELL_PRIORITY + 7n, SOLANA_POOL_SELL_PRIORITY]] as const) {
+    const w = await world({ cluster: "mainnet", units: 90_000, lamports: Number(need + room) });
+    const a = await runPoolSell(w.host, ASK);
+    assert.equal("stage" in a && a.stage, "filled", `${room}: ${JSON.stringify(a)}`);
+    assert.equal(budgetOf(w, a)?.priority ?? null, want, String(room));
+  }
+});
+
+// the reviewer's case: a PumpSwap coin's W a release 116 partial sell left at exactly the next sell's need (1,493,440 at
+// mainnet's rent), which then asked that need plus the priority (1,593,440): not_funded, its tokens stuck
+test("a W a release 116 partial sell left at the next sell's need, with no priority, sells the rest on mainnet", async () => {
+  const probe = await world({ venue: "pumpswap" });
+  const need = solanaPoolBuySellNeed(await readSolanaPoolBuyVenue(probe.host.rpcs, "pumpswap", VF.pumpswap.mint), rent);
+  assert.equal(need, solanaPoolSellNeed(await readSolanaPoolBuyVenue(probe.host.rpcs, "pumpswap", VF.pumpswap.mint), rent), "the keep is the sell's whole need");
+  const w = await world({ cluster: "mainnet", units: 90_000, venue: "pumpswap", lamports: Number(need) });
+  const a = await runPoolSell(w.host, { ...ASK, token: VF.pumpswap.mint });
+  assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
+  assert.equal(budgetOf(w, a), null, "no room beyond the need: no compute budget, as at release 116");
+});
+
+test("on mainnet a partial sell keeps the next sell's need plus its priority on W, so the rest sells with the full priority", async () => {
+  const probe = await world({});
+  const need = solanaPoolBuySellNeed(await readSolanaPoolBuyVenue(probe.host.rpcs, "pump-curve", MINT), rent);
+  const w = await world({ cluster: "mainnet", units: 90_000, held: 2n * AMOUNT, lamports: Number(need) }, [wallet(2n * AMOUNT)]);
   const a = await runPoolSell(w.host, ASK);
-  assert.deepEqual(a, { error: "not_funded" });
-  assert.ok(!w.c.log.some((x) => x.endsWith("sendTransaction")), w.c.log.join(" "));
+  assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
+  const left = BigInt(w.c.accounts.get(W.address)?.lamports ?? 0);
+  assert.equal(left, need + SOLANA_POOL_SELL_PRIORITY, "W keeps the next sell's need and its priority");
+  const b = await runPoolSell(w.host, ASK);
+  assert.equal("stage" in b && b.stage, "filled", JSON.stringify(b));
+  assert.equal(budgetOf(w, b)?.priority, SOLANA_POOL_SELL_PRIORITY);
+});
+
+test("a mainnet sale over three wallets, one W at exactly its sale's need: every leg is sent and fills", async () => {
+  // X at exactly its sale's need (a kit app's buy over tap_max leaves W so)
+  const w = await world({ cluster: "mainnet", units: 90_000, held: T5, ataLamports: TOKEN_RENT, others: [{ l: 8n, j: 0, held: T3, lamports: Number(BigInt(FEE) + rentMin(0)) }, { l: 9n, j: 0, held: T3 }] }, [listedW(T5), walletX(T3), walletY(T3)]);
+  const a = await runPoolSell(w.host, share(10_000));
+  assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
+  assert.equal("legs" in a && a.legs!.length, 3);
+});
+
+// the review of 6d76212d, P1-1: a PumpSwap cashback coin's sell, the largest form, has no room for the compute budget
+// under 1,232 bytes; it goes without one, as before, full and partial, and the preview counts no priority for it
+test("a mainnet PumpSwap cashback sell, the largest form, goes without the compute budget, full and partial, inside 1,232 bytes", async () => {
+  const ask = { ...ASK, token: VF.pumpswap.mint };
+  for (const held of [AMOUNT, 2n * AMOUNT]) {
+    const w = await world({ cluster: "mainnet", units: 90_000, venue: "pumpswap", cashback: true, held }, [wallet(held, false, VF.pumpswap.mint)]);
+    const a = await runPoolSell(w.host, ask);
+    assert.equal("stage" in a && a.stage, "filled", `${held}: ${JSON.stringify(a)}`);
+    assert.equal(budgetOf(w, a), null);
+    assert.ok(sentWire(w, a).length <= 1_232);
+  }
+  // a plain PumpSwap coin's sell has room: it carries the budget
+  const p = await world({ cluster: "mainnet", units: 90_000, venue: "pumpswap" });
+  const b = await runPoolSell(p.host, ask);
+  assert.equal("stage" in b && b.stage, "filled", JSON.stringify(b));
+  assert.equal(budgetOf(p, b)?.priority, SOLANA_POOL_SELL_PRIORITY);
+  assert.ok(sentWire(p, b).length <= 1_232);
+  assert.equal(solanaSellBudgetFits("pumpswap", true), false);
+  assert.equal(solanaSellBudgetFits("pumpswap", false), true);
+  assert.equal(solanaSellBudgetFits("pump-curve", true), true);
+});
+
+// the review of 6d76212d, P2-3: the deposit's index is read from the compiled message, so a mainnet sell (the compute
+// budget first) that met a page another deposit filled first is built again, as on devnet
+test("a mainnet sell whose deposit fails WrongAccount on both RPCs is built again from new reads and fills", async () => {
+  const w = await world({ cluster: "mainnet", units: 90_000, wrongAccountOnce: true, leaves: 1023 });
+  const a = await runPoolSell(w.host, ASK);
+  assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
+  assert.equal(w.c.deposits.filter((d) => !d.sweep).length, 1);
 });
 
 test("a sell that never reads back, its blockhash never past on both RPCs, is sent: its note INCOMING with W's send (written before the send), for the next load to settle", async () => {
