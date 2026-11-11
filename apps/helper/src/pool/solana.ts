@@ -728,9 +728,12 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
         const plainSends = sends.filter((x) => x.path !== "jito");
         note = { ...note, end: state === "filled" || state === "failed" || state === "expired" ? state : "unknown", rebroadcasts: jitoSends.filter((x) => x.ok).length, misses: jitoSends.filter((x) => !x.ok).length };
         if (taken !== undefined) note = { ...note, plain: plainSends.filter((x) => x.ok).length };
-        const e3 = await engine3;
+        // a read still in flight when the send ended never holds the answer: it is taken as it stands (the engine's
+        // word unread; the blockhash still valid at its last read)
+        const asItStands = <T>(p: Promise<T>, then: () => T) => Promise.race([p, new Promise<T>((r) => setImmediate(() => r(then())))]);
+        const e3 = await asItStands<PoolSendNote["engine3"]>(engine3, () => (taken?.bundleId === undefined ? undefined : "unread"));
         if (e3 !== undefined) note = { ...note, engine3: e3 };
-        note = { ...note, hashMs: await hash };
+        note = { ...note, hashMs: await asItStands(hash, () => `>${Math.max(0, now() - arrived)}`) };
         // a send that did not fill: the same bytes simulated now on a fresh blockhash (no signature check), so the line
         // tells a state or slippage failure from none
         if (state !== "filled") {

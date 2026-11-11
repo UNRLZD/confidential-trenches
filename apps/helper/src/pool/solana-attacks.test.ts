@@ -321,13 +321,13 @@ type Done = Promise<{ txs: { signature: string; state: "filled" | "failed" | "ex
 /** A mainnet sender on a fake block engine; the kit's send is faked as the chain: a bundle-only send that would fail
  * never lands (expired), a plain one that fails lands as a paid failure. `done`, when set, decides each send instead.
  * The block engine's pacer runs at `intervalMs` (0 unless a test is about the pacing). */
-function mainnet(o: { engine: ReturnType<typeof blockEngine> | { fetchFn: JitoFetch }; a?: Calls; now?: () => number; paths?: string[][]; end?: "failed" | "filled"; done?: (s: Sent) => Done; intervalMs?: number; jitoClock?: () => number; jitoSleep?: JitoSleep; wait?: (ms: number, signal: AbortSignal) => Promise<boolean> }) {
+function mainnet(o: { engine: ReturnType<typeof blockEngine> | { fetchFn: JitoFetch }; a?: Calls; now?: () => number; paths?: string[][]; end?: "failed" | "filled"; done?: (s: Sent) => Done; intervalMs?: number; jitoClock?: () => number; jitoSleep?: JitoSleep; wait?: (ms: number, signal: AbortSignal) => Promise<boolean>; providers?: [SolanaRpc, SolanaRpc] }) {
   return solanaPoolSender(
     { cluster: "mainnet", program: PROGRAM, feePayerSecret: FP.secret, fee: String(FEE) },
     {
       // the line's timed reads: none unless a test is about them (each wait ends with the send)
       wait: o.wait ?? ((_ms, signal) => new Promise((done) => (signal.aborted ? done(false) : signal.addEventListener("abort", () => done(false), { once: true })))),
-      providers: [stub(o.a ?? []), stub([])],
+      providers: o.providers ?? [stub(o.a ?? []), stub([])],
       now: o.now ?? (() => NOW),
       readRent: async () => MAINNET,
       jito: jitoSender({ fetch: o.engine.fetchFn, timeoutMs: 1_000, intervalMs: o.intervalMs ?? 0, ...(o.jitoClock === undefined ? {} : { clock: o.jitoClock }), ...(o.jitoSleep === undefined ? {} : { sleep: o.jitoSleep }) }),
@@ -1059,4 +1059,29 @@ test("the line's reads: the engine's word about 3 s after the first send, how lo
   assert.equal(a.note?.hashMs, "8000", "invalid at the first 5 s read, 3 s and 5 s after it arrived");
   assert.equal(a.note?.endSim, "ok");
   assert.equal(e.seen.filter((m) => m === "getInflightBundleStatuses").length, 2, "one at 3 s, one at the end");
+});
+
+test("a fill answers at once: a line read still in flight when the send ends (the blockhash, the engine's word) never holds the answer", async () => {
+  const calls: Calls = [];
+  const base = stub(calls);
+  let hanging = 0;
+  // provider a: every read as the stub answers it, but isBlockhashValid and the engine's status never answer
+  const a = Object.assign(async (m: string, p: readonly unknown[]) => (m === "isBlockhashValid" ? (hanging++, new Promise<never>(() => {})) : base(m, p)), { url: base.url });
+  const e = { fetchFn: (async (url, init) => (JSON.parse(String(init.body)).method === "getInflightBundleStatuses" ? (hanging++, new Promise<never>(() => {})) : engineWith("da".repeat(32)).fetchFn(url, init))) as JitoFetch };
+  let fill!: () => void;
+  const s = mainnet({
+    engine: e,
+    providers: [a as SolanaRpc, stub([])],
+    wait: (ms, signal) => (ms === 3_000 || ms === 5_000 ? Promise.resolve(!signal.aborted) : new Promise((done) => signal.addEventListener("abort", () => done(false), { once: true }))),
+    done: (x) => new Promise((ok) => (fill = () => ok({ txs: [{ signature: x.sig, state: "filled", sends: [] }] }))),
+  });
+  const p = s.carry(body(tipped({ r: { existingNullifierHash: f32(132) } })));
+  for (let k = 0; k < 50 && hanging < 2; k++) await new Promise((r) => setImmediate(r));
+  assert.equal(hanging, 2, "both reads in flight");
+  fill();
+  const answer = await Promise.race([p, new Promise<"held">((r) => setTimeout(() => r("held"), 500))]);
+  assert.notEqual(answer, "held", "the answer waited on a line read");
+  assert.equal((answer as PoolSendAnswer).status, 200);
+  assert.equal((answer as PoolSendAnswer).note?.hashMs, ">0");
+  assert.equal((answer as PoolSendAnswer).note?.engine3, "unread");
 });
