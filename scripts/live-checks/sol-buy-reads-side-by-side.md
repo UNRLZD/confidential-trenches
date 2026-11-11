@@ -1,4 +1,4 @@
-CARD sol-buy-reads-side-by-side / live: PASS on this card's builds, FAIL on SIGN_HOST before its deploy
+CARD sol-buy-reads-side-by-side / live: PASS
 Money path: yes
 Tx: solana-devnet 24W6xqY3j9qgtWkM2MWezWUFTpMe6AY2MPzLmeQ7Wjq5L5RqsWWvf9w1Pwm1tmpVV1ke11Em976br4f1pPdJBBLn
 Tx: solana-devnet LtPuPJiVrmSk9Wb6Y2jZFxhvuue6p1qPceeHkCpdCBL5XpDNpYyCmp7duoBJJHT9HrBA2bKCYgKPUN6n1dtj7if
@@ -29,11 +29,12 @@ Retry-After of 10 s, past its transport's deadline, and the script ended there, 
 coin on devnet. The script's own reads now wait out a throttle and ask again (96e8a549); the page's reads are unchanged.
 
 Run 2: apps/terminal/test/e2e/buy/run.mjs (the app in the installed Chrome, the real kit and signing page, testnet
-build) on head 96e8a549, whose src is 6b3bd660's, on 11 Nov 2026 between 00:26:51Z and 00:33:48Z (the buy's tap at 00:32:14Z). BUY: PASS, the box read
-"Filled 2.9s". Its Tx lines, in order: D funded U (5enGFb3RvN1Wm8R3MhpmqPP345U1BavFpW6zFu6LRkd2) with 11473120
-lamports; pool.deposit of 0.01 SOL; pool.buy (W 3CnqZjGQYgpHbejpVzotcyT5a1yezQyn36y6iyyjpGkD then held
-948902563378 of the coin on both RPCs). The sell was refused (Retry, nothing sent), as in the app's run 4 on 10 Nov:
-the sell in the app is its own card (app-sell-e2e-in-the-app), not this one.
+build) on head 96e8a549, whose src is 6b3bd660's, on 11 Nov 2026 between 00:26:51Z and 00:33:48Z (the buy's tap at
+00:32:14Z). BUY: PASS, the box read "Filled 2.9s". Its three lines at the top, in order: D funded U
+(5enGFb3RvN1Wm8R3MhpmqPP345U1BavFpW6zFu6LRkd2) with 11473120 lamports; pool.deposit of 0.01 SOL; pool.buy (W
+3CnqZjGQYgpHbejpVzotcyT5a1yezQyn36y6iyyjpGkD then held 948902563378 of the coin on both RPCs). The sell was refused
+(Retry, nothing sent), as in the app's run 4 on 10 Nov: the sell in the app is its own card (app-sell-e2e-in-the-app),
+not this one.
 
 The buy's split, in ms from the tap (run 1 and 2 of card pool-buy-filled-2s beside them, both on Node's HTTP/1.1):
 
