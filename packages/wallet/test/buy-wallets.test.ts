@@ -889,7 +889,8 @@ test("a 429 on every round is a refusal at the bound, after a growing wait betwe
   // HOLDINGS_THROTTLE_MAX_MS on the gate's clock is not waited: 18.5 s of waits, then a 10 s one would end at 28.5 s, the
   // next past 30 s); EVM's 4 rounds come before it
   const runs = [
-    ["sol", solanaHoldingsReader(always429(), own()), "its reads drew the provider's 429 past 30 s", [1234, 2468, 4936, 9872, 10_000]],
+    // the refusal as the kit's transport fault (card pool-sell-legs-side-by-side: a sale counts it as the provider's)
+    ["sol", solanaHoldingsReader(always429(), own()), "its reads drew the provider's 429 past 30 s (http_429, 1 try at the holdings route)", [1234, 2468, 4936, 9872, 10_000]],
     ["evm", evmHoldingsReader(always429(), [], own()), `its reads drew the helper's 429 in ${EVM_HOLDINGS_ROUNDS} rounds`, [1234, 2468, 4936]],
   ] as const;
   for (const [chain, reader, error, want] of runs) {
