@@ -542,3 +542,21 @@ test("a quote coin with no price keeps the tape empty and the log says why, neve
   assert.equal(line, "solana tape: 1 tokens open, 1 empty: quote with no price 1, no trade of a venue read 0, quiet 0");
   assert.ok(!lines.join("\n").includes(QC.mint));
 });
+
+// card token-page-data-complete-and-fast: a cold tape waited for its whole walk (30 reads, 5 at a time, oldest first)
+test("a first tape read answers after the walk's newest round, with the newest trades, before the older reads end", async () => {
+  const sigs = Array.from({ length: 10 }, (_, i) => `${BUY.signature.slice(0, -2)}${String(i).padStart(2, "0")}`);
+  const slow = new Set(sigs.slice(0, 5)); // the 5 oldest take 2.5 s each
+  const base = rpcFetch({ sigs: () => sigs.map((s, i) => ({ signature: s, slot: 465_000_000 + i, err: null })).reverse(), txs: Object.fromEntries(sigs.map((s) => [s, BUY.result])), price: 9_342_267_796n, pub: TS, slot: 100 }, { [MINT]: 6 });
+  const fetchSlow = async (url: string, init: RequestInit) => {
+    const req = JSON.parse(String(init.body)) as { method: string; params: [string] };
+    if (req.method === "getTransaction" && slow.has(req.params[0])) await new Promise((r) => setTimeout(r, 2_500));
+    return base(url, init);
+  };
+  const t = createSolanaTrades({ fetch: fetchSlow, now: () => TS * 1000, listed: async (m) => m === MINT, rpcs: ["https://rpc.test"], source: () => ({ watch: async () => undefined, unwatch: () => undefined, close: () => undefined }), tickMs: 0 });
+  const t0 = Date.now();
+  const rows = (JSON.parse((await t.trades(MINT, 50)).body) as { trades: { tx: string }[] }).trades;
+  assert.ok(Date.now() - t0 < 1_500, `answered in ${Date.now() - t0} ms`);
+  assert.deepEqual(rows.map((r) => r.tx).sort(), sigs.slice(5).sort(), "the 5 newest trades");
+  t.stop();
+});
