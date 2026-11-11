@@ -801,6 +801,12 @@ export function solanaTradesFromEnv(env: Record<string, string | undefined>, lis
     wsUrl: ws === undefined || ws === "" ? undefined : ws,
     rpcs: solanaTradesRpcs(env),
     history: (mint, tf, to, limit, client) => token.candles(mint, tf, to, limit, client),
+    // a coin quoted in another coin is priced at that coin's own row: Discover's, else Jupiter's held search row
+    quoteUsd: async (mint) => {
+      const a = await token.named(mint);
+      const p = a.status === 200 ? (JSON.parse(a.body) as { row?: { price_usd?: unknown } }).row?.price_usd : null;
+      return typeof p === "string" ? p : null;
+    },
     log: (line) => console.log(`helper: ${line}`),
     // the walks draw the Solana budget callers draw, behind them (rpc.ts userRoomOf)
     ...(rpc === undefined ? {} : { budget: (u: string, m: string) => rpc.background("solana", u, m), throttled: (u: string, h: globalThis.Headers) => rpc.backgroundThrottled("solana", u, h) }),

@@ -485,3 +485,60 @@ test("card helper-live-bars-no-503, control: a listed Solana token the helper ho
   assert.equal(a.status, 503);
   assert.deepEqual(JSON.parse(a.body), { error: { code: "upstream" } });
 });
+
+// card token-page-data-complete-and-fast: a coin launched against another coin (BUBBLE against FRONTIER, 11 Nov) had
+// an empty tape: its trades were dropped for a quote that is not SOL or USDC. They are priced at the quote coin's row.
+const QC = JSON.parse(readFileSync(path.join(HERE, "fixtures/sol-trades-quote-coin.json"), "utf8")) as { mint: string; quoteMint: string; signature: string; slot: number; logMessages: string[] };
+test("a coin quoted in another coin fills the tape, priced at that coin's USD price, and moves with it", async () => {
+  let on: SourceEvents | null = null;
+  let price = "0.87";
+  const asked: string[] = [];
+  let t0 = 1794409723 * 1000;
+  const t = createSolanaTrades({
+    fetch: rpcFetch({ sigs: () => [], txs: {}, price: 9_342_267_796n, pub: 1794409723, slot: QC.slot }, { [QC.mint]: 6, [QC.quoteMint]: 6 }),
+    now: () => t0,
+    listed: async (m) => m === QC.mint,
+    rpcs: ["https://rpc.test"],
+    source: (o) => ((on = o), { watch: async () => undefined, unwatch: () => undefined, close: () => undefined }),
+    quoteUsd: async (m) => (asked.push(m), price),
+    tickMs: 0,
+  });
+  assert.equal((await t.trades(QC.mint, 50)).status, 200);
+  on!.note(QC.mint, { sig: QC.signature, slot: QC.slot, err: false, logs: QC.logMessages });
+  await settle();
+  const rows = (JSON.parse((await t.trades(QC.mint, 50)).body) as { trades: { usd: string; amt: string; side: string; tx: string }[] }).trades;
+  // 53.265791 FRONTIER at 0.87 USD; 14,716,998.471539 BUBBLE
+  assert.deepEqual(rows.map((r) => [r.side, r.usd, r.amt, r.tx]), [["b", "46.34123817", "14716998.471539", QC.signature]]);
+  assert.deepEqual(asked, [QC.quoteMint], "the quote coin's price read once for the first trade");
+  // the quote coin's price is read again every REF_MS while the token is open
+  price = "1.74";
+  t0 += 5_000;
+  t.tick();
+  await settle();
+  assert.deepEqual(asked, [QC.quoteMint, QC.quoteMint]);
+});
+
+test("a quote coin with no price keeps the tape empty and the log says why, never which token", async () => {
+  let on: SourceEvents | null = null;
+  const lines: string[] = [];
+  let t0 = 1794409723 * 1000;
+  const t = createSolanaTrades({
+    fetch: rpcFetch({ sigs: () => [], txs: {}, price: 9_342_267_796n, pub: 1794409723, slot: QC.slot }, { [QC.mint]: 6, [QC.quoteMint]: 6 }),
+    now: () => t0,
+    listed: async (m) => m === QC.mint,
+    rpcs: ["https://rpc.test"],
+    source: (o) => ((on = o), { watch: async () => undefined, unwatch: () => undefined, close: () => undefined }),
+    quoteUsd: async () => null,
+    log: (l) => lines.push(l),
+    tickMs: 0,
+  });
+  await t.trades(QC.mint, 50);
+  on!.note(QC.mint, { sig: QC.signature, slot: QC.slot, err: false, logs: QC.logMessages });
+  await settle();
+  assert.deepEqual((JSON.parse((await t.trades(QC.mint, 50)).body) as { trades: unknown[] }).trades, []);
+  t0 += 61_000;
+  t.tick();
+  const line = lines.find((l) => l.startsWith("solana tape:"));
+  assert.equal(line, "solana tape: 1 tokens open, 1 empty: quote with no price 1, no trade of a venue read 0, quiet 0");
+  assert.ok(!lines.join("\n").includes(QC.mint));
+});
