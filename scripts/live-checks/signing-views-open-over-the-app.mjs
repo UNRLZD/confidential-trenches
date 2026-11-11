@@ -6,8 +6,9 @@
 //   - the sheet's parts: data-sheet "scrim", "box", "close", "body", a dialog with aria-modal;
 //   - the close control: the app's x icon path and its accessible name "Close";
 //   - the user's own Esc ("Escape");
-//   - the screens with a field typed into, as one set ("words", "invalid-code", "withdraw", "pool-withdraw", "held"): the
-//     frame leaves the document before them (src/main.ts TYPED).
+//   - the screens the frame must not sit under, as one set ("words", "invalid-code", "withdraw", "pool-withdraw", "held",
+//     "backup"): the frame leaves the document before them (src/main.ts TYPED);
+// and SIGN_HOST's Permissions-Policy denies picture-in-picture and fullscreen (packages/signpage/public/_headers).
 // What the sheet does in a browser (the frame kept in the page under the sheet, its messages dropped, close to the same
 // app document, a typed screen with the frame out) is proven by packages/signpage/test/shell.test.ts and the two-host
 // run apps/terminal/test/e2e/signing-sheet/run.mjs.
@@ -29,7 +30,7 @@ export const SIGN_URL = "https://confidential.unrealized.trade/";
 const Q = "[\"'`]";
 const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const lit = (s) => new RegExp(`${Q}${esc(s)}${Q}`);
-export const TYPED = ["words", "invalid-code", "withdraw", "pool-withdraw", "held"];
+export const TYPED = ["words", "invalid-code", "withdraw", "pool-withdraw", "held", "backup"];
 /** Each marker by name, and its test on the script's text. */
 export const MARKS = {
   "sheet scrim": (js) => /sheet=["'`]scrim["'`]/.test(js),
@@ -60,6 +61,9 @@ export function judge(rec) {
   const js = rec?.js ?? [];
   say(js.length > 0 && js.every((f) => f.status === 200), `sign: ${js.length} script(s) named by the page, each answering 200`);
   const held = new Set(js.flatMap((f) => f.found ?? []));
+  const pp = String(rec?.permissions ?? "");
+  const denied = ["picture-in-picture=()", "fullscreen=()"].filter((x) => pp.split(/,\s*/).includes(x));
+  say(denied.length === 2, `sign: Permissions-Policy denies picture-in-picture and fullscreen (${denied.join(", ") || "neither"})`);
   const miss = MARKERS.filter((m) => !held.has(m));
   say(miss.length === 0, miss.length ? `sign: the script lacks ${miss.length} of ${MARKERS.length}: ${miss.join(", ")}` : `sign: the script holds all ${MARKERS.length} of the sheet's markers`);
   return { ok: lines.every((l) => l.startsWith("ok ")), lines };
@@ -67,7 +71,7 @@ export function judge(rec) {
 
 async function http(url) {
   const r = await fetch(url, { redirect: "manual" });
-  return { status: r.status, text: await r.text() };
+  return { status: r.status, permissions: r.headers.get("permissions-policy"), text: await r.text() };
 }
 
 export async function collect({ local = false } = {}) {
@@ -80,7 +84,9 @@ export async function collect({ local = false } = {}) {
     }
   };
   const page = local ? file("index.html") : await http(SIGN_URL);
-  const rec = { at: new Date().toISOString(), source: local ? `this checkout, ${path.relative(ROOT, dir)}` : SIGN_URL, pageStatus: page.status, js: [] };
+  // the policy as served: live, the response's header; local, the /* rule in the build's _headers
+  const permissions = local ? (/^\/\*$[\s\S]*?^\s+Permissions-Policy:\s*(.+)$/m.exec(file(path.join("public", "_headers")).text)?.[1] ?? null) : page.permissions;
+  const rec = { at: new Date().toISOString(), source: local ? `this checkout, ${path.relative(ROOT, dir)}` : SIGN_URL, pageStatus: page.status, permissions, js: [] };
   for (const ref of scriptsOf(page.text)) {
     const f = local ? file(path.join("public", new URL(ref, "http://x/").pathname)) : await http(new URL(ref, SIGN_URL).href);
     rec.js.push({ url: ref, status: f.status, found: found(f.text) });

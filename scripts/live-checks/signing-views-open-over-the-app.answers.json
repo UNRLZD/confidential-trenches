@@ -1,8 +1,9 @@
 {
  "good": {
-  "at": "2026-11-11T15:03:48.289Z",
+  "at": "2026-11-11T17:04:03.036Z",
   "source": "this checkout, packages/signpage",
   "pageStatus": 200,
+  "permissions": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), fullscreen=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), picture-in-picture=(), publickey-credentials-create=(self), publickey-credentials-get=(self), serial=(), usb=(), xr-spatial-tracking=()",
   "js": [
    {
     "url": "/app.js",
@@ -22,9 +23,10 @@
   ]
  },
  "bad": {
-  "at": "2026-11-11T15:03:53.469Z",
+  "at": "2026-11-11T17:04:03.573Z",
   "source": "https://confidential.unrealized.trade/",
   "pageStatus": 200,
+  "permissions": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(self), publickey-credentials-get=(self), serial=(), usb=(), xr-spatial-tracking=()",
   "js": [
    {
     "url": "/app.js",
