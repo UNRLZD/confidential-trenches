@@ -34,6 +34,10 @@
 //   from the send before it.
 // - It writes the answers, the stages, the notes, each leg, the times and every tx to <out.json>; exit 0 only when every
 //   deposit landed, every buy filled, the sell answered sent and ended filled with a leg per W and its return notes.
+// - FLOW_RESUME=<run.seed> with <n> 0 and FLOW_FINDER=1: no deposit or buy; the kept words of an earlier run are signed in
+//   to a fresh store, the page's restore rebuilds its notes, and the sale sells every W of theirs that still holds the
+//   coin (a W an earlier run left unsold). Each refused leg's cause (its record's, card pool-sell-legs-side-by-side) is
+//   in the report.
 import { randomBytes, createHash } from "node:crypto";
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -65,7 +69,8 @@ if (POOL_TESTNET !== true || SOL_POOLS.devnet === undefined) throw new Error("no
 const [TABLE, MINT, NS, BPS, OUT] = process.argv.slice(2);
 const N = Number(NS);
 const SHARE = Number(BPS);
-if (!OUT || !Number.isInteger(N) || N < 1 || !Number.isInteger(SHARE) || SHARE < 1 || SHARE > 10_000) throw new Error("usage: pool-sell-share-devnet.mjs <table> <mint> <n buys> <share bps> <out.json>");
+const RESUME = process.env.FLOW_RESUME;
+if (!OUT || !Number.isInteger(N) || N < (RESUME ? 0 : 1) || (RESUME && N !== 0) || !Number.isInteger(SHARE) || SHARE < 1 || SHARE > 10_000) throw new Error("usage: pool-sell-share-devnet.mjs <table> <mint> <n buys> <share bps> <out.json>");
 const RUNG = 10_000_000n;
 const FEE = 5_000n;
 const SYSTEM = "11111111111111111111111111111111";
@@ -140,9 +145,10 @@ const DIR = join(homedir(), ".ct-devnet-runs");
 mkdirSync(DIR, { recursive: true, mode: 0o700 });
 chmodSync(DIR, 0o700);
 const STAMP = new Date().toISOString().replace(/[:.]/g, "-");
-const entropy = randomBytes(16);
-writeFileSync(join(DIR, `run-${STAMP}.seed`), entropy.toString("hex") + "\n", { mode: 0o600, flag: "wx" });
-log(`the run's seed is kept at ${join(DIR, `run-${STAMP}.seed`)}`);
+const entropy = RESUME ? Buffer.from(readFileSync(RESUME, "utf8").trim(), "hex") : randomBytes(16);
+if (entropy.length !== 16) throw new Error("the seed file holds no 16-byte seed");
+if (!RESUME) writeFileSync(join(DIR, `run-${STAMP}.seed`), entropy.toString("hex") + "\n", { mode: 0o600, flag: "wx" });
+log(RESUME ? `the words of ${RESUME}, signed in to a fresh store` : `the run's seed is kept at ${join(DIR, `run-${STAMP}.seed`)}`);
 const keptF = process.env.FLOW_FUNDER;
 const fKey = keptF ? Uint8Array.from(Buffer.from(readFileSync(keptF, "utf8").trim(), "hex")) : Uint8Array.from(randomBytes(32));
 if (fKey.length !== 32) throw new Error("the funder's file holds no 32-byte key");
@@ -299,6 +305,27 @@ for (let i = 0; i < N && ok; i++) {
   if (!W) ok = false;
 }
 
+// FLOW_RESUME: the page's restore rebuilds the words' notes; each spent note's W that still holds the coin is a round
+if (RESUME && ok) {
+  const { poolRestore } = await import("../src/pool-restore.ts");
+  const { freshWallet } = await import("../../wallet/src/derive/keys.ts");
+  const { jOf } = await import("../../wallet/src/pool/queue.ts");
+  const restore = poolRestore({ store: async () => w, seed64: async () => seed64.slice(), signedIn: async () => true, ended: () => {} });
+  log(`the restore ended ${await restore.auto()}`);
+  const owner = (await again(() => rpcs[0]("getAccountInfo", [MINT, { encoding: "base64", commitment: "finalized" }]))).value.owner;
+  for (const n of (await ns.list()).filter((x) => x.state === "SPENT" && x.leaf)) {
+    const fw = freshWallet(seed64, "sol", n.leaf.label, jOf(n.ref));
+    fw.secretKey.fill(0);
+    const ata = (await again(() => rpcs[0]("getAccountInfo", [solanaAta(fw.address, MINT, owner), { encoding: "base64", commitment: "finalized" }]))).value;
+    const units = ata ? Buffer.from(ata.data[0], "base64").readBigUInt64LE(64) : 0n;
+    log(`W ${fw.address} holds ${units} units of the coin`);
+    if (units > 0n) rounds.push({ W: fw.address, resumed: true });
+  }
+  if (rounds.length === 0) ok = false;
+}
+// the return notes the store held before the tap (a resumed run's restore rebuilds the earlier run's)
+const returnsOf = (ns_) => ns_.filter((n) => n.ref === "return" && n.state === "UNSPENT" && n.leafIndex !== null).length;
+const returnsBefore = returnsOf(await noteList());
 let sell = null;
 let after = null;
 // the sale's path, as the app's: the page's positions pass runs at sign in (positions(), its first pass), so the sale
@@ -348,7 +375,7 @@ if (sell?.times?.tap !== undefined) {
   const end = tap + sell.times.ended;
   const legs = (sell.record?.legs ?? []).map((l, i) => {
     const endAt = sell.times.timeline.find((x) => x.legs[i] && x.legs[i][1] !== "pending" && x.legs[i][1] !== "signed" && x.legs[i][1] !== "sent");
-    return { leg: i + 1, wallet: l.wallet, units: l.units, tx: l.tx, stage: l.stage, code: l.code ?? null, sentMs: l.tx && sentAt.has(l.tx) ? Math.round(sentAt.get(l.tx) - tap) : null, endedMs: endAt?.ms ?? null };
+    return { leg: i + 1, wallet: l.wallet, units: l.units, tx: l.tx, stage: l.stage, code: l.code ?? null, cause: l.cause ?? null, sentMs: l.tx && sentAt.has(l.tx) ? Math.round(sentAt.get(l.tx) - tap) : null, endedMs: endAt?.ms ?? null };
   });
   const during = calls.filter((c) => c.t >= tap && c.t <= end);
   const perHost = {};
@@ -401,7 +428,7 @@ const filled =
   [...new Set(sell.record.legs.map((l) => l.wallet))].sort().join() === rounds.map((r) => r.W).sort().join() &&
   sell.times.filled !== undefined &&
   legTxs.length === rounds.length &&
-  notes.filter((n) => n.ref === "return" && n.state === "UNSPENT" && n.leafIndex !== null).length === rounds.length &&
+  returnsOf(notes) - returnsBefore === rounds.length &&
   !stages.some((x) => x.kind !== "pool.deposit" && x.stage !== "sent" && x.stage !== "filled") &&
   Object.values(readBack).every((r) => r.every((x) => x !== null && x.err === null)) &&
   path === (FINDER ? "finder" : "kept listing");
