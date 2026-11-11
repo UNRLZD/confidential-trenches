@@ -20,7 +20,7 @@ import { SolanaRpcTransportError, solanaSameProvider, solanaPacedRpc, type Solan
 import type { Stage } from "../../kit/src/signpage/messages.ts";
 import { RELEASE_HELPER } from "../../wallet/src/withdraw/relay.ts";
 import { readFileSync } from "node:fs";
-import { SOLANA_PROVIDER_A, TRADE_HELPER, TRADE_PICK_LOCK, tradeLock, buyLegs, refusalCode, releaseTradeDeps, sellSplit, settleTradeOps, tradeKind, tradeSettleDue } from "../src/trade.ts";
+import { SOLANA_PROVIDER_A, SOLANA_PUBLIC_SEAT, TRADE_HELPER, TRADE_PICK_LOCK, tradeLock, buyLegs, refusalCode, releaseTradeDeps, sellSplit, settleTradeOps, tradeKind, tradeSettleDue } from "../src/trade.ts";
 
 // the skeleton check's pinned policy (an .mjs with no types: imported by a plain string)
 const SKELETON: string = "../../../scripts/live-checks/signpage-skeleton.mjs";
@@ -792,13 +792,15 @@ test("a buy refused (no ready set) reaches the app as progress refused after its
 
 // Card pool-read-down: the release's reference read (releaseTradeDeps) on either provider down past the page's retry is
 // that fault, never "no reference pool" (quote_check_failed); the trade is then "down" before a leg is signed, never after.
+// Provider 0 is the public seat (card signpage-throttled-provider-has-a-spare): down is every member of it down, since a
+// read provider A throttles goes to its spare, which then answers it.
 for (const p of [0, 1] as const) {
   test(`card pool-read-down: provider ${p} down past its retry: the release's reference read rejects with the fault, never null`, async () => {
     const real = globalThis.fetch;
     const deps = releaseTradeDeps();
-    const downOrigin = p === 0 ? new URL(SOLANA_PROVIDER_A).origin : new URL(TRADE_HELPER).origin;
+    const down = p === 0 ? SOLANA_PUBLIC_SEAT.map((u) => new URL(u).origin) : [new URL(TRADE_HELPER).origin];
     globalThis.fetch = (async (u: string | URL | Request, init?: RequestInit) => {
-      if (new URL(u instanceof Request ? u.url : String(u)).origin === downOrigin) return new Response("", { status: 429, headers: { "retry-after": "0" } });
+      if (down.includes(new URL(u instanceof Request ? u.url : String(u)).origin)) return new Response("", { status: 429, headers: { "retry-after": "0" } });
       const { id } = JSON.parse(String(init?.body)) as { id: string };
       return Response.json({ jsonrpc: "2.0", id, result: { context: { slot: 1 }, value: null } });
     }) as typeof fetch;
@@ -808,12 +810,39 @@ for (const p of [0, 1] as const) {
         (e: unknown) => ({ rejected: e }),
       );
       assert.ok("rejected" in got && got.rejected instanceof SolanaRpcTransportError, JSON.stringify(got, (_k, v) => (typeof v === "bigint" ? String(v) : v)));
-      assert.equal(got.rejected.host, new URL(downOrigin).host);
+      assert.ok(down.map((o) => new URL(o).host).includes(got.rejected.host), got.rejected.host);
     } finally {
       globalThis.fetch = real;
     }
   });
 }
+
+// Card signpage-throttled-provider-has-a-spare: provider A down past its retry, its spare up: the release's reference
+// read is the spare's answer, and provider A is asked no more than its first try (its pause sends the rest on at once).
+test("card signpage-throttled-provider-has-a-spare: provider A down, its spare up: the release's reference read answers from the spare", async () => {
+  const real = globalThis.fetch;
+  const deps = releaseTradeDeps();
+  const a = new URL(SOLANA_PROVIDER_A).origin;
+  const spare = new URL(SOLANA_PUBLIC_SEAT[1]!).origin;
+  const asked: string[] = [];
+  globalThis.fetch = (async (u: string | URL | Request, init?: RequestInit) => {
+    const o = new URL(u instanceof Request ? u.url : String(u)).origin;
+    asked.push(o);
+    if (o === a) return new Response("", { status: 429, headers: { "retry-after": "0" } });
+    const { id } = JSON.parse(String(init?.body)) as { id: string };
+    return Response.json({ jsonrpc: "2.0", id, result: { context: { slot: 1 }, value: null } });
+  }) as typeof fetch;
+  try {
+    const got = await deps.reference({ side: "buy", token: MINT, amount: 10_000_000n, amounts: [10_000_000n] }, deps.providers).then(
+      (r) => ({ resolved: r }),
+      (e: unknown) => ({ rejected: String(e) }),
+    );
+    assert.deepEqual(got, { resolved: null }, "the spare's answer (no pool for the token) is the read's");
+    assert.ok(asked.includes(spare), "the spare was asked");
+  } finally {
+    globalThis.fetch = real;
+  }
+});
 
 // Card solana-release-reads-paced: the release's reference reads on the pair the kit hands it (flow.ts gives its paced
 // providers, pacedDeps), never on a pair of its own that the trade's pace does not hold.
