@@ -552,7 +552,7 @@ test("card pool-sell-share-across-wallets: pool.sell takes a share of the whole 
     assert.throws(() => C.signpageBuildRequest("pool.sell", b, "id"), TypeError, JSON.stringify(b));
 });
 
-test("card app-sell-shows-what-you-receive: pool.sell.dry takes pool.sell's params exactly (a share or a typed amount, one of them), and answers out, network and fee_bps only", async () => {
+test("card app-sell-shows-what-you-receive: pool.sell.dry takes pool.sell's params exactly (a share or a typed amount, one of them), and answers out, min_out, network and fee_bps only", async () => {
   const T = "So1aNaMint1111111111111111111111111111111pump";
   const base = { chain: "solana", token: T, slippage_bps: 1000 };
   for (const good of [{ ...base, share_bps: 5_000 }, { ...base, amount: "12.5" }, { chain: "base", token: "0xF111111111111111111111111111111111111111", share_bps: 10_000, slippage_bps: 0 }])
@@ -566,7 +566,9 @@ test("card app-sell-shows-what-you-receive: pool.sell.dry takes pool.sell's para
     [{ ...R, fee_bps: 10_001 }, "a fee over 100%"],
     [{ ...R, fee_bps: 1.5 }, "a fee not whole"],
     [{ out: R.out, network: R.network }, "no fee"],
-    [{ ...R, min_out: "0.1" }, "a field the answer does not have"],
+    [{ ...R, route: "Metis" }, "a field the answer does not have"],
+    [{ ...R, min_out: "0.1234567891" }, "a floor above the out"],
+    [{ out: R.out, network: R.network, fee_bps: 0 }, "no floor"],
     [{ ...R, wallet: "W" }, "a wallet on a preview"],
   ]) {
     const { h, c } = await readyClient();

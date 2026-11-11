@@ -223,11 +223,13 @@ export interface SignpageResults {
 /**
  * pool.sell.dry's answer (card app-sell-shows-what-you-receive), each amount a decimal string in whole units of the
  * chain pool's asset (POOL_ASSET_DECIMALS: SOL on Solana, ETH on Base and Robinhood): `out`, what the sale gives back
- * into the pool by the device's own quote (the venue's fees taken, before slippage); `network`, what the chain charges
- * the sale; `fee_bps`, the platform's fee on it in basis points. Numbers only: never a wallet, a note or a route.
+ * into the pool by the device's own quote (the venue's fees taken, before slippage); `min_out`, the least the sale may
+ * give at the asked slippage (the floor it signs), at most `out`; `network`, what the chain charges the sale; `fee_bps`,
+ * the platform's fee on it in basis points. Numbers only: never a wallet, a note or a route.
  */
 export interface PoolSellDry {
   out: string;
+  min_out: string;
   network: string;
   fee_bps: number;
 }

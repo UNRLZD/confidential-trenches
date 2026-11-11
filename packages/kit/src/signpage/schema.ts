@@ -315,6 +315,10 @@ const depositDry: SignpageSchema = (v) => {
   return at78(d.min_amount_out_usd) <= at78(d.amount_out_usd);
 };
 
+/** pool.sell.dry's answer (messages.ts PoolSellDry): its floor at most its out. */
+const poolSellDryLines = obj({ out: dec, min_out: dec, network: dec, fee_bps: bps(0) });
+const poolSellDry: SignpageSchema = (v) => poolSellDryLines(v) && at78((v as { min_out: string }).min_out) <= at78((v as { out: string }).out);
+
 /** pool.address's answer (card pool-deposit-address): the chain's one-time deposit wallet U_X, an address of that chain
  *  (base58 of 32 bytes on Solana, 0x and 40 hex on an EVM chain), the chain's pool asset, and for money from another
  *  chain the checked quote to U_X, its min out in that asset's whole units at no more than its decimals. */
@@ -364,7 +368,7 @@ export const SIGNPAGE_RESULT_SCHEMAS = {
   "deposit.assets": depositAssets,
   "deposit.dry": depositDry,
   "pool.address": poolAddress,
-  "pool.sell.dry": obj({ out: dec, network: dec, fee_bps: bps(0) }),
+  "pool.sell.dry": poolSellDry,
 } as const satisfies Record<SignpageKind, SignpageSchema>;
 deepFreeze(SIGNPAGE_RESULT_SCHEMAS);
 

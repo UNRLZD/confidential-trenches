@@ -484,10 +484,13 @@ export function solanaPoolSellMinOut(venue: SolanaPoolBuyVenue, amount: bigint, 
   const addr = venue.kind === "pump-curve" ? venue.curve : venue.pool;
   const pool = ref?.pools.find((x) => x.address === addr && x.venue === venue.kind);
   if (!pool) throw new Error(`no reference read for ${addr} on two providers`);
-  const floor = (pool.expectedOut * BigInt(10_000 - slippageBps)) / 10_000n;
+  const floor = solanaSellFloor(pool.expectedOut, slippageBps);
   if (floor === 0n) throw new Error("the sell's floor is 0");
   return floor;
 }
+
+/** A sell's floor: E less the user's slippage, rounded down (solanaPoolSellMinOut's, and the sell box's preview's). */
+export const solanaSellFloor = (expectedOut: bigint, slippageBps: number): bigint => (expectedOut * BigInt(10_000 - slippageBps)) / 10_000n;
 
 /**
  * W's sell of `amount` tokens for at least `minOut` lamports (from solanaPoolSellMinOut). pump: `sell` with the IDL's
