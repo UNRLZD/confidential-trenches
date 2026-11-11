@@ -130,13 +130,13 @@ export const pageEvmHistory = (pin: EvmPoolPin): readonly EvmRpc[] => {
   if (h === undefined) HISTORY.set(pin.network, (h = Object.freeze([evmHelperKeyedRpc(TRADE_HELPER, pin.network), ...MAINNET_POOL_HISTORY[pin.network].map((u) => pageRpc(u))])));
   return h;
 };
-/** Where a mainnet W's balance is read, for its positions and for a sale's finding (decision M359): the helper's route
- *  alone (POST /v1/rpc/{chain}, the wallet's evmHelperRpc, the holdings readers' one paced queue, which the restore's W
- *  reads share), so a provider the device reaches itself is never named a W of it, nor two in one burst; a sale's own
- *  pre-signature reads stay on the pool's two RPCs (src/pool-sell-evm.ts). None in the testnet build, whose helper has no
- *  route for the chain: there the pool's two RPCs read each W, as before. */
-export const pageEvmWalletRpc = (chain: "base" | "robinhood"): EvmRpc | undefined => {
-  if (POOL_TESTNET) return undefined;
+/** Where a mainnet W's balance is read for its positions (decision M359): the helper's route alone (POST
+ *  /v1/rpc/{chain}, the wallet's evmHelperRpc, the holdings readers' one paced queue, which the restore's W reads share),
+ *  so a provider the device reaches itself is never named a W of it, nor two in one burst. A sale reads none of it: its
+ *  finding gates its signature, so it reads on the pool's two RPCs (src/pool-sell-evm.ts planEvmSell). None in the
+ *  testnet build, whose helper has no route for the chain: there the pool's two RPCs read each W, as before. */
+export const pageEvmWalletRpc = (chain: "base" | "robinhood", testnet: boolean = POOL_TESTNET): EvmRpc | undefined => {
+  if (testnet) return undefined;
   let r = WALLET_RPCS.get(chain);
   if (r === undefined) {
     const route = evmHelperRpc(TRADE_HELPER, chain);
@@ -145,6 +145,12 @@ export const pageEvmWalletRpc = (chain: "base" | "robinhood"): EvmRpc | undefine
   return r;
 };
 const WALLET_RPCS = new Map<"base" | "robinhood", EvmRpc>();
+/** A positions pass's readers (src/positions-evm.ts): the pool's pass pair, and on SIGN_HOST's build the helper's route
+ *  as `one`, every W's balance read on it alone; the pair alone in the testnet build. */
+export const pageEvmPassReads = (chain: "base" | "robinhood", rpcs: readonly [EvmRpc, EvmRpc], testnet: boolean = POOL_TESTNET): { rpcs: readonly [EvmRpc, EvmRpc]; one?: EvmRpc } => {
+  const one = pageEvmWalletRpc(chain, testnet);
+  return one === undefined ? { rpcs } : { rpcs, one };
+};
 /** Tests only: forget this page's hold objects (EVM_HOLDS; each pool's record stays in the wallet store, as on a new
  *  page). */
 export const resetPageEvmHolds = (): void => EVM_HOLDS.clear();
@@ -922,7 +928,6 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       held: () => (page.held ? page.held() : Promise.reject(new Error("no wallet store is open"))),
       round: () => e.sync.events(),
       testnet: POOL_TESTNET,
-      ...((f) => (f ? { finder: f } : {}))(pageEvmWalletRpc(chain)),
       fetch: over.fetch,
       signal: follows.signal,
       // the session's sign out (signingOut, at its tap): it ends a wait between the sale's reads' attempts
@@ -1378,11 +1383,9 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
                   const g = hs.gen();
                   const st = await page.store();
                   // a background read: the pass pair, which waits while a trade holds the hosts (page-rpc.ts)
-                  const one = pageEvmWalletRpc(chain);
                   const got = await evmPositionsPass({
                     chain,
-                    rpcs: e.passRpcs,
-                    ...(one ? { one } : {}),
+                    ...pageEvmPassReads(chain, e.passRpcs),
                     signal: run.signal,
                     // the open sales: this page's, and the records a load finds
                     holds: async (heads) => {

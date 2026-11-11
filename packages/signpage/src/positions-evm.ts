@@ -47,9 +47,13 @@
 //   provider from the user's IP in one burst would show it the user's wallets together. Holdings are display and never
 //   signed on (a sale signs on its own reads, on both pool RPCs: pool-sell-evm.ts), so they take one reader: one block,
 //   eth_getBlockByNumber("latest") (Robinhood serves no finalized state), then each W's balanceOf at that block's hash
-//   (EIP-1898), one W a request, the Ws in a random order. The floor and the open sales' holds are the same rule, on that
-//   one block. The pool's two RPCs read the token's decimals only, which name no W. A lying helper can show a wrong
-//   amount, or none; it can never make the device sign. Requests per pass on the helper: 1 + one per filled W.
+//   (EIP-1898), one W a request, the Ws in a random order. The pool's two RPCs read their heads and the token's decimals,
+//   which name no W; the block the pass counts as read at is the lowest of the helper's block and the two heads, so a
+//   helper naming a block far ahead never lifts the floor past the chain (positions would wait for it all session). A
+//   helper read that fails (a 429, an outage) is a W's failed read: its last kept amount stays and the pass runs again,
+//   never a public provider in its place. A lying helper can show a wrong amount, or none; it can never make the device
+//   sign: a sale's finding reads on the pool's two RPCs (pool-sell-evm.ts planEvmSell). Requests per pass on the
+//   helper: 1 + one per filled W.
 import type { EvmRpc } from "../../wallet/src/pool/evm.ts";
 import { evmHeadNumber } from "./evm-send.ts";
 import type { EvmHolding } from "./pool-buy-evm.ts";
@@ -84,6 +88,8 @@ export type EvmPositionsReads = {
   holds?(heads: readonly [bigint, bigint] | null): Promise<ReadonlyMap<string, bigint | null>>;
   /** Mainnet: the helper's route, the one reader of every W's balance (see the header); `rpcs` then name no W. */
   one?: EvmRpc;
+  /** The random source the Ws' order is drawn from (crypto.getRandomValues when not given). */
+  random?: (out: Uint32Array<ArrayBuffer>) => void;
 };
 
 const word = (v: unknown): bigint => {
@@ -137,10 +143,10 @@ export async function evmOneBalance(rpc: EvmRpc, token: string, w: string, hash:
 }
 /** `xs` in a random order (Fisher-Yates on the platform's random source): the Ws a reader is named, never in the
  *  notes' or the records' order (M359 (4)). */
-export function shuffled<T>(xs: readonly T[]): T[] {
+export function shuffled<T>(xs: readonly T[], random: (out: Uint32Array<ArrayBuffer>) => void = (out) => void globalThis.crypto.getRandomValues(out)): T[] {
   const out = [...xs];
   const r = new Uint32Array(Math.max(out.length, 1));
-  globalThis.crypto.getRandomValues(r);
+  random(r);
   for (let i = out.length - 1; i > 0; i--) {
     const j = r[i]! % (i + 1);
     [out[i], out[j]] = [out[j]!, out[i]!];
@@ -183,15 +189,14 @@ export async function evmPositionsPass(r: EvmPositionsReads, memo: PassMemo): Pr
   // the one reader's block hash, every W's balance read at it (mainnet)
   let oneAt: string | null = null;
   try {
-    let x: bigint, y: bigint;
-    if (one === undefined) [x, y] = (await Promise.all(rpcs.map((rpc) => evmHeadNumber(rpc)))) as [bigint, bigint];
-    else {
-      const b = await evmOneBlock(one);
-      [x, y] = [b.number, b.number];
+    // the pair's heads (no W named), and on mainnet the helper's block beside them: the lowest of the three counts
+    const [[x, y], b] = await Promise.all([Promise.all(rpcs.map((rpc) => evmHeadNumber(rpc))), one === undefined ? null : evmOneBlock(one)]);
+    heads = [x!, y!];
+    let l = x! < y! ? x! : y!;
+    if (b !== null) {
+      if (b.number < l) l = b.number;
       oneAt = b.hash;
     }
-    heads = [x!, y!];
-    const l = x! < y! ? x! : y!;
     // under the floor: no balance read (see the header), not whole
     if (l >= floor) {
       at = `0x${l.toString(16)}`;
@@ -211,7 +216,7 @@ export async function evmPositionsPass(r: EvmPositionsReads, memo: PassMemo): Pr
   // mainnet: every W's balance on the one reader, one W a request, all the pass's Ws in one random order
   const oneRead = new Map<string, Promise<bigint>>();
   if (one !== undefined && at !== null)
-    for (const [token, w] of shuffled(tokens.flatMap(([token, ws]) => (past(first, token, low) ? [...ws].map((w) => [token, w] as const) : []))))
+    for (const [token, w] of shuffled(tokens.flatMap(([token, ws]) => (past(first, token, low) ? [...ws].map((w) => [token, w] as const) : [])), r.random))
       oneRead.set(`${w} ${token}`, evmOneBalance(one, token, w, oneAt!));
   for (const p of oneRead.values()) p.catch(() => {});
   const read = await Promise.all(

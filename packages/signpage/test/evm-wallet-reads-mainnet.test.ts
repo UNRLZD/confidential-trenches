@@ -1,7 +1,9 @@
-// A mainnet W's balance on Base and Robinhood (decision M359, card evm-pools-on-mainnet): its positions and a sale's
-// finding read each W on the helper's route alone (src/pool-testnet.ts pageEvmWalletRpc), never on the pool RPCs a device
-// reaches itself; one request names one W; the answers equal the testnet reader's (each W on the pool's two RPCs) on
-// the same recorded chain answers; and what a holding of 1, 3 and 8 Ws costs the helper's route per pass. Every chain is
+// A mainnet W's balance on Base and Robinhood (decision M359, card evm-pools-on-mainnet): its positions read each W on
+// the helper's route alone (src/pool-testnet.ts pageEvmWalletRpc), never on the pool RPCs a device reaches itself, and
+// equal the testnet reader's (each W on the pool's two RPCs) on the same recorded chain answers; a helper that lies, 429s
+// or is out changes no kept amount; a sale's finding, which gates its signature, reads on the pool's two RPCs only, the
+// Ws whose own buy record names the token, never the helper; one request names one W; and what a holding of 1, 3 and 8
+// Ws costs the helper's route per pass. Every chain is
 // a fake one; nothing here reaches a network.
 //   node --test test/evm-wallet-reads-mainnet.test.ts
 import assert from "node:assert/strict";
@@ -20,7 +22,7 @@ import { evmPoolVenues } from "../../kit/src/trade/evm/buy-unpinned.ts";
 import { evmPositionsPass } from "../src/positions-evm.ts";
 import { passMemo } from "../src/positions.ts";
 import { planEvmSell } from "../src/pool-sell-evm.ts";
-import { MAINNET_EVM_FEE_RPCS, MAINNET_POOL_HISTORY, MAINNET_POOL_RPCS, pageEvmWalletRpc } from "../src/pool-testnet.ts";
+import { MAINNET_EVM_FEE_RPCS, MAINNET_POOL_HISTORY, MAINNET_POOL_RPCS, pageEvmPassReads, pageEvmWalletRpc } from "../src/pool-testnet.ts";
 import { TRADE_HELPER } from "../src/trade.ts";
 import type { PoolAsk } from "../src/rules/pool.ts";
 
@@ -78,14 +80,17 @@ function publicRpc(host: string, bal: ReadonlyMap<string, bigint>): EvmRpc {
     { url: host },
   ) as EvmRpc;
 }
-/** The helper's route, answering the same recorded state: one block, then each balance only at its hash. */
-function helperRpc(bal: ReadonlyMap<string, bigint>): EvmRpc {
+/** The helper's route, answering the same recorded state: one block, then each balance only at its hash. `o.number`:
+ *  the block number it names (a lying helper's); `o.down`: the error each call meets (a 429, an outage). */
+function helperRpc(bal: ReadonlyMap<string, bigint>, o: { number?: bigint; down?: () => Error | null } = {}): EvmRpc {
   const host = `${TRADE_HELPER}/v1/rpc/base`;
   return Object.assign(
     async (method: string, params: readonly unknown[]) => {
       calls.push({ host, method, params });
+      const e = o.down?.();
+      if (e) throw e;
       const c = params[0] as { data?: string } | undefined;
-      if (method === "eth_getBlockByNumber" && params[0] === "latest") return { number: hex(HEAD), hash: HASH };
+      if (method === "eth_getBlockByNumber" && params[0] === "latest") return { number: hex(o.number ?? HEAD), hash: HASH };
       if (method === "eth_call" && c?.data?.startsWith("0x70a08231") && (params[1] as { blockHash?: string })?.blockHash === HASH) return word(bal.get(`0x${c.data.slice(-40)}`) ?? 0n);
       throw new Error(`no such read: ${method}`);
     },
@@ -99,7 +104,7 @@ const named = (c: Call, ws: readonly string[]): string[] => {
   return ws.filter((w) => s.includes(w.slice(2)));
 };
 
-async function positions(ws: readonly string[], mainnet: boolean) {
+async function positions(ws: readonly string[], mainnet: boolean, o: { memo?: ReturnType<typeof passMemo>; helper?: EvmRpc; random?: (out: Uint32Array) => void } = {}) {
   const bal = held(ws);
   calls.length = 0;
   const rpcs = [publicRpc(PUBLIC[0]!, bal), publicRpc(PUBLIC[1]!, bal)] as const;
@@ -107,7 +112,8 @@ async function positions(ws: readonly string[], mainnet: boolean) {
     {
       chain: "base",
       rpcs,
-      ...(mainnet ? { one: helperRpc(bal) } : {}),
+      ...(mainnet ? { one: o.helper ?? helperRpc(bal) } : {}),
+      ...(o.random ? { random: o.random } : {}),
       signal: new AbortController().signal,
       holdings: async () => records(ws),
       decimals: async (token, r) => {
@@ -116,7 +122,7 @@ async function positions(ws: readonly string[], mainnet: boolean) {
         return Number(BigInt(a as string));
       },
     },
-    passMemo(),
+    o.memo ?? passMemo(),
   );
   return { got, calls: [...calls] };
 }
@@ -144,49 +150,132 @@ for (const n of [1, 3, 8]) {
     const pub = m.calls.filter((c) => !c.host.startsWith(TRADE_HELPER));
     for (const c of pub) assert.deepEqual(named(c, ws), [], `${c.host} ${c.method} names a W`);
     for (const c of m.calls) assert.ok(named(c, ws).length <= 1, `${c.host} ${c.method} names two Ws`);
-    // the helper: one block, then one balanceOf per W at its hash; the public pair: the token's decimals only
+    // the helper: one block, then one balanceOf per W at its hash; the public pair: its heads and the token's decimals
     assert.equal(helper.length, 1 + n);
     assert.deepEqual(helper.map((c) => c.method), ["eth_getBlockByNumber", ...Array(n).fill("eth_call")]);
-    assert.equal(pub.length, 2);
-    assert.ok(pub.every((c) => (c.params[0] as { data?: string }).data === "0x313ce567"));
+    assert.equal(pub.length, 4);
+    assert.ok(pub.every((c) => c.method === "eth_blockNumber" || (c.params[0] as { data?: string }).data === "0x313ce567"));
   });
 }
 
-test("a sale's finding on mainnet: the same plan as the testnet reader's on the same chain answers, every W read on the helper alone at one block's hash, one W a request", async () => {
-  for (const n of [1, 3, 8]) {
-    const { ws, store } = await boughtWs(n);
-    const bal = held(ws);
-    const recs = records(ws);
-    const ask: PoolAsk = { kind: "pool.sell", chain: "base", token: TOKEN, amount: n === 1 ? 1_000_000n : 4_000_000n, slippageBps: 100, decimals: 6 };
-    const host = (mainnet: boolean) => ({
-      chain: "base" as const,
-      scope: SCOPE,
-      rpcs: [publicRpc(PUBLIC[0]!, bal), publicRpc(PUBLIC[1]!, bal)] as const,
-      ...(mainnet ? { finder: helperRpc(bal) } : {}),
-      notes: async () => store,
-      seed64: async () => SEED.slice(),
-      holdings: async () => recs,
-    });
-    calls.length = 0;
-    const t = await planEvmSell(host(false), ask);
-    const tc = [...calls];
-    calls.length = 0;
-    const m = await planEvmSell(host(true), ask);
-    const mc = [...calls];
-    assert.deepEqual(m, t, `${n} Ws`);
-    assert.equal(tc.filter((c) => named(c, ws).length > 0).length, 2 * n);
-    for (const c of mc) {
-      if (!c.host.startsWith(TRADE_HELPER)) assert.deepEqual(named(c, ws), [], `${c.host} ${c.method} names a W`);
-      assert.ok(named(c, ws).length <= 1, `${c.method} names two Ws`);
-    }
-    assert.equal(mc.length, 1 + n);
-    assert.ok(mc.every((c) => c.host.startsWith(TRADE_HELPER)));
+/** A sale's plan as the page's host gives it: the pool's two RPCs answering `pair`, and a helper route answering
+ *  `helper` set where a page could still hand one (`finder`, `one`): a sale must never ask it. */
+const planHost = (store: NoteStore, recs: Record<string, unknown>, pair: ReadonlyMap<string, bigint>, helper: ReadonlyMap<string, bigint>, random?: (out: Uint32Array) => void) => {
+  const h = {
+    chain: "base" as const,
+    scope: SCOPE,
+    rpcs: [publicRpc(PUBLIC[0]!, pair), publicRpc(PUBLIC[1]!, pair)] as const,
+    finder: helperRpc(helper),
+    one: helperRpc(helper),
+    notes: async () => store,
+    seed64: async () => SEED.slice(),
+    holdings: async () => recs,
+    ...(random ? { random } : {}),
+  };
+  return h;
+};
+const share = (bps: number): PoolAsk => ({ kind: "pool.sell", chain: "base", token: TOKEN, amount: 0n, slippageBps: 100, decimals: 6, shareBps: bps });
+const OTHER_TOKEN = "0x" + "0d".repeat(20);
+
+test("a sale's share is sized on the pool's two RPCs, never the helper's word: W holds 1,000, the helper says 4,000, a 25 % sale signs 250; no request of the sale goes to the helper", async () => {
+  const { ws, store } = await boughtWs(1);
+  calls.length = 0;
+  const plan = await planEvmSell(planHost(store, records(ws), new Map([[ws[0]!, 1_000n]]), new Map([[ws[0]!, 4_000n]])), share(2_500));
+  assert.equal(plan.total, 1_000n);
+  assert.equal(plan.units, 250n);
+  assert.deepEqual(plan.legs.map((l) => l.units), [250n]);
+  assert.deepEqual(calls.filter((c) => c.host.startsWith(TRADE_HELPER)), []);
+});
+
+test("a W the helper hides is still sold on a 100 % sale (its own buy record names it); a W the helper invents never becomes a leg nor is named", async () => {
+  const { ws, store } = await boughtWs(2);
+  const invented = "0x" + "e1".repeat(20);
+  calls.length = 0;
+  const plan = await planEvmSell(planHost(store, records(ws), new Map([[ws[0]!, 1_000n], [ws[1]!, 500n]]), new Map([[ws[0]!, 1_000n], [ws[1]!, 0n], [invented, 9_000n]])), share(10_000));
+  assert.equal(plan.units, 1_500n);
+  assert.deepEqual(plan.legs.map((l) => l.w.w).sort(), [...ws].sort());
+  assert.ok(calls.every((c) => named(c, [invented]).length === 0));
+  assert.deepEqual(calls.filter((c) => c.host.startsWith(TRADE_HELPER)), []);
+});
+
+test("a sale names to the public pair only the Ws whose own buy record names the token sold, one W a request, at one agreed block, in the order the random source gives", async () => {
+  // W0 and W2 bought the token, W1 another token, W3 has no record at all
+  const { ws, store } = await boughtWs(4);
+  const recs = { ...records([ws[0]!, ws[2]!]), [ws[1]!]: { ...records([ws[1]!])[ws[1]!], mint: OTHER_TOKEN } };
+  const bal = new Map(ws.map((w) => [w, 700n]));
+  calls.length = 0;
+  // all zeros: Fisher-Yates swaps each place i (from the last) with place 0
+  const plan = await planEvmSell(planHost(store, recs, bal, bal, (out) => out.fill(0)), share(10_000));
+  assert.equal(plan.units, 1_400n);
+  const balanceReads = calls.filter((c) => c.method === "eth_call");
+  for (const c of calls) assert.ok(named(c, ws).length <= 1, `${c.method} names two Ws`);
+  assert.deepEqual([...new Set(balanceReads.flatMap((c) => named(c, ws)))].sort(), [ws[0]!, ws[2]!].sort());
+  assert.ok(balanceReads.every((c) => c.params[1] === hex(HEAD)));
+  assert.deepEqual(calls.filter((c) => c.host.startsWith(TRADE_HELPER)), []);
+  // the order the reads were asked in, on the first RPC, follows the random source: the identity draws (place i kept)
+  // give the plan's own order, every draw 0 swaps place i (from the last) with place 0
+  const asked = () => calls.filter((c) => c.method === "eth_call" && c.host === PUBLIC[0]).flatMap((c) => named(c, ws));
+  const zeros = asked();
+  calls.length = 0;
+  await planEvmSell(planHost(store, recs, bal, bal, (out) => out.forEach((_, i) => (out[i] = i))), share(10_000));
+  const want = asked();
+  for (let i = want.length - 1; i > 0; i--) [want[i], want[0]] = [want[0]!, want[i]!];
+  assert.equal(want.length, 2);
+  assert.deepEqual(zeros, want);
+});
+
+test("positions on a helper 429 or outage: the pass keeps the last kept amounts, waits (not whole, so it runs again), never asks a public provider for a W", async () => {
+  const { ws } = await boughtWs(3);
+  const memo = passMemo();
+  const first = await positions(ws, true, { memo });
+  assert.equal(first.got.whole, true);
+  for (const down of [() => Object.assign(new Error("HTTP 429"), { status: 429 }), () => new Error("the helper did not answer")]) {
+    const m = await positions(ws, true, { memo, helper: helperRpc(held(ws), { down }) });
+    assert.equal(m.got.whole, false);
+    assert.deepEqual(m.got.positions, first.got.positions);
+    for (const c of m.calls.filter((c) => !c.host.startsWith(TRADE_HELPER))) assert.deepEqual(named(c, ws), [], `${c.host} ${c.method} names a W`);
+  }
+  // the helper back: whole again, the same rows
+  const back = await positions(ws, true, { memo });
+  assert.equal(back.got.whole, true);
+  assert.deepEqual(back.got.positions, first.got.positions);
+});
+
+test("a helper naming a block far ahead never freezes positions: the floor is the lower of its block and the pool pair's heads", async () => {
+  const { ws } = await boughtWs(2);
+  const memo = passMemo();
+  const lied = await positions(ws, true, { memo, helper: helperRpc(held(ws), { number: 10n ** 9n }) });
+  assert.equal(lied.got.whole, true);
+  const next = await positions(ws, true, { memo });
+  assert.equal(next.got.whole, true);
+  assert.deepEqual(next.got.positions, lied.got.positions);
+});
+
+test("positions name the Ws to the helper in the order the random source gives", async () => {
+  const { ws } = await boughtWs(8);
+  const m = await positions(ws, true, { random: (out) => out.fill(0) });
+  // Fisher-Yates with every draw 0: place i (from the last) swapped with place 0
+  const want = [...ws];
+  for (let i = want.length - 1; i > 0; i--) [want[i], want[0]] = [want[0]!, want[i]!];
+  assert.deepEqual(m.calls.filter((c) => c.host.startsWith(TRADE_HELPER) && c.method === "eth_call").flatMap((c) => named(c, ws)), want);
+});
+
+test("the page's pass readers: on SIGN_HOST's build the pool pair and the helper's route as `one`; on the testnet build no helper route is made", () => {
+  const pair = [publicRpc(PUBLIC[0]!, new Map()), publicRpc(PUBLIC[1]!, new Map())] as const;
+  for (const chain of ["base", "robinhood"] as const) {
+    const main = pageEvmPassReads(chain, pair);
+    assert.equal(main.rpcs, pair);
+    assert.equal(main.one, pageEvmWalletRpc(chain));
+    assert.equal(main.one?.url, `${TRADE_HELPER}/v1/rpc/${chain}`);
+    const test = pageEvmPassReads(chain, pair, true);
+    assert.deepEqual(Object.keys(test), ["rpcs"]);
+    assert.equal(pageEvmWalletRpc(chain, true), undefined);
   }
 });
 
 test("the helper's per-caller share holds a pass of 8 Ws: the device's own pace on the route asks at most 12 in any 10 s, under base's and robinhood's 30 (apps/helper/src/rpc/rpc.ts RPC_PAGE_NEED)", () => {
-  // the route's queue (buy-wallets.ts HOLDINGS_RPC_LIMIT): `total` calls in any `windowMs`, the positions, a sale's
-  // finding and a restore's W reads together
+  // the route's queue (buy-wallets.ts HOLDINGS_RPC_LIMIT): `total` calls in any `windowMs`, the positions and a
+  // restore's W reads together (a sale reads no W on the helper)
   const per10s = Math.ceil(10_000 / HOLDINGS_RPC_LIMIT.windowMs) * HOLDINGS_RPC_LIMIT.total;
   assert.ok(per10s <= 30, `${per10s} a 10 s window`);
   // a pass of 8 Ws is 9 requests, 8 of them eth_call at perMethod a window: done in ceil(8 / perMethod) windows
