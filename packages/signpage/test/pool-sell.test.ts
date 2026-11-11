@@ -33,7 +33,7 @@ import { openNoteStore, type NoteStore } from "../../wallet/src/notes/store.ts";
 import type { BuyWallet } from "../../wallet/src/pool/buy-wallets.ts";
 import { solanaPoolOf } from "../../wallet/src/pool/solana.ts";
 import { BLOCKHASH, FEE_PAYER, POOL, PROGRAM, fx, providers, rent } from "../../kit/test/solana-pool-buy-fx.ts";
-import { POOL_RENT_BACK_MS, POOL_RENT_BACK_RULES, POOL_SELL_LOCK, POOL_SELL_READS, POOL_SELL_SHARED_READ_MS, POOL_SELL_SIZE_RETRY_MS, POOL_SELL_SIZES_WAIT_MS, POOL_SELL_WAIT_MS, buyMints, leftAfter, owedRentBacks, planPoolSell, poolSellKind, resumeRentBacks, runPoolSell, settleDeadSellOps, settlePoolSells, settleSellOps, solanaSellAfterFull, solanaSellReserve, keptSells, stageOfLegs, type KeptSell, type OwedRentBack, type PoolSellHost, type PoolSellKindHost, type RentBackTold } from "../src/pool-sell.ts";
+import { POOL_RENT_BACK_MS, POOL_RENT_BACK_RULES, POOL_SELL_LOCK, POOL_SELL_READS, POOL_SELL_SHARED_READ_MS, POOL_SELL_SIZE_RETRY_MS, POOL_SELL_AGREE_WAIT_MS, POOL_SELL_WAIT_MS, buyMints, leftAfter, owedRentBacks, planPoolSell, poolSellKind, resumeRentBacks, runPoolSell, settleDeadSellOps, settlePoolSells, settleSellOps, solanaSellAfterFull, solanaSellReserve, keptSells, stageOfLegs, type KeptSell, type OwedRentBack, type PoolSellHost, type PoolSellKindHost, type RentBackTold } from "../src/pool-sell.ts";
 import { opOf } from "../src/state.ts";
 import { solanaCompileV0 } from "../../kit/src/trade/solana/build.ts";
 import { checkSolanaSweep, PoolRuleRefused, SOLANA_POOL_MIN_DEPOSIT, SOLANA_POOL_SELL_RESERVE_MAX, solanaDepositRents, solanaSweepFloor, solanaSweepKeep, solanaWithdrawMinPart, withdrawNoteFloor, type PoolAsk } from "../src/rules/pool.ts";
@@ -844,7 +844,7 @@ test("a W short of lamports keeps them on W: the reserve is its fee, the mark's 
   assert.deepEqual(await ours(w.ns), [{ ref: RETURN, state: "UNSPENT", value: MIN_OUT - reserve, leafIndex: BigInt(N) }]);
 });
 
-test("an amount over W's holding as both RPCs read it is not_funded; two RPCs that read different amounts are read again once, then failed, the higher never taken: nothing derived, signed or sent", async () => {
+test("an amount over W's holding as both RPCs read it is not_funded; two RPCs that read different amounts are read again every 0.5 s up to POOL_SELL_AGREE_WAIT_MS, then failed, the higher never taken: nothing derived, signed or sent", async () => {
   const w = await world({ held: AMOUNT - 1n });
   assert.deepEqual(await runPoolSell(w.host, ASK), { error: "not_funded" });
   // card pool-sell-legs-side-by-side: a lone W's note is read beside the plan, so the seed is read once, for the note's
@@ -853,11 +853,13 @@ test("an amount over W's holding as both RPCs read it is not_funded; two RPCs th
   assert.ok(!w.c.log.some((x) => /simulateTransaction|sendTransaction/.test(x)));
   assert.deepEqual(await ours(w.ns), []);
   // the second re-review (low): RPC 1 reads less, or more (a whole sale it would make look partial, keeping the next
-  // sell's need on an empty W): read again once, then failed
+  // sell's need on an empty W): read again every POOL_SELL_SIZE_RETRY_MS up to POOL_SELL_AGREE_WAIT_MS of waits (card
+  // pool-sell-legs-side-by-side: one provider not showing a buy's result yet is waited out), then failed
+  const reads = 1 + POOL_SELL_AGREE_WAIT_MS / POOL_SELL_SIZE_RETRY_MS;
   for (const heldOn1 of [AMOUNT - 1n, 2n * AMOUNT]) {
     const x = await world({ heldOn1 }, [wallet(2n * AMOUNT)]);
-    assert.deepEqual(await runPoolSell(x.host, ASK), { error: "failed" }, String(heldOn1));
-    assert.deepEqual([0, 1].map((p) => x.c.calls.filter((c) => c.p === p && namesIn(c.method, c.params, ATA)).length), [2, 2], "read twice on each");
+    assert.deepEqual(await runPoolSell({ ...x.host, wait: async () => {} }, ASK), { error: "failed" }, String(heldOn1));
+    assert.deepEqual([0, 1].map((p) => x.c.calls.filter((c) => c.p === p && namesIn(c.method, c.params, ATA)).length), [reads, reads], "read on each until the bound");
     assert.ok(x.seeds.length <= 1 && x.seeds.every((s) => s.every((b) => b === 0)), "the seed read for the note alone, zeroed");
     assert.ok(!x.c.log.some((l) => /simulateTransaction|sendTransaction/.test(l)));
   }
@@ -1426,7 +1428,7 @@ test("a partial sell whose reserve for the next sell passes the cap is refused n
 
 // The second re-review (low): each PumpSwap cashback account is counted on its own, by its owner, and one RPC that does
 // not show it yet is no reason to refuse.
-test("W's PumpSwap cashback accounts are counted one by one, by owner, there only when both RPCs show them; a split is read again once, then failed", async () => {
+test("W's PumpSwap cashback accounts are counted one by one, by owner, there only when both RPCs show them", async () => {
   const ask = { ...ASK, token: VF.pumpswap.mint };
   const base = BigInt(FEE) + rentMin(165);
   const cases: [Plant, bigint][] = [
@@ -1446,14 +1448,17 @@ test("W's PumpSwap cashback accounts are counted one by one, by owner, there onl
 });
 
 // The second re-review of fd5eec3 (medium): one RPC that says W's cashback accounts are there, the other not, would keep
-// their rent off W's budget: read again once, then failed, nothing simulated or signed.
-test("W's PumpSwap cashback accounts on one RPC only: read again once, then failed before anything is simulated or signed", async () => {
+// their rent off W's budget: read again (card pool-sell-legs-side-by-side: every POOL_SELL_SIZE_RETRY_MS up to
+// POOL_SELL_AGREE_WAIT_MS of waits, since W's buy made them moments before), then failed, nothing simulated or signed.
+test("W's PumpSwap cashback accounts on one RPC only: read again up to POOL_SELL_AGREE_WAIT_MS, then failed before anything is simulated or signed", async () => {
   const ask = { ...ASK, token: VF.pumpswap.mint };
   const vol = solanaVolumeAccumulator(W.address, SOLANA_PUMP_AMM_PROGRAM);
   const need = BigInt(FEE) + rentMin(165) + rentMin(137) + rentMin(165);
   const w = await world({ venue: "pumpswap", cashback: true, ammCashback: true, ammHiddenOn1: true, held: 2n * AMOUNT, lamports: Number(need) }, [wallet(2n * AMOUNT, false, VF.pumpswap.mint)]);
-  assert.deepEqual(await runPoolSell(w.host, ask), { error: "failed" });
-  assert.deepEqual([0, 1].map((p) => w.c.calls.filter((c) => c.p === p && c.method === "getAccountInfo" && c.params[0] === vol).length), [2, 2], "read twice on each");
+  const waits: number[] = [];
+  assert.deepEqual(await runPoolSell({ ...w.host, wait: async (ms: number) => void waits.push(ms) }, ask), { error: "failed" });
+  const reads = 1 + POOL_SELL_AGREE_WAIT_MS / POOL_SELL_SIZE_RETRY_MS;
+  assert.deepEqual([0, 1].map((p) => w.c.calls.filter((c) => c.p === p && c.method === "getAccountInfo" && c.params[0] === vol).length), [reads, reads], "read on each until the bound");
   assert.ok(!w.c.log.some((l) => /simulateTransaction|sendTransaction/.test(l)));
   assert.equal(w.seeds.length > 1, false, "never signed");
 });
@@ -5138,7 +5143,7 @@ test("each plain refusal of a sale names its check in the leg's cause: fee_split
 // card pool-sell-legs-side-by-side, the finder pass of 11 Nov 09:39Z: leg 5 of five was refused (check sizes_moved or
 // sizes_split) as the earlier legs' deposits landed under its deposit reads; on mainnet anyone's deposits move the
 // trees all the time. The deposit's reads follow the trees as long as both providers agree on them, and wait out a
-// split between the two, up to POOL_SELL_SIZES_WAIT_MS in all; the deposit names the pages of its last read alone
+// split between the two, up to POOL_SELL_AGREE_WAIT_MS in all; the deposit names the pages of its last read alone
 /** The deposit's read (the pool, its two pages, the mark) as `on` changes it, by provider and that provider's read count. */
 const depositReads = (w: World, on: (p: 0 | 1, n: number, read: () => Promise<unknown>) => Promise<unknown>) => {
   const n = [0, 0];
@@ -5206,7 +5211,7 @@ test("another user's deposit that one provider sees three reads before the other
   assert.ok(waits.filter((ms) => ms === POOL_SELL_SIZE_RETRY_MS).length >= 3, `the split waited out: ${waits.join(", ")}`);
 });
 
-test("trees that never hold still, or two providers that never agree: the reads stop after POOL_SELL_SIZES_WAIT_MS of waits, refused before W signs", async () => {
+test("trees that never hold still, or two providers that never agree: the reads stop after POOL_SELL_AGREE_WAIT_MS of waits, refused before W signs", async () => {
   for (const [name, on] of [
     ["sizes_moved", (w: World) => depositReads(w, (p, n, read) => (p === 0 && n < 100 && w.c.deposit(600_000n + BigInt(n), 1_000_000n), read()))],
     ["sizes_split", (w: World) => { let s: Promise<unknown> | null = null; return depositReads(w, async (p, n, read) => (p === 0 ? (s ??= read()) : (w.c.deposit(500_000n + BigInt(n), 1_000_000n), read()))); }],
@@ -5215,8 +5220,85 @@ test("trees that never hold still, or two providers that never agree: the reads 
     const waits: number[] = [];
     const x = await saleCause(w, { rpcs: on(w), wait: async (ms: number) => void waits.push(ms) });
     assert.match(x.cause, new RegExp(`check ${name}`), x.cause);
-    assert.equal(waits.filter((ms) => ms === POOL_SELL_SIZE_RETRY_MS).reduce((a, b) => a + b, 0), POOL_SELL_SIZES_WAIT_MS, `${name}: ${waits.join(", ")}`);
+    assert.equal(waits.filter((ms) => ms === POOL_SELL_SIZE_RETRY_MS).reduce((a, b) => a + b, 0), POOL_SELL_AGREE_WAIT_MS, `${name}: ${waits.join(", ")}`);
     assert.equal(w.c.calls.filter((c) => c.method === "sendTransaction").length, 0);
+  }
+});
+
+// card pool-sell-legs-side-by-side, from the wallet lead's measure: a sale tapped right after its buy was refused
+// "failed" with no wait when one provider did not show W's token account yet (wHeld read twice back to back, then
+// failed). On mainnet two providers are routinely a slot apart. Every read a sale makes right after a buy that two
+// providers answer apart waits POOL_SELL_SIZE_RETRY_MS and reads again, up to POOL_SELL_AGREE_WAIT_MS of waits
+/** RPC 1 answers W's own read (its token account first) with no token account while `hide(n)` holds for its nth read. */
+const heldHidden = (w: World, hide: (n: number) => boolean) => {
+  let n = 0;
+  return [
+    w.c.rpcs[0],
+    (async (m: string, q: readonly unknown[]) => {
+      const out = await w.c.rpcs[1](m, q);
+      const keys = q[0] as string[];
+      if (m !== "getMultipleAccounts" || keys[0] !== ataOfW(W.address) || keys[1] !== W.address) return out;
+      if (!hide(n++)) return out;
+      const v = out as { context: unknown; value: unknown[] };
+      return { ...v, value: [null, ...v.value.slice(1)] };
+    }) as SolanaRpc,
+  ] as unknown as readonly [SolanaRpc, SolanaRpc];
+};
+
+test("RPC 1 shows W's token account three reads after RPC 0 (a sale tapped right after its buy): the sale waits and sells the amount both show", async () => {
+  const w = await world({ ataLamports: TOKEN_RENT });
+  const waits: number[] = [];
+  const held = heldOn(w, W.address);
+  const x = await saleCause(w, { rpcs: heldHidden(w, (n) => n < 3), wait: async (ms: number) => void waits.push(ms) }, share(10_000));
+  assert.equal(x.rec.stage, "filled", `${x.cause} ${JSON.stringify(x.answer)}`);
+  assert.equal(x.rec.legs[0]!.units, String(held / 10n ** 6n), "the amount both providers show (whole units at 6 decimals)");
+  assert.equal(waits.filter((ms) => ms === POOL_SELL_SIZE_RETRY_MS).length, 3, `the waits: ${waits.join(", ")}`);
+});
+
+test("two providers that never agree on W's token account: refused held_split after POOL_SELL_AGREE_WAIT_MS of waits, nothing signed; both showing none is refused at once", async () => {
+  const w = await world({ ataLamports: TOKEN_RENT });
+  const waits: number[] = [];
+  const a = await runPoolSell({ ...w.host, rpcs: heldHidden(w, () => true), wait: async (ms: number) => void waits.push(ms) }, ASK);
+  assert.deepEqual(a, { error: "failed" });
+  assert.equal(waits.filter((ms) => ms === POOL_SELL_SIZE_RETRY_MS).reduce((s, ms) => s + ms, 0), POOL_SELL_AGREE_WAIT_MS, `the waits: ${waits.join(", ")}`);
+  assert.equal(w.c.calls.filter((c) => c.method === "sendTransaction").length, 0);
+  assert.ok(w.seeds.every((s) => s.every((b) => b === 0)));
+  // both providers show no token account for W: nothing to sell, refused at once with no wait
+  const e = await world({ ataLamports: TOKEN_RENT });
+  e.c.accounts.delete(ataOfW(W.address));
+  const ew: number[] = [];
+  const b = await runPoolSell({ ...e.host, wait: async (ms: number) => void ew.push(ms) }, ASK);
+  assert.ok("error" in b && b.error !== "failed", JSON.stringify(b));
+  assert.deepEqual(ew.filter((ms) => ms === POOL_SELL_SIZE_RETRY_MS), [], "no wait");
+});
+
+test("the pool account two providers read a slot apart (a buy's change note landing): waited out, then the sale sells; never agreeing refuses sizes_split", async () => {
+  // provider 1's getAccountInfo of `address`: its bytes a leaf behind, while hide(n)
+  const lagOn1 = (w: World, address: string, hide: (n: number) => boolean) => {
+    let n = 0;
+    return [
+      w.c.rpcs[0],
+      (async (m: string, q: readonly unknown[]) => {
+        const out = (await w.c.rpcs[1](m, q)) as { context: unknown; value: { data: [string, string] } | null };
+        if (m !== "getAccountInfo" || q[0] !== address || !hide(n++)) return out;
+        const d = base64.decode(out.value!.data[0]);
+        const v = new DataView(d.buffer, d.byteOffset, d.length);
+        v.setBigUint64(49, v.getBigUint64(49, true) - 1n, true);
+        return { ...out, value: { ...out.value!, data: [base64.encode(d), "base64"] } };
+      }) as SolanaRpc,
+    ] as unknown as readonly [SolanaRpc, SolanaRpc];
+  };
+  for (const [address, check] of [[POOL, "sizes_split"]] as const) {
+    const w = await world({ ataLamports: TOKEN_RENT });
+    const waits: number[] = [];
+    const x = await saleCause(w, { rpcs: lagOn1(w, address, (n) => n < 2), wait: async (ms: number) => void waits.push(ms) });
+    assert.equal(x.rec.stage, "filled", `${address}: ${x.cause} ${JSON.stringify(x.answer)}`);
+    assert.ok(waits.filter((ms) => ms === POOL_SELL_SIZE_RETRY_MS).length >= 2, `${address}: ${waits.join(", ")}`);
+    const never = await world({ ataLamports: TOKEN_RENT });
+    const y = await saleCause(never, { rpcs: lagOn1(never, address, () => true), wait: async () => {} }, ASK, "nv");
+    assert.equal(y.rec.stage, "refused");
+    assert.equal(never.c.calls.filter((c) => c.method === "sendTransaction").length, 0);
+    assert.match(y.cause, new RegExp(`check ${check}`), y.cause);
   }
 });
 

@@ -151,12 +151,27 @@ export const POOL_SELL_SHARED_READ_MS = 4_000;
 /** Two providers a slot apart read the pool account at two states, or the trees grew again since the last read: read
  *  again this long after. */
 export const POOL_SELL_SIZE_RETRY_MS = 500;
-/** How long a sale's deposit reads wait for the pool's trees to hold still on both providers (card
- *  pool-sell-legs-side-by-side, the finder pass of 11 Nov 09:39Z: the fifth leg of five was refused when the trees moved
- *  under its reads, by the earlier legs' own deposits; on mainnet anyone's deposit moves them). [design: 10 s, the
- *  quote's age bound SOLANA_POOL_QUOTE_MAX_AGE_SLOTS (25) at 400 ms a slot: a sale whose pages do not hold still that
- *  long is refused, never priced on one provider's sizes.] */
-export const POOL_SELL_SIZES_WAIT_MS = SOLANA_POOL_QUOTE_MAX_AGE_SLOTS * 400;
+/** How long a sale's reads wait, POOL_SELL_SIZE_RETRY_MS apart, for its two providers to agree: the pool's trees
+ *  holding still (card pool-sell-legs-side-by-side, the finder pass of 11 Nov 09:39Z: the fifth leg of five was refused
+ *  when the trees moved under its reads, by the earlier legs' own deposits; on mainnet anyone's deposit moves them), and
+ *  what a sale reads right after a buy, which one provider may not show yet: W's token account (wHeld), W's PumpSwap
+ *  cashback accounts, the pool's sizes (treeSizes; a buy's change note grows the state tree). [design: 10 s, the quote's age bound
+ *  SOLANA_POOL_QUOTE_MAX_AGE_SLOTS (25) at 400 ms a slot: two providers that do not agree that long refuse the sale,
+ *  which is never priced on one provider's word.] */
+export const POOL_SELL_AGREE_WAIT_MS = SOLANA_POOL_QUOTE_MAX_AGE_SLOTS * 400;
+/** A read the two providers answer apart: read again after a wait (agreed). */
+const SPLIT = Symbol("split");
+/** `read` again POOL_SELL_SIZE_RETRY_MS on while it answers SPLIT, up to POOL_SELL_AGREE_WAIT_MS of waits in all, then
+ *  refused failed with `check`: what both providers answer alike, never one provider's word alone. */
+async function agreed<T>(read: () => Promise<T | typeof SPLIT>, wait: (ms: number) => Promise<void>, check: Check): Promise<T> {
+  for (let waited = 0; ; ) {
+    const r = await read();
+    if (r !== SPLIT) return r;
+    if (waited >= POOL_SELL_AGREE_WAIT_MS) return no("failed", check);
+    waited += POOL_SELL_SIZE_RETRY_MS;
+    await wait(POOL_SELL_SIZE_RETRY_MS);
+  }
+}
 /** One sell at a time on this device, every tab: two runs never pick one return note. */
 export const POOL_SELL_LOCK = "ct-pool/sell";
 /** The rent back's tries at each step: a provider's throttle, stall or lag is read again from the top (the devnet run at
@@ -188,7 +203,7 @@ const enc = /* @__PURE__ */ new TextEncoder();
 
 type Code = "not_allowed" | "not_funded" | "quote_check_failed" | "failed";
 /** Which check of a sale refused it "failed", named in the leg's cause (legCause) and nowhere a user reads. */
-type Check = "venue_program" | "volume_split" | "fee_split" | "fee_moved" | "sim" | "stopped" | "wallet" | "pool_owner" | "sizes_moved" | "sizes_split";
+type Check = "venue_program" | "volume_split" | "fee_split" | "fee_moved" | "sim" | "stopped" | "wallet" | "pool_owner" | "sizes_moved" | "sizes_split" | "held_split" | "mint_program";
 class Refused extends Error {
   readonly code: Code;
   readonly check: Check | undefined;
@@ -250,17 +265,17 @@ async function accountsOf(rpc: SolanaRpc, addresses: readonly string[]): Promise
 
 /** The pool account on both RPCs, the same bytes (read again once when they differ): its two tree sizes. */
 async function treeSizes(rpcs: Rpcs, program: string, pool: string, wait: (ms: number) => Promise<void>): Promise<{ stateSize: number; labelSize: number }> {
-  for (let round = 0; ; round++) {
-    const [a, b] = await both(rpcs, (r) => account(r, pool, "confirmed"));
-    if ("none" in a || "none" in b) return no("not_allowed");
-    if (a.owner !== program || b.owner !== program) return no("failed", "pool_owner");
-    if (!sameBytes(a.data, b.data)) {
-      if (round > 0) return no("failed", "sizes_split");
-      await wait(POOL_SELL_SIZE_RETRY_MS);
-      continue;
-    }
-    return sizesOf(a.data);
-  }
+  return agreed(
+    async () => {
+      const [a, b] = await both(rpcs, (r) => account(r, pool, "confirmed"));
+      if ("none" in a || "none" in b) return no("not_allowed");
+      if (a.owner !== program || b.owner !== program) return no("failed", "pool_owner");
+      // two providers a slot apart (a buy's change note, anyone's deposit): read again after a wait
+      return sameBytes(a.data, b.data) ? sizesOf(a.data) : SPLIT;
+    },
+    wait,
+    "sizes_split",
+  );
 }
 
 /** The pool account's two tree sizes. */
@@ -270,12 +285,13 @@ function sizesOf(d: Uint8Array): { stateSize: number; labelSize: number } {
   return { stateSize: size(OFF_TREES), labelSize: size(OFF_TREES + TREE_LEN) };
 }
 
-/** The token's program: the mint's owner, the same on both RPCs, the token program or Token-2022. */
+/** The token's program: the mint's owner, the same on both RPCs, the token program or Token-2022 (a buy never
+ *  changes the mint, so two RPCs apart on it are refused at once). */
 async function mintProgram(rpcs: Rpcs, mint: string): Promise<string> {
   const mints = await both(rpcs, (r) => account(r, mint, "confirmed"));
-  const programs = mints.map((m) => ("none" in m ? no() : m.owner));
+  const programs = mints.map((m) => ("none" in m ? no("failed", "mint_program") : m.owner));
   const program = programs[0]!;
-  if (programs[1] !== program || (program !== SOLANA_TOKEN_PROGRAM && program !== SOLANA_TOKEN_2022_PROGRAM)) return no();
+  if (programs[1] !== program || (program !== SOLANA_TOKEN_PROGRAM && program !== SOLANA_TOKEN_2022_PROGRAM)) return no("failed", "mint_program");
   return program;
 }
 
@@ -286,14 +302,16 @@ type WHeld = { program: string; amount: bigint; lamports: bigint; owes: readonly
 /** W's own accounts in one getMultipleAccounts call on each RPC (card pool-sell-legs-side-by-side; every address in it
  *  is W's, so a read still names one W of the user's at most): its associated token account of `mint` under `program`,
  *  W itself, and its volume accounts on pump and PumpSwap.
- *  - The token amount, the same on both RPCs (two that differ are read again once, then failed: neither RPC's word
- *    alone sets what the sell takes or what W keeps after it). None on either RPC holds nothing. Frozen on both:
+ *  - The token amount, the same on both RPCs: two that differ (one RPC not showing W's token account yet, right after
+ *    its buy) are read again POOL_SELL_SIZE_RETRY_MS on, up to POOL_SELL_AGREE_WAIT_MS of waits (agreed), then failed
+ *    held_split: neither RPC's word alone sets what the sell takes or what W keeps after it. None on both holds nothing
+ *    (the sale refuses it at once, not_funded). Frozen on both:
  *    not_allowed; frozen on one RPC alone is two RPCs that differ (review P3-3 of 77055f4e: one RPC's word that W is
  *    frozen never leaves W out of a sell of all of it).
  *  - W's lamports: the lower of the two RPCs' (none: 0).
  *  - A volume account owes a claim when either RPC's read of it pays out (solanaVolumeClaimable: one RPC's word that
  *    nothing is owed never lowers what W keeps after the sell, review L3 of 38faee89). */
-async function wHeld(rpcs: Rpcs, w: string, mint: string, program: string): Promise<WHeld> {
+async function wHeld(rpcs: Rpcs, w: string, mint: string, program: string, wait: (ms: number) => Promise<void>): Promise<WHeld> {
   const ata = solanaAta(w, mint, program);
   const vps = [SOLANA_PUMP_PROGRAM, SOLANA_PUMP_AMM_PROGRAM] as const;
   const keys = [ata, w, ...vps.map((vp) => solanaVolumeAccumulator(w, vp))];
@@ -310,16 +328,19 @@ async function wHeld(rpcs: Rpcs, w: string, mint: string, program: string): Prom
     if (t.state === 2) return "frozen";
     return t.amount;
   };
-  for (let i = 0; i < 2; i++) {
-    const reads = await both(rpcs, (r) => accountsRaw(r, keys));
-    const [a, b] = reads.map((x) => tokenOf(x[0]!));
-    if (a !== b) continue;
-    if (a === "frozen") return no("not_allowed");
-    const lamports = lower(...(reads.map((x) => (x[1] == null ? 0n : BigInt(int(x[1].lamports)))) as [bigint, bigint]));
-    const owes = vps.map((vp, k) => reads.some((x) => x[2 + k] != null && x[2 + k]!.owner === vp && solanaVolumeClaimable(vp, x[2 + k]!.data) > 0n)) as [boolean, boolean];
-    return { program, amount: a!, lamports, owes };
-  }
-  return no();
+  return agreed(
+    async () => {
+      const reads = await both(rpcs, (r) => accountsRaw(r, keys));
+      const [a, b] = reads.map((x) => tokenOf(x[0]!));
+      if (a !== b) return SPLIT;
+      if (a === "frozen") return no("not_allowed");
+      const lamports = lower(...(reads.map((x) => (x[1] == null ? 0n : BigInt(int(x[1].lamports)))) as [bigint, bigint]));
+      const owes = vps.map((vp, k) => reads.some((x) => x[2 + k] != null && x[2 + k]!.owner === vp && solanaVolumeClaimable(vp, x[2 + k]!.data) > 0n)) as [boolean, boolean];
+      return { program, amount: a!, lamports, owes };
+    },
+    wait,
+    "held_split",
+  );
 }
 
 type Mark = { value: bigint; nonce: bigint; slot: number };
@@ -720,18 +741,20 @@ async function planReads(h: Pick<PoolSellHost, "rpcs" | "wallets" | "bought" | "
     ws.push({ w: x, guess: bought?.mint === token && typeof bought.program === "string" ? bought.program : null });
   }
   listed?.(ws.map((x) => x.w));
+  // a read the two providers answer apart waits on the sale's own wait, ended by a sign out
+  const planWait = (ms: number) => waitUnless(h.wait, ms, h.signal);
   const mint = ws.length === 0 ? null : mintProgram(h.rpcs, token);
   mint?.catch(() => {});
   const reads = new Map<string, WHeld>();
   const one = async ({ w, guess }: (typeof ws)[number]): Promise<{ w: BuyWallet; held: bigint; frozen?: true }> => {
     try {
       let r: WHeld;
-      if (guess === null) r = await wHeld(h.rpcs, w.address, token, await mint!);
+      if (guess === null) r = await wHeld(h.rpcs, w.address, token, await mint!, planWait);
       else {
-        const g = wHeld(h.rpcs, w.address, token, guess);
+        const g = wHeld(h.rpcs, w.address, token, guess, planWait);
         g.catch(() => {});
         const program = await mint!;
-        r = program === guess ? await g : (await g.catch(() => null), await wHeld(h.rpcs, w.address, token, program));
+        r = program === guess ? await g : (await g.catch(() => null), await wHeld(h.rpcs, w.address, token, program, planWait));
       }
       reads.set(w.address, r);
       return { w, held: r.amount };
@@ -1043,7 +1066,7 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later, w: BuyWallet
     const [rent, sizes0, tokens, rn, reference] = await Promise.all([
       rentP,
       sizesP,
-      early?.held ?? mintP!.then((p) => wHeld(rpcs, w.address, token, p)),
+      early?.held ?? mintP!.then((p) => wHeld(rpcs, w.address, token, p, wait)),
       noteP,
       // a reference read at other units (sellAll's guess for a lone W's share) is never this sale's: read at its units
       early?.reference?.amount === amount ? early.reference.read : pageReference(rpcs, { side: "sell", token, amount }),
@@ -1080,13 +1103,16 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later, w: BuyWallet
     if (venue.kind === "pumpswap" && venue.cashback) {
       const vol = solanaVolumeAccumulator(w.address, SOLANA_PUMP_AMM_PROGRAM);
       const ata = solanaAta(vol, SOLANA_SOL_MINT, SOLANA_TOKEN_PROGRAM);
-      const owned = async (address: string, owner: string): Promise<boolean> => {
-        for (let i = 0; i < 2; i++) {
-          const [a, b] = (await both(rpcs, (r) => account(r, address, "confirmed"))).map((x) => !("none" in x) && x.owner === owner);
-          if (a === b) return a!;
-        }
-        return no("failed", "volume_split");
-      };
+      // made by W's buy moments before: one RPC may not show them yet, read again after a wait (agreed)
+      const owned = (address: string, owner: string): Promise<boolean> =>
+        agreed(
+          async () => {
+            const [a, b] = (await both(rpcs, (r) => account(r, address, "confirmed"))).map((x) => !("none" in x) && x.owner === owner);
+            return a === b ? a! : SPLIT;
+          },
+          wait,
+          "volume_split",
+        );
       [has.ammVolume, has.ammVolumeAta] = await Promise.all([owned(vol, SOLANA_PUMP_AMM_PROGRAM), owned(ata, SOLANA_TOKEN_PROGRAM)]);
     }
     const need = solanaPoolSellNeed(venue, rent, has);
@@ -1341,7 +1367,7 @@ const markAddress = (program: string, pre: Uint8Array): string => solanaProgramA
  *  earlier sale's deposit landed priced pages read after it). Sizes other than the ones asked, the same on both: read
  *  again at them, at once the first time, then POOL_SELL_SIZE_RETRY_MS on each time they move again (an earlier leg's
  *  deposit or anyone's landing between the reads); two RPCs that differ: read again POOL_SELL_SIZE_RETRY_MS on (two RPCs
- *  a slot apart). The waits stop at POOL_SELL_SIZES_WAIT_MS in all, then failed. What it gives back is one read that
+ *  a slot apart). The waits stop at POOL_SELL_AGREE_WAIT_MS in all, then failed. What it gives back is one read that
  *  both RPCs answer alike, at the sizes that read names: the deposit is priced and its pages named from it alone. */
 async function depositHeld(rpcs: Rpcs, program: string, pool: string, sizes: { stateSize: number; labelSize: number }, pre: Uint8Array, wait: (ms: number) => Promise<void>): Promise<{ held: SolanaDepositHeld; sizes: { stateSize: number; labelSize: number } }> {
   let at = sizes;
@@ -1359,8 +1385,8 @@ async function depositHeld(rpcs: Rpcs, program: string, pool: string, sizes: { s
       // both RPCs read the trees at other sizes: the pages at those, at once the first time, then after a wait
       at = pa!;
       if (moved++ === 0) continue;
-      if (waited >= POOL_SELL_SIZES_WAIT_MS) return no("failed", "sizes_moved");
-    } else if (waited >= POOL_SELL_SIZES_WAIT_MS) return no("failed", "sizes_split");
+      if (waited >= POOL_SELL_AGREE_WAIT_MS) return no("failed", "sizes_moved");
+    } else if (waited >= POOL_SELL_AGREE_WAIT_MS) return no("failed", "sizes_split");
     waited += POOL_SELL_SIZE_RETRY_MS;
     await wait(POOL_SELL_SIZE_RETRY_MS);
   }
