@@ -65,9 +65,9 @@ const U32 = 0xffffffff;
 const CHAIN_TAGS = Object.keys(CHAINS) as Chain[];
 
 export type EvmRestoredNote = { ref: NoteRef; scope: bigint; precommitment: bigint; leaf: Leaf; state: "UNSPENT" | "SPENT"; parent?: string };
-/** A spent note of ours: its release (l, j), the W it paid (lowercase), what it withdrew, the release's block, and a
- * buy's token (lowercase; null for a withdraw). */
-export type EvmRestoredSpend = { l: bigint; j: number; note: string; w: string; withdrawn: bigint; block: bigint; token: string | null };
+/** A spent note of ours: its release (l, j), the W it paid (lowercase), what it withdrew, the release's block, a buy's
+ * token (lowercase; null for a withdraw), and the release log's block hash and log index. */
+export type EvmRestoredSpend = { l: bigint; j: number; note: string; w: string; withdrawn: bigint; block: bigint; token: string | null; blockHash: string; logIndex: bigint };
 /** A spend's W and every token it was sent from the release's block on (lowercase contracts, sorted); null with the
  * error when its reads failed. */
 export type EvmRestoredWallet = { note: string; w: string; tokens: string[] | null; error?: string };
@@ -209,7 +209,9 @@ function* evmRestoreSteps(a: Omit<EvmRestoreArgs, "seed64">): Generator<void, Ev
     const cCommitment = noteCommitment(cValue, l, cP);
     const changeOurs = cCommitment === e.state;
     // only a W the words give is listed (and read); a release the device did not make is listed as such, never a refusal
-    if (ours) spends.push({ l, j, note: key, w: e.recipient!, withdrawn: e.value, block: e.block, token: e.token });
+    // with the release's place (block hash, log index): the signing page reads a buy's route back from it (card
+    // signpage-evm-pool-sell, pool-sell-evm.ts restoreEvmHoldings)
+    if (ours) spends.push({ l, j, note: key, w: e.recipient!, withdrawn: e.value, block: e.block, token: e.token, blockHash: e.blockHash, logIndex: e.logIndex });
     if (!ours || !changeOurs) elsewhere.push({ note: key, to: e.recipient!, withdrawn: e.value, block: e.block, changeOurs });
     if (changeOurs) put(cref, cP, { value: cValue, label: l, commitment: cCommitment, leafIndex: BigInt(at) }, key);
     yield* asDeposit({ kind: "move", l, j });

@@ -13,7 +13,7 @@ import { after, test } from "node:test";
 import { IDBFactory } from "fake-indexeddb";
 import { entropyToWords, wordsToSeed64 } from "@blindfill/wallet/derive";
 import { openWalletStore, type WalletStore } from "@blindfill/wallet/store";
-import { noteSecrets, type NoteRef } from "../../wallet/src/notes/secrets.ts";
+import { noteCommitment, noteSecrets, type NoteRef } from "../../wallet/src/notes/secrets.ts";
 import { openNoteStore, type NoteStore } from "../../wallet/src/notes/store.ts";
 import { signalsProver } from "../../wallet/test/withdraw-fixture.ts";
 import { onTestClock } from "../../kit/test/test-clock.ts";
@@ -31,7 +31,7 @@ const DEVNET = TESTNET_RPCS.solana[0];
 const SEPOLIA_USDC = "0x036cbd53842c5426634e7929541ec2318f3dcf7e";
 const HELPER = TESTNET_RPCS.solana[1];
 
-type Sent = { host: string; method: string; at: number; status: number };
+type Sent = { host: string; method: string; at: number; status: number; /** its answer's time: `at` and the fake's delay */ end: number };
 type Answer = number | { status?: number; result?: unknown; ms?: number; retryAfter?: string };
 /** A fake provider as globalThis.fetch: every request counted per host; `answer` says the status of each (429 or 200),
  *  or its status, result, delay and Retry-After. On the test clock: performance.now and every timer are its. */
@@ -55,7 +55,8 @@ async function onProviderNow(answer: (host: string, n: number, method: string) =
     }
     const a = answer(host, n, q.method);
     const { status = 200, result = 7, ms = 0, retryAfter } = typeof a === "number" ? { status: a } : a;
-    sent.push({ host, method: q.method, at: performance.now() - t0, status });
+    const at = performance.now() - t0;
+    sent.push({ host, method: q.method, at, status, end: at + ms });
     if (ms > 0) await new Promise((r) => setTimeout(r, ms));
     if (status === 429) return new Response("Too Many Requests", { status: 429, headers: retryAfter === undefined ? {} : { "retry-after": retryAfter } });
     return new Response(JSON.stringify({ jsonrpc: "2.0", id: q.id, result }), { status: 200 });
@@ -203,6 +204,129 @@ test("Base and Robinhood: the same rule; a pass's read of a chain's pool list wa
   });
 });
 
+test("Base's positions pass reads on the pass pair: while a trade holds the chain's hosts and fills their windows it sends nothing, and it reads once they are free", async () => {
+  const word = (n: number) => "0x" + n.toString(16).padStart(64, "0");
+  await onProviderNow((_host, _n, method) => ({ result: method === "eth_blockNumber" ? "0x64" : method === "eth_call" ? word(6) : 7 }), async (sent) => {
+    const { w } = await wallet();
+    const W = "0x" + "a1".repeat(20);
+    const { EVM_POSITION_COSTS_KEY } = await import("../src/pool-buy-evm.ts");
+    await w.update("meta", EVM_POSITION_COSTS_KEY, () => ({ [W]: { mint: SEPOLIA_USDC, decimals: 6, chain: "base", state: "filled", route: { venue: "uniswap-v3", adapter: "0x" + "ad".repeat(20), path: { kind: "v3", fee: 500 }, tx: "0x" + "11".repeat(32), block: "90" }, received: "1" } }));
+    const t = testnetPool({ store: async () => w, held: async () => w, seed64: async () => SEED64.slice() }, { prover: { vault: signalsProver(), stop: () => {} }, evmSync: () => ({ events: async () => assert.fail("no sync read") }) } as never);
+    const base = new Set(TESTNET_RPCS.base.map((u) => new URL(u).host));
+    const reads = () => sent.filter((x) => base.has(x.host) && (x.method === "eth_blockNumber" || x.method === "eth_call"));
+    // a trade holds Base's hosts: the floor's pass read spent, then its reads fill the windows
+    const release = holdHosts(TESTNET_RPCS.base);
+    await Promise.all(pageEvmPoolRpcs("base", "pass")!.map((r) => r("eth_gasPrice", [])));
+    for (const u of TESTNET_RPCS.base) fill(u);
+    await t.positions();
+    await tick(1_500);
+    assert.deepEqual(reads(), [], "no positions read while the trade holds the hosts");
+    release();
+    resetHostLanes();
+    let rows: unknown[] = [];
+    for (let i = 0; i < 100 && rows.length === 0; i++) {
+      await tick(50);
+      rows = ((await t.positions()) ?? []).filter((p) => (p as { chain: string }).chain === "base");
+    }
+    assert.ok(reads().some((x) => x.method === "eth_blockNumber"), "read once the hosts are free");
+    assert.deepEqual(rows.map((p) => (p as { amount: string }).amount), ["0.000006"]);
+    await t.signedOut();
+  });
+});
+
+// devnet run 11 (11 Nov): the buy held its hosts to its Final, 33.8 s past its Filled. The buy kind gives them back at
+// its early "sent" through the host's release (pool-buy.ts poolBuyKind); its end then gives back nothing more, and a
+// buy that never answers "sent" gives them back at its end, once
+test("the buy's host gives its hosts back at its release, once: its end after it leaves another trade's hold standing; with no release its end gives them back", async () => {
+  await onProvider(() => 200, async () => {
+    const made: { buy?: () => { release?(): void; end?(): void } } = {};
+    testnetPool(
+      { store: async () => assert.fail("no store read"), seed64: async () => assert.fail("no seed read") },
+      { evmPin: () => undefined, tradeKinds: { buy: ((h: () => { release?(): void; end?(): void }) => ((made.buy = h), () => ({ error: "not_allowed" }))) as never } },
+    );
+    const h = made.buy!();
+    assert.equal(hostLane(DEVNET).trading(), true);
+    assert.equal(typeof h.release, "function", "the buy's host gives its hosts back early");
+    h.release!();
+    assert.equal(hostLane(DEVNET).trading(), false, "api.devnet given back at the release");
+    assert.equal(hostLane(HELPER).trading(), false, "the helper's devnet route too");
+    const other = holdHosts([DEVNET, HELPER]);
+    h.release!();
+    h.end?.();
+    assert.equal(hostLane(DEVNET).trading(), true, "another trade's hold stands: given back once");
+    other();
+    const failed = made.buy!();
+    assert.equal(hostLane(DEVNET).trading(), true);
+    failed.end?.();
+    failed.end?.();
+    assert.equal(hostLane(DEVNET).trading(), false, "a buy with no sent: given back at its end, once");
+  });
+});
+
+// Card sell-right-after-a-buy (devnet run 11): the buy's reads to Final went as a trade's, never on the host's budget, and
+// drew the 20 throttles a sell tapped 1 s after Filled met. The same release that gives its hosts back switches them, once:
+// its pair and its settle (its pair and lister) read as a background pass's from its land on (pool-buy.ts landed), never
+// at its sent alone: sent can come before both RPCs report it succeeded, and the reads to Filled are a trade's (review of
+// 29a9e506, P2).
+test("card sell-right-after-a-buy: the buy's host reads as a trade's to its land, past its release too, then as a pass's: its pair and its settle, once", async () => {
+  const { w, ns } = await wallet();
+  // a landed note for the settle to read (its reads are what is timed here; their answers end it)
+  const ref: NoteRef = { kind: "deposit", s: SCOPE, i: 0 };
+  const pre = noteSecrets(SEED64, ref).precommitment;
+  const n = await ns.add({ ref, scope: SCOPE, precommitment: pre, state: "UNSPENT", leaf: { value: 5_000_000n, label: 9n, commitment: noteCommitment(5_000_000n, 9n, pre), leafIndex: 0n } });
+  await onProvider(() => 200, async (sent) => {
+    const made: { buy?: () => { rpcs: readonly [(m: string, p: unknown[]) => Promise<unknown>, (m: string, p: unknown[]) => Promise<unknown>]; settle(id: string): Promise<unknown>; release(): void; landed(): void; end(): void } } = {};
+    testnetPool(
+      { store: async () => w, seed64: async () => SEED64.slice() },
+      { evmPin: () => undefined, cache: {}, tradeKinds: { buy: ((h: never) => ((made.buy = h), () => ({ error: "not_allowed" }))) as never } } as never,
+    );
+    const h = made.buy!();
+    // a sale holds both hosts, a pass just went on each, and the sale's reads fill each window: a pass waits for the floor
+    const sale = holdHosts([DEVNET, HELPER]);
+    await Promise.all([pageSolanaRpcs("pass")[0]("getSlot", []), pageSolanaRpcs("pass")[1]("getSlot", [])]);
+    fill(DEVNET, 100);
+    fill(HELPER, 100);
+    // each time below is a request's own, as the fake provider logged it on the test clock (sent[].at)
+    const devnet = new URL(DEVNET).host;
+    const lastOn = (host: string): number => sent.filter((x) => x.host === host).at(-1)!.at;
+    const passAt = lastOn(devnet);
+    await Promise.all([h.rpcs[0]("getSlot", []), h.rpcs[1]("getSlot", [])]);
+    assert.ok(lastOn(devnet) - passAt < 100, "before its release: its reads a trade's, at once past every budget");
+    // the settle's first request on api.devnet, from the request before it (its note store opens first: fake IndexedDB)
+    const firstFrom = async (from: number): Promise<number> => {
+      for (let i = 0; i < 2_000 && !sent.slice(from).some((x) => x.host === devnet); i++) await tick(5);
+      return sent.slice(from).find((x) => x.host === devnet)!.at - sent[from - 1]!.at;
+    };
+    let n1 = sent.length;
+    void h.settle(n.id).catch(() => {});
+    const settleBefore = await firstFrom(n1);
+    assert.ok(settleBefore < 1_000, `a settle before its release: a trade's, at once (${settleBefore.toFixed(0)} ms)`);
+    h.release();
+    assert.equal(hostLane(DEVNET).trading(), true, "the sale's hold stands");
+    // released, not landed (its sent before both RPCs report it succeeded): still a trade's, at once
+    const released = lastOn(devnet);
+    await Promise.all([h.rpcs[0]("getSlot", []), h.rpcs[1]("getSlot", [])]);
+    assert.ok(lastOn(devnet) - released < 100, "after its release alone: a trade's, at once");
+    h.landed();
+    // a pass on each host now, so the next pass there waits PASS_FLOOR_MS
+    await Promise.all([pageSolanaRpcs("pass")[0]("getSlot", []), pageSolanaRpcs("pass")[1]("getSlot", [])]);
+    fill(DEVNET, 100);
+    fill(HELPER, 100);
+    const pass2 = lastOn(devnet);
+    await h.rpcs[0]("getSlot", []);
+    assert.ok(lastOn(devnet) - pass2 >= PASS_FLOOR_MS - 100, `after its land: a pass's, at the floor (${(lastOn(devnet) - pass2).toFixed(0)} ms)`);
+    n1 = sent.length;
+    void h.settle(n.id).catch(() => {});
+    const afterMs = await firstFrom(n1);
+    assert.ok(afterMs >= PASS_FLOOR_MS - 1_000, `its settle after its land: a pass's, at the floor (${afterMs.toFixed(0)} ms)`);
+    h.release();
+    h.end();
+    assert.equal(hostLane(DEVNET).trading(), true, "given back once: the sale's hold stands");
+    sale();
+    resetHostLanes();
+  });
+});
+
 test("the EVM buy kind's host holds its chain's pool list hosts from its making to its end", async () => {
   await onProvider(() => 200, async () => {
     const made: { h?: { end?(): void } } = {};
@@ -343,7 +467,8 @@ test("a host that throttles for good with Retry-After 3600: a trade's read ends 
     const t = performance.now();
     const seat0 = await b[0]("getBlockHeight", []).then(() => "answered", (e: unknown) => String(e));
     const ms = performance.now() - t;
-    assert.match(seat0, /HTTP 429/);
+    // its own 429, or its turn refused unsent while the pause outlasts it (the host paused: http_429, 0 tries)
+    assert.match(seat0, /HTTP 429|http_429/);
     assert.ok(ms <= TRADE_TURN_MAX_MS + 3_500, `the trade's read ended ${Math.round(ms)} ms after its call`);
     assert.equal(await b[1]("getBlockHeight", []), 7, "the other seat reads and answers");
     await renew;
@@ -405,5 +530,91 @@ test("every request the page sends a host counts in that host's lane: the helper
       assert.ok(went > 0, `${name}: sent nothing to the helper`);
       assert.equal(counted() - before, went, `${name}: ${went} request(s) sent to the helper, ${counted() - before} counted on its lane`);
     }
+  });
+});
+
+// the device's own send paths beside the helper's (the kit's solanaSendPaths: Sender, Jito and the public RPC, each from
+// the device, src/trade.ts releaseTradeDeps: `fetch: laneFetch()`): each request counted on its own host's lane, as the
+// host counts it, so a trade's sends there leave the passes only what the budget leaves
+test("every request the device's own send paths send counts in its host's lane: sender, jito and the public rpc", async () => {
+  const { releaseTradeDeps } = await import("../src/trade.ts");
+  await onProvider(() => ({ result: "1".repeat(88) }), async (sent) => {
+    const paths = releaseTradeDeps().paths;
+    for (const name of ["sender", "jito", "rpc"]) {
+      const path = paths.find((p) => p.name === name);
+      assert.ok(path, `the device's ${name} path`);
+      const n = sent.length;
+      await path.send("AA==").catch(() => {});
+      const mine = sent.slice(n);
+      assert.ok(mine.length > 0, `${name}: sent nothing`);
+      for (const host of new Set(mine.map((x) => x.host))) {
+        assert.equal(hostLane(`https://${host}/`).inWindow(), mine.filter((x) => x.host === host).length, `${name}: every request to ${host} counted on its lane`);
+      }
+    }
+  });
+});
+
+// Card signpage-throttled-provider-has-a-spare, run 9 of 11 Nov (a devnet buy, scratchpad record run9-buy-calls.txt):
+// api.devnet answered 84 of the page's 86 reads with 429 in 21 s, two 200s at +6.46 s; the helper's route answered
+// every one. Each pause ended with every parked read leaving within 3 ms, 10 to 15 at a time, and the two 200s put the
+// pause back to 1 s. Replayed here: the buy's rounds (each 6 getAccountInfo, 3 getMultipleAccounts and 2 getSlot on
+// both seats, as run 9's) under the tap's waits (read-waits.ts), api.devnet refusing until 21.8 s but for two answers
+// between 6 and 8 s. While its last word is a 429, the host gets one read at a time: the probe.
+test("run 9 replayed: a host that refuses nearly everything gets one read at a time while its last word is a 429, never a burst at a pause's end, and the buy goes on inside its tap's 30 s once it answers", async () => {
+  const OK_AT = 21_800;
+  let okLeft = 2;
+  let t0 = 0;
+  await onProvider((host) => {
+    if (host !== "api.devnet.solana.com") return { ms: 300 };
+    const now = performance.now();
+    if (now >= t0 + OK_AT) return { ms: 60 };
+    if (now >= t0 + 6_000 && now < t0 + 8_000 && okLeft > 0) return (okLeft--, { ms: 60 });
+    return { status: 429, ms: 60 };
+  }, async (sent, start) => {
+    t0 = start;
+    const { readWaits, readsWaited } = await import("../src/read-waits.ts");
+    const ROUND = [...Array(6).fill("getAccountInfo"), ...Array(3).fill("getMultipleAccounts"), ...Array(2).fill("getSlot")] as string[];
+    const give = holdHosts([DEVNET, HELPER]);
+    const out = await readsWaited(async (at) => {
+      const pair = pageSolanaRpcs("trade");
+      const got = await Promise.allSettled(ROUND.flatMap((m) => [pair[0](m, []), pair[1](m, [])]));
+      const bad = got.find((g) => g.status === "rejected");
+      if (bad !== undefined) return ((at.fault = (bad as PromiseRejectedResult).reason), "down");
+      return "filled";
+    }, undefined, undefined, readWaits());
+    give();
+    const dev = sent.filter((x) => x.host === "api.devnet.solana.com").sort((a, b) => a.at - b.at);
+    const line = dev.map((x) => `${Math.round(x.at)}:${x.status}`).join(" ");
+    // in doubt: sent after a 429 answer and before any 200 answer that followed it
+    const inDoubt = dev.filter((x) => {
+      const before = dev.filter((y) => y.end <= x.at).sort((a, b) => a.end - b.end).at(-1);
+      return before !== undefined && before.status === 429;
+    });
+    for (let i = 1; i < inDoubt.length; i++) assert.ok(inDoubt[i]!.at >= inDoubt[i - 1]!.end, `two reads in flight on a host in doubt at ${Math.round(inDoubt[i]!.at)} ms: ${line}`);
+    assert.ok(dev.length <= 40, `${dev.length} reads to the refusing host: ${line}`);
+    assert.equal(out, "filled", `the buy: ${String(out)}; ${line}`);
+    const last = Math.max(...sent.map((x) => x.end));
+    assert.ok(last > OK_AT && last < 30_000, `the buy's last read answered at ${Math.round(last)} ms: ${line}`);
+  });
+});
+
+// The review of 321509e2: a read's re-ask turn was not held to the read's own bound. A read of 3.5 s met a 429 and slept
+// the 1 s pause; another reader's 429 with a Retry-After of 9 s moved the pause on meanwhile; the read then waited the
+// whole pause and threw its old 429 at 9.4 s, its dropped turn counted on the lane (3 counted for 2 sent). Now the turn
+// is held to the read's end: a pause past it is refused at once, nothing sent or counted, and the read ends on its 429
+// while the pause is still on (another provider's time, when the seat has one).
+test("a re-ask whose host's pause moves past the read's bound ends at once on its 429, not at the pause's end, and counts nothing it did not send", async () => {
+  // the read's 429 at 60 ms; the other reader's, sent beside it, at 500 ms with a Retry-After of 9 s
+  await onProvider((host, n) => (host !== "api.devnet.solana.com" ? 200 : n === 2 ? { status: 429, ms: 500, retryAfter: "9" } : { status: 429, ms: 60 }), async (sent) => {
+    const first = pageSolanaRpcs("trade")[0]("getSlot", []).then(() => "answered", (e: unknown) => e);
+    const other = pageSolanaRpcs("trade")[0]("getBlockHeight", []).then(() => "answered", (e: unknown) => e);
+    const e = await first;
+    const leftAtEnd = hostLane(DEVNET).gate.left();
+    assert.ok(e instanceof Error && /HTTP 429|http_429/.test(String(e)), String(e));
+    assert.ok(leftAtEnd > 7_000, `the read ended with ${Math.round(leftAtEnd)} ms of the 9 s pause left: it never waited it out`);
+    await other;
+    const dev = sent.filter((x) => x.host === "api.devnet.solana.com");
+    assert.equal(dev.length, 2, `no re-ask sent into the pause: ${dev.map((x) => `${x.method}@${Math.round(x.at)}:${x.status}`).join(" ")}`);
+    assert.equal(hostLane(DEVNET).inWindow(), dev.length, "the lane counts what was sent, nothing more");
   });
 });

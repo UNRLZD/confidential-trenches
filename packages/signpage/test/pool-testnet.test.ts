@@ -20,7 +20,7 @@ import { noteCommitment, noteSecrets, type NoteRef } from "../../wallet/src/note
 import { openNoteStore, type NoteRecord, type NoteStore } from "../../wallet/src/notes/store.ts";
 import type { Pool } from "../../wallet/src/pool/pool.ts";
 import type { SolanaPoolCache } from "../../wallet/src/pool/solana-restore.ts";
-import { SOLANA_PROVIDER_A } from "../src/trade.ts";
+import { SOLANA_PROVIDER_A, SOLANA_PUBLIC_SEAT } from "../src/trade.ts";
 import { signalsProver } from "../../wallet/test/withdraw-fixture.ts";
 
 (globalThis as { __SIGN_NETWORK__?: string }).__SIGN_NETWORK__ = "testnet";
@@ -509,8 +509,11 @@ test("review P2-1 and P2-2 of a34c1626, P2-1 and P3-3 of e3489b3b: every Solana 
   const src = readFileSync(new URL("../src/pool-testnet.ts", import.meta.url), "utf8");
   const calls = [...src.matchAll(/solanaSettle(?:Spent|Reserved)\(\{[^}]*\}\)/g)].map((m) => m[0]);
   assert.equal(calls.length, 4);
-  // the reserved pass's on the pair's pass reads (card signpage-passes-yield-to-a-trade), the buy's and the rest on its trade reads
-  for (const c of calls) assert.match(c, /, rpcs: settleRpcs\((?:"pass")?\), lister: lister\((?:"pass")?\), signal, cache, markBatches: PAGE_SOL_MARK_BATCHES \}\)$/, c);
+  // the reserved pass's on the pair's pass reads (card signpage-passes-yield-to-a-trade), the rest on its trade reads, and
+  // the buy's on its own kind: a trade's to its release, a pass's after it (card sell-right-after-a-buy), its one call so
+  for (const c of calls) assert.match(c, /, rpcs: settleRpcs\((?:"pass"|kind)?\), lister: lister\((?:"pass"|kind)?\), signal, cache, markBatches: PAGE_SOL_MARK_BATCHES \}\)$/, c);
+  assert.deepEqual(calls.filter((c) => c.includes("(kind)")), calls.filter((c) => c.includes("minSlots, rpcs: settleRpcs(kind), lister: lister(kind),")), "a kind only where the pair and the lister both take it");
+  assert.equal(calls.filter((c) => c.includes("settleRpcs(kind)")).length, 1, "the buy's alone");
   // each site's signal is the stop's when the call began: four takes, and the stop read elsewhere only where a trade's
   // reads wait before a signature (card start-reads-wait-out-a-throttle): the buy's and the sell's host, each taken when
   // the host is made, and a pool kind's request (outSignal), each ending its waits at the next sign out
@@ -712,14 +715,18 @@ test("pool.sell on the devnet pool runs the sell kind: a page whose buys left no
   const { w } = await wallet();
   const reads: string[] = [];
   const offline = (n: string) => Object.assign(async (m: string) => (reads.push(m), Promise.reject(new Error("offline"))), { url: `https://${n}.invalid` });
-  const t = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { rpcs: [offline("a"), offline("b")] });
+  const evmSells: string[] = [];
+  const t = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { rpcs: [offline("a"), offline("b")], tradeKinds: { evmSell: () => (a) => (evmSells.push(a.chain), { running: true, after: Promise.resolve(), answer: () => ({ result: { stage: "sent", txs: [] } }) }) } });
   const ask: Ask = { kind: "pool.sell", chain: "solana", token: SOL_TOKEN, amount: 1n, slippageBps: 100, decimals: 9 };
   const r = t.flow(ask, ctx as never) as { running?: true; after: Promise<unknown>; answer: () => unknown };
   assert.equal(r.running, true, "the sell runs");
   await r.after;
   assert.deepEqual(r.answer(), { error: "not_funded" });
   assert.deepEqual(reads, [], "no W: no read");
-  assert.deepEqual(t.flow({ ...ask, chain: "base" }, ctx as never), { error: "not_allowed" });
+  // a sale on an EVM chain is the EVM sell's, never the Solana sell's (card signpage-evm-pool-sell: before it, refused)
+  assert.equal("running" in t.flow({ ...ask, chain: "base" }, ctx as never), true);
+  assert.deepEqual(evmSells, ["base"]);
+  assert.deepEqual(reads, [], "and the Solana pair read nothing for it");
 });
 
 test("a state read settles a sell a closed page left INCOMING (the review of signpage-pool-sell 4b6223a, high): its mark read on both RPCs, the note kept while they fail", async () => {
@@ -1338,9 +1345,12 @@ test("the page's sell host settles a sale's record by its signature, and a sign 
 // review P3-6 of a34c1626: the helper's start check (apps/helper/src/env-check.ts checkSolanaPairOperators) refuses a
 // keyed Solana URL of this page's direct seat's operator; it names that seat in its own constant (the helper imports no
 // page code), read here as text and held equal to the page's, so a new direct seat moves both
-test("the helper's start check names this page's direct Solana seat (SOLANA_PROVIDER_A)", () => {
+test("the helper's start check names every member of this page's public Solana seat (SOLANA_PUBLIC_SEAT), in its order", () => {
   const helper = readFileSync(new URL("../../../apps/helper/src/env-check.ts", import.meta.url), "utf8");
-  assert.equal(/export const PAGE_SOLANA_DIRECT = "([^"]+)";/.exec(helper)?.[1], SOLANA_PROVIDER_A);
+  const line = /export const PAGE_SOLANA_PUBLIC_SEAT: readonly string\[\] = Object\.freeze\(\[([^\]]*)\]\);/.exec(helper)?.[1];
+  assert.ok(line !== undefined, "env-check.ts PAGE_SOLANA_PUBLIC_SEAT");
+  assert.deepEqual([...line.matchAll(/"([^"]+)"/g)].map((m) => m[1]), [...SOLANA_PUBLIC_SEAT]);
+  assert.equal(SOLANA_PUBLIC_SEAT[0], SOLANA_PROVIDER_A);
 });
 
 // The review of 8522bdf8, F6: the testnet build's finder (pool-testnet.ts finderOf, no holdings given) reads the Ws on

@@ -20,6 +20,7 @@ import { fileURLToPath } from "node:url";
 import { HEADER_TIMED, SWAP_RPCS, TOPIC } from "../../apps/helper/src/data/evm/swaps.ts";
 import * as check from "./index-evm-swaps.mjs";
 import { candlesFault, CANDLES_PATH, judge, read, TRADES_PATH, tradesFault, units } from "./index-evm-swaps.mjs";
+import { candlesReader } from "./candles-read.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const A = JSON.parse(readFileSync(path.join(HERE, "index-evm-swaps.answers.json"), "utf8"));
@@ -565,4 +566,28 @@ test("card index-evm-swaps-check-reads-the-pool-leg: read() keeps both receipts 
   const r = judge(again);
   assert.equal(r.ok, false);
   assert.ok(bad(r).some((l) => l.startsWith(`BAD trade ${tx.slice(0, 10)}: this pool's Swap leg differs on the two providers: `)), r.lines.join("\n"));
+});
+
+// card evm-chart-opens-without-a-vendor-call: the candles read as the token page reads it (candles-read.mjs)
+test("the candles read as the page reads it: a 429 that clears inside the span passes, with the replay's own lines", async () => {
+  const clock = { t: 0 };
+  const reader = candlesReader({ now: () => clock.t, wait: async (ms) => void (clock.t += ms) });
+  let refused = 2;
+  const base = replay(A.good);
+  const fetchFn = async (url, init) => (url.endsWith(CANDLES_PATH(A.good.coin)) && refused-- > 0 ? new Response("{}", { status: 429, headers: { "retry-after": "30" } }) : base(url, init));
+  const again = asRecorded(await read("https://ct-api.unrealized.trade", A.good.coin, fetchFn, undefined, "base", reader), A.good);
+  assert.deepEqual(again.reads.candles.waits, [30_000, 30_000]);
+  assert.equal(again.reads.candles.status, 200);
+  for (const k of ["candles", "trades"]) delete again.reads[k].ms;
+  delete again.reads.candles.waits;
+  assert.deepEqual(judge(again).lines, judge(A.good).lines);
+});
+
+test("a candles 429 still standing after the span fails, its waits named; an empty 200 fails", () => {
+  const stood = edit((rec) => Object.assign(rec.reads.candles, { status: 429, body: '{"error":{"code":"rate_limited"}}', waits: [60_000, 15_000] }));
+  assert.ok(bad(run(stood)).some((l) => l.includes("answers 429 after 75 s of reads at each Retry-After (60, 15 s)")), bad(run(stood)).join("\n"));
+  const empty = edit((rec) => body(rec, "candles", (b) => (b.candles = [])));
+  assert.ok(bad(run(empty)).some((l) => /candles: exactly the frozen fields in their wire forms: (keys|candles 0)/.test(l)), bad(run(empty)).join("\n"));
+  const cleared = edit((rec) => (rec.reads.candles.waits = [30_000]));
+  assert.deepEqual(bad(run(cleared)), [], "a 200 after a wait inside the span passes");
 });

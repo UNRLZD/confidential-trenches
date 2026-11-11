@@ -21,7 +21,7 @@ import type { Holdings, HoldingsReader } from "../../wallet/src/pool/buy-wallets
 import { solanaPoolOf } from "../../wallet/src/pool/solana.ts";
 import { freshWallet } from "../../wallet/src/derive/keys.ts";
 import { jOf } from "../../wallet/src/pool/queue.ts";
-import { keptPositions, passMemo, POSITION_COSTS_KEY, positionCost, POSITIONS_KEPT_KEY, POSITIONS_RETRIES, POSITIONS_SOLD_KEY, POSITIONS_SOLD_TX_KEY, POSITIONS_UNLANDED_KEY, positionsCache, positionsPass, recordPoolBuy, usdOf, withPositions, type KeptPass, type PassMemo, type PassResult, type FoundWallet, type PassRun, type Position, type PositionCosts, type PositionsReads } from "../src/positions.ts";
+import { keptPositions, passMemo, POSITION_COSTS_KEY, positionCost, POSITIONS_KEPT_KEY, POSITIONS_RETRIES, POSITIONS_SOLD_KEY, POSITIONS_SOLD_TX_KEY, POSITIONS_UNLANDED_KEY, positionsCache, positionsPass, recordBoughtOut, recordPoolBuy, usdOf, withPositions, type KeptPass, type PassMemo, type PassResult, type FoundWallet, type PassRun, type Position, type PositionCosts, type PositionsReads } from "../src/positions.ts";
 import { stateFor } from "../src/kit-version.ts";
 import { testnetPool, testnetPoolDeps } from "../src/pool-testnet.ts";
 import { poolKinds, type PoolRpc } from "../src/pool-kinds.ts";
@@ -111,9 +111,10 @@ test("what this device bought: shown from its buy record while the finder lags, 
   // the finder read W whole, not listing the token yet: the record's amount
   let got = await positionsPass(reads({ [W1]: {} }, { costs }), memo);
   assert.deepEqual([got.positions.map((p) => [p.token, p.amount, p.wallets]), got.whole], [[[MINT, "7", [W1]]], true]);
-  // the finder does not know W yet (its note not read as spent): the record's amount, and the pass runs again
+  // the finder's whole list without W (its note neither SPENT nor RESERVED: freed, its buy never landed; card
+  // sell-right-after-a-buy writes the record at the read-back, so it can outlive such a buy): no row, nothing to wait for
   got = await positionsPass(reads({}, { costs }), passMemo());
-  assert.deepEqual([got.positions.map((p) => p.amount), got.whole], [["7"], false]);
+  assert.deepEqual([got.positions, got.whole], [[], true]);
   for (let i = 0; i < 3; i++) got = await positionsPass(reads({ [W1]: {} }, { costs }), memo);
   assert.deepEqual(got.positions.map((p) => p.amount), ["7"], "never hidden for a lag");
   got = await positionsPass(reads({ [W1]: { [MINT]: 3_000_000n } }, { costs }), memo);
@@ -1859,4 +1860,37 @@ test("a provider throttled by the page's own asks clears: the passes, buys endin
     const n429 = refused.filter((x) => x).length;
     assert.ok(n429 <= 2 * HOLDINGS_THROTTLED_ROUNDS_60S, `${n429} answers of 429 in the first 60 s, bound ${2 * HOLDINGS_THROTTLED_ROUNDS_60S} (two getTokenAccountsByOwner a round)`);
   });
+});
+
+test("card sell-right-after-a-buy: W's record at the read-back is the record a filled end writes, and nothing else; an end decided on both RPCs (not_landed, refused) takes back that very record, an error, a sent end or another buy's record keeps it", async () => {
+  const early = memStore();
+  await recordBoughtOut(early, FACTS);
+  const filled = memStore();
+  await recordPoolBuy(filled, "b1", FACTS, { result: { stage: "filled", txs: [{ chain: "solana", hash: "S" }] } });
+  assert.deepEqual(early.meta.get(POSITION_COSTS_KEY), filled.meta.get(POSITION_COSTS_KEY), "the same fields");
+  assert.equal(early.ops.size, 0, "no ops record: nothing says the buy ended");
+  await recordBoughtOut(early, { ...FACTS, out: undefined });
+  await recordBoughtOut(early, { ...FACTS, wallet: undefined });
+  assert.deepEqual(Object.keys(early.meta.get(POSITION_COSTS_KEY) as object), [W1], "no W or no amount: nothing written");
+  const ends: [string, Parameters<typeof recordPoolBuy>[3], boolean][] = [
+    ["not_landed", { result: { stage: "not_landed", txs: [] } }, false],
+    ["refused on chain", { result: { stage: "refused", txs: [] } }, false],
+    ["sent", { result: { stage: "sent", txs: [] } }, true],
+    ["an error (reads failed, throttled, out of time)", { error: "failed" }, true],
+    ["seen before (another tab's id)", { error: "id_reused" }, true],
+  ];
+  for (const [what, end, kept] of ends) {
+    const s = memStore();
+    await recordBoughtOut(s, FACTS);
+    await recordBoughtOut(s, { ...FACTS, wallet: W2, out: "5" });
+    await recordPoolBuy(s, "b1", FACTS, end);
+    const recs = s.meta.get(POSITION_COSTS_KEY) as Record<string, unknown>;
+    assert.equal(Object.hasOwn(recs, W1), kept, `${what}: W's record ${kept ? "kept" : "taken back"}`);
+    assert.ok(Object.hasOwn(recs, W2), `${what}: every other W's kept`);
+  }
+  // not_landed for a W whose record is another buy's (a different amount): kept
+  const other = memStore();
+  await recordBoughtOut(other, { ...FACTS, out: "9" });
+  await recordPoolBuy(other, "b1", FACTS, { result: { stage: "not_landed", txs: [] } });
+  assert.ok(Object.hasOwn(other.meta.get(POSITION_COSTS_KEY) as object, W1));
 });

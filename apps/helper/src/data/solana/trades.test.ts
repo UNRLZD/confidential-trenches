@@ -335,7 +335,9 @@ test("a listed token with no priced trade for over a minute answers its empty ta
 });
 
 test("candles of a listed token with no bars of ours: the history is asked for its newest range (one cache key), and a throttled or failed history answers its 429 or 503, never an empty 200", async () => {
-  // app live run 41787804457 (4 Nov 06:49Z): wNEAR (listed, no curve trades) answered 200 "chain" with no bars
+  // app live run 41787804457 (4 Nov 06:49Z): wNEAR (listed, no curve trades) answered 200 "chain" with no bars; card
+  // evm-chart-opens-without-a-vendor-call: helper live runs 42995547054 and 42998586210 read 200 with no bars for
+  // sUSDai's and A7bdiYdS's 1h, both charted by GeckoTerminal minutes later
   const asked: (number | null)[] = [];
   let hist: { status: number; body: string; src?: string; asOfMs?: number; retryAfterS?: number } = { status: 429, body: '{"error":{"code":"rate_limited"}}', retryAfterS: 30 };
   const t = createSolanaTrades({

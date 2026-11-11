@@ -70,8 +70,11 @@ export const IN_PROCESS = [
   viaRead("sol-w-sweep", () => import("../live-checks/sol-w-sweep.mjs")),
   viaRead("intents-u-registered-first", () => import("../live-checks/intents-u-registered-first.mjs")),
   viaRead("sol-rent-back-dust-burn", () => import("../live-checks/sol-rent-back-dust-burn.mjs")),
+  viaRead("sell-right-after-a-buy", () => import("../live-checks/sell-right-after-a-buy.mjs")),
   // cut as a release only after its merge: the marks and the pin, not the ledger
   { key: "sol-sell-deposit-back-floor", host: "sign", load: () => import("../live-checks/sol-sell-deposit-back-floor.mjs"), run: async (m, f) => m.judge(await m.read(f), { ledger: false }) },
+  { key: "app-holding-follows-a-fill", host: "app", load: () => import("../live-checks/app-holding-follows-a-fill.mjs"), run: async (m, f) => m.judge(await m.read(f)) },
+  { key: "app-sell-shows-what-you-receive", host: "app", load: () => import("../live-checks/app-sell-shows-what-you-receive.mjs"), run: async (m, f) => m.judge(await m.read(f)) },
   { key: "pool-sell-share-across-wallets", host: "sign", load: () => import("../live-checks/pool-sell-share-across-wallets.mjs"), run: async (m, f) => m.judge(await m.read(f), { ledger: false }) },
   // the bundle part only: the chain part reads the helper and two RPCs, past the build
   { key: "wallet-mainnet-relayer-pins", host: "sign", load: () => import("../live-checks/wallet-mainnet-relayer-pins.mjs"), run: async (m, f) => m.judgeBundle(await m.readBundle(f)) },
@@ -116,6 +119,8 @@ export const OUT = {
   "evm-pool-lists-mainnet": "mainnet Base and Robinhood RPC reads of the pool's logs on each chain's two seats, and SIGN_HOST's response headers (connect-src), never the build",
   "signpage-solana-trade": "the page's CSP header, and a run record's transactions on two RPCs",
   "signpage-evm-pool-buy": "a run record's buys on two testnet RPCs each and the helper's send route; on the build, the mainnet refusal its bundle part reads is held by packages/signpage/test/pool-network.test.ts (pool.buy on Base and Robinhood not_allowed)",
+  "signpage-evm-pool-sell": "a run record's sales on two testnet RPCs each and the helper's sell route; on the build, the mainnet refusal its bundle part reads is held by packages/signpage/test/pool-network.test.ts (pool.sell on Base and Robinhood not_allowed)",
+  "signpage-positions-evm": "a run record's Base Sepolia buy and sell, and W's balance, on two testnet RPCs; the testnet build's positions pass is held by packages/signpage/test/positions-evm.test.ts (the mainnet build pins no EVM pool)",
   "signpage-withdraw-handoff": "the page's CSP header, and the testnet fee read on the release helper and RPCs",
   "held-move-forgotten-tx": "the page's CSP header (signpage-skeleton pins it in the build's _headers), and a mainnet archival RPC read",
   "signpage-release": "the release list against what the host serves",
@@ -126,6 +131,7 @@ export const OUT = {
   "signpage-pool-notes": "devnet RPC reads of the run",
   "signpage-pool-withdraw-form": "devnet RPC reads of the run",
   "signpage-pool-pins": "mainnet RPC reads of the pin's accounts and the helper's mainnet fee answer",
+  "signpage-throttled-provider-has-a-spare": "both public Solana seats' CORS answers to the page's origin and their mainnet reads of the stable accounts",
   "pool-deposits": "devnet RPC reads of the run",
   "wallet-passkey-prf": "a browser",
   "signpage-postmessage": "a browser",

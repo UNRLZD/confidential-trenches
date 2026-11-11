@@ -26,8 +26,11 @@ test("the mainnet build refuses an EVM pool buy by name, whatever pin a chain ha
     evmPin: () => pin,
     evmRpcs: () => rpcs,
     evmSync: () => ({ events: async () => assert.fail("no sync read") }),
-    tradeKinds: { evmBuy: () => () => assert.fail("no EVM buy on mainnet") },
+    tradeKinds: { evmBuy: () => () => assert.fail("no EVM buy on mainnet"), evmSell: () => () => assert.fail("no EVM sell on mainnet") },
   });
-  for (const chain of ["base", "robinhood"] as const)
+  for (const chain of ["base", "robinhood"] as const) {
     assert.deepEqual(t.flow({ kind: "pool.buy", chain, token: SEPOLIA_USDC, amount: 10n ** 15n, slippageBps: 100, decimals: 18 }, null as never), { error: "not_allowed" });
+    // and the sale (card signpage-evm-pool-sell): its kind is built only in the testnet build
+    assert.deepEqual(t.flow({ kind: "pool.sell", chain, token: SEPOLIA_USDC, amount: 10n ** 6n, slippageBps: 100, decimals: 6 }, null as never), { error: "not_allowed" });
+  }
 });

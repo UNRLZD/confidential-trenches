@@ -11,8 +11,10 @@
 // The sell's button runs the buy side's own state machine (trade/model.ts tap, progress, outcome: Sending, Landing,
 // Filled, one request for a double tap); nothing is forked here.
 
-import type { SignpageClientSnapshot } from "@blindfill/kit";
-import type { Phase } from "../trade/model.ts";
+import type { SignpageClient, SignpageClientSnapshot, SignpageState } from "@blindfill/kit";
+import { centsToDecimal, decimalToUnits, poolSellAsk, unitsToCents } from "../trade/model.ts";
+import type { Phase, PoolPrice } from "../trade/model.ts";
+import type { SellPreviewAnswer, SellPreviewRequest } from "./source.tsx";
 
 /** 100% in basis points. */
 export const WHOLE = 10_000;
@@ -162,4 +164,34 @@ export function baseUnits(amount: string, decimals: number | null): string | nul
   if (!u || decimals === null || !Number.isInteger(decimals) || decimals < 0 || decimals > 36 || u.scale > decimals) return null;
   const n = u.n * 10n ** BigInt(decimals - u.scale);
   return n === 0n || n > U64_MAX ? null : n.toString();
+}
+
+/**
+ * The sell box's preview (card app-sell-shows-what-you-receive): the signing page's pool.sell.dry for exactly what the
+ * tap would ask (poolSellAsk: the share of the whole holding, the user's slippage), its out and network fee in USD at the
+ * pool asset's price the page put in its state (`price`, the trade box's poolPrice), its fee as the page answers it.
+ * Display only: nothing here goes into any request. No preview (ok false) with no client, no pool on the chain, no fresh
+ * price, the page's refusal (its code), or an answer the price's decimals cannot read.
+ */
+export async function askSellPreview(
+  request: SignpageClient["request"] | null,
+  pools: SignpageState["pools"],
+  price: (chain: SellPreviewRequest["chain"]) => PoolPrice | null,
+  req: SellPreviewRequest,
+): Promise<SellPreviewAnswer> {
+  const ask = poolSellAsk(pools, req.chain, req.token, { share_bps: req.share_bps }, req.slippage_bps);
+  if (!ask || !request) return { ok: false, code: "no_pool" };
+  let o;
+  try {
+    o = await request("pool.sell.dry", ask.params).outcome;
+  } catch {
+    return { ok: false, code: "failed" };
+  }
+  if (!o.ok) return { ok: false, code: o.error.code };
+  const p = price(req.chain);
+  if (!p) return { ok: false, code: "no_price" };
+  const out = decimalToUnits(o.result.out, p.decimals);
+  const network = decimalToUnits(o.result.network, p.decimals);
+  if (out === null || network === null) return { ok: false, code: "no_price" };
+  return { ok: true, preview: { out_usd: centsToDecimal(unitsToCents(out, p)), network_usd: centsToDecimal(unitsToCents(network, p)), fee_bps: o.result.fee_bps } };
 }

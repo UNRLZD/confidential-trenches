@@ -116,3 +116,12 @@ test("the tokens the check opened stay read while it waits for a trade (the help
   await new Promise((r) => setTimeout(r, 30));
   assert.equal(seen.length, n); // none after stop
 });
+
+// card evm-chart-opens-without-a-vendor-call: the candles read as the token page reads it (candles-read.mjs)
+test("the 1s candles: a 200 after a 429 that cleared inside the span passes; a 429 still standing after it, or an empty 200, fails", () => {
+  assert.deepEqual(bad(judge(edit((rec) => (rec.candles.waits = [30_000])))), []);
+  const stood = judge(edit((rec) => Object.assign(rec.candles, { status: 429, body: '{"error":{"code":"rate_limited"}}', waits: [60_000, 15_000] })));
+  assert.ok(bad(stood).some((l) => l.endsWith("answers 429 after 75 s of reads at each Retry-After (60, 15 s)")), bad(stood).join("\n"));
+  const empty = judge(edit((rec) => body(rec.candles, (b) => (b.candles = []))));
+  assert.ok(bad(empty).some((l) => /the 1s candles hold the trade's second/.test(l)), bad(empty).join("\n"));
+});

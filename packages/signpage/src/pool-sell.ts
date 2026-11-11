@@ -294,7 +294,7 @@ async function treeSizes(rpcs: Rpcs, program: string, pool: string, wait: (ms: n
 }
 
 /** The pool account's two tree sizes. */
-function sizesOf(d: Uint8Array): { stateSize: number; labelSize: number } {
+export function sizesOf(d: Uint8Array): { stateSize: number; labelSize: number } {
   if (d.length !== POOL_LEN || !sameBytes(d.subarray(0, 8), POOL_DISC)) return no();
   const size = (at: number): number => int(Number(new DataView(d.buffer, d.byteOffset + at, 8).getBigUint64(0, true)));
   return { stateSize: size(OFF_TREES), labelSize: size(OFF_TREES + TREE_LEN) };
@@ -816,7 +816,7 @@ function planOf(ask: PoolAsk, held: readonly { w: BuyWallet; held: bigint; froze
   const frozen = held.some((x) => "frozen" in x);
   const order = held.filter((x) => x.held > 0n).sort((x, y) => (x.held < y.held ? -1 : x.held > y.held ? 1 : x.w.address < y.w.address ? -1 : x.w.address > y.w.address ? 1 : 0));
   const total = order.reduce((t, x) => t + x.held, 0n);
-  const units = ask.shareBps === undefined ? ask.amount : ask.shareBps === 10_000 ? total : (total * BigInt(ask.shareBps)) / 10_000n;
+  const units = poolSellUnits(total, ask);
   // short of the units: a frozen account among the Ws is why (not_allowed, as one W's frozen sale is), else not_funded
   if (units <= 0n || units > total) return no(frozen ? "not_allowed" : "not_funded");
   const one = order.find((x) => x.held >= units);
@@ -830,6 +830,22 @@ function planOf(ask: PoolAsk, held: readonly { w: BuyWallet; held: bigint; froze
     left -= take;
   }
   return { units, total, legs, frozen };
+}
+
+/** The units a sell takes of a holding of `total` base units: a share's, the total times the share in basis points,
+ *  rounded down (10,000: the whole total, every unit); a typed amount's, the amount. The plan (planPoolSell) and the
+ *  sell box's preview (pool-sell-dry.ts) both take it from here. */
+export const poolSellUnits = (total: bigint, ask: Pick<PoolAsk, "amount" | "shareBps">): bigint =>
+  ask.shareBps === undefined ? ask.amount : ask.shareBps === 10_000 ? total : (total * BigInt(ask.shareBps)) / 10_000n;
+
+/** The quote a sale of `amount` signs on: the reference for exactly this sell on both RPCs (the kit's
+ *  readSolanaReference, side "sell", through pageReference) and the venue in it that gives the most; null when there is
+ *  none. Every sale (sellRun) and the sell box's preview (pool-sell-dry.ts) read it here, so the preview is the sale's
+ *  own quote on the same reads. A provider's fault is thrown (pageReference). */
+export async function poolSellReference(rpcs: Rpcs, token: string, amount: bigint): Promise<{ reference: SolanaReference; best: SolanaReference["pools"][number] } | null> {
+  const reference = await pageReference(rpcs, { side: "sell", token, amount });
+  const best = reference?.pools.filter((p) => p.venue === "pump-curve" || p.venue === "pumpswap").sort((x, y) => (x.expectedOut > y.expectedOut ? -1 : 1))[0];
+  return reference && best ? { reference, best } : null;
 }
 
 /** What each wallet's sale is told beyond the run's host: which leg it is, for the host's record. */
@@ -912,7 +928,7 @@ async function sellAll(host: PoolSellHost, ask: PoolAsk, laters: Later[], hooks:
           return s;
         };
         early.note = quiet(h.notes().then((store) => noteFor(h, h.rpcs, program, scope, store, solanaTreeSync(h.rpcs, program), w!, seed)).finally(() => seeds.forEach((s) => s.fill(0))));
-        if (units > 0n) early.reference = { amount: units, read: quiet(pageReference(h.rpcs, { side: "sell", token: ask.token, amount: units })) };
+        if (units > 0n) early.reference = { amount: units, read: quiet(poolSellReference(h.rpcs, ask.token, units)) };
       }, planWait);
       plan = got.plan;
       const held = got.seen.get(plan.legs[0]!.w.address);
@@ -1014,7 +1030,7 @@ type Early = {
   sizes?: Promise<{ stateSize: number; labelSize: number }>;
   held?: Promise<WHeld>;
   note?: Promise<{ ref: NoteRef; precommitment: bigint; planned: string | null }>;
-  reference?: { amount: bigint; read: Promise<SolanaReference | null> };
+  reference?: { amount: bigint; read: ReturnType<typeof poolSellReference> };
   /** Whether the plan waited for its providers to agree: its reference (asked before that) is then old. */
   waited?: () => boolean;
 };
@@ -1121,13 +1137,13 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later, w: BuyWallet
     //    77055f4e); W's own accounts (wHeld: the token, W's lamports, its volume accounts) under the mint's program; the
     //    note the deposit makes (returnNote; the seed copy for its precommitment zeroed at once); the price reference at
     //    the sale's units
-    const [rent, sizes0, tokens, rn, reference] = await Promise.all([
+    const [rent, sizes0, tokens, rn, quoted] = await Promise.all([
       rentP,
       sizesP,
       early?.held ?? mintP!.then((p) => wHeld(rpcs, w.address, token, p, wait)),
       noteP,
       // a reference read at other units (sellAll's guess for a lone W's share) is never this sale's: read at its units
-      early?.reference?.amount === amount ? early.reference.read : pageReference(rpcs, { side: "sell", token, amount }),
+      early?.reference?.amount === amount ? early.reference.read : poolSellReference(rpcs, token, amount),
     ]);
     let sizes = sizes0;
     if (tokens.amount < amount) return no("not_funded");
@@ -1137,8 +1153,8 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later, w: BuyWallet
     if (lamports < solanaPoolSellNeed({ kind: "pump-curve", cashback: false }, rent)) return no("not_funded");
     const { ref, precommitment, planned } = rn;
     const pre = be32(precommitment);
-    const best = reference?.pools.filter((p) => p.venue === "pump-curve" || p.venue === "pumpswap").sort((x, y) => (x.expectedOut > y.expectedOut ? -1 : 1))[0];
-    if (!reference || !best) return no("quote_check_failed");
+    if (!quoted) return no("quote_check_failed");
+    const { reference, best } = quoted;
     const chose = best.venue as "pump-curve" | "pumpswap";
     if (turn) turn.venues.kind = chose;
     // 2. after the reference (the quote's age counts from it): its venue (a leg after the first: the one read beside its

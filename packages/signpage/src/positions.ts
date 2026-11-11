@@ -3,10 +3,13 @@
 //
 // - Only what this device bought: a position is the token W's buy mint names (the wallet store's owed/buy-sol, which
 //   the buy writes before every send: pool-buy.ts h.bought.put, pool-sell.ts buyMints). W's buy record
-//   (POSITION_COSTS_KEY, written by recordPoolBuy when the run ended filled with the amount W received read back on both
-//   RPCs) adds to it: the amount shown while the finder lags, the mint's decimals and the cost. A buy whose run never
-//   told that amount (the helper's 502, read-backs apart or unreadable, a run that ended "sent", a tab closed before the
-//   end) is still a position, at the finder's amount. A token the finder lists in W that W's buy mint does not name (one
+//   (POSITION_COSTS_KEY, written by recordBoughtOut as soon as the run tells the amount W received, read back on both
+//   RPCs at confirmed, its early "sent" on: card sell-right-after-a-buy; and again by recordPoolBuy at a filled end)
+//   adds to it: the amount shown while the finder lags, the mint's decimals and the cost. It says where to look, never
+//   that the buy is final: no reader takes it so, and a sale reads W on both RPCs before it signs. A run that ends
+//   not_landed (both RPCs' verdict) takes it back; one whose end is not known ("sent") keeps it. A buy whose run never
+//   told that amount (the helper's 502, read-backs apart or unreadable, a tab closed before the read-back) is still a
+//   position, at the finder's amount. A token the finder lists in W that W's buy mint does not name (one
 //   sent to W by anyone) is no position: not listed, no Sell, and nothing is read for it. A W takes one buy only (a W is
 //   its note's, and a note spends once: wallet/src/pool/queue.ts jOf and derive/keys.ts walletPath), so its buy mint
 //   names W's one holding. A device restored from the words has no buy mints (src/pool-restore.ts writes notes only), so
@@ -25,8 +28,8 @@
 //   finder that is down never brings it back. A recorded token the finder read W whole and never listed shows at the
 //   record's amount (a reader that lags hides nothing this device bought) until the finder lists it or this device
 //   signed a full sell of it from W (pool-sell.ts writes W's rent-back record with that sell before it leaves the
-//   device; noted here). A W with a buy mint the finder does not know (its note never spent: a buy refused or not
-//   landed) is no position and no fault.
+//   device; noted here). A W with a buy mint or a record that the finder's whole list does not know (its note neither
+//   SPENT nor RESERVED: a buy refused or not landed, its note freed) is no position and no fault.
 // - Looked for again, never a failed pass: a W whose buy this page ran (`awaited`) that the finder does not list yet,
 //   with no record's amount, and a token this device signed a full sell of that the finder still lists (the sell's
 //   verdict is read at confirmed, the finder at finalized). Each runs the pass again, and the pass is kept all the same,
@@ -269,10 +272,11 @@ export async function positionsPass(r: PositionsReads, memo: PassMemo = passMemo
       else if (awaited.has(address)) look(k, awaited, address);
       continue;
     }
-    // a W the finder answered without, with no record and no buy this page ran: its note never spent (a buy refused or
-    // not landed), so nothing to show and nothing to wait for
-    if (found !== null && tokens === undefined && received === undefined) {
-      if (!awaited.has(address)) continue;
+    // a W the finder answered without (its list whole: every W whose note is SPENT or RESERVED is in it): its note never
+    // spent or was freed (a buy refused or not landed), so nothing to show, its record's amount included, and nothing
+    // to wait for but a buy this page ran with no record yet
+    if (found !== null && tokens === undefined) {
+      if (!awaited.has(address) || received !== undefined) continue;
       // a buy this page ran whose W the finder does not know yet: looked for again, its last amount while it is
       look(k, awaited, address);
       const last = memo.held.get(k);
@@ -354,9 +358,28 @@ export const routeInto = (facts: PoolBuyFacts, route?: (r: BuyRoute) => void) =>
   route?.(r);
 };
 
+/** W's buy record from what the run told: the token, the amount W received, the token's decimals when told, and the USD
+ *  it spent when a price was read; null without W or that amount. */
+function buyRecordOf(f: PoolBuyFacts): PositionCost | null {
+  if (f.wallet === undefined || f.out === undefined || !DEC.test(f.out)) return null;
+  const usd = f.price === null ? null : usdOf(f.spend, f.spendDecimals, f.price);
+  return { mint: f.token, received: f.out, ...(isDecimals(f.decimals) ? { decimals: f.decimals } : {}), ...(usd === null ? {} : { cost_usd: usd }) };
+}
+
+/** W's buy record as soon as the run tells the amount W received (card sell-right-after-a-buy: the route's `out`, read
+ *  back on both RPCs at confirmed, after its early "sent"), every other W's record kept: the same record a filled end
+ *  writes. Nothing else is written: the ops record waits for the run's end. */
+export async function recordBoughtOut(store: Pick<BuyRecordStore, "update">, f: PoolBuyFacts): Promise<void> {
+  const rec = buyRecordOf(f);
+  if (rec === null) return;
+  await store.update("meta", POSITION_COSTS_KEY, (v) => ({ ...(typeof v === "object" && v !== null ? v : {}), [f.wallet!]: rec }));
+}
+
 /** A pool buy's records once its run ended (see the header): its ops record under the request's id (never over one
  *  already there, nor for an id another tab runs), and when it filled with W and its amount told, W's buy record (with
- *  the token's decimals when told, and the USD it spent when a price was read), every other W's record kept. */
+ *  the token's decimals when told, and the USD it spent when a price was read), every other W's record kept. A run that
+ *  ended not_landed or refused on chain (both RPCs' verdict: pool-buy.ts) takes back W's record of this very buy, the
+ *  one recordBoughtOut wrote at its read-back; an end not known ("sent") writes nothing, so it stays. */
 export async function recordPoolBuy(store: BuyRecordStore, id: string, f: PoolBuyFacts, answer: BuyAnswer | null): Promise<void> {
   if (answer === null || ("error" in answer && answer.error === "id_reused")) return;
   if ((await store.get("ops", id)) !== undefined) return;
@@ -368,9 +391,17 @@ export async function recordPoolBuy(store: BuyRecordStore, id: string, f: PoolBu
   if (!FINAL.has(stage)) return;
   const txs = "error" in answer ? [] : answer.result.txs.map((t) => ({ chain: t.chain, hash: t.hash }));
   await store.put("ops", id, { kind: "buy", stage, txs, ...("error" in answer ? { code: answer.error } : {}), created_ms: f.createdMs, chain: "solana", token: f.token, ...(usd === null ? {} : { amount_usd: usd }) });
-  if (stage !== "filled" || f.wallet === undefined || f.out === undefined || !DEC.test(f.out)) return;
-  const rec: PositionCost = { mint: f.token, received: f.out, ...(isDecimals(f.decimals) ? { decimals: f.decimals } : {}), ...(usd === null ? {} : { cost_usd: usd }) };
-  await store.update("meta", POSITION_COSTS_KEY, (v) => ({ ...(typeof v === "object" && v !== null ? v : {}), [f.wallet!]: rec }));
+  const rec = buyRecordOf(f);
+  if (rec === null) return;
+  if (stage === "filled") return void (await store.update("meta", POSITION_COSTS_KEY, (v) => ({ ...(typeof v === "object" && v !== null ? v : {}), [f.wallet!]: rec })));
+  if ("error" in answer || (stage !== "not_landed" && stage !== "refused")) return;
+  // W's record only when it is this buy's own (a W takes one buy: its token and the amount it received)
+  await store.update("meta", POSITION_COSTS_KEY, (v) => {
+    const all = { ...(typeof v === "object" && v !== null ? (v as Record<string, PositionCost>) : {}) };
+    const had = Object.hasOwn(all, f.wallet!) ? all[f.wallet!] : undefined;
+    if (had?.mint === rec.mint && had.received === rec.received) delete all[f.wallet!];
+    return all;
+  });
 }
 
 export type PositionsCache = {
@@ -396,6 +427,11 @@ export type PositionsCache = {
   clear(): void;
   /** Settles once no pass runs (tests). */
   idle(): Promise<void>;
+  /** The last pass was not whole and its round of retries is spent: no pass runs or is booked, so only a refresh() or
+   *  once() reads again. */
+  spent(): boolean;
+  /** One pass, the round of retries left as it is (a spent round books none after it). */
+  once(): void;
 };
 
 /** A sell's read of the Ws, holding the passes off until it ends, once: fed, the Ws as it read them are the next pass's
@@ -407,8 +443,9 @@ export type PassHold = { feed(found: readonly FoundWallet[]): void; release(): v
 export type PassRun = { signal: AbortSignal; found?: readonly FoundWallet[] };
 
 /** The positions of `pass`, one pass at a time, kept between passes. */
-export function positionsCache(pass: (memo: PassMemo, run: PassRun) => Promise<PassResult>, o: { kept?: () => Promise<readonly Position[] | null>; retryMs?: number; retries?: number; setTimer?: (f: () => void, ms: number) => unknown; clearTimer?: (t: unknown) => void } = {}): PositionsCache {
-  const retryMs = o.retryMs ?? POSITIONS_RETRY_MS;
+export function positionsCache(pass: (memo: PassMemo, run: PassRun) => Promise<PassResult>, o: { kept?: () => Promise<readonly Position[] | null>; retryMs?: number | ((tries: number) => number); retries?: number; setTimer?: (f: () => void, ms: number) => unknown; clearTimer?: (t: unknown) => void } = {}): PositionsCache {
+  // a fixed wait, or the wait before the try after `tries` tries (a back off)
+  const retryMs = (tries: number): number => (typeof o.retryMs === "function" ? o.retryMs(tries) : (o.retryMs ?? POSITIONS_RETRY_MS));
   const retries = o.retries ?? POSITIONS_RETRIES;
   // a retry never holds a process open (Node's unref; a browser's timer has none)
   const setTimer = o.setTimer ?? ((f, ms) => {
@@ -432,6 +469,8 @@ export function positionsCache(pass: (memo: PassMemo, run: PassRun) => Promise<P
   let timer: unknown = null;
   let started = false;
   let loading: Promise<void> | null = null;
+  // the last pass's answer was whole (and looks for nothing again)
+  let whole = true;
   const run = (): void => {
     if (timer !== null) clearTimer(timer), (timer = null);
     if (running || holds > 0) return void (again = true);
@@ -445,14 +484,15 @@ export function positionsCache(pass: (memo: PassMemo, run: PassRun) => Promise<P
     // booked unless the round of retries has run out (false then)
     const retry = (): boolean => {
       if (!live() || tries >= retries) return false;
+      timer = setTimer(() => ((timer = null), run()), retryMs(tries));
       tries++;
-      timer = setTimer(() => ((timer = null), run()), retryMs);
       return true;
     };
     const m = memo;
     running = pass(m, { signal: stop.signal, ...(found === null ? {} : { found }) }).then(
       (got) => {
         if (!live()) return;
+        whole = got.whole && (got.wait?.length ?? 0) === 0;
         const changed = JSON.stringify(got.positions) !== JSON.stringify(last);
         last = got.positions;
         if (changed) for (const f of watchers) f();
@@ -460,7 +500,10 @@ export function positionsCache(pass: (memo: PassMemo, run: PassRun) => Promise<P
         // looks for, a round of retries in vain ends (PassResult)
         if ((!got.whole || (got.wait?.length ?? 0) > 0) && !retry() && got.whole) for (const k of got.wait ?? []) m.waited.add(k);
       },
-      () => void retry(),
+      () => {
+        if (live()) whole = false;
+        void retry();
+      },
     ).finally(() => {
       running = null;
       if (current === stop) current = null;
@@ -535,10 +578,15 @@ export function positionsCache(pass: (memo: PassMemo, run: PassRun) => Promise<P
       fed = null;
       holds = 0;
       tries = 0;
+      whole = true;
       if (timer !== null) clearTimer(timer), (timer = null);
     },
     idle: async () => {
       while (running) await running;
+    },
+    spent: () => started && !whole && running === null && timer === null && holds === 0,
+    once: () => {
+      if (started) run();
     },
   };
   return cache;

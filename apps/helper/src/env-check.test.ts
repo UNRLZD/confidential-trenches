@@ -345,7 +345,7 @@ test("evm-pool-sync-holds: node src/env-check.ts exits 2 on a keyed URL of a poo
 test("a keyed Solana URL the helper reads /v1/rpc/solana from, run by the page's direct seat's operator (PublicNode), is refused naming the variable, never the URL or its key; another operator's, and none set, pass", async () => {
   const { checkSolanaPairOperators } = (await import("./env-check.ts")) as unknown as { checkSolanaPairOperators: (env: Record<string, string | undefined>) => void };
   assert.equal(typeof checkSolanaPairOperators, "function", "env-check.ts checkSolanaPairOperators");
-  // PAGE_SOLANA_DIRECT is held equal to the page's own constant by packages/signpage/test/pool-testnet.test.ts
+  // PAGE_SOLANA_PUBLIC_SEAT is held equal to the page's own seat by packages/signpage/test/pool-testnet.test.ts
   const KEY = "k3y-test-value-not-a-key";
   const why = (env: Record<string, string | undefined>): string | null => {
     try {
@@ -358,10 +358,17 @@ test("a keyed Solana URL the helper reads /v1/rpc/solana from, run by the page's
   for (const name of ["SOLANA_RPC_URL", "SOLANA_RPC_URL_QUICKNODE", "SOLANA_RPC_URL_DRPC_1", "SOLANA_RPC_URL_DRPC_2", "SOLANA_RPC_URL_DRPC_3"]) {
     for (const url of [`https://solana-rpc.publicnode.com/${KEY}`, `https://solana-mainnet.publicnode.com/?token=${KEY}`]) {
       const m = why({ SOLANA_RPC_URL: `https://mainnet.helius-rpc.com/?api-key=${KEY}`, [name]: url });
-      assert.equal(m, `${name}: its operator publicnode.com is the signing page's direct Solana seat, so the page's pair would read one operator twice`);
+      assert.equal(m, `${name}: its operator publicnode.com runs a member of the signing page's public Solana seat, so the page's pair would read one operator twice`);
       assert.ok(!m!.includes(KEY), m!);
     }
-    assert.equal(why({ [name]: `not a url ${KEY}` }), `${name}: not an http(s) URL, so no operator apart from the page's direct Solana seat`);
+    // card signpage-throttled-provider-has-a-spare: the seat's spare is Pocket's gateway, so a keyed Pocket URL, or one
+    // of Grove's portal (Pocket Network Inc. renamed), is that seat's operator too
+    for (const url of [`https://solana.api.pocket.network/${KEY}`, `https://solana.rpc.grove.city/v1/${KEY}`]) {
+      const m = why({ [name]: url });
+      assert.equal(m, `${name}: its operator pocket.network runs a member of the signing page's public Solana seat, so the page's pair would read one operator twice`);
+      assert.ok(!m!.includes(KEY), m!);
+    }
+    assert.equal(why({ [name]: `not a url ${KEY}` }), `${name}: not an http(s) URL, so no operator apart from the page's public Solana seat`);
   }
   assert.equal(why({}), null);
   assert.equal(why({ SOLANA_RPC_URL: `https://mainnet.helius-rpc.com/?api-key=${KEY}`, SOLANA_RPC_URL_QUICKNODE: `https://x.solana-mainnet.quiknode.pro/${KEY}/`, SOLANA_RPC_URL_DRPC_1: `https://lb.drpc.live/solana/${KEY}` }), null);
@@ -373,7 +380,7 @@ test("node src/env-check.ts exits 2 on a keyed Solana URL of the page's direct s
   for (const name of ["SOLANA_RPC_URL", "SOLANA_RPC_URL_DRPC_2"]) {
     const r = spawnSync(process.execPath, [path.join(import.meta.dirname, "env-check.ts")], { encoding: "utf8", env: { PATH: process.env.PATH ?? "", [name]: "https://solana-rpc.publicnode.com/FAKEKEY123" } });
     assert.equal(r.status, 2, r.stdout + r.stderr);
-    assert.match(r.stderr, new RegExp(`^helper env: ${name}: its operator publicnode\\.com is the signing page's direct Solana seat`, "m"));
+    assert.match(r.stderr, new RegExp(`^helper env: ${name}: its operator publicnode\\.com runs a member of the signing page's public Solana seat`, "m"));
     assert.ok(!(r.stdout + r.stderr).includes("FAKEKEY123"), "the key was printed");
   }
 });

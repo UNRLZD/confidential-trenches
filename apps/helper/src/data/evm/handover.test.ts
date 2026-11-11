@@ -76,7 +76,10 @@ test("a handed-over info state that fails any check restores nothing: a read tim
   for (const [why, st] of bad) {
     const next = tokenPart(clock, true);
     assert.equal(next.part.restore(st), false, why);
-    assert.equal((await next.part.holders(COIN)).status, 429, `${why}: nothing restored, the cold read's 429`);
+    // nothing restored: the cold read refused, holders with no count from no source, never a 429 (card
+    // evm-chart-opens-without-a-vendor-call)
+    const h = await next.part.holders(COIN);
+    assert.deepEqual([h.status, JSON.parse(h.body).total, JSON.parse(h.body).src], [200, null, "none"], `${why}: nothing restored`);
   }
 });
 
@@ -125,6 +128,8 @@ test("a chart the old helper read from GeckoTerminal is served by the next one o
   assert.equal(late.s.restore(handed), true);
   const l = await late.s.candles(late.NOPOOL, "1m", null, 60);
   late.s.stop();
+  // the newest bars past their bound are not served, and nothing of ours: the 429, never an empty 200 while the read
+  // is owed (card evm-chart-opens-without-a-vendor-call: live run 42995547054)
   assert.equal(l.status, 429, "the newest bars past their bound are not served");
 });
 

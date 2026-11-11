@@ -24,6 +24,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { EXIT, MAX_READS, MIN_BARS, MIN_TEXTS, collect, crosshairTexts, judge, pickLines, pickToken } from "./app-legend-holds-still.mjs";
+import * as legend from "./app-legend-holds-still.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ANSWERS = JSON.parse(readFileSync(path.join(HERE, "app-legend-holds-still.answers.json"), "utf8"));
@@ -155,10 +156,11 @@ test("the top token's chart holds 3 bars and a 111-bar token is below it: the se
   assert.equal(rec.route, null);
 });
 
-test("a 429 on a token is read again after its Retry-After (as the page does), then skipped with its status; the token below it is picked", async () => {
+test("a 429 on a token is read again at each Retry-After for one budget window (as the page does), then skipped with its status; the token below it is picked", async () => {
   const waits = [];
   const pick = await pickToken({ fetchFn: helper(ANSWERS.pick.throttled), chains: ["solana"], wait: (ms) => (waits.push(ms), Promise.resolve()) });
-  assert.deepEqual(waits, [2000, 2000]);
+  // Retry-After 2 s each time: 37 waits of 2 s and the window's last second (candles.ts THROTTLE_SPAN_S, 75 s)
+  assert.deepEqual(waits, [...Array(37).fill(2000), 1000]);
   assert.equal(pick.read[0].bars, null);
   assert.equal(pick.read[0].why, "bars 429");
   assert.equal(pick.picked.bars, 30);
@@ -206,4 +208,52 @@ test("the recorded live run that picked its token: PASS, the picked token printe
   assert.equal(r.verdict, "PASS", r.lines.join("\n"));
   assert.match(r.lines[0], /^ok {2}picked solana\/\w+, 500 bars at 15m \(24 needed\), read 1 token for it, none skipped \(solana 99 Trending\)$/);
   assert.equal(ANSWERS.picked.route, `/token/${ANSWERS.picked.pick.picked.chain}/${ANSWERS.picked.pick.picked.addr}`);
+});
+
+
+// card app-live-run-judges-the-build: live 11 Nov 06:47Z (/token/solana/uHMWNFjUNxbPy1q43WrdbzygmJwdeh6AiQm1NKdxPAY, 142
+// bars) the newest bars' trade marks sat under the phone's rest tap: each rest read the point before it (0 crosshair
+// texts of 12 points) and the mark's opened card moved (div.tm-card 162,279 -> 162,251)
+test("a phone's tap meant for the chart lands clear of the trade marks' 44 px areas: the nearest clear height in the pane's middle 80 %, null when none is clear", async () => {
+  const clearY = legend.clearY;
+  assert.equal(typeof clearY, "function");
+  const marks = (lo, hi) => async (y) => y >= lo && y <= hi;
+  assert.equal(await clearY(150, 300, marks(1000, 1001)), 150, "nothing under it: where it was asked");
+  assert.equal(await clearY(150, 300, marks(128, 172)), 126, "a mark's 44 px area under it: the nearest clear height");
+  assert.equal(await clearY(40, 300, marks(30, 50)), 56, "never above the pane's top tenth (30): 32 and 48 covered, 24 above it, 56 clear");
+  assert.equal(await clearY(150, 300, marks(0, 300)), null, "every height covered");
+});
+
+test("recorded live answers on one token (PAYDAY, 142 bars): the rest tap on a trade mark's area FAILs on the phone; the tap clear of the marks PASSes", () => {
+  const before = judge(ANSWERS.badMarkUnderTap);
+  assert.equal(before.verdict, "FAIL");
+  assert.ok(bad(before).some((l) => l.startsWith("BAD phone: the crosshair moved the legend through 0 text(s) of its own in 12 point(s) over 142 bar(s)")), before.lines.join("\n"));
+  assert.ok(bad(before).some((l) => l.includes("div.tm-card")), "the opened mark card's move, named");
+  const after = judge(ANSWERS.goodClearTap);
+  assert.equal(after.verdict, "PASS", after.lines.join("\n"));
+  assert.equal(ANSWERS.goodClearTap.route, ANSWERS.badMarkUnderTap.route, "the same token");
+});
+
+// card evm-chart-opens-without-a-vendor-call: the candles read as the token page reads it (candles-read.mjs)
+test("a 429 that clears inside the span: that token read again and picked; an empty 200 is skipped as no bars", async () => {
+  const fx = structuredClone(ANSWERS.pick.throttled);
+  const first = fx.list.body.lists.trending_1h[0].addr;
+  const below = fx.list.body.lists.trending_1h[1].addr;
+  const served = fx.candles[below];
+  let refused = 3;
+  const base = helper(fx);
+  const fetchFn = async (url) => {
+    const t = new URL(String(url)).searchParams.get("token");
+    if (t === first) return refused-- > 0 ? new Response("{}", { status: 429, headers: { "retry-after": "2" } }) : new Response(JSON.stringify(served.body), { status: 200, headers: { "x-helper-source": served.src ?? "chain" } });
+    return base(url);
+  };
+  const waits = [];
+  const pick = await pickToken({ fetchFn, chains: ["solana"], wait: (ms) => (waits.push(ms), Promise.resolve()) });
+  assert.deepEqual(waits, [2000, 2000, 2000]);
+  assert.equal(pick.picked.addr, first, "the token whose 429 cleared is picked");
+  const empty = structuredClone(ANSWERS.pick.throttled);
+  empty.candles[first] = { status: 200, src: "chain", body: { ...served.body, candles: [] } };
+  const p2 = await pickToken({ fetchFn: helper(empty), chains: ["solana"], wait: noWait });
+  assert.notEqual(p2.picked?.addr, first);
+  assert.ok(p2.read[0].bars === null || p2.read[0].bars === 0, JSON.stringify(p2.read[0]));
 });

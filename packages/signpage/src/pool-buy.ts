@@ -167,6 +167,10 @@ export type PoolBuyHost = {
   /** Both RPCs read this very transaction's bytes under that signature: its signature, told once. Never before, so
    *  nothing the app is told names a transaction the chain did not read as this one. */
   sent?(signature: string): void | Promise<void>;
+  /** This very transaction landed: both RPCs read it back as succeeded, the amount out told when it reads the same. Once,
+   *  after sent; never for one that did not land. The reads from here to Final are the host's to pace (card
+   *  sell-right-after-a-buy: a background pass's), every read before it a trade's, the ones that tell Filled among them. */
+  landed?(): void;
   /** The buy's route as the run binds and reads it (messages.ts BuyRoute): W and the venue with its pool once the check
    *  passed and W derived to the proof's recipient, then the amount W received once the transaction read back on both
    *  RPCs as the same. Each once, in that order; a throw here never stops the buy. */
@@ -206,8 +210,12 @@ export const POOL_SEND_TRIES_MAX = 120;
  *  Past it, a busy send is not made again, whatever an RPC that is down or stuck reads. */
 export const POOL_BLOCKHASH_LIFE_MS = 90_000;
 /** The read-back's bound on the wall clock, from the signature: the blockhash's life and a finalization (~32 slots).
- *  Past it, the answer is "sent" (the note RESERVED, settled by the state reads), so one RPC down or stuck never holds
- *  the seed's lock, and sign out, for minutes. */
+ *  Past it no round of reads is begun and the answer is "sent" (the note RESERVED, settled by the state reads). It is
+ *  checked between rounds, not inside one: from the land on the run's reads are a background pass's (card
+ *  sell-right-after-a-buy, pool-testnet.ts buyReads), whose turn waits for its host's room or floor with no deadline of
+ *  its own, so a round begun inside it can end past it, and Final with it (the review of 29a9e506: 40 s with trades
+ *  holding the hosts and no other pass reader, 155 s with one, 205 s with two, each "filled"). A sign out ends every
+ *  such wait at once (throttle.ts stopHostLaneWaits), so it never holds the seed's lock, nor sign out. */
 export const POOL_BUY_SETTLE_MS = 120_000;
 
 /** Read-back reads a buy gets, at most POOL_BUY_POLL_MS apart: POOL_BUY_SETTLE_MS of them, past a blockhash's life
@@ -705,7 +713,7 @@ async function buyRun(h: PoolBuyHost, ask: PoolAsk, at: { fault?: unknown }): Pr
  *  fill: the buy's route, told as the run goes (W and the venue with its pool once the take holds the note, the amount
  *  out once the transaction reads back); none for a pool withdraw, whose release tells no buy route. */
 export async function sendAndSettle(
-  h: Pick<PoolBuyHost, "rpcs" | "take" | "send" | "settle" | "now" | "reads" | "named" | "sent">, r: Ready, release: SolanaPoolRelease, pool: string, signed: Uint8Array, lastHeight: number, wait: (ms: number) => Promise<void>,
+  h: Pick<PoolBuyHost, "rpcs" | "take" | "send" | "settle" | "now" | "reads" | "named" | "sent" | "landed">, r: Ready, release: SolanaPoolRelease, pool: string, signed: Uint8Array, lastHeight: number, wait: (ms: number) => Promise<void>,
   fill?: { token: string; minOut: bigint; tell: (x: BuyRoute) => void; bound: readonly BuyRoute[]; decimals?: (d: number) => void; early?: Promise<ChainNow> },
 ): Promise<PoolBuyAnswer> {
   // the take, awaited before anything leaves: the queue hands out this very attempt, or refuses with the note HELD; a
@@ -875,6 +883,7 @@ export async function sendAndSettle(
     }
   }
   if (!landed) return unlanded(ours ? txs : [], signature);
+  h.landed?.();
   // only now: the note SPENT, its change written (solanaSettleSpent reads the spent mark at finalized), then filled
   // only once both RPCs read the spend as this attempt's. The settle lists every mark of the pool, so it is asked only
   // once each RPC's finalized slot reaches the slot it read this transaction at (card pool-buy-filled-2s: run 3 asked
@@ -926,7 +935,7 @@ type Locks = Pick<LockManager, "request">;
 /** The pool.buy kind: one run per tap under the seed's shared lock (sign out waits for it), answered "sent" with its
  *  signature once that reads back on both RPCs as this very transaction (sendAndSettle's sent), or at the run's end
  *  with the run's own answer; the run's final stage is always posted as progress as well. */
-export function poolBuyKind(host: () => PoolBuyHost & { end?(): void }, locks: Locks | null = globalThis.navigator?.locks ?? null) {
+export function poolBuyKind(host: () => PoolBuyHost & { release?(): void; end?(): void }, locks: Locks | null = globalThis.navigator?.locks ?? null) {
   return (ask: PoolAsk, ctx: KindContext | null): HostRefusal | Running<"pool.buy"> => {
     if (ask.kind !== "pool.buy" || ask.chain !== "solana" || !locks) return { error: "not_allowed" };
     // the tap's one bound, from its arrival (before its locks)
@@ -951,6 +960,9 @@ export function poolBuyKind(host: () => PoolBuyHost & { end?(): void }, locks: L
           const a = await runPoolBuy({ ...h, sent: (signature) => {
             if (!answer) (answer = { result: { stage: "sent", txs: [{ chain: "solana", hash: signature }] } }), (early = true);
             give();
+            // its transaction read back: its hosts go back now (the read-backs to Final are a trade's reads, first on
+            // their host all the same), so the page's background reads and the sell box's preview go on beside them
+            h.release?.();
           }, route: (x) => ctx?.route?.(x) }, ask, waits);
           if (!answer) answer = "error" in a ? { error: a.error } : { result: a };
           // the run's stage goes out as progress too, answered early or not: an answer that comes only at the run's end

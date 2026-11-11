@@ -9,7 +9,7 @@ import { solanaJsonRpc, solanaPacedRpc } from "@blindfill/kit";
 import { SOLANA_KEYLESS_RPC_LIMIT } from "../../kit/src/trade/solana/send.ts";
 import { onTestClock } from "../../kit/test/test-clock.ts";
 import * as d from "../src/derive/index.ts";
-import { HOST_WINDOW_MS, HostLane, holdHosts, hostLane, PASS_BUDGET, PASS_BUDGET_TRADING, PASS_FLOOR_MS, resetHostLanes, stopHostLaneWaits, THROTTLE_BOUNDS, THROTTLE_PAUSE_FIRST_MS, THROTTLE_PAUSE_MAX_MS, THROTTLE_RETRY_AFTER_MAX_MS, ThrottleGate, throttleWaitMs, TRADE_HOLD_MAX_MS, TRADE_TURN_MAX_MS } from "../src/throttle.ts";
+import { HOST_WINDOW_MS, HostLane, HostPaused, PROBE_HELD_MAX_MS, THROTTLE_QUIET_MS, holdHosts, hostLane, PASS_BUDGET, PASS_BUDGET_TRADING, PASS_FLOOR_MS, resetHostLanes, stopHostLaneWaits, THROTTLE_BOUNDS, THROTTLE_PAUSE_FIRST_MS, THROTTLE_PAUSE_MAX_MS, THROTTLE_RETRY_AFTER_MAX_MS, ThrottleGate, throttleWaitMs, TRADE_HOLD_MAX_MS, TRADE_TURN_MAX_MS } from "../src/throttle.ts";
 import { buyWallets, evmHoldingsReader, HOLDINGS_THROTTLE_MAX_MS, HOLDINGS_THROTTLED_ROUNDS_60S, solanaHelperHoldings, solanaHoldingsAt, solanaHoldingsReader, type HoldingsReader } from "../src/pool/buy-wallets.ts";
 
 const SEED = d.wordsToSeed64(d.entropyToWords(new Uint8Array(16)));
@@ -31,7 +31,7 @@ test("the rule: a pause doubling from the first to the cap; a Retry-After the wa
   assert.equal(THROTTLE_BOUNDS.maxMs, THROTTLE_PAUSE_MAX_MS);
 });
 
-test("the gate: one round's throttles count once, any answer after them sets the pause back, a late Retry-After only moves the time on", () => {
+test("the gate: one round's throttles count once, an answer never sets the pause back while the provider is in its quiet time, a late Retry-After only moves the time on", () => {
   let now = 0;
   const g = new ThrottleGate({ now: () => now });
   assert.equal(g.left(), 0);
@@ -46,19 +46,26 @@ test("the gate: one round's throttles count once, any answer after them sets the
   // a call of the counted round answers late with a longer Retry-After: the time moves, the pause does not grow
   g.throttled(e0, 5_000);
   assert.equal(g.left(), 5_000);
+  // card signpage-throttled-provider-has-a-spare (run 9 of 11 Nov: two 200s put the pause back to 1 s, and the next
+  // round met 429 at once): an answer ends the doubt, the pause is kept for the next throttle inside the quiet time
   now = 6_000;
   const e2 = g.epoch();
+  assert.equal(g.suspect(), true);
   g.answered(e2);
+  assert.equal(g.suspect(), false, "an answer sent after the last throttle ends the doubt");
   g.throttled(g.epoch(), null);
-  assert.equal(g.left(), 1_000, "after an answer, the first pause again");
-  // an answer from before the last counted throttle sets nothing back
-  now = 7_000;
+  assert.equal(g.left(), 4_000, "1 s after the pause's end, inside the quiet time: the last pause doubled, never 1 s again");
+  // an answer from before the last counted throttle ends nothing
+  now = 11_000;
   const e3 = g.epoch();
   g.throttled(e3, null);
   g.answered(e3);
-  now = 9_000;
+  assert.equal(g.suspect(), true, "a stale answer leaves the doubt");
+  assert.equal(g.left(), 8_000);
+  // the provider open THROTTLE_QUIET_MS with no throttle: its last pause forgotten
+  now = 19_000 + THROTTLE_QUIET_MS;
   g.throttled(g.epoch(), null);
-  assert.equal(g.left(), 4_000, "a stale answer leaves the pause growing");
+  assert.equal(g.left(), 1_000, "after the quiet time, the first pause again");
 });
 
 test("HOLDINGS_THROTTLED_ROUNDS_60S is the rule's count: rounds whose start falls in the first 60 s of 429s", () => {
@@ -388,8 +395,8 @@ test("a JSON-RPC throttle code (-32029) on the devnet transport counts as a thro
 });
 
 // F2: the pause goes back to none after a whole round, on both readers
-test("after a throttle, a whole round that goes through sets the pause back: the next throttle waits the first pause again (Solana and EVM)", async () => {
-  const run = async (make: (rpc: (m: string, p: readonly unknown[]) => Promise<unknown>, o: { gate: ThrottleGate; sleep: (ms: number) => Promise<void> }) => HoldingsReader, answer: (m: string) => unknown) => {
+test("after a throttle, a whole round that goes through keeps the pause for a throttle inside the quiet time, and the first pause comes back only after it (Solana and EVM)", async () => {
+  const run = async (make: (rpc: (m: string, p: readonly unknown[]) => Promise<unknown>, o: { gate: ThrottleGate; sleep: (ms: number) => Promise<void> }) => HoldingsReader, answer: (m: string) => unknown, quiet = 0) => {
     let now = 0, hot = 0;
     const sleeps: number[] = [];
     const gate = new ThrottleGate({ now: () => now });
@@ -403,15 +410,18 @@ test("after a throttle, a whole round that goes through sets the pause back: the
     for (let k = 0; k < 3; k++) {
       hot = make === solanaMake ? 3 : 1;
       await reader.read(W);
+      now += quiet;
     }
     return sleeps;
   };
   const solanaMake = (rpc: (m: string, p: readonly unknown[]) => Promise<unknown>, o: { gate: ThrottleGate; sleep: (ms: number) => Promise<void> }) => solanaHoldingsReader(rpc as never, o);
-  const sol = await run(solanaMake, (m) => ({ context: { slot: 1 }, value: m === "getBalance" ? 0 : [] }));
-  assert.deepEqual(sol, [1_000, 1_000, 1_000], "Solana: the first pause each time");
+  const solAnswer = (m: string) => ({ context: { slot: 1 }, value: m === "getBalance" ? 0 : [] });
+  assert.deepEqual(await run(solanaMake, solAnswer), [1_000, 2_000, 4_000], "Solana: a throttle right after the round doubles the last pause");
+  assert.deepEqual(await run(solanaMake, solAnswer, THROTTLE_QUIET_MS), [1_000, 1_000, 1_000], "Solana: the first pause again after the quiet time");
   const evmMake = (rpc: (m: string, p: readonly unknown[]) => Promise<unknown>, o: { gate: ThrottleGate; sleep: (ms: number) => Promise<void> }) => evmHoldingsReader(rpc, [], o);
-  const evm = await run(evmMake, (m) => (m === "eth_getBlockByNumber" ? { hash: `0x${"1".repeat(64)}`, number: "0x1" } : "0x0"));
-  assert.deepEqual(evm, [1_000, 1_000, 1_000], "EVM: the first pause each time");
+  const evmAnswer = (m: string) => (m === "eth_getBlockByNumber" ? { hash: `0x${"1".repeat(64)}`, number: "0x1" } : "0x0");
+  assert.deepEqual(await run(evmMake, evmAnswer), [1_000, 2_000, 4_000], "EVM: the same");
+  assert.deepEqual(await run(evmMake, evmAnswer, THROTTLE_QUIET_MS), [1_000, 1_000, 1_000], "EVM: the same after the quiet time");
 });
 
 // F2: one gate per route, never one for all; a reader with no route's gate holds one per rpc it reads on
@@ -558,14 +568,15 @@ test("HostLane: while a trade holds the host, passes take what its reads leave o
   assert.equal(m.open("pass"), false, "a trade's reads and a pass at PASS_BUDGET_TRADING: the next waits for the floor");
 });
 
-test("HostLane: a trade's turn waits the host's pause, at most TRADE_TURN_MAX_MS however often the pause is renewed", async () => {
+test("HostLane: a trade's turn waits the host's pause, at most TRADE_TURN_MAX_MS however often the pause is renewed, and is then refused unsent", async () => {
   const clock = { t: 0 };
   // another reader's 429 (a Retry-After of an hour) renews the pause each time this one wakes
   const l: HostLane = new HostLane({ now: () => clock.t, sleep: async (ms) => { clock.t += ms; l.gate.throttled(l.gate.epoch(), 3_600_000); } });
   l.gate.throttled(l.gate.epoch(), 3_600_000);
-  await l.turn("trade");
+  await assert.rejects(l.turn("trade"), HostPaused);
   assert.equal(clock.t, TRADE_TURN_MAX_MS, "its turn's deadline, the pause still on");
   assert.ok(l.gate.left() > 0);
+  assert.equal(l.inWindow(), 0, "nothing sent into the pause, nothing counted");
 });
 
 test("HostLane: a hold is counted, given back once, ends at its bound; holdHosts holds each host once, whatever its spelling", async () => {
@@ -622,4 +633,176 @@ test("HostLane: a pass asleep for room learns of a trade's start at once, and go
   assert.equal(went, true, "the trade's start woke it, and the floor let it go");
   assert.deepEqual(slept, [HOST_WINDOW_MS], "it slept no more: woken at the trade's start, not at its room's end");
   give();
+});
+
+// Card signpage-throttled-provider-has-a-spare (run 9 of 11 Nov: every read parked on a pause left within 3 ms of its
+// end, 10 to 15 at a time, and each burst met 429 again). On a planted clock and sleep.
+function plantedLane(): { l: HostLane; clock: { t: number }; advance: (t: number) => Promise<void>; flush: () => Promise<void> } {
+  const clock = { t: 0 };
+  const sleeps: { at: number; r: () => void }[] = [];
+  const l = new HostLane({ now: () => clock.t, sleep: (ms) => new Promise<void>((r) => void sleeps.push({ at: clock.t + ms, r })) });
+  const flush = async (): Promise<void> => {
+    for (let i = 0; i < 20; i++) await new Promise((r) => setImmediate(r));
+  };
+  const advance = async (t: number): Promise<void> => {
+    clock.t = t;
+    for (const s of sleeps.splice(0)) if (s.at <= t) s.r();
+      else sleeps.push(s);
+    await flush();
+  };
+  return { l, clock, advance, flush };
+}
+
+test("HostLane: after a pause one probe goes, a trade's though a pass asked first; the rest wait for it, its 429 starts the next pause doubled, and its answer lets the trades go before any pass", async () => {
+  const { l, advance, flush } = plantedLane();
+  l.throttled(l.gate.epoch(), null);
+  assert.equal(l.gate.left(), 1_000);
+  const order: string[] = [];
+  const turn = (kind: "trade" | "pass", name: string) => l.turn(kind, undefined, true, { reports: true }).then(() => void order.push(name));
+  const all = [turn("pass", "pass"), turn("trade", "t1"), turn("trade", "t2")];
+  await flush();
+  assert.deepEqual(order, [], "nothing leaves inside the pause");
+  await advance(1_000);
+  assert.deepEqual(order, ["t1"], "one read at the pause's end: the probe, a trade's");
+  // the probe's 429: the next pause, doubled from the last (never 1 s again), and still nobody else goes
+  l.throttled(l.gate.epoch(), null);
+  assert.equal(l.gate.left(), 2_000);
+  await flush();
+  assert.deepEqual(order, ["t1"]);
+  // t2's turn ends at its 10 s deadline, so the next probe is the pass's or t2's: at 3 s, t2 (a trade) again
+  await advance(3_000);
+  assert.deepEqual(order, ["t1", "t2"], "the next probe, a trade's");
+  // its answer: the host open, the pass goes after the trades
+  l.answered(l.gate.epoch());
+  await flush();
+  assert.deepEqual(order, ["t1", "t2", "pass"]);
+  await Promise.all(all);
+  assert.equal(l.inWindow(), 3, "each read counted once, as it left");
+});
+
+test("HostLane: with a trade parked, a pass never leaves before it, and a turn that reports nothing never takes the probe", async () => {
+  const { l, advance, flush } = plantedLane();
+  l.throttled(l.gate.epoch(), null);
+  const order: string[] = [];
+  // a turn whose transport reports no outcome (the finder's): it goes once the pause ends, but not as the probe
+  const finder = l.turn("pass", undefined, false).then(() => void order.push("finder"));
+  const trade = l.turn("trade", undefined, true, { reports: true }).then(() => void order.push("trade"));
+  await advance(1_000);
+  assert.ok(order.includes("trade"), "the trade's read probes");
+  // the probe out: a reporting pass waits for it
+  const pass = l.turn("pass", undefined, true, { reports: true }).then(() => void order.push("pass"));
+  await flush();
+  assert.ok(!order.includes("pass"), "a pass waits for the probe");
+  l.answered(l.gate.epoch());
+  await Promise.all([finder, trade, pass]);
+  assert.equal(order.at(-1), "pass");
+  // alone after a pause, a turn that reports nothing goes, but leaves the probe to a read that reports: one goes at once
+  const m = plantedLane();
+  m.l.throttled(m.l.gate.epoch(), null);
+  const alone = m.l.turn("pass", undefined, false);
+  await m.advance(1_000);
+  await alone;
+  let probed = false;
+  const next = m.l.turn("trade", undefined, true, { reports: true }).then(() => (probed = true));
+  await m.flush();
+  assert.equal(probed, true, "the probe was not taken by a turn that reports no outcome");
+  await next;
+});
+
+// The review of 507431c0, P2: a 10 s pause (the doubling's cap, the helper's own Retry-After ceiling) is as long as a
+// trade's turn, so every parked trade read but the probe was refused unsent at the pause's end. The wait for the probe's
+// verdict has its own bound: each read that waited the pause out goes once the probe settles.
+test("HostLane: after a 10 s pause, every trade read that waited it out goes once the probe answers, none refused", async () => {
+  const { l, advance, flush } = plantedLane();
+  l.throttled(l.gate.epoch(), 10_000);
+  assert.equal(l.gate.left(), 10_000);
+  await advance(5);
+  const out: string[] = [];
+  const turn = (n: string) => l.turn("trade", undefined, true, { reports: true }).then(() => void out.push(`${n}:sent`), (e: unknown) => void out.push(`${n}:${e instanceof HostPaused ? "HostPaused" : String(e)}`));
+  const all = [turn("t1"), turn("t2"), turn("t3")];
+  await flush();
+  await advance(10_000);
+  assert.deepEqual(out, ["t1:sent"], "the probe alone at the pause's end");
+  const probe = l.gate.epoch();
+  await advance(10_100);
+  assert.deepEqual(out, ["t1:sent"], "the rest wait for the probe, past the turn's 10 s from their start");
+  l.answered(probe);
+  await Promise.all(all);
+  assert.deepEqual(out, ["t1:sent", "t2:sent", "t3:sent"]);
+  assert.equal(l.inWindow(), 3);
+});
+
+test("HostLane: a known 10 s pause against a 3.5 s bound is refused at once, nothing sent or counted", async () => {
+  const { l, flush } = plantedLane();
+  l.throttled(l.gate.epoch(), 10_000);
+  let err: unknown = null;
+  const p = l.turn("trade", undefined, true, { reports: true, by: 3_500 }).catch((e: unknown) => void (err = e));
+  await flush();
+  assert.ok(err instanceof HostPaused, "refused at once, not at 3.5 s");
+  await p;
+  assert.equal(l.inWindow(), 0);
+});
+
+test("HostLane: a probe that fails any other way settles it (the host still in doubt, the next read probes); a lost probe is given up at PROBE_HELD_MAX_MS", async () => {
+  const { l, advance, flush } = plantedLane();
+  l.throttled(l.gate.epoch(), null);
+  const order: string[] = [];
+  const t = (n: string) => l.turn("trade", undefined, true, { reports: true }).then(() => void order.push(n));
+  const a = t("a");
+  const b = t("b");
+  const c = t("c");
+  await advance(1_000);
+  assert.deepEqual(order, ["a"]);
+  // a's read stalled and was dropped: failed() settles the probe, so b probes at once (no dead lane)
+  l.failed(l.gate.epoch());
+  await flush();
+  assert.deepEqual(order, ["a", "b"], "the next read probes after a failed probe");
+  // b's read is never reported: c waits PROBE_HELD_MAX_MS for it, then probes in its place
+  await advance(1_000 + PROBE_HELD_MAX_MS - 1);
+  assert.deepEqual(order, ["a", "b"]);
+  await advance(1_000 + PROBE_HELD_MAX_MS);
+  assert.deepEqual(order, ["a", "b", "c"], "a lost probe is given up at its try's timeout");
+  await Promise.all([a, b, c]);
+});
+
+// The review of card signpage-throttled-provider-has-a-spare (row b, its case T1): no test held `by` on a trade's held
+// wait, so `Math.min(by, ...)` in HostLane.turn's held bound could go. A probe in flight holds t2; t2's own bound (by,
+// 3 s) ends its wait there, never at the probe's held bound past its known waits'.
+/** A planted lane whose sleeps wake each at its own time, in order, as the clock reaches it. */
+function plantedInOrder(): { l: HostLane; clock: { t: number }; advance: (t: number) => Promise<void>; flush: () => Promise<void> } {
+  const clock = { t: 0 };
+  const sleeps: { at: number; r: () => void }[] = [];
+  const l = new HostLane({ now: () => clock.t, sleep: (ms) => new Promise<void>((r) => void sleeps.push({ at: clock.t + ms, r })) });
+  const flush = async (): Promise<void> => {
+    for (let i = 0; i < 20; i++) await new Promise((r) => setImmediate(r));
+  };
+  const advance = async (t: number): Promise<void> => {
+    for (;;) {
+      const next = sleeps.filter((s) => s.at <= t).sort((a, b) => a.at - b.at)[0];
+      if (!next) break;
+      clock.t = Math.max(clock.t, next.at);
+      sleeps.splice(sleeps.indexOf(next), 1);
+      next.r();
+      await flush();
+    }
+    clock.t = t;
+    await flush();
+  };
+  return { l, clock, advance, flush };
+}
+test("HostLane: a trade's held wait behind a probe ends at the reader's own bound (by), never at the probe's held bound", async () => {
+  const { l, clock, advance, flush } = plantedInOrder();
+  const out: string[] = [];
+  const turn = (n: string, o: { by?: number } = {}) =>
+    l.turn("trade", undefined, true, { reports: true, ...o }).then(() => void out.push(`${n}:sent@${clock.t}`), (e: unknown) => void out.push(`${n}:${e instanceof HostPaused ? `refused@${clock.t}` : String(e)}`));
+  l.throttled(l.gate.epoch(), 1_000);
+  await advance(5);
+  const a = turn("t1");
+  await advance(1_005);
+  const b = turn("t2", { by: 3_000 });
+  await flush();
+  await advance(20_000);
+  await Promise.all([a, b]);
+  assert.deepEqual(out, ["t1:sent@1000", "t2:refused@3000"]);
+  assert.ok(PROBE_HELD_MAX_MS > 3_000 - 1_005, "the probe's held bound is past t2's own");
 });

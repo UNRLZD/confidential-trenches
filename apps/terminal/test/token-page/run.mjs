@@ -87,6 +87,13 @@ const LIVE_MS = 1_000;
 // state's later reads land past the boundary:
 //   TOKEN_PAGE_CLOCK_EDGE_MS=2000 node apps/terminal/test/token-page/run.mjs --only chart-live-503,chart-live
 const EDGE_MS = Number(process.env.TOKEN_PAGE_CLOCK_EDGE_MS ?? 0);
+// The planted slow frame (TOKEN_PAGE_MARK_DELAY_MS=<ms>, card chart-push-mark-test-waits): from the push on, each
+// animation-frame callback in the terminal's frame runs that many ms late, as on a loaded runner. The marks are placed in
+// a frame after the tape takes the trade (TradeMarks.tsx schedule), the last bar by the wake's read, so the mark can land
+// after the bar: browser job 130467972429 (PR #627, 10:42Z) read 0 marks at the instant the bar moved. 200 fails a count
+// read at that instant and passes one that waits under LIVE_MS / 2; 5000 is a mark never drawn in the bound, which fails:
+//   TOKEN_PAGE_MARK_DELAY_MS=200 node apps/terminal/test/token-page/run.mjs --only chart-live
+const MARK_DELAY_MS = Number(process.env.TOKEN_PAGE_MARK_DELAY_MS ?? 0);
 const BOUNDARY_MS = 900_000;
 let skewMs = 0;
 const chartNow = () => Date.now() + skewMs;
@@ -228,6 +235,11 @@ const check = (ok, what) => {
 // `page` is the top window (SIGN_HOST's shell, for the shot); `f` is the terminal's frame inside it, where every read is.
 async function openAt(browser, route, w, s, calls) {
   const ctx = await browser.newContext({ viewport: w.viewport, deviceScaleFactor: w.deviceScaleFactor, isMobile: w.isMobile, hasTouch: w.hasTouch, colorScheme: "dark", reducedMotion: "reduce" });
+  if (MARK_DELAY_MS > 0)
+    await ctx.addInitScript((ms) => {
+      const raf = window.requestAnimationFrame.bind(window);
+      window.requestAnimationFrame = (cb) => (window.__ctMarkDelay === true ? setTimeout(() => cb(performance.now()), ms) : raf(cb));
+    }, MARK_DELAY_MS);
   await ctx.route("**/*", (r) => {
     const u = new URL(r.request().url());
     if (u.origin === HELPER) {
@@ -454,6 +466,7 @@ try {
               const marks0 = await marks();
               const [ts] = after.last.split(":");
               calls.plant = (Number(calls.plant) * 1.05).toFixed(12).replace(/0+$/, "").replace(/\.$/, "");
+              if (MARK_DELAY_MS > 0) await f.evaluate(() => (window.__ctMarkDelay = true));
               const t1 = Date.now();
               ws.send(JSON.stringify({ trades: [{ t_ms: Number(ts) + 1_000, side: "b", usd: "50.00", amt: (50 / Number(calls.plant)).toFixed(6), trader: "TraderPushxxxxxxxxxxxxxxxxxxxxxxxxxxxx", tx: "txPush" }], src: "chain", as_of_ms: Date.now() }));
               let pushed = after;
@@ -463,9 +476,16 @@ try {
               }
               const ms2 = Date.now() - t1;
               check(pushed.last.endsWith(`:${Number(calls.plant)}`) && ms2 < LIVE_MS / 2, `${tag}: the pushed trade (close ${calls.plant}) reached the last bar in ${ms2} ms (${pushed.last}), want under ${LIVE_MS / 2} ms (the wake, not the next tick)`);
-              const marks1 = await marks();
-              check(marks1 === marks0 + 1, `${tag}: the pushed trade's mark: ${marks0} -> ${marks1} marks, want one more`);
-              console.log(`${tag}: pushed trade drawn on the last bar in ${ms2} ms; marks ${marks0} -> ${marks1}`);
+              // its mark is placed in a frame of its own (TradeMarks.tsx), which may come after the bar: read until it is
+              // drawn, under the bar's own bound from the send, and fail only past it
+              let marks1 = await marks();
+              while (Date.now() - t1 < LIVE_MS / 2 && marks1 <= marks0) {
+                await f.waitForTimeout(20);
+                marks1 = await marks();
+              }
+              const ms3 = Date.now() - t1;
+              check(marks1 === marks0 + 1 && ms3 < LIVE_MS / 2, `${tag}: the pushed trade's mark: ${marks0} -> ${marks1} marks in ${ms3} ms, want one more under ${LIVE_MS / 2} ms`);
+              console.log(`${tag}: pushed trade drawn on the last bar in ${ms2} ms; marks ${marks0} -> ${marks1} in ${ms3} ms`);
             }
           } else {
             await f.waitForTimeout(4 * LIVE_MS);

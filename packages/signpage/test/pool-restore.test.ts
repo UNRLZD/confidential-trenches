@@ -1151,7 +1151,9 @@ test("E1: a restore is done once the walk's notes are written, before any deposi
   const id = a.ask();
   // done is posted while step 5's first id read is still unanswered
   await until("done while no id read answered", () => a.posted.some((m) => m.id === id && m.stage === "done"), 5_000);
-  assert.ok(g.asked() > 0, "step 5 had started");
+  // step 5 starts after the walk's end, on its own turn: on a loaded machine done can be seen first (every id read is
+  // held at the gate either way, so none has answered)
+  await until("step 5 started", () => g.asked() > 0, 5_000);
   assert.equal(n.found.size, 0, "no scope's ids read yet");
   assert.equal((await opOf(w.store, id))?.stage, "done");
   // the user's notes are back, shown and spendable
@@ -1238,6 +1240,9 @@ test("E3: step 5 is owed by a marker (scopes only) from the walk's end; a reload
   const factory = new IDBFactory();
   const name = `restore-owed-${db++}`;
   const store = await openWalletStore({ name, indexedDB: factory });
+  // closed at the file's end like every world's store: a failure before the sign out below would leave its
+  // BroadcastChannel open, and the test process would never exit
+  closers.push(() => store.close());
   const w = await world({ store: async () => store, pools: () => SOL_ONLY, ids: g.ids, ux: () => uxOf(new Map()).reads });
   assert.equal(await w.r.auto(), "done");
   // written at the walk's end, its scopes alone, under owed/ (which the frame's reader never reads or lists)
@@ -1709,6 +1714,21 @@ test("delta P3-D: a tab whose step 5 ends never removes the marker another tab's
   g.open();
   await w.r.idle();
   assert.deepEqual(await markerOf(w.store), mine, "tab 2's marker stands: the next load reads for it");
+});
+
+// card signpage-evm-pool-sell: the mainnet build writes no EVM buy record from a restore (the sale is the testnet
+// build's only; test/pool-restore-evm-holdings.test.ts runs the testnet build's restore of them)
+test("restore: the mainnet build reads no EVM buy's transaction and writes no buy record", async () => {
+  const { EVM_POSITION_COSTS_KEY } = await import("../src/pool-buy-evm.ts");
+  const asked: string[] = [];
+  const rpc = async (m: string) => (asked.push(m), assert.fail(`no ${m} read`));
+  const pools: readonly RestorePool[] = [{ chain: "evm", pin: { network: "base", pool: "0x1", feeRecipient: "0x2", fromBlock: 1n }, scope: EVM_SCOPE, rpcs: () => [rpc, rpc] }];
+  const spends = [{ l: LABEL_E, j: 0, note: "n", w: "0x00000000000000000000000000000000000000aa", withdrawn: 1n, block: 0x100n, token: "0x1111111111111111111111111111111111111111", blockHash: "0x" + "cd".repeat(32), logIndex: 3n }];
+  const w = await world({ pools: () => pools, evm: (async () => ({ notes: notesOf(EVM_SCOPE, LABEL_E, 2000n), spends, elsewhere: [], wallets: [], block: 1n })) as never });
+  assert.equal(await w.r.auto(), "done");
+  await w.r.idle();
+  assert.equal(await w.store.get("meta", EVM_POSITION_COSTS_KEY), undefined);
+  assert.deepEqual(asked, []);
 });
 
 // card restore-first-sign-in-under-two-minutes (release 114's live run 42935167402): a sign out ends the run at once at

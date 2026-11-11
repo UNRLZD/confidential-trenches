@@ -28,8 +28,12 @@
 // reads; and at least one burn round read the supply moved, which is the read main's kit before this card refused
 // (it compared the mint byte for byte). A run in which no burn landed between two reads proves nothing either way: it
 // says so and exits 2, never PASS.
+// Its last helper call is the burn token's dry buy: it then prints `live-check solana-mint-supply-moves: budget released`,
+// so the live run's serial group (scripts/ci/live-serial.mjs RELEASES) starts its next check while this one reads public
+// RPCs for a burn, and --burn-until (epoch ms) ends those reads by then, inside BURN_BUDGET_MS (card
+// live-run-red-means-the-build). The verdict rule is the same: no burn read in the window is INCONCLUSIVE, never PASS.
 // After: helper
-//   node scripts/live-checks/solana-mint-supply-moves.mjs [--base <helper origin>] [--token <mint>] [--burn <mint>] [--rounds <n>] [--record <file>]
+//   node scripts/live-checks/solana-mint-supply-moves.mjs [--base <helper origin>] [--token <mint>] [--burn <mint>] [--rounds <n>] [--burn-until <epoch ms>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, no burn seen or error exit 2. --record writes every answer the run read, so the test
 //   can replay it.
 import "../net-window.mjs";
@@ -157,7 +161,7 @@ async function get(base, path) {
   return { status: res.status, body: await res.text() };
 }
 
-export async function read({ base = BASE, token, burn, rounds = ROUNDS } = {}) {
+export async function read({ base = BASE, token, burn, rounds = ROUNDS, burnUntil = Infinity, released = () => {} } = {}) {
   base = base.replace(/\/$/, "");
   const live = RPCS.map((u) => solanaJsonRpc(u));
   const mintPair = async (m) => {
@@ -220,12 +224,14 @@ export async function read({ base = BASE, token, burn, rounds = ROUNDS } = {}) {
     if (i + 1 < rounds) await sleep(GAP_MS);
   }
   const burnBuild = await buildFor(burn);
+  // the last helper call: the burn reads below are public RPCs' alone
+  released();
   // each round: provider A's read of the last tick beside provider B's of this one, BURN_GAP_MS later, so a burn
   // anywhere in the run lands between some round's two reads
   const burnRounds = [];
   const t0 = Date.now();
   let last = null;
-  while (Date.now() - t0 < BURN_BUDGET_MS) {
+  while (Date.now() - t0 < BURN_BUDGET_MS && Date.now() < burnUntil) {
     const m = await mintPair(burn).catch(() => null);
     if (m && last) burnRounds.push({ slots: [last.slots[0], m.slots[1]], mint: [last.mint[0], m.mint[1]] });
     last = m ?? last;
@@ -239,7 +245,9 @@ if (import.meta.main) {
   const a = process.argv.slice(2);
   const opt = (k, d) => (a.includes(k) ? a[a.indexOf(k) + 1] : d);
   try {
-    const answer = await read({ base: opt("--base", BASE), token: opt("--token"), burn: opt("--burn"), rounds: Number(opt("--rounds", ROUNDS)) });
+    const until = opt("--burn-until");
+    if (until !== undefined && !/^\d{13}$/.test(until)) throw new Error(`--burn-until ${until}: not an epoch time in ms`);
+    const answer = await read({ base: opt("--base", BASE), token: opt("--token"), burn: opt("--burn"), rounds: Number(opt("--rounds", ROUNDS)), burnUntil: until === undefined ? Infinity : Number(until), released: () => console.log(`live-check ${KEY}: budget released`) });
     // `mint`, not `token`, in the record: gitleaks' generic-api-key rule reads a long value after "token" as a key
     if (opt("--record")) writeFileSync(opt("--record"), `${JSON.stringify(answer, null, 1)}\n`);
     const { ok, inconclusive, lines } = await judge(answer);

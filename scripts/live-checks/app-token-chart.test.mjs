@@ -88,3 +88,19 @@ test("planted: CoinGecko's label missing over GeckoTerminal's bars, or shown ove
   });
   assert.ok(bad(own.lines).some((l) => /^BAD phone .*CoinGecko's label shown for X-Helper-Source chain/.test(l)), own.lines.join("\n"));
 });
+
+// card evm-chart-opens-without-a-vendor-call: the candle read as the token page reads it (candles-read.mjs)
+test("planted: a candle read after a 429 that cleared inside the span passes; a 429 still standing after it, or an empty 200, fails", () => {
+  const plant = (fn) => {
+    const rec = structuredClone(ANSWERS.good);
+    fn(rec.candles);
+    return judge(rec);
+  };
+  assert.equal(plant((c) => (c.waits = [30_000])).ok, true);
+  const stood = plant((c) => Object.assign(c, { status: 429, body: { error: { code: "rate_limited" } }, waits: [60_000, 15_000] }));
+  assert.equal(stood.ok, false);
+  assert.ok(stood.lines.some((l) => l.includes("status 429 after 75 s of reads at each Retry-After (60, 15 s)")), stood.lines.join("\n"));
+  const empty = plant((c) => (c.body = { ...c.body, candles: [] }));
+  assert.equal(empty.ok, false);
+  assert.ok(empty.lines.some((l) => /candles for the mint: .*no bars/.test(l)), empty.lines.join("\n"));
+});

@@ -2,6 +2,7 @@ import { heldKey, readHeldHistory, readHeldMarket } from "@blindfill/kit";
 import type { Chain, HeldBar, HeldMarket, PoolChain, SignpageClientSnapshot, SignpageState } from "@blindfill/kit";
 import { createContext, useContext, useEffect, useState } from "react";
 import { useSignpage } from "../../shell/signpage-frame.tsx";
+import { useFilled } from "./fills.ts";
 import { heldData, heldRefs } from "./held.ts";
 import { balanceOf, heldOf, NO_DATA, portfolio } from "./model.ts";
 import type { PortfolioData, Row } from "./model.ts";
@@ -77,8 +78,11 @@ function useHeldReads(state: SignpageState | null): { markets: HeldMarket[]; his
 export function usePortfolioSource(act: (a: PortfolioAction) => void): PortfolioSource {
   const fixture = useContext(Fixture);
   const { snapshot } = useSignpage();
-  const { markets, history } = useHeldReads(fixture ? null : snapshot.state);
-  return fixture ?? { snapshot, data: heldData(snapshot, markets, history, Date.now()), now: Date.now, tzMin: -new Date().getTimezoneOffset(), act };
+  // the trades' fills no holdings read shows yet (fills.ts): the same holding the trade box draws
+  const filled = useFilled(fixture?.snapshot ?? snapshot, fixture?.now ?? Date.now);
+  const { markets, history } = useHeldReads(fixture ? null : filled.state);
+  if (fixture) return filled === fixture.snapshot ? fixture : { ...fixture, snapshot: filled };
+  return { snapshot: filled, data: heldData(filled, markets, history, Date.now()), now: Date.now, tzMin: -new Date().getTimezoneOffset(), act };
 }
 
 /** The one balance for `snapshot` (balanceOf: Portfolio's Cash), from the same data Portfolio reads. */

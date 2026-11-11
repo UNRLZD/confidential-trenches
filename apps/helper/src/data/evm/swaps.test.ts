@@ -447,7 +447,8 @@ test("GeckoTerminal's bars before ours: the newest range asked once; a 429 later
   assert.deepEqual(JSON.parse(kept.body).candles, first.candles);
   assert.equal(kept.src, "chain,geckoterminal");
   const none = await s.candles(ICNT, "5m", null, 500); // paused by the 429, nothing kept for 5m
-  // no bar of ours either: the 429 with its wait, never 200 with no bars (card market-reads-hold-under-load)
+  // no bar of ours either: the 429 with its wait, never 200 with no bars (card market-reads-hold-under-load; card
+  // evm-chart-opens-without-a-vendor-call: live run 42995547054)
   assert.equal(none.status, 429, none.body);
   s.stop();
 });

@@ -6,7 +6,8 @@
 // names: each FAIL. Planted in the bundle's own excerpt (the .excerpt.txt, eight pieces cut from the good build's
 // public/app.js: the rule and the gate, the wait before a round, the round in the gate's turn, a call's throttle told
 // to the gate, the Solana reader's round, the helper route's gate, the read's bound, the list's one bound): each rule
-// broken in place FAILs, by its name.
+// broken in place FAILs, by its name. The rule and the gate re-cut from card signpage-throttled-provider-has-a-spare's
+// build (its doubling kept until the quiet time, an answer clearing only the doubt), their names kept.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
@@ -69,8 +70,14 @@ test("planted in the bundle's excerpt: each rule broken in place FAILs", () => {
     "a Retry-After of any size": [at(/Math\.min\([\w$]+,[\w$]+\.afterMaxMs\)/), (s) => s.replace(/Math\.min\(([\w$]+),[\w$]+\.afterMaxMs\)/, "$1"), "rule"],
     "a non-finite Retry-After the wait": [at(/typeof [\w$]+==`number`&&Number\.isFinite\([\w$]+\)&&/), (s) => s.replace(/Number\.isFinite\([\w$]+\)&&/, ""), "rule"],
     "a first pause of 0": [at(/firstMs:1e3/), () => "firstMs:0", "rule"],
-    "every throttle of a round counted": [at(/if\([\w$]+===this\.#[\w$]+\)\{this\.#[\w$]+\+\+/), (s) => s.replace(/===this\.#[\w$]+\)/, "!==null)"), "gate"],
-    "one call's answer sets the pause back": [at(/answered\([\w$]+\)\{[\w$]+===this\.#[\w$]+&&/), (s) => s.replace(/\{[\w$]+===this\.#[\w$]+&&/, "{!0&&"), "gate"],
+    "every throttle of a round counted": [at(/,[\w$]+===this\.#[\w$]+\)\{this\.#[\w$]+\+\+/), (s) => s.replace(/===this\.#[\w$]+\)/, "!==null)"), "gate"],
+    "an answer of any epoch clears the doubt": [at(/answered\([\w$]+\)\{[\w$]+===this\.#[\w$]+&&/), (s) => s.replace(/\{[\w$]+===this\.#[\w$]+&&/, "{!0&&"), "gate"],
+    // card signpage-throttled-provider-has-a-spare (run 9): one or two answers never set the doubling back; it ends only
+    // once the provider has been open its quiet time
+    "one call's answer sets the pause back": [at(/answered\([\w$]+\)\{[\w$]+===this\.#[\w$]+&&\(this\.#[\w$]+=!1\)\}/), (s) => s.replace(/=!1\)\}$/, "=0)}"), "gate"],
+    "no quiet time: every throttle a first pause again": [at(/<\(this\.#[\w$]+\.quietMs\?\?1e4\)/), () => "<0", "gate"],
+    "the doubling never forgotten": [at(/\?this\.#[\w$]+:0;this\.#/), (s) => s.replace(/:0;/, ":1e4;"), "gate"],
+    "a throttle that leaves the gate out of doubt": [at(/if\(this\.#[\w$]+=!0,/), () => "if(", "gate"],
     "the gate on the wall clock": [at(/\(\(\)=>performance\.now\(\)\)/), () => "Date.now", "gate"],
     "left() past the longest wait": [at(/left\(\)\{return Math\.min\(/), () => "left(){return (", "gate"],
     "a stopped waiter keeps the turn": [at(/catch\(([\w$]+)\)\{throw [\w$]+\(\),\1\}/), (s) => s.replace(/throw [\w$]+\(\),/, "throw "), "gate"],

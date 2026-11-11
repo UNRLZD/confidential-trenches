@@ -50,9 +50,24 @@ const UNITS = new RegExp(`(${N})=(${N})\\.shareBps===void 0\\?\\2\\.amount:\\2\\
 const LEGS = new RegExp(`\\{\\.\\.\\.${N},amount:${N}\\.units,shareBps:void 0\\}`);
 const RULE = new RegExp(`if\\((${N})\\.kind!==${Q}pool\\.sell${Q}\\|\\|\\1\\.chain!==${Q}solana${Q}\\)return (${N})\\(${Q}kind${Q}\\);if\\(\\1\\.shareBps!==void 0\\)return \\2\\(${Q}amount${Q}\\)`);
 
+// The same two marks once the sell box's preview (card app-sell-shows-what-you-receive) shares them: pool.sell's schema
+// a named validator that pool.sell.dry names too (`"pool.sell":fl` with `fl=e=>dl(e)&&Object.hasOwn(...)...`), and the
+// units one function the sale and the preview both call (pool-sell.ts poolSellUnits: `vH=(e,t)=>t.shareBps===void 0?
+// t.amount:...` and `d=vH(u,t);if(d<=0n||d>u)return`).
+const SCHEMA_NAMED = new RegExp(`"pool\\.sell":(${N})[,}]`);
+const esc = (name) => name.replace(/\$/g, "\\$");
+const schemaDef = (name) => new RegExp(`(?:^|[^\\w$])${esc(name)}=(${N})=>${N}\\(\\1\\)&&Object\\.hasOwn\\(\\1,${Q}amount${Q}\\)!==Object\\.hasOwn\\(\\1,${Q}share_bps${Q}\\)`);
+const UNITS_FN = new RegExp(`(?:^|[^\\w$])(${N})=\\((${N}),(${N})\\)=>\\3\\.shareBps===void 0\\?\\3\\.amount:\\3\\.shareBps===1e4\\?\\2:\\2\\*BigInt\\(\\3\\.shareBps\\)\\/10000n[;,]`, "g");
+const unitsCall = (name) => new RegExp(`(${N})=${esc(name)}\\((${N}),${N}\\);if\\(\\1<=0n\\|\\|\\1>\\2\\)return`);
+const schemaNamed = (js) => {
+  const m = SCHEMA_NAMED.exec(js);
+  return m !== null && schemaDef(m[1]).test(js);
+};
+const unitsNamed = (js) => [...js.matchAll(UNITS_FN)].some((m) => unitsCall(m[1]).test(js));
+
 /** What the check keeps of the reads: the index, the served bundle's sha384, and whether the bundle holds each mark. */
 export function facts(index, js) {
-  return { index, sha384: sha384(js), schema: SCHEMA.test(js), units: UNITS.test(js), legs: LEGS.test(js), rule: RULE.test(js) };
+  return { index, sha384: sha384(js), schema: SCHEMA.test(js) || schemaNamed(js), units: UNITS.test(js) || unitsNamed(js), legs: LEGS.test(js), rule: RULE.test(js) };
 }
 
 /** The verdict on an answer { index, sha384, schema, units, legs, rule }, against the release lists' /app.js files

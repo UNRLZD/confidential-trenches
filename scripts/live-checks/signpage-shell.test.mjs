@@ -287,14 +287,16 @@ test("PINNED_HOSTS is exactly the hosts the page's sources name for the mainnet 
   const want = [
     ...one("packages/signpage/src/trade.ts", /export const TRADE_HELPER = "([^"]+)"/),
     ...one("packages/signpage/src/trade.ts", /export const SOLANA_PROVIDER_A = "([^"]+)"/),
+    // the public seat: provider A and its spare (card signpage-throttled-provider-has-a-spare)
+    ...one("packages/signpage/src/trade.ts", /export const SOLANA_PUBLIC_SEAT: readonly string\[\] = Object\.freeze\(\[SOLANA_PROVIDER_A, "([^"]+)"\]\);/),
     ...one("packages/signpage/src/pool-restore.ts", /export const RESTORE_UX_SOLANA = Object\.freeze\(\["([^"]+)", "([^"]+)"\]/),
     new URL(near[0]).host,
     new URL(near[2]).host,
   ];
   assert.deepEqual([...PINNED_HOSTS].sort(), [...new Set(want)].sort());
-  // the mainnet pair: provider A and the helper's route, both paced, nothing else; each seat with its read's kind (and
-  // the helper's its retry: the page's, or a settle's window), card signpage-passes-yield-to-a-trade
-  assert.match(src("packages/signpage/src/pool-testnet.ts"), /: \[solanaPacedRpc\(pageRpc\(SOLANA_PROVIDER_A, kind\)\), solanaPacedRpc\(pageHelperRpc\(TRADE_HELPER, SOLANA_RPC(?:_WINDOW)?_RETRY, kind\)\)\];/);
+  // the mainnet pair: the public seat (provider A, then its spare) and the helper's route, both paced, nothing else; each
+  // with its read's kind (and the helper's its retry: the page's, or a settle's window)
+  assert.match(src("packages/signpage/src/pool-testnet.ts"), /: \[solanaPacedRpc\(seatRpc\(SOLANA_PUBLIC_SEAT, kind\)\), solanaPacedRpc\(pageHelperRpc\(TRADE_HELPER, SOLANA_RPC(?:_WINDOW)?_RETRY, kind\)\)\];/);
   assert.match(src("packages/signpage/src/pool-restore.ts"), /return \{ rpcs: \(\) => \[relayRpc\(net\.fastnear\[0\]\), relayRpc\(net\.drpc\)\] \};/);
   // and each is in the page's own connect-src as committed
   const csp = /Content-Security-Policy: (.+)/.exec(src("packages/signpage/public/_headers"))[1];

@@ -1254,8 +1254,9 @@ export function companyOf(host: string): string {
   return h.split(".").slice(-2).join(".");
 }
 /** Each company's other domain, folded into the one companyOf names for it: dRPC's keyed endpoints are lb.drpc.live
- *  (drpc.org/docs/gettingstarted/firstrequest), its keyless ones *.drpc.org. */
-const SAME_COMPANY: Readonly<Record<string, string>> = { "drpc.live": "drpc.org" };
+ *  (drpc.org/docs/gettingstarted/firstrequest), its keyless ones *.drpc.org; Grove is Pocket Network Inc. renamed, so its
+ *  *.rpc.grove.city portal is Pocket's, as the kit's EVM operator map counts it (packages/kit/src/trade/evm/rpc-operator.ts). */
+const SAME_COMPANY: Readonly<Record<string, string>> = { "drpc.live": "drpc.org", "grove.city": "pocket.network" };
 /** The company that runs a provider URL (companyOf, its other domains folded in): two answers "agree" only from two of
  *  these (review M1 of 424dce1e: dRPC's key 1 and key 2 are one operator answering twice). */
 export function operatorOf(url: string): string {

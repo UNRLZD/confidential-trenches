@@ -121,12 +121,14 @@ export const SKIPPED = {
 // needs fewer than 9, and a build check leaves no sends in a minute that a page check after it would read (proxy.ts freeAt).
 // Every member is one run with no arguments.
 export const SERIAL_GROUPS = {
+  // solana-mint-supply-moves first: once its two dry builds are made it lets the next check start and reads public RPCs for
+  // a burn beside them, to its deadline (live-serial.mjs RELEASES; card live-run-red-means-the-build)
   "jupiter-budget": [
+    "solana-mint-supply-moves",
     "helper-token-page-cold",
     "market-data-solana-token",
     "helper-page-jup-429",
     "solana-legs-share-wait",
-    "solana-mint-supply-moves",
     "solana-jupiter-build",
     "app-a2-e2e",
   ],
