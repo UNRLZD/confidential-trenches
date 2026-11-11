@@ -379,7 +379,7 @@ test("card helper-chart-fresh: a listed token with no pool of ours, its GeckoTer
   s.stop();
 });
 
-test("card helper-restart-fresh: a listed token with no pool of ours is served GeckoTerminal's newest bars only within GT_SERVE_MS: 16 min on they are read again, and on a spent budget the read answers 429 with its wait, never a 200 with the old bars", async () => {
+test("card helper-restart-fresh: a listed token with no pool of ours is served GeckoTerminal's newest bars only within GT_SERVE_MS: 16 min on they are read again, and on a spent budget the read answers our own empty chart dated now, never a 200 with the old bars and never a 429", async () => {
   const { readFileSync } = await import("node:fs");
   const FX = JSON.parse(readFileSync(new URL("../solana/fixtures/token-page.json", import.meta.url), "utf8"));
   const { geckoBudget, GT_LIMIT_PER_MIN } = await import("../gecko.ts");
@@ -404,9 +404,11 @@ test("card helper-restart-fresh: a listed token with no pool of ours is served G
   clock.t += 16 * 60_000;
   for (let i = 0; i < GT_LIMIT_PER_MIN; i++) assert.equal(budget.take("pages"), true);
   const spent = await s.candles(token, "1m", null, 60);
-  assert.notEqual(spent.status, 200, `never a 200 dated ${Math.round((clock.t - (spent.asOfMs ?? clock.t)) / 60_000)} min back`);
-  assert.equal(spent.status, 429, spent.body);
-  assert.ok((spent.retryAfterS ?? 0) >= 1, "with the wait to the next call");
+  // never the bars read 16 min back: on a spent budget our own reads' empty chart, dated now, never a 429 (card
+  // evm-chart-opens-without-a-vendor-call; the read is queued for the next free call)
+  assert.equal(spent.status, 200, spent.body);
+  assert.deepEqual([spent.src, JSON.parse(spent.body).candles], ["chain", []]);
+  assert.equal(spent.asOfMs, clock.t, `never a 200 dated ${Math.round((clock.t - (spent.asOfMs ?? clock.t)) / 60_000)} min back`);
   s.stop();
 });
 

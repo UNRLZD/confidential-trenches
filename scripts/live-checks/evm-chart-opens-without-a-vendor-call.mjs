@@ -16,8 +16,8 @@
 // The line names each token's source and bar count. Run after a deploy on a helper started fresh (the coordinator's
 // run); on a warm helper the tokens may already be held, which still must pass.
 // After: helper
-// Usage: node scripts/live-checks/evm-chart-opens-without-a-vendor-call.mjs [--base <helper>] [--n <count>]
-//   [--record <file>]
+// Usage:
+//   node scripts/live-checks/evm-chart-opens-without-a-vendor-call.mjs [--base <helper url>] [--n <count>] [--record <file>]
 import { writeFileSync } from "node:fs";
 import "../net-window.mjs";
 import { APP, BASE } from "./index-evm-swaps.mjs";
