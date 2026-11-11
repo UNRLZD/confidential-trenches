@@ -29,13 +29,16 @@
 // must be refused; execCommand copy, which no policy governs, is read and not judged: no view that keeps the frame has a
 // Copy); it takes the focus, and the sheet must take it back;
 // and a key's timeStamp is read against performance.now (the shell's guard compares the two).
-//   node apps/terminal/test/e2e/signing-sheet/run.mjs [--shots <dir>] [--record <file>]   PASS exit 0, FAIL exit 1, error 2
+//   node apps/terminal/test/e2e/signing-sheet/run.mjs [--shots <dir>] [--record <file>] [--cpu <rate>] [--hold-paint <ms>]
+//     PASS exit 0, FAIL exit 1, error 2. --cpu 4 slows the tab's CPU 4x (CDP Emulation.setCPUThrottlingRate); --hold-paint
+//     300 keeps every APP_HOST document from painting until 300 ms after its load (its root display none until then), an
+//     app slow to its first paint: a close's dim must still wait for it (src/shell.ts veil, the kit's painted).
 // Needs the terminal's build (pnpm --filter terminal build). Records hold states and boxes only: never the 12 words.
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { addAuthenticator, HOSTS, REAL, startHarness } from "../../harness/harness.mjs";
+import { addAuthenticator, cdpFor, HOSTS, REAL, startHarness } from "../../harness/harness.mjs";
 
 export const WIDTHS = [
   { name: "390", viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true },
@@ -172,10 +175,18 @@ async function probes(page) {
   return { ...top, ...inFrame, focusAfter: after.focusAfter, focusAfterMs: 100, blurBefore: after.blurAt !== null && focusAt !== null ? after.blurAt <= focusAt : null, clockSkewMs };
 }
 
-async function oneWidth(h, w, shotDir) {
+async function oneWidth(h, w, shotDir, { cpu = 1, holdPaint = 0 } = {}) {
   const out = { width: w.name, views: {} };
   const { context } = await h.newContext({ viewport: w.viewport, deviceScaleFactor: w.deviceScaleFactor, isMobile: w.isMobile, hasTouch: w.hasTouch, reducedMotion: "reduce" });
+  // --hold-paint: each APP_HOST document paints nothing until `ms` after its load
+  if (holdPaint > 0)
+    await context.addInitScript(({ host, ms }) => {
+      if (location.hostname !== host) return;
+      document.documentElement.style.setProperty("display", "none", "important");
+      addEventListener("load", () => setTimeout(() => document.documentElement.style.removeProperty("display"), ms), { once: true });
+    }, { host: REAL.app, ms: holdPaint });
   const page = await context.newPage();
+  if (cpu > 1) await (await cdpFor(page)).send("Emulation.setCPUThrottlingRate", { rate: cpu });
   const auth = await addAuthenticator(page, { hasPrf: false });
   const app = page.frameLocator("iframe#app");
   const vis = (sel) => app.locator(`${sel} >> visible=true`).first();
@@ -377,13 +388,13 @@ async function oneWidth(h, w, shotDir) {
   return out;
 }
 
-export async function run({ shots }) {
+export async function run({ shots, cpu = 1, holdPaint = 0 }) {
   rmSync(shots, { recursive: true, force: true });
   mkdirSync(shots, { recursive: true });
   const h = await startHarness({ realNames: true, edit: (sites) => (sites[HOSTS.sign].spa = true) });
   const rec = { browser: h.browser.version(), widths: [] };
   try {
-    for (const w of WIDTHS) rec.widths.push(await oneWidth(h, w, shots));
+    for (const w of WIDTHS) rec.widths.push(await oneWidth(h, w, shots, { cpu, holdPaint }));
   } finally {
     await h.close();
   }
@@ -399,7 +410,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
   const shots = path.resolve(opt("--shots", temp));
   let rec;
   try {
-    rec = await run({ shots });
+    rec = await run({ shots, cpu: Number(opt("--cpu", "1")), holdPaint: Number(opt("--hold-paint", "0")) });
   } catch (e) {
     console.error(`ERROR signing-sheet: ${e.stack ?? e}`);
     process.exit(2);
