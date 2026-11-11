@@ -40,14 +40,15 @@ const esc = (s) => s.replace(/\$/g, "\\$");
 const CLOCK = new RegExp(String.raw`async function (${N})\((${N}),(${N})\)\{let (${N})=performance\.now\(\),(${N})=Date\.now\(\);return\{ms:await \2\.now\(\3\),at:\4,wall:\5\}\}`);
 /** The take's time: its name (group 1). */
 const NOW = new RegExp(String.raw`let (${N})=async (${N})=>\{let (${N})=await \2\?\.catch\(\(\)=>void 0\);if\(\3!==void 0\)\{let (${N})=performance\.now\(\)-\3\.at,(${N})=Date\.now\(\)-\3\.wall;if\(\4>=0&&\4<=5e3&&\5<=5e3\)return \3\.ms\+BigInt\(Math\.ceil\(Math\.max\(\4,\5\)\)\)\}return ${N}\.now\(\)\}`);
-/** The queue's take, its head to its time: the time's function (group 4) called with the third argument. */
-const TAKE = new RegExp(String.raw`take\((${N}),(${N}),(${N})\)\{return ${N}\(\),${N}\(\1,async\(\)=>\{[^{}]*?\{[^{}]*\}[^{}]*?\{[^{}]*\}[^{}]*?let ${N}=await (${N})\(\3\),`);
+/** The queue's take, its head to its time: the time's function (group 4) called with the third argument. Its fourth and
+ *  fifth arguments (a Solana last height, an EVM nullifier: card pool-buy-record-never-stays-sent) are not read here. */
+const TAKE = new RegExp(String.raw`take\((${N}),(${N}),(${N})(?:,${N}){0,2}\)\{return ${N}\(\),${N}\(\1,async\(\)=>\{[^{}]*?\{[^{}]*\}[^{}]*?\{[^{}]*\}[^{}]*?let ${N}=await (${N})\(\3\),`);
 /** The buy's start of the read (group 1), right after its not_funded check. */
 const START = new RegExp(String.raw`return ${N}\(\x60not_funded\x60\);let (${N})=(${N})\.chainNow\?\.\(\);\1\?\.catch\(\(\)=>\{\}\);`);
 /** The send's take: the fill's early (group 1). */
-const SEND = new RegExp(String.raw`await ${N}\.take\(${N}\.noteId,${N}\.attempt,(${N})\?\.early\)`);
+const SEND = new RegExp(String.raw`await ${N}\.take\(${N}\.noteId,${N}\.attempt,(${N})\?\.early(?:,BigInt\(${N}\))?\)`);
 /** The page's buy host: the take's third argument passed on, and its read (group 4) on the page's pool or its RPCs. */
-const HOST = new RegExp(String.raw`take:async\((${N}),(${N}),(${N})\)=>\(await ${N}\(\)\)\.take\(\1,\2,\3\),chainNow:\(\)=>(${N})\((${N})\.pool\?\?\{now:(${N})=>${N}\((${N})\(\),\6\)\}\)`);
+const HOST = new RegExp(String.raw`take:async\((${N}),(${N}),(${N})(?:,${N})?\)=>(?:\(await ${N}\(\)\)|${N}=await\(await ${N}\(\)\))\.take\(\1,\2,\3(?:,${N})?\),chainNow:\(\)=>(${N})\((${N})\.pool\?\?\{now:(${N})=>${N}\((${N})\(\),\6\)\}\)`);
 
 /** The stretches of the bundle the rule is read in, each its match or null. */
 export function facts(index, js) {

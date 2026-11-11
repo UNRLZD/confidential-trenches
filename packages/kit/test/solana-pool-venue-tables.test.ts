@@ -61,7 +61,7 @@ test("the table venue reader gives the fee accounts the buy's own venue reader g
     const { venue } = await setup(FX[kind]);
     const t = await tableVenue(kind);
     if (t.kind === "pump-curve" && venue.kind === "pump-curve") assert.deepEqual(t, { kind, feeRecipient: venue.feeRecipient, buybackFeeRecipients: venue.buybackFeeRecipients });
-    else if (t.kind === "pumpswap" && venue.kind === "pumpswap") assert.deepEqual(t, { kind, protocolFeeRecipient: venue.protocolFeeRecipient, buybackFeeRecipients: venue.buybackFeeRecipients });
+    else if (t.kind === "pumpswap" && venue.kind === "pumpswap") assert.deepEqual(t, { kind, protocolFeeRecipient: venue.protocolFeeRecipient, buybackFeeRecipients: venue.buybackFeeRecipients, reservedFeeRecipient: RESERVED });
     else assert.fail(`${kind}: read as ${t.kind}`);
   }
 });
@@ -90,16 +90,22 @@ test("the table venue reader refuses: providers that disagree, an unset buyback 
   assert.throws(() => solanaPoolTableVenueOf("toString" as "pumpswap", { owner: "", data: new Uint8Array(0) } as never), /no such venue/);
 });
 
+/** The reserved fee recipient a Mayhem coin's buy pays (pump Global 483, PumpSwap GlobalConfig 385; card
+ *  sol-pool-buys-mayhem-coins). */
+const RESERVED = "GesfTA3X2arioaHp8bbKdjG9vJtskViWACZoYvxp4twS";
+const RESERVED_WSOL = "C93K8DX4YsABYJtHX9awzgZW3LWzBqBVezEbbLJH4yet";
 /** Every case the page can build for a venue: Token-2022 or not, cashback or not, tip or none, coin creator set or not
- *  (PumpSwap; the curve's creator is always set). */
-function* cases(venue: SolanaPoolBuyVenue) {
+ *  (PumpSwap; the curve's creator is always set), a Mayhem coin or not (`mayhem`: its fee recipient the reserved one). */
+function* cases(venue: SolanaPoolBuyVenue, mayhems: readonly boolean[] = [false, true]) {
   for (const t22 of [false, true])
     for (const cashback of [false, true])
       for (const tip of [0n, TIP])
-        for (const creator of venue.kind === "pumpswap" ? [true, false] : [true]) {
-          const ven = { ...venue, cashback, ...(t22 ? { tokenProgram: SOLANA_TOKEN_2022_PROGRAM, tokenAccountSize: 182 } : {}), ...(creator ? {} : { coinCreator: SOLANA_SYSTEM_PROGRAM }) } as SolanaPoolBuyVenue;
-          yield { ven, tip, name: `${venue.kind}${t22 ? " token-2022" : ""}${cashback ? " cashback" : ""}${creator ? "" : " no-creator"} ${tip > 0n ? "tip" : "none"}` };
-        }
+        for (const creator of venue.kind === "pumpswap" ? [true, false] : [true])
+          for (const mayhem of mayhems) {
+            const fee = !mayhem ? {} : venue.kind === "pumpswap" ? { protocolFeeRecipient: RESERVED } : { feeRecipient: RESERVED };
+            const ven = { ...venue, cashback, ...fee, ...(t22 ? { tokenProgram: SOLANA_TOKEN_2022_PROGRAM, tokenAccountSize: 182 } : {}), ...(creator ? {} : { coinCreator: SOLANA_SYSTEM_PROGRAM }) } as SolanaPoolBuyVenue;
+            yield { ven, tip, cashback, name: `${venue.kind}${mayhem ? " mayhem" : ""}${t22 ? " token-2022" : ""}${cashback ? " cashback" : ""}${creator ? "" : " no-creator"} ${tip > 0n ? "tip" : "none"}` };
+          }
 }
 /** A venue's generations, each made when the trees held the sizes given (null: the curve's frozen first). */
 const generations = async (kind: "pump-curve" | "pumpswap", made: readonly ({ state: number; label: number } | null)[]) => {
@@ -112,19 +118,21 @@ const generations = async (kind: "pump-curve" | "pumpswap", made: readonly ({ st
 };
 const FIRST = { state: 0, label: 0 };
 
-test("generations: PumpSwap's first fills its table, 136 state pages and 90 label pages; a next one starts a page behind each tree's end", async () => {
+test("generations: PumpSwap's first fills its table, 135 state pages and 89 label pages; a next one starts a page behind each tree's end", async () => {
   const [g1] = await generations("pumpswap", [FIRST]);
-  assert.deepEqual(g1!.range, { state: [0, 135], label: [0, 89] });
+  // 32 venue accounts (GlobalConfig's reserved fee recipient and its wSOL account among them), then 224 pages
+  assert.deepEqual(g1!.range, { state: [0, 134], label: [0, 88] });
   assert.equal(g1!.list.length, 256);
-  // entries covered: state 0 to 139,263, label 0 to 92,159; it warns past 111,411 and 73,727
-  assert.deepEqual(solanaPoolRangeEnd(g1!.range), { state: 139_264, label: 92_160 });
-  assert.deepEqual(solanaPoolRangeWarn(g1!.range), { state: 111_411, label: 73_728 });
+  assert.ok(g1!.list.includes(RESERVED) && g1!.list.includes(RESERVED_WSOL));
+  // entries covered: state 0 to 138,239, label 0 to 91,135; it warns past 110,591 and 72,907
+  assert.deepEqual(solanaPoolRangeEnd(g1!.range), { state: 138_240, label: 91_136 });
+  assert.deepEqual(solanaPoolRangeWarn(g1!.range), { state: 110_592, label: 72_908 });
   // made when the state tree passed generation 1's warning and the label tree lags far behind: each from its own page
-  const [, g2] = await generations("pumpswap", [FIRST, { state: 111_412, label: 5_000 }]);
-  assert.deepEqual(g2!.range, { state: [107, 242], label: [3, 92] });
+  const [, g2] = await generations("pumpswap", [FIRST, { state: 110_593, label: 5_000 }]);
+  assert.deepEqual(g2!.range, { state: [107, 241], label: [3, 91] });
   // its warning is 80 percent into its own range, counted from the range's first page, never from entry 0
-  assert.deepEqual(solanaPoolRangeWarn(g2!.range), { state: 107 * 1024 + 111_411, label: 3 * 1024 + 73_728 });
-  assert.deepEqual(solanaPoolRangeEnd(g2!.range), { state: 243 * 1024, label: 93 * 1024 });
+  assert.deepEqual(solanaPoolRangeWarn(g2!.range), { state: 107 * 1024 + 110_592, label: 3 * 1024 + 72_908 });
+  assert.deepEqual(solanaPoolRangeEnd(g2!.range), { state: 242 * 1024, label: 92 * 1024 });
   assert.equal(g2!.list.length, 256);
   // the curve: its first generation is the frozen mainnet table's (pages 0 and 1, 25 addresses); it fits at any tree
   // size (below), so its next range is its first at every size: a generation only for changed venue accounts
@@ -191,7 +199,7 @@ test("size at the edges: PumpSwap on two generations, every case: the last entry
   assert.equal(largest, 1204);
 });
 
-test("size: the curve's one frozen generation fits every case at any tree size (1,137 B at worst), so it never becomes a limit", async () => {
+test("size: the curve's one frozen generation fits every case at any tree size (1,168 B at worst, a Mayhem coin), so it never becomes a limit", async () => {
   const { venue, req, chain } = await setup("pump");
   const [g1] = await generations("pump-curve", [null]);
   const { table: _t, ...bare } = chain;
@@ -202,7 +210,22 @@ test("size: the curve's one frozen generation fits every case at any tree size (
         const b = buildSolanaPoolBuyOnTables(cfg, { ...release, stateRootIndex: sri, labelRootIndex: lri }, ven, { ...req, tip, cluster: tip > 0n ? "mainnet" : "devnet" }, { ...bare, stateSize }, [g1!.table], { pick: () => 0 });
         largest = Math.max(largest, b.size);
       }
-  assert.ok(largest <= 1137, `${largest} B`);
+  // 1,137 B at worst for a coin that is not Mayhem; a Mayhem coin's reserved fee recipient is not in the frozen table
+  // (it holds Global's fee recipient), so it goes as a static key, 31 B more: 1,168 B, 64 B to spare
+  assert.ok(largest <= 1168, `${largest} B`);
+});
+
+test("size: a Mayhem PumpSwap buy fits every case on a generation that holds the reserved recipient and its wSOL account", async () => {
+  const { venue, req, chain } = await setup("pumpswap");
+  const [g1] = await generations("pumpswap", [FIRST]);
+  const { table: _t, ...bare } = chain;
+  let largest = 0;
+  for (const { ven, tip } of cases(venue, [true])) {
+    const r = { ...req, tip, cluster: tip > 0n ? "mainnet" : "devnet" } as typeof req;
+    largest = Math.max(largest, buildSolanaPoolBuyOnTables(cfg, release, ven, r, { ...bare, stateSize: 6 }, [g1!.table], { pick: () => 0 }).size);
+  }
+  // the same as a pool that is not Mayhem: both accounts load from the table (a generation without them: 1,264 B, no fit)
+  assert.ok(largest <= 1204, `${largest} B`);
 });
 
 test("the selector: the smallest of the given tables, one tip account for all; none, or none that fits: no_table_fits", async () => {

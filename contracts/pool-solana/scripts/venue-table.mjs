@@ -220,11 +220,19 @@ export async function plan(cluster, venue, { fetchFn = fetch, dir = DEPLOYMENTS,
     if (at >= 0) generation = at + 1;
   } else {
     const newest = gens.at(-1);
-    const same = (g) => JSON.stringify(g.addresses) === JSON.stringify(kit.solanaPoolVenueTableList(cfg, tv, g.pages));
+    // a generation whose pages, with the venue's accounts as they are now, no longer fit one table (the venue gained an
+    // account since: GlobalConfig's reserved fee recipient, card sol-pool-buys-mayhem-coins) is not the kit's list
+    const same = (g) => {
+      try {
+        return JSON.stringify(g.addresses) === JSON.stringify(kit.solanaPoolVenueTableList(cfg, tv, g.pages));
+      } catch {
+        return false;
+      }
+    };
     if (newest && !kit.SOLANA_POOL_TABLE_GROWS.includes(venue) && same(newest)) {
       throw new Error(`nothing to add: ${venue}'s buy fits 1,232 bytes at any tree size on its generation ${gens.length} (${newest.table}): a new generation is made for it only when the venue's accounts change`);
     }
-    if (newest && holds(newest.pages, range) && JSON.stringify(newest.addresses) === JSON.stringify(kit.solanaPoolVenueTableList(cfg, tv, newest.pages))) {
+    if (newest && holds(newest.pages, range) && same(newest)) {
       throw new Error(`nothing to add: ${venue}'s generation ${gens.length} (${newest.table}, ${pagesText(newest.pages)}) holds every page of the next range (${pagesText(range)}, for trees of ${sizes.state} and ${sizes.label} entries) and the venue's accounts are unchanged`);
     }
   }

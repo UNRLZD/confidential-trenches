@@ -319,7 +319,7 @@ async function mintProgram(rpcs: Rpcs, mint: string): Promise<string> {
 
 /** What W holds, as a sale prices it: the token's program, W's token amount, W's lamports (the lower of the two RPCs'),
  *  and for pump and PumpSwap in that order whether W's volume account there owes a claim on either RPC's read. */
-type WHeld = { program: string; amount: bigint; lamports: bigint; owes: readonly [boolean, boolean] };
+export type WHeld = { program: string; amount: bigint; lamports: bigint; owes: readonly [boolean, boolean] };
 
 /** W's own accounts in one getMultipleAccounts call on each RPC (card pool-sell-legs-side-by-side; every address in it
  *  is W's, so a read still names one W of the user's at most): its associated token account of `mint` under `program`,
@@ -363,6 +363,19 @@ async function wHeld(rpcs: Rpcs, w: string, mint: string, program: string, wait:
     wait,
     "held_split",
   );
+}
+/** W's own read as a sale's plan takes it (wHeld), for the sell box's preview (pool-sell-dry.ts, card
+ *  app-sell-shows-what-you-receive): the same call, W's addresses only; with no wait, so two RPCs that answer apart end it
+ *  at once ("split", the preview's "not now"); frozen on both: "frozen", which the plan counts as nothing held. */
+export async function wHeldNow(rpcs: Rpcs, w: string, mint: string, program: string): Promise<WHeld | "split" | "frozen"> {
+  const now = new Error("split");
+  try {
+    return await wHeld(rpcs, w, mint, program, () => Promise.reject(now));
+  } catch (e) {
+    if (e === now) return "split";
+    if (e instanceof Refused && e.code === "not_allowed") return "frozen";
+    throw e;
+  }
 }
 
 type Mark = { value: bigint; nonce: bigint; slot: number };
@@ -1462,7 +1475,7 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later, w: ListedBuy
     const cause = legCause(e);
     if (e instanceof Refused) return { error: e.code, cause };
     if (e instanceof PoolRuleRefused) return { error: "quote_check_failed", cause };
-    // both RPCs read a coin this build does not trade (a Mayhem curve or pool): by name, nothing built
+    // both RPCs read a coin this build does not trade (a curve quoted in another mint): by name, nothing built
     if (e instanceof SolanaPoolBuyError && e.code === "venue_not_built") return { error: "venue_not_built", cause };
     // a provider read that still fails after the page's own retry, before W signs: "not now" (card pool-read-down)
     if (!signing && e instanceof SolanaRpcTransportError) {

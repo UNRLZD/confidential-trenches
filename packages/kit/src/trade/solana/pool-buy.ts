@@ -262,10 +262,25 @@ const AMM_BUY_EXACT_QUOTE_IN = [198, 46, 21, 82, 180, 217, 232, 112];
  * @pump-fun/pump-sdk 4.3.1 bondingCurve.ts CURRENT_FEE_RECIPIENTS_FOR_BUYBACK lists, 5,000 bps after them). */
 const PUMP_GLOBAL_FEE_RECIPIENT = 41;
 const PUMP_GLOBAL_BUYBACK_RECIPIENTS = 741;
+/** pump Global's reserved_fee_recipient at 483 (after whitelist_pda; pump-fun/pump-public-docs 639b87fb idl/pump.json
+ * Global, its head on 2026-11-11 14:24Z), the first of the 8 reserved recipients a Mayhem coin's trade pays (its
+ * BUY.md: "For mayhem mode coins, choose one of the 8 reserved fee recipients"; reserved_fee_recipients, 7 more, at
+ * 516). Read on mainnet-beta and publicnode 2026-11-11 14:13Z (slot 468152767, the same 1,088 bytes):
+ * GesfTA3X2arioaHp8bbKdjG9vJtskViWACZoYvxp4twS, the key a Mayhem buy on mainnet named (4PABnGnDxdGn..., slot
+ * 468144537, its account 1). The device names this first one, as it names fee_recipient (41) on a coin that is not
+ * Mayhem, read from the Global both providers answered. */
+const PUMP_GLOBAL_RESERVED_FEE_RECIPIENT = 483;
 /** PumpSwap GlobalConfig: protocol_fee_recipients, 8 keys at 57 (pool.ts's layout note); buyback_fee_recipients, 8
  * keys at 643, before buyback_basis_points at 899 (read on both providers 2026-11-02 21:02Z). */
 const AMM_PROTOCOL_FEE_RECIPIENTS = 57;
 const AMM_GLOBAL_BUYBACK_RECIPIENTS = 643;
+/** PumpSwap GlobalConfig's reserved_fee_recipient at 385 (after whitelist_pda; pump-public-docs 639b87fb
+ * idl/pump_amm.json GlobalConfig), the first of its 8 reserved recipients (7 more at 418), which a Mayhem pool's trade
+ * pays in place of a protocol fee recipient, and its wSOL account. Read on mainnet-beta and publicnode 2026-11-11 14:26Z
+ * (slot 468156436, the same 949 bytes): GesfTA3X2arioaHp8bbKdjG9vJtskViWACZoYvxp4twS, the same 8 keys as pump
+ * Global's; on devnet the same first key (15:14Z). Real Mayhem pool trades on mainnet name one of the 8 there (pool
+ * GtpyFuro..., slot 468169403: 8SBKzEQU...; 468169437 and 468169445: Fh9HmeLN...). */
+const AMM_GLOBAL_RESERVED_FEE_RECIPIENT = 385;
 const DEFAULT_KEY = SOLANA_SYSTEM_PROGRAM;
 
 /** The pool's pages up to the one holding entry `size` of each tree: shared by every release. A frozen table holds the
@@ -280,7 +295,11 @@ export const solanaPoolPages = (program: string, stateSize: number, labelSize: n
  * pool-sol-deploy-mainnet). */
 export type SolanaPoolTableVenue =
   | Pick<Extract<SolanaPoolBuyVenue, { kind: "pump-curve" }>, "kind" | "feeRecipient" | "buybackFeeRecipients">
-  | Pick<Extract<SolanaPoolBuyVenue, { kind: "pumpswap" }>, "kind" | "protocolFeeRecipient" | "buybackFeeRecipients">;
+  | (Pick<Extract<SolanaPoolBuyVenue, { kind: "pumpswap" }>, "kind" | "protocolFeeRecipient" | "buybackFeeRecipients"> & {
+      /** GlobalConfig's reserved fee recipient, which a Mayhem pool's buy pays (solanaPoolTableVenueOf names it): the
+       *  table holds it and its wSOL account, so a Mayhem pool buy fits as any other. */
+      readonly reservedFeeRecipient?: string;
+    });
 
 /** The program-wide accounts a pool buy uses: what our lookup table holds (the pool and its pages, the venue's shared
  * accounts and programs, the token programs and wSOL). Not the Jito tip accounts: the tip goes as a static key
@@ -293,6 +312,7 @@ export function solanaPoolBuyTableAccounts(cfg: SolanaPoolConfig, venue: SolanaP
         ...common, SOLANA_PUMP_AMM_PROGRAM, AMM_GLOBAL_CONFIG, venue.protocolFeeRecipient, solanaAta(venue.protocolFeeRecipient, SOLANA_SOL_MINT, SOLANA_TOKEN_PROGRAM),
         solanaEventAuthority(SOLANA_PUMP_AMM_PROGRAM), AMM_GLOBAL_VOLUME, AMM_FEE_CONFIG,
         ...venue.buybackFeeRecipients.flatMap((r) => [r, solanaAta(r, SOLANA_SOL_MINT, SOLANA_TOKEN_PROGRAM)]),
+        ...("reservedFeeRecipient" in venue && venue.reservedFeeRecipient ? [venue.reservedFeeRecipient, solanaAta(venue.reservedFeeRecipient, SOLANA_SOL_MINT, SOLANA_TOKEN_PROGRAM)] : []),
       ];
 }
 
@@ -798,7 +818,7 @@ export function solanaPoolBuyInstructions(cfg: SolanaPoolConfig, release: Solana
 }
 
 // venue_not_in_table: our lookup table is not made for the buy's venue (none of its program's accounts);
-// venue_not_built: both providers read a venue this build does not trade (a Mayhem curve or pool, a curve not in SOL)
+// venue_not_built: both providers read a venue this build does not trade (a curve not quoted in SOL)
 export type SolanaPoolBuyErrorCode = "venue_not_in_table" | "venue_not_built";
 export class SolanaPoolBuyError extends Error {
   readonly code: SolanaPoolBuyErrorCode;
@@ -889,22 +909,25 @@ export const SOLANA_POOL_WORST_BUY_VENUE = Object.freeze({ kind: "pump-curve", t
 
 /** The venue's buy accounts from one provider's read of [mint, curve, pump Global] or [mint, pool, GlobalConfig]; the
  * buyback recipient is the `pick`ed one of the venue's eight (the SDKs pick at random, which spreads the write locks). */
-/** pump Global's fee recipient: the account checked as pump's Global (owner, discriminator, this layout's size). */
-function pumpGlobalFeeRecipient(global: SolanaPoolAccount): string {
+/** pump Global's fee recipient: the account checked as pump's Global (owner, discriminator, this layout's size); on a
+ *  Mayhem coin its reserved fee recipient. */
+function pumpGlobalFeeRecipient(global: SolanaPoolAccount, mayhem = false): string {
   solanaDecodePumpGlobal(global); // owner and discriminator
   if (global.data.length !== SOLANA_PUMP_GLOBAL_SIZE) throw new Error(`pump Global is ${global.data.length} bytes, not ${SOLANA_PUMP_GLOBAL_SIZE}`);
-  const feeRecipient = base58.encode(global.data.subarray(PUMP_GLOBAL_FEE_RECIPIENT, PUMP_GLOBAL_FEE_RECIPIENT + 32));
-  if (feeRecipient === DEFAULT_KEY) throw new Error("pump Global has no fee recipient");
+  const at = mayhem ? PUMP_GLOBAL_RESERVED_FEE_RECIPIENT : PUMP_GLOBAL_FEE_RECIPIENT;
+  const feeRecipient = base58.encode(global.data.subarray(at, at + 32));
+  if (feeRecipient === DEFAULT_KEY) throw new Error(mayhem ? "pump Global has no reserved fee recipient" : "pump Global has no fee recipient");
   return feeRecipient;
 }
 
 /** PumpSwap GlobalConfig's protocol fee recipient: the account checked as GlobalConfig (owner, discriminator, this
- *  layout's size). */
-function ammConfigFeeRecipient(global: SolanaPoolAccount): string {
+ *  layout's size); for a Mayhem pool its reserved fee recipient. */
+function ammConfigFeeRecipient(global: SolanaPoolAccount, mayhem = false): string {
   solanaDecodePumpSwapConfig(global); // owner and discriminator
   if (global.data.length !== SOLANA_PUMP_AMM_CONFIG_SIZE) throw new Error(`GlobalConfig is ${global.data.length} bytes, not ${SOLANA_PUMP_AMM_CONFIG_SIZE}`);
-  const protocolFeeRecipient = base58.encode(global.data.subarray(AMM_PROTOCOL_FEE_RECIPIENTS, AMM_PROTOCOL_FEE_RECIPIENTS + 32));
-  if (protocolFeeRecipient === DEFAULT_KEY) throw new Error("GlobalConfig has no protocol fee recipient");
+  const at = mayhem ? AMM_GLOBAL_RESERVED_FEE_RECIPIENT : AMM_PROTOCOL_FEE_RECIPIENTS;
+  const protocolFeeRecipient = base58.encode(global.data.subarray(at, at + 32));
+  if (protocolFeeRecipient === DEFAULT_KEY) throw new Error(mayhem ? "GlobalConfig has no reserved fee recipient" : "GlobalConfig has no protocol fee recipient");
   return protocolFeeRecipient;
 }
 
@@ -927,17 +950,17 @@ export function solanaPoolBuyVenueOf(kind: SolanaPoolVenue, mint: string, accoun
   if (kind === "pump-curve") {
     const c = solanaDecodeBondingCurve(main);
     if (c.complete) throw new Error("the curve is complete");
-    if (c.isMayhemMode) throw new SolanaPoolBuyError("venue_not_built", "a Mayhem curve pays its reserved fee recipients, not built here");
     if (c.quoteMint !== SOLANA_SYSTEM_PROGRAM && c.quoteMint !== SOLANA_SOL_MINT) throw new SolanaPoolBuyError("venue_not_built", "the curve is not quoted in SOL");
-    const feeRecipient = pumpGlobalFeeRecipient(global);
+    // a Mayhem curve pays Global's reserved fee recipient, every other curve its fee recipient: both from the bytes
+    const feeRecipient = pumpGlobalFeeRecipient(global, c.isMayhemMode);
     return { kind, mint, tokenProgram: m.owner, tokenAccountSize: solanaTokenAccountSize(m), curve: addr.curve, creator: c.creator, feeRecipient, cashback: c.isCashbackCoin, ...buyback(global.data, PUMP_GLOBAL_BUYBACK_RECIPIENTS) };
   }
   const p = solanaDecodePumpSwapPool(main);
   if (p.index !== 0 || p.creator !== addr.poolAuthority || p.baseMint !== mint || p.quoteMint !== SOLANA_SOL_MINT) throw new Error("the pool is not the mint's canonical pool");
-  if (p.isMayhemMode) throw new SolanaPoolBuyError("venue_not_built", "a Mayhem pool pays its reserved fee recipients, not built here");
   const t22 = m.owner === SOLANA_TOKEN_2022_PROGRAM;
   if (p.baseVault !== (t22 ? addr.baseVaultToken2022 : addr.baseVaultToken) || p.quoteVault !== addr.quoteVault) throw new Error("the pool's vaults are not its token accounts");
-  const protocolFeeRecipient = ammConfigFeeRecipient(global);
+  // a Mayhem pool pays GlobalConfig's reserved fee recipient, every other pool its first protocol fee recipient
+  const protocolFeeRecipient = ammConfigFeeRecipient(global, p.isMayhemMode);
   const cashback = solanaPumpSwapCashback(main.data);
   if (cashback === null) throw new Error("the pool's cashback flag is not a bool");
   return {
@@ -988,7 +1011,7 @@ export function solanaPoolTableVenueOf(kind: SolanaPoolVenue, global: SolanaPool
     return l;
   };
   if (kind === "pump-curve") return { kind, feeRecipient: pumpGlobalFeeRecipient(global), buybackFeeRecipients: list(PUMP_GLOBAL_BUYBACK_RECIPIENTS) };
-  if (kind === "pumpswap") return { kind, protocolFeeRecipient: ammConfigFeeRecipient(global), buybackFeeRecipients: list(AMM_GLOBAL_BUYBACK_RECIPIENTS) };
+  if (kind === "pumpswap") return { kind, protocolFeeRecipient: ammConfigFeeRecipient(global), buybackFeeRecipients: list(AMM_GLOBAL_BUYBACK_RECIPIENTS), reservedFeeRecipient: ammConfigFeeRecipient(global, true) };
   throw new Error(`no such venue ${String(kind).slice(0, 40)}`);
 }
 

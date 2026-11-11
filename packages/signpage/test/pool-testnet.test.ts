@@ -4,7 +4,7 @@
 // Base Sepolia and Robinhood testnet, and a pool buy on the pinned devnet pool reaches the flow. Another chain (no EVM
 // pool pinned), a page with no flow, or the mainnet tables are refused. Its own file: the network is read once, at
 // import, so this process runs as the testnet build does (test/pool-network.test.ts runs the mainnet one).
-import { after, mock, test } from "node:test";
+import { after, afterEach, mock, test } from "node:test";
 import { enableTimers, resetTimers } from "./mock-timers.ts";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -27,7 +27,27 @@ import { signalsProver } from "../../wallet/test/withdraw-fixture.ts";
 const { SOL_POOLS, SOL_POOL_TABLES, solanaPoolOf, SOL_LADDER, SOL_EPOCH_MS, SOL_LIFE_MS, SOL_SEND_MARGIN_MS } = await import("../../wallet/src/pool/solana.ts");
 const { POOL_TESTNET } = await import("../../wallet/src/pool/network.ts");
 const { poolKinds } = await import("../src/pool-kinds.ts");
-const { PAGE_CLUSTER, TESTNET_RPCS, PAGE_SOL_MARK_BATCHES, testnetPoolDeps, testnetPool, poolRelayFee, helperPoolSend, POOL_SEND_TIMEOUT_MS, PAGE_TABLES, settleFreedOps, oweSend, dropSend, keepRelease, mergeWithdrawOp } = await import("../src/pool-testnet.ts");
+const { PAGE_CLUSTER, TESTNET_RPCS, PAGE_SOL_MARK_BATCHES, testnetPoolDeps, testnetPool: makePool, poolRelayFee, helperPoolSend, POOL_SEND_TIMEOUT_MS, PAGE_TABLES, settleFreedOps, oweSend, dropSend, keepRelease, mergeWithdrawOp } = await import("../src/pool-testnet.ts");
+// Every page a test makes signs out at the test's end, as main.ts's sign out does (signingOut: its turn timer cleared).
+// A state read arms the page's EVM turn (src/pool-testnet.ts armTurn) on whichever clock is in place; a page left signed
+// in on the real clock can fire its turn inside a later test's test clock, which re-arms it there for good ("the test
+// left 1 timer(s) that never stop", test/passes-yield.test.ts in CI, 11 Nov).
+const pages: { signingOut(): void }[] = [];
+afterEach(() => pages.splice(0).forEach((p) => p.signingOut()));
+const testnetPool = ((...a: Parameters<typeof makePool>) => {
+  const t = makePool(...a);
+  pages.push(t);
+  return t;
+}) as typeof makePool;
+// Whether `p` settles inside `ms` of real time: a hang bound on the real clock, taken before any test clock or mocked
+// timer goes in, for a test on the test clock that waits for work the clock cannot see (fake IndexedDB, a Web Lock)
+const [REAL_SET, REAL_CLEAR] = [globalThis.setTimeout, globalThis.clearTimeout];
+const realWithin = (p: Promise<unknown>, ms: number): Promise<boolean> =>
+  new Promise((ok) => {
+    const t = REAL_SET(() => ok(false), ms);
+    const end = (): void => (REAL_CLEAR(t), ok(true));
+    p.then(end, end);
+  });
 const { SIGNPAGE_TIMEOUT_MS } = await import("../../kit/src/signpage/client.ts");
 // the withdraw tests' world, loaded once here so its stores close after the whole file (its after() is file-level)
 const WORLD = await import("./pool-withdraw-world.ts");
@@ -1110,6 +1130,32 @@ test("a withdraw on the page, the helper's 502 after the release landed, every s
   assert.ok(asked.length > 0 && asked.every((s) => s === undefined || s === FINAL_SLOT) && asked.includes(FINAL_SLOT), `asked at ${asked.join(",")}`);
 });
 
+// card pool-buy-record-never-stays-sent: a withdraw's release read landed writes its withdrawn value on the note's mark
+// and pings the page's watchers, so the app's read right after counts only the note's change, with no other write
+test("a withdraw on the page whose release lands, its spend not read in time: the watchers are told once its withdrawn value is on the note's mark", async () => {
+  const { world, TO, COST } = WORLD;
+  const wd = await world([30_000_000n], { settleUnspent: true });
+  const fetchFn = (async (_url: string, init: { body: string }) => {
+    const { pool, tx } = JSON.parse(init.body) as { pool: string; tx: string };
+    return new Response(JSON.stringify(await wd.host.send(pool, base64.decode(tx))), { status: 200 });
+  }) as unknown as typeof fetch;
+  const over = { pin: wd.host.pin, rpcs: wd.host.rpcs, pool: wd.host.pool as never, prover: { vault: signalsProver(), stop: () => {} }, fetch: fetchFn, ...quickClock() };
+  const t = testnetPool({ store: async () => wd.w, seed64: async () => SEED64.slice() }, over);
+  // what each ping of the watchers reads, as the app reads the state again on it
+  const reads: Promise<unknown>[] = [];
+  t.watch(() => void reads.push(t.readyWith(async () => null).then((v) => [...(v.landed ?? [])])));
+  await t.withdraw({ chain: "solana", to: TO, amount: 5_000_000n, maxFee: COST }, "op-w");
+  const id = wd.ids[0]!;
+  assert.equal((await wd.ns.get(id))!.state, "RESERVED", "its spend not read yet");
+  const mark = (await wd.ns.marks()).get(id);
+  assert.ok(mark?.withdrawn !== undefined && mark.withdrawn > 0n, "the release's withdrawn value on the note's mark");
+  for (let i = 0; i < 200 && reads.length === 0; i++) await new Promise((r) => setTimeout(r, 5));
+  const want = [[id, { attempt: mark.attempt, withdrawn: mark.withdrawn }]];
+  const seen = await Promise.all(reads);
+  assert.ok(seen.some((l) => { try { assert.deepEqual(l, want); return true; } catch { return false; } }), `a ping reads the landed release (${seen.length} pings)`);
+  await t.signedOut();
+});
+
 test("an owed send with no release signature under 2,500 newer entries of W's history, the page's RPC functions new on every pass: the next finish reads on from the last one's place and sends it (fold 4, review HIGH)", async () => {
   const { wd, over, page, TO, end } = await hungWithdraw();
   const id = wd.ids[0]!;
@@ -1386,11 +1432,17 @@ test("the testnet finder reads the Ws on the first devnet RPC, one try a call: a
     // the gate's first pause on the test clock, from the first 429: a call before its timer fires came before the gate opened
     const seen: { host: string; method: string; open: boolean }[] = [];
     let hot = 2, open = false, timed = false;
+    // the fourth getTokenAccountsByOwner, waited for as it comes: before its first read the pass reads fake IndexedDB
+    // and takes the seed's Web Lock, work in real time the test clock cannot see, so a loop of clock ticks ran its
+    // whole bound out first (CI, 11 Nov: no request seen)
+    let fourth = (): void => {};
+    const four = new Promise<void>((ok) => (fourth = ok));
     const real = globalThis.fetch;
     globalThis.fetch = (async (u: string | URL | Request, init?: RequestInit) => {
       const b = JSON.parse(String(init?.body)) as { id: string; method: string; params: unknown[] };
       if (b.params?.[0] !== fw.address) return new Response("offline", { status: 503 });
       seen.push({ host: new URL(String(u)).host, method: b.method, open });
+      if (seen.filter((x) => x.method === "getTokenAccountsByOwner").length >= 4) fourth();
       if (b.method === "getTokenAccountsByOwner" && hot > 0) {
         if (!timed) (timed = true), setTimeout(() => (open = true), 999);
         return hot--, new Response("slow down", { status: 429 });
@@ -1400,7 +1452,7 @@ test("the testnet finder reads the Ws on the first devnet RPC, one try a call: a
     try {
       const t = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { positions: { setTimer: () => 0, clearTimer: () => {} } } as never);
       await t.positions();
-      for (let i = 0; i < 200 && seen.filter((x) => x.method === "getTokenAccountsByOwner").length < 4; i++) await new Promise((ok) => setTimeout(ok, 50));
+      await realWithin(four, 8_000);
     } finally {
       globalThis.fetch = real;
     }
@@ -1465,4 +1517,54 @@ test("card sol-buy-reads-side-by-side: the page's buy host hands the early read 
   } finally {
     (b as { end?: () => void }).end?.();
   }
+});
+
+// card pool-buy-record-never-stays-sent, on the page: the buy host's take writes the last height, its landed reaches the
+// state's view (readyWith's landed, which state.pools counts) and the watchers, and a run that ended "sent" is followed by
+// the page's state reads: its end posted once, to that run, once its note is out of RESERVED
+test("card pool-buy-record-never-stays-sent: the page's buy host writes the take's last height, tells the state a landed release (read by another tab too), and posts a followed buy's end once", async () => {
+  const { w, ns } = await wallet();
+  const { pool, land } = fakePool();
+  const offline = async () => {
+    throw new Error("offline");
+  };
+  type Host = ReturnType<Parameters<typeof import("../src/pool-buy.ts").poolBuyKind>[0]>;
+  let hostOf: (() => Host) | null = null;
+  const buy = ((h: () => Host) => ((hostOf = h), () => ({ error: "not_allowed" }))) as unknown as typeof import("../src/pool-buy.ts").poolBuyKind;
+  const t = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { pool, prover: { vault: signalsProver(), stop: () => {} }, hardwareConcurrency: 4, rpcs: [offline, async () => offline()], tradeKinds: { buy } });
+  let heard = 0;
+  t.watch(() => heard++);
+  await land(ns, await incoming(ns, null, 9));
+  await t.stateRead();
+  await t.proofs();
+  const r = (await t.readyWith(async () => null)).ready![0]!;
+  const h = hostOf!() as Host & { follow(post: (s: "filled" | "not_landed") => void): void };
+  await h.take(r.noteId, r.attempt, undefined, 151n);
+  const taken = await ns.get(r.noteId);
+  assert.equal(taken?.state, "RESERVED");
+  assert.equal((taken as Record<string, unknown> | undefined)?.lastHeight, undefined, "never in the note");
+  assert.equal((await ns.marks()).get(r.noteId)?.lastHeight, 151n, "the take writes the signed transaction's last height on the note's mark");
+  const before = heard;
+  h.landed!(r.noteId, r.attempt, 4n);
+  const want = [[r.noteId, { attempt: r.attempt, withdrawn: 4n }]];
+  const landedOf = async (p: typeof t) => [...((await p.readyWith(async () => null)).landed ?? [])];
+  for (let i = 0; i < 200 && heard === before; i++) await new Promise((r) => setTimeout(r, 5));
+  assert.deepEqual(await landedOf(t), want, "the state's view carries the landed release");
+  assert.ok(heard > before, "the watchers hear it, so the app reads the state again");
+  // another tab on the same store (and this one after a reload) counts it too: the landed value is on the note's mark
+  const t2 = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { pool, prover: { vault: signalsProver(), stop: () => {} }, hardwareConcurrency: 4, rpcs: [offline, async () => offline()] });
+  assert.deepEqual(await landedOf(t2), want, "another tab's state view");
+  await t2.signedOut();
+  const posts: string[] = [];
+  h.follow((s) => void posts.push(s));
+  // still RESERVED (the pass's reads offline): its end is not known, nothing posted
+  await t.stateRead();
+  assert.deepEqual(posts, []);
+  // the pass frees it (both RPCs' finalized height past 151, no spent mark): not_landed, once
+  await ns.move(r.noteId, "RESERVED", "UNSPENT", { finalHeight: 152n });
+  await t.stateRead();
+  assert.deepEqual(posts, ["not_landed"]);
+  await t.stateRead();
+  assert.deepEqual(posts, ["not_landed"], "posted once");
+  await t.signedOut();
 });

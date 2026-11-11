@@ -10,7 +10,8 @@ import { after, test } from "node:test";
 import { IDBFactory, IDBObjectStore } from "fake-indexeddb";
 import * as d from "../src/derive/index.ts";
 import { noteCommitment, noteSecrets, vaultNote, type NoteRef } from "../src/notes/secrets.ts";
-import { NOTE_EDGES, NOTE_STATES, NOTE_REQUEST_MAX, SEND_MARGIN_MS, openNoteStore, type Leaf, type NoteRecord, type NoteState, type NoteStore } from "../src/notes/store.ts";
+import { NOTE_EDGES, NOTE_STATES, NOTE_REQUEST_MAX, RESERVED_MARKS_KEY, SEND_MARGIN_MS, openNoteStore, readReservedMarks, type Leaf, type NoteRecord, type NoteState, type NoteStore } from "../src/notes/store.ts";
+import * as old116 from "./note-store-116.ts";
 import { openWalletStore, type WalletStore } from "../src/store/index.ts";
 
 const SEED = d.wordsToSeed64(d.entropyToWords(new Uint8Array(16)));
@@ -407,6 +408,106 @@ test("F1: RESERVED goes back to UNSPENT only once block time is past its deadlin
   const Y = await landed(t.ns, 902n, 9002n, 7n);
   await reserved(t.ns, Y, 6_000n);
   assert.equal((await t.ns.move(Y.id, "RESERVED", "UNSPENT", { blockTimeMs: 6_001n })).state, "UNSPENT");
+});
+
+test("F1b: a RESERVED note whose one signed Solana transaction names its last block height goes back to UNSPENT once both RPCs' finalized height is past it, before its deadline; never on a height at it, nor without one", async () => {
+  const t = await tab();
+  const X = await landed(t.ns, 903n, 9003n, 100n);
+  const h = await t.ns.move(X.id, "UNSPENT", "HELD", { deadlineMs: 900_000n, context: String(contexts++) });
+  const r = await t.ns.move(X.id, "HELD", "RESERVED", { attempt: h.attempt, lastHeight: 1_000n });
+  assert.equal((r as Record<string, unknown>).lastHeight, undefined, "never in the note record");
+  assert.deepEqual((await t.ns.marks()).get(X.id), { attempt: h.attempt, lastHeight: 1_000n }, "on the note's mark, written with the take");
+  assert.deepEqual((await readReservedMarks(t.w)).get(X.id), { attempt: h.attempt, lastHeight: 1_000n }, "read back as stored");
+  const puts = t.puts();
+  await assert.rejects(t.ns.move(X.id, "RESERVED", "UNSPENT", { finalHeight: 1_000n }), /can still land/, "at its last height it can still land");
+  await assert.rejects(t.ns.move(X.id, "RESERVED", "UNSPENT", { finalHeight: 1 as unknown as bigint }), /finalHeight/);
+  await assert.rejects(t.ns.move(X.id, "RESERVED", "UNSPENT", { blockTimeMs: 900_000n }), /can still land/, "the deadline rule holds as before");
+  assert.equal(t.puts(), puts);
+  const back = await t.ns.move(X.id, "RESERVED", "UNSPENT", { finalHeight: 1_001n });
+  assert.equal(back.state, "UNSPENT");
+  assert.equal((await readReservedMarks(t.w)).has(X.id), false, "the mark goes with the attempt");
+  // a note reserved with no height (an EVM proof, or a send that names none) is freed only past its deadline
+  const Y = await landed(t.ns, 904n, 9004n, 7n);
+  await reserved(t.ns, Y, 6_000n);
+  await assert.rejects(t.ns.move(Y.id, "RESERVED", "UNSPENT", { finalHeight: 10n ** 9n }), /can still land/);
+  // the height and the nullifier are written with HELD -> RESERVED only
+  const Z = await landed(t.ns, 905n, 9005n, 7n);
+  const hz = await t.ns.move(Z.id, "UNSPENT", "HELD", { deadlineMs: 6_000n, context: String(contexts++) });
+  await assert.rejects(t.ns.move(Z.id, "HELD", "UNSPENT", { attempt: hz.attempt, lastHeight: 5n }), /HELD -> RESERVED only/);
+  await assert.rejects(t.ns.move(Z.id, "HELD", "UNSPENT", { attempt: hz.attempt, nullifier: 5n }), /HELD -> RESERVED only/);
+});
+
+// card pool-buy-record-never-stays-sent: a mark of another attempt (a tab on release 116 freed the note and took it
+// again, writing no mark; the old mark left over) names a height the note's own transaction never signed: never freed by it
+test("a RESERVED note whose mark is another attempt's is never freed by that mark's height, only past its deadline", async () => {
+  const t = await tab();
+  const X = await landed(t.ns, 908n, 9009n, 100n);
+  const h = await t.ns.move(X.id, "UNSPENT", "HELD", { deadlineMs: 900_000n, context: String(contexts++) });
+  await t.ns.move(X.id, "HELD", "RESERVED", { attempt: h.attempt! });
+  await t.w.update("meta", RESERVED_MARKS_KEY, () => ({ [X.id]: { attempt: "other", lastHeight: 1n } }));
+  await assert.rejects(t.ns.move(X.id, "RESERVED", "UNSPENT", { finalHeight: 10n ** 9n }), /can still land/, "another attempt's height frees nothing");
+  assert.equal((await t.ns.get(X.id))?.state, "RESERVED");
+  assert.equal((await t.ns.move(X.id, "RESERVED", "UNSPENT", { blockTimeMs: 900_001n })).state, "UNSPENT", "its deadline frees it");
+});
+
+// card pool-buy-record-never-stays-sent: a tab still on release 116 reads every note record this build writes. Its reader
+// (test/note-store-116.ts, 314835ca's store.ts) refuses any key off its list, so the last height, the nullifier and the
+// landed value live on the note's mark (meta owed/reserved-notes), which no reader lists (store keys() leaves owed/ out)
+test("release 116's reader reads every note record this build writes: during a buy, after a filled one, after a not-landed one", async () => {
+  const t = await tab();
+  const old = async (step: string) => {
+    const all = await old116.readNotes(t.w);
+    assert.ok(all.length > 0, step);
+    for (const n of all) assert.equal((n as Record<string, unknown>).lastHeight, undefined, step);
+  };
+  // a buy that does not land: taken with its last height and nullifier, then freed by its height
+  const X = await landed(t.ns, 906n, 9006n, 100n);
+  const hx = await t.ns.move(X.id, "UNSPENT", "HELD", { deadlineMs: 900_000n, context: String(contexts++) });
+  await old("held");
+  await t.ns.move(X.id, "HELD", "RESERVED", { attempt: hx.attempt, lastHeight: 1_000n, nullifier: 77n });
+  await old("during a buy");
+  await t.ns.landed(X.id, hx.attempt!, 40n);
+  await old("its release read landed");
+  await t.ns.move(X.id, "RESERVED", "UNSPENT", { finalHeight: 1_001n });
+  await old("after a not-landed buy");
+  // a buy that fills: taken, landed, its change written, the note SPENT
+  const Y = await landed(t.ns, 906n, 9007n, 100n);
+  const hy = await t.ns.move(Y.id, "UNSPENT", "HELD", { deadlineMs: 900_000n, context: String(contexts++) });
+  await t.ns.move(Y.id, "HELD", "RESERVED", { attempt: hy.attempt, lastHeight: 2_000n });
+  await t.ns.landed(Y.id, hy.attempt!, 60n);
+  const ch: NoteRef = { kind: "change", l: 9007n, j: 0 };
+  await t.ns.add({ ref: ch, scope: 906n, precommitment: pc(ch), state: "UNSPENT", leaf: leafOf(pc(ch), 40n, 9007n, 9n), parent: Y.id });
+  await old("after a filled buy");
+  assert.equal((await t.ns.get(Y.id))?.state, "SPENT");
+  assert.equal((await t.ns.marks()).has(Y.id), false, "a SPENT note's mark goes at the next read of the marks");
+  assert.equal((await readReservedMarks(t.w)).has(Y.id), false);
+});
+
+// card pool-buy-record-never-stays-sent: the mark is written before the note (one store per transaction), so a crash
+// between the two leaves a HELD note and a mark no rule reads; a RESERVED note whose mark is gone (taken on release 116,
+// or a lost write) is freed by its deadline only, never by a height
+test("the mark and the note are two writes: a crash between them leaves the note HELD, and a RESERVED note with no mark waits for its deadline", async () => {
+  const idb = new IDBFactory();
+  const w = await openWalletStore({ indexedDB: idb });
+  opened.push(w);
+  let failNotes = false;
+  const crashing: WalletStore = { ...w, put: async (s, k, v) => (s === "notes" && failNotes ? Promise.reject(new Error("crash")) : w.put(s, k, v)) };
+  const ns = await openNoteStore(crashing);
+  notes.push(ns);
+  const X = await landed(ns, 907n, 9008n, 100n);
+  const hx = await ns.move(X.id, "UNSPENT", "HELD", { deadlineMs: 900_000n, context: String(contexts++) });
+  failNotes = true;
+  await assert.rejects(ns.move(X.id, "HELD", "RESERVED", { attempt: hx.attempt, lastHeight: 1_000n }), /crash/);
+  failNotes = false;
+  assert.equal((await ns.get(X.id))?.state, "HELD", "the note is not RESERVED: nothing was sent on it");
+  assert.equal((await readReservedMarks(w)).get(X.id)?.attempt, hx.attempt, "the mark was written first");
+  // its take again: RESERVED, the same mark
+  await ns.move(X.id, "HELD", "RESERVED", { attempt: hx.attempt, lastHeight: 1_000n });
+  assert.equal((await ns.marks()).get(X.id)?.lastHeight, 1_000n);
+  // the other way round: a RESERVED note with no mark (its mark lost) is held to its deadline, whatever the height
+  await w.update("meta", RESERVED_MARKS_KEY, () => ({}));
+  await assert.rejects(ns.move(X.id, "RESERVED", "UNSPENT", { finalHeight: 10n ** 9n }), /can still land/, "no mark: never freed by a height");
+  assert.equal((await ns.move(X.id, "RESERVED", "UNSPENT", { blockTimeMs: 900_001n })).state, "UNSPENT", "its deadline frees it, as on release 116");
 });
 
 test("F2: the parent comes from the child's (l, j): a wrong parent, j, label or scope is refused; an unnamed parent is found", async () => {

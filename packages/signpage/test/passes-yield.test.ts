@@ -9,7 +9,7 @@
 // clock (onProviderNow) and read no time: each holds its flow to a hang bound of 8 s (`within`), against the 150 s their
 // regression took.
 import assert from "node:assert/strict";
-import { after, test } from "node:test";
+import { after, afterEach, test } from "node:test";
 import { IDBFactory } from "fake-indexeddb";
 import { entropyToWords, wordsToSeed64 } from "@blindfill/wallet/derive";
 import { openWalletStore, type WalletStore } from "@blindfill/wallet/store";
@@ -19,7 +19,18 @@ import { signalsProver } from "../../wallet/test/withdraw-fixture.ts";
 import { onTestClock } from "../../kit/test/test-clock.ts";
 
 (globalThis as { __SIGN_NETWORK__?: string }).__SIGN_NETWORK__ = "testnet";
-const { TESTNET_RPCS, pageEvmPoolRpcs, pageSolanaRpcs, pageSolanaSettleRpcs, testnetPool } = await import("../src/pool-testnet.ts");
+const { TESTNET_RPCS, pageEvmPoolRpcs, pageSolanaRpcs, pageSolanaSettleRpcs, testnetPool: makePool } = await import("../src/pool-testnet.ts");
+// Every page a test makes signs out at the test's end, as main.ts's sign out does (signingOut: its turn timer cleared). A
+// state read arms the page's EVM turn (src/pool-testnet.ts armTurn) on whichever clock is in place; a page that A, A2
+// or D left signed in on the real clock fired its turn inside a later test's test clock, which re-armed it there for
+// good (CI, 11 Nov: "the test left 1 timer(s) that never stop").
+const pages: { signingOut(): void }[] = [];
+afterEach(() => pages.splice(0).forEach((p) => p.signingOut()));
+const testnetPool = ((...a: Parameters<typeof makePool>) => {
+  const t = makePool(...a);
+  pages.push(t);
+  return t;
+}) as typeof makePool;
 const { EVM_LADDER } = await import("../../wallet/src/pool/evm.ts");
 const { holdHosts, hostLane, resetHostLanes, stopHostLaneWaits, PASS_BUDGET_TRADING, PASS_FLOOR_MS, TRADE_TURN_MAX_MS } = await import("../../wallet/src/throttle.ts");
 const { SOL_POOLS, solanaPoolOf } = await import("../../wallet/src/pool/solana.ts");
@@ -35,6 +46,17 @@ type Sent = { host: string; method: string; at: number; status: number; /** its 
 type Answer = number | { status?: number; result?: unknown; ms?: number; retryAfter?: string };
 /** A fake provider as globalThis.fetch: every request counted per host; `answer` says the status of each (429 or 200),
  *  or its status, result, delay and Retry-After. On the test clock: performance.now and every timer are its. */
+/** Called at each request the fake provider logs: a test waits for a request as it comes, never on clock ticks. */
+const sentWaits = new Set<() => void>();
+const [REAL_SET, REAL_CLEAR] = [globalThis.setTimeout, globalThis.clearTimeout];
+/** Whether `p` settles inside `ms` of real time: a hang bound on the real clock, taken before any test clock goes in, for a
+ *  test on the test clock that waits for work the clock cannot see (fake IndexedDB, a Web Lock). */
+const realWithin = (p: Promise<unknown>, ms: number): Promise<boolean> =>
+  new Promise((ok) => {
+    const t = REAL_SET(() => ok(false), ms);
+    const end = (): void => (REAL_CLEAR(t), ok(true));
+    p.then(end, end);
+  });
 const onProvider = (answer: (host: string, n: number, method: string) => Answer, run: (sent: Sent[], t0: number) => Promise<void>): Promise<void> =>
   onTestClock(() => onProviderNow(answer, run));
 async function onProviderNow(answer: (host: string, n: number, method: string) => Answer, run: (sent: Sent[], t0: number) => Promise<void>): Promise<void> {
@@ -57,6 +79,7 @@ async function onProviderNow(answer: (host: string, n: number, method: string) =
     const { status = 200, result = 7, ms = 0, retryAfter } = typeof a === "number" ? { status: a } : a;
     const at = performance.now() - t0;
     sent.push({ host, method: q.method, at, status, end: at + ms });
+    for (const f of [...sentWaits]) f();
     if (ms > 0) await new Promise((r) => setTimeout(r, ms));
     if (status === 429) return new Response("Too Many Requests", { status: 429, headers: retryAfter === undefined ? {} : { "retry-after": retryAfter } });
     return new Response(JSON.stringify({ jsonrpc: "2.0", id: q.id, result }), { status: 200 });
@@ -277,7 +300,10 @@ test("card sell-right-after-a-buy: the buy's host reads as a trade's to its land
   const ref: NoteRef = { kind: "deposit", s: SCOPE, i: 0 };
   const pre = noteSecrets(SEED64, ref).precommitment;
   const n = await ns.add({ ref, scope: SCOPE, precommitment: pre, state: "UNSPENT", leaf: { value: 5_000_000n, label: 9n, commitment: noteCommitment(5_000_000n, 9n, pre), leafIndex: 0n } });
-  await onProvider(() => 200, async (sent) => {
+  // on the real clock, as A, A2 and D: each settle opens its note store (fake IndexedDB) first, work the test clock cannot
+  // see, during which the clock skipped to each timer still set, the sale's 150 s hold bound among them. A trade's read
+  // is told from a pass's by the floor a pass waits (PASS_FLOOR_MS, a real timer: never shorter), never by a few ms.
+  await onProviderNow(() => 200, async (sent) => {
     const made: { buy?: () => { rpcs: readonly [(m: string, p: unknown[]) => Promise<unknown>, (m: string, p: unknown[]) => Promise<unknown>]; settle(id: string): Promise<unknown>; release(): void; landed(): void; end(): void } } = {};
     testnetPool(
       { store: async () => w, seed64: async () => SEED64.slice() },
@@ -289,27 +315,34 @@ test("card sell-right-after-a-buy: the buy's host reads as a trade's to its land
     await Promise.all([pageSolanaRpcs("pass")[0]("getSlot", []), pageSolanaRpcs("pass")[1]("getSlot", [])]);
     fill(DEVNET, 100);
     fill(HELPER, 100);
-    // each time below is a request's own, as the fake provider logged it on the test clock (sent[].at)
+    // each time below is a request's own, as the fake provider logged it (sent[].at)
     const devnet = new URL(DEVNET).host;
     const lastOn = (host: string): number => sent.filter((x) => x.host === host).at(-1)!.at;
     const passAt = lastOn(devnet);
     await Promise.all([h.rpcs[0]("getSlot", []), h.rpcs[1]("getSlot", [])]);
-    assert.ok(lastOn(devnet) - passAt < 100, "before its release: its reads a trade's, at once past every budget");
-    // the settle's first request on api.devnet, from the request before it (its note store opens first: fake IndexedDB)
+    assert.ok(lastOn(devnet) - passAt < PASS_FLOOR_MS - 1_000, "before its release: its reads a trade's, before a pass's floor");
+    // the time of the settle's first request on api.devnet, waited for as it comes (its note store opens first): a loop
+    // of 5 ms ticks on the test clock read 1.8 s while the store opened (CI, 11 Nov)
     const firstFrom = async (from: number): Promise<number> => {
-      for (let i = 0; i < 2_000 && !sent.slice(from).some((x) => x.host === devnet); i++) await tick(5);
-      return sent.slice(from).find((x) => x.host === devnet)!.at - sent[from - 1]!.at;
+      const got = (): boolean => sent.slice(from).some((x) => x.host === devnet);
+      let f = (): void => {};
+      const came = new Promise<void>((ok) => sentWaits.add((f = () => void (got() && ok()))));
+      f();
+      const ok = await realWithin(came, 8_000);
+      sentWaits.delete(f);
+      assert.ok(ok, "the settle sent api.devnet nothing inside 8 s");
+      return sent.slice(from).find((x) => x.host === devnet)!.at;
     };
     let n1 = sent.length;
     void h.settle(n.id).catch(() => {});
-    const settleBefore = await firstFrom(n1);
-    assert.ok(settleBefore < 1_000, `a settle before its release: a trade's, at once (${settleBefore.toFixed(0)} ms)`);
+    const settleBefore = (await firstFrom(n1)) - passAt;
+    assert.ok(settleBefore < PASS_FLOOR_MS - 1_000, `a settle before its release: a trade's, sent before a pass's floor (${settleBefore.toFixed(0)} ms after the last pass)`);
     h.release();
     assert.equal(hostLane(DEVNET).trading(), true, "the sale's hold stands");
     // released, not landed (its sent before both RPCs report it succeeded): still a trade's, at once
     const released = lastOn(devnet);
     await Promise.all([h.rpcs[0]("getSlot", []), h.rpcs[1]("getSlot", [])]);
-    assert.ok(lastOn(devnet) - released < 100, "after its release alone: a trade's, at once");
+    assert.ok(lastOn(devnet) - released < PASS_FLOOR_MS - 1_000, "after its release alone: a trade's, before a pass's floor");
     h.landed();
     // a pass on each host now, so the next pass there waits PASS_FLOOR_MS
     await Promise.all([pageSolanaRpcs("pass")[0]("getSlot", []), pageSolanaRpcs("pass")[1]("getSlot", [])]);
@@ -320,7 +353,7 @@ test("card sell-right-after-a-buy: the buy's host reads as a trade's to its land
     assert.ok(lastOn(devnet) - pass2 >= PASS_FLOOR_MS - 100, `after its land: a pass's, at the floor (${(lastOn(devnet) - pass2).toFixed(0)} ms)`);
     n1 = sent.length;
     void h.settle(n.id).catch(() => {});
-    const afterMs = await firstFrom(n1);
+    const afterMs = (await firstFrom(n1)) - sent[n1 - 1]!.at;
     assert.ok(afterMs >= PASS_FLOOR_MS - 1_000, `its settle after its land: a pass's, at the floor (${afterMs.toFixed(0)} ms)`);
     h.release();
     h.end();

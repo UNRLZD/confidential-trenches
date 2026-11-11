@@ -14,6 +14,7 @@ import { sameBar } from "./candles.ts";
 import type { Bar, ChartTf } from "./candles.ts";
 import { valueText, volumeIn } from "./units.ts";
 import type { ChartUnit } from "./units.ts";
+import { zoomEvents } from "./zoomEvents.ts";
 
 const PERIOD: Record<ChartTf, { type: PeriodType; span: number }> = {
   "1s": { type: "second", span: 1 },
@@ -85,7 +86,8 @@ export function mountChart(el: HTMLElement, phone: boolean, onBar: (b: KLineData
   if (!chart) return null;
   addVolume(chart, phone);
   // the newest bar close to the price axis, as R5 draws it
-  chart.setOffsetRightDistance(phone ? 16 : 40);
+  const offsetRight = phone ? 16 : 40;
+  chart.setOffsetRightDistance(offsetRight);
   // the price range starts under the legend (its rows: two on desktop, three on the phone), in px
   chart.overrideYAxis({ paneId: "candle_pane", gap: gapOf(phone) });
   // the library hands this action the pointer's own coordinates, never the bar under them (klinecharts 10.0.3
@@ -106,6 +108,7 @@ export function mountChart(el: HTMLElement, phone: boolean, onBar: (b: KLineData
     bars: [],
     key: null,
     push: null,
+    offsetRight,
     get unit() {
       return unit;
     },
@@ -122,8 +125,33 @@ export function mountChart(el: HTMLElement, phone: boolean, onBar: (b: KLineData
       drawn.push = null;
     },
   });
+  // the pointer in the plot's own px under the shell's design-fit zoom (zoomEvents.ts), removed with the chart
+  unzoomed.set(el, zoomEvents(el));
+  // the view, for checks (the plot's own px): the newest bar's x in the candle pane and the bar space, each frame it moves
+  let frame = 0;
+  const view = () => {
+    frame = 0;
+    try {
+      const last = chart.getDataList().at(-1);
+      const p = last ? (chart.convertToPixel({ timestamp: last.timestamp }, { paneId: CANDLE }) as { x?: number }) : null;
+      el.dataset.view = typeof p?.x === "number" ? `${p.x.toFixed(2)}|${chart.getBarSpace().bar.toFixed(4)}` : "";
+    } catch {
+      // a chart disposed before its frame: nothing to read
+    }
+  };
+  chart.subscribeAction("onVisibleRangeChange", () => {
+    frame ||= requestAnimationFrame(view);
+  });
+  chart.subscribeAction("onScroll", () => {
+    frame ||= requestAnimationFrame(view);
+  });
+  chart.subscribeAction("onZoom", () => {
+    frame ||= requestAnimationFrame(view);
+  });
   return drawn;
 }
+
+const unzoomed = new WeakMap<HTMLElement, () => void>();
 
 /** A mounted chart, the bars it draws and what they were drawn for; `push` is the library's live feed while it holds
  *  a full load (a bar of the newest's time replaces it, a newer one is appended). */
@@ -132,6 +160,8 @@ export interface Drawn {
   bars: readonly Bar[];
   key: string | null;
   push: ((k: KLineData) => void) | null;
+  /** The newest bar's distance from the price axis at the live edge, in px. */
+  offsetRight: number;
   /** The unit the axis and the volume pane draw in. */
   unit: ChartUnit;
 }
@@ -148,21 +178,62 @@ export function drawBars(d: Drawn, ticker: string, tf: ChartTf, bars: readonly B
 /** Draws `bars` (card app-chart-live): when the chart already draws this ticker, timeframe and precision and the bars
  *  differ only from its newest bar on (the fold's usual change: the last bar updated, new bars after it), each of
  *  those goes through the library's live feed, so the last candle and the price mark move and the view keeps its
- *  scroll and zoom; any other change draws them all again (drawBars). Returns whether it drew them all again. */
+ *  scroll and zoom. Any other change to the same ticker and timeframe (a late trade in a bar before the newest, the
+ *  full read's resync, a new precision or unit) draws them all again and keeps the view (card
+ *  chart-drags-and-tracks-the-pointer: such a redraw snapped a dragged chart back to the newest bar and reset its price
+ *  axis); a new ticker or timeframe starts the view over (drawBars). Returns whether the view started over. */
 export function liveBars(d: Drawn, ticker: string, tf: ChartTf, bars: readonly Bar[], precision: number): boolean {
   const old = d.bars;
   const k = old.length - 1;
-  const tail = d.key === `${ticker}|${tf}|${precision}|${unitKey(d.unit)}` && d.push !== null && k >= 0 && bars.length >= old.length && bars[k]!.timestamp === old[k]!.timestamp && old.slice(0, k).every((b, i) => b === bars[i] || sameBar(b, bars[i]!));
-  if (!tail) {
+  const key = `${ticker}|${tf}|${precision}|${unitKey(d.unit)}`;
+  const tail = d.key === key && d.push !== null && k >= 0 && bars.length >= old.length && bars[k]!.timestamp === old[k]!.timestamp && old.slice(0, k).every((b, i) => b === bars[i] || sameBar(b, bars[i]!));
+  if (tail) {
+    d.bars = bars;
+    for (const b of bars.slice(k)) d.push!({ ...b });
+    return false;
+  }
+  if (d.key === null || !d.key.startsWith(`${ticker}|${tf}|`)) {
     drawBars(d, ticker, tf, bars, precision);
     return true;
   }
-  d.bars = bars;
-  for (const b of bars.slice(k)) d.push!({ ...b });
+  keepView(d, () => {
+    if (d.key === key) {
+      // the same symbol: the bars read again, the price axis's own range kept (setSymbol and setPeriod reset it)
+      d.bars = bars;
+      d.chart.resetData();
+    } else drawBars(d, ticker, tf, bars, precision);
+  });
   return false;
 }
 
-export const unmountChart = (el: HTMLElement): void => dispose(el);
+/** Runs `redraw` (a full reload, which the library draws at the newest bar) and puts the view back: a chart at its live
+ *  edge stays there, with any new bars; a chart dragged or zoomed away from it keeps the same bar at the same x. */
+function keepView(d: Drawn, redraw: () => void): void {
+  const live = Math.abs(d.chart.getOffsetRightDistance() - d.offsetRight) < 0.5;
+  const at = live ? null : newestX(d);
+  redraw();
+  if (at === null) return;
+  const now = xOf(d, at.ts);
+  if (now !== null && Math.abs(now - at.x) > 0.01) d.chart.scrollByDistance(at.x - now);
+}
+
+function xOf(d: Drawn, ts: number): number | null {
+  const p = d.chart.convertToPixel({ timestamp: ts }, { paneId: CANDLE }) as { x?: number };
+  return typeof p?.x === "number" && Number.isFinite(p.x) ? p.x : null;
+}
+
+function newestX(d: Drawn): { ts: number; x: number } | null {
+  const last = d.chart.getDataList().at(-1);
+  if (!last) return null;
+  const x = xOf(d, last.timestamp);
+  return x === null ? null : { ts: last.timestamp, x };
+}
+
+export function unmountChart(el: HTMLElement): void {
+  unzoomed.get(el)?.();
+  unzoomed.delete(el);
+  dispose(el);
+}
 
 const unitKey = (u: ChartUnit) => `${u.mc ? "mc" : "price"}/${u.quote ? "coin" : "usd"}`;
 
