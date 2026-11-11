@@ -611,12 +611,12 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
         sim = s;
         height = (h as { value?: { lastValidBlockHeight?: unknown } })?.value?.lastValidBlockHeight as number;
       } catch (e) {
-        // the provider's signature verification failure (JSON-RPC -32003, agave rpc custom error): named, nothing sent
-        if (/^RPC error -32003\b/.test(String((e as Error)?.message ?? ""))) return { ...no(422, "signature_failed"), note: { err: "signature" } };
         return unread(e);
       }
       const v = (sim as { value?: { err?: unknown } } | null)?.value;
       if (typeof v !== "object" || v === null || !("err" in v)) return no(503, "upstream");
+      // as a public mainnet RPC answers (read 11 Nov 18:13Z): a signature that does not hold is value.err
+      // "SignatureFailure", a blockhash it does not know "BlockhashNotFound"
       if (v.err === "SignatureFailure") return { ...no(422, "signature_failed"), note: { err: "signature" } };
       if (v.err === "BlockhashNotFound") return { ...no(422, "blockhash_not_found"), note: { err: simErrText(v.err) } };
       if (v.err !== null) return { ...no(422, "simulation_failed", JSON.stringify(v.err).slice(0, 200)), note: { err: simErrText(v.err) } };
