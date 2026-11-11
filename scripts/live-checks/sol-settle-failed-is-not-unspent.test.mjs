@@ -87,3 +87,13 @@ test("planted in the bundle's excerpt: each rule broken in place FAILs", () => {
     assert.equal(judge(broken, { ledger: false }).ok, false, name);
   }
 });
+
+test("the buy's settle pair named by its kind at the call (card sell-right-after-a-buy: settleRpcs(kind)) still hands the slots; with the slots dropped in that shape: FAIL", () => {
+  const index = A.good.index;
+  const js = readFileSync(new URL("./sol-settle-failed-is-not-unspent.excerpt.txt", import.meta.url), "utf8");
+  const host = /(noteId:[\w$]+,program:[\w$]+\.program,minSlots:[\w$]+,rpcs:[\w$]+)\(\)/.exec(js);
+  assert.ok(host, "a host's settle call is in the excerpt");
+  const kinded = js.replace(host[0], `${host[1]}(u)`);
+  assert.equal(facts(index, kinded).hosts, true, "rpcs:x(u) is the settle pair of the buy's kind");
+  assert.equal(facts(index, kinded.replace(/minSlots:[\w$]+,rpcs:[\w$]+\(u\)/, "rpcs:x(u)")).hosts, false, "that call with no slots");
+});
