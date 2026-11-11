@@ -44,7 +44,7 @@ export function triggerProblems(yml) {
   if (!("merge_group" in t) || !/types: \[checks_requested\]/.test(t.merge_group)) p.push("ci.yml does not run on merge_group checks_requested: no commit on main would have a full run");
   if (!("pull_request" in t) || !/branches: \[main\]/.test(t.pull_request)) p.push("ci.yml does not run on pull requests into main");
   if (!("workflow_dispatch" in t)) p.push("ci.yml has no workflow_dispatch: a commit with no full run could not be given one");
-  for (const k of Object.keys(t)) if (!["pull_request", "merge_group", "schedule", "workflow_dispatch"].includes(k)) p.push(`ci.yml runs on ${k}, which this rule does not know`);
+  for (const k of Object.keys(t)) if (!["pull_request", "merge_group", "schedule", "workflow_dispatch", "push"].includes(k)) p.push(`ci.yml runs on ${k}, which this rule does not know`);
   return p;
 }
 
