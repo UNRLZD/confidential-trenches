@@ -29,9 +29,21 @@
 //   HOLDINGS_RPC_LIMIT (M367), on one queue of their own per helper route URL: keyed on the readers' own function,
 //   never the route's URL, so a restore never slows the trade path's calls on the same /v1/rpc route. A Solana round's
 //   three calls go out in one tick and the limit's total is one round, so they are booked as one unit, at one
-//   instant, and a failed round leaves no call behind it. The helper's 429 is a failed round: the reader waits its
-//   Retry-After (at most RETRY_AFTER_MAX_MS, else RETRY_AFTER_DEFAULT_MS) and reads again, within SOL_HOLDINGS_ROUNDS
-//   or EVM_HOLDINGS_ROUNDS. The budget the helper enforces per client is card helper-abuse-limits.
+//   instant, and a failed round leaves no call behind it. The budget the helper enforces per client is card
+//   helper-abuse-limits. The testnet build reads its devnet RPC (solanaHoldingsAt) with the same one try a call and the
+//   same gate, paced in that URL's one queue (the kit's keyless limit, which the page's devnet pair shares), so the
+//   holdings reads never add a budget of their own to a public host.
+// - A throttle (card signpage-throttled-read-is-not-asked-again-at-once): a 429, or a JSON-RPC throttle code, is a
+//   failed round, and the route is not asked again until its gate opens (../throttle.ts ThrottleGate: the Retry-After,
+//   capped, else a pause doubling from THROTTLE_PAUSE_FIRST_MS to THROTTLE_PAUSE_MAX_MS, back to none after an answer).
+//   The gate is the route's, shared by every reader of it (a positions pass, a sell's read, a restore), so a pass run
+//   again, or a run of buys and sells each asking for one, never asks a throttled route faster than the gate. One round
+//   of the route goes at a time (the gate's turn, taken before the gate is waited, given back once the round's calls
+//   settle, on an answer, a throw or a stop), so two list reads at once ask no faster than one: at most
+//   HOLDINGS_THROTTLED_ROUNDS_60S rounds a minute a page; two tabs hold two gates, so at most twice that. It is never
+//   the trade path's: a buy's own reads on the same URL keep their own retry and gate. A read (every W of one list)
+//   waits the gate for at most HOLDINGS_THROTTLE_MAX_MS from the list's start, then is refused without asking; within
+//   that, SOL_HOLDINGS_ROUNDS or EVM_HOLDINGS_ROUNDS.
 // - One failure never hides the rest: a pool that fails reports its error and the others still list.
 // - Privacy: every request names one W and nothing else of the user's: no batch, no call carries two Ws. The Ws of every
 //   pool are read one after another in a random order, never in the notes' order.
@@ -45,6 +57,8 @@ import type { NoteRef } from "../notes/secrets.ts";
 import { refKey, type NoteStore } from "../notes/store.ts";
 import { evmRpcHex } from "./evm.ts";
 import { jOf } from "./queue.ts";
+import { sleepFor } from "../busy.ts";
+import { ThrottleGate } from "../throttle.ts";
 import { solanaRestoreNotes, type SolanaRestoredNote, type SolanaRestoredSpend } from "./solana-restore.ts";
 import { SOL_LAG_SLOTS, SOL_LAG_WAIT_MS } from "./solana.ts";
 
@@ -60,7 +74,8 @@ export type Holdings = { native: bigint; tokens: ReadonlyMap<string, TokenHoldin
 /** One provider's read of one W's holdings, at one state. */
 export interface HoldingsReader {
   readonly chain: BuyChain;
-  read(address: string, signal?: AbortSignal): Promise<Holdings>;
+  /** `by`: the Date.now time past which a throttled route is not waited for (default: HOLDINGS_THROTTLE_MAX_MS on). */
+  read(address: string, signal?: AbortSignal, by?: number): Promise<Holdings>;
 }
 
 /** A spent note of a pool: its ref and the label of its leaf. */
@@ -82,6 +97,14 @@ export type BuyWallets = { wallets: BuyWallet[]; failed: { pool: string; error: 
  * of mainnet-beta's rounds answer from backends at different slots, and a W took up to 4 rounds live (M367; see
  * HOLDINGS_RPC_LIMIT), so 8 leaves a refusal to a chain that keeps moving under the reads. */
 export const SOL_HOLDINGS_ROUNDS = 8;
+/** The longest a read (every W of one list: a sell's from its tap, a positions pass's) waits a throttled route, from
+ *  its start; a wait that would end past it is not begun, and the read is refused without asking. */
+export const HOLDINGS_THROTTLE_MAX_MS = 30_000;
+/** The most rounds a route asks in the first 60 s of a provider that answers every one with a 429 and names no
+ *  Retry-After, whoever asks (a pass run again, a sell, buys ending): the gate's pauses from THROTTLE_PAUSE_FIRST_MS,
+ *  doubling to THROTTLE_PAUSE_MAX_MS, put the rounds at 0, 1, 3, 7, 15, 25, 35, 45 and 55 s. Before the gate a
+ *  devnet read asked about 2 getTokenAccountsByOwner a second (app-a2-e2e run 4: 638 in 300 s). */
+export const HOLDINGS_THROTTLED_ROUNDS_60S = 9;
 /** An EVM W's reads are made again after the helper's 429 at most this many times before a refusal. */
 export const EVM_HOLDINGS_ROUNDS = 4;
 /** The holdings readers' own pace on a helper route (M367), both chains: one Solana round (getBalance and the two
@@ -171,6 +194,8 @@ async function readDerived(pools: readonly BuyPool[], derived: readonly (BuyWall
   // each read's own copies: a read again starts from no holdings
   const found = derived.map((ws) => ws.map((w): BuyWallet | undefined => (w === undefined ? undefined : { ...w, holdings: { native: 0n, tokens: new Map(), unreadable: [] } })));
   const jobs = all.filter((j) => only === undefined || only.has(j.address));
+  // the whole list's bound on a throttled route, from its start (a sell's from its tap)
+  const by = Date.now() + HOLDINGS_THROTTLE_MAX_MS;
   // Fisher-Yates over every pool's Ws
   for (let i = jobs.length - 1; i > 0; i--) {
     const r = pick(i + 1);
@@ -181,7 +206,7 @@ async function readDerived(pools: readonly BuyPool[], derived: readonly (BuyWall
     if (failed.has(p)) continue;
     opts.signal?.throwIfAborted();
     try {
-      found[p]![k]!.holdings = await pools[p]!.reader.read(address, opts.signal);
+      found[p]![k]!.holdings = await pools[p]!.reader.read(address, opts.signal, by);
     } catch (e) {
       opts.signal?.throwIfAborted();
       failed.set(p, `wallet ${k}: ${msg(e)}`);
@@ -213,27 +238,67 @@ class RpcFailed extends Error {
  *  comes, so a call queued before a stop never goes out after it (a sign out's next account never sees one of the last
  *  account's Ws named after it signs in). */
 const stopOf = new WeakMap<readonly unknown[], AbortSignal>();
-async function call(rpc: JsonRpc, method: string, params: readonly unknown[], signal?: AbortSignal): Promise<unknown> {
+/** A reader's route: its rpc, its gate (the route's), and the Retry-After of the route's latest 429 when it reads one. */
+type Asker = { rpc: JsonRpc; gate: ThrottleGate; hint?: () => number };
+async function call(a: Asker, method: string, params: readonly unknown[], signal?: AbortSignal): Promise<unknown> {
   signal?.throwIfAborted();
   if (signal !== undefined) stopOf.set(params, signal);
+  const sentIn = a.gate.epoch();
   try {
-    return await rpc(method, params);
+    return await a.rpc(method, params);
   } catch (e) {
+    // only a throttle reaches the gate here; the pause goes back to none once a whole round goes through (the reader's
+    // answered), never on one call's answer: a provider that throttles one method answers the others
+    const f = failure(method, e);
+    if (f.http === 429) a.gate.throttled(sentIn, Math.max(f.afterMs ?? 0, a.hint?.() ?? 0));
     signal?.throwIfAborted();
-    // a provider's throttle past the kit client's retry (kit send.ts SolanaRpcTransportError: HTTP 429, or a throttle
-    // code such as -32029 in a 200), read by its fault, never its words: a 429, its Retry-After kept
-    const t = e as { name?: unknown; fault?: unknown; afterMs?: unknown } | null;
-    if (t?.name === "SolanaRpcTransportError" && (t.fault === "http_429" || t.fault === "rpc_throttled")) throw new RpcFailed(method, undefined, 429, typeof t.afterMs === "number" ? t.afterMs : null);
-    // the kit's JSON-RPC client's text for a non-2xx answer: "HTTP 429", or past its retry "HTTP 503 (http_5xx, 1 try at
-    // <host>)"
-    const http = /^HTTP (\d{3})(?: \(|$)/.exec(msg(e))?.[1];
-    throw new RpcFailed(method, /RPC error (-?\d+)/.exec(msg(e))?.[1], http === undefined ? undefined : Number(http));
+    throw f;
   }
 }
-const is429 = (e: unknown): boolean => e instanceof RpcFailed && e.http === 429;
-/** The wait before the next round after a 429: the route's (wait429), or the provider's own Retry-After when longer,
- *  capped at RETRY_AFTER_MAX_MS. */
-const waitAfter = (e: unknown, wait429: () => number): number => Math.max(wait429(), Math.min(e instanceof RpcFailed && e.afterMs !== null ? e.afterMs : 0, RETRY_AFTER_MAX_MS));
+/** A call's failure as RpcFailed: a throttle (HTTP 429, or a JSON-RPC throttle code) as http 429. */
+function failure(method: string, e: unknown): RpcFailed {
+  // a provider's throttle past the kit client's retry (kit send.ts SolanaRpcTransportError: HTTP 429, or a throttle
+  // code such as -32029 in a 200), read by its fault, never its words: a 429, its Retry-After kept
+  const t = e as { name?: unknown; fault?: unknown; afterMs?: unknown } | null;
+  if (t?.name === "SolanaRpcTransportError" && (t.fault === "http_429" || t.fault === "rpc_throttled")) return new RpcFailed(method, undefined, 429, typeof t.afterMs === "number" ? t.afterMs : null);
+  // the kit's JSON-RPC client's text for a non-2xx answer: "HTTP 429", or past its retry "HTTP 503 (http_5xx, 1 try at
+  // <host>)"
+  const http = /^HTTP (\d{3})(?: \(|$)/.exec(msg(e))?.[1];
+  const code = /RPC error (-?\d+)/.exec(msg(e))?.[1];
+  // a throttle code in a 200, as the kit's client without its retry throws it (its RPC_THROTTLE_CODES)
+  if (code !== undefined && RPC_THROTTLE_CODES.has(code)) return new RpcFailed(method, undefined, 429);
+  return new RpcFailed(method, code, http === undefined ? undefined : Number(http));
+}
+/** The kit's JSON-RPC throttle codes (send.ts RPC_THROTTLE_CODES), as the text of its error carries them. */
+const RPC_THROTTLE_CODES: ReadonlySet<string> = new Set(["-32029", "-32429", "-429", "15"]);
+const is429 = (e: unknown): e is RpcFailed => e instanceof RpcFailed && e.http === 429;
+/** Before a round, holding the gate's turn: the route's gate waited out until it is open, unless it would open past
+ *  `by` (then refused, nothing asked). */
+async function held(gate: ThrottleGate, by: number, sleep: Sleep, signal?: AbortSignal): Promise<void> {
+  for (let w = gate.left(); w > 0; w = gate.left()) {
+    if (Date.now() + w > by) throw new Error(`its reads drew the provider's 429 past ${HOLDINGS_THROTTLE_MAX_MS / 1_000} s`);
+    await sleep(w, signal);
+    signal?.throwIfAborted();
+  }
+}
+/** One round of a reader on its gate: the gate's turn, the gate waited out, the round, the turn given back however the
+ *  round ends. `round` gets the epoch its calls are sent in. */
+async function inTurn<T>(gate: ThrottleGate, by: number, sleep: Sleep, signal: AbortSignal | undefined, round: (sentIn: number) => Promise<T>): Promise<T> {
+  const give = await gate.turn(signal);
+  try {
+    await held(gate, by, sleep, signal);
+    return await round(gate.epoch());
+  } finally {
+    give();
+  }
+}
+/** A reader's gate when its route gives none: one per rpc it reads on (never per URL, so never another's queue). */
+const ownGates = new WeakMap<object, ThrottleGate>();
+const gateOf = (rpc: object): ThrottleGate => {
+  let g = ownGates.get(rpc);
+  if (g === undefined) ownGates.set(rpc, (g = new ThrottleGate()));
+  return g;
+};
 
 /** A helper's 429 is a failed round: the reader waits this long (its Retry-After, capped), then reads again. */
 export const RETRY_AFTER_MAX_MS = 10_000;
@@ -261,29 +326,35 @@ function retryAfterFetch(): { fetch: SolanaFetch; wait429: () => number } {
     wait429: () => next,
   };
 }
-/** The readers' paced transport on one helper route URL, at HOLDINGS_RPC_LIMIT, made once and shared by every reader
- * of it. Its queue is keyed on its own function with no url, so the kit never adds this limit to the route URL's
- * queue, where the trade path's calls (send.ts rpcPath, solanaPacedRpc on the helper) are paced. */
-const holdingsRoutes = new Map<string, { rpc: SolanaRpc; wait429: () => number }>();
-function holdingsRoute(make: (fetch: SolanaFetch) => SolanaRpc): { rpc: SolanaRpc; wait429: () => number } {
+/** The readers' paced transport on one route URL, with its throttle gate, made once and shared by every reader of it.
+ * On the helper ("own"), at HOLDINGS_RPC_LIMIT in a queue keyed on its own function with no url, so the kit never adds
+ * this limit to the route URL's queue, where the trade path's calls (send.ts rpcPath, solanaPacedRpc on the helper) are
+ * paced. On a public host the device reaches ("url"), in that URL's one queue at the kit's keyless limit, beside the
+ * page's own pair, so the host is never asked past the one budget. The gate is the route's either way, so a throttle
+ * met here never holds the trade path back. */
+type Route = { rpc: SolanaRpc; wait429: () => number; gate: ThrottleGate };
+const holdingsRoutes = new Map<string, Route>();
+function holdingsRoute(make: (fetch: SolanaFetch) => SolanaRpc, queue: "own" | "url" = "own"): Route {
   const t = retryAfterFetch();
   const bare = make(t.fetch);
-  let r = holdingsRoutes.get(String(bare.url));
+  const key = `${queue} ${String(bare.url)}`;
+  let r = holdingsRoutes.get(key);
   if (r === undefined) {
-    // no url: the kit keys its queue on this function; a call whose read was stopped while it waited its turn is not sent
-    const own: SolanaRpc = (method, params) => {
+    // a call whose read was stopped while it waited its turn is not sent
+    const stopped = (method: string, params: readonly unknown[]): Promise<unknown> => {
       const stop = stopOf.get(params);
       return stop?.aborted ? Promise.reject(stop.reason) : bare(method, params);
     };
-    r = { rpc: solanaPacedRpc(own, HOLDINGS_RPC_LIMIT), wait429: t.wait429 };
-    holdingsRoutes.set(String(bare.url), r);
+    const rpc = queue === "url" ? solanaPacedRpc(Object.assign(stopped, { url: bare.url })) : solanaPacedRpc(stopped, HOLDINGS_RPC_LIMIT);
+    r = { rpc, wait429: t.wait429, gate: new ThrottleGate() };
+    holdingsRoutes.set(key, r);
   }
   return r;
 }
-/** How a reader waits after a 429: wait429 gives the wait (the transport's Retry-After; RETRY_AFTER_DEFAULT_MS when
- * none), sleep waits it (tests only). */
-export type ReaderOpts = { wait429?: () => number; sleep?: (ms: number) => Promise<void> };
-const sleepMs = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+/** How a reader waits after a 429: gate is the route's (default: the reader's own for its rpc), wait429 the
+ * transport's Retry-After of the latest 429 (the gate's wait when longer), sleep waits (tests only; a stop ends it). */
+type Sleep = (ms: number, signal?: AbortSignal) => Promise<void>;
+export type ReaderOpts = { wait429?: () => number; sleep?: Sleep; gate?: ThrottleGate };
 function helperUrl(origin: string, chain: "base" | "robinhood"): string {
   let u: URL;
   try { u = new URL(origin); } catch { throw new Error("the helper origin must be an origin"); }
@@ -301,16 +372,17 @@ function slotted(a: unknown, what: string, min: number | undefined): Slotted<unk
 
 /** One Solana provider's reader (production: solanaHelperHoldings). */
 export function solanaHoldingsReader(rpc: SolanaRpc, o: ReaderOpts = {}): HoldingsReader {
-  const wait429 = o.wait429 ?? (() => RETRY_AFTER_DEFAULT_MS), sleep = o.sleep ?? sleepMs;
+  const sleep = o.sleep ?? sleepFor;
+  const a: Asker = { rpc, gate: o.gate ?? gateOf(rpc), ...(o.wait429 ? { hint: o.wait429 } : {}) };
   const cfg = (min?: number) => ({ commitment: "finalized", ...(min === undefined ? {} : { minContextSlot: min }) });
   const balance = async (owner: string, min?: number, signal?: AbortSignal): Promise<Slotted<bigint>> => {
-    const r = slotted(await call(rpc, "getBalance", [owner, cfg(min)], signal), "getBalance", min);
+    const r = slotted(await call(a, "getBalance", [owner, cfg(min)], signal), "getBalance", min);
     if (!Number.isSafeInteger(r.value) || (r.value as number) < 0) throw new Error("getBalance: not a whole number in range");
     return { slot: r.slot, value: BigInt(r.value as number) };
   };
   type Acct = { pubkey: string; mint: string; amount: bigint; frozen: boolean };
   const accounts = async (owner: string, program: string, min?: number, signal?: AbortSignal): Promise<Slotted<Acct[]>> => {
-    const r = slotted(await call(rpc, "getTokenAccountsByOwner", [owner, { programId: program }, { ...cfg(min), encoding: "base64" }], signal), "getTokenAccountsByOwner", min);
+    const r = slotted(await call(a, "getTokenAccountsByOwner", [owner, { programId: program }, { ...cfg(min), encoding: "base64" }], signal), "getTokenAccountsByOwner", min);
     if (!Array.isArray(r.value)) throw new Error("getTokenAccountsByOwner: not a list");
     return {
       slot: r.slot,
@@ -325,36 +397,48 @@ export function solanaHoldingsReader(rpc: SolanaRpc, o: ReaderOpts = {}): Holdin
   };
   return {
     chain: "sol",
-    async read(address, signal) {
-      const once = (min?: number) => Promise.all([balance(address, min, signal), accounts(address, SOLANA_TOKEN_PROGRAM, min, signal), accounts(address, SOLANA_TOKEN_2022_PROGRAM, min, signal)] as const);
+    async read(address, signal, by = Date.now() + HOLDINGS_THROTTLE_MAX_MS) {
+      // the round's three calls together, every one settled before the round ends (its turn is given back only then)
+      const once = async (min?: number) => {
+        const got = await Promise.allSettled([balance(address, min, signal), accounts(address, SOLANA_TOKEN_PROGRAM, min, signal), accounts(address, SOLANA_TOKEN_2022_PROGRAM, min, signal)] as const);
+        for (const g of got) if (g.status === "rejected") throw g.reason;
+        return got.map((g) => (g as PromiseFulfilledResult<unknown>).value) as [Slotted<bigint>, Slotted<Acct[]>, Slotted<Acct[]>];
+      };
       // Each round reads all three at the highest slot seen (none in the first). A round fails when they answer at
-      // different slots, or on the helper's 429 (after its wait); the next round asks again, and SOL_HOLDINGS_ROUNDS
+      // different slots, or on a 429 (the next waits the route's gate); the next round asks again, and SOL_HOLDINGS_ROUNDS
       // failed rounds are a refusal. A backend behind the slot asked (-32016) is asked again a slot later, SOL_LAG_SLOTS
       // waits at most, as every Solana read of the wallet (./solana.ts solanaLagRetry): it waits for the chain.
       let r: Awaited<ReturnType<typeof once>> | undefined;
       let min: number | undefined;
-      let last: unknown = null;
       for (let round = 1, lags = 0; ; ) {
         signal?.throwIfAborted();
-        let why = "met at no one slot";
-        try {
-          r = await once(min);
-          const slots = [r[0].slot, r[1].slot, r[2].slot];
-          const top = Math.max(...slots);
-          if (slots.every((s) => s === top)) break;
-          min = top;
-        } catch (e) {
-          if (min !== undefined && e instanceof RpcFailed && e.code === MIN_CONTEXT_SLOT_NOT_REACHED) {
-            if (++lags > SOL_LAG_SLOTS) throw e;
-            await sleep(SOL_LAG_WAIT_MS);
-            continue;
+        // how the round ended, in the route's turn: "met" (one slot), "apart" (slots apart), "lag" (a backend behind the
+        // slot asked; waited for outside the turn) or "429"
+        const ended = await inTurn(a.gate, by, sleep, signal, async (sentIn) => {
+          try {
+            r = await once(min);
+            a.gate.answered(sentIn);
+            const slots = [r[0].slot, r[1].slot, r[2].slot];
+            const top = Math.max(...slots);
+            if (slots.every((s) => s === top)) return "met";
+            min = top;
+            return "apart";
+          } catch (e) {
+            if (min !== undefined && e instanceof RpcFailed && e.code === MIN_CONTEXT_SLOT_NOT_REACHED) {
+              if (++lags > SOL_LAG_SLOTS) throw e;
+              return "lag";
+            }
+            if (!is429(e)) throw e;
+            return "429";
           }
-          if (!is429(e)) throw e;
-          why = "drew the helper's 429";
-          last = e;
+        });
+        if (ended === "met") break;
+        if (ended === "lag") {
+          await sleep(SOL_LAG_WAIT_MS);
+          continue;
         }
+        const why = ended === "429" ? "drew the helper's 429" : "met at no one slot";
         if (round++ >= SOL_HOLDINGS_ROUNDS) throw new Error(`its reads ${why} in ${SOL_HOLDINGS_ROUNDS} rounds`);
-        if (why !== "met at no one slot") await sleep(waitAfter(last, wait429));
       }
       if (r === undefined) throw new Error("no read");
       const keys = new Set<string>();
@@ -374,7 +458,14 @@ export function solanaHoldingsReader(rpc: SolanaRpc, o: ReaderOpts = {}): Holdin
  * HOLDINGS_RPC_LIMIT on the readers' own queue for the route; a 429 waits the answer's Retry-After. */
 export function solanaHelperHoldings(origin: string): HoldingsReader {
   const r = holdingsRoute((fetch) => solanaHelperRpc(origin, { fetch }));
-  return solanaHoldingsReader(r.rpc, { wait429: r.wait429 });
+  return solanaHoldingsReader(r.rpc, { wait429: r.wait429, gate: r.gate });
+}
+/** The Solana reader on a provider the device reaches directly (the testnet build's devnet RPC): one try a call and the
+ *  route's gate, as the helper's, never the trade pair's client, whose retry asks a throttled provider up to four times
+ *  a call; paced in the URL's one queue, the pair's own, so the host's calls never rise past that one budget. */
+export function solanaHoldingsAt(url: string): HoldingsReader {
+  const r = holdingsRoute((fetch) => solanaJsonRpc(url, { fetch }), "url");
+  return solanaHoldingsReader(r.rpc, { wait429: r.wait429, gate: r.gate });
 }
 
 /** A Solana pool's restored notes to its buys' Ws: its spends must be exactly its SPENT notes, each at jOf(ref). */
@@ -403,35 +494,39 @@ const BALANCE_OF = "0x70a08231"; // balanceOf(address)
 
 /** One EVM provider's reader (production: evmHelperHoldings): one block, then every call at its hash. */
 export function evmHoldingsReader(rpc: JsonRpc, tokens: readonly string[], o: ReaderOpts = {}): HoldingsReader {
-  const wait429 = o.wait429 ?? (() => RETRY_AFTER_DEFAULT_MS), sleep = o.sleep ?? sleepMs;
+  const sleep = o.sleep ?? sleepFor;
+  const a: Asker = { rpc, gate: o.gate ?? gateOf(rpc), ...(o.wait429 ? { hint: o.wait429 } : {}) };
   const list = tokens.map((t) => toChecksum(t).toLowerCase());
   if (new Set(list).size !== list.length) throw new Error("evm tokens: a token twice");
   return {
     chain: "evm",
-    async read(address, signal) {
-      // the helper's 429 fails the round (after its wait): the next reads again from a new block, and
+    async read(address, signal, by = Date.now() + HOLDINGS_THROTTLE_MAX_MS) {
+      // a 429 fails the round (the next waits the route's gate): the next reads again from a new block, and
       // EVM_HOLDINGS_ROUNDS failed rounds are a refusal
       for (let round = 1; ; round++) {
-        let last: unknown;
-        try {
-          return await once(address, signal);
-        } catch (e) {
-          if (!is429(e)) throw e;
-          last = e;
-        }
+        const h = await inTurn(a.gate, by, sleep, signal, async (sentIn) => {
+          try {
+            const got = await once(address, signal);
+            a.gate.answered(sentIn);
+            return got;
+          } catch (e) {
+            if (!is429(e)) throw e;
+            return null;
+          }
+        });
+        if (h !== null) return h;
         if (round >= EVM_HOLDINGS_ROUNDS) throw new Error(`its reads drew the helper's 429 in ${EVM_HOLDINGS_ROUNDS} rounds`);
-        await sleep(waitAfter(last, wait429));
       }
     },
   };
   async function once(address: string, signal?: AbortSignal): Promise<Holdings> {
     const w = toChecksum(address).toLowerCase();
     signal?.throwIfAborted();
-    const blk = (await call(rpc, "eth_getBlockByNumber", ["latest", false], signal)) as { hash?: unknown; number?: unknown } | null;
+    const blk = (await call(a, "eth_getBlockByNumber", ["latest", false], signal)) as { hash?: unknown; number?: unknown } | null;
     const hash = evmRpcHex(blk?.hash), number = evmRpcHex(blk?.number);
     if (hash === null || !WORD.test(hash) || number === null || !QUANTITY.test(number)) throw new Error("eth_getBlockByNumber: not a block");
     const at = { blockHash: hash };
-    const b = evmRpcHex(await call(rpc, "eth_getBalance", [w, at], signal));
+    const b = evmRpcHex(await call(a, "eth_getBalance", [w, at], signal));
     if (b === null || !QUANTITY.test(b)) throw new Error("eth_getBalance: not a quantity");
     const out = new Map<string, TokenHolding>();
     const unreadable: string[] = [];
@@ -439,7 +534,7 @@ export function evmHoldingsReader(rpc: JsonRpc, tokens: readonly string[], o: Re
       signal?.throwIfAborted();
       let r: unknown;
       try {
-        r = await call(rpc, "eth_call", [{ to: t, data: BALANCE_OF + w.slice(2).padStart(64, "0") }, at], signal);
+        r = await call(a, "eth_call", [{ to: t, data: BALANCE_OF + w.slice(2).padStart(64, "0") }, at], signal);
       } catch (e) {
         // reverted: the token's own answer. Any other error (a block a lagging backend lacks, a limit, an internal
         // error) is the provider's, and fails the pool so it is read again.
@@ -461,9 +556,9 @@ export function evmHoldingsReader(rpc: JsonRpc, tokens: readonly string[], o: Re
  * waits the answer's Retry-After. */
 export function evmHelperHoldings(origin: string, chain: "base" | "robinhood", tokens: readonly string[]): HoldingsReader {
   const r = evmHelperRoute(origin, chain);
-  return evmHoldingsReader(r.rpc, tokens, { wait429: r.wait429 });
+  return evmHoldingsReader(r.rpc, tokens, { wait429: r.wait429, gate: r.gate });
 }
-function evmHelperRoute(origin: string, chain: "base" | "robinhood"): { rpc: SolanaRpc; wait429: () => number } {
+function evmHelperRoute(origin: string, chain: "base" | "robinhood"): Route {
   const url = helperUrl(origin, chain);
   return holdingsRoute((fetch) => solanaJsonRpc(url, { init: HELPER_FETCH_INIT, fetch }));
 }

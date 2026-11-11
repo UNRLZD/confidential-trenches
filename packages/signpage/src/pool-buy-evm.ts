@@ -61,9 +61,9 @@ import { EVM_LAG_TRIES, EVM_LAG_WAIT_MS, EVM_SEND_MARGIN_MS, type EvmPoolPin, ty
 import type { ReadyProof } from "../../wallet/src/pool/pool.ts";
 import type { ProofQueue } from "../../wallet/src/pool/queue.ts";
 import { WALLET_SEED_LOCK, type WalletStore } from "@blindfill/wallet/store";
-import { checkEvmBuy, PoolRuleRefused, poolUnits, signEvmBuy, TOKEN_DECIMALS_MAX, tokenDecimalsOf, type PoolAsk } from "./rules/pool.ts";
+import { checkEvmBuy, PoolRuleRefused, poolUnits, signEvmBuy, TOKEN_DECIMALS_MAX, type PoolAsk } from "./rules/pool.ts";
 import { EvmSendBusy, EvmSendRefused, evmBuyCalldata, evmBuyVerdict, evmHeadNumber, evmPoolSend, evmReleaseRead, type EvmBuyVerdict, type EvmBuyWant, type EvmReleaseRead } from "./evm-send.ts";
-import { readTokenDecimals, type PoolRpc } from "./pool-kinds.ts";
+import { keptTokenDecimals, type PoolRpc } from "./pool-kinds.ts";
 import { TRADE_HELPER } from "./trade.ts";
 import type { HostAnswer, HostRefusal, KindContext, Running } from "./api.ts";
 
@@ -113,7 +113,7 @@ export type EvmPoolBuyHost = {
   quote(req: EvmPoolBuyQuoteRequest): Promise<EvmPoolBuyQuote>;
   /** The kit's evmPoolBuildQuoted. */
   build(adapter: string, q: EvmPoolBuyQuote): EvmPoolBuy;
-  /** The token's decimals, the same on both RPCs (rules/pool.ts tokenDecimalsOf); throws otherwise. */
+  /** The token's decimals, the same on both RPCs (rules/pool.ts tokenDecimalsOf, via pool-kinds.ts keptTokenDecimals); throws otherwise. */
   decimals(token: string): Promise<number>;
   /** POST /v1/pool/evm/send (evm-send.ts evmPoolSend): its hash a hint only. */
   send(body: { pool: string; data: Uint8Array; epoch: bigint }): Promise<string>;
@@ -526,7 +526,9 @@ export function evmBuyHost(chain: Chain, pin: EvmPoolPin, rpcs: readonly [EvmRpc
     seed64: page.seed64,
     quote: evmPoolBuyQuote,
     build: evmPoolBuildQuoted,
-    decimals: async (token) => tokenDecimalsOf(chain, await readTokenDecimals(chain, token, rpcs as readonly [PoolRpc, PoolRpc])),
+    // the page's kept decimals (pool-kinds.ts keptTokenDecimals: read on both RPCs and kept, so a sell after it reads none);
+    // no wait here: this read falls between the buy's quote check and W's signature, and fails fast as the heads read does
+    decimals: (token) => keptTokenDecimals(chain, token, rpcs as readonly [PoolRpc, PoolRpc], { waits: 0 }),
     send: (body) => evmPoolSend(TRADE_HELPER, body, page.fetch),
     settle: page.settle,
     // the pending write, before anything leaves, refuses a W that already has a holding (another tab's run of the same
