@@ -93,7 +93,8 @@ test("one row field by field against its recorded Jupiter row (TRUMP, top trendi
   assert.deepEqual([r.mint_auth, r.freeze_auth], [false, false]);
   assert.equal(r.launchpad, null, "a token with no launchpad is listed, tagged null (D-S4)");
   assert.equal(r.curve_bps, null, "no launchpad and no graduated pool: unknown");
-  assert.deepEqual([r.icon, r.venue, r.label, r.dev_bps, r.snipers_bps, r.creator_sold_bps, r.chg_4h_bps], [false, null, null, null, null, null, null]);
+  assert.equal(r.icon, true, "Jupiter's https icon: GET /v1/logo/solana/{token} serves it (logo.ts)");
+  assert.deepEqual([r.venue, r.label, r.dev_bps, r.snipers_bps, r.creator_sold_bps, r.chg_4h_bps], [null, null, null, null, null, null]);
 });
 
 test("app-discover-solana's asks: price null with no usdPrice, launchpad null with none, curve 10,000 once graduated, buys and sells for 1h", () => {

@@ -62,5 +62,47 @@ export function chainOf(chain: string | null | undefined): ChainMark | null {
   return typeof chain === "string" && own(CHAINS, chain) ? CHAINS[chain]! : null;
 }
 
+/** OKLCH, as the main app's padColors.ts writes a ring colour. */
+export type RingColor = { l: number; c: number; h: number };
+
+/**
+ * The ring colour of each pad, by the main app's method (UNRLZD components/viz/padColors.ts): the brand colour sampled
+ * from the pad's own logo in ./logos (the chroma-weighted main hue of its opaque pixels), kept saturated and clean, then
+ * moved by the smallest hue, lightness or chroma step until it clears the gain green, the loss red, the live blue, the
+ * neutral ring and every pad above it (test/pad-rings.test.ts holds each rule). The comment is the sample it moved from.
+ * A pad whose logo has no brand colour (white or grey on black) takes the one neutral ring, NEUTRAL_RING.
+ */
+export const PAD_RING: Readonly<Record<string, RingColor | "neutral">> = {
+  "pump.fun": { l: 0.76, c: 0.12, h: 154 }, // 0.76 0.14 154
+  "met-dbc": { l: 0.73, c: 0.18, h: 50 }, // 0.73 0.18 50
+  "letsbonk.fun": { l: 0.63, c: 0.18, h: 39 }, // 0.67 0.20 39
+  metadao: { l: 0.61, c: 0.24, h: 25 }, // 0.67 0.22 25
+  Raydium: { l: 0.59, c: 0.2, h: 261 }, // 0.62 0.20 261
+  "raydium-launchlab": { l: 0.56, c: 0.24, h: 278 }, // 0.62 0.20 261 (Raydium's logo)
+  stonkfun: { l: 0.69, c: 0.1, h: 225 }, // 0.69 0.10 225
+  "jup-studio": { l: 0.73, c: 0.1, h: 53 }, // 0.73 0.09 53
+  grainpad: { l: 0.56, c: 0.18, h: 20 }, // 0.70 0.20 43
+  zora: { l: 0.72, c: 0.14, h: 268 }, // 0.57 0.16 268
+  clanker: { l: 0.6, c: 0.17, h: 298 }, // 0.60 0.17 298
+  flaunch: { l: 0.7, c: 0.22, h: 349 }, // 0.70 0.24 349
+  virtuals: { l: 0.63, c: 0.1, h: 192 }, // 0.63 0.09 192
+  torch: { l: 0.78, c: 0.22, h: 148 }, // 0.80 0.16 148
+  "bags.fun": "neutral", // white on black
+  bags: "neutral", // white on black
+  doppler: "neutral", // white on black
+  pons: "neutral", // grey chrome, chroma 0.07
+};
+
+/** The one ring of a pad with no brand colour (the app's --text-2). */
+export const NEUTRAL_RING = "#a3a3a3";
+
+/** The CSS colour of a row's launchpad ring, or null when the row names no pad this table knows (the ring keeps its
+ *  stage colour, as the main app's does). */
+export function padRing(id: string | null | undefined): string | null {
+  if (typeof id !== "string" || !own(PAD_RING, id)) return null;
+  const r = PAD_RING[id]!;
+  return r === "neutral" ? NEUTRAL_RING : `oklch(${r.l} ${r.c} ${r.h})`;
+}
+
 /** The badge's diameter for an avatar of `size` px (design-lock-r5 P.badgeD): 36% of it, 10 to 16 px. */
 export const badgeSize = (size: number): number => Math.max(10, Math.min(16, Math.round(size * 0.36)));

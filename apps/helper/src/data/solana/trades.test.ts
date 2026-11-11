@@ -485,3 +485,82 @@ test("card helper-live-bars-no-503, control: a listed Solana token the helper ho
   assert.equal(a.status, 503);
   assert.deepEqual(JSON.parse(a.body), { error: { code: "upstream" } });
 });
+
+// card token-page-data-complete-and-fast: a coin launched against another coin (BUBBLE against FRONTIER, 11 Nov) had
+// an empty tape: its trades were dropped for a quote that is not SOL or USDC. They are priced at the quote coin's row.
+const QC = JSON.parse(readFileSync(path.join(HERE, "fixtures/sol-trades-quote-coin.json"), "utf8")) as { mint: string; quoteMint: string; signature: string; slot: number; logMessages: string[] };
+test("a coin quoted in another coin fills the tape, priced at that coin's USD price, and moves with it", async () => {
+  let on: SourceEvents | null = null;
+  let price = "0.87";
+  const asked: string[] = [];
+  let t0 = 1794409723 * 1000;
+  const t = createSolanaTrades({
+    fetch: rpcFetch({ sigs: () => [], txs: {}, price: 9_342_267_796n, pub: 1794409723, slot: QC.slot }, { [QC.mint]: 6, [QC.quoteMint]: 6 }),
+    now: () => t0,
+    listed: async (m) => m === QC.mint,
+    rpcs: ["https://rpc.test"],
+    source: (o) => ((on = o), { watch: async () => undefined, unwatch: () => undefined, close: () => undefined }),
+    quoteUsd: async (m) => (asked.push(m), price),
+    tickMs: 0,
+  });
+  assert.equal((await t.trades(QC.mint, 50)).status, 200);
+  on!.note(QC.mint, { sig: QC.signature, slot: QC.slot, err: false, logs: QC.logMessages });
+  await settle();
+  const rows = (JSON.parse((await t.trades(QC.mint, 50)).body) as { trades: { usd: string; amt: string; side: string; tx: string }[] }).trades;
+  // 53.265791 FRONTIER at 0.87 USD; 14,716,998.471539 BUBBLE
+  assert.deepEqual(rows.map((r) => [r.side, r.usd, r.amt, r.tx]), [["b", "46.34123817", "14716998.471539", QC.signature]]);
+  assert.deepEqual(asked, [QC.quoteMint], "the quote coin's price read once for the first trade");
+  // the quote coin's price is read again every REF_MS while the token is open
+  price = "1.74";
+  t0 += 5_000;
+  t.tick();
+  await settle();
+  assert.deepEqual(asked, [QC.quoteMint, QC.quoteMint]);
+});
+
+test("a quote coin with no price keeps the tape empty and the log says why, never which token", async () => {
+  let on: SourceEvents | null = null;
+  const lines: string[] = [];
+  let t0 = 1794409723 * 1000;
+  const t = createSolanaTrades({
+    fetch: rpcFetch({ sigs: () => [], txs: {}, price: 9_342_267_796n, pub: 1794409723, slot: QC.slot }, { [QC.mint]: 6, [QC.quoteMint]: 6 }),
+    now: () => t0,
+    listed: async (m) => m === QC.mint,
+    rpcs: ["https://rpc.test"],
+    source: (o) => ((on = o), { watch: async () => undefined, unwatch: () => undefined, close: () => undefined }),
+    quoteUsd: async () => null,
+    log: (l) => lines.push(l),
+    tickMs: 0,
+  });
+  await t.trades(QC.mint, 50);
+  on!.note(QC.mint, { sig: QC.signature, slot: QC.slot, err: false, logs: QC.logMessages });
+  await settle();
+  assert.deepEqual((JSON.parse((await t.trades(QC.mint, 50)).body) as { trades: unknown[] }).trades, []);
+  t0 += 61_000;
+  t.tick();
+  const line = lines.find((l) => l.startsWith("solana tape:"));
+  assert.equal(line, "solana tape: 1 tokens open, 1 empty: quote with no price 1, no trade of a venue read 0, quiet 0");
+  assert.ok(!lines.join("\n").includes(QC.mint));
+});
+
+// card token-page-data-complete-and-fast: a cold tape waited for its whole walk (30 reads, 5 at a time, oldest first)
+test("a first tape read answers after the walk's newest round, with the newest trades, before the older reads end", async () => {
+  const sigs = Array.from({ length: 10 }, (_, i) => `${BUY.signature.slice(0, -2)}${String(i).padStart(2, "0")}`);
+  const slow = new Set(sigs.slice(0, 5)); // the 5 oldest take 2.5 s each
+  const base = rpcFetch({ sigs: () => sigs.map((s, i) => ({ signature: s, slot: 465_000_000 + i, err: null })).reverse(), txs: Object.fromEntries(sigs.map((s) => [s, BUY.result])), price: 9_342_267_796n, pub: TS, slot: 100 }, { [MINT]: 6 });
+  let slowOpen = 0; // older reads started and not yet answered
+  const fetchSlow = async (url: string, init: RequestInit) => {
+    const req = JSON.parse(String(init.body)) as { method: string; params: [string] };
+    if (req.method === "getTransaction" && slow.has(req.params[0])) {
+      slowOpen++;
+      await new Promise((r) => setTimeout(r, 2_500));
+      slowOpen--;
+    }
+    return base(url, init);
+  };
+  const t = createSolanaTrades({ fetch: fetchSlow, now: () => TS * 1000, listed: async (m) => m === MINT, rpcs: ["https://rpc.test"], source: () => ({ watch: async () => undefined, unwatch: () => undefined, close: () => undefined }), tickMs: 0 });
+  const rows = (JSON.parse((await t.trades(MINT, 50)).body) as { trades: { tx: string }[] }).trades;
+  assert.ok(slowOpen > 0, "answered while the older reads still ran (the whole walk waited for: none open)");
+  assert.deepEqual(rows.map((r) => r.tx).sort(), sigs.slice(5).sort(), "the 5 newest trades");
+  t.stop();
+});

@@ -1,5 +1,8 @@
 /* the token avatar (Avatar.tsx); values are Discover's, after UNRLZD TokenAvatar */
-.tok-av { display: flex; flex: none; align-items: center; justify-content: center; border-radius: 50%; overflow: hidden; font-family: var(--font-num); font-weight: 700; letter-spacing: -0.05em; }
+.tok-av { position: relative; display: flex; flex: none; align-items: center; justify-content: center; border-radius: 50%; overflow: hidden; font-family: var(--font-num); font-weight: 700; letter-spacing: -0.05em; }
+/* the token's logo over the initials (UNRLZD TokenAvatar: object-fit cover, round), shown once it has loaded */
+.tok-logo { position: absolute; inset: 0; display: block; width: 100%; height: 100%; object-fit: cover; border-radius: 50%; opacity: 0; }
+.tok-logo[data-loaded="true"] { opacity: 1; }
 /* the origin badges (design-lock-r5 proto.css .tav .pb/.cb): the launchpad bottom-right, the chain top-right, round on the
    page colour with a 1.5px panel ring */
 .tok-avw { position: relative; display: block; flex: none; }

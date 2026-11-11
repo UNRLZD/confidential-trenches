@@ -124,7 +124,7 @@ test("card token-page-fills-after: a Jupiter row answers filling false, and ever
   const p = ask(tok, mint(7));
   await until(t, p, 1_000);
   assert.deepEqual([p.done?.status, p.done?.row?.src, p.done?.filling], [200, "jupiter", false]);
-  assert.deepEqual(T.PAGE_FIELDS.at(-1), "filling");
+  assert.deepEqual(T.PAGE_FIELDS.slice(-2), ["filling", "links"]);
 });
 
 test("card token-page-fills-after: the app's 5 s re-reads of a held chain-named page send their search as a background read, never as a caller's", async (t) => {

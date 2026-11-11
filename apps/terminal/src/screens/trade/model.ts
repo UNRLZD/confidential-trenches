@@ -205,7 +205,7 @@ export type Reason = "priceCheck" | "notSent" | "unavailable";
  * The kit's codes the app has a reason for: the device's quote check refused (S8.20 Price check failed), the signing
  * page down, so the request was never posted (the kit's client code, S8.28 Not sent), and a Solana pool buy the pool
  * cannot make yet: the token's venue has no pinned lookup table (venue_not_pinned) or no table fits the buy
- * (no_table_fits), or the coin is one the build does not trade (venue_not_built: a Mayhem coin, buy or sell), Unavailable
+ * (no_table_fits), or the coin is one the build does not trade (venue_not_built: a curve quoted in another mint, buy or sell), Unavailable
  * (owner 10 Nov 18:12Z). Any other code draws Failed alone: the app never makes up a reason, and never draws a code.
  */
 const REASONS: Readonly<Record<string, Reason>> = Object.freeze({ quote_check_failed: "priceCheck", signpage_down: "notSent", venue_not_pinned: "unavailable", no_table_fits: "unavailable", venue_not_built: "unavailable" });

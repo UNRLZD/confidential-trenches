@@ -151,8 +151,9 @@ function Star({ v, cls, size }: { v: TokenView; cls: string; size: number }) {
 function Links({ v }: { v: TokenView }) {
   return (
     <>
-      {tokenLinks(v.chain, v.token).map((l) => {
-        const name = l.id === "xSearch" ? WORDS.searchX.text : WORDS[l.name].text;
+      {tokenLinks(v.chain, v.token, v.social, v.launchpad).map((l) => {
+        // the token's own links are named by their address (data); the search and the explorer by their words
+        const name = l.id === "xSearch" ? WORDS.searchX.text : l.id === "explorer" ? WORDS[l.name].text : l.label;
         return (
           <a key={l.id} className="tkp-ib" href={l.href} target="_blank" rel="noopener noreferrer" aria-label={name} title={name} data-link={l.id}>
             <Ic n={l.id === "xSearch" ? "search" : "link"} size={l.id === "xSearch" ? 12 : 13} />
@@ -537,7 +538,7 @@ function Desktop({ v, r, c, t, tape }: { v: TokenView | null; r: Ready | null; c
       <div className="tkp-main">
         <header className="tkp-head">
           <div className="tkp-ident">
-            {v ? <Avatar symbol={v.symbol} size={54} pad={v.launchpad} chain={v.chain} /> : <span className="tkp-sk tkp-skc" style={{ width: 54, height: 54 }} />}
+            {v ? <Avatar symbol={v.symbol} size={54} pad={v.launchpad} chain={v.chain} logo={{ chain: v.chain, token: v.token, icon: v.icon }} /> : <span className="tkp-sk tkp-skc" style={{ width: 54, height: 54 }} />}
             <div className="tkp-idtext">
               <div className="tkp-symrow">
                 {v ? <h1 className="tkp-sym" title={v.symbol}>{v.symbol}</h1> : <SkLine cls="tkp-sym" w={120} />}
@@ -587,7 +588,7 @@ function Desktop({ v, r, c, t, tape }: { v: TokenView | null; r: Ready | null; c
 function SheetHead({ v }: { v: TokenView }) {
   return (
     <div className="tkp-shead">
-      <Avatar symbol={v.symbol} size={40} pad={v.launchpad} chain={v.chain} />
+      <Avatar symbol={v.symbol} size={40} pad={v.launchpad} chain={v.chain} logo={{ chain: v.chain, token: v.token, icon: v.icon }} />
       <div className="tkp-stitle">
         <span className="tkp-ssym" title={v.symbol}>{v.symbol}</span>
         {v.price === null ? <SkLine cls="tkp-sprice" w={80} /> : <span className="tkp-sprice">{v.price}</span>}
@@ -624,7 +625,7 @@ function Phone({ v, r, c, t, tape }: { v: TokenView | null; r: Ready | null; c: 
     <div className="tkp-phone">
       <div className="tkp-nav" data-testid="token-nav">
         <button type="button" className="tkp-navbtn" aria-label={WORDS.back.text} onClick={back}><Ic n="back" size={20} stroke={1.4} /></button>
-        {v ? <Avatar symbol={v.symbol} size={30} pad={v.launchpad} chain={v.chain} /> : <span className="tkp-sk tkp-skc" style={{ width: 30, height: 30 }} />}
+        {v ? <Avatar symbol={v.symbol} size={30} pad={v.launchpad} chain={v.chain} logo={{ chain: v.chain, token: v.token, icon: v.icon }} /> : <span className="tkp-sk tkp-skc" style={{ width: 30, height: 30 }} />}
         {v ? <h1 className="tkp-sym" title={v.symbol}>{v.symbol}</h1> : <SkLine cls="tkp-sym" w={100} />}
         {v && <Star v={v} cls="tkp-navbtn tkp-star" size={20} />}
         {v && <button type="button" className="tkp-navbtn" aria-label={WORDS.share.text} onClick={() => share(v)}><Ic n="share" size={19} /></button>}
@@ -721,7 +722,7 @@ export function TokenPage({ data, nowMs, onRetry, pushed = false }: { data: Toke
         {data.status === "error" && <button type="button" className="tkp-retry" onClick={onRetry}>{WORDS.retry.text}</button>}
       </section>
     );
-  const v = data.status === "ready" ? tokenView(data.row, nowMs, data.filling === true) : null;
+  const v = data.status === "ready" ? tokenView(data.row, nowMs, data.filling === true, data.links) : null;
   const ready = data.status === "ready" ? { data, nowMs } : null;
   // the coin unit's price: the device's own read the trade box holds (signed in, on a chain with a pool), else none
   const c: ChartState = { sym: v?.symbol ?? null, chain: row?.chain ?? null, tf, onTf, data: candles, retry, ctl, set, supply: supplyOf(row), coin: coinUsd(trade.price), trades: tape.trades };

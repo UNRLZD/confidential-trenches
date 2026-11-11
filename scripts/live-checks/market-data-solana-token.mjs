@@ -55,12 +55,16 @@ const show = (v) => (v === undefined ? "none" : JSON.stringify(v));
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const isObj = (v) => typeof v === "object" && v !== null && !Array.isArray(v);
 const intOrNull = (v) => v === null || Number.isSafeInteger(v);
+/** A page's `links`: only site, x and telegram, each an http(s) URL. */
+const linksOk = (l) => isObj(l) && Object.entries(l).every(([k, v]) => ["site", "x", "telegram"].includes(k) && typeof v === "string" && /^https?:\/\/[^\s]+$/.test(v));
 const bpsOrNull = (v) => v === null || (Number.isSafeInteger(v) && v >= 0 && v <= 10_000);
 
 /** The first thing wrong with a TokenPage for `mint`, or null. */
 export function pageFault(p, mint) {
-  if (!isObj(p) || !(same(Object.keys(p), PAGE) || same(Object.keys(p), [...PAGE, "filling"]))) return `keys ${show(isObj(p) ? Object.keys(p) : p)}`;
-  if ("filling" in p && typeof p.filling !== "boolean") return `filling ${show(p.filling)}`;
+  // 06b's list, then `filling` (card token-page-fills-after) and `links` (card token-page-data-complete-and-fast)
+  if (!isObj(p) || !same(Object.keys(p), [...PAGE, "filling", "links"])) return `keys ${show(isObj(p) ? Object.keys(p) : p)}`;
+  if (typeof p.filling !== "boolean") return `filling ${show(p.filling)}`;
+  if (!linksOk(p.links)) return `links ${show(p.links)}`;
   if (!isObj(p.row) || !same(Object.keys(p.row), ROW)) return `row keys ${show(isObj(p.row) ? Object.keys(p.row) : p.row)}`;
   if (p.row.chain !== "solana" || p.row.token !== mint) return `row is ${show(p.row.chain)} ${show(p.row.token)}`;
   for (const f of ["symbol", "name", "src"]) if (typeof p.row[f] !== "string" || p.row[f] === "") return `row ${f} ${show(p.row[f])}`;
