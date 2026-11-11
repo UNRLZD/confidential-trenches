@@ -55,10 +55,14 @@
 //                       again), unknown (503; held to the release's deadline) or failed (422, detail "failed";
 //                       failed_this_epoch after).
 // A 503 says only its code: no text from a block engine or an RPC reaches the caller (M374 (1)).
-// The send (M362 (4)): on mainnet a tag 3 goes to Jito bundle-only (./jito.ts), so one that fails on chain never lands
-// and the fee payer pays nothing for it; only when every block engine fails on transport does it go out as a plain send,
-// under M356 (1)'s one paid failure per nullifier per epoch. A tag 2 (its one on-chain failure is the note spent
-// elsewhere) and every devnet send (devnet has no block engine) go plain.
+// The send (M362 (4)): on mainnet a tag 3 goes to Jito bundle-only (./jito.ts) and, at once beside it, as a plain send
+// on both providers at the plain path's pace (card sol-pool-buy-lands-on-mainnet: Jito counts a tip only as an
+// instruction that transfers SOL, and the pool pays its tip by a lamport write, release.rs:279-280, so the engine may
+// never consider the bundle; 11 Nov 17:38Z it answered invalid after 33 rebroadcasts). A plain copy that fails on chain
+// is M356 (1)'s one paid failure per nullifier per epoch, as the transport fallback always was; the user loses nothing
+// (the release reverts whole). A tag 2 (its one on-chain failure is the note spent elsewhere) and every devnet send
+// (devnet has no block engine) go plain only. Before any send the bytes as sent are simulated once, every signature
+// checked, on their own blockhash.
 // Answer: 200 { signature } (the fee payer's, the transaction id). When it comes (M369 (H1)):
 //   mainnet tag 3: only once the send is decided, and only when it filled. The fee payer's signature is the one byte
 //     string the caller lacks to hold the fully signed transaction (it sent the message and W's signature itself);
@@ -361,6 +365,9 @@ export type SolanaPoolSenderDeps = {
   /** The bundle-only sender a mainnet tag 3 goes through (./jito.ts); default the block engines on mainnet, none on
    * any other cluster. null: none (every send plain). */
   jito?: JitoSender | null;
+  /** The sender's timer for the log line's reads (engine3, hash_ms): true after `ms`, false at once when `signal`
+   *  aborts; replaced in tests. */
+  wait?: (ms: number, signal: AbortSignal) => Promise<boolean>;
   /** Where a failed start read is told (POOL_START_LOG_MS apart at most once); default stderr. */
   log?: (line: string) => void;
 };
@@ -461,6 +468,15 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
   };
   const send = deps.send ?? sendSolanaSet;
   const jito = deps.jito !== undefined ? deps.jito : cfg.cluster === "mainnet" ? jitoSender() : null;
+  const wait =
+    deps.wait ??
+    ((ms: number, signal: AbortSignal) =>
+      new Promise<boolean>((done) => {
+        if (signal.aborted) return done(false);
+        const t = setTimeout(() => done(true), ms);
+        t.unref?.(); // a log line's read never holds the process open
+        signal.addEventListener("abort", () => (clearTimeout(t), done(false)), { once: true });
+      }));
   const paths: readonly SolanaSendPath[] =
     deps.paths ??
     deps.providers.map((rpc, i) => ({
@@ -560,6 +576,7 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
       return p;
   }
   async function simulateSignSend(raw: string, tx: SolanaPoolChecked, queueMaxMs?: number): Promise<PoolSendAnswer> {
+      const arrived = now();
       // the simulation of W's bytes as received (slot 0 empty, so no signature check), on its own blockhash; and the
       // newest blockhash's last valid height, which bounds how long the sender rebroadcasts (W's is no newer)
       // a message that loads keys: its tables on both providers first, then the pool and inner programs they resolve to
@@ -634,6 +651,9 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
           const region = j.region;
           note = { via: "jito", region: regionName(region), bundle: j.bundleId !== undefined };
           taken = { region, bundleId: j.bundleId };
+          // the plain copy at once beside the bundle (card sol-pool-buy-lands-on-mainnet: a bundle the engine never
+          // considered never lands): sendTransaction on both providers at their own pace, skipPreflight (just simulated,
+          // signed), until the send ends; a copy that fails on chain is M356 (1)'s one paid failure a nullifier an epoch
           through = [
             {
               name: "jito",
@@ -648,6 +668,7 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
                 return sig;
               },
             },
+            ...paths,
           ];
         }
         // every region failed on transport: the plain send, under M356 (1) (a failure that lands is paid once an epoch)
@@ -671,6 +692,25 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
         if (mine()) bounded(heldUntil, nf, { entry, deadline: Number(tx.deadlineMs) });
       };
       if (bundled) {
+        // the line's reads while it goes (./send-log.ts): the engine's word about 3 s after the first send, when no
+        // other bundle carry is in progress (its region's second, ./jito.ts status); and how long the transaction's own
+        // blockhash stays valid after it arrived, read on provider a every 5 s until it is not or the send ends
+        const engine3 =
+          taken?.bundleId === undefined
+            ? Promise.resolve(undefined)
+            : wait(3_000, ended.signal).then(async (go) => (go && bundling === 1 ? await jito!.status(taken!.region, taken!.bundleId!).catch(() => "unread" as const) : undefined));
+        const hash = (async (): Promise<string> => {
+          // bounded by the release's deadline, past which it cannot land
+          for (;;) {
+            if (now() > Number(tx.deadlineMs) || !(await wait(5_000, ended.signal))) return `>${Math.max(0, now() - arrived)}`;
+            try {
+              const v = (await a("isBlockhashValid", [tx.message.blockhash, { commitment: "processed" }])) as { value?: unknown } | null;
+              if (v?.value === false) return String(Math.max(0, now() - arrived));
+            } catch {
+              // an unread round: read again at the next
+            }
+          }
+        })();
         // M369 (H1): the fee payer's signature only once the send is decided, and only for a fill (the header)
         let state: string | undefined;
         let sends: readonly { path: string; ok: boolean }[] = [];
@@ -685,7 +725,24 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
         // the rebroadcasts, counted (the first send went before the set); and for a send that did not fill, the
         // engine's word on its bundle (one read, in the region's second), so the line says whether it lost the auction
         const jitoSends = sends.filter((x) => x.path === "jito");
+        const plainSends = sends.filter((x) => x.path !== "jito");
         note = { ...note, end: state === "filled" || state === "failed" || state === "expired" ? state : "unknown", rebroadcasts: jitoSends.filter((x) => x.ok).length, misses: jitoSends.filter((x) => !x.ok).length };
+        if (taken !== undefined) note = { ...note, plain: plainSends.filter((x) => x.ok).length };
+        const e3 = await engine3;
+        if (e3 !== undefined) note = { ...note, engine3: e3 };
+        note = { ...note, hashMs: await hash };
+        // a send that did not fill: the same bytes simulated now on a fresh blockhash (no signature check), so the line
+        // tells a state or slippage failure from none
+        if (state !== "filled") {
+          let endSim = "unread";
+          try {
+            const r = (await a("simulateTransaction", [Buffer.from(signed.wire).toString("base64"), { encoding: "base64", sigVerify: false, replaceRecentBlockhash: true, commitment: "processed" }])) as { value?: { err?: unknown } } | null;
+            if (r?.value !== undefined && r.value !== null && "err" in r.value) endSim = r.value.err === null ? "ok" : simErrText(r.value.err);
+          } catch {
+            endSim = "unread";
+          }
+          note = { ...note, endSim };
+        }
         if (state !== "filled" && taken?.bundleId !== undefined) {
           let word: PoolSendNote["status"] = "unread";
           try {

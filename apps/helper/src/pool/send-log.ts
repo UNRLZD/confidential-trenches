@@ -26,6 +26,14 @@ export type PoolSendNote = {
   status?: "landed" | "pending" | "failed" | "invalid" | "unread";
   /** A simulation's error, simErrText's. */
   err?: string;
+  /** The engine's word on the bundle about 3 s after the first send (unread, or none when another carry was in progress). */
+  engine3?: "landed" | "pending" | "failed" | "invalid" | "unread";
+  /** The plain copies the providers took (sent at once beside the bundle). */
+  plain?: number;
+  /** How long the transaction's own blockhash stayed valid after it arrived, ms; `>n` when still valid at the end. */
+  hashMs?: string;
+  /** For a send that did not fill: the same bytes simulated at the end on a fresh blockhash, ok or simErrText's. */
+  endSim?: string;
 };
 
 /** The error's code word and, for not_landed, its end; "sent" for a 200 whose end the answer did not wait for. */
@@ -50,7 +58,11 @@ export function poolSendLine(l: { chain: "solana" | "evm" | "unknown"; net: stri
   if (n.end !== undefined) out.push(`end=${n.end}`);
   if (n.rebroadcasts !== undefined) out.push(`rebroadcasts=${n.rebroadcasts}`);
   if (n.misses !== undefined) out.push(`misses=${n.misses}`);
+  if (n.engine3 !== undefined) out.push(`engine3=${n.engine3}`);
   if (n.status !== undefined) out.push(`engine=${n.status}`);
+  if (n.plain !== undefined) out.push(`plain=${n.plain}`);
+  if (n.hashMs !== undefined && /^>?\d{1,9}$/.test(n.hashMs)) out.push(`hash_ms=${n.hashMs}`);
+  if (n.endSim !== undefined) out.push(`end_sim=${n.endSim}`);
   if (n.err !== undefined) out.push(`err=${n.err}`);
   return out.join(" ");
 }

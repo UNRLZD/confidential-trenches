@@ -93,3 +93,10 @@ test("each pool send route writes one line when it answers: no signature, addres
   assert.match(lines[4]!, /^pool send unknown \? send outcome=bad_shape status=400 ms=\d+$/);
   for (const l of lines) assert.ok(!l.includes(ADDR) && !l.includes("127.0.0.1") && !/0x[0-9a-f]{8}/.test(l), l);
 });
+
+test("the line's reads of why a bundle did not land: engine3, engine, plain, hash_ms and end_sim, in that order; a hash_ms that is not a count is dropped", () => {
+  const note = { tag: 3 as const, via: "jito" as const, region: "amsterdam", bundle: true, end: "expired" as const, rebroadcasts: 33, misses: 0, engine3: "invalid" as const, status: "invalid" as const, plain: 31, hashMs: ">67003", endSim: '{"InstructionError":[2,{"Custom":6004}]}' };
+  assert.equal(poolSendLine({ chain: "solana", net: "mainnet", route: "send", status: 503, body: { error: { code: "not_landed" } }, ms: 67003, note }), 'pool send solana mainnet send outcome=not_landed status=503 ms=67003 tag=3 via=jito region=amsterdam bundle=named end=expired rebroadcasts=33 misses=0 engine3=invalid engine=invalid plain=31 hash_ms=>67003 end_sim={"InstructionError":[2,{"Custom":6004}]}');
+  assert.equal(poolSendLine({ chain: "solana", net: "mainnet", route: "send", status: 200, body: { signature: SIG }, ms: 900, note: { tag: 3, end: "filled", plain: 2, hashMs: "41000" } }), "pool send solana mainnet send outcome=filled status=200 ms=900 tag=3 end=filled plain=2 hash_ms=41000");
+  assert.doesNotMatch(poolSendLine({ chain: "solana", net: "mainnet", route: "send", status: 200, body: {}, ms: 1, note: { hashMs: ADDR } }), /hash_ms/);
+});
