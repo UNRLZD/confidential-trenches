@@ -10,7 +10,7 @@
 // It passes only when each answers 200 JSON with X-Helper-Commit a full sha, X-Fetched-At an ISO time within AGE_MS of
 // the read and Access-Control-Allow-Origin echoing APP_HOST, and the bodies hold exactly the frozen fields: the lists
 // {chain: "near", lists: {new, trending, ...}, as_of_ms} with rows exactly the terminal's Row fields, chain near, src
-// chain, a decimal price; the page {row, decimals, pool, risk, route, filling} for that token; holders {holders, total,
+// chain, a decimal price; the page {row, decimals, pool, risk, route, filling, links} for that token; holders {holders, total,
 // top_bps, src, as_of_ms}; trades {trades, src, as_of_ms} with rows {t_ms, side, usd, amt, trader, tx}; candles {tf,
 // candles, src, as_of_ms} with 6-value bars; and the account with no pool answers 404. Anything else is a FAIL.
 // After: helper
@@ -36,7 +36,7 @@ export const READS = {
   candles: (t) => `/v1/market/candles?chain=near&token=${t}&tf=1h`,
 };
 export const ROW = [...TERMINAL_FIELDS];
-export const PAGE = ["row", "decimals", "pool", "risk", "route", "filling"];
+export const PAGE = ["row", "decimals", "pool", "risk", "route", "filling", "links"];
 export const RISK = ["mint_auth", "freeze_auth", "lp", "top10_bps", "dev_bps", "snipers_bps", "holders", "liq_usd", "age_s", "tax", "honeypot", "insiders_bps", "bundlers_bps", "fresh_bps"];
 export const HOLDERS = ["holders", "total", "top_bps", "src", "as_of_ms"];
 export const TAPE = ["t_ms", "side", "usd", "amt", "trader", "tx"];
@@ -86,6 +86,7 @@ export const FAULTS = {
     for (const f of RISK) if (!same(b.risk[f], ["v", "src", "as_of_ms"])) return `risk.${f} ${show(b.risk[f])}`;
     if (!(Number.isInteger(b.decimals) && b.decimals >= 0 && b.decimals <= 30)) return `decimals ${show(b.decimals)}`;
     if (b.pool !== null || b.route !== "unknown" || b.filling !== false) return `pool ${show(b.pool)}, route ${show(b.route)}, filling ${show(b.filling)}`;
+    if (!isObj(b.links) || !Object.entries(b.links).every(([k, v]) => ["site", "x", "telegram"].includes(k) && typeof v === "string" && /^https?:\/\/[^\s]+$/.test(v))) return `links ${show(b.links)}`;
     return null;
   },
   holders: (b) => (same(b, HOLDERS) && Array.isArray(b.holders) ? null : "not the holders fields"),

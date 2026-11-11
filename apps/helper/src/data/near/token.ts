@@ -9,12 +9,13 @@
 // as the other chains answer with no holders source.
 //
 // Display only: nothing here feeds a signature.
+import { LINKS, type Links } from "../links.ts";
 import { NOT_FOUND, type DataAnswer, type Field, type RISK_FIELDS } from "../solana/token.ts";
 import type { Row } from "../solana/lists.ts";
 import type { NearLists } from "./lists.ts";
 import { nearAccount } from "./views.ts";
 
-export type NearTokenPage = { row: Row; decimals: number; pool: null; risk: Record<(typeof RISK_FIELDS)[number], Field<unknown>>; route: "unknown"; filling: false };
+export type NearTokenPage = { row: Row; decimals: number; pool: null; risk: Record<(typeof RISK_FIELDS)[number], Field<unknown>>; route: "unknown"; filling: false; links: Links };
 
 export function toNearPage(row: Row, decimals: number): NearTokenPage {
   const at = row.as_of_ms as number;
@@ -41,6 +42,8 @@ export function toNearPage(row: Row, decimals: number): NearTokenPage {
     },
     route: "unknown",
     filling: false,
+    // no NEAR source here names a token's site or socials: what the shared registry holds (../links.ts), else {}
+    links: LINKS.of("near", String(row.token)),
   };
 }
 
