@@ -10,6 +10,7 @@ import {
   SOLANA_ALT_PROGRAM,
   SOLANA_COMPUTE_BUDGET_PROGRAM,
   SOLANA_JITO_TIP_ACCOUNTS,
+  SOLANA_POOL_JITO_TIP,
   solanaPoolStepPrograms,
   SOLANA_SYSTEM_PROGRAM,
   SOLANA_TOKEN_2022_PROGRAM,
@@ -348,6 +349,9 @@ test("M362 (4): on mainnet a tag 3 tips at least 1,000 lamports to a Jito tip ac
   assert.equal(mverdict(tipped()), "ok");
   for (const t of SOLANA_JITO_TIP_ACCOUNTS) assert.equal(mverdict(tipped({ tipTo: t })), "ok", t);
   assert.equal(mverdict(tipped({ tip: 999n })), "tip_low");
+  // card sol-pool-buy-lands-on-mainnet: any tip from the minimum up passes the helper's check (the program holds it to
+  // the proof's tip cap, TipOverCap, which the simulation runs): the device's 100,000 and the cap 1,000,000 included
+  for (const tip of [SOLANA_POOL_JITO_TIP, 1_000_000n]) assert.equal(mverdict(tipped({ tip, r: { tipCap: 1_000_000n } })), "ok", `tip ${tip}`);
   assert.equal(mverdict(wire({ inner: SOLANA_SYSTEM_PROGRAM })), "tip_low", "no tip at all");
   assert.equal(mverdict(tipped({ tipTo: TO })), "tip_low", "a tip to an account that is not Jito's");
   // the kit's compiler never loads a Jito tip account (M362 (4)), so a loaded account 8 is another key: refused unread

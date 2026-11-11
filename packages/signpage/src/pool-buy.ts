@@ -103,7 +103,7 @@ import {
 } from "../../kit/src/trade/solana/pool-buy.ts";
 import { pageReference } from "./page-rpc.ts";
 import { solanaDecodeLookupTable, type SolanaLookupTable } from "../../kit/src/checks/solana/message.ts";
-import { SOLANA_CU_PRICE_MAX, SOLANA_JITO_TIP_MIN } from "../../kit/src/checks/solana/checks.ts";
+import { SOLANA_CU_PRICE_MAX, SOLANA_POOL_JITO_TIP } from "../../kit/src/checks/solana/checks.ts";
 import { SolanaRpcTransportError, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import type { VaultSnarkjsProof } from "../../kit/src/vault/shapes.ts";
 import type { BuyRoute, TradeStage, TxRef } from "../../kit/src/signpage/messages.ts";
@@ -587,7 +587,9 @@ async function buyRun(h: PoolBuyHost, ask: PoolAsk, at: { fault?: unknown }): Pr
     // not awaited here: the buy waits on its own venue's reads only (below, once the reference names the venue), so a
     // slow or hung read of another venue's table never holds it; a rejection no buy awaits is marked handled
     for (const r of tableReads.values()) r.catch(() => {});
-    const tip = h.cluster === "mainnet" ? SOLANA_JITO_TIP_MIN : 0n;
+    // on mainnet the helper sends the tag 3 to Jito bundle-only, so it tips enough to win the auction (the kit's
+    // SOLANA_POOL_JITO_TIP); devnet has no block engine, so no tip
+    const tip = h.cluster === "mainnet" ? SOLANA_POOL_JITO_TIP : 0n;
     // each root's leaf index, found once: absent when it is on no page or not on both RPCs at one index
     const roots = new Map<string, number | null>();
     const rootKey = (tree: 0 | 1, root: string): string => `${tree}:${root}`;

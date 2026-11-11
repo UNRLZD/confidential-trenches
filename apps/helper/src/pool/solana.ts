@@ -29,7 +29,8 @@
 //                       that cannot land before it would only be a paid failure;
 //   inner_program       a tag 3 inner instruction invokes a program off the kit's solanaPoolStepPrograms() (helper
 //                       policy, M356 (1): a program W chose could fail on chain after passing the simulation);
-//   tip_low             mainnet only: a tag 3 whose Jito tip is under SOLANA_JITO_TIP_MIN (1,000 lamports), or whose tip
+//   tip_low             mainnet only: a tag 3 whose Jito tip is under SOLANA_JITO_TIP_MIN (1,000 lamports; any tip from it to
+//                       the proof's tip cap passes here, the program refusing one over the cap, TipOverCap), or whose tip
 //                       account (account 8) is not a Jito tip account named in the message itself (./jito.ts: "When
 //                       tipping make sure to not use Address Lookup Tables for the tip accounts", M362 (4));
 //   bad_table           a lookup table the message loads is not an active table both providers read the same at
