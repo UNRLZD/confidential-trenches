@@ -351,6 +351,29 @@ test("trees: a newest block below the anchor, or an anchor one seat alone no lon
   }
 });
 
+// delta review of 3e13d4e2, P3-5: the anchor is read again after the times, not only the newest block: here seat b alone
+// names another block at the anchor's height while the times are read (the newest block it names still the chain's)
+test("trees: the anchor read again after the times on both seats: one seat's other block there is a retry", async () => {
+  const c = chain([...deps(PP, [10, 12, 15]), { block: 20, kind: "wd", leaf: 999n }], 100, 90);
+  let pages = 0, flip = false, timed = false;
+  const waits: number[] = [];
+  const [a, b0] = pair(c, c, { getLogs: () => void (pages++ === 0 && (c.head += 5)), call: (data) => void (!timed && data.startsWith(`0x${sel("stateRootTimes(uint256)")}`) && ((timed = true), (flip = true))) });
+  // seat b: its header at height 100, asked by number once the times are being read, is another block's
+  const b = Object.assign(async (m: string, p: readonly unknown[]) => {
+    const v = await b0(m, p);
+    if (flip && m === "eth_getBlockByNumber" && p[0] === q(100)) return (flip = false), { ...(v as object), hash: h32("b alone 100") };
+    return v;
+  }, { url: "https://b.example" });
+  const t = await evmTreeSync({
+    rpcs: [a, b],
+    pin: PIN,
+    sleep: async (ms: number) => void waits.push(ms),
+  }).trees(after(20));
+  assert.ok(timed && !flip, "seat b named its other block 100 after the times");
+  assert.equal(t.stateTree.size, 4);
+  assert.ok(waits.includes(EVM_LAG_WAIT_MS), "a retry");
+});
+
 test("trees: an anchor reorged away during the paging is a retry, then the new chain's times", async () => {
   const c = chain([...deps(PP, [10, 12, 15]), { block: 20, kind: "wd", leaf: 999n }], 100, 90);
   const hashOf = c.hashOf;
@@ -856,7 +879,83 @@ test("the hold reads the fee's state straight after the period's first block, be
   }
 });
 
-test("a held fee is not taken once the depth at its block moved: read again", async () => {
+// delta review of 3e13d4e2, P3-1: the fee two operators agreed on at the block's hash is kept when a read after it
+// lags (here the sync's newest block below the period's first once), so the retry asks no state, which is gone by then
+test("an agreed fee is kept across a retry when a read after it lags: the retry asks no state", async () => {
+  for (const network of ["base", "robinhood"] as const) {
+    const c = { ...CB(), head: 31 };
+    const log: string[] = [];
+    let gone = false, low = false, fees = 0;
+    const chainId = network === "base" ? 8453n : 4663n;
+    const seat = (url: string) => rpc(c, { url, log, chainId, call: () => { if (gone) throw new Error(UNKNOWN_STATE); }, chainFee: (s) => (++fees === (network === "base" ? 4 : 2) && ((gone = true), (low = true)), s === "f1c7a58b" ? 7_917n : 0n) });
+    const p = evmPool({ pin: { ...PIN, network }, rpcs: pair(c, c, { chainId, latest: () => (low ? ((low = false), 25) : c.head) }, { chainId }), feeRpcs: [seat("https://robinhood.drpc.org"), seat("https://robinhood.api.pocket.network")], relayFee: async () => answer(), epochFee: feeRule([]), salt: () => new Uint8Array(16), sleep: async () => undefined });
+    await p.holdFee(EPOCH);
+    assert.ok(gone, `${network}: the state was gone for the retry`);
+    assert.equal(fees, network === "base" ? 4 : 2, `${network}: one fee read`);
+  }
+});
+
+// delta review of 3e13d4e2, P3-6: the hold and two binds at once share the fee read in flight for the block's hash
+test("callers at once share the period's fee read: the hold and two binds read it once", async () => {
+  const c = { ...CB(), head: 31 };
+  const log: string[] = [];
+  const p = evmPool({ pin: PIN, rpcs: pair(c, c), feeRpcs: freshOnly(c, 100, log), relayFee: async () => answer(), epochFee: feeRule([]), salt: () => new Uint8Array(16), sleep: async () => undefined });
+  await Promise.all([p.holdFee(EPOCH), p.bind(bindArgs()), p.bind(bindArgs())]);
+  assert.equal(feeCalls(log), 4, "one read: two operators, the L1 fee bound and the operator fee each");
+});
+
+test("a fee read that lags is dropped, so the retry reads it again; a caller that stops leaves the read to the others", async () => {
+  // both fee seats do not yet keep the block's state on their first fee call: a lag, then a read again that agrees
+  {
+    const c = { ...CB(), head: 31 };
+    const log: string[] = [];
+    const first = new Set<string>();
+    const seat = (url: string) => rpc(c, { url, log, chainFee: (sel) => { if (!first.has(url)) (first.add(url), (() => { throw new Error(UNKNOWN_STATE); })()); return sel === "f1c7a58b" ? 7_917n : 0n; } });
+    const waits: number[] = [];
+    const p = evmPool({ pin: PIN, rpcs: pair(c, c), feeRpcs: [seat("https://robinhood.drpc.org"), seat("https://robinhood.api.pocket.network")], relayFee: async () => answer(), epochFee: feeRule([]), salt: () => new Uint8Array(16), sleep: async (ms: number) => void waits.push(ms) });
+    await p.holdFee(EPOCH);
+    assert.ok(waits.includes(EVM_LAG_WAIT_MS), "a retry");
+  }
+  // the hold's caller stops while the read is in flight: it ends at once; a bind sharing the read binds on it
+  {
+    const c = { ...CB(), head: 31 };
+    const log: string[] = [];
+    let free: () => void = () => {};
+    const gate = new Promise<void>((r) => (free = r));
+    const gated = (r: EvmRpc): EvmRpc => Object.assign(async (m: string, q: readonly unknown[]) => (m === "eth_call" && JSON.stringify(q).includes("0x420000000000000000000000000000000000000f") ? (await gate, r(m, q)) : r(m, q)), { url: (r as { url?: string }).url });
+    const p = evmPool({ pin: PIN, rpcs: pair(c, c), feeRpcs: freshOnly(c, 100, log).map(gated), relayFee: async () => answer(), epochFee: feeRule([]), salt: () => new Uint8Array(16), sleep: async () => undefined });
+    const stop = new AbortController();
+    const hold = p.holdFee(EPOCH, stop.signal);
+    const bind = p.bind(bindArgs());
+    await new Promise((r) => setTimeout(r, 30));
+    stop.abort(new Error("signed out"));
+    await assert.rejects(hold, /signed out/);
+    free();
+    await bind;
+    assert.equal(feeCalls(log), 4, "one read, finished for the bind");
+  }
+});
+
+// delta review of 3e13d4e2, P3-5: the pool's size at the block is two operators' word, and it is the logs' depth
+test("the pool's size at the period's first block: one operator's word is never taken, and two that agree on a size the logs do not hold are refused", async () => {
+  const lies = (urls: string[], size: bigint) => (url: string) => rpc(CBc, { url, view: (name, v) => (urls.includes(url) && name === "currentTreeSize" ? size : v) });
+  const CBc = { ...CB(), head: 31 };
+  const urls = ["https://robinhood.drpc.org", "https://robinhood.api.pocket.network", "https://robinhood-rpc.publicnode.com"];
+  // one operator says 99 leaves (the true size at block 30: 3)
+  {
+    const seat = lies([urls[0]!], 99n);
+    const p = evmPool({ pin: PIN, rpcs: pair(CBc, CBc), feeRpcs: urls.map(seat), relayFee: async () => answer(), epochFee: feeRule([]), salt: () => new Uint8Array(16), sleep: async () => undefined });
+    await assert.rejects(p.holdFee(EPOCH), /answered differently|differ/);
+  }
+  // two operators agree on 5 leaves (depth 3): the logs hold 3 there (depth 2)
+  {
+    const seat = lies([urls[0]!, urls[1]!], 5n);
+    const p = evmPool({ pin: PIN, rpcs: pair(CBc, CBc), feeRpcs: urls.map(seat), relayFee: async () => answer(), epochFee: feeRule([]), salt: () => new Uint8Array(16), sleep: async () => undefined });
+    await assert.rejects(p.holdFee(EPOCH), /the tree depth at block 30: 3 by the pool's size there on two operators, 2 by its logs/);
+  }
+});
+
+test("a held fee is not taken once the depth at its block moved: refused, then read again", async () => {
   const c = { ...CB(), head: 31 };
   const log: string[] = [];
   const seen: unknown[] = [];
@@ -864,9 +963,11 @@ test("a held fee is not taken once the depth at its block moved: read again", as
   await p.holdFee(EPOCH);
   const held = feeCalls(log);
   // two leaves at blocks 25 and 26 (past the finalized 20, below the period's first block 30): 5 leaves at block 30,
-  // depth 3 now
+  // depth 3 now by the logs, where the held read's state gave 3 leaves (depth 2): never the held fee at another depth
   c.events.push({ block: 25, kind: "wd", leaf: 4242n }, { block: 26, kind: "wd", leaf: 4243n });
   c.events.sort((x, y) => x.block - y.block);
+  await assert.rejects(p.bind(bindArgs()), /the tree depth at block 30: 2 by the pool's size there on two operators, 3 by its logs/);
+  // the held read dropped: the next bind reads the block's state again, at depth 3
   await p.bind(bindArgs());
   assert.ok(feeCalls(log) > held, "read again at the new depth");
   assert.equal((seen.at(-1) as { depth: number }).depth, 3);

@@ -18,7 +18,7 @@
 // block no two operators still keep waits for the next turn, at most 65 s on "Making proof" with no error; Robinhood
 // at +55 s, 1 of 3 periods read 2026-11-10 23:20-23:29Z (robinhood.com alone kept it; drpc.org, pocket.network and
 // publicnode.com refused it), Base 0 of 5 (packages/signpage/src/pool-testnet.ts EVM_TURN_PASS_MS; the bound is held by
-// test/pool-testnet-evm-queue.test.ts "a load mid-period whose first block no two operators hold").
+// test/pool-testnet-evm-queue.test.ts "a fresh load has no proof until the turn").
 // After: sign
 //   node scripts/live-checks/evm-device-reads-need-no-old-state.mjs [--record <file>] [--answer <file>]
 //     PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3

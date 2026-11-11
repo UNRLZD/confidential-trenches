@@ -1769,6 +1769,17 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
   };
 }
 
+/** p, or the signal's reason once it is aborted first (p runs on for its other callers). */
+function untilAborted<T>(p: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (signal === undefined) return p;
+  return new Promise<T>((res, rej) => {
+    if (signal.aborted) return rej(signal.reason);
+    const off = () => rej(signal.reason);
+    signal.addEventListener("abort", off, { once: true });
+    p.then((v) => (signal.removeEventListener("abort", off), res(v)), (e: unknown) => (signal.removeEventListener("abort", off), rej(e)));
+  });
+}
+
 /**
  * The period's chain fee at its first block, its state reads first and with the fewest (card
  * evm-device-reads-need-no-old-state; review of 7fbf2af3, P2-2): a keyless operator keeps a block's state seconds
@@ -1959,28 +1970,34 @@ export function evmPool(a: EvmPoolArgs): EvmPoolOf {
   // read is made once while the block is fresh, by the turn's pass or the period's first bind, and every bind of the
   // period after it uses it. A bind names its own period (the queue binds at epochOf(now)), so the hold keeps that
   // period and the one before it, for a pass that crosses the turn; older ones are dropped.
-  const heldFees = new Map<bigint, { hash: string; depth: number; chainFee: bigint }>();
+  // One read per period, by its first block's hash: shared by every caller while it is in flight and kept once agreed,
+  // so a read after it that lags (a retry) or a second bind asks no state again (delta review of 3e13d4e2, P3-1 and
+  // P3-6); one that fails is dropped, so the next asks again. It runs under no caller's signal (each caller stops on
+  // its own), within the reads' own bound.
+  const heldFees = new Map<bigint, { hash: string; read: Promise<{ depth: number | null; chainFee: bigint }> }>();
   const feeAt = (epochStartMs: bigint, signal?: AbortSignal) =>
     evmRetryLag(async () => {
       const block = await evmEpochBlock(rpcs, epochStartMs, signal, sleep);
-      // held for this block, by its hash (a reorg that replaced the block is another block) and its depth (Base's
-      // operator fee is of G(depth)): the depth on the block's own chain read again from the pool's logs (depthAt
-      // refuses, a retry, when that block is no longer at its height), never from state
-      const h = heldFees.get(epochStartMs);
-      if (h !== undefined && h.hash === block.hash) {
-        const depth = await sync.depthAt(block.number, signal, block.hash);
-        if (h.depth === depth) return { block, depth, chainFee: h.chainFee };
+      let h = heldFees.get(epochStartMs);
+      if (h === undefined || h.hash !== block.hash) {
+        // the period's fee state read while its block is fresh, straight after the block (review of 7fbf2af3, P2-2);
+        // held by the block's hash (a reorg that replaced the block is another block)
+        const held: { hash: string; read: Promise<{ depth: number | null; chainFee: bigint }> } = { hash: block.hash, read: evmPeriodChainFee(feeRpcs, a.pin.network, pool, block, undefined, sleep) };
+        held.read.catch(() => void (heldFees.get(epochStartMs) === held && heldFees.delete(epochStartMs)));
+        heldFees.set(epochStartMs, (h = held));
+        const newest = [...heldFees.keys()].reduce((x, y) => (y > x ? y : x));
+        for (const e of heldFees.keys()) if (e < newest - EVM_EPOCH_MS) heldFees.delete(e);
       }
-      // the period's fee read while its block is fresh: its state reads straight after the block (review of 7fbf2af3,
-      // P2-2), then the depth from the logs, which must be the one the state gave
-      const { depth, chainFee } = await evmPeriodChainFee(feeRpcs, a.pin.network, pool, block, signal, sleep);
+      const { depth, chainFee } = await untilAborted(h.read, signal);
+      // the depth on the block's own chain from the pool's logs (depthAt refuses, a retry, when that block is no longer
+      // at its height), never from state; where the fee is of the depth (Base: G(depth)) the state's must be the same
       const logs = await sync.depthAt(block.number, signal, block.hash);
-      if (depth !== null && depth !== logs) throw new Error(`the tree depth at block ${block.number}: ${depth} by the pool's size there on two operators, ${logs} by its logs`);
+      if (depth !== null && depth !== logs) {
+        if (heldFees.get(epochStartMs) === h) heldFees.delete(epochStartMs);
+        throw new Error(`the tree depth at block ${block.number}: ${depth} by the pool's size there on two operators, ${logs} by its logs`);
+      }
       // what two operators agreed on at the block's hash is held for the period: a lie two operators agree on lasts the
       // period too, the two-operator limit of every read here (evmTwoOperators), where before it lasted one bind
-      heldFees.set(epochStartMs, { hash: block.hash, depth: logs, chainFee });
-      const newest = [...heldFees.keys()].reduce((x, y) => (y > x ? y : x));
-      for (const e of heldFees.keys()) if (e < newest - EVM_EPOCH_MS) heldFees.delete(e);
       return { block, depth: logs, chainFee };
     }, sleep, signal);
   return {

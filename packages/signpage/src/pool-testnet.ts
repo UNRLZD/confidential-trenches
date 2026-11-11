@@ -481,15 +481,17 @@ export type TestnetPool = {
 
 /** The testnet build's devnet pool on this page: the deposit flow, its settling and the next buy's proofs. */
 /** An open proof queue, its note store and the id of the pool it proves for. */
-type OpenQueue = { queue: ProofQueue<unknown>; notes: NoteStore; poolId: string; hold?: (signal?: AbortSignal) => Promise<bigint> };
+type OpenQueue = { queue: ProofQueue<unknown>; notes: NoteStore; poolId: string; hold?: (signal?: AbortSignal, seen?: (now: bigint) => void) => Promise<void> };
 
 /** The EVM turn pass (card evm-device-reads-need-no-old-state): this long past each period's turn, plus the page's
  *  spread, the period's first block is in on both seats (Base makes one every 2 s, Robinhood several a second) and still
  *  fresh: Pocket and publicnode refused its state 15 to 242 s back (read 2026-11-10 21:50-22:30Z). */
 //  A page loaded mid-period binds at the period's first block too, on the walk of the kit's read list; where no two
 //  operators still keep that block's state it waits for the next turn, at most 60 s + EVM_TURN_PASS_MS +
-//  EVM_TURN_SPREAD_MS (65 s) after a load just past a turn, on the screen's "Making proof", never an error and never a
-//  proof of the period before (a measured residue, removed by card device-evm-read-residuals). Robinhood at +55 s, 3
+//  EVM_TURN_SPREAD_MS (65 s) after a load just past a turn: a fresh load has no proof until then, on the screen's
+//  "Making proof", never an error (a page open in the period before keeps that period's proof takeable meanwhile, the
+//  queue's rule, packages/wallet/src/pool/queue.ts:10-13); a measured residue, removed by card
+//  device-evm-read-residuals. Robinhood at +55 s, 3
 //  periods read 2026-11-10 23:20-23:29Z: two operators kept the block in 2 (robinhood.com with drpc.org, then with
 //  pocket.network), robinhood.com alone in 1 (drpc.org "Unknown state", pocket.network and publicnode.com "historical
 //  state ... is not available"); Base's four kept it in 5 of 5. The wait itself was bounded in a test, not timed live.
@@ -664,11 +666,12 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       const hardwareConcurrency = over.hardwareConcurrency ?? globalThis.navigator?.hardwareConcurrency;
       // the period's fee held at the turn (the wallet's evmPool holdFee), at the pool's own time's period
       const holdFee = (pool as Partial<Pick<EvmPoolOf, "holdFee">>).holdFee;
-      // it answers the pool's time it read, the newest block's, which the turn's timer takes its offset from
-      const hold = typeof holdFee === "function" ? async (s?: AbortSignal): Promise<bigint> => {
+      // `seen` gets the pool's time it read, the newest block's, before the fee is read, so the turn's timer takes its
+      // offset and its period from it whether or not the fee read succeeds (delta review of 3e13d4e2, P3-2)
+      const hold = typeof holdFee === "function" ? async (s?: AbortSignal, seen?: (now: bigint) => void): Promise<void> => {
         const now = await pool.now(s);
+        seen?.(now);
         await holdFee.call(pool, now - (now % pool.epochMs), s);
-        return now;
       } : undefined;
       return { queue: openProofQueue({ seed64, notes, pool, provers: [prover.vault], hardwareConcurrency, skip: owedNotes }), notes, poolId: pool.id, ...(hold ? { hold } : {}) };
     } catch (err) {
@@ -849,8 +852,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     await Promise.all(
       chains.map(async (chain) => {
         const mine = all.filter((n) => n.scope === evmPool(chain)!.scope);
-        if (stop.aborted) return;
-        if (!evmPassing.has(chain) && (evmQueues.has(chain) || mine.some((n) => n.state === "UNSPENT" || n.state === "HELD")))
+        // a sign out since the read began: no pass, and the settle stops on its signal
+        if (!stop.aborted && !evmPassing.has(chain) && (evmQueues.has(chain) || mine.some((n) => n.state === "UNSPENT" || n.state === "HELD")))
           evmPassing.set(chain, evmProofs(chain).finally(() => evmPassing.delete(chain)));
         if (mine.some((n) => n.state === "RESERVED")) await reserveEvm(chain, stop).catch(() => {});
       }),
@@ -900,17 +903,18 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         if (p === undefined) evmQueues.set(chain, (p = openEvmQueue(chain)));
         const q = await p.catch(() => null);
         // the fee first, then the pass: a read that fails leaves the pass to read it as before
-        const now = await q?.hold?.(signal).catch(() => undefined);
-        if (typeof now === "bigint") {
+        await q?.hold?.(signal, (now) => {
           const before = turnOffset;
           turnOffset = Number(now) - turnNow();
+          // the period this pass ran for is the pool's (review P3-3): a device clock ahead marked the next one
+          turnRan = Number(now - (now % EVM_EPOCH_MS));
           // the timer armed on the old offset is armed again on the pool's time
           if (Math.abs(turnOffset - before) > 1_000 && turnTimer !== null && !signal.aborted) {
             turnClear(turnTimer);
             turnTimer = null;
             armTurn();
           }
-        }
+        }).catch(() => {});
         // a pass already running (begun before the turn, its binds of the period before) ends first; then this one,
         // unless this tab signed out meanwhile
         await evmPassing.get(chain)?.catch(() => {});

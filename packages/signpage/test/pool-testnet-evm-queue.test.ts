@@ -503,7 +503,8 @@ const { evmPool: walletEvmPool } = await import("../../wallet/src/pool/evm.ts");
 const { freshWallet } = await import("../../wallet/src/derive/keys.ts");
 /** The page's turn timers, by hand: each set timer's wait and its callback (which returns the pass). */
 function turnTimers(o: { now: number; random?: () => number; hidden?: () => boolean }) {
-  const set: { ms: number; f: () => unknown; cleared: boolean }[] = [];
+  // `at`: the device's time the timer fires at
+  const set: { ms: number; at: number; f: () => unknown; cleared: boolean }[] = [];
   let onShow: (() => unknown) | null = null;
   return {
     set,
@@ -511,7 +512,7 @@ function turnTimers(o: { now: number; random?: () => number; hidden?: () => bool
     evmTurn: {
       now: () => o.now,
       random: o.random ?? (() => 0),
-      setTimeout: (f: () => unknown, ms: number) => (set.push({ ms, f, cleared: false }), set.length - 1),
+      setTimeout: (f: () => unknown, ms: number) => (set.push({ ms, at: o.now + ms, f, cleared: false }), set.length - 1),
       clearTimeout: (t: unknown) => void (set[t as number]!.cleared = true),
       visibility: { hidden: o.hidden ?? (() => false), onShow: (f: () => unknown) => void (onShow = f) },
     },
@@ -608,6 +609,56 @@ test("the turn pass: a device clock minutes off holds the pool's period and arms
   assert.equal(o.now + 205_000 + tt.set.at(-1)!.ms, 1_800_000_060_000 + 3_000);
   assert.ok(tt.set[0]!.cleared === false && tt.set.length >= 2);
   await t.signedOut();
+});
+
+// delta review of 3e13d4e2, P3-2 and P3-3: a device clock ahead of the pool's: the pool's time read at the hold sets
+// the timer's offset even when the fee read fails, and the period the pass ran for is the pool's, so the pool's next
+// turn still runs (ahead 5 s and 20 s; loaded 30 s into the pool's period)
+test("the turn pass with a device clock ahead: the pool's time read at the hold, even a failed one, sets the next turn and the period it ran for", async () => {
+  const S = 1_800_000_000_000; // the pool's period start
+  for (const ahead of [5_000, 20_000]) {
+    for (const fails of [true, false]) {
+      const { w, ns } = await wallet();
+      const o = { now: S + 30_000 + ahead };
+      const tt = turnTimers(o);
+      const holds: bigint[] = [], binds: bigint[] = [];
+      const t = testnetPool(page(w), {
+        prover: { vault: signalsProver(), stop: () => {} },
+        evmPin: (c) => (c === "base" ? PIN : undefined),
+        evmRpcs: unread,
+        evmSync: () => ({ events: async () => assert.fail("no sync read") }),
+        evmQueuePool: () => {
+          const p = fakeEvmPool();
+          const own = p.bind.bind(p);
+          return Object.assign(p, {
+            now: async () => BigInt(o.now - ahead),
+            holdFee: async (e: bigint) => {
+              holds.push(e);
+              if (fails) throw new Error("the chain fee at block 100: one operator alone never passes");
+            },
+            bind: async (b: Parameters<typeof p.bind>[0]) => (binds.push(b.epochStartMs), own(b)),
+          }) as Pool<unknown>;
+        },
+        evmTurn: tt.evmTurn,
+      } as Parameters<typeof testnetPool>[1]);
+      await landed(ns);
+      await t.stateRead();
+      // the first timer, armed on the device's clock: it fires before the pool's next turn
+      o.now = tt.set.at(-1)!.at;
+      await tt.set.at(-1)!.f();
+      const next = tt.set.filter((x) => !x.cleared).at(-1)!;
+      assert.equal(next.at - ahead, S + 60_000 + 3_000, `ahead ${ahead}${fails ? ", the hold failing" : ""}: the next timer at the pool's turn + 3 s`);
+      // the pool's turn: its pass holds the pool's period and binds it
+      holds.length = 0;
+      binds.length = 0;
+      o.now = next.at;
+      await next.f();
+      for (let i = 0; i < 50 && !binds.includes(BigInt(S + 60_000)); i++) await new Promise((r) => setTimeout(r, 10));
+      assert.deepEqual(holds, [BigInt(S + 60_000)], `ahead ${ahead}${fails ? ", the hold failing" : ""}: the pool's turn held`);
+      assert.ok(binds.includes(BigInt(S + 60_000)), `ahead ${ahead}: the pool's turn bound its period`);
+      await t.signedOut();
+    }
+  }
 });
 
 test("the turn pass waits for a pass already running, and runs nothing after a sign out", async () => {
@@ -850,10 +901,11 @@ test("the turn pass on a pool with leaves binds, proves and asks the helper, and
   await t.signedOut();
 });
 
-// the ruling on review P3-d: a page loaded mid-period whose period's first block no two operators still hold (Robinhood
-// at +55 s, 1 of 3 periods read 2026-11-10 23:20-23:29Z) waits for the next turn: no proof and no error in between,
-// never one of the old period, and the proof at the turn's pass, never later
-test("a load mid-period whose first block no two operators hold: no proof and no error until the next turn, then the turn's proof", async () => {
+// the ruling on review P3-d: a fresh load mid-period whose period's first block no two operators still hold (Robinhood
+// at +55 s, 1 of 3 periods read 2026-11-10 23:20-23:29Z) has no proof until the next turn, and no error in between;
+// the proof comes at the turn's pass, never later. (A page open in the period before keeps that period's proof
+// takeable meanwhile, the queue's own rule, packages/wallet/src/pool/queue.ts:10-13: the next test.)
+test("a fresh load has no proof until the turn: no error in between, then the turn's proof", async () => {
   const { EvmLagError } = await import("../../wallet/src/pool/evm.ts");
   const { w, ns } = await wallet();
   const START = 1_800_000_000_000;
@@ -886,7 +938,7 @@ test("a load mid-period whose first block no two operators hold: no proof and no
   for (let i = 0; i < 50 && binds.length === 0; i++) await new Promise((r) => setTimeout(r, 10));
   await new Promise((r) => setTimeout(r, 30));
   assert.deepEqual(binds, [BigInt(START)], "the load's pass tried its own period");
-  // in between: the page answers with no proof, never an error, and no proof of the old period
+  // in between: the page answers with no proof and never an error
   const between = await t.readyWith(async () => "between");
   assert.equal(between.value, "between");
   assert.equal((between.ready ?? []).length, 0);
@@ -900,5 +952,74 @@ test("a load mid-period whose first block no two operators hold: no proof and no
   const after = await t.readyWith(async () => null);
   assert.equal(after.ready?.length, 1, "the turn's proof");
   assert.equal(after.ready![0]!.epochStartMs, BigInt(START + 60_000));
+  await t.signedOut();
+});
+
+// delta review of 3e13d4e2, P3-5: the state read's stop reaches its RESERVED notes' settle: a sign out right after the
+// read begins starts no settle round
+test("a sign out right after a state read begins starts no settle of its RESERVED notes", async () => {
+  const { w, ns } = await wallet();
+  await reserved(ns);
+  const slow = slowSync();
+  const t = testnetPool(page(w), { prover: { vault: signalsProver(), stop: () => {} }, evmPin: (c) => (c === "base" ? PIN : undefined), evmRpcs: unread, evmSync: () => slow.sync, evmQueuePool: () => fakeEvmPool() });
+  const read = t.stateRead();
+  t.signingOut();
+  await new Promise((r) => setTimeout(r, 50));
+  const started = slow.started();
+  slow.go();
+  await read;
+  assert.equal(started, 0, "no settle round after the sign out");
+  await t.signedOut();
+});
+
+// delta review of 3e13d4e2, P3-4: the queue's own rule shown, not hidden: a page open in the period before made that
+// period's proof; 30 s into the next, with no two operators keeping the new period's first block, that proof stays
+// takeable (its note's remake waits), and the turn's pass replaces it with the new period's
+test("a page open across the turn keeps the period before's proof takeable while the new period's fee is not read, then the turn replaces it", async () => {
+  const { EvmLagError } = await import("../../wallet/src/pool/evm.ts");
+  const { w, ns } = await wallet();
+  const START = 1_800_000_000_000;
+  const o = { now: START + 10_000 };
+  const tt = turnTimers(o);
+  const binds: bigint[] = [];
+  const t = testnetPool(page(w), {
+    prover: { vault: signalsProver(), stop: () => {} },
+    evmPin: (c) => (c === "base" ? PIN : undefined),
+    evmRpcs: unread,
+    evmSync: () => ({ events: async () => assert.fail("no sync read") }),
+    evmQueuePool: () => {
+      const p = fakeEvmPool();
+      const own = p.bind.bind(p);
+      return Object.assign(p, {
+        now: async () => BigInt(o.now),
+        holdFee: async () => undefined,
+        bind: async (b: Parameters<typeof p.bind>[0]) => {
+          binds.push(b.epochStartMs);
+          if (b.epochStartMs === BigInt(START + 60_000)) throw new EvmLagError("the chain fee at block 130: one operator alone never passes");
+          return own(b);
+        },
+      }) as Pool<unknown>;
+    },
+    evmTurn: tt.evmTurn,
+  } as Parameters<typeof testnetPool>[1]);
+  await landed(ns);
+  await t.stateRead();
+  await until(() => binds.includes(BigInt(START)));
+  await new Promise((r) => setTimeout(r, 30));
+  assert.equal((await t.readyWith(async () => null)).ready?.[0]?.epochStartMs, BigInt(START), "the period's proof");
+  // 30 s into the next period: the remake fails (no two operators keep block 130); the old proof stays takeable
+  o.now = START + 90_000;
+  await t.stateRead();
+  await until(() => binds.includes(BigInt(START + 60_000)));
+  await new Promise((r) => setTimeout(r, 30));
+  const between = await t.readyWith(async () => null);
+  assert.equal(between.ready?.length, 1);
+  assert.equal(between.ready![0]!.epochStartMs, BigInt(START), "the period before's proof, by the queue's rule");
+  // the turn: the new period's proof replaces it
+  o.now = START + 123_000;
+  await tt.set.filter((x) => !x.cleared).at(-1)!.f();
+  await until(() => binds.includes(BigInt(START + 120_000)));
+  await new Promise((r) => setTimeout(r, 30));
+  assert.equal((await t.readyWith(async () => null)).ready?.[0]?.epochStartMs, BigInt(START + 120_000));
   await t.signedOut();
 });
