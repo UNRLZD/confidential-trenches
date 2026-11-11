@@ -988,6 +988,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       cluster: PAGE_CLUSTER,
       rpcs: rpcs(),
       claimed,
+      // a sign out ends the buy's waits before its signature (read-waits.ts waitUnless): this session's stop
+      signal: solanaStop.signal,
       // none ready (a page that has landed no deposit since it loaded has run no pass): a pass starts for the next tap
       ready: async () => {
         const list = (await q()).ready();
