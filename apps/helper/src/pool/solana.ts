@@ -41,19 +41,19 @@
 //                       not verify over the message, checked here before anything leaves, so nothing is sent;
 //   blockhash_not_found the provider does not know the transaction's own blockhash (simulated without replacing it);
 //   simulation_failed   the simulation of W's transaction (no signature check, its own blockhash) failed;
-//   upstream (503)      the simulation or the blockhash read could not be made, this epoch's rent could not be read,
-//                       or (mainnet tag 3) every block engine failed (a 5xx) or refused it; a provider that throttled
-//                       one of those reads (its HTTP 429, a rate-limit error) is rate_limited (429) instead, never 503;
+//   upstream (503)      the simulation or the blockhash read could not be made, or this epoch's rent could not be
+//                       read; a provider that throttled one of those reads (its HTTP 429, a rate-limit error) is
+//                       rate_limited (429) instead, never 503 (a block engine's answer is never one: the bundle is the
+//                       extra, the plain copy carries the send);
 //   in_flight (429)     mainnet tag 3: this client already holds POOL_JITO_IN_FLIGHT_MAX requests open waiting for a
 //                       fill, repeats of one carry each counted (M369 (M1), M374 (5): the block engines' seconds are
 //                       shared by every caller); Retry-After POOL_IN_FLIGHT_RETRY_S;
-//   rate_limited (429)  a pool provider throttled a read (Retry-After 1, limits.ts throttleOf); or mainnet tag 3: the
-//                       block engines throttled it (every second booked, a 429 or rate-limit words
-//                       from a region); Retry-After 1. A nullifier whose last send expired goes again only into a second
-//                       free now (M374 (4)), else this;
+//   rate_limited (429)  a pool provider throttled a read (Retry-After 1, limits.ts throttleOf). A mainnet tag 3 the
+//                       block engines throttle, or an expired nullifier's re-send with no free second (M374 (4)), goes
+//                       plain without a bundle (the line's via=plain first=throttled), never this;
 //   not_landed          mainnet tag 3: the send ended without a fill: expired (503; never landed, the nullifier is free
-//                       again), unknown (503; held to the release's deadline) or failed (422, detail "failed";
-//                       failed_this_epoch after).
+//                       again), unknown (503; held to the release's deadline; failed_this_epoch after when one
+//                       provider read it landed and failed) or failed (422, detail "failed"; failed_this_epoch after).
 // A 503 says only its code: no text from a block engine or an RPC reaches the caller (M374 (1)).
 // The send (M362 (4)): on mainnet a tag 3 goes to Jito bundle-only (./jito.ts) and, at once beside it, as a plain send
 // on both providers at the plain path's pace (card sol-pool-buy-lands-on-mainnet: Jito counts a tip only as an
@@ -394,6 +394,8 @@ export type SolanaPoolSenderDeps = {
   /** The bundle-only sender a mainnet tag 3 goes through (./jito.ts); default the block engines on mainnet, none on
    * any other cluster. null: none (every send plain). */
   jito?: JitoSender | null;
+  /** The fee payer's signing (default signAsFeePayer); replaced in tests only, to reach the signature check after it. */
+  signFeePayer?: (tx: SolanaPoolChecked, seed: Uint8Array) => Uint8Array;
   /** The sender's timer for the log line's reads (engine3, hash_ms): true after `ms`, false at once when `signal`
    *  aborts; replaced in tests. */
   wait?: (ms: number, signal: AbortSignal) => Promise<boolean>;
@@ -646,7 +648,7 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
       // the bytes as they will be sent: the fee payer's signature added, and both signatures verified here over the
       // message (card sol-pool-buy-lands-on-mainnet); the signed bytes leave the process only in a send, never in a
       // simulation, so no provider's answer can carry the fee payer's signature to the caller (M369 (H1))
-      const signedWire = signAsFeePayer(tx, seed);
+      const signedWire = (deps.signFeePayer ?? signAsFeePayer)(tx, seed);
       if (!solanaPoolSignaturesHold(signedWire, tx)) return { ...no(422, "signature_failed"), note: { err: "signature" } };
       const signed: SolanaSignedTx = { wire: signedWire, lastValidBlockHeight: height };
       let through = paths;

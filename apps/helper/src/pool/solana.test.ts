@@ -208,10 +208,11 @@ function rpcStub(simErr: unknown = null, calls: Calls = []): SolanaRpc {
     { url: `https://stub.invalid/${Math.random()}` },
   );
 }
-function sender(simErr: unknown = null, calls: Calls = [], sent: Uint8Array[] = [], o: { fee?: bigint; ends?: () => Promise<string>; memory?: number; now?: () => number; rent?: SolanaRent; readRent?: (epoch: number) => Promise<SolanaRent>; log?: (line: string) => void } = {}) {
+function sender(simErr: unknown = null, calls: Calls = [], sent: Uint8Array[] = [], o: { fee?: bigint; ends?: () => Promise<string>; memory?: number; now?: () => number; rent?: SolanaRent; readRent?: (epoch: number) => Promise<SolanaRent>; log?: (line: string) => void; signFeePayer?: (tx: never, seed: Uint8Array) => Uint8Array } = {}) {
   return solanaPoolSender(
     { cluster: "devnet", program: PROGRAM, feePayerSecret: FP.secret, fee: String(o.fee ?? FEE) },
     {
+      ...(o.signFeePayer ? { signFeePayer: o.signFeePayer } : {}),
       providers: [rpcStub(simErr, calls), rpcStub()],
       ...(o.memory ? { memory: o.memory } : {}),
       now: o.now ?? (() => NOW),
@@ -264,6 +265,21 @@ test("both signatures of the bytes as sent are verified here: a wrong fee-payer 
     }
     // a fee payer key that is not the message's payer: its signature does not hold
     assert.equal(solanaPoolSignaturesHold(signAsFeePayer(c.tx, W.seed), c.tx), false);
+  }
+});
+test("a fee payer signature that does not verify at the call site is refused signature_failed, nothing sent, none in the answer", async () => {
+  for (const tag of [2, 3] as const) {
+    const sent: Uint8Array[] = [];
+    // the signing seam: a slot 0 one bit off what the fee payer's key signs
+    const flip = (tx: never, seed: Uint8Array) => {
+      const w = signAsFeePayer(tx, seed);
+      w[3]! ^= 1;
+      return w;
+    };
+    const a = await sender(null, [], sent, { signFeePayer: flip }).carry(body(build({ tag })));
+    assert.deepEqual([a.status, code(a), a.note?.err], [422, "signature_failed", "signature"], `tag ${tag}`);
+    assert.equal(sent.length, 0, "nothing sent");
+    assert.deepEqual(Object.keys(a.body), ["error"]);
   }
 });
 test("a wire whose W signature does not verify is refused before any provider call; no provider call carries a signed slot 0", async () => {
