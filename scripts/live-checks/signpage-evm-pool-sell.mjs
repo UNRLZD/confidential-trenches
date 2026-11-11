@@ -44,8 +44,9 @@ export const SELL_PINS = Object.freeze({
   "robinhood-testnet": Object.freeze({ sellDelegate: "0xcec6c1b18be682cfa1679568eab309db79fe3cce", sellSender: "0xd12d83097671d731df2db731e973ad9a07673607" }),
 });
 /** Strings only the EVM sell's code carries in a bundle (src/pool-sell-evm.ts: the open sale's key, the SellDelegate
- *  nonce() call it reads on W). The helper's route table names /v1/pool/evm/sell in every build, so it is no mark. */
-export const EVM_SELL_MARKS = Object.freeze(["owed/sell-evm", "nonce()"]);
+ *  nonce() call it reads on W; src/pool-buy-evm.ts: the buy records' key, which the testnet restore writes and the
+ *  sale reads). The helper's route table names /v1/pool/evm/sell in every build, so it is no mark. */
+export const EVM_SELL_MARKS = Object.freeze(["owed/sell-evm", "nonce()", "owed/cost-evm"]);
 const RECORD = new URL("./signpage-evm-pool-sell.md", import.meta.url);
 const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}`;
 const lower = (s) => (typeof s === "string" ? s.toLowerCase() : null);

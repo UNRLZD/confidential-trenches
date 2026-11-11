@@ -465,6 +465,7 @@ test("the live check's own constants are the page's: the sell selector, the Depo
   const v = evmPoolVenues();
   for (const n of ["base-sepolia", "robinhood-testnet"] as const) assert.deepEqual((lc.SELL_PINS as Record<string, unknown>)[n], { sellDelegate: v[n]!.sellDelegate!.toLowerCase(), sellSender: v[n]!.sellSender!.toLowerCase() });
   assert.ok((lc.EVM_SELL_MARKS as string[]).includes(EVM_OPEN_SELLS_KEY));
+  assert.ok((lc.EVM_SELL_MARKS as string[]).includes(EVM_POSITION_COSTS_KEY), "the buy records' key: no mainnet bundle carries it");
 });
 
 // ---- the review of 1004e598..617fcd62 (card signpage-evm-pool-sell) ----
@@ -678,4 +679,41 @@ test("P3-3: a busy helper never holds the tap past its bound: answered sent, the
   for (let i = 0; i < 50 && kept.length < 2; i++) await new Promise((r) => setTimeout(r, 5));
   await Promise.all(kept);
   assert.equal((await returnNote(x.store))?.state, "UNSPENT");
+});
+
+test("a wiped device sells the rest while its last sale's deposit is not final: that note written INCOMING from the round, the next on R's first; once final both land; an INCOMING note no sale holds and no deposit names is signed on", async () => {
+  let x!: World;
+  x = await world({
+    send: async (_n, body) => {
+      const s = sellOf(body.data);
+      x.c.balance = x.c.balance.map((b) => b - s.amount);
+      x.land(s.minOut - s.fee, s.precommitment, W, "0x" + "e2".repeat(32), true);
+      return "0x" + "aa".repeat(32);
+    },
+  });
+  // the first sale, from another device: on chain above the final block, its note in no store here
+  x.land(10n ** 15n, P, W, "0x" + "e1".repeat(32), true);
+  const a = await runEvmPoolSell(x.h, HALF);
+  assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
+  const s = sellOf(x.posts[0]!.data);
+  assert.deepEqual([s.precommitment, s.nonce], [P_R0, 1n], "R's first, on the next Sell nonce");
+  assert.deepEqual(await saleNotes(x.store), [`${refKey(RETURN)} INCOMING`, `${refKey(R0)} INCOMING`]);
+  x.c.fin += 100n;
+  x.c.head += 200n;
+  await followEvmSells(x.h);
+  assert.deepEqual(await saleNotes(x.store), [`${refKey(RETURN)} UNSPENT`, `${refKey(R0)} UNSPENT`]);
+  // an INCOMING note with no open sale whose deposit a reorg dropped: the next sale signs on it, never stuck
+  const y = await world({
+    send: async (_n, body) => {
+      const s = sellOf(body.data);
+      y.land(s.minOut - s.fee, s.precommitment);
+      return "0x" + "aa".repeat(32);
+    },
+  });
+  const n = await y.store.add({ ref: RETURN, scope: SCOPE, precommitment: P, state: "PLANNED" });
+  await y.store.move(n.id, "PLANNED", "INCOMING");
+  const b = await runEvmPoolSell(y.h, ASK);
+  assert.equal("stage" in b && b.stage, "filled", JSON.stringify(b));
+  assert.equal(sellOf(y.posts[0]!.data).precommitment, P);
+  assert.equal((await returnNote(y.store))?.state, "UNSPENT");
 });

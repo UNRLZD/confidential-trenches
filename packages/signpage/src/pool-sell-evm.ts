@@ -302,7 +302,7 @@ export async function planEvmSell(h: Pick<EvmSellHost, "chain" | "scope" | "rpcs
 /** One leg's plan and quote: its return note, its nonces, its `sent` and bans, the kit's quote at the ask's slippage,
  *  the decimals at the quote's block. `sim`, W's sim signer (none: a read-only caller, which then cannot price a route
  *  through a hook the venue does not list: the kit refuses that quote bad_request). */
-export type EvmSellLegQuote = { q: EvmPoolSellQuote; note: { ref: NoteRef; precommitment: bigint; held: NoteRecord | undefined; resume?: EvmOpenSell }; nonce: bigint; authNonce: bigint; authReads: readonly [bigint, bigint] };
+export type EvmSellLegQuote = { q: EvmPoolSellQuote; note: { ref: NoteRef; precommitment: bigint; held: NoteRecord | undefined; resume?: EvmOpenSell; orphan?: boolean }; pending: { ref: NoteRef; precommitment: bigint }[]; nonce: bigint; authNonce: bigint; authReads: readonly [bigint, bigint] };
 /** `opens`: the open sales; a note held INCOMING whose sale of this W is open, not on chain and not being sent by this
  *  page is that sale's to sign again (`resume`: its Sell nonce and precommitment, card signpage-evm-pool-sell review
  *  P2-4: a helper's refusal or no answer never locks W's sale until its deadline). `own`: this run's own note. */
@@ -321,7 +321,10 @@ export async function evmSellQuoteLeg(h: Omit<EvmSellHost, "send" | "record" | "
   // this page is sending now, or one with no open sale of W, is not
   const resume = held?.state === "INCOMING" ? Object.values(opens ?? {}).find((o) => o?.note === held.id && o.chain === h.chain && lower(String(o.w)) === lower(w.w) && BigInt(o.precommitment) === walk.next.precommitment) : undefined;
   const mine = held !== undefined && held.id === own;
-  if (held !== undefined && held.state !== "PLANNED" && !(held.state === "INCOMING" && (mine || (resume !== undefined && h.sending?.has(held.id) !== true)))) return no("failed");
+  // one held INCOMING with no open sale at all and no deposit naming it: a pending take a sale wrote that a reorg dropped
+  // (below); no signature of the device's is out on it (a sale's record outlives its signatures), so it is signed on
+  const orphan = held?.state === "INCOMING" && !mine && !Object.values(opens ?? {}).some((o) => o?.note === held.id);
+  if (held !== undefined && held.state !== "PLANNED" && !(held.state === "INCOMING" && (mine || orphan || (resume !== undefined && h.sending?.has(held.id) !== true)))) return no("failed");
   const sent = evmSellSent(seed64, h.scope, w.l, w.j, await store.list(), round);
   const nonce = await agreed(h.rpcs, async (rpc) => word0(await rpc("eth_call", [{ to: w.w, data: nonceCall() }, "latest"]), "nonce", true));
   const authReads = (await Promise.all(h.rpcs.map(async (rpc) => quantity(await rpc("eth_getTransactionCount", [w.w, "latest"]), "nonce")))) as [bigint, bigint];
@@ -331,7 +334,11 @@ export async function evmSellQuoteLeg(h: Omit<EvmSellHost, "send" | "record" | "
   const at = hexQ(q.block.number);
   const reads = await Promise.all(h.rpcs.map((rpc) => rpc("eth_call", [{ to: token, data: ERC20_DECIMALS }, at])));
   if (tokenDecimalsOf(ask.chain, reads as [unknown, unknown]) !== ask.decimals) return no("quote_check_failed");
-  return { q, note: { ref: walk.next.ref, precommitment: walk.next.precommitment, held, ...(resume && !mine ? { resume } : {}) }, nonce, authNonce: authReads[0], authReads };
+  // the chain's notes a deposit names in a block not final yet (a sale of W's on chain, its note not in this store: a
+  // wiped device's restore writes final ones only): written INCOMING before the next one is planned (sellLeg), so the
+  // store's order rule holds and a later round lands them
+  const pending = walk.pending.map((ref) => ({ ref, precommitment: noteSecrets(seed64, ref).precommitment }));
+  return { q, note: { ref: walk.next.ref, precommitment: walk.next.precommitment, held, ...(resume && !mine ? { resume } : {}), ...(orphan ? { orphan } : {}) }, pending, nonce, authNonce: authReads[0], authReads };
 }
 
 /** The return note's chain for W: (return, evm, l, j), then R's second arrivals. */
@@ -428,6 +435,12 @@ async function sellLeg(h: EvmSellHost, ask: PoolAsk, w: EvmSellWallet, on: { sen
       // two sales of one W never share a Sell nonce or a note: any other open sale of W on either is a refusal
       const others = Object.values(await h.open()).filter((o) => o?.chain === h.chain && lower(String(o.w)) === lower(w.w) && o.note !== resume?.note);
       if (others.some((o) => BigInt(o.nonce) === s.built.nonce || BigInt(o.precommitment) === s.built.precommitment)) return no();
+      for (const p of leg.pending) {
+        if ((await store.list()).some((n) => n.scope === h.scope && n.precommitment === p.precommitment)) continue;
+        const m = await store.add({ ref: p.ref, scope: h.scope, precommitment: p.precommitment, state: "PLANNED" });
+        await store.move(m.id, "PLANNED", "INCOMING");
+      }
+      if (leg.note.orphan) await store.move(leg.note.held!.id, "INCOMING", "PLANNED");
       const note = leg.note.held ?? (await store.add({ ref: leg.note.ref, scope: h.scope, precommitment: leg.note.precommitment, state: "PLANNED" }));
       if (h.sending?.has(note.id)) return no();
       h.sending?.add(note.id);
@@ -646,7 +659,10 @@ async function land(h: EvmSellHost, o: EvmOpenSell): Promise<boolean> {
     const walk = evmNextNote(seed, h.scope, round.events, first, round.fin.number);
     const mine = walk.taken.find((t) => t.precommitment === n.precommitment);
     if (mine === undefined) return false;
-    await evmClaimTaken(store, [mine]);
+    // with it, every final one of the chain no other open sale holds (a pending take a sale wrote INCOMING); each open
+    // sale's own lands in its own run
+    const others = new Set(Object.values(await h.open()).filter((x) => x?.note !== o.note).map((x) => String(x?.precommitment)));
+    await evmClaimTaken(store, walk.taken.filter((t) => t === mine || !others.has(t.precommitment.toString())));
   } finally {
     seed.fill(0);
   }
