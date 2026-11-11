@@ -41,9 +41,13 @@
 //   of the route goes at a time (the gate's turn, taken before the gate is waited, given back once the round's calls
 //   settle, on an answer, a throw or a stop), so two list reads at once ask no faster than one: at most
 //   HOLDINGS_THROTTLED_ROUNDS_60S rounds a minute a page; two tabs hold two gates, so at most twice that. It is never
-//   the trade path's: a buy's own reads on the same URL keep their own retry and gate. A read (every W of one list)
-//   waits the gate for at most HOLDINGS_THROTTLE_MAX_MS from the list's start, then is refused without asking; within
-//   that, SOL_HOLDINGS_ROUNDS or EVM_HOLDINGS_ROUNDS.
+//   the trade path's: a 429 met here pauses these readers only, never the host's lane, so a trade's reads on the same
+//   host go on (each round still takes the host's pass turn, so it waits a pause a trade met and the passes' budget).
+//   The bound is the route's (HOLDINGS_THROTTLE_MAX_MS): no wait is begun past 30 s of the route throttled with no round
+//   through since, so one W whose rounds keep drawing 429s (a provider refusing one method for good) is refused within
+//   it, and every W after it on the route is refused without asking while that lasts: the list ends at the bound. A
+//   429 late in a long list, after rounds went through, starts its own 30 s. Within it, SOL_HOLDINGS_ROUNDS or
+//   EVM_HOLDINGS_ROUNDS.
 // - One failure never hides the rest: a pool that fails reports its error and the others still list.
 // - Privacy: every request names one W and nothing else of the user's: no batch, no call carries two Ws. The Ws of every
 //   pool are read one after another in a random order, never in the notes' order.
@@ -74,8 +78,8 @@ export type Holdings = { native: bigint; tokens: ReadonlyMap<string, TokenHoldin
 /** One provider's read of one W's holdings, at one state. */
 export interface HoldingsReader {
   readonly chain: BuyChain;
-  /** `by`: the Date.now time past which a throttled route is not waited for (default: none but the gate's own bound,
-   *  HOLDINGS_THROTTLE_MAX_MS of the provider in doubt). */
+  /** `by`: the Date.now time past which a throttled route is not waited for (default: none but the route's own bound,
+   *  HOLDINGS_THROTTLE_MAX_MS of the route throttled with no round through). */
   read(address: string, signal?: AbortSignal, by?: number): Promise<Holdings>;
 }
 
@@ -105,11 +109,14 @@ export type DerivedBuyWallets = { wallets: readonly BuyWalletKey[]; failed: BuyW
  * of mainnet-beta's rounds answer from backends at different slots, and a W took up to 4 rounds live (M367; see
  * HOLDINGS_RPC_LIMIT), so 8 leaves a refusal to a chain that keeps moving under the reads. */
 export const SOL_HOLDINGS_ROUNDS = 8;
-/** The longest a throttled route is waited for: a wait that would end past this much of the provider in doubt (from
- *  the throttle that began it, no round through since: ThrottleGate doubtMs, the host's one gate) is not begun, and
- *  the read is refused without asking. One bound for every reader of the host, so a provider throttling for good is
- *  refused within it whoever asks; a 429 met late in a long list (100 Ws at the pace: 165 s) is waited out (card
- *  wallets-found-in-one-read; it ran from the list's start before). A caller's `by` may bound a read sooner. */
+/** The longest a throttled route is waited for: a wait that would end past this much of the route in doubt (from the
+ *  throttle that began it, no round through since: ThrottleGate doubtMs on the route's own gate) is not begun, and the
+ *  read is refused without asking. One bound for every reader of the route, so a provider throttling for good, or for
+ *  one method while it answers the rest, is refused within it whoever asks, and a list ends there; a 429 met late in a
+ *  long list (100 Ws at the pace: 165 s) after rounds went through is waited out (card wallets-found-in-one-read; it
+ *  ran from the list's start before). What the user sees at it: a sale planned from its buy records alone asks no
+ *  finder and is not touched; a sale that needs the finder is refused with the cause; Portfolio keeps every row at its
+ *  last amount and tries again. A caller's `by` may bound a read sooner. */
 export const HOLDINGS_THROTTLE_MAX_MS = 30_000;
 /** The most rounds a route asks in the first 60 s of a provider that answers every one with a 429 and names no
  *  Retry-After, whoever asks (a pass run again, a sell, buys ending): the gate's pauses from THROTTLE_PAUSE_FIRST_MS,
@@ -146,8 +153,10 @@ export const EVM_HOLDINGS_ROUNDS = 4;
  * One round in 1,667 ms: 6 rounds in any 10 s, 18 calls (12 getTokenAccountsByOwner, 6 getBalance), under the passes'
  * 20, spread evenly, never in a burst. A full pass of N Ws takes (N - 1) x 1.667 s: 5 Ws 6.7 s, 20 Ws 31.7 s, 100 Ws
  * 165 s (at 3 s: 12, 57 and 297 s). On mainnet-beta, the helper's public fallback, 12 getTokenAccountsByOwner in 10 s
- * is past the about 10 measured above: a 429 there pauses the host by the one throttle rule and the round is read
- * again, never a failed list: the gate refuses only a provider in doubt for HOLDINGS_THROTTLE_MAX_MS (held). */
+ * is past the about 10 measured above: a 429 there pauses the route's own gate and the round is read again, never a
+ * failed list: the gate refuses only a route in doubt for HOLDINGS_THROTTLE_MAX_MS (held).
+ * It also paces the EVM readers on the helper's /v1/rpc/base and /v1/rpc/robinhood: 18 calls in 10 s against the 30 a
+ * caller may send each (apps/helper/src/rpc/rpc.ts RPC_PAGE_NEED). Two tabs hold two routes, so their finders take 36 of a caller's 42 on /v1/rpc/solana. */
 export const HOLDINGS_RPC_LIMIT: SolanaRpcLimit = /* @__PURE__ */ Object.freeze({ windowMs: 1_667, total: 3, perMethod: 2 });
 /** Solana's JSON-RPC code for a minContextSlot the node has not reached. */
 const MIN_CONTEXT_SLOT_NOT_REACHED = "-32016";
@@ -235,8 +244,8 @@ async function readDerived(pools: readonly BuyPool[], derived: readonly (BuyWall
   const found = derived.map((ws) => ws.map((w): BuyWallet | undefined => (w === undefined ? undefined : { ...w, holdings: { native: 0n, tokens: new Map(), unreadable: [] } })));
   const jobs = all.filter((j) => only === undefined || only.has(j.address));
   // no bound from the list's start (card wallets-found-in-one-read): a list at the pace takes longer than one (100 Ws:
-  // 165 s), and a 429 met late in it was refused though nothing before had waited. The gate's own bound holds instead:
-  // a provider in doubt for HOLDINGS_THROTTLE_MAX_MS (throttling for good) is not waited, whoever asks
+  // 165 s), and a 429 met late in it was refused though nothing before had waited. The route's own bound holds instead:
+  // a route in doubt for HOLDINGS_THROTTLE_MAX_MS (throttling for good) is not waited, whoever asks
   const by = Infinity;
   // Fisher-Yates over every pool's Ws
   for (let i = jobs.length - 1; i > 0; i--) {
@@ -384,7 +393,8 @@ function retryAfterFetch(): { fetch: SolanaFetch; wait429: () => number } {
  * this limit to the route URL's queue, where the trade path's calls (send.ts rpcPath, solanaPacedRpc on the helper) are
  * paced. On a public host the device reaches ("url"), in that URL's one queue at the kit's keyless limit, beside the
  * page's own pair, so the host is never asked past the one budget. The gate is the route's either way, so a throttle
- * met here never holds the trade path back. */
+ * met here never holds the trade path back; each round takes the host's pass turn (inTurn), so a pause the trade met
+ * and the passes' budget hold these rounds. */
 type Route = { rpc: SolanaRpc; wait429: () => number; gate: ThrottleGate; lane: HostLane };
 const holdingsRoutes = new Map<string, Route>();
 function holdingsRoute(make: (fetch: SolanaFetch) => SolanaRpc, queue: "own" | "url" = "own"): Route {
@@ -399,10 +409,9 @@ function holdingsRoute(make: (fetch: SolanaFetch) => SolanaRpc, queue: "own" | "
       return stop?.aborted ? Promise.reject(stop.reason) : bare(method, params);
     };
     const rpc = queue === "url" ? solanaPacedRpc(Object.assign(stopped, { url: bare.url })) : solanaPacedRpc(stopped, HOLDINGS_RPC_LIMIT);
-    // the gate is the host's one throttle rule (its lane's): a 429 met here pauses the host for every reader of the page,
-    // and a pause any reader met holds these rounds; each round takes the host's pass turn (card wallets-found-in-one-read)
-    const lane = hostLane(String(bare.url));
-    r = { rpc, wait429: t.wait429, gate: lane.gate, lane };
+    // the gate is the route's own: a 429 met here pauses these readers, never the host's lane (a trade's reads go on);
+    // each round takes the host's pass turn, so the lane's pause and budget hold it (card wallets-found-in-one-read)
+    r = { rpc, wait429: t.wait429, gate: new ThrottleGate(), lane: hostLane(String(bare.url)) };
     holdingsRoutes.set(key, r);
   }
   return r;

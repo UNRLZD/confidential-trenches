@@ -17,7 +17,7 @@ import { openNoteStore, refKey, type NoteStore } from "../src/notes/store.ts";
 import { openWalletStore, type WalletStore } from "../src/store/index.ts";
 import { SOL_LAG_SLOTS, SOL_LAG_WAIT_MS } from "../src/pool/solana.ts";
 import { hostLane, PASS_BUDGET, ThrottleGate } from "../src/throttle.ts";
-import { type ReaderOpts, buyWallets, derivedBuyWallets, wantedBuyWallets, EVM_HOLDINGS_ROUNDS, evmHelperHoldings, HOLDINGS_RPC_LIMIT, evmHoldingsReader, RETRY_AFTER_DEFAULT_MS, RETRY_AFTER_MAX_MS, retryAfterMs, SOL_HOLDINGS_ROUNDS, solanaHelperHoldings, solanaHoldingsReader, solanaSpentNotes, spentNotesOf, type BuyPool, type HoldingsReader, type JsonRpc } from "../src/pool/buy-wallets.ts";
+import { type ReaderOpts, buyWallets, derivedBuyWallets, wantedBuyWallets, EVM_HOLDINGS_ROUNDS, evmHelperHoldings, HOLDINGS_RPC_LIMIT, HOLDINGS_THROTTLE_MAX_MS, evmHoldingsReader, RETRY_AFTER_DEFAULT_MS, RETRY_AFTER_MAX_MS, retryAfterMs, SOL_HOLDINGS_ROUNDS, solanaHelperHoldings, solanaHoldingsReader, solanaSpentNotes, spentNotesOf, type BuyPool, type HoldingsReader, type JsonRpc } from "../src/pool/buy-wallets.ts";
 
 const A8 = JSON.parse(readFileSync(new URL("./vectors/a8.json", import.meta.url), "utf8")) as { inputs: { entropy: string }; l: string; wallets: { name: string; c: string; l: string; j: number; path: string; address: string }[] };
 const SEED = d.wordsToSeed64(d.entropyToWords(new Uint8Array(Buffer.from(A8.inputs.entropy, "hex"))));
@@ -558,6 +558,54 @@ test("card wallets-found-in-one-read: on a provider that takes about 10 getToken
     assert.equal(r.wallets.length, 20);
     assert.ok(n429 > 0, "the pace is past this provider's: it throttled");
   } finally {
+    sol.restore();
+  }
+}));
+
+test("card wallets-found-in-one-read: a finder 429 never pauses a trade: the finder's throttle is its route's own, the host's lane stays open for a trade's read", () => onTestClock(async () => {
+  const origin = "https://finder-429.example";
+  const sol = stubFetch(origin, (m, id) => (m === "getTokenAccountsByOwner" ? too("10") : solOk(m, id)));
+  try {
+    const stop = new AbortController();
+    const read = solanaHelperHoldings(origin).read(solW(0), stop.signal).catch(() => "stopped");
+    while (sol.starts.length < 3) await new Promise((r) => setTimeout(r, 10));
+    await new Promise((r) => setTimeout(r, 50)); // the round's 429s are in
+    const lane = hostLane(`${origin}/v1/rpc/solana`);
+    assert.equal(lane.gate.left(), 0, "the host's lane is not paused by the finder's 429");
+    const t0 = Date.now();
+    await lane.turn("trade");
+    assert.equal(Date.now() - t0, 0, "a trade's read goes at once");
+    stop.abort();
+    await read;
+  } finally {
+    sol.restore();
+  }
+}));
+
+test("card wallets-found-in-one-read: a provider refusing one method for good (getTokenAccountsByOwner always 429, Retry-After 10) while it answers the rest, and a trade's reads on the host going through: the list ends at the bound, nothing asked past 30 s", () => onTestClock(async () => {
+  const origin = "https://one-method-429.example";
+  const sol = stubFetch(origin, (m, id) => (m === "getTokenAccountsByOwner" ? too("10") : solOk(m, id)));
+  // a trade's reads on the same host answer every second, as page-rpc.ts reports them to the host's lane
+  const lane = hostLane(`${origin}/v1/rpc/solana`);
+  let trading = true;
+  const trade = (async () => {
+    while (trading) {
+      lane.answered(lane.gate.epoch());
+      await new Promise((r) => setTimeout(r, 1_000));
+    }
+  })();
+  const t0 = Date.now();
+  try {
+    const spent = Array.from({ length: 5 }, (_, i) => ({ ref: { kind: "deposit", s: 1n, i } as NoteRef, label: 700n + BigInt(i) }));
+    const r = await buyWallets(SEED, [{ id: "sol", chain: "sol", spent, reader: solanaHelperHoldings(origin) }]);
+    assert.equal(r.failed.length, 1, "refused, with its cause");
+    assert.match(r.failed[0]!.error, /429/);
+    const last = Math.max(...sol.starts.map(([at]) => at)) - t0;
+    assert.ok(last <= HOLDINGS_THROTTLE_MAX_MS, `the last call at ${last} ms`);
+    assert.ok(Date.now() - t0 <= HOLDINGS_THROTTLE_MAX_MS + 1_000, `the list ended at ${Date.now() - t0} ms`);
+  } finally {
+    trading = false;
+    await trade;
     sol.restore();
   }
 }));

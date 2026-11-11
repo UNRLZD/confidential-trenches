@@ -92,7 +92,9 @@ export class ThrottleGate {
   }
   /** A call sent in `sentIn` drew a throttle, with the provider's Retry-After (ms, any value). */
   throttled(sentIn: number, afterMs: unknown): void {
-    if (!this.#suspect) this.#since = this.#now();
+    // the doubt starts at this throttle unless one is running: a gate left in doubt, then open past its quiet time with
+    // nothing asked, starts again (a later read is not refused for an old doubt)
+    if (!this.#suspect || this.#now() - this.#until >= (this.#bounds.quietMs ?? THROTTLE_QUIET_MS)) this.#since = this.#now();
     this.#suspect = true;
     if (sentIn === this.#epoch) {
       this.#epoch++;

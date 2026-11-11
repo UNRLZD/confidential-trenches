@@ -1410,8 +1410,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       chain: inner.chain,
       read: async (address, s, by) => {
         try {
-          // the finder takes the host's pass turn at each of its rounds (buy-wallets.ts inTurn), and the list's budget of
-          // throttled waits (readDerived's `by`) is passed on, as a sell's read keeps it
+          // the finder takes the host's pass turn at each of its rounds (buy-wallets.ts inTurn), and its route's bound on a
+          // throttle holds (HOLDINGS_THROTTLE_MAX_MS): past it every W after is refused without asking, so the pass ends
           return await inner.read(address, s, by);
         } catch (e) {
           if (s?.aborted) throw e;
