@@ -1,46 +1,63 @@
 import type { Chain } from "@blindfill/kit";
-import { createContext, useContext, useEffect, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { busy, outcome, poolSellAsk, progress, READY, tap } from "../trade/model.ts";
 import type { Phase } from "../trade/model.ts";
 import { useTradeSource } from "../trade/source.tsx";
 import type { PartCount } from "../trade/States.tsx";
-import { baseUnits, sellLocked } from "./model.ts";
+import { askSellPreview, baseUnits, sellLocked } from "./model.ts";
 import type { Tapped } from "./model.ts";
 
 // What the sell side reads and does. The sell is the kit's own `buy` request with `side: "sell"` (messages.ts
 // SignpageParams.buy) through the trade box's source (src/screens/trade/source.tsx: the same TradeKit stub, `request`
-// and `onProgress`), so the buy and the sell share one kit seam. Not in the kit yet, so typed here as the stub the screen
-// is built on, as the buy side's set preview is: the sell preview (what the share sells for, from the device's own quote
-// and pool reads). The live source answers none, so `You receive` draws a dash until the kit has it. The fixture page
-// passes the stub through SellKitProvider.
+// and `onProgress`), so the buy and the sell share one kit seam. The sell preview (what the share sells for) is the
+// signing page's pool.sell.dry (card app-sell-shows-what-you-receive: the sale's own quote on the device's pool reads),
+// asked through the same client for exactly what the tap would ask, in USD at the page's own pool price (model.ts
+// askSellPreview). The live source gives it with no provider; a fixture passes its own stub through SellKitProvider.
 
-/** Not in the kit: what the sell preview is asked for. `amount` is in the token's units (decimal string). */
+/** What the sell preview is asked for: `amount` the share's token units (decimal string), `share_bps` the share. */
 export interface SellPreviewRequest {
   chain: Chain;
   token: string;
   amount: string;
+  share_bps: number;
   slippage_bps: number;
 }
 
-/** Not in the kit: the sell preview for one amount. USD values are decimal strings, as every kit amount. */
+/** The sell preview for one share. USD values are decimal strings, as every kit amount. */
 export interface SellPreview {
-  /** The expected USD out, after the platform fee, before slippage. */
+  /** The expected USD out, the venue's fees taken, before slippage. */
   out_usd: string;
   fee_bps: number;
   network_usd: string;
-  route: string;
 }
 
 export type SellPreviewAnswer = { ok: true; preview: SellPreview } | { ok: false; code: string };
 
 export interface SellKit {
-  /** Missing kit call: the sell preview for a token amount. Null on the live source. */
+  /** The sell preview for a share. Null while the signing page has no client yet. */
   sellPreview: ((req: SellPreviewRequest) => Promise<SellPreviewAnswer>) | null;
 }
 
-const Kit = createContext<SellKit>({ sellPreview: null });
+const Kit = createContext<SellKit | null>(null);
 export const SellKitProvider = Kit.Provider;
-export const useSellKit = (): SellKit => useContext(Kit);
+
+/** The fixture's stub, else the live source: pool.sell.dry through the trade box's client (askSellPreview). The call
+ *  reads the newest state and price when it runs, and changes only when the client comes or a chain's pool or price
+ *  comes or goes, so a state event never asks again (the page's reads are paced; card app-sell-shows-what-you-receive). */
+export function useSellKit(): SellKit {
+  const fixture = useContext(Kit);
+  const { snapshot, kit } = useTradeSource();
+  const pools = snapshot.state?.pools;
+  const latest = useRef({ pools, kit });
+  latest.current = { pools, kit };
+  const on = kit.request !== null;
+  const key = (pools ?? []).map((p) => `${p.chain}:${p.price ? 1 : 0}`).join(",");
+  const live = useMemo<SellKit>(
+    () => ({ sellPreview: on ? (req) => askSellPreview(latest.current.kit.request, latest.current.pools, (c) => latest.current.kit.poolPrice(c), req) : null }),
+    [on, key],
+  );
+  return fixture ?? live;
+}
 
 /** One position's sell: the buy side's button states, one request for a double tap, shared by the box and the panel. */
 export interface Sell {

@@ -8,7 +8,10 @@
 // BAR-10 rules (MEASURE: no text under 11 px, no phone tap box under 44 px, no horizontal scroll), no external request,
 // no dialog and no navigation, and the kit requests sent. Then: a double tap is one sell, 100% sends the kit's amount
 // string unchanged, Initials sends the share that returns the cost, a typed percent sells its share, Share goes to the
-// mount.
+// mount. Then the box as the app mounts it (?kit=live, no SellKitProvider; card app-sell-shows-what-you-receive): the
+// signing page's pool.sell.dry asked once on open, for the tap's own share, its out, network and fee drawn at the page's
+// price within 1 s of the Sell side opening, one more ask per settled share (a quick "2" then "25" asks once), and
+// Unavailable on You receive when the page refuses (Network and Fee drawn with no number), a busy answer asked again once.
 //   node apps/terminal/test/sell-positions/run.mjs [--shots <dir>] [--plant tap|clock] [--slow-cpu <rate>] [--slow-commit]
 // PASS exit 0, FAIL exit 1. --plant runs the same checks on a planted fault (tap: the quick sells 36 px tall on the
 // phone, R5's desktop height; clock: the screen's clock 25% fast) and must FAIL. --slow-cpu slows the page's CPU by the
@@ -124,7 +127,7 @@ const check = (ok, what) => ok || fails.push(what);
 const norm = (s) => s.replace(/\s+/g, " ").trim();
 
 let BASE = "";
-async function open(browser, w, f) {
+async function open(browser, w, f, extra = "") {
   const ctx = await browser.newContext({ viewport: w.viewport, deviceScaleFactor: w.deviceScaleFactor, isMobile: w.isMobile, hasTouch: w.hasTouch, reducedMotion: "reduce" });
   await ctx.addInitScript(INIT);
   if (SLOW_COMMIT) await ctx.addInitScript(LATE);
@@ -140,7 +143,7 @@ async function open(browser, w, f) {
     void d.dismiss();
   });
   if (SLOW_CPU) await (await ctx.newCDPSession(page)).send("Emulation.setCPUThrottlingRate", { rate: SLOW_CPU });
-  await page.goto(`${BASE}/?f=${f}${PLANT === "clock" ? "&plant=clock" : ""}`);
+  await page.goto(`${BASE}/?f=${f}${extra}${PLANT === "clock" ? "&plant=clock" : ""}`);
   page.on("framenavigated", (fr) => fr === page.mainFrame() && navs.push(fr.url()));
   await page.waitForSelector('[data-testid="sell-box"]');
   if (PLANT === "tap") await page.addStyleTag({ content: ".tk-position .tk-quick > button { height: 36px !important; }" });
@@ -320,6 +323,58 @@ try {
       await page.clock.runFor(100);
       const c = await calls(page);
       check(c.length === 1 && sent(c[0]) === QUARTER, `@${w.name}: typed 25% sent ${JSON.stringify(c)}`);
+      await ctx.close();
+    }
+    // the box as the app mounts it: the live source asks the page's dry sale, once per open and per settled share
+    {
+      const { ctx, page, external, dialogs } = await open(browser, w, "up", "&kit=live");
+      const text = async (id) => norm(await page.locator(`[data-testid="${id}"]`).innerText());
+      check((await text("sell-receive")) === "—", `@${w.name} live: You receive before the first answer "${await text("sell-receive")}"`);
+      await page.clock.runFor(490); // the open (10 ms) + 490: asked at once on open, the page answers 200 ms later
+      const receive = await settle(() => text("sell-receive"), "≈ $108.00");
+      check(receive === "≈ $108.00", `@${w.name} live: You receive "${receive}" 500 ms after the Sell side opened, want ≈ $108.00 (0.72 SOL at $150)`);
+      check((await text("sell-network")) === "$0.00", `@${w.name} live: Network "${await text("sell-network")}"`);
+      check((await text("sell-fee")) === "0%", `@${w.name} live: Fee "${await text("sell-fee")}"`);
+      const dry = await page.evaluate(() => window.__dry);
+      check(JSON.stringify(dry) === JSON.stringify([{ kind: "pool.sell.dry", params: { chain: "solana", token: MINT, share_bps: 5000, slippage_bps: 1000 } }]), `@${w.name} live: asked ${JSON.stringify(dry)}`);
+      if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `live-receive-${w.name}.png`), fullPage: true });
+      const input = page.locator('[data-testid="sell-box"] .trb-input');
+      await input.fill("2");
+      await page.clock.runFor(100);
+      await input.fill("25");
+      await page.clock.runFor(500);
+      const after = await page.evaluate(() => window.__dry.map((d) => d.params.share_bps));
+      check(JSON.stringify(after) === "[5000,2500]", `@${w.name} live: asks per settled share ${JSON.stringify(after)}, want [5000,2500]`);
+      check((await calls(page)).length === 0, `@${w.name} live: a sell sent with no tap`);
+      const m = await measure(page, w);
+      check(!m.hscroll && m.smallText.length === 0 && m.violations.length === 0, `@${w.name} live: ${JSON.stringify(m)}`);
+      check(external.length === 0 && dialogs.length === 0, `@${w.name} live: external ${external.join(" ")} dialogs ${dialogs.join(" ")}`);
+      await ctx.close();
+    }
+    {
+      const { ctx, page, dialogs } = await open(browser, w, "up", "&kit=live&dry=refuse");
+      const text = async (id) => norm(await page.locator(`[data-testid="${id}"]`).innerText());
+      await page.clock.runFor(490);
+      const got = await settle(() => text("sell-receive"), "Unavailable");
+      check(got === "Unavailable", `@${w.name} live refused: You receive "${got}", want Unavailable`);
+      check((await page.locator('[data-testid="sell-network"], [data-testid="sell-fee"]').count()) === 0, `@${w.name} live refused: Network and Fee drawn with no number`);
+      check((await text("sell-cta")) === "Sell 50%", `@${w.name} live refused: the button "${await text("sell-cta")}" (the sale's own checks judge the tap)`);
+      const m = await measure(page, w);
+      check(!m.hscroll && m.smallText.length === 0, `@${w.name} live refused: ${JSON.stringify(m)}`);
+      check(dialogs.length === 0, `@${w.name} live refused: a dialog`);
+      if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `live-unavailable-${w.name}.png`), fullPage: true });
+      await ctx.close();
+    }
+    // a "not now" answer is asked again once, 3 s later: the numbers come, never Unavailable
+    {
+      const { ctx, page } = await open(browser, w, "up", "&kit=live&dry=busy");
+      const text = async (id) => norm(await page.locator(`[data-testid="${id}"]`).innerText());
+      await page.clock.runFor(490);
+      check((await text("sell-receive")) === "—", `@${w.name} live busy: You receive "${await text("sell-receive")}" before the second ask`);
+      await page.clock.runFor(3_200);
+      const got = await settle(() => text("sell-receive"), "≈ $108.00");
+      check(got === "≈ $108.00", `@${w.name} live busy: You receive "${got}" after the second ask`);
+      check((await page.evaluate(() => window.__dry.length)) === 2, `@${w.name} live busy: asked ${await page.evaluate(() => window.__dry.length)} times`);
       await ctx.close();
     }
     // Share goes to the mount

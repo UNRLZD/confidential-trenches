@@ -17,7 +17,11 @@
 // position: notsent (signpage_down) and other (not_allowed) refusals, slow (filled at 8 s), notlanded (not_landed at 3 s),
 // partial (part_filled, the kit's count 1 of 2) and partial-nocount. Every request is recorded in window.__calls; every Share
 // tap in window.__shares. ?pool=sol puts the devnet Solana pool in the state (card trade-box-pool: the 0.01 SOL note of
-// scripts/live-checks/signpage-pool-notes.run.json), so the sell goes into the pool (pool.sell). Test only.
+// scripts/live-checks/signpage-pool-notes.run.json), so the sell goes into the pool (pool.sell). ?kit=live mounts no
+// SellKitProvider, as the app does (card app-sell-shows-what-you-receive): the box's preview is the live source's, the
+// stub's request answering pool.sell.dry at 200 ms (0.72 SOL out, 0.000005 network, no fee; ?dry=refuse:
+// quote_check_failed; ?dry=busy: busy first, then the numbers) at the page's pool price of $150 a SOL, with the pool in the state; each ask is in window.__dry.
+// Test only.
 import type { SignpageClientSnapshot, SignpageOutcome, SignpageState, Stage } from "@blindfill/kit";
 import { StrictMode, useState } from "react";
 import { createRoot } from "react-dom/client";
@@ -41,13 +45,16 @@ declare global {
   interface Window {
     __calls: unknown[];
     __shares: number;
+    __dry: unknown[];
   }
 }
 window.__calls = [];
 window.__shares = 0;
+window.__dry = [];
 
 const q = new URLSearchParams(location.search);
 const f = q.get("f") ?? "up";
+const LIVE = q.get("kit") === "live";
 
 // the position: amount (token units, the kit's string), cost (USD), the market price (USD per unit), the token's decimals
 // as the token read gives them (null: none read)
@@ -80,7 +87,7 @@ const STATE: SignpageState = {
   held: [],
   // open: the device's record holds a sell at sent that this mount did not start (a remount while it runs)
   ops: f === "open" ? [{ id: "sell-elsewhere", kind: "sell", stage: "sent", txs: [] }] : [],
-  ...(q.get("pool") === "sol" || f === "nodec" ? { pools: [{ chain: "solana", asset: "SOL", balance: "0.01", ready: "0.01", tap_max: "0.00173608" }] } : {}),
+  ...(q.get("pool") === "sol" || f === "nodec" || LIVE ? { pools: [{ chain: "solana", asset: "SOL", balance: "0.01", ready: "0.01", tap_max: "0.00173608" }] } : {}),
 };
 const MARKET: TokenMarket = { symbol: "TORCH", name: "Torch", price: P.price, route: P.route };
 const DATA: PortfolioData = {
@@ -126,8 +133,15 @@ let n = 0;
 const kit: TradeKit = {
   setPreview: null,
   maxBuy: () => "100",
-  poolPrice: () => null,
+  // the page's pool price (state.pools[].price): $150.00 a SOL, 9 decimals; on the live kit only
+  poolPrice: () => (LIVE ? { price: 15_000_000_000n, expo: -8, decimals: 9 } : null),
   request: ((kind: string, params: unknown) => {
+    if (kind === "pool.sell.dry") {
+      window.__dry.push({ kind, params });
+      const dry = q.get("dry");
+      const answer = dry === "refuse" || (dry === "busy" && window.__dry.length === 1) ? { ok: false, error: { code: dry === "busy" ? "busy" : "quote_check_failed" } } : { ok: true, result: { out: "0.72", min_out: "0.648", network: "0.000005", fee_bps: 0 } };
+      return { id: `dry-${window.__dry.length}`, outcome: new Promise((r) => setTimeout(() => r(answer), 200)) };
+    }
     const id = `sell-${++n}`;
     window.__calls.push({ kind, params, id });
     const share = (params as { share_bps?: unknown }).share_bps;
@@ -171,7 +185,7 @@ const kit: TradeKit = {
 const sellKit: SellKit = {
   sellPreview: async (req) => {
     const gross = mulCents(req.amount, P.price) ?? 0n;
-    return { ok: true, preview: { out_usd: centsToDecimal(gross - gross / 100n), fee_bps: 100, network_usd: "0.02", route: "Metis" } };
+    return { ok: true, preview: { out_usd: centsToDecimal(gross - gross / 100n), fee_bps: 100, network_usd: "0.02" } };
   },
 };
 /** The screen's clock: the page's own, which the run pauses and moves; ?plant=clock runs it 25% fast from its first read
@@ -185,9 +199,13 @@ function Column() {
   setSnapshot = set;
   return (
     <TradeSourceProvider value={{ ...src, snapshot: snap }}>
-      <SellKitProvider value={sellKit}>
+      {LIVE ? (
         <Panels />
-      </SellKitProvider>
+      ) : (
+        <SellKitProvider value={sellKit}>
+          <Panels />
+        </SellKitProvider>
+      )}
     </TradeSourceProvider>
   );
 }
