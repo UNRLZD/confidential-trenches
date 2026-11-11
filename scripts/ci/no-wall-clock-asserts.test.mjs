@@ -3,7 +3,7 @@
 //   node --test scripts/ci/no-wall-clock-asserts.test.mjs
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { LISTED, findings, refusals, scan, stale } from "./no-wall-clock-asserts.mjs";
+import { LISTED, QUOTE_LISTED, findings, quoteFindings, refusals, scan, stale } from "./no-wall-clock-asserts.mjs";
 
 test("the tracked unit tests read nothing past LISTED", () => {
   assert.deepEqual(refusals(scan()), []);
@@ -54,4 +54,27 @@ test("a file outside LISTED with one is refused, a file over its count is refuse
   assert.equal(refusals({ "a.test.ts": [{ line: 3, text: "" }, { line: 9, text: "" }] }, { "a.test.ts": { count: 1 } }).length, 1);
   assert.deepEqual(refusals({}, { "a.test.ts": { count: 1 } }), []);
   assert.deepEqual(stale({}, { "a.test.ts": { count: 1 } }), ["a.test.ts: 0 of 1"]);
+});
+
+// card ci-fresh-run-ends-with-room: a quote run on the machine's own monotonic clock flips with the machine's speed
+test("the tracked tests run no quote on the real monotonic clock past QUOTE_LISTED", () => {
+  assert.deepEqual(refusals(scan(undefined, quoteFindings), QUOTE_LISTED, "quote on the real monotonic clock"), []);
+  for (const [f, v] of Object.entries(QUOTE_LISTED)) assert.ok(Number.isInteger(v.count) && v.count > 0 && v.why.length > 0, f);
+});
+
+test("refuses a quote on the default clock, lets a fixed clock, the test clock and quoteOnStill through", () => {
+  const REFUSED_QUOTES = {
+    "evmPoolBuyQuoteWith with no mono": "const v = await evmPoolBuyQuoteWith(req, [a, b], NOW);",
+    "with a scan but no mono": "const v = await evmPoolBuyQuoteWith(req, [chain(p, 0), chain(p, 1)], NOW, scanner(5_000_000, logs));",
+    "the attack tests' quoteOn helper (KB1, 65,000 made-up pools)": "const v1 = await quoteOn([best(t1)], t1, bestRoute(t1), scanner(5_000_000, empties(t1, EVM_QUOTE_MAX_KEYS - 6)), hints);",
+    "after an onTestClock that has ended": "await onTestClock(async () => {\n  await x();\n});\nawait evmPoolBuyQuoteWith(req, [a], NOW);",
+  };
+  for (const [name, src] of Object.entries(REFUSED_QUOTES)) assert.equal(quoteFindings(src).length, 1, name);
+  const ALLOWED_QUOTES = {
+    "a fixed clock as the sixth argument": "await evmPoolBuyQuoteWith(req, [a, b], NOW, undefined, undefined, () => 0);",
+    "quoteOnStill (a fixed clock, no scan bound)": "await quoteOnStill([best(t1)], t1, bestRoute(t1), scanner(5_000_000, logs));",
+    "inside onTestClock": "test('x', () => onTestClock(async () => {\n  await evmPoolBuyQuoteWith(req, [a, b], NOW);\n  await quoteOn(pools, t, r);\n}));",
+    "in a comment or a string": "// evmPoolBuyQuoteWith(req, [a], NOW) was the old form\nconst s = 'quoteOn(x)';",
+  };
+  for (const [name, src] of Object.entries(ALLOWED_QUOTES)) assert.deepEqual(quoteFindings(src), [], name);
 });

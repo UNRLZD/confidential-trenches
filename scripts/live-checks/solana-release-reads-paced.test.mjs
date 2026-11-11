@@ -48,7 +48,8 @@ test("the facts read from a bundle", () => {
     "Ly=e=>e instanceof Fy||e instanceof jm&&e.fault===`timeout`;async function zy(e,t,n,r,i){for(let a=1;;a++){if(i.stopped)return X(`${r}: not asked again, the read has ended`);" +
     "let o=wm(e,()=>{if(i.stopped)throw Error(`${r}: not asked again, the read ended before its turn`);let e=i.end-Date.now();if(e<=0)throw new Fy(`${r}: no turn inside the read's bound`);return Math.min(My,e)},e=>new Fy(`${r}: no answer in ${e} ms`));try{return await Promise.resolve().then(()=>o(t,n))}catch(e){}}}" +
     "t Promise.all(e.map(async e=>{try{let r=wm(e,n),i=(e,t)=>Promise.resolve().then(()=>r(e,t)),a=Xm(await i(`getLatestBlockhash`,[{commitment:`finalized`}]));" +
-    "a=t=>Promise.all(e.map(e=>Promise.resolve().then(()=>wm(e,Dg)(`getMultipleAccounts`,[t,{encoding:`base64`,commitment:`confirmed`}])).then(e=>p_(e,t.length),()=>null)));" +
+    "function Rv(e){let t;try{t=e instanceof Error?e.message:e}catch{return`the call failed`}if(typeof t!=`string`)return`the call failed`;let n=/\\bHTTP (\\d{3})\\b/.exec(t);if(n)return`HTTP ${n[1]}`;let r=/\\bRPC error (-?\\d{1,6})\\b/.exec(t);if(r)return`RPC error ${r[1]}`;let i=/\\bno answer in (\\d{1,7}) ms\\b/.exec(t);return i?`no answer in ${i[1]} ms`:`the call failed`}" +
+    "a=t=>Promise.all(e.map(e=>Promise.resolve().then(()=>wm(e,Dg)(`getMultipleAccounts`,[t,{encoding:`base64`,commitment:`confirmed`}])).then(e=>({read:p_(e,t.length),fault:null}),e=>({read:null,fault:Rv(e)}))));" +
     "let t=(await Promise.resolve().then(()=>wm(e,Wv)(`getAccountInfo`,[dv,{encoding:`base64`,commitment:`confirmed`}])))?.value;" +
     "var GM=`https://ct-api.unrealized.trade`,KM=`https://solana-rpc.publicnode.com`;function qM(){return{helper:GM,providers:[Cm(hk(KM)),Cm(gk(GM))],reference:(e,t)=>_k(t,e),paths:Vm({helper:Rm(GM)})}}" +
     "var pI=yE.mainnet,mI=`mainnet`,BV=`${GM}/v1/rpc/solana-marks`,hI=()=>[Cm(hk(KM)),Cm(gk(GM))],LI=()=>Cm(jV(BV)),zH=()=>[Cm(hk(KM)),Cm(gk(GM,Uh))],BH=Object.freeze([10,100]),qV={proving:0};";
@@ -96,6 +97,14 @@ test("the facts read from a bundle", () => {
   assert.equal(planted("?.limits.values().next().value;", ";").timed, false);
   // each read called bare, the timed read left out: FAIL
   assert.equal(planted("wm(e,Dg)(`getMultipleAccounts`", "e(`getMultipleAccounts`").timed, false, "the reference");
+  // the reference's failed read taken as an answer, or with no fault: FAIL (card solana-reference-read-holds-a-slot-apart)
+  assert.equal(planted("e=>({read:null,fault:Rv(e)})", "e=>({read:e,fault:Rv(e)})").timed, false, "the reference's failed read");
+  assert.equal(planted("e=>({read:null,fault:Rv(e)})", "()=>null").timed, false, "the reference's failed read unnamed");
+  // the fault the error's own text, or a builder that can return it: FAIL (card solana-reference-read-holds-a-slot-apart)
+  assert.equal(planted("fault:Rv(e)", "fault:String(e)").timed, false, "the fault the error's text");
+  assert.equal(planted("/\\bHTTP (\\d{3})\\b/", "/\\bHTTP (\\S+)/").timed, false, "the builder's status any text");
+  assert.equal(planted("if(typeof t!=`string`)return`the call failed`;", "").timed, false, "the builder reading a message that is not a string");
+  assert.equal(planted("return i?`no answer in ${i[1]} ms`:`the call failed`}", "return i?`no answer in ${i[1]} ms`:t}").timed, false, "the builder returning the message");
   assert.equal(planted("wm(e,Wv)(`getAccountInfo`", "e(`getAccountInfo`").timed, false, "the rent");
   assert.equal(planted("let r=wm(e,n),", "let r=e,").timed, false, "the tx end");
   // the price read: its try timed over the wait (the provider called bare under a plain timeout), a turn past the read's
