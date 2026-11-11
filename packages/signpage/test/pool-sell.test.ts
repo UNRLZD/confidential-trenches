@@ -5078,6 +5078,74 @@ test("a leg refused before it signed keeps its cause in the record and on the co
   for (const x of [bad.cause!, line!]) assert.ok(!/https?:|api-key|secret|rpc\.example/.test(x), `public words only: ${x}`);
 });
 
+// card pool-sell-legs-side-by-side, the finder pass of 11 Nov 09:39Z: two legs ended "failed" with causes "at no <
+// sellRun" and "at no < depositHeld", which name no check (sellRun holds seven plain refusals). Each plain refusal of a
+// sale now names its check in the leg's cause; the answer and what a user reads stay as they were
+/** A one-W sale run as the kind runs it, the rpcs and host fields over; its record's leg cause and its answer. */
+const saleCause = async (w: World, over: Partial<PoolSellHost> = {}, ask: PoolAsk = ASK, id = "nc") => {
+  Object.assign(w.host, over);
+  const r = poolSellKind(kindHost(w), fakeLocks())(ask, ctxOf(id, "aa")) as KindAnswer;
+  await r.after;
+  await until(async () => ["filled", "part_filled", "refused", "not_landed"].includes(((await w.store.get("ops", id)) as Rec | undefined)?.stage ?? ""));
+  const rec = (await w.store.get("ops", id)) as Rec & { legs: (Rec["legs"][number] & { cause?: string })[] };
+  return { cause: rec.legs?.[0]?.cause ?? "", answer: r.answer(), rec };
+};
+const feesOn = (w: World, fees: (p: 0 | 1, n: number) => number) => {
+  const n = [0, 0];
+  return ([0, 1] as const).map((p) => (async (m: string, q: readonly unknown[]) => (m === "getFeeForMessage" ? { context: { slot: 1 }, value: fees(p, n[p]!++) } : w.c.rpcs[p](m, q))) as SolanaRpc) as unknown as readonly [SolanaRpc, SolanaRpc];
+};
+/** The pool account's two tree sizes as one provider reads it, moved by `by(n)` leaves on its nth read. */
+const sizesOn = (rpc: SolanaRpc, by: (n: number) => bigint): SolanaRpc => {
+  let n = 0;
+  return (async (method: string, params: readonly unknown[]) => {
+    const out = (await rpc(method, params)) as { value: ({ data: [string, string] } | null)[] };
+    if (method !== "getMultipleAccounts" || (params[0] as string[])[0] !== POOL || out.value[0] === null) return out;
+    const d = base64.decode(out.value[0]!.data[0]);
+    const v = new DataView(d.buffer, d.byteOffset, d.length);
+    const k = by(n++);
+    for (const at of [49, 49 + 1065]) v.setBigUint64(at, v.getBigUint64(at, true) + k, true);
+    return { ...out, value: [{ ...out.value[0]!, data: [base64.encode(d), "base64"] }, ...out.value.slice(1)] };
+  }) as SolanaRpc;
+};
+
+test("each plain refusal of a sale names its check in the leg's cause: fee_split, fee_moved, sim, volume_split, sizes_split, sizes_moved, stopped; the answer stays failed", async () => {
+  const check = (cause: string, name: string) => assert.match(cause, new RegExp(`^Error failed check ${name} at no < [\\w$.]+$`), `the cause: ${cause}`);
+  // the two providers price the fee apart; the fee moves again after the build at it
+  for (const [name, fees] of [["fee_split", (p: 0 | 1) => FEE + p], ["fee_moved", (_p: 0 | 1, n: number) => FEE + 1_000 * (n + 1)]] as const) {
+    const w = await world();
+    const x = await saleCause(w, { rpcs: feesOn(w, fees) });
+    check(x.cause, name);
+    assert.deepEqual(x.answer, { error: "failed" });
+  }
+  // a simulation that fails on one provider
+  const s = await world({ simFailOn1: true });
+  check((await saleCause(s)).cause, "sim");
+  // W's PumpSwap cashback accounts on one provider only, read twice
+  const need = BigInt(FEE) + rentMin(165) + rentMin(137) + rentMin(165);
+  const v = await world({ venue: "pumpswap", cashback: true, ammCashback: true, ammHiddenOn1: true, held: 2n * AMOUNT, lamports: Number(need) }, [wallet(2n * AMOUNT, false, VF.pumpswap.mint)]);
+  check((await saleCause(v, {}, { ...ASK, token: VF.pumpswap.mint })).cause, "volume_split");
+  // the two providers read the trees at sizes apart, still after the wait
+  const z = await world({ ataLamports: TOKEN_RENT, leaves: 1_025, labelLeaves: 1_025 });
+  check((await saleCause(z, { rpcs: [z.c.rpcs[0], sizesOn(z.c.rpcs[1], () => -2n)] as never, wait: async () => {} })).cause, "sizes_split");
+  // both providers read the trees grown on every read
+  const m = await world({ ataLamports: TOKEN_RENT, leaves: 1_025, labelLeaves: 1_025 });
+  check((await saleCause(m, { rpcs: [sizesOn(m.c.rpcs[0], (n) => BigInt(n + 1)), sizesOn(m.c.rpcs[1], (n) => BigInt(n + 1))] as never })).cause, "sizes_moved");
+  // a sign out asked before W signs
+  const o = await world();
+  check((await saleCause(o, { stopped: () => o.c.calls.some((c) => c.method === "simulateTransaction") })).cause, "stopped");
+});
+
+test("every plain refusal in sellRun, depositHeld and treeSizes names its check (the ones no fixture reaches: venue_program, wallet, pool_owner)", () => {
+  const src = readFileSync(new URL("../src/pool-sell.ts", import.meta.url), "utf8");
+  for (const fn of ["async function sellRun(", "async function depositHeld(", "async function treeSizes("]) {
+    const at = src.indexOf(fn);
+    const body = src.slice(at, src.indexOf("\n}\n", at));
+    assert.ok(at > 0 && body.length > 100, fn);
+    assert.deepEqual(body.match(/(?<![\w$])no\(\)/g) ?? [], [], `${fn} has a plain no()`);
+  }
+  for (const name of ["venue_program", "wallet", "pool_owner"]) assert.ok(src.includes(`no("failed", "${name}")`), name);
+});
+
 // card pool-sell-legs-side-by-side: the paid pass of 11 Nov 07:36Z drew 59 calls in 10 s from the helper, over one
 // caller's 42. Each leg after the first asked again the reads that are the same for every leg of the sale: the coin's
 // market (the reference's curve and PumpSwap reads, the venue's) and the blockhash. A later leg takes the sale's read

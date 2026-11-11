@@ -180,15 +180,19 @@ const U32 = 0xffff_ffff;
 const enc = /* @__PURE__ */ new TextEncoder();
 
 type Code = "not_allowed" | "not_funded" | "quote_check_failed" | "failed";
+/** Which check of a sale refused it "failed", named in the leg's cause (legCause) and nowhere a user reads. */
+type Check = "venue_program" | "volume_split" | "fee_split" | "fee_moved" | "sim" | "stopped" | "wallet" | "pool_owner" | "sizes_moved" | "sizes_split";
 class Refused extends Error {
   readonly code: Code;
-  constructor(code: Code) {
+  readonly check: Check | undefined;
+  constructor(code: Code, check?: Check) {
     super(code);
     this.code = code;
+    this.check = check;
   }
 }
-const no = (code: Code = "failed"): never => {
-  throw new Refused(code);
+const no = (code: Code = "failed", check?: Check): never => {
+  throw new Refused(code, check);
 };
 const int = (x: unknown): number => (Number.isSafeInteger(x) && (x as number) >= 0 ? (x as number) : no());
 const be32 = (x: bigint): Uint8Array => {
@@ -242,9 +246,9 @@ async function treeSizes(rpcs: Rpcs, program: string, pool: string, wait: (ms: n
   for (let round = 0; ; round++) {
     const [a, b] = await both(rpcs, (r) => account(r, pool, "confirmed"));
     if ("none" in a || "none" in b) return no("not_allowed");
-    if (a.owner !== program || b.owner !== program) return no();
+    if (a.owner !== program || b.owner !== program) return no("failed", "pool_owner");
     if (!sameBytes(a.data, b.data)) {
-      if (round > 0) return no();
+      if (round > 0) return no("failed", "sizes_split");
       await wait(POOL_SELL_SIZE_RETRY_MS);
       continue;
     }
@@ -645,10 +649,12 @@ export function legCause(e: unknown): string {
     const name = typeof x?.name === "string" && /^[\w$]{1,40}$/.test(x.name) ? x.name : "thrown";
     const text = typeof x?.message === "string" ? x.message : "";
     const own = typeof x?.code === "string" || typeof x?.code === "number" ? String(x.code) : typeof x?.fault === "string" ? x.fault : undefined;
+    // a sale's own check that refused it (Refused's check: fee_split, sim, sizes_moved...)
+    const check = e instanceof Refused && e.check !== undefined ? `check ${e.check}` : undefined;
     const code = own !== undefined && /^[\w-]{1,40}$/.test(own) ? own : (/RPC error (-?\d{1,6})\b/.exec(text)?.[1] ?? /\bHTTP (\d{3})\b/.exec(text)?.[1]);
     // the two innermost named frames (a refusal is thrown in its helper, no(): the second is where it was refused)
     const frames = typeof x?.stack === "string" ? [...x.stack.matchAll(/\n\s*at (?:async )?([\w$.]{1,60}) \(/g)].slice(0, 2).map((m) => m[1]) : [];
-    return [name, code, frames.length === 0 ? undefined : `at ${frames.join(" < ")}`].filter((v) => v !== undefined).join(" ");
+    return [name, code, check, frames.length === 0 ? undefined : `at ${frames.join(" < ")}`].filter((v) => v !== undefined).join(" ");
   } catch {
     return "thrown";
   }
@@ -1055,7 +1061,7 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later, w: BuyWallet
     const valid = first.then((r) => blockhashValid(rpcs, r));
     valid.catch(() => {});
     const [venue, bh0, deposit] = await Promise.all([legVenue(guess, chose, venueOf), first, depositP ?? depositHeld(rpcs, program, pool, sizes, pre, wait)]);
-    if (venue.tokenProgram !== tokens.program) return no();
+    if (venue.tokenProgram !== tokens.program) return no("failed", "venue_program");
     // the venue's own need up front (PumpSwap: the wrapped-SOL account its sell makes first), before anything is built
     // a cashback coin on PumpSwap: the sell names W's PumpSwap volume account and its wrapped-SOL account, which a curve
     // buy never made, and makes each one missing at W's cost (release.rs venue_pumpswap_cashback_sell_makes_ws_cashback_
@@ -1072,7 +1078,7 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later, w: BuyWallet
           const [a, b] = (await both(rpcs, (r) => account(r, address, "confirmed"))).map((x) => !("none" in x) && x.owner === owner);
           if (a === b) return a!;
         }
-        return no();
+        return no("failed", "volume_split");
       };
       [has.ammVolume, has.ammVolumeAta] = await Promise.all([owned(vol, SOLANA_PUMP_AMM_PROGRAM), owned(ata, SOLANA_TOKEN_PROGRAM)]);
     }
@@ -1170,13 +1176,13 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later, w: BuyWallet
         continue;
       }
       const [[fa, fb], sims] = await Promise.all([feeOf(next), simulate(b.wire)]);
-      if (fa !== fb) return no();
+      if (fa !== fb) return no("failed", "fee_split");
       if (fa !== fee) {
-        if (moved++ > 0) return no();
+        if (moved++ > 0) return no("failed", "fee_moved");
         fee = fa;
         continue;
       }
-      if (!sims.every((v) => v !== undefined && v !== null && v.err === null)) return no();
+      if (!sims.every((v) => v !== undefined && v !== null && v.err === null)) return no("failed", "sim");
       built = b;
       break;
     }
@@ -1184,13 +1190,13 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later, w: BuyWallet
     // the blockhash valid on RPC 1 (round 2's check), before W signs
     const bhv = await valid;
     // a sign out asked while this sale was built: nothing signs from here (review P3-5 of 77055f4e)
-    if (h.stopped?.()) return no();
+    if (h.stopped?.()) return no("failed", "stopped");
     // W, from the seed, right before it signs: it must be the W the bytes were built and checked for
     signing = true;
     const fw = freshWallet(await seed(), "sol", w.l, w.j);
     key = fw.secretKey;
     for (const x of seeds) x.fill(0);
-    if (fw.address !== w.address) return no();
+    if (fw.address !== w.address) return no("failed", "wallet");
     const sig = signSolana(key, wire);
     key.fill(0);
     key = null;
@@ -1333,7 +1339,7 @@ async function depositHeld(rpcs: Rpcs, program: string, pool: string, sizes: { s
     const keys = [pool, solanaPoolPage(program, 0, at.stateSize), solanaPoolPage(program, 1, at.labelSize), markAddress(program, pre)];
     // the pool's balance is never priced (card pool-answer-unknown F5: past 2^53 it is never parsed)
     const [a, b] = await both(rpcs, (r) => accountsRaw(r, keys));
-    const [pa, pb] = [a[0], b[0]].map((p) => (p == null ? no("not_allowed") : p.owner !== program ? no() : sizesOf(p.data)));
+    const [pa, pb] = [a[0], b[0]].map((p) => (p == null ? no("not_allowed") : p.owner !== program ? no("failed", "pool_owner") : sizesOf(p.data)));
     const lam = (x: { lamports: unknown } | null | undefined): bigint | null => (x == null ? null : BigInt(int(x.lamports)));
     const pair = (k: number) => [lam(a[k]), lam(b[k])] as const;
     const held = { state: pair(1), label: pair(2), mark: pair(3) };
@@ -1341,11 +1347,11 @@ async function depositHeld(rpcs: Rpcs, program: string, pool: string, sizes: { s
     if (agree && pa!.stateSize === at.stateSize && pa!.labelSize === at.labelSize) return { held, sizes: at };
     if (agree) {
       // both RPCs read the trees at other sizes: the pages at those
-      if (moved++ > 0) return no();
+      if (moved++ > 0) return no("failed", "sizes_moved");
       at = pa!;
       continue;
     }
-    if (split++ > 0) return no();
+    if (split++ > 0) return no("failed", "sizes_split");
     await wait(POOL_SELL_SIZE_RETRY_MS);
   }
 }
