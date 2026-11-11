@@ -176,6 +176,7 @@ export const OUT = {
   "evm-pool-index": "EVM RPC index reads on the venue's two index readers",
   "evm-sell-hook-intrablock": "EVM RPC traces and replays",
   "device-evm-fee-read-walks-operators": "EVM RPC reads on the kit's read lists",
+  "evm-device-reads-need-no-old-state": "EVM RPC reads on the kit's read lists",
   "rh-cold-quote": "EVM RPC quotes",
   "token-page-fills-after": "a browser and the helper",
   "app-deposit-mount": "a browser (its --harness run is in test-browser)",

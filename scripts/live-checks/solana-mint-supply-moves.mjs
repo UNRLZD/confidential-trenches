@@ -22,7 +22,9 @@
 // Each token gets one dry buy built through the helper's Jupiter proxy (nothing is signed or sent), from a random taker
 // nobody holds a key for.
 // It passes only when: at least ROUNDS rounds of each; in every reference round the reference read, replayed through
-// the kit on the round's recorded answers, gives a reference; the build passes S6 and S10 on every round's two mint
+// the kit on the round's recorded answers, gives a reference (a round with none prints the kit's reason,
+// readSolanaReferenceWhy: card solana-reference-read-holds-a-slot-apart, after run 42926088151's round 11 printed none);
+// the build passes S6 and S10 on every round's two mint
 // reads; and at least one burn round read the supply moved, which is the read main's kit before this card refused
 // (it compared the mint byte for byte). A run in which no burn landed between two reads proves nothing either way: it
 // says so and exits 2, never PASS.
@@ -39,6 +41,7 @@ import {
   fetchSolanaJupiterBuildThatFits,
   readSolanaBlockhash,
   readSolanaReference,
+  readSolanaReferenceWhy,
   solanaDecodeLookupTable,
   solanaJsonRpc,
 } from "../../packages/kit/src/index.ts";
@@ -117,7 +120,10 @@ export async function judge(r) {
     let ref = null;
     let why = "";
     try {
-      ref = await readSolanaReference([replayRpc(x.calls?.[0] ?? [], RPCS[0]), replayRpc(x.calls?.[1] ?? [], RPCS[1])], { side: "buy", token: r.mint, amount: req.amount });
+      // the kit's reason for a round with no reference, in its line (card solana-reference-read-holds-a-slot-apart)
+      const got = await readSolanaReferenceWhy([replayRpc(x.calls?.[0] ?? [], RPCS[0]), replayRpc(x.calls?.[1] ?? [], RPCS[1])], { side: "buy", token: r.mint, amount: req.amount });
+      if ("reference" in got) ref = got.reference;
+      else why = `: ${got.refused}`;
     } catch (e) {
       why = `: ${e.message}`;
     }
