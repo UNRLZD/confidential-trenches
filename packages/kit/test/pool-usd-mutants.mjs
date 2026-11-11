@@ -192,6 +192,23 @@ export const MUTANTS = [
   [POOL, "if (!a || !b) return \"the mint is not read on both providers\";", "if (!a) return \"the mint is not read on both providers\"; b ??= a;", "the mint missing on provider B", POOL_TEST],
   [POOL, "one(curves[1], balances[1], ms[1].supply)", "one(curves[1], balances[1], ms[0].supply)", "each provider's read is priced on its own supply", POOL_TEST],
   [POOL, "one(poolB, bases[1], quotes[1], ms[1].supply)", "one(poolB, bases[1], quotes[1], ms[0].supply)", "each provider's read is priced on its own supply", POOL_TEST],
+  // card solana-reference-read-holds-a-slot-apart: the pool's moving fields masked exactly (virtual_quote_reserves and
+  // the fee buckets, never a byte beside them), virtual_quote_reserves held in the quote reserve's band on each
+  // provider's own read, and every read with no reference naming why
+  [POOL, "[[245, 261], [271, 287]]", "[[271, 287]]", "card solana-reference-read-holds-a-slot-apart: a trade between", POOL_TEST],
+  [POOL, "[[245, 261], [271, 287]]", "[[245, 253], [271, 287]]", "card solana-reference-read-holds-a-slot-apart: a trade between", POOL_TEST],
+  [POOL, "[[245, 261], [271, 287]]", "[[245, 261]]", "card solana-reference-read-holds-a-slot-apart: a trade between", POOL_TEST],
+  [POOL, "[[245, 261], [271, 287]]", "[[244, 261], [271, 287]]", "a static byte that differs between the providers is refused", POOL_TEST],
+  [POOL, "[[245, 261], [271, 287]]", "[[245, 262], [271, 287]]", "a static byte that differs between the providers is refused", POOL_TEST],
+  [POOL, "[[245, 261], [271, 287]]", "[[245, 261], [270, 287]]", "a static byte that differs between the providers is refused", POOL_TEST],
+  [POOL, "[[245, 261], [271, 287]]", "[[245, 261], [271, 288]]", "a static byte that differs between the providers is refused", POOL_TEST],
+  [POOL, "if (!solanaReservesAgree(qs[0], qs[1])) return", "if (false) return", "card solana-reference-read-holds-a-slot-apart: virtual_quote_reserves that put", POOL_TEST],
+  [POOL, "quotes[1] + poolB.virtualQuoteReserves]", "quotes[1] + pool.virtualQuoteReserves]", "card solana-reference-read-holds-a-slot-apart: virtual_quote_reserves that put", POOL_TEST],
+  [POOL, "if (!solanaReservesAgree(qs[0], qs[1])) return { kind: \"bad\", why: \"the pool's quote reserve is outside the band\" };", "if (!solanaReservesAgree(qs[0], qs[1])) return { kind: \"bad\", why: \"the pool's vaults are outside the band\" };", "card solana-reference-read-holds-a-slot-apart: every read with no reference names why", POOL_TEST],
+  [POOL, "fault: String(e instanceof Error ? e.message : e).slice(0, 200) }", "fault: null }", "card solana-reference-read-holds-a-slot-apart: every read with no reference names why", POOL_TEST],
+  [POOL, "`${venues[i]}: ${v.why}, after a re-read`", "v.why", "card solana-reference-read-holds-a-slot-apart: every read with no reference names why", POOL_TEST],
+  [POOL, "candidates.length ? \"no pool pays out for this amount\" : \"no reference pool\"", "\"no reference pool\"", "card solana-reference-read-holds-a-slot-apart: every read with no reference names why", POOL_TEST],
+  [POOL, "(g.read ? [] : [`${PROVIDER[i]} gave no answer", "(g.read || i === 0 ? [] : [`${PROVIDER[i]} gave no answer", "card solana-reference-read-holds-a-slot-apart: every read with no reference names why", POOL_TEST],
   [S6, "m.fill(0, MINT_SUPPLY, MINT_SUPPLY + 8);", "m.fill(0, MINT_SUPPLY, 82);", "refused: S10 the providers disagree on the mint's freeze authority", S10_TEST],
   [S6, "m.fill(0, MINT_SUPPLY, MINT_SUPPLY + 8);", "m.fill(0, MINT_SUPPLY, MINT_SUPPLY + 9);", "refused: S10 the providers disagree on the mint's decimals", S10_TEST],
   [S6, "m.fill(0, MINT_SUPPLY, MINT_SUPPLY + 8);", "m.fill(0, 0, MINT_SUPPLY + 8);", "refused: S10 the providers disagree on the mint's mint authority", S10_TEST],

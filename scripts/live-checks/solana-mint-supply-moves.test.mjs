@@ -10,6 +10,14 @@
 // (FAIL: no reference); its mint read's freeze authority (FAIL: S10 names it); a reference round dropped (FAIL); the
 // burn rounds that read a moved supply read equal (INCONCLUSIVE, never PASS); a burn round's freeze authority (FAIL);
 // a burn round dropped below 20 (FAIL).
+// - slotApart (card solana-reference-read-holds-a-slot-apart): 20 recorded rounds of 9cRCn9rGT8V2imeM2BaKs13yhMEais3ruM3rPvTGpump
+//   (rounds 12-31 of a run of 60 on 11 Nov 00:03-00:07Z, the burn rounds of the same run). In its round 10 provider A read
+//   the pool at slot 467915586 and B at 467915587 with a trade between them: the pool's virtual_quote_reserves (bytes
+//   245..261) and fee buckets moved, the vaults inside the band. Its re-read is answered with that same recorded pair, a
+//   second trade between the slots as helper live run 42926088151's round 11 had. PASS on this kit, which holds
+//   virtual_quote_reserves in the quote reserve's band; main's kit (it compared those bytes as static) printed "BAD round
+//   10: ...; no reference; S6,S10 pass" on it, FAIL. Made from it: B's virtual_quote_reserves moving the quote reserve
+//   3% (FAIL, the line naming the band).
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -26,7 +34,9 @@ const edit = (b64, f) => { const d = Buffer.from(b64, "base64"); f(d); return d.
 const supply = (m) => Buffer.from(m.data, "base64").readBigUInt64LE(36);
 const read = (m) => ({ owner: m.owner, data: Uint8Array.from(Buffer.from(m.data, "base64")) });
 const movedRounds = (r) => r.burn.rounds.map((x, i) => [x, i]).filter(([x]) => x.mint[0] && x.mint[1] && supply(x.mint[0]) !== supply(x.mint[1]));
-/** good, with round 1's mint read on provider B changed by `mintRead`, and the mint in each of B's reference reads by `refRead`. */
+/** good, with round 1's mint read on provider B changed by `mintRead`, and the mint in each of B's reference reads by
+ * `refRead`; a re-read the kit asks is answered as the first read was, on both providers (the record has none: no
+ * round of good disagreed), so a refusal is the kit's, never a call the record lacks. */
 function planted({ mintRead, refRead }) {
   const r = copy(A.good);
   const x = r.rounds[0];
@@ -37,6 +47,7 @@ function planted({ mintRead, refRead }) {
       assert.ok(JSON.parse(c.key)[1][0][0] === r.mint && m, "each reference read names the mint first");
       m.data[0] = edit(m.data[0], refRead);
     }
+    for (const p of [0, 1]) x.calls[p] = [...x.calls[p], ...copy(x.calls[p])];
   }
   return r;
 }
@@ -77,7 +88,47 @@ test("planted: round 1's reference read on provider B reads the supply 3% lower,
   const r = await judge(planted({ refRead: (d) => d.writeBigUInt64LE((d.readBigUInt64LE(36) * 97n) / 100n, 36) }));
   assert.equal(r.ok, false);
   assert.equal(bad(r).length, 1, r.lines.join("\n"));
-  assert.match(bad(r)[0], /^BAD round 1: .*; no reference; S6,S10 pass$/);
+  assert.match(bad(r)[0], /^BAD round 1: .*; no reference: pumpswap: the mint's supply is outside the band \(\d+ \/ \d+\), after a re-read; S6,S10 pass$/);
+});
+
+const S = A.slotApart;
+const I128 = 245;
+const vqr = (b64) => { const d = Buffer.from(b64, "base64"); return BigInt.asIntN(128, d.readBigUInt64LE(I128) + (d.readBigUInt64LE(I128 + 8) << 64n)); };
+/** Each provider's pool-venue reads of slotApart's round 10, in call order. */
+const poolCalls = (r, p) => r.rounds[9].calls[p].filter((c) => JSON.parse(c.key)[1][0].length === 7);
+test("recorded slotApart run: a trade between the two providers' slots of round 10, its re-read the same pair: PASS, every round a reference", async () => {
+  const r = await judge(S);
+  assert.equal(r.ok, true, r.lines.join("\n"));
+  assert.equal(S.mint, "9cRCn9rGT8V2imeM2BaKs13yhMEais3ruM3rPvTGpump");
+  assert.equal(S.rounds.length, ROUNDS);
+  assert.equal(r.lines.filter((l) => /^ok {2}round \d+: .*; reference on pumpswap, E \d+; S6,S10 pass$/.test(l)).length, ROUNDS, r.lines.join("\n"));
+});
+test("recorded slotApart run: round 10's two pool reads are a slot apart and differ only in virtual_quote_reserves, the fee buckets and the vaults, the bytes main's kit compared as static", () => {
+  const [a, b] = [poolCalls(S, 0)[0].result, poolCalls(S, 1)[0].result];
+  assert.deepEqual([a.context.slot, b.context.slot], [467915586, 467915587]);
+  const pa = Buffer.from(a.value[1].data[0], "base64");
+  const pb = Buffer.from(b.value[1].data[0], "base64");
+  const off = [...pa.keys()].filter((i) => pa[i] !== pb[i]);
+  assert.ok(off.some((i) => i >= I128 && i < I128 + 16), "virtual_quote_reserves moved");
+  assert.ok(off.every((i) => (i >= I128 && i < I128 + 16) || (i >= 271 && i < 287)), `only the moving fields: ${off}`);
+  assert.deepEqual([vqr(a.value[1].data[0]), vqr(b.value[1].data[0])], [-14063185n, -14367986n]);
+  // its re-read on each provider: the same pair again
+  for (const p of [0, 1]) assert.deepEqual(poolCalls(S, p)[1].result, poolCalls(S, p)[0].result);
+});
+test("planted: slotApart's round 10 with provider B's virtual_quote_reserves moving its quote reserve 3%, every read: FAIL, the line naming the band", async () => {
+  const r = copy(S);
+  for (const c of poolCalls(r, 1)) {
+    const v = c.result.value;
+    const q = Buffer.from(v[6].data[0], "base64").readBigUInt64LE(64);
+    v[1].data[0] = edit(v[1].data[0], (d) => {
+      const x = vqr(d.toString("base64")) + ((q + vqr(d.toString("base64"))) * 3n) / 100n;
+      d.writeBigUInt64LE(BigInt.asUintN(64, x), I128);
+      d.writeBigUInt64LE(BigInt.asUintN(64, x >> 64n), I128 + 8);
+    });
+  }
+  const v = await judge(r);
+  assert.equal(v.ok, false);
+  assert.deepEqual(bad(v).map((l) => l.replace(/^BAD round 10: .*?; no reference: /, "")), ["pumpswap: the pool's quote reserve is outside the band, after a re-read; S6,S10 pass"], v.lines.join("\n"));
 });
 
 test("planted: round 1's mint read on provider B differs in its freeze authority: FAIL, S10 names it", async () => {

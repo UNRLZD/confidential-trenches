@@ -16,6 +16,7 @@ import { base58, base64 } from "@scure/base";
 import {
   SOLANA_POOL_READ_TOL_BPS,
   readSolanaReference,
+  readSolanaReferenceWhy,
   solanaCurveOut,
   solanaCurveRates,
   solanaDecodeBondingCurve,
@@ -36,6 +37,7 @@ import {
   type SolanaReference,
 } from "../src/trade/solana/pool.ts";
 import { solanaPacedRpc, type SolanaRpc } from "../src/trade/solana/send.ts";
+import { onTestClock } from "./test-clock.ts";
 
 type RawAcc = { owner: string; lamports: number; data: [string, string]; executable?: boolean } | null;
 type Answer = { context: { slot: number }; value: RawAcc[] };
@@ -205,6 +207,94 @@ test("a reserve outside the band is read once more on both, then the route is re
   assert.equal(SOLANA_POOL_READ_TOL_BPS, 200);
 });
 
+// Card solana-reference-read-holds-a-slot-apart: a trade between the two providers' slots moves the pool's
+// virtual_quote_reserves (i128 at 245) with its fee buckets and vaults (recorded 11 Nov 00:05Z on
+// 9cRCn9rGT8V2imeM2BaKs13yhMEais3ruM3rPvTGpump: -14063185 at slot 467915586 on provider A, -14367986 at 467915587 on B).
+// It is a reserve, not a static byte: held in the quote reserve Q = quote vault + virtual_quote_reserves, within the band
+// on both providers. Main's kit compared it byte for byte, so a trade between the slots of the read and of its re-read
+// came back with no reference (helper live run 42926088151, round 11).
+const putI128 = (d: Uint8Array, o: number, v: bigint): void => { putU64(d, o, BigInt.asUintN(64, v)); putU64(d, o + 8, BigInt.asUintN(64, v >> 64n)); };
+const vqrOf = (d: Uint8Array): bigint => BigInt.asIntN(128, u64(d, 245) + (u64(d, 253) << 64n));
+/** Provider B's pool account (every read, or read `only`) after a trade that moved virtual_quote_reserves by `dv(Q)` and
+ * the protocol fee bucket by `fee`; with `base`, both providers' virtual_quote_reserves set to it first. */
+const traded = (dv: (q: bigint) => bigint, fee = 0n, only?: number, base?: bigint) => (p: 0 | 1, v: Venue, n: number, ans: Answer): void => {
+  if (v !== "pool") return;
+  if (base !== undefined) edit(ans.value[PI.pool]!, (d) => putI128(d, 245, base));
+  if (p !== 1 || (only !== undefined && n !== only)) return;
+  const q = tokenAmount(ans.value[PI.quote]!);
+  edit(ans.value[PI.pool]!, (d) => { const x = vqrOf(d); putI128(d, 245, x + dv(q + x)); putU64(d, 271, u64(d, 271) + fee); });
+};
+test("card solana-reference-read-holds-a-slot-apart: a trade between the two providers' slots moves virtual_quote_reserves: the reference stands, with no re-read", async () => {
+  for (const side of ["buy", "sell"] as const) {
+    const s = scenario(ammToken, side);
+    // the fixture's own virtual_quote_reserves, and 5,000 lamports on both, which the trade takes below zero on B (the
+    // i128's high word moves with it)
+    for (const [dv, base] of [[-8_071n, undefined], [8_071n, undefined], [-8_071n, 5_000n]] as const) {
+      const move = (_q: bigint) => dv;
+      const [a, b] = pair(s, traded(move, 4_036n, undefined, base));
+      const ref = await readSolanaReference([a, b], req(ammToken, s));
+      assert.ok(ref, `${side} ${dv}: ${show(ref)}`);
+      assert.equal(ref.pools[0]!.venue, "pumpswap");
+      assert.deepEqual([a.by.pool, b.by.pool], [1, 1], `${side} ${dv}: agreed on the first read`);
+      // E from the larger-output read, each priced on its own provider's virtual_quote_reserves
+      const honest = (await readSolanaReference(pair(s, traded(() => 0n, 0n, undefined, base)), req(ammToken, s)))!;
+      const both = (await readSolanaReference(pair(s, (_p, v, n, ans) => { traded(move, 4_036n, undefined, base)(1, v, n, ans); }), req(ammToken, s)))!;
+      assert.equal(ref.expectedOut, honest.expectedOut > both.expectedOut ? honest.expectedOut : both.expectedOut, `${side} ${dv}`);
+      assert.notEqual(honest.expectedOut, both.expectedOut, `${side} ${dv}: the move changes E`);
+      assert.deepEqual(ref.pools[0]!.depth.map((x) => x - honest.pools[0]!.depth[0]), [0n, dv], `${side} ${dv}: each read's depth is its own Q`);
+    }
+  }
+});
+test("card solana-reference-read-holds-a-slot-apart: virtual_quote_reserves that put one provider's quote reserve outside the band are refused after one re-read, as every reserve is", async () => {
+  for (const side of ["buy", "sell"] as const) {
+    const s = scenario(ammToken, side);
+    // B's Q 2.01% higher or lower, the vaults unchanged: only virtual_quote_reserves tells; and a change in the i128's
+    // high word alone (2^64 either way)
+    for (const dv of [(q: bigint) => (q * 201n) / 10_000n + 1n, (q: bigint) => -((q * 201n) / 10_201n) - 1n, () => 1n << 64n, () => -(1n << 64n)]) {
+      const [a, b] = pair(s, traded(dv));
+      assert.equal(await readSolanaReference([a, b], req(ammToken, s)), null, side);
+      assert.deepEqual([a.by.pool, b.by.pool], [2, 2], "one re-read on both, no more");
+      const [a2, b2] = pair(s, traded(dv, 0n, 0));
+      assert.ok(await readSolanaReference([a2, b2], req(ammToken, s)), `${side}: agreed on the re-read`);
+    }
+    // just inside the band: 2.00% higher
+    assert.ok(await readSolanaReference(pair(s, traded((q) => (q * 200n) / 10_000n)), req(ammToken, s)), `${side}: 2.00% is inside`);
+  }
+});
+
+test("card solana-reference-read-holds-a-slot-apart: every read with no reference names why (readSolanaReferenceWhy), and readSolanaReference gives null for each", async () => {
+  const s = scenario(ammToken, "buy");
+  const pool = (p: 0 | 1, f: (a: Answer) => void) => (q: 0 | 1, v: Venue, _n: number, ans: Answer) => { if (q === p && v === "pool") f(ans); };
+  const throwing = (msg: string) => {
+    const [a] = pair(s);
+    return [a, Object.assign(async () => { throw new Error(msg); }, { url: fx.rpcs[1] })] as const;
+  };
+  const silent = () => {
+    const [a] = pair(s);
+    return [a, Object.assign(() => new Promise<never>(() => {}), { url: fx.rpcs[1] })] as const;
+  };
+  const cases: [string, () => readonly [SolanaRpc, SolanaRpc], string][] = [
+    ["a throttle", () => throwing("HTTP 429"), "pump-curve: provider B gave no answer (HTTP 429), after a re-read; pumpswap: provider B gave no answer (HTTP 429), after a re-read"],
+    ["a timeout", silent, "pump-curve: provider B gave no answer (no answer in 5000 ms), after a re-read; pumpswap: provider B gave no answer (no answer in 5000 ms), after a re-read"],
+    ["a malformed answer", () => pair(s, pool(0, (a) => { a.value = []; })), "pumpswap: provider A gave no answer (not an accounts read), after a re-read"],
+    ["static bytes that differ", () => pair(s, pool(1, (a) => edit(a.value[PI.pool]!, (d) => { d[220] = d[220]! ^ 1; }))), "pumpswap: the pool's static bytes differ, after a re-read"],
+    ["the vaults outside the band", () => pair(s, pool(1, (a) => edit(a.value[PI.quote]!, (d) => putU64(d, 64, (u64(d, 64) * 10_300n) / 10_000n)))), "pumpswap: the pool's vaults are outside the band, after a re-read"],
+    ["the quote reserve outside the band", () => pair(s, traded((q) => (q * 300n) / 10_000n)), "pumpswap: the pool's quote reserve is outside the band, after a re-read"],
+    ["no candidate", () => pair(s, (_p, _v, _n, ans) => { ans.value[1] = null; }), "no reference pool"],
+  ];
+  for (const [name, providers, why] of cases) {
+    const got = await onTestClock(() => readSolanaReferenceWhy(providers(), req(ammToken, s)));
+    assert.deepEqual(got, { refused: why }, name);
+    assert.equal(await onTestClock(() => readSolanaReference(providers(), req(ammToken, s))), null, name);
+  }
+  // nothing pays out: a pool whose base vault holds 1 token pays 0 for the buy
+  const empty = await readSolanaReferenceWhy(pair(s, (_p, v, _n, ans) => { if (v === "pool") edit(ans.value[PI.baseT22]!, (d) => putU64(d, 64, 1n)); }), req(ammToken, s));
+  assert.deepEqual(empty, { refused: "no pool pays out for this amount" });
+  const good = await readSolanaReferenceWhy(pair(s), req(ammToken, s));
+  assert.ok("reference" in good && good.reference.expectedOut > 0n);
+  assert.deepEqual(good.reference, await readSolanaReference(pair(s), req(ammToken, s)));
+});
+
 test("a candidate that still disagrees after the re-read refuses the route, even with another candidate agreed", async () => {
   // the graduated token's reads, with a live curve beside its pool whose SOL reserve B reads 3% higher, every read
   const s = scenario(ammToken, "buy");
@@ -237,6 +327,13 @@ test("a static byte that differs between the providers is refused (pump Global, 
     [ammToken, "pool", PI.mint, 44],
     [curveToken, "curve", CI.curve, 60],
     [ammToken, "pool", PI.pool, 220],
+    // the bytes beside the masked fields (card solana-reference-read-holds-a-slot-apart): is_cashback_coin before
+    // virtual_quote_reserves, creator_fee_bps after it, is_holder_reward before the fee buckets, the account's bytes after them
+    [ammToken, "pool", PI.pool, 244],
+    [ammToken, "pool", PI.pool, 261],
+    [ammToken, "pool", PI.pool, 270],
+    [ammToken, "pool", PI.pool, 287],
+    [ammToken, "pool", PI.pool, 300],
   ] as const) {
     const s = scenario(t, "buy");
     const [a, b] = pair(s, (p, w, _n, ans) => { if (p === 1 && w === v) edit(ans.value[index]!, (d) => { d[at] = d[at]! ^ 1; }); });

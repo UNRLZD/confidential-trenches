@@ -9,7 +9,8 @@
 //   solana-rpc.publicnode.com takes at most 10 accounts in one call, so each candidate rests on one slot per provider.
 // - Agree: static accounts byte-equal on both (the mint, pump's Global, both fee configs, the PumpSwap GlobalConfig,
 //   the curve and the pool with their moving fields masked); each reserve (the curve's virtual token and SOL
-//   reserves and its own token account's balance, the pool's two vault balances) within SOLANA_POOL_READ_TOL_BPS of
+//   reserves and its own token account's balance, the pool's two vault balances and its quote reserve, the quote vault
+//   plus virtual_quote_reserves) within SOLANA_POOL_READ_TOL_BPS of
 //   each other. A candidate that does not agree is read once more on both; if it still does not agree the route is
 //   refused (null): it is never priced on the candidates left.
 // - The set: depth = the quote-side (SOL) reserve; cutoff = (1 − 200 / 10,000) × the largest, over the candidates, of
@@ -243,8 +244,15 @@ export function solanaDecodePumpSwapPool(acc: SolanaPoolAccount): SolanaPumpSwap
     virtualQuoteReserves: i128(d, 245), creatorFeeBps: u64(d, 261), protocolFees: u64(d, 271), creatorFees: u64(d, 279),
   };
 }
-/** The pool's fee buckets (271..287) move with each v2 trade; they are masked before the bytes are compared. */
-const POOL_MOVING: readonly (readonly [number, number])[] = [[271, 287]];
+/** The pool's fields that move with each trade, masked before the providers' bytes are compared, each exactly one field
+ * of pump-swap-sdk 2.2.0's Pool (dist/index.js, POOL_SIZE 287): virtual_quote_reserves (i128, 245..261), held instead in
+ * the quote reserve's band, and protocol_fees and creator_fees (u64 each, 271..287). The SDK's README (v2 migration
+ * notes): "every v2 accrual is subtracted from" virtual_quote_reserves, which the fee buckets add. Read on 11 Nov
+ * 00:03-00:22Z (card solana-reference-read-holds-a-slot-apart), on three canonical pools on both public RPCs (281 pairs),
+ * these were the only pool bytes that moved, between the providers or over time; in one pair, A at slot 467915586 and B
+ * at 467915587 (9cRCn9rGT8V2imeM2BaKs13yhMEais3ruM3rPvTGpump), virtual_quote_reserves read -14063185 and -14367986,
+ * protocol_fees 6007858 and 6312659. */
+const POOL_MOVING: readonly (readonly [number, number])[] = [[245, 261], [271, 287]];
 
 export type SolanaPumpSwapConfig = { lpFeeBps: bigint; protocolFeeBps: bigint; coinCreatorFeeBps: bigint; disableFlags: number; creatorFeeConfigurable: boolean };
 /** PumpSwap GlobalConfig: admin 8, lp_fee_basis_points 40, protocol_fee_basis_points 48, disable_flags 56 (bit 3 buy,
@@ -504,8 +512,17 @@ function heldBy(acc: SolanaPoolAccount | null, m: string, owner: string, program
   return t.amount;
 }
 
-function judge(venue: SolanaPoolVenue, req: SolanaReferenceRequest, addr: ReturnType<typeof solanaPoolAddresses>, a: Read, b: Read): Verdict {
-  if (!a || !b) return { kind: "bad", why: "a provider gave no answer" };
+/** One provider's read of one venue: its parsed answer, or why there is none (the call's own fault, or a malformed answer). */
+type Got = { read: Read; fault: string | null };
+const PROVIDER = ["provider A", "provider B"] as const;
+
+function judge(venue: SolanaPoolVenue, req: SolanaReferenceRequest, addr: ReturnType<typeof solanaPoolAddresses>, ga: Got, gb: Got): Verdict {
+  const a = ga.read;
+  const b = gb.read;
+  if (!a || !b) {
+    const why = [ga, gb].flatMap((g, i) => (g.read ? [] : [`${PROVIDER[i]} gave no answer${g.fault ? ` (${g.fault})` : " (not an accounts read)"}`]));
+    return { kind: "bad", why: why.join(", ") };
+  }
   const A = a.accounts;
   const B = b.accounts;
   const at = (r: (SolanaPoolAccount | null)[], i: number): SolanaPoolAccount | null => r[i] ?? null;
@@ -558,6 +575,9 @@ function judge(venue: SolanaPoolVenue, req: SolanaReferenceRequest, addr: Return
     const bases = [heldBy(at(A, baseI), addr.mint, addr.pool, mint.program), heldBy(at(B, baseI), addr.mint, addr.pool, mint.program)] as const;
     const quotes = [heldBy(at(A, PI.quote), SOLANA_SOL_MINT, addr.pool, SOLANA_TOKEN_PROGRAM), heldBy(at(B, PI.quote), SOLANA_SOL_MINT, addr.pool, SOLANA_TOKEN_PROGRAM)] as const;
     if (!solanaReservesAgree(bases[0], bases[1]) || !solanaReservesAgree(quotes[0], quotes[1])) return { kind: "bad", why: "the pool's vaults are outside the band" };
+    // the quote reserve the price and the depth are built from: the vault and virtual_quote_reserves, each provider's own
+    const qs = [quotes[0] + pool.virtualQuoteReserves, quotes[1] + poolB.virtualQuoteReserves] as const;
+    if (!solanaReservesAgree(qs[0], qs[1])) return { kind: "bad", why: "the pool's quote reserve is outside the band" };
     const cfg = solanaDecodePumpSwapConfig(at(A, PI.ammGlobalConfig) ?? fail("no GlobalConfig"));
     const feeConfig = solanaDecodeFeeConfig(at(A, PI.ammFeeConfig) ?? fail("no PumpSwap fee config"));
     const one = (p: SolanaPumpSwapPool, base: bigint, quote: bigint, supply: bigint): SolanaCandidateRead => ({
@@ -579,9 +599,22 @@ function fail(why: string): never {
  * provider B the second, as LD1 has them). Null when there is no candidate ("no reference pool"), or when a candidate
  * still disagrees after the one re-read (the route is refused, never priced on the candidates left; markets.md l.92
  * and S12). `req.amounts` (optional, at most 64 positive u64s) get their own E in `expectedOuts`. Throws only on a
- * request or provider pair that is not one.
+ * request or provider pair that is not one. readSolanaReferenceWhy is the same read with the reason for a null.
  */
 export async function readSolanaReference(providers: readonly [SolanaRpc, SolanaRpc], req: SolanaReferenceRequest): Promise<SolanaReference | null> {
+  const r = await readSolanaReferenceWhy(providers, req);
+  return "reference" in r ? r.reference : null;
+}
+
+/** Why a reference read gave no reference: "no reference pool" (no candidate on the chain), "no pool pays out for this
+ *  amount", or, for each venue still refused after its one re-read, the venue and its refusal (a provider gave no
+ *  answer, with the call's fault such as HTTP 429 or no answer in 5000 ms; static bytes that differ; a reserve outside
+ *  the band; a malformed account). */
+export type SolanaReferenceRefused = { refused: string };
+
+/** readSolanaReference, with the reason when there is no reference (card solana-reference-read-holds-a-slot-apart): the
+ *  same reads, the same rules, the same refusals. */
+export async function readSolanaReferenceWhy(providers: readonly [SolanaRpc, SolanaRpc], req: SolanaReferenceRequest): Promise<{ reference: SolanaReference } | SolanaReferenceRefused> {
   if (!Array.isArray(providers) || providers.length !== 2 || typeof providers[0] !== "function" || typeof providers[1] !== "function") throw new Error("two providers are needed");
   const [pa, pb] = providers;
   if (solanaSameProvider(pa, pb)) throw new Error("the two providers are the same provider: a reference must never rest on one provider's word");
@@ -593,26 +626,29 @@ export async function readSolanaReference(providers: readonly [SolanaRpc, Solana
   }
   const addr = solanaPoolAddresses(req.token);
   // one venue's accounts, one call per provider: each candidate rests on one slot per provider
-  const readBoth = (list: string[]): Promise<[Read, Read]> =>
+  const readBoth = (list: string[]): Promise<[Got, Got]> =>
     Promise.all(providers.map((rpc) =>
       Promise.resolve().then(() => solanaTimedRpc(rpc, READ_TIMEOUT_MS)("getMultipleAccounts", [list, { encoding: "base64", commitment: "confirmed" }])).then(
-        (ans) => solanaParseAccountsAnswer(ans, list.length),
-        () => null,
+        (ans): Got => ({ read: solanaParseAccountsAnswer(ans, list.length), fault: null }),
+        (e: unknown): Got => ({ read: null, fault: String(e instanceof Error ? e.message : e).slice(0, 200) }),
       ),
-    )) as Promise<[Read, Read]>;
+    )) as Promise<[Got, Got]>;
   const lists: Record<SolanaPoolVenue, string[]> = { "pump-curve": addr.curveList, pumpswap: addr.poolList };
   const venues: SolanaPoolVenue[] = ["pump-curve", "pumpswap"];
   const slots: number[] = [];
   const look = async (v: SolanaPoolVenue): Promise<Verdict> => {
     const [a, b] = await readBoth(lists[v]);
     const verdict = judge(v, req, addr, a, b);
-    if (verdict.kind === "ok" && a && b) slots.push(a.slot, b.slot);
+    if (verdict.kind === "ok" && a.read && b.read) slots.push(a.read.slot, b.read.slot);
     return verdict;
   };
   let verdicts = await Promise.all(venues.map(look));
   // one more read on both of a candidate that did not agree; if it still does not, the route is refused
   verdicts = await Promise.all(verdicts.map((v, i) => (v.kind === "bad" ? look(venues[i]!) : v)));
-  if (verdicts.some((v) => v.kind === "bad")) return null;
-  const ref = solanaReferenceSet(verdicts.flatMap((v) => (v.kind === "ok" ? [v.candidate] : [])));
-  return ref && slots.length ? { ...ref, slot: Math.min(...slots) } : ref;
+  const refused = verdicts.flatMap((v, i) => (v.kind === "bad" ? [`${venues[i]}: ${v.why}, after a re-read`] : []));
+  if (refused.length) return { refused: refused.join("; ") };
+  const candidates = verdicts.flatMap((v) => (v.kind === "ok" ? [v.candidate] : []));
+  const ref = solanaReferenceSet(candidates);
+  if (!ref) return { refused: candidates.length ? "no pool pays out for this amount" : "no reference pool" };
+  return { reference: slots.length ? { ...ref, slot: Math.min(...slots) } : ref };
 }
