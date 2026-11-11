@@ -2507,22 +2507,21 @@ test("a stranger's unit at W's account of the sold mint made again after W was s
 // Delta review 7 of 08290868 (item 1): W's own coin is the mint its one buy bought (the buy's record). A full sell of
 // an airdropped mint while W still holds its own coin swept W to 0, and any later sell of that coin was refused
 // not_funded (W pays its fee up front). The rent back now holds while W holds any unit of its buy mint.
-// card wallets-found-in-one-read: a W whose buy record names another mint is no seller of an airdrop (each W takes one
-// buy, and positions.ts lists no token its record does not name), so the sell of a fully held airdrop that this test
-// once ran from W (its rent back then held for W's own unsold coin) is refused before anything is read or signed
-test("an airdrop in a W whose buy record names its own unsold coin: the sell of the airdrop is refused not_funded, nothing signed, W's accounts as they were", async () => {
+// card wallets-found-in-one-read: W's record names its own coin, not the airdrop, so the fast path covers nothing and the
+// finder's read of the other Ws (W among them) finds the airdrop: sold as before
+test("W's own unsold coin and a fully sold airdrop: the rent back holds, W keeps its SOL and its coin's account", async () => {
   const air = VF.pumpswap.mint;
   const own = solanaAta(W.address, MINT, TOKEN_PROGRAM);
   const holding: BuyWallet = { ...wallet(AMOUNT, false, air), holdings: { native: 0n, tokens: new Map([[air, { amount: AMOUNT, frozen: false }], [MINT, { amount: 5n, frozen: false }]]), unreadable: [] } };
   const w = await world({ venue: "pumpswap", ataLamports: TOKEN_RENT, buy: { mint: MINT, program: TOKEN_PROGRAM } }, [holding]);
   const before = { owner: TOKEN_PROGRAM, lamports: TOKEN_RENT, data: tokenAccount(5n, 1, MINT) };
   w.c.accounts.set(own, before);
-  const lamports = w.c.accounts.get(W.address)?.lamports;
   const a = await runPoolSell(w.host, { ...ASK, token: air });
-  assert.deepEqual(a, { error: "not_funded" });
-  assert.equal(sends(w).length, 0, "nothing sent");
+  assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
   assert.deepEqual(w.c.accounts.get(own), before, "W's own coin's account as it was");
-  assert.equal(w.c.accounts.get(W.address)?.lamports, lamports, "W's SOL as it was");
+  assert.equal(w.c.deposits.filter((d) => d.sweep).length, 0, "no sweep");
+  assert.ok((w.c.accounts.get(W.address)?.lamports ?? 0) > 0, "W keeps its SOL for its coin's sell");
+  assert.equal(w.told.at(-1)?.state, "holds", JSON.stringify(w.told));
 });
 
 // With no buy record (a buy from before it was written, or a restored device), the pass holds (delta review 8 of
@@ -4873,13 +4872,33 @@ test("card wallets-found-in-one-read: a W whose record names the token but whose
   assert.equal(plan.total, T3);
 });
 
-test("card wallets-found-in-one-read: a W holding the token with no buy record among recorded ones is found by the finder's read of the unrecorded Ws alone, and sold from", async () => {
+test("card wallets-found-in-one-read: a holding with no buy record beside a recorded one: 100 percent sells what the records name at once, the finder reading none", async () => {
   const w = await world({ others: [{ l: 100n, j: 0, held: T3 }] });
-  const f = finder(pastBuys(20), () => [[MINT, T3]]);
+  const f = finder(pastBuys(20), (a) => [[MINT, a === W.address ? AMOUNT : T3]]);
   const unrecorded = f.addressOf(100n);
   const { plan } = await planOver(w, f, (a) => (a === unrecorded ? undefined : a === W.address ? MINT : OTHER_MINT));
+  assert.deepEqual(plan.legs.map((x) => [x.w.address, x.held]), [[W.address, AMOUNT]]);
+  assert.deepEqual(f.reads, []);
+});
+
+test("card wallets-found-in-one-read: a typed amount past what the recorded Ws hold: the finder reads every other W, one per request, and the unrecorded holder joins the sale", async () => {
+  const w = await world({ others: [{ l: 100n, j: 0, held: T3 }] });
+  const unrecordedL = 100n;
+  const f = finder(pastBuys(20), (a) => (a === W.address ? [[MINT, AMOUNT]] : [[MINT, T3]]));
+  const unrecorded = f.addressOf(unrecordedL);
+  const { plan } = await planOver(w, f, (a) => (a === unrecorded ? undefined : a === W.address ? MINT : OTHER_MINT), { ...ASK, amount: AMOUNT + T3 });
   assert.deepEqual(new Set(plan.legs.map((x) => x.w.address)), new Set([W.address, unrecorded]));
   assert.equal(plan.total, AMOUNT + T3);
-  // the finder read the one W with no record, and no other
-  assert.deepEqual(f.reads, [unrecorded]);
+  // the 19 Ws the fast path did not read (no record, or another mint's), each once; W not among them; the others list
+  // the token but hold no account of it on the RPCs, so none joins
+  assert.equal(f.reads.length, 19);
+  assert.ok(!f.reads.includes(W.address));
+});
+
+test("card wallets-found-in-one-read: no recorded W holds the token (an airdrop in a W whose record names another mint): the finder's read finds it and it sells, never a refusal", async () => {
+  const w = await world({ buy: { mint: OTHER_MINT, program: TOKEN_PROGRAM } });
+  const f = finder(pastBuys(5), (a) => (a === W.address ? [[MINT, AMOUNT]] : []));
+  const { plan } = await planOver(w, f, () => OTHER_MINT);
+  assert.deepEqual(plan.legs.map((x) => [x.w.address, x.held]), [[W.address, AMOUNT]]);
+  assert.equal(f.reads.length, 5);
 });
