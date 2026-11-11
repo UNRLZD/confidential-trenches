@@ -29,6 +29,9 @@ import { TRADE_HELPER } from "../src/trade.ts";
 
 const SEED64 = wordsToSeed64(entropyToWords(new Uint8Array(16))); // the published all-zero entropy vector (a8.json)
 const PIN = { program: "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8", feePayer: "9T3RgAVTNgedZhjJyC1UmyisV61pFWoU24LQHnk5W2bb" };
+// the Solana pool's page alone: no EVM pool is pinned here (SIGN_HOST's build pins Base's and Robinhood's since card
+// evm-pools-on-mainnet, whose passes would add their own timers and state reads to the ones this file counts)
+const NO_EVM = (): undefined => undefined;
 const SCOPE = solanaPoolOf(PIN.program).scope;
 const key = (b: number) => base58.encode(Uint8Array.from({ length: 32 }, (_, i) => (i === 31 ? b : i === 0 ? 9 : 0)));
 const BOUGHT = key(7); // W0's buy, its record naming its decimals
@@ -101,7 +104,7 @@ test("the positions on the mainnet build: no request names a W to any host but t
   }) as typeof fetch;
 
   const timers: (() => void)[] = [];
-  const make = () => testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { pin: PIN, positions: { setTimer: (f: () => void) => (timers.push(f), f), clearTimer: (t: unknown) => void timers.splice(timers.indexOf(t as () => void) >>> 0, timers.includes(t as () => void) ? 1 : 0) } } as never);
+  const make = () => testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { pin: PIN, evmPin: NO_EVM, positions: { setTimer: (f: () => void) => (timers.push(f), f), clearTimer: (t: unknown) => void timers.splice(timers.indexOf(t as () => void) >>> 0, timers.includes(t as () => void) ? 1 : 0) } } as never);
   type Tp = ReturnType<typeof make>;
   const show = (p: readonly Position[] | null) => p?.map((x) => [names.get(x.token), x.amount, x.wallets.map((a) => names.get(a))]);
   const until = async (f: () => boolean | Promise<boolean>) => {
@@ -273,7 +276,7 @@ test("the positions across a buy with no record, a sell, a sign out mid-pass and
   };
   const tp = testnetPool(
     { store: async () => cur, seed64: async () => (seed === null ? Promise.reject(new Error("no seed is stored")) : seed.slice()) },
-    { pin: PIN, table: "6bbfV79efN889c4iRTSTf4htv6EnurCJuz5CjMftjsyZ", tradeKinds: { buy, sell }, positions: { setTimer: () => 0, clearTimer: () => {} } } as never,
+    { pin: PIN, evmPin: NO_EVM, table: "6bbfV79efN889c4iRTSTf4htv6EnurCJuz5CjMftjsyZ", tradeKinds: { buy, sell }, positions: { setTimer: () => 0, clearTimer: () => {} } } as never,
   );
   const show = (p: readonly Position[] | null) => p?.map((x) => `${names.get(x.token)}=${x.amount}@${x.wallets.map((a) => names.get(a)).join("+")}`).sort();
   const until = async (f: () => boolean | Promise<boolean>, what: () => Promise<string> = async () => "") => {
@@ -360,7 +363,7 @@ test("the positions pass on a helper that throttles for good ends within the lis
     return new Response("slow down", { status: 429 });
   }) as typeof fetch;
   const timers: (() => void)[] = [];
-  const tp = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { pin: PIN, positions: { setTimer: (f: () => void) => (timers.push(f), f), clearTimer: () => {} } } as never);
+  const tp = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { pin: PIN, evmPin: NO_EVM, positions: { setTimer: (f: () => void) => (timers.push(f), f), clearTimer: () => {} } } as never);
   await tp.positions();
   // the pass ends when it sets its retry; a W's read past the list's bound would keep it going for minutes
   for (let i = 0; i < 4_000 && timers.length === 0; i++) await new Promise((r) => setTimeout(r, 50));

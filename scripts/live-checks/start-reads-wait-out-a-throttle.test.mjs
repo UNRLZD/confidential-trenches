@@ -25,6 +25,16 @@ for (const k of ["good", "goodTestnet"])
     assert.deepEqual(v.lines, []);
   });
 
+test("a bundle that carries the EVM sale counts it among the kinds on their request's one bound (card evm-pools-on-mainnet)", () => {
+  const good = ANSWERS.good;
+  const withSale = { ...good, evmSale: true, wired: { ...good.wired, taps: 5 } };
+  assert.deepEqual(judge(withSale).lines, []);
+  // the sale off its bound: four taps with the sale in the bundle
+  assert.deepEqual(judge({ ...withSale, wired: { ...withSale.wired, taps: 4 } }).lines, [NO_TAPS]);
+  // a fifth tap with no EVM sale is not one of the four kinds
+  assert.deepEqual(judge({ ...good, wired: { ...good.wired, taps: 5 } }).lines, [NO_TAPS]);
+});
+
 for (const k of ["bad", "badTestnet"])
   test(`recorded bad answer ${k}: FAIL, each mark named`, () => {
     const v = judge(ANSWERS[k]);
@@ -76,7 +86,8 @@ const JS =
 
 test("the facts read from a bundle", () => {
   const f = facts("", JS);
-  assert.deepEqual({ ...f, sha384: null }, { index: "", sha384: null, rule: true, faults: true, stop: true, wired: { decimals: true, sell: true, spent: true, buy: true, deposits: 2, stops: 2, taps: 4 }, rentBack: true });
+  assert.deepEqual({ ...f, sha384: null }, { index: "", sha384: null, rule: true, faults: true, stop: true, wired: { decimals: true, sell: true, spent: true, buy: true, deposits: 2, stops: 2, taps: 4 }, rentBack: true, evmSale: false });
+  assert.equal(facts("", JS + "const K=`owed/sell-evm`;").evmSale, true, "the EVM sale's key read in a bundle");
 });
 
 test("planted on the bundle: a flat wait, another bound, no clock, any error waiting, no sign out, a kind off the rule or off its request's bound: each read as not held", () => {
