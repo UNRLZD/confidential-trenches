@@ -510,9 +510,13 @@ test("review P2-1 and P2-2 of a34c1626, P2-1 and P3-3 of e3489b3b: every Solana 
   const calls = [...src.matchAll(/solanaSettle(?:Spent|Reserved)\(\{[^}]*\}\)/g)].map((m) => m[0]);
   assert.equal(calls.length, 4);
   for (const c of calls) assert.match(c, /, rpcs: settleRpcs\(\), lister: lister\(\), signal, cache, markBatches: PAGE_SOL_MARK_BATCHES \}\)$/, c);
-  // each site's signal is the stop's when the call began: four takes, and the stop read nowhere else
+  // each site's signal is the stop's when the call began: four takes, and the stop read elsewhere only where a trade's
+  // reads wait before a signature (card start-reads-wait-out-a-throttle): the buy's and the sell's host, each taken when
+  // the host is made, and a pool kind's request (outSignal), each ending its waits at the next sign out
   assert.equal([...src.matchAll(/const signal = solanaStop\.signal;/g)].length, 4);
-  assert.equal([...src.matchAll(/solanaStop\.signal/g)].length, 4);
+  assert.equal([...src.matchAll(/ signal: solanaStop\.signal,/g)].length, 2);
+  assert.equal([...src.matchAll(/outSignal: \(\) => solanaStop\.signal,/g)].length, 1);
+  assert.equal([...src.matchAll(/solanaStop\.signal/g)].length, 7);
   // the settle pair: the page's two seats, the helper's with the window-long retry
   assert.match(src, /solanaPacedRpc\(pageHelperRpc\(TRADE_HELPER, SOLANA_RPC_WINDOW_RETRY\)\)\]/);
   assert.match(src, /solanaPacedRpc\(testnetRpc\(TESTNET_RPCS\.solana\[1\], SOLANA_RPC_WINDOW_RETRY\)\)\]/);
