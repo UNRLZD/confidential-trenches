@@ -571,9 +571,11 @@ export function createSolanaTrades(deps: {
     e.readAt = now();
   }
 
-  /** Walks `mint`'s signatures newer than `until` (all of the newest COLD_SIGS when null), oldest first, and holds each
-   *  transaction's trades. */
-  async function walk(e: Entry, until: string | null): Promise<void> {
+  /** Walks `mint`'s signatures newer than `until` (all of the newest COLD_SIGS when null) and holds each transaction's
+   *  trades, each in its place in the list. The reads go newest first, TX_PARALLEL at a time, and the tape is folded
+   *  after each round (`round`), so a first read serves the newest trades after one round, not after the whole walk
+   *  (card token-page-data-complete-and-fast: 30 reads at 5 a time held a cold tape 3.8 to 7.9 s on public endpoints). */
+  async function walk(e: Entry, until: string | null, round?: () => void): Promise<void> {
     const sigs: { signature: string; slot: number; err: unknown }[] = [];
     let before: string | undefined;
     const max = until === null ? COLD_SIGS : REFILL_MAX;
@@ -589,9 +591,9 @@ export function createSolanaTrades(deps: {
     sigs.reverse();
     // each transaction's place is the list's (oldest first), taken before the reads, which go TX_PARALLEL at a time
     const todo = sigs.filter((s) => (s.err === null || s.err === undefined) && !e.held.has(s.signature)).map((s) => ({ ...s, order: ++seq }));
-    for (let k = 0; k < todo.length; k += TX_PARALLEL) {
+    for (let k = todo.length; k > 0; k -= TX_PARALLEL) {
       await Promise.all(
-        todo.slice(k, k + TX_PARALLEL).map(async (s) => {
+        todo.slice(Math.max(0, k - TX_PARALLEL), k).map(async (s) => {
           const r = (await rpc("getTransaction", [s.signature, { encoding: "json", maxSupportedTransactionVersion: 1, commitment: "confirmed" }])) as Record<string, unknown> | null;
           if (r === null) return;
           e.seen++;
@@ -600,6 +602,10 @@ export function createSolanaTrades(deps: {
           hold(e, s.signature, s.slot, s.order, await forMint(e.mint, f.truncated ? fromInner(r) : f.trades));
         }),
       );
+      if (round !== undefined) {
+        fold(e);
+        round();
+      }
     }
     for (const s of sigs) e.covered = Math.max(e.covered, s.slot);
     // a walk runs while the stream's trades already arrive: the newest signature held is then the stream's
@@ -716,10 +722,12 @@ export function createSolanaTrades(deps: {
     }
     // the tape is served from the moment the stream holds the token; the walk's older trades join as they are read
     e.readAt = now();
+    let firstRound: () => void = () => undefined;
+    const rounded = new Promise<void>((ok) => (firstRound = ok));
     const cold = (async () => {
       for (let attempt = 0; ; attempt++) {
         try {
-          await walk(e, null);
+          await walk(e, null, () => firstRound());
           break;
         } catch {
           if (attempt === 2 || !entries.has(mint)) break; // the stream's trades still serve; the cold window stays short
@@ -729,7 +737,8 @@ export function createSolanaTrades(deps: {
       if (e.state === "cold") e.state = "live";
       fold(e);
     })();
-    await Promise.race([cold, new Promise((r) => setTimeout(r, COLD_WAIT_MS).unref?.())]);
+    // the first answer waits for the walk's first round (its newest trades), the whole walk, or COLD_WAIT_MS
+    await Promise.race([cold, rounded, new Promise((r) => setTimeout(r, COLD_WAIT_MS).unref?.())]);
     return e;
   }
 
