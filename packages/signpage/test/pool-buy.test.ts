@@ -844,9 +844,10 @@ test("the decimals of the token W received, read with that amount on both RPCs, 
   const w0 = await world();
   const ok = await world({ received: [w0.E, w0.E] });
   const told: unknown[] = [];
-  const a = await runPoolBuy({ ...ok.host, route: (x) => void told.push(x), outDecimals: (wallet, d) => void told.push({ decimals: [wallet, d] }) }, ASK);
+  const a = await runPoolBuy({ ...ok.host, route: (x) => void told.push(x), outDecimals: (wallet, d, mint) => void told.push({ decimals: [wallet, d, mint] }) }, ASK);
   assert.deepEqual(a, { stage: "filled", txs: [{ chain: "solana", hash: SIG }] });
-  assert.deepEqual(told.slice(-2), [{ decimals: [W.address, 6] }, { out: whole6(w0.E) }]);
+  // with the token's mint, which the page keeps them for (card sell-first-read-waits-out-a-throttle)
+  assert.deepEqual(told.slice(-2), [{ decimals: [W.address, 6, ASK.token] }, { out: whole6(w0.E) }]);
   const apart = await world({ received: [w0.E, w0.E - 1n] });
   const none: unknown[] = [];
   await runPoolBuy({ ...apart.host, outDecimals: (wallet, d) => void none.push([wallet, d]) }, ASK);

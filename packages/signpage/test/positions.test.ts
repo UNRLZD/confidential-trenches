@@ -23,7 +23,8 @@ import { freshWallet } from "../../wallet/src/derive/keys.ts";
 import { jOf } from "../../wallet/src/pool/queue.ts";
 import { keptPositions, passMemo, POSITION_COSTS_KEY, positionCost, POSITIONS_KEPT_KEY, POSITIONS_RETRIES, POSITIONS_SOLD_KEY, POSITIONS_SOLD_TX_KEY, POSITIONS_UNLANDED_KEY, positionsCache, positionsPass, recordPoolBuy, usdOf, withPositions, type KeptPass, type PassMemo, type PassResult, type FoundWallet, type PassRun, type Position, type PositionCosts, type PositionsReads } from "../src/positions.ts";
 import { stateFor } from "../src/kit-version.ts";
-import { testnetPool } from "../src/pool-testnet.ts";
+import { testnetPool, testnetPoolDeps } from "../src/pool-testnet.ts";
+import { poolKinds, type PoolRpc } from "../src/pool-kinds.ts";
 import { tokenDecimalsShown } from "../src/rules/pool.ts";
 import { BUY_MINTS_KEY, buyMints } from "../src/pool-sell.ts";
 
@@ -774,6 +775,36 @@ test("the page: a pool buy's end writes its records, the decimals its run told a
   assert.deepEqual(routed, [{ wallet: solanaWallet() }, { out: "1081590.213565" }], "the run's route facts still reach the app");
   const op = (await w.get("ops", "pb1")) as { stage: string; amount_usd: string; token: string };
   assert.deepEqual([op.stage, op.amount_usd, op.token], ["filled", "1.5", MINT], "the pool buy shows in state.ops (review P3-1)");
+});
+
+// card sell-first-read-waits-out-a-throttle: the app's devnet run 5 tapped Sell 2.26 s after its buy filled, and the
+// sell's first read, the mint's decimals, met four 429s and answered down. The buy's run already read them (with the
+// amount W received, on both RPCs: pool-buy.ts outDecimals), and the page keeps them, so the sell asks none.
+test("the page: a sell after a pool buy on this page asks no decimals read: the buy's own read is kept for the session", async () => {
+  const w = await spentWallet();
+  const c = chain();
+  const buy = (host: () => { outDecimals?(w: string, d: number, mint: string): void }) => (_ask: unknown, ctx: { route?: (r: unknown) => void }) => {
+    ctx.route?.({ wallet: solanaWallet() });
+    host().outDecimals?.(solanaWallet(), 6, MINT);
+    ctx.route?.({ out: "1081590.213565" });
+    return { running: true as const, after: new Promise<void>(() => {}), answer: () => null };
+  };
+  const tp = testnetPool(
+    { store: async () => w, seed64: async () => SEED64.slice(), price: () => PRICE },
+    // @ts-expect-error a stand-in buy kind: only its route facts matter here
+    { pin: PIN, rpcs: c.rpcs, table: "Table111111111111111111111111111111111111111", holdings: () => c.finder, tradeKinds: { buy }, positions: { setTimer: () => {}, clearTimer: () => {} } },
+  );
+  assert.ok("running" in tp.flow({ kind: "pool.buy", chain: "solana", token: MINT, amount: 10_000_000n, slippageBps: 100, decimals: 9 }, { id: "pb1", sha: "00", progress: () => {}, route: () => {} } as never));
+  // the sell on the page's own deps (testnetPoolDeps), its two providers counting every ask
+  const asks: string[] = [];
+  const rpc: PoolRpc = async (method) => (asks.push(method), null);
+  const flows: { decimals: number; amount: bigint }[] = [];
+  const k = poolKinds({ ...testnetPoolDeps((ask) => (flows.push(ask), { error: "busy" })), pinned: () => true, rpcs: () => [rpc, rpc] });
+  const r = k["pool.sell"]({ chain: "solana", token: MINT, amount: "2.5", slippage_bps: 100 }, { id: "ps1", sha: "00", progress: () => {} }) as { after: Promise<unknown>; answer: () => unknown };
+  await r.after;
+  assert.deepEqual(r.answer(), { error: "busy" }, "the flow's own answer: the sell went on");
+  assert.deepEqual(asks, [], "no decimals read");
+  assert.deepEqual(flows.map((a) => [a.decimals, a.amount]), [[6, 2_500_000n]]);
 });
 
 test("the page: a pool buy answered early as sent (its fill read later) is recorded at the end stage its run posts, once", async () => {

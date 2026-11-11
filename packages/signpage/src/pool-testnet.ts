@@ -67,7 +67,7 @@ import { evmSettleReserved } from "../../wallet/src/pool/evm-settle.ts";
 import { evmPoolFee, evmPoolGas } from "../../kit/src/trade/evm/pool-fee.ts";
 import { poolDepositEvmKind, type EvmDepositRound } from "./pool-deposit-evm.ts";
 import { evmBuyHost, followPendingEvmBuys, poolBuyEvmKind, type EvmBuyPage } from "./pool-buy-evm.ts";
-import type { PoolKindsDeps, PoolRpc } from "./pool-kinds.ts";
+import { PAGE_TOKEN_DECIMALS, type PoolKindsDeps, type PoolRpc } from "./pool-kinds.ts";
 import { checkPoolRequest, tokenDecimalsShown, type PoolAsk, type PoolChain, type PoolRequest } from "./rules/pool.ts";
 import type { HostAnswer, HostRefusal, KindContext, Running } from "./api.ts";
 import { readSolanaRent, solanaPoolFee } from "../../kit/src/trade/solana/pool-buy.ts";
@@ -303,6 +303,8 @@ export function testnetPoolDeps(flow?: PoolKindsDeps["flow"]): PoolKindsDeps {
         : POOL_TESTNET
           ? (TESTNET_RPCS[chain].map((u) => testnetRpc(u) as PoolRpc) as unknown as readonly [PoolRpc, PoolRpc])
           : null,
+    // the tokens' decimals kept this session: the sell's read and both buys' own (card sell-first-read-waits-out-a-throttle)
+    decimals: PAGE_TOKEN_DECIMALS,
     ...(flow ? { flow } : {}),
   };
 }
@@ -995,8 +997,12 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       // W's buy mint, written before the send: the rent back after a later sell holds while W holds any of it
       bought: buyMints(page.store),
       send: (pool, tx) => helperPoolSend(pool, tx, over.fetch),
-      // the received token's decimals, for W's buy record (src/positions.ts recordPoolBuy)
-      outDecimals: (wallet, d) => void boughtDecimals.set(wallet, d),
+      // the received token's decimals, for W's buy record (src/positions.ts recordPoolBuy), and kept for the session: read
+      // on both RPCs with the amount, so a sell of it asks no decimals read (card sell-first-read-waits-out-a-throttle)
+      outDecimals: (wallet, d, mint) => {
+        boughtDecimals.set(wallet, d);
+        PAGE_TOKEN_DECIMALS.keep("solana", mint, d);
+      },
       // minSlots: the not_landed verdict's slots (pool-buy.ts pastAt), every read at or past them
       settle: async (noteId, minSlots) => {
         // the stop's signal of this call, taken before its first wait: a sign out during the seed read stops it

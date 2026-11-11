@@ -39,6 +39,7 @@ export const IN_PROCESS = [
   viaRead("signpage-error-after-timeout", () => import("../live-checks/signpage-error-after-timeout.mjs")),
   viaRead("sol-buy-rent-back", () => import("../live-checks/sol-buy-rent-back.mjs")),
   viaRead("pool-read-down", () => import("../live-checks/pool-read-down.mjs")),
+  viaRead("sell-first-read-waits-out-a-throttle", () => import("../live-checks/sell-first-read-waits-out-a-throttle.mjs")),
   viaRead("evm-pool-sync-wide-pages", () => import("../live-checks/evm-pool-sync-wide-pages.mjs")),
   viaRead("wallet-near-prepay-taken", () => import("../live-checks/wallet-near-prepay-taken.mjs")),
   viaRead("held-deposit-way-out", () => import("../live-checks/held-deposit-way-out.mjs")),

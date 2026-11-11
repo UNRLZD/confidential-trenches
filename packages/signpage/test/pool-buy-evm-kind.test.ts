@@ -396,8 +396,17 @@ test("host: decimals reads the token on both RPCs, and two answers that differ t
   assert.equal(b.calls.length, 1);
   assert.equal(a.calls[0]![0], "eth_call");
   assert.deepEqual(a.calls[0], b.calls[0]);
+  // kept for the session (card sell-first-read-waits-out-a-throttle, src/pool-kinds.ts): another run reads it no more
+  const again = counted("0x" + w32(18n));
+  assert.equal(await evmBuyHost("base", PIN, [again.rpc, again.rpc], new Set(), page().p).decimals(TOKEN), 6);
+  assert.equal(again.calls.length, 0);
+  // another token, two answers that differ: thrown, and nothing kept
+  const other = "0x" + "00".repeat(19) + "07";
   const c = counted("0x" + w32(18n));
-  await assert.rejects(evmBuyHost("base", PIN, [counted("0x" + w32(6n)).rpc, c.rpc], new Set(), page().p).decimals(TOKEN));
+  const d = counted("0x" + w32(6n));
+  await assert.rejects(evmBuyHost("base", PIN, [d.rpc, c.rpc], new Set(), page().p).decimals(other));
+  await assert.rejects(evmBuyHost("base", PIN, [d.rpc, c.rpc], new Set(), page().p).decimals(other));
+  assert.equal(c.calls.length, 2, "read again");
 });
 
 test("host: claimed is the page's very set", () => {
