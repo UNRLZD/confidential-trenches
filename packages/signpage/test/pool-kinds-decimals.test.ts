@@ -3,8 +3,10 @@
 // came back HTTP 429 four times inside the page client's own retry (kit send.ts SOLANA_RPC_RETRY, 3.5 s), the buy's
 // settle having sent it about 40 reads, and the sell's first read answered down at once (src/pool-kinds.ts). Here:
 //   (a) a decimals read that fails past the page's retry on one provider, then answers: the sell goes on, never down;
-//   (b) one that fails for good: down only after the bound (POOL_SELL_THROTTLE_WAITS waits on the wallet's one rule,
-//       throttleWaitMs), the failing provider asked once per wait and never again at once;
+//   (b) one that fails for good: down only after the bound (the page's one rule, src/read-waits.ts readWaits: the
+//       wallet's throttleWaitMs from 1 s, doubling, to 10 s, 30 s in all), the failing provider asked once per wait and
+//       never again at once; any other error is down at once (card start-reads-wait-out-a-throttle, review of 49efdb0c);
+//   (f) a sign out ends the wait, and the sell asked before it never runs (the same review);
 //   (c) a token's decimals kept for the session: a second sell, and a sell after a buy's own read, ask no decimals read;
 //   (d) two providers that disagree are still refused, and nothing of theirs is kept;
 //   (e) the same on Base and Robinhood.
@@ -80,7 +82,7 @@ for (const [chain, token, ok, decimals] of CHAINS)
     });
   }
 
-test("(a) a Retry-After longer than the pause is the wait (the pause doubles from it), held to POOL_SELL_THROTTLE_MAX_MS", async () => {
+test("(a) a Retry-After longer than the pause is the wait (the pause doubles from it), held to 10 s", async () => {
   const p = pair(mint(6), 0, 2, 4_500);
   const s = deps(p.pair);
   assert.deepEqual(await settle(poolKinds(s.deps)["pool.sell"](SELL("solana", SOL_TOKEN), ctx)), { error: "busy" });
@@ -97,26 +99,69 @@ for (const [chain, token, ok] of CHAINS)
     const s = deps(p.pair);
     const k = poolKinds(s.deps);
     assert.deepEqual(await settle(k["pool.sell"](SELL(chain, token), ctx)), { error: "down" });
-    // POOL_SELL_THROTTLE_WAITS (3) waits, each on throttleWaitMs; the failing provider asked once at first and once after
-    // each wait, never twice at once; the provider that answered asked once
-    assert.deepEqual(s.waits, [1_000, 2_000, 4_000]);
-    assert.deepEqual(p.asks, [4, 1]);
+    // the rule's waits (doubling to 10 s, 30 s in all), each on throttleWaitMs; the failing provider asked once at first
+    // and once after each wait, never twice at once; the provider that answered asked once
+    assert.deepEqual(s.waits, [1_000, 2_000, 4_000, 8_000, 10_000]);
+    assert.deepEqual(p.asks, [6, 1]);
     assert.equal(s.flows.length, 0, "nothing ran, nothing signed");
     // nothing was kept: the same request again reads again
     assert.deepEqual(await settle(k["pool.sell"](SELL(chain, token), ctx)), { error: "down" });
-    assert.deepEqual(p.asks, [8, 2]);
+    assert.deepEqual(p.asks, [12, 2]);
   });
 
-test("(b) any failed read waits the same, a 5xx or a plain throw alike; both providers failing count as one round", async () => {
+test("(b) a 5xx past the page's retry waits as a 429 does; both providers failing count as one round", async () => {
   let n = 0;
   const failing: PoolRpc = async () => {
     n++;
-    throw new Error("HTTP 503");
+    throw new SolanaRpcTransportError("http_5xx", "HTTP 503", 4, "sepolia.base.org", null);
   };
   const s = deps([failing, failing]);
   assert.deepEqual(await settle(poolKinds(s.deps)["pool.sell"](SELL("base", EVM_TOKEN), ctx)), { error: "down" });
-  assert.deepEqual(s.waits, [1_000, 2_000, 4_000]);
-  assert.equal(n, 8, "both asked once a round, four rounds");
+  assert.deepEqual(s.waits, [1_000, 2_000, 4_000, 8_000, 10_000]);
+  assert.equal(n, 12, "both asked once a round, six rounds");
+});
+
+test("(b) any error but a provider's fault (a revert, a TypeError, a plain throw) is down at once: no wait, no second ask", async () => {
+  for (const e of [new Error("execution reverted"), new TypeError("x is not a function"), new Error("HTTP 503")]) {
+    let n = 0;
+    const failing: PoolRpc = async () => {
+      n++;
+      throw e;
+    };
+    const s = deps([failing, failing]);
+    assert.deepEqual(await settle(poolKinds(s.deps)["pool.sell"](SELL("base", EVM_TOKEN), ctx)), { error: "down" }, e.message);
+    assert.deepEqual(s.waits, [], e.message);
+    assert.equal(n, 2, e.message);
+    // one provider's fault beside another's plain error: the plain error answers, no wait
+    const t = deps([async () => Promise.reject(throttle()), failing]);
+    assert.deepEqual(await settle(poolKinds(t.deps)["pool.sell"](SELL("base", EVM_TOKEN), ctx)), { error: "down" });
+    assert.deepEqual(t.waits, []);
+  }
+});
+
+test("(f) a sign out during the decimals wait ends it at once, and the sell asked before it never runs (also when the wait ends and a new sign in follows)", async () => {
+  for (const how of ["held", "ends"] as const)
+    for (const [chain, token, ok] of CHAINS) {
+      const p = pair(ok, 0, 1);
+      const s = deps(p.pair);
+      let out = new AbortController();
+      const d: PoolKindsDeps = {
+        ...s.deps,
+        stop: () => out.signal,
+        // the sign out comes during the wait; "held": the wait never ends by itself; "ends": it ends, and a new session
+        // (sign in) has its own signal by then
+        wait: (ms) => {
+          s.waits.push(ms);
+          out.abort();
+          out = new AbortController();
+          return how === "held" ? new Promise<void>(() => {}) : Promise.resolve();
+        },
+      };
+      const a = await Promise.race([settle(poolKinds(d)["pool.sell"](SELL(chain, token), ctx)), new Promise<"held">((r) => setTimeout(() => r("held"), 5_000))]);
+      assert.deepEqual(a, { error: "failed" }, `${how} ${chain}`);
+      assert.deepEqual(s.waits, [1_000]);
+      assert.equal(s.flows.length, 0, `${how} ${chain}: the flow never ran`);
+    }
 });
 
 for (const [chain, token, ok, decimals] of CHAINS)

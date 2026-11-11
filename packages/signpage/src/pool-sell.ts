@@ -73,6 +73,7 @@ import type { BuyWallet } from "../../wallet/src/pool/buy-wallets.ts";
 import { solanaPoolOf, solanaTreeSync, type SolanaPoolPin, type SolanaTreeSync } from "../../wallet/src/pool/solana.ts";
 import { WALLET_SEED_LOCK } from "@blindfill/wallet/store";
 import { blockhashOf, pastOnBoth, readBack, readBackFailure, readBackMeta, type BuyMints } from "./pool-buy.ts";
+import { keptReads, readWaits, solanaStableReads, waitsOn, waitUnless } from "./read-waits.ts";
 import { fromRecord, timedStore, TRADE_STORE_MS, tradeLock, type TradeStore } from "./trade.ts";
 import { checkSolanaSell, checkSolanaSweep, checkSolanaTeardownFrames, PoolRuleRefused, poolUnits, signSolana, SOLANA_POOL_MIN_DEPOSIT, SOLANA_POOL_SELL_RESERVE_MAX, SOLANA_SWEEP_OWED_MAX, solanaDepositRents, solanaSellAfterFull, solanaSweepFloor, solanaSweepKeep, type PoolAsk, type SolanaDepositHeld } from "./rules/pool.ts";
 // the full sell's keep is priced by the sell's rule too (rules/pool.ts checkSolanaSell, review L1 of 38faee89)
@@ -124,6 +125,8 @@ export type PoolSellHost = {
   /** A sign out was asked (pool-testnet.ts signingOut): no sale signs from then on (review P3-5 of 77055f4e); each is
    *  refused "failed" right before its signature, so a sale already sent stands and none after it starts. */
   stopped?(): boolean;
+  /** The session's sign out: it ends a wait before a sale's next attempt (read-waits.ts waitUnless). */
+  signal?: AbortSignal;
 };
 
 /** One wallet's sale in a sell (card pool-sell-share-across-wallets): W's address, the token's base units it sells (a
@@ -505,16 +508,15 @@ async function goneOnBoth(rpcs: Rpcs, signature: string, last: number): Promise<
 
 /** What a sell leaves to run after its answer: the rent back, after a full sell filled; or the sell built again, its
  *  deposit having met a page another deposit filled first. */
-type Later = { back?: (locks: Locks | null) => Promise<unknown>; rebuild?: true; last?: boolean; throttle?: number | null };
+type Later = { back?: (locks: Locks | null) => Promise<unknown>; rebuild?: true; last?: boolean; fault?: unknown };
 
-/** A provider's rate limit before any signature (review of the 5-wallet devnet run): a read that drew one, past the
- *  page's own retry (kit send.ts SolanaRpcTransportError, HTTP 429 or a throttle code), makes the step it failed (the
- *  plan, or one wallet's sale from its first read) again after the provider's Retry-After, at least POOL_SELL_WAIT_MS
- *  and at most POOL_SELL_THROTTLE_MAX_MS, this many times; then "down", nothing signed. A new quote is read each time. */
-export const POOL_SELL_THROTTLE_WAITS = 3;
-export const POOL_SELL_THROTTLE_MAX_MS = 10_000;
-const throttled = (e: unknown): e is SolanaRpcTransportError => e instanceof SolanaRpcTransportError && (e.fault === "http_429" || e.fault === "rpc_throttled");
-const throttleWait = (afterMs: number | null): number => Math.min(Math.max(afterMs ?? 0, POOL_SELL_WAIT_MS), POOL_SELL_THROTTLE_MAX_MS);
+// A provider read that still fails past the page's own retry before any signature (kit send.ts SolanaRpcTransportError:
+// a 429, a 5xx, a throttle code, no answer in time) makes the step it failed (the plan, or one wallet's sale from its
+// first read) again after a wait on the page's one rule (read-waits.ts readWaits: from 1 s, doubling, at most 10 s, a
+// Retry-After honoured to 10 s), until the waits would pass READ_WAIT_TOTAL_MS; then "down", nothing signed (card
+// start-reads-wait-out-a-throttle: the app's devnet run 6 met three flat 1 s waits that never outlasted the provider's
+// window). Each attempt reads its quote, venue and blockhash again; the Rent sysvar and the mint are kept per provider
+// across the attempts of one sell (keptReads), so a provider that answered them is not asked again.
 
 /** One W's rent back owed: W, its l and j (W again from the seed), the mints it traded, and its passes so far; `seen`,
  *  what W read as (heldSeen) when its last pass ended on W's own state (under the floor, holding, an account kept), so
@@ -579,16 +581,21 @@ export const buyMints = (store: () => Promise<Pick<TradeStore, "get" | "update">
 /** One W's sale, built again (POOL_SELL_REBUILDS at most) while its deposit meets a page another deposit filled first. */
 async function sellRuns(h: PoolSellHost, ask: PoolAsk, later: Later, w: BuyWallet): Promise<LegAnswer> {
   const wait = h.wait ?? ((ms: number) => new Promise<void>((res) => setTimeout(res, ms)));
-  for (let i = 0, waits = 0; ; ) {
+  const waits = readWaits();
+  for (let i = 0; ; ) {
     delete later.rebuild;
-    delete later.throttle;
+    delete later.fault;
     later.last = i >= POOL_SELL_REBUILDS;
     const a = await sellRun(h, ask, later, w);
-    // a provider's rate limit before W signed: the sale again from its first read, after the provider's wait
-    if ("error" in a && later.throttle !== undefined && waits < POOL_SELL_THROTTLE_WAITS && !h.stopped?.()) {
-      await wait(throttleWait(later.throttle));
-      waits++;
-      continue;
+    // a provider read that failed before W signed: the sale again from its first read, after the rule's wait
+    if ("error" in a && "fault" in later && !h.stopped?.()) {
+      const ms = waits.next(later.fault);
+      if (ms !== null) {
+        await waitUnless(wait, ms, h.signal);
+        // a sign out during the wait: the sale never starts again (nothing signed)
+        if (h.stopped?.() || h.signal?.aborted) return { error: "failed" };
+        continue;
+      }
     }
     if (!later.rebuild || i >= POOL_SELL_REBUILDS) return a;
     i++;
@@ -699,21 +706,27 @@ export function stageOfLegs(legs: readonly Pick<PoolSellLeg, "stage" | "error">[
  * side by side. A leg that fails ends alone: nothing is retried, the others' results stand, and the answer names every
  * leg. One leg's refusal before it signed, with no other leg, is the sell's own refusal, as before.
  */
-async function sellAll(h: PoolSellHost, ask: PoolAsk, laters: Later[], hooks: LegHooks = {}): Promise<PoolSellAnswer> {
+async function sellAll(host: PoolSellHost, ask: PoolAsk, laters: Later[], hooks: LegHooks = {}): Promise<PoolSellAnswer> {
   let plan: PoolSellPlan;
+  // the sell's reads that cannot change while it waits, kept per provider across its attempts (read-waits.ts)
+  const h: PoolSellHost = Object.assign(Object.create(host) as PoolSellHost, { rpcs: keptReads(host.rpcs, solanaStableReads(ask.token)) });
   const wait = h.wait ?? ((ms: number) => new Promise<void>((res) => setTimeout(res, ms)));
-  for (let waits = 0; ; waits++) {
+  const waits = readWaits();
+  for (;;) {
     try {
       plan = await planPoolSell(h, ask);
       break;
     } catch (e) {
       if (e instanceof Refused) return { error: e.code };
-      // a provider's rate limit: the plan read again after its wait (POOL_SELL_THROTTLE_WAITS), then "down"
-      if (throttled(e) && waits < POOL_SELL_THROTTLE_WAITS && !h.stopped?.()) {
-        await wait(throttleWait(e.afterMs));
+      // a provider read that failed: the plan read again after the rule's wait, then "down"; a sign out during the
+      // wait ends it, nothing run
+      if (waitsOn(e)) {
+        const ms = h.stopped?.() ? null : waits.next(e);
+        if (ms === null) return { error: "down" };
+        await waitUnless(wait, ms, h.signal);
+        if (h.stopped?.() || h.signal?.aborted) return { error: "failed" };
         continue;
       }
-      if (e instanceof SolanaRpcTransportError) return { error: "down" };
       return { error: "failed" };
     }
   }
@@ -1021,7 +1034,7 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later, w: BuyWallet
     if (e instanceof PoolRuleRefused) return { error: "quote_check_failed" };
     // a provider read that still fails after the page's own retry, before W signs: "not now" (card pool-read-down)
     if (!signing && e instanceof SolanaRpcTransportError) {
-      if (throttled(e)) later.throttle = e.afterMs;
+      later.fault = e;
       return { error: "down" };
     }
     return { error: "failed" };
