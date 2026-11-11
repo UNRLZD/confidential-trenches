@@ -227,7 +227,10 @@ const { WALLET_SEED_LOCK } = await import("@blindfill/wallet/store");
 const stages = [];
 const once = async (kind, params) => {
   if (kind === "pool.buy") tapAt = performance.now();
-  const r = kinds[kind](params, { ...ctx(kind), progress: (s) => (stages.push({ kind, stage: s }), kind === "pool.buy" && mark(`progress ${s}`, performance.now(), 0), log(`${kind} progress ${JSON.stringify(s)}`)) });
+  // the buy's route facts are timed too (card pool-buy-filled-2s): its "out", the amount W received at confirmed on both
+  // RPCs, is the app's Filled; the stage filled is its Final
+  const route = (x) => kind === "pool.buy" && mark(`route ${Object.keys(x).join(",")}`, performance.now(), 0);
+  const r = kinds[kind](params, { ...ctx(kind), route, progress: (s) => (stages.push({ kind, stage: s }), kind === "pool.buy" && mark(`progress ${s}`, performance.now(), 0), log(`${kind} progress ${JSON.stringify(s)}`)) });
   if ("error" in r) return { answer: r };
   await r.after;
   const answer = r.answer();

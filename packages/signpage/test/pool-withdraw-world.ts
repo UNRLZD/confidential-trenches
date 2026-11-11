@@ -77,6 +77,14 @@ export type Plant = {
   history?: (sigs: string[], p: 0 | 1) => string[];
   /** the helper answers this well-formed signature, not the release's own; the release lands under its own all the same */
   helperSig?: string;
+  /** the slot getTransaction names for a release (FINAL_SLOT when not given) */
+  txSlot?: number;
+  /** RPC p's finalized slot at its i-th getSlot (FINAL_SLOT when not given) */
+  finalizedSlot?: (p: 0 | 1, i: number) => number;
+  /** the helper's send fails (HTTP 502): no signature to read back, the run goes to the not-landed reads */
+  helper502?: boolean;
+  /** both RPCs' finalized block height (1,000, past every blockhash, when not given) */
+  finalHeight?: number;
 };
 /** Both RPCs' finalized slot in the world. */
 export const FINAL_SLOT = 20;
@@ -91,6 +99,7 @@ export async function world(values: readonly bigint[], plant: Plant = {}) {
   const state: bigint[] = [];
   const labels: bigint[] = [];
   const ids: string[] = [];
+  const slotReads = [0, 0];
   for (const value of values) {
     const planned = await ns.planDeposit(SCOPE, (r) => noteSecrets(SEED64, r).precommitment);
     const inc = await ns.move(planned.id, "PLANNED", "INCOMING", { send: { signature: base58.encode(new Uint8Array(64).fill(9 + ids.length)), value, last_valid_block_height: 1_000n } });
@@ -157,15 +166,15 @@ export async function world(values: readonly bigint[], plant: Plant = {}) {
       }
       if (method === "getLatestBlockhash") return { context: { slot: 12 }, value: { blockhash: BLOCKHASH, lastValidBlockHeight: 100 } };
       if (method === "isBlockhashValid") return { value: true };
-      if (method === "getBlockHeight") return (params[0] as { commitment: string }).commitment === "confirmed" ? 0 : 1_000;
+      if (method === "getBlockHeight") return (params[0] as { commitment: string }).commitment === "confirmed" ? 0 : (plant.finalHeight ?? 1_000);
       // the not_landed verdict's read (pool-buy.ts pastAt): the finalized bank's height and its slot
-      if (method === "getEpochInfo") return { blockHeight: 1_000, absoluteSlot: FINAL_SLOT, epoch: 1, slotIndex: 0, slotsInEpoch: 432_000 };
+      if (method === "getEpochInfo") return { blockHeight: plant.finalHeight ?? 1_000, absoluteSlot: FINAL_SLOT, epoch: 1, slotIndex: 0, slotsInEpoch: 432_000 };
       if (method === "getFeeForMessage") {
         const m = base64.decode(params[0] as string);
         fees.push(m);
         return { context: { slot: 12 }, value: Number(plant.feeFor?.(m) ?? W_FEE) };
       }
-      if (method === "getSlot") return FINAL_SLOT;
+      if (method === "getSlot") return plant.finalizedSlot?.(p, slotReads[p]!++) ?? FINAL_SLOT;
       if (method === "getBalance") {
         const min = (params[1] as { minContextSlot?: number } | undefined)?.minContextSlot;
         if (plant.stale && (min === undefined || min < FINAL_SLOT)) return { context: { slot: 12 }, value: 0 };
@@ -199,7 +208,7 @@ export async function world(values: readonly bigint[], plant: Plant = {}) {
       if (method === "getTransaction") {
         const sig = params[0] as string;
         const rel = landed.get(sig);
-        if (rel) return { transaction: [base64.encode(rel), "base64"], meta: { err: failed.has(sig) ? { InstructionError: [1, { Custom: 6 }] } : null } };
+        if (rel) return { slot: plant.txSlot ?? FINAL_SLOT, transaction: [base64.encode(rel), "base64"], meta: { err: failed.has(sig) ? { InstructionError: [1, { Custom: 6 }] } : null } };
         const on = onwards.get(sig);
         if (on) return { transaction: [base64.encode(on), "base64"], meta: { err: null } };
         const last = releases.at(-1);
@@ -208,7 +217,7 @@ export async function world(values: readonly bigint[], plant: Plant = {}) {
         if (sig !== SIG || (plant.readBack ?? "ours") === "none" || !last) return null;
         const tx = last.slice();
         tx.set(base58.decode(SIG), 1);
-        return { transaction: [base64.encode(tx), "base64"], meta: { err: spentByOther ? { InstructionError: [1, { Custom: 6 }] } : null } };
+        return { slot: plant.txSlot ?? FINAL_SLOT, transaction: [base64.encode(tx), "base64"], meta: { err: spentByOther ? { InstructionError: [1, { Custom: 6 }] } : null } };
       }
       throw new Error(`unexpected ${method}`);
     }) as SolanaRpc;
@@ -225,6 +234,7 @@ export async function world(values: readonly bigint[], plant: Plant = {}) {
     send: async (_pool, tx) => {
       order.push(`send:${(await ns.list()).filter((n) => n.state === "RESERVED").length}`);
       releases.push(tx.slice());
+      if (plant.helper502) throw new Error("pool send: HTTP 502");
       if (plant.landed !== false && (plant.readBack ?? "ours") === "ours") {
         const m = keysOf(tx);
         const ix = m.instructions.at(-1)!;

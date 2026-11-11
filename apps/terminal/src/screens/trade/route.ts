@@ -9,6 +9,11 @@
 //   proves it: the app has no earlier event for it;
 // - `sent`: the buy's one-time wallet signed and the transaction went out (the kit's `sent`, with its tx);
 // - `filled`: the transaction read back on chain as the buy (the kit's `filled`); the pool and the token check on it.
+// - `out` (card pool-buy-filled-2s): a pool buy's amount W received, which the page tells only once both RPCs read this
+//   very transaction at confirmed with no error, the same amount on both and at least the min out: the buy is Filled, so
+//   the pool and the token check on it (and the take and the send before it), the strip done at the kit's `filled`
+//   (Final). A run that then ends not known (the page's progress "sent") puts the pool back to waiting; one that ends
+//   with no fill fails the pool step (fromProgress).
 // - data: the buy's wallet, the quote's venue and pool address, the filled amount: the signing page's route events for
 //   the buy's id (the kit's BuyRoute, card signpage-buy-route-events), through TradeKit.route (fromBuyRoute). A page of
 //   an earlier release sends none: a step checks and its value stays empty, never made up. The route's `tx` (card
@@ -71,7 +76,13 @@ export function routeEvent(r: Route, ev: RouteEvent): Route {
   // its value on the strip of its own id, done or failed; it checks nothing
   if (ev.t === "wallet") return { ...r, wallet: ev.address };
   if (ev.t === "route") return { ...r, venue: ev.venue, pool: ev.pool };
-  if (ev.t === "out") return { ...r, out: ev.amount };
+  if (ev.t === "out") {
+    if (r.k !== "running") return { ...r, out: ev.amount };
+    let n = r;
+    if (n.st[0] === "active") n = routeEvent(n, { t: "taken", id: ev.id });
+    if (n.st[1] === "active") n = routeEvent(n, { t: "sent", id: ev.id });
+    return n.st[2] === "active" ? { ...n, out: ev.amount, st: set(set(n.st, 2, "done"), 3, "done"), links: link(n.links, 2) } : { ...n, out: ev.amount };
+  }
   // the transaction the answer named stays; the route's names it when the answer came too late to be read
   if (ev.t === "tx") return r.tx ? r : { ...r, tx: ev.tx };
   if (r.k !== "running") return r;
@@ -84,12 +95,29 @@ export function routeEvent(r: Route, ev: RouteEvent): Route {
       if (r.st[1] === "active") return { ...r, st: set(set(r.st, 1, "done"), 2, "active"), links: link(r.links, 1), tx: ev.tx ?? r.tx };
       return ev.tx && !r.tx ? { ...r, tx: ev.tx } : r;
     case "filled":
+      if (filledOnly(r)) return { ...r, k: "done" };
       return r.st[2] === "active" ? { ...r, k: "done", st: set(set(r.st, 2, "done"), 3, "done"), links: link(r.links, 2) } : r;
     case "fail": {
+      if (filledOnly(r)) return { ...unfill(r), k: "failed", st: set(unfill(r).st, 2, "error") };
       const i = r.st.indexOf("active");
       return i < 0 ? r : { ...r, k: "failed", st: set(r.st, i, "error") };
     }
   }
+}
+
+/** Filled by the route's amount out, not Final yet: every step checked, the strip still running. */
+const filledOnly = (r: Route): boolean => r.k === "running" && r.st[3] === "done";
+/** The pool waiting again, the token not reached: the strip as it was before the amount out. */
+const unfill = (r: Route): Route => ({ ...r, st: set(set(r.st, 2, "active"), 3, "off"), links: [r.links[0], r.links[1], false] });
+
+/**
+ * The kit's progress event for the buy: its stage, except that a run the page ends not known (its final progress
+ * "sent", pool-buy.ts poolBuyKind) after the amount out puts the strip back to the pool waiting, as the button goes
+ * back to Landing (model.ts progress). The request's answer "sent" is the early one and never does (fromOutcome).
+ */
+export function fromProgress(r: Route, id: string, stage: Stage | "refused"): Route {
+  if (stage === "sent" && r.id === id && filledOnly(r)) return unfill(r);
+  return fromStage(r, id, stage);
 }
 
 /**

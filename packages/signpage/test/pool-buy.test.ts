@@ -20,6 +20,8 @@ import type { ReadyProof } from "../../wallet/src/pool/pool.ts";
 import { solanaContextOf, solanaPoolOf, type SolanaReleaseRequest } from "../../wallet/src/pool/solana.ts";
 import { ALT, BLOCKHASH, FEE_PAYER, POOL, PROGRAM, fx, rent, replay, setup, unhex } from "../../kit/test/solana-pool-buy-fx.ts";
 import { POOL_BLOCKHASH_LIFE_MS, POOL_BUY_READS, POOL_BUY_SETTLE_MS, PoolSendBusy, poolBuyKind, readBack, runPoolBuy, solanaProofBytes, type PoolBuyHost } from "../src/pool-buy.ts";
+import * as poolBuy from "../src/pool-buy.ts";
+import { SolanaRpcTransportError } from "../../kit/src/trade/solana/send.ts";
 import type { PoolAsk } from "../src/rules/pool.ts";
 import { SIGNPAGE_KIT_VERSION, type TxRef } from "../../kit/src/signpage/messages.ts";
 import { pairDown } from "./outage.ts";
@@ -71,12 +73,12 @@ const page = (root: bigint): Uint8Array => {
   for (let i = 0; i < SIZE; i++) d.set(b32(i === SIZE - 1 ? root : 1000n + BigInt(i)), 16 + i * 72 + 32);
   return d;
 };
-const poolAccount = (): Uint8Array => {
+const poolAccount = (size = SIZE): Uint8Array => {
   const d = new Uint8Array(2179);
   d.set(new TextEncoder().encode("bfpool01"));
   const v = new DataView(d.buffer);
-  v.setBigUint64(49, BigInt(SIZE), true);
-  v.setBigUint64(49 + 8 + 1 + 33 * 32, BigInt(SIZE), true);
+  v.setBigUint64(49, BigInt(size), true);
+  v.setBigUint64(49 + 8 + 1 + 33 * 32, BigInt(size), true);
   return d;
 };
 
@@ -104,6 +106,8 @@ type Plant = {
   tableNotForVenue?: boolean;
   /** the slot of the device's blockhash read, past the quote's */
   slotAhead?: number;
+  /** RPC 0's getLatestBlockhash answers in turn (the slot past the quote's, the blockhash); past the list, the last */
+  blockhashReads?: readonly { slotAhead: number; blockhash: string }[];
   /** provider B's curve account changed at one byte: "reserves" (the top byte of its virtual SOL reserves: far past
    *  the kit's 2% read tolerance) or "creator" (a static byte, the creator's key) */
   venueOff?: "reserves" | "creator";
@@ -154,7 +158,21 @@ type Plant = {
   finalSlot?: (p: 0 | 1) => number;
   /** the spend's slot: a settle not held to a slot at or past it on both RPCs answers from before it ("unspent") */
   spendSlot?: number;
+  /** RPC 1's getTransaction names no slot for the buy's transaction */
+  noTxSlotOn1?: boolean;
+  /** RPC 1's getTransaction names this slot for the buy's transaction (TX_SLOT when not given) */
+  txSlotOn1?: number;
+  /** both trees this many pages past the one that holds the proof's roots (page 0): each newer page holds neither */
+  pagesBack?: number;
+  /** RPC 1 reads the device's blockhash as not valid */
+  blockhashInvalid?: boolean;
+  /** RPC 1's pool account always a leaf short on the state tree (not a slot apart: another tree) */
+  sizeSkewAlways?: boolean;
+  /** RPC p's finalized slot at its i-th getSlot (500 when not given; the buy's transaction lands at TX_SLOT) */
+  finalizedSlot?: (p: 0 | 1, i: number) => number;
 };
+/** The slot the buy's transaction lands at, as getTransaction names it. */
+const TX_SLOT = 400;
 const OTHER_TABLE = base58.encode(new Uint8Array(32).fill(8));
 /** The fixture's table address (solana-pool-buy-fx.ts setup). */
 const s0 = { tableAddr: base58.encode(new Uint8Array(32).fill(9)) };
@@ -196,19 +214,23 @@ async function world(plant: Plant = {}, proof = readyProof()): Promise<World> {
   // the queue's ready proof for the note now: the last list's (a remake swaps it in place, the note HELD)
   const current = readies.at(-1)![0] ?? proof;
   let skewed = false;
+  let bhReads = 0;
   let settles = 0;
   const settleSlots: (number[] | null)[] = [];
   const heightReads = [0, 0];
   const txReads = [0, 0];
+  const slotReads = [0, 0];
   const accounts = (p: 0 | 1): Record<string, { owner: string; data: Uint8Array }> => ({
     [s.tableAddr]: { owner: ALT, data: plant.tableNotForVenue ? s.tableData.filter((_, i) => i < 56 || Math.floor((i - 56) / 32) !== s.addresses.indexOf(SOLANA_PUMP_PROGRAM)) : s.tableData },
     [OTHER_TABLE]: { owner: ALT, data: s.tableData },
     ...Object.fromEntries(Object.entries(plant.extraTables ?? {}).map(([a, f]) => [a, { owner: ALT, data: Uint8Array.from([...s.tableData.subarray(0, 56), ...f(s.addresses).flatMap((k) => [...base58.decode(k)])]) }])),
-    [POOL]: { owner: PROGRAM, data: poolAccount() },
+    [POOL]: { owner: PROGRAM, data: poolAccount((plant.pagesBack ?? 0) * 1024 + SIZE) },
+    ...Object.fromEntries(Array.from({ length: plant.pagesBack ?? 0 }, (_, k) => ([0, 1] as const).map((tree) => [solanaPoolPage(PROGRAM, tree, (k + 1) * 1024), { owner: PROGRAM, data: page(999n) }])).flat()),
     [solanaPoolPage(PROGRAM, 0, 0)]: { owner: PROGRAM, data: page(plant.rootOnOne && p === 1 ? 77n : STATE_ROOT) },
     [solanaPoolPage(PROGRAM, 1, 0)]: { owner: PROGRAM, data: page(LABEL_ROOT) },
     [fx.rent.account]: { owner: fx.rent.answers[p].owner, data: base64.decode(fx.rent.answers[p].data) },
   });
+  const txSlot = (p: 0 | 1): number | undefined => (p === 1 ? (plant.noTxSlotOn1 ? undefined : plant.txSlotOn1 ?? TX_SLOT) : TX_SLOT);
   const rpc = (p: 0 | 1): SolanaRpc => {
     const venue = replay(fx[coin], p, plant.venueOff && p === 1 ? (list, ans) => {
       const k = list.indexOf(s.venue.kind === "pump-curve" ? s.venue.curve : "");
@@ -223,7 +245,7 @@ async function world(plant: Plant = {}, proof = readyProof()): Promise<World> {
       const finalized = (params[1] as { commitment?: string } | undefined)?.commitment === "finalized";
       // the own-spend reads at finalized (pool-withdraw.ts spendOwner) are logged apart from the read-back's
       log.push(method === "getTransaction" && finalized ? `${p}:getTransaction:finalized` : `${p}:${method}`);
-      if (method === "getSlot") return 500;
+      if (method === "getSlot") return plant.finalizedSlot?.(p, slotReads[p]!++) ?? 500;
       // the chain at finalized: this device's buy once the settle found its spend, or another device's buy
       const ours = st === "SPENT" && !plant.otherSpent && sent !== null;
       const listed = plant.otherSpent && sent !== null && (plant.otherListed?.(p) ?? true);
@@ -250,7 +272,7 @@ async function world(plant: Plant = {}, proof = readyProof()): Promise<World> {
         // a read that never answers: nothing (no timer either) keeps the process waiting on it
         if (off === "hang") return new Promise<never>(() => {});
         const a = !a0 || off === null ? a0 : off === "gone" ? undefined : off === "owner" ? { owner: PROGRAM, data: a0.data } : { owner: a0.owner, data: Uint8Array.from(a0.data, (x, i) => (i === a0.data.length - 1 ? x ^ 1 : x)) };
-        if (plant.sizeSkewOnce && p === 1 && params[0] === POOL && !skewed) {
+        if ((plant.sizeSkewOnce || plant.sizeSkewAlways) && p === 1 && params[0] === POOL && (!skewed || plant.sizeSkewAlways)) {
           skewed = true;
           const d = poolAccount();
           new DataView(d.buffer).setBigUint64(49, BigInt(SIZE - 1), true);
@@ -258,8 +280,12 @@ async function world(plant: Plant = {}, proof = readyProof()): Promise<World> {
         }
         return { context: { slot: s.ref.slot! + 2 }, value: a ? { owner: a.owner, lamports: 1, data: [base64.encode(a.data), "base64"] } : null };
       }
+      if (method === "getLatestBlockhash" && plant.blockhashReads) {
+        const b = plant.blockhashReads[Math.min(bhReads++, plant.blockhashReads.length - 1)]!;
+        return { context: { slot: s.ref.slot! + b.slotAhead }, value: { blockhash: b.blockhash, lastValidBlockHeight: 100 } };
+      }
       if (method === "getLatestBlockhash") return { context: { slot: s.ref.slot! + (plant.slotAhead ?? 2) }, value: { blockhash: BLOCKHASH, lastValidBlockHeight: 100 } };
-      if (method === "isBlockhashValid") return { value: true };
+      if (method === "isBlockhashValid") return { value: !plant.blockhashInvalid };
       if (method === "getBlockHeight") {
         // confirmed: RPC 1's height beside the blockhash, so the last height is max(100, 0 + 151) = 151
         if ((params[0] as { commitment: string }).commitment === "confirmed") return 0;
@@ -276,13 +302,14 @@ async function world(plant: Plant = {}, proof = readyProof()): Promise<World> {
         const tx = sent.slice();
         tx.set(base58.decode(SIG), 1);
         if (how === "other" || (how === "lieOne" && p === 1)) tx[tx.length - 1]! ^= 1;
-        if (how === "metaJunk") return { transaction: [base64.encode(tx), "base64"], meta: "x" };
+        if (how === "metaJunk") return { slot: txSlot(p), transaction: [base64.encode(tx), "base64"], meta: "x" };
         const err = how === "failed" ? { InstructionError: [2, { Custom: 6 }] } : null;
-        if (!plant.received) return { transaction: [base64.encode(tx), "base64"], meta: { err } };
+        if (!plant.received) return { slot: txSlot(p), transaction: [base64.encode(tx), "base64"], meta: { err } };
         const dp = plant.decimals ?? 6;
         const bal = (owner: string, mint: string, amount: bigint) => ({ accountIndex: 3, mint, owner, programId: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb", uiTokenAmount: { amount: amount.toString(), decimals: dp, uiAmount: Number(amount) / 10 ** dp, uiAmountString: String(Number(amount) / 10 ** dp) } });
         const other = base58.encode(new Uint8Array(32).fill(3));
         return {
+          slot: txSlot(p),
           transaction: [base64.encode(tx), "base64"],
           meta: {
             err,
@@ -625,7 +652,12 @@ test("fold 1 (4): the device's slot read is last before signing: no RPC read bet
   const bh = w.log.indexOf("0:getLatestBlockhash");
   const take = w.log.indexOf("take:note-1");
   const between = w.log.slice(bh + 1, take);
-  assert.deepEqual(between.filter((x) => /^[01]:/.test(x) && x !== "1:isBlockhashValid" && x !== "1:getBlockHeight"), [], between.join(" "));
+  // card pool-buy-filled-2s: the venue's read goes out in the slot read's own round, its call a tick behind (the kit
+  // starts it in a microtask): one per RPC, the venue's accounts (the mint first); no other read starts after the slot's
+  const venue = between.filter((x) => x.endsWith(":getMultipleAccounts"));
+  assert.deepEqual(venue, ["0:getMultipleAccounts", "1:getMultipleAccounts"], between.join(" "));
+  assert.equal(w.multi.at(-1)![0], fx.pump.mint, "the last accounts read is the venue's");
+  assert.deepEqual(between.filter((x) => /^[01]:/.test(x) && x !== "1:isBlockhashValid" && x !== "1:getBlockHeight" && !x.endsWith(":getMultipleAccounts")), [], between.join(" "));
   assert.ok(w.log.indexOf("seed") > bh, "W is derived after the slot read");
   // a proof whose l, j derive another W than it names: refused before W signs, nothing taken
   const x = await world({}, readyProof({ j: 1 }));
@@ -1085,6 +1117,26 @@ test("dropped tx: not_landed reaches progress", async () => {
   assert.deepEqual(stages, ["not_landed"], "the stage reaches the app as progress, whatever its client waited");
 });
 
+// Review of 418af7d5 (P3-2): a run that ends with an error after its early answer "sent" (the transaction went out, its
+// end not known) posts "sent" as its final progress, so the app's Filled not yet Final ends (Landing again, as for any
+// buy whose end is not known) instead of staying Filled for good; before its answer an error is the answer itself.
+test("review of 418af7d5: a run that throws after its early answer posts sent as its final progress", async () => {
+  const w = await world();
+  const locks = { request: (_n: string, _o: unknown, f: () => Promise<void>) => f() } as unknown as Pick<LockManager, "request">;
+  const stages: string[] = [];
+  // the page's clock throws once the read-back read the transaction on both RPCs (an unplanned fault past the answer)
+  const now = w.host.now;
+  const host = { ...w.host, now: () => {
+    if (w.log.filter((x) => /^[01]:getTransaction/.test(x)).length >= 2) throw new Error("a fault after the answer");
+    return now ? now() : BigInt(Date.now());
+  } };
+  const r = poolBuyKind(() => host, locks)(ASK, { id: "r1", sha: "00", progress: (s: string) => void stages.push(s) } as never) as { running: true; after: Promise<void>; answer: () => unknown };
+  await r.after;
+  assert.deepEqual(r.answer(), { result: { stage: "sent", txs: [{ chain: "solana", hash: SIG }] } });
+  await new Promise((res) => setTimeout(res, 50));
+  assert.deepEqual(stages, ["sent"], "the run's end reaches the app");
+});
+
 test("the kind, the helper answering a well-formed signature that is not this transaction's: the app's answer never names it", async () => {
   const w = await world({ helperSig: NOT_OURS });
   const locks = { request: (_n: string, _o: unknown, f: () => Promise<void>) => f() } as unknown as Pick<LockManager, "request">;
@@ -1199,7 +1251,13 @@ test("each ending's time: not_landed at the first read past the blockhash (and o
   const always = await run({ helper: "502", settleThrows: () => true });
   assert.deepEqual(always.a, { stage: "sent", txs: [] });
   assert.ok(always.ms <= POOL_BUY_SETTLE_MS, `${always.ms} ms`);
-  assert.equal(always.ms, 119_000);
+  // card pool-buy-filled-2s: a settle that throws is asked again after a wait that doubles to 8 s, so the run reaches
+  // its bound in under twenty settles (120 at a fixed second before), never past it
+  assert.equal(always.ms, POOL_BUY_SETTLE_MS);
+  const settles = await world({ helper: "502", settleThrows: () => true });
+  settles.host.now = () => BigInt(1_000 + settles.waits.reduce((s, x) => s + x, 0));
+  await runPoolBuy({ ...settles.host, reads: POOL_BUY_READS }, ASK);
+  assert.ok(settles.log.filter((x) => x === "settle:note-1").length < 20, settles.waits.join(","));
 });
 
 // Card sol-settle-failed-is-not-unspent: "past" is a finalized height above the blockhash's last valid one (151 here:
@@ -1211,4 +1269,322 @@ test("past is a finalized height above the blockhash's last valid one: at the la
   const above = await world({ helper: "502", landsAtSettle: "never", finalHeight: () => 152 });
   assert.deepEqual(await runPoolBuy(above.host, ASK), { stage: "not_landed", txs: [] });
   assert.deepEqual(above.settleSlots, [[500, 500]]);
+});
+
+// Card pool-buy-filled-2s: the checks' reads go out in rounds by their inputs alone. A round is every call made before
+// any of them is answered; the gate holds each call until the round is let go, so the count is the run's own, never a
+// clock's.
+/** The read-back's pace: a slot (~400 ms), pool-buy.ts POOL_BUY_POLL_MS. */
+const POOL_BUY_POLL_MS = 400;
+async function roundsToSend(w: World): Promise<{ rounds: string[][]; answer: unknown }> {
+  const held: { go: () => void; name: string }[] = [];
+  const gate = (p: 0 | 1, rpc: SolanaRpc): SolanaRpc => (async (method: string, params: readonly unknown[]) => {
+    await new Promise<void>((go) => held.push({ go, name: `${p}:${method}` }));
+    return rpc(method, params);
+  }) as SolanaRpc;
+  w.host.rpcs = [gate(0, w.host.rpcs[0]), gate(1, w.host.rpcs[1])];
+  const rounds: string[][] = [];
+  let done = false;
+  let answer: unknown;
+  const run = runPoolBuy(w.host, ASK).then((a) => ((done = true), (answer = a)));
+  while (!done && !w.log.includes("send")) {
+    for (let i = 0; i < 20; i++) await new Promise((r) => setImmediate(r));
+    if (held.length === 0) continue;
+    const now = held.splice(0);
+    rounds.push(now.map((x) => x.name));
+    now.forEach((x) => x.go());
+  }
+  // past the send the gate stays open
+  w.host.rpcs = w.host.rpcs;
+  const drain = setInterval(() => held.splice(0).forEach((x) => x.go()), 0);
+  await run;
+  clearInterval(drain);
+  return { rounds, answer };
+}
+
+test("card pool-buy-filled-2s: the checks' reads go out in three rounds by their inputs (8 serial rounds before), every read on both RPCs as before", async () => {
+  const w = await world();
+  const { rounds, answer } = await roundsToSend(w);
+  assert.equal((answer as { stage?: string }).stage, "filled");
+  const before = rounds.slice(0, rounds.findIndex((r) => r.includes("0:getTransaction")));
+  assert.deepEqual(before.map((r) => [...r].sort()), [
+    // the rent, the pinned table, the pool account and the reference: each needs only the pin and the ask
+    ["0:getAccountInfo", "0:getAccountInfo", "0:getAccountInfo", "0:getMultipleAccounts", "0:getMultipleAccounts", "1:getAccountInfo", "1:getAccountInfo", "1:getAccountInfo", "1:getMultipleAccounts", "1:getMultipleAccounts"],
+    // the two root pages (the sizes name them), the venue (the reference names it), then the device's blockhash and slot
+    ["0:getAccountInfo", "0:getAccountInfo", "0:getLatestBlockhash", "0:getMultipleAccounts", "1:getAccountInfo", "1:getAccountInfo", "1:getMultipleAccounts"],
+    // the blockhash on RPC 1, which needs RPC 0's
+    ["1:getBlockHeight", "1:isBlockhashValid"],
+  ]);
+});
+
+test("card pool-buy-filled-2s: the read-back polls at the slot's pace, never a fixed second", async () => {
+  const w = await world({ metaJunkReads: 2 });
+  assert.equal((await runPoolBuy(w.host, ASK) as { stage?: string }).stage, "filled");
+  assert.ok(w.waits.length >= 2, w.waits.join(","));
+  assert.ok(w.waits.every((ms) => ms === POOL_BUY_POLL_MS), w.waits.join(","));
+  assert.equal((poolBuy as Record<string, unknown>).POOL_BUY_POLL_MS, POOL_BUY_POLL_MS);
+});
+
+test("card pool-buy-filled-2s: no settle before both RPCs' finalized slot reaches the transaction's slot; then one, held to those slots", async () => {
+  // RPC 1's finalized slot trails: below the transaction's slot for its first three reads
+  const w = await world({ finalizedSlot: (p, i) => (p === 1 && i < 3 ? TX_SLOT - 10 : TX_SLOT + 5) });
+  assert.equal((await runPoolBuy({ ...w.host, reads: 10 }, ASK) as { stage?: string }).stage, "filled");
+  assert.equal(w.log.filter((x) => x === "settle:note-1").length, 1, w.log.join(","));
+  assert.deepEqual(w.settleSlots, [[TX_SLOT + 5, TX_SLOT + 5]]);
+  const firstSettle = w.log.indexOf("settle:note-1");
+  assert.equal(w.log.slice(0, firstSettle).filter((x) => x === "1:getSlot").length, 4, "three reads below, the fourth at or past it");
+});
+
+test("card pool-buy-filled-2s: a settle that throws is asked again only after a wait that doubles from the slot's pace", async () => {
+  const w = await world({ settleThrows: (n) => n <= 3 });
+  assert.equal((await runPoolBuy({ ...w.host, reads: 10 }, ASK) as { stage?: string }).stage, "filled");
+  assert.equal(w.log.filter((x) => x === "settle:note-1").length, 4);
+  assert.deepEqual(w.waits, [2 * POOL_BUY_POLL_MS, 4 * POOL_BUY_POLL_MS, 8 * POOL_BUY_POLL_MS]);
+});
+
+test("card pool-buy-filled-2s: a provider answering 429 for 30 s is asked again at a doubling wait (its Retry-After honoured), not at the slot's pace", async () => {
+  const w = await world();
+  let t = 0;
+  const calls = { tx: 0 };
+  const inner = w.host.rpcs[1];
+  w.host.rpcs = [w.host.rpcs[0], (async (method: string, params: readonly unknown[]) => {
+    if (method === "getTransaction" && t < 30_000) {
+      calls.tx++;
+      throw new SolanaRpcTransportError("http_429", "HTTP 429", 3, "rpc1", calls.tx === 3 ? 5_000 : null);
+    }
+    return inner(method, params);
+  }) as SolanaRpc];
+  const a = await runPoolBuy({ ...w.host, reads: POOL_BUY_READS, now: () => BigInt(t), wait: async (ms) => void ((t += ms), w.waits.push(ms)) }, ASK) as { stage?: string };
+  assert.equal(a.stage, "filled");
+  // 400, 800, then the provider's 5 s, then 6.4 s and the 8 s cap: under ten calls in 30 s, where a fixed 400 ms is 75
+  assert.ok(calls.tx <= 8, `${calls.tx} calls in 30 s`);
+  assert.ok(w.waits.includes(5_000), w.waits.join(","));
+  assert.ok(w.waits.every((ms) => ms <= 8_000), w.waits.join(","));
+});
+
+test("card pool-buy-filled-2s: the device's blockhash not valid on RPC 1 is refused before anything is claimed, taken or sent", async () => {
+  const w = await world({ blockhashInvalid: true });
+  assert.deepEqual(await runPoolBuy(w.host, ASK), { error: "failed" });
+  nothingMoved(w);
+});
+
+test("card pool-buy-filled-2s: two RPCs on two state tree sizes after the read again are refused: nothing claimed, taken or sent", async () => {
+  const w = await world({ sizeSkewAlways: true });
+  assert.deepEqual(await runPoolBuy(w.host, ASK), { error: "failed" });
+  nothingMoved(w);
+});
+
+test("card pool-buy-filled-2s: the finality wait reads both RPCs' slot, then waits the gap: 32 slots behind, at most 4 getSlot a provider before the settle, asked within a second of both reaching it", async () => {
+  const w = await world();
+  let t = 0;
+  const behind = 32;
+  // each RPC's finalized slot, a slot every 400 ms of the run's clock from 32 behind the transaction's at the send
+  let sentAt: number | null = null;
+  const slotsBefore = [0, 0];
+  let settledAt: number | null = null;
+  const inner = w.host.rpcs;
+  const at = (p: 0 | 1): SolanaRpc => (async (method: string, params: readonly unknown[]) => {
+    if (method === "getSlot" && sentAt !== null && settledAt === null) {
+      slotsBefore[p]!++;
+      return TX_SLOT - behind + Math.floor((t - sentAt) / 400);
+    }
+    return inner[p](method, params);
+  }) as SolanaRpc;
+  const host: PoolBuyHost = { ...w.host, rpcs: [at(0), at(1)], reads: POOL_BUY_READS, now: () => BigInt(t), wait: async (ms) => void (t += ms),
+    send: async (pool, tx) => ((sentAt = t), w.host.send(pool, tx)),
+    settle: async (id, m) => ((settledAt ??= t), w.host.settle(id, m)) };
+  assert.equal((await runPoolBuy(host, ASK) as { stage?: string }).stage, "filled");
+  assert.ok(slotsBefore.every((n) => n <= 4), `getSlot calls before the settle: ${slotsBefore.join(", ")}`);
+  const reached = sentAt! + behind * 400;
+  assert.ok(settledAt! >= reached && settledAt! - reached <= 1_000, `the settle at ${settledAt! - sentAt!} ms, both reached at ${reached - sentAt!} ms`);
+});
+
+test("card pool-buy-filled-2s: an RPC that names no slot for the transaction is held to the other's: the settle is asked once, when both finalized slots reach it", async () => {
+  // the spend at the transaction's slot: a settle held to a slot below it on either RPC answers unspent (nothing
+  // written, the note RESERVED). RPC 1 names no slot; its finalized slot is 390 at first, then 410; RPC 0's is 405
+  const w = await world({ noTxSlotOn1: true, spendSlot: TX_SLOT, finalizedSlot: (p, i) => (p === 0 ? TX_SLOT + 5 : i < 1 ? TX_SLOT - 10 : TX_SLOT + 10) });
+  assert.equal((await runPoolBuy({ ...w.host, reads: 10 }, ASK) as { stage?: string }).stage, "filled");
+  assert.deepEqual(w.settleSlots, [[TX_SLOT + 5, TX_SLOT + 10]], "no early settle: RPC 1's gate is RPC 0's slot of the transaction");
+});
+
+// Review of 1caf0b17 (card pool-buy-filled-2s). A fake clock for the run: `after(ms, f)` answers f() ms on from now, and
+// the clock moves to each answer's time as it lands, earliest first (every other read answers at once, at now), so a
+// read held on one RPC holds only what waits on it. `t()` is the clock; the host's now and wait run on it.
+function timeline() {
+  let t = 0;
+  const q: { at: number; n: number; go: () => void }[] = [];
+  let n = 0;
+  let pumping = false;
+  const step = (): void => {
+    if (q.length === 0) return void (pumping = false);
+    q.sort((a, b) => a.at - b.at || a.n - b.n);
+    const x = q.shift()!;
+    t = Math.max(t, x.at);
+    x.go();
+    setImmediate(step);
+  };
+  const after = <T,>(ms: number, f: () => Promise<T>): Promise<T> =>
+    ms <= 0 ? f() : new Promise<T>((ok, ko) => {
+      q.push({ at: t + ms, n: n++, go: () => void f().then(ok, ko) });
+      if (!pumping) (pumping = true), setImmediate(step);
+    });
+  return { t: () => t, after };
+}
+const GATE_MAX_MS = 30_000; // POOL_BUY_GATE_MAX_MS (a local copy, so the run before it loads)
+const SLOT_STALE_MS = 1_000; // POOL_BUY_SLOT_STALE_MS
+const SLOT_MS = 400;
+/** The host on the fake clock, each RPC read held `delay(p, method, params)` ms; the times of the device's slot reads
+ *  (getLatestBlockhash answered), of W's seed read, of each settle and of RPC 1's read-backs. */
+function clocked(w: World, delay: (p: 0 | 1, method: string, params: readonly unknown[]) => number = () => 0) {
+  const c = timeline();
+  const at = { slot: [] as number[], seed: [] as number[], settle: [] as number[], landed: [] as number[] };
+  const inner = w.host.rpcs;
+  const rpc = (p: 0 | 1): SolanaRpc => (async (method: string, params: readonly unknown[]) => {
+    const x = await c.after(delay(p, method, params), () => inner[p](method, params));
+    if (method === "getLatestBlockhash") at.slot.push(c.t());
+    if (method === "getTransaction" && p === 1 && x) at.landed.push(c.t());
+    return x;
+  }) as SolanaRpc;
+  const host: PoolBuyHost = {
+    ...w.host, rpcs: [rpc(0), rpc(1)], reads: POOL_BUY_READS, now: () => BigInt(c.t()),
+    wait: (ms) => (w.waits.push(ms), c.after(ms, async () => {})),
+    seed64: () => (at.seed.push(c.t()), w.host.seed64()),
+    settle: (id, m) => (at.settle.push(c.t()), w.host.settle(id, m)),
+  };
+  return { host, at, t: c.t };
+}
+/** The time W's seed was read after the slot read it signs on: what the quote's age check did not count. */
+const uncounted = (at: { slot: number[]; seed: number[] }): number => at.seed[0]! - at.slot.filter((x) => x <= at.seed[0]!).at(-1)!;
+const isPage = (params: readonly unknown[]): boolean => Array.from({ length: 8 }, (_, k) => ([0, 1] as const).map((tree) => solanaPoolPage(PROGRAM, tree, k * 1024))).flat().includes(params[0] as string);
+
+test("review P2 of 1caf0b17: a root 4 pages back with RPC 1 holding each page read 9 slots: the slot is read again after the pages, so W signs within a second of the slot it is checked on", async () => {
+  const w = await world({ pagesBack: 4 });
+  const c = clocked(w, (p, m, params) => (p === 1 && m === "getAccountInfo" && isPage(params) ? 9 * SLOT_MS : 0));
+  assert.equal((await runPoolBuy(c.host, ASK) as { stage?: string }).stage, "filled");
+  assert.equal(c.at.slot.length, 2, "the blockhash and slot read again");
+  assert.ok(uncounted(c.at) <= SLOT_STALE_MS, `W signed ${uncounted(c.at)} ms after its slot read (${Math.round(uncounted(c.at) / SLOT_MS)} slots)`);
+});
+
+test("review P2 of 1caf0b17: RPC 1 holding the venue's read 9 slots: the slot is read again after it, so W signs within a second of the slot it is checked on", async () => {
+  const w = await world();
+  const c = clocked(w, (p, m, params) => (p === 1 && m === "getMultipleAccounts" && (params[0] as string[])[0] === fx.pump.mint ? 9 * SLOT_MS : 0));
+  assert.equal((await runPoolBuy(c.host, ASK) as { stage?: string }).stage, "filled");
+  assert.equal(c.at.slot.length, 2, "the blockhash and slot read again");
+  assert.ok(uncounted(c.at) <= SLOT_STALE_MS, `W signed ${uncounted(c.at)} ms after its slot read`);
+});
+
+// Review of 418af7d5 (P3-1): the read again is the one the buy is checked and built on. The fixture answered the same
+// slot and blockhash both times, so a check that kept the first slot, or a transaction built on the first blockhash,
+// passed; here the second read answers another of each.
+const OTHER_BLOCKHASH = base58.encode(new Uint8Array(32).fill(9));
+const holdVenue = (p: 0 | 1, m: string, params: readonly unknown[]): number => (p === 1 && m === "getMultipleAccounts" && (params[0] as string[])[0] === fx.pump.mint ? 9 * SLOT_MS : 0);
+test("review of 418af7d5: the slot read again 30 slots past the quote's is the one checked: quote_check_failed, nothing taken or sent", async () => {
+  const w = await world({ blockhashReads: [{ slotAhead: 2, blockhash: BLOCKHASH }, { slotAhead: 30, blockhash: BLOCKHASH }] });
+  const c = clocked(w, holdVenue);
+  assert.deepEqual(await runPoolBuy(c.host, ASK), { error: "quote_check_failed" });
+  assert.equal(c.at.slot.length, 2, "the blockhash and slot read again");
+  assert.equal(w.state(), "HELD");
+  assert.ok(!w.log.includes("send") && !w.log.some((x) => x.startsWith("take")));
+  assert.equal(w.sends.length, 0);
+});
+
+test("review of 418af7d5: the blockhash read again is the one W signs: the sent transaction carries the second", async () => {
+  const w = await world({ blockhashReads: [{ slotAhead: 2, blockhash: BLOCKHASH }, { slotAhead: 2, blockhash: OTHER_BLOCKHASH }] });
+  assert.notEqual(OTHER_BLOCKHASH, BLOCKHASH);
+  const c = clocked(w, holdVenue);
+  assert.equal((await runPoolBuy(c.host, ASK) as { stage?: string }).stage, "filled");
+  assert.equal(c.at.slot.length, 2, "the blockhash and slot read again");
+  assert.equal(solanaDecodeMessage(w.sentTx()!.subarray(129)).blockhash, OTHER_BLOCKHASH);
+});
+
+test("review P2 of 1caf0b17: a round that ends within a second of the slot read reads it once (three rounds), however slow the reads before it", async () => {
+  const w = await world({ pagesBack: 1 });
+  // the first round (rent, tables, pool account, reference) slow, the pages and the venue at once
+  const c = clocked(w, (_p, m, params) => (m === "getAccountInfo" && !isPage(params) ? 5 * SLOT_MS : 0));
+  assert.equal((await runPoolBuy(c.host, ASK) as { stage?: string }).stage, "filled");
+  assert.equal(c.at.slot.length, 1);
+  assert.equal(w.log.filter((x) => x === "0:getLatestBlockhash").length, 1);
+});
+
+test("fold 1 (4), two pages: past the device's slot read, before the take, only RPC 1's blockhash reads, the venue's, and the root pages past the first", async () => {
+  const w = await world({ pagesBack: 1 });
+  const c = clocked(w);
+  assert.equal((await runPoolBuy(c.host, ASK) as { stage?: string }).stage, "filled");
+  const bh = w.log.indexOf("0:getLatestBlockhash");
+  const between = w.log.slice(bh + 1, w.log.indexOf("take:note-1"));
+  assert.deepEqual(between.filter((x) => x.endsWith(":getMultipleAccounts")), ["0:getMultipleAccounts", "1:getMultipleAccounts"], between.join(" "));
+  // the second page of each tree (page 0, after page 1 found neither root) on each RPC
+  assert.deepEqual(between.filter((x) => x.endsWith(":getAccountInfo")).sort(), ["0:getAccountInfo", "0:getAccountInfo", "1:getAccountInfo", "1:getAccountInfo"], between.join(" "));
+  assert.deepEqual(between.filter((x) => /^[01]:/.test(x) && !["1:isBlockhashValid", "1:getBlockHeight"].includes(x) && !/:get(MultipleAccounts|AccountInfo)$/.test(x)), [], between.join(" "));
+  assert.ok(uncounted(c.at) <= SLOT_STALE_MS);
+});
+
+test("review P3a of 1caf0b17: one RPC's word for the transaction's slot (2^53 - 1) holds the settle at most POOL_BUY_GATE_MAX_MS from the land; its own reads decide: filled", async () => {
+  const w = await world({ txSlotOn1: Number.MAX_SAFE_INTEGER, finalizedSlot: () => TX_SLOT + 5 });
+  const c = clocked(w);
+  assert.deepEqual(await runPoolBuy(c.host, ASK), { stage: "filled", txs: [{ chain: "solana", hash: SIG }] });
+  assert.equal((poolBuy as Record<string, unknown>).POOL_BUY_GATE_MAX_MS, GATE_MAX_MS);
+  const held = c.at.settle[0]! - c.at.landed[0]!;
+  assert.ok(held >= GATE_MAX_MS && held <= GATE_MAX_MS + SLOT_MS, `the settle ${held} ms after the land`);
+  const before = w.log.slice(0, w.log.indexOf("settle:note-1"));
+  assert.ok(before.filter((x) => x === "1:getSlot").length <= 6, `${before.filter((x) => x === "1:getSlot").length} getSlot on RPC 1 before it`);
+});
+
+test("review P3b of 1caf0b17: past the gate, a settle that finds no spend is asked again at a doubling wait: under 20 in the run's 120 s", async () => {
+  const w = await world({ finalizedSlot: () => TX_SLOT + 5, spendSlot: TX_SLOT + 1_000 });
+  const c = clocked(w);
+  assert.deepEqual(await runPoolBuy(c.host, ASK), { stage: "sent", txs: [{ chain: "solana", hash: SIG }] });
+  assert.ok(c.at.settle.length < 20, `${c.at.settle.length} settles`);
+  assert.ok(c.t() <= POOL_BUY_SETTLE_MS + 1_000, `${c.t()} ms`);
+});
+
+test("review P3c of 1caf0b17: a finalized-slot read that goes through puts the wait back to the slot's pace after a throttle", async () => {
+  const w = await world({ finalizedSlot: (_p, i) => (i < 2 ? TX_SLOT - 1 : TX_SLOT + 5) });
+  let throttles = 0;
+  const inner = w.host.rpcs[1];
+  w.host.rpcs = [w.host.rpcs[0], (async (m: string, q: readonly unknown[]) => {
+    if (m === "getSlot" && throttles < 3) throw (throttles++, new SolanaRpcTransportError("http_429", "HTTP 429", 3, "rpc1", null));
+    return inner(m, q);
+  }) as SolanaRpc];
+  assert.equal((await runPoolBuy({ ...w.host, reads: 20 }, ASK) as { stage?: string }).stage, "filled");
+  // three throttles (800, 1,600, 3,200), then RPC 1 a slot short on two reads that went through: the slot's time each,
+  // not 3,200
+  assert.deepEqual(w.waits, [800, 1_600, 3_200, SLOT_MS, SLOT_MS], w.waits.join(","));
+});
+
+test("review P3d of 1caf0b17: a finalized-slot read that fails asks no settle that round", async () => {
+  let fails = 0;
+  const w = await world();
+  const inner = w.host.rpcs[1];
+  w.host.rpcs = [w.host.rpcs[0], (async (m: string, q: readonly unknown[]) => {
+    if (m === "getSlot" && fails < 2) throw (fails++, new Error("rpc1: socket hang up"));
+    return inner(m, q);
+  }) as SolanaRpc];
+  assert.equal((await runPoolBuy({ ...w.host, reads: 10 }, ASK) as { stage?: string }).stage, "filled");
+  assert.equal(w.log.filter((x) => x === "settle:note-1").length, 1);
+  assert.equal(w.log.slice(0, w.log.indexOf("settle:note-1")).filter((x) => x === "0:getSlot").length, 3, "the settle only on the third round, the first whose read went through");
+});
+
+test("review P3d of 1caf0b17: a Retry-After past POOL_BUY_RETRY_AFTER_MAX_MS (60 s) waits 10 s, never the provider's word", async () => {
+  const w = await world();
+  let once = false;
+  const inner = w.host.rpcs[1];
+  w.host.rpcs = [w.host.rpcs[0], (async (m: string, q: readonly unknown[]) => {
+    if (m === "getTransaction" && !once) throw ((once = true), new SolanaRpcTransportError("http_429", "HTTP 429", 3, "rpc1", 60_000));
+    return inner(m, q);
+  }) as SolanaRpc];
+  assert.equal((await runPoolBuy({ ...w.host, reads: 10 }, ASK) as { stage?: string }).stage, "filled");
+  assert.deepEqual(w.waits, [10_000]);
+});
+
+test("review P3e of 1caf0b17: a Retry-After that is no number (NaN) never becomes the wait: the doubling wait instead", async () => {
+  const w = await world();
+  let once = false;
+  const inner = w.host.rpcs[1];
+  w.host.rpcs = [w.host.rpcs[0], (async (m: string, q: readonly unknown[]) => {
+    if (m === "getTransaction" && !once) throw ((once = true), new SolanaRpcTransportError("http_429", "HTTP 429", 3, "rpc1", Number.NaN));
+    return inner(m, q);
+  }) as SolanaRpc];
+  assert.equal((await runPoolBuy({ ...w.host, reads: 10 }, ASK) as { stage?: string }).stage, "filled");
+  assert.deepEqual(w.waits, [800]);
 });
