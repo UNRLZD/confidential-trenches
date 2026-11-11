@@ -53,7 +53,8 @@ import { base58, base64 } from "@scure/base";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { SOLANA_POOL_SPENT_MARK_LEN, vaultLabelOf, type SolanaRpc } from "@blindfill/kit";
 import { CHAINS, type Chain, freshWallet, type SecondId } from "../derive/index.ts";
-import { RESTORE_GAP, RESTORE_LANES, type SeedUse, walkLane, withSeed } from "../notes/restore.ts";
+import { masters } from "../derive/index.ts";
+import { laneOf, type LaneWalk, RESTORE_GAP, RESTORE_LANES, type SeedUse, walkLane, walkLaneYielding, withSeed } from "../notes/restore.ts";
 import { noteCommitment, noteSecrets, type NoteRef } from "../notes/secrets.ts";
 import { refKey, type Leaf, type NoteRecord, type NoteStore } from "../notes/store.ts";
 import { checkSolanaRpcs, type SolanaLagWait, solanaFinalTimes, solanaLagRetry, solanaPda, solanaPoolOf, solanaTreeSync, type SolanaTreeSync } from "./solana.ts";
@@ -338,6 +339,9 @@ export type SolanaRestoreArgs = {
   marks: SolanaMarks;
   /** tests only: RESTORE_GAP unless given */
   gap?: number;
+  /** The 8 lanes already walked (walkLaneYielding, by the async restore below); walked here with walkLane when not given.
+   *  Each index a lane names is checked against noteSecrets, so a walk handed in that is wrong stops the restore. */
+  lanes?: readonly LaneWalk[];
 };
 
 export function solanaRestore(a: SolanaRestoreArgs): { notes: SolanaRestoredNote[]; spends: SolanaRestoredSpend[] } {
@@ -377,7 +381,7 @@ export function solanaRestore(a: SolanaRestoreArgs): { notes: SolanaRestoredNote
   };
 
   for (let lane = 0; lane < RESTORE_LANES; lane++)
-    for (const i of walkLane(seed64, scope, lane, (P) => markOf(P) !== undefined, a.gap ?? RESTORE_GAP).found)
+    for (const i of (a.lanes ? laneOf(a.lanes, lane) : walkLane(seed64, scope, lane, (P) => markOf(P) !== undefined, a.gap ?? RESTORE_GAP)).found)
       if (!asDeposit({ kind: "deposit", s: scope, i })) throw new Error(`deposit index ${i}: the walk's precommitment is not the note's`);
 
   for (let k = 0; k < notes.length; k++) {
@@ -522,7 +526,12 @@ export async function solanaRestoreNotes(a: {
         // each RPC's own pages hold exactly the marks' leaves, and the counters run with no hole (header; review P1-1): a
         // mark the lister hides, plus one RPC's page a leaf short, is refused on every device alike
         solanaMarkCounts(marks, leaves.counts);
-        return withSeed(a.seed64, (seed64) => solanaRestore({ seed64, program: a.program, scope, stateLeaves: leaves.state, labelLeaves: leaves.label, marks, ...(a.gap === undefined ? {} : { gap: a.gap }) }));
+        // the walk off the seed, yielding as it goes (walkLaneYielding: never one stretch on the page's thread, ended by
+        // the signal), from the deposit masters of one short use of the seed; then the restore on those lanes
+        const m = await withSeed(a.seed64, (seed64) => masters(seed64, "deposit"));
+        const lanes: LaneWalk[] = [];
+        for (let lane = 0; lane < RESTORE_LANES; lane++) lanes.push(await walkLaneYielding(m, scope, lane, (P) => marks.pre.has(solanaMarkOf(a.program, "pre", P)), a.gap ?? RESTORE_GAP, null, a.signal));
+        return withSeed(a.seed64, (seed64) => solanaRestore({ seed64, program: a.program, scope, stateLeaves: leaves.state, labelLeaves: leaves.label, marks, lanes, ...(a.gap === undefined ? {} : { gap: a.gap }) }));
       }
       marks = again;
     }

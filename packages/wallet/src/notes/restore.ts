@@ -215,6 +215,49 @@ export function walkLane(seed64: Uint8Array, scope: bigint, lane: number, has: (
  * masters and never the seed (../restore/walk.ts).
  */
 export function walkLaneOf(m: { nullifier: bigint; secret: bigint }, scope: bigint, lane: number, has: (precommitment: bigint) => boolean, gap: number = RESTORE_GAP, reach: number | null = null): LaneWalk {
+  const steps = walkSteps(m, scope, lane, has, gap, reach);
+  for (let r = steps.next(); ; r = steps.next()) if (r.done) return r.value;
+}
+
+/** Lane `lane` of 8 walks handed in: each a LaneWalk of its own lane, or the restore stops. */
+export function laneOf(lanes: readonly LaneWalk[], lane: number): LaneWalk {
+  if (lanes.length !== RESTORE_LANES) throw new Error(`lanes: ${lanes.length} walks, not ${RESTORE_LANES}`);
+  const w = lanes[lane]!;
+  if (!w.found.every((i) => Number.isSafeInteger(i) && i % RESTORE_LANES === lane)) throw new Error(`lane ${lane}: an index of another lane`);
+  return w;
+}
+
+/** The longest stretch, in ms, a yielding walk runs before it gives the event loop a turn. */
+export const WALK_SLICE_MS = 8;
+// one turn of the event loop: a message on a channel of its own (never a timer, which browsers hold to 4 ms once nested)
+const turn = (): Promise<void> =>
+  new Promise((ok) => {
+    const c = new MessageChannel();
+    c.port1.onmessage = () => (c.port1.close(), c.port2.close(), ok());
+    c.port2.postMessage(null);
+  });
+
+/**
+ * walkLaneOf as a page runs it: the same walk, giving the event loop a turn every WALK_SLICE_MS of work and checking
+ * `signal` at each, so the lane's RESTORE_GAP indices never hold the page (a sign out, another tab's, a frame's message
+ * and the screen all run between slices) and a signal that ends stops it at the next slice with its reason, no index
+ * after (card restore-first-sign-in-under-two-minutes: release 114's walk held the main thread 15 to 70 s).
+ */
+export async function walkLaneYielding(m: { nullifier: bigint; secret: bigint }, scope: bigint, lane: number, has: (precommitment: bigint) => boolean, gap: number = RESTORE_GAP, reach: number | null = null, signal?: AbortSignal): Promise<LaneWalk> {
+  signal?.throwIfAborted();
+  const steps = walkSteps(m, scope, lane, has, gap, reach);
+  let at = performance.now();
+  for (let r = steps.next(); ; r = steps.next()) {
+    if (r.done) return r.value;
+    if (performance.now() - at < WALK_SLICE_MS) continue;
+    await turn();
+    signal?.throwIfAborted();
+    at = performance.now();
+  }
+}
+
+// the walk itself, one index a step: walkLaneOf runs it through, walkLaneYielding a slice at a time
+function* walkSteps(m: { nullifier: bigint; secret: bigint }, scope: bigint, lane: number, has: (precommitment: bigint) => boolean, gap: number, reach: number | null): Generator<void, LaneWalk, void> {
   if (!Number.isInteger(lane) || lane < 0 || lane >= RESTORE_LANES) throw new Error("a lane is 0-7");
   if (!Number.isSafeInteger(gap) || gap < 1) throw new Error("gap is a count above 0");
   if (reach !== null && (!Number.isSafeInteger(reach) || reach < lane || reach > U32 || reach % RESTORE_LANES !== lane)) throw new Error(`reach: not an index of lane ${lane}`);
@@ -234,6 +277,7 @@ export function walkLaneOf(m: { nullifier: bigint; secret: bigint }, scope: bigi
       found.push(i);
       misses = 0;
     } else if (i > floor) misses++;
+    yield;
   }
   return { found, last, lastPrecommitment };
 }

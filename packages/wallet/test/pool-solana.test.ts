@@ -2915,3 +2915,55 @@ test("review P3-2 of e3489b3b: one page read answered at slot 2^53 - 1 (the data
   assert.equal(cache.marks?.slot, 0);
   assert.deepEqual([await settle(), await settle()], ["spent", "spent"]);
 });
+
+// card restore-first-sign-in-under-two-minutes (release 114's live run 42935167402): the walk's 8 lanes of RESTORE_GAP
+// indices, each a precommitment and its mark's address, ran in one synchronous stretch on the page's main thread, so a
+// sign out in another tab reached the frame 30 to 70 s late and the page drew nothing until it ended. The walk yields to
+// the event loop as it goes, and its signal ends it at the next yield: no read and no index after it.
+const stall = () => {
+  let last = performance.now(), most = 0, on = true;
+  const tick = (): void => {
+    const t = performance.now();
+    most = Math.max(most, t - last);
+    last = t;
+    if (on) setTimeout(tick, 1);
+  };
+  setTimeout(tick, 1);
+  return { most: () => most, stop: () => void (on = false) };
+};
+test("the walk never holds the event loop: a restore's 8 lanes of a wide gap leave a timer waiting under 100 ms", async () => {
+  const { chain } = restorePool();
+  const s = stall();
+  const t0 = performance.now();
+  const r = await solanaRestoreNotes({ seed64: SEED, program: PROGRAM, rpcs: pair(chain, chain), gap: 400 });
+  // the tick a long stretch held runs once it ends: read after it
+  await new Promise((ok) => setTimeout(ok, 5));
+  s.stop();
+  assert.equal(r.notes.length, 5, "the same notes as the gap-4 walk");
+  assert.ok(performance.now() - t0 > 150, `the walk is long enough to show a stall (${Math.round(performance.now() - t0)} ms)`);
+  assert.ok(s.most() < 100, `a timer waited ${Math.round(s.most())} ms`);
+});
+test("the walk ends at its signal: aborted mid-walk, the restore rejects with the reason at once and reads nothing after", async () => {
+  const { chain } = restorePool();
+  const log: string[] = [];
+  const rpcs = pair(chain, chain).map((f) => (async (m: string, p: unknown[]) => (log.push(m), f(m, p))) as SolanaRpc) as [SolanaRpc, SolanaRpc];
+  const stop = new AbortController();
+  const why = new Error("signed out");
+  let at = -1, t = 0;
+  const run = solanaRestoreNotes({ seed64: SEED, program: PROGRAM, rpcs, gap: 2_000, signal: stop.signal });
+  // the reads end before the walk: abort once they have, 30 ms into the walk
+  const reads = setInterval(() => {
+    if (log.length > 0 && at === log.length) {
+      clearInterval(reads);
+      setTimeout(() => ((t = performance.now()), stop.abort(why)), 30);
+    }
+    at = log.length;
+  }, 20);
+  await assert.rejects(run, (e) => e === why);
+  clearInterval(reads);
+  assert.ok(t > 0, "aborted during the walk");
+  assert.ok(performance.now() - t < 50, `ended ${Math.round(performance.now() - t)} ms after the abort`);
+  const n = log.length;
+  await new Promise((r) => setTimeout(r, 100));
+  assert.equal(log.length, n, "no read after it");
+});

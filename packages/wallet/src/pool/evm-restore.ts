@@ -52,7 +52,8 @@
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { vaultLabelOf } from "@blindfill/kit";
 import { CHAINS, type Chain, freshWallet, type SecondId } from "../derive/index.ts";
-import { RESTORE_GAP, RESTORE_LANES, type SeedUse, walkLane, withSeed } from "../notes/restore.ts";
+import { masters } from "../derive/index.ts";
+import { laneOf, type LaneWalk, RESTORE_GAP, RESTORE_LANES, type SeedUse, walkLane, walkLaneYielding, withSeed } from "../notes/restore.ts";
 import { noteCommitment, noteSecrets, type NoteRef } from "../notes/secrets.ts";
 import { refKey, type Leaf, type NoteRecord, type NoteStore } from "../notes/store.ts";
 import { solanaSameProvider } from "@blindfill/kit";
@@ -82,6 +83,9 @@ export type EvmRestoreArgs = {
   events: readonly EvmPoolEvent[];
   /** tests only: RESTORE_GAP unless given */
   gap?: number;
+  /** The 8 lanes already walked (walkLaneYielding, by the async restore below); walked here with walkLane when not given.
+   *  Each index a lane names is checked against noteSecrets, so a walk handed in that is wrong stops the restore. */
+  lanes?: readonly LaneWalk[];
 };
 
 type Deposits = { byPre: Map<bigint, { at: number; nonce: bigint }>; byNull: Map<bigint, number> };
@@ -161,7 +165,7 @@ export function evmRestore(a: EvmRestoreArgs): { notes: EvmRestoredNote[]; spend
   };
 
   for (let lane = 0; lane < RESTORE_LANES; lane++)
-    for (const i of walkLane(seed64, scope, lane, (P) => byPre.has(P), a.gap ?? RESTORE_GAP).found)
+    for (const i of (a.lanes ? laneOf(a.lanes, lane) : walkLane(seed64, scope, lane, (P) => byPre.has(P), a.gap ?? RESTORE_GAP)).found)
       if (!asDeposit({ kind: "deposit", s: scope, i })) throw new Error(`deposit index ${i}: the walk's precommitment is not the note's`);
 
   for (let k = 0; k < notes.length; k++) {
@@ -380,7 +384,13 @@ export async function evmRestoreNotes(a: EvmRestoreNotesArgs): Promise<{ notes: 
   // a PLANNED note on a block a reorg can drop, nor writes a note SPENT on a spend that is not final (review P3-4 of
   // 53f5e92f; delta review P3-E: the events cut before the restore, never its notes after)
   const final = r.events.filter((e) => e.block <= r.fin.number);
-  const { notes, spends, elsewhere } = await withSeed(a.seed64, (seed64) => evmRestore({ seed64, scope, events: final, ...(a.gap === undefined ? {} : { gap: a.gap }) }));
+  // the walk off the seed, yielding as it goes (walkLaneYielding: never one stretch on the page's thread, ended by the
+  // signal), from the deposit masters of one short use of the seed; then the restore on those lanes
+  const byPre = indexEvents(final).byPre;
+  const m = await withSeed(a.seed64, (seed64) => masters(seed64, "deposit"));
+  const lanes: LaneWalk[] = [];
+  for (let lane = 0; lane < RESTORE_LANES; lane++) lanes.push(await walkLaneYielding(m, scope, lane, (P) => byPre.has(P), a.gap ?? RESTORE_GAP, null, a.signal));
+  const { notes, spends, elsewhere } = await withSeed(a.seed64, (seed64) => evmRestore({ seed64, scope, events: final, lanes, ...(a.gap === undefined ? {} : { gap: a.gap }) }));
   if (a.wallets === false) return { notes, spends, elsewhere, wallets: [], block: r.anchor.number };
   const order = spends.map((_, k) => k);
   for (let i = order.length - 1; i > 0; i--) {
