@@ -10,7 +10,7 @@ import * as d from "../src/derive/index.ts";
 import { noteCommitment, noteSecrets, type NoteRef } from "../src/notes/secrets.ts";
 import type { NoteRecord } from "../src/notes/store.ts";
 import { NEAR_EPOCH_MS, NEAR_LIFE_MS, USDC_LADDER, nearVaultPool } from "../src/pool/near.ts";
-import { NEWEST_GRACE_MS, NOW_REUSE_MS, TAKE_SLACK_MS, type ChainNow, type Pool, type PoolBindArgs, type PoolTrees, type ReadyProof } from "../src/pool/pool.ts";
+import { chainNow, NEWEST_GRACE_MS, NOW_REUSE_MS, TAKE_SLACK_MS, type ChainNow, type Pool, type PoolBindArgs, type PoolTrees, type ReadyProof } from "../src/pool/pool.ts";
 import { openProofQueue, proofPoolSize, readySetSize, type ProofQueue } from "../src/pool/queue.ts";
 import { poolBalances, type BalancePool } from "../src/pool/balances.ts";
 import {
@@ -1079,12 +1079,16 @@ test("skip: a note the page's withdraw still owes a send for is never proved nor
 });
 
 // Card sol-buy-reads-side-by-side: the take accepts the pool's time read earlier (a buy starts it beside its first
-// reads), as that read's ms plus the device's monotonic time since the read started (performance.now, never the wall
-// clock); past NOW_REUSE_MS, or when the early read failed, it reads the pool's time again. Every check of the take is
-// a "too late" bound (past the previous epoch, past the newest root's grace, under the send margin + slack before the
-// deadline), so a later "now" only refuses more: an estimate that runs ahead of the chain's own block time never lets
-// a take through that a fresh read would refuse.
-const early = (ms: bigint, ago = 0): Promise<ChainNow> => Promise.resolve({ ms, at: performance.now() - ago });
+// reads), as that read's ms plus the time since the read started, the larger of the device's monotonic and wall
+// clock's; past NOW_REUSE_MS on either, or when the early read failed, it reads the pool's time again. Every check of
+// the take is a "too late" bound (past the previous epoch, past the newest root's grace, under the send margin + slack
+// before the deadline), so counting from the read's start only makes "now" later than the read's own ms plus the time
+// since. It is not stricter than a fresh read when the chain's block time runs ahead of the device's clock in between:
+// block time 2 s ahead in 1 s takes a proof 1 s past the edge a fresh read refuses at, and finality catching up 30 s in
+// 2 s one 10 s past it, both inside the 15 s TAKE_SLACK_MS, with the helper and the pool program checking the deadline
+// again on the chain's clock (review of 6b3bd660).
+// `ago` on the monotonic clock, `wallAgo` on the wall clock (the same unless a test moves one)
+const early = (ms: bigint, ago = 0, wallAgo = ago): Promise<ChainNow> => Promise.resolve({ ms, at: performance.now() - ago, wall: Date.now() - wallAgo });
 const counted = (pool: Fake) => {
   let reads = 0;
   const now = pool.now;
@@ -1124,7 +1128,38 @@ test("card sol-buy-reads-side-by-side: an early read past NOW_REUSE_MS, a tab fr
   assert.equal(reads(), 3);
 });
 
-test("card sol-buy-reads-side-by-side: the wall clock set back or forward between the read and the take changes nothing", async () => {
+// review of 6b3bd660 (P3-C): performance.now stops while the device sleeps (macOS, Linux, phones), so the time since
+// the read is the larger of the monotonic and the wall clock's, and the read stands only while both are within
+// NOW_REUSE_MS: a sleep shows on the wall clock, a wall clock set back shows on the monotonic one
+test("card sol-buy-reads-side-by-side: a device asleep 540 s between the read and the take (0.5 s on the monotonic clock): the pool's time is read again", async () => {
+  const v = await vaultWith([usd(5)]);
+  const pool = fakePool(v);
+  const q = queue(v, pool);
+  await q.refresh();
+  const reads = counted(pool);
+  pool.t.now = START + 2n * E; // the chain moved on while the device slept: a fresh read refuses
+  await assert.rejects(q.take(q.ready()[0]!.noteId, undefined, early(START + 2n * E - 540_000n, 500, 540_000)), /before the previous epoch/);
+  assert.equal(reads(), 1);
+});
+
+test("card sol-buy-reads-side-by-side: the wall clock set back 1 h between the read and the take still counts the monotonic time; set forward 1 h, the pool's time is read again", async () => {
+  const v = await vaultWith([usd(5), usd(10)]);
+  const tight = { ...fakePool(v), lifeMs: 2n * E + MARGIN };
+  const q = queue(v, tight);
+  await q.refresh();
+  const [a, b] = q.ready();
+  const reads = counted(tight);
+  const edge = START + tight.lifeMs - MARGIN - TAKE_SLACK_MS; // deadline - now = margin + 15 s: the last ms taken
+  tight.t.now = edge + 1n; // a fresh read refuses, 1 ms past the edge
+  // set back an hour: the wall clock's time since is -1 h, the monotonic 1 s counts and puts it past the edge
+  await assert.rejects(q.take(b!.noteId, undefined, early(edge - 1_000n, 1_000, -3_600_000)), /send margin/);
+  assert.equal(reads(), 0, "the read stands: the monotonic time is within the bound");
+  // set forward an hour: the read does not stand, the fresh read refuses what the estimate would take
+  await assert.rejects(q.take(a!.noteId, undefined, early(edge - 2_000n, 1_000, 3_600_000)), /send margin/);
+  assert.equal(reads(), 1);
+});
+
+test("card sol-buy-reads-side-by-side: a short sleep within NOW_REUSE_MS counts the wall clock's longer time since, not the monotonic's", async () => {
   const v = await vaultWith([usd(5), usd(10)]);
   const tight = { ...fakePool(v), lifeMs: 2n * E + MARGIN };
   const q = queue(v, tight);
@@ -1132,16 +1167,51 @@ test("card sol-buy-reads-side-by-side: the wall clock set back or forward betwee
   const [a, b] = q.ready();
   const reads = counted(tight);
   const edge = START + tight.lifeMs - MARGIN - TAKE_SLACK_MS;
-  const real = Date.now;
+  tight.t.now = edge + 1n;
+  // 0.5 s on the monotonic clock, 3 s on the wall clock (asleep 2.5 s): read 2 s before the edge, the estimate is 1 s past it
+  await assert.rejects(q.take(b!.noteId, undefined, early(edge - 2_000n, 500, 3_000)), /send margin/);
+  // the other way (the wall clock set back 2.5 s): the monotonic 3 s counts
+  await assert.rejects(q.take(a!.noteId, undefined, early(edge - 2_000n, 3_000, 500)), /send margin/);
+  assert.equal(reads(), 0, "both within the bound: no read at the take");
+});
+
+test("card sol-buy-reads-side-by-side: a read whose start is ahead of the device's monotonic clock is not used", async () => {
+  const v = await vaultWith([usd(5)]);
+  const pool = fakePool(v);
+  const q = queue(v, pool);
+  await q.refresh();
+  const reads = counted(pool);
+  pool.t.now = START + 2n * E;
+  await assert.rejects(q.take(q.ready()[0]!.noteId, undefined, early(START, -10_000, 0)), /before the previous epoch/);
+  assert.equal(reads(), 1);
+});
+
+test("card sol-buy-reads-side-by-side: 60 s on the monotonic clock with the wall clock set back 60 s: past NOW_REUSE_MS, the pool's time is read again", async () => {
+  const v = await vaultWith([usd(5)]);
+  const pool = fakePool(v);
+  const q = queue(v, pool);
+  await q.refresh();
+  const reads = counted(pool);
+  pool.t.now = START + 2n * E; // a fresh read refuses; the estimate, START + 60 s, would take it
+  await assert.rejects(q.take(q.ready()[0]!.noteId, undefined, early(START, 60_000, 0)), /before the previous epoch/);
+  assert.equal(reads(), 1);
+});
+
+// P3-D: chainNow takes both clocks at the read's start, before its answer
+test("card sol-buy-reads-side-by-side: chainNow stamps the monotonic and the wall clock at the read's start, before the pool answers", async () => {
+  const realPerf = performance.now.bind(performance);
+  const realDate = Date.now;
+  let mono = 1_000;
+  let wall = 1_700_000_000_000;
+  performance.now = () => mono;
+  Date.now = () => wall;
   try {
-    Date.now = () => real() - 3_600_000; // an hour back: an estimate on the wall clock would take a proof past its edge
-    await assert.rejects(q.take(b!.noteId, undefined, early(edge - 1_000n, 1_000)), /send margin/);
-    Date.now = () => real() + 3_600_000; // an hour on: an estimate on the wall clock would refuse a proof inside it
-    assert.equal((await q.take(a!.noteId, undefined, early(edge - 2_000n, 1_000))).noteId, a!.noteId);
+    const n = await chainNow({ now: async () => ((mono += 700), (wall += 900), 42n) });
+    assert.deepEqual(n, { ms: 42n, at: 1_000, wall: 1_700_000_000_000 });
   } finally {
-    Date.now = real;
+    performance.now = realPerf;
+    Date.now = realDate;
   }
-  assert.equal(reads(), 0);
 });
 
 test("card sol-buy-reads-side-by-side: each check of the take refuses at least where a fresh read refuses when the estimate runs ahead of block time by up to 2 s", async () => {

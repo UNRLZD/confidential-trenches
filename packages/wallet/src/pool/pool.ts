@@ -120,20 +120,28 @@ export const TAKE_SLACK_MS = 15_000n;
 export const NEWEST_GRACE_MS = 15_000n;
 
 /**
- * The pool's time read before the take (card sol-buy-reads-side-by-side): its ms, and the device's monotonic clock
- * (performance.now, never the wall clock, which a user or an NTP fix may set back or forward) when the read started.
- * take() uses it as `ms` plus the time since `at`, within NOW_REUSE_MS of it, instead of a read of its own. Every check
- * of the take is a "too late" bound, so the time since counted from the read's start (more than since its answer) only
- * makes "now" later: stricter, never looser.
+ * The pool's time read before the take (card sol-buy-reads-side-by-side): its ms, and both of the device's clocks when
+ * the read started: `at` on the monotonic one (performance.now, which a user or an NTP fix cannot set back, but which
+ * stops while the device sleeps on macOS, Linux and phones) and `wall` on the wall clock (Date.now, which runs through
+ * a sleep). take() uses it as `ms` plus the time since, the larger of the two clocks' elapsed times, only while the
+ * monotonic one is 0 to NOW_REUSE_MS and the wall clock's at most NOW_REUSE_MS (a sleep shows on the wall clock, a wall
+ * clock set back on the monotonic one); otherwise it reads the pool's time itself.
+ * Every check of the take is a "too late" bound, and counting from the read's start (more than since its answer) only
+ * makes "now" later than the read's own ms plus the time since. Against a fresh read at the take it can still be
+ * earlier when the chain's block time runs ahead of the device's clock in between: block time 2 s ahead in 1 s takes a
+ * proof 1 s past the edge a fresh read refuses at, and finality catching up 30 s in 2 s takes one 10 s past it. Both
+ * are inside the take's 15 s slack (TAKE_SLACK_MS), and the helper and the pool program check the deadline again on
+ * the chain's own clock, so such a take is refused there and costs a not-landed, never money (review of 6b3bd660).
  */
-export type ChainNow = { readonly ms: bigint; readonly at: number };
+export type ChainNow = { readonly ms: bigint; readonly at: number; readonly wall: number };
 /** How long after its start a read of the pool's time stands for the take's own. [design: 5 s: a buy's reads before its
  *  take end within about 1.5 s; past this (a slow round, a tab frozen in the background) the take reads it again.] */
 export const NOW_REUSE_MS = 5_000;
 /** The pool's time read now, for a take a moment later (ChainNow). */
 export async function chainNow(pool: Pick<Pool<unknown>, "now">, signal?: AbortSignal): Promise<ChainNow> {
   const at = performance.now();
-  return { ms: await pool.now(signal), at };
+  const wall = Date.now();
+  return { ms: await pool.now(signal), at, wall };
 }
 
 const field = (x: unknown): boolean => typeof x === "bigint" && x >= 0n && x < VAULT_FIELD_P;

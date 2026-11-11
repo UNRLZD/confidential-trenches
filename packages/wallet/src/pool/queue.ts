@@ -93,8 +93,9 @@ export interface ProofQueue<R> {
    * then it is handed out. With `attempt` (the ready proof the caller built its transaction on), refused in the note's
    * turn, before any write, when the note's ready proof is another attempt (a remake swapped it in meanwhile): the note
    * stays HELD with its new proof ready, never RESERVED for bytes no one sends. `early` (card
-   * sol-buy-reads-side-by-side): the pool's time read before the take (chainNow), its ms plus the device's monotonic
-   * time since its start, when that is at most NOW_REUSE_MS; else, or when that read failed, the pool's time is read here. */
+   * sol-buy-reads-side-by-side): the pool's time read before the take (chainNow), its ms plus the time since its
+   * start (ChainNow: the larger of the device's two clocks', both within NOW_REUSE_MS); else, or when that read
+   * failed, the pool's time is read here. */
   take(noteId: string, attempt?: string, early?: Promise<ChainNow>): Promise<ReadyProof<R>>;
   /** The proof is dropped and its note goes back to UNSPENT. */
   drop(noteId: string): Promise<void>;
@@ -293,12 +294,14 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
     return out;
   }
 
-  /** The take's "now": an early read's ms plus the monotonic time since its start, within NOW_REUSE_MS; else read. */
+  /** The take's "now": an early read's ms plus the time since its start, the larger of the monotonic and the wall
+   *  clock's, while the monotonic is 0 to NOW_REUSE_MS and the wall clock's at most NOW_REUSE_MS (ChainNow); else read. */
   const takeNow = async (early: Promise<ChainNow> | undefined): Promise<bigint> => {
     const e = await early?.catch(() => undefined);
     if (e !== undefined) {
-      const since = performance.now() - e.at;
-      if (since >= 0 && since <= NOW_REUSE_MS) return e.ms + BigInt(Math.ceil(since));
+      const mono = performance.now() - e.at;
+      const wall = Date.now() - e.wall;
+      if (mono >= 0 && mono <= NOW_REUSE_MS && wall <= NOW_REUSE_MS) return e.ms + BigInt(Math.ceil(Math.max(mono, wall)));
     }
     return pool.now();
   };

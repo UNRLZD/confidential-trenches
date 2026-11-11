@@ -880,6 +880,9 @@ export function poolBuyKind(host: () => PoolBuyHost & { end?(): void }, locks: L
   return (ask: PoolAsk, ctx: KindContext | null): HostRefusal | Running<"pool.buy"> => {
     if (ask.kind !== "pool.buy" || ask.chain !== "solana" || !locks) return { error: "not_allowed" };
     let answer: HostAnswer<"pool.buy"> | HostRefusal | null = null;
+    // true once the run answered "sent" early (its transaction went out): only then is "sent" its end when it ends with
+    // no stage of its own
+    let early = false;
     // the run's final stage, posted once
     let ended = false;
     const end = (stage: TradeStage): void => {
@@ -894,10 +897,9 @@ export function poolBuyKind(host: () => PoolBuyHost & { end?(): void }, locks: L
         const h = host();
         try {
           const a = await runPoolBuy({ ...h, sent: (signature) => {
-            if (!answer) answer = { result: { stage: "sent", txs: [{ chain: "solana", hash: signature }] } };
+            if (!answer) (answer = { result: { stage: "sent", txs: [{ chain: "solana", hash: signature }] } }), (early = true);
             give();
           }, route: (x) => ctx?.route?.(x) }, ask);
-          const early = answer !== null;
           if (!answer) answer = "error" in a ? { error: a.error } : { result: a };
           // the run's stage goes out as progress too, answered early or not: an answer that comes only at the run's end
           // (no read-back within the client's 10 s) is one the kit's client has dropped, and the app waits on progress
@@ -911,9 +913,10 @@ export function poolBuyKind(host: () => PoolBuyHost & { end?(): void }, locks: L
         }
       })
       .catch(() => {
-        // a run that threw past its own catch: its error is the answer, or, after the early answer, "sent"
+        // a run that threw past its own catch: its error is the answer, or, after the early answer, "sent"; a run that
+        // answered its own error (nothing sent) and then threw (the host's end) posts nothing more
         if (!answer) answer = { error: "failed" };
-        else end("sent");
+        else if (early) end("sent");
       })
       .finally(give);
     void run;

@@ -1617,3 +1617,45 @@ test("card sol-buy-reads-side-by-side: an early read that fails never stops the 
   const refused: PoolBuyHost = { ...n.host, chainNow: () => Promise.reject(new Error("rpc 1: socket hang up")) };
   assert.deepEqual(await runPoolBuy(refused, ASK), { error: "quote_check_failed" });
 });
+
+// Card sol-buy-reads-side-by-side, review of 6b3bd660 (P3-A): "sent" is the run's final progress only after the early
+// answer "sent"; the run's own end is posted once, whatever throws after it
+const lockOnce = { request: (_n: string, _o: unknown, f: () => Promise<void>) => f() } as unknown as Pick<LockManager, "request">;
+const kindRun = async (host: PoolBuyHost & { end?(): void }) => {
+  const stages: string[] = [];
+  const r = poolBuyKind(() => host, lockOnce)(ASK, { id: "r1", sha: "00", progress: (s: string) => void stages.push(s) } as never) as { running: true; after: Promise<void>; answer: () => unknown };
+  await r.after;
+  await new Promise((res) => setTimeout(res, 50));
+  return { answer: r.answer(), stages };
+};
+const throwingEnd = () => {
+  throw new Error("the host's end throws");
+};
+
+test("card sol-buy-reads-side-by-side: a run refused with nothing sent posts no sent when the host's end throws", async () => {
+  const w = await world({ blockhashReads: [{ slotAhead: 2, blockhash: BLOCKHASH }, { slotAhead: 30, blockhash: BLOCKHASH }] });
+  const c = clocked(w, holdVenue);
+  const { answer, stages } = await kindRun({ ...c.host, end: throwingEnd });
+  assert.deepEqual(answer, { error: "quote_check_failed" });
+  assert.deepEqual(stages, [], "nothing went out: no sent");
+  assert.equal(w.state(), "HELD");
+  assert.equal(w.sends.length, 0);
+});
+
+test("card sol-buy-reads-side-by-side: a run that throws past its own catch after the early answer posts sent", async () => {
+  const w = await world();
+  // the run's own finally throws (the claimed set refuses the delete): runPoolBuy throws after its early answer
+  const claimed = { has: () => false, add: () => {}, delete: () => {
+    throw new Error("the claimed set throws");
+  } } as unknown as Set<string>;
+  const { answer, stages } = await kindRun({ ...w.host, claimed });
+  assert.deepEqual(answer, { result: { stage: "sent", txs: [{ chain: "solana", hash: SIG }] } });
+  assert.deepEqual(stages, ["sent"]);
+});
+
+test("card sol-buy-reads-side-by-side: a filled run whose host's end throws posts filled once, never sent after it", async () => {
+  const w = await world();
+  const { answer, stages } = await kindRun({ ...w.host, end: throwingEnd });
+  assert.deepEqual(answer, { result: { stage: "sent", txs: [{ chain: "solana", hash: SIG }] } });
+  assert.deepEqual(stages, ["filled"]);
+});
