@@ -28,9 +28,15 @@ const pct = (bps: number) => `${(bps / 100).toFixed(bps % 100 === 0 ? 0 : 1)}%`;
 
 /** How long the share in the box holds still before its preview is asked: a typed "50" asks once, not for "5" too. */
 export const PREVIEW_SETTLE_MS = 250;
-/** A "not now" preview answer (the signing page's RETRY_CODES) is asked again once, this long after. */
+/** A "down" preview answer (a provider failed: the page's next ask reads again) is asked again once, this long after. */
 export const PREVIEW_AGAIN_MS = 3_000;
+/** A busy answer (a trade runs on the page, or its preview budget is spent), or not_funded while the box shows a holding
+ *  (the page's own read of a just-filled buy not in yet), is asked again this often, as long as the box shows that
+ *  holding and no sale runs: the page answers either before it asks any provider (src/pool-sell-dry.ts), so a re-ask
+ *  costs no read, and the number comes within about a second of the page having it (devnet runs 11 and 12, 11 Nov). */
+export const PREVIEW_BUSY_MS = 1_000;
 const NOT_NOW: ReadonlySet<string> = new Set(["busy", "down"]);
+const NOT_YET: ReadonlySet<string> = new Set(["busy", "not_funded"]);
 /** A share's last number is shown again for a "not now" answer this long after it came, so a shown number never flips
  *  to a dash and back while the page is busy. */
 export const PREVIEW_KEEP_MS = 10_000;
@@ -75,15 +81,18 @@ export function SellBox({ row, s, slippageBps = 1000, initialPercent = "50", onB
 
   // the sell preview for the share in the box: asked at once when the box opens, then once a changed share has settled
   // (PREVIEW_SETTLE_MS: one ask per typed percent, never per key); the last numbers stay, dimmed, until a change
-  // answers. A "not now" answer (busy: a trade runs or the page's preview budget is spent; down) is asked again once,
-  // PREVIEW_AGAIN_MS later; still not now, the share's own number from the last PREVIEW_KEEP_MS shows, else the dash
+  // answers. Nothing is asked while a sale runs (its tap fixed what it sells; the last number stays, dimmed). A busy or
+  // not_funded answer is asked again every PREVIEW_BUSY_MS while the box shows the holding; a down answer once,
+  // PREVIEW_AGAIN_MS later. A first "not now" leaves what shows; after it, the share's own number from the last
+  // PREVIEW_KEEP_MS shows, else the dash
   const sellPreview = kit.sellPreview;
   const asked = useRef(false);
   useEffect(() => {
-    if (!sellPreview || amount === null || bps === null) return;
+    if (!sellPreview || amount === null || bps === null || running) return;
     let live = true;
     let t: ReturnType<typeof setTimeout>;
-    const ask = (again: boolean): void =>
+    let downs = 0;
+    const ask = (first: boolean): void =>
       void sellPreview({ chain: row.chain, token: row.token, amount, share_bps: bps, slippage_bps: slippageBps }).then(
         (a) => {
           if (!live) return;
@@ -91,11 +100,13 @@ export function SellBox({ row, s, slippageBps = 1000, initialPercent = "50", onB
           if (a.ok) {
             recent.current.set(key, { p: a.preview, at: s.now() });
             setPreview({ amount, p: a.preview });
-          } else if (again && NOT_NOW.has(a.code)) t = setTimeout(() => ask(false), PREVIEW_AGAIN_MS);
-          else {
-            const kept = NOT_NOW.has(a.code) ? recent.current.get(key) : undefined;
-            setPreview({ amount, p: kept && s.now() - kept.at <= PREVIEW_KEEP_MS ? kept.p : null });
+            return;
           }
+          const again = NOT_YET.has(a.code) ? PREVIEW_BUSY_MS : a.code === "down" && downs++ === 0 ? PREVIEW_AGAIN_MS : null;
+          if (again !== null) t = setTimeout(() => ask(false), again);
+          if (first && (NOT_NOW.has(a.code) || a.code === "not_funded")) return;
+          const kept = NOT_NOW.has(a.code) ? recent.current.get(key) : undefined;
+          setPreview({ amount, p: kept && s.now() - kept.at <= PREVIEW_KEEP_MS ? kept.p : null });
         },
         () => live && setPreview({ amount, p: null }),
       );
@@ -104,7 +115,7 @@ export function SellBox({ row, s, slippageBps = 1000, initialPercent = "50", onB
       live = false;
       clearTimeout(t);
     };
-  }, [sellPreview, row.chain, row.token, amount, bps, slippageBps]);
+  }, [sellPreview, row.chain, row.token, amount, bps, slippageBps, running]);
 
   // a sell started from Your position's quick sells shows its percent here, so the box never names another share
   useEffect(() => {
@@ -119,7 +130,7 @@ export function SellBox({ row, s, slippageBps = 1000, initialPercent = "50", onB
 
   const shown = preview && preview.amount === amount ? preview.p : null;
   const last = preview?.p ?? null;
-  const pending = shown === null && last !== null;
+  const pending = last !== null && (shown === null || running);
   const outC = (shown ?? last) ? cents((shown ?? last)!.out_usd) : null;
   const share = bps === null ? null : shareCents(row.value, bps);
   const now = s.now();
