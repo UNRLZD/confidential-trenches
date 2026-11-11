@@ -43,7 +43,9 @@
 //   behind POOL_TESTNET, folded at build time, so SIGN_HOST's bundle carries none of them.
 import { base58, base64 } from "@scure/base";
 import { SOLANA_RPC_RETRY, SOLANA_RPC_WINDOW_RETRY, solanaJsonRpc, solanaPacedRpc, type SolanaRpc, type SolanaRpcRetry } from "../../kit/src/trade/solana/send.ts";
-import { pageHelperRpc, pageHelperRpcStopped, pageRpc } from "./page-rpc.ts";
+import { lanedRpc, pageHelperRpc, pageHelperRpcStopped, pageRpc, type ReadKind } from "./page-rpc.ts";
+import { holdHosts, hostLane } from "../../wallet/src/throttle.ts";
+import { solanaNow } from "../../wallet/src/pool/solana.ts";
 import { HELPER_FETCH_INIT, HELPER_V1_PATHS } from "../../kit/src/helper/v1.ts";
 import type { VaultProver } from "../../kit/src/prover/prove.ts";
 import { WALLET_SEED_LOCK, type WalletStore } from "@blindfill/wallet/store";
@@ -93,7 +95,8 @@ export const TESTNET_RPCS: Readonly<Record<PoolChain, readonly [string, string]>
 /** One testnet RPC as the page reads it: the helper's route with the kit's HELPER_FETCH_INIT (as pageHelperRpc), any
  *  other directly; both with the page's retry, the helper's route with `helperRetry` when a read names it (a pool
  *  settle's and restore's, pageSolanaSettleRpcs). */
-export const testnetRpc = (url: string, helperRetry: SolanaRpcRetry = SOLANA_RPC_RETRY): SolanaRpc => (url.startsWith(`${TRADE_HELPER}/`) ? solanaJsonRpc(url, { retry: helperRetry, init: HELPER_FETCH_INIT }) : pageRpc(url));
+export const testnetRpc = (url: string, helperRetry: SolanaRpcRetry = SOLANA_RPC_RETRY, kind: ReadKind = "trade"): SolanaRpc =>
+  url.startsWith(`${TRADE_HELPER}/`) ? lanedRpc(url, { kind, retry: helperRetry, init: HELPER_FETCH_INIT }) : pageRpc(url, kind);
 const EVM_TESTNET = /* @__PURE__ */ Object.freeze({ base: "base-sepolia", robinhood: "robinhood-testnet" } as const);
 /** Each EVM pool's synced tree on this device (card evm-pool-leaves-any-source; card evm-pool-sync-holds: in the wallet
  *  store, ../../wallet/src/pool/evm-hold-store.ts): one hold per pool, which the deposit's sync and the restore's both
@@ -177,22 +180,22 @@ export const MAINNET_MARKS_ROUTE = `${TRADE_HELPER}/v1/rpc/solana-marks`;
  *  note is never shown unspent nor freed. The helper alone can only stop a restore or a settle, never move money. Each
  *  paced where it is made (card solana-release-reads-paced): every pool buy, sell, withdraw, settle and restore read
  *  takes its turn in the provider's one queue, the trade's own with it. */
-export const pageSolanaRpcs = (): readonly [SolanaRpc, SolanaRpc] =>
+export const pageSolanaRpcs = (kind: ReadKind = "trade"): readonly [SolanaRpc, SolanaRpc] =>
   POOL_TESTNET
-    ? [solanaPacedRpc(testnetRpc(TESTNET_RPCS.solana[0])), solanaPacedRpc(testnetRpc(TESTNET_RPCS.solana[1]))]
-    : [solanaPacedRpc(pageRpc(SOLANA_PROVIDER_A)), solanaPacedRpc(pageHelperRpc(TRADE_HELPER))];
+    ? [solanaPacedRpc(testnetRpc(TESTNET_RPCS.solana[0], SOLANA_RPC_RETRY, kind)), solanaPacedRpc(testnetRpc(TESTNET_RPCS.solana[1], SOLANA_RPC_RETRY, kind))]
+    : [solanaPacedRpc(pageRpc(SOLANA_PROVIDER_A, kind)), solanaPacedRpc(pageHelperRpc(TRADE_HELPER, SOLANA_RPC_RETRY, kind))];
 /** The page's mark lister (the wallet's solanaMarksListed): MAINNET_MARKS_ROUTE, paced, on mainnet; none in the testnet
  *  build, where the wallet lists on the pair's first devnet RPC. It only names addresses: the pair reads each. */
-export const pageSolanaLister = (): SolanaRpc | undefined => (POOL_TESTNET ? undefined : solanaPacedRpc(testnetRpc(MAINNET_MARKS_ROUTE)));
+export const pageSolanaLister = (kind: ReadKind = "trade"): SolanaRpc | undefined => (POOL_TESTNET ? undefined : solanaPacedRpc(testnetRpc(MAINNET_MARKS_ROUTE, SOLANA_RPC_RETRY, kind)));
 /** The pair every Solana pool settle and the restore read the marks and pages on (review P2-1 of e3489b3b): pageSolanaRpcs'
  *  two providers, in their same paced queues, the helper's seat with SOLANA_RPC_WINDOW_RETRY. The helper answers a
  *  caller's 17th call in a 10 s window with 429 and a Retry-After of up to 10 s (apps/helper/src/rpc/rpc.ts
  *  RPC_CLIENT_MAX), past the page's 3.5 s, so a cold read of a few hundred marks failed at its first window and never
  *  closed; these reads have no quote to age, so they wait the window out. A buy, sell or withdraw keeps pageSolanaRpcs. */
-export const pageSolanaSettleRpcs = (): readonly [SolanaRpc, SolanaRpc] =>
+export const pageSolanaSettleRpcs = (kind: ReadKind = "trade"): readonly [SolanaRpc, SolanaRpc] =>
   POOL_TESTNET
-    ? [solanaPacedRpc(testnetRpc(TESTNET_RPCS.solana[0])), solanaPacedRpc(testnetRpc(TESTNET_RPCS.solana[1], SOLANA_RPC_WINDOW_RETRY))]
-    : [solanaPacedRpc(pageRpc(SOLANA_PROVIDER_A)), solanaPacedRpc(pageHelperRpc(TRADE_HELPER, SOLANA_RPC_WINDOW_RETRY))];
+    ? [solanaPacedRpc(testnetRpc(TESTNET_RPCS.solana[0], SOLANA_RPC_RETRY, kind)), solanaPacedRpc(testnetRpc(TESTNET_RPCS.solana[1], SOLANA_RPC_WINDOW_RETRY, kind))]
+    : [solanaPacedRpc(pageRpc(SOLANA_PROVIDER_A, kind)), solanaPacedRpc(pageHelperRpc(TRADE_HELPER, SOLANA_RPC_WINDOW_RETRY, kind))];
 /** Marks per getMultipleAccounts on pageSolanaSettleRpcs' two seats (the wallet's solanaMarksListed batches): the public
  *  provider's 10 (publicnode's cap; api.devnet.solana.com held to the same), the helper's route getMultipleAccounts' own
  *  100, so a cold read draws a tenth of the calls from the helper's share a user's trade reads also draw on. */
@@ -509,11 +512,17 @@ export type EvmTurnDeps = {
 
 export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetPool {
   const pin = over.pin === null ? undefined : (over.pin ?? PAGE_SOL_PIN);
-  const rpcs = (): readonly [SolanaRpc, SolanaRpc] => over.rpcs ?? pageSolanaRpcs();
+  // each read a trade's own ("trade") unless it is a background pass's ("pass": the proof pass, the positions pass and
+  // the state reads' settles), which waits on its host while a trade holds it (card signpage-passes-yield-to-a-trade,
+  // src/page-rpc.ts)
+  const rpcs = (kind: ReadKind = "trade"): readonly [SolanaRpc, SolanaRpc] => over.rpcs ?? pageSolanaRpcs(kind);
   // every settle's pair: the same two seats, the helper's waiting out its window (pageSolanaSettleRpcs)
-  const settleRpcs = (): readonly [SolanaRpc, SolanaRpc] => over.rpcs ?? pageSolanaSettleRpcs();
+  const settleRpcs = (kind: ReadKind = "trade"): readonly [SolanaRpc, SolanaRpc] => over.rpcs ?? pageSolanaSettleRpcs(kind);
   // the marks' lister: a test's planted pair lists on its own first RPC unless it plants a lister
-  const lister = (): SolanaRpc | undefined => over.lister ?? (over.rpcs === undefined ? pageSolanaLister() : undefined);
+  const lister = (kind: ReadKind = "trade"): SolanaRpc | undefined => over.lister ?? (over.rpcs === undefined ? pageSolanaLister(kind) : undefined);
+  // a trade's hold on the hosts its reads go to, from its host's making to its run's end (the host's end): every pass
+  // read on those hosts waits for it
+  const holdTrade = (): (() => void) => holdHosts([...rpcs(), ...settleRpcs(), lister()].map((r) => r?.url));
   // one cache for every Solana settle on this page (and its restore, src/pool-restore.ts pagePools), on one pair
   const cache: SolanaPoolCache = over.cache ?? (over.rpcs === undefined && over.pin === undefined ? PAGE_SOL_CACHE : {});
   // every Solana settle's stop: a sign out (this tab's, signingOut, or another's, signedOut) aborts it, so a settle on a
@@ -547,7 +556,9 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     let seed64: Uint8Array | null = null;
     try {
       seed64 = await page.seed64();
-      const pool = over.pool ?? solanaPool({ pin: pin!, rpcs: rpcs(), relayFee: (e, s) => poolRelayFee(solanaPoolOf(pin!.program).pool, e, s, over.fetch) });
+      // the pass's reads wait for a trade; the time a buy's take reads is the trade's own, so a buy never waits on itself
+      const passPool = solanaPool({ pin: pin!, rpcs: rpcs("pass"), relayFee: (e, s) => poolRelayFee(solanaPoolOf(pin!.program).pool, e, s, over.fetch) });
+      const pool = over.pool ?? { ...passPool, now: (signal?: AbortSignal) => solanaNow(rpcs(), signal) };
       const hardwareConcurrency = over.hardwareConcurrency ?? globalThis.navigator?.hardwareConcurrency;
       return { queue: openProofQueue({ seed64, notes, pool, provers: [prover.vault], hardwareConcurrency, skip: owedNotes }), notes, poolId: pool.id };
     } catch (e) {
@@ -596,11 +607,12 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     }
   };
 
-  const host = (end?: () => void): PoolDepositHost => {
+  // a deposit's own run reads as a trade; the state reads' settle of the INCOMING notes (settleSolana) as a pass
+  const host = (end?: () => void, kind: ReadKind = "trade"): PoolDepositHost => {
     let notes: NoteStore | null = null;
     return {
       pin: pin!,
-      rpcs: rpcs(),
+      rpcs: rpcs(kind),
       notes: async () => (notes = await openNoteStore(await page.store())),
       records: async () => readNotes(await page.store()),
       seed64: page.seed64,
@@ -967,6 +979,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   const claimed = new Set<string>();
   const buyHost = (): PoolBuyHost & { end(): void } => {
     let notes: NoteStore | null = null;
+    // the buy holds its hosts from its run's start to its end: the passes' reads wait, the buy's own go first
+    const release = holdTrade();
     // the queue, opened when it is not; one that cannot open (signed out) is dropped, so the next tap opens it again
     const q = async (): Promise<ProofQueue<SolanaReleaseRequest>> => {
       const p = (open ??= openQueue());
@@ -1008,7 +1022,10 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
           seed64.fill(0);
         }
       },
-      end: () => notes?.close(),
+      end: () => {
+        release();
+        notes?.close();
+      },
     };
   };
   // each buy's W and the decimals of the token it received, told by the run (pool-buy.ts outDecimals) until its records
@@ -1025,7 +1042,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       if (settling === p) settling = null;
     });
     settling = p;
-    const r = solanaDepositKind(() => host(done))(null, null);
+    const r = solanaDepositKind(() => host(done, "pass"))(null, null);
     // refused before it ran (no Web Locks), or failed before its host was made: no end will come
     if ("error" in r) done();
     else
@@ -1038,6 +1055,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   const scope = pin === undefined ? null : solanaPoolOf(pin.program).scope;
   // the pool's Ws with their holdings, the one finder a sell and the positions use: on mainnet through the helper's keyed
   // route, in the testnet build on one devnet RPC (the header's testnet-only choice); none: no read
+  const FINDER_HOST = POOL_TESTNET ? TESTNET_RPCS.solana[0] : TRADE_HELPER;
   const finderOf = (r: readonly [SolanaRpc, SolanaRpc]): HoldingsReader => over.holdings?.(r) ?? (POOL_TESTNET ? solanaHoldingsAt(TESTNET_RPCS.solana[0]) : solanaHelperHoldings(TRADE_HELPER));
   const poolBuyWallets = async (notes: NoteStore, r: readonly [SolanaRpc, SolanaRpc], reader: HoldingsReader = finderOf(r)) => {
     const spent = await spentNotesOf(notes, scope!);
@@ -1062,7 +1080,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   const positions = positionsCache(
     async (memo, run) => {
       if (scope === null) return { positions: [], whole: true };
-      const r = rpcs();
+      const r = rpcs("pass");
       const st = await page.store();
       const meta = async (k: string): Promise<Record<string, unknown>> => {
         const v = await st.get("meta", k);
@@ -1087,7 +1105,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         // carries the pass's stop in its every fetch, in the helper route's own queue: nothing of a signed-out account's
         // is sent after the sign out, queued or tried again
         decimals: async (mint) => {
-          const rpc = POOL_TESTNET ? r[0] : over.rpcs ? r[1] : solanaPacedRpc(pageHelperRpcStopped(TRADE_HELPER, run.signal));
+          const rpc = POOL_TESTNET ? r[0] : over.rpcs ? r[1] : solanaPacedRpc(pageHelperRpcStopped(TRADE_HELPER, run.signal, "pass"));
           run.signal.throwIfAborted();
           return tokenDecimalsShown("solana", await rpc("getAccountInfo", [mint, { encoding: "base64", commitment: "confirmed" }]));
         },
@@ -1113,6 +1131,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       chain: inner.chain,
       read: async (address, s, by) => {
         try {
+          // a pass's read on the finder's host: after every trade on it (the finder is its own transport)
+          await hostLane(FINDER_HOST).turn("pass", s);
           // the list's bound from its start (buy-wallets.ts readDerived's `by`), as a sell's read keeps it
           return await inner.read(address, s, by);
         } catch (e) {
@@ -1283,8 +1303,10 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     return run;
   };
   // pool.sell: W from the page's buy wallets; one run per tap, one at a time (the sell kind's lock)
-  const sellHost = (): PoolSellKindHost & { end(): void } => {
+  // `trade`: the sell kind's run, which holds its hosts until its end (a rent back resumed at load holds none)
+  const sellHost = (trade = false): PoolSellKindHost & { end(): void } => {
     const r = rpcs();
+    const release = trade ? holdTrade() : () => {};
     // the sign outs asked before this host: one asked after it stops its sales before their signatures (review P3-5 of
     // 77055f4e)
     const outs = signOuts;
@@ -1324,10 +1346,13 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       // run puts its own over this one (poolSellKind)
       settled: async (signature, stage) => settleSellOps(await page.store(), signature, stage),
       stopped: () => signOuts !== outs,
-      end: () => void notes?.then((n) => n.close(), () => {}),
+      end: () => {
+        release();
+        void notes?.then((n) => n.close(), () => {});
+      },
     };
   };
-  const sell = (over.tradeKinds?.sell ?? poolSellKind)(() => sellHost());
+  const sell = (over.tradeKinds?.sell ?? poolSellKind)(() => sellHost(true));
   // the sells a closed or reloaded page left INCOMING: each settled by the run's own verdict rules, its ops record's
   // stage written; under the seed's shared lock, as every pass that writes the store (a sign out waits for it)
   const settleSells = async (): Promise<void> => {
@@ -1337,7 +1362,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       try {
         const ops = await page.store();
         // each sell's stage written before its record goes (a write that fails keeps it for the next read)
-        await settlePoolSells({ pin: pin!, rpcs: rpcs(), notes: async () => notes, kept: keptSells(page.store), settled: async (signature, stage) => {
+        await settlePoolSells({ pin: pin!, rpcs: rpcs("pass"), notes: async () => notes, kept: keptSells(page.store), settled: async (signature, stage) => {
           await settleSellOps(ops, signature, stage);
           // a sell's end, written: its tokens read again (card signpage-state-holdings), a not landed one's marks back
           if (stage === "not_landed") await unsold(signature).catch(() => {});
@@ -1374,7 +1399,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       try {
         seed64 = await page.seed64();
         signal.throwIfAborted();
-        const pass = await solanaSettleReserved({ seed64, notes, program: pin!.program, rpcs: settleRpcs(), lister: lister(), signal, cache, markBatches: PAGE_SOL_MARK_BATCHES });
+        const pass = await solanaSettleReserved({ seed64, notes, program: pin!.program, rpcs: settleRpcs("pass"), lister: lister("pass"), signal, cache, markBatches: PAGE_SOL_MARK_BATCHES });
         // a freed note's release never landed: an op owing its send is settled stopped, nothing sent, before the note
         // can be spent again
         if (pass.freed.length > 0) await settleFreedOps(await page.store(), pass.freed);
