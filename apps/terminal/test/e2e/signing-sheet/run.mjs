@@ -182,7 +182,15 @@ async function oneWidth(h, w, shotDir, { cpu = 1, holdPaint = 0 } = {}) {
   if (holdPaint > 0)
     await context.addInitScript(({ host, ms }) => {
       if (location.hostname !== host) return;
-      document.documentElement.style.setProperty("display", "none", "important");
+      // an init script can run before the document has its root: hidden as soon as it has one
+      const hide = () => document.documentElement.style.setProperty("display", "none", "important");
+      if (document.documentElement) hide();
+      else
+        new MutationObserver((_, o) => {
+          if (!document.documentElement) return;
+          o.disconnect();
+          hide();
+        }).observe(document, { childList: true });
       addEventListener("load", () => setTimeout(() => document.documentElement.style.removeProperty("display"), ms), { once: true });
     }, { host: REAL.app, ms: holdPaint });
   const page = await context.newPage();
