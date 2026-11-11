@@ -503,7 +503,8 @@ export async function read(base = BASE, token, fetchFn = fetch, rpcs, net = "bas
   let quiet;
   for (const t of candidates.slice(0, 12)) {
     const candles = await reader.read(() => get(base, CANDLES_PATH(t, net), fetchFn));
-    if (candles.status !== 200) {
+    // a chart still filling (a cold book past the helper's open bound: no bars yet) is passed over as a failed one is
+    if (candles.status !== 200 || /"filling":true/.test(candles.body ?? "")) {
       tried.push({ token: t, candles: seen(candles) });
       continue;
     }

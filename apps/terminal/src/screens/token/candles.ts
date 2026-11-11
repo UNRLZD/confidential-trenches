@@ -125,10 +125,15 @@ export function throttleWaitMs(retryAfter: string | null, waitedMs: number): num
   return Math.min(1000 * (retryAfter !== null && Number.isFinite(after) && after > 0 ? after : 1), left);
 }
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+/** A first read the helper answers `filling` (no bars yet, its read of a cold Base or Robinhood book still going on past
+ *  its bound, apps/helper/src/data/evm/swaps.ts candles) is read again this long after, the chart loading meanwhile,
+ *  within the same THROTTLE_SPAN_S as a 429, then the error state (Retry reads again) [design: the tape's own read
+ *  interval, trades.ts TRADES_POLL_MS less a second: a cold book measured filled 1.0 to 7.1 s past the bound]. */
+export const FILL_WAIT_MS = 2_000;
 
 /** One candle read: the bars, the empty state when the helper holds none (an answer of no bars, or a 404 for a token or
- *  chain it draws no candles for), else the error state. A 429 is read again after its Retry-After until THROTTLE_SPAN_S
- *  is waited, then is the error state (Retry reads again). */
+ *  chain it draws no candles for), else the error state. A 429 is read again after its Retry-After, and an answer of no
+ *  bars marked `filling` after FILL_WAIT_MS, until THROTTLE_SPAN_S is waited, then is the error state (Retry reads again). */
 export async function loadCandles(chain: MarketChain, token: string, tf: ChartTf, fetchFn: typeof fetch = fetch, wait: (ms: number) => Promise<void> = sleep): Promise<CandleData> {
   try {
     for (let waited = 0; ; ) {
@@ -141,7 +146,16 @@ export async function loadCandles(chain: MarketChain, token: string, tf: ChartTf
       }
       if (r.status === 404) return { status: "empty", gecko: false, held: false };
       if (r.status !== 200) return { status: "error" };
-      return toCandleData(await r.json(), tf, r.headers.get(HELPER_SOURCE_HEADER)) ?? { status: "error" };
+      const body: unknown = await r.json();
+      if (isObject(body) && body.filling === true && Array.isArray(body.candles) && body.candles.length === 0) {
+        const left = THROTTLE_SPAN_S * 1000 - waited;
+        if (left <= 0) return { status: "error" };
+        const w = Math.min(FILL_WAIT_MS, left);
+        await wait(w);
+        waited += w;
+        continue;
+      }
+      return toCandleData(body, tf, r.headers.get(HELPER_SOURCE_HEADER)) ?? { status: "error" };
     }
   } catch {
     return { status: "error" };

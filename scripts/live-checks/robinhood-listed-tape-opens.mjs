@@ -9,7 +9,8 @@
 // GET /v1/market/trades?chain=<chain>&token=<t>&limit=50 for up to DROPPED_MAX such tokens. A chain whose lists drop
 // none in WAIT_MS is named and proves nothing.
 // A cold tape answers at the route's bound with what it holds and `filling: true` while its reads go on (card
-// token-page-data-complete-and-fast: release 117's helper live run read three Base tapes 503 at 12.1-12.6 s), so a tape
+// token-page-data-complete-and-fast: ten cold Base tapes opened at once from the Mac answered 503 at 12 s in 6 of 10
+// before it), so a tape
 // that answers filling is read again every FILL_POLL_MS until the mark goes, for FILLED_MS at most from its first read.
 // PASS when at least one chain dropped a token and every dropped token's tape answers 200 JSON { trades: [...] } within
 // ANSWER_MS and, when it answered filling, is filled within FILLED_MS; FAIL when one answers otherwise (a 404 is the

@@ -60,7 +60,7 @@ for (const [what, token, pools] of [
 
 // card token-page-data-complete-and-fast: a cold tape at its bound is filling, not failed: it answers 200 with what is
 // held and `filling` true while its reads go on, and 503 only once a read failed (every provider hung past its aborts)
-test("card helper-robinhood-trades-hang: with every provider never answering, a first tape answers 200 filling and the chart 503 within the open's bound; once the reads failed the tape answers 503", async () => {
+test("card helper-robinhood-trades-hang: with every provider never answering, a first tape and chart answer 200 filling within the open's bound; once the reads failed each answers 503", async () => {
   const { value, ms } = await onVirtualTime(1_000_000_000, async () => {
     const run = rig([...SWAP_RPCS.robinhood], new Map<string, never>());
     try {
@@ -74,7 +74,8 @@ test("card helper-robinhood-trades-hang: with every provider never answering, a 
         after = await run.s.trades(CURVE_TOKEN, 50);
         polls++;
       }
-      return { tape, chart, polls, after };
+      const chartAfter = await run.s.candles(MAG, "1m", null, 500);
+      return { tape, chart, polls, after, chartAfter };
     } finally {
       run.s.stop();
     }
@@ -83,7 +84,9 @@ test("card helper-robinhood-trades-hang: with every provider never answering, a 
   assert.equal(value.tape.status, 200, value.tape.body);
   assert.deepEqual(JSON.parse(value.tape.body).filling, true, "filling, its reads still running");
   assert.deepEqual(JSON.parse(value.tape.body).trades, []);
-  assert.equal(value.chart.status, 503, value.chart.body);
+  assert.equal(value.chart.status, 200, value.chart.body);
+  assert.deepEqual(JSON.parse(value.chart.body), { tf: "1m", candles: [], filling: true, src: "chain", as_of_ms: JSON.parse(value.chart.body).as_of_ms });
+  assert.equal(value.chartAfter.status, 503, `the chart's read failed too: ${value.chartAfter.body}`);
   assert.equal(value.after.status, 503, `a read that failed is the 503: ${value.after.body}`);
   assert.ok(value.polls <= 12, `the 503 came after ${value.polls} reads 10 s apart`);
   assert.ok(ms > OPEN_BOUND_MS);
@@ -96,12 +99,13 @@ test("card token-page-data-complete-and-fast: providers slower than the open's b
       // a timer at the bound: the first answer must come before it fires (no clock read: scripts/ci/no-wall-clock-asserts)
       let past = false;
       const bound = setTimeout(() => (past = true), OPEN_BOUND_MS + 100);
-      const first = await run.s.trades(MAG, 50);
+      const [first, chart] = await Promise.all([run.s.trades(MAG, 50), run.s.candles(MAG, "1m", null, 500)]);
       const inBound = !past;
       clearTimeout(bound);
       await new Promise((go) => setTimeout(go, 60_000));
       const later = await run.s.trades(MAG, 50);
-      return { first, inBound, later };
+      const chartLater = await run.s.candles(MAG, "1m", null, 500);
+      return { first, chart, inBound, later, chartLater };
     } finally {
       run.s.stop();
     }
@@ -110,6 +114,10 @@ test("card token-page-data-complete-and-fast: providers slower than the open's b
   assert.equal(value.first.status, 200, value.first.body);
   assert.equal(JSON.parse(value.first.body).filling, true);
   assert.ok(value.inBound, "answered inside the bound");
+  assert.equal(value.chart.status, 200, value.chart.body);
+  assert.equal(JSON.parse(value.chart.body).filling, true, "the chart too");
+  assert.equal(value.chartLater.status, 200);
+  assert.ok((JSON.parse(value.chartLater.body) as { candles: unknown[] }).candles.length > 0, "then its bars");
   const later = JSON.parse(value.later.body) as { trades: unknown[]; filling?: boolean };
   assert.equal(value.later.status, 200);
   assert.equal(later.filling, undefined, "filled: no mark");
