@@ -300,3 +300,31 @@ test("item 5: a sale planned while one provider is a slot behind on W's token ac
   assert.ok("legs" in plan, `refused: ${JSON.stringify(plan)}`);
   assert.deepEqual(plan.legs.map((l) => [l.w.address, l.units]), [[W, OUT_UNITS]]);
 });
+
+// The review of 29a9e506 (P3): the end's records are written after W's early record, never beside it. A store slow on
+// that write (another tab's transaction ahead of it) and an end told right after the amount out: a not_landed end still
+// takes the record back, since its take-back runs once the early write is done.
+test("the end's records wait for the early write: a not_landed end told at once after the amount out, the early write slow, leaves no record of W", async () => {
+  const w = await sentWallet();
+  let slow = true;
+  const slowed = new Proxy(w, {
+    get(t, k, r) {
+      const v = Reflect.get(t, k, r);
+      if (k !== "update") return typeof v === "function" ? v.bind(t) : v;
+      return async (store: string, key: string, f: (v: unknown) => unknown) => {
+        // the first write of W's record waits 50 ms before its transaction
+        if (key === POSITION_COSTS_KEY && slow) (slow = false), await tick(50);
+        return t.update(store as never, key, f as never);
+      };
+    },
+  }) as WalletStore;
+  const b = buyKind();
+  const tp = page(slowed, finder(), pair([OUT_UNITS, OUT_UNITS]), { buy: b.kind });
+  await until(async () => (await tp.positions()) !== null);
+  tapBuy(tp);
+  await until(() => b.run.told);
+  b.run.end("not_landed");
+  await until(async () => (await w.get("ops", "pb1")) !== undefined, "the end's ops record");
+  await tick(120);
+  assert.equal(((await w.get("meta", POSITION_COSTS_KEY)) as Record<string, unknown> | undefined)?.[W], undefined, "W's record taken back after the early write");
+});
