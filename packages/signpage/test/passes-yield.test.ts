@@ -203,6 +203,36 @@ test("Base and Robinhood: the same rule; a pass's read of a chain's pool list wa
   });
 });
 
+test("Base's positions pass reads on the pass pair: while a trade holds the chain's hosts and fills their windows it sends nothing, and it reads once they are free", async () => {
+  const word = (n: number) => "0x" + n.toString(16).padStart(64, "0");
+  await onProviderNow((_host, _n, method) => ({ result: method === "eth_blockNumber" ? "0x64" : method === "eth_call" ? word(6) : 7 }), async (sent) => {
+    const { w } = await wallet();
+    const W = "0x" + "a1".repeat(20);
+    const { EVM_POSITION_COSTS_KEY } = await import("../src/pool-buy-evm.ts");
+    await w.update("meta", EVM_POSITION_COSTS_KEY, () => ({ [W]: { mint: SEPOLIA_USDC, decimals: 6, chain: "base", state: "filled", route: { venue: "uniswap-v3", adapter: "0x" + "ad".repeat(20), path: { kind: "v3", fee: 500 }, tx: "0x" + "11".repeat(32), block: "90" }, received: "1" } }));
+    const t = testnetPool({ store: async () => w, held: async () => w, seed64: async () => SEED64.slice() }, { prover: { vault: signalsProver(), stop: () => {} }, evmSync: () => ({ events: async () => assert.fail("no sync read") }) } as never);
+    const base = new Set(TESTNET_RPCS.base.map((u) => new URL(u).host));
+    const reads = () => sent.filter((x) => base.has(x.host) && (x.method === "eth_blockNumber" || x.method === "eth_call"));
+    // a trade holds Base's hosts: the floor's pass read spent, then its reads fill the windows
+    const release = holdHosts(TESTNET_RPCS.base);
+    await Promise.all(pageEvmPoolRpcs("base", "pass")!.map((r) => r("eth_gasPrice", [])));
+    for (const u of TESTNET_RPCS.base) fill(u);
+    await t.positions();
+    await tick(1_500);
+    assert.deepEqual(reads(), [], "no positions read while the trade holds the hosts");
+    release();
+    resetHostLanes();
+    let rows: unknown[] = [];
+    for (let i = 0; i < 100 && rows.length === 0; i++) {
+      await tick(50);
+      rows = ((await t.positions()) ?? []).filter((p) => (p as { chain: string }).chain === "base");
+    }
+    assert.ok(reads().some((x) => x.method === "eth_blockNumber"), "read once the hosts are free");
+    assert.deepEqual(rows.map((p) => (p as { amount: string }).amount), ["0.000006"]);
+    await t.signedOut();
+  });
+});
+
 test("the EVM buy kind's host holds its chain's pool list hosts from its making to its end", async () => {
   await onProvider(() => 200, async () => {
     const made: { h?: { end?(): void } } = {};
