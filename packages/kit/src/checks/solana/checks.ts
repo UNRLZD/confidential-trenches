@@ -66,6 +66,14 @@ export const SOLANA_JITO_TIP = 10_000n;
 /** The least tip a Jito bundle carries: "Jito enforces a minimum tip of 1000 lamports for bundles"
  * (docs.jito.wtf/lowlatencytxnsend, read 2026-11-03 02:20Z). A mainnet pool buy goes bundle-only, so it tips at least this. */
 export const SOLANA_JITO_TIP_MIN = 1_000n;
+/** The tip a mainnet pool buy's tag 3 pays (card sol-pool-buy-lands-on-mainnet): 100,000 lamports (0.0001 SOL). Jito's
+ * auction ranks bundles by tip ("Bundles compete against other bundles on tips to the validator"; "If the tip is too low,
+ * the bundle might not be selected during the auction", docs.jito.wtf/lowlatencytxnsend, read 2026-11-11 14:25Z), and
+ * two mainnet buys at SOLANA_JITO_TIP_MIN were taken by a block engine and expired unlanded (11 Nov 13:59Z, 14:07Z,
+ * 14:15Z). Over the landed tips' 95th percentile on Jito's tip floor at 11 Nov 14:08Z (bundles.jito.wtf/api/v1/bundles/
+ * tip_floor, landed_tips_95th_percentile 0.00005999 SOL = 59,990 lamports), a tenth of the proof's tip cap
+ * (packages/wallet SOL_TIP_CAP, 1,000,000), so every ready proof funds it (the tap's spend counts the whole cap). */
+export const SOLANA_POOL_JITO_TIP = 100_000n;
 // S8 (P4S "Slippage and priority"; run.mjs:85-91).
 export const SOLANA_CU_PRICE_MAX = 1_000_000n;
 export const SOLANA_CU_LIMIT = { pumpBuy: 200_000, pumpSell: 150_000, other: 600_000 } as const;

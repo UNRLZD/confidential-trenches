@@ -29,7 +29,8 @@
 //                       that cannot land before it would only be a paid failure;
 //   inner_program       a tag 3 inner instruction invokes a program off the kit's solanaPoolStepPrograms() (helper
 //                       policy, M356 (1): a program W chose could fail on chain after passing the simulation);
-//   tip_low             mainnet only: a tag 3 whose Jito tip is under SOLANA_JITO_TIP_MIN (1,000 lamports), or whose tip
+//   tip_low             mainnet only: a tag 3 whose Jito tip is under SOLANA_JITO_TIP_MIN (1,000 lamports; any tip from it to
+//                       the proof's tip cap passes here, the program refusing one over the cap, TipOverCap), or whose tip
 //                       account (account 8) is not a Jito tip account named in the message itself (./jito.ts: "When
 //                       tipping make sure to not use Address Lookup Tables for the tip accounts", M362 (4));
 //   bad_table           a lookup table the message loads is not an active table both providers read the same at
@@ -101,6 +102,7 @@ import { base58 } from "../bind/checks.ts";
 import { base58decode } from "../bind/send.ts";
 import { JITO_TICK_SLACK_MS, jitoSender, type JitoSender } from "./jito.ts";
 import { oncePerNullifier } from "./once.ts";
+import { regionName, simErrText, type PoolSendNote } from "./send-log.ts";
 import { heldPerClient, throttleOf } from "../limits/limits.ts";
 import { epochStartOf, POOL_EPOCH_MS, POOL_FEE_STEP, type PoolFeeAnswer } from "./fee.ts";
 import { POOL_LIFE_MAX_MS } from "./evm.ts";
@@ -142,7 +144,8 @@ export type PoolSendCode =
   | "simulation_failed"
   | "upstream";
 /** `retryAfterS` on a 429 only: the whole seconds the route names in Retry-After (card helper-abuse-limits). */
-export type PoolSendAnswer = { status: number; body: { signature: string } | { error: { code: PoolSendCode; detail?: string } }; retryAfterS?: number };
+/** `note`: what the route's log line reads (./send-log.ts); never part of the answer the caller gets. */
+export type PoolSendAnswer = { status: number; body: { signature: string } | { error: { code: PoolSendCode; detail?: string } }; retryAfterS?: number; note?: PoolSendNote };
 
 /** What a pool instruction carries that the checks read: its tag, its relay fee and the accounts tag 3's inner instructions name. */
 export type SolanaPoolIx = { tag: 2 | 3; relayFee: bigint; deadlineMs: bigint; nullifier: string; tip: bigint; innerAccounts: number[]; innerPrograms: number[]; nextPage: boolean };
@@ -183,12 +186,13 @@ export function solanaReadPoolIx(d: Uint8Array): SolanaPoolIx {
   return { tag: 3, relayFee, deadlineMs: v.getBigUint64(fieldsAt + DEADLINE_AT, true), nullifier: Buffer.from(d.subarray(fieldsAt + 32, fieldsAt + 64)).toString("hex"), tip: v.getBigUint64(tipAt, true), innerAccounts, innerPrograms, nextPage: (flags & 2) !== 0 };
 }
 
-/** The relay fee a pool instruction carries, or null when the bytes are not one (checkSolanaPoolTx then names why). */
-function relayFeeOf(wire: Uint8Array): bigint | null {
+/** The pool instruction a transaction's last instruction reads as, or null when the bytes are not one
+ *  (checkSolanaPoolTx then names why). */
+function poolIxOf(wire: Uint8Array): SolanaPoolIx | null {
   try {
     const m = solanaDecodeTransaction(wire).message;
     const pix = m.instructions[m.instructions.length - 1];
-    return pix ? solanaReadPoolIx(pix.data).relayFee : null;
+    return pix ? solanaReadPoolIx(pix.data) : null;
   } catch {
     return null;
   }
@@ -476,6 +480,9 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
   const holding = heldPerClient(POOL_JITO_IN_FLIGHT_MAX);
   // M374 (4): nullifiers whose last bundle send expired (never landed): sent again only into a free second
   const expired = new Map<string, true>();
+  // the bundle carries in progress, from their first send to their end: the engine's word on a bundle is read only
+  // when no other is, so the read never takes a second another carry's rebroadcast wants (./jito.ts status)
+  let bundling = 0;
   const bounded = <V>(m: Map<string, V>, k: string, v: V) => {
     m.delete(k);
     m.set(k, v);
@@ -506,6 +513,12 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
       if (typeof raw !== "string" || raw.length > 1_644 || !B64.test(raw)) return no(400, "bad_shape");
       const wire = new Uint8Array(Buffer.from(raw, "base64"));
       if (Buffer.from(wire).toString("base64") !== raw) return no(400, "bad_shape");
+      const tag = poolIxOf(wire)?.tag;
+      const a = await carryWire(raw, wire, client);
+      return tag === undefined ? a : { ...a, note: { tag, ...a.note } };
+    },
+  };
+  async function carryWire(raw: string, wire: Uint8Array, client: string): Promise<PoolSendAnswer> {
       const at = now();
       let current: EpochFee;
       try {
@@ -514,7 +527,8 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
         return unread(e);
       }
       // the release's relay fee is this epoch's, or an earlier epoch's still inside a proof's life
-      const relay = relayFeeOf(wire);
+      const ix = poolIxOf(wire);
+      const relay = ix?.relayFee ?? null;
       const match = relay === current.fee ? current : [...known.entries()].find(([k, f]) => k >= at - POOL_LIFE_MAX_MS && f.fee === relay)?.[1];
       const f = match ?? current;
       const c = checkSolanaPoolTx(wire, { program: cfg.program, pool, feePayer, fee: f.fee, budget: f.budget, nowMs: at, jito: jito !== null });
@@ -539,8 +553,7 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
       const p = once.run(nf, () => simulateSignSend(raw, c.tx, expired.has(nf) ? 0 : undefined));
       p.then(leave, leave);
       return p;
-    },
-  };
+  }
   async function simulateSignSend(raw: string, tx: SolanaPoolChecked, queueMaxMs?: number): Promise<PoolSendAnswer> {
       // the simulation of W's bytes as received (slot 0 empty, so no signature check), on its own blockhash; and the
       // newest blockhash's last valid height, which bounds how long the sender rebroadcasts (W's is no newer)
@@ -575,24 +588,38 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
       }
       const v = (sim as { value?: { err?: unknown } } | null)?.value;
       if (typeof v !== "object" || v === null || !("err" in v)) return no(503, "upstream");
-      if (v.err !== null) return no(422, "simulation_failed", JSON.stringify(v.err).slice(0, 200));
+      if (v.err !== null) return { ...no(422, "simulation_failed", JSON.stringify(v.err).slice(0, 200)), note: { err: simErrText(v.err) } };
       if (!Number.isSafeInteger(height) || height <= 0) return no(503, "upstream");
       const signed: SolanaSignedTx = { wire: signAsFeePayer(tx, seed), lastValidBlockHeight: height };
       let through = paths;
+      // the log line's note (./send-log.ts): how it went out, and for a bundle the region that took it
+      let note: PoolSendNote = { via: "plain" };
+      let taken: { region: string; bundleId: string | undefined } | undefined;
       // a rebroadcast waiting for its region's next second (./jito.ts) is dropped unsent once the send has ended
       const ended = new AbortController();
       const bundled = jito !== null && tx.tag === 3;
+      let left = !bundled;
+      const leave = () => {
+        if (!left) (left = true), (bundling -= 1);
+      };
+      if (bundled) bundling += 1;
       if (bundled) {
         // M362 (4): bundle-only, so a tag 3 that would fail on chain never lands; rebroadcast the same way, one a
         // second, to the region that took it only (./jito.ts), its pacer shared by every carry rebroadcasting there
         const sig = base58(signed.wire.subarray(1, 65));
-        const j = await jito.send(Buffer.from(signed.wire).toString("base64"), sig, queueMaxMs);
+        const j = await jito.send(Buffer.from(signed.wire).toString("base64"), sig, queueMaxMs).catch((e: unknown) => {
+          leave();
+          throw e;
+        });
         // M374 (1): the code only. A block engine's words never reach the caller: they could carry the fee payer's
         // signature before the send is decided (M369 (H1)). A throttle is a 429 with its wait, a failure a 503.
-        if (j.kind === "busy" && j.throttled) return { ...no(429, "rate_limited"), retryAfterS: 1 };
-        if (j.kind === "busy" || j.kind === "refused") return no(503, "upstream");
+        if (j.kind === "busy" || j.kind === "refused") leave();
+        if (j.kind === "busy" && j.throttled) return { ...no(429, "rate_limited"), retryAfterS: 1, note: { via: "jito", first: "throttled" } };
+        if (j.kind === "busy" || j.kind === "refused") return { ...no(503, "upstream"), note: { via: "jito", first: j.kind } };
         if (j.kind === "ok") {
           const region = j.region;
+          note = { via: "jito", region: regionName(region), bundle: j.bundleId !== undefined };
+          taken = { region, bundleId: j.bundleId };
           through = [
             {
               name: "jito",
@@ -610,8 +637,15 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
           ];
         }
         // every region failed on transport: the plain send, under M356 (1) (a failure that lands is paid once an epoch)
+        else note = { via: "plain", first: "transport" };
       }
-      const h = send([signed], { paths: through, providers: [a, b] });
+      let h: ReturnType<typeof send>;
+      try {
+        h = send([signed], { paths: through, providers: [a, b] });
+      } catch (e) {
+        leave();
+        throw e;
+      }
       h.done.then(() => ended.abort(), () => ended.abort());
       // the send's end frees the nullifier only if once still holds this send's entry (a newer one stays):
       //   expired (never landed, no fee paid): free now; failed (a paid failure): free, and refuse it until the next
@@ -625,24 +659,41 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
       if (bundled) {
         // M369 (H1): the fee payer's signature only once the send is decided, and only for a fill (the header)
         let state: string | undefined;
+        let sends: readonly { path: string; ok: boolean }[] = [];
         try {
-          state = (await h.done).txs[0]?.state;
+          const t0 = (await h.done).txs[0];
+          state = t0?.state;
+          sends = t0?.sends ?? [];
         } catch {
           state = undefined;
         }
+        leave();
+        // the rebroadcasts, counted (the first send went before the set); and for a send that did not fill, the
+        // engine's word on its bundle (one read, in the region's second), so the line says whether it lost the auction
+        const jitoSends = sends.filter((x) => x.path === "jito");
+        note = { ...note, end: state === "filled" || state === "failed" || state === "expired" ? state : "unknown", rebroadcasts: jitoSends.filter((x) => x.ok).length, misses: jitoSends.filter((x) => !x.ok).length };
+        if (state !== "filled" && taken?.bundleId !== undefined) {
+          let word: PoolSendNote["status"] = "unread";
+          try {
+            if (bundling === 0) word = await jito.status(taken.region, taken.bundleId);
+          } catch {
+            word = "unread";
+          }
+          note = { ...note, status: word };
+        }
         if (state === "filled") {
           expired.delete(nf);
-          return { status: 200, body: { signature: h.signatures[0]! } };
+          return { status: 200, body: { signature: h.signatures[0]! }, note };
         }
         if (state === "failed") {
           bounded(failedIn, nf, epochStartOf(now()));
-          return no(422, "not_landed", "failed");
+          return { ...no(422, "not_landed", "failed"), note };
         }
         if (state === "expired") {
           bounded(expired, nf, true); // M374 (4): its next send only into a free second
-          return no(503, "not_landed"); // never landed: once frees the nullifier
+          return { ...no(503, "not_landed"), note }; // never landed: once frees the nullifier
         }
-        const unknown = no(503, "not_landed");
+        const unknown = { ...no(503, "not_landed"), note };
         bounded(heldUntil, nf, { entry: undefined, answer: unknown, deadline: Number(tx.deadlineMs) });
         return unknown;
       }
@@ -658,7 +709,7 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
           hold();
         })
         .catch(hold);
-      return { status: 200, body: { signature: h.signatures[0]! } };
+      return { status: 200, body: { signature: h.signatures[0]! }, note };
   }
 }
 
