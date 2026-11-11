@@ -295,7 +295,7 @@ function store(seed: Record<string, unknown> = {}): { store: WalletStore; data: 
 function page(o: { store?: WalletStore; ready?: ReadyProof<EvmPoolRequest>[]; fetch?: typeof fetch } = {}) {
   let refreshes = 0;
   const queue = { ready: () => o.ready ?? [], refresh: async () => (refreshes++, { proved: [], remade: [], failed: [] }), take: async () => assert.fail("no take") } as unknown as ProofQueue<EvmPoolRequest>;
-  const p: EvmBuyPage = { queue: async () => queue, seed64: async () => SEED.slice(), held: async () => o.store ?? store().store, settle: () => {}, testnet: false, fetch: o.fetch };
+  const p: EvmBuyPage = { queue: async () => queue, seed64: async () => SEED.slice(), held: async () => o.store ?? store().store, settle: () => {}, marks: async () => new Map(), testnet: false, fetch: o.fetch };
   return { p, refreshes: () => refreshes };
 }
 const NO_RPCS: readonly [EvmRpc, EvmRpc] = [async () => null, async () => null];

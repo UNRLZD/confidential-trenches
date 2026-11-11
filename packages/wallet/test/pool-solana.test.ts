@@ -1415,7 +1415,8 @@ test("a pass frees a RESERVED note whose signed transaction can no longer land: 
   // both past it, no mark on either: freed now, 200 s before its deadline, so the queue proves it again
   assert.deepEqual(await pass(b.ns, pair(at(beforeSpend, EARLY_S, 1_001), at(beforeSpend, EARLY_S, 1_002))), { spent: [], freed: [b.id], held: [] });
   const freed = (await b.ns.get(b.id))!;
-  assert.deepEqual([freed.state, freed.lastHeight, freed.deadlineMs], ["UNSPENT", undefined, undefined]);
+  assert.deepEqual([freed.state, freed.deadlineMs], ["UNSPENT", undefined]);
+  assert.equal((await b.ns.marks()).has(b.id), false, "its mark goes with it");
   // the chain holds the spend: settled SPENT with its change, whatever the heights say
   const c = await reservedDeposit0(l0, LAST);
   assert.deepEqual(await pass(c.ns, pair(at(chain, EARLY_S, 1_001), at(chain, EARLY_S, 1_001))), { spent: [c.id], freed: [], held: [] });

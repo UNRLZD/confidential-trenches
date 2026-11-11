@@ -1947,10 +1947,21 @@ test("the last height: RPC 1's height is read at or past the slot RPC 1 called t
   const fresh = await at({ blockHeight: 200, absoluteSlot: 600 });
   assert.equal(fresh.got.lastHeight, 351);
   assert.deepEqual(fresh.asked, [["isBlockhashValid", { commitment: "confirmed" }], ["getEpochInfo", { commitment: "confirmed" }]]);
-  // its height beside the check of a bank behind it (slot 400, height 5): read again at the check's slot
-  const behind = await at({ blockHeight: 5, absoluteSlot: 400 });
-  assert.equal(behind.got.lastHeight, 351, "never 5 + 151");
-  assert.deepEqual(behind.asked.at(-1), ["getBlockHeight", { commitment: "confirmed", minContextSlot: 500 }]);
+  // a bank k slots behind the check (here 3: slot 497, at most height 197 on a chain of one block a slot at most): its
+  // height + k, an upper bound on the height at the check's slot, with no read more
+  const behind = await at({ blockHeight: 197, absoluteSlot: 497 });
+  assert.equal(behind.got.lastHeight, 351);
+  assert.equal(behind.asked.length, 2, "no read more");
+  // fewer blocks than slots behind (skipped slots): the bound is higher than the true height, never lower
+  const skipped = await at({ blockHeight: 190, absoluteSlot: 497 });
+  assert.ok(skipped.got.lastHeight >= 190 + 151 && skipped.got.lastHeight === 193 + 151);
+  // a bank more than a blockhash's life behind (200 slots), or an answer with no whole height and slot: read again at the
+  // check's slot
+  for (const info of [{ blockHeight: 5, absoluteSlot: 300 }, { blockHeight: 5 } as { blockHeight: number; absoluteSlot: number }]) {
+    const far = await at(info);
+    assert.equal(far.got.lastHeight, 351, "never 5 + 151");
+    assert.deepEqual(far.asked.at(-1), ["getBlockHeight", { commitment: "confirmed", minContextSlot: 500 }]);
+  }
 });
 
 // Card sol-buy-reads-side-by-side: the pool's time for the take is read beside the first round (the host's chainNow,

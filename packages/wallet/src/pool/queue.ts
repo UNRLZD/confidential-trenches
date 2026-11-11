@@ -96,8 +96,9 @@ export interface ProofQueue<R> {
    * sol-buy-reads-side-by-side): the pool's time read before the take (chainNow), its ms plus the time since its
    * start (ChainNow: the larger of the device's two clocks', both within NOW_REUSE_MS); else, or when that read
    * failed, the pool's time is read here. `lastHeight`: the height past which the one transaction the caller signed on
-   * this proof can no longer land (a Solana blockhash's), written on the note with HELD -> RESERVED (notes/store.ts). */
-  take(noteId: string, attempt?: string, early?: Promise<ChainNow>, lastHeight?: bigint): Promise<ReadyProof<R>>;
+   * this proof can no longer land (a Solana blockhash's); `nullifier`: the proof's (an EVM buy's). Each written on the
+   * note's mark with HELD -> RESERVED, never in the note (notes/store.ts ReservedMark). */
+  take(noteId: string, attempt?: string, early?: Promise<ChainNow>, lastHeight?: bigint, nullifier?: bigint): Promise<ReadyProof<R>>;
   /** The proof is dropped and its note goes back to UNSPENT. */
   drop(noteId: string): Promise<void>;
   /** Frees every ready proof's note (HELD -> UNSPENT), then zeroes the seed's copy; the queue does nothing more. */
@@ -315,7 +316,7 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
     },
     ready: () => sorted(),
     readyWith: (read) => inView(async () => ({ ready: sorted(), value: await read() })),
-    take(noteId, attempt, early, lastHeight) {
+    take(noteId, attempt, early, lastHeight, nullifier) {
       live();
       return onNote(noteId, async () => {
         live();
@@ -338,7 +339,7 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
         }
         ready.delete(noteId);
         try {
-          await notes.move(noteId, "HELD", "RESERVED", { attempt: r.attempt, ...(lastHeight === undefined ? {} : { lastHeight }) });
+          await notes.move(noteId, "HELD", "RESERVED", { attempt: r.attempt, ...(lastHeight === undefined ? {} : { lastHeight }), ...(nullifier === undefined ? {} : { nullifier }) });
         } catch (e) {
           await free(noteId, r.attempt);
           throw e;

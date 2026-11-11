@@ -414,7 +414,10 @@ export async function blockhashRead(rpcs: readonly [SolanaRpc, SolanaRpc]): Prom
  *  the one RPC 1 judged the blockhash valid at: RPC 1 has then seen the blockhash's block, so its height is at least
  *  that block's and the last height is never under the true one, whatever RPC 0 said (a last height too low would free
  *  the note while its transaction can still land: card pool-buy-record-never-stays-sent). The height and its slot come
- *  in one read beside the check (getEpochInfo); a bank behind the check's slot is read again at it (minContextSlot). */
+ *  in one read beside the check (getEpochInfo). A bank k slots behind the check's slot (k at most BLOCKHASH_LIFE) is
+ *  taken as its height + k: a slot adds at most one block, so that is never under the height at the check's slot, and
+ *  only holds a note RESERVED a little longer. A bank further behind, or an answer with no whole height and slot, is
+ *  read again at the check's slot (minContextSlot). */
 export async function blockhashValid(rpcs: readonly [SolanaRpc, SolanaRpc], r: { blockhash: string; lastValidBlockHeight: number; slot: number }): Promise<{ blockhash: string; lastValidBlockHeight: number; slot: number; lastHeight: number }> {
   const [ok, info] = await Promise.all([
     rpcs[1]("isBlockhashValid", [r.blockhash, { commitment: "confirmed" }]) as Promise<{ context?: { slot?: unknown }; value?: unknown }>,
@@ -423,8 +426,10 @@ export async function blockhashValid(rpcs: readonly [SolanaRpc, SolanaRpc], r: {
   if (ok?.value !== true) return no();
   const seen = int(ok.context?.slot);
   if (seen === 0) return no();
-  const at = info?.absoluteSlot;
-  const height = Number.isSafeInteger(at) && (at as number) >= seen ? info.blockHeight : await rpcs[1]("getBlockHeight", [{ commitment: "confirmed", minContextSlot: seen }]);
+  const at = info?.absoluteSlot, bh = info?.blockHeight;
+  const whole = Number.isSafeInteger(at) && Number.isSafeInteger(bh) && (at as number) >= 0 && (bh as number) >= 0;
+  const behind = whole ? Math.max(0, seen - (at as number)) : Infinity;
+  const height = behind <= BLOCKHASH_LIFE ? (bh as number) + behind : await rpcs[1]("getBlockHeight", [{ commitment: "confirmed", minContextSlot: seen }]);
   const said = r.lastValidBlockHeight;
   const cap = int(height) + BLOCKHASH_LIFE;
   return { blockhash: r.blockhash, lastValidBlockHeight: said, slot: r.slot, lastHeight: said > cap ? said : cap };

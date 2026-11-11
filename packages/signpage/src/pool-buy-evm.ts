@@ -57,6 +57,7 @@ import { evmPoolBuyQuote, type EvmPoolBuyQuote, type EvmPoolBuyQuoteRequest } fr
 import { evmPoolVenues, venuePins, type EvmPoolBuy, type EvmPoolChain, type EvmPoolVenueList, type EvmRoute } from "../../kit/src/trade/evm/buy-unpinned.ts";
 import { evmPoolBuildQuoted } from "../../kit/src/trade/evm/buy.ts";
 import { freshWallet } from "../../wallet/src/derive/keys.ts";
+import type { ReservedMark } from "../../wallet/src/notes/store.ts";
 import { EVM_LAG_TRIES, EVM_LAG_WAIT_MS, EVM_SEND_MARGIN_MS, type EvmPoolPin, type EvmPoolRequest, type EvmRpc } from "../../wallet/src/pool/evm.ts";
 import type { ReadyProof } from "../../wallet/src/pool/pool.ts";
 import type { ProofQueue } from "../../wallet/src/pool/queue.ts";
@@ -107,7 +108,11 @@ export type EvmPoolBuyHost = {
   /** The pool's two RPCs, of two operators (the page's evmPair of the chain's pool list). */
   rpcs: readonly [EvmRpc, EvmRpc];
   ready(): Promise<readonly Ready[]>;
-  take(noteId: string, attempt: string): Promise<Ready>;
+  /** The queue's take; `nullifier` (the proof's) goes on the note's mark, so a page that did not run the buy finds its
+   *  note from the chain's release (noteOf). */
+  take(noteId: string, attempt: string, nullifier?: bigint): Promise<Ready>;
+  /** The RESERVED note and attempt whose mark names `nullifier` (../../wallet/src/notes/store.ts ReservedMark), or null. */
+  noteOf?(nullifier: bigint): Promise<{ noteId: string; attempt: string } | null>;
   seed64(): Promise<Uint8Array>;
   /** The kit's evmPoolBuyQuote. */
   quote(req: EvmPoolBuyQuoteRequest): Promise<EvmPoolBuyQuote>;
@@ -137,7 +142,7 @@ export type EvmPoolBuyHost = {
   sent?(): void;
   /** The note's release read on both RPCs (filled or withdrawn): the chunk left the pool, so the balance counts the
    *  note's change only until the settle writes it (../../wallet/src/pool/balances.ts landed). */
-  landed?(noteId: string, attempt: string, withdrawn: bigint): void;
+  landed?(noteId: string, attempt: string, withdrawn: bigint, block: bigint): void;
   /** An end the reads found after the tap's run answered "sent" at its bound. */
   late?(a: { stage: TradeStage; txs: TxRef[] }): void;
   /** The notes a run on this page has picked and not finished. */
@@ -295,7 +300,7 @@ export async function runEvmPoolBuy(h: EvmPoolBuyHost, ask: PoolAsk): Promise<Ev
       await h.record(w.address, holding);
       written = { w: w.address, nullifier: want.nullifier, deadlineMs: want.deadlineMs };
       // the take, awaited before anything leaves: this very attempt, or refused with the note HELD
-      const got = await h.take(r.noteId, r.attempt);
+      const got = await h.take(r.noteId, r.attempt, want.nullifier);
       taken = true;
       if (got.attempt !== r.attempt) return no();
       const mine = { noteId: r.noteId, attempt: r.attempt, chunk: r.chunk };
@@ -425,7 +430,7 @@ async function watch(h: EvmPoolBuyHost, x: Watch, more: () => boolean, wait: (ms
     const txs: TxRef[] = [{ chain: h.chain, hash: v.release.tx }];
     const at = { ...x.holding.route, tx: v.release.tx, block: v.release.block.toString() };
     // this run's own release landed: its note's chunk (the device's, never the chain's word) is out of the pool
-    if (x.mine !== undefined) h.landed?.(x.mine.noteId, x.mine.attempt, x.mine.chunk);
+    if (x.mine !== undefined) h.landed?.(x.mine.noteId, x.mine.attempt, x.mine.chunk, v.release.block);
     if (v.end === "filled") {
       await h.record(x.w, { ...x.holding, state: "filled", received: poolUnits(v.release.out, x.holding.decimals), route: at }).catch(() => {});
       return { stage: "filled", txs };
@@ -474,7 +479,10 @@ export async function followPendingEvmBuys(h: EvmPoolBuyHost): Promise<void> {
     h.following?.add(key);
     // the fee recipient is the pin's, never the record's
     const want: EvmBuyWant = { nullifier, w, feeRecipient: h.pin.feeRecipient, token: rec.mint, minOut, value, feeCap, deadlineMs };
-    const x: Watch = { want, from, holding: rec as EvmHolding, w, stops: [null, null], none: null };
+    // the buy's note, from the mark its take wrote (a tab on an earlier release wrote none): its release read back counts
+    // only the note's change, in this tab too
+    const note = await (h.noteOf?.(nullifier) ?? Promise.resolve(null)).catch(() => null);
+    const x: Watch = { want, from, holding: rec as EvmHolding, w, stops: [null, null], none: null, ...(note === null ? {} : { mine: { ...note, chunk: value } }) };
     const slowAt = deadlineMs + BigInt(EVM_BUY_FOLLOW_MS);
     runs.push(
       watch(h, x, live, (ms) => wait(clock() > slowAt ? EVM_BUY_SLOW_WAIT_MS : ms), clock, live)
@@ -502,8 +510,10 @@ export type EvmBuyPage = {
   fetch?: typeof fetch;
   signal?: AbortSignal;
   stopped?(): boolean;
+  /** The notes' marks as stored (../../wallet/src/notes/store.ts readReservedMarks), for noteOf. */
+  marks(): Promise<ReadonlyMap<string, ReservedMark>>;
   /** EvmPoolBuyHost.landed: the page's balance counts the note's change from here. */
-  landed?(noteId: string, attempt: string, withdrawn: bigint): void;
+  landed?(noteId: string, attempt: string, withdrawn: bigint, block: bigint): void;
 };
 
 /** A W that already has a holding: the pending write is refused, so nothing is sent (review P3-7). */
@@ -530,7 +540,11 @@ export function evmBuyHost(chain: Chain, pin: EvmPoolPin, rpcs: readonly [EvmRpc
       if (list.length === 0) void q.refresh().catch(() => {});
       return list;
     },
-    take: async (id, attempt) => (await page.queue()).take(id, attempt),
+    take: async (id, attempt, nullifier) => (await page.queue()).take(id, attempt, undefined, undefined, nullifier),
+    noteOf: async (nullifier) => {
+      for (const [noteId, m] of await page.marks()) if (m.nullifier === nullifier) return { noteId, attempt: m.attempt };
+      return null;
+    },
     seed64: page.seed64,
     quote: evmPoolBuyQuote,
     build: evmPoolBuildQuoted,

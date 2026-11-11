@@ -687,7 +687,8 @@ export type SolanaReservedPass = { spent: string[]; freed: string[]; held: strin
  * - No spent mark, and the lower of the two block times past deadline_ms: RESERVED -> UNSPENT (the store's own rule,
  *   blockTimeMs past deadline_ms), so the queue proves the note again. Before that the note is held: its send may still
  *   be in flight.
- * - No spent mark, and the note names its signed transaction's last height (lastHeight, written with the take): freed
+ * - No spent mark, and the note's mark names its signed transaction's last height (notes/store.ts ReservedMark, written
+ *   with the take, never in the note): freed
  *   as soon as each RPC's finalized block height (getEpochInfo, one node's block: its height and its slot) is past it,
  *   the marks read at or past that slot (card pool-buy-record-never-stays-sent). Every release needs W's signature
  *   (contracts/pool-solana src/release.rs row 2), W signs one transaction per attempt (pool-buy.ts, pool-withdraw.ts),
@@ -703,7 +704,13 @@ export async function solanaSettleReserved(a: { seed64: Uint8Array; notes: NoteS
   const times = await solanaFinalTimes(a.rpcs, a.signal);
   const timeMs = times[0].ms < times[1].ms ? times[0].ms : times[1].ms;
   // each RPC's finalized height and its slot, read after the times, only while a note names a last height
-  const heights = reserved.some((n) => n.lastHeight !== undefined) ? await finalHeights(a.rpcs).catch(() => null) : null;
+  // each note's last height, from the mark of its own attempt only (none: its deadline only)
+  const marks = await a.notes.marks();
+  const lastOf = (n: NoteRecord): bigint | undefined => {
+    const m = marks.get(n.id);
+    return m !== undefined && n.attempt !== undefined && m.attempt === n.attempt ? m.lastHeight : undefined;
+  };
+  const heights = reserved.some((n) => lastOf(n) !== undefined) ? await finalHeights(a.rpcs).catch(() => null) : null;
   const height = heights === null ? undefined : BigInt(Math.min(heights[0].height, heights[1].height));
   const minSlots = [Math.max(times[0].slot, heights?.[0].slot ?? 0), Math.max(times[1].slot, heights?.[1].slot ?? 0)] as const;
   // the marks read for one note are not read again for the next (a mark is never closed or rewritten)
@@ -715,7 +722,7 @@ export async function solanaSettleReserved(a: { seed64: Uint8Array; notes: NoteS
       else if (n.deadlineMs !== undefined && timeMs > n.deadlineMs) {
         await a.notes.move(n.id, "RESERVED", "UNSPENT", { blockTimeMs: timeMs });
         out.freed.push(n.id);
-      } else if (height !== undefined && n.lastHeight !== undefined && height > n.lastHeight) {
+      } else if (height !== undefined && lastOf(n) !== undefined && height > lastOf(n)!) {
         await a.notes.move(n.id, "RESERVED", "UNSPENT", { finalHeight: height });
         out.freed.push(n.id);
       } else out.held.push(n.id);

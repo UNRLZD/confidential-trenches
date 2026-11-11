@@ -342,3 +342,21 @@ test("a pass stopped (sign out) writes nothing after the stop: not after its rou
   await assert.rejects(evmSettleReserved({ seed64: SEED, notes: b.ns, scope: SCOPE, round: async () => ({ fin: { number: 30n, timestamp: timeOf(30) }, events: [depEv(9n), depEv(b.commitment), depEv(c1)] as never }), signal: later.signal }), { name: "AbortError" });
   assert.deepEqual((await b.ns.list()).map((n) => n.state).sort(), ["RESERVED", "UNSPENT"]);
 });
+
+// card pool-buy-record-never-stays-sent: a release this device read landed is on the note's mark with its block; a pass
+// whose final block is at or past that block with no release of the note in the round (a reorg dropped it) takes the
+// landed value off, so the balance counts the whole note again; one whose final block is below it keeps it
+test("a landed value whose release a reorg dropped: taken off once the final block is past its block with no release in the round, kept before", async () => {
+  const { ns, id } = await reserved();
+  const n = (await ns.get(id))!;
+  await ns.landed(id, n.attempt!, 40n, 15n);
+  const early: World = { pool: chain(false), head: 40, finalized: 14 };
+  assert.deepEqual(await pass(ns, early, early), { spent: [], freed: [], held: [id] });
+  assert.equal((await ns.marks()).get(id)?.withdrawn, 40n, "its block not final yet: the release may still come in");
+  const final: World = { pool: chain(false), head: 40, finalized: 15 };
+  assert.deepEqual(await pass(ns, final, final), { spent: [], freed: [], held: [id] });
+  const m = (await ns.marks()).get(id);
+  assert.equal(m?.withdrawn, undefined, "final past its block and not in the round: taken off");
+  assert.equal(m?.attempt, n.attempt);
+  assert.equal(await stateOf(ns, id), "RESERVED");
+});

@@ -14,7 +14,7 @@ import { VAULT_FIELD_P, vaultLabelOf } from "../../kit/src/vault/shapes.ts";
 import { evmPoolVenues, evmReadProvidersOf } from "../../kit/src/trade/evm/buy-unpinned.ts";
 import { evmPoolFee, evmPoolGas } from "../../kit/src/trade/evm/pool-fee.ts";
 import { noteCommitment, noteSecrets, type NoteRef } from "../../wallet/src/notes/secrets.ts";
-import { openNoteStore, refKey, type NoteStore } from "../../wallet/src/notes/store.ts";
+import { openNoteStore, readReservedMarks, refKey, type NoteStore } from "../../wallet/src/notes/store.ts";
 import type { Pool } from "../../wallet/src/pool/pool.ts";
 import type { EvmPoolBuyHost } from "../src/pool-buy-evm.ts";
 import { signalsProver } from "../../wallet/test/withdraw-fixture.ts";
@@ -339,10 +339,11 @@ test("the EVM part of a state read runs beside the Solana part: a Solana proof i
 // Circle's testnet USDC on Base Sepolia, a public address (contracts/pool-evm/script/testnet-run.mjs)
 const SEPOLIA_USDC = "0x036cbd53842c5426634e7929541ec2318f3dcf7e";
 
-test("pool.buy on a chain with its EVM pin goes to the EVM buy on that chain's queue; a chain with none is refused not_allowed (card signpage-evm-pool-buy)", async () => {
+test("pool.buy on a chain with its EVM pin goes to the EVM buy on that chain's queue; a chain with none is refused not_allowed (card signpage-evm-pool-buy); its take and landed release mark the note in the store, read by another tab (card pool-buy-record-never-stays-sent)", async () => {
   const { w, ns } = await wallet();
   const prover = signalsProver();
   const hosts: { chain: string; network: string; ready: number }[] = [];
+  const marked: { got?: { id: string; attempt: string; noteOf: unknown; none: unknown } } = {};
   const t = testnetPool(page(w), {
     prover: { vault: prover, stop: () => {} },
     evmPin: (c) => (c === "base" ? PIN : undefined),
@@ -354,7 +355,14 @@ test("pool.buy on a chain with its EVM pin goes to the EVM buy on that chain's q
         const after = (async () => {
           const h = host();
           try {
-            hosts.push({ chain: h.chain, network: h.pin.network, ready: (await h.ready()).length });
+            const ready = await h.ready();
+            hosts.push({ chain: h.chain, network: h.pin.network, ready: ready.length });
+            // card pool-buy-record-never-stays-sent: the take marks the proof's nullifier, the landed release its
+            // withdrawn value and block, in the store; the note is found from the nullifier
+            const r = ready[0]!;
+            await h.take(r.noteId, r.attempt, 9n);
+            h.landed!(r.noteId, r.attempt, 5n, 12n);
+            marked.got = { id: r.noteId, attempt: r.attempt, noteOf: await h.noteOf!(9n), none: await h.noteOf!(8n) };
           } finally {
             // ended at the run's end, as poolBuyEvmKind ends its host (a host holds the list's hosts until then)
             h.end?.();
@@ -373,6 +381,18 @@ test("pool.buy on a chain with its EVM pin goes to the EVM buy on that chain's q
   assert.ok("after" in got, "the base buy runs");
   await got.after;
   assert.deepEqual(hosts, [{ chain: "base", network: "base-sepolia", ready: 1 }], "on the chain's own queue: its landed note's proof");
+  const { id, attempt, noteOf, none } = marked.got!;
+  let mark = (await readReservedMarks(w)).get(id);
+  for (let i = 0; i < 200 && mark?.withdrawn === undefined; i++) {
+    await new Promise((r) => setTimeout(r, 10));
+    mark = (await readReservedMarks(w)).get(id);
+  }
+  assert.deepEqual(mark, { attempt, nullifier: 9n, withdrawn: 5n, block: 12n }, "on the note's mark in the store");
+  assert.deepEqual([noteOf, none], [{ noteId: id, attempt }, null], "the note found from its nullifier");
+  // another tab on the same store counts the landed release too
+  const t2 = testnetPool(page(w), { prover: { vault: signalsProver(), stop: () => {} }, evmPin: (c) => (c === "base" ? PIN : undefined), evmRpcs: unread, evmSync: () => ({ events: async () => assert.fail("no sync read") }), evmQueuePool: () => fakeEvmPool() as Pool<unknown> });
+  assert.deepEqual([...((await t2.readyWith(async () => null)).landed ?? [])], [[id, { attempt, withdrawn: 5n }]], "another tab's state view");
+  await t2.signedOut();
   assert.deepEqual(t.flow({ ...ask, chain: "robinhood" }, null as never), { error: "not_allowed" });
   await t.signedOut();
 });
@@ -1096,3 +1116,4 @@ test("a page open across the turn keeps the period before's proof takeable while
   assert.equal((await t.readyWith(async () => null)).ready?.[0]?.epochStartMs, BigInt(START + 120_000));
   await t.signedOut();
 });
+

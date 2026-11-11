@@ -48,7 +48,7 @@ import { holdHosts, hostLane, laneFetch, stopHostLaneWaits } from "../../wallet/
 import { HELPER_FETCH_INIT, HELPER_V1_PATHS } from "../../kit/src/helper/v1.ts";
 import type { VaultProver } from "../../kit/src/prover/prove.ts";
 import { WALLET_SEED_LOCK, type WalletStore } from "@blindfill/wallet/store";
-import { openNoteStore, readNotes, type NoteStore } from "../../wallet/src/notes/store.ts";
+import { openNoteStore, readNotes, readReservedMarks, type NoteStore } from "../../wallet/src/notes/store.ts";
 import { chainNow, type Pool, type ReadyProof } from "../../wallet/src/pool/pool.ts";
 import { openProofQueue, type ProofQueue, type QueuePass } from "../../wallet/src/pool/queue.ts";
 import { poolDepositKind, type PoolDepositFrom, type PoolDepositHost } from "./pool-deposit.ts";
@@ -614,6 +614,19 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     }
   };
   const watchers = new Set<() => void>();
+  // a release read landed on both RPCs (a Solana or EVM buy's, a withdraw's): what it took out of the pool goes on the
+  // note's mark in the store (../../wallet/src/notes/store.ts ReservedMark), so every tab and a reload count only the
+  // note's change until the settle writes it (../../wallet/src/pool/balances.ts landed); then the app reads the state
+  // again (an owed/ write tells no store listener)
+  const markLanded = async (noteId: string, attempt: string, withdrawn: bigint, block?: bigint): Promise<void> => {
+    const ns = await openNoteStore(await page.store());
+    try {
+      await ns.landed(noteId, attempt, withdrawn, block);
+    } finally {
+      ns.close();
+    }
+    for (const f of watchers) f();
+  };
   const proofs = async (): Promise<QueuePass | null> => {
     const p = (open ??= openQueue());
     try {
@@ -832,10 +845,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     stopped: ((at) => () => signOuts !== at)(signOuts),
     // as the Solana buy's: the balance counts the note's change from its release's read-back (card
     // pool-buy-record-never-stays-sent)
-    landed: (noteId, attempt, withdrawn) => {
-      landedReleases.set(noteId, { attempt, withdrawn });
-      for (const f of watchers) f();
-    },
+    landed: (noteId, attempt, withdrawn, block) => void markLanded(noteId, attempt, withdrawn, block).catch(() => {}),
+    marks: async () => readReservedMarks(await page.store()),
   });
   const evmBuy = (chain: "base" | "robinhood") => {
     const e = evmPool(chain);
@@ -1255,8 +1266,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       // (../../wallet/src/pool/balances.ts landed), and the app reads the state again
       landed: (noteId, attempt, withdrawn) => {
         reads.landed();
-        landedReleases.set(noteId, { attempt, withdrawn });
-        for (const f of watchers) f();
+        void markLanded(noteId, attempt, withdrawn).catch(() => {});
       },
       end: () => {
         release();
@@ -1270,10 +1280,6 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   // each buy's W and the decimals of the token it received, told by the run (pool-buy.ts outDecimals) until its records
   // are written; a W takes one buy only
   const boughtDecimals = new Map<string, number>();
-  // each RESERVED note whose buy this page read landed, by note id (pool-buy.ts landed): its attempt and the value its
-  // release withdrew, for state.pools (src/pools.ts withPools); one that is no longer RESERVED by that attempt counts
-  // nothing, and goes at the next read
-  const landedReleases = new Map<string, LandedRelease>();
   // each buy whose run ended "sent" (its end not known), by note id: its taken proof, where to post its end, and W's
   // history places read so far (card pool-buy-record-never-stays-sent)
   const lateBuys = new Map<string, { r: ReadyProof<SolanaReleaseRequest>; post: (stage: "filled" | "not_landed") => void; places: HistoryPlaces }>();
@@ -1779,7 +1785,6 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         seed64 = await page.seed64();
         signal.throwIfAborted();
         const pass = await solanaSettleReserved({ seed64, notes, program: pin!.program, rpcs: settleRpcs("pass"), lister: lister("pass"), signal, cache, markBatches: PAGE_SOL_MARK_BATCHES });
-        for (const id of [...pass.spent, ...pass.freed]) landedReleases.delete(id);
         await followBuys(notes);
         // a freed note's release never landed: an op owing its send is settled stopped, nothing sent, before the note
         // can be spent again
@@ -2158,9 +2163,16 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
           ids.add(q.poolId);
         }
       }
-      // this page's landed releases as they are now; one whose note left RESERVED is dropped once the notes say so
-      const landed = (): ReadonlyMap<string, LandedRelease> => new Map(landedReleases);
-      if (qs.length === 0) return { ready: undefined, value: await read(), open: ids, landed: landed() };
+      // the landed releases on the notes' marks, as any tab wrote them, read after the notes (a mark whose note the notes
+      // read shows out of RESERVED counts nothing: balances.ts takes a RESERVED note's mark of its own attempt only)
+      const landed = async (): Promise<ReadonlyMap<string, LandedRelease>> => {
+        const m = await readReservedMarks(await page.store()).catch(() => new Map());
+        return new Map([...m].flatMap(([id, x]) => (x.withdrawn === undefined ? [] : [[id, { attempt: x.attempt, withdrawn: x.withdrawn }] as const])));
+      };
+      if (qs.length === 0) {
+        const value = await read();
+        return { ready: undefined, value, open: ids, landed: await landed() };
+      }
       const ready: ReadyProof[] = [];
       const turn = async (i: number): Promise<T> => {
         if (i === qs.length) return read();
@@ -2169,7 +2181,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         return r.value;
       };
       const value = await turn(0);
-      return { ready, value, open: ids, landed: landed() };
+      return { ready, value, open: ids, landed: await landed() };
     },
     watch: (fn) => void watchers.add(fn),
     signingOut: () => {

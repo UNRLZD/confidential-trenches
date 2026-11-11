@@ -642,6 +642,9 @@ async function onePart(h: PoolWithdrawHost, ask: PoolAsk, notes: NoteStore, p: W
         await h.owe?.(owed);
         return r;
       },
+      // the release read landed on both RPCs: the note's mark holds what it took out, so the balance counts only the
+      // change until the settle writes it, as a buy's (card pool-buy-record-never-stays-sent)
+      landed: (noteId: string, at: string, withdrawn: bigint) => void notes.landed(noteId, at, withdrawn).catch(() => {}),
     };
     const a = await sendAndSettle(host, r, release, pool, signed, bh.lastHeight, wait);
     if ("error" in a) return stop("send");

@@ -130,12 +130,47 @@ export type NoteRecord = {
   evmSpent?: EvmSpent; // INCOMING with evmSends only: the block U's last send's nonce was read used at (card evm-deposit-note-stays-incoming)
   contexts?: AttemptContext[]; // from its first HELD on: every attempt's context and deadline_ms, in the order written
   request?: string; // RESERVED: the vault withdrawal's request body as sent (JSON), written with HELD -> RESERVED, so a later page sends the same bytes again
-  // RESERVED: the block height past which the attempt's one signed Solana transaction can no longer land (its
-  // blockhash's last valid height, the higher of two RPCs' words), written with HELD -> RESERVED before it leaves. W must
-  // sign every release (contracts/pool-solana src/release.rs row 2) and signs one transaction per attempt, so once both
-  // RPCs' finalized height is past it with no spent mark the proof can never be spent: freed then, not at deadline_ms
-  lastHeight?: bigint;
 };
+
+/**
+ * What a RESERVED note's spend left beside the note, never in it (card pool-buy-record-never-stays-sent): the record's
+ * keys stay the ones every earlier release's reader accepts (checkRecord's list), so a tab still on an earlier release
+ * reads every note this one writes. One meta record (RESERVED_MARKS_KEY), by note id, each of its attempt:
+ * - lastHeight: the height past which the attempt's one signed Solana transaction can no longer land (its blockhash's
+ *   last valid height, the higher of two RPCs' words). W must sign every release (contracts/pool-solana src/release.rs
+ *   row 2) and signs one transaction per attempt, so once both RPCs' finalized height is past it with no spent mark
+ *   the proof can never be spent: the note is freed then, not at deadline_ms;
+ * - nullifier: an EVM buy's proof nullifier, so a page that did not run the buy finds its note from the chain's release;
+ * - withdrawn: the value the attempt's release took out of the pool, once read back on both RPCs, so the balance counts
+ *   only the note's change until the settle writes it, in every tab and after a reload; block: the EVM block that
+ *   release was read in, so a pass whose final block is past it with no release of the note (a reorg dropped it) takes
+ *   the withdrawn value off again (unlanded).
+ * Written before the note's move HELD -> RESERVED (one store per transaction: a crash between the two leaves a HELD note
+ * and a mark no rule reads, never a RESERVED note freed early); a RESERVED note with no mark of its attempt (one taken
+ * on an earlier release, or a lost write) is freed by its deadline only. Dropped once the note leaves RESERVED; any mark
+ * whose note is not HELD or RESERVED by its attempt is dropped at the next read of the marks.
+ */
+export type ReservedMark = { attempt: string; lastHeight?: bigint; nullifier?: bigint; withdrawn?: bigint; block?: bigint };
+/** meta/owed/reserved-notes: an owed/ key, which no reader of any release lists (store keys() leaves owed/ out). */
+export const RESERVED_MARKS_KEY = "owed/reserved-notes";
+
+function marksOf(v: unknown): Map<string, ReservedMark> {
+  const out = new Map<string, ReservedMark>();
+  if (v === null || typeof v !== "object") return out;
+  const big = (x: unknown): boolean => x === undefined || (typeof x === "bigint" && x >= 0n && x < 1n << 256n);
+  for (const [id, m] of Object.entries(v as Record<string, unknown>)) {
+    const r = m as Partial<ReservedMark> | null;
+    // a mark this device never writes is no mark: its note is freed by its deadline only
+    if (r === null || typeof r !== "object" || typeof r.attempt !== "string" || !big(r.lastHeight) || !big(r.nullifier) || !big(r.withdrawn) || !big(r.block)) continue;
+    out.set(id, { attempt: r.attempt, ...(r.lastHeight === undefined ? {} : { lastHeight: r.lastHeight }), ...(r.nullifier === undefined ? {} : { nullifier: r.nullifier }), ...(r.withdrawn === undefined ? {} : { withdrawn: r.withdrawn }), ...(r.block === undefined ? {} : { block: r.block }) });
+  }
+  return out;
+}
+
+/** The RESERVED notes' marks as stored, read with no lock and nothing written (as readNotes reads the notes). */
+export async function readReservedMarks(store: Pick<WalletStore, "get">): Promise<Map<string, ReservedMark>> {
+  return marksOf(await store.get("meta", RESERVED_MARKS_KEY));
+}
 
 /** A withdrawal attempt's context (a canonical decimal below p) and its deadline_ms, written with the move to HELD. */
 export type AttemptContext = { context: string; deadlineMs: bigint };
@@ -181,9 +216,10 @@ export type NewNote = {
 // attempt: the holder's HELD -> RESERVED, HELD -> HELD or HELD -> UNSPENT. blockTimeMs: RESERVED -> UNSPENT (past deadline_ms), or another tab's HELD -> UNSPENT (past
 // deadline_ms - margin).
 // request: the holder's HELD -> RESERVED only (the vault withdrawal's body, card signpage-withdraw-handoff).
-// lastHeight: the holder's HELD -> RESERVED only. finalHeight: RESERVED -> UNSPENT, the lower of both RPCs' finalized
-// block heights, past the note's lastHeight (card pool-buy-record-never-stays-sent).
-export type MoveFields = { leaf?: Leaf; deadlineMs?: bigint; context?: string; attempt?: string; blockTimeMs?: bigint; send?: PoolSend; evmSend?: EvmPoolSend; request?: string; lastHeight?: bigint; finalHeight?: bigint };
+// lastHeight, nullifier: the holder's HELD -> RESERVED only, written to the note's mark (ReservedMark), never the note.
+// finalHeight: RESERVED -> UNSPENT, the lower of both RPCs' finalized block heights, past its mark's lastHeight (card
+// pool-buy-record-never-stays-sent).
+export type MoveFields = { leaf?: Leaf; deadlineMs?: bigint; context?: string; attempt?: string; blockTimeMs?: bigint; send?: PoolSend; evmSend?: EvmPoolSend; request?: string; lastHeight?: bigint; nullifier?: bigint; finalHeight?: bigint };
 /** The longest request body a RESERVED note holds: the helper's POST /v1/withdraw limit (8 KiB). */
 export const NOTE_REQUEST_MAX = 8_192;
 
@@ -193,6 +229,13 @@ export interface NoteStore {
   planDeposit(scope: bigint, precommitmentOf: (ref: NoteRef) => bigint): Promise<NoteRecord>;
   add(note: NewNote): Promise<NoteRecord>;
   move(id: string, from: NoteState, to: NoteState, fields?: MoveFields): Promise<NoteRecord>;
+  /** The marks of the notes HELD or RESERVED by their attempt (ReservedMark); any other is dropped. */
+  marks(): Promise<ReadonlyMap<string, ReservedMark>>;
+  /** Writes what the attempt's release took out of the pool, read back on both RPCs, on the note's mark, only while the
+   *  note is RESERVED by that attempt (a mark is made for it when its take wrote none). */
+  landed(id: string, attempt: string, withdrawn: bigint, block?: bigint): Promise<void>;
+  /** Takes the landed value off the note's mark of `attempt` (its release no longer on the chain's final blocks). */
+  unlanded(id: string, attempt: string): Promise<void>;
   /**
    * Writes a call U signed for an INCOMING note, before it is sent, when the note still holds `seen` calls (else
    * nothing is written: another bind's call came first). Returns the note as stored. The first call may carry the
@@ -455,7 +498,7 @@ function checkRequest(r: unknown, what: string): string {
 function checkRecord(id: string, r: unknown): NoteRecord {
   if (r === null || typeof r !== "object") throw new Error(`note ${id} is not a record`);
   const n = r as NoteRecord;
-  onlyKeys(n, ["id", "ref", "scope", "precommitment", "state", "parent", "leaf", "deadlineMs", "attempt", "tab", "calls", "searchFrom", "sends", "evmSends", "evmSpent", "contexts", "request", "lastHeight"], `note ${id}`);
+  onlyKeys(n, ["id", "ref", "scope", "precommitment", "state", "parent", "leaf", "deadlineMs", "attempt", "tab", "calls", "searchFrom", "sends", "evmSends", "evmSpent", "contexts", "request"], `note ${id}`);
   if (n.id !== id) throw new Error(`note ${id} names another id`);
   refKey(n.ref);
   field(n.scope, "scope");
@@ -473,10 +516,6 @@ function checkRecord(id: string, r: unknown): NoteRecord {
   if (n.request !== undefined) {
     if (n.state !== "RESERVED") throw new Error(`note ${id}: a request in RESERVED only`);
     checkRequest(n.request, `note ${id}: request`);
-  }
-  if (n.lastHeight !== undefined) {
-    if (n.state !== "RESERVED") throw new Error(`note ${id}: a last height in RESERVED only`);
-    u64(n.lastHeight, `note ${id}: lastHeight`);
   }
   if (n.parent !== undefined && (typeof n.parent !== "string" || (n.ref.kind !== "change" && n.ref.kind !== "refund"))) throw new Error(`note ${id}: only a change or refund note has a parent`);
   if (n.calls !== undefined) {
@@ -528,7 +567,6 @@ function record(n: NoteRecord): NoteRecord {
   if (n.evmSpent !== undefined) out.evmSpent = n.evmSpent;
   if (n.contexts !== undefined) out.contexts = n.contexts;
   if (n.request !== undefined) out.request = n.request;
-  if (n.lastHeight !== undefined) out.lastHeight = n.lastHeight;
   return out;
 }
 
@@ -567,7 +605,7 @@ export async function readNotes(store: Pick<WalletStore, "get" | "keys">): Promi
   return all.map((n) => {
     if (!parents.has(n.id) || n.state === "SPENT") return n;
     // settle's put(p, "SPENT"): no tab, no deadline, no attempt
-    const { tab: _tab, deadlineMs: _deadline, attempt: _attempt, request: _request, lastHeight: _lastHeight, ...spent } = n;
+    const { tab: _tab, deadlineMs: _deadline, attempt: _attempt, request: _request, ...spent } = n;
     return { ...spent, state: "SPENT" };
   });
 }
@@ -607,7 +645,7 @@ export async function openNoteStore(store: WalletStore, opts: NoteStoreOptions =
   };
 
   // The one write of a state change: shape and fields checked, then one put. The callers check edge and ownership.
-  async function put(cur: NoteRecord, to: NoteState, fields: Pick<MoveFields, "leaf" | "deadlineMs" | "context" | "request" | "lastHeight"> = {}): Promise<NoteRecord> {
+  async function put(cur: NoteRecord, to: NoteState, fields: Pick<MoveFields, "leaf" | "deadlineMs" | "context" | "request"> = {}): Promise<NoteRecord> {
     const next: NoteRecord = { ...cur, state: to };
     if (to !== "INCOMING") delete next.evmSpent;
     if (cur.state === "INCOMING" && to === "UNSPENT") next.leaf = checkLeaf(fields.leaf, cur.precommitment);
@@ -634,11 +672,7 @@ export async function openNoteStore(store: WalletStore, opts: NoteStoreOptions =
         delete next.deadlineMs;
         delete next.attempt;
         delete next.request;
-        delete next.lastHeight;
-      } else {
-        if (fields.request !== undefined) next.request = checkRequest(fields.request, "request");
-        if (fields.lastHeight !== undefined) next.lastHeight = u64(fields.lastHeight, "lastHeight");
-      }
+      } else if (fields.request !== undefined) next.request = checkRequest(fields.request, "request");
       // a sell's deposit planned again: its dropped sends go with it, of either shape (the next send is written with the
       // next move); a PLANNED note holds none, so one left would make every read of the store throw
       if (to === "PLANNED") {
@@ -668,7 +702,7 @@ export async function openNoteStore(store: WalletStore, opts: NoteStoreOptions =
   async function moveLocked(id: string, from: NoteState, to: NoteState, fields: MoveFields = {}): Promise<NoteRecord> {
     if (!NOTE_STATES.includes(from) || !NOTE_STATES.includes(to)) throw new Error("unknown note state");
     if (fields === null || typeof fields !== "object") throw new Error("fields is an object");
-    onlyKeys(fields, ["leaf", "deadlineMs", "context", "attempt", "blockTimeMs", "send", "evmSend", "request", "lastHeight", "finalHeight"], "a move");
+    onlyKeys(fields, ["leaf", "deadlineMs", "context", "attempt", "blockTimeMs", "send", "evmSend", "request", "lastHeight", "nullifier", "finalHeight"], "a move");
     const all = await settle();
     const cur = all.find((n) => n.id === id);
     if (cur === undefined) throw new Error(`no note ${id}`);
@@ -682,7 +716,7 @@ export async function openNoteStore(store: WalletStore, opts: NoteStoreOptions =
     if (fields.evmSend !== undefined && !(from === "PLANNED" && to === "INCOMING")) throw new Error("a send is written with the move PLANNED -> INCOMING only");
     if (fields.send !== undefined && fields.evmSend !== undefined) throw new Error("a note's sends are one shape");
     if (fields.request !== undefined && !(from === "HELD" && to === "RESERVED")) throw new Error("a request is written with the move HELD -> RESERVED only");
-    if (fields.lastHeight !== undefined && !(from === "HELD" && to === "RESERVED")) throw new Error("a last height is written with the move HELD -> RESERVED only");
+    if ((fields.lastHeight !== undefined || fields.nullifier !== undefined) && !(from === "HELD" && to === "RESERVED")) throw new Error("a last height or nullifier is written with the move HELD -> RESERVED only");
     const time = fields.blockTimeMs === undefined ? undefined : u64(fields.blockTimeMs, "blockTimeMs");
     const height = fields.finalHeight === undefined ? undefined : u64(fields.finalHeight, "finalHeight");
     const own = fields.attempt !== undefined && fields.attempt === cur.attempt && cur.tab === tab;
@@ -690,11 +724,72 @@ export async function openNoteStore(store: WalletStore, opts: NoteStoreOptions =
     if (from === "HELD" && to === "RESERVED" && !own) throw new Error(`note ${id} is held by another attempt: only the attempt that holds it sends it`);
     if (from === "HELD" && to === "UNSPENT" && !own && !(time !== undefined && time > cur.deadlineMs! - SEND_MARGIN_MS))
       throw new Error(`note ${id} is held by another attempt: freed only by that attempt, or once block time is past deadline_ms - ${SEND_MARGIN_MS} ms`);
-    if (from === "RESERVED" && to === "UNSPENT" && !(time !== undefined && time > cur.deadlineMs!) && !(height !== undefined && cur.lastHeight !== undefined && height > cur.lastHeight))
+    // the last height is the mark of the note's own attempt: none (a take on an earlier release, a lost write) leaves the
+    // deadline only
+    const last = height === undefined || from !== "RESERVED" ? undefined : (await readReservedMarks(store)).get(id);
+    const lastHeight = last !== undefined && cur.attempt !== undefined && last.attempt === cur.attempt ? last.lastHeight : undefined;
+    if (from === "RESERVED" && to === "UNSPENT" && !(time !== undefined && time > cur.deadlineMs!) && !(height !== undefined && lastHeight !== undefined && height > lastHeight))
       throw new Error(`note ${id} is RESERVED until block time is past its deadline_ms, or the finalized height past its last height: its proof can still land`);
     if (fields.send !== undefined) return put({ ...cur, sends: checkSends([checkSend(fields.send, "a send")], id) }, to, {});
     if (fields.evmSend !== undefined) return put({ ...cur, evmSends: checkEvmSends([checkEvmSend(fields.evmSend, "a send")], id) }, to, {});
-    return put(cur, to, { leaf: fields.leaf, deadlineMs: fields.deadlineMs, context: fields.context, request: fields.request, lastHeight: fields.lastHeight });
+    // the mark first, then the note: a crash between leaves the note HELD and a mark no rule reads
+    if (from === "HELD" && to === "RESERVED" && (fields.lastHeight !== undefined || fields.nullifier !== undefined)) {
+      if (fields.nullifier !== undefined && (typeof fields.nullifier !== "bigint" || fields.nullifier < 0n || fields.nullifier >= 1n << 256n)) throw new Error("nullifier is a bigint below 2^256");
+      const mark: ReservedMark = { attempt: fields.attempt!, ...(fields.lastHeight === undefined ? {} : { lastHeight: u64(fields.lastHeight, "lastHeight") }), ...(fields.nullifier === undefined ? {} : { nullifier: fields.nullifier }) };
+      await store.update("meta", RESERVED_MARKS_KEY, (v) => ({ ...Object.fromEntries(marksOf(v)), [id]: mark }));
+    }
+    const out = await put(cur, to, { leaf: fields.leaf, deadlineMs: fields.deadlineMs, context: fields.context, request: fields.request });
+    // out of RESERVED: its mark goes (one left by a failed write is dropped at the next read of the marks)
+    if (from === "RESERVED" && to !== "RESERVED") await dropMarks((m) => m.has(id) ? [id] : []).catch(() => {});
+    return out;
+  }
+
+  // drops the marks `which` names in one compare-and-set; nothing written when it names none
+  async function dropMarks(which: (m: Map<string, ReservedMark>) => string[]): Promise<void> {
+    await store.update("meta", RESERVED_MARKS_KEY, (v) => {
+      const m = marksOf(v);
+      const gone = which(m);
+      if (gone.length === 0) return undefined;
+      for (const id of gone) m.delete(id);
+      return Object.fromEntries(m);
+    });
+  }
+
+  async function marksLocked(): Promise<ReadonlyMap<string, ReservedMark>> {
+    const all = await settle();
+    const byId = new Map(all.map((n) => [n.id, n]));
+    const kept = (id: string, m: ReservedMark): boolean => {
+      const n = byId.get(id);
+      return n !== undefined && (n.state === "HELD" || n.state === "RESERVED") && n.attempt === m.attempt;
+    };
+    const m = await readReservedMarks(store);
+    if ([...m].some(([id, x]) => !kept(id, x))) await dropMarks((now) => [...now].filter(([id, x]) => !kept(id, x)).map(([id]) => id)).catch(() => {});
+    return new Map([...m].filter(([id, x]) => kept(id, x)));
+  }
+
+  async function unlandedLocked(id: string, attempt: string): Promise<void> {
+    await store.update("meta", RESERVED_MARKS_KEY, (v) => {
+      const m = marksOf(v);
+      const cur = m.get(id);
+      if (cur?.attempt !== attempt || cur.withdrawn === undefined) return undefined;
+      const { withdrawn: _w, block: _b, ...rest } = cur;
+      m.set(id, rest);
+      return Object.fromEntries(m);
+    });
+  }
+
+  async function landedLocked(id: string, attempt: string, withdrawn: bigint, block?: bigint): Promise<void> {
+    if (typeof withdrawn !== "bigint" || withdrawn < 0n) throw new Error("withdrawn is a bigint at least 0");
+    if (block !== undefined && (typeof block !== "bigint" || block < 0n)) throw new Error("block is a bigint at least 0");
+    const n = (await settle()).find((x) => x.id === id);
+    if (n?.state !== "RESERVED" || n.attempt !== attempt) return;
+    await store.update("meta", RESERVED_MARKS_KEY, (v) => {
+      const m = marksOf(v);
+      const cur = m.get(id);
+      const at = block === undefined ? {} : { block };
+      m.set(id, cur?.attempt === attempt ? { ...cur, withdrawn, ...at } : { attempt, withdrawn, ...at });
+      return Object.fromEntries(m);
+    });
   }
 
   async function addLocked(note: NewNote): Promise<NoteRecord> {
@@ -852,6 +947,9 @@ export async function openNoteStore(store: WalletStore, opts: NoteStoreOptions =
     list: () => locked(settle),
     add: (note) => locked(() => addLocked(note)),
     move: (id, from, to, fields) => locked(() => moveLocked(id, from, to, fields)),
+    marks: () => locked(marksLocked),
+    landed: (id, attempt, withdrawn, block) => locked(() => landedLocked(id, attempt, withdrawn, block)),
+    unlanded: (id, attempt) => locked(() => unlandedLocked(id, attempt)),
     addCall: (id, call, seen, searchFrom) => locked(() => addCallLocked(id, call, seen, searchFrom)),
     syncCursor: (vault) => locked(() => syncCursorLocked(vault)),
     saveSyncCursor: (cursor) => locked(() => saveSyncCursorLocked(cursor)),

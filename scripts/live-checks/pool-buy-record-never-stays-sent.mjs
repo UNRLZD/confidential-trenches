@@ -30,19 +30,23 @@ const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}
 const I = "[\\w$]+"; // a minified name
 const count = (js, re) => (js.match(new RegExp(re.source, "g")) ?? []).length;
 
-// the store's refusal of RESERVED -> UNSPENT, naming both ways out, and its rule for where a last height is written
+// the store's refusal of RESERVED -> UNSPENT, naming both ways out, its rule for where a last height is written, and the
+// key of the notes' marks (meta owed/reserved-notes), where the last height lives, out of the note record
 const STORE_FREE = "is RESERVED until block time is past its deadline_ms, or the finalized height past its last height: its proof can still land";
-const STORE_WRITE = "a last height is written with the move HELD -> RESERVED only";
+const STORE_WRITE = "a last height or nullifier is written with the move HELD -> RESERVED only";
+const MARKS_KEY = "`owed/reserved-notes`";
+// the note record's keys, exactly release 116's (its reader refuses any other): no lastHeight among them
+const RECORD_KEYS = "`deadlineMs`,`attempt`,`tab`,`calls`,`searchFrom`,`sends`,`evmSends`,`evmSpent`,`contexts`,`request`]";
 // the old refusal: RESERVED until the deadline only
 const OLD = "is RESERVED until block time is past its deadline_ms: its proof can still land";
-// a take's move: `move(id, "HELD", "RESERVED", { attempt: ..., ...(h === undefined ? {} : { lastHeight: h }) })`, the
-// queue's and the withdraw's
-const TAKE_MOVE = new RegExp(String.raw`\`HELD\`,\`RESERVED\`,\{attempt:${I}(?:\.attempt)?,\.\.\.${I}===void 0\?\{\}:\{lastHeight:${I}\}\}`);
+// a take's move: `move(id, "HELD", "RESERVED", { attempt: ..., ...(h === undefined ? {} : { lastHeight: h }), ... })`,
+// the queue's and the withdraw's (the store writes the height on the note's mark)
+const TAKE_MOVE = new RegExp(String.raw`\`HELD\`,\`RESERVED\`,\{attempt:${I}(?:\.attempt)?,\.\.\.${I}===void 0\?\{\}:\{lastHeight:${I}\}`);
 // the send's take: `take(r.noteId, r.attempt, fill?.early, BigInt(lastHeight))`
 const TAKE_CALL = new RegExp(String.raw`\.take\(${I}\.noteId,${I}\.attempt,${I}\?\.early,BigInt\(${I}\)\)`);
-// the pass: `height !== undefined && n.lastHeight !== undefined && height > n.lastHeight ? (await a.notes.move(n.id,
-// "RESERVED", "UNSPENT", { finalHeight: height }), freed) : held`
-const PASS = new RegExp(String.raw`(?<h>${I})!==void 0&&(?<n>${I})\.lastHeight!==void 0&&\k<h>>\k<n>\.lastHeight\?\(await ${I}\.notes\.move\(\k<n>\.id,\`RESERVED\`,\`UNSPENT\`,\{finalHeight:\k<h>\}\)`);
+// the pass: `height !== undefined && lastOf(n) !== undefined && height > lastOf(n)! ? (await a.notes.move(n.id,
+// "RESERVED", "UNSPENT", { finalHeight: height }), freed) : held`, lastOf reading the note's mark of its own attempt
+const PASS = new RegExp(String.raw`(?<h>${I})!==void 0&&(?<f>${I})\((?<n>${I})\)!==void 0&&\k<h>>\k<f>\(\k<n>\)\?\(await ${I}\.notes\.move\(\k<n>\.id,\`RESERVED\`,\`UNSPENT\`,\{finalHeight:\k<h>\}\)`);
 const PASS_READ = "getEpochInfo: no finalized height";
 // the balance: a RESERVED note counted, less its landed release's withdrawn value
 const BALANCE = "its landed release withdrew more than it holds";
@@ -53,7 +57,7 @@ export function facts(index, js) {
   return {
     index,
     sha384: sha384(js),
-    store: js.includes(STORE_FREE) && js.includes(STORE_WRITE),
+    store: js.includes(STORE_FREE) && js.includes(STORE_WRITE) && js.includes(MARKS_KEY) && js.includes(RECORD_KEYS),
     take: count(js, TAKE_MOVE) >= 2 && TAKE_CALL.test(js),
     pass: PASS.test(js) && js.includes(PASS_READ),
     balance: js.includes(BALANCE) && BALANCE_STATES.test(js),
@@ -68,7 +72,7 @@ export function judge(a) {
   const pin = /src="\/app\.js" integrity="([^"]+)"/.exec(a?.index ?? "")?.[1];
   if (!pin) bad("SIGN_HOST's index.html pins no /app.js");
   else if (pin !== a.sha384) bad("SIGN_HOST's served /app.js is not the one index.html pins");
-  if (a?.store !== true) bad("the note store frees a RESERVED note only past its deadline, or takes a last height on another move");
+  if (a?.store !== true) bad("the note store frees a RESERVED note only past its deadline, takes a last height on another move, or keeps it in the note record");
   if (a?.take !== true) bad("a take does not write the signed transaction's last height on the RESERVED note");
   if (a?.pass !== true) bad("the settle pass does not free a RESERVED note once both RPCs' finalized height is past its last height");
   if (a?.balance !== true) bad("the pool balance leaves out a RESERVED note: a buy in flight reads its money gone");
