@@ -54,12 +54,12 @@ test("planted in the bundle's excerpt: each break in place FAILs", () => {
     ["every W read through the finder, recorded or not", "!Object.hasOwn(o,e)&&!r.has(e)", "!0", "listed"],
     ["the finder asked for every W, not the unrecorded ones only", "{only:u,together:!0}", "{together:!0}", "listed"],
     ["the seed read with no W", "if(t.length===0)return a=[];", "", "listed"],
-    ["the sale's reads unshared", "rpcs:nR(tR(e.rpcs,aR(t.token)),iR(t.token),rU,", "rpcs:(tR(e.rpcs,aR(t.token)),iR(t.token),rU,", "young"],
-    ["shared past 4 s", "rU=4e3", "rU=6e4", "young"],
+    ["the sale's reads unshared", "rpcs:tR(eR(e.rpcs,iR(t.token)),rR(t.token),nU,", "rpcs:(eR(e.rpcs,iR(t.token)),rR(t.token),nU,", "young"],
+    ["shared past 4 s", "nU=4e3", "nU=6e4", "young"],
     ["shared at any age", "if(l&&c-l.at<n)return l.read", "if(l)return l.read", "young"],
     ["a failed read kept", "u.catch(()=>{a.get(s)===d&&a.delete(s)})", "u.catch(()=>{})", "young"],
     ["a W's read shared (every getMultipleAccounts)", "t===`getMultipleAccounts`&&Array.isArray(n[0])&&n[0].includes(e)", "t===`getMultipleAccounts`", "young"],
-    ["nothing forgotten after a wait", "rR(e.rpcs),e.stopped", "e.stopped", "young"],
+    ["nothing forgotten after a leg's wait", "return{error:`failed`};nR(e.rpcs);continue}", "return{error:`failed`};continue}", "young"],
   ]) {
     const bad = js.replace(from, to);
     assert.notEqual(bad, js, what);

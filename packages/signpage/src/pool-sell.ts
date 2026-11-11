@@ -619,10 +619,10 @@ async function sellRuns(h: PoolSellHost, ask: PoolAsk, later: Later, w: BuyWalle
       const ms = waits.next(later.fault);
       if (ms !== null) {
         await waitUnless(h.wait, ms, h.signal);
-        // every read after the wait its own: none of the sale's young reads from before it
-        forgetYoung(h.rpcs);
         // a sign out during the wait: the sale never starts again (nothing signed)
         if (h.stopped?.() || h.signal?.aborted) return { error: "failed" };
+        // every read after the wait its own: none of the sale's young reads from before it
+        forgetYoung(h.rpcs);
         continue;
       }
     }
