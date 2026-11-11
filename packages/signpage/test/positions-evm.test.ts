@@ -186,6 +186,16 @@ for (const chain of CHAINS) {
   });
 }
 
+test("the live check's Deposited topic and pool RPCs are the page's own (scripts/live-checks/signpage-positions-evm.mjs reaches no package code)", async () => {
+  const { keccak_256 } = await import("@noble/hashes/sha3.js");
+  const { EVM_POOL_EVENTS } = await import("../../wallet/src/pool/evm.ts");
+  const { TESTNET_RPCS } = await import("../src/pool-testnet.ts");
+  const live = (await import(new URL("../../../scripts/live-checks/signpage-positions-evm.mjs", import.meta.url).href)) as { DEPOSITED: string };
+  const buy = (await import(new URL("../../../scripts/live-checks/signpage-evm-pool-buy.mjs", import.meta.url).href)) as { RPCS: Record<string, readonly string[]> };
+  assert.equal(live.DEPOSITED, `0x${Buffer.from(keccak_256(new TextEncoder().encode(EVM_POOL_EVENTS.Deposited))).toString("hex")}`);
+  assert.deepEqual([...buy.RPCS["base-sepolia"]!], [...TESTNET_RPCS.base], "the pair the page reads Base Sepolia positions on");
+});
+
 test("the stagger: a pass starts its step after it is asked, and a stop before then runs nothing", async () => {
   const timers: { f: () => void; ms: number }[] = [];
   const setTimer = (f: () => void, ms: number) => void timers.push({ f, ms });
@@ -248,6 +258,8 @@ test("the page: Base's and Robinhood's positions beside Solana's, staggered; a b
       },
     },
   });
+  let told = 0;
+  t.watch(() => told++);
   const run = async () => {
     for (let i = 0; i < 50; i++) {
       await tick();
@@ -263,6 +275,7 @@ test("the page: Base's and Robinhood's positions beside Solana's, staggered; a b
     { chain: "robinhood", token: TOKEN, amount: "3", cost: "0", wallets: [W2.toLowerCase()], decimals: 6 },
   ]);
   for (const c of CHAINS) assert.deepEqual(per(ch[c], 0), { eth_blockNumber: 1, balanceOf: 1, decimals: 1 }, `${c}: one pass, its reads bounded`);
+  assert.ok(told >= 2, `the page's state is read again when an EVM chain's positions change (told ${told})`);
   assert.deepEqual(asked.filter((ms) => ms < 5_000).sort((a, b) => a - b), [EVM_POSITIONS_STAGGER_MS, 2 * EVM_POSITIONS_STAGGER_MS], "Base one step after Solana's pass, Robinhood two");
   // what SIGN_HOST then sends the app: the terminal's EVM sell test reads this very state
   const sent = withPositions(await withPools(SIGNED_IN, async () => [], PAGE_POOLS), ((await t.positions()) ?? []).filter((p) => p.chain === "base"));

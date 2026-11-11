@@ -1194,6 +1194,10 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
               { ...over.positions, kept: undefined },
             ),
       );
+      // a change of this chain's positions reads the page's state again, as Solana's does (positions.watch below)
+      evmPositionsCaches.get(chain)?.watch(() => {
+        for (const f of watchers) f();
+      });
     }
     return evmPositionsCaches.get(chain)!;
   };
