@@ -126,3 +126,39 @@ test("the bundle half alone: a pinned bundle naming every seat and no old state 
   assert.equal(judgeBundleOnly(await readBundle(served(seated().replace(`"${seats[0]}"`, "")))).ok, false);
   assert.deepEqual(judgeBundleOnly(await readBundle(served(seated(), "sha384-other"))).lines, ["BAD SIGN_HOST's served /app.js is not the one index.html pins"]);
 });
+
+// Release 116's sign live run 43024665974 (job 130536379256): "FAIL base.api.pocket.network: block 56057255: not a block",
+// a seat that answered null for a block below both seats' latest (a backend behind the one that answered "latest").
+const POCKET = A.good.pairs[0].seats[1];
+const byNumber = (e, seat = POCKET) => e.url === seat && e.method === "eth_getBlockByNumber" && /^0x/.test(e.params[0]);
+test("planted: a seat that does not know the newest agreed block yet is read again, and still behind on the last read is INCONCLUSIVE naming it", async () => {
+  const first = A.good.log.find((e) => byNumber(e));
+  const once = A.good.log.flatMap((e) => (e === first ? [{ ...e, result: null }, e] : [e]));
+  const waits = [];
+  const r = await run({ ...A.good, log: once }, { sleep: async (ms) => void waits.push(ms) });
+  assert.equal(r.verdict, "PASS", r.lines.join("\n"));
+  assert.deepEqual(waits, [2_000], "behind once: read again from the newest block");
+  const always = A.good.log.map((e) => (e === first ? { ...e, result: null } : e));
+  const waited = [];
+  const behind = await run({ ...A.good, log: always }, { sleep: async (ms) => void waited.push(ms) });
+  assert.equal(behind.verdict, "INCONCLUSIVE", behind.lines.join("\n"));
+  assert.equal(waited.length, 4);
+  assert.match(behind.lines.at(-1), /^base\.api\.pocket\.network: block \d+: not known yet, on 5 reads 2000 ms apart$/);
+});
+test("planted: a seat behind the final block, or answering a state read at the newest block with the words of a block not held, is INCONCLUSIVE; a pruned state still fails", async () => {
+  const low = A.good.log.filter((e) => byNumber(e)).at(-1);
+  assert.equal((await run({ ...A.good, log: A.good.log.map((e) => (e === low ? { ...e, result: null } : e)) })).verdict, "INCONCLUSIVE", "the final block");
+  const robin = A.good.pairs[1].seats[0];
+  const notHeld = A.good.log.map((e) => (e.url === robin && e.method === "eth_getBalance" ? { url: e.url, method: e.method, params: e.params, error: { code: -32000, message: "header not found" } } : e));
+  const r = await run({ ...A.good, log: notHeld });
+  assert.equal(r.verdict, "INCONCLUSIVE", r.lines.join("\n"));
+  assert.match(r.lines.at(-1), /^rpc\.mainnet\.chain\.robinhood\.com: U's balance at the newest block \d+: RPC error -32000: header not found: the block not known yet, on 5 reads 2000 ms apart$/);
+  const pruned = A.good.log.map((e) => (e.url === robin && e.method === "eth_getBalance" ? { url: e.url, method: e.method, params: e.params, error: { code: 27, message: "Unknown state. First available state is 1" } } : e));
+  assert.equal((await run({ ...A.good, log: pruned })).verdict, "FAIL", "drpc's code 27 is a state not kept, the check's subject");
+});
+test("planted: a seat that knows the block and answers it wrong still fails", async () => {
+  const first = A.good.log.find((e) => byNumber(e));
+  const r = await run({ ...A.good, log: A.good.log.map((e) => (e === first ? { ...e, result: { number: e.result.number } } : e)) });
+  assert.equal(r.verdict, "FAIL", r.lines.join("\n"));
+  assert.match(r.lines.at(-1), /^base\.api\.pocket\.network: block \d+: not a block$/);
+});

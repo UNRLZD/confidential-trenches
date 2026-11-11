@@ -197,3 +197,28 @@ test("each run is read against the pool set of its time: the first set's runs it
     assert.throws(() => poolRecordAt(c, "2026-11-01T00:00:00.000Z"), /no pool deployed on/);
   }
 });
+
+// A block below both RPCs' newest that one does not hold yet (a null by number: the pattern of release 116's sign live
+// run 43024665974) is read again from the newest, and still null on the last read is INCONCLUSIVE naming that RPC;
+// two RPCs that hold it with two hashes still fail.
+test("planted: an RPC behind the newest agreed block is read again, INCONCLUSIVE named when still behind; two hashes still FAIL", async () => {
+  const run = A.runs[0];
+  const lowRead = (e) => e.url === run.urls[1] && e.method === "eth_getBlockByNumber" && /^0x/.test(String(e.params?.[0]));
+  const last = run.good.filter(lowRead).at(-1);
+  const waits = [];
+  const sleep = async (ms) => void waits.push(ms);
+  const once = run.good.flatMap((e) => (e === last ? [{ ...e, result: null }, e] : [e]));
+  const r1 = await check(run.record, replayer(once), run.urls, sleep);
+  assert.equal(r1.ok, true, r1.lines.join("\n"));
+  assert.deepEqual(waits, [2_000]);
+  const always = run.good.map((e) => (e === last ? { ...e, result: null } : e));
+  const r2 = await check(run.record, replayer(always), run.urls, sleep);
+  assert.equal(r2.ok, false);
+  assert.equal(r2.inconclusive, true, r2.lines.join("\n"));
+  assert.match(r2.lines.at(-1), new RegExp(`block \\d+: ${new URL(run.urls[1]).host.replace(/\./g, "\\.")} did not know it yet after 5 reads 2000 ms apart: INCONCLUSIVE$`));
+  const fork = run.good.map((e) => (e === last ? { ...e, result: { ...e.result, hash: `0x${"22".repeat(32)}` } } : e));
+  const r3 = await check(run.record, replayer(fork), run.urls, sleep);
+  assert.equal(r3.ok, false);
+  assert.notEqual(r3.inconclusive, true, "a block both hold with two hashes");
+  assert.match(r3.lines.at(-1), /two hashes on the two RPCs$/);
+});
