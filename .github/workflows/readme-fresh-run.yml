@@ -16,22 +16,11 @@
 #   actions/checkout v7.0.1, actions/setup-node v7.1.0, pnpm/action-setup v6.1.0.
 name: readme-fresh-run
 
+# Nightly on main and by hand only (card ci-fast-checks-on-the-pr): no pull request waits on it.
 on:
-  pull_request:
-    branches: [main]
-    paths:
-      - README.md
-      - AGENTS.md
-      - "**/package.json"
-      - pnpm-lock.yaml
-      - pnpm-workspace.yaml
-      - "**/*.test.*"
-      - "**/test/**"
-      - "**/scripts/**"
-      - .github/workflows/readme-fresh-run.yml
-  # weekly until 25 Nov 2026 (the window job below skips every later run)
+  # nightly until 25 Nov 2026 (the window job below skips every later run)
   schedule:
-    - cron: "41 5 * * 1"
+    - cron: "41 5 * * *"
   workflow_dispatch:
 
 permissions:
@@ -51,7 +40,7 @@ jobs:
       - id: window
         run: |
           if [ "$GITHUB_EVENT_NAME" = schedule ] && [ "$(date -u +%F)" \> 2026-11-25 ]; then
-            echo "the weekly run ended on 2026-11-25"
+            echo "the nightly run ended on 2026-11-25"
             echo "open=false" >> "$GITHUB_OUTPUT"
           else
             echo "open=true" >> "$GITHUB_OUTPUT"

@@ -65,18 +65,18 @@ import { SolanaRpcTransportError } from "../../kit/src/trade/solana/send.ts";
 import { freshWallet } from "../../wallet/src/derive/keys.ts";
 import { noteSecrets, type NoteRef } from "../../wallet/src/notes/secrets.ts";
 import type { NoteRecord, NoteStore } from "../../wallet/src/notes/store.ts";
-import { EVM_SEND_MARGIN_MS, type EvmPoolEvent, type EvmPoolPin, type EvmRpc } from "../../wallet/src/pool/evm.ts";
+import { EvmLagError, EvmUnansweredError, EVM_SEND_MARGIN_MS, type EvmPoolEvent, type EvmPoolPin, type EvmRpc } from "../../wallet/src/pool/evm.ts";
 import { evmClaimTaken, evmNextNote, EvmNotFinalError } from "../../wallet/src/pool/evm-restore.ts";
 import { evmSellSent } from "../../wallet/src/pool/evm-releases.ts";
 import { evmSellBan, evmSellBanned } from "../../wallet/src/pool/evm-sell-bans.ts";
 import { jOf } from "../../wallet/src/pool/queue.ts";
-import { throttleWaitMs } from "../../wallet/src/throttle.ts";
 import { WALLET_SEED_LOCK, type WalletStore } from "@blindfill/wallet/store";
 import { checkEvmAuthorization, checkEvmSell, checkEvmSellSim, PoolRuleRefused, signEvmAuthorization, signEvmSell, signEvmSellSim, tokenDecimalsOf, type PoolAsk, type PoolContext } from "./rules/pool.ts";
 import { EvmSendBusy, EvmSendRefused, evmBuyCalldataRead, evmSellSelector, evmDepositedRead, evmHeadNumber, evmSellCalldata, evmSellSend, evmSellVerdict, type EvmDepositedRead, type EvmSellAuthorization, type EvmSellVerdict } from "./evm-send.ts";
 import { EVM_BUY_HEAD_SPREAD, EVM_BUY_LAG_MS, EVM_POSITION_COSTS_KEY, type EvmHolding } from "./pool-buy-evm.ts";
-import { ERC20_DECIMALS, keptTokenDecimals, TOKEN_DECIMALS_THROTTLE, type PoolRpc } from "./pool-kinds.ts";
-import { POOL_SELL_THROTTLE_WAITS, stageOfLegs, type PoolSellAnswer, type PoolSellLeg } from "./pool-sell.ts";
+import { ERC20_DECIMALS, keptTokenDecimals, type PoolRpc } from "./pool-kinds.ts";
+import { stageOfLegs, type PoolSellAnswer, type PoolSellLeg } from "./pool-sell.ts";
+import { clockOf as readClockOf, readWaits, stopOf, tapDone, tapWaits, waitsOn, waitUnless, type ReadWaits } from "./read-waits.ts";
 import { TRADE_HELPER } from "./trade.ts";
 import type { HostAnswer, HostRefusal, KindContext, Running } from "./api.ts";
 
@@ -178,6 +178,10 @@ export type EvmSellHost = {
   sent?(): void;
   late?(a: { stage: TradeStage; txs: TxRef[] }): void;
   signal?: AbortSignal;
+  /** The session's sign out, aborted at its tap: it ends a wait between the reads' attempts (read-waits.ts waitUnless). */
+  stop?: AbortSignal;
+  /** The tap's one bound on those waits (read-waits.ts tapWaits); a fresh bound when none is given. */
+  waits?: ReadWaits;
   stopped?(): boolean;
   now?(): bigint;
   wait?(ms: number): Promise<void>;
@@ -187,28 +191,28 @@ const clockOf = (h: Pick<EvmSellHost, "now">) => (): bigint => h.now?.() ?? BigI
 const waitOf = (h: Pick<EvmSellHost, "wait">) => h.wait ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
 const networkOf = (h: Pick<EvmSellHost, "chain" | "testnet">): EvmPoolChain => (h.testnet ? (h.chain === "base" ? "base-sepolia" : "robinhood-testnet") : h.chain);
 
-/** A provider's throttle: a JSON-RPC client's 429 or rate-limit answer, or the kit quote's own rpc_error (its pinned
- *  providers' clients). */
-const throttled = (e: unknown): number | null => {
-  if (e instanceof SolanaRpcTransportError && (e.fault === "http_429" || e.fault === "rpc_throttled")) return e.afterMs ?? 0;
-  return null;
-};
 const unanswered = (e: unknown): boolean => e instanceof SolanaRpcTransportError || (e as { code?: unknown })?.code === "rpc_error";
+/** A provider read that failed past its client's own retry (the page's one rule, card start-reads-wait-out-a-throttle):
+ *  the page client's transport fault, the EVM reads' own unanswered and lag faults, or the kit quote's rpc_error (its
+ *  pinned providers' clients). Any other error answers at once. */
+const waitable = (e: unknown): boolean => waitsOn(e) || e instanceof EvmUnansweredError || e instanceof EvmLagError || (e as { code?: unknown })?.code === "rpc_error";
 
-/** `f` again after a throttle, by the wallet's one rule (throttleWaitMs, pool-kinds.ts's bounds), at most
- *  POOL_SELL_THROTTLE_WAITS times; then "down". `f` reads everything it signs on from its start, so nothing after a wait
- *  is signed on a read from before it. */
-async function patient<T>(h: Pick<EvmSellHost, "wait" | "stopped">, f: () => Promise<T>): Promise<T> {
-  const wait = waitOf(h);
-  for (let n = 0, pause = 0; ; n++) {
+/** `f` again after a provider read that failed before W signs, on the page's one rule (read-waits.ts readWaits: from
+ *  1 s, doubling, at most 10 s, inside the tap's one bound `h.waits`); then "down". A sign out ends a wait, and `f`
+ *  never runs after it ("failed"). `f` reads everything it signs on from its start, so nothing after a wait is signed
+ *  on a read from before it. */
+async function patient<T>(h: Pick<EvmSellHost, "wait" | "stopped" | "signal" | "stop" | "waits" | "now">, f: () => Promise<T>): Promise<T> {
+  const waits = h.waits ?? readWaits(readClockOf(h));
+  const stop = stopOf(h);
+  for (;;) {
     try {
       return await f();
     } catch (e) {
-      const after = throttled(e) ?? ((e as { code?: unknown })?.code === "rpc_error" ? 0 : null);
-      if (after === null) throw e;
-      if (n >= POOL_SELL_THROTTLE_WAITS || h.stopped?.()) return no("down");
-      pause = throttleWaitMs(pause, after, TOKEN_DECIMALS_THROTTLE);
-      await wait(pause);
+      if (!waitable(e)) throw e;
+      const ms = h.stopped?.() ? null : waits.next(e);
+      if (ms === null) return no("down");
+      await waitUnless(h.wait, ms, stop);
+      if (h.stopped?.() || stop?.aborted) return no("failed");
     }
   }
 }
@@ -747,7 +751,9 @@ export async function followEvmSells(h: EvmSellHost): Promise<void> {
 
 /** One pool.sell on an EVM chain: the ask is the user's own (rules/pool.ts checkPoolRequest passed it, with the token's
  *  decimals): its plan, then each leg in turn up to its send, their read-backs side by side. */
-export async function runEvmPoolSell(h: EvmSellHost, ask: PoolAsk): Promise<PoolSellAnswer> {
+export async function runEvmPoolSell(host: EvmSellHost, ask: PoolAsk): Promise<PoolSellAnswer> {
+  // one tap's waits: its plan's and every sale's share the rule's one bound (read-waits.ts READ_WAIT_TOTAL_MS)
+  const h: EvmSellHost = host.waits ? host : { ...host, waits: readWaits(readClockOf(host)) };
   let plan: EvmSellPlan;
   try {
     plan = await patient(h, () => planEvmSell(h, ask));
@@ -842,18 +848,21 @@ export async function evmBuyRouteRead(rpcs: readonly [EvmRpc, EvmRpc], network: 
 /** Each restored buy's record written (see above): a W with a record keeps it, a record with no route block takes the
  *  read one. A spend whose read fails is left: its W is not sold until a later restore reads it (the sell refuses a W
  *  with no route). Returns the Ws written. */
-export async function restoreEvmHoldings(a: { chain: Chain; testnet: boolean; pin: EvmPoolPin; rpcs: readonly [EvmRpc, EvmRpc]; store: Pick<WalletStore, "get" | "update">; spends: readonly EvmBuySpend[] }): Promise<string[]> {
+export async function restoreEvmHoldings(a: { chain: Chain; testnet: boolean; pin: EvmPoolPin; rpcs: readonly [EvmRpc, EvmRpc]; store: Pick<WalletStore, "get" | "update">; spends: readonly EvmBuySpend[]; signal?: AbortSignal }): Promise<string[]> {
   const network = networkOf(a);
   const out: string[] = [];
   for (const s of a.spends) {
+    // a sign out ends the restore: no read starts after it (card restore-first-sign-in-under-two-minutes)
+    a.signal?.throwIfAborted();
     let route: EvmHolding["route"];
     let decimals: number;
     try {
       route = await evmBuyRouteRead(a.rpcs, network, a.pin.pool, s);
-      decimals = await keptTokenDecimals(a.chain, s.token, a.rpcs as readonly [PoolRpc, PoolRpc]);
+      decimals = await keptTokenDecimals(a.chain, s.token, a.rpcs as readonly [PoolRpc, PoolRpc], a.signal ? { signal: a.signal } : {});
     } catch {
       continue;
     }
+    a.signal?.throwIfAborted();
     const w = s.w;
     let wrote = false;
     await a.store.update("meta", EVM_POSITION_COSTS_KEY, (v) => {
@@ -885,6 +894,8 @@ export type EvmSellPage = {
   testnet: boolean;
   fetch?: typeof fetch;
   signal?: AbortSignal;
+  /** The session's sign out, aborted at its tap (EvmSellHost.stop). */
+  stop?: AbortSignal;
   stopped?(): boolean;
 };
 
@@ -921,6 +932,7 @@ export function evmSellHost(chain: Chain, pin: EvmPoolPin, scope: bigint, rpcs: 
     ...(page.sending ? { sending: page.sending } : {}),
     ...(page.keep ? { keep: page.keep } : {}),
     signal: page.signal,
+    ...(page.stop ? { stop: page.stop } : {}),
     stopped: page.stopped,
   };
 }
@@ -932,6 +944,8 @@ type Locks = Pick<LockManager, "request">;
 export function poolSellEvmKind(host: () => EvmSellHost & { end?(): void }, locks: Locks | null = globalThis.navigator?.locks ?? null) {
   return (ask: PoolAsk, ctx: KindContext | null): HostRefusal | Running<"pool.sell"> => {
     if (ask.kind !== "pool.sell" || (ask.chain !== "base" && ask.chain !== "robinhood") || !locks) return { error: "not_allowed" };
+    // the tap's one bound, from its arrival (pool-kinds started it already when the sell came through its decimals read)
+    const waits = tapWaits(ctx);
     let answer: HostAnswer<"pool.sell"> | HostRefusal | null = null;
     let give!: () => void;
     const answered = new Promise<void>((r) => (give = r));
@@ -941,6 +955,7 @@ export function poolSellEvmKind(host: () => EvmSellHost & { end?(): void }, lock
         const a = await runEvmPoolSell(
           {
             ...h,
+            waits,
             hold: (f) => locks.request(WALLET_SEED_LOCK, { mode: "shared" }, f),
             sent: () => {
               if (!answer) answer = { result: { stage: "sent", txs: [] } };
@@ -960,7 +975,8 @@ export function poolSellEvmKind(host: () => EvmSellHost & { end?(): void }, lock
         if (!answer) answer = { error: "failed" };
       })
       .finally(give);
-    void run;
+    // the request's run ended: its bound dropped (read-waits.ts tapDone)
+    void run.then(() => tapDone(ctx, waits));
     return { running: true, after: answered, answer: () => answer ?? { error: "failed" } };
   };
 }

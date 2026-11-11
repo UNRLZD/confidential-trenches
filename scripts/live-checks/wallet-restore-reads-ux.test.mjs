@@ -17,6 +17,9 @@
 // - bad_filter_one_amount and bad_filter_both_nonzero: delta review 2's P2-A plants A5 and A6 (the held reader drops an
 //   asset one provider reads at 0, so 0 there and 5 USDC on the other ends done): FAIL on the bundle alone.
 // The recorded getBalance answers are also the restore tests' U_X reads (packages/signpage/test/pool-restore.test.ts).
+// Card restore-first-sign-in-under-two-minutes (first in release 115) re-anchored step 5's head: the readers opened and
+// each held read waited on through letGo on the run's own signal, letGo held by its body; it re-recorded good alone from
+// its build (11 Nov, --local).
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
@@ -120,13 +123,21 @@ test("the bundle facts hold this build's lines, never a carry, a read or a held 
   assert.equal(mut(/:([\w$]+)>1n&&([\w$]+)\.push\(\{why:`holds/, ":!1&&$2.push({why:`holds").id_held, false, "money above the kept unit not named");
   assert.equal(mut(/&&!([\w$]+)\.startsWith\(`nep141:`\)\?/, "&&!1?").id_held, false, "an NFT or multi-token read as moved-out dust (review P3-4)");
   assert.equal(mut(/amounts:\[([\w$]+)\.get\(([\w$]+)\)\?\?0n,([\w$]+)\.get\(\2\)\?\?0n\]/, "amounts:[$1.get($2)??0n,$1.get($2)??0n]").id_held, false, "one provider's map gives both amounts (review P2-2)");
-  assert.equal(mut(/,([\w$]+)=await ([\w$]+)\(([\w$]+),([\w$]+),([\w$]+),\{\.\.\.([\w$]+)\.opts,signal:([\w$]+)\}\),([\w$]+)=async\(/, ",$1=async e=>[],$8=async(").id_held, false, "step 5's held reader returns nothing (review P2-2)");
+  assert.equal(mut(/,([\w$]+)=([\w$]+)=>([\w$]+)\(([\w$]+)\(\2\),([\w$]+)\),([\w$]+)=async\(/, ",$1=async $2=>[],$6=async(").id_held, false, "step 5's held reader returns nothing (review P2-2)");
+  // card restore-first-sign-in-under-two-minutes: each held read waited on through letGo on the run's signal, and letGo
+  // its own body: a read not let go, one let go on another signal, and a letGo that never stops at the abort fail
+  assert.equal(mut(/,([\w$]+)=([\w$]+)=>([\w$]+)\(([\w$]+)\(\2\),([\w$]+)\),([\w$]+)=async\(/, ",$1=$2=>$4($2),$6=async(").id_held, false, "a held read not let go");
+  assert.equal(mut(/,([\w$]+)=([\w$]+)=>([\w$]+)\(([\w$]+)\(\2\),([\w$]+)\),([\w$]+)=async\(/, ",$1=$2=>$3($4($2),__other),$6=async(").id_held, false, "a held read let go on another signal");
+  assert.equal(mut(/\?\(([\w$]+)\.catch\(\(\)=>\{\}\),Promise\.reject\(([\w$]+)\.reason\)\):new Promise\(\(([\w$]+),([\w$]+)\)=>\{let ([\w$]+)=\(\)=>\4\(\2\.reason\);\2\.addEventListener\(`abort`,\5,\{once:!0\}\),/, "?($1.catch(()=>{}),Promise.reject($2.reason)):new Promise(($3,$4)=>{let $5=()=>$4($2.reason);").id_held, false, "a letGo that never stops at the abort");
   // on main's keptIdReader (merge of wallet-id-reader-paced): the held reader opened on another pass or pair than the id
   // reader's, or without the run's signal, is not step 5's
-  const head = /let\{rpcs:([\w$]+),pass:([\w$]+),reader:([\w$]+)\}=await ([\w$]+)\(([\w$]+),([\w$]+)\.rpcs,([\w$]+),\{\.\.\.\6\.opts,signal:([\w$]+)\}\),([\w$]+)=await ([\w$]+)\(\5,\1,\2,\{\.\.\.\6\.opts,signal:\8\}\),/;
-  assert.equal(mut(head, "let{rpcs:$1,pass:$2,reader:$3}=await $4($5,$6.rpcs,$7,{...$6.opts,signal:$8}),$9=await $10($5,$1,__pass,{...$6.opts,signal:$8}),").id_held, false, "the held reader on another pass");
-  assert.equal(mut(head, "let{rpcs:$1,pass:$2,reader:$3}=await $4($5,$6.rpcs,$7,{...$6.opts,signal:$8}),$9=await $10($5,$6.rpcs(),$2,{...$6.opts,signal:$8}),").id_held, false, "the held reader on a new pair");
-  assert.equal(mut(head, "let{rpcs:$1,pass:$2,reader:$3}=await $4($5,$6.rpcs,$7,{...$6.opts,signal:$8}),$9=await $10($5,$1,$2,$6.opts??{}),").id_held, false, "the held reader without the run's signal");
+  // (card restore-first-sign-in-under-two-minutes: both opened through letGo, `$4`, on the run's signal)
+  const head = /let\{rpcs:([\w$]+),pass:([\w$]+),reader:([\w$]+)\}=await ([\w$]+)\(([\w$]+)\(([\w$]+),([\w$]+)\.rpcs,([\w$]+),\{\.\.\.\7\.opts,signal:([\w$]+)\}\),\9\),([\w$]+)=await \4\(([\w$]+)\(\6,\1,\2,\{\.\.\.\7\.opts,signal:\9\}\),\9\),/;
+  const opened = "let{rpcs:$1,pass:$2,reader:$3}=await $4($5($6,$7.rpcs,$8,{...$7.opts,signal:$9}),$9),$10=await $4(";
+  assert.equal(mut(head, `${opened}$11($6,$1,__pass,{...$7.opts,signal:$9}),$9),`).id_held, false, "the held reader on another pass");
+  assert.equal(mut(head, `${opened}$11($6,$7.rpcs(),$2,{...$7.opts,signal:$9}),$9),`).id_held, false, "the held reader on a new pair");
+  assert.equal(mut(head, `${opened}$11($6,$1,$2,$7.opts??{}),$9),`).id_held, false, "the held reader without the run's signal");
+  assert.equal(mut(head, "let{rpcs:$1,pass:$2,reader:$3}=await $4($5($6,$7.rpcs,$8,{...$7.opts,signal:$9}),$9),$10=await $11($6,$1,$2,{...$7.opts,signal:$9}),").id_held, false, "the held reader opened not let go");
   assert.equal(mut(/(for\(let\{asset:([\w$]+),amounts:\[([\w$]+),([\w$]+)\]\}of [\w$]+\))\3===\4\?/, "$1!0?").id_held, false, "two providers read apart taken");
   assert.equal(mut(/let\[([\w$]+),([\w$]+)\]=await Promise\.all\(\[([\w$]+)\(([\w$]+)\[0\],([\w$]+)\),\3\(\4\[1\],\5\)\]\);return\[\.\.\.new Set/, "let[$1,$2]=await Promise.all([$3($4[0],$5),$3($4[0],$5)]);return[...new Set").id_held, false, "one provider read twice");
   // delta review 2: the held reader's filter (P2-A plants A5, A6), readOn's intents.near and token reads and step 5's

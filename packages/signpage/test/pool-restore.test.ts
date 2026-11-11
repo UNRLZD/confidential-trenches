@@ -1725,3 +1725,77 @@ test("restore: the mainnet build reads no EVM buy's transaction and writes no bu
   assert.equal(await w.store.get("meta", EVM_POSITION_COSTS_KEY), undefined);
   assert.deepEqual(asked, []);
 });
+
+// card restore-first-sign-in-under-two-minutes (release 114's live run 42935167402): a sign out ends the run at once at
+// every stage, the walk's and step 5's alike: its reads in flight are let go of (the run waits on none of them), and no
+// read starts after it
+// each run below is awaited whole: a run that waits on a read past its sign out never ends, and the test's own timeout
+// fails it
+test("a sign out during the walk ends the run at once: the walk's signal ends it, nothing read after", { timeout: 5_000 }, async () => {
+  const n = nearOf();
+  let r: ReturnType<typeof poolRestore> | null = null;
+  let had: AbortSignal | undefined;
+  let entered: () => void = () => {};
+  const walking = new Promise<void>((ok) => (entered = ok));
+  // a walk that ends only at its signal, as the pool walks do since this card (they yield and check it)
+  const walk = (async (a: { signal?: AbortSignal }) => {
+    had = a.signal;
+    entered();
+    setTimeout(() => r!.signedOut(), 20);
+    return new Promise((_, no) => a.signal?.addEventListener("abort", () => no(a.signal!.reason), { once: true }));
+  }) as never;
+  const w = await world({ pools: () => SOL_ONLY, solana: walk, ids: n.ids, pausesMs: [1, 1, 1, 1] });
+  r = w.r;
+  const run = w.r.auto().catch(() => null);
+  await walking;
+  await run.then(() => w.r.idle());
+  assert.ok(had instanceof AbortSignal && had.aborted, "the walk had the run's signal, ended");
+  await new Promise((ok) => setTimeout(ok, 50));
+  assert.equal(n.log.length, 0, "no id read after it");
+});
+test("a sign out during step 5's first try ends the run at once though an id read never answers, nothing read after", { timeout: 10_000 }, async () => {
+  let r: ReturnType<typeof poolRestore> | null = null;
+  const log: string[] = [];
+  let first = true;
+  // the recorded operators, but no id read is ever answered: the sign out lands while one is in flight
+  const hang = (url: string): NearRpc => {
+    const base = replay(url, new Map(), []);
+    return {
+      name: url,
+      query: async (params) => {
+        const u = (params.request_type === "view_account" ? params.account_id : argsOf(params).account_id) as string;
+        if (u === "intents.near") return base.query(params);
+        log.push(`${url} ${u}`);
+        if (first) (first = false), setTimeout(() => r!.signedOut(), 20);
+        return new Promise(() => {});
+      },
+    } as NearRpc;
+  };
+  const ids: NonNullable<PoolRestoreHost["ids"]> = { rpcs: () => [hang(FAST), hang(DRPC)], opts: { tries: 1, sleep: async () => {}, now: () => performance.now() }, read: () => {} };
+  const w = await world({ pools: () => SOL_ONLY, solana: emptyWalk, ids, pausesMs: [1, 1, 1, 1] });
+  r = w.r;
+  // the sign out lands on the run's first NEAR read, whichever step makes it
+  await w.r.auto().catch(() => null).then(() => w.r.idle());
+  assert.ok(log.length > 0, "a read was in flight");
+  const at = log.length;
+  await new Promise((ok) => setTimeout(ok, 50));
+  assert.equal(log.length, at, "no read after it");
+});
+test("a sign out while the walk's read is in flight ends the run at once though the read never answers: no seed, no read after", { timeout: 10_000 }, async () => {
+  const n = nearOf();
+  let r: ReturnType<typeof poolRestore> | null = null;
+  let entered: () => void = () => {};
+  const reading = new Promise<void>((ok) => (entered = ok));
+  // a walk whose provider read never answers and never looks at the signal (a fetch in flight)
+  const walk = (async () => (entered(), setTimeout(() => r!.signedOut(), 20), new Promise(() => {}))) as never;
+  const w = await world({ pools: () => SOL_ONLY, solana: walk, ids: n.ids, pausesMs: [1, 1, 1, 1] });
+  r = w.r;
+  const run = w.r.auto().catch(() => null);
+  await reading;
+  const seeds = w.seeds.length;
+  await run.then(() => w.r.idle());
+  await new Promise((ok) => setTimeout(ok, 50));
+  assert.equal(w.seeds.length, seeds, "no seed taken after it");
+  assert.ok(w.seeds.every((s) => s.every((b) => b === 0)), "every seed it took is zeroed");
+  assert.equal(n.log.length, 0, "no id read after it");
+});

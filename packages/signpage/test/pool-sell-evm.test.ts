@@ -27,6 +27,8 @@ import { EVM_POSITION_COSTS_KEY, type EvmHolding } from "../src/pool-buy-evm.ts"
 import { EvmSendBusy, EvmSendNoAnswer, EvmSendRefused, evmBuyCalldata, evmSellSend } from "../src/evm-send.ts";
 import { EVM_OPEN_SELLS_KEY, evmBuyRouteRead, evmSellPlanQuote, followEvmSells, runEvmPoolSell, type EvmOpenSell, type EvmSellHost } from "../src/pool-sell-evm.ts";
 import type { PoolAsk } from "../src/rules/pool.ts";
+import { SolanaRpcTransportError } from "../../kit/src/trade/solana/send.ts";
+import { READ_WAIT_TOTAL_MS } from "../src/read-waits.ts";
 
 const LIB = new URL("../../../contracts/pool-evm/script/testnet-run-lib.mjs", import.meta.url).href;
 const { sellData } = (await import(LIB)) as { sellData: (...a: unknown[]) => string };
@@ -359,6 +361,8 @@ test("past the deadline's margin the sale is signed once more on the same nonce 
 
 test("a page closed between the record and the send: a reload's follow puts the note back PLANNED past the deadline, record dropped", async () => {
   const x = await world({ send: () => new Promise<string>(() => {}) });
+  // the closed page's tap: its bound on the send the test's own, so its timer does not hold the test's process 20 s
+  x.h.sendTapMs = 1;
   void runEvmPoolSell(x.h, ASK);
   for (let i = 0; i < 200 && (await openOf(x)).length === 0; i++) await new Promise((r) => setImmediate(r));
   for (let i = 0; i < 200 && x.posts.length === 0; i++) await new Promise((r) => setImmediate(r));
@@ -383,6 +387,8 @@ test("a page closed between the send and the read-back: a reload's follow lands 
       return new Promise<string>(() => {});
     },
   });
+  // the closed page's tap: its bound on the send the test's own, so its timer does not hold the test's process 20 s
+  x.h.sendTapMs = 1;
   void runEvmPoolSell(x.h, ASK);
   for (let i = 0; i < 400 && x.posts.length === 0; i++) await new Promise((r) => setImmediate(r));
   assert.equal(x.posts.length, 1);
@@ -501,8 +507,10 @@ test("P1-1: half, then the other half at once while the first sale's deposit is 
   await followEvmSells(x.h);
   assert.deepEqual(await saleNotes(x.store), [`${refKey(RETURN)} UNSPENT`, `${refKey(R0)} UNSPENT`]);
   assert.deepEqual(await openOf(x), []);
-  // a wiped device: the words and the pool's events alone give both notes back
-  const r = evmRestore({ seed64: SEED, scope: SCOPE, events: x.c.events });
+  // a wiped device: the words and the pool's events alone give both notes back (the walk's gap the test's own: the
+  // pool's one deposit is lane 0's first index, and RESTORE_GAP's 8 x 10,000 misses are 28 s of pure hashing; the
+  // return note's chain walks SECOND_GAP as on the device)
+  const r = evmRestore({ seed64: SEED, scope: SCOPE, events: x.c.events, gap: 4 });
   assert.deepEqual(r.notes.filter((n) => n.ref.kind === "return" || n.ref.kind === "second").map((n) => [refKey(n.ref), n.leaf.value]), [
     [refKey(RETURN), s1!.minOut - s1!.fee],
     [refKey(R0), s2!.minOut - s2!.fee],
@@ -860,4 +868,38 @@ test("review F3b: a sign out during a send past the tap's bound frees the note's
   stop.abort();
   for (let i = 0; i < 3; i++) await Promise.all(kept);
   assert.equal(x.h.following.size, 0);
+});
+
+// the page's one rule for a kind's reads (card start-reads-wait-out-a-throttle, src/read-waits.ts), the sale's too: a
+// provider read that fails before W signs is made again after a wait from 1 s, doubling, at most 10 s, inside the tap's
+// one bound, then "down"; a sign out ends a wait at once, and nothing runs after it
+test("a throttled read before W signs: the rule's waits inside the tap's one bound, then down, nothing sent", async () => {
+  const x = await world();
+  const waited: number[] = [];
+  let reads = 0;
+  x.h.holdings = async () => {
+    reads++;
+    throw new SolanaRpcTransportError("http_429", "HTTP 429", 1, "rpc.test");
+  };
+  x.h.wait = async (ms) => (waited.push(ms), tick(ms));
+  assert.deepEqual(await runEvmPoolSell(x.h, ASK), { error: "down" });
+  assert.deepEqual(waited, [1_000, 2_000, 4_000, 8_000, 10_000], "doubling, at most 10 s, none past the tap's bound");
+  assert.ok(waited.reduce((a, b) => a + b, 0) <= READ_WAIT_TOTAL_MS);
+  assert.equal(reads, waited.length + 1, "each attempt reads again from its first read");
+  assert.equal(x.posts.length, 0);
+});
+test("a sign out while the sale's read waits ends the wait at once: failed, nothing read after, nothing sent", { timeout: 5_000 }, async () => {
+  const x = await world();
+  const out = new AbortController();
+  let reads = 0;
+  x.h.holdings = async () => {
+    reads++;
+    throw new SolanaRpcTransportError("http_429", "HTTP 429", 1, "rpc.test");
+  };
+  // a wait that ends only at the sign out
+  x.h.wait = () => (out.abort(), new Promise<void>(() => {}));
+  x.h.stop = out.signal;
+  assert.deepEqual(await runEvmPoolSell(x.h, ASK), { error: "failed" });
+  assert.equal(reads, 1);
+  assert.equal(x.posts.length, 0);
 });

@@ -80,3 +80,38 @@ test("restore: an EVM buy's record is written again from its own transaction, th
   }
   assert.ok(asked.every((a) => !a.includes(W.slice(2)) && !a.includes(TX.slice(2))), "no read names W or the transaction");
 });
+
+// card restore-first-sign-in-under-two-minutes's rule holds for the buy records' reads too: a sign out while one is in
+// flight ends the run at once though the read never answers, and nothing is read after it
+test("restore: a sign out while a buy record's read is in flight ends the run at once, nothing read after", { timeout: 5_000 }, async () => {
+  const store = await openWalletStore({ name: "evm-holdings-sign-out", indexedDB: new IDBFactory() });
+  closers.push(() => store.close());
+  let r: ReturnType<typeof poolRestore> | null = null;
+  const asked: string[] = [];
+  // two providers whose reads never answer and never look at a signal (a fetch in flight)
+  const hang = () => async (method: string): Promise<unknown> => {
+    asked.push(method);
+    if (asked.length === 1) setTimeout(() => r!.signedOut(), 20);
+    return new Promise(() => {});
+  };
+  const spends = [{ l: 202n, j: 0, note: "n", w: W, withdrawn: 1n, block: 0x100n, token: TOKEN, blockHash: BH, logIndex: 3n }];
+  const host: Host = {
+    store: async () => store,
+    seed64: async () => new Uint8Array(64).fill(7),
+    signedIn: async () => true,
+    pools: () => [{ chain: "evm", pin: { network: "base-sepolia", pool: POOL, feeRecipient: "0x0000000000000000000000000000000000000fee", fromBlock: 1n }, scope: 22n, rpcs: () => [hang(), hang()] }],
+    ids: null,
+    ended: () => {},
+    step5: () => {},
+    pausesMs: [],
+    solana: (async () => ({ notes: [], spends: [] })) as never,
+    evm: (async () => ({ notes: [], spends, elsewhere: [], wallets: [], block: 1n })) as never,
+  };
+  r = poolRestore(host);
+  await r.auto().catch(() => null).then(() => r!.idle());
+  assert.ok(asked.length > 0, "a buy record's read was in flight");
+  const at = asked.length;
+  await new Promise((ok) => setTimeout(ok, 50));
+  assert.equal(asked.length, at, "no read after it");
+  assert.equal(await store.get("meta", EVM_POSITION_COSTS_KEY), undefined, "no record written");
+});

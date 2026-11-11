@@ -250,16 +250,17 @@ async function readDepositIds(
   own: { lane: number; raise(scope: bigint, min: number): Promise<void> },
   kept: { of(scope: bigint, laneHighest: readonly (number | null)[]): Promise<ReadonlyMap<number, number>>; add(scope: bigint, lane: number, readTo: number, highest: number | null): Promise<void> },
 ): Promise<void> {
-  const { rpcs, pass, reader } = await keptIdReader(POOL_DEPOSIT_NETWORK, ids.rpcs, keep, { ...ids.opts, signal });
+  const { rpcs, pass, reader } = await letGo(keptIdReader(POOL_DEPOSIT_NETWORK, ids.rpcs, keep, { ...ids.opts, signal }), signal);
   // what an id read as money holds, by asset on both providers at the same pass, opened now beside the id reader on the
   // pass it reads at (the kept one while fresh, else the one just opened): nearIdHeldReader refuses a pass
   // VAULT_SYNC_LAG_MAX blocks old, and step 5 takes minutes
-  const heldOf = await nearIdHeldReader(POOL_DEPOSIT_NETWORK, rpcs, pass, { ...ids.opts, signal });
+  const held = await letGo(nearIdHeldReader(POOL_DEPOSIT_NETWORK, rpcs, pass, { ...ids.opts, signal }), signal);
+  const heldOf: typeof held = (id) => letGo(held(id), signal);
   // each id on the run's signal; an id unread leaves the ids after it read (review P2-2 of 53f5e92f): the lane names
   // it unread and reads on, as restoreDepositIds does past any unread id
   const holds: IdReader = async (u, i) => {
     signal.throwIfAborted();
-    return reader(u, i);
+    return letGo(reader(u, i), signal);
   };
   const undone = (label: string, r: DepositIds): void => {
     for (const y of idsUndoneOf(r)) out[y.kind].push(`${label}: ${y.why}`);
@@ -571,6 +572,23 @@ export type PoolRestore = {
   idle(): Promise<void>;
 };
 
+/**
+ * A read of the run's, waited on only while its signal lasts: at the signal's end it rejects with its reason at once and
+ * the run waits on the read no more (the read's own answer, when it comes, is dropped), so a sign out never waits on a
+ * provider. Each read the run makes goes through it: the walk's whole call (its pool's RPCs are the page's own, kept
+ * across runs with its cache, so they are not bound to one run's signal; the walk checks the signal before each new
+ * read) and each of step 5's NEAR reads (card restore-first-sign-in-under-two-minutes: release 114's walk ran on after a
+ * sign out until its getProgramAccounts answered).
+ */
+export function letGo<T>(read: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return (read.catch(() => {}), Promise.reject(signal.reason));
+  return new Promise<T>((ok, no) => {
+    const stop = (): void => no(signal.reason);
+    signal.addEventListener("abort", stop, { once: true });
+    read.then(ok, no).finally(() => signal.removeEventListener("abort", stop));
+  });
+}
+
 const pause = (ms: number, signal: AbortSignal): Promise<void> =>
   new Promise((res, rej) => {
     signal.throwIfAborted();
@@ -651,11 +669,11 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
           if (p.rpcs === null) throw new Error("no reads on this page");
           if (p.chain === "solana") {
             const lister = p.lister?.();
-            return (await solana({ seed64: seed, program: p.program, rpcs: p.rpcs(), ...(lister ? { lister } : {}), ...(p.cache ? { cache: p.cache } : {}), ...(p.markBatches ? { markBatches: p.markBatches } : {}), signal })).notes;
+            return (await letGo(solana({ seed64: seed, program: p.program, rpcs: p.rpcs(), ...(lister ? { lister } : {}), ...(p.cache ? { cache: p.cache } : {}), ...(p.markBatches ? { markBatches: p.markBatches } : {}), signal }), signal)).notes;
           }
           // the notes only: no W's Transfer logs are read (wallets: false)
           // the page's hold (the deposit's sync's too) and its history sources (card evm-pool-leaves-any-source)
-          const r = await evm({ seed64: seed, pin: p.pin, rpcs: p.rpcs(), signal, wallets: false, held: pageEvmHold(p.pin, () => h.held ? h.held() : h.store()), history: pageEvmHistory(p.pin) });
+          const r = await letGo(evm({ seed64: seed, pin: p.pin, rpcs: p.rpcs(), signal, wallets: false, held: pageEvmHold(p.pin, () => h.held ? h.held() : h.store()), history: pageEvmHistory(p.pin) }), signal);
           // each buy's record again from its own transaction, so a restored W sells on its buy's route (card
           // signpage-evm-pool-sell, pool-sell-evm.ts restoreEvmHoldings: no read names W or a transaction); the testnet
           // build only, as the sell is (POOL_TESTNET is folded at build time, so the mainnet bundle carries none of it)
@@ -706,7 +724,8 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
         // restore reads it
         if (POOL_TESTNET) for (const o of evmHoldingsOwed) {
           signal.throwIfAborted();
-          await restoreEvmHoldings({ chain: o.chain, testnet: POOL_TESTNET, pin: o.pin, rpcs: evmPair(o.list), store: await (h.held ? h.held() : h.store()), spends: o.buys }).catch(() => {});
+          // the run's signal ends it at once, as every read of the run (letGo)
+          await letGo(restoreEvmHoldings({ chain: o.chain, testnet: POOL_TESTNET, pin: o.pin, rpcs: evmPair(o.list), store: await (h.held ? h.held() : h.store()), spends: o.buys, signal }).catch(() => {}), signal);
         }
         // step 5 is owed from here until a try reads every id (the marker, the pools' scopes alone)
         const owes = ids !== null && pools.length > 0;

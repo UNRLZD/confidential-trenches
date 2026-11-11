@@ -48,12 +48,12 @@ import { HELPER_FETCH_INIT, HELPER_V1_PATHS } from "../../kit/src/helper/v1.ts";
 import type { VaultProver } from "../../kit/src/prover/prove.ts";
 import { WALLET_SEED_LOCK, type WalletStore } from "@blindfill/wallet/store";
 import { openNoteStore, readNotes, type NoteStore } from "../../wallet/src/notes/store.ts";
-import type { Pool, ReadyProof } from "../../wallet/src/pool/pool.ts";
+import { chainNow, type Pool, type ReadyProof } from "../../wallet/src/pool/pool.ts";
 import { openProofQueue, type ProofQueue, type QueuePass } from "../../wallet/src/pool/queue.ts";
 import { poolDepositKind, type PoolDepositFrom, type PoolDepositHost } from "./pool-deposit.ts";
 import { proverHost } from "./prover-host.ts";
 import { SOLANA_PROVIDER_A, TRADE_HELPER } from "./trade.ts";
-import { SOL_POOL_TABLES, SOL_POOLS, solanaPool, solanaPoolOf, type SolanaFeeAnswer, type SolanaPoolPin, type SolanaReleaseRequest } from "../../wallet/src/pool/solana.ts";
+import { SOL_POOL_TABLES, SOL_POOLS, solanaNow, solanaPool, solanaPoolOf, type SolanaFeeAnswer, type SolanaPoolPin, type SolanaReleaseRequest } from "../../wallet/src/pool/solana.ts";
 import { SOL_MARK_READ_BATCH, SOL_MARK_READ_BATCH_MAX, solanaSettleReserved, solanaSettleSpent, type SolanaPoolCache } from "../../wallet/src/pool/solana-restore.ts";
 import { POOL_TESTNET } from "../../wallet/src/pool/network.ts";
 import { askWhileBusy, type BusyOpts } from "../../wallet/src/busy.ts";
@@ -295,7 +295,7 @@ async function moveLegacyPending(w: WalletStore, opId: string, p: PendingOnward)
 
 /** The page network's deps for poolKinds, with `flow` the ops' flow (none: every checked request is refused). Mainnet
  *  reads EVM pools on no pair yet (signpage-evm-pool-trade), as main.ts did before. */
-export function testnetPoolDeps(flow?: PoolKindsDeps["flow"]): PoolKindsDeps {
+export function testnetPoolDeps(flow?: PoolKindsDeps["flow"], stop?: PoolKindsDeps["stop"]): PoolKindsDeps {
   return {
     pinned: (chain) => (chain === "solana" ? PAGE_SOL_PIN !== undefined : EVM_POOLS[POOL_TESTNET ? EVM_TESTNET[chain] : chain] !== undefined),
     rpcs: (chain) =>
@@ -307,6 +307,7 @@ export function testnetPoolDeps(flow?: PoolKindsDeps["flow"]): PoolKindsDeps {
     // the tokens' decimals kept this session: the sell's read and both buys' own (card sell-first-read-waits-out-a-throttle)
     decimals: PAGE_TOKEN_DECIMALS,
     ...(flow ? { flow } : {}),
+    ...(stop ? { stop } : {}),
   };
 }
 
@@ -476,6 +477,8 @@ export type TestnetPool = {
   signingOut(): void;
   /** Sign out: the queue closed (its notes freed, its seed copy zeroed), its note store closed, the worker ended. */
   signedOut(): Promise<void>;
+  /** The session's sign out, aborted at the next one: a pool kind's reads read it when a request comes (pool-kinds.ts). */
+  outSignal(): AbortSignal;
   /** The pool withdraw screen's reads and run (src/withdraw/pool-form.ts) for the request's op id. */
   withdrawDeps(chain: PoolChain, opId: string): PoolWithdrawFormDeps;
   /** The withdraw run of a screen's checked answer, its op record written as it goes; settles at the run's end. */
@@ -610,6 +613,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       landed: () => void proofs(),
       settle: () => void settleSolana(),
       signal: follows.signal,
+      // the session's sign out (signingOut, at its tap): it ends a wait between the ask's attempts
+      stop: solanaStop.signal,
       end: () => {
         notes?.close();
         end?.();
@@ -717,6 +722,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         landed: () => void evmProofs(chain),
         settle: () => void settleEvm(chain),
         signal: follows.signal,
+        // the session's sign out (signingOut, at its tap): it ends a wait between the ask's attempts
+        stop: evmStop.signal,
         end: () => {
           notes?.close();
           end?.();
@@ -798,6 +805,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       testnet: POOL_TESTNET,
       fetch: over.fetch,
       signal: follows.signal,
+      // the session's sign out (signingOut, at its tap): it ends a wait between the sale's reads' attempts
+      stop: evmStop.signal,
       stopped: ((at) => () => signOuts !== at)(signOuts),
     });
     return {
@@ -1044,13 +1053,16 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       cluster: PAGE_CLUSTER,
       rpcs: rpcs(),
       claimed,
+      // a sign out ends the buy's waits before its signature (read-waits.ts waitUnless): this session's stop
+      signal: solanaStop.signal,
       // none ready (a page that has landed no deposit since it loaded has run no pass): a pass starts for the next tap
       ready: async () => {
         const list = (await q()).ready();
         if (list.length === 0) void proofs();
         return list;
       },
-      take: async (id, attempt) => (await q()).take(id, attempt),
+      take: async (id, attempt, early) => (await q()).take(id, attempt, early),
+      chainNow: () => chainNow(over.pool ?? { now: (signal) => solanaNow(rpcs(), signal) }),
       seed64: page.seed64,
       // W's buy mint, written before the send: the rent back after a later sell holds while W holds any of it
       bought: buyMints(page.store),
@@ -1389,6 +1401,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       // run puts its own over this one (poolSellKind)
       settled: async (signature, stage) => settleSellOps(await page.store(), signature, stage),
       stopped: () => signOuts !== outs,
+      // a sign out ends the sale's waits (read-waits.ts waitUnless)
+      signal: solanaStop.signal,
       end: () => void notes?.then((n) => n.close(), () => {}),
     };
   };
@@ -1810,6 +1824,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       evmStop = new AbortController();
     },
     signedOut,
+    // the session's sign out: aborted at the next one (this tab's or another's), as every Solana settle's stop
+    outSignal: () => solanaStop.signal,
     withdrawDeps,
     withdraw,
   };

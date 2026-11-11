@@ -157,3 +157,24 @@ test("the run waits up to 5 minutes for a trade's end label and records Slow or 
   assert.match(SRC, /\^\(Filled\|Failed\|Not landed\|Retry\)\\b/);
   assert.match(SRC, /\^\(Slow\|Stuck\)\$/);
 });
+
+// Card sol-buy-reads-side-by-side: run 3's read of the buy's wallet failed on api.devnet's 429s (Retry-After 10 s, the
+// page's own reads keeping the limit hot) and the run said FAIL on a filled buy: a throttled read waits the provider's
+// Retry-After (at most 15 s a wait), a 5xx is asked again too, and the waits are the run's sleep's, not the clock's
+test("card sol-buy-reads-side-by-side: a throttled read waits the provider's Retry-After, at most 15 s; a 5xx is asked again", async () => {
+  const waits = [];
+  const sleep = async (ms) => void waits.push(ms);
+  const seq = (list) => {
+    let n = 0;
+    return async () => {
+      const a = list[Math.min(n++, list.length - 1)];
+      return { status: a.status ?? 200, headers: new Headers(a.headers ?? {}), json: async () => a.body };
+    };
+  };
+  const ok = { body: { jsonrpc: "2.0", id: 1, result: 7 } };
+  assert.equal(await rpc("https://x.test", "getTransaction", [], { pauseMs: 1_500, sleep, fetchFn: seq([{ status: 429, headers: { "retry-after": "10" } }, { status: 429, headers: { "retry-after": "60" } }, { status: 503 }, ok]) }), 7);
+  assert.deepEqual(waits, [10_000, 15_000, 4_500], "the Retry-After, capped at 15 s, then the growing pause for the 5xx");
+  waits.length = 0;
+  assert.equal(await rpc("https://x.test", "getTransaction", [], { pauseMs: 1_500, sleep, fetchFn: seq([{ body: { jsonrpc: "2.0", id: 1, error: { code: 429 } } }, ok]) }), 7);
+  assert.deepEqual(waits, [1_500], "a JSON-RPC 429 has no header: the growing pause");
+});

@@ -5,7 +5,8 @@
 // not_allowed, failed or quote_check_failed:
 //   - the sell's decimals read (pool-kinds.ts): its frozen down answer;
 //   - the buy, the sell and the deposit (pool-buy.ts, pool-sell.ts, pool-deposit.ts): the page's transport fault before
-//     anything is signed answers down, three catches in all;
+//     anything is signed answers down, three catches in all (after the waits of card start-reads-wait-out-a-throttle,
+//     each catch naming its fault for them);
 //   - deposit.quote (deposit-wire.ts): a read that throws answers down;
 //   - the reference (page-rpc.ts pageReference): its own one-provider refusal beside the kit's, the page's wrap that
 //     turns a failed read's null into that fault.
@@ -27,7 +28,9 @@ const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}
 /** The minified marks of each piece, as the bundle spells them. */
 const Q = "[`\"']";
 const KINDS = new RegExp(`Object\\.freeze\\(\\{error:${Q}down${Q}\\}\\)`);
-const FLOWS = new RegExp(`instanceof [\\w$]+(\\?|\\)return)\\{error:${Q}down${Q}\\}`, "g");
+// since card start-reads-wait-out-a-throttle each names its fault for the wait before it answers down (read-waits.ts:
+// the fault the page's transport class, or waitsOn of it): `instanceof X)return a.fault=e,{error:"down"}`
+const FLOWS = new RegExp(`(?:instanceof [\\w$]+|[\\w$]+\\([\\w$]+\\))(\\?|\\)return)\\(?(?:[\\w$]+\\.fault=[\\w$]+,)?\\{error:${Q}down${Q}\\}`, "g");
 const WIRE = new RegExp(`\\.catch\\(\\(\\)=>\\{[\\w$]+=\\{error:${Q}down${Q}\\}\\}\\)`);
 const REFERENCE = /a reference must never rest on one provider's word/g;
 // what landed (the list's length, or card pool-answer-unknown's count: never the list itself, an array always true),

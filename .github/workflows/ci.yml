@@ -27,7 +27,8 @@ on:
     types: [checks_requested]
   push:
     branches: [main]
-  # nightly on main: the vault's sandbox suite only (every other job skips a scheduled run)
+  # nightly on main: the vault's sandbox suite, the mutant sweeps (test-mutants) and the venue tables' alarm; every
+  # other job skips a scheduled run
   schedule:
     - cron: "17 3 * * *"
   workflow_dispatch:
@@ -491,9 +492,12 @@ jobs:
   # the helper's sell sweep in halves or quarters; the rent back's in eight parts), and 14 parts plan the heaviest at 540 s
   # (13 would plan 581 s). A sweep that runs more than 1.25 times its listed seconds prints a warning on the run.
   # scripts/ci/test-shards.test.mjs fails when any ci.yml line but a comment names test:mutants, in any runner's form.
+  # Nightly on main and by hand only (card ci-fast-checks-on-the-pr): no pull request, queue group or push waits on the
+  # sweeps, and the required check test does not need this job. It needs no changes job (that one skips a scheduled
+  # run, and would skip this one with it), and a failed part fails the nightly run. scripts/ci/test-shards.test.mjs
+  # holds this if exactly and refuses test needing this job.
   test-mutants:
-    needs: changes
-    if: github.event_name != 'schedule' && (github.event_name != 'pull_request' || needs.changes.outputs.test_mutants != 'false')
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     strategy:
@@ -648,9 +652,9 @@ jobs:
   # The required check: it runs whatever the shards ended with (always()), and passes only when each one passed. A
   # shard that failed, was skipped or was cancelled fails it; a test that skipped instead would pass the ruleset. The one
   # skip it passes (card ci-pr-light): on a pull request, a shard the changes job, itself passed, said false for (its
-  # output named as the shard's id with _ for -).
+  # output named as the shard's id with _ for -). test-mutants is no shard of it: it runs nightly (above).
   test:
-    needs: [changes, test-wallet, test-packages, test-mutants, test-browser, test-scripts, test-vault]
+    needs: [changes, test-wallet, test-packages, test-browser, test-scripts, test-vault]
     if: always() && github.event_name != 'schedule'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
