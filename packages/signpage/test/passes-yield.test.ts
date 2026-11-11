@@ -19,6 +19,7 @@ const { EVM_LADDER } = await import("../../wallet/src/pool/evm.ts");
 const { holdHosts, hostLane, resetHostLanes, stopHostLaneWaits, PASS_BUDGET_TRADING, PASS_FLOOR_MS, TRADE_TURN_MAX_MS } = await import("../../wallet/src/throttle.ts");
 const { SOL_POOLS, solanaPoolOf } = await import("../../wallet/src/pool/solana.ts");
 const { POOL_DEPOSIT_LOCK } = await import("../src/pool-deposit.ts");
+const { keptSells } = await import("../src/pool-sell.ts");
 
 const DEVNET = TESTNET_RPCS.solana[0];
 // Circle's USDC on Base Sepolia, as test/pool-testnet-evm-queue.test.ts names it
@@ -78,6 +79,9 @@ async function incoming(ns: NoteStore, ref: NoteRef | null): Promise<void> {
   await ns.move(planned.id, "PLANNED", "INCOMING", { send: { signature: "1".repeat(64), value: 5_000_000n, last_valid_block_height: 151n } });
 }
 const SELL = { kind: "pool.sell", chain: "solana", token: "So11111111111111111111111111111111111111112", amount: 1n, slippageBps: 100, decimals: 9 } as const;
+/** A sell kept on W (it ended "sent", or the page reloaded after its send): a state read settles it by its own
+ *  transaction on both RPCs, then each RPC's height, read after (the review's probe A). */
+const keptSell = (w: WalletStore): Promise<void> => keptSells(async () => w as never).put({ signature: "1".repeat(64), tx: "AA==", last: 151 });
 /** `p`'s time to settle from now in ms, or null past `ms`. */
 const within = async (p: Promise<unknown>, ms: number): Promise<number | null> => {
   const t = performance.now();
@@ -228,8 +232,8 @@ test("a sign out ends every wait on every host at once: a pass's read waiting fo
 // 150 s after the tap. A reader that holds what a trade can wait for reads as a trade.
 test("A: a sell tapped while a state read settles a kept sell (under the sell lock) answers in seconds, not at the hold's bound", async () => {
   await onProvider(slowNull, async () => {
-    const { w, ns } = await wallet();
-    await incoming(ns, { kind: "return", c: "sol", l: 7n, j: 0 });
+    const { w } = await wallet();
+    await keptSell(w);
     const t = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { prover: { vault: signalsProver(), stop: () => {} } });
     const read = t.stateRead();
     await tick(100);
@@ -245,8 +249,8 @@ test("A: a sell tapped while a state read settles a kept sell (under the sell lo
 // Its probe A2: the same with a buy running (its hold on both hosts), the sell tapped 1 s in, the buy ending at 2 s.
 test("A2: the same with a buy holding the hosts: the sell answers in seconds and the buy's end is not what frees it", async () => {
   await onProvider(slowNull, async () => {
-    const { w, ns } = await wallet();
-    await incoming(ns, { kind: "return", c: "sol", l: 7n, j: 0 });
+    const { w } = await wallet();
+    await keptSell(w);
     const t = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { prover: { vault: signalsProver(), stop: () => {} } });
     const buy = holdHosts([DEVNET, HELPER]);
     const read = t.stateRead();
