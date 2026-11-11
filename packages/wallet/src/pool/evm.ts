@@ -346,15 +346,19 @@ export const EVM_TRANSFER_RPCS: Readonly<Record<EvmTestnet, readonly string[]>> 
 /** A network's pool, pinned on the device: the pool, the relayer's fee recipient every proof binds, and the pool's
  * deploy block (the sync's first block). */
 export type EvmPoolPin = { readonly network: EvmNetwork; readonly pool: string; readonly feeRecipient: string; readonly fromBlock: bigint };
-/** The pinned pools by network (card evm-pool-pins). Testnets only, in the testnet build only (./network.ts, as
- *  SOL_POOLS keeps devnet out of SIGN_HOST's build): each pool is its chain's newest pool record, card
- *  pool-evm-buy-pays-revert's (scripts/live-checks/pool-evm-buy-pays-revert.<chain>.json; pool-evm-deploy.md's 3 Nov
- *  pools are older builds no helper serves), and the kit's venue pool; its deploy block is the block of that record's
- *  PrivacyPoolSimple deploy tx, and its fee recipient the helper's withdraw sender on that chain, which GET
- *  /v1/pool/fee names for the pool. Read 2026-11-09 21:5xZ: each receipt's block and contract the same on both of
- *  pool-evm-deploy.mjs CHAINS' RPCs, the code the build's; live check evm-pool-pins reads all three after every deploy.
- *  No mainnet pin until buy, sell and withdraw are proven on testnet: a pin turns on deposits into the pool
- *  (test/evm-pool-pins.test.ts refuses one). */
+/** The pinned pools by network (cards evm-pool-pins, evm-pools-on-mainnet), one build's network each (./network.ts, as
+ *  SOL_POOLS keeps devnet out of SIGN_HOST's build). Each pool is its chain's pool record and the kit's venue pool; its
+ *  deploy block is the block of that record's PrivacyPoolSimple deploy tx, and its fee recipient the helper's withdraw
+ *  sender on that chain, which GET /v1/pool/fee names for the pool.
+ *  - The testnet build: Base Sepolia's and Robinhood testnet's newest pool record, card pool-evm-buy-pays-revert's
+ *    (scripts/live-checks/pool-evm-buy-pays-revert.<chain>.json; pool-evm-deploy.md's 3 Nov pools are older builds no
+ *    helper serves). Read 2026-11-09 21:5xZ: each receipt's block and contract the same on both of pool-evm-deploy.mjs
+ *    CHAINS' RPCs, the code the build's; live check evm-pool-pins reads all three after every deploy.
+ *  - SIGN_HOST's build: Base's and Robinhood's mainnet pool, contracts/pool-evm/deployments/<chain>.json (card
+ *    pool-evm-deploy-mainnet). Read 2026-11-11 15:0xZ: each receipt's block, contract and status the same on both of
+ *    pool-evm-deploy.mjs MAINNETS' RPCs; live check evm-pools-on-mainnet reads them, the code, the fee recipient's
+ *    (none) and the helper's fee answer after every sign and helper deploy. test/evm-pool-pins.test.ts holds each pin
+ *    equal to its record and to that check's. */
 export const EVM_POOLS: Readonly<Partial<Record<EvmNetwork, EvmPoolPin>>> = Object.freeze(
   POOL_TESTNET
     ? {
@@ -363,7 +367,12 @@ export const EVM_POOLS: Readonly<Partial<Record<EvmNetwork, EvmPoolPin>>> = Obje
         // deploy tx 0x83ab94117dc9659a95f08966be9f49e02dc313afb54e8fccf1fbd25fca82567b
         "robinhood-testnet": Object.freeze({ network: "robinhood-testnet", pool: "0xed9fac860e6bc5e932455232eedca8b71c44da4d", feeRecipient: "0xe40f67e8502a3e2ebf4caf7bdee8ac8758b472a7", fromBlock: 149_841_188n }),
       }
-    : {},
+    : {
+        // deploy tx 0x2e0cba4bfa2c24ae138ade564a027c5d83943340153dec0ad2e278c8c89b23c7
+        base: Object.freeze({ network: "base", pool: "0xaa080e74ec99cf5c684548c77ca145edfcf899cf", feeRecipient: "0x4611338bf66389a2d2d3e67301dbb7ac9fb1fb9d", fromBlock: 54_325_671n }),
+        // deploy tx 0xb5b5c6c0403e94daf9cf37e5b61f8d6dc9af41d929a3ecf732898e0d9fa88176
+        robinhood: Object.freeze({ network: "robinhood", pool: "0x9306359433127c4f3be426f6faeb00a3c41f66db", feeRecipient: "0x63c4b707b319d3f1643a7d0d61c188d76ec8f23d", fromBlock: 108_420_674n }),
+      },
 );
 
 /** A block as the sync reads it. */

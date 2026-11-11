@@ -25,7 +25,7 @@ import type { EvmPoolSellQuoteRequest } from "../../kit/src/checks/evm/quote.ts"
 import { BOUGHT, flat, provider, refreshHead, sellQuoteWith, TOKEN } from "../../kit/test/evm-sell-quote-fx.ts";
 import { EVM_POSITION_COSTS_KEY, type EvmHolding } from "../src/pool-buy-evm.ts";
 import { EvmSendBusy, EvmSendNoAnswer, EvmSendRefused, evmBuyCalldata, evmSellSend } from "../src/evm-send.ts";
-import { EVM_OPEN_SELLS_KEY, evmBuyRouteRead, evmSellPlanQuote, followEvmSells, runEvmPoolSell, type EvmOpenSell, type EvmSellHost } from "../src/pool-sell-evm.ts";
+import { EVM_OPEN_SELLS_KEY, evmBuyRouteRead, evmSellPlanQuote, followEvmSells, planEvmSell, runEvmPoolSell, type EvmOpenSell, type EvmSellHost } from "../src/pool-sell-evm.ts";
 import type { PoolAsk } from "../src/rules/pool.ts";
 import { SolanaRpcTransportError } from "../../kit/src/trade/solana/send.ts";
 import { READ_WAIT_TOTAL_MS } from "../src/read-waits.ts";
@@ -271,6 +271,30 @@ test("the calldata is byte for byte the encoding the pool's testnet run sends (t
   const target = "0x" + h.slice(8 + 64 * 5 + 24, 8 + 64 * 6);
   const again = sellData({ token: TOKEN, amount: s.amount, target, data: swap, minOut: s.minOut, pool: POOL, precommitment: s.precommitment, feeCap: s.feeCap, feeRecipient: V.feeCollector, deadline: s.deadline, nonce: s.nonce }, s.fee, new Uint8Array(sig));
   assert.equal("0x" + h, again);
+});
+
+test("the sale's finding reads only the Ws whose own buy record names the token sold: another W of the device, holding another token, is never named to the pool's RPCs (card evm-pools-on-mainnet)", async () => {
+  const store = await notes();
+  // a second note the device spent, paying its own W2, whose buy record names another token
+  const DEP2: NoteRef = { kind: "deposit", s: SCOPE, i: 1 };
+  const L2 = vaultLabelOf(keccak_256, SCOPE, 2n);
+  const pre2 = noteSecrets(SEED, DEP2).precommitment;
+  const n2 = await store.add({ ref: DEP2, scope: SCOPE, precommitment: pre2, state: "UNSPENT", leaf: { value: 2n * 10n ** 15n, label: L2, commitment: noteCommitment(2n * 10n ** 15n, L2, pre2), leafIndex: 1n } });
+  await store.move(n2.id, "UNSPENT", "SPENT");
+  const W2 = freshWallet(SEED, "evm", L2, jOf(DEP2)).address.toLowerCase();
+  assert.notEqual(W2, W);
+  const OTHER = "0x" + "c0".repeat(20);
+  const md = meta({ [EVM_POSITION_COSTS_KEY]: { [W]: ROUTE_REC, [W2]: { ...ROUTE_REC, mint: OTHER } } });
+  const x = await world({ store, md });
+  const named: string[] = [];
+  const watch = (rpc: EvmRpc): EvmRpc => Object.assign(async (m: string, params: readonly unknown[]) => {
+    named.push(JSON.stringify(params).toLowerCase());
+    return rpc(m, params);
+  }, { url: (rpc as { url?: string }).url });
+  const plan = await planEvmSell({ ...x.h, rpcs: [watch(x.h.rpcs[0]), watch(x.h.rpcs[1])] as const }, ASK);
+  assert.ok("legs" in plan, JSON.stringify(plan, (_k, v) => (typeof v === "bigint" ? v.toString() : v)));
+  assert.ok(named.some((n) => n.includes(W.slice(2))), "W, the token's holder, is read");
+  assert.ok(named.every((n) => !n.includes(W2.slice(2))), "W2 is never named to a pool RPC");
 });
 
 test("a W whose buy record holds no route, or no block, is refused not_allowed: nothing read past the plan, nothing sent", async () => {

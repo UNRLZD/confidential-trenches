@@ -306,11 +306,21 @@ test("signed out mid-run: the run stops, its seed zeroed, nothing written after"
   assert.equal((await opOf(w.store, k!))?.stage, "reading");
 });
 
-test("pagePools: the mainnet build pins the Solana pool (card sol-pools-mainnet-pin), read on the page's Solana pair; no EVM pool yet", async () => {
+test("pagePools: the mainnet build pins the Solana pool (card sol-pools-mainnet-pin), read on the page's Solana pair, then Base's and Robinhood's (card evm-pools-on-mainnet), each on its pool list", async () => {
   const { SOL_POOLS, solanaPoolOf } = await import("../../wallet/src/pool/solana.ts");
-  const { PAGE_SOL_CACHE, PAGE_SOL_MARK_BATCHES, pageSolanaLister, pageSolanaSettleRpcs } = await import("../src/pool-testnet.ts");
+  const { EVM_POOLS, evmPoolScopeOf } = await import("../../wallet/src/pool/evm.ts");
+  const { PAGE_SOL_CACHE, PAGE_SOL_MARK_BATCHES, pageEvmPoolRpcs, pageSolanaLister, pageSolanaSettleRpcs } = await import("../src/pool-testnet.ts");
   const pin = SOL_POOLS.mainnet!;
-  assert.deepEqual(pagePools(), [{ chain: "solana", program: pin.program, scope: solanaPoolOf(pin.program).scope, rpcs: pageSolanaSettleRpcs, lister: pageSolanaLister, cache: PAGE_SOL_CACHE, markBatches: PAGE_SOL_MARK_BATCHES }]);
+  const [sol, ...evm] = pagePools();
+  assert.deepEqual(sol, { chain: "solana", program: pin.program, scope: solanaPoolOf(pin.program).scope, rpcs: pageSolanaSettleRpcs, lister: pageSolanaLister, cache: PAGE_SOL_CACHE, markBatches: PAGE_SOL_MARK_BATCHES });
+  assert.deepEqual(evm.map((p) => [p.chain, (p as { pin?: unknown }).pin, (p as { scope?: unknown }).scope]), [
+    ["evm", EVM_POOLS.base, evmPoolScopeOf(EVM_POOLS.base!.pool, 8453n)],
+    ["evm", EVM_POOLS.robinhood, evmPoolScopeOf(EVM_POOLS.robinhood!.pool, 4663n)],
+  ]);
+  for (const [i, chain] of (["base", "robinhood"] as const).entries()) {
+    const rpcs = (evm[i] as { rpcs: (() => readonly { url?: string }[]) | null }).rpcs;
+    assert.deepEqual(rpcs?.().map((r) => r.url), pageEvmPoolRpcs(chain)!.map((r) => (r as { url?: string }).url), `${chain}: its pool list`);
+  }
   // the restore reads on the same cache as every settle of the page (review P2-2 of a34c1626): one object, not a copy
   assert.equal((pagePools()[0] as { cache?: unknown }).cache, PAGE_SOL_CACHE);
 });

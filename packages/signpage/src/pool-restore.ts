@@ -678,7 +678,9 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
           const r = await letGo(evm({ seed64: seed, pin: p.pin, rpcs: p.rpcs(), signal, wallets: false, held: pageEvmHold(p.pin, () => h.held ? h.held() : h.store()), history: pageEvmHistory(p.pin) }), signal);
           // each buy's record again from its own transaction, so a restored W sells on its buy's route (card
           // signpage-evm-pool-sell, pool-sell-evm.ts restoreEvmHoldings: no read names W or a transaction); the testnet
-          // build only, as the sell is (POOL_TESTNET is folded at build time, so the mainnet bundle carries none of it)
+          // build only: it asks the pool's public RPCs for the Bought logs and the whole block at each of one device's
+          // buys together, which on a quiet mainnet pool tells a provider which buys are one device's (card
+          // evm-pools-on-mainnet leaves it closed; a restored mainnet W is not sold until its record is back)
           const buys = POOL_TESTNET ? r.spends.flatMap((x) => (x.token === null ? [] : [{ w: x.w, token: x.token, block: x.block, blockHash: x.blockHash, logIndex: x.logIndex }])) : [];
           const chain = chainOf(p);
           if (POOL_TESTNET && buys.length > 0 && chain !== "solana") evmHoldingsOwed.push({ chain, pin: p.pin, list: p.rpcs(), buys });

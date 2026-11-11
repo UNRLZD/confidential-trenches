@@ -42,6 +42,7 @@ export const IN_PROCESS = [
   viaRead("sell-first-read-waits-out-a-throttle", () => import("../live-checks/sell-first-read-waits-out-a-throttle.mjs")),
   viaRead("start-reads-wait-out-a-throttle", () => import("../live-checks/start-reads-wait-out-a-throttle.mjs")),
   viaRead("evm-pool-sync-wide-pages", () => import("../live-checks/evm-pool-sync-wide-pages.mjs")),
+  viaRead("evm-pools-on-mainnet", () => import("../live-checks/evm-pools-on-mainnet.mjs")),
   viaRead("wallet-near-prepay-taken", () => import("../live-checks/wallet-near-prepay-taken.mjs")),
   viaRead("held-deposit-way-out", () => import("../live-checks/held-deposit-way-out.mjs")),
   // cut as a release only after its merge: the marks and the pin, not the ledger

@@ -3,12 +3,15 @@
 //   scripts/live-checks/helper-pool-senders.mjs reads the devnet Rent sysvar on (RENT_RPCS.devnet).
 // - Base Sepolia and Robinhood testnet: the two RPCs each testnet pin was read on (scripts/live-checks/pool-evm-deploy.mjs
 //   CHAINS, card evm-venues-pin), each answered as the app's "base" and "robinhood". A chain is pinned only when the
-//   wallet's EVM_POOLS holds its testnet pool, so until then every EVM pool kind is refused, as on mainnet.
+//   wallet's EVM_POOLS holds its testnet pool (SIGN_HOST's build: its mainnet one, card evm-pools-on-mainnet).
 // - The flow (card signpage-pool-notes): pool.deposit on the devnet pool (src/pool-deposit.ts), with the page's own
 //   note store and seed; on Base or Robinhood (card pool-deposits) pool.deposit goes to src/pool-deposit-evm.ts when that
-//   chain's EVM pin exists on the page's network and the page has its two RPCs (EVM_POOLS is empty today, so it is
-//   refused not_allowed); every other op is refused until its card. A signed-in load finishes the pool's INCOMING notes,
-//   and so does each state read of the page while one is open (card signpage-pool-notes-2), one pass at a time.
+//   chain's EVM pin exists on the page's network and the page has its two RPCs (else refused not_allowed); every other
+//   op is refused until its card. On mainnet the EVM positions stay closed until the helper-route reader of a W's
+//   holdings lands (card evm-pools-on-mainnet-reader): they read every W of the device on the pool's public RPCs. A sale
+//   reads only the Ws whose buy record names its token (planEvmSell). A signed-in load
+//   finishes the pool's INCOMING notes, and so does each state read of the page while one is open (card
+//   signpage-pool-notes-2), one pass at a time.
 // - The next buy's proof (card signpage-pool-notes-2): each landed deposit note runs a pass of the wallet's proof queue
 //   (../../wallet/src/pool/queue.ts openProofQueue), opened at the first landing on the page's prover
 //   (src/prover-host.ts, its `vault`), its own note store and a copy of the seed, with the devnet pool
@@ -322,8 +325,9 @@ async function moveLegacyPending(w: WalletStore, opId: string, p: PendingOnward)
   });
 }
 
-/** The page network's deps for poolKinds, with `flow` the ops' flow (none: every checked request is refused). Mainnet
- *  reads EVM pools on no pair yet (signpage-evm-pool-trade), as main.ts did before. */
+/** The page network's deps for poolKinds, with `flow` the ops' flow (none: every checked request is refused). `rpcs` is
+ *  each chain's pair, which the sell's decimals read and the page's USD price (src/pool-price.ts, the trade box's Buy)
+ *  read on: on mainnet's EVM chains the pool list's two seats (pageEvmPoolRpcs, card evm-pools-on-mainnet). */
 export function testnetPoolDeps(flow?: PoolKindsDeps["flow"], stop?: PoolKindsDeps["stop"]): PoolKindsDeps {
   return {
     pinned: (chain) => (chain === "solana" ? PAGE_SOL_PIN !== undefined : EVM_POOLS[POOL_TESTNET ? EVM_TESTNET[chain] : chain] !== undefined),
@@ -332,7 +336,7 @@ export function testnetPoolDeps(flow?: PoolKindsDeps["flow"], stop?: PoolKindsDe
         ? (pageSolanaRpcs() as unknown as readonly [PoolRpc, PoolRpc])
         : POOL_TESTNET
           ? (TESTNET_RPCS[chain].map((u) => testnetRpc(u) as PoolRpc) as unknown as readonly [PoolRpc, PoolRpc])
-          : null,
+          : ((pageEvmPoolRpcs(chain)?.slice(0, 2) as unknown as readonly [PoolRpc, PoolRpc] | undefined) ?? null),
     // the tokens' decimals kept this session: the sell's read and both buys' own (card sell-first-read-waits-out-a-throttle)
     decimals: PAGE_TOKEN_DECIMALS,
     ...(flow ? { flow } : {}),
@@ -796,8 +800,9 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   };
   const evmDeposit = (chain: "base" | "robinhood") => evmKind(chain);
   // pool.buy on an EVM chain (card signpage-evm-pool-buy, src/pool-buy-evm.ts): the chain's queue, the kit's quote and
-  // build, the helper's send, the deposit's pair for the read-back, and the chain's RESERVED settle; testnet build only
-  // until the mainnet pins' card (the mainnet build refuses it not_allowed)
+  // build, the helper's send, the deposit's pair for the read-back, and the chain's RESERVED settle; on each build whose
+  // network pins the chain's pool (card evm-pools-on-mainnet: SIGN_HOST's too). The buy names no W to a pool RPC
+  // (src/pool-buy-evm.ts, who learns what)
   const evmBuyClaims = new Set<string>();
   // the Ws whose buy a run or the load's follow of this page is following now (followPendingEvmBuys skips them)
   const evmBuyFollowing = new Set<string>();
@@ -831,7 +836,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   });
   const evmBuy = (chain: "base" | "robinhood") => {
     const e = evmPool(chain);
-    if (e === null || !POOL_TESTNET) return null;
+    if (e === null) return null;
     // the buy holds the list's hosts from its run's start to its end: the passes' reads wait, the buy's own go first
     return (over.tradeKinds?.evmBuy ?? poolBuyEvmKind)(() => {
       const release = holdHosts(e.list.map((r) => r.url));
@@ -872,10 +877,10 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   // the holds' change each chain's shown rows were read after (EvmSaleHolds.gen): a sale newer than it hides its token
   const evmShownGen = new Map<"base" | "robinhood", number>();
   // a buy whose tab ended before its end (the pending record's own follow died with it): followed from its record at
-  // each state read, until filled, withdrawn or not_landed (src/pool-buy-evm.ts followPendingEvmBuys); testnet build only
+  // each state read, until filled, withdrawn or not_landed (src/pool-buy-evm.ts followPendingEvmBuys); as the buy is
   const evmBuyFollow = (chain: "base" | "robinhood"): void => {
     const e = evmPool(chain);
-    if (e === null || !POOL_TESTNET) return;
+    if (e === null) return;
     void followPendingEvmBuys(evmBuyHost(chain, e.pin, e.rpcs, evmBuyClaims, evmBuyPage(chain))).catch(() => {});
   };
   // pool.sell on an EVM chain (card signpage-evm-pool-sell, src/pool-sell-evm.ts): the Ws the chain's spent notes pay,
@@ -958,15 +963,14 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     };
   };
   const evmSell = (chain: "base" | "robinhood") => {
-    // first, alone: folded at build time, so the mainnet bundle carries none of the sale
-    if (!POOL_TESTNET) return null;
+    // on each build whose network pins the chain's pool (card evm-pools-on-mainnet): the sale's finding reads, on the
+    // pool's two RPCs at one agreed block, only the Ws whose own buy record names the token sold (planEvmSell)
     const e = evmPool(chain);
     if (e === null) return null;
     return (over.tradeKinds?.evmSell ?? poolSellEvmKind)(() => evmSellOf(chain, e));
   };
   // a sale whose tab ended before its end: followed from its open record at each state read (followEvmSells)
   const evmSellFollow = (chain: "base" | "robinhood"): void => {
-    if (!POOL_TESTNET) return;
     const e = evmPool(chain);
     if (e === null) return;
     const h = evmSellOf(chain, e);
