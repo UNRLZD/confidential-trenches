@@ -90,24 +90,28 @@ type FakeEl = {
   tagName: string; id: string; hidden: boolean; style: Record<string, string>; src: string;
   contentWindow: { postMessage(m: unknown, o: string): void } | null;
   setAttribute(k: string, v: string): void; getAttribute(k: string): string | null; attributes(): string[];
-  addEventListener(t: string, fn: () => void): void; fire(t: string): void; remove(): void;
+  addEventListener(t: string, fn: (e?: unknown) => void): void; fire(t: string, e?: unknown): void; remove(): void;
+  dataset: Record<string, string>; append(...xs: unknown[]): void; inert?: boolean;
 };
 function fakeDom(href = `${SIGN_ORIGIN}/token/solana/So111?tab=trades`) {
   const loc = new URL(href);
   const calls = { replace: [] as string[], reload: 0, assign: 0 };
   const posted: { msg: unknown; to: string; win: unknown }[] = [];
   const listeners: ((e: IncomingMessage) => void)[] = [];
+  const keys: ((e: unknown) => void)[] = [];
   const children: FakeEl[] = [];
   const createElement = (tag: string): FakeEl => {
     const attrs = new Map<string, string>();
-    const on = new Map<string, () => void>();
+    const on = new Map<string, (e?: unknown) => void>();
     const e: FakeEl = {
       tagName: tag, id: "", hidden: false, style: {}, src: "", contentWindow: null,
       setAttribute: (k, v) => void attrs.set(k, String(v)),
       getAttribute: (k) => attrs.get(k) ?? null,
       attributes: () => [...attrs.keys()].sort(),
       addEventListener: (t, fn) => void on.set(t, fn),
-      fire: (t) => on.get(t)?.(),
+      fire: (t, ev) => on.get(t)?.(ev),
+      dataset: {},
+      append: () => {},
       remove: () => void (children.includes(e) && children.splice(children.indexOf(e), 1)),
     };
     if (tag === "iframe") {
@@ -126,7 +130,7 @@ function fakeDom(href = `${SIGN_ORIGIN}/token/solana/So111?tab=trades`) {
         calls.replace.push(u.href);
       },
     },
-    addEventListener: (t: string, fn: (e: IncomingMessage) => void) => void (t === "message" && listeners.push(fn)),
+    addEventListener: (t: string, fn: (e: IncomingMessage) => void) => void (t === "message" ? listeners.push(fn) : t === "keydown" && keys.push(fn as unknown as (e: unknown) => void)),
   };
   const body = {
     style: {},
@@ -138,7 +142,10 @@ function fakeDom(href = `${SIGN_ORIGIN}/token/solana/So111?tab=trades`) {
   const send = (data: unknown, source: unknown) => {
     for (const fn of listeners) fn({ origin: APP_ORIGIN, source, data });
   };
-  return { doc, loc, calls, posted, children, frames, send };
+  const key = (k: string, isTrusted = true) => {
+    for (const fn of keys) fn({ key: k, isTrusted });
+  };
+  return { doc, loc, calls, posted, children, frames, send, key };
 }
 // The shell answers after an off-thread SHA-256 of each message (src/api.ts), so on a loaded runner an answer comes when
 // it comes: every wait below waits until its condition holds, bounded at 2 s with a named failure, never for a set time.
@@ -174,12 +181,12 @@ test("mountShell: one frame, sandboxed exactly, no allow, no referrer, at appSrc
   }
 });
 
-test("open takes the frame out of the document and nothing reaches the old window; close puts a new one in at the address now, and only its load posts ready", async () => {
+test("open(typed) takes the frame out of the document and nothing reaches the old window; close puts a new one in at the address now, and only its load posts ready", async () => {
   const d = fakeDom();
   const sh = mountShell(d.doc, { state: () => signedOutState() });
   const old = d.frames()[0]!;
   old.fire("load");
-  sh.open();
+  sh.open(true);
   assert.equal(sh.layer.hidden, false);
   assert.equal(d.frames().length, 1, "the frame stays FRAME_LEAVE_MS, for the answer that opened the layer");
   assert.equal((old as unknown as { inert?: boolean }).inert, true, "inert in the same task as the layer shows");
@@ -207,7 +214,7 @@ test("open takes the frame out of the document and nothing reaches the old windo
   // close twice: one frame; open then close at once: the frame stays, and stays the only one
   sh.close();
   assert.equal(d.frames().length, 1);
-  sh.open();
+  sh.open(true);
   sh.close();
   // a check that nothing came: this timer is due after the shell's FRAME_LEAVE_MS timer, so that one has run
   await new Promise((ok) => setTimeout(ok, FRAME_LEAVE_MS + 20));
@@ -236,19 +243,77 @@ test("nav: the top window's address becomes APP_HOST's path and query, by replac
   assert.equal(d.calls.assign + d.calls.reload, 0, "never a navigation");
 });
 
-test("open: the frame is out of the document within 100 ms, whatever FRAME_LEAVE_MS says, since inert alone keeps no focus thief out", () => {
+test("open(typed): the frame is out of the document within 100 ms, whatever FRAME_LEAVE_MS says, since inert alone keeps no focus thief out", () => {
   assert.ok(FRAME_LEAVE_MS > 0 && FRAME_LEAVE_MS <= 100, `FRAME_LEAVE_MS ${FRAME_LEAVE_MS}`);
   enableTimers(mock.timers, { apis: ["setTimeout"] });
   try {
     const d = fakeDom();
     const sh = mountShell(d.doc, { state: () => signedOutState() });
-    sh.open();
+    sh.open(true);
     assert.equal(d.frames().length, 1);
     mock.timers.tick(100);
     assert.equal(d.frames().length, 0, "the frame is gone 100 ms after open");
+    // a typed screen drawn on a sheet opened untyped (Recovery code on the sign-in sheet): seal takes the frame out
+    sh.close();
+    sh.open();
+    mock.timers.tick(1_000);
+    assert.equal(d.frames().length, 1, "an untyped sheet keeps the frame");
+    const view = d.doc.defaultView as unknown as { performance?: { now(): number } };
+    let now = 0;
+    view.performance = { now: () => now };
+    sh.close();
+    sh.open();
+    now += FRAME_LEAVE_MS + 1;
+    sh.seal();
+    assert.equal(d.frames().length, 0, "seal on a sheet open longer than FRAME_LEAVE_MS takes it out in the same task");
   } finally {
     resetTimers(mock.timers);
   }
+});
+
+test("open: the sheet over the app keeps the frame in the page, inert, with its state; nothing it sends is read until close; close makes it live again, no new frame, no new ready", async () => {
+  const d = fakeDom();
+  const sh = mountShell(d.doc, { state: () => signedOutState() });
+  const f = d.frames()[0]!;
+  f.fire("load");
+  await until(() => d.posted.length === 1, "ready");
+  sh.open();
+  assert.equal(sh.layer.hidden, false);
+  assert.equal(f.inert, true, "inert in the same task as the sheet shows");
+  await new Promise((ok) => setTimeout(ok, FRAME_LEAVE_MS + 20));
+  assert.deepEqual(d.frames(), [f], "the same frame, still in the page");
+  // the frame asks while the sheet shows: a state read, a nav, a reload, an open kind; none is read
+  const before = d.posted.length;
+  for (const m of [ask(), { v: 1, id: crypto.randomUUID(), type: "nav", path: "/portfolio" }, { v: 1, id: crypto.randomUUID(), type: "reload" }, { v: 1, id: crypto.randomUUID(), type: "signin.open", return_key: "signin", way: "passkey" }]) d.send(m, f.contentWindow);
+  await quiet();
+  assert.equal(d.posted.length, before, "no answer while the sheet shows");
+  assert.deepEqual(d.calls, { replace: [], reload: 0, assign: 0 }, "no address change, no reload");
+  sh.close();
+  assert.equal(sh.layer.hidden, true);
+  assert.deepEqual(d.frames(), [f], "no new frame: the app kept its state");
+  assert.equal(f.inert, false);
+  const q = ask();
+  d.send(q, f.contentWindow);
+  assert.deepEqual(await answerTo(d, q.id), { v: 1, id: q.id, ok: true, result: signedOutState() });
+  assert.equal(d.posted.filter((p) => (p.msg as { type?: string }).type === "ready").length, 1, "one ready, for the frame's one load");
+});
+
+test("dismiss: the user's own Esc acts only on a sheet whose screen may be left, and never on an untrusted event", () => {
+  const d = fakeDom();
+  const sh = mountShell(d.doc, { state: () => signedOutState() });
+  let n = 0;
+  sh.onDismiss = () => void n++;
+  d.key("Escape");
+  assert.equal(n, 0, "no sheet shown");
+  sh.open();
+  d.key("Escape");
+  assert.equal(n, 0, "a screen that may not be left (the 12 words before Saved)");
+  sh.dismissible(true);
+  d.key("Escape", false);
+  d.key("Enter");
+  assert.equal(n, 0, "an untrusted Esc, another key");
+  d.key("Escape");
+  assert.equal(n, 1);
 });
 
 test("nav refuses every file SIGN_HOST's build serves, in any spelling, and the list is the deploy build's own output", () => {
@@ -315,7 +380,7 @@ test("a kind the host answers (signin.open): its answer goes to the frame before
   const order: string[] = [];
   sh = mountShell(d.doc, {
     state: () => signedOutState(),
-    kinds: { "signin.open": (p) => (p.way === "wallet" ? null : { result: { pending: true }, then: () => (order.push(`open after ${d.posted.length} posts`), sh!.open()) }) },
+    kinds: { "signin.open": (p) => (p.way === "wallet" ? null : { result: { pending: true }, then: () => (order.push(`open after ${d.posted.length} posts`), sh!.open(true)) }) },
   });
   const win = d.frames()[0]!.contentWindow;
   const m = { v: 1, id: crypto.randomUUID(), type: "signin.open", return_key: "deposit", way: "words" };

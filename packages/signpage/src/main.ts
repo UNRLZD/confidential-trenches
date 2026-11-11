@@ -44,7 +44,8 @@
 //   store (the read-only reader: the state needs the seed's key, the status record and the ops, never the seed, and
 //   it makes no database before a sign-in). These screens draw in the shell's layer over the frame, hidden in every
 //   state until the app sends signin.open (signed out: the passkey or the words screen), and closed again on signed in
-//   or Cancel, so the terminal shows signed out too. While the layer shows, the frame is out of the document (src/shell.ts).
+//   or Cancel, so the terminal shows signed out too. The layer is one sheet over the app (src/sheet.ts): the frame stays
+//   under it, inert, its messages dropped, and leaves the document only for a screen with a typed field (src/shell.ts).
 //   Card signpage-signin-kinds adds the account's other open kinds (src/pages/open.ts decides which page each draws):
 //   signout (the backup first while the 12 words are the only copy, then Sign out, which closes the layer back to the
 //   app signed out), backup.open (the 12 words, then Saved or Cancel back to the app) and signin.open's wallet way (the
@@ -350,7 +351,9 @@ else {
       ...(restore ? { restore: restore.kind } : {}),
     }),
   });
-  shell.layer.append(root);
+  shell.body.append(root);
+  // the user's own Esc, close tap or scrim tap: Cancel's step, on a screen Cancel is drawn on (show() below)
+  shell.onDismiss = () => void run(cancel);
 }
 
 // The account's open kinds (src/pages/open.ts): refused unless the page's state takes them; else the answer goes first,
@@ -371,7 +374,8 @@ async function resynced(): Promise<void> {
 }
 type OpenAnswer = { result: { pending: true }; then: () => void } | null;
 function decide(kind: AccountKind, way: unknown, fromId?: string): OpenAnswer {
-  if (!takes(kind, root.dataset.signin, busy)) return null;
+  // a sheet shown already is never redrawn by the app: a kind the frame sent before it opened is refused
+  if (sheetShown() || !takes(kind, root.dataset.signin, busy)) return null;
   return {
     result: { pending: true },
     then: () =>
@@ -403,7 +407,7 @@ function decide(kind: AccountKind, way: unknown, fromId?: string): OpenAnswer {
 // answer goes first, then the screen where the user types To and the amount, never passed in by the app; the run's
 // stages go to the op under the request's id.
 function openPoolWithdraw(chain: PoolChain, opId: string): { result: { pending: true }; then: () => void } | null {
-  if (framed || !testnet || !takes("withdraw.open", root.dataset.signin, busy)) return null;
+  if (framed || !testnet || sheetShown() || !takes("withdraw.open", root.dataset.signin, busy)) return null;
   return {
     result: { pending: true },
     then: () =>
@@ -414,9 +418,10 @@ function openPoolWithdraw(chain: PoolChain, opId: string): { result: { pending: 
       }),
   };
 }
+const sheetShown = (): boolean => shell !== null && !shell.layer.hidden;
 // The layer opens, and the activation guard restarts its 500 ms: a click lined up before cannot act on what it shows.
 function openLayer(): void {
-  shell?.open();
+  shell?.open(TYPED.has(root.dataset.signin ?? ""));
   reshown();
 }
 // Back to the app: the layer closes on the page's signed-in or signed-out state.
@@ -440,6 +445,9 @@ const input = (e: Event): void => {
 addEventListener("pointerdown", input, true);
 addEventListener("keydown", input, true);
 
+// The screens with a field typed into (the 12 words, the withdraw forms' address and amount): the APP_HOST frame leaves
+// the document before they show (src/shell.ts seal), so no key typed or pasted there can reach it.
+const TYPED = new Set<string>(["words", "invalid-code", "withdraw", "pool-withdraw", "held"]);
 const GUARDED = new Set(["signout", "saved", "backup", "copy", "withdraw", "move-out"]);
 function button(action: string, label: string, onClick: () => void): HTMLButtonElement {
   const b = document.createElement("button");
@@ -566,6 +574,8 @@ function show(state: State, seed?: { account: string; code_saved: boolean; signo
   // and from a backup or sign-out page an open kind drew over a signed-in account (the words saved or not, as they were)
   const cancellable = state !== "loading" && state !== "signed-in" && (state !== "backup" || openedBy === "backup.open" || openedBy === "signout");
   if (shell && cancellable) parts.push(button("cancel", WORDS.cancel, () => void run(cancel)));
+  shell?.dismissible(cancellable);
+  if (TYPED.has(state)) shell?.seal();
   root.replaceChildren(...parts);
 }
 
