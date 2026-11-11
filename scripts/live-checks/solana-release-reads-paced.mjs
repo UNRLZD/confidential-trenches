@@ -69,8 +69,9 @@ export function facts(index, js) {
     new RegExp(`(?<![\\w$])${m}=${Q}\\$\\{${h}\\}/v1/rpc/solana-marks${Q},${N}=\\(\\)=>\\[${esc(p)}\\(${N}\\(${a}\\)\\),${esc(p)}\\(${N}\\(${h}\\)\\)\\],${N}=\\(\\)=>${esc(p)}\\(${N}\\(${m}\\)\\),${N}=\\(\\)=>\\[${esc(p)}\\(${N}\\(${a}\\)\\),${esc(p)}\\(${N}\\(${h},${N}\\)\\)\\],${N}=Object\\.freeze\\(\\[\\d+,\\d+\\]\\)[,;]`).test(js);
   const timed =
     !!t &&
-    // the reference's reads, a failed one read as no answer (pool.ts readSolanaReference)
-    new RegExp(`\\.map\\((${N})=>Promise\\.resolve\\(\\)\\.then\\(\\(\\)=>${esc(t)}\\(\\1,${N}\\)\\(${Q}getMultipleAccounts${Q},\\[${N},\\{encoding:${Q}base64${Q},commitment:${Q}confirmed${Q}\\}\\]\\)\\)\\.then\\((${N})=>${N}\\(\\2,${N}\\.length\\),\\(\\)=>null\\)`).test(js) &&
+    // the reference's reads, a failed one read as no answer with its fault named (pool.ts readSolanaReferenceWhy, card
+    // solana-reference-read-holds-a-slot-apart)
+    new RegExp(`\\.map\\((${N})=>Promise\\.resolve\\(\\)\\.then\\(\\(\\)=>${esc(t)}\\(\\1,${N}\\)\\(${Q}getMultipleAccounts${Q},\\[${N},\\{encoding:${Q}base64${Q},commitment:${Q}confirmed${Q}\\}\\]\\)\\)\\.then\\((${N})=>\\(\\{read:${N}\\(\\2,${N}\\.length\\),fault:null\\}\\),(${N})=>\\(\\{read:null,fault:${N}\\(\\3\\)\\}\\)\\)`).test(js) &&
     // the rent read (pool-buy.ts readSolanaRent)
     new RegExp(`${esc(t)}\\(${N},${N}\\)\\(${Q}getAccountInfo${Q},\\[${N},\\{encoding:${Q}base64${Q},commitment:${Q}confirmed${Q}\\}\\]\\)`).test(js) &&
     // the tx-end reads (send.ts readSolanaTxEnd)
