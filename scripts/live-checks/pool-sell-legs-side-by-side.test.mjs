@@ -5,7 +5,10 @@
 // (pool-sell-legs-side-by-side.excerpt.txt, cut from this card's public/app.js): the turn not awaited, a sign out not
 // checked after it, the tap's spent waits not checked after it, the blockhash read before it, the finder read for every
 // sale, the seed read with no W, the seed copy not zeroed, a W no record names left unread, read whatever its record,
-// or the finder asked for every W; the sale's reads unshared, shared past 4 s, shared on a failed read, never forgotten after a wait, or naming a W's read: each FAIL.
+// or the finder asked for every W; the sale's reads unshared, shared past 4 s, shared on a failed read, never forgotten after a wait, or naming a W's read;
+// the young reads kept at a leg's turn; a sale's wait off the tap's bound, not marking it old, or not ended at a sign
+// out; the plan's wait off the bound; an old sale signed, or the plan's wait not making it old; a sale's simulation
+// refused while an earlier leg is in flight not priced again, or its cause naming no provider: each FAIL.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
@@ -15,6 +18,7 @@ const A = JSON.parse(readFileSync(new URL("./pool-sell-legs-side-by-side.answers
 const NO_TURN = "BAD a sale of several wallets reads a later leg's sale only after the leg before it sent: each leg's reads wait out every sale before it";
 const NO_LISTED = "BAD a sale reads the finder at the tap: its list of wallets waits on a read the last whole positions pass already made";
 const NO_YOUNG = "BAD each leg of a sale asks its market and blockhash again: the legs draw the providers' share with reads that are the same for each";
+const NO_FRESH = "BAD a sale signs on a quote read before a wait: its price is not read again, or its waits pass the tap's bound or a sign out";
 
 test("recorded good answer: this card's build: PASS", () => {
   const v = judge(A.good);
@@ -24,7 +28,7 @@ test("recorded good answer: this card's build: PASS", () => {
 test("recorded bad answer: SIGN_HOST as served before this card: FAIL, each fact named", () => {
   const v = judge(A.bad);
   assert.equal(v.ok, false);
-  assert.deepEqual(v.lines, [NO_TURN, NO_LISTED, NO_YOUNG]);
+  assert.deepEqual(v.lines, [NO_TURN, NO_LISTED, NO_YOUNG, NO_FRESH]);
 });
 
 test("planted on the good answer: each fact taken away FAILs", () => {
@@ -34,6 +38,7 @@ test("planted on the good answer: each fact taken away FAILs", () => {
   assert.deepEqual(judge({ ...g, turn: false }).lines, [NO_TURN]);
   assert.deepEqual(judge({ ...g, listed: false }).lines, [NO_LISTED]);
   assert.deepEqual(judge({ ...g, young: false }).lines, [NO_YOUNG]);
+  assert.deepEqual(judge({ ...g, fresh: false }).lines, [NO_FRESH]);
   assert.equal(judge(null).ok, false);
 });
 
@@ -43,11 +48,13 @@ test("planted in the bundle's excerpt: each break in place FAILs", () => {
   assert.equal(f.turn, true, "the excerpt holds the turn");
   assert.equal(f.listed, true, "the excerpt holds the listing");
   assert.equal(f.young, true, "the excerpt holds the young reads");
+  assert.equal(f.fresh, true, "the excerpt holds the new price");
   for (const [what, from, to, key] of [
-    ["the turn not awaited", "(await T,e.stopped?.())", "(e.stopped?.())", "turn"],
-    ["no sign out checked after the turn", "(await T,e.stopped?.())", "(await T,!1)", "turn"],
-    ["the tap's waits not checked after the turn", "if(a.spent?.())return{error:`down`}", "", "turn"],
-    ["the blockhash read whatever the turn", "if(T){D=", "{D=", "turn"],
+    ["the turn not awaited", "(await O,e.stopped?.())", "(e.stopped?.())", "turn"],
+    ["no sign out checked after the turn", "(await O,e.stopped?.())", "(await O,!1)", "turn"],
+    ["the tap's waits not checked after the turn", "if(o.spent?.())return{error:`down`};", "", "turn"],
+    ["the young reads kept at the turn (review of 55d4c6eb..dbf63c98, P2-1)", "return{error:`down`};nR(y)}", "return{error:`down`}}", "turn"],
+    ["the blockhash read whatever the turn", "if(O){A=", "{A=", "turn"],
     ["the finder for every sale", "let r=t?", "let r=!1?", "listed"],
     ["the seed copy not zeroed", "finally{s.fill(0)}", "finally{}", "listed"],
     ["an unrecorded W never read (review of 55d4c6eb, P2-A)", "l.failed.length===0&&u.size>0&&(d=", "!1&&(d=", "listed"],
@@ -60,6 +67,15 @@ test("planted in the bundle's excerpt: each break in place FAILs", () => {
     ["a failed read kept", "u.catch(()=>{a.get(s)===d&&a.delete(s)})", "u.catch(()=>{})", "young"],
     ["a W's read shared (every getMultipleAccounts)", "t===`getMultipleAccounts`&&Array.isArray(n[0])&&n[0].includes(e)", "t===`getMultipleAccounts`", "young"],
     ["nothing forgotten after a leg's wait", "return{error:`failed`};nR(e.rpcs);continue}", "return{error:`failed`};continue}", "young"],
+    ["a sale's wait off the tap's bound", "m=async t=>{if(!i.hold(t))return $(`failed`,`tap_bound`);", "m=async t=>{", "fresh"],
+    ["a sale's wait never marking it old", "if(f&&(p=!0),await ZL(", "if(await ZL(", "fresh"],
+    ["a sale's wait not ended at a sign out", "await ZL(e.wait,t,e.signal),e.stopped?.()||e.signal?.aborted)return $(`failed`,`stopped`)}", "await ZL(e.wait,t,e.signal),!1)return $(`failed`,`stopped`)}", "fresh"],
+    ["the plan's wait off the tap's bound", "u=async e=>{if(!i.hold(e))return $(`failed`,`tap_bound`);", "u=async e=>{", "fresh"],
+    ["an old sale signed", "if(p||a?.waited?.())return n.reprice=!0,{error:`failed`};", "", "fresh"],
+    ["the plan's wait not making the sale old", "if(p||a?.waited?.())", "if(p)", "fresh"],
+    ["an old sale not priced again", "n.reprice&&!e.stopped?.())nR(e.rpcs);", "!1)nR(e.rpcs);", "fresh"],
+    ["a simulation refused with an earlier leg in flight not priced again", "return o?.inFlight?.()&&", "return !1&&", "fresh"],
+    ["a refused simulation's cause naming no provider", "[`RPC ${", "[`${", "fresh"],
   ]) {
     const bad = js.replace(from, to);
     assert.notEqual(bad, js, what);

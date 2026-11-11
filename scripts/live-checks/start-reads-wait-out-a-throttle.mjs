@@ -43,8 +43,9 @@ export const SPENT = new RegExp(`\\.then\\(\\(\\)=>(${N})\\.stopped\\?\\.\\(\\)\
 export function facts(index, js) {
   const out = { index, sha384: sha384(js), rule: false, faults: false, stop: false, wired: { decimals: false, sell: false, spent: false, buy: false, deposits: 0, stops: 0, taps: 0 }, rentBack: false };
   // the bounds, the device's clock, the Retry-After of the transport fault, and the rule: next(e) = T(pause, A(e), B),
-  // null (and spent from then on) once max(the clock since the tap began, the waits so far) + the pause passes 30 s
-  const def = new RegExp(`[,; ](${N})=Object\\.freeze\\(\\{firstMs:1e3,maxMs:1e4,afterMaxMs:1e4\\}\\),(${N})=\\(\\)=>Date\\.now\\(\\),(${N})=(${N})=>\\4 instanceof (${N})\\?\\4\\.afterMs:null;function (${N})\\((${N})=\\2\\)\\{let (${N})=\\7\\(\\),(${N})=0,(${N})=0,(${N})=!1;return\\{next\\((${N})\\)\\{let (${N})=(${N})\\(\\9,\\3\\(\\12\\),\\1\\);return \\11\\|\\|Math\\.max\\(\\7\\(\\)-\\8,\\10\\)\\+\\13>3e4\\?\\(\\11=!0,null\\):\\(\\9=\\13,\\10\\+=\\13,\\13\\)\\},spent:\\(\\)=>\\11\\}\\}`).exec(js);
+  // null (and spent from then on) once max(the clock since the tap began, the waits so far) + the pause passes 30 s;
+  // hold(ms), a wait that is not a fault's (card pool-sell-legs-side-by-side: a sale's agree waits), on the same bound
+  const def = new RegExp(`[,; ](${N})=Object\\.freeze\\(\\{firstMs:1e3,maxMs:1e4,afterMaxMs:1e4\\}\\),(${N})=\\(\\)=>Date\\.now\\(\\),(${N})=(${N})=>\\4 instanceof (${N})\\?\\4\\.afterMs:null;function (${N})\\((${N})=\\2\\)\\{let (${N})=\\7\\(\\),(${N})=0,(${N})=0,(${N})=!1;return\\{next\\((${N})\\)\\{let (${N})=(${N})\\(\\9,\\3\\(\\12\\),\\1\\);return \\11\\|\\|Math\\.max\\(\\7\\(\\)-\\8,\\10\\)\\+\\13>3e4\\?\\(\\11=!0,null\\):\\(\\9=\\13,\\10\\+=\\13,\\13\\)\\},spent:\\(\\)=>\\11(?:,hold\\((${N})\\)\\{return \\11\\|\\|Math\\.max\\(\\7\\(\\)-\\8,\\10\\)\\+\\15>3e4\\?!1:\\(\\10\\+=\\15,!0\\)\\})?\\}\\}`).exec(js);
   if (!def) return out;
   const [, B, , A, , X, R] = def;
   const T = def[14];
