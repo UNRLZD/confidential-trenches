@@ -262,6 +262,7 @@ try {
         await side.click();
         const held = await settle(async () => norm(await page.locator('[data-testid="sell-held"]').innerText()), "10.6K TORCH held");
         check(held === "10.6K TORCH held", `@${w.name}: the Sell side holds "${held}", want the 10,600 the buy received`);
+        if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `held-after-buy-filled-${w.name}.png`) });
         check(!(await page.locator('[data-testid="sell-cta"]').isDisabled()), `@${w.name}: Sell off on the Sell side after the buy's Filled`);
       }
       await ctx.close();

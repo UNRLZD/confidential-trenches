@@ -327,6 +327,7 @@ try {
       await page.clock.runFor(900);
       const held = await settle(async () => norm(await page.locator('[data-testid="sell-held"]').innerText()), "617.2K TORCH held");
       check(held === "617.2K TORCH held", `@${w.name}: half sold, the read lagging: held "${held}" 0.9 s after its Filled, want 617.2K`);
+      if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `held-after-half-sold-${w.name}.png`), fullPage: true });
       await ctx.close();
     }
     // a typed percent sells its share; a percent over 100 is not taken
