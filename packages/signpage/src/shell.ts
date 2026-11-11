@@ -229,8 +229,11 @@ export function mountShell(doc: Document, host: Omit<ApiHost, "parent" | "listen
       layer.hidden = true;
       if (leaving !== null) clearTimeout(leaving);
       leaving = null;
-      if (frame) frame.inert = false;
-      else add();
+      // a kept frame is live again and takes the keyboard's focus back, as a sheet gives it back to what opened it
+      if (frame) {
+        frame.inert = false;
+        frame.focus?.();
+      } else add();
     },
     dismissible(may) {
       sheet.close.hidden = !may;
