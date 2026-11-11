@@ -125,7 +125,7 @@ export function keptHeldOf(token: string, kept: unknown): Map<string, bigint> {
 export function readFirst(held: readonly { address: string; held: bigint }[], units: bigint | null): string[] {
   const order = [...held].sort((x, y) => (x.held < y.held ? -1 : x.held > y.held ? 1 : x.address < y.address ? -1 : x.address > y.address ? 1 : 0));
   const one = units === null ? undefined : order.find((x) => x.held >= units && x.held > 0n);
-  return order.map((x) => x.address);
+  return (one ? [one, ...order.filter((x) => x !== one)] : order).map((x) => x.address);
 }
 /** The Ws bought since the last whole pass, by the pass's own rule (positions.ts positionsPass: a recorded token the
  *  finder never listed shows at the record's amount): W's buy mint (pool-sell.ts BUY_MINTS_KEY, the sale plan's
