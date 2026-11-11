@@ -323,7 +323,7 @@ if (RESUME && ok) {
     const ata = (await again(() => rpcs[0]("getAccountInfo", [solanaAta(fw.address, MINT, owner), { encoding: "base64", commitment: "finalized" }]))).value;
     const units = ata ? Buffer.from(ata.data[0], "base64").readBigUInt64LE(64) : 0n;
     log(`W ${fw.address} holds ${units} units of the coin`);
-    if (units > 0n) rounds.push({ W: fw.address, resumed: true, units, ata: solanaAta(fw.address, MINT, owner) });
+    if (units > 0n) rounds.push({ W: fw.address, resumed: true, units: String(units), ata: solanaAta(fw.address, MINT, owner) });
   }
   if (rounds.length === 0) ok = false;
 }
@@ -384,7 +384,7 @@ if (ok && ONE_FIRST) {
   // is the restore's own read of its token account at finalized
   if (rounds.length < 2 || (FINDER && !RESUME)) throw new Error("FLOW_ONE_FIRST takes two buys at least, and the finder path only on a resumed run");
   const listed = FINDER ? null : keptListed(await w.get("meta", POSITIONS_KEPT_KEY));
-  const held = rounds.map((r) => ({ W: r.W, units: FINDER ? r.units : listed.get(r.W).get(MINT) })).sort((a, b) => (a.units < b.units ? -1 : a.units > b.units ? 1 : 0));
+  const held = rounds.map((r) => ({ W: r.W, units: FINDER ? BigInt(r.units) : listed.get(r.W).get(MINT) })).sort((a, b) => (a.units < b.units ? -1 : a.units > b.units ? 1 : 0));
   oneW = held[0].W;
   const dec = 6;
   const s_ = held[0].units.toString().padStart(dec + 1, "0");
