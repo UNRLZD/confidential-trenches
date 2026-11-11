@@ -946,3 +946,34 @@ test("a bundle that did not fill: the note names the region, the end, the rebroa
   assert.equal(u.note?.status, undefined);
   assert.equal(bare.seen.length, 1);
 });
+
+// review of 40afe385: the engine's word on a bundle is read only when no other bundle carry is in progress, so the
+// read never takes a second another carry's rebroadcast wants; the line then says it was not read
+test("a bundle that did not fill while another bundle carry is in progress: its status is not read, the note says unread", async () => {
+  const id = "ab".repeat(32);
+  const seen: string[] = [];
+  const fetchFn: JitoFetch = async (url, init) => {
+    const b = JSON.parse(String(init.body));
+    seen.push(b.method);
+    if (b.method === "getInflightBundleStatuses") return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: { context: { slot: 1 }, value: [{ bundle_id: id, status: "Failed", landed_slot: null }] } }), { status: 200 });
+    const w = Buffer.from(b.params[0], "base64");
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: base58(w.subarray(1, 65)) }), { status: 200, headers: { "x-bundle-id": id } });
+  };
+  let endFirst!: () => void;
+  const first = new Promise<void>((r) => (endFirst = r));
+  let n = 0;
+  const s = mainnet({
+    engine: { fetchFn },
+    done: (x) => (n++ === 0 ? first.then(() => ({ txs: [{ signature: x.sig, state: "expired" as const, sends: [] as [] }] })) : Promise.resolve({ txs: [{ signature: x.sig, state: "expired" as const, sends: [] as [] }] })),
+  });
+  const long = s.carry(body(tipped({ r: { existingNullifierHash: f32(120) } })));
+  await new Promise((r) => setImmediate(r));
+  const b = await s.carry(body(tipped({ r: { existingNullifierHash: f32(121) } })));
+  assert.equal(b.note?.status, "unread", "read while the other carry was in progress");
+  assert.equal(seen.filter((m) => m === "getInflightBundleStatuses").length, 0);
+  // the other carry, the last in progress, reads its bundle's word once it ends
+  endFirst();
+  const a = await long;
+  assert.equal(a.note?.status, "failed");
+  assert.equal(seen.filter((m) => m === "getInflightBundleStatuses").length, 1);
+});

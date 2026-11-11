@@ -36,6 +36,19 @@ test("a simulation's error keeps its variant names, indexes and codes; any free 
   assert.ok(simErrText({ InstructionError: [1, { A: { B: { C: { D: { E: 1 } } } } }] }).length <= 120);
 });
 
+test("a simulation's error keeps at most two numbers, each at most 65,535: an RPC cannot spell a signature or an address in integers", () => {
+  // what a real error holds: an instruction index and a program's code, or one account index
+  assert.equal(simErrText({ InstructionError: [255, { Custom: 65_535 }] }), '{"InstructionError":[255,{"Custom":65535}]}');
+  // a number over 16 bits, a negative one, a third one: dropped
+  assert.equal(simErrText({ InstructionError: [2, { Custom: 65_536 }] }), '{"InstructionError":[2,{"Custom":"?"}]}');
+  assert.equal(simErrText({ InstructionError: [-1, { Custom: 2 ** 53 - 1 }] }), '{"InstructionError":["?",{"Custom":"?"}]}');
+  assert.equal(simErrText({ InstructionError: [1, 2, 3, 4], InsufficientFundsForRent: { account_index: 5 } }), '{"InstructionError":[1,2,"?","?"],"InsufficientFundsForRent":{"account_index":"?"}}');
+  // 32 bytes in any spread of integers: at most 32 bits of them reach the line
+  const bytes = Array.from({ length: 32 }, (_, k) => 200 + k);
+  const kept = (t: string) => (t.match(/\d+/g) ?? []).length;
+  for (const err of [{ A: bytes }, { A: [bytes.slice(0, 4), bytes.slice(4, 8)], B: { C: bytes.slice(8, 12), D: bytes.slice(12, 16) } }]) assert.ok(kept(simErrText(err)) <= 2, simErrText(err));
+});
+
 test("a region's name is its host's first label", () => {
   assert.equal(regionName("https://frankfurt.mainnet.block-engine.jito.wtf/api/v1/transactions?bundleOnly=true"), "frankfurt");
   assert.equal(regionName("not a url"), "?");

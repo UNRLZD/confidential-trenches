@@ -480,6 +480,9 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
   const holding = heldPerClient(POOL_JITO_IN_FLIGHT_MAX);
   // M374 (4): nullifiers whose last bundle send expired (never landed): sent again only into a free second
   const expired = new Map<string, true>();
+  // the bundle carries in progress, from their first send to their end: the engine's word on a bundle is read only
+  // when no other is, so the read never takes a second another carry's rebroadcast wants (./jito.ts status)
+  let bundling = 0;
   const bounded = <V>(m: Map<string, V>, k: string, v: V) => {
     m.delete(k);
     m.set(k, v);
@@ -595,13 +598,22 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
       // a rebroadcast waiting for its region's next second (./jito.ts) is dropped unsent once the send has ended
       const ended = new AbortController();
       const bundled = jito !== null && tx.tag === 3;
+      let left = !bundled;
+      const leave = () => {
+        if (!left) (left = true), (bundling -= 1);
+      };
+      if (bundled) bundling += 1;
       if (bundled) {
         // M362 (4): bundle-only, so a tag 3 that would fail on chain never lands; rebroadcast the same way, one a
         // second, to the region that took it only (./jito.ts), its pacer shared by every carry rebroadcasting there
         const sig = base58(signed.wire.subarray(1, 65));
-        const j = await jito.send(Buffer.from(signed.wire).toString("base64"), sig, queueMaxMs);
+        const j = await jito.send(Buffer.from(signed.wire).toString("base64"), sig, queueMaxMs).catch((e: unknown) => {
+          leave();
+          throw e;
+        });
         // M374 (1): the code only. A block engine's words never reach the caller: they could carry the fee payer's
         // signature before the send is decided (M369 (H1)). A throttle is a 429 with its wait, a failure a 503.
+        if (j.kind === "busy" || j.kind === "refused") leave();
         if (j.kind === "busy" && j.throttled) return { ...no(429, "rate_limited"), retryAfterS: 1, note: { via: "jito", first: "throttled" } };
         if (j.kind === "busy" || j.kind === "refused") return { ...no(503, "upstream"), note: { via: "jito", first: j.kind } };
         if (j.kind === "ok") {
@@ -627,7 +639,13 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
         // every region failed on transport: the plain send, under M356 (1) (a failure that lands is paid once an epoch)
         else note = { via: "plain", first: "transport" };
       }
-      const h = send([signed], { paths: through, providers: [a, b] });
+      let h: ReturnType<typeof send>;
+      try {
+        h = send([signed], { paths: through, providers: [a, b] });
+      } catch (e) {
+        leave();
+        throw e;
+      }
       h.done.then(() => ended.abort(), () => ended.abort());
       // the send's end frees the nullifier only if once still holds this send's entry (a newer one stays):
       //   expired (never landed, no fee paid): free now; failed (a paid failure): free, and refuse it until the next
@@ -649,6 +667,7 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
         } catch {
           state = undefined;
         }
+        leave();
         // the rebroadcasts, counted (the first send went before the set); and for a send that did not fill, the
         // engine's word on its bundle (one read, in the region's second), so the line says whether it lost the auction
         const jitoSends = sends.filter((x) => x.path === "jito");
@@ -656,7 +675,7 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
         if (state !== "filled" && taken?.bundleId !== undefined) {
           let word: PoolSendNote["status"] = "unread";
           try {
-            word = await jito.status(taken.region, taken.bundleId);
+            if (bundling === 0) word = await jito.status(taken.region, taken.bundleId);
           } catch {
             word = "unread";
           }

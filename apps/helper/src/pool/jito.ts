@@ -80,7 +80,10 @@ export type JitoSender = {
    * aborts first. */
   rebroadcast(region: string, base64Tx: string, signature: string, signal?: AbortSignal): Promise<JitoTry>;
   /** The engine's word on `bundleId` (an x-bundle-id `region` gave), read at `region` in a second nobody booked, as a
-   *  rebroadcast goes (it counts in the region's limit); for the send's log line only, never a send's decision. */
+   *  rebroadcast goes (it counts in the region's limit); for the send's log line only, never a send's decision. It
+   *  yields to every send: it waits at most one interval for the region's second, never holds the place a rebroadcast
+   *  waits in, and gives the second up to a rebroadcast waiting for it; past that, or past its request's timeout, it is
+   *  unread, so it answers within one interval plus the timeout. */
   status(region: string, bundleId: string, signal?: AbortSignal): Promise<JitoBundleStatus>;
 };
 /** Resolves true after `ms`, or false at once when `signal` aborts (the timer cleared). */
@@ -232,7 +235,14 @@ export function jitoSender(opts: { regions?: readonly string[]; fetch?: JitoFetc
     async status(region, bundleId, signal) {
       const i = regions.indexOf(region);
       if (i < 0 || !/^[0-9a-f]{64}$/.test(bundleId)) return "unread";
-      if ((await unbooked(i, signal)) !== null) return "unread";
+      // the region's second, yielded: unread past one interval, when a first send booked it, or when a rebroadcast
+      // waits for it (that rebroadcast's place is never held, so it is never refused or put after this read)
+      const until = clock() + interval;
+      for (let now = clock(); free[i]! > now; now = clock()) {
+        if (free[i]! > sent[i]! + interval || free[i]! > until || holding[i]) return "unread";
+        if (!(await sleep(free[i]! - now, signal))) return "unread";
+      }
+      if (holding[i]) return "unread";
       let text: string;
       try {
         const init: RequestInit = {
