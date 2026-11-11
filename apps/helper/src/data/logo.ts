@@ -107,7 +107,10 @@ export type Resolve = (host: string, signal: AbortSignal) => Promise<{ address: 
 
 /** The host's A and AAAA answers through c-ares, one try under DNS_MS, cancelled when `signal` ends (`servers` only
  *  for a test). Rejects when neither family answers. */
-export async function systemResolve(host: string, signal: AbortSignal, servers?: string[]): Promise<{ address: string; family: number }[]> {
+/** The logo resolver's name servers: undefined is the system's (a test sets its own). */
+export const LOGO_DNS: { servers: string[] | undefined } = { servers: undefined };
+
+export async function systemResolve(host: string, signal: AbortSignal, servers: string[] | undefined = LOGO_DNS.servers): Promise<{ address: string; family: number }[]> {
   const r = new Resolver({ timeout: DNS_MS, tries: 1 });
   if (servers !== undefined) r.setServers(servers);
   const cancel = () => r.cancel();
@@ -124,12 +127,14 @@ export async function systemResolve(host: string, signal: AbortSignal, servers?:
   }
 }
 
-/** At most DNS_PARALLEL logo lookups at once, every process-wide; a waiter leaves when its signal ends. */
+/** A fetch whose time ended while it waited for a lookup slot: the helper was busy, nothing about the URL is known. */
+const SLOT_WAIT = new Error("no lookup slot in time");
+/** At most DNS_PARALLEL logo lookups at once, every process-wide; a waiter leaves (SLOT_WAIT) when its signal ends. */
 let dnsOpen = 0;
 const dnsWaiting: (() => void)[] = [];
 async function lookupTurn<T>(signal: AbortSignal, f: () => Promise<T>): Promise<T> {
   while (dnsOpen >= DNS_PARALLEL) {
-    if (signal.aborted) throw signal.reason;
+    if (signal.aborted) throw SLOT_WAIT;
     await new Promise<void>((go) => {
       const wake = () => (signal.removeEventListener("abort", leave), go());
       const leave = () => {
@@ -141,7 +146,7 @@ async function lookupTurn<T>(signal: AbortSignal, f: () => Promise<T>): Promise<
       signal.addEventListener("abort", leave, { once: true });
     });
   }
-  if (signal.aborted) throw signal.reason;
+  if (signal.aborted) throw SLOT_WAIT;
   dnsOpen++;
   try {
     // the injected resolve may ignore the signal: the race frees the slot at the deadline either way
@@ -193,8 +198,9 @@ export async function fetchLogo(start: URL, deps: { resolve?: Resolve; get?: Get
     let addrs: { address: string; family: number }[];
     try {
       addrs = await lookupTurn(signal, () => resolve(url.hostname, signal));
-    } catch {
-      throw new Refused(signal.aborted ? "timeout" : "dns");
+    } catch (e) {
+      // a wait for a slot is the helper's load, not the URL's fault: "busy", never cached
+      throw new Refused(e === SLOT_WAIT ? "busy" : signal.aborted ? "timeout" : "dns");
     }
     if (addrs.length === 0 || addrs.some((a) => blockedAddress(a.address))) throw new Refused("address");
     const r = await get(url, addrs, signal).catch((e: unknown) => {

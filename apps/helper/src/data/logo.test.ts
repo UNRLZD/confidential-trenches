@@ -310,3 +310,55 @@ test("a full fetch queue answers 503 with no-store, never a cached 404; a refusa
     await new Promise<void>((ok) => s.close(() => ok()));
   }
 });
+
+// The re-read of 8082d886: a fetch that timed out waiting for a DNS slot was cached as a refusal for LOGO_NONE_MS, so a
+// few slow-DNS coins blanked real coins' logos; and two mutants lived: the default lookup back on dns.lookup (the libuv
+// pool), and createLogos answering null where it means "busy".
+test("a fetch that waits out its time for a DNS slot is busy, never a cached refusal: the next read fetches again", { timeout: 5_000 }, async () => {
+  const hangers = createLogos({ resolve: (_h, signal) => new Promise((_, no) => signal.addEventListener("abort", () => no(signal.reason), { once: true })), timeoutMs: 600 });
+  hangers.remember("solana", "SlowA", "https://slow-a.example/x.png");
+  hangers.remember("solana", "SlowB", "https://slow-b.example/x.png");
+  const held = [hangers.read("solana", "SlowA"), hangers.read("solana", "SlowB")]; // both DNS slots
+  let gets = 0;
+  const victim = createLogos({ resolve: PUBLIC, get: async () => (gets++, got(200, { "content-type": "image/png" }, PNG)), timeoutMs: 150 });
+  victim.remember("solana", "Real", "https://arweave.net/real");
+  assert.equal(await victim.read("solana", "Real"), "busy", "no slot within its time: busy");
+  assert.equal(gets, 0);
+  assert.deepEqual(await Promise.all(held), [null, null], "the hanging lookups are real refusals (timeout)");
+  const again = await victim.read("solana", "Real");
+  assert.ok(again !== null && again !== "busy" && again.type === "image/png", "nothing was cached: the next read fetched");
+  assert.equal(gets, 1);
+});
+
+test("a full fetch queue makes createLogos answer busy, not null", { timeout: 10_000 }, async () => {
+  const release: (() => void)[] = [];
+  const logos = createLogos({ resolve: PUBLIC, get: () => new Promise((ok) => release.push(() => ok(got(200, { "content-type": "image/png" }, PNG)))), timeoutMs: 8_000 });
+  const n = L.PARALLEL + L.QUEUE_MAX;
+  for (let i = 0; i <= n; i++) logos.remember("solana", `M${i}`, `https://arweave.net/${i}`);
+  const reads = Array.from({ length: n }, (_, i) => logos.read("solana", `M${i}`));
+  assert.equal(await logos.read("solana", `M${n}`), "busy");
+  let done = false;
+  const all = Promise.all(reads).then(() => (done = true));
+  while (!done) {
+    while (release.length > 0) release.shift()!();
+    await new Promise((r) => setTimeout(r, 1));
+  }
+  await all;
+});
+
+test("the default lookup is c-ares on the logo resolver's servers, never dns.lookup", { timeout: 5_000 }, async () => {
+  const silent = createSocket("udp4");
+  let asked = 0;
+  silent.on("message", () => asked++);
+  await new Promise<void>((ok) => silent.bind(0, "127.0.0.1", ok));
+  assert.ok(L.LOGO_DNS !== undefined, "logo.ts exports LOGO_DNS");
+  const was = L.LOGO_DNS.servers;
+  L.LOGO_DNS.servers = [`127.0.0.1:${silent.address().port}`];
+  try {
+    await assert.rejects(fetchLogo(new URL("https://example.com/x.png"), { timeoutMs: 300 }), refusedAs("timeout"));
+    assert.ok(asked >= 1, "the lookup asked the logo resolver's server (dns.lookup would ask the system's)");
+  } finally {
+    L.LOGO_DNS.servers = was;
+    silent.close();
+  }
+});
