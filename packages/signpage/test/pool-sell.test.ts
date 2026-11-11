@@ -583,6 +583,9 @@ function chain(plant: Plant = {}) {
           // confirmed: RPC 1's height beside the blockhash, so the last height is max(100, 0 + 151) = 151
           return (params[0] as { commitment: string }).commitment === "confirmed" ? 0 : (plant.finalHeight ?? 1_000);
         case "getEpochInfo":
+          // confirmed: RPC 1's height and its slot beside the blockhash check (pool-buy.ts blockhashValid), at the
+          // check's own slot, so the last height is max(100, 0 + 151) = 151
+          if ((params[0] as { commitment: string }).commitment === "confirmed") return { blockHeight: 0, absoluteSlot: VF[v].slot, epoch: 1, slotIndex: 0, slotsInEpoch: 432_000 };
           // finalized: each RPC's height and, of the same block, its slot, which pins its mark read (minContextSlot)
           assert.equal((params[0] as { commitment: string }).commitment, "finalized");
           return { blockHeight: plant.finalHeight ?? 1_000, absoluteSlot: VF[v].slot + 10 + p, epoch: 1, slotIndex: 0, slotsInEpoch: 432_000 };

@@ -990,7 +990,7 @@ test("a release of this buy's own read back, filled or withdrawn, tells the page
     const r = host(both([release(o)]));
     const told: unknown[] = [];
     r.h.landed = (...a) => void told.push(a);
-    assert.equal((await runEvmPoolBuy(r.h, ASK)).stage, "not_landed");
+    assert.deepEqual(await runEvmPoolBuy(r.h, ASK), { stage: "not_landed", txs: [] });
     assert.deepEqual(told, [], "another's release is not this note's");
   }
 });

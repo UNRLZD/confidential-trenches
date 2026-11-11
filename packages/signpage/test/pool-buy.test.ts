@@ -299,6 +299,8 @@ async function world(plant: Plant = {}, proof = readyProof()): Promise<World> {
       }
       // the not_landed verdict's read: one bank's block height and its slot (the same height count as getBlockHeight's)
       if (method === "getEpochInfo") {
+        // confirmed: RPC 1's height and its slot beside the blockhash check, at the check's own slot (blockhashValid)
+        if ((params[0] as { commitment: string }).commitment === "confirmed") return { blockHeight: 0, absoluteSlot: s.ref.slot! + 3, epoch: 1, slotIndex: 0, slotsInEpoch: 432_000 };
         assert.equal((params[0] as { commitment: string }).commitment, "finalized");
         return { blockHeight: plant.finalHeight?.(p, heightReads[p]!++) ?? 1_000, absoluteSlot: plant.finalSlot?.(p) ?? 500, epoch: 1, slotIndex: 0, slotsInEpoch: 432_000 };
       }
@@ -667,7 +669,7 @@ test("fold 1 (4): the device's slot read is last before signing: no RPC read bet
   const venue = between.filter((x) => x.endsWith(":getMultipleAccounts"));
   assert.deepEqual(venue, ["0:getMultipleAccounts", "1:getMultipleAccounts"], between.join(" "));
   assert.equal(w.multi.at(-1)![0], fx.pump.mint, "the last accounts read is the venue's");
-  assert.deepEqual(between.filter((x) => /^[01]:/.test(x) && x !== "1:isBlockhashValid" && x !== "1:getBlockHeight" && !x.endsWith(":getMultipleAccounts")), [], between.join(" "));
+  assert.deepEqual(between.filter((x) => /^[01]:/.test(x) && x !== "1:isBlockhashValid" && x !== "1:getBlockHeight" && x !== "1:getEpochInfo" && !x.endsWith(":getMultipleAccounts")), [], between.join(" "));
   assert.ok(w.log.indexOf("seed") > bh, "W is derived after the slot read");
   // a proof whose l, j derive another W than it names: refused before W signs, nothing taken
   const x = await world({}, readyProof({ j: 1 }));
@@ -1434,7 +1436,7 @@ async function roundsToSend(w: World): Promise<{ rounds: string[][]; answer: unk
   return { rounds, answer };
 }
 
-test("card pool-buy-filled-2s: the checks' reads go out in four rounds by their inputs (8 serial rounds before; the fourth RPC 1's height, card pool-buy-record-never-stays-sent), every read on both RPCs as before", async () => {
+test("card pool-buy-filled-2s: the checks' reads go out in three rounds by their inputs (8 serial rounds before), every read on both RPCs as before", async () => {
   const w = await world();
   const { rounds, answer } = await roundsToSend(w);
   assert.equal((answer as { stage?: string }).stage, "filled");
@@ -1444,10 +1446,9 @@ test("card pool-buy-filled-2s: the checks' reads go out in four rounds by their 
     ["0:getAccountInfo", "0:getAccountInfo", "0:getAccountInfo", "0:getMultipleAccounts", "0:getMultipleAccounts", "1:getAccountInfo", "1:getAccountInfo", "1:getAccountInfo", "1:getMultipleAccounts", "1:getMultipleAccounts"],
     // the two root pages (the sizes name them), the venue (the reference names it), then the device's blockhash and slot
     ["0:getAccountInfo", "0:getAccountInfo", "0:getLatestBlockhash", "0:getMultipleAccounts", "1:getAccountInfo", "1:getAccountInfo", "1:getMultipleAccounts"],
-    // the blockhash on RPC 1, which needs RPC 0's
-    ["1:isBlockhashValid"],
-    // RPC 1's height, at or past the slot it called the blockhash valid at (card pool-buy-record-never-stays-sent)
-    ["1:getBlockHeight"],
+    // the blockhash on RPC 1, which needs RPC 0's, and beside it RPC 1's height with its slot (card
+    // pool-buy-record-never-stays-sent: at or past the slot RPC 1 called the blockhash valid at)
+    ["1:getEpochInfo", "1:isBlockhashValid"],
   ]);
 });
 
@@ -1649,7 +1650,7 @@ test("fold 1 (4), two pages: past the device's slot read, before the take, only 
   assert.deepEqual(between.filter((x) => x.endsWith(":getMultipleAccounts")), ["0:getMultipleAccounts", "1:getMultipleAccounts"], between.join(" "));
   // the second page of each tree (page 0, after page 1 found neither root) on each RPC
   assert.deepEqual(between.filter((x) => x.endsWith(":getAccountInfo")).sort(), ["0:getAccountInfo", "0:getAccountInfo", "1:getAccountInfo", "1:getAccountInfo"], between.join(" "));
-  assert.deepEqual(between.filter((x) => /^[01]:/.test(x) && !["1:isBlockhashValid", "1:getBlockHeight"].includes(x) && !/:get(MultipleAccounts|AccountInfo)$/.test(x)), [], between.join(" "));
+  assert.deepEqual(between.filter((x) => /^[01]:/.test(x) && !["1:isBlockhashValid", "1:getBlockHeight", "1:getEpochInfo"].includes(x) && !/:get(MultipleAccounts|AccountInfo)$/.test(x)), [], between.join(" "));
   assert.ok(uncounted(c.at) <= SLOT_STALE_MS);
 });
 
@@ -1801,7 +1802,8 @@ test("the not-landed reads: a 503 on one RPC's height read waits the growing pau
   let t = 0, hot = 0, after = 0;
   const inner = w.host.rpcs;
   const seat = (p: 0 | 1): SolanaRpc => (async (method: string, params: readonly unknown[]) => {
-    if (method === "getEpochInfo" && t < 100_000) {
+    // the not-landed verdict's finalized read (the confirmed one beside the blockhash check is the buy's own)
+    if (method === "getEpochInfo" && (params[0] as { commitment?: string })?.commitment === "finalized" && t < 100_000) {
       if (p === 0) t < 60_000 ? hot++ : after++;
       if (p === 1 && t < 60_000) throw new SolanaRpcTransportError("http_5xx", "HTTP 503", 3, "rpc1", null);
       return { blockHeight: 0, absoluteSlot: 0 };
@@ -1898,29 +1900,29 @@ test("card start-reads-wait-out-a-throttle: a buy's bound is on the device's clo
 });
 
 test("card pool-sell-legs-side-by-side: blockhashOf, split into its read and its check for the sell, asks the buy's calls in the buy's order and refuses as before", async () => {
-  const run = async (answers: { latest?: unknown; valid?: unknown; height?: unknown }) => {
+  const run = async (answers: { latest?: unknown; valid?: unknown; height?: unknown; info?: unknown }) => {
     const asked: string[] = [];
     const at = (p: 0 | 1): SolanaRpc =>
       (async (m: string) => {
         asked.push(`${p}:${m}`);
-        return m === "getLatestBlockhash" ? answers.latest : m === "isBlockhashValid" ? answers.valid : answers.height;
+        return m === "getLatestBlockhash" ? answers.latest : m === "isBlockhashValid" ? answers.valid : m === "getEpochInfo" ? answers.info : answers.height;
       }) as SolanaRpc;
     const got = await poolBuy.blockhashOf([at(0), at(1)]).then((x) => x, (e: unknown) => ({ refused: String(e) }));
     return { asked, got };
   };
-  const ok = await run({ latest: { context: { slot: 9 }, value: { blockhash: "B", lastValidBlockHeight: 100 } }, valid: { context: { slot: 11 }, value: true }, height: 10 });
-  assert.deepEqual(ok.asked, ["0:getLatestBlockhash", "1:isBlockhashValid", "1:getBlockHeight"]);
+  const info = { blockHeight: 10, absoluteSlot: 11 };
+  const ok = await run({ latest: { context: { slot: 9 }, value: { blockhash: "B", lastValidBlockHeight: 100 } }, valid: { context: { slot: 11 }, value: true }, info });
+  assert.deepEqual(ok.asked, ["0:getLatestBlockhash", "1:isBlockhashValid", "1:getEpochInfo"]);
   assert.deepEqual(ok.got, { blockhash: "B", lastValidBlockHeight: 100, slot: 9, lastHeight: 161 });
   // no blockhash: refused with nothing asked of RPC 1; RPC 1 calling it invalid: refused
   const none = await run({ latest: { context: { slot: 9 }, value: {} } });
   assert.deepEqual(none.asked, ["0:getLatestBlockhash"]);
   assert.ok("refused" in none.got);
-  const invalid = await run({ latest: { context: { slot: 9 }, value: { blockhash: "B", lastValidBlockHeight: 100 } }, valid: { context: { slot: 11 }, value: false }, height: 10 });
-  assert.deepEqual(invalid.asked, ["0:getLatestBlockhash", "1:isBlockhashValid"], "the height is read only once RPC 1 called the blockhash valid");
+  const invalid = await run({ latest: { context: { slot: 9 }, value: { blockhash: "B", lastValidBlockHeight: 100 } }, valid: { context: { slot: 11 }, value: false }, info });
+  assert.deepEqual(invalid.asked, ["0:getLatestBlockhash", "1:isBlockhashValid", "1:getEpochInfo"]);
   assert.ok("refused" in invalid.got);
-  // valid with no slot of its own: refused, its height never read
-  const noSlot = await run({ latest: { context: { slot: 9 }, value: { blockhash: "B", lastValidBlockHeight: 100 } }, valid: { value: true }, height: 10 });
-  assert.deepEqual(noSlot.asked, ["0:getLatestBlockhash", "1:isBlockhashValid"]);
+  // valid with no slot of its own: refused
+  const noSlot = await run({ latest: { context: { slot: 9 }, value: { blockhash: "B", lastValidBlockHeight: 100 } }, valid: { value: true }, info });
   assert.ok("refused" in noSlot.got);
 });
 
@@ -1928,18 +1930,27 @@ test("card pool-sell-legs-side-by-side: blockhashOf, split into its read and its
 // it must never come out under the true one. RPC 0 lying low on lastValidBlockHeight and RPC 1's height answer lagging
 // the blockhash's block would set it low; RPC 1's height is read at or past the slot it judged the blockhash valid at.
 test("the last height: RPC 1's height is read at or past the slot RPC 1 called the blockhash valid at, so a lying RPC 0 and a lagging height answer never set it low", async () => {
-  const heights: unknown[] = [];
-  const rpc0: SolanaRpc = (async () => ({ context: { slot: 9 }, value: { blockhash: "B", lastValidBlockHeight: 10 } })) as SolanaRpc;
-  const rpc1: SolanaRpc = (async (m: string, p: readonly unknown[]) => {
-    if (m === "isBlockhashValid") return { context: { slot: 500 }, value: true };
-    heights.push(p[0]);
-    // a node behind the blockhash's block answers 5; one at slot 500 or past, the blockhash's block's height or more
-    const at = (p[0] as { minContextSlot?: number }).minContextSlot ?? 0;
-    return at >= 500 ? 200 : 5;
-  }) as SolanaRpc;
-  const got = await poolBuy.blockhashOf([rpc0, rpc1]);
-  assert.deepEqual(heights, [{ commitment: "confirmed", minContextSlot: 500 }]);
-  assert.equal(got.lastHeight, 351);
+  // RPC 0 lies low (lastValidBlockHeight 10); RPC 1 called the blockhash valid at slot 500, whose block height is 200
+  const at = async (info: { blockHeight: number; absoluteSlot: number }) => {
+    const asked: unknown[] = [];
+    const rpc0: SolanaRpc = (async () => ({ context: { slot: 9 }, value: { blockhash: "B", lastValidBlockHeight: 10 } })) as SolanaRpc;
+    const rpc1: SolanaRpc = (async (m: string, p: readonly unknown[]) => {
+      asked.push([m, p[p.length - 1]]);
+      if (m === "isBlockhashValid") return { context: { slot: 500 }, value: true };
+      if (m === "getEpochInfo") return info;
+      // a height read again at a slot: a node at slot 500 or past answers the blockhash's block's height or more
+      return ((p[0] as { minContextSlot?: number }).minContextSlot ?? 0) >= 500 ? 200 : 5;
+    }) as SolanaRpc;
+    return { got: await poolBuy.blockhashOf([rpc0, rpc1]), asked };
+  };
+  // its height beside the check, of a bank at slot 600: taken as it is, no read more
+  const fresh = await at({ blockHeight: 200, absoluteSlot: 600 });
+  assert.equal(fresh.got.lastHeight, 351);
+  assert.deepEqual(fresh.asked, [["isBlockhashValid", { commitment: "confirmed" }], ["getEpochInfo", { commitment: "confirmed" }]]);
+  // its height beside the check of a bank behind it (slot 400, height 5): read again at the check's slot
+  const behind = await at({ blockHeight: 5, absoluteSlot: 400 });
+  assert.equal(behind.got.lastHeight, 351, "never 5 + 151");
+  assert.deepEqual(behind.asked.at(-1), ["getBlockHeight", { commitment: "confirmed", minContextSlot: 500 }]);
 });
 
 // Card sol-buy-reads-side-by-side: the pool's time for the take is read beside the first round (the host's chainNow,
