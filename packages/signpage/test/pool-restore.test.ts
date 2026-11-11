@@ -839,6 +839,24 @@ test("review of d5699312 P2: a chain this build gives no deposit address on is n
   assert.ok(n.found.get(SOL_SCOPE) !== undefined, "the Solana scope's ids read");
 });
 
+test("review of 56a57ed2 P3: on a build that gives no deposit address on a chain, a failed walk of that chain's pool does not hold back the restore of the chain that does", async () => {
+  const solOnly = uxOf(new Map());
+  const alone = await world({ pools: () => SOL_ONLY, solana: emptyWalk, ids: nearOf().ids, ux: () => solOnly.reads });
+  assert.equal(await whole(alone), "done");
+  const ux = uxOf(new Map());
+  const failed = (async () => {
+    throw new Error("the pool's RPCs refused the walk");
+  }) as never;
+  const w = await world({ solana: emptyWalk, evm: failed, ids: nearOf().ids, ux: (chain) => (chain === "solana" ? ux.reads : null), addressed: (chain) => chain === "solana" });
+  assert.equal(await whole(w), "done");
+  assert.deepEqual(w.ends, alone.ends);
+  assert.deepEqual(w.steps, alone.steps);
+  // the same failed walk on a chain that gives a deposit address still stalls the run by name
+  const v = await world({ solana: emptyWalk, evm: failed, ids: nearOf().ids, ux: (chain) => (chain === "solana" ? ux.reads : null) });
+  assert.equal(await whole(v), "stalled");
+  assert.ok(v.ends.at(-1)!.why.some((x) => x.includes("the pool's RPCs refused the walk")), JSON.stringify(v.ends));
+});
+
 test("planted: the U_X reads are keyed by the pool's chain from its pin: an EVM pool reads U^evm_{s,i}'s address, a chain with none names U_X unread", async () => {
   const ux = uxOf(new Map());
   const chains: string[] = [];

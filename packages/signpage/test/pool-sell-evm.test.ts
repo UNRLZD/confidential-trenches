@@ -528,7 +528,7 @@ test("the live check's own constants are the page's: the sell selector, the Depo
   // the open sales' and the buy records' keys are no marks: the mainnet positions pass reads both (card evm-pools-on-mainnet)
   assert.ok(!(lc.EVM_SELL_MARKS as string[]).includes(EVM_OPEN_SELLS_KEY));
   assert.ok(!(lc.EVM_SELL_MARKS as string[]).includes(EVM_POSITION_COSTS_KEY));
-  assert.deepEqual(lc.EVM_SELL_MARKS, ["nonce()"]);
+  assert.deepEqual(lc.EVM_SELL_MARKS, ["nonce()", "Sell(address token"]);
 });
 
 // ---- the review of 1004e598..617fcd62 (card signpage-evm-pool-sell) ----

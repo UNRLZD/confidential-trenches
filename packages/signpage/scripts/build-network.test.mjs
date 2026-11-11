@@ -39,6 +39,7 @@ const TESTNET_ONLY = [
   "owed/back-evm", // the EVM buy's owed-back record (src/pool-buy-evm.ts EVM_OWED_BACK_KEY)
   "uniswap-v4", // the EVM buy's route search
   "nonce()", // the sale's read of W's SellDelegate nonce (src/pool-sell-evm.ts)
+  "Sell(address token", // the Sell typed data W signs (packages/kit/src/trade/evm/sell-unpinned.ts)
 ];
 /** The mainnet pins (packages/wallet/src/pool/solana.ts SOL_POOLS.mainnet and SOL_MAINNET_DEPLOY, card
  *  sol-pools-mainnet-pin; packages/wallet/src/pool/evm.ts EVM_POOLS.base and .robinhood, card evm-pools-on-mainnet):

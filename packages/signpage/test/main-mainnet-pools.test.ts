@@ -29,6 +29,9 @@ registerHooks({
     const r = next(url, context);
     if (url.endsWith("/signpage/src/pool-testnet.ts"))
       return { ...r, source: wrap(String(r.source), "testnetPool", "export function testnetPool(page, over) { return { ...testnetPool__real(page, over), readyWith: async (read) => ({ ready: globalThis.__ctReady, value: await read() }) }; }") };
+    // the restore host main.ts builds, kept for the wiring test below
+    if (url.endsWith("/signpage/src/pool-restore.ts"))
+      return { ...r, source: wrap(String(r.source), "poolRestore", "export function poolRestore(h) { globalThis.__ctRestoreHost = h; return poolRestore__real(h); }") };
     if (url.endsWith("/signpage/src/pool-price.ts"))
       return { ...r, source: wrap(String(r.source), "poolPrices", "export function poolPrices(deps) { return poolPrices__real({ ...deps, read: globalThis.__ctPriceRead, after: (ms, fn) => void setTimeout(fn, ms).unref() }); }") };
     return r;
@@ -371,4 +374,10 @@ test("review of d5699312: on the mainnet build pool.address gives no Base or Rob
     const got = await ask({ chain });
     assert.equal(got.error?.code, "not_allowed", `${chain}: ${JSON.stringify(got)}`);
   }
+});
+
+test("review of 56a57ed2: main.ts's restore host says this mainnet build gives a deposit address on Solana alone, as pool.address does, so a Solana-only restore still reads Solana's U_X and no Base or Robinhood pool stalls it", () => {
+  const h = (globalThis as { __ctRestoreHost?: { addressed?: (chain: string) => boolean } }).__ctRestoreHost;
+  assert.ok(h?.addressed, "the page's restore host has its addressed wiring");
+  assert.deepEqual(["solana", "base", "robinhood"].map((c) => [c, h.addressed!(c)]), [["solana", true], ["base", false], ["robinhood", false]]);
 });

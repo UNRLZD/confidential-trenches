@@ -698,7 +698,9 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
             found.push(...r.value);
             const chain = chainOf(pools[k]!);
             walked.push({ label: label(pools[k]!), chain, scope: pools[k]!.scope, notes: r.value, ux: h.ux?.(chain) ?? null, addressed: h.addressed?.(chain) ?? true });
-          } else why.push(`${label(pools[k]!)}: ${r.reason instanceof Error ? r.reason.message : "the walk failed"}`);
+            // a failed walk stalls the run, but not on a chain this build gives no deposit address on (nor a deposit: the
+            // two open together), which holds no note of this device: it holds back no other chain's restore
+          } else if (h.addressed?.(chainOf(pools[k]!)) ?? true) why.push(`${label(pools[k]!)}: ${r.reason instanceof Error ? r.reason.message : "the walk failed"}`);
         });
         signal.throwIfAborted();
         // a walk that failed: the next load walks that pool again, so step 5 stays owed after it (the marker)
