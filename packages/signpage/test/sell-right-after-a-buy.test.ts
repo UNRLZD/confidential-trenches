@@ -74,11 +74,12 @@ async function freed(w: WalletStore): Promise<void> {
 
 /** The finder, which reads at finalized: W known (its note RESERVED), its token not listed until `listed` is set. */
 function finder() {
-  const st = { listed: null as bigint | null, fail: false, failW: false, reads: 0 };
+  const st = { listed: null as bigint | null, fail: false, failW: false, reads: 0, held: null as Promise<void> | null };
   const reader: HoldingsReader = {
     chain: "sol",
     read: async (address) => {
       st.reads++;
+      if (st.held !== null) await st.held;
       if (st.fail) throw new Error("the finder did not answer");
       if (st.failW) throw new Error("its reads drew the provider's 429");
       assert.equal(address, W);
@@ -327,4 +328,42 @@ test("the end's records wait for the early write: a not_landed end told at once 
   await until(async () => (await w.get("ops", "pb1")) !== undefined, "the end's ops record");
   await tick(120);
   assert.equal(((await w.get("meta", POSITION_COSTS_KEY)) as Record<string, unknown> | undefined)?.[W], undefined, "W's record taken back after the early write");
+});
+
+// Card app-sell-shows-what-you-receive, devnet run 116 (11 Nov): the sell box's preview answered not_funded 7.6 s past a
+// buy's Filled, as long as the positions pass's finder read of W waited on its lane, while a sale planned W at once. With
+// the page's own source for the Ws bought since the last pass (pool-testnet.ts boughtSince, as the sale's plan finds W:
+// its buy mint), the preview reads W itself as the sale does: a number on its first ask, the finder still not answering,
+// and no finder read of its own; W's token account gone on both (a buy that did not stay): not_funded, as the sale.
+test("the preview right after a buy's read-back, the pass's finder read still held: a number for W's amount on the first ask, no finder read; W empty on both: not_funded", async () => {
+  const w = await sentWallet();
+  const f = finder();
+  const b = buyKind();
+  const tp = page(w, f, pair([OUT_UNITS, OUT_UNITS]), { buy: b.kind });
+  await until(async () => (await tp.positions()) !== null);
+  // the finder's next read waits (a pass read held on its host's lane)
+  let free!: () => void;
+  f.st.held = new Promise<void>((r) => (free = r));
+  assert.ok("running" in tapBuy(tp));
+  await until(() => b.run.told, "the run told its amount");
+  assert.equal((tp.positionsNow() ?? []).find((p) => p.token === MINT), undefined, "the pass has not listed W's token yet");
+  const mintRead = Object.entries(fx.pump.reads[0]).find(([k]) => JSON.parse(k)[0] === MINT)![1] as { context: unknown; value: unknown[] };
+  const ask = (held: [bigint | null, bigint | null]) => {
+    const own = pair(held);
+    const rec = providers("pump").map((rpc, k) => (async (method: string, params: readonly unknown[]) => {
+      if (method === "getAccountInfo") return { context: mintRead.context, value: mintRead.value[0] };
+      const list = params[0] as string[];
+      // W's own read, as the sale's plan reads it: its token account first
+      if (list[0] === ATA) return own[k as 0 | 1]!(method, params);
+      if (list.length === 1 && list[0] === solanaPoolOf(PIN.program).pool) return { context: { slot: 1 }, value: [null] };
+      return rpc(method, params);
+    }) as SolanaRpc) as unknown as readonly [SolanaRpc, SolanaRpc];
+    return poolSellDry({ pinned: () => true, rpcs: () => rec, positions: () => tp.positionsNow(), bought: (t) => tp.boughtSince(t), pin: () => PIN, rent: () => RENT, decimals: tokenDecimalsKept(), trading: () => false }, { chain: "solana", token: MINT, share_bps: 10_000, slippage_bps: 1000 });
+  };
+  const reads = f.st.reads;
+  const a = (await ask([OUT_UNITS, OUT_UNITS])) as { result?: { out: string } };
+  assert.ok(a.result && Number(a.result.out) > 0, `a number on the first ask: ${JSON.stringify(a)}`);
+  assert.equal(f.st.reads, reads, "the preview reads no finder");
+  assert.deepEqual(await ask([null, null]), { error: "not_funded" }, "W holds nothing on both: as the sale, nothing");
+  free();
 });

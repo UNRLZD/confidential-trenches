@@ -408,6 +408,7 @@ test("the page answers it (src/main.ts): the kind on the trades' paced pair as b
   assert.match(main, /"pool\.sell\.dry": \(params\) => poolSellDry\(params\),/);
   assert.match(main, /PAGE_SOL_PIN === undefined \? null : pageSolanaRpcs\("pass"\)/, "the trades' own paced pair, each read a background one on its host's lane");
   assert.match(main, /positions: \(\) => testnet\?\.positionsNow\(\) \?\? null, pin: \(\) => PAGE_SOL_PIN \?\? null,/, "the held positions: no pass, no seed read, no write; the page's pool");
+  assert.match(main, /bought: \(token\) => testnet\?\.boughtSince\(token\) \?\? Promise\.resolve\(\[\]\),/, "the Ws bought since the pass, as the sale finds them");
   assert.match(main, /rent: \(\) => \(hasSolana \? rent\.get\(\) : null\),/, "the page's own Rent sysvar read");
   assert.match(main, /const buys = liveRuns\(poolKindMap\["pool\.buy"\]\);\n  poolKindMap\["pool\.buy"\] = buys\.kind;/, "a buy counted to its first answer, its early sent (devnet run 11: to Final it kept the preview busy 33.8 s)");
   assert.match(main, /const sells = liveRuns\(poolKindMap\["pool\.sell"\]\);\n  poolKindMap\["pool\.sell"\] = sells\.kind;/);
@@ -415,6 +416,7 @@ test("the page answers it (src/main.ts): the kind on the trades' paced pair as b
   assert.match(main, /trading: \(\) => buys\.live\(\) \+ sells\.live\(\) > 0 \|\| \(dryPair\(\) \?\? \[\]\)\.some\(\(r\) => r\.url !== undefined && hostLane\(r\.url\)\.trading\(\)\),/);
   const tp = readFileSync(new URL("../src/pool-testnet.ts", import.meta.url), "utf8");
   assert.match(tp, /positionsNow: \(\) => positions\.get\(\),/);
+  assert.match(tp, /return boughtSincePass\(token, mints, kept, costs\);/, "from the store's buy mints, kept pass and buy records: no read");
 });
 
 // devnet run 11 (11 Nov): a buy's hold on the pair's hosts lasted to its Final, so every preview asked after its Filled
@@ -538,4 +540,91 @@ test("the kept answers are the preview's only: a sale's reference after a previe
   assert.ok(log.length >= n + 4, `the sale's own reads: ${log.length - n}`);
   const main = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
   assert.match(main, /const dryPair = \(\): readonly \[SolanaRpc, SolanaRpc\] \| null => \(PAGE_SOL_PIN === undefined \? null : pageSolanaRpcs\("pass"\)\);/, "the preview's pair is its own, made per ask");
+});
+
+// Card app-sell-shows-what-you-receive, devnet run 116 (11 Nov): right after a buy's Filled the preview answered
+// not_funded for 7.6 s, waiting for the positions pass's finder read of the new W, while a sale tapped then planned W from
+// its buy mint and W's own read. The preview takes a W bought since the last whole pass as the sale's plan does: its buy
+// mint names the token (boughtSincePass), and W's own read (pool-sell.ts wHeldNow, the sale's wHeld) says what it holds.
+const { solanaAta } = await import("../../kit/src/checks/solana/message.ts");
+const { base58 } = await import("@scure/base");
+const { boughtSincePass } = await import("../src/pool-sell-dry.ts");
+const MINT_PROGRAM = (Object.entries(fx.pump.reads[0]).find(([k]) => JSON.parse(k)[0] === MINT)![1] as { value: { owner: string }[] }).value[0]!.owner;
+const tokenBytes = (amount: bigint, owner: string): string => {
+  const d = new Uint8Array(165);
+  d.set(base58.decode(MINT), 0);
+  d.set(base58.decode(owner), 32);
+  new DataView(d.buffer).setBigUint64(64, amount, true);
+  d[108] = 1;
+  return Buffer.from(d).toString("base64");
+};
+/** The recorded pair, with W2's own read (its token account, W2, its two volume accounts) answered: W2 holding `held`
+ *  on each provider (null: no token account there), its lamports ENOUGH. Each call's address list logged. */
+function boughtPair(held: readonly [bigint | null, bigint | null], log: string[], lists: string[][]): readonly [SolanaRpc, SolanaRpc] {
+  const ata = solanaAta(W2, MINT, MINT_PROGRAM);
+  return pair("pump", log).map((rpc, i) => (async (method: string, params: readonly unknown[]) => {
+    const list = params[0];
+    if (method === "getMultipleAccounts" && Array.isArray(list)) lists.push(list as string[]);
+    if (method === "getMultipleAccounts" && Array.isArray(list) && list[0] === ata) {
+      log.push(method);
+      const h = held[i]!;
+      return { context: { slot: 1 }, value: [h === null ? null : { lamports: 2_039_280, owner: MINT_PROGRAM, data: [tokenBytes(h, W2), "base64"] }, { lamports: Number(ENOUGH), owner: "11111111111111111111111111111111", data: ["", "base64"] }, null, null] };
+    }
+    // no W of the pass's: the Ws' call reads the pool account alone
+    if (method === "getMultipleAccounts" && Array.isArray(list) && list.length === 1 && list[0] === POOL) {
+      log.push(method);
+      return { context: { slot: 1 }, value: [{ lamports: 1, owner: PROGRAM, data: [poolBytes(...SIZES), "base64"] }] };
+    }
+    return rpc(method, params);
+  }) as SolanaRpc) as unknown as readonly [SolanaRpc, SolanaRpc];
+}
+const FINDER = /^(getTokenAccountsByOwner|getBalance|getProgramAccounts|getSignaturesForAddress)$/;
+
+test("a preview asked right after a buy's read-back, before the pass lists its W: the buy's amount from W's own read, the same number as the pass's, and no finder read", async () => {
+  const log: string[] = [];
+  const lists: string[][] = [];
+  const since = { address: W2, program: MINT_PROGRAM, decimals: 6 };
+  const got = await poolSellDry(deps({ positions: () => [pos(SWAP_MINT)], rpcs: () => boughtPair([HELD, HELD], log, lists), bought: async (t: string) => (t === MINT ? [since] : []) }), share(MINT, 10_000));
+  assert.ok("result" in got, `a number on the first ask: ${JSON.stringify(got)}`);
+  // the same W as the pass would hold it, the same holding: the same answer
+  const passed = await poolSellDry(deps({ positions: () => [pos(MINT, "4000000", 6, [W2])] }), share(MINT, 10_000));
+  assert.deepEqual(got, passed, "the buy's amount, priced as the pass's holding of it");
+  assert.equal(log.filter((m) => FINDER.test(m)).length, 0, `no finder read: ${log.join(",")}`);
+  // a partial share of it as well
+  const half = await poolSellDry(deps({ positions: () => [], rpcs: () => boughtPair([HELD, HELD], [], []), bought: async () => [since] }), share(MINT, 5_000));
+  const halfPassed = await poolSellDry(deps({ positions: () => [pos(MINT, "4000000", 6, [W2])] }), share(MINT, 5_000));
+  assert.deepEqual(half, halfPassed);
+});
+
+test("a W bought since the pass as the sale finds it: empty on both (the buy did not land) adds nothing; apart on the two (its account on one only): not now; beside the pass's W, each W in its own call", async () => {
+  const since = [{ address: W2, program: MINT_PROGRAM, decimals: 6 }];
+  // not landed: no token account on either provider, so the sale would plan nothing of W
+  assert.deepEqual(await poolSellDry(deps({ positions: () => [], rpcs: () => boughtPair([null, null], [], []), bought: async () => since }), share(MINT, 10_000)), { error: "not_funded" });
+  // one provider shows it, the other not yet: neither's word alone, busy (the app asks again)
+  assert.deepEqual(await poolSellDry(deps({ positions: () => [], rpcs: () => boughtPair([HELD, null], [], []), bought: async () => since }), share(MINT, 10_000)), { error: "busy" });
+  // signed out: nothing, no read of W
+  const lists: string[][] = [];
+  assert.deepEqual(await poolSellDry(deps({ positions: () => null, rpcs: () => boughtPair([HELD, HELD], [], lists), bought: async () => since }), share(MINT, 10_000)), { error: "not_funded" });
+  assert.equal(lists.length, 0);
+  // the pass holds W1, W2 was bought since: both counted, W2's read names W2 alone
+  const both = await poolSellDry(deps({ positions: () => [pos(MINT, "4000000", 6, [W1])], rpcs: () => boughtPair([HELD, HELD], [], lists), bought: async () => since }), share(MINT, 10_000));
+  const passedBoth = await poolSellDry(deps({ positions: () => [pos(MINT, "8000000", 6, [W1, W2])] }), share(MINT, 10_000));
+  assert.ok("result" in both && "result" in passedBoth, JSON.stringify([both, passedBoth]));
+  assert.equal(both.result.out, passedBoth.result.out, "the two Ws' holding, as the pass would hold it");
+  for (const l of lists.filter((x) => x.includes(W2))) assert.ok(!l.includes(W1), `a call naming W2 names no other W: ${l.join(",")}`);
+  // a W the pass already holds is not read again
+  const again: string[][] = [];
+  await poolSellDry(deps({ positions: () => [pos(MINT, "4000000", 6, [W2])], rpcs: () => boughtPair([HELD, HELD], [], again), bought: async () => since }), share(MINT, 10_000));
+  assert.equal(again.filter((l) => l[0] === solanaAta(W2, MINT, MINT_PROGRAM)).length, 0, "the pass's W: no own read");
+});
+
+test("boughtSincePass: the Ws whose buy mint names the token and that the kept pass never listed it in, with the program and the record's decimals", () => {
+  const mints = { [W1]: { mint: MINT, program: MINT_PROGRAM }, [W2]: { mint: MINT, program: MINT_PROGRAM }, [PROGRAM]: { mint: SWAP_MINT, program: MINT_PROGRAM } };
+  const costs = { [W2]: { mint: MINT, received: "4000000", decimals: 6 } };
+  // no whole pass kept yet: every W of the token
+  assert.deepEqual(boughtSincePass(MINT, mints, undefined, costs), [{ address: W1, program: MINT_PROGRAM }, { address: W2, program: MINT_PROGRAM, decimals: 6 }]);
+  // W1 listed the token once (held or sold since): the pass's, never read here
+  assert.deepEqual(boughtSincePass(MINT, mints, { positions: [], held: {}, listed: [`${W1} ${MINT}`] }, costs), [{ address: W2, program: MINT_PROGRAM, decimals: 6 }]);
+  assert.deepEqual(boughtSincePass(MINT, undefined, undefined, costs), []);
+  assert.deepEqual(boughtSincePass(MINT, { [W2]: { mint: MINT } }, undefined, {}), [], "no program: not the sale's read");
 });

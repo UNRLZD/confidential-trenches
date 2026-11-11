@@ -242,6 +242,8 @@ else {
     pinned: (chain) => poolDeps.pinned(chain),
     rpcs: dryPair,
     positions: () => testnet?.positionsNow() ?? null, pin: () => PAGE_SOL_PIN ?? null,
+    // the Ws bought since the last whole pass, as the sale's plan finds them (the preview reads each as the sale does)
+    bought: (token) => testnet?.boughtSince(token) ?? Promise.resolve([]),
     decimals: PAGE_TOKEN_DECIMALS,
     // the Rent sysvar state.pools' tap_max already reads, once; none yet: the preview reads it on both
     rent: () => (hasSolana ? rent.get() : null),

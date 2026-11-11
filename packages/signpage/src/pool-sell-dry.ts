@@ -7,7 +7,13 @@
 //   page's paced RPCs and the venue that gives the most), so the preview is the quote the sale signs on, on the same
 //   reads. No quote math here.
 // - What the page already holds first: the holding is the positions pass's last read (src/positions.ts get(): the amount
-//   over every W that holds the token, and the Ws; it starts nothing, reads no seed and writes nothing), the token's
+//   over every W that holds the token, and the Ws; it starts nothing, reads no seed and writes nothing), and each W
+//   bought since the last whole pass as the sale's plan takes it (pool-sell.ts planReads: W's buy mint names the token;
+//   boughtSincePass, from the page's store), read by W's own read (pool-sell.ts wHeldNow: the sale's wHeld, one W per
+//   call, on both providers, the token account's amount the same on both), so a preview right after a buy's Filled
+//   answers for it before the finder lists it, and a W the sale would find empty adds nothing (card
+//   app-sell-shows-what-you-receive: devnet run 116 answered not_funded 7.6 s after a Filled while the pass's finder
+//   read waited on its lane, and a sale then planned W). The token's
 //   decimals the pass's or the page's kept ones (PAGE_TOKEN_DECIMALS) and the Rent sysvar the page's (main.ts
 //   rentOnce), each read on the providers only when the page has none. A cold preview's provider reads are then three
 //   getMultipleAccounts per provider, side by side: the reference's two (one per venue; a venue the two did not agree on
@@ -44,8 +50,8 @@ import { solanaPoolOf } from "../../wallet/src/pool/solana.ts";
 import { TRADE_HOLD_MAX_MS } from "../../wallet/src/throttle.ts";
 import type { KindContext, Running } from "./api.ts";
 import { keptTokenDecimals, type PoolRpc, type TokenDecimalsKept } from "./pool-kinds.ts";
-import { poolSellReference, poolSellUnits, sizesOf as poolTreeSizes, solanaSellReserve } from "./pool-sell.ts";
-import type { Position } from "./positions.ts";
+import { poolSellReference, poolSellUnits, sizesOf as poolTreeSizes, solanaSellReserve, wHeldNow, type WHeld } from "./pool-sell.ts";
+import { keptListed, type Position } from "./positions.ts";
 import { checkPoolRequest, POOL_ASSET_DECIMALS_OF, poolTokenAddress, poolUnits, SOLANA_POOL_MIN_DEPOSIT, solanaDepositRents, solanaSellAfterFull, SOLANA_SWEEP_OWED_MAX, solanaSweepFloor, solanaSweepKeep, type PoolAsk, type PoolChain } from "./rules/pool.ts";
 
 /** The longest a trade counts as running with no end seen: the lanes' own hold (throttle.ts TRADE_HOLD_MAX_MS). */
@@ -79,10 +85,32 @@ export type PoolSellDryDeps = {
   rent?(): SolanaRent | null;
   /** The page's kept decimals (PAGE_TOKEN_DECIMALS). */
   decimals?: TokenDecimalsKept;
+  /** The Ws bought since the last whole pass that name `token` (boughtSincePass on the page's store); none: []. */
+  bought?(token: string): Promise<readonly BoughtW[]>;
   /** True while a trade runs on the page or holds a host of the pair (main.ts: liveRuns and the lanes). */
   trading(): boolean;
   now?(): number;
 };
+
+/** A W bought since the last whole pass: its address, its token's program as its buy mint names it, and the token's
+ *  decimals as W's buy record holds them. */
+export type BoughtW = { address: string; program: string; decimals?: number };
+/** The Ws whose buy mint (pool-sell.ts BUY_MINTS_KEY, the sale plan's `bought`) names `token` and that the kept pass
+ *  (positions.ts POSITIONS_KEPT_KEY) never listed it in: bought since the last whole pass. A W the finder listed it in
+ *  once is the pass's, sold or held (positions.ts: gone once it lists it no more), so it is never read here. */
+export function boughtSincePass(token: string, mints: unknown, kept: unknown, costs: unknown): BoughtW[] {
+  const listed = keptListed(kept);
+  const out: BoughtW[] = [];
+  if (typeof mints !== "object" || mints === null) return out;
+  for (const [address, m] of Object.entries(mints)) {
+    const b = m as { mint?: unknown; program?: unknown } | null;
+    if (b?.mint !== token || typeof b.program !== "string" || listed?.get(address)?.has(token)) continue;
+    const c = (costs as Record<string, { mint?: unknown; decimals?: unknown } | undefined> | null | undefined)?.[address];
+    const d = c?.mint === token ? c.decimals : undefined;
+    out.push({ address, program: b.program, ...(Number.isInteger(d) && (d as number) >= 0 && (d as number) <= 255 ? { decimals: d as number } : {}) });
+  }
+  return out;
+}
 
 /** Each provider's answers to one preview's calls, by call (callKey). */
 type Answers = readonly [Map<string, unknown>, Map<string, unknown>];
@@ -246,9 +274,13 @@ export async function poolSellDry(d: PoolSellDryDeps, params: Record<string, unk
   const bare = d.rpcs();
   const token = params.token;
   if (bare === null || !poolTokenAddress("solana", token)) return { error: "not_allowed" };
-  // the holding the positions pass read: over every W that holds the token
+  // the holding the positions pass read: over every W that holds the token; and the Ws bought since that pass, which the
+  // sale plans before the pass lists them (pool-sell.ts planReads), each read below as the sale reads it
   const pos = holding(d, token);
-  if (!pos) {
+  // a store that cannot be read (signed out meanwhile): none, so the pass's holding alone, as before
+  const since = d.positions() === null ? [] : ((await (async () => d.bought?.(token as string))().catch(() => undefined)) ?? []);
+  const extra = since.filter((b) => !pos?.wallets.includes(b.address));
+  if (!pos && extra.length === 0) {
     // signed out (or sold out): nothing kept outlives the holding
     if (d.positions() === null) turn.kept.drop();
     return { error: "not_funded" };
@@ -258,11 +290,11 @@ export async function poolSellDry(d: PoolSellDryDeps, params: Record<string, unk
   // provider (whose queue books a call's turn when it is asked): a preview that does not go asks nothing
   await null;
   if (!turn.newest()) return { error: "busy" };
-  if (holding(d, token) === undefined) {
+  if (d.positions() === null || (extra.length === 0 && holding(d, token) === undefined)) {
     turn.kept.drop();
     return { error: "not_funded" };
   }
-  const scope = JSON.stringify([token, pos.amount, pos.wallets]);
+  const scope = JSON.stringify([token, pos?.amount ?? null, pos?.wallets ?? [], extra.map((b) => b.address)]);
   const kept = turn.kept.get(scope);
   if (kept !== null) {
     // the kept answers, as two plain answer lists outside the providers' queues: no call, no budget, no wait on a trade
@@ -275,14 +307,15 @@ export async function poolSellDry(d: PoolSellDryDeps, params: Record<string, unk
       }
       return Promise.resolve(m.get(k));
     }) as SolanaRpc) as unknown as readonly [SolanaRpc, SolanaRpc];
-    const a = await previewOn(d, params, pos, replay);
+    const a = await previewOn(d, params, pos, extra, replay);
     if (!missed) return a;
     turn.kept.drop();
   }
   if (d.trading()) return { error: "busy" };
   const t = now();
   for (const c of turn.calls) while (c.length > 0 && c[0]! <= t - POOL_SELL_DRY_WINDOW_MS) c.shift();
-  if (turn.calls.some((c) => c.length + POOL_SELL_DRY_READ_CALLS > POOL_SELL_DRY_CALLS)) return { error: "busy" };
+  // W's own read for each W bought since the pass: one call more per host each
+  if (turn.calls.some((c) => c.length + POOL_SELL_DRY_READ_CALLS + extra.length > POOL_SELL_DRY_CALLS)) return { error: "busy" };
   const answers: Answers = [new Map(), new Map()];
   const rpcs = bare.map((rpc, i) => solanaWrappedRpc(rpc, (m, p) => {
     turn.calls[i as 0 | 1].push(now());
@@ -292,7 +325,7 @@ export async function poolSellDry(d: PoolSellDryDeps, params: Record<string, unk
   let timer: ReturnType<typeof setTimeout> | undefined;
   const late = new Promise<DryAnswer>((r) => (timer = setTimeout(() => r({ error: "busy" }), POOL_SELL_DRY_ANSWER_MS)));
   try {
-    const a = await Promise.race([previewOn(d, params, pos, rpcs), late]);
+    const a = await Promise.race([previewOn(d, params, pos, extra, rpcs), late]);
     if ("result" in a) turn.kept.put(scope, answers, t);
     return a;
   } finally {
@@ -300,11 +333,11 @@ export async function poolSellDry(d: PoolSellDryDeps, params: Record<string, unk
   }
 }
 
-/** The preview on `rpcs` (the gated pair, or the kept answers). */
-async function previewOn(d: PoolSellDryDeps, params: Record<string, unknown>, pos: Position, rpcs: readonly [SolanaRpc, SolanaRpc]): Promise<DryAnswer> {
+/** The preview on `rpcs` (the gated pair, or the kept answers): the pass's holding `pos` and the Ws bought since it. */
+async function previewOn(d: PoolSellDryDeps, params: Record<string, unknown>, pos: Position | undefined, extra: readonly BoughtW[], rpcs: readonly [SolanaRpc, SolanaRpc]): Promise<DryAnswer> {
   const token = params.token as string;
   const fault = (e: unknown, other: ErrorCode): DryAnswer => ({ error: e instanceof SolanaRpcTransportError ? "down" : other });
-  let decimals = pos.decimals ?? d.decimals?.get("solana", token);
+  let decimals = pos?.decimals ?? extra.find((b) => b.decimals !== undefined)?.decimals ?? d.decimals?.get("solana", token);
   try {
     // neither the pass nor the page has them: one read on both providers, kept (pool-kinds.ts keptTokenDecimals), no wait
     decimals ??= await keptTokenDecimals("solana", token, rpcs as unknown as readonly [PoolRpc, PoolRpc], { ...(d.decimals ? { kept: d.decimals } : {}), waits: 0 });
@@ -317,12 +350,23 @@ async function previewOn(d: PoolSellDryDeps, params: Record<string, unknown>, po
   } catch {
     return { error: "not_allowed" };
   }
-  const total = baseUnits(pos.amount, decimals);
-  if (total === null) return { error: "not_allowed" };
+  // each W bought since the pass: what it holds as the sale's plan reads it, side by side (one W per call); two
+  // providers apart (its token account on one only, right after its buy): not now; frozen on both: nothing held
+  let own: (WHeld | "split" | "frozen")[];
+  try {
+    own = await Promise.all(extra.map((b) => wHeldNow(rpcs, b.address, token, b.program)));
+  } catch (e) {
+    return fault(e, "quote_check_failed");
+  }
+  if (own.includes("split")) return { error: "busy" };
+  const mine = own.filter((o): o is WHeld => typeof o === "object" && o.amount > 0n);
+  const passed = pos === undefined ? 0n : baseUnits(pos.amount, decimals);
+  if (passed === null) return { error: "not_allowed" };
+  const total = mine.reduce((t, o) => t + o.amount, passed);
   const units = poolSellUnits(total, ask);
   if (units <= 0n || units > total) return { error: "not_funded" };
-  const ws = pos.wallets;
-  if (ws.length === 0) return { error: "not_funded" };
+  const ws = pos?.wallets ?? [];
+  if (ws.length + mine.length === 0) return { error: "not_funded" };
   // the sale's quote, and the Ws (lamports, volume accounts) with the pool's sizes and the Rent sysvar, side by side
   let quoted: Awaited<ReturnType<typeof poolSellReference>>;
   let read: Awaited<ReturnType<typeof walletReads>>;
@@ -336,9 +380,10 @@ async function previewOn(d: PoolSellDryDeps, params: Record<string, unknown>, po
   const venue = quoted.best.venue;
   if (venue !== "pump-curve" && venue !== "pumpswap") return { error: "quote_check_failed" };
   // a sign out while it read: the old holding is not answered
-  if (holding(d, token) === undefined) return { error: "not_funded" };
+  if (d.positions() === null || (extra.length === 0 && holding(d, token) === undefined)) return { error: "not_funded" };
   const e = quoted.best.expectedOut;
-  const pays = poolSellPays(rent, venue, read.wallets, ws.length === 1 && units === total, e, solanaSellFloor(e, ask.slippageBps), quoted.best.cashback, read.sizes);
+  const wallets = [...read.wallets, ...mine.map((o): DryWallet => ({ lamports: o.lamports, claim: o.owes }))];
+  const pays = poolSellPays(rent, venue, wallets, wallets.length === 1 && units === total, e, solanaSellFloor(e, ask.slippageBps), quoted.best.cashback, read.sizes);
   if ("refused" in pays) return { error: pays.refused };
   const sol = POOL_ASSET_DECIMALS_OF.solana;
   return { result: { out: poolUnits(pays.out, sol), min_out: poolUnits(pays.minOut, sol), network: poolUnits(SOLANA_POOL_SELL_FEE, sol), fee_bps: 0 } };
