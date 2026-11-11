@@ -62,7 +62,7 @@ test("the recorded good answer passes", () => {
 
 test("the card's page at 7a21ffcd, the frame kept under the 12 words (the review's P2-2), unedited: fails on the sheet's line only", () => {
   const r = judge(answers.goodKeptUnderWords);
-  assert.equal(r.ok, false);
+  assert.equal(r.pass, false);
   assert.deepEqual(BAD_ALL(answers.goodKeptUnderWords), [SHEET], r.lines.join("\n"));
   assert.ok(r.lines.includes(`BAD ${SHEET} (7 of 7 kept, 0 of 4 out)`), r.lines.join("\n"));
 });
