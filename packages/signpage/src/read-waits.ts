@@ -77,6 +77,23 @@ export function waitUnless(wait: (ms: number) => Promise<void>, ms: number, sign
   });
 }
 
+/** A kind's attempts (`run`, which names the fault it answered down on in `at`) with the rule's waits between them:
+ *  its answer once it names no fault; "down" once the waits are spent; failed once a sign out ended a wait. */
+export async function readsWaited<A>(run: (at: { fault?: unknown }) => Promise<A>, wait: ((ms: number) => Promise<void>) | undefined, signal: AbortSignal | undefined): Promise<A | { error: "failed" }> {
+  const pause = wait ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  const waits = readWaits();
+  for (;;) {
+    const at: { fault?: unknown } = {};
+    const a = await run(at);
+    if (!("fault" in at)) return a;
+    if (signal?.aborted) return { error: "failed" };
+    const ms = waits.next(at.fault);
+    if (ms === null) return a;
+    await waitUnless(pause, ms, signal);
+    if (signal?.aborted) return { error: "failed" };
+  }
+}
+
 /** The pair of providers with the reads `stable` names kept per provider once answered (see the header). The same
  *  providers to solanaSameProvider and their queues (solanaWrappedRpc). */
 export function keptReads(rpcs: readonly [SolanaRpc, SolanaRpc], stable: (method: string, params: readonly unknown[]) => boolean): readonly [SolanaRpc, SolanaRpc] {

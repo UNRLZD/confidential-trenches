@@ -115,7 +115,7 @@ import { solanaContextOf, solanaPoolOf, type SolanaPoolPin, type SolanaReleaseRe
 import { WALLET_SEED_LOCK } from "@blindfill/wallet/store";
 import { checkSolanaBuy, PoolRuleRefused, signSolana, type PoolAsk } from "./rules/pool.ts";
 import { spendOwner, type HistoryPlaces, type SpendOwner } from "./pool-spend.ts";
-import { keptReads, readWaits, solanaStableReads, waitsOn, waitUnless } from "./read-waits.ts";
+import { keptReads, readsWaited, solanaStableReads, waitsOn } from "./read-waits.ts";
 import type { HostAnswer, HostRefusal, KindContext, Running } from "./api.ts";
 
 /** The page's own copy of the kit's route bound: a frozen RegExp's matcher can still be swapped
@@ -519,17 +519,7 @@ type Got = "none" | "ok" | "failed" | "other";
  *  sign out ends the wait, and the buy answers failed, nothing taken or signed. */
 export async function runPoolBuy(host: PoolBuyHost, ask: PoolAsk): Promise<PoolBuyAnswer> {
   const h: PoolBuyHost = Object.assign(Object.create(host) as PoolBuyHost, { rpcs: keptReads(host.rpcs, solanaStableReads(null)) });
-  const wait = h.wait ?? ((ms: number) => new Promise<void>((res) => setTimeout(res, ms)));
-  const waits = readWaits();
-  for (;;) {
-    const at: { fault?: unknown } = {};
-    const a = await buyRun(h, ask, at);
-    if (!("fault" in at)) return a;
-    const ms = h.signal?.aborted ? null : waits.next(at.fault);
-    if (ms === null) return h.signal?.aborted ? { error: "failed" } : a;
-    await waitUnless(wait, ms, h.signal);
-    if (h.signal?.aborted) return { error: "failed" };
-  }
+  return readsWaited((at) => buyRun(h, ask, at), h.wait, h.signal);
 }
 
 async function buyRun(h: PoolBuyHost, ask: PoolAsk, at: { fault?: unknown }): Promise<PoolBuyAnswer> {

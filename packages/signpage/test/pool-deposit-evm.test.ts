@@ -1388,3 +1388,35 @@ test("pool-deposit-sent-end review 2 (info, EVM): a note a pass the follower did
   assert.equal(sentOf(ch.c.sent[1]!).nonce, 1n);
   assert.deepEqual(waits.slice(killed, killed + 3), [10_000, 10_000, 10_000], "the new send is read every 10 s");
 });
+
+// ---- card start-reads-wait-out-a-throttle: an EVM deposit's reads before U signs wait out a provider fault on the
+// page's one rule (src/read-waits.ts readWaits), each attempt from its first read, then "down", nothing sent ----
+test("card start-reads-wait-out-a-throttle: a provider down past the page's retry at U's balance, the estimate or the nonce waits 1 s and deposits; one that stays waits 1, 2, 4, 8, 10 s, then down; a sign out ends the wait", async () => {
+  for (const m of ["eth_getBalance", "eth_estimateGas", "eth_getTransactionCount"]) {
+    const { ch, ns } = await funded(RUNG + FEE);
+    ch.c.down = m;
+    ch.c.onSend = (raw) => ch.land(raw);
+    const waits: number[] = [];
+    const a = await runPoolDepositEvm(hostOf(ch, ns, { wait: async (ms) => void (ch.c.sent.length === 0 && (waits.push(ms), (ch.c.down = null))) }), ASK);
+    assert.ok("stage" in a && a.stage === "filled", `${m}: ${JSON.stringify(a)}`);
+    assert.deepEqual(waits.slice(0, 1), [1_000], m);
+    assert.equal(ch.c.sent.length, 1, m);
+  }
+  {
+    const { ch, ns } = await funded(RUNG + FEE);
+    ch.c.down = "eth_estimateGas";
+    const waits: number[] = [];
+    assert.deepEqual(await runPoolDepositEvm(hostOf(ch, ns, { wait: async (ms) => void waits.push(ms) }), ASK), { error: "down" });
+    assert.deepEqual(waits, [1_000, 2_000, 4_000, 8_000, 10_000]);
+    assert.equal(ch.c.sent.length, 0);
+  }
+  {
+    const { ch, ns } = await funded(RUNG + FEE);
+    ch.c.down = "eth_estimateGas";
+    const stop = new AbortController();
+    const run = runPoolDepositEvm(hostOf(ch, ns, { signal: stop.signal, wait: () => (stop.abort(), new Promise<void>(() => {})) }), ASK);
+    const a = await Promise.race([run, new Promise<"held">((r) => setTimeout(() => r("held"), 5_000))]);
+    assert.deepEqual(a, { error: "failed" });
+    assert.equal(ch.c.sent.length, 0);
+  }
+});
