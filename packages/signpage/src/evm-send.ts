@@ -339,7 +339,11 @@ export function evmSellCalldata(s: EvmSellFields, fee: bigint, signature: Uint8A
  *  with no leading zero digit. */
 export type EvmSellAuthorization = { chainId: number; address: string; nonce: bigint; yParity: 0 | 1; r: string; s: string };
 const quantity = (v: bigint | number | string): string => `0x${BigInt(v).toString(16)}`;
-export const evmAuthorizationJson = (a: EvmSellAuthorization) => ({ chainId: quantity(a.chainId), address: lower(a.address), nonce: quantity(a.nonce), yParity: quantity(a.yParity), r: quantity(a.r), s: quantity(a.s) });
+// r and s as 32-byte words, the helper's shape (apps/helper/src/pool/evm.ts WORD32): as quantities, a signature whose r or
+// s has a zero first byte (one in 128) was refused bad_shape, and on every signature again, since W's authorization of
+// one nonce signs the same r and s each time (Base Sepolia, 11 Nov 04:43Z)
+const word32 = (v: bigint | string): string => `0x${BigInt(v).toString(16).padStart(64, "0")}`;
+export const evmAuthorizationJson = (a: EvmSellAuthorization) => ({ chainId: quantity(a.chainId), address: lower(a.address), nonce: quantity(a.nonce), yParity: quantity(a.yParity), r: word32(a.r), s: word32(a.s) });
 
 // read at the call, so a bundle that sends no sale (the mainnet build) keeps none of it
 const sellAnswerMax = (): number => HELPER_V1_PATHS.find((p) => p.method === "POST" && p.path === "/v1/pool/evm/sell")!.limitBytes!;

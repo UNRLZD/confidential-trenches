@@ -423,7 +423,7 @@ test("evmSellSend: a 503 naming a Retry-After is a wait (the same bytes again), 
   let sent: unknown = null;
   const ok = (async (_u: unknown, init: RequestInit) => ((sent = JSON.parse(String(init.body))), new Response(JSON.stringify({ hash: "0x" + "ab".repeat(32) }), { status: 200 }))) as typeof fetch;
   assert.equal(await evmSellSend("https://h.test", body, ok), "0x" + "ab".repeat(32));
-  assert.deepEqual(sent, { pool: POOL, w: W, data: "0x0102", authorization: { chainId: "0x2105", address: V.sellDelegate!.toLowerCase(), nonce: "0x0", yParity: "0x1", r: "0x1", s: "0x2" } });
+  assert.deepEqual(sent, { pool: POOL, w: W, data: "0x0102", authorization: { chainId: "0x2105", address: V.sellDelegate!.toLowerCase(), nonce: "0x0", yParity: "0x1", r: "0x" + "1".padStart(64, "0"), s: "0x" + "2".padStart(64, "0") } });
 });
 
 test("restore: the route read back from the buy's own transaction on two RPCs equals the one the buy stored; no read names W or a hash", async () => {
@@ -716,4 +716,15 @@ test("a wiped device sells the rest while its last sale's deposit is not final: 
   assert.equal("stage" in b && b.stage, "filled", JSON.stringify(b));
   assert.equal(sellOf(y.posts[0]!.data).precommitment, P);
   assert.equal((await returnNote(y.store))?.state, "UNSPENT");
+});
+
+test("the authorization's r and s go to the helper as 32-byte words, a zero first byte kept (its WORD32 shape): one in 128 signatures was refused bad_shape on every try", async () => {
+  const { evmAuthorizationJson } = await import("../src/evm-send.ts");
+  // as signEvmAuthorization gives them: hex strings, here with a zero first byte
+  const j = evmAuthorizationJson({ chainId: 84532, address: W, nonce: 0n, yParity: 1, r: "0x" + "00ab".padStart(64, "0"), s: "0x" + (1n << 247n).toString(16).padStart(64, "0") });
+  assert.match(j.r, /^0x[0-9a-f]{64}$/);
+  assert.match(j.s, /^0x[0-9a-f]{64}$/);
+  assert.equal(BigInt(j.r), 0xabn);
+  assert.equal(BigInt(j.s), 1n << 247n);
+  assert.deepEqual([j.chainId, j.nonce, j.yParity], ["0x14a34", "0x0", "0x1"], "the rest stay quantities");
 });
