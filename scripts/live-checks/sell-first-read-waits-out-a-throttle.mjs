@@ -53,15 +53,16 @@ export function facts(index, js) {
     evmBuy: new RegExp(`decimals:${N}=>${esc(F)}\\([^)]{0,80}\\{waits:0\\}\\)`).test(js) || (EVM_BUY_HOST.test(js) ? false : "none"),
     sell: new RegExp(`after:${esc(F)}\\(${N},${N}\\.token,${N},\\{kept:`).test(js),
   };
-  // the wait: none with waits 0, else the rule's next; null (its total spent): the failure thrown
-  const loop = new RegExp(`(${N})=${N}\\.waits===0\\?null:(${N})\\(\\)[^]*?(${N})=\\1===null\\?null:\\1\\.next\\((${N})\\);if\\(\\3===null\\)throw \\4;`).exec(body);
-  // the rule: next(e) = T(pause, Retry-After of e, B)
-  const def = loop ? new RegExp(`[,; ](${N})=Object\\.freeze\\(\\{firstMs:(${N}),maxMs:(${N}),afterMaxMs:\\3\\}\\),(${N})=[^;]{0,80};function ${esc(loop[2])}\\(\\)\\{let (${N})=0,(${N})=0;return\\{next\\((${N})\\)\\{let (${N})=(${N})\\(\\5,\\4\\(\\7\\),\\1\\);`).exec(js) : null;
-  if (def) {
-    const T = def[9];
+  // the wait: none with waits 0, else the request's waits or the rule's own; null (its bound spent): the failure thrown
+  const loop = new RegExp(`(${N})=(${N})\\.waits===0\\?null:(?:\\2\\.waits\\?\\?)?(${N})\\(\\)[^]*?(${N})=\\1===null\\?null:\\1\\.next\\((${N})\\);if\\(\\4===null\\)throw \\5;`).exec(body);
+  // the rule: next(e) = T(pause, Retry-After of e, B), its bound on a clock (card start-reads-wait-out-a-throttle)
+  const fn = loop ? new RegExp(`function ${esc(loop[3])}\\((${N})=${N}\\)\\{let (${N})=\\1\\(\\),(${N})=0,(${N})=0;return\\{next\\((${N})\\)\\{let (${N})=(${N})\\(\\3,(${N})\\(\\5\\),(${N})\\);`).exec(js) : null;
+  const def = fn ? new RegExp(`[,; ]${esc(fn[9])}=Object\\.freeze\\(\\{firstMs:(${N}),maxMs:(${N}),afterMaxMs:\\2\\}\\)`).exec(js) : null;
+  if (fn && def) {
+    const T = fn[7];
     const rule = new RegExp(`function ${esc(T)}\\((${N}),(${N}),(${N})=${N}\\)\\{let ${N}=Number\\.isFinite\\(\\1\\)&&\\1>0\\?Math\\.min\\(\\1\\*2,\\3\\.maxMs\\):\\3\\.firstMs,${N}=typeof \\2==${Q}number${Q}&&Number\\.isFinite\\(\\2\\)&&\\2>0\\?Math\\.min\\(\\2,\\3\\.afterMaxMs\\):0;return Math\\.max\\(`).test(js);
     const value = (name) => (/^[\d.e]+$/.test(name) ? name : new RegExp(`[,; ]${esc(name)}=([\\d.e]+)[,;]`).exec(js)?.[1]);
-    out.wait = rule && Number(value(def[2])) === 1_000 && Number(value(def[3])) === 10_000;
+    out.wait = rule && Number(value(def[1])) === 1_000 && Number(value(def[2])) === 10_000;
   }
   // down only for a failed read: a rule's refusal (two answers that disagree) is not_allowed (a sign out's stop, since
   // card start-reads-wait-out-a-throttle, failed)

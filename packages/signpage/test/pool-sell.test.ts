@@ -4693,3 +4693,35 @@ test("card start-reads-wait-out-a-throttle: one tap's waits share one total: a t
   assert.equal(f.sales.size, 0);
   assert.ok(!("stage" in a) || a.stage === "refused", JSON.stringify(a));
 });
+
+test("card start-reads-wait-out-a-throttle: the tap's bound is on the device's clock: with each throttled read taking 5 s, the waits are 1, 2 and 4 s and the sell answers down by 30 s plus the read in flight, nothing signed", async () => {
+  const w = await world({ ataLamports: TOKEN_RENT });
+  let t = 0n;
+  // a slow provider: each throttled fee read answers its fault 5 s on the device's clock (the host's pause and the call's bound)
+  const f = faulty(w, (p, method) => (p === 0 && method === "getFeeForMessage" ? ((t += 5_000n), run6()) : null));
+  const waits: number[] = [];
+  const a = await runPoolSell({ ...w.host, rpcs: f.rpcs, now: () => t, wait: async (ms: number) => void (waits.push(ms), (t += BigInt(ms))) }, ASK);
+  assert.deepEqual(a, { error: "down" });
+  // 5 + 1 + 5 + 2 + 5 + 4 + 5 = 27 s; the next wait (8 s) would end past 30 s
+  assert.deepEqual(waits, [1_000, 2_000, 4_000]);
+  assert.ok(t <= 30_000n + 13_500n, `down at ${t} ms`);
+  assert.equal(f.sales.size, 0);
+});
+
+test("card start-reads-wait-out-a-throttle: one bound per request: the sell's plan and sales go on from the waits its decimals read took (tapWaits by the request's id), never from 0", async () => {
+  const { tapWaits } = await import("../src/read-waits.ts");
+  let t = 0;
+  const tap = { id: "tap-shared-bound" };
+  const first = tapWaits(tap, () => t);
+  assert.equal(first.next(run6()), 1_000);
+  t += 1_000;
+  assert.equal(first.next(run6()), 2_000);
+  t += 2_000;
+  // the kind's host passes the request on as a copy: the same id is the same bound
+  const later = tapWaits({ ...tap }, () => 0);
+  assert.equal(later, first);
+  assert.equal(later.next(run6()), 4_000);
+  t += 25_000;
+  assert.equal(later.next(run6()), null, "past 30 s on the clock: down");
+  assert.notEqual(tapWaits({ id: "another" }), first);
+});

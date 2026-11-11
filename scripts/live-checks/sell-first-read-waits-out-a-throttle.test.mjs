@@ -46,8 +46,8 @@ const JS =
   "var sV=1e3,cV=`ct-pool/sell`;var UV=1e4,WV=0;" +
   "var JI=Object.freeze({firstMs:1e3,maxMs:1e4,afterMaxMs:1e4});function YI(e,t,n=JI){let r=Number.isFinite(e)&&e>0?Math.min(e*2,n.maxMs):n.firstMs,i=typeof t==`number`&&Number.isFinite(t)&&t>0?Math.min(t,n.afterMaxMs):0;return Math.max(r,i)}" +
   "function kH(){let e=new Map,t=(e,t)=>`${e} ${e===`solana`?t:t.toLowerCase()}`;return{get:(n,r)=>e.get(t(n,r)),keep:(n,r,i)=>{if(MD(n,r))try{e.set(t(n,r),UD(i))}catch{}}}}" +
-  "var AH=kH(),jH=Object.freeze({firstMs:sV,maxMs:UV,afterMaxMs:UV}),yL=e=>e instanceof Wh?e.afterMs:null;function bL(){let e=0,t=0;return{next(n){let r=YI(e,yL(n),jH);return t+r>3e4?null:(e=r,t+=r,r)}}}" +
-  "async function MH(e,t,n,r={}){let i=r.kept??AH,a=i.get(e,t);if(a!==void 0)return a;let o=r.waits===0?null:bL(),s=r.wait??(e=>new Promise(t=>setTimeout(t,e))),c=n=>0,l=[void 0,void 0],u=[!1,!1];" +
+  "var AH=kH(),jH=Object.freeze({firstMs:sV,maxMs:UV,afterMaxMs:UV}),zL=()=>Date.now(),yL=e=>e instanceof Wh?e.afterMs:null;function bL(e=zL){let t=e(),n=0,r=0;return{next(i){let a=YI(n,yL(i),jH);return Math.max(e()-t,r)+a>3e4?null:(n=a,r+=a,a)}}}" +
+  "async function MH(e,t,n,r={}){let i=r.kept??AH,a=i.get(e,t);if(a!==void 0)return a;let o=r.waits===0?null:r.waits??bL(),s=r.wait??(e=>new Promise(t=>setTimeout(t,e))),c=n=>0,l=[void 0,void 0],u=[!1,!1];" +
   "for(;;){let e=[];if(await Promise.all([0,1].map(async t=>{if(!u[t])try{l[t]=await c(n[t]),u[t]=!0}catch(t){e.push(t)}})),e.length===0)break;let t=e.find(e=>!xL(e));if(t!==void 0)throw t;let i=e.reduce((e,t)=>t),a=o===null?null:o.next(i);if(a===null)throw i;if(await CL(s,a,r.signal),r.signal?.aborted)throw new SL}let d=HD(e,l);return i.keep(e,t,d),d}" +
   "var NH=Object.freeze({error:`not_allowed`}),PH=Object.freeze({error:`down`});" +
   "return{running:!0,after:MH(o,a.token,s,{kept:t,...e.wait?{wait:e.wait}:{},...l?{signal:l}:{}}).then(async t=>{c=NH},e=>{c=e instanceof jD?NH:e instanceof SL?kV:PH}),answer:()=>c}};" +
@@ -72,8 +72,8 @@ test("the facts read from a bundle", () => {
   assert.equal(facts("", JS.replace("quote:o_,build:Yw,decimals:t=>MH(e,t,n,{waits:0})", "")).wired.evmBuy, "none");
   assert.equal(facts("", JS.replace("after:MH(o,a.token,s,{kept:t,", "after:MH(o,a.token,s,{")).wired.sell, false);
   // the wait: on the page's one rule (read-waits.ts readWaits), in its bounds
-  assert.equal(facts("", JS.replace("let r=YI(e,yL(n),jH);", "let r=1e3;")).wait, false);
-  assert.equal(facts("", JS.replace("r.waits===0?null:bL()", "null")).wait, false);
+  assert.equal(facts("", JS.replace("let a=YI(n,yL(i),jH);", "let a=1e3;")).wait, false);
+  assert.equal(facts("", JS.replace("r.waits===0?null:r.waits??bL()", "null")).wait, false);
   assert.equal(facts("", JS.replace("if(a===null)throw i;", "")).wait, false);
   assert.equal(facts("", JS.replace("var sV=1e3", "var sV=250")).wait, false);
   assert.equal(facts("", JS.replace("var UV=1e4", "var UV=6e4")).wait, false);

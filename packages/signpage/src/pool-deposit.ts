@@ -104,7 +104,7 @@ import { ladderSplit } from "../../wallet/src/pool/ladder.ts";
 import { SOL_LADDER, solanaPoolOf, solanaTreeSync, type SolanaPoolPin } from "../../wallet/src/pool/solana.ts";
 import { WALLET_SEED_LOCK } from "@blindfill/wallet/store";
 import { checkSolanaDeposit, PoolRuleRefused, signSolana, type PoolAsk } from "./rules/pool.ts";
-import { keptReads, readsWaited, solanaStableReads } from "./read-waits.ts";
+import { clockOf, keptReads, readsWaited, readWaits, solanaStableReads, tapWaits, type ReadWaits } from "./read-waits.ts";
 import type { HostAnswer, HostRefusal, KindContext, Running } from "./api.ts";
 
 export type PoolDepositHost = {
@@ -476,13 +476,13 @@ function uOf(ref: NoteRef): { s: bigint; i: number } | null {
  *  next second arrival; never the newest-used-or-planned pick, so money a quote sent to an older U_X goes in from U_X.
  *  `u` is the op's U_X: U_{s,i}'s own address must be it (review 2 L2), so an op naming another index never pays from it. */
 export type PoolDepositFrom = { s: bigint; i: number; u: string };
-export async function runPoolDeposit(host: PoolDepositHost, ask: PoolAsk | null, fixed?: PoolDepositFrom): Promise<PoolDepositAnswer> {
+export async function runPoolDeposit(host: PoolDepositHost, ask: PoolAsk | null, fixed?: PoolDepositFrom, waits: ReadWaits = readWaits(clockOf(host))): Promise<PoolDepositAnswer> {
   if (ask === null) return depositRun(host, ask, fixed, {});
   // an ask's provider read that still fails past the page's own retry, with nothing of it sent: the run again from its
   // first read after a wait on the page's one rule (read-waits.ts readWaits), then "down" (card start-reads-wait-out-a-
   // throttle); the Rent sysvar kept per provider across the attempts; a sign out ends the wait, nothing signed after it
   const h: PoolDepositHost = Object.assign(Object.create(host) as PoolDepositHost, { rpcs: keptReads(host.rpcs, solanaStableReads(null)) });
-  return readsWaited((at) => depositRun(h, ask, fixed, at), h.wait, h.signal);
+  return readsWaited((at) => depositRun(h, ask, fixed, at), h.wait, h.signal, waits);
 }
 
 async function depositRun(h: PoolDepositHost, ask: PoolAsk | null, fixed: PoolDepositFrom | undefined, at: { fault?: unknown }): Promise<PoolDepositAnswer> {
@@ -891,7 +891,7 @@ export function poolDepositKind(host: () => PoolDepositHost, locks: Locks | null
           // null: the run threw (review 5: its `left` is still read, so a throw past a send never leaves the app at sent)
           let a: PoolDepositAnswer | null = null;
           try {
-            a = await runPoolDeposit(run, ask, from);
+            a = await runPoolDeposit(run, ask, from, tapWaits(ctx, clockOf(run)));
           } finally {
             try {
               const l = left as PoolDepositLeft | null;

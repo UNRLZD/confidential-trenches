@@ -63,7 +63,7 @@ import { evmSameChainDeposit } from "../../wallet/src/pool/same-chain.ts";
 import { ladderSplit } from "../../wallet/src/pool/ladder.ts";
 import { WALLET_SEED_LOCK } from "@blindfill/wallet/store";
 import { checkEvmDeposit, EVM_DEPOSIT_GAS_MAX, evmDepositHeadroom, PoolRuleRefused, signEvmDeposit, type EvmOnwardSend, type PoolAsk } from "./rules/pool.ts";
-import { readsWaited } from "./read-waits.ts";
+import { clockOf, readsWaited, readWaits, tapWaits, type ReadWaits } from "./read-waits.ts";
 import { followWait, POOL_DEPOSIT_FOLLOW_MAX_MS, POOL_DEPOSIT_LOCK, stopped, type PoolDepositAnswer } from "./pool-deposit.ts";
 import type { HostAnswer, HostRefusal, KindContext, Running } from "./api.ts";
 
@@ -556,11 +556,11 @@ export async function followPoolDepositEvm(h: PoolDepositEvmHost, left: PoolDepo
 }
 
 /** The run: an ask (pool.deposit on an EVM chain), or null to settle the scope's open notes only. */
-export async function runPoolDepositEvm(h: PoolDepositEvmHost, ask: PoolAsk | null): Promise<PoolDepositAnswer> {
+export async function runPoolDepositEvm(h: PoolDepositEvmHost, ask: PoolAsk | null, waits: ReadWaits = readWaits(clockOf(h))): Promise<PoolDepositAnswer> {
   // an ask's provider read that still fails before U signs: the run again from its first read after a wait on the
   // page's one rule (read-waits.ts readWaits), then "down" (card start-reads-wait-out-a-throttle); a sign out ends it
   if (ask === null) return depositRunEvm(h, ask, {});
-  return readsWaited((at) => depositRunEvm(h, ask, at), h.wait, h.signal);
+  return readsWaited((at) => depositRunEvm(h, ask, at), h.wait, h.signal, waits);
 }
 
 async function depositRunEvm(h: PoolDepositEvmHost, ask: PoolAsk | null, at: { fault?: unknown }): Promise<PoolDepositAnswer> {
@@ -759,7 +759,7 @@ export function poolDepositEvmKind(host: () => PoolDepositEvmHost, locks: Locks 
           const progress = (stage: TradeStage): void => (stage === "sent" && first ? void (first = false) : ctx?.progress(stage));
           let left: PoolDepositEvmLeft | null = null;
           try {
-            const a = await runPoolDepositEvm({ ...h, sent, progress, left: (l) => void (left = l) }, ask);
+            const a = await runPoolDepositEvm({ ...h, sent, progress, left: (l) => void (left = l) }, ask, tapWaits(ctx, clockOf(h)));
             const l = left as PoolDepositEvmLeft | null;
             // filled or part_filled is the ask's end; anything else past a send of the ask (sent, not_landed, a fault)
             // is no end: its open notes are read on, and the end goes as progress once each is landed or dead

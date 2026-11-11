@@ -115,7 +115,7 @@ import { solanaContextOf, solanaPoolOf, type SolanaPoolPin, type SolanaReleaseRe
 import { WALLET_SEED_LOCK } from "@blindfill/wallet/store";
 import { checkSolanaBuy, PoolRuleRefused, signSolana, type PoolAsk } from "./rules/pool.ts";
 import { spendOwner, type HistoryPlaces, type SpendOwner } from "./pool-spend.ts";
-import { keptReads, readsWaited, solanaStableReads, waitsOn } from "./read-waits.ts";
+import { clockOf, keptReads, readsWaited, readWaits, solanaStableReads, tapWaits, waitsOn, type ReadWaits } from "./read-waits.ts";
 import type { HostAnswer, HostRefusal, KindContext, Running } from "./api.ts";
 
 /** The page's own copy of the kit's route bound: a frozen RegExp's matcher can still be swapped
@@ -521,9 +521,9 @@ type Got = "none" | "ok" | "failed" | "other";
  *  start-reads-wait-out-a-throttle): each attempt reads its reference, venue, sizes and blockhash again, so nothing it
  *  signs rests on a read from before a wait; the Rent sysvar is kept per provider across the attempts (keptReads). A
  *  sign out ends the wait, and the buy answers failed, nothing taken or signed. */
-export async function runPoolBuy(host: PoolBuyHost, ask: PoolAsk): Promise<PoolBuyAnswer> {
+export async function runPoolBuy(host: PoolBuyHost, ask: PoolAsk, waits: ReadWaits = readWaits(clockOf(host))): Promise<PoolBuyAnswer> {
   const h: PoolBuyHost = Object.assign(Object.create(host) as PoolBuyHost, { rpcs: keptReads(host.rpcs, solanaStableReads(null)) });
-  return readsWaited((at) => buyRun(h, ask, at), h.wait, h.signal);
+  return readsWaited((at) => buyRun(h, ask, at), h.wait, h.signal, waits);
 }
 
 async function buyRun(h: PoolBuyHost, ask: PoolAsk, at: { fault?: unknown }): Promise<PoolBuyAnswer> {
@@ -938,7 +938,7 @@ export function poolBuyKind(host: () => PoolBuyHost & { end?(): void }, locks: L
           const a = await runPoolBuy({ ...h, sent: (signature) => {
             if (!answer) (answer = { result: { stage: "sent", txs: [{ chain: "solana", hash: signature }] } }), (early = true);
             give();
-          }, route: (x) => ctx?.route?.(x) }, ask);
+          }, route: (x) => ctx?.route?.(x) }, ask, tapWaits(ctx, clockOf(h)));
           if (!answer) answer = "error" in a ? { error: a.error } : { result: a };
           // the run's stage goes out as progress too, answered early or not: an answer that comes only at the run's end
           // (no read-back within the client's 10 s) is one the kit's client has dropped, and the app waits on progress

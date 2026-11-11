@@ -7,8 +7,10 @@
 //
 // - readWaits: the wait before a kind's next attempt, on the wallet's one rule (../../wallet/src/throttle.ts
 //   throttleWaitMs): from 1 s, doubling, at most 10 s, a Retry-After longer than that pause honoured up to 10 s. No
-//   flat wait. The kind answers down only once the next wait would take its waits past READ_WAIT_TOTAL_MS (1 + 2 + 4 + 8
-//   + 10 = 25 s of waits, five attempts after the first).
+//   flat wait. One total per tap (tapWaits, keyed by the request's KindContext: the sell's decimals read, its plan and
+//   every sale share it; a buy and a deposit ask likewise), on the device's clock from the request's arrival, so waits,
+//   the host's pauses and slow reads all count: no wait starts that would end past READ_WAIT_TOTAL_MS, so no attempt
+//   starts past it.
 // - Each attempt after a wait reads again from its first read, so its quote, its venue, its blockhash and every account
 //   it prices are the attempt's own: nothing signed rests on a read from before a wait.
 // - keptReads: the reads that cannot change while a kind waits (the Rent sysvar, a token's mint account: its program
@@ -27,30 +29,52 @@ import { throttleWaitMs, type ThrottleBounds } from "../../wallet/src/throttle.t
 
 /** The wait before a kind's next attempt: the wallet's rule in these bounds. */
 export const READ_WAIT: ThrottleBounds = /* @__PURE__ */ Object.freeze({ firstMs: 1_000, maxMs: 10_000, afterMaxMs: 10_000 });
-/** The most a kind waits in all before it answers down. */
+/** One tap's bound, on the device's clock from the request's arrival: no attempt starts past it, and the tap answers down
+ *  once the next wait would end past it. The worst a tap takes before down is this plus the one read in flight: 13.5 s
+ *  with the per-host pause (page-rpc.ts: the host's pause, at most 10 s, then the call's 3.5 s bound), so 43.5 s. */
 export const READ_WAIT_TOTAL_MS = 30_000;
+/** The device's clock, ms. */
+export type ReadClock = () => number;
+const deviceClock: ReadClock = () => Date.now();
 
 /** The provider's Retry-After as the page client read it (ms), or null. */
 export const afterOf = (e: unknown): number | null => (e instanceof SolanaRpcTransportError ? e.afterMs : null);
 
 export type ReadWaits = {
-  /** The next wait after a fault (`e`, for its Retry-After), or null once it would take the waits past the total. */
+  /** The next wait after a fault (`e`, for its Retry-After), or null once it would end past the tap's bound. */
   next(e: unknown): number | null;
 };
-/** One kind's waits, from none. */
-export function readWaits(): ReadWaits {
+/** One tap's waits, its bound counted on `clock` from now. */
+export function readWaits(clock: ReadClock = deviceClock): ReadWaits {
+  const start = clock();
   let pause = 0;
+  // the waits asked so far: the time spent is never less than them (a clock that does not move, a host's fixed `now`)
   let waited = 0;
   return {
     next(e) {
       const p = throttleWaitMs(pause, afterOf(e), READ_WAIT);
-      if (waited + p > READ_WAIT_TOTAL_MS) return null;
+      if (Math.max(clock() - start, waited) + p > READ_WAIT_TOTAL_MS) return null;
       pause = p;
       waited += p;
       return p;
     },
   };
 }
+// each request's bound by its id (a kind's host passes the request's context on as a copy, so the id names it), kept
+// past its bound for a minute, then dropped: the page holds a few at most
+const taps = new Map<string, { waits: ReadWaits; at: number }>();
+const TAP_KEPT_MS = READ_WAIT_TOTAL_MS + 60_000;
+/** A request's one bound (`tap`: its KindContext, by its id), started by its first reader; a fresh one with none. */
+export function tapWaits(tap: { id?: unknown } | null | undefined, clock?: ReadClock): ReadWaits {
+  if (typeof tap?.id !== "string") return readWaits(clock);
+  const now = deviceClock();
+  for (const [k, v] of taps) if (now - v.at > TAP_KEPT_MS) taps.delete(k);
+  let t = taps.get(tap.id);
+  if (t === undefined) taps.set(tap.id, (t = { waits: readWaits(clock), at: now }));
+  return t.waits;
+}
+/** A host's clock (its `now`, a bigint or a number of ms), else the device's. */
+export const clockOf = (h: { now?: () => bigint | number }): ReadClock => () => Number(h.now?.() ?? Date.now());
 
 /** Whether a fault waits (see the header): the page client's transport fault; any other error answers at once. */
 export const waitsOn = (e: unknown): boolean => e instanceof SolanaRpcTransportError;
@@ -79,9 +103,8 @@ export function waitUnless(wait: (ms: number) => Promise<void>, ms: number, sign
 
 /** A kind's attempts (`run`, which names the fault it answered down on in `at`) with the rule's waits between them:
  *  its answer once it names no fault; "down" once the waits are spent; failed once a sign out ended a wait. */
-export async function readsWaited<A>(run: (at: { fault?: unknown }) => Promise<A>, wait: ((ms: number) => Promise<void>) | undefined, signal: AbortSignal | undefined): Promise<A | { error: "failed" }> {
+export async function readsWaited<A>(run: (at: { fault?: unknown }) => Promise<A>, wait: ((ms: number) => Promise<void>) | undefined, signal: AbortSignal | undefined, waits: ReadWaits): Promise<A | { error: "failed" }> {
   const pause = wait ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
-  const waits = readWaits();
   for (;;) {
     const at: { fault?: unknown } = {};
     const a = await run(at);

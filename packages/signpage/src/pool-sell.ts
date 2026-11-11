@@ -73,7 +73,7 @@ import type { BuyWallet } from "../../wallet/src/pool/buy-wallets.ts";
 import { solanaPoolOf, solanaTreeSync, type SolanaPoolPin, type SolanaTreeSync } from "../../wallet/src/pool/solana.ts";
 import { WALLET_SEED_LOCK } from "@blindfill/wallet/store";
 import { blockhashOf, pastOnBoth, readBack, readBackFailure, readBackMeta, type BuyMints } from "./pool-buy.ts";
-import { afterOf, keptReads, READ_WAIT, readWaits, solanaStableReads, waitsOn, waitUnless, type ReadWaits } from "./read-waits.ts";
+import { afterOf, clockOf, keptReads, READ_WAIT, readWaits, solanaStableReads, tapWaits, waitsOn, waitUnless, type ReadWaits } from "./read-waits.ts";
 import { throttleWaitMs } from "../../wallet/src/throttle.ts";
 import { fromRecord, timedStore, TRADE_STORE_MS, tradeLock, type TradeStore } from "./trade.ts";
 import { checkSolanaSell, checkSolanaSweep, checkSolanaTeardownFrames, PoolRuleRefused, poolUnits, signSolana, SOLANA_POOL_MIN_DEPOSIT, SOLANA_POOL_SELL_RESERVE_MAX, SOLANA_SWEEP_OWED_MAX, solanaDepositRents, solanaSellAfterFull, solanaSweepFloor, solanaSweepKeep, type PoolAsk, type SolanaDepositHeld } from "./rules/pool.ts";
@@ -708,13 +708,12 @@ export function stageOfLegs(legs: readonly Pick<PoolSellLeg, "stage" | "error">[
  * side by side. A leg that fails ends alone: nothing is retried, the others' results stand, and the answer names every
  * leg. One leg's refusal before it signed, with no other leg, is the sell's own refusal, as before.
  */
-async function sellAll(host: PoolSellHost, ask: PoolAsk, laters: Later[], hooks: LegHooks = {}): Promise<PoolSellAnswer> {
+async function sellAll(host: PoolSellHost, ask: PoolAsk, laters: Later[], hooks: LegHooks = {}, waits: ReadWaits = readWaits(clockOf(host))): Promise<PoolSellAnswer> {
   let plan: PoolSellPlan;
   // the sell's reads that cannot change while it waits, kept per provider across its attempts (read-waits.ts)
   const h: PoolSellHost = Object.assign(Object.create(host) as PoolSellHost, { rpcs: keptReads(host.rpcs, solanaStableReads(ask.token)) });
   const wait = h.wait ?? ((ms: number) => new Promise<void>((res) => setTimeout(res, ms)));
-  // one tap's waits: its plan's and every sale's share the rule's one total (READ_WAIT_TOTAL_MS)
-  const waits = readWaits();
+  // one tap's waits: its plan's and every sale's share the rule's one bound (READ_WAIT_TOTAL_MS on the clock)
   for (;;) {
     try {
       plan = await planPoolSell(h, ask);
@@ -783,9 +782,9 @@ const shortOf = (stage: TradeStage, short: boolean): TradeStage => (short && sta
 /** One pool.sell: the ask is the user's own (rules/pool.ts checkPoolRequest passed it, with the token's decimals): its
  *  units, or its share of the whole holding (planPoolSell). After the sales, each full sale's rent back (rentBack) runs,
  *  one W after another, before this answers; none changes the answer. */
-export async function runPoolSell(h: PoolSellHost, ask: PoolAsk): Promise<PoolSellAnswer> {
+export async function runPoolSell(h: PoolSellHost, ask: PoolAsk, waits?: ReadWaits): Promise<PoolSellAnswer> {
   const laters: Later[] = [];
-  const a = await sellAll(h, ask, laters);
+  const a = await sellAll(h, ask, laters, {}, waits);
   for (const later of laters) await later.back?.(null);
   return a;
 }
@@ -1792,7 +1791,7 @@ export function poolSellKind(host: () => PoolSellKindHost, locks: Locks | null =
                   give();
                 },
                 ended: (i, leg) => setLeg(i, leg.error !== undefined ? { tx: null, stage: "refused", code: leg.error } : { tx: leg.tx, stage: leg.stage ?? "refused" }),
-              });
+              }, tapWaits(ctx, clockOf(h)));
               if ("error" in a) write({ stage: "refused", code: a.error });
               else write({ stage: a.stage, txs: a.txs });
               await writes;
