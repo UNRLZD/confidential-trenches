@@ -246,7 +246,22 @@ test("with a mainnet pin, pool.deposit, pool.buy, pool.sell and pool.withdraw re
   await ns.move(p.id, "PLANNED", "INCOMING", { send: { signature: "2".repeat(64), value: CHUNK, last_valid_block_height: 1n } });
   await ns.move(p.id, "INCOMING", "UNSPENT", { leaf: { value: CHUNK, label: 2n, commitment: noteCommitment(CHUNK, 2n, p.precommitment), leafIndex: 1n } });
   await ns.move(p.id, "UNSPENT", "SPENT", {});
-  const from = calls.length;
+  const ask = async (data: Record<string, unknown>): Promise<Record<string, unknown>> => {
+    const id = crypto.randomUUID();
+    const e = new Event("message");
+    Object.defineProperties(e, { origin: { value: APP_ORIGIN }, source: { value: frameWindow }, data: { value: { v: 1, id, ...data } } });
+    win.dispatchEvent(e);
+    let a: { ok?: boolean; error?: { code: string } } | undefined;
+    for (let t = 0; t < 1500 && !a; t++) {
+      a = posted.find((m) => m.id === id) as typeof a;
+      if (!a) await new Promise((ok) => setTimeout(ok, 10));
+    }
+    assert.ok(a, `${String(data.type)}: answered`);
+    assert.notEqual(a?.error?.code, "not_allowed", `${String(data.type)} was refused not_allowed: it never reached the flow`);
+    const { v: _v, id: _id, ...got } = a as Record<string, unknown>;
+    return got;
+  };
+  let from = calls.length;
   // each answer is the flow's own (src/pool-testnet.ts): the deposit's reads fail on this test's RPCs, the buy finds no
   // proof it may spend and the sell no W holding the token, and the withdraw opens the page's screen
   for (const [data, want] of [
@@ -263,22 +278,18 @@ test("with a mainnet pin, pool.deposit, pool.buy, pool.sell and pool.withdraw re
       assert.ok(root, "the page's root is in the document");
       root.dataset.signin = "signed-in";
     }
-    const id = crypto.randomUUID();
-    const e = new Event("message");
-    Object.defineProperties(e, { origin: { value: APP_ORIGIN }, source: { value: frameWindow }, data: { value: { v: 1, id, ...data } } });
-    win.dispatchEvent(e);
-    let a: { ok?: boolean; error?: { code: string } } | undefined;
-    for (let t = 0; t < 1500 && !a; t++) {
-      a = posted.find((m) => m.id === id) as typeof a;
-      if (!a) await new Promise((ok) => setTimeout(ok, 10));
-    }
-    assert.ok(a, `${data.type}: answered`);
-    assert.notEqual(a?.error?.code, "not_allowed", `${data.type} was refused not_allowed: it never reached the flow`);
-    const { v: _v, id: _id, ...got } = a as Record<string, unknown>;
-    assert.deepEqual(got, want, `${data.type}: the flow's own answer`);
+    assert.deepEqual(await ask(data), want, `${data.type}: the flow's own answer`);
   }
-  // the sell read its W's holdings, and only through the helper's keyed route: never on the public provider, which
-  // would see the user's W asked from the user's own address
+  // the page's own positions pass at sign in kept a whole pass that lists no W holding the token (card
+  // pool-sell-legs-side-by-side): the sell lists its Ws from it and the spent notes, and reads no W's holdings at all
+  const reads = (c: { method: string }) => c.method === "getBalance" || c.method === "getTokenAccountsByOwner" || c.method === "getMultipleAccounts";
+  assert.deepEqual(calls.slice(from).filter(reads), [], "a kept pass listing no W: the sell names no W to any provider");
+  // with no pass kept (a device whose passes have not run), the sell finds its Ws by their holdings, and only through
+  // the helper's keyed route: never on the public provider, which would see the user's W asked from the user's own address
+  await w.delete("meta", "owed/positions-sol");
+  from = calls.length;
+  const sell = { type: "pool.sell", chain: "solana", token: SELL_MINT, amount: "1", slippage_bps: 100 } as const;
+  assert.deepEqual(await ask(sell), { ok: false, error: { code: "not_funded" } }, "pool.sell with no pass kept: the flow's own answer");
   const holdings = calls.slice(from).filter((c) => c.method === "getBalance" || c.method === "getTokenAccountsByOwner");
   assert.ok(holdings.length >= 3, `the sell's W holdings were read: ${holdings.length} call(s)`);
   assert.deepEqual([...new Set(holdings.map((c) => c.url))], ["https://ct-api.unrealized.trade/v1/rpc/solana"], "the W's holdings on the helper's route only");
