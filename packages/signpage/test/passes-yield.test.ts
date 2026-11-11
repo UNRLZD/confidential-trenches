@@ -241,7 +241,7 @@ test("card sell-right-after-a-buy: the buy's host reads as a trade's to its rele
   const ref: NoteRef = { kind: "deposit", s: SCOPE, i: 0 };
   const pre = noteSecrets(SEED64, ref).precommitment;
   const n = await ns.add({ ref, scope: SCOPE, precommitment: pre, state: "UNSPENT", leaf: { value: 5_000_000n, label: 9n, commitment: noteCommitment(5_000_000n, 9n, pre), leafIndex: 0n } });
-  await onProvider(() => 200, async (sent, t0) => {
+  await onProvider(() => 200, async (sent) => {
     const made: { buy?: () => { rpcs: readonly [(m: string, p: unknown[]) => Promise<unknown>, (m: string, p: unknown[]) => Promise<unknown>]; settle(id: string): Promise<unknown>; release(): void; end(): void } } = {};
     testnetPool(
       { store: async () => w, seed64: async () => SEED64.slice() },
@@ -253,33 +253,33 @@ test("card sell-right-after-a-buy: the buy's host reads as a trade's to its rele
     await Promise.all([pageSolanaRpcs("pass")[0]("getSlot", []), pageSolanaRpcs("pass")[1]("getSlot", [])]);
     fill(DEVNET, 100);
     fill(HELPER, 100);
-    const at = () => performance.now() - t0;
-    const t1 = at();
+    // each time below is a request's own, as the fake provider logged it on the test clock (sent[].at)
+    const devnet = new URL(DEVNET).host;
+    const lastOn = (host: string): number => sent.filter((x) => x.host === host).at(-1)!.at;
+    const passAt = lastOn(devnet);
     await Promise.all([h.rpcs[0]("getSlot", []), h.rpcs[1]("getSlot", [])]);
-    assert.ok(at() - t1 < 100, "before its release: its reads a trade's, at once past every budget");
-    // the settle's first request on api.devnet, timed from its call (its note store opens first: fake IndexedDB)
-    const firstOf = async (from: number, t: number): Promise<number> => {
-      for (let i = 0; i < 2_000 && !sent.slice(from).some((x) => x.host === new URL(DEVNET).host); i++) await tick(5);
-      return sent.slice(from).find((x) => x.host === new URL(DEVNET).host)!.at - t;
+    assert.ok(lastOn(devnet) - passAt < 100, "before its release: its reads a trade's, at once past every budget");
+    // the settle's first request on api.devnet, from the request before it (its note store opens first: fake IndexedDB)
+    const firstFrom = async (from: number): Promise<number> => {
+      for (let i = 0; i < 2_000 && !sent.slice(from).some((x) => x.host === devnet); i++) await tick(5);
+      return sent.slice(from).find((x) => x.host === devnet)!.at - sent[from - 1]!.at;
     };
     let n1 = sent.length;
-    let t = at();
     void h.settle(n.id).catch(() => {});
-    const before = await firstOf(n1, t);
-    assert.ok(before < 1_000, `a settle before its release: a trade's, at once (${before.toFixed(0)} ms)`);
+    const settleBefore = await firstFrom(n1);
+    assert.ok(settleBefore < 1_000, `a settle before its release: a trade's, at once (${settleBefore.toFixed(0)} ms)`);
     h.release();
     assert.equal(hostLane(DEVNET).trading(), true, "the sale's hold stands");
     // a pass on each host now, so the next pass there waits PASS_FLOOR_MS
     await Promise.all([pageSolanaRpcs("pass")[0]("getSlot", []), pageSolanaRpcs("pass")[1]("getSlot", [])]);
     fill(DEVNET, 100);
     fill(HELPER, 100);
-    const t2 = at();
+    const pass2 = lastOn(devnet);
     await h.rpcs[0]("getSlot", []);
-    assert.ok(at() - t2 >= PASS_FLOOR_MS - 100, `after its release: a pass's, at the floor (${(at() - t2).toFixed(0)} ms)`);
+    assert.ok(lastOn(devnet) - pass2 >= PASS_FLOOR_MS - 100, `after its release: a pass's, at the floor (${(lastOn(devnet) - pass2).toFixed(0)} ms)`);
     n1 = sent.length;
-    t = at();
     void h.settle(n.id).catch(() => {});
-    const afterMs = await firstOf(n1, t);
+    const afterMs = await firstFrom(n1);
     assert.ok(afterMs >= PASS_FLOOR_MS - 1_000, `its settle after its release: a pass's, at the floor (${afterMs.toFixed(0)} ms)`);
     h.release();
     h.end();

@@ -874,11 +874,11 @@ test("item 6: a sale's wallet list on the mainnet pace: one finder round per pas
     try {
       const reader = solanaHelperHoldings(`https://pace-many-${n}.example`);
       const spent = Array.from({ length: n }, (_, i) => ({ ref: { ...DEP, i } as NoteRef, label: L + BigInt(i) }));
-      const t = Date.now();
       const r = await buyWallets(SEED, [{ id: "sol", chain: "sol", spent, reader }]);
       assert.deepEqual(r.failed, []);
       assert.equal(r.wallets.length, n);
-      got[n] = { rounds: rounds(sol.starts).length, ms: Date.now() - t };
+      // from the first round's start to the last's, as the stub logged them on the test clock
+      got[n] = { rounds: rounds(sol.starts).length, ms: sol.starts.at(-1)![0] - sol.starts[0]![0] };
     } finally {
       sol.restore();
     }
@@ -886,6 +886,6 @@ test("item 6: a sale's wallet list on the mainnet pace: one finder round per pas
   console.log(`item 6: ${JSON.stringify(got)}`);
   for (const n of [1, 5, 20]) {
     assert.equal(got[n]!.rounds, n, `${n} Ws: one round each`);
-    assert.ok(got[n]!.ms >= (n - 1) * HOLDINGS_RPC_LIMIT.windowMs && got[n]!.ms < (n - 1) * HOLDINGS_RPC_LIMIT.windowMs + 1_000, `${n} Ws: ${got[n]!.ms} ms`);
+    assert.ok(got[n]!.ms >= (n - 1) * HOLDINGS_RPC_LIMIT.windowMs && got[n]!.ms < (n - 1) * HOLDINGS_RPC_LIMIT.windowMs + 1_000, `${n} Ws: ${got[n]!.ms} ms from the first round to the last`);
   }
 }));

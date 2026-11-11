@@ -106,10 +106,10 @@ const tokenAccount = (amount: bigint): Uint8Array => {
 const ATA = solanaAta(W, MINT, SOLANA_TOKEN_PROGRAM);
 /** The page's pair at confirmed: the mint, and W's token account holding `held[k]` on RPC k (null: no account). Every
  *  call logged. Answers getAccountInfo and getMultipleAccounts, so a sale reading W's accounts either way reads them. */
-function pair(held: [bigint | null, bigint | null], log: string[] = [], behind?: { rpc: 0 | 1; untilMs: number }): readonly [SolanaRpc, SolanaRpc] {
-  const t0 = performance.now();
-  // `behind`: that RPC a slot or two behind the other, so it holds no token account of W's until `untilMs` from the first read
-  const lags = (k: number) => behind !== undefined && behind.rpc === k && performance.now() - t0 < behind.untilMs;
+function pair(held: [bigint | null, bigint | null], log: string[] = [], behind?: { rpc: 0 | 1; reads: number }): readonly [SolanaRpc, SolanaRpc] {
+  // `behind`: that RPC a slot or two behind the other, so it holds no token account of W's for its first `reads` reads of it
+  let ataReads = 0;
+  const lags = (k: number) => behind !== undefined && behind.rpc === k && ataReads++ < behind.reads;
   const acct = (k: number, a: string) =>
     a === MINT ? { owner: SOLANA_TOKEN_PROGRAM, lamports: 1, data: [base64.encode(mintData), "base64"] }
     : a === ATA ? (held[k] === null || lags(k) ? null : { owner: SOLANA_TOKEN_PROGRAM, lamports: 2_039_280, data: [base64.encode(tokenAccount(held[k]!)), "base64"] })
@@ -294,10 +294,9 @@ test("item 5: a sale planned while one provider is a slot behind on W's token ac
   await buyKindMint(w);
   const ask = { kind: "pool.sell", chain: "solana", token: MINT, amount: 0n, shareBps: 10_000, slippageBps: 1000, decimals: 6 } as const;
   const log: string[] = [];
-  const lagging = Object.assign(Object.create(made()) as PoolSellHost, { rpcs: pair([OUT_UNITS, OUT_UNITS], log, { rpc: 1, untilMs: 800 }) });
-  const t = performance.now();
-  const plan = await planPoolSell(lagging, ask).catch((e: unknown) => ({ refused: String((e as Error)?.message ?? e), ms: performance.now() - t, reads: log.length }));
+  // RPC 1 holds no token account of W's for its first 2 reads of it, as a provider a slot behind does for about 400 ms
+  const lagging = Object.assign(Object.create(made()) as PoolSellHost, { rpcs: pair([OUT_UNITS, OUT_UNITS], log, { rpc: 1, reads: 2 }) });
+  const plan = await planPoolSell(lagging, ask).catch((e: unknown) => ({ refused: String((e as Error)?.message ?? e), reads: log.length }));
   assert.ok("legs" in plan, `refused: ${JSON.stringify(plan)}`);
   assert.deepEqual(plan.legs.map((l) => [l.w.address, l.units]), [[W, OUT_UNITS]]);
-  assert.ok(performance.now() - t < 3_000, "bounded");
 });

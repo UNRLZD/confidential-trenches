@@ -509,8 +509,11 @@ test("review P2-1 and P2-2 of a34c1626, P2-1 and P3-3 of e3489b3b: every Solana 
   const src = readFileSync(new URL("../src/pool-testnet.ts", import.meta.url), "utf8");
   const calls = [...src.matchAll(/solanaSettle(?:Spent|Reserved)\(\{[^}]*\}\)/g)].map((m) => m[0]);
   assert.equal(calls.length, 4);
-  // the reserved pass's on the pair's pass reads (card signpage-passes-yield-to-a-trade), the buy's and the rest on its trade reads
-  for (const c of calls) assert.match(c, /, rpcs: settleRpcs\((?:"pass")?\), lister: lister\((?:"pass")?\), signal, cache, markBatches: PAGE_SOL_MARK_BATCHES \}\)$/, c);
+  // the reserved pass's on the pair's pass reads (card signpage-passes-yield-to-a-trade), the rest on its trade reads, and
+  // the buy's on its own kind: a trade's to its release, a pass's after it (card sell-right-after-a-buy), its one call so
+  for (const c of calls) assert.match(c, /, rpcs: settleRpcs\((?:"pass"|kind)?\), lister: lister\((?:"pass"|kind)?\), signal, cache, markBatches: PAGE_SOL_MARK_BATCHES \}\)$/, c);
+  assert.deepEqual(calls.filter((c) => c.includes("(kind)")), calls.filter((c) => c.includes("minSlots, rpcs: settleRpcs(kind), lister: lister(kind),")), "a kind only where the pair and the lister both take it");
+  assert.equal(calls.filter((c) => c.includes("settleRpcs(kind)")).length, 1, "the buy's alone");
   // each site's signal is the stop's when the call began: four takes, and the stop read elsewhere only where a trade's
   // reads wait before a signature (card start-reads-wait-out-a-throttle): the buy's and the sell's host, each taken when
   // the host is made, and a pool kind's request (outSignal), each ending its waits at the next sign out

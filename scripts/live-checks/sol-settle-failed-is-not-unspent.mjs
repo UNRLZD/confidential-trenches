@@ -49,8 +49,10 @@ const VERDICT = (g) => new RegExp(String.raw`let (?:${I}=${I},)?(?<p>${I})=await
 // pastAt: each RPC's finalized slot once both are past, one getEpochInfo bank each, else null; a read that throws is
 // null (not past), after it is handed to the third argument, the read's slow-down
 const PAST_AT = (pa) => new RegExp(String.raw`async function ${esc(pa)}\((${I}),(${I}),(${I})\)\{try\{let (${I})=await Promise\.all\(\1\.map\(async (${I})=>\{let (${I})=await \5\(\`getEpochInfo\`,\[\{commitment:\`finalized\`\}\]\);return (${I})\(\6\?\.blockHeight\)>\2\?\7\(\6\?\.absoluteSlot\):null\}\)\);return \4\[0\]!==null&&\4\[1\]!==null\?\[\4\[0\],\4\[1\]\]:null\}catch\((${I})\)\{return \3\?\.\(\8\),null\}\}`);
-// the page's buy and withdraw settles: solanaSettleSpent({ ..., noteId, program: pin.program, minSlots, rpcs: ... })
-const HOSTS = new RegExp(String.raw`noteId:${I},program:${I}\.program,minSlots:${I},rpcs:${I}\(\)`);
+// the page's buy and withdraw settles: solanaSettleSpent({ ..., noteId, program: pin.program, minSlots, rpcs: ... }), the
+// settle pair made at the call, of the kind its reads take there (the buy's: its own, a pass's from its release; card
+// sell-right-after-a-buy)
+const HOSTS = new RegExp(String.raw`noteId:${I},program:${I}\.program,minSlots:${I},rpcs:${I}\((?:${I})?\)`);
 // the old shape: a settle's throw read as unspent
 const OLD = /\.catch\(\(\)=>\(\{kind:`unspent`\}\)\)/;
 
