@@ -309,6 +309,26 @@ try {
       check(c.length === 1 && sent(c[0]) === want, `@${w.name}: ${sel} sent ${JSON.stringify(c)}, want ${want}`);
       await ctx.close();
     }
+    // the holdings read lags the sell (?lag=1, as the signing page's finalized read does): the sold holding leaves the
+    // box and the panel within 1 s of the sell's Filled (card app-holding-follows-a-fill), a part of it stays
+    {
+      const { ctx, page } = await open(browser, w, "up", "&lag=1");
+      await page.locator('[data-quick="10000"]').click();
+      await page.clock.runFor(1_100); // the sell's Filled
+      await page.clock.runFor(900);
+      const left = await settle(() => page.locator('[data-testid="sell-box"]').count(), 0);
+      check(left === 0, `@${w.name}: a sold holding still in the box 0.9 s after its Filled, the read lagging`);
+      await ctx.close();
+    }
+    {
+      const { ctx, page } = await open(browser, w, "up", "&lag=1");
+      await page.locator('[data-quick="5000"]').click();
+      await page.clock.runFor(1_100);
+      await page.clock.runFor(900);
+      const held = await settle(async () => norm(await page.locator('[data-testid="sell-held"]').innerText()), "617.2K TORCH held");
+      check(held === "617.2K TORCH held", `@${w.name}: half sold, the read lagging: held "${held}" 0.9 s after its Filled, want 617.2K`);
+      await ctx.close();
+    }
     // a typed percent sells its share; a percent over 100 is not taken
     {
       const { ctx, page } = await open(browser, w, "up");

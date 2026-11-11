@@ -99,7 +99,7 @@ const check = (ok, what) => ok || fails.push(what);
 const norm = (s) => s.replace(/\s+/g, " ").trim();
 
 let BASE = "";
-async function open(browser, w, f) {
+async function open(browser, w, f, extra = "") {
   const ctx = await browser.newContext({ viewport: w.viewport, deviceScaleFactor: w.deviceScaleFactor, isMobile: w.isMobile, hasTouch: w.hasTouch, reducedMotion: "reduce" });
   await ctx.addInitScript(INIT);
   if (SLOW_COMMIT) await ctx.addInitScript(LATE);
@@ -115,7 +115,7 @@ async function open(browser, w, f) {
     void d.dismiss();
   });
   if (SLOW_CPU) await (await ctx.newCDPSession(page)).send("Emulation.setCPUThrottlingRate", { rate: SLOW_CPU });
-  const url = `${BASE}/?f=${f}${PLANT === "set" || PLANT === "clock" ? `&plant=${PLANT}` : ""}`;
+  const url = `${BASE}/?f=${f}${PLANT === "set" || PLANT === "clock" ? `&plant=${PLANT}` : ""}${extra}`;
   await page.goto(url);
   page.on("framenavigated", (fr) => fr === page.mainFrame() && navs.push(fr.url()));
   await page.waitForSelector('[data-testid="trade-box"]');
@@ -247,6 +247,36 @@ try {
       await ctx.close();
     }
 
+    // the buy's Filled opens the Sell side within 1 s, its Final 9.3 s later and the holdings read never showing it (card
+    // app-holding-follows-a-fill): the amount W received is the holding until a read shows it
+    {
+      const { ctx, page } = await open(browser, w, "late", "&route=1");
+      const side = page.locator('[data-testid="trade-side-sell"]');
+      check(await side.isDisabled(), `@${w.name}: Sell on before any buy`);
+      await page.locator('[data-testid="trade-cta"]').click();
+      await page.clock.runFor(1_100); // the route's out: Filled
+      await page.clock.runFor(900);
+      const on = await settle(async () => !(await side.isDisabled()), true);
+      check(on, `@${w.name}: Sell still off 0.9 s after the buy's Filled, its Final 9.3 s away`);
+      if (on) {
+        await side.click();
+        const held = await settle(async () => norm(await page.locator('[data-testid="sell-held"]').innerText()), "10.6K TORCH held");
+        check(held === "10.6K TORCH held", `@${w.name}: the Sell side holds "${held}", want the 10,600 the buy received`);
+        check(!(await page.locator('[data-testid="sell-cta"]').isDisabled()), `@${w.name}: Sell off on the Sell side after the buy's Filled`);
+      }
+      await ctx.close();
+    }
+    // a fill the run then ends without (Filled, then not landed) is taken back: no holding, no Sell
+    {
+      const { ctx, page } = await open(browser, w, "forked", "&route=1");
+      const side = page.locator('[data-testid="trade-side-sell"]');
+      await page.locator('[data-testid="trade-cta"]').click();
+      await page.clock.runFor(1_200);
+      check(await settle(async () => !(await side.isDisabled()), true), `@${w.name}: Sell off after the forked buy's Filled`);
+      await page.clock.runFor(2_000); // not landed at 3 s
+      check(await settle(async () => await side.isDisabled(), true), `@${w.name}: Sell still on after the buy ended not landed`);
+      await ctx.close();
+    }
     // a double tap is one buy
     {
       const { ctx, page } = await open(browser, w, "ready");

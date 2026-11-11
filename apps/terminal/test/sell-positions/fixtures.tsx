@@ -55,6 +55,9 @@ window.__dry = [];
 const q = new URLSearchParams(location.search);
 const f = q.get("f") ?? "up";
 const LIVE = q.get("kit") === "live";
+/** ?lag=1: the holdings read lags the sell (card app-holding-follows-a-fill): the record shows the sell's stages, the
+ *  positions stay as they were, as the signing page's finalized read does until the sale is final. */
+const LAG = q.get("lag") === "1";
 
 // the position: amount (token units, the kit's string), cost (USD), the market price (USD per unit), the token's decimals
 // as the token read gives them (null: none read)
@@ -115,7 +118,7 @@ function record(id: string, stage: string, ask: string, pooled: boolean): void {
   const st = snapshot.state!;
   const ops = [...st.ops.filter((o) => o.id !== id), { id, kind: "sell", stage, txs: [] } as SignpageState["ops"][number]];
   let positions = st.positions;
-  if (stage === "filled" || stage === "part_filled") {
+  if (!LAG && (stage === "filled" || stage === "part_filled")) {
     const units = (s: string) => BigInt(s.replace(".", "").replace(/^0+(?=\d)/, "")) * 10n ** BigInt(TOKEN_DECIMALS - (s.split(".")[1]?.length ?? 0));
     const sold = pooled ? units(ask) : BigInt(ask);
     positions = positions.map((p) => {
