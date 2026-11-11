@@ -1125,7 +1125,7 @@ test("a W's history the reader cannot tell is no buy: none at all, a listed tran
   }
   // review of ae2cfe28, P2: "none" only once the pool's release naming W is read and holds no buy (W's note spent). A
   // buy that failed on chain names W, so sends may come before the retry's buy: read past them, up to SOL_BUY_TXS
-  const sends = (n: number) => ({ sigs: Array.from({ length: n }, (_, i) => drop(i)), txs: new Map<string, unknown>(Array.from({ length: n }, (_, i) => [`drop${i}`, dropTx] as [string, unknown])) });
+  const sends = (n: number) => ({ sigs: Array.from({ length: n }, (_, i): { signature: string; err: unknown } => drop(i)), txs: new Map<string, unknown>(Array.from({ length: n }, (_, i) => [`drop${i}`, dropTx] as [string, unknown])) });
   const after = (h: ReturnType<typeof sends>, sig: string, tx: unknown) => ({ sigs: [{ signature: sig, err: null }, ...h.sigs], txs: new Map<string, unknown>([[sig, tx], ...h.txs]) });
   const plainRelease = txOf({ signers: [FEE_PAYER, W], ix: [{ program: BUY_POOL, to: W, tag: 2 }], post: [] });
   const readOf = async (h: ReturnType<typeof sends>) => {
