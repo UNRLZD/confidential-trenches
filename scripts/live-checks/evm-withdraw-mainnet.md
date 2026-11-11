@@ -1,4 +1,4 @@
-CARD evm-withdraw-mainnet / live: PARTIAL (Robinhood testnet run; Base Sepolia waits for test ETH)
+CARD evm-withdraw-mainnet / live: FAIL
 Money path: yes
 Tx: robinhood-testnet 0xf8068ce8b26eaa1b041ad78ae92524c291bf5a288c19a7c3bd3065aec7a5e362
 Tx: robinhood-testnet 0x13feefcca5b6bdc699c70a55c1ff4ec4978d0c7b76756327cfb0290e74cfa385
@@ -40,5 +40,5 @@ robinhood-sepolia-rpc.publicnode.com:
   800000000000000 wei left once and landed in block 151938676 (status 1 on both), the op ended sent with it, the owed
   record cleared. To read 800000000000000 wei on both RPCs, W 0 on both.
 
-Base Sepolia: not run yet. E holds 0.000677898867880239 ETH there (devwallet balance, 18:28Z), and one deposit of the
+Base Sepolia: not run yet, so the live check fails its "a withdraw on each testnet" line. E holds 0.000677898867880239 ETH there (devwallet balance, 18:28Z), and one deposit of the
 pool's smallest rung needs about 0.00104 ETH.
