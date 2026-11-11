@@ -176,6 +176,7 @@ export const OUT = {
   "app-sell-mount": "a browser",
   "app-list-age": "a browser and the helper",
   "app-discover-toolbar": "a browser and the helper",
+  "discover-matches-the-main-app": "a browser and the helper",
   "app-pool-withdraw": "a browser",
   "app-hop-sync-lock": "a browser",
   "balances-per-chain": "a browser and chain RPCs",
