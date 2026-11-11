@@ -591,3 +591,43 @@ test("a candles 429 still standing after the span fails, its waits named; an emp
   const cleared = edit((rec) => (rec.reads.candles.waits = [30_000]));
   assert.deepEqual(bad(run(cleared)), [], "a 200 after a wait inside the span passes");
 });
+
+// A head one provider reported, which another does not hold yet (a null block by number: the pattern of release 116's
+// sign live run 43024665974 on Base), is read again, and still unknown on the last read is INCONCLUSIVE naming the
+// providers; two providers that hold it and differ still fail.
+test("planted: a head no second provider knew yet is INCONCLUSIVE, named; a head time missing with no lag named still fails", () => {
+  const head = A.robinhood_good.chain.heads[1];
+  const edit = (f) => {
+    const r = structuredClone(A.robinhood_good);
+    f(r);
+    return judge(r);
+  };
+  const lag = edit((r) => {
+    delete r.chain.blockTimes[head];
+    r.chain.behind = { [head]: ["robinhood-rpc.publicnode.com", "robinhood.api.pocket.network"] };
+  });
+  assert.equal(lag.verdict, "INCONCLUSIVE", lag.lines.join("\n"));
+  assert.equal(lag.ok, false, "never a pass");
+  assert.ok(lag.lines.some((l) => l === `--  the newest block ${head}: robinhood-rpc.publicnode.com and robinhood.api.pocket.network did not know it yet after 5 reads 2000 ms apart: INCONCLUSIVE`), lag.lines.join("\n"));
+  assert.equal(edit((r) => delete r.chain.blockTimes[head]).verdict, "FAIL", "no time and no provider named");
+  assert.equal(edit((r) => ((r.chain.behind = { [head]: ["x"] }), (r.chain.heads = [r.chain.heads[0] - 1000, r.chain.heads[1] - 1000]))).verdict, "FAIL", "a real FAIL beside it");
+  assert.equal(judge(A.robinhood_good).verdict, "PASS");
+});
+
+test("headTime: a null block is read again; still null is the providers behind; two that differ name none", async () => {
+  const rpcs = ["https://a.example", "https://b.example", "https://c.example"];
+  const answers = (table) => async (url, init) => {
+    const k = new URL(url).host;
+    const v = table[k].length > 1 ? table[k].shift() : table[k][0];
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id: JSON.parse(init.body).id, result: v }), { status: 200 });
+  };
+  const blk = (ts) => ({ number: "0x10", timestamp: ts });
+  const waits = [];
+  const sleep = async (ms) => void waits.push(ms);
+  assert.deepEqual(await check.headTime(16, answers({ "a.example": [null, blk("0x5")], "b.example": [null, blk("0x5")], "c.example": [blk("0x5")] }), rpcs, 5, sleep), { ts: "0x5", behind: [] });
+  assert.deepEqual(waits, [2_000]);
+  waits.length = 0;
+  assert.deepEqual(await check.headTime(16, answers({ "a.example": [null], "b.example": [null], "c.example": [blk("0x5")] }), rpcs, 5, sleep), { behind: ["a.example", "b.example"] });
+  assert.equal(waits.length, 4);
+  assert.deepEqual(await check.headTime(16, answers({ "a.example": [blk("0x5")], "b.example": [blk("0x6")], "c.example": [blk("0x5")] }), rpcs, 5, sleep), { behind: [] }, "two that differ");
+});
