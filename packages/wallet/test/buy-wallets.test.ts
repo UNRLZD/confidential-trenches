@@ -942,3 +942,30 @@ test("the kit's JSON-RPC client's 5xx or timeout past its retry refuses the wall
     }
   }
 });
+
+// Card sell-right-after-a-buy, item 6 (a measure, no fix): a sale's wallet list (signpage pool-testnet.ts sellHost.wallets
+// -> poolBuyWallets -> buyWallets) reads every W the pool's spent notes paid, one after another (readDerived), each W one
+// round of three calls on the helper's route, paced at HOLDINGS_RPC_LIMIT (one round in 3 s). So its time grows with the
+// past buys: about (N - 1) x 3 s for N Ws, with every answer at its first try (one round a W).
+test("item 6: a sale's wallet list on the mainnet pace: one finder round per past W, (N - 1) x HOLDINGS_RPC_LIMIT.windowMs for N Ws (1, 5, 20)", () => onTestClock(async () => {
+  const got: Record<number, { rounds: number; ms: number }> = {};
+  for (const n of [1, 5, 20]) {
+    const sol = stubFetch(`https://pace-many-${n}.example`, (m, id) => solOk(m, id));
+    try {
+      const reader = solanaHelperHoldings(`https://pace-many-${n}.example`);
+      const spent = Array.from({ length: n }, (_, i) => ({ ref: { ...DEP, i } as NoteRef, label: L + BigInt(i) }));
+      const r = await buyWallets(SEED, [{ id: "sol", chain: "sol", spent, reader }]);
+      assert.deepEqual(r.failed, []);
+      assert.equal(r.wallets.length, n);
+      // from the first round's start to the last's, as the stub logged them on the test clock
+      got[n] = { rounds: rounds(sol.starts).length, ms: sol.starts.at(-1)![0] - sol.starts[0]![0] };
+    } finally {
+      sol.restore();
+    }
+  }
+  console.log(`item 6: ${JSON.stringify(got)}`);
+  for (const n of [1, 5, 20]) {
+    assert.equal(got[n]!.rounds, n, `${n} Ws: one round each`);
+    assert.ok(got[n]!.ms >= (n - 1) * HOLDINGS_RPC_LIMIT.windowMs && got[n]!.ms < (n - 1) * HOLDINGS_RPC_LIMIT.windowMs + 1_000, `${n} Ws: ${got[n]!.ms} ms from the first round to the last`);
+  }
+}));

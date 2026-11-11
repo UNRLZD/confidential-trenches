@@ -3,10 +3,13 @@
 //
 // - Only what this device bought: a position is the token W's buy mint names (the wallet store's owed/buy-sol, which
 //   the buy writes before every send: pool-buy.ts h.bought.put, pool-sell.ts buyMints). W's buy record
-//   (POSITION_COSTS_KEY, written by recordPoolBuy when the run ended filled with the amount W received read back on both
-//   RPCs) adds to it: the amount shown while the finder lags, the mint's decimals and the cost. A buy whose run never
-//   told that amount (the helper's 502, read-backs apart or unreadable, a run that ended "sent", a tab closed before the
-//   end) is still a position, at the finder's amount. A token the finder lists in W that W's buy mint does not name (one
+//   (POSITION_COSTS_KEY, written by recordBoughtOut as soon as the run tells the amount W received, read back on both
+//   RPCs at confirmed, its early "sent" on: card sell-right-after-a-buy; and again by recordPoolBuy at a filled end)
+//   adds to it: the amount shown while the finder lags, the mint's decimals and the cost. It says where to look, never
+//   that the buy is final: no reader takes it so, and a sale reads W on both RPCs before it signs. A run that ends
+//   not_landed (both RPCs' verdict) takes it back; one whose end is not known ("sent") keeps it. A buy whose run never
+//   told that amount (the helper's 502, read-backs apart or unreadable, a tab closed before the read-back) is still a
+//   position, at the finder's amount. A token the finder lists in W that W's buy mint does not name (one
 //   sent to W by anyone) is no position: not listed, no Sell, and nothing is read for it. A W takes one buy only (a W is
 //   its note's, and a note spends once: wallet/src/pool/queue.ts jOf and derive/keys.ts walletPath), so its buy mint
 //   names W's one holding. A device restored from the words has no buy mints (src/pool-restore.ts writes notes only), so
@@ -29,8 +32,8 @@
 //   finder that is down never brings it back. A recorded token the finder read W whole and never listed shows at the
 //   record's amount (a reader that lags hides nothing this device bought) until the finder lists it or this device
 //   signed a full sell of it from W (pool-sell.ts writes W's rent-back record with that sell before it leaves the
-//   device; noted here). A W with a buy mint the finder does not know (its note never spent: a buy refused or not
-//   landed) is no position and no fault.
+//   device; noted here). A W with a buy mint or a record that the finder's whole list does not know (its note neither
+//   SPENT nor RESERVED: a buy refused or not landed, its note freed) is no position and no fault.
 // - Looked for again, never a failed pass: a W whose buy this page ran (`awaited`) that the finder does not list yet,
 //   with no record's amount, and a token this device signed a full sell of that the finder still lists (the sell's
 //   verdict is read at confirmed, the finder at finalized). Each runs the pass again, and the pass is kept all the same,
@@ -376,9 +379,28 @@ export const routeInto = (facts: PoolBuyFacts, route?: (r: BuyRoute) => void) =>
   route?.(r);
 };
 
+/** W's buy record from what the run told: the token, the amount W received, the token's decimals when told, and the USD
+ *  it spent when a price was read; null without W or that amount. */
+function buyRecordOf(f: PoolBuyFacts): PositionCost | null {
+  if (f.wallet === undefined || f.out === undefined || !DEC.test(f.out)) return null;
+  const usd = f.price === null ? null : usdOf(f.spend, f.spendDecimals, f.price);
+  return { mint: f.token, received: f.out, ...(isDecimals(f.decimals) ? { decimals: f.decimals } : {}), ...(usd === null ? {} : { cost_usd: usd }) };
+}
+
+/** W's buy record as soon as the run tells the amount W received (card sell-right-after-a-buy: the route's `out`, read
+ *  back on both RPCs at confirmed, after its early "sent"), every other W's record kept: the same record a filled end
+ *  writes. Nothing else is written: the ops record waits for the run's end. */
+export async function recordBoughtOut(store: Pick<BuyRecordStore, "update">, f: PoolBuyFacts): Promise<void> {
+  const rec = buyRecordOf(f);
+  if (rec === null) return;
+  await store.update("meta", POSITION_COSTS_KEY, (v) => ({ ...(typeof v === "object" && v !== null ? v : {}), [f.wallet!]: rec }));
+}
+
 /** A pool buy's records once its run ended (see the header): its ops record under the request's id (never over one
  *  already there, nor for an id another tab runs), and when it filled with W and its amount told, W's buy record (with
- *  the token's decimals when told, and the USD it spent when a price was read), every other W's record kept. */
+ *  the token's decimals when told, and the USD it spent when a price was read), every other W's record kept. A run that
+ *  ended not_landed or refused on chain (both RPCs' verdict: pool-buy.ts) takes back W's record of this very buy, the
+ *  one recordBoughtOut wrote at its read-back; an end not known ("sent") writes nothing, so it stays. */
 export async function recordPoolBuy(store: BuyRecordStore, id: string, f: PoolBuyFacts, answer: BuyAnswer | null): Promise<void> {
   if (answer === null || ("error" in answer && answer.error === "id_reused")) return;
   if ((await store.get("ops", id)) !== undefined) return;
@@ -390,9 +412,17 @@ export async function recordPoolBuy(store: BuyRecordStore, id: string, f: PoolBu
   if (!FINAL.has(stage)) return;
   const txs = "error" in answer ? [] : answer.result.txs.map((t) => ({ chain: t.chain, hash: t.hash }));
   await store.put("ops", id, { kind: "buy", stage, txs, ...("error" in answer ? { code: answer.error } : {}), created_ms: f.createdMs, chain: "solana", token: f.token, ...(usd === null ? {} : { amount_usd: usd }) });
-  if (stage !== "filled" || f.wallet === undefined || f.out === undefined || !DEC.test(f.out)) return;
-  const rec: PositionCost = { mint: f.token, received: f.out, ...(isDecimals(f.decimals) ? { decimals: f.decimals } : {}), ...(usd === null ? {} : { cost_usd: usd }) };
-  await store.update("meta", POSITION_COSTS_KEY, (v) => ({ ...(typeof v === "object" && v !== null ? v : {}), [f.wallet!]: rec }));
+  const rec = buyRecordOf(f);
+  if (rec === null) return;
+  if (stage === "filled") return void (await store.update("meta", POSITION_COSTS_KEY, (v) => ({ ...(typeof v === "object" && v !== null ? v : {}), [f.wallet!]: rec })));
+  if ("error" in answer || (stage !== "not_landed" && stage !== "refused")) return;
+  // W's record only when it is this buy's own (a W takes one buy: its token and the amount it received)
+  await store.update("meta", POSITION_COSTS_KEY, (v) => {
+    const all = { ...(typeof v === "object" && v !== null ? (v as Record<string, PositionCost>) : {}) };
+    const had = Object.hasOwn(all, f.wallet!) ? all[f.wallet!] : undefined;
+    if (had?.mint === rec.mint && had.received === rec.received) delete all[f.wallet!];
+    return all;
+  });
 }
 
 export type PositionsCache = {

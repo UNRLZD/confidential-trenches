@@ -2101,30 +2101,28 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     if (deps.gecko === undefined || !Object.hasOwn(GT_TF, tf)) return none;
     let p = gtPools.get(token);
     if (p === undefined || now() - p.at >= GT_POOL_FRESH_MS) {
-      // a held pool's re-read is a refresh: refused, the pool held serves. With none held, a refused read is queued
-      // (wantPool) and the page answered from our own reads, an empty chart it reads again (AWAY_MS), never a 429 (card
-      // evm-chart-opens-without-a-vendor-call: Base candles 429 on every cold token read, the helper's live run at
-      // 06:58Z); a read that fails is the 503
+      // a held pool's re-read is a refresh: refused, the pool held serves. With none held, the read is tried in its
+      // turn (a cold page read, GT_PAGE_WAIT_MS); refused or throttled, it is queued (wantPool) and the answer is the
+      // 429 with the wait, so the page reads again, never an empty 200 while its fill is owed (card
+      // evm-chart-opens-without-a-vendor-call: live run 42995547054 at 09:29:50Z read an empty 200 for Base
+      // 0xb2000000...8c01, which GeckoTerminal charts); a read that fails is the 503
       const cold = p === undefined;
-      if (cold && wanted !== undefined && wanted.size() > 0) {
-        wantPool(token, tf);
-        return none;
-      }
+      const waitOf = (why: string) => limited(Math.min(Math.max(Math.ceil((deps.gecko!.retryAt("pages") - now()) / 1000), 1), RETRY_AFTER_MAX_S), why);
       if (await gtTake(cold ? "pages" : "refresh", `${chain} pool`, client)) {
         const got = await readPool(token);
-        if (got !== "throttled" && got !== "failed") p = got ?? undefined;
-        if (cold && got === "throttled") wantPool(token, tf);
-        if (p === undefined && got === "failed") return UPSTREAM;
-        // GeckoTerminal names no such token (null): nothing to chart, the empty answer below
+        // GeckoTerminal names no such token (null): nothing to chart, the empty answer
         if (got === null) return none;
-      } else if (cold) wantPool(token, tf);
-      if (p === undefined) return none;
+        if (got !== "throttled" && got !== "failed") p = got;
+        if (p === undefined && got === "failed") return UPSTREAM;
+        if (p === undefined) return wantPool(token, tf), waitOf("geckoterminal 429");
+      } else if (p === undefined) return wantPool(token, tf), waitOf("geckoterminal budget");
     }
     if (p.id === null) return none;
     const got = await geckoBars({ pool: { id: p.id, token } } as Entry, tf, to, true, client);
-    // GeckoTerminal refused with nothing to serve: the read is queued (geckoBars) and the page answered from our own
-    // reads, never a 429 (card evm-chart-opens-without-a-vendor-call); a read that failed is the 503, so the page retries
-    if (!Array.isArray(got)) return got.status === 429 ? none : got;
+    // GeckoTerminal refused with nothing to serve: the read is queued (geckoBars) and the answer its 429 with the wait,
+    // or the 503 of a read that failed, so the page reads again, never an empty 200 while its fill is owed (card
+    // evm-chart-opens-without-a-vendor-call)
+    if (!Array.isArray(got)) return got;
     const bars = got.filter((c) => to === null || c[0] < to).slice(-limit);
     if (bars.length === 0) return none;
     const at = history.get(`${p.id}:${tf}:${to ?? ""}`)?.at ?? kept.get(`${p.id}:${tf}`)?.at ?? now();
@@ -2191,11 +2189,11 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     // the history before a book of ours (not `alone`) is an optional seed, the answer our chain bars without it: a stale
     // read, so it never takes the call a chart with nothing to serve needs (card helper-crowd-429)
     const lane = before === null ? refreshLane(kept.get(`${e.pool.id}:${tf}`)?.at ?? fresh?.at ?? null, now()) : fresh !== undefined ? "refresh" : alone ? "pages" : SEED_LANE;
-    // a read a page asked for with nothing held to serve waits in the queue for the next free call, behind those queued
-    // before it (card evm-chart-opens-without-a-vendor-call); the page is answered now from our own bars, never a 429
+    // a read with nothing held to serve is tried in its turn, and refused it waits in the queue for the next free call
+    // (card evm-chart-opens-without-a-vendor-call: live run 42995547054, a cold read behind a queue that was not empty
+    // was never tried and its page answered an empty 200)
     const nothing = fresh === undefined && fallback(UPSTREAM) === UPSTREAM;
-    const queued = nothing && wanted !== undefined && (wanted.has(k) || wanted.size() > 0);
-    if (queued || !(await gtTake(lane, `${chain} bars`, client))) {
+    if (!(await gtTake(lane, `${chain} bars`, client))) {
       if (nothing) wantBars(e.pool.id, e.pool.token, tf, before, k);
       return fallback(wait(lane === "pages" ? undefined : `geckoterminal ${lane}`));
     }
@@ -2490,13 +2488,13 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       if (own.length < limit) {
         const before = ownFrom === null ? (to ?? Math.floor(now() / 1000)) : Math.min(ownFrom, to ?? ownFrom);
         // GeckoTerminal's history is an optional seed (card helper-crowd-429): refused or failed, the answer is our
-        // chain bars alone, never its 429 (index-evm-swaps at 22:12Z: a Robinhood 1m chart answered 429 for the seed).
-        // With no bar of ours to serve, a refused read is queued (geckoBars) and the answer our own reads' empty chart,
-        // which the page reads again (AWAY_MS), never a 429 (card evm-chart-opens-without-a-vendor-call: at
-        // market-reads-hold-under-load it was the 429, and the helper's live run at 06:58Z read 429 on every cold Base
-        // token); a read that failed with nothing held is the 503, so the page retries
+        // chain bars alone, never its 429 (index-evm-swaps at 22:12Z: a Robinhood 1m chart answered 429 for the seed),
+        // and a quiet pool's bars of ours are its mark (markQuiet). With no bar of ours to serve, a refused read is
+        // queued (geckoBars) and the answer its 429 with the wait, or the 503 of a read that failed, so the page reads
+        // again, never a 200 with no bars for a token that has them (card market-reads-hold-under-load: Base
+        // 0xfbb75a59's 1h answered 200 [] at 19:55Z; card evm-chart-opens-without-a-vendor-call: live run 42995547054)
         const got = await geckoBars(e, tf as Tf, ownFrom === null ? to : before, false, client);
-        if (own.length === 0 && !Array.isArray(got) && got.status !== 429) return timed(got);
+        if (own.length === 0 && !Array.isArray(got)) return timed(got);
         const old = (Array.isArray(got) ? got : []).filter((c) => c[0] < before);
         if (old.length > 0) {
           bars = old.concat(own).slice(-limit);

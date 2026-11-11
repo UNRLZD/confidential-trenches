@@ -19,10 +19,13 @@
 //     grid, oldest first, USD values decimal strings. src is "geckoterminal" for a mint the lists do not hold, else
 //     "chain" or "chain,geckoterminal" (the helper's own bars, the vendor's only before them,
 //     apps/helper/src/data/solana/trades.ts); when the bars include ours, own_from_s (before as_of_ms) is our first bar.
+// The candles read is read as the token page reads it (candles-read.mjs): a 429 again at its Retry-After, for at most
+// one 75 s span; a 429 still standing after it, or a 200 with no bars, is BAD as any other answer.
 // After: helper
 //   node scripts/live-checks/market-data-solana-token.mjs [--base <url>] [--token <mint>] [--record <file>] [--speed <n>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read; --speed times n more page reads.
 import "../net-window.mjs";
+import { candlesReader, waitsText } from "./candles-read.mjs";
 import { writeFileSync } from "node:fs";
 import { ROW_FIELDS as TERMINAL_FIELDS } from "../../apps/terminal/src/screens/discover/fields.ts";
 
@@ -130,7 +133,7 @@ export function judge(run) {
     const r = run.reads?.[k] ?? { status: 0, headers: {}, body: "" };
     const h = r.headers ?? {};
     const path = READS[k](run.mint);
-    say(r.status === 200, `GET ${path} answers ${r.status}`);
+    say(r.status === 200, `GET ${path} answers ${r.status}${k === "candles" ? waitsText(r) : ""}`);
     say(/^application\/json/i.test(h["content-type"] ?? ""), `${k} Content-Type: ${show(h["content-type"])}`);
     say(SHA.test(h["x-helper-commit"] ?? ""), `${k} X-Helper-Commit: ${show(h["x-helper-commit"])}`);
     say(SOURCE[k].includes(h["x-helper-source"]), `${k} X-Helper-Source: ${show(h["x-helper-source"])}`);
@@ -160,10 +163,11 @@ async function get(base, path, fetchFn) {
   return { at, ms: Math.round(performance.now() - t0), status: r.status, headers, body };
 }
 
-export async function read(base = BASE, mint = MINT, fetchFn = fetch) {
+/** `reader`: the run's candles reader (candles-read.mjs): a 429 is read again at its Retry-After, as the page reads it. */
+export async function read(base = BASE, mint = MINT, fetchFn = fetch, reader = candlesReader()) {
   const readAt = new Date().toISOString();
   const reads = {};
-  for (const k of Object.keys(READS)) reads[k] = await get(base, READS[k](mint), fetchFn);
+  for (const k of Object.keys(READS)) reads[k] = k === "candles" ? await reader.read(() => get(base, READS[k](mint), fetchFn)) : await get(base, READS[k](mint), fetchFn);
   return { base, mint, readAt, reads };
 }
 

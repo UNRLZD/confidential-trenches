@@ -161,7 +161,9 @@ export class ThrottleGate {
 //   past it or counted, so a read that gives up on a paused host leaves its time to another provider.
 
 /** The longest a trade holds its hosts: the buy's read-back bound (pool-buy.ts POOL_BUY_SETTLE_MS, EVM_BUY_SETTLE_MS:
- *  120 s) and 30 s of its reads before the send. */
+ *  120 s) and 30 s of its reads before the send. A Solana pool buy gives its hold back at its early "sent", and its
+ *  reads past its land are a pass's (card sell-right-after-a-buy): this bounds the hold, not when that buy reaches Final,
+ *  which can be past it (pool-buy.ts POOL_BUY_SETTLE_MS). */
 export const TRADE_HOLD_MAX_MS = 150_000;
 /** The window the page's budget per host is counted in: the public Solana providers' own (solana.com's 100 per 10 s). */
 export const HOST_WINDOW_MS = 10_000;

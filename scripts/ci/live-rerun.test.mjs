@@ -9,7 +9,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { EXIT, RETRY, classify, rpcAnswer } from "../live-checks/provider-answer.mjs";
-import { INCONCLUSIVE, RERUN, noAnswerHosts, pauseMs, rerun, runCheck } from "./live-rerun.mjs";
+import { INCONCLUSIVE, RERUN, noAnswerHosts, pauseMs, reasonOf, rerun, runCheck, verdictFile, verdictOf } from "./live-rerun.mjs";
 
 test("the code run again is provider-answer.mjs's INCONCLUSIVE, and the bound is three runs", () => {
   assert.equal(INCONCLUSIVE, EXIT.INCONCLUSIVE);
@@ -40,11 +40,11 @@ test("the providers named are the hosts in provider-answer.mjs's own no-answer w
   assert.deepEqual(noAnswerHosts("live-check k: PASS (every provider answered)\nBAD x: 0.1 != 0.2"), []);
 });
 
-test("a check that is still INCONCLUSIVE at the bound exits 3, and its last line names the providers; never a pass", async () => {
+test("a check that is still INCONCLUSIVE at the bound is inconclusive (job exit 0), and its last line names the providers; never a pass", async () => {
   const lines = [];
   const pauses = [];
   const r = await rerun("k", [], { run: async () => ({ code: 3, output: "--- base mainnet.base.org HTTP 429: 429 Too Many Requests" }), sleep: async (ms) => void pauses.push(ms), say: (l) => lines.push(l), random: () => 0 });
-  assert.deepEqual(r, { code: 3, runs: 3, stopped: false });
+  assert.deepEqual(r, { code: 3, runs: 3, stopped: false, verdict: "inconclusive", reason: "after 3 runs: no verdict line in its output; no answer from: mainnet.base.org", exit: 0 });
   assert.deepEqual(pauses, [15_000, 30_000]);
   assert.equal(lines.at(-1), "live-rerun k: INCONCLUSIVE after 3 runs, never a pass; no answer from: mainnet.base.org");
   assert.match(lines[0], /^live-rerun k: run 1 of 3 INCONCLUSIVE \(no answer from: mainnet\.base\.org\); run again in 15 s$/);
@@ -72,7 +72,7 @@ test("the process run: a check that is INCONCLUSIVE once and then passes ends 0;
     assert.match(runs[1].output, /PASS --host app/, "the args reach the check");
     assert.match(lines.at(-1), /run 2 of 3 ended exit 0 PASS; runs before it were INCONCLUSIVE \(no answer from: rpc\.example\.org\)/);
     const f = await rerun("fail", [], { run: (k, a) => runCheck(k, a, root), sleep: async () => assert.fail("a FAIL is never run again"), say: () => {} });
-    assert.deepEqual(f, { code: 1, runs: 1, stopped: false });
+    assert.deepEqual(f, { code: 1, runs: 1, stopped: false, verdict: "fail", reason: "live-check fail: FAIL", exit: 1 });
     assert.equal((await runCheck("missing", [], root)).code, 1, "a check file that is not there is node's own exit 1, never run again");
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -127,6 +127,64 @@ test("the runner writes the log itself, the check's stdout and stderr in order, 
     assert.deepEqual(got, Array.from({ length: 40 }, (_, i) => `line ${i}`));
     assert.match(readFileSync(log, "utf8"), /live-rerun both: exit 1 FAIL, never run again/);
     assert.match(r.stdout, /line 39/, "the job's console shows it too");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// card live-run-red-means-the-build: an inconclusive check is its own result: its job passes with a notice and a verdict
+// file naming why; a FAIL, an ERROR and a crash stay red
+test("verdictOf reads the code, and an exit 2 by the check's last verdict line", () => {
+  assert.equal(verdictOf("k", 0), "pass");
+  assert.equal(verdictOf("k", 1), "fail");
+  assert.equal(verdictOf("k", 3), "inconclusive");
+  assert.equal(verdictOf("k", 2, "live-check k: INCONCLUSIVE (no burn)"), "inconclusive");
+  assert.equal(verdictOf("k", 2, "live-check k: INCONCLUSIVE (x)\nlive-check k: ERROR: y"), "error", "the last verdict line decides");
+  assert.equal(verdictOf("k", 2, "live-check other: INCONCLUSIVE (x)"), "error", "another check's line is not its own");
+  assert.equal(verdictOf("k", 2, "  live-check k: INCONCLUSIVE (x)"), "error", "a verdict line starts its line");
+  assert.equal(verdictOf("k", null), "error", "a crash with no code");
+  assert.equal(verdictOf("k", 137), "error");
+  assert.equal(reasonOf("k", "ok  a\n--  no burn landed between two reads: the run proves nothing either way\nlive-check k: INCONCLUSIVE (u)"), "no burn landed between two reads: the run proves nothing either way");
+});
+
+const RUNNER_PATH = fileURLToPath(new URL("./live-rerun.mjs", import.meta.url));
+test("the process run: an inconclusive check's job exits 0 with a notice and a verdict file; a FAIL, an ERROR and a crash exit red with theirs", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "live-rerun-verdict-"));
+  try {
+    mkdirSync(path.join(root, "scripts/live-checks"), { recursive: true });
+    const put = (k, body) => writeFileSync(path.join(root, `scripts/live-checks/${k}.mjs`), body);
+    put("own-inc", 'console.log("--  no burn landed between two reads: the run proves nothing either way"); console.log("live-check own-inc: INCONCLUSIVE (x)"); process.exit(2);\n');
+    put("ok", 'console.log("live-check ok: PASS (x)");\n');
+    put("bad", 'console.log("live-check bad: FAIL (the build answered wrong)"); process.exit(1);\n');
+    put("err", 'console.error("live-check err: ERROR: HTTP 500"); process.exit(2);\n');
+    put("crash", 'throw new Error("boom");\n');
+    put("killed", 'process.kill(process.pid, "SIGKILL");\n');
+    const run = (k) => {
+      const log = path.join(root, `${k}.log`);
+      const r = spawnSync(process.execPath, [RUNNER_PATH, "--log", log, k], { cwd: root, encoding: "utf8" });
+      return { status: r.status, out: r.stdout, verdict: JSON.parse(readFileSync(verdictFile(log), "utf8")).results[0] };
+    };
+    const inc = run("own-inc");
+    assert.equal(inc.status, 0, "its own INCONCLUSIVE is no red");
+    assert.deepEqual(inc.verdict, { key: "own-inc", verdict: "inconclusive", reason: "no burn landed between two reads: the run proves nothing either way", runs: 1 });
+    assert.match(inc.out, /^::notice title=inconclusive own-inc::no burn landed between two reads: the run proves nothing either way$/m);
+    assert.match(inc.out, /never run again/);
+    const ok = run("ok");
+    assert.equal(ok.status, 0);
+    assert.equal(ok.verdict.verdict, "pass");
+    assert.doesNotMatch(ok.out, /::notice/);
+    const bad = run("bad");
+    assert.equal(bad.status, 1, "a FAIL stays red");
+    assert.deepEqual(bad.verdict, { key: "bad", verdict: "fail", reason: "live-check bad: FAIL (the build answered wrong)", runs: 1 });
+    const err = run("err");
+    assert.equal(err.status, 2, "an ERROR stays red");
+    assert.equal(err.verdict.verdict, "error");
+    const crash = run("crash");
+    assert.equal(crash.status, 1, "an uncaught throw is node's exit 1: red");
+    assert.equal(crash.verdict.verdict, "fail");
+    const killed = run("killed");
+    assert.equal(killed.status, 2, "a check killed by a signal (no code) is an ERROR: red");
+    assert.equal(killed.verdict.verdict, "error");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

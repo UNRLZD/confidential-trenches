@@ -7,10 +7,15 @@
 // its Retry-After, so a FAIL says which route refused (the helper's own log says which limit: "refused <route> <why>").
 // From one machine the helper sees one client: CROWD x 4 + 4 stays under its 120 a client a window (server.ts
 // API_RATE_MAX), so a 429 here is never this check's own window.
+// A candles read is read as the token page reads it (candles-read.mjs, card evm-chart-opens-without-a-vendor-call: with
+// nothing held and the GeckoTerminal budget spent the helper answers the 429 with its wait, the page reading again at
+// it): its 429 is read again at its Retry-After within one 75 s span for the crowd, and its answer must then be a 200
+// with bars; a 429 still standing after the span is named with its waits.
 // After: app helper
 //   node scripts/live-checks/app-console-429.mjs [--base <url>] [--crowd <n>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the check's test can replay it.
 import "../net-window.mjs";
+import { candlesReader, waitsText } from "./candles-read.mjs";
 import { writeFileSync } from "node:fs";
 
 const KEY = "app-console-429";
@@ -36,7 +41,19 @@ async function get(base, path, fetchFn) {
   }
 }
 
-export async function read(base = BASE, fetchFn = fetch, crowd = CROWD) {
+/** The bars of a candles answer's body, null when it holds no list (a record keeps the count, never the body). */
+const barsOf = (body) => {
+  try {
+    const c = JSON.parse(body)?.candles;
+    return Array.isArray(c) ? c.length : null;
+  } catch {
+    return null;
+  }
+};
+
+/** `reader`: the run's candles reader (candles-read.mjs): a candles 429 is read again at its Retry-After, as the page
+ *  reads it, the crowd side by side within one span. */
+export async function read(base = BASE, fetchFn = fetch, crowd = CROWD, reader = candlesReader()) {
   const at = new Date().toISOString();
   const lists = await get(base, "/v1/market/lists?chain=solana", fetchFn);
   let mint = null;
@@ -48,7 +65,8 @@ export async function read(base = BASE, fetchFn = fetch, crowd = CROWD) {
   if (typeof mint !== "string") return { base, at, crowd, mint: null, lists: first, answers: [] };
   const reads = [...CHAINS.map((c) => `/v1/market/lists?chain=${c}`), ...Array.from({ length: crowd }, () => ROUTES(mint)).flat()];
   // each path kept with the token written once, in `mint`: a record holds routes, not addresses
-  const answers = (await Promise.all(reads.map((p) => get(base, p, fetchFn)))).map(({ body: _x, ...a }) => ({ ...a, path: a.path.replace(mint, "<mint>") }));
+  const one = (p) => (p.startsWith("/v1/market/candles") ? reader.read(() => get(base, p, fetchFn)).then((a) => ({ ...a, bars: a.status === 200 ? barsOf(a.body) : undefined })) : get(base, p, fetchFn));
+  const answers = (await Promise.all(reads.map(one))).map(({ body: _x, ...a }) => ({ ...a, path: a.path.replace(mint, "<mint>") }));
   return { base, at, crowd, mint, lists: first, answers };
 }
 
@@ -69,9 +87,10 @@ export function judge(run) {
     by.get(k).push(a);
   }
   for (const [route, as] of by) {
-    const bad = as.filter((a) => a.status !== 200);
+    // a candles 200 with no bars is a chart drawn empty (recorded before the count, a run has none to judge)
+    const bad = as.filter((a) => a.status !== 200 || a.bars === 0 || a.bars === null);
     const ms = as.map((a) => a.ms).sort((x, y) => x - y);
-    const kinds = [...new Set(bad.map((a) => `${a.status}${a.retryAfter ? ` Retry-After ${a.retryAfter}` : ""}${a.error ? ` ${a.error}` : ""}`))];
+    const kinds = [...new Set(bad.map((a) => `${a.status}${a.status === 200 ? " with no bars" : ""}${a.retryAfter ? ` Retry-After ${a.retryAfter}` : ""}${waitsText(a)}${a.error ? ` ${a.error}` : ""}`))];
     say(bad.length === 0, `${route}: ${as.length - bad.length} of ${as.length} answered 200${bad.length ? `; ${bad.length} did not: ${kinds.join(", ")}` : ""} (p50 ${ms[Math.floor(ms.length / 2)]} ms, max ${ms.at(-1)} ms)`);
   }
   return { ok: lines.every((l) => l.startsWith("ok ")), lines };
