@@ -20,7 +20,7 @@ import { noteCommitment, noteSecrets, type NoteRef } from "../../wallet/src/note
 import { openNoteStore, type NoteRecord, type NoteStore } from "../../wallet/src/notes/store.ts";
 import type { Pool } from "../../wallet/src/pool/pool.ts";
 import type { SolanaPoolCache } from "../../wallet/src/pool/solana-restore.ts";
-import { SOLANA_PROVIDER_A } from "../src/trade.ts";
+import { SOLANA_PROVIDER_A, SOLANA_PUBLIC_SEAT } from "../src/trade.ts";
 import { signalsProver } from "../../wallet/test/withdraw-fixture.ts";
 
 (globalThis as { __SIGN_NETWORK__?: string }).__SIGN_NETWORK__ = "testnet";
@@ -1342,9 +1342,12 @@ test("the page's sell host settles a sale's record by its signature, and a sign 
 // review P3-6 of a34c1626: the helper's start check (apps/helper/src/env-check.ts checkSolanaPairOperators) refuses a
 // keyed Solana URL of this page's direct seat's operator; it names that seat in its own constant (the helper imports no
 // page code), read here as text and held equal to the page's, so a new direct seat moves both
-test("the helper's start check names this page's direct Solana seat (SOLANA_PROVIDER_A)", () => {
+test("the helper's start check names every member of this page's public Solana seat (SOLANA_PUBLIC_SEAT), in its order", () => {
   const helper = readFileSync(new URL("../../../apps/helper/src/env-check.ts", import.meta.url), "utf8");
-  assert.equal(/export const PAGE_SOLANA_DIRECT = "([^"]+)";/.exec(helper)?.[1], SOLANA_PROVIDER_A);
+  const line = /export const PAGE_SOLANA_PUBLIC_SEAT: readonly string\[\] = Object\.freeze\(\[([^\]]*)\]\);/.exec(helper)?.[1];
+  assert.ok(line !== undefined, "env-check.ts PAGE_SOLANA_PUBLIC_SEAT");
+  assert.deepEqual([...line.matchAll(/"([^"]+)"/g)].map((m) => m[1]), [...SOLANA_PUBLIC_SEAT]);
+  assert.equal(SOLANA_PUBLIC_SEAT[0], SOLANA_PROVIDER_A);
 });
 
 // The review of 8522bdf8, F6: the testnet build's finder (pool-testnet.ts finderOf, no holdings given) reads the Ws on

@@ -1151,7 +1151,9 @@ test("E1: a restore is done once the walk's notes are written, before any deposi
   const id = a.ask();
   // done is posted while step 5's first id read is still unanswered
   await until("done while no id read answered", () => a.posted.some((m) => m.id === id && m.stage === "done"), 5_000);
-  assert.ok(g.asked() > 0, "step 5 had started");
+  // step 5 starts after the walk's end, on its own turn: on a loaded machine done can be seen first (every id read is
+  // held at the gate either way, so none has answered)
+  await until("step 5 started", () => g.asked() > 0, 5_000);
   assert.equal(n.found.size, 0, "no scope's ids read yet");
   assert.equal((await opOf(w.store, id))?.stage, "done");
   // the user's notes are back, shown and spendable
@@ -1238,6 +1240,9 @@ test("E3: step 5 is owed by a marker (scopes only) from the walk's end; a reload
   const factory = new IDBFactory();
   const name = `restore-owed-${db++}`;
   const store = await openWalletStore({ name, indexedDB: factory });
+  // closed at the file's end like every world's store: a failure before the sign out below would leave its
+  // BroadcastChannel open, and the test process would never exit
+  closers.push(() => store.close());
   const w = await world({ store: async () => store, pools: () => SOL_ONLY, ids: g.ids, ux: () => uxOf(new Map()).reads });
   assert.equal(await w.r.auto(), "done");
   // written at the walk's end, its scopes alone, under owed/ (which the frame's reader never reads or lists)

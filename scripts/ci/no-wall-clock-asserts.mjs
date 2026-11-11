@@ -61,6 +61,8 @@ export const LISTED = {
   "packages/signpage/test/api.test.ts": { count: 2, why: "to convert" },
   "packages/signpage/test/deposit-dry.test.ts": { count: 1, why: "to convert" },
   "packages/signpage/test/passes-yield.test.ts": { count: 6, why: "performance.now is the test clock here (onProvider runs each of these tests in onTestClock); A, A2 and D, on the real clock, read none" },
+  "packages/signpage/test/page-rpc.test.ts": { count: 4, why: "performance.now is the test clock here (onSeat and the parked-reads stall test run in onTestClock, which jumps over every wait, so a time under a wait's length proves it was not waited)" },
+  "packages/signpage/test/trade.test.ts": { count: 1, why: "performance.now is the test clock here (the reference-down tests run in onTestClock): the time to down, measured" },
   "packages/signpage/test/pool-deposit-evm.test.ts": { count: 1, why: "to convert" },
   "packages/signpage/test/pool-deposit.test.ts": { count: 1, why: "to convert" },
   "packages/signpage/test/pool-restore.test.ts": { count: 2, why: "to convert" },

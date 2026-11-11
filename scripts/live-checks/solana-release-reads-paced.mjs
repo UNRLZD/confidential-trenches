@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 // Live check of card solana-release-reads-paced on SIGN_HOST (https://confidential.unrealized.trade). What it
 // holds, and only that: the served /app.js is the one index.html pins (its sha384), and in it, as minified:
-//   - release: the release's trade deps (trade.ts releaseTradeDeps) make provider A (PublicNode) and the helper's route
-//     each under the kit's paced wrapper (send.ts solanaPacedRpc), and the reference reads on the pair the kit hands
-//     it (flow.ts gives its paced providers), never on a pair of its own;
+//   - release: the release's trade deps (trade.ts releaseTradeDeps) make the public seat (trade.ts SOLANA_PUBLIC_SEAT:
+//     provider A, PublicNode, then its spare, Pocket's gateway; card signpage-throttled-provider-has-a-spare) and the
+//     helper's route each under the kit's paced wrapper (send.ts solanaPacedRpc), and the reference reads on the pair
+//     the kit hands it (flow.ts gives its paced providers), never on a pair of its own;
 //   - pair: the page's Solana pair (pool-testnet.ts pageSolanaRpcs, which every pool buy, sell, withdraw, settle and
-//     restore read takes) is the same two providers, each under the paced wrapper alone, so provider A's reads go to
-//     provider A and nowhere else; the pair every settle and the restore read on (pageSolanaSettleRpcs) is the same two
+//     restore read takes) is the same seat and route, each under the paced wrapper alone, so the public seat's reads go
+//     to its two providers and nowhere else; the pair every settle and the restore read on (pageSolanaSettleRpcs) is the same two
 //     providers, each paced alone, the helper's with its own retry (review P2-1 of e3489b3b: it waits out the helper's
 //     window); and the page's mark lister (pageSolanaLister) is the helper's solana-marks route, paced too (card
 //     sol-pools-mainnet-pin): it only names the marks, which the pair reads by address;
@@ -75,22 +76,25 @@ export function facts(index, js) {
   const p = PACED.exec(js)?.[1];
   const a = urlVar(js, "https://solana-rpc.publicnode.com");
   const h = urlVar(js, "https://ct-api.unrealized.trade");
+  // the public seat (card signpage-throttled-provider-has-a-spare): provider A, then Pocket's gateway, nothing else
+  const seats = a ? [...js.matchAll(new RegExp(`(?<![\\w$])(${N})=Object\\.freeze\\(\\[${a},${Q}https://solana\\.api\\.pocket\\.network${Q}\\]\\)`, "g"))].map((x) => esc(x[1])) : [];
+  const s = seats.length ? `(?:${seats.join("|")})` : undefined;
   const t = p ? TIMED(p).exec(js)?.[1] : undefined;
   const f = FAULT.exec(js)?.groups?.F;
   const release =
-    !!(p && a && h) &&
-    new RegExp(`providers:\\[${esc(p)}\\(${N}\\(${a}\\)\\),${esc(p)}\\(${N}\\(${h}\\)\\)\\],reference:\\((${N}),(${N})\\)=>${N}\\(\\2,\\1\\)`).test(js);
+    !!(p && s && h) &&
+    new RegExp(`providers:\\[${esc(p)}\\(${N}\\(${s}\\)\\),${esc(p)}\\(${N}\\(${h}\\)\\)\\],reference:\\((${N}),(${N})\\)=>${N}\\(\\2,\\1\\)`).test(js);
   // card sol-pools-mainnet-pin: the pair is provider A and the helper's route, each paced and nothing else (provider A
   // never wrapped onto another route: a mark the helper makes up would count, review of 369a87a8 P1); the lister is the
   // helper's solana-marks route, paced
   const marks = h ? [...js.matchAll(new RegExp(`(?<![\\w$])(${N})=${Q}\\$\\{${h}\\}/v1/rpc/solana-marks${Q}`, "g"))].map((x) => esc(x[1])) : [];
   const m = marks.length ? `(?:${marks.join("|")})` : undefined;
   const pair =
-    !!(p && a && h && m) &&
+    !!(p && s && h && m) &&
     // MAINNET_MARKS_ROUTE, pageSolanaRpcs, pageSolanaLister, pageSolanaSettleRpcs (the helper's seat with its retry) and
     // PAGE_SOL_MARK_BATCHES, as pool-testnet.ts declares them in turn; each of the three takes its reads' kind on its
     // host's lane (card signpage-passes-yield-to-a-trade: `(e="trade")=>`), and hands it to every seat it makes
-    new RegExp(`(?<![\\w$])${m}=${Q}\\$\\{${h}\\}/v1/rpc/solana-marks${Q},${N}=\\((${N})=${Q}trade${Q}\\)=>\\[${esc(p)}\\(${N}\\(${a},\\1\\)\\),${esc(p)}\\(${N}\\(${h},${N},\\1\\)\\)\\],${N}=\\((${N})=${Q}trade${Q}\\)=>${esc(p)}\\(${N}\\(${m},${N},\\2\\)\\),${N}=\\((${N})=${Q}trade${Q}\\)=>\\[${esc(p)}\\(${N}\\(${a},\\3\\)\\),${esc(p)}\\(${N}\\(${h},${N},\\3\\)\\)\\],${N}=Object\\.freeze\\(\\[\\d+,\\d+\\]\\)[,;]`).test(js);
+    new RegExp(`(?<![\\w$])${m}=${Q}\\$\\{${h}\\}/v1/rpc/solana-marks${Q},${N}=\\((${N})=${Q}trade${Q}\\)=>\\[${esc(p)}\\(${N}\\(${s},\\1\\)\\),${esc(p)}\\(${N}\\(${h},${N},\\1\\)\\)\\],${N}=\\((${N})=${Q}trade${Q}\\)=>${esc(p)}\\(${N}\\(${m},${N},\\2\\)\\),${N}=\\((${N})=${Q}trade${Q}\\)=>\\[${esc(p)}\\(${N}\\(${s},\\3\\)\\),${esc(p)}\\(${N}\\(${h},${N},\\3\\)\\)\\],${N}=Object\\.freeze\\(\\[\\d+,\\d+\\]\\)[,;]`).test(js);
   const timed =
     !!t &&
     !!f &&
