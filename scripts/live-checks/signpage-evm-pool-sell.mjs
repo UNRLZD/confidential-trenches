@@ -10,7 +10,7 @@
 //      with a sale that is not one (the selector alone, no authorization) for each testnet pool, refuses it bad_shape
 //      before any send and echoes SIGN_HOST in Access-Control-Allow-Origin;
 //   3. SIGN_HOST's served /app.js is the one its index.html pins, and it is the mainnet build with no EVM sell in it
-//      (no "nonce()", its read of W's SellDelegate nonce; no "Sell(address token", the typed data W signs): the mainnet build pins both EVM pools (card
+//      (no "nonce()", its read of W's SellDelegate nonce; no Sell type string, the typed data W signs): the mainnet build pins both EVM pools (card
 //      evm-pools-on-mainnet) but keeps the sale closed there until a restored device has buy records to sell from, so
 //      pool.sell on Base or Robinhood is refused not_allowed before any read (packages/signpage/test/
 //      pool-mainnet-evm.test.ts) and the sell code is left out of it (POOL_TESTNET is a build constant). The open sales'
@@ -47,7 +47,10 @@ export const SELL_PINS = Object.freeze({
 /** Strings only the EVM sell's code carries in a bundle (src/pool-sell-evm.ts: the SellDelegate nonce() call it reads
  *  on W; the kit's sell-unpinned.ts: the Sell typed data W signs). The helper's route table names /v1/pool/evm/sell in every build, and the positions pass reads the open
  *  sales' and the buy records' keys (owed/sell-evm, owed/cost-evm), so none of them is a mark. */
-export const EVM_SELL_MARKS = Object.freeze(["nonce()", "Sell(address token"]);
+export const EVM_SELL_MARKS = Object.freeze([
+  "nonce()",
+  "Sell(address token,uint256 amount,address target,bytes data,uint256 minOut,address pool,uint256 precommitment,uint256 feeCap,address feeRecipient,uint256 deadline,uint256 nonce)",
+]);
 const RECORD = new URL("./signpage-evm-pool-sell.md", import.meta.url);
 const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}`;
 const lower = (s) => (typeof s === "string" ? s.toLowerCase() : null);

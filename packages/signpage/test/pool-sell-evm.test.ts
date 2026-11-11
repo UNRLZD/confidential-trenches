@@ -528,7 +528,8 @@ test("the live check's own constants are the page's: the sell selector, the Depo
   // the open sales' and the buy records' keys are no marks: the mainnet positions pass reads both (card evm-pools-on-mainnet)
   assert.ok(!(lc.EVM_SELL_MARKS as string[]).includes(EVM_OPEN_SELLS_KEY));
   assert.ok(!(lc.EVM_SELL_MARKS as string[]).includes(EVM_POSITION_COSTS_KEY));
-  assert.deepEqual(lc.EVM_SELL_MARKS, ["nonce()", "Sell(address token"]);
+  // the sale's typed data, whole: the kit's own type string (packages/kit/src/trade/evm/sell-unpinned.ts)
+  assert.deepEqual(lc.EVM_SELL_MARKS, ["nonce()", "Sell(address token,uint256 amount,address target,bytes data,uint256 minOut,address pool,uint256 precommitment,uint256 feeCap,address feeRecipient,uint256 deadline,uint256 nonce)"]);
 });
 
 // ---- the review of 1004e598..617fcd62 (card signpage-evm-pool-sell) ----
