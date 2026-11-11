@@ -18,7 +18,7 @@ import { solanaCompileV0 } from "../../kit/src/trade/solana/build.ts";
 import { solanaDecodeMessage } from "../../kit/src/checks/solana/message.ts";
 import { mergeWithdrawOp } from "../src/pool-testnet.ts";
 import { SOLANA_SYSTEM_PROGRAM } from "../../kit/src/checks/solana/checks.ts";
-import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
+import { SolanaRpcTransportError, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import { noteCommitment, noteSecrets } from "../../wallet/src/notes/secrets.ts";
 import { openNoteStore, type NoteStore } from "../../wallet/src/notes/store.ts";
 import type { Pool } from "../../wallet/src/pool/pool.ts";
@@ -1263,4 +1263,90 @@ test("withdraw, card pool-buy-filled-2s: a settle that always throws ends the pa
   assert.equal(a.stage, "in_transit");
   assert.ok(t - Number(NOW) <= POOL_BUY_SETTLE_MS, `${t - Number(NOW)} ms`);
   assert.ok(s.asked.length < 20, `${s.asked.length} settles`);
+});
+
+// Review of 418af7d5 (P3-4): the buy suite's rules on the shared send and settle, held on the withdraw path too, where a
+// not_landed would drop the owed send. Past the gate a settle that finds no spend decides nothing: the part stays owed
+// at the run's bound, its settles at a doubling wait; a finalized-slot read that fails asks no settle that round; a
+// throttle's wait is the doubling one, a Retry-After only when it is a number and at most POOL_BUY_RETRY_AFTER_MAX_MS.
+const throttle = (retryAfterMs: number | null) => new SolanaRpcTransportError("http_429", "HTTP 429", 3, "rpc1", retryAfterMs);
+const onRpc1 = (wd: Awaited<ReturnType<typeof world>>, f: (m: string, q: readonly unknown[], inner: SolanaRpc) => unknown) => {
+  const inner = wd.host.rpcs[1];
+  wd.host.rpcs = [wd.host.rpcs[0], (async (m: string, q: readonly unknown[]) => f(m, q, inner)) as SolanaRpc] as unknown as PoolWithdrawHost["rpcs"];
+};
+
+test("review of 418af7d5: withdraw, past the gate a settle that finds no spend never ends the part not landed: it stays owed at the run's bound, under 20 settles", async () => {
+  const wd = await world([30_000_000n], { txSlot: 20, settleUnspent: true });
+  const s = settles(wd);
+  let t = Number(NOW);
+  const a = await runPoolWithdraw({ ...wd.host, reads: POOL_BUY_READS, now: () => BigInt(t), wait: async (ms) => void (t += ms) }, ASK, TO, 5_000_000n, COST);
+  assert.equal(a.stage, "in_transit", "the send owed, never dropped");
+  assert.ok(!wd.stages.includes("stopped"));
+  assert.ok(s.asked.length > 1 && s.asked.length < 20, `${s.asked.length} settles`);
+  assert.ok(t - Number(NOW) <= POOL_BUY_SETTLE_MS, `${t - Number(NOW)} ms`);
+});
+
+test("review of 418af7d5: withdraw, a finalized-slot read that fails asks no settle that round", async () => {
+  const wd = await world([30_000_000n], { txSlot: 20 });
+  let fails = 0;
+  onRpc1(wd, (m, q, inner) => {
+    if (m === "getSlot" && fails < 2) throw (fails++, new Error("rpc1: socket hang up"));
+    return inner(m, q);
+  });
+  const s = settles(wd);
+  const a = await runPoolWithdraw({ ...wd.host, reads: 10, wait: async () => {} }, ASK, TO, 5_000_000n, COST);
+  assert.equal(a.stage, "sent");
+  assert.equal(s.asked.length, 1);
+  assert.equal(s.log.slice(0, s.asked[0]!.at).filter((x) => x === "0:getSlot").length, 3, "the settle only on the third round, the first whose read went through");
+});
+
+test("review of 418af7d5: withdraw, a throttled finalized-slot read waits twice as long each time, and the slot's pace once a read goes through", async () => {
+  const wd = await world([30_000_000n], { txSlot: 22, finalizedSlot: (_p, i) => (i < 2 ? 21 : 25) });
+  let throttles = 0;
+  onRpc1(wd, (m, q, inner) => {
+    if (m === "getSlot" && throttles < 3) throw (throttles++, throttle(null));
+    return inner(m, q);
+  });
+  const waits: number[] = [];
+  const a = await runPoolWithdraw({ ...wd.host, reads: 20, wait: async (ms) => void waits.push(ms) }, ASK, TO, 5_000_000n, COST);
+  assert.equal(a.stage, "sent");
+  assert.deepEqual(waits.slice(0, 5), [800, 1_600, 3_200, 400, 400], waits.join(","));
+});
+
+for (const [name, after, want] of [["past POOL_BUY_RETRY_AFTER_MAX_MS (60 s)", 60_000, 10_000], ["no number (NaN)", Number.NaN, 800]] as const)
+  test(`review of 418af7d5: withdraw, a read-back throttled with a Retry-After ${name} waits ${want} ms`, async () => {
+    const wd = await world([30_000_000n], { txSlot: 20 });
+    let once = false;
+    onRpc1(wd, (m, q, inner) => {
+      if (m === "getTransaction" && !once) throw ((once = true), throttle(after));
+      return inner(m, q);
+    });
+    const waits: number[] = [];
+    const a = await runPoolWithdraw({ ...wd.host, reads: 10, wait: async (ms) => void waits.push(ms) }, ASK, TO, 5_000_000n, COST);
+    assert.equal(a.stage, "sent");
+    assert.equal(waits[0], want, waits.join(","));
+  });
+
+test("review of 418af7d5: withdraw, a release slot the finalized slots never reach holds the settle at most POOL_BUY_GATE_MAX_MS, its slots read a few times, never every slot", async () => {
+  const wd = await world([30_000_000n], { txSlot: 1_000, finalizedSlot: () => 25 });
+  const s = settles(wd);
+  let t = Number(NOW);
+  const at: number[] = [];
+  const settle = wd.host.settle;
+  wd.host.settle = (id, m) => (at.push(t - Number(NOW)), settle(id, m));
+  const a = await runPoolWithdraw({ ...wd.host, reads: POOL_BUY_READS, now: () => BigInt(t), wait: async (ms) => void (t += ms) }, ASK, TO, 5_000_000n, COST);
+  assert.equal(a.stage, "sent");
+  assert.ok(at[0]! >= 30_000 && at[0]! <= 30_000 + 2_000, `the first settle at ${at[0]} ms`);
+  const before = s.log.slice(0, s.asked[0]!.at).filter((x) => x === "1:getSlot").length;
+  assert.ok(before <= 8, `${before} getSlot on RPC 1 before it`);
+});
+
+test("review of 418af7d5: withdraw, a release with no signature to read back whose settle always throws asks it at a doubling wait: under 20 settles by the run's bound, the part not stopped", async () => {
+  const wd = await world([30_000_000n], { helper502: true, landed: false, finalHeight: 50 });
+  const s = settles(wd, () => true);
+  let t = Number(NOW);
+  const a = await runPoolWithdraw({ ...wd.host, reads: POOL_BUY_READS, now: () => BigInt(t), wait: async (ms) => void (t += ms) }, ASK, TO, 5_000_000n, COST);
+  assert.notEqual(a.stage, "stopped");
+  assert.ok(s.asked.length > 1 && s.asked.length < 20, `${s.asked.length} settles`);
+  assert.ok(t - Number(NOW) <= POOL_BUY_SETTLE_MS + 2_000, `${t - Number(NOW)} ms`);
 });

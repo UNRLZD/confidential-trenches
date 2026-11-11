@@ -33,7 +33,7 @@ import {
 import type { Cents, Phase } from "./model.ts";
 import { EndLine, hasRunLabel, RunLabel, stateId } from "./States.tsx";
 import { FillToast, RouteStrip } from "./RouteStrip.tsx";
-import { fromOutcome, fromStage, IDLE, routeEvent, routeTap, toastLine, usd2 } from "./route.ts";
+import { fromOutcome, fromProgress, IDLE, routeEvent, routeTap, toastLine, usd2 } from "./route.ts";
 import type { Route } from "./route.ts";
 import { txLink } from "../withdraw/model.ts";
 import { OrderTabs, OrdersSoon } from "./OrderTabs.tsx";
@@ -194,7 +194,7 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
     return kit.onProgress((id, stage) => {
       const at = src.now();
       setPhase((p) => progress(p, id, stage, at));
-      setRoute((r) => fromStage(r, id, stage));
+      setRoute((r) => fromProgress(r, id, stage));
     });
   }, [kit.onProgress, src.now]);
 

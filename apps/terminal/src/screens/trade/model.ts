@@ -105,7 +105,8 @@ export type Phase =
   | { k: "sending"; id: string; at: number }
   | { k: "landing"; id: string; at: number }
   /** `provisional`: a pool buy the page read filled at confirmed (its route's amount out), not Final yet (card
-   *  pool-buy-filled-2s); the kit's stage filled makes it Final, and a stage that is no fill ends it. */
+   *  pool-buy-filled-2s); the kit's stage filled makes it Final. A run that ends with no fill goes to what the box
+   *  shows for that end with no Filled before it (progress, outcome). */
   | { k: "filled"; id: string; at: number; ms: number; provisional?: true }
   /** The kit's part_filled or not_landed, or a refusal: drawn by the next card (Failed, Not landed). */
   | { k: "ended"; id: string; at: number; stage: Stage | "refused"; code?: ErrorCode };
@@ -122,10 +123,13 @@ export function tap(p: Phase, id: string, now: number): Phase {
 
 /** A `progress` event of the kit: only the running buy's id moves the button, never backwards. */
 export function progress(p: Phase, id: string, stage: Stage, now: number): Phase {
-  // a Filled not yet Final: the stage filled makes it Final with its own time; a stage that is no fill (a fork the
-  // settle read as not landed) ends it
+  // a Filled not yet Final: the stage filled makes it Final with its own time. The page posts a pool buy's final stage
+  // as progress (pool-buy.ts poolBuyKind): "sent" is a run that ended not known (a settle never read, a run that threw
+  // after its answer), which is Landing again, then Slow, as for any buy whose end is not known; not_landed,
+  // part_filled and refused end it
   if (p.k === "filled" && p.provisional && p.id === id) {
     if (stage === "filled") return { k: "filled", id, at: p.at, ms: p.ms };
+    if (stage === "sent") return { k: "landing", id, at: p.at };
     if (stage === "part_filled" || stage === "not_landed" || stage === "refused") return { k: "ended", id, at: p.at, stage };
     return p;
   }
@@ -160,6 +164,13 @@ export function outcome(
   o: { ok: true; result: { stage: Stage } } | { ok: false; error: { code: ErrorCode } },
   now: number,
 ): Phase {
+  // a Filled not yet Final: the request's early answer "sent" may come after the route's amount (it is posted on its
+  // own) and moves nothing; any other answer ends it as it ends a running buy
+  if (p.k === "filled" && p.provisional && p.id === id) {
+    if (o.ok) return o.result.stage === "sent" ? p : progress(p, id, o.result.stage, now);
+    if (o.error.code === CLIENT_TIMEOUT) return p;
+    return { k: "ended", id, at: p.at, stage: "refused", code: o.error.code };
+  }
   if (!busy(p) || p.id !== id) return p;
   if (o.ok) return progress(p, id, o.result.stage, now);
   if (o.error.code === CLIENT_TIMEOUT) return p;

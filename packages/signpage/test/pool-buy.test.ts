@@ -106,6 +106,8 @@ type Plant = {
   tableNotForVenue?: boolean;
   /** the slot of the device's blockhash read, past the quote's */
   slotAhead?: number;
+  /** RPC 0's getLatestBlockhash answers in turn (the slot past the quote's, the blockhash); past the list, the last */
+  blockhashReads?: readonly { slotAhead: number; blockhash: string }[];
   /** provider B's curve account changed at one byte: "reserves" (the top byte of its virtual SOL reserves: far past
    *  the kit's 2% read tolerance) or "creator" (a static byte, the creator's key) */
   venueOff?: "reserves" | "creator";
@@ -212,6 +214,7 @@ async function world(plant: Plant = {}, proof = readyProof()): Promise<World> {
   // the queue's ready proof for the note now: the last list's (a remake swaps it in place, the note HELD)
   const current = readies.at(-1)![0] ?? proof;
   let skewed = false;
+  let bhReads = 0;
   let settles = 0;
   const settleSlots: (number[] | null)[] = [];
   const heightReads = [0, 0];
@@ -276,6 +279,10 @@ async function world(plant: Plant = {}, proof = readyProof()): Promise<World> {
           return { context: { slot: s.ref.slot! + 1 }, value: { owner: PROGRAM, lamports: 1, data: [base64.encode(d), "base64"] } };
         }
         return { context: { slot: s.ref.slot! + 2 }, value: a ? { owner: a.owner, lamports: 1, data: [base64.encode(a.data), "base64"] } : null };
+      }
+      if (method === "getLatestBlockhash" && plant.blockhashReads) {
+        const b = plant.blockhashReads[Math.min(bhReads++, plant.blockhashReads.length - 1)]!;
+        return { context: { slot: s.ref.slot! + b.slotAhead }, value: { blockhash: b.blockhash, lastValidBlockHeight: 100 } };
       }
       if (method === "getLatestBlockhash") return { context: { slot: s.ref.slot! + (plant.slotAhead ?? 2) }, value: { blockhash: BLOCKHASH, lastValidBlockHeight: 100 } };
       if (method === "isBlockhashValid") return { value: !plant.blockhashInvalid };
@@ -1110,6 +1117,26 @@ test("dropped tx: not_landed reaches progress", async () => {
   assert.deepEqual(stages, ["not_landed"], "the stage reaches the app as progress, whatever its client waited");
 });
 
+// Review of 418af7d5 (P3-2): a run that ends with an error after its early answer "sent" (the transaction went out, its
+// end not known) posts "sent" as its final progress, so the app's Filled not yet Final ends (Landing again, as for any
+// buy whose end is not known) instead of staying Filled for good; before its answer an error is the answer itself.
+test("review of 418af7d5: a run that throws after its early answer posts sent as its final progress", async () => {
+  const w = await world();
+  const locks = { request: (_n: string, _o: unknown, f: () => Promise<void>) => f() } as unknown as Pick<LockManager, "request">;
+  const stages: string[] = [];
+  // the page's clock throws once the read-back read the transaction on both RPCs (an unplanned fault past the answer)
+  const now = w.host.now;
+  const host = { ...w.host, now: () => {
+    if (w.log.filter((x) => /^[01]:getTransaction/.test(x)).length >= 2) throw new Error("a fault after the answer");
+    return now ? now() : BigInt(Date.now());
+  } };
+  const r = poolBuyKind(() => host, locks)(ASK, { id: "r1", sha: "00", progress: (s: string) => void stages.push(s) } as never) as { running: true; after: Promise<void>; answer: () => unknown };
+  await r.after;
+  assert.deepEqual(r.answer(), { result: { stage: "sent", txs: [{ chain: "solana", hash: SIG }] } });
+  await new Promise((res) => setTimeout(res, 50));
+  assert.deepEqual(stages, ["sent"], "the run's end reaches the app");
+});
+
 test("the kind, the helper answering a well-formed signature that is not this transaction's: the app's answer never names it", async () => {
   const w = await world({ helperSig: NOT_OURS });
   const locks = { request: (_n: string, _o: unknown, f: () => Promise<void>) => f() } as unknown as Pick<LockManager, "request">;
@@ -1444,6 +1471,30 @@ test("review P2 of 1caf0b17: RPC 1 holding the venue's read 9 slots: the slot is
   assert.equal((await runPoolBuy(c.host, ASK) as { stage?: string }).stage, "filled");
   assert.equal(c.at.slot.length, 2, "the blockhash and slot read again");
   assert.ok(uncounted(c.at) <= SLOT_STALE_MS, `W signed ${uncounted(c.at)} ms after its slot read`);
+});
+
+// Review of 418af7d5 (P3-1): the read again is the one the buy is checked and built on. The fixture answered the same
+// slot and blockhash both times, so a check that kept the first slot, or a transaction built on the first blockhash,
+// passed; here the second read answers another of each.
+const OTHER_BLOCKHASH = base58.encode(new Uint8Array(32).fill(9));
+const holdVenue = (p: 0 | 1, m: string, params: readonly unknown[]): number => (p === 1 && m === "getMultipleAccounts" && (params[0] as string[])[0] === fx.pump.mint ? 9 * SLOT_MS : 0);
+test("review of 418af7d5: the slot read again 30 slots past the quote's is the one checked: quote_check_failed, nothing taken or sent", async () => {
+  const w = await world({ blockhashReads: [{ slotAhead: 2, blockhash: BLOCKHASH }, { slotAhead: 30, blockhash: BLOCKHASH }] });
+  const c = clocked(w, holdVenue);
+  assert.deepEqual(await runPoolBuy(c.host, ASK), { error: "quote_check_failed" });
+  assert.equal(c.at.slot.length, 2, "the blockhash and slot read again");
+  assert.equal(w.state(), "HELD");
+  assert.ok(!w.log.includes("send") && !w.log.some((x) => x.startsWith("take")));
+  assert.equal(w.sends.length, 0);
+});
+
+test("review of 418af7d5: the blockhash read again is the one W signs: the sent transaction carries the second", async () => {
+  const w = await world({ blockhashReads: [{ slotAhead: 2, blockhash: BLOCKHASH }, { slotAhead: 2, blockhash: OTHER_BLOCKHASH }] });
+  assert.notEqual(OTHER_BLOCKHASH, BLOCKHASH);
+  const c = clocked(w, holdVenue);
+  assert.equal((await runPoolBuy(c.host, ASK) as { stage?: string }).stage, "filled");
+  assert.equal(c.at.slot.length, 2, "the blockhash and slot read again");
+  assert.equal(solanaDecodeMessage(w.sentTx()!.subarray(129)).blockhash, OTHER_BLOCKHASH);
 });
 
 test("review P2 of 1caf0b17: a round that ends within a second of the slot read reads it once (three rounds), however slow the reads before it", async () => {

@@ -81,6 +81,10 @@ export type Plant = {
   txSlot?: number;
   /** RPC p's finalized slot at its i-th getSlot (FINAL_SLOT when not given) */
   finalizedSlot?: (p: 0 | 1, i: number) => number;
+  /** the helper's send fails (HTTP 502): no signature to read back, the run goes to the not-landed reads */
+  helper502?: boolean;
+  /** both RPCs' finalized block height (1,000, past every blockhash, when not given) */
+  finalHeight?: number;
 };
 /** Both RPCs' finalized slot in the world. */
 export const FINAL_SLOT = 20;
@@ -162,9 +166,9 @@ export async function world(values: readonly bigint[], plant: Plant = {}) {
       }
       if (method === "getLatestBlockhash") return { context: { slot: 12 }, value: { blockhash: BLOCKHASH, lastValidBlockHeight: 100 } };
       if (method === "isBlockhashValid") return { value: true };
-      if (method === "getBlockHeight") return (params[0] as { commitment: string }).commitment === "confirmed" ? 0 : 1_000;
+      if (method === "getBlockHeight") return (params[0] as { commitment: string }).commitment === "confirmed" ? 0 : (plant.finalHeight ?? 1_000);
       // the not_landed verdict's read (pool-buy.ts pastAt): the finalized bank's height and its slot
-      if (method === "getEpochInfo") return { blockHeight: 1_000, absoluteSlot: FINAL_SLOT, epoch: 1, slotIndex: 0, slotsInEpoch: 432_000 };
+      if (method === "getEpochInfo") return { blockHeight: plant.finalHeight ?? 1_000, absoluteSlot: FINAL_SLOT, epoch: 1, slotIndex: 0, slotsInEpoch: 432_000 };
       if (method === "getFeeForMessage") {
         const m = base64.decode(params[0] as string);
         fees.push(m);
@@ -230,6 +234,7 @@ export async function world(values: readonly bigint[], plant: Plant = {}) {
     send: async (_pool, tx) => {
       order.push(`send:${(await ns.list()).filter((n) => n.state === "RESERVED").length}`);
       releases.push(tx.slice());
+      if (plant.helper502) throw new Error("pool send: HTTP 502");
       if (plant.landed !== false && (plant.readBack ?? "ours") === "ours") {
         const m = keysOf(tx);
         const ix = m.instructions.at(-1)!;

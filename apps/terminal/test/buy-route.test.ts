@@ -5,7 +5,7 @@
 // times on the button and the toast are the buy's own measured ones.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { fromBuyRoute, fromOutcome, fromStage, IDLE, liveRoute, routeEvent, routeTap, stepView, toastLine } from "../src/screens/trade/route.ts";
+import { fromBuyRoute, fromOutcome, fromProgress, fromStage, IDLE, liveRoute, routeEvent, routeTap, stepView, toastLine } from "../src/screens/trade/route.ts";
 import type { BuyRoute } from "@blindfill/kit";
 import type { Route } from "../src/screens/trade/route.ts";
 
@@ -32,10 +32,10 @@ test("the tap: the wallet step grows in, Private balance is the step waiting, no
 
 test("each step checks only on its own event", () => {
   let r = tap();
-  // the wallet, the venue and the pool, and the filled amount are data: none of them checks a step
+  // the wallet, the venue and the pool are data: none of them checks a step (the filled amount is the pool's and the
+  // token's event, card pool-buy-filled-2s: its test below)
   r = routeEvent(r, { t: "wallet", id: "b1", address: WALLET });
   r = routeEvent(r, { t: "route", id: "b1", venue: "Raydium", pool: POOL });
-  r = routeEvent(r, { t: "out", id: "b1", amount: "10600" });
   assert.deepEqual(steps(r), ["active", "off", "off", "off"]);
   // sent before the amount was taken is not the wallet's event: ignored
   assert.deepEqual(steps(routeEvent(r, { t: "sent", id: "b1", tx: "sig" })), ["active", "off", "off", "off"]);
@@ -56,13 +56,14 @@ test("a value is hidden until its step has happened, then shows what the events 
   let r = tap();
   r = routeEvent(r, { t: "wallet", id: "b1", address: WALLET });
   r = routeEvent(r, { t: "route", id: "b1", venue: "Raydium", pool: POOL });
-  r = routeEvent(r, { t: "out", id: "b1", amount: "10600" });
   // the data came early: nothing shows yet
   assert.deepEqual(values(r), [null, null, null, null]);
   r = routeEvent(r, { t: "taken", id: "b1" });
   assert.deepEqual(values(r), ["$25.00", "9DJa…Zst6", null, null]);
   r = routeEvent(r, { t: "sent", id: "b1", tx: "sig" });
   assert.deepEqual(values(r), ["$25.00", "9DJa…Zst6", "G19c…TQki", null]);
+  r = routeEvent(r, { t: "out", id: "b1", amount: "10600" });
+  assert.deepEqual(values(r), ["$25.00", "9DJa…Zst6", "G19c…TQki", "10600"]);
   r = routeEvent(r, { t: "filled", id: "b1" });
   assert.deepEqual(values(r), ["$25.00", "9DJa…Zst6", "G19c…TQki", "10600"]);
   assert.equal(r.venue, "Raydium");
@@ -217,4 +218,47 @@ test("fromBuyRoute reads only the event's own keys: an inherited wallet, venue o
   const route = liveRoute((fn) => (fn("b1", Object.create({ wallet: WALLET }) as BuyRoute), () => {}));
   route((d) => void seen.push(d));
   assert.deepEqual(seen, []);
+});
+
+// Card pool-buy-filled-2s and the review of 418af7d5: the route's amount out (this very transaction read at confirmed on
+// both RPCs, at least the min out) is the buy Filled, as the button says: the pool and the token check, the amount shows,
+// the strip is not done until the kit's filled (Final). A run that then ends not known (the page's progress "sent") puts
+// the strip back where the button is, the pool waiting and the token not shown; one that ends with no fill fails the pool
+// step, nothing after it checked. The request's early answer "sent" never undoes it.
+test("card pool-buy-filled-2s: the amount out checks the pool and the token; the kit's filled ends the strip done", () => {
+  const sent = fromStage(tap(), "b1", "sent");
+  const f = routeEvent(sent, { t: "out", id: "b1", amount: "10600" });
+  assert.deepEqual(steps(f), ["done", "done", "done", "done"]);
+  assert.deepEqual(f.links, [true, true, true]);
+  assert.equal(values(f)[3], "10600");
+  assert.equal(f.k, "running", "not Final yet");
+  const fin = fromStage(f, "b1", "filled");
+  assert.deepEqual(steps(fin), ["done", "done", "done", "done"]);
+  assert.equal(fin.k, "done");
+  // the out before the answer's sent reached the app (the answer is posted on its own): the take and the send happened
+  assert.deepEqual(steps(routeEvent(tap(), { t: "out", id: "b1", amount: "10600" })), ["done", "done", "done", "done"]);
+  // another buy's out moves nothing
+  assert.deepEqual(steps(routeEvent(sent, { t: "out", id: "b2", amount: "10600" })), ["done", "done", "active", "off"]);
+});
+
+test("review of 418af7d5: after the amount out, a run that ends not known is the pool waiting again; one with no fill fails the pool step", () => {
+  const f = routeEvent(fromStage(tap(), "b1", "sent"), { t: "out", id: "b1", amount: "10600" });
+  const back = fromProgress(f, "b1", "sent");
+  assert.deepEqual(steps(back), ["done", "done", "active", "off"]);
+  assert.deepEqual(back.links, [true, true, false]);
+  assert.deepEqual(values(back).slice(3), [null]);
+  assert.equal(back.k, "running");
+  assert.equal(fromProgress(back, "b1", "filled").k, "done");
+  // the early answer "sent" after the out moves nothing
+  assert.deepEqual(fromOutcome(f, "b1", { ok: true, result: { stage: "sent", txs: [{ hash: "sig" }] } }), { ...f, tx: f.tx ?? "sig" });
+  for (const s of ["not_landed", "part_filled", "refused"] as const) {
+    const nl = fromProgress(f, "b1", s);
+    assert.deepEqual(steps(nl), ["done", "done", "error", "off"], s);
+    assert.deepEqual(nl.links, [true, true, false], s);
+    assert.equal(nl.k, "failed", s);
+  }
+  assert.equal(fromOutcome(f, "b1", { ok: false, error: { code: "failed" } }).k, "failed");
+  // another buy's end never moves it
+  assert.deepEqual(fromProgress(f, "b2", "not_landed"), f);
+  assert.deepEqual(fromProgress(f, "b2", "sent"), f);
 });

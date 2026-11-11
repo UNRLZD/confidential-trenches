@@ -29,8 +29,10 @@ const WIDTHS = [
   { name: "1440", viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, isMobile: false, hasTouch: false },
 ];
 // [name, fixture, ms after the tap (null: before the tap), the four steps' states, the four values, the pool label,
-// the button, the toast's line]. The kit stub (fixtures.tsx): wallet and venue 100 ms, signed 80, sent 150, the filled
-// amount at 1,099 and `filled` at 1,100 ms, a refusal at 300, not_landed at 3,000.
+// the button, the toast's line]. The kit stub (fixtures.tsx): wallet and venue 100 ms, signed 80, sent 150, the route's
+// amount out (Filled: the pool and the token check, the toast) at 1,100 and `filled` (Final) at 1,150 ms, a refusal at
+// 300, not_landed at 3,000; forked: Filled, then not_landed at 3,000; unsure: Filled, then the run's end not known
+// (progress sent) at 3,000, Landing again (card pool-buy-filled-2s, review of 418af7d5).
 const SIG = "9DJa…Zst6";
 const ROWS = [
   ["idle", "ready", null, "off off off off", ["", "", "", ""], "Pool", "Buy TORCH", null],
@@ -38,10 +40,14 @@ const ROWS = [
   ["before-sent", "ready", 149, "active off off off", ["", "", "", ""], "pump.fun pool", "Sending", null],
   ["sent", "ready", 150, "done done active off", ["$25.00", SIG, "G19c…TQki", ""], "pump.fun pool", "Landing 0.1s", null],
   ["landing", "ready", 400, "done done active off", ["$25.00", SIG, "G19c…TQki", ""], "pump.fun pool", "Landing 0.4s", null],
-  ["before-filled", "ready", 1_099, "done done active off", ["$25.00", SIG, "G19c…TQki", ""], "pump.fun pool", "Landing 1.0s", null],
-  ["filled", "ready", 1_100, "done done done done", ["$25.00", SIG, "G19c…TQki", "10.6K"], "pump.fun pool", "Filled 1.1s Final", "Filled 1.1s · 10.6K TORCH · $25.00"],
+  ["before-out", "ready", 1_099, "done done active off", ["$25.00", SIG, "G19c…TQki", ""], "pump.fun pool", "Landing 1.0s", null],
+  ["filled", "ready", 1_100, "done done done done", ["$25.00", SIG, "G19c…TQki", "10.6K"], "pump.fun pool", "Filled 1.1s", "Filled 1.1s · 10.6K TORCH · $25.00"],
+  ["final", "ready", 1_150, "done done done done", ["$25.00", SIG, "G19c…TQki", "10.6K"], "pump.fun pool", "Filled 1.1s Final", "Filled 1.1s · 10.6K TORCH · $25.00"],
   ["refused", "refuse", 400, "error off off off", ["", "", "", ""], "Pool", "Retry", null],
   ["notlanded", "notlanded", 3_100, "done done error off", ["$25.00", SIG, "G19c…TQki", ""], "pump.fun pool", "Retry", null],
+  ["forked-filled", "forked", 1_100, "done done done done", ["$25.00", SIG, "G19c…TQki", "10.6K"], "pump.fun pool", "Filled 1.1s", "Filled 1.1s · 10.6K TORCH · $25.00"],
+  ["forked", "forked", 3_100, "done done error off", ["$25.00", SIG, "G19c…TQki", ""], "pump.fun pool", "Retry", null],
+  ["unsure", "unsure", 3_100, "done done active off", ["$25.00", SIG, "G19c…TQki", ""], "pump.fun pool", "Landing 3.1s", null],
 ];
 
 async function build() {
@@ -106,7 +112,13 @@ try {
       await page.evaluate(() => document.fonts.ready);
       if (ms !== null) {
         await page.locator('[data-testid="trade-cta"]').click();
-        await page.clock.runFor(ms);
+        // Final: the toast that came at Filled stays the one toast (marked at Filled, the same node at Final)
+        if (name === "final") {
+          await page.clock.runFor(1_100);
+          await page.waitForSelector('[data-testid="fill-toast"]');
+          await page.locator('[data-testid="fill-toast"]').evaluate((e) => e.setAttribute("data-seen", "filled"));
+          await page.clock.runFor(ms - 1_100);
+        } else await page.clock.runFor(ms);
       }
       const strip = page.locator('[data-testid="route-strip"]');
       const got = await settle(async () => (await strip.getAttribute("data-steps")) + "|" + norm(await page.locator('[data-testid="trade-cta"]').innerText()), `${steps}|${button}`);
@@ -127,7 +139,10 @@ try {
         const line = norm(await page.locator('[data-testid="fill-toast-line"]').innerText());
         check(line === toast, `${tag}: toast "${line}", want "${toast}"`);
         check((await page.locator('[data-testid="fill-toast"] a').getAttribute("href")) === `https://solscan.io/tx/${"5".repeat(88)}`, `${tag}: toast link`);
-      } else check((await page.locator('[data-testid="fill-toast"]').count()) === 0, `${tag}: a toast before the fill`);
+        if (name === "final") check((await page.locator('[data-testid="fill-toast"][data-seen="filled"]').count()) === 1 && (await page.locator('[data-testid="fill-toast"]').count()) === 1, `${tag}: the toast fired again at Final`);
+      } else check((await page.locator('[data-testid="fill-toast"]').count()) === 0, `${tag}: a toast with no fill`);
+      // a buy that is not Filled shows no Filled anywhere on the box (a Filled before Not landed leaves none)
+      if (!button.startsWith("Filled")) check(!/\bFilled\b/.test(await page.locator('[data-testid="trade-box"]').innerText()), `${tag}: Filled on the box`);
       const m = await page.evaluate(MEASURE, { phone: w.isMobile, vw: w.viewport.width });
       check(!m.hscroll, `${tag}: horizontal scroll`);
       check(m.smallText.length === 0, `${tag}: text under 11 px: ${m.smallText.join(", ")}`);
