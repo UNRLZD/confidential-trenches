@@ -12,7 +12,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { budgetFromEnv } from "../src/limits/limits.ts";
 import { RPC_BATCH_MAX } from "../src/rpc/methods.ts";
-import { RPC_RESERVE } from "../src/rpc/rpc.ts";
+import { rpcLeastShare, RPC_RESERVE } from "../src/rpc/rpc.ts";
 import { PROXY_MIN_SHARE, PROXY_RESERVE } from "../src/proxy/proxy.ts";
 
 const SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), "redeploy.sh");
@@ -274,8 +274,13 @@ test("a HELPER_RELEASE or HELPER_COMMIT line not in the plain form, or written t
 
 // the rule as the helper's start applies it, each name with its own-read reserve
 const rules = {
-  RPC_BUDGET_SOLANA: { minShare: RPC_BATCH_MAX, perMethod: true, reserve: RPC_RESERVE.solana },
-  RPC_BUDGET_BASE: { minShare: RPC_BATCH_MAX, perMethod: true, reserve: RPC_RESERVE.base },
+  // card helper-gives-a-trade-its-reads: each route's least share is what one signing page draws from it (rpcLeastShare)
+  RPC_BUDGET_SOLANA: { minShare: rpcLeastShare("solana"), perMethod: true, reserve: RPC_RESERVE.solana },
+  RPC_BUDGET_SOLANA_DEVNET: { minShare: rpcLeastShare("solana-devnet"), perMethod: true, reserve: RPC_RESERVE["solana-devnet"] },
+  RPC_BUDGET_SOLANA_MARKS: { minShare: rpcLeastShare("solana-marks"), perMethod: true, reserve: RPC_RESERVE["solana-marks"] },
+  RPC_BUDGET_BASE: { minShare: rpcLeastShare("base"), perMethod: true, reserve: RPC_RESERVE.base },
+  RPC_BUDGET_ROBINHOOD: { minShare: rpcLeastShare("robinhood"), perMethod: true, reserve: RPC_RESERVE.robinhood },
+  RPC_BUDGET_NEAR: { minShare: rpcLeastShare("near"), perMethod: true, reserve: RPC_RESERVE.near },
   PROXY_BUDGET_JUPITER: { reserve: PROXY_RESERVE.jupiter },
   PROXY_BUDGET_RELAY: { reserve: PROXY_RESERVE.relay },
   // card deposit-sheet-oneclick-budget review LOW 3: 1Click's share is never under one deposit sheet open
@@ -290,6 +295,7 @@ const helperTakes = (name, v) => {
   }
 };
 const values = ["", "100,16", "100,10", "100,9", "100,5", "16,16", "4,2", "2,1", "100,16,40", "100,16,10", "100,16,9", "100,16,12", "100,16,13", "100,16,100", "100,16,101", "100,16,", "100,16,40,1",
+  "100,42", "100,41", "100,30", "100,29", "100,42,45", "100,42,44", "100,42,100", "100,30,30", "100,30,29", "46,42", "45,42", "500,42",
   "12,10", "13,10", "14,10", "34,1", "35,1", "36,1", "60,4", "38,4", "39,4", "600,4", "50,2", "3,2",
   "0,0", "05,4", "1e3,1", "-1,1", " 100,16", "100,16 ", "100;16", "１００,１６", "9999999,10", "10000000,10", "lots", `${SECRET},1`, "'100,16'"];
 // The drift check (fold 5): redeploy.sh's budget_ok, run on its own, agrees with budgetFromEnv for every name with a

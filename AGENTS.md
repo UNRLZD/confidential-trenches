@@ -138,6 +138,7 @@ commit under its pull request's title. A pull request never has to catch up with
 
 On a pull request and in the queue the verify and money gates run as `main` has them, so a pull request cannot loosen
 its own gate.
+The mutant sweeps and the README's fresh run are nightly on `main`, so no pull request waits on them.
 Every action is pinned to a commit sha. `scripts/ci/tests-run.test.mjs` fails when a tracked test file is run by
 no command.
 
