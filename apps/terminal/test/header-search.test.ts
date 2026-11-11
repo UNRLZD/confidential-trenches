@@ -44,6 +44,13 @@ test("addressChains: a base58 mint is Solana's, a 0x address the EVM chains', a 
   assert.deepEqual(addressChains("wrap.near"), ["near"]);
   assert.deepEqual(addressChains("token.v2.ref-finance.near"), ["near"]);
   assert.deepEqual(addressChains(NEAR_IMPLICIT), ["near"]);
+  // NEAR account id rules: 2 to 64 characters, no leading, trailing or doubled separator
+  const long = (n: number) => `${"a".repeat(n - ".near".length)}.near`;
+  assert.deepEqual(addressChains(long(64)), ["near"]);
+  assert.deepEqual(addressChains("a.near"), ["near"]);
+  assert.deepEqual(addressChains(`${NEAR_IMPLICIT}0`), []);
+  for (const q of [long(65), long(100), "-a.near", "a-.near", "a.-b.near", "a._b.near", "a__b.near", "a-.b.near", "A.near".replace("A", "!"), `${"a".repeat(40)}.${"b".repeat(30)}.near`]) assert.deepEqual(addressChains(q), [], q);
+  assert.deepEqual(addressChains("WRAP.NEAR"), ["near"], "an account id is lower case: the query is folded, as the plan's id is");
   for (const q of ["", "bonk", "$WIF", "pump", "So1111", `${SOL}0`.repeat(2), "0x1234", `0x${"g".repeat(40)}`, "near", ".near", "a..near", "So11111111111111111111111111111111111111O12"]) assert.deepEqual(addressChains(q), [], q);
 });
 
