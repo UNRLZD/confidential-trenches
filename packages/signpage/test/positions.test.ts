@@ -112,6 +112,47 @@ test("card wallets-found-in-one-read: the open buys' Ws are read first, the sold
   assert.deepEqual(got.positions.map((p) => [p.token, p.amount]), [[MINT, "3.5"]]);
 });
 
+test("card wallets-found-in-one-read: a pass stopped mid-way keeps each read it made, so the next pass never puts an older amount back before the W is read again (a partial sell's 0.4 stays, a sold-out row stays gone)", async () => {
+  const costs = { [W1]: rec(MINT, "1"), [W2]: rec(MINT, "2"), [W3]: rec(MINT2, "3") };
+  const memo = passMemo();
+  // pass A, whole: W1 1, W2 2, W3 3
+  await positionsPass(reads({ [W1]: { [MINT]: 1_000_000n }, [W2]: { [MINT]: 2_000_000n }, [W3]: { [MINT2]: 3_000_000_000n } }, { costs }), memo);
+  const now = { [W1]: { [MINT]: 400_000n }, [W2]: { [MINT]: 2_000_000n }, [W3]: { [MINT2]: 0n } } as Record<string, Record<string, bigint>>;
+  const run = (order: string[], stopAfter: number | null) => {
+    const stop = new AbortController();
+    const shown: [string, string][][] = [];
+    const r: PositionsReads = {
+      ...reads({}, { costs }),
+      signal: stop.signal,
+      wallets: async (only, o = {}) => {
+        const out: FoundWallet[] = [];
+        for (const address of order.filter((a) => only.has(a))) {
+          if (out.length === stopAfter) {
+            stop.abort(); // a sale's read preempts the pass
+            stop.signal.throwIfAborted();
+          }
+          const w = { address, tokens: new Map(Object.entries(now[address]!)) };
+          out.push(w);
+          o.each?.(w);
+        }
+        return out;
+      },
+      shown: (ps) => void shown.push(ps.map((p) => [p.token, p.amount])),
+    };
+    return { r, shown };
+  };
+  // pass B: W1 (a partial sell landed: 0.4) and W3 (sold out: 0) read, then stopped
+  const b = run([W1, W3, W2], 2);
+  await assert.rejects(positionsPass(b.r, memo));
+  assert.deepEqual(b.shown.at(-1), [[MINT, "2.4"]], "pass B showed W1's 0.4 and W3 gone");
+  // pass C reads W2 first: W1 and W3 hold what pass B read, never pass A's
+  const c = run([W2, W1, W3], null);
+  const got = await positionsPass(c.r, memo);
+  assert.equal(c.shown.length, 3);
+  for (const ps of c.shown) assert.deepEqual(ps, [[MINT, "2.4"]], `no row moves back to an older read: ${JSON.stringify(c.shown)}`);
+  assert.deepEqual(got.positions.map((p) => [p.token, p.amount]), [[MINT, "2.4"]]);
+});
+
 test("card wallets-found-in-one-read: the cache gives the rows a pass shows while it runs, and a state read meanwhile sees them", async () => {
   let release!: () => void;
   const c = positionsCache(async (_m, run) => {

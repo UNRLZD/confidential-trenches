@@ -304,7 +304,20 @@ export async function positionsPass(r: PositionsReads, memo: PassMemo = passMemo
     ? (w: FoundWallet): void => {
         if (r.signal?.aborted || !soFar.has(w.address)) return;
         soFar.set(w.address, w.tokens);
-        r.shown!(positionsOf(tally(soFar, true).held));
+        const t = tally(soFar, true);
+        // W's read is the memo's at once, so a pass stopped after it (a sale's read preempts the pass) leaves the next
+        // pass W's amount as read, never an older one before W is read again
+        if (w.tokens !== null) for (const { address, mint } of records) {
+          if (address !== w.address) continue;
+          const k = KEY(address, mint);
+          const h = t.held.get(k);
+          const d = memo.decimals.get(mint);
+          const a = h === undefined ? null : typeof h.amount === "bigint" ? h.amount : d === undefined ? null : base(h.amount, d);
+          if (a !== null && a > 0n) memo.held.set(k, a);
+          else if (h === undefined || a !== null) memo.held.delete(k);
+          if (t.listed.has(k)) memo.listed.add(k);
+        }
+        r.shown!(positionsOf(t.held));
       }
     : undefined;
   let found: readonly FoundWallet[] | null = null;
