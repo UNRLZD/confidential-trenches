@@ -329,7 +329,7 @@ function exactQuoteInNet(budget: bigint, p: bigint, c: bigint): bigint {
  * buys from the pool-to-be that migration deposits (base = the curve's token account balance − R, quote = real quote
  * reserves + curveNet, less Global.pool_migration_fee on a SOL curve) floor((leg − 1) × base / (quote + leg − 1)),
  * the leg shaved until the whole debit fits; out = R + that. Sell: gross = amount × vQ / (vT + amount), less the ceil
- * protocol and creator fees.
+ * protocol and creator fees; 0 when gross is more than the curve's real quote reserves.
  */
 export function solanaCurveOut(side: "buy" | "sell", amount: bigint, curve: SolanaBondingCurve, global: SolanaPumpGlobal, feeConfig: SolanaFeeConfig, mintSupply: bigint, curveBaseBalance: bigint): SolanaPoolOut {
   if (curve.complete) throw new Error("curve complete");
@@ -371,8 +371,13 @@ export function solanaCurveOut(side: "buy" | "sell", amount: bigint, curve: Sola
     return { out: R + legTokens, spotOut };
   }
   const gross = (amount * vQ) / (vT + amount);
-  const out = gross - fees(gross);
   const spot = (amount * vQ) / vT;
+  // a sell takes gross out of the curve's real SOL as well as its virtual SOL (pump-public-docs PUMP_PROGRAM_README:
+  // "decrease with the same lamports amount"), and a sale past it fails whole (Overflow 6024): on a Mayhem curve, whose
+  // agent's tokens were never bought, it can hold less than a sale's gross. Such a sale pays nothing, as a PumpSwap sale
+  // past the pool's real quote does (solanaPumpSwapOut)
+  if (gross > curve.realQuoteReserves) return { out: 0n, spotOut: spot - fees(spot) };
+  const out = gross - fees(gross);
   return { out: out > 0n ? out : 0n, spotOut: spot - fees(spot) };
 }
 

@@ -696,7 +696,7 @@ async function buyRun(h: PoolBuyHost, ask: PoolAsk, at: { fault?: unknown }): Pr
   } catch (e) {
     if (e instanceof Refused) return { error: e.code };
     if (e instanceof PoolRuleRefused) return { error: "quote_check_failed" };
-    // both RPCs read a coin this build does not trade (a Mayhem curve or pool): refused by name at the venue's read,
+    // both RPCs read a coin this build does not trade (a curve quoted in another mint): refused by name at the venue's read,
     // before the claim, so the app shows it as one the pool cannot buy, never a Retry that cannot work
     if (e instanceof SolanaPoolBuyError && e.code === "venue_not_built") return { error: "venue_not_built" };
     // a provider read that still fails after the page's own retry, before W signs: "not now" (card pool-read-down),
