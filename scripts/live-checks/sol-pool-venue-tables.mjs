@@ -191,9 +191,17 @@ async function checkRow({ cluster, venue, k, newest, rec, fetchFn, call }) {
     if (newest) {
       // the kit's own list for this program, pool and range, from the venue's global account read on the same two RPCs
       const tv = await kit.readSolanaPoolTableVenue(call, venue);
-      const own = kit.solanaPoolVenueTableList({ program: rec.program_id, pool: rec.pool }, tv, g.pages);
-      const p = tableProblems(reads[0], own);
-      say(p.length === 0, `the newest generation holds exactly the kit's list for this program, pool and pages (${own.length} addresses, in order)${p.length ? `: ${p.join("; ")}: the venue's accounts changed, make the next generation (venue-table.mjs)` : ""}`);
+      let own = null;
+      try {
+        own = kit.solanaPoolVenueTableList({ program: rec.program_id, pool: rec.pool }, tv, g.pages);
+      } catch (e) {
+        // the venue's accounts as they are now and these pages no longer fit one table: the venue gained an account
+        say(false, `the newest generation holds exactly the kit's list for this program, pool and pages: the kit's list for them no longer fits one table (${String(e.message).slice(0, 80)}): the venue's accounts changed, make the next generation (venue-table.mjs)`);
+      }
+      if (own) {
+        const p = tableProblems(reads[0], own);
+        say(p.length === 0, `the newest generation holds exactly the kit's list for this program, pool and pages (${own.length} addresses, in order)${p.length ? `: ${p.join("; ")}: the venue's accounts changed, make the next generation (venue-table.mjs)` : ""}`);
+      }
     }
     for (const t of g.txs) {
       const got = await Promise.all(TX_RPCS[cluster].map((url) => read(fetchFn, url, "getTransaction", [t.signature, { encoding: "base64", commitment: "finalized", maxSupportedTransactionVersion: 0 }])));
