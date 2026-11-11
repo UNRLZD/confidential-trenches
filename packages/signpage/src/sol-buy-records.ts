@@ -18,9 +18,13 @@
 // - The record written is marked `rebuilt`: it is one provider's word (W's history as the helper answered it), so the
 //   rent back counts it as no record and holds (pool-sell.ts rentBackOwed); the rows and which W a sale reads stay on
 //   it, and a sale sells only what both RPCs read W holds. A buy on this device writes its own record over it, unmarked.
-// - A W whose read is final with no buy (the reader's "none": its whole history read, its oldest four returned, none
-//   a buy) gets a "read, no buy" mark (BUY_NONE_KEY) and is not read again; never for a failed, cut short or pruned
-//   read, which is read again at the next run.
+// - A W whose read is final with no buy (the reader's "none": the pool's own release naming W read, and no buy) gets a
+//   "read, no buy" mark (BUY_NONE_KEY) and is not read again; never for a failed, cut short or pruned read.
+// - A W the reader cannot tell (null: no release read yet, past its bounds, a list cut short) is read once a page load:
+//   this page does not read it again, a run after a sale or a later state read's included (review of ae2cfe28, P2).
+//   Its cost a load: one history read, at most SOL_BUY_PAGES getSignaturesForAddress and SOL_BUY_TXS getTransaction
+//   (buy-wallets.ts), on the rebuild's own gate and the host's pass turn; 0 at a run after a sale. A W whose read
+//   failed (a provider fault, a throttle) is read again at the next run, on that gate.
 // - Only the buy record is written: never a cost record (owed/cost-sol), whose amount W received would show a W that
 //   sold since at that amount. A sold W gets its buy record as any other: it holds none of the token now, so the
 //   positions show nothing for it and a sale reads 0 on it.
@@ -89,11 +93,13 @@ export function solBuyRecords(d: SolBuyRecordsDeps): SolBuyRecords {
     again = false;
   };
 
+  // the Ws this page load read whole with no answer (see the top): never read again before the next load or sign-in
+  let unanswered = new Set<string>();
   const once = async (signal: AbortSignal): Promise<void> => {
     const ws = await d.wallets(signal);
     if (ws.length === 0) return;
     const had = await d.done();
-    const todo = [...new Set(ws)].filter((a) => !had.has(a));
+    const todo = [...new Set(ws)].filter((a) => !had.has(a) && !unanswered.has(a));
     for (let i = todo.length - 1; i > 0; i--) {
       const r = pick(i + 1);
       if (!Number.isInteger(r) || r < 0 || r > i) throw new Error("pick: not an index");
@@ -110,7 +116,8 @@ export function solBuyRecords(d: SolBuyRecordsDeps): SolBuyRecords {
         continue;
       }
       signal.throwIfAborted();
-      if (buy !== null && (await d.write(w, buy))) d.wrote();
+      if (buy === null) unanswered.add(w);
+      else if (await d.write(w, buy)) d.wrote();
     }
   };
 
@@ -145,6 +152,7 @@ export function solBuyRecords(d: SolBuyRecordsDeps): SolBuyRecords {
     stop() {
       halt("signed out");
       missed = false;
+      unanswered = new Set();
     },
     hold() {
       holds++;

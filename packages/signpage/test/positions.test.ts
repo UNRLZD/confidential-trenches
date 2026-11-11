@@ -517,6 +517,26 @@ test("the cache: a sell's own read stops the running pass and is the next pass's
   assert.deepEqual(c.get(), [P("fed")]);
 });
 
+// Review of ae2cfe28, item 2: the background read a sell's read also holds (preempted: the buy records' rebuild) gets
+// its hold's end back once, a sign out (clear) between included; without it the rebuild stays held for good after a
+// sale whose read spans a sign out, and no later sign-in's rebuild runs
+test("the cache: the hold a sell's read takes on the other background read is given back once, across a sign out too", async () => {
+  let held = 0;
+  let ended = 0;
+  const c = positionsCache(async () => ({ positions: [], whole: true }), { preempted: () => (held++, () => void ended++) });
+  c.first();
+  const a = c.preempt();
+  c.clear();
+  a.release();
+  a.feed([]);
+  assert.deepEqual([held, ended], [1, 1], "given back across the sign out, once");
+  const b = c.preempt();
+  b.feed([]);
+  b.release();
+  assert.deepEqual([held, ended], [2, 2], "and once on a plain end");
+  await c.idle();
+});
+
 test("withPositions: signed in with a pass, the state carries them, valid at kit 1.9 and at kit 1.8 (decimals kept), kit 1.7 without decimals; a state past the answer's bound goes as it was", () => {
   const Ps: Position[] = [{ chain: "solana", token: MINT, amount: "3.750001", cost: "0", wallets: [W1, W2], decimals: 6 }];
   const s = withPositions(SIGNED_IN, Ps);

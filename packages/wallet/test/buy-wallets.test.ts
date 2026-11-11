@@ -1023,7 +1023,7 @@ test("item 6: a sale's wallet list on the mainnet pace: one finder round per pas
 }));
 
 // ---------- a W's buy from its own history (card restore-rebuilds-buy-records) ----------
-import { SOL_BUY_PAGE, SOL_BUY_PAGES, SOL_BUY_TXS, solanaBuyIn, solanaBuyReader, solanaHelperBuys } from "../src/pool/buy-wallets.ts";
+import { SOL_BUY_PAGE, SOL_BUY_PAGES, SOL_BUY_TXS, solanaBuyIn, solanaBuyReader, solanaHelperBuys, solanaReleaseIn } from "../src/pool/buy-wallets.ts";
 
 const BUY_POOL = key32(40), FEE_PAYER = key32(41), STRANGER_KEY = key32(42), VENUE = key32(43);
 const WSOL = "So11111111111111111111111111111111111111112";
@@ -1058,6 +1058,13 @@ test("a W's buy is read from its own transaction: W signs it, the pinned pool's 
   assert.equal(solanaBuyIn(txOf({ signers: [FEE_PAYER, W], ix: [{ program: BUY_POOL, to: W, tag: 3 }], post: [tb(4, MINT_A, W, 5n, VENUE)] }), W, BUY_POOL), null, "not a token program");
   assert.equal(solanaBuyIn(txOf({ signers: [FEE_PAYER, W], ix: [{ program: BUY_POOL, to: W, tag: 3 }], pre: [tb(4, MINT_A, W, 9n)], post: [tb(4, MINT_A, W, 5n)] }), W, BUY_POOL), null, "a sale: the token falls");
   assert.equal(solanaBuyIn(null, W, BUY_POOL), null);
+  // the pool's release naming W: tag 2 or 3, landed, W a signer
+  assert.equal(solanaReleaseIn(txOf({ signers: [FEE_PAYER, W], ix: [{ program: BUY_POOL, to: W, tag: 2 }], post: [] }), W, BUY_POOL), true, "a plain release");
+  assert.equal(solanaReleaseIn(buyTx(), W, BUY_POOL), true, "a release and buy");
+  assert.equal(solanaReleaseIn(txOf({ signers: [STRANGER_KEY], keys: [W], ix: [{ program: BUY_POOL, to: W, tag: 2 }], post: [] }), W, BUY_POOL), false, "a stranger's tx dressed as one");
+  assert.equal(solanaReleaseIn({ ...buyTx(), meta: { ...buyTx().meta, err: { x: 1 } } }, W, BUY_POOL), false, "failed");
+  assert.equal(solanaReleaseIn(txOf({ signers: [FEE_PAYER, W], ix: [{ program: BUY_POOL, to: W, tag: 1 }], post: [] }), W, BUY_POOL), false, "another tag");
+  assert.equal(solanaReleaseIn(txOf({ signers: [FEE_PAYER, W], ix: [{ program: VENUE, to: W, tag: 2 }], post: [] }), W, BUY_POOL), false, "another program");
 });
 
 /** A fake route of W's history: its signatures newest first, each with its transaction; every request logged. */
@@ -1099,7 +1106,7 @@ test("a W's buy from its history: its oldest successful transactions, past a fai
   }
 });
 
-test("a W's history the reader cannot tell is no buy: none at all, a listed transaction the route no longer returns (the read ends there, a buy after it unread), past SOL_BUY_PAGES pages; past SOL_BUY_TXS sends first is final", async () => {
+test("a W's history the reader cannot tell is no buy: none at all, a listed transaction the route no longer returns (the read ends there, a buy after it unread), past SOL_BUY_PAGES pages, no pool release read; the pool's release with no buy is final", async () => {
   const drop = (n: number) => ({ signature: `drop${n}`, err: null });
   const dropTx = txOf({ signers: [STRANGER_KEY], keys: [W], post: [tb(2, MINT_B, W, 9n)] });
   const cases: [string, { sigs: { signature: string; err: unknown }[]; txs: Map<string, unknown> }, number][] = [
@@ -1116,15 +1123,24 @@ test("a W's history the reader cannot tell is no buy: none at all, a listed tran
     assert.equal(await solanaBuyReader(rpc, BUY_POOL).read(W), null, what);
     assert.equal(log.length, calls, `${what}: ${log.length} calls`);
   }
-  // review of 42a99f81 (a): W's whole history read and all of its oldest four returned, none a buy: final ("none"); a
-  // buy after them (flooded first) is never among them
-  const four = { sigs: Array.from({ length: SOL_BUY_TXS }, (_, i) => drop(i)), txs: new Map<string, unknown>(Array.from({ length: SOL_BUY_TXS }, (_, i) => [`drop${i}`, dropTx] as [string, unknown])) };
-  const flooded = { sigs: [{ signature: "buy", err: null }, ...four.sigs], txs: new Map<string, unknown>([["buy", buyTx()], ...four.txs]) };
-  for (const [what, h] of [["four sends", four], ["flooded first", flooded]] as const) {
+  // review of ae2cfe28, P2: "none" only once the pool's release naming W is read and holds no buy (W's note spent). A
+  // buy that failed on chain names W, so sends may come before the retry's buy: read past them, up to SOL_BUY_TXS
+  const sends = (n: number) => ({ sigs: Array.from({ length: n }, (_, i) => drop(i)), txs: new Map<string, unknown>(Array.from({ length: n }, (_, i) => [`drop${i}`, dropTx] as [string, unknown])) });
+  const after = (h: ReturnType<typeof sends>, sig: string, tx: unknown) => ({ sigs: [{ signature: sig, err: null }, ...h.sigs], txs: new Map<string, unknown>([[sig, tx], ...h.txs]) });
+  const plainRelease = txOf({ signers: [FEE_PAYER, W], ix: [{ program: BUY_POOL, to: W, tag: 2 }], post: [] });
+  const readOf = async (h: ReturnType<typeof sends>) => {
     const { rpc, log } = historyRpc(new Map([[W, h]]));
-    assert.equal(await solanaBuyReader(rpc, BUY_POOL).read(W), "none", what);
-    assert.equal(log.length, 1 + SOL_BUY_TXS, `${what}: ${log.length} calls`);
-  }
+    return { got: await solanaBuyReader(rpc, BUY_POOL).read(W), calls: log.length };
+  };
+  // a failed buy, then four sends, then the retry's buy: its record back
+  const failedFirst = after({ sigs: [...sends(4).sigs, { signature: "failed", err: { x: 1 } }], txs: sends(4).txs }, "buy", buyTx());
+  assert.deepEqual(await readOf(failedFirst), { got: { mint: MINT_A, program: SOLANA_TOKEN_PROGRAM }, calls: 1 + 5 }, "four sends then the buy");
+  // no pool release among those read: null, never "none" (SOL_BUY_TXS sends; a provider's list cut short of the release)
+  assert.deepEqual(await readOf(sends(SOL_BUY_TXS)), { got: null, calls: 1 + SOL_BUY_TXS }, "SOL_BUY_TXS sends, no release");
+  assert.deepEqual(await readOf(sends(2)), { got: null, calls: 3 }, "a shortened list");
+  assert.deepEqual(await readOf(after(sends(SOL_BUY_TXS), "buy", buyTx())), { got: null, calls: 1 + SOL_BUY_TXS }, "the buy past the bound");
+  // the pool's plain release naming W, after two sends: W's note spent with no buy, for good
+  assert.deepEqual(await readOf(after(sends(2), "release", plainRelease)), { got: "none", calls: 1 + 3 }, "the release, no buy");
   // within the pages: the buy past a full first page is found
   const long = new Map([[W, { sigs: [...Array.from({ length: SOL_BUY_PAGE + 2 }, (_, i) => drop(i)).map((x, i) => (i === SOL_BUY_PAGE + 1 ? { signature: "buy", err: null } : x))], txs: new Map<string, unknown>([["buy", buyTx()]]) }]]);
   const l2 = historyRpc(long);
@@ -1145,6 +1161,26 @@ test("a buy read's answer clears its gate's doubt after a 429", async () => {
   assert.equal(gate.suspect(), true, "the 429 counted");
   assert.equal(await r.read(W), null);
   assert.equal(gate.suspect(), false, "the next read's answer cleared the doubt");
+});
+
+// Review of ae2cfe28, P3: the doubt clears on a whole read, not on one call's answer. A provider that throttles
+// getTransaction alone while it answers getSignaturesForAddress stays in doubt from its first 429, so past the bound
+// the reads are refused without asking; a clear at each answer restarted the doubt at every W and asked it forever
+test("a provider throttling getTransaction alone stays in doubt across Ws, and past the bound is refused without asking", async () => {
+  let t = 0;
+  const gate = new ThrottleGate({ now: () => t });
+  const asked: string[] = [];
+  const rpc = (async (m: string) => {
+    asked.push(m);
+    return m === "getSignaturesForAddress" ? [{ signature: "s", err: null }] : Promise.reject(new Error("HTTP 429"));
+  }) as unknown as SolanaRpc;
+  const r = solanaBuyReader(rpc, BUY_POOL, { gate, sleep: async (ms) => void (t += ms) });
+  for (let i = 0; i < 12; i++) await r.read(W).catch(() => {});
+  assert.ok(gate.doubtMs() > 0, "in doubt");
+  assert.ok(gate.doubtMs() >= t - 10_000, `the doubt runs from the first 429: ${gate.doubtMs()} of ${t} ms`);
+  const before = asked.length;
+  await assert.rejects(r.read(W), /429/);
+  assert.equal(asked.length, before, "past the bound: refused without asking");
 });
 
 // Review of 42a99f81, P2: the buy reads share the finder's paced queue on the helper (one budget at the provider) but
