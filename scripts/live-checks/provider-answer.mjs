@@ -172,3 +172,10 @@ export function preflightRefuses(url, p, origin) {
 export function verdictOf(bad, quiet) {
   return bad ? "FAIL" : quiet ? "INCONCLUSIVE" : "PASS";
 }
+
+/** The hosts a read's record names as not knowing a fresh block yet on the check's last read (`lagging`, written by a
+ *  child that read under the wallet's lag retries: packages/wallet/scripts/lag-hosts.ts), or null. Such a read is
+ *  INCONCLUSIVE naming them (laggingLine), never FAIL: a provider behind a block another provider just reported is the
+ *  provider's moment, not the build's (release 116's sign live run 43024665974). */
+export const laggingOf = (x) => (Array.isArray(x?.lagging) && x.lagging.length > 0 && x.lagging.every((h) => typeof h === "string" && h !== "") ? x.lagging : null);
+export const laggingLine = (what, hosts) => `--  ${what}: ${hosts.join(" and ")} did not know the fresh block yet on the last lag retry: INCONCLUSIVE`;

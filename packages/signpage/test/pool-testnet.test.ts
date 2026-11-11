@@ -516,9 +516,16 @@ test("review P2-1 and P2-2 of a34c1626, P2-1 and P3-3 of e3489b3b: every Solana 
   assert.equal(calls.filter((c) => c.includes("settleRpcs(kind)")).length, 1, "the buy's alone");
   // each site's signal is the stop's when the call began: four takes, and the stop read elsewhere only where a trade's
   // reads wait before a signature (card start-reads-wait-out-a-throttle): the buy's and the sell's host, each taken when
-  // the host is made, and a pool kind's request (outSignal), each ending its waits at the next sign out
-  assert.equal([...src.matchAll(/const signal = solanaStop\.signal;/g)].length, 4);
-  assert.equal([...src.matchAll(/ signal: solanaStop\.signal,/g)].length, 2);
+  // the host is made, and a pool kind's request (outSignal), each ending its waits at the next sign out. The sell host's
+  // one take also stops its sale's finder list (card wallets-found-in-one-read, review P3 of 8da6b97f): the host's
+  // signal and the list's reads are the same stop, taken once when the host is made
+  assert.equal([...src.matchAll(/const signal = solanaStop\.signal;/g)].length, 5, "the four settles' and the sell host's");
+  const sellHost = src.slice(src.indexOf("const sellHost = "), src.indexOf("const sell = (over.tradeKinds?.sell"));
+  assert.equal([...sellHost.matchAll(/const signal = solanaStop\.signal;/g)].length, 1, "the sell host's take, when the host is made");
+  assert.ok(sellHost.indexOf("const signal = solanaStop.signal;") < sellHost.indexOf("return {"), "taken before the host's first wait");
+  assert.match(sellHost, /await poolBuyWallets\(await store\(\), r, ask, signal\)/, "the sale's finder list on that stop");
+  assert.match(sellHost, /\n {6}signal,\n/, "the host's own signal the same stop");
+  assert.equal([...src.matchAll(/ signal: solanaStop\.signal,/g)].length, 1, "the buy host's");
   assert.equal([...src.matchAll(/outSignal: \(\) => solanaStop\.signal,/g)].length, 1);
   // the Solana deposit host's stop: its waits between attempts end at a sign out's tap (review of f0e7bd38, P2-1)
   assert.equal([...src.matchAll(/ stop: solanaStop\.signal,/g)].length, 1);

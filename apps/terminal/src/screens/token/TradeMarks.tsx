@@ -160,12 +160,15 @@ export function TradeMarks({ chart, bars, tf, factor, symbol, phone, version, tr
   );
 }
 
+/** A mark's card, placed by its transform as the marks are: a live read that moves its mark (a new axis top, a wider
+ *  axis label) moves the card with it and no layout box (left and top stay 0). Placed by left and top, the open card
+ *  was a layout shift on every such move (live app run 43025383719, phone: div.tm-card 148,272 -> 148,244). */
 function Card({ d, symbol, rect, r }: { d: Drawn; symbol: string; rect: Rect; r: number }) {
   const m = d.mark;
   const left = d.x > rect.width - 190;
   const top = Math.max(40, Math.min(rect.height - 40, d.y));
   return (
-    <div className="tm-card" data-testid="trade-mark-card" data-side={m.side} data-h={left ? "l" : "r"} style={{ left: left ? d.x - r : d.x + r, top }}>
+    <div className="tm-card" data-testid="trade-mark-card" data-side={m.side} data-h={left ? "l" : "r"} style={{ transform: `translate(${left ? d.x - r : d.x + r}px, ${top}px) translate(${left ? "-100%" : "0"}, -50%)` }}>
       <span className="tm-cs">{m.side === "buy" ? WORDS.buy.text : WORDS.sell.text}</span>
       <span className="tm-cn">{usd(m.usd.toFixed(8))}</span>
       <span className="tm-cn tm-cw">

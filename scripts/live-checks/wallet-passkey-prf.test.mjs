@@ -525,3 +525,28 @@ test("recorded live run on release 111: the helper's 429s on display reads WARN,
   r.errors.push("console: Refused to connect to 'https://evil.example/' because it violates the following Content Security Policy directive");
   assert.ok(bad(r).some((l) => l.startsWith("BAD no page error or CSP violation (1): console: Refused to connect")), bad(r).join("\n"));
 });
+
+// Sign live run 43026641635 (job 130543092582): "BAD no page error or CSP violation (9)", six candles and three lists
+// 429s from the helper, the framed terminal's market reads in this check's own several pages of one browser (the helper's
+// window is per address, 120 in 10 s; no other job of the run logged a 429). Each such line matched by a 429 response
+// the page read on that route is the run's load: INCONCLUSIVE naming the routes, never FAIL and never a pass.
+const CANDLES = "https://ct-api.unrealized.trade/v1/market/candles", LISTS = "https://ct-api.unrealized.trade/v1/market/lists";
+const line429 = (u) => `console: Failed to load resource: the server responded with a status of 429 () (${u})`;
+const withMarket = (marketRefused, errors) => {
+  const r = clone(answers.good);
+  r.marketRefused = marketRefused;
+  r.errors.push(...errors);
+  return judge(r);
+};
+test("the helper's market-read 429s that the page's responses bear out are INCONCLUSIVE, named; any other stays BAD", () => {
+  const seen = [...Array(6).fill({ url: CANDLES, status: 429, retryAfter: "3" }), ...Array(3).fill({ url: LISTS, status: 429, retryAfter: "3" })];
+  const run = withMarket(seen, [...Array(6).fill(line429(CANDLES)), ...Array(3).fill(line429(LISTS))]);
+  assert.equal(run.verdict, "INCONCLUSIVE", run.lines.filter((l) => !l.startsWith("ok")).join("\n"));
+  assert.ok(run.lines.includes("INCONCLUSIVE the helper refused the terminal's market reads 429 (/v1/market/candles 6, /v1/market/lists 3): its window for this run's own pages, not the page's error"), run.lines.join("\n"));
+  assert.equal(withMarket([], [line429(CANDLES)]).verdict, "FAIL", "a console 429 with no 429 response read under it");
+  assert.equal(withMarket(seen.slice(0, 1), [line429(CANDLES), line429(CANDLES)]).verdict, "FAIL", "more lines than responses");
+  assert.equal(withMarket([{ url: CANDLES, status: 429 }], [line429("https://ct-api.unrealized.trade/v1/market/token")]).verdict, "FAIL", "another market route");
+  assert.equal(withMarket([{ url: CANDLES, status: 429 }], [line429(CANDLES), "pageerror: boom"]).verdict, "FAIL", "a page error beside it");
+  assert.equal(withMarket([{ url: CANDLES, status: 429 }], ["console: Failed to load resource: the server responded with a status of 503 () (https://ct-api.unrealized.trade/v1/market/candles)"]).verdict, "FAIL", "a 503 is no window");
+  assert.equal(judge(answers.good).verdict, "PASS");
+});

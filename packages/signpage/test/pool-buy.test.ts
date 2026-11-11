@@ -176,6 +176,9 @@ type Plant = {
   sizeSkewAlways?: boolean;
   /** RPC p's finalized slot at its i-th getSlot (500 when not given; the buy's transaction lands at TX_SLOT) */
   finalizedSlot?: (p: 0 | 1, i: number) => number;
+  /** the coin is a Mayhem coin on these RPCs: its curve's is_mayhem_mode (byte 81) or its PumpSwap pool's (byte 243)
+   *  set in every read of it */
+  mayhemOn?: readonly (0 | 1)[];
 };
 /** The slot the buy's transaction lands at, as getTransaction names it. */
 const TX_SLOT = 400;
@@ -238,7 +241,17 @@ async function world(plant: Plant = {}, proof = readyProof()): Promise<World> {
   });
   const txSlot = (p: 0 | 1): number | undefined => (p === 1 ? (plant.noTxSlotOn1 ? undefined : plant.txSlotOn1 ?? TX_SLOT) : TX_SLOT);
   const rpc = (p: 0 | 1): SolanaRpc => {
-    const venue = replay(fx[coin], p, plant.venueOff && p === 1 ? (list, ans) => {
+    const mayhem = plant.mayhemOn?.includes(p) ? (list: string[], ans: any) => {
+      for (const [k, a] of list.entries()) {
+        const at = s.venue.kind === "pump-curve" && a === s.venue.curve ? 81 : s.venue.kind === "pumpswap" && a === s.venue.pool ? 243 : -1;
+        if (at < 0 || !ans.value[k]) continue;
+        const d = base64.decode(ans.value[k].data[0]);
+        d[at] = 1;
+        ans.value[k].data[0] = base64.encode(d);
+      }
+      return ans;
+    } : undefined;
+    const venue = replay(fx[coin], p, mayhem ?? (plant.venueOff && p === 1 ? (list, ans) => {
       const k = list.indexOf(s.venue.kind === "pump-curve" ? s.venue.curve : "");
       if (k >= 0 && ans.value[k]) {
         const d = base64.decode(ans.value[k].data[0]);
@@ -246,7 +259,7 @@ async function world(plant: Plant = {}, proof = readyProof()): Promise<World> {
         ans.value[k].data[0] = base64.encode(d);
       }
       return ans;
-    } : undefined);
+    } : undefined));
     return (async (method: string, params: readonly unknown[]) => {
       const finalized = (params[1] as { commitment?: string } | undefined)?.commitment === "finalized";
       // the own-spend reads at finalized (pool-withdraw.ts spendOwner) are logged apart from the read-back's
@@ -506,6 +519,23 @@ test("a venue with no pinned table is refused venue_not_pinned once the referenc
   // venue's read on both RPCs after them)
   assert.equal(w.multi.length, 4, JSON.stringify(w.multi));
   assert.equal(new Set(w.multi.map((l) => l.join())).size, 2);
+});
+// Card sol-pool-buys-mayhem-coins: a coin this build cannot trade (a Mayhem curve or pool, as the first mainnet buy met
+// on 11 Nov 13:43Z) is refused venue_not_built once both RPCs read it so, before the claim: never "failed", nothing
+// claimed, taken, seeded, signed or sent. One RPC's word alone is a disagreement, refused as before (the reference's two
+// reads already differ: quote_check_failed), never venue_not_built
+test("a Mayhem coin, on the curve or on PumpSwap, is refused venue_not_built before the claim; one RPC's word alone is not", async () => {
+  for (const coin of ["pump", "pumpswap"] as const) {
+    const ask = coin === "pump" ? ASK : ASK_PS;
+    const w = await world({ coin, mayhemOn: [0, 1] });
+    assert.deepEqual(await runPoolBuy(w.host, ask), { error: "venue_not_built" }, coin);
+    nothingMoved(w);
+    for (const one of [0, 1] as const) {
+      const x = await world({ coin, mayhemOn: [one] });
+      assert.deepEqual(await runPoolBuy(x.host, ask), { error: "quote_check_failed" }, `${coin} on RPC ${one}`);
+      nothingMoved(x);
+    }
+  }
 });
 test("no table pinned, or a pin that is not a list of addresses: refused not_allowed before any read (mutant A2)", async () => {
   for (const tables of [{}, Object.create({ "pump-curve": [s0.tableAddr] }), { "pump-curve": s0.tableAddr }, { "pump-curve": [] }, { "pump-curve": [7] }, { "pump-curve": [s0.tableAddr], pumpswap: [{}] }, { "pump-curve": [s0.tableAddr], pumpswap: [] }]) {
