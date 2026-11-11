@@ -194,14 +194,26 @@ export function keptPositions(v: unknown, ...bought: unknown[]): Position[] | nu
 export function keptListed(v: unknown): Map<string, Map<string, bigint>> | null {
   const k = v as Partial<KeptPass> | null;
   if (typeof k !== "object" || k === null || !Array.isArray(k.listed)) return null;
+  return listingOf(k.listed, (key) => {
+    const a = (k.held as Record<string, unknown> | undefined)?.[key];
+    return typeof a === "string" && BASE.test(a) ? BigInt(a) : undefined;
+  });
+}
+/** The memo's listing, as keptListed reads a kept pass: each "W mint" the finder listed, at the amount this tab last
+ *  read (0 when gone). Null before the memo has loaded the kept pass. The memo is loaded from the kept pass and every
+ *  read of this tab writes it before the tab keeps a pass (each W's read as it comes; a pass's end), so it is never older
+ *  than the kept pass, and a read made after that pass stands over it (review P2 of 8da6b97f). */
+export function memoListed(memo: PassMemo): Map<string, Map<string, bigint>> | null {
+  return memo.loaded ? listingOf(memo.listed, (key) => memo.held.get(key)) : null;
+}
+function listingOf(keys: Iterable<unknown>, held: (key: string) => bigint | undefined): Map<string, Map<string, bigint>> {
   const out = new Map<string, Map<string, bigint>>();
-  for (const key of k.listed) {
+  for (const key of keys) {
     if (typeof key !== "string") continue;
     const [w, m, ...rest] = key.split(" ");
     if (!w || !m || rest.length > 0) continue;
-    const a = (k.held as Record<string, unknown> | undefined)?.[key];
     if (!out.has(w)) out.set(w, new Map());
-    out.get(w)!.set(m, typeof a === "string" && BASE.test(a) ? BigInt(a) : 0n);
+    out.get(w)!.set(m, held(key) ?? 0n);
   }
   return out;
 }
@@ -220,9 +232,10 @@ function loadMemo(memo: PassMemo, v: unknown): void {
 /** One pass: the positions of this device's buys, each from the finder's read of its W (see the header). */
 export async function positionsPass(r: PositionsReads, memo: PassMemo = passMemo()): Promise<PassResult> {
   const stop = (): void => r.signal?.throwIfAborted();
+  // loaded once the kept pass is in it, so memoListed never gives a memo half loaded
   if (!memo.loaded) {
-    memo.loaded = true;
     loadMemo(memo, await r.kept?.().catch(() => null));
+    memo.loaded = true;
   }
   let whole = true;
   // each looked for by its trade: "W mint" and the sell or run that asks for it (tally's `look`)
@@ -472,6 +485,8 @@ export type PositionsCache = {
   /** A sell's own read of the Ws begins: the running pass stops, a booked retry is dropped, and no pass runs until the
    *  hold ends (its reads never share the finder's queue with the sell's). See PassHold. */
   preempt(): PassHold;
+  /** What this tab last read of each W the finder listed (memoListed); null before the kept pass is loaded. */
+  listed(): Map<string, Map<string, bigint>> | null;
   /** `fn` runs when a pass changes the positions. */
   watch(fn: () => void): void;
   /** Sign out: the running pass stopped and its answer ignored, the positions and what the passes kept dropped, no
@@ -624,6 +639,7 @@ export function positionsCache(pass: (memo: PassMemo, run: PassRun) => Promise<P
       };
       return { feed: (found) => end(found), release: () => end(null) };
     },
+    listed: () => memoListed(memo),
     watch: (fn) => void watchers.add(fn),
     clear: () => {
       gen++;

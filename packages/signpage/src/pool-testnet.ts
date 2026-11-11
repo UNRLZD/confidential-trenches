@@ -1272,7 +1272,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   // route, in the testnet build on one devnet RPC (the header's testnet-only choice); none: no read
   const finderOf = (r: readonly [SolanaRpc, SolanaRpc]): HoldingsReader => over.holdings?.(r) ?? (POOL_TESTNET ? solanaHoldingsAt(TESTNET_RPCS.solana[0]) : solanaHelperHoldings(TRADE_HELPER));
   // a sell's list: every W derived, the finder reading only those `read` asks for (buy-wallets.ts wantedBuyWallets)
-  const poolBuyWallets = async (notes: NoteStore, r: readonly [SolanaRpc, SolanaRpc], read: (address: string) => boolean | Promise<boolean> = () => true): Promise<ListedBuyWallet[]> => {
+  const poolBuyWallets = async (notes: NoteStore, r: readonly [SolanaRpc, SolanaRpc], read: (address: string) => boolean | Promise<boolean> = () => true, signal?: AbortSignal): Promise<ListedBuyWallet[]> => {
     const spent = await spentNotesOf(notes, scope!);
     if (spent.length === 0) return [];
     const seed64 = await page.seed64();
@@ -1284,7 +1284,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     }
     if (derived.failed.length > 0) throw new Error("the buy wallets could not be derived");
     // side by side in the finder's steps (card pool-sell-legs-side-by-side)
-    const got = await wantedBuyWallets(derived, read, { together: true });
+    const got = await wantedBuyWallets(derived, read, { together: true, ...(signal ? { signal } : {}) });
     // a read refused by its provider: its transport fault, so the sale answers "down" (its waits count it)
     if (got.failed.length > 0) throw got.fault ?? new Error("the buy wallets' holdings could not be read");
     return got.wallets;
@@ -1607,6 +1607,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     // the sign outs asked before this host: one asked after it stops its sales before their signatures (review P3-5 of
     // 77055f4e)
     const outs = signOuts;
+    // a sign out ends the sale's waits (read-waits.ts waitUnless) and its finder list's reads
+    const signal = solanaStop.signal;
     let notes: Promise<NoteStore> | null = null;
     const store = (): Promise<NoteStore> => (notes ??= page.store().then((w) => openNoteStore(w)));
     return {
@@ -1626,19 +1628,21 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
           // paid, derived from the seed; the finder reads those `read` asks for, side by side in its steps, and with no
           // `read` only the Ws neither a buy record nor the last whole positions pass names (a buy from before a sign
           // out or a restore: the store is new, so no pass lists it), so with every W recorded or listed no finder read
-          // starts at the tap (review of 55d4c6eb, P2-A). Each W the finder did not read has the tokens that pass listed
+          // starts at the tap (review of 55d4c6eb, P2-A). Each W the finder did not read has the tokens the listing names
           // it holding, else none read (null). The sale reads each W it sells from itself (pool-sell.ts planReads, one W
-          // per request). No whole pass kept yet (a restored device before its first pass), or a load's rent back: no
-          // listing
-          const listed = trade ? keptListed(await (await page.store()).get("meta", POSITIONS_KEPT_KEY)) : null;
+          // per request). The listing is what this tab last read of each W (positions.listed(): the memo, loaded from the
+          // kept pass and written by every read after it), so a W read after the kept pass is never fed or hinted at the
+          // kept pass's older amount (review P2 of 8da6b97f); the kept pass's own only before the memo has loaded it. No
+          // whole pass kept yet (a restored device before its first pass), or a load's rent back: no listing
+          const listed = trade ? (positions.listed() ?? keptListed(await (await page.store()).get("meta", POSITIONS_KEPT_KEY))) : null;
           let ask = read;
           if (ask === undefined) {
             const records = ((await (await page.store()).get("meta", BUY_MINTS_KEY)) as Record<string, unknown> | undefined) ?? {};
             ask = (a) => !Object.hasOwn(records, a) && listed?.has(a) !== true;
           }
-          const got = await poolBuyWallets(await store(), r, ask);
+          const got = await poolBuyWallets(await store(), r, ask, signal);
           const kept = (a: string) => (listed?.has(a) ? new Map(listed.get(a)) : null);
-          // the Ws the finder read, and those the kept pass lists: the next pass's read (a W in neither: the pass reads it)
+          // the Ws the finder read, and those the listing names: the next pass's read (a W in neither: the pass reads it)
           found = got.flatMap((w) => {
             const tokens = w.holdings === null ? kept(w.address) : new Map([...w.holdings.tokens].map(([m, h]) => [m, h.amount] as const));
             return tokens === null ? [] : [{ address: w.address, tokens }];
@@ -1647,9 +1651,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
             const k = w.holdings === null ? kept(w.address) : null;
             return k === null ? w : { ...w, holdings: { native: 0n, tokens: new Map([...k].map(([m, a]) => [m, { amount: a, frozen: false }] as const)), unreadable: [] } };
           });
-          return got;
         } finally {
-          // read, or listed from the kept pass: the next pass's read; failed (the sell refuses, or a rent back at load
+          // read, or named by the listing: the next pass's read; failed (the sell refuses, or a rent back at load
           // waits): the next pass reads
           if (found === null) hold.release();
           else hold.feed(found);
@@ -1667,8 +1670,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       // run puts its own over this one (poolSellKind)
       settled: async (signature, stage) => settleSellOps(await page.store(), signature, stage),
       stopped: () => signOuts !== outs,
-      // a sign out ends the sale's waits (read-waits.ts waitUnless)
-      signal: solanaStop.signal,
+      signal,
       end: () => {
         release();
         void notes?.then((n) => n.close(), () => {});

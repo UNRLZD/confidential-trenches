@@ -33,15 +33,18 @@ const N = "[\\w$]+";
 // reads forgotten, the quote marked asked, then (its venue reader between) the blockhash and the deposit's pages started
 // only when there was a turn
 export const TURN = new RegExp(`(${N})=${N}\\?\\.opened;if\\(\\1\\)\\{if\\(await \\1,${N}\\.stopped\\?\\.\\(\\)\\)return\\{error:\`failed\`\\};if\\(${N}\\.spent\\?\\.\\(\\)\\)return\\{error:\`down\`\\};${N}\\(${N}\\)\\}${N}=!0;[^;]{0,200};if\\(\\1\\)\\{${N}=${N}\\(${N}\\(${N}\\)\\),${N}=${N}\\(Promise\\.all\\(\\[${N},${N}\\]\\)\\.then\\(`);
-// the sale's wallets: the passes held off, then (for a sale) the kept pass's listing read; the Ws the finder reads with no
-// `read` given: those neither a buy record nor the listing names (review of 55d4c6eb, P2-A: a W from before a sign out;
-// card wallets-found-in-one-read: one list for a sale's first read and its fallback), each other W its listing
-const LISTED = new RegExp(`wallets:async ${N}=>\\{let ${N}=${N}\\.preempt\\(\\),${N}=null;try\\{let (${N})=${N}\\?${N}\\(await\\(await ${N}\\.store\\(\\)\\)\\.get\\(\`meta\`,${N}\\)\\):null,(${N})=${N};if\\(\\2===void 0\\)\\{let (${N})=await\\(await ${N}\\.store\\(\\)\\)\\.get\\(\`meta\`,\`owed/buy-sol\`\\)\\?\\?\\{\\};\\2=(${N})=>!Object\\.hasOwn\\(\\3,\\4\\)&&\\1\\?\\.has\\(\\4\\)!==!0\\}let ${N}=await (${N})\\(await ${N}\\(\\),${N},\\2\\),(${N})=(${N})=>\\1\\?\\.has\\(\\7\\)\\?new Map\\(\\1\\.get\\(\\7\\)\\):null;`);
+// the sale's wallets: the passes held off, then (for a sale) the listing: what this tab last read of each W (the
+// positions' memo, listed()), the kept pass's only before the memo has loaded it, so a W read after the kept pass is
+// never fed or hinted at its older amount (review P2 of 8da6b97f); the Ws the finder reads with no `read` given: those
+// neither a buy record nor the listing names (review of 55d4c6eb, P2-A: a W from before a sign out; card
+// wallets-found-in-one-read: one list for a sale's first read and its fallback), each other W its listing; the finder
+// list asked with the sale's stop
+const LISTED = new RegExp(`wallets:async ${N}=>\\{let ${N}=(${N})\\.preempt\\(\\),${N}=null;try\\{let (${N})=${N}\\?\\1\\.listed\\(\\)\\?\\?${N}\\(await\\(await ${N}\\.store\\(\\)\\)\\.get\\(\`meta\`,(?:${N}|\`owed/positions-sol\`)\\)\\):null,(${N})=${N};if\\(\\3===void 0\\)\\{let (${N})=await\\(await ${N}\\.store\\(\\)\\)\\.get\\(\`meta\`,\`owed/buy-sol\`\\)\\?\\?\\{\\};\\3=(${N})=>!Object\\.hasOwn\\(\\4,\\5\\)&&\\2\\?\\.has\\(\\5\\)!==!0\\}let ${N}=await (${N})\\(await ${N}\\(\\),${N},\\3,${N}\\),(${N})=(${N})=>\\2\\?\\.has\\(\\8\\)\\?new Map\\(\\2\\.get\\(\\8\\)\\):null;`);
 // that list: no spent note, no seed read; else the Ws derived from the spent notes, the seed copy zeroed, and the finder
-// asked for only those the list's `read` names, side by side in its steps
-const LISTER = (f) => new RegExp(`[,;\\s]${f.replace(/\$/g, "\\$")}=async\\(${N},${N},(${N})=\\(\\)=>!0\\)=>\\{let (${N})=await ${N}\\(${N},${N}\\);if\\(\\2\\.length===0\\)return\\[\\];let (${N})=await ${N}\\.seed64\\(\\),(${N});try\\{\\4=${N}\\(\\3,\\[\\{id:${N}\\.program,chain:\`sol\`,spent:\\2,reader:${N}\\(${N}\\)\\}\\]\\)\\}finally\\{\\3\\.fill\\(0\\)\\}[^]{0,120}?let ${N}=await ${N}\\(\\4,\\1,\\{together:!0\\}\\)`);
+// asked for only those the list's `read` names, side by side in its steps, under the stop it is given
+const LISTER = (f) => new RegExp(`[,;\\s]${f.replace(/\$/g, "\\$")}=async\\(${N},${N},(${N})=\\(\\)=>!0,(${N})\\)=>\\{let (${N})=await ${N}\\(${N},${N}\\);if\\(\\3\\.length===0\\)return\\[\\];let (${N})=await ${N}\\.seed64\\(\\),(${N});try\\{\\5=${N}\\(\\4,\\[\\{id:${N}\\.program,chain:\`sol\`,spent:\\3,reader:${N}\\(${N}\\)\\}\\]\\)\\}finally\\{\\4\\.fill\\(0\\)\\}[^]{0,120}?let ${N}=await ${N}\\(\\5,\\1,\\{together:!0,\\.\\.\\.\\2\\?\\{signal:\\2\\}:\\{\\}\\}\\)`);
 const listedOf = (js) => {
-  const f = LISTED.exec(js)?.[5];
+  const f = LISTED.exec(js)?.[6];
   return f !== undefined && LISTER(f).test(js);
 };
 
