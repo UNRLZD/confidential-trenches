@@ -157,6 +157,8 @@ type Plant = {
   leaves?: number;
   /** the bonding curve says a cashback coin (its is_cashback_coin byte, 82, set in the recorded reads) */
   curveCashback?: boolean;
+  /** a Mayhem coin: the bonding curve's is_mayhem_mode byte (81) or the PumpSwap Pool's (243) set in the recorded reads */
+  mayhem?: boolean;
   /** of W's PumpSwap cashback accounts, only these (W's PumpSwap volume account, its wrapped-SOL account) */
   ammOnly?: "volume" | "ata";
   /** RPC 1 never shows W's PumpSwap cashback accounts (a lagging RPC) */
@@ -547,6 +549,17 @@ function chain(plant: Plant = {}) {
       switch (method) {
         case "getMultipleAccounts": {
           const recorded = fx[v].reads[p][JSON.stringify(params[0])];
+          if (recorded && plant.mayhem) {
+            const r = structuredClone(recorded) as { value: ({ owner: string; data: [string, string] } | null)[] };
+            for (const a of r.value) {
+              const d = a ? base64.decode(a.data[0]) : null;
+              const at = !a || !d ? -1 : a.owner === SOLANA_PUMP_PROGRAM && d.length >= 83 && d.length < 300 ? 81 : a.owner === SOLANA_PUMP_AMM_PROGRAM && d.length >= 245 && d.length < 600 ? 243 : -1;
+              if (at < 0) continue;
+              d![at] = 1;
+              a!.data[0] = base64.encode(d!);
+            }
+            return r;
+          }
           if (recorded && plant.curveCashback) {
             // the bonding curve (owned by pump, under 300 bytes): its cashback byte set
             const r = structuredClone(recorded) as { value: ({ owner: string; data: [string, string] } | null)[] };
@@ -1149,6 +1162,17 @@ test("W at 0 lamports (no account) cannot pay its sell's fee: not_funded before 
     nothingBuilt(w);
     assert.deepEqual(w.sent, []);
     assert.deepEqual(await ours(w.ns), []);
+  }
+});
+
+// Card sol-pool-buys-mayhem-coins: a sale of a coin this build cannot trade (a Mayhem curve or pool) is refused
+// venue_not_built at its venue's read, nothing built, signed or sent, so the app shows it as one the pool cannot sell
+test("a Mayhem coin's sale, on the curve or on PumpSwap, is refused venue_not_built before anything is built", async () => {
+  for (const venue of ["pump", "pumpswap"] as const) {
+    const w = await world({ venue, mayhem: true });
+    assert.deepEqual(await runPoolSell(w.host, { ...ASK, token: VF[venue].mint }), { error: "venue_not_built" }, venue);
+    nothingBuilt(w);
+    assert.deepEqual(w.sent, [], venue);
   }
 });
 

@@ -187,7 +187,7 @@ export type PoolBuyHost = {
   signal?: AbortSignal;
 };
 
-export type PoolBuyAnswer = { stage: TradeStage; txs: TxRef[] } | { error: "not_allowed" | "not_funded" | "quote_check_failed" | "venue_not_pinned" | "no_table_fits" | "failed" | "down" };
+export type PoolBuyAnswer = { stage: TradeStage; txs: TxRef[] } | { error: "not_allowed" | "not_funded" | "quote_check_failed" | "venue_not_pinned" | "no_table_fits" | "venue_not_built" | "failed" | "down" };
 
 /** The helper's busy answer to a send (its 429: rate_limited when a pool provider throttled a read, in_flight when this
  *  caller holds too many sends open, or its per-caller throttle), with the wait its Retry-After names. The send is
@@ -694,6 +694,9 @@ async function buyRun(h: PoolBuyHost, ask: PoolAsk, at: { fault?: unknown }): Pr
   } catch (e) {
     if (e instanceof Refused) return { error: e.code };
     if (e instanceof PoolRuleRefused) return { error: "quote_check_failed" };
+    // both RPCs read a coin this build does not trade (a Mayhem curve or pool): refused by name at the venue's read,
+    // before the claim, so the app shows it as one the pool cannot buy, never a Retry that cannot work
+    if (e instanceof SolanaPoolBuyError && e.code === "venue_not_built") return { error: "venue_not_built" };
     // a provider read that still fails after the page's own retry, before W signs: "not now" (card pool-read-down),
     // after the rule's waits (runPoolBuy)
     if (!signing && waitsOn(e)) {
