@@ -636,7 +636,10 @@ test("the page: a reload with a kept pass answers the first state read with no c
   assert.deepEqual([c.calls.rpc, c.calls.finder], [[0, 0], 0], "no chain read for it");
   release();
   await until(async () => (await tp.positions())![0]?.amount === "2");
-  assert.deepEqual(((await w.get("meta", POSITIONS_KEPT_KEY)) as KeptPass).positions.map((p) => p.amount), ["2"], "the pass is kept in its place");
+  // the rows show as each W is read (card wallets-found-in-one-read), the pass is kept at its end
+  const keptAmounts = async () => ((await w.get("meta", POSITIONS_KEPT_KEY)) as KeptPass).positions.map((p) => p.amount);
+  await until(async () => (await keptAmounts())[0] === "2");
+  assert.deepEqual(await keptAmounts(), ["2"], "the pass is kept in its place");
   await w.signOut();
   await tp.signedOut();
   assert.equal(await tp.positions(), null, "sign out: the kept pass went with the store");
