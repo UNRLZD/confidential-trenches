@@ -657,10 +657,11 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
           // the page's hold (the deposit's sync's too) and its history sources (card evm-pool-leaves-any-source)
           const r = await evm({ seed64: seed, pin: p.pin, rpcs: p.rpcs(), signal, wallets: false, held: pageEvmHold(p.pin, () => h.held ? h.held() : h.store()), history: pageEvmHistory(p.pin) });
           // each buy's record again from its own transaction, so a restored W sells on its buy's route (card
-          // signpage-evm-pool-sell, pool-sell-evm.ts restoreEvmHoldings: no read names W or a transaction)
-          const buys = r.spends.flatMap((x) => (x.token === null ? [] : [{ w: x.w, token: x.token, block: x.block, blockHash: x.blockHash, logIndex: x.logIndex }]));
+          // signpage-evm-pool-sell, pool-sell-evm.ts restoreEvmHoldings: no read names W or a transaction); the testnet
+          // build only, as the sell is (POOL_TESTNET is folded at build time, so the mainnet bundle carries none of it)
+          const buys = POOL_TESTNET ? r.spends.flatMap((x) => (x.token === null ? [] : [{ w: x.w, token: x.token, block: x.block, blockHash: x.blockHash, logIndex: x.logIndex }])) : [];
           const chain = chainOf(p);
-          if (buys.length > 0 && chain !== "solana") evmHoldingsOwed.push({ chain, pin: p.pin, list: p.rpcs(), buys });
+          if (POOL_TESTNET && buys.length > 0 && chain !== "solana") evmHoldingsOwed.push({ chain, pin: p.pin, list: p.rpcs(), buys });
           return r.notes;
         });
         const walked: Walked[] = [];
@@ -703,7 +704,7 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
         }
         // the buy records, once the notes are written: a W whose read fails keeps none, and is not sold until a later
         // restore reads it
-        for (const o of evmHoldingsOwed) {
+        if (POOL_TESTNET) for (const o of evmHoldingsOwed) {
           signal.throwIfAborted();
           await restoreEvmHoldings({ chain: o.chain, testnet: POOL_TESTNET, pin: o.pin, rpcs: evmPair(o.list), store: await (h.held ? h.held() : h.store()), spends: o.buys }).catch(() => {});
         }

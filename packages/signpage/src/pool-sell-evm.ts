@@ -102,7 +102,8 @@ export const EVM_SELL_LAG_BLOCKS = 100n;
 /** A busy wait's slices: it ends within one once a sign out starts. */
 const STOP_POLL_MS = 250;
 /** SellDelegate.nonce() (contracts/pool-evm/src/SellDelegate.sol:127), called on W. */
-const NONCE_CALL = /* @__PURE__ */ `0x${Array.from(keccak_256(new TextEncoder().encode("nonce()")).subarray(0, 4), (b) => b.toString(16).padStart(2, "0")).join("")}`;
+// made at the call, so a bundle with no sale (the mainnet build) keeps none of it
+const nonceCall = (): string => `0x${Array.from(keccak_256(new TextEncoder().encode("nonce()")).subarray(0, 4), (b) => b.toString(16).padStart(2, "0")).join("")}`;
 const BALANCE_OF = "0x70a08231";
 const lower = (s: string): string => s.toLowerCase();
 const hexQ = (v: bigint): string => `0x${v.toString(16)}`;
@@ -304,7 +305,7 @@ export async function evmSellQuoteLeg(h: Omit<EvmSellHost, "send" | "record" | "
   // (`own`: this run's own note, INCOMING since its first signature, signed again)
   if (held !== undefined && held.state !== "PLANNED" && !(held.state === "INCOMING" && held.id === own)) return no("failed");
   const sent = evmSellSent(seed64, h.scope, w.l, w.j, await store.list(), round);
-  const nonce = await agreed(h.rpcs, async (rpc) => word0(await rpc("eth_call", [{ to: w.w, data: NONCE_CALL }, "latest"]), "nonce", true));
+  const nonce = await agreed(h.rpcs, async (rpc) => word0(await rpc("eth_call", [{ to: w.w, data: nonceCall() }, "latest"]), "nonce", true));
   const authReads = (await Promise.all(h.rpcs.map(async (rpc) => quantity(await rpc("eth_getTransactionCount", [w.w, "latest"]), "nonce")))) as [bigint, bigint];
   const banned = await h.banned(token);
   const q = await h.quote({ chain: networkOf(h), token, w: w.w, amountIn: ask.amount, slippageBps: ask.slippageBps, bought: w.route, boughtBlock: w.block, sent, banned, ...(sim ? { signSim: sim } : {}) });
@@ -648,7 +649,7 @@ export async function evmSellPlanQuote(h: Omit<EvmSellHost, "send" | "record" | 
 // both; its Buy (evm-send.ts evmBuyCalldataRead) must be the kit's builder's encoding of its route (evmBuyRouteOf, the
 // helper's own check) and buy the token the Bought names. No read names W or a transaction hash. A record the buy wrote
 // is never replaced; one that holds no route block takes this one's route.
-const TOPIC_BOUGHT = /* @__PURE__ */ `0x${Array.from(keccak_256(new TextEncoder().encode("Bought(address,address,uint256,uint256,uint256,uint256,address,uint256)")), (b) => b.toString(16).padStart(2, "0")).join("")}`;
+const topicBought = (): string => `0x${Array.from(keccak_256(new TextEncoder().encode("Bought(address,address,uint256,uint256,uint256,uint256,address,uint256)")), (b) => b.toString(16).padStart(2, "0")).join("")}`;
 
 /** A buy spend as the restore names it: W, the token, and its Bought's place. */
 export type EvmBuySpend = { w: string; token: string; block: bigint; blockHash: string; logIndex: bigint };
@@ -657,7 +658,7 @@ export type EvmBuySpend = { w: string; token: string; block: bigint; blockHash: 
  *  block; throws when the two RPCs differ or the transaction is not a Buy of the pool the device's builder makes. */
 export async function evmBuyRouteRead(rpcs: readonly [EvmRpc, EvmRpc], network: EvmPoolChain, pool: string, s: EvmBuySpend): Promise<EvmHolding["route"]> {
   const one = async (rpc: EvmRpc) => {
-    const logs = (await rpc("eth_getLogs", [{ address: lower(pool), topics: [TOPIC_BOUGHT], fromBlock: hexQ(s.block), toBlock: hexQ(s.block) }])) as unknown;
+    const logs = (await rpc("eth_getLogs", [{ address: lower(pool), topics: [topicBought()], fromBlock: hexQ(s.block), toBlock: hexQ(s.block) }])) as unknown;
     if (!Array.isArray(logs)) throw new Error("restore: not a log list");
     const log = (logs as Record<string, unknown>[]).find((l) => typeof l === "object" && l !== null && l.removed !== true && typeof l.logIndex === "string" && BigInt(l.logIndex) === s.logIndex && typeof l.blockHash === "string" && lower(l.blockHash) === lower(s.blockHash));
     const topics = Array.isArray(log?.topics) ? (log!.topics as unknown[]) : [];

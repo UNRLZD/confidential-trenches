@@ -339,7 +339,8 @@ export type EvmSellAuthorization = { chainId: number; address: string; nonce: bi
 const quantity = (v: bigint | number | string): string => `0x${BigInt(v).toString(16)}`;
 export const evmAuthorizationJson = (a: EvmSellAuthorization) => ({ chainId: quantity(a.chainId), address: lower(a.address), nonce: quantity(a.nonce), yParity: quantity(a.yParity), r: quantity(a.r), s: quantity(a.s) });
 
-const SELL_ANSWER_MAX = /* @__PURE__ */ HELPER_V1_PATHS.find((p) => p.method === "POST" && p.path === "/v1/pool/evm/sell")!.limitBytes!;
+// read at the call, so a bundle that sends no sale (the mainnet build) keeps none of it
+const sellAnswerMax = (): number => HELPER_V1_PATHS.find((p) => p.method === "POST" && p.path === "/v1/pool/evm/sell")!.limitBytes!;
 const retryAfterMs = (res: Response): number | null => {
   const header = res.headers.get("retry-after");
   if (header === null || !/^[0-9]{1,6}$/.test(header.trim())) return null;
@@ -369,7 +370,7 @@ export async function evmSellSend(helper: string, body: { pool: string; w: strin
     }
     let json: unknown = null;
     try {
-      json = bytes.length <= SELL_ANSWER_MAX ? JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)) : null;
+      json = bytes.length <= sellAnswerMax() ? JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)) : null;
     } catch {
       json = null;
     }
@@ -393,7 +394,8 @@ export async function evmSellSend(helper: string, body: { pool: string; w: strin
   }
 }
 
-const TOPIC_DEPOSITED = /* @__PURE__ */ topicOf(EVM_POOL_EVENTS.Deposited);
+// made at the read, as sellAnswerMax
+const topicDeposited = (): string => topicOf(EVM_POOL_EVENTS.Deposited);
 /** A Deposited the pool logged: its depositor (topic 1), commitment, label, value and precommitment. */
 export type EvmDeposited = { block: bigint; blockHash: string; tx: string; index: bigint; depositor: string; commitment: bigint; label: bigint; value: bigint; precommitment: bigint };
 /** One RPC's read of the pool's deposits since `from`, as evmReleaseRead reads the releases (its `safe`, `stop`,
@@ -411,7 +413,7 @@ export async function evmDepositedRead(rpc: EvmRpc, pool: string, from: bigint, 
   }
   const ended = stop !== null && to >= stop && to >= from;
   if (to < from) return { head, safe, stop, to, ended, deposits: [] };
-  const logs = (await rpc("eth_getLogs", [{ address: lower(pool), topics: [TOPIC_DEPOSITED], fromBlock: hexQ(from), toBlock: hexQ(to) }])) as unknown;
+  const logs = (await rpc("eth_getLogs", [{ address: lower(pool), topics: [topicDeposited()], fromBlock: hexQ(from), toBlock: hexQ(to) }])) as unknown;
   if (!Array.isArray(logs)) throw new Error("read-back: not a log list");
   const deposits: EvmDeposited[] = [];
   for (const l of logs as Record<string, unknown>[]) {
@@ -423,7 +425,7 @@ export async function evmDepositedRead(rpc: EvmRpc, pool: string, from: bigint, 
     const tx = typeof l.transactionHash === "string" && HASH.test(lower(l.transactionHash)) ? lower(l.transactionHash) : null;
     const blockHash = typeof l.blockHash === "string" && HASH.test(lower(l.blockHash)) ? lower(l.blockHash) : null;
     const who = big(topics[1]);
-    if (topics[0] !== TOPIC_DEPOSITED || d === null || d.length !== 4 || block === null || index === null || tx === null || blockHash === null || who === null || block < from || block > to) continue;
+    if (topics[0] !== topicDeposited() || d === null || d.length !== 4 || block === null || index === null || tx === null || blockHash === null || who === null || block < from || block > to) continue;
     const depositor = addressOf(who);
     if (depositor === null) continue;
     deposits.push({ block, blockHash, tx, index, depositor, commitment: d[0]!, label: d[1]!, value: d[2]!, precommitment: d[3]! });

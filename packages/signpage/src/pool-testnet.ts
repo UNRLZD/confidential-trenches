@@ -787,14 +787,17 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     return { ...host, end: () => void notes?.then((n) => n.close(), () => {}) };
   };
   const evmSell = (chain: "base" | "robinhood") => {
+    // first, alone: folded at build time, so the mainnet bundle carries none of the sale
+    if (!POOL_TESTNET) return null;
     const e = evmPool(chain);
-    if (e === null || !POOL_TESTNET) return null;
+    if (e === null) return null;
     return (over.tradeKinds?.evmSell ?? poolSellEvmKind)(() => evmSellOf(chain, e));
   };
   // a sale whose tab ended before its end: followed from its open record at each state read (followEvmSells)
   const evmSellFollow = (chain: "base" | "robinhood"): void => {
+    if (!POOL_TESTNET) return;
     const e = evmPool(chain);
-    if (e === null || !POOL_TESTNET) return;
+    if (e === null) return;
     const h = evmSellOf(chain, e);
     void followEvmSells(h).catch(() => {}).finally(h.end);
   };

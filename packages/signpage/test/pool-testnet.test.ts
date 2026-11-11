@@ -705,14 +705,18 @@ test("pool.sell on the devnet pool runs the sell kind: a page whose buys left no
   const { w } = await wallet();
   const reads: string[] = [];
   const offline = (n: string) => Object.assign(async (m: string) => (reads.push(m), Promise.reject(new Error("offline"))), { url: `https://${n}.invalid` });
-  const t = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { rpcs: [offline("a"), offline("b")] });
+  const evmSells: string[] = [];
+  const t = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { rpcs: [offline("a"), offline("b")], tradeKinds: { evmSell: () => (a) => (evmSells.push(a.chain), { running: true, after: Promise.resolve(), answer: () => ({ result: { stage: "sent", txs: [] } }) }) } });
   const ask: Ask = { kind: "pool.sell", chain: "solana", token: SOL_TOKEN, amount: 1n, slippageBps: 100, decimals: 9 };
   const r = t.flow(ask, ctx as never) as { running?: true; after: Promise<unknown>; answer: () => unknown };
   assert.equal(r.running, true, "the sell runs");
   await r.after;
   assert.deepEqual(r.answer(), { error: "not_funded" });
   assert.deepEqual(reads, [], "no W: no read");
-  assert.deepEqual(t.flow({ ...ask, chain: "base" }, ctx as never), { error: "not_allowed" });
+  // a sale on an EVM chain is the EVM sell's, never the Solana sell's (card signpage-evm-pool-sell: before it, refused)
+  assert.equal("running" in t.flow({ ...ask, chain: "base" }, ctx as never), true);
+  assert.deepEqual(evmSells, ["base"]);
+  assert.deepEqual(reads, [], "and the Solana pair read nothing for it");
 });
 
 test("a state read settles a sell a closed page left INCOMING (the review of signpage-pool-sell 4b6223a, high): its mark read on both RPCs, the note kept while they fail", async () => {
