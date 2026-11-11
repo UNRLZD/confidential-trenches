@@ -150,8 +150,9 @@ async function oneWidth(h, w, shotDir) {
     await look("signin", m);
     await closed("signin", "esc");
 
-    // words: the passkey way again, Recovery code; the x back
+    // words: the passkey way again (the app's sign-in sheet again first where a close lost it), Recovery code; the x back
     m = await newMark();
+    if (!(await vis('.sgn-opt[data-way="passkey"]').isVisible().catch(() => false))) await tap(signIn);
     await tap(vis('.sgn-opt[data-way="passkey"]'));
     await top('#screen:not([hidden]) #signin[data-signin="signed-out"] button[data-action="recovery"]').waitFor({ timeout: WAIT_MS });
     await tap(top('#signin button[data-action="recovery"]'));

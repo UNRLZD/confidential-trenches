@@ -7,8 +7,8 @@
 //     closes, back to the app with a frame again; that frame takes the signed-in state, pools included (live: the
 //     deployed terminal's own kit client reaches ready, <html data-signpage>, never down; both: the state the shell
 //     answers is signed in, holds pools and passes the kit's client, scripts/signpage-state.mjs). backup.open draws the 12 words in the layer (counted, never read) and
-//     Cancel goes back to the app, still signed in. signout opens the sign-out page in the top window (the frame out of
-//     the document, no Sign out in any frame); Sign out deletes the store and goes back to the app, signed out. A
+//     Cancel goes back to the app, still signed in. signout opens the sign-out page in the top window (no Sign out in
+//     any frame); Sign out deletes the store and goes back to the app, signed out. A
 //     signout sent signed out, and a backup.open sent signed out, are refused (not_allowed). Signed in, a signin.open is
 //     refused (a seed is never replaced), and a press on Sign out within 500 ms of the sign-out page opening does
 //     nothing. Signed in, a blank page of the check's own (APP_HOST frames nothing: its frame-src 'none') puts SIGN_HOST
@@ -29,6 +29,8 @@
 //   broken store: signin.open opens the passkey page; a seed record that decrypts but fails checkSeed is put in the
 //     store; Cancel still goes back to the app.
 //   Every press waits out the page's 500 ms activation guard first, which each layer opening restarts.
+//   Every screen above opens as a sheet over the app with the APP_HOST frame kept in the page under it (card
+//   signing-views-open-over-the-app); none of them has a field typed into, the one kind of screen that takes it out.
 // After: sign
 //   node scripts/live-checks/signpage-signin-kinds.mjs [--url <origin>] [--record <file>]
 //   node scripts/live-checks/signpage-signin-kinds.mjs --harness [--site <dir>] ...   the same steps on the app's
@@ -112,7 +114,7 @@ export function judge(rec) {
   const p = rec.prf ?? {};
   const pending = (a) => a?.ok === true && a?.result?.pending === true;
   const refusedNA = (a) => a?.ok === false && a?.error?.code === "not_allowed";
-  const inLayer = (x, state) => x?.state === state && x?.layer === "shown" && x?.frame === false && x?.top === true;
+  const inLayer = (x, state) => x?.state === state && x?.layer === "shown" && x?.top === true;
   const backToApp = (x, state) => x?.state === state && x?.layer === "hidden" && x?.frame === true;
 
   say(pending(p.signin?.answer) && inLayer(p.signin?.page, "signed-out") && p.signin?.page?.create === 1,
@@ -177,6 +179,11 @@ export function judge(rec) {
   const bk = rec.broken ?? {};
   say(inLayer(bk.open, "signed-out") && bk.planted === true && bk.cancel?.layer === "hidden" && bk.cancel?.frame === true,
     `broken store: Cancel goes back to the app when the stored seed cannot be read (${bk.cancel?.state ?? "no step"}, layer ${bk.cancel?.layer ?? "?"})`);
+  // card signing-views-open-over-the-app: every screen above opens as a sheet over the app, its frame kept in the page
+  // under it (only a screen with a field typed into takes the frame out, and none of these has one)
+  const sheets = [p.signin?.page, p.backup?.page, so.page, so.early, n.signout?.page, n.saved, w.choose, w.existing, ex, t.backup?.page, bk.open];
+  const kept = sheets.filter((x) => x?.layer === "shown" && x?.frame === true).length;
+  say(kept === sheets.length, `the sheet keeps the app's frame in the page under every screen it draws (${kept} of ${sheets.length})`);
   say(Array.isArray(rec.errors) && rec.errors.length === 0, `no page error or CSP violation (${Array.isArray(rec.errors) ? rec.errors.length : "no record"})${Array.isArray(rec.errors) && rec.errors.length ? `: ${rec.errors.join("; ")}` : ""}`);
   return { pass: lines.every((l) => l.startsWith("ok ")), lines };
 }
@@ -286,7 +293,7 @@ async function framedTry(page) {
   return { answer, loaded, signoutButtons, refusals: refusals.length, errors };
 }
 
-// The APP_HOST frame the shell holds now (a new one comes each time the layer closes).
+// The APP_HOST frame the shell holds now (kept under the sheet; a new one comes only after a screen with a typed field).
 async function appFrame(page) {
   const until = Date.now() + WAIT_MS;
   for (;;) {
@@ -299,7 +306,7 @@ async function appFrame(page) {
 
 // Posts one kind from inside the APP_HOST frame to the shell, as the terminal does, and returns the shell's answer.
 async function send(page, type, params = {}) {
-  // no frame: the layer is open (an open kind a page should have refused took it), so no kind can be sent
+  // no frame: a screen with a typed field is open, so no kind can be sent (under any other sheet one goes unread)
   const f = await appFrame(page).catch(() => null);
   if (!f) return { noFrame: true };
   return f.evaluate(({ type, params, origin, hello }) => new Promise((done) => {
@@ -337,7 +344,7 @@ async function read(page, not = []) {
     const s = document.getElementById("signin")?.dataset.signin;
     return s && s !== "loading" && !not.includes(s);
   }, not, { timeout: WAIT_MS }).catch(() => {});
-  // the frame leaves FRAME_LEAVE_MS (100 ms) after the layer shows, and a new one comes at close
+  // a screen with a typed field takes the frame out FRAME_LEAVE_MS (100 ms) after the layer shows; every other keeps it
   await page.waitForTimeout(300);
   const r = await page.evaluate(async () => {
     const m = document.getElementById("signin");

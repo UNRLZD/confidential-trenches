@@ -5,6 +5,12 @@
 // (pools included), which passes; liveGood: the deployed SIGN_HOST at release-9 framing the deployed terminal, whose
 // own kit client is ready on that state, which passes, and edited from it, the step's bads (the client down or never
 // settled, a state the kit refuses, no pools, no state). Each bad fails on its own lines only:
+// - good (edited) was recorded with card signing-views-open-over-the-app on the harness, where every RPC name answers
+//   not found: those console lines are cleared from it, and badMainNoSheet (main 8253c0a3, the same harness, unedited)
+//   shows main gives the same lines and fails the sheet's line;
+// - badPageOfItsOwn: the good of this tree before card signing-views-open-over-the-app, each screen a page of its own
+//   with the frame taken out of the document: fails on the sheet's line only. Every record but good was recorded before
+//   that card, so the sheet's line is read on good and on badPageOfItsOwn alone (the others are read on their own lines);
 // - bad: the card's page at efacb58, before the recheck's Lows (an open sent during a resync refused; Cancel stuck on
 //   the error page when the stored seed cannot be read);
 // - badDcad6c9: the card's page at dcad6c9, before the review fixes (Create passkey offered after I already have one,
@@ -29,7 +35,9 @@ const BAD_ALL = (rec) => judge(rec).lines.filter((l) => l.startsWith("BAD")).map
 // The terminal-takes-the-state step came after most bads were recorded: a record with no prf.app step was recorded
 // before it, and is read on its other lines (the step's own bads are below, and a good with the step deleted is BAD).
 const APP = "prf: the terminal in the frame takes the signed-in state with pools";
-const BAD = (rec) => BAD_ALL(rec).filter((l) => l !== APP || Object.hasOwn(rec.prf ?? {}, "app"));
+// The sheet's line (card signing-views-open-over-the-app) came after every record but good: read on good alone.
+const SHEET = "the sheet keeps the app's frame in the page under every screen it draws";
+const BAD = (rec) => BAD_ALL(rec).filter((l) => (l !== APP || Object.hasOwn(rec.prf ?? {}, "app")) && (l !== SHEET || rec === answers.good));
 
 const FRAMED = "prf: a signout sent to SIGN_HOST in a frame is refused, the frame never loads a sign-out";
 const AGAIN = "prf: signin.open sent signed in is refused, the seed kept";
@@ -50,9 +58,22 @@ test("the recorded good answer passes", () => {
   assert.ok(Array.isArray(answers.good.prf.app.state.pools));
 });
 
-test("the recorded live answer on release-9 passes: the deployed terminal's client is ready on a state with pools", () => {
+test("a page of its own over no frame (this tree before card signing-views-open-over-the-app) fails on the sheet's line only", () => {
+  assert.deepEqual(BAD_ALL(answers.badPageOfItsOwn), [SHEET]);
+  assert.equal(answers.badPageOfItsOwn.prf.signin.page.frame, false);
+  assert.equal(answers.good.prf.signin.page.frame, true);
+});
+
+test("main 8253c0a3 on the same harness as good (11 Nov): fails on the sheet's line, and its console holds the harness's unresolved RPC names that good's edit cleared", () => {
+  const r = judge(answers.badMainNoSheet);
+  assert.deepEqual(BAD_ALL(answers.badMainNoSheet).map((l) => l.replace(/ \(\d+\)$/, "")), [SHEET, "no page error or CSP violation"], r.lines.join("\n"));
+  assert.ok(answers.badMainNoSheet.errors.length > 0 && answers.badMainNoSheet.errors.every((e) => /ERR_NAME_NOT_RESOLVED/.test(e)));
+  assert.match(answers.good.edited, /console lines of it cleared/);
+});
+
+test("the recorded live answer on release-9, before the sheet: the deployed terminal's client is ready on a state with pools", () => {
   const r = judge(answers.liveGood);
-  assert.equal(r.pass, true, r.lines.join("\n"));
+  assert.deepEqual(BAD_ALL(answers.liveGood), [SHEET], r.lines.join("\n"));
   assert.equal(answers.liveGood.mode, "live");
   assert.equal(answers.liveGood.prf.app.signpage, "ready");
   assert.ok(r.lines.includes(`ok  ${APP} (APP_HOST's client ready, signed_in true, pools ${answers.liveGood.prf.app.state.pools.length}, the kit takes it)`));
@@ -142,7 +163,7 @@ test("a step that never ran is BAD, never ok, and a missing error list is BAD", 
   delete rec.twoTabs;
   delete rec.broken;
   delete rec.prf.app;
-  assert.deepEqual(BAD_ALL(rec), [APP, AGAIN, FRAMED, EARLY, NO_CREATE, TWO_TABS, BROKEN]);
+  assert.deepEqual(BAD_ALL(rec), [APP, AGAIN, FRAMED, EARLY, NO_CREATE, TWO_TABS, BROKEN, SHEET]);
   const none = structuredClone(answers.good);
   delete none.errors;
   assert.deepEqual(BAD(none), ["no page error or CSP violation"]);
