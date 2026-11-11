@@ -90,16 +90,21 @@ test("the table venue reader refuses: providers that disagree, an unset buyback 
   assert.throws(() => solanaPoolTableVenueOf("toString" as "pumpswap", { owner: "", data: new Uint8Array(0) } as never), /no such venue/);
 });
 
+/** The reserved fee recipient a Mayhem coin's buy pays (pump Global 483, PumpSwap GlobalConfig 385; card
+ *  sol-pool-buys-mayhem-coins). */
+const RESERVED = "GesfTA3X2arioaHp8bbKdjG9vJtskViWACZoYvxp4twS";
 /** Every case the page can build for a venue: Token-2022 or not, cashback or not, tip or none, coin creator set or not
- *  (PumpSwap; the curve's creator is always set). */
-function* cases(venue: SolanaPoolBuyVenue) {
+ *  (PumpSwap; the curve's creator is always set), a Mayhem coin or not (`mayhem`: its fee recipient the reserved one). */
+function* cases(venue: SolanaPoolBuyVenue, mayhems: readonly boolean[] = venue.kind === "pump-curve" ? [false, true] : [false]) {
   for (const t22 of [false, true])
     for (const cashback of [false, true])
       for (const tip of [0n, TIP])
-        for (const creator of venue.kind === "pumpswap" ? [true, false] : [true]) {
-          const ven = { ...venue, cashback, ...(t22 ? { tokenProgram: SOLANA_TOKEN_2022_PROGRAM, tokenAccountSize: 182 } : {}), ...(creator ? {} : { coinCreator: SOLANA_SYSTEM_PROGRAM }) } as SolanaPoolBuyVenue;
-          yield { ven, tip, name: `${venue.kind}${t22 ? " token-2022" : ""}${cashback ? " cashback" : ""}${creator ? "" : " no-creator"} ${tip > 0n ? "tip" : "none"}` };
-        }
+        for (const creator of venue.kind === "pumpswap" ? [true, false] : [true])
+          for (const mayhem of mayhems) {
+            const fee = !mayhem ? {} : venue.kind === "pumpswap" ? { protocolFeeRecipient: RESERVED } : { feeRecipient: RESERVED };
+            const ven = { ...venue, cashback, ...fee, ...(t22 ? { tokenProgram: SOLANA_TOKEN_2022_PROGRAM, tokenAccountSize: 182 } : {}), ...(creator ? {} : { coinCreator: SOLANA_SYSTEM_PROGRAM }) } as SolanaPoolBuyVenue;
+            yield { ven, tip, cashback, name: `${venue.kind}${mayhem ? " mayhem" : ""}${t22 ? " token-2022" : ""}${cashback ? " cashback" : ""}${creator ? "" : " no-creator"} ${tip > 0n ? "tip" : "none"}` };
+          }
 }
 /** A venue's generations, each made when the trees held the sizes given (null: the curve's frozen first). */
 const generations = async (kind: "pump-curve" | "pumpswap", made: readonly ({ state: number; label: number } | null)[]) => {
@@ -191,7 +196,7 @@ test("size at the edges: PumpSwap on two generations, every case: the last entry
   assert.equal(largest, 1204);
 });
 
-test("size: the curve's one frozen generation fits every case at any tree size (1,137 B at worst), so it never becomes a limit", async () => {
+test("size: the curve's one frozen generation fits every case at any tree size (1,168 B at worst, a Mayhem coin), so it never becomes a limit", async () => {
   const { venue, req, chain } = await setup("pump");
   const [g1] = await generations("pump-curve", [null]);
   const { table: _t, ...bare } = chain;
@@ -202,7 +207,32 @@ test("size: the curve's one frozen generation fits every case at any tree size (
         const b = buildSolanaPoolBuyOnTables(cfg, { ...release, stateRootIndex: sri, labelRootIndex: lri }, ven, { ...req, tip, cluster: tip > 0n ? "mainnet" : "devnet" }, { ...bare, stateSize }, [g1!.table], { pick: () => 0 });
         largest = Math.max(largest, b.size);
       }
-  assert.ok(largest <= 1137, `${largest} B`);
+  // 1,137 B at worst for a coin that is not Mayhem; a Mayhem coin's reserved fee recipient is not in the frozen table
+  // (it holds Global's fee recipient), so it goes as a static key, 31 B more: 1,168 B, 64 B to spare
+  assert.ok(largest <= 1168, `${largest} B`);
+});
+
+test("size: a Mayhem PumpSwap buy on today's generation (no reserved recipient in it) fits every case but a cashback pool's with a tip: that one is no_table_fits by name", async () => {
+  const { venue, req, chain } = await setup("pumpswap");
+  const [g1] = await generations("pumpswap", [FIRST]);
+  const { table: _t, ...bare } = chain;
+  const over: string[] = [];
+  let largest = 0;
+  for (const { ven, tip, cashback, name } of cases(venue, [true])) {
+    const r = { ...req, tip, cluster: tip > 0n ? "mainnet" : "devnet" } as typeof req;
+    try {
+      largest = Math.max(largest, buildSolanaPoolBuyOnTables(cfg, release, ven, r, { ...bare, stateSize: 6 }, [g1!.table], { pick: () => 0 }).size);
+    } catch (e) {
+      assert.match((e as Error).message, /^no_table_fits: the smallest is 12(6[0-9]) bytes > 1232$/, name);
+      assert.ok(cashback && tip > 0n, name);
+      over.push(name);
+    }
+  }
+  // the reserved recipient and its wSOL account as static keys, 62 B more than a pool that is not Mayhem
+  assert.ok(largest <= 1232, `${largest} B`);
+  // a cashback pool whose coin has a creator, with a tip (every mainnet buy tips): the generation that holds the reserved
+  // recipient and its wSOL account is what lets it fit
+  assert.deepEqual(over, ["pumpswap mayhem cashback tip", "pumpswap mayhem token-2022 cashback tip"]);
 });
 
 test("the selector: the smallest of the given tables, one tip account for all; none, or none that fits: no_table_fits", async () => {
