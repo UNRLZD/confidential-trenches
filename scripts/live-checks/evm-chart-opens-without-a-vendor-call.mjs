@@ -8,7 +8,8 @@
 //   GET /v1/market/lists?chain=base                                   (one read: the trending tokens)
 //   GET /v1/market/candles?chain=base&token=<t>&tf=15m&limit=500      (the token page's first read, for N tokens)
 // N (default 10) distinct tokens, Trending 5m's then Trending 1h's rows in order, one after another, each read as the
-// page reads it (a 429 again at its Retry-After until THROTTLE_SPAN_S is waited, throttleWaitMs), and passes only when:
+// page reads it (candles-read.mjs: a 429 again at its Retry-After, within one THROTTLE_SPAN_S span for the run), and
+// passes only when:
 //   - the lists answer 200 with at least N distinct trending tokens;
 //   - every candles answer is 200 JSON with X-Helper-Commit a full sha, its src one the helper names (X-Helper-Source
 //     and the body's src alike): "chain" or "chain,geckoterminal" (our own bars, the vendor only before our first), or
@@ -23,7 +24,7 @@
 //   node scripts/live-checks/evm-chart-opens-without-a-vendor-call.mjs [--base <helper url>] [--n <count>] [--record <file>]
 import { writeFileSync } from "node:fs";
 import "../net-window.mjs";
-import { THROTTLE_SPAN_S, throttleWaitMs } from "../../apps/terminal/src/screens/token/candles.ts";
+import { candlesReader, THROTTLE_SPAN_S } from "./candles-read.mjs";
 import { APP, BASE } from "./index-evm-swaps.mjs";
 
 const KEY = "evm-chart-opens-without-a-vendor-call";
@@ -121,8 +122,8 @@ async function get(base, path, fetchFn) {
 }
 
 /** One run: the lists, then each of the first `n` trending tokens' candles, one after another, each read as the page
- *  reads it: a 429 again at its Retry-After until THROTTLE_SPAN_S is waited (`wait`), the last answer judged with
- *  `first` (its first read's time) and `waitedMs`. */
+ *  reads it (candles-read.mjs, one span for the run, its clock the time waited: the reads are one after another), the
+ *  last answer judged with `first` (its first read's time) and `waitedMs`. */
 export async function read(base = BASE, n = N, fetchFn = fetch, wait = (ms) => new Promise((ok) => setTimeout(ok, ms))) {
   const lists = await get(base, LISTS_PATH, fetchFn);
   let body = null;
@@ -132,15 +133,16 @@ export async function read(base = BASE, n = N, fetchFn = fetch, wait = (ms) => n
     // judged as no tokens
   }
   const candles = [];
+  let waited = 0;
+  const reader = candlesReader({ now: () => waited, wait: async (ms) => void (await wait(ms), (waited += ms)) });
   for (const token of lists.status === 200 ? trending(body).slice(0, n) : []) {
-    let r = await get(base, CANDLES_PATH(token), fetchFn);
-    const first = r.at;
-    let waitedMs = 0;
-    for (let w; r.status === 429 && (w = throttleWaitMs(r.headers["retry-after"] ?? null, waitedMs)) !== null; waitedMs += w) {
-      await wait(w);
-      r = await get(base, CANDLES_PATH(token), fetchFn);
-    }
-    candles.push({ coin: token, first, waitedMs, ...r });
+    let first;
+    const { waits, ...r } = await reader.read(async () => {
+      const a = await get(base, CANDLES_PATH(token), fetchFn);
+      first ??= a.at;
+      return a;
+    });
+    candles.push({ coin: token, first, waitedMs: (waits ?? []).reduce((x, y) => x + y, 0), ...r });
   }
   return { base, n, lists, candles };
 }

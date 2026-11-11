@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 import { HELD_HISTORY_BARS, HELD_HISTORY_TF, HELD_MARKET_MAX } from "../../packages/kit/src/index.ts";
 import { HELD_MAX } from "../../apps/helper/src/data/held.ts";
 import { judge, OFF_LIST, pick, read, READS, SPEED_MS } from "./market-token-reads.mjs";
+import { candlesReader } from "./candles-read.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const A = JSON.parse(readFileSync(path.join(HERE, "market-token-reads.answers.json"), "utf8"));
@@ -85,4 +86,25 @@ test("made from good: each fault FAILs", async () => {
     const r = await run(edit(fn));
     assert.equal(r.ok, false, why);
   }
+});
+
+// card evm-chart-opens-without-a-vendor-call: the candles read as the token page reads it (candles-read.mjs)
+test("a listed token's candles 429 that clears inside the span passes; one still standing after it, or an empty 200, FAILs", async () => {
+  const clock = { t: 0 };
+  const reader = candlesReader({ now: () => clock.t, wait: async (ms) => void (clock.t += ms) });
+  const t = Object.keys(A.good.run.chains.solana.candles)[0];
+  const url = `${BASE}${READS.candles("solana", t)}`;
+  let refused = 1;
+  const base = replay(A.good.run);
+  const r = await read(undefined, async (u, init) => (u === url && refused-- > 0 ? new Response("{}", { status: 429, headers: { "retry-after": "40" } }) : base(u, init)), reader);
+  assert.deepEqual(r.chains.solana.candles[t].waits, [40_000]);
+  for (const [chain, c] of Object.entries(r.chains)) if (c.held) c.held.ms = A.good.run.chains[chain].held.ms;
+  const passed = await judge(r);
+  assert.deepEqual(bad(passed), []);
+  const stood = edit((rec) => Object.assign(rec.chains.solana.candles[t], { status: 429, body: '{"error":{"code":"rate_limited"}}', waits: [40_000, 35_000] }));
+  const judged = judge(stood);
+  const lines = bad(await judged);
+  assert.ok(lines.some((l) => l.includes("answers 429 after 75 s of reads at each Retry-After (40, 35 s), the kit takes 0 hourly bars")), lines.join("\n"));
+  const empty = edit((rec) => body(rec.chains.solana.candles[t], (b) => (b.candles = [])));
+  assert.ok(bad(await judge(empty)).some((l) => l.includes("answers 200, the kit takes 0 hourly bars")));
 });

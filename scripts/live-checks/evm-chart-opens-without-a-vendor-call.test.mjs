@@ -71,3 +71,11 @@ test("read: the lists once, then each of the first n trending tokens once, Trend
   assert.deepEqual(asked.map((u) => new URL(u).pathname), ["/v1/market/lists", "/v1/market/candles", "/v1/market/candles"]);
   assert.deepEqual(run.candles.map((c) => c.coin), [`0x${"1".repeat(40)}`, `0x${"2".repeat(40)}`]);
 });
+
+test("a chart that opened after a 429 cleared inside the span passes, its wait named", () => {
+  const run = structuredClone(A.good);
+  run.candles[1].waitedMs = 30_000;
+  const r = judge(run);
+  assert.deepEqual(bad(r), []);
+  assert.ok(r.lines.some((l) => l.endsWith("after 30 s of 429s")));
+});
