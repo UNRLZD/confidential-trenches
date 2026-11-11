@@ -171,7 +171,7 @@ test("a bad index or id is refused and nothing is stored", async () => {
   }
 });
 
-test("nameDeposit waits for the seed lock (a sign out or a seed write in flight) and writes only after it", async () => {
+test("nameDeposit waits for a sign out holding the seed lock (exclusive) and writes only after it", async () => {
   const name = `deposit-name-lock-${process.pid}`;
   const s = await openWalletStore({ indexedDB: new IDBFactory(), name });
   closers.push(s);
@@ -281,4 +281,19 @@ test("two tabs naming one scope at once, a lower index and a higher one: the hig
     await Promise.all([x.nameDeposit({ entropy: entropy() }, high), y.nameDeposit({ entropy: entropy() }, low)]);
     assert.deepEqual(await a.get("meta", `deposit/${scope}`), { v: 1, scope: scope.toString(), index: 8, id: id(8) }, `round ${round}`);
   }
+});
+
+// The review of dddcc5f6, P3-1: the compare on the scope's record holds only a wrapped record (sameRaw reads its iv); a
+// record there that is not one (corrupted or tampered with) is never "the same" as itself, so the naming looped for
+// ever under the seed lock and every quote, settle and sign out waited on it. Such a record is written over, as before.
+test("a record at the scope's key that is not a wrapped record is written over: the naming ends", { timeout: 10_000 }, async () => {
+  const idb = new IDBFactory();
+  const name = `deposit-name-junk-${process.pid}`;
+  const s = await openWalletStore({ indexedDB: idb, name });
+  closers.push(s);
+  await s.insertSeed(SEED());
+  await rawPut(idb, name, "meta", "deposit/9", { junk: true });
+  const named = await s.nameDeposit({ entropy: new Uint8Array(16).fill(0x7f) }, { scope: 9n, index: 0, id: id(0) });
+  assert.deepEqual(named, { v: 1, scope: "9", index: 0, id: id(0) });
+  assert.deepEqual(await s.get("meta", "deposit/9"), named);
 });

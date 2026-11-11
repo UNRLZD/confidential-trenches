@@ -360,7 +360,8 @@ export async function openWalletStore(opts: WalletStoreOptions = {}): Promise<Wa
   // durability; resolves after the commit. false: another tab wrote first.
   // `also`: more records of the same store written in the same transaction, only when the compare holds; `next`
   // undefined writes `also` alone, the record under `key` left as it is.
-  // `also`: records written in the same transaction; `same`: records of the store that must still be as read too
+  // `also`: records written in the same transaction; `same`: records of the store that must still be as read too, each a
+  // wrapped record or undefined (sameRaw reads the iv)
   async function casPut(store: WalletStoreName, key: string, before: unknown, next: unknown, also: [string, unknown][] = [], same: [string, unknown][] = []): Promise<boolean> {
     const tx = live().transaction(store, "readwrite", { durability: "strict" });
     const os = tx.objectStore(store);
@@ -548,8 +549,11 @@ export async function openWalletStore(opts: WalletStoreOptions = {}): Promise<Wa
           // index, and never replaces the newer one another tab named since (wallet.md W:355-358)
           if (had && had.scope === rec.scope && had.index > rec.index) return had;
           // the compare is on the seed record and this scope's record read and checked above: a seed written since gets
-          // no record, and a record another tab wrote since is read again (the lock is shared: see the top)
-          if (await casPut("meta", "seed", before, undefined, [[key, await wrap("meta", key, rec)]], [[key, hadRaw]])) {
+          // no record, and a record another tab wrote since is read again (the lock is shared: see the top). Only a
+          // wrapped record or none can be compared (sameRaw reads the iv): one that is neither is written over, as it was
+          // under the exclusive lock, so the loop ends (the review of dddcc5f6, P3-1)
+          const held: [string, unknown][] = hadRaw === undefined || (hadRaw as Wrapped).iv instanceof Uint8Array ? [[key, hadRaw]] : [];
+          if (await casPut("meta", "seed", before, undefined, [[key, await wrap("meta", key, rec)]], held)) {
             notify(["meta"]);
             return rec;
           }
