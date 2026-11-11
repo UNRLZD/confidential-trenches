@@ -5,9 +5,9 @@
 // (pools included), which passes; liveGood: the deployed SIGN_HOST at release-9 framing the deployed terminal, whose
 // own kit client is ready on that state, which passes, and edited from it, the step's bads (the client down or never
 // settled, a state the kit refuses, no pools, no state). Each bad fails on its own lines only:
-// - good (edited) was recorded with card signing-views-open-over-the-app on the harness, where every RPC name answers
-//   not found: those console lines are cleared from it, and badMainNoSheet (main 8253c0a3, the same harness, unedited)
-//   shows main gives the same lines and fails the sheet's line;
+// - good was recorded, unedited, with card signing-views-open-over-the-app on the harness, which maps every outside
+//   name to not found: its console lines for those names are not counted on a harness run (HARNESS_UNRESOLVED), and
+//   badMainNoSheet (main 8253c0a3, the same harness, unedited) fails the sheet's line only;
 // - badPageOfItsOwn: the good of this tree before card signing-views-open-over-the-app, each screen a page of its own
 //   with the frame taken out of the document: fails on the sheet's line only. Every record but good was recorded before
 //   that card, so the sheet's line is read on good and on badPageOfItsOwn alone (the others are read on their own lines);
@@ -27,7 +27,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { judge, watch } from "./signpage-signin-kinds.mjs";
+import { HARNESS_UNRESOLVED, judge, watch } from "./signpage-signin-kinds.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const answers = JSON.parse(readFileSync(path.join(HERE, "signpage-signin-kinds.answers.json"), "utf8"));
@@ -64,11 +64,30 @@ test("a page of its own over no frame (this tree before card signing-views-open-
   assert.equal(answers.good.prf.signin.page.frame, true);
 });
 
-test("main 8253c0a3 on the same harness as good (11 Nov): fails on the sheet's line, and its console holds the harness's unresolved RPC names that good's edit cleared", () => {
+test("main 8253c0a3 on the same harness as good (11 Nov), unedited: fails on the sheet's line only", () => {
   const r = judge(answers.badMainNoSheet);
-  assert.deepEqual(BAD_ALL(answers.badMainNoSheet).map((l) => l.replace(/ \(\d+\)$/, "")), [SHEET, "no page error or CSP violation"], r.lines.join("\n"));
-  assert.ok(answers.badMainNoSheet.errors.length > 0 && answers.badMainNoSheet.errors.every((e) => /ERR_NAME_NOT_RESOLVED/.test(e)));
-  assert.match(answers.good.edited, /console lines of it cleared/);
+  assert.deepEqual(BAD_ALL(answers.badMainNoSheet), [SHEET], r.lines.join("\n"));
+  assert.ok(answers.badMainNoSheet.errors.length > 0 && answers.badMainNoSheet.errors.every((e) => HARNESS_UNRESOLVED.test(e)));
+});
+
+test("the harness's unresolved outside names are not the page's errors on a harness run only: any other line, or the same on the live host, fails", () => {
+  const good = answers.good;
+  assert.equal(good.mode, "harness");
+  assert.ok(!("edited" in good), "good is the run as recorded");
+  assert.ok(good.errors.length > 0 && good.errors.every((e) => HARNESS_UNRESOLVED.test(e)), "good's console holds only the harness's unresolved names");
+  const r = judge(good);
+  assert.ok(r.lines.includes(`ok  no page error or CSP violation (0)`), r.lines.join("\n"));
+  assert.ok(r.lines.includes(`ok  harness: ${good.errors.length} console line(s) for outside names it leaves unresolved, not counted`));
+  // planted: the same lines on the live host
+  const live = structuredClone(good);
+  live.mode = "live";
+  assert.ok(judge(live).lines.some((l) => l.startsWith(`BAD no page error or CSP violation (${good.errors.length}):`)));
+  // planted: another failure to load on the harness, a resolved name's 404 and an unresolved line with more after it
+  for (const line of ["console: Failed to load resource: the server responded with a status of 404 () (https://confidential.unrealized.trade/x)", "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://x.example/) and more", "console: Failed to load resource: net::ERR_CONNECTION_REFUSED (https://x.example/)"]) {
+    const rec = structuredClone(good);
+    rec.errors.push(line);
+    assert.ok(judge(rec).lines.includes(`BAD no page error or CSP violation (1): ${line}`), `${line}: ${judge(rec).lines.join("\n")}`);
+  }
 });
 
 test("the recorded live answer on release-9, before the sheet: the deployed terminal's client is ready on a state with pools", () => {
@@ -99,7 +118,8 @@ test("the terminal's step fails on a client down, a state the kit refuses, no po
   const h = structuredClone(answers.good);
   h.mode = "live";
   delete h.prf.app.signpage;
-  assert.deepEqual(BAD(h), [APP]);
+  // (and the harness's unresolved outside names, named live, count as the page's errors)
+  assert.deepEqual(BAD(h), [APP, "no page error or CSP violation"]);
 });
 
 test("the card's page before the recheck's Lows fails: an open refused during a resync, Cancel stuck on a broken store", () => {

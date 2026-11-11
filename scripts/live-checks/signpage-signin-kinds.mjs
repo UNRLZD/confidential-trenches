@@ -184,7 +184,13 @@ export function judge(rec) {
   const sheets = [p.signin?.page, p.backup?.page, so.page, so.early, n.signout?.page, n.saved, w.choose, w.existing, ex, t.backup?.page, bk.open];
   const kept = sheets.filter((x) => x?.layer === "shown" && x?.frame === true).length;
   say(kept === sheets.length, `the sheet keeps the app's frame in the page under every screen it draws (${kept} of ${sheets.length})`);
-  say(Array.isArray(rec.errors) && rec.errors.length === 0, `no page error or CSP violation (${Array.isArray(rec.errors) ? rec.errors.length : "no record"})${Array.isArray(rec.errors) && rec.errors.length ? `: ${rec.errors.join("; ")}` : ""}`);
+  // the harness maps every name but its own to not found (launch(): MAP * ~NOTFOUND), so a page's reads of outside hosts
+  // (public RPCs, the helper) fail there by design: on a harness run those lines alone are not the page's errors. Any
+  // other line, and the same line on the live host, still is.
+  const errors = Array.isArray(rec.errors) ? rec.errors.filter((e) => !(rec.mode === "harness" && HARNESS_UNRESOLVED.test(e))) : null;
+  const skipped = Array.isArray(rec.errors) ? rec.errors.length - errors.length : 0;
+  say(errors !== null && errors.length === 0, `no page error or CSP violation (${errors ? errors.length : "no record"})${errors?.length ? `: ${errors.join("; ")}` : ""}`);
+  if (skipped) say(true, `harness: ${skipped} console line(s) for outside names it leaves unresolved, not counted`);
   return { pass: lines.every((l) => l.startsWith("ok ")), lines };
 }
 
@@ -247,6 +253,9 @@ async function passkeyNoPrf(page) {
 
 /** The check's page and console hooks: a page error, and a console error kept through the shared collector
  *  (console-errors.mjs) as its text and its address's origin and path. */
+/** A console line on the harness for a name it does not serve: the resource failed to resolve, nothing else. */
+export const HARNESS_UNRESOLVED = /^console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED(?: \([^)]*\))?$/;
+
 export function watch(page, errors) {
   page.on("pageerror", (e) => errors.push(`pageerror: ${e.message}`));
   page.on("console", (m) => m.type() === "error" && errors.push(`console: ${consoleError(m)}`));
