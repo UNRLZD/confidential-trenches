@@ -4895,6 +4895,35 @@ test("card wallets-found-in-one-read: a typed amount past what the recorded Ws h
   assert.ok(!f.reads.includes(W.address));
 });
 
+test("card wallets-found-in-one-read: a W whose buy record could not be read goes to the finder even when the recorded Ws cover the sale, so 100 percent is never sold short in silence", async () => {
+  const w = await world({ others: [{ l: 100n, j: 0, held: T3 }] });
+  const f = finder(pastBuys(20), () => [[MINT, T3]]);
+  const unreadable = f.addressOf(100n);
+  const host: PoolSellHost = { ...w.host, wallets: f.wallets, bought: { get: async (a) => {
+    if (a === unreadable) throw new Error("the store did not answer");
+    return { mint: a === W.address ? MINT : OTHER_MINT, program: TOKEN_PROGRAM };
+  }, put: async () => {} } };
+  let plan!: Awaited<ReturnType<typeof planPoolSell>>;
+  await onTestClock(async () => void (plan = await planPoolSell(host, share(10_000))));
+  assert.deepEqual(new Set(plan.legs.map((x) => x.w.address)), new Set([W.address, unreadable]), "both Ws sold");
+  assert.equal(plan.total, AMOUNT + T3);
+  assert.deepEqual(f.reads, [unreadable], "the finder reads that W alone");
+});
+
+test("card wallets-found-in-one-read: the fast path is the rule for every share: a recorded W of 1 unit beside an unrecorded W of 3,000,000 tokens sells from the records alone at 50 and 100 percent, the finder reading none", async () => {
+  for (const bps of [5_000, 10_000]) {
+    const w = await world({ held: 1n, others: [{ l: 100n, j: 0, held: 3_000_000_000_000n }] });
+    const f = finder(pastBuys(2), () => [[MINT, 3_000_000_000_000n]]);
+    const unrecorded = f.addressOf(100n);
+    const host: PoolSellHost = { ...w.host, wallets: f.wallets, bought: { get: async (a) => (a === unrecorded ? undefined : { mint: MINT, program: TOKEN_PROGRAM }), put: async () => {} } };
+    let got: unknown;
+    await onTestClock(async () => void (got = await planPoolSell(host, share(bps)).catch((e: unknown) => e)));
+    if (bps === 10_000) assert.deepEqual((got as Awaited<ReturnType<typeof planPoolSell>>).legs.map((x) => [x.w.address, x.units]), [[W.address, 1n]], "100 percent: the 1 unit the records name");
+    else assert.equal((got as { code?: string }).code, "not_funded", "50 percent of 1 unit is no unit: refused, never planned from the unrecorded W");
+    assert.deepEqual(f.reads, [], `${bps}: no finder read`);
+  }
+});
+
 test("card wallets-found-in-one-read: no recorded W holds the token (an airdrop in a W whose record names another mint): the finder's read finds it and it sells, never a refusal", async () => {
   const w = await world({ buy: { mint: OTHER_MINT, program: TOKEN_PROGRAM } });
   const f = finder(pastBuys(5), (a) => (a === W.address ? [[MINT, AMOUNT]] : []));

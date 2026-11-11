@@ -617,12 +617,13 @@ export type PoolSellPlan = { units: bigint; total: bigint; legs: readonly { w: L
  * - The Ws: the page's buy wallets (h.wallets(): every W the pool's spent notes paid, derived from the seed) that its own
  *   buy record names for this token (h.bought, written by the buy before its send), read here with no read of the
  *   finder's: the fast path, so a token held in 1 W of 100 past buys costs that one W's reads (card
- *   wallets-found-in-one-read). When those do not cover the sale (the units it asks, a share's of their total or a
- *   typed amount, come to 0 or past it: no recorded W holds the token, or they hold less than the amount), the finder
+ *   wallets-found-in-one-read). When those do not cover the sale (no recorded W holds the token, or a typed amount is
+ *   past what they hold), the finder
  *   (on mainnet the helper's one read, paced) reads every other W, one per request, and those it lists holding the token
  *   join: a W with no record (a buy from before the record, a restored device) and a token sent to a W whose record
  *   names another (an airdrop). The listed holdings only add a W to read; no amount of theirs is used. So a share sells
- *   that share of what the recorded Ws hold whenever any does, and of every W's holding only when none does.
+ *   that share of what the recorded Ws hold whenever any does, and of every W's holding only when none does. A W whose
+ *   record could not be read is the finder's to read even when the records cover the sale, never left out in silence.
  * - Each W's holding: its token account on both RPCs, the same on both (ataHeld: read again once, then failed), each W
  *   in requests of its own (a read names one W of the user's at most); the mint once, on both RPCs. An account both
  *   RPCs read frozen is not sold (holds 0 here; a sell it leaves short is not_allowed; a share then ends part_filled at
@@ -642,9 +643,10 @@ export type PoolSellPlan = { units: bigint; total: bigint; legs: readonly { w: L
 export async function planPoolSell(h: Pick<PoolSellHost, "rpcs" | "wallets" | "bought">, ask: PoolAsk): Promise<PoolSellPlan> {
   if (ask.kind !== "pool.sell" || ask.chain !== "solana" || ask.token === null) return no("not_allowed");
   const token = ask.token;
-  // each W's buy record, read once; one that does not read is no record (unknown is not empty: the finder may read it)
+  // each W's buy record, read once; one that does not read is unknown, never empty: the finder reads that W
   const records = new Map<string, Promise<{ mint: string } | undefined>>();
-  const recordOf = (a: string) => records.get(a) ?? records.set(a, Promise.resolve(h.bought?.get(a)).catch(() => undefined)).get(a)!;
+  const unknown = new Set<string>();
+  const recordOf = (a: string) => records.get(a) ?? records.set(a, Promise.resolve(h.bought?.get(a)).catch(() => (unknown.add(a), undefined))).get(a)!;
   const seen = new Set<string>();
   const held: { w: ListedBuyWallet; held: bigint; frozen?: true }[] = [];
   let program: string | null = null;
@@ -677,17 +679,14 @@ export async function planPoolSell(h: Pick<PoolSellHost, "rpcs" | "wallets" | "b
   }
   await readOf(fast);
   const total0 = held.reduce((t, x) => t + x.held, 0n);
-  const units0 = poolSellUnits(total0, ask);
   // not covered (no recorded W holds it, or they hold less than a typed amount): every other W through the finder, one
   // per request, and each it lists holding the token is read and added (an airdrop, a buy from before the record, a
-  // restored device): what that cost before, never a refusal
-  if (units0 <= 0n || units0 > total0) {
+  // restored device): what that cost before, never a refusal. Covered: only the Ws whose record could not be read, so
+  // a share is never taken of a total that misses one in silence
+  const covered = total0 > 0n && poolSellUnits(total0, ask) <= total0;
+  if (!covered || unknown.size > 0) {
     const rest: ListedBuyWallet[] = [];
-    for (const x of sol(await h.wallets((a) => !seen.has(a)))) {
-      if (seen.has(x.address) || !x.holdings?.tokens.has(token)) continue;
-      seen.add(x.address);
-      rest.push(x);
-    }
+    for (const x of sol(await h.wallets((a) => (covered ? unknown.has(a) : !seen.has(a))))) if (x.holdings?.tokens.has(token)) rest.push(x);
     await readOf(rest);
   }
   const frozen = held.some((x) => "frozen" in x);
