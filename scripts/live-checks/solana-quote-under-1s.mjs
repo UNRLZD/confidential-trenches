@@ -29,7 +29,8 @@ export const WSOL = "FVee2JCpMd9k17iP1LLCSP28wwLt5N172pULCqUo8qQi";
 export const BUY_LAMPORTS = 10_000_000n;
 export const SLIPPAGE_BPS = 500;
 export const RUNS = 20;
-/** The helper's /v1/rpc takes 16 calls of one caller in 10 s (apps/helper/src/rpc/rpc.ts RPC_CLIENT_MAX); a quote and its
+/** The helper's /v1/rpc takes 16 calls of one caller in 10 s on the public endpoint (apps/helper/src/rpc/rpc.ts
+ * RPC_CLIENT_MAX; 42 on our keyed providers, RPC_PAGE_NEED); a quote and its
  * dry send ask about 14 of provider B, so runs go 10 s apart. */
 export const GAP_MS = 10_000;
 export const P50_MS = 1_000;

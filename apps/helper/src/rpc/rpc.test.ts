@@ -13,6 +13,9 @@ import { createRpc, readUpstreams, RPC_ANSWER_MAX, RPC_UPSTREAMS } from "./rpc.t
 import { providerHolds, RETRY_AFTER_MAX_S } from "../limits/limits.ts";
 // read off the module, so this file still loads at a base without them and its tests fail on the behaviour (red runs)
 const { RPC_CHAIN_MAX, RPC_CLIENT_MAX } = rpcModule as unknown as { RPC_CHAIN_MAX: number; RPC_CLIENT_MAX: number };
+// each route's share: what one signing page draws in its busiest 10 s (card helper-gives-a-trade-its-reads)
+const NEED = (rpcModule as unknown as { RPC_PAGE_NEED?: Record<string, number> }).RPC_PAGE_NEED ?? { solana: RPC_CLIENT_MAX, base: RPC_CLIENT_MAX };
+const SOL_SHARE = NEED.solana!;
 
 const KEY = "fake-helius-key-0123456789abcdef";
 type Seen = { url: string; headers: IncomingMessage["headers"]; body: string };
@@ -505,15 +508,16 @@ test("review F-B: after a provider 429 with Retry-After 30, zero provider calls 
   assert.equal(calls, 1, `the provider was called ${calls - 1} more times inside the reset it named`);
 });
 
-test("review F-D: more than five addresses at their full share are needed to throttle an honest first-time caller (a provider with no limit per method)", async () => {
+test("review F-D, card helper-gives-a-trade-its-reads: (the total less the reserve) / the page's share addresses at their full share fit before an honest first-time caller is refused (a provider with no limit per method): two at Helius free's 100", async () => {
   let t = 1_800_000_000_000;
-  const r = createRpc({ RPC_BUDGET_SOLANA: `${RPC_CHAIN_MAX},${RPC_CLIENT_MAX}` }, { now: () => (t += 1), fetch: (async () => new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: 1 }), { status: 200, headers: { "content-type": "application/json" } })) as never });
+  const r = createRpc({ RPC_BUDGET_SOLANA: `${RPC_CHAIN_MAX},${SOL_SHARE}` }, { now: () => (t += 1), fetch: (async () => new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: 1 }), { status: 200, headers: { "content-type": "application/json" } })) as never });
   let n = 0;
   for (; n < 100; n++) {
-    for (let i = 0; i < RPC_CLIENT_MAX; i++) await r.handle("solana", JSON_T, JSON.stringify(getBalance()), `198.51.100.${n}`);
+    for (let i = 0; i < SOL_SHARE; i++) await r.handle("solana", JSON_T, JSON.stringify(getBalance()), `198.51.100.${n}`);
     if ((await r.handle("solana", JSON_T, JSON.stringify(getBalance()), "192.0.2.200")).status === 429) break;
   }
-  assert.ok(n + 1 > 5, `${n + 1} addresses lock out an honest caller`);
+  assert.equal(n, Math.floor((RPC_CHAIN_MAX - 3) / SOL_SHARE), `${n + 1} addresses lock out an honest caller`);
+  assert.equal(n, 2, "two pages at their full share at once on Helius free");
 });
 
 test("each chain's budget is RPC_BUDGET_<CHAIN> when set (\"<total>,<per client>[,<per method>]\"), else the provider's published limit; a bad value stops the start naming the variable", () => {
@@ -522,21 +526,21 @@ test("each chain's budget is RPC_BUDGET_<CHAIN> when set (\"<total>,<per client>
   const f = (async () => (calls++, new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: 1 }), { status: 200, headers: { "content-type": "application/json" } }))) as never;
   assert.throws(() => createRpc({ RPC_BUDGET_BASE: "16,16" }, { fetch: f }), /^Error: RPC_BUDGET_BASE must be/);
   assert.throws(() => createRpc({ RPC_BUDGET_SOLANA: "lots" }, { fetch: f }), (e: Error) => !e.message.includes("lots"));
-  const r = createRpc({ RPC_BUDGET_SOLANA: "20,12" }, { now: () => (t += 1), fetch: f });
+  const r = createRpc({ RPC_BUDGET_SOLANA: "80,50" }, { now: () => (t += 1), fetch: f });
   return (async () => {
-    for (let i = 0; i < 13; i++) await r.handle("solana", JSON_T, JSON.stringify(getBalance()), "a");
-    assert.equal(calls, 12, "the share from the environment");
-    for (let i = 0; i < 13; i++) await r.handle("solana", JSON_T, JSON.stringify(getBalance()), "b");
-    assert.equal(calls, 17, "the total from the environment less Solana's own-read reserve of 3 (two numbers: no limit per method)");
+    for (let i = 0; i < 51; i++) await r.handle("solana", JSON_T, JSON.stringify(getBalance()), "a");
+    assert.equal(calls, 50, "the share from the environment");
+    for (let i = 0; i < 51; i++) await r.handle("solana", JSON_T, JSON.stringify(getBalance()), "b");
+    assert.equal(calls, 77, "the total from the environment less Solana's own-read reserve of 3 (two numbers: no limit per method)");
     for (let i = 0; i < RPC_CLIENT_MAX + 1; i++) await r.handle("base", JSON_T, JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_blockNumber", params: [] }), "a");
-    assert.equal(calls, 17 + RPC_CLIENT_MAX, "another chain keeps the default");
+    assert.equal(calls, 77 + RPC_CLIENT_MAX, "another chain keeps the default (its public endpoint's)");
   })();
 });
 
 test("re-check env: an RPC_BUDGET_<CHAIN> whose share is under a full batch (RPC_BATCH_MAX), or whose method limit is under a batch or over the total, stops the start naming the variable only", () => {
   for (const [name, bad] of [["RPC_BUDGET_SOLANA", "100,5"], ["RPC_BUDGET_SOLANA", `100,${RPC_BATCH_MAX - 1}`], ["RPC_BUDGET_BASE", "50,9"], ["RPC_BUDGET_SOLANA", "100,16,9"], ["RPC_BUDGET_NEAR", "100,16,101"]] as const)
     assert.throws(() => createRpc({ [name]: bad }), (e: Error) => e.message.startsWith(`${name} must be`) && !e.message.includes(bad), `${name}=${bad}`);
-  assert.doesNotThrow(() => createRpc({ RPC_BUDGET_SOLANA: `100,${RPC_BATCH_MAX}`, RPC_BUDGET_BASE: "500,50,40" }));
+  assert.doesNotThrow(() => createRpc({ RPC_BUDGET_SOLANA: `100,${SOL_SHARE}`, RPC_BUDGET_BASE: "500,50,40" }));
 });
 
 test("re-check F-D solana: under the public endpoint's limits (100 a 10 s, 40 a 10 s for one method, rolling), callers at their share of one method never make it throttle, and an honest caller of another method is served", async () => {
@@ -602,11 +606,11 @@ test("re-check F-D: the helper's own reads (no caller) draw from the chain's tot
   let calls = 0;
   let t = 1_800_000_000_000;
   const f = (async () => (calls++, new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: 1 }), { status: 200, headers: { "content-type": "application/json" } }))) as never;
-  const r = createRpc({ RPC_BUDGET_SOLANA: "20,12" }, { now: () => t, fetch: f });
-  for (let i = 0; i < 20; i++) assert.equal((await r.handle("solana", JSON_T, JSON.stringify(getBalance()), undefined, true)).status, 200, `own read ${i + 1}`);
-  assert.equal((await r.handle("solana", JSON_T, JSON.stringify(getBalance()), undefined, true)).status, 429, "the 21st own read in 10 s waits");
+  const r = createRpc({ RPC_BUDGET_SOLANA: "50,42" }, { now: () => t, fetch: f });
+  for (let i = 0; i < 50; i++) assert.equal((await r.handle("solana", JSON_T, JSON.stringify(getBalance()), undefined, true)).status, 200, `own read ${i + 1}`);
+  assert.equal((await r.handle("solana", JSON_T, JSON.stringify(getBalance()), undefined, true)).status, 429, "the 51st own read in 10 s waits");
   assert.equal((await r.handle("solana", JSON_T, JSON.stringify(getBalance()), "device")).status, 429, "and so does a device: the total is spent");
-  assert.equal(calls, 20);
+  assert.equal(calls, 50);
   t += 11_000;
   assert.equal((await r.handle("solana", JSON_T, JSON.stringify(getBalance()), "device")).status, 200, "once they leave the provider's window");
 });
@@ -617,22 +621,23 @@ test("each chain is one budget callers draw from fairly: a heavy caller is throt
   const ok = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getBalance", params: ["x"] });
   next = { status: 200, type: JSON_T, body: echo };
   seen.length = 0;
-  for (let i = 0; i < RPC_CLIENT_MAX; i++) assert.equal((await r.handle("solana", JSON_T, ok, "heavy")).status, 200);
+  for (let i = 0; i < SOL_SHARE; i++) assert.equal((await r.handle("solana", JSON_T, ok, "heavy")).status, 200);
   const h = await r.handle("solana", JSON_T, ok, "heavy");
   assert.equal(h.status, 429);
   assert.deepEqual(JSON.parse(h.body), { error: { code: "rate_limited" } });
   const wait = Number(h.headers?.["Retry-After"]);
   assert.ok(Number.isInteger(wait) && wait >= 1 && wait <= 10, `Retry-After ${wait}`);
-  assert.equal(seen.length, RPC_CLIENT_MAX, "the throttled draw never reached the provider");
+  assert.equal(seen.length, SOL_SHARE, "the throttled draw never reached the provider");
   assert.equal((await r.handle("solana", JSON_T, ok, "honest")).status, 200, "an honest caller in the same window");
   assert.equal((await r.handle("near", JSON_T, JSON.stringify({ jsonrpc: "2.0", id: 1, method: "block", params: { finality: "final" } }), "heavy")).status, 200, "another chain is its own budget");
   assert.equal((await r.handle("solana", JSON_T, ok, undefined, true)).status, 200, "the helper's own reserved read (no caller) draws from no share");
-  // card helper-ready-gate: a background read (no caller, not reserved) leaves the callers' half of the method's 40 free:
-  // the callers drew 17 of the 37 they may, so 40 - 3 - 20 = 17 leaves it nothing
+  // card helper-ready-gate: a background read (no caller, not reserved) leaves the callers' half of the total free: once a
+  // second caller drew its share too, the callers drew 85 of the 97 they may, under the half (50) it must leave
+  for (let i = 0; i < SOL_SHARE; i++) assert.equal((await r.handle("solana", JSON_T, ok, "second")).status, 200);
   assert.equal((await r.handle("solana", JSON_T, ok)).status, 429, "a background read goes behind callers");
   t += wait * 1000;
   assert.equal((await r.handle("solana", JSON_T, ok, "heavy")).status, 200, "after the named wait the heavy caller goes again");
-  assert.ok(RPC_CLIENT_MAX * 6 <= RPC_CHAIN_MAX, "six callers at their full share before anyone else is throttled");
+  assert.ok(SOL_SHARE * 2 <= RPC_CHAIN_MAX - 3, "two callers at their full share before anyone else is throttled");
 });
 
 test("provider URLs: from the environment, http(s) only; an error names the variable, never the value; a public default (solana-devnet and solana-marks: none, off)", () => {
@@ -673,13 +678,15 @@ const keepsPerSecond = (perSecond: number) => {
 test("card app-console-429: one caller's burst of 35 on a keyed provider (Helius free, 100 per 10 s = 10 a second) is paced to the provider's second, so it never throttles, nothing is held, and another caller's read answers 200", async () => {
   const provider = keepsPerSecond(10);
   const lines: string[] = [];
-  const r = createRpc({ SOLANA_RPC_URL: `https://mainnet.helius-rpc.invalid/?api-key=${KEY}`, RPC_BUDGET_SOLANA: "100,16" }, { fetch: provider.fetch as never, log: (l) => lines.push(l) });
+  const r = createRpc({ SOLANA_RPC_URL: `https://mainnet.helius-rpc.invalid/?api-key=${KEY}`, RPC_BUDGET_SOLANA: `100,${SOL_SHARE}` }, { fetch: provider.fetch as never, log: (l) => lines.push(l) });
   const burst = await Promise.all(Array.from({ length: 35 }, (_, i) => r.handle("solana", JSON_T, JSON.stringify(getBalance(i + 1)), "203.0.113.7")));
   const other = await r.handle("solana", JSON_T, JSON.stringify(getBalance()), "203.0.113.8");
   assert.equal(provider.p.throttled, 0, `the provider never throttled (${provider.p.calls} sent)`);
   assert.deepEqual(lines.filter((l) => l.startsWith("rpc hold")), [], "no hold");
   assert.equal(other.status, 200, "another caller is served");
-  assert.equal(burst.filter((a) => a.status === 200).length, 16, "the burst's caller gets its share, RPC_CLIENT_MAX");
+  // under its share of 42, the provider's second bounds a burst sent at once: 10 now, 10 a PACE_SECOND_MS later, within
+  // PACE_MAX_MS (the page's busiest 10 s is spread over the window; scripts/live-checks/helper-gives-a-trade-its-reads.mjs)
+  assert.equal(burst.filter((a) => a.status === 200).length, 20, "the burst's caller gets the provider's room within PACE_MAX_MS");
   for (const a of burst.filter((x) => x.status !== 200)) assert.equal(a.status, 429, "the rest of the burst is that caller's own 429");
 });
 
@@ -721,7 +728,7 @@ test("card helper-rpc-hold-queued: a send waiting for a keyed provider's second 
   // each wait the client asks for is recorded, then waited on the real timer
   const waits: number[] = [];
   const sleep = (ms: number) => (waits.push(ms), new Promise((ok) => setTimeout(ok, ms)));
-  const r = createRpc({ BASE_RPC_URL: `https://base-mainnet.example.invalid/v2/${KEY}`, RPC_BUDGET_BASE: "100,16" }, { fetch: fetch as never, log: (l) => lines.push(l), now: () => performance.timeOrigin + performance.now(), sleep });
+  const r = createRpc({ BASE_RPC_URL: `https://base-mainnet.example.invalid/v2/${KEY}`, RPC_BUDGET_BASE: "100,30" }, { fetch: fetch as never, log: (l) => lines.push(l), now: () => performance.timeOrigin + performance.now(), sleep });
   const blockNumber = (id: number) => JSON.stringify({ jsonrpc: "2.0", id, method: "eth_blockNumber", params: [] });
   const all = await Promise.all(Array.from({ length: 11 }, (_, i) => r.handle("base", JSON_T, blockNumber(i + 1), `198.51.100.${i}`)));
   assert.equal(waits.length, 1, `the 11th alone waited for the provider's next second: ${waits.join(", ")}`);
@@ -1171,4 +1178,23 @@ test("card evm-pool-leaves-any-source: ?keyed=only refuses what the route refuse
   assert.equal(a.status, 400, a.body);
   assert.equal(code(a), "method_not_allowed");
   assert.deepEqual(asked, []);
+});
+
+test("card helper-gives-a-trade-its-reads: a route on our keyed providers gives one caller what one signing page draws in its busiest 10 s (RPC_PAGE_NEED: 42 on Solana, 30 on the mark list and the EVM chains), and an RPC_BUDGET_<CHAIN> naming less is refused at the start, naming the variable only", async () => {
+  const ok = (async (_u: string, i: RequestInit) => new Response(JSON.stringify({ jsonrpc: "2.0", id: (JSON.parse(String(i.body)) as { id: unknown }).id, result: 1 }), { status: 200, headers: { "content-type": "application/json" } })) as never;
+  // one page's window from one address, each read after the last answered, on the real clock: the keyed pace (10 a
+  // second at a total of 100) spreads them over about 4 s, inside the 10 s window
+  const served = async (env: Record<string, string>, chain: string, method: string, n: number) => {
+    // the budget's windows are fixed on its clock: this one starts at a window's start and moves with the real one
+    const t0 = performance.now();
+    const r = createRpc(env, { fetch: ok, log: () => {}, now: () => 1_800_000_000_000 + (performance.now() - t0) });
+    let s = 0;
+    for (let i = 0; i < n; i++) if ((await r.handle(chain as never, JSON_T, JSON.stringify({ jsonrpc: "2.0", id: i + 1, method, params: [] }), "203.0.113.9")).status === 200) s++;
+    return s;
+  };
+  assert.equal(await served({ SOLANA_RPC_URL: `https://mainnet.helius-rpc.invalid/?api-key=${KEY}` }, "solana", "getSlot", 43), 42, "Solana: the page's 42, the 43rd its own 429");
+  assert.equal(await served({ BASE_RPC_URL: `https://base-mainnet.example.invalid/v2/${KEY}` }, "base", "eth_blockNumber", 31), 30, "Base: the page's 30");
+  for (const [name, bad] of [["RPC_BUDGET_SOLANA", "100,16"], ["RPC_BUDGET_SOLANA", "100,41"], ["RPC_BUDGET_SOLANA_DEVNET", "100,16"], ["RPC_BUDGET_SOLANA_MARKS", "100,29"], ["RPC_BUDGET_BASE", "100,29"], ["RPC_BUDGET_ROBINHOOD", "100,16"]] as const)
+    assert.throws(() => createRpc({ [name]: bad }), (e: Error) => e.message.startsWith(`${name} must be`) && !e.message.includes(bad), `${name}=${bad}`);
+  assert.doesNotThrow(() => createRpc({ RPC_BUDGET_SOLANA: "100,42", RPC_BUDGET_SOLANA_DEVNET: "100,42", RPC_BUDGET_SOLANA_MARKS: "100,30", RPC_BUDGET_BASE: "100,30", RPC_BUDGET_ROBINHOOD: "100,30", RPC_BUDGET_NEAR: "100,16" }));
 });
