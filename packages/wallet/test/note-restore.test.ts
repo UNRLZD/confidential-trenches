@@ -869,6 +869,40 @@ test("R3b: a store note on the same ref with another precommitment stops writeRe
   }
 });
 
+// card restore-first-sign-in-under-two-minutes, E5: a page names its deposit index (PLANNED) at the sign-in, before the
+// restore's walk; when the new lane is one the lost store used, the walk finds that very index landed. The restore's
+// reads (the vault's pages on two RPCs, its commitment the state tree's leaf) are the landing's proof: the note is
+// written landed with its leaf, as a landing moves it (PLANNED -> INCOMING -> UNSPENT), and the notes below it follow
+test("E5: a PLANNED index the restore finds landed is written landed with its leaf, its spend and change below it; nothing left alone", async () => {
+  const v = new Vault();
+  const { ns, close } = await liveStore();
+  try {
+    // this device's index, named at the sign-in: no money from it
+    const p = await ns.planDeposit(SCOPE, (ref) => sec(ref).precommitment);
+    // the lost store's deposit on that same index, spent with a change note
+    const pl = v.deposit(p.precommitment, 40_000_000n, hex64("lost store"))!;
+    const cref: NoteRef = { kind: "change", l: pl.label, j: 0 };
+    v.withdraw(sec(p.ref).nullifierHash, 10_000_000n, { P: sec(cref).precommitment, value: 30_000_000n, label: pl.label }, sec({ kind: "refund", l: pl.label, j: 0 }).precommitment, 9n);
+    // and its unspent deposit on the lane's next index
+    const q = { kind: "deposit" as const, s: SCOPE, i: p.ref.kind === "deposit" ? p.ref.i + 8 : -1 };
+    v.deposit(sec(q).precommitment, 5_000_000n, hex64("lost store 2"));
+    const got = await restoreNotes({ seed64: SEED, vault: VAULT, token: TOKEN, rpcs: rpcs(v.views()), gap: TEST_GAP });
+    const out = await writeRestored(ns, got);
+    assert.deepEqual(out.leftAlone, []);
+    const by = new Map(out.notes.map((x) => [refKey(x.ref), x]));
+    const planned = by.get(refKey(p.ref))!;
+    assert.equal(planned.id, p.id, "the PLANNED record itself is the landed note");
+    assert.equal(planned.state, "SPENT");
+    assert.deepEqual(planned.leaf, got.notes.find((x) => refKey(x.ref) === refKey(p.ref))!.leaf);
+    const ch = by.get(refKey(cref));
+    assert.ok(ch && ch.state === "UNSPENT" && ch.leaf?.value === 30_000_000n && ch.parent === p.id, "the change below it is written, spendable");
+    assert.equal(by.get(refKey(q))?.state, "UNSPENT");
+    assert.equal(out.notes.length, 3);
+  } finally {
+    close();
+  }
+});
+
 test("R3c, R3d and D5: a TAKEN index and an INCOMING note the vault holds come back in leftAlone; notes below TAKEN are written, notes below INCOMING wait", async () => {
   const v = new Vault();
   const { ns, close } = await liveStore();

@@ -5,6 +5,7 @@
 // pacedFetch by default.
 import assert from "node:assert/strict";
 import { beforeEach, test } from "node:test";
+import { onTestClock } from "../../kit/test/test-clock.ts";
 import * as P from "../src/pace.ts";
 import { bindRpc } from "../src/deposit/bind.ts";
 import { followRpc } from "../src/deposit/follow.ts";
@@ -19,7 +20,7 @@ const answer = () => new Response(JSON.stringify({ jsonrpc: "2.0", id: "blindfil
 
 // five relay-like chains at once, each three reads in a row on FastNEAR, the readers' own default deadline: 15 requests
 // past a burst of 8 at 2.56 s apart, the last slot about 18 s after the first, every one answered
-test("five FastNEAR chains at once on the page's pace: every request answered, none timed out in the queue", { timeout: 60_000 }, async () => {
+test("five FastNEAR chains at once on the page's pace: every request answered, none timed out in the queue", { timeout: 60_000 }, () => onTestClock(async () => {
   let sent = 0;
   const f = P.pacedFetch(FAST, async (_u, init) => (sent++, assert.equal(init?.signal?.aborted, false), answer()));
   const rpc = relayRpc(FAST, f);
@@ -30,7 +31,7 @@ test("five FastNEAR chains at once on the page's pace: every request answered, n
   await Promise.all([chain(), chain(), chain(), chain(), chain()]);
   assert.equal(sent, 15);
   assert.ok(performance.now() - t > 15_000, `15 requests in ${performance.now() - t} ms: the pace held`);
-});
+}));
 
 test("a wait its caller ends gives its slot back, sends nothing and throws the caller's reason", async () => {
   let sent = 0;
@@ -143,7 +144,7 @@ test("queued waits ended in any order never send past the burst at once or the r
 
 // delta review 3, P2-2: relayRpc.block and pacedNearRpc leave the deadline to the paced fetch as query does (with their
 // own 10 s deadline back, five chains at once gave 15 queue timeouts in 60 s)
-test("five FastNEAR chains at once on relayRpc.block and pacedNearRpc: every request answered", { timeout: 60_000 }, async () => {
+test("five FastNEAR chains at once on relayRpc.block and pacedNearRpc: every request answered", { timeout: 60_000 }, () => onTestClock(async () => {
   const real = globalThis.fetch;
   let sent = 0;
   const stub = async (_u: unknown, init?: RequestInit) => (sent++, assert.equal(init?.signal?.aborted, false), answer());
@@ -161,7 +162,7 @@ test("five FastNEAR chains at once on relayRpc.block and pacedNearRpc: every req
   } finally {
     globalThis.fetch = real;
   }
-});
+}));
 
 // delta review 4: the real pacedFetch on a virtual clock (performance.now and setTimeout replaced for the body's length)
 async function onVirtualClock(body: (c: { now: () => number; setNow: (t: number) => void; runTo: (t: number) => Promise<void>; turn: () => Promise<void> }) => Promise<void>): Promise<void> {
