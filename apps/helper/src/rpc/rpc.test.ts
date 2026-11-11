@@ -1182,12 +1182,13 @@ test("card evm-pool-leaves-any-source: ?keyed=only refuses what the route refuse
 
 test("card helper-gives-a-trade-its-reads: a route on our keyed providers gives one caller what one signing page draws in its busiest 10 s (RPC_PAGE_NEED: 42 on Solana, 30 on the mark list and the EVM chains), and an RPC_BUDGET_<CHAIN> naming less is refused at the start, naming the variable only", async () => {
   const ok = (async (_u: string, i: RequestInit) => new Response(JSON.stringify({ jsonrpc: "2.0", id: (JSON.parse(String(i.body)) as { id: unknown }).id, result: 1 }), { status: 200, headers: { "content-type": "application/json" } })) as never;
-  // one page's window from one address, each read after the last answered, on the real clock: the keyed pace (10 a
-  // second at a total of 100) spreads them over about 4 s, inside the 10 s window
+  // one page's window from one address, each read after the last answered, on a planted clock inside one 10 s window;
+  // the keyed pace (its second, real time) is planted open: the share is what this holds, the pace has its own tests
+  // (card app-console-429 above)
+  const open = { at: () => 0, go: () => 0 };
   const served = async (env: Record<string, string>, chain: string, method: string, n: number) => {
-    // the budget's windows are fixed on its clock: this one starts at a window's start and moves with the real one
-    const t0 = performance.now();
-    const r = createRpc(env, { fetch: ok, log: () => {}, now: () => 1_800_000_000_000 + (performance.now() - t0) });
+    let t = 1_800_000_000_000;
+    const r = createRpc(env, { fetch: ok, log: () => {}, now: () => (t += 1), pacer: open as never });
     let s = 0;
     for (let i = 0; i < n; i++) if ((await r.handle(chain as never, JSON_T, JSON.stringify({ jsonrpc: "2.0", id: i + 1, method, params: [] }), "203.0.113.9")).status === 200) s++;
     return s;
