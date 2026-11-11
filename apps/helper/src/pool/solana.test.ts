@@ -208,7 +208,7 @@ function rpcStub(simErr: unknown = null, calls: Calls = []): SolanaRpc {
     { url: `https://stub.invalid/${Math.random()}` },
   );
 }
-function sender(simErr: unknown = null, calls: Calls = [], sent: Uint8Array[] = [], o: { fee?: bigint; ends?: () => Promise<string>; memory?: number; now?: () => number; rent?: SolanaRent; readRent?: (epoch: number) => Promise<SolanaRent>; log?: (line: string) => void; signFeePayer?: (tx: never, seed: Uint8Array) => Uint8Array } = {}) {
+function sender(simErr: unknown = null, calls: Calls = [], sent: Uint8Array[] = [], o: { fee?: bigint; ends?: () => Promise<string>; memory?: number; now?: () => number; rent?: SolanaRent; readRent?: (epoch: number) => Promise<SolanaRent>; log?: (line: string) => void; signFeePayer?: typeof signAsFeePayer } = {}) {
   return solanaPoolSender(
     { cluster: "devnet", program: PROGRAM, feePayerSecret: FP.secret, fee: String(o.fee ?? FEE) },
     {
@@ -271,7 +271,7 @@ test("a fee payer signature that does not verify at the call site is refused sig
   for (const tag of [2, 3] as const) {
     const sent: Uint8Array[] = [];
     // the signing seam: a slot 0 one bit off what the fee payer's key signs
-    const flip = (tx: never, seed: Uint8Array) => {
+    const flip: typeof signAsFeePayer = (tx, seed) => {
       const w = signAsFeePayer(tx, seed);
       w[3]! ^= 1;
       return w;
