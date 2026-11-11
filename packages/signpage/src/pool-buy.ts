@@ -871,6 +871,13 @@ export function poolBuyKind(host: () => PoolBuyHost & { end?(): void }, locks: L
   return (ask: PoolAsk, ctx: KindContext | null): HostRefusal | Running<"pool.buy"> => {
     if (ask.kind !== "pool.buy" || ask.chain !== "solana" || !locks) return { error: "not_allowed" };
     let answer: HostAnswer<"pool.buy"> | HostRefusal | null = null;
+    // the run's final stage, posted once
+    let ended = false;
+    const end = (stage: TradeStage): void => {
+      if (ended) return;
+      ended = true;
+      ctx?.progress(stage);
+    };
     let give!: () => void;
     const answered = new Promise<void>((r) => (give = r));
     const run = locks
@@ -881,17 +888,23 @@ export function poolBuyKind(host: () => PoolBuyHost & { end?(): void }, locks: L
             if (!answer) answer = { result: { stage: "sent", txs: [{ chain: "solana", hash: signature }] } };
             give();
           }, route: (x) => ctx?.route?.(x) }, ask);
+          const early = answer !== null;
           if (!answer) answer = "error" in a ? { error: a.error } : { result: a };
           // the run's stage goes out as progress too, answered early or not: an answer that comes only at the run's end
           // (no read-back within the client's 10 s) is one the kit's client has dropped, and the app waits on progress
-          // (api.ts holds a progress event until its id's answer is posted)
-          if ("stage" in a) ctx?.progress(a.stage);
+          // (api.ts holds a progress event until its id's answer is posted). An error after the early answer "sent" is
+          // a transaction that went out with its end not known: "sent", so the app's Filled not yet Final ends too
+          // (review of 418af7d5)
+          if ("stage" in a) end(a.stage);
+          else if (early) end("sent");
         } finally {
           h.end?.();
         }
       })
       .catch(() => {
+        // a run that threw past its own catch: its error is the answer, or, after the early answer, "sent"
         if (!answer) answer = { error: "failed" };
+        else end("sent");
       })
       .finally(give);
     void run;

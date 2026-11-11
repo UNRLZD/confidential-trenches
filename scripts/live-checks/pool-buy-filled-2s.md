@@ -114,6 +114,14 @@ Run 2's steps:
 - Final at 6378.
 Send to sent is 552 ms longer than run 1's: one more read-back round at the 400 ms pace (devnet confirmed later).
 
+How runs 1 and 2 were measured: the script reads through Node's fetch, which speaks HTTP/1.1 and opens a TLS socket
+for each read sent at once. A browser does not: it sends the page's reads together on one HTTP/2 connection. So the
+helper's "one after another" answers above are the script's, not the helper's or the page's. Read on 10 Nov
+23:36-23:39Z from the same machine, getSlot on the helper's /v1/rpc/solana-devnet: 7 reads at once on a socket each
+ended at 880 to 930 ms, each paying a new TLS handshake of about 550 ms; on one HTTP/2 connection, 6 at once ended at
+290 to 499 ms. The helper's Server-Timing read rpc-wait 0 on every one. The round times in both runs therefore
+overstate the page's by about that much, and are the script's numbers, not the product's.
+
 Every RPC call the page made for run 2's buy, tap to Final (method: api.devnet.solana.com / the helper's route):
 getAccountInfo 7 / 7, getMultipleAccounts 14 / 6, getLatestBlockhash 1 / 0, isBlockhashValid 0 / 1,
 getBlockHeight 0 / 1, getSlot 3 / 3, getBlockTime 1 / 1, getTransaction 4 / 4, getProgramAccounts 2 / 0. getSlot is
