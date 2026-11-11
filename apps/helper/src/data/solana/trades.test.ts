@@ -548,15 +548,19 @@ test("a first tape read answers after the walk's newest round, with the newest t
   const sigs = Array.from({ length: 10 }, (_, i) => `${BUY.signature.slice(0, -2)}${String(i).padStart(2, "0")}`);
   const slow = new Set(sigs.slice(0, 5)); // the 5 oldest take 2.5 s each
   const base = rpcFetch({ sigs: () => sigs.map((s, i) => ({ signature: s, slot: 465_000_000 + i, err: null })).reverse(), txs: Object.fromEntries(sigs.map((s) => [s, BUY.result])), price: 9_342_267_796n, pub: TS, slot: 100 }, { [MINT]: 6 });
+  let slowOpen = 0; // older reads started and not yet answered
   const fetchSlow = async (url: string, init: RequestInit) => {
     const req = JSON.parse(String(init.body)) as { method: string; params: [string] };
-    if (req.method === "getTransaction" && slow.has(req.params[0])) await new Promise((r) => setTimeout(r, 2_500));
+    if (req.method === "getTransaction" && slow.has(req.params[0])) {
+      slowOpen++;
+      await new Promise((r) => setTimeout(r, 2_500));
+      slowOpen--;
+    }
     return base(url, init);
   };
   const t = createSolanaTrades({ fetch: fetchSlow, now: () => TS * 1000, listed: async (m) => m === MINT, rpcs: ["https://rpc.test"], source: () => ({ watch: async () => undefined, unwatch: () => undefined, close: () => undefined }), tickMs: 0 });
-  const t0 = Date.now();
   const rows = (JSON.parse((await t.trades(MINT, 50)).body) as { trades: { tx: string }[] }).trades;
-  assert.ok(Date.now() - t0 < 1_500, `answered in ${Date.now() - t0} ms`);
+  assert.ok(slowOpen > 0, "answered while the older reads still ran (the whole walk waited for: none open)");
   assert.deepEqual(rows.map((r) => r.tx).sort(), sigs.slice(5).sort(), "the 5 newest trades");
   t.stop();
 });

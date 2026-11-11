@@ -102,15 +102,14 @@ test("fetchLogo refuses SVG, a type its bytes do not show, a non-200, and anythi
   await assert.rejects(one(() => got(200, { "content-type": "image/png" }, big)), refusedAs("size"), "a body with no length that runs past the cap");
 });
 
-test("fetchLogo gives up after its time, a body that never ends included", async () => {
+test("fetchLogo gives up after its time, a body that never ends included", { timeout: 5_000 }, async () => {
   const u = new URL("https://slow.example/l");
   const get: Get = async (_u, _a, signal) => got(200, { "content-type": "image/png" }, (async function* () {
     yield PNG;
     await new Promise((_, no) => signal.addEventListener("abort", () => no(new Error("aborted"))));
   })());
-  const t0 = Date.now();
+  // the bound is the test's own timeout (scripts/ci/no-wall-clock-asserts.mjs): a fetch that never gave up hangs it
   await assert.rejects(fetchLogo(u, { resolve: PUBLIC, get, timeoutMs: 100 }), refusedAs("timeout"));
-  assert.ok(Date.now() - t0 < 2_000);
 });
 
 test("createLogos fetches only URLs the lists gave, once in flight per token, and keeps a refusal", async () => {
@@ -208,10 +207,8 @@ test("a lookup that never answers ends at the fetch's deadline, and logo lookups
     signal?.addEventListener("abort", () => open--, { once: true });
     return new Promise(() => {});
   };
-  const t0 = Date.now();
   const runs = Array.from({ length: 6 }, () => fetchLogo(new URL("https://never.example/x.png"), { resolve: hang, timeoutMs: 300 }).then(() => "ok", (e: unknown) => (e as Error).message));
   const why = await within(Promise.all(runs), 1_500, "six hanging lookups");
-  assert.ok(Date.now() - t0 < 1_000, `ended in ${Date.now() - t0} ms`);
   assert.deepEqual([...new Set(why)], ["timeout"]);
   assert.ok(most <= 2, `${most} lookups in flight at once`);
   assert.equal(L.DNS_PARALLEL, 2);
@@ -228,10 +225,8 @@ test("the helper's own lookup goes through c-ares with a deadline: a name server
   await new Promise<void>((ok) => silent.bind(0, "127.0.0.1", ok));
   try {
     assert.equal(typeof L.systemResolve, "function", "logo.ts exports systemResolve");
-    const t0 = Date.now();
     const r = await within(L.systemResolve("never.example", AbortSignal.timeout(300), [`127.0.0.1:${silent.address().port}`]).then(() => "answered", (e: unknown) => String((e as { code?: string }).code ?? (e as Error).name)), 1_500, "a silent name server");
     assert.notEqual(r, "answered");
-    assert.ok(Date.now() - t0 < 1_000, `ended in ${Date.now() - t0} ms`);
     assert.ok(asked >= 1, "the lookup asked the given name server");
   } finally {
     silent.close();
@@ -259,12 +254,10 @@ test("the real request connects to the checked address for a name DNS cannot res
   const srv = await helloServer();
   try {
     assert.equal(typeof L.httpsGet, "function", "logo.ts exports httpsGet");
-    const t0 = Date.now();
     const why = await within(L.httpsGet(new URL(`https://pinned.invalid:${srv.port}/x.png`), [{ address: "127.0.0.1", family: 4 }], AbortSignal.timeout(400)).then(() => "ok", (e: unknown) => (e as Error).name), 2_000, "a stalled host");
     assert.equal(srv.hellos.length, 1, "the pinned address got the connection (an unresolvable name: no pin, no connection)");
     assert.ok(srv.hellos[0]!.includes(Buffer.from("pinned.invalid")), "SNI is the URL's name");
     assert.equal(why, "AbortError");
-    assert.ok(Date.now() - t0 < 1_500, `cut in ${Date.now() - t0} ms`);
   } finally {
     await closeAll(srv);
   }
