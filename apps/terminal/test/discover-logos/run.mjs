@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Discover's token logos and launchpad rings on mainnet rows (card discover-matches-the-main-app): page.tsx draws the
 // helper's lists as served on 11 Nov 15:20Z (lists-2026-11-11.json: Solana, Base and Robinhood, the rows that pass the
-// release word scan, ten pads and rows with no launchpad; page.tsx adds one row for each other pad of the ring table),
+// release word scan, ten pads and rows with no launchpad; page.tsx adds a New row for each ring-table pad New lacks),
 // built with vite and served on 127.0.0.1.
 // The helper's logo route is answered here: an image for every token, a 404 with no body for one (the helper's "no
 // logo"). Checks, at 1440 x 900, 1024 x 768 and 390 x 844 (dpr 2, touch):

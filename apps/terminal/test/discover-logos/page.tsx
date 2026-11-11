@@ -27,10 +27,11 @@ const parts: MarketSnapshot[] = Object.entries(read.chains).map(([chain, c]) => 
   as_of_ms: c.as_of_ms,
   lists: Object.fromEntries(Object.entries(c.lists).map(([k, rows]) => [k, (rows as unknown[][]).map(row)])) as unknown as MarketSnapshot["lists"],
 }));
-// every pad of the ring table the served rows lack (that day's lists showed ten of eighteen): one more row on its chain,
-// a copy of that chain's first served row with the pad's id and its own token id, so each pad's ring is drawn and checked
+// every pad of the ring table the served New rows lack (that day's lists showed ten of eighteen pads, some only in lists
+// a width does not draw): one more New row on its chain, a copy of that chain's first New row with the pad's id and its
+// own token id, so each pad's ring is drawn at every width (the phone opens on New) and checked
 const EVM_PADS = new Set(["zora", "clanker", "doppler", "flaunch", "virtuals", "pons", "bags", "torch"]);
-const served = new Set(parts.flatMap((p) => Object.values(p.lists).flat()).map((r) => r?.launchpad));
+const served = new Set(parts.flatMap((p) => p.lists.new ?? []).map((r) => r?.launchpad));
 for (const pad of Object.keys(PAD_RING).filter((k) => !served.has(k))) {
   const p = parts.find((x) => x.chain === (EVM_PADS.has(pad) ? "base" : "solana"))!;
   const base = p.lists.new[0]!;
