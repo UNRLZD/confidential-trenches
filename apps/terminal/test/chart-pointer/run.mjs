@@ -239,7 +239,9 @@ try {
     const top0 = await page.evaluate(() => [scrollX, scrollY]);
     const D = phone ? 120 : 200;
     // the desktop's drag begins on a mark's disc, where a mark used to take the press
-    const mk = !phone && m0.length ? m0.reduce((a, b) => (b.x > a.x && b.x < H.width / d0.zoom - 220 ? b : a)) : null;
+    // (one whose drag stays over the candles, clear of the price axis, ~80 px at the plot's right)
+    const room = H.width / d0.zoom - 140 - D / d0.zoom;
+    const mk = !phone ? (m0.filter((m) => m.x < room).sort((a, b) => b.x - a.x)[0] ?? null) : null;
     const r = phone ? 6 : 8;
     const start = mk ? { x: fb.x + H.left + (mk.x + r) * d0.zoom, y: fb.y + H.top + (mk.y + r) * d0.zoom + 0 } : at(0.4, 0.5);
     if (phone) {
@@ -254,7 +256,6 @@ try {
       await page.mouse.move(start.x, start.y);
       await page.mouse.down();
       for (let i = 1; i <= 10; i++) await page.mouse.move(start.x + (D * i) / 10, start.y, { steps: 2 });
-      await shot("drag");
       await page.mouse.up();
     }
     await f.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
