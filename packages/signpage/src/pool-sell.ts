@@ -591,6 +591,14 @@ export const buyMints = (store: () => Promise<Pick<TradeStore, "get" | "update">
   };
 };
 
+/** A later leg's venue: the one it read at its turn when that is the venue its own reference chose (the leg before it
+ *  chose it too), else the chosen venue read now; a guess not taken is never used, its failure never this sale's. */
+export function legVenue<V>(guess: { kind: "pump-curve" | "pumpswap"; read: Promise<V> } | null, chose: "pump-curve" | "pumpswap", venueOf: (kind: "pump-curve" | "pumpswap") => Promise<V>): Promise<V> {
+  if (guess?.kind === chose) return guess.read;
+  guess?.read.catch(() => {});
+  return venueOf(chose);
+}
+
 /** One W's sale, built again (POOL_SELL_REBUILDS at most) while its deposit meets a page another deposit filled first. */
 async function sellRuns(h: PoolSellHost, ask: PoolAsk, later: Later, w: BuyWallet, waits: ReadWaits, early?: Early, turn?: LegTurn): Promise<LegAnswer> {
   for (let i = 0; ; ) {
@@ -1005,7 +1013,7 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later, w: BuyWallet
     first ??= blockhashRead(rpcs);
     const valid = first.then((r) => blockhashValid(rpcs, r));
     valid.catch(() => {});
-    const [venue, bh0, deposit] = await Promise.all([guess?.kind === chose ? guess.read : venueOf(chose), first, depositP ?? depositHeld(rpcs, program, pool, sizes, pre, wait)]);
+    const [venue, bh0, deposit] = await Promise.all([legVenue(guess, chose, venueOf), first, depositP ?? depositHeld(rpcs, program, pool, sizes, pre, wait)]);
     if (venue.tokenProgram !== tokens.program) return no();
     // the venue's own need up front (PumpSwap: the wrapped-SOL account its sell makes first), before anything is built
     // a cashback coin on PumpSwap: the sell names W's PumpSwap volume account and its wrapped-SOL account, which a curve

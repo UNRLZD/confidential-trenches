@@ -4973,3 +4973,28 @@ test("review of f0e7bd38, P3: waitUnless clears its own timer at a sign out and 
   await waitUnless(() => Promise.reject(new Error("the host's wait failed")), 1_000, new AbortController().signal);
   await waitUnless(() => Promise.reject(new Error("the host's wait failed")), 1_000);
 });
+
+// card pool-sell-legs-side-by-side: a later leg reads the venue the leg before it chose beside its quote; when its own
+// reference chooses the other venue (the coin graduated between the two sales), the guess is dropped and the chosen
+// venue read (the recorded fixtures carry one venue per coin, so the miss is planted at the leg's choice itself)
+test("a later leg's guessed venue its reference does not confirm is read again as the chosen one, the guess never used", async () => {
+  const { legVenue } = await import("../src/pool-sell.ts");
+  const asked: string[] = [];
+  const venueOf = async (k: "pump-curve" | "pumpswap") => (asked.push(k), `read ${k} now`);
+  // a hit: the guess's own read, nothing asked again
+  assert.equal(await legVenue({ kind: "pump-curve", read: Promise.resolve("guessed curve") }, "pump-curve", venueOf), "guessed curve");
+  assert.deepEqual(asked, []);
+  // a miss: the chosen venue read now, the guess (even one that fails) never used and never unhandled
+  let seen = false;
+  const failing = Promise.reject(new Error("rpc 0: socket hang up"));
+  const watch = (e: unknown) => void (seen = e instanceof Error);
+  process.once("unhandledRejection", watch);
+  assert.equal(await legVenue({ kind: "pump-curve", read: failing }, "pumpswap", venueOf), "read pumpswap now");
+  await new Promise((r) => setImmediate(r));
+  process.off("unhandledRejection", watch);
+  assert.equal(seen, false, "the dropped guess's failure is handled");
+  assert.deepEqual(asked, ["pumpswap"]);
+  // no guess (the first leg, or a leg before whom none chose): the chosen venue read
+  assert.equal(await legVenue(null, "pump-curve", venueOf), "read pump-curve now");
+  assert.deepEqual(asked, ["pumpswap", "pump-curve"]);
+});
