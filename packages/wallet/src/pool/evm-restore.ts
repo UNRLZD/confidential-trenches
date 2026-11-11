@@ -53,7 +53,7 @@ import { keccak_256 } from "@noble/hashes/sha3.js";
 import { vaultLabelOf } from "@blindfill/kit";
 import { CHAINS, type Chain, freshWallet, type SecondId } from "../derive/index.ts";
 import { masters } from "../derive/index.ts";
-import { laneOf, type LaneWalk, RESTORE_GAP, RESTORE_LANES, type SeedUse, walkLane, walkLaneYielding, withSeed } from "../notes/restore.ts";
+import { laneOf, type LaneWalk, RESTORE_GAP, RESTORE_LANES, type SeedUse, slices, walkLane, walkLaneYielding, withSeed } from "../notes/restore.ts";
 import { noteCommitment, noteSecrets, type NoteRef } from "../notes/secrets.ts";
 import { refKey, type Leaf, type NoteRecord, type NoteStore } from "../notes/store.ts";
 import { solanaSameProvider } from "@blindfill/kit";
@@ -134,8 +134,21 @@ function depositLeaf(scope: bigint, events: readonly EvmPoolEvent[], ix: Deposit
  */
 export const SECOND_GAP = 20;
 
-export function evmRestore(a: EvmRestoreArgs): { notes: EvmRestoredNote[]; spends: EvmRestoredSpend[]; elsewhere: EvmRestoredElsewhere[] } {
-  const { seed64, scope, events } = a;
+type EvmRestored = { notes: EvmRestoredNote[]; spends: EvmRestoredSpend[]; elsewhere: EvmRestoredElsewhere[] };
+export function evmRestore(a: EvmRestoreArgs): EvmRestored {
+  const steps = evmRestoreSteps(a);
+  for (let r = steps.next(); ; r = steps.next(a.seed64)) if (r.done) return r.value;
+}
+
+/**
+ * evmRestore a note at a time: it waits for the seed before the walk's deposits and again before each note, and reads
+ * the seed only between being given it and its next wait, so a page gives it the seed in short synchronous uses and the
+ * event loop a turn between them (evmRestoreNotes; card restore-first-sign-in-under-two-minutes: each spent note's
+ * second, move and return notes, about 120 note derivations a note, ran as one stretch with the walk's).
+ */
+function* evmRestoreSteps(a: Omit<EvmRestoreArgs, "seed64">): Generator<void, EvmRestored, Uint8Array> {
+  const { scope, events } = a;
+  let seed64: Uint8Array = yield;
   const ix = indexEvents(events);
   const { byPre, byNull } = ix;
 
@@ -150,7 +163,9 @@ export function evmRestore(a: EvmRestoreArgs): { notes: EvmRestoredNote[]; spend
     notes.push({ ref, scope, precommitment, leaf, state: "UNSPENT", ...(parent === undefined ? {} : { parent }) });
   };
   // a note the pool holds as a deposit: its Deposited event, its label and commitment checked
-  const asDeposit = (ref: NoteRef): boolean => {
+  // each note's derivation waits for the seed first (a page gives it in short uses, the event loop a turn between)
+  const asDeposit = function* (ref: NoteRef): Generator<void, boolean, Uint8Array> {
+    seed64 = yield;
     const P = noteSecrets(seed64, ref).precommitment;
     const leaf = depositLeaf(scope, events, ix, P, refKey(ref));
     if (leaf === null) return false;
@@ -159,19 +174,23 @@ export function evmRestore(a: EvmRestoreArgs): { notes: EvmRestoredNote[]; spend
   };
   // on U, V and R up to SECOND_GAP - 1 empty notes in a row read past (a pending take evmNextNote passed over, then
   // reorged out); A, which evmNextNote never signs on, stops at its first miss
-  const seconds = (id: SecondId): void => {
+  const seconds = function* (id: SecondId): Generator<void, void, Uint8Array> {
     const gap = id.id === "A" ? 1 : SECOND_GAP;
-    for (let n = 0, miss = 0; n <= U32 && miss < gap; n++) miss = asDeposit({ kind: "second", id, n }) ? 0 : miss + 1;
+    for (let n = 0, miss = 0; n <= U32 && miss < gap; n++) miss = (yield* asDeposit({ kind: "second", id, n })) ? 0 : miss + 1;
   };
 
-  for (let lane = 0; lane < RESTORE_LANES; lane++)
-    for (const i of (a.lanes ? laneOf(a.lanes, lane) : walkLane(seed64, scope, lane, (P) => byPre.has(P), a.gap ?? RESTORE_GAP)).found)
-      if (!asDeposit({ kind: "deposit", s: scope, i })) throw new Error(`deposit index ${i}: the walk's precommitment is not the note's`);
+  for (let lane = 0; lane < RESTORE_LANES; lane++) {
+    // a walk handed in is held to a whole walk's end on this seed and scope (laneOf) before a note is taken from it
+    seed64 = yield;
+    const w = a.lanes ? laneOf(a.lanes, lane, seed64, scope, a.gap ?? RESTORE_GAP) : walkLane(seed64, scope, lane, (P) => byPre.has(P), a.gap ?? RESTORE_GAP);
+    for (const i of w.found) if (!(yield* asDeposit({ kind: "deposit", s: scope, i }))) throw new Error(`deposit index ${i}: the walk's precommitment is not the note's`);
+  }
 
   for (let k = 0; k < notes.length; k++) {
+    seed64 = yield;
     const note = notes[k]!;
     const ref = note.ref;
-    if (ref.kind === "deposit") seconds({ id: "U", s: ref.s, i: ref.i });
+    if (ref.kind === "deposit") yield* seconds({ id: "U", s: ref.s, i: ref.i });
     const at = byNull.get(noteSecrets(seed64, ref).nullifierHash);
     if (at === undefined) continue;
     note.state = "SPENT";
@@ -193,12 +212,12 @@ export function evmRestore(a: EvmRestoreArgs): { notes: EvmRestoredNote[]; spend
     if (ours) spends.push({ l, j, note: key, w: e.recipient!, withdrawn: e.value, block: e.block, token: e.token });
     if (!ours || !changeOurs) elsewhere.push({ note: key, to: e.recipient!, withdrawn: e.value, block: e.block, changeOurs });
     if (changeOurs) put(cref, cP, { value: cValue, label: l, commitment: cCommitment, leafIndex: BigInt(at) }, key);
-    asDeposit({ kind: "move", l, j });
-    seconds({ id: "V", l, j });
-    seconds({ id: "A", l, j });
+    yield* asDeposit({ kind: "move", l, j });
+    yield* seconds({ id: "V", l, j });
+    yield* seconds({ id: "A", l, j });
     for (const c of CHAIN_TAGS) {
-      asDeposit({ kind: "return", c, l, j });
-      seconds({ id: "R", c, l, j });
+      yield* asDeposit({ kind: "return", c, l, j });
+      yield* seconds({ id: "R", c, l, j });
     }
   }
   return { notes, spends, elsewhere };
@@ -325,6 +344,8 @@ export type EvmRestoreNotesArgs = {
    * each W's Transfer logs, on those of them that are no provider of `rpcs`, two or more. Each call names one W. */
   walletRpcs?: readonly EvmRpc[];
   signal?: AbortSignal;
+  /** The clock the walk and the notes after it are sliced on (sliceClock, the page's own); a test gives its own. */
+  now?: () => number;
   /** false: the notes only. No W is read or named to any provider, `helper` and `walletRpcs` are not asked for, and
    * `wallets` comes back empty (the signing page's restore, which keeps the notes alone: pool-restore.ts). */
   wallets?: false;
@@ -389,8 +410,23 @@ export async function evmRestoreNotes(a: EvmRestoreNotesArgs): Promise<{ notes: 
   const byPre = indexEvents(final).byPre;
   const m = await withSeed(a.seed64, (seed64) => masters(seed64, "deposit"));
   const lanes: LaneWalk[] = [];
-  for (let lane = 0; lane < RESTORE_LANES; lane++) lanes.push(await walkLaneYielding(m, scope, lane, (P) => byPre.has(P), a.gap ?? RESTORE_GAP, null, a.signal));
-  const { notes, spends, elsewhere } = await withSeed(a.seed64, (seed64) => evmRestore({ seed64, scope, events: final, lanes, ...(a.gap === undefined ? {} : { gap: a.gap }) }));
+  const slice = slices(a.signal, a.now);
+  for (let lane = 0; lane < RESTORE_LANES; lane++) lanes.push(await walkLaneYielding(m, scope, lane, (P) => byPre.has(P), a.gap ?? RESTORE_GAP, null, a.signal, slice));
+  // then the notes a slice at a time: one short use of the seed a slice (WALK_SLICE_MS of work), the event loop a turn
+  // and the signal checked between slices
+  const steps = evmRestoreSteps({ scope, events: final, lanes, ...(a.gap === undefined ? {} : { gap: a.gap }) });
+  let step = steps.next();
+  while (!step.done) {
+    const at = step;
+    step = await withSeed(a.seed64, (seed64) => {
+      let r: IteratorResult<void, EvmRestored> = at;
+      do r = steps.next(seed64);
+      while (!r.done && !slice.due());
+      return r;
+    });
+    if (!step.done) await slice.pass();
+  }
+  const { notes, spends, elsewhere } = step.value;
   if (a.wallets === false) return { notes, spends, elsewhere, wallets: [], block: r.anchor.number };
   const order = spends.map((_, k) => k);
   for (let i = order.length - 1; i > 0; i--) {

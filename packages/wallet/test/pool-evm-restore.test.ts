@@ -12,6 +12,7 @@ import { noteCommitment, noteSecrets, type NoteRef } from "../src/notes/secrets.
 import { refKey } from "../src/notes/store.ts";
 import { EVM_LAG_TRIES, EVM_LOG_PAGE_BLOCKS, EVM_LOG_THROTTLE_TRIES, EVM_LOG_THROTTLE_WAIT_MAX_MS, EVM_POOL_EVENTS, EVM_TRANSFER_RPCS, EVM_TRANSFER_TOPIC, EvmLagError, evmHoldsAnchor, evmTokensSentTo, evmTokensSentToOne, evmPoolScopeOf, type EvmPoolPin, type EvmRpc } from "../src/pool/evm.ts";
 import { evmRestore, evmRestoreNotes } from "../src/pool/evm-restore.ts";
+import { RESTORE_LANES, WALK_SLICE_MS } from "../src/notes/restore.ts";
 
 const SEED = d.wordsToSeed64(d.entropyToWords(new Uint8Array(16)));
 const enc = new TextEncoder();
@@ -199,7 +200,7 @@ function rpc(w: World, o: Over = {}): EvmRpc {
 const pair = (a: World, b: World, oa: Over = {}, ob: Over = {}): [EvmRpc, EvmRpc] => [rpc(a, { url: "https://a.example", ...oa }), rpc(b, { url: "https://b.example", ...ob })];
 /** The Transfer RPCs: their own pair, never a provider of the pool's (card notes-restore-evm F7). */
 const wpair = (a: World, b: World = a, oa: Over = {}, ob: Over = {}): [EvmRpc, EvmRpc] => [rpc(a, { url: "https://c.example", ...oa }), rpc(b, { url: "https://d.example", ...ob })];
-type Extra = { sleep?: (ms: number) => Promise<void>; pick?: (n: number) => number };
+type Extra = { sleep?: (ms: number) => Promise<void>; pick?: (n: number) => number; gap?: number; signal?: AbortSignal; now?: () => number };
 const restore = (rpcs: readonly EvmRpc[], walletRpcs: readonly EvmRpc[], extra: Extra = {}) =>
   evmRestoreNotes({ seed64: SEED, pin: PIN, rpcs, walletRpcs, gap: 4, sleep: async () => {}, ...extra });
 /** The seeded chain's restore on clean pairs, run once (card fresh-run-margin): the tests that hold a restore under a
@@ -1328,42 +1329,44 @@ test("P3-E: at a finalized block below a spend, the restore is the one of a chai
 
 // card restore-first-sign-in-under-two-minutes: as the Solana walk (pool-solana.test.ts), the EVM walk yields to the
 // event loop as it goes and ends at its signal, so a Base or Robinhood restore never holds the page
-test("the EVM walk never holds the event loop, and ends at its signal with nothing read after", async () => {
+// A clock that reads one unit a step, with the event loop's turns counted beside it (as pool-solana.test.ts's)
+const sliced = (at?: { read: number; then: () => void }) => {
+  let reads = 0, since = 0, most = 0, turns = 0, on = true;
+  // the ticker is a message of its own, as another tab's sign out and the frame's asks reach a page
+  const c = new MessageChannel();
+  c.port1.onmessage = () => void ((turns += 1), (since = 0), on ? c.port2.postMessage(null) : (c.port1.close(), c.port2.close()));
+  c.port2.postMessage(null);
+  const now = (): number => ((reads += 1), (since += 1), (most = Math.max(most, since)), reads === at?.read && at.then(), reads);
+  return { now, stop: () => void (on = false), most: () => most, reads: () => reads, turns: () => turns };
+};
+test("the EVM walk and the notes after it never hold the event loop, and end at their signal with nothing read after", async () => {
   const { world } = seeded();
-  // the longest a timer waits across one restore: the walk's part is what a wider gap adds (the notes' own reads after
-  // the walk, the same at any gap, are not the walk's)
-  const held = async (gap: number) => {
-    let last = performance.now(), most = 0, on = true;
-    const tick = (): void => ((most = Math.max(most, performance.now() - last)), (last = performance.now()), void (on && setTimeout(tick, 1)));
-    setTimeout(tick, 1);
-    const t0 = performance.now();
-    const r = await restore(pair(world, world), wpair(world), { gap });
-    await new Promise((ok) => setTimeout(ok, 5));
-    on = false;
-    return { most, took: performance.now() - t0, r };
+  const run = async (gap: number) => {
+    const c = sliced();
+    const r = await restore(pair(world, world), wpair(world), { gap, now: c.now });
+    c.stop();
+    return { c, r };
   };
-  const narrow = await held(4);
-  const wide = await held(400);
-  assert.ok(wide.took - narrow.took > 150, `the wide walk is long enough to show a stall (${Math.round(wide.took - narrow.took)} ms more)`);
-  assert.ok(wide.most - narrow.most < 100, `the wide walk held a timer ${Math.round(wide.most)} ms, the narrow ${Math.round(narrow.most)} ms`);
+  const narrow = await run(4);
+  const wide = await run(400);
   assert.deepEqual(wide.r.notes.map((n) => refKey(n.ref)), narrow.r.notes.map((n) => refKey(n.ref)), "the same notes");
-  // aborted during the walk: the restore rejects with the reason, and no read after it
+  for (const [name, { c }] of [["narrow", narrow], ["wide", wide]] as const) {
+    // the walk's steps and each note derivation after it (a spent note's second, move and return notes) are sliced
+    assert.ok(c.reads() >= RESTORE_LANES * (name === "wide" ? 400 : 4), `${name}: every step is sliced (${c.reads()})`);
+    assert.ok(c.most() <= 2 * WALK_SLICE_MS + 2, `${name}: at most a slice between two turns (${c.most()} steps)`);
+  }
+  assert.ok(narrow.c.reads() > RESTORE_LANES * 4 + 100, `the notes after the walk are sliced too (${narrow.c.reads()} steps at gap 4)`);
+  // aborted at the walk's 500th step: the restore rejects with the reason within a slice, and no read after it
   const stop = new AbortController();
   const why = new Error("signed out");
   const calls: string[] = [];
   const count = (f: EvmRpc): EvmRpc => async (m, p) => (calls.push(m), f(m, p));
   const [a, b] = pair(world, world);
-  const run = restore([count(a!), count(b!)], wpair(world), { gap: 4_000, signal: stop.signal });
-  let at = -1;
-  const t = await new Promise<number>((ok) => {
-    const i = setInterval(() => {
-      if (calls.length > 0 && calls.length === at) (clearInterval(i), setTimeout(() => (stop.abort(why), ok(performance.now())), 30));
-      at = calls.length;
-    }, 20);
-  });
-  await assert.rejects(run, (e) => e === why);
-  assert.ok(performance.now() - t < 50, `ended ${Math.round(performance.now() - t)} ms after the abort`);
-  const n = calls.length;
-  await new Promise((ok) => setTimeout(ok, 100));
-  assert.equal(calls.length, n, "no read after it");
+  let reads = 0;
+  const c = sliced({ read: 500, then: () => ((reads = calls.length), stop.abort(why)) });
+  await assert.rejects(restore([count(a!), count(b!)], wpair(world), { gap: 4_000, signal: stop.signal, now: c.now }), (e) => e === why);
+  c.stop();
+  assert.ok(reads > 0, "aborted during the walk");
+  assert.ok(c.reads() - 500 <= WALK_SLICE_MS + 2, `at most a slice after the abort (${c.reads() - 500} steps)`);
+  assert.equal(calls.length, reads, "no read after it");
 });

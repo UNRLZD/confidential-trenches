@@ -219,18 +219,35 @@ export function walkLaneOf(m: { nullifier: bigint; secret: bigint }, scope: bigi
   for (let r = steps.next(); ; r = steps.next()) if (r.done) return r.value;
 }
 
-/** Lane `lane` of 8 walks handed in: each a LaneWalk of its own lane, or the restore stops. */
-export function laneOf(lanes: readonly LaneWalk[], lane: number): LaneWalk {
-  if (lanes.length !== RESTORE_LANES) throw new Error(`lanes: ${lanes.length} walks, not ${RESTORE_LANES}`);
+/** Lane `lane` of 8 walks handed in, held to a whole walk of that lane on this seed and scope (checkedWalk), or the restore stops. */
+export function laneOf(lanes: readonly LaneWalk[], lane: number, seed64: Uint8Array, scope: bigint, gap: number = RESTORE_GAP): LaneWalk {
+  if (!Array.isArray(lanes) || lanes.length !== RESTORE_LANES) throw new Error(`lanes: ${String(lanes?.length)} walks, not ${RESTORE_LANES}`);
   const w = lanes[lane]!;
-  if (!w.found.every((i) => Number.isSafeInteger(i) && i % RESTORE_LANES === lane)) throw new Error(`lane ${lane}: an index of another lane`);
+  checkedWalk(w, lane, seed64, scope, gap, null);
   return w;
+}
+
+/**
+ * A lane's walk run elsewhere (on the page's yielding loop, or handed in), held to what a whole walk on this seed and
+ * scope returns before a note is taken from it: the lane's own indices, ascending; read to `gap` misses past its last
+ * note or its reach (walkEnd); its last index's precommitment recomputed from the seed. A walk that stopped early, or
+ * ran on another seed or scope, throws here, so the restore stops instead of returning fewer notes.
+ */
+export function checkedWalk(w: LaneWalk, lane: number, seed64: Uint8Array, scope: bigint, gap: number, reach: number | null): { found: number[]; end: number } {
+  const found = Array.isArray(w?.found) ? [...w.found] : null;
+  if (found === null || !found.every((i, k) => Number.isInteger(i) && i >= 0 && i <= U32 && i % RESTORE_LANES === lane && (k === 0 || i > found[k - 1]!)))
+    throw new Error(`lane ${lane}: the walk's indices are not this lane's, ascending`);
+  const end = walkEnd(lane, found, gap, reach);
+  if (w.last !== end) throw new Error(`lane ${lane}: the walk ended at ${String(w.last)}, not ${end} (gap ${gap} past its last note${reach === null ? "" : ` or its reach ${reach}`})`);
+  if (w.lastPrecommitment !== noteSecrets(seed64, { kind: "deposit", s: scope, i: w.last }).precommitment)
+    throw new Error(`lane ${lane}: the walk's last precommitment is not this seed's and scope's`);
+  return { found, end };
 }
 
 /** The longest stretch, in ms, a yielding walk runs before it gives the event loop a turn. */
 export const WALK_SLICE_MS = 8;
-// one turn of the event loop: a message on a channel of its own (never a timer, which browsers hold to 4 ms once nested)
-const turn = (): Promise<void> =>
+/** One turn of the event loop: a message on a channel of its own (never a timer, which browsers hold to 4 ms once nested). */
+export const turn = (): Promise<void> =>
   new Promise((ok) => {
     const c = new MessageChannel();
     c.port1.onmessage = () => (c.port1.close(), c.port2.close(), ok());
@@ -243,17 +260,33 @@ const turn = (): Promise<void> =>
  * and the screen all run between slices) and a signal that ends stops it at the next slice with its reason, no index
  * after (card restore-first-sign-in-under-two-minutes: release 114's walk held the main thread 15 to 70 s).
  */
-export async function walkLaneYielding(m: { nullifier: bigint; secret: bigint }, scope: bigint, lane: number, has: (precommitment: bigint) => boolean, gap: number = RESTORE_GAP, reach: number | null = null, signal?: AbortSignal): Promise<LaneWalk> {
+export async function walkLaneYielding(m: { nullifier: bigint; secret: bigint }, scope: bigint, lane: number, has: (precommitment: bigint) => boolean, gap: number = RESTORE_GAP, reach: number | null = null, signal?: AbortSignal, s: Slices = slices(signal)): Promise<LaneWalk> {
   signal?.throwIfAborted();
   const steps = walkSteps(m, scope, lane, has, gap, reach);
-  let at = performance.now();
   for (let r = steps.next(); ; r = steps.next()) {
     if (r.done) return r.value;
-    if (performance.now() - at < WALK_SLICE_MS) continue;
-    await turn();
-    signal?.throwIfAborted();
-    at = performance.now();
+    if (s.due()) await s.pass();
   }
+}
+
+/** The clock a slice is measured on: the page's own; a test gives one of its own (read once a step). */
+export const sliceClock = (): number => performance.now();
+/**
+ * One restore's slices: a single WALK_SLICE_MS budget across its 8 lanes and the notes after them, so short lanes run
+ * back to back still give the event loop a turn every slice. `due` once a slice is spent; `pass` gives the turn, then
+ * checks the signal (its reason thrown) and starts the next slice.
+ */
+export type Slices = { due(): boolean; pass(): Promise<void> };
+export function slices(signal?: AbortSignal, now: () => number = sliceClock): Slices {
+  let at = now();
+  return {
+    due: () => now() - at >= WALK_SLICE_MS,
+    pass: async () => {
+      await turn();
+      signal?.throwIfAborted();
+      at = now();
+    },
+  };
 }
 
 // the walk itself, one index a step: walkLaneOf runs it through, walkLaneYielding a slice at a time
@@ -351,15 +384,8 @@ export function restorePages(
   const laneWalked: number[] = [];
   for (let lane = 0; lane < RESTORE_LANES; lane++) {
     const w = opts.lanes ? opts.lanes[lane]! : walkLane(seed64, scope, lane, (P) => byP.has(P), gap, reach[lane]!);
-    const found = Array.isArray(w?.found) ? [...w.found] : null;
-    // a walk run elsewhere: the lane's own indices, ascending, each one the vault holds (checked by asDeposit below) ...
-    if (found === null || !found.every((i, k) => Number.isInteger(i) && i >= 0 && i <= U32 && i % RESTORE_LANES === lane && (k === 0 || i > found[k - 1]!)))
-      throw new Error(`lane ${lane}: the walk's indices are not this lane's, ascending`);
-    // ... read to gap misses past its last note, on this seed and scope: its last index's precommitment is recomputed
-    const end = walkEnd(lane, found, gap, reach[lane]!);
-    if (w.last !== end) throw new Error(`lane ${lane}: the walk ended at ${String(w.last)}, not ${end} (gap ${gap} past its last note${reach[lane] === null ? "" : ` or its reach ${reach[lane]}`})`);
-    if (w.lastPrecommitment !== noteSecrets(seed64, { kind: "deposit", s: scope, i: w.last }).precommitment)
-      throw new Error(`lane ${lane}: the walk's last precommitment is not this seed's and scope's`);
+    // a walk run elsewhere is held to a whole walk's end on this seed and scope; each index the vault holds (asDeposit below)
+    const { found, end } = checkedWalk(w, lane, seed64, scope, gap, reach[lane]!);
     for (const i of found) {
       const ref: NoteRef = { kind: "deposit", s: scope, i };
       if (!asDeposit(ref)) throw new Error(`deposit index ${i}: the walk's precommitment is not the note's`);
