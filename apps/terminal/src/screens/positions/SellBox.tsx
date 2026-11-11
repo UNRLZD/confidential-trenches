@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { cents, units, usd } from "../portfolio/model.ts";
 import type { Row } from "../portfolio/model.ts";
-import { busy } from "../trade/model.ts";
+import { busy, unavailable } from "../trade/model.ts";
 import { EndLine, hasRunLabel, RunLabel, stateId } from "../trade/States.tsx";
 import { BOX_PERCENTS, parsePercent, pctLabel, sellAmount, shareCents } from "./model.ts";
 import { useSellKit } from "./source.tsx";
@@ -77,7 +77,10 @@ export function SellBox({ row, s, slippageBps = 1000, initialPercent = "50", onB
   const noRoute = row.mark === "noRoute";
   const amount = bps === null ? null : sellAmount(row.units, bps, decimals);
   const running = busy(s.phase);
-  const canSell = s.ready && !running && !noRoute && amount !== null;
+  // the pool cannot sell this token (model.ts unavailable: the same sale would be refused again): Sell and its presets
+  // stay off, as the buy side's
+  const off = unavailable(s.phase);
+  const canSell = s.ready && !running && !off && !noRoute && amount !== null;
 
   // the sell preview for the share in the box: asked at once when the box opens, then once a changed share has settled
   // (PREVIEW_SETTLE_MS: one ask per typed percent, never per key); the last numbers stay, dimmed, until a change
@@ -126,7 +129,7 @@ export function SellBox({ row, s, slippageBps = 1000, initialPercent = "50", onB
     if (!canSellAt(b)) return;
     s.sell(sellAmount(row.units, b, decimals), b, decimals);
   }
-  const canSellAt = (b: number) => s.ready && !running && !noRoute && sellAmount(row.units, b, decimals) !== null;
+  const canSellAt = (b: number) => s.ready && !running && !off && !noRoute && sellAmount(row.units, b, decimals) !== null;
 
   const shown = preview && preview.amount === amount ? preview.p : null;
   const last = preview?.p ?? null;

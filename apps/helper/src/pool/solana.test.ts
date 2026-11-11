@@ -236,6 +236,8 @@ test("a failed simulation is refused before any signature or send (simulation_fa
   assert.equal(code(a), "simulation_failed");
   assert.equal(a.status, 422);
   assert.equal(sent.length, 0);
+  // card sol-pool-buy-lands-on-mainnet: the log line's note carries the error's shape only
+  assert.equal(a.note?.err, '{"InstructionError":[2,{"Custom":16}]}');
 });
 
 test("every refusal of the checks reaches the route before any read", async () => {
