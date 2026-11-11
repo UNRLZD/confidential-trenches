@@ -4785,8 +4785,16 @@ function ticked(rpcs: readonly [SolanaRpc, SolanaRpc]) {
   const wrap = (rpc: SolanaRpc): SolanaRpc => (async (m: string, p: readonly unknown[]) => (await new Promise<void>((r) => void queue.push(r)), rpc(m, p))) as SolanaRpc;
   return { rpcs: [wrap(rpcs[0]), wrap(rpcs[1])] as const, queue };
 }
-const drain = async (): Promise<void> => {
-  for (let i = 0; i < 30; i++) await new Promise((r) => setImmediate(r));
+// A round ends once the sale asks nothing more: the event loop's turns, then until nothing new is asked over a 20 ms
+// window, since some of the page's own work between an answer and its next call settles on the clock, not on the
+// loop's turns (the note store's WebCrypto AES-GCM, crypto.subtle, answers from libuv's threadpool). Counted on turns
+// alone, a slower machine split one round of the same calls in two (card sol-pool-buys-mayhem-coins: the box's 4)
+const drain = async (queue: readonly unknown[]): Promise<void> => {
+  for (let n = -1; n !== queue.length; ) {
+    n = queue.length;
+    for (let i = 0; i < 30; i++) await new Promise((r) => setImmediate(r));
+    await new Promise((r) => setTimeout(r, 20));
+  }
 };
 /** The sale run on ticked RPCs: the rounds before W's first signature, and the answer. */
 async function rounds(w: World, ask: PoolAsk = ASK): Promise<{ rounds: number; a: Awaited<ReturnType<typeof runPoolSell>>; signedAt: number }> {
@@ -4798,7 +4806,7 @@ async function rounds(w: World, ask: PoolAsk = ASK): Promise<{ rounds: number; a
   let signedRounds = -1;
   const run = runPoolSell(host, ask).finally(() => (done = true));
   while (!done) {
-    await drain();
+    await drain(t.queue);
     if (signedAt >= 0 && signedRounds < 0) signedRounds = n;
     if (t.queue.length === 0) continue;
     for (const r of t.queue.splice(0)) r();
@@ -4968,7 +4976,7 @@ async function legRounds(w: World, ask: PoolAsk, plant?: (t: ReturnType<typeof t
   const host: PoolSellHost = { ...w.host, rpcs: t.rpcs, signed: async () => void signedAt.push(n), sent: (s) => (sentAt.push(n), callsAtSend.push(w.c.calls.length), void w.sent.push(s)) };
   const run = runPoolSell(host, ask).finally(() => (done = true));
   while (!done) {
-    await drain();
+    await drain(t.queue);
     if (t.queue.length === 0) continue;
     for (const r of t.queue.splice(0)) r();
     n++;
