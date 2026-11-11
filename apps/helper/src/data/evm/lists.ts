@@ -26,6 +26,7 @@
 // text is cut and stripped, a list holds at most LIST_MAX rows, and an RPC log is used only when its emitter, topic0
 // and token word match the table exactly.
 import { gzipSync } from "node:zlib";
+import { LOGOS } from "../logo.ts";
 import { dec, LIST_MAX, ROW_FIELDS, SERVED_MAX, servedTokens, text, type ListsAnswer, type Row } from "../solana/lists.ts";
 import { throttledUntil, type GeckoBudget } from "../gecko.ts";
 import { evmThrottleS, upstreamRetryAfterS, type ProviderHolds } from "../../limits/limits.ts";
@@ -336,7 +337,7 @@ export function toRows(chain: EvmChain, answer: unknown, asOfMs: number): { rows
       token,
       symbol,
       name,
-      icon: false, // GET /v1/logo/{chain}/{token} is not served yet; the app draws its own
+      icon: LOGOS.remember(chain, token, t.image_url), // GET /v1/logo/{chain}/{token} serves it (../logo.ts)
       venue: null,
       label: null,
       created_s: createdS, // the pool's; a pad makes the token and its pool in one transaction
