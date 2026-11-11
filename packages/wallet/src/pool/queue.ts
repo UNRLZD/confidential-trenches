@@ -47,7 +47,7 @@ import { changeIndex, freshWallet } from "../derive/index.ts";
 import { noteSecrets, type NoteRef } from "../notes/secrets.ts";
 import type { NoteRecord, NoteStore } from "../notes/store.ts";
 import { checkLadder, chunkOf } from "./ladder.ts";
-import { checkBinding, checkPool, NEWEST_GRACE_MS, TAKE_SLACK_MS, type Pool, type PoolTrees, type ReadyProof } from "./pool.ts";
+import { checkBinding, checkPool, NEWEST_GRACE_MS, NOW_REUSE_MS, TAKE_SLACK_MS, type ChainNow, type Pool, type PoolTrees, type ReadyProof } from "./pool.ts";
 
 /** Proofs kept ready: min(hardwareConcurrency - 1, 3), at least 1, all made by the one prover in turn. */
 export function readySetSize(hardwareConcurrency: number | undefined): number {
@@ -92,8 +92,11 @@ export interface ProofQueue<R> {
    * next boundary + NEWEST_GRACE_MS, or one with less than sendMarginMs + TAKE_SLACK_MS left; else HELD -> RESERVED,
    * then it is handed out. With `attempt` (the ready proof the caller built its transaction on), refused in the note's
    * turn, before any write, when the note's ready proof is another attempt (a remake swapped it in meanwhile): the note
-   * stays HELD with its new proof ready, never RESERVED for bytes no one sends. */
-  take(noteId: string, attempt?: string): Promise<ReadyProof<R>>;
+   * stays HELD with its new proof ready, never RESERVED for bytes no one sends. `early` (card
+   * sol-buy-reads-side-by-side): the pool's time read before the take (chainNow), its ms plus the time since its
+   * start (ChainNow: the larger of the device's two clocks', both within NOW_REUSE_MS); else, or when that read
+   * failed, the pool's time is read here. */
+  take(noteId: string, attempt?: string, early?: Promise<ChainNow>): Promise<ReadyProof<R>>;
   /** The proof is dropped and its note goes back to UNSPENT. */
   drop(noteId: string): Promise<void>;
   /** Frees every ready proof's note (HELD -> UNSPENT), then zeroes the seed's copy; the queue does nothing more. */
@@ -291,6 +294,17 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
     return out;
   }
 
+  /** The take's "now": an early read's ms plus the time since its start, the larger of the monotonic and the wall
+   *  clock's, while the monotonic is 0 to NOW_REUSE_MS and the wall clock's at most NOW_REUSE_MS (ChainNow); else read. */
+  const takeNow = async (early: Promise<ChainNow> | undefined): Promise<bigint> => {
+    const e = await early?.catch(() => undefined);
+    if (e !== undefined) {
+      const mono = performance.now() - e.at;
+      const wall = Date.now() - e.wall;
+      if (mono >= 0 && mono <= NOW_REUSE_MS && wall <= NOW_REUSE_MS) return e.ms + BigInt(Math.ceil(Math.max(mono, wall)));
+    }
+    return pool.now();
+  };
   const sorted = (): ReadyProof<R>[] => [...ready.values()].sort((x, y) => (order.get(x.noteId)! < order.get(y.noteId)! ? -1 : 1));
   return {
     refresh(signal) {
@@ -300,14 +314,14 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
     },
     ready: () => sorted(),
     readyWith: (read) => inView(async () => ({ ready: sorted(), value: await read() })),
-    take(noteId, attempt) {
+    take(noteId, attempt, early) {
       live();
       return onNote(noteId, async () => {
         live();
         const r = ready.get(noteId);
         if (r === undefined) throw new Error(`no ready proof for note ${noteId}`);
         if (attempt !== undefined && r.attempt !== attempt) throw new Error(`note ${noteId}'s ready proof is another attempt: it was made again, so it is not taken`);
-        const nowMs = await pool.now();
+        const nowMs = await takeNow(early);
         const why =
           epochOf(nowMs) > r.epochStartMs + pool.epochMs
             ? "is from before the previous epoch"
