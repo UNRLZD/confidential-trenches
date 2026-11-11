@@ -206,13 +206,14 @@ async function heldOn(owner, opts) {
 
 // ------------------------------------------------------------------------------------------------ the testnet SIGN_HOST
 /** SIGN_HOST's testnet build in a fresh folder: build-app.mjs --network testnet (run as a child, never imported), the
- *  page's own _headers with the devnet RPC added to connect-src (the shipped policy names the mainnet RPCs only; this
+ *  testnet build's _headers (build-app.mjs writes it) with the devnet RPC added to connect-src (the shipped policy names the mainnet RPCs only; this
  *  folder is the run's alone), and the prover's setup files at assets/zk/<sha256>.<ext>, as SIGN_HOST serves them. */
 export function testnetSign() {
   const out = mkdtempSync(path.join(tmpdir(), "ct-a2e-sign-"));
   const r = spawnSync(process.execPath, [path.join(SIGNPAGE, "scripts", "build-app.mjs"), "--out", out, "--network", "testnet"], { encoding: "utf8" });
   if (r.status !== 0) throw new Error(`build-app --network testnet failed: ${`${r.stderr}${r.stdout}`.trim().slice(-400)}`);
-  const headers = readFileSync(path.join(SIGNPAGE, "public", "_headers"), "utf8");
+  // the testnet build's own policy, which build-app writes beside it (SIGN_HOST's with the testnet EVM providers)
+  const headers = readFileSync(path.join(out, "_headers"), "utf8");
   const devnet = headers.replace("connect-src 'self' ", `connect-src 'self' ${DEVNET_RPC} `);
   if (devnet === headers) throw new Error("SIGN_HOST's _headers has no connect-src 'self' to add the devnet RPC to");
   writeFileSync(path.join(out, "_headers"), devnet);

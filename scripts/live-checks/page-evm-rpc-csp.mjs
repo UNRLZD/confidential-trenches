@@ -49,11 +49,20 @@ export function connectSrc(csp) {
   return null;
 }
 
-/** The check on one run's answers: { app, sign }, each { url, status, csp }, for the pages in `hosts`. */
-export function judge(answers, origins = evmOrigins(), hosts = Object.keys(PAGES)) {
+/** The chains SIGN_HOST's build carries venues for (card evm-pools-on-mainnet: the kit folds the testnets' half out of
+ *  it): its connect-src names their providers, and none that only a testnet venue names. APP_HOST reads every chain. */
+export const SIGN_CHAINS = Object.freeze(["base", "robinhood"]);
+/** The venues of `chains` alone, in the list's order. */
+export const venuesOf = (chains, venues = evmPoolVenues()) => Object.fromEntries(Object.keys(venues).filter((c) => chains.includes(c)).map((c) => [c, venues[c]]));
+
+/** The check on one run's answers: { app, sign }, each { url, status, csp }, for the pages in `hosts`. `origins` is
+ *  APP_HOST's list (every venue), `signOrigins` SIGN_HOST's (SIGN_CHAINS' venues); a sign answer naming any of
+ *  `origins` that `signOrigins` leaves out fails. */
+export function judge(answers, origins = evmOrigins(), hosts = Object.keys(PAGES), signOrigins = evmOrigins(venuesOf(SIGN_CHAINS))) {
   const lines = [];
   const say = (ok, text) => lines.push(`${ok ? "ok " : "BAD"} ${text}`);
   say(origins.length >= 4, `the kit's EVM venues name ${origins.length} provider origins`);
+  const testnetOnly = origins.filter((o) => !signOrigins.includes(o));
   for (const page of hosts) {
     const a = answers?.[page];
     if (!a) {
@@ -73,8 +82,13 @@ export function judge(answers, origins = evmOrigins(), hosts = Object.keys(PAGES
     }
     const wild = src.filter((s) => s.includes("*"));
     say(wild.length === 0, `${page}: connect-src holds no wildcard${wild.length ? `: ${wild.join(" ")}` : ""}`);
-    const missing = origins.filter((o) => !src.includes(o));
-    say(missing.length === 0, `${page}: connect-src names every kit EVM provider${missing.length ? `: lacks ${missing.join(" ")}` : ` (${origins.length})`}`);
+    const want = page === "sign" ? signOrigins : origins;
+    const missing = want.filter((o) => !src.includes(o));
+    say(missing.length === 0, `${page}: connect-src names every kit EVM provider${missing.length ? `: lacks ${missing.join(" ")}` : ` (${want.length})`}`);
+    if (page === "sign") {
+      const extra = testnetOnly.filter((o) => src.includes(o));
+      say(extra.length === 0, `sign: connect-src names no testnet-only EVM provider${extra.length ? `: names ${extra.join(" ")}` : ""}`);
+    }
   }
   return { ok: lines.every((l) => l.startsWith("ok ")), lines };
 }

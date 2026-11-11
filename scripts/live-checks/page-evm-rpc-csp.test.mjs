@@ -3,7 +3,10 @@
 // (apps/terminal/scripts/deploy.mjs, packages/signpage/scripts/deploy.mjs) and served by the Pages runtime of wrangler
 // 4.151.1 on a Mac, 2026-11-07: PASS. bad: the live APP_HOST and SIGN_HOST the same day, before the card's deploy
 // (neither connect-src names any EVM provider): FAIL. And it holds both committed _headers files to the kit's EVM venue
-// lists, read from the kit: a provider the kit adds or swaps in that a page's policy misses fails here, in CI.
+// lists, read from the kit: a provider the kit adds or swaps in that a page's policy misses fails here, in CI. Since card
+// evm-pools-on-mainnet SIGN_HOST's policy names the mainnets' providers alone (its build folds the testnets' venues
+// out): the recorded good SIGN_HOST answer, which names the six testnet providers too, now FAILs, and SIGN_HOST's good
+// answer is its committed _headers until the next sign deploy is recorded.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -11,7 +14,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { evmPoolVenues } from "../../packages/kit/src/index.ts";
 import { CSP as APP_PIN } from "./app-host-gate.mjs";
-import { connectSrc, evmOrigins, judge, PAGES, read } from "./page-evm-rpc-csp.mjs";
+import { connectSrc, evmOrigins, judge, PAGES, read, SIGN_CHAINS, venuesOf } from "./page-evm-rpc-csp.mjs";
 import { CSP as SIGN_PIN } from "./signpage-skeleton.mjs";
 
 const ANSWERS = JSON.parse(readFileSync(new URL("./page-evm-rpc-csp.answers.json", import.meta.url), "utf8"));
@@ -26,6 +29,9 @@ const served = (texts) => Object.fromEntries(Object.keys(PAGES).map((p) => [p, {
 const shipped = () => served({ app: text("app"), sign: text("sign") });
 const replay = (a) => async () => ({ status: a.status, headers: new Headers(a.csp === null ? {} : { "content-security-policy": a.csp }) });
 const bads = (r) => r.lines.filter((l) => l.startsWith("BAD"));
+const SIGN_ORIGINS = evmOrigins(venuesOf(SIGN_CHAINS));
+const TESTNET_ONLY = evmOrigins().filter((o) => !SIGN_ORIGINS.includes(o));
+const want = (p) => (p === "sign" ? SIGN_ORIGINS : evmOrigins());
 
 test("the kit's EVM venues: Base, Robinhood and both testnets, every provider an origin with no path, each once", () => {
   const v = evmPoolVenues();
@@ -43,21 +49,28 @@ test("the kit's EVM venues: Base, Robinhood and both testnets, every provider an
   assert.ok(o.includes("https://rpc.sentio.xyz") && !o.includes("https://rpc.sentio.xyz/base"));
 });
 
-test("recorded good answer: both pages' served connect-src name every kit EVM provider: PASS", async () => {
-  const a = { app: await read(ANSWERS.good.app.url, replay(ANSWERS.good.app)), sign: await read(ANSWERS.good.sign.url, replay(ANSWERS.good.sign)) };
+test("recorded good answer: APP_HOST's served connect-src names every kit EVM provider, SIGN_HOST's committed one the mainnets': PASS", async () => {
+  const a = { app: await read(ANSWERS.good.app.url, replay(ANSWERS.good.app)), sign: shipped().sign };
   const r = judge(a);
   assert.equal(r.ok, true, r.lines.join("\n"));
   assert.ok(r.lines.includes(`ok  app: connect-src names every kit EVM provider (${evmOrigins().length})`));
-  assert.ok(r.lines.includes(`ok  sign: connect-src names every kit EVM provider (${evmOrigins().length})`));
+  assert.ok(r.lines.includes(`ok  sign: connect-src names every kit EVM provider (${SIGN_ORIGINS.length})`));
+  assert.ok(r.lines.includes("ok  sign: connect-src names no testnet-only EVM provider"));
+  assert.equal(TESTNET_ONLY.length, 6);
+});
+
+test("recorded: SIGN_HOST as served before card evm-pools-on-mainnet names the six testnet providers: FAIL, naming them", async () => {
+  const sign = await read(ANSWERS.good.sign.url, replay(ANSWERS.good.sign));
+  assert.deepEqual(bads(judge({ sign }, evmOrigins(), ["sign"])), [`BAD sign: connect-src names no testnet-only EVM provider: names ${TESTNET_ONLY.join(" ")}`]);
 });
 
 test("recorded bad answer: the live hosts before the card name no EVM provider: FAIL on both pages", () => {
   const r = judge(ANSWERS.bad);
   assert.equal(r.ok, false);
   const all = evmOrigins().join(" ");
-  assert.deepEqual(bads(r), [`BAD app: connect-src names every kit EVM provider: lacks ${all}`, `BAD sign: connect-src names every kit EVM provider: lacks ${all}`]);
+  assert.deepEqual(bads(r), [`BAD app: connect-src names every kit EVM provider: lacks ${all}`, `BAD sign: connect-src names every kit EVM provider: lacks ${SIGN_ORIGINS.join(" ")}`]);
   // --host reads one page alone
-  assert.deepEqual(bads(judge({ sign: ANSWERS.bad.sign }, evmOrigins(), ["sign"])), [`BAD sign: connect-src names every kit EVM provider: lacks ${all}`]);
+  assert.deepEqual(bads(judge({ sign: ANSWERS.bad.sign }, evmOrigins(), ["sign"])), [`BAD sign: connect-src names every kit EVM provider: lacks ${SIGN_ORIGINS.join(" ")}`]);
 });
 
 test("both committed _headers files name every kit EVM provider, and each page's connect-src is its pinned policy's", () => {
@@ -69,7 +82,7 @@ test("both committed _headers files name every kit EVM provider, and each page's
 });
 
 test("planted: any one kit EVM provider taken out of either _headers file: FAIL, naming it", () => {
-  for (const p of Object.keys(PAGES)) for (const o of evmOrigins()) {
+  for (const p of Object.keys(PAGES)) for (const o of want(p)) {
     const t = text(p);
     assert.equal(t.split(` ${o} `).length + t.split(` ${o};`).length, 3, `${p} names ${o} once`);
     const cut = t.replace(new RegExp(` ${o.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?=[ ;])`), "");
@@ -79,10 +92,17 @@ test("planted: any one kit EVM provider taken out of either _headers file: FAIL,
   }
 });
 
+test("planted: any one testnet-only provider put into SIGN_HOST's _headers: FAIL, naming it", () => {
+  for (const o of TESTNET_ONLY) {
+    const t = text("sign").replace("connect-src 'self' ", `connect-src 'self' ${o} `);
+    assert.deepEqual(bads(judge(served({ app: text("app"), sign: t }))), [`BAD sign: connect-src names no testnet-only EVM provider: names ${o}`]);
+  }
+});
+
 test("planted: a provider the kit swaps in that no header names: FAIL on both pages", () => {
   const v = evmPoolVenues();
   const swapped = { ...v, base: { ...v.base, providers: ["https://base.new-rpc.example", ...v.base.providers.slice(1)] } };
-  const r = judge(shipped(), evmOrigins(swapped));
+  const r = judge(shipped(), evmOrigins(swapped), Object.keys(PAGES), evmOrigins(venuesOf(SIGN_CHAINS, swapped)));
   assert.deepEqual(bads(r), ["BAD app: connect-src names every kit EVM provider: lacks https://base.new-rpc.example", "BAD sign: connect-src names every kit EVM provider: lacks https://base.new-rpc.example"]);
 });
 
