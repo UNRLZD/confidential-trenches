@@ -1,0 +1,122 @@
+{
+ "good": {
+  "note": "SIGN_HOST and both seats read from this Mac at 2026-11-11T05:56:53.215Z (release as deployed then)",
+  "at": "2026-11-11T05:56:53.215Z",
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-26aZznw6r261vIDzaINH1jf2kV8EnT3vYFSmB4Ts9tT7Uzvg5FEQqKAjn08XuJFR\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "app": {
+   "sha384": "sha384-26aZznw6r261vIDzaINH1jf2kV8EnT3vYFSmB4Ts9tT7Uzvg5FEQqKAjn08XuJFR",
+   "names": [
+    "https://solana-rpc.publicnode.com",
+    "https://solana.api.pocket.network"
+   ]
+  },
+  "seats": {
+   "https://solana-rpc.publicnode.com": {
+    "preflight": {
+     "status": 204,
+     "allow": "*",
+     "headers": "content-type"
+    },
+    "post": {
+     "status": 200,
+     "allow": "*",
+     "accounts": 10,
+     "sha256": "8db39047d5c88dc061a39a4c3906f04e3d62a16e5e4825329aaf6fb4bfdb46d4"
+    }
+   },
+   "https://solana.api.pocket.network": {
+    "preflight": {
+     "status": 204,
+     "allow": "https://confidential.unrealized.trade",
+     "headers": "content-type"
+    },
+    "post": {
+     "status": 200,
+     "allow": "https://confidential.unrealized.trade",
+     "accounts": 10,
+     "sha256": "8db39047d5c88dc061a39a4c3906f04e3d62a16e5e4825329aaf6fb4bfdb46d4"
+    }
+   }
+  }
+ },
+ "bad": {
+  "at": "2026-11-11T05:56:53.215Z",
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-26aZznw6r261vIDzaINH1jf2kV8EnT3vYFSmB4Ts9tT7Uzvg5FEQqKAjn08XuJFR\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "app": {
+   "sha384": "sha384-26aZznw6r261vIDzaINH1jf2kV8EnT3vYFSmB4Ts9tT7Uzvg5FEQqKAjn08XuJFR",
+   "names": [
+    "https://solana-rpc.publicnode.com",
+    "https://solana.api.pocket.network"
+   ]
+  },
+  "seats": {
+   "https://solana-rpc.publicnode.com": {
+    "preflight": {
+     "status": 204,
+     "allow": "*",
+     "headers": "content-type"
+    },
+    "post": {
+     "status": 200,
+     "allow": "*",
+     "accounts": 10,
+     "sha256": "8db39047d5c88dc061a39a4c3906f04e3d62a16e5e4825329aaf6fb4bfdb46d4"
+    }
+   },
+   "https://solana.api.pocket.network": {
+    "preflight": {
+     "status": 204,
+     "allow": "https://confidential.unrealized.trade",
+     "headers": "content-type"
+    },
+    "post": {
+     "status": 200,
+     "allow": "https://confidential.unrealized.trade",
+     "accounts": 10,
+     "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    }
+   }
+  },
+  "note": "planted: the good run with the spare drifted, its answer to the same request hashing other than provider A (a provider that answers differently must fail the check, never pass it)"
+ },
+ "bad2": {
+  "at": "2026-11-11T05:56:53.215Z",
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-26aZznw6r261vIDzaINH1jf2kV8EnT3vYFSmB4Ts9tT7Uzvg5FEQqKAjn08XuJFR\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "app": {
+   "sha384": "sha384-26aZznw6r261vIDzaINH1jf2kV8EnT3vYFSmB4Ts9tT7Uzvg5FEQqKAjn08XuJFR",
+   "names": [
+    "https://solana-rpc.publicnode.com",
+    "https://solana.api.pocket.network"
+   ]
+  },
+  "seats": {
+   "https://solana-rpc.publicnode.com": {
+    "preflight": {
+     "status": 204,
+     "allow": "*",
+     "headers": "content-type"
+    },
+    "post": {
+     "status": 200,
+     "allow": "*",
+     "accounts": 10,
+     "sha256": "8db39047d5c88dc061a39a4c3906f04e3d62a16e5e4825329aaf6fb4bfdb46d4"
+    }
+   },
+   "https://solana.api.pocket.network": {
+    "preflight": {
+     "status": 403,
+     "allow": null,
+     "headers": null
+    },
+    "post": {
+     "status": 403,
+     "allow": null,
+     "accounts": 0,
+     "sha256": null
+    }
+   }
+  },
+  "note": "planted: the good run with the spare refusing the page (its preflight 403, no allow-origin, as api.mainnet-beta.solana.com answers a page)"
+ }
+}
