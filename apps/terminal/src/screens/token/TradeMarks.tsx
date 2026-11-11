@@ -5,11 +5,15 @@
 // frame. Positions go through React's style prop only, so APP_HOST's CSP (style-src 'self', trusted types) needs nothing.
 // A mark is placed by its transform (left and top stay 0): a mark that moves with the chart's data (a bigger trade
 // landing in its bar takes its place) or with a zoom moves no layout box (BAR-10 CLS 0, card
-// app-phone-token-taps-and-rows). On a phone each mark is tapped through a 44 px area round it (marks.css, tapped).
+// app-phone-token-taps-and-rows). On a phone each mark is tapped through a 44 px area round it (marks.css).
+// The marks take no pointer (card chart-drags-and-tracks-the-pointer): as buttons over the chart they were hit boxes that
+// a drag, a wheel or the crosshair begun on a mark never reached the chart through (on a phone a 44 px square per mark).
+// The plot's own pointer events find the mark instead, from the marks as last placed (the live UNRLZD terminal
+// hit-tests its marks the same way): a hover on a mark's disc on the desktop, a tap inside its 44 px area on a phone,
+// the one drawn on top or the nearest centre (pickMark). The chart sees every event; a key still focuses each mark.
 import "./marks.css";
 import type { Chart } from "klinecharts";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { MouseEvent } from "react";
 import { age, compact, price, usd } from "../discover/format.ts";
 import { Avatar } from "../market/Avatar.tsx";
 import type { Bar, ChartTf } from "./candles.ts";
@@ -20,6 +24,10 @@ import { WORDS } from "./words.ts";
 const PANE = "candle_pane";
 const ACTIONS = ["onZoom", "onScroll", "onVisibleRangeChange"] as const;
 const radius = (phone: boolean): number => (phone ? 6 : 8);
+/** Half a phone mark's tap area (marks.css: 44 px). */
+const TAP_HALF = 22;
+/** A press that moves farther than this is a drag of the chart, not a tap. */
+const TAP_SLOP = 8;
 
 interface Drawn {
   id: string;
@@ -45,6 +53,8 @@ export function TradeMarks({ chart, bars, tf, factor, symbol, phone, version, tr
   const [open, setOpen] = useState<string | null>(null);
   const layer = useRef<HTMLDivElement>(null);
   const frame = useRef(0);
+  const last = useRef(drawn);
+  last.current = drawn;
 
   const place = useCallback(() => {
     let size: ReturnType<Chart["getSize"]> = null;
@@ -103,25 +113,70 @@ export function TradeMarks({ chart, bars, tf, factor, symbol, phone, version, tr
     return () => ro.disconnect();
   }, [schedule]);
 
-  // a tap outside the marks closes a phone's card
+  // the mark under the pointer, from the plot's own events: the marks take none (marks.css), so the chart takes them all
   useEffect(() => {
-    if (!phone || open === null) return;
-    const close = (e: PointerEvent) => {
-      if (!(e.target instanceof Element) || !e.target.closest(".tm")) setOpen(null);
+    const pane = layer.current?.firstElementChild;
+    const plot = layer.current?.parentElement;
+    if (!(pane instanceof HTMLElement) || !plot) return;
+    /** The pane's own px of a window point (the shell's fit zoom draws the pane smaller than its own size). */
+    const at = (e: PointerEvent): { x: number; y: number } | null => {
+      const b = pane.getBoundingClientRect();
+      const { rect } = last.current;
+      if (b.width === 0 || b.height === 0) return null;
+      return { x: ((e.clientX - b.left) * rect.width) / b.width, y: ((e.clientY - b.top) * rect.height) / b.height };
     };
-    document.addEventListener("pointerdown", close);
-    return () => document.removeEventListener("pointerdown", close);
-  }, [phone, open]);
-
-  /** The mark a phone's tap opens: the tap's own point decides (pickMark), not the element it landed on, as each mark's
-   *  44 px area reaches over its neighbours. A key's click (no point) is the focused mark's. */
-  const tapped = (e: MouseEvent<HTMLButtonElement>, d: Drawn): string => {
-    const pane = e.currentTarget.parentElement?.getBoundingClientRect();
-    if (e.detail === 0 || !pane || pane.width === 0 || pane.height === 0) return d.id;
-    const x = ((e.clientX - pane.left) * drawn.rect.width) / pane.width;
-    const y = ((e.clientY - pane.top) * drawn.rect.height) / pane.height;
-    return pickMark(drawn.marks, x, y, r) ?? d.id;
-  };
+    const hit = (p: { x: number; y: number } | null, reach: (m: Drawn) => boolean): string | null => {
+      if (p === null) return null;
+      const near = last.current.marks.filter(reach);
+      return near.length === 0 ? null : pickMark(near, p.x, p.y, r);
+    };
+    if (!phone) {
+      const move = (e: PointerEvent) => {
+        if (e.pointerType === "touch") return;
+        const p = at(e);
+        const id = hit(p, (m) => p !== null && Math.hypot(m.x - p.x, m.y - p.y) <= r);
+        setOpen((o) => (o === id ? o : id));
+      };
+      const leave = () => setOpen(null);
+      plot.addEventListener("pointermove", move);
+      plot.addEventListener("pointerleave", leave);
+      return () => {
+        plot.removeEventListener("pointermove", move);
+        plot.removeEventListener("pointerleave", leave);
+      };
+    }
+    // a phone: a press that ends where it began is a tap; on a mark's area it opens that mark's card, or closes it
+    // when open; anywhere else in the plot it closes the card
+    let down: { id: number; x: number; y: number } | null = null;
+    const press = (e: PointerEvent) => {
+      down = { id: e.pointerId, x: e.clientX, y: e.clientY };
+    };
+    const release = (e: PointerEvent) => {
+      const d = down;
+      down = null;
+      if (d === null || d.id !== e.pointerId || Math.hypot(e.clientX - d.x, e.clientY - d.y) > TAP_SLOP) return;
+      const p = at(e);
+      const id = hit(p, (m) => p !== null && Math.abs(m.x - p.x) <= TAP_HALF && Math.abs(m.y - p.y) <= TAP_HALF);
+      setOpen((o) => (id === null || o === id ? null : id));
+    };
+    const cancel = () => {
+      down = null;
+    };
+    // a press outside the plot closes the card
+    const outside = (e: PointerEvent) => {
+      if (!(e.target instanceof Node) || !plot.contains(e.target)) setOpen(null);
+    };
+    plot.addEventListener("pointerdown", press);
+    plot.addEventListener("pointerup", release);
+    plot.addEventListener("pointercancel", cancel);
+    document.addEventListener("pointerdown", outside);
+    return () => {
+      plot.removeEventListener("pointerdown", press);
+      plot.removeEventListener("pointerup", release);
+      plot.removeEventListener("pointercancel", cancel);
+      document.removeEventListener("pointerdown", outside);
+    };
+  }, [phone, r]);
 
   const card = open === null ? null : drawn.marks.find((d) => d.id === open) ?? null;
   const { rect } = drawn;
@@ -136,18 +191,9 @@ export function TradeMarks({ chart, bars, tf, factor, symbol, phone, version, tr
             data-testid="trade-mark"
             data-side={d.mark.side}
             style={{ transform: `translate(${d.x - r}px, ${d.y - r}px)`, width: 2 * r, height: 2 * r }}
-            onPointerEnter={phone ? undefined : () => setOpen(d.id)}
-            onPointerLeave={phone ? undefined : () => setOpen(null)}
             onFocus={phone ? undefined : () => setOpen(d.id)}
             onBlur={phone ? undefined : () => setOpen(null)}
-            onClick={
-              phone
-                ? (e) => {
-                    const id = tapped(e, d);
-                    setOpen((o) => (o === id ? null : id));
-                  }
-                : undefined
-            }
+            onClick={phone ? () => setOpen((o) => (o === d.id ? null : d.id)) : undefined}
           >
             <Avatar symbol={symbol} size={2 * r} />
             <i className="tm-dot" />
@@ -160,12 +206,15 @@ export function TradeMarks({ chart, bars, tf, factor, symbol, phone, version, tr
   );
 }
 
+/** A mark's card, placed by its transform as the marks are: a live read that moves its mark (a new axis top, a wider
+ *  axis label) moves the card with it and no layout box (left and top stay 0). Placed by left and top, the open card
+ *  was a layout shift on every such move (live app run 43025383719, phone: div.tm-card 148,272 -> 148,244). */
 function Card({ d, symbol, rect, r }: { d: Drawn; symbol: string; rect: Rect; r: number }) {
   const m = d.mark;
   const left = d.x > rect.width - 190;
   const top = Math.max(40, Math.min(rect.height - 40, d.y));
   return (
-    <div className="tm-card" data-testid="trade-mark-card" data-side={m.side} data-h={left ? "l" : "r"} style={{ left: left ? d.x - r : d.x + r, top }}>
+    <div className="tm-card" data-testid="trade-mark-card" data-side={m.side} data-h={left ? "l" : "r"} style={{ transform: `translate(${left ? d.x - r : d.x + r}px, ${top}px) translate(${left ? "-100%" : "0"}, -50%)` }}>
       <span className="tm-cs">{m.side === "buy" ? WORDS.buy.text : WORDS.sell.text}</span>
       <span className="tm-cn">{usd(m.usd.toFixed(8))}</span>
       <span className="tm-cn tm-cw">

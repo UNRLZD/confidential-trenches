@@ -14,6 +14,7 @@ import assert from "node:assert/strict";
 import { throughApi } from "./api-ends.ts";
 import { after, test } from "node:test";
 import { readFileSync } from "node:fs";
+import { createHook } from "node:async_hooks";
 import { IDBFactory } from "fake-indexeddb";
 import { base58, base64 } from "@scure/base";
 import { ed25519 } from "@noble/curves/ed25519.js";
@@ -30,11 +31,12 @@ import { pairDown } from "./outage.ts";
 import { vaultLabelOf } from "../../kit/src/vault/shapes.ts";
 import { noteCommitment, noteSecrets, type NoteRef } from "../../wallet/src/notes/secrets.ts";
 import { openNoteStore, type NoteStore } from "../../wallet/src/notes/store.ts";
-import type { BuyWallet } from "../../wallet/src/pool/buy-wallets.ts";
+import { buyWallets, HOLDINGS_RPC_LIMIT, type BuyWallet, type HoldingsReader } from "../../wallet/src/pool/buy-wallets.ts";
+import { onTestClock } from "../../kit/test/test-clock.ts";
 import { solanaPoolOf } from "../../wallet/src/pool/solana.ts";
 import { BLOCKHASH, FEE_PAYER, POOL, PROGRAM, fx, providers, rent } from "../../kit/test/solana-pool-buy-fx.ts";
 import { READ_WAIT_TOTAL_MS } from "../src/read-waits.ts";
-import { POOL_RENT_BACK_MS, POOL_RENT_BACK_RULES, POOL_SELL_LOCK, POOL_SELL_READS, POOL_SELL_SHARED_READ_MS, POOL_SELL_SIZE_RETRY_MS, POOL_SELL_AGREE_WAIT_MS, POOL_SELL_WAIT_MS, buyMints, leftAfter, owedRentBacks, planPoolSell, poolSellKind, resumeRentBacks, runPoolSell, settleDeadSellOps, settlePoolSells, settleSellOps, solanaSellAfterFull, solanaSellReserve, keptSells, stageOfLegs, type KeptSell, type OwedRentBack, type PoolSellHost, type PoolSellKindHost, type RentBackTold } from "../src/pool-sell.ts";
+import { POOL_RENT_BACK_MS, POOL_RENT_BACK_RULES, POOL_SELL_LOCK, POOL_SELL_READS, POOL_SELL_SHARED_READ_MS, POOL_SELL_SIZE_RETRY_MS, POOL_SELL_AGREE_WAIT_MS, POOL_SELL_WAIT_MS, buyMints, leftAfter, owedRentBacks, planPoolSell, poolSellKind, resumeRentBacks, runPoolSell, settleDeadSellOps, settlePoolSells, settleSellOps, solanaSellAfterFull, solanaSellBudget, solanaSellBudgetFits, solanaSellReserve, SOLANA_POOL_SELL_PRIORITY, keptSells, stageOfLegs, type KeptSell, type OwedRentBack, type PoolSellHost, type PoolSellKindHost, type RentBackTold } from "../src/pool-sell.ts";
 import { opOf } from "../src/state.ts";
 import { solanaCompileV0 } from "../../kit/src/trade/solana/build.ts";
 import { checkSolanaSweep, PoolRuleRefused, SOLANA_POOL_MIN_DEPOSIT, SOLANA_POOL_SELL_RESERVE_MAX, solanaDepositRents, solanaSweepFloor, solanaSweepKeep, solanaWithdrawMinPart, withdrawNoteFloor, type PoolAsk } from "../src/rules/pool.ts";
@@ -59,6 +61,18 @@ const ASK: PoolAsk = { kind: "pool.sell", chain: "solana", token: MINT, amount: 
 /** ASK's amount in whole units at its decimals, as its ops record names it (card kit-portfolio-reads). */
 const UNITS = "4000000";
 const FEE = 5_000;
+/** The fee the runtime charges a message: FEE (one signature) and its priority, compute unit limit x price, rounded up. */
+const feeOf = (m: ReturnType<typeof solanaDecodeMessage>): bigint => {
+  let limit = 0n;
+  let price = 0n;
+  for (const x of m.instructions) {
+    if (m.staticKeys[x.programIndex] !== SOLANA_COMPUTE_BUDGET_PROGRAM) continue;
+    const dv = new DataView(x.data.buffer, x.data.byteOffset, x.data.byteLength);
+    if (x.data[0] === 2) limit = BigInt(dv.getUint32(1, true));
+    if (x.data[0] === 3) price = dv.getBigUint64(1, true);
+  }
+  return BigInt(FEE) + (limit * price + 999_999n) / 1_000_000n;
+};
 const N = 6; // leaves on each tree before the sell
 const ENOUGH = 1_000_000_000; // W's lamports: a reserve of 0
 const enc = new TextEncoder();
@@ -118,6 +132,10 @@ const pageBytes = (tree: 0 | 1, leaves: bigint[], pageNo = 0): Uint8Array => {
 };
 
 type Plant = {
+  /** the page's cluster (devnet, no priority fee, when not given); on mainnet the sell pays one (solanaSellBudget) */
+  cluster?: "mainnet" | "devnet";
+  /** the units each simulation answers it used (none when not given) */
+  units?: number;
   /** the recorded venue the sell goes to (pump's curve when not given) */
   venue?: Venue;
   /** W's lamports (ENOUGH when not given) */
@@ -156,6 +174,8 @@ type Plant = {
   leaves?: number;
   /** the bonding curve says a cashback coin (its is_cashback_coin byte, 82, set in the recorded reads) */
   curveCashback?: boolean;
+  /** a Mayhem coin: the bonding curve's is_mayhem_mode byte (81) or the PumpSwap Pool's (243) set in the recorded reads */
+  mayhem?: boolean;
   /** of W's PumpSwap cashback accounts, only these (W's PumpSwap volume account, its wrapped-SOL account) */
   ammOnly?: "volume" | "ata";
   /** RPC 1 never shows W's PumpSwap cashback accounts (a lagging RPC) */
@@ -441,7 +461,7 @@ function chain(plant: Plant = {}) {
       let got = new DataView(venueSell.data.buffer, venueSell.data.byteOffset + 16, 8).getBigUint64(0, true);
       const made: [string, string, number][] = m.staticKeys[venueSell.programIndex] === SOLANA_PUMP_AMM_PROGRAM && plant.cashback ? ([[ammVol, SOLANA_PUMP_AMM_PROGRAM, 137], [ammAta, SOLANA_TOKEN_PROGRAM, 165]] as [string, string, number][]).filter(([x, owner]) => accounts.get(x)?.owner !== owner) : [];
       for (const [, , size] of made) got -= solanaRentMin(rent, size);
-      const ends = BigInt(accounts.get(signer)?.lamports ?? 0) + got - BigInt(FEE);
+      const ends = BigInt(accounts.get(signer)?.lamports ?? 0) + got - feeOf(m);
       if (ends < 0n) throw new Error("InsufficientFunds");
       if (ends > 0n && ends < solanaRentMin(rent, 0)) throw new Error("InsufficientFundsForRent");
       if (dry) return;
@@ -469,7 +489,7 @@ function chain(plant: Plant = {}) {
       const at = solanaPoolPage(PROGRAM, tree, Number(pv.getBigUint64(tree === 0 ? 49 : 49 + 1065, true)));
       if (keys[2 + tree] !== at && !(keys.length === 8 && keys[6 + tree] === at)) throw new Error("WrongAccount");
     }
-    const cost = BigInt(FEE) + rentsOf(pre);
+    const cost = feeOf(m) + rentsOf(pre);
     // the venue's sell first: what W gets, less the cashback accounts it makes at W's cost
     const sellIx = m.instructions.find((x) => x.data.length === 24);
     let gets = 0n;
@@ -546,6 +566,17 @@ function chain(plant: Plant = {}) {
       switch (method) {
         case "getMultipleAccounts": {
           const recorded = fx[v].reads[p][JSON.stringify(params[0])];
+          if (recorded && plant.mayhem) {
+            const r = structuredClone(recorded) as { value: ({ owner: string; data: [string, string] } | null)[] };
+            for (const a of r.value) {
+              const d = a ? base64.decode(a.data[0]) : null;
+              const at = !a || !d ? -1 : a.owner === SOLANA_PUMP_PROGRAM && d.length >= 83 && d.length < 300 ? 81 : a.owner === SOLANA_PUMP_AMM_PROGRAM && d.length >= 245 && d.length < 600 ? 243 : -1;
+              if (at < 0) continue;
+              d![at] = 1;
+              a!.data[0] = base64.encode(d!);
+            }
+            return r;
+          }
           if (recorded && plant.curveCashback) {
             // the bonding curve (owned by pump, under 300 bytes): its cashback byte set
             const r = structuredClone(recorded) as { value: ({ owner: string; data: [string, string] } | null)[] };
@@ -590,7 +621,7 @@ function chain(plant: Plant = {}) {
           assert.equal((params[0] as { commitment: string }).commitment, "finalized");
           return { blockHeight: plant.finalHeight ?? 1_000, absoluteSlot: VF[v].slot + 10 + p, epoch: 1, slotIndex: 0, slotsInEpoch: 432_000 };
         case "getFeeForMessage":
-          return { ...ctx, value: FEE };
+          return { ...ctx, value: Number(feeOf(solanaDecodeMessage(base64.decode(params[0] as string)))) };
         case "simulateTransaction": {
           const tx = base64.decode(params[0] as string);
           assert.equal((params[1] as { sigVerify: boolean }).sigVerify, false);
@@ -611,9 +642,9 @@ function chain(plant: Plant = {}) {
                 const a = after.get(x);
                 return a ? { owner: a.owner, lamports: a.lamports, data: [base64.encode(a.data), "base64"], executable: false, rentEpoch: 0, space: a.data.length } : null;
               };
-              return { ...ctx, value: { err: null, logs: [], accounts: want.map(read) } };
+              return { ...ctx, value: { err: null, logs: [], accounts: want.map(read), ...(plant.units === undefined ? {} : { unitsConsumed: plant.units }) } };
             }
-            return { ...ctx, value: { err: null, logs: [] } };
+            return { ...ctx, value: { err: null, logs: [], ...(plant.units === undefined ? {} : { unitsConsumed: plant.units }) } };
           } catch (e) {
             return { ...ctx, value: { err: String(e), logs: [] } };
           }
@@ -759,6 +790,7 @@ async function world(plant: Plant = {}, wallets: BuyWallet[] = [wallet(AMOUNT, f
   for (const o of plant.others ?? []) bought.set(freshWallet(SEED64, "sol", o.l, o.j).address, { mint: VF[plant.venue ?? "pump"].mint, program: VF[plant.venue ?? "pump"].mintRead.owner });
   const host: PoolSellHost = {
     pin: PIN,
+    ...(plant.cluster === undefined ? {} : { cluster: plant.cluster }),
     bought: { get: async (a) => bought.get(a), put: async (a, m) => void bought.set(a, m) },
     rpcs: c.rpcs,
     notes: async () => ns,
@@ -902,6 +934,131 @@ test("proceeds bent to any pool but the pinned one are refused by the rule befor
   assert.ok(w.seeds.every((s) => s.every((b) => b === 0)));
   assert.deepEqual(w.sent, []);
   assert.deepEqual(await ours(w.ns), []);
+});
+
+// card sol-pool-buy-lands-on-mainnet: a mainnet sell pays a priority fee so a busy leader includes it: a compute unit
+// limit 1.2x the units both simulations used, a price that makes about SOLANA_POOL_SELL_PRIORITY in all, priced by both
+// RPCs into the fee the reserve, the funds check and the rule count; devnet's sell stays without one
+test("a mainnet sell carries a compute unit limit sized from its simulation and a price of about 100,000 lamports in all, counted in its reserve", async () => {
+  assert.equal(SOLANA_POOL_SELL_PRIORITY, 100_000n);
+  const w = await world({ cluster: "mainnet", units: 90_000 });
+  const a = await runPoolSell(w.host, ASK);
+  assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a, (_, v) => (typeof v === "bigint" ? String(v) : v)));
+  const sig = (a as { txs: { hash: string }[] }).txs[0]!.hash;
+  const m = solanaDecodeMessage(w.c.txs.get(sig)!.tx.subarray(65));
+  const [lim, pri] = m.instructions.slice(0, 2);
+  assert.equal(m.staticKeys[lim!.programIndex], SOLANA_COMPUTE_BUDGET_PROGRAM);
+  assert.equal(m.staticKeys[pri!.programIndex], SOLANA_COMPUTE_BUDGET_PROGRAM);
+  const limit = new DataView(lim!.data.buffer, lim!.data.byteOffset, lim!.data.byteLength).getUint32(1, true);
+  const price = new DataView(pri!.data.buffer, pri!.data.byteOffset, pri!.data.byteLength).getBigUint64(1, true);
+  assert.deepEqual([lim!.data[0], pri!.data[0]], [2, 3]);
+  assert.equal(limit, 108_000, "1.2x the 90,000 units the simulations used");
+  const priority = (BigInt(limit) * price + 999_999n) / 1_000_000n;
+  assert.ok(priority <= SOLANA_POOL_SELL_PRIORITY && priority > SOLANA_POOL_SELL_PRIORITY - 2n, String(priority));
+  assert.deepEqual(solanaSellBudget(90_000), { limit, price, priority });
+  // the deposit back is the devnet sell's less the priority: the reserve took it out of the sale, W ends where it would
+  const dep = m.instructions.at(-1)!;
+  assert.equal(m.staticKeys[dep.programIndex], PROGRAM);
+  assert.equal(new DataView(dep.data.buffer, dep.data.byteOffset + 1, 8).getBigUint64(0, true), FULL - priority);
+  // devnet: no compute budget, as before
+  const d = await world({ units: 90_000 });
+  const b = await runPoolSell(d.host, ASK);
+  const dm = solanaDecodeMessage(d.c.txs.get((b as { txs: { hash: string }[] }).txs[0]!.hash)!.tx.subarray(65));
+  assert.ok(!dm.staticKeys.includes(SOLANA_COMPUTE_BUDGET_PROGRAM));
+  // the budget's bounds: unread units take the runtime's most at about the same priority; a tiny sell's limit stops at
+  // 100,000, so its priority is the cap the preview counts, its price the kit's cap; a cap of 0 buys none
+  assert.deepEqual(solanaSellBudget(null)!.limit, 1_400_000);
+  assert.ok(solanaSellBudget(null)!.priority <= SOLANA_POOL_SELL_PRIORITY);
+  assert.deepEqual(solanaSellBudget(10), { limit: 100_000, price: 1_000_000n, priority: SOLANA_POOL_SELL_PRIORITY });
+  for (const units of [1, 50_000, 83_333, 90_000, 500_000, 833_333]) for (const cap of [1n, 777n, 50_000n, SOLANA_POOL_SELL_PRIORITY]) assert.equal(solanaSellBudget(units, cap)!.priority, cap, `${units} ${cap}`);
+  assert.equal(solanaSellBudget(90_000, 0n), null);
+});
+
+// the review of 6d76212d: the priority is never a reason to refuse. A sell that could be sent without it is sent: W pays
+// what it holds beyond the sell's need, at most SOLANA_POOL_SELL_PRIORITY, down to none (then no compute budget at all)
+const budgetOf = (w: World, a: unknown): { limit: number; price: bigint; priority: bigint } | null => {
+  const sig = (a as { txs: { hash: string }[] }).txs[0]!.hash;
+  const m = solanaDecodeMessage(w.c.txs.get(sig)!.tx.subarray(65));
+  const at = m.instructions.filter((x) => m.staticKeys[x.programIndex] === SOLANA_COMPUTE_BUDGET_PROGRAM);
+  if (at.length === 0) return null;
+  const dv = (d: Uint8Array) => new DataView(d.buffer, d.byteOffset, d.byteLength);
+  const limit = dv(at[0]!.data).getUint32(1, true);
+  const price = dv(at[1]!.data).getBigUint64(1, true);
+  return { limit, price, priority: (BigInt(limit) * price + 999_999n) / 1_000_000n };
+};
+const sentWire = (w: World, a: unknown): Uint8Array => w.c.txs.get((a as { txs: { hash: string }[] }).txs[0]!.hash)!.tx;
+test("a mainnet sell from a W short of the priority fee pays what W holds beyond the sell's need, down to none: sent either way", async () => {
+  const need = BigInt(FEE) + rentMin(0);
+  for (const [room, want] of [[50_000n, 50_000n], [1n, null], [0n, null], [SOLANA_POOL_SELL_PRIORITY + 7n, SOLANA_POOL_SELL_PRIORITY]] as const) {
+    const w = await world({ cluster: "mainnet", units: 90_000, lamports: Number(need + room) });
+    const a = await runPoolSell(w.host, ASK);
+    assert.equal("stage" in a && a.stage, "filled", `${room}: ${JSON.stringify(a)}`);
+    assert.equal(budgetOf(w, a)?.priority ?? null, want, String(room));
+  }
+});
+
+// the reviewer's case: a PumpSwap coin's W a release 116 partial sell left at exactly the next sell's need (1,493,440 at
+// mainnet's rent), which then asked that need plus the priority (1,593,440): not_funded, its tokens stuck
+test("a W a release 116 partial sell left at the next sell's need, with no priority, sells the rest on mainnet", async () => {
+  const probe = await world({ venue: "pumpswap" });
+  const need = solanaPoolBuySellNeed(await readSolanaPoolBuyVenue(probe.host.rpcs, "pumpswap", VF.pumpswap.mint), rent);
+  assert.equal(need, solanaPoolSellNeed(await readSolanaPoolBuyVenue(probe.host.rpcs, "pumpswap", VF.pumpswap.mint), rent), "the keep is the sell's whole need");
+  const w = await world({ cluster: "mainnet", units: 90_000, venue: "pumpswap", lamports: Number(need) });
+  const a = await runPoolSell(w.host, { ...ASK, token: VF.pumpswap.mint });
+  assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
+  assert.equal(budgetOf(w, a), null, "no room beyond the need: no compute budget, as at release 116");
+});
+
+test("on mainnet a partial sell keeps the next sell's need plus its priority on W, so the rest sells with the full priority", async () => {
+  const probe = await world({});
+  const need = solanaPoolBuySellNeed(await readSolanaPoolBuyVenue(probe.host.rpcs, "pump-curve", MINT), rent);
+  const w = await world({ cluster: "mainnet", units: 90_000, held: 2n * AMOUNT, lamports: Number(need) }, [wallet(2n * AMOUNT)]);
+  const a = await runPoolSell(w.host, ASK);
+  assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
+  const left = BigInt(w.c.accounts.get(W.address)?.lamports ?? 0);
+  assert.equal(left, need + SOLANA_POOL_SELL_PRIORITY, "W keeps the next sell's need and its priority");
+  const b = await runPoolSell(w.host, ASK);
+  assert.equal("stage" in b && b.stage, "filled", JSON.stringify(b));
+  assert.equal(budgetOf(w, b)?.priority, SOLANA_POOL_SELL_PRIORITY);
+});
+
+test("a mainnet sale over three wallets, one W at exactly its sale's need: every leg is sent and fills", async () => {
+  // X at exactly its sale's need (a kit app's buy over tap_max leaves W so)
+  const w = await world({ cluster: "mainnet", units: 90_000, held: T5, ataLamports: TOKEN_RENT, others: [{ l: 8n, j: 0, held: T3, lamports: Number(BigInt(FEE) + rentMin(0)) }, { l: 9n, j: 0, held: T3 }] }, [listedW(T5), walletX(T3), walletY(T3)]);
+  const a = await runPoolSell(w.host, share(10_000));
+  assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
+  assert.equal("legs" in a && a.legs!.length, 3);
+});
+
+// the review of 6d76212d, P1-1: a PumpSwap cashback coin's sell, the largest form, has no room for the compute budget
+// under 1,232 bytes; it goes without one, as before, full and partial, and the preview counts no priority for it
+test("a mainnet PumpSwap cashback sell, the largest form, goes without the compute budget, full and partial, inside 1,232 bytes", async () => {
+  const ask = { ...ASK, token: VF.pumpswap.mint };
+  for (const held of [AMOUNT, 2n * AMOUNT]) {
+    const w = await world({ cluster: "mainnet", units: 90_000, venue: "pumpswap", cashback: true, held }, [wallet(held, false, VF.pumpswap.mint)]);
+    const a = await runPoolSell(w.host, ask);
+    assert.equal("stage" in a && a.stage, "filled", `${held}: ${JSON.stringify(a)}`);
+    assert.equal(budgetOf(w, a), null);
+    assert.ok(sentWire(w, a).length <= 1_232);
+  }
+  // a plain PumpSwap coin's sell has room: it carries the budget
+  const p = await world({ cluster: "mainnet", units: 90_000, venue: "pumpswap" });
+  const b = await runPoolSell(p.host, ask);
+  assert.equal("stage" in b && b.stage, "filled", JSON.stringify(b));
+  assert.equal(budgetOf(p, b)?.priority, SOLANA_POOL_SELL_PRIORITY);
+  assert.ok(sentWire(p, b).length <= 1_232);
+  assert.equal(solanaSellBudgetFits("pumpswap", true), false);
+  assert.equal(solanaSellBudgetFits("pumpswap", false), true);
+  assert.equal(solanaSellBudgetFits("pump-curve", true), true);
+});
+
+// the review of 6d76212d, P2-3: the deposit's index is read from the compiled message, so a mainnet sell (the compute
+// budget first) that met a page another deposit filled first is built again, as on devnet
+test("a mainnet sell whose deposit fails WrongAccount on both RPCs is built again from new reads and fills", async () => {
+  const w = await world({ cluster: "mainnet", units: 90_000, wrongAccountOnce: true, leaves: 1023 });
+  const a = await runPoolSell(w.host, ASK);
+  assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
+  assert.equal(w.c.deposits.filter((d) => !d.sweep).length, 1);
 });
 
 test("a sell that never reads back, its blockhash never past on both RPCs, is sent: its note INCOMING with W's send (written before the send), for the next load to settle", async () => {
@@ -1151,6 +1308,19 @@ test("W at 0 lamports (no account) cannot pay its sell's fee: not_funded before 
     nothingBuilt(w);
     assert.deepEqual(w.sent, []);
     assert.deepEqual(await ours(w.ns), []);
+  }
+});
+
+// Card sol-pool-buys-mayhem-coins: a Mayhem coin's sale goes through on the curve and on PumpSwap, paying the reserved
+// fee recipient its venue's read named on both RPCs (pump Global 483, PumpSwap GlobalConfig 385)
+test("a Mayhem coin's sale goes through on the curve and on PumpSwap, paying the reserved fee recipient", async () => {
+  const reserved = Buffer.from(base58.decode("GesfTA3X2arioaHp8bbKdjG9vJtskViWACZoYvxp4twS"));
+  for (const venue of ["pump", "pumpswap"] as const) {
+    const w = await world({ venue, mayhem: true });
+    const a = await runPoolSell(w.host, { ...ASK, token: VF[venue].mint });
+    assert.ok(!("error" in a), `${venue}: ${JSON.stringify(a)}`);
+    const sells = w.c.calls.filter((c) => c.method === "sendTransaction").map((c) => Buffer.from(base64.decode(c.params[0] as string)));
+    assert.ok(sells.length > 0 && sells.some((t) => t.includes(reserved)), `${venue}: the sent sell names the reserved fee recipient`);
   }
 });
 
@@ -2522,6 +2692,8 @@ test("a stranger's unit at W's account of the sold mint made again after W was s
 // Delta review 7 of 08290868 (item 1): W's own coin is the mint its one buy bought (the buy's record). A full sell of
 // an airdropped mint while W still holds its own coin swept W to 0, and any later sell of that coin was refused
 // not_funded (W pays its fee up front). The rent back now holds while W holds any unit of its buy mint.
+// card wallets-found-in-one-read: W's record names its own coin, not the airdrop, so the fast path covers nothing and the
+// finder's read of the other Ws (W among them) finds the airdrop: sold as before
 test("W's own unsold coin and a fully sold airdrop: the rent back holds, W keeps its SOL and its coin's account", async () => {
   const air = VF.pumpswap.mint;
   const own = solanaAta(W.address, MINT, TOKEN_PROGRAM);
@@ -4720,15 +4892,35 @@ test("card start-reads-wait-out-a-throttle: one tap's waits share one total: a t
 
 // card pool-sell-legs-side-by-side: one wallet's sale reads side by side, each read once, the fee beside the simulations
 
+/** The device's own crypto jobs in flight: WebCrypto runs each one (the note store's AES-GCM reads and writes, digests,
+ *  key work) on the thread pool, and its answer comes back on a later turn that no immediate waits for. The sync
+ *  random bytes behind getRandomValues never call back (each finishes before its init returns), so they are not
+ *  counted. Tracked only while ticked RPCs run (`ticked` enables it, `t.stop()` disables it). */
+const jobs = new Map<number, string>();
+const jobHook = createHook({
+  init: (id, type) => void (/REQUEST$/.test(type) && type !== "RANDOMBYTESREQUEST" && jobs.set(id, type)),
+  before: (id) => void jobs.delete(id),
+  destroy: (id) => void jobs.delete(id),
+});
 /** RPCs that answer only on a tick: each call asked since the last tick answers at the next one, so the ticks a sale
  *  takes to its signature are its read rounds (no clock read anywhere). */
 function ticked(rpcs: readonly [SolanaRpc, SolanaRpc]) {
   const queue: (() => void)[] = [];
   const wrap = (rpc: SolanaRpc): SolanaRpc => (async (m: string, p: readonly unknown[]) => (await new Promise<void>((r) => void queue.push(r)), rpc(m, p))) as SolanaRpc;
-  return { rpcs: [wrap(rpcs[0]), wrap(rpcs[1])] as const, queue };
+  jobHook.enable();
+  return { rpcs: [wrap(rpcs[0]), wrap(rpcs[1])] as readonly [SolanaRpc, SolanaRpc], queue, stop: () => void (jobHook.disable(), jobs.clear()) };
 }
+/** Every task the last answers started has run before the next tick: no immediate left (the store's writes, the
+ *  checks, the signature and its record run on immediates and microtasks) and no crypto job in flight, however many
+ *  turns that takes on this machine. Without the jobs, a tick ended while the later leg's note write (five AES-GCM
+ *  jobs, written before it signs) was still on the thread pool, and its signature fell in the next tick: a round that
+ *  read nothing, counted on a fast loop (CI job 130573328559 and three more PR runs on 11 Nov: actual 4, expected 3; on
+ *  the build box 3 of 3 in the whole file, with the same calls in the same order as a green run). */
 const drain = async (): Promise<void> => {
-  for (let i = 0; i < 30; i++) await new Promise((r) => setImmediate(r));
+  for (let i = 0; i < 30 || jobs.size > 0 || process.getActiveResourcesInfo().includes("Immediate"); i++) {
+    if (i > 1_000_000) throw new Error(`the loop never went quiet: ${[...jobs.values()].join(", ")}`);
+    await new Promise((r) => setImmediate(r));
+  }
 };
 /** The sale run on ticked RPCs: the rounds before W's first signature, and the answer. */
 async function rounds(w: World, ask: PoolAsk = ASK): Promise<{ rounds: number; a: Awaited<ReturnType<typeof runPoolSell>>; signedAt: number }> {
@@ -4746,6 +4938,7 @@ async function rounds(w: World, ask: PoolAsk = ASK): Promise<{ rounds: number; a
     for (const r of t.queue.splice(0)) r();
     n++;
   }
+  t.stop();
   return { rounds: signedRounds, a: await run, signedAt };
 }
 /** Each provider's calls before W's first signature. */
@@ -4915,8 +5108,22 @@ async function legRounds(w: World, ask: PoolAsk, plant?: (t: ReturnType<typeof t
     for (const r of t.queue.splice(0)) r();
     n++;
   }
+  t.stop();
   return { a: await run, signedAt, sentAt, callsAtSend };
 }
+
+// the count is the rounds: a read held one tick more before the later leg's signature is a fourth
+test("card pool-sell-legs-side-by-side: the leg rounds count a planted round: the later leg's fee read answered a tick late signs four rounds after the leg before it sent", async () => {
+  const w = await twoBuys({ ataLamports: TOKEN_RENT });
+  (w.host as { back?: unknown }).back = undefined;
+  const r = await legRounds(w, share(10_000), (t) => {
+    let fees = 0;
+    const late = (rpc: SolanaRpc): SolanaRpc => (async (m: string, p: readonly unknown[]) => (m === "getFeeForMessage" && ++fees === 2 && (await new Promise<void>((res) => void t.queue.push(res))), rpc(m, p))) as SolanaRpc;
+    t.rpcs = [late(t.rpcs[0]), t.rpcs[1]] as const;
+  });
+  assert.equal("stage" in r.a && r.a.stage, "filled", JSON.stringify(r.a));
+  assert.equal(r.signedAt[1]! - r.sentAt[0]!, 4, JSON.stringify(r));
+});
 
 test("card pool-sell-legs-side-by-side: a later leg reads before its turn only what no other sale changes, and signs three read rounds after the leg before it sent (W's accounts and the deposit's pages read after that send; its quote, blockhash and venue the sale's young reads)", async () => {
   const w = await twoBuys({ ataLamports: TOKEN_RENT });
@@ -4987,6 +5194,188 @@ test("review of f0e7bd38, P3: waitUnless clears its own timer at a sign out and 
   }
   await waitUnless(() => Promise.reject(new Error("the host's wait failed")), 1_000, new AbortController().signal);
   await waitUnless(() => Promise.reject(new Error("the host's wait failed")), 1_000);
+});
+
+// ---------- card wallets-found-in-one-read: a sale reads the Ws that can hold its token, not every past buy's ----------
+
+/** The page's finder on the test clock at its real pace (buy-wallets.ts HOLDINGS_RPC_LIMIT: one W's round in each
+ *  window, the first at once), over the Ws of these labels (each a deposit note's, so j 0): `lists` is what it reads in
+ *  a W. Its `wallets` answers as the page's sell host does with no pass kept: every W, the finder reading only those
+ *  `read` asks for (all, when no `read` is given: a caller passes the host's own rule), the rest with holdings null. */
+function finder(labels: readonly bigint[], lists: (address: string) => [string, bigint][] = () => []) {
+  const reads: string[] = [];
+  let turn = Promise.resolve();
+  const reader: HoldingsReader = {
+    chain: "sol",
+    read: async (address) => {
+      const mine = turn;
+      let free!: () => void;
+      turn = new Promise<void>((r) => (free = r));
+      await mine;
+      setTimeout(free, HOLDINGS_RPC_LIMIT.windowMs);
+      reads.push(address);
+      return { native: 0n, tokens: new Map(lists(address).map(([m, a]) => [m, { amount: a, frozen: false }] as const)), unreadable: [] };
+    },
+  };
+  const spent = labels.map((label, i) => ({ ref: { kind: "deposit" as const, s: 1n, i }, label }));
+  const keys = labels.map((l, i) => {
+    const x = freshWallet(SEED64, "sol", l, 0);
+    x.secretKey.fill(0);
+    return { pool: PROGRAM, chain: "sol" as const, note: `n${i}`, l, j: 0, path: x.path, address: x.address };
+  });
+  const wallets = async (read?: (address: string) => boolean | Promise<boolean>) => {
+    const only = new Set<string>();
+    for (const k of keys) if (!read || (await read(k.address))) only.add(k.address);
+    const got = only.size === 0 ? [] : (await buyWallets(SEED64.slice(), [{ id: PROGRAM, chain: "sol", spent, reader }], { only })).wallets;
+    return keys.map((k) => ({ ...k, holdings: got.find((w) => w.address === k.address)?.holdings ?? null }));
+  };
+  return { reads, wallets, addressOf: (l: bigint) => keys[labels.indexOf(l)]!.address };
+}
+/** The labels of n past buys: W's own (L) first, then 100, 101, ... */
+const pastBuys = (n: number): bigint[] => [L, ...Array.from({ length: n - 1 }, (_, i) => 100n + BigInt(i))];
+const OTHER_MINT = "So11111111111111111111111111111111111111112";
+/** The host's list with no `read` (pool-testnet.ts): the finder reads the Ws no buy record names (no pass kept here). */
+const unrecordedOf = (f: ReturnType<typeof finder>, recorded: (address: string) => boolean) => (read?: (address: string) => boolean | Promise<boolean>) => f.wallets(read ?? ((a) => !recorded(a)));
+/** The plan of a sell of `ask` on a world whose sell host lists these past buys through the finder, every W's buy record
+ *  as `record` names it (undefined: none), on the test clock: its plan and the clock time it took. */
+async function planOver(w: World, f: ReturnType<typeof finder>, record: (address: string) => string | undefined, ask: PoolAsk = share(10_000)) {
+  const host: PoolSellHost = { ...w.host, wallets: unrecordedOf(f, (a) => record(a) !== undefined), bought: { get: async (a) => (record(a) === undefined ? undefined : { mint: record(a)!, program: TOKEN_PROGRAM }), put: async () => {} } };
+  let plan: Awaited<ReturnType<typeof planPoolSell>> | undefined;
+  let ms = 0;
+  await onTestClock(async () => {
+    const t0 = performance.now();
+    plan = await planPoolSell(host, ask);
+    ms = performance.now() - t0;
+  });
+  return { plan: plan!, ms };
+}
+
+test("card wallets-found-in-one-read: a token held in 1 W among 20 or 100 past buys, each recorded, is planned as fast as with 1 past buy, the finder reading none", async () => {
+  const times: number[] = [];
+  for (const n of [1, 20, 100]) {
+    const w = await world();
+    // every other W's record names another mint, and the finder would list this one in each: never read, never sold
+    const f = finder(pastBuys(n), () => [[MINT, T3]]);
+    const { plan, ms } = await planOver(w, f, (a) => (a === W.address ? MINT : OTHER_MINT));
+    times.push(ms);
+    assert.deepEqual(plan.legs.map((x) => [x.w.address, x.held]), [[W.address, AMOUNT]], `${n} past buys`);
+    assert.deepEqual(f.reads, [], `${n} past buys: the finder read ${f.reads.length} Ws in ${ms} ms`);
+  }
+  // no finder round at all: under one window of the pace whatever the count (before: (n - 1) windows, 297 s at 100)
+  for (const ms of times) assert.ok(ms < HOLDINGS_RPC_LIMIT.windowMs, `${times.join(", ")} ms`);
+});
+
+test("card wallets-found-in-one-read: a token held in 5 recorded Ws among 20 sells from all 5, each read on both RPCs once, with no finder round", async () => {
+  const held = [T3, T5, T3, T5];
+  const w = await world({ others: held.map((h, i) => ({ l: 100n + BigInt(i), j: 0, held: h })) });
+  const f = finder(pastBuys(20));
+  const holders = new Set([W.address, ...held.map((_, i) => f.addressOf(100n + BigInt(i)))]);
+  const { plan, ms } = await planOver(w, f, (a) => (holders.has(a) ? MINT : OTHER_MINT));
+  assert.equal(plan.legs.length, 5);
+  assert.equal(plan.total, AMOUNT + 2n * T3 + 2n * T5);
+  assert.deepEqual(new Set(plan.legs.map((x) => x.w.address)), holders);
+  assert.deepEqual(f.reads, []);
+  assert.ok(ms < HOLDINGS_RPC_LIMIT.windowMs, `${ms} ms`);
+});
+
+test("card wallets-found-in-one-read: no buy records (a restored device): every W is read by the finder, as before, and the one holding the token is sold from", async () => {
+  const w = await world({ buy: null });
+  const f = finder(pastBuys(20), (a) => (a === W.address ? [[MINT, AMOUNT]] : []));
+  const { plan, ms } = await planOver(w, f, () => undefined);
+  assert.deepEqual(plan.legs.map((x) => [x.w.address, x.held]), [[W.address, AMOUNT]]);
+  assert.equal(new Set(f.reads).size, 20);
+  // the full pass at the pace: one W's round a window, the first at once
+  assert.ok(ms >= 19 * HOLDINGS_RPC_LIMIT.windowMs, `${ms} ms`);
+});
+
+test("card wallets-found-in-one-read: a W whose record names the token but whose account reads empty on both RPCs is not sold from", async () => {
+  const w = await world({ held: 0n, others: [{ l: 100n, j: 0, held: T3 }] });
+  const f = finder(pastBuys(2));
+  const { plan } = await planOver(w, f, () => MINT);
+  assert.deepEqual(plan.legs.map((x) => [x.w.address, x.held]), [[f.addressOf(100n), T3]]);
+  assert.equal(plan.total, T3);
+});
+
+test("card wallets-found-in-one-read: a holding with no buy record (no pass lists it) beside a recorded one: 100 percent sells both, the finder reading the unrecorded W alone", async () => {
+  const w = await world({ others: [{ l: 100n, j: 0, held: T3 }] });
+  const f = finder(pastBuys(20), (a) => [[MINT, a === W.address ? AMOUNT : T3]]);
+  const unrecorded = f.addressOf(100n);
+  const { plan } = await planOver(w, f, (a) => (a === unrecorded ? undefined : a === W.address ? MINT : OTHER_MINT));
+  assert.deepEqual(new Set(plan.legs.map((x) => x.w.address)), new Set([W.address, unrecorded]));
+  assert.equal(plan.total, AMOUNT + T3);
+  assert.deepEqual(f.reads, [unrecorded]);
+});
+
+test("card wallets-found-in-one-read: a typed amount past what the recorded Ws hold: the finder reads every other W, one per request, and a holder whose record names another mint (an airdrop) joins the sale", async () => {
+  const w = await world({ others: [{ l: 100n, j: 0, held: T3 }] });
+  const f = finder(pastBuys(20), (a) => (a === W.address ? [[MINT, AMOUNT]] : [[MINT, T3]]));
+  const airdropped = f.addressOf(100n);
+  const { plan } = await planOver(w, f, (a) => (a === W.address ? MINT : OTHER_MINT), { ...ASK, amount: AMOUNT + T3 });
+  assert.deepEqual(new Set(plan.legs.map((x) => x.w.address)), new Set([W.address, airdropped]));
+  assert.equal(plan.total, AMOUNT + T3);
+  // the 19 Ws the fast path did not read (each another mint's), each once; W not among them; the others list the token
+  // but hold no account of it on the RPCs, so none joins
+  assert.equal(f.reads.length, 19);
+  assert.ok(!f.reads.includes(W.address));
+});
+
+test("card wallets-found-in-one-read: a W whose buy record could not be read goes to the finder even when the recorded Ws cover the sale, so 100 percent is never sold short in silence", async () => {
+  const w = await world({ others: [{ l: 100n, j: 0, held: T3 }] });
+  const f = finder(pastBuys(20), () => [[MINT, T3]]);
+  const unreadable = f.addressOf(100n);
+  // every W recorded (the host's own list reads none); the plan's read of one W's record fails
+  const host: PoolSellHost = { ...w.host, wallets: unrecordedOf(f, () => true), bought: { get: async (a) => {
+    if (a === unreadable) throw new Error("the store did not answer");
+    return { mint: a === W.address ? MINT : OTHER_MINT, program: TOKEN_PROGRAM };
+  }, put: async () => {} } };
+  let plan!: Awaited<ReturnType<typeof planPoolSell>>;
+  await onTestClock(async () => void (plan = await planPoolSell(host, share(10_000))));
+  assert.deepEqual(new Set(plan.legs.map((x) => x.w.address)), new Set([W.address, unreadable]), "both Ws sold");
+  assert.equal(plan.total, AMOUNT + T3);
+  assert.deepEqual(f.reads, [unreadable], "the finder reads that W alone");
+});
+
+test("card wallets-found-in-one-read: every share plans over the same Ws: a recorded W of 1 unit beside an unrecorded W (no pass lists it) of 3,000,000 tokens, 50 and 100 percent both a share of the two, the finder reading the unrecorded W alone", async () => {
+  const BIG = 3_000_000_000_000n;
+  for (const bps of [5_000, 10_000]) {
+    const w = await world({ held: 1n, others: [{ l: 100n, j: 0, held: BIG }] });
+    const f = finder(pastBuys(2), () => [[MINT, BIG]]);
+    const unrecorded = f.addressOf(100n);
+    const host: PoolSellHost = { ...w.host, wallets: unrecordedOf(f, (a) => a !== unrecorded), bought: { get: async (a) => (a === unrecorded ? undefined : { mint: MINT, program: TOKEN_PROGRAM }), put: async () => {} } };
+    let plan!: Awaited<ReturnType<typeof planPoolSell>>;
+    await onTestClock(async () => void (plan = await planPoolSell(host, share(bps))));
+    assert.equal(plan.total, 1n + BIG, `${bps}: the total of both`);
+    if (bps === 10_000) assert.deepEqual(plan.legs.map((x) => [x.w.address, x.units]), [[W.address, 1n], [unrecorded, BIG]], "100 percent: every unit of both");
+    else assert.deepEqual(plan.legs.map((x) => [x.w.address, x.units]), [[unrecorded, (1n + BIG) / 2n]], "50 percent: half of both, from the W holding it");
+    assert.deepEqual(f.reads, [unrecorded], `${bps}: the finder reads the unrecorded W alone`);
+  }
+});
+
+test("card wallets-found-in-one-read: a host that lists every W twice gives each W one leg, on the fast path and the finder's alike", async () => {
+  for (const typed of [false, true]) {
+    const w = await world({ others: [{ l: 100n, j: 0, held: T3 }] });
+    const f = finder(pastBuys(3), (a) => [[MINT, a === W.address ? AMOUNT : T3]]);
+    const other = f.addressOf(100n);
+    // typed: the other's record names another mint (an airdrop), so the finder's read past the records finds it
+    const record = (a: string) => (a === W.address || !typed ? MINT : OTHER_MINT);
+    const twice = async (read?: (address: string) => boolean | Promise<boolean>) => {
+      const got = await f.wallets(read ?? (() => false));
+      return [...got, ...got];
+    };
+    const host: PoolSellHost = { ...w.host, wallets: twice, bought: { get: async (a) => ({ mint: record(a), program: TOKEN_PROGRAM }), put: async () => {} } };
+    let plan!: Awaited<ReturnType<typeof planPoolSell>>;
+    await onTestClock(async () => void (plan = await planPoolSell(host, typed ? { ...ASK, amount: AMOUNT + T3 } : share(10_000))));
+    assert.deepEqual(plan.legs.map((x) => x.w.address).sort(), [W.address, other].sort(), `${typed ? "the finder's" : "the fast path"}: one leg each`);
+    assert.equal(plan.total, AMOUNT + T3);
+  }
+});
+
+test("card wallets-found-in-one-read: no recorded W holds the token (an airdrop in a W whose record names another mint): the finder's read finds it and it sells, never a refusal", async () => {
+  const w = await world({ buy: { mint: OTHER_MINT, program: TOKEN_PROGRAM } });
+  const f = finder(pastBuys(5), (a) => (a === W.address ? [[MINT, AMOUNT]] : []));
+  const { plan } = await planOver(w, f, () => OTHER_MINT);
+  assert.deepEqual(plan.legs.map((x) => [x.w.address, x.held]), [[W.address, AMOUNT]]);
+  assert.equal(f.reads.length, 5);
 });
 
 // card pool-sell-legs-side-by-side: a later leg reads the venue the leg before it chose beside its quote; when its own

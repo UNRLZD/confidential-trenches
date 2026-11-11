@@ -61,10 +61,15 @@ export const JITO_QUEUE_MAX_MS = 2 * JITO_REGION_INTERVAL_MS;
 const ANSWER_MAX = 16_384;
 
 /** One whole first send: accepted by a region, every region busy or refusing, or every region failing on transport. */
-export type JitoSend = { kind: "ok"; region: string } | { kind: "busy"; detail: string; throttled: boolean } | { kind: "refused"; detail: string } | { kind: "transport"; detail: string };
+export type JitoSend = { kind: "ok"; region: string; bundleId?: string } | { kind: "busy"; detail: string; throttled: boolean } | { kind: "refused"; detail: string } | { kind: "transport"; detail: string };
 /** One rebroadcast: sent and accepted, or not sent (its region's second is taken), or the region's answer; `throttled`
  * when a busy region said so (a 429 or rate-limit words, not a 5xx). */
-export type JitoTry = { kind: "ok" | "busy" | "transport" | "refused"; detail: string; throttled?: boolean };
+export type JitoTry = { kind: "ok" | "busy" | "transport" | "refused"; detail: string; throttled?: boolean; bundleId?: string };
+/** The block engine's word on a bundle (getInflightBundleStatuses, docs.jito.wtf/lowlatencytxnsend, read 2026-11-11
+ *  14:25Z: "Failed: Indicates that all regions have marked the bundle as failed, and it has not been forwarded";
+ *  "Pending: ... has not failed, landed, or been deemed invalid"; "Invalid: ... Bundle ID not in our system (5 minute
+ *  look back)"), or unread: no turn in the region's second, a timeout, or an answer that is not one. */
+export type JitoBundleStatus = "landed" | "pending" | "failed" | "invalid" | "unread";
 export type JitoSender = {
   /** Each region's pace, ms between two requests to it (JITO_REGION_INTERVAL_MS unless given). */
   readonly intervalMs: number;
@@ -74,6 +79,12 @@ export type JitoSender = {
    * the interval of the region's last request waits for the rest of it (one at a time a region), unless `signal`
    * aborts first. */
   rebroadcast(region: string, base64Tx: string, signature: string, signal?: AbortSignal): Promise<JitoTry>;
+  /** The engine's word on `bundleId` (an x-bundle-id `region` gave), read at `region` in a second nobody booked, as a
+   *  rebroadcast goes (it counts in the region's limit); for the send's log line only, never a send's decision. It
+   *  yields to every send: it waits at most one interval for the region's second, never holds the place a rebroadcast
+   *  waits in, and gives the second up to a rebroadcast waiting for it; past that, or past its request's timeout, it is
+   *  unread, so it answers within one interval plus the timeout. */
+  status(region: string, bundleId: string, signal?: AbortSignal): Promise<JitoBundleStatus>;
 };
 /** Resolves true after `ms`, or false at once when `signal` aborts (the timer cleared). */
 export type JitoSleep = (ms: number, signal?: AbortSignal) => Promise<boolean>;
@@ -175,7 +186,9 @@ export function jitoSender(opts: { regions?: readonly string[]; fetch?: JitoFetc
     }
     if (!r.ok) return { kind: "refused", detail: `HTTP ${r.status}` };
     if (o.result !== signature) return { kind: "refused", detail: "the answer is not this transaction's signature" };
-    return { kind: "ok", detail: "" };
+    // the bundle the engine made of it ("you can get the bundle_id from the x-bundle-id HTTP header", the same page)
+    const id = r.headers.get("x-bundle-id");
+    return { kind: "ok", detail: "", ...(id !== null && /^[0-9a-f]{64}$/.test(id) ? { bundleId: id } : {}) };
   }
 
   return {
@@ -204,7 +217,7 @@ export function jitoSender(opts: { regions?: readonly string[]; fetch?: JitoFetc
         // then what is left of the region's interval since its last actual request (a late timer), and go at once
         for (let wait = sent[at]! + interval - clock(); wait > 0; wait = sent[at]! + interval - clock()) await sleep(wait);
         const t = await one(at, b64, signature);
-        if (t.kind === "ok") return { kind: "ok", region: regions[at]! };
+        if (t.kind === "ok") return { kind: "ok", region: regions[at]!, ...(t.bundleId === undefined ? {} : { bundleId: t.bundleId }) };
         if (t.kind === "refused") return { kind: "refused", detail: t.detail };
         if (t.kind === "busy") transportOnly = false;
         if (t.throttled) throttled = true;
@@ -215,23 +228,71 @@ export function jitoSender(opts: { regions?: readonly string[]; fetch?: JitoFetc
     async rebroadcast(region, b64, signature, signal) {
       const i = regions.indexOf(region);
       if (i < 0) return { kind: "refused", detail: "not a block engine" };
-      // free is never under the last actual request plus the interval (mark), so the loop's test holds both. Early
-      // inside only the last request's interval (free is that, no first send booked past it), the rebroadcast waits
-      // out the rest, at most one interval since that request was at or before now, then reads again: a first send
-      // that booked the second meanwhile, or a late timer's second taken, refuses it then as now.
-      let held = false;
-      try {
-        for (let now = clock(); free[i]! > now; now = clock()) {
-          if (free[i]! > sent[i]! + interval) return { kind: "busy", detail: "the region's second is taken" };
-          if (holding[i] && !held) return { kind: "busy", detail: "a rebroadcast already waits for the region's second" };
-          holding[i] = held = true;
-          if (!(await sleep(free[i]! - now, signal))) return { kind: "busy", detail: "the send ended" };
-        }
-      } finally {
-        if (held) holding[i] = false;
+      const no = await unbooked(i, signal);
+      // in the same turn as the read in unbooked: nothing can take the second between them
+      return no ?? one(i, b64, signature);
+    },
+    async status(region, bundleId, signal) {
+      const i = regions.indexOf(region);
+      if (i < 0 || !/^[0-9a-f]{64}$/.test(bundleId)) return "unread";
+      // the region's second, yielded: unread past one interval, when a first send booked it, or when a rebroadcast
+      // waits for it (that rebroadcast's place is never held, so it is never refused or put after this read)
+      const until = clock() + interval;
+      for (let now = clock(); free[i]! > now; now = clock()) {
+        if (free[i]! > sent[i]! + interval || free[i]! > until || holding[i]) return "unread";
+        if (!(await sleep(free[i]! - now, signal))) return "unread";
       }
-      // in the same turn as the read above: nothing can take the second between them
-      return one(i, b64, signature);
+      if (holding[i]) return "unread";
+      let text: string;
+      try {
+        const init: RequestInit = {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getInflightBundleStatuses", params: [[bundleId]] }),
+          signal: AbortSignal.timeout(timeoutMs),
+          redirect: "error",
+        };
+        let going: Promise<Response>;
+        try {
+          going = doFetch(`${new URL(region).origin}/api/v1/getInflightBundleStatuses`, init);
+        } finally {
+          mark(i, clock());
+        }
+        const r = await going;
+        if (!r.ok) return "unread";
+        text = await bounded(r);
+      } catch {
+        return "unread";
+      }
+      try {
+        const v = (JSON.parse(text) as { result?: { value?: unknown } })?.result?.value;
+        const b = Array.isArray(v) && v.length === 1 ? (v[0] as { bundle_id?: unknown; status?: unknown } | null) : null;
+        if (b === null || typeof b !== "object" || b.bundle_id !== bundleId || typeof b.status !== "string") return "unread";
+        const s = b.status.toLowerCase();
+        return s === "landed" || s === "pending" || s === "failed" || s === "invalid" ? s : "unread";
+      } catch {
+        return "unread";
+      }
     },
   };
+
+  /** Waits for region i's second if only the last request's interval is left of it; null once a request may go now (in
+   *  this turn), else why not. free is never under the last actual request plus the interval (mark), so the loop's test
+   *  holds both. Early inside only the last request's interval (free is that, no first send booked past it), it waits
+   *  out the rest, at most one interval since that request was at or before now, then reads again: a first send that
+   *  booked the second meanwhile, or a late timer's second taken, refuses it then as now. */
+  async function unbooked(i: number, signal?: AbortSignal): Promise<JitoTry | null> {
+    let held = false;
+    try {
+      for (let now = clock(); free[i]! > now; now = clock()) {
+        if (free[i]! > sent[i]! + interval) return { kind: "busy", detail: "the region's second is taken" };
+        if (holding[i] && !held) return { kind: "busy", detail: "a rebroadcast already waits for the region's second" };
+        holding[i] = held = true;
+        if (!(await sleep(free[i]! - now, signal))) return { kind: "busy", detail: "the send ended" };
+      }
+    } finally {
+      if (held) holding[i] = false;
+    }
+    return null;
+  }
 }

@@ -8,7 +8,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { judge } from "./evm-sell-hook-intrablock.mjs";
+import { digestOf, judge, notKnown } from "./evm-sell-hook-intrablock.mjs";
 
 const A = JSON.parse(readFileSync(new URL("./evm-sell-hook-intrablock.answers.json", import.meta.url), "utf8"));
 
@@ -62,4 +62,30 @@ test("planted: a replay seat that refuses the state is walked past to two operat
   assert.equal(run([[RH, ran], [DR, STATE]]).ok, false, "one operator only");
   assert.equal(run([[RH, ran], ["https://customer-origin.offchainlabs.com", ran]]).ok, false, "one operator twice");
   assert.equal(run([[RH, ran], [DR, { jsonrpc: "2.0", id: 1, error: { code: -32000, message: "overriding address 0xA4b05FffffFffFFFFfFFfffFfffFFfffFfFfFFFf  not allowed" } }], [PK, ran]]).ok, false, "the override refused is no walk");
+});
+
+// The newest Robinhood transactions are a second or so old (a block every 0.1 s): a trace provider or a replay seat that
+// does not hold the transaction or its block yet is read again, and still behind on the last read is INCONCLUSIVE naming
+// it (the pattern of release 116's sign live run 43024665974 on Base); one that holds them and answers wrong still fails.
+test("planted: a trace provider or a replay seat still behind is INCONCLUSIVE, named; a wrong answer beside it still fails", () => {
+  const ran = A.good.txs[0].replays[0].answer;
+  const RH = "https://rpc.mainnet.chain.robinhood.com", PK = "https://robinhood.api.pocket.network", PN = "https://robinhood-rpc.publicnode.com";
+  const edit = (f) => {
+    const g = structuredClone(A.good);
+    f(g.txs[0], g);
+    return judge(g);
+  };
+  const nullTrace = (t) => (t.traces[1] = { url: t.traces[1].url, digest: digestOf([{ id: 1, result: null }, { id: 2, result: null }]), lagging: true });
+  const r = edit(nullTrace);
+  assert.equal(r.verdict, "INCONCLUSIVE", r.lines.join("\n"));
+  assert.ok(r.lines.some((l) => /^-- +\[0x[0-9a-f]{8}\] \S+ did not know the transaction yet after 5 reads 2000 ms apart: INCONCLUSIVE$/.test(l)), r.lines.join("\n"));
+  assert.equal(edit((t) => (t.traces[1] = { url: t.traces[1].url, digest: digestOf([{ id: 1, result: null }, { id: 2, result: null }]) })).verdict, "FAIL", "a null trace the read did not wait out names no lag");
+  assert.equal(edit((t, g) => (nullTrace(t), (g.trace = [g.trace[0], g.trace[0]]))).verdict, "FAIL", "a real FAIL beside it");
+  const HNF = { jsonrpc: "2.0", id: 1, error: { code: -32000, message: "unknown block" } };
+  const behind = edit((t) => (t.replays = [{ url: RH, answer: ran }, { url: PK, answer: HNF, lagging: true }, { url: PN, answer: HNF, lagging: true }]));
+  assert.equal(behind.verdict, "INCONCLUSIVE", behind.lines.join("\n"));
+  assert.ok(behind.lines.some((l) => /replayed on 1 operator\(s\): robinhood\.api\.pocket\.network and robinhood-rpc\.publicnode\.com did not know the block yet/.test(l)), behind.lines.join("\n"));
+  assert.equal(edit((t) => (t.replays = [{ url: RH, answer: ran }, { url: PK, answer: HNF }])).verdict, "FAIL", "unknown block not waited out: as before");
+  assert.equal(edit((t) => (t.replays = [{ url: RH, answer: ran }, { url: PK, answer: HNF, lagging: true }, { url: PN, answer: ran }])).verdict, "PASS", "walked past a seat behind to two that ran it");
+  assert.ok(notKnown({ result: null }) && notKnown([{ result: {} }, { error: { message: "transaction not found" } }]) && !notKnown({ error: { code: 3, message: "execution reverted" } }));
 });

@@ -5,10 +5,13 @@
 // operators of the kit's read list, under evmRetryLag; at the current period's first block and, when that fails, at the
 // next period's, as the proof queue's next pass does while the period's proof still lives (src/pool/queue.ts take). The
 // depth is the pool's public currentTreeSize() at the block, read on two operators of the list (the device counts its
-// sync's leaves there, the same number). No key, no seed, nothing signed or sent. It prints one JSON record on stdout:
+// sync's leaves there, the same number). A try that still fails on its last lag retry because a provider did not know
+// the block yet records that provider's hosts as `lagging` (lag-hosts.ts), which the check judges INCONCLUSIVE. No key,
+// no seed, nothing signed or sent. It prints one JSON record on stdout:
 //   node --import ./scripts/net-window.mjs packages/wallet/scripts/bind-fee-live.ts
 import { evmPoolProvidersOf, evmPoolVenues, evmReadProvidersOf, evmRpcOperator, evmTwoOperators, solanaJsonRpc, type SolanaRpc } from "@blindfill/kit";
 import { evmBindChainFee, evmEpochBlock, evmRetryLag, type EvmNetwork } from "../src/pool/evm.ts";
+import { laggingHosts, walkLag } from "./lag-hosts.ts";
 
 const EPOCH_MS = 60_000;
 /** currentTreeSize() */
@@ -19,11 +22,18 @@ const out: Record<string, { tries: Record<string, unknown>[] }> = {};
 for (const chain of ["base", "robinhood"] as const) {
   const venue = v[chain]!;
   const list = [...evmReadProvidersOf(venue)!];
-  // a seat's client, marking the seats whose eth_call answered (the fee read's two operators)
-  const client = (url: string, answered?: Set<string>): SolanaRpc => {
+  // a seat's client, marking the seats whose eth_call answered (the fee read's two operators) and each seat's last eth_call
+  // refusal (lag-hosts.ts walkLag)
+  const client = (url: string, answered?: Set<string>, refused?: Map<string, string>): SolanaRpc => {
     const rpc = solanaJsonRpc(url);
     return Object.assign(async (method: string, params: readonly unknown[]) => {
-      const r = await rpc(method, params);
+      let r;
+      try {
+        r = await rpc(method, params);
+      } catch (e) {
+        if (method === "eth_call") refused?.set(url, String((e as Error)?.message ?? e).slice(0, 300));
+        throw e;
+      }
       if (method === "eth_call") answered?.add(url);
       return r;
     }, { url });
@@ -35,16 +45,26 @@ for (const chain of ["base", "robinhood"] as const) {
   for (const start of [start0, start0 + EPOCH_MS]) {
     if (Date.now() < start + 5_000) await sleep(start + 5_000 - Date.now());
     const answered = new Set<string>();
-    const walk = evmTwoOperators(list.map((url) => ({ url, rpc: client(url, answered) })));
+    const refused = new Map<string, string>();
+    const walk = evmTwoOperators(list.map((url) => ({ url, rpc: client(url, answered, refused) })));
+    // a walk's read, a lag when every seat that refused it did not know the block (so evmRetryLag reads again)
+    const walked = async <T>(f: () => Promise<T>): Promise<T> => {
+      refused.clear();
+      try {
+        return await f();
+      } catch (e) {
+        throw walkLag(e, refused);
+      }
+    };
     try {
       const got = await evmRetryLag(async () => {
         const b = await evmEpochBlock(pair, BigInt(start));
-        const [{ value: word }] = await walk.read(`${chain} currentTreeSize() at block ${b.number}`, (rpc) => rpc("eth_call", [{ to: venue.pool, data: TREE_SIZE }, { blockHash: b.hash }]), (x, y) => x === y);
+        const [{ value: word }] = await walked(() => walk.read(`${chain} currentTreeSize() at block ${b.number}`, (rpc) => rpc("eth_call", [{ to: venue.pool, data: TREE_SIZE }, { blockHash: b.hash }]), (x, y) => x === y));
         const size = Number(BigInt(String(word)));
         let depth = 0;
         while (2 ** depth < size) depth++;
         answered.clear();
-        const chainFee = await evmBindChainFee(walk, chain as EvmNetwork, b, depth);
+        const chainFee = await walked(() => evmBindChainFee(walk, chain as EvmNetwork, b, depth));
         return { block: b.number.toString(), depth, chainFee: chainFee.toString() };
       }, sleep);
       const used = list.filter((u) => answered.has(u));
@@ -53,7 +73,8 @@ for (const chain of ["base", "robinhood"] as const) {
     } catch (e) {
       const m = String((e as Error)?.message ?? e);
       const noAnswer = /no answer in \d+ ms|HTTP 429|rate limit/i.test(m) && !/answered differently/.test(m);
-      tries.push({ start: new Date(start).toISOString(), ok: false, name: noAnswer ? "noAnswer" : ((e as Error)?.name ?? "Error"), error: m.slice(0, 300) });
+      const lagging = laggingHosts(e, pairUrls);
+      tries.push({ start: new Date(start).toISOString(), ok: false, name: noAnswer ? "noAnswer" : ((e as Error)?.name ?? "Error"), error: m.slice(0, 300), ...(lagging ? { lagging } : {}) });
     }
   }
   out[chain] = { tries };

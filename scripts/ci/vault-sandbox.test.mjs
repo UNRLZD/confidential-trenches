@@ -296,9 +296,9 @@ test("planted: a commit in a key, a cached or host-built vault, a shard that bui
   assert.deepEqual(cacheProblems(plant("vault-sandbox-shard", "shared-key: vault-sandbox", "shared-key: vault-sandbox-shard")),
     ["the shards do not read the build's rust-cache entry"]);
   assert.deepEqual(cacheProblems(plant("vault-sandbox-shard", 'save-if: "false"', 'save-if: "true"')), ["a shard saves the rust-cache entry"]);
-  assert.deepEqual(cacheProblems(plant("vault-sandbox-shard", "shard: [1, 2, 3, 4]", "shard: [1, 2, 3]")),
-    ["the matrix runs shards [1, 2, 3], and SHARDS has [1, 2, 3, 4]"]);
-  assert.deepEqual(cacheProblems(ci, [...SHARDS, ["s99"]]), ["the matrix runs shards [1, 2, 3, 4], and SHARDS has [1, 2, 3, 4, 5]"]);
+  assert.deepEqual(cacheProblems(plant("vault-sandbox-shard", "shard: [1, 2, 3, 4, 5]", "shard: [1, 2, 3, 4]")),
+    ["the matrix runs shards [1, 2, 3, 4], and SHARDS has [1, 2, 3, 4, 5]"]);
+  assert.deepEqual(cacheProblems(ci, [...SHARDS, ["s99"]]), ["the matrix runs shards [1, 2, 3, 4, 5], and SHARDS has [1, 2, 3, 4, 5, 6]"]);
 });
 
 // What is wrong with run.sh's vault: on the shards' prebuilt path it must need the build job's sha256 and check the

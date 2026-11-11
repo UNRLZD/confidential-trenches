@@ -61,7 +61,7 @@ export const WORDS = {
   notLanded: draft("Not landed", "09-design-brief S8.36 [draft copy: Not landed]; S8.24's `· refunded` left out: no refund step, the money never left W (app.md CH-050)"),
   priceCheck: draft("Price check failed", "09-design-brief S8.20 [draft copy: Price check failed]; the kit's quote_check_failed"),
   notSent: draft("Not sent", "09-design-brief S8.28 [draft copy: Not sent]; the kit's signpage_down (never posted)"),
-  unavailable: ok("Unavailable", "owner 10 Nov 18:12Z (owner-decisions: Mainnet run tonight and three labels); a Solana pool buy refused venue_not_pinned or no_table_fits: Buy off"),
+  unavailable: ok("Unavailable", "owner 10 Nov 18:12Z (owner-decisions: Mainnet run tonight and three labels); a Solana pool buy refused venue_not_pinned or no_table_fits, a buy or sell refused venue_not_built: Buy or Sell off"),
   filledOf: draft("filled", "app.md CH-045 (the filled part shown), after 09-design-brief S8.35 [draft copy: 2/3 sold]: `2/3 filled`"),
   soldOf: draft("sold", "09-design-brief S8.35 [draft copy: 2/3 sold]"),
   partFilled: draft("Part filled", "app.md CH-045 (set partly filled); drawn when the kit gives no count"),

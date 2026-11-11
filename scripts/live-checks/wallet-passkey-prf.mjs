@@ -84,6 +84,16 @@ const WAIT_MS = 15_000;
  *  and path only). */
 export const HELPER_SOLANA = "https://ct-api.unrealized.trade/v1/rpc/solana";
 export const HELPER_SOLANA_429 = `console: Failed to load resource: the server responded with a status of 429 () (${HELPER_SOLANA})`;
+/** The terminal's market reads on the helper (the app SIGN_HOST frames reads Discover's lists and the token's candles),
+ *  and the console line a 429 there leaves. The helper answers them 429 only for one address past its own window
+ *  (apps/helper/src/server.ts API_RATE_MAX, 120 a client in 10 s) or a cold chart past GeckoTerminal's budget (data/
+ *  gecko.ts): this check opens the terminal in several pages of one browser at once, reloading, so its own pages fill
+ *  that address's window (sign live run 43026641635, job 130543092582: six candles and three lists 429s, no other job
+ *  of the run refused). Such a 429, matched by the response the page read (rec.marketRefused), is the run's load:
+ *  INCONCLUSIVE naming the route and its count, never FAIL and never a pass. A storm of the terminal's own is
+ *  app-console-429's to judge (a crowd of reads from one machine, held under the window, must all answer 200). */
+export const HELPER_MARKET = Object.freeze(["https://ct-api.unrealized.trade/v1/market/candles", "https://ct-api.unrealized.trade/v1/market/lists"]);
+export const marketLine = (u) => `console: Failed to load resource: the server responded with a status of 429 () (${u})`;
 /** The signed-in page's price and display reads on that route (card sign-live-checks-read-a-pinned-page; the sign live
  *  run 42882854987 opens the page in 78 jobs at once, each polling them, and the route's budget is every caller's):
  *  Pyth's SOL/USD account (packages/kit/src/price/pool-usd.ts POOL_USD_FEEDS.solana), the Rent sysvar (the pool's
@@ -299,10 +309,21 @@ export function judge(rec) {
   const other = refused.filter((x) => x?.display !== true);
   say(other.length === 0, `no read but a price or display read is refused (429) on the helper's Solana route (${other.length}${other.length ? `: ${other.slice(0, 3).map((x) => JSON.stringify(x?.calls ?? null)).join("; ")}` : ""})`);
   let room = refused.length - other.length;
-  const errs = (rec.errors ?? []).filter((e) => !(e === HELPER_SOLANA_429 && room > 0 && room-- > 0));
-  const load = (rec.errors ?? []).length - errs.length;
+  // the terminal's market reads refused 429, each matched by a 429 response the page read on that route
+  const market = new Map(HELPER_MARKET.map((u) => [u, (Array.isArray(rec.marketRefused) ? rec.marketRefused : []).filter((x) => x?.url === u && x?.status === 429).length]));
+  const marketLoad = new Map();
+  const errs = (rec.errors ?? []).filter((e) => {
+    if (e === HELPER_SOLANA_429 && room > 0 && room-- > 0) return false;
+    const u = HELPER_MARKET.find((m) => e === marketLine(m));
+    if (u === undefined || market.get(u) <= 0) return true;
+    market.set(u, market.get(u) - 1);
+    marketLoad.set(u, (marketLoad.get(u) ?? 0) + 1);
+    return false;
+  });
+  const load = (rec.errors ?? []).length - errs.length - [...marketLoad.values()].reduce((a, b) => a + b, 0);
   say(errs.length === 0, `no page error or CSP violation (${errs.length})${errs.length ? `: ${errs.join("; ")}` : ""}`);
   if (load) lines.push(`WARN the helper's Solana route refused ${load} price or display read${load === 1 ? "" : "s"} for its shared budget (429), the run's load`);
+  if (marketLoad.size) lines.push(`INCONCLUSIVE the helper refused the terminal's market reads 429 (${[...marketLoad].map(([u, n]) => `${new URL(u).pathname} ${n}`).join(", ")}): its window for this run's own pages, not the page's error`);
   const verdict = lines.some((l) => l.startsWith("BAD")) ? "FAIL" : lines.some((l) => l.startsWith("INCONCLUSIVE")) ? "INCONCLUSIVE" : "PASS";
   return { verdict, pass: verdict === "PASS", lines };
 }
@@ -481,7 +502,7 @@ async function click(page, action) {
 }
 /** The check's page and console hooks: a page error, and a console error kept through the shared collector
  *  (console-errors.mjs) as its text and its address's origin and path. */
-export function watch(page, errors, refused = null) {
+export function watch(page, errors, refused = null, marketRefused = null) {
   // a 429 from the helper's Solana route, with what it read (judge: a price or display read is the run's load)
   if (refused) page.on("response", (r) => {
     if (r.status() !== 429) return;
@@ -492,6 +513,7 @@ export function watch(page, errors, refused = null) {
       return;
     }
     if (`${u.origin}${u.pathname}` === HELPER_SOLANA) refused.push(refusedRead(r.request().postData()));
+    if (marketRefused && HELPER_MARKET.includes(`${u.origin}${u.pathname}`)) marketRefused.push({ url: `${u.origin}${u.pathname}`, status: 429, retryAfter: r.headers()["retry-after"] ?? null });
   });
   page.on("pageerror", (e) => errors.push(`pageerror: ${e.message}`));
   page.on("console", (m) => {
@@ -593,7 +615,8 @@ async function repeatEnter(page, cdp) {
 export async function probe({ url = `https://${SIGN_HOST}/`, harness = false, site, fetchFn = fetch } = {}) {
   const errors = [];
   const refused = [];
-  const record = { key: KEY, url, mode: harness ? "harness" : "live", at: new Date().toISOString(), prf: {}, phone: {}, noPrf: {}, errors, refused };
+  const marketRefused = [];
+  const record = { key: KEY, url, mode: harness ? "harness" : "live", at: new Date().toISOString(), prf: {}, phone: {}, noPrf: {}, errors, refused, marketRefused };
   let prfHex = null;
   // prf run
   {
@@ -604,11 +627,11 @@ export async function probe({ url = `https://${SIGN_HOST}/`, harness = false, si
       await ctx.addInitScript(DRAWN);
       await ctx.addInitScript(HOLD_LAYER);
       const page = await ctx.newPage();
-      watch(page, errors, refused);
+      watch(page, errors, refused, marketRefused);
       const creds = await authenticator(page, true);
       // a second tab, open before the first one makes a passkey: its button must then run no ceremony
       const tab2 = await ctx.newPage();
-      watch(tab2, errors, refused);
+      watch(tab2, errors, refused, marketRefused);
       const creds2 = await authenticator(tab2, true);
       await page.goto(url);
       await tab2.goto(url);
@@ -699,7 +722,7 @@ export async function probe({ url = `https://${SIGN_HOST}/`, harness = false, si
       const APP = `https://${APP_HOST}/__wallet-passkey-prf-frame.html`;
       if (!h.harnessApp) await ctx.route(APP, (rt) => rt.fulfill({ status: 200, contentType: "text/html", body: FRAME_PARENT }));
       const parent = await ctx.newPage();
-      watch(parent, errors, refused);
+      watch(parent, errors, refused, marketRefused);
       // SIGN_HOST's frame-ancestors 'none' blocks this frame outright (card signpage-shell; signpage-skeleton holds the
       // header). It is lifted here, for this parent's frame only, so the page's own rule still shows: in a frame it
       // draws no sign-in or sign-out control.
@@ -759,7 +782,7 @@ export async function probe({ url = `https://${SIGN_HOST}/`, harness = false, si
       await ctx.addInitScript(HOLD_LAYER);
       const [a, b] = [await ctx.newPage(), await ctx.newPage()];
       for (const t of [a, b]) {
-        watch(t, errors, refused);
+        watch(t, errors, refused, marketRefused);
         await authenticator(t, true);
         await t.goto(url);
         await settled(t);
@@ -781,7 +804,7 @@ export async function probe({ url = `https://${SIGN_HOST}/`, harness = false, si
       await ctx.addInitScript(DRAWN);
       await ctx.addInitScript(HOLD_LAYER);
       const page = await ctx.newPage();
-      watch(page, errors, refused);
+      watch(page, errors, refused, marketRefused);
       const creds = await authenticator(page, true);
       const touch = (type, points) => creds.cdp.send("Input.dispatchTouchEvent", { type, touchPoints: points });
       await page.goto(url);
@@ -830,7 +853,7 @@ export async function probe({ url = `https://${SIGN_HOST}/`, harness = false, si
       await nctx.addInitScript(DRAWN);
       await nctx.addInitScript(HOLD_LAYER);
       const page = await nctx.newPage();
-      watch(page, errors, refused);
+      watch(page, errors, refused, marketRefused);
       await authenticator(page, false);
       await page.goto(url);
       record.noPrf.open = await settled(page);
@@ -912,7 +935,7 @@ export async function probe({ url = `https://${SIGN_HOST}/`, harness = false, si
       const tctx = await h.browser.newContext();
       await tctx.addInitScript(HOLD_LAYER);
       const typing = await tctx.newPage();
-      watch(typing, errors, refused);
+      watch(typing, errors, refused, marketRefused);
       await typing.goto(url);
       await settled(typing);
       // a missing control is a finding, not an error: the step records the state it left

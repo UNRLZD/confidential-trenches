@@ -41,7 +41,8 @@
 // one 75 s span in the run; a candidate whose candles still answer 429 after it is skipped as before, its waits named.
 // After: helper
 //   node scripts/live-checks/index-evm-swaps.mjs [--chain base|robinhood] [--base <url>] [--token <0x..>] [--record <file>] [--speed <n>]
-//   PASS exit 0, FAIL exit 1, error exit 2. --record writes the run (every answer read).
+//   PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3 (a head no second provider knew yet, read again 5 times
+//   2 s apart: the providers named). --record writes the run (every answer read).
 import "../net-window.mjs";
 import { candlesReader, waitsText } from "./candles-read.mjs";
 import { writeFileSync } from "node:fs";
@@ -263,7 +264,11 @@ export function judge(run) {
   const head = Math.min(...heads);
   // the heads' time against their own read (c.headsAt; a run recorded before it, the run's start), as each answer's
   const headsAt = c.headsAt === undefined ? readAt : Date.parse(c.headsAt);
-  say(c.heads?.every((n) => Number.isSafeInteger(timeOf(n)) && Math.abs(timeOf(n) - headsAt / 1000) <= 20), `the providers' newest block's time${net === "base" ? " is on Base's clock and" : ", read on two providers,"} within 20 s of their read${c.headsAt === undefined ? "" : ` at ${c.headsAt}`}`);
+  // a head another provider does not know yet (the lower head's provider, a block or two behind on Robinhood's 0.1 s
+  // blocks) is read again and, still unknown on the last read (c.behind: its hosts), INCONCLUSIVE naming them, never FAIL
+  const behind = (c.heads ?? []).filter((n) => !Number.isSafeInteger(timeOf(n)) && Array.isArray(c.behind?.[n]) && c.behind[n].length > 0);
+  for (const n of behind) lines.push(`--  the newest block ${n}: ${c.behind[n].join(" and ")} did not know it yet after ${HEAD_TRIES} reads ${HEAD_WAIT_MS} ms apart: INCONCLUSIVE`);
+  if (behind.length === 0) say(c.heads?.every((n) => Number.isSafeInteger(timeOf(n)) && Math.abs(timeOf(n) - headsAt / 1000) <= 20), `the providers' newest block's time${net === "base" ? " is on Base's clock and" : ", read on two providers,"} within 20 s of their read${c.headsAt === undefined ? "" : ` at ${c.headsAt}`}`);
   say(Number.isSafeInteger(c.decimals), `token decimals read on chain: ${show(c.decimals)}`);
   const sample = trades.trades.slice(0, SAMPLE);
   const keys = [];
@@ -391,13 +396,14 @@ export function judge(run) {
 /** The verdict, and on FAIL a line for each read the helper answered: status, time, Server-Timing. */
 function withReads(run, lines) {
   const ok = lines.every((l) => l.startsWith("ok ") || l.startsWith("-- "));
+  const verdict = !ok ? "FAIL" : lines.some((l) => l.startsWith("-- ") && l.endsWith(": INCONCLUSIVE")) ? "INCONCLUSIVE" : "PASS";
   if (!ok) {
     const st = (r) => `${r?.status ?? "none"}${waitsText(r)} in ${r?.ms ?? "?"} ms, Server-Timing ${show(r?.headers?.["server-timing"])}`;
     if (run.listsRead !== undefined) lines.push(`--  read: lists ${st(run.listsRead)}`);
     for (const t of run.tried ?? []) lines.push(`--  read: ${t.token} before it: candles ${st(t.candles)}${t.trades === undefined ? "" : `; trades ${st(t.trades)}`}`);
     for (const k of ["candles", "trades"]) if (run.reads?.[k] !== undefined) lines.push(`--  read: ${run.coin} ${k} ${st(run.reads[k])}`);
   }
-  return { ok, lines };
+  return { ok: verdict === "PASS", verdict, lines };
 }
 
 async function get(base, path, fetchFn) {
@@ -422,6 +428,32 @@ async function single(method, params, fetchFn, url) {
   }
 }
 
+/** A head another provider just reported may be a block a provider does not hold yet (a null block): read again this
+ *  often, this far apart (the wallet's EVM_LAG_TRIES and EVM_LAG_WAIT_MS), before its time is judged unknown. */
+export const HEAD_TRIES = 5;
+export const HEAD_WAIT_MS = 2_000;
+const sleepMs = (ms) => new Promise((ok) => setTimeout(ok, ms));
+/** Block `n`'s time on the first two providers that hold it, which must agree: { ts }, or { behind: hosts } when fewer
+ *  than two held it and those that answered null did not (read again `tries` times HEAD_WAIT_MS apart). Two that hold it
+ *  and differ, or a provider giving no answer, are no time and name none: judged as before. */
+export async function headTime(n, fetchFn, rpcs, tries = HEAD_TRIES, sleep = sleepMs) {
+  let behind = [];
+  for (let t = 1; t <= tries; t++) {
+    const got = [];
+    behind = [];
+    for (const url of rpcs) {
+      const b = await single("eth_getBlockByNumber", [hex(n), false], fetchFn, url);
+      if (b === null) behind.push(new URL(url).host);
+      else if (isObj(b) && typeof b.timestamp === "string") got.push(b.timestamp);
+      if (got.length === 2) break;
+    }
+    if (got.length === 2) return got[0] === got[1] ? { ts: got[0], behind: [] } : { behind: [] };
+    if (behind.length === 0) return { behind: [] };
+    if (t < tries) await sleep(HEAD_WAIT_MS);
+  }
+  return { behind };
+}
+
 /** One JSON-RPC call on the first two providers that answer, which must agree on the result: the result, or null; with
  *  `both`, two that answered and differ are `{ differ: [a, b] }`, each answer's `pick`. */
 async function agreed(method, params, fetchFn, rpcs = SWAP_RPCS.base, pick = (x) => x, both = false) {
@@ -441,7 +473,7 @@ async function agreed(method, params, fetchFn, rpcs = SWAP_RPCS.base, pick = (x)
 }
 
 /** `reader`: the run's candles reader (candles-read.mjs): a 429 is read again at its Retry-After, as the page reads it. */
-export async function read(base = BASE, token, fetchFn = fetch, rpcs, net = "base", reader = candlesReader()) {
+export async function read(base = BASE, token, fetchFn = fetch, rpcs, net = "base", reader = candlesReader(), sleep = sleepMs) {
   rpcs ??= SWAP_RPCS[net];
   const readAt = new Date().toISOString();
   let candidates = token === undefined ? [] : [token];
@@ -548,8 +580,9 @@ export async function read(base = BASE, token, fetchFn = fetch, rpcs, net = "bas
     const ns = new Set([...heads, ...Object.values(run.chain.receipts).map(one).filter(isObj).map((r) => Number.parseInt(r.blockNumber, 16)), ...(run.chain.poolLogs ? [run.chain.poolLogs.from] : [])]);
     run.chain.blockTimes = {};
     for (const n of ns) {
-      const ts = await agreed("eth_getBlockByNumber", [hex(n), false], fetchFn, rpcs, (b) => b.timestamp);
-      if (typeof ts === "string") run.chain.blockTimes[n] = Number.parseInt(ts, 16);
+      const got = await headTime(n, fetchFn, rpcs, heads.includes(n) ? HEAD_TRIES : 1, sleep);
+      if (typeof got.ts === "string") run.chain.blockTimes[n] = Number.parseInt(got.ts, 16);
+      else if (got.behind.length > 0 && heads.includes(n)) (run.chain.behind ??= {})[n] = got.behind;
     }
   }
   return run;
@@ -572,10 +605,12 @@ if (import.meta.main) {
     if (!nets.every((n) => ["base", "robinhood"].includes(n))) throw new Error(`--chain ${nets}: base or robinhood`);
     if (nets.length > 1 && opt("--token")) throw new Error("--token needs --chain");
     let all = true;
+    let quiet = false;
     for (const net of nets) {
       const run = await read(base, opt("--token"), fetch, undefined, net);
       if (opt("--record")) writeFileSync(nets.length > 1 ? opt("--record").replace(/(\.json)?$/, `.${net}.json`) : opt("--record"), `${JSON.stringify(run, null, 1)}\n`);
-      const { ok, lines } = judge(run);
+      const { ok, verdict, lines } = judge(run);
+      quiet ||= verdict === "INCONCLUSIVE";
       for (const l of lines) console.log(`${nets.length > 1 ? `[${net}] ` : ""}${l}`);
       console.log(`first reads (${net} ${run.coin}): candles ${run.reads.candles?.ms} ms, trades ${run.reads.trades?.ms} ms`);
       const n = Number(opt("--speed", "0"));
@@ -584,10 +619,11 @@ if (import.meta.main) {
         for (let i = 0; i < n; i++) ms.push((await get(base, CANDLES_PATH(run.coin, net), fetch)).ms);
         console.log(`speed (${net}): ${n} candle reads, p50 ${pct(ms, 50)} ms, p95 ${pct(ms, 95)} ms, max ${Math.max(...ms)} ms`);
       }
-      all &&= ok;
+      all &&= ok || verdict === "INCONCLUSIVE";
     }
-    console.log(`live-check ${KEY}: ${all ? "PASS" : "FAIL"} (${base}, ${nets.join(" and ")})`);
-    process.exit(all ? 0 : 1);
+    const v = !all ? "FAIL" : quiet ? "INCONCLUSIVE" : "PASS";
+    console.log(`live-check ${KEY}: ${v} (${base}, ${nets.join(" and ")})`);
+    process.exit({ PASS: 0, FAIL: 1, INCONCLUSIVE: 3 }[v]);
   } catch (e) {
     console.error(`live-check ${KEY}: ERROR: ${e.message}`);
     process.exit(2);
