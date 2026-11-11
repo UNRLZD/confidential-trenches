@@ -7,7 +7,9 @@
 // settled, a state the kit refuses, no pools, no state). Each bad fails on its own lines only:
 // - good was recorded, unedited, with card signing-views-open-over-the-app on the harness, which maps every outside
 //   name to not found: its console lines for those names are not counted on a harness run (HARNESS_UNRESOLVED), and
-//   badMainNoSheet (main 8253c0a3, the same harness, unedited) fails the sheet's line only;
+//   badMainNoSheet (main 8253c0a3, the same harness, unedited) fails the sheet's line only; good was recorded again
+//   (12 Nov) once the 12 words shown took the frame out (the review of 7a21ffcd, P2-2), the answer before it kept as
+//   goodKeptUnderWords, which fails the sheet's line only;
 // - badPageOfItsOwn: the good of this tree before card signing-views-open-over-the-app, each screen a page of its own
 //   with the frame taken out of the document: fails on the sheet's line only. Every record but good was recorded before
 //   that card, so the sheet's line is read on good and on badPageOfItsOwn alone (the others are read on their own lines);
@@ -36,7 +38,7 @@ const BAD_ALL = (rec) => judge(rec).lines.filter((l) => l.startsWith("BAD")).map
 // before it, and is read on its other lines (the step's own bads are below, and a good with the step deleted is BAD).
 const APP = "prf: the terminal in the frame takes the signed-in state with pools";
 // The sheet's line (card signing-views-open-over-the-app) came after every record but good: read on good alone.
-const SHEET = "the sheet keeps the app's frame in the page under every screen it draws";
+const SHEET = "the sheet keeps the app's frame in the page under every screen it draws but the 12 words, and takes it out under those and after them";
 const BAD = (rec) => BAD_ALL(rec).filter((l) => (l !== APP || Object.hasOwn(rec.prf ?? {}, "app")) && (l !== SHEET || rec === answers.good));
 
 const FRAMED = "prf: a signout sent to SIGN_HOST in a frame is refused, the frame never loads a sign-out";
@@ -56,6 +58,13 @@ test("the recorded good answer passes", () => {
   assert.equal(answers.good.mode, "harness");
   assert.ok(answers.good.prf.framed.refusals >= 1);
   assert.ok(Array.isArray(answers.good.prf.app.state.pools));
+});
+
+test("the card's page at 7a21ffcd, the frame kept under the 12 words (the review's P2-2), unedited: fails on the sheet's line only", () => {
+  const r = judge(answers.goodKeptUnderWords);
+  assert.equal(r.ok, false);
+  assert.deepEqual(BAD_ALL(answers.goodKeptUnderWords), [SHEET], r.lines.join("\n"));
+  assert.ok(r.lines.includes(`BAD ${SHEET} (7 of 7 kept, 0 of 4 out)`), r.lines.join("\n"));
 });
 
 test("a page of its own over no frame (this tree before card signing-views-open-over-the-app) fails on the sheet's line only", () => {
@@ -83,7 +92,13 @@ test("the harness's unresolved outside names are not the page's errors on a harn
   live.mode = "live";
   assert.ok(judge(live).lines.some((l) => l.startsWith(`BAD no page error or CSP violation (${good.errors.length}):`)));
   // planted: another failure to load on the harness, a resolved name's 404 and an unresolved line with more after it
-  for (const line of ["console: Failed to load resource: the server responded with a status of 404 () (https://confidential.unrealized.trade/x)", "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://x.example/) and more", "console: Failed to load resource: net::ERR_CONNECTION_REFUSED (https://x.example/)"]) {
+  for (const line of ["console: Failed to load resource: the server responded with a status of 404 () (https://confidential.unrealized.trade/x)", "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://x.example/) and more", "console: Failed to load resource: net::ERR_CONNECTION_REFUSED (https://x.example/)",
+    // the skip is pinned to SIGN_HOST's connect-src (as its skeleton check pins it): a name outside it, a name that only
+    // starts like one in it, plain http, or no address at all is the page's error
+    "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://x.example/)",
+    "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana-rpc.publicnode.com.x.example/)",
+    "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (http://solana-rpc.publicnode.com/)",
+    "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED"]) {
     const rec = structuredClone(good);
     rec.errors.push(line);
     assert.ok(judge(rec).lines.includes(`BAD no page error or CSP violation (1): ${line}`), `${line}: ${judge(rec).lines.join("\n")}`);

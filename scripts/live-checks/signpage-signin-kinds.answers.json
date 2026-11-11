@@ -4,6 +4,597 @@
   "key": "signpage-signin-kinds",
   "url": "https://confidential.unrealized.trade/",
   "mode": "harness",
+  "at": "2026-11-11T17:17:17.143Z",
+  "prf": {
+   "signin": {
+    "answer": {
+     "v": 1,
+     "id": "8a7fef70-7613-4161-93e5-ba5f70c3fe59",
+     "ok": true,
+     "result": {
+      "pending": true
+     }
+    },
+    "page": {
+     "state": "signed-out",
+     "account": null,
+     "codeSaved": null,
+     "layer": "shown",
+     "frame": true,
+     "top": true,
+     "words": 0,
+     "create": 1,
+     "use": 1,
+     "recovery": 1,
+     "newAccount": 0,
+     "haveOne": 0,
+     "signoutButtons": 0,
+     "walletAsks": null,
+     "db": true,
+     "seed": false,
+     "framesWithSignout": 0
+    }
+   },
+   "create": {
+    "state": "signed-in",
+    "account": "646088a6feea2f06086742c277afe924a1879b736f908e480bc41224d0cec25f",
+    "codeSaved": "false",
+    "layer": "hidden",
+    "frame": true,
+    "top": true,
+    "words": 0,
+    "create": 0,
+    "use": 0,
+    "recovery": 0,
+    "newAccount": 0,
+    "haveOne": 0,
+    "signoutButtons": 1,
+    "walletAsks": null,
+    "db": true,
+    "seed": true,
+    "framesWithSignout": 0
+   },
+   "app": {
+    "signpage": null,
+    "state": {
+     "release": "unreleased",
+     "api": 1,
+     "signed_in": true,
+     "way": "passkey",
+     "code_saved": false,
+     "vault_balance": "0",
+     "wallets": [],
+     "positions": [],
+     "orders": [],
+     "held": [],
+     "ops": [],
+     "pools": [
+      {
+       "chain": "solana",
+       "asset": "SOL",
+       "balance": "0"
+      }
+     ]
+    }
+   },
+   "framed": {
+    "answer": {
+     "timeout": true
+    },
+    "loaded": false,
+    "signoutButtons": 0,
+    "refusals": 1
+   },
+   "again": {
+    "answer": {
+     "v": 1,
+     "id": "84a1e7a3-1092-4b08-ada4-dc6dd6ca52cb",
+     "ok": false,
+     "error": {
+      "code": "not_allowed"
+     }
+    },
+    "page": {
+     "state": "signed-in",
+     "account": "646088a6feea2f06086742c277afe924a1879b736f908e480bc41224d0cec25f",
+     "codeSaved": "false",
+     "layer": "hidden",
+     "frame": true,
+     "top": true,
+     "words": 0,
+     "create": 0,
+     "use": 0,
+     "recovery": 0,
+     "newAccount": 0,
+     "haveOne": 0,
+     "signoutButtons": 1,
+     "walletAsks": null,
+     "db": true,
+     "seed": true,
+     "framesWithSignout": 0
+    }
+   },
+   "backup": {
+    "answer": {
+     "v": 1,
+     "id": "9d5d5d5e-bd8e-4e49-9aa5-cd9bec6863d2",
+     "ok": true,
+     "result": {
+      "pending": true
+     }
+    },
+    "page": {
+     "state": "backup",
+     "account": "646088a6feea2f06086742c277afe924a1879b736f908e480bc41224d0cec25f",
+     "codeSaved": "false",
+     "layer": "shown",
+     "frame": false,
+     "top": true,
+     "words": 12,
+     "create": 0,
+     "use": 0,
+     "recovery": 0,
+     "newAccount": 0,
+     "haveOne": 0,
+     "signoutButtons": 0,
+     "walletAsks": null,
+     "db": true,
+     "seed": true,
+     "framesWithSignout": 0
+    }
+   },
+   "backupCancel": {
+    "state": "signed-in",
+    "account": "646088a6feea2f06086742c277afe924a1879b736f908e480bc41224d0cec25f",
+    "codeSaved": "false",
+    "layer": "hidden",
+    "frame": true,
+    "top": true,
+    "words": 0,
+    "create": 0,
+    "use": 0,
+    "recovery": 0,
+    "newAccount": 0,
+    "haveOne": 0,
+    "signoutButtons": 1,
+    "walletAsks": null,
+    "db": true,
+    "seed": true,
+    "framesWithSignout": 0
+   },
+   "signout": {
+    "answer": {
+     "v": 1,
+     "id": "274d73cd-2099-41ee-94f1-58b9ce4e71af",
+     "ok": true,
+     "result": {
+      "pending": true
+     }
+    },
+    "page": {
+     "state": "signout",
+     "account": "646088a6feea2f06086742c277afe924a1879b736f908e480bc41224d0cec25f",
+     "codeSaved": "false",
+     "layer": "shown",
+     "frame": true,
+     "top": true,
+     "words": 0,
+     "create": 0,
+     "use": 0,
+     "recovery": 0,
+     "newAccount": 0,
+     "haveOne": 0,
+     "signoutButtons": 1,
+     "walletAsks": null,
+     "db": true,
+     "seed": true,
+     "framesWithSignout": 0
+    },
+    "early": {
+     "state": "signout",
+     "account": "646088a6feea2f06086742c277afe924a1879b736f908e480bc41224d0cec25f",
+     "codeSaved": "false",
+     "layer": "shown",
+     "frame": true,
+     "top": true,
+     "words": 0,
+     "create": 0,
+     "use": 0,
+     "recovery": 0,
+     "newAccount": 0,
+     "haveOne": 0,
+     "signoutButtons": 1,
+     "walletAsks": null,
+     "db": true,
+     "seed": true,
+     "framesWithSignout": 0,
+     "pressLanded": true,
+     "pressMs": 32
+    },
+    "after": {
+     "state": "signed-out",
+     "account": null,
+     "codeSaved": null,
+     "layer": "hidden",
+     "frame": true,
+     "top": true,
+     "words": 0,
+     "create": 1,
+     "use": 1,
+     "recovery": 1,
+     "newAccount": 0,
+     "haveOne": 0,
+     "signoutButtons": 0,
+     "walletAsks": null,
+     "db": false,
+     "seed": false,
+     "framesWithSignout": 0
+    }
+   },
+   "refused": {
+    "signout": {
+     "v": 1,
+     "id": "445dfc51-ad28-4ce4-97e6-74d6155d7162",
+     "ok": false,
+     "error": {
+      "code": "not_allowed"
+     }
+    },
+    "backup": {
+     "v": 1,
+     "id": "0676e306-1552-4681-9699-89e8756dbe2a",
+     "ok": false,
+     "error": {
+      "code": "not_allowed"
+     }
+    },
+    "layer": "hidden"
+   }
+  },
+  "noPrf": {
+   "create": {
+    "state": "backup",
+    "account": "7e570169594758d8c3dc003e86e9b0c559a3cef5424b8c9592475c0c9123ff75",
+    "codeSaved": "false",
+    "layer": "shown",
+    "frame": false,
+    "top": true,
+    "words": 12,
+    "create": 0,
+    "use": 0,
+    "recovery": 0,
+    "newAccount": 0,
+    "haveOne": 0,
+    "signoutButtons": 0,
+    "walletAsks": null,
+    "db": true,
+    "seed": true,
+    "framesWithSignout": 0
+   },
+   "signout": {
+    "answer": {
+     "v": 1,
+     "id": "42e776a5-57e0-4fb3-a233-d79de3036945",
+     "ok": true,
+     "result": {
+      "pending": true
+     }
+    },
+    "page": {
+     "state": "backup",
+     "account": "7e570169594758d8c3dc003e86e9b0c559a3cef5424b8c9592475c0c9123ff75",
+     "codeSaved": "false",
+     "layer": "shown",
+     "frame": false,
+     "top": true,
+     "words": 12,
+     "create": 0,
+     "use": 0,
+     "recovery": 0,
+     "newAccount": 0,
+     "haveOne": 0,
+     "signoutButtons": 0,
+     "walletAsks": null,
+     "db": true,
+     "seed": true,
+     "framesWithSignout": 0
+    }
+   },
+   "saved": {
+    "state": "signout",
+    "account": "7e570169594758d8c3dc003e86e9b0c559a3cef5424b8c9592475c0c9123ff75",
+    "codeSaved": "true",
+    "layer": "shown",
+    "frame": false,
+    "top": true,
+    "words": 0,
+    "create": 0,
+    "use": 0,
+    "recovery": 0,
+    "newAccount": 0,
+    "haveOne": 0,
+    "signoutButtons": 1,
+    "walletAsks": null,
+    "db": true,
+    "seed": true,
+    "framesWithSignout": 0
+   },
+   "after": {
+    "state": "signed-out",
+    "account": null,
+    "codeSaved": null,
+    "layer": "hidden",
+    "frame": true,
+    "top": true,
+    "words": 0,
+    "create": 1,
+    "use": 1,
+    "recovery": 1,
+    "newAccount": 0,
+    "haveOne": 0,
+    "signoutButtons": 0,
+    "walletAsks": null,
+    "db": false,
+    "seed": false,
+    "framesWithSignout": 0
+   }
+  },
+  "wallet": {
+   "answer": {
+    "v": 1,
+    "id": "e5d9d255-c4f1-4a4f-a192-979dc4dcdceb",
+    "ok": true,
+    "result": {
+     "pending": true
+    }
+   },
+   "choose": {
+    "state": "choose",
+    "account": null,
+    "codeSaved": null,
+    "layer": "shown",
+    "frame": true,
+    "top": true,
+    "words": 0,
+    "create": 0,
+    "use": 0,
+    "recovery": 0,
+    "newAccount": 1,
+    "haveOne": 1,
+    "signoutButtons": 0,
+    "walletAsks": 0,
+    "db": true,
+    "seed": false,
+    "framesWithSignout": 0
+   },
+   "existing": {
+    "state": "existing",
+    "account": null,
+    "codeSaved": null,
+    "layer": "shown",
+    "frame": true,
+    "top": true,
+    "words": 0,
+    "create": 0,
+    "use": 1,
+    "recovery": 1,
+    "newAccount": 0,
+    "haveOne": 0,
+    "signoutButtons": 0,
+    "walletAsks": 0,
+    "db": true,
+    "seed": false,
+    "framesWithSignout": 0
+   },
+   "existingUse": {
+    "state": "no-prf",
+    "account": null,
+    "codeSaved": null,
+    "layer": "shown",
+    "frame": true,
+    "top": true,
+    "words": 0,
+    "create": 0,
+    "use": 1,
+    "recovery": 1,
+    "newAccount": 0,
+    "haveOne": 0,
+    "signoutButtons": 0,
+    "walletAsks": 0,
+    "db": true,
+    "seed": false,
+    "framesWithSignout": 0
+   }
+  },
+  "twoTabs": {
+   "aLoaded": {
+    "state": "signed-out",
+    "account": null,
+    "codeSaved": null,
+    "layer": "hidden",
+    "frame": true,
+    "top": true,
+    "words": 0,
+    "create": 1,
+    "use": 1,
+    "recovery": 1,
+    "newAccount": 0,
+    "haveOne": 0,
+    "signoutButtons": 0,
+    "walletAsks": null,
+    "db": true,
+    "seed": false,
+    "framesWithSignout": 0
+   },
+   "bCreate": {
+    "state": "signed-in",
+    "account": "49e312ba166dfb4d6efc7e42b69843ec9a816c5ea8d608d6a166b0a4f6b3bc41",
+    "codeSaved": "false",
+    "layer": "hidden",
+    "frame": true,
+    "top": true,
+    "words": 0,
+    "create": 0,
+    "use": 0,
+    "recovery": 0,
+    "newAccount": 0,
+    "haveOne": 0,
+    "signoutButtons": 1,
+    "walletAsks": null,
+    "db": true,
+    "seed": true,
+    "framesWithSignout": 0
+   },
+   "heldAtSend": true,
+   "backup": {
+    "answer": {
+     "v": 1,
+     "id": "54f31bc8-de72-4941-b8bc-a05d6db2244c",
+     "ok": true,
+     "result": {
+      "pending": true
+     }
+    },
+    "page": {
+     "state": "backup",
+     "account": "49e312ba166dfb4d6efc7e42b69843ec9a816c5ea8d608d6a166b0a4f6b3bc41",
+     "codeSaved": "false",
+     "layer": "shown",
+     "frame": false,
+     "top": true,
+     "words": 12,
+     "create": 0,
+     "use": 0,
+     "recovery": 0,
+     "newAccount": 0,
+     "haveOne": 0,
+     "signoutButtons": 0,
+     "walletAsks": null,
+     "db": true,
+     "seed": true,
+     "framesWithSignout": 0
+    }
+   }
+  },
+  "broken": {
+   "open": {
+    "state": "signed-out",
+    "account": null,
+    "codeSaved": null,
+    "layer": "shown",
+    "frame": true,
+    "top": true,
+    "words": 0,
+    "create": 1,
+    "use": 1,
+    "recovery": 1,
+    "newAccount": 0,
+    "haveOne": 0,
+    "signoutButtons": 0,
+    "walletAsks": null,
+    "db": true,
+    "seed": false,
+    "framesWithSignout": 0
+   },
+   "planted": true,
+   "cancel": {
+    "state": "signed-out",
+    "account": null,
+    "codeSaved": null,
+    "layer": "hidden",
+    "frame": true,
+    "top": true,
+    "words": 0,
+    "create": 1,
+    "use": 1,
+    "recovery": 1,
+    "newAccount": 0,
+    "haveOne": 0,
+    "signoutButtons": 0,
+    "walletAsks": null,
+    "db": true,
+    "seed": true,
+    "framesWithSignout": 0
+   }
+  },
+  "errors": [
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana-rpc.publicnode.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana.api.pocket.network/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana.api.pocket.network/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana-rpc.publicnode.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana.api.pocket.network/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana-rpc.publicnode.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana.api.pocket.network/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana.api.pocket.network/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana.api.pocket.network/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana-rpc.publicnode.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana.api.pocket.network/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana.api.pocket.network/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana-rpc.publicnode.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana.api.pocket.network/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana-rpc.publicnode.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana.api.pocket.network/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana.api.pocket.network/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana.api.pocket.network/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana-rpc.publicnode.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana.api.pocket.network/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana.api.pocket.network/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana-rpc.publicnode.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana.api.pocket.network/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana-rpc.publicnode.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana.api.pocket.network/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana.api.pocket.network/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana.api.pocket.network/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana-rpc.publicnode.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana.api.pocket.network/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana.api.pocket.network/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana-rpc.publicnode.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana.api.pocket.network/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana.api.pocket.network/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana-rpc.publicnode.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana.api.pocket.network/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana.api.pocket.network/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana-rpc.publicnode.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana.api.pocket.network/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana.api.pocket.network/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana-rpc.publicnode.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana.api.pocket.network/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana.api.pocket.network/)"
+  ],
+  "browser": "Chrome 156.0.8078.79, sandbox on"
+ },
+ "goodKeptUnderWords": {
+  "key": "signpage-signin-kinds",
+  "url": "https://confidential.unrealized.trade/",
+  "mode": "harness",
   "at": "2026-11-11T15:18:32.846Z",
   "prf": {
    "signin": {
