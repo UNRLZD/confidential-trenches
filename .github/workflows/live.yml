@@ -15,8 +15,13 @@
 #
 # A check that ends INCONCLUSIVE (exit 3: too few of its providers answered, a public RPC's 429) runs again after a
 # pause, three runs at most (card live-inconclusive-rerun; scripts/ci/live-rerun.mjs: capped exponential backoff with equal
-# jitter). Still INCONCLUSIVE, the job is red and its last line names the providers that did not answer; a FAIL (1) or an
-# ERROR (2) is never run again.
+# jitter); a FAIL (1) or an ERROR (2) is never run again. Still INCONCLUSIVE, or a check whose exit 2 its own last verdict
+# line calls INCONCLUSIVE, it could not judge the build: its job passes with a notice naming why (card
+# live-run-red-means-the-build). Each job writes its checks' verdicts to a file, and the live job reads them all
+# (scripts/ci/live-verdicts.mjs): it prints passed, failed and inconclusive by key with each reason, and is red when a check
+# FAILED or erred, was not run, or left no verdict, or the plan broke; never for an inconclusive one alone. From the CLI:
+#   gh run view <run id> --log | grep 'live-verdicts: '
+
 #
 # A serial group (card helper-live-jup-serial; SERIAL_GROUPS in scripts/ci/helper-live-checks.mjs) is ONE job: its checks
 # spend one shared budget, the helper's Jupiter window, so they run one after another (scripts/ci/live-serial.mjs), each
@@ -208,8 +213,9 @@ jobs:
             ~/.cache/playwright-debs
           key: ${{ steps.engines-key.outputs.key }}
       # TMPDIR is the folder the artifact takes: a check keeps its screenshots under the temporary folder by default.
-      # live-rerun runs the check, and again on INCONCLUSIVE (exit 3) alone, writes the log itself and exits with the
-      # check's own last code: the runner line is the step's only command, with nothing after it (the gate holds it whole).
+      # live-rerun runs the check, and again on INCONCLUSIVE (exit 3) alone, writes the log and the verdict file itself and
+      # exits 0 on a pass or an inconclusive, 1 on a FAIL, the check's code on an error: the runner line is the step's only
+      # command, with nothing after it (the gate holds it whole).
       - name: ${{ matrix.name }}
         if: matrix.group == ''
         env:
@@ -223,7 +229,8 @@ jobs:
           # shellcheck disable=SC2086
           node .live-runner/scripts/ci/live-rerun.mjs --log "$out/$ID.log" "$KEY" $ARGS
       # a serial group: its checks one after another, each once the helper's Jupiter budget is idle, an INCONCLUSIVE one
-      # run again as a single check is (live-rerun.mjs), a FAIL or ERROR never
+      # run again as a single check is (live-rerun.mjs), a FAIL or ERROR never; a member done with the budget reads on
+      # beside the next ones (live-serial.mjs RELEASES)
       - name: ${{ matrix.name }} (in turn)
         if: matrix.group != ''
         env:
@@ -257,19 +264,45 @@ jobs:
             ${{ runner.temp }}/live/**/*.png
           if-no-files-found: warn
           retention-days: 14
+      # the job's verdicts (the runner writes them beside its log), which the live job reads; none when the runner never
+      # ended, and the live job is red for that
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: verdict-${{ matrix.id }}
+          path: ${{ runner.temp }}/live/${{ matrix.id }}.verdict.json
+          if-no-files-found: ignore
+          retention-days: 14
 
-  # The one status to read, and to require: green only when the plan and every check job passed. A skipped check is
-  # listed with its reason, never counted as a pass.
+  # The one status to read, and to require: green only when the plan and every check job passed and no check FAILED,
+  # erred or went unrun (an inconclusive one is listed with its reason, never counted as a pass, never red). A skipped
+  # check is listed with its reason, never counted as a pass. The verdicts' reader is this workflow's own
+  # (github.workflow_sha), as the runners are.
   live:
     needs: [plan, check]
     if: always() && needs.plan.result != 'skipped'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: .live-verdicts
+          persist-credentials: false
+          sparse-checkout: |
+            scripts/ci/live-verdicts.mjs
+          sparse-checkout-cone-mode: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: needs.plan.result == 'success'
+        with:
+          pattern: verdict-*
+          path: ${{ runner.temp }}/verdicts
+          merge-multiple: true
       - name: every check passed, and what was not run
         env:
           PLAN: ${{ needs.plan.result }}
           COUNT: ${{ needs.plan.outputs.count }}
+          MATRIX: ${{ needs.plan.outputs.matrix }}
           CHECKS: ${{ needs.check.result }}
           SKIPPED: ${{ needs.plan.outputs.skipped }}
         run: |
@@ -278,8 +311,9 @@ jobs:
           fi
           if [ "$PLAN" != success ]; then echo "the plan job ended $PLAN"; exit 1; fi
           if [ -z "$COUNT" ] || [ "$COUNT" = 0 ]; then echo "the plan lists no check to run"; exit 1; fi
+          node .live-verdicts/scripts/ci/live-verdicts.mjs --dir "$RUNNER_TEMP/verdicts" --matrix "$MATRIX" --summary "$GITHUB_STEP_SUMMARY"
           if [ "$CHECKS" != success ]; then echo "a check job ended $CHECKS"; exit 1; fi
-          echo "all $COUNT live runs passed"
+          echo "all $COUNT live runs ended with no check judging the build bad"
 
   # The terminal's browser chain and the signing page's browser runs, on every pull request, in parallel with ci.yml's jobs.
   browser-e2e:
