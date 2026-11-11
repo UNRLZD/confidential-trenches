@@ -54,7 +54,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { createBook, TFS, type Book, type Candle, type Event, type Ref, type Swap, type Tf } from "../candles.ts";
-import { GT_PAGE_WAIT_MS, GT_SERVE_MS, refreshLane, SEED_LANE, takeOrWait, throttledUntil, type GeckoBudget } from "../gecko.ts";
+import { createWanted, GT_PAGE_WAIT_MS, GT_SERVE_MS, refreshLane, SEED_LANE, takeOrWait, throttledUntil, type GeckoBudget, type Later } from "../gecko.ts";
 import { CALLER_ROOM, evmThrottleS, LOGS_REFUSED, providerHolds, RETRY_AFTER_MAX_S, upstreamRetryAfterS, type ProviderHolds } from "../../limits/limits.ts";
 import { operatorOf } from "../../rpc/rpc.ts";
 import { isBars, KEPT_HANDOVER_MS, toCandles, TF as GT_TF, type DataAnswer } from "../solana/token.ts";
@@ -779,7 +779,7 @@ const isRevert = (e: unknown): boolean => {
  *  no value (undefined), as a call not agreed is. */
 const REVERTED = "reverted";
 
-export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => number; listed: (token: string) => Promise<boolean>; hint?: (token: string) => Promise<string | null>; gecko?: GeckoBudget; sleep?: (ms: number) => Promise<unknown>; rpcs?: readonly string[]; headerTimed?: ReadonlySet<string>; pools?: ReadonlyMap<string, { pool: Pool; decimals: number }>; tickMs?: number; holds?: ProviderHolds; index?: readonly string[] }) {
+export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => number; listed: (token: string) => Promise<boolean>; hint?: (token: string) => Promise<string | null>; gecko?: GeckoBudget; sleep?: (ms: number) => Promise<unknown>; later?: Later; rpcs?: readonly string[]; headerTimed?: ReadonlySet<string>; pools?: ReadonlyMap<string, { pool: Pool; decimals: number }>; tickMs?: number; holds?: ProviderHolds; index?: readonly string[] }) {
   const now = deps.now ?? Date.now;
   const doFetch = deps.fetch ?? fetch;
   const rpcs = deps.rpcs ?? SWAP_RPCS[chain];
@@ -1969,44 +1969,66 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   async function noneCandles(token: string, tf: Tf, to: number | null, limit: number, client?: string): Promise<DataAnswer> {
     const none = empty({ tf, candles: [] });
     if (deps.gecko === undefined || !Object.hasOwn(GT_TF, tf)) return none;
-    const gecko = deps.gecko;
     let p = gtPools.get(token);
     if (p === undefined || now() - p.at >= GT_POOL_FRESH_MS) {
-      // a held pool's re-read is a refresh: refused, the pool held serves. With none held, a refused, throttled or
-      // failed read is the 429 or 503, never an empty 200 (card market-reads-hold-under-load)
+      // a held pool's re-read is a refresh: refused, the pool held serves. With none held, a refused read is queued
+      // (wantPool) and the page answered from our own reads, an empty chart it reads again (AWAY_MS), never a 429 (card
+      // evm-chart-opens-without-a-vendor-call: Base candles 429 on every cold token read, the helper's live run at
+      // 06:58Z); a read that fails is the 503
       const cold = p === undefined;
-      const waitOf = (why: string) => limited(Math.min(Math.max(Math.ceil((gecko.retryAt("pages") - now()) / 1000), 1), RETRY_AFTER_MAX_S), why);
-      let fail: DataAnswer | undefined = waitOf("geckoterminal budget");
-      if (await gtTake(cold ? "pages" : "refresh", `${chain} pool`, client)) {
-        fail = UPSTREAM;
-        try {
-          const r = await doFetch(`${GT_BASE}/networks/${chain}/tokens/${token}/pools?page=1`, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(TIMEOUT_MS), redirect: "error" });
-          if (r.status === 429) fail = (throttledUntil(gecko, r.headers.get("retry-after"), now()), waitOf("geckoterminal 429"));
-          // GeckoTerminal names no such token: nothing to chart, the empty answer below
-          if (r.status === 404) fail = undefined;
-          if (r.status === 200 && Number(r.headers.get("content-length") ?? "0") <= ANSWER_MAX) {
-            const text = await r.text();
-            const id = text.length > ANSWER_MAX ? undefined : (JSON.parse(text) as { data?: { attributes?: { address?: unknown } }[] })?.data?.[0]?.attributes?.address;
-            p = { id: typeof id === "string" && /^0x[0-9a-f]{40}([0-9a-f]{24})?$/.test(id.toLowerCase()) ? id.toLowerCase() : null, at: now() };
-            if (gtPools.size >= POOLS_MAX) gtPools.delete(gtPools.keys().next().value!);
-            gtPools.set(token, p);
-          } else await r.body?.cancel();
-        } catch {
-          // GeckoTerminal did not answer: the pool held, if any
-        }
+      if (cold && wanted !== undefined && wanted.size() > 0) {
+        wantPool(token, tf);
+        return none;
       }
-      if (p === undefined && fail !== undefined) return fail;
+      if (await gtTake(cold ? "pages" : "refresh", `${chain} pool`, client)) {
+        const got = await readPool(token);
+        if (got !== "throttled" && got !== "failed") p = got ?? undefined;
+        if (cold && got === "throttled") wantPool(token, tf);
+        if (p === undefined && got === "failed") return UPSTREAM;
+        // GeckoTerminal names no such token (null): nothing to chart, the empty answer below
+        if (got === null) return none;
+      } else if (cold) wantPool(token, tf);
+      if (p === undefined) return none;
     }
-    if (p === undefined || p.id === null) return none;
+    if (p.id === null) return none;
     const got = await geckoBars({ pool: { id: p.id, token } } as Entry, tf, to, true, client);
-    // GeckoTerminal refused or failed with nothing to serve: its 429 (with the wait) or 503, so the page retries, never
-    // an empty 200 for a token it names a pool of (card helper-restart-fresh)
-    if (!Array.isArray(got)) return got;
+    // GeckoTerminal refused with nothing to serve: the read is queued (geckoBars) and the page answered from our own
+    // reads, never a 429 (card evm-chart-opens-without-a-vendor-call); a read that failed is the 503, so the page retries
+    if (!Array.isArray(got)) return got.status === 429 ? none : got;
     const bars = got.filter((c) => to === null || c[0] < to).slice(-limit);
     if (bars.length === 0) return none;
     const at = history.get(`${p.id}:${tf}:${to ?? ""}`)?.at ?? kept.get(`${p.id}:${tf}`)?.at ?? now();
     const body = { tf, candles: bars, src: "geckoterminal", as_of_ms: at };
     return { status: 200, body: JSON.stringify(body), src: "geckoterminal", asOfMs: at };
+  }
+
+  /** GeckoTerminal's top pool of a token, its call already taken, held in gtPools: the pool, null when GeckoTerminal
+   *  names no such token, "throttled" on its 429, else "failed". */
+  async function readPool(token: string): Promise<{ id: string | null; at: number } | null | "throttled" | "failed"> {
+    try {
+      const r = await doFetch(`${GT_BASE}/networks/${chain}/tokens/${token}/pools?page=1`, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(TIMEOUT_MS), redirect: "error" });
+      if (r.status === 429) {
+        await r.body?.cancel();
+        throttledUntil(deps.gecko!, r.headers.get("retry-after"), now());
+        return "throttled";
+      }
+      if (r.status === 404) {
+        await r.body?.cancel();
+        return null;
+      }
+      if (r.status !== 200 || Number(r.headers.get("content-length") ?? "0") > ANSWER_MAX) {
+        await r.body?.cancel();
+        return "failed";
+      }
+      const text = await r.text();
+      const id = text.length > ANSWER_MAX ? undefined : (JSON.parse(text) as { data?: { attributes?: { address?: unknown } }[] })?.data?.[0]?.attributes?.address;
+      const p = { id: typeof id === "string" && /^0x[0-9a-f]{40}([0-9a-f]{24})?$/.test(id.toLowerCase()) ? id.toLowerCase() : null, at: now() };
+      if (gtPools.size >= POOLS_MAX) gtPools.delete(gtPools.keys().next().value!);
+      gtPools.set(token, p);
+      return p;
+    } catch {
+      return "failed";
+    }
   }
 
   /** The last good bars per pool and tf (the newest range read): served when a read is throttled or fails. */
@@ -2039,27 +2061,42 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     // the history before a book of ours (not `alone`) is an optional seed, the answer our chain bars without it: a stale
     // read, so it never takes the call a chart with nothing to serve needs (card helper-crowd-429)
     const lane = before === null ? refreshLane(kept.get(`${e.pool.id}:${tf}`)?.at ?? fresh?.at ?? null, now()) : fresh !== undefined ? "refresh" : alone ? "pages" : SEED_LANE;
-    if (!(await gtTake(lane, `${chain} bars`, client))) return fallback(wait(lane === "pages" ? undefined : `geckoterminal ${lane}`));
+    // a read a page asked for with nothing held to serve waits in the queue for the next free call, behind those queued
+    // before it (card evm-chart-opens-without-a-vendor-call); the page is answered now from our own bars, never a 429
+    const nothing = fresh === undefined && fallback(UPSTREAM) === UPSTREAM;
+    const queued = nothing && wanted !== undefined && (wanted.has(k) || wanted.size() > 0);
+    if (queued || !(await gtTake(lane, `${chain} bars`, client))) {
+      if (nothing) wantBars(e.pool.id, e.pool.token, tf, before, k);
+      return fallback(wait(lane === "pages" ? undefined : `geckoterminal ${lane}`));
+    }
+    const got = await readBars(e.pool.id, e.pool.token, tf, before, k);
+    if (got === "throttled" && nothing) wantBars(e.pool.id, e.pool.token, tf, before, k);
+    return Array.isArray(got) ? got : fallback(got === "throttled" ? wait("geckoterminal 429") : UPSTREAM);
+  }
+
+  /** One GeckoTerminal OHLCV read of a pool, its call already taken: the bars (held under `k`, and as the pool's newest
+   *  when they are), "throttled" on its 429 (every lane paused for its Retry-After), else "failed". */
+  async function readBars(pool: string, token: string, tf: Tf, before: number | null, k: string): Promise<Candle[] | "throttled" | "failed"> {
     try {
       const g = GT_TF[tf as keyof typeof GT_TF];
-      const url = `${GT_BASE}/networks/${chain}/pools/${e.pool.id}/ohlcv/${g.period}?aggregate=${g.aggregate}&limit=1000&currency=usd&token=${e.pool.token}${before === null ? "" : `&before_timestamp=${before}`}`;
+      const url = `${GT_BASE}/networks/${chain}/pools/${pool}/ohlcv/${g.period}?aggregate=${g.aggregate}&limit=1000&currency=usd&token=${token}${before === null ? "" : `&before_timestamp=${before}`}`;
       const r = await doFetch(url, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(TIMEOUT_MS), redirect: "error" });
       if (r.status === 429) {
         await r.body?.cancel();
-        throttledUntil(gecko, r.headers.get("retry-after"), now());
-        return fallback(wait("geckoterminal 429"));
+        throttledUntil(deps.gecko!, r.headers.get("retry-after"), now());
+        return "throttled";
       }
       if (r.status !== 200 || Number(r.headers.get("content-length") ?? "0") > ANSWER_MAX) {
         await r.body?.cancel();
-        return fallback(UPSTREAM);
+        return "failed";
       }
       const text = await r.text();
-      if (text.length > ANSWER_MAX) return fallback(UPSTREAM);
+      if (text.length > ANSWER_MAX) return "failed";
       const bars = toCandles(JSON.parse(text), tf as keyof typeof GT_TF, 1_000, now());
-      if (bars === null) return fallback(UPSTREAM);
+      if (bars === null) return "failed";
       if (history.size >= 500) history.delete(history.keys().next().value!);
       history.set(k, { at: now(), bars });
-      const kk = `${e.pool.id}:${tf}`;
+      const kk = `${pool}:${tf}`;
       const had = kept.get(kk);
       if (bars.length > 0 && (had === undefined || bars.at(-1)![0] >= had.bars.at(-1)![0])) {
         kept.delete(kk);
@@ -2068,8 +2105,27 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       }
       return bars;
     } catch {
-      return fallback(UPSTREAM);
+      return "failed";
     }
+  }
+
+  /** The reads pages asked for and the budget refused (../gecko.ts createWanted): each in its turn, the page's next read
+   *  then served from what it got (the app reads its chart in full every RESYNC_MS, 60 s, and a chart with no bars of
+   *  ours AWAY_MS, 45 s: apps/terminal/src/screens/token/candles.ts). */
+  const wanted = deps.gecko === undefined ? undefined : createWanted(deps.gecko, `${chain} bars`, now, deps.later);
+  function wantBars(pool: string, token: string, tf: Tf, before: number | null, k: string, first = false): void {
+    wanted?.want(k, { done: () => history.has(k), run: async () => ((await readBars(pool, token, tf, before, k)) === "throttled" ? "again" : undefined) }, first);
+  }
+  /** A listed token our reads find no pool of: GeckoTerminal's top pool for it, then that pool's newest bars, first. */
+  function wantPool(token: string, tf: Tf): void {
+    wanted?.want(`pool:${token}`, {
+      done: () => gtPools.has(token) && now() - gtPools.get(token)!.at < GT_POOL_FRESH_MS,
+      run: async () => {
+        const got = await readPool(token);
+        if (got === "throttled") return "again";
+        if (typeof got === "object" && got !== null && got.id !== null) wantBars(got.id, token, tf, null, `${got.id}:${tf}:`, true);
+      },
+    });
   }
 
   // -------------------------------------------------------------------------------------------------------------
@@ -2246,6 +2302,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     tick: start,
     stop(): void {
       aheadQueue.clear();
+      wanted?.stop();
       if (timer !== null) clearInterval(timer);
       timer = null;
       if (follower !== null) clearInterval(follower);
@@ -2288,11 +2345,12 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
         const before = ownFrom === null ? (to ?? Math.floor(now() / 1000)) : Math.min(ownFrom, to ?? ownFrom);
         // GeckoTerminal's history is an optional seed (card helper-crowd-429): refused or failed, the answer is our
         // chain bars alone, never its 429 (index-evm-swaps at 22:12Z: a Robinhood 1m chart answered 429 for the seed).
-        // With no bar of ours to serve, its 429 (with the wait) or 503 is the answer, so the page reads again, never a
-        // 200 with no bars for a token that has them (card market-reads-hold-under-load: Base 0xfbb75a59's 1h answered
-        // 200 [] at 19:55Z on a book opened a minute before, its seed refused by the budget; 356 bars at 20:11Z)
+        // With no bar of ours to serve, a refused read is queued (geckoBars) and the answer our own reads' empty chart,
+        // which the page reads again (AWAY_MS), never a 429 (card evm-chart-opens-without-a-vendor-call: at
+        // market-reads-hold-under-load it was the 429, and the helper's live run at 06:58Z read 429 on every cold Base
+        // token); a read that failed with nothing held is the 503, so the page retries
         const got = await geckoBars(e, tf as Tf, ownFrom === null ? to : before, false, client);
-        if (own.length === 0 && !Array.isArray(got)) return timed(got);
+        if (own.length === 0 && !Array.isArray(got) && got.status !== 429) return timed(got);
         const old = (Array.isArray(got) ? got : []).filter((c) => c[0] < before);
         if (old.length > 0) {
           bars = old.concat(own).slice(-limit);

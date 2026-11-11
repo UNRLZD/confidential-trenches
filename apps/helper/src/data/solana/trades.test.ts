@@ -334,8 +334,9 @@ test("a listed token with no priced trade for over a minute answers its empty ta
   t.stop();
 });
 
-test("candles of a listed token with no bars of ours: the history is asked for its newest range (one cache key), and a throttled or failed history answers its 429 or 503, never an empty 200", async () => {
-  // app live run 41787804457 (4 Nov 06:49Z): wNEAR (listed, no curve trades) answered 200 "chain" with no bars
+test("candles of a listed token with no bars of ours: the history is asked for its newest range (one cache key); a throttled history answers our own reads' empty chart (200, src chain), never a 429, and a failed one its 503", async () => {
+  // app live run 41787804457 (4 Nov 06:49Z): wNEAR (listed, no curve trades) answered 200 "chain" with no bars. Card
+  // evm-chart-opens-without-a-vendor-call: a listed token never answers 429 on candles, one rule with swaps.ts
   const asked: (number | null)[] = [];
   let hist: { status: number; body: string; src?: string; asOfMs?: number; retryAfterS?: number } = { status: 429, body: '{"error":{"code":"rate_limited"}}', retryAfterS: 30 };
   const t = createSolanaTrades({
@@ -348,7 +349,8 @@ test("candles of a listed token with no bars of ours: the history is asked for i
     tickMs: 0,
   });
   const throttled = await t.candles(MINT, "1h", null, 60);
-  assert.deepEqual([throttled.status, throttled.retryAfterS], [429, 30], throttled.body);
+  assert.equal(throttled.status, 200, throttled.body);
+  assert.deepEqual([throttled.src, JSON.parse(throttled.body).candles], ["chain", []]);
   hist = { status: 503, body: '{"error":{"code":"upstream"}}' };
   assert.equal((await t.candles(MINT, "1h", null, 60)).status, 503);
   hist = { status: 200, body: JSON.stringify({ tf: "1h", candles: [[TS - (TS % 3600) - 3600, "1", "1", "1", "1", "5"]], src: "geckoterminal", as_of_ms: TS * 1000 }), src: "geckoterminal", asOfMs: TS * 1000 };

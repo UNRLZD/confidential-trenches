@@ -76,6 +76,20 @@ export const SEED_LANE = "optional";
  *  its bars, or its info), so one caller opens one cold page at a time while the rest serve others; keyed by the
  *  server's clientOf, the key the held route's share (held.ts DEX_LIMITS) and every other caller share use.] */
 export const PAGE_PER_CLIENT = 2;
+/** The lane of a read a page asked for and the budget refused (card evm-chart-opens-without-a-vendor-call): the page is
+ *  answered at once from our own reads (a chart's own bars, holders with no count), never a 429, and the read waits in
+ *  a queue (createWanted) for the next free call. While any waits, the lists' reads that are not urgent and the "ahead"
+ *  lane take none, so what a page asked for comes before the helper's own background reads; a cold page read waiting
+ *  its turn (takeOrWait) still comes first, and the queue leaves STALE_RESERVE calls of the window to a page with
+ *  nothing to serve, as a stale read does (card helper-crowd-429). */
+export const WANTED_LANE = "wanted";
+/** Reads one queue holds; past it a new key is not queued (its page is answered from our own reads, and asks again).
+ *  [design: 64, every token a crowd opens in a few minutes, which the budget's 5 calls in 75 s take 16 minutes to read;
+ *  a key past that is no wait worth queueing] */
+export const WANTED_MAX = 64;
+/** The shortest wait between two tries of a queue refused for a reason no time names (a cold page waiting its turn, a
+ *  helper held at its start). */
+const WANTED_RETRY_MS = 250;
 
 /** The lane of a read of the newest data, held since `heldAtMs` (null: nothing held): "pages" for a first read and for
  *  data past GT_SERVE_MS (nothing a caller may be served), "stale" for data REFRESH_URGENT_MS old that is still servable,
@@ -104,6 +118,9 @@ export type GeckoBudget = {
   /** When a page call can next be taken (now when it can now): the pause's end or the minute's oldest call leaving
    *  the window; what a refused page names as its wait. */
   retryAt(lane: string, ticket?: number): number;
+  /** The reads `source`'s queue holds now (createWanted): while the sum over every source is above 0, the lists' reads
+   *  that are not urgent and the "ahead" lane are refused. */
+  wanting(source: string, n: number): void;
   /** The calls in the window, oldest first (those of `lane` when it is named): what a restart's next process seeds from
    *  (../data/warm.ts). */
   calls(lane?: string): number[];
@@ -188,6 +205,9 @@ export function geckoBudget(now: () => number, perMin = GT_LIMIT_PER_MIN): Gecko
   };
   let pausedUntil = 0;
   let held = false;
+  /** Each queue's reads waiting (wanting), by source. */
+  const wants = new Map<string, number>();
+  const backlog = (): boolean => [...wants.values()].some((n) => n > 0);
   // the minute's counts (minute()): `lane what` taken, lanes refused, 429s, calls seeded
   const took = new Map<string, number>();
   const refused = new Map<string, number>();
@@ -207,8 +227,12 @@ export function geckoBudget(now: () => number, perMin = GT_LIMIT_PER_MIN): Gecko
     if (waiting.length > 0 && (lane !== "pages" || !turnOf(by.ticket, by.client))) return false;
     if (lane === "refresh" && calls.length >= perMin - COLD_RESERVE) return false;
     if (lane === "stale" && calls.length >= perMin - STALE_RESERVE) return false;
+    // a queued read leaves the window's last call to a page with nothing to serve, as a stale read does
+    if (lane === WANTED_LANE && calls.length >= perMin - STALE_RESERVE) return false;
     if (lane === SEED_LANE && calls.length >= perMin - COLD_RESERVE) return false;
-    if (lane === "ahead" && (calls.length >= perMin - COLD_RESERVE || calls.filter((c) => c.lane === "ahead").length >= AHEAD_PER_WINDOW)) return false;
+    if (lane === "ahead" && (backlog() || calls.length >= perMin - COLD_RESERVE || calls.filter((c) => c.lane === "ahead").length >= AHEAD_PER_WINDOW)) return false;
+    // a read a page asked for comes before the lists' reads that are not urgent (WANTED_LANE)
+    if (lane === "lists" && !urgent && backlog()) return false;
     if (lane === "lists") {
       const floor = urgent && calls.filter((c) => c.lane === "lists").length < LIST_FLOOR;
       if (!floor && (calls.length >= perMin - PAGE_RESERVE - (first ? 0 : REFRESH_SLOT) || calls.some((c) => c.lane !== "lists" && c.lane !== "seed" && c.lane !== "ahead" && c.lane !== SEED_LANE && t - c.at < YIELD_MS))) return false;
@@ -235,7 +259,7 @@ export function geckoBudget(now: () => number, perMin = GT_LIMIT_PER_MIN): Gecko
       if (untilMs > now()) throttled++;
       pausedUntil = Math.max(pausedUntil, untilMs);
     },
-    retryAt(_lane, ticket) {
+    retryAt(lane, ticket) {
       const t = now();
       prune(t);
       let at = Math.max(t, pausedUntil);
@@ -244,7 +268,8 @@ export function geckoBudget(now: () => number, perMin = GT_LIMIT_PER_MIN): Gecko
       const at_ = ticket === undefined ? -1 : waiting.findIndex((w) => w.ticket === ticket);
       const ahead = Math.max(at_, 0);
       // a caller past its share is left the window's last call by no one: its next is one more call leaving
-      const cap = at_ !== -1 && byClient(waiting[at_]!.client) >= PAGE_PER_CLIENT ? perMin - 1 : perMin;
+      // a queued read's next call is the one that leaves it STALE_RESERVE free
+      const cap = lane === WANTED_LANE ? perMin - STALE_RESERVE : at_ !== -1 && byClient(waiting[at_]!.client) >= PAGE_PER_CLIENT ? perMin - 1 : perMin;
       const need = calls.length + ahead - cap;
       if (need >= calls.length) at = Math.max(at, t + WINDOW_MS);
       else if (need >= 0) at = Math.max(at, calls[need]!.at + WINDOW_MS);
@@ -258,6 +283,10 @@ export function geckoBudget(now: () => number, perMin = GT_LIMIT_PER_MIN): Gecko
     leave(ticket) {
       const i = waiting.findIndex((w) => w.ticket === ticket);
       if (i !== -1) waiting.splice(i, 1);
+    },
+    wanting(source, n) {
+      if (n > 0) wants.set(source, n);
+      else wants.delete(source);
     },
     calls(lane) {
       prune(now());
@@ -289,3 +318,74 @@ export function geckoBudget(now: () => number, perMin = GT_LIMIT_PER_MIN): Gecko
     },
   };
 }
+
+/** One read a page asked for (createWanted): `done()` true once what it reads is held (another read got it first), so
+ *  it takes no call; `run()` makes the one GeckoTerminal call, its call already taken, and returns "again" when
+ *  GeckoTerminal answered 429 (the read stays first in the queue and the pause is the wait). */
+export type WantedRead = { done(): boolean; run(): Promise<"again" | void> };
+/** Runs `fn` after `ms` (a timer that keeps no process alive; tests plant their own). */
+export type Later = (fn: () => void, ms: number) => void;
+const laterReal: Later = (fn, ms) => void setTimeout(fn, ms).unref();
+
+/**
+ * A queue of reads pages asked for and the budget refused (card evm-chart-opens-without-a-vendor-call), first in, first
+ * out, one call at a time in WANTED_LANE, each as soon as the budget gives one: a cold page waiting its turn first, then
+ * these, then the lists' reads that are not urgent and "ahead" (which the budget refuses while this queue holds any).
+ * `source` names it to the budget (one per data path: a chain's bars, a chain's info). A key already queued is not queued
+ * again; `first` puts it at the front (a read that follows from one just run, such as a pool's bars after its pool).
+ * Refused, the queue tries again when the budget names its next call (retryAt), at least WANTED_RETRY_MS later: one
+ * timer, never a loop.
+ */
+export function createWanted(b: GeckoBudget, source: string, now: () => number, later: Later = laterReal) {
+  let queue = new Map<string, WantedRead>();
+  let running: Promise<void> | null = null;
+  let waiting = false;
+  let stopped = false;
+  const tell = () => b.wanting(source, queue.size);
+  function pump(): void {
+    if (stopped || running !== null || waiting) return;
+    for (const [k, r] of queue) {
+      if (!r.done()) break;
+      queue.delete(k);
+    }
+    tell();
+    const head = queue.entries().next().value;
+    if (head === undefined) return;
+    if (!b.take(WANTED_LANE, false, false, source)) {
+      waiting = true;
+      later(() => {
+        waiting = false;
+        pump();
+      }, Math.max(b.retryAt("pages") - now(), WANTED_RETRY_MS));
+      return;
+    }
+    const [k, r] = head;
+    running = r
+      .run()
+      .catch(() => undefined)
+      .then((again) => {
+        if (again !== "again" && queue.get(k) === r) queue.delete(k);
+        running = null;
+        tell();
+        pump();
+      });
+  }
+  return {
+    want(key: string, read: WantedRead, first = false): void {
+      if (stopped || queue.has(key) || queue.size >= WANTED_MAX || read.done()) return;
+      queue = first ? new Map([[key, read], ...queue]) : queue.set(key, read);
+      tell();
+      pump();
+    },
+    has: (key: string): boolean => queue.has(key),
+    size: (): number => queue.size,
+    /** The read out now, settled (tests). */
+    settled: (): Promise<void> => running ?? Promise.resolve(),
+    stop(): void {
+      stopped = true;
+      queue.clear();
+      tell();
+    },
+  };
+}
+export type Wanted = ReturnType<typeof createWanted>;
