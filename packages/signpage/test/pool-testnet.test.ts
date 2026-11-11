@@ -26,6 +26,7 @@ import { signalsProver } from "../../wallet/test/withdraw-fixture.ts";
 (globalThis as { __SIGN_NETWORK__?: string }).__SIGN_NETWORK__ = "testnet";
 const { SOL_POOLS, SOL_POOL_TABLES, solanaPoolOf, SOL_LADDER, SOL_EPOCH_MS, SOL_LIFE_MS, SOL_SEND_MARGIN_MS } = await import("../../wallet/src/pool/solana.ts");
 const { POOL_TESTNET } = await import("../../wallet/src/pool/network.ts");
+const { EVM_POOLS } = await import("../../wallet/src/pool/evm.ts");
 const { poolKinds } = await import("../src/pool-kinds.ts");
 const { PAGE_CLUSTER, TESTNET_RPCS, PAGE_SOL_MARK_BATCHES, testnetPoolDeps, testnetPool, poolRelayFee, helperPoolSend, POOL_SEND_TIMEOUT_MS, PAGE_TABLES, settleFreedOps, oweSend, dropSend, keepRelease, mergeWithdrawOp } = await import("../src/pool-testnet.ts");
 const { SIGNPAGE_TIMEOUT_MS } = await import("../../kit/src/signpage/client.ts");
@@ -803,7 +804,7 @@ test("helperPoolSend gives the helper's 429 as busy, with its code and its Retry
   assert.match(String(await busy(answer(503, '{"error":{"code":"upstream"}}'))), /HTTP 503/);
 });
 
-test("pool.withdraw (card signpage-pool-withdraw-form): a checked Solana request opens the page's own screen with its id; no screen, or an EVM chain, is refused", async () => {
+test("pool.withdraw (card signpage-pool-withdraw-form): a checked request opens the page's own screen with its id, on Solana and on an EVM chain its pin names; no screen, or an EVM chain with no pin, is refused", async () => {
   const { w } = await wallet();
   const opened: [string, string][] = [];
   const answer = { result: { pending: true as const } };
@@ -811,7 +812,16 @@ test("pool.withdraw (card signpage-pool-withdraw-form): a checked Solana request
   const ask: Ask = { kind: "pool.withdraw", chain: "solana", token: null, amount: 0n, slippageBps: 0, decimals: 9 };
   assert.equal(with_.flow(ask, ctx), answer);
   assert.deepEqual(opened, [["solana", "r1"]]);
-  assert.deepEqual(with_.flow({ ...ask, chain: "base", decimals: 18 }, ctx), { error: "not_allowed" });
+  // Base and Robinhood: the chain's pin alone decides
+  assert.equal(with_.flow({ ...ask, chain: "base", decimals: 18 }, ctx), answer);
+  assert.equal(with_.flow({ ...ask, chain: "robinhood", decimals: 18 }, ctx), answer);
+  assert.deepEqual(opened, [["solana", "r1"], ["base", "r1"], ["robinhood", "r1"]]);
+  const unpinned = testnetPool({ store: async () => w, seed64: async () => SEED64.slice(), openWithdraw: (chain, c) => (opened.push([chain, c.id]), answer) }, { prover: { vault: signalsProver(), stop: () => {} }, locks: null, evmPin: () => undefined });
+  assert.deepEqual(unpinned.flow({ ...ask, chain: "base", decimals: 18 }, ctx), { error: "not_allowed" });
+  assert.deepEqual(unpinned.flow({ ...ask, chain: "robinhood", decimals: 18 }, ctx), { error: "not_allowed" });
+  assert.equal(opened.length, 3);
+  assert.equal(unpinned.withdrawDeps("base", "r1").handoff, undefined, "no pin: no withdraw");
+  await assert.rejects(unpinned.withdrawDeps("base", "r1").funds(), /no flow/);
   const refused = testnetPool({ store: async () => w, seed64: async () => SEED64.slice(), openWithdraw: () => null }, { prover: { vault: signalsProver(), stop: () => {} }, locks: null });
   assert.deepEqual(refused.flow(ask, ctx), { error: "not_allowed" });
   const none = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { prover: { vault: signalsProver(), stop: () => {} }, locks: null });
@@ -821,7 +831,9 @@ test("pool.withdraw (card signpage-pool-withdraw-form): a checked Solana request
   assert.equal(keys.pool, solanaPoolOf(SOL_POOLS.devnet!.program).pool);
   assert.equal(keys.program, SOL_POOLS.devnet!.program);
   assert.equal(keys.feePayer, SOL_POOLS.devnet!.feePayer);
-  assert.equal(with_.withdrawDeps("base", "r1").handoff, undefined, "no EVM flow on this page yet");
+  // the EVM screen's keys: the pinned pool; no Web Locks, no run
+  assert.equal(with_.withdrawDeps("base", "r1").keys.pool, EVM_POOLS["base-sepolia"]!.pool);
+  assert.equal(with_.withdrawDeps("base", "r1").handoff, undefined, "no Web Locks: no run");
 });
 
 // Review #232b LOW 2: the finish of an owed onward send takes the seed lock per use (a derive, a signature), never

@@ -153,8 +153,9 @@ export function poolRefusalWords(chain: PoolChain, code: PoolAddressCode | PoolA
 export interface PoolWithdrawFormDeps {
   chain: PoolChain;
   keys: PoolKeys;
-  /** The notes, the epoch fee and the smallest part, read on the device (a rejection leaves them unread). */
-  funds(): Promise<PoolFunds>;
+  /** The notes, the epoch fee and the smallest part, read on the device (a rejection leaves them unread). On Base and
+   *  Robinhood `to`, the checked To once typed: W's own send to it is priced (an address with code takes more gas). */
+  funds(to?: string): Promise<PoolFunds>;
   /** The withdraw run; absent while the chain has no flow on this page. */
   handoff?: (r: PoolReady) => void | Promise<void>;
   /** The sends owed whose network fee rose past the Max fee drawn: each op id with the fee it now needs (lamports). */
@@ -240,7 +241,9 @@ export function drawPoolWithdrawForm(doc: Document, deps: PoolWithdrawFormDeps, 
   }
 
   let funds: PoolFunds | null = null;
-  const load = (): Promise<void> => deps.funds().then((f) => void (funds = f), () => void (funds = null));
+  // the To the funds were read for (Base and Robinhood: W's send to it is priced)
+  let fundsTo: string | undefined;
+  const load = (): Promise<void> => deps.funds(fundsTo).then((f) => void (funds = f), () => void (funds = null));
   let loaded = load();
   let seq = 0;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -290,6 +293,14 @@ export function drawPoolWithdrawForm(doc: Document, deps: PoolWithdrawFormDeps, 
   };
   const check = async (): Promise<PoolFormView | null> => {
     const at = ++seq;
+    if (chain !== "solana") {
+      const a = to.input.value.trim() === "" ? null : checkPoolTo(chain, to.input.value, deps.keys);
+      const t = a?.ok ? a.to : undefined;
+      if (t !== fundsTo) {
+        fundsTo = t;
+        loaded = load();
+      }
+    }
     await loaded;
     const v = evaluatePool(chain, to.input.value, amount.input.value, deps.keys, funds);
     if (at !== seq) return null;

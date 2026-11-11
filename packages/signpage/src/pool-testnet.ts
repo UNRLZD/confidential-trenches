@@ -79,6 +79,9 @@ import type { HostAnswer, HostRefusal, KindContext, Running } from "./api.ts";
 import { readSolanaRent, solanaPoolFee } from "../../kit/src/trade/solana/pool-buy.ts";
 import type { PoolStatePrice, TxRef, WithdrawStage } from "../../kit/src/signpage/messages.ts";
 import { finishPoolOnward, runPoolWithdraw, solanaOnwardFee, solanaWithdrawMinPart, withdrawSources, type Arrivals, type HistoryPlaces, type PendingOnward } from "./pool-withdraw.ts";
+import { evmWithdrawFunds, finishEvmOnward, runEvmPoolWithdraw, type EvmPendingOnward, type EvmWithdrawHost } from "./pool-withdraw-evm.ts";
+import { evmPoolSend } from "./evm-send.ts";
+import { evmPoolVenues } from "../../kit/src/trade/evm/buy-unpinned.ts";
 import type { PoolFunds, PoolReady, PoolWithdrawFormDeps } from "./withdraw/pool-form.ts";
 import { EVM_POOL_HISTORY } from "../../kit/src/trade/evm/buy-unpinned.ts";
 
@@ -1036,6 +1039,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         seed64 = await page.seed64();
         // a pass: each round of the deposit's sync starts once no trade holds the list's hosts
         const pass = await evmSettleReserved({ seed64, notes, scope: e.scope, round: async (s) => (await passTurn(e.list, s), e.sync.events(s)), signal });
+        // a freed note's release never landed: a withdraw op owing its send is settled stopped, nothing sent
+        if (pass.freed.length > 0) await settleFreedOps(await page.store(), pass.freed);
         if (pass.freed.length > 0 || pass.spent.length > 0) void evmProofs(chain);
       } finally {
         seed64?.fill(0);
@@ -1773,8 +1778,10 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         seed64.fill(0);
       }
     });
-  const finishOnward = async (): Promise<void> => {
-    if (!locks || pin === undefined || !owedScan) return;
+  let finishing: Promise<void> | null = null;
+  const finishOnward = (): Promise<void> => (finishing ??= finishOnwardOnce().finally(() => (finishing = null)));
+  const finishOnwardOnce = async (): Promise<void> => {
+    if (!locks || !owedScan) return;
     owedScan = false;
     const ops = await page.store();
     const owed: [string, PendingOnward][] = [];
@@ -1799,6 +1806,25 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
           owedScan = true;
           continue;
         }
+        const evmChain = (pending as Partial<EvmPendingOnward>).chain;
+        // an EVM pool's owed send: its chain's finish (src/pool-withdraw-evm.ts); a chain with no pool here is read again
+        if (evmChain === "base" || evmChain === "robinhood") {
+          const eh = evmWithdrawHost(evmChain, notes);
+          const got = eh === null ? null : await locks.request(WALLET_SEED_LOCK, { mode: "shared" }, () => finishEvmOnward(eh, pending as EvmPendingOnward, evmStopsOf(k)));
+          if (got?.feeNeeded !== undefined) await ops.update("ops", k, (v) => mergeWithdrawOp(v, { feeNeeded: got.feeNeeded! }));
+          if (got && got.feeNeeded === undefined) {
+            owedRetry.delete(k);
+            evmStops.delete(k);
+            await ops.update("ops", k, (v) => mergeWithdrawOp(v, { stage: got.stage, txs: got.txs, arrived: got.arrived, clear: pending.noteId }));
+            await dropSend(ops, k, pending.noteId);
+          } else {
+            const waitMs = Math.min(Math.max(2_000, (retry?.waitMs ?? 1_000) * 2), 60_000);
+            owedRetry.set(k, { at: Date.now() + waitMs, waitMs });
+            owedScan = true;
+          }
+          continue;
+        }
+        if (pin === undefined) continue;
         const got = await finishPoolOnward(
           {
             pin,
@@ -1840,7 +1866,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   // the other
   const stateRead = (): Promise<void> => {
     armTurn();
-    const evm = evmRead().catch(() => {});
+    const evm = evmRead().then(() => finishOnward()).catch(() => {});
     if (scope === null) return evm;
     return Promise.all([evm, solanaRead()]).then(() => {});
   };
@@ -1907,13 +1933,134 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     }
   };
   const withdraw = async (ready: PoolReady, opId: string): Promise<void> => {
-    if (ready.chain !== "solana" || pin === undefined || !locks) return;
+    if (!locks || (ready.chain === "solana" ? pin === undefined : evmPool(ready.chain) === null)) return;
     withdrawing.add(opId);
     try {
-      await withdrawRun(ready, opId);
+      await (ready.chain === "solana" ? withdrawRun(ready, opId) : evmWithdrawRun(ready.chain, ready, opId));
     } finally {
       withdrawing.delete(opId);
     }
+  };
+  // pool.withdraw on Base or Robinhood (src/pool-withdraw-evm.ts): the chain's pool (its pin decides: none, no
+  // withdraw), the wallet's evmPool on the trade's pair for the bind, the page's prover and note store, the helper's
+  // send, the chain's RESERVED settle; the op record and its owed send as Solana's (meta/owed/<op id>)
+  const evmStops = new Map<string, [bigint | null, bigint | null]>();
+  const evmStopsOf = (k: string): [bigint | null, bigint | null] => {
+    let s = evmStops.get(k);
+    if (!s) evmStops.set(k, (s = [null, null]));
+    return s;
+  };
+  const evmWithdrawHost = (chain: "base" | "robinhood", notes: NoteStore): EvmWithdrawHost | null => {
+    const e = evmPool(chain);
+    if (e === null) return null;
+    const pool =
+      (over.evmQueuePool?.(chain) as Pool<EvmPoolRequest> | undefined) ??
+      walletEvmPool({
+        pin: e.pin,
+        rpcs: e.list,
+        feeRpcs: pageEvmFeeRpcs(chain),
+        held: pageEvmHold(e.pin, () => (page.held ? page.held() : page.store())),
+        history: [...e.list, ...pageEvmHistory(e.pin)],
+        relayFee: (ep, sg) => evmPoolRelayFee(e.pin.pool, ep, sg, over.fetch),
+        epochFee: evmEpochFee,
+      });
+    return {
+      chain,
+      testnet: POOL_TESTNET,
+      pin: e.pin,
+      venues: evmPoolVenues(),
+      rpcs: e.rpcs,
+      pool,
+      prover: prover.vault,
+      notes: async () => notes,
+      seed64: page.seed64,
+      send: (body) => evmPoolSend(TRADE_HELPER, body, over.fetch),
+      settle: () => void reserveEvm(chain).catch(() => {}),
+      owedNotes,
+      ...(over.now ? { now: over.now } : {}),
+      ...(over.wait ? { wait: over.wait } : {}),
+    };
+  };
+  const evmQueueOf = async (chain: "base" | "robinhood"): Promise<ProofQueue<EvmPoolRequest> | null> => {
+    const q = evmQueues.get(chain);
+    return q ? (((await q.catch(() => null))?.queue as ProofQueue<EvmPoolRequest> | undefined) ?? null) : null;
+  };
+  const evmFunds = async (chain: "base" | "robinhood", to?: string): Promise<PoolFunds> => {
+    const notes = await openNoteStore(await page.store());
+    try {
+      const h = evmWithdrawHost(chain, notes);
+      if (h === null) throw new Error("no pool for this chain");
+      const mine = new Set((await evmQueueOf(chain))?.ready().map((p) => p.noteId) ?? []);
+      return await evmWithdrawFunds(h, mine, to);
+    } finally {
+      notes.close();
+    }
+  };
+  // the owed send's record kept (its release read back, W's send's hash before it leaves), only while it is still
+  // this attempt's
+  const keepEvmSend = (ops: WalletStore, opId: string, q: EvmPendingOnward): Promise<unknown> =>
+    ops.update("meta", `owed/${opId}`, (v) => {
+      const r = v as OwedSends | undefined;
+      const had = r !== undefined && Object.hasOwn(r, q.noteId) ? r[q.noteId] : undefined;
+      if (had === undefined || had.attempt !== q.attempt) return undefined;
+      return { ...r, [q.noteId]: q };
+    });
+  const evmWithdrawRun = async (chain: "base" | "robinhood", ready: PoolReady, opId: string): Promise<void> => {
+    if (!locks) return;
+    const ops = await page.store();
+    const created_ms = Date.now();
+    let writes: Promise<unknown> = ops.put("ops", opId, { kind: "withdraw", stage: "proving", txs: [], created_ms }).catch(() => {});
+    let owedNote: string | null = null;
+    const write = (stage: WithdrawStage, txs: TxRef[], pending: PendingOnward | null, arrived: Arrivals) => {
+      const cleared = pending ? null : owedNote;
+      void (writes = writes
+        .then(async () => {
+          await ops.update("ops", opId, (v) => mergeWithdrawOp(v, { stage, txs, arrived, ...(cleared ? { clear: cleared } : {}) }));
+          if (cleared) await dropSend(ops, opId, cleared);
+        })
+        .catch(() => {}));
+    };
+    const owe = async (pending: EvmPendingOnward): Promise<void> => {
+      owedNote = pending.noteId;
+      const w = writes.then(async () => {
+        await oweSend(ops, opId, pending);
+        await ops.update("ops", opId, (v) => mergeWithdrawOp(v, { stage: "in_transit", owe: pending.noteId }));
+      });
+      writes = w.catch(() => {});
+      await w;
+    };
+    const keep = async (q: EvmPendingOnward): Promise<void> => {
+      const w = writes.then(() => keepEvmSend(ops, opId, q));
+      writes = w.catch(() => {});
+      await w;
+    };
+    await locks.request(WALLET_SEED_LOCK, { mode: "shared" }, async () => {
+      const notes = await openNoteStore(await page.store());
+      try {
+        const h = evmWithdrawHost(chain, notes);
+        if (h === null) return write("stopped", [], null, {});
+        const q = await evmQueueOf(chain);
+        const mine = new Set(q?.ready().map((p) => p.noteId) ?? []);
+        const ask = { kind: "pool.withdraw", chain, token: null, amount: 0n, slippageBps: 0, decimals: 18 } as const;
+        const end = await runEvmPoolWithdraw({ ...h, ...(q ? { drop: (id: string) => q.drop(id) } : {}), stage: write, owe, keep }, { ...ask }, ready.to, ready.amount, ready.maxFee, mine);
+        write(end.stage, end.txs, end.pending, end.arrived);
+        if (end.feeNeeded !== undefined) void (writes = writes.then(() => ops.update("ops", opId, (v) => mergeWithdrawOp(v, { feeNeeded: end.feeNeeded! }))).catch(() => {}));
+        if (end.pending) owedScan = true;
+      } finally {
+        notes.close();
+      }
+    });
+    await writes;
+    if (evmQueues.has(chain)) void evmProofs(chain);
+  };
+  const evmWithdrawDeps = (chain: "base" | "robinhood", opId: string): PoolWithdrawFormDeps => {
+    const e = evmPool(chain);
+    return {
+      chain,
+      keys: { pool: e?.pin.pool ?? "" },
+      funds: (to?: string) => (e === null ? Promise.reject(new Error("no flow for this chain")) : evmFunds(chain, to)),
+      ...(e !== null && locks ? { handoff: (r: PoolReady) => void withdraw(r, opId), owedFees, redraw } : {}),
+    };
   };
   const withdrawRun = async (ready: PoolReady, opId: string): Promise<void> => {
     if (pin === undefined || !locks) return;
@@ -2030,7 +2177,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     owedScan = true;
     await stateRead();
   };
-  const withdrawDeps = (chain: PoolChain, opId: string): PoolWithdrawFormDeps => ({
+  const withdrawDeps = (chain: PoolChain, opId: string): PoolWithdrawFormDeps => chain !== "solana" ? evmWithdrawDeps(chain, opId) : ({
     chain,
     keys: chain === "solana" && pin !== undefined ? { pool: solanaPoolOf(pin.program).pool, program: pin.program, feePayer: pin.feePayer } : { pool: "" },
     funds: () => (chain === "solana" && pin !== undefined ? funds() : Promise.reject(new Error("no flow for this chain"))),
@@ -2045,7 +2192,9 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
             ? evmRun(ask.chain, ask, ctx, evmBuy(ask.chain) ?? undefined)
             : ask.kind === "pool.sell"
               ? evmRun(ask.chain, ask, ctx, evmSell(ask.chain) ?? undefined)
-              : { error: "not_allowed" }
+              : ask.kind === "pool.withdraw" && page.openWithdraw && evmPool(ask.chain) !== null
+                ? (page.openWithdraw(ask.chain, ctx) ?? { error: "not_allowed" })
+                : { error: "not_allowed" }
         : pin === undefined
         ? { error: "not_allowed" }
         : ask.kind === "pool.deposit"
