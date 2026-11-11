@@ -521,7 +521,7 @@ try {
                 check(moved.last.endsWith(`:${Number(calls.plant)}`), `${tag}: the close ${calls.plant} never reached the last bar (${moved.last})`);
                 check(card1 !== null && dy !== 0, `${tag}: the card did not follow its mark (dy ${dy}): the sequence moved nothing, so it proves nothing`);
                 check(log.length === 0, `${tag}: ${log.length} layout shift(s) of the open card while the live read moved its mark [${log.map((e) => `+${e.at}ms ${e.value.toFixed(5)}: ${e.sources.join(" | ") || "no source"}`).join("; ")}]`);
-                console.log(`${tag}: the open card followed its mark ${dy} px with ${log.length} layout shift(s)`);
+                console.log(`${tag}: the open card at ${[card0.x, card0.y, card0.width, card0.height].map((v) => v.toFixed(2)).join(",")} followed its mark ${dy} px with ${log.length} layout shift(s)`);
                 if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `${s.id}-${w.name}-open-card.png`) });
                 if (phone) await pm.tap().catch(() => {});
                 else await pm.blur().catch(() => {});
