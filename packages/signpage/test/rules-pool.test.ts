@@ -440,8 +440,10 @@ test("Solana sell: the kit's venue sell from W at or above the device's floor, t
   const slot = reads.slot;
   const floor = (ref.pools.find((p) => p.venue === "pump-curve")!.expectedOut * 9_700n) / 10_000n;
   const ask: PoolAsk = { kind: "pool.sell", chain: "solana", token: venue.mint, amount, slippageBps: 300, decimals: 6 };
-  const sellWire = (o: { minOut?: bigint; amount?: bigint; dep?: Partial<Parameters<typeof depositIx>[0]>; w?: string; extra?: Ixx[] } = {}) => {
+  const sellWire = (o: { minOut?: bigint; amount?: bigint; dep?: Partial<Parameters<typeof depositIx>[0]>; w?: string; extra?: Ixx[]; account?: [number, string] } = {}) => {
     const steps = solanaPoolSellSteps(venue, o.w ?? SOL_W, o.amount ?? amount, o.minOut ?? floor).map((x) => ({ ...x, accounts: x.accounts.map((a) => ({ ...a })) }));
+    // `account`: the venue sell's account at that index names another key, its flags kept (a wire's own accounts)
+    if (o.account) steps[0]!.accounts[o.account[0]]!.key = o.account[1];
     return wire(o.w ?? SOL_W, [cuLimit, ...steps, ...(o.extra ?? []), depositIx({ value: (o.minOut ?? floor) - RESERVE, ...o.dep })]);
   };
   const RESERVE = 5_000n;
@@ -474,6 +476,9 @@ test("Solana sell: the kit's venue sell from W at or above the device's floor, t
   // cashback sell with no lookup table, sends the form before d3edab1); the next pages wrong are still refused
   assert.equal(checkSolanaSell(sellWire({ dep: { six: true } }), ask, solCtx(), venue, reference, slot, SOL_READS, RESERVE, PART).back, floor - RESERVE);
   assert.throws(() => checkSolanaSell(sellWire({ dep: { nextState: key(45) } }), ask, solCtx(), venue, reference, slot, SOL_READS, RESERVE, PART), refusedAs("state_page"));
+  // the kit's curve sell is one instruction, the fee recipient its second account and the curve its fourth
+  const built = solanaPoolSellSteps(venue, SOL_W, amount, floor);
+  assert.ok(venue.kind === "pump-curve" && built.length === 1 && built[0]!.accounts[1]!.key === venue.feeRecipient && built[0]!.accounts[3]!.key === venue.curve);
   for (const [w, rule] of [
     [sellWire({ minOut: floor - 1n }), "min_out"],
     [sellWire({ amount: amount - 1n }), "sell"],
@@ -485,6 +490,10 @@ test("Solana sell: the kit's venue sell from W at or above the device's floor, t
     [sellWire({ dep: { pre: PRE + 1n } }), "precommitment"],
     [sellWire({ dep: { program: key(43) } }), "program"],
     [sellWire({ extra: [send(key(79), 1n)] }), "sell"],
+    // the sell's accounts are the ones the kit builds from the device's own venue read, never the wire's: a sell paying
+    // another fee recipient (pump's sell names it second, writable), or sending the SOL out of another curve
+    [sellWire({ account: [1, key(80)] }), "sell_accounts"],
+    [sellWire({ account: [3, key(81)] }), "sell_accounts"],
   ] as const) {
     assert.throws(() => checkSolanaSell(w, ask, solCtx(), venue, reference, slot, SOL_READS, RESERVE, PART), refusedAs(rule), rule);
   }
