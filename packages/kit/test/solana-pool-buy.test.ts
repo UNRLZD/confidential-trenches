@@ -11,6 +11,7 @@ import {
   HELPER_V1_PATHS,
   SOLANA_JITO_TIP_ACCOUNTS,
   SOLANA_JITO_TIP_MIN,
+  SOLANA_POOL_JITO_TIP,
   SOLANA_POOL_QUOTE_MAX_AGE_SLOTS,
   SOLANA_POOL_RELEASE_LEN,
   SOLANA_POOL_VOLUME_ACCOUNT_SIZE,
@@ -371,6 +372,18 @@ test("M369 (L2): a mainnet pool buy tips at least Jito's minimum; devnet may tip
     const built = buildSolanaPoolBuy(cfg, release, venue, { ...req, tip: 0n, cluster: "devnet" }, chain, { pick: () => 0 });
     assert.throws(() => solanaPoolBuyInstructions(cfg, release, venue, { ...req, tip: 0n, cluster: "mainnet" }, 6, chain.rent, null), /tips at least 1000 lamports/);
     assert.ok(built.size > 0);
+  }
+});
+
+// card sol-pool-buy-lands-on-mainnet: a mainnet tip is any amount from Jito's minimum to the proof's tip cap; the device
+// tips SOLANA_POOL_JITO_TIP (100,000), a tenth of the cap
+test("a mainnet pool buy builds at SOLANA_POOL_JITO_TIP and at the proof's tip cap, and refuses one lamport over the cap", async () => {
+  assert.equal(SOLANA_POOL_JITO_TIP, 100_000n);
+  assert.ok(SOLANA_POOL_JITO_TIP >= SOLANA_JITO_TIP_MIN && SOLANA_POOL_JITO_TIP <= release.tipCap, `cap ${release.tipCap}`);
+  for (const v of ["pump", "pumpswap"] as const) {
+    const { venue, req, chain } = await setup(v);
+    for (const tip of [SOLANA_POOL_JITO_TIP, release.tipCap]) assert.ok(buildSolanaPoolBuy(cfg, release, venue, { ...req, tip, cluster: "mainnet" }, chain, { pick: () => 0 }).size > 0, `${v} tip ${tip}`);
+    assert.throws(() => buildSolanaPoolBuy(cfg, release, venue, { ...req, tip: release.tipCap + 1n, cluster: "mainnet" }, chain, { pick: () => 0 }), /over the proof's tip cap/);
   }
 });
 

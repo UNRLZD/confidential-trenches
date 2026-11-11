@@ -173,6 +173,7 @@ export const CHANGED = [
   "scripts/live-checks/robinhood-listed-tape-opens.mjs",
   "scripts/live-checks/rpc-keyed-lists.mjs",
   "scripts/live-checks/signpage-buy-own-spend.mjs",
+  "scripts/live-checks/sol-pool-buy-lands-on-mainnet.mjs",
   "scripts/live-checks/signpage-error-after-timeout.mjs",
   "scripts/live-checks/signpage-evm-pool-buy.mjs",
   "scripts/live-checks/signpage-evm-pool-sell.mjs",

@@ -163,7 +163,7 @@ test("GET /v1/logo/{chain}/{token} serves a listed token's logo with the kit's h
   const logos = createLogos({ resolve: PUBLIC, get: fakeGet({ "https://arweave.net/logo": () => got(200, { "content-type": "image/png" }, PNG), "https://assets.example/e.png": () => got(200, { "content-type": "image/svg+xml" }, SVG) }, seen) });
   logos.remember("solana", MINT, "https://arweave.net/logo");
   logos.remember("base", EVM, "https://assets.example/e.png");
-  const h = handler(COMMIT, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, logos);
+  const h = handler(COMMIT, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, logos);
   const s = createServer(h);
   await new Promise<void>((ok) => s.listen(0, "127.0.0.1", ok));
   const port = (s.address() as { port: number }).port;
@@ -303,8 +303,8 @@ test("a full fetch queue answers 503 with no-store, never a cached 404; a refusa
   assert.match(lines[0]!, /^logo refusals: address 1$/);
   assert.ok(!lines.join("").includes("evil") && !lines.join("").includes("Mint"));
   // the route: a busy registry answers 503 no-store
-  const busy = { ...createLogos(), read: async () => "busy" as const } as unknown as Parameters<typeof handler>[21];
-  const h = handler(COMMIT, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, busy);
+  const busy = { ...createLogos(), read: async () => "busy" as const } as unknown as Parameters<typeof handler>[22];
+  const h = handler(COMMIT, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, busy);
   const s = createServer(h);
   await new Promise<void>((ok) => s.listen(0, "127.0.0.1", ok));
   try {

@@ -20,7 +20,7 @@ import { SOLANA_PUMP_AMM_PROGRAM, SOLANA_PUMP_PROGRAM, solanaVolumeAccumulator }
 import { solanaPoolOf } from "../../wallet/src/pool/solana.ts";
 import { tokenDecimalsKept } from "../src/pool-kinds.ts";
 import { liveRuns, POOL_SELL_DRY_ANSWER_MS, POOL_SELL_DRY_CALLS, POOL_SELL_DRY_KEEP_MS, POOL_SELL_DRY_WINDOW_MS, poolSellDry, poolSellDryKind, poolSellPays, type DryWallet, type PoolSellDryDeps } from "../src/pool-sell-dry.ts";
-import { solanaSellReserve } from "../src/pool-sell.ts";
+import { SOLANA_POOL_SELL_PRIORITY, solanaSellReserve } from "../src/pool-sell.ts";
 import type { Position } from "../src/positions.ts";
 import { poolUnits, SOLANA_POOL_MIN_DEPOSIT, solanaDepositRents, solanaSellAfterFull, solanaSweepFloor, solanaSweepKeep } from "../src/rules/pool.ts";
 import { solanaPoolNoteFloor } from "../../kit/src/trade/solana/pool-deposit.ts";
@@ -99,6 +99,47 @@ test("the preview's out is the sale's own quote for the units pool.sell would se
       assert.equal(SIGNPAGE_RESULT_SCHEMAS["pool.sell.dry"](a.result), true, "the kit's client takes it");
     }
   }
+});
+
+// card sol-pool-buy-lands-on-mainnet: on mainnet the sale pays its priority fee (pool-sell.ts solanaSellBudget, at most
+// SOLANA_POOL_SELL_PRIORITY): You receive and Network count it at that most
+test("on mainnet the preview counts the sale's priority fee in out, min_out and network", async () => {
+  const params = share(MINT, 10_000);
+  const dev = await poolSellDry(deps({ v: "pump" }), params);
+  const main = await poolSellDry(deps({ v: "pump", cluster: "mainnet" }), params);
+  assert.ok("result" in dev && "result" in main, JSON.stringify([dev, main]));
+  assert.equal(main.result.network, "0.000105", "one signature and the priority fee");
+  const { e, cashback } = await saleOut("pump", MINT, HELD);
+  const pays = poolSellPays(RENT, "pump-curve", [{ lamports: ENOUGH, claim: [false, false] }], true, e, solanaSellFloor(e, params.slippage_bps), cashback, { stateSize: SIZES[0], labelSize: SIZES[1] }, true);
+  assert.ok(!("refused" in pays));
+  assert.equal(pays.priority, SOLANA_POOL_SELL_PRIORITY);
+  assert.equal(main.result.out, poolUnits(pays.out, 9));
+  assert.equal(main.result.min_out, poolUnits(pays.minOut, 9));
+  assert.notEqual(main.result.out, dev.result.out, "the priority comes out of what the sale pays in");
+});
+
+// the review of 6d76212d: the preview follows the sale's decision: a PumpSwap cashback coin's sale has no room for the
+// compute budget, so no priority; a W with less than the priority beyond the sale's need pays that, down to none; a
+// partial sale keeps the next sale's priority on W
+test("on mainnet the preview counts the priority the sale pays: none on a PumpSwap cashback coin, what W holds beyond the need, kept on a partial sale", () => {
+  const e = 50_000_000n;
+  const sz = { stateSize: SIZES[0], labelSize: SIZES[1] };
+  const main = (venue: "pump-curve" | "pumpswap", cashback: boolean | undefined, lamports: bigint, full = true) => poolSellPays(RENT, venue, [{ lamports, claim: [false, false] }], full, e, e, cashback, sz, true);
+  const dev = (venue: "pump-curve" | "pumpswap", cashback: boolean | undefined, lamports: bigint, full = true) => poolSellPays(RENT, venue, [{ lamports, claim: [false, false] }], full, e, e, cashback, sz, false);
+  const ok = (x: ReturnType<typeof poolSellPays>): { out: bigint; minOut: bigint; priority: bigint } => {
+    if ("refused" in x) assert.fail(x.refused);
+    return x;
+  };
+  // no room: exactly the devnet sale
+  assert.deepEqual(ok(main("pumpswap", true, ENOUGH)), { ...ok(dev("pumpswap", true, ENOUGH)), priority: 0n });
+  assert.equal(ok(main("pumpswap", false, ENOUGH)).priority, SOLANA_POOL_SELL_PRIORITY);
+  // a W 30,000 over the curve sale's need pays 30,000 of priority; one at the need pays none
+  const need = solanaPoolSellNeed({ kind: "pump-curve", cashback: false }, RENT);
+  assert.equal(ok(main("pump-curve", false, need + 30_000n)).priority, 30_000n);
+  assert.equal(ok(main("pump-curve", false, need)).priority, 0n);
+  // a partial sale from a tight W: W keeps the next sale's need and its priority, out of what the sale pays in
+  const tight = solanaPoolBuySellNeed({ kind: "pump-curve", cashback: false }, RENT);
+  assert.equal(ok(dev("pump-curve", false, tight, false)).out - ok(main("pump-curve", false, tight, false)).out, SOLANA_POOL_SELL_PRIORITY + ok(main("pump-curve", false, tight, false)).priority);
 });
 
 test("one code path: every sale reads its quote through poolSellReference, the one reference read in pool-sell.ts", () => {

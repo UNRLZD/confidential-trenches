@@ -47,6 +47,7 @@ import { feeQuoterFromEnv, FeeReadRefused, STORE_ENV, type FeeQuoter } from "./w
 import { withdrawSenderFromEnv, type WithdrawSender } from "./withdraw/send.ts";
 import { POOL_EPOCH_MS } from "./pool/fee.ts";
 import { POOL_SOLANA_BODY_MAX, solanaPoolSendersFromEnv, type SolanaPoolSender } from "./pool/solana.ts";
+import { poolSendLine, type PoolSendNote } from "./pool/send-log.ts";
 import { evmFeeWarm, evmPoolSendersFromEnv, POOL_EVM_BODY_MAX, POOL_EVM_SELL_BODY_MAX, POOL_LIFE_MAX_MS, type EvmPoolSender } from "./pool/evm.ts";
 import { clientOf, clientWindow, PROVIDER_PACE, providerHolds, refusalLog, throttled, throttleOf, type ProviderHolds } from "./limits/limits.ts";
 import { openDurableDir } from "./store/durable.ts";
@@ -254,6 +255,8 @@ export function handler(
   evmTokens: EvmTokens = {},
   // card market-token-reads: GET /v1/market/held (src/data/held.ts); none mounted answers 404
   held: Held | undefined = undefined,
+  // card sol-pool-buy-lands-on-mainnet: one line per pool send (pool/send-log.ts)
+  sendLog: (line: string) => void = (line) => console.log(`helper: ${line}`),
   // GET /v1/logo/{chain}/{token} (src/data/logo.ts): the registry the list builders fill
   logos: Logos = LOGOS,
 ) {
@@ -404,8 +407,22 @@ export function handler(
       }
       if (path === POOL_SOLANA_SEND) {
         if (req.method !== "POST") return send(405, { error: { code: "method_not_allowed" } }, { ...cors(req), Allow: "POST, OPTIONS" });
+        const began = performance.now();
+        // the send's one log line (pool/send-log.ts): the chain and net once the body names a pool this helper carries
+        let net = "?";
+        let note: PoolSendNote | undefined;
+        const logged = (a: { status: number; headers?: Headers; body: string }) => {
+          let body: unknown;
+          try {
+            body = JSON.parse(a.body);
+          } catch {
+            body = null;
+          }
+          sendLog(poolSendLine({ chain: net === "?" ? "unknown" : "solana", net, route: "send", status: a.status, body, ms: performance.now() - began, note }));
+          reply(a);
+        };
         const wait = poolRate.take(clientOf(req));
-        if (wait > 0) return reply(throttled(wait, undefined, CLIENT_WINDOW));
+        if (wait > 0) return logged(throttled(wait, undefined, CLIENT_WINDOW));
         // pool/solana.ts: { pool, tx }, the pool one this helper carries (else 404 not_found)
         void readBody(req, POOL_SOLANA_BODY_MAX)
           .then(async (text) => {
@@ -420,18 +437,32 @@ export function handler(
             const name = typeof body === "object" && body !== null ? (body as { pool?: unknown }).pool : undefined;
             const pool = typeof name === "string" ? pools.get(name) : undefined;
             if (pool === undefined) return { status: 404, body: JSON.stringify({ error: { code: "not_found" } }) };
+            net = pool.cluster;
             if (!(await heldWithin(senders))) return SENDERS_LATE;
             const a = await pool.carry(body, clientOf(req));
+            note = a.note;
             return { status: a.status, headers: (a.retryAfterS === undefined ? {} : { "Retry-After": String(a.retryAfterS) }) as Headers, body: JSON.stringify(a.body) };
           })
-          .then(reply)
+          .then(logged)
           .catch(() => (res.headersSent ? res.destroy() : send(500, { error: "internal" }, cors(req))));
         return;
       }
       if (path === POOL_EVM_SEND || path === POOL_EVM_SELL) {
         if (req.method !== "POST") return send(405, { error: { code: "method_not_allowed" } }, { ...cors(req), Allow: "POST, OPTIONS" });
+        const began = performance.now();
+        let net = "?";
+        const logged = (a: { status: number; headers?: Headers; body: string }) => {
+          let body: unknown;
+          try {
+            body = JSON.parse(a.body);
+          } catch {
+            body = null;
+          }
+          sendLog(poolSendLine({ chain: net === "?" ? "unknown" : "evm", net, route: path === POOL_EVM_SELL ? "sell" : "send", status: a.status, body, ms: performance.now() - began }));
+          reply(a);
+        };
         const wait = poolRate.take(clientOf(req));
-        if (wait > 0) return reply(throttled(wait, undefined, CLIENT_WINDOW));
+        if (wait > 0) return logged(throttled(wait, undefined, CLIENT_WINDOW));
         // pool/evm.ts: a withdraw { pool, data, epoch } or a sell { pool, w, data, authorization }, the pool one this
         // helper carries (else 404 not_found); both draw on the pool's one queue and its held limit per client
         const sell = path === POOL_EVM_SELL;
@@ -447,11 +478,12 @@ export function handler(
             const name = typeof body === "object" && body !== null ? (body as { pool?: unknown }).pool : undefined;
             const pool = typeof name === "string" ? evmPools.get(name) : undefined;
             if (pool === undefined) return { status: 404, body: JSON.stringify({ error: { code: "not_found" } }) };
+            net = pool.network;
             if (!(await heldWithin(senders))) return SENDERS_LATE;
             const a = await (sell ? pool.sell(body, clientOf(req)) : pool.carry(body, clientOf(req)));
             return { status: a.status, headers: (a.retryAfterS === undefined ? {} : { "Retry-After": String(a.retryAfterS) }) as Headers, body: JSON.stringify(a.body) };
           })
-          .then(reply)
+          .then(logged)
           .catch(() => (res.headersSent ? res.destroy() : send(500, { error: "internal" }, cors(req))));
         return;
       }
