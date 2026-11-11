@@ -6,7 +6,9 @@
 // pool.sell quotes on the route the buy took, builds, checks and signs (W's Sell and its EIP-7702 authorization),
 // writes the open record and the note INCOMING, sends through the helper's POST /v1/pool/evm/sell and reads its end on
 // the pool's Deposited logs on the chain's two pool RPCs (src/pool-sell-evm.ts).
-//   FLOW_RESUME=<seed file> node packages/signpage/scripts/pool-sell-evm-testnet.mjs <base|robinhood> <out.json>
+//   FLOW_RESUME=<seed file> [SELL_PARTS=2] [SETTLE_S=600] node packages/signpage/scripts/pool-sell-evm-testnet.mjs <base|robinhood> <out.json>
+// - SELL_PARTS=2: half the holding, then the rest at once, while the first sale's deposit is not final yet (W's next
+//   return note and Sell nonce); SETTLE_S: how long the run reads on for the return notes to land (final blocks).
 // - The seed: a buy run's own 16 random bytes, kept 0600 in ~/.ct-devnet-runs by pool-buy-evm-testnet.mjs's run; read
 //   here, never printed.
 // - What differs from the page in a browser, and only that: the wallet store is fake-indexeddb in memory, and W's
@@ -74,16 +76,20 @@ const restoredHoldings = await w.get("meta", EVM_POSITION_COSTS_KEY);
 log(`buy records written: ${written.length}; ${JSON.stringify(restoredHoldings, big)}`);
 if (written.length === 0) throw new Error("no buy record restored");
 
-// W's whole holding of the first restored buy: the box's number
+// W's whole holding of the first restored buy: the box's number (or its parts, SELL_PARTS)
 const W = written[0];
 const rec = restoredHoldings[W];
 const bal = BigInt(await rpcs[0]("eth_call", [{ to: rec.mint, data: "0x70a08231" + W.slice(2).toLowerCase().padStart(64, "0") }, "latest"]));
 if (bal === 0n) throw new Error("W holds none of its buy's token");
 // the exact decimal string of the units (the kind converts it back with the token's decimals)
 const D = 10n ** BigInt(rec.decimals);
-const frac = (bal % D).toString().padStart(rec.decimals, "0").replace(/0+$/, "");
-const amount = `${bal / D}${frac ? "." + frac : ""}`;
-log(`selling ${amount} of ${rec.mint} (${bal} units, ${rec.decimals} decimals) on route ${rec.route.venue}`);
+const decimal = (u) => {
+  const frac = (u % D).toString().padStart(rec.decimals, "0").replace(/0+$/, "");
+  return `${u / D}${frac ? "." + frac : ""}`;
+};
+const PARTS = process.env.SELL_PARTS === "2" ? [bal / 2n, bal - bal / 2n] : [bal];
+const amount = decimal(bal);
+log(`selling ${amount} of ${rec.mint} (${bal} units, ${rec.decimals} decimals) on route ${rec.route.venue} in ${PARTS.length} part(s)`);
 
 const helperLog = [];
 const helperFetch = async (url, init) => {
@@ -98,45 +104,64 @@ const t = testnetPool(page, { prover: { vault: { load: async () => {}, prove: as
 const kinds = poolKinds(testnetPoolDeps(t.flow));
 
 const stages = [];
+const ENDS = ["filled", "part_filled", "refused", "not_landed"];
 tapped = true;
 const tapAt = Date.now();
-const r = kinds["pool.sell"]({ chain: CHAIN, token: rec.mint, amount, slippage_bps: 300 }, { id: "sell", sha: "00", progress: (s) => (stages.push(s), log(`progress ${JSON.stringify(s)}`)) });
-if ("error" in r) throw new Error(`refused: ${JSON.stringify(r)}`);
-await r.after;
-const first = r.answer();
-log(`answered ${JSON.stringify(first)} in ${Date.now() - tapAt} ms; waiting for the end`);
-await navigator.locks.request(WALLET_SEED_LOCK, { mode: "exclusive" }, () => {});
-const ENDS = ["filled", "part_filled", "refused", "not_landed"];
-const endOf = () => first?.result?.stage ?? stages.at(-1)?.stage ?? stages.at(-1);
-for (let i = 0; i < 360 && !ENDS.includes(stages.at(-1)?.stage ?? stages.at(-1)) && !ENDS.includes(endOf()); i++) await sleep(2_000);
-const end = ENDS.includes(endOf()) ? endOf() : (stages.at(-1)?.stage ?? stages.at(-1) ?? null);
+const taps = [];
+for (const [k, units] of PARTS.entries()) {
+  const at = Date.now();
+  const mine = [];
+  const r = kinds["pool.sell"]({ chain: CHAIN, token: rec.mint, amount: decimal(units), slippage_bps: 300 }, { id: `sell${k}`, sha: "00", progress: (s) => (stages.push(s), mine.push(s), log(`sale ${k} progress ${JSON.stringify(s)}`)) });
+  if ("error" in r) throw new Error(`refused: ${JSON.stringify(r)}`);
+  await r.after;
+  const first = r.answer();
+  log(`sale ${k} of ${units} units answered ${JSON.stringify(first)} in ${Date.now() - at} ms`);
+  // the latest stage: a progress after the answer, else the answer's own
+  const endOf = () => (mine.length > 0 ? (mine.at(-1)?.stage ?? mine.at(-1)) : first?.result?.stage);
+  for (let i = 0; i < 360 && !ENDS.includes(endOf()); i++) await sleep(2_000);
+  taps.push({ units, first, end: ENDS.includes(endOf()) ? endOf() : null, endMs: Date.now() - at, notes: (await ns.list()).filter((n) => n.ref.kind !== "deposit").map((n) => `${n.ref.kind}${n.ref.kind === "second" ? "/" + n.ref.n : ""} ${n.state}`) });
+  log(`sale ${k} end ${taps.at(-1).end} in ${taps.at(-1).endMs} ms; notes ${JSON.stringify(taps.at(-1).notes)}`);
+}
+const first = taps[0].first;
+const end = taps.every((x) => x.end === "filled") ? "filled" : taps.map((x) => x.end).join(",");
 const endMs = Date.now() - tapAt;
-// the sale's open record, then its end: the return note leaves INCOMING once the pool's round holds its deposit at a
-// final block (the record is dropped then), read on as the page's own background read does
-const sale = Object.values((await w.get("meta", EVM_OPEN_SELLS_KEY)) ?? {})[0] ?? null;
-for (let i = 0; i < 300 && Object.keys((await w.get("meta", EVM_OPEN_SELLS_KEY)) ?? {}).length > 0; i++) await sleep(2_000);
+await navigator.locks.request(WALLET_SEED_LOCK, { mode: "exclusive" }, () => {});
+// the sales' open records, then their end: each return note leaves INCOMING once the pool's round holds its deposit at
+// a final block (the record is dropped then), read on as the page's own background read does
+const sales = Object.values((await w.get("meta", EVM_OPEN_SELLS_KEY)) ?? {});
+const sale = sales[0] ?? null;
+const SETTLE_S = Number(process.env.SETTLE_S ?? 600);
+for (let i = 0; i < SETTLE_S / 10 && Object.keys((await w.get("meta", EVM_OPEN_SELLS_KEY)) ?? {}).length > 0; i++) {
+  if (i % 30 === 0) log(`open sales: ${Object.keys((await w.get("meta", EVM_OPEN_SELLS_KEY)) ?? {}).length}`);
+  await sleep(10_000);
+}
 const settledMs = Date.now() - tapAt;
 tapped = false;
-// the sale's transaction: the pool's Deposited log for the return note's precommitment, from the record's first block
-let hash = null;
-if (sale) {
-  const T = "0x" + Buffer.from((await import("@noble/hashes/sha3.js")).keccak_256(new TextEncoder().encode("Deposited(address,uint256,uint256,uint256,uint256)"))).toString("hex");
-  const logs = await rpcs[0]("eth_getLogs", [{ address: PIN.pool, topics: [T], fromBlock: "0x" + BigInt(sale.from).toString(16), toBlock: "latest" }]);
-  hash = logs.find((l) => BigInt("0x" + l.data.slice(2 + 64 * 3, 2 + 64 * 4)) === BigInt(sale.precommitment))?.transactionHash ?? null;
+// each sale's transaction: the pool's Deposited log for its note's precommitment, from the record's first block, in a
+// bounded range (a public RPC refuses an unbounded one)
+const T = "0x" + Buffer.from((await import("@noble/hashes/sha3.js")).keccak_256(new TextEncoder().encode("Deposited(address,uint256,uint256,uint256,uint256)"))).toString("hex");
+const headNow = BigInt(await rpcs[0]("eth_blockNumber", []));
+const hashes = [];
+for (const o of sales) {
+  const from = BigInt(o.from);
+  const to = from + 9_000n < headNow ? from + 9_000n : headNow;
+  const logs = await rpcs[0]("eth_getLogs", [{ address: PIN.pool, topics: [T], fromBlock: "0x" + from.toString(16), toBlock: "0x" + to.toString(16) }]);
+  hashes.push(logs.find((l) => BigInt("0x" + l.data.slice(2 + 64 * 3, 2 + 64 * 4)) === BigInt(o.precommitment))?.transactionHash ?? null);
 }
+const hash = hashes[0] ?? null;
 const said = { w: W.slice(2).toLowerCase(), tx: hash?.slice(2) ?? "-" };
 const requestLog = requests.map(({ body, ...q }) => ({ ...q, at: q.at - tapAt, names: Object.entries(said).filter(([, v]) => body.includes(v)).map(([k]) => k) }));
 const reads = [];
-if (hash)
+for (const h of hashes.filter(Boolean))
   for (const [k, rpc] of rpcs.entries()) {
-    const rc = await rpc("eth_getTransactionReceipt", [hash]).catch((e) => ({ error: String(e?.message).slice(0, 120) }));
-    reads.push({ rpc: RPCS[k], block: rc?.blockNumber ? BigInt(rc.blockNumber).toString() : null, status: rc?.status ?? null });
+    const rc = await rpc("eth_getTransactionReceipt", [h]).catch((e) => ({ error: String(e?.message).slice(0, 120) }));
+    reads.push({ hash: h, rpc: RPCS[k], block: rc?.blockNumber ? BigInt(rc.blockNumber).toString() : null, status: rc?.status ?? null });
   }
 const notes = (await ns.list()).map((n) => ({ id: n.id, ref: n.ref.kind, state: n.state, value: n.leaf ? String(n.leaf.value) : null }));
 const open = await w.get("meta", EVM_OPEN_SELLS_KEY);
-log(`end ${end} in ${endMs} ms, settled in ${settledMs} ms; tx ${hash}; reads ${JSON.stringify(reads)}; notes ${JSON.stringify(notes)}; open ${JSON.stringify(open ?? null, big)}`);
+log(`end ${end} in ${endMs} ms, settled in ${settledMs} ms; txs ${JSON.stringify(hashes)}; reads ${JSON.stringify(reads)}; notes ${JSON.stringify(notes)}; open ${JSON.stringify(open ?? null, big)}`);
 for (const q of requestLog) log(`request +${q.at} ms ${q.verb} ${q.host}${q.path} ${q.method ?? ""} names: ${q.names.join(",") || "none"}`);
-writeFileSync(OUT, JSON.stringify({ by: "packages/signpage/scripts/pool-sell-evm-testnet.mjs", network: NETWORK, pool: PIN.pool, scope: evmPoolScopeOf(PIN.pool, EVM_CHAIN_IDS[NETWORK]), rpcs: RPCS, w: W, token: rec.mint, amount, units: bal, route: rec.route, first, stages, end, endMs, settledMs, sale, hash, reads, notes, open: open ?? null, helper: helperLog, requests: requestLog }, big, 2) + "\n");
+writeFileSync(OUT, JSON.stringify({ by: "packages/signpage/scripts/pool-sell-evm-testnet.mjs", network: NETWORK, pool: PIN.pool, scope: evmPoolScopeOf(PIN.pool, EVM_CHAIN_IDS[NETWORK]), rpcs: RPCS, w: W, token: rec.mint, amount, units: bal, route: rec.route, first, stages, taps, end, endMs, settledMs, sale, sales, hash, hashes, reads, notes, open: open ?? null, helper: helperLog, requests: requestLog }, big, 2) + "\n");
 log(`wrote ${OUT}`);
 await t.signedOut();
 seed64.fill(0);
