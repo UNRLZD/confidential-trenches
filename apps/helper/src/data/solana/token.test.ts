@@ -11,7 +11,7 @@ import { start } from "../../server.ts";
 import { geckoBudget, PAGE_RESERVE, REFRESH_SLOT, WINDOW_MS } from "../gecko.ts";
 import { createProxy } from "../../proxy/proxy.ts";
 import { createRpc } from "../../rpc/rpc.ts";
-import { pumpCurveAddress, ROW_FIELDS, toRow } from "./lists.ts";
+import { b58decode, pumpCurveAddress, ROW_FIELDS, toRow } from "./lists.ts";
 import {
   CANDLES_FIELDS, createSolanaToken, GT_PAGE_WAIT_MS, GT_PER_MIN, HOLDERS_FIELDS, JUP_GAP_MS, JUP_PAGE_WAIT_MS, LAUNCH_WAIT_MS, metadataAddress, PAGE_FIELDS, RISK_FIELDS, toCandles, toHolders, toMint, TOKEN_2022_PROGRAM, TOKEN_PROGRAM, top10Of, topPool, walletsTop10,
 } from "./token.ts";
@@ -415,7 +415,7 @@ test("toMint: decimals, supply, authorities and the Token-2022 fee in force at t
     ...base,
     data: { parsed: { type: "mint", info: { ...base.data.parsed.info, extensions: [{ extension: "transferFeeConfig", state: { olderTransferFee: { epoch: 0, transferFeeBasisPoints: older, maximumFee: 1 }, newerTransferFee: { epoch, transferFeeBasisPoints: newer, maximumFee: 1 } } }] } } },
   });
-  assert.deepEqual(toMint(base, 1), { decimals: 9, supply: 1000n, mintAuth: false, freezeAuth: true, feeBps: 0 });
+  assert.deepEqual(toMint(base, 1), { decimals: 9, supply: 1000n, mintAuth: false, freezeAuth: true, feeBps: 0, program: base.owner });
   assert.equal(toMint(fee(100, 250, 1075), 1075 * 432_000)!.feeBps, 250, "the newer fee from its epoch");
   assert.equal(toMint(fee(100, 250, 1076), 1075 * 432_000)!.feeBps, 100, "the older fee before it");
   assert.equal(toMint({ ...base, owner: TOKEN_PROGRAM }, 1)!.feeBps, 0);
@@ -884,4 +884,41 @@ test("card token-page-data-complete-and-fast: with a holders provider the page's
   const p = JSON.parse((await t.page(PUMP)).body);
   assert.deepEqual(p.risk.top10_bps, { v: 1000, src: "chain", as_of_ms: NOW });
   assert.equal(p.row.top10_bps, 1000, "the safety grid's cell reads the row");
+});
+
+test("card token-page-data-complete-and-fast: with a holders provider the page's snipers and bundlers are our chain read of the first trades (first-buyers.ts), on that provider alone; without one, none", async () => {
+  const FT = JSON.parse(readFileSync(new URL("./fixtures/sol-trades-txs.json", import.meta.url), "utf8")) as { txs: Record<string, { result: { meta: { logMessages: string[] } } }> };
+  // the recorded mainnet pump.fun buy, its event's mint set to this page's: two first buys in slot 200 by its buyer
+  const logs = FT.txs["pump-buy"]!.result.meta.logMessages.map((l) => {
+    if (!l.startsWith("Program data: vdt/")) return l;
+    const b = Buffer.from(l.slice("Program data: ".length), "base64");
+    Buffer.from(b58decode(PUMP)!).copy(b, 8);
+    return `Program data: ${b.toString("base64")}`;
+  });
+  const buyer = "4ZvukwqXc2AFAHcuvW8VrKD9j3zGHuoqW4hvEQfANH2n";
+  const supply = toMint(FX.tokens[PUMP].accounts.result.value[0], 1)!.supply;
+  const methods: string[] = [];
+  const own = {
+    async handle(_c: string, _ct: string | undefined, body: string) {
+      const r = JSON.parse(body) as RpcCall;
+      methods.push(r.method);
+      const ok = (result: unknown) => ({ status: 200, body: JSON.stringify({ jsonrpc: "2.0", id: 1, result }) });
+      if (r.method === "getSignaturesForAddress") return ok([{ signature: "b1", slot: 200, err: null }, { signature: "b0", slot: 199, err: null }]);
+      if (r.method === "getTransaction") return ok({ meta: { err: null, logMessages: logs } });
+      if (r.method === "getMultipleAccounts") return ok({ context: { slot: 1 }, value: [{ data: { parsed: { info: { owner: buyer, mint: PUMP, tokenAmount: { amount: (supply / 20n).toString() } } } } }] });
+      return { status: 503, body: '{"error":{"code":"upstream"}}' };
+    },
+  };
+  const shared = fakeRpc();
+  const t = createSolanaToken(fakeProxy(), shared, { now: () => NOW, holdersRpc: own });
+  const p = JSON.parse((await t.page(PUMP)).body);
+  const bps = Number(((supply / 20n) * 10_000n) / supply); // a twentieth of the supply, in whole basis points
+  assert.deepEqual(p.risk.snipers_bps, { v: bps, src: "chain", as_of_ms: NOW });
+  assert.equal(p.row.snipers_bps, bps, "the safety grid's cell reads the row");
+  // one wallet in the first slot is no bundle
+  assert.deepEqual(p.risk.bundlers_bps, { v: 0, src: "chain", as_of_ms: NOW });
+  assert.deepEqual(methods.filter((m) => m !== "getTokenLargestAccounts"), ["getSignaturesForAddress", "getTransaction", "getTransaction", "getMultipleAccounts"]);
+  assert.equal(shared.calls.some((c) => c.method === "getSignaturesForAddress" || c.method === "getTransaction"), false, "never on the shared path");
+  const none = JSON.parse((await createSolanaToken(fakeProxy(), fakeRpc(), { now: () => NOW }).page(PUMP)).body);
+  assert.deepEqual([none.risk.snipers_bps.src, none.risk.bundlers_bps.src], ["none", "none"]);
 });
