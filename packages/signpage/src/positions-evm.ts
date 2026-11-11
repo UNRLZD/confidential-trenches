@@ -17,7 +17,8 @@
 //   it): it is not whole, so it runs again, and each W keeps its last agreed amount, a sold token's dropped first
 //   (`dropped`) so a sold row never stays on an old read. One seat under the floor while the other is past it is a
 //   provider behind (stuck, or a spare the pair walked to): that pass reads on the first provider of the pool's list
-//   (`spares`) that neither seat holds and whose newest block is past the floor, still two providers that agree, so
+//   (`spares`) whose operator neither seat's is (the kit's evmRpcOperator, by domain: one operator's second host is
+//   never a second provider) and whose newest block is past the floor, still two operators that agree, so
 //   one stuck provider never holds the rows back where the list has a third (mainnet's Base list has 4, Robinhood's
 //   more). The block a pass read at is the floor's third part: a stuck provider holds the lower head where it is, so
 //   it alone never stops a pass being whole; only a buy or sale past it does, and the spare reads past that.
@@ -36,6 +37,7 @@
 //   sign out or a sell's hold sends nothing more of the pass.
 // - Who learns what: each pool RPC, a W of this device and the token it bought (the sell's own balance read names the
 //   same pair). No other host is asked.
+import { evmRpcOperator } from "../../kit/src/trade/evm/rpc-operator.ts";
 import type { EvmRpc } from "../../wallet/src/pool/evm.ts";
 import { evmHeadNumber } from "./evm-send.ts";
 import type { EvmHolding } from "./pool-buy-evm.ts";
@@ -109,14 +111,8 @@ async function agreedBalance(rpcs: readonly [EvmRpc, EvmRpc], signal: AbortSigna
   if (a !== b) throw new Error("balanceOf: the two RPCs differ");
   return a!;
 }
-/** A provider's host (lower case), the one an RPC's `url` names; null with none. */
-const hostOf = (url: string | undefined): string | null => {
-  try {
-    return url === undefined ? null : new URL(url).host.toLowerCase();
-  } catch {
-    return null;
-  }
-};
+/** The operator an RPC's `url` names (the kit's evmRpcOperator: by domain, an alias's owner); null with none. */
+const operatorOf = (url: string | undefined): string | null => (url === undefined ? null : evmRpcOperator(url));
 /** The block each pass of a memo last read at (the floor's third part). */
 const READ_AT = new WeakMap<PassMemo, bigint>();
 
@@ -155,9 +151,9 @@ export async function evmPositionsPass(r: EvmPositionsReads, memo: PassMemo): Pr
     if (low < floor && (x! >= floor) !== (y! >= floor)) {
       const behind = x! < floor ? 0 : 1;
       const ahead = behind === 0 ? y! : x!;
-      const held = new Set(r.rpcs.map((q) => hostOf(q.url)));
+      const held = new Set(r.rpcs.map((q) => operatorOf(q.url)));
       for (const spare of r.spares ?? []) {
-        const h = hostOf(spare.url);
+        const h = operatorOf(spare.url);
         if (h === null || held.has(h)) continue;
         const g = gated(spare, gate, r.signal);
         const head = await evmHeadNumber(g).catch(() => -1n);

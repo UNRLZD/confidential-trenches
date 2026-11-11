@@ -260,12 +260,13 @@ for (const chain of CHAINS) {
         },
         { url },
       );
-    const spares = [spare("https://a.example/v2", 300n), spare("https://c.example", 160n), spare("https://d.example", 201n), spare("https://e.example", 999n)];
+    // a.example's second host is a.example's operator (the kit's evmRpcOperator: by domain), never a second provider
+    const spares = [spare("https://a.example/v2", 300n), spare("https://rpc2.a.example", 300n), spare("https://c.example", 160n), spare("https://d.example", 201n), spare("https://e.example", 999n)];
     c.calls[0] = [];
     c.calls[1] = [];
     const got = await evmPositionsPass(reads(chain, c, records, { spares }), memo);
     assert.deepEqual(got, { positions: [{ chain, token: TOKEN, amount: "7", cost: "0", wallets: [W1], decimals: 6 }], whole: true });
-    assert.deepEqual(calls, ["c.example eth_blockNumber", "d.example eth_blockNumber", "d.example eth_call"], "the seat's own provider never asked, the first spare past the floor read, none after it");
+    assert.deepEqual(calls, ["c.example eth_blockNumber", "d.example eth_blockNumber", "d.example eth_call"], "a seat's own operator never asked (its second host neither), the first spare past the floor read, none after it");
     assert.ok(c.calls[1]!.filter((x) => x.data?.startsWith("0x70a08231")).every((x) => x.at === hex(200n)), "at the lower of the two that read");
     assert.deepEqual(per(c, 0), { eth_blockNumber: 1 }, "the stuck provider is asked its head only");
   });
