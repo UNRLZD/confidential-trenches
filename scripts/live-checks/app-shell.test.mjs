@@ -569,3 +569,15 @@ test("plantTape: zero bars, or a tf with no known length, plants nothing (no tra
 test("TF_SECONDS: each timeframe's length is the helper's own", () => {
   assert.deepEqual({ ...shell.TF_SECONDS }, { ...HELPER_TF_SECONDS });
 });
+
+// goodOneBar: APP_HOST live, 11 Nov 06:41Z, the page's top Trending token a Base token two hours old with one 15m bar
+// (0xb51d897806ed81a483fb778ebba54f6179753d5f): its tape planted on that one bar (marks, rows, trades pushed): PASS. The
+// same token at 05:50Z, before the plant took one bar, read marks 0, rows 0, pushed 0 (run 42970713123).
+test("recorded good answer on a one-bar top token: the tape planted on its one bar, marks, rows and pushed trades at both widths: PASS", () => {
+  const r = judge(ANSWERS.goodOneBar);
+  assert.equal(r.ok, true, r.lines.join("\n"));
+  for (const w of WIDTHS) {
+    const t = ANSWERS.goodOneBar.loads.find((l) => l.width === w.name && l.expect === "token").tape;
+    assert.ok(t.marks > 0 && t.rows > 0 && t.pushed >= 2, `${w.name}: ${JSON.stringify(t)}`);
+  }
+});
