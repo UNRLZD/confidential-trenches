@@ -3,6 +3,11 @@
 // window full while a buy waited for Final (429 to its finality reads for 8 to 18 s), and the transport asked a
 // throttling host again at 250, 500 and 1000 ms. Each test here runs on a fake provider that counts every request per
 // host and throttles as told. Run as the testnet build, whose Solana pair is api.devnet and the helper's devnet route.
+// Every test runs on the test clock (onProvider: onTestClock), so each time read and asserted here is the clock's, and a
+// wait the lanes set is skipped when nothing else is left to run: no assertion holds only because real time passed. The
+// three that run a state read (A, A2, D: fake IndexedDB and Web Locks, whose work the clock cannot see) run on the real
+// clock (onProviderNow) and read no time: each holds its flow to a hang bound of 8 s (`within`), against the 150 s their
+// regression took.
 import assert from "node:assert/strict";
 import { after, test } from "node:test";
 import { IDBFactory } from "fake-indexeddb";
@@ -29,8 +34,10 @@ const HELPER = TESTNET_RPCS.solana[1];
 type Sent = { host: string; method: string; at: number; status: number };
 type Answer = number | { status?: number; result?: unknown; ms?: number; retryAfter?: string };
 /** A fake provider as globalThis.fetch: every request counted per host; `answer` says the status of each (429 or 200),
- *  or its status, result, delay and Retry-After. */
-async function onProvider(answer: (host: string, n: number, method: string) => Answer, run: (sent: Sent[], t0: number) => Promise<void>): Promise<void> {
+ *  or its status, result, delay and Retry-After. On the test clock: performance.now and every timer are its. */
+const onProvider = (answer: (host: string, n: number, method: string) => Answer, run: (sent: Sent[], t0: number) => Promise<void>): Promise<void> =>
+  onTestClock(() => onProviderNow(answer, run));
+async function onProviderNow(answer: (host: string, n: number, method: string) => Answer, run: (sent: Sent[], t0: number) => Promise<void>): Promise<void> {
   const real = globalThis.fetch;
   const sent: Sent[] = [];
   const per = new Map<string, number>();
@@ -88,11 +95,8 @@ const SELL = { kind: "pool.sell", chain: "solana", token: "So1111111111111111111
 /** A sell kept on W (it ended "sent", or the page reloaded after its send): a state read settles it by its own
  *  transaction on both RPCs, then each RPC's height, read after (the review's probe A). */
 const keptSell = (w: WalletStore): Promise<void> => keptSells(async () => w as never).put({ signature: "1".repeat(64), tx: "AA==", last: 151 });
-/** `p`'s time to settle from now in ms, or null past `ms`. */
-const within = async (p: Promise<unknown>, ms: number): Promise<number | null> => {
-  const t = performance.now();
-  return Promise.race([p.then(() => performance.now() - t, () => performance.now() - t), tick(ms).then(() => null)]);
-};
+/** Whether `p` settles inside `ms` from now (a hang bound). */
+const within = (p: Promise<unknown>, ms: number): Promise<boolean> => Promise.race([p.then(() => true, () => true), tick(ms).then(() => false)]);
 // every chain read answers null after 200 ms: a settle's reads are in flight when a trade is tapped
 const slowNull = (): Answer => ({ result: null, ms: 200 });
 
@@ -237,7 +241,7 @@ test("a sign out ends every wait on every host at once: a pass's read waiting fo
 // tapped meanwhile holds its hosts and waits for that lock. The settle's reads park on the sell's hold: the sell answered
 // 150 s after the tap. A reader that holds what a trade can wait for reads as a trade.
 test("A: a sell tapped while a state read settles a kept sell (under the sell lock) answers in seconds, not at the hold's bound", async () => {
-  await onProvider(slowNull, async () => {
+  await onProviderNow(slowNull, async () => {
     const { w } = await wallet();
     await keptSell(w);
     const t = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { prover: { vault: signalsProver(), stop: () => {} } });
@@ -245,16 +249,15 @@ test("A: a sell tapped while a state read settles a kept sell (under the sell lo
     await tick(100);
     const r = t.flow(SELL as never, { id: "s1", sha: "00", progress: () => {} } as never) as { running?: true; after: Promise<unknown>; answer: () => unknown };
     assert.equal(r.running, true);
-    const ms = await within(r.after, 8_000);
-    assert.ok(ms !== null, "the sell answered inside 8 s of its tap");
+    assert.ok(await within(r.after, 8_000), "the sell answered inside 8 s of its tap");
     assert.deepEqual(r.answer(), { error: "not_funded" });
-    assert.ok((await within(read, 8_000)) !== null, "the state read ended");
+    assert.ok(await within(read, 8_000), "the state read ended");
   });
 });
 
 // Its probe A2: the same with a buy running (its hold on both hosts), the sell tapped 1 s in, the buy ending at 2 s.
 test("A2: the same with a buy holding the hosts: the sell answers in seconds and the buy's end is not what frees it", async () => {
-  await onProvider(slowNull, async () => {
+  await onProviderNow(slowNull, async () => {
     const { w } = await wallet();
     await keptSell(w);
     const t = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { prover: { vault: signalsProver(), stop: () => {} } });
@@ -262,28 +265,28 @@ test("A2: the same with a buy holding the hosts: the sell answers in seconds and
     const read = t.stateRead();
     await tick(1_000);
     const r = t.flow(SELL as never, { id: "s2", sha: "00", progress: () => {} } as never) as { after: Promise<unknown>; answer: () => unknown };
-    const ms = await within(r.after, 8_000);
+    const ok = await within(r.after, 8_000);
     buy();
-    assert.ok(ms !== null, "the sell answered inside 8 s of its tap, the buy still holding");
+    assert.ok(ok, "the sell answered inside 8 s of its tap, the buy still holding");
     assert.deepEqual(r.answer(), { error: "not_funded" });
-    assert.ok((await within(read, 8_000)) !== null);
+    assert.ok(await within(read, 8_000));
   });
 });
 
 // Its probe D (P2-1): a state read's settle of an INCOMING deposit note holds POOL_DEPOSIT_LOCK across its reads; a
 // deposit tapped during a buy's hold waits for that lock. The settle reads as a trade, so the lock comes in seconds.
 test("D: a deposit tapped while a buy holds the hosts and a state read settles a deposit gets the deposit lock in seconds", async () => {
-  await onProvider(slowNull, async () => {
+  await onProviderNow(slowNull, async () => {
     const { w, ns } = await wallet();
     await incoming(ns, null);
     const t = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { prover: { vault: signalsProver(), stop: () => {} } });
     const buy = holdHosts([DEVNET, HELPER]);
     const read = t.stateRead();
     await tick(300);
-    const ms = await within(navigator.locks.request(POOL_DEPOSIT_LOCK, { mode: "exclusive" }, async () => {}), 8_000);
+    const ok = await within(navigator.locks.request(POOL_DEPOSIT_LOCK, { mode: "exclusive" }, async () => {}), 8_000);
     buy();
-    assert.ok(ms !== null, "the deposit's lock came inside 8 s, the buy still holding");
-    assert.ok((await within(read, 8_000)) !== null);
+    assert.ok(ok, "the deposit's lock came inside 8 s, the buy still holding");
+    assert.ok(await within(read, 8_000));
   });
 });
 
@@ -314,11 +317,11 @@ test("E: under trades that overlap for good and fill the host's window, a pass r
         at.push(performance.now() - t0);
       }
     })();
-    const ms = await within(passes, 3 * PASS_FLOOR_MS + 2_000);
+    const ok = await within(passes, 3 * PASS_FLOOR_MS + 2_000);
     on = false;
     await trades;
     await Promise.allSettled([...reads, passes]);
-    assert.ok(ms !== null, `three pass reads inside ${3 * PASS_FLOOR_MS + 2_000} ms: ${at.map(Math.round).join(", ")}`);
+    assert.ok(ok, `three pass reads inside ${3 * PASS_FLOOR_MS + 2_000} ms: ${at.map(Math.round).join(", ")}`);
     assert.equal(sent.filter((x) => x.method === "getAccountInfo").length, 3);
     for (let i = 1; i < at.length; i++) assert.ok(at[i]! - at[i - 1]! <= PASS_FLOOR_MS + 200, `pass ${i} waited ${Math.round(at[i]! - at[i - 1]!)} ms`);
   });
@@ -327,7 +330,7 @@ test("E: under trades that overlap for good and fill the host's window, a pass r
 // The review of a1a6bad6, P2 (d): the turn's deadline. A host that answers 429 with a Retry-After of an hour, for good,
 // and another reader whose 429s keep renewing its pause: a trade's read on it still ends within its stated bound
 // (TRADE_TURN_MAX_MS for its turn, then its 3.5 s), and the pair's other seat reads and answers.
-test("a host that throttles for good with Retry-After 3600: a trade's read ends within 13.5 s of its call, and the other seat still reads", () => onTestClock(async () => {
+test("a host that throttles for good with Retry-After 3600: a trade's read ends within 13.5 s of its call, and the other seat still reads", async () => {
   await onProvider((host) => (host === "api.devnet.solana.com" ? { status: 429, retryAfter: "3600" } : 200), async () => {
     const [a, b] = [pageSolanaRpcs("trade"), pageSolanaRpcs("trade")];
     // the first read meets the 429: the host paused 10 s (the Retry-After held to the cap)
@@ -345,7 +348,7 @@ test("a host that throttles for good with Retry-After 3600: a trade's read ends 
     assert.equal(await b[1]("getBlockHeight", []), 7, "the other seat reads and answers");
     await renew;
   });
-}));
+});
 
 // A paid devnet run on 1e15ba0f (11 Nov): a deposit asked beside a state read's settle answered down. A trade's re-ask
 // after a 429 slept the pause it read at its fault, then went out without looking again: a pause another reader's 429

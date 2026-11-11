@@ -606,11 +606,20 @@ test("HostLane: a sign out ends a waiting turn at once with its reason, and a tu
 // The delta review of ed85d367 (P2-A): a pass asleep for room when a trade starts slept on to its room's end (10 s
 // measured), so the floor (one every PASS_FLOOR_MS) did not hold from the trade's start.
 test("HostLane: a pass asleep for room learns of a trade's start at once, and goes by the floor", async () => {
-  const l = new HostLane();
+  // a planted clock and a sleep that never ends by itself: only a wake moves the pass on
+  const clock = { t: 0 };
+  const slept: number[] = [];
+  const l = new HostLane({ now: () => clock.t, sleep: (ms) => (slept.push(ms), new Promise<void>(() => {})) });
   for (let i = 0; i < PASS_BUDGET; i++) l.sent("trade");
-  const t0 = performance.now();
-  const pass = l.turn("pass");
-  setTimeout(() => l.trade(1_000), 100);
-  const ms = await Promise.race([pass.then(() => performance.now() - t0), new Promise<null>((r) => setTimeout(() => r(null), 3_000))]);
-  assert.ok(ms !== null && ms < 1_000, `the pass went ${ms === null ? "after 3 s or never" : `${Math.round(ms)} ms`} after its turn, a trade started at 100 ms`);
+  let went = false;
+  const pass = l.turn("pass").then(() => (went = true));
+  await new Promise((r) => setImmediate(r));
+  assert.deepEqual(slept, [HOST_WINDOW_MS], "asleep for the window's room, no trade yet");
+  assert.equal(went, false);
+  clock.t = 100;
+  const give = l.trade(1_000);
+  await pass;
+  assert.equal(went, true, "the trade's start woke it, and the floor let it go");
+  assert.deepEqual(slept, [HOST_WINDOW_MS], "it slept no more: woken at the trade's start, not at its room's end");
+  give();
 });
