@@ -631,6 +631,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       landed: () => void proofs(),
       settle: () => void settleSolana(),
       signal: follows.signal,
+      // the session's sign out (signingOut, at its tap): it ends a wait between the ask's attempts
+      stop: solanaStop.signal,
       end: () => {
         notes?.close();
         end?.();
@@ -743,6 +745,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         landed: () => void evmProofs(chain),
         settle: () => void settleEvm(chain),
         signal: follows.signal,
+        // the session's sign out (signingOut, at its tap): it ends a wait between the ask's attempts
+        stop: evmStop.signal,
         end: () => {
           notes?.close();
           end?.();

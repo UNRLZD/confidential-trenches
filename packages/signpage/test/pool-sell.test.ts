@@ -178,7 +178,7 @@ type Plant = {
   /** Provider B throttled once the sell has landed (the devnet run at 0068524a: onfinality's HTTP 429s, each call failing
    *  after page-rpc's own retries): from the first read of W's token account ("read") or the first teardown simulation
    *  ("simulate"), B's next `n` calls fail as the page's RPC fails them */
-  throttle?: { on: "read" | "simulate"; n: number };
+  throttle?: { on: "read" | "simulate"; n: number; plain?: true };
   /** The first sell's deposit meets a page another deposit filled first: it fails WrongAccount on chain (review L2),
    *  W paying its fee, nothing else moving */
   wrongAccountOnce?: boolean;
@@ -539,7 +539,7 @@ function chain(plant: Plant = {}) {
         const hit = plant.throttle.on === "read" ? list.includes(ata) : method === "simulateTransaction" && (params[1] as { accounts?: unknown }).accounts !== undefined;
         if (throttled > 0 || hit) {
           throttled++;
-          throw new SolanaRpcTransportError("http_429", "HTTP 429", 4, "solana-devnet.api.onfinality.io");
+          throw plant.throttle.plain ? new Error("an answer that does not parse") : new SolanaRpcTransportError("http_429", "HTTP 429", 4, "solana-devnet.api.onfinality.io");
         }
       }
       switch (method) {
@@ -4694,7 +4694,7 @@ test("card start-reads-wait-out-a-throttle: one tap's waits share one total: a t
   assert.ok(!("stage" in a) || a.stage === "refused", JSON.stringify(a));
 });
 
-test("card start-reads-wait-out-a-throttle: the tap's bound is on the device's clock: with each throttled read taking 5 s, the waits are 1, 2 and 4 s and the sell answers down by 30 s plus the read in flight, nothing signed", async () => {
+test("card start-reads-wait-out-a-throttle: the tap's bound is on the device's clock: with each throttled read taking 5 s, the waits are 1, 2 and 4 s and the sell answers down by 30 s plus the attempt in flight, nothing signed", async () => {
   const w = await world({ ataLamports: TOKEN_RENT });
   let t = 0n;
   // a slow provider: each throttled fee read answers its fault 5 s on the device's clock (the host's pause and the call's bound)
@@ -4724,4 +4724,49 @@ test("card start-reads-wait-out-a-throttle: one bound per request: the sell's pl
   t += 25_000;
   assert.equal(later.next(run6()), null, "past 30 s on the clock: down");
   assert.notEqual(tapWaits({ id: "another" }), first);
+});
+
+test("review of f0e7bd38, P2-2: a three-wallet sell whose every sale's fee read is throttled (Retry-After an hour, each read 13.5 s): once the tap's waits are spent no further wallet starts, so no attempt starts past 30 s and it answers down by 30 s plus the attempt in flight, nothing signed", async () => {
+  const w = await world({ held: T5, ataLamports: TOKEN_RENT, others: [{ l: 8n, j: 0, held: T3 }, { l: 9n, j: 0, held: T3 }] }, [listedW(T5), walletX(T3), walletY(T3)]);
+  let t = 0n;
+  const starts: bigint[] = [];
+  const f = faulty(w, (p, method) => (p === 0 && method === "getFeeForMessage" ? (starts.push(t), (t += 13_500n), run6(3_600_000)) : null));
+  const waits: number[] = [];
+  const a = await runPoolSell({ ...w.host, rpcs: f.rpcs, now: () => t, wait: async (ms: number) => void (waits.push(ms), (t += BigInt(ms))) }, share(10_000));
+  assert.deepEqual(a, { error: "down" });
+  // wallet 1: a fault at 13.5 s, a 10 s wait (the Retry-After held to 10 s), a fault at 37 s: spent; wallets 2 and 3 never start
+  assert.deepEqual(waits, [10_000]);
+  assert.deepEqual(starts, [0n, 23_500n], "no attempt starts past 30 s");
+  assert.equal(t, 37_000n, "down at 30 s plus the attempt in flight");
+  assert.equal(f.sales.size, 0);
+});
+
+test("review of f0e7bd38, P3: the rent back's tries double only on a provider fault; any other failure waits the rule's first step each time", async () => {
+  const w = await world({ ataLamports: TOKEN_RENT, volumes: [{ program: SOLANA_PUMP_PROGRAM }], throttle: { on: "simulate", n: 3, plain: true } });
+  const waits: number[] = [];
+  const faults = () => w.told.filter((t) => t.step === "teardown" && t.state === "fault").length;
+  let passed = false;
+  const a = await runPoolSell({ ...w.host, wait: async (ms: number) => void (faults() > 0 && !passed && waits.push(ms)), told: (t: RentBackTold) => (w.host.told?.(t), t.step === "teardown" && t.state === "sent" && (passed = true)) } as PoolSellHost, ASK);
+  assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
+  const n = faults();
+  assert.ok(n >= 2, `${n} faults`);
+  assert.deepEqual(waits.slice(0, n), Array(n).fill(1_000), JSON.stringify(w.told));
+});
+
+test("review of f0e7bd38, P3: waitUnless clears its own timer at a sign out and settles when the host's wait rejects", async () => {
+  const { waitUnless } = await import("../src/read-waits.ts");
+  const c = new AbortController();
+  const cleared: unknown[] = [];
+  const real = globalThis.clearTimeout;
+  globalThis.clearTimeout = ((id: unknown) => (cleared.push(id), real(id as never))) as typeof clearTimeout;
+  try {
+    const p = waitUnless(undefined, 3_600_000, c.signal);
+    c.abort();
+    await p;
+    assert.equal(cleared.filter((x) => x !== undefined).length, 1, "its hour-long timer cleared at the abort");
+  } finally {
+    globalThis.clearTimeout = real;
+  }
+  await waitUnless(() => Promise.reject(new Error("the host's wait failed")), 1_000, new AbortController().signal);
+  await waitUnless(() => Promise.reject(new Error("the host's wait failed")), 1_000);
 });

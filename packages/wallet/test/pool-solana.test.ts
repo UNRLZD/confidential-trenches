@@ -19,6 +19,7 @@ import { openNoteStore, type NoteStore } from "../src/notes/store.ts";
 import { openWalletStore } from "../src/store/index.ts";
 import { refKey } from "../src/notes/store.ts";
 import { checkPool } from "../src/pool/pool.ts";
+import { RESTORE_LANES, WALK_SLICE_MS } from "../src/notes/restore.ts";
 import {
   SOL_LAG_SLOTS, SOL_LAG_WAIT_MS, SOL_PAGES_A_CALL, SOL_LIFE_MS, type SolanaLagWait, solanaLagRetry, SOL_TIP_CAP, solanaContextOf, solanaEpochFee, solanaNow, solanaPageOf, solanaPool, solanaPoolOf, solanaTreeSync, type SolanaFeeAnswer,
 } from "../src/pool/solana.ts";
@@ -2944,4 +2945,45 @@ test("review P3-2 of e3489b3b: one page read answered at slot 2^53 - 1 (the data
   assert.equal(cache.pages, undefined);
   assert.equal(cache.marks?.slot, 0);
   assert.deepEqual([await settle(), await settle()], ["spent", "spent"]);
+});
+
+// card restore-first-sign-in-under-two-minutes (release 114's live run 42935167402): the walk's 8 lanes of RESTORE_GAP
+// indices, each a precommitment and its mark's address, ran in one synchronous stretch on the page's main thread, so a
+// sign out in another tab reached the frame 30 to 70 s late and the page drew nothing until it ended. The walk yields to
+// the event loop as it goes, and its signal ends it at the next yield: no read and no index after it.
+// A clock that reads one unit a step (the walk and the notes after it read it once a step), with the event loop's turns
+// counted beside it: `most` is the most steps run between two turns. No real time is read.
+const sliced = (at?: { read: number; then: () => void }) => {
+  let reads = 0, since = 0, most = 0, turns = 0, on = true;
+  // the ticker is a message of its own, as another tab's sign out and the frame's asks reach a page
+  const c = new MessageChannel();
+  c.port1.onmessage = () => void ((turns += 1), (since = 0), on ? c.port2.postMessage(null) : (c.port1.close(), c.port2.close()));
+  c.port2.postMessage(null);
+  const now = (): number => ((reads += 1), (since += 1), (most = Math.max(most, since)), reads === at?.read && at.then(), reads);
+  return { now, stop: () => void (on = false), most: () => most, reads: () => reads, turns: () => turns };
+};
+test("the walk never holds the event loop: a restore's 8 lanes of a wide gap run a slice at a time, a turn between", async () => {
+  const { chain } = restorePool();
+  const c = sliced();
+  const r = await solanaRestoreNotes({ seed64: SEED, program: PROGRAM, rpcs: pair(chain, chain), gap: 400, now: c.now });
+  c.stop();
+  assert.equal(r.notes.length, 5, "the same notes as the gap-4 walk");
+  assert.ok(c.reads() >= RESTORE_LANES * 400, `every step of the walk is sliced (${c.reads()} steps)`);
+  assert.ok(c.most() <= 2 * WALK_SLICE_MS + 2, `at most a slice between two turns (${c.most()} steps)`);
+  assert.ok(c.turns() >= c.reads() / (2 * WALK_SLICE_MS + 2), `a turn each slice (${c.turns()} turns)`);
+});
+test("the walk ends at its signal: aborted mid-walk, the restore rejects with the reason within a slice and reads nothing after", async () => {
+  const { chain } = restorePool();
+  const log: string[] = [];
+  const rpcs = pair(chain, chain).map((f) => (async (m: string, p: unknown[]) => (log.push(m), f(m, p))) as SolanaRpc) as [SolanaRpc, SolanaRpc];
+  const stop = new AbortController();
+  const why = new Error("signed out");
+  let reads = 0;
+  // aborted at the walk's 500th step, after every read
+  const c = sliced({ read: 500, then: () => ((reads = log.length), stop.abort(why)) });
+  await assert.rejects(solanaRestoreNotes({ seed64: SEED, program: PROGRAM, rpcs, gap: 2_000, signal: stop.signal, now: c.now }), (e) => e === why);
+  c.stop();
+  assert.ok(reads > 0 && stop.signal.aborted, "aborted during the walk");
+  assert.ok(c.reads() - 500 <= WALK_SLICE_MS + 2, `at most a slice after the abort (${c.reads() - 500} steps)`);
+  assert.equal(log.length, reads, "no read after it");
 });

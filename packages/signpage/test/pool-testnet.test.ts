@@ -517,7 +517,9 @@ test("review P2-1 and P2-2 of a34c1626, P2-1 and P3-3 of e3489b3b: every Solana 
   assert.equal([...src.matchAll(/const signal = solanaStop\.signal;/g)].length, 4);
   assert.equal([...src.matchAll(/ signal: solanaStop\.signal,/g)].length, 2);
   assert.equal([...src.matchAll(/outSignal: \(\) => solanaStop\.signal,/g)].length, 1);
-  assert.equal([...src.matchAll(/solanaStop\.signal/g)].length, 7);
+  // the Solana deposit host's stop: its waits between attempts end at a sign out's tap (review of f0e7bd38, P2-1)
+  assert.equal([...src.matchAll(/ stop: solanaStop\.signal,/g)].length, 1);
+  assert.equal([...src.matchAll(/solanaStop\.signal/g)].length, 8);
   // the settle pair: the page's two seats, the helper's with the window-long retry
   assert.match(src, /solanaPacedRpc\(pageHelperRpc\(TRADE_HELPER, SOLANA_RPC_WINDOW_RETRY, kind\)\)\]/);
   assert.match(src, /solanaPacedRpc\(testnetRpc\(TESTNET_RPCS\.solana\[1\], SOLANA_RPC_WINDOW_RETRY, kind\)\)\]/);

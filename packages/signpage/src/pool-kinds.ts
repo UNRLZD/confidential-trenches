@@ -39,7 +39,7 @@
 //   pool-restore-wired). Any other error is answered as before.
 import { EvmNotFinalError } from "../../wallet/src/pool/evm-restore.ts";
 import type { KindContext, Deferred, HostAnswer, HostRefusal, Running } from "./api.ts";
-import { afterOf, readWaits, ReadStopped, tapWaits, waitsOn, waitUnless, type ReadWaits } from "./read-waits.ts";
+import { afterOf, readWaits, ReadStopped, tapDone, tapWaits, waitsOn, waitUnless, type ReadWaits } from "./read-waits.ts";
 import { PoolRuleRefused, checkPoolRequest, poolTokenAddress, tokenDecimalsKeptOf, tokenDecimalsOf, type PoolAsk, type PoolChain, type PoolRequest } from "./rules/pool.ts";
 
 /** One provider's JSON-RPC call: the method's result, or a throw. */
@@ -95,7 +95,6 @@ export async function keptTokenDecimals(chain: PoolChain, token: string, rpcs: r
   const had = kept.get(chain, token);
   if (had !== undefined) return had;
   const waits = o.waits === 0 ? null : (o.waits ?? readWaits());
-  const wait = o.wait ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const one = (rpc: PoolRpc) =>
     chain === "solana"
       ? rpc("getAccountInfo", [token, { encoding: "base64", commitment: "confirmed" }])
@@ -123,7 +122,7 @@ export async function keptTokenDecimals(chain: PoolChain, token: string, rpcs: r
     const fault = failed.reduce((a, e) => ((afterOf(e) ?? -1) > (afterOf(a) ?? -1) ? e : a));
     const ms = waits === null ? null : waits.next(fault);
     if (ms === null) throw fault;
-    await waitUnless(wait, ms, o.signal);
+    await waitUnless(o.wait, ms, o.signal);
     if (o.signal?.aborted) throw new ReadStopped();
   }
   const decimals = tokenDecimalsOf(chain, answers);
@@ -235,7 +234,7 @@ export function poolKinds(deps: PoolKindsDeps): { [K in PoolKind]: Handler<K> } 
         (e: unknown) => {
           answer = e instanceof PoolRuleRefused ? NO : e instanceof ReadStopped ? FAILED : DOWN;
         },
-      );
+      ).then(() => tapDone(ctx, waits));
       return { running: true, after, answer: () => answer };
     };
   return { "pool.deposit": handler("pool.deposit"), "pool.buy": handler("pool.buy"), "pool.sell": handler("pool.sell"), "pool.withdraw": handler("pool.withdraw") };

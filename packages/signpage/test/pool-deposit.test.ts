@@ -2567,3 +2567,45 @@ test("card start-reads-wait-out-a-throttle: a sign out ends a deposit's wait at 
   assert.deepEqual(a, { error: "failed" });
   assert.equal(c.sent.length, 0);
 });
+
+test("card start-reads-wait-out-a-throttle: a follow deposit 45 s after another (both the page's one follow id) has a bound of its own: it waits out a 429 and sends", async () => {
+  const realNow = Date.now;
+  let now = realNow();
+  Date.now = () => now;
+  try {
+    // the page's follow asks every deposit under one id (src/pool-deposit-follow.ts)
+    const FOLLOW = "pool-follow-solana";
+    const run = async (fault: boolean) => {
+      const c = chain();
+      const ns = await notes();
+      c.fund((await plannedU(ns)).address, Number(RUNG) + COST);
+      let fired = !fault;
+      const gate = (i: 0 | 1, rpc: SolanaRpc): SolanaRpc => async (m, q) => {
+        if (!fired && i === 0 && m === "getFeeForMessage") {
+          fired = true;
+          throw new SolanaRpcTransportError("http_429", "HTTP 429", 4, "api.devnet.solana.com", null);
+        }
+        return rpc(m, q);
+      };
+      const waits: number[] = [];
+      let ended!: () => void;
+      const done = new Promise<void>((r) => (ended = r));
+      const kind = poolDepositKind(() => ({ ...host(c, ns, { rpcs: [gate(0, c.rpc()), gate(1, c.rpc())], wait: async (ms) => void (waits.push(ms), (now += ms)) }), end: ended }));
+      const r = kind(ask(RUNG), { id: FOLLOW, sha: "00", progress: () => {} });
+      assert.ok("running" in r);
+      await r.after;
+      await done;
+      await new Promise((res) => setImmediate(res));
+      return { answer: r.answer(), waits, sent: c.sent.length };
+    };
+    const first = await run(false);
+    assert.equal(first.sent, 1, JSON.stringify(first.answer));
+    now += 45_000;
+    const second = await run(true);
+    assert.deepEqual(second.waits, [1_000], JSON.stringify(second.answer));
+    assert.equal(second.sent, 1, JSON.stringify(second.answer));
+    assert.equal((second.answer as { result?: { stage?: string } }).result?.stage, "sent");
+  } finally {
+    Date.now = realNow;
+  }
+});

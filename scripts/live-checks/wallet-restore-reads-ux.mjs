@@ -125,11 +125,18 @@ const MAINNET = (n) => new RegExp(`[,; ]${esc(n)}=${Q}mainnet${Q}[,;]`);
 // restore's kept pass (keptIdReader, which hands back the pair and the pass it reads at) and the held reader `H` opened
 // on that very pair and pass, both under the run's signal, so the held loop's reader is this very binding, never a name
 // looked up across the bundle; `R` the held reader's builder; named groups: ids, keep, signal, why (readDepositIds'
-// sixth parameter), pair, pass, net (the network), H, R
+// sixth parameter), pair, pass, net (the network), H0 (the held reader), H (the held reader through letGo), R, lg
+// since card restore-first-sign-in-under-two-minutes (first in release 115) the reader's opening, the held reader's and
+// each held read are waited on through letGo (`lg`) on the run's own signal, so a sign out lets go of a read in flight;
+// the loop reads through the let-go reader `H`
 const STEP5_HEAD = new RegExp(
-  `async function ${N}\\(${N},${N},(?<ids>${N}),(?<keep>${N}),(?<signal>${N}),(?<why>${N}),${N},${N},${N}\\)\\{let\\{rpcs:(?<pair>${N}),pass:(?<pass>${N}),reader:${N}\\}=await ${N}\\((?<net>${N}),\\k<ids>\\.rpcs,\\k<keep>,\\{\\.\\.\\.\\k<ids>\\.opts,signal:\\k<signal>\\}\\),` +
-    `(?<H>${N})=await (?<R>${N})\\(\\k<net>,\\k<pair>,\\k<pass>,\\{\\.\\.\\.\\k<ids>\\.opts,signal:\\k<signal>\\}\\),`,
+  `async function ${N}\\(${N},${N},(?<ids>${N}),(?<keep>${N}),(?<signal>${N}),(?<why>${N}),${N},${N},${N}\\)\\{let\\{rpcs:(?<pair>${N}),pass:(?<pass>${N}),reader:${N}\\}=await (?<lg>${N})\\(${N}\\((?<net>${N}),\\k<ids>\\.rpcs,\\k<keep>,\\{\\.\\.\\.\\k<ids>\\.opts,signal:\\k<signal>\\}\\),\\k<signal>\\),` +
+    `(?<H0>${N})=await \\k<lg>\\((?<R>${N})\\(\\k<net>,\\k<pair>,\\k<pass>,\\{\\.\\.\\.\\k<ids>\\.opts,signal:\\k<signal>\\}\\),\\k<signal>\\),(?<H>${N})=(?<e>${N})=>\\k<lg>\\(\\k<H0>\\(\\k<e>\\),\\k<signal>\\),`,
 );
+// letGo (src/pool-restore.ts) by its body: a read waited on only while the signal lasts, rejected with its reason at the
+// signal's end, its own answer taken otherwise
+const LET_GO = (lg) =>
+  new RegExp(`function ${esc(lg)}\\((${N}),(${N})\\)\\{return \\2\\.aborted\\?\\(\\1\\.catch\\(\\(\\)=>\\{\\}\\),Promise\\.reject\\(\\2\\.reason\\)\\):new Promise\\(\\((${N}),(${N})\\)=>\\{let (${N})=\\(\\)=>\\4\\(\\2\\.reason\\);\\2\\.addEventListener\\(${Q}abort${Q},\\5,\\{once:!0\\}\\),\\1\\.then\\(\\3,\\4\\)\\.finally\\(\\(\\)=>\\2\\.removeEventListener\\(${Q}abort${Q},\\5\\)\\)\\}\\)\\}`);
 // the held reader: each provider's reader (`readOn`) reads the token (ft_balance_of, once U is registered on it) and adds
 // what intents.near holds (`I`), every id read on both providers at once, each asset's two amounts taken one from each
 // provider's map, and an asset left out only at 0 on both (delta review 2: P2-A the filter, P3-1 readOn's two reads)
@@ -195,7 +202,7 @@ export function bundleFacts(index, js) {
     sha384: `sha384-${createHash("sha384").update(js).digest("base64")}`,
     ux_read: !!read && once(WORDS.ux_read, js),
     ux_carry: !!read && !!carry && once(UX_NOTED(read[11], read[9], carry[1]), js) && once(WORDS.ux_carry, js),
-    id_held: !!held && !!head && held[7] === head.groups.H && inside(js, head, held) && !!ruled && !!token && once(MAINNET(token[1]), js) && !!both && !!intents && once(INTENTS(intents[7]), js) && once(WORDS.id_held, js),
+    id_held: !!held && !!head && held[7] === head.groups.H && once(LET_GO(head.groups.lg), js) && inside(js, head, held) && !!ruled && !!token && once(MAINNET(token[1]), js) && !!both && !!intents && once(INTENTS(intents[7]), js) && once(WORDS.id_held, js),
     ux_pair: !!pair && !!paced && once(KEYLESS(paced[3]), js) && once(FOLLOW_READER(pair[12]), js) && once(WORDS.ux_pair, js),
     ux_wired: !!wired && once(FOLLOW_DEPS(wired[2]), js),
   };

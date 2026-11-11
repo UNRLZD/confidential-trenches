@@ -115,7 +115,7 @@ import { solanaContextOf, solanaPoolOf, type SolanaPoolPin, type SolanaReleaseRe
 import { WALLET_SEED_LOCK } from "@blindfill/wallet/store";
 import { checkSolanaBuy, PoolRuleRefused, signSolana, type PoolAsk } from "./rules/pool.ts";
 import { spendOwner, type HistoryPlaces, type SpendOwner } from "./pool-spend.ts";
-import { clockOf, keptReads, readsWaited, readWaits, solanaStableReads, tapWaits, waitsOn, type ReadWaits } from "./read-waits.ts";
+import { clockOf, keptReads, readsWaited, readWaits, solanaStableReads, tapDone, tapWaits, waitsOn, type ReadWaits } from "./read-waits.ts";
 import type { HostAnswer, HostRefusal, KindContext, Running } from "./api.ts";
 
 /** The page's own copy of the kit's route bound: a frozen RegExp's matcher can still be swapped
@@ -918,6 +918,8 @@ type Locks = Pick<LockManager, "request">;
 export function poolBuyKind(host: () => PoolBuyHost & { end?(): void }, locks: Locks | null = globalThis.navigator?.locks ?? null) {
   return (ask: PoolAsk, ctx: KindContext | null): HostRefusal | Running<"pool.buy"> => {
     if (ask.kind !== "pool.buy" || ask.chain !== "solana" || !locks) return { error: "not_allowed" };
+    // the tap's one bound, from its arrival (before its locks)
+    const waits = tapWaits(ctx);
     let answer: HostAnswer<"pool.buy"> | HostRefusal | null = null;
     // true once the run answered "sent" early (its transaction went out): only then is "sent" its end when it ends with
     // no stage of its own
@@ -938,7 +940,7 @@ export function poolBuyKind(host: () => PoolBuyHost & { end?(): void }, locks: L
           const a = await runPoolBuy({ ...h, sent: (signature) => {
             if (!answer) (answer = { result: { stage: "sent", txs: [{ chain: "solana", hash: signature }] } }), (early = true);
             give();
-          }, route: (x) => ctx?.route?.(x) }, ask, tapWaits(ctx, clockOf(h)));
+          }, route: (x) => ctx?.route?.(x) }, ask, waits);
           if (!answer) answer = "error" in a ? { error: a.error } : { result: a };
           // the run's stage goes out as progress too, answered early or not: an answer that comes only at the run's end
           // (no read-back within the client's 10 s) is one the kit's client has dropped, and the app waits on progress
@@ -959,6 +961,8 @@ export function poolBuyKind(host: () => PoolBuyHost & { end?(): void }, locks: L
       })
       .finally(give);
     void run;
+    // the request's run ended: its bound dropped (read-waits.ts tapDone)
+    void run.then(() => tapDone(ctx, waits), () => tapDone(ctx, waits));
     return { running: true, after: answered, answer: () => answer ?? { error: "failed" } };
   };
 }

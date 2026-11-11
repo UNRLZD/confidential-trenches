@@ -6,8 +6,8 @@
     "badTestnet": "the base 10317f87's testnet build: FAIL"
   },
   "good": {
-    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-L6S0ZlSvYfzdU9Pcl8eSKGfCNM3NtN7w3N3Lj1lsBBiHcGQjIeQ/g8Q7FvphGJSZ\"></script>\n  </head>\n  <body></body>\n</html>\n",
-    "sha384": "sha384-L6S0ZlSvYfzdU9Pcl8eSKGfCNM3NtN7w3N3Lj1lsBBiHcGQjIeQ/g8Q7FvphGJSZ",
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-qpf/NZP1G58Eni2RXfd0VOq/z4PBJr2QvQNkKdqA8/95VGr7Czg+zSXLvrE+TIBA\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-qpf/NZP1G58Eni2RXfd0VOq/z4PBJr2QvQNkKdqA8/95VGr7Czg+zSXLvrE+TIBA",
     "kept": true,
     "wired": {
       "page": true,
@@ -32,8 +32,8 @@
     "down": false
   },
   "goodTestnet": {
-    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-VNB4I8PWWWQ+fduK19/2xF3OjtyjRZms/yTqTf++J8Oo38nBfktZoODtB/eQtQI2\"></script>\n  </head>\n  <body></body>\n</html>\n",
-    "sha384": "sha384-VNB4I8PWWWQ+fduK19/2xF3OjtyjRZms/yTqTf++J8Oo38nBfktZoODtB/eQtQI2",
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-qw8i24Sf2knjaa5kO7l8el4hhBAlWpd5HyilYYlPwM5t4nCb3W7Moo6rMkbUCWbm\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-qw8i24Sf2knjaa5kO7l8el4hhBAlWpd5HyilYYlPwM5t4nCb3W7Moo6rMkbUCWbm",
     "kept": true,
     "wired": {
       "page": true,
