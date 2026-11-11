@@ -23,7 +23,7 @@ import type { PoolStatePrice, SignpageState } from "../../kit/src/signpage/messa
 import { SIGNPAGE_MAX_ANSWER_BYTES, SIGNPAGE_RESULT_SCHEMAS } from "../../kit/src/signpage/schema.ts";
 import type { SolanaRent } from "../../kit/src/trade/solana/pool-buy.ts";
 import type { NoteRecord } from "../../wallet/src/notes/store.ts";
-import { evmBalancePool, evmTapSpendOf, poolBalances, solanaBalancePool, solanaTapSpendOf, type BalancePool, type BalanceProof } from "../../wallet/src/pool/balances.ts";
+import { evmBalancePool, evmTapSpendOf, poolBalances, solanaBalancePool, solanaTapSpendOf, type BalancePool, type BalanceProof, type LandedRelease } from "../../wallet/src/pool/balances.ts";
 import { EVM_CHAIN_IDS, EVM_POOLS, evmPoolScopeOf, type EvmNetwork } from "../../wallet/src/pool/evm.ts";
 import { POOL_TESTNET } from "../../wallet/src/pool/network.ts";
 import { SOL_POOLS, solanaPoolOf } from "../../wallet/src/pool/solana.ts";
@@ -105,7 +105,8 @@ const utf8 = (v: unknown): number => new TextEncoder().encode(JSON.stringify(v))
  * `state` with `pools` from the notes `readNotes` gives, when signed in. `ready`: the proof queue's ready proofs;
  * undefined while no queue runs, and then no entry has `ready`. `price`: the page's own USD price read per chain
  * (src/pool-price.ts, card signpage-pool-price); an entry gets `price` only when it gives one. `open`: the pool ids
- * whose queue runs (src/pool-testnet.ts readyWith); a chain with none of them has no `ready` (poolBalances).
+ * whose queue runs (src/pool-testnet.ts readyWith); a chain with none of them has no `ready` (poolBalances). `landed`:
+ * the RESERVED notes whose release this page read landed (src/pool-testnet.ts readyWith), each counted as its change.
  */
 export async function withPools(
   state: SignpageState,
@@ -114,11 +115,12 @@ export async function withPools(
   ready?: readonly BalanceProof[],
   price?: (chain: Chain) => PoolStatePrice | null,
   open?: ReadonlySet<string>,
+  landed?: ReadonlyMap<string, LandedRelease>,
 ): Promise<SignpageState> {
   if (!state.signed_in) return state;
   try {
     const notes = pools.length === 0 ? [] : await readNotes();
-    const sums = poolBalances(notes, pools, ready, open).map((e) => {
+    const sums = poolBalances(notes, pools, ready, open, landed).map((e) => {
       const p = price?.(e.chain) ?? null;
       return p === null ? e : { ...e, price: p };
     });

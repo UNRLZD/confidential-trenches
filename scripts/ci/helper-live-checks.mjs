@@ -128,6 +128,8 @@ export const SERIAL_GROUPS = {
     "helper-token-page-cold",
     "market-data-solana-token",
     "helper-page-jup-429",
+    // a page check (the lists, one listed pump.fun token's page and three tapes): last of the pages, before the builds
+    "token-page-data-complete-and-fast",
     "solana-legs-share-wait",
     "solana-jupiter-build",
     "app-a2-e2e",

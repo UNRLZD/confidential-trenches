@@ -974,3 +974,23 @@ test("(pending end) the load's follow leaves a W this page follows, a record of 
   assert.equal(load.seen.calls.length, 0, "no read at all, not even the newest blocks (review P3-3)");
   assert.equal(kept.size, 4);
 });
+
+// card pool-buy-record-never-stays-sent: the balance counts a RESERVED note at full value while its buy is in flight or
+// refused, and its change only from the read-back of its own release; so a filled (or withdrawn) release tells the page
+// its note and chunk, and an end with no release of its own tells it nothing
+test("a release of this buy's own read back, filled or withdrawn, tells the page its note, attempt and chunk; not_landed tells nothing", async () => {
+  for (const kind of ["bought", "withdrawn"] as const) {
+    const r = host(both([release(kind === "bought" ? {} : { kind })]));
+    const told: [string, string, bigint][] = [];
+    r.h.landed = (id, attempt, w) => void told.push([id, attempt, w]);
+    await runEvmPoolBuy(r.h, ASK);
+    assert.deepEqual(told, [["n1", "a1", CHUNK]], kind);
+  }
+  for (const o of [{ w: OTHER }, { value: CHUNK - 1n }]) {
+    const r = host(both([release(o)]));
+    const told: unknown[] = [];
+    r.h.landed = (...a) => void told.push(a);
+    assert.deepEqual(await runEvmPoolBuy(r.h, ASK), { stage: "not_landed", txs: [] });
+    assert.deepEqual(told, [], "another's release is not this note's");
+  }
+});

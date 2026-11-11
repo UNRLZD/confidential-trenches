@@ -440,8 +440,10 @@ test("Solana sell: the kit's venue sell from W at or above the device's floor, t
   const slot = reads.slot;
   const floor = (ref.pools.find((p) => p.venue === "pump-curve")!.expectedOut * 9_700n) / 10_000n;
   const ask: PoolAsk = { kind: "pool.sell", chain: "solana", token: venue.mint, amount, slippageBps: 300, decimals: 6 };
-  const sellWire = (o: { minOut?: bigint; amount?: bigint; dep?: Partial<Parameters<typeof depositIx>[0]>; w?: string; extra?: Ixx[] } = {}) => {
+  const sellWire = (o: { minOut?: bigint; amount?: bigint; dep?: Partial<Parameters<typeof depositIx>[0]>; w?: string; extra?: Ixx[]; account?: [number, string] } = {}) => {
     const steps = solanaPoolSellSteps(venue, o.w ?? SOL_W, o.amount ?? amount, o.minOut ?? floor).map((x) => ({ ...x, accounts: x.accounts.map((a) => ({ ...a })) }));
+    // `account`: the venue sell's account at that index names another key, its flags kept (a wire's own accounts)
+    if (o.account) steps[0]!.accounts[o.account[0]]!.key = o.account[1];
     return wire(o.w ?? SOL_W, [cuLimit, ...steps, ...(o.extra ?? []), depositIx({ value: (o.minOut ?? floor) - RESERVE, ...o.dep })]);
   };
   const RESERVE = 5_000n;
@@ -474,6 +476,9 @@ test("Solana sell: the kit's venue sell from W at or above the device's floor, t
   // cashback sell with no lookup table, sends the form before d3edab1); the next pages wrong are still refused
   assert.equal(checkSolanaSell(sellWire({ dep: { six: true } }), ask, solCtx(), venue, reference, slot, SOL_READS, RESERVE, PART).back, floor - RESERVE);
   assert.throws(() => checkSolanaSell(sellWire({ dep: { nextState: key(45) } }), ask, solCtx(), venue, reference, slot, SOL_READS, RESERVE, PART), refusedAs("state_page"));
+  // the kit's curve sell is one instruction, the fee recipient its second account and the curve its fourth
+  const built = solanaPoolSellSteps(venue, SOL_W, amount, floor);
+  assert.ok(venue.kind === "pump-curve" && built.length === 1 && built[0]!.accounts[1]!.key === venue.feeRecipient && built[0]!.accounts[3]!.key === venue.curve);
   for (const [w, rule] of [
     [sellWire({ minOut: floor - 1n }), "min_out"],
     [sellWire({ amount: amount - 1n }), "sell"],
@@ -485,6 +490,10 @@ test("Solana sell: the kit's venue sell from W at or above the device's floor, t
     [sellWire({ dep: { pre: PRE + 1n } }), "precommitment"],
     [sellWire({ dep: { program: key(43) } }), "program"],
     [sellWire({ extra: [send(key(79), 1n)] }), "sell"],
+    // the sell's accounts are the ones the kit builds from the device's own venue read, never the wire's: a sell paying
+    // another fee recipient (pump's sell names it second, writable), or sending the SOL out of another curve
+    [sellWire({ account: [1, key(80)] }), "sell_accounts"],
+    [sellWire({ account: [3, key(81)] }), "sell_accounts"],
   ] as const) {
     assert.throws(() => checkSolanaSell(w, ask, solCtx(), venue, reference, slot, SOL_READS, RESERVE, PART), refusedAs(rule), rule);
   }
@@ -887,6 +896,41 @@ test("no rule reads a field from a server: the rule file imports no fetch, helpe
 // Card sol-sell-deposit-back-floor: the rule refused only a deposit back of 0 (depositOf) and one under the pool's least
 // deposit, so a note between 1,000,000 and the kit's release floor (solanaPoolNoteFloor, 2,600,000 at mainnet's rent)
 // passed though no release can take it whole. Under the floor it is refused by name; the sell is the venue's alone.
+// Card sol-pool-buys-mayhem-coins (the review of 6eb64bdb): every account of every step of the venue's sell is the one
+// the kit builds from the device's own venue read, never the wire's. Each one in turn names another key (a signer's
+// slot planted unsigned, so the signers stay W alone): on the curve, a cashback curve (its volume accumulator) and
+// PumpSwap (its wrapped-SOL account, the sell, the close), each is refused sell_accounts, and the wire as built passes
+test("Solana sell: each account of each step of the venue's sell, on the curve, a cashback curve and PumpSwap, naming another key is refused sell_accounts", async () => {
+  const RESERVE = 5_000n;
+  const PART: SolanaSellSurplus = { full: false, lamports: 0n, fee: 5_000n, made: 0n, rent: { lamportsPerByte: 5_080n, factor: 1n }, held: { mark: [null, null], state: [null, null], label: [null, null] }, next: false, owed: 0 };
+  const amount = 5_000_000n;
+  let planted = 0;
+  for (const [name, v, cashback] of [["curve", "pump", false], ["cashback curve", "pump", true], ["pumpswap", "pumpswap", false]] as const) {
+    const s = await setup(v);
+    const venue = cashback ? { ...s.venue, cashback: true } : s.venue;
+    const kind = venue.kind;
+    const reference = { amount, ref: s.ref, slippageBps: 300 };
+    const floor = (s.ref.pools.find((p) => p.venue === kind)!.expectedOut * 9_700n) / 10_000n;
+    const ask: PoolAsk = { kind: "pool.sell", chain: "solana", token: venue.mint, amount, slippageBps: 300, decimals: 6 };
+    const steps = () => solanaPoolSellSteps(venue, SOL_W, amount, floor).map((x) => ({ ...x, accounts: x.accounts.map((a) => ({ ...a })) }));
+    // the deposit back in the six (its pages read on chain), so PumpSwap's sell with no lookup table stays under 1,232 bytes
+    const check = (sell: Ixx[]) => checkSolanaSell(wire(SOL_W, [cuLimit, ...sell, depositIx({ value: floor - RESERVE, six: true })]), ask, solCtx(), venue, reference, s.reads.slot, SOL_READS, RESERVE, PART);
+    assert.equal(check(steps()).back, floor - RESERVE, `${name}: the kit's own sell passes`);
+    const built = steps();
+    if (cashback) assert.equal(built[0]!.accounts.length, s.venue.kind === "pump-curve" ? solanaPoolSellSteps(s.venue, SOL_W, amount, floor)[0]!.accounts.length + 1 : 0, "the cashback curve's sell names its volume accumulator too");
+    for (let i = 0; i < built.length; i++) {
+      for (let j = 0; j < built[i]!.accounts.length; j++) {
+        const bent = steps();
+        const a = bent[i]!.accounts[j]!;
+        bent[i]!.accounts[j] = { key: key(200 + (planted % 50)), signer: false, writable: a.writable };
+        assert.throws(() => check(bent), refusedAs("sell_accounts"), `${name}: step ${i} account ${j} (${a.key}) from the wire`);
+        planted++;
+      }
+    }
+  }
+  assert.equal(planted, 18 + 19 + 29, "the curve's 18 accounts, the cashback curve's 19, PumpSwap's 29 over its three steps");
+});
+
 test("Solana sell: a deposit back under the kit's release floor at the rent read is refused by name (deposit_floor); at the floor it passes; under it the venue's sell alone passes, drawing no deposit", async () => {
   const { venue, ref, reads } = await setup("pump");
   const amount = 5_000_000n;

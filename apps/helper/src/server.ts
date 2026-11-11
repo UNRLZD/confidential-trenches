@@ -23,7 +23,8 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { setDefaultAutoSelectFamilyAttemptTimeout } from "node:net";
 import { HELPER_BIND_ANSWER_MS, HELPER_CODE_STATUS, HELPER_COMMIT_HEADER, HELPER_CORS, HELPER_FETCHED_AT_HEADER, HELPER_SOURCE_HEADER } from "@blindfill/kit";
-import { createSolanaLists } from "./data/solana/lists.ts";
+import { address as solanaAddress, createSolanaLists } from "./data/solana/lists.ts";
+import { LOGO_NONE_MS, LOGOS, type LogoChain, type Logos } from "./data/logo.ts";
 import { createEvmLists, type EvmChain } from "./data/evm/lists.ts";
 import { createSwaps, INDEX_RPCS, SWAP_RPCS, TRADES_MAX, type EvmSwaps } from "./data/evm/swaps.ts";
 import { createEvmToken, type EvmToken } from "./data/evm/token.ts";
@@ -76,8 +77,8 @@ type Fee = ReturnType<typeof feeQuoterFromEnv>;
 const ONECLICK_STATUS = "oneclick/v0/status";
 /** The proxy path whose live answers are POST /v1/intents's quote records (card helper-id-intents, intents/records.ts). */
 const ONECLICK_QUOTE = "oneclick/v0/quote";
-const MOUNTED = { proxy: ["/v1/proxy/", "/v1/rpc/", "/v1/market/lists", "/v1/market/token", "/v1/market/holders", "/v1/market/candles", "/v1/market/trades", PUSH_PATH, "/v1/market/held"], relay: ["/v1/token-status", "/v1/withdraw/fee", "/v1/withdraw", "/v1/pool/fee", "/v1/pool/solana/send", "/v1/pool/evm/send", "/v1/pool/evm/sell"], delegate: ["/v1/bind"], intents: ["/v1/intents"] } as const satisfies Partial<Record<Part, readonly string[]>>;
-const [PROXY_PREFIX, RPC_PREFIX, MARKET_LISTS, MARKET_TOKEN, MARKET_HOLDERS, MARKET_CANDLES, MARKET_TRADES, MARKET_PUSH, MARKET_HELD] = MOUNTED.proxy;
+const MOUNTED = { proxy: ["/v1/proxy/", "/v1/rpc/", "/v1/market/lists", "/v1/market/token", "/v1/market/holders", "/v1/market/candles", "/v1/market/trades", PUSH_PATH, "/v1/market/held", "/v1/logo/"], relay: ["/v1/token-status", "/v1/withdraw/fee", "/v1/withdraw", "/v1/pool/fee", "/v1/pool/solana/send", "/v1/pool/evm/send", "/v1/pool/evm/sell"], delegate: ["/v1/bind"], intents: ["/v1/intents"] } as const satisfies Partial<Record<Part, readonly string[]>>;
+const [PROXY_PREFIX, RPC_PREFIX, MARKET_LISTS, MARKET_TOKEN, MARKET_HOLDERS, MARKET_CANDLES, MARKET_TRADES, MARKET_PUSH, MARKET_HELD, LOGO_PREFIX] = MOUNTED.proxy;
 const [TOKEN_STATUS, WITHDRAW_FEE, WITHDRAW, POOL_FEE, POOL_SOLANA_SEND, POOL_EVM_SEND, POOL_EVM_SELL] = MOUNTED.relay;
 const [BIND] = MOUNTED.delegate;
 const [INTENTS] = MOUNTED.intents;
@@ -133,7 +134,7 @@ const SERVED: ReadonlySet<Part> = new Set(Object.keys(MOUNTED) as Part[]);
 /** The routes a refusal is logged under (card app-console-429): a mounted route by its own path, the proxy and RPC
  *  routes by their prefix (the vendor or chain is in the reason), anything else "other": never a caller's text. */
 const ROUTE_NAMES: ReadonlySet<string> = new Set(["/v1/health", ...Object.values(MOUNTED).flat().filter((p) => !p.endsWith("/"))]);
-const routeOf = (path: string): string => (ROUTE_NAMES.has(path) ? path : path.startsWith(PROXY_PREFIX) ? "/v1/proxy" : path.startsWith(RPC_PREFIX) ? "/v1/rpc" : "other");
+const routeOf = (path: string): string => (ROUTE_NAMES.has(path) ? path : path.startsWith(PROXY_PREFIX) ? "/v1/proxy" : path.startsWith(RPC_PREFIX) ? "/v1/rpc" : path.startsWith(LOGO_PREFIX) ? "/v1/logo" : "other");
 /** The reason a per-client window names (limits.ts clientWindow): one address past its requests a window. */
 const CLIENT_WINDOW = "client window";
 
@@ -152,6 +153,9 @@ export const API_RATE_MAX = 120;
  * device draws there (RPC_CLIENT_MAX a chain, a vendor's PROXY_BUDGETS share), so an honest device meets its share first,
  * while the bodies one client makes the helper read and parse stay bounded]. */
 export const UPSTREAM_ROUTE_MAX = 120;
+/** Requests one client makes per limit window to GET /v1/logo (its own window: a Discover screen asks for every
+ *  row's logo at once, and the browser keeps each a day); a miss fetches at most once per token (src/data/logo.ts). */
+export const LOGO_RATE_MAX = 600;
 const METHODS: readonly string[] = HELPER_CORS.allowMethods;
 const SHA = /^[0-9a-f]{40}$/;
 
@@ -253,6 +257,8 @@ export function handler(
   held: Held | undefined = undefined,
   // card sol-pool-buy-lands-on-mainnet: one line per pool send (pool/send-log.ts)
   sendLog: (line: string) => void = (line) => console.log(`helper: ${line}`),
+  // GET /v1/logo/{chain}/{token} (src/data/logo.ts): the registry the list builders fill
+  logos: Logos = LOGOS,
 ) {
   if (!SHA.test(commit)) throw new Error("HELPER_COMMIT must be a full 40-hex commit");
   // card helper-id-intents: a mainnet withdrawal that landed to an arming account A makes A a seen signer on POST
@@ -266,6 +272,7 @@ export function handler(
   const apiRate = clientWindow(API_RATE_MAX, now);
   const rpcRate = clientWindow(UPSTREAM_ROUTE_MAX, now);
   const proxyRate = clientWindow(UPSTREAM_ROUTE_MAX, now);
+  const logoRate = clientWindow(LOGO_RATE_MAX, now);
   return (req: IncomingMessage, res: ServerResponse): void => {
     const base: Headers = {
       [HELPER_COMMIT_HEADER]: commit,
@@ -320,6 +327,27 @@ export function handler(
       }
       route = routeOf(path);
       // every route but the pool, RPC and proxy routes (which have their own windows below) counts in the client's window
+      if (path.startsWith(LOGO_PREFIX)) {
+        const wait = logoRate.take(clientOf(req));
+        if (wait > 0) return reply(throttled(wait, undefined, CLIENT_WINDOW));
+        if (req.method !== "GET" && req.method !== "HEAD") return send(405, undefined, { ...cors(req), Allow: "GET, HEAD, OPTIONS" });
+        // the kit's contract (packages/kit/src/helper/v1.ts): chain and token only, never a URL; 404 with no body for
+        // a token with no logo or one the checks refused, so the app draws its own
+        const [chain, token, ...rest] = path.slice(LOGO_PREFIX.length).split("/");
+        const id = chain === "solana" ? solanaAddress(token) : chain === "base" || chain === "robinhood" ? (token !== undefined && /^0x[0-9a-f]{40}$/.test(token) ? token : null) : null;
+        const none = { ...cors(req), "Cache-Control": `public, max-age=${LOGO_NONE_MS / 1000}` };
+        if (rest.length > 0 || id === null || id !== token) return send(404, undefined, none);
+        void logos
+          .read(chain as LogoChain, id)
+          .then((logo) => {
+            if (logo === "busy") return send(503, undefined, { ...cors(req), "Cache-Control": "no-store" }); // never cached: one caller filling the queue must not blank logos for everyone
+            if (logo === null) return send(404, undefined, none);
+            res.writeHead(200, { ...base, ...cors(req), "Content-Type": logo.type, "Content-Length": String(logo.bytes.length), "Cache-Control": "public, max-age=86400", "Content-Security-Policy": "default-src 'none'; sandbox" });
+            res.end(req.method === "HEAD" ? undefined : logo.bytes);
+          })
+          .catch(() => (res.headersSent ? res.destroy() : send(500, undefined, cors(req))));
+        return;
+      }
       if (!path.startsWith(PROXY_PREFIX) && !path.startsWith(RPC_PREFIX) && path !== POOL_FEE && path !== POOL_SOLANA_SEND && path !== POOL_EVM_SEND && path !== POOL_EVM_SELL) {
         const wait = apiRate.take(clientOf(req));
         if (wait > 0) return reply(throttled(wait, undefined, CLIENT_WINDOW));
@@ -806,6 +834,12 @@ export function solanaTradesFromEnv(env: Record<string, string | undefined>, lis
     wsUrl: ws === undefined || ws === "" ? undefined : ws,
     rpcs: solanaTradesRpcs(env),
     history: (mint, tf, to, limit, client) => token.candles(mint, tf, to, limit, client),
+    // a coin quoted in another coin is priced at that coin's own row: Discover's, else Jupiter's held search row
+    quoteUsd: async (mint) => {
+      const a = await token.named(mint);
+      const p = a.status === 200 ? (JSON.parse(a.body) as { row?: { price_usd?: unknown } }).row?.price_usd : null;
+      return typeof p === "string" ? p : null;
+    },
     log: (line) => console.log(`helper: ${line}`),
     // the walks draw the Solana budget callers draw, behind them (rpc.ts userRoomOf)
     ...(rpc === undefined ? {} : { budget: (u: string, m: string) => rpc.background("solana", u, m), throttled: (u: string, h: globalThis.Headers) => rpc.backgroundThrottled("solana", u, h) }),

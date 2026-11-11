@@ -295,7 +295,11 @@ export const solanaPoolPages = (program: string, stateSize: number, labelSize: n
  * pool-sol-deploy-mainnet). */
 export type SolanaPoolTableVenue =
   | Pick<Extract<SolanaPoolBuyVenue, { kind: "pump-curve" }>, "kind" | "feeRecipient" | "buybackFeeRecipients">
-  | Pick<Extract<SolanaPoolBuyVenue, { kind: "pumpswap" }>, "kind" | "protocolFeeRecipient" | "buybackFeeRecipients">;
+  | (Pick<Extract<SolanaPoolBuyVenue, { kind: "pumpswap" }>, "kind" | "protocolFeeRecipient" | "buybackFeeRecipients"> & {
+      /** GlobalConfig's reserved fee recipient, which a Mayhem pool's buy pays (solanaPoolTableVenueOf names it): the
+       *  table holds it and its wSOL account, so a Mayhem pool buy fits as any other. */
+      readonly reservedFeeRecipient?: string;
+    });
 
 /** The program-wide accounts a pool buy uses: what our lookup table holds (the pool and its pages, the venue's shared
  * accounts and programs, the token programs and wSOL). Not the Jito tip accounts: the tip goes as a static key
@@ -308,6 +312,7 @@ export function solanaPoolBuyTableAccounts(cfg: SolanaPoolConfig, venue: SolanaP
         ...common, SOLANA_PUMP_AMM_PROGRAM, AMM_GLOBAL_CONFIG, venue.protocolFeeRecipient, solanaAta(venue.protocolFeeRecipient, SOLANA_SOL_MINT, SOLANA_TOKEN_PROGRAM),
         solanaEventAuthority(SOLANA_PUMP_AMM_PROGRAM), AMM_GLOBAL_VOLUME, AMM_FEE_CONFIG,
         ...venue.buybackFeeRecipients.flatMap((r) => [r, solanaAta(r, SOLANA_SOL_MINT, SOLANA_TOKEN_PROGRAM)]),
+        ...("reservedFeeRecipient" in venue && venue.reservedFeeRecipient ? [venue.reservedFeeRecipient, solanaAta(venue.reservedFeeRecipient, SOLANA_SOL_MINT, SOLANA_TOKEN_PROGRAM)] : []),
       ];
 }
 
@@ -1006,7 +1011,7 @@ export function solanaPoolTableVenueOf(kind: SolanaPoolVenue, global: SolanaPool
     return l;
   };
   if (kind === "pump-curve") return { kind, feeRecipient: pumpGlobalFeeRecipient(global), buybackFeeRecipients: list(PUMP_GLOBAL_BUYBACK_RECIPIENTS) };
-  if (kind === "pumpswap") return { kind, protocolFeeRecipient: ammConfigFeeRecipient(global), buybackFeeRecipients: list(AMM_GLOBAL_BUYBACK_RECIPIENTS) };
+  if (kind === "pumpswap") return { kind, protocolFeeRecipient: ammConfigFeeRecipient(global), buybackFeeRecipients: list(AMM_GLOBAL_BUYBACK_RECIPIENTS), reservedFeeRecipient: ammConfigFeeRecipient(global, true) };
   throw new Error(`no such venue ${String(kind).slice(0, 40)}`);
 }
 

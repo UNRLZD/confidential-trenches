@@ -1475,7 +1475,7 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later, w: ListedBuy
     const cause = legCause(e);
     if (e instanceof Refused) return { error: e.code, cause };
     if (e instanceof PoolRuleRefused) return { error: "quote_check_failed", cause };
-    // both RPCs read a coin this build does not trade (a Mayhem curve or pool): by name, nothing built
+    // both RPCs read a coin this build does not trade (a curve quoted in another mint): by name, nothing built
     if (e instanceof SolanaPoolBuyError && e.code === "venue_not_built") return { error: "venue_not_built", cause };
     // a provider read that still fails after the page's own retry, before W signs: "not now" (card pool-read-down)
     if (!signing && e instanceof SolanaRpcTransportError) {

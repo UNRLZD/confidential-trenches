@@ -15,8 +15,8 @@ import { SOL_MARK_BUCKET, SOL_MARK_READ_BATCH, SOL_MARK_READ_BATCH_MAX, SOL_MARK
 import { IDBFactory } from "fake-indexeddb";
 import { createRpc as createHelperRpc } from "../../../apps/helper/src/rpc/rpc.ts";
 import { SOLANA_RPC_WINDOW_RETRY, solanaHelperRpc, solanaPacedRpc } from "../../kit/src/trade/solana/send.ts";
-import { openNoteStore, type NoteStore } from "../src/notes/store.ts";
-import { openWalletStore } from "../src/store/index.ts";
+import { RESERVED_MARKS_KEY, openNoteStore, readReservedMarks, type NoteStore } from "../src/notes/store.ts";
+import { openWalletStore, type WalletStore } from "../src/store/index.ts";
 import { refKey } from "../src/notes/store.ts";
 import { checkPool } from "../src/pool/pool.ts";
 import { RESTORE_LANES, WALK_SLICE_MS } from "../src/notes/restore.ts";
@@ -73,7 +73,7 @@ function pages(tree: 0 | 1, es: readonly Entry[], edit: (b: Uint8Array, i: numbe
   return out;
 }
 
-type Chain = { accounts: Map<string, Uint8Array>; slot: number; time: (slot: number) => bigint; marks?: Map<string, Uint8Array> };
+type Chain = { accounts: Map<string, Uint8Array>; slot: number; time: (slot: number) => bigint; marks?: Map<string, Uint8Array>; height?: number };
 /** The bytes of a getProgramAccounts answer of n marks of `size` bytes, as a real RPC writes it (base64, withContext,
  * rent-exempt lamports, rentEpoch at u64 max, space); the largest the fake has answered so far. */
 function gpaAnswerBytes(n: number, size: number): number {
@@ -93,6 +93,12 @@ function rpc(c: Chain, o: Over = {}, log: string[] = []): SolanaRpc {
     switch (method) {
       case "getSlot": return c.slot;
       case "getBlockTime": return Number(c.time(params[0] as number));
+      // one node's finalized block: its height and its slot (card pool-buy-record-never-stays-sent)
+      case "getEpochInfo": {
+        assert.deepEqual(params, [{ commitment: "finalized" }]);
+        if (c.height === undefined) throw new Error("no height");
+        return { absoluteSlot: c.slot, blockHeight: c.height, epoch: 1, slotIndex: 0, slotsInEpoch: 432_000 };
+      }
       case "getAccountInfo": {
         assert.equal(params[0], "SysvarRent111111111111111111111111111111111");
         const d = new Uint8Array(17);
@@ -1296,7 +1302,7 @@ test("N1 union: two reads of one mark with other records are refused (the union 
 // comes back refused as already spent.
 const stores: { close(): void }[] = [];
 after(() => { for (const x of stores.splice(0)) x.close(); });
-async function reservedDeposit0(l0: bigint): Promise<{ ns: NoteStore; id: string }> {
+async function reservedDeposit0(l0: bigint, lastHeight?: bigint): Promise<{ ns: NoteStore; id: string; w: WalletStore }> {
   const w = await openWalletStore({ indexedDB: new IDBFactory() });
   const ns = await openNoteStore(w);
   stores.push(ns, w);
@@ -1304,8 +1310,8 @@ async function reservedDeposit0(l0: bigint): Promise<{ ns: NoteStore; id: string
   const P0 = noteSecrets(SEED, ref).precommitment;
   let n = await ns.add({ ref, scope: SCOPE, precommitment: P0, state: "UNSPENT", leaf: { value: 50_000_000n, label: l0, commitment: noteCommitment(50_000_000n, l0, P0), leafIndex: 1n } });
   n = await ns.move(n.id, "UNSPENT", "HELD", { deadlineMs: 1_800_000_200_000n, context: "1" });
-  n = await ns.move(n.id, "HELD", "RESERVED", { attempt: n.attempt! });
-  return { ns, id: n.id };
+  n = await ns.move(n.id, "HELD", "RESERVED", { attempt: n.attempt!, ...(lastHeight === undefined ? {} : { lastHeight }) });
+  return { ns, id: n.id, w };
 }
 
 test("already spent: a send refused as spent marks the note SPENT with its change, only from the chain's marks and pages on two RPCs", async () => {
@@ -1379,6 +1385,54 @@ test("a pass over RESERVED notes: spent is settled; no mark and both RPCs' block
   // nothing RESERVED: no read at all
   const quiet: SolanaRpc = Object.assign(async () => assert.fail("no read"), { url: "https://q.example" });
   assert.deepEqual(await pass(b.ns, [quiet, Object.assign(async () => assert.fail("no read"), { url: "https://r.example" })]), { spent: [], freed: [], held: [] });
+});
+
+test("a pass frees a RESERVED note whose signed transaction can no longer land: both RPCs' finalized height past its last height and no spent mark, long before its deadline (card pool-buy-record-never-stays-sent)", async () => {
+  const { chain, beforeSpend, l0 } = restorePool();
+  const EARLY_S = 1_800_000_000n; // 200 s before reservedDeposit0's deadline
+  const LAST = 1_000n;
+  const at = (c: Chain, s: bigint, height?: number, slot = c.slot): Chain => ({ ...c, time: () => s, slot, ...(height === undefined ? {} : { height }) });
+  const pass = (ns: NoteStore, rs: [SolanaRpc, SolanaRpc], lst?: SolanaRpc) => solanaSettleReserved({ seed64: SEED, notes: ns, program: PROGRAM, rpcs: rs, ...(lst ? { lister: lst } : {}) });
+  const b = await reservedDeposit0(l0, LAST);
+  // either RPC's finalized height at or under the last height: the transaction may still land, held
+  for (const [x, y] of [[1_000, 1_000], [1_001, 1_000], [1_000, 1_001], [999, 5_000]] as const) {
+    assert.deepEqual(await pass(b.ns, pair(at(beforeSpend, EARLY_S, x), at(beforeSpend, EARLY_S, y))), { spent: [], freed: [], held: [b.id] }, `${x} ${y}`);
+    assert.equal((await b.ns.get(b.id))!.state, "RESERVED");
+  }
+  // a height read that fails says nothing: held, the deadline rule alone
+  assert.deepEqual(await pass(b.ns, pair(at(beforeSpend, EARLY_S), at(beforeSpend, EARLY_S, 5_000))), { spent: [], freed: [], held: [b.id] });
+  // both past it, and a spent mark the lister lists that one RPC lacks: held, never freed
+  const spent0 = solanaMarkOf(PROGRAM, "spent", noteSecrets(SEED, { kind: "deposit", s: SCOPE, i: 0 }).nullifierHash);
+  const claimed: Chain = { ...beforeSpend, marks: new Map(beforeSpend.marks!).set(spent0, spentData(50_000_000n, 0)) };
+  for (const [x, y] of [[claimed, beforeSpend], [beforeSpend, claimed]] as const) {
+    assert.deepEqual(await pass(b.ns, pair(at(x, EARLY_S, 1_001), at(y, EARLY_S, 1_001)), lister(claimed)), { spent: [], freed: [], held: [b.id] });
+    assert.equal((await b.ns.get(b.id))!.state, "RESERVED");
+  }
+  // the marks are read at or past the slot of the height read: an RPC whose finalized slot there is behind it refuses
+  // the marks read (minContextSlot), so the note is held
+  const behind: SolanaRpc = Object.assign(async (m: string, q: readonly unknown[]) => (m === "getEpochInfo" ? { absoluteSlot: beforeSpend.slot + 50, blockHeight: 1_001 } : rpc(at(beforeSpend, EARLY_S), MAINNET)(m, q)), { url: "https://a.example" });
+  assert.deepEqual(await pass(b.ns, [behind, rpc(at(beforeSpend, EARLY_S, 1_001), { ...MAINNET, url: "https://b.example" })]), { spent: [], freed: [], held: [b.id] });
+  // both past it, no mark on either: freed now, 200 s before its deadline, so the queue proves it again
+  assert.deepEqual(await pass(b.ns, pair(at(beforeSpend, EARLY_S, 1_001), at(beforeSpend, EARLY_S, 1_002))), { spent: [], freed: [b.id], held: [] });
+  const freed = (await b.ns.get(b.id))!;
+  assert.deepEqual([freed.state, freed.deadlineMs], ["UNSPENT", undefined]);
+  assert.equal((await b.ns.marks()).has(b.id), false, "its mark goes with it");
+  // the chain holds the spend: settled SPENT with its change, whatever the heights say
+  const c = await reservedDeposit0(l0, LAST);
+  assert.deepEqual(await pass(c.ns, pair(at(chain, EARLY_S, 1_001), at(chain, EARLY_S, 1_001))), { spent: [c.id], freed: [], held: [] });
+  // a note whose mark is another attempt's (a tab on release 116 freed it and took it again; the old mark left over):
+  // that mark's height is never the note's, so the pass reads no height for it and moves nothing, even when the marks it
+  // is handed are the store's as written (no sweep)
+  const o = await reservedDeposit0(l0);
+  await o.w.update("meta", RESERVED_MARKS_KEY, () => ({ [o.id]: { attempt: "other", lastHeight: 1n } }));
+  let moves = 0;
+  const raw: NoteStore = { ...o.ns, marks: () => readReservedMarks(o.w), move: (...x: Parameters<NoteStore["move"]>) => (moves++, o.ns.move(...x)) };
+  assert.deepEqual(await pass(raw, pair(at(beforeSpend, EARLY_S, 10 ** 9), at(beforeSpend, EARLY_S, 10 ** 9))), { spent: [], freed: [], held: [o.id] });
+  assert.equal(moves, 0, "no free tried on another attempt's height");
+  assert.equal((await o.ns.get(o.id))!.state, "RESERVED");
+  // a note reserved with no last height is never freed by a height, only past its deadline
+  const d = await reservedDeposit0(l0);
+  assert.deepEqual(await pass(d.ns, pair(at(beforeSpend, EARLY_S, 10 ** 9), at(beforeSpend, EARLY_S, 10 ** 9))), { spent: [], freed: [], held: [d.id] });
 });
 
 test("a spent mark the lister hides never frees the note: each RPC's own pages must count every listed mark (review P2-1, P1 of 369a87a8)", async () => {

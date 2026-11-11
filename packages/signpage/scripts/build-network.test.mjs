@@ -21,6 +21,7 @@ const TESTNET_ONLY = [
   "C2vLuah7VtGDTVnFkBpY7DkNf135Wwu6Uv57qCXPb9qJ", // the devnet pool's curve table (wallet SOL_POOL_TABLES.devnet)
   "4kG4g4fbSbwkxxdqT4G3cLeEbnvcbZTmBwJExK3ZGGAT", // the devnet pool's PumpSwap table, generation 1 (wallet SOL_POOL_TABLES.devnet)
   "J1R9px8LFg597sGfaME1qf7L5WGHGnn2YL2Vs2CwaWvU", // the devnet pool's PumpSwap table, generation 2
+  "3uym947bDVPRHyzmzTAV8C4p4Du6s2wRjVr4AZpYQtBH", // the devnet pool's PumpSwap table, generation 3
   "api.devnet.solana.com",
   "/v1/rpc/solana-devnet", // the helper's devnet route, the second devnet provider (card pool-buy-send-fast)
   "base-sepolia-rpc.publicnode.com",

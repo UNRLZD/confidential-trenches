@@ -4,7 +4,8 @@
 // release proof.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { base58 } from "@scure/base";
+import { base58, base64 } from "@scure/base";
+import { solanaPoolAddresses } from "../src/trade/solana/pool.ts";
 import {
   readSolanaPoolBuyVenue,
   readSolanaReference,
@@ -20,6 +21,22 @@ import {
 } from "../src/index.ts";
 
 export const fx = JSON.parse(readFileSync(new URL("./fixtures/solana-pool-buy.json", import.meta.url), "utf8"));
+// The recorded curve holds 12,589,928 lamports of real SOL (bytes 32..40), what its 450,106 sold tokens paid, and the
+// sales of the tests on it sell more (4,000,000 tokens W is planted holding), which that curve could not pay: the kit's
+// sell quote pays nothing past a curve's real SOL (card sol-pool-buys-mayhem-coins). Every read of it here holds its
+// real SOL at its virtual SOL (bytes 16..24), more than the gross of any sale, so each sale is priced by the curve's
+// formula as before; the fixture file keeps the recorded bytes
+const CURVE = solanaPoolAddresses(fx.pump.mint).curve;
+for (const reads of fx.pump.reads as Record<string, { value: ({ data: [string, string] } | null)[] }>[]) {
+  for (const [k, ans] of Object.entries(reads)) {
+    const a = ans.value[(JSON.parse(k) as string[]).indexOf(CURVE)];
+    if (!a) continue;
+    const d = base64.decode(a.data[0]);
+    const dv = new DataView(d.buffer, d.byteOffset);
+    dv.setBigUint64(32, dv.getBigUint64(16, true), true);
+    a.data[0] = base64.encode(d);
+  }
+}
 export const unhex = (s: string): Uint8Array => Uint8Array.from(Buffer.from(s, "hex"));
 const key = (h: string): string => base58.encode(unhex(h));
 export const PROGRAM = key(fx.program);

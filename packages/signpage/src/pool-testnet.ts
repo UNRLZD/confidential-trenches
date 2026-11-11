@@ -49,7 +49,7 @@ import { holdHosts, hostLane, laneFetch, stopHostLaneWaits } from "../../wallet/
 import { HELPER_FETCH_INIT, HELPER_V1_PATHS } from "../../kit/src/helper/v1.ts";
 import type { VaultProver } from "../../kit/src/prover/prove.ts";
 import { WALLET_SEED_LOCK, type WalletStore } from "@blindfill/wallet/store";
-import { openNoteStore, readNotes, type NoteStore } from "../../wallet/src/notes/store.ts";
+import { openNoteStore, readNotes, readReservedMarks, type NoteStore } from "../../wallet/src/notes/store.ts";
 import { chainNow, type Pool, type ReadyProof } from "../../wallet/src/pool/pool.ts";
 import { openProofQueue, type ProofQueue, type QueuePass } from "../../wallet/src/pool/queue.ts";
 import { poolDepositKind, type PoolDepositFrom, type PoolDepositHost } from "./pool-deposit.ts";
@@ -59,7 +59,7 @@ import { SOL_POOL_TABLES, SOL_POOLS, solanaNow, solanaPool, solanaPoolOf, type S
 import { SOL_MARK_READ_BATCH, SOL_MARK_READ_BATCH_MAX, solanaSettleReserved, solanaSettleSpent, type SolanaPoolCache } from "../../wallet/src/pool/solana-restore.ts";
 import { POOL_TESTNET } from "../../wallet/src/pool/network.ts";
 import { askWhileBusy, type BusyOpts } from "../../wallet/src/busy.ts";
-import { POOL_SEND_BUSY_WAIT_MS, PoolSendBusy, poolBuyKind, type PoolBuyHost } from "./pool-buy.ts";
+import { lateBuyEnd, POOL_SEND_BUSY_WAIT_MS, PoolSendBusy, poolBuyKind, type PoolBuyHost } from "./pool-buy.ts";
 import { boughtSincePass, keptHeldOf, type StoreWs } from "./pool-sell-dry.ts";
 import { BUY_MINTS_KEY, buyMints, keptSells, owedRentBacks, poolSellKind, resumeRentBacks, settleDeadSellOps, settlePoolSells, settleSellOps, type PoolSellKindHost } from "./pool-sell.ts";
 import { derivedBuyWallets, evmHelperKeyedRpc, solanaHelperHoldings, solanaHoldingsAt, spentNotesOf, wantedBuyWallets, type BuyWallet, type HoldingsReader, type ListedBuyWallet } from "../../wallet/src/pool/buy-wallets.ts";
@@ -67,6 +67,8 @@ import { keptListed, keptPositions, POSITION_COSTS_KEY, POSITIONS_KEPT_KEY, POSI
 import { evmStoredHold } from "../../wallet/src/pool/evm-hold-store.ts";
 import { EVM_CHAIN_IDS, EVM_EPOCH_MS, EVM_POOLS, evmNow, evmPair, evmRetryLag, evmPool as walletEvmPool, evmPoolScopeOf, evmTreeSync, type EvmFeeAnswer, type EvmPoolOf, type EvmPoolPin, type EvmPoolRequest, type EvmRpc, type EvmSyncHold, type EvmTreeSync } from "../../wallet/src/pool/evm.ts";
 import { evmSettleReserved } from "../../wallet/src/pool/evm-settle.ts";
+import type { LandedRelease } from "../../wallet/src/pool/balances.ts";
+import { spendOwner } from "./pool-spend.ts";
 import { evmPoolFee, evmPoolGas } from "../../kit/src/trade/evm/pool-fee.ts";
 import { poolDepositEvmKind, type EvmDepositRound } from "./pool-deposit-evm.ts";
 import { EVM_POSITION_COSTS_KEY, evmBuyHost, followPendingEvmBuys, poolBuyEvmKind, type EvmBuyPage } from "./pool-buy-evm.ts";
@@ -528,7 +530,7 @@ export type TestnetPool = {
    * a remake's swap never falls between the two (card pool-ready-no-flicker); `ready` undefined while no queue is open.
    * `open`: the ids of the pools whose queue is open, so a chain with no open queue reads no ready (src/pools.ts
    * withPools). `read` waits for nothing of the queue's. */
-  readyWith<T>(read: () => Promise<T>): Promise<{ ready: readonly ReadyProof[] | undefined; value: T; open: ReadonlySet<string> }>;
+  readyWith<T>(read: () => Promise<T>): Promise<{ ready: readonly ReadyProof[] | undefined; value: T; open: ReadonlySet<string>; landed?: ReadonlyMap<string, LandedRelease> }>;
   /** `fn` runs after each pass that made or remade a proof: a proof made changes no store record (its note was HELD
    * before it began), so the page's state is read again on this. */
   watch(fn: () => void): void;
@@ -636,6 +638,19 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     }
   };
   const watchers = new Set<() => void>();
+  // a release read landed on both RPCs (a Solana or EVM buy's, a withdraw's): what it took out of the pool goes on the
+  // note's mark in the store (../../wallet/src/notes/store.ts ReservedMark), so every tab and a reload count only the
+  // note's change until the settle writes it (../../wallet/src/pool/balances.ts landed); then the app reads the state
+  // again (an owed/ write tells no store listener)
+  const markLanded = async (noteId: string, attempt: string, withdrawn: bigint, block?: bigint): Promise<void> => {
+    const ns = await openNoteStore(await page.store());
+    try {
+      await ns.landed(noteId, attempt, withdrawn, block);
+    } finally {
+      ns.close();
+    }
+    for (const f of watchers) f();
+  };
   const proofs = async (): Promise<QueuePass | null> => {
     const p = (open ??= openQueue());
     try {
@@ -852,6 +867,10 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     testnet: POOL_TESTNET,
     signal: follows.signal,
     stopped: ((at) => () => signOuts !== at)(signOuts),
+    // as the Solana buy's: the balance counts the note's change from its release's read-back (card
+    // pool-buy-record-never-stays-sent)
+    landed: (noteId, attempt, withdrawn, block) => void markLanded(noteId, attempt, withdrawn, block).catch(() => {}),
+    marks: async () => readReservedMarks(await page.store()),
   });
   const evmBuy = (chain: "base" | "robinhood") => {
     const e = evmPool(chain);
@@ -1202,7 +1221,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   // pool.buy: the open queue's ready proofs; one run per tap, each picking a proof no other run of this page holds
   const tables = over.tables === undefined ? PAGE_TABLES : over.tables;
   const claimed = new Set<string>();
-  const buyHost = (): PoolBuyHost & { release(): void; end(): void } => {
+  const buyHost = (): PoolBuyHost & { release(): void; end(): void; follow(post: (stage: "filled" | "not_landed") => void): void } => {
     let notes: NoteStore | null = null;
     // the buy holds its hosts from its run's start to its early "sent" (pool-buy.ts poolBuyKind: release), else its
     // end: the passes' reads wait, the buy's own go first; given back once (holdHosts), whichever comes first. From its
@@ -1221,6 +1240,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         throw e;
       }
     };
+    // the proof this run's take handed out: what a follow of its note reads (pool-buy.ts poolBuyKind follow)
+    let taken: ReadyProof<SolanaReleaseRequest> | null = null;
     return {
       pin: pin!,
       tables,
@@ -1235,8 +1256,14 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         if (list.length === 0) void proofs();
         return list;
       },
-      take: async (id, attempt, early) => (await q()).take(id, attempt, early),
+      take: async (id, attempt, early, lastHeight) => (taken = await (await q()).take(id, attempt, early, lastHeight)),
       chainNow: () => chainNow(over.pool ?? { now: (signal) => solanaNow(rpcs(), signal) }),
+      // the run ended "sent": its note is followed by the state reads' pass until its end is known (followBuys)
+      follow: (post) => {
+        if (taken === null) return;
+        lateBuys.set(taken.noteId, { r: taken, post, places: new Map() });
+        void settleReserved().catch(() => {});
+      },
       seed64: page.seed64,
       // W's buy mint, written before the send: the rent back after a later sell holds while W holds any of it
       bought: buyMints(page.store),
@@ -1261,16 +1288,44 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         }
       },
       release,
-      landed: reads.landed,
+      // the release read landed on both RPCs: the balance counts only the note's change until the settle writes it
+      // (../../wallet/src/pool/balances.ts landed), and the app reads the state again
+      landed: (noteId, attempt, withdrawn) => {
+        reads.landed();
+        void markLanded(noteId, attempt, withdrawn).catch(() => {});
+      },
       end: () => {
         release();
         notes?.close();
+        // the run's note settled now, not on the next state read: a buy that ended not landed has read its blockhash past
+        // on both RPCs, so the pass frees its note at once (card pool-buy-record-never-stays-sent)
+        void settleReserved().catch(() => {});
       },
     };
   };
   // each buy's W and the decimals of the token it received, told by the run (pool-buy.ts outDecimals) until its records
   // are written; a W takes one buy only
   const boughtDecimals = new Map<string, number>();
+  // each buy whose run ended "sent" (its end not known), by note id: its taken proof, where to post its end, and W's
+  // history places read so far (card pool-buy-record-never-stays-sent)
+  const lateBuys = new Map<string, { r: ReadyProof<SolanaReleaseRequest>; post: (stage: "filled" | "not_landed") => void; places: HistoryPlaces }>();
+  // each followed buy's end, from its note as the pass left it: still RESERVED by its attempt, not known yet; out of it
+  // and not SPENT, freed (both RPCs read its transaction past its last height, or its deadline, with no spent mark: it
+  // can never land), not_landed; SPENT, filled only once both RPCs read the spend as this attempt's (pool-spend.ts
+  // spendOwner, as the run's own spentBy), another's not_landed, a read that fails not known yet
+  const followBuys = async (notes: NoteStore): Promise<void> => {
+    for (const [id, b] of lateBuys) {
+      const end = await lateBuyEnd(await notes.get(id).catch(() => undefined), b.r.attempt, async () => {
+        const rs = settleRpcs("pass");
+        const slots = await Promise.all(rs.map((rpc) => rpc("getSlot", [{ commitment: "finalized" }])));
+        if (!slots.every((x) => Number.isSafeInteger(x))) return null;
+        return spendOwner(rs, { program: b.r.binding.request.program, feePayer: b.r.binding.request.feePayer }, b.r.wallet.address, BigInt(b.r.publicSignals[1]), b.r.binding.context.toString(), Math.max(...(slots as number[])), undefined, b.places);
+      });
+      if (end === null) continue;
+      lateBuys.delete(id);
+      b.post(end);
+    }
+  };
   const buy = (over.tradeKinds?.buy ?? poolBuyKind)(() => buyHost());
   let settling: Promise<void> | null = null;
   const settle = (): Promise<void> => Promise.all([settleSolana(), settleEvmOpen().catch(() => {})]).then(() => {});
@@ -1736,8 +1791,9 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   let deadSettled = false;
   let backsResumed = false;
   // the RESERVED notes a buy left (filled, refused, never answered, or its page closed mid-send): settled spent, freed
-  // once both RPCs' block time is past their deadline with no spent mark, or held (../../wallet/src/pool/solana-restore.ts
-  // solanaSettleReserved); a freed note is proved again by the open queue's next pass
+  // once both RPCs' finalized height is past the signed transaction's last height, or their block time past the
+  // deadline, with no spent mark, or held (../../wallet/src/pool/solana-restore.ts solanaSettleReserved); a freed note is
+  // proved again by the open queue's next pass
   // It holds a seed copy, so it runs under the seed's shared lock, as every run that does (a sign out, in any tab, waits
   // for it; one that came first leaves no seed, and the pass ends at its seed read). No Web Locks: no pass.
   const locks = over.locks === undefined ? (globalThis.navigator?.locks ?? null) : over.locks;
@@ -1753,6 +1809,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         seed64 = await page.seed64();
         signal.throwIfAborted();
         const pass = await solanaSettleReserved({ seed64, notes, program: pin!.program, rpcs: settleRpcs("pass"), lister: lister("pass"), signal, cache, markBatches: PAGE_SOL_MARK_BATCHES });
+        await followBuys(notes);
         // a freed note's release never landed: an op owing its send is settled stopped, nothing sent, before the note
         // can be spent again
         if (pass.freed.length > 0) await settleFreedOps(await page.store(), pass.freed);
@@ -1893,7 +1950,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         const mine = (await readNotes(await page.store())).filter((n) => n.scope === scope);
         if (mine.some((n) => n.state === "INCOMING")) await settleSolana();
         // a failed reserved pass never holds back a send owed (the money on W): the finish below still runs
-        if (mine.some((n) => n.state === "RESERVED")) await settleReserved().catch(() => {});
+        if (mine.some((n) => n.state === "RESERVED") || lateBuys.size > 0) await settleReserved().catch(() => {});
         // a sell's note left INCOMING, or a sell with no deposit back (no note) left sent: both settled by the sell's verdict
         if (mine.some((n) => n.state === "INCOMING" && (n.ref.kind === "return" || (n.ref.kind === "second" && n.ref.id.id === "R"))) || (await keptSells(page.store).list().catch(() => [])).length > 0) await settleSells();
         // the next buy's proofs (card signpage-pool-pins): a page that loads with the pool's notes landed opens the
@@ -2133,6 +2190,10 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
             ...(over.wait ? { wait: over.wait } : {}),
             keepRelease: async (noteId, attempt, release) => void (await keepRelease(ops, opId, noteId, attempt, release)),
             owedNotes,
+            // the release's withdrawn value is on the note's mark: the app reads the state again, as after a buy's
+            marked: () => {
+              for (const f of watchers) f();
+            },
           },
           { ...ask },
           ready.to,
@@ -2274,7 +2335,16 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
           ids.add(q.poolId);
         }
       }
-      if (qs.length === 0) return { ready: undefined, value: await read(), open: ids };
+      // the landed releases on the notes' marks, as any tab wrote them, read after the notes (a mark whose note the notes
+      // read shows out of RESERVED counts nothing: balances.ts takes a RESERVED note's mark of its own attempt only)
+      const landed = async (): Promise<ReadonlyMap<string, LandedRelease>> => {
+        const m = await readReservedMarks(await page.store()).catch(() => new Map());
+        return new Map([...m].flatMap(([id, x]) => (x.withdrawn === undefined ? [] : [[id, { attempt: x.attempt, withdrawn: x.withdrawn }] as const])));
+      };
+      if (qs.length === 0) {
+        const value = await read();
+        return { ready: undefined, value, open: ids, landed: await landed() };
+      }
       const ready: ReadyProof[] = [];
       const turn = async (i: number): Promise<T> => {
         if (i === qs.length) return read();
@@ -2283,10 +2353,11 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         return r.value;
       };
       const value = await turn(0);
-      return { ready, value, open: ids };
+      return { ready, value, open: ids, landed: await landed() };
     },
     watch: (fn) => void watchers.add(fn),
     signingOut: () => {
+      lateBuys.clear();
       stopTurn();
       stopHostLaneWaits();
       signOuts++;
