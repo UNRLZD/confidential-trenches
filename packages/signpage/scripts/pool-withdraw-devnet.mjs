@@ -159,7 +159,7 @@ const notes = await noteList();
 const sent = op?.stage === "sent" && checks.length === (plan?.length ?? -1) && checks.every((c) => c.landed);
 // FLOW_COPY: each send by its step, To and the fee payer watched
 const steps = COPY ? copy.sent.map((x, i) => ({ step: txs.findIndex((y) => y.hash === x.signature) % 2 === 1 ? "withdraw: onward to To" : "withdraw: release", signature: x.signature, watch: { to: TO, feePayer: PIN.feePayer } })) : undefined;
-writeFileSync(OUT, JSON.stringify({ ...record, op, checks, notes, sent, steps, simFails: copy?.simFails }, big, 2) + "\n");
+writeFileSync(OUT, JSON.stringify({ ...record, op, checks, notes, sent, steps, simFails: copy?.simFails, sendLines: copy?.sendLines }, big, 2) + "\n");
 log(`checks ${JSON.stringify(checks)}; sent ${sent}`);
 seed64.fill(0);
 await t.signedOut();

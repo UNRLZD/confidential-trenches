@@ -79,8 +79,8 @@ test("a transaction's record: result, compute units against its limit, fee, logs
   tx(null).meta.preBalances.push(0);
   const ok = txRecord("curve", "buy", "S", { ...tx(null), meta: { ...tx(null).meta, preBalances: [5, 100, 1, 0], postBalances: [6, 40, 1, 100_000] } }, { W: "W", tip: "TIP" });
   assert.deepEqual(
-    { ok: ok.ok, cu: ok.cu, cuLimit: ok.cuLimit, fee: ok.fee, lookups: ok.lookups, logs: ok.logsTail, w: ok.lamports.W.change, tip: ok.lamports.tip.change },
-    { ok: true, cu: 312_345, cuLimit: 450_000, fee: 10_000, lookups: ["T"], logs: undefined, w: -60, tip: 100_000 },
+    { ok: ok.ok, cu: ok.cu, cuLimit: ok.cuLimit, fee: ok.fee, lookups: ok.lookups, programs: ok.programs, logs: ok.logsTail, w: ok.lamports.W.change, tip: ok.lamports.tip.change },
+    { ok: true, cu: 312_345, cuLimit: 450_000, fee: 10_000, lookups: ["T"], programs: [COMPUTE_BUDGET], logs: undefined, w: -60, tip: 100_000 },
   );
   const bad = txRecord("mayhem", "buy", "S2", tx({ InstructionError: [3, { Custom: 6000 }] }));
   assert.equal(bad.ok, false);

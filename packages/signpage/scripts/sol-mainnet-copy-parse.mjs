@@ -130,6 +130,7 @@ export function txRecord(coin, step, signature, tx, watch = {}, decode = (x) => 
     fee: tx.meta?.fee ?? null,
     accounts: keys.length,
     lookups: (m?.addressTableLookups ?? []).map((l) => l.accountKey),
+    programs: (m?.instructions ?? []).map((ix) => keys[ix.programIdIndex]),
     ...(err === null ? {} : { logsTail: logs.slice(-12) }),
     ...(Object.keys(lamports).length ? { lamports } : {}),
   };

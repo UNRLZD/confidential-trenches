@@ -8,10 +8,16 @@
 //   programs, and each coin's mint, curve or pool and their token accounts. They load into solana-test-validator with
 //   mainnet's feature set (--clone-feature-set); the upgradeable programs are cloned by the validator itself.
 // - Then, for each coin, the signing page's own pool flow (packages/signpage/scripts/pool-flow-devnet.mjs, FLOW_COPY:
-//   the mainnet build, its pins, its tip, the helper's own sender pointed at the copy, the Jito step a plain send)
+//   the mainnet build, its pins, its tip, the helper's own sender pointed at the copy, its block engine a local stand-in)
 //   runs deposit, buy and sell, and pool-withdraw-devnet.mjs runs a tag 2 withdraw of the sell's return note to a plain
 //   address. Every transaction is read back from the copy into the record: per coin and step its signature, its
 //   result, compute units used against the limit it set, the last log lines on a failure.
+// - SOL_COPY_ENGINE (./copy-net.mjs): the engine stand-in's answer to the helper's bundle: swallow (the default: takes it
+//   and never lands it), busy, refused, or lands. The record keeps the helper's send line and the ms from the page's
+//   send to filled.
+// - A graduated coin runs on a PumpSwap lookup table the copy makes (copyTable: mainnet has none yet), named only in
+//   that run's table argument.
+// - SOL_COPY_ONLY=<kind,...> runs those kinds only; SOL_COPY_STEPS=buy stops each after its buy.
 // - SOL_COPY_PLANT=mayhem-drop: the Mayhem coin's buy is built with its curve read as not Mayhem, so the buy names the
 //   plain fee recipient in place of the Mayhem one; the run must fail with pump's own error.
 // - Keys are made fresh for the copy and live only in the run's temp folder, removed at the end.
@@ -30,6 +36,9 @@ if (!OUT) throw new Error("usage: sol-mainnet-copy.mjs <out.json> [curve=<mint>]
 const ONLY = (process.env.SOL_COPY_ONLY ?? "").split(",").filter(Boolean);
 const PLANT = process.env.SOL_COPY_PLANT ?? "";
 const STEPS = process.env.SOL_COPY_STEPS ?? "all"; // "buy": deposit and buy only
+// the helper's block engine stand-in (./copy-net.mjs): swallow (takes the bundle, never lands it), busy, refused, lands
+const ENGINE = process.env.SOL_COPY_ENGINE ?? "swallow";
+if (!["swallow", "busy", "refused", "lands"].includes(ENGINE)) throw new Error(`SOL_COPY_ENGINE: swallow, busy, refused or lands, not ${ENGINE}`);
 const log = (s) => console.log(`${new Date().toISOString()} copy: ${s}`);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -114,6 +123,7 @@ log(`coins ${JSON.stringify(coins)}`);
 // 2. what to clone: the pool's own accounts and table, the tip accounts, and each coin's buy and sell accounts
 const DUMMY = [0, 1].map(() => base58.encode(ed25519.getPublicKey(randomBytes(32))));
 const keysOf = (ixs) => ixs.flatMap((x) => [x.programId ?? x.program, ...x.accounts.map((a) => a.pubkey ?? a.key)]).filter(Boolean);
+const { solanaAta: solanaAtaOf } = await import("../../kit/src/checks/solana/message.ts");
 const want = new Set([...DEPLOY.table_addresses, DEPLOY.table, DEPLOY.program_id, ...SOLANA_JITO_TIP_ACCOUNTS, SOLANA_PUMP_AMM_PROGRAM]);
 for (const [kind, c] of Object.entries(coins)) {
   if (!c || !KINDS.includes(kind)) continue;
@@ -122,6 +132,9 @@ for (const [kind, c] of Object.entries(coins)) {
   const perW = DUMMY.map((w) => new Set([...keysOf(solanaPoolBuySteps(venue, w, 1n, 0n)), ...keysOf(solanaPoolSellSteps(venue, w, 1n, 1n))]));
   for (const k of perW[0]) if (perW[1].has(k)) want.add(k);
   for (const k of [...a.curveList, ...a.poolList, ...venue.buybackFeeRecipients]) want.add(k);
+  // a PumpSwap buy pays its buyback fee into the recipient's wSOL account, and the page picks one of the eight at random:
+  // PumpSwap makes a missing one at the buyer's cost, which a copy missing it would show as W short of rent
+  if (venue.kind === "pumpswap") for (const r of venue.buybackFeeRecipients) want.add(solanaAtaOf(r, "So11111111111111111111111111111111111111112", "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"));
 }
 // pump Global's and PumpSwap GlobalConfig's 8 reserved (Mayhem) recipients each, and their wSOL accounts
 const { solanaAta } = await import("../../kit/src/checks/solana/message.ts");
@@ -229,6 +242,59 @@ log(`fee payer ${FP} funded on the copy`);
 
 clock.push(await clockRead());
 log(`copy clock ${JSON.stringify(clock[1])}`);
+// The PumpSwap table: mainnet has none yet (the mainnet build pins the pump curve's alone, so the page refuses a
+// graduated coin venue_not_pinned), so the copy makes one the way contracts/pool-solana/scripts/venue-table.mjs would
+// on mainnet: the kit's list for the venue and the pool's next range, created, extended and frozen by tableSteps, from
+// a key the copy funds. Only this run's table argument names it, never a product file.
+async function copyTable(venue) {
+  const vt = await import("../../../contracts/pool-solana/scripts/venue-table.mjs");
+  const { pda, le } = await import("../../../scripts/live-checks/pool-sol-deploy.mjs");
+  const kit = await import("../../kit/src/trade/solana/pool-buy.ts");
+  const { solanaPoolTreeSizes } = await import("../../kit/src/trade/solana/pool-deposit.ts");
+  const { solanaCompileV0 } = await import("../../kit/src/trade/solana/build.ts");
+  const { solanaDecodeMessage } = await import("../../kit/src/checks/solana/message.ts");
+  const { solanaJsonRpc: rpcOf } = await import("../../kit/src/trade/solana/send.ts");
+  const providers = [rpcOf(URLS[0]), rpcOf(URLS[1])];
+  const cfg = { program: DEPLOY.program_id, pool: DEPLOY.pool };
+  const tv = await kit.readSolanaPoolTableVenue(providers, venue);
+  const pa = (await local("getAccountInfo", [DEPLOY.pool, { encoding: "base64", commitment: "finalized" }])).value;
+  const t = solanaPoolTreeSizes({ owner: pa.owner, data: new Uint8Array(Buffer.from(pa.data[0], "base64")) }, DEPLOY.program_id);
+  const range = kit.solanaPoolNextTableRange(cfg, tv, { state: t.stateSize, label: t.labelSize });
+  const list = kit.solanaPoolVenueTableList(cfg, tv, range);
+  const key = randomBytes(32);
+  const pub = ed25519.getPublicKey(key);
+  const funder = base58.encode(pub);
+  await airdrop(funder, 1_000_000_000);
+  const slot = await vt.recentSlot(local);
+  const at = pda([pub, le(slot, 8)], ALT_PROGRAM);
+  const sigs = [];
+  for (const st of vt.tableSteps(funder, at.address, slot, at.bump, list, 0n)) {
+    const { blockhash } = (await local("getLatestBlockhash", [{ commitment: "confirmed" }])).value;
+    // deploy.mjs's instruction shape ({ program, keys: [{ id, signer, writable }], data }) as the kit compiles it
+    const ixs = st.ixs.map((x) => ({ program: x.program, accounts: x.keys.map((k) => ({ key: k.id, signer: k.signer, writable: k.writable })), data: Uint8Array.from(x.data) }));
+    const { message } = solanaCompileV0(funder, ixs, blockhash, [], [funder]);
+    const m = solanaDecodeMessage(message);
+    const wire = new Uint8Array(1 + 64 * m.requiredSignatures + message.length);
+    wire[0] = m.requiredSignatures;
+    wire.set(ed25519.sign(message, key), 1);
+    wire.set(message, 1 + 64 * m.requiredSignatures);
+    const sig = await local("sendTransaction", [Buffer.from(wire).toString("base64"), { encoding: "base64", preflightCommitment: "confirmed" }]);
+    for (let i = 0; ; i++) {
+      const v = (await local("getSignatureStatuses", [[sig]])).value[0];
+      if (v?.err) throw new Error(`${st.step}: ${JSON.stringify(v.err)}`);
+      if (v?.confirmationStatus === "finalized") break;
+      if (i > 120) throw new Error(`${st.step}: not finalized`);
+      await sleep(500);
+    }
+    sigs.push({ step: st.step, signature: sig });
+  }
+  key.fill(0);
+  await sleep(1_000); // the addresses of the last extend serve from the next slot
+  return { venue, table: at.address, range, addresses: list.length, txs: sigs };
+}
+const ALT_PROGRAM = "AddressLookupTab1e1111111111111111111111111";
+const madeTables = {};
+
 // 4. each coin's run, through the page's own flow and withdraw drivers
 const cfg = join(TMP, "copy.json");
 const records = [];
@@ -249,10 +315,17 @@ for (const kind of KINDS) {
   }
   const dir = join(TMP, kind);
   mkdirSync(dir, { mode: 0o700 });
-  writeFileSync(cfg, JSON.stringify({ rpcs: URLS, feePayerKeyFile: fpFile, dir, mint: c.mint, plant: kind === "mayhem" ? PLANT : "" }));
+  writeFileSync(cfg, JSON.stringify({ rpcs: URLS, feePayerKeyFile: fpFile, dir, mint: c.mint, engine: ENGINE, plant: kind === "mayhem" ? PLANT : "" }));
   const flowOut = join(dir, "flow.json");
   log(`${kind} ${c.mint}: deposit, buy${STEPS === "buy" ? "" : ", sell"}`);
-  const flow = await runNode(["packages/signpage/scripts/pool-flow-devnet.mjs", "pinned", c.mint, "max", flowOut], { FLOW_COPY: cfg, ...(STEPS === "buy" ? { FLOW_COPY_STOP: "buy" } : {}) });
+  // a graduated coin runs on the copy's own PumpSwap table, with the pump curve's pinned one
+  let tables = "pinned";
+  if (kind === "graduated") {
+    madeTables.pumpswap ??= await copyTable("pumpswap");
+    log(`the copy's PumpSwap table ${JSON.stringify(madeTables.pumpswap)}`);
+    tables = `pump-curve=${DEPLOY.table},pumpswap=${madeTables.pumpswap.table}`;
+  }
+  const flow = await runNode(["packages/signpage/scripts/pool-flow-devnet.mjs", tables, c.mint, "max", flowOut], { FLOW_COPY: cfg, ...(STEPS === "buy" ? { FLOW_COPY_STOP: "buy" } : {}) });
   const f = existsSync(flowOut) ? JSON.parse(readFileSync(flowOut, "utf8")) : null;
   runs[kind] = { exit: flow.code, flow: f, tail: flow.out.split("\n").slice(-30) };
   let withdraw = null;
@@ -278,6 +351,14 @@ for (const kind of KINDS) {
   }
   for (const s of [...(f?.simFails ?? []), ...(withdraw?.simFails ?? [])]) records.push({ coin: kind, step: s.phase, ok: false, simulation: s });
   if (f && !f.filled) records.push({ coin: kind, step: "flow", ok: false, exit: flow.code, buyAnswer: f.buy?.answer ?? null, sellAnswer: f.sell?.answer ?? null });
+  // the buy's send as the helper logged it, and the ms from the page's send to its fill (the buy's timeline)
+  const tl = f?.buyTimeline ?? [];
+  const sendAt = tl.find((x) => x.what.startsWith("helper POST /v1/pool/solana/send"));
+  const filledAt = tl.find((x) => x.what === "progress filled");
+  runs[kind].proofWait = f?.proofWait ?? null;
+  runs[kind].buySend = { lines: (f?.sendLines ?? []).filter((x) => x.phase === "buy").map((x) => x.line), sendStartMs: sendAt?.at ?? null, helperMs: sendAt?.ms ?? null, filledMs: filledAt?.at ?? null, sendToFilledMs: sendAt && filledAt ? filledAt.at - sendAt.at : null, engineCalls: f?.engineCalls ?? [] };
+  log(`${kind} buy send: ${JSON.stringify(runs[kind].buySend)}`);
+  if (withdraw && !withdraw.sent) records.push({ coin: kind, step: "withdraw", ok: false, op: withdraw.op ?? null, view: withdraw.view?.state ?? null, tail: runs[kind].withdraw.tail.slice(-8) });
   if (!f) records.push({ coin: kind, step: "flow", ok: false, exit: flow.code, tail: flow.out.split("\n").slice(-15) });
 }
 const record = {
@@ -289,13 +370,17 @@ const record = {
   clock,
   mainnetReads,
   plant: PLANT || null,
+  copyTables: madeTables,
+  engine: ENGINE,
   coins,
   skippedCoins: skipped,
   cloned: { accounts: plan.files.map((f) => f.pubkey), programs: plan.programs, absentOnMainnet: plan.missing, tablesReset: plan.resets },
   records,
   runs,
   cannotShow: [
-    "whether a block builder or a leader includes the transaction: the copy has no Jito block engine and one leader, itself; the helper's bundle step is a plain send to the copy",
+    "whether a block builder or a leader includes the transaction: the copy has no Jito block engine and one leader, itself; the helper's engine is a local stand-in (busy, refused, swallowing or landing the bundle) and its plain copies go to the copy",
+    "the real engines' answers and their timing: the stand-in answers at once",
+    "a graduated coin's buy on mainnet's own PumpSwap table: mainnet has none yet, so the copy makes one with the same list (contracts/pool-solana/scripts/venue-table.mjs's steps) from a key it funds",
     "priority fee levels: the copy's only transactions are the run's own, so no fee market",
     "rate limits of real providers: the page reads the copy's one RPC under two names",
     "the helper's mainnet fee payer: the copy's fee payer is a fresh local key (the pool program binds the fee payer only through the proof's context, release.rs, so any key it signs with is accepted)",

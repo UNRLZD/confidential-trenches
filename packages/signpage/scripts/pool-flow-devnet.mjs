@@ -445,6 +445,7 @@ if (RESUME && process.env.FLOW_SWEEP_W) {
 }
 const landed = deposit.notes?.some((n) => n.ref === "deposit" && n.state === "UNSPENT");
 let buy = null;
+let proofWait = null;
 // FLOW_REFUSE: the Solana pool balance from the notes, as state.pools counts it, before the tap and after the run's end
 let refused = null;
 const { poolBalances, solanaBalancePool } = await import("../../wallet/src/pool/balances.ts");
@@ -453,14 +454,20 @@ const poolBalance = async () => poolBalances(await ns.list(), [solanaBalancePool
 if (RESUME && process.env.FLOW_BUY_SIG) buy = { answer: { result: { txs: [{ hash: process.env.FLOW_BUY_SIG }] } }, notes: await noteList(), resumedAfterBuy: true };
 else if (landed) {
   log("the proof queue's pass");
+  const passFrom = Date.now();
   let pass = await t.proofs();
-  // FLOW_COPY: the page runs its pass again on its next state read; a pass made the second the deposit landed waits for
-  // the chain's next second here (the copy's first slots carry one block time for every slot of that second)
-  for (let i = 0; COPY && i < 30 && pass.made.length === 0 && pass.failed.length > 0; i++) {
+  // FLOW_COPY: the page runs its pass again on its next state read, so a failed pass is run again here once a second, up
+  // to 3 minutes, and the count and the wait are recorded (proofWait): a note that landed this epoch proves on the newest
+  // root, read at confirmed, which must be past the finalized now (wallet pool/solana.ts), and with confirmed equal to
+  // finalized a pass passes only when a block-second turns between its two reads
+  let passes = 1;
+  for (; COPY && passes < 180 && pass.made.length === 0 && pass.failed.length > 0; passes++) {
     log(`pass ${JSON.stringify(pass.failed)}: the pass again in 1 s`);
     await sleep(1_000);
     pass = await t.proofs();
   }
+  proofWait = { passes, ms: Date.now() - passFrom, made: pass.made.length > 0 };
+  if (COPY && pass.made.length === 0) throw new Error(`the buy's proof was not made in ${passes} passes over ${proofWait.ms} ms: ${JSON.stringify(pass.failed)}`);
   log(`pass ${JSON.stringify(pass, (k, v) => (typeof v === "bigint" ? String(v) : v))}`);
   let spend = SPEND;
   if (SPEND === "max") {
@@ -571,7 +578,7 @@ const filled = REFUSE ? back : COPY && process.env.FLOW_COPY_STOP === "buy" ? la
 seed64.fill(0);
 // FLOW_COPY: each send by its step (the copy's record reads each back), the W of the buy and the tip accounts watched
 const steps = COPY ? copy.sent.map((s) => ({ step: s.phase, signature: s.signature, watch: { W: rentBack?.W ?? null, feePayer: PIN.feePayer, ...Object.fromEntries(SOLANA_JITO_TIP_ACCOUNTS.map((a, i) => [`tip${i}`, a])) } })) : undefined;
-writeFileSync(OUT, JSON.stringify({ at: new Date().toISOString(), cluster: COPY ? "mainnet copy" : "devnet", program: PIN.program, seedFile, steps, simFails: copy?.simFails, planted: copy?.planted, fee: copy ? String(copy.fee) : undefined, pool, tables: TABLES, mint: MINT, spend: SPEND, resumed: Boolean(RESUME), burst: BURST, injected, dust: DUST ? { S: dust.S, sent: dust.sent, burned: dust.burned ?? null, txs: dustTxs } : null, U, need: String(NEED), deposit, buy, buyTimeline: timeline, refused, sell, rentBack, sentTxs, stages, notes, filled }, null, 2) + "\n");
+writeFileSync(OUT, JSON.stringify({ at: new Date().toISOString(), cluster: COPY ? "mainnet copy" : "devnet", program: PIN.program, seedFile, steps, simFails: copy?.simFails, planted: copy?.planted, fee: copy ? String(copy.fee) : undefined, sendLines: copy?.sendLines, proofWait, engine: copy?.engine, engineCalls: copy?.engineCalls, pool, tables: TABLES, mint: MINT, spend: SPEND, resumed: Boolean(RESUME), burst: BURST, injected, dust: DUST ? { S: dust.S, sent: dust.sent, burned: dust.burned ?? null, txs: dustTxs } : null, U, need: String(NEED), deposit, buy, buyTimeline: timeline, refused, sell, rentBack, sentTxs, stages, notes, filled }, null, 2) + "\n");
 await t.signedOut();
 ns.close();
 w.close();

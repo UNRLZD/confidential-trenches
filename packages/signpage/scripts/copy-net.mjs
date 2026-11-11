@@ -6,8 +6,11 @@
 // - the pool's pin: the mainnet program, with the copy's fee payer (a fresh key the run made; the proof binds the fee
 //   payer through its context only, so the program takes any signer there);
 // - the helper: its own Solana pool sender (apps/helper/src/pool/solana.ts) on the copy, answering GET /v1/pool/fee and
-//   POST /v1/pool/solana/send as server.ts does; its bundle step (Jito) is a plain sendTransaction to the copy, since the
-//   copy has no block engine. Every other helper path answers 404 and is logged; any other host is refused;
+//   POST /v1/pool/solana/send as server.ts does, with server.ts's send line (pool/send-log.ts poolSendLine). The copy has
+//   no block engine, so the sender's engine is a local stand-in (COPY.engine) that never reaches a real one: "busy" and
+//   "refused" answer so; "swallow" takes the bundle and never lands it (what mainnet's engines did with five buys);
+//   "lands" sends it to the copy as a plain transaction. Every other helper path answers 404 and is logged; any other
+//   host is refused;
 // - FLOW_COPY's plant "mayhem-drop": every account read of a curve answers it with its Mayhem byte cleared, so the page
 //   builds a Mayhem coin's buy with the plain fee recipient in place of the Mayhem one (the chain's own state is
 //   unchanged and refuses it);
@@ -29,6 +32,7 @@ export async function copyNet({ log, phase = () => "" }) {
   const { readSolanaRent, solanaPoolFee } = await import("../../kit/src/trade/solana/pool-buy.ts");
   const { solanaPoolAddresses } = await import("../../kit/src/trade/solana/pool.ts");
   const { solanaPoolSender } = await import("../../../apps/helper/src/pool/solana.ts");
+  const { poolSendLine } = await import("../../../apps/helper/src/pool/send-log.ts");
   if (POOL_TESTNET !== false || SOL_POOLS.mainnet === undefined) throw new Error("not the mainnet build's pins");
   const secret = readFileSync(COPY.feePayerKeyFile, "utf8").trim();
   const PIN = Object.freeze({ program: SOL_POOLS.mainnet.program, feePayer: base58.encode(base58.decode(secret).subarray(32)) });
@@ -36,6 +40,7 @@ export async function copyNet({ log, phase = () => "" }) {
   const helperHost = new URL(TRADE_HELPER).host;
   const native = globalThis.fetch;
   const simFails = [];
+  const sendLines = [];
   const sent = [];
   const plantCurve = COPY.plant === "mayhem-drop" && COPY.mint ? solanaPoolAddresses(COPY.mint).curve : null;
   const planted = { reads: 0 };
@@ -87,11 +92,24 @@ export async function copyNet({ log, phase = () => "" }) {
   const providers = [solanaJsonRpc(COPY.rpcs[0]), solanaJsonRpc(COPY.rpcs[1])];
   const fee = solanaPoolFee(await readSolanaRent(providers));
   const plain = (b64) => providers[0]("sendTransaction", [b64, { encoding: "base64", skipPreflight: true, maxRetries: 0 }]);
+  const ENGINE = "http://engine-stand-in.localhost"; // a name only: the stand-in never fetches
+  const engine = COPY.engine ?? "lands";
+  const engineCalls = [];
   const jito = {
     intervalMs: 1_000,
-    send: async (b64) => (await plain(b64), { kind: "ok", region: COPY.rpcs[0] }),
-    rebroadcast: async (_region, b64) => (await plain(b64).catch(() => {}), { kind: "ok", detail: "the copy" }),
-    status: async () => "unread",
+    send: async (b64) => {
+      engineCalls.push({ at: Date.now(), call: "send", mode: engine });
+      if (engine === "busy") return { kind: "busy", detail: "the stand-in is busy", throttled: false };
+      if (engine === "refused") return { kind: "refused", detail: "the stand-in refused it" };
+      if (engine === "lands") await plain(b64);
+      return { kind: "ok", region: ENGINE, bundleId: "stand-in" };
+    },
+    rebroadcast: async (_region, b64) => {
+      engineCalls.push({ at: Date.now(), call: "rebroadcast", mode: engine });
+      if (engine === "lands") await plain(b64).catch(() => {});
+      return { kind: "ok", detail: "the stand-in" };
+    },
+    status: async () => (engineCalls.push({ at: Date.now(), call: "status", mode: engine }), engine === "lands" ? "landed" : "pending"),
   };
   const sender = solanaPoolSender({ cluster: "mainnet", program: PIN.program, feePayerSecret: secret, fee: String(fee) }, { providers, jito, log: (l) => log(`helper: ${l}`) });
   await sender.ready;
@@ -103,18 +121,21 @@ export async function copyNet({ log, phase = () => "" }) {
       const epoch = url.searchParams.get("epoch");
       r = url.searchParams.get("pool") !== sender.pool ? json(404, { error: { code: "not_found" } }) : json(200, await sender.fee(epoch ? Number(epoch) : Date.now()));
     } else if (url.pathname === "/v1/pool/solana/send" && method === "POST") {
+      const began = performance.now();
       const body = JSON.parse(String(init.body));
       const a = body?.pool === sender.pool ? await sender.carry(body, "copy") : { status: 404, body: { error: { code: "not_found" } } };
       r = json(a.status, a.body, a.retryAfterS === undefined ? {} : { "retry-after": String(a.retryAfterS) });
-      log(`copy helper: send ${a.status} ${JSON.stringify(a.body).slice(0, 300)}${a.note ? ` ${JSON.stringify(a.note)}` : ""}`);
+      const line = poolSendLine({ chain: "solana", net: sender.cluster, route: "send", status: a.status, body: a.body, ms: performance.now() - began, note: a.note });
+      sendLines.push({ phase: phase(), line });
+      log(`helper: ${line}`);
     } else {
       r = json(404, { error: { code: "not_found" } });
       log(`copy helper: ${method} ${url.pathname} is not served on the copy (404)`);
     }
     return r;
   };
-  log(`copy: the mainnet build on ${COPY.rpcs.join(" and ")}; pool ${sender.pool}; fee payer ${PIN.feePayer}; fee ${fee}`);
-  return { rpcs, pin: PIN, holdings: (r) => solanaHoldingsAt(COPY.rpcs[0]), simFails, sent, planted, fee };
+  log(`copy: the mainnet build on ${COPY.rpcs.join(" and ")}; pool ${sender.pool}; fee payer ${PIN.feePayer}; fee ${fee}; engine stand-in ${engine}`);
+  return { rpcs, pin: PIN, holdings: (r) => solanaHoldingsAt(COPY.rpcs[0]), simFails, sent, planted, fee, sendLines, engine, engineCalls };
 }
 
 /** Funds `to` with `lamports` by the copy's own airdrop, read back finalized (the page reads a deposit's source there). */
