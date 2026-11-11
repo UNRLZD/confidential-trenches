@@ -39,13 +39,17 @@
 //   word would read the lane on); each FAIL on the markers alone, its own marker at 0;
 // - and the good record with another script's integrity, each marker gone, a provider out of the CSP, and each provider's
 //   preflight or reads unknown, wrong, failed or with no CORS for the page: each FAIL.
+// Card restore-first-sign-in-under-two-minutes (first in release 115) re-anchored ids_stop and id_keep: each of step 5's
+// reads, the readers' openings too, is waited on through letGo on the run's own signal, letGo held by its body (LET_GO),
+// so a sign out lets go of a read in flight; it re-recorded good alone from its build (11 Nov, --local), the bad records
+// keeping the counts their builds gave then.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { signBuilt } from "../signpage-built.mjs";
-import { countOf, IDS_END_TRY, IDS_TELL, IDS_WALK_END, judge, judgeBundle, localFetch, MARK, MARKERS, PAIR, PLACES, probe, readBundle, REGISTERED, SIGN_ORIGIN, USDC } from "./wallet-restore-id-reader.mjs";
+import { countOf, IDS_END_TRY, IDS_TELL, IDS_WALK_END, judge, judgeBundle, LET_GO, localFetch, MARK, MARKERS, PAIR, PLACES, probe, readBundle, REGISTERED, SIGN_ORIGIN, USDC } from "./wallet-restore-id-reader.mjs";
 import { copyChange, dropRule, plantedFetch } from "./planted-build.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -275,15 +279,33 @@ test("reach_misses and reach_floor match a miss counted only past the floor, nev
 // it at every read after is gone)
 test("ids_stop matches each id read on the run's signal through the kept reader, nothing kept between reads, never another", () => {
   const n = (text, k) => [...text.matchAll(MARK[k])].length;
+  // since that card's sign out fix (first in release 115) each read is waited on through letGo (WG) on the same signal
   const line = (o = {}) => {
-    const x = { sig: "i", rd: "u", check: "i", call: "u(e,t)", ...o };
-    return `let{rpcs:c,pass:l,reader:${x.rd}}=await zW(Nw,n.rpcs,r,{...n.opts,signal:${x.sig}}),d=await BW(Nw,c,l,{...n.opts,signal:i}),f=async(e,t)=>(${x.check}.throwIfAborted(),${x.call}),p=1`;
+    const x = { sig: "i", rd: "u", check: "i", call: "WG(u(e,t),i)", open: "WG(zW(Nw,n.rpcs,r,{...n.opts,signal:i}),i)", held: "WG(f(e),i)", ...o };
+    return `let{rpcs:c,pass:l,reader:${x.rd}}=${x.open === "" ? "" : "await "}${x.open.replace("signal:i", `signal:${x.sig}`)},f=await WG(BW(Nw,c,l,{...n.opts,signal:i}),i),p=e=>${x.held},m=async(e,t)=>(${x.check}.throwIfAborted(),${x.call}),q=1`;
   };
   assert.equal(n(line(), "ids_stop"), 1);
   assert.equal(n(line({ check: "o" }), "ids_stop"), 0, "another signal checked");
-  assert.equal(n(line({ call: "c(e,t)" }), "ids_stop"), 0, "another reader");
-  assert.equal(n(line({ call: "u(e)" }), "ids_stop"), 0, "the index dropped");
-  assert.equal(n(`let{rpcs:c,pass:l,reader:u}=await zW(Nw,n.rpcs,r,{...n.opts,signal:i}),d=await BW(Nw,c,l,{...n.opts,signal:i}),f=async(e,t)=>{if(i.throwIfAborted(),o!==void 0)throw o;try{return await u(e,t)}catch(e){throw o??=e,e}}`, "ids_stop"), 0, "the stop at the first unread id");
+  assert.equal(n(line({ call: "WG(c(e,t),i)" }), "ids_stop"), 0, "another reader");
+  assert.equal(n(line({ call: "WG(u(e),i)" }), "ids_stop"), 0, "the index dropped");
+  assert.equal(n(line({ call: "u(e,t)" }), "ids_stop"), 0, "a read not let go");
+  assert.equal(n(line({ call: "WG(u(e,t),o)" }), "ids_stop"), 0, "a read let go on another signal");
+  assert.equal(n(line({ call: "XG(u(e,t),i)" }), "ids_stop"), 0, "a read let go through another function");
+  assert.equal(n(line({ open: "zW(Nw,n.rpcs,r,{...n.opts,signal:i})" }), "ids_stop"), 0, "the reader opened not let go");
+  assert.equal(n(line({ held: "f(e)" }), "ids_stop"), 0, "a held read not let go");
+  assert.equal(n(`let{rpcs:c,pass:l,reader:u}=await WG(zW(Nw,n.rpcs,r,{...n.opts,signal:i}),i),f=await WG(BW(Nw,c,l,{...n.opts,signal:i}),i),p=e=>WG(f(e),i),m=async(e,t)=>{if(i.throwIfAborted(),o!==void 0)throw o;try{return await WG(u(e,t),i)}catch(e){throw o??=e,e}}`, "ids_stop"), 0, "the stop at the first unread id");
+});
+
+// letGo by its body (id_keep binds it): the function step 5's reads are waited on through
+test("LET_GO holds letGo's body: a read let go at the signal's end with its reason, its own answer taken otherwise", () => {
+  const body = "function WG(e,t){return t.aborted?(e.catch(()=>{}),Promise.reject(t.reason)):new Promise((n,r)=>{let i=()=>r(t.reason);t.addEventListener(`abort`,i,{once:!0}),e.then(n,r).finally(()=>t.removeEventListener(`abort`,i))})}";
+  assert.equal(LET_GO(body, "WG"), true);
+  assert.equal(LET_GO(body, "XG"), false, "another name");
+  assert.equal(LET_GO(body + body, "WG"), false, "two of it");
+  assert.equal(LET_GO(body.replace("t.addEventListener(`abort`,i,{once:!0}),", ""), "WG"), false, "never stops at the abort");
+  assert.equal(LET_GO(body.replace("r(t.reason)", "n(void 0)"), "WG"), false, "the abort taken as an answer");
+  assert.equal(LET_GO(body.replace("e.then(n,r)", "e.then(n,n)"), "WG"), false, "a read's failure taken as an answer");
+  assert.equal(LET_GO(body.replace("Promise.reject(t.reason)", "e"), "WG"), false, "an aborted signal waits on the read");
 });
 
 test("a 429 or a 408 is asked again after its Retry-After (10 s with none, 30 s at most), and after four asks it is the answer", async () => {
@@ -478,7 +500,10 @@ const PLANTS = [
   ["id_keep", "a new pass drops nothing", () => swap(String.raw`§\.lasting\.has\(§\)\|\|§\.answers\.delete\(§\);`, "||", "||1||")],
   ["id_keep", "a new pass drops everything (31be751d's rule)", () => plant(String.raw`for\(let (?<x>§) of\[\.\.\.(?<k>§)\.answers\.keys\(\)\]\)\k<k>\.lasting\.has\(\k<x>\)\|\|\k<k>\.answers\.delete\(\k<x>\);`, (s, g) => `${g.k}.answers.clear();`)],
   ["id_keep", "keptIdReader opens a new pass on any refusal", () => swap(String.raw`catch\((?<e>§)\)\{if\(!\(\k<e> instanceof §\)\)throw \k<e>\}let`, "if(!(", "if(!1&&!(")],
-  ["id_keep", "step 5 reads with a new keep each run", () => plant(String.raw`let\{rpcs:§,pass:§,reader:§\}=await §\(§,§\.rpcs,(?<k>§),\{`, (s, g) => s.replace(`,${g.k},{`, ",{answers:new Map,lasting:new Set},{"))],
+  ["id_keep", "step 5 reads with a new keep each run", () => plant(String.raw`let\{rpcs:§,pass:§,reader:§\}=await §\(§\(§,§\.rpcs,(?<k>§),\{`, (s, g) => s.replace(`,${g.k},{`, ",{answers:new Map,lasting:new Set},{"))],
+  // card restore-first-sign-in-under-two-minutes: the kept reader opened through letGo on the run's signal, letGo its body
+  ["id_keep", "step 5's kept reader opened not let go", () => plant(String.raw`let\{rpcs:§,pass:§,reader:§\}=await (?<lg>§)\((?<call>§\(§,§\.rpcs,§,\{\.\.\.§\.opts,signal:(?<sig>§)\}\)),\k<sig>\)`, (s, g) => s.replace(`${g.lg}(${g.call},${g.sig})`, g.call))],
+  ["id_keep", "letGo never stops at the abort", () => plant(String.raw`Promise\.reject\((?<t>§)\.reason\)\):new Promise\(\((?<n>§),(?<r>§)\)=>\{let (?<l>§)=\(\)=>\k<r>\(\k<t>\.reason\);\k<t>\.addEventListener\(` + "`abort`" + String.raw`,\k<l>,\{once:!0\}\),`, (s, g) => `Promise.reject(${g.t}.reason)):new Promise((${g.n},${g.r})=>{let ${g.l}=()=>${g.r}(${g.t}.reason);`)],
   // signing out drops it
   ["id_signout", "sign out keeps what the restore kept", () => plant(String.raw`signedOut:\(\)=>\{(?<a>§)\?\.abort\(\),§=§\(\)\}`, (s, g) => `signedOut:()=>{${g.a}?.abort()}`)],
   ["id_signout", "sign out makes a new keep nobody reads", () => plant(String.raw`signedOut:\(\)=>\{(?<a>§)\?\.abort\(\),(?<o>§)=(?<f>§)\(\)\}`, (s, g) => `signedOut:()=>{${g.a}?.abort(),zzK=${g.f}()}`)],
