@@ -134,8 +134,8 @@ test("an address the lists never served, a mixed-case listed address, no token, 
   for (const q of ["?chain=BASE", "?chain=eip155:8453", "?chain=constructor"]) assert.equal((await call(`/v1/market/token${q}&token=${CASES[0].addr}`)).status, 404, q);
 });
 
-test("GeckoTerminal refusing (429) or failing (500): the page is the lists' row with those fields null, holders 429 or 503, never a value made up", async () => {
-  for (const [to, holders] of [[1, 429], [2, 503]] as const) {
+test("GeckoTerminal refusing (429) or failing (500): the page is the lists' row with those fields null, holders 200 with no count (src none) or 503, never a value made up and never a 429", async () => {
+  for (const [to, holders] of [[1, 200], [2, 503]] as const) {
     const r = await call(`/v1/market/token?chain=base&token=${CASES[0].addr}`, to);
     assert.equal(r.status, 200);
     const p = JSON.parse(r.body);
@@ -146,7 +146,10 @@ test("GeckoTerminal refusing (429) or failing (500): the page is the lists' row 
     assert.equal(p.row.launchpad, "doppler");
     const h = await call(`/v1/market/holders?chain=base&token=${CASES[0].addr}`, to);
     assert.equal(h.status, holders, h.body);
-    if (holders === 429) assert.ok(Number(h.headers["retry-after"]) >= 1);
+    if (holders === 200) {
+      const b = JSON.parse(h.body);
+      assert.deepEqual([b.holders, b.total, b.top_bps, b.src], [[], null, null, "none"]);
+    }
   }
 });
 
@@ -303,13 +306,14 @@ test("a held info's re-read leaves a first read its calls: refused, the held cou
   assert.equal(JSON.parse(kept.body).total, c.holders);
   assert.equal(JSON.parse((await tok.page(c.addr)).body).row.holders, c.holders);
   assert.equal(calls, 1);
-  // past INFO_SERVE_MS the held count is not served: its re-read is a page read, and refused it is the budget's 429 with
-  // its wait, never a 200 with a count older than the bound
+  // past INFO_SERVE_MS the held count is not served: its re-read is a page read, and refused it is no count from no
+  // source (the read queued), never a 200 with a count older than the bound and never a 429 (card
+  // evm-chart-opens-without-a-vendor-call)
   t = NOW + INFO_SERVE_MS;
   for (let i = 0; i < 5; i++) assert.ok(gecko.take("pages"));
   const old = await tok.holders(c.addr);
-  assert.equal(old.status, 429, old.body);
-  assert.ok((old.retryAfterS ?? 0) >= 1);
+  assert.equal(old.status, 200, old.body);
+  assert.deepEqual([JSON.parse(old.body).total, JSON.parse(old.body).src], [null, "none"]);
   assert.equal(JSON.parse((await tok.page(c.addr)).body).row.holders, null, "the page: no old count");
   assert.equal(calls, 1);
 });
@@ -367,14 +371,27 @@ test("the window full (5 of 5): a cold base holders read waits for the next free
   assert.ok(waited >= 2_000 && waited <= GT_PAGE_WAIT_MS, `waited ${waited} ms`);
 });
 
-test("the window full with its next free call past GT_PAGE_WAIT_MS: a cold holders read answers 429 with that wait, without waiting", async () => {
+test("the window full with its next free call past GT_PAGE_WAIT_MS: a cold holders read answers 200 with no count (src none) without waiting, never a 429; the read is queued, takes the next free call, and the next read has the count", async () => {
   let t = NOW;
+  calls = 0;
   const gecko = geckoBudget(() => t);
   gecko.seed(Array.from({ length: 5 }, () => NOW - 1_000)); // the next free call 74 s away
   const slept: number[] = [];
-  const tok = createEvmToken("base", { lists: listsOf("base"), gecko, fetch: fake("base"), now: () => t, sleep: async (ms) => (slept.push(ms), (t += ms)) });
+  const due: { at: number; fn: () => void }[] = [];
+  const tok = createEvmToken("base", { lists: listsOf("base"), gecko, fetch: fake("base"), now: () => t, sleep: async (ms) => (slept.push(ms), (t += ms)), later: (fn, ms) => void due.push({ at: t + ms, fn }) });
   const h = await tok.holders(CASES[0].addr);
-  assert.equal(h.status, 429, h.body);
-  assert.ok((h.retryAfterS ?? 0) >= 70, `retry-after ${h.retryAfterS}`);
+  assert.equal(h.status, 200, h.body);
+  assert.deepEqual([JSON.parse(h.body).total, JSON.parse(h.body).src], [null, "none"]);
   assert.deepEqual(slept, []);
+  assert.equal(calls, 0);
+  assert.equal(due.length, 1, "the queued read waits for the next free call");
+  assert.ok(due[0]!.at >= NOW + 70_000, `at ${due[0]!.at - NOW}`);
+  t = due[0]!.at;
+  due.shift()!.fn();
+  for (let i = 0; i < 20; i++) await new Promise((ok) => setImmediate(ok));
+  assert.equal(calls, 1, "the queued read made its call");
+  const again = await tok.holders(CASES[0].addr);
+  assert.equal(again.status, 200);
+  assert.equal(JSON.parse(again.body).total, CASES[0].holders);
+  assert.equal(calls, 1, "served from the queued read");
 });

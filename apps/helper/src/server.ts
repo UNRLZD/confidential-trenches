@@ -695,14 +695,20 @@ export function evmSwapsFromEnv(env: Record<string, string | undefined>, evmList
   for (const chain of ["base", "robinhood"] as const) {
     const lists = evmLists[chain];
     if (lists === undefined) continue;
-    let seen: { asOfMs: number; tokens: Set<string>; pools: Record<string, string> } | null = null;
-    // the lists' newest answer, read once per answer: its tokens, and each one's pool as the list names it
+    let seen: { asOfMs: number; tokens: Set<string>; pools: Record<string, string>; prices: Map<string, number> } | null = null;
+    // the lists' newest answer, read once per answer: its tokens, each one's pool as the list names it, and its price
     const snapshot = async () => {
       const a = await lists.get();
       if (a.status !== 200 || a.asOfMs === undefined) return null;
       if (seen === null || seen.asOfMs !== a.asOfMs) {
-        const snap = JSON.parse(a.body) as { lists: Record<string, { token: string }[]>; pools?: Record<string, string> };
-        seen = { asOfMs: a.asOfMs, tokens: new Set(Object.values(snap.lists).flatMap((rows) => rows.map((r) => r.token))), pools: snap.pools ?? {} };
+        const snap = JSON.parse(a.body) as { lists: Record<string, { token: string; price_usd?: string | null }[]>; pools?: Record<string, string> };
+        const rows = Object.values(snap.lists).flat();
+        const prices = new Map<string, number>();
+        for (const r of rows) {
+          const p = typeof r.price_usd === "string" ? Number(r.price_usd) : NaN;
+          if (!prices.has(r.token) && Number.isFinite(p) && p > 0) prices.set(r.token, p);
+        }
+        seen = { asOfMs: a.asOfMs, tokens: new Set(rows.map((r) => r.token)), pools: snap.pools ?? {}, prices };
       }
       return seen;
     };
@@ -719,6 +725,8 @@ export function evmSwapsFromEnv(env: Record<string, string | undefined>, evmList
         const s = await snapshot();
         return s !== null && Object.hasOwn(s.pools, token) ? s.pools[token]! : null;
       },
+      // the same rows' price_usd, as the last answer read held it: a book off it by SCALE_BOUND is not served as ours
+      price: (token) => seen?.prices.get(token) ?? null,
     });
     out[chain] = swaps;
     // the lists' tokens' pools looked for as each answer loads, not at each token's first open (card

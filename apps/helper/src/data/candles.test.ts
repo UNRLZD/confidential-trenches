@@ -218,3 +218,58 @@ test("every timeframe's bars sit on its grid and a bar's high and low hold its o
     }
   }
 });
+
+// -- a mark: a quiet pool's own state as its price (card evm-chart-opens-without-a-vendor-call) -------------------------
+
+test("a mark: a quiet book's one bar, at the mark's bucket, priced by the one rule from its two legs, zero volume; it counts for ownFrom; never on the tape", () => {
+  const b = createBook(USD);
+  b.ingest(0, [], 10);
+  assert.equal(b.close(), null, "no swap, no mark: nothing to close at");
+  // the pool's state as two legs: 3 USDC for 4 tokens, 0.75 USD each
+  assert.equal(b.mark({ block: 10, t: 1_000_150, amt: 4n * E18, quote: 3n * E6, ethUsd: null }), true);
+  assert.deepEqual(b.candles("1m", null, 10), [[1_000_140, "0.75", "0.75", "0.75", "0.75", "0"]]);
+  assert.deepEqual(b.candles("1h", null, 10), [[997_200, "0.75", "0.75", "0.75", "0.75", "0"]]);
+  for (const tf of TFS) assert.equal(b.ownFrom(tf), b.candles(tf, null, 1)[0]![0], tf);
+  assert.equal(fixed(b.close()!, 30), "0.75");
+  assert.deepEqual(b.tape(50), [], "a mark is no trade");
+  // `to` cuts it as any bar
+  assert.deepEqual(b.candles("1m", 1_000_140, 10), []);
+});
+
+test("a mark is replaced by a real swap's bar in the same bucket, and stays a bar of its own before a later one", () => {
+  const b = createBook(USD);
+  b.ingest(0, [], 10);
+  b.mark({ block: 10, t: 1_000_150, amt: 4n * E18, quote: 3n * E6, ethUsd: null });
+  // a swap in the same minute (settled) and one in the next minute (still in the tail)
+  b.ingest(11, [swap(11, 0, 1_000_160, "b", 1n, 2n * E6), swap(40, 0, 1_000_200, "s", 1n, E6)], 20);
+  assert.deepEqual(b.candles("1m", null, 10), [
+    [1_000_140, "2", "2", "2", "2", "2"],
+    [1_000_200, "1", "1", "1", "1", "1"],
+  ]);
+  assert.equal(b.ownFrom("1m"), 1_000_140);
+  assert.equal(fixed(b.close()!, 30), "1", "the newest close is the newest swap's");
+  assert.equal(b.tape(50).length, 2, "the tape holds the two swaps only");
+  // a mark whose bucket holds a swap still in the tail is replaced too
+  const c = createBook(USD);
+  c.ingest(0, [], 10);
+  c.mark({ block: 10, t: 1_000_150, amt: 4n * E18, quote: 3n * E6, ethUsd: null });
+  c.ingest(11, [swap(11, 0, 1_000_170, "b", 1n, 2n * E6)], 10);
+  assert.deepEqual(c.candles("1m", null, 10), [[1_000_140, "2", "2", "2", "2", "2"]]);
+});
+
+test("a mark is priced as a swap is: ETH legs at the ETH price it carries, the token's decimals, flooring; one that cannot be priced is no mark", () => {
+  // 0.001 ETH per token at 2,500 USD per ETH: 2.5 USD
+  const e = createBook(ETH);
+  assert.equal(e.mark({ block: 1, t: 1_000_000, amt: 1_000n * E18, quote: E18, ethUsd: 2_500n * E18 }), true);
+  assert.equal(e.candles("1m", null, 1)[0]![4], "2.5");
+  assert.equal(createBook(ETH).mark({ block: 1, t: 1_000_000, amt: E18, quote: E18, ethUsd: null }), false, "an ETH quote with no ETH price");
+  // a 6-decimal token: 1 USDC for 2 whole tokens (2,000,000 units) is 0.5 USD
+  const six = createBook({ decimals: 6, quote: { kind: "usd", decimals: 6 } });
+  six.mark({ block: 1, t: 1_000_000, amt: 2n * E6, quote: E6, ethUsd: null });
+  assert.equal(six.candles("1m", null, 1)[0]![4], "0.5");
+  const zero = createBook({ decimals: 0, quote: { kind: "usd", decimals: 6 } });
+  assert.equal(zero.mark({ block: 1, t: 1_000_000, amt: 10n ** 60n, quote: 1n, ethUsd: null }), false, "a price that floors to zero is dropped");
+  assert.deepEqual(zero.candles("1m", null, 10), []);
+  assert.equal(zero.ownFrom("1m"), null);
+  assert.equal(createBook(USD).mark({ block: 1, t: 1_000_000, amt: 0n, quote: E6, ethUsd: null }), false, "a zero leg");
+});
