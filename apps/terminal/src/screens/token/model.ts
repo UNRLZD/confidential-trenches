@@ -55,6 +55,8 @@ export interface TokenView {
   chgTile: string | null;
   launchpad: string | null;
   chain: string;
+  /** The helper serves the token's logo (06b `icon`, GET /v1/logo/{chain}/{token}). */
+  icon: boolean;
   curve: Curve;
   /** The helper's `filling` (M384): Jupiter's row is still coming, so the null fields above are loading. */
   filling: boolean;
@@ -82,6 +84,7 @@ export function tokenView(r: MarketRow, nowMs: number, filling = false): TokenVi
     chgTile: or(r.chg_24h_bps, changeTile(r.chg_24h_bps)),
     launchpad: r.launchpad ?? null,
     chain: r.chain,
+    icon: r.icon === true,
     curve: curve(r),
     filling,
   };
