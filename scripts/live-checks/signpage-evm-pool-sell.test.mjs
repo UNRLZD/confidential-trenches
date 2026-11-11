@@ -5,6 +5,9 @@
 // a reverted receipt, a receipt with no Deposited, a Deposited from another address, another block, another chain id,
 // another sender, another delegate, no authorization, a helper that sends a malformed sale, a CORS echo of "*", one
 // testnet missing, a bundle that is not the pinned one, the EVM sell in the served bundle: each FAIL.
+// Card evm-pools-on-mainnet: the good answers' page parts are re-made from a local mainnet build (and the testnet
+// build for a testnet page) of that card, which pins both EVM pools and keeps the kind closed there; re-recorded from
+// SIGN_HOST at the next sign deploy.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
