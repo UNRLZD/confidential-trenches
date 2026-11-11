@@ -1,5 +1,6 @@
 // Discover on the helper's mainnet lists as served on 11 Nov 15:20Z (run.mjs; lists-2026-11-11.json, Solana, Base and
-// Robinhood merged as the app merges them, data.ts mergeLists), inside the app's own header, footer and tab bar. The rows
+// Robinhood merged as the app merges them, data.ts mergeLists; rows cut to those that pass the release word scan), inside
+// the app's own header, footer and tab bar, plus one row for each ring-table pad the served rows lack. The rows
 // carry `icon` as served (false on every row that day); ?logos=1 sets it true on every row but the first (window.__noLogo), as the
 // helper will once it serves GET /v1/logo/{chain}/{token}. Test only.
 import { StrictMode } from "react";
@@ -7,6 +8,7 @@ import { createRoot } from "react-dom/client";
 import { MemoryRouter } from "react-router";
 import { Discover } from "../../src/screens/discover/Discover.tsx";
 import { mergeLists } from "../../src/screens/discover/data.ts";
+import { PAD_RING } from "../../src/screens/market/pads.ts";
 import type { MarketChain, MarketRow, MarketSnapshot } from "../../src/screens/discover/fields.ts";
 import { SigninSheetProvider, SigninSourceProvider } from "../../src/screens/signin/source.tsx";
 import type { SigninSource } from "../../src/screens/signin/source.tsx";
@@ -25,6 +27,15 @@ const parts: MarketSnapshot[] = Object.entries(read.chains).map(([chain, c]) => 
   as_of_ms: c.as_of_ms,
   lists: Object.fromEntries(Object.entries(c.lists).map(([k, rows]) => [k, (rows as unknown[][]).map(row)])) as unknown as MarketSnapshot["lists"],
 }));
+// every pad of the ring table the served rows lack (that day's lists showed ten of eighteen): one more row on its chain,
+// a copy of that chain's first served row with the pad's id and its own token id, so each pad's ring is drawn and checked
+const EVM_PADS = new Set(["zora", "clanker", "doppler", "flaunch", "virtuals", "pons", "bags", "torch"]);
+const served = new Set(parts.flatMap((p) => Object.values(p.lists).flat()).map((r) => r?.launchpad));
+for (const pad of Object.keys(PAD_RING).filter((k) => !served.has(k))) {
+  const p = parts.find((x) => x.chain === (EVM_PADS.has(pad) ? "base" : "solana"))!;
+  const base = p.lists.new[0]!;
+  p.lists.new.push({ ...base, token: `${base.token}-${pad}`, launchpad: pad });
+}
 const merged = mergeLists(parts);
 let first: string | null = null;
 if (logos)

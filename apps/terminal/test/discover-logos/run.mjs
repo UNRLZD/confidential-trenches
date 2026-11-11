@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 // Discover's token logos and launchpad rings on mainnet rows (card discover-matches-the-main-app): page.tsx draws the
-// helper's lists as served on 11 Nov 15:20Z (lists-2026-11-11.json: Solana, Base and Robinhood, pump.fun, StonkFun,
-// LaunchLab, Zora, Pons, Clanker, Torch, Doppler and rows with no launchpad), built with vite and served on 127.0.0.1.
+// helper's lists as served on 11 Nov 15:20Z (lists-2026-11-11.json: Solana, Base and Robinhood, the rows that pass the
+// release word scan, ten pads and rows with no launchpad; page.tsx adds one row for each other pad of the ring table),
+// built with vite and served on 127.0.0.1.
 // The helper's logo route is answered here: an image for every token, a 404 with no body for one (the helper's "no
 // logo"). Checks, at 1440 x 900, 1024 x 768 and 390 x 844 (dpr 2, touch):
 //   rings: every drawn row's ring is its launchpad's colour (pads.ts padRing), a row with no known pad keeps a stage
-//     colour, and the rows draw at least three pad colours;
+//     colour, the rows draw at least three pad colours, and every pad of the ring table is drawn in its own;
 //   logos as served (icon false on every row): no logo request is made and every avatar draws its initials;
 //   ?logos=1 (icon true on every row but one): every row in view draws its own loaded logo (naturalWidth > 0, shown),
 //     the icon-false row asks for none and draws initials, the 404 row draws initials and no broken image, and no
@@ -19,7 +20,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { browserLabel } from "../../../../scripts/browsers.mjs";
 import { launchHarnessBrowser } from "../../../../scripts/harness-sockets.mjs";
-import { padRing } from "../../src/screens/market/pads.ts";
+import { PAD_RING, padRing } from "../../src/screens/market/pads.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -141,6 +142,9 @@ try {
       const drawn = await page.evaluate((s) => [...document.querySelectorAll(`${s} [role="listitem"][data-token] svg[data-ring]`)].map((e) => e.getAttribute("data-ring")), scope);
       const pads = new Set(drawn.filter((c) => !STAGE.has(c)));
       check(pads.size >= 3, `${w.name}: ${pads.size} pad ring colours drawn (${[...pads].join(", ")}), under 3`);
+      // every pad of the ring table is drawn somewhere in the list, each in its own colour
+      const byPad = await page.evaluate((s) => [...document.querySelectorAll(`${s} [role="listitem"][data-token]`)].map((r) => [r.querySelector(".tok-pb")?.getAttribute("data-pad") ?? null, r.querySelector("svg[data-ring]")?.getAttribute("data-ring") ?? null]), scope);
+      for (const pad of Object.keys(PAD_RING)) check(byPad.some(([p, c]) => p === pad && c === padRing(pad)), `${w.name}: no row of ${pad} drawn in its ring colour`);
       if (w.name !== "390") check(colours.size >= 2, `${w.name}: ${colours.size} pad ring colours in view`);
       if (w.name === "1024") {
         const cols = await page.evaluate(() => [...document.querySelectorAll(".dsc-grid .dsc-col")].map((c) => c.getBoundingClientRect()).map((b) => ({ x: Math.round(b.x), y: Math.round(b.y), w: Math.round(b.width) })));

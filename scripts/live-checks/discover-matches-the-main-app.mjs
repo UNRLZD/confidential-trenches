@@ -2,16 +2,18 @@
 // Live check of card discover-matches-the-main-app: Discover draws each token's own logo and its launchpad's ring
 // colour, in the main app's four-column layout from 1024 px. Headless Chromium opens APP_HOST/discover inside SIGN_HOST's
 // shell at 1440 x 900, 1024 x 768 and 390 x 844 (dpr 2, touch), signed out, waits for rows and reads every drawn row:
-// its ring colour, its launchpad badge, its avatar's logo (loaded or not) and its initials. The same run reads the
-// helper's lists (HELPER_HOST /v1/market/lists, each chain) for each token's `icon`. Judged:
+// its chain, its token id, its launchpad badge's pad id, its ring colour, whether it draws initials, and its logo: the
+// logo route's status and content type as the page received them and whether the image is drawn. The same run reads the
+// helper's lists (HELPER_HOST /v1/market/lists, each chain) for each token's `icon` flag and the pads they hold. Only these
+// are recorded: never a name, a symbol or any other text a token carries. Judged:
 //   - every row whose launchpad the terminal's table knows (apps/terminal/src/screens/market/pads.ts padRing) draws that
 //     pad's ring colour; a row with no known pad a stage colour; the rows drawn at 1440 hold at least three pad colours
 //     whenever the lists hold three pads with a colour;
-//   - a row the helper serves `icon: true` for draws its loaded logo once in view, or its initials if that logo failed
-//     (named); a row served `icon: false` asks for no logo and draws its initials; no row draws a broken image;
+//   - a row in view the helper serves `icon: true` for: its logo route answered 200 with a PNG, JPEG, WebP or GIF and the
+//     logo is drawn; a row served `icon: false` asks for no logo; every row without a drawn logo draws its initials; no
+//     row draws a broken image;
 //   - at 1024 the four columns sit in one row.
-// The logo part is judged on what the helper serves: while it serves no logo (icon false on every row) it is named and
-// passes on the initials.
+// While the helper serves no logo (icon false on every row) the logo part is named and passes on the initials.
 // After: app
 //   node scripts/live-checks/discover-matches-the-main-app.mjs [--build <dir>] [--shots <dir>] [--record <file>]
 //     PASS exit 0, FAIL exit 1, error exit 2
@@ -33,6 +35,8 @@ export const EXIT = Object.freeze({ PASS: 0, FAIL: 1 });
 const CHAINS = ["solana", "base", "robinhood"];
 const READY_MS = 30_000;
 const SIGNED_OUT = { release: "harness-shell", api: 1, signed_in: false, code_saved: false, vault_balance: "0", wallets: [], positions: [], orders: [], held: [], ops: [] };
+const IMAGE = /^image\/(png|jpeg|webp|gif)\b/;
+const LOGO = /^https:\/\/ct-api\.unrealized\.trade\/v1\/logo\/[a-z]+\/([^/?#]+)$/;
 const STAGE = new Set(["var(--blue)", "var(--border-strong)", "var(--text-1)", "#bcbcbc", "#808080"]);
 const WIDTHS = [
   { name: "1440", viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, isMobile: false, hasTouch: false },
@@ -54,32 +58,31 @@ export function judge(rec) {
       bad(`${w.name}: no row drawn`);
       continue;
     }
-    let ringBad = 0, logoBad = 0, broken = 0, failed = 0;
+    let ringBad = 0, logoBad = 0, broken = 0;
     for (const r of w.rows) {
       const want = padRing(r.pad);
       if (want ? r.ring !== want : !STAGE.has(r.ring)) {
         ringBad++;
-        if (ringBad <= 3) bad(`${w.name} ${r.symbol}: ring ${r.ring}, want ${want ?? "a stage colour"} (pad ${r.pad})`);
+        if (ringBad <= 3) bad(`${w.name} ${r.chain}:${r.id}: ring ${r.ring}, want ${want ?? "a stage colour"} (pad ${r.pad})`);
       }
       if (r.broken) broken++;
       const icon = icons[r.id];
-      if (icon === true && r.inView) {
-        if (r.logo === "failed") failed++;
-        else if (r.logo !== "loaded") {
-          logoBad++;
-          if (logoBad <= 3) bad(`${w.name} ${r.symbol}: served icon true, logo ${r.logo}`);
-        }
+      // served icon true: in view, its logo route answered 200 with an image and the logo is drawn
+      if (icon === true && r.inView && !(r.logo?.status === 200 && IMAGE.test(r.logo?.type ?? "") && r.logo?.drawn === true)) {
+        logoBad++;
+        if (logoBad <= 3) bad(`${w.name} ${r.chain}:${r.id}: served icon true, logo ${JSON.stringify(r.logo)}`);
       }
+      // served icon false: no logo asked for or drawn
       if (icon === false && r.logo !== null) {
         logoBad++;
-        if (logoBad <= 3) bad(`${w.name} ${r.symbol}: served icon false, yet a logo ${r.logo}`);
+        if (logoBad <= 3) bad(`${w.name} ${r.chain}:${r.id}: served icon false, yet a logo ${JSON.stringify(r.logo)}`);
       }
-      if ((r.logo === null || r.logo === "failed") && !r.initials) bad(`${w.name} ${r.symbol}: no logo and no initials`);
+      if (!r.logo?.drawn && !r.initials) bad(`${w.name} ${r.chain}:${r.id}: no logo and no initials`);
     }
     if (broken) bad(`${w.name}: ${broken} broken images`);
     if (ringBad) bad(`${w.name}: ${ringBad} of ${w.rows.length} rings off their launchpad's colour`);
     else ok(`${w.name}: ${w.rows.length} rows, every ring its launchpad's colour or a stage colour`);
-    if (!logoBad) ok(`${w.name}: logos as served (${served} tokens served with a logo${failed ? `, ${failed} in view failed to load and drew initials` : ""})`);
+    if (!logoBad) ok(`${w.name}: logos as served (${served} tokens served with a logo)`);
     if (w.name === "1440") {
       const pads = new Set(w.rows.map((r) => padRing(r.pad)).filter(Boolean));
       const listed = new Set((rec.pads ?? []).map(padRing).filter(Boolean));
@@ -113,7 +116,7 @@ async function terminalFrame(page) {
   }
 }
 
-// runs in the frame: every drawn row of the visible layout
+// runs in the frame: every drawn row of the visible layout, only what the verdict reads (no name or symbol is recorded)
 const ROWS = (scope) => {
   const vis = (e) => e.getClientRects().length > 0;
   return [...document.querySelectorAll(`${scope} [role="listitem"][data-token]`)].filter(vis).map((r) => {
@@ -122,12 +125,12 @@ const ROWS = (scope) => {
     const b = r.getBoundingClientRect();
     return {
       id: r.getAttribute("data-token"),
-      symbol: r.querySelector(".dsc-sym")?.textContent ?? "",
-      ring: r.querySelector("svg[data-ring]")?.getAttribute("data-ring") ?? null,
+      chain: r.querySelector(".tok-cb")?.getAttribute("data-chain") ?? null,
       pad: r.querySelector(".tok-pb")?.getAttribute("data-pad") ?? null,
+      ring: r.querySelector("svg[data-ring]")?.getAttribute("data-ring") ?? null,
       inView: b.bottom > 0 && b.top < innerHeight,
-      initials: av?.firstChild?.nodeType === 3 ? av.firstChild.textContent : "",
-      logo: img ? (img.getAttribute("data-loaded") === "true" && img.naturalWidth > 0 ? "loaded" : img.complete ? "failed" : "waiting") : null,
+      initials: av?.firstChild?.nodeType === 3 && av.firstChild.textContent !== "",
+      drawn: img ? img.getAttribute("data-loaded") === "true" && img.naturalWidth > 0 : null,
       broken: [...r.querySelectorAll("img")].some((i) => i.complete && i.naturalWidth === 0 && getComputedStyle(i).opacity !== "0"),
     };
   });
@@ -140,6 +143,12 @@ async function readWidth(browser, w, harness, shots) {
     const page = await ctx.newPage();
     const errors = [];
     page.on("pageerror", (e) => errors.push(String(e).slice(0, 300)));
+    // each logo route's answer: its status and content type, by token
+    const answers = new Map();
+    page.on("response", (res) => {
+      const m = LOGO.exec(res.url());
+      if (m) answers.set(decodeURIComponent(m[1]), { status: res.status(), type: res.headers()["content-type"] ?? null });
+    });
     await page.goto(`${APP_HOST}/discover`, { waitUntil: "load" });
     const f = await terminalFrame(page);
     const scope = w.name === "390" ? ".dsc-phone" : ".dsc-grid";
@@ -148,7 +157,7 @@ async function readWidth(browser, w, harness, shots) {
     // the logos in view answer (loaded or failed)
     await f.waitForFunction((s) => [...document.querySelectorAll(`${s} img.tok-logo`)].every((i) => i.complete || i.getBoundingClientRect().top > innerHeight), scope, { timeout: 10_000 }).catch(() => {});
     await page.waitForTimeout(300);
-    const rows = await f.evaluate(ROWS, scope);
+    const rows = (await f.evaluate(ROWS, scope)).map(({ drawn, ...r }) => ({ ...r, logo: drawn === null && !answers.has(r.id) ? null : { ...(answers.get(r.id) ?? { status: null, type: null }), drawn: drawn === true } }));
     const cols = w.name === "1024" ? await f.evaluate(() => [...document.querySelectorAll(".dsc-grid .dsc-col")].map((c) => c.getBoundingClientRect()).map((b) => ({ x: Math.round(b.x), y: Math.round(b.y) }))) : undefined;
     await page.screenshot({ path: path.join(shots, `discover-${w.name}.png`) });
     return { name: w.name, rows, ...(cols && { cols }), errors };

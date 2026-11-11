@@ -3,9 +3,9 @@
 //   good: this card's terminal build at APP_HOST's name in the stand-in shell, the helper live: every ring its pad's
 //         colour, ten pad colours at 1440, four columns at 1024, logos as served: PASS;
 //   bad:  APP_HOST as deployed before this card (release 116): every ring a stage colour, 2 x 2 at 1024: FAIL.
-// Planted from the good answer: a ring off its pad's colour, a row served a logo that draws none, a row served none that
-// draws one, a broken image, three columns at 1024, or a page error fails; a logo that failed to load and drew its
-// initials passes, named.
+// Planted from the good answer: a ring off its pad's colour, a row served a logo whose route did not answer 200 with an
+// image or that is not drawn, a row served none that asks for one, a broken image, three columns at 1024, or a page
+// error fails. The record holds no name or symbol.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -45,20 +45,32 @@ test("planted: a row with no known pad drawn in a pad's colour fails", () => {
   assert.equal(mut((rec) => (w(rec, "1440").rows.find((r) => r.pad === null).ring = "oklch(0.76 0.12 154)")).verdict, "FAIL");
 });
 
-test("planted: a row served a logo that draws none, or still waits, fails; one that failed to load and drew initials passes", () => {
+test("planted: a row served a logo whose route did not answer 200 with an image, or that is not drawn, fails; one that did passes", () => {
   const row = (rec) => w(rec, "1440").rows.find((r) => r.inView);
+  // the token served a logo, its answer the same at every width it is drawn in
+  const served = (logo) =>
+    mut((rec) => {
+      const id = row(rec).id;
+      rec.icons[id] = true;
+      for (const x of rec.widths) for (const r of x.rows) if (r.id === id) r.logo = logo;
+    });
   assert.equal(mut((rec) => (rec.icons[row(rec).id] = true)).verdict, "FAIL");
-  assert.equal(mut((rec) => ((rec.icons[row(rec).id] = true), (row(rec).logo = "waiting"))).verdict, "FAIL");
-  assert.equal(mut((rec) => ((rec.icons[row(rec).id] = true), (row(rec).logo = "loaded"))).verdict, "PASS");
-  const r = mut((rec) => ((rec.icons[row(rec).id] = true), (row(rec).logo = "failed")));
+  assert.equal(served({ status: 404, type: "application/json", drawn: false }).verdict, "FAIL");
+  assert.equal(served({ status: 200, type: "image/svg+xml", drawn: true }).verdict, "FAIL");
+  assert.equal(served({ status: 200, type: "image/png", drawn: false }).verdict, "FAIL");
+  const r = served({ status: 200, type: "image/png", drawn: true });
   assert.equal(r.verdict, "PASS", r.lines.join("\n"));
-  assert.ok(r.lines.some((l) => /failed to load and drew initials/.test(l)));
 });
 
-test("planted: a row served no logo that draws one, a broken image, no initials under no logo fail", () => {
-  assert.equal(mut((rec) => (w(rec, "390").rows[0].logo = "loaded")).verdict, "FAIL");
+test("planted: a row served no logo that asks for one, a broken image, no initials under no logo fail", () => {
+  assert.equal(mut((rec) => (w(rec, "390").rows[0].logo = { status: 200, type: "image/png", drawn: true })).verdict, "FAIL");
   assert.equal(mut((rec) => (w(rec, "390").rows[0].broken = true)).verdict, "FAIL");
-  assert.equal(mut((rec) => (w(rec, "390").rows[0].initials = "")).verdict, "FAIL");
+  assert.equal(mut((rec) => (w(rec, "390").rows[0].initials = false)).verdict, "FAIL");
+});
+
+test("the record holds no token text: each row only its id, chain, pad, ring, view, initials flag, logo answer and broken flag", () => {
+  const KEYS = ["broken", "chain", "id", "inView", "initials", "logo", "pad", "ring"];
+  for (const rec of [ANSWERS.good, ANSWERS.bad]) for (const x of rec.widths) for (const r of x.rows) assert.deepEqual(Object.keys(r).sort(), KEYS);
 });
 
 test("planted: three columns at 1024, a page error, under three pad colours at 1440 fail", () => {
