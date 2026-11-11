@@ -16,9 +16,10 @@
 //   - the trees: the pool account's two tree sizes on both RPCs (the larger is judged). For a venue whose buy outgrows
 //     a generation (PumpSwap; the curve fits at any tree size: packages/kit/test/solana-pool-venue-tables.test.ts), the
 //     row FAILs once either tree passes 80 percent of the newest pinned generation's range, naming the entries left.
-//     The arithmetic: PumpSwap's generation 1 covers state entries to 139,264 and label entries to 92,160 and warns at
-//     111,411 and 73,728, leaving 27,853 state and 18,432 label entries. A buy and its sell add 3 state entries and 2
-//     label entries, so the warning comes about 9,200 buys before the end: about 31 days at 300 buys a day, about 9
+//     The arithmetic: PumpSwap's generation 1 (32 venue accounts, GlobalConfig's reserved fee recipient and its wSOL
+//     account among them, then 224 pages) covers state entries to 138,240 and label entries to 91,136 and warns at
+//     110,592 and 72,908, leaving 27,648 state and 18,228 label entries. A buy and its sell add 3 state entries and 2
+//     label entries, so the warning comes about 9,100 buys before the end: about 30 days at 300 buys a day, about 9
 //     days at 1,000. Every later generation has the same width. The fix is the same paste for the next generation
 //     (contracts/pool-solana/scripts/venue-table.mjs), then its pin.
 // Every read goes through provider-answer.mjs's rpcAnswer: a provider's no-answer (a 429, an empty or cut body, a rate
