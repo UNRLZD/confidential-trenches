@@ -23,6 +23,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { APP_HOST, SIGN_HOST, harnessRoute } from "../../../../scripts/live-checks/app-in-shell.mjs";
+import { INIT } from "../../../../scripts/live-checks/app-shell.mjs";
 import { rowFaults } from "../../../../scripts/live-checks/app-launchpad-badges.mjs";
 import { LIST_CHAINS } from "../../src/screens/discover/data.ts";
 import { FIXTURE_NOW_MS, TOKENS } from "./fixtures.ts";
@@ -235,6 +236,8 @@ const check = (ok, what) => {
 // `page` is the top window (SIGN_HOST's shell, for the shot); `f` is the terminal's frame inside it, where every read is.
 async function openAt(browser, route, w, s, calls) {
   const ctx = await browser.newContext({ viewport: w.viewport, deviceScaleFactor: w.deviceScaleFactor, isMobile: w.isMobile, hasTouch: w.hasTouch, colorScheme: "dark", reducedMotion: "reduce" });
+  // every layout shift in every frame, with its element and rects (app-shell.mjs INIT), for the reads that count them
+  await ctx.addInitScript(INIT);
   if (MARK_DELAY_MS > 0)
     await ctx.addInitScript((ms) => {
       const raf = window.requestAnimationFrame.bind(window);
@@ -486,6 +489,43 @@ try {
               const ms3 = Date.now() - t1;
               check(marks1 === marks0 + 1 && ms3 < LIVE_MS / 2, `${tag}: the pushed trade's mark: ${marks0} -> ${marks1} marks in ${ms3} ms, want one more under ${LIVE_MS / 2} ms`);
               console.log(`${tag}: pushed trade drawn on the last bar in ${ms2} ms; marks ${marks0} -> ${marks1} in ${ms3} ms`);
+              // card app-sell-e2e-in-the-app: an open mark's card holds still while a live read moves its mark. Live app run
+              // 43025383719 (11 Nov, phone): a walk's tap opened the newest bar's mark card, a live tick rescaled the price
+              // axis, and the card moved 28 px as a layout shift (div.tm-card 148,272 -> 148,244); the marks moved by their
+              // transform and shifted nothing. Here: the pushed mark's card opened (a tap on the phone; on the desktop a
+              // focus, as a key opens it, since a hovered card closes once its mark slides from under the pointer), then a
+              // close three times up on the next live read: the axis takes a new top and a wider label, and the mark moves.
+              // Counted: the shifts the card is a source of (the axis's own canvases and the legend may move under a
+              // close of a new length; this check is the card's).
+              const card = () => f.evaluate((box) => document.querySelector(`${box} [data-testid="trade-mark-card"]`)?.getBoundingClientRect().toJSON() ?? null, box);
+              const pm = f.locator(`${box} [data-testid="trade-mark"]`).last();
+              if (phone) await pm.tap().catch(() => {});
+              else await pm.focus().catch(() => {});
+              await f.waitForSelector(`${box} [data-testid="trade-mark-card"]`, { timeout: 2_000 }).catch(() => {});
+              const card0 = await card();
+              check(card0 !== null, `${tag}: the pushed trade's mark opened no card`);
+              if (card0 !== null) {
+                const shifts0 = await f.evaluate(() => window.__ct.shiftLog.length);
+                calls.plant = (Number(calls.plant) * 3).toFixed(12).replace(/0+$/, "").replace(/\.$/, "");
+                const t2 = Date.now();
+                let moved = pushed;
+                while (Date.now() - t2 < 3 * LIVE_MS && !moved.last.endsWith(`:${Number(calls.plant)}`)) {
+                  await f.waitForTimeout(50);
+                  moved = await read();
+                }
+                // the marks are placed again in the frame after the bars (TradeMarks.tsx schedule): two frames, then read
+                await f.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(r, 50)))));
+                const card1 = await card();
+                const log = (await f.evaluate((n) => window.__ct.shiftLog.slice(n), shifts0)).filter((e) => e.sources.some((x) => x.startsWith("div.tm-card ")));
+                const dy = card1 === null ? null : Math.round(card1.y - card0.y);
+                check(moved.last.endsWith(`:${Number(calls.plant)}`), `${tag}: the close ${calls.plant} never reached the last bar (${moved.last})`);
+                check(card1 !== null && dy !== 0, `${tag}: the card did not follow its mark (dy ${dy}): the sequence moved nothing, so it proves nothing`);
+                check(log.length === 0, `${tag}: ${log.length} layout shift(s) of the open card while the live read moved its mark [${log.map((e) => `+${e.at}ms ${e.value.toFixed(5)}: ${e.sources.join(" | ") || "no source"}`).join("; ")}]`);
+                console.log(`${tag}: the open card followed its mark ${dy} px with ${log.length} layout shift(s)`);
+                if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `${s.id}-${w.name}-open-card.png`) });
+                if (phone) await pm.tap().catch(() => {});
+                else await pm.blur().catch(() => {});
+              }
             }
           } else {
             await f.waitForTimeout(4 * LIVE_MS);
