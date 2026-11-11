@@ -463,6 +463,9 @@ export type TestnetPool = {
   /** state.positions (src/positions.ts): the last pass, or the kept one before it, null before either; the first
    *  signed-in read starts a pass. */
   positions(): Promise<readonly Position[] | null>;
+  /** The positions as held (positions.ts get()): the last pass, or the kept one read before it; null before either or
+   *  signed out. Starts nothing: no pass, no seed read, no store write (the sell box's preview, src/pool-sell-dry.ts). */
+  positionsNow(): readonly Position[] | null;
   /** The proof queue's pass, the queue opened first when none is: what each landed note runs. */
   proofs(): Promise<QueuePass | null>;
   /** state.pools' `ready` (src/pools.ts) with `read`'s notes, in one turn of the queue's view (queue.ts readyWith), so
@@ -1740,6 +1743,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     settle,
     stateRead,
     positions: () => positions.read(),
+    positionsNow: () => positions.get(),
     proofs,
     // every open queue's ready list (Solana's, then each EVM pool's; each proof names its pool) with `read`, in one turn
     // of every queue's view: each queue's readyWith holds its view while the next one's and then `read` run, always in

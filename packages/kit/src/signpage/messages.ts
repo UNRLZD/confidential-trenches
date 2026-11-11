@@ -166,8 +166,9 @@ export interface SignpageParams {
    * What a pool.sell of these same params would give (card app-sell-shows-what-you-receive): the sell box's preview,
    * from the device's own pool reads on two providers. Signs nothing, writes nothing and sends nothing. Display only: a
    * pool.sell never takes its numbers (the sell reads and checks its own quote before W signs), and an app never puts
-   * them in a request. The same refusals as pool.sell before its quote (not_allowed, not_funded, quote_check_failed,
-   * down), and busy when the page's trade reads hold the providers.
+   * them in a request. Its refusals: not_allowed (a chain, token or amount the page does not sell), not_funded (no such
+   * holding, or signed out), quote_check_failed (no reference the two providers agree on), down (a provider failed),
+   * and busy (a trade runs, the page's preview budget is spent, or a newer ask came first); busy and down are "not now".
    */
   "pool.sell.dry": SignpageParams["pool.sell"];
 }
@@ -222,10 +223,13 @@ export interface SignpageResults {
 
 /**
  * pool.sell.dry's answer (card app-sell-shows-what-you-receive), each amount a decimal string in whole units of the
- * chain pool's asset (POOL_ASSET_DECIMALS: SOL on Solana, ETH on Base and Robinhood): `out`, what the sale gives back
- * into the pool by the device's own quote (the venue's fees taken, before slippage); `min_out`, the least the sale may
- * give at the asked slippage (the floor it signs), at most `out`; `network`, what the chain charges the sale; `fee_bps`,
- * the platform's fee on it in basis points. Numbers only: never a wallet, a note or a route.
+ * chain pool's asset (POOL_ASSET_DECIMALS: SOL on Solana, ETH on Base and Robinhood). `out`: the sale's expected out by
+ * the device's own quote (the venue's fees taken, before slippage) less the most the sale keeps out of the user's money
+ * (its fee, the deposit's rents and what the sale wallet keeps, less what it holds), so at the quote's own price it is
+ * never above what the sale pays into the user's notes. `min_out`: the same at the asked slippage (the floor the sale
+ * signs, less the same), at most `out`. `network`: what the chain charges the sale, inside `out`'s taking already.
+ * `fee_bps`: the platform's fee in basis points. Numbers only: never a wallet, a note or a route. Display only: no
+ * request takes them. The kit's client drops an answer with a field not named here (SIGNPAGE_RESULT_SCHEMAS).
  */
 export interface PoolSellDry {
   out: string;

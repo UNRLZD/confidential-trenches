@@ -95,8 +95,9 @@ import { drawPoolWithdrawForm } from "./withdraw/pool-form.ts";
 import { releaseTradeDeps, tradeKind } from "./trade.ts";
 import { settleTradeOps, timedStore, TRADE_STORE_MS, tradeSettleDue } from "./trade.ts";
 import { PAGE_TOKEN_DECIMALS, poolKinds } from "./pool-kinds.ts";
-import { liveBuys, poolSellDryKind } from "./pool-sell-dry.ts";
-import { PAGE_SOL_PIN, testnetPool, testnetPoolDeps } from "./pool-testnet.ts";
+import { liveRuns, poolSellDryKind } from "./pool-sell-dry.ts";
+import { PAGE_SOL_PIN, pageSolanaRpcs, testnetPool, testnetPoolDeps } from "./pool-testnet.ts";
+import { hostLane } from "../../wallet/src/throttle.ts";
 import { poolRestore, restoreUxOf } from "./pool-restore.ts";
 import type { PoolChain } from "./rules/pool.ts";
 
@@ -225,20 +226,22 @@ else {
   );
   const hasSolana = PAGE_POOLS.some((p) => p.chain === "solana");
   const poolKindMap = poolKinds(poolDeps);
-  // the sell box's preview (src/pool-sell-dry.ts): the positions pass's holding, the sale's own quote on the trades' paced
-  // pair, never while a trade's reads hold it: a sell's by its lock, a pool buy's by this count, from its tap to its
-  // run's final stage (posted once as progress after its read-backs, pool-buy.ts poolBuyKind) or a refusal, at most
-  // POOL_BUY_LIVE_MAX_MS (a run that ends at "sent" posts no end)
-  const buys = liveBuys(poolKindMap["pool.buy"]);
+  // the sell box's preview (src/pool-sell-dry.ts): the positions pass's holding as held, the sale's own quote on the
+  // trades' paced pair as background reads, never while a trade runs: a pool buy from its tap to its run's final stage,
+  // a pool sell from its tap to its run's end (liveRuns), or a trade holds a host of the pair (the lanes)
+  const buys = liveRuns(poolKindMap["pool.buy"], "final");
   poolKindMap["pool.buy"] = buys.kind;
+  const sells = liveRuns(poolKindMap["pool.sell"], "after");
+  poolKindMap["pool.sell"] = sells.kind;
+  const dryPair = (): readonly [SolanaRpc, SolanaRpc] | null => (PAGE_SOL_PIN === undefined ? null : pageSolanaRpcs("pass"));
   const poolSellDry = poolSellDryKind({
     pinned: (chain) => poolDeps.pinned(chain),
-    rpcs: () => (poolDeps.rpcs("solana") as unknown as readonly [SolanaRpc, SolanaRpc] | null),
-    positions: async () => (testnet ? testnet.positions() : null),
+    rpcs: dryPair,
+    positions: () => testnet?.positionsNow() ?? null,
     decimals: PAGE_TOKEN_DECIMALS,
     // the Rent sysvar state.pools' tap_max already reads, once; none yet: the preview reads it on both
     rent: () => (hasSolana ? rent.get() : null),
-    busy: () => buys.live() > 0,
+    trading: () => buys.live() + sells.live() > 0 || (dryPair() ?? []).some((r) => r.url !== undefined && hostLane(r.url).trading()),
   });
   // a pool quote's price reads (pool-deposit-address.ts priced): USDC in at 1 USD on both reads, X's coin at the page's
   // own Pyth read on its two RPCs (src/pool-price.ts); any other origin has none yet, so it gets no quote

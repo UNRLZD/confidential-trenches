@@ -15,8 +15,8 @@ import { SIGNPAGE_RESULT_SCHEMAS } from "../../kit/src/signpage/schema.ts";
 import { fx, providers, rent as RENT } from "../../kit/test/solana-pool-buy-fx.ts";
 import { solanaPoolBuySellNeed, solanaPoolSellNeed } from "../../kit/src/trade/solana/pool-buy.ts";
 import { tokenDecimalsKept } from "../src/pool-kinds.ts";
-import { liveBuys, POOL_SELL_DRY_WAIT_MS, poolSellDry, poolSellDryKind, poolSellReserveBound, type PoolSellDryDeps } from "../src/pool-sell-dry.ts";
-import { POOL_SELL_LOCK, solanaSellReserve } from "../src/pool-sell.ts";
+import { liveRuns, POOL_SELL_DRY_CALLS, POOL_SELL_DRY_START_MS, POOL_SELL_DRY_WINDOW_MS, poolSellDry, poolSellDryKind, poolSellReserveBound, type PoolSellDryDeps } from "../src/pool-sell-dry.ts";
+import { solanaSellReserve } from "../src/pool-sell.ts";
 import type { Position } from "../src/positions.ts";
 import { poolUnits, solanaDepositRents, solanaSellAfterFull, SOLANA_POOL_SELL_RESERVE_MAX } from "../src/rules/pool.ts";
 import { solanaPoolNoteFloor } from "../../kit/src/trade/solana/pool-deposit.ts";
@@ -45,17 +45,18 @@ function pair(v: "pump" | "pumpswap" = "pump", log: string[] = [], lamports: Rec
 const deps = (o: Partial<PoolSellDryDeps> & { log?: string[]; v?: "pump" | "pumpswap" } = {}): PoolSellDryDeps => ({
   pinned: () => true,
   rpcs: () => pair(o.v, o.log),
-  positions: async () => [pos(), pos(SWAP_MINT)],
+  positions: () => [pos(), pos(SWAP_MINT)],
   rent: () => RENT,
   decimals: tokenDecimalsKept(),
-  locks: null,
+  trading: () => false,
   wait: async () => {},
   ...o,
 });
 /** What the sale's own read gives for `units`: the venue in the reference that gives the most (pool-sell.ts sellRun). */
-const saleOut = async (v: "pump" | "pumpswap", token: string, units: bigint): Promise<bigint> => {
+const saleOut = async (v: "pump" | "pumpswap", token: string, units: bigint): Promise<{ e: bigint; cashback: boolean | undefined }> => {
   const ref = (await readSolanaReference(providers(v), { side: "sell", token, amount: units }))!;
-  return ref.pools.filter((p) => p.venue === "pump-curve" || p.venue === "pumpswap").sort((x, y) => (x.expectedOut > y.expectedOut ? -1 : 1))[0]!.expectedOut;
+  const best = ref.pools.filter((p) => p.venue === "pump-curve" || p.venue === "pumpswap").sort((x, y) => (x.expectedOut > y.expectedOut ? -1 : 1))[0]!;
+  return { e: best.expectedOut, cashback: best.cashback };
 };
 
 test("the preview's out is the sale's own quote for the units pool.sell would sell, on both recorded venues, for a share and a typed amount", async () => {
@@ -63,8 +64,9 @@ test("the preview's out is the sale's own quote for the units pool.sell would se
     for (const [params, units] of [[share(token, 10_000), HELD], [share(token, 5_000), HELD / 2n], [share(token, 2_500), HELD / 4n], [{ chain: "solana", token, amount: "1000000", slippage_bps: 300 }, 1_000_000_000_000n]] as const) {
       const a = await poolSellDry(deps({ v }), params);
       assert.ok("result" in a, `${v} ${JSON.stringify(params)}: ${JSON.stringify(a)}`);
-      const e = await saleOut(v, token, units);
-      const reserve = poolSellReserveBound(RENT, v === "pump" ? "pump-curve" : "pumpswap", [ENOUGH], units === HELD);
+      const { e, cashback } = await saleOut(v, token, units);
+      assert.equal(cashback, false, "the recorded coins are plain: the reference read the flag");
+      const reserve = poolSellReserveBound(RENT, v === "pump" ? "pump-curve" : "pumpswap", [ENOUGH], units === HELD, cashback);
       // a partial sale from a W that holds ENOUGH keeps nothing out of the note; a full one puts W's surplus in it too
       assert.equal(units === HELD ? reserve < 0n : reserve === 0n, true, `${v} reserve ${reserve}`);
       assert.equal(a.result.out, poolUnits(e - reserve, 9), `${v} ${JSON.stringify(params)}`);
@@ -123,6 +125,9 @@ test("never above: at the quote's price, the preview's reserve is at least the o
                 if ("refused" in real) continue; // refused: nothing is sold, nothing to preview against
                 const bound = poolSellReserveBound(RENT, venue, [lamports], full);
                 assert.ok(bound >= real.reserve, `${venue} cashback ${cashback} owed ${owed} lamports ${lamports} rents ${rents} full ${full}: bound ${bound} < ${real.reserve}`);
+                // the coin's flag known (the reference's): still never under the sale's rule
+                const known = poolSellReserveBound(RENT, venue, [lamports], full, cashback);
+                assert.ok(known >= real.reserve && known <= bound, `${venue} cashback ${cashback} known: ${known} vs ${real.reserve}`);
                 checked++;
               }
   assert.ok(checked > 300, `checked ${checked}`);
@@ -136,13 +141,17 @@ test("the gap on a single-wallet sale: on the recorded sells (W holds ENOUGH) no
   const bound = poolSellReserveBound(RENT, "pump-curve", [solanaPoolSellNeed({ kind: "pump-curve", cashback: false }, RENT)], false);
   const gap = bound - real.reserve;
   assert.ok(gap >= 0n && gap < SOLANA_POOL_SELL_RESERVE_MAX, `gap ${gap}`);
-  console.log(`# single-wallet gap on a lean W: ${poolUnits(gap, 9)} SOL (bound ${poolUnits(bound, 9)}, rule ${poolUnits(real.reserve, 9)})`);
+  console.log(`# single-wallet gap on a lean W, flag unknown: ${poolUnits(gap, 9)} SOL (bound ${poolUnits(bound, 9)}, rule ${poolUnits(real.reserve, 9)})`);
+  // the reference names the flag (a plain coin): only the pages' opening over their growth is left
+  const known = poolSellReserveBound(RENT, "pump-curve", [solanaPoolSellNeed({ kind: "pump-curve", cashback: false }, RENT)], false, false);
+  assert.ok(known - real.reserve >= 0n && known < bound);
+  console.log(`# single-wallet gap on a lean W, flag read: ${poolUnits(known - real.reserve, 9)} SOL`);
 });
 
 test("the decimals: the positions pass's, else the page's kept ones, else one read on both providers (then kept)", async () => {
   const kept = tokenDecimalsKept();
   let log: string[] = [];
-  const noDec = async () => [pos(MINT, "4000000", null)];
+  const noDec = () => [pos(MINT, "4000000", null)];
   let a = await poolSellDry(deps({ log, decimals: kept, positions: noDec }), share(MINT, 5_000));
   assert.ok("result" in a);
   assert.equal(log.filter((m) => m === "getAccountInfo").length, 2, "one read on each provider");
@@ -159,32 +168,101 @@ test("refusals before any provider read: another chain, no pin, no position, mor
     [{}, { ...share("0xF111111111111111111111111111111111111111", 5_000), chain: "base" }, "not_allowed"],
     [{ pinned: () => false }, share(MINT, 5_000), "not_allowed"],
     [{ rpcs: () => null }, share(MINT, 5_000), "not_allowed"],
-    [{ positions: async () => [] }, share(MINT, 5_000), "not_funded"],
-    [{ positions: async () => null }, share(MINT, 5_000), "not_funded"],
+    [{ positions: () => [] }, share(MINT, 5_000), "not_funded"],
+    [{ positions: () => null }, share(MINT, 5_000), "not_funded"],
     [{}, { chain: "solana", token: MINT, amount: "4000000.000001", slippage_bps: 300 }, "not_funded"],
     [{}, { chain: "solana", token: MINT, amount: "1.0000001", slippage_bps: 300 }, "not_allowed"],
-    [{ positions: async () => [pos(MINT, "0.000001")] }, share(MINT, 1), "not_funded"],
+    [{ positions: () => [pos(MINT, "0.000001")] }, share(MINT, 1), "not_funded"],
     [{}, share("not-a-mint", 5_000), "not_allowed"],
   ];
   for (const [o, params, code] of cases) assert.deepEqual(await poolSellDry(deps({ ...o, log }), params), { error: code }, JSON.stringify(params));
   assert.deepEqual(log, []);
 });
 
-test("a trade's reads first: it waits while the sell lock is held or the page runs a trade, reads once they end, and answers busy past its bound", async () => {
-  let heldFor = 3;
-  const locks = { query: async () => ({ held: heldFor-- > 0 ? [{ name: POOL_SELL_LOCK, mode: "exclusive" as const }] : [], pending: [] }) };
+/** A page clock the waits move (each wait its own ms). */
+const clock = () => {
+  let t = 0;
+  return { now: () => t, wait: async (ms: number) => void (t += ms), at: () => t, add: (ms: number) => void (t += ms) };
+};
+
+test("the trades first: no read while a trade runs on the page or holds a host; reads once it ends; busy, with no read, once its start bound passes", async () => {
+  const c = clock();
+  let trading = 3;
   const log: string[] = [];
-  const waits: number[] = [];
-  const a = await poolSellDry(deps({ log, locks, wait: async (ms) => void waits.push(ms) }), share(MINT, 5_000));
-  assert.ok("result" in a);
-  assert.equal(waits.length, 3, "looked again until the lock was let go");
-  let n = 0;
-  const b = await poolSellDry(deps({ log: [], busy: () => true, wait: async () => void n++ }), share(MINT, 5_000));
-  assert.deepEqual(b, { error: "busy" });
-  assert.equal(n, POOL_SELL_DRY_WAIT_MS / 250);
+  const a = await poolSellDry(deps({ log, now: c.now, wait: c.wait, trading: () => trading-- > 0 }), share(MINT, 5_000));
+  assert.ok("result" in a, JSON.stringify(a));
+  assert.equal(log.length, 6, "read once the trade ended");
   const never: string[] = [];
-  await poolSellDry(deps({ log: never, busy: () => true }), share(MINT, 5_000));
+  const c2 = clock();
+  assert.deepEqual(await poolSellDry(deps({ log: never, now: c2.now, wait: c2.wait, trading: () => true }), share(MINT, 5_000)), { error: "busy" });
   assert.deepEqual(never, [], "no provider read while a trade runs");
+  assert.ok(c2.at() >= POOL_SELL_DRY_START_MS && c2.at() < POOL_SELL_DRY_START_MS + 500, `gave up at ${c2.at()} ms, inside the client's 10 s`);
+});
+
+test("a sign out during the wait ends it: no read, the old holding not answered", async () => {
+  const c = clock();
+  let signedIn = true;
+  const log: string[] = [];
+  let looks = 0;
+  const a = await poolSellDry(deps({ log, now: c.now, wait: async (ms) => void (c.wait(ms), looks++ === 1 && (signedIn = false)), trading: () => true, positions: () => (signedIn ? [pos()] : null) }), share(MINT, 5_000));
+  assert.deepEqual(a, { error: "not_funded" });
+  assert.deepEqual(log, []);
+  assert.ok(c.at() < 1_000, "ended at the sign out, not at its bound");
+});
+
+test("the budget: at most POOL_SELL_DRY_CALLS calls per host in any window; past it a preview waits for the window, or answers busy at once when it frees past its start bound", async () => {
+  const c = clock();
+  const log: string[] = [];
+  const k = poolSellDryKind(deps({ log, now: c.now, wait: c.wait }));
+  const answers: unknown[] = [];
+  for (const bps of [1_000, 2_000, 3_000]) {
+    const r = k(share(MINT, bps));
+    await r.after;
+    answers.push(r.answer());
+  }
+  assert.ok("result" in (answers[0] as object) && "result" in (answers[1] as object), JSON.stringify(answers));
+  assert.deepEqual(answers[2], { error: "busy" }, "the third in 10 s: its host's budget frees past its start bound");
+  assert.equal(log.length, 2 * POOL_SELL_DRY_CALLS, "six calls per host, no more");
+  assert.ok(c.at() < 500, "answered busy at once, no wait");
+  c.add(POOL_SELL_DRY_WINDOW_MS);
+  const r = k(share(MINT, 3_000));
+  await r.after;
+  assert.ok("result" in r.answer()!, "the next window");
+});
+
+test("one preview at a time: a newer ask stops an older one before its next read; asks for what the running one reads share its answer", async () => {
+  const log: string[] = [];
+  let release!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  const k = poolSellDryKind(deps({ log, trading: () => false, wait: async () => {} , rpcs: () => pair("pump", log).map((rpc) => (async (m: string, p: readonly unknown[]) => (await gate, rpc(m, p))) as SolanaRpc) as unknown as readonly [SolanaRpc, SolanaRpc] }));
+  // a hundred asks for one share: one run
+  const same = Array.from({ length: 100 }, () => k(share(MINT, 5_000)));
+  release();
+  await Promise.all(same.map((r) => r.after));
+  assert.equal(log.length, 6, `${log.length} calls for 100 asks of one share`);
+  assert.ok(same.every((r) => JSON.stringify(r.answer()) === JSON.stringify(same[0]!.answer()) && "result" in r.answer()!));
+  // thirty asks of other shares in one turn: only the newest reads
+  const log2: string[] = [];
+  const k2 = poolSellDryKind(deps({ log: log2 }));
+  const many = Array.from({ length: 30 }, (_, i) => k2(share(MINT, 100 + i)));
+  await Promise.all(many.map((r) => r.after));
+  assert.ok("result" in many[29]!.answer()!, JSON.stringify(many[29]!.answer()));
+  assert.equal(many.slice(0, 29).filter((r) => JSON.stringify(r.answer()) === '{"error":"busy"}').length, 29);
+  assert.equal(log2.length, 6, "the older asks stop before their first read");
+  // thirty asks a turn apart on providers that answer late: never more than the budget on a host
+  const log3: string[] = [];
+  let open!: () => void;
+  const late = new Promise<void>((r) => (open = r));
+  const k3 = poolSellDryKind(deps({ log: log3, rpcs: () => pair("pump", log3).map((rpc) => (async (m: string, p: readonly unknown[]) => (await late, rpc(m, p))) as SolanaRpc) as unknown as readonly [SolanaRpc, SolanaRpc] }));
+  const spread = [];
+  for (let i = 0; i < 30; i++) {
+    spread.push(k3(share(MINT, 100 + i)));
+    await new Promise((r) => setTimeout(r, 0));
+  }
+  open();
+  await Promise.all(spread.map((r) => r.after));
+  assert.ok(log3.length <= 2 * POOL_SELL_DRY_CALLS, `${log3.length} calls for 30 asks`);
+  assert.ok(spread.every((r) => "result" in r.answer()! || JSON.stringify(r.answer()) === '{"error":"busy"}'));
 });
 
 test("a provider that fails is not asked again: down; a reference the two do not agree on: quote_check_failed", async () => {
@@ -201,29 +279,33 @@ test("the kind: a read that runs, its answer once its wait settles; a throw is d
   assert.equal(r.running, true);
   await r.after;
   assert.ok("result" in r.answer()!);
-  const bad = poolSellDryKind(deps({ positions: async () => { throw new Error("store gone"); } }))(share(MINT, 5_000));
+  const bad = poolSellDryKind(deps({ positions: () => { throw new Error("store gone"); } }))(share(MINT, 5_000));
   await bad.after;
   assert.deepEqual(bad.answer(), { error: "down" });
 });
 
-test("the page answers it (src/main.ts): the kind on the trades' paced pair and the positions pass, a pool buy counted from its tap", () => {
+test("the page answers it (src/main.ts): the kind on the trades' paced pair as background reads, the held positions, every pool trade counted from its tap to its run's end, the lanes", () => {
   const main = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
   assert.match(main, /"pool\.sell\.dry": \(params\) => poolSellDry\(params\),/);
-  assert.match(main, /rpcs: \(\) => \(poolDeps\.rpcs\("solana"\)/, "the pool kinds' own pair: pageSolanaRpcs, paced with the trades");
-  assert.match(main, /positions: async \(\) => \(testnet \? testnet\.positions\(\) : null\),/);
-  assert.match(main, /busy: \(\) => buys\.live\(\) > 0,/);
+  assert.match(main, /PAGE_SOL_PIN === undefined \? null : pageSolanaRpcs\("pass"\)/, "the trades' own paced pair, each read a background one on its host's lane");
+  assert.match(main, /positions: \(\) => testnet\?\.positionsNow\(\) \?\? null,/, "the held positions: no pass, no seed read, no write");
   assert.match(main, /rent: \(\) => \(hasSolana \? rent\.get\(\) : null\),/, "the page's own Rent sysvar read");
-  assert.match(main, /const buys = liveBuys\(poolKindMap\["pool\.buy"\]\);\n  poolKindMap\["pool\.buy"\] = buys\.kind;/);
+  assert.match(main, /const buys = liveRuns\(poolKindMap\["pool\.buy"\], "final"\);\n  poolKindMap\["pool\.buy"\] = buys\.kind;/);
+  assert.match(main, /const sells = liveRuns\(poolKindMap\["pool\.sell"\], "after"\);\n  poolKindMap\["pool\.sell"\] = sells\.kind;/);
+  assert.match(main, /trading: \(\) => buys\.live\(\) \+ sells\.live\(\) > 0 \|\| \(dryPair\(\) \?\? \[\]\)\.some\(\(r\) => r\.url !== undefined && hostLane\(r\.url\)\.trading\(\)\),/);
+  const tp = readFileSync(new URL("../src/pool-testnet.ts", import.meta.url), "utf8");
+  assert.match(tp, /positionsNow: \(\) => positions\.get\(\),/);
 });
 
-test("a pool buy is live from its tap to its run's final stage, through an early \"sent\" answer; a refusal ends it; the backstop ends one with no end", async () => {
-  const ctx = (seen: string[]) => ({ id: "b1", sha: "s", progress: (s: string) => void seen.push(s) }) as unknown as Parameters<ReturnType<typeof liveBuys>["kind"]>[1];
+test("a pool buy runs from its tap to its final stage, through an early \"sent\" answer; a sell to its run's end; a refusal ends either; the backstop ends one with no end", async () => {
+  type Ctx = Parameters<ReturnType<typeof liveRuns>["kind"]>[1];
+  const ctx = (seen: string[]) => ({ id: "b1", sha: "s", progress: (s: string) => void seen.push(s) }) as unknown as Ctx;
   let post!: (s: string) => void;
   let answered!: () => void;
-  const b = liveBuys((_p, c) => {
+  const b = liveRuns((_p, c) => {
     post = (s) => c.progress(s as never);
     return { running: true, after: new Promise<void>((r) => (answered = r)), answer: () => ({ result: { stage: "sent", txs: [] } }) };
-  });
+  }, "final");
   const seen: string[] = [];
   b.kind({}, ctx(seen));
   assert.equal(b.live(), 1);
@@ -233,10 +315,21 @@ test("a pool buy is live from its tap to its run's final stage, through an early
   post("filled");
   assert.equal(b.live(), 0, "its final stage");
   assert.deepEqual(seen, ["filled"], "progress passes through");
-  const refused = liveBuys(() => ({ error: "not_allowed" }));
+  let ran!: () => void;
+  const s = liveRuns(() => ({ running: true, after: new Promise<void>((r) => (ran = r)), answer: () => ({ result: { stage: "sent", txs: [] } }) }), "after");
+  s.kind({}, ctx([]));
+  assert.equal(s.live(), 1, "a sell from its tap");
+  ran();
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(s.live(), 0, "to its run's end");
+  const refused = liveRuns(() => ({ error: "not_allowed" }), "final");
   refused.kind({}, ctx([]));
   assert.equal(refused.live(), 0);
-  const late = liveBuys(() => ({ running: true, after: new Promise<void>(() => {}), answer: () => null }), 5);
+  const rejects = liveRuns(() => ({ running: true, after: Promise.reject(new Error("x")), answer: () => null }), "final");
+  rejects.kind({}, ctx([]));
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(rejects.live(), 0, "a run whose after rejects ends, nothing unhandled");
+  const late = liveRuns(() => ({ running: true, after: new Promise<void>(() => {}), answer: () => null }), "final", 5);
   late.kind({}, ctx([]));
   assert.equal(late.live(), 1);
   await new Promise((r) => setTimeout(r, 20));
