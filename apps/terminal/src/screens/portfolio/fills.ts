@@ -9,10 +9,11 @@ import { fromUnits, toUnits } from "../positions/model.ts";
 // its Filled) is the shown holding from its Filled until a read shows it: one rule for buy and sell on every chain,
 // applied to the one snapshot the trade box, the positions and the portfolio draw (useFilled). Display only: no request
 // takes these amounts (a sale reads its own Ws before it signs).
-// - A fill is shown until a read shows it (a buy's: the read at its amount or more; a sell's: at its amount or less) or
-//   the read moves its way from what it was when the fill was first drawn (a buy's up, a sell's down: the trade's own
-//   read, at whatever amount it landed), and a read that shows a later fill of the token shows the earlier ones too.
-//   Past FILL_KEEP_MS the read stands.
+// - A fill is shown until a read shows it: one that has moved its way from the read at the trade's tap (a buy's up, a
+//   sell's down) and reached its amount (a buy's at it or more, a sell's at it or less). A read that has not moved since
+//   the tap is the one from before the trade, whatever its amount (a sale of a holding the read never had reads 0 before
+//   and after: devnet run 10). A read that shows a later fill of the token shows the earlier ones too. Past
+//   FILL_KEEP_MS the read stands.
 // - A trade that ends with no fill (part filled, not landed, refused) takes its fill back: the old amount shows again.
 // - Sign out (no state) drops them all.
 
@@ -37,7 +38,7 @@ export interface Fill {
   wallet: string | null;
   /** When it filled, the app's clock (ms). */
   at: number;
-  /** The read's amount when the fill was first drawn (fillStore.sync; null: no position), unset before. */
+  /** The holdings read at the trade's tap (fillStore.readOf; null: no position), unset when none had come. */
   was?: string | null;
 }
 
@@ -54,7 +55,7 @@ const trim = (s: string): string => (s.includes(".") ? s.replace(/0+$/, "").repl
 /** The fill of a trade on a holding shown as `held` (null: none) at `cost`: a buy adds `amount` (and its spend `spend`,
  *  a USD decimal, to a known cost), a sell takes `amount` off (and its share of the cost). Null when an amount is not a
  *  decimal. */
-export function fillOf(t: { id: string; chain: string; token: string; side: "buy" | "sell"; amount: string; wallet?: string | null; spend?: string | null; at: number }, held: { amount: string; cost: string } | null): Fill | null {
+export function fillOf(t: { id: string; chain: string; token: string; side: "buy" | "sell"; amount: string; wallet?: string | null; spend?: string | null; at: number; was?: string | null }, held: { amount: string; cost: string } | null): Fill | null {
   const was = held?.amount ?? "0";
   const m = scaled(was, t.amount);
   if (!m) return null;
@@ -69,17 +70,18 @@ export function fillOf(t: { id: string; chain: string; token: string; side: "buy
       if (sum) cost = trim(fromUnits(sum.a + sum.b, sum.scale));
     }
   } else if (c !== null && c.n > 0n && m.a > 0n) cost = trim(fromUnits((c.n * n) / m.a, c.scale));
-  return { id: t.id, chain: t.chain, token: t.token, side: t.side, after: trim(fromUnits(n, m.scale)), cost, wallet: t.wallet ?? null, at: t.at };
+  return { id: t.id, chain: t.chain, token: t.token, side: t.side, after: trim(fromUnits(n, m.scale)), cost, wallet: t.wallet ?? null, at: t.at, ...(t.was === undefined ? {} : { was: t.was }) };
 }
 
-/** Whether the read `amount` (null: no position) shows the fill: at its amount or past it, or moved its way since. */
+/** Whether the read `amount` (null: no position) shows the fill: moved its way since the tap's read and at its amount
+ *  or past it (with no read at the tap, at its amount or past it). */
 function shows(f: Fill, amount: string | null): boolean {
   const m = scaled(amount ?? "0", f.after);
   if (!m) return true;
-  if (f.side === "buy" ? m.a >= m.b : m.a <= m.b) return true;
-  if (f.was === undefined) return false;
+  const reached = f.side === "buy" ? m.a >= m.b : m.a <= m.b;
+  if (f.was === undefined || !reached) return reached;
   const w = scaled(amount ?? "0", f.was ?? "0");
-  return w !== null && (f.side === "buy" ? w.a > w.b : w.a < w.b);
+  return w === null || (f.side === "buy" ? w.a > w.b : w.a < w.b);
 }
 
 const same = (p: { chain: string; token: string }, f: { chain: string; token: string }) => p.chain === f.chain && p.token === f.token;
@@ -117,8 +119,10 @@ export function withFills(positions: readonly Position[], fills: readonly Fill[]
   return out;
 }
 
-// The page's fills, kept for the page (as the sells' TAPPED, positions/source.tsx): a box mounted again draws them.
+// The page's fills, kept for the page (as the sells' TAPPED, positions/source.tsx): a box mounted again draws them; and the
+// last holdings read useFilled saw (undefined: none yet), for a trade's tap (readOf).
 let fills: Fill[] = [];
+let lastRead: readonly Position[] | null | undefined;
 const subs = new Set<() => void>();
 const changed = (next: Fill[]): void => {
   fills = next;
@@ -134,12 +138,15 @@ export const fillStore = {
   drop(id: string): void {
     if (fills.some((x) => x.id === id)) changed(fills.filter((x) => x.id !== id));
   },
+  /** The holdings read's amount of a token now, before any fill (null: no position; undefined: no read yet). */
+  readOf(chain: string, token: string): string | null | undefined {
+    return lastRead === undefined || lastRead === null ? undefined : (lastRead.find((p) => same(p, { chain, token }))?.amount ?? null);
+  },
   /** Only the fills no read shows yet (none when signed out). */
   sync(positions: readonly Position[] | null, now: number): void {
-    const pending = pendingFills(positions, fills, now);
-    // each fill keeps the read it was first drawn on, so the read moving its way stands it down
-    const next = pending.map((f) => (f.was !== undefined ? f : { ...f, was: positions?.find((p) => same(p, f))?.amount ?? null }));
-    if (next.length !== fills.length || next.some((f, i) => f !== pending[i])) changed(next);
+    lastRead = positions;
+    const next = pendingFills(positions, fills, now);
+    if (next.length !== fills.length) changed(next);
   },
   subscribe(fn: () => void): () => void {
     subs.add(fn);

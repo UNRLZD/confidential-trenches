@@ -10,8 +10,8 @@ import { FILL_KEEP_MS, fillOf, fillStore, pendingFills, withFills, type Fill } f
 const MINT = "Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr";
 type P = Parameters<typeof withFills>[0][number];
 const pos = (amount: string, cost = "10", wallets = ["W1"]): P => ({ chain: "solana", token: MINT, amount, cost, wallets, decimals: 6 });
-const buy = (id: string, amount: string, held: P | null, at = 0, spend = "0.03") => fillOf({ id, chain: "solana", token: MINT, side: "buy", amount, wallet: "W9", spend, at }, held)!;
-const sell = (id: string, amount: string, held: P | null, at = 0) => fillOf({ id, chain: "solana", token: MINT, side: "sell", amount, at }, held)!;
+const buy = (id: string, amount: string, held: P | null, at = 0, spend = "0.03", was?: string | null) => fillOf({ id, chain: "solana", token: MINT, side: "buy", amount, wallet: "W9", spend, at, ...(was === undefined ? {} : { was }) }, held)!;
+const sell = (id: string, amount: string, held: { amount: string; cost: string } | null, at = 0, was?: string | null) => fillOf({ id, chain: "solana", token: MINT, side: "sell", amount, at, ...(was === undefined ? {} : { was }) }, held)!;
 const amountOf = (ps: readonly P[]) => ps.find((p) => p.token === MINT)?.amount ?? null;
 
 test("a buy's fill is the holding at once, with its wallet and spend, until a read shows it", () => {
@@ -55,23 +55,38 @@ test("a buy then a sell before any read: the read that shows the buy only still 
   assert.deepEqual(pendingFills([], [b, s], 20), []);
 });
 
-test("the next real read replaces the shown amount: a read that moved the fill's way since it was drawn, at any amount", () => {
-  // a sell asked as a share sold a little less than the box's units: the read lands at 501, not 500
-  const half = { ...sell("s1", "500", pos("1000")), was: "1000" };
-  assert.equal(amountOf(withFills([pos("1000")], [half], 1)), "500", "the stale read: the fill stands");
-  assert.equal(amountOf(withFills([pos("501")], [half], 1)), "501", "the sale's own read stands");
-  // a buy whose read lands a unit short of its out
-  const b = { ...buy("b1", "10600", null), was: null };
-  assert.equal(amountOf(withFills([pos("10599")], [b], 1)), "10599");
-  // a buy then a sell before any read: the read up to the buy stands the buy down, never the sell
-  const b2 = { ...buy("b2", "1000", null), was: null };
-  const s2 = { ...sell("s2", "1000", pos("1000"), 10), was: null };
-  assert.equal(amountOf(withFills([pos("1000")], [b2, s2], 20)), null);
-  // the store sets what each fill was first drawn on
+test("the next real read replaces the shown amount: one that moved the fill's way since its tap and reached it", () => {
+  // half sold of 1000, the read at the tap 1000
+  const half = sell("s1", "500", pos("1000"), 0, "1000");
+  assert.equal(amountOf(withFills([pos("1000")], [half], 1)), "500", "the read from before the sale: the fill stands");
+  assert.equal(amountOf(withFills([pos("500")], [half], 1)), "500");
+  assert.deepEqual(pendingFills([pos("500")], [half], 1), [], "the sale's read stands it down");
+  // a buy, the read at its tap none
+  const b = buy("b1", "10600", null, 0, "0.03", null);
+  assert.equal(amountOf(withFills([], [b], 1)), "10600");
+  assert.deepEqual(pendingFills([pos("10600")], [b], 1), []);
+  // two buys in a row: the first one's read does not stand the second down
+  const b2 = buy("b2", "5000", pos("10600"), 5, "0.01", null);
+  assert.equal(amountOf(withFills([pos("10600")], [b, b2], 6)), "15600");
+});
+
+test("devnet run 10: a 100% sale of a holding the read never had: the read at 0 before and after shows 0, and the buy's late read never brings it back", () => {
+  const b = buy("b1", "10600", null, 0, "0.03", null);
+  const s = sell("s1", "10600", { amount: b.after, cost: b.cost }, 3_000, null);
+  assert.equal(amountOf(withFills([], [b, s], 4_000)), null, "sold: none, the read still at none");
+  assert.equal(pendingFills([], [b, s], 4_000).length, 2, "the read from before both stands neither down");
+  // the buy's finalized read comes: the sale still shows
+  assert.equal(amountOf(withFills([pos("10600")], [b, s], 13_000)), null);
+  assert.deepEqual(pendingFills([pos("10600")], [b, s], 13_000).map((f) => f.id), ["s1"]);
+});
+
+test("the store reads the holdings at a tap: none before a read, then the read's amount", () => {
   fillStore.sync(null, Date.now());
-  fillStore.note(buy("x9", "5", null, Date.now()));
+  assert.equal(fillStore.readOf("solana", MINT), undefined);
+  fillStore.sync([pos("7")], Date.now());
+  assert.equal(fillStore.readOf("solana", MINT), "7");
   fillStore.sync([], Date.now());
-  assert.equal(fillStore.get().find((x) => x.id === "x9")?.was, null);
+  assert.equal(fillStore.readOf("solana", MINT), null);
   fillStore.sync(null, Date.now());
 });
 
@@ -109,9 +124,11 @@ test("one source: the trade box, the positions and the portfolio draw the filled
   assert.match(sellSrc, /fillStore\.note\(fillOf\(\{ id: phase\.id, chain: t\.chain, token: t\.token, side: "sell", amount: t\.amount,/);
   // each on the holding as shown at its tap, so a read that has shown the trade by its Filled is not counted twice
   assert.match(box, /tapHeld\.current = \{ id: h\.id, held: snapshot\.state\?\.positions\.find\(/);
-  assert.match(box, /side: "buy", amount: d\.amount, [^\n]*\}, t\.held\)\);/);
+  assert.match(box, /side: "buy", amount: d\.amount, [^\n]*, was: t\.was \}, t\.held\)\);/);
+  assert.match(box, /was: fillStore\.readOf\(chain, token\) \};/);
   assert.match(sellSrc, /SOLD\.set\(h\.id, \{ chain, token, amount, held: src\.snapshot\.state\?\.positions\.find\(/);
-  assert.match(sellSrc, /side: "sell", amount: t\.amount, [^\n]*\}, t\.held\)\);/);
+  assert.match(sellSrc, /side: "sell", amount: t\.amount, [^\n]*, was: t\.was \}, t\.held\)\);/);
+  assert.match(sellSrc, /was: fillStore\.readOf\(chain, token\) \}\);/);
 });
 
 test("a read that already shows the sale at its Filled: the fill made on the tap's holding stands down at once", () => {

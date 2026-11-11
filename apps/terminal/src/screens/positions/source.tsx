@@ -86,7 +86,7 @@ let refusedHere = 0;
 
 /** What each sell tapped on this page sells (its holding's chain and token, the units) and the holding as shown at its
  *  tap, by request id, until its Filled. */
-const SOLD = new Map<string, { chain: string; token: string; amount: string; held: { amount: string; cost: string } | null }>();
+const SOLD = new Map<string, { chain: string; token: string; amount: string; held: { amount: string; cost: string } | null; was: string | null | undefined }>();
 
 /** `units` is the row's units now (null with no row): the sell's lock reads it (model.ts sellLocked). */
 export function useSell(chain: Chain, token: string, slippageBps = 1000, units: string | null = null): Sell {
@@ -121,7 +121,7 @@ export function useSell(chain: Chain, token: string, slippageBps = 1000, units: 
     const t = SOLD.get(phase.id);
     if (!t) return;
     SOLD.delete(phase.id);
-    fillStore.note(fillOf({ id: phase.id, chain: t.chain, token: t.token, side: "sell", amount: t.amount, at: phase.at + phase.ms }, t.held));
+    fillStore.note(fillOf({ id: phase.id, chain: t.chain, token: t.token, side: "sell", amount: t.amount, at: phase.at + phase.ms, was: t.was }, t.held));
   }, [phase]);
 
   // a tapped sell the record has shown once is the record's from then on (sellLocked)
@@ -158,7 +158,7 @@ export function useSell(chain: Chain, token: string, slippageBps = 1000, units: 
       }
       const h = ask ? kit.request!(ask.kind, ask.params) : kit.request!("buy", { chain, token, side: "sell", amount: base!, slippage_bps: slippageBps });
       TAPPED.set(h.id, { chain, token, units });
-      SOLD.set(h.id, { chain, token, amount, held: src.snapshot.state?.positions.find((x) => x.chain === chain && x.token === token) ?? null });
+      SOLD.set(h.id, { chain, token, amount, held: src.snapshot.state?.positions.find((x) => x.chain === chain && x.token === token) ?? null, was: fillStore.readOf(chain, token) });
       const next = tap(ref.current, h.id, src.now());
       ref.current = next;
       setPhase(next);

@@ -142,7 +142,7 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
   const heldNow = useHeld(signedOut ? null : snapshot, chain, token);
   const here = useRef({ chain, token });
   here.current = { chain, token };
-  const tapHeld = useRef<{ id: string; held: { amount: string; cost: string } | null } | null>(null);
+  const tapHeld = useRef<{ id: string; held: { amount: string; cost: string } | null; was: string | null | undefined } | null>(null);
   const sell = useSell(chain, heldNow?.token ?? token, slippageBps, heldNow?.units ?? null);
   const [side, setSide] = useState<"buy" | "sell">("buy");
   const lastHeld = useRef<Row | null>(null);
@@ -152,7 +152,10 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
   // reached the row) the box is display only: the row it draws may be what was held before the sell. While a sell runs
   // or the lock holds, the box keeps its row though the position has left the state (a 100% sell), so its Filled or its
   // end shows where it was tapped; after it, no position is no sell side.
-  const held = heldNow ?? (busy(sell.phase) || sell.locked ? lastHeld.current : null);
+  // A sale that sold it all (card app-holding-follows-a-fill): its Filled stays on the box where it was tapped, as a
+  // buy's stays on the buy box, until the user acts (the next tap, Buy, another token); the box draws the holding as 0.
+  const soldOut = heldNow === null && !busy(sell.phase) && (sell.phase.k === "filled" || sell.phase.k === "ended") && lastHeld.current !== null;
+  const held = heldNow ?? (soldOut ? { ...lastHeld.current!, units: "0", value: 0n } : busy(sell.phase) || sell.locked ? lastHeld.current : null);
   const onSell = side === "sell" && held !== null;
   // the side moves only while neither side runs: a running buy or sell keeps the box that draws its state
   const pickSide = (x: "buy" | "sell") => {
@@ -217,7 +220,7 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
         const h = here.current;
         const r = routeRef.current;
         const t = tapHeld.current;
-        if (t?.id === d.id) fillStore.note(fillOf({ id: d.id, chain: h.chain, token: h.token, side: "buy", amount: d.amount, wallet: r.id === d.id ? r.wallet : null, spend: r.id === d.id && r.cents !== null ? centsToDecimal(r.cents) : null, at }, t.held));
+        if (t?.id === d.id) fillStore.note(fillOf({ id: d.id, chain: h.chain, token: h.token, side: "buy", amount: d.amount, wallet: r.id === d.id ? r.wallet : null, spend: r.id === d.id && r.cents !== null ? centsToDecimal(r.cents) : null, at, was: t.was }, t.held));
       }
       setRoute((r) => routeEvent(r, d));
     });
@@ -261,7 +264,7 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
     setRoute(routeTap(h.id, src.now(), c));
     // the holding as shown at the tap: the buy's fill adds to it (a read that has shown the buy by its Filled is not
     // counted twice)
-    tapHeld.current = { id: h.id, held: snapshot.state?.positions.find((x) => x.chain === chain && x.token === token) ?? null };
+    tapHeld.current = { id: h.id, held: snapshot.state?.positions.find((x) => x.chain === chain && x.token === token) ?? null, was: fillStore.readOf(chain, token) };
     void h.outcome.then((o) => {
       const at = src.now();
       setPhase((p) => outcome(p, h.id, o, at));
