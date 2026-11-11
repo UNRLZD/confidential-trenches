@@ -77,8 +77,15 @@ export type EvmWithdrawCosts = WithdrawCosts & { gas: bigint; maxFee: bigint; ti
 
 /** One owed onward send on an EVM pool: the Solana record's fields, the chain, the part (wei, a decimal), and the
  *  release's nullifier, the block its read-back starts at, its deadline, chunk and fee (decimals); `release` the
- *  release's transaction once both RPCs read it, `onward` W's signed send's hash, written before it leaves. */
-export type EvmPendingOnward = PendingOnward & { chain: Chain; part: string; nullifier: string; from: string; deadlineMs: string; chunk: string; fee: string; onward?: string };
+ *  release's transaction once both RPCs read it, `onward` W's newest signed send's hash and `onwards` every one signed
+ *  for this part (a reload's, another tab's), each written before its bytes leave. */
+export type EvmPendingOnward = PendingOnward & { chain: Chain; part: string; nullifier: string; from: string; deadlineMs: string; chunk: string; fee: string; onward?: string; onwards?: string[] };
+
+/** Every W send kept for an owed part: `onwards` and `onward`, once each. */
+export const evmKeptOnwards = (p: Pick<EvmPendingOnward, "onward" | "onwards">): string[] => [...new Set([...(p.onwards ?? []), ...(p.onward !== undefined ? [p.onward] : [])])];
+
+/** One op's finish state across its passes: each RPC's read stop, and when its release first read "none". */
+export type EvmFinishState = { stops: [bigint | null, bigint | null]; noneAt: bigint | null };
 
 export type EvmWithdrawHost = {
   chain: Chain;
@@ -547,10 +554,11 @@ async function onePart(h: EvmWithdrawHost, ask: PoolAsk, notes: NoteStore, p: Wi
 }
 
 /** The state reads' pass for an owed EVM part (a reload, a crash, a lost send): its note still this attempt's
- *  (RESERVED by it, or SPENT with its context), its release read on both RPCs (none past the deadline, or another's:
- *  stopped, nothing sent), then W's send: a hash kept read back first, W's nonce past 0 (sent: this tab's or
- *  another's), else W's send onward. null: read again later (the money may be on W). */
-export async function finishEvmOnward(h: EvmWithdrawHost, pending: EvmPendingOnward, stops: [bigint | null, bigint | null] = [null, null]): Promise<{ stage: WithdrawStage; txs: TxRef[]; arrived: Arrivals; feeNeeded?: string } | null> {
+ *  (RESERVED by it, or SPENT with its context), its release read on both RPCs (none past the deadline on two passes
+ *  the lag margin apart, as the run's own rule, or another's: stopped, nothing sent), then W's send: every hash kept
+ *  read back first, then W's send onward, its hash kept before it leaves. W's nonce past 0 with a hash kept: one of
+ *  them landed, read again until both RPCs hold its receipt. null: read again later (the money may be on W). */
+export async function finishEvmOnward(h: EvmWithdrawHost, pending: EvmPendingOnward, state: EvmFinishState = { stops: [null, null], noneAt: null }): Promise<{ stage: WithdrawStage; txs: TxRef[]; arrived: Arrivals; feeNeeded?: string } | null> {
   const done = (stage: WithdrawStage, txs: TxRef[] = [], arrived: Arrivals = {}) => ({ stage, txs, arrived });
   try {
     const ask: PoolAsk = { kind: "pool.withdraw", chain: h.chain, token: null, amount: 0n, slippageBps: 0, decimals: 18 };
@@ -562,21 +570,31 @@ export async function finishEvmOnward(h: EvmWithdrawHost, pending: EvmPendingOnw
     const l = n.leaf.label;
     const j = jOf(n.ref);
     const { w } = await seedUse(h, (seed) => spendOf(seed, n));
-    // a send of W's kept: read back first
-    if (pending.onward !== undefined) {
-      const r = await onwardReceipt(h.rpcs, pending.onward, w, pending.to);
-      if (r === "ok") return done(pending.last ? "sent" : "stopped", [{ chain: h.chain, hash: pending.onward }], { [pending.onward]: await sentValue(h.rpcs, pending.onward) });
+    // every send of W's kept: read back first
+    const kept = evmKeptOnwards(pending);
+    for (const hash of kept) {
+      const r = await onwardReceipt(h.rpcs, hash, w, pending.to);
+      if (r === "ok") return done(pending.last ? "sent" : "stopped", [{ chain: h.chain, hash }], { [hash]: await sentValue(h.rpcs, hash) });
     }
-    const v = await evmReleaseOf(h, pending, w, stops);
+    const v = await evmReleaseOf(h, pending, w, state.stops);
     if (v === null) return null;
-    if (v.end !== "mine") return done("stopped");
+    if (v.end === "none") {
+      // two passes of "none" at least the lag margin apart (the run's rule): then it never lands
+      const at = clockOf(h)();
+      state.noneAt ??= at;
+      if (at - state.noneAt < BigInt(EVM_BUY_LAG_MS)) return null;
+      h.settle();
+      return done("stopped");
+    }
+    state.noneAt = null;
     h.settle();
+    if (v.end !== "mine") return done("stopped");
     const on = await sendOnward(h, ask, pending, l, j, async (q) => {
       await h.keep?.(q);
     });
     const rel: TxRef = { chain: h.chain, hash: v.tx };
     if (on.state === "ok") return done(pending.last ? "sent" : "stopped", [rel, { chain: h.chain, hash: on.hash }], { [on.hash]: on.value.toString() });
-    if (on.state === "empty") return done(pending.last ? "sent" : "stopped", [rel]);
+    if (on.state === "empty") return kept.length > 0 ? null : done(pending.last ? "sent" : "stopped", [rel]);
     if (on.state === "fee") return { stage: "in_transit", txs: [], arrived: {}, feeNeeded: on.need.toString() };
     return null;
   } catch {

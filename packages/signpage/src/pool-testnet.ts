@@ -79,7 +79,7 @@ import type { HostAnswer, HostRefusal, KindContext, Running } from "./api.ts";
 import { readSolanaRent, solanaPoolFee } from "../../kit/src/trade/solana/pool-buy.ts";
 import type { PoolStatePrice, TxRef, WithdrawStage } from "../../kit/src/signpage/messages.ts";
 import { finishPoolOnward, runPoolWithdraw, solanaOnwardFee, solanaWithdrawMinPart, withdrawSources, type Arrivals, type HistoryPlaces, type PendingOnward } from "./pool-withdraw.ts";
-import { evmWithdrawFunds, finishEvmOnward, runEvmPoolWithdraw, type EvmPendingOnward, type EvmWithdrawHost } from "./pool-withdraw-evm.ts";
+import { evmKeptOnwards, evmWithdrawFunds, finishEvmOnward, runEvmPoolWithdraw, type EvmFinishState, type EvmPendingOnward, type EvmWithdrawHost } from "./pool-withdraw-evm.ts";
 import { evmPoolSend } from "./evm-send.ts";
 import { evmPoolVenues } from "../../kit/src/trade/evm/buy-unpinned.ts";
 import type { PoolFunds, PoolReady, PoolWithdrawFormDeps } from "./withdraw/pool-form.ts";
@@ -291,6 +291,20 @@ export const keepRelease = (w: WalletStore, opId: string, noteId: string, attemp
     if (p === undefined || p.attempt !== attempt || p.release === release) return undefined;
     return { ...r, [noteId]: { ...p, release } };
   });
+/** An EVM part's owed send kept (its release read back, W's send's hash before it leaves), only while it is still this
+ *  attempt's: every W send hash signed for it stays in `onwards`, so whichever lands (a reload's, another tab's) is
+ *  read back. One that is no longer this attempt's throws, so no send leaves unkept. */
+export const keepEvmSend = async (w: WalletStore, opId: string, q: EvmPendingOnward): Promise<void> => {
+  const got = await w.update("meta", owedKey(opId), (v) => {
+    const r = v as OwedSends | undefined;
+    const had = (r !== undefined && Object.hasOwn(r, q.noteId) ? r[q.noteId] : undefined) as EvmPendingOnward | undefined;
+    if (had === undefined || had.attempt !== q.attempt) return undefined;
+    const onwards = evmKeptOnwards({ onwards: [...evmKeptOnwards(had), ...evmKeptOnwards(q)] });
+    const onward = q.onward ?? had.onward;
+    return { ...r, [q.noteId]: { ...had, ...q, ...(onward !== undefined ? { onward } : {}), ...(onwards.length > 0 ? { onwards } : {}) } };
+  });
+  if (got === undefined) throw new Error("owed send: not this attempt's");
+};
 /** The op's owed send for `noteId` dropped, once the op no longer owes it; a later part's stays (one compare-and-set). */
 export const dropSend = (w: WalletStore, opId: string, noteId: string): Promise<unknown> =>
   w.update("meta", owedKey(opId), (v) => {
@@ -1810,7 +1824,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         // an EVM pool's owed send: its chain's finish (src/pool-withdraw-evm.ts); a chain with no pool here is read again
         if (POOL_TESTNET && (evmChain === "base" || evmChain === "robinhood")) {
           const eh = evmWithdrawHost(evmChain, notes);
-          const got = eh === null ? null : await locks.request(WALLET_SEED_LOCK, { mode: "shared" }, () => finishEvmOnward(eh, pending as EvmPendingOnward, evmStopsOf(k)));
+          // the finish's own send kept as the run's is, before it leaves
+          const got = eh === null ? null : await locks.request(WALLET_SEED_LOCK, { mode: "shared" }, () => finishEvmOnward({ ...eh, keep: (q) => keepEvmSend(ops, k, q) }, pending as EvmPendingOnward, evmStopsOf(k)));
           if (got?.feeNeeded !== undefined) await ops.update("ops", k, (v) => mergeWithdrawOp(v, { feeNeeded: got.feeNeeded! }));
           if (got && got.feeNeeded === undefined) {
             owedRetry.delete(k);
@@ -1944,10 +1959,10 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   // pool.withdraw on Base or Robinhood (src/pool-withdraw-evm.ts): the chain's pool (its pin decides: none, no
   // withdraw), the wallet's evmPool on the trade's pair for the bind, the page's prover and note store, the helper's
   // send, the chain's RESERVED settle; the op record and its owed send as Solana's (meta/owed/<op id>)
-  const evmStops = new Map<string, [bigint | null, bigint | null]>();
-  const evmStopsOf = (k: string): [bigint | null, bigint | null] => {
+  const evmStops = new Map<string, EvmFinishState>();
+  const evmStopsOf = (k: string): EvmFinishState => {
     let s = evmStops.get(k);
-    if (!s) evmStops.set(k, (s = [null, null]));
+    if (!s) evmStops.set(k, (s = { stops: [null, null], noneAt: null }));
     return s;
   };
   const evmWithdrawHost = (chain: "base" | "robinhood", notes: NoteStore): EvmWithdrawHost | null => {
@@ -1999,15 +2014,6 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       notes.close();
     }
   };
-  // the owed send's record kept (its release read back, W's send's hash before it leaves), only while it is still
-  // this attempt's
-  const keepEvmSend = (ops: WalletStore, opId: string, q: EvmPendingOnward): Promise<unknown> =>
-    ops.update("meta", `owed/${opId}`, (v) => {
-      const r = v as OwedSends | undefined;
-      const had = r !== undefined && Object.hasOwn(r, q.noteId) ? r[q.noteId] : undefined;
-      if (had === undefined || had.attempt !== q.attempt) return undefined;
-      return { ...r, [q.noteId]: q };
-    });
   const evmWithdrawRun = async (chain: "base" | "robinhood", ready: PoolReady, opId: string): Promise<void> => {
     if (!POOL_TESTNET || !locks) return;
     const ops = await page.store();

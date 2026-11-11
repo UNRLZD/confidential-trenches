@@ -28,7 +28,7 @@ const { SOL_POOLS, SOL_POOL_TABLES, solanaPoolOf, SOL_LADDER, SOL_EPOCH_MS, SOL_
 const { POOL_TESTNET } = await import("../../wallet/src/pool/network.ts");
 const { EVM_POOLS } = await import("../../wallet/src/pool/evm.ts");
 const { poolKinds } = await import("../src/pool-kinds.ts");
-const { PAGE_CLUSTER, TESTNET_RPCS, PAGE_SOL_MARK_BATCHES, testnetPoolDeps, testnetPool, poolRelayFee, helperPoolSend, POOL_SEND_TIMEOUT_MS, PAGE_TABLES, settleFreedOps, oweSend, dropSend, keepRelease, mergeWithdrawOp } = await import("../src/pool-testnet.ts");
+const { PAGE_CLUSTER, TESTNET_RPCS, PAGE_SOL_MARK_BATCHES, testnetPoolDeps, testnetPool, poolRelayFee, helperPoolSend, POOL_SEND_TIMEOUT_MS, PAGE_TABLES, settleFreedOps, oweSend, dropSend, keepRelease, keepEvmSend, mergeWithdrawOp } = await import("../src/pool-testnet.ts");
 const { SIGNPAGE_TIMEOUT_MS } = await import("../../kit/src/signpage/client.ts");
 // the withdraw tests' world, loaded once here so its stores close after the whole file (its after() is file-level)
 const WORLD = await import("./pool-withdraw-world.ts");
@@ -1029,6 +1029,22 @@ test("a withdraw whose first run is still live beside the page opened again: one
   assert.equal(wd.onwards().length, 1, "one onward send, whichever page made it");
   assert.equal(wd.balance.get(W), 0n);
   assert.equal(wd.balance.get(TO), amount);
+});
+
+test("keepEvmSend keeps every W send signed for the part (a reload's, another tab's) beside the newest, and refuses, so nothing leaves unkept, once the send is no longer this attempt's", async () => {
+  const { w } = await wallet();
+  const p = { ...owedPending("n1", "0x1111111111111111111111111111111111111111"), chain: "base", part: "1", nullifier: "2", from: "3", deadlineMs: "4", chunk: "5", fee: "6" } as const;
+  await oweSend(w, "op1", p);
+  await keepEvmSend(w, "op1", { ...p, onward: "0xh1" });
+  // a second tab's send, from its own copy that never saw the first
+  await keepEvmSend(w, "op1", { ...p, onward: "0xh2" });
+  // the run's release-only keep after them keeps both
+  await keepEvmSend(w, "op1", { ...p, feeCap: "7000" });
+  assert.deepEqual(await w.get("meta", "owed/op1"), { n1: { ...p, feeCap: "7000", onward: "0xh2", onwards: ["0xh1", "0xh2"] } });
+  await assert.rejects(keepEvmSend(w, "op1", { ...p, attempt: "cd".repeat(16), onward: "0xh3" }), /not this attempt's/);
+  await dropSend(w, "op1", "n1");
+  await assert.rejects(keepEvmSend(w, "op1", { ...p, onward: "0xh4" }), /not this attempt's/);
+  assert.deepEqual(await w.get("meta", "owed/op1"), {});
 });
 
 // fold 4 (review LOW): the release's own signature is added to the send still stored, never a whole owe again

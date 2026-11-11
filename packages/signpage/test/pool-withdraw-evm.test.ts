@@ -3,6 +3,7 @@
 // its estimate and margin and its run on both, refused when it reverts or the two disagree), the release's calldata
 // byte for byte the pool's testnet run's encoding, and an owed send's finish after a reload. The two RPCs are fakes.
 import { test } from "node:test";
+import { keccak_256 } from "@noble/hashes/sha3.js";
 import assert from "node:assert/strict";
 import { entropyToWords, freshWallet, wordsToSeed64 } from "../../wallet/src/derive/keys.ts";
 import { evmRelayDataBytes, type EvmPoolPin, type EvmPoolRequest, type EvmRelayData } from "../../wallet/src/pool/evm.ts";
@@ -11,6 +12,8 @@ import type { Pool } from "../../wallet/src/pool/pool.ts";
 import { evmPoolChainFee, evmPoolChainFeeReads } from "../../kit/src/trade/evm/pool-fee.ts";
 import { evmWithdrawCalldata } from "../src/evm-send.ts";
 import { planPoolWithdraw, withdrawSources } from "../src/pool-withdraw.ts";
+import { evmPoolVenues } from "../../kit/src/trade/evm/buy-unpinned.ts";
+import { EVM_BUY_LAG_MS } from "../src/pool-buy-evm.ts";
 import { evmToRefused, evmWithdrawCosts, evmWithdrawMinPart, finishEvmOnward, releaseContextOf, EVM_ONWARD_TIP, EVM_ONWARD_L1_BYTES, type EvmPendingOnward, type EvmWithdrawHost } from "../src/pool-withdraw-evm.ts";
 import { EVM_ONWARD_GAS, evmOnwardCodeGas, withdrawNoteFloor } from "../src/rules/pool.ts";
 
@@ -34,11 +37,22 @@ const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, "
 const q = (v: bigint) => "0x" + v.toString(16);
 const word = (v: bigint) => "0x" + v.toString(16).padStart(64, "0");
 
-type Side = { code?: Record<string, string>; estimate?: (call: { from: string; to: string }) => bigint; reverts?: boolean; l1?: bigint; operator?: bigint; nonce?: bigint; receipt?: unknown; tx?: unknown };
+type Side = {
+  code?: Record<string, string>; estimate?: (call: { from: string; to: string }) => bigint; reverts?: boolean; l1?: bigint; operator?: bigint; nonce?: bigint; receipt?: unknown; tx?: unknown;
+  // a finish's release read and W's send: the blocks' time, the pool's logs, transactions and receipts by hash, W's
+  // balance, the raw sends made, and a send's receipt (status 1, from W to To) once one is made
+  timeMs?: bigint; logs?: unknown[]; txs?: Record<string, unknown>; receipts?: Record<string, unknown>; balance?: bigint; sent?: string[]; landsOnSend?: boolean;
+};
 type Call = { method: string; params: unknown[] };
 const rpcOf = (s: Side, calls: Call[]) => async (method: string, params: unknown[] = []): Promise<unknown> => {
   calls.push({ method, params });
-  if (method === "eth_getBlockByNumber") return { number: "0x100", hash: "0x" + "be".repeat(32), timestamp: q(NOW / 1000n), baseFeePerGas: q(BASE_FEE) };
+  if (method === "eth_getBlockByNumber") return { number: "0x100", hash: "0x" + "be".repeat(32), timestamp: q((s.timeMs ?? NOW) / 1000n), baseFeePerGas: q(BASE_FEE) };
+  if (method === "eth_getLogs") return s.logs ?? [];
+  if (method === "eth_getBalance") return q(s.balance ?? 0n);
+  if (method === "eth_sendRawTransaction") {
+    (s.sent ??= []).push(String(params[0]));
+    return "0x" + hex(keccak_256(Uint8Array.from(Buffer.from(String(params[0]).slice(2), "hex"))));
+  }
   if (method === "eth_getCode") return s.code?.[String(params[0]).toLowerCase()] ?? "0x";
   if (method === "eth_estimateGas") return q(s.estimate?.(params[0] as { from: string; to: string }) ?? EVM_ONWARD_GAS);
   if (method === "eth_call") {
@@ -49,8 +63,13 @@ const rpcOf = (s: Side, calls: Call[]) => async (method: string, params: unknown
     return "0x";
   }
   if (method === "eth_getTransactionCount") return q(s.nonce ?? 0n);
-  if (method === "eth_getTransactionReceipt") return s.receipt ?? null;
-  if (method === "eth_getTransactionByHash") return s.tx ?? null;
+  if (method === "eth_getTransactionReceipt") {
+    const h = String(params[0]);
+    if (s.receipts?.[h] !== undefined) return s.receipts[h];
+    const raw = s.landsOnSend ? s.sent?.find((r) => "0x" + hex(keccak_256(Uint8Array.from(Buffer.from(r.slice(2), "hex")))) === h) : undefined;
+    return raw !== undefined ? { status: "0x1", from: W, to: TO, blockHash: "0x" + "ee".repeat(32) } : (s.receipt ?? null);
+  }
+  if (method === "eth_getTransactionByHash") return s.txs?.[String(params[0])] ?? s.tx ?? null;
   throw new Error(`no ${method}`);
 };
 const poolOf = (fee = FEE) =>
@@ -219,8 +238,95 @@ test("a reload whose kept send is not read on both RPCs yet, nor the release: re
   assert.equal(await finishEvmOnward(host, pendingOf({ onward: ONWARD })), null);
 });
 
+// a finish's release read: the pool's Withdrawn of the part's nullifier (12) paying `to` the chunk, in transaction REL
+// whose calldata carries `context`; the blocks past the deadline once `ended`
+const REL = "0x" + "ab".repeat(32);
+const PART = 10n ** 14n;
+const W_BOUND = 21_000n * (2n * BASE_FEE + EVM_ONWARD_TIP) + 900n;
+const releaseSide = (o: { to?: string; context?: bigint; logs?: boolean; ended?: boolean } = {}): Side => {
+  const chunk = PART + FEE + 210_000_000_000n;
+  const relay: EvmRelayData = { recipient: o.to ?? W, feeRecipient: FEE_TO, feeCap: FEE, deadlineMs: NOW + 210_000n, refundPrecommitment: 9n, salt: "0x" + "ab".repeat(16) };
+  const proof = { pi_a: ["1", "2", "1"], pi_b: [["3", "4"], ["5", "6"], ["1", "0"]], pi_c: ["7", "8", "1"] };
+  const signals = ["11", "12", "13", "14", "15", "16", "17", String(o.context ?? 18n)];
+  const input = "0x" + hex(evmWithdrawCalldata(POOL, relay, proof as never, signals as never, FEE, new Uint8Array(65).fill(1)));
+  const topic = "0x" + hex(keccak_256(new TextEncoder().encode("Withdrawn(address,address,uint256,uint256,uint256,uint256)")));
+  const data = "0x" + [BigInt(FEE_TO), chunk, FEE, 12n, 1n].map((v) => v.toString(16).padStart(64, "0")).join("");
+  const log = { address: POOL, topics: [topic, word(BigInt(o.to ?? W))], data, blockNumber: "0xf0", logIndex: "0x0", transactionHash: REL, blockHash: "0x" + "bb".repeat(32) };
+  return { timeMs: o.ended === false ? NOW : NOW + 300_000n, logs: o.logs === false ? [] : [log], txs: { [REL]: { to: POOL, input } }, balance: PART + W_BOUND };
+};
+const finishHost = (side: Side, o: { note?: NoteRecord; clock?: { ms: bigint }; settled?: number[]; kept?: EvmPendingOnward[] } = {}): EvmWithdrawHost =>
+  ({
+    ...fullHost(o.note ?? noteOf("RESERVED"), side),
+    // the testnet build's venues, Base Sepolia's pool this test's
+    venues: Object.freeze({ "base-sepolia": Object.freeze({ ...evmPoolVenues()["base-sepolia"], pool: POOL }) }),
+    rpcs: [rpcOf(side, []), rpcOf(side, [])],
+    now: () => o.clock?.ms ?? NOW,
+    wait: async () => {},
+    settle: () => void o.settled?.push(1),
+    keep: async (p: EvmPendingOnward) => {
+      // kept before its bytes leave: no raw send yet of this hash
+      assert.ok(!(side.sent ?? []).some((r) => "0x" + hex(keccak_256(Uint8Array.from(Buffer.from(r.slice(2), "hex")))) === p.onward), "kept before it leaves");
+      o.kept?.push(p);
+    },
+  }) as unknown as EvmWithdrawHost;
+const BIG_CAP = { feeCap: W_BOUND.toString() };
+
+test("a reload whose release reads none past its deadline: read again until a second pass the lag margin later reads none too, then stopped and the note settled, nothing sent", async () => {
+  const side = releaseSide({ logs: false });
+  const clock = { ms: NOW };
+  const settled: number[] = [];
+  const state = { stops: [null, null] as [bigint | null, bigint | null], noneAt: null as bigint | null };
+  const host = finishHost(side, { clock, settled });
+  assert.equal(await finishEvmOnward(host, pendingOf(BIG_CAP), state), null, "one pass of none: read again");
+  clock.ms = NOW + BigInt(EVM_BUY_LAG_MS) - 1n;
+  assert.equal(await finishEvmOnward(host, pendingOf(BIG_CAP), state), null, "under the lag margin: read again");
+  clock.ms = NOW + BigInt(EVM_BUY_LAG_MS);
+  assert.deepEqual(await finishEvmOnward(host, pendingOf(BIG_CAP), state), { stage: "stopped", txs: [], arrived: {} });
+  assert.equal(settled.length, 1, "the note settled once");
+  assert.deepEqual(side.sent ?? [], [], "nothing sent");
+  // a read not yet past the deadline is no "none": read again
+  assert.equal(await finishEvmOnward(finishHost(releaseSide({ logs: false, ended: false }), { clock }), pendingOf(BIG_CAP)), null);
+});
+
+test("a reload whose release is another's (another context, or paying another address): stopped, the note settled, nothing sent", async () => {
+  for (const side of [releaseSide({ context: 19n }), releaseSide({ to: SAFE })]) {
+    const settled: number[] = [];
+    assert.deepEqual(await finishEvmOnward(finishHost(side, { settled }), pendingOf(BIG_CAP)), { stage: "stopped", txs: [], arrived: {} });
+    assert.deepEqual(side.sent ?? [], [], "nothing sent");
+    assert.equal(settled.length, 1);
+  }
+});
+
+test("a reload whose release is this attempt's and W's send never left: W sends exactly the part to To, its hash kept before it leaves, the op sent with what arrived", async () => {
+  const side = { ...releaseSide(), landsOnSend: true };
+  const kept: EvmPendingOnward[] = [];
+  const got = await finishEvmOnward(finishHost(side, { kept }), pendingOf(BIG_CAP));
+  assert.equal(side.sent?.length, 2, "the one send, to both RPCs");
+  assert.equal(side.sent![0], side.sent![1]);
+  const hash = "0x" + hex(keccak_256(Uint8Array.from(Buffer.from(side.sent![0]!.slice(2), "hex"))));
+  assert.deepEqual(kept.map((p) => p.onward), [hash], "its hash kept");
+  assert.deepEqual(got, { stage: "sent", txs: [{ chain: "base", hash: REL }, { chain: "base", hash }], arrived: { [hash]: PART.toString() } });
+});
+
+test("a reload with several of W's sends kept (a reload's, another tab's): the one that landed read back, whichever it is, nothing signed again", async () => {
+  const H1 = "0x" + "c1".repeat(32);
+  const H2 = "0x" + "c2".repeat(32);
+  const side: Side = { ...releaseSide(), receipts: { [H1]: { status: "0x1", from: W, to: TO, blockHash: "0x" + "ee".repeat(32) } }, txs: { ...releaseSide().txs, [H1]: { value: q(PART) } } };
+  const got = await finishEvmOnward(finishHost(side), pendingOf({ ...BIG_CAP, onward: H2, onwards: [H1, H2] }));
+  assert.deepEqual(got, { stage: "sent", txs: [{ chain: "base", hash: H1 }], arrived: { [H1]: PART.toString() } });
+  assert.deepEqual(side.sent ?? [], [], "nothing signed again");
+});
+
+test("W's nonce past 0 (one of its sends landed): with a send kept, read again until both RPCs hold its receipt; with none kept, sent with the release", async () => {
+  const kept = { ...releaseSide(), nonce: 1n };
+  assert.equal(await finishEvmOnward(finishHost(kept), pendingOf({ ...BIG_CAP, onward: "0x" + "c2".repeat(32) })), null);
+  assert.deepEqual(kept.sent ?? [], [], "nothing signed at nonce 1");
+  const none = { ...releaseSide(), nonce: 1n };
+  assert.deepEqual(await finishEvmOnward(finishHost(none), pendingOf(BIG_CAP)), { stage: "sent", txs: [{ chain: "base", hash: REL }], arrived: {} });
+  assert.deepEqual(none.sent ?? [], []);
+});
+
 test("the withdraw's live check reads what the page sends: the release's selector, the pool's Withdrawn topic and the bundle marks this code carries (scripts/live-checks/evm-withdraw-mainnet.mjs)", async () => {
-  const { keccak_256 } = await import("@noble/hashes/sha3.js");
   const { EVM_WITHDRAW_SIGNATURE } = await import("../src/evm-send.ts");
   const { EVM_POOL_EVENTS } = await import("../../wallet/src/pool/evm.ts");
   const { readFileSync } = await import("node:fs");
