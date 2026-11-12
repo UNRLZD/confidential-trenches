@@ -1,0 +1,195 @@
+{
+ "about": "good: this card's helper senders in process (record-local.mjs at the card's head); bad_before_card: the same at 2258f8e3c, whose helper has no pieces route",
+ "good": [
+  {
+   "cluster": "devnet",
+   "program": "5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ",
+   "pool": "2S5wpE7U7GoJRVqox1dXmTQm38SmseG8A4F9eReWwYwr",
+   "reads": [
+    {
+     "asked": "fee",
+     "readAt": "2026-11-12T14:10:46.685Z",
+     "status": 200,
+     "headers": {
+      "content-type": "application/json",
+      "x-helper-commit": "140b35111ae07bb055a7f7274f88641177657d54"
+     },
+     "body": "{\"chain\":\"solana\",\"cluster\":\"devnet\",\"program\":\"5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ\",\"pool\":\"2S5wpE7U7GoJRVqox1dXmTQm38SmseG8A4F9eReWwYwr\",\"fee_payer\":\"3nEuhozEba4inpzA5oSZx2wmP9Gis6fERL7EkrKGGbeS\",\"epoch_ms\":60000,\"epoch_start_ms\":1794492600000,\"fee\":\"1300000\",\"step\":\"100000\"}"
+    },
+    {
+     "asked": "two_wallets",
+     "readAt": "2026-11-12T14:10:46.713Z",
+     "status": 422,
+     "headers": {
+      "content-type": "application/json",
+      "x-helper-commit": "140b35111ae07bb055a7f7274f88641177657d54"
+     },
+     "body": "{\"error\":{\"code\":\"wallets_differ\"}}"
+    },
+    {
+     "asked": "one_tx",
+     "readAt": "2026-11-12T14:10:46.713Z",
+     "status": 400,
+     "headers": {
+      "content-type": "application/json",
+      "x-helper-commit": "140b35111ae07bb055a7f7274f88641177657d54"
+     },
+     "body": "{\"error\":{\"code\":\"bad_shape\",\"detail\":\"not 2 to 4 transactions\"}}"
+    },
+    {
+     "asked": "one_wallet",
+     "readAt": "2026-11-12T14:10:46.717Z",
+     "status": 422,
+     "headers": {
+      "content-type": "application/json",
+      "x-helper-commit": "140b35111ae07bb055a7f7274f88641177657d54"
+     },
+     "body": "{\"error\":{\"code\":\"blockhash_not_found\"}}"
+    }
+   ]
+  },
+  {
+   "cluster": "devnet",
+   "program": "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8",
+   "pool": "92YuYhb4Cj2UM3JxFAWB2kyHcdaPkWCnoNkoUAZZK2cr",
+   "reads": [
+    {
+     "asked": "fee",
+     "readAt": "2026-11-12T14:10:46.717Z",
+     "status": 200,
+     "headers": {
+      "content-type": "application/json",
+      "x-helper-commit": "140b35111ae07bb055a7f7274f88641177657d54"
+     },
+     "body": "{\"chain\":\"solana\",\"cluster\":\"devnet\",\"program\":\"9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8\",\"pool\":\"92YuYhb4Cj2UM3JxFAWB2kyHcdaPkWCnoNkoUAZZK2cr\",\"fee_payer\":\"3nEuhozEba4inpzA5oSZx2wmP9Gis6fERL7EkrKGGbeS\",\"epoch_ms\":60000,\"epoch_start_ms\":1794492600000,\"fee\":\"1300000\",\"step\":\"100000\"}"
+    },
+    {
+     "asked": "two_wallets",
+     "readAt": "2026-11-12T14:10:46.731Z",
+     "status": 422,
+     "headers": {
+      "content-type": "application/json",
+      "x-helper-commit": "140b35111ae07bb055a7f7274f88641177657d54"
+     },
+     "body": "{\"error\":{\"code\":\"wallets_differ\"}}"
+    },
+    {
+     "asked": "one_tx",
+     "readAt": "2026-11-12T14:10:46.731Z",
+     "status": 400,
+     "headers": {
+      "content-type": "application/json",
+      "x-helper-commit": "140b35111ae07bb055a7f7274f88641177657d54"
+     },
+     "body": "{\"error\":{\"code\":\"bad_shape\",\"detail\":\"not 2 to 4 transactions\"}}"
+    },
+    {
+     "asked": "one_wallet",
+     "readAt": "2026-11-12T14:10:46.734Z",
+     "status": 422,
+     "headers": {
+      "content-type": "application/json",
+      "x-helper-commit": "140b35111ae07bb055a7f7274f88641177657d54"
+     },
+     "body": "{\"error\":{\"code\":\"blockhash_not_found\"}}"
+    }
+   ]
+  }
+ ],
+ "bad_before_card": [
+  {
+   "cluster": "devnet",
+   "program": "5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ",
+   "pool": "2S5wpE7U7GoJRVqox1dXmTQm38SmseG8A4F9eReWwYwr",
+   "reads": [
+    {
+     "asked": "fee",
+     "readAt": "2026-11-12T14:00:51.962Z",
+     "status": 200,
+     "headers": {
+      "content-type": "application/json",
+      "x-helper-commit": "2258f8e3c415c3cfdbe385bf02d9c68f8df60505"
+     },
+     "body": "{\"chain\":\"solana\",\"cluster\":\"devnet\",\"program\":\"5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ\",\"pool\":\"2S5wpE7U7GoJRVqox1dXmTQm38SmseG8A4F9eReWwYwr\",\"fee_payer\":\"73mrudFA2i1BSteq1dV32nKhVxZXMwTUTB5Bc7o8CNnX\",\"epoch_ms\":60000,\"epoch_start_ms\":1794492000000,\"fee\":\"1300000\",\"step\":\"100000\"}"
+    },
+    {
+     "asked": "two_wallets",
+     "readAt": "2026-11-12T14:00:51.972Z",
+     "status": 404,
+     "headers": {
+      "content-type": "application/json",
+      "x-helper-commit": "2258f8e3c415c3cfdbe385bf02d9c68f8df60505"
+     },
+     "body": "{\"error\":{\"code\":\"not_found\"}}"
+    },
+    {
+     "asked": "one_tx",
+     "readAt": "2026-11-12T14:00:51.972Z",
+     "status": 404,
+     "headers": {
+      "content-type": "application/json",
+      "x-helper-commit": "2258f8e3c415c3cfdbe385bf02d9c68f8df60505"
+     },
+     "body": "{\"error\":{\"code\":\"not_found\"}}"
+    },
+    {
+     "asked": "one_wallet",
+     "readAt": "2026-11-12T14:00:51.972Z",
+     "status": 404,
+     "headers": {
+      "content-type": "application/json",
+      "x-helper-commit": "2258f8e3c415c3cfdbe385bf02d9c68f8df60505"
+     },
+     "body": "{\"error\":{\"code\":\"not_found\"}}"
+    }
+   ]
+  },
+  {
+   "cluster": "devnet",
+   "program": "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8",
+   "pool": "92YuYhb4Cj2UM3JxFAWB2kyHcdaPkWCnoNkoUAZZK2cr",
+   "reads": [
+    {
+     "asked": "fee",
+     "readAt": "2026-11-12T14:00:51.972Z",
+     "status": 200,
+     "headers": {
+      "content-type": "application/json",
+      "x-helper-commit": "2258f8e3c415c3cfdbe385bf02d9c68f8df60505"
+     },
+     "body": "{\"chain\":\"solana\",\"cluster\":\"devnet\",\"program\":\"9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8\",\"pool\":\"92YuYhb4Cj2UM3JxFAWB2kyHcdaPkWCnoNkoUAZZK2cr\",\"fee_payer\":\"73mrudFA2i1BSteq1dV32nKhVxZXMwTUTB5Bc7o8CNnX\",\"epoch_ms\":60000,\"epoch_start_ms\":1794492000000,\"fee\":\"1300000\",\"step\":\"100000\"}"
+    },
+    {
+     "asked": "two_wallets",
+     "readAt": "2026-11-12T14:00:51.979Z",
+     "status": 404,
+     "headers": {
+      "content-type": "application/json",
+      "x-helper-commit": "2258f8e3c415c3cfdbe385bf02d9c68f8df60505"
+     },
+     "body": "{\"error\":{\"code\":\"not_found\"}}"
+    },
+    {
+     "asked": "one_tx",
+     "readAt": "2026-11-12T14:00:51.979Z",
+     "status": 404,
+     "headers": {
+      "content-type": "application/json",
+      "x-helper-commit": "2258f8e3c415c3cfdbe385bf02d9c68f8df60505"
+     },
+     "body": "{\"error\":{\"code\":\"not_found\"}}"
+    },
+    {
+     "asked": "one_wallet",
+     "readAt": "2026-11-12T14:00:51.979Z",
+     "status": 404,
+     "headers": {
+      "content-type": "application/json",
+      "x-helper-commit": "2258f8e3c415c3cfdbe385bf02d9c68f8df60505"
+     },
+     "body": "{\"error\":{\"code\":\"not_found\"}}"
+    }
+   ]
+  }
+ ]
+}
