@@ -349,7 +349,7 @@ export interface ReadyEvent {
  * The page sends a client only the states, stages and facts its version reads. A change to what the page may send
  * (a state field, an op kind, a stage, a fact) raises it, and the page maps the version before it down.
  */
-export const SIGNPAGE_KIT_VERSION = "1.10";
+export const SIGNPAGE_KIT_VERSION = "1.11";
 
 /**
  * The client's half of the handshake, app to page (card kit-frame-version): its kit version, posted before every
@@ -603,8 +603,14 @@ export interface SignpageState {
    * as its mint or contract names them (a u8), so an app sizes a partial sell in base units; `amount` then has no more
    * fraction digits than that. Absent from a page of an earlier release: an app then reads the amount at its string's
    * own scale.
+   *
+   * `asset_held` (card portfolio-counts-money-an-open-buy-holds, additive) is the chain's pool asset (SOL on Solana)
+   * the position's wallets hold beside the token and get back at a full sell, in whole units as `pools[].balance` is:
+   * each wallet's own balance and that of its accounts a full sell closes back to it (its token account, its venue's
+   * volume accounts), read on chain. Never the fees already paid, never counted twice. Absent when any of the position's
+   * wallets was not read (never "0" in its place), on EVM, and from a page of an earlier release.
    */
-  readonly positions: readonly { readonly chain: Chain; readonly token: string; readonly amount: string; readonly cost: string; readonly wallets: readonly string[]; readonly decimals?: number }[];
+  readonly positions: readonly { readonly chain: Chain; readonly token: string; readonly amount: string; readonly cost: string; readonly wallets: readonly string[]; readonly decimals?: number; readonly asset_held?: string }[];
   readonly orders: readonly {
     readonly order_id: string;
     readonly chain: Chain;

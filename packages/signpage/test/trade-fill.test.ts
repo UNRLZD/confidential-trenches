@@ -183,6 +183,22 @@ test("at most FILL_OPS_MAX ops a run, newest first (review P3-1)", async () => {
   assert.equal(ops.get("b0")!.pool_amount, undefined, "the oldest wait for the next run");
 });
 
+// Card portfolio-counts-money-an-open-buy-holds, review of 98d75c8cb: the sign out's stop ends the run. A read that
+// answers after it writes nothing, and no other op is read. Red before: the loop had no stop, so every op was read and
+// written for an account already signed out.
+test("a stop mid-run: the op whose read answers after it is not written, and no other op is read", async () => {
+  const ops = new Map<string, Record<string, unknown>>();
+  for (let i = 0; i < 3; i++) ops.set(`b${i}`, { kind: "buy", stage: "filled", txs: [{ chain: "solana", hash: SIG.buy1 }], created_ms: i, chain: "solana", token: MINT });
+  const s: FillStore = { keys: async () => [...ops.keys()], get: async (_s, k) => ops.get(k), update: async (_s, k, f) => void ops.set(k, f(ops.get(k)) as Record<string, unknown>) };
+  const stop = new AbortController();
+  let reads = 0;
+  // the sign out comes while the first read is out; its answer comes after it
+  const wrote = await fillTradeOps({ store: s, read: async (sig) => (reads++, stop.abort(), TX[sig]), price: () => null, now: () => OLD, signal: stop.signal });
+  assert.equal(wrote, false);
+  assert.equal(reads, 1, "no other op read after the stop");
+  assert.ok([...ops.values()].every((o) => o.pool_amount === undefined), "nothing written after the stop");
+});
+
 // R1 (review P2-1): a PumpSwap sale as the kit builds it (pool-buy.ts solanaPoolSellSteps): W makes its wrapped-SOL
 // account (a system CreateAccount of rent(165) = 2,039,280 from W), PumpSwap pays the proceeds into it, and the close
 // gives W the proceeds and that rent back. Modelled on the real curve sale 32CSJ1 (no PumpSwap sale of ours is on

@@ -106,6 +106,8 @@ export const IN_PROCESS = [
   { key: "app-harness-signin-e2e", host: "app", load: () => import("../live-checks/app-harness-signin-e2e.mjs"), run: async (m, f) => m.judge(await m.probe(SIGN, APP, ["app"], f)) },
   { key: "portfolio-shows-pool-trades", host: "sign", load: () => import("../live-checks/portfolio-shows-pool-trades.mjs"), run: async (m, f) => m.judge(await m.collect({ hosts: ["sign"], fetchFn: f })) },
   { key: "portfolio-shows-pool-trades", host: "app", load: () => import("../live-checks/portfolio-shows-pool-trades.mjs"), run: async (m, f) => m.judge(await m.collect({ hosts: ["app"], fetchFn: f })) },
+  { key: "portfolio-counts-money-an-open-buy-holds", host: "sign", load: () => import("../live-checks/portfolio-counts-money-an-open-buy-holds.mjs"), run: async (m, f) => m.judge(await m.collect({ hosts: ["sign"], fetchFn: f })) },
+  { key: "portfolio-counts-money-an-open-buy-holds", host: "app", load: () => import("../live-checks/portfolio-counts-money-an-open-buy-holds.mjs"), run: async (m, f) => m.judge(await m.collect({ hosts: ["app"], fetchFn: f })) },
 ];
 /** The checks run in their own local mode, as a child process: the arguments after the check's path. */
 export const CHILD_RUNS = [
