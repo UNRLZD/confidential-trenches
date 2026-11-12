@@ -405,33 +405,56 @@ async function landPlanned(v: Vault, pool: Fake, ref: NoteRef, value: bigint, no
   return v.ns.move(n.id, "INCOMING", "UNSPENT", { leaf: { value, label, commitment, leafIndex: BigInt(v.stateLeaves.length - 1) } });
 }
 
-test("only a deposit's own notes are proved at once: a return note and a return's second arrival wait for the boundary", async () => {
+// card fresh-money-spendable-at-once (owner, 12 Nov 08:48Z: no terminal locks funds for a minute): a sell's money back,
+// its second arrival and a deposit's are each ready on the newest root as soon as they land; a rested note keeps the
+// epoch root; at the next epoch every one of them is made again on that epoch's root
+test("a note of any kind that landed this epoch is proved at once on the newest root; a rested note keeps the epoch root", async () => {
   const v = await vaultWith([usd(2)]);
   const pool = fakePool(v);
   const q = queue(v, pool);
   pool.t.now += 10_000n;
-  const dep = await landDeposit(v, pool, usd(50), 1000n);
-  const i = (dep.ref as Extract<NoteRef, { kind: "deposit" }>).i;
   const back = await landPlanned(v, pool, { kind: "return", c: "sol", l: 7n, j: 1 }, usd(20), 2000n); // a sell's money back
   const backSecond = await landPlanned(v, pool, { kind: "second", id: { id: "R", c: "sol", l: 7n, j: 1 }, n: 0 }, usd(10), 2001n);
-  const depSecond = await landPlanned(v, pool, { kind: "second", id: { id: "U", s: SCOPE, i }, n: 0 }, usd(5), 1001n);
-  await q.refresh();
+  const rested = (await v.ns.list()).find((n) => n.id !== back.id && n.id !== backSecond.id)!;
+  const pass = await q.refresh();
+  assert.deepEqual(pass.failed, []);
   const ready = new Map(q.ready().map((r) => [r.noteId, r]));
-  assert.equal(ready.get(dep.id)!.root, "newest");
-  assert.equal(ready.get(depSecond.id)!.root, "newest", "a second arrival of a deposit from U is the deposit's own");
-  assert.equal(ready.size, 3);
+  assert.equal(ready.size, 3, "the money back is ready at once, with no boundary wait");
   for (const n of [back, backSecond]) {
-    assert.ok(!ready.has(n.id), "a return's note never on the root right after its own leaf");
-    assert.equal((await state(v, n.id)).state, "UNSPENT");
+    const r = ready.get(n.id)!;
+    assert.equal(r.root, "newest");
+    assert.equal(r.publicSignals[3], v.stateTree.root!.toString(), "the newest root, its own leaf in it");
+    assert.equal(r.deadlineMs, START + L, "the epoch's grid all the same");
+    assert.equal(r.binding.feeCap, feeOf(START), "the epoch's fee");
   }
-  for (const n of [dep, depSecond]) await q.take(n.id);
+  assert.equal(ready.get(rested.id)!.root, "epoch", "a rested note keeps the shared epoch root");
+  assert.equal(ready.get(rested.id)!.publicSignals[3], pool.rootAt(START).state.toString());
   pool.t.now = START + E + 10n;
   const p = await q.refresh();
-  assert.deepEqual(p.made.sort(), [back.id, backSecond.id].sort());
-  for (const r of q.ready().filter((x) => p.made.includes(x.noteId))) {
+  assert.deepEqual(p.remade.sort(), [rested.id, back.id, backSecond.id].sort());
+  for (const r of q.ready()) {
     assert.equal(r.root, "epoch");
     assert.equal(r.publicSignals[3], pool.rootAt(START + E).state.toString());
   }
+});
+
+test("a note whose leaf the newest cut does not hold yet (its landing read ahead of the pool's time) is not proved, and is at the next pass", async () => {
+  const v = await vaultWith([usd(2)]);
+  const pool = fakePool(v);
+  const q = queue(v, pool);
+  pool.t.now += 10_000n;
+  const trees = pool.trees;
+  let behind = true;
+  // the pool's time read 1 s before the leaf's own: the newest cut at now + 1 lacks it
+  pool.trees = async (before, signal, opts) => trees(opts?.newest && behind ? before - 1_001n : before, signal, opts);
+  const back = await landPlanned(v, pool, { kind: "return", c: "sol", l: 7n, j: 1 }, usd(20), 2000n);
+  const first = await q.refresh();
+  assert.deepEqual(first.failed, [], "no proof started on a tree without its leaf");
+  assert.ok(!q.ready().some((r) => r.noteId === back.id));
+  assert.equal((await state(v, back.id)).state, "UNSPENT");
+  behind = false;
+  assert.deepEqual((await q.refresh()).made, [back.id]);
+  assert.equal(q.ready().find((r) => r.noteId === back.id)!.root, "newest");
 });
 
 test("a newest-root proof is handed out in the next epoch only until its replacement, never past the boundary + 15 s", async () => {
@@ -703,7 +726,7 @@ test("a drop whose write fails is tried again at the next pass", async () => {
   assert.ok(!(n.state === "HELD" && n.attempt === a!.attempt), "the dropped attempt was freed at the next pass");
 });
 
-test("a change note that landed in this epoch waits for the next one; then its own W (j + 1) and refund note (l, j + 1)", async () => {
+test("a change note that landed in this epoch is proved at once on the newest root, with its own W (j + 1) and refund note (l, j + 1)", async () => {
   const v = await vaultWith([usd(25)]);
   const pool = fakePool(v);
   const q = queue(v, pool);
@@ -713,10 +736,10 @@ test("a change note that landed in this epoch waits for the next one; then its o
   await q.take(top!.noteId);
   const c0 = await landChange(v, pool, await state(v, top!.noteId), top!.chunk); // change (l, 0), $5
   assert.equal((await state(v, top!.noteId)).state, "SPENT");
-  assert.deepEqual((await q.refresh()).made, [], "a change note waits for the next epoch");
-  pool.t.now = START + E;
-  assert.deepEqual((await q.refresh()).made, [c0.id]);
+  assert.deepEqual((await q.refresh()).made, [c0.id], "the change is ready at once");
   const [next] = q.ready();
+  assert.equal(next!.root, "newest");
+  assert.equal(next!.publicSignals[3], v.stateTree.root!.toString());
   assert.equal(next!.chunk, usd(5));
   assert.equal(next!.wallet.j, 1);
   assert.equal(next!.wallet.address, W("sol", c0.ref, c0.leaf!.label));
@@ -724,6 +747,9 @@ test("a change note that landed in this epoch waits for the next one; then its o
   const label = c0.leaf!.label;
   assert.equal(pool.binds.at(-1)!.refundPrecommitment, noteSecrets(SEED, { kind: "refund", l: label, j: 1 }).precommitment);
   assert.equal(next!.publicSignals[0], noteCommitment(0n, label, noteSecrets(SEED, { kind: "change", l: label, j: 1 }).precommitment).toString());
+  pool.t.now = START + E;
+  assert.deepEqual((await q.refresh()).remade, [c0.id]);
+  assert.equal(q.ready()[0]!.root, "epoch");
 });
 
 test("take refuses a proof made before the previous epoch and frees its note; the next pass makes it again", async () => {

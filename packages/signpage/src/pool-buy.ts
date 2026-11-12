@@ -313,14 +313,17 @@ async function treeSizesOnce(h: Pick<PoolBuyHost, "rpcs" | "pin">, pool: string)
   return { state: sizes[0]!.state, label: Math.min(sizes[0]!.label, sizes[1]!.label), stateSize: sizes[0]!.state };
 }
 
-/** The leaf index whose root is `root` in `tree`, read on both RPCs from the newest page back: both must give it. */
+/** The leaf index whose root is `root` in `tree`, read on both RPCs from the newest page back: both must give it, at an
+ *  index below `size` (the tree's size both RPCs' pool account agreed on, treeSizes): a root a page holds past it is one
+ *  only a later read could agree on, so it is never named (card fresh-money-spendable-at-once: a newest root is named
+ *  only once both providers hold it). */
 export async function rootIndex(h: Pick<PoolBuyHost, "rpcs" | "pin">, tree: 0 | 1, size: number, root: bigint): Promise<number> {
   const want = be32(root);
   for (let page = Math.floor((size - 1) / PAGE_ENTRIES); page >= 0; page--) {
     const found = (await both(h, (r) => account(r, solanaPoolPage(h.pin.program, tree, page * PAGE_ENTRIES)))).map((a) => {
       if (a === null) return no();
       if (a.owner !== h.pin.program || a.data.length < PAGE_HEADER || (a.data.length - PAGE_HEADER) % PAGE_ENTRY !== 0) return no();
-      const n = (a.data.length - PAGE_HEADER) / PAGE_ENTRY;
+      const n = Math.min((a.data.length - PAGE_HEADER) / PAGE_ENTRY, size - page * PAGE_ENTRIES);
       for (let i = n - 1; i >= 0; i--) {
         const at = PAGE_HEADER + i * PAGE_ENTRY + 32;
         if (sameBytes(a.data.subarray(at, at + 32), want)) return page * PAGE_ENTRIES + i;
@@ -648,10 +651,12 @@ async function buyRun(h: PoolBuyHost, ask: PoolAsk, at: { fault?: unknown }): Pr
       const bh = nowMs() - slotAt > POOL_BUY_SLOT_STALE_MS ? await blockhashOf(h.rpcs) : first;
       const minOut = (best.expectedOut * BigInt(10_000 - ask.slippageBps)) / 10_000n;
       // the pick, from the ready proofs as they are now (a remake or another tab may have changed them during the
-      // reads): the smallest chunk that pays the spend and W's accounts; filtered and claimed in one turn, so two runs
-      // of this page never claim one note
+      // reads): a proof on the epoch root first, then one on the newest root (a note that landed this epoch: its root is
+      // easier to tie to that landing, so it is spent only when no rested note pays, card fresh-money-spendable-at-once);
+      // within each, the smallest chunk that pays the spend and W's accounts; filtered and claimed in one turn, so two
+      // runs of this page never claim one note
       const fundable = mine(await h.ready())
-        .sort((x, y) => (x.chunk < y.chunk ? -1 : x.chunk > y.chunk ? 1 : 0))
+        .sort((x, y) => (x.root !== y.root ? (x.root === "epoch" ? -1 : 1) : x.chunk < y.chunk ? -1 : x.chunk > y.chunk ? 1 : 0))
         .filter((p) => solanaPoolBuyFunds({ withdrawnValue: p.chunk, relayFee: p.binding.request.relayFee } as SolanaPoolRelease, venue, { spend: ask.amount, tip }, rent).problem === null);
       if (fundable.length === 0) return no("not_funded");
       const r = fundable.find((p) => indexOf(p) !== null);

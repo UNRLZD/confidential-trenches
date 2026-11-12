@@ -79,12 +79,12 @@ const page = (root: bigint): Uint8Array => {
   for (let i = 0; i < SIZE; i++) d.set(b32(i === SIZE - 1 ? root : 1000n + BigInt(i)), 16 + i * 72 + 32);
   return d;
 };
-const poolAccount = (size = SIZE): Uint8Array => {
+const poolAccount = (size = SIZE, labelSize = size): Uint8Array => {
   const d = new Uint8Array(2179);
   d.set(new TextEncoder().encode("bfpool01"));
   const v = new DataView(d.buffer);
   v.setBigUint64(49, BigInt(size), true);
-  v.setBigUint64(49 + 8 + 1 + 33 * 32, BigInt(size), true);
+  v.setBigUint64(49 + 8 + 1 + 33 * 32, BigInt(labelSize), true);
   return d;
 };
 
@@ -119,6 +119,8 @@ type Plant = {
   venueOff?: "reserves" | "creator";
   /** provider B's state page without the proof's root */
   rootOnOne?: boolean;
+  /** provider B's pool account a label leaf short: its page holds the label root one past the size both agree on */
+  labelShortOn1?: boolean;
   /** getTransaction's answer for the helper's signature; "lieOne": the chain holds it, RPC 1 answers another tx */
   readBack?: "ours" | "none" | "other" | "failed" | "lieOne" | "metaJunk";
   /** RPC 1's first read of the pool account is a slot behind: its state tree one leaf short */
@@ -233,7 +235,7 @@ async function world(plant: Plant = {}, proof = readyProof()): Promise<World> {
     [s.tableAddr]: { owner: ALT, data: plant.tableNotForVenue ? s.tableData.filter((_, i) => i < 56 || Math.floor((i - 56) / 32) !== s.addresses.indexOf(SOLANA_PUMP_PROGRAM)) : s.tableData },
     [OTHER_TABLE]: { owner: ALT, data: s.tableData },
     ...Object.fromEntries(Object.entries(plant.extraTables ?? {}).map(([a, f]) => [a, { owner: ALT, data: Uint8Array.from([...s.tableData.subarray(0, 56), ...f(s.addresses).flatMap((k) => [...base58.decode(k)])]) }])),
-    [POOL]: { owner: PROGRAM, data: poolAccount((plant.pagesBack ?? 0) * 1024 + SIZE) },
+    [POOL]: { owner: PROGRAM, data: poolAccount((plant.pagesBack ?? 0) * 1024 + SIZE, (plant.pagesBack ?? 0) * 1024 + SIZE - (plant.labelShortOn1 && p === 1 ? 1 : 0)) },
     ...Object.fromEntries(Array.from({ length: plant.pagesBack ?? 0 }, (_, k) => ([0, 1] as const).map((tree) => [solanaPoolPage(PROGRAM, tree, (k + 1) * 1024), { owner: PROGRAM, data: page(999n) }])).flat()),
     [solanaPoolPage(PROGRAM, 0, 0)]: { owner: PROGRAM, data: page(plant.rootOnOne && p === 1 ? 77n : STATE_ROOT) },
     [solanaPoolPage(PROGRAM, 1, 0)]: { owner: PROGRAM, data: page(LABEL_ROOT) },
@@ -602,13 +604,37 @@ test("a venue the two RPCs disagree on is refused: nothing taken or sent", async
   }
 });
 
-test("a proof for another root is refused: a root on no page, or on one RPC's page only", async () => {
-  for (const [plant, proof] of [[{}, readyProof({ stateRoot: 4242n })], [{ rootOnOne: true }, readyProof()]] as const) {
+test("a proof for another root is refused: a root on no page (another pool's), on one RPC's page only, or at an index past the size both RPCs agree on", async () => {
+  for (const [plant, proof] of [[{}, readyProof({ stateRoot: 4242n })], [{ rootOnOne: true }, readyProof()], [{ labelShortOn1: true }, readyProof()]] as const) {
     const w = await world(plant, proof);
     assert.deepEqual(await runPoolBuy(w.host, ASK), { error: "failed" });
     assert.equal(w.state(), "HELD");
     assert.ok(!w.log.includes("send") && !w.log.some((x) => x.startsWith("take")));
   }
+});
+
+/** The state root index a sent tag 3 names: after tag, flags, the 128-byte compressed proof and 72 field bytes. */
+const tag3StateRootIndex = (tx: Uint8Array): number => {
+  const d = solanaDecodeMessage(tx.subarray(1 + 64 * tx[0]!)).instructions.at(-1)!.data;
+  assert.equal(d[0], 3);
+  return new DataView(d.buffer, d.byteOffset, d.byteLength).getUint32(2 + 128 + 72, true);
+};
+// card fresh-money-spendable-at-once: a proof on the newest root (a note that landed this epoch) is bought with only
+// when no proof on the epoch root pays the spend: its root is easier to tie to that landing
+test("the pick takes a proof on the epoch root before one on the newest root, and the newest one when it alone pays", async () => {
+  const epochP = readyProof();
+  const newestP: ReadyProof<SolanaReleaseRequest> = { ...readyProof({ stateRoot: 1004n, attempt: "attempt-n" }), noteId: "note-2", root: "newest" };
+  const w = await world({ readies: [[newestP, epochP]] });
+  const take = w.host.take.bind(w.host);
+  w.host.take = async (id, _attempt, early, lastHeight) => (await take(id, undefined, early, lastHeight), id === "note-1" ? epochP : newestP);
+  assert.deepEqual(await runPoolBuy(w.host, ASK), { stage: "filled", txs: [{ chain: "solana", hash: SIG }] });
+  assert.ok(w.log.includes("take:note-1") && !w.log.includes("take:note-2"), w.log.filter((x) => x.startsWith("take")).join(","));
+  assert.equal(tag3StateRootIndex(w.sentTx()!), 5, "the epoch proof's root index");
+  // the newest-root proof alone: bought at once, on its own root's index
+  const n = await world({ readies: [[newestP]] });
+  assert.deepEqual(await runPoolBuy(n.host, ASK), { stage: "filled", txs: [{ chain: "solana", hash: SIG }] });
+  assert.ok(n.log.includes("take:note-2"));
+  assert.equal(tag3StateRootIndex(n.sentTx()!), 4, "the newest root's index");
 });
 
 test("a helper answer whose tx does not read back, or reads back as another tx, never marks the note spent: the settle is tried first", async () => {
