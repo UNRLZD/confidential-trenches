@@ -1,235 +1,285 @@
 {
  "good": {
   "base": "http://127.0.0.1:18931",
-  "at": "2026-11-12T17:58:39.062Z",
+  "at": "2026-11-12T18:11:59.818Z",
   "reads": [
    {
     "route": "solana",
     "read": "slot",
-    "id": 1,
-    "ms": 79,
+    "ms": 69,
     "status": 200,
-    "headers": {
-     "x-helper-commit": "b72cb2c33e121d62f8d033d3ef0bf462d85cd790",
-     "access-control-allow-origin": "https://confidential.unrealized.trade"
-    },
-    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":468617386}"
+    "acao": "https://confidential.unrealized.trade",
+    "commit": "dab793230dd57d4d79d521f582568a2c81a4a9a4",
+    "answer": {
+     "result": 468621092
+    }
    },
    {
     "route": "solana",
     "read": "header",
-    "id": 2,
-    "ms": 107,
+    "ms": 61,
     "status": 200,
-    "headers": {
-     "x-helper-commit": "b72cb2c33e121d62f8d033d3ef0bf462d85cd790",
-     "access-control-allow-origin": "https://confidential.unrealized.trade"
-    },
-    "body": "{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"keys\":[\"blockHeight\",\"blockTime\",\"blockhash\",\"parentSlot\",\"previousBlockhash\"],\"blockHeight\":446633024}}"
+    "acao": "https://confidential.unrealized.trade",
+    "commit": "dab793230dd57d4d79d521f582568a2c81a4a9a4",
+    "answer": {
+     "result": {
+      "keys": [
+       "blockHeight",
+       "blockTime",
+       "blockhash",
+       "parentSlot",
+       "previousBlockhash"
+      ],
+      "blockHeight": 446636718
+     }
+    }
    },
    {
     "route": "solana",
     "read": "full",
-    "id": 3,
-    "ms": 1,
+    "ms": 2,
     "status": 400,
-    "headers": {
-     "x-helper-commit": "b72cb2c33e121d62f8d033d3ef0bf462d85cd790",
-     "access-control-allow-origin": "https://confidential.unrealized.trade"
-    },
-    "body": "{\"error\":{\"code\":\"method_not_allowed\"}}"
+    "acao": "https://confidential.unrealized.trade",
+    "commit": "dab793230dd57d4d79d521f582568a2c81a4a9a4",
+    "answer": {
+     "error": {
+      "code": "method_not_allowed",
+      "message": ""
+     }
+    }
    },
    {
     "route": "solana-devnet",
     "read": "slot",
-    "id": 4,
-    "ms": 342,
+    "ms": 288,
     "status": 200,
-    "headers": {
-     "x-helper-commit": "b72cb2c33e121d62f8d033d3ef0bf462d85cd790",
-     "access-control-allow-origin": "https://confidential.unrealized.trade"
-    },
-    "body": "{\"jsonrpc\":\"2.0\",\"id\":4,\"result\":521545805}"
+    "acao": "https://confidential.unrealized.trade",
+    "commit": "dab793230dd57d4d79d521f582568a2c81a4a9a4",
+    "answer": {
+     "result": 521549147
+    }
    },
    {
     "route": "solana-devnet",
     "read": "header",
-    "id": 5,
-    "ms": 72,
+    "ms": 61,
     "status": 200,
-    "headers": {
-     "x-helper-commit": "b72cb2c33e121d62f8d033d3ef0bf462d85cd790",
-     "access-control-allow-origin": "https://confidential.unrealized.trade"
-    },
-    "body": "{\"jsonrpc\":\"2.0\",\"id\":5,\"result\":{\"keys\":[\"blockHeight\",\"blockTime\",\"blockhash\",\"parentSlot\",\"previousBlockhash\"],\"blockHeight\":508676579}}"
+    "acao": "https://confidential.unrealized.trade",
+    "commit": "dab793230dd57d4d79d521f582568a2c81a4a9a4",
+    "answer": {
+     "result": {
+      "keys": [
+       "blockHeight",
+       "blockTime",
+       "blockhash",
+       "parentSlot",
+       "previousBlockhash"
+      ],
+      "blockHeight": 508679905
+     }
+    }
    },
    {
     "route": "solana-devnet",
     "read": "full",
-    "id": 6,
-    "ms": 2,
+    "ms": 1,
     "status": 400,
-    "headers": {
-     "x-helper-commit": "b72cb2c33e121d62f8d033d3ef0bf462d85cd790",
-     "access-control-allow-origin": "https://confidential.unrealized.trade"
-    },
-    "body": "{\"error\":{\"code\":\"method_not_allowed\"}}"
+    "acao": "https://confidential.unrealized.trade",
+    "commit": "dab793230dd57d4d79d521f582568a2c81a4a9a4",
+    "answer": {
+     "error": {
+      "code": "method_not_allowed",
+      "message": ""
+     }
+    }
    }
   ]
  },
  "bad_before": {
   "base": "https://ct-api.unrealized.trade",
-  "at": "2026-11-12T17:57:22.622Z",
+  "at": "2026-11-12T18:11:55.135Z",
   "reads": [
    {
     "route": "solana",
     "read": "slot",
-    "id": 1,
-    "ms": 863,
+    "ms": 929,
     "status": 200,
-    "headers": {
-     "x-helper-commit": "7635cb5245bb71fa5e6294987c2d5a03737e7bf4",
-     "access-control-allow-origin": "https://confidential.unrealized.trade"
-    },
-    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":468617019}"
+    "acao": "https://confidential.unrealized.trade",
+    "commit": "4f673c93bf9afcc8e7c66ed4582e39c0af8dfe6c",
+    "answer": {
+     "result": 468621060
+    }
    },
    {
     "route": "solana",
     "read": "header",
-    "id": 2,
-    "ms": 775,
+    "ms": 727,
     "status": 400,
-    "headers": {
-     "x-helper-commit": "7635cb5245bb71fa5e6294987c2d5a03737e7bf4",
-     "access-control-allow-origin": "https://confidential.unrealized.trade"
-    },
-    "body": "{\"error\":{\"code\":\"method_not_allowed\"}}"
+    "acao": "https://confidential.unrealized.trade",
+    "commit": "4f673c93bf9afcc8e7c66ed4582e39c0af8dfe6c",
+    "answer": {
+     "error": {
+      "code": "method_not_allowed",
+      "message": ""
+     }
+    }
    },
    {
     "route": "solana",
     "read": "full",
-    "id": 3,
-    "ms": 273,
+    "ms": 261,
     "status": 400,
-    "headers": {
-     "x-helper-commit": "7635cb5245bb71fa5e6294987c2d5a03737e7bf4",
-     "access-control-allow-origin": "https://confidential.unrealized.trade"
-    },
-    "body": "{\"error\":{\"code\":\"method_not_allowed\"}}"
+    "acao": "https://confidential.unrealized.trade",
+    "commit": "4f673c93bf9afcc8e7c66ed4582e39c0af8dfe6c",
+    "answer": {
+     "error": {
+      "code": "method_not_allowed",
+      "message": ""
+     }
+    }
    },
    {
     "route": "solana-devnet",
     "read": "slot",
-    "id": 4,
-    "ms": 524,
+    "ms": 504,
     "status": 200,
-    "headers": {
-     "x-helper-commit": "7635cb5245bb71fa5e6294987c2d5a03737e7bf4",
-     "access-control-allow-origin": "https://confidential.unrealized.trade"
-    },
-    "body": "{\"jsonrpc\":\"2.0\",\"id\":4,\"result\":521545483}"
+    "acao": "https://confidential.unrealized.trade",
+    "commit": "4f673c93bf9afcc8e7c66ed4582e39c0af8dfe6c",
+    "answer": {
+     "result": 521549123
+    }
    },
    {
     "route": "solana-devnet",
     "read": "header",
-    "id": 5,
-    "ms": 238,
+    "ms": 263,
     "status": 400,
-    "headers": {
-     "x-helper-commit": "7635cb5245bb71fa5e6294987c2d5a03737e7bf4",
-     "access-control-allow-origin": "https://confidential.unrealized.trade"
-    },
-    "body": "{\"error\":{\"code\":\"method_not_allowed\"}}"
+    "acao": "https://confidential.unrealized.trade",
+    "commit": "4f673c93bf9afcc8e7c66ed4582e39c0af8dfe6c",
+    "answer": {
+     "error": {
+      "code": "method_not_allowed",
+      "message": ""
+     }
+    }
    },
    {
     "route": "solana-devnet",
     "read": "full",
-    "id": 6,
-    "ms": 285,
+    "ms": 868,
     "status": 400,
-    "headers": {
-     "x-helper-commit": "7635cb5245bb71fa5e6294987c2d5a03737e7bf4",
-     "access-control-allow-origin": "https://confidential.unrealized.trade"
-    },
-    "body": "{\"error\":{\"code\":\"method_not_allowed\"}}"
+    "acao": "https://confidential.unrealized.trade",
+    "commit": "4f673c93bf9afcc8e7c66ed4582e39c0af8dfe6c",
+    "answer": {
+     "error": {
+      "code": "method_not_allowed",
+      "message": ""
+     }
+    }
    }
   ]
  },
  "bad_full_forwarded": {
   "base": "http://127.0.0.1:18931",
-  "at": "2026-11-12T17:58:39.062Z",
+  "at": "2026-11-12T18:11:59.818Z",
   "reads": [
    {
     "route": "solana",
     "read": "slot",
-    "id": 1,
-    "ms": 79,
+    "ms": 69,
     "status": 200,
-    "headers": {
-     "x-helper-commit": "b72cb2c33e121d62f8d033d3ef0bf462d85cd790",
-     "access-control-allow-origin": "https://confidential.unrealized.trade"
-    },
-    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":468617386}"
+    "acao": "https://confidential.unrealized.trade",
+    "commit": "dab793230dd57d4d79d521f582568a2c81a4a9a4",
+    "answer": {
+     "result": 468621092
+    }
    },
    {
     "route": "solana",
     "read": "header",
-    "id": 2,
-    "ms": 107,
+    "ms": 61,
     "status": 200,
-    "headers": {
-     "x-helper-commit": "b72cb2c33e121d62f8d033d3ef0bf462d85cd790",
-     "access-control-allow-origin": "https://confidential.unrealized.trade"
-    },
-    "body": "{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"keys\":[\"blockHeight\",\"blockTime\",\"blockhash\",\"parentSlot\",\"previousBlockhash\"],\"blockHeight\":446633024}}"
+    "acao": "https://confidential.unrealized.trade",
+    "commit": "dab793230dd57d4d79d521f582568a2c81a4a9a4",
+    "answer": {
+     "result": {
+      "keys": [
+       "blockHeight",
+       "blockTime",
+       "blockhash",
+       "parentSlot",
+       "previousBlockhash"
+      ],
+      "blockHeight": 446636718
+     }
+    }
    },
    {
     "route": "solana",
     "read": "full",
-    "id": 3,
-    "ms": 1,
+    "ms": 2,
     "status": 200,
-    "headers": {
-     "x-helper-commit": "b72cb2c33e121d62f8d033d3ef0bf462d85cd790",
-     "access-control-allow-origin": "https://confidential.unrealized.trade"
-    },
-    "body": "{\"jsonrpc\":\"2.0\",\"id\":3,\"result\":{\"keys\":[\"blockHeight\",\"blockTime\",\"blockhash\",\"parentSlot\",\"previousBlockhash\",\"rewards\",\"transactions\"],\"blockHeight\":446633024}}"
+    "acao": "https://confidential.unrealized.trade",
+    "commit": "dab793230dd57d4d79d521f582568a2c81a4a9a4",
+    "answer": {
+     "result": {
+      "keys": [
+       "blockHeight",
+       "blockTime",
+       "blockhash",
+       "parentSlot",
+       "previousBlockhash",
+       "rewards",
+       "transactions"
+      ],
+      "blockHeight": 446636718
+     }
+    }
    },
    {
     "route": "solana-devnet",
     "read": "slot",
-    "id": 4,
-    "ms": 342,
+    "ms": 288,
     "status": 200,
-    "headers": {
-     "x-helper-commit": "b72cb2c33e121d62f8d033d3ef0bf462d85cd790",
-     "access-control-allow-origin": "https://confidential.unrealized.trade"
-    },
-    "body": "{\"jsonrpc\":\"2.0\",\"id\":4,\"result\":521545805}"
+    "acao": "https://confidential.unrealized.trade",
+    "commit": "dab793230dd57d4d79d521f582568a2c81a4a9a4",
+    "answer": {
+     "result": 521549147
+    }
    },
    {
     "route": "solana-devnet",
     "read": "header",
-    "id": 5,
-    "ms": 72,
+    "ms": 61,
     "status": 200,
-    "headers": {
-     "x-helper-commit": "b72cb2c33e121d62f8d033d3ef0bf462d85cd790",
-     "access-control-allow-origin": "https://confidential.unrealized.trade"
-    },
-    "body": "{\"jsonrpc\":\"2.0\",\"id\":5,\"result\":{\"keys\":[\"blockHeight\",\"blockTime\",\"blockhash\",\"parentSlot\",\"previousBlockhash\"],\"blockHeight\":508676579}}"
+    "acao": "https://confidential.unrealized.trade",
+    "commit": "dab793230dd57d4d79d521f582568a2c81a4a9a4",
+    "answer": {
+     "result": {
+      "keys": [
+       "blockHeight",
+       "blockTime",
+       "blockhash",
+       "parentSlot",
+       "previousBlockhash"
+      ],
+      "blockHeight": 508679905
+     }
+    }
    },
    {
     "route": "solana-devnet",
     "read": "full",
-    "id": 6,
-    "ms": 2,
+    "ms": 1,
     "status": 400,
-    "headers": {
-     "x-helper-commit": "b72cb2c33e121d62f8d033d3ef0bf462d85cd790",
-     "access-control-allow-origin": "https://confidential.unrealized.trade"
-    },
-    "body": "{\"error\":{\"code\":\"method_not_allowed\"}}"
+    "acao": "https://confidential.unrealized.trade",
+    "commit": "dab793230dd57d4d79d521f582568a2c81a4a9a4",
+    "answer": {
+     "error": {
+      "code": "method_not_allowed",
+      "message": ""
+     }
+    }
    }
   ]
  }
