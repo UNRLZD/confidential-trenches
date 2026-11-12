@@ -5,7 +5,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { SignpageState } from "@blindfill/kit";
-import { proofStatus } from "../src/screens/trade/model.ts";
+import { hasPool, presetsOf, PRESETS, poolBuyAsk, poolView, proofStatus, tradeBal } from "../src/screens/trade/model.ts";
 import { WORDS } from "../src/screens/trade/words.ts";
 
 type Pools = SignpageState["pools"];
@@ -47,4 +47,24 @@ test("a total that is not a plain decimal reads none, never a label the data doe
 test("the two labels are terse and kept (owner 8 Nov 07:55Z), no draft mark", () => {
   assert.deepEqual([WORDS.proofReady.text, WORDS.proofReady.draft], ["Proof ready", false]);
   assert.deepEqual([WORDS.proofMaking.text, WORDS.proofMaking.draft], ["Making proof", false]);
+});
+
+// A NEAR token has no pool: the vault is NEAR's money (deposit/model.ts DESTS), and the signing page lists it in
+// state.pools (a `near` entry, its balance) beside the pools. The trade box takes the pool path only for a chain that
+// has a pool, so a NEAR token's box is what a chain with no pool draws: the vault's Cash, no proof label, the four
+// presets, no pool buy.
+test("NEAR: the vault's entry in state.pools is no pool; the box is the one a chain with no pool draws", () => {
+  const near = { chain: "near" as const, asset: "USDC" as const, balance: "7.25", ready: "7.25", tap_max: "7.25" };
+  const pools: Pools = [near, sol("0.5", "0.5")];
+  assert.equal(hasPool(pools, "near"), false);
+  assert.equal(hasPool(undefined, "near"), false);
+  assert.equal(hasPool([near], "near"), hasPool(undefined, "base"), "the same as a chain with no pool in the state");
+  assert.equal(hasPool(pools, "solana"), true);
+  assert.equal(hasPool(pools, "base"), false);
+  assert.equal(proofStatus(pools, "near"), "none", "no proof label: the vault has no proof queue");
+  assert.equal(poolView(pools, "near", { price: 1n, expo: 0, decimals: 6 }), null);
+  assert.deepEqual(presetsOf("near", null), PRESETS);
+  assert.deepEqual(poolBuyAsk(pools, "near", "wrap.near", 100n, { price: 1n, expo: 0, decimals: 6 }, 100), { ok: false, why: "no_pool" });
+  // Bal is the vault path's Cash, as on any chain with no pool
+  assert.deepEqual(tradeBal(hasPool(pools, "near"), null, 725n), { from: "cash", cents: 725n });
 });

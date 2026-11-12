@@ -1,10 +1,10 @@
 // node --test scripts/live-checks/signpage-positions-evm.test.mjs: the live check replays recorded runs
 // (signpage-positions-evm.answers.json). good: the card's Base Sepolia buy and sell read back on both pool RPCs, W
-// holding none of the token after, and SIGN_HOST's build joining the EVM positions with no EVM pass in the mainnet
-// build: PASS. bad: the same run's record naming U's deposit as the sell (a sale that never reached W), read with
+// holding none of the token after, and SIGN_HOST's build joining the EVM positions and carrying the EVM pass (the page
+// part re-made from a mainnet build of card evm-pools-on-mainnet, which pins both EVM pools): PASS. bad: the same run's record naming U's deposit as the sell (a sale that never reached W), read with
 // SIGN_HOST as it served before the card (no join): FAIL. Made from the good run: W still holding the token on one RPC, a reverted sell, a sell to another
 // address, a Bought for another W, the sell in another block on one RPC, a sell before the buy, a page with no join, a
-// mainnet page with the EVM pass, a bundle that is not the pinned one: each FAIL; an RPC with
+// mainnet page with no EVM pass, a bundle that is not the pinned one: each FAIL; an RPC with
 // no answer: INCONCLUSIVE, never a pass.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -66,7 +66,7 @@ test("made from the good run: each broken fact FAILs, and no answer is INCONCLUS
     "the sell in another block on one RPC": edit(g, on("eth_getTransactionReceipt", sell, (rc) => ({ ...rc, blockNumber: `0x${(BigInt(rc.blockNumber) + 1n).toString(16)}` }))),
     "the sell before the buy": edit(g, on("eth_getTransactionReceipt", sell, (rc) => ({ ...rc, blockNumber: "0x1" }), false)),
     "a page with no join": { ...g, page: { ...g.page, marks: { ...g.page.marks, join: 0 } } },
-    "a mainnet page with the EVM pass": { ...g, page: { ...g.page, marks: { ...g.page.marks, pass: 1 } } },
+    "a mainnet page with no EVM pass": { ...g, page: { ...g.page, marks: { ...g.page.marks, pass: 0 } } },
     "a bundle that is not the pinned one": { ...g, page: { ...g.page, sha384: `sha384-${"A".repeat(64)}` } },
   };
   for (const [name, rec] of Object.entries(cases)) {

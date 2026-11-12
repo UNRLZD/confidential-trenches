@@ -250,7 +250,10 @@ test("review F1, G1, G2: on Base the delivery sends U_X the quote's least, then 
     [{ pReceipt: { ...p, blockNumber: "0x50" } }, /not after the delivery/],
   ];
   for (const [o, why] of bad) await assert.rejects(evmRead(evmAnswers(o)), why, String(why));
-  await assert.rejects(evmRead(evmAnswers(), { pin: undefined }), /no pool pinned on base/);
+  // with no pin given, the read is held to the wallet's mainnet pin (EVM_POOLS.base, card evm-pools-on-mainnet): a pool tx
+  // into any other contract is no deposit; a chain with no pin is never read
+  await assert.rejects(evmRead(evmAnswers(), { pin: undefined }), /no Deposited log/);
+  await assert.rejects(evmRead(evmAnswers(), { pin: null }), /no pool pinned on base/);
 });
 
 test("review R6: one pass writes the record only once the delivery and the pool tx read right", async () => {

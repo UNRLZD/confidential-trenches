@@ -3,7 +3,8 @@
 // Discover), kept across a page hop (an unsubscribe and a subscribe at once read nothing new), read again on Discover's
 // cadence, a failed read keeping the last good lists; the rail narrows them to the shell's chain filter (pickSnapshot).
 // test/discover-data/helper-lists-2026-11-01.json is a recorded answer of GET /v1/market/lists?chain=solana,
-// test/chains-evm/lists-{base,robinhood}-2026-11-09.json of ?chain=base and ?chain=robinhood.
+// test/chains-evm/lists-{base,robinhood}-2026-11-09.json of ?chain=base and ?chain=robinhood; test/chains-near/
+// lists-near-planted-2026-11-12.json is planted in the shape the helper answers ?chain=near in.
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { LIST_CHAINS, listsUrl, pickSnapshot, REFRESH_MS, sharedAllLists, STALE_MS } from "../src/screens/discover/data.ts";
@@ -13,10 +14,12 @@ import { railStore } from "../src/screens/token/rail.ts";
 import lists from "./discover-data/helper-lists-2026-11-01.json" with { type: "json" };
 import baseRec from "./chains-evm/lists-base-2026-11-09.json" with { type: "json" };
 import robinhoodRec from "./chains-evm/lists-robinhood-2026-11-09.json" with { type: "json" };
+import nearRec from "./chains-near/lists-near-planted-2026-11-12.json" with { type: "json" };
 
 type Rec = { chain: string; as_of_ms: number; fields: string[]; lists: Record<string, unknown[][]> };
 const answerOf = (rec: Rec) => ({ chain: rec.chain, as_of_ms: rec.as_of_ms, lists: Object.fromEntries(Object.entries(rec.lists).map(([k, rows]) => [k, rows.map((v) => Object.fromEntries(rec.fields.map((f, i) => [f, v[i]])))])) });
-const RECS: Record<string, Rec> = { solana: lists as Rec, base: baseRec as Rec, robinhood: robinhoodRec as Rec };
+const RECS: Record<string, Rec> = { solana: lists as Rec, base: baseRec as Rec, robinhood: robinhoodRec as Rec, near: nearRec as Rec };
+const FOUR = ["solana", "base", "robinhood", "near"] as const;
 const answer = () => answerOf(lists as Rec);
 
 /** A fetch that answers each chain's lists URL with its recording after `gate` resolves, and counts its calls. */
@@ -67,7 +70,8 @@ test("railStore: its own read is every chain's lists (sharedAllLists); the rail 
     const d = store.get().data;
     assert.equal(d.status, "ready");
     if (d.status !== "ready") return;
-    assert.deepEqual([...f.calls].sort(), LIST_CHAINS.map(listsUrl).sort(), "the store read Solana, Base and Robinhood");
+    assert.deepEqual([...f.calls].sort(), LIST_CHAINS.map(listsUrl).sort(), "the store read Solana, Base, Robinhood and NEAR");
+    assert.deepEqual([...LIST_CHAINS].sort(), [...FOUR].sort(), "the chains the page reads are the four the helper serves");
     assert.equal(d.snapshot.chain, "all");
     for (const list of ["trending", "new"] as const) {
       const all = columnRows(pickSnapshot(d.snapshot, "all"), list);

@@ -9,10 +9,11 @@
 //      a buy that is not one (the selector alone) for each testnet pool, refuses it bad_shape before any send and
 //      echoes SIGN_HOST in Access-Control-Allow-Origin;
 //   3. SIGN_HOST's served /app.js is the one its index.html pins, and it is the mainnet build with no EVM buy in it
-//      (no "owed/cost-evm", the buy's holding key; no "uniswap-v4", its route search): the mainnet build pins no EVM
-//      pool, so pool.buy on Base or Robinhood is refused not_allowed there (packages/signpage/test/pool-network.test.ts),
-//      and the buy code is left out of it (POOL_TESTNET is a build constant). When mainnet EVM pools are pinned, the
-//      card that pins them turns this part over.
+//      (no "uniswap-v4", its route search; no "owed/back-evm", its failed swap's record): the mainnet build pins both
+//      EVM pools (card evm-pools-on-mainnet) but keeps the buy closed there until a failed swap's chunk has a way back,
+//      so pool.buy on Base or Robinhood is refused not_allowed before any read (packages/signpage/test/
+//      pool-mainnet-evm.test.ts) and the buy code is left out of it (POOL_TESTNET is a build constant). The buy records'
+//      key, "owed/cost-evm", is no mark: the positions pass, open on mainnet, reads it.
 // RPCS, CHAIN_IDS, BOUGHT and BUY_SELECTOR are this file's own (it reaches no package code: check:imports holds it);
 // packages/signpage/test/pool-buy-evm.test.ts holds each equal to the page's own (TESTNET_RPCS, EVM_CHAIN_IDS,
 // keccak256 of EVM_POOL_EVENTS.Bought, evm-send.ts EVM_BUY_SIGNATURE).
@@ -38,7 +39,7 @@ export const RPCS = Object.freeze({
 });
 export const CHAIN_IDS = Object.freeze({ "base-sepolia": 84532n, "robinhood-testnet": 46630n });
 /** Strings only the EVM buy's code carries in a bundle (src/pool-buy-evm.ts). */
-export const EVM_BUY_MARKS = Object.freeze(["owed/cost-evm", "uniswap-v4"]);
+export const EVM_BUY_MARKS = Object.freeze(["uniswap-v4", "owed/back-evm"]);
 /** Each testnet's pinned pool, by network. */
 export const PINS_OF = Object.freeze(Object.fromEntries(Object.entries(PINS).map(([k, v]) => [k, v.pool])));
 const RECORD = new URL("./signpage-evm-pool-buy.md", import.meta.url);
@@ -109,7 +110,7 @@ export function judge(run) {
   }
   const p = run.page;
   say(typeof p?.pin === "string" && p.pin === p.sha384, `[SIGN_HOST] the served /app.js is the one index.html pins: ${p?.pin ?? "no pin"}`);
-  say(Array.isArray(p?.marks) && p.marks.length === 0, `[SIGN_HOST] the mainnet build carries no EVM buy (no pinned mainnet EVM pool): ${Array.isArray(p?.marks) ? p.marks.join(", ") || "none" : "not read"}`);
+  say(Array.isArray(p?.marks) && p.marks.length === 0, `[SIGN_HOST] the mainnet build carries no EVM buy (closed on mainnet: refused before any read): ${Array.isArray(p?.marks) ? p.marks.join(", ") || "none" : "not read"}`);
   const verdict = verdictOf(lines.some((l) => l.startsWith("BAD")), quiet);
   return { ok: verdict === "PASS", verdict, lines };
 }
