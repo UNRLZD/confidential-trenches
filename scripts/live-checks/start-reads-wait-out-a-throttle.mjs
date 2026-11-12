@@ -41,7 +41,10 @@ const count = (re, s) => [...s.matchAll(new RegExp(re.source, "g"))].length;
 export const SPENT = new RegExp(`\\.then\\(\\(\\)=>(${N})\\.stopped\\?\\.\\(\\)\\?\\{error:${Q}failed${Q}\\}:(${N})\\.spent\\(\\)\\?\\{error:${Q}down${Q}\\}:${N}\\(${N},\\{\\.\\.\\.${N},amount:${N}\\.units,shareBps:void 0\\},${N},${N}\\.w,\\2(?:,[^;]{0,240}?)?\\)\\)`);
 
 export function facts(index, js) {
-  const out = { index, sha384: sha384(js), rule: false, faults: false, stop: false, wired: { decimals: false, sell: false, spent: false, buy: false, deposits: 0, stops: 0, taps: 0 }, rentBack: false };
+  const out = { index, sha384: sha384(js), rule: false, faults: false, stop: false, wired: { decimals: false, sell: false, spent: false, buy: false, deposits: 0, stops: 0, taps: 0 }, rentBack: false, evmSale: false };
+  // the EVM sale (src/pool-sell-evm.ts, its read of W's SellDelegate nonce(), which only the sale carries; the positions
+  // pass reads its open-sales key in SIGN_HOST's build too): a fifth kind on its request's one bound wherever it is built
+  out.evmSale = /["'`]nonce\(\)["'`]/.test(js);
   // the bounds, the device's clock, the Retry-After of the transport fault, and the rule: next(e) = T(pause, A(e), B),
   // null (and spent from then on) once max(the clock since the tap began, the waits so far) + the pause passes 30 s;
   // hold(ms), a wait that is not a fault's (card pool-sell-legs-side-by-side: a sale's agree waits), on the same bound
@@ -116,8 +119,8 @@ export function judge(a) {
   for (const w of ["decimals", "sell", "buy"]) if (a?.wired?.[w] !== true) lines.push(NO_WIRED(w));
   // the Solana deposit and the EVM deposit, both in each build
   if (a?.wired?.deposits !== 2) lines.push(NO_WIRED("deposits"));
-  // the buy, the sell and both deposits each on its request's one bound
-  if (a?.wired?.taps !== 4) lines.push(NO_TAPS);
+  // the buy, the sell and both deposits each on its request's one bound, and the EVM sale where the bundle carries it
+  if (a?.wired?.taps !== (a?.evmSale === true ? 5 : 4)) lines.push(NO_TAPS);
   if (a?.wired?.spent !== true) lines.push(NO_SPENT);
   // the Solana deposit's host and the EVM deposit's, on the page
   if (a?.wired?.stops !== 2) lines.push(NO_STOPS);

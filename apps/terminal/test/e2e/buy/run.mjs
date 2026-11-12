@@ -25,7 +25,10 @@
 //      both (err null, confirmed).
 // Nothing here signs or sends: SIGN_HOST signs, proves and sends; the run only reads. What is left on U, W or in the
 // pool after the run stays there.
-//   node apps/terminal/test/e2e/buy/run.mjs [--record <file>] [--shots <dir>] [--plant free|no-buy|no-sell]
+//   7b. with --restore-on-b (card restore-rebuilds-buy-records): device B, a second browser profile, signs in with the
+//      kept words (the wallet way's recovery words), its restore runs, and step 7's sell is made from B once B's Sell
+//      side opens: the position B shows comes from W's buy record read back from W's own buy, never from A.
+//   node apps/terminal/test/e2e/buy/run.mjs [--record <file>] [--shots <dir>] [--plant free|no-buy|no-sell] [--restore-on-b]
 //     PASS exit 0, FAIL exit 1, error exit 2. --plant free stops once U is answered, before the fund line (the free
 //     part: no money); no-buy stops before the buy's tap, no-sell before the sell's (the red runs).
 //     It prints two verdicts: BUY (every line but the sell's: what card app-a2-e2e proves) and SELL (PASS, or NOT PROVEN
@@ -53,6 +56,8 @@ const PROOF_MS = 6 * 60_000;
 const END_MS = 5 * 60_000;
 const PRICE_MS = 7 * 60_000;
 const HELD_MS = 60_000;
+/** With --restore-on-b: the longest from B's sign-in to its Sell side open (the restore's two minutes, then W's buy read). */
+const RESTORE_HELD_MS = 3 * 60_000;
 const FUND_MS = 10 * 60_000;
 /** Solana devnet's genesis hash (getGenesisHash on api.devnet.solana.com); any other cluster is refused. */
 export const DEVNET_GENESIS = "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG";
@@ -86,6 +91,11 @@ export function judge(rec) {
   const [a, b] = rec.heldAfterBuy ?? [];
   say(typeof rec.w === "string" && a === b && /^\d+$/.test(a ?? "") && BigInt(a) > 0n, `the buy's wallet ${rec.w ?? "none"} holds ${a ?? "-"} / ${b ?? "-"} of the coin on the two RPCs`);
   part = "sell";
+  // with --restore-on-b the sell is device B's, from the position B's restore gave back
+  if (rec.restoreOnB) {
+    say(rec.restoreB?.signedIn === true, "device B signed in with the 12 words");
+    say(Number.isFinite(rec.restoreB?.positionMs), `device B's Sell side opened ${rec.restoreB?.positionMs ?? "-"} ms after its sign-in`);
+  }
   say(rec.sell?.taps === 1, `the sell tapped once: ${rec.sell?.taps ?? 0}`);
   say(rec.sell?.asks === 1, `one sell sent: ${rec.sell?.asks ?? 0} ${rec.sell?.kind ?? ""}`);
   say(/^Filled\b/.test(rec.sell?.end ?? ""), `the sell box ended "${rec.sell?.end ?? "none"}"`);
@@ -206,13 +216,14 @@ async function heldOn(owner, opts) {
 
 // ------------------------------------------------------------------------------------------------ the testnet SIGN_HOST
 /** SIGN_HOST's testnet build in a fresh folder: build-app.mjs --network testnet (run as a child, never imported), the
- *  page's own _headers with the devnet RPC added to connect-src (the shipped policy names the mainnet RPCs only; this
+ *  testnet build's _headers (build-app.mjs writes it) with the devnet RPC added to connect-src (the shipped policy names the mainnet RPCs only; this
  *  folder is the run's alone), and the prover's setup files at assets/zk/<sha256>.<ext>, as SIGN_HOST serves them. */
 export function testnetSign() {
   const out = mkdtempSync(path.join(tmpdir(), "ct-a2e-sign-"));
   const r = spawnSync(process.execPath, [path.join(SIGNPAGE, "scripts", "build-app.mjs"), "--out", out, "--network", "testnet"], { encoding: "utf8" });
   if (r.status !== 0) throw new Error(`build-app --network testnet failed: ${`${r.stderr}${r.stdout}`.trim().slice(-400)}`);
-  const headers = readFileSync(path.join(SIGNPAGE, "public", "_headers"), "utf8");
+  // the testnet build's own policy, which build-app writes beside it (SIGN_HOST's with the testnet EVM providers)
+  const headers = readFileSync(path.join(out, "_headers"), "utf8");
   const devnet = headers.replace("connect-src 'self' ", `connect-src 'self' ${DEVNET_RPC} `);
   if (devnet === headers) throw new Error("SIGN_HOST's _headers has no connect-src 'self' to add the devnet RPC to");
   writeFileSync(path.join(out, "_headers"), devnet);
@@ -280,8 +291,8 @@ export function netTable(net) {
   return [...rows].map(([k, row]) => `net ${k}: ${[...row].map(([a, n]) => `${a} x${n}`).join(", ")}`);
 }
 
-export async function run({ plant = null, shots = null } = {}) {
-  const rec = { started: new Date().toISOString(), plant, txs: [], csp: [], hosts: [], dialogs: 0 };
+export async function run({ plant = null, shots = null, restoreOnB = false } = {}) {
+  const rec = { started: new Date().toISOString(), plant, restoreOnB, txs: [], csp: [], hosts: [], dialogs: 0 };
   devnetOnly(await both("getGenesisHash", []));
   rec.stub = `market read for ${MINT} answered by the run, shape from apps/terminal/test/e2e/buy/market-token.json`;
   const signRoot = testnetSign();
@@ -296,16 +307,6 @@ export async function run({ plant = null, shots = null } = {}) {
   try {
     // the recorded answer keeps its mint as "<mint>" (a mint beside "token" reads as a key to gitleaks' generic rule)
     const market = readFileSync(path.join(HERE, "market-token.json"), "utf8").trim().replaceAll("<mint>", MINT);
-    const { context } = await h.newContext({ viewport: { width: 1440, height: 900 }, reducedMotion: "reduce" });
-    await context.route(`https://${REAL.api}/v1/market/token?chain=solana&token=${MINT}`, (r) => r.fulfill({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": `https://${REAL.app}` }, body: market }));
-    await context.exposeBinding("__ct", (_s, e) => events.push({ ...e, at: Date.now() }));
-    await context.addInitScript(PROBE, { app: REAL.app, sign: REAL.sign });
-    // a host counts as reached once it answered (the footer's NEAR RPCs are asked and fail as not found)
-    context.on("response", (r) => {
-      try {
-        hosts.add(new URL(r.url()).hostname);
-      } catch {}
-    });
     // a transaction sent to an RPC is named by its first signature, as sent; one the helper carries (POST
     // /v1/pool/solana/send: slot 0, the fee payer's, is zero until the helper signs) by the signature its 200 answers
     const add = (sig) => sig && !/^1+$/.test(sig) && !sent.some((x) => x.sig === sig) && sent.push({ step, sig });
@@ -319,45 +320,60 @@ export async function run({ plant = null, shots = null } = {}) {
     // each logged request's answer: its HTTP status and, for a JSON-RPC answer, its error code when it has one (the code
     // only, never a body); a request that got no answer, the failure's text
     const netOf = new WeakMap();
-    context.on("response", (r) => {
-      const entry = netOf.get(r.request());
-      if (!entry) return;
-      entry.status = r.status();
-      entry.ms = Date.now() - entry.at;
-      if (entry.method) answers.push(r.json().then((j) => (entry.code = Array.isArray(j) ? j.map((x) => x?.error?.code ?? null).join("+") : (j?.error?.code ?? null)), () => (entry.code = "unread")));
-    });
-    context.on("requestfailed", (r) => {
-      const entry = netOf.get(r);
-      if (entry) entry.failed = String(r.failure()?.errorText ?? "failed").slice(0, 60);
-    });
-    context.on("request", (r) => {
-      if (["buy", "held", "sell"].includes(step) && rec.net.length < 4000) {
-        const u = new URL(r.url());
-        let method = null;
+    // one browser profile's wiring, the same on device A and, with --restore-on-b, on device B
+    const wire = async (context) => {
+      await context.route(`https://${REAL.api}/v1/market/token?chain=solana&token=${MINT}`, (r) => r.fulfill({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": `https://${REAL.app}` }, body: market }));
+      await context.exposeBinding("__ct", (_s, e) => events.push({ ...e, at: Date.now() }));
+      await context.addInitScript(PROBE, { app: REAL.app, sign: REAL.sign });
+      // a host counts as reached once it answered (the footer's NEAR RPCs are asked and fail as not found)
+      context.on("response", (r) => {
         try {
-          const b = JSON.parse(r.postData() ?? "null");
-          method = Array.isArray(b) ? b.map((x) => x?.method).join("+") : (b?.method ?? null);
+          hosts.add(new URL(r.url()).hostname);
         } catch {}
-        const entry = { step, at: Date.now(), host: u.hostname, path: u.pathname, method };
-        rec.net.push(entry);
-        netOf.set(r, entry);
-      }
-      if (r.method() !== "POST") return;
-      if (isPoolSend(r)) return void mark();
-      try {
-        const b = JSON.parse(r.postData() ?? "");
-        if (b?.method === "sendTransaction" && typeof b.params?.[0] === "string") mark(), add(b58(Buffer.from(b.params[0], "base64").subarray(1, 65)));
-      } catch {}
-    });
-    context.on("response", (r) => {
-      if (!isPoolSend(r.request()) || r.status() !== 200) return;
-      const at = step;
-      answers.push(r.json().then((j) => typeof j?.signature === "string" && !sent.some((x) => x.sig === j.signature) && sent.push({ step: at, sig: j.signature }), () => {}));
-    });
-    const page = await context.newPage();
+      });
+      context.on("response", (r) => {
+        const entry = netOf.get(r.request());
+        if (!entry) return;
+        entry.status = r.status();
+        entry.ms = Date.now() - entry.at;
+        if (entry.method) answers.push(r.json().then((j) => (entry.code = Array.isArray(j) ? j.map((x) => x?.error?.code ?? null).join("+") : (j?.error?.code ?? null)), () => (entry.code = "unread")));
+      });
+      context.on("requestfailed", (r) => {
+        const entry = netOf.get(r);
+        if (entry) entry.failed = String(r.failure()?.errorText ?? "failed").slice(0, 60);
+      });
+      context.on("request", (r) => {
+        if (["buy", "held", "sell"].includes(step) && rec.net.length < 4000) {
+          const u = new URL(r.url());
+          let method = null;
+          try {
+            const b = JSON.parse(r.postData() ?? "null");
+            method = Array.isArray(b) ? b.map((x) => x?.method).join("+") : (b?.method ?? null);
+          } catch {}
+          const entry = { step, at: Date.now(), host: u.hostname, path: u.pathname, method };
+          rec.net.push(entry);
+          netOf.set(r, entry);
+        }
+        if (r.method() !== "POST") return;
+        if (isPoolSend(r)) return void mark();
+        try {
+          const b = JSON.parse(r.postData() ?? "");
+          if (b?.method === "sendTransaction" && typeof b.params?.[0] === "string") mark(), add(b58(Buffer.from(b.params[0], "base64").subarray(1, 65)));
+        } catch {}
+      });
+      context.on("response", (r) => {
+        if (!isPoolSend(r.request()) || r.status() !== 200) return;
+        const at = step;
+        answers.push(r.json().then((j) => typeof j?.signature === "string" && !sent.some((x) => x.sig === j.signature) && sent.push({ step: at, sig: j.signature }), () => {}));
+      });
+    };
+    const { context } = await h.newContext({ viewport: { width: 1440, height: 900 }, reducedMotion: "reduce" });
+    await wire(context);
+    // device A's page; with --restore-on-b, device B's from step 7b on (each helper below reads the current one)
+    let page = await context.newPage();
     page.on("dialog", (d) => (rec.dialogs++, void d.dismiss()));
     await addAuthenticator(page, { hasPrf: false });
-    const app = page.frameLocator("iframe#app");
+    let app = page.frameLocator("iframe#app");
     const vis = (sel) => app.locator(`${sel} >> visible=true`).first();
     const top = (sel) => page.locator(sel).first();
     const shot = async (name) => shots && (await page.screenshot({ path: path.join(shots, `a2e-${name}-1440.png`) }));
@@ -523,10 +539,42 @@ export async function run({ plant = null, shots = null } = {}) {
       rec.readErrors.push(`after the buy: ${String(e?.message ?? e).slice(0, 200)}`);
     }
 
+    // 7b. (--restore-on-b) device B: a second browser profile, nothing of A's in it, signs in with A's 12 words (the
+    // wallet way: I already have one, then the recovery words); its restore runs, then W's buy record comes back from
+    // W's own buy (card restore-rebuilds-buy-records), and step 8's sell runs from B
+    if (restoreOnB) {
+      step = "restore";
+      rec.restoreB = { signedIn: false };
+      const { context: b } = await h.newContext({ viewport: { width: 1440, height: 900 }, reducedMotion: "reduce" });
+      await wire(b);
+      page = await b.newPage();
+      page.on("dialog", (d) => (rec.dialogs++, void d.dismiss()));
+      await addAuthenticator(page, { hasPrf: false });
+      app = page.frameLocator("iframe#app");
+      await page.goto(`https://${REAL.app}/token/solana/${MINT}`, { waitUntil: "commit" });
+      await page.waitForURL((u) => u.hostname === REAL.sign, { timeout: WAIT_MS });
+      await app.locator(':root[data-signpage="ready"]').waitFor({ state: "attached", timeout: WAIT_MS });
+      await vis('[data-header="S1.1"] button, button[data-header="S1.1"]').click();
+      await vis('.sgn-opt[data-way="wallet"]').click();
+      await top('#screen:not([hidden]) #signin[data-signin="choose"] button[data-action="have-one"]').click();
+      await top('#signin[data-signin="existing"] button[data-action="recovery"]').click();
+      const box = top('#signin[data-signin="words"] textarea[data-input="words"]');
+      await box.waitFor({ timeout: WAIT_MS });
+      await box.fill(words.join(" "));
+      await top('#signin[data-signin="words"] button[data-action="next"]').click();
+      await top("#screen").waitFor({ state: "hidden", timeout: WAIT_MS });
+      await vis('[data-header="S1.3"], [data-header="S1.4"]').waitFor({ timeout: WAIT_MS });
+      rec.restoreB.signedIn = true;
+      rec.restoreB.at = Date.now();
+      await shot("5b-restored-on-b");
+    }
+
     // 8. the sell side, once the signing page's state holds the position: 100% sold in one tap, back into the pool
     const side = vis('[data-testid="trade-side-sell"]');
-    const heldBy = Date.now() + HELD_MS;
+    // on device B the position comes from the restore and W's buy record read back, so it is given the restore's bound
+    const heldBy = Date.now() + (restoreOnB ? RESTORE_HELD_MS : HELD_MS);
     while (Date.now() < heldBy && (await side.isDisabled())) await page.waitForTimeout(500);
+    if (restoreOnB) rec.restoreB.positionMs = (await side.isDisabled()) ? null : Date.now() - rec.restoreB.at;
     rec.sell = { taps: 0, asks: 0 };
     if (await side.isDisabled()) throw new Error(`no position to sell ${HELD_MS / 1000} s after Filled`);
     await side.click();
@@ -581,7 +629,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const shots = opt("--shots");
   if (shots) mkdirSync(shots, { recursive: true });
   try {
-    const rec = await run({ plant: opt("--plant"), shots });
+    const rec = await run({ plant: opt("--plant"), shots, restoreOnB: args.includes("--restore-on-b") });
     if (opt("--record")) writeFileSync(opt("--record"), `${JSON.stringify(rec, null, 2)}\n`);
     const v = judge(rec);
     console.log(rec.stub);

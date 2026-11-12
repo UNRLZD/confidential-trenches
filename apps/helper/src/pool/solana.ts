@@ -37,25 +37,34 @@
 //                       every index used (read only when the message has lookups; at most SOLANA_POOL_LOOKUPS_MAX);
 //   failed_this_epoch   this nullifier's send already failed on chain in this epoch (M356 (1): at most one paid
 //                       failure per nullifier per epoch);
+//   signature_failed    a signature of the bytes as they would be sent (the fee payer's added, W's as received) does
+//                       not verify over the message, checked here before anything leaves, so nothing is sent;
+//   blockhash_not_found the provider does not know the transaction's own blockhash (simulated without replacing it);
 //   simulation_failed   the simulation of W's transaction (no signature check, its own blockhash) failed;
-//   upstream (503)      the simulation or the blockhash read could not be made, this epoch's rent could not be read,
-//                       or (mainnet tag 3) every block engine failed (a 5xx) or refused it; a provider that throttled
-//                       one of those reads (its HTTP 429, a rate-limit error) is rate_limited (429) instead, never 503;
+//   upstream (503)      the simulation or the blockhash read could not be made, or this epoch's rent could not be
+//                       read; a provider that throttled one of those reads (its HTTP 429, a rate-limit error) is
+//                       rate_limited (429) instead, never 503 (a block engine's answer is never one: the bundle is the
+//                       extra, the plain copy carries the send);
 //   in_flight (429)     mainnet tag 3: this client already holds POOL_JITO_IN_FLIGHT_MAX requests open waiting for a
 //                       fill, repeats of one carry each counted (M369 (M1), M374 (5): the block engines' seconds are
 //                       shared by every caller); Retry-After POOL_IN_FLIGHT_RETRY_S;
-//   rate_limited (429)  a pool provider throttled a read (Retry-After 1, limits.ts throttleOf); or mainnet tag 3: the
-//                       block engines throttled it (every second booked, a 429 or rate-limit words
-//                       from a region); Retry-After 1. A nullifier whose last send expired goes again only into a second
-//                       free now (M374 (4)), else this;
+//   rate_limited (429)  a pool provider throttled a read (Retry-After 1, limits.ts throttleOf). A mainnet tag 3 the
+//                       block engines throttle, or an expired nullifier's re-send with no free second (M374 (4)), goes
+//                       plain without a bundle (the line's via=plain first=throttled), never this;
 //   not_landed          mainnet tag 3: the send ended without a fill: expired (503; never landed, the nullifier is free
-//                       again), unknown (503; held to the release's deadline) or failed (422, detail "failed";
-//                       failed_this_epoch after).
+//                       again), unknown (503; held to the release's deadline; failed_this_epoch after when one
+//                       provider read it landed and failed) or failed (422, detail "failed"; failed_this_epoch after).
 // A 503 says only its code: no text from a block engine or an RPC reaches the caller (M374 (1)).
-// The send (M362 (4)): on mainnet a tag 3 goes to Jito bundle-only (./jito.ts), so one that fails on chain never lands
-// and the fee payer pays nothing for it; only when every block engine fails on transport does it go out as a plain send,
-// under M356 (1)'s one paid failure per nullifier per epoch. A tag 2 (its one on-chain failure is the note spent
-// elsewhere) and every devnet send (devnet has no block engine) go plain.
+// The send (M362 (4)): on mainnet a tag 3 goes to Jito bundle-only (./jito.ts) and, at once beside it, as a plain send
+// on both providers at the plain path's pace (card sol-pool-buy-lands-on-mainnet: Jito counts a tip only as an
+// instruction that transfers SOL, and the pool pays its tip by a lamport write, release.rs:279-280, so the engine may
+// never consider the bundle; 11 Nov 17:38Z it answered invalid after 33 rebroadcasts). A plain copy that fails on chain
+// is M356 (1)'s one paid failure per nullifier per epoch, as the transport fallback always was; the user loses nothing
+// (the release reverts whole). A tag 2 (its one on-chain failure is the note spent elsewhere) and every devnet send
+// (devnet has no block engine) go plain only. The plain copy never waits on the engine: it starts at 0 ms whether or not
+// a region takes the bundle, and the answer is its outcome; the bundle is the extra. Before any send W's bytes are
+// simulated (slot 0 empty) and both signatures of the bytes as sent are verified here: the signed bytes leave the
+// process only in a send.
 // Answer: 200 { signature } (the fee payer's, the transaction id). When it comes (M369 (H1)):
 //   mainnet tag 3: only once the send is decided, and only when it filled. The fee payer's signature is the one byte
 //     string the caller lacks to hold the fully signed transaction (it sent the message and W's signature itself);
@@ -100,7 +109,7 @@ import {
 } from "@blindfill/kit";
 import { base58 } from "../bind/checks.ts";
 import { base58decode } from "../bind/send.ts";
-import { JITO_TICK_SLACK_MS, jitoSender, type JitoSender } from "./jito.ts";
+import { JITO_TICK_SLACK_MS, jitoSender, type JitoSend, type JitoSender } from "./jito.ts";
 import { oncePerNullifier } from "./once.ts";
 import { regionName, simErrText, type PoolSendNote } from "./send-log.ts";
 import { heldPerClient, throttleOf } from "../limits/limits.ts";
@@ -141,6 +150,8 @@ export type PoolSendCode =
   | "not_landed"
   | "bad_table"
   | "failed_this_epoch"
+  | "signature_failed"
+  | "blockhash_not_found"
   | "simulation_failed"
   | "upstream";
 /** `retryAfterS` on a 429 only: the whole seconds the route names in Retry-After (card helper-abuse-limits). */
@@ -340,6 +351,33 @@ export function signAsFeePayer(tx: SolanaPoolChecked, seed: Uint8Array): Uint8Ar
   return out;
 }
 
+/** Both signatures of the bytes as they would be sent, verified over the message: slot 0 by the fee payer (static key
+ *  0), slot 1 by W (static key 1). Checked before any send, so a send never carries a signature the runtime refuses. */
+export function solanaPoolSignaturesHold(wire: Uint8Array, tx: SolanaPoolChecked): boolean {
+  try {
+    return [0, 1].every((i) => ed25519.verify(wire.subarray(1 + 64 * i, 65 + 64 * i), tx.messageBytes, base58decode(tx.message.staticKeys[i]!)));
+  } catch {
+    return false;
+  }
+}
+
+/** A transaction a provider reads as landed and failed at confirmed (getSignatureStatuses: err set, confirmed or
+ *  finalized). One provider's read is enough to refuse its nullifier for the epoch (a refusal costs the caller at most
+ *  a minute's wait, and a confirmed block is voted by a supermajority), never enough to answer filled (that needs
+ *  both, the kit's rule, so one broken provider cannot claim money moved). */
+export async function solanaLandedFailedOnOne(providers: readonly SolanaRpc[], signature: string): Promise<boolean> {
+  const one = async (rpc: SolanaRpc): Promise<boolean> => {
+    try {
+      const r = (await rpc("getSignatureStatuses", [[signature]])) as { value?: readonly ({ err?: unknown; confirmationStatus?: unknown } | null)[] } | null;
+      const v = r?.value?.[0];
+      return v !== null && v !== undefined && v.err !== null && v.err !== undefined && (v.confirmationStatus === "confirmed" || v.confirmationStatus === "finalized");
+    } catch {
+      return false;
+    }
+  };
+  return (await Promise.all(providers.map(one))).some(Boolean);
+}
+
 export type SolanaPoolSenderDeps = {
   /** Provider A (simulation, blockhash height) and provider B: the kit's sender reads fills on both. */
   providers: readonly [SolanaRpc, SolanaRpc];
@@ -356,6 +394,11 @@ export type SolanaPoolSenderDeps = {
   /** The bundle-only sender a mainnet tag 3 goes through (./jito.ts); default the block engines on mainnet, none on
    * any other cluster. null: none (every send plain). */
   jito?: JitoSender | null;
+  /** The fee payer's signing (default signAsFeePayer); replaced in tests only, to reach the signature check after it. */
+  signFeePayer?: (tx: SolanaPoolChecked, seed: Uint8Array) => Uint8Array;
+  /** The sender's timer for the log line's reads (engine3, hash_ms): true after `ms`, false at once when `signal`
+   *  aborts; replaced in tests. */
+  wait?: (ms: number, signal: AbortSignal) => Promise<boolean>;
   /** Where a failed start read is told (POOL_START_LOG_MS apart at most once); default stderr. */
   log?: (line: string) => void;
 };
@@ -456,6 +499,15 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
   };
   const send = deps.send ?? sendSolanaSet;
   const jito = deps.jito !== undefined ? deps.jito : cfg.cluster === "mainnet" ? jitoSender() : null;
+  const wait =
+    deps.wait ??
+    ((ms: number, signal: AbortSignal) =>
+      new Promise<boolean>((done) => {
+        if (signal.aborted) return done(false);
+        const t = setTimeout(() => done(true), ms);
+        t.unref?.(); // a log line's read never holds the process open
+        signal.addEventListener("abort", () => (clearTimeout(t), done(false)), { once: true });
+      }));
   const paths: readonly SolanaSendPath[] =
     deps.paths ??
     deps.providers.map((rpc, i) => ({
@@ -555,6 +607,7 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
       return p;
   }
   async function simulateSignSend(raw: string, tx: SolanaPoolChecked, queueMaxMs?: number): Promise<PoolSendAnswer> {
+      const arrived = now();
       // the simulation of W's bytes as received (slot 0 empty, so no signature check), on its own blockhash; and the
       // newest blockhash's last valid height, which bounds how long the sender rebroadcasts (W's is no newer)
       // a message that loads keys: its tables on both providers first, then the pool and inner programs they resolve to
@@ -588,9 +641,16 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
       }
       const v = (sim as { value?: { err?: unknown } } | null)?.value;
       if (typeof v !== "object" || v === null || !("err" in v)) return no(503, "upstream");
+      // a blockhash the provider does not know, as a public mainnet RPC answers it (read 11 Nov 18:10Z)
+      if (v.err === "BlockhashNotFound") return { ...no(422, "blockhash_not_found"), note: { err: simErrText(v.err) } };
       if (v.err !== null) return { ...no(422, "simulation_failed", JSON.stringify(v.err).slice(0, 200)), note: { err: simErrText(v.err) } };
       if (!Number.isSafeInteger(height) || height <= 0) return no(503, "upstream");
-      const signed: SolanaSignedTx = { wire: signAsFeePayer(tx, seed), lastValidBlockHeight: height };
+      // the bytes as they will be sent: the fee payer's signature added, and both signatures verified here over the
+      // message (card sol-pool-buy-lands-on-mainnet); the signed bytes leave the process only in a send, never in a
+      // simulation, so no provider's answer can carry the fee payer's signature to the caller (M369 (H1))
+      const signedWire = (deps.signFeePayer ?? signAsFeePayer)(tx, seed);
+      if (!solanaPoolSignaturesHold(signedWire, tx)) return { ...no(422, "signature_failed"), note: { err: "signature" } };
+      const signed: SolanaSignedTx = { wire: signedWire, lastValidBlockHeight: height };
       let through = paths;
       // the log line's note (./send-log.ts): how it went out, and for a bundle the region that took it
       let note: PoolSendNote = { via: "plain" };
@@ -603,41 +663,33 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
         if (!left) (left = true), (bundling -= 1);
       };
       if (bundled) bundling += 1;
+      const sig = base58(signed.wire.subarray(1, 65));
+      // a mainnet tag 3: the bundle's first send (./jito.ts, its region queue) starts beside the plain copy, never
+      // before it; its rebroadcasts go one a second to the region that took it, once it is known. A region that is busy,
+      // refuses or fails on transport only means no bundle: the plain copy carries the send (M374 (1): the engine's
+      // words never reach the caller)
+      let first: Promise<JitoSend> | undefined;
       if (bundled) {
-        // M362 (4): bundle-only, so a tag 3 that would fail on chain never lands; rebroadcast the same way, one a
-        // second, to the region that took it only (./jito.ts), its pacer shared by every carry rebroadcasting there
-        const sig = base58(signed.wire.subarray(1, 65));
-        const j = await jito.send(Buffer.from(signed.wire).toString("base64"), sig, queueMaxMs).catch((e: unknown) => {
-          leave();
-          throw e;
-        });
-        // M374 (1): the code only. A block engine's words never reach the caller: they could carry the fee payer's
-        // signature before the send is decided (M369 (H1)). A throttle is a 429 with its wait, a failure a 503.
-        if (j.kind === "busy" || j.kind === "refused") leave();
-        if (j.kind === "busy" && j.throttled) return { ...no(429, "rate_limited"), retryAfterS: 1, note: { via: "jito", first: "throttled" } };
-        if (j.kind === "busy" || j.kind === "refused") return { ...no(503, "upstream"), note: { via: "jito", first: j.kind } };
-        if (j.kind === "ok") {
-          const region = j.region;
-          note = { via: "jito", region: regionName(region), bundle: j.bundleId !== undefined };
-          taken = { region, bundleId: j.bundleId };
-          through = [
-            {
-              name: "jito",
-              // the region's own pace (./jito.ts JITO_REGION_INTERVAL_MS) plus JITO_TICK_SLACK_MS, so the kit's tick, in
-              // whole Date.now() ms, lands past the gate's performance.now() interval; one the gate stamps later than
-              // that waits for the region's next second (./jito.ts rebroadcast), never refused unsent
-              minIntervalMs: jito.intervalMs + JITO_TICK_SLACK_MS,
-              paceKey: region,
-              send: async (b64) => {
-                const r = await jito.rebroadcast(region, b64, sig, ended.signal);
-                if (r.kind !== "ok") throw new Error(`block engine ${r.kind}: ${r.detail}`);
-                return sig;
-              },
+        first = jito.send(Buffer.from(signed.wire).toString("base64"), sig, queueMaxMs).catch((e: unknown) => ({ kind: "transport" as const, detail: String((e as Error)?.message ?? e).slice(0, 120) }));
+        const took = first;
+        through = [
+          {
+            name: "jito",
+            // the region's own pace (./jito.ts JITO_REGION_INTERVAL_MS) plus JITO_TICK_SLACK_MS, so the kit's tick, in
+            // whole Date.now() ms, lands past the gate's performance.now() interval; the region's gate (./jito.ts
+            // rebroadcast) is what every carry rebroadcasting there shares: one the gate stamps later waits for the
+            // region's next second, never refused unsent
+            minIntervalMs: jito.intervalMs + JITO_TICK_SLACK_MS,
+            send: async (b64) => {
+              const j = await took;
+              if (j.kind !== "ok") throw new Error(`block engine ${j.kind}`);
+              const r = await jito.rebroadcast(j.region, b64, sig, ended.signal);
+              if (r.kind !== "ok") throw new Error(`block engine ${r.kind}: ${r.detail}`);
+              return sig;
             },
-          ];
-        }
-        // every region failed on transport: the plain send, under M356 (1) (a failure that lands is paid once an epoch)
-        else note = { via: "plain", first: "transport" };
+          },
+          ...paths,
+        ];
       }
       let h: ReturnType<typeof send>;
       try {
@@ -657,6 +709,27 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
         if (mine()) bounded(heldUntil, nf, { entry, deadline: Number(tx.deadlineMs) });
       };
       if (bundled) {
+        // the line's reads while it goes (./send-log.ts): the engine's word about 3 s after the first send, when no
+        // other bundle carry is in progress (its region's second, ./jito.ts status); and how long the transaction's own
+        // blockhash stays valid after it arrived, read on provider a every 5 s until it is not or the send ends
+        const engine3: Promise<PoolSendNote["engine3"]> = wait(3_000, ended.signal).then(async (go) => {
+          const j = go && bundling === 1 ? await first! : undefined;
+          // read only while this is the one bundle carry (no other carry's second to take) and the send goes on
+          if (j?.kind !== "ok" || j.bundleId === undefined || bundling !== 1 || ended.signal.aborted) return undefined;
+          return jito!.status(j.region, j.bundleId, ended.signal).catch(() => "unread" as const);
+        });
+        const hash = (async (): Promise<string> => {
+          // bounded by the release's deadline, past which it cannot land
+          for (;;) {
+            if (now() > Number(tx.deadlineMs) || !(await wait(5_000, ended.signal))) return `>${Math.max(0, now() - arrived)}`;
+            try {
+              const v = (await a("isBlockhashValid", [tx.message.blockhash, { commitment: "processed" }])) as { value?: unknown } | null;
+              if (v?.value === false) return String(Math.max(0, now() - arrived));
+            } catch {
+              // an unread round: read again at the next
+            }
+          }
+        })();
         // M369 (H1): the fee payer's signature only once the send is decided, and only for a fill (the header)
         let state: string | undefined;
         let sends: readonly { path: string; ok: boolean }[] = [];
@@ -668,10 +741,37 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
           state = undefined;
         }
         leave();
-        // the rebroadcasts, counted (the first send went before the set); and for a send that did not fill, the
-        // engine's word on its bundle (one read, in the region's second), so the line says whether it lost the auction
+        // a read still in flight when the send ended never holds the answer: it is taken as it stands (the bundle's first
+        // send still queued; the engine's word unread; the blockhash still valid at its last read)
+        const asItStands = <T>(p: Promise<T>, then: () => T) => Promise.race([p, new Promise<T>((r) => setImmediate(() => r(then())))]);
+        const j = await asItStands<JitoSend | undefined>(first!, () => undefined);
+        // how it went out: via=jito with the region and its bundle when a region took the first send, else via=plain with
+        // why no bundle went (first=busy, throttled, refused, transport, or queued: still in the region queue at the end);
+        // plain= the copies the providers took, always
+        if (j?.kind === "ok") {
+          note = { via: "jito", region: regionName(j.region), bundle: j.bundleId !== undefined };
+          taken = { region: j.region, bundleId: j.bundleId };
+        } else note = { via: "plain", first: j === undefined ? "queued" : j.kind === "busy" && j.throttled ? "throttled" : j.kind };
+        // the rebroadcasts, counted (the first send is not one); and for a send that did not fill, the engine's word on
+        // its bundle (one read, in the region's second), so the line says whether it lost the auction
         const jitoSends = sends.filter((x) => x.path === "jito");
-        note = { ...note, end: state === "filled" || state === "failed" || state === "expired" ? state : "unknown", rebroadcasts: jitoSends.filter((x) => x.ok).length, misses: jitoSends.filter((x) => !x.ok).length };
+        const plainSends = sends.filter((x) => x.path !== "jito");
+        note = { ...note, end: state === "filled" || state === "failed" || state === "expired" ? state : "unknown", rebroadcasts: jitoSends.filter((x) => x.ok).length, misses: jitoSends.filter((x) => !x.ok).length, plain: plainSends.filter((x) => x.ok).length };
+        const e3 = await asItStands<PoolSendNote["engine3"]>(engine3, () => (taken?.bundleId === undefined ? undefined : "unread"));
+        if (e3 !== undefined) note = { ...note, engine3: e3 };
+        note = { ...note, hashMs: await asItStands(hash, () => `>${Math.max(0, now() - arrived)}`) };
+        // a send that did not fill: W's bytes (slot 0 empty) simulated now on a fresh blockhash, no signature check, so
+        // the line tells a state or slippage failure from none
+        if (state !== "filled") {
+          let endSim = "unread";
+          try {
+            const r = (await a("simulateTransaction", [raw, { encoding: "base64", sigVerify: false, replaceRecentBlockhash: true, commitment: "processed" }])) as { value?: { err?: unknown } } | null;
+            if (r?.value !== undefined && r.value !== null && "err" in r.value) endSim = r.value.err === null ? "ok" : simErrText(r.value.err);
+          } catch {
+            endSim = "unread";
+          }
+          note = { ...note, endSim };
+        }
         if (state !== "filled" && taken?.bundleId !== undefined) {
           let word: PoolSendNote["status"] = "unread";
           try {
@@ -693,6 +793,9 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
           bounded(expired, nf, true); // M374 (4): its next send only into a free second
           return { ...no(503, "not_landed"), note }; // never landed: once frees the nullifier
         }
+        // an end the two providers did not agree on: a landed failure either one reads at confirmed refuses the nullifier
+        // for the epoch (solanaLandedFailedOnOne), as a failure both read does
+        if (await solanaLandedFailedOnOne([a, b], sig)) bounded(failedIn, nf, epochStartOf(now()));
         const unknown = { ...no(503, "not_landed"), note };
         bounded(heldUntil, nf, { entry: undefined, answer: unknown, deadline: Number(tx.deadlineMs) });
         return unknown;
@@ -707,6 +810,10 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
             return;
           }
           hold();
+          // an end the providers did not agree on: a landed failure either one reads refuses the nullifier this epoch
+          return solanaLandedFailedOnOne([a, b], sig).then((one) => {
+            if (one) bounded(failedIn, nf, epochStartOf(now()));
+          });
         })
         .catch(hold);
       return { status: 200, body: { signature: h.signatures[0]! }, note };

@@ -42,6 +42,18 @@
 //   sign out or a sell's hold sends nothing more of the pass.
 // - Who learns what: each pool RPC, a W of this device and the token it bought (the sell's own balance read names the
 //   same pair). No other host is asked.
+// - On mainnet (`one`, decision M359): every W's balance is read on the helper's route alone (POST /v1/rpc/{chain}, the
+//   page's pageEvmWalletRpc), never on the pool's two RPCs, which a device reaches itself: two Ws named to one public
+//   provider from the user's IP in one burst would show it the user's wallets together. Holdings are display and never
+//   signed on (a sale signs on its own reads, on both pool RPCs: pool-sell-evm.ts), so they take one reader: one block,
+//   eth_getBlockByNumber("latest") (Robinhood serves no finalized state), then each W's balanceOf at that block's hash
+//   (EIP-1898), one W a request, the Ws in a random order. The pool's two RPCs read their heads and the token's decimals,
+//   which name no W; the block the pass counts as read at is the lowest of the helper's block and the two heads, so a
+//   helper naming a block far ahead never lifts the floor past the chain (positions would wait for it all session). A
+//   helper read that fails (a 429, an outage) is a W's failed read: its last kept amount stays and the pass runs again,
+//   never a public provider in its place. A lying helper can show a wrong amount, or none; it can never make the device
+//   sign: a sale's finding reads on the pool's two RPCs (pool-sell-evm.ts planEvmSell). Requests per pass on the
+//   helper: 1 + one per filled W.
 import type { EvmRpc } from "../../wallet/src/pool/evm.ts";
 import { evmHeadNumber } from "./evm-send.ts";
 import type { EvmHolding } from "./pool-buy-evm.ts";
@@ -74,6 +86,10 @@ export type EvmPositionsReads = {
   /** The tokens an open sale holds (lower case), each with its floor, or null while it has none (EvmSaleHolds.at), given
    *  the pass's two newest blocks (null when either failed): asked after the pass reads them and again at its end. */
   holds?(heads: readonly [bigint, bigint] | null): Promise<ReadonlyMap<string, bigint | null>>;
+  /** Mainnet: the helper's route, the one reader of every W's balance (see the header); `rpcs` then name no W. */
+  one?: EvmRpc;
+  /** The random source the Ws' order is drawn from (crypto.getRandomValues when not given). */
+  random?: (out: Uint32Array<ArrayBuffer>) => void;
 };
 
 const word = (v: unknown): bigint => {
@@ -111,6 +127,32 @@ async function agreedBalance(rpcs: readonly [EvmRpc, EvmRpc], signal: AbortSigna
   if (a !== b) throw new Error("balanceOf: the two RPCs differ");
   return a!;
 }
+const HASH = /^0x[0-9a-f]{64}$/;
+const QUANTITY = /^0x(0|[1-9a-f][0-9a-f]*)$/;
+/** One reader's block for a list of W reads (M359 (3)): the newest, by number and hash. */
+export async function evmOneBlock(rpc: EvmRpc): Promise<{ number: bigint; hash: string }> {
+  const b = (await rpc("eth_getBlockByNumber", ["latest", false])) as { hash?: unknown; number?: unknown } | null;
+  const hash = typeof b?.hash === "string" ? b.hash.toLowerCase() : "";
+  const number = typeof b?.number === "string" ? b.number.toLowerCase() : "";
+  if (!HASH.test(hash) || !QUANTITY.test(number)) throw new Error("eth_getBlockByNumber: not a block");
+  return { number: BigInt(number), hash };
+}
+/** balanceOf(W) of `token` on one reader at the block of `hash` (EIP-1898): one W, one request. */
+export async function evmOneBalance(rpc: EvmRpc, token: string, w: string, hash: string): Promise<bigint> {
+  return word(await rpc("eth_call", [{ to: token, data: `${BALANCE_OF}${BigInt(w).toString(16).padStart(64, "0")}` }, { blockHash: hash }]));
+}
+/** `xs` in a random order (Fisher-Yates on the platform's random source): the Ws a reader is named, never in the
+ *  notes' or the records' order (M359 (4)). */
+export function shuffled<T>(xs: readonly T[], random: (out: Uint32Array<ArrayBuffer>) => void = (out) => void globalThis.crypto.getRandomValues(out)): T[] {
+  const out = [...xs];
+  const r = new Uint32Array(Math.max(out.length, 1));
+  random(r);
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = r[i]! % (i + 1);
+    [out[i], out[j]] = [out[j]!, out[i]!];
+  }
+  return out;
+}
 /** The block each pass of a memo last read at (the floor's third part). */
 const READ_AT = new WeakMap<PassMemo, bigint>();
 /** The block each of a memo's kept amounts ("W token") was agreed at. */
@@ -143,10 +185,18 @@ export async function evmPositionsPass(r: EvmPositionsReads, memo: PassMemo): Pr
   let heads: readonly [bigint, bigint] | null = null;
   const gate = { busy: 0, queue: [] as (() => void)[], n: EVM_POSITIONS_IN_FLIGHT };
   const rpcs: readonly [EvmRpc, EvmRpc] = [gated(r.rpcs[0], gate, r.signal), gated(r.rpcs[1], gate, r.signal)];
+  const one = r.one === undefined ? undefined : gated(r.one, gate, r.signal);
+  // the one reader's block hash, every W's balance read at it (mainnet)
+  let oneAt: string | null = null;
   try {
-    const [x, y] = await Promise.all(rpcs.map((rpc) => evmHeadNumber(rpc)));
+    // the pair's heads (no W named), and on mainnet the helper's block beside them: the lowest of the three counts
+    const [[x, y], b] = await Promise.all([Promise.all(rpcs.map((rpc) => evmHeadNumber(rpc))), one === undefined ? null : evmOneBlock(one)]);
     heads = [x!, y!];
-    const l = x! < y! ? x! : y!;
+    let l = x! < y! ? x! : y!;
+    if (b !== null) {
+      if (b.number < l) l = b.number;
+      oneAt = b.hash;
+    }
     // under the floor: no balance read (see the header), not whole
     if (l >= floor) {
       at = `0x${l.toString(16)}`;
@@ -163,6 +213,12 @@ export async function evmPositionsPass(r: EvmPositionsReads, memo: PassMemo): Pr
   const first = await holdsNow();
   r.signal.throwIfAborted();
   const tokens = [...byToken];
+  // mainnet: every W's balance on the one reader, one W a request, all the pass's Ws in one random order
+  const oneRead = new Map<string, Promise<bigint>>();
+  if (one !== undefined && at !== null)
+    for (const [token, w] of shuffled(tokens.flatMap(([token, ws]) => (past(first, token, low) ? [...ws].map((w) => [token, w] as const) : [])), r.random))
+      oneRead.set(`${w} ${token}`, evmOneBalance(one, token, w, oneAt!));
+  for (const p of oneRead.values()) p.catch(() => {});
   const read = await Promise.all(
     tokens.map(async ([token, ws]) => {
       let decimals = memo.decimals.get(token);
@@ -179,7 +235,7 @@ export async function evmPositionsPass(r: EvmPositionsReads, memo: PassMemo): Pr
         [...ws].map(async (w) => {
           if (at === null || !past(first, token, low)) return { w, amount: null };
           try {
-            return { w, amount: await agreedBalance(rpcs, r.signal, token, w, at) };
+            return { w, amount: one === undefined ? await agreedBalance(rpcs, r.signal, token, w, at) : await oneRead.get(`${w} ${token}`)! };
           } catch {
             r.signal.throwIfAborted();
             return { w, amount: null };

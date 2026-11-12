@@ -1,5 +1,5 @@
 {
- "_note": "good: the card's Base Sepolia run (signpage-positions-evm.md) read on both pool RPCs at 2026-11-11T08:18:24.969Z, with this tree's SIGN_HOST build; bad: the same record naming U2's deposit as the sell, read with SIGN_HOST as served at 2026-11-11T04:56:27.909Z (before the card)",
+ "_note": "good: the card's Base Sepolia run (signpage-positions-evm.md) read on both pool RPCs at 2026-11-11T08:18:24.969Z, with this tree's SIGN_HOST build; bad: the same record naming U2's deposit as the sell, read with SIGN_HOST as served at 2026-11-11T04:56:27.909Z (before the card) The page parts were re-made from a local mainnet build (and the testnet build for a testnet page) of card evm-pools-on-mainnet, which pins both EVM pools; re-recorded from SIGN_HOST at the next sign deploy.",
  "good": {
   "readAt": "2026-11-11T08:18:24.969Z",
   "run": {
@@ -787,10 +787,10 @@
    }
   ],
   "page": {
-   "pin": "sha384-mtMhHhw5p0O6i6znSFNRpUhwfjMYLz6G2w7xncBLhpmxh8//ZP0wb81PucyMbwPa",
-   "sha384": "sha384-mtMhHhw5p0O6i6znSFNRpUhwfjMYLz6G2w7xncBLhpmxh8//ZP0wb81PucyMbwPa",
+   "pin": "sha384-bEUwzsHsi7ni86xGdk4Jm5rAu1D/mbSdMYRyWB5aIjV0ttdon92LOVYPWoT/n2hS",
+   "sha384": "sha384-bEUwzsHsi7ni86xGdk4Jm5rAu1D/mbSdMYRyWB5aIjV0ttdon92LOVYPWoT/n2hS",
    "marks": {
-    "pass": 0,
+    "pass": 1,
     "join": 1
    }
   }
