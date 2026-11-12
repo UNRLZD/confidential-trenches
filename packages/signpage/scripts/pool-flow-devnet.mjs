@@ -467,7 +467,9 @@ else if (landed) {
     pass = await t.proofs();
   }
   proofWait = { passes, ms: Date.now() - passFrom, made: pass.made.length > 0 };
-  if (COPY && pass.made.length === 0) throw new Error(`the buy's proof was not made in ${passes} passes over ${proofWait.ms} ms: ${JSON.stringify(pass.failed)}`);
+  // a pass that made nothing and failed nothing found the proof already made (the page's own pass, run on a state read,
+  // got there first): only a pass that still fails is the fault
+  if (COPY && pass.made.length === 0 && pass.failed.length > 0) throw new Error(`the buy's proof was not made in ${passes} passes over ${proofWait.ms} ms: ${JSON.stringify(pass.failed)}`);
   log(`pass ${JSON.stringify(pass, (k, v) => (typeof v === "bigint" ? String(v) : v))}`);
   let spend = SPEND;
   if (SPEND === "max") {
