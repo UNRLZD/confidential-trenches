@@ -9,9 +9,10 @@
 //   is refused by any other.
 // - chain: which fresh wallet a chunk goes to. W = W_{chain, l, j} (derive/keys.ts walletPath), with (l, j) the spent
 //   note's label and change index (keys.ts changeIndex), so each note has its own W and no W serves two notes. A pool
-//   with piecesMax above 1 (card buy-spends-several-pieces) has one buy pay one W from several notes: the queue binds
-//   every ready proof to one W, the W of one of the ready notes (its owner), and a buy spends a set of them that holds
-//   that note, so each W a buy paid is still the W of a note it spent and a restore finds it the same way.
+//   with piecesMax above 1 (card buy-spends-several-pieces) has one buy pay one W from several notes: the queue keeps
+//   each ready note's proof bound to its own W and, once those are made, a second proof of other notes bound to the W
+//   of one ready note (the primary, ./queue.ts "Pieces"); a buy spends a set of one W that holds that W's own note, so
+//   each W a buy paid is still the W of a note it spent and a restore finds it the same way.
 // - ladder: the rungs in the pool's asset (./ladder.ts). A proof withdraws exactly one rung (withdrawnValue, public),
 //   so every release from every user is one of a few standard sizes. The fee is paid from the chunk, never added to
 //   it: a fee read at another time would otherwise make another size.
@@ -102,7 +103,7 @@ export interface Pool<R = unknown> {
 
 /** A proof made ahead for one note, held until the tap sends it or the queue drops it. */
 export type ReadyProof<R = unknown> = {
-  /** The note it spends, HELD in the store by this attempt. */
+  /** The note it spends, HELD in the store by this attempt (the note's first or its second, notes/store.ts heldBy). */
   noteId: string;
   attempt: string;
   poolId: string;

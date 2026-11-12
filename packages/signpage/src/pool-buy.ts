@@ -2,10 +2,12 @@
 // its fresh wallet W and buys the user's token in the same transaction (tag 3), and the note counts as spent only once
 // that transaction reads back on two RPCs.
 //
-// - The pieces (card buy-spends-several-pieces): the wallet's proof queue binds every ready proof to one W, the own W of
-//   its smallest ready note; a tap spends the set of them that holds that note, pays the spend and W's new accounts (the
-//   kit's solanaPoolBuyFunds over every piece) and releases the least, then the fewest pieces (pickPieces), at most
-//   five: the other pieces' releases (tag 2) to W, each its own transaction, then the own note's tag 3 that buys, sent
+// - The pieces (card buy-spends-several-pieces): the wallet's proof queue keeps each ready note's proof bound to its own
+//   W (tier 1) and, once those are made, a second proof of the largest other notes bound to the primary's W, the own W
+//   of the ready note with the largest chunk (tier 2, ../../wallet/src/pool/queue.ts "Pieces"). A tap spends the
+//   proofs of one W that hold that W's own note, never two of one note, that pay the spend and W's new accounts (the
+//   kit's solanaPoolBuyFunds over every piece): the fewest pieces, then the least released (pickPieces), at most four:
+//   the other pieces' releases (tag 2) to W, each its own transaction, then the own note's tag 3 that buys, sent
 //   as one bundle that lands whole or not at all. Every note is taken (RESERVED) before anything leaves, each read back,
 //   settled and owned on its own (sendAndSettle). One piece is the plain buy below.
 // - The proof: one the wallet's proof queue made ahead (../../wallet/src/pool/queue.ts). Its release is read off the proof itself:
@@ -577,12 +579,14 @@ export const POOL_RELEASE_CU = 400_000;
 
 /**
  * The pieces a buy spends (card buy-spends-several-pieces): ready proofs bound to one W, one of them that W's own
- * note's (ReadyProof.own: W is found again from that spent note, buy-wallets.ts), at most `max`, that `pays` passes;
- * the set that releases the least in all, then the fewest pieces, then the fewest on the newest root (card
- * fresh-money-spendable-at-once). In send order: the other pieces largest first, the own one last (the tag 3 that
- * buys, so a buy that lands always spends W's own note). null: no set pays.
+ * note's (ReadyProof.own: W is found again from that spent note, buy-wallets.ts), each note once (a note's tier 1 and
+ * tier 2 proofs pay two W's; a list naming one note twice in a W gives the pick one of them), at most `max`, that
+ * `pays` passes; the set of the fewest pieces (a buy one note pays is one piece, whatever tier 2 holds), then the least
+ * released in all, then the fewest on the newest root (card fresh-money-spendable-at-once), then the first found (the
+ * sort below). In send order: the other pieces largest first, the own one last (the tag 3 that buys, so a buy that
+ * lands always spends W's own note). null: no set pays.
  */
-export type PickPiece = { readonly wallet: { readonly address: string }; readonly own?: true; readonly chunk: bigint; readonly root?: string };
+export type PickPiece = { readonly noteId: string; readonly wallet: { readonly address: string }; readonly own?: true; readonly chunk: bigint; readonly root?: string };
 export function pickPieces<P extends PickPiece>(list: readonly P[], pays: (set: readonly P[]) => boolean, max: number = SOLANA_POOL_BUY_PIECES_MAX): P[] | null {
   const byW = new Map<string, P[]>();
   // the smallest chunk first and, of one chunk, a proof on the epoch root before one on the newest root: of two sets
@@ -593,13 +597,23 @@ export function pickPieces<P extends PickPiece>(list: readonly P[], pays: (set: 
   const weigh = (set: P[]): void => {
     const sum = set.reduce((a, p) => a + p.chunk, 0n);
     const newest = set.filter((p) => p.root === "newest").length;
-    const better = best === null || sum < best.sum || (sum === best.sum && (set.length < best.set.length || (set.length === best.set.length && newest < best.newest)));
+    const better = best === null || set.length < best.set.length || (set.length === best.set.length && (sum < best.sum || (sum === best.sum && newest < best.newest)));
     if (better && pays(set)) best = { set, sum, newest };
   };
   // one W has one own note; a list that names several (one proof per note, each its own W's) weighs each as the own one
   for (const group of byW.values())
     for (const own of group.filter((p) => p.own === true)) {
-      const rest = group.filter((p) => p !== own).sort((x, y) => (x.chunk > y.chunk ? -1 : x.chunk < y.chunk ? 1 : 0)).slice(0, PICK_SIZE - 1);
+      // each other note once, never the own note's: its first proof in the largest-first order
+      const notes = new Set([own.noteId]);
+      const rest = group
+        .filter((p) => p !== own)
+        .sort((x, y) => (x.chunk > y.chunk ? -1 : x.chunk < y.chunk ? 1 : 0))
+        .filter((p) => {
+          if (notes.has(p.noteId)) return false;
+          notes.add(p.noteId);
+          return true;
+        })
+        .slice(0, PICK_SIZE - 1);
       for (let mask = 0; mask < 1 << rest.length; mask++) {
         const others = rest.filter((_, i) => (mask >> i) & 1);
         if (others.length < max) weigh([...others, own]);
@@ -720,8 +734,9 @@ async function buyRun(h: PoolBuyHost, ask: PoolAsk, at: { fault?: unknown }): Pr
       const bh = nowMs() - slotAt > POOL_BUY_SLOT_STALE_MS ? await blockhashOf(h.rpcs) : first;
       const minOut = (best.expectedOut * BigInt(10_000 - ask.slippageBps)) / 10_000n;
       // the pick, from the ready proofs as they are now (a remake or another tab may have changed them during the
-      // reads): the pieces of one W, its own note's among them, that pay the spend and W's accounts and release the
-      // least in all (pickPieces; card buy-spends-several-pieces), so a tap never parks more on its W than it needs;
+      // reads): the pieces of one W, its own note's among them, each note once, that pay the spend and W's accounts in
+      // the fewest pieces, then the least released (pickPieces; card buy-spends-several-pieces), so a buy one note pays
+      // takes that note's own proof alone and leaves every other note's ready, and a tap never parks more than it needs;
       // one piece when the host takes one only; filtered and claimed in one turn, so two runs of this page never
       // claim one note
       const pays = (set: readonly Ready[]): boolean =>

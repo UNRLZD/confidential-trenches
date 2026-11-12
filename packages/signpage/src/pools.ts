@@ -26,7 +26,7 @@ import { SOLANA_POOL_JITO_TIP } from "../../kit/src/checks/solana/checks.ts";
 import type { ReadyProof } from "../../wallet/src/pool/pool.ts";
 import { pickPieces } from "./pool-buy.ts";
 import { SolanaRpcTransportError, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
-import type { NoteRecord } from "../../wallet/src/notes/store.ts";
+import { heldBy, type NoteRecord } from "../../wallet/src/notes/store.ts";
 import { evmBalancePool, evmTapSpendOf, poolBalances, solanaBalancePool, solanaTapSpendOf, type BalancePool, type BalanceProof, type LandedRelease } from "../../wallet/src/pool/balances.ts";
 import { EVM_CHAIN_IDS, EVM_POOLS, evmPoolScopeOf, type EvmNetwork } from "../../wallet/src/pool/evm.ts";
 import { POOL_TESTNET } from "../../wallet/src/pool/network.ts";
@@ -181,7 +181,10 @@ export function poolBuyDryKind(d: PoolBuyDryDeps): (params: Record<string, unkno
     if (amount === null || amount === 0n || amount > lamportsOf(tap)!) return { result: { tap_max: tap } };
     const ids = new Set(sol.map((p) => p.id));
     const byId = new Map(got.notes.map((n) => [n.id, n]));
-    const live = (got.ready ?? []).filter((r) => ids.has(r.poolId) && byId.get(r.noteId)?.state === "HELD" && byId.get(r.noteId)?.attempt === r.attempt);
+    const live = (got.ready ?? []).filter((r) => {
+      const n = byId.get(r.noteId);
+      return ids.has(r.poolId) && n !== undefined && heldBy(n, r.attempt);
+    });
     const pays = (set: readonly (typeof live)[number][]): boolean =>
       solanaPoolBuyFunds(set.map((p) => ({ withdrawnValue: p.chunk, relayFee: p.binding.feeCap })), venue, { spend: amount, tip }, rent).problem === null;
     const set = pickPieces(live, pays);
