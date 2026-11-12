@@ -10,8 +10,9 @@
 //   node contracts/pool-evm/test/fork-rpc.mjs [--record] --book pools -- <command...>
 //                                   the deployed pools' fork (card evm-money-shows-and-spends-at-once): anvil forks
 //                                   Base and Robinhood mainnet at POOLS_FORK_BLOCKS, served from fixtures/fork-rpc-pools.json,
-//                                   recorded from publicnode (Base) and Pocket (Robinhood), whose eth_getLogs pages are
-//                                   wide (50,000 and 100,000 blocks) so the page's sync reads the pools' logs in few pages
+//                                   recorded from publicnode (Base: eth_getLogs pages of 50,000 blocks) and Robinhood's own
+//                                   RPC (Pocket's Robinhood node keeps no state that old: "historical state ... is not
+//                                   available", 12 Nov 21:41Z)
 // foundry.toml's rpc_endpoints point at http://127.0.0.1:47545/<chain>.
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -21,7 +22,7 @@ import { fileURLToPath } from "node:url";
 
 const BOOKS = {
   forge: { file: "fixtures/fork-rpc.json", upstream: { base: "https://mainnet.base.org", robinhood: "https://rpc.mainnet.chain.robinhood.com" } },
-  pools: { file: "fixtures/fork-rpc-pools.json", upstream: { base: "https://base-rpc.publicnode.com", robinhood: "https://robinhood.api.pocket.network" } },
+  pools: { file: "fixtures/fork-rpc-pools.json", upstream: { base: "https://base-rpc.publicnode.com", robinhood: "https://rpc.mainnet.chain.robinhood.com" } },
 };
 /** The pools' fork blocks: after each pool's deploy (wallet EVM_POOLS fromBlock 54,325,671 and 108,420,674), read
  *  12 Nov 20:49Z as both providers' agreed head less a few hundred blocks. */
@@ -45,8 +46,18 @@ function keyOf(book, chain, r) {
       ? byHash[p.blockHash.toLowerCase()]
       : p && typeof p === "object" && !Array.isArray(p) && typeof p.blockNumber === "string" ? p.blockNumber : p,
   );
-  return `${r.method} ${JSON.stringify(params)}`;
+  return `${r.method} ${JSON.stringify(r.method === "eth_getLogs" ? params.map(logFilter) : params)}`;
 }
+
+// An eth_getLogs filter's topic alternatives in one order: the page asks a log's topics in a new random order on every
+// read (each position's list is one OR set), so the same read is one key whatever the order it came in
+const logFilter = (f) => (f && typeof f === "object" && Array.isArray(f.topics) ? { ...f, topics: f.topics.map((t) => (Array.isArray(t) ? [...t].sort() : t)) } : f);
+/** A book read from its file, each key in that one order (a book recorded before it holds the same answer twice). */
+const normal = (book) =>
+  Object.fromEntries(Object.entries(book).map(([c, b]) => [c, Object.fromEntries(Object.entries(b).map(([k, v]) => {
+    const at = k.indexOf(" ");
+    return [k.slice(0, at) === "eth_getLogs" ? `eth_getLogs ${JSON.stringify(JSON.parse(k.slice(at + 1)).map(logFilter))}` : k, v];
+  }))]));
 
 /** Answers one JSON-RPC request (or a batch) for `chain` from `book`, or from upstream when recording. */
 async function answer(book, chain, req, record) {
@@ -100,7 +111,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     process.exit(2);
   }
   // recording adds to what is recorded, so runs with two Foundry versions each add what theirs asks
-  const book = existsSync(FILE) ? JSON.parse(readFileSync(FILE, "utf8")) : {};
+  const book = existsSync(FILE) ? normal(JSON.parse(readFileSync(FILE, "utf8"))) : {};
   const server = await serve(book, record);
   // forge runs as a child while this process answers its requests
   const child = spawn(cmd[0], cmd.slice(1), { stdio: "inherit" });

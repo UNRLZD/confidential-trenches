@@ -1,7 +1,7 @@
 // The signing page's own pool.buy on a local fork of Base or Robinhood mainnet (card evm-money-shows-and-spends-at-once):
 // it spends the note pool-fork-evm.mjs left in the pinned mainnet pool seconds before, sent through the helper's own
 // route and EVM sender run in this process, with nothing signed or sent on any real chain:
-//   node contracts/pool-evm/test/fork-rpc.mjs --book pools -- sh packages/signpage/scripts/pool-fork-evm.sh <base|robinhood> <S> <fork.json> \
+//   node contracts/pool-evm/test/fork-rpc.mjs --book pools -- sh packages/signpage/scripts/pool-fork-evm.sh <base|robinhood> <S> <lag> <fork.json> \
 //     packages/signpage/scripts/pool-fork-evm-buy.mjs <base|robinhood> http://127.0.0.1:<port> <out.json> <token>
 // (anvil is a heavy job: scripts/heavy.sh). The mainnet build: __SIGN_NETWORK__ is not set, so the pins and lists are
 // SIGN_HOST's (the wallet's EVM_POOLS, src/pool-testnet.ts MAINNET_POOL_RPCS and MAINNET_EVM_FEE_RPCS).
@@ -274,9 +274,11 @@ log("end", { end: record.end, ms: record.times.tapToEndMs, stages, holding: hold
 // 4. the receipt, read on the fork
 const sent = helperCalls.filter((c) => c.path === "/v1/pool/evm/send" && c.status === 200).map((c) => /"hash":"(0x[0-9a-f]{64})"/.exec(c.body)?.[1]).filter(Boolean).at(-1);
 const hash = holdings?.[proof.wallet.address]?.route?.tx ?? sent ?? null;
+// read only once a block of this fork holds it: anvil sends a hash it does not know to the forked chain's provider
 let rc = null;
 for (let i = 0; hash && rc === null && i < 20; i++) {
-  rc = await anvil("eth_getTransactionReceipt", [hash]);
+  const top = BigInt(await anvil("eth_blockNumber", []));
+  for (let n = top; rc === null && n > firstHead; n--) if ((await anvil("eth_getBlockByNumber", [`0x${n.toString(16)}`, false])).transactions.includes(hash)) rc = await anvil("eth_getTransactionReceipt", [hash]);
   if (rc === null) await sleep(500);
 }
 record.tx = hash;
