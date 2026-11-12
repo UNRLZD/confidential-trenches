@@ -76,13 +76,22 @@ export type EvmSettleArgs = {
 /** The most rounds of back-outs one pass makes: a chain of change notes unwinds one generation a round. */
 const HEAL_ROUNDS = 64;
 
+/**
+ * Whether a settle pass has anything to read for the scope: a RESERVED note of it, or a note of it whose block the store
+ * keeps (`landings`: one landed above the finalized block, or one backed out and not landed again yet). The one rule a
+ * caller asks before it reads a round or the seed; false once every note of the scope is final.
+ */
+export function evmSettleOpen(notes: readonly NoteRecord[], landings: ReadonlyMap<string, bigint>, scope: bigint): boolean {
+  return notes.some((n) => n.scope === scope && (n.state === "RESERVED" || landings.has(n.id)));
+}
+
 export async function evmSettleReserved(a: EvmSettleArgs): Promise<EvmReservedPass> {
   if (!(a.seed64 instanceof Uint8Array) || a.seed64.length !== 64) throw new Error("seed64: not 64 bytes");
   const out: EvmReservedPass = { spent: [], freed: [], held: [], backedOut: [] };
   const mine = async () => (await a.notes.list()).filter((n) => n.scope === a.scope);
   const first = await mine();
   const tail = await a.notes.landings();
-  if (!first.some((n) => n.state === "RESERVED" || tail.has(n.id))) return out;
+  if (!evmSettleOpen(first, tail, a.scope)) return out;
   const r = await a.round(a.signal);
   if (typeof r?.fin?.number !== "bigint" || typeof r.fin.timestamp !== "bigint" || typeof r?.anchor?.number !== "bigint" || typeof r.anchor.timestamp !== "bigint" || !Array.isArray(r.events)) throw new Error("round: not the sync's round");
   const anchorMs = r.anchor.timestamp * 1000n;
