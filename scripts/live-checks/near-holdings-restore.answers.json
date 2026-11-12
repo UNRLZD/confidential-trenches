@@ -1,0 +1,50 @@
+{
+ "good": {
+  "at": "2026-11-12T21:12:35.232Z",
+  "csp": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://ct-api.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://archival-rpc.mainnet.near.org https://archival-rpc.mainnet.fastnear.com https://api.fastnear.com https://solana-rpc.publicnode.com https://solana.api.pocket.network https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com https://base-rpc.publicnode.com https://base-mainnet.public.blastapi.io https://mainnet.base.org https://base.api.pocket.network https://base.gateway.tenderly.co https://rpc.sentio.xyz https://robinhood-rpc.publicnode.com https://robinhood.drpc.org https://rpc.mainnet.chain.robinhood.com https://robinhood.rpc.blxrbdn.com https://rpc-robinhood.globalstake.io https://robinhood.api.pocket.network https://robinhood.daybreak-rpc.network https://base.rpc.blxrbdn.com; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-src https://ct-app.unrealized.trade; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker walk-worker",
+  "html": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-JB5no0efLF527+kZ6xnZ0nKzxm+1dHeS/Q1jSJ+2L1hbNXAyGAosU6mbNPPrUQrA\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "appSha384": "sha384-JB5no0efLF527+kZ6xnZ0nKzxm+1dHeS/Q1jSJ+2L1hbNXAyGAosU6mbNPPrUQrA",
+  "app": {
+   "pass": true
+  },
+  "list": {
+   "status": 200,
+   "acao": "https://confidential.unrealized.trade",
+   "body": {
+    "account_id": "vault.confidential.unrlzd.near",
+    "tokens": [
+     {
+      "contract_id": "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+      "last_update_block_height": 223715160,
+      "balance": "0"
+     }
+    ]
+   }
+  },
+  "source": "this card's SIGN_HOST build as committed (--local: index.html, public/app.js, public/_headers), the FT list read live"
+ },
+ "bad": {
+  "at": "2026-11-12T21:12:36.475Z",
+  "csp": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://ct-api.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://archival-rpc.mainnet.near.org https://archival-rpc.mainnet.fastnear.com https://solana-rpc.publicnode.com https://solana.api.pocket.network https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com https://base-rpc.publicnode.com https://base-mainnet.public.blastapi.io https://mainnet.base.org https://base.api.pocket.network https://base.gateway.tenderly.co https://rpc.sentio.xyz https://robinhood-rpc.publicnode.com https://robinhood.drpc.org https://rpc.mainnet.chain.robinhood.com https://robinhood.rpc.blxrbdn.com https://rpc-robinhood.globalstake.io https://robinhood.api.pocket.network https://robinhood.daybreak-rpc.network https://base.rpc.blxrbdn.com; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-src https://ct-app.unrealized.trade; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker walk-worker",
+  "html": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-MXtxRQ69yMzIwXstvbHh6uFRsGMpLRvRwGrrOBZL/HOsGOUCrvjyD/72JuWZKdU7\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "appSha384": "sha384-MXtxRQ69yMzIwXstvbHh6uFRsGMpLRvRwGrrOBZL/HOsGOUCrvjyD/72JuWZKdU7",
+  "app": {
+   "pass": false
+  },
+  "list": {
+   "status": 200,
+   "acao": "https://confidential.unrealized.trade",
+   "body": {
+    "account_id": "vault.confidential.unrlzd.near",
+    "tokens": [
+     {
+      "contract_id": "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+      "last_update_block_height": 223715160,
+      "balance": "0"
+     }
+    ]
+   }
+  },
+  "source": "SIGN_HOST as served before this card (release 123)"
+ }
+}

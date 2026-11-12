@@ -341,3 +341,23 @@ test("a history of 100 withdrawals (150 notes): the seed is opened a slice at a 
   const held = uses.filter((t, i) => i > 0 && t === uses[i - 1]).length;
   assert.equal(held, 0, `${held} of ${uses.length} uses of the seed followed another with no turn of the page between`);
 });
+
+test("the NEAR vault's notes written, the page's NEAR buy records are rebuilt from them (card near-holdings-restore): the host's hook once, after the write; a hook that throws holds back nothing", async () => {
+  const { v, own } = lived();
+  const st = await device();
+  const seen: number[] = [];
+  const ends: { stage: string; why: readonly string[] }[] = [];
+  await restoreKind.poolRestore({ ...hostOf(st, () => pair(v), ends), nearWalked: () => void notesIn(st).then((n) => seen.push(n.length)) }).auto();
+  await new Promise((r) => setTimeout(r, 50));
+  assert.deepEqual(seen, [own.size], "called once, with the vault's notes already in the store");
+  const st2 = await device();
+  const ends2: { stage: string; why: readonly string[] }[] = [];
+  await restoreKind.poolRestore({
+    ...hostOf(st2, () => pair(v), ends2),
+    nearWalked: () => {
+      throw new Error("the hook failed");
+    },
+  }).auto();
+  assert.deepEqual(sorted(await notesIn(st2)), want(own));
+  assert.deepEqual(ends2.at(-1)?.why, []);
+});

@@ -94,7 +94,7 @@ import { drawHeldMoveOut, type HeldDeps } from "./withdraw/held.ts";
 import { archivalRpc, heldOpOf, moveOutHeld, moveOutRpc } from "../../wallet/src/deposit/moveout.ts";
 import type { DepositOp } from "../../wallet/src/deposit/follow.ts";
 import { PAGE_NETWORK, withdrawFormDeps, withdrawHandoff, withdrawSettle } from "./withdraw/handoff.ts";
-import { nearBuyKind, nearPositions, nearSellKind, resumeNearBuys, resumeNearSells, type NearBuyPage } from "./near-buy.ts";
+import { nearBuyKind, nearHoldingsPass, nearPositions, nearSellKind, resumeNearBuys, resumeNearSells, type NearBuyPage } from "./near-buy.ts";
 import { rheaPoolsKept } from "./near-pools.ts";
 import { nearSeatRpc, pacedNearRpc } from "../../wallet/src/pace.ts";
 import { proverHost } from "./prover-host.ts";
@@ -168,6 +168,12 @@ const restore = !framed
       },
       // a chain this build gives no deposit address on (pageAddressPools): no U_X there to read, so no stall reason
       addressed: (chain) => pageAddressPools().some((p) => p.chain === chain),
+      // the NEAR vault's notes written: each W they show with no record gets it back (card near-holdings-restore), and
+      // a W's USDC on its way home goes on; never awaited by the restore
+      nearWalked: () => {
+        const page = nearBuyPage();
+        if (page) void nearHoldings(page).then(() => resumeNearSells(page)).catch(() => {});
+      },
       // a chain's buy records written (card signpage-positions-evm): its positions read again, with no reload; ahead of
       // `written`, whose neighbours wallet-restore-reads-ux's bundle check reads
       holdingsWritten: (chain) => testnet?.evmHoldingsRestored(chain),
@@ -702,6 +708,15 @@ function nearBuyPage(): NearBuyPage | null {
     log: (line) => console.info(line),
   });
 }
+// The NEAR buy records rebuilt from the chain (card near-holdings-restore): one pass at a time, on each landing and after
+// each restore's NEAR walk; it never throws, a read it could not make is read on the next pass
+let nearHoldingsRun: Promise<void> | null = null;
+function nearHoldings(page: NearBuyPage): Promise<void> {
+  return (nearHoldingsRun ??= nearHoldingsPass(page)
+    .then((p) => void (p.unread.length > 0 && console.warn(`near holdings unread: ${p.unread.length}, read again on the next load`)))
+    .catch((e: unknown) => console.warn(`near holdings: ${e instanceof Error ? e.name : "failed"}`))
+    .finally(() => (nearHoldingsRun = null)));
+}
 // How many RESERVED vault withdrawals the last settle pass read "unmatched" (a spend of the note whose change is not this
 // device's): kept for the form, never dropped (card wallet-withdraw-move-out).
 let withdrawsUnmatched = 0;
@@ -967,8 +982,9 @@ async function landed(l: Landing): Promise<void> {
     .catch(() => {})
     .then(() => {
       const page = nearBuyPage();
-      // then a NEAR sell a reload cut short, from the same records
-      return page ? resumeNearBuys(page).then(() => resumeNearSells(page)) : undefined;
+      // then a NEAR sell a reload cut short, from the same records; first, a W the store holds no record of (a sign out,
+      // another device's buy) gets its record back from the chain (src/near-buy.ts nearHoldingsPass)
+      return page ? nearHoldings(page).then(() => resumeNearBuys(page)).then(() => resumeNearSells(page)) : undefined;
     })
     .catch(() => {});
   // a held deposit's move out a reload cut short (src/withdraw/held.ts)

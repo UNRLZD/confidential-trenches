@@ -7,6 +7,8 @@
 // Card evm-pools-on-mainnet: SIGN_HOST's site policy names the mainnets' EVM providers alone, so the good answers' site
 // CSP is the recorded one with the six testnet EVM providers taken out of its connect-src, as the build's _headers now
 // serves it (the headers come from that file alone); re-recorded at the next sign deploy.
+// Card near-holdings-restore: the same, with the NEAR FT list (https://api.fastnear.com) added after the archival
+// RPCs in its connect-src.
 // Card restore-shows-the-balance-in-seconds: the site's trusted-types names walk-worker beside prover-worker, so the
 // good answer's site CSP is the recorded one with walk-worker added there, as the build's _headers now serves it; re-recorded
 // at the next sign deploy.

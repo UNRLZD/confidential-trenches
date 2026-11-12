@@ -560,6 +560,9 @@ export type PoolRestoreHost = {
   written?: () => void;
   /** After a chain's buy records are written (any W): that chain's positions read again, so they show with no reload. */
   holdingsWritten?: (chain: "base" | "robinhood") => void;
+  /** After the NEAR vault's notes are written: the page's NEAR buy records rebuilt from them (card near-holdings-restore,
+   *  src/near-buy.ts nearHoldingsPass), started and never awaited, so it holds back no other pool's restore. */
+  nearWalked?: () => void;
   /** Step 5's reads (pageIdReads unless given; null: no deposit id is read). */
   ids?: IdReads | null;
   /** A pool chain's U_X reads and carry (the pool follow's own, src/main.ts), or null when the page has none there: that
@@ -755,6 +758,14 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
           if (p.chain === "near") {
             const notes = (await letGo(vaultWalk({ network: p.network, rpcs: p.rpcs(), seed64: seed, signal, turn, ...walkers }), signal)).notes;
             await floor(p.scope, notes);
+            // a host's hook that throws never ends this walk
+            if (floorFailed === null && notes.some((n) => n.state === "SPENT")) {
+              try {
+                h.nearWalked?.();
+              } catch {
+                /* the next load's pass reads it */
+              }
+            }
             return notes;
           }
           if (p.chain === "solana") {

@@ -28,6 +28,9 @@ export const STRANGER = "https://example.com";
 const HELPER = "ct-api.unrealized.trade";
 // plus the archival RPC, read only for a held move out both of the pair forgot (card held-move-forgotten-tx)
 const RPCS = "https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://archival-rpc.mainnet.near.org https://archival-rpc.mainnet.fastnear.com"; // near-rpc-operators: one operator (the release's FastNEAR hosts and the archival list)
+// the NEAR FT list a restored W's token hint is asked of (card near-holdings-restore: packages/signpage/src/near-buy.ts
+// NEAR_FT_LIST.mainnet), read only as a hint, each token then read on the pair
+export const FT_LIST = "https://api.fastnear.com";
 // the Solana trade's own (card signpage-solana-trade): provider A of LD1 and the kit's three device-direct send paths
 // (packages/kit/src/trade/solana/send.ts); packages/signpage/test/trade.test.ts reads them from the page's trade deps;
 // and Pocket's gateway, the second of the restore's U_X pair (card wallet-restore-reads-ux, pool-restore.ts RESTORE_UX_SOLANA)
@@ -45,7 +48,7 @@ export const CSP = [
   ["default-src", "'none'"],
   ["script-src", "'self' 'wasm-unsafe-eval'"],
   ["worker-src", "'self'"],
-  ["connect-src", `'self' https://${HELPER} https://1click.chaindefuser.com ${RPCS} ${SOLANA} ${EVM} ${POOL_HISTORY}`],
+  ["connect-src", `'self' https://${HELPER} https://1click.chaindefuser.com ${RPCS} ${FT_LIST} ${SOLANA} ${EVM} ${POOL_HISTORY}`],
   ["style-src", "'self'"],
   ["img-src", "'self' data:"],
   ["font-src", "'self'"], // app.md finding 1 (l.1085): the top-level SIGN_HOST screens draw in the brand fonts
