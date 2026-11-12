@@ -1171,7 +1171,7 @@ export async function evmTokensSentToOne(rpc: EvmRpc, w: string, from: bigint, {
   return [...new Set(logs.map((l) => l.token))].sort();
 }
 
-/** What a trees() call may ask beyond the cut: a deposit's own note's newest root, read like every other read. */
+/** What a trees() call may ask beyond the cut: the newest root of a note that landed this epoch, read like every other read. */
 export type EvmTreesOpts = { newest?: boolean };
 
 /** The sync's read at one anchor: every leaf event both RPCs agree on up to it, checked against the pool's views. */
@@ -1725,7 +1725,7 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
   return {
     trees(beforeMs, signal, opts) {
       if (typeof beforeMs !== "bigint" || beforeMs <= 0n) return Promise.reject(new Error("beforeMs: a bigint above 0"));
-      // a deposit's own note (opts.newest) reads the same newest agreed block as every epoch read
+      // a note that landed this epoch (opts.newest) reads the same newest agreed block as every epoch read
       return serial(() => evmRetryLag(async () => {
         const r = await round(signal);
         // every leaf under the cut is in only once the anchor's time reached beforeMs; later blocks' times are too

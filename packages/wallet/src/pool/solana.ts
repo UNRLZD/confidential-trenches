@@ -35,8 +35,8 @@
 // - Epochs of 60 s (the helper's grid, apps/helper pool/fee.ts) and a life of 2E + 90 s + 2 TAKE_SLACK_MS = 240 s: the
 //   kit's send margin SOLANA_POOL_SEND_MARGIN_MS is 90 s (M356 (1)), longer than a blockhash lives (150 blocks, ~60 s),
 //   so a send the device hands out lands or expires before its deadline; the helper refuses a deadline under it too.
-// - A deposit's own note proves at once on the newest root (pool.ts): that read is at confirmed on both RPCs, and is
-//   never kept; epoch roots stay finalized (M355 (5)). A rollback under a confirmed root only fails that one send.
+// - A note that landed this epoch proves at once on the newest root (pool.ts): that read is at confirmed on both RPCs,
+//   and is never kept; epoch roots stay finalized (M355 (5)). A rollback under a confirmed root only fails that one send.
 // - Two RPCs are two providers: the kit's solanaSameProvider refuses one passed twice, by function or by URL.
 // Nothing here holds a secret, and no read names a note or a wallet of the user's: only the pool's own accounts.
 import { ed25519 } from "@noble/curves/ed25519.js";
@@ -373,7 +373,7 @@ export class SolanaNotReachedError extends Error {
   }
 }
 
-/** What a trees() call may ask beyond the cut: the newest root of a deposit's own note, read at confirmed (M355 (5)). */
+/** What a trees() call may ask beyond the cut: the newest root of a note that landed this epoch, read at confirmed (M355 (5)). */
 export type SolanaTreesOpts = { newest?: boolean };
 
 /**
