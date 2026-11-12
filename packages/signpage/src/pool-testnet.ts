@@ -1164,7 +1164,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       if (evmSettling.get(chain) === p) evmSettling.delete(chain);
     });
     evmSettling.set(chain, p);
-    const kind = evmKind(chain, done);
+    // only where the build carries the chain's withdraw (poolWayOut), as the deposit itself (review P3-1)
+    const kind = wayOut(chain) ? evmKind(chain, done) : null;
     const r = kind === null ? ({ error: "not_allowed" } as const) : kind(null, null);
     if ("error" in r) done();
     else
@@ -2339,8 +2340,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     const q = evmQueues.get(chain);
     return q ? (((await q.catch(() => null))?.queue as ProofQueue<EvmPoolRequest> | undefined) ?? null) : null;
   };
+  // the rule is evmWithdrawHost's (no withdraw in the build: no host, "no pool for this chain")
   const evmFunds = async (chain: "base" | "robinhood", to?: string): Promise<PoolFunds> => {
-    if (!wayOut(chain)) throw new Error("no flow for this chain");
     const notes = await openNoteStore(await page.store());
     try {
       const h = evmWithdrawHost(chain, notes);
