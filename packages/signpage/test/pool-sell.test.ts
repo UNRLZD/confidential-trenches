@@ -1656,11 +1656,11 @@ test("a PumpSwap sell of part of W's holding leaves W the next sell's need (the 
   const a = await runPoolSell(part.host, ask);
   assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
   assert.equal(wAfter(lamports, VF.pumpswap.minOut, await deposited(part)), next);
-  // card round-trip-costs-less: the whole holding's sale (its quote over min out small enough) closes W's token account
-  // (1 lamport) to W before its deposit, W left at rent(0)
+  // card round-trip-costs-less: the whole holding's sale keeps the form before at the fixture's slippage (a fill near min
+  // out would leave W's keep under the floor), so W keeps what the sweep needs
   const all = await world({ venue: "pumpswap", lamports: Number(lamports) });
   assert.equal("stage" in (await runPoolSell(all.host, ask)) && "filled", "filled");
-  assert.equal(wAfter(lamports + 1n, VF.pumpswap.minOut, await deposited(all)), R0);
+  assert.equal(wAfter(lamports, VF.pumpswap.minOut, await deposited(all)), AFTER);
 });
 
 test("a curve sell of part of W's holding leaves W the PumpSwap need the coin has once it graduates, with both cashback accounts on a cashback coin", async () => {
@@ -1886,19 +1886,21 @@ for (const [venue, volume] of [["pump", SOLANA_PUMP_PROGRAM], ["pumpswap", SOLAN
 // accounts inside the sale, after the venue's sell and before its deposit, so their rents go into the one note: no
 // teardown frame, no sweep, no second deposit (its mark and page entries, 1,468,120 here, forced by the pool program and
 // never closed). W keeps rent(0) and what the venue pays over min out, below the sweep's floor: kept on W's record.
-// Only where that costs less: at 0.5 percent slippage (LOW) the curve quote's expected out over min out is 550,601, so W
-// would keep 1,200,841, under one more deposit's 1,473,120; at the fixture's 3 percent it is 3,303,602 (W 3,953,842,
-// under the 4,073,120 where the rent back sweeps it), which the form before carries into the note.
+// Only where that costs less at every fill from min out to the expected out: at 0.5 percent slippage (LOW) the curve
+// quote's expected out over min out is 550,601, so W would keep at most 1,200,841, within a frame's fee and one more
+// deposit's cost, 1,478,120; at the fixture's 3 percent it is 3,303,602 (W up to 3,953,842, under the 4,073,120 where
+// the rent back sweeps it), which the form before carries into the note. The PumpSwap fixture's sale is about 37 SOL,
+// so 0.5 percent is about 0.18 SOL, past that edge: its sale here asks no slippage.
 const LOW = 50;
-const lowMinOut = (venue: Venue) => (VF[venue].expected * BigInt(10_000 - LOW)) / 10_000n;
-for (const [venue, volume] of [["pump", SOLANA_PUMP_PROGRAM], ["pumpswap", SOLANA_PUMP_AMM_PROGRAM]] as const) {
+const minOutAt = (venue: Venue, bps: number) => (VF[venue].expected * BigInt(10_000 - bps)) / 10_000n;
+for (const [venue, volume, bps] of [["pump", SOLANA_PUMP_PROGRAM, LOW], ["pumpswap", SOLANA_PUMP_AMM_PROGRAM, 0]] as const) {
   test(`round-trip-costs-less b: a full sell on ${venue} closes W's token account and its volume account inside the sale before its one deposit: one note, nothing sent after, W at rent(0)`, async () => {
     const back: string[] = [];
     const w = await world({ venue, ataLamports: TOKEN_RENT, volumes: [{ program: volume }] });
     w.host.back = (s) => void back.push(s);
     const ata = VF[venue].ata;
     const vol = solanaVolumeAccumulator(W.address, volume);
-    const a = await runPoolSell(w.host, { ...ASK, token: VF[venue].mint, slippageBps: LOW });
+    const a = await runPoolSell(w.host, { ...ASK, token: VF[venue].mint, slippageBps: bps });
     assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
     const sig = (a as { txs: { hash: string }[] }).txs[0]!.hash;
     const m = solanaDecodeMessage(w.c.txs.get(sig)!.tx.subarray(65));
@@ -1912,7 +1914,7 @@ for (const [venue, volume] of [["pump", SOLANA_PUMP_PROGRAM], ["pumpswap", SOLAN
     // the token account closes to W and by W
     assert.deepEqual(m.instructions[tokenClose]!.accounts.map((i) => m.staticKeys[i]), [ata, W.address, W.address]);
     // one deposit: min out, W's lamports and both rents, less the fee, the mark, the pages' growth and rent(0)
-    const value = lowMinOut(venue) + BigInt(ENOUGH) + BigInt(TOKEN_RENT) + VOLUME_RENT - BigInt(FEE) - rentMin(17) - GROWTH - R0;
+    const value = minOutAt(venue, bps) + BigInt(ENOUGH) + BigInt(TOKEN_RENT) + VOLUME_RENT - BigInt(FEE) - rentMin(17) - GROWTH - R0;
     assert.deepEqual(w.c.deposits, [{ pre: preOf(RETURN), value, sweep: false }], "one deposit, no sweep");
     assert.deepEqual({ tokenAccount: w.c.accounts.get(ata), volumeAccount: w.c.accounts.get(vol), w: w.c.accounts.get(W.address)?.lamports }, { tokenAccount: undefined, volumeAccount: undefined, w: Number(R0) });
     // the rent back after it sends nothing: W under the floor, what is left on its record
@@ -1922,9 +1924,11 @@ for (const [venue, volume] of [["pump", SOLANA_PUMP_PROGRAM], ["pumpswap", SOLAN
 }
 
 // What fits 1,232 bytes, the largest form of each venue, W holding both volume accounts: pump's curve carries all three
-// closes with mainnet's compute budget and the eight; PumpSwap names its own volume account in its sell (the sale
-// writes it), so the token account alone goes, beside the budget in the six on mainnet and the eight on devnet; a
-// PumpSwap cashback coin's sale makes cashback owed, so its form stays the two-step one (the claim before the close).
+// closes with mainnet's compute budget and the eight. PumpSwap's sale has no room for all three, so the token account's
+// close alone would go and a volume account stay open, its rent kept on W under the floor after its teardown frame
+// (1,991,440 with rent(0)), more than the form before loses: no close, the budget in the six on mainnet and the eight on
+// devnet. A PumpSwap
+// cashback coin's sale makes cashback owed, so its form stays the two-step one (the claim before the close).
 test("round-trip-costs-less b: what each venue's sale carries inside 1,232 bytes", async () => {
   const closesOf = (w: World, a: Awaited<ReturnType<typeof runPoolSell>>, venue: Venue) => {
     const m = solanaDecodeMessage(sentWire(w, a).subarray(65));
@@ -1933,8 +1937,8 @@ test("round-trip-costs-less b: what each venue's sale carries inside 1,232 bytes
   for (const [venue, cashback, cluster, closes, budget, accounts] of [
     ["pump", false, "mainnet", ["token", "pump volume", "pumpswap volume"], SOLANA_POOL_SELL_PRIORITY, 8],
     ["pump", false, "devnet", ["token", "pump volume", "pumpswap volume"], null, 8],
-    ["pumpswap", false, "mainnet", ["token"], SOLANA_POOL_SELL_PRIORITY, 6],
-    ["pumpswap", false, "devnet", ["token"], null, 8],
+    ["pumpswap", false, "mainnet", [], SOLANA_POOL_SELL_PRIORITY, 6],
+    ["pumpswap", false, "devnet", [], null, 8],
     ["pumpswap", true, "mainnet", [], null, 6],
   ] as const) {
     const w = await world({ cluster, units: 90_000, venue, cashback, ataLamports: TOKEN_RENT, volumes: [{ program: SOLANA_PUMP_PROGRAM }, { program: SOLANA_PUMP_AMM_PROGRAM }] });
@@ -1979,6 +1983,11 @@ test("round-trip-costs-less b: a stranger's unit front-run to W's token account 
   const sig = (a as { txs: { hash: string }[] }).txs[0]!.hash;
   const m = solanaDecodeMessage(w.c.txs.get(sig)!.tx.subarray(65));
   assert.ok(!m.instructions.some((x) => (x.data.length === 1 && x.data[0] === 9) || (x.data.length === 8 && x.data.every((b, i) => b === SOLANA_CLOSE_VOLUME_ACCUMULATOR[i]))), "the sale that filled carries no close");
+  // built bare from the start: of the sale's simulations (those with the venue's sell), only the first build's (one on
+  // each RPC) carry a close, never one after the failure, which would only be refused there and cost a round of reads
+  const shuts = (x: { data: Uint8Array }): boolean => (x.data.length === 1 && x.data[0] === 9) || (x.data.length === 8 && x.data.every((b, i) => b === SOLANA_CLOSE_VOLUME_ACCUMULATOR[i]));
+  const sales = w.c.calls.filter((c) => c.method === "simulateTransaction").map((c) => solanaDecodeMessage(base64.decode(c.params[0] as string).subarray(65))).filter((sm) => sm.instructions.some((x) => x.data.length === 24));
+  assert.deepEqual(sales.map((sm) => sm.instructions.some(shuts)), [true, true, ...sales.slice(2).map(() => false)], "only the first build's simulations carry the closes");
   assert.deepEqual(w.c.burned, [{ at: ATA, amount: 1n }]);
   assert.deepEqual(w.c.deposits.map((d) => d.sweep), [false, true]);
   assert.equal(w.c.accounts.get(W.address), undefined, "W at 0");
@@ -2022,13 +2031,14 @@ test("round-trip-costs-less b: a cashback claim owed keeps the two-step form; a 
   assert.ok(!m.instructions.some((x) => x.data.length === 1 && x.data[0] === 9 && m.staticKeys[x.accounts[0]!] === VF.pumpswap.ata), "nor the token account");
 });
 
-// Review of 20ba2481b, P1-3: the one deposit is decided on the closes that fit, against what the form before really
-// loses: at every slippage, on each venue and cluster, the notes the sale and its rent back make (the venue paying its
-// quote's expected out) are at least the form before's (the closes refused: the sale as before the card, its teardown and
-// its sweep). PumpSwap's sale names its own volume account, so that account stays open whatever the form: at 0 slippage
-// W would keep rent(0) and its rent less the teardown's fee, 1,991,440, more than the form before's one more deposit,
-// so the sale keeps the form before; past where the rent back sweeps (its quote over min out large), the one deposit.
-test("round-trip-costs-less b: the one deposit never loses more than the form before, on each venue and cluster at every slippage, the volume account PumpSwap's sale names counted", async () => {
+// Review of 20ba2481b, P1-3, and of 2c4682ec9: the one deposit is decided on the closes that fit, against the least the
+// form before can lose, at every fill the sale can get. On each venue and cluster, at every slippage, with the venue
+// paying min out and paying the quote's expected out: the notes the sale and its rent back make are at least the form
+// before's (the closes refused: the sale as before the card, its teardown and its sweep). The closes go only where
+// rent(0), the quote's expected out over min out and any account left open stay within a frame's fee and one more
+// deposit's cost, 1,478,120: the pump fixture at up to 0.5 percent, never at 3 percent or past it (a fill near min out
+// would leave W under the floor), and never with PumpSwap's volume close left out for size (W would keep 1,991,440).
+test("round-trip-costs-less b: the one deposit never loses more than the form before, on each venue and cluster at every slippage and at min out or the expected out", async () => {
   const closesIn = (w: World, a: Awaited<ReturnType<typeof runPoolSell>>, venue: Venue) => {
     const m = solanaDecodeMessage(sentWire(w, a).subarray(65));
     return m.instructions.filter((x) => (x.data.length === 1 && x.data[0] === 9 && m.staticKeys[x.accounts[0]!] === VF[venue].ata) || (x.data.length === 8 && x.data.every((b, i) => b === SOLANA_CLOSE_VOLUME_ACCUMULATOR[i]))).length;
@@ -2042,22 +2052,80 @@ test("round-trip-costs-less b: the one deposit never loses more than the form be
   ] as const) {
     for (const bps of [0, 1, 50, 300, 1_000]) {
       const over = VF[venue].expected - (VF[venue].expected * BigInt(10_000 - bps)) / 10_000n;
-      const run = async (refused: boolean) => {
-        const w = await world({ venue, cluster, units: 90_000, ataLamports: TOKEN_RENT, volumes: volumes.map((program) => ({ program })), paysOver: over, ...(refused ? { closesRefused: true as const } : {}) });
+      const run = async (refused: boolean, paysOver: bigint) => {
+        const w = await world({ venue, cluster, units: 90_000, ataLamports: TOKEN_RENT, volumes: volumes.map((program) => ({ program })), paysOver, ...(refused ? { closesRefused: true as const } : {}) });
         const a = await runPoolSell(w.host, { ...ASK, token: VF[venue].mint, slippageBps: bps });
         assert.equal("stage" in a && a.stage, "filled", `${venue} ${cluster} ${bps}: ${JSON.stringify(a)}`);
         return { notes: w.c.deposits.reduce((t, d) => t + d.value, 0n), closes: closesIn(w, a, venue) };
       };
-      const one = await run(false);
-      const before = await run(true);
-      assert.ok(one.notes >= before.notes, `${venue} ${cluster} ${bps}: ${one.notes} < ${before.notes}`);
-      seen.push(`${venue} ${cluster} ${bps} ${one.closes > 0 ? "one" : "before"}`);
+      const forms = [];
+      for (const paysOver of [0n, over]) {
+        const one = await run(false, paysOver);
+        const before = await run(true, paysOver);
+        assert.ok(one.notes >= before.notes, `${venue} ${cluster} ${bps} over ${paysOver}: ${one.notes} < ${before.notes}`);
+        forms.push(one.closes > 0 ? "one" : "before");
+      }
+      assert.equal(forms[0], forms[1], "decided at signing, whatever the fill");
+      seen.push(`${venue} ${cluster} ${bps} ${forms[0]}`);
     }
   }
-  assert.ok(seen.includes("pumpswap mainnet 0 before"), seen.join("; "));
-  assert.ok(seen.includes("pumpswap mainnet 50 one"), seen.join("; "));
-  assert.ok(seen.includes("pump devnet 50 one"), seen.join("; "));
-  assert.ok(seen.includes("pump devnet 300 before"), seen.join("; "));
+  // the closes only where the slippage band stays under where W's keep would sit unswept; never where a volume close
+  // does not fit
+  assert.deepEqual(seen, [
+    "pump devnet 0 one", "pump devnet 1 one", "pump devnet 50 one", "pump devnet 300 before", "pump devnet 1000 before",
+    "pump mainnet 0 one", "pump mainnet 1 one", "pump mainnet 50 one", "pump mainnet 300 before", "pump mainnet 1000 before",
+    "pumpswap mainnet 0 before", "pumpswap mainnet 1 before", "pumpswap mainnet 50 before", "pumpswap mainnet 300 before", "pumpswap mainnet 1000 before",
+    "pumpswap devnet 0 before", "pumpswap devnet 1 before", "pumpswap devnet 50 before", "pumpswap devnet 300 before", "pumpswap devnet 1000 before",
+  ]);
+});
+
+// Review of 2c4682ec9: the one deposit is set against the least the form before can lose, never a model of it. A small
+// PumpSwap sale from a W holding only the sale's own need: the form before's sale has no deposit back (its note under
+// the floor), so its lamports stay on W and the sweep carries all of them, W at 0; the one deposit would keep rent(0) on
+// W, so the form before. With W's lamports and the coin sold larger, the one deposit makes the larger note.
+test("round-trip-costs-less b: a small sale whose form before makes no deposit back keeps that form; a larger one closes", async () => {
+  const venue = "pumpswap" as const;
+  const expectedOf = async (amount: bigint) => (await readSolanaReference(providers(venue), { side: "sell", token: VF[venue].mint, amount }))?.pools[0]?.expectedOut ?? 1n << 62n;
+  const amountOf = async (target: bigint) => {
+    let [lo, hi] = [1n, AMOUNT];
+    while (lo < hi) {
+      const mid = (lo + hi) / 2n;
+      if ((await expectedOf(mid)) >= target) hi = mid;
+      else lo = mid + 1n;
+    }
+    return lo;
+  };
+  const seen: string[] = [];
+  for (const target of [2_000_000n, 5_000_000n]) {
+    const amount = await amountOf(target);
+    const run = async (refused: boolean) => {
+      const w = await world({ venue, cluster: "mainnet", units: 90_000, held: amount, lamports: Number(BigInt(FEE) + rentMin(165)), ataLamports: TOKEN_RENT, volumes: [{ program: SOLANA_PUMP_AMM_PROGRAM }], ...(refused ? { closesRefused: true as const } : {}) });
+      const a = await runPoolSell(w.host, { ...ASK, amount, token: VF[venue].mint, slippageBps: 0 });
+      assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
+      const m = solanaDecodeMessage(sentWire(w, a).subarray(65));
+      return { notes: w.c.deposits.reduce((t, d) => t + d.value, 0n), closes: m.instructions.some((x) => x.data.length === 1 && x.data[0] === 9 && m.staticKeys[x.accounts[0]!] === VF[venue].ata) };
+    };
+    const one = await run(false);
+    const before = await run(true);
+    assert.ok(one.notes >= before.notes, `${target}: ${one.notes} < ${before.notes}`);
+    seen.push(`${target} ${one.closes ? "one" : "before"}`);
+  }
+  assert.deepEqual(seen, ["2000000 before", "5000000 one"]);
+});
+
+// Review of 20ba2481b, P3-11: a full sell's owed record, written before the send, keeps the buy a pass already proved on
+// W's record, so W's buy is not read again on the public seat.
+test("round-trip-costs-less b: the sale's owed record keeps W's proven buy", async () => {
+  const w = await world({ ataLamports: TOKEN_RENT, volumes: [{ program: SOLANA_PUMP_PROGRAM }] });
+  const proven = { mint: MINT, program: TOKEN_PROGRAM };
+  await w.host.owed!.put({ address: W.address, l: "1", j: 0, mints: [proven], passes: 2, buy: proven } as OwedRentBack);
+  const puts: OwedRentBack[] = [];
+  const put = w.host.owed!.put.bind(w.host.owed);
+  const a = await runPoolSell({ ...w.host, owed: { ...w.host.owed!, put: async (r: OwedRentBack) => (puts.push(structuredClone(r)), put(r)) } }, { ...ASK, slippageBps: LOW });
+  assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
+  const sale = puts.find((r) => r.sell !== undefined && r.passes === 0);
+  assert.ok(sale, JSON.stringify(puts));
+  assert.deepEqual(sale.buy, proven);
 });
 
 // Review of 20ba2481b, P3-12: a sale's last build (two deposits met a page another filled first) carries no close, so
@@ -2267,15 +2335,14 @@ test("the sell counts a volume account owed a claim when RPC B alone reads it ow
 // Review 2 L3 of 911d7e25: what is owed is what was earned less what was claimed (cashback_claimed @82, pump's
 // stable_cashback_claimed @98); a claimed amount read a byte off (@83, @97) survived, every fixture claiming nothing.
 test("a volume account's claimed cashback is taken off what it earned: all of it claimed owes nothing, part of it owes the claim's cost", async () => {
-  // card round-trip-costs-less: nothing owed on PumpSwap (its quote over min out small), the sale closes W's token
-  // account and the volume account to W before its deposit (their rents in `closed`), W left at rent(0)
-  const after = async (plant: Plant, venue: Venue, closed = 0n) => {
+  // card round-trip-costs-less: at the fixture's slippage the sale keeps the form before (no close in it)
+  const after = async (plant: Plant, venue: Venue) => {
     const w = await world({ venue, ataLamports: TOKEN_RENT, claimFails: true, ...plant });
     const a = await runPoolSell(w.host, { ...ASK, token: VF[venue].mint });
     assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
-    return BigInt(ENOUGH) + closed + VF[venue].minOut - w.c.deposits[0]!.value - BigInt(FEE) - rentMin(17) - GROWTH;
+    return BigInt(ENOUGH) + VF[venue].minOut - w.c.deposits[0]!.value - BigInt(FEE) - rentMin(17) - GROWTH;
   };
-  assert.equal(await after({ volumes: [{ program: SOLANA_PUMP_AMM_PROGRAM, cashback: 12_742_862n, claimed: 12_742_862n }] }, "pumpswap", BigInt(TOKEN_RENT) + rentMin(137)), R0);
+  assert.equal(await after({ volumes: [{ program: SOLANA_PUMP_AMM_PROGRAM, cashback: 12_742_862n, claimed: 12_742_862n }] }, "pumpswap"), solanaSellAfterFull(rent, 0));
   assert.equal(await after({ volumes: [{ program: SOLANA_PUMP_AMM_PROGRAM, cashback: 12_742_862n, claimed: 12_742_861n }] }, "pumpswap"), solanaSellAfterFull(rent, 1));
   assert.equal(await after({ volumes: [{ program: SOLANA_PUMP_PROGRAM, stable: 3_000_000n, claimed: 3_000_000n }] }, "pump"), solanaSellAfterFull(rent, 0));
   assert.equal(await after({ volumes: [{ program: SOLANA_PUMP_PROGRAM, stable: 3_000_000n, claimed: 1_000_000n }] }, "pump"), solanaSellAfterFull(rent, 1));
@@ -3891,6 +3958,20 @@ async function floorWorld() {
   return { w, plant, loaded, amount };
 }
 const SYSTEM = "11111111111111111111111111111111";
+
+// Review of 20ba2481b, P2-4: a W settled at its floor (what it read as kept) and the helper's read down at the next load:
+// the W is not passed (nothing read on the public seat, no pass counted), as when the helper reads it as it was.
+test("round-trip-costs-less a: a settled W the helper's read misses at a load is not passed: nothing read on the public seat", async () => {
+  const { w, loaded } = await floorWorld();
+  const passes = w.owed.get(W.address)?.passes;
+  const told = w.told.length;
+  const at = w.c.calls.length;
+  const helperDown = faulty(w, (p, method) => (p === 1 && method === "getMultipleAccounts" ? new Error("offline") : null));
+  await resumeRentBacks({ ...loaded, rpcs: helperDown.rpcs }, fakeLocks());
+  assert.equal(w.owed.get(W.address)?.passes, passes, "no pass");
+  assert.deepEqual(w.told.slice(told), []);
+  assert.deepEqual(w.c.calls.slice(at).filter((c) => c.p === 0), [], "nothing on the public seat");
+});
 
 test("M1: lamports anyone sends to W's unused PumpSwap volume address never stop its sweep: no fault, W swept", async () => {
   const w = await world({ closesRefused: true,  ataLamports: TOKEN_RENT });
@@ -6414,6 +6495,17 @@ test("round-trip-costs-less a: a W whose note paid a plain release, holding more
   assert.ok(w.owed.has(W.address), "never dropped");
 });
 
+// Review of 20ba2481b, P1-2: the rebuild's "no buy" mark is the helper's word too. The public seat reading a buy of W's
+// is no proof of none: W holds, unproven, tried again, nothing moved and no "no buy" kept on its record.
+test("round-trip-costs-less a: a no-buy mark the public seat reads a buy against: no proof, W held and tried again", async () => {
+  const { w } = await soldElsewhere(ENOUGH, null);
+  const none = { ...w.host, buyNone: async (a: string) => a === W.address };
+  assert.equal(await resumeRentBacks(none, fakeLocks()), true, "unproven: tried again");
+  assert.deepEqual(w.told.map((t) => t.state), ["holds"]);
+  assert.equal(w.owed.get(W.address)?.buy, undefined, "no proof of none");
+  assert.equal(w.c.accounts.get(W.address)?.lamports, ENOUGH, "nothing moved");
+});
+
 // Review of 20ba2481b, P1-2 and P2-4: a load with 20 of the account's Ws, one holding SOL (W, sold elsewhere, its
 // rebuilt record proven), nine with nothing and no record, ten settled at their last pass. The helper's seat alone reads
 // several Ws in one request; on the public seat no request names more than one W, and none names a settled W or one the
@@ -6485,3 +6577,4 @@ test("round-trip-costs-less a: the Ws a load passes go in an order drawn at rand
   assert.deepEqual(modes.filter((m) => m.startsWith("ct-pool/back/")).map((m) => m.slice("ct-pool/back/".length).split(":")[0]), [ws[1], ws[2], ws[0]]);
   assert.deepEqual(waits, [POOL_RENT_BACK_GAP_MS, POOL_RENT_BACK_GAP_MS]);
 });
+

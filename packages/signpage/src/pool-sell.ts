@@ -1362,15 +1362,18 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later, w: ListedBuy
     const sixFits = (cs: readonly SolanaSellClose[]): boolean => wireOf(solanaCompileV0(w.address, [...budgetIxs(budget), ...steps, ...solanaSellCloses(w.address, cs), depositIx(program, pool, w.address, sizes, pre, minOut, false)], bh.blockhash, []).message).length <= SOLANA_MAX_TX_BYTES;
     if (closes.length > 0 && !sixFits(closes)) closes = closes.filter((c) => c.kind === "token");
     if (closes.length > 0 && !sixFits(closes)) closes = [];
-    // Only where it costs less, decided on the closes that fit: what never reaches a note either way, priced at the
-    // quote's expected out. What W keeps after a sale (and its teardown) goes into a note only once the rent back's sweep
-    // makes one at the floor, at one more deposit's cost (solanaSweepCost); under that, it stays on W. In the one deposit,
-    // W keeps rent(0), what the venue pays over min out and the rent of every account whose close did not fit, whose
-    // teardown frame then costs its fee; in the form before, W keeps the sweep's keep (solanaSellAfterFull, or rent(0)
-    // where that keep is refused or lands its note under the floor), what the venue pays over min out and every account's
-    // rent, less the teardown frame's fee. Every account means each the teardown closes after either form, the volume
-    // account the sale names (PumpSwap's own) and one whose close did not fit among them. The one deposit only when it
-    // loses no more than the form before.
+    // Only where it costs less, decided on the closes that fit, at every fill the sale can get, from min out up to the
+    // quote's expected out (review of 2c4682ec9: a fill at min out can leave W under the floor where the expected one
+    // would not). Beside the sale's own deposit, which both forms pay, the one deposit loses what W keeps after it: rent(0),
+    // what the venue pays over min out and the rent of every account whose close did not fit, whose teardown frame then
+    // costs its fee; that goes into a note only once the rent back's sweep makes one at the floor, at one more deposit's
+    // cost (solanaSweepCost), and under that it stays on W. It is set against the least the form before can lose, never a
+    // model of it: a sale with no deposit back (its reserve refused, or its note under the floor) leaves its lamports on W
+    // and the sweep is that form's one deposit, so a teardown frame's fee; any other, a frame's fee and the sweep's cost,
+    // or, where W keeps too little to sweep, all it keeps: at least rent(0) and every account the teardown closes after
+    // either form, less the frame's fee. That least is under where the sweep makes a note, so a one deposit within it
+    // never reaches the sweep at any fill in the range: its most is at the expected out, rent(0), the surplus and every
+    // open account's rent (its teardown frame's fee paid out of that rent).
     if (closes.length > 0) {
       const every = solanaSellClosesOf(w.address, token, tokens.program, tokens.accounts, new Set());
       const r0 = solanaRentMin(rent, 0);
@@ -1378,15 +1381,15 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later, w: ListedBuy
       const surplus = expected > minOut ? expected - minOut : 0n;
       const sweepFloor = solanaSweepFloor(rent) > SOLANA_POOL_MIN_DEPOSIT ? solanaSweepFloor(rent) : SOLANA_POOL_MIN_DEPOSIT;
       const sweepCost = solanaSweepCost(rent);
-      const lost = (kept: bigint): bigint => (kept >= sweepFloor + sweepCost ? sweepCost : kept);
       const rentsOf = (cs: readonly SolanaSellClose[]): bigint => cs.reduce((t, c) => t + c.lamports, 0n);
       const open = rentsOf(every) - rentsOf(closes);
       const frame = SOLANA_POOL_SELL_FEE;
-      const one = open > 0n ? frame + lost(r0 + surplus + open - frame) : lost(r0 + surplus);
-      const keep = solanaSellReserve({ fee: SOLANA_POOL_SELL_FEE + (budget?.priority ?? 0n), made, rents: solanaDepositRents(rent, sizes, holds, false), after, lamports, minOut, keeps: false, noteFloor: solanaPoolNoteFloor(rent), swept: after - r0 });
-      const keptBefore = "refused" in keep || keep.value < sweepFloor ? r0 : after;
-      const before = frame + lost(keptBefore + surplus + rentsOf(every) - frame);
-      if (one > before) closes = [];
+      // the form before's own sale, as it is built below with no close
+      const keep = solanaSellReserve({ fee: SOLANA_POOL_SELL_FEE + (budget?.priority ?? 0n), made, rents: solanaDepositRents(rent, sizes, holds, false), after, lamports, minOut, keeps: false, noteFloor: solanaPoolNoteFloor(rent), swept: after - r0, base: r0, floor: sweepFloor });
+      const kept = r0 + rentsOf(every) - frame;
+      const least = "refused" in keep || keep.value === 0n ? frame : frame + (sweepCost < kept ? sweepCost : kept);
+      // the most the one deposit loses: what W keeps at the expected out and each open account's teardown frame fee
+      if (r0 + open + surplus > least) closes = [];
     }
     const fits = wireOf(solanaCompileV0(w.address, [...budgetIxs(budget), ...steps, ...solanaSellCloses(w.address, closes), depositIx(program, pool, w.address, sizes, pre, minOut, true)], bh.blockhash, []).message).length <= SOLANA_MAX_TX_BYTES;
     const eight = fits && (!keeps || (near(sizes.stateSize) && near(sizes.labelSize)));

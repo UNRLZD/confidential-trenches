@@ -3,7 +3,8 @@
 // any browser of the account finishing its Ws: PASS. bad: main b9361e809's build, before this card: FAIL, every mark
 // named. beforeReview: this card's 20ba2481b build, before the review of it was folded: FAIL on the rules that review
 // moved (the cost rule decided after the size fallback, no close on the last build, what the sale left read from the
-// balances before it, the proven buy kept, and the rent backs' reads). Planted on the good one: another /app.js, no pin,
+// balances before it, the proven buy kept, and the rent backs' reads). beforeFill: its 8c08894bd build, the cost rule
+// decided at the quote's expected out against a model of the form before: FAIL on that rule. Planted on the good one: another /app.js, no pin,
 // each mark taken away: each FAIL; and the good build's lines (round-trip-costs-less.excerpt.txt, cut from its
 // public/app.js) with one rule changed: each FAIL on that rule's mark alone.
 import assert from "node:assert/strict";
@@ -32,6 +33,12 @@ test("recorded answer beforeReview (20ba2481b's build): FAIL on the rules the re
   assert.deepEqual(v.lines, [0, 1, 5, 6, 7, 8, 9, 10, 11, 12].map((i) => ALL[i]));
 });
 
+test("recorded answer beforeFill (8c08894bd's build): FAIL on the cost rule alone, decided there at the expected out against a model of the form before", () => {
+  const v = judge(ANSWERS.beforeFill);
+  assert.equal(v.ok, false);
+  assert.deepEqual(v.lines, [ALL[1]]);
+});
+
 test("planted on the good answer: each fact taken away FAILs", () => {
   const g = ANSWERS.good;
   assert.deepEqual(judge({ ...g, sha384: "sha384-other" }).lines, ["BAD SIGN_HOST's served /app.js is not the one index.html pins"]);
@@ -53,11 +60,13 @@ test("the good build's lines carry every mark; each with its rule changed FAILs 
     ["Oe=e=>Qv-e%Qv<=64,", "Oe=e=>Qv-e%Qv<=128,", 0],
     // the cost rule
     ["F.accounts,new Set),t=qy(N,0)", "F.accounts,ke),t=qy(N,0)", 1],
-    ["c=e=>e>=o+s?s:e", "c=e=>s", 1],
     ["a=n>_e?n-_e:0n", "a=0n", 1],
-    ["f=u>0n?d+c(t+a+u-d):c(t+a)", "f=c(t+a+u)", 1],
-    ["(`refused`in p||p.value<o?t:Se)", "(Se)", 1],
+    [";t+l+a>p&&(Ae=[])}", ";t+a>p&&(Ae=[])}", 1],
+    [";t+l+a>p&&(Ae=[])}", ";t+l>p&&(Ae=[])}", 1],
     ["&&(Ae=[])}", "&&(Ae=Ae)}", 1],
+    ["p=`refused`in d||d.value===0n?u:u+(s<f?s:f)", "p=u+(s<f?s:f)", 1],
+    ["p=`refused`in d||d.value===0n?u:u+(s<f?s:f)", "p=`refused`in d||d.value===0n?u:u+f", 1],
+    [",swept:Se-t,base:t,floor:o})", ",swept:Se-t})", 1],
     ["2n*(qy(e,PO)-qy(e,0))", "2n*qy(e,PO)", 1],
     // the deposit with the closes
     ["after:r,lamports:R+i,", "after:r,lamports:R,", 2],

@@ -137,17 +137,20 @@ export const M = [
   ["review P17a a run with a W left books none", TESTNET, TT, "(more) => backs.ended(more === true),", "(more) => backs.ended(false),"],
   ["review P17b a run with none left books one", TESTNET, TT, "(more) => backs.ended(more === true),", "(more) => backs.ended(true),"],
   // step b: the sale's closes and its cost rule (P1-3), its record (P3-11), its read of what the sale left (P3-9)
-  ["b1 the closes even where they cost more", SELL, T, "      if (one > before) closes = [];\n", ""],
+  ["b1 the closes even where they cost more", SELL, T, "      if (r0 + open + surplus > least) closes = [];\n", ""],
   ["b2 the closes on the sale's last build", SELL, T, " && later.bare !== true && !later.last && !near(", " && later.bare !== true && !near("],
   ["b3 the closes on a sale built bare", SELL, T, "owed === 0 && later.bare !== true && !later.last", "owed === 0 && !later.last"],
   ["b4 the closes with a tree near its page's end", SELL, T, " && !near(sizes.stateSize) && !near(sizes.labelSize);\n    let closes", ";\n    let closes"],
   ["b5 the closes with a claim owed", SELL, T, "const may = !keeps && owed === 0 && ", "const may = !keeps && "],
   ["b6 no size fallback to the token account alone", SELL, T, "    if (closes.length > 0 && !sixFits(closes)) closes = closes.filter((c) => c.kind === \"token\");\n", ""],
-  ["b7 the form before priced without the volume account the sale names", SELL, T, "tokens.accounts, new Set());\n      const r0", "tokens.accounts, named);\n      const r0"],
-  ["b8 what W keeps always lost", SELL, T, "(kept >= sweepFloor + sweepCost ? sweepCost : kept)", "kept"],
-  ["b9 the form before always keeps the sweep's keep", SELL, T, "const keptBefore = \"refused\" in keep || keep.value < sweepFloor ? r0 : after;", "const keptBefore = after;"],
+  // (every account's rent counted with the sale's named accounts left out is no plant: a sale names a volume account only
+  // on a cashback coin, whose cashback is then owed, and no close is weighed with a claim owed)
+  ["b9 the form before always makes a deposit back", SELL, T, "\"refused\" in keep || keep.value === 0n ? frame : ", ""],
   ["b10 the quote's surplus left out", SELL, T, "const surplus = expected > minOut ? expected - minOut : 0n;", "const surplus = 0n;"],
-  ["b11 a teardown frame's fee left out of the one deposit", SELL, T, "const one = open > 0n ? frame + lost(r0 + surplus + open - frame) : lost(r0 + surplus);", "const one = lost(r0 + surplus + open);"],
+  ["b11 the rent of an account left open left out of the one deposit", SELL, T, "if (r0 + open + surplus > least)", "if (r0 + surplus > least)"],
+  ["b8 the form before's least its frame's fee and the sweep's cost even where it makes no deposit back", SELL, T, "base: r0, floor: sweepFloor });", "});"],
+  // (no plant for the least the form before keeps where it makes no note: rent(0) and the token account's rent, less a
+  // frame's fee, pass the sweep's cost at any rate the Rent sysvar gives, so that term never decides a sale)
   ["b12 a simulation refusing the closes refuses the sale", SELL, T, "        if (closes.length > 0) {\n          closes = [];\n          continue;\n        }\n", ""],
   ["b13 a failed close not built bare", SELL, T, "      if (shutFailed) later.bare = true;\n", ""],
   ["b14 the sale's record drops W's proven buy", SELL, T, "      if (prior?.buy !== undefined) owedRec.buy = prior.buy;\n", ""],
