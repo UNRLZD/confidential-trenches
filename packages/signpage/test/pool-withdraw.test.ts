@@ -329,7 +329,7 @@ function otherContext(wd: Awaited<ReturnType<typeof world>>, prover = wd.host.pr
   const pool = { ...wd.host.pool, bind: (b: Parameters<typeof wd.host.pool.bind>[0], s?: AbortSignal) => wd.host.pool.bind({ ...b, tipCap: b.tipCap ?? 1n }, s) };
   return openProofQueue({ seed64: SEED64, notes: wd.ns, pool, provers: [prover], hardwareConcurrency: 4, skip: () => keptOutNotes(wd.w, BigInt(Date.now())) });
 }
-const keepOut = (wd: Awaited<ReturnType<typeof world>>) => async (ids: readonly string[], spanMs: bigint) => void (await keepOutNotes(wd.w, "op-w", ids, BigInt(Date.now()) + spanMs));
+const keepOut = (wd: Awaited<ReturnType<typeof world>>) => async (ids: readonly string[], spanMs: bigint) => void (await keepOutNotes(wd.w, "op-w", ids, BigInt(Date.now()), spanMs));
 
 test("another context's queue passing during the part's wait leaves the withdraw's planned note alone: the withdraw ends sent, and a buy still gets its proof from the other notes", async () => {
   let slept = 0n;
@@ -376,12 +376,24 @@ test("another context's queue passing at the bind (its prover still proving), be
 
 test("the planned record of a run that crashed stops counting at its own deadline; another run's entry is kept", async () => {
   const wd = await world([30_000_000n]);
-  await keepOutNotes(wd.w, "op-a", ["n1", "n2"], NOW + 100n);
-  await keepOutNotes(wd.w, "op-b", ["n3"], NOW + 500n);
+  await keepOutNotes(wd.w, "op-a", ["n1", "n2"], NOW, 100n);
+  await keepOutNotes(wd.w, "op-b", ["n3"], NOW, 500n);
   assert.deepEqual(await keptOutNotes(wd.w, NOW), new Set(["n1", "n2", "n3"]));
   assert.deepEqual(await keptOutNotes(wd.w, NOW + 100n), new Set(["n3"]), "op-a's deadline passed");
-  await keepOutNotes(wd.w, "op-b", [], 0n);
+  await keepOutNotes(wd.w, "op-b", [], NOW, 0n);
   assert.deepEqual(await keptOutNotes(wd.w, NOW), new Set(["n1", "n2"]));
+});
+
+test("the planned record drops another run's entry once it no longer stands: past its deadline (a dead run's), or further off than the longest span (written on a clock since set back)", async () => {
+  const { WITHDRAW_PLANNED_KEY, WITHDRAW_KEEP_MAX_MS } = await import("../src/pool-testnet.ts");
+  const wd = await world([30_000_000n]);
+  await keepOutNotes(wd.w, "op-dead", ["n1"], NOW - 1_000n, 500n);
+  await keepOutNotes(wd.w, "op-ahead", ["n2"], NOW + 86_400_000n, 100n);
+  await keepOutNotes(wd.w, "op-live", ["n3"], NOW, WITHDRAW_KEEP_MAX_MS);
+  // the read counts only the standing entry, before any write drops the others
+  assert.deepEqual(await keptOutNotes(wd.w, NOW), new Set(["n3"]), "neither a dead run's entry nor a clock set back's holds a note out");
+  await keepOutNotes(wd.w, "op-new", ["n4"], NOW, 1_000n);
+  assert.deepEqual(Object.keys(((await wd.w.get("meta", WITHDRAW_PLANNED_KEY)) as object) ?? {}).sort(), ["op-live", "op-new"], "the write drops both");
 });
 
 test("a note this page's queue is still proving when the run starts comes back once that proof ends: the run waits for it and sends", async () => {

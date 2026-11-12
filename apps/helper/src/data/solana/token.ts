@@ -1045,7 +1045,8 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
     return JSON.parse(text);
   }
 
-  // a held pool's re-read is a refresh: refused, the pool held is served (a token's top pool rarely moves)
+  // a held pool's re-read is a refresh: refused, the pool held is served (a token's top pool rarely moves; a launchpad
+  // coin's moves once, off its curve: chartPool)
   const pools = cached(
     POOL_FRESH_MS,
     now,
@@ -1056,6 +1057,18 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
     },
     { keepHeld: true },
   );
+
+  /** The pool a chart reads for `mint`, given the top pool `p` held or read for it. A launchpad coin's top pool is its
+   *  curve's until it graduates, and a refused refresh (above) keeps serving the curve's, whose bars end at the
+   *  graduation (card app-faults-seen-on-122: a PumpSwap coin's chart held 2 bars for a day). Once the launch read says
+   *  the coin is off its curve (origin.ts, 10,000), the curve is never its chart's pool: the pool the page names (Jupiter's
+   *  graduated pool), with no read of ours; when none is known yet, `p`. */
+  const chartPool = (mint: string, p: string): string => {
+    const o = origins.get(mint);
+    if (o == null || o.curveBps !== 10_000 || p !== o.pool) return p;
+    const graduated = built.get(mint)?.pool ?? null;
+    return graduated !== null && graduated !== o.pool ? graduated : p;
+  };
 
   /** The last good GeckoTerminal bars per mint and tf: served when a read is throttled or fails, while under GT_SERVE_MS
    *  or for history before their read (an empty chart is never the answer for a token with known history, and an old one
@@ -1078,7 +1091,7 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
     }
     const { period, aggregate } = TF[tf];
     const before = to === "" ? "" : `&before_timestamp=${to}`;
-    const a = await gecko(`/networks/solana/pools/${p.body}/ohlcv/${period}?aggregate=${aggregate}&limit=1000&currency=usd&token=${mint}${before}`, lane, "sol bars", until, client);
+    const a = await gecko(`/networks/solana/pools/${chartPool(mint, p.body)}/ohlcv/${period}?aggregate=${aggregate}&limit=1000&currency=usd&token=${mint}${before}`, lane, "sol bars", until, client);
     const candles = a === null ? [] : toCandles(a, tf, 1_000, now());
     if (candles === null) throw new Upstream();
     const at = now();
@@ -1148,7 +1161,7 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
             return k;
           }
           const { period, aggregate } = TF[tf];
-          const a = await gecko(`/networks/solana/pools/${pool.body}/ohlcv/${period}?aggregate=${aggregate}&limit=1000&currency=usd&token=${mint}`, "ahead", "sol bars");
+          const a = await gecko(`/networks/solana/pools/${chartPool(mint, pool.body)}/ohlcv/${period}?aggregate=${aggregate}&limit=1000&currency=usd&token=${mint}`, "ahead", "sol bars");
           tried.set(k, now());
           const got = a === null ? [] : toCandles(a, tf, 1_000, now());
           if (got !== null) keep(k, got, now());

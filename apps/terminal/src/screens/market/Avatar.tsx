@@ -33,18 +33,19 @@ function LogoImg({ src, size }: { src: string; size: number }) {
   );
 }
 
-/** The token avatar (UNRLZD TokenAvatar), one for every screen: the token's own logo from the helper when it has one,
+/** `initials` false draws the gradient alone, for a mark too small for letters to read (Portfolio's Coins part, 16 px).
+ *  The token avatar (UNRLZD TokenAvatar), one for every screen: the token's own logo from the helper when it has one,
  *  else the main app's fallback, two initials on a gradient from the symbol. Given a `chain` (and a `pad`), it carries
  *  the origin badges at its corners as design-lock-r5 draws them (P.badges): the launchpad's logo bottom-right, the
  *  chain's mark top-right, each with its proper name in the hover (pads.ts). An unknown or null pad draws no badge. */
-export function Avatar({ symbol, size, pad, chain, logo }: { symbol: string; size: number; pad?: string | null; chain?: string; logo?: Logo }) {
+export function Avatar({ symbol, size, pad, chain, logo, initials = true }: { symbol: string; size: number; pad?: string | null; chain?: string; logo?: Logo; initials?: boolean }) {
   let h = 7;
   for (const ch of symbol) h = (h * 31 + ch.charCodeAt(0)) % 360;
   const letters = Array.from(symbol.replace(/^\$/, "").normalize("NFKC").replace(/\p{M}/gu, "")).slice(0, 2).join("");
   const src = logo?.icon === true && logo.token ? logoUrl(logo.chain, logo.token) : null;
   const av = (
     <span className="tok-av" aria-hidden="true" style={{ width: size, height: size, background: `conic-gradient(from ${h}deg at 35% 30%, oklch(0.62 0.15 ${h}), oklch(0.34 0.09 ${(h + 70) % 360}), oklch(0.5 0.13 ${h}), oklch(0.62 0.15 ${h}))`, color: `oklch(0.97 0.03 ${h})`, fontSize: Math.round(size * 0.36) }}>
-      {letters}
+      {initials && letters}
       {src && <LogoImg key={src} src={src} size={size} />}
     </span>
   );
