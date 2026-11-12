@@ -79,7 +79,10 @@ export const vendorSeedMax = (totals: readonly number[]): number => Math.ceil((M
 /** The 1Click calls one deposit sheet open sends within a second (card deposit-sheet-oneclick-budget): deposit.assets
  *  reads the token list, then one dry quote per release asset at once (packages/signpage/src/rules/deposit-dry.ts
  *  depositAssetsKind over DEPOSIT_ASSET_CHAINS, the kit's ONECLICK_USDC_ASSETS in order), and deposit.dry one dry quote:
- *  5 for the 3 assets, one client's share of 1Click, so no other client's load can refuse it. */
+ *  5 for the 3 assets, one client's share of 1Click, so no other client's load can refuse it. That is while 1Click
+ *  quotes: in a spell of its 400s not about the request, each dry quote is asked up to 3 times inside its 10 s
+ *  (packages/wallet/src/deposit/quote.ts askDepositQuoteAgain), so one open sends up to 13 (1 + 3 x 3 + 3), past the
+ *  share from its sixth (packages/signpage/test/deposit-dry-count.test.ts holds 13). */
 export const DEPOSIT_SHEET_CALLS = ONECLICK_USDC_ASSETS.length + 2;
 /** A vendor's budget is counted over its own window: every vendor below publishes a per-minute limit. */
 export const VENDOR_WINDOW_MS = 60_000;
@@ -110,7 +113,9 @@ export const VENDOR_WINDOW_MS = 60_000;
  *   latency (a draw is counted by its whole second, and reaches 1Click up to a timeout later) can only make our count
  *   short of 1Click's, and one 429 holds every call for its 60 s reset. Share DEPOSIT_SHEET_CALLS 5: one deposit sheet
  *   open, within a second, and no override may name less (PROXY_MIN_SHARE). At 50 and 2 the sheet's third call went
- *   only as lent, and from the eighth sheet in a minute it answered 429 busy or 503 with 1Click idle.
+ *   only as lent, and from the eighth sheet in a minute it answered 429 busy or 503 with 1Click idle. The share fits a
+ *   sheet while 1Click quotes; in a spell of its 400s one open sends up to 13 (DEPOSIT_SHEET_CALLS), each past the
+ *   fifth only as lent.
  */
 export const PROXY_BUDGETS: Readonly<Record<VendorName, BudgetLimits>> = {
   jupiter: { total: 60, perClient: 4, windowMs: VENDOR_WINDOW_MS, reserve: 34, lend: true },
@@ -191,35 +196,103 @@ export function messageOf(text: string): string | null {
   if (typeof em === "string") return em;
   return null;
 }
-/** Every value of the caller's request (its JSON body's leaves and its query's values) of 3 characters or more, longest
- *  first: no log line may carry one, as a vendor's message can echo what it was sent. */
-export function requestValues(body: string, rawQuery: string): string[] {
+/** The most of a vendor's message safeMessage reads (card helper-says-why-a-vendor-refused, review P1): a longer one is
+ *  cut to it at its last whole word before any pass over it, so no pass costs more than it does whatever the vendor sent
+ *  (ANSWER_MAX is 4 MB). The VENDOR_MESSAGE_MAX a line keeps come from it. */
+export const VENDOR_MESSAGE_READ = 2_048;
+/** The most values of the caller's request a message is made safe against; past it the vendor's message is withheld
+ *  from the line. With VENDOR_MESSAGE_READ and VALUE_HEAD it bounds the work: at most 256 searches of at most 64
+ *  characters over at most 2,048. */
+export const REQUEST_VALUES_MAX = 256;
+/** A request value longer than this is found by its first VALUE_HEAD characters, and the message ends where they stand
+ *  (what follows may be the rest of the value). */
+export const VALUE_HEAD = 64;
+/** Every value of the caller's request of 3 characters or more, longest first: its JSON body's keys and leaves and its
+ *  query's values. No log line may carry one, since a vendor's message can echo what it was sent, a property name
+ *  included (a validation answer's "property X should not exist"). null past REQUEST_VALUES_MAX. */
+export function requestValues(body: string, rawQuery: string): string[] | null {
   const out = new Set<string>();
-  const walk = (v: unknown, depth: number): void => {
-    if (depth > 32) return;
-    if (typeof v === "string" || typeof v === "number" || typeof v === "bigint") out.add(String(v));
-    else if (Array.isArray(v)) for (const x of v) walk(x, depth + 1);
-    else if (typeof v === "object" && v !== null) for (const x of Object.values(v)) walk(x, depth + 1);
+  const add = (v: string): boolean => {
+    if (v.length >= 3) out.add(v);
+    return out.size <= REQUEST_VALUES_MAX;
+  };
+  const walk = (v: unknown, depth: number): boolean => {
+    if (depth > 32) return true;
+    if (typeof v === "string" || typeof v === "number" || typeof v === "bigint") return add(String(v));
+    if (Array.isArray(v)) return v.every((x) => walk(x, depth + 1));
+    if (typeof v === "object" && v !== null) return Object.entries(v).every(([k, x]) => add(k) && walk(x, depth + 1));
+    return true;
   };
   if (body !== "") {
+    let parsed: unknown;
     try {
-      walk(JSON.parse(body), 0);
+      parsed = JSON.parse(body);
     } catch {
-      // a body that is not JSON is never echoed into a line: the vendor's message is kept only through the shapes below
+      // a body that is not JSON is never echoed into a line: the vendor's message is kept only through the words below
+    }
+    if (parsed !== undefined && !walk(parsed, 0)) return null;
+  }
+  for (const v of new URLSearchParams(rawQuery).values()) if (!add(v)) return null;
+  return [...out].sort((a, b) => b.length - a.length);
+}
+/** The last label a NEAR named account may end in (near, tg, sweat, testnet), or the 64-hex implicit account a
+ *  sub-account sits under. */
+const NEAR_TOP = /^(near|tg|sweat|testnet|[0-9a-f]{64})$/;
+/** A word of a message: a run of letters, digits, "_", ".", "-" and "…". Matched once over the message, never backed
+ *  into (one character class), so the pass is linear in it. */
+const WORD = /[0-9A-Za-z_.\-…]+/g;
+const EDGE = new Set([".", "-", "…"]);
+/**
+ * True when a word is an address or a part of one, whatever the request held: an EVM address or hash (0x and 6 hex
+ * digits or more), a hex id of 32 or more (a NEAR implicit account), a base58 run of 32 or more (a Solana key or
+ * address, glued to others by "_", "." or "-" too), a shortened one ("9ddc51…", "0x8335...2913"), or a NEAR named
+ * account in any case (a dotted name whose last label is in NEAR_TOP). What no pattern catches: a bare top-level name
+ * ("alice") or a name under a top-level name not in NEAR_TOP, which reads as any other word; a value of the request is
+ * caught however it reads (requestValues).
+ */
+function addressWord(w: string): boolean {
+  if (/[0-9A-Za-z]{3}(\.\.\.|…)/.test(w)) return true;
+  let a = 0;
+  let b = w.length;
+  while (a < b && EDGE.has(w[a]!)) a++;
+  while (b > a && EDGE.has(w[b - 1]!)) b--;
+  const t = w.slice(a, b);
+  const lower = t.toLowerCase();
+  if (/^[a-z0-9_-]+(\.[a-z0-9_-]+)+$/.test(lower) && NEAR_TOP.test(lower.slice(lower.lastIndexOf(".") + 1))) return true;
+  return t.split(/[_.\-…]+/).some((p) => /^0x[0-9a-f]{6,}$/i.test(p) || /^[0-9a-f]{32,}$/i.test(p) || /^[1-9A-HJ-NP-Za-km-z]{32,}$/.test(p));
+}
+/**
+ * A vendor's message made safe for one log line, every step linear in VENDOR_MESSAGE_READ: cut to it at its last whole
+ * word (a word cut in two is one no pattern knows); every request value replaced, and a value's start where the cut
+ * message ends; every control and line-separator character a space; every address word replaced (addressWord); cut to
+ * VENDOR_MESSAGE_MAX characters. `values` null (past REQUEST_VALUES_MAX): the message is withheld.
+ */
+export function safeMessage(m: string, values: readonly string[] | null): string {
+  if (values === null) return "(withheld: the request held too many values)";
+  let s = m;
+  const cut = s.length > VENDOR_MESSAGE_READ;
+  if (cut) {
+    let i = VENDOR_MESSAGE_READ;
+    while (i > 0 && !/\s/.test(s[i - 1]!)) i--;
+    s = s.slice(0, i);
+  }
+  for (const v of values) {
+    if (v.length <= VALUE_HEAD) s = s.split(v).join("<request field>");
+    else {
+      const at = s.indexOf(v.slice(0, VALUE_HEAD));
+      if (at >= 0) s = `${s.slice(0, at)}<request field>`;
     }
   }
-  for (const v of new URLSearchParams(rawQuery).values()) out.add(v);
-  return [...out].filter((v) => v.length >= 3).sort((a, b) => b.length - a.length);
-}
-/** Address shapes a message may carry whatever the request held: an EVM address or hash, a hex id (a NEAR implicit
- *  account), a base58 key or address (Solana), a NEAR named account, and a shortened one ("9ddc51…"). */
-const ADDRESS_SHAPES: readonly RegExp[] = [/0x[0-9a-fA-F]{6,}/g, /\b[0-9a-fA-F]{32,}\b/g, /\b[1-9A-HJ-NP-Za-km-z]{32,88}\b/g, /\b[a-z0-9_-]+(\.[a-z0-9_-]+)*\.(near|tg|testnet)\b/g, /[0-9A-Za-z]{3,}…/g];
-/** A vendor's message made safe for one log line: every request value and address shape replaced, every control and
- *  line-separator character a space, cut to VENDOR_MESSAGE_MAX characters. */
-export function safeMessage(m: string, values: readonly string[]): string {
-  let s = m.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, " ");
-  for (const v of values) s = s.split(v).join("<request field>");
-  for (const r of ADDRESS_SHAPES) s = s.replace(r, "<address>");
+  // a value whose start ends the cut message: its first characters, cut from the rest
+  if (cut)
+    for (const v of values)
+      for (let p = Math.max(0, s.length - VALUE_HEAD); p <= s.length - 3; p++)
+        if (v.startsWith(s.slice(p))) {
+          s = `${s.slice(0, p)}<request field>`;
+          break;
+        }
+  s = s.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, " ");
+  s = s.replace(WORD, (w) => (addressWord(w) ? "<address>" : w));
   return [...s].slice(0, VENDOR_MESSAGE_MAX).join("");
 }
 /** `peers` (card helper-deploy-reads-fast): the other helpers on the same keys (shared-calls.ts callsFiles), whose calls
@@ -829,7 +902,9 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
    * One proxied call (answer), and card helper-says-why-a-vendor-refused: an answer that is not 2xx is logged in one line,
    * "proxy <vendor> <path> answered <status>, <ours|the vendor's>: <what>", folded with the same line in SAID_FOLD_MS.
    * The vendor's: its status (and the 503's cause), and its message made safe (safeMessage); ours: the refusal's name.
-   * The answer's Server-Timing gains refusal;desc="vendor" or refusal;desc="ours".
+   * The answer's Server-Timing gains refusal;desc="vendor" or refusal;desc="ours", for our Node live check: a browser on
+   * SIGN_HOST cannot read the header (it is not exposed and names no Timing-Allow-Origin), and the device tells a refusal
+   * by its status and body (packages/wallet/src/deposit/quote.ts refusalOf).
    * A vendor or path not on the list is never written as the caller wrote it; no query, body field, key or client.
    */
   async function handle(vendor: string, path: string, rawQuery: string, body: string, client?: string, reserved = false, waitMs?: number, caller = client !== undefined): Promise<ProxyAnswer> {
@@ -855,7 +930,7 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
       what = a.why ?? (typeof code === "string" ? code : "unnamed");
     }
     sayOnce(`proxy ${where} answered ${a.status}, ${theirs ? "the vendor's" : "ours"}: ${what}`);
-    // and on the answer, in its Server-Timing, so a device or a live check tells a vendor's refusal from ours
+    // and on the answer, in its Server-Timing, so our live check tells a vendor's refusal from ours (never a browser: not exposed)
     return { ...out, timing: [...(out.timing ?? []), `refusal;desc="${theirs ? "vendor" : "ours"}"`] };
   }
 

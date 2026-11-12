@@ -5,8 +5,9 @@
 // /v1/proxy/oneclick/v0/quote, as the signing page asks them (no cookie, the kit's public placeholder as recipient and
 // refundTo, Solana USDC into NEAR USDC), and one more straight to 1Click only when the helper refuses:
 //   - short: 1 base unit, a size 1Click refuses for its amount. It passes only when the helper answers 400 with 1Click's
-//     message in its body and refusal;desc="vendor" in its Server-Timing (apps/helper/src/proxy/proxy.ts handle): a
-//     device tells 1Click's refusal from the helper's own, and its message decides whether the page asks again
+//     message in its body and refusal;desc="vendor" in its Server-Timing (apps/helper/src/proxy/proxy.ts handle): this
+//     check tells 1Click's refusal from the helper's own by the header, which a browser on SIGN_HOST cannot read (not
+//     exposed); the device tells it by the status and body, whose message decides whether the page asks again
 //     (packages/wallet/src/deposit/quote.ts askAgainFor). A helper before this change names no refusal: FAIL;
 //   - quote: 10 USDC, a size 1Click quotes. It passes on 200 or 201. When the helper answers it 400, the same body (its
 //     deadline renewed) goes to 1Click keyless (the twin): 1Click refusing it too, or failing, is 1Click's own trouble:
