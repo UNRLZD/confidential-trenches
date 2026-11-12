@@ -76,7 +76,9 @@ export function judge(rec) {
   for (const r of runs) {
     const n = `${r.width} ${PATH}`;
     say(r.view === "rows", `${n}: the pool block ${r.view ? `is ${r.view}` : "is not drawn"}, want rows`);
-    const rows = r.rows ?? [];
+    // NEAR's vault row (card app-faults-seen-on-122) is the vault's USDC, not a pool the answer sends: its own live check
+    // (app-faults-seen-on-122.mjs) reads it; this check reads the pools' rows
+    const rows = (r.rows ?? []).filter((x) => x.chain !== "near" || pools.some((p) => p.chain === "near"));
     say(rows.length === pools.length && rows.every((x, i) => x.chain === pools[i].chain), `${n}: rows ${rows.map((x) => x.chain).join(", ") || "none"}, want ${pools.map((p) => p.chain).join(", ")}`);
     for (const p of pools) {
       const x = rows.find((y) => y.chain === p.chain);

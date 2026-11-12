@@ -719,7 +719,7 @@ function AllocMap({ items, inline = false }: { items: { r: Row; v: number }[]; i
         return (
           <div className={`at${inline ? " inl" : ""}`} key={r.key} data-alloc={r.key} style={{ left: `${x}%`, top: `${y}%`, width: `calc(${w}% - 4px)`, height: `calc(${h}% - 4px)`, background: bg }}>
             <div className="row-flex">
-              {big && <Avatar symbol={r.symbol} size={inline ? 28 : 32} />}
+              {big && <Avatar symbol={r.symbol} size={32} />}
               {w > 13 && <span className="as ell">{r.symbol}</span>}
               {inline && big && <span className="av3 num">{usd(r.value!)}</span>}
             </div>
