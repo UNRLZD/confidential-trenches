@@ -52,17 +52,18 @@ import { holdHosts, hostLane, laneFetch, stopHostLaneWaits } from "../../wallet/
 import { HELPER_FETCH_INIT, HELPER_V1_PATHS } from "../../kit/src/helper/v1.ts";
 import type { VaultProver } from "../../kit/src/prover/prove.ts";
 import { WALLET_SEED_LOCK, type WalletStore } from "@blindfill/wallet/store";
-import { openNoteStore, readNotes, readReservedMarks, type NoteStore } from "../../wallet/src/notes/store.ts";
+import { openNoteStore, readNotes, readReservedMarks, type NoteRecord, type NoteStore } from "../../wallet/src/notes/store.ts";
 import { chainNow, type Pool, type ReadyProof } from "../../wallet/src/pool/pool.ts";
 import { openProofQueue, type ProofQueue, type QueuePass } from "../../wallet/src/pool/queue.ts";
 import { poolDepositKind, type PoolDepositFrom, type PoolDepositHost } from "./pool-deposit.ts";
 import { proverHost } from "./prover-host.ts";
-import { SOLANA_PUBLIC_SEAT, TRADE_HELPER } from "./trade.ts";
+import { SOLANA_PUBLIC_SEAT, TRADE_HELPER, type TradeStore } from "./trade.ts";
 import { SOL_POOL_TABLES, SOL_POOLS, solanaNow, solanaPool, solanaPoolOf, type SolanaFeeAnswer, type SolanaPoolPin, type SolanaReleaseRequest } from "../../wallet/src/pool/solana.ts";
 import { SOL_MARK_READ_BATCH, SOL_MARK_READ_BATCH_MAX, solanaSettleReserved, solanaSettleSpent, type SolanaPoolCache } from "../../wallet/src/pool/solana-restore.ts";
 import { POOL_TESTNET } from "../../wallet/src/pool/network.ts";
 import { askWhileBusy, type BusyOpts } from "../../wallet/src/busy.ts";
-import { lateBuyEnd, POOL_SEND_BUSY_WAIT_MS, PoolSendBusy, poolBuyKind, type PoolBuyHost } from "./pool-buy.ts";
+import { lateBuyEnd, POOL_SEND_BUSY_WAIT_MS, PoolSendBusy, PoolSendRefused, poolBuyKind, resumePieces, type OwedPieces, type PiecesOwed, type PoolBuyHost } from "./pool-buy.ts";
+import { heldWs, ownWs } from "./pool-found.ts";
 import { boughtSincePass, keptHeldOf, type StoreWs } from "./pool-sell-dry.ts";
 import { BUY_MINTS_KEY, buyMints, keptSells, owedRentBacks, poolSellKind, resumeRentBacks, settleDeadSellOps, settlePoolSells, settleSellOps, type PoolSellKindHost } from "./pool-sell.ts";
 import { derivedBuyWallets, evmHelperKeyedRpc, evmHelperRpc, solanaHelperHoldings, solanaHoldingsAt, spentNotesOf, wantedBuyWallets, type BuyWallet, type HoldingsReader, type ListedBuyWallet } from "../../wallet/src/pool/buy-wallets.ts";
@@ -203,6 +204,25 @@ export const evmEpochFee = (at: { baseFeePerGas: bigint; depth: number; chainFee
 export const PAGE_SOL_PIN: SolanaPoolPin | undefined = POOL_TESTNET ? SOL_POOLS.devnet : SOL_POOLS.mainnet;
 /** The page's Solana cluster: the fee route's and pool.buy's (its tip). */
 export const PAGE_CLUSTER: "mainnet" | "devnet" = POOL_TESTNET ? "devnet" : "mainnet";
+/** The buys of several pieces owed their end (pool-buy.ts OwedPieces), in the wallet store's meta/owed/pieces-sol (meta/owed/
+ *  is never read or listed by the frame), by W's address. */
+export const piecesOwedOf = (store: () => Promise<Pick<TradeStore, "get" | "update">>): PiecesOwed => {
+  const KEY = "owed/pieces-sol";
+  type All = Record<string, OwedPieces>;
+  return {
+    list: async () => Object.values(((await (await store()).get("meta", KEY)) as All | undefined) ?? {}),
+    put: async (r) =>
+      void (await (await store()).update("meta", KEY, (v) => ({ ...((v as All | undefined) ?? {}), [r.address]: r }))),
+    drop: async (address) =>
+      void (await (await store()).update("meta", KEY, (v) => {
+        const all = { ...((v as All | undefined) ?? {}) };
+        if (!Object.hasOwn(all, address)) return undefined;
+        delete all[address];
+        return all;
+      })),
+  };
+};
+
 /** The helper's route for the mainnet mark list (card sol-pools-mainnet-pin): getProgramAccounts in the note restore's
  *  exact shape alone, answered by another company's provider than /v1/rpc/solana's (apps/helper/src/rpc/rpc.ts
  *  marksRoutes). No keyless mainnet provider answers that scan (publicnode 403 "Indexed requests require a personal
@@ -501,6 +521,20 @@ async function helperPoolPost(path: "/v1/pool/solana/send" | "/v1/pool/solana/pi
         // a body that is not the helper's: still its 429
       }
       throw new PoolSendBusy(code, ms);
+    }
+    // refused before anything was sent (any other 4xx: a shape, wallet, fee, blockhash or simulation the helper refused,
+    // or a route an older helper does not have, 404): pool-buy.ts ends the run at once, its notes RESERVED until the
+    // state reads free them
+    if (res.status >= 400 && res.status < 500) {
+      const body = new Uint8Array(await res.arrayBuffer());
+      let code = "refused";
+      try {
+        const c = body.length <= 4_096 ? (JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(body)) as { error?: { code?: unknown } })?.error?.code : undefined;
+        if (typeof c === "string" && /^[a-z_]{1,40}$/.test(c)) code = c;
+      } catch {
+        // a body that is not the helper's: still its refusal
+      }
+      throw new PoolSendRefused(res.status, code);
     }
     if (res.status !== 200) throw new Error(`pool send: HTTP ${res.status}`);
     const SEND_ANSWER_MAX = HELPER_V1_PATHS.find((p) => p.method === "POST" && p.path === path)!.limitBytes!;
@@ -1333,6 +1367,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       seed64: page.seed64,
       // W's buy mint, written before the send: the rent back after a later sell holds while W holds any of it
       bought: buyMints(page.store),
+      // a buy of several pieces' owed record, before its take (resumePieces, on the state reads)
+      piecesOwed: piecesOwedOf(page.store),
       send: (pool, tx) => helperPoolSend(pool, tx, over.fetch),
       sendPieces: (pool, txs) => helperPoolSendPieces(pool, txs, over.fetch),
       // the received token's decimals, for W's buy record (src/positions.ts recordPoolBuy), and kept for the session: read
@@ -1950,6 +1986,44 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   // the dead pending sell records are settled once per page load, not on every state read (a re-ask settles its own)
   let deadSettled = false;
   let backsResumed = false;
+  let foundScanned = false;
+  const piecesOwed = piecesOwedOf(page.store);
+  /** The buys of several pieces owed their end, decided from their notes' states (pool-buy.ts resumePieces): a W whose
+   *  pieces paid it and whose buy can no longer land is owed a rent back (merged into W's own record, the buy's mint
+   *  among its mints), which this load's background run of resumeRentBacks sweeps into the pool with no tap. Run on each
+   *  state read and from followBuys (the settle pass a buy that ended "sent" starts). */
+  const resumeOwedPieces = async (state: (noteId: string) => Promise<string | undefined>): Promise<void> => {
+    if ((await piecesOwed.list().catch(() => [])).length === 0) return;
+    const stranded = await resumePieces({
+      owed: piecesOwed,
+      state,
+      strand: async (r) => {
+        const o = owedNoted(page.store);
+        const had = (await o.list()).find((x) => x.address === r.address);
+        await o.put({ ...(had ?? { passes: 0 }), address: r.address, l: r.l, j: r.j, mints: [...(had?.mints ?? []).filter((m) => m.mint !== r.mint), { mint: r.mint, program: r.program }] });
+      },
+    }).catch(() => 0);
+    if (stranded > 0) backsResumed = false;
+  };
+  /** The scan of pool-found.ts on `mine` (under the seed's shared lock, the caller's): each W holding SOL that no owed
+   *  record names gets one, `found`. */
+  const findHeldWs = async (mine: readonly NoteRecord[]): Promise<void> => {
+    // no note whose own W the scan reads: the seed is not read
+    if (scope === null || !mine.some((n) => n.scope === scope && (n.state === "UNSPENT" || n.state === "HELD") && n.leaf !== undefined)) return;
+    const o = owedNoted(page.store);
+    const skip = new Set([...(await o.list()).map((x) => x.address), ...(await piecesOwed.list()).map((x) => x.address)]);
+    const seed64 = await page.seed64();
+    let ws: ReturnType<typeof ownWs>;
+    try {
+      ws = ownWs(seed64, mine, scope, skip);
+    } finally {
+      seed64.fill(0);
+    }
+    if (ws.length === 0) return;
+    // the helper's seat for the batch (never a public provider); the testnet build, with none, one W a request
+    const batch = POOL_TESTNET ? null : over.rpcs ? over.rpcs[1] : solanaPacedRpc(pageHelperRpc(TRADE_HELPER, SOLANA_RPC_RETRY, "pass"));
+    for (const w of await heldWs(ws, batch, rpcs("pass")[0])) await o.put({ address: w.address, l: w.l.toString(), j: w.j, mints: [], passes: 0, found: true });
+  };
   // the RESERVED notes a buy left (filled, refused, never answered, or its page closed mid-send): settled spent, freed
   // once both RPCs' finalized height is past the signed transaction's last height, or their block time past the
   // deadline, with no spent mark, or held (../../wallet/src/pool/solana-restore.ts solanaSettleReserved); a freed note is
@@ -1970,6 +2044,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         signal.throwIfAborted();
         const pass = await solanaSettleReserved({ seed64, notes, program: pin!.program, rpcs: settleRpcs("pass"), lister: lister("pass"), signal, cache, markBatches: PAGE_SOL_MARK_BATCHES });
         await followBuys(notes);
+        await resumeOwedPieces(async (id) => (await notes.get(id))?.state);
         // a freed note's release never landed: an op owing its send is settled stopped, nothing sent, before the note
         // can be spent again
         if (pass.freed.length > 0) await settleFreedOps(await page.store(), pass.freed);
@@ -2089,6 +2164,12 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         if (mine.some((n) => n.state === "INCOMING")) await settleSolana();
         // a failed reserved pass never holds back a send owed (the money on W): the finish below still runs
         if (mine.some((n) => n.state === "RESERVED") || lateBuys.size > 0) await settleReserved().catch(() => {});
+        // a buy of several pieces whose pieces paid W and whose buy can no longer land: what W holds goes back into the
+        // pool by the rent back (W's own owed record), run in this load's background below, with no tap
+        if ((await piecesOwed.list().catch(() => [])).length > 0) {
+          const now = new Map((await readNotes(await page.store())).map((n) => [n.id, n.state]));
+          await resumeOwedPieces(async (id) => now.get(id));
+        }
         // a sell's note left INCOMING, or a sell with no deposit back (no note) left sent: both settled by the sell's verdict
         if (mine.some((n) => n.state === "INCOMING" && (n.ref.kind === "return" || (n.ref.kind === "second" && n.ref.id.id === "R"))) || (await keptSells(page.store).list().catch(() => [])).length > 0) await settleSells();
         // the next buy's proofs (card signpage-pool-pins): a page that loads with the pool's notes landed opens the
@@ -2104,10 +2185,16 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         // the sells settle, in the background (it reads, checks and sends), under the seed's shared lock and the sell lock
         if (locks && !backsResumed) {
           backsResumed = true;
+          const scan = !foundScanned;
+          foundScanned = true;
           void locks
             .request(WALLET_SEED_LOCK, { mode: "shared" }, async () => {
               const h = sellHost();
               try {
+                // once a load: the own W of each UNSPENT or HELD note that holds SOL (pool-found.ts), owed a rent back
+                // that sweeps it only while both RPCs read it owning no token account; a restored device finds there a
+                // buy of several pieces whose pieces paid W and whose buy never landed
+                if (scan) await findHeldWs(mine).catch(() => {});
                 await resumeRentBacks(h, locks);
               } finally {
                 h.end();

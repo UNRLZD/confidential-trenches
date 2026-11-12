@@ -20,7 +20,7 @@ import type { VaultSnarkjsProof, VaultWithdrawSignals } from "../../kit/src/vaul
 import type { ReadyProof } from "../../wallet/src/pool/pool.ts";
 import { solanaContextOf, solanaPoolOf, type SolanaReleaseRequest } from "../../wallet/src/pool/solana.ts";
 import { ALT, BLOCKHASH, FEE_PAYER, POOL, PROGRAM, fx, rent, replay, setup, unhex } from "../../kit/test/solana-pool-buy-fx.ts";
-import { lateBuyEnd, pickPieces, POOL_BLOCKHASH_LIFE_MS, POOL_BUY_READS, POOL_BUY_SETTLE_MS, PoolSendBusy, poolBuyKind, readBack, runPoolBuy, solanaProofBytes, type PoolBuyHost } from "../src/pool-buy.ts";
+import { lateBuyEnd, pickPieces, POOL_BLOCKHASH_LIFE_MS, POOL_BUY_READS, POOL_BUY_RESEND_MAX, POOL_BUY_RESEND_MS, POOL_BUY_SETTLE_MS, PoolSendBusy, PoolSendRefused, poolBuyKind, readBack, resumePieces, runPoolBuy, solanaProofBytes, type OwedPieces, type PiecesOwed, type PoolBuyHost } from "../src/pool-buy.ts";
 import * as poolBuy from "../src/pool-buy.ts";
 import { SolanaRpcTransportError } from "../../kit/src/trade/solana/send.ts";
 import type { PoolAsk } from "../src/rules/pool.ts";
@@ -2359,6 +2359,17 @@ test("pieces: a spend past the own note's Max sends one bundle: the other piece'
     bundles.push(txs.map((t) => t.slice()));
     throw new Error("pool send: HTTP 502");
   };
+  // a host with no owed record for a buy of several pieces sends nothing: what its releases pay W could not be found
+  assert.deepEqual(await runPoolBuy(w.host, { ...ASK, amount: spend }), { error: "failed" });
+  assert.equal(bundles.length, 0, "nothing sent with no owed record");
+  sets.length = 0;
+  const owed = owedMem();
+  w.host.piecesOwed = owed;
+  const inner = w.host.sendPieces;
+  w.host.sendPieces = async (pool, txs) => {
+    assert.equal((await owed.list()).length, 1, "the owed record written before the bundle leaves");
+    return inner(pool, txs);
+  };
   const a = await runPoolBuy(w.host, { ...ASK, amount: spend });
   assert.equal("stage" in a && a.stage, "not_landed", JSON.stringify(a));
   assert.deepEqual(sets, [["note-2", "note-1"]]);
@@ -2393,9 +2404,154 @@ test("pieces: the releases land and the buy does not (a helper that sent the tag
     settled.push(`${id}:${kind}`);
     return { kind };
   };
+  const owed = owedMem();
+  w.host.piecesOwed = owed;
   const a = await runPoolBuy(w.host, { ...ASK, amount: spend });
   assert.equal("stage" in a && a.stage, "not_landed", JSON.stringify(a));
   // the landed piece is SPENT once, and asked no more; the buy's own note is read unspent (freed by the state reads)
   assert.equal(settled.filter((x) => x === "note-2:spent").length, 1, settled.join(","));
   assert.ok(settled.includes("note-1:unspent"), settled.join(","));
+  // the owed record, written before the send, outlives the run: W's l and j, the buy's own note, the pieces, the
+  // blockhash's last height, the coin and its token program
+  const rec = await owed.list();
+  assert.deepEqual(rec, [{ address: W.address, l: L.toString(), j: J, primary: "note-1", pieces: ["note-2"], lastHeight: "151", mint: fx.pump.mint, program: rec[0]!.program }]);
+  assert.match(rec[0]!.program, /^Token/);
+  // the page's next state read, the buy's own note freed and the piece SPENT: W is swept back into the pool with no tap
+  // (the strand puts the rent back owed on W, pool-sell.test.ts "a W no spent note lists": derived from l and j, swept
+  // into the return note), then the record goes
+  const stranded: OwedPieces[] = [];
+  const states: Record<string, string> = { "note-1": "UNSPENT", "note-2": "SPENT" };
+  assert.equal(await resumePieces({ owed, state: async (id) => states[id], strand: async (r) => void stranded.push(r) }), 1);
+  assert.deepEqual(stranded, rec);
+  assert.deepEqual(await owed.list(), []);
+});
+
+/** An owed-pieces store in memory, as the page's (pool-testnet.ts piecesOwedOf): one record a W. */
+function owedMem(): PiecesOwed & { all: Map<string, OwedPieces> } {
+  const all = new Map<string, OwedPieces>();
+  return { all, list: async () => [...all.values()], put: async (r) => void all.set(r.address, r), drop: async (a) => void all.delete(a) };
+}
+
+const PIECE_SIG = base58.encode(new Uint8Array(64).fill(7));
+/** A buy of two pieces whose tag 2 lands on both RPCs and whose tag 3 the helper lost (read none on both): the world's
+ *  reads but getTransaction, which answers the piece's very bytes under PIECE_SIG and nothing under SIG. */
+async function lostBuy(clockAt: () => number) {
+  const own = pieceProof("note-1", BigInt("0x" + Buffer.from(unhex(r.nullifier_hash)).toString("hex")), BigInt(r.withdrawn), true);
+  const other = pieceProof("note-2", 777n, 5_000_000n);
+  const s = await setup("pump", SPEND);
+  const spend = solanaPoolBuyMaxSpend([relOf(own)], s.venue, SOLANA_POOL_JITO_TIP, rent) + 1_000_000n;
+  const w = await world({ readies: [[other, own]], landsAtSettle: "never", finalHeight: () => 120 });
+  let bundle: Uint8Array[] = [];
+  const resent: Uint8Array[] = [];
+  w.host.piecesOwed = owedMem();
+  w.host.takeSet = async (items) => items.map((x) => (x.noteId === own.noteId ? own : other));
+  w.host.sendPieces = async (_pool, txs) => {
+    bundle = txs.map((t) => t.slice());
+    return { signatures: [PIECE_SIG, SIG] };
+  };
+  w.host.send = async (_pool, tx) => {
+    resent.push(tx.slice());
+    throw new Error("pool send: HTTP 502");
+  };
+  const [r0, r1] = w.host.rpcs;
+  const wrap = (rpc: SolanaRpc, p: 0 | 1): SolanaRpc =>
+    (async (method: string, params: readonly unknown[]) => {
+      if (method !== "getTransaction" || (params[1] as { commitment?: string }).commitment === "finalized") return rpc(method, params);
+      if (params[0] !== PIECE_SIG || bundle.length === 0) return null;
+      const tx = bundle[0]!.slice();
+      tx.set(base58.decode(PIECE_SIG), 1);
+      return { slot: TX_SLOT + p, transaction: [base64.encode(tx), "base64"], meta: { err: null } };
+    }) as SolanaRpc;
+  w.host.rpcs = [wrap(r0, 0), wrap(r1, 1)];
+  w.host.now = () => BigInt(clockAt());
+  return { w, spend, resent, bundle: () => bundle };
+}
+
+test("pieces: the tag 2s land and the tag 3 reads none on both RPCs: the very tag 3 W signed is sent again, POOL_BUY_RESEND_MS after the pieces landed and as long after each, at most POOL_BUY_RESEND_MAX times, within the blockhash's life", async () => {
+  let t = 0;
+  const x = await lostBuy(() => t);
+  // each read-back round a second on: the pieces read landed at 0 s, the re-sends at 5, 10 and 15 s, never a fourth
+  x.w.host.wait = async (ms: number) => void (t += Math.max(ms, 1_000));
+  x.w.host.reads = 40;
+  const a = await runPoolBuy(x.w.host, { ...ASK, amount: x.spend });
+  assert.ok("stage" in a && a.stage !== "filled", JSON.stringify(a));
+  assert.equal(x.resent.length, POOL_BUY_RESEND_MAX, `${x.resent.length} re-sends`);
+  for (const tx of x.resent) assert.deepEqual(tx, x.bundle().at(-1), "the bundle's own tag 3, byte for byte: nothing new signed");
+  assert.equal(POOL_BUY_RESEND_MS, 5_000);
+});
+
+test("pieces: no re-send past the blockhash's life, and none while a piece reads none", async () => {
+  let t = 0;
+  const x = await lostBuy(() => t);
+  // the first read-back round already past the blockhash's life: the tag 3 can no longer land, nothing sent again
+  x.w.host.wait = async (ms: number) => void (t += Math.max(ms, POOL_BLOCKHASH_LIFE_MS));
+  x.w.host.reads = 10;
+  await runPoolBuy(x.w.host, { ...ASK, amount: x.spend });
+  assert.equal(x.resent.length, 0);
+  // the piece reads none on RPC 1: not every tag 2 landed on both, nothing sent again
+  let u = 0;
+  const y = await lostBuy(() => u);
+  const [q0, q1] = y.w.host.rpcs;
+  y.w.host.rpcs = [q0, (async (m: string, p: readonly unknown[]) => (m === "getTransaction" ? null : q1(m, p))) as SolanaRpc];
+  y.w.host.wait = async (ms: number) => void (u += Math.max(ms, 1_000));
+  y.w.host.reads = 40;
+  await runPoolBuy(y.w.host, { ...ASK, amount: y.spend });
+  assert.equal(y.resent.length, 0);
+});
+
+test("pieces: the helper refused the bundle (a 4xx: a refusal, or a 404 from a helper with no pieces route): the run ends at once, failed, no read-back and no wait", async () => {
+  for (const e of [new PoolSendRefused(422, "wallets_differ"), new PoolSendRefused(404, "refused")]) {
+    const own = pieceProof("note-1", BigInt("0x" + Buffer.from(unhex(r.nullifier_hash)).toString("hex")), BigInt(r.withdrawn), true);
+    const other = pieceProof("note-2", 777n, 5_000_000n);
+    const s = await setup("pump", SPEND);
+    const spend = solanaPoolBuyMaxSpend([relOf(own)], s.venue, SOLANA_POOL_JITO_TIP, rent) + 1_000_000n;
+    const w = await world({ readies: [[other, own]] });
+    w.host.piecesOwed = owedMem();
+    w.host.takeSet = async (items) => items.map((x) => (x.noteId === own.noteId ? own : other));
+    w.host.sendPieces = async () => {
+      throw e;
+    };
+    const before = w.log.length;
+    assert.deepEqual(await runPoolBuy(w.host, { ...ASK, amount: spend }), { error: "failed" }, e.message);
+    const after = w.log.slice(before);
+    assert.ok(!after.some((x) => x.endsWith("getTransaction") || x.startsWith("settle")), after.join(","));
+    assert.deepEqual(w.waits, []);
+  }
+  // one piece the same: the plain send refused
+  const w = await world();
+  w.host.send = async () => {
+    throw new PoolSendRefused(404, "refused");
+  };
+  assert.deepEqual(await runPoolBuy(w.host, ASK), { error: "failed" });
+  assert.ok(!w.log.some((x) => x.endsWith("getTransaction")));
+});
+
+test("pieces: resumePieces on a reload mid-buy and after: RESERVED keeps, the buy's note SPENT drops, a freed buy with a piece SPENT is swept back, nothing spent drops, a failing read or strand keeps", async () => {
+  const rec = (address: string): OwedPieces => ({ address, l: "3", j: 0, primary: `${address}-own`, pieces: [`${address}-p1`, `${address}-p2`], lastHeight: "151", mint: "M", program: "T" });
+  const cases: [string, Record<string, string | undefined>, "keep" | "drop" | "strand"][] = [
+    ["a reload mid-buy: every note RESERVED", { own: "RESERVED", p1: "RESERVED", p2: "RESERVED" }, "keep"],
+    ["one piece settled, the rest RESERVED", { own: "RESERVED", p1: "SPENT", p2: "RESERVED" }, "keep"],
+    ["the buy landed", { own: "SPENT", p1: "SPENT", p2: "SPENT" }, "drop"],
+    ["the buy freed, one piece landed", { own: "UNSPENT", p1: "SPENT", p2: "UNSPENT" }, "strand"],
+    ["the buy freed HELD, every piece landed", { own: "HELD", p1: "SPENT", p2: "SPENT" }, "strand"],
+    ["nothing landed", { own: "UNSPENT", p1: "UNSPENT", p2: "HELD" }, "drop"],
+    ["a note gone from the store", { own: undefined, p1: "UNSPENT", p2: "UNSPENT" }, "drop"],
+  ];
+  for (const [name, st, want] of cases) {
+    const owed = owedMem();
+    await owed.put(rec("W"));
+    const stranded: string[] = [];
+    const n = await resumePieces({ owed, state: async (id) => st[id.slice(2)], strand: async (r) => void stranded.push(r.address) });
+    assert.equal(n, want === "strand" ? 1 : 0, name);
+    assert.deepEqual(stranded, want === "strand" ? ["W"] : [], name);
+    assert.equal(owed.all.size, want === "keep" ? 1 : 0, name);
+  }
+  // a state read that throws, or a strand that throws: kept for the next read, the other records still decided
+  const owed = owedMem();
+  await owed.put(rec("A"));
+  await owed.put(rec("B"));
+  assert.equal(await resumePieces({ owed, state: async (id) => { if (id.startsWith("A")) throw new Error("idb"); return id.endsWith("own") ? "UNSPENT" : "SPENT"; }, strand: async () => {} }), 1);
+  assert.deepEqual([...owed.all.keys()], ["A"]);
+  assert.equal(await resumePieces({ owed, state: async (id) => (id.endsWith("own") ? "UNSPENT" : "SPENT"), strand: async () => { throw new Error("idb"); } }), 0);
+  assert.deepEqual([...owed.all.keys()], ["A"]);
 });

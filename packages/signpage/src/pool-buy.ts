@@ -139,11 +139,23 @@ const ROUTE_OUT = new RegExp(SIGNPAGE_ROUTE_OUT.source, SIGNPAGE_ROUTE_OUT.flags
  *  here: put writes mint and program alone, so this device's next buy from W replaces the mark. */
 export type BuyMints = { get(address: string): Promise<{ mint: string; program: string; rebuilt?: true } | undefined>; put(address: string, m: { mint: string; program: string }): Promise<void> };
 
+/**
+ * A buy of several pieces owed its end (card buy-spends-several-pieces), written before anything of it leaves: W (its
+ * l and j: W again from the seed), the note whose tag 3 buys (`primary`, W's own), the notes whose tag 2s pay W
+ * (`pieces`), the last block height its signed transactions can land at, and the coin it buys. When a piece of it is
+ * spent and the buy can no longer land, what the pieces paid W goes back into the pool (resumePieces).
+ */
+export type OwedPieces = { address: string; l: string; j: number; primary: string; pieces: string[]; lastHeight: string; mint: string; program: string };
+export type PiecesOwed = { list(): Promise<OwedPieces[]>; put(r: OwedPieces): Promise<void>; drop(address: string): Promise<void> };
+
 export type PoolBuyHost = {
   /** The pinned pool (the wallet's SOL_POOLS of this page's network). */
   pin: SolanaPoolPin;
   /** Where the buy writes W's buy mint before its send (BuyMints); a write that fails sends nothing. */
   bought?: BuyMints;
+  /** Where a buy of several pieces writes its owed record (OwedPieces) before its take; a write that fails sends
+   *  nothing. Absent: a buy spends one piece. */
+  piecesOwed?: PiecesOwed;
   /** The pin's lookup tables per venue, generations oldest first (wallet SOL_POOL_TABLES: the addresses a tag 3 on that
    *  venue may load its accounts from); none pinned, or a pin that is not a list of addresses: refused not_allowed; the
    *  buy's venue with none: refused venue_not_pinned before the pick. */
@@ -222,6 +234,23 @@ export class PoolSendBusy extends Error {
     this.retryAfterMs = retryAfterMs;
   }
 }
+/** The helper's refusal of a send before it sent anything (any 4xx but its 429: a shape, a wallet, a fee, a blockhash or
+ *  a simulation it refused, or a route an older helper does not have, 404): the run ends at once, "failed", its notes
+ *  RESERVED until the state reads free them (nothing is freed on the helper's word). */
+export class PoolSendRefused extends Error {
+  readonly status: number;
+  readonly code: string;
+  constructor(status: number, code: string) {
+    super(`pool send: refused (${status} ${code})`);
+    this.status = status;
+    this.code = code;
+  }
+}
+/** A buy of several pieces whose tag 2s read landed and whose tag 3 reads on neither RPC: its signed bytes are sent
+ *  again this long after the pieces read landed, and as long again after each, at most POOL_BUY_RESEND_MAX times
+ *  [design: past a devnet carry's own tag 3 send after its pieces (about a second), well inside a blockhash's life]. */
+export const POOL_BUY_RESEND_MS = 5_000;
+export const POOL_BUY_RESEND_MAX = 3;
 /** The wait between two sends of one transaction: the helper's Retry-After, at least 1 s, at most 5 s. */
 export const POOL_SEND_BUSY_WAIT_MS = { min: 1_000, max: 5_000 } as const;
 /** The most sends of one transaction: past a blockhash's life at the shortest wait, so the height decides first. */
@@ -623,6 +652,39 @@ export function solanaPieceWire(cfg: { program: string; pool: string }, wallet: 
   return wire;
 }
 
+/**
+ * The buys of several pieces owed their end (card buy-spends-several-pieces), on each Solana state read, with no tap:
+ * each record's notes as the state reads left them. Any still RESERVED: its end is not known yet (the settle reads it
+ * on). The buy's own note SPENT: it landed, W holds its coin, the record goes. Else the buy can no longer land (its
+ * note freed: both RPCs read its blockhash past with no spent mark): a piece SPENT means its release paid W, and what
+ * W holds goes back into the pool (`strand`: the rent back's sweep, W's own owed record), then the record goes; no
+ * piece spent, nothing reached W, the record goes. A note that cannot be read keeps the record for the next read, and
+ * so does a strand that fails. The number stranded.
+ */
+export async function resumePieces(o: { owed: PiecesOwed; state(noteId: string): Promise<string | undefined>; strand(r: OwedPieces): Promise<void> }): Promise<number> {
+  let stranded = 0;
+  for (const r of await o.owed.list()) {
+    let states: (string | undefined)[];
+    try {
+      states = await Promise.all([r.primary, ...r.pieces].map((id) => o.state(id)));
+    } catch {
+      continue;
+    }
+    const [own, ...pieces] = states;
+    if (own === "RESERVED" || pieces.includes("RESERVED")) continue;
+    try {
+      if (own !== "SPENT" && pieces.includes("SPENT")) {
+        await o.strand(r);
+        stranded++;
+      }
+      await o.owed.drop(r.address);
+    } catch {
+      // kept: the next state read tries again
+    }
+  }
+  return stranded;
+}
+
 /** One pool.buy: the ask is the user's own (rules/pool.ts checkPoolRequest passed it). A provider read that still fails
  *  past the page's own retry before W signs makes the buy again from its first read after a wait on the page's one rule
  *  (read-waits.ts readWaits: from 1 s, doubling, at most 10 s, until READ_WAIT_TOTAL_MS), then "down" (card
@@ -793,6 +855,12 @@ async function buyRun(h: PoolBuyHost, ask: PoolAsk, at: { fault?: unknown }): Pr
       const bound: readonly BuyRoute[] = [{ wallet: w.address }, { venue: venue.kind, pool: venue.kind === "pump-curve" ? venue.curve : venue.pool }];
       // W's buy mint, written before the send (delta review 7 of 08290868): the rent back holds while W holds any of it
       await h.bought?.put(w.address, { mint: venue.mint, program: venue.tokenProgram });
+      // a buy of several pieces: its owed record before the take, so a page that closes from here on leaves W found
+      // (resumePieces); none written, nothing taken or sent
+      if (before.length > 0) {
+        if (!h.piecesOwed) return no();
+        await h.piecesOwed.put({ address: w.address, l: r.wallet.l.toString(), j: r.wallet.j, primary: r.noteId, pieces: before.map((b) => b.r.noteId), lastHeight: String(bh.lastHeight), mint: venue.mint, program: venue.tokenProgram });
+      }
       const decimals = (d: number): void => {
         // a record's decimals never stop a buy: a listener that throws, or rejects
         try {
@@ -965,6 +1033,9 @@ export async function sendAndSettle(
       answer = parts.length === 1 ? await h.send(pool, signed) : await h.sendPieces!(pool, parts.map((p) => p.signed));
       break;
     } catch (e) {
+      // the helper refused before it sent (a 4xx but 429): the run ends now, "failed"; its notes stay RESERVED until
+      // both RPCs read the blockhash past (the state reads), so a helper that refused and sent anyway frees nothing
+      if (e instanceof PoolSendRefused) return { error: "failed" };
       // the helper's error says nothing of the chain: a broken-in helper may answer 502 and send it anyway
       if (!(e instanceof PoolSendBusy) || tries >= POOL_SEND_TRIES_MAX) return unlanded([]);
       // busy: the same bytes again after its wait, while the blockhash lives: never once either RPC reads it past, nor
@@ -991,6 +1062,9 @@ export async function sendAndSettle(
   // every part so: the one pair the sent guard reads
   const seenPart = parts.map(() => [false, false]);
   const seen = [false, false];
+  // the re-sends of the buy's own transaction, and when every piece first read landed (card buy-spends-several-pieces)
+  let resends = 0;
+  let piecesAt: number | undefined;
   let ours = false;
   let landed = false;
   // each RPC's slot of the buy's transaction at confirmed, as it said it: the settle waits for its finalized slot. An
@@ -1026,6 +1100,20 @@ export async function sendAndSettle(
     // is not this buy's, so not_landed at once
     if (got.some((g) => g[0] === "failed" && g[1] === "failed")) return (await spent()) || left.length < parts.length ? { stage: "not_landed", txs } : { stage: "refused", txs };
     landed = got.every((g) => g[0] === "ok" && g[1] === "ok");
+    // every tag 2 on both RPCs and the buy on neither (a buy of several pieces whose tag 3 the helper lost): the very
+    // bytes W signed sent again on the one-piece route while the blockhash lives, POOL_BUY_RESEND_MS after the pieces
+    // first read landed and as often after, at most POOL_BUY_RESEND_MAX times. Nothing new is signed: its min out is the
+    // user's own, and the helper carries a nullifier once, so a buy it still carries answers that carry's word
+    const tag3 = got[got.length - 1]!;
+    if (!landed && parts.length > 1 && got.slice(0, -1).every((g) => g[0] === "ok" && g[1] === "ok") && tag3[0] === "none" && tag3[1] === "none") {
+      piecesAt ??= clock();
+      if (resends < POOL_BUY_RESEND_MAX && clock() - piecesAt >= (resends + 1) * POOL_BUY_RESEND_MS && clock() - signedAt < POOL_BLOCKHASH_LIFE_MS) {
+        resends++;
+        void Promise.resolve()
+          .then(() => h.send(pool, signed))
+          .catch(() => {});
+      }
+    }
     // read back on both RPCs as these very transactions: only now is the buy told as sent, by its signature; a buy
     // tells it as a route fact too (card pool-buy-send-fast), which reaches the app however late it comes: an answer
     // past the kit client's 10 s is dropped (a mainnet bundle the helper holds until it lands)

@@ -606,8 +606,10 @@ type Later = { back?: (locks: Locks | null) => Promise<unknown>; rebuild?: true;
 
 /** One W's rent back owed: W, its l and j (W again from the seed), the mints it traded, and its passes so far; `seen`,
  *  what W read as (heldSeen) when its last pass ended on W's own state (under the floor, holding, an account kept), so
- *  a load that reads W the same skips the pass. */
-export type OwedRentBack = { address: string; l: string; j: number; mints: { mint: string; program: string }[]; passes: number; seen?: string; sell?: Readonly<Record<string, SoldBy>> };
+ *  a load that reads W the same skips the pass. `found`: a W the device found holding SOL with no buy of its recorded
+ *  (card buy-spends-several-pieces: the own W of an UNSPENT note, after a restore): swept only once both RPCs read it
+ *  owning no token account at all, so a coin is never swept with it. */
+export type OwedRentBack = { address: string; l: string; j: number; mints: { mint: string; program: string }[]; passes: number; seen?: string; sell?: Readonly<Record<string, SoldBy>>; found?: true };
 /** A full sell of one mint, as W's owed record keeps it (card sol-rent-back-dust-burn): its signed bytes (base64) and its
  *  blockhash's last valid height, so a balance W's account of that mint holds after this very transaction landed
  *  leaving it none is a stranger's, burned by the rent back. */
@@ -1654,7 +1656,7 @@ const wireOf = (message: Uint8Array): Uint8Array => {
   return wire;
 };
 
-type RentBack = { rpcs: Rpcs; program: string; pool: string; scope: bigint; rent: SolanaRent; store: NoteStore; sync: SolanaTreeSync; w: ListedBuyWallet; mints: readonly { mint: string; program: string }[]; wait: (ms: number) => Promise<void>; sell?: Readonly<Record<string, SoldBy>>; buy?: { mint: string; program: string } | null };
+type RentBack = { rpcs: Rpcs; program: string; pool: string; scope: bigint; rent: SolanaRent; store: NoteStore; sync: SolanaTreeSync; w: ListedBuyWallet; mints: readonly { mint: string; program: string }[]; wait: (ms: number) => Promise<void>; sell?: Readonly<Record<string, SoldBy>>; buy?: { mint: string; program: string } | null; bare?: true };
 
 /**
  * W's rent back (card sol-buy-rent-back), after a full sell filled or at a later load while it is owed: what W's
@@ -1774,7 +1776,7 @@ async function rentBack(h: PoolSellHost, x: RentBack, hold?: Hold): Promise<Ende
     // under the 12 words (delta review 8 of 5697d7a1, F1). Only the record names W's own coin: on mainnet the page's
     // holdings are the helper's word (pool-testnet.ts, solanaHelperHoldings), and a sweep is never signed on it. With
     // the record, W's buy mint is among x.mints (rentBackOwed) and a stranger's mint never holds the pass back
-    if (!x.buy) return end("holds", "no buy of W's is recorded");
+    if (!x.buy && x.bare !== true) return end("holds", "no buy of W's is recorded");
     const addresses = solanaTeardownAddresses(w.address, x.mints);
     // W's accounts and W, in one getMultipleAccounts call on each RPC (one slot each): the plan over them, and whether
     // W still holds a mint it traded (review M-B: an owed record from a sell that never filled, or not yet); planned with
@@ -1992,7 +1994,10 @@ async function rentBackOwed(h: PoolSellHost, given: RentBack, o: OwedRentBack, h
   // writes the record before its send without the mark, names W's own coin to the sweep
   const rec = await Promise.resolve(h.bought?.get(given.w.address)).catch(() => undefined);
   const buy = rec && rec.rebuilt !== true ? rec : undefined;
-  const x: RentBack = buy ? { ...given, mints: mintsOf(given.mints, [buy]), buy } : { ...given, buy: null };
+  // a W found holding SOL with no buy recorded (o.found): swept only while both RPCs read it owning no token account,
+  // of either token program; one that owns any holds, as a W with no record always does
+  const bare = !buy && o.found === true && (await ownsNoTokens(given.rpcs, given.w.address).catch(() => false));
+  const x: RentBack = buy ? { ...given, mints: mintsOf(given.mints, [buy]), buy } : { ...given, buy: null, ...(bare ? { bare: true as const } : {}) };
   const seen = await heldSeen(x).catch(() => undefined);
   if (seen !== undefined && seen === o.seen) return;
   const r = await rentBack(h, x, hold);
@@ -2055,11 +2060,28 @@ export async function resumeRentBacks(h: PoolSellHost, locks: Locks | null = glo
     const go = await withHolds(locks, address, true, wait, async (hold) => {
       // the record as it is now: a sell meanwhile may have written W's again or dropped it
       const o = (await h.owed!.list()).find((r) => r.address === address);
-      const w = o && wallets.find((x) => x.chain === "sol" && x.address === o.address && x.l.toString() === o.l && x.j === o.j);
+      // W as the page's spent notes list it, or, for a W whose own note is not spent (a buy of several pieces whose
+      // pieces paid W and whose buy never landed, pool-buy.ts resumePieces; or one a restore found holding SOL), as the
+      // record names it: the pass derives W's key from l and j and signs nothing for another address (rentBack keyOf)
+      const w = o && (wallets.find((x) => x.chain === "sol" && x.address === o.address && x.l.toString() === o.l && x.j === o.j) ?? ownW(o, program));
       if (o && w) await rentBackOwed(h, { rpcs, program, pool, scope, rent, store, sync, w, mints: o.mints, wait, ...(o.sell ? { sell: o.sell } : {}) }, o, hold);
     });
     if (!go) return;
   }
+}
+
+/** Both RPCs read `owner` owning no token account of either token program (four calls, each naming W alone). */
+async function ownsNoTokens(rpcs: Rpcs, owner: string): Promise<boolean> {
+  const reads = await Promise.all(
+    rpcs.flatMap((r) => [SOLANA_TOKEN_PROGRAM, SOLANA_TOKEN_2022_PROGRAM].map((programId) => r("getTokenAccountsByOwner", [owner, { programId }, { encoding: "base64", commitment: "confirmed" }]))),
+  );
+  return reads.every((x) => Array.isArray((x as { value?: unknown } | null)?.value) && ((x as { value: unknown[] }).value.length === 0));
+}
+
+/** An owed record's W with no spent note naming it (resumeRentBacks): its l and j as written, never read (holdings null). */
+function ownW(o: OwedRentBack, program: string): ListedBuyWallet | undefined {
+  if (!/^(0|[1-9][0-9]{0,77})$/.test(o.l) || !Number.isSafeInteger(o.j) || o.j < 0) return undefined;
+  return { pool: program, chain: "sol", note: "", l: BigInt(o.l), j: o.j, path: "", address: o.address, holdings: null };
 }
 
 /** How a pass ended, and whether on W's own state (its `seen` then kept). */

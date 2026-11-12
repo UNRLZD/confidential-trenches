@@ -27,7 +27,8 @@ import { signalsProver } from "../../wallet/test/withdraw-fixture.ts";
 const { SOL_POOLS, SOL_POOL_TABLES, solanaPoolOf, SOL_LADDER, SOL_EPOCH_MS, SOL_LIFE_MS, SOL_SEND_MARGIN_MS } = await import("../../wallet/src/pool/solana.ts");
 const { POOL_TESTNET } = await import("../../wallet/src/pool/network.ts");
 const { poolKinds } = await import("../src/pool-kinds.ts");
-const { PAGE_CLUSTER, TESTNET_RPCS, PAGE_SOL_MARK_BATCHES, testnetPoolDeps, testnetPool: makePool, poolRelayFee, helperPoolSend, helperPoolSendPieces, POOL_SEND_TIMEOUT_MS, PAGE_TABLES, settleFreedOps, oweSend, dropSend, keepRelease, mergeWithdrawOp } = await import("../src/pool-testnet.ts");
+const { PoolSendRefused } = await import("../src/pool-buy.ts");
+const { PAGE_CLUSTER, TESTNET_RPCS, PAGE_SOL_MARK_BATCHES, testnetPoolDeps, testnetPool: makePool, poolRelayFee, helperPoolSend, helperPoolSendPieces, piecesOwedOf, POOL_SEND_TIMEOUT_MS, PAGE_TABLES, settleFreedOps, oweSend, dropSend, keepRelease, mergeWithdrawOp } = await import("../src/pool-testnet.ts");
 // Every page a test makes signs out at the test's end, as main.ts's sign out does (signingOut: its turn timer cleared).
 // A state read arms the page's EVM turn (src/pool-testnet.ts armTurn) on whichever clock is in place; a page left signed
 // in on the real clock can fire its turn inside a later test's test clock, which re-arms it there for good ("the test
@@ -730,8 +731,15 @@ test("helperPoolSend posts {pool, tx} to the helper and takes only a 200 within 
   assert.deepEqual(await helperPoolSend("P", Uint8Array.of(1, 2, 3), ok), { signature: "x" });
   assert.match(seen[0]!.url, /\/v1\/pool\/solana\/send$/);
   assert.deepEqual(seen[0]!.body, { pool: "P", tx: "AQID" });
-  const refused = (async () => new Response("{}", { status: 422 })) as unknown as typeof fetch;
-  await assert.rejects(helperPoolSend("P", Uint8Array.of(1), refused), /HTTP 422/);
+  // a 4xx but 429 is the helper's refusal before it sent anything: PoolSendRefused with its code (card
+  // buy-spends-several-pieces: the run ends at once); a 404 (an older helper with no such route) the same; a 5xx stays
+  // an error that says nothing of the chain
+  const refused = (async () => new Response(JSON.stringify({ error: { code: "simulation_failed" } }), { status: 422 })) as unknown as typeof fetch;
+  await assert.rejects(helperPoolSend("P", Uint8Array.of(1), refused), (e: unknown) => e instanceof PoolSendRefused && e.status === 422 && e.code === "simulation_failed");
+  const gone = (async () => new Response("not found", { status: 404 })) as unknown as typeof fetch;
+  await assert.rejects(helperPoolSend("P", Uint8Array.of(1), gone), (e: unknown) => e instanceof PoolSendRefused && e.status === 404 && e.code === "refused");
+  const down = (async () => new Response("{}", { status: 502 })) as unknown as typeof fetch;
+  await assert.rejects(helperPoolSend("P", Uint8Array.of(1), down), (e: unknown) => !(e instanceof PoolSendRefused) && /HTTP 502/.test(String(e)));
   const big = (async () => new Response(JSON.stringify({ signature: "x".repeat(5000) }), { status: 200 })) as unknown as typeof fetch;
   await assert.rejects(helperPoolSend("P", Uint8Array.of(1), big), /over 4096 B/);
 });
@@ -742,14 +750,36 @@ test("card buy-spends-several-pieces: helperPoolSendPieces posts {pool, txs} in 
   assert.deepEqual(await helperPoolSendPieces("P", [Uint8Array.of(1, 2, 3), Uint8Array.of(4)], ok), { signatures: ["a", "b"] });
   assert.match(seen[0]!.url, /\/v1\/pool\/solana\/pieces$/);
   assert.deepEqual(seen[0]!.body, { pool: "P", txs: ["AQID", "BA=="] });
-  const refused = (async () => new Response("{}", { status: 422 })) as unknown as typeof fetch;
-  await assert.rejects(helperPoolSendPieces("P", [Uint8Array.of(1)], refused), /HTTP 422/);
+  const refused = (async () => new Response(JSON.stringify({ error: { code: "wallets_differ" } }), { status: 422 })) as unknown as typeof fetch;
+  await assert.rejects(helperPoolSendPieces("P", [Uint8Array.of(1)], refused), (e: unknown) => e instanceof PoolSendRefused && e.code === "wallets_differ");
   const big = (async () => new Response(JSON.stringify({ signatures: ["x".repeat(9000)] }), { status: 200 })) as unknown as typeof fetch;
   await assert.rejects(helperPoolSendPieces("P", [Uint8Array.of(1)], big), /over 8192 B/);
   // the buy host offers the pieces send beside takeSet, so a buy may spend several pieces (pool-buy.ts: both or one piece)
   const src = readFileSync(new URL("../src/pool-testnet.ts", import.meta.url), "utf8");
   assert.match(src, /sendPieces: \(pool, txs\) => helperPoolSendPieces\(pool, txs, over\.fetch\)/);
   assert.match(src, /takeSet: async \(items, early, lastHeight\)/);
+  assert.match(src, /piecesOwed: piecesOwedOf\(page\.store\)/, "the buy host writes a buy of several pieces' owed record");
+  // the owed record's end is decided on each state read and from followBuys (the pass a buy that ended "sent" starts)
+  assert.match(src, /await followBuys\(notes\);\s*await resumeOwedPieces\(/);
+  assert.match(src, /now = new Map\(\(await readNotes\(await page\.store\(\)\)\)[^\n]*\n\s*await resumeOwedPieces\(/);
+  // a restore's scan: the batch on the helper's seat on mainnet, never a public provider; the testnet build one W a request
+  assert.match(src, /const batch = POOL_TESTNET \? null : over\.rpcs \? over\.rpcs\[1\] : solanaPacedRpc\(pageHelperRpc\(TRADE_HELPER,/);
+  assert.match(src, /if \(scan\) await findHeldWs\(mine\)\.catch\(\(\) => \{\}\);\s*await resumeRentBacks\(h, locks\);/);
+});
+
+test("card buy-spends-several-pieces: piecesOwedOf keeps one record a W in the store's meta/owed/pieces-sol, put over and dropped by W", async () => {
+  // the real wallet store: the key is one its caller check allows, and a drop of no record writes nothing
+  const { w } = await wallet();
+  const o = piecesOwedOf(async () => w);
+  const rec = { address: "W1", l: "3", j: 0, primary: "n1", pieces: ["n2"], lastHeight: "151", mint: "M", program: "T" };
+  await o.put(rec);
+  await o.put({ ...rec, address: "W2" });
+  await o.put({ ...rec, pieces: ["n2", "n3"] });
+  assert.deepEqual(await o.list(), [{ ...rec, pieces: ["n2", "n3"] }, { ...rec, address: "W2" }]);
+  assert.equal(Object.keys((await w.get("meta", "owed/pieces-sol")) as object).length, 2);
+  await o.drop("W1");
+  await o.drop("nobody");
+  assert.deepEqual((await o.list()).map((r) => r.address), ["W2"]);
 });
 
 // ---- card signpage-pool-sell: pool.sell on the devnet pool ----

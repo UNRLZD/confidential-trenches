@@ -767,6 +767,12 @@ function chain(plant: Plant = {}) {
           }
           return t ? { slot: VF[v].slot, transaction: [base64.encode(t.tx), "base64"], meta: { err: t.err, ...(t.post && !plant.noPostBalances ? { postTokenBalances: p === 1 && plant.postDiffers ? t.post.map((e) => ({ ...(e as object), uiTokenAmount: { amount: "9", decimals: 6 } })) : t.post } : {}) } } : null;
         }
+        case "getTokenAccountsByOwner": {
+          // every token account of the program asked whose owner field (bytes 32..64) is the owner asked
+          const { programId } = params[1] as { programId: string };
+          const value = [...accounts.entries()].filter(([, x]) => x.owner === programId && x.data.length >= 64 && base58.encode(x.data.subarray(32, 64)) === params[0]).map(([pubkey, x]) => ({ pubkey, account: { owner: x.owner, lamports: x.lamports, data: [base64.encode(x.data), "base64"] } }));
+          return { ...ctx, value };
+        }
         default:
           throw new Error(`no fixture for ${method}`);
       }
@@ -2747,6 +2753,39 @@ test("W's own unsold coin and a fully sold airdrop: the rent back holds, W keeps
 // With no buy record (a buy from before it was written, or a restored device), the pass holds (delta review 8 of
 // 5697d7a1, F1): only the record names W's own coin, and the page's holdings are the helper's word on mainnet. W's rent
 // waits on W, under the 12 words
+// Card buy-spends-several-pieces, P0: a buy of several pieces whose pieces paid W and whose buy never landed leaves W
+// holding SOL while its own note is unspent, so no spent note lists W. The page's own record of it (pool-buy.ts
+// resumePieces) and, after a restore, the own W of an unspent note found holding SOL (pool-found.ts) each owe W a rent
+// back; the pass derives W from the record's l and j, and a found W with no buy recorded is swept only while both RPCs
+// read it owning no token account.
+test("a W no spent note lists, owed by the record of a buy whose pieces landed: the rent back derives it from l and j and sweeps it back into the pool", async () => {
+  const w = await world({}, []);
+  w.c.accounts.delete(VF.pump.ata);
+  await w.host.owed!.put({ address: W.address, l: L.toString(), j: J, mints: [{ mint: MINT, program: TOKEN_PROGRAM }], passes: 0 });
+  await resumeRentBacks(w.host, fakeLocks());
+  assert.equal(w.c.deposits.filter((d) => d.sweep).length, 1, JSON.stringify(w.told));
+  assert.ok(w.seeds.length >= 1 && w.seeds.every((s) => s.every((b) => b === 0)), "every seed copy zeroed");
+});
+
+test("a W found holding SOL with no buy recorded (a restore): held while either RPC reads it owning a token account, swept once both read none", async () => {
+  const w = await world({ buy: null }, []);
+  const rec: OwedRentBack = { address: W.address, l: L.toString(), j: J, mints: [], passes: 0, found: true };
+  await w.host.owed!.put(rec);
+  // W owns a token account (its coin, or anyone's): nothing swept
+  await resumeRentBacks(w.host, fakeLocks());
+  assert.equal(w.c.deposits.filter((d) => d.sweep).length, 0);
+  assert.deepEqual(w.told.filter((t) => t.step === "rent_back").map((t) => t.state), ["holds"]);
+  // none left: swept
+  w.c.accounts.delete(VF.pump.ata);
+  await w.host.owed!.put(rec);
+  await resumeRentBacks(w.host, fakeLocks());
+  assert.equal(w.c.deposits.filter((d) => d.sweep).length, 1, JSON.stringify(w.told));
+  // the reads that decided it named W alone, on both RPCs
+  const asked = w.c.calls.filter((c) => c.method === "getTokenAccountsByOwner");
+  assert.ok(asked.length >= 8 && asked.every((c) => c.params[0] === W.address), JSON.stringify(asked.map((c) => c.params[0])));
+  assert.deepEqual([...new Set(asked.map((c) => c.p))].sort(), [0, 1]);
+});
+
 test("no buy record and a token W's record does not name: the rent back holds, W keeps its SOL, that account untouched", async () => {
   const other = VF.pumpswap.mint;
   const at = solanaAta(W.address, other, TOKEN_PROGRAM);
