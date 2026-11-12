@@ -435,3 +435,19 @@ test("main.ts wires the deposit follows to the store's connection: a close ends 
   assert.equal(follows.slice(from).filter((k) => k === "settle:open").length, 1, "settled from open() once");
   again.close();
 });
+
+// card sign-out-stops-the-pages-reads: another tab's sign out reaches main.ts twice, on the shell's channel (storeMoved,
+// the first task) and on the store's own (open's onEvent, a later task). Whichever task hears it first stops every read
+// of the account: one function, called from both, stops the restore before the pool flow (whose stop ends the lanes'
+// waits, which a restore read still running would meet with a page halved and asked again).
+test("card sign-out-stops-the-pages-reads: both ways another tab's sign out reaches main.ts stop the restore, the follows and the pool flow, the restore first", () => {
+  const src = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
+  const moved = /function storeMoved\(e: WalletEvent\): void \{\n([\s\S]*?)\n\}/.exec(src)?.[1] ?? "";
+  assert.match(moved, /^  if \(e\.kind === "signout"\) signedOutElsewhere\(\);$/m, "storeMoved stops every read");
+  const onEvent = /onEvent: \(e\) => \{\n([\s\S]*?)\n    \},\n  \}\)\);/.exec(src)?.[1] ?? "";
+  assert.match(onEvent, /^      signedOutElsewhere\(\);$/m, "the store's signout event stops every read");
+  const body = /function signedOutElsewhere\(\): void \{\n([\s\S]*?)\n\}/.exec(src)?.[1] ?? "";
+  const at = (s: string) => body.indexOf(s);
+  for (const s of ["restore?.signedOut();", "follows?.signedOut();", "poolFollow?.stop();", "withdrawsSignedOut();", "void testnet?.signedOut();"]) assert.ok(at(s) >= 0, `signedOutElsewhere: ${s}`);
+  assert.ok(at("restore?.signedOut();") < at("void testnet?.signedOut();"), "the restore stops before the lanes' waits end");
+});

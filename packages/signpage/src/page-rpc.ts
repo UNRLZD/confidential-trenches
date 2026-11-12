@@ -43,7 +43,10 @@ export function lanedRpc(url: string, o: { kind?: ReadKind; retry?: SolanaRpcRet
   const once = (ms: number, method: string, params: readonly unknown[]): Promise<unknown> =>
     solanaJsonRpc(url, { ...(o.init ? { init: o.init } : {}), ...(o.fetch ? { fetch: o.fetch } : {}), retry: { deadlineMs: ms, backoffMs: ms } })(method, params);
   // every outcome reported to the lane: the gate's pause, and the probe's settle when this read was it
-  const ask = async (end: number, method: string, params: readonly unknown[]): Promise<unknown> => {
+  // `stop`: the lanes' sign-out stop as it stood when the call began (laneSignal), so an ask after a sign out that came
+  // during the call is never sent (card sign-out-stops-the-pages-reads)
+  const ask = async (end: number, stop: AbortSignal, method: string, params: readonly unknown[]): Promise<unknown> => {
+    stop.throwIfAborted();
     const sentIn = lane.gate.epoch();
     try {
       const r = await once(Math.max(1, Math.floor(end - performance.now())), method, params);
@@ -57,41 +60,45 @@ export function lanedRpc(url: string, o: { kind?: ReadKind; retry?: SolanaRpcRet
   };
   // asked again once: after the host's pause (a throttle) or the retry's backoff (any other fault), a background read
   // on the host's budget too, never past the call's bound
-  const again = async (end: number, e: unknown, method: string, params: readonly unknown[]): Promise<unknown> => {
+  const again = async (end: number, stop: AbortSignal, e: unknown, method: string, params: readonly unknown[]): Promise<unknown> => {
     if (!(e instanceof SolanaRpcTransportError)) throw e;
+    // a sign out during the call: no ask again (its answer, whatever it was, is the call's end)
+    if (stop.aborted) throw e;
     if (!throttles(e)) {
       if (performance.now() + retry.backoffMs >= end) throw e;
-      await sleep(retry.backoffMs, laneSignal(o.signal));
+      await sleep(retry.backoffMs, stop);
     }
     // its turn again, whichever kind, held to the read's bound: the turn waits the host's pause (another reader's 429
     // may move it on meanwhile: a paid devnet run of 11 Nov, a deposit's re-ask sent into it drew a 429 and doubled it)
     // and the probe after it; a wait that would pass `end` is refused at once, nothing counted, and the read ends on
     // its 429 (the review of 321509e2: a 3.5 s read slept a pause moved to 9 s, then threw at 9.4 s, its turn counted)
     try {
-      await lane.turn(kind, o.signal, true, { reports: true, by: end });
+      await lane.turn(kind, stop, true, { reports: true, by: end });
     } catch (x) {
       if (x instanceof HostPaused) throw e;
       throw x;
     }
-    return ask(end, method, params);
+    return ask(end, stop, method, params);
   };
   // its bound from its turn on
-  const go = (method: string, params: readonly unknown[]): Promise<unknown> => {
+  const go = (stop: AbortSignal, method: string, params: readonly unknown[]): Promise<unknown> => {
     const end = performance.now() + retry.deadlineMs;
     // a seat's member with a spare after it (seatRpc) is not asked again after any provider fault (a throttle, a 5xx, no
     // connection, a stall to its bound, an answer that is no JSON): the read goes to the spare
-    return ask(end, method, params).catch((e: unknown) => (o.spare === true && e instanceof SolanaRpcTransportError ? Promise.reject(e) : again(end, e, method, params)));
+    return ask(end, stop, method, params).catch((e: unknown) => (o.spare === true && e instanceof SolanaRpcTransportError ? Promise.reject(e) : again(end, stop, e, method, params)));
   };
   // a read whose turn is open now goes out in this tick (a paced queue's slot calls it as its own)
   // (a trade's turn refused past its TRADE_TURN_MAX_MS is the host's throttle, never sent: HostPaused)
   const rpc = (method: string, params: readonly unknown[]): Promise<unknown> => {
+    // the caller's signal and the lanes' sign-out stop of this moment: every wait and ask of this call ends at either
+    const stop = laneSignal(o.signal);
     if (!lane.open(kind))
-      return lane.turn(kind, o.signal, true, { reports: true }).then(
-        () => go(method, params),
+      return lane.turn(kind, stop, true, { reports: true }).then(
+        () => go(stop, method, params),
         (x: unknown) => Promise.reject(x instanceof HostPaused ? new SolanaRpcTransportError("http_429", "the host stayed paused past the read's turn", 0, lane.host) : x),
       );
     lane.took(kind);
-    return go(method, params);
+    return go(stop, method, params);
   };
   return Object.assign(rpc, { url: href });
 }

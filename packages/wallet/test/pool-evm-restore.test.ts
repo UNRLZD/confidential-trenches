@@ -1370,3 +1370,34 @@ test("the EVM walk and the notes after it never hold the event loop, and end at 
   assert.ok(c.reads() - 500 <= WALK_SLICE_MS + 2, `at most a slice after the abort (${c.reads() - 500} steps)`);
   assert.equal(calls.length, reads, "no read after it");
 });
+
+// card sign-out-stops-the-pages-reads: the signing page's restore (wallets: false) stops at its signal's abort, a sign
+// out's. For every call of a whole restore in turn, the abort comes while that call is in flight: once it answers, no
+// call to the pool's RPCs starts, whatever read it was (a block, a view, a log page) and whatever was still to come.
+// Calls counted only.
+test("card sign-out-stops-the-pages-reads: an abort while any one of the restore's pool reads is in flight starts no call after it", { timeout: 60_000 }, async () => {
+  const { world } = seeded();
+  const whole: NonNullable<Over["log"]> = [];
+  await evmRestoreNotes({ seed64: SEED, pin: PIN, rpcs: pair(world, world, { log: whole }, { log: whole }), wallets: false, gap: 4, sleep: async () => {} });
+  assert.ok(whole.length > 10, `a whole restore reads (${whole.length} calls)`);
+  for (let k = 0; k < whole.length; k++) {
+    const ac = new AbortController();
+    let started = 0;
+    let atAbort = -1;
+    const wrap = (r: EvmRpc): EvmRpc =>
+      Object.assign(async (method: string, params: readonly unknown[]) => {
+        started++;
+        // the sign out comes as its own step after this call went out (both seats of one agreed read go out together)
+        if (started === k + 1)
+          queueMicrotask(() => {
+            atAbort = started;
+            ac.abort(new Error("signed out"));
+          });
+        return r(method, params);
+      }, { url: r.url });
+    const [a, b] = pair(world, world);
+    await evmRestoreNotes({ seed64: SEED, pin: PIN, rpcs: [wrap(a), wrap(b)], wallets: false, gap: 4, signal: ac.signal, sleep: async () => {} }).catch(() => {});
+    assert.ok(atAbort > 0, `call ${k + 1} was made`);
+    assert.equal(started - atAbort, 0, `aborted at call ${k + 1}: no call after it`);
+  }
+});

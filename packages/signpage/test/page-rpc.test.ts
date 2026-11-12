@@ -3,11 +3,11 @@
 // that answers failed (run 6: a devnet provider's 429 burst).
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { SOLANA_RPC_RETRY, SolanaRpcTransportError, solanaPacedRpc, solanaSameProvider } from "../../kit/src/trade/solana/send.ts";
-import { pageHelperRpc, pageHelperRpcStopped, pageRpc, seatHosts } from "../src/page-rpc.ts";
+import { SOLANA_RPC_RETRY, SolanaRpcTransportError, solanaPacedRpc, solanaSameProvider, type SolanaFetch } from "../../kit/src/trade/solana/send.ts";
+import { lanedRpc, pageHelperRpc, pageHelperRpcStopped, pageRpc, seatHosts } from "../src/page-rpc.ts";
 import { pageEvmPoolRpcs, pageSolanaLister, pageSolanaRpcs, pageSolanaSettleRpcs, testnetPool, testnetPoolDeps } from "../src/pool-testnet.ts";
 import { SOLANA_PROVIDER_A, SOLANA_PUBLIC_SEAT, TRADE_HELPER, releaseTradeDeps } from "../src/trade.ts";
-import { hostLane, PROBE_HELD_MAX_MS, resetHostLanes, TRADE_TURN_MAX_MS } from "../../wallet/src/throttle.ts";
+import { hostLane, PROBE_HELD_MAX_MS, resetHostLanes, stopHostLaneWaits, TRADE_TURN_MAX_MS } from "../../wallet/src/throttle.ts";
 import { onTestClock } from "../../kit/test/test-clock.ts";
 import { readdirSync, readFileSync } from "node:fs";
 import { HELPER_RPC_METHODS } from "../../kit/src/helper/v1.ts";
@@ -405,6 +405,36 @@ test("pageHelperRpcStopped: a call the stop came before is never sent, whether i
   } finally {
     globalThis.fetch = real;
   }
+});
+
+// card sign-out-stops-the-pages-reads: a page RPC's call in flight at a sign out (this tab's or another's, both
+// stopHostLaneWaits) is never asked again after it. The answer that comes after the sign out, a 503 (the host's pause,
+// then the re-ask) or one that is no JSON (the backoff, then the re-ask), ends the call with no second request; the
+// call's own stop is the lanes' stop as it stood when the call began. Calls counted only, no clock read.
+test("card sign-out-stops-the-pages-reads: a page RPC's call in flight at a sign out is never asked again after it, on a 503 or an answer that is no JSON", { timeout: 20_000 }, async () => {
+  for (const fail of ["503", "not-json"] as const) {
+    resetHostLanes();
+    let sent = 0;
+    let free!: () => void;
+    const gate = new Promise<void>((r) => (free = r));
+    const fetch: SolanaFetch = async (_u, init) => {
+      sent++;
+      if (sent === 1) {
+        await gate;
+        return fail === "503" ? new Response("busy", { status: 503 }) : new Response("<html>", { status: 200 });
+      }
+      const id = (JSON.parse(String(init.body)) as { id: number }).id;
+      return new Response(JSON.stringify({ jsonrpc: "2.0", id, result: 1 }), { status: 200 });
+    };
+    const call = lanedRpc(`https://signout-${fail}.example`, { retry: { deadlineMs: 10_000, backoffMs: 1 }, fetch })("eth_blockNumber", []);
+    while (sent === 0) await new Promise((r) => setTimeout(r, 1));
+    stopHostLaneWaits(new Error("signed out"));
+    const atSignOut = sent;
+    free();
+    await call.catch(() => {});
+    assert.equal(sent - atSignOut, 0, `${fail}: no request after the sign out`);
+  }
+  resetHostLanes();
 });
 
 // card sol-pools-mainnet-pin: no keyless mainnet provider answers the mark list (publicnode 403 "Indexed requests

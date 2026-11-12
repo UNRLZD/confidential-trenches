@@ -779,10 +779,7 @@ const open = async (): Promise<WalletStore> => {
       store = null;
       followsClosed = false;
       openedBy = null;
-      void testnet?.signedOut();
-      restore?.signedOut();
-      follows?.signedOut();
-      poolFollow?.stop();
+      signedOutElsewhere();
       show("signed-out");
     },
   }));
@@ -822,12 +819,21 @@ async function readSeedSettled(): Promise<Seed | undefined> {
 function storeMoved(e: WalletEvent): void {
   if (walletSeedMoved(e)) moved += 1;
   else return;
-  // another tab signed out: the proof queue and its seed copy go now
-  if (e.kind === "signout") {
-    void testnet?.signedOut();
-    withdrawsSignedOut();
-  }
+  // another tab signed out: every read of the account stops now, the proof queue and its seed copy go
+  if (e.kind === "signout") signedOutElsewhere();
   void resync();
+}
+// Another tab's sign out, heard on the shell's channel (storeMoved) or the store's own (open's onEvent), whichever comes
+// first, each a task of its own: every read of the account stops in the one task that hears it (card
+// sign-out-stops-the-pages-reads: the shell's channel, first, stopped the lanes' waits alone, and the restore's reads,
+// a page refused by that stop halved and asked again, went on until the store's channel's task). The restore, the
+// follows and the withdrawals first, then the pool flow, whose stop ends every wait for a turn on a host.
+function signedOutElsewhere(): void {
+  restore?.signedOut();
+  follows?.signedOut();
+  poolFollow?.stop();
+  withdrawsSignedOut();
+  void testnet?.signedOut();
 }
 // the resync in flight, which open kinds wait for (openKind)
 let resyncing: Promise<void> | null = null;

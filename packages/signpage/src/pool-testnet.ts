@@ -716,12 +716,23 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   };
   // the deposit ends' reads after a run (pool-deposit-sent-end): stopped when the page leaves the deposit (sign out)
   let follows = new AbortController();
-  const signedOut = async (): Promise<void> => {
-    stopTurn();
+  // A sign out's stops, this tab's (signingOut, at its tap) and another tab's (signedOut alone, as main.ts hears it) alike
+  // (card sign-out-stops-the-pages-reads: another tab's sign out left the EVM reads bound to evmStop and signOuts running):
+  // the buy records' rebuild, the late buys, the turn pass, every read waiting for its turn on a host (card
+  // signpage-passes-yield-to-a-trade), every Solana settle, and every EVM read on evmStop or the sign-out count
+  function stopReads(): void {
     buyRecords.stop();
-    clears++;
-    // every read waiting for its turn on a host ends (card signpage-passes-yield-to-a-trade)
+    lateBuys.clear();
+    stopTurn();
     stopHostLaneWaits();
+    signOuts++;
+    stopSolana();
+    evmStop.abort();
+    evmStop = new AbortController();
+  }
+  const signedOut = async (): Promise<void> => {
+    stopReads();
+    clears++;
     positions.clear();
     for (const c of evmPositionsCaches.values()) c?.clear();
     evmHolds.clear();
@@ -734,7 +745,6 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     fillStop.abort();
     fillStop = new AbortController();
     fillAgain = false;
-    stopSolana();
     // every queue, Solana's and each EVM pool's: its notes freed, its seed copy zeroed, its note store closed
     const all = [open, ...evmQueues.values()];
     open = null;
@@ -2391,16 +2401,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       return { ready, value, open: ids, landed: await landed() };
     },
     watch: (fn) => void watchers.add(fn),
-    signingOut: () => {
-      buyRecords.stop();
-      lateBuys.clear();
-      stopTurn();
-      stopHostLaneWaits();
-      signOuts++;
-      stopSolana();
-      evmStop.abort();
-      evmStop = new AbortController();
-    },
+    signingOut: stopReads,
     signedOut,
     // the session's sign out: aborted at the next one (this tab's or another's), as every Solana settle's stop
     outSignal: () => solanaStop.signal,
