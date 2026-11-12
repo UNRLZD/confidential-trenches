@@ -229,10 +229,12 @@ try {
         check(share === "≈ $109.49", `${tag}: the share's value "${share}"`);
         const receive = await settle(async () => norm(await page.locator('[data-testid="sell-receive"]').innerText()), "≈ $108.40");
         check(receive === "≈ $108.40", `${tag}: You receive "${receive}"`);
-        check(norm(await page.locator('[data-testid="position-pnl"]').innerText()) === "+$118.99", `${tag}: the PnL hero`);
-        check(norm(await page.locator('[data-testid="pos-holding"]').innerText()) === "Holding $218.99 1.23M TORCH", `${tag}: the Holding row`);
+        // card portfolio-counts-money-an-open-buy-holds: the drawn figures are to the nearest cent ($218.995 reads
+        // $219.00), the share and Initials stay on the floored value ($109.49)
+        check(norm(await page.locator('[data-testid="position-pnl"]').innerText()) === "+$119.00", `${tag}: the PnL hero`);
+        check(norm(await page.locator('[data-testid="pos-holding"]').innerText()) === "Holding $219.00 1.23M TORCH", `${tag}: the Holding row`);
         check(norm(await page.locator('[data-testid="pos-bought"]').innerText()) === "Bought $100.00", `${tag}: the Bought row`);
-        check(norm(await page.locator('[data-testid="pos-total"]').innerText()) === "Total PnL +$118.99 +118.9%", `${tag}: the Total PnL row`);
+        check(norm(await page.locator('[data-testid="pos-total"]').innerText()) === "Total PnL +$119.00 +119.0%", `${tag}: the Total PnL row`);
         check(norm(await page.locator('[data-testid="pos-held"]').innerText()) === "Held for 6d 6h", `${tag}: Held for`);
       }
       const m = await measure(page, w);

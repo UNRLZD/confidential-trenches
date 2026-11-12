@@ -73,7 +73,7 @@ const STATES = [
   ["pooltrades-mixed", "S10.10", ["1440"], false],
   ["pooltrades-unknown", "S10.9", ["390", "1440"], false],
   // card portfolio-counts-money-an-open-buy-holds: the open buy's wallet counted, the axis's ticks distinct
-  ["openbuy", "S10.9", ["390", "1440"], false],
+  ["openbuy", "S10.3", ["390", "1440"], false],
   ["axis", "S10.3", ["1440"], false],
 ];
 // one balance (card portfolio-one-balance): each fixture's Cash tile in cents and its parts as drawn on hover (desktop) or
@@ -226,7 +226,8 @@ try {
         if (rows) check(JSON.stringify(r.rows) === JSON.stringify(rows), `${tag}: pool rows ${JSON.stringify(r?.rows)}`);
         check(r?.inside && r.clipped.length === 0, `${tag}: pool block outside its panel or clipped ${JSON.stringify(r)}`);
       }
-      if (want === "S10.3" && !phone) {
+      // the S10 row bars need a full list: the open buy's fixture holds one row
+      if (want === "S10.3" && !phone && f !== "openbuy") {
         // the brief's S10 bar at 1440: rows 72 layout px (54 CSS px), at least 9 visible, at least 9 fields a row
         const r = await page.evaluate(() => {
           const box = document.querySelector(".ptw").getBoundingClientRect();
@@ -236,7 +237,7 @@ try {
         check(Math.abs(r.h - 54) < 1 && r.visible >= 9 && r.fields >= 9, `${tag}: S10 bar rows ${r.h}px, ${r.visible} visible, ${r.fields} fields`);
         console.log(`@1440 positions: row ${r.h.toFixed(1)} css px, ${r.visible} visible, ${r.fields} fields`);
       }
-      if (want === "S10.3" && phone) {
+      if (want === "S10.3" && phone && f !== "openbuy") {
         await toSegments(page);
         const r = await page.evaluate(() => {
           const tb = document.querySelector(".tabbar").getBoundingClientRect().top;
