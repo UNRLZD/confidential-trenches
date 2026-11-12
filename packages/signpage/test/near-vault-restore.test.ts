@@ -73,7 +73,7 @@ class Vault {
 type Lie = (method: string, view: unknown) => unknown;
 const config = () => ({ version: "blindfill-vault 0.1.0", asset: NET.usdc, scope: String(SCOPE), max_tree_depth: 32, min_deposit: "1000000", max_relay_fee_bps: 5000, page_max: VAULT_CONSTANTS.PAGE_MAX });
 /** The page's release pair (one FastNEAR URL and dRPC, by URL), answering the vault's views at one block. */
-function pair(v: Vault, lieB?: Lie): [VaultSyncRpc, VaultSyncRpc] {
+function pair(v: Vault, lieB?: Lie, lieA?: Lie, names: readonly [string, string] = [NET.fastnear[0], NET.drpc]): [VaultSyncRpc, VaultSyncRpc] {
   const one = (name: string, lie?: Lie): VaultSyncRpc => ({
     name,
     async query(p) {
@@ -93,7 +93,7 @@ function pair(v: Vault, lieB?: Lie): [VaultSyncRpc, VaultSyncRpc] {
       return { jsonrpc: "2.0", id: "x", result: { block_hash: `hash-${at}`, block_height: at, logs: [], result: [...new TextEncoder().encode(JSON.stringify(view))] } };
     },
   });
-  return [one(NET.fastnear[0]), one(NET.drpc, lieB)];
+  return [one(names[0], lieA), one(names[1], lieB)];
 }
 
 /** A device's life in the vault: two deposits in lanes 0 and 1, the first spent with its change, a deposit of these
@@ -210,4 +210,31 @@ test("a note the store holds in flight is never written over; the others come ba
   // (step 7's raise: its lane's highest restored index plus two of the lane, or past the lane's first in an empty lane)
   const lane = st.lane;
   assert.deepEqual(next.ref.kind === "deposit" ? next.ref.i : null, lane <= 1 ? lane + 16 : lane + 8, `lane ${lane}`);
+});
+
+test("both providers agreeing on what is not the vault's: a state tree longer than its leaves, a config of another asset or scope, or a pair that is not the release's: none of the vault's notes is written", async () => {
+  const both = (lie: Lie): [Lie, Lie] => [lie, lie];
+  for (const [name, rpcs] of [
+    ["the state tree longer than the leaves", (v: Vault) => pair(v, ...both((m, view) => (m === "state_tree" ? { ...(view as object), size: v.leaves.length + 1 } : view)))],
+    ["the config's asset another token", (v: Vault) => pair(v, ...both((m, view) => (m === "config" ? { ...(view as object), asset: "other.near" } : view)))],
+    ["the config's scope another", (v: Vault) => pair(v, ...both((m, view) => (m === "config" ? { ...(view as object), scope: String(OTHER_SCOPE) } : view)))],
+    ["two hosts of one operator", (v: Vault) => pair(v, undefined, undefined, [NET.fastnear[0], NET.fastnear[1]])],
+  ] as const) {
+    const { v } = lived();
+    const st = await device();
+    const ends: { stage: string; why: readonly string[] }[] = [];
+    await restoreKind.poolRestore(hostOf(st, () => rpcs(v), ends)).auto();
+    assert.deepEqual(await notesIn(st), [], name);
+    assert.equal(ends.at(-1)?.stage, "stalled", name);
+  }
+});
+
+test("the vault's walk owes no deposit id read: no step 5 marker is written for its scope", async () => {
+  const { v } = lived();
+  const st = await device();
+  const r = restoreKind.poolRestore({ ...hostOf(st, () => pair(v), []), ids: { rpcs: () => pair(v) as never } });
+  await r.auto();
+  await r.idle();
+  assert.equal((await notesIn(st)).length, 3);
+  assert.equal(await st.get("meta", restoreKind.RESTORE_IDS_KEY), undefined);
 });
