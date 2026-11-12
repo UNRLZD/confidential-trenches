@@ -89,6 +89,7 @@ import { EVM_POOL_HISTORY } from "../../kit/src/trade/evm/buy-unpinned.ts";
 import { solanaBuysAt, solanaHelperBuys } from "../../wallet/src/pool/buy-wallets.ts";
 import { BUY_NONE_KEY, solBuyRecords } from "./sol-buy-records.ts";
 import { fillTradeOps, type FillStore } from "./trade-fill.ts";
+import { POOL_USD_FEEDS } from "../../kit/src/price/pool-usd.ts";
 
 // The freezes are marked pure, so SIGN_HOST's build, which never reads these, drops them whole (scripts/build-network.test.mjs).
 /** Each chain's two testnet RPCs, as the app names the chain. Solana's are mainnet's shape (main.ts: a public provider
@@ -1691,7 +1692,12 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     const read = (sig: string): Promise<readonly [unknown, unknown]> => Promise.all([tx(r[0], sig), tx(r[1], sig)]);
     filling = (async () => {
       const store = (await page.store()) as unknown as FillStore;
-      if (await fillTradeOps({ store, read, price: () => page.price?.("solana") ?? null, now: Date.now })) for (const f of watchers) f();
+      // an old sale's USD at its own block: the page's SOL/USD feed account's writes before it (trade-fill.ts blockPrice)
+      const feedBefore = async (sig: string): Promise<readonly string[]> => {
+        const l = await r[0]("getSignaturesForAddress", [POOL_USD_FEEDS.solana.account, { before: sig, limit: 100, commitment: "finalized" }]);
+        return Array.isArray(l) ? l.flatMap((e) => (e !== null && typeof e === "object" && (e as { err?: unknown }).err === null && typeof (e as { signature?: unknown }).signature === "string" ? [(e as { signature: string }).signature] : [])) : [];
+      };
+      if (await fillTradeOps({ store, read, feedBefore, price: () => page.price?.("solana") ?? null, now: Date.now })) for (const f of watchers) f();
     })()
       .catch(() => {})
       .finally(() => {

@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { base58 } from "@scure/base";
-import { fillTradeOps, solanaTradeLeg, type FillStore } from "../src/trade-fill.ts";
+import { feedWritePrice, fillTradeOps, solanaTradeLeg, type FillStore } from "../src/trade-fill.ts";
 
 const MINT = "78GaXFTJzkCWpdxkNHMSP3TXEKbhQTpb3EqMt7Uupump";
 const fx = (f: string): Record<string, unknown> => JSON.parse(readFileSync(new URL(`./fixtures/trade-fill/${f}.json`, import.meta.url), "utf8"));
@@ -112,4 +112,68 @@ test("two RPCs that differ, or a read that fails, write nothing for that op", as
   assert.equal(s.ops.get("b2")!.pool_amount, undefined);
   assert.equal(s.ops.get("b1")!.pool_amount, "0.001205887");
   assert.equal(s.ops.get("s2")!.pool_amount, "0.001174666");
+});
+
+// ------------------------------------------------------------------------------------------------ an old sale's USD
+// The CO's 07:07Z piece: an old sale's dollar value from the SOL price at its own block, read from the page's own SOL/USD
+// feed (the kit's POOL_USD_FEEDS.solana, Pyth's sponsored account): the newest write of it before the sale, its signed
+// price message (fixtures feed-*.json: getTransaction "json" at finalized, 12 Nov; feed-before-*.json: the account's
+// getSignaturesForAddress before each sale, finalized, limit 20 and 60).
+const FEED_BEFORE: Record<string, { signature: string; err: unknown }[]> = { [SIG.sell1]: fx("feed-before-32CSJ1") as never, [SIG.sell2]: fx("feed-before-3aUiLL") as never };
+const WRITES: Record<string, Record<string, unknown>> = { "5yEBxDX1FsLJBBRoj47D95QCH6xDQxNW45P1Wyqo8g9QAEmPT6WiXZiCuCM9zyv7ay9YHjN5pyQgRaghxKvzJxcD": fx("feed-5yEBxD"), "4JFB6zkT6UBujxAi7ToPNbSw32RiSLe2tFeL3UN5Z4GCmbtWAjAMBB3QoVroRAp8BzMuJmnhifWNVAMTXewfeizx": fx("feed-4JFB6z") };
+const ALL: Record<string, Record<string, unknown>> = { ...TX, ...WRITES };
+const feedBefore = async (sig: string) => (FEED_BEFORE[sig] ?? []).filter((s) => s.err === null).map((s) => s.signature);
+/** A read of `sig` as both RPCs answer it: a feed reader's transaction (not recorded) answers null, as a version-1 one does. */
+const both = async (sig: string) => [ALL[sig] ?? null, ALL[sig] ?? null] as const;
+
+test("a feed write's signed SOL/USD: price, confidence, exponent and publish time from its message; any other transaction none", () => {
+  assert.deepEqual(feedWritePrice(WRITES["5yEBxDX1FsLJBBRoj47D95QCH6xDQxNW45P1Wyqo8g9QAEmPT6WiXZiCuCM9zyv7ay9YHjN5pyQgRaghxKvzJxcD"]), { price: 8298770947n, conf: 2770833n, expo: -8, publishedS: 1794461905, blockS: 1794461908 });
+  assert.equal(feedWritePrice(TX[SIG.sell1]), null, "a trade is no feed write");
+  const failed = structuredClone(WRITES["5yEBxDX1FsLJBBRoj47D95QCH6xDQxNW45P1Wyqo8g9QAEmPT6WiXZiCuCM9zyv7ay9YHjN5pyQgRaghxKvzJxcD"]) as { meta: { err: unknown } };
+  failed.meta.err = { InstructionError: [0, "Custom"] };
+  assert.equal(feedWritePrice(failed), null, "a write that failed proves nothing");
+});
+
+test("release 118's sales get their USD at the SOL price of their own block, marked as read later; the live path is marked live", async () => {
+  const s = store118();
+  await fillTradeOps({ store: s, read: both, feedBefore, price: () => null, now: () => 10 * 86_400_000 });
+  // 574,635 lamports at $82.98770947 (published 7 s before the sale's block); 1,174,666 at the write 13 s before its block
+  assert.equal(s.ops.get("s1")!.amount_usd, "0.04768764243129345");
+  assert.equal(s.ops.get("s1")!.usd_from, "block");
+  assert.match(String(s.ops.get("s2")!.amount_usd), /^0\.09\d+$/);
+  assert.equal(s.ops.get("s2")!.usd_from, "block");
+  assert.equal(s.ops.get("b1")!.usd_from, undefined, "a buy keeps the USD it was written with");
+  const t = store118();
+  await fillTradeOps({ store: t, read: both, feedBefore, price: () => ({ ...PRICE, read_ms: 4 }), now: () => 60_000 });
+  assert.equal(t.ops.get("s1")!.usd_from, "live");
+});
+
+test("never a guess: no write within a minute of the sale's block, no write in the list, or two RPCs that differ on it: no USD", async () => {
+  const late = store118();
+  // the sale read as 2 minutes after its block: the write before it is too old to be that minute's price
+  const shifted = (sig: string) => {
+    const t = structuredClone(ALL[sig] ?? null) as { blockTime?: number } | null;
+    if (t && (sig === SIG.sell1 || sig === SIG.sell2)) t.blockTime! += 120;
+    return [t, t] as const;
+  };
+  await fillTradeOps({ store: late, read: async (sig) => shifted(sig), feedBefore, price: () => null, now: () => 1e12 });
+  assert.equal(late.ops.get("s1")!.amount_usd, undefined);
+  assert.equal(late.ops.get("s1")!.pool_amount, "0.000574635", "the SOL still written");
+  const none = store118();
+  await fillTradeOps({ store: none, read: both, feedBefore: async () => [], price: () => null, now: () => 1e12 });
+  assert.equal(none.ops.get("s1")!.amount_usd, undefined);
+  const split = store118();
+  await fillTradeOps({
+    store: split,
+    read: async (sig) => {
+      if (!(sig in WRITES)) return both(sig);
+      const o = structuredClone(WRITES[sig]) as { blockTime: number };
+      o.blockTime += 1;
+      return [WRITES[sig], o] as const;
+    },
+    feedBefore,
+    price: () => null,
+    now: () => 1e12,
+  });
+  assert.equal(split.ops.get("s1")!.amount_usd, undefined);
 });
