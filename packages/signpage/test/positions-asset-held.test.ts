@@ -116,13 +116,13 @@ test("review P2-2: a sign out mid-read ends the held read: the call in flight is
   }) as typeof fetch;
   try {
     const out = new AbortController();
-    const p = solanaAssetHeld(pageAssetHeldRpc(out.signal, false), [{ address: W1, mint: MINT }], out.signal);
+    const p = solanaAssetHeld(pageAssetHeldRpc(out.signal), [{ address: W1, mint: MINT }], out.signal);
     for (let i = 0; i < 100 && sent.length === 0; i++) await new Promise((r) => setTimeout(r, 5));
     assert.equal(sent.length, 1, "the read went out");
     out.abort();
     await assert.rejects(p, "the sign out ends the read");
     assert.ok(release !== null);
-    await assert.rejects(solanaAssetHeld(pageAssetHeldRpc(out.signal, false), [{ address: W2, mint: MINT }], out.signal));
+    await assert.rejects(solanaAssetHeld(pageAssetHeldRpc(out.signal), [{ address: W2, mint: MINT }], out.signal));
     await new Promise((r) => setTimeout(r, 50));
     assert.equal(sent.length, 1, "nothing of the signed-out account's is sent after the stop");
   } finally {

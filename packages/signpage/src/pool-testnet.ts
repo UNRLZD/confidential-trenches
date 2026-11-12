@@ -149,9 +149,9 @@ export const pageEvmHistory = (pin: EvmPoolPin): readonly EvmRpc[] => {
 /** The read of each W's asset_held (card portfolio-counts-money-an-open-buy-holds) on the finder's own route, never a
  *  public provider: on mainnet the helper's keyed route with the pass's stop in its every fetch, so nothing of a
  *  signed-out account's is sent after the sign out, queued or tried again (as the pass's decimals read); in the testnet
- *  build the devnet RPC the finder reads. */
-export const pageAssetHeldRpc = (signal: AbortSignal, testnet: boolean = POOL_TESTNET): SolanaRpc =>
-  solanaPacedRpc(testnet ? testnetRpc(TESTNET_RPCS.solana[0], SOLANA_RPC_RETRY, "pass") : pageHelperRpcStopped(TRADE_HELPER, signal, "pass"));
+ *  build the devnet RPC the finder reads (POOL_TESTNET folded at build time, so SIGN_HOST's bundle names no devnet RPC). */
+export const pageAssetHeldRpc = (signal: AbortSignal): SolanaRpc =>
+  solanaPacedRpc(POOL_TESTNET ? testnetRpc(TESTNET_RPCS.solana[0], SOLANA_RPC_RETRY, "pass") : pageHelperRpcStopped(TRADE_HELPER, signal, "pass"));
 
 export const pageEvmWalletRpc = (chain: "base" | "robinhood", testnet: boolean = POOL_TESTNET): EvmRpc | undefined => {
   if (testnet) return undefined;
