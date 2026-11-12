@@ -155,9 +155,73 @@ const KEY_SHAPE = /^[\x21-\x7e]{8,4096}$/; // printable ASCII, no space or line 
  *  the call's Server-Timing entries for the helper's own reads that name them (the token page's Jupiter search): its
  *  wait for the budget's room (budget), for the vendor's hold or turn (turn), each 429 the vendor answered (429), and
  *  the send (send). */
-export type ProxyAnswer = { status: number; headers: Record<string, string>; body: string; why?: string; timing?: string[] };
+export type ProxyAnswer = { status: number; headers: Record<string, string>; body: string; why?: string; timing?: string[]; said?: Said };
 type Fetch = (url: string, init: RequestInit) => Promise<Response>;
-type Read = { status: number; body: string; fetchedAt: string; timing?: string[] };
+type Read = { status: number; body: string; fetchedAt: string; timing?: string[]; said?: Said };
+/** What the vendor itself answered a call the proxy refused or passed on as not 2xx, for its log line (card
+ *  helper-says-why-a-vendor-refused), never sent: its status, and its message as read (VENDOR_MESSAGE_MAX at most, made
+ *  safe by safeMessage), null when the vendor's body held none; `message` left out when no body was read. */
+type Said = { status?: number; message?: string | null };
+/** The most of a vendor's message one log line keeps. */
+export const VENDOR_MESSAGE_MAX = 200;
+/** The window over which identical lines are folded into one with a count (card helper-says-why-a-vendor-refused): the
+ *  helper's log keeps 2 MB in all (deploy/compose.yaml: json-file max-size 1m, max-file 2), so a crowd's identical
+ *  refusals, one a request, would push the lines that name a cause out of it. [design: the refusal log's 10 s,
+ *  limits.ts LIMIT_WINDOW_MS] */
+export const SAID_FOLD_MS = 10_000;
+/** The most distinct lines one fold window holds; past it, lines are counted, not kept. */
+export const SAID_FOLD_KEYS = 256;
+/** The vendor's message from its JSON body: `message` (a string, or strings joined), else `error` as a string or its
+ *  `message`; null when it holds none. Hostile input: only strings are read. */
+export function messageOf(text: string): string | null {
+  let b: unknown;
+  try {
+    b = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  if (typeof b !== "object" || b === null) return null;
+  const o = b as Record<string, unknown>;
+  const m = o.message;
+  if (typeof m === "string") return m;
+  if (Array.isArray(m) && m.length > 0 && m.every((x) => typeof x === "string")) return m.slice(0, 8).join("; ");
+  const e = o.error;
+  if (typeof e === "string") return e;
+  const em = typeof e === "object" && e !== null ? (e as Record<string, unknown>).message : undefined;
+  if (typeof em === "string") return em;
+  return null;
+}
+/** Every value of the caller's request (its JSON body's leaves and its query's values) of 3 characters or more, longest
+ *  first: no log line may carry one, as a vendor's message can echo what it was sent. */
+export function requestValues(body: string, rawQuery: string): string[] {
+  const out = new Set<string>();
+  const walk = (v: unknown, depth: number): void => {
+    if (depth > 32) return;
+    if (typeof v === "string" || typeof v === "number" || typeof v === "bigint") out.add(String(v));
+    else if (Array.isArray(v)) for (const x of v) walk(x, depth + 1);
+    else if (typeof v === "object" && v !== null) for (const x of Object.values(v)) walk(x, depth + 1);
+  };
+  if (body !== "") {
+    try {
+      walk(JSON.parse(body), 0);
+    } catch {
+      // a body that is not JSON is never echoed into a line: the vendor's message is kept only through the shapes below
+    }
+  }
+  for (const v of new URLSearchParams(rawQuery).values()) out.add(v);
+  return [...out].filter((v) => v.length >= 3).sort((a, b) => b.length - a.length);
+}
+/** Address shapes a message may carry whatever the request held: an EVM address or hash, a hex id (a NEAR implicit
+ *  account), a base58 key or address (Solana), a NEAR named account, and a shortened one ("9ddc51…"). */
+const ADDRESS_SHAPES: readonly RegExp[] = [/0x[0-9a-fA-F]{6,}/g, /\b[0-9a-fA-F]{32,}\b/g, /\b[1-9A-HJ-NP-Za-km-z]{32,88}\b/g, /\b[a-z0-9_-]+(\.[a-z0-9_-]+)*\.(near|tg|testnet)\b/g, /[0-9A-Za-z]{3,}…/g];
+/** A vendor's message made safe for one log line: every request value and address shape replaced, every control and
+ *  line-separator character a space, cut to VENDOR_MESSAGE_MAX characters. */
+export function safeMessage(m: string, values: readonly string[]): string {
+  let s = m.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, " ");
+  for (const v of values) s = s.split(v).join("<request field>");
+  for (const r of ADDRESS_SHAPES) s = s.replace(r, "<address>");
+  return [...s].slice(0, VENDOR_MESSAGE_MAX).join("");
+}
 /** `peers` (card helper-deploy-reads-fast): the other helpers on the same keys (shared-calls.ts callsFiles), whose calls
  *  every draw that may reach a vendor counts first, and to which each such draw is told at once. */
 export type Peers = { read(): unknown; write(calls: Record<string, number[]>): void };
@@ -165,7 +229,7 @@ export type Peers = { read(): unknown; write(calls: Record<string, number[]>): v
  *  (a turn's wait, a send's duration: the turn log line and Server-Timing), performance.now by default. A test injects both
  *  so an elapsed time is a value it sets, never the machine's speed (card helper-jup-log-clock: "answered 200 in 1 ms" on a
  *  busy CI runner where 0 was expected). */
-type Deps = { fetch?: Fetch; now?: () => number; mono?: () => number; sleep?: (ms: number) => Promise<void>; peers?: Peers; log?: (line: string) => void; burstMs?: number };
+type Deps = { fetch?: Fetch; now?: () => number; mono?: () => number; sleep?: (ms: number) => Promise<void>; peers?: Peers; log?: (line: string) => void; burstMs?: number; foldWait?: (ms: number) => Promise<void> };
 
 const error = (status: number, code: string): ProxyAnswer => ({ status, headers: {}, body: JSON.stringify({ error: { code } }) });
 /**
@@ -586,7 +650,7 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
           // one a turn (BURST_MS / burst), so the hold's end is no burst (fold 6)
           if (PACED.has(name)) recoverUntil.set(name, budget.heldUntil(name) + burstMs);
           if (refusals < SENDS_429) continue;
-          return notReady("429", `${name} provider 429`, heldS(), waits());
+          return { ...notReady("429", `${name} provider 429`, heldS(), waits()), said: { status: 429 } };
         }
         if (r.status >= 500 && r.status < 600) {
           await r.body?.cancel();
@@ -594,7 +658,7 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
             await sleep(RETRY_FAILED_MS);
             continue;
           }
-          return UPSTREAM("5xx", `${name} 5xx`, waits());
+          return { ...UPSTREAM("5xx", `${name} 5xx`, waits()), said: { status: r.status } };
         }
         text = await readBody(r);
       } catch (e) {
@@ -607,18 +671,20 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
         return UPSTREAM(timeout ? "timeout" : "send", `${name} ${timeout ? "timeout" : "send"}`, waits());
       }
       const fetchedAt = new Date(now()).toISOString();
+      // card helper-says-why-a-vendor-refused: what the vendor answered, for the log line of an answer that is not 2xx
+      const said: Said = { status: r.status, ...(text === undefined ? {} : { message: messageOf(text) }) };
       // our key refused (401, 403), or an answer we cannot pass as JSON data
-      if (r.status === 401 || r.status === 403) return UPSTREAM("key", `${name} key`, waits());
-      if (r.status < 200 || (r.status >= 300 && r.status < 400)) return UPSTREAM("answer", `${name} answer`, waits());
-      if (text === undefined || !/^application\/([a-z0-9.+-]+\+)?json\s*(;|$)/i.test(r.headers.get("content-type") ?? "")) return UPSTREAM("answer", `${name} answer`, waits());
+      if (r.status === 401 || r.status === 403) return { ...UPSTREAM("key", `${name} key`, waits()), said };
+      if (r.status < 200 || (r.status >= 300 && r.status < 400)) return { ...UPSTREAM("answer", `${name} answer`, waits()), said };
+      if (text === undefined || !/^application\/([a-z0-9.+-]+\+)?json\s*(;|$)/i.test(r.headers.get("content-type") ?? "")) return { ...UPSTREAM("answer", `${name} answer`, waits()), said: { status: r.status } };
       try {
         JSON.parse(text);
       } catch {
-        return UPSTREAM("answer", `${name} answer`, waits());
+        return { ...UPSTREAM("answer", `${name} answer`, waits()), said: { status: r.status } };
       }
-      if (holdsKey(text)) return UPSTREAM("answer", `${name} answer`, waits());
+      if (holdsKey(text)) return { ...UPSTREAM("answer", `${name} answer`, waits()), said: { status: r.status } };
       const timing = [...waits(), `send;dur=${Math.round(mono() - sentAt)}`];
-      return { status: r.status, body: text, fetchedAt, timing };
+      return { status: r.status, body: text, fetchedAt, timing, ...(r.status >= 200 && r.status < 300 ? {} : { said }) };
     }
   }
 
@@ -630,7 +696,7 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
    * caller's, which goes ahead of the helper's background reads for a PACED vendor's turn: every call with a client, and
    * an own read a caller waits for (the token page's cold search).
    */
-  async function handle(vendor: string, path: string, rawQuery: string, body: string, client?: string, reserved = false, waitMs?: number, caller = client !== undefined): Promise<ProxyAnswer> {
+  async function answer(vendor: string, path: string, rawQuery: string, body: string, client?: string, reserved = false, waitMs?: number, caller = client !== undefined): Promise<ProxyAnswer> {
     // card helper-page-jup-429: an own read nobody waits for (the lists, a held page's refresh) waits up to a window
     // (BURST_MS) for its turn, so a burst that filled the window delays it, never drops it
     const wait = waitMs ?? (reserved && !caller ? BURST_MS : QUEUE_WAIT_MS);
@@ -727,7 +793,68 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
       out = await call(name, v, up, path, qs, up.method === "POST" ? body : "", reserved, by, caller, client);
     }
     if (!("fetchedAt" in out)) return source(out.timing ? { ...out, timing: [`budget;dur=${Math.round(budgetMs)}`, ...out.timing] } : out);
-    return source({ status: out.status, headers: { [HELPER_FETCHED_AT_HEADER]: out.fetchedAt }, body: out.body, ...(out.timing ? { timing: [`budget;dur=${Math.round(budgetMs)}`, ...out.timing] } : {}) });
+    return source({ status: out.status, headers: { [HELPER_FETCHED_AT_HEADER]: out.fetchedAt }, body: out.body, ...(out.timing ? { timing: [`budget;dur=${Math.round(budgetMs)}`, ...out.timing] } : {}), ...(out.said ? { said: out.said } : {}) });
+  }
+
+  /** Identical lines in the fold window (SAID_FOLD_MS): the first is written at once, the rest counted and written as one
+   *  line when the window ends. */
+  const folded = new Map<string, number>();
+  let foldedOver = 0;
+  let folding = false;
+  function sayOnce(line: string): void {
+    const n = folded.get(line);
+    if (n !== undefined) folded.set(line, n + 1);
+    else if (folded.size >= SAID_FOLD_KEYS) foldedOver++;
+    else {
+      folded.set(line, 0);
+      log(line);
+    }
+    if (folding) return;
+    folding = true;
+    // its own timer, never the proxy's `sleep` (a test's virtual clock would move for it), and one that never holds the
+    // process open (a test's end, the helper's stop)
+    const windowEnd = deps.foldWait ? deps.foldWait(SAID_FOLD_MS) : new Promise<void>((ok) => setTimeout(ok, SAID_FOLD_MS).unref());
+    void windowEnd.then(() => {
+      for (const [l, more] of folded) if (more > 0) log(`${l} (and ${more} more in ${SAID_FOLD_MS / 1000} s)`);
+      if (foldedOver > 0) log(`proxy: ${foldedOver} more answers not 2xx in ${SAID_FOLD_MS / 1000} s, past ${SAID_FOLD_KEYS} distinct lines`);
+      folded.clear();
+      foldedOver = 0;
+      folding = false;
+    });
+  }
+  /** Causes of a 503 that are the vendor's own (Cause): its 429, its failure, its silence, never reached, its refusal of
+   *  our key, an answer we could not pass. "held" and "budget" are ours. */
+  const VENDOR_CAUSES: ReadonlySet<string> = new Set(["429", "5xx", "timeout", "send", "key", "answer"]);
+  /**
+   * One proxied call (answer), and card helper-says-why-a-vendor-refused: an answer that is not 2xx is logged in one line,
+   * "proxy <vendor> <path> answered <status>, <ours|the vendor's>: <what>", folded with the same line in SAID_FOLD_MS.
+   * The vendor's: its status (and the 503's cause), and its message made safe (safeMessage); ours: the refusal's name.
+   * A vendor or path not on the list is never written as the caller wrote it; no query, body field, key or client.
+   */
+  async function handle(vendor: string, path: string, rawQuery: string, body: string, client?: string, reserved = false, waitMs?: number, caller = client !== undefined): Promise<ProxyAnswer> {
+    const a = await answer(vendor, path, rawQuery, body, client, reserved, waitMs, caller);
+    const { said, ...out } = a;
+    if (a.status >= 200 && a.status < 300) return out;
+    const known = Object.hasOwn(VENDORS, vendor);
+    const where = !known ? "(a vendor not on the list)" : Object.hasOwn(VENDORS[vendor as VendorName].paths, path) ? `${vendor} ${path}` : `${vendor} (a path not on the list)`;
+    const cause = /cause;desc="([a-z0-9]+)"/.exec((a.timing ?? []).join(","))?.[1];
+    const theirs = said !== undefined || (cause !== undefined && VENDOR_CAUSES.has(cause));
+    let what: string;
+    if (theirs) {
+      const status = said?.status;
+      what = status === undefined ? (cause ?? "unnamed") : cause === undefined || cause === "429" ? String(status) : `${status} (${cause})`;
+      if (said && "message" in said) what += said.message === null || said.message === undefined ? " (no message)" : ` ${JSON.stringify(holdsKey(said.message) ? "(withheld: it held a key)" : safeMessage(said.message, requestValues(body, rawQuery)))}`;
+    } else {
+      let code: unknown;
+      try {
+        code = (JSON.parse(a.body) as { error?: { code?: unknown } })?.error?.code;
+      } catch {
+        // our own bodies are JSON
+      }
+      what = a.why ?? (typeof code === "string" ? code : "unnamed");
+    }
+    sayOnce(`proxy ${where} answered ${a.status}, ${theirs ? "the vendor's" : "ours"}: ${what}`);
+    return out;
   }
 
   return {

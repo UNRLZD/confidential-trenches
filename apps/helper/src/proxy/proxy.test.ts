@@ -785,9 +785,14 @@ test("card helper-page-jup-429 (d): the live run's crowd (six legs, two builds, 
   assert.equal((await page).status, 200);
   assert.ok(j.sent.filter((s) => s.at > sentAt - 10_000 && s.at <= sentAt).length <= 10, "the window held");
   // one line a send: the lane, the wait, the window, the answer; never a path, query or client
-  assert.equal(lines.length, j.sent.length);
-  assert.ok(lines.every((l) => /^jupiter turn: (caller|background), waited \d+ ms, \d+ of 10 sent in 10 s, answered 200 in \d+ ms$/.test(l)), lines.join("\n"));
-  assert.ok(lines.every((l) => !/198\.51|query|leg=|\/swap|\/tokens/.test(l)));
+  const turns = lines.filter((l) => l.startsWith("jupiter turn: "));
+  assert.equal(turns.length, j.sent.length);
+  assert.ok(turns.every((l) => /^jupiter turn: (caller|background), waited \d+ ms, \d+ of 10 sent in 10 s, answered 200 in \d+ ms$/.test(l)), turns.join("\n"));
+  assert.ok(turns.every((l) => !/198\.51|query|leg=|\/swap|\/tokens/.test(l)));
+  // card helper-says-why-a-vendor-refused: every other line is a refusal of ours (a page's turn past its wait), with the
+  // allowlisted path alone, never a query or client
+  const rest = lines.filter((l) => !l.startsWith("jupiter turn: "));
+  assert.ok(rest.every((l) => /^proxy jupiter \/tokens\/v2\/search answered 503, ours: jupiter (turn|budget|held)/.test(l) && !/198\.51|query|leg=/.test(l)), rest.join("\n"));
   void t0;
 });
 test("card helper-page-jup-429: a turn's log line keeps only whole numbers of the vendor's own count (hostile headers)", async () => {
