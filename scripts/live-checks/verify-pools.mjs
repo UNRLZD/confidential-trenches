@@ -172,6 +172,14 @@ function judgeRow(say, n, c, row, release, run, shown = new Set(), network = "ma
   say(JSON.stringify(row.links) === JSON.stringify(links), `${n} ${c}: explorer links ${JSON.stringify(row.links ?? [])}${JSON.stringify(row.links) === JSON.stringify(links) ? "" : `, want ${JSON.stringify(links)}`}`);
 }
 
+/** What a run with no terminal frame saw (card app-live-run-green-after-119: a desktop run found none in READY_MS and
+ *  kept nothing): the top window's address, its frames' and every page load's answer, each without its query. */
+const bare = (u) => String(u).split(/[?#]/)[0];
+const noFrame = (r) =>
+  r.top === undefined
+    ? ""
+    : `; top ${bare(r.top)}, frames [${(r.frames ?? []).map(bare).join(", ")}], page loads [${(r.docs ?? []).map((d) => `${bare(d.url)} ${d.status ?? d.failure ?? "no answer"}`).join(", ")}]`;
+
 export function judge(rec) {
   const lines = [];
   const say = (ok, s) => lines.push(`${ok ? "ok " : "BAD"} ${s}`);
@@ -183,7 +191,7 @@ export function judge(rec) {
   for (const r of runs) {
     const n = `${r.width} ${PATH}`;
     if (!r.pools || r.pools.state !== "read") {
-      say(false, `${n}: the pool rows ${r.pools ? `stayed ${r.pools.state}` : "were not drawn"} (${r.frame ?? "no frame"})`);
+      say(false, `${n}: the pool rows ${r.pools ? `stayed ${r.pools.state}` : "were not drawn"} (${r.frame ?? `no frame${noFrame(r)}`})`);
       continue;
     }
     // what the page shows of a down RPC, from this run's console errors and the DOM (rpc-outage.mjs)
@@ -276,9 +284,30 @@ async function runOne({ browser, w, shots, route }) {
     run.preflights = [];
     watchPreflights(ctx, page, run.preflights);
     watch(page, run.errors);
+    // every page load (the top window's and each frame's), so a run with no terminal frame says what loaded instead
+    run.docs = [];
+    const docOf = new Map();
+    page.on("request", (q) => {
+      if (q.resourceType() !== "document") return;
+      const d = { url: bare(q.url()), status: null };
+      docOf.set(q, d);
+      run.docs.push(d);
+    });
+    page.on("response", (res) => {
+      const d = docOf.get(res.request());
+      if (d) d.status = res.status();
+    });
+    page.on("requestfailed", (q) => {
+      const d = docOf.get(q);
+      if (d) d.failure = q.failure()?.errorText ?? "failed";
+    });
     await page.goto(APP_HOST + PATH, { waitUntil: "commit" });
     const f = await appFrame(page);
-    if (!f) return run;
+    if (!f) {
+      run.top = page.url();
+      run.frames = page.frames().filter((x) => x !== page.mainFrame()).map((x) => x.url());
+      return run;
+    }
     run.frame = f.url();
     await f.waitForSelector(".vpools[data-pools='read']", { timeout: READ_MS }).catch(() => {});
     phase = "after";
