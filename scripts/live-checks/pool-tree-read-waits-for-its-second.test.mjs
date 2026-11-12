@@ -86,7 +86,7 @@ test("a chain read that fails in transport or answers an error is INCONCLUSIVE (
   assert.equal(judge({ ...A.good, chain: dropped }).verdict, "INCONCLUSIVE");
   assert.match(dropped[0].noAnswer, /ECONNRESET/);
   // a 503 whose body is a JSON-RPC error, and a 200 with an error answer that is not -32004
-  for (const [status, code] of [[503, -32603], [200, -32603], [200, -32004]]) {
+  for (const [status, code] of [[503, -32603], [200, -32603]]) {
     const erring = await readChain(async (url, init) => {
       if (url !== PROVIDERS[1]) return ok(url, init);
       return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, error: { code, message: "Internal error" } }), { status });
@@ -97,4 +97,15 @@ test("a chain read that fails in transport or answers an error is INCONCLUSIVE (
   }
   // the command's own exit for that verdict
   assert.equal(EXIT[judge({ ...A.good, chain: dropped }).verdict], 3);
+});
+
+test("a provider that answers -32004 for the block time through the whole cap is BAD, the refusal the sync makes", async () => {
+  const ok = chainFetch(() => 1_800_000_000);
+  const stuck = await readChain(async (url, init) => {
+    if (url !== PROVIDERS[1] || JSON.parse(init.body).method !== "getBlockTime") return ok(url, init);
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, error: { code: -32004, message: "Block not available for slot 1" } }), { status: 200 });
+  });
+  const v = judge({ ...A.good, chain: stuck });
+  assert.equal(v.verdict, "FAIL", v.lines.join("\n"));
+  assert.deepEqual(bads(v), [`BAD ${PROVIDERS[1]}: its confirmed block did not reach now + 1 s within ${REACH_WAITS} waits`]);
 });

@@ -327,6 +327,24 @@ export const dropSend = (w: WalletStore, opId: string, noteId: string): Promise<
     const { [noteId]: _gone, ...rest } = r;
     return rest;
   });
+/** meta's record of the notes each running withdraw (any tab's) has planned, by op id, each with the latest deadline
+ *  that run can bind (pool ms): out of every proof queue's pass and every other plan until the run ends, or, for a run
+ *  that crashed, until that deadline passes on the device's clock (card pool-tree-read-waits-for-its-second). */
+export const WITHDRAW_PLANNED_KEY = "owed/withdraw-sol";
+type WithdrawPlanned = Record<string, { notes: string[]; until_ms: string }>;
+/** The op's planned notes and its deadline written ([] drops its entry); another op's entry kept. */
+export const keepOutNotes = (w: WalletStore, opId: string, noteIds: readonly string[], untilMs: bigint): Promise<unknown> =>
+  w.update("meta", WITHDRAW_PLANNED_KEY, (v) => {
+    const { [opId]: _was, ...r } = (v as WithdrawPlanned | undefined) ?? {};
+    return noteIds.length === 0 ? r : { ...r, [opId]: { notes: [...noteIds], until_ms: untilMs.toString() } };
+  });
+/** The notes a withdraw run still holds out at `nowMs`: every entry whose deadline is still to come. */
+export async function keptOutNotes(w: WalletStore, nowMs: bigint): Promise<Set<string>> {
+  const r = ((await w.get("meta", WITHDRAW_PLANNED_KEY)) as WithdrawPlanned | undefined) ?? {};
+  const out = new Set<string>();
+  for (const e of Object.values(r)) if (/^[0-9]{1,20}$/.test(e?.until_ms ?? "") && BigInt(e.until_ms) > nowMs) for (const id of e.notes ?? []) out.add(id);
+  return out;
+}
 /** The op's owed send for `noteId`, or none. */
 export async function owedSendOf(w: WalletStore, opId: string, noteId: string): Promise<PendingOnward | undefined> {
   const r = (await w.get("meta", owedKey(opId))) as OwedSends | undefined;
@@ -630,6 +648,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       if (typeof rec.owed === "string") out.add(rec.owed);
       if (rec.pending) out.add(rec.pending.noteId);
     }
+    // and the notes a withdraw run (any tab's) has planned, until it ends
+    for (const id of await keptOutNotes(ops, BigInt(Date.now()))) out.add(id);
     return out;
   };
   // the proof queue: opened at the first landing, closed at sign out
@@ -2141,6 +2161,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
             ...(over.wait ? { wait: over.wait } : {}),
             keepRelease: async (noteId, attempt, release) => void (await keepRelease(ops, opId, noteId, attempt, release)),
             owedNotes,
+            keepOut: async (ids, untilMs) => void (await keepOutNotes(ops, opId, ids, untilMs)),
             // the release's withdrawn value is on the note's mark: the app reads the state again, as after a buy's
             marked: () => {
               for (const f of watchers) f();

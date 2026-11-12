@@ -100,12 +100,16 @@ const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
 /** A read that is not an answer about the chain's cadence (an error answer, a result not a whole number): this
  *  provider's reads stop, a no-answer (INCONCLUSIVE, which live.yml runs again), never ERROR. */
 const notRead = (url, what, a) => new NoAnswer(`${new URL(url).host}: ${what} answered ${JSON.stringify(a.error ?? a.result).slice(0, 120)}`);
+/** A provider that answered -32004 for a slot's block time through the whole cap: the refusal the product's sync makes
+ *  (solana.ts blockTime), a provider that answered and did not reach the cut: BAD. */
+class NoBlockTime extends Error {}
 /** A slot's block time, -32004 (not available yet) read again a slot apart, as the sync does. */
 async function blockTime(url, slot, fetchFn) {
   for (let i = 0; ; i++) {
     const a = await result(url, "getBlockTime", [slot], fetchFn);
     if (a.error === undefined && Number.isSafeInteger(a.result)) return a.result;
-    if (a.error?.code !== -32004 || i >= REACH_WAITS) throw notRead(url, `getBlockTime(${slot})`, a);
+    if (a.error?.code === -32004 && i >= REACH_WAITS) throw new NoBlockTime(`${new URL(url).host}: getBlockTime(${slot}) answered -32004 through ${REACH_WAITS} waits`);
+    if (a.error?.code !== -32004) throw notRead(url, `getBlockTime(${slot})`, a);
     await sleep(WAIT.ms);
   }
 }
@@ -120,12 +124,14 @@ async function slotOf(url, commitment, fetchFn) {
 export async function readChain(fetchFn = fetch) {
   const quiet = (provider) => (e) => {
     if (e instanceof NoAnswer) return { provider, noAnswer: e.message };
+    if (e instanceof NoBlockTime) return { provider, waits: REACH_WAITS, reached: false, noBlockTime: e.message };
     throw e;
   };
   const fin = await Promise.all(PROVIDERS.map(async (u) => {
     const slot = await slotOf(u, "finalized", fetchFn);
     return { slot, t: await blockTime(u, slot, fetchFn) };
   }).map((p, k) => p.catch(quiet(PROVIDERS[k]))));
+  if (fin.some((f) => f.reached === false)) return PROVIDERS.map((provider, k) => (fin[k].reached === false || fin[k].noAnswer !== undefined ? fin[k] : { provider, noAnswer: "the other provider gave no finalized time" }));
   const gone = fin.filter((f) => f.noAnswer !== undefined);
   if (gone.length > 0) return PROVIDERS.map((provider, k) => (fin[k].noAnswer !== undefined ? fin[k] : { provider, noAnswer: "the other provider gave no finalized time" }));
   const now = Math.min(...fin.map((f) => f.t));
