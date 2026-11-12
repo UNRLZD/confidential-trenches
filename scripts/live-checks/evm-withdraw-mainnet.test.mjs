@@ -1,7 +1,7 @@
 // node --test scripts/live-checks/evm-withdraw-mainnet.test.mjs: the live check replays recorded runs
-// (evm-withdraw-mainnet.answers.json). robinhood: the card's Robinhood withdraws (a release and W's onward send each)
-// read back on both pool RPCs, and SIGN_HOST's bundle: every line ok but "a withdraw on each testnet" (Base Sepolia not
-// run yet). bad_buys: the EVM buy run's buys named as withdraws: FAIL. bad_page: the testnet build before this change
+// (evm-withdraw-mainnet.answers.json). both: the card's record with its Robinhood and Base Sepolia withdraws, every
+// line ok: PASS. robinhood: the Robinhood withdraws alone (a release and W's onward send each) read back on both pool
+// RPCs, and SIGN_HOST's bundle: every line ok but "a withdraw on each testnet": FAIL. bad_buys: the EVM buy run's buys named as withdraws: FAIL. bad_page: the testnet build before this change
 // (an EVM pool, no withdraw in it): FAIL. Made from the robinhood run, each adding a BAD line of its own: a release
 // or a send reverted, to another pool, on another chain id, no Withdrawn, the send from another address, to another,
 // one wei off the part, with calldata, in another block, a bundle that is not the pinned one, no page read; a read one
@@ -41,9 +41,16 @@ const onward = (rec) => new Set(rec.withdraws.map((w) => w.onward));
 const at = (rec, which, method, f) => (x) => (x.method === method && x.rpc.includes("publicnode") && onward(rec).has(x.hash) === (which === "onward") ? withResult(x, f) : undefined);
 
 test("the run record's Withdraw lines are the recorded run's withdraws, and each transaction is a Tx line too", () => {
-  assert.deepEqual(withdrawsOf(RECORD), A.robinhood.withdraws);
+  assert.deepEqual(withdrawsOf(RECORD), A.both.withdraws);
   assert.match(RECORD, /^Money path: yes$/m);
-  for (const w of A.robinhood.withdraws) for (const h of [w.release, w.onward]) assert.ok(RECORD.includes(`Tx: ${w.network} ${h}\n`), h);
+  for (const w of A.both.withdraws) for (const h of [w.release, w.onward]) assert.ok(RECORD.includes(`Tx: ${w.network} ${h}\n`), h);
+});
+
+test("recorded good run: the Robinhood and Base Sepolia withdraws read back on both pool RPCs of each chain: PASS", async () => {
+  const r = await run(A.both);
+  assert.deepEqual(bad(r), [], r.lines.join("\n"));
+  assert.equal(r.verdict, "PASS", r.lines.join("\n"));
+  assert.deepEqual([...new Set(A.both.withdraws.map((w) => w.network))].sort(), ["base-sepolia", "robinhood-testnet"]);
 });
 
 test("pageFacts reads the index's pin, the bundle's sha384, the EVM buy's marks and the EVM withdraw's", () => {
@@ -54,7 +61,7 @@ test("pageFacts reads the index's pin, the bundle's sha384, the EVM buy's marks 
   assert.deepEqual(pageFacts("", "plain").withdraw, []);
 });
 
-test("recorded Robinhood run: each withdraw's release and onward send read back on both pool RPCs, exactly the part to To; FAIL only for the testnet not run", async () => {
+test("recorded bad run: the Robinhood withdraws alone, each read back exactly the part to To; FAIL only for the testnet with none", async () => {
   const r = await run(A.robinhood);
   assert.equal(r.verdict, "FAIL");
   assert.deepEqual(bad(r), ["BAD the record names a withdraw on each testnet: robinhood-testnet, robinhood-testnet"], r.lines.join("\n"));

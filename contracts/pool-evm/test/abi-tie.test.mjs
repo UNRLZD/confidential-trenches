@@ -177,6 +177,8 @@ const MONEY_PATHS = {
     "buy((address,bytes),(uint256[2],uint256[2][2],uint256[2],uint256[8]),uint256,(address,bytes,uint256,address),bytes)",
     // the sale's selector, which the read-back's deposit tx input must start with (card signpage-evm-pool-sell)
     "sell((address,uint256,address,bytes,uint256,address,uint256,uint256,address,uint256,uint256),uint256,bytes)",
+    // the withdraw's selector, which the release's tx input must start with (card evm-withdraw-mainnet)
+    "withdraw((address,bytes),(uint256[2],uint256[2][2],uint256[2],uint256[8]),uint256,bytes)",
   ],
   "packages/signpage/src/pool-deposit-evm.ts": [
     "currentLabelTreeDepth()", // the deposit's gas headroom reads both trees' depths (card pool-deposits)
@@ -262,6 +264,8 @@ test("planted: a changed withdraw, sell, event, view, error, EIP-712 type or dom
     ["apps/helper/src/pool/evm.ts", '"withdraw((address,bytes),(uint256[2],uint256[2][2],uint256[2],uint256[8]),uint256,bytes)"', '"function withdraw((address,bytes),(uint256[2],uint256[2][2],uint256[2],uint256[8]),uint256)"'],
     ["apps/helper/src/pool/evm.ts", "export const WITHDRAW_SELECTOR = selectorOf(WITHDRAW_SIGNATURE);", 'export const WITHDRAW_SELECTOR = "8a3bff22";'],
     ["apps/helper/src/pool/evm.ts", "export const WITHDRAW_SELECTOR = selectorOf(WITHDRAW_SIGNATURE);", "export const WITHDRAW_SELECTOR = 0x8a3bff22;"],
+    // the signing page's withdraw (card evm-withdraw-mainnet), in the three-argument form of 654e8293
+    ["packages/signpage/src/evm-send.ts", 'EVM_WITHDRAW_SIGNATURE = "withdraw((address,bytes),(uint256[2],uint256[2][2],uint256[2],uint256[8]),uint256,bytes)"', 'EVM_WITHDRAW_SIGNATURE = "withdraw((address,bytes),(uint256[2],uint256[2][2],uint256[2],uint256[8]),uint256)"'],
   ];
   for (const [file, from, to] of cases) assert.ok(plant(file, from, to).length > 0, `${file}: ${from} -> ${to}`);
 });
