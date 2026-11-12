@@ -382,23 +382,26 @@ async function oneWidth(h, w, shotDir, { cpu = 1, holdPaint = 0 } = {}) {
     await vis('[data-header="S1.3"], [data-header="S1.4"]').waitFor({ timeout: WAIT_MS });
 
     // backup2: the account's Backup, the scrim back (a desktop width) or Esc
-    await account("acct-backup");
+    // the mark before the tap: a sealed screen takes the frame out in the open's own task
     m = await newMark();
+    await account("acct-backup");
     const list2 = top('#screen:not([hidden]) #signin[data-signin="backup"] [data-words="12"]');
     await list2.waitFor({ timeout: WAIT_MS });
     await look("backup2", m, [list2]);
     await closed("backup2", w.name === "1440" ? "scrim" : "esc");
 
     // signout: the account's Sign out, the x back
-    await account("acct-signout");
+    // the mark before the tap: a sealed screen takes the frame out in the open's own task
     m = await newMark();
+    await account("acct-signout");
     await top('#screen:not([hidden]) #signin[data-signin="signout"]').waitFor({ timeout: WAIT_MS });
     await look("signout", m);
     await closed("signout", "x");
 
     // withdraw: the account's Withdraw, Esc back
-    await account("acct-withdraw");
+    // the mark before the tap: a sealed screen takes the frame out in the open's own task
     m = await newMark();
+    await account("acct-withdraw");
     await top('#screen:not([hidden]) #signin[data-signin="withdraw"]').waitFor({ timeout: WAIT_MS });
     await look("withdraw", m);
     await closed("withdraw", "esc");
