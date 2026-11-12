@@ -92,7 +92,7 @@ const ROUTE = (deps) =>
       `deps:\\((${N}),(${N}),(${N})\\)=>\\{let (${N})=\\3\\(\\10\\);return \\13===null\\?null:${esc(deps)}\\(\\{\\.\\.\\.\\13,deposit:\\11,refund:\\12\\(\\(\\)=>\\9\\(\\13\\.rpcs,\\13\\.pin\\)\\),\\.\\.\\.\\2\\.notes===void 0\\?\\{\\}:\\{notes:\\2\\.notes\\}\\}\\)\\}\\}\\}`,
   );
 // main.ts: the route on the page's network, its pools and its wallet reader
-const ROUTE_CALL = (route) => new RegExp(`[,;](${N})=${esc(route)}\\(\\{network:(${N}),pool:(${N})=>(${N})\\?\\.evmPoolOf\\(\\3\\)\\?\\?null,wallet:(${N}=>void 0|${N}),notes:\\(\\)=>(${N})\\(\\)\\}\\)`);
+const ROUTE_CALL = (route) => new RegExp(`[,;](${N})=${esc(route)}\\(\\{network:(${N}),pool:(${N})=>(${N})\\?\\.evmPoolOf\\(\\3\\)\\?\\?null,wallet:(${N}=>void 0|${N}=>${N}\\(${N}\\)|${N}),notes:\\(\\)=>(${N})\\(\\)\\}\\)`);
 const FLOOR_WIRE = (m) => new RegExp(`=async\\((${N}),(${N})\\)=>\\{if\\(\\1!==${Q}solana${Q}\\)return ${esc(m)}\\.floor\\(\\1\\);`);
 const DEPS_WIRE = (m) =>
   new RegExp(`=\\((${N}),(${N})\\)=>\\{if\\(\\1\\.chain!==${Q}solana${Q}\\)\\{let (${N})=${esc(m)}\\.deps\\(\\1\\.chain,(${N}),(${N})=>(${N})\\(\\5,\\2\\)\\);return \\3===null\\?null:\\{\\.\\.\\.\\3,noted:(${N}),open:(${N})\\}\\}`);
@@ -125,7 +125,7 @@ const KIND = new RegExp(
 // pool-testnet.ts depositFrom: Base and Robinhood to the chain's EVM kind with the same fixed source
 const FROM_ENTRY = new RegExp(
   `depositFrom:\\((${N}),(${N}),(${N})\\)=>\\{let (${N});try\\{\\4=${N}\\(\\{\\.\\.\\.\\1,kind:${Q}pool\\.deposit${Q}\\}\\)\\}catch\\{return\\{error:${Q}not_allowed${Q}\\}\\}` +
-    `return \\4\\.chain===${Q}solana${Q}\\?${N}===void 0\\?\\{error:${Q}not_allowed${Q}\\}:${N}\\(\\4,\\3,\\2\\):${N}\\(\\4\\.chain\\)\\?\\.\\(\\4,\\3,\\2\\)\\?\\?\\{error:${Q}not_allowed${Q}\\}\\}`,
+    `return \\4\\.chain===${Q}solana${Q}\\?${N}===void 0(?:\\|\\|!${N}\\(${Q}solana${Q}\\))?\\?\\{error:${Q}not_allowed${Q}\\}:${N}\\(\\4,\\3,\\2\\):${N}\\(\\4\\.chain\\)\\?\\.\\(\\4,\\3,\\2\\)\\?\\?\\{error:${Q}not_allowed${Q}\\}\\}`,
 );
 
 // evmLanded reads each send by the tx read whose receipt and finalized block it asks
