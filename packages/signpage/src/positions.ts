@@ -64,15 +64,16 @@
 //   never shares the finder's paced queue with the display. A pass with any read failed is tried again
 //   POSITIONS_RETRY_MS later, up to POSITIONS_RETRIES times. Sign out stops the running pass and drops it all.
 // - The SOL a position holds beside its token (asset_held, card portfolio-counts-money-an-open-buy-holds): per W the
-//   finder read whole this pass, one getMultipleAccounts on the finder's own route (`assetHeld`) naming that W alone:
-//   W's lamports and those of the accounts a full sell closes back to W (its token account of the mint, under either
-//   token program, and its pump and PumpSwap volume accounts), all at one slot, so nothing is counted twice. Fees
-//   already paid are gone from every one of them. A position's figure is the sum over its Ws, absent when any of its Ws
-//   was not read this pass (never a part sum, never "0" in its place); a read that fails is that W's alone, and the pass
-//   runs again. Rows shown while the finder reads carry none; the pass's end does.
+//   finder read whole this pass, one batched getMultipleAccounts on the finder's own route (`assetHeld`) for every such W
+//   of the pass, under one limit (twenty Ws a call, the calls side by side): W's lamports and those of the accounts a
+//   full sell closes back to W (its token account of the mint, under either token program, and its pump and PumpSwap
+//   volume accounts), all at one slot, so nothing is counted twice. Fees already paid are gone from every one of them.
+//   A position's figure is the sum over its Ws, absent when any of its Ws was not read this pass (never a part sum,
+//   never "0" in its place); an answer refused for one W is that W's alone, and the pass runs again. Rows shown while
+//   the finder reads carry none; the pass's end does.
 // - What crosses to APP_HOST: per token its chain, mint, amount, decimals, the Ws' addresses and the SOL they hold:
 //   amounts, addresses and tokens only, never a note, a key or a path.
-import { SOLANA_PUMP_AMM_PROGRAM, SOLANA_PUMP_PROGRAM, SOLANA_TOKEN_2022_PROGRAM, SOLANA_TOKEN_PROGRAM, solanaVolumeAccumulator } from "../../kit/src/checks/solana/checks.ts";
+import { SOLANA_PUMP_AMM_PROGRAM, SOLANA_PUMP_PROGRAM, SOLANA_SYSTEM_PROGRAM, SOLANA_TOKEN_2022_PROGRAM, SOLANA_TOKEN_PROGRAM, solanaVolumeAccumulator } from "../../kit/src/checks/solana/checks.ts";
 import { solanaAta } from "../../kit/src/checks/solana/message.ts";
 import type { BuyRoute, PoolStatePrice, SignpageState, TxRef } from "../../kit/src/signpage/messages.ts";
 import { SIGNPAGE_MAX_ANSWER_BYTES, SIGNPAGE_RESULT_SCHEMAS } from "../../kit/src/signpage/schema.ts";
@@ -103,9 +104,10 @@ export type PositionsReads = {
   /** The mint's decimals, one read on the finder's own route; throws when it does not read. Asked only for a mint W
    *  holds whose record and kept pass name none. */
   decimals(mint: string): Promise<number>;
-  /** The lamports W holds and gets back at a full sell of `mint` (solanaAssetHeld on the finder's own route); throws when
-   *  it does not read. None: no position carries asset_held. */
-  assetHeld?(address: string, mint: string, signal?: AbortSignal): Promise<bigint>;
+  /** The lamports each W holds and gets back at a full sell of its `mint`, by W's address (solanaAssetHeld on the
+   *  finder's own route, one batch for the pass): a W whose answer is refused is absent; throws when the read fails.
+   *  None: no position carries asset_held. */
+  assetHeld?(wallets: readonly { address: string; mint: string }[], signal?: AbortSignal): Promise<ReadonlyMap<string, bigint>>;
   /** Each W's buy mint (owed/buy-sol: `{ mint, program }` by W's address); none: nothing bought. */
   bought?(): Promise<Readonly<Record<string, unknown>>>;
   /** Each W's buy record (POSITION_COSTS_KEY); none: nothing recorded. */
@@ -169,36 +171,64 @@ export function positionCost(mint: string, decimals: number, held: readonly { ad
 
 /** SOL's decimals: asset_held is in whole SOL, as pools[].balance is. */
 const SOL_DECIMALS = 9;
-/**
- * The lamports W holds beside its `mint` and gets back at a full sell (card portfolio-counts-money-an-open-buy-holds):
- * one getMultipleAccounts at finalized naming W alone, as the finder reads, of W, its token account of the mint under
- * each token program and its pump and PumpSwap volume accounts, all at one slot. An account that is not there counts 0;
- * a closable account owned by any program but its own, a count that is not the keys', or lamports that are not a whole
- * number in range is refused (a throw), so a hostile answer never makes a figure.
- */
-export async function solanaAssetHeld(rpc: SolanaRpc, address: string, mint: string, signal?: AbortSignal): Promise<bigint> {
-  const keys: [string, string | null][] = [
-    [address, null],
-    [solanaAta(address, mint, SOLANA_TOKEN_PROGRAM), SOLANA_TOKEN_PROGRAM],
-    [solanaAta(address, mint, SOLANA_TOKEN_2022_PROGRAM), SOLANA_TOKEN_2022_PROGRAM],
-    [solanaVolumeAccumulator(address, SOLANA_PUMP_PROGRAM), SOLANA_PUMP_PROGRAM],
-    [solanaVolumeAccumulator(address, SOLANA_PUMP_AMM_PROGRAM), SOLANA_PUMP_AMM_PROGRAM],
-  ];
-  signal?.throwIfAborted();
-  const answer = await rpc("getMultipleAccounts", [keys.map(([k]) => k), { encoding: "base64", commitment: "finalized", dataSlice: { offset: 0, length: 0 } }]);
-  signal?.throwIfAborted();
-  const value = (answer as { value?: unknown } | null)?.value;
-  if (!Array.isArray(value) || value.length !== keys.length) throw new Error("getMultipleAccounts: not an answer for these accounts");
+/** The accounts a getMultipleAccounts may name (the RPC's own limit): twenty Ws of five a call. */
+const HELD_KEYS_PER_CALL = 100;
+/** The accounts read per W: W itself, then each closable one with the program that must own it. */
+const heldKeys = (address: string, mint: string): [string, string | null][] => [
+  [address, null],
+  [solanaAta(address, mint, SOLANA_TOKEN_PROGRAM), SOLANA_TOKEN_PROGRAM],
+  [solanaAta(address, mint, SOLANA_TOKEN_2022_PROGRAM), SOLANA_TOKEN_2022_PROGRAM],
+  [solanaVolumeAccumulator(address, SOLANA_PUMP_PROGRAM), SOLANA_PUMP_PROGRAM],
+  [solanaVolumeAccumulator(address, SOLANA_PUMP_AMM_PROGRAM), SOLANA_PUMP_AMM_PROGRAM],
+];
+const PER_W = 5;
+
+/** One W's lamports from its five answers, or null when an answer is refused. */
+function heldOf(keys: readonly [string, string | null][], value: readonly unknown[]): bigint | null {
   let sum = 0n;
-  value.forEach((a: unknown, i) => {
-    if (a === null) return;
+  for (let i = 0; i < keys.length; i++) {
+    const a = value[i];
+    if (a === null) continue;
     const { lamports, owner } = (a ?? {}) as { lamports?: unknown; owner?: unknown };
-    if (!Number.isSafeInteger(lamports) || (lamports as number) < 0) throw new Error("getMultipleAccounts: lamports not a whole number");
+    if (!Number.isSafeInteger(lamports) || (lamports as number) < 0) return null;
     const program = keys[i]![1];
-    if (program !== null && owner !== program) throw new Error(`getMultipleAccounts: ${keys[i]![0]} is not ${program}'s`);
+    // a System-owned account at a closable address is lamports anyone may send to an address not made yet: W can neither
+    // close nor spend them, so they count 0 (as packages/kit/src/checks/solana/checks.ts solanaTeardownPlan reads it)
+    if (program !== null && owner === SOLANA_SYSTEM_PROGRAM) continue;
+    if (program !== null && owner !== program) return null;
     sum += BigInt(lamports as number);
-  });
+  }
   return sum;
+}
+
+/**
+ * The lamports each W holds beside its `mint` and gets back at a full sell (card portfolio-counts-money-an-open-buy-holds),
+ * by W's address: a batched getMultipleAccounts at finalized for every W given (HELD_KEYS_PER_CALL accounts a call, the
+ * calls side by side), each W's accounts at one slot: W, its token account of the mint under each token program and its
+ * pump and PumpSwap volume accounts. An account that is not there counts 0, a System-owned one at a closable address
+ * too. A W with a closable account owned by any other program, or lamports that are not a whole number in range, is
+ * absent (refused, so a hostile answer never makes a figure); an answer of another count, or no answer, throws.
+ */
+export async function solanaAssetHeld(rpc: SolanaRpc, wallets: readonly { address: string; mint: string }[], signal?: AbortSignal): Promise<Map<string, bigint>> {
+  const each = wallets.map(({ address, mint }) => ({ address, keys: heldKeys(address, mint) }));
+  const per = Math.floor(HELD_KEYS_PER_CALL / PER_W);
+  const calls: (typeof each)[] = [];
+  for (let i = 0; i < each.length; i += per) calls.push(each.slice(i, i + per));
+  signal?.throwIfAborted();
+  const answers = await Promise.all(calls.map(async (ws) => {
+    const keys = ws.flatMap((w) => w.keys.map(([k]) => k));
+    const answer = await rpc("getMultipleAccounts", [keys, { encoding: "base64", commitment: "finalized", dataSlice: { offset: 0, length: 0 } }]);
+    const value = (answer as { value?: unknown } | null)?.value;
+    if (!Array.isArray(value) || value.length !== keys.length) throw new Error("getMultipleAccounts: not an answer for these accounts");
+    return value as unknown[];
+  }));
+  signal?.throwIfAborted();
+  const out = new Map<string, bigint>();
+  calls.forEach((ws, c) => ws.forEach((w, i) => {
+    const sum = heldOf(w.keys, answers[c]!.slice(i * PER_W, (i + 1) * PER_W));
+    if (sum !== null) out.set(w.address, sum);
+  }));
+  return out;
 }
 
 /** A pass as kept: its positions, each "W mint" amount (base units, a decimal string) and each "W mint" the finder
@@ -434,13 +464,19 @@ export async function positionsPass(r: PositionsReads, memo: PassMemo = passMemo
     }
   }
   stop();
-  // the SOL each W holds beside its token: one read per W the finder read whole this pass, in turn; a failed read is that
-  // W's alone (its position goes without asset_held) and the pass runs again
+  // the SOL each W holds beside its token: one batched read for every W the finder read whole this pass, under one
+  // limit; a W refused or not read goes without asset_held (its position too) and the pass runs again
   const lamports = new Map<string, bigint>();
-  if (r.assetHeld) for (const h of held.values()) {
-    if (!read.get(h.address) || lamports.has(h.address)) continue;
+  const heldWs = new Map<string, string>();
+  for (const h of held.values()) if (read.get(h.address) && !heldWs.has(h.address)) heldWs.set(h.address, h.mint);
+  if (r.assetHeld && heldWs.size > 0) {
     try {
-      lamports.set(h.address, await r.assetHeld(h.address, h.mint, r.signal));
+      const got = await r.assetHeld([...heldWs].map(([address, mint]) => ({ address, mint })), r.signal);
+      for (const a of heldWs.keys()) {
+        const v = got.get(a);
+        if (v === undefined) whole = false;
+        else lamports.set(a, v);
+      }
     } catch {
       stop();
       whole = false;

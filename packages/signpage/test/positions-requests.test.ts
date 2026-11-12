@@ -105,7 +105,7 @@ test("the positions on the mainnet build: no request names a W to any host but t
     // each W's asset_held read (card portfolio-counts-money-an-open-buy-holds): W and its bought token account
     if (b.method === "getMultipleAccounts") {
       const keys = b.params[0] as string[];
-      return ok({ context: { slot: 100 }, value: keys.map((k) => (Ws.includes(k) ? { lamports: 5000, owner: "11111111111111111111111111111111", data: ["", "base64"] } : keys.indexOf(k) === 1 && names.get(k)?.startsWith("ATA") ? { lamports: 2_039_280, owner: SOLANA_TOKEN_PROGRAM, data: ["", "base64"] } : null)) });
+      return ok({ context: { slot: 100 }, value: keys.map((k) => (Ws.includes(k) ? { lamports: 5000, owner: "11111111111111111111111111111111", data: ["", "base64"] } : keys.indexOf(k) % 5 === 1 && names.get(k)?.startsWith("ATA") ? { lamports: 2_039_280, owner: SOLANA_TOKEN_PROGRAM, data: ["", "base64"] } : null)) });
     }
     return ok(null);
   }) as typeof fetch;

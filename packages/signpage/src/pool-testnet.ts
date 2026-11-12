@@ -146,6 +146,13 @@ export const pageEvmHistory = (pin: EvmPoolPin): readonly EvmRpc[] => {
  *  so a provider the device reaches itself is never named a W of it, nor two in one burst. A sale reads none of it: its
  *  finding gates its signature, so it reads on the pool's two RPCs (src/pool-sell-evm.ts planEvmSell). None in the
  *  testnet build, whose helper has no route for the chain: there the pool's two RPCs read each W, as before. */
+/** The read of each W's asset_held (card portfolio-counts-money-an-open-buy-holds) on the finder's own route, never a
+ *  public provider: on mainnet the helper's keyed route with the pass's stop in its every fetch, so nothing of a
+ *  signed-out account's is sent after the sign out, queued or tried again (as the pass's decimals read); in the testnet
+ *  build the devnet RPC the finder reads. */
+export const pageAssetHeldRpc = (signal: AbortSignal, testnet: boolean = POOL_TESTNET): SolanaRpc =>
+  solanaPacedRpc(testnet ? testnetRpc(TESTNET_RPCS.solana[0], SOLANA_RPC_RETRY, "pass") : pageHelperRpcStopped(TRADE_HELPER, signal, "pass"));
+
 export const pageEvmWalletRpc = (chain: "base" | "robinhood", testnet: boolean = POOL_TESTNET): EvmRpc | undefined => {
   if (testnet) return undefined;
   let r = WALLET_RPCS.get(chain);
@@ -1437,9 +1444,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     async (memo, run) => {
       if (scope === null) return { positions: [], whole: true };
       const r = rpcs("pass");
-      const heldRpc = over.holdings !== undefined
-        ? over.assetHeldRpc
-        : solanaPacedRpc(POOL_TESTNET ? testnetRpc(TESTNET_RPCS.solana[0], SOLANA_RPC_RETRY, "pass") : pageHelperRpc(TRADE_HELPER, SOLANA_RPC_RETRY, "pass"));
+      const heldRpc = over.holdings !== undefined ? over.assetHeldRpc : pageAssetHeldRpc(run.signal);
       const st = await page.store();
       const meta = async (k: string): Promise<Record<string, unknown>> => {
         const v = await st.get("meta", k);
@@ -1456,9 +1461,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
           return [...fed, ...(rest.size === 0 ? [] : await recordedWallets(st, r, rest, run.signal, o))];
         },
         ...(run.shown ? { shown: run.shown } : {}),
-        // each W's SOL beside its token (asset_held), one call per W on the finder's own route: the helper's keyed route
-        // on mainnet, never a public provider; the devnet RPC the finder reads in the testnet build
-        ...(heldRpc === undefined ? {} : { assetHeld: (address: string, mint: string, signal?: AbortSignal) => solanaAssetHeld(heldRpc, address, mint, signal) }),
+        // each W's SOL beside its token (asset_held), one batch for the pass on the finder's own route (pageAssetHeldRpc)
+        ...(heldRpc === undefined ? {} : { assetHeld: (ws: readonly { address: string; mint: string }[], signal?: AbortSignal) => solanaAssetHeld(heldRpc, ws, signal) }),
         bought: async () => meta(BUY_MINTS_KEY),
         costs: async () => (await meta(POSITION_COSTS_KEY)) as PositionCosts,
         awaited: () => awaited,
