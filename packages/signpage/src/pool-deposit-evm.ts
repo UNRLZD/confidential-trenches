@@ -64,7 +64,7 @@ import { ladderSplit } from "../../wallet/src/pool/ladder.ts";
 import { WALLET_SEED_LOCK } from "@blindfill/wallet/store";
 import { checkEvmDeposit, EVM_DEPOSIT_GAS_MAX, evmDepositHeadroom, PoolRuleRefused, signEvmDeposit, type EvmOnwardSend, type PoolAsk } from "./rules/pool.ts";
 import { clockOf, readsWaited, readWaits, stopOf, tapDone, tapWaits, type ReadWaits } from "./read-waits.ts";
-import { followWait, POOL_DEPOSIT_FOLLOW_MAX_MS, POOL_DEPOSIT_LOCK, stopped, type PoolDepositAnswer } from "./pool-deposit.ts";
+import { followWait, POOL_DEPOSIT_FOLLOW_MAX_MS, POOL_DEPOSIT_LOCK, stopped, type PoolDepositAnswer, type PoolDepositFrom } from "./pool-deposit.ts";
 import type { HostAnswer, HostRefusal, KindContext, Running } from "./api.ts";
 
 /** The pool's events up to the newest block both RPCs agree on, with the round's finalized block (evmTreeSync's
@@ -254,7 +254,7 @@ function selectorOf(sig: string): string {
   return hex(keccak_256(new TextEncoder().encode(sig)).slice(0, 4));
 }
 /** The pool's state and label tree depths at `tag`, each as both RPCs read it (they must agree). */
-async function depthsOf(r: Run, tag: string): Promise<{ state: [bigint, bigint]; label: [bigint, bigint] }> {
+async function depthsOf(r: { h: Pick<PoolDepositEvmHost, "rpcs" | "pin"> }, tag: string): Promise<{ state: [bigint, bigint]; label: [bigint, bigint] }> {
   const out: [bigint, bigint][] = [];
   for (const data of DEPTH_CALLS) {
     const d = await both(r.h.rpcs, async (rpc, k) => firstWord(await rpc("eth_call", [{ to: r.h.pin.pool, data }, tag]), `rpc ${k} tree depth`));
@@ -266,7 +266,7 @@ async function depthsOf(r: Run, tag: string): Promise<{ state: [bigint, bigint];
 
 /** The L1 fee bound for `gas` on the pin's network, as each RPC's chain fee reads give it (the kit's reads; they must
  *  agree), 0 on Nitro. */
-async function l1FeesOf(r: Run, gas: bigint, tag: string): Promise<[bigint, bigint]> {
+async function l1FeesOf(r: { h: Pick<PoolDepositEvmHost, "rpcs" | "pin"> }, gas: bigint, tag: string): Promise<[bigint, bigint]> {
   const net = r.h.pin.network;
   if (net === "robinhood" || net === "robinhood-testnet") return [0n, 0n];
   const calls = evmPoolChainFeeReads(net, gas);
@@ -278,6 +278,24 @@ async function l1FeesOf(r: Run, gas: bigint, tag: string): Promise<[bigint, bigi
     answers[1].push(b);
   }
   return [evmPoolChainFee(net, EVM_POOL_TX_BYTES, answers[0]), evmPoolChainFee(net, EVM_POOL_TX_BYTES, answers[1])];
+}
+
+/**
+ * What one deposit into `pin`'s pool is priced from, read now on both RPCs at the newest block both hold (card
+ * evm-deposit-route-mainnet: the floor of a quote into U_X, pool-deposit-quote.ts evmPoolDepositFloor): the base fee
+ * both read, the tip U offers (EVM_DEPOSIT_PRIORITY_CAP), the pool's two tree depths both read, and the L1 fee bound at
+ * the cap's gas with the tree's headroom (0 on Nitro), as tryNote prices its `bound`. Names no account. Two RPCs that
+ * read apart throw EvmDepositDisagree; a read that fails throws.
+ */
+export async function readEvmDepositPrice(rpcs: readonly [EvmRpc, EvmRpc], pin: EvmPoolPin, sleep?: (ms: number) => Promise<void>): Promise<{ baseFee: bigint; tip: bigint; l1Fee: bigint; stateDepth: bigint; labelDepth: bigint }> {
+  const r = { h: { rpcs, pin } };
+  const blk = await evmRetryLag(() => evmAgreedBlock(rpcs, "latest", undefined, sleep), sleep);
+  const tag = qty(blk.number);
+  const fees = await both(rpcs, async (rpc, k) => quantity(((await rpc("eth_getBlockByNumber", [tag, false])) as { baseFeePerGas?: unknown } | null)?.baseFeePerGas, `rpc ${k} base fee`));
+  if (fees[0] !== fees[1] || blk.baseFeePerGas !== fees[0]) apart("the base fee");
+  const depths = await depthsOf(r, tag);
+  const l1 = await l1FeesOf(r, EVM_DEPOSIT_GAS_MAX + evmDepositHeadroom(depths.state[0], depths.label[0]), tag);
+  return { baseFee: fees[0], tip: EVM_DEPOSIT_PRIORITY_CAP, l1Fee: l1[0], stateDepth: depths.state[0], labelDepth: depths.label[0] };
 }
 
 /** What one try at a note came to. */
@@ -329,22 +347,39 @@ async function tryNote(r: Run, first: Extract<NoteRef, { kind: "deposit" }>, aga
   // the estimate both RPCs agree on for the call that gives, with it
   const depths = await depthsOf(r, acct.tag);
   const room = evmDepositHeadroom(depths.state[0], depths.label[0]);
+  // the run's need is the deposit's own gas (card evm-deposit-route-mainnet review P2b): the rung's call found with no
+  // fee, estimated on both RPCs at the agreed block (the two the same, at most the cap), its limit the estimate and the
+  // tree's headroom (`room`, the margin: the deposit lands at any depth up to that), priced at 2 x base fee + tip and the
+  // L1 fee at that limit. The cap is only the short a U with no rung yet is named (its top-up then covers any fee)
   const capGas = EVM_DEPOSIT_GAS_MAX + room;
-  const bound = capGas * maxFee + (await l1FeesOf(r, capGas, acct.tag))[0];
-  let step = priced(bound);
+  let step = priced(0n);
   if (step.kind === "wait") return { kind: "wait" };
   if (step.kind === "claim") return { kind: "claimed" };
   // short: the rung this ask goes in at first (the ladder's split of what is left of it, or the open note's recorded
-  // value) and the fee bound, less U's lower reading
+  // value) and the fee, less U's lower reading
   const need = sentValue ?? (want > 0n ? ladderSplit(EVM_LADDER, want).notes[0] : undefined) ?? EVM_LADDER.min;
-  if (step.kind !== "deposit" || step.call === undefined) return { kind: "keep", short: need + bound > low ? need + bound - low : 0n, u };
-  if (sentValue !== undefined && (step.value !== sentValue || !sameRef(step.ref, again!.ref))) return { kind: "keep", short: sentValue + bound > low ? sentValue + bound - low : 0n, u };
+  const shortAt = (v: bigint, fee: bigint): Try => ({ kind: "keep", short: v + fee > low ? v + fee - low : 0n, u });
+  if (step.kind !== "deposit" || step.call === undefined) return shortAt(need, capGas * maxFee + (await l1FeesOf(r, capGas, acct.tag))[0]);
   const estimateOf = async (call: { to: string; value: bigint; data: string }) =>
     both(r.h.rpcs, async (rpc, k) => quantity(await rpc("eth_estimateGas", [{ from: u, to: call.to, value: qty(call.value), data: call.data }, acct.tag]), `rpc ${k} estimate`));
   let estimate = await estimateOf(step.call);
   if (estimate[0] !== estimate[1]) apart("the deposit's gas estimate");
   if (estimate[0] > EVM_DEPOSIT_GAS_MAX) throw new PoolRuleRefused("gas_over_cap");
   let l1 = await l1FeesOf(r, estimate[0] + room, acct.tag);
+  {
+    // the rung U pays with that fee: the same call when it still fits, else the next rung down, estimated again
+    const fee = (estimate[0] + room) * maxFee + l1[0];
+    const fitted = priced(fee);
+    if (fitted.kind !== "deposit" || fitted.call === undefined) return shortAt(need, fee);
+    if (fitted.value !== step.value || !sameRef(fitted.ref, step.ref)) {
+      const e2 = await estimateOf(fitted.call);
+      if (e2[0] !== e2[1]) apart("the deposit's gas estimate");
+      if (e2[0] > EVM_DEPOSIT_GAS_MAX) throw new PoolRuleRefused("gas_over_cap");
+      if (e2[0] !== estimate[0]) ((estimate = e2), (l1 = await l1FeesOf(r, e2[0] + room, acct.tag)));
+    }
+    step = fitted;
+  }
+  if (sentValue !== undefined && (step.value !== sentValue || !sameRef(step.ref, again!.ref))) return shortAt(sentValue, (estimate[0] + room) * maxFee + l1[0]);
   if (sentValue === undefined) {
     const better = priced((estimate[0] + room) * maxFee + l1[0]);
     if (better.kind === "deposit" && better.call !== undefined && better.value > step.value && sameRef(better.ref, step.ref)) {
@@ -558,15 +593,17 @@ export async function followPoolDepositEvm(h: PoolDepositEvmHost, left: PoolDepo
   return left.landed || ends.includes("landed") ? "part_filled" : "not_landed";
 }
 
-/** The run: an ask (pool.deposit on an EVM chain), or null to settle the scope's open notes only. */
-export async function runPoolDepositEvm(h: PoolDepositEvmHost, ask: PoolAsk | null, waits: ReadWaits = readWaits(clockOf(h))): Promise<PoolDepositAnswer> {
+/** The run: an ask (pool.deposit on an EVM chain), or null to settle the scope's open notes only. `fixed`: the ask's
+ *  one source, U^evm_{s,i} (card evm-deposit-route-mainnet, the follow of a pool quote into U_X; src/pool-deposit.ts
+ *  PoolDepositFrom, review H1): never the newest landed U or the planned index. */
+export async function runPoolDepositEvm(h: PoolDepositEvmHost, ask: PoolAsk | null, waits: ReadWaits = readWaits(clockOf(h)), fixed?: PoolDepositFrom): Promise<PoolDepositAnswer> {
   // an ask's provider read that still fails before U signs: the run again from its first read after a wait on the
   // page's one rule (read-waits.ts readWaits), then "down" (card start-reads-wait-out-a-throttle); a sign out ends it
   if (ask === null) return depositRunEvm(h, ask, {});
-  return readsWaited((at) => depositRunEvm(h, ask, at), h.wait, stopOf(h), waits);
+  return readsWaited((at) => depositRunEvm(h, ask, at, fixed), h.wait, stopOf(h), waits);
 }
 
-async function depositRunEvm(h: PoolDepositEvmHost, ask: PoolAsk | null, at: { fault?: unknown }): Promise<PoolDepositAnswer> {
+async function depositRunEvm(h: PoolDepositEvmHost, ask: PoolAsk | null, at: { fault?: unknown }, fixed?: PoolDepositFrom): Promise<PoolDepositAnswer> {
   if (ask !== null && (ask.kind !== "pool.deposit" || ask.chain === "solana")) return { error: "not_allowed" };
   const seed = await h.seed64();
   const keys: Uint8Array[] = [];
@@ -604,6 +641,9 @@ async function depositRunEvm(h: PoolDepositEvmHost, ask: PoolAsk | null, at: { f
     let passFault: { e: unknown } | null = null;
     for (const n of (await mine()).filter((x) => x.state === "INCOMING")) {
       const i = firstOf(n.ref, scope)!.i;
+      // a fixed source's run reads that U alone (card evm-deposit-route-mainnet review P3, M359: no request of this run
+      // names another of the device's one-time addresses); the page's own pass reads the others, one U a request
+      if (fixed !== undefined && i !== fixed.i) continue;
       // a note whose read fails is held open (never dead, never built again in this run) and its U is no source, so the
       // pass reads every other note (one that landed settles) and an ask is never refused for it; with no ask the first
       // failure is the pass's answer, after the loop (review 1, delta review P2-1)
@@ -637,6 +677,17 @@ async function depositRunEvm(h: PoolDepositEvmHost, ask: PoolAsk | null, at: { f
 
     // an ask below the ladder's smallest rung has no note to deposit (the Solana runner's rule): refused, nothing planned
     if (ladderSplit(EVM_LADDER, ask.amount).notes.length === 0) return { error: "not_allowed" };
+    // the fixed source (card evm-deposit-route-mainnet; the Solana runner's rule, review H1): U^evm_{s,i} of the pool's
+    // scope whose address is the op's U_X, from its deposit note the store planned (else its next second arrival, as
+    // tryNote picks on U's chain); a U with a note still landing is read again next time; any other U is refused
+    if (fixed !== undefined) {
+      if (fixed.s !== scope) return { error: "not_allowed" };
+      const id = depositIdEvm(seed, fixed.s, fixed.i);
+      keys.push(id.secretKey);
+      if (id.address !== fixed.u) return { error: "not_allowed" };
+      if (busy.has(fixed.i)) return { stage: "not_landed", txs: [] };
+      if (!(await mine()).some((n) => n.ref.kind === "deposit" && n.ref.i === fixed.i)) return { error: "not_allowed" };
+    }
     let left = ask.amount;
     let simAgain = false;
     for (let steps = 0; steps < STEPS_MAX; steps++) {
@@ -645,7 +696,8 @@ async function depositRunEvm(h: PoolDepositEvmHost, ask: PoolAsk | null, at: { f
       const all = await mine();
       const used = all.filter((n) => LANDED.includes(n.state)).map((n) => firstOf(n.ref, scope)!.i).filter((i) => !busy.has(i));
       let t: Try | null = null;
-      if (used.length > 0) {
+      if (fixed !== undefined) t = await tryNote(r, { kind: "deposit", s: scope, i: fixed.i }, null, left);
+      else if (used.length > 0) {
         t = await tryNote(r, { kind: "deposit", s: scope, i: Math.max(...used) }, null, left);
         if (t.kind === "keep") t = null;
       }
@@ -695,7 +747,8 @@ async function depositRunEvm(h: PoolDepositEvmHost, ask: PoolAsk | null, at: { f
       if (landed) return { stage: left >= EVM_POOL_MIN_DEPOSIT ? "part_filled" : "filled", txs: landedTxs };
       // an earlier note still landing on a U that covers this rung once it lands: try again then; else the ask's own U
       // is short, and the top-up names it
-      if (await coversOnceLanded(ladderSplit(EVM_LADDER, left).notes[0] ?? EVM_LADDER.min)) return { stage: "not_landed", txs: [] };
+      // (never another U for a fixed source: its pass reads that U alone, so no other U is pending)
+      if ((await coversOnceLanded(ladderSplit(EVM_LADDER, left).notes[0] ?? EVM_LADDER.min))) return { stage: "not_landed", txs: [] };
       h.short?.(t.u, t.short);
       return { error: "not_funded" };
     }
@@ -740,7 +793,7 @@ type Locks = Pick<LockManager, "request">;
 /** pool.deposit on an EVM pool, under the seed's shared lock and POOL_DEPOSIT_LOCK (one deposit run at a time, Solana's
  *  and the EVM's alike): answered at its first send, or at its end when nothing was sent. */
 export function poolDepositEvmKind(host: () => PoolDepositEvmHost, locks: Locks | null = globalThis.navigator?.locks ?? null) {
-  return (ask: PoolAsk | null, ctx: KindContext | null): HostRefusal | Running<"pool.deposit"> => {
+  return (ask: PoolAsk | null, ctx: KindContext | null, from?: PoolDepositFrom): HostRefusal | Running<"pool.deposit"> => {
     if ((ask !== null && (ask.kind !== "pool.deposit" || ask.chain === "solana")) || !locks) return { error: "not_allowed" };
     // the tap's one bound, from its arrival (before its locks)
     const waits = tapWaits(ctx);
@@ -764,7 +817,7 @@ export function poolDepositEvmKind(host: () => PoolDepositEvmHost, locks: Locks 
           const progress = (stage: TradeStage): void => (stage === "sent" && first ? void (first = false) : ctx?.progress(stage));
           let left: PoolDepositEvmLeft | null = null;
           try {
-            const a = await runPoolDepositEvm({ ...h, sent, progress, left: (l) => void (left = l) }, ask, waits);
+            const a = await runPoolDepositEvm({ ...h, sent, progress, left: (l) => void (left = l) }, ask, waits, from);
             const l = left as PoolDepositEvmLeft | null;
             // filled or part_filled is the ask's end; anything else past a send of the ask (sent, not_landed, a fault)
             // is no end: its open notes are read on, and the end goes as progress once each is landed or dead

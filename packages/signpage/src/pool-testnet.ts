@@ -512,9 +512,13 @@ async function helperFee(url: string, signal: AbortSignal | undefined, fetchFn: 
 export type TestnetPool = {
   /** The pool kinds' flow: pool.deposit, pool.buy and pool.sell on the devnet pool. */
   flow: NonNullable<PoolKindsDeps["flow"]>;
-  /** pool.deposit on the page's Solana pool from one fixed U_{s,i} (card pool-deposit-follow, review H1: the follow of a
-   *  quote into U_X): the request checked by the pool rule as the kind's own, then run with `from`; never another U. */
+  /** pool.deposit on the page's pool of the request's chain (Solana's; Base's and Robinhood's on their pins, card
+   *  evm-deposit-route-mainnet) from one fixed U_{s,i} (card pool-deposit-follow, review H1: the follow of a quote into
+   *  U_X): the request checked by the pool rule as the kind's own, then run with `from`; never another U. */
   depositFrom(params: Record<string, unknown>, from: PoolDepositFrom, ctx: KindContext): HostRefusal | Running<"pool.deposit">;
+  /** Base's or Robinhood's pool on this page (card evm-deposit-route-mainnet): its pin (the wallet's EVM_POOLS on the
+   *  page's network) and the deposit's own pair, the reads a pool quote's floor and follow make; null with no pin. */
+  evmPoolOf(chain: "base" | "robinhood"): { pin: EvmPoolPin; rpcs: readonly [EvmRpc, EvmRpc] } | null;
   /** The deposit run's host (a new one per run): its `landed` runs the proof queue's pass. */
   host(): PoolDepositHost;
   /** The INCOMING notes finished (src/pool-deposit.ts settlePoolDeposits), one pass at a time: a signed-in load. */
@@ -2229,8 +2233,11 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       } catch {
         return { error: "not_allowed" };
       }
-      return ask.chain !== "solana" || pin === undefined ? { error: "not_allowed" } : deposit(ask, ctx, from);
+      // Base and Robinhood (card evm-deposit-route-mainnet): the chain's EVM kind with the same fixed source, on its pin
+      if (ask.chain !== "solana") return evmDeposit(ask.chain)?.(ask, ctx, from) ?? { error: "not_allowed" };
+      return pin === undefined ? { error: "not_allowed" } : deposit(ask, ctx, from);
     },
+    evmPoolOf: (chain) => ((e) => (e === null ? null : { pin: e.pin, rpcs: e.rpcs }))(evmPool(chain)),
     host: () => host(),
     settle,
     stateRead,

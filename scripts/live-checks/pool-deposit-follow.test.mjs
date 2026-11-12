@@ -1,6 +1,7 @@
 // node --test scripts/live-checks/pool-deposit-follow.test.mjs: the live check replays its recorded answers
 // (pool-deposit-follow.answers.json). good: this card's build, re-recorded by card pool-deposit-op-txs (the run's end read
-// from its {end, txs}, the follow function re-cut into the excerpt from that build): PASS. bad: origin/main 6616059d's build (release-91), and
+// from its {end, txs}, the follow function re-cut into the excerpt from that build), and by card evm-deposit-route-mainnet
+// (the wiring, the follow's deps with its deposit and refund functions and depositFrom re-cut from that build): PASS. bad: origin/main 6616059d's build (release-91), and
 // liveBefore: SIGN_HOST before this card's deploy: each FAIL, each mark named. Planted on the good one: another /app.js,
 // no pin, each mark taken away: each FAIL. Planted in the bundle's own excerpt (pool-deposit-follow.excerpt.txt, cut from
 // this build's public/app.js: the floor and its read, the quote check, the wiring, the follow's page deps, its reads and
@@ -56,11 +57,12 @@ const PLANTED = [
   ["pool.address handed no follow", new RegExp(`=>(${N})\\.quoted\\((${N}),(${N}),(${N}),(${N})\\)\\}\\)`), "=>void 0})", ["wired"]],
   ["the follow depositing from index 0, not the op's own U", new RegExp(`\\{s:BigInt\\((${N})\\.s\\),i:\\1\\.i,u:\\1\\.u\\}`), "{s:BigInt($1.s),i:0,u:$1.u}", ["wired"]],
   ["the follow depositing through the kinds' handler, not depositFrom", /\.depositFrom\(/, ".flow(", ["wired"]],
-  ["the follow with no refund mover", new RegExp(`,refund:(${N})\\(\\{read:`), ",other:$1({read:", ["wired"]],
+  ["the follow with no refund mover", new RegExp(`,refund:(${N})\\(async (${N})=>`), ",other:$1(async $2=>", ["wired"]],
+  ["the refund mover at a floor not the one it is handed", new RegExp(`,floor:(${N}),priced:`), ",floor:async()=>0n,priced:", ["wired"]],
   ["U_X's balance read at confirmed (G2)", /getBalance`,\[([\w$]+)\.u,\{commitment:`finalized`\}/, "getBalance`,[$1.u,{commitment:`confirmed`}", ["chainFirst"]],
   ["the higher balance counted", new RegExp(`=(${N})<(${N})\\?\\1:\\2,`), "=$1<$2?$2:$1,", ["chainFirst"]],
-  ["a deposit under the floor", new RegExp(`&&(${N})>=(${N})\\.floor\\)\\{`), "&&!0){", ["chainFirst"]],
-  ["the costs read while U_X holds nothing (review L2)", new RegExp(`=(${N})>=(${N})\\.ladder\\.min\\?await`), "=!0?await", ["chainFirst"]],
+  ["a deposit under the floor", new RegExp(`&&(${N})>=(${N})\\.floor\\)await`), "&&!0)await", ["chainFirst"]],
+  ["the costs read while U_X holds nothing (review L2)", new RegExp(`=(${N})>=(${N})\\.ladder\\.min\\?(${N})\\(await`), "=!0?$3(await", ["chainFirst"]],
   ["a fixed source of another pool's scope let through (H1)", new RegExp(`if\\((${N})\\.s!==(${N})\\|\\|`), "if(", ["fromUX"]],
   ["a fixed source whose U is not the op's U_X let through (review 2 L2)", new RegExp(`\\|\\|(${N})\\((${N})\\)\\.address!==\\2\\.u\\)return\\{error:\`not_allowed\`\\};`), ")return{error:`not_allowed`};", ["fromUX"]],
   ["the kind drops the fixed source (review 2 L1)", new RegExp(`=await (${N})\\((${N}),(${N}),(${N})\\)\\}finally`), "=await $1($2,$3)}finally", ["fromUX"]],
@@ -68,8 +70,16 @@ const PLANTED = [
   ["a U the store never planned let through (H1)", new RegExp(`if\\((${N})===void 0\\)return\\{error:\`not_allowed\`\\};(${N})=\\{s:`), "$2={s:", ["fromUX"]],
   ["the newest-used-or-planned fallback kept with a fixed source (H1)", new RegExp(`if\\((${N})===void 0&&(${N})===0&&`), "if(!0&&$2===0&&", ["fromUX"]],
   ["depositFrom with no pool rule (H1)", new RegExp(`try\\{(${N})=${N}\\(\\{\\.\\.\\.(${N}),kind:\`pool\\.deposit\`\\}\\)\\}`), "try{$1=$2}", ["fromUX"]],
-  ["depositFrom on any chain (H1)", new RegExp(`return (${N})\\.chain!==\`solana\`\\|\\|`), "return ", ["fromUX"]],
+  ["depositFrom runs the Solana kind on any chain (H1)", new RegExp(`return (${N})\\.chain===\`solana\`\\?`), "return !0?", ["fromUX"]],
+  ["depositFrom drops the fixed source on Base and Robinhood (card evm-deposit-route-mainnet)", new RegExp(`\\?\\.\\((${N}),(${N}),(${N})\\)\\?\\?\\{error:`), "?.($1,$2)??{error:", ["fromUX"]],
   ["any end counted as landed", new RegExp(`\\|\\|(${N})===\`part_filled\`\\)&&`), "||!0)&&", ["chainFirst"]],
+  // card evm-deposit-route-mainnet review and re-read: a note of U_X's still landing holds in_pool and the end; a
+  // landed note counts only after this quote's own SUCCESS; a carry U_X cannot pay with its fee shows short
+  ["a carry counted landed with a later rung of U_X's still landing", /&&!await p\(\);return l&&/, ";return l&&", ["chainFirst"]],
+  ["in_pool shown while a note of U_X's is landing", /if\(!s&&r!==`in_pool`&&/, "if(r!==`in_pool`&&", ["chainFirst"]],
+  ["a neighbour's landed note counted before this quote's own SUCCESS (re-read P2-1)", /!a&&!s&&o&&t\.noted!==void 0/, "!a&&!s&&t.noted!==void 0", ["chainFirst"]],
+  ["SUCCESS never read as this quote's payment (re-read P2-1)", /a\.status===`SUCCESS`&&\(o=!0\),/, "", ["chainFirst"]],
+  ["a carry U_X cannot pay with its fee shown as nothing (re-read P3-2)", /s===`not_funded`&&!a&&await i\(`short`\),/, "", ["chainFirst"]],
   ["the status read for U_X, not the refund id", new RegExp(`,Date\\.now\\(\\),(${N})\\.refund_id\\)`), ",Date.now(),$1.u)", ["chainFirst"]],
   ["a refund's move to another coin", new RegExp(`if\\((${N})\\.destinationAsset!==${N}\\[${N}\\]\\)return ${N}\\(\`destinationAsset\`\\);`), "", ["refundCarry"]],
   ["a refund's move to another wallet", new RegExp(`if\\((${N})\\.recipient!==(${N})\\.wallet\\)return ${N}\\(\`recipient\`\\);`), "", ["refundCarry"]],

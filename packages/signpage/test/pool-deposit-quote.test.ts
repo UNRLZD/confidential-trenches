@@ -120,6 +120,18 @@ test("an answer below the device's own floor, or priced past its two reads, is r
   refusedAnswer("price", () => checkPoolDepositQuote(req, answerOf(req, 9), wide));
 });
 
+test("evm-deposit-route-mainnet round 3: the signed amounts are the request's own: an input not the amount asked, a least input not the input, or a least output over the output is refused, even signed", () => {
+  const req = poolDepositQuoteRequest("solana", SOL_U, SOL_ID, BASE_USDC, 25_000_000n, NOW);
+  const ctx = ctxOf("solana", SOL_U, 9);
+  // an input under the amount asked (the rest of the user's money would sit at 1Click's address): the floors at it pass
+  const under = (a: Answer) => { a.quote.amountIn = a.quote.minAmountIn = "24000000"; a.quote.amountInFormatted = "24.000000"; };
+  refusedAnswer("amount", () => checkPoolDepositQuote(req, answerOf(req, 9, 1_000n, under), ctx));
+  refusedAnswer("amount", () => checkPoolDepositQuote(req, answerOf(req, 9, 1_000n, (a) => { a.quote.minAmountIn = "24000000"; }), ctx));
+  refusedAnswer("amount", () => checkPoolDepositQuote(req, answerOf(req, 9, 1_000n, (a) => { a.quote.minAmountOut = (BigInt(a.quote.amountOut as string) + 1n).toString(); }), ctx));
+  // the same answer with its own amounts passes
+  assert.equal(checkPoolDepositQuote(req, answerOf(req, 9), ctx).amountIn, 25_000_000n);
+});
+
 test("review F3: a min out under the pool's smallest deposit is refused by the pool rule, never the vault's floor", async () => {
   const { POOL_DEPOSIT_MIN_OUT } = await import("../../wallet/src/deposit/quote.ts");
   assert.deepEqual([POOL_DEPOSIT_MIN_OUT.solana, POOL_DEPOSIT_MIN_OUT.base, POOL_DEPOSIT_MIN_OUT.robinhood], [10_000_000n, 1_000_000_000_000_000n, 1_000_000_000_000_000n]); // 0.01 SOL, 0.001 ETH
