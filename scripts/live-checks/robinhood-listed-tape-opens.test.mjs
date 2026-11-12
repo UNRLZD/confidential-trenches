@@ -125,7 +125,8 @@ test("card token-page-data-complete-and-fast: read() reads a filling tape again 
   const T = `0x${"1".repeat(40)}`;
   const lists = (rows) => new Response(JSON.stringify({ lists: { new: rows.map((token) => ({ token })) } }), { status: 200 });
   const tape = (filling) => new Response(JSON.stringify({ trades: [], ...(filling ? { filling: true } : {}), src: "chain", as_of_ms: 1 }), { status: 200 });
-  for (const [what, fills, verdict] of [["filled on the third read", 3, "PASS"], ["never filled", Infinity, "FAIL"]]) {
+  // the bound is wall-clock: far for the tape that fills (a slow runner must not reach it first), near for the one that never does
+  for (const [what, fills, verdict, filledMs] of [["filled on the third read", 3, "PASS", 60_000], ["never filled", Infinity, "FAIL", 5]]) {
     const reads = { lists: 0, tape: 0 };
     const fetchFn = async (url) => {
       const u = new URL(url);
@@ -134,7 +135,7 @@ test("card token-page-data-complete-and-fast: read() reads a filling tape again 
       reads.tape++;
       return tape(reads.tape < fills);
     };
-    const run = await read("https://h.test", fetchFn, { waitMs: 50, pollMs: 0, filledMs: 5, fillPollMs: 1, sleep: (ms) => new Promise((ok) => setTimeout(ok, ms)) });
+    const run = await read("https://h.test", fetchFn, { waitMs: 50, pollMs: 0, filledMs, fillPollMs: 1, sleep: (ms) => new Promise((ok) => setTimeout(ok, ms)) });
     const d = run.chains.robinhood.dropped[0];
     assert.equal(d.filling, true, what);
     assert.equal(d.filled.filling, fills === Infinity, what);
