@@ -305,8 +305,10 @@ test("a history of 100 withdrawals (150 notes): the seed is opened a slice at a 
   // each answer on a turn of its own, as a provider's answer comes over the network
   const net = (x: VaultSyncRpc): VaultSyncRpc => ({ name: x.name, query: async (p, s) => (await turn(), x.query(p, s)) });
   const [a, b] = pair(v);
-  const r = await restoreKind.nearVaultRestoreNotes({ network: PAGE_NETWORK, rpcs: [net(a), net(b)], seed64, gap: GAP });
-  on = false;
+  // the other task ends with the restore also when it fails, so a failing restore is red here and never a hang
+  const r = await restoreKind.nearVaultRestoreNotes({ network: PAGE_NETWORK, rpcs: [net(a), net(b)], seed64, gap: GAP }).finally(() => {
+    on = false;
+  });
   assert.equal(r.notes.length, 150);
   assert.equal(r.notes.filter((n) => n.state === "UNSPENT").length, 50);
   // a slice is WALK_SLICE_MS (8 ms) of work and the step it ends on, about 10 ms here; the bound leaves a loaded machine
