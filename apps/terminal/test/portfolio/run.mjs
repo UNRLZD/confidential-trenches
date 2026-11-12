@@ -186,7 +186,7 @@ try {
       // an open row of unknown cost (review P2-4): bought and PnL the dash, its value drawn, and no unrealized from it
       if (f === "pooltrades-unknown" && !phone) {
         const row = await page.$$eval(".pf [data-pos]", (rs) => rs.filter((r) => r.getClientRects().length).map((r) => [...r.querySelectorAll("td")].slice(1, 6).map((c) => c.innerText.replace(/\s+/g, " ").trim()).join("|")));
-        check(JSON.stringify(row) === JSON.stringify(["—|—|34,154.04 Icm|$0.07|—"]), `${tag}: open row ${JSON.stringify(row)}`);
+        check(JSON.stringify(row) === JSON.stringify(["—|—|34.1K Icm|$0.07|—"]), `${tag}: open row ${JSON.stringify(row)}`);
       }
       // a price that reads zero: KINU's value is the dash, on the desktop table and the phone card, never $0.00
       if (f === "zeroprice") {
