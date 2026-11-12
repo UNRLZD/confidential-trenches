@@ -361,6 +361,9 @@ export function createSolanaTrades(deps: {
   /** One line per stream drop and return (the host's log), so a deploy's tape can be read back. */
   log?: (line: string) => void;
   tickMs?: number;
+  /** The first answer's bound: resolves when a first read stops waiting for a round that holds a trade (default
+   *  COLD_WAIT_MS on a timer; a test gives its own). */
+  coldWait?: () => Promise<unknown>;
   /** The shared RPC budget (../../rpc/rpc.ts background, card helper-ready-gate): before each request to `url`, the
    *  seconds to wait (0: go); a provider with a wait is skipped for the next, so callers' reads keep their room. */
   budget?: (url: string, method: string) => number;
@@ -745,7 +748,7 @@ export function createSolanaTrades(deps: {
     })();
     // the first answer waits for the walk's first round that holds a trade (its newest trades), the whole walk, or
     // COLD_WAIT_MS
-    await Promise.race([cold, rounded, new Promise((r) => setTimeout(r, COLD_WAIT_MS).unref?.())]);
+    await Promise.race([cold, rounded, deps.coldWait?.() ?? new Promise((r) => setTimeout(r, COLD_WAIT_MS).unref?.())]);
     return e;
   }
 

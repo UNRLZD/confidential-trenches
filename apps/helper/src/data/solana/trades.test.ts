@@ -598,22 +598,39 @@ test("card helper-live-run-green-after-122: a busy token whose newest transactio
   t.stop();
 });
 
-test("card helper-live-run-green-after-122: a token none of whose newest transactions holds a trade still answers its first read by COLD_WAIT_MS, empty and filling", async () => {
+test("card helper-live-run-green-after-122: a token none of whose newest transactions holds a trade answers its first read at its bound (COLD_WAIT_MS), empty and filling, not at the first round", async () => {
   const sigs = Array.from({ length: 10 }, (_, i) => `${BUY.signature.slice(0, -2)}${String(i).padStart(2, "0")}`);
   const noTrade = { ...BUY.result, meta: { ...BUY.result.meta, logMessages: [] } };
   const base = rpcFetch({ sigs: () => sigs.map((s, i) => ({ signature: s, slot: 465_000_000 + i, err: null })).reverse(), txs: Object.fromEntries(sigs.map((s) => [s, noTrade])), price: 9_342_267_796n, pub: TS, slot: 100 }, { [MINT]: 6 });
-  // the older round hangs past COLD_WAIT_MS
+  // the 5 newer reads answer at once; the 5 older hang until the test lets them go
+  let newerDone = 0;
+  let olderOpen = 0;
+  let letGo = () => {};
+  const held = new Promise<void>((go) => (letGo = go));
   const hang = async (url: string, init: RequestInit) => {
     const req = JSON.parse(String(init.body)) as { method: string; params: [string] };
-    if (req.method === "getTransaction" && sigs.slice(0, 5).includes(req.params[0])) await new Promise((r) => setTimeout(r, 4_000));
-    return base(url, init);
+    if (req.method === "getTransaction" && sigs.slice(0, 5).includes(req.params[0])) {
+      olderOpen++;
+      await held;
+      olderOpen--;
+    }
+    const r = await base(url, init);
+    if (req.method === "getTransaction" && sigs.slice(5).includes(req.params[0])) newerDone++;
+    return r;
   };
-  const t = createSolanaTrades({ fetch: hang, now: () => TS * 1000, listed: async (m) => m === MINT, rpcs: ["https://rpc.test"], source: () => ({ watch: async () => undefined, unwatch: () => undefined, close: () => undefined }), tickMs: 0 });
-  const t0 = performance.now();
-  const a = JSON.parse((await t.trades(MINT, 50)).body) as { trades: unknown[]; filling?: boolean };
-  const ms = performance.now() - t0;
-  assert.deepEqual([a.trades.length, a.filling], [0, true]);
-  assert.ok(ms >= 2_900 && ms < 3_900, `answered at ${Math.round(ms)} ms (COLD_WAIT_MS 3000)`);
-  await new Promise((r) => setTimeout(r, 1_200));
+  // the bound is the test's: it ends only when the test ends it
+  let bound = () => {};
+  const t = createSolanaTrades({ fetch: hang, now: () => TS * 1000, listed: async (m) => m === MINT, rpcs: ["https://rpc.test"], source: () => ({ watch: async () => undefined, unwatch: () => undefined, close: () => undefined }), tickMs: 0, coldWait: () => new Promise<void>((go) => (bound = go)) });
+  let answer: { trades: unknown[]; filling?: boolean } | null = null;
+  const reading = t.trades(MINT, 50).then((a) => (answer = JSON.parse(a.body)));
+  for (let i = 0; i < 100 && !(newerDone === 5 && olderOpen === 5); i++) await settle();
+  assert.deepEqual([newerDone, olderOpen], [5, 5], "the newer round answered, the older reads still open");
+  await settle();
+  assert.equal(answer, null, "no answer at a first round with no trade");
+  bound();
+  await reading;
+  assert.deepEqual([answer!.trades.length, answer!.filling, olderOpen], [0, true, 5], "at the bound: empty and filling, the older reads still open");
+  letGo();
+  for (let i = 0; i < 100 && olderOpen > 0; i++) await settle();
   t.stop();
 });
