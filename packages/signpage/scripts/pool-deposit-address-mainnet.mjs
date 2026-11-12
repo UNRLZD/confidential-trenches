@@ -20,7 +20,7 @@
 //   and every tag 1 instruction of the pinned program (SOL_MAINNET_DEPLOY), at least one, has U_X as its depositor
 //   (accounts[1]) and deposits a rung of SOL_LADDER. On Base and Robinhood, each at or below that RPC's finalized block:
 //   the delivery's receipt succeeded and its tx sends U_X at least minAmountOut; the pool tx's receipt, in a later block,
-//   succeeded from U_X with the pinned pool's Deposited log (EVM_POOLS; none pinned yet, so refused). Anything else:
+//   succeeded from U_X with the pinned pool's Deposited log (EVM_POOLS, card evm-pools-on-mainnet). Anything else:
 //   refused, nothing written.
 // - The record (scripts/live-checks/pool-deposit-address.md by default) is appended with one run section:
 //     CARD pool-deposit-address / live: PASS

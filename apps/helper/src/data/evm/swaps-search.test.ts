@@ -118,7 +118,16 @@ test("card helper-robinhood-search-ahead: 12 cold tokens whose pool only the dis
     await (s as Ahead).ahead?.(TOKENS.map((x) => x.token));
     const before = [...r.reads.values()].reduce((a, b) => a + b, 0);
     const t0 = Date.now();
-    const got = await Promise.all(TOKENS.map(({ token }) => s.trades(token, 50).then((a) => ({ a, ms: Date.now() - t0 }))));
+    // each read as the page reads it: a tape still filling past the open's bound (card token-page-data-complete-and-fast)
+    // is read again 3 s on (the page's TRADES_POLL_MS), and timed at the answer that holds the tape
+    const filled = async (token: string) => {
+      for (;;) {
+        const a = await s.trades(token, 50);
+        if (a.status !== 200 || (JSON.parse(a.body) as { filling?: boolean }).filling !== true) return a;
+        await new Promise((go) => setTimeout(go, 3_000));
+      }
+    };
+    const got = await Promise.all(TOKENS.map(({ token }) => filled(token).then((a) => ({ a, ms: Date.now() - t0 }))));
     s.stop();
     return { got, opened: [...r.reads.values()].reduce((a, b) => a + b, 0) - before };
   });

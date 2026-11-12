@@ -37,7 +37,7 @@ export const READS = {
   holders: (c, t) => `/v1/market/holders?chain=${c}&token=${t}`,
 };
 export const ROW = [...TERMINAL_FIELDS];
-export const PAGE = ["row", "decimals", "pool", "risk", "route", "filling"];
+export const PAGE = ["row", "decimals", "pool", "risk", "route", "filling", "links"];
 export const RISK = ["mint_auth", "freeze_auth", "lp", "top10_bps", "dev_bps", "snipers_bps", "holders", "liq_usd", "age_s", "tax", "honeypot", "insiders_bps", "bundlers_bps", "fresh_bps"];
 export const HOLDERS = ["holders", "total", "top_bps", "src", "as_of_ms"];
 const SHA = /^[0-9a-f]{40}$/;
@@ -72,6 +72,7 @@ export function pick(snapshot) {
 /** The first thing wrong with a page body for `row` (the lists' row of the token) on `chain`, or null. */
 export function pageFault(chain, row, p) {
   if (!same(p, PAGE)) return `page: ${diff(p, PAGE)}`;
+  if (!isObj(p.links) || !Object.entries(p.links).every(([k, v]) => ["site", "x", "telegram"].includes(k) && typeof v === "string" && /^https?:\/\/[^\s]+$/.test(v))) return `links ${show(p.links)}`;
   if (!same(p.row, ROW)) return `row: ${diff(p.row, ROW)}`;
   if (p.row.chain !== chain) return `row.chain ${show(p.row.chain)}, not ${chain}`;
   if (p.row.token !== row.token) return `row.token ${show(p.row.token)}, not ${row.token}`;

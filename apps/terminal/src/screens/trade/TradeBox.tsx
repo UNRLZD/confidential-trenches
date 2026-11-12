@@ -17,6 +17,7 @@ import {
   centsToDecimal,
   filledOut,
   fmtUsd,
+  hasPool,
   outcome,
   parseUsd,
   poolBuyAsk,
@@ -166,7 +167,7 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
   // the pool path (card trade-box-pool): a chain whose pool the signing page reports buys from it, one proof a tap; Bal
   // is the pool's balance and Max the most one tap can spend, in USD at the device's price. Other chains keep the vault.
   const pools = signedOut ? undefined : snapshot.state?.pools;
-  const onPool = !!pools?.some((p) => p.chain === chain);
+  const onPool = hasPool(pools, chain);
   const price = onPool ? kit.poolPrice(chain) : null;
   const pool = onPool ? poolView(pools, chain, price) : null;
   // the proof's state reads state.pools alone: it draws with no price

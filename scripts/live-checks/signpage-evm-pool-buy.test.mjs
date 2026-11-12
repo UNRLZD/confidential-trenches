@@ -5,6 +5,9 @@
 // FAIL. Made from the good run: a buy read back on one RPC only, a reverted receipt, a receipt with no Bought, another
 // block, another pool, a helper that sends a malformed buy, a CORS echo of "*", one testnet missing, a bundle that is
 // not the pinned one: each FAIL.
+// Card evm-pools-on-mainnet: the good and bad_testnet_page answers' page parts are re-made from a local mainnet build (and the testnet
+// build for a testnet page) of that card, which pins both EVM pools and keeps the kind closed there; re-recorded from
+// SIGN_HOST at the next sign deploy.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -71,7 +74,7 @@ test("recorded bad run: the run's deposits named as buys: FAIL", async () => {
 test("recorded bad run: the testnet build, the EVM buy in it, served on SIGN_HOST: FAIL", async () => {
   const r = await run(A.bad_testnet_page);
   assert.equal(r.ok, false);
-  assert.deepEqual(bad(r), [`BAD [SIGN_HOST] the mainnet build carries no EVM buy (no pinned mainnet EVM pool): ${EVM_BUY_MARKS.join(", ")}`]);
+  assert.deepEqual(bad(r), [`BAD [SIGN_HOST] the mainnet build carries no EVM buy (closed on mainnet: refused before any read): ${EVM_BUY_MARKS.join(", ")}`]);
 });
 
 test("made from the good run: each break FAILs", async () => {

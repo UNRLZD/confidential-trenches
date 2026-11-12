@@ -4,6 +4,9 @@
 // (re-recorded for card page-evm-rpc-csp, the site's CSP with the kit's EVM providers, 2026-11-07; and for card held-move-forgotten-tx, with the mainnet archival RPCs, 2026-11-08; and for card wallet-restore-reads-ux, with Pocket's Solana gateway, 2026-11-09 on the Mac, Chrome 157; and for card evm-pool-sync-holds on that build with Base's bloXroute too, 2026-11-09 on the Mac). bad: the same build
 // with one byte of withdraw.zkey changed: its sha256 is not the pin and the worker refuses it at load, so nothing is
 // proved: FAIL. The other bad answers are the good one with one fault planted each: FAIL.
+// Card evm-pools-on-mainnet: SIGN_HOST's site policy names the mainnets' EVM providers alone, so the good answers' site
+// CSP is the recorded one with the six testnet EVM providers taken out of its connect-src, as the build's _headers now
+// serves it (the headers come from that file alone); re-recorded at the next sign deploy.
 import assert from "node:assert/strict";
 import { chmodSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";

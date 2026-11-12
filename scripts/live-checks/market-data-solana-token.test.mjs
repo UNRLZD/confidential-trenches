@@ -4,7 +4,10 @@
 // before this card, 404 on all three: FAIL. Made from the good answer: a page missing a Risk field, a row with an extra
 // field, the authorities not from the chain, a holder row with a stray field, a bar off the hour grid, bars out of
 // order, another mint's page, a stale read and no CORS echo: each FAIL. Card helper-restart-fresh: each answer judged by
-// its own read's time: one read late in a run, dated past 10 min of it, FAILs.
+// its own read's time: one read late in a run, dated past 10 min of it, FAILs. Card token-page-data-complete-and-fast: the
+// page now always carries `filling` and `links`; the good answer's page had neither (recorded before both), so both were
+// added to it by hand (`filling: false`, `links: {}`); re-record it from the first deploy that serves them.
+// A page with no `links`, or a link that is not http(s), FAILs.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -52,8 +55,8 @@ const edit = (k, fn, headers) => {
 test("the pinned lists are 06b's, the Row is the terminal's, and the helper serves exactly them", () => {
   assert.deepEqual(ROW, [...TERMINAL_FIELDS]);
   assert.deepEqual(ROW, [...HELPER_ROW]);
-  // the helper's list is 06b's then `filling` (card token-page-fills-after)
-  assert.deepEqual([...PAGE, "filling"], [...PAGE_FIELDS]);
+  // the helper's list is 06b's then `filling` (card token-page-fills-after) and `links` (card token-page-data-complete-and-fast)
+  assert.deepEqual([...PAGE, "filling", "links"], [...PAGE_FIELDS]);
   assert.deepEqual(RISK, [...RISK_FIELDS]);
   assert.deepEqual(HOLDERS, [...HOLDERS_FIELDS]);
   assert.deepEqual(CANDLES, [...CANDLES_FIELDS]);
@@ -64,6 +67,15 @@ test("recorded good answer: the page, holders and candles of one live mint in ex
   assert.equal(r.ok, true, r.lines.join("\n"));
   assert.equal(r.lines.length, 21);
   assert.ok(JSON.parse(A.good.reads.candles.body).candles.length > 0);
+});
+
+test("card token-page-data-complete-and-fast: a page with no links, or a link that is not http(s), FAILs", async () => {
+  for (const [f, re] of [[(b) => delete b.links, /keys/], [(b) => (b.links = { site: "javascript:alert(1)" }), /links/], [(b) => (b.links = { mail: "https://x.y" }), /links/]]) {
+    const r = await run(edit("token", f));
+    assert.equal(r.ok, false);
+    assert.ok(bad(r).some((l) => re.test(l)), bad(r).join("\n"));
+  }
+  assert.equal((await run(edit("token", (b) => (b.links = { x: "https://x.com/pump" })))).ok, true);
 });
 
 test("card token-page-fills-after: a page with filling false passes; filling not a boolean, or true on a Jupiter row, FAILs", async () => {

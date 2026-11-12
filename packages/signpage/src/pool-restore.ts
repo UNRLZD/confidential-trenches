@@ -14,8 +14,10 @@
 //   with no tap (src/main.ts), under an op id of its own, so the app's sign-in sheet shows it (S19).
 // - It runs on every pool the page's network pins (pagePools): the Solana pool through the wallet's solanaRestoreNotes
 //   on the page's Solana pair, each EVM pool through evmRestoreNotes on its pool list, notes only (wallets: false: no W
-//   is named to any provider, since the page keeps no W record). A pin with no reads on this page (an EVM pin on
-//   mainnet, which has no EVM pool list yet) is a failed pool, never skipped: the run ends stalled, so "done" always
+//   is named to any provider, since the page keeps no W record; each Solana W's buy record comes back after the notes
+//   are written, in the background, outside the restore's wait: src/sol-buy-records.ts, run by the notes' write). A pin
+//   with no reads on this page (an EVM pin on mainnet, which has no EVM pool list yet) is a failed pool, never skipped:
+//   the run ends stalled, so "done" always
 //   means every pinned pool was read.
 // - What they find goes to the note store through the wallet's writeRestored (parents first; a note the store holds in
 //   flight is left as it is; an index this page planned that the walk finds landed is landed, E5), the pools' notes
@@ -287,6 +289,8 @@ async function readDepositIds(
       out.named.push(`${w.label}: ${drift.length} deposit note${drift.length === 1 ? "" : "s"} of scope ${String((drift[0]!.ref as { s: bigint }).s)} in the walk of scope ${w.scope}; its ids are not read`);
       continue;
     }
+    // a chain this build gives no deposit address on: no id of it can hold money, nothing to read
+    if (!w.addressed) continue;
     const ux = w.ux;
     if (ux === null) {
       const r = await restoreDepositIds(seed, w.scope, { notes: [...w.notes], ...lanesOf(w.notes, w.scope) }, holds, await lanes(w.scope, w.notes));
@@ -435,7 +439,7 @@ export function restoreUxOf(chain: PoolChain, follow: PoolUxReads | null, progra
 }
 
 /** A pool walked: its label, chain, scope, notes, and its U_X reads on its own chain (null: none on this page). */
-type Walked = { label: string; chain: PoolChain; scope: bigint; notes: readonly RestoredNote[]; ux: PoolUxReads | null };
+type Walked = { label: string; chain: PoolChain; scope: bigint; notes: readonly RestoredNote[]; ux: PoolUxReads | null; addressed: boolean };
 
 /** A pinned pool's chain: Solana, or the app chain of its EVM network (Base Sepolia is Base's, as src/pools.ts names it). */
 const chainOf = (p: RestorePool): PoolChain => (p.chain === "solana" ? "solana" : p.pin.network === "base" || p.pin.network === "base-sepolia" ? "base" : "robinhood");
@@ -543,6 +547,10 @@ export type PoolRestoreHost = {
   /** A pool chain's U_X reads and carry (the pool follow's own, src/main.ts), or null when the page has none there: that
    *  pool's scope then ends stalled, POOL_CHAIN_UNREAD. None given: null on every chain. */
   ux?: (chain: PoolChain) => PoolUxReads | null;
+  /** Whether this build gives a deposit address on a pool chain (pool.address: main.ts pageAddressPools). A chain it gives
+   *  none on has no deposit id nor U_X that money could have reached, so its ids and U_X are not read and are no reason
+   *  the restore is not done; its pool's notes are walked as any other's. None given: every chain. */
+  addressed?: (chain: PoolChain) => boolean;
   /** The walk's end and each reason it is not done (empty when done), told once a run: the op record holds the kit's
    *  stage only. */
   ended?: (stage: RestoreStage, why: readonly string[]) => void;
@@ -678,7 +686,9 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
           const r = await letGo(evm({ seed64: seed, pin: p.pin, rpcs: p.rpcs(), signal, wallets: false, held: pageEvmHold(p.pin, () => h.held ? h.held() : h.store()), history: pageEvmHistory(p.pin) }), signal);
           // each buy's record again from its own transaction, so a restored W sells on its buy's route (card
           // signpage-evm-pool-sell, pool-sell-evm.ts restoreEvmHoldings: no read names W or a transaction); the testnet
-          // build only, as the sell is (POOL_TESTNET is folded at build time, so the mainnet bundle carries none of it)
+          // build only: it asks the pool's public RPCs for the Bought logs and the whole block at each of one device's
+          // buys together, which on a quiet mainnet pool tells a provider which buys are one device's (card
+          // evm-pools-on-mainnet leaves it closed; a restored mainnet W is not sold until its record is back)
           const buys = POOL_TESTNET ? r.spends.flatMap((x) => (x.token === null ? [] : [{ w: x.w, token: x.token, block: x.block, blockHash: x.blockHash, logIndex: x.logIndex }])) : [];
           const chain = chainOf(p);
           if (POOL_TESTNET && buys.length > 0 && chain !== "solana") evmHoldingsOwed.push({ chain, pin: p.pin, list: p.rpcs(), buys });
@@ -689,8 +699,10 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
           if (r.status === "fulfilled") {
             found.push(...r.value);
             const chain = chainOf(pools[k]!);
-            walked.push({ label: label(pools[k]!), chain, scope: pools[k]!.scope, notes: r.value, ux: h.ux?.(chain) ?? null });
-          } else why.push(`${label(pools[k]!)}: ${r.reason instanceof Error ? r.reason.message : "the walk failed"}`);
+            walked.push({ label: label(pools[k]!), chain, scope: pools[k]!.scope, notes: r.value, ux: h.ux?.(chain) ?? null, addressed: h.addressed?.(chain) ?? true });
+            // a failed walk stalls the run, but not on a chain this build gives no deposit address on (nor a deposit: the
+            // two open together), which holds no note of this device: it holds back no other chain's restore
+          } else if (h.addressed?.(chainOf(pools[k]!)) ?? true) why.push(`${label(pools[k]!)}: ${r.reason instanceof Error ? r.reason.message : "the walk failed"}`);
         });
         signal.throwIfAborted();
         // a walk that failed: the next load walks that pool again, so step 5 stays owed after it (the marker)
@@ -703,7 +715,7 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
         for (const w of walked) {
           if (ids === null) {
             if (POOL_TESTNET) why.push(`${w.label}: ${POOL_UX_UNREAD_TESTNET}`);
-          } else if (w.ux === null) why.push(`${w.label}: ${POOL_CHAIN_UNREAD}`);
+          } else if (w.ux === null && w.addressed) why.push(`${w.label}: ${POOL_CHAIN_UNREAD}`);
         }
         // the floor: the walk's notes are written before any id is read. First each walked scope's deposit counter goes
         // past the walk's highest note in this store's lane (step 7's, on the notes alone; step 5 raises it again once

@@ -135,7 +135,9 @@ export function candlesFault(c) {
 
 /** The first thing wrong with a Trades answer, or null. */
 export function tradesFault(t) {
-  if (!isObj(t) || !same(Object.keys(t), ["trades", "src", "as_of_ms"])) return `keys ${show(isObj(t) ? Object.keys(t) : t)}`;
+  // `filling` true: a tape whose older trades the helper still reads (card token-page-data-complete-and-fast); never false
+  const keys = isObj(t) && t.filling === true ? ["trades", "filling", "src", "as_of_ms"] : ["trades", "src", "as_of_ms"];
+  if (!isObj(t) || !same(Object.keys(t), keys)) return `keys ${show(isObj(t) ? Object.keys(t) : t)}`;
   if (t.src !== "chain" || !Number.isSafeInteger(t.as_of_ms)) return `src ${show(t.src)}`;
   if (!Array.isArray(t.trades) || t.trades.length === 0 || t.trades.length > 50) return `trades ${Array.isArray(t.trades) ? t.trades.length : "not a list"}`;
   for (const [i, r] of t.trades.entries()) {
@@ -501,7 +503,8 @@ export async function read(base = BASE, token, fetchFn = fetch, rpcs, net = "bas
   let quiet;
   for (const t of candidates.slice(0, 12)) {
     const candles = await reader.read(() => get(base, CANDLES_PATH(t, net), fetchFn));
-    if (candles.status !== 200) {
+    // a chart still filling (a cold book past the helper's open bound: no bars yet) is passed over as a failed one is
+    if (candles.status !== 200 || /"filling":true/.test(candles.body ?? "")) {
       tried.push({ token: t, candles: seen(candles) });
       continue;
     }

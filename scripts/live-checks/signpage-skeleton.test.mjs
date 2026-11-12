@@ -7,7 +7,9 @@
 // (deploy.mjs --build served by wrangler 4.151.1's pages dev, 2026-11-09), the answer before it kept as beforeHistory: FAIL;
 // and on a Mac for card signing-views-open-over-the-app's Permissions-Policy (deploy.mjs --build served by wrangler 4.151.1's
 // pages dev, 2026-11-12), the answer before it kept as beforePip: FAIL; SIGN_HOST answered 522 before any deploy, so no served answer existed
-// yet): PASS. The bad answers are that same answer with frame-ancestors taken out of the CSP, and with
+// yet): PASS. Card evm-pools-on-mainnet: SIGN_HOST's policy names the mainnets' EVM providers alone, so good is that
+// recorded answer with the six testnet EVM providers taken out of its connect-src, as the build's _headers now sets it
+// (no served answer of it until the next sign deploy), and the answer before is kept as beforeMainnetOnly: FAIL. The bad answers are that same answer with frame-ancestors taken out of the CSP, and with
 // frame-ancestors *: FAIL. predeploy: SIGN_HOST's real 522 before any deploy: FAIL. framed: the live SIGN_HOST before
 // card signpage-shell (APP_HOST framed it; no frame-src, no Origin-Agent-Cluster): FAIL.
 import assert from "node:assert/strict";
@@ -16,7 +18,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { evmOrigins } from "./page-evm-rpc-csp.mjs";
+import { evmOrigins, SIGN_CHAINS, venuesOf } from "./page-evm-rpc-csp.mjs";
 import { CSP, frameAllowed, HEADERS, judge, POOL_HISTORY, read } from "./signpage-skeleton.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -97,6 +99,15 @@ test("recorded bad answer: the good build before card held-move-forgotten-tx (no
   assert.deepEqual(r.lines.filter((l) => l.startsWith("BAD")), [`BAD CSP connect-src: "${site.slice("connect-src ".length)}", want "${want}"`, PRE_PP(ANSWERS.beforeArchival)]);
 });
 
+test("recorded bad answer: the good build before card evm-pools-on-mainnet (the six testnet EVM providers in connect-src): FAIL on connect-src alone", () => {
+  const r = judge(ANSWERS.beforeMainnetOnly);
+  assert.equal(r.ok, false);
+  const site = ANSWERS.beforeMainnetOnly.headers["content-security-policy"].split(";").map((d) => d.trim()).find((d) => d.startsWith("connect-src "));
+  const want = CSP.find(([k]) => k === "connect-src")[1];
+  for (const h of ["https://base-sepolia-rpc.publicnode.com", "https://robinhood-testnet.drpc.org"]) assert.ok(site.includes(h) && !want.includes(h), h);
+  assert.deepEqual(r.lines.filter((l) => l.startsWith("BAD")), [`BAD CSP connect-src: "${site.slice("connect-src ".length)}", want "${want}"`, PRE_PP(ANSWERS.beforeMainnetOnly)]);
+});
+
 test("recorded bad answer: the good build before card evm-pool-sync-holds (no Base bloXroute in connect-src): FAIL on connect-src alone", () => {
   const r = judge(ANSWERS.beforeHistory);
   assert.equal(r.ok, false);
@@ -111,7 +122,7 @@ test("card evm-pool-sync-holds: every origin of the kit's EVM_POOL_HISTORY is in
   assert.ok(history.length >= 2, `the kit's history origins: ${history.join(" ")}`);
   const pinned = CSP.find(([k]) => k === "connect-src")[1].split(" ");
   for (const o of history) assert.equal(pinned.filter((x) => x === o).length, 1, `${o} once in the pinned connect-src`);
-  const venues = evmOrigins();
+  const venues = evmOrigins(venuesOf(SIGN_CHAINS));
   assert.deepEqual(POOL_HISTORY.split(" "), history.filter((o) => !venues.includes(o)));
 });
 

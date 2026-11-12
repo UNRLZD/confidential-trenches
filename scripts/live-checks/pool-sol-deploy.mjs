@@ -244,7 +244,8 @@ export async function rpc(fetchFn, url, method, params, sleep = sleepMs, tries =
       continue;
     }
     if (!j) throw new Error(`${method}: HTTP ${r.status}, no JSON`);
-    if (j.error) throw new Error(`${method}: HTTP ${r.status} ${JSON.stringify(j.error).slice(0, 160)}`);
+    // the node's error object rides whole on `rpcError`: the message holds only its first 160 characters
+    if (j.error) throw Object.assign(new Error(`${method}: HTTP ${r.status} ${JSON.stringify(j.error).slice(0, 160)}`), { rpcError: j.error });
     return j.result;
   }
 }

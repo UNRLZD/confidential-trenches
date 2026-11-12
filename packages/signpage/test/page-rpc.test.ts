@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { SOLANA_RPC_RETRY, SolanaRpcTransportError, solanaPacedRpc, solanaSameProvider } from "../../kit/src/trade/solana/send.ts";
 import { pageHelperRpc, pageHelperRpcStopped, pageRpc, seatHosts } from "../src/page-rpc.ts";
-import { pageSolanaLister, pageSolanaRpcs, pageSolanaSettleRpcs, testnetPool, testnetPoolDeps } from "../src/pool-testnet.ts";
+import { pageEvmPoolRpcs, pageSolanaLister, pageSolanaRpcs, pageSolanaSettleRpcs, testnetPool, testnetPoolDeps } from "../src/pool-testnet.ts";
 import { SOLANA_PROVIDER_A, SOLANA_PUBLIC_SEAT, TRADE_HELPER, releaseTradeDeps } from "../src/trade.ts";
 import { hostLane, PROBE_HELD_MAX_MS, resetHostLanes, TRADE_TURN_MAX_MS } from "../../wallet/src/throttle.ts";
 import { onTestClock } from "../../kit/test/test-clock.ts";
@@ -33,7 +33,7 @@ async function withThrottledOnce(run: (seen: Map<string, number>) => Promise<voi
 }
 
 // the testnet build's pool RPCs read through a 429 once in test/pool-testnet.test.ts, which runs as that build
-test("the mainnet build's pool RPCs (src/pool-testnet.ts on SIGN_HOST's build): Solana's pair, provider A and the helper's route, reads through a 429 once; Base and Robinhood have no pair yet", async () => {
+test("the mainnet build's pool RPCs (src/pool-testnet.ts on SIGN_HOST's build): Solana's pair, provider A and the helper's route, reads through a 429 once; Base and Robinhood the pool list's two seats (card evm-pools-on-mainnet)", async () => {
   await withThrottledOnce(async (seen) => {
     const deps = testnetPoolDeps();
     for (const r of deps.rpcs("solana")!) assert.equal(await (r as unknown as (m: string, p: unknown[]) => Promise<unknown>)("getSlot", []), 42);
@@ -41,8 +41,8 @@ test("the mainnet build's pool RPCs (src/pool-testnet.ts on SIGN_HOST's build): 
     assert.equal(seen.get(SOLANA_PROVIDER_A), 1);
     assert.equal(seen.get(SOLANA_PUBLIC_SEAT[1]!), 2);
     assert.equal(seen.get(`${TRADE_HELPER}/v1/rpc/solana`), 2);
-    assert.equal(deps.rpcs("base"), null);
-    assert.equal(deps.rpcs("robinhood"), null);
+    for (const chain of ["base", "robinhood"] as const)
+      assert.deepEqual(deps.rpcs(chain)!.map((r) => (r as unknown as { url: string }).url), pageEvmPoolRpcs(chain)!.slice(0, 2).map((r) => (r as unknown as { url: string }).url));
   });
 });
 

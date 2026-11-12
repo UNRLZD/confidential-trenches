@@ -2,7 +2,7 @@
 // and every planted bad answer refused whole (the chart's error state, never a partly drawn chart).
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { CANDLES_URL, THROTTLE_SPAN_S, isGecko, loadCandles, pricePrecision, priceText, toCandleData, volumeText } from "../src/screens/token/candles.ts";
+import { CANDLES_URL, FILL_WAIT_MS, THROTTLE_SPAN_S, isGecko, loadCandles, pricePrecision, priceText, toCandleData, volumeText } from "../src/screens/token/candles.ts";
 
 const T0 = 1_762_000_200; // a 15m bucket start
 const good = () => ({
@@ -125,6 +125,25 @@ test("the read: 404 is empty, another status, a bad body or a failed fetch is th
   let asked = "";
   await loadCandles("base", "0xab", "4H", async (u) => { asked = String(u); return new Response("{}", { status: 503 }); });
   assert.match(asked, /chain=base&token=0xab&tf=4h&limit=500$/);
+});
+
+// card token-page-data-complete-and-fast: a cold Base or Robinhood chart past the helper's open bound answers no bars and
+// `filling` true (apps/helper/src/data/evm/swaps.ts candles); the chart stays loading and reads again, never the empty
+// state of a token with no bars, nor the error state of a failed read
+test("a filling answer with no bars: read again every FILL_WAIT_MS while loading, drawn once its bars come; still filling past THROTTLE_SPAN_S is the error state", async () => {
+  const filling = { tf: "15m", candles: [], filling: true, src: "chain", as_of_ms: 1 };
+  const waits: number[] = [];
+  const wait = async (ms: number) => void waits.push(ms);
+  let n = 0;
+  const d = await loadCandles("base", "0xab", "15m", async () => new Response(JSON.stringify(n++ < 3 ? filling : { ...good(), src: "chain" }), { status: 200 }), wait);
+  assert.equal(d.status, "ready");
+  assert.deepEqual(waits, [FILL_WAIT_MS, FILL_WAIT_MS, FILL_WAIT_MS]);
+  waits.length = 0;
+  const never = await loadCandles("base", "0xab", "15m", async () => new Response(JSON.stringify(filling), { status: 200 }), wait);
+  assert.deepEqual(never, { status: "error" });
+  assert.equal(waits.reduce((a, b) => a + b, 0), THROTTLE_SPAN_S * 1000, "one span waited, no more");
+  // a filling answer that holds bars is drawn as it is
+  assert.equal((await loadCandles("base", "0xab", "15m", async () => new Response(JSON.stringify({ ...good(), filling: true, src: "chain" }), { status: 200 }), wait)).status, "ready");
 });
 
 test("a 429: read again at each Retry-After until one budget window (THROTTLE_SPAN_S) is waited, then the error state", async () => {

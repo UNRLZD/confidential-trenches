@@ -8,11 +8,14 @@
 // then Trending 5m, then New, each once), and reads GET /v1/market/trades?chain=robinhood&token=<t>&limit=50 for all of
 // them at once. It passes only when the lists answer 200 with at least TOKENS_MIN tokens and every tape answers 200 JSON
 // { trades: [...], src: "chain", as_of_ms } within ANSWER_MS. A failing tape is named by its status, Retry-After and time.
+// A cold tape past the helper's open bound answers 200 filling (card token-page-data-complete-and-fast); such a tape
+// is read again until it fills (tape-read.mjs) and FAILs still filling FILLED_MS after its first answer.
 // After: helper
 //   node scripts/live-checks/helper-robinhood-search-ahead.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the check's test can replay it.
 import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
+import { fillingOf, filledVerdict, readFilled } from "./tape-read.mjs";
 
 const KEY = "helper-robinhood-search-ahead";
 export const BASE = "https://ct-api.unrealized.trade";
@@ -62,14 +65,17 @@ function shapeOf(body) {
   }
 }
 
-export async function read(base = BASE, fetchFn = fetch) {
+export async function read(base = BASE, fetchFn = fetch, o = {}) {
   const at = new Date().toISOString();
   const lists = await get(base, "/v1/market/lists?chain=robinhood", fetchFn);
   const tokens = lists.status === 200 ? tokensOf(lists.body) : [];
   const answers = await Promise.all(
     tokens.map(async (t) => {
-      const a = await get(base, `/v1/market/trades?chain=robinhood&token=${t}&limit=50`, fetchFn);
-      return { address: t, status: a.status, retryAfter: a.retryAfter, ms: a.ms, shape: a.status === 200 ? shapeOf(a.body) : null, ...(a.error ? { error: a.error } : {}), ...(a.status !== 200 ? { body: a.body.slice(0, 120) } : {}) };
+      const path = `/v1/market/trades?chain=robinhood&token=${t}&limit=50`;
+      const a = await get(base, path, fetchFn);
+      const d = { address: t, status: a.status, retryAfter: a.retryAfter, ms: a.ms, shape: a.status === 200 ? shapeOf(a.body) : null, ...(a.error ? { error: a.error } : {}), ...(a.status !== 200 ? { body: a.body.slice(0, 120) } : {}) };
+      if (a.status === 200 && fillingOf(a.body)) Object.assign(d, { filling: true, filled: await readFilled(() => get(base, path, fetchFn), shapeOf, o) });
+      return d;
     }),
   );
   return { base, at, lists: { status: lists.status, ms: lists.ms, tokens: tokens.length }, answers };
@@ -84,9 +90,10 @@ export function judge(run) {
   const ms = (run.answers ?? []).map((a) => a.ms).sort((x, y) => x - y);
   for (const a of run.answers ?? []) {
     const ok = a.status === 200 && a.shape === "tape" && a.ms <= ANSWER_MS;
-    say(ok, `trades ${a.address}: ${a.status}${a.retryAfter ? ` Retry-After ${a.retryAfter}` : ""}${a.status === 200 ? ` ${a.shape}` : ` ${a.body ?? ""}`}${a.error ? ` ${a.error}` : ""} in ${a.ms} ms${a.ms > ANSWER_MS ? ` (past ${ANSWER_MS} ms)` : ""}`);
+    say(ok, `trades ${a.address}: ${a.status}${a.retryAfter ? ` Retry-After ${a.retryAfter}` : ""}${a.status === 200 ? ` ${a.shape}${a.filling ? " filling" : ""}` : ` ${a.body ?? ""}`}${a.error ? ` ${a.error}` : ""} in ${a.ms} ms${a.ms > ANSWER_MS ? ` (past ${ANSWER_MS} ms)` : ""}`);
+    if (ok && a.filling === true) say(filledVerdict(a.filled).ok, `trades ${a.address}: ${filledVerdict(a.filled).text}`);
   }
-  const good = (run.answers ?? []).filter((a) => a.status === 200 && a.shape === "tape" && a.ms <= ANSWER_MS).length;
+  const good = (run.answers ?? []).filter((a) => a.status === 200 && a.shape === "tape" && a.ms <= ANSWER_MS && (a.filling !== true || filledVerdict(a.filled).ok)).length;
   lines.push(`    ${good} of ${n} tapes 200 within ${ANSWER_MS} ms (p50 ${ms[Math.floor(ms.length / 2)] ?? "-"} ms, max ${ms.at(-1) ?? "-"} ms)`);
   return { ok: lines.filter((l) => !l.startsWith("    ")).every((l) => l.startsWith("ok ")), lines };
 }

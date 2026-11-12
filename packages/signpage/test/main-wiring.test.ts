@@ -9,10 +9,11 @@
 //   lands is counted in the next state. The state read never writes: pageNotes reads with the wallet's readNotes and
 //   never opens the note store (whose open and list free a dead tab's notes and finish a parent); a third hook records
 //   who calls each of the two. The framed side is test/main-framed-pools.test.ts.
-// - The page's pool pins: a fourth hook loads the wallet's SOL_POOLS with no pool on either cluster, so the pool kinds
-//   and the restore are checked on a network with no pin (the mainnet build pins the Solana pool since card
-//   sol-pools-mainnet-pin; that build's pinned flow is test/main-mainnet-pools.test.ts), and no pool read sits among
-//   the helper's requests this file reads.
+// - The page's pool pins: a fourth hook loads the wallet's SOL_POOLS with no pool on either cluster, and a fifth its
+//   EVM_POOLS with none on any network, so the pool kinds and the restore are checked on a network with no pin (the
+//   mainnet build pins the Solana pool since card sol-pools-mainnet-pin, Base's and Robinhood's since card
+//   evm-pools-on-mainnet; that build's pinned flows are test/main-mainnet-pools.test.ts and test/pool-mainnet-evm.test.ts),
+//   and no pool read sits among the helper's requests this file reads.
 // The scope is mainnet's real one: the v1 deploy record's (contracts/vault/deployments/mainnet-v1.json), which
 // checks.ts's vaultScope answers unhooked for the page's network (the first test holds the two equal). The helper is a fetch that
 // records each request and answers 503, so a quote that reached it answers "down" and carries U in its body.
@@ -38,6 +39,7 @@ const TABLE = 'export const PAGE_POOLS: readonly BalancePool[] = pagePoolsOf(POO
 // nothing); the mainnet pin's own wiring, the landing's settle pass beside deposit.quote among it, is
 // test/main-mainnet-pools.test.ts's (card sol-pools-mainnet-pin)
 const SOL_PINS = "export const SOL_POOLS: Readonly<Partial<Record<\"devnet\" | \"mainnet\", SolanaPoolPin>>> = Object.freeze(";
+const EVM_PINS = "export const EVM_POOLS: Readonly<Partial<Record<EvmNetwork, EvmPoolPin>>> = Object.freeze(";
 // each call of the note store's openNoteStore and readNotes, with the stack it was called from
 const calls: { name: string; stack: string }[] = ((globalThis as { __ctNoteCalls?: unknown }).__ctNoteCalls = []) as never;
 const record = (src: string, name: string): string => {
@@ -59,6 +61,11 @@ registerHooks({
       const src = String(r.source);
       if (!src.includes(SOL_PINS)) throw new Error("solana.ts: SOL_POOLS's line moved; update this test's hook");
       return { ...r, source: src.replace(SOL_PINS, `export const SOL_POOLS = Object.freeze({});\nconst SOL_POOLS__real = Object.freeze(`) };
+    }
+    if (url.endsWith("/wallet/src/pool/evm.ts")) {
+      const src = String(r.source);
+      if (!src.includes(EVM_PINS)) throw new Error("evm.ts: EVM_POOLS's line moved; update this test's hook");
+      return { ...r, source: src.replace(EVM_PINS, `export const EVM_POOLS = Object.freeze({});\nconst EVM_POOLS__real = Object.freeze(`) };
     }
     if (url.endsWith("/wallet/src/notes/store.ts")) return { ...r, source: record(record(String(r.source), "openNoteStore"), "readNotes") };
     // card wallet-deposit-follow: the follows' storeClosed and settle calls are recorded, so the test reads what main.ts

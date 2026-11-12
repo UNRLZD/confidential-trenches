@@ -65,7 +65,7 @@
 // opposite signs; counts, ranges and the books are bounded.
 import { AsyncLocalStorage } from "node:async_hooks";
 import { keccak_256 } from "@noble/hashes/sha3.js";
-import { createBook, fixed, PRICE_SCALE, TFS, type Book, type Candle, type Event, type Ref, type Swap, type Tf } from "../candles.ts";
+import { change4h, createBook, fixed, PRICE_SCALE, TFS, type Book, type Candle, type Event, type Ref, type Swap, type Tf } from "../candles.ts";
 import { createWanted, GT_PAGE_WAIT_MS, GT_SERVE_MS, refreshLane, SEED_LANE, takeOrWait, throttledUntil, type GeckoBudget, type Later } from "../gecko.ts";
 import { CALLER_ROOM, evmThrottleS, LOGS_REFUSED, providerHolds, RETRY_AFTER_MAX_S, upstreamRetryAfterS, type ProviderHolds } from "../../limits/limits.ts";
 import { operatorOf } from "../../rpc/rpc.ts";
@@ -424,10 +424,13 @@ export const HEDGE_MS = 2_000;
  *  the index is shared, never anyone's wait (the same card: its first read never landed for 135 s and every cold tape
  *  waited on it). [design: one hedge, the time a healthy index chunk is agreed in.] */
 export const INDEX_WAIT_MS = HEDGE_MS;
-/** A first open's answer bound: past it the tape or chart answers 503 and its read goes on, so the next ask finds it
- *  (the same card: requests held 60 s and more). [design: 12 s, under the 15 s the live checks give an answer
- *  (helper-robinhood-search-ahead ANSWER_MS) with room for the way to the page.] */
-export const OPEN_BOUND_MS = 12_000;
+/** A first open's answer bound: past it the tape or chart answers what it holds with `filling` true and its read goes
+ *  on, so the next ask finds it (the same card: requests held 60 s and more; card token-page-data-complete-and-fast:
+ *  503 before). It must end before the page gives up on the read: the token page aborts its tape and chart reads at
+ *  10 s (apps/terminal/src/screens/token/trades.ts and candles.ts TIMEOUT_MS), so at 12 s a cold tape was the page's
+ *  empty Trades tab and a cold chart its error state, whatever the helper answered (swaps-hang.test.ts pins the two).
+ *  [design: 8 s, the page's 10 s less 2 s for the way to it.] */
+export const OPEN_BOUND_MS = 8_000;
 /** `p`'s value, or LATE once `ms` have passed (`p` goes on). */
 const LATE = Symbol("late");
 function within<T>(p: Promise<T>, ms: number): Promise<T | typeof LATE> {
@@ -2074,6 +2077,24 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   const withTiming = (a: DataAnswer, timing: string): DataAnswer => (a.status === 429 ? a : { ...a, timing: a.timing === undefined ? timing : `${timing}, ${a.timing}` });
   const NOT_FOUND = err(404, "not_found");
   const UPSTREAM = err(503, "upstream");
+  /** Tokens whose last open failed (UPSTREAM), and when: a tape past its bound answers 503 within FAILED_MS of that,
+   *  else 200 filling. Bounded as the books are (OPEN_MAX), the oldest out first. [design: a minute, the time a failed
+   *  open's retries and the providers' holds clear in.] */
+  const failedOpen = new Map<string, number>();
+  const FAILED_MS = 60_000;
+  /** A caller's open of `t` in `lane`, LATE past OPEN_BOUND_MS while it goes on; how it ended is kept in failedOpen. */
+  function openWithin(t: string, lane: Lane): Promise<Awaited<ReturnType<typeof open>> | typeof LATE> {
+    const opened = lanes.run(lane, () => open(t));
+    const failed = () => {
+      failedOpen.delete(t);
+      failedOpen.set(t, now());
+      while (failedOpen.size > OPEN_MAX) failedOpen.delete(failedOpen.keys().next().value!);
+    };
+    void opened.then((r) => (r === UPSTREAM ? failed() : failedOpen.delete(t)), failed);
+    return within(opened, OPEN_BOUND_MS);
+  }
+  /** An open past its bound with this token's last open failed within FAILED_MS: the providers failed, not a cold book. */
+  const failedLately = (t: string): boolean => now() - (failedOpen.get(t) ?? -Infinity) <= FAILED_MS;
   const limited = (s: number, why: string): DataAnswer => ({ ...err(429, "rate_limited"), retryAfterS: s, why });
   /** One GeckoTerminal call in `lane`: a caller's cold read ("pages") waits its turn for the budget's next free call up to
    *  GT_PAGE_WAIT_MS (../gecko.ts takeOrWait), as the Solana path's and the EVM token info's do; any other lane never
@@ -2466,17 +2487,29 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       return k?.found != null && now() - k.at < POOL_KEEP_MS ? { pool: k.found.pool.id, decimals: k.found.decimals } : undefined;
     },
     /** 06b Candles for a listed Base token: our own bars, and GeckoTerminal's before our first. */
+    /** The 4h change from our own bars of a token whose book is open (candles.ts change4h); null otherwise, never an
+     *  open of its own. */
+    change4h(token: string): number | null {
+      const t = evmAddress(token);
+      const e = t === null ? undefined : books.get(t);
+      return e === undefined ? null : change4h(e.book, Math.floor(now() / 1000));
+    },
     async candles(token: string, tf: string, to: number | null, limit: number, client?: string): Promise<DataAnswer> {
       const t = evmAddress(token);
       if (t === null || !(TFS as readonly string[]).includes(tf) || tf === "1s" || !Number.isSafeInteger(limit) || limit < 1 || limit > CANDLES_MAX) return NOT_FOUND;
-      // a first open past its bound answers 503 and its read goes on (OPEN_BOUND_MS); its reads are a caller's, in the
-      // foreground lane, and the answer names their wait (Server-Timing)
+      // a first open past its bound answers no bars and `filling` true while its read goes on (OPEN_BOUND_MS), as the
+      // tape does (trades), and 503 once a read failed; its reads are a caller's, in the foreground lane, and the answer
+      // names their wait (Server-Timing)
       const lane = newLane(true);
       const began = performance.now();
-      const e = await within(lanes.run(lane, () => open(t)), OPEN_BOUND_MS);
+      const e = await openWithin(t, lane);
       const openMs = performance.now() - began;
       const timed = (a: DataAnswer): DataAnswer => withTiming(a, laneTiming(lane, openMs));
-      if (e === LATE) return timed(UPSTREAM);
+      if (e === LATE && failedLately(t)) return timed(UPSTREAM);
+      if (e === LATE) {
+        const at = now();
+        return timed({ status: 200, body: JSON.stringify({ tf, candles: [], filling: true, src: "chain", as_of_ms: at }), src: "chain", asOfMs: at });
+      }
       if (e === "none") return timed(await noneCandles(t, tf as Tf, to, limit, client));
       if (!("book" in e)) return timed(e);
       if (offScale(e, t)) return timed(await noneCandles(t, tf as Tf, to, limit, client));
@@ -2511,17 +2544,27 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     async trades(token: string, limit: number): Promise<DataAnswer> {
       const t = evmAddress(token);
       if (t === null || !Number.isSafeInteger(limit) || limit < 1 || limit > TRADES_MAX) return NOT_FOUND;
-      // a first open past its bound answers 503 and its read goes on (OPEN_BOUND_MS); the traders are looked up within
-      // what is left of it, and one not read by then is null this time, asked again the next
+      // a first open past its bound answers filling and its read goes on (OPEN_BOUND_MS); the traders are looked up
+      // within what is left of it, and one not read by then is null this time, asked again the next
       const until = performance.now() + OPEN_BOUND_MS;
       // a caller's reads, in the foreground lane, their wait named in the answer (as candles)
       const lane = newLane(true);
       const began = performance.now();
-      const e = await within(lanes.run(lane, () => open(t)), OPEN_BOUND_MS);
+      const e = await openWithin(t, lane);
       const openMs = performance.now() - began;
       // the queue wait counts the traders' lookups below too: the answer waits on them
       const timed = (a: DataAnswer): DataAnswer => withTiming(a, laneTiming(lane, openMs));
-      if (e === LATE) return timed(UPSTREAM);
+      if (e === LATE && failedLately(t)) return timed(UPSTREAM);
+      if (e === LATE) {
+        // a cold tape past its bound is filling, not failed (card token-page-data-complete-and-fast: ten cold Base opens
+        // at once from the Mac on the public providers answered 503 at 12 s in 6 of 10, on the providers' paces alone):
+        // 200 with what is held, the discovery's agreed seed or nothing, and `filling` true; the open goes on and the
+        // next read gets the rows. 503 is only a read that failed.
+        const held = books.get(t);
+        const at = now();
+        const trades = (held?.book.tape(limit) ?? []).map((r) => ({ t_ms: r.t_ms, side: r.side, usd: r.usd, amt: r.amt, trader: traderAt(traders.get(r.tx), r.index), tx: r.tx }));
+        return timed({ status: 200, body: JSON.stringify({ trades, filling: true, src: "chain", as_of_ms: at }), src: "chain", asOfMs: at });
+      }
       if (e === "none") return timed(empty({ trades: [] }));
       if (!("book" in e)) return timed(e);
       const rows = e.book.tape(limit);

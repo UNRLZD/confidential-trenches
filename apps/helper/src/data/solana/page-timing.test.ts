@@ -200,3 +200,21 @@ async function jupTurnCase(early: number) {
 test("card helper-ready-page-warm slice 2, card helper-page-jup-429: a page whose search outlasts its wait names it late; the search's own parts are named in the proxy's turn lines (a 429, then the send), and the next read has its row", () => jupTurnCase(0));
 
 test("card helper-rpc-wait-timing: a search whose retry wakes a few ms inside Jupiter's hold waits out the rest and is sent, never a 503 (red at 9ceba84: the retry's draw refused as held, one turn line of two)", () => jupTurnCase(3));
+
+test("card token-page-data-complete-and-fast: GET /v1/market/token sets the row's 4h change from the chain's tape where the page has none (Jupiter has no 4h window)", async (t) => {
+  const token = { page: async () => ({ status: 200, body: JSON.stringify({ row: { chg_4h_bps: null, chg_1h_bps: 5 } }), src: "jupiter", asOfMs: 1 }) };
+  const asked: string[] = [];
+  const swaps = { solana: { change4h: (m: string) => (asked.push(m), 1_234) } };
+  const h = server.start(COMMIT, 0, undefined, undefined, undefined, undefined, undefined, undefined, token as never, undefined, undefined, undefined, swaps as never);
+  t.after(() => new Promise<void>((done) => (h.closeAllConnections(), h.close(() => done()))));
+  await new Promise<void>((done) => h.on("listening", () => done()));
+  const port = (h.address() as AddressInfo).port;
+  const body = await new Promise<string>((done, fail) =>
+    request({ host: "127.0.0.1", port, path: `/v1/market/token?chain=solana&token=${PUMP}` }, (res) => {
+      let b = "";
+      res.on("data", (c) => (b += c)).on("end", () => done(b));
+    }).on("error", fail).end(),
+  );
+  assert.deepEqual(JSON.parse(body).row, { chg_4h_bps: 1_234, chg_1h_bps: 5 });
+  assert.deepEqual(asked, [PUMP]);
+});

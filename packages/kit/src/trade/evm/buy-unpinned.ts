@@ -152,9 +152,19 @@ export const EVM_POOL_HISTORY: Readonly<Record<"base" | "robinhood", readonly st
   base: /* @__PURE__ */ Object.freeze(["https://base.rpc.blxrbdn.com", "https://base.gateway.tenderly.co"]),
   robinhood: /* @__PURE__ */ Object.freeze([] as string[]),
 });
+declare const __SIGN_NETWORK__: string | undefined;
+/** SIGN_HOST's build (the signing page's scripts/build-app.mjs defines __SIGN_NETWORK__ "mainnet", card
+ *  evm-pools-on-mainnet): its bundle carries the mainnets' venues alone, the testnets' folded away at build time, so it
+ *  names no testnet provider, pool or sender. Everywhere else (the testnet build, the helper, the terminal, Node) the
+ *  list is the whole list, both halves in this order. */
+const SIGN_MAINNET: boolean = typeof __SIGN_NETWORK__ !== "undefined" && __SIGN_NETWORK__ === "mainnet";
 let venues: Readonly<Record<EvmPoolChain, EvmPoolVenue>> | undefined;
 export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
-  (venues ??= bare({
+  (venues ??= (SIGN_MAINNET ? evmMainnetVenues() : bare({ ...evmMainnetVenues(), ...evmTestnetVenues() })) as Readonly<Record<EvmPoolChain, EvmPoolVenue>>);
+/** The mainnets' half of the venue list (Base, Robinhood), made fresh on each call: evmPoolVenues() keeps the one it
+ *  made. Not on the kit's entry. */
+export const evmMainnetVenues = () =>
+  bare({
     base: bare({
       chainId: 8453,
       weth: "0x4200000000000000000000000000000000000006",
@@ -495,6 +505,11 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
     // The testnets: each pin is pool-evm-deploy's record (scripts/live-checks/pool-evm-deploy.<chain>.json, deployed
     // 2026-11-03), whose code scripts/live-checks/evm-venues-pin.mjs reads on the chain's two RPCs against the build
     // (pool-evm-deploy.build.json). No middle is listed, so a route is WETH and the token only.
+  });
+/** The testnets' half (Base Sepolia, Robinhood testnet), made fresh on each call; no SIGN_HOST bundle carries it. Not on
+ *  the kit's entry. */
+export const evmTestnetVenues = () =>
+  bare({
     "base-sepolia": bare({
       chainId: 84532,
       weth: "0x4200000000000000000000000000000000000006",
@@ -603,7 +618,7 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // to block 149155719 took 1,634 s on both providers, read 2026-11-05 20:38Z)
       maxLag: 100,
     }),
-  }));
+  });
 
 /** Most hops a route takes; a fee fits u24; v4's tick spacing is 1 to 32,767 (v4-core TickMath); hook data is bounded. */
 export const EVM_POOL_MAX_HOPS = 4;

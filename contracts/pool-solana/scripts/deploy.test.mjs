@@ -2491,6 +2491,52 @@ test("review 7a21 L-2: a send answered 'Blockhash not found' (-32002) or 'node i
   }
 });
 
+// the PumpSwap table paste of 12 Nov 05:57Z stopped on this answer, the provider's own words (message "Transaction
+// simulation failed", the reason only in data.err): a node behind the one the blockhash came from
+const PROVIDER_BHNF = { code: -32002, message: "Transaction simulation failed", data: { err: "BlockhashNotFound", logs: [] } };
+const sendWorld = (first, { height = 5 } = {}) => {
+  const sent = [];
+  const fetchFn = async (u, init) => {
+    const { method, params } = JSON.parse(init.body);
+    if (method === "getLatestBlockhash") return okR({ value: { blockhash: SYSTEM_ID, lastValidBlockHeight: 10 } });
+    if (method === "getBlockHeight") return okR(height);
+    if (method === "sendTransaction") return sent.push(params[0]), sent.length === 1 ? { ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: 1, error: first }) } : okR(decodeTx(params[0]).signature);
+    if (method === "getSignatureStatuses") return okR({ value: [sent.length >= 2 ? { confirmationStatus: "confirmed", err: null } : null] });
+    throw new Error(`unexpected ${method}`);
+  };
+  return { sent, fetchFn };
+};
+
+test("a send whose preflight answers a simulation failure with err BlockhashNotFound is sent again, the same bytes, and lands once", async () => {
+  const k = newKey();
+  const { sendAndConfirm } = await import("./deploy.mjs");
+  const { sent, fetchFn } = sendWorld(PROVIDER_BHNF);
+  let t = 0;
+  const sig = await sendAndConfirm(fetchFn, "http://x", [transferIx(k.id, RETURN, 1n)], k, [k], { step: "lookup table: extend 2", wait: async (ms) => void (t += ms), now: () => t });
+  assert.equal(sent.length, 2, "sent again after the node's BlockhashNotFound");
+  assert.equal(new Set(sent).size, 1, "the same signed bytes: one signature");
+  assert.equal(sig, decodeTx(sent[0]).signature);
+});
+
+test("a send whose preflight answers any other simulation failure ends the step at once", async () => {
+  const k = newKey();
+  const { sendAndConfirm } = await import("./deploy.mjs");
+  const { sent, fetchFn } = sendWorld({ code: -32002, message: "Transaction simulation failed", data: { err: { InstructionError: [0, "Custom"] }, logs: [] } });
+  let t = 0;
+  await assert.rejects(sendAndConfirm(fetchFn, "http://x", [transferIx(k.id, RETURN, 1n)], k, [k], { step: "lookup table: extend 2", wait: async (ms) => void (t += ms), now: () => t }), /InstructionError/);
+  assert.equal(sent.length, 1, "not sent again");
+});
+
+test("a send answered BlockhashNotFound once its blockhash's last valid block height has passed stops at once, by name", async () => {
+  const k = newKey();
+  const { sendAndConfirm } = await import("./deploy.mjs");
+  const { sent, fetchFn } = sendWorld(PROVIDER_BHNF, { height: 11 });
+  let t = 0;
+  await assert.rejects(sendAndConfirm(fetchFn, "http://x", [transferIx(k.id, RETURN, 1n)], k, [k], { step: "lookup table: extend 2", wait: async (ms) => void (t += ms), now: () => t }), /lookup table: extend 2: its blockhash expired \(block height 11, past its last valid 10\)/);
+  assert.equal(sent.length, 1, "not sent again");
+  assert.ok(t < 5_000, `stopped at once, not at the 90 s deadline (${t} ms)`);
+});
+
 test("review 7a21 L-3: a --program resume whose stopped run's table reads frozen with exactly the list on both RPCs reuses it: no second table", async () => {
   const c = asMainnet(cluster({ poolMissing: true }));
   const kit = await import(pathToFileURL(path.join(REPO, "packages/kit/src/trade/solana/pool-buy.ts")).href);
