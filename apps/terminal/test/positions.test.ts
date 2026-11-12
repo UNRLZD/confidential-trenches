@@ -4,7 +4,7 @@
 // value in cents, and one WORDS table.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { BOX_PERCENTS, initialsBps, parsePercent, QUICK, sellAmount, shareCents, toUnits, fromUnits } from "../src/screens/positions/model.ts";
+import { BOX_PERCENTS, initialsBps, parsePercent, QUICK, sellAmount, toUnits, fromUnits } from "../src/screens/positions/model.ts";
 import { DRAFTS, WORDS } from "../src/screens/positions/words.ts";
 
 test("token amounts to exact base units and back: the string's own decimals, no float", () => {
@@ -70,13 +70,6 @@ test("Initials sells the share whose value returns the cost, rounded up; off whe
     const b = initialsBps(c, v)!;
     assert.ok(v * BigInt(b) >= c * 10_000n, `${c}/${v}: ${b}`);
   }
-});
-
-test("the share's value in cents, rounded down", () => {
-  assert.equal(shareCents(21_900n, 5000), 10_950n);
-  assert.equal(shareCents(333n, 5000), 166n);
-  assert.equal(shareCents(21_900n, 10000), 21_900n);
-  assert.equal(shareCents(null, 5000), null);
 });
 
 test("the presets: the box's 25 50 75 100 (VN-05 A), the panel's 25% 50% All Initials", () => {

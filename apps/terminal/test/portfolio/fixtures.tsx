@@ -101,6 +101,20 @@ const POOL_STATE: Partial<SignpageState> = { vault_balance: "0", positions: [], 
 const POOL_MARKETS = [{ chain: "solana" as const, token: ICM, symbol: "Icm", name: "Internet cat money", price_usd: "0.00000233314178549" }];
 
 export const FIXTURES: Record<string, Fx> = {
+  // card portfolio-counts-money-an-open-buy-holds, the 12 Nov mainnet buy: a $0.01 buy whose one-time wallet holds
+  // 0.008478835 SOL beside the coin (its own and its accounts' rent), the pool's 0.030426 SOL at $82.37; Total and
+  // Positions count the wallet's, the row reads Bought $0.01
+  openbuy: {
+    state: {
+      ...POOL_STATE,
+      pools: [{ chain: "solana", asset: "SOL", balance: "0.030426", ready: "0", tap_max: "0", price: PX(82.37) }],
+      ops: [{ id: "ob1", kind: "buy", stage: "filled", txs: sol("4HSwogMa6ru6c61XhXgb1zxisrFaiPWTuWmhRDsxAaW8PwsWDJNHK9ydPq7GjGW28KC2vKiyKarAqKmfxyZANZd3"), created_ms: at(3), chain: "solana", token: ICM, amount_usd: "0.0099999", units: "4286.1", pool_amount: "0.000121043" }],
+      positions: [{ chain: "solana", token: ICM, amount: "4286.1", cost: "0.0099999", wallets: ["8e8RsnpnL6Toqsa2Q1YPLvopDqPa3HFTdwEikCkqpQ7p"], decimals: 6, asset_held: "0.008478835" }],
+    },
+    live: true,
+  },
+  // the value line between $2.51 and $3.33 (the owner's four "$3" ticks)
+  axis: { data: { series: [[NOW - 6 * 86_400_000, "3.33"], [NOW - 3 * 86_400_000, "3.31"], [NOW - 86_400_000, "3.33"], [NOW - 3_600_000, "2.51"], [NOW, "2.52"]] } },
   // the owner's sequence, done: both round trips on Closed (desktop), in the stats (phone) and in Activity
   pooltrades: { state: POOL_STATE, live: true, ui: { closed: true } },
   "pooltrades-stats": { state: POOL_STATE, live: true, ui: { pane: "stats" } },
