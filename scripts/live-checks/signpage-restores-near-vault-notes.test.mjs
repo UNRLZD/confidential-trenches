@@ -1,17 +1,19 @@
 // node --test scripts/live-checks/signpage-restores-near-vault-notes.test.mjs: card
-// signpage-restores-near-vault-notes's live check, replayed on pool-restore-wired.answers.json. Good: live119, the live
-// page's run of 12 Nov 09:12Z (done, every request on a pinned host, both NEAR operators read), passes. Bad, planted on
-// it: the page's own line for a vault it could not read ("restore stalled: near vault: ..."), the run's progress
-// ending stalled, and a NEAR operator the page's connect-src does not name each fail.
+// signpage-restores-near-vault-notes's live check, replayed on its answers file (pool-restore-wired's own recorded runs,
+// copied whole: see the file's first line). Good: the live page's run of 12 Nov 09:12Z (done, every request on a pinned
+// host, both NEAR operators read) passes. Bad: the live page of 6 Nov, which refused restore and ran none, fails.
+// Planted on the good run: the page's own line for a vault it could not read ("restore stalled: near vault: ..."), the
+// run's progress ending stalled, and a NEAR operator the page's connect-src does not name each fail.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { CHECK } from "./signpage-restores-near-vault-notes.mjs";
 import { NEAR_OPS, judge } from "./pool-restore-wired.mjs";
 
-const A = JSON.parse(readFileSync(new URL("./pool-restore-wired.answers.json", import.meta.url), "utf8"));
+const A = JSON.parse(readFileSync(new URL("./signpage-restores-near-vault-notes.answers.json", import.meta.url), "utf8"));
+const WIRED = JSON.parse(readFileSync(new URL("./pool-restore-wired.answers.json", import.meta.url), "utf8"));
 const mut = (f) => {
-  const rec = structuredClone(A.live119);
+  const rec = structuredClone(A.good);
   f(rec);
   return judge(rec);
 };
@@ -26,9 +28,15 @@ test("the entry runs pool-restore-wired, whose run reads the vault's NEAR pair",
 });
 
 test("recorded good answer: the live page's run ends done with both NEAR operators read: PASS", () => {
-  const r = judge(A.live119);
+  const r = judge(A.good);
   assert.equal(r.ok, true, r.lines.join("\n"));
-  for (const op of NEAR_OPS) assert.ok(A.live119.hosts[op] > 0, op);
+  for (const op of NEAR_OPS) assert.ok(A.good.hosts[op] > 0, op);
+});
+
+test("recorded bad answer: the live page that refused restore and ran none: FAIL; both records are pool-restore-wired's own", () => {
+  fails(judge(A.bad), /ran one restore with no tap/);
+  assert.deepEqual(A.good, WIRED.live119);
+  assert.deepEqual(A.bad, WIRED.bad);
 });
 
 test("planted bad answers: a vault the page could not read, a run that ends stalled, a NEAR operator out of the connect-src: FAIL", () => {

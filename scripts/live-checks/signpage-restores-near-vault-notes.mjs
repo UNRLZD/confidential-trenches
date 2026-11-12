@@ -8,10 +8,13 @@
 // fails. This entry runs that check with its exit code (as restore-check-bounded.mjs runs its check), so the verify
 // gate's scripts/live-checks/<key>.mjs is that check; its recorded runs are pool-restore-wired.answers.json, replayed
 // by signpage-restores-near-vault-notes.test.mjs.
-//   node scripts/live-checks/signpage-restores-near-vault-notes.mjs
-// Runs: once, at merge; pool-restore-wired is in the signing page's list and runs after every sign deploy, the first
-// with the vault's walk in it release 122's. PASS exit 0, FAIL exit 1, error exit 2. No money; the account is the
-// published vector's, thrown away with the profile.
+// After: sign
+//   node scripts/live-checks/signpage-restores-near-vault-notes.mjs   the deployed SIGN_HOST
+//     (confidential.unrealized.trade), as pool-restore-wired.mjs reads it
+// It is in the signing page's list (packages/signpage/scripts/deploy.test.mjs holds every signpage-* check there), so
+// the restore run is read twice after a sign deploy, each in its own job; the first with the vault's walk in it is
+// release 122's. PASS exit 0, FAIL exit 1, error exit 2. No money; the account is the published vector's, thrown away
+// with the profile.
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
