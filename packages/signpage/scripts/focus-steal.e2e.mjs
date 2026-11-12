@@ -10,10 +10,10 @@
 //               the front: the user copies an address in another app and comes back to paste). Whether the engine, as
 //               driven here, takes the focus from the page at all is recorded (document.hasFocus() while away); where it
 //               does not, the case is the foreground one, and the record says so.
-//   t0:         the user types from the moment of the open (8 keys 10 ms apart, then more until 250 ms), while the frame
-//               still waits FRAME_LEAVE_MS for the open's answer: the field is made only once the frame is out, so a key
-//               typed before it reaches nobody. The verdict: the app read 0 keys, no field was in the page while the
-//               frame was, and the sheet's box kept its size when the field came.
+//   t0:         the user types from the moment of the open (8 keys 10 ms apart, then more until 250 ms): the frame
+//               leaves in the open's own task, so no key from the first millisecond reaches the app (a frame left even
+//               100 ms for the open's answer got them on Firefox). The verdict: the app read 0 keys, no field was in the
+//               page while the frame was, and the sheet's box kept its size when the field came.
 //   kept:       the same thief under a sheet that keeps the frame (any screen with no field), its second loop started
 //               after the first keys: the app must get the focus (its own focus event), read keys, or the keys must
 //               miss the field, or this run proves nothing about the thief on that engine (the shell takes the focus
@@ -110,8 +110,9 @@ async function oneRun(browser, engine, js, { sealed, background }) {
   }
 }
 
-async function typedFromOpen(browser, js) {
+async function typedFromOpen(browser, engine, js) {
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  if (engine === "chromium") await ctx.grantPermissions(["clipboard-read", "clipboard-write"], { origin: SIGN }).catch(() => {});
   const seen = { loads: 0, leaked: [] };
   try {
     await ctx.route(`${SIGN}entry.js`, (r) => r.fulfill({ status: 200, contentType: "text/javascript", body: js }));
@@ -123,6 +124,7 @@ async function typedFromOpen(browser, js) {
     await page.goto(SIGN);
     const until = Date.now() + 10_000;
     while (seen.loads < 1 && Date.now() < until) await page.waitForTimeout(50);
+    await page.evaluate((t) => navigator.clipboard?.writeText(t).catch(() => {}), CLIP);
     // the field's arrival: whether the frame was in the page then, and the sheet's box before and after
     await page.evaluate(() => {
       const box = () => JSON.stringify(document.querySelector("[data-sheet=box]")?.getBoundingClientRect());
@@ -136,6 +138,9 @@ async function typedFromOpen(browser, js) {
       window.__open(true);
       window.__t0.boxAtOpen = box();
     });
+    // a paste first (the inserted text and the real clipboard paste), then the keys
+    await page.keyboard.insertText(PASTE);
+    await page.keyboard.press("ControlOrMeta+V");
     await page.keyboard.type(AFTER + FIRST, { delay: 10 });
     for (let t = 0; t < 10; t++) await page.keyboard.type("z", { delay: 0 }).then(() => page.waitForTimeout(15));
     await page.waitForTimeout(300);
@@ -163,7 +168,7 @@ export function judge(rec) {
       say(r.loadsAfterClose === 2, `${name}: the close brings a new app document (${r.loadsAfterClose} loads)`);
     }
     const t0 = e.t0;
-    say(t0.leaked.length === 0, `t0: keys typed from the open read by the app: ${t0.leaked.length ? JSON.stringify(t0.leaked) : "none"}`);
+    say(t0.leaked.length === 0, `t0: a paste and keys from the first millisecond of the open read by the app: ${t0.leaked.length ? JSON.stringify(t0.leaked) : "none"}`);
     say(t0.fieldWithFrame === false && t0.frame === "out", `t0: the field entered the page with the frame ${t0.fieldWithFrame === false ? "out" : "IN"}`);
     say(t0.boxAtField === t0.boxAtOpen, `t0: the sheet's box the same when the field came (${t0.boxAtOpen})`);
     const a = e.background.away;
@@ -186,7 +191,7 @@ export async function run(engines = ENGINES) {
       const e = { engine, label: browserLabel(browser) };
       e.sealed = await oneRun(browser, engine, js, { sealed: true, background: false });
       e.background = await oneRun(browser, engine, js, { sealed: true, background: true });
-      e.t0 = await typedFromOpen(browser, js);
+      e.t0 = await typedFromOpen(browser, engine, js);
       e.kept = await oneRun(browser, engine, js, { sealed: false, background: false });
       rec.engines.push(e);
     } catch (err) {

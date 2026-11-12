@@ -20,8 +20,11 @@
 //   screen may be left (card signing-views-open-over-the-app). While it shows, the frame stays in the page under the
 //   scrim, inert, with its state, and every message from it is dropped: it cannot open, redraw, move, close or reload
 //   the sheet, nor change the address, until the sheet closes; the shell's own posts to it go on (the state it shows).
-//   A screen with a field typed into (the 12 words, the withdraw forms) takes the frame out of the document first: a
-//   frame left in the page takes the keyboard's focus back and reads what is typed or pasted (open(typed), seal()).
+//   A screen with a field typed into (the 12 words, the withdraw forms) takes the frame out of the document first, in the
+//   open's own task: a frame left in the page takes the keyboard's focus back and reads what is typed or pasted, even
+//   with no field drawn yet (Firefox, measured by scripts/focus-steal.e2e.mjs), so it is never in the page under such a
+//   screen (open(typed), seal()). The answer to the kind that opened it is then never delivered: the app document it
+//   was posted to is gone, and the app loads new at close and reads the state.
 //   At close a kept frame is live again as it was; a frame taken out comes back new, at the top window's address.
 // - nav: the app says where it is, and the shell puts that path and query in the top window's address with
 //   history.replaceState (never a navigation), so the address bar, a reload, a new frame and a shared link follow the
@@ -45,15 +48,6 @@ export function appSrc(loc: { pathname: string; search: string }): string {
     return root;
   }
 }
-
-/**
- * How long the frame stays after the layer opens: the answer to the kind that opened it (posted just before) is
- * delivered to the frame as a task of its own, and a frame taken out first never gets it. Taking the frame out is what
- * stops a frame from taking the keyboard's focus; it is inert meanwhile, which narrows this window but does not close
- * it (an APP_HOST page calling focus() every few ms still took keys from an inert frame on two engines, the review
- * measured). So this stays as short as the answer's delivery allows, 100 ms at most (test/shell.test.ts pins it).
- */
-export const FRAME_LEAVE_MS = 100;
 
 /** How long the sheet's dim may wait over a new frame for its painted before it fades all the same (src/shell.ts close). */
 export const VEIL_CAP_MS = 2_000;
@@ -134,19 +128,19 @@ export interface Shell {
   body: HTMLElement;
   /**
    * Shows the sheet over the frame, which stays in the page, inert, under the scrim, its messages dropped until close.
-   * With `typed` (a screen with a field typed into), FRAME_LEAVE_MS later the frame is taken out of the document, as
-   * seal(): the removal is what keeps typed keys from it. A frame left under the sheet takes the keyboard's focus back
+   * With `typed` (a screen with a field typed into), the frame is taken out of the document in this task, as seal():
+   * the removal is what keeps typed keys from it. A frame left under the sheet takes the keyboard's focus back
    * (an APP_HOST page that calls focus() every few ms gets every key typed after the first, the 12 words included, on
    * every engine; inert, visibility and display each let it through on some engine, the reviews measured), so none is
    * left under a typed screen.
    */
   open(typed?: boolean): void;
-  /** A screen with a typed field is drawn on the open sheet: the frame leaves, FRAME_LEAVE_MS after the open at most. */
+  /** A screen with a typed field is drawn on the open sheet: the frame leaves in this task. */
   seal(): void;
   /**
-   * Runs `draw` once no APP_HOST frame is in the page: now when none is, or in the task that takes it out. A sealed
-   * screen draws its fields through this, so no field exists while the frame does (the sheet itself shows at once). A
-   * close before the frame leaves drops it, as does the next call.
+   * Runs `draw` once no APP_HOST frame is in the page: now when none is, or when the frame is taken out. A sealed screen
+   * drawn while the layer is still hidden (an open kind draws, then opens) makes its fields through this, so no field is
+   * ever in the page with the frame. A close before the frame leaves drops it, as does the next call.
    */
   whenOut(draw: () => void): void;
   /** Hides the sheet: a kept frame is live again as it was; a frame taken out comes back new at the top window's address. */
@@ -246,7 +240,6 @@ export function mountShell(doc: Document, host: Omit<ApiHost, "parent" | "listen
     },
   );
   add();
-  let leaving: ReturnType<typeof setTimeout> | null = null;
   let waking: ReturnType<typeof setTimeout> | null = null;
   let openedAt = 0;
   // the draw waiting for the frame to leave (whenOut)
@@ -277,16 +270,7 @@ export function mountShell(doc: Document, host: Omit<ApiHost, "parent" | "listen
       if (typed) shell.seal();
     },
     seal() {
-      if (layer.hidden || !frame || leaving !== null) return;
-      // the answer to the kind that opened the sheet is delivered to the frame as a task of its own: the frame stays
-      // until FRAME_LEAVE_MS after the open, never longer
-      const wait = FRAME_LEAVE_MS - ((view.performance?.now?.() ?? Date.now()) - openedAt);
-      // a typed screen drawn on a sheet open longer than that (Recovery code on the sign-in sheet): out in this task
-      if (wait <= 0) return leave();
-      leaving = setTimeout(() => {
-        leaving = null;
-        leave();
-      }, wait);
+      leave();
     },
     whenOut(draw) {
       pending = null;
@@ -295,8 +279,6 @@ export function mountShell(doc: Document, host: Omit<ApiHost, "parent" | "listen
     },
     close() {
       layer.hidden = true;
-      if (leaving !== null) clearTimeout(leaving);
-      leaving = null;
       pending = null;
       // a kept frame stays inert for PROTECT_MS after the close (the second tap of a double tap on Cancel, Saved, the x or
       // the scrim lands on no app control there), then is live again and takes the keyboard's focus back; a frame taken

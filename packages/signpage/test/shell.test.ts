@@ -11,7 +11,7 @@ import { mock, test } from "node:test";
 import { enableTimers, resetTimers } from "./mock-timers.ts";
 import { PROTECT_MS } from "../src/guard.ts";
 import { APP_ORIGIN, RELEASE, signedOutState, type IncomingMessage } from "../src/api.ts";
-import { appSrc, VEIL_CAP_MS, FRAME_LEAVE_MS, FRAME_SANDBOX, mountShell, navUrl, SERVED_FILES, wireShell } from "../src/shell.ts";
+import { appSrc, VEIL_CAP_MS, FRAME_SANDBOX, mountShell, navUrl, SERVED_FILES, wireShell } from "../src/shell.ts";
 // @ts-expect-error: the deploy script is plain JavaScript, with no types
 import { build } from "../scripts/deploy.mjs";
 
@@ -200,9 +200,7 @@ test("open(typed) takes the frame out of the document and nothing reaches the ol
   old.fire("load");
   sh.open(true);
   assert.equal(sh.layer.hidden, false);
-  assert.equal(d.frames().length, 1, "the frame stays FRAME_LEAVE_MS, for the answer that opened the layer");
-  assert.equal((old as unknown as { inert?: boolean }).inert, true, "inert in the same task as the layer shows");
-  await until(() => d.frames().length === 0, "the frame leaves after FRAME_LEAVE_MS");
+  assert.equal(d.frames().length, 0, "out of the document in the open's own task: no moment for it to take the focus");
   const before = d.posted.length;
   // the removed frame's window asks: dropped; a late load of it posts nothing
   d.send(ask(), old.contentWindow);
@@ -223,15 +221,14 @@ test("open(typed) takes the frame out of the document and nothing reaches the ol
   const after = d.posted.slice(before);
   assert.deepEqual(after.map((p) => p.msg), [READY, { v: 1, id: q.id, ok: true, result: signedOutState() }]);
   assert.ok(after.every((p) => p.win === f.contentWindow && p.to === APP_ORIGIN));
-  // close twice: one frame; open then close at once: the frame stays, and stays the only one
+  // close twice: one frame; open then close at once: a new frame, the only one, live again PROTECT_MS after the close
   sh.close();
   assert.equal(d.frames().length, 1);
   sh.open(true);
   sh.close();
-  // a check that nothing came: this timer is due after the shell's FRAME_LEAVE_MS timer, so that one has run
   await new Promise((ok) => setTimeout(ok, PROTECT_MS + 20));
   assert.equal(d.frames().length, 1);
-  assert.equal((d.frames()[0] as unknown as { inert?: boolean }).inert, false, "a frame kept by a quick close is live again, PROTECT_MS after it");
+  assert.equal((d.frames()[0] as unknown as { inert?: boolean }).inert, false, "the new frame is live again, PROTECT_MS after the close");
 });
 
 test("nav: the top window's address becomes APP_HOST's path and query, by replaceState only; another origin, // and an over-long path are refused", async () => {
@@ -255,59 +252,41 @@ test("nav: the top window's address becomes APP_HOST's path and query, by replac
   assert.equal(d.calls.assign + d.calls.reload, 0, "never a navigation");
 });
 
-test("whenOut: a sealed screen's draw runs in the task that takes the frame out, never while it is in the page; a close or a later draw drops it", () => {
-  enableTimers(mock.timers, { apis: ["setTimeout"] });
-  try {
-    const d = fakeDom();
-    const sh = mountShell(d.doc, { state: () => signedOutState() });
-    const drawn: number[] = [];
-    sh.open(true);
-    sh.whenOut(() => drawn.push(d.frames().length));
-    assert.equal(drawn.length, 0, "no draw while the frame waits for the open's answer");
-    mock.timers.tick(FRAME_LEAVE_MS);
-    assert.deepEqual(drawn, [0], "drawn once, with no frame in the page");
-    sh.whenOut(() => drawn.push(-1));
-    assert.deepEqual(drawn, [0, -1], "no frame: drawn at once");
-    // a close before the frame leaves drops the draw; a later draw replaces an earlier one
-    sh.close();
-    mock.timers.tick(PROTECT_MS * 4);
-    sh.open(true);
-    sh.whenOut(() => drawn.push(1));
-    sh.close();
-    mock.timers.tick(FRAME_LEAVE_MS * 4);
-    sh.open(true);
-    sh.whenOut(() => drawn.push(2));
-    sh.whenOut(() => drawn.push(3));
-    mock.timers.tick(FRAME_LEAVE_MS);
-    assert.deepEqual(drawn, [0, -1, 3]);
-  } finally {
-    resetTimers(mock.timers);
-  }
+test("whenOut: a screen drawn while the layer is hidden with the frame in runs its draw in the open that takes the frame out, never before; a close or a later draw drops it", () => {
+  const d = fakeDom();
+  const sh = mountShell(d.doc, { state: () => signedOutState() });
+  const drawn: number[] = [];
+  sh.whenOut(() => drawn.push(d.frames().length));
+  assert.equal(drawn.length, 0, "no draw while the frame is in the page");
+  sh.open(true);
+  assert.deepEqual([...drawn], [0], "drawn once, in the open's task, with no frame in the page");
+  sh.whenOut(() => drawn.push(-1));
+  assert.deepEqual([...drawn], [0, -1], "no frame: drawn at once");
+  // a close before the open drops the draw; a later draw replaces an earlier one
+  sh.close();
+  sh.whenOut(() => drawn.push(1));
+  sh.close();
+  sh.open(true);
+  sh.close();
+  sh.whenOut(() => drawn.push(2));
+  sh.whenOut(() => drawn.push(3));
+  sh.open(true);
+  assert.deepEqual([...drawn], [0, -1, 3]);
 });
 
-test("open(typed): the frame is out of the document within 100 ms, whatever FRAME_LEAVE_MS says, since inert alone keeps no focus thief out", () => {
-  assert.ok(FRAME_LEAVE_MS > 0 && FRAME_LEAVE_MS <= 100, `FRAME_LEAVE_MS ${FRAME_LEAVE_MS}`);
+test("open(typed): the frame is out of the document in the open's own task (a frame left in the page even 100 ms took keys typed with no field on Firefox); an untyped open keeps it, and seal() then takes it out at once", () => {
   enableTimers(mock.timers, { apis: ["setTimeout"] });
   try {
     const d = fakeDom();
     const sh = mountShell(d.doc, { state: () => signedOutState() });
     sh.open(true);
-    assert.equal(d.frames().length, 1);
-    mock.timers.tick(100);
-    assert.equal(d.frames().length, 0, "the frame is gone 100 ms after open");
-    // a typed screen drawn on a sheet opened untyped (Recovery code on the sign-in sheet): seal takes the frame out
+    assert.equal(d.frames().length, 0, "gone in the same task as the open");
     sh.close();
     sh.open();
     mock.timers.tick(1_000);
     assert.equal(d.frames().length, 1, "an untyped sheet keeps the frame");
-    const view = d.doc.defaultView as unknown as { performance?: { now(): number } };
-    let now = 0;
-    view.performance = { now: () => now };
-    sh.close();
-    sh.open();
-    now += FRAME_LEAVE_MS + 1;
     sh.seal();
-    assert.equal(d.frames().length, 0, "seal on a sheet open longer than FRAME_LEAVE_MS takes it out in the same task");
+    assert.equal(d.frames().length, 0, "seal on an open sheet takes it out in the same task");
   } finally {
     resetTimers(mock.timers);
   }
@@ -322,7 +301,7 @@ test("open: the sheet over the app keeps the frame in the page, inert, with its 
   sh.open();
   assert.equal(sh.layer.hidden, false);
   assert.equal(f.inert, true, "inert in the same task as the sheet shows");
-  await new Promise((ok) => setTimeout(ok, FRAME_LEAVE_MS + 20));
+  await new Promise((ok) => setTimeout(ok, 120));
   assert.deepEqual(d.frames(), [f], "the same frame, still in the page");
   // the frame asks while the sheet shows: a state read, a nav, a reload, an open kind; none is read
   const before = d.posted.length;
@@ -382,7 +361,6 @@ test("a typed screen's close keeps the sheet's dim over the new frame until that
     const veil = d.children.find((c) => c.dataset.sheet === "veil")!;
     assert.ok(veil && veil.hidden, "no veil before a close");
     sh.open(true);
-    mock.timers.tick(FRAME_LEAVE_MS);
     assert.equal(d.frames().length, 0);
     sh.close();
     assert.equal(sh.layer.hidden, true);
@@ -522,7 +500,7 @@ test("a kind the host answers (signin.open): its answer goes to the frame before
   assert.deepEqual(await answerTo(d, m.id), { v: 1, id: m.id, ok: true, result: { pending: true } });
   await until(() => order.length > 0, "then() opens the layer");
   assert.deepEqual(order, [`open after ${d.posted.length} posts`]);
-  await until(() => d.frames().length === 0, "the frame leaves after FRAME_LEAVE_MS");
+  assert.equal(d.frames().length, 0, "the frame out in the open's own task: the answer posted to it before is never delivered");
   // backup.open has no handler: refused, and so is a signin.open the handler refuses (a new frame first)
   sh.close();
   const w2 = d.frames()[0]!.contentWindow;
@@ -670,7 +648,6 @@ test("after a close the frame takes no tap for PROTECT_MS: a kept frame, and a n
     assert.equal(kept.inert, true, "a sheet open again keeps it inert");
     sh.close();
     sh.open(true);
-    mock.timers.tick(FRAME_LEAVE_MS);
     sh.close();
     const fresh = d.frames()[0]!;
     assert.notEqual(fresh, kept);
@@ -689,7 +666,6 @@ test("the dim over a new frame that never loads fades at VEIL_CAP_MS", () => {
     const sh = mountShell(d.doc, { state: () => signedOutState() });
     const veil = d.part("veil");
     sh.open(true);
-    mock.timers.tick(FRAME_LEAVE_MS);
     sh.close();
     mock.timers.tick(VEIL_CAP_MS - 1);
     assert.equal(veil.style.opacity, "1");

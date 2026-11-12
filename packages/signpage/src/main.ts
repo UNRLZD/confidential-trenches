@@ -623,8 +623,9 @@ function show(state: State, seed?: { account: string; code_saved: boolean; signo
     root.replaceChildren(...parts);
   };
   // a sealed screen's fields (the 12 words' area, To and the amount, the account, the 12 words and their Copy) are made
-  // only once the APP_HOST frame is out of the page: on an open straight onto it the sheet shows at once, empty, and the
-  // frame stays FRAME_LEAVE_MS for the open's answer, so no field exists while it does (src/shell.ts whenOut)
+  // only once the APP_HOST frame is out of the page: an open kind draws its screen while the layer is still hidden and
+  // the frame in, then opens the layer, which takes the frame out (openLayer); the fields come in that task, never before
+  // (src/shell.ts whenOut). A later show() before then draws instead (shows).
   if (shell && SEALED.has(state)) {
     root.replaceChildren();
     shell.whenOut(draw);

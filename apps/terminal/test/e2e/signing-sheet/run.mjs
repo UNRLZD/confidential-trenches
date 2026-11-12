@@ -237,7 +237,7 @@ async function oneWidth(h, w, shotDir, { cpu = 1, holdPaint = 0 } = {}) {
   const look = async (name, m, mask = []) => {
     // the screen shown (a build before the sheet draws it as a page of its own: shot and judged all the same)
     await top("#screen:not([hidden])").waitFor({ timeout: WAIT_MS });
-    await page.waitForTimeout(250); // past FRAME_LEAVE_MS
+    await page.waitForTimeout(250); // the screen settled
     const v = await page.evaluate(() => {
       const box = document.querySelector("#screen [data-sheet=box]");
       const b = box?.getBoundingClientRect();

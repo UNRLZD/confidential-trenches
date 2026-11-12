@@ -363,7 +363,7 @@ async function read(page, not = []) {
     const s = document.getElementById("signin")?.dataset.signin;
     return s && s !== "loading" && !not.includes(s);
   }, not, { timeout: WAIT_MS }).catch(() => {});
-  // a screen with a typed field takes the frame out FRAME_LEAVE_MS (100 ms) after the layer shows; every other keeps it
+  // a screen with a typed field takes the frame out as the layer shows; every other keeps it
   await page.waitForTimeout(300);
   const r = await page.evaluate(async () => {
     const m = document.getElementById("signin");

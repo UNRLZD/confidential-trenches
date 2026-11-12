@@ -7,8 +7,8 @@
 // - show()'s seal: a typed screen drawn on a sheet already shown (I already have one, Recovery code) takes the frame out,
 //   and it is out when the screen's field enters the page (the seal dropped from show(), or moved after the draw, fails);
 // - openLayer's open(typed): a sheet opened straight on a typed screen (signin.open {way: words}) takes the frame out,
-//   and its field enters the page only once the frame is out (drawn before, while the frame waits FRAME_LEAVE_MS for the
-//   open's answer, it fails);
+//   and its field enters the page only once the frame is out (drawn before, while the layer is still hidden with the
+//   frame in, it fails);
 // - onDismiss: the user's Esc on a screen Cancel is drawn on goes back to the app;
 // - dismissible(cancellable): Esc on the backup a new account lands on (no Cancel drawn) does nothing;
 // - the clipboard: Copy on the backup puts the 12 words there, and Saved, in its own tap, writes it empty (a write that
@@ -188,7 +188,7 @@ async function until(what: string, ok: () => boolean, ms = 3000): Promise<void> 
   }
   throw new Error(`never: ${what} (state ${root()?.dataset.signin}, layer ${shown() ? "shown" : "hidden"}, frame ${frameIn() ? "in" : "out"})`);
 }
-const settle = () => new Promise((r) => setTimeout(r, 200)); // past FRAME_LEAVE_MS (100) of any seal
+const settle = () => new Promise((r) => setTimeout(r, 200)); // past any step the page runs
 function send(data: Record<string, unknown>): string {
   const id = crypto.randomUUID();
   const e = new Event("message");
@@ -254,7 +254,7 @@ test("main.ts's sheet: a kind under a shown sheet refused, the frame out under a
   // openLayer's open(typed): a sheet opened straight on the words field takes the frame out
   assert.equal((await answer(send({ type: "signin.open", way: "words", return_key: "portfolio" })))?.ok, true);
   await until("the words sheet", () => shown() && root().dataset.signin === "words");
-  await until("the frame out under the words field it opened on", () => !frameIn(), 1000);
+  assert.equal(frameIn(), false, "the frame out in the open's own task: no wait for the answer");
   await until("the words field drawn", () => fieldDrawn.length === 2);
   assert.deepEqual(fieldDrawn[1], { state: "words", frame: false }, "on an open straight onto the words, the field entered the page with the frame out");
   esc();
