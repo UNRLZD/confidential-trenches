@@ -10641,5 +10641,7577 @@
     "errors": []
    }
   }
+ },
+ "release119": {
+  "chromium": {
+   "desktop": {
+    "engine": "chromium",
+    "view": {
+     "name": "desktop",
+     "width": 1440,
+     "height": 900,
+     "inner": 1440
+    },
+    "source": "live https://confidential.unrealized.trade",
+    "at": "2026-11-12T08:52:16.883Z",
+    "browser": "Chrome 157.0.8103.51, sandbox on",
+    "topology": "shell",
+    "steps": {
+     "open": {
+      "frameHref": "https://ct-app.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell",
+      "top": {
+       "state": "signed-out",
+       "codeSaved": null,
+       "layerHidden": true,
+       "frames": 1,
+       "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      },
+      "attrs": {
+       "sandbox": "allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox",
+       "allow": null,
+       "referrerpolicy": "no-referrer"
+      }
+     },
+     "first": {
+      "id": "c1c66314-67f6-4bd5-ae7f-01ecc0b71a7b"
+     },
+     "topNav": {
+      "tried": true,
+      "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+     },
+     "passkeyIn": {
+      "openId": "806239df-9a99-4ae3-ae0a-23cc172dc30a",
+      "layer": {
+       "state": "signed-out",
+       "codeSaved": null,
+       "layerHidden": false,
+       "frames": 1,
+       "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      }
+     },
+     "created": {
+      "t": 1794473539633,
+      "top": {
+       "state": "backup",
+       "codeSaved": "false",
+       "layerHidden": false,
+       "frames": 0,
+       "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      }
+     },
+     "saved": {
+      "t": 1794473543782,
+      "top": {
+       "state": "signed-in",
+       "codeSaved": "true",
+       "layerHidden": true,
+       "frames": 1,
+       "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      },
+      "kept": false,
+      "id": "5153a439-feb3-4a31-ac2e-ad4a3f289fa5"
+     },
+     "passkeyOut": {
+      "t": 1794473547025,
+      "top": {
+       "state": "signed-out",
+       "codeSaved": null,
+       "layerHidden": true,
+       "frames": 1,
+       "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      }
+     },
+     "wordsIn": {
+      "openId": "f774bb84-a46e-49b0-8097-f70b4f7c0a51",
+      "clickedWithFrames": 0,
+      "layer": {
+       "state": "words",
+       "codeSaved": null,
+       "layerHidden": false,
+       "frames": 0,
+       "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      },
+      "typed": {
+       "shellHasWords": true,
+       "appChars": 0
+      }
+     },
+     "words": {
+      "t": 1794473554500,
+      "top": {
+       "state": "signed-in",
+       "codeSaved": "true",
+       "layerHidden": true,
+       "frames": 1,
+       "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      },
+      "id": "97c5edf0-a43b-4512-b572-512a92ad43b4"
+     },
+     "nav": {
+      "t": 1794473557857,
+      "okId": "53f153d7-c015-47c2-adbc-b420915ba34c",
+      "evilId": "b39c2a14-fef2-455d-963c-b6a5f931687f",
+      "after": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
+      "afterEvil": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
+      "frames": 1
+     },
+     "reload": {
+      "t": 1794473558089,
+      "reloadId": "9abc70d8-13d2-4966-a384-80da898af784",
+      "frameHref": "https://ct-app.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
+      "top": {
+       "state": "signed-in",
+       "codeSaved": "true",
+       "layerHidden": true,
+       "frames": 1,
+       "href": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
+      },
+      "id": "ba829dc7-c494-4fc7-a5f5-d54db4f07bf0"
+     },
+     "statusGone": {
+      "id": "28b18834-aa03-46c5-8440-c6edcc7e80dc"
+     },
+     "backfill": {
+      "t": 1794473558912,
+      "top": {
+       "state": "signed-in",
+       "codeSaved": "true",
+       "layerHidden": true,
+       "frames": 1,
+       "href": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
+      },
+      "id": "1251444c-fbbc-411a-ba48-b72feda33146"
+     },
+     "wordsOut": {
+      "t": 1794473562410,
+      "top": {
+       "state": "signed-out",
+       "codeSaved": null,
+       "layerHidden": true,
+       "frames": 1,
+       "href": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
+      }
+     },
+     "last": {
+      "id": "1c85732d-98ca-4188-8ce0-66a10cc4c637"
+     },
+     "stranger": {
+      "t": 1794473565519,
+      "done": true
+     }
+    },
+    "messages": [
+     {
+      "t": 1794473537598,
+      "data": {
+       "v": 1,
+       "type": "ready",
+       "release": "unreleased",
+       "api": 1
+      }
+     },
+     {
+      "t": 1794473537619,
+      "data": {
+       "v": 1,
+       "id": "c1c66314-67f6-4bd5-ae7f-01ecc0b71a7b",
+       "ok": true,
+       "result": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": false,
+        "code_saved": false,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": []
+       }
+      }
+     },
+     {
+      "t": 1794473538730,
+      "data": {
+       "v": 1,
+       "id": "806239df-9a99-4ae3-ae0a-23cc172dc30a",
+       "ok": true,
+       "result": {
+        "pending": true
+       }
+      }
+     },
+     {
+      "t": 1794473543835,
+      "data": {
+       "v": 1,
+       "type": "ready",
+       "release": "unreleased",
+       "api": 1
+      }
+     },
+     {
+      "t": 1794473546942,
+      "data": {
+       "v": 1,
+       "id": "5153a439-feb3-4a31-ac2e-ad4a3f289fa5",
+       "ok": true,
+       "result": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": true,
+        "way": "passkey",
+        "code_saved": true,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": [],
+        "pools": [
+         {
+          "chain": "solana",
+          "asset": "SOL",
+          "balance": "0",
+          "price": {
+           "price": "8288251645",
+           "expo": -8,
+           "published_s": 1794473537,
+           "read_ms": 1794473540574
+          }
+         },
+         {
+          "chain": "base",
+          "asset": "ETH",
+          "balance": "0",
+          "price": {
+           "price": "204708529686",
+           "expo": -8,
+           "published_s": 1794473316,
+           "read_ms": 1794473541432
+          }
+         },
+         {
+          "chain": "robinhood",
+          "asset": "ETH",
+          "balance": "0",
+          "price": {
+           "price": "204630418940",
+           "expo": -8,
+           "published_s": 1794458006,
+           "read_ms": 1794473541618
+          }
+         }
+        ]
+       }
+      }
+     },
+     {
+      "t": 1794473547035,
+      "data": {
+       "v": 1,
+       "type": "state",
+       "state": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": false,
+        "code_saved": false,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": []
+       }
+      }
+     },
+     {
+      "t": 1794473550047,
+      "data": {
+       "v": 1,
+       "id": "f774bb84-a46e-49b0-8097-f70b4f7c0a51",
+       "ok": true,
+       "result": {
+        "pending": true
+       }
+      }
+     },
+     {
+      "t": 1794473554564,
+      "data": {
+       "v": 1,
+       "type": "ready",
+       "release": "unreleased",
+       "api": 1
+      }
+     },
+     {
+      "t": 1794473554567,
+      "data": {
+       "v": 1,
+       "type": "state",
+       "state": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": true,
+        "way": "words",
+        "code_saved": true,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": [],
+        "pools": [
+         {
+          "chain": "solana",
+          "asset": "SOL",
+          "balance": "0",
+          "price": {
+           "price": "8288251645",
+           "expo": -8,
+           "published_s": 1794473537,
+           "read_ms": 1794473540574
+          }
+         },
+         {
+          "chain": "base",
+          "asset": "ETH",
+          "balance": "0",
+          "price": {
+           "price": "204708529686",
+           "expo": -8,
+           "published_s": 1794473316,
+           "read_ms": 1794473541432
+          }
+         },
+         {
+          "chain": "robinhood",
+          "asset": "ETH",
+          "balance": "0",
+          "price": {
+           "price": "204630418940",
+           "expo": -8,
+           "published_s": 1794458006,
+           "read_ms": 1794473541618
+          }
+         }
+        ]
+       }
+      }
+     },
+     {
+      "t": 1794473557821,
+      "data": {
+       "v": 1,
+       "id": "97c5edf0-a43b-4512-b572-512a92ad43b4",
+       "ok": true,
+       "result": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": true,
+        "way": "words",
+        "code_saved": true,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": [
+         {
+          "id": "c4932be9-5421-4c19-ad38-906dcdc13c2a",
+          "kind": "restore",
+          "stage": "reading",
+          "txs": [],
+          "created_ms": 1794473554569
+         }
+        ],
+        "pools": [
+         {
+          "chain": "solana",
+          "asset": "SOL",
+          "balance": "0",
+          "price": {
+           "price": "8288251645",
+           "expo": -8,
+           "published_s": 1794473537,
+           "read_ms": 1794473540574
+          }
+         },
+         {
+          "chain": "base",
+          "asset": "ETH",
+          "balance": "0",
+          "price": {
+           "price": "204708529686",
+           "expo": -8,
+           "published_s": 1794473316,
+           "read_ms": 1794473541432
+          }
+         },
+         {
+          "chain": "robinhood",
+          "asset": "ETH",
+          "balance": "0",
+          "price": {
+           "price": "204630418940",
+           "expo": -8,
+           "published_s": 1794458006,
+           "read_ms": 1794473541618
+          }
+         }
+        ]
+       }
+      }
+     },
+     {
+      "t": 1794473557864,
+      "data": {
+       "v": 1,
+       "id": "53f153d7-c015-47c2-adbc-b420915ba34c",
+       "ok": true,
+       "result": {}
+      }
+     },
+     {
+      "t": 1794473557970,
+      "data": {
+       "v": 1,
+       "id": "b39c2a14-fef2-455d-963c-b6a5f931687f",
+       "ok": false,
+       "error": {
+        "code": "not_allowed"
+       }
+      }
+     },
+     {
+      "t": 1794473558225,
+      "data": {
+       "v": 1,
+       "type": "state",
+       "state": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": true,
+        "way": "words",
+        "code_saved": true,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": [
+         {
+          "id": "c4932be9-5421-4c19-ad38-906dcdc13c2a",
+          "kind": "restore",
+          "stage": "reading",
+          "txs": [],
+          "created_ms": 1794473554569
+         }
+        ],
+        "pools": [
+         {
+          "chain": "solana",
+          "asset": "SOL",
+          "balance": "0",
+          "price": {
+           "price": "8288259825",
+           "expo": -8,
+           "published_s": 1794473547,
+           "read_ms": 1794473558054
+          }
+         },
+         {
+          "chain": "base",
+          "asset": "ETH",
+          "balance": "0",
+          "price": {
+           "price": "204708529686",
+           "expo": -8,
+           "published_s": 1794473316,
+           "read_ms": 1794473541432
+          }
+         },
+         {
+          "chain": "robinhood",
+          "asset": "ETH",
+          "balance": "0",
+          "price": {
+           "price": "204630418940",
+           "expo": -8,
+           "published_s": 1794458006,
+           "read_ms": 1794473541618
+          }
+         }
+        ]
+       }
+      }
+     },
+     {
+      "t": 1794473558225,
+      "data": {
+       "v": 1,
+       "id": "9abc70d8-13d2-4966-a384-80da898af784",
+       "ok": true,
+       "result": {}
+      }
+     },
+     {
+      "t": 1794473558596,
+      "data": {
+       "v": 1,
+       "type": "ready",
+       "release": "unreleased",
+       "api": 1
+      }
+     },
+     {
+      "t": 1794473558712,
+      "data": {
+       "v": 1,
+       "id": "ba829dc7-c494-4fc7-a5f5-d54db4f07bf0",
+       "ok": true,
+       "result": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": true,
+        "way": "words",
+        "code_saved": true,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": [
+         {
+          "id": "c4932be9-5421-4c19-ad38-906dcdc13c2a",
+          "kind": "restore",
+          "stage": "stalled",
+          "txs": [],
+          "created_ms": 1794473554569
+         }
+        ],
+        "pools": [
+         {
+          "chain": "solana",
+          "asset": "SOL",
+          "balance": "0"
+         },
+         {
+          "chain": "base",
+          "asset": "ETH",
+          "balance": "0"
+         },
+         {
+          "chain": "robinhood",
+          "asset": "ETH",
+          "balance": "0"
+         }
+        ]
+       }
+      }
+     },
+     {
+      "t": 1794473558816,
+      "data": {
+       "v": 1,
+       "id": "28b18834-aa03-46c5-8440-c6edcc7e80dc",
+       "ok": true,
+       "result": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": true,
+        "code_saved": false,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": [
+         {
+          "id": "c4932be9-5421-4c19-ad38-906dcdc13c2a",
+          "kind": "restore",
+          "stage": "stalled",
+          "txs": [],
+          "created_ms": 1794473554569
+         }
+        ],
+        "pools": [
+         {
+          "chain": "solana",
+          "asset": "SOL",
+          "balance": "0"
+         },
+         {
+          "chain": "base",
+          "asset": "ETH",
+          "balance": "0"
+         },
+         {
+          "chain": "robinhood",
+          "asset": "ETH",
+          "balance": "0"
+         }
+        ]
+       }
+      }
+     },
+     {
+      "t": 1794473558931,
+      "data": {
+       "v": 1,
+       "type": "state",
+       "state": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": true,
+        "code_saved": false,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": [
+         {
+          "id": "c4932be9-5421-4c19-ad38-906dcdc13c2a",
+          "kind": "restore",
+          "stage": "stalled",
+          "txs": [],
+          "created_ms": 1794473554569
+         }
+        ],
+        "pools": [
+         {
+          "chain": "solana",
+          "asset": "SOL",
+          "balance": "0",
+          "price": {
+           "price": "8288259825",
+           "expo": -8,
+           "published_s": 1794473547,
+           "read_ms": 1794473558928
+          }
+         },
+         {
+          "chain": "base",
+          "asset": "ETH",
+          "balance": "0"
+         },
+         {
+          "chain": "robinhood",
+          "asset": "ETH",
+          "balance": "0"
+         }
+        ]
+       }
+      }
+     },
+     {
+      "t": 1794473559202,
+      "data": {
+       "v": 1,
+       "type": "ready",
+       "release": "unreleased",
+       "api": 1
+      }
+     },
+     {
+      "t": 1794473559317,
+      "data": {
+       "v": 1,
+       "id": "1251444c-fbbc-411a-ba48-b72feda33146",
+       "ok": true,
+       "result": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": true,
+        "way": "words",
+        "code_saved": true,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": [
+         {
+          "id": "c4932be9-5421-4c19-ad38-906dcdc13c2a",
+          "kind": "restore",
+          "stage": "stalled",
+          "txs": [],
+          "created_ms": 1794473554569
+         }
+        ],
+        "pools": [
+         {
+          "chain": "solana",
+          "asset": "SOL",
+          "balance": "0"
+         },
+         {
+          "chain": "base",
+          "asset": "ETH",
+          "balance": "0"
+         },
+         {
+          "chain": "robinhood",
+          "asset": "ETH",
+          "balance": "0"
+         }
+        ]
+       }
+      }
+     },
+     {
+      "t": 1794473559566,
+      "data": {
+       "v": 1,
+       "type": "state",
+       "state": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": true,
+        "way": "words",
+        "code_saved": true,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": [
+         {
+          "id": "c4932be9-5421-4c19-ad38-906dcdc13c2a",
+          "kind": "restore",
+          "stage": "stalled",
+          "txs": [],
+          "created_ms": 1794473554569
+         }
+        ],
+        "pools": [
+         {
+          "chain": "solana",
+          "asset": "SOL",
+          "balance": "0",
+          "price": {
+           "price": "8288259825",
+           "expo": -8,
+           "published_s": 1794473547,
+           "read_ms": 1794473559564
+          }
+         },
+         {
+          "chain": "base",
+          "asset": "ETH",
+          "balance": "0"
+         },
+         {
+          "chain": "robinhood",
+          "asset": "ETH",
+          "balance": "0"
+         }
+        ]
+       }
+      }
+     },
+     {
+      "t": 1794473560601,
+      "data": {
+       "v": 1,
+       "type": "state",
+       "state": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": true,
+        "way": "words",
+        "code_saved": true,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": [
+         {
+          "id": "c4932be9-5421-4c19-ad38-906dcdc13c2a",
+          "kind": "restore",
+          "stage": "stalled",
+          "txs": [],
+          "created_ms": 1794473554569
+         }
+        ],
+        "pools": [
+         {
+          "chain": "solana",
+          "asset": "SOL",
+          "balance": "0",
+          "price": {
+           "price": "8288259825",
+           "expo": -8,
+           "published_s": 1794473547,
+           "read_ms": 1794473559564
+          }
+         },
+         {
+          "chain": "base",
+          "asset": "ETH",
+          "balance": "0"
+         },
+         {
+          "chain": "robinhood",
+          "asset": "ETH",
+          "balance": "0",
+          "price": {
+           "price": "204630418940",
+           "expo": -8,
+           "published_s": 1794458006,
+           "read_ms": 1794473560597
+          }
+         }
+        ]
+       }
+      }
+     },
+     {
+      "t": 1794473561999,
+      "data": {
+       "v": 1,
+       "type": "state",
+       "state": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": true,
+        "way": "words",
+        "code_saved": true,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": [
+         {
+          "id": "c4932be9-5421-4c19-ad38-906dcdc13c2a",
+          "kind": "restore",
+          "stage": "stalled",
+          "txs": [],
+          "created_ms": 1794473554569
+         }
+        ],
+        "pools": [
+         {
+          "chain": "solana",
+          "asset": "SOL",
+          "balance": "0",
+          "price": {
+           "price": "8288259825",
+           "expo": -8,
+           "published_s": 1794473547,
+           "read_ms": 1794473559564
+          }
+         },
+         {
+          "chain": "base",
+          "asset": "ETH",
+          "balance": "0",
+          "price": {
+           "price": "204708529686",
+           "expo": -8,
+           "published_s": 1794473316,
+           "read_ms": 1794473561995
+          }
+         },
+         {
+          "chain": "robinhood",
+          "asset": "ETH",
+          "balance": "0",
+          "price": {
+           "price": "204630418940",
+           "expo": -8,
+           "published_s": 1794458006,
+           "read_ms": 1794473560597
+          }
+         }
+        ]
+       }
+      }
+     },
+     {
+      "t": 1794473562414,
+      "data": {
+       "v": 1,
+       "type": "state",
+       "state": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": false,
+        "code_saved": false,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": []
+       }
+      }
+     },
+     {
+      "t": 1794473565421,
+      "data": {
+       "v": 1,
+       "id": "1c85732d-98ca-4188-8ce0-66a10cc4c637",
+       "ok": true,
+       "result": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": false,
+        "code_saved": false,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": []
+       }
+      }
+     }
+    ],
+    "requests": [
+     {
+      "t": 1794473537582,
+      "host": "ct-app.unrealized.trade",
+      "path": "/token/solana/So11111111111111111111111111111111111111112",
+      "method": "GET",
+      "query": "tab=trades&from=shell"
+     },
+     {
+      "t": 1794473539929,
+      "host": "solana-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getAccountInfo",
+        "params": [
+         "SysvarRent111111111111111111111111111111111",
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473539930,
+      "host": "ct-api.unrealized.trade",
+      "path": "/v1/rpc/solana",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getAccountInfo",
+        "params": [
+         "SysvarRent111111111111111111111111111111111",
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473539932,
+      "host": "solana-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getMultipleAccounts",
+        "params": [
+         [
+          "7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE"
+         ],
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473539933,
+      "host": "ct-api.unrealized.trade",
+      "path": "/v1/rpc/solana",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getMultipleAccounts",
+        "params": [
+         [
+          "7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE"
+         ],
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473539933,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_chainId",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794473539933,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_chainId",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794473539933,
+      "host": "rpc.mainnet.chain.robinhood.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_chainId",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794473539933,
+      "host": "robinhood.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_chainId",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794473539933,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_chainId",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794473539934,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_chainId",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794473540044,
+      "host": "solana-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getAccountInfo",
+        "params": [
+         "7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8",
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473540045,
+      "host": "ct-api.unrealized.trade",
+      "path": "/v1/rpc/solana",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getAccountInfo",
+        "params": [
+         "7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8",
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473540769,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_blockNumber",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794473540770,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_blockNumber",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794473540782,
+      "host": "rpc.mainnet.chain.robinhood.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_blockNumber",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794473540783,
+      "host": "robinhood.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_blockNumber",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794473540785,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_blockNumber",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794473540786,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_blockNumber",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794473540982,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getBlockByNumber",
+        "params": [
+         "0x35cd651",
+         false
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473540983,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getBlockByNumber",
+        "params": [
+         "0x35cd651",
+         false
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473541002,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getBlockByNumber",
+        "params": [
+         "0x35cd64f",
+         false
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473541003,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getBlockByNumber",
+        "params": [
+         "0x35cd64f",
+         false
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473541059,
+      "host": "rpc.mainnet.chain.robinhood.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getBlockByNumber",
+        "params": [
+         "0x6b31dc0",
+         false
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473541059,
+      "host": "robinhood.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getBlockByNumber",
+        "params": [
+         "0x6b31dc0",
+         false
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473541198,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70",
+          "data": "0x313ce567"
+         },
+         "0x35cd651"
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473541199,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70",
+          "data": "0xfeaf968c"
+         },
+         "0x35cd651"
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473541199,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70",
+          "data": "0x313ce567"
+         },
+         "0x35cd651"
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473541200,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70",
+          "data": "0xfeaf968c"
+         },
+         "0x35cd651"
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473541214,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70",
+          "data": "0x313ce567"
+         },
+         "0x35cd64f"
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473541215,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70",
+          "data": "0xfeaf968c"
+         },
+         "0x35cd64f"
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473541215,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70",
+          "data": "0x313ce567"
+         },
+         "0x35cd64f"
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473541215,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70",
+          "data": "0xfeaf968c"
+         },
+         "0x35cd64f"
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473541351,
+      "host": "rpc.mainnet.chain.robinhood.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0x5058aDee53b04e374d8bEDbAD634Bc4778F50b22",
+          "data": "0x313ce567"
+         },
+         "0x6b31dc0"
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473541351,
+      "host": "rpc.mainnet.chain.robinhood.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0x5058aDee53b04e374d8bEDbAD634Bc4778F50b22",
+          "data": "0xfeaf968c"
+         },
+         "0x6b31dc0"
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473541352,
+      "host": "robinhood.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0x5058aDee53b04e374d8bEDbAD634Bc4778F50b22",
+          "data": "0x313ce567"
+         },
+         "0x6b31dc0"
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473541352,
+      "host": "robinhood.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0x5058aDee53b04e374d8bEDbAD634Bc4778F50b22",
+          "data": "0xfeaf968c"
+         },
+         "0x6b31dc0"
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473543827,
+      "host": "ct-app.unrealized.trade",
+      "path": "/token/solana/So11111111111111111111111111111111111111112",
+      "method": "GET",
+      "query": "tab=trades&from=shell"
+     },
+     {
+      "t": 1794473554549,
+      "host": "ct-app.unrealized.trade",
+      "path": "/token/solana/So11111111111111111111111111111111111111112",
+      "method": "GET",
+      "query": "tab=trades&from=shell"
+     },
+     {
+      "t": 1794473554573,
+      "host": "ct-api.unrealized.trade",
+      "path": "/v1/rpc/solana-marks",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getProgramAccounts",
+        "params": [
+         "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         {
+          "commitment": "finalized",
+          "encoding": "base64",
+          "withContext": true,
+          "dataSlice": {
+           "offset": 0,
+           "length": 0
+          },
+          "filters": [
+           {
+            "dataSize": 13
+           },
+           {
+            "memcmp": {
+             "offset": 9,
+             "bytes": "1112"
+            }
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473554577,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_chainId",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794473554579,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_chainId",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794473554579,
+      "host": "rpc.mainnet.chain.robinhood.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_chainId",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794473554580,
+      "host": "robinhood.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_chainId",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794473554780,
+      "host": "solana-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getAccountInfo",
+        "params": [
+         "7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8",
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473554781,
+      "host": "ct-api.unrealized.trade",
+      "path": "/v1/rpc/solana",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getAccountInfo",
+        "params": [
+         "7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8",
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473554840,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getBlockByNumber",
+        "params": [
+         "finalized",
+         false
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473554841,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getBlockByNumber",
+        "params": [
+         "finalized",
+         false
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473554843,
+      "host": "solana-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getMultipleAccounts",
+        "params": [
+         [
+          "8RhWX5yPkPQF1tDmDjTzxWXRzR1E5zXWGdpAi7Q6RFCR",
+          "9CXQY74YjN4y9yzpyowtwHhyPCkQ3fnZf5RLPymP55Lg"
+         ],
+         {
+          "commitment": "finalized",
+          "encoding": "base64",
+          "minContextSlot": 468464995
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473554844,
+      "host": "ct-api.unrealized.trade",
+      "path": "/v1/rpc/solana",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getMultipleAccounts",
+        "params": [
+         [
+          "8RhWX5yPkPQF1tDmDjTzxWXRzR1E5zXWGdpAi7Q6RFCR",
+          "9CXQY74YjN4y9yzpyowtwHhyPCkQ3fnZf5RLPymP55Lg"
+         ],
+         {
+          "commitment": "finalized",
+          "encoding": "base64",
+          "minContextSlot": 468464995
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473554856,
+      "host": "rpc.mainnet.chain.robinhood.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getBlockByNumber",
+        "params": [
+         "finalized",
+         false
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473554857,
+      "host": "robinhood.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getBlockByNumber",
+        "params": [
+         "finalized",
+         false
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473555095,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getBlockByNumber",
+        "params": [
+         "0x35cc1df",
+         false
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473555096,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getBlockByNumber",
+        "params": [
+         "0x35cc1df",
+         false
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473555112,
+      "host": "ct-api.unrealized.trade",
+      "path": "/v1/rpc/solana-marks",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getProgramAccounts",
+        "params": [
+         "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         {
+          "commitment": "finalized",
+          "encoding": "base64",
+          "withContext": true,
+          "dataSlice": {
+           "offset": 0,
+           "length": 0
+          },
+          "minContextSlot": 468464995,
+          "filters": [
+           {
+            "dataSize": 17
+           },
+           {
+            "memcmp": {
+             "offset": 9,
+             "bytes": "11111112"
+            }
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473555139,
+      "host": "rpc.mainnet.chain.robinhood.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getBlockByNumber",
+        "params": [
+         "0x6b2f6d0",
+         false
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473555139,
+      "host": "robinhood.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getBlockByNumber",
+        "params": [
+         "0x6b2f6d0",
+         false
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473555364,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getBlockByNumber",
+        "params": [
+         "latest",
+         false
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473555366,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getBlockByNumber",
+        "params": [
+         "latest",
+         false
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473555366,
+      "host": "solana-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getMultipleAccounts",
+        "params": [
+         [
+          "LEtAFNkdb8iNejugBDjnkkpKST5SbmZx5H1hAZE7c92",
+          "53qXZL6xeJ4XcsRgYjsVhhh1FUPVs5JGka6N3nnRkB7r",
+          "B3DXFHBR6HSHR57dYYyTfQXmJkyj9786ndAnpE6wjYKE",
+          "GJ61ojoB7aDLGWHYCFHVpJN681XLgxPQ2QVfFwShBbvx",
+          "GyTUGdPFyj1X53uQNBtuw4QXx7LQfbYtCLjvWM8WY7B2"
+         ],
+         {
+          "commitment": "finalized",
+          "encoding": "base64",
+          "minContextSlot": 468464997
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473555367,
+      "host": "ct-api.unrealized.trade",
+      "path": "/v1/rpc/solana",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getMultipleAccounts",
+        "params": [
+         [
+          "LEtAFNkdb8iNejugBDjnkkpKST5SbmZx5H1hAZE7c92",
+          "53qXZL6xeJ4XcsRgYjsVhhh1FUPVs5JGka6N3nnRkB7r",
+          "B3DXFHBR6HSHR57dYYyTfQXmJkyj9786ndAnpE6wjYKE",
+          "GJ61ojoB7aDLGWHYCFHVpJN681XLgxPQ2QVfFwShBbvx",
+          "GyTUGdPFyj1X53uQNBtuw4QXx7LQfbYtCLjvWM8WY7B2"
+         ],
+         {
+          "commitment": "finalized",
+          "encoding": "base64",
+          "minContextSlot": 468464997
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473555429,
+      "host": "rpc.mainnet.chain.robinhood.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getBlockByNumber",
+        "params": [
+         "latest",
+         false
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473555430,
+      "host": "robinhood.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getBlockByNumber",
+        "params": [
+         "latest",
+         false
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473555577,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getBlockByNumber",
+        "params": [
+         "0x35cd69a",
+         false
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473555577,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getBlockByNumber",
+        "params": [
+         "0x35cd69a",
+         false
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473555589,
+      "host": "solana-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getMultipleAccounts",
+        "params": [
+         [
+          "ELkTShr5bKWSwntTpF238dq3r5ha2oVsNyApMk19x4AJ",
+          "ECSchKJGQPtfHC4TLFp78Ao9g51EawTgmQPbmA1cFb5y",
+          "7x7AFBzgkuJg3gTVASmwJLtvC2kPJE7CY5fQhjqNUHqN",
+          "5ovwS2VUQgNL1Kwz7q9M5LjmmnJAt1khBoDchUfe6Gzv",
+          "EesTGaxwD6izcU1Nr78dk346UqoNA11SQbsbRQkg2pYn",
+          "9uZjezZDJjNyqz4gvQkALs9ksHA7UqmdPHsJi5Zjv7Ge",
+          "AaFx2d9QXh6xk4pCAijWUcYUv1fdYqdzLTPxnTVKfC2x",
+          "CnzexD5xzToXy3vHLSATA8zNoj4WVqg8ENDhDANCHP7c"
+         ],
+         {
+          "commitment": "finalized",
+          "encoding": "base64",
+          "minContextSlot": 468464998
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473555590,
+      "host": "ct-api.unrealized.trade",
+      "path": "/v1/rpc/solana",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getMultipleAccounts",
+        "params": [
+         [
+          "ELkTShr5bKWSwntTpF238dq3r5ha2oVsNyApMk19x4AJ",
+          "ECSchKJGQPtfHC4TLFp78Ao9g51EawTgmQPbmA1cFb5y",
+          "7x7AFBzgkuJg3gTVASmwJLtvC2kPJE7CY5fQhjqNUHqN",
+          "5ovwS2VUQgNL1Kwz7q9M5LjmmnJAt1khBoDchUfe6Gzv",
+          "EesTGaxwD6izcU1Nr78dk346UqoNA11SQbsbRQkg2pYn",
+          "9uZjezZDJjNyqz4gvQkALs9ksHA7UqmdPHsJi5Zjv7Ge",
+          "AaFx2d9QXh6xk4pCAijWUcYUv1fdYqdzLTPxnTVKfC2x",
+          "CnzexD5xzToXy3vHLSATA8zNoj4WVqg8ENDhDANCHP7c"
+         ],
+         {
+          "commitment": "finalized",
+          "encoding": "base64",
+          "minContextSlot": 468464998
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473555733,
+      "host": "rpc.mainnet.chain.robinhood.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getBlockByNumber",
+        "params": [
+         "0x6b31e40",
+         false
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473555734,
+      "host": "robinhood.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getBlockByNumber",
+        "params": [
+         "0x6b31e40",
+         false
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473555880,
+      "host": "ct-api.unrealized.trade",
+      "path": "/v1/rpc/solana-marks",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getProgramAccounts",
+        "params": [
+         "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         {
+          "commitment": "finalized",
+          "encoding": "base64",
+          "withContext": true,
+          "dataSlice": {
+           "offset": 0,
+           "length": 0
+          },
+          "minContextSlot": 468464999,
+          "filters": [
+           {
+            "dataSize": 13
+           },
+           {
+            "memcmp": {
+             "offset": 9,
+             "bytes": "1112"
+            }
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473556054,
+      "host": "rpc.mainnet.chain.robinhood.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0x9306359433127c4f3be426f6faeb00a3c41f66db",
+          "data": "0x33d09200"
+         },
+         {
+          "blockHash": "0xa22330e8ce45052dcd4992b9f36222f17a052399ae0bd1b45e5267211eff8a96"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473556055,
+      "host": "robinhood.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0x9306359433127c4f3be426f6faeb00a3c41f66db",
+          "data": "0x33d09200"
+         },
+         {
+          "blockHash": "0xa22330e8ce45052dcd4992b9f36222f17a052399ae0bd1b45e5267211eff8a96"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473556089,
+      "host": "ct-api.unrealized.trade",
+      "path": "/v1/rpc/solana-marks",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getProgramAccounts",
+        "params": [
+         "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         {
+          "commitment": "finalized",
+          "encoding": "base64",
+          "withContext": true,
+          "dataSlice": {
+           "offset": 0,
+           "length": 0
+          },
+          "minContextSlot": 468464999,
+          "filters": [
+           {
+            "dataSize": 17
+           },
+           {
+            "memcmp": {
+             "offset": 9,
+             "bytes": "11111112"
+            }
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473556422,
+      "host": "rpc.mainnet.chain.robinhood.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0x9306359433127c4f3be426f6faeb00a3c41f66db",
+          "data": "0xfdab463d"
+         },
+         {
+          "blockHash": "0xa22330e8ce45052dcd4992b9f36222f17a052399ae0bd1b45e5267211eff8a96"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473556422,
+      "host": "robinhood.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0x9306359433127c4f3be426f6faeb00a3c41f66db",
+          "data": "0xfdab463d"
+         },
+         {
+          "blockHash": "0xa22330e8ce45052dcd4992b9f36222f17a052399ae0bd1b45e5267211eff8a96"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473556801,
+      "host": "rpc.mainnet.chain.robinhood.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0x9306359433127c4f3be426f6faeb00a3c41f66db",
+          "data": "0xa8f0f95a"
+         },
+         {
+          "blockHash": "0xa22330e8ce45052dcd4992b9f36222f17a052399ae0bd1b45e5267211eff8a96"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473556802,
+      "host": "robinhood.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0x9306359433127c4f3be426f6faeb00a3c41f66db",
+          "data": "0xa8f0f95a"
+         },
+         {
+          "blockHash": "0xa22330e8ce45052dcd4992b9f36222f17a052399ae0bd1b45e5267211eff8a96"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473557111,
+      "host": "rpc.mainnet.chain.robinhood.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0x9306359433127c4f3be426f6faeb00a3c41f66db",
+          "data": "0x50f3e219"
+         },
+         {
+          "blockHash": "0xa22330e8ce45052dcd4992b9f36222f17a052399ae0bd1b45e5267211eff8a96"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473557112,
+      "host": "robinhood.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0x9306359433127c4f3be426f6faeb00a3c41f66db",
+          "data": "0x50f3e219"
+         },
+         {
+          "blockHash": "0xa22330e8ce45052dcd4992b9f36222f17a052399ae0bd1b45e5267211eff8a96"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473557473,
+      "host": "rpc.mainnet.chain.robinhood.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0x9306359433127c4f3be426f6faeb00a3c41f66db",
+          "data": "0x4181445b"
+         },
+         {
+          "blockHash": "0xa22330e8ce45052dcd4992b9f36222f17a052399ae0bd1b45e5267211eff8a96"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473557473,
+      "host": "robinhood.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0x9306359433127c4f3be426f6faeb00a3c41f66db",
+          "data": "0x4181445b"
+         },
+         {
+          "blockHash": "0xa22330e8ce45052dcd4992b9f36222f17a052399ae0bd1b45e5267211eff8a96"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473557822,
+      "host": "solana-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getMultipleAccounts",
+        "params": [
+         [
+          "7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE"
+         ],
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473557823,
+      "host": "ct-api.unrealized.trade",
+      "path": "/v1/rpc/solana",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getMultipleAccounts",
+        "params": [
+         [
+          "7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE"
+         ],
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473557823,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_chainId",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794473557823,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_chainId",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794473557824,
+      "host": "rpc.mainnet.chain.robinhood.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_chainId",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794473557824,
+      "host": "robinhood.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_chainId",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794473557824,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_chainId",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794473557824,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_chainId",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794473557890,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_chainId",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794473557890,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_chainId",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794473558047,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_blockNumber",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794473558048,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_blockNumber",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794473558078,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_blockNumber",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794473558078,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_blockNumber",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794473558109,
+      "host": "rpc.mainnet.chain.robinhood.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getLogs",
+        "params": [
+         {
+          "address": "0x9306359433127c4f3be426f6faeb00a3c41f66db",
+          "topics": [
+           [
+            "0xe3b53cd1a44fbf11535e145d80b8ef1ed6d57a73bf5daa7e939b6b01657d6549",
+            "0xfabb9e7afa4ef595f60e1ae9041b2b311b4acb27aeaed4b11b6f2abf689af10a",
+            "0xb8a1e6c10d45357f60b093ab761ca4af74bf300c039aa105fb946f7e5105727d"
+           ]
+          ],
+          "fromBlock": "0x6765e42",
+          "toBlock": "0x677e4e1"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473558110,
+      "host": "robinhood.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getLogs",
+        "params": [
+         {
+          "address": "0x9306359433127c4f3be426f6faeb00a3c41f66db",
+          "topics": [
+           [
+            "0xe3b53cd1a44fbf11535e145d80b8ef1ed6d57a73bf5daa7e939b6b01657d6549",
+            "0xfabb9e7afa4ef595f60e1ae9041b2b311b4acb27aeaed4b11b6f2abf689af10a",
+            "0xb8a1e6c10d45357f60b093ab761ca4af74bf300c039aa105fb946f7e5105727d"
+           ]
+          ],
+          "fromBlock": "0x6765e42",
+          "toBlock": "0x677e4e1"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473558110,
+      "host": "rpc.mainnet.chain.robinhood.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_blockNumber",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794473558110,
+      "host": "robinhood.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_blockNumber",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794473558247,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getBlockByNumber",
+        "params": [
+         "finalized",
+         false
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473558247,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getBlockByNumber",
+        "params": [
+         "finalized",
+         false
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473558281,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getBlockByNumber",
+        "params": [
+         "0x35cd6a7",
+         false
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473558281,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getBlockByNumber",
+        "params": [
+         "0x35cd6a7",
+         false
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473558322,
+      "host": "robinhood.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getLogs",
+        "params": [
+         {
+          "address": "0x9306359433127c4f3be426f6faeb00a3c41f66db",
+          "topics": [
+           [
+            "0xe3b53cd1a44fbf11535e145d80b8ef1ed6d57a73bf5daa7e939b6b01657d6549",
+            "0xfabb9e7afa4ef595f60e1ae9041b2b311b4acb27aeaed4b11b6f2abf689af10a",
+            "0xb8a1e6c10d45357f60b093ab761ca4af74bf300c039aa105fb946f7e5105727d"
+           ]
+          ],
+          "fromBlock": "0x677e4e2",
+          "toBlock": "0x67af221"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473558341,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getBlockByNumber",
+        "params": [
+         "0x35cd6a8",
+         false
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473558341,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getBlockByNumber",
+        "params": [
+         "0x35cd6a8",
+         false
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473558573,
+      "host": "ct-app.unrealized.trade",
+      "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      "method": "GET",
+      "query": "tab=holders"
+     },
+     {
+      "t": 1794473558627,
+      "host": "solana-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getAccountInfo",
+        "params": [
+         "7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8",
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473558628,
+      "host": "ct-api.unrealized.trade",
+      "path": "/v1/rpc/solana",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getAccountInfo",
+        "params": [
+         "7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8",
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473558711,
+      "host": "solana-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getAccountInfo",
+        "params": [
+         "SysvarRent111111111111111111111111111111111",
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473558713,
+      "host": "ct-api.unrealized.trade",
+      "path": "/v1/rpc/solana",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getAccountInfo",
+        "params": [
+         "SysvarRent111111111111111111111111111111111",
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473558714,
+      "host": "solana-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getMultipleAccounts",
+        "params": [
+         [
+          "7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE"
+         ],
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473558715,
+      "host": "ct-api.unrealized.trade",
+      "path": "/v1/rpc/solana",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getMultipleAccounts",
+        "params": [
+         [
+          "7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE"
+         ],
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473558715,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_chainId",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794473558717,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_chainId",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794473558718,
+      "host": "rpc.mainnet.chain.robinhood.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_chainId",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794473558718,
+      "host": "robinhood.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_chainId",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794473558719,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_chainId",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794473558719,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_chainId",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794473558923,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_blockNumber",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794473558923,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_blockNumber",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794473559180,
+      "host": "ct-app.unrealized.trade",
+      "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      "method": "GET",
+      "query": "tab=holders"
+     },
+     {
+      "t": 1794473559304,
+      "host": "solana-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getAccountInfo",
+        "params": [
+         "7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8",
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473559305,
+      "host": "ct-api.unrealized.trade",
+      "path": "/v1/rpc/solana",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getAccountInfo",
+        "params": [
+         "7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8",
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473559315,
+      "host": "solana-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getAccountInfo",
+        "params": [
+         "SysvarRent111111111111111111111111111111111",
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473559316,
+      "host": "ct-api.unrealized.trade",
+      "path": "/v1/rpc/solana",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getAccountInfo",
+        "params": [
+         "SysvarRent111111111111111111111111111111111",
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473559319,
+      "host": "solana-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getMultipleAccounts",
+        "params": [
+         [
+          "7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE"
+         ],
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473559320,
+      "host": "ct-api.unrealized.trade",
+      "path": "/v1/rpc/solana",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getMultipleAccounts",
+        "params": [
+         [
+          "7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE"
+         ],
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473559320,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_chainId",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794473559321,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_chainId",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794473559321,
+      "host": "rpc.mainnet.chain.robinhood.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_chainId",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794473559321,
+      "host": "robinhood.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_chainId",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794473559321,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_chainId",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794473559322,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_chainId",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794473559568,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_blockNumber",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794473559570,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_blockNumber",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794473559571,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_blockNumber",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794473559571,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_blockNumber",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794473559581,
+      "host": "rpc.mainnet.chain.robinhood.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_blockNumber",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794473559583,
+      "host": "robinhood.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_blockNumber",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794473559803,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getBlockByNumber",
+        "params": [
+         "0x35cd6af",
+         false
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473559803,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getBlockByNumber",
+        "params": [
+         "0x35cd6af",
+         false
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473559813,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getBlockByNumber",
+        "params": [
+         "0x35cd6af",
+         false
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473559813,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getBlockByNumber",
+        "params": [
+         "0x35cd6af",
+         false
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473559839,
+      "host": "rpc.mainnet.chain.robinhood.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getBlockByNumber",
+        "params": [
+         "0x6b31e66",
+         false
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473559840,
+      "host": "robinhood.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getBlockByNumber",
+        "params": [
+         "0x6b31e66",
+         false
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473560075,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70",
+          "data": "0x313ce567"
+         },
+         "0x35cd6af"
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473560076,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70",
+          "data": "0xfeaf968c"
+         },
+         "0x35cd6af"
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473560076,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70",
+          "data": "0x313ce567"
+         },
+         "0x35cd6af"
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473560076,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70",
+          "data": "0xfeaf968c"
+         },
+         "0x35cd6af"
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473560113,
+      "host": "rpc.mainnet.chain.robinhood.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0x5058aDee53b04e374d8bEDbAD634Bc4778F50b22",
+          "data": "0x313ce567"
+         },
+         "0x6b31e66"
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473560113,
+      "host": "rpc.mainnet.chain.robinhood.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0x5058aDee53b04e374d8bEDbAD634Bc4778F50b22",
+          "data": "0xfeaf968c"
+         },
+         "0x6b31e66"
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473560114,
+      "host": "robinhood.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0x5058aDee53b04e374d8bEDbAD634Bc4778F50b22",
+          "data": "0x313ce567"
+         },
+         "0x6b31e66"
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473560114,
+      "host": "robinhood.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0x5058aDee53b04e374d8bEDbAD634Bc4778F50b22",
+          "data": "0xfeaf968c"
+         },
+         "0x6b31e66"
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473561078,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_chainId",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794473561079,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_chainId",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794473561331,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_blockNumber",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794473561331,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_blockNumber",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794473561544,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getBlockByNumber",
+        "params": [
+         "0x35cd6b8",
+         false
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473561545,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getBlockByNumber",
+        "params": [
+         "0x35cd6b8",
+         false
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473561763,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70",
+          "data": "0x313ce567"
+         },
+         "0x35cd6b8"
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473561763,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70",
+          "data": "0xfeaf968c"
+         },
+         "0x35cd6b8"
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473561763,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70",
+          "data": "0x313ce567"
+         },
+         "0x35cd6b8"
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794473561764,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70",
+          "data": "0xfeaf968c"
+         },
+         "0x35cd6b8"
+        ]
+       }
+      ]
+     }
+    ],
+    "connect": [
+     "ct-api.unrealized.trade",
+     "1click.chaindefuser.com",
+     "rpc.mainnet.fastnear.com",
+     "rpc.mainnet.near.org",
+     "near.drpc.org",
+     "archival-rpc.mainnet.near.org",
+     "archival-rpc.mainnet.fastnear.com",
+     "solana-rpc.publicnode.com",
+     "solana.api.pocket.network",
+     "sender.helius-rpc.com",
+     "mainnet.block-engine.jito.wtf",
+     "api.mainnet-beta.solana.com",
+     "base-rpc.publicnode.com",
+     "base-mainnet.public.blastapi.io",
+     "mainnet.base.org",
+     "base.api.pocket.network",
+     "base.gateway.tenderly.co",
+     "rpc.sentio.xyz",
+     "robinhood-rpc.publicnode.com",
+     "robinhood.drpc.org",
+     "rpc.mainnet.chain.robinhood.com",
+     "robinhood.rpc.blxrbdn.com",
+     "rpc-robinhood.globalstake.io",
+     "robinhood.api.pocket.network",
+     "robinhood.daybreak-rpc.network",
+     "base.rpc.blxrbdn.com"
+    ],
+    "errors": []
+   },
+   "phone": {
+    "engine": "chromium",
+    "view": {
+     "name": "phone",
+     "width": 390,
+     "height": 844,
+     "inner": 390
+    },
+    "source": "live https://confidential.unrealized.trade",
+    "at": "2026-11-12T09:07:24.239Z",
+    "browser": "Chrome 157.0.8103.51, sandbox on",
+    "topology": "shell",
+    "steps": {
+     "open": {
+      "frameHref": "https://ct-app.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell",
+      "top": {
+       "state": "signed-out",
+       "codeSaved": null,
+       "layerHidden": true,
+       "frames": 1,
+       "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      },
+      "attrs": {
+       "sandbox": "allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox",
+       "allow": null,
+       "referrerpolicy": "no-referrer"
+      }
+     },
+     "first": {
+      "id": "3733ab23-d89f-4c38-916d-dcad356dc6e1"
+     },
+     "topNav": {
+      "tried": true,
+      "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+     },
+     "passkeyIn": {
+      "openId": "eeba642e-70dc-491f-9f2d-f43c300cd91d",
+      "layer": {
+       "state": "signed-out",
+       "codeSaved": null,
+       "layerHidden": false,
+       "frames": 1,
+       "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      }
+     },
+     "created": {
+      "t": 1794474447075,
+      "top": {
+       "state": "backup",
+       "codeSaved": "false",
+       "layerHidden": false,
+       "frames": 0,
+       "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      }
+     },
+     "saved": {
+      "t": 1794474451233,
+      "top": {
+       "state": "signed-in",
+       "codeSaved": "true",
+       "layerHidden": true,
+       "frames": 1,
+       "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      },
+      "kept": false,
+      "id": "c4ca0db3-8268-4adf-b288-938ec0b5d256"
+     },
+     "passkeyOut": {
+      "t": 1794474454471,
+      "top": {
+       "state": "signed-out",
+       "codeSaved": null,
+       "layerHidden": true,
+       "frames": 1,
+       "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      }
+     },
+     "wordsIn": {
+      "openId": "175468be-bff0-4616-8838-848abcbf7e26",
+      "clickedWithFrames": 0,
+      "layer": {
+       "state": "words",
+       "codeSaved": null,
+       "layerHidden": false,
+       "frames": 0,
+       "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      },
+      "typed": {
+       "shellHasWords": true,
+       "appChars": 0
+      }
+     },
+     "words": {
+      "t": 1794474462046,
+      "top": {
+       "state": "signed-in",
+       "codeSaved": "true",
+       "layerHidden": true,
+       "frames": 1,
+       "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      },
+      "id": "0ebab111-7ae3-4e19-b91f-11ccd4748858"
+     },
+     "nav": {
+      "t": 1794474465429,
+      "okId": "47001638-60e6-4040-849f-f6257577dee5",
+      "evilId": "6e9c2947-55ea-48cb-b91b-7c2478ed5843",
+      "after": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
+      "afterEvil": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
+      "frames": 1
+     },
+     "reload": {
+      "t": 1794474465699,
+      "reloadId": "753eeaea-28b8-4fd9-945f-f8c3683735ce",
+      "frameHref": "https://ct-app.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
+      "top": {
+       "state": "signed-in",
+       "codeSaved": "true",
+       "layerHidden": true,
+       "frames": 1,
+       "href": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
+      },
+      "id": "a4fe7d95-0638-402e-9115-9899ccad4f7e"
+     },
+     "statusGone": {
+      "id": "eef2f24a-1e47-4ce5-adf4-ac9dabb534db"
+     },
+     "backfill": {
+      "t": 1794474466432,
+      "top": {
+       "state": "signed-in",
+       "codeSaved": "true",
+       "layerHidden": true,
+       "frames": 1,
+       "href": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
+      },
+      "id": "6187bde1-f651-4344-8b7a-ff5e42879095"
+     },
+     "wordsOut": {
+      "t": 1794474469993,
+      "top": {
+       "state": "signed-out",
+       "codeSaved": null,
+       "layerHidden": true,
+       "frames": 1,
+       "href": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
+      }
+     },
+     "last": {
+      "id": "65bca753-62ba-4942-a7ca-adbd1f7dd41d"
+     },
+     "stranger": {
+      "t": 1794474473114,
+      "done": true
+     }
+    },
+    "messages": [
+     {
+      "t": 1794474444905,
+      "data": {
+       "v": 1,
+       "type": "ready",
+       "release": "unreleased",
+       "api": 1
+      }
+     },
+     {
+      "t": 1794474445052,
+      "data": {
+       "v": 1,
+       "id": "3733ab23-d89f-4c38-916d-dcad356dc6e1",
+       "ok": true,
+       "result": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": false,
+        "code_saved": false,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": []
+       }
+      }
+     },
+     {
+      "t": 1794474446170,
+      "data": {
+       "v": 1,
+       "id": "eeba642e-70dc-491f-9f2d-f43c300cd91d",
+       "ok": true,
+       "result": {
+        "pending": true
+       }
+      }
+     },
+     {
+      "t": 1794474451296,
+      "data": {
+       "v": 1,
+       "type": "ready",
+       "release": "unreleased",
+       "api": 1
+      }
+     },
+     {
+      "t": 1794474454375,
+      "data": {
+       "v": 1,
+       "id": "c4ca0db3-8268-4adf-b288-938ec0b5d256",
+       "ok": true,
+       "result": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": true,
+        "way": "passkey",
+        "code_saved": true,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": [],
+        "pools": [
+         {
+          "chain": "solana",
+          "asset": "SOL",
+          "balance": "0",
+          "price": {
+           "price": "8272156205",
+           "expo": -8,
+           "published_s": 1794474437,
+           "read_ms": 1794474448051
+          }
+         },
+         {
+          "chain": "base",
+          "asset": "ETH",
+          "balance": "0",
+          "price": {
+           "price": "204400469853",
+           "expo": -8,
+           "published_s": 1794474157,
+           "read_ms": 1794474449119
+          }
+         },
+         {
+          "chain": "robinhood",
+          "asset": "ETH",
+          "balance": "0",
+          "price": {
+           "price": "204630418940",
+           "expo": -8,
+           "published_s": 1794458006,
+           "read_ms": 1794474449303
+          }
+         }
+        ]
+       }
+      }
+     },
+     {
+      "t": 1794474454477,
+      "data": {
+       "v": 1,
+       "type": "state",
+       "state": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": false,
+        "code_saved": false,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": []
+       }
+      }
+     },
+     {
+      "t": 1794474457486,
+      "data": {
+       "v": 1,
+       "id": "175468be-bff0-4616-8838-848abcbf7e26",
+       "ok": true,
+       "result": {
+        "pending": true
+       }
+      }
+     },
+     {
+      "t": 1794474462159,
+      "data": {
+       "v": 1,
+       "type": "ready",
+       "release": "unreleased",
+       "api": 1
+      }
+     },
+     {
+      "t": 1794474462159,
+      "data": {
+       "v": 1,
+       "type": "state",
+       "state": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": true,
+        "way": "words",
+        "code_saved": true,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": [],
+        "pools": [
+         {
+          "chain": "solana",
+          "asset": "SOL",
+          "balance": "0",
+          "price": {
+           "price": "8272156205",
+           "expo": -8,
+           "published_s": 1794474437,
+           "read_ms": 1794474448051
+          }
+         },
+         {
+          "chain": "base",
+          "asset": "ETH",
+          "balance": "0",
+          "price": {
+           "price": "204400469853",
+           "expo": -8,
+           "published_s": 1794474157,
+           "read_ms": 1794474449119
+          }
+         },
+         {
+          "chain": "robinhood",
+          "asset": "ETH",
+          "balance": "0",
+          "price": {
+           "price": "204630418940",
+           "expo": -8,
+           "published_s": 1794458006,
+           "read_ms": 1794474449303
+          }
+         }
+        ]
+       }
+      }
+     },
+     {
+      "t": 1794474465393,
+      "data": {
+       "v": 1,
+       "id": "0ebab111-7ae3-4e19-b91f-11ccd4748858",
+       "ok": true,
+       "result": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": true,
+        "way": "words",
+        "code_saved": true,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": [
+         {
+          "id": "3ff4c50d-d41e-477b-819b-91c89560887f",
+          "kind": "restore",
+          "stage": "reading",
+          "txs": [],
+          "created_ms": 1794474462162
+         }
+        ],
+        "pools": [
+         {
+          "chain": "solana",
+          "asset": "SOL",
+          "balance": "0",
+          "price": {
+           "price": "8272156205",
+           "expo": -8,
+           "published_s": 1794474437,
+           "read_ms": 1794474448051
+          }
+         },
+         {
+          "chain": "base",
+          "asset": "ETH",
+          "balance": "0",
+          "price": {
+           "price": "204400469853",
+           "expo": -8,
+           "published_s": 1794474157,
+           "read_ms": 1794474449119
+          }
+         },
+         {
+          "chain": "robinhood",
+          "asset": "ETH",
+          "balance": "0",
+          "price": {
+           "price": "204630418940",
+           "expo": -8,
+           "published_s": 1794458006,
+           "read_ms": 1794474449303
+          }
+         }
+        ]
+       }
+      }
+     },
+     {
+      "t": 1794474465442,
+      "data": {
+       "v": 1,
+       "id": "47001638-60e6-4040-849f-f6257577dee5",
+       "ok": true,
+       "result": {}
+      }
+     },
+     {
+      "t": 1794474465594,
+      "data": {
+       "v": 1,
+       "id": "6e9c2947-55ea-48cb-b91b-7c2478ed5843",
+       "ok": false,
+       "error": {
+        "code": "not_allowed"
+       }
+      }
+     },
+     {
+      "t": 1794474465795,
+      "data": {
+       "v": 1,
+       "type": "state",
+       "state": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": true,
+        "way": "words",
+        "code_saved": true,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": [
+         {
+          "id": "3ff4c50d-d41e-477b-819b-91c89560887f",
+          "kind": "restore",
+          "stage": "reading",
+          "txs": [],
+          "created_ms": 1794474462162
+         }
+        ],
+        "pools": [
+         {
+          "chain": "solana",
+          "asset": "SOL",
+          "balance": "0",
+          "price": {
+           "price": "8271355951",
+           "expo": -8,
+           "published_s": 1794474457,
+           "read_ms": 1794474465636
+          }
+         },
+         {
+          "chain": "base",
+          "asset": "ETH",
+          "balance": "0",
+          "price": {
+           "price": "204400469853",
+           "expo": -8,
+           "published_s": 1794474157,
+           "read_ms": 1794474449119
+          }
+         },
+         {
+          "chain": "robinhood",
+          "asset": "ETH",
+          "balance": "0",
+          "price": {
+           "price": "204630418940",
+           "expo": -8,
+           "published_s": 1794458006,
+           "read_ms": 1794474449303
+          }
+         }
+        ]
+       }
+      }
+     },
+     {
+      "t": 1794474465795,
+      "data": {
+       "v": 1,
+       "id": "753eeaea-28b8-4fd9-945f-f8c3683735ce",
+       "ok": true,
+       "result": {}
+      }
+     },
+     {
+      "t": 1794474466173,
+      "data": {
+       "v": 1,
+       "type": "ready",
+       "release": "unreleased",
+       "api": 1
+      }
+     },
+     {
+      "t": 1794474466224,
+      "data": {
+       "v": 1,
+       "id": "a4fe7d95-0638-402e-9115-9899ccad4f7e",
+       "ok": true,
+       "result": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": true,
+        "way": "words",
+        "code_saved": true,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": [
+         {
+          "id": "3ff4c50d-d41e-477b-819b-91c89560887f",
+          "kind": "restore",
+          "stage": "stalled",
+          "txs": [],
+          "created_ms": 1794474462162
+         }
+        ],
+        "pools": [
+         {
+          "chain": "solana",
+          "asset": "SOL",
+          "balance": "0"
+         },
+         {
+          "chain": "base",
+          "asset": "ETH",
+          "balance": "0"
+         },
+         {
+          "chain": "robinhood",
+          "asset": "ETH",
+          "balance": "0"
+         }
+        ]
+       }
+      }
+     },
+     {
+      "t": 1794474466336,
+      "data": {
+       "v": 1,
+       "id": "eef2f24a-1e47-4ce5-adf4-ac9dabb534db",
+       "ok": true,
+       "result": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": true,
+        "code_saved": false,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": [
+         {
+          "id": "3ff4c50d-d41e-477b-819b-91c89560887f",
+          "kind": "restore",
+          "stage": "stalled",
+          "txs": [],
+          "created_ms": 1794474462162
+         }
+        ],
+        "pools": [
+         {
+          "chain": "solana",
+          "asset": "SOL",
+          "balance": "0"
+         },
+         {
+          "chain": "base",
+          "asset": "ETH",
+          "balance": "0"
+         },
+         {
+          "chain": "robinhood",
+          "asset": "ETH",
+          "balance": "0"
+         }
+        ]
+       }
+      }
+     },
+     {
+      "t": 1794474466477,
+      "data": {
+       "v": 1,
+       "type": "state",
+       "state": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": true,
+        "code_saved": false,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": [
+         {
+          "id": "3ff4c50d-d41e-477b-819b-91c89560887f",
+          "kind": "restore",
+          "stage": "stalled",
+          "txs": [],
+          "created_ms": 1794474462162
+         }
+        ],
+        "pools": [
+         {
+          "chain": "solana",
+          "asset": "SOL",
+          "balance": "0",
+          "price": {
+           "price": "8271355951",
+           "expo": -8,
+           "published_s": 1794474457,
+           "read_ms": 1794474466469
+          }
+         },
+         {
+          "chain": "base",
+          "asset": "ETH",
+          "balance": "0"
+         },
+         {
+          "chain": "robinhood",
+          "asset": "ETH",
+          "balance": "0"
+         }
+        ]
+       }
+      }
+     },
+     {
+      "t": 1794474466777,
+      "data": {
+       "v": 1,
+       "type": "ready",
+       "release": "unreleased",
+       "api": 1
+      }
+     },
+     {
+      "t": 1794474466895,
+      "data": {
+       "v": 1,
+       "id": "6187bde1-f651-4344-8b7a-ff5e42879095",
+       "ok": true,
+       "result": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": true,
+        "way": "words",
+        "code_saved": true,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": [
+         {
+          "id": "3ff4c50d-d41e-477b-819b-91c89560887f",
+          "kind": "restore",
+          "stage": "stalled",
+          "txs": [],
+          "created_ms": 1794474462162
+         }
+        ],
+        "pools": [
+         {
+          "chain": "solana",
+          "asset": "SOL",
+          "balance": "0"
+         },
+         {
+          "chain": "base",
+          "asset": "ETH",
+          "balance": "0"
+         },
+         {
+          "chain": "robinhood",
+          "asset": "ETH",
+          "balance": "0"
+         }
+        ]
+       }
+      }
+     },
+     {
+      "t": 1794474467178,
+      "data": {
+       "v": 1,
+       "type": "state",
+       "state": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": true,
+        "way": "words",
+        "code_saved": true,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": [
+         {
+          "id": "3ff4c50d-d41e-477b-819b-91c89560887f",
+          "kind": "restore",
+          "stage": "stalled",
+          "txs": [],
+          "created_ms": 1794474462162
+         }
+        ],
+        "pools": [
+         {
+          "chain": "solana",
+          "asset": "SOL",
+          "balance": "0",
+          "price": {
+           "price": "8271355951",
+           "expo": -8,
+           "published_s": 1794474457,
+           "read_ms": 1794474467172
+          }
+         },
+         {
+          "chain": "base",
+          "asset": "ETH",
+          "balance": "0"
+         },
+         {
+          "chain": "robinhood",
+          "asset": "ETH",
+          "balance": "0"
+         }
+        ]
+       }
+      }
+     },
+     {
+      "t": 1794474467950,
+      "data": {
+       "v": 1,
+       "type": "state",
+       "state": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": true,
+        "way": "words",
+        "code_saved": true,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": [
+         {
+          "id": "3ff4c50d-d41e-477b-819b-91c89560887f",
+          "kind": "restore",
+          "stage": "stalled",
+          "txs": [],
+          "created_ms": 1794474462162
+         }
+        ],
+        "pools": [
+         {
+          "chain": "solana",
+          "asset": "SOL",
+          "balance": "0",
+          "price": {
+           "price": "8271355951",
+           "expo": -8,
+           "published_s": 1794474457,
+           "read_ms": 1794474467172
+          }
+         },
+         {
+          "chain": "base",
+          "asset": "ETH",
+          "balance": "0",
+          "price": {
+           "price": "204400469853",
+           "expo": -8,
+           "published_s": 1794474157,
+           "read_ms": 1794474467930
+          }
+         },
+         {
+          "chain": "robinhood",
+          "asset": "ETH",
+          "balance": "0"
+         }
+        ]
+       }
+      }
+     },
+     {
+      "t": 1794474468065,
+      "data": {
+       "v": 1,
+       "type": "state",
+       "state": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": true,
+        "way": "words",
+        "code_saved": true,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": [
+         {
+          "id": "3ff4c50d-d41e-477b-819b-91c89560887f",
+          "kind": "restore",
+          "stage": "stalled",
+          "txs": [],
+          "created_ms": 1794474462162
+         }
+        ],
+        "pools": [
+         {
+          "chain": "solana",
+          "asset": "SOL",
+          "balance": "0",
+          "price": {
+           "price": "8271355951",
+           "expo": -8,
+           "published_s": 1794474457,
+           "read_ms": 1794474467172
+          }
+         },
+         {
+          "chain": "base",
+          "asset": "ETH",
+          "balance": "0",
+          "price": {
+           "price": "204400469853",
+           "expo": -8,
+           "published_s": 1794474157,
+           "read_ms": 1794474467930
+          }
+         },
+         {
+          "chain": "robinhood",
+          "asset": "ETH",
+          "balance": "0",
+          "price": {
+           "price": "204630418940",
+           "expo": -8,
+           "published_s": 1794458006,
+           "read_ms": 1794474468055
+          }
+         }
+        ]
+       }
+      }
+     },
+     {
+      "t": 1794474470003,
+      "data": {
+       "v": 1,
+       "type": "state",
+       "state": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": false,
+        "code_saved": false,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": []
+       }
+      }
+     },
+     {
+      "t": 1794474473010,
+      "data": {
+       "v": 1,
+       "id": "65bca753-62ba-4942-a7ca-adbd1f7dd41d",
+       "ok": true,
+       "result": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": false,
+        "code_saved": false,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": []
+       }
+      }
+     }
+    ],
+    "requests": [
+     {
+      "t": 1794474444885,
+      "host": "ct-app.unrealized.trade",
+      "path": "/token/solana/So11111111111111111111111111111111111111112",
+      "method": "GET",
+      "query": "tab=trades&from=shell"
+     },
+     {
+      "t": 1794474447390,
+      "host": "solana-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getAccountInfo",
+        "params": [
+         "SysvarRent111111111111111111111111111111111",
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474447392,
+      "host": "ct-api.unrealized.trade",
+      "path": "/v1/rpc/solana",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getAccountInfo",
+        "params": [
+         "SysvarRent111111111111111111111111111111111",
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474447395,
+      "host": "solana-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getMultipleAccounts",
+        "params": [
+         [
+          "7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE"
+         ],
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474447399,
+      "host": "ct-api.unrealized.trade",
+      "path": "/v1/rpc/solana",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getMultipleAccounts",
+        "params": [
+         [
+          "7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE"
+         ],
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474447402,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_chainId",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794474447402,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_chainId",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794474447402,
+      "host": "rpc.mainnet.chain.robinhood.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_chainId",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794474447402,
+      "host": "robinhood.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_chainId",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794474447403,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_chainId",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794474447403,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_chainId",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794474447675,
+      "host": "solana-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getAccountInfo",
+        "params": [
+         "7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8",
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474447676,
+      "host": "ct-api.unrealized.trade",
+      "path": "/v1/rpc/solana",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getAccountInfo",
+        "params": [
+         "7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8",
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474448329,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_blockNumber",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794474448329,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_blockNumber",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794474448337,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_blockNumber",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794474448338,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_blockNumber",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794474448341,
+      "host": "rpc.mainnet.chain.robinhood.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_blockNumber",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794474448341,
+      "host": "robinhood.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_blockNumber",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794474448569,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getBlockByNumber",
+        "params": [
+         "0x35ce80b",
+         false
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474448569,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getBlockByNumber",
+        "params": [
+         "0x35ce80b",
+         false
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474448619,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getBlockByNumber",
+        "params": [
+         "0x35ce80b",
+         false
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474448619,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getBlockByNumber",
+        "params": [
+         "0x35ce80b",
+         false
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474448662,
+      "host": "rpc.mainnet.chain.robinhood.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getBlockByNumber",
+        "params": [
+         "0x6b33e80",
+         false
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474448663,
+      "host": "robinhood.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getBlockByNumber",
+        "params": [
+         "0x6b33e80",
+         false
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474448798,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70",
+          "data": "0x313ce567"
+         },
+         "0x35ce80b"
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474448799,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70",
+          "data": "0xfeaf968c"
+         },
+         "0x35ce80b"
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474448799,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70",
+          "data": "0x313ce567"
+         },
+         "0x35ce80b"
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474448799,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70",
+          "data": "0xfeaf968c"
+         },
+         "0x35ce80b"
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474448885,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70",
+          "data": "0x313ce567"
+         },
+         "0x35ce80b"
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474448886,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70",
+          "data": "0xfeaf968c"
+         },
+         "0x35ce80b"
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474448886,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70",
+          "data": "0x313ce567"
+         },
+         "0x35ce80b"
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474448887,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70",
+          "data": "0xfeaf968c"
+         },
+         "0x35ce80b"
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474448965,
+      "host": "rpc.mainnet.chain.robinhood.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0x5058aDee53b04e374d8bEDbAD634Bc4778F50b22",
+          "data": "0x313ce567"
+         },
+         "0x6b33e80"
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474448967,
+      "host": "rpc.mainnet.chain.robinhood.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0x5058aDee53b04e374d8bEDbAD634Bc4778F50b22",
+          "data": "0xfeaf968c"
+         },
+         "0x6b33e80"
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474448968,
+      "host": "robinhood.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0x5058aDee53b04e374d8bEDbAD634Bc4778F50b22",
+          "data": "0x313ce567"
+         },
+         "0x6b33e80"
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474448968,
+      "host": "robinhood.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0x5058aDee53b04e374d8bEDbAD634Bc4778F50b22",
+          "data": "0xfeaf968c"
+         },
+         "0x6b33e80"
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474451289,
+      "host": "ct-app.unrealized.trade",
+      "path": "/token/solana/So11111111111111111111111111111111111111112",
+      "method": "GET",
+      "query": "tab=trades&from=shell"
+     },
+     {
+      "t": 1794474462141,
+      "host": "ct-app.unrealized.trade",
+      "path": "/token/solana/So11111111111111111111111111111111111111112",
+      "method": "GET",
+      "query": "tab=trades&from=shell"
+     },
+     {
+      "t": 1794474462183,
+      "host": "ct-api.unrealized.trade",
+      "path": "/v1/rpc/solana-marks",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getProgramAccounts",
+        "params": [
+         "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         {
+          "commitment": "finalized",
+          "encoding": "base64",
+          "withContext": true,
+          "dataSlice": {
+           "offset": 0,
+           "length": 0
+          },
+          "filters": [
+           {
+            "dataSize": 13
+           },
+           {
+            "memcmp": {
+             "offset": 9,
+             "bytes": "1112"
+            }
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474462184,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_chainId",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794474462184,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_chainId",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794474462184,
+      "host": "rpc.mainnet.chain.robinhood.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_chainId",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794474462184,
+      "host": "robinhood.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_chainId",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794474462424,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getBlockByNumber",
+        "params": [
+         "finalized",
+         false
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474462426,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getBlockByNumber",
+        "params": [
+         "finalized",
+         false
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474462447,
+      "host": "solana-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getMultipleAccounts",
+        "params": [
+         [
+          "8RhWX5yPkPQF1tDmDjTzxWXRzR1E5zXWGdpAi7Q6RFCR",
+          "9CXQY74YjN4y9yzpyowtwHhyPCkQ3fnZf5RLPymP55Lg"
+         ],
+         {
+          "commitment": "finalized",
+          "encoding": "base64",
+          "minContextSlot": 468469208
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474462448,
+      "host": "ct-api.unrealized.trade",
+      "path": "/v1/rpc/solana",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getMultipleAccounts",
+        "params": [
+         [
+          "8RhWX5yPkPQF1tDmDjTzxWXRzR1E5zXWGdpAi7Q6RFCR",
+          "9CXQY74YjN4y9yzpyowtwHhyPCkQ3fnZf5RLPymP55Lg"
+         ],
+         {
+          "commitment": "finalized",
+          "encoding": "base64",
+          "minContextSlot": 468469208
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474462514,
+      "host": "rpc.mainnet.chain.robinhood.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getBlockByNumber",
+        "params": [
+         "finalized",
+         false
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474462515,
+      "host": "robinhood.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getBlockByNumber",
+        "params": [
+         "finalized",
+         false
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474462670,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getBlockByNumber",
+        "params": [
+         "0x35cd153",
+         false
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474462674,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getBlockByNumber",
+        "params": [
+         "0x35cd153",
+         false
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474462695,
+      "host": "ct-api.unrealized.trade",
+      "path": "/v1/rpc/solana-marks",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getProgramAccounts",
+        "params": [
+         "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         {
+          "commitment": "finalized",
+          "encoding": "base64",
+          "withContext": true,
+          "dataSlice": {
+           "offset": 0,
+           "length": 0
+          },
+          "minContextSlot": 468469209,
+          "filters": [
+           {
+            "dataSize": 17
+           },
+           {
+            "memcmp": {
+             "offset": 9,
+             "bytes": "11111112"
+            }
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474462802,
+      "host": "rpc.mainnet.chain.robinhood.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getBlockByNumber",
+        "params": [
+         "0x6b314b0",
+         false
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474462803,
+      "host": "robinhood.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getBlockByNumber",
+        "params": [
+         "0x6b314b0",
+         false
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474462878,
+      "host": "solana-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getAccountInfo",
+        "params": [
+         "7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8",
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474462880,
+      "host": "ct-api.unrealized.trade",
+      "path": "/v1/rpc/solana",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getAccountInfo",
+        "params": [
+         "7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8",
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474462944,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getBlockByNumber",
+        "params": [
+         "latest",
+         false
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474462955,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getBlockByNumber",
+        "params": [
+         "latest",
+         false
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474462958,
+      "host": "solana-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getMultipleAccounts",
+        "params": [
+         [
+          "LEtAFNkdb8iNejugBDjnkkpKST5SbmZx5H1hAZE7c92",
+          "53qXZL6xeJ4XcsRgYjsVhhh1FUPVs5JGka6N3nnRkB7r",
+          "B3DXFHBR6HSHR57dYYyTfQXmJkyj9786ndAnpE6wjYKE",
+          "GJ61ojoB7aDLGWHYCFHVpJN681XLgxPQ2QVfFwShBbvx",
+          "GyTUGdPFyj1X53uQNBtuw4QXx7LQfbYtCLjvWM8WY7B2"
+         ],
+         {
+          "commitment": "finalized",
+          "encoding": "base64",
+          "minContextSlot": 468469210
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474462959,
+      "host": "ct-api.unrealized.trade",
+      "path": "/v1/rpc/solana",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getMultipleAccounts",
+        "params": [
+         [
+          "LEtAFNkdb8iNejugBDjnkkpKST5SbmZx5H1hAZE7c92",
+          "53qXZL6xeJ4XcsRgYjsVhhh1FUPVs5JGka6N3nnRkB7r",
+          "B3DXFHBR6HSHR57dYYyTfQXmJkyj9786ndAnpE6wjYKE",
+          "GJ61ojoB7aDLGWHYCFHVpJN681XLgxPQ2QVfFwShBbvx",
+          "GyTUGdPFyj1X53uQNBtuw4QXx7LQfbYtCLjvWM8WY7B2"
+         ],
+         {
+          "commitment": "finalized",
+          "encoding": "base64",
+          "minContextSlot": 468469210
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474463084,
+      "host": "rpc.mainnet.chain.robinhood.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getBlockByNumber",
+        "params": [
+         "latest",
+         false
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474463086,
+      "host": "robinhood.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getBlockByNumber",
+        "params": [
+         "latest",
+         false
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474463166,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getBlockByNumber",
+        "params": [
+         "0x35ce854",
+         false
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474463167,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getBlockByNumber",
+        "params": [
+         "0x35ce854",
+         false
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474463182,
+      "host": "solana-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getMultipleAccounts",
+        "params": [
+         [
+          "ELkTShr5bKWSwntTpF238dq3r5ha2oVsNyApMk19x4AJ",
+          "ECSchKJGQPtfHC4TLFp78Ao9g51EawTgmQPbmA1cFb5y",
+          "7x7AFBzgkuJg3gTVASmwJLtvC2kPJE7CY5fQhjqNUHqN",
+          "5ovwS2VUQgNL1Kwz7q9M5LjmmnJAt1khBoDchUfe6Gzv",
+          "EesTGaxwD6izcU1Nr78dk346UqoNA11SQbsbRQkg2pYn",
+          "9uZjezZDJjNyqz4gvQkALs9ksHA7UqmdPHsJi5Zjv7Ge",
+          "AaFx2d9QXh6xk4pCAijWUcYUv1fdYqdzLTPxnTVKfC2x",
+          "CnzexD5xzToXy3vHLSATA8zNoj4WVqg8ENDhDANCHP7c"
+         ],
+         {
+          "commitment": "finalized",
+          "encoding": "base64",
+          "minContextSlot": 468469211
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474463184,
+      "host": "ct-api.unrealized.trade",
+      "path": "/v1/rpc/solana",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getMultipleAccounts",
+        "params": [
+         [
+          "ELkTShr5bKWSwntTpF238dq3r5ha2oVsNyApMk19x4AJ",
+          "ECSchKJGQPtfHC4TLFp78Ao9g51EawTgmQPbmA1cFb5y",
+          "7x7AFBzgkuJg3gTVASmwJLtvC2kPJE7CY5fQhjqNUHqN",
+          "5ovwS2VUQgNL1Kwz7q9M5LjmmnJAt1khBoDchUfe6Gzv",
+          "EesTGaxwD6izcU1Nr78dk346UqoNA11SQbsbRQkg2pYn",
+          "9uZjezZDJjNyqz4gvQkALs9ksHA7UqmdPHsJi5Zjv7Ge",
+          "AaFx2d9QXh6xk4pCAijWUcYUv1fdYqdzLTPxnTVKfC2x",
+          "CnzexD5xzToXy3vHLSATA8zNoj4WVqg8ENDhDANCHP7c"
+         ],
+         {
+          "commitment": "finalized",
+          "encoding": "base64",
+          "minContextSlot": 468469211
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474463359,
+      "host": "rpc.mainnet.chain.robinhood.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getBlockByNumber",
+        "params": [
+         "0x6b33f0f",
+         false
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474463360,
+      "host": "robinhood.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getBlockByNumber",
+        "params": [
+         "0x6b33f0f",
+         false
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474463476,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0xaa080e74ec99cf5c684548c77ca145edfcf899cf",
+          "data": "0x33d09200"
+         },
+         {
+          "blockHash": "0x205c57fd70191357fcb03cdcab3f25f4c888414724e4e7f6c7873bf674e19530"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474463476,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0xaa080e74ec99cf5c684548c77ca145edfcf899cf",
+          "data": "0x33d09200"
+         },
+         {
+          "blockHash": "0x205c57fd70191357fcb03cdcab3f25f4c888414724e4e7f6c7873bf674e19530"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474463476,
+      "host": "ct-api.unrealized.trade",
+      "path": "/v1/rpc/solana-marks",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getProgramAccounts",
+        "params": [
+         "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         {
+          "commitment": "finalized",
+          "encoding": "base64",
+          "withContext": true,
+          "dataSlice": {
+           "offset": 0,
+           "length": 0
+          },
+          "minContextSlot": 468469212,
+          "filters": [
+           {
+            "dataSize": 13
+           },
+           {
+            "memcmp": {
+             "offset": 9,
+             "bytes": "1112"
+            }
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474463641,
+      "host": "rpc.mainnet.chain.robinhood.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0x9306359433127c4f3be426f6faeb00a3c41f66db",
+          "data": "0x33d09200"
+         },
+         {
+          "blockHash": "0xcbb107ec900742f3e19e07fb1a87c05736229b5dccd4eb3e515e1b15c05c163e"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474463642,
+      "host": "robinhood.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0x9306359433127c4f3be426f6faeb00a3c41f66db",
+          "data": "0x33d09200"
+         },
+         {
+          "blockHash": "0xcbb107ec900742f3e19e07fb1a87c05736229b5dccd4eb3e515e1b15c05c163e"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474463720,
+      "host": "ct-api.unrealized.trade",
+      "path": "/v1/rpc/solana-marks",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getProgramAccounts",
+        "params": [
+         "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         {
+          "commitment": "finalized",
+          "encoding": "base64",
+          "withContext": true,
+          "dataSlice": {
+           "offset": 0,
+           "length": 0
+          },
+          "minContextSlot": 468469212,
+          "filters": [
+           {
+            "dataSize": 17
+           },
+           {
+            "memcmp": {
+             "offset": 9,
+             "bytes": "11111112"
+            }
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474463723,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0xaa080e74ec99cf5c684548c77ca145edfcf899cf",
+          "data": "0xfdab463d"
+         },
+         {
+          "blockHash": "0x205c57fd70191357fcb03cdcab3f25f4c888414724e4e7f6c7873bf674e19530"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474463724,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0xaa080e74ec99cf5c684548c77ca145edfcf899cf",
+          "data": "0xfdab463d"
+         },
+         {
+          "blockHash": "0x205c57fd70191357fcb03cdcab3f25f4c888414724e4e7f6c7873bf674e19530"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474463989,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0xaa080e74ec99cf5c684548c77ca145edfcf899cf",
+          "data": "0xa8f0f95a"
+         },
+         {
+          "blockHash": "0x205c57fd70191357fcb03cdcab3f25f4c888414724e4e7f6c7873bf674e19530"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474463990,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0xaa080e74ec99cf5c684548c77ca145edfcf899cf",
+          "data": "0xa8f0f95a"
+         },
+         {
+          "blockHash": "0x205c57fd70191357fcb03cdcab3f25f4c888414724e4e7f6c7873bf674e19530"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474463991,
+      "host": "rpc.mainnet.chain.robinhood.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0x9306359433127c4f3be426f6faeb00a3c41f66db",
+          "data": "0xfdab463d"
+         },
+         {
+          "blockHash": "0xcbb107ec900742f3e19e07fb1a87c05736229b5dccd4eb3e515e1b15c05c163e"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474463991,
+      "host": "robinhood.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0x9306359433127c4f3be426f6faeb00a3c41f66db",
+          "data": "0xfdab463d"
+         },
+         {
+          "blockHash": "0xcbb107ec900742f3e19e07fb1a87c05736229b5dccd4eb3e515e1b15c05c163e"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474464309,
+      "host": "rpc.mainnet.chain.robinhood.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0x9306359433127c4f3be426f6faeb00a3c41f66db",
+          "data": "0xa8f0f95a"
+         },
+         {
+          "blockHash": "0xcbb107ec900742f3e19e07fb1a87c05736229b5dccd4eb3e515e1b15c05c163e"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474464316,
+      "host": "robinhood.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0x9306359433127c4f3be426f6faeb00a3c41f66db",
+          "data": "0xa8f0f95a"
+         },
+         {
+          "blockHash": "0xcbb107ec900742f3e19e07fb1a87c05736229b5dccd4eb3e515e1b15c05c163e"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474464338,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0xaa080e74ec99cf5c684548c77ca145edfcf899cf",
+          "data": "0x50f3e219"
+         },
+         {
+          "blockHash": "0x205c57fd70191357fcb03cdcab3f25f4c888414724e4e7f6c7873bf674e19530"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474464339,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0xaa080e74ec99cf5c684548c77ca145edfcf899cf",
+          "data": "0x50f3e219"
+         },
+         {
+          "blockHash": "0x205c57fd70191357fcb03cdcab3f25f4c888414724e4e7f6c7873bf674e19530"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474464575,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0xaa080e74ec99cf5c684548c77ca145edfcf899cf",
+          "data": "0x4181445b"
+         },
+         {
+          "blockHash": "0x205c57fd70191357fcb03cdcab3f25f4c888414724e4e7f6c7873bf674e19530"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474464576,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0xaa080e74ec99cf5c684548c77ca145edfcf899cf",
+          "data": "0x4181445b"
+         },
+         {
+          "blockHash": "0x205c57fd70191357fcb03cdcab3f25f4c888414724e4e7f6c7873bf674e19530"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474464611,
+      "host": "rpc.mainnet.chain.robinhood.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0x9306359433127c4f3be426f6faeb00a3c41f66db",
+          "data": "0x50f3e219"
+         },
+         {
+          "blockHash": "0xcbb107ec900742f3e19e07fb1a87c05736229b5dccd4eb3e515e1b15c05c163e"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474464612,
+      "host": "robinhood.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0x9306359433127c4f3be426f6faeb00a3c41f66db",
+          "data": "0x50f3e219"
+         },
+         {
+          "blockHash": "0xcbb107ec900742f3e19e07fb1a87c05736229b5dccd4eb3e515e1b15c05c163e"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474464808,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getLogs",
+        "params": [
+         {
+          "address": "0xaa080e74ec99cf5c684548c77ca145edfcf899cf",
+          "topics": [
+           [
+            "0xe3b53cd1a44fbf11535e145d80b8ef1ed6d57a73bf5daa7e939b6b01657d6549",
+            "0xfabb9e7afa4ef595f60e1ae9041b2b311b4acb27aeaed4b11b6f2abf689af10a",
+            "0xb8a1e6c10d45357f60b093ab761ca4af74bf300c039aa105fb946f7e5105727d"
+           ]
+          ],
+          "fromBlock": "0x33cf1a7",
+          "toBlock": "0x33e7846"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474464809,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getLogs",
+        "params": [
+         {
+          "address": "0xaa080e74ec99cf5c684548c77ca145edfcf899cf",
+          "topics": [
+           [
+            "0xe3b53cd1a44fbf11535e145d80b8ef1ed6d57a73bf5daa7e939b6b01657d6549",
+            "0xfabb9e7afa4ef595f60e1ae9041b2b311b4acb27aeaed4b11b6f2abf689af10a",
+            "0xb8a1e6c10d45357f60b093ab761ca4af74bf300c039aa105fb946f7e5105727d"
+           ]
+          ],
+          "fromBlock": "0x33cf1a7",
+          "toBlock": "0x33e7846"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474464908,
+      "host": "rpc.mainnet.chain.robinhood.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0x9306359433127c4f3be426f6faeb00a3c41f66db",
+          "data": "0x4181445b"
+         },
+         {
+          "blockHash": "0xcbb107ec900742f3e19e07fb1a87c05736229b5dccd4eb3e515e1b15c05c163e"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474464909,
+      "host": "robinhood.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0x9306359433127c4f3be426f6faeb00a3c41f66db",
+          "data": "0x4181445b"
+         },
+         {
+          "blockHash": "0xcbb107ec900742f3e19e07fb1a87c05736229b5dccd4eb3e515e1b15c05c163e"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474464921,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getLogs",
+        "params": [
+         {
+          "address": "0xaa080e74ec99cf5c684548c77ca145edfcf899cf",
+          "topics": [
+           [
+            "0xe3b53cd1a44fbf11535e145d80b8ef1ed6d57a73bf5daa7e939b6b01657d6549",
+            "0xfabb9e7afa4ef595f60e1ae9041b2b311b4acb27aeaed4b11b6f2abf689af10a",
+            "0xb8a1e6c10d45357f60b093ab761ca4af74bf300c039aa105fb946f7e5105727d"
+           ]
+          ],
+          "fromBlock": "0x33cf1a7",
+          "toBlock": "0x33db4f6"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474465066,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getLogs",
+        "params": [
+         {
+          "address": "0xaa080e74ec99cf5c684548c77ca145edfcf899cf",
+          "topics": [
+           [
+            "0xe3b53cd1a44fbf11535e145d80b8ef1ed6d57a73bf5daa7e939b6b01657d6549",
+            "0xfabb9e7afa4ef595f60e1ae9041b2b311b4acb27aeaed4b11b6f2abf689af10a",
+            "0xb8a1e6c10d45357f60b093ab761ca4af74bf300c039aa105fb946f7e5105727d"
+           ]
+          ],
+          "fromBlock": "0x33cf1a7",
+          "toBlock": "0x33cf39a"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474465067,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getLogs",
+        "params": [
+         {
+          "address": "0xaa080e74ec99cf5c684548c77ca145edfcf899cf",
+          "topics": [
+           [
+            "0xe3b53cd1a44fbf11535e145d80b8ef1ed6d57a73bf5daa7e939b6b01657d6549",
+            "0xfabb9e7afa4ef595f60e1ae9041b2b311b4acb27aeaed4b11b6f2abf689af10a",
+            "0xb8a1e6c10d45357f60b093ab761ca4af74bf300c039aa105fb946f7e5105727d"
+           ]
+          ],
+          "fromBlock": "0x33db4f7",
+          "toBlock": "0x33e7846"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474465211,
+      "host": "rpc.mainnet.chain.robinhood.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getLogs",
+        "params": [
+         {
+          "address": "0x9306359433127c4f3be426f6faeb00a3c41f66db",
+          "topics": [
+           [
+            "0xe3b53cd1a44fbf11535e145d80b8ef1ed6d57a73bf5daa7e939b6b01657d6549",
+            "0xfabb9e7afa4ef595f60e1ae9041b2b311b4acb27aeaed4b11b6f2abf689af10a",
+            "0xb8a1e6c10d45357f60b093ab761ca4af74bf300c039aa105fb946f7e5105727d"
+           ]
+          ],
+          "fromBlock": "0x6765e42",
+          "toBlock": "0x677e4e1"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474465211,
+      "host": "robinhood.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getLogs",
+        "params": [
+         {
+          "address": "0x9306359433127c4f3be426f6faeb00a3c41f66db",
+          "topics": [
+           [
+            "0xe3b53cd1a44fbf11535e145d80b8ef1ed6d57a73bf5daa7e939b6b01657d6549",
+            "0xfabb9e7afa4ef595f60e1ae9041b2b311b4acb27aeaed4b11b6f2abf689af10a",
+            "0xb8a1e6c10d45357f60b093ab761ca4af74bf300c039aa105fb946f7e5105727d"
+           ]
+          ],
+          "fromBlock": "0x6765e42",
+          "toBlock": "0x677e4e1"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474465226,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getLogs",
+        "params": [
+         {
+          "address": "0xaa080e74ec99cf5c684548c77ca145edfcf899cf",
+          "topics": [
+           [
+            "0xe3b53cd1a44fbf11535e145d80b8ef1ed6d57a73bf5daa7e939b6b01657d6549",
+            "0xfabb9e7afa4ef595f60e1ae9041b2b311b4acb27aeaed4b11b6f2abf689af10a",
+            "0xb8a1e6c10d45357f60b093ab761ca4af74bf300c039aa105fb946f7e5105727d"
+           ]
+          ],
+          "fromBlock": "0x33e7847",
+          "toBlock": "0x33f3b96"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474465313,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getLogs",
+        "params": [
+         {
+          "address": "0xaa080e74ec99cf5c684548c77ca145edfcf899cf",
+          "topics": [
+           [
+            "0xe3b53cd1a44fbf11535e145d80b8ef1ed6d57a73bf5daa7e939b6b01657d6549",
+            "0xfabb9e7afa4ef595f60e1ae9041b2b311b4acb27aeaed4b11b6f2abf689af10a",
+            "0xb8a1e6c10d45357f60b093ab761ca4af74bf300c039aa105fb946f7e5105727d"
+           ]
+          ],
+          "fromBlock": "0x33cf39b",
+          "toBlock": "0x33cf58e"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474465396,
+      "host": "solana-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getMultipleAccounts",
+        "params": [
+         [
+          "7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE"
+         ],
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474465397,
+      "host": "ct-api.unrealized.trade",
+      "path": "/v1/rpc/solana",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getMultipleAccounts",
+        "params": [
+         [
+          "7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE"
+         ],
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474465397,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_chainId",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794474465398,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_chainId",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794474465398,
+      "host": "rpc.mainnet.chain.robinhood.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_chainId",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794474465398,
+      "host": "robinhood.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_chainId",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794474465398,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_chainId",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794474465398,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_chainId",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794474465413,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getLogs",
+        "params": [
+         {
+          "address": "0xaa080e74ec99cf5c684548c77ca145edfcf899cf",
+          "topics": [
+           [
+            "0xe3b53cd1a44fbf11535e145d80b8ef1ed6d57a73bf5daa7e939b6b01657d6549",
+            "0xfabb9e7afa4ef595f60e1ae9041b2b311b4acb27aeaed4b11b6f2abf689af10a",
+            "0xb8a1e6c10d45357f60b093ab761ca4af74bf300c039aa105fb946f7e5105727d"
+           ]
+          ],
+          "fromBlock": "0x33f3b97",
+          "toBlock": "0x33ffee6"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474465598,
+      "host": "rpc.mainnet.chain.robinhood.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getLogs",
+        "params": [
+         {
+          "address": "0x9306359433127c4f3be426f6faeb00a3c41f66db",
+          "topics": [
+           [
+            "0xe3b53cd1a44fbf11535e145d80b8ef1ed6d57a73bf5daa7e939b6b01657d6549",
+            "0xfabb9e7afa4ef595f60e1ae9041b2b311b4acb27aeaed4b11b6f2abf689af10a",
+            "0xb8a1e6c10d45357f60b093ab761ca4af74bf300c039aa105fb946f7e5105727d"
+           ]
+          ],
+          "fromBlock": "0x677e4e2",
+          "toBlock": "0x67af221"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474465603,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getLogs",
+        "params": [
+         {
+          "address": "0xaa080e74ec99cf5c684548c77ca145edfcf899cf",
+          "topics": [
+           [
+            "0xe3b53cd1a44fbf11535e145d80b8ef1ed6d57a73bf5daa7e939b6b01657d6549",
+            "0xfabb9e7afa4ef595f60e1ae9041b2b311b4acb27aeaed4b11b6f2abf689af10a",
+            "0xb8a1e6c10d45357f60b093ab761ca4af74bf300c039aa105fb946f7e5105727d"
+           ]
+          ],
+          "fromBlock": "0x33ffee7",
+          "toBlock": "0x340c236"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474465608,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getLogs",
+        "params": [
+         {
+          "address": "0xaa080e74ec99cf5c684548c77ca145edfcf899cf",
+          "topics": [
+           [
+            "0xe3b53cd1a44fbf11535e145d80b8ef1ed6d57a73bf5daa7e939b6b01657d6549",
+            "0xfabb9e7afa4ef595f60e1ae9041b2b311b4acb27aeaed4b11b6f2abf689af10a",
+            "0xb8a1e6c10d45357f60b093ab761ca4af74bf300c039aa105fb946f7e5105727d"
+           ]
+          ],
+          "fromBlock": "0x33cf58f",
+          "toBlock": "0x33cf782"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474465620,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_blockNumber",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794474465621,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_blockNumber",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794474465641,
+      "host": "robinhood.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getLogs",
+        "params": [
+         {
+          "address": "0x9306359433127c4f3be426f6faeb00a3c41f66db",
+          "topics": [
+           [
+            "0xe3b53cd1a44fbf11535e145d80b8ef1ed6d57a73bf5daa7e939b6b01657d6549",
+            "0xfabb9e7afa4ef595f60e1ae9041b2b311b4acb27aeaed4b11b6f2abf689af10a",
+            "0xb8a1e6c10d45357f60b093ab761ca4af74bf300c039aa105fb946f7e5105727d"
+           ]
+          ],
+          "fromBlock": "0x6765e42",
+          "toBlock": "0x6768552"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474465695,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_blockNumber",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794474465696,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_blockNumber",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794474465697,
+      "host": "rpc.mainnet.chain.robinhood.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_blockNumber",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794474465699,
+      "host": "robinhood.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_blockNumber",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794474465770,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getLogs",
+        "params": [
+         {
+          "address": "0xaa080e74ec99cf5c684548c77ca145edfcf899cf",
+          "topics": [
+           [
+            "0xe3b53cd1a44fbf11535e145d80b8ef1ed6d57a73bf5daa7e939b6b01657d6549",
+            "0xfabb9e7afa4ef595f60e1ae9041b2b311b4acb27aeaed4b11b6f2abf689af10a",
+            "0xb8a1e6c10d45357f60b093ab761ca4af74bf300c039aa105fb946f7e5105727d"
+           ]
+          ],
+          "fromBlock": "0x340c237",
+          "toBlock": "0x3418586"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474465861,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getBlockByNumber",
+        "params": [
+         "0x35ce862",
+         false
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474465862,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getBlockByNumber",
+        "params": [
+         "0x35ce862",
+         false
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474466146,
+      "host": "ct-app.unrealized.trade",
+      "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      "method": "GET",
+      "query": "tab=holders"
+     },
+     {
+      "t": 1794474466210,
+      "host": "solana-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getAccountInfo",
+        "params": [
+         "7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8",
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474466212,
+      "host": "ct-api.unrealized.trade",
+      "path": "/v1/rpc/solana",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getAccountInfo",
+        "params": [
+         "7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8",
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474466217,
+      "host": "solana-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getAccountInfo",
+        "params": [
+         "SysvarRent111111111111111111111111111111111",
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474466218,
+      "host": "ct-api.unrealized.trade",
+      "path": "/v1/rpc/solana",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getAccountInfo",
+        "params": [
+         "SysvarRent111111111111111111111111111111111",
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474466222,
+      "host": "solana-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getMultipleAccounts",
+        "params": [
+         [
+          "7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE"
+         ],
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474466223,
+      "host": "ct-api.unrealized.trade",
+      "path": "/v1/rpc/solana",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getMultipleAccounts",
+        "params": [
+         [
+          "7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE"
+         ],
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474466223,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_chainId",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794474466224,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_chainId",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794474466225,
+      "host": "rpc.mainnet.chain.robinhood.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_chainId",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794474466225,
+      "host": "robinhood.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_chainId",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794474466225,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_chainId",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794474466226,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_chainId",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794474466438,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_blockNumber",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794474466442,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_blockNumber",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794474466442,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_blockNumber",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794474466442,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_blockNumber",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794474466502,
+      "host": "rpc.mainnet.chain.robinhood.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_blockNumber",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794474466502,
+      "host": "robinhood.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_blockNumber",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794474466745,
+      "host": "ct-app.unrealized.trade",
+      "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      "method": "GET",
+      "query": "tab=holders"
+     },
+     {
+      "t": 1794474466837,
+      "host": "solana-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getAccountInfo",
+        "params": [
+         "7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8",
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474466838,
+      "host": "ct-api.unrealized.trade",
+      "path": "/v1/rpc/solana",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getAccountInfo",
+        "params": [
+         "7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8",
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474466892,
+      "host": "solana-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getAccountInfo",
+        "params": [
+         "SysvarRent111111111111111111111111111111111",
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474466892,
+      "host": "ct-api.unrealized.trade",
+      "path": "/v1/rpc/solana",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getAccountInfo",
+        "params": [
+         "SysvarRent111111111111111111111111111111111",
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474466896,
+      "host": "solana-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getMultipleAccounts",
+        "params": [
+         [
+          "7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE"
+         ],
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474466897,
+      "host": "ct-api.unrealized.trade",
+      "path": "/v1/rpc/solana",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getMultipleAccounts",
+        "params": [
+         [
+          "7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE"
+         ],
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474466901,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_chainId",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794474466902,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_chainId",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794474466902,
+      "host": "rpc.mainnet.chain.robinhood.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_chainId",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794474466903,
+      "host": "robinhood.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_chainId",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794474466903,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_chainId",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794474466903,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_chainId",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794474467178,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_blockNumber",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794474467179,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_blockNumber",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794474467179,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_blockNumber",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794474467181,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_blockNumber",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794474467185,
+      "host": "rpc.mainnet.chain.robinhood.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_blockNumber",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794474467186,
+      "host": "robinhood.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_blockNumber",
+        "params": []
+       }
+      ]
+     },
+     {
+      "t": 1794474467383,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getBlockByNumber",
+        "params": [
+         "0x35ce869",
+         false
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474467383,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getBlockByNumber",
+        "params": [
+         "0x35ce869",
+         false
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474467415,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getBlockByNumber",
+        "params": [
+         "0x35ce869",
+         false
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474467415,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getBlockByNumber",
+        "params": [
+         "0x35ce869",
+         false
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474467466,
+      "host": "rpc.mainnet.chain.robinhood.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getBlockByNumber",
+        "params": [
+         "0x6b33f3e",
+         false
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474467469,
+      "host": "robinhood.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_getBlockByNumber",
+        "params": [
+         "0x6b33f3e",
+         false
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474467691,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70",
+          "data": "0x313ce567"
+         },
+         "0x35ce869"
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474467692,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70",
+          "data": "0xfeaf968c"
+         },
+         "0x35ce869"
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474467692,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70",
+          "data": "0x313ce567"
+         },
+         "0x35ce869"
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474467692,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70",
+          "data": "0xfeaf968c"
+         },
+         "0x35ce869"
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474467692,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70",
+          "data": "0x313ce567"
+         },
+         "0x35ce869"
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474467692,
+      "host": "base-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70",
+          "data": "0xfeaf968c"
+         },
+         "0x35ce869"
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474467692,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70",
+          "data": "0x313ce567"
+         },
+         "0x35ce869"
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474467692,
+      "host": "base.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70",
+          "data": "0xfeaf968c"
+         },
+         "0x35ce869"
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474467773,
+      "host": "rpc.mainnet.chain.robinhood.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0x5058aDee53b04e374d8bEDbAD634Bc4778F50b22",
+          "data": "0x313ce567"
+         },
+         "0x6b33f3e"
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474467773,
+      "host": "rpc.mainnet.chain.robinhood.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0x5058aDee53b04e374d8bEDbAD634Bc4778F50b22",
+          "data": "0xfeaf968c"
+         },
+         "0x6b33f3e"
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474467774,
+      "host": "robinhood.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0x5058aDee53b04e374d8bEDbAD634Bc4778F50b22",
+          "data": "0x313ce567"
+         },
+         "0x6b33f3e"
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794474467775,
+      "host": "robinhood.api.pocket.network",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "eth_call",
+        "params": [
+         {
+          "to": "0x5058aDee53b04e374d8bEDbAD634Bc4778F50b22",
+          "data": "0xfeaf968c"
+         },
+         "0x6b33f3e"
+        ]
+       }
+      ]
+     }
+    ],
+    "connect": [
+     "ct-api.unrealized.trade",
+     "1click.chaindefuser.com",
+     "rpc.mainnet.fastnear.com",
+     "rpc.mainnet.near.org",
+     "near.drpc.org",
+     "archival-rpc.mainnet.near.org",
+     "archival-rpc.mainnet.fastnear.com",
+     "solana-rpc.publicnode.com",
+     "solana.api.pocket.network",
+     "sender.helius-rpc.com",
+     "mainnet.block-engine.jito.wtf",
+     "api.mainnet-beta.solana.com",
+     "base-rpc.publicnode.com",
+     "base-mainnet.public.blastapi.io",
+     "mainnet.base.org",
+     "base.api.pocket.network",
+     "base.gateway.tenderly.co",
+     "rpc.sentio.xyz",
+     "robinhood-rpc.publicnode.com",
+     "robinhood.drpc.org",
+     "rpc.mainnet.chain.robinhood.com",
+     "robinhood.rpc.blxrbdn.com",
+     "rpc-robinhood.globalstake.io",
+     "robinhood.api.pocket.network",
+     "robinhood.daybreak-rpc.network",
+     "base.rpc.blxrbdn.com"
+    ],
+    "errors": []
+   }
+  }
  }
 }

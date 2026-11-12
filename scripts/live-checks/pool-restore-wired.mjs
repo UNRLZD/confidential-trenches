@@ -17,7 +17,8 @@
 // deployed. The devnet and Base Sepolia notes themselves are the card's run record
 // (pool-restore-wired.run.json), read on two RPCs.
 // Since card sign-live-checks-read-a-pinned-page the page reaches the pinned pool's own hosts (PINNED_HOSTS: the
-// helper, the Solana pair and the U_X pair, the NEAR pair step 5 reads ids on), each of them in the page's own
+// helper, the Solana pair and the U_X pair, the NEAR pair step 5 reads ids on, and since release 119 the Base and
+// Robinhood pools' lists), each of them in the page's own
 // connect-src as served; any other host is refused and fails the check. A stalled run prints the page's own reason
 // (main.ts's "restore stalled: ..." console line).
 // WAIT_MS, the bound on the run with no tap from Continue to its end (card restore-first-sign-in-under-two-minutes), set
