@@ -15,9 +15,13 @@
 //   builds a Mayhem coin's buy with the plain fee recipient in place of the Mayhem one (the chain's own state is
 //   unchanged and refuses it);
 // - every failed simulation's last log lines are kept (simFails), so a refusal carries the program's own log.
+// - FLOW_COPY's fee plants (card round-trip-costs-less, ./sol-mainnet-copy-parse.mjs feePlantAnswer): "fees-busy"
+//   answers every getRecentPrioritizationFees with a busy history, "fees-fail" answers it on the second name with a
+//   JSON-RPC error (a helper on the build before the method was allowed); with none the copy answers from its own slots.
+//   Each fee read is kept (planted.feeReads: its phase, the name it went to, how many accounts it named).
 import { readFileSync } from "node:fs";
 import { base58 } from "@scure/base";
-import { copyRpcsLocal } from "./sol-mainnet-copy-parse.mjs";
+import { copyRpcsLocal, feePlantAnswer } from "./sol-mainnet-copy-parse.mjs";
 
 export const COPY = process.env.FLOW_COPY ? JSON.parse(readFileSync(process.env.FLOW_COPY, "utf8")) : null;
 
@@ -45,7 +49,8 @@ export async function copyNet({ log, phase = () => "" }) {
   const sendLines = [];
   const sent = [];
   const plantCurve = COPY.plant === "mayhem-drop" && COPY.mint ? solanaPoolAddresses(COPY.mint).curve : null;
-  const planted = { reads: 0 };
+  const planted = { reads: 0, fees: 0, feeReads: [] };
+  const secondHost = new URL(COPY.rpcs[1]).host;
   const clearMayhem = (acc) => {
     if (!acc || !Array.isArray(acc.data) || acc.data[1] !== "base64") return acc;
     const d = Buffer.from(acc.data[0], "base64");
@@ -68,6 +73,14 @@ export async function copyNet({ log, phase = () => "" }) {
       try {
         sent.push({ phase: phase(), signature: base58.encode(Buffer.from(String(body.params?.[0]), "base64").subarray(1, 65)) });
       } catch {}
+    }
+    if (body?.method === "getRecentPrioritizationFees") {
+      planted.feeReads.push({ phase: phase(), host: url.host, accounts: Array.isArray(body.params?.[0]) ? body.params[0].length : null });
+      const a = feePlantAnswer(COPY.plant ?? "", body.id, url.host === secondHost);
+      if (a) {
+        planted.fees++;
+        return new Response(JSON.stringify(a), { status: 200, headers: { "content-type": "application/json" } });
+      }
     }
     const r = await native(u, init);
     if (body?.method === "simulateTransaction" || (plantCurve && (body?.method === "getMultipleAccounts" || body?.method === "getAccountInfo"))) {

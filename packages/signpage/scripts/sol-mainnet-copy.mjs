@@ -20,6 +20,10 @@
 // - SOL_COPY_ONLY=<kind,...> runs those kinds only; SOL_COPY_STEPS=buy stops each after its buy.
 // - SOL_COPY_PLANT=mayhem-drop: the Mayhem coin's buy is built with its curve read as not Mayhem, so the buy names the
 //   plain fee recipient in place of the Mayhem one; the run must fail with pump's own error.
+// - SOL_COPY_PLANT=fees-busy or fees-fail (card round-trip-costs-less, ./copy-net.mjs): the curve coin's run with the
+//   sale's fee read planted (a busy history; a refusal on the second name); its sale must pay the cap of 100,000 and
+//   fill. SOL_COPY_FEES=1 with no plant: the copy's own history, so the sale must pay the floor (1 or 2 lamports).
+//   Either way the record's feeRun is the sale's price and priority read back from the copy's transaction.
 // - Keys are made fresh for the copy and live only in the run's temp folder, removed at the end.
 import { spawn } from "node:child_process";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
@@ -28,7 +32,7 @@ import { dirname, join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { base58 } from "@scure/base";
 import { ed25519 } from "@noble/curves/ed25519.js";
-import { RENT_FEATURES, clonePlan, listCandidates, pendingFeature, txRecord } from "./sol-mainnet-copy-parse.mjs";
+import { FEE_PLANTS, RENT_FEATURES, clonePlan, feeRunVerdict, listCandidates, pendingFeature, txRecord } from "./sol-mainnet-copy-parse.mjs";
 
 const ROOT = new URL("../../../", import.meta.url).pathname;
 const [OUT, ...given] = process.argv.slice(2);
@@ -38,6 +42,7 @@ const PLANT = process.env.SOL_COPY_PLANT ?? "";
 const STEPS = process.env.SOL_COPY_STEPS ?? "all"; // "buy": deposit and buy only
 // the helper's block engine stand-in (./copy-net.mjs): swallow (takes the bundle, never lands it), busy, refused, lands
 const ENGINE = process.env.SOL_COPY_ENGINE ?? "swallow";
+const FEES = FEE_PLANTS.includes(PLANT) || process.env.SOL_COPY_FEES === "1";
 if (!["swallow", "busy", "refused", "lands"].includes(ENGINE)) throw new Error(`SOL_COPY_ENGINE: swallow, busy, refused or lands, not ${ENGINE}`);
 const log = (s) => console.log(`${new Date().toISOString()} copy: ${s}`);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -316,7 +321,7 @@ for (const kind of KINDS) {
   }
   const dir = join(TMP, kind);
   mkdirSync(dir, { mode: 0o700 });
-  writeFileSync(cfg, JSON.stringify({ rpcs: URLS, feePayerKeyFile: fpFile, dir, mint: c.mint, engine: ENGINE, plant: kind === "mayhem" ? PLANT : "" }));
+  writeFileSync(cfg, JSON.stringify({ rpcs: URLS, feePayerKeyFile: fpFile, dir, mint: c.mint, engine: ENGINE, plant: kind === "mayhem" && !FEE_PLANTS.includes(PLANT) ? PLANT : kind === "curve" && FEE_PLANTS.includes(PLANT) ? PLANT : "" }));
   const flowOut = join(dir, "flow.json");
   log(`${kind} ${c.mint}: deposit, buy${STEPS === "buy" ? "" : ", sell"}`);
   // a graduated coin runs on the copy's own PumpSwap table, with the pump curve's pinned one
@@ -359,6 +364,10 @@ for (const kind of KINDS) {
   runs[kind].proofWait = f?.proofWait ?? null;
   runs[kind].buySend = { lines: (f?.sendLines ?? []).filter((x) => x.phase === "buy").map((x) => x.line), sendStartMs: sendAt?.at ?? null, helperMs: sendAt?.ms ?? null, filledMs: filledAt?.at ?? null, sendToFilledMs: sendAt && filledAt ? filledAt.at - sendAt.at : null, engineCalls: f?.engineCalls ?? [] };
   log(`${kind} buy send: ${JSON.stringify(runs[kind].buySend)}`);
+  if (FEES && kind === "curve") {
+    runs[kind].feeRun = { ...feeRunVerdict(FEE_PLANTS.includes(PLANT) ? PLANT : "", records.filter((r) => r.coin === kind)), feeReads: f?.planted?.feeReads ?? [], planted: f?.planted?.fees ?? 0 };
+    log(`${kind} fee run: ${JSON.stringify(runs[kind].feeRun)}`);
+  }
   if (withdraw && !withdraw.sent) records.push({ coin: kind, step: "withdraw", ok: false, op: withdraw.op ?? null, view: withdraw.view?.state ?? null, tail: runs[kind].withdraw.tail.slice(-8) });
   if (!f) records.push({ coin: kind, step: "flow", ok: false, exit: flow.code, tail: flow.out.split("\n").slice(-15) });
 }
@@ -393,6 +402,7 @@ writeFileSync(OUT, JSON.stringify(record, null, 2) + "\n");
 log(`record ${OUT}: ${records.map((r) => `${r.coin}/${r.step} ${r.ok ? "ok" : "FAIL"}`).join(", ")}`);
 // the plant fails only with pump's own refusal of the buy, in the program's log
 const pumpRefused = (r) => r.coin === "mayhem" && r.step === "buy" && !r.ok && (r.simulation?.logsTail ?? r.logsTail ?? []).some((l) => l.includes(`Program ${SOLANA_PUMP_PROGRAM} failed`));
-const plantOk = PLANT ? records.some(pumpRefused) : true;
-if (PLANT) log(`plant ${PLANT}: ${plantOk ? "the buy failed with pump's own error" : "NOT refused by pump"}`);
-process.exit(records.length > 0 && (PLANT ? plantOk : records.every((r) => r.ok)) ? 0 : 1);
+const plantOk = FEES ? runs.curve?.feeRun?.ok === true : PLANT ? records.some(pumpRefused) : true;
+if (FEES) log(`fee run ${PLANT || "unplanted"}: ${plantOk ? "the sale paid the priority planned" : "NOT the priority planned"}`);
+else if (PLANT) log(`plant ${PLANT}: ${plantOk ? "the buy failed with pump's own error" : "NOT refused by pump"}`);
+process.exit(records.length > 0 && (FEES ? plantOk && records.every((r) => r.ok) : PLANT ? plantOk : records.every((r) => r.ok)) ? 0 : 1);

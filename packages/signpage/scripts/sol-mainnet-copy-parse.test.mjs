@@ -2,7 +2,7 @@
 // helper's lists, and each transaction's record.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ALT_PROGRAM, COMPUTE_BUDGET, RENT_FEATURES, UPGRADEABLE_LOADER, clonePlan, copyAccountFile, copyRpcsLocal, cuLimitOf, listCandidates, pendingFeature, simFailure, txRecord } from "./sol-mainnet-copy-parse.mjs";
+import { ALT_PROGRAM, COMPUTE_BUDGET, RENT_FEATURES, UPGRADEABLE_LOADER, clonePlan, copyAccountFile, copyRpcsLocal, cuLimitOf, cuPriceOf, FEE_PLANTS, FEES_BUSY, feePlantAnswer, feeRunVerdict, listCandidates, pendingFeature, simFailure, txRecord } from "./sol-mainnet-copy-parse.mjs";
 
 const b64 = (b) => Buffer.from(b).toString("base64");
 /** A frozen lookup table's bytes: tag 1, deactivation u64::MAX, last extended `slot` at start index 24, no authority. */
@@ -88,6 +88,47 @@ test("a transaction's record: result, compute units against its limit, fee, logs
   assert.deepEqual(bad.logsTail, Array.from({ length: 12 }, (_, i) => `line ${i + 8}`));
   assert.deepEqual(txRecord("x", "sell", "S3", null), { coin: "x", step: "sell", signature: "S3", found: false });
   assert.equal(cuLimitOf(["A"], [{ programIdIndex: 0, data: b64(limit) }], (x) => Buffer.from(x, "base64")), null);
+});
+
+// card round-trip-costs-less: the sale's price and priority read back from the copy's transaction, the fee plants'
+// answers, and each run's verdict on the sale's priority
+test("round-trip-costs-less: a transaction's price and priority read back; the fee plants answer; the floor and the cap judged", () => {
+  const limit = Buffer.alloc(5);
+  limit[0] = 2;
+  limit.writeUInt32LE(104_523, 1);
+  const price = (p) => {
+    const d = Buffer.alloc(9);
+    d[0] = 3;
+    d.writeBigUInt64LE(p, 1);
+    return d;
+  };
+  const PUMP = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P";
+  const sale = (p, err = null) => ({ slot: 9, transaction: { message: { accountKeys: ["W", COMPUTE_BUDGET, PUMP], instructions: [{ programIdIndex: 1, data: b64(limit) }, ...(p === null ? [] : [{ programIdIndex: 1, data: b64(price(p)) }]), { programIdIndex: 2, data: "" }] } }, meta: { err, fee: 5_001, computeUnitsConsumed: 87_102, logMessages: [], preBalances: [1], postBalances: [1] } });
+  const r = (p, err) => txRecord("curve", "sell", "S", sale(p, err));
+  assert.deepEqual([r(1n).cuPrice, r(1n).priority, r(1n).cuLimit], ["1", "1", 104_523]);
+  assert.deepEqual([r(956_727n).priority], ["100000"]);
+  assert.equal(r(null).cuPrice, undefined);
+  assert.equal(cuPriceOf(["A"], [{ programIdIndex: 0, data: b64(price(7n)) }], (x) => Buffer.from(x, "base64")), null);
+  // the plants: a busy history on both names; a refusal on the second only; none passes the request on
+  assert.deepEqual(FEE_PLANTS, ["fees-busy", "fees-fail"]);
+  const busy = feePlantAnswer("fees-busy", 4, false, 200);
+  assert.equal(busy.result.length, 150);
+  assert.ok(busy.result.every((x) => x.prioritizationFee === FEES_BUSY && x.slot <= 200));
+  assert.deepEqual(feePlantAnswer("fees-busy", 4, true, 200), busy);
+  assert.equal(feePlantAnswer("fees-fail", 4, false), null);
+  assert.deepEqual(feePlantAnswer("fees-fail", 4, true).error.code, -32601);
+  assert.equal(feePlantAnswer("", 4, true), null);
+  // the verdicts: no plant, the floor; planted, the cap; the sale failed, no price, or none read back: FAIL
+  assert.equal(feeRunVerdict("", [r(1n)]).ok, true);
+  assert.equal(feeRunVerdict("", [r(956_727n)]).ok, false);
+  for (const plant of FEE_PLANTS) {
+    assert.equal(feeRunVerdict(plant, [r(956_727n)]).ok, true, plant);
+    assert.equal(feeRunVerdict(plant, [r(1n)]).ok, false, plant);
+  }
+  assert.equal(feeRunVerdict("fees-fail", [r(956_727n, { InstructionError: [2, { Custom: 1 }] })]).ok, false);
+  assert.equal(feeRunVerdict("", [r(null)]).ok, false);
+  assert.equal(feeRunVerdict("", [txRecord("curve", "buy", "B", sale(1n))]).ok, false);
+  assert.equal(feeRunVerdict("mayhem-drop", [r(1n)]).ok, false);
 });
 
 test("a failed simulation keeps its error, units and last log lines; a good one is none", () => {
