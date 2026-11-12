@@ -1,8 +1,10 @@
 // node --test scripts/live-checks/app-no-test-token.test.mjs: the live check's verdict replays recorded runs
 // (app-no-test-token.answers.json), each read by app-no-test-token.mjs collect() in headless Chromium:
-//   good: card app-chains-evm-rail's build (9 Nov) served at APP_HOST's name inside the stand-in shell (--build),
-//         HELPER_HOST answered live: / at 1440 and 390 and /?fx=curve read Solana's, Base's and Robinhood's lists and
-//         draw the top Trending token of them all, read on its own chain: PASS;
+//   good: card app-near-trading's build (12 Nov) served at APP_HOST's name inside the stand-in shell (--build),
+//         HELPER_HOST answered live: / at 1440 and 390 and /?fx=curve read Solana's, Base's, Robinhood's and NEAR's
+//         lists and draw the top Trending token of them all, read on its own chain: PASS;
+//   bad_no_near: card app-chains-evm-rail's build (9 Nov), the good answer until NEAR joined, served the same way: /
+//         reads no NEAR lists: FAIL;
 //   bad:  APP_HOST as deployed before card app-no-test-token (3 Nov, the fixture source): its JS holds
 //         GlowFixtureCurve and the other fixture ids, the page draws the fixture token G1owFixtureCurve... and reads no
 //         lists: FAIL;
@@ -45,14 +47,21 @@ test("recorded bad answer: the deployed fixture source (GlowFixtureCurve in the 
   const b = bad(r.lines);
   assert.ok(b.some((l) => /desktop \/: the served JS .* fixture hit\(s\): .*G1owFixtureCurve/.test(l)), r.lines.join("\n"));
   assert.ok(b.some((l) => /desktop \/: .*data-token G1owFixtureCurve1111111111111111111111pump is a fixture/.test(l)), r.lines.join("\n"));
-  assert.ok(b.some((l) => /desktop \/: .*the page read no lists of solana, base, robinhood/.test(l)), r.lines.join("\n"));
+  assert.ok(b.some((l) => /desktop \/: .*the page read no lists of solana, base, robinhood, near/.test(l)), r.lines.join("\n"));
   assert.ok(b.some((l) => /desktop \/\?fx=curve: /.test(l)), r.lines.join("\n"));
 });
 
 test("recorded bad answer: the build of 7b5770f3, / reading Solana's lists alone: FAIL at every load", () => {
   const r = judge(ANSWERS.bad_one_chain);
   assert.equal(r.ok, false);
-  for (const l of LOADS) assert.ok(bad(r.lines).some((x) => x.includes(`${l.name} ${l.path}: `) && /the page read no lists of base, robinhood/.test(x)), r.lines.join("\n"));
+  for (const l of LOADS) assert.ok(bad(r.lines).some((x) => x.includes(`${l.name} ${l.path}: `) && /the page read no lists of base, robinhood, near/.test(x)), r.lines.join("\n"));
+});
+
+test("recorded bad answer: the build of 9 Nov, / reading Solana's, Base's and Robinhood's lists and no NEAR's: FAIL at every load", () => {
+  assert.ok(CHAINS.includes("near"));
+  const r = judge(ANSWERS.bad_no_near);
+  assert.equal(r.ok, false);
+  for (const l of LOADS) assert.ok(bad(r.lines).some((x) => x.includes(`${l.name} ${l.path}: `) && /the page read no lists of near$/.test(x)), r.lines.join("\n"));
 });
 
 test("planted: a page token on another chain than the top's fails, so does a token read on the wrong chain", () => {

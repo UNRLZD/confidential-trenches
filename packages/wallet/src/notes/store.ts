@@ -519,7 +519,8 @@ function checkRecord(id: string, r: unknown): NoteRecord {
   }
   if (n.parent !== undefined && (typeof n.parent !== "string" || (n.ref.kind !== "change" && n.ref.kind !== "refund"))) throw new Error(`note ${id}: only a change or refund note has a parent`);
   if (n.calls !== undefined) {
-    if (n.ref.kind !== "deposit" && n.ref.kind !== "second") throw new Error(`note ${id}: only a deposit or second-arrival note has calls`);
+    // a NEAR sell's return note too: W_{near,l,j}'s deposit call back into the vault (card near-private-trading)
+    if (n.ref.kind !== "deposit" && n.ref.kind !== "second" && !(n.ref.kind === "return" && n.ref.c === "near")) throw new Error(`note ${id}: only a deposit, second-arrival or NEAR return note has calls`);
     if (n.state === "PLANNED" || n.state === "TAKEN") throw new Error(`note ${id}: calls from INCOMING on`);
     checkCalls(n.calls, id);
   }

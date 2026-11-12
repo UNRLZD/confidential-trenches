@@ -28,8 +28,8 @@ import { HELPER_BIND_ANSWER_MS, HELPER_BIND_DEPOSIT_CODES, HELPER_CODE_STATUS, H
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { base58, base64 } from "@scure/base";
-import { depositId } from "../derive/keys.ts";
-import { type DepositAccount, NEAR_NETWORKS, type NearNetwork, type NearRpc, readDepositAccount } from "./account.ts";
+import { depositId, freshWallet } from "../derive/keys.ts";
+import { checkDepositAccount, type DepositAccount, NEAR_NETWORKS, type NearNetwork, type NearRpc } from "./account.ts";
 import { readCapped } from "./capped.ts";
 import { busyWaitMs } from "../busy.ts";
 
@@ -147,11 +147,36 @@ function signDelegateAction(d: DelegateFields, secretKey: Uint8Array): Uint8Arra
   return signed;
 }
 
-// Signs U_{s,i}'s deposit call from `read`, the answer of readDepositAccount on args.network made just before (module
-// private: depositDelegate is its only caller). Refuses, before anything is signed: a network with no vault in the
+/**
+ * The account that moves USDC into the vault with this call: U_{s,i}, a deposit's one-time account, or W_{near,l,j}, the
+ * fresh NEAR wallet of a sell, whose USDC goes back as its return note (card near-private-trading; wallet.md WM-11's
+ * "same shape": the same call, the depositor the moving account). Both are 64-hex implicit accounts holding their own
+ * key alone, read by the same checks (checkDepositAccount) and signed the same way; only the key's path differs.
+ */
+export type DepositMover = { kind: "U"; s: bigint; i: number } | { kind: "W"; l: bigint; j: number };
+
+/** The mover's key at its frozen path: U by depositId, W by freshWallet on chain tag near. The caller zeroes secretKey. */
+function moverKey(seed64: Uint8Array, m: DepositMover): { id: string; publicKey: Uint8Array; secretKey: Uint8Array } {
+  if (m.kind === "U") return depositId(seed64, m.s, m.i);
+  if (m.kind === "W") {
+    const w = freshWallet(seed64, "near", m.l, m.j);
+    return { id: w.address, publicKey: w.publicKey, secretKey: w.secretKey };
+  }
+  throw new DepositDelegateRefused("input", "the mover is U or W");
+}
+
+/** The mover's account id (public side only). */
+export function moverAccount(seed64: Uint8Array, m: DepositMover): string {
+  const k = moverKey(seed64, m);
+  k.secretKey.fill(0);
+  return k.id;
+}
+
+// Signs the mover's deposit call from `read`, the answer of checkDepositAccount on args.network made just before
+// (module private: moverDepositDelegate is its only caller). Refuses, before anything is signed: a network with no vault in the
 // release, a window that is not a whole number in 1..600, a nonce + 1 at or above the read height x 1,000,000, and
-// whatever vaultDepositCall refuses (the cap among them). U's secret key is zeroed on every path once derived.
-function signDepositDelegate(seed64: Uint8Array, s: bigint, i: number, args: DepositDelegateArgs, read: DepositAccount): SignedDepositDelegate {
+// whatever vaultDepositCall refuses (the cap among them). The mover's secret key is zeroed on every path once derived.
+function signDepositDelegate(seed64: Uint8Array, mover: DepositMover, args: DepositDelegateArgs, read: DepositAccount): SignedDepositDelegate {
   const window = args.window ?? DEPOSIT_WINDOW;
   if (!Number.isSafeInteger(window) || window < 1 || window > DEPOSIT_WINDOW_MAX)
     throw new DepositDelegateRefused("window", `the window must be a whole number of blocks in 1..${DEPOSIT_WINDOW_MAX}`);
@@ -160,10 +185,10 @@ function signDepositDelegate(seed64: Uint8Array, s: bigint, i: number, args: Dep
   const n = BigInt(read.nonce) + 1n;
   if (n >= BigInt(read.height) * NONCE_RANGE_MULTIPLIER) throw new DepositDelegateRefused("nonce", "nonce + 1 is at or above the read height x 1,000,000");
 
-  const u = depositId(seed64, s, i);
+  const u = moverKey(seed64, mover);
   try {
     // The read must be of the key that signs: never a call from an account other than the one just read.
-    if (read.account !== u.id) throw new DepositDelegateRefused("key", "the read is not of U_{s,i}");
+    if (read.account !== u.id) throw new DepositDelegateRefused("key", "the read is not of the mover's key");
     let call: ReturnType<typeof vaultDepositCall>;
     try {
       call = vaultDepositCall({ vault, token, mover: u.id, amount: args.amount, precommitment: args.precommitment });
@@ -202,14 +227,26 @@ function signDepositDelegate(seed64: Uint8Array, s: bigint, i: number, args: Dep
 export async function depositDelegate(
   seed64: Uint8Array, s: bigint, i: number, args: DepositDelegateArgs, rpcs: readonly [NearRpc, NearRpc],
 ): Promise<SignedDepositDelegate> {
-  // Everything the call is made from is copied before the first await: a change to args or seed64 while the reads are
-  // out cannot reach what is signed. The seed's copy is zeroed on every path.
+  return moverDepositDelegate(seed64, { kind: "U", s, i }, args, rpcs);
+}
+
+/**
+ * The mover's deposit call (U_{s,i}'s, or W_{near,l,j}'s for a sell's return): reads the mover on two RPCs
+ * (checkDepositAccount, which refuses an unknown network) and signs only once every read passed.
+ */
+export async function moverDepositDelegate(
+  seed64: Uint8Array, mover: DepositMover, args: DepositDelegateArgs, rpcs: readonly [NearRpc, NearRpc],
+): Promise<SignedDepositDelegate> {
+  // Everything the call is made from is copied before the first await: a change to args, the mover or seed64 while the
+  // reads are out cannot reach what is signed. The seed's copy is zeroed on every path.
   const own: DepositDelegateArgs = { network: args.network, amount: args.amount, precommitment: args.precommitment, window: args.window };
+  const m: DepositMover = mover?.kind === "U" ? { kind: "U", s: mover.s, i: mover.i } : mover?.kind === "W" ? { kind: "W", l: mover.l, j: mover.j } : (null as never);
+  if (m === null) throw new DepositDelegateRefused("input", "the mover is U or W");
   if (!(seed64 instanceof Uint8Array) || seed64.length !== 64) throw new DepositDelegateRefused("input", "seed64 must be 64 bytes");
   const seed = Uint8Array.from(seed64);
   try {
-    const read = await readDepositAccount(seed, s, i, own.amount, own.network, rpcs);
-    return signDepositDelegate(seed, s, i, own, read);
+    const read = await checkDepositAccount(moverAccount(seed, m), own.amount, own.network, rpcs);
+    return signDepositDelegate(seed, m, own, read);
   } finally {
     seed.fill(0);
   }

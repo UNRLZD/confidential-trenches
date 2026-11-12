@@ -1,0 +1,1421 @@
+{
+  "at": "2026-11-12T10:29:42.566Z",
+  "what": "deposit, buy, sell and withdraw of the Solana pool on a local copy of mainnet (solana-test-validator, mainnet's feature set, mainnet accounts cloned)",
+  "validator": {
+    "feature-set": 3383571666,
+    "solana-core": "4.3.2"
+  },
+  "mainnetSlot": 468491967,
+  "rent": {
+    "mainnet": "d813000000000000000000000000f03f32",
+    "copy": "d813000000000000000000000000f03f32"
+  },
+  "clock": [
+    {
+      "wallMs": 1794479358736,
+      "confirmed": {
+        "slot": 34,
+        "time": 1794479358
+      },
+      "finalized": {
+        "slot": 34,
+        "time": 1794479358
+      }
+    },
+    {
+      "wallMs": 1794479359243,
+      "confirmed": {
+        "slot": 37,
+        "time": 1794479359
+      },
+      "finalized": {
+        "slot": 37,
+        "time": 1794479359
+      }
+    }
+  ],
+  "mainnetReads": 6,
+  "plant": null,
+  "copyTables": {
+    "pumpswap": {
+      "venue": "pumpswap",
+      "table": "3e2KifQF38H8Lx6MNz8x99aaZmUJGbcDWNFFV2b4vim1",
+      "range": {
+        "state": [
+          0,
+          134
+        ],
+        "label": [
+          0,
+          88
+        ]
+      },
+      "addresses": 256,
+      "txs": [
+        {
+          "step": "lookup table: create and extend with 30 addresses",
+          "signature": "4t4a9p9F3DXeLZg9saQcCSJbMwGvWHKPh3j87rQy4YUqPisPV1dxYY299j4CSvvKSHCGSBWiM3jpy7HCKAt6dH45"
+        },
+        {
+          "step": "lookup table: extend with 30 addresses",
+          "signature": "5XhBMBvjtSZmeRBfoBCkjHqXPBSycxL6rZTKwYF3b8ZxeeEB5SEP1m9pYeLrZRRcbYaz1RP9sxCcXw1w1nT49GqY"
+        },
+        {
+          "step": "lookup table: extend with 30 addresses",
+          "signature": "5k85pak8UrKV7dpuN7TCR8hgBZ5xskEXwowx6Z3Vwzcacw7eHDdgfk2p4vKbp1jaLNHqrPyDLSmn81pQCckvFJA1"
+        },
+        {
+          "step": "lookup table: extend with 30 addresses",
+          "signature": "45SCVLKMXNKtudRDjP3bX9QmFgjXHXfqNNAbzxqpA2rcqR7Y27WmSBLGWwaSPnrheMEd2r9nZK7qZb9ozxbkKuHJ"
+        },
+        {
+          "step": "lookup table: extend with 30 addresses",
+          "signature": "3AVriFpamPc4nGFEtW349SAX5g6cQ78q1sBcuWyG86C34Aqr1NgBkYXFKM5Rixr1rfz7k8D7axqCf6L34R9zs3uL"
+        },
+        {
+          "step": "lookup table: extend with 30 addresses",
+          "signature": "4bYwqygrGkksR6pKjQCh31KCYUtfnVNpr7x3yBfNtYmedLD2gCkXXzkstxJtgdLFJHeHHzcZDKMfii1gypbLjCSS"
+        },
+        {
+          "step": "lookup table: extend with 30 addresses",
+          "signature": "63jv1cSQQDZzqyMhRUdkMaxbT4wRk7opzy748YUNM2NLwnKZSrgzzZfssUtt9y2HzaVczJMrAHwAC2TX87a9MCQ8"
+        },
+        {
+          "step": "lookup table: extend with 30 addresses",
+          "signature": "3pJCjgiJ1EhALDKReqWFEsqkUmcW9ukxfFpu4PahX1D1xzBvhEj81srmu4g4cT897PKEKXQM6LndokRf5pJrZjar"
+        },
+        {
+          "step": "lookup table: extend with 16 addresses",
+          "signature": "5RxRUHqBsMmSfSj1h781Vzsrkna2z3GVLLqHXRzzsoJ9xMgNnfYHUN1yq9JhGPVLzXiNPsqiogjUzUHmiDSf2ExJ"
+        },
+        {
+          "step": "lookup table: freeze (authority none)",
+          "signature": "5eZG83zWPFBvnrDkJehkwAzHS4eQjv94Dg7X7n4y6Rpq9aLCAUF8TC3kYJHhdQg7WLZxegtj7LsAtecPn349tGMK"
+        }
+      ]
+    }
+  },
+  "engine": "swallow",
+  "coins": {
+    "curve": {
+      "mint": "DrFpDMWjxNZpfd64HwjR86Q3ysVhnRW7vZxnQ939cash",
+      "list": "new",
+      "symbol": "JOKOWI"
+    },
+    "graduated": {
+      "mint": "9cRCn9rGT8V2imeM2BaKs13yhMEais3ruM3rPvTGpump",
+      "list": "trending",
+      "symbol": "ANSEM"
+    }
+  },
+  "skippedCoins": [
+    {
+      "kind": "curve",
+      "mint": "9SyyKsUYEAFenCRB9eisEAhy94tey2LXpoWcM3fLpump",
+      "why": "venue_not_built: the curve is not quoted in SOL"
+    }
+  ],
+  "cloned": {
+    "accounts": [
+      "7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8",
+      "ELkTShr5bKWSwntTpF238dq3r5ha2oVsNyApMk19x4AJ",
+      "EesTGaxwD6izcU1Nr78dk346UqoNA11SQbsbRQkg2pYn",
+      "So11111111111111111111111111111111111111112",
+      "4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4Jjaxnjf",
+      "62qc2CNXwrYqQScmEdiZFFAnJR262PxWEuNQtxfafNgV",
+      "Ce6TQqeHC9p8KetsN6JsjHK7UTZk7nasjjnr7XxXp9F1",
+      "Hq2wp8uJ9jCPsYgNHex8RtqdvMPfVGoYwjvF1ATiwn2Y",
+      "8Wf5TiAheLUqBrKXeYg2JtAFFMWtKdG2BSFgqUcPVwTt",
+      "5YxQFdt3Tr9zJLvkFccqXVUwhdTWJQc1fFg2YPbxvxeD",
+      "9M4giFFMxmFGXtc3feFzRai56WbBqehoSeRE5GK7gf7",
+      "GXPFM2caqTtQYC2cJ5yJRi9VDkpsYZXzYdwYpGnLmtDL",
+      "3BpXnfJaUTiwXnJNe7Ej1rcbzqTTQUvLShZaWazebsVR",
+      "5cjcW9wExnJJiqgLjq7DEG75Pm6JBgE1hNv4B2vHXUW6",
+      "EHAAiTxcdDwQ3U4bU6YcMsQGaekdzLS3B5SmYo46kJtL",
+      "5eHhjP8JaYkz83CWwvGU2uMUXefd3AazWGx4gpcuEEYD",
+      "A7hAgCzFw14fejgCp387JUJRMNyz4j89JKnhtKU8piqW",
+      "BShWZ8FbDPYGpoc1ebj4TiELvVFmBQwW4XMYuLtQoHYZ",
+      "ADaUMid9yfUytqMBgopwjb2DTLSokTSzL1zt6iGPaS49",
+      "HFqU5x63VTqvQss8hp11i4wVV8bD44PvwucfZ2bU7gRe",
+      "DfXygSm4jCyNCybVYYK6DwvWqjKee8pbDmJGcLWNDXjh",
+      "DttWaMuVvTiduZRnguLF7jNxTgiMBZ1hyAumKUiL2KRL",
+      "ADuUkR4vqLUMWXxW9gh6D6L8pMSawimctcNZ5pGwDcEt",
+      "96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5",
+      "Cw8CFyM9FkoMi7K7Crf6HNQqf4uEMzpKw6QNghXLvLkY",
+      "3AVi9Tg9Uo68tJfuvoKvqKNWKkC5wPdSSdeBnizKZ6jT",
+      "DrFpDMWjxNZpfd64HwjR86Q3ysVhnRW7vZxnQ939cash",
+      "4oMwKr4EMgk151S5piXv7iBpEso3yF57pBH1oB9hEuKG",
+      "9SpvLVH1annu6r6WC2VUfh6mNYjnCK1HtxajHNnYNtiQ",
+      "F9VVc2XxhgZfXeKTzkpBJGSHVFfxkCeECx5m9UGUWcAE",
+      "ADyA8hdefvWN2dbGGWFotbzWxrAvLW83WG6QCVXvJKqw",
+      "5PHirr8joyTMp9JMm6nW7hNDVyEYdkzDqazxPD7RaTjx",
+      "9cRCn9rGT8V2imeM2BaKs13yhMEais3ruM3rPvTGpump",
+      "FnzKY6x7entQ1eR3D225dQyT7ybfka4PskBMQhb8L3CC",
+      "BmCXK8QFCHgjiqGm7peAtBbZpFPJNsp5fYP5rSRazMS8",
+      "DaXhQ3pfN3J5dQnXxVU8YqW9bwA3RUVxXvq2iBjTDVt4",
+      "94qWNrtmfn42h3ZjUZwWvK1MEo9uVmmrBPd2hpNjYDjb",
+      "GS4CU59F31iL7aR2Q8zVS8DRrcRnXX1yjQ66TqNVQnaR",
+      "CQfwrncb67iboVdGB62naWUFUWutuRfizZ3jncGRNTiR",
+      "C2aFPdENg4A2HQsmrd5rTw5TaYBX5Ku887cWjbFKtZpw",
+      "8oVgtpGYR2GvCQCVQg8ZcXoYj8qrzfeyimDWE6FTuW9k",
+      "HjQjngTDqoHE6aaGhUqfz9aQ7WZcBRjy5xB8PScLSr8i",
+      "FxC6pJJSiu6efSn8PmBMQjQaYm6dkSqmQYohui6NPnrf",
+      "6h19hTXkE4TYCUR3arffCgAN61eRNrJn12cZGzx3bDHk",
+      "GAFuhgcd328SkkBYHpfadzmef9hTGAFRCi9QoCnsZQug",
+      "AktftA98kSWAxn6kVSoqBXBELUArjKu2H9WmKB48ULFY",
+      "6rVkF4HSgy1jrnC3HogfRgPHrq4CtLg5f11URpsC4i9D",
+      "GYH1Gae1wJytMSvMvw8JVcv7nuAbxi8i9erNVbERnzXd",
+      "CA7v8gHfbquYXyDnDx6QxWW8hmL1H7X6Y2RYDrGLnuck",
+      "CASRL2zkwDnppxEFQ4LgdwgR9pdz5Q8R8nEMKVZ9QoLp",
+      "qkYdTGRPHbWTWuBMz45bCiU6a23axRqf6sBHm9295WY",
+      "GesfTA3X2arioaHp8bbKdjG9vJtskViWACZoYvxp4twS",
+      "C93K8DX4YsABYJtHX9awzgZW3LWzBqBVezEbbLJH4yet",
+      "4budycTjhs9fD6xw62VBducVTNgMgJJ5BgtKq7mAZwn6",
+      "Bckr4rY4rUGvWtwqC9mnWN35LKzfPRcmsoMRYq6DFEjN",
+      "8SBKzEQU4nLSzcwF4a74F2iaUDQyTfjGndn6qUWBnrpR",
+      "9tvBjCQ4m3954ESgxW9PnBPvW8afHEjKpkNEAdfN2D8U",
+      "4UQeTP1T39KZ9Sfxzo3WR5skgsaP6NZa87BAkuazLEKH",
+      "CoRuMWRuDAsjB5SDMmYEcDuyQyaH3L2vVFvwBy1FF8Kr",
+      "8sNeir4QsLsJdYpc9RZacohhK1Y5FLU3nC5LXgYB4aa6",
+      "21L1QB6DJ9HBvePgwN6jFuK3UT9mq2SgTq1oJ7D6cNiV",
+      "Fh9HmeLNUMVCvejxCtCL2DbYaRyBFVJ5xrWkLnMH6fdk",
+      "2i3uCDzDhr3pSvMPF5uBpUckLAv7XGdo2a8soiqNJMHk",
+      "463MEnMeGyJekNZFQSTUABBEbLnvMTALbT6ZmsxAbAdq",
+      "BZeq7y8ajn5Pjpy5KjEhF6eBY2H9ippTpqCtQLQPsmJf",
+      "6AUH3WEHucYZyC61hqpqYUWVto5qA5hjHuNQ32GNnNxA",
+      "ghSBUgyxyvyurm1vJBkU4rUyLJoUipCZhFeiBogKCSy",
+      "LEtAFNkdb8iNejugBDjnkkpKST5SbmZx5H1hAZE7c92",
+      "53qXZL6xeJ4XcsRgYjsVhhh1FUPVs5JGka6N3nnRkB7r",
+      "8RhWX5yPkPQF1tDmDjTzxWXRzR1E5zXWGdpAi7Q6RFCR",
+      "9CXQY74YjN4y9yzpyowtwHhyPCkQ3fnZf5RLPymP55Lg",
+      "B3DXFHBR6HSHR57dYYyTfQXmJkyj9786ndAnpE6wjYKE",
+      "GJ61ojoB7aDLGWHYCFHVpJN681XLgxPQ2QVfFwShBbvx",
+      "GyTUGdPFyj1X53uQNBtuw4QXx7LQfbYtCLjvWM8WY7B2"
+    ],
+    "programs": [
+      "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+      "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+      "pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ",
+      "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
+      "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+      "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA"
+    ],
+    "absentOnMainnet": [
+      "ECSchKJGQPtfHC4TLFp78Ao9g51EawTgmQPbmA1cFb5y",
+      "9uZjezZDJjNyqz4gvQkALs9ksHA7UqmdPHsJi5Zjv7Ge",
+      "2TZ6bAMa14sPRNZZU7Mj7K4Q41JQs8qA4gsrCp1jrpvC",
+      "7Z4bsMJo2q5dYQgPT6RD6XqQvonY798D1uHApN8UG7CC",
+      "3E5DbyCnYcStqjepUGZgN63vEGZTwxf7YU32ebPLGom6",
+      "FyVcrNLMFThKXCSYAxnpuYbked5vjAnbTuWygYXhVpYi",
+      "7vh5sMBfDpfFeAWGWrFmD54AbEEcgnWoDDubw6AtZjka",
+      "58VbkYJ7mKLak6MaLhNg3MnvNpRQyCUuV6kyyLEXuCpJ",
+      "AdPnUcnMJY4JExDWXb2Zd3QD76VYP1c6KHszwVZqjUfv",
+      "8YuvNGWBm7NL45CHiHrwyBwKbKLspG4iFmt4EeFfSASh",
+      "D7cSi94ehxZwyoRTp8Re9ZohEBhLm8Dm9CzRQogtL5re"
+    ],
+    "tablesReset": [
+      "BShWZ8FbDPYGpoc1ebj4TiELvVFmBQwW4XMYuLtQoHYZ"
+    ]
+  },
+  "records": [
+    {
+      "coin": "curve",
+      "step": "deposit",
+      "signature": "2qWbMgAce7cCy73r7Gra6RCBFUazuas6R8YZ9yP18nshLEYHgrqxPahQtLGLCxxqkuCB8k9ty6NbiWes9uvGa8bW",
+      "found": true,
+      "slot": 43,
+      "ok": true,
+      "err": null,
+      "cu": 21819,
+      "cuLimit": null,
+      "fee": 5000,
+      "accounts": 9,
+      "lookups": [],
+      "programs": [
+        "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF"
+      ]
+    },
+    {
+      "coin": "curve",
+      "step": "buy",
+      "signature": "55ptWpWxnbEtVTTMMVKrYr2r9ewXBsseg84CyeEzssm6hkcsDwKUDuk5ysxmgz4KaBmMjDrEpK5PLL66V45HondR",
+      "found": true,
+      "slot": 81,
+      "ok": true,
+      "err": null,
+      "cu": 251618,
+      "cuLimit": 300000,
+      "fee": 217245,
+      "accounts": 28,
+      "lookups": [
+        "BShWZ8FbDPYGpoc1ebj4TiELvVFmBQwW4XMYuLtQoHYZ"
+      ],
+      "programs": [
+        "ComputeBudget111111111111111111111111111111",
+        "ComputeBudget111111111111111111111111111111",
+        "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF"
+      ],
+      "lamports": {
+        "W": {
+          "before": 0,
+          "after": 2393440,
+          "change": 2393440
+        },
+        "feePayer": {
+          "before": 10000000000,
+          "after": 10000000715,
+          "change": 715
+        },
+        "tip4": {
+          "before": 749230,
+          "after": 849230,
+          "change": 100000
+        }
+      }
+    },
+    {
+      "coin": "graduated",
+      "step": "deposit",
+      "signature": "PRBBja2Vm6vacrwRFTCkg2eEWA7SwBLBwqkFN9m6ckrp9Dj7ZgekFcPxV25BmfJhud959YgR46FdqNBSGJx94ER",
+      "found": true,
+      "slot": 126,
+      "ok": true,
+      "err": null,
+      "cu": 22423,
+      "cuLimit": null,
+      "fee": 5000,
+      "accounts": 9,
+      "lookups": [],
+      "programs": [
+        "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF"
+      ]
+    },
+    {
+      "coin": "graduated",
+      "step": "buy",
+      "signature": "2CrvyNaXkNH27Gk3yAWi85puCe8xzdv6UodHujwgpni5YF12DHXYcrhRgnPekwqGQz4ttZe9EcCkmni4ATcyc21L",
+      "found": true,
+      "slot": 160,
+      "ok": true,
+      "err": null,
+      "cu": 293554,
+      "cuLimit": 400000,
+      "fee": 217245,
+      "accounts": 35,
+      "lookups": [
+        "3e2KifQF38H8Lx6MNz8x99aaZmUJGbcDWNFFV2b4vim1"
+      ],
+      "programs": [
+        "ComputeBudget111111111111111111111111111111",
+        "ComputeBudget111111111111111111111111111111",
+        "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF"
+      ],
+      "lamports": {
+        "W": {
+          "before": 0,
+          "after": 2393440,
+          "change": 2393440
+        },
+        "feePayer": {
+          "before": 10000000715,
+          "after": 10000001430,
+          "change": 715
+        },
+        "tip7": {
+          "before": 742671,
+          "after": 842671,
+          "change": 100000
+        }
+      }
+    }
+  ],
+  "runs": {
+    "curve": {
+      "exit": 0,
+      "flow": {
+        "at": "2026-11-12T10:29:27.795Z",
+        "cluster": "mainnet copy",
+        "program": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+        "seedFile": "/tmp/sol-copy-JZuyXr/curve/run-2026-11-12T10-29-19-679Z.seed",
+        "steps": [
+          {
+            "step": "deposit",
+            "signature": "2qWbMgAce7cCy73r7Gra6RCBFUazuas6R8YZ9yP18nshLEYHgrqxPahQtLGLCxxqkuCB8k9ty6NbiWes9uvGa8bW",
+            "watch": {
+              "W": null,
+              "feePayer": "CxF7fZXZeC8ytskvLrkzyZxmNBqYecSn6JNcG3gCV8yZ",
+              "tip0": "ADaUMid9yfUytqMBgopwjb2DTLSokTSzL1zt6iGPaS49",
+              "tip1": "HFqU5x63VTqvQss8hp11i4wVV8bD44PvwucfZ2bU7gRe",
+              "tip2": "DfXygSm4jCyNCybVYYK6DwvWqjKee8pbDmJGcLWNDXjh",
+              "tip3": "DttWaMuVvTiduZRnguLF7jNxTgiMBZ1hyAumKUiL2KRL",
+              "tip4": "ADuUkR4vqLUMWXxW9gh6D6L8pMSawimctcNZ5pGwDcEt",
+              "tip5": "96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5",
+              "tip6": "Cw8CFyM9FkoMi7K7Crf6HNQqf4uEMzpKw6QNghXLvLkY",
+              "tip7": "3AVi9Tg9Uo68tJfuvoKvqKNWKkC5wPdSSdeBnizKZ6jT"
+            }
+          },
+          {
+            "step": "deposit",
+            "signature": "2qWbMgAce7cCy73r7Gra6RCBFUazuas6R8YZ9yP18nshLEYHgrqxPahQtLGLCxxqkuCB8k9ty6NbiWes9uvGa8bW",
+            "watch": {
+              "W": null,
+              "feePayer": "CxF7fZXZeC8ytskvLrkzyZxmNBqYecSn6JNcG3gCV8yZ",
+              "tip0": "ADaUMid9yfUytqMBgopwjb2DTLSokTSzL1zt6iGPaS49",
+              "tip1": "HFqU5x63VTqvQss8hp11i4wVV8bD44PvwucfZ2bU7gRe",
+              "tip2": "DfXygSm4jCyNCybVYYK6DwvWqjKee8pbDmJGcLWNDXjh",
+              "tip3": "DttWaMuVvTiduZRnguLF7jNxTgiMBZ1hyAumKUiL2KRL",
+              "tip4": "ADuUkR4vqLUMWXxW9gh6D6L8pMSawimctcNZ5pGwDcEt",
+              "tip5": "96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5",
+              "tip6": "Cw8CFyM9FkoMi7K7Crf6HNQqf4uEMzpKw6QNghXLvLkY",
+              "tip7": "3AVi9Tg9Uo68tJfuvoKvqKNWKkC5wPdSSdeBnizKZ6jT"
+            }
+          },
+          {
+            "step": "buy",
+            "signature": "55ptWpWxnbEtVTTMMVKrYr2r9ewXBsseg84CyeEzssm6hkcsDwKUDuk5ysxmgz4KaBmMjDrEpK5PLL66V45HondR",
+            "watch": {
+              "W": null,
+              "feePayer": "CxF7fZXZeC8ytskvLrkzyZxmNBqYecSn6JNcG3gCV8yZ",
+              "tip0": "ADaUMid9yfUytqMBgopwjb2DTLSokTSzL1zt6iGPaS49",
+              "tip1": "HFqU5x63VTqvQss8hp11i4wVV8bD44PvwucfZ2bU7gRe",
+              "tip2": "DfXygSm4jCyNCybVYYK6DwvWqjKee8pbDmJGcLWNDXjh",
+              "tip3": "DttWaMuVvTiduZRnguLF7jNxTgiMBZ1hyAumKUiL2KRL",
+              "tip4": "ADuUkR4vqLUMWXxW9gh6D6L8pMSawimctcNZ5pGwDcEt",
+              "tip5": "96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5",
+              "tip6": "Cw8CFyM9FkoMi7K7Crf6HNQqf4uEMzpKw6QNghXLvLkY",
+              "tip7": "3AVi9Tg9Uo68tJfuvoKvqKNWKkC5wPdSSdeBnizKZ6jT"
+            }
+          },
+          {
+            "step": "buy",
+            "signature": "55ptWpWxnbEtVTTMMVKrYr2r9ewXBsseg84CyeEzssm6hkcsDwKUDuk5ysxmgz4KaBmMjDrEpK5PLL66V45HondR",
+            "watch": {
+              "W": null,
+              "feePayer": "CxF7fZXZeC8ytskvLrkzyZxmNBqYecSn6JNcG3gCV8yZ",
+              "tip0": "ADaUMid9yfUytqMBgopwjb2DTLSokTSzL1zt6iGPaS49",
+              "tip1": "HFqU5x63VTqvQss8hp11i4wVV8bD44PvwucfZ2bU7gRe",
+              "tip2": "DfXygSm4jCyNCybVYYK6DwvWqjKee8pbDmJGcLWNDXjh",
+              "tip3": "DttWaMuVvTiduZRnguLF7jNxTgiMBZ1hyAumKUiL2KRL",
+              "tip4": "ADuUkR4vqLUMWXxW9gh6D6L8pMSawimctcNZ5pGwDcEt",
+              "tip5": "96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5",
+              "tip6": "Cw8CFyM9FkoMi7K7Crf6HNQqf4uEMzpKw6QNghXLvLkY",
+              "tip7": "3AVi9Tg9Uo68tJfuvoKvqKNWKkC5wPdSSdeBnizKZ6jT"
+            }
+          }
+        ],
+        "simFails": [],
+        "planted": {
+          "reads": 0
+        },
+        "fee": "1300000",
+        "sendLines": [
+          {
+            "phase": "buy",
+            "line": "pool send solana mainnet send outcome=filled status=200 ms=448 tag=3 via=jito region=engine-stand-in bundle=named end=filled rebroadcasts=1 misses=0 plain=2 hash_ms=>439"
+          }
+        ],
+        "proofWait": {
+          "passes": 1,
+          "ms": 6011,
+          "made": false
+        },
+        "engine": "swallow",
+        "engineCalls": [
+          {
+            "at": 1794479367360,
+            "call": "send",
+            "mode": "swallow"
+          },
+          {
+            "at": 1794479367361,
+            "call": "rebroadcast",
+            "mode": "swallow"
+          }
+        ],
+        "pool": "7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8",
+        "tables": {
+          "pump-curve": [
+            "BShWZ8FbDPYGpoc1ebj4TiELvVFmBQwW4XMYuLtQoHYZ"
+          ],
+          "pumpswap": [
+            "4PyMCJPKZQvrLsj8DKCG2Yddh3vDmTf1EWnjCL1Bk3Pc"
+          ]
+        },
+        "mint": "DrFpDMWjxNZpfd64HwjR86Q3ysVhnRW7vZxnQ939cash",
+        "spend": "max",
+        "maxSpend": {
+          "page": "0.00334652",
+          "worstVenue": "384880",
+          "runReads": "4246520",
+          "venue": {
+            "kind": "pump-curve",
+            "mint": "DrFpDMWjxNZpfd64HwjR86Q3ysVhnRW7vZxnQ939cash",
+            "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+            "tokenAccountSize": 170,
+            "curve": "4oMwKr4EMgk151S5piXv7iBpEso3yF57pBH1oB9hEuKG",
+            "creator": "6JBLBLDht6bxca7obi81taHpVMpnU3iHDmyCuHpNKPCR",
+            "feeRecipient": "62qc2CNXwrYqQScmEdiZFFAnJR262PxWEuNQtxfafNgV",
+            "cashback": false,
+            "buybackFeeRecipients": [
+              "5YxQFdt3Tr9zJLvkFccqXVUwhdTWJQc1fFg2YPbxvxeD",
+              "9M4giFFMxmFGXtc3feFzRai56WbBqehoSeRE5GK7gf7",
+              "GXPFM2caqTtQYC2cJ5yJRi9VDkpsYZXzYdwYpGnLmtDL",
+              "3BpXnfJaUTiwXnJNe7Ej1rcbzqTTQUvLShZaWazebsVR",
+              "5cjcW9wExnJJiqgLjq7DEG75Pm6JBgE1hNv4B2vHXUW6",
+              "EHAAiTxcdDwQ3U4bU6YcMsQGaekdzLS3B5SmYo46kJtL",
+              "5eHhjP8JaYkz83CWwvGU2uMUXefd3AazWGx4gpcuEEYD",
+              "A7hAgCzFw14fejgCp387JUJRMNyz4j89JKnhtKU8piqW"
+            ],
+            "buybackFeeRecipient": "EHAAiTxcdDwQ3U4bU6YcMsQGaekdzLS3B5SmYo46kJtL"
+          }
+        },
+        "resumed": false,
+        "burst": false,
+        "injected": {
+          "rpc": 0,
+          "send": 0
+        },
+        "dust": null,
+        "U": "9Pgd25U9zyqmscAeHc8PTmoK8j1N7L4HdNf173QWRzCn",
+        "need": "11473120",
+        "deposit": {
+          "answer": {
+            "result": {
+              "stage": "sent",
+              "txs": [
+                {
+                  "chain": "solana",
+                  "hash": "2qWbMgAce7cCy73r7Gra6RCBFUazuas6R8YZ9yP18nshLEYHgrqxPahQtLGLCxxqkuCB8k9ty6NbiWes9uvGa8bW"
+                }
+              ]
+            }
+          },
+          "notes": [
+            {
+              "ref": "deposit",
+              "state": "UNSPENT",
+              "value": "10000000",
+              "leafIndex": "7",
+              "sends": [
+                "2qWbMgAce7cCy73r7Gra6RCBFUazuas6R8YZ9yP18nshLEYHgrqxPahQtLGLCxxqkuCB8k9ty6NbiWes9uvGa8bW"
+              ]
+            }
+          ]
+        },
+        "buy": {
+          "answer": {
+            "result": {
+              "stage": "sent",
+              "txs": [
+                {
+                  "chain": "solana",
+                  "hash": "55ptWpWxnbEtVTTMMVKrYr2r9ewXBsseg84CyeEzssm6hkcsDwKUDuk5ysxmgz4KaBmMjDrEpK5PLL66V45HondR"
+                }
+              ]
+            }
+          },
+          "notes": [
+            {
+              "ref": "change",
+              "state": "UNSPENT",
+              "value": "0",
+              "leafIndex": "8",
+              "sends": []
+            },
+            {
+              "ref": "deposit",
+              "state": "SPENT",
+              "value": "10000000",
+              "leafIndex": "7",
+              "sends": [
+                "2qWbMgAce7cCy73r7Gra6RCBFUazuas6R8YZ9yP18nshLEYHgrqxPahQtLGLCxxqkuCB8k9ty6NbiWes9uvGa8bW"
+              ]
+            }
+          ]
+        },
+        "buyTimeline": [
+          {
+            "what": "rpc 127.0.0.1:23381 getSlot",
+            "at": 1,
+            "ms": 5
+          },
+          {
+            "what": "rpc 127.0.0.1:23381 getAccountInfo",
+            "at": 2,
+            "ms": 6
+          },
+          {
+            "what": "rpc 127.0.0.1:23381 getAccountInfo",
+            "at": 2,
+            "ms": 6
+          },
+          {
+            "what": "rpc 127.0.0.1:23381 getAccountInfo",
+            "at": 2,
+            "ms": 6
+          },
+          {
+            "what": "rpc 127.0.0.1:23381 getAccountInfo",
+            "at": 4,
+            "ms": 4
+          },
+          {
+            "what": "rpc localhost:23381 getSlot",
+            "at": 1,
+            "ms": 8
+          },
+          {
+            "what": "rpc localhost:23381 getAccountInfo",
+            "at": 2,
+            "ms": 8
+          },
+          {
+            "what": "rpc localhost:23381 getAccountInfo",
+            "at": 2,
+            "ms": 8
+          },
+          {
+            "what": "rpc localhost:23381 getAccountInfo",
+            "at": 2,
+            "ms": 8
+          },
+          {
+            "what": "rpc localhost:23381 getAccountInfo",
+            "at": 4,
+            "ms": 6
+          },
+          {
+            "what": "rpc localhost:23381 getMultipleAccounts",
+            "at": 5,
+            "ms": 6
+          },
+          {
+            "what": "rpc 127.0.0.1:23381 getMultipleAccounts",
+            "at": 5,
+            "ms": 6
+          },
+          {
+            "what": "rpc 127.0.0.1:23381 getMultipleAccounts",
+            "at": 5,
+            "ms": 7
+          },
+          {
+            "what": "rpc 127.0.0.1:23381 getBlockTime",
+            "at": 6,
+            "ms": 6
+          },
+          {
+            "what": "rpc localhost:23381 getMultipleAccounts",
+            "at": 5,
+            "ms": 7
+          },
+          {
+            "what": "rpc localhost:23381 getBlockTime",
+            "at": 9,
+            "ms": 7
+          },
+          {
+            "what": "rpc 127.0.0.1:23381 getLatestBlockhash",
+            "at": 16,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:23381 getAccountInfo",
+            "at": 13,
+            "ms": 4
+          },
+          {
+            "what": "rpc localhost:23381 getAccountInfo",
+            "at": 13,
+            "ms": 4
+          },
+          {
+            "what": "rpc 127.0.0.1:23381 getAccountInfo",
+            "at": 14,
+            "ms": 4
+          },
+          {
+            "what": "rpc localhost:23381 getAccountInfo",
+            "at": 14,
+            "ms": 4
+          },
+          {
+            "what": "rpc localhost:23381 getMultipleAccounts",
+            "at": 16,
+            "ms": 2
+          },
+          {
+            "what": "rpc 127.0.0.1:23381 getMultipleAccounts",
+            "at": 16,
+            "ms": 2
+          },
+          {
+            "what": "rpc localhost:23381 isBlockhashValid",
+            "at": 17,
+            "ms": 6
+          },
+          {
+            "what": "rpc localhost:23381 getEpochInfo",
+            "at": 17,
+            "ms": 6
+          },
+          {
+            "what": "route wallet",
+            "at": 35,
+            "ms": 0
+          },
+          {
+            "what": "route venue,pool",
+            "at": 35,
+            "ms": 0
+          },
+          {
+            "what": "helper POST /v1/pool/solana/send HTTP 200",
+            "at": 35,
+            "ms": 448
+          },
+          {
+            "what": "rpc localhost:23381 getTransaction",
+            "at": 484,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:23381 getTransaction",
+            "at": 483,
+            "ms": 2
+          },
+          {
+            "what": "route tx",
+            "at": 485,
+            "ms": 0
+          },
+          {
+            "what": "route out",
+            "at": 486,
+            "ms": 0
+          },
+          {
+            "what": "answer {\"result\":{\"stage\":\"sent\",\"txs\":[{\"chain",
+            "at": 486,
+            "ms": 0
+          },
+          {
+            "what": "rpc localhost:23381 getSlot",
+            "at": 486,
+            "ms": 2
+          },
+          {
+            "what": "rpc 127.0.0.1:23381 getSlot",
+            "at": 486,
+            "ms": 2
+          },
+          {
+            "what": "rpc 127.0.0.1:23381 getProgramAccounts",
+            "at": 492,
+            "ms": 1
+          },
+          {
+            "what": "rpc localhost:23381 getMultipleAccounts",
+            "at": 493,
+            "ms": 2
+          },
+          {
+            "what": "rpc 127.0.0.1:23381 getMultipleAccounts",
+            "at": 493,
+            "ms": 3
+          },
+          {
+            "what": "rpc 127.0.0.1:23381 getProgramAccounts",
+            "at": 496,
+            "ms": 1
+          },
+          {
+            "what": "rpc localhost:23381 getMultipleAccounts",
+            "at": 498,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:23381 getMultipleAccounts",
+            "at": 497,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:23381 getMultipleAccounts",
+            "at": 500,
+            "ms": 2
+          },
+          {
+            "what": "rpc localhost:23381 getMultipleAccounts",
+            "at": 501,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:23381 getSlot",
+            "at": 508,
+            "ms": 1
+          },
+          {
+            "what": "rpc localhost:23381 getSlot",
+            "at": 508,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:23381 getTransaction",
+            "at": 509,
+            "ms": 1
+          },
+          {
+            "what": "rpc localhost:23381 getTransaction",
+            "at": 509,
+            "ms": 2
+          },
+          {
+            "what": "progress filled",
+            "at": 511,
+            "ms": 0
+          }
+        ],
+        "refused": null,
+        "sell": null,
+        "rentBack": null,
+        "sentTxs": [],
+        "stages": [
+          {
+            "kind": "pool.deposit",
+            "stage": "filled"
+          },
+          {
+            "kind": "pool.buy",
+            "stage": "filled"
+          }
+        ],
+        "notes": [
+          {
+            "ref": "change",
+            "state": "UNSPENT",
+            "value": "0",
+            "leafIndex": "8",
+            "sends": []
+          },
+          {
+            "ref": "deposit",
+            "state": "SPENT",
+            "value": "10000000",
+            "leafIndex": "7",
+            "sends": [
+              "2qWbMgAce7cCy73r7Gra6RCBFUazuas6R8YZ9yP18nshLEYHgrqxPahQtLGLCxxqkuCB8k9ty6NbiWes9uvGa8bW"
+            ]
+          }
+        ],
+        "filled": true
+      },
+      "tail": [
+        "2026-11-12T10:29:27.315Z t+35 ms route wallet 0 ms",
+        "2026-11-12T10:29:27.315Z t+35 ms route venue,pool 0 ms",
+        "2026-11-12T10:29:27.763Z helper: pool send solana mainnet send outcome=filled status=200 ms=448 tag=3 via=jito region=engine-stand-in bundle=named end=filled rebroadcasts=1 misses=0 plain=2 hash_ms=>439",
+        "2026-11-12T10:29:27.763Z helper POST /v1/pool/solana/send: HTTP 200",
+        "2026-11-12T10:29:27.763Z t+35 ms helper POST /v1/pool/solana/send HTTP 200 448 ms",
+        "2026-11-12T10:29:27.765Z t+484 ms rpc localhost:23381 getTransaction 1 ms",
+        "2026-11-12T10:29:27.765Z t+483 ms rpc 127.0.0.1:23381 getTransaction 2 ms",
+        "2026-11-12T10:29:27.765Z t+485 ms route tx 0 ms",
+        "2026-11-12T10:29:27.766Z t+486 ms route out 0 ms",
+        "2026-11-12T10:29:27.766Z t+486 ms answer {\"result\":{\"stage\":\"sent\",\"txs\":[{\"chain 0 ms",
+        "2026-11-12T10:29:27.766Z pool.buy answered {\"result\":{\"stage\":\"sent\",\"txs\":[{\"chain\":\"solana\",\"hash\":\"55ptWpWxnbEtVTTMMVKrYr2r9ewXBsseg84CyeEzssm6hkcsDwKUDuk5ysxmgz4KaBmMjDrEpK5PLL66V45HondR\"}]}}; waiting for its run to end",
+        "2026-11-12T10:29:27.768Z t+486 ms rpc localhost:23381 getSlot 2 ms",
+        "2026-11-12T10:29:27.768Z t+486 ms rpc 127.0.0.1:23381 getSlot 2 ms",
+        "2026-11-12T10:29:27.773Z t+492 ms rpc 127.0.0.1:23381 getProgramAccounts 1 ms",
+        "2026-11-12T10:29:27.775Z t+493 ms rpc localhost:23381 getMultipleAccounts 2 ms",
+        "2026-11-12T10:29:27.776Z t+493 ms rpc 127.0.0.1:23381 getMultipleAccounts 3 ms",
+        "2026-11-12T10:29:27.777Z t+496 ms rpc 127.0.0.1:23381 getProgramAccounts 1 ms",
+        "2026-11-12T10:29:27.778Z t+498 ms rpc localhost:23381 getMultipleAccounts 1 ms",
+        "2026-11-12T10:29:27.778Z t+497 ms rpc 127.0.0.1:23381 getMultipleAccounts 1 ms",
+        "2026-11-12T10:29:27.781Z t+500 ms rpc 127.0.0.1:23381 getMultipleAccounts 2 ms",
+        "2026-11-12T10:29:27.782Z t+501 ms rpc localhost:23381 getMultipleAccounts 1 ms",
+        "2026-11-12T10:29:27.788Z t+508 ms rpc 127.0.0.1:23381 getSlot 1 ms",
+        "2026-11-12T10:29:27.788Z t+508 ms rpc localhost:23381 getSlot 1 ms",
+        "2026-11-12T10:29:27.790Z t+509 ms rpc 127.0.0.1:23381 getTransaction 1 ms",
+        "2026-11-12T10:29:27.790Z t+509 ms rpc localhost:23381 getTransaction 2 ms",
+        "2026-11-12T10:29:27.791Z t+511 ms progress filled 0 ms",
+        "2026-11-12T10:29:27.791Z pool.buy progress \"filled\"",
+        "2026-11-12T10:29:27.793Z buy {\"answer\":{\"result\":{\"stage\":\"sent\",\"txs\":[{\"chain\":\"solana\",\"hash\":\"55ptWpWxnbEtVTTMMVKrYr2r9ewXBsseg84CyeEzssm6hkcsDwKUDuk5ysxmgz4KaBmMjDrEpK5PLL66V45HondR\"}]}},\"notes\":[{\"ref\":\"change\",\"state\":\"UNSPENT\",\"value\":\"0\",\"leafIndex\":\"8\",\"sends\":[]},{\"ref\":\"deposit\",\"state\":\"SPENT\",\"value\":\"10000000\",\"leafIndex\":\"7\",\"sends\":[\"2qWbMgAce7cCy73r7Gra6RCBFUazuas6R8YZ9yP18nshLEYHgrqxPahQtLGLCxxqkuCB8k9ty6NbiWes9uvGa8bW\"]}]}",
+        "2026-11-12T10:29:27.794Z notes [{\"ref\":\"change\",\"state\":\"UNSPENT\",\"value\":\"0\",\"leafIndex\":\"8\",\"sends\":[]},{\"ref\":\"deposit\",\"state\":\"SPENT\",\"value\":\"10000000\",\"leafIndex\":\"7\",\"sends\":[\"2qWbMgAce7cCy73r7Gra6RCBFUazuas6R8YZ9yP18nshLEYHgrqxPahQtLGLCxxqkuCB8k9ty6NbiWes9uvGa8bW\"]}]",
+        ""
+      ],
+      "proofWait": {
+        "passes": 1,
+        "ms": 6011,
+        "made": false
+      },
+      "buySend": {
+        "lines": [
+          "pool send solana mainnet send outcome=filled status=200 ms=448 tag=3 via=jito region=engine-stand-in bundle=named end=filled rebroadcasts=1 misses=0 plain=2 hash_ms=>439"
+        ],
+        "sendStartMs": 35,
+        "helperMs": 448,
+        "filledMs": 511,
+        "sendToFilledMs": 476,
+        "engineCalls": [
+          {
+            "at": 1794479367360,
+            "call": "send",
+            "mode": "swallow"
+          },
+          {
+            "at": 1794479367361,
+            "call": "rebroadcast",
+            "mode": "swallow"
+          }
+        ]
+      }
+    },
+    "graduated": {
+      "exit": 0,
+      "flow": {
+        "at": "2026-11-12T10:29:42.556Z",
+        "cluster": "mainnet copy",
+        "program": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+        "seedFile": "/tmp/sol-copy-JZuyXr/graduated/run-2026-11-12T10-29-35-210Z.seed",
+        "steps": [
+          {
+            "step": "deposit",
+            "signature": "PRBBja2Vm6vacrwRFTCkg2eEWA7SwBLBwqkFN9m6ckrp9Dj7ZgekFcPxV25BmfJhud959YgR46FdqNBSGJx94ER",
+            "watch": {
+              "W": null,
+              "feePayer": "CxF7fZXZeC8ytskvLrkzyZxmNBqYecSn6JNcG3gCV8yZ",
+              "tip0": "ADaUMid9yfUytqMBgopwjb2DTLSokTSzL1zt6iGPaS49",
+              "tip1": "HFqU5x63VTqvQss8hp11i4wVV8bD44PvwucfZ2bU7gRe",
+              "tip2": "DfXygSm4jCyNCybVYYK6DwvWqjKee8pbDmJGcLWNDXjh",
+              "tip3": "DttWaMuVvTiduZRnguLF7jNxTgiMBZ1hyAumKUiL2KRL",
+              "tip4": "ADuUkR4vqLUMWXxW9gh6D6L8pMSawimctcNZ5pGwDcEt",
+              "tip5": "96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5",
+              "tip6": "Cw8CFyM9FkoMi7K7Crf6HNQqf4uEMzpKw6QNghXLvLkY",
+              "tip7": "3AVi9Tg9Uo68tJfuvoKvqKNWKkC5wPdSSdeBnizKZ6jT"
+            }
+          },
+          {
+            "step": "deposit",
+            "signature": "PRBBja2Vm6vacrwRFTCkg2eEWA7SwBLBwqkFN9m6ckrp9Dj7ZgekFcPxV25BmfJhud959YgR46FdqNBSGJx94ER",
+            "watch": {
+              "W": null,
+              "feePayer": "CxF7fZXZeC8ytskvLrkzyZxmNBqYecSn6JNcG3gCV8yZ",
+              "tip0": "ADaUMid9yfUytqMBgopwjb2DTLSokTSzL1zt6iGPaS49",
+              "tip1": "HFqU5x63VTqvQss8hp11i4wVV8bD44PvwucfZ2bU7gRe",
+              "tip2": "DfXygSm4jCyNCybVYYK6DwvWqjKee8pbDmJGcLWNDXjh",
+              "tip3": "DttWaMuVvTiduZRnguLF7jNxTgiMBZ1hyAumKUiL2KRL",
+              "tip4": "ADuUkR4vqLUMWXxW9gh6D6L8pMSawimctcNZ5pGwDcEt",
+              "tip5": "96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5",
+              "tip6": "Cw8CFyM9FkoMi7K7Crf6HNQqf4uEMzpKw6QNghXLvLkY",
+              "tip7": "3AVi9Tg9Uo68tJfuvoKvqKNWKkC5wPdSSdeBnizKZ6jT"
+            }
+          },
+          {
+            "step": "buy",
+            "signature": "2CrvyNaXkNH27Gk3yAWi85puCe8xzdv6UodHujwgpni5YF12DHXYcrhRgnPekwqGQz4ttZe9EcCkmni4ATcyc21L",
+            "watch": {
+              "W": null,
+              "feePayer": "CxF7fZXZeC8ytskvLrkzyZxmNBqYecSn6JNcG3gCV8yZ",
+              "tip0": "ADaUMid9yfUytqMBgopwjb2DTLSokTSzL1zt6iGPaS49",
+              "tip1": "HFqU5x63VTqvQss8hp11i4wVV8bD44PvwucfZ2bU7gRe",
+              "tip2": "DfXygSm4jCyNCybVYYK6DwvWqjKee8pbDmJGcLWNDXjh",
+              "tip3": "DttWaMuVvTiduZRnguLF7jNxTgiMBZ1hyAumKUiL2KRL",
+              "tip4": "ADuUkR4vqLUMWXxW9gh6D6L8pMSawimctcNZ5pGwDcEt",
+              "tip5": "96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5",
+              "tip6": "Cw8CFyM9FkoMi7K7Crf6HNQqf4uEMzpKw6QNghXLvLkY",
+              "tip7": "3AVi9Tg9Uo68tJfuvoKvqKNWKkC5wPdSSdeBnizKZ6jT"
+            }
+          },
+          {
+            "step": "buy",
+            "signature": "2CrvyNaXkNH27Gk3yAWi85puCe8xzdv6UodHujwgpni5YF12DHXYcrhRgnPekwqGQz4ttZe9EcCkmni4ATcyc21L",
+            "watch": {
+              "W": null,
+              "feePayer": "CxF7fZXZeC8ytskvLrkzyZxmNBqYecSn6JNcG3gCV8yZ",
+              "tip0": "ADaUMid9yfUytqMBgopwjb2DTLSokTSzL1zt6iGPaS49",
+              "tip1": "HFqU5x63VTqvQss8hp11i4wVV8bD44PvwucfZ2bU7gRe",
+              "tip2": "DfXygSm4jCyNCybVYYK6DwvWqjKee8pbDmJGcLWNDXjh",
+              "tip3": "DttWaMuVvTiduZRnguLF7jNxTgiMBZ1hyAumKUiL2KRL",
+              "tip4": "ADuUkR4vqLUMWXxW9gh6D6L8pMSawimctcNZ5pGwDcEt",
+              "tip5": "96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5",
+              "tip6": "Cw8CFyM9FkoMi7K7Crf6HNQqf4uEMzpKw6QNghXLvLkY",
+              "tip7": "3AVi9Tg9Uo68tJfuvoKvqKNWKkC5wPdSSdeBnizKZ6jT"
+            }
+          }
+        ],
+        "simFails": [],
+        "planted": {
+          "reads": 0
+        },
+        "fee": "1300000",
+        "sendLines": [
+          {
+            "phase": "buy",
+            "line": "pool send solana mainnet send outcome=filled status=200 ms=445 tag=3 via=jito region=engine-stand-in bundle=named end=filled rebroadcasts=1 misses=0 plain=2 hash_ms=>436"
+          }
+        ],
+        "proofWait": {
+          "passes": 1,
+          "ms": 5204,
+          "made": false
+        },
+        "engine": "swallow",
+        "engineCalls": [
+          {
+            "at": 1794479382092,
+            "call": "send",
+            "mode": "swallow"
+          },
+          {
+            "at": 1794479382093,
+            "call": "rebroadcast",
+            "mode": "swallow"
+          }
+        ],
+        "pool": "7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8",
+        "tables": {
+          "pump-curve": [
+            "BShWZ8FbDPYGpoc1ebj4TiELvVFmBQwW4XMYuLtQoHYZ"
+          ],
+          "pumpswap": [
+            "3e2KifQF38H8Lx6MNz8x99aaZmUJGbcDWNFFV2b4vim1"
+          ]
+        },
+        "mint": "9cRCn9rGT8V2imeM2BaKs13yhMEais3ruM3rPvTGpump",
+        "spend": "max",
+        "maxSpend": {
+          "page": "0.00334652",
+          "worstVenue": "384880",
+          "runReads": "4246520",
+          "venue": {
+            "kind": "pumpswap",
+            "mint": "9cRCn9rGT8V2imeM2BaKs13yhMEais3ruM3rPvTGpump",
+            "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+            "tokenAccountSize": 170,
+            "pool": "FnzKY6x7entQ1eR3D225dQyT7ybfka4PskBMQhb8L3CC",
+            "baseVault": "BmCXK8QFCHgjiqGm7peAtBbZpFPJNsp5fYP5rSRazMS8",
+            "quoteVault": "DaXhQ3pfN3J5dQnXxVU8YqW9bwA3RUVxXvq2iBjTDVt4",
+            "coinCreator": "9ENSWnedBEAvVB7jJKZrLRZ9vuVuJdBE7uJt2oAsG1jr",
+            "cashback": false,
+            "protocolFeeRecipient": "62qc2CNXwrYqQScmEdiZFFAnJR262PxWEuNQtxfafNgV",
+            "buybackFeeRecipients": [
+              "5YxQFdt3Tr9zJLvkFccqXVUwhdTWJQc1fFg2YPbxvxeD",
+              "9M4giFFMxmFGXtc3feFzRai56WbBqehoSeRE5GK7gf7",
+              "GXPFM2caqTtQYC2cJ5yJRi9VDkpsYZXzYdwYpGnLmtDL",
+              "3BpXnfJaUTiwXnJNe7Ej1rcbzqTTQUvLShZaWazebsVR",
+              "5cjcW9wExnJJiqgLjq7DEG75Pm6JBgE1hNv4B2vHXUW6",
+              "EHAAiTxcdDwQ3U4bU6YcMsQGaekdzLS3B5SmYo46kJtL",
+              "5eHhjP8JaYkz83CWwvGU2uMUXefd3AazWGx4gpcuEEYD",
+              "A7hAgCzFw14fejgCp387JUJRMNyz4j89JKnhtKU8piqW"
+            ],
+            "buybackFeeRecipient": "9M4giFFMxmFGXtc3feFzRai56WbBqehoSeRE5GK7gf7"
+          }
+        },
+        "resumed": false,
+        "burst": false,
+        "injected": {
+          "rpc": 0,
+          "send": 0
+        },
+        "dust": null,
+        "U": "F8KepJ8ZpMNj63zaytpWzinx74giHG3Ei9dWiKNyPghr",
+        "need": "11473120",
+        "deposit": {
+          "answer": {
+            "result": {
+              "stage": "sent",
+              "txs": [
+                {
+                  "chain": "solana",
+                  "hash": "PRBBja2Vm6vacrwRFTCkg2eEWA7SwBLBwqkFN9m6ckrp9Dj7ZgekFcPxV25BmfJhud959YgR46FdqNBSGJx94ER"
+                }
+              ]
+            }
+          },
+          "notes": [
+            {
+              "ref": "deposit",
+              "state": "UNSPENT",
+              "value": "10000000",
+              "leafIndex": "9",
+              "sends": [
+                "PRBBja2Vm6vacrwRFTCkg2eEWA7SwBLBwqkFN9m6ckrp9Dj7ZgekFcPxV25BmfJhud959YgR46FdqNBSGJx94ER"
+              ]
+            }
+          ]
+        },
+        "buy": {
+          "answer": {
+            "result": {
+              "stage": "sent",
+              "txs": [
+                {
+                  "chain": "solana",
+                  "hash": "2CrvyNaXkNH27Gk3yAWi85puCe8xzdv6UodHujwgpni5YF12DHXYcrhRgnPekwqGQz4ttZe9EcCkmni4ATcyc21L"
+                }
+              ]
+            }
+          },
+          "notes": [
+            {
+              "ref": "deposit",
+              "state": "SPENT",
+              "value": "10000000",
+              "leafIndex": "9",
+              "sends": [
+                "PRBBja2Vm6vacrwRFTCkg2eEWA7SwBLBwqkFN9m6ckrp9Dj7ZgekFcPxV25BmfJhud959YgR46FdqNBSGJx94ER"
+              ]
+            },
+            {
+              "ref": "change",
+              "state": "UNSPENT",
+              "value": "0",
+              "leafIndex": "10",
+              "sends": []
+            }
+          ]
+        },
+        "buyTimeline": [
+          {
+            "what": "rpc 127.0.0.1:23381 getSlot",
+            "at": 1,
+            "ms": 5
+          },
+          {
+            "what": "rpc localhost:23381 getSlot",
+            "at": 2,
+            "ms": 5
+          },
+          {
+            "what": "rpc 127.0.0.1:23381 getAccountInfo",
+            "at": 2,
+            "ms": 6
+          },
+          {
+            "what": "rpc 127.0.0.1:23381 getAccountInfo",
+            "at": 2,
+            "ms": 6
+          },
+          {
+            "what": "rpc 127.0.0.1:23381 getAccountInfo",
+            "at": 2,
+            "ms": 6
+          },
+          {
+            "what": "rpc 127.0.0.1:23381 getAccountInfo",
+            "at": 4,
+            "ms": 4
+          },
+          {
+            "what": "rpc localhost:23381 getBlockTime",
+            "at": 7,
+            "ms": 2
+          },
+          {
+            "what": "rpc localhost:23381 getAccountInfo",
+            "at": 2,
+            "ms": 7
+          },
+          {
+            "what": "rpc localhost:23381 getAccountInfo",
+            "at": 2,
+            "ms": 8
+          },
+          {
+            "what": "rpc localhost:23381 getAccountInfo",
+            "at": 2,
+            "ms": 9
+          },
+          {
+            "what": "rpc localhost:23381 getAccountInfo",
+            "at": 5,
+            "ms": 7
+          },
+          {
+            "what": "rpc 127.0.0.1:23381 getMultipleAccounts",
+            "at": 5,
+            "ms": 7
+          },
+          {
+            "what": "rpc 127.0.0.1:23381 getMultipleAccounts",
+            "at": 5,
+            "ms": 7
+          },
+          {
+            "what": "rpc 127.0.0.1:23381 getBlockTime",
+            "at": 6,
+            "ms": 6
+          },
+          {
+            "what": "rpc localhost:23381 getMultipleAccounts",
+            "at": 5,
+            "ms": 7
+          },
+          {
+            "what": "rpc localhost:23381 getMultipleAccounts",
+            "at": 5,
+            "ms": 7
+          },
+          {
+            "what": "rpc 127.0.0.1:23381 getLatestBlockhash",
+            "at": 17,
+            "ms": 1
+          },
+          {
+            "what": "rpc localhost:23381 getAccountInfo",
+            "at": 14,
+            "ms": 4
+          },
+          {
+            "what": "rpc 127.0.0.1:23381 getAccountInfo",
+            "at": 14,
+            "ms": 4
+          },
+          {
+            "what": "rpc localhost:23381 getAccountInfo",
+            "at": 15,
+            "ms": 4
+          },
+          {
+            "what": "rpc 127.0.0.1:23381 getAccountInfo",
+            "at": 14,
+            "ms": 5
+          },
+          {
+            "what": "rpc localhost:23381 getMultipleAccounts",
+            "at": 17,
+            "ms": 2
+          },
+          {
+            "what": "rpc 127.0.0.1:23381 getMultipleAccounts",
+            "at": 17,
+            "ms": 2
+          },
+          {
+            "what": "rpc localhost:23381 isBlockhashValid",
+            "at": 18,
+            "ms": 5
+          },
+          {
+            "what": "rpc localhost:23381 getEpochInfo",
+            "at": 18,
+            "ms": 5
+          },
+          {
+            "what": "route wallet",
+            "at": 37,
+            "ms": 0
+          },
+          {
+            "what": "route venue,pool",
+            "at": 38,
+            "ms": 0
+          },
+          {
+            "what": "helper POST /v1/pool/solana/send HTTP 200",
+            "at": 38,
+            "ms": 446
+          },
+          {
+            "what": "rpc localhost:23381 getTransaction",
+            "at": 484,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:23381 getTransaction",
+            "at": 484,
+            "ms": 2
+          },
+          {
+            "what": "route tx",
+            "at": 485,
+            "ms": 0
+          },
+          {
+            "what": "route out",
+            "at": 486,
+            "ms": 0
+          },
+          {
+            "what": "answer {\"result\":{\"stage\":\"sent\",\"txs\":[{\"chain",
+            "at": 486,
+            "ms": 0
+          },
+          {
+            "what": "rpc 127.0.0.1:23381 getSlot",
+            "at": 486,
+            "ms": 1
+          },
+          {
+            "what": "rpc localhost:23381 getSlot",
+            "at": 486,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:23381 getProgramAccounts",
+            "at": 490,
+            "ms": 18
+          },
+          {
+            "what": "rpc 127.0.0.1:23381 getMultipleAccounts",
+            "at": 508,
+            "ms": 1
+          },
+          {
+            "what": "rpc localhost:23381 getMultipleAccounts",
+            "at": 509,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:23381 getProgramAccounts",
+            "at": 510,
+            "ms": 14
+          },
+          {
+            "what": "rpc 127.0.0.1:23381 getMultipleAccounts",
+            "at": 524,
+            "ms": 1
+          },
+          {
+            "what": "rpc localhost:23381 getMultipleAccounts",
+            "at": 524,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:23381 getMultipleAccounts",
+            "at": 526,
+            "ms": 2
+          },
+          {
+            "what": "rpc localhost:23381 getMultipleAccounts",
+            "at": 528,
+            "ms": 1
+          },
+          {
+            "what": "rpc localhost:23381 getSlot",
+            "at": 535,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:23381 getSlot",
+            "at": 535,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:23381 getTransaction",
+            "at": 536,
+            "ms": 1
+          },
+          {
+            "what": "rpc localhost:23381 getTransaction",
+            "at": 536,
+            "ms": 2
+          },
+          {
+            "what": "progress filled",
+            "at": 539,
+            "ms": 0
+          }
+        ],
+        "refused": null,
+        "sell": null,
+        "rentBack": null,
+        "sentTxs": [],
+        "stages": [
+          {
+            "kind": "pool.deposit",
+            "stage": "filled"
+          },
+          {
+            "kind": "pool.buy",
+            "stage": "filled"
+          }
+        ],
+        "notes": [
+          {
+            "ref": "deposit",
+            "state": "SPENT",
+            "value": "10000000",
+            "leafIndex": "9",
+            "sends": [
+              "PRBBja2Vm6vacrwRFTCkg2eEWA7SwBLBwqkFN9m6ckrp9Dj7ZgekFcPxV25BmfJhud959YgR46FdqNBSGJx94ER"
+            ]
+          },
+          {
+            "ref": "change",
+            "state": "UNSPENT",
+            "value": "0",
+            "leafIndex": "10",
+            "sends": []
+          }
+        ],
+        "filled": true
+      },
+      "tail": [
+        "2026-11-12T10:29:42.051Z t+37 ms route wallet 0 ms",
+        "2026-11-12T10:29:42.051Z t+38 ms route venue,pool 0 ms",
+        "2026-11-12T10:29:42.496Z helper: pool send solana mainnet send outcome=filled status=200 ms=445 tag=3 via=jito region=engine-stand-in bundle=named end=filled rebroadcasts=1 misses=0 plain=2 hash_ms=>436",
+        "2026-11-12T10:29:42.496Z helper POST /v1/pool/solana/send: HTTP 200",
+        "2026-11-12T10:29:42.497Z t+38 ms helper POST /v1/pool/solana/send HTTP 200 446 ms",
+        "2026-11-12T10:29:42.498Z t+484 ms rpc localhost:23381 getTransaction 1 ms",
+        "2026-11-12T10:29:42.498Z t+484 ms rpc 127.0.0.1:23381 getTransaction 2 ms",
+        "2026-11-12T10:29:42.499Z t+485 ms route tx 0 ms",
+        "2026-11-12T10:29:42.499Z t+486 ms route out 0 ms",
+        "2026-11-12T10:29:42.499Z t+486 ms answer {\"result\":{\"stage\":\"sent\",\"txs\":[{\"chain 0 ms",
+        "2026-11-12T10:29:42.499Z pool.buy answered {\"result\":{\"stage\":\"sent\",\"txs\":[{\"chain\":\"solana\",\"hash\":\"2CrvyNaXkNH27Gk3yAWi85puCe8xzdv6UodHujwgpni5YF12DHXYcrhRgnPekwqGQz4ttZe9EcCkmni4ATcyc21L\"}]}}; waiting for its run to end",
+        "2026-11-12T10:29:42.500Z t+486 ms rpc 127.0.0.1:23381 getSlot 1 ms",
+        "2026-11-12T10:29:42.500Z t+486 ms rpc localhost:23381 getSlot 1 ms",
+        "2026-11-12T10:29:42.521Z t+490 ms rpc 127.0.0.1:23381 getProgramAccounts 18 ms",
+        "2026-11-12T10:29:42.523Z t+508 ms rpc 127.0.0.1:23381 getMultipleAccounts 1 ms",
+        "2026-11-12T10:29:42.523Z t+509 ms rpc localhost:23381 getMultipleAccounts 1 ms",
+        "2026-11-12T10:29:42.537Z t+510 ms rpc 127.0.0.1:23381 getProgramAccounts 14 ms",
+        "2026-11-12T10:29:42.538Z t+524 ms rpc 127.0.0.1:23381 getMultipleAccounts 1 ms",
+        "2026-11-12T10:29:42.538Z t+524 ms rpc localhost:23381 getMultipleAccounts 1 ms",
+        "2026-11-12T10:29:42.542Z t+526 ms rpc 127.0.0.1:23381 getMultipleAccounts 2 ms",
+        "2026-11-12T10:29:42.542Z t+528 ms rpc localhost:23381 getMultipleAccounts 1 ms",
+        "2026-11-12T10:29:42.549Z t+535 ms rpc localhost:23381 getSlot 1 ms",
+        "2026-11-12T10:29:42.549Z t+535 ms rpc 127.0.0.1:23381 getSlot 1 ms",
+        "2026-11-12T10:29:42.551Z t+536 ms rpc 127.0.0.1:23381 getTransaction 1 ms",
+        "2026-11-12T10:29:42.551Z t+536 ms rpc localhost:23381 getTransaction 2 ms",
+        "2026-11-12T10:29:42.552Z t+539 ms progress filled 0 ms",
+        "2026-11-12T10:29:42.552Z pool.buy progress \"filled\"",
+        "2026-11-12T10:29:42.553Z buy {\"answer\":{\"result\":{\"stage\":\"sent\",\"txs\":[{\"chain\":\"solana\",\"hash\":\"2CrvyNaXkNH27Gk3yAWi85puCe8xzdv6UodHujwgpni5YF12DHXYcrhRgnPekwqGQz4ttZe9EcCkmni4ATcyc21L\"}]}},\"notes\":[{\"ref\":\"deposit\",\"state\":\"SPENT\",\"value\":\"10000000\",\"leafIndex\":\"9\",\"sends\":[\"PRBBja2Vm6vacrwRFTCkg2eEWA7SwBLBwqkFN9m6ckrp9Dj7ZgekFcPxV25BmfJhud959YgR46FdqNBSGJx94ER\"]},{\"ref\":\"change\",\"state\":\"UNSPENT\",\"value\":\"0\",\"leafIndex\":\"10\",\"sends\":[]}]}",
+        "2026-11-12T10:29:42.556Z notes [{\"ref\":\"deposit\",\"state\":\"SPENT\",\"value\":\"10000000\",\"leafIndex\":\"9\",\"sends\":[\"PRBBja2Vm6vacrwRFTCkg2eEWA7SwBLBwqkFN9m6ckrp9Dj7ZgekFcPxV25BmfJhud959YgR46FdqNBSGJx94ER\"]},{\"ref\":\"change\",\"state\":\"UNSPENT\",\"value\":\"0\",\"leafIndex\":\"10\",\"sends\":[]}]",
+        ""
+      ],
+      "proofWait": {
+        "passes": 1,
+        "ms": 5204,
+        "made": false
+      },
+      "buySend": {
+        "lines": [
+          "pool send solana mainnet send outcome=filled status=200 ms=445 tag=3 via=jito region=engine-stand-in bundle=named end=filled rebroadcasts=1 misses=0 plain=2 hash_ms=>436"
+        ],
+        "sendStartMs": 38,
+        "helperMs": 446,
+        "filledMs": 539,
+        "sendToFilledMs": 501,
+        "engineCalls": [
+          {
+            "at": 1794479382092,
+            "call": "send",
+            "mode": "swallow"
+          },
+          {
+            "at": 1794479382093,
+            "call": "rebroadcast",
+            "mode": "swallow"
+          }
+        ]
+      }
+    }
+  },
+  "cannotShow": [
+    "whether a block builder or a leader includes the transaction: the copy has no Jito block engine and one leader, itself; the helper's engine is a local stand-in (busy, refused, swallowing or landing the bundle) and its plain copies go to the copy",
+    "the real engines' answers and their timing: the stand-in answers at once",
+    "a graduated coin's buy on mainnet's own PumpSwap table: mainnet has none yet, so the copy makes one with the same list (contracts/pool-solana/scripts/venue-table.mjs's steps) from a key it funds",
+    "priority fee levels: the copy's only transactions are the run's own, so no fee market",
+    "rate limits of real providers: the page reads the copy's one RPC under two names",
+    "the helper's mainnet fee payer: the copy's fee payer is a fresh local key (the pool program binds the fee payer only through the proof's context, release.rs, so any key it signs with is accepted)",
+    "mainnet's slot and clock: the copy starts near slot 0 on this machine's clock; accounts are as of the clone slot"
+  ]
+}

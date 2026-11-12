@@ -95,6 +95,8 @@ export const SIGNPAGE_TIMEOUT_MS = {
   "pool.address": 15_000,
   // the sell box's preview (card app-sell-shows-what-you-receive): pool reads on two providers, as pool.sell's
   "pool.sell.dry": 10_000,
+  // Max for the coin on screen (card max-is-priced-for-the-coin): the coin's venue read on two providers
+  "pool.buy.dry": 10_000,
 } as const satisfies Record<SignpageKind, number | null>;
 deepFreeze(SIGNPAGE_TIMEOUT_MS);
 

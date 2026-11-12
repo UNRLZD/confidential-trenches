@@ -451,3 +451,62 @@ test("signer-guard-parser: every planted signer and encoder in fixtures/signer-g
   for (const f of ["f01-nested-map.ts", "f03-lock-callback.ts"]) assert.ok(GUARD.sites(join(FIXTURES, "good", f)).some((s) => s.ok && /^calls .*#signEvmSell$/.test(s.what)), `${f}: the signer call in its callback is read and passes`);
   for (const f of ["reexports.ts", "shadow.ts", "default-reexport.ts"]) assert.deepEqual(GUARD.sites(join(FIXTURES, "good", f)), [], f);
 });
+
+test("a NEAR sell goes to the NEAR sell flow after its own rule: the whole of W's token (share_bps 10000), never an amount or a part", async () => {
+  const { calls, pair } = providers(() => mint(6));
+  const flows: PoolAsk[] = [];
+  const sells: unknown[] = [];
+  const running = { running: true as const, after: Promise.resolve(), answer: () => null };
+  const k = poolKinds({ pinned: () => true, rpcs: () => pair, flow: (ask) => (flows.push(ask), { error: "not_allowed" }), near: { sell: (ask) => (sells.push(ask), running) } });
+  assert.equal(k["pool.sell"]({ chain: "near", token: "wrap.near", share_bps: 10_000, slippage_bps: 100 }, ctx), running);
+  assert.deepEqual(sells, [{ token: "wrap.near", slippageBps: 100 }]);
+  for (const bad of [
+    { chain: "near", token: "wrap.near", amount: "1", slippage_bps: 100 },
+    { chain: "near", token: "wrap.near", share_bps: 5_000, slippage_bps: 100 },
+    { chain: "near", token: "wrap.near", share_bps: 10_000, amount: "1", slippage_bps: 100 },
+    { chain: "near", token: "Wrap.near", share_bps: 10_000, slippage_bps: 100 },
+    { chain: "near", token: "wrap.near", share_bps: 10_000, slippage_bps: 0 },
+    { chain: "near", token: "wrap.near", share_bps: 10_000, slippage_bps: 5001 },
+    { chain: "near", token: "wrap.near", share_bps: "10000", slippage_bps: 100 },
+  ]) assert.deepEqual(k["pool.sell"](bad, ctx), { error: "not_allowed" }, JSON.stringify(bad));
+  assert.equal(sells.length, 1);
+  // a buy on a page with only the sell's flow, and a sell on a page with only the buy's: refused, no read made
+  assert.deepEqual(k["pool.buy"]({ chain: "near", token: "wrap.near", amount: "1", slippage_bps: 100 }, ctx), { error: "not_allowed" });
+  const buyOnly = poolKinds({ pinned: () => true, rpcs: () => pair, near: { buy: () => running } });
+  assert.deepEqual(buyOnly["pool.sell"]({ chain: "near", token: "wrap.near", share_bps: 10_000, slippage_bps: 100 }, ctx), { error: "not_allowed" });
+  assert.deepEqual(calls, []);
+  assert.equal(flows.length, 0);
+});
+
+test("a trade on NEAR goes to the NEAR flow after its own rule, never to a pool's rule, pin or provider", async () => {
+  const { tradeRoute } = await import("../src/pool-kinds.ts");
+  assert.deepEqual((["solana", "base", "robinhood", "near"] as const).map(tradeRoute), ["pool", "pool", "pool", "near"]);
+  const { calls, pair } = providers(() => mint(6));
+  const flows: PoolAsk[] = [];
+  const near: unknown[] = [];
+  const running = { running: true as const, after: Promise.resolve(), answer: () => null };
+  const k = poolKinds({ pinned: () => true, rpcs: () => pair, flow: (ask) => (flows.push(ask), { error: "not_allowed" }), near: { buy: (ask) => (near.push(ask), running) } });
+  assert.equal(k["pool.buy"]({ chain: "near", token: "wrap.near", amount: "1.5", slippage_bps: 100 }, ctx), running);
+  assert.deepEqual(near, [{ token: "wrap.near", amount: 1_500_000n, slippageBps: 100 }]);
+  // the rule refuses, the flow is never asked: a token that is no account id, an amount past USDC's 6 decimals, 0, a
+  // share, a slippage of 0 or over the cap
+  for (const bad of [
+    { chain: "near", token: "Wrap.near", amount: "1", slippage_bps: 100 },
+    { chain: "near", token: "wrap.near", amount: "0.0000001", slippage_bps: 100 },
+    { chain: "near", token: "wrap.near", amount: "0", slippage_bps: 100 },
+    { chain: "near", token: "wrap.near", share_bps: 5000, slippage_bps: 100 },
+    { chain: "near", token: "wrap.near", amount: "1", slippage_bps: 0 },
+    { chain: "near", token: "wrap.near", amount: "1", slippage_bps: 5001 },
+  ]) assert.deepEqual(k["pool.buy"](bad, ctx), { error: "not_allowed" }, JSON.stringify(bad));
+  assert.equal(near.length, 1);
+  // a NEAR sell has no flow yet, a deposit or a withdraw on NEAR is no pool's: refused, no read made
+  assert.deepEqual(await settle(k["pool.sell"]({ chain: "near", token: "wrap.near", amount: "1", slippage_bps: 100 }, ctx)), { error: "not_allowed" });
+  assert.deepEqual(k["pool.deposit"]({ chain: "near", amount: "1" }, ctx), { error: "not_allowed" });
+  assert.deepEqual(k["pool.withdraw"]({ chain: "near" }, ctx), { error: "not_allowed" });
+  assert.deepEqual(calls, []);
+  assert.equal(flows.length, 0);
+  // no NEAR flow on this page: refused not_allowed
+  const none = poolKinds({ pinned: () => true, rpcs: () => pair, flow: (ask) => (flows.push(ask), { error: "not_allowed" }) });
+  assert.deepEqual(none["pool.buy"]({ chain: "near", token: "wrap.near", amount: "1", slippage_bps: 100 }, ctx), { error: "not_allowed" });
+  assert.equal(flows.length, 0);
+});

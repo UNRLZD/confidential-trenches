@@ -239,7 +239,7 @@ export async function checkBindDeposit(request: unknown, cfg: BindConfig, reads:
 // read or a byte left over is refused at decoding.
 
 type Action = { kind: "FunctionCall"; method_name: string; args: Uint8Array; gas: bigint; deposit: bigint } | { kind: "DeleteAccount"; beneficiary_id: string };
-type Decoded = {
+export type Decoded = {
   sender_id: string;
   receiver_id: string;
   actions: Action[];
@@ -292,7 +292,8 @@ export function decodeSignedDelegate(b: Uint8Array): Decoded {
   return { sender_id, receiver_id, actions, nonce, max_block_height, public_key, signature, delegate };
 }
 
-function signatureOk(d: Decoded): boolean {
+/** NEP-366: ed25519 over sha256(u32le(2^30 + 366) || borsh(DelegateAction)), as check 2 reads it. */
+export function signatureOk(d: Decoded): boolean {
   const prefix = Buffer.alloc(4);
   prefix.writeUInt32LE(NEP366_PREFIX);
   const hash = createHash("sha256").update(prefix).update(d.delegate).digest();
