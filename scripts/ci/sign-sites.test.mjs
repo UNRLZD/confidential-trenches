@@ -44,11 +44,11 @@ const refuses = (name, files, want, links) => {
 test("the tree's sign sites are SIGN_SITES, each with a proof test that exists; the copy reads the same", () => {
   const tree = readTrees(ROOT);
   assert.deepEqual(check(tree, SIGN_SITES, exists), []);
-  assert.equal(Object.keys(SIGN_SITES).length, 17);
+  assert.equal(Object.keys(SIGN_SITES).length, 20);
   assert.deepEqual(census(tree).sites, Object.fromEntries(Object.entries(SIGN_SITES).map(([k, v]) => [k, v.n])));
   assert.ok(Object.keys(tree).some((f) => f.startsWith("packages/exit/src/")));
   assert.deepEqual(plant({}), []);
-  assert.equal(execFileSync(process.execPath, [path.join(ROOT, "scripts/ci/sign-sites.mjs"), ROOT], { encoding: "utf8" }).trim(), "sign-sites: OK (17 sign sites, each with its proof test)");
+  assert.equal(execFileSync(process.execPath, [path.join(ROOT, "scripts/ci/sign-sites.mjs"), ROOT], { encoding: "utf8" }).trim(), "sign-sites: OK (20 sign sites, each with its proof test)");
 });
 
 const W = "packages/wallet/src";
@@ -125,12 +125,12 @@ test("planted: review 5's escapes (E1-E20, E4b, E16b, E17b) each fail the gate",
     "E16b function(){} / 1, no cast": [{ [`${W}/a.ts`]: `${ED}const f = function () {} / 1; export const z = (d: Uint8Array, k: Uint8Array) => ed25519.sign(d, k);\n` }, /a\.ts:z: a sign site/],
     "E17 semicolon-free imports": [{ [`${W}/a.ts`]: `import { sha256 } from "@noble/hashes/sha2.js"\nimport { ed25519 } from "@noble/curves/ed25519.js"\nexport function f(d: Uint8Array, k: Uint8Array) { return ed25519.sign(sha256(d), k) }\n` }, /a\.ts:f: a sign site/],
     "E17b semicolon-free imports, read by member": [{ [`${W}/a.ts`]: `import { base58 } from "@scure/base"\nimport { ed25519 } from "@noble/curves/ed25519.js"\nexport function f(d: Uint8Array, k: Uint8Array) { return base58.encode(ed25519.sign(d, k)) }\n` }, /a\.ts:f: a sign site/],
-    "E18 an indented export after a listed site": [{ [D]: DELEGATE.replace("  const signature = ed25519.sign(sha256(signable), secretKey);", "  const signature = anySign(sha256(signable), secretKey);").replace("// Signs U_{s,i}'s deposit call", " export function anySign(m: Uint8Array, k: Uint8Array): Uint8Array { return ed25519.sign(m, k); }\n\n// Signs U_{s,i}'s deposit call") }, /delegate\.ts:anySign: a sign site/],
+    "E18 an indented export after a listed site": [{ [D]: DELEGATE.replace("  const signature = ed25519.sign(sha256(signable), secretKey);", "  const signature = anySign(sha256(signable), secretKey);").replace("// Signs the mover's deposit call", " export function anySign(m: Uint8Array, k: Uint8Array): Uint8Array { return ed25519.sign(m, k); }\n\n// Signs the mover's deposit call") }, /delegate\.ts:anySign: a sign site/],
     "E19 near-api-js": [{ [`${W}/a.ts`]: `import { KeyPair } from "near-api-js";\nexport const n = (s: string, m: Uint8Array) => KeyPair.fromString(s as never).sign(m);\n` }, /an import of near-api-js, not an allowed module/],
     "E20 another library re-exported": [{ [`${W}/a.ts`]: `export { default as nacl } from "tweetnacl";\n`, [`${W}/b.ts`]: `import { nacl } from "./a.ts";\nexport const t = (m: Uint8Array, k: Uint8Array) => nacl.sign.detached(m, k);\n` }, /an export-from of tweetnacl, not an allowed module/],
   };
   assert.equal(Object.keys(cases).length, 23);
-  assert.ok(DELEGATE.includes("  const signature = ed25519.sign(sha256(signable), secretKey);") && DELEGATE.includes("// Signs U_{s,i}'s deposit call"));
+  assert.ok(DELEGATE.includes("  const signature = ed25519.sign(sha256(signable), secretKey);") && DELEGATE.includes("// Signs the mover's deposit call"));
   for (const [name, [files, want]] of Object.entries(cases)) refuses(name, files, want);
 });
 

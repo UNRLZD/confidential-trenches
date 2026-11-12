@@ -66,7 +66,9 @@ const Coins = () => (
 export function SellBox({ row, s, slippageBps = 1000, initialPercent = "50", onBuy, footer }: { row: Row; s: Sell; slippageBps?: number; initialPercent?: string; onBuy?: () => void; footer?: ReactNode }) {
   const decimals = row.decimals;
   const kit = useSellKit();
-  const [text, setText] = useState(initialPercent);
+  // NEAR sells the whole holding only (s.takes): its box opens at 100%, and its amount box holds it there
+  const whole = !s.takes(5_000);
+  const [text, setText] = useState(whole ? "100" : initialPercent);
   // the last answer and the amount it was for: a preview, or none (a dash: the page refused, or its reads could not be had)
   const [preview, setPreview] = useState<{ amount: string; p: SellPreview | null } | null>(null);
   // each share's last number, by token and amount, with when it came (PREVIEW_KEEP_MS)
@@ -80,7 +82,7 @@ export function SellBox({ row, s, slippageBps = 1000, initialPercent = "50", onB
   // the pool cannot sell this token (model.ts unavailable: the same sale would be refused again): Sell and its presets
   // stay off, as the buy side's
   const off = unavailable(s.phase);
-  const canSell = s.ready && !running && !off && !noRoute && amount !== null;
+  const canSell = s.ready && !running && !off && !noRoute && amount !== null && bps !== null && s.takes(bps);
 
   // the sell preview for the share in the box: asked at once when the box opens, then once a changed share has settled
   // (PREVIEW_SETTLE_MS: one ask per typed percent, never per key); the last numbers stay, dimmed, until a change
@@ -129,7 +131,7 @@ export function SellBox({ row, s, slippageBps = 1000, initialPercent = "50", onB
     if (!canSellAt(b)) return;
     s.sell(sellAmount(row.units, b, decimals), b, decimals);
   }
-  const canSellAt = (b: number) => s.ready && !running && !off && !noRoute && sellAmount(row.units, b, decimals) !== null;
+  const canSellAt = (b: number) => s.ready && !running && !off && !noRoute && s.takes(b) && sellAmount(row.units, b, decimals) !== null;
 
   const shown = preview && preview.amount === amount ? preview.p : null;
   const last = preview?.p ?? null;
@@ -173,6 +175,7 @@ export function SellBox({ row, s, slippageBps = 1000, initialPercent = "50", onB
           autoComplete="off"
           aria-label={WORDS.percent.text}
           disabled={running}
+          readOnly={whole}
           onChange={(e) => TYPING.test(e.target.value) && setText(e.target.value)}
         />
         <span className="trb-unit">

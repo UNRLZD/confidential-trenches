@@ -105,7 +105,8 @@ test("the switch's Sell is live: on with a held position, it draws SellBox from 
 
 test("the sell asks pool.sell on a pool chain, from useSell only, and draws States.tsx's states", () => {
   const sell = src("screens/positions/source.tsx");
-  assert.match(sell, /const ask = poolSellAsk\(src\.snapshot\.state\?\.pools, chain, token, \{ share_bps: b \}, slippageBps\);/);
+  // tradeSellAsk: poolSellAsk on a pool chain, NEAR's whole-holding pool.sell on NEAR (card app-near-trading)
+  assert.match(sell, /const ask = tradeSellAsk\(src\.snapshot\.state\?\.pools, chain, token, \{ share_bps: b \}, slippageBps\);/);
   assert.match(sell, /if \(!ready \|\| amount === null \|\| busy\(ref\.current\)\) return;/, "a double tap can send two sells");
   const sb = src("screens/positions/SellBox.tsx");
   assert.match(sb, /import \{ EndLine, hasRunLabel, RunLabel, stateId \} from "\.\.\/trade\/States\.tsx";/);

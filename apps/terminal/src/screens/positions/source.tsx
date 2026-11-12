@@ -1,7 +1,7 @@
 import type { Chain } from "@blindfill/kit";
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { fillOf, fillStore } from "../portfolio/fills.ts";
-import { busy, outcome, poolSellAsk, progress, READY, tap } from "../trade/model.ts";
+import { busy, outcome, progress, READY, sellShareOk, tap, tradeSellAsk } from "../trade/model.ts";
 import type { Phase } from "../trade/model.ts";
 import { useTradeSource } from "../trade/source.tsx";
 import type { PartCount } from "../trade/States.tsx";
@@ -69,8 +69,10 @@ export interface Sell {
   ready: boolean;
   /** A sell's lock holds (model.ts sellLocked): the row drawn may be what was held before a sell. */
   locked: boolean;
-  /** The sell goes into the chain's pool: its proceeds land back in the pool (pool.sell). */
+  /** The sell's proceeds go back to Cash in the same run (pool.sell: into the chain's pool, or on NEAR the vault). */
   pool: boolean;
+  /** Whether a share of the holding (basis points) can be sold here: any on a pool chain, the whole alone on NEAR. */
+  takes(bps: number): boolean;
   /** A part-filled sell's count of slices, when the kit gives it (TradeKit.part, not in the kit yet). */
   part: PartCount | null;
   now(): number;
@@ -136,17 +138,20 @@ export function useSell(chain: Chain, token: string, slippageBps = 1000, units: 
     bps,
     ready,
     locked,
-    pool: poolSellAsk(src.snapshot.state?.pools, chain, token, { share_bps: 10_000 }, slippageBps) !== null,
+    pool: tradeSellAsk(src.snapshot.state?.pools, chain, token, { share_bps: 10_000 }, slippageBps) !== null,
+    takes: (b) => sellShareOk(chain, b),
     part: phase.k === "ended" ? (kit.part?.(phase.id) ?? null) : null,
     now: src.now,
     sell(amount, b, decimals = null) {
       if (!ready || amount === null || busy(ref.current)) return;
+      // a share this chain does not sell (NEAR: anything but the whole) is never asked, nor the vault's sell in its place
+      if (!sellShareOk(chain, b)) return;
       // a chain whose pool the signing page reports sells into it: the proceeds go back into the pool in the same
       // transaction (card trade-box-pool), asked as the share `b` of the whole holding, which the signing page turns
       // into units from its own reads of every wallet that holds the token, never this row's amount (a server's read
       // on mainnet; card pool-sell-share-across-wallets); other chains keep the vault's sell, in whole base units
-      // (trade.ts UNITS)
-      const ask = poolSellAsk(src.snapshot.state?.pools, chain, token, { share_bps: b }, slippageBps);
+      // (trade.ts UNITS); NEAR sells the whole holding back to Cash (pool.sell with chain near, card app-near-trading)
+      const ask = tradeSellAsk(src.snapshot.state?.pools, chain, token, { share_bps: b }, slippageBps);
       const base = baseUnits(amount, decimals);
       if (!ask && base === null) {
         // no decimals read (or a share finer than the token's): the vault would refuse it, so nothing is sent

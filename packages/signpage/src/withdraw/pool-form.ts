@@ -8,7 +8,8 @@
 //   System among them; a send to any of them is never the user's and can never land); on Base and Robinhood 0x and 40 hex digits (EVM_ADDRESS), its EIP-55 checksum
 //   right when it mixes cases, never the zero address or the pool.
 // - Amount: a decimal in the pool asset's decimals, refused above what the pool's notes can send ("Insufficient": the
-//   ready pool balance, poolWithdrawable: each note less the epoch's fee and W's fee), under the smallest part ("Min"),
+//   ready pool balance, poolWithdrawable: each note less the epoch's fee and W's fee; the line then names what can be
+//   sent, "Try 0.0289 SOL", and says Insufficient only when nothing can), under the smallest part ("Min"),
 //   or when no plan of parts pays it exactly without leaving a change no withdraw could ever send: then the line names
 //   the nearest amounts that can be sent (review #232 HIGH 2).
 // - Before the press, with both fields passed: the To line (the address that gets the money) and the Max fee line (one
@@ -24,7 +25,8 @@
 // - What the screen is for and what can go (card withdraw-form-shows-what-you-can-send): the chain's mark and name at the
 //   top (./chain-mark.ts, the app's own), the asset's symbol at the amount, and the amount that can be sent now, a value
 //   and its symbol that fills the field when tapped: exactly the largest amount the amount check accepts (poolSendable),
-//   so a tap never draws Insufficient or Try. No word is added: values, symbols and marks only.
+//   so a tap never draws Insufficient or Try. Its label is the owner's Max (12 Nov 13:03Z), the trade box's word: the
+//   chip reads "Max 0.048695 SOL".
 // - A pasted To carries what a copy carries (toCleaned): whitespace and invisible format characters are taken off its two
 //   ends, and the invisible joiners (zero-width space, non-joiner and joiner, word joiner, byte-order mark, soft hyphen)
 //   out of it anywhere. Whitespace inside is never taken out: it would glue two pieces of a row ("3<tab>address",
@@ -57,6 +59,7 @@ export const POOL_WITHDRAW_WORDS = {
   // a send owed whose fee rose past the Max fee drawn: "Network fee rose. New max fee: 0.000015 SOL." and its button
   "fee-rose": "Network fee rose. New max fee: ", // owner 8 Nov 07:55Z, kept (pw.feeRose)
   "fee-redraw": "Send at new fee", // owner 8 Nov 07:55Z, kept (pw.feeRoseSend)
+  max: "Max", // owner 12 Nov 13:03Z, "Add Max, the same word the trade box uses": the label of what can be sent, "Max 0.048695 SOL"
 } as const;
 
 /** The keys of POOL_WITHDRAW_WORDS the owner has not picked: their elements keep data-draft-copy. */
@@ -142,7 +145,8 @@ export function checkPoolAmount(chain: PoolChain, raw: string, funds: PoolFunds 
   const amount = parseUnits(raw, POOL_ASSET[chain].decimals);
   if (amount === null || amount === 0n) return { ok: false, code: "amount" };
   if (funds === null) return { ok: false, code: "unread" };
-  if (amount > poolWithdrawable(funds.notes, funds)) return { ok: false, code: "insufficient" };
+  const can = poolWithdrawable(funds.notes, funds);
+  if (amount > can) return can > 0n ? { ok: false, code: "insufficient", below: can } : { ok: false, code: "insufficient" };
   if (amount < funds.minPart) return { ok: false, code: "min", min: funds.minPart };
   const plan = planPoolWithdraw(funds.notes, amount, funds);
   if (plan === null) return { ok: false, code: "unplannable", ...nearestPlannable(funds.notes, amount, funds) };
@@ -174,7 +178,8 @@ export function poolRefusalWords(chain: PoolChain, code: PoolAddressCode | PoolA
   }
   if (code === "unread") return POOL_WITHDRAW_WORDS.busy;
   if (code === "amount") return POOL_WITHDRAW_WORDS["invalid-amount"];
-  if (code === "insufficient") return POOL_WITHDRAW_WORDS.insufficient;
+  // above what can be sent: what can be, in the nearest-amounts words ("Try 0.0289 SOL"); Insufficient when none can
+  if (code === "insufficient") return near.below ? `${POOL_WITHDRAW_WORDS.try}${formatUnits(near.below, decimals)} ${symbol}` : POOL_WITHDRAW_WORDS.insufficient;
   if (code === "min") return `${POOL_WITHDRAW_WORDS.min}${formatUnits(min ?? 0n, decimals)} ${symbol}`;
   return POOL_WITHDRAW_WORDS["invalid-address"];
 }
@@ -312,7 +317,7 @@ export function drawPoolWithdrawForm(doc: Document, deps: PoolWithdrawFormDeps, 
     canRow.hidden = can === null;
     sendable.disabled = !can;
     Object.assign(sendable.style, { opacity: can ? "" : "0.5", cursor: can ? "pointer" : "default" }); // 0: shown, not offered
-    sendable.textContent = can === null ? "" : `${formatUnits(can, decimals)} ${symbol}`;
+    sendable.textContent = can === null ? "" : `${POOL_WITHDRAW_WORDS.max} ${formatUnits(can, decimals)} ${symbol}`;
     if (can === null) delete sendable.dataset.value;
     else sendable.dataset.value = String(can);
   };
@@ -332,7 +337,7 @@ export function drawPoolWithdrawForm(doc: Document, deps: PoolWithdrawFormDeps, 
     p.dataset.refusal = code;
     markDraft(p, code === "unread" ? "busy" : code === "amount" ? "invalid-amount" : code === "address" ? "invalid-address" : code === "unplannable" ? "try" : code, POOL_DRAFT);
     const min = c && !c.ok && "min" in c ? c.min : undefined;
-    const near = c && !c.ok && c.code === "unplannable" ? (c as { below?: bigint; above?: bigint }) : {};
+    const near = c && !c.ok && (c.code === "unplannable" || c.code === "insufficient") ? (c as { below?: bigint; above?: bigint }) : {};
     if (code !== "unread") return void (p.textContent = poolRefusalWords(chain, code, min, near));
     const again = doc.createElement("button");
     again.type = "button";

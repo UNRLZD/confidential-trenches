@@ -262,3 +262,19 @@ test("card intents-u-registered-first (delta review F2): with no mainnet token w
   assert.deepEqual(errors, [], "held is in flight: nothing logged");
   s.stop();
 });
+
+test("card relayer-near-trade: a body with `trade` goes to the trade carry of the network it names, never to the deposit carry", async () => {
+  const trade = (network: string) => ({ trade: { network, side: "buy", token: "token.test.testnet", wallet: "c".repeat(64), amount_in: "1", slippage_bps: 100, venue_out: "1", hops: [] }, signed_delegates: [] });
+  // no network carried: bad_shape, nothing read
+  let fetched = 0;
+  const none = bindSenderFromEnv({}, {}, (async () => (fetched++, new Response("{}", { status: 500 }))) as typeof fetch);
+  assert.equal(code(await none.carry(trade("testnet"))), "bad_shape");
+  // testnet carried: a mainnet trade is not this helper's (bad_shape, nothing read); a testnet one starts testnet's
+  // relayer (every read here answers 500: upstream), where the deposit carry would have answered token_not_accepted
+  const s = bindSenderFromEnv(good(), {}, (async () => (fetched++, new Response("{}", { status: 500 }))) as typeof fetch);
+  assert.equal(code(await s.carry(trade("mainnet"))), "bad_shape");
+  assert.equal(fetched, 0);
+  assert.equal(code(await s.carry(trade("testnet"))), "upstream");
+  assert.ok(fetched > 0);
+  s.stop();
+});

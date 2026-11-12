@@ -595,6 +595,33 @@ test("pages the vault could never write stop the restore: a precommitment or a n
   assert.throws(() => restorePages(SEED, SCOPE, moved, { gap: TEST_GAP }), /its change is at leaf 1, not 0/);
 });
 
+test("a NEAR sell of 2,500 USDC (card near-private-trading): W's return note and its two R second arrivals on NEAR, each at or under the deposit's cap, are all found from the words", () => {
+  const w = new World(rng(11));
+  w.index(0, "note");
+  const { l, j } = w.withdraw(w.unspent()[0]!);
+  const id = { id: "R" as const, c: "near" as const, l, j };
+  const ret: NoteRef = { kind: "return", c: "near", l, j };
+  w.land(ret, w.v.deposit(sec(ret).precommitment, 1_000_000_000n, hex64("W")));
+  w.second(id, 1_000_000_000n);
+  w.second(id, 500_000_000n);
+  w.finish();
+  const v = w.v.views();
+  const pages = {
+    deposits: v.deposits.map((r) => ({ index: r.index, precommitment: BigInt(r.precommitment), label: BigInt(r.label), value: BigInt(r.value), leafIndex: BigInt(r.leaf_index), depositor: r.depositor })),
+    spends: w.v.spends.map((x, index) => ({ index, nullifierHash: x.nh, withdrawn: x.withdrawn, newLeafIndex: BigInt(x.newLeaf), refundPrecommitment: x.refundP, refundValue: x.refundValue, refundLabel: x.refundLabel, refundLeafIndex: BigInt(x.refundLeaf), status: x.status, payer: "p.testnet", reserve: 0n, recipient: x.recipient, fee: x.fee, context: x.context })),
+    leaves: [...w.v.leaves],
+  };
+  const found = restorePages(SEED, SCOPE, pages, { gap: TEST_GAP }).notes.filter((n) => n.ref.kind === "return" || (n.ref.kind === "second" && n.ref.id.id === "R"));
+  assert.deepEqual(
+    found.map((n) => [refKey(n.ref), n.leaf.value, n.state]),
+    [
+      [refKey(ret), 1_000_000_000n, "UNSPENT"],
+      [refKey({ kind: "second", id, n: 0 }), 1_000_000_000n, "UNSPENT"],
+      [refKey({ kind: "second", id, n: 1 }), 500_000_000n, "UNSPENT"],
+    ],
+  );
+});
+
 // ---------- the independent review's cases (card wallet-restore-notes, review of 740fba4) ----------
 // The model vault's pages as restorePages takes them (the rows vaultSync parses).
 function pagesOf(v: Vault): { deposits: VaultDepositRow[]; spends: VaultSpendRow[]; leaves: bigint[] } {

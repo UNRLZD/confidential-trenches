@@ -1,0 +1,66 @@
+{
+  "good_read": "mainnet, rpc.mainnet.fastnear.com and near.drpc.org, 11 Nov 2026 18:20Z, this card kit",
+  "good": {
+    "height": 224101891,
+    "blockHash": "JBxBncQRCLKpbjfPuqdnKvV3fnt2xYaj8jgzgBMvJv49",
+    "hops": [
+      {
+        "pool": 4512,
+        "tokenIn": "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+        "tokenOut": "wrap.near",
+        "amountIn": "1000000",
+        "amountOut": "266767392426749533737222",
+        "feeBps": 30
+      }
+    ],
+    "amountOut": "266767392426749533737222",
+    "getReturn": [
+      {
+        "provider": "https://rpc.mainnet.fastnear.com",
+        "height": 224101891,
+        "hash": "JBxBncQRCLKpbjfPuqdnKvV3fnt2xYaj8jgzgBMvJv49",
+        "value": "266767392426749533737222",
+        "error": null
+      },
+      {
+        "provider": "https://near.drpc.org",
+        "height": 224101891,
+        "hash": "JBxBncQRCLKpbjfPuqdnKvV3fnt2xYaj8jgzgBMvJv49",
+        "value": "266767392426749533737222",
+        "error": null
+      }
+    ]
+  },
+  "bad_read": "mainnet, the same pair, 11 Nov 2026 18:35Z, the kit with the pool fee taken out of rheaSimpleOut",
+  "bad": {
+    "height": 224102522,
+    "blockHash": "GRVHhgiZqg4LhQmpMDFpojexNPX9JMw4ou1D7XHYYRwW",
+    "hops": [
+      {
+        "pool": 4512,
+        "tokenIn": "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+        "tokenOut": "wrap.near",
+        "amountIn": "1000000",
+        "amountOut": "267635021765532436507837",
+        "feeBps": 30
+      }
+    ],
+    "amountOut": "267635021765532436507837",
+    "getReturn": [
+      {
+        "provider": "https://rpc.mainnet.fastnear.com",
+        "height": 224102522,
+        "hash": "GRVHhgiZqg4LhQmpMDFpojexNPX9JMw4ou1D7XHYYRwW",
+        "value": "266832117519530042627501",
+        "error": null
+      },
+      {
+        "provider": "https://near.drpc.org",
+        "height": 224102522,
+        "hash": "GRVHhgiZqg4LhQmpMDFpojexNPX9JMw4ou1D7XHYYRwW",
+        "value": "266832117519530042627501",
+        "error": null
+      }
+    ]
+  }
+}
