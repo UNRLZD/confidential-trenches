@@ -6,7 +6,9 @@
 //   alone would take it there: choose is not signed in);
 // - show()'s seal: a typed screen drawn on a sheet already shown (I already have one, Recovery code) takes the frame out,
 //   and it is out when the screen's field enters the page (the seal dropped from show(), or moved after the draw, fails);
-// - openLayer's open(typed): a sheet opened straight on a typed screen (signin.open {way: words}) takes the frame out;
+// - openLayer's open(typed): a sheet opened straight on a typed screen (signin.open {way: words}) takes the frame out,
+//   and its field enters the page only once the frame is out (drawn before, while the frame waits FRAME_LEAVE_MS for the
+//   open's answer, it fails);
 // - onDismiss: the user's Esc on a screen Cancel is drawn on goes back to the app;
 // - dismissible(cancellable): Esc on the backup a new account lands on (no Cancel drawn) does nothing;
 // - the clipboard: Copy on the backup puts the 12 words there, and Saved, in its own tap, writes it empty (a write that
@@ -163,7 +165,8 @@ const press = (action: string) => {
 };
 // each time a field enters the sign-in screen: the screen, and whether the frame was in the page then
 const fieldDrawn: { state: string; frame: boolean }[] = [];
-const hasField = (el: El): boolean => el.tagName === "textarea" || el.tagName === "input" || el.children.some(hasField);
+// a field: what can be typed or pasted into, and the 12 words' Copy
+const hasField = (el: El): boolean => el.tagName === "textarea" || el.tagName === "input" || el.dataset.action === "copy" || el.children.some(hasField);
 // the clipboard: every write, in order
 const clip: string[] = [];
 let clipFails = false;
@@ -248,6 +251,8 @@ test("main.ts's sheet: a kind under a shown sheet refused, the frame out under a
   assert.equal((await answer(send({ type: "signin.open", way: "words", return_key: "portfolio" })))?.ok, true);
   await until("the words sheet", () => shown() && root().dataset.signin === "words");
   await until("the frame out under the words field it opened on", () => !frameIn(), 1000);
+  await until("the words field drawn", () => fieldDrawn.length === 2);
+  assert.deepEqual(fieldDrawn[1], { state: "words", frame: false }, "on an open straight onto the words, the field entered the page with the frame out");
   esc();
   await until("Esc back to the app", () => !shown());
   await until("a new frame", frameIn);
@@ -274,4 +279,5 @@ test("main.ts's sheet: a kind under a shown sheet refused, the frame out under a
   press("saved");
   assert.deepEqual(clip, [words, ""], "Saved writes the clipboard empty in its own tap");
   await until("the words saved though the clear was refused", () => root().dataset.signin === "signed-in");
+  assert.ok(fieldDrawn.length >= 3 && fieldDrawn.every((f) => !f.frame), `no field in the page with the frame: ${JSON.stringify(fieldDrawn)}`);
 });

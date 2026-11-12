@@ -507,6 +507,8 @@ function button(action: string, label: string, onClick: () => void): HTMLButtonE
   return b;
 }
 
+// each show() draws only if no later one came before its fields could be made
+let shows = 0;
 function show(state: State, seed?: { account: string; code_saved: boolean; signout: boolean }, words?: string): void {
   // a screen with a field typed into, or the 12 words shown, drawn on an open sheet: the frame out of the document before
   // any of its fields is (src/frame-cover.ts)
@@ -525,90 +527,101 @@ function show(state: State, seed?: { account: string; code_saved: boolean; signo
     delete root.dataset.account;
     delete root.dataset.codeSaved;
   }
-  const parts: HTMLElement[] = [];
-  if (state !== "loading" && state !== "signed-out" && state !== "signed-in" && state !== "backup" && state !== "words"
-    && state !== "choose" && state !== "existing" && state !== "signout" && state !== "withdraw" && state !== "pool-withdraw" && state !== "held") {
-    const p = document.createElement("p");
-    p.textContent = WORDS[state];
-    parts.push(p);
-  }
-  if (state === "signed-in") {
-    const p = document.createElement("p");
-    p.textContent = WORDS["signed-in"];
-    parts.push(p);
-    if (!framed && seed?.signout) parts.push(button("signout", WORDS.signout, () => void run(signOut)));
-    // the Backup dot: the 12 words are the only copy and not saved (ses.17, ses.18)
-    if (!framed && seed && !seed.signout) parts.push(button("backup", WORDS.backup, () => void run(openBackup)));
-  } else if (state === "signout") {
-    // the sign-out page (W:913): top-level only, and drawn only once the 12 words are saved or are not the only copy
-    if (!framed && seed?.signout) parts.push(button("signout", WORDS.signout, () => void run(signOut)));
-  } else if (!framed && state === "choose") {
-    // wallet.md:50: the two choices, before the wallet is asked anything or any seed is made. New account asks the
-    // wallet to sign; that request has no code yet, so it is drawn and not offered (data-pending) until it lands.
-    const fresh = button("new-account", WORDS["new-account"], () => {});
-    fresh.disabled = true;
-    fresh.dataset.pending = "wallet-signature";
-    parts.push(fresh);
-    parts.push(button("have-one", WORDS["have-one"], () => ((restoreOnly = true), show("existing"))));
-  } else if (!framed && state === "withdraw") {
-    // the withdraw form (src/withdraw/form.ts), top-level only: the address and the amount are typed here, never
-    // passed in by the app (W:927)
-    parts.push(drawWithdrawForm(document, withdrawDeps(), button, (step) => void run(step)));
-  } else if (!framed && state === "held" && heldOp !== null) {
-    // the held deposit's way out (src/withdraw/held.ts): the account typed here, never passed in by the app
-    parts.push(drawHeldMoveOut(document, heldDeps(heldOp), button, (step) => void run(step)));
-  } else if (!framed && state === "pool-withdraw" && testnet && poolWithdraw) {
-    // the pool withdraw screen: To and the amount typed here; the press starts the run and the layer closes, its
-    // stages read back in state.ops
-    const { chain, opId } = poolWithdraw;
-    const deps = testnet.withdrawDeps(chain, opId);
-    const handoff = deps.handoff;
-    parts.push(drawPoolWithdrawForm(document, handoff ? { ...deps, handoff: async (r) => (void handoff(r), (poolWithdraw = null), await cancel()) } : deps, button, (step) => void run(step)));
-  } else if (!framed && state === "existing") {
-    // I already have one: Face ID (the passkey with PRF) or the typed 12 words, then restore (W:50); never a new seed
-    if (typeof PublicKeyCredential !== "undefined") parts.push(button("use", WORDS.use, () => void run(() => signIn(getPasskey, false))));
-    parts.push(button("recovery", WORDS.recovery, () => show("words")));
-  } else if (state === "backup") {
-    // the 12 words, top-level only (W:914): show() is never asked for them in a frame, and backupWords refuses there
-    if (!framed && words) {
-      const list = document.createElement("ol");
-      list.dataset.words = "12";
-      for (const w of words.split(" ")) {
-        const li = document.createElement("li");
-        li.textContent = w;
-        list.append(li);
-      }
-      parts.push(list);
-      parts.push(button("copy", WORDS.copy, () => void navigator.clipboard?.writeText(words).then(() => void (copied = true), () => {})));
-      parts.push(button("saved", WORDS.saved, () => void run(saved)));
-    }
-  } else if (!framed && (state === "words" || state === "invalid-code")) {
-    const box = document.createElement("textarea");
-    box.dataset.input = "words";
-    box.rows = 3;
-    box.autocomplete = "off";
-    box.spellcheck = false;
-    box.setAttribute("autocapitalize", "none");
-    box.setAttribute("autocorrect", "off");
-    parts.push(box);
-    parts.push(button("next", WORDS.next, () => {
-      const typed = box.value;
-      box.value = "";
-      void run(() => signInWords(typed));
-    }));
-  } else if (!framed && state !== "loading") {
-    if (state !== "unsupported") {
-      if (!restoreOnly) parts.push(button("create", WORDS.create, () => void run(() => signIn(createPasskey, true))));
-      parts.push(button("use", WORDS.use, () => void run(() => signIn(getPasskey, false))));
-    }
-    parts.push(button("recovery", WORDS.recovery, () => show("words")));
-  }
   // back to the app from any sign-in screen; the backup's words stay until Saved or a sign-in elsewhere
   // and from a backup or sign-out page an open kind drew over a signed-in account (the words saved or not, as they were)
   const cancellable = state !== "loading" && state !== "signed-in" && (state !== "backup" || openedBy === "backup.open" || openedBy === "signout");
-  if (shell && cancellable) parts.push(button("cancel", WORDS.cancel, () => void run(cancel)));
   shell?.dismissible(cancellable);
-  root.replaceChildren(...parts);
+  const at = ++shows;
+  const draw = (): void => {
+    if (at !== shows) return;
+    const parts: HTMLElement[] = [];
+    if (state !== "loading" && state !== "signed-out" && state !== "signed-in" && state !== "backup" && state !== "words"
+      && state !== "choose" && state !== "existing" && state !== "signout" && state !== "withdraw" && state !== "pool-withdraw" && state !== "held") {
+      const p = document.createElement("p");
+      p.textContent = WORDS[state];
+      parts.push(p);
+    }
+    if (state === "signed-in") {
+      const p = document.createElement("p");
+      p.textContent = WORDS["signed-in"];
+      parts.push(p);
+      if (!framed && seed?.signout) parts.push(button("signout", WORDS.signout, () => void run(signOut)));
+      // the Backup dot: the 12 words are the only copy and not saved (ses.17, ses.18)
+      if (!framed && seed && !seed.signout) parts.push(button("backup", WORDS.backup, () => void run(openBackup)));
+    } else if (state === "signout") {
+      // the sign-out page (W:913): top-level only, and drawn only once the 12 words are saved or are not the only copy
+      if (!framed && seed?.signout) parts.push(button("signout", WORDS.signout, () => void run(signOut)));
+    } else if (!framed && state === "choose") {
+      // wallet.md:50: the two choices, before the wallet is asked anything or any seed is made. New account asks the
+      // wallet to sign; that request has no code yet, so it is drawn and not offered (data-pending) until it lands.
+      const fresh = button("new-account", WORDS["new-account"], () => {});
+      fresh.disabled = true;
+      fresh.dataset.pending = "wallet-signature";
+      parts.push(fresh);
+      parts.push(button("have-one", WORDS["have-one"], () => ((restoreOnly = true), show("existing"))));
+    } else if (!framed && state === "withdraw") {
+      // the withdraw form (src/withdraw/form.ts), top-level only: the address and the amount are typed here, never
+      // passed in by the app (W:927)
+      parts.push(drawWithdrawForm(document, withdrawDeps(), button, (step) => void run(step)));
+    } else if (!framed && state === "held" && heldOp !== null) {
+      // the held deposit's way out (src/withdraw/held.ts): the account typed here, never passed in by the app
+      parts.push(drawHeldMoveOut(document, heldDeps(heldOp), button, (step) => void run(step)));
+    } else if (!framed && state === "pool-withdraw" && testnet && poolWithdraw) {
+      // the pool withdraw screen: To and the amount typed here; the press starts the run and the layer closes, its
+      // stages read back in state.ops
+      const { chain, opId } = poolWithdraw;
+      const deps = testnet.withdrawDeps(chain, opId);
+      const handoff = deps.handoff;
+      parts.push(drawPoolWithdrawForm(document, handoff ? { ...deps, handoff: async (r) => (void handoff(r), (poolWithdraw = null), await cancel()) } : deps, button, (step) => void run(step)));
+    } else if (!framed && state === "existing") {
+      // I already have one: Face ID (the passkey with PRF) or the typed 12 words, then restore (W:50); never a new seed
+      if (typeof PublicKeyCredential !== "undefined") parts.push(button("use", WORDS.use, () => void run(() => signIn(getPasskey, false))));
+      parts.push(button("recovery", WORDS.recovery, () => show("words")));
+    } else if (state === "backup") {
+      // the 12 words, top-level only (W:914): show() is never asked for them in a frame, and backupWords refuses there
+      if (!framed && words) {
+        const list = document.createElement("ol");
+        list.dataset.words = "12";
+        for (const w of words.split(" ")) {
+          const li = document.createElement("li");
+          li.textContent = w;
+          list.append(li);
+        }
+        parts.push(list);
+        parts.push(button("copy", WORDS.copy, () => void navigator.clipboard?.writeText(words).then(() => void (copied = true), () => {})));
+        parts.push(button("saved", WORDS.saved, () => void run(saved)));
+      }
+    } else if (!framed && (state === "words" || state === "invalid-code")) {
+      const box = document.createElement("textarea");
+      box.dataset.input = "words";
+      box.rows = 3;
+      box.autocomplete = "off";
+      box.spellcheck = false;
+      box.setAttribute("autocapitalize", "none");
+      box.setAttribute("autocorrect", "off");
+      parts.push(box);
+      parts.push(button("next", WORDS.next, () => {
+        const typed = box.value;
+        box.value = "";
+        void run(() => signInWords(typed));
+      }));
+    } else if (!framed && state !== "loading") {
+      if (state !== "unsupported") {
+        if (!restoreOnly) parts.push(button("create", WORDS.create, () => void run(() => signIn(createPasskey, true))));
+        parts.push(button("use", WORDS.use, () => void run(() => signIn(getPasskey, false))));
+      }
+      parts.push(button("recovery", WORDS.recovery, () => show("words")));
+    }
+    if (shell && cancellable) parts.push(button("cancel", WORDS.cancel, () => void run(cancel)));
+    root.replaceChildren(...parts);
+  };
+  // a sealed screen's fields (the 12 words' area, To and the amount, the account, the 12 words and their Copy) are made
+  // only once the APP_HOST frame is out of the page: on an open straight onto it the sheet shows at once, empty, and the
+  // frame stays FRAME_LEAVE_MS for the open's answer, so no field exists while it does (src/shell.ts whenOut)
+  if (shell && SEALED.has(state)) {
+    root.replaceChildren();
+    shell.whenOut(draw);
+  } else draw();
 }
 
 // The withdraw form's reads on the build's network (src/withdraw/handoff.ts): the note value over the note store, the

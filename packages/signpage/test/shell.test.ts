@@ -255,6 +255,36 @@ test("nav: the top window's address becomes APP_HOST's path and query, by replac
   assert.equal(d.calls.assign + d.calls.reload, 0, "never a navigation");
 });
 
+test("whenOut: a sealed screen's draw runs in the task that takes the frame out, never while it is in the page; a close or a later draw drops it", () => {
+  enableTimers(mock.timers, { apis: ["setTimeout"] });
+  try {
+    const d = fakeDom();
+    const sh = mountShell(d.doc, { state: () => signedOutState() });
+    const drawn: number[] = [];
+    sh.open(true);
+    sh.whenOut(() => drawn.push(d.frames().length));
+    assert.deepEqual(drawn, [], "no draw while the frame waits for the open's answer");
+    mock.timers.tick(FRAME_LEAVE_MS);
+    assert.deepEqual(drawn, [0], "drawn once, with no frame in the page");
+    sh.whenOut(() => drawn.push(-1));
+    assert.deepEqual(drawn, [0, -1], "no frame: drawn at once");
+    // a close before the frame leaves drops the draw; a later draw replaces an earlier one
+    sh.close();
+    mock.timers.tick(PROTECT_MS * 4);
+    sh.open(true);
+    sh.whenOut(() => drawn.push(1));
+    sh.close();
+    mock.timers.tick(FRAME_LEAVE_MS * 4);
+    sh.open(true);
+    sh.whenOut(() => drawn.push(2));
+    sh.whenOut(() => drawn.push(3));
+    mock.timers.tick(FRAME_LEAVE_MS);
+    assert.deepEqual(drawn, [0, -1, 3]);
+  } finally {
+    resetTimers(mock.timers);
+  }
+});
+
 test("open(typed): the frame is out of the document within 100 ms, whatever FRAME_LEAVE_MS says, since inert alone keeps no focus thief out", () => {
   assert.ok(FRAME_LEAVE_MS > 0 && FRAME_LEAVE_MS <= 100, `FRAME_LEAVE_MS ${FRAME_LEAVE_MS}`);
   enableTimers(mock.timers, { apis: ["setTimeout"] });

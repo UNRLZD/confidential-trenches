@@ -143,6 +143,12 @@ export interface Shell {
   open(typed?: boolean): void;
   /** A screen with a typed field is drawn on the open sheet: the frame leaves, FRAME_LEAVE_MS after the open at most. */
   seal(): void;
+  /**
+   * Runs `draw` once no APP_HOST frame is in the page: now when none is, or in the task that takes it out. A sealed
+   * screen draws its fields through this, so no field exists while the frame does (the sheet itself shows at once). A
+   * close before the frame leaves drops it, as does the next call.
+   */
+  whenOut(draw: () => void): void;
   /** Hides the sheet: a kept frame is live again as it was; a frame taken out comes back new at the top window's address. */
   close(): void;
   /** Called on the user's own Esc, close tap or scrim tap (trusted events only); set by the screens. */
@@ -240,11 +246,16 @@ export function mountShell(doc: Document, host: Omit<ApiHost, "parent" | "listen
   let leaving: ReturnType<typeof setTimeout> | null = null;
   let waking: ReturnType<typeof setTimeout> | null = null;
   let openedAt = 0;
+  // the draw waiting for the frame to leave (whenOut)
+  let pending: (() => void) | null = null;
   const leave = (): void => {
     if (layer.hidden || !frame) return;
     frame.remove();
     frame = null;
     peer = NO_FRAME;
+    const draw = pending;
+    pending = null;
+    draw?.();
   };
   const shell: Shell = {
     layer,
@@ -274,10 +285,16 @@ export function mountShell(doc: Document, host: Omit<ApiHost, "parent" | "listen
         leave();
       }, wait);
     },
+    whenOut(draw) {
+      pending = null;
+      if (!frame) draw();
+      else pending = draw;
+    },
     close() {
       layer.hidden = true;
       if (leaving !== null) clearTimeout(leaving);
       leaving = null;
+      pending = null;
       // a kept frame stays inert for PROTECT_MS after the close (the second tap of a double tap on Cancel, Saved, the x or
       // the scrim lands on no app control there), then is live again and takes the keyboard's focus back; a frame taken
       // out comes back new, as inert for the same time, under the sheet's dim until it has painted
