@@ -234,6 +234,11 @@ export interface Totals {
   /** What the open buys' one-time wallets hold beside their tokens and get back at the sell (the signing page's
    *  positions[].asset_held: the wallet's own coin and its accounts' rent), at the pool's price; part of `inPos`. */
   held: bigint;
+  /** The chains whose open buys hold any of `held`, in the order the positions name them (the Reserve part's mark). */
+  heldChains: Chain[];
+  /** The positions' own value, the exact sum rounded down once: `inPos` less `held` (the Coins part, owner 12 Nov
+   *  16:17:50Z option B). */
+  coins: bigint;
   inPos: bigint;
   total: bigint;
   unreal: bigint;
@@ -562,8 +567,9 @@ export function totals(s: SignpageState, rows: readonly Row[], closed: readonly 
       if (r.costX !== null) unrealX += r.valueX - r.costX;
     }
   }
-  const inPos = held.cents + downCents(posX);
-  return { cash, parts, offPool, onWay, held: held.cents, inPos, total: cash + onWay + inPos, unreal: downCents(unrealX), realized30: realized30(rows, closed, now), unrealSign: signOf(unrealX), realized30Sign: signOf(realized30X(rows, closed, now)), partial };
+  const coins = downCents(posX);
+  const inPos = held.cents + coins;
+  return { cash, parts, offPool, onWay, held: held.cents, heldChains: held.chains, coins, inPos, total: cash + onWay + inPos, unreal: downCents(unrealX), realized30: realized30(rows, closed, now), unrealSign: signOf(unrealX), realized30Sign: signOf(realized30X(rows, closed, now)), partial };
 }
 
 /**
@@ -573,7 +579,7 @@ export function totals(s: SignpageState, rows: readonly Row[], closed: readonly 
  * fresh price, rounded down. A position whose wallet the state already counts (an arm record in `wallets`) adds none,
  * so no money counts twice; a chain with no fresh price adds none and marks the total partial, never a made-up figure.
  */
-function openBuysHold(s: SignpageState, now: number): { cents: bigint; partial: boolean } {
+function openBuysHold(s: SignpageState, now: number): { cents: bigint; chains: Chain[]; partial: boolean } {
   const counted = new Set(s.wallets.map((w) => `${w.chain}:${w.address}`));
   const by = new Map<Chain, bigint>();
   let partial = false;
@@ -587,15 +593,23 @@ function openBuysHold(s: SignpageState, now: number): { cents: bigint; partial: 
     }
     by.set(p.chain, (by.get(p.chain) ?? 0n) + units);
   }
-  let c = 0n;
+  // each chain's value exact, in cents x 10^HELD_SCALE (past any pool price's own scale), summed, then rounded down once
+  let x = 0n;
+  const chains: Chain[] = [];
   for (const [chain, units] of by) {
     if (units === 0n) continue;
     const price = statePoolPrice(s.pools, chain, now);
-    if (price) c += unitsToCents(units, price);
-    else partial = true;
+    if (price) {
+      x += unitsToCents(units * 10n ** HELD_SCALE, price);
+      chains.push(chain);
+    } else partial = true;
   }
-  return { cents: c, partial };
+  return { cents: x / 10n ** HELD_SCALE, chains, partial };
 }
+
+/** The scale openBuysHold sums at: a pool price's own scale is expo + 2 - decimals (SOL -15, ETH -24), so 10^36 keeps
+ *  every chain's figure exact before the one rounding. */
+const HELD_SCALE = 36n;
 
 /** The screen's state from the signing page's snapshot and the local data. */
 export function portfolio(snap: SignpageClientSnapshot, d: PortfolioData, now: number): Portfolio {
@@ -711,16 +725,19 @@ export interface Pools {
   rows: PoolRow[];
 }
 
-/** The pool rows from the signing page's state, in the page's order. A ready above the balance is held to it. */
+/** The pool rows from the signing page's state: NEAR's first, the vault's USDC (vault_balance; the page's pool table
+ *  never holds the vault, as cashParts reads it), with no proof queue sent for it, so Ready and Pending are null
+ *  (dashes); then the pools in the page's order. A ready above the balance is held to it. */
 export function pools(s: SignpageState, offline = false): Pools {
   if (s.pools === undefined) return { view: offline ? "offline" : "unread", rows: [] };
-  const rows = s.pools.map((p): PoolRow => {
+  const vault: PoolRow = { chain: "near", asset: "USDC", decimals: POOL_ASSET_DECIMALS.USDC, balance: baseUnits(s.vault_balance, POOL_ASSET_DECIMALS.USDC) ?? 0n, ready: null, pending: null };
+  const rows = [vault, ...s.pools.map((p): PoolRow => {
     const decimals = POOL_ASSET_DECIMALS[p.asset];
     const balance = baseUnits(p.balance, decimals) ?? 0n;
     const r = p.ready === undefined ? null : baseUnits(p.ready, decimals) ?? 0n;
     const ready = r === null ? null : r > balance ? balance : r;
     return { chain: p.chain, asset: p.asset, decimals, balance, ready, pending: ready === null ? null : balance - ready };
-  });
+  })];
   return { view: rows.some((r) => r.balance > 0n) ? "rows" : "empty", rows };
 }
 

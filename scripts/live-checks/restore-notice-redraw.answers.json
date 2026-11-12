@@ -1,0 +1,66 @@
+{
+ "good": {
+  "source": "a local build read from dist",
+  "at": "2026-11-12T19:02:47.917Z",
+  "pageStatus": 200,
+  "js": [
+   {
+    "url": "/assets/index-CVz0ft7F.js",
+    "status": 200,
+    "marks": {
+     "mark": 1,
+     "arc": 1,
+     "tick": 1,
+     "bar": 0
+    }
+   }
+  ],
+  "css": [
+   {
+    "url": "/assets/style-DdQ4MFGO.css",
+    "status": 200,
+    "rules": {
+     "tickGreen": true,
+     "offAmber": true,
+     "sweep": true,
+     "restsReduced": true,
+     "retryOff": true,
+     "barRule": false
+    }
+   }
+  ],
+  "note": "this card: apps/terminal built fresh (vite build, 12 Nov 2026, branch card/restore-notice-redraw) and read from disk (--root): the dot mark, its sweep and tick, the green tick, the amber stall, the rest under reduced motion, Retry drawn off, no bar"
+ },
+ "bad": {
+  "source": "https://ct-app.unrealized.trade/",
+  "at": "2026-11-12T19:02:48.185Z",
+  "pageStatus": 200,
+  "js": [
+   {
+    "url": "/assets/index-7-R2oYB8.js",
+    "status": 200,
+    "marks": {
+     "mark": 0,
+     "arc": 0,
+     "tick": 0,
+     "bar": 1
+    }
+   }
+  ],
+  "css": [
+   {
+    "url": "/assets/style-DCc2pUEW.css",
+    "status": 200,
+    "rules": {
+     "tickGreen": false,
+     "offAmber": false,
+     "sweep": false,
+     "restsReduced": false,
+     "retryOff": false,
+     "barRule": true
+    }
+   }
+  ],
+  "note": "APP_HOST as deployed before this card, read over https: the sliding bar, no dot mark, no Retry drawn off"
+ }
+}

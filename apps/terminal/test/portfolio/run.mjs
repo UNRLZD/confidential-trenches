@@ -45,7 +45,7 @@ const STATES = [
   ["reverted", "S10.7", ["390", "1440"], true],
   ["held", "S10.8", ["390", "1440"], true],
   ["rows", "S10.9", ["390", "1440"], false],
-  ["closed", "S10.10", ["1440"], false],
+  ["closed", "S10.10", ["390", "1440"], true],
   ["search", "S10.11", ["1440"], false],
   ["selling", "S10.12", ["390", "1440"], true],
   ["sheet", "S10.13", ["390"], false],
@@ -74,6 +74,7 @@ const STATES = [
   ["pooltrades-unknown", "S10.9", ["390", "1440"], false],
   // card portfolio-counts-money-an-open-buy-holds: the open buy's wallet counted, the axis's ticks distinct
   ["openbuy", "S10.3", ["390", "1440"], false],
+  ["openbuy-noheld", "S10.3", ["390", "1440"], false],
   ["axis", "S10.3", ["1440"], false],
 ];
 // one balance (card portfolio-one-balance): each fixture's Cash tile in cents and its parts as drawn on hover (desktop) or
@@ -84,13 +85,17 @@ const CASH = {
   "cash-four": ["$1,498.18", [["near", "NEAR$73.18", "7318", false], ["solana", "Solana$375.00", "37500", false], ["base", "Base$750.00", "75000", false], ["robinhood", "Robinhood$300.00", "30000", false]]],
   "cash-moving": ["$1,198.18", [["near", "NEAR$73.18", "7318", false], ["solana", "Solana$375.00", "37500", false], ["base", "Base$750.00", "75000", false], ["robinhood", "RobinhoodProcessing$0.00", "0", true]]],
 };
+// item 7 (card app-faults-seen-on-122): each fixture's Positions tile and its parts as drawn, [tile, Coins, Reserve];
+// null: nothing held, no parts
+const HELD = { openbuy: ["$0.70", "$0.01", "$0.69"], "openbuy-noheld": null };
 // each fixture's pool view, and per row [chain, Balance, Ready, Pending] as drawn
 const POOLS = {
   loading: ["loading"],
   offline: ["offline"],
   rows: ["unread"],
-  pools: ["rows", [["Solana", "1.25M SOL", "999.99K", "250K", ""], ["Base", "0.25 ETH", "0.2", "0.05", ""], ["Robinhood", "0 ETH", "0", "0", ""]]],
-  "pools-noready": ["rows", [["Solana", "12.5 SOL", "—", "—", ""], ["Base", "0.001 ETH", "—", "—", ""]]],
+  // card app-faults-seen-on-122: NEAR's vault USDC first, Ready and Pending dashes (the vault sends no proof queue)
+  pools: ["rows", [["NEAR", "73.18 USDC", "—", "—", ""], ["Solana", "1.25M SOL", "999.99K", "250K", ""], ["Base", "0.25 ETH", "0.2", "0.05", ""], ["Robinhood", "0 ETH", "0", "0", ""]]],
+  "pools-noready": ["rows", [["NEAR", "73.18 USDC", "—", "—", ""], ["Solana", "12.5 SOL", "—", "—", ""], ["Base", "0.001 ETH", "—", "—", ""]]],
   "pools-empty": ["empty"],
 };
 
@@ -230,7 +235,7 @@ try {
         check(r?.inside && r.clipped.length === 0, `${tag}: pool block outside its panel or clipped ${JSON.stringify(r)}`);
       }
       // the S10 row bars need a full list: the open buy's fixture holds one row
-      if (want === "S10.3" && !phone && f !== "openbuy") {
+      if (want === "S10.3" && !phone && !f.startsWith("openbuy")) {
         // the brief's S10 bar at 1440: rows 72 layout px (54 CSS px), at least 9 visible, at least 9 fields a row
         const r = await page.evaluate(() => {
           const box = document.querySelector(".ptw").getBoundingClientRect();
@@ -240,7 +245,7 @@ try {
         check(Math.abs(r.h - 54) < 1 && r.visible >= 9 && r.fields >= 9, `${tag}: S10 bar rows ${r.h}px, ${r.visible} visible, ${r.fields} fields`);
         console.log(`@1440 positions: row ${r.h.toFixed(1)} css px, ${r.visible} visible, ${r.fields} fields`);
       }
-      if (want === "S10.3" && phone && f !== "openbuy") {
+      if (want === "S10.3" && phone && !f.startsWith("openbuy")) {
         await toSegments(page);
         const r = await page.evaluate(() => {
           const tb = document.querySelector(".tabbar").getBoundingClientRect().top;
@@ -284,6 +289,45 @@ try {
         } else await page.mouse.move(1, 1);
         await page.evaluate(() => window.scrollTo(0, 0));
       }
+      // item 7 of card app-faults-seen-on-122 (owner 12 Nov 16:17:50Z, option B): the Positions tile opens to Coins and
+      // Reserve, which add up to it, as the Cash tile opens; with nothing held it has no parts and does not open; on
+      // desktop, Allocation draws a Reserve tile at the held value
+      if (HELD[f] !== undefined) {
+        const form = phone ? ".pfm" : ".pfd";
+        const tile = page.locator(`${form} [data-tile="positions"]`);
+        const want7 = HELD[f];
+        const parts = await tile.locator("[data-part]").evaluateAll((xs) => xs.map((x) => [x.getAttribute("data-part"), x.textContent, x.getAttribute("data-cents")]));
+        const alloc = phone ? null : await page.$$eval('.pfd [data-alloc="reserve"]', (xs) => xs.map((x) => [x.textContent, x.getAttribute("data-cents")]));
+        if (want7 === null) {
+          check(parts.length === 0 && (await tile.getAttribute("role")) === null, `${tag}: nothing held, yet the Positions tile has parts ${JSON.stringify(parts)}`);
+          if (!phone) check(alloc.length === 0, `${tag}: nothing held, yet a Reserve tile ${JSON.stringify(alloc)}`);
+        } else {
+          const [tot, coins, reserve] = want7;
+          check((await tile.locator(".pvv").textContent()) === tot, `${tag}: Positions ${await tile.locator(".pvv").textContent()}, want ${tot}`);
+          check(!(await tile.locator(".pvparts").isVisible()), `${tag}: Positions parts shown before a hover or tap`);
+          if (phone) {
+            await page.evaluate((sel) => document.querySelector(sel).scrollIntoView({ block: "start" }), `${form} .pvtiles`);
+            await tile.tap();
+          } else await tile.hover();
+          const got = await page.evaluate((sel) => {
+            const box = document.querySelector(`${sel} [data-tile="positions"] .pvparts`);
+            const r = box.getBoundingClientRect();
+            const panel = box.closest(".panel, .mwhere").getBoundingClientRect();
+            const seen = [...box.querySelectorAll("[data-part]")].every((x) => { const q = x.getBoundingClientRect(); const e = document.elementFromPoint(q.left + q.width / 2, q.top + q.height / 2); return !!e && x.contains(e); });
+            return { inside: r.left >= panel.left - 0.5 && r.right <= Math.min(panel.right, innerWidth) + 0.5 && r.bottom <= innerHeight + 0.5, seen };
+          }, form);
+          const drawn = parts.map((x) => x.slice(0, 2));
+          check(JSON.stringify(drawn) === JSON.stringify([["coins", `Coins${coins}`], ["reserve", `Reserve${reserve}`]]) && BigInt(parts[0][2]) + BigInt(parts[1][2]) === BigInt(tot.replace(/[$,.]/g, "")), `${tag}: Positions parts ${JSON.stringify(parts)}, want Coins ${coins} and Reserve ${reserve} adding up to ${tot}`);
+          check(got.inside && got.seen, `${tag}: Positions parts outside the panel or covered ${JSON.stringify(got)}`);
+          if (!phone) check(alloc.length === 1 && alloc[0][0] === `Reserve${reserve}` && alloc[0][1] === parts[1][2], `${tag}: Allocation's Reserve tile ${JSON.stringify(alloc)}, want Reserve ${reserve}`);
+          if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `positions-parts-${f}-${w.name}${SCHEME === "dark" ? "" : `-${SCHEME}`}.png`) });
+          if (phone) {
+            await tile.tap();
+            check(!(await tile.locator(".pvparts").isVisible()), `${tag}: a second tap closes the Positions parts`);
+          } else await page.mouse.move(1, 1);
+          await page.evaluate(() => window.scrollTo(0, 0));
+        }
+      }
       // a pool fixture's phone shot shows the pool rows (the S10.3 bar above scrolled to the segments)
       if (phone && f.startsWith("pools")) await page.evaluate(() => document.querySelector(".pfm .pools").scrollIntoView({ block: "center" }));
       if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `${want}-${f}-${w.name}${SCHEME === "dark" ? "" : `-${SCHEME}`}.png`) });
@@ -320,6 +364,17 @@ try {
     } else {
       const { ctx, page } = await open(browser, w, "rows");
       await toSegments(page);
+      // card app-faults-seen-on-122 (walk of release 122, row 8): the phone's Open / Closed, as the desktop's
+      const closedTap = page.locator('.pfm [data-control="closed"]');
+      check((await closedTap.count()) === 1 && (await closedTap.isVisible()), `@${w.name}: no Closed control on the phone page`);
+      if (await closedTap.count()) {
+        await closedTap.tap();
+        const closedRows = await page.$$eval(".pfm [data-closed]", (rs) => rs.filter((r) => r.getClientRects().length).map((r) => r.getAttribute("data-closed")));
+        check((await states(page)).includes("S10.10") && closedRows.length === 4 && (await page.locator(".pfm .mpr[data-pos]").count()) === 0, `@${w.name}: Closed lists ${closedRows.length} closed rows, want 4 and no open row`);
+        if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `S10.10-closed-tap-${w.name}.png`) });
+        await page.locator('.pfm [data-control="open"]').tap();
+        check((await page.locator(".pfm .mpr[data-pos]").count()) > 0 && (await page.locator(".pfm [data-closed]").count()) === 0, `@${w.name}: Open lists the open rows again`);
+      }
       await page.locator('.pfm .mpr[data-pos="near:WTH"]').click();
       check((await states(page)).includes("S10.13") && (await page.locator('.pfm [data-sheet="position"]').count()) === 1, `@${w.name}: row opens the sheet`);
       await page.locator('.pfm [data-control="sheet-sell-50"]').click();

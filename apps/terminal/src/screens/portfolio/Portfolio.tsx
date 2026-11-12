@@ -153,7 +153,7 @@ export function Portfolio({ onAction = () => {}, initial = START }: { onAction?:
                 </span>
                 {ui.pane !== "activity" && pf.totals && <span className="t3 num">{usd(pf.totals.inPos)}</span>}
               </div>
-              {ui.pane === "activity" ? actList : <Allocation rows={pf.rows} loading={loading} />}
+              {ui.pane === "activity" ? actList : <Allocation rows={pf.rows} loading={loading} t={pf.totals} />}
             </section>
           </div>
         </div>
@@ -168,6 +168,12 @@ export function Portfolio({ onAction = () => {}, initial = START }: { onAction?:
             <button type="button" role="tab" className={`t ${ui.pane === "activity" ? "on" : ""}`} data-control="seg-activity" onClick={() => setUi({ pane: "activity" })}><W id="activity" /></button>
             <button type="button" role="tab" className={`t ${ui.pane === "stats" ? "on" : ""}`} data-control="seg-stats" onClick={() => setUi({ pane: "stats" })}><W id="stats" /></button>
           </div>
+          {ui.pane === "positions" && (
+            <div className="mpoc">
+              <button type="button" className={ui.closed ? "" : "on"} data-control="open" onClick={() => setUi({ closed: false })}><span><W id="open" /></span></button>
+              <button type="button" className={ui.closed ? "on" : ""} data-control="closed" onClick={() => setUi({ closed: true })}><span><W id="closed" /></span></button>
+            </div>
+          )}
         </div>
         {ui.pane === "activity" ? (
           actList
@@ -175,8 +181,10 @@ export function Portfolio({ onAction = () => {}, initial = START }: { onAction?:
           <PhoneStats st={st} closed={closed} now={now} realized={pf.totals?.realized30 ?? null} realizedSign={pf.totals?.realized30Sign ?? null} />
         ) : loading ? (
           Array.from({ length: 6 }, (_, i) => <div className="mpr" key={i}><Sk w={44} h={44} r={22} /><div><Sk w={80} h={14} /><div style={{ height: 6 }} /><Sk w={50} h={11} /></div><div><Sk w={70} h={14} /></div><span /></div>)
-        ) : pf.rows.length === 0 ? (
+        ) : (ui.closed ? closedList.length === 0 : pf.rows.length === 0) ? (
           <div className="empty"><Plate /><span><W id="noPositions" /></span></div>
+        ) : ui.closed ? (
+          closedList.map((c) => <PhoneClosed key={c.key} c={c} />)
         ) : (
           pf.rows.map((r) => <PhoneRow key={r.key} r={r} onOpen={() => setUi({ sheet: r.key })} act={src.act} />)
         )}
@@ -223,7 +231,7 @@ function Equity({ src, t, pools, loading, offline, rows, ui, setUi, now }: HeadP
       <div className="eqsplit">
         <div className="eqbrk">
           <div className="eqh"><W id="whereItIs" /></div>
-          <Where t={t} loading={loading} />
+          <Where t={t} loading={loading} rows={rows} />
           <PoolRows p={pools} src={src} />
           <WalletRows src={src} />
         </div>
@@ -251,7 +259,7 @@ function RangeSeg({ ui, setUi }: { ui: Ui; setUi(p: Partial<Ui>): void }) {
 }
 
 /** Where it is: Cash, Positions, On the way and the total, each with its share and a dot strip (R5 P.pvEquity). */
-function Where({ t, loading, phone }: { t: Totals | null; loading: boolean; phone?: boolean }) {
+function Where({ t, loading, rows, phone }: { t: Totals | null; loading: boolean; rows: readonly Row[]; phone?: boolean }) {
   if (loading) return <div className="pvtiles">{Array.from({ length: 4 }, (_, i) => <Sk key={i} w={phone ? 150 : 140} h={phone ? 96 : 58} r={12} />)}</div>;
   const tot = t?.total ?? 0n;
   const parts = [
@@ -271,6 +279,8 @@ function Where({ t, loading, phone }: { t: Totals | null; loading: boolean; phon
       {parts.map((p) =>
         p.id === "cash" ? (
           <CashTile key={p.id} parts={t?.parts ?? []} col={p.col}>{body(p)}</CashTile>
+        ) : p.id === "positions" && t && t.held > 0n ? (
+          <PositionsTile key={p.id} t={t} top={rows[0] ?? null} col={p.col}>{body(p)}</PositionsTile>
         ) : (
           <div className="pvt" key={p.id} data-tile={p.id} style={{ ["--tc" as string]: p.col }}>{body(p)}</div>
         ),
@@ -307,6 +317,36 @@ function CashTile({ parts, col, children }: { parts: readonly CashPart[]; col: s
             </div>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+/** The Positions tile with its two parts (owner 12 Nov 16:17:50Z, option B; card app-faults-seen-on-122): Coins, the
+ *  positions' own value with the top row's avatar, and Reserve, what the open buys' wallets hold (asset_held) with its
+ *  chain's mark, each the exact sum rounded down once (model.ts totals), the two adding up to the tile. It opens as the
+ *  Cash tile does; at the panel's right edge its parts open leftward. Drawn only while something is held: with nothing
+ *  held the tile is its coins alone and does not open. data-part names each row for the checks. */
+function PositionsTile({ t, top, col, children }: { t: Totals; top: Row | null; col: string; children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  const flip = () => setOpen((o) => !o);
+  const m = t.heldChains.length === 1 ? chainOf(t.heldChains[0]!) : null;
+  return (
+    <div className={`pvt pvcash pvpos${open ? " open" : ""}`} data-tile="positions" style={{ ["--tc" as string]: col }} role="button" tabIndex={0} aria-expanded={open} onClick={flip} onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), flip())}>
+      {children}
+      <div className="pvparts end" data-parts={2}>
+        <div className="pvpr" data-part="coins" data-cents={t.coins.toString()}>
+          {top && <Avatar symbol={top.symbol} size={16} initials={false} />}
+          <span className="ell"><W id="coins" /></span>
+          <span className="grow" />
+          <span className="num">{usd(t.coins)}</span>
+        </div>
+        <div className="pvpr" data-part="reserve" data-cents={t.held.toString()} data-chains={t.heldChains.join(" ")}>
+          {m && <img className="pvpl" src={m.logo} alt="" style={{ padding: Math.round(16 * m.inset) }} />}
+          <span className="ell"><W id="reserve" /></span>
+          <span className="grow" />
+          <span className="num">{usd(t.held)}</span>
+        </div>
       </div>
     </div>
   );
@@ -617,11 +657,37 @@ function ClosedTr({ c }: { c: ClosedRow }) {
   );
 }
 
-/** Allocation (R5 cur-18): a map sized by value, tinted by PnL. Priceless rows are left out. */
-function Allocation({ rows, loading }: { rows: Row[]; loading: boolean }) {
+/** Allocation (R5 cur-18): a map sized by value, tinted by PnL. Priceless rows are left out. While the open buys hold
+ *  something (owner 12 Nov 16:17:50Z, option B), a neutral Reserve tile at the held value sits above the coins' map, and
+ *  the coins keep at least the height one tile's row needs (ALLOC_ROW_PX), in which a tile draws its figure on its row. */
+const ALLOC_ROW_PX = 52;
+function Allocation({ rows, loading, t }: { rows: Row[]; loading: boolean; t: Totals | null }) {
   if (loading) return <div className="amap"><Sk w={440} h={400} r={10} /></div>;
   const items = rows.filter((r) => r.value !== null && r.value > 0n).map((r) => ({ r, v: Number(r.value) }));
-  if (!items.length) return <div className="amap empty"><Plate /></div>;
+  const held = t?.held ?? 0n;
+  if (!items.length && held <= 0n) return <div className="amap empty"><Plate /></div>;
+  if (held <= 0n) return <div className="amap"><AllocMap items={items} /></div>;
+  const coins = items.reduce((a, b) => a + b.v, 0);
+  const share = (Number(held) / (Number(held) + coins)) * 100;
+  const cut = items.length ? `clamp(${ALLOC_ROW_PX}px, ${share.toFixed(3)}%, calc(100% - ${ALLOC_ROW_PX}px))` : "100%";
+  const m = t!.heldChains.length === 1 ? chainOf(t!.heldChains[0]!) : null;
+  return (
+    <div className="amap">
+      <div className="at arsv" data-alloc="reserve" data-cents={held.toString()} style={{ left: 0, top: 0, width: "calc(100% - 4px)", height: `calc(${cut} - 4px)` }}>
+        <div className="row-flex">{m && <img className="arl" src={m.logo} alt="" style={{ padding: Math.round(32 * m.inset) }} />}<span className="as ell"><W id="reserve" /></span></div>
+        <div className="av3 num">{usd(held)}</div>
+      </div>
+      {items.length > 0 && (
+        <div className="amapc" style={{ top: cut }}>
+          <AllocMap items={items} inline={share > 80} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** The coins' map: each tile sized by its value, tinted by its PnL; `inline` draws each figure on its row. */
+function AllocMap({ items, inline = false }: { items: { r: Row; v: number }[]; inline?: boolean }) {
   const rects: { r: Row; x: number; y: number; w: number; h: number }[] = [];
   const split = (arr: typeof items, x: number, y: number, w: number, h: number) => {
     if (arr.length === 1) return void rects.push({ r: arr[0]!.r, x, y, w, h });
@@ -644,20 +710,24 @@ function Allocation({ rows, loading }: { rows: Row[]; loading: boolean }) {
   };
   split(items, 0, 0, 100, 100);
   return (
-    <div className="amap">
+    <>
       {rects.map(({ r, x, y, w, h }) => {
         const a = Math.min(1, Math.abs((r.pnlBps ?? 0) / 6000));
         // its tone from the exact PnL's sign; an exact zero neutral
         const bg = r.pnlSign === 0n ? "rgba(244,244,242,0.08)" : (r.pnlSign ?? 0n) > 0n || r.pnlSign === null ? `rgba(80,227,151,${(0.08 + 0.3 * a).toFixed(2)})` : `rgba(255,93,77,${(0.08 + 0.3 * a).toFixed(2)})`;
         const big = w > 19 && h > 15;
         return (
-          <div className="at" key={r.key} style={{ left: `${x}%`, top: `${y}%`, width: `calc(${w}% - 4px)`, height: `calc(${h}% - 4px)`, background: bg }}>
-            <div className="row-flex">{big && <Avatar symbol={r.symbol} size={32} />}{w > 13 && <span className="as ell">{r.symbol}</span>}</div>
-            {big && <div className="av3 num">{usd(r.value!)}<div className={sgn(r.pnlSign)}>{pct(r.pnlBps)}</div></div>}
+          <div className={`at${inline ? " inl" : ""}`} key={r.key} data-alloc={r.key} style={{ left: `${x}%`, top: `${y}%`, width: `calc(${w}% - 4px)`, height: `calc(${h}% - 4px)`, background: bg }}>
+            <div className="row-flex">
+              {big && <Avatar symbol={r.symbol} size={32} />}
+              {w > 13 && <span className="as ell">{r.symbol}</span>}
+              {inline && big && <span className="av3 num">{usd(r.value!)}</span>}
+            </div>
+            {big && !inline && <div className="av3 num">{usd(r.value!)}<div className={sgn(r.pnlSign)}>{pct(r.pnlBps)}</div></div>}
           </div>
         );
       })}
-    </div>
+    </>
   );
 }
 
@@ -700,7 +770,7 @@ function PhoneTop({ src, t, pools, loading, offline, rows, ui, setUi, now }: Hea
       </div>
       <div className="mwhere">
         <div className="lbl2"><W id="whereItIs" /></div>
-        <Where t={t} loading={loading} phone />
+        <Where t={t} loading={loading} rows={rows} phone />
         <PoolRows p={pools} src={src} phone />
         <WalletRows src={src} phone />
       </div>
@@ -758,6 +828,26 @@ function PhoneRow({ r, onOpen, act }: { r: Row; onOpen(): void; act(a: Portfolio
         )}
       </div>
       <button type="button" className={`sc ${r.selling ? "live" : ""}`} data-control="sell-100" onClick={(e) => (e.stopPropagation(), act({ kind: "sell", chain: r.chain, token: r.token, part: "100" }))}><span className="num">100%</span></button>
+    </div>
+  );
+}
+
+/** A closed position on the phone (S10.10, as the desktop's ClosedTr): the token, how long it was held, and its
+ *  realized in dollars with its percent, tinted by the exact figure's sign; no action. */
+function PhoneClosed({ c }: { c: ClosedRow }) {
+  const tone = c.realizedX === null ? null : signOf(c.realizedX);
+  return (
+    <div className="mpr mpc" data-closed={c.key}>
+      <Avatar symbol={c.symbol} size={44} />
+      <div className="mn">
+        <div className="sy">{c.symbol}</div>
+        <div className="h num">{held(c.heldMs)}</div>
+      </div>
+      <div className="vv">
+        <div className={`v num ${sgn(tone)}`}>{c.realized === null ? "—" : usd(c.realized, true)}</div>
+        {c.realized !== null && <span className={`pl num ${tone === null || tone === 0n ? "" : tone > 0n ? "g" : "r"}`}>{pct(c.realizedBps)}</span>}
+      </div>
+      <span />
     </div>
   );
 }
