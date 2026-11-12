@@ -6,7 +6,7 @@
 // either run here or left out with its reason, so a check a deploy adds is never silently skipped.
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -18,11 +18,12 @@ import { signBuilt } from "../signpage-built.mjs";
 const SIGN_ONLY = IN_PROCESS.filter((c) => c.host === "sign");
 const sha384 = (b) => `sha384-${createHash("sha384").update(b).digest("base64")}`;
 
-/** A copy of SIGN_HOST's build (index.html and public/app.js) with `edit` applied to app.js; `repin` writes its new sha384 into index.html. */
+/** A copy of SIGN_HOST's build (index.html and public/, every file a check may read: the walk's Worker beside app.js) with
+ *  `edit` applied to app.js; `repin` writes its new sha384 into index.html. */
 function signCopy(edit = (js) => js, repin = true) {
   const dir = mkdtempSync(path.join(tmpdir(), "bundle-checks-"));
-  mkdirSync(path.join(dir, "public"));
   signBuilt(); // this checkout's build, made from its sources (card signpage-generated-merge-free)
+  cpSync(path.join(SIGN_DIR, "public"), path.join(dir, "public"), { recursive: true });
   const js = edit(readFileSync(path.join(SIGN_DIR, "public/app.js"), "utf8"));
   writeFileSync(path.join(dir, "public/app.js"), js);
   const index = readFileSync(path.join(SIGN_DIR, "index.html"), "utf8");
