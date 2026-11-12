@@ -327,9 +327,10 @@ export const dropSend = (w: WalletStore, opId: string, noteId: string): Promise<
     const { [noteId]: _gone, ...rest } = r;
     return rest;
   });
-/** meta's record of the notes each running withdraw (any tab's) has planned, by op id, each with the latest deadline
- *  that run can bind (pool ms): out of every proof queue's pass and every other plan until the run ends, or, for a run
- *  that crashed, until that deadline passes on the device's clock (card pool-tree-read-waits-for-its-second). */
+/** meta's record of the notes each running withdraw (any tab's) has planned, by op id, each with the time (the device's
+ *  clock, ms) until which it stands: out of every proof queue's pass and every other plan until the run ends, or, for a
+ *  run that crashed, until that time (card pool-tree-read-waits-for-its-second). Every write tells the other tabs
+ *  (the store's change event), whose state read runs their queue's pass, which lets go of these notes (queue.ts skip). */
 export const WITHDRAW_PLANNED_KEY = "owed/withdraw-sol";
 type WithdrawPlanned = Record<string, { notes: string[]; until_ms: string }>;
 /** The op's planned notes and its deadline written ([] drops its entry); another op's entry kept. */
@@ -2081,11 +2082,10 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     const rent = await readSolanaRent(r);
     const notes = await openNoteStore(await page.store());
     try {
-      const mine = new Set((await queued())?.ready().map((p) => p.noteId) ?? []);
       const fee = solanaPoolFee(rent);
       const wFee = await solanaOnwardFee(r, pin!);
       const owed = await owedNotes();
-      return { notes: withdrawSources(await notes.list(), scope!, mine).filter((n) => !owed.has(n.id)), fee, wFee, minPart: solanaWithdrawMinPart(rent, fee, wFee) };
+      return { notes: withdrawSources(await notes.list(), scope!).filter((n) => !owed.has(n.id)), fee, wFee, minPart: solanaWithdrawMinPart(rent, fee, wFee) };
     } finally {
       notes.close();
     }
@@ -2134,7 +2134,6 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       const notes = await openNoteStore(await page.store());
       try {
         const q = await queued();
-        const mine = new Set(q?.ready().map((p) => p.noteId) ?? []);
         const ask = { kind: "pool.withdraw", chain: "solana", token: null, amount: 0n, slippageBps: 0, decimals: 9 } as const;
         const end = await runPoolWithdraw(
           {
@@ -2161,7 +2160,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
             ...(over.wait ? { wait: over.wait } : {}),
             keepRelease: async (noteId, attempt, release) => void (await keepRelease(ops, opId, noteId, attempt, release)),
             owedNotes,
-            keepOut: async (ids, untilMs) => void (await keepOutNotes(ops, opId, ids, untilMs)),
+            keepOut: async (ids, spanMs) => void (await keepOutNotes(ops, opId, ids, BigInt(Date.now()) + spanMs)),
             // the release's withdrawn value is on the note's mark: the app reads the state again, as after a buy's
             marked: () => {
               for (const f of watchers) f();
@@ -2171,7 +2170,6 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
           ready.to,
           ready.amount,
           ready.maxFee,
-          mine,
         );
         write(end.stage, end.txs, end.pending, end.arrived);
         if (end.feeNeeded !== undefined) void (writes = writes.then(() => ops.update("ops", opId, (v) => mergeWithdrawOp(v, { feeNeeded: end.feeNeeded! }))).catch(() => {}));

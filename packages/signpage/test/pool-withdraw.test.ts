@@ -294,11 +294,11 @@ test("a note held by an old page's queue at the boundary (no planned record read
 /** The planned notes' record on the world's store, as the page writes it, and a queue in another context reading it. */
 function otherContext(wd: Awaited<ReturnType<typeof world>>, prover = wd.host.prover) {
   const pool = { ...wd.host.pool, bind: (b: Parameters<typeof wd.host.pool.bind>[0], s?: AbortSignal) => wd.host.pool.bind({ ...b, tipCap: b.tipCap ?? 1n }, s) };
-  return openProofQueue({ seed64: SEED64, notes: wd.ns, pool, provers: [prover], hardwareConcurrency: 4, skip: () => keptOutNotes(wd.w, NOW) });
+  return openProofQueue({ seed64: SEED64, notes: wd.ns, pool, provers: [prover], hardwareConcurrency: 4, skip: () => keptOutNotes(wd.w, BigInt(Date.now())) });
 }
-const keepOut = (wd: Awaited<ReturnType<typeof world>>) => async (ids: readonly string[], untilMs: bigint) => void (await keepOutNotes(wd.w, "op-w", ids, untilMs));
+const keepOut = (wd: Awaited<ReturnType<typeof world>>) => async (ids: readonly string[], spanMs: bigint) => void (await keepOutNotes(wd.w, "op-w", ids, BigInt(Date.now()) + spanMs));
 
-for (const at of ["the boundary", "the bind"] as const) {
+for (const at of ["the boundary"] as const) {
   test(`another context's queue passing at ${at} leaves the withdraw's planned note alone: the withdraw ends sent, and a buy still gets its proof from the other notes`, async () => {
     let slept = 0n;
     let q: ReturnType<typeof openProofQueue> | undefined;
@@ -312,19 +312,60 @@ for (const at of ["the boundary", "the bind"] as const) {
       },
     });
     q = otherContext(wd);
-    if (at === "the bind") {
-      const bind = wd.host.pool.bind;
-      // the pass starts while the withdraw binds, between its last free() and its own hold
-      wd.host.pool = { ...wd.host.pool, bind: async (b, s) => (b.tipCap === 0n && passes.length === 0 && passes.push(q!.refresh()), await new Promise((r) => setTimeout(r, 50)), bind(b, s)) };
-    }
     const a = await runPoolWithdraw({ ...wd.host, keepOut: keepOut(wd) }, ASK, TO, 2_000_000n + MIN, COST);
     assert.equal(a.stage, "sent", a.cause);
     await Promise.all(passes);
     assert.deepEqual(q.ready().map((r) => r.noteId), [wd.ids[0]], "the buy's proof: the other note's");
-    assert.deepEqual(await keptOutNotes(wd.w, NOW), new Set(), "cleared at the run's end");
+    assert.deepEqual(await keptOutNotes(wd.w, BigInt(Date.now())), new Set(), "cleared at the run's end");
     await q.close();
   });
 }
+
+test("another context's queue passing at the bind (its prover still proving), between the part's last free() and its own hold, leaves the planned note alone: the run sends", async () => {
+  let slept = 0n;
+  const wd = await world([1_000n, 30_000_000n, 1_000n], { trees: cutTrees, refs: [undefined, RETURN], now: () => (slept >= BOUNDARY - NOW ? BOUNDARY : NOW), wait: async (ms) => void (slept += BigInt(ms)) });
+  let open!: () => void;
+  const gate = new Promise<void>((r) => (open = r));
+  const base = wd.host.prover;
+  const q = otherContext(wd, { ...base, prove: async (c: string, i: unknown) => (await gate, (base.prove as (c: string, i: unknown) => Promise<unknown>)(c, i)) } as typeof base);
+  const bind = wd.host.pool.bind;
+  let held = false;
+  wd.host.pool = { ...wd.host.pool, bind: async (b, s) => {
+    if (b.tipCap === 0n && !held) {
+      void q.refresh();
+      // up to 300 ms for the queue to hold the note (it would at once, with no record)
+      for (let i = 0; i < 300 && !(held = (await wd.ns.get(wd.ids[1]!))?.state === "HELD"); i++) await new Promise((r) => setTimeout(r, 1));
+      held = true;
+    }
+    return bind(b, s);
+  } };
+  const a = await runPoolWithdraw({ ...wd.host, keepOut: keepOut(wd) }, ASK, TO, 2_000_000n + MIN, COST);
+  open();
+  await q.close();
+  assert.equal(a.stage, "sent", a.cause);
+});
+
+test("the waits for the leaf's boundary share one budget: pool time 40 s behind the leaf needs 100 s of waits for two boundaries and stops 'boundary'", async () => {
+  const times = [BOUNDARY - 40_000n, BOUNDARY + 1_000n, BOUNDARY + 2_000n];
+  let slept = 0n;
+  const wd = await world([1_000n, 30_000_000n, 1_000n], { trees: cutAt(times), refs: [undefined, RETURN], now: () => (slept >= 100_000n ? BOUNDARY + E : slept >= 40_000n ? BOUNDARY + 500n : BOUNDARY - 40_000n), wait: async (ms) => void (slept += BigInt(ms)) });
+  const a = await runPoolWithdraw(wd.host, ASK, TO, 2_000_000n + MIN, COST);
+  assert.equal(a.stage, "stopped");
+  assert.match(a.cause ?? "", /boundary/);
+  assert.equal(slept, E + WITHDRAW_BOUNDARY_LAG_MS);
+  assert.equal(wd.binds.length, 0);
+});
+
+test("pool time that passes a boundary within each loop's own reads, the leaf never in the cut: two boundaries at most, then stopped", async () => {
+  let reads = 0;
+  let trees = 0;
+  const cut = cutAt([NOW - 30_000n, 1n << 62n]);
+  const wd = await world([1_000n, 30_000_000n], { trees: (st, lb) => { const f = cut(st, lb); return async (b, sg) => (trees++, f(b, sg)); }, refs: [undefined, RETURN], now: () => NOW + BigInt(reads++) * E, wait: async () => {} });
+  const a = await runPoolWithdraw(wd.host, ASK, TO, 2_000_000n + MIN, COST);
+  assert.equal(a.stage, "stopped");
+  assert.match(a.cause ?? "", /boundary/);
+  assert.ok(trees <= 3, `${trees} tree reads`);
+});
 
 test("the planned record of a run that crashed stops counting at its own deadline; another run's entry is kept", async () => {
   const wd = await world([30_000_000n]);
@@ -347,8 +388,8 @@ test("a note this page's queue is still proving when the run starts comes back o
   const pass = q.refresh();
   for (let i = 0; i < 2000 && (await wd.ns.get(wd.ids[0]!))?.state !== "HELD"; i++) await new Promise((r) => setTimeout(r, 1));
   assert.equal((await wd.ns.get(wd.ids[0]!))?.state, "HELD", "the queue holds it, proving");
-  // planned as this page's (its pass began before the run's record was written)
-  const a = await runPoolWithdraw({ ...wd.host, drop: (id) => q.drop(id) }, ASK, TO, 2_000_000n + MIN, COST, new Set([wd.ids[0]!]));
+  // a HELD note is planned (any tab's queue may hold it); this page's queue is proving it
+  const a = await runPoolWithdraw({ ...wd.host, drop: (id) => q.drop(id) }, ASK, TO, 2_000_000n + MIN, COST);
   assert.equal(a.stage, "sent", a.cause);
   assert.ok(waited >= 1, "it waited for the proof to end");
   await pass;

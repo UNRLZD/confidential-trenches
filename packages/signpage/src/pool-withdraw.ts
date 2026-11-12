@@ -196,9 +196,10 @@ export type PoolWithdrawHost = Pick<PoolBuyHost, "send" | "now" | "reads" | "wai
   /** The notes an op still owes an onward send for (any tab's): never planned again until that op is settled, since a
    *  note's W is the same for every spend of it (review #232b MEDIUM 1). */
   owedNotes?(): Promise<ReadonlySet<string>>;
-  /** The run's planned notes kept out of every proof queue (any tab's) and every other plan until `untilMs` (pool ms,
-   *  the latest deadline the run can bind), written before a part's wait; [] clears them, at every end. */
-  keepOut?(noteIds: readonly string[], untilMs: bigint): Promise<void>;
+  /** The run's planned notes kept out of every proof queue (any tab's) and every other plan for `spanMs` from now on
+   *  the device's clock (the longest a part can take to bind), written before any part and again at each; [] clears
+   *  them, at every end. */
+  keepOut?(noteIds: readonly string[], spanMs: bigint): Promise<void>;
   /** The op's stage, its txs so far, the onward send still owed and what reached To, by onward signature. */
   stage?(stage: WithdrawStage, txs: TxRef[], pending: PendingOnward | null, arrived: Arrivals): void;
 };
@@ -272,9 +273,12 @@ async function feeOf(rpcs: readonly [SolanaRpc, SolanaRpc], message: Uint8Array)
   return agree(a!, b!);
 }
 
-/** The landed notes of the pool's scope a withdraw may spend: UNSPENT, or HELD by this page's proof queue (`mine`). */
-export function withdrawSources(list: readonly NoteRecord[], scope: bigint, mine: ReadonlySet<string>): WithdrawSource[] {
-  return list.filter((n) => n.scope === scope && n.leaf !== undefined && (n.state === "UNSPENT" || (n.state === "HELD" && mine.has(n.id)))).map((n) => ({ id: n.id, value: n.leaf!.value }));
+/** The landed notes of the pool's scope a withdraw may spend: UNSPENT, or HELD. A HELD note has nothing sent (every
+ *  send moves it RESERVED first: queue.ts take, request.ts, onePart below), so it is a proof queue's ready or in-flight
+ *  proof (any tab's), or a withdraw part's, which the caller leaves out with the owed and kept-out notes. Its run frees it
+ *  first (free(): this page's queue drops it, another tab's lets go at its next pass, queue.ts skip). */
+export function withdrawSources(list: readonly NoteRecord[], scope: bigint): WithdrawSource[] {
+  return list.filter((n) => n.scope === scope && n.leaf !== undefined && (n.state === "UNSPENT" || n.state === "HELD")).map((n) => ({ id: n.id, value: n.leaf!.value }));
 }
 
 /** To's account on both RPCs: never executable, never one the pool program owns (its pages, marks, the pool). */
@@ -320,7 +324,7 @@ const toRefused = (to: string, pin: SolanaPoolPin, pool: string, ws: readonly st
 
 /** One withdraw of `amount` (base units arriving at `to`), `to` the address typed on this page and checked there, and
  *  `maxFee` the Max fee the screen drew: a plan that would cost more stops before its first part. */
-export async function runPoolWithdraw(h: PoolWithdrawHost, ask: PoolAsk, to: string, amount: bigint, maxFee: bigint, mine: ReadonlySet<string> = new Set()): Promise<PoolWithdrawAnswer> {
+export async function runPoolWithdraw(h: PoolWithdrawHost, ask: PoolAsk, to: string, amount: bigint, maxFee: bigint): Promise<PoolWithdrawAnswer> {
   const txs: TxRef[] = [];
   const arrived: Arrivals = {};
   let pending: PendingOnward | null = null;
@@ -339,7 +343,7 @@ export async function runPoolWithdraw(h: PoolWithdrawHost, ask: PoolAsk, to: str
     const notes = await h.notes();
     // a note an op still owes a send for stays out of the plan: its W is this spend's W too (review #232b MEDIUM 1)
     const owedNotes = (await h.owedNotes?.()) ?? new Set<string>();
-    const plan = planPoolWithdraw(withdrawSources(await notes.list(), scope, mine).filter((n) => !owedNotes.has(n.id)), amount, costs);
+    const plan = planPoolWithdraw(withdrawSources(await notes.list(), scope).filter((n) => !owedNotes.has(n.id)), amount, costs);
     if (plan === null) stop("plan");
     // review #232 MEDIUM 1: never more than the Max fee the screen showed
     if (BigInt(plan!.length) * (fee + wFee) > maxFee) stop("max_fee");
@@ -360,12 +364,12 @@ export async function runPoolWithdraw(h: PoolWithdrawHost, ask: PoolAsk, to: str
     if (toRefused(to, h.pin, pool, spends.map((x) => x.w))) stop("to");
     await checkTo(h, to);
     // from here to the run's end no queue in any tab takes a planned note (each part refreshes the record's deadline)
-    if (h.keepOut) await h.keepOut(plan!.map((x) => x.noteId), (await h.pool.now()) + h.pool.epochMs + WITHDRAW_BOUNDARY_LAG_MS + h.pool.lifeMs);
+    if (h.keepOut) await h.keepOut(plan!.map((x) => x.noteId), keepSpan(h.pool));
     for (const [i, p] of plan!.entries()) {
       say("proving");
       // the release's take writes the note RESERVED, then the pending (with the attempt): from then on a crash leaves
       // it owed
-      const keep = (untilMs: bigint): Promise<void> => h.keepOut?.(plan!.map((x) => x.noteId), untilMs) ?? Promise.resolve();
+      const keep = (): Promise<void> => h.keepOut?.(plan!.map((x) => x.noteId), keepSpan(h.pool)) ?? Promise.resolve();
       const got = await onePart(h, ask, notes, p, fee, wFee, pool, { to, last: i === plan!.length - 1, feeCap: wCap.toString() }, (owed) => void (pending = owed), keep);
       // the release's signature only as both RPCs read it as this release (card signpage-sent-read-back): a helper's
       // word not read back is never in the op's txs
@@ -563,6 +567,9 @@ export const WITHDRAW_BOUNDARY_LAG_MS = 30_000n;
 /** A withdraw's tree read, bounded in wall-clock time: the read counts its waits (solana.ts SOL_REACH_WAITS), and a
  *  provider that answers each call slowly would stretch them; the read stops at its next wait past this. */
 export const WITHDRAW_TREES_MS = 30_000;
+/** How long a run's kept-out record stands on the device's clock from each write: the longest a part takes from its
+ *  write to its bind (one wait's budget) and that bind's life. */
+const keepSpan = (P: PoolWithdrawHost["pool"]): bigint => P.epochMs + WITHDRAW_BOUNDARY_LAG_MS + P.lifeMs;
 /** How long a part waits for a note this page's queue is still proving to come back UNSPENT once dropped (a proof takes
  *  6.7 s on a laptop, run 6d; a slow phone several times that): past it the note is another's and the part stops. */
 export const WITHDRAW_FREE_MS = 30_000;
@@ -583,7 +590,7 @@ async function poolTimeAt(P: PoolWithdrawHost["pool"], wait: (ms: number) => Pro
 
 /** One part's release to W: hold the note, prove part + fees to W, build, check, sign, RESERVED, then the send and
  *  its settle. The release is alone in its transaction (review #232 HIGH 1). */
-async function onePart(h: PoolWithdrawHost, ask: PoolAsk, notes: NoteStore, p: WithdrawPart, fee: bigint, wFee: bigint, pool: string, base: Pick<PendingOnward, "to" | "last" | "feeCap">, owing: (owed: PendingOnward) => void, keep: (untilMs: bigint) => Promise<void> = async () => {}): Promise<{ stage: string; signature: string; l: bigint; j: number; releaseAccounts: string[] }> {
+async function onePart(h: PoolWithdrawHost, ask: PoolAsk, notes: NoteStore, p: WithdrawPart, fee: bigint, wFee: bigint, pool: string, base: Pick<PendingOnward, "to" | "last" | "feeCap">, owing: (owed: PendingOnward) => void, keep: () => Promise<void> = async () => {}): Promise<{ stage: string; signature: string; l: bigint; j: number; releaseAccounts: string[] }> {
   const P = h.pool;
   let seed: Uint8Array | null = null;
   let key: Uint8Array | null = null;
@@ -591,12 +598,13 @@ async function onePart(h: PoolWithdrawHost, ask: PoolAsk, notes: NoteStore, p: W
   let reserved = false;
   try {
     const wait = h.wait ?? ((ms: number) => new Promise<void>((res) => setTimeout(res, ms)));
-    // the note, dropped first when the page's proof queue holds it for the next buy; one it is still proving comes
-    // back UNSPENT when that proof ends (queue.ts drop), waited for at most WITHDRAW_FREE_MS
+    // the note, dropped first when this page's proof queue holds it; one it is still proving, or another tab's queue
+    // holds, comes back UNSPENT when that proof ends or at that queue's next pass (the kept-out record's write wakes it:
+    // queue.ts skip), waited for at most WITHDRAW_FREE_MS
     const free = async (): Promise<NoteRecord> => {
       let n = await notes.get(p.noteId);
-      if (n?.state === "HELD" && h.drop) {
-        await h.drop(p.noteId);
+      if (n?.state === "HELD") {
+        await h.drop?.(p.noteId);
         for (let waited = 0; (n = await notes.get(p.noteId))?.state === "HELD" && waited < WITHDRAW_FREE_MS; waited += 500) await wait(500);
       }
       if (n === undefined || n.state !== "UNSPENT" || n.leaf === undefined) stop("note");
@@ -609,19 +617,21 @@ async function onePart(h: PoolWithdrawHost, ask: PoolAsk, notes: NoteStore, p: W
     let nowMs = await P.now();
     // the run's notes stay out of every queue's pass (any tab's) past the latest deadline this part can bind: so no
     // queue holds this note at the boundary it may wait for
-    await keep(nowMs + P.epochMs + WITHDRAW_BOUNDARY_LAG_MS + P.lifeMs);
+    await keep();
     let epochStartMs = nowMs - (nowMs % P.epochMs);
     let trees = await P.trees(epochStartMs, AbortSignal.timeout(WITHDRAW_TREES_MS));
     if (leaf.leafIndex >= BigInt(trees.stateTree.size)) {
       if (provesOnNewest(n.ref)) trees = await P.trees(nowMs + 1n, AbortSignal.timeout(WITHDRAW_TREES_MS), { newest: true });
       else {
         const left = { ms: P.epochMs + WITHDRAW_BOUNDARY_LAG_MS };
-        // the next boundary whose epoch root holds the leaf: one more when the first time read was behind the leaf's own
-        do {
+        // the next boundary whose epoch root holds the leaf: one more when the first time read was behind the leaf's own;
+        // two at most, and every wait out of one budget
+        for (let boundaries = 0; leaf.leafIndex >= BigInt(trees.stateTree.size); boundaries++) {
+          if (boundaries === 2) stop("boundary");
           nowMs = await poolTimeAt(P, wait, epochStartMs + P.epochMs, left);
           epochStartMs = nowMs - (nowMs % P.epochMs);
           trees = await P.trees(epochStartMs, AbortSignal.timeout(WITHDRAW_TREES_MS));
-        } while (leaf.leafIndex >= BigInt(trees.stateTree.size));
+        }
         // a queue that held it before the record was written: dropped as at the start
         n = await free();
       }

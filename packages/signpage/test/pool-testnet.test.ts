@@ -1584,3 +1584,91 @@ test("card pool-buy-record-never-stays-sent: the page's buy host writes the take
   assert.deepEqual(posts, ["not_landed"], "posted once");
   await t.signedOut();
 });
+
+// card pool-tree-read-waits-for-its-second, round 3: the app's hidden frame and the top-level withdraw sheet, two pages
+// on one wallet store, each with its own proof queue. The frame's pass runs on its state reads, which every store
+// write wakes (the change event, below); here each wait of the sheet's run stands for one.
+const twoDocs = async (values: bigint[], refs: (NoteRef | undefined)[], times: bigint[]) => {
+  const { world, NOW } = WORLD;
+  const E = SOL_EPOCH_MS as bigint;
+  const B = NOW - (NOW % E) + E;
+  let slept = 0n;
+  let onWait: (() => Promise<unknown>) | null = null;
+  const wd = await world(values, {
+    trees: (state, labels) => async (beforeMs) => {
+      const n = times.filter((t) => t < beforeMs).length;
+      const s = new VaultTree(state.slice(0, n)), l = new VaultTree(labels.slice(0, n));
+      return { stateTree: s, labelTree: l, stateRoot: s.root!, labelRoot: l.root! };
+    },
+    refs,
+    now: () => (slept >= B - NOW ? B : NOW),
+    wait: async (ms) => {
+      slept += BigInt(ms);
+      await onWait?.();
+    },
+  });
+  const qPool = { ...wd.host.pool, bind: (b: Parameters<typeof wd.host.pool.bind>[0], s?: AbortSignal) => wd.host.pool.bind({ ...b, tipCap: b.tipCap ?? 1n }, s) };
+  const fetchFn = (async (_url: string, init: { body: string }) => {
+    const { pool, tx } = JSON.parse(init.body) as { pool: string; tx: string };
+    return new Response(JSON.stringify(await wd.host.send(pool, base64.decode(tx))), { status: 200 });
+  }) as unknown as typeof fetch;
+  const mk = (pool: unknown) => testnetPool({ store: async () => wd.w, seed64: async () => SEED64.slice() }, { pin: wd.host.pin, rpcs: wd.host.rpcs, pool: pool as never, prover: { vault: signalsProver(), stop: () => {} }, fetch: fetchFn, hardwareConcurrency: 4, now: () => NOW + slept, wait: wd.host.wait } as never);
+  return { wd, B, frame: mk(qPool), top: mk(wd.host.pool), onWait: (f: () => Promise<unknown>) => void (onWait = f) };
+};
+const RET: NoteRef = { kind: "return", c: "sol", l: 7n, j: 0 };
+
+test("two pages, TOPO 1: the frame holds the user's note ready; the sheet's funds count it and its withdraw sends once the frame's pass lets it go", async () => {
+  const { wd, frame, top, onWait } = await twoDocs([30_000_000n], [undefined], [WORLD.NOW - 30_000n]);
+  await frame.proofs();
+  assert.equal((await wd.ns.get(wd.ids[0]!))?.state, "HELD", "the frame's ready proof");
+  const funds = await top.withdrawDeps("solana", "op-w").funds();
+  assert.equal(funds.notes.length, 1, "a HELD note not owed is the sheet's to spend");
+  onWait(() => frame.proofs());
+  await top.withdraw({ chain: "solana", to: WORLD.TO, amount: 5_000_000n, maxFee: WORLD.COST }, "op-w");
+  assert.equal(wd.releases.length, 1, JSON.stringify(await wd.w.get("ops", "op-w")));
+});
+
+test("two pages, TOPO 2: a sell's return note, the frame's pass at the boundary: the record keeps the return note out and the sheet's run sends", async () => {
+  const { wd, frame, top, onWait } = await twoDocs([30_000_000n, 30_000_000n], [undefined, RET], [WORLD.NOW - 30_000n, WORLD.NOW - 1n]);
+  await frame.proofs();
+  onWait(() => frame.proofs());
+  await top.withdraw({ chain: "solana", to: WORLD.TO, amount: 2_000_000n + WORLD.MIN, maxFee: WORLD.COST }, "op-w");
+  assert.equal(wd.releases.length, 1, JSON.stringify(await wd.w.get("ops", "op-w")));
+});
+
+test("two pages, TOPO 3: the frame's pass after the boundary holds the return note before the tap: the sheet's funds still count it and the run sends", async () => {
+  const { wd, B, frame, top, onWait } = await twoDocs([30_000_000n, 30_000_000n], [undefined, RET], [WORLD.NOW - 30_000n, WORLD.NOW - 1n]);
+  await frame.proofs();
+  await wd.host.wait!(Number(B - WORLD.NOW));
+  await frame.proofs();
+  assert.deepEqual([(await wd.ns.get(wd.ids[0]!))?.state, (await wd.ns.get(wd.ids[1]!))?.state], ["HELD", "HELD"], "the frame holds both");
+  assert.equal((await top.withdrawDeps("solana", "op-w").funds()).notes.length, 2);
+  onWait(() => frame.proofs());
+  await top.withdraw({ chain: "solana", to: WORLD.TO, amount: 2_000_000n + WORLD.MIN, maxFee: WORLD.COST }, "op-w");
+  assert.equal(wd.releases.length, 1, JSON.stringify(await wd.w.get("ops", "op-w")));
+});
+
+test("the kept-out record's write reaches another page as a store change (its state read, and so its queue's pass), never as a seed move", async () => {
+  const { WALLET_CHANNEL, walletSeedMoved } = await import("@blindfill/wallet/store");
+  const { keepOutNotes, WITHDRAW_PLANNED_KEY } = await import("../src/pool-testnet.ts");
+  const { frameState } = await import("../src/state.ts");
+  const w = await openWalletStore({ indexedDB: new IDBFactory() });
+  await w.insertSeed({ v: 1, entropy: new Uint8Array(16), source: "code", code_saved: true, created_ms: 1 });
+  // the other page's listen and frame state, as main.ts makes them (src/main.ts: the channel, frameState(..., listen))
+  const channel = new BroadcastChannel(WALLET_CHANNEL);
+  const seen: unknown[] = [];
+  let woke = 0;
+  const fs = frameState(async () => null, (fn) => channel.addEventListener("message", (m) => (seen.push((m as MessageEvent).data), fn((m as MessageEvent).data))));
+  fs.watch(() => void woke++);
+  try {
+    await keepOutNotes(w, "op-w", ["n1"], BigInt(Date.now()) + 1_000n);
+    for (let i = 0; i < 200 && woke === 0; i++) await new Promise((r) => setTimeout(r, 5));
+    const e = seen.find((x) => (x as { key?: string }).key === WITHDRAW_PLANNED_KEY) as { kind: string; stores: string[] } | undefined;
+    assert.deepEqual(e && { kind: e.kind, stores: e.stores }, { kind: "changed", stores: ["meta"] });
+    assert.ok(woke >= 1, "the page's watchers (its state read, which runs the queue's pass) are told");
+    assert.equal(walletSeedMoved(e as never), false, "never a seed move");
+  } finally {
+    channel.close();
+    w.close();
+  }
+});
