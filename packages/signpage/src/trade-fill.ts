@@ -57,14 +57,14 @@ const u64 = (b: Uint8Array, at: number): bigint => new DataView(b.buffer, b.byte
 function tokenChanges(pre: unknown, post: unknown, token: string): Map<string, { delta: bigint; decimals: number }> | null {
   if (!Array.isArray(pre) || !Array.isArray(post)) return null;
   const out = new Map<string, { delta: bigint; decimals: number }>();
-  for (const [list, sign] of [[pre, -1n], [post, 1n]] as const) {
+  for (const [list, side] of [[pre, -1n], [post, 1n]] as const) {
     for (const b of list as TokenBalance[]) {
       if (b?.mint !== token) continue;
       const amount = b.uiTokenAmount?.amount;
       const decimals = b.uiTokenAmount?.decimals;
       if (typeof b.owner !== "string" || typeof amount !== "string" || !/^\d{1,40}$/.test(amount) || !Number.isSafeInteger(decimals)) return null;
       const had = out.get(b.owner);
-      out.set(b.owner, { delta: (had?.delta ?? 0n) + sign * BigInt(amount), decimals: decimals as number });
+      out.set(b.owner, { delta: (had?.delta ?? 0n) + side * BigInt(amount), decimals: decimals as number });
     }
   }
   return out;
