@@ -543,3 +543,70 @@ test("every object export of the deposit rules and the quote request is frozen a
   assert.deepEqual(walk(Object.freeze([{ id: "x" }]), "ROWS", []), ["ROWS.0"]);
   assert.deepEqual(walk(new Set([200]), "ANSWERED", []), ["ANSWERED: a Set stays writable when frozen"]);
 });
+
+// Review P3 of card helper-says-why-a-vendor-refused: a read's asks end on its stop. A newer deposit.dry ends the one
+// before it, and the page's sign out (src/main.ts quotesSignedOut) ends every read: no ask leaves after, the pause included.
+/** A pause that ends only when the test says, and says when it began. */
+function heldPause() {
+  const ends: (() => void)[] = [];
+  let began = 0;
+  return { sleep: () => new Promise<void>((ok) => (began++, ends.push(ok))), began: () => began, end: () => ends.splice(0).forEach((ok) => ok()) };
+}
+const turn = () => new Promise((ok) => setImmediate(ok));
+
+test("a newer deposit.dry ends the one before it in its pause: the older asks no more and answers down", async () => {
+  const h = helper({ by: { [SOL_USDC]: { failed: 9 } } });
+  const p = heldPause();
+  const hosts = depositReadHosts({ fetch: h.fetch, now: () => NOW, sleep: p.sleep, deadlineMs: 60_000 });
+  const older = hosts["deposit.dry"]({ origin_asset: SOL_USDC, amount: "25" });
+  while (p.began() < 1) await turn();
+  const newer = hosts["deposit.dry"]({ origin_asset: NEAR_USDC, amount: "25" });
+  // at once, never at its deadline
+  assert.equal(await Promise.race([older.after.then(() => "ended"), new Promise((ok) => setTimeout(() => ok("still paused"), 1_000))]), "ended");
+  assert.deepEqual(older.answer(), { error: "down" });
+  assert.equal(h.sent.filter((s) => s.body?.originAsset === SOL_USDC).length, 1);
+  await newer.after;
+  assert.ok("result" in newer.answer(), JSON.stringify(newer.answer()));
+});
+
+test("the page's stop ends every read in its pause: no re-ask leaves after it", async () => {
+  const h = helper({ quote: { failed: 9 } });
+  const p = heldPause();
+  let stop = new AbortController();
+  const hosts = depositReadHosts({ fetch: h.fetch, now: () => NOW, sleep: p.sleep, stop: () => stop.signal, deadlineMs: 60_000 });
+  const assets = hosts["deposit.assets"]();
+  while (p.began() < ONECLICK_USDC_ASSETS.length) await turn();
+  const asked = h.sent.length;
+  stop.abort(new DOMException("signed out", "AbortError"));
+  stop = new AbortController();
+  p.end();
+  await assets.after;
+  // a pause the stop did not end would ask again now: give it the turns to
+  await new Promise((ok) => setTimeout(ok, 50));
+  assert.deepEqual(assets.answer(), { error: "down" });
+  assert.equal(h.sent.length, asked, "no ask after the stop");
+  assert.equal(asked, 1 + ONECLICK_USDC_ASSETS.length);
+});
+
+test("deposit.quote's asks end on the page's stop: no re-ask after a sign out in its pause", async () => {
+  const h = helper({ quote: { failed: 9 } });
+  const stop = new AbortController();
+  const kind = depositQuoteKind({ origin_asset: SOL_USDC, amount: "25" }, { seed: { source: "code", code_saved: true }, depositId: U, fetch: h.fetch, now: () => NOW, signal: stop.signal });
+  // the committed ask pauses on the wallet's own timer: the stop ends it at once
+  await new Promise((ok) => setTimeout(ok, 50));
+  stop.abort(new DOMException("signed out", "AbortError"));
+  assert.deepEqual(await kind, { ok: false, code: "down" });
+  assert.equal(h.sent.length, 1);
+});
+
+test("a read past its deadline in its pause asks no more: the deadline ends the pause too", async () => {
+  const h = helper({ by: { [SOL_USDC]: { failed: 9 } } });
+  const p = heldPause();
+  const hosts = depositReadHosts({ fetch: h.fetch, now: () => NOW, sleep: p.sleep, deadlineMs: 100 });
+  const dry = hosts["deposit.dry"]({ origin_asset: SOL_USDC, amount: "25" });
+  await dry.after;
+  assert.deepEqual(dry.answer(), { error: "down" });
+  p.end();
+  await new Promise((ok) => setTimeout(ok, 50));
+  assert.equal(h.sent.length, 1, "no ask after the deadline");
+});

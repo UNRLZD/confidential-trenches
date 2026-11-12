@@ -273,3 +273,45 @@ test("a re-ask answered about the request leaves that answer, the request's own,
   assert.deepEqual(await askDepositQuoteAgain(req(), r.fetchFn, r.sleep, r.clock), low);
   assert.equal(r.bodies.length, 2);
 });
+
+// Review P3 of card helper-says-why-a-vendor-refused: the caller's stop ends the asks. A sign out, a superseded read or a
+// refund move's stop during the 500 ms pause sends no second ask; an ask under way is cut; a stop before the first sends none.
+test("a stop during the pause ends it: no second ask leaves, and the asks throw the stop's reason", async () => {
+  const r = replay([NO_LIQ, QUOTED]);
+  const stop = new AbortController();
+  let paused = false;
+  let pauseEnded = false;
+  const sleep = (t: number) => new Promise<void>((ok) => (r.waits.push(t), (paused = true), setTimeout(() => ((pauseEnded = true), ok()), 2_000).unref()));
+  const signals: (AbortSignal | null | undefined)[] = [];
+  const fetchFn = ((u: string | URL | Request, init?: RequestInit) => (signals.push(init?.signal), r.fetchFn(u, init))) as typeof fetch;
+  const asked = askDepositQuoteAgain(req(), fetchFn, sleep, r.clock, stop.signal);
+  while (!paused) await new Promise((ok) => setImmediate(ok));
+  stop.abort(new Error("signed out"));
+  await assert.rejects(asked, /signed out/);
+  assert.equal(pauseEnded, false, "the stop ends the pause, not its timer");
+  assert.equal(r.bodies.length, 1);
+  // every ask carries the stop beside its own timeout
+  assert.equal(signals[0]?.aborted, true);
+});
+
+test("a stop before the first ask sends none; a stop while an ask is under way cuts it and asks no more", async () => {
+  const r = replay([QUOTED]);
+  const stop = new AbortController();
+  stop.abort(new Error("signed out"));
+  await assert.rejects(askDepositQuoteAgain(req(), r.fetchFn, r.sleep, r.clock, stop.signal), /signed out/);
+  assert.equal(r.bodies.length, 0);
+  const late = new AbortController();
+  let sent = 0;
+  const hang = (async (_u: string | URL | Request, init?: RequestInit) => {
+    sent++;
+    if (sent === 1) return new Response(JSON.stringify(NO_LIQ.body), { status: 400, headers: { "content-type": "application/json" } });
+    return await new Promise<Response>((_ok, no) => init!.signal!.addEventListener("abort", () => no(init!.signal!.reason)));
+  }) as typeof fetch;
+  const asked = askDepositQuoteAgain(req(), hang, async () => {}, () => 0, late.signal);
+  while (sent < 2) await new Promise((ok) => setImmediate(ok));
+  // the callers' stops are AbortErrors (src/main.ts quotesSignedOut, deposit-wire.ts), which a failed ask is too: the
+  // stop is thrown, never read as a failed re-ask that leaves the standing answer
+  late.abort(new DOMException("superseded", "AbortError"));
+  await assert.rejects(asked, /superseded/);
+  assert.equal(sent, 2);
+});

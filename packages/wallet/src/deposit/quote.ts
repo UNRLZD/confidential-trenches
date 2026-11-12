@@ -242,20 +242,25 @@ const askFailed = (e: unknown): boolean =>
  * same way, and the display reads ask this way too (signpage rules/deposit-dry.ts): a sheet that asked its assets once
  * showed Not available for a few minutes of 1Click 400s (live run 43289730843). A re-ask 1Click answers about the request
  * (ABOUT_THE_REQUEST) ends the asks with that answer.
+ * `signal` (review P3 of that card): the caller's stop (a refund move's, a superseded read's, the page's sign out). Once it
+ * aborts, the pause ends, no ask leaves and an ask under way is cut; the asks throw its reason, never answer.
  */
-export async function askDepositQuoteAgain(request: OneClickRequest, fetchFn: typeof fetch = fetch, sleep: (ms: number) => Promise<void> = pause, clock: () => number = Date.now): Promise<DepositQuoteReply> {
+export async function askDepositQuoteAgain(request: OneClickRequest, fetchFn: typeof fetch = fetch, sleep: (ms: number) => Promise<void> = pause, clock: () => number = Date.now, signal?: AbortSignal): Promise<DepositQuoteReply> {
+  signal?.throwIfAborted();
   const end = clock() + DEPOSIT_QUOTE_TIMEOUT_MS;
-  let reply = await askOnce(request, fetchFn, DEPOSIT_QUOTE_TIMEOUT_MS);
+  let reply = await askOnce(request, fetchFn, DEPOSIT_QUOTE_TIMEOUT_MS, signal);
   for (const ms of NO_LIQUIDITY_PAUSES_MS) {
     if (!askAgainFor(reply) || end - clock() - ms < NO_LIQUIDITY_ASK_MIN_MS) break;
-    await sleep(ms);
+    await stoppable(sleep(ms), signal);
+    signal?.throwIfAborted();
     // never more than the one ask's own window, whatever the clock reads (a wall clock set back mid-ask)
     const left = Math.min(Math.floor(end - clock()), DEPOSIT_QUOTE_TIMEOUT_MS);
     if (!(left >= NO_LIQUIDITY_ASK_MIN_MS)) break;
     let next: DepositQuoteReply;
     try {
-      next = await askOnce(request, fetchFn, left);
+      next = await askOnce(request, fetchFn, left, signal);
     } catch (e) {
+      signal?.throwIfAborted();
       if (askFailed(e)) break;
       throw e;
     }
@@ -269,15 +274,28 @@ export async function askDepositQuoteAgain(request: OneClickRequest, fetchFn: ty
 }
 
 const pause = (ms: number): Promise<void> => new Promise((ok) => setTimeout(ok, ms));
+/** `p`, ended early by `signal`'s abort (its reason thrown). */
+function stoppable(p: Promise<void>, signal?: AbortSignal): Promise<void> {
+  if (!signal) return p;
+  return new Promise((ok, no) => {
+    const stop = () => no(signal.reason);
+    if (signal.aborted) return stop();
+    signal.addEventListener("abort", stop, { once: true });
+    p.then(
+      () => (signal.removeEventListener("abort", stop), ok()),
+      (e) => (signal.removeEventListener("abort", stop), no(e)),
+    );
+  });
+}
 
-async function askOnce(request: OneClickRequest, fetchFn: typeof fetch, timeoutMs: number): Promise<DepositQuoteReply> {
+async function askOnce(request: OneClickRequest, fetchFn: typeof fetch, timeoutMs: number, signal?: AbortSignal): Promise<DepositQuoteReply> {
   const res = await fetchFn(DEPOSIT_QUOTE_URL, {
     ...HELPER_FETCH_INIT,
     redirect: "error",
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(request),
-    signal: AbortSignal.timeout(timeoutMs),
+    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs),
   });
   const bytes = await readCapped(res, DEPOSIT_QUOTE_ANSWER_MAX);
   let body: unknown;

@@ -208,6 +208,15 @@ const poolFollow = !framed
   : null;
 // pool.withdraw's screen (src/withdraw/pool-form.ts): the chain the app named and the request's id, the op's id in state.ops
 let poolWithdraw: { chain: PoolChain; opId: string } | null = null;
+// Sign out (this tab's or another's) stops every quote's asks (card helper-says-why-a-vendor-refused, review P3):
+// deposit.quote, pool.address and the deposit sheet's reads send nothing more, a re-ask's pause included.
+let quotesStop = new AbortController();
+const quotesStopped = (): AbortSignal => quotesStop.signal;
+function quotesSignedOut(): void {
+  quotesStop.abort(new DOMException("signed out", "AbortError"));
+  quotesStop = new AbortController();
+}
+// declared before the API starts below (its kinds read quotesStopped)
 if (framed) document.body.append(root);
 else {
   // the shell's own channel: it hears this document's store and other tabs' (a sign-in, Saved, a sign out)
@@ -398,13 +407,13 @@ else {
       // the form withdraws from the vault's notes; with a one-time id (from_id) the held deposit's way out
       "withdraw.open": (p) => (takesParams("withdraw.open", p) ? openKind("withdraw.open", undefined, typeof p.from_id === "string" ? p.from_id : undefined) : null),
       // from public records only (src/deposit-wire.ts): U named ahead by this page (src/deposit-name.ts), never the seed
-      "deposit.quote": depositQuoteHost({ scope: pageScope, read: fs.depositRead, named: () => namer.named(), checked: (id, r, u) => follows!.quoted(id, r, u) }),
+      "deposit.quote": depositQuoteHost({ scope: pageScope, read: fs.depositRead, named: () => namer.named(), checked: (id, r, u) => follows!.quoted(id, r, u), stop: quotesStopped }),
       // the deposit sheet's reads before any address (src/deposit-wire.ts depositReadHosts): public data only
-      ...depositReadHosts(),
+      ...depositReadHosts({ stop: quotesStopped }),
       // where money for a pool goes (src/pool-deposit-address.ts): U_X from its scope's public record, named ahead by this
       // page; a quote from another chain at the device's own price reads and floor, its address only once the follow
       // took it (src/pool-deposit-follow.ts), on mainnet only
-      "pool.address": poolAddressHost({ pools: pageAddressPools, network: PAGE_NETWORK, read: fs.depositRead, named: () => namer.named(), priced: pricedFor, floor: floorFor, checked: (id, chain, quote, u) => poolFollow!.quoted(id, chain, quote, u) }),
+      "pool.address": poolAddressHost({ pools: pageAddressPools, network: PAGE_NETWORK, read: fs.depositRead, named: () => namer.named(), priced: pricedFor, floor: floorFor, checked: (id, chain, quote, u) => poolFollow!.quoted(id, chain, quote, u), stop: quotesStopped }),
       buy: trades,
       // the pool kinds (src/pool-kinds.ts): each checked by src/rules/pool.ts, answered only on a pool this page's
       // network pins (src/pool-testnet.ts, whose flow runs deposit, buy, sell and withdraw on every build; a network with
@@ -810,6 +819,7 @@ const open = async (): Promise<WalletStore> => {
       followsClosed = false;
       openedBy = null;
       void testnet?.signedOut();
+      quotesSignedOut();
       restore?.signedOut();
       follows?.signedOut();
       poolFollow?.stop();
@@ -856,6 +866,7 @@ function storeMoved(e: WalletEvent): void {
   if (e.kind === "signout") {
     void testnet?.signedOut();
     withdrawsSignedOut();
+    quotesSignedOut();
   }
   void resync();
 }
@@ -1079,6 +1090,8 @@ async function cancel(): Promise<void> {
 async function signOut(): Promise<void> {
   topLevelOnly();
   const s = await open();
+  // no quote asks again once Sign out is tapped
+  quotesSignedOut();
   // a restore holds the seed lock shared, which the sign out waits for: it stops first
   restore?.signedOut();
   // a deposit's follow stops too: its op stays at its stage (src/deposit-follow.ts)
@@ -1142,6 +1155,6 @@ if (framed) {
     state: fs.state,
     watch: fs.watch,
     // deposit.quote only on the top-level page, which follows its address (src/deposit-follow.ts): the frame refuses it
-    kinds: { ...depositReadHosts() },
+    kinds: { ...depositReadHosts({ stop: quotesStopped }) },
   });
 }

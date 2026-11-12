@@ -479,3 +479,17 @@ test("evm-deposit-route-mainnet review: readEvmPoolFloor reads every value at th
     evmPoolDepositFloor({ baseFee: 5_000_000n, tip: EVM_DEPOSIT_PRIORITY_CAP, l1Fee: 7_000_000_000n + gas * 3n, stateDepth: 3n, labelDepth: 2n }),
   );
 });
+
+// Review P3 of card helper-says-why-a-vendor-refused: the page's stop (src/main.ts quotesSignedOut) reaches the quote's
+// re-ask: a sign out in its pause sends no second quote and gives no address.
+test("a sign out in the quote's re-ask pause: no second quote leaves, no address, nothing handed to the follow", async () => {
+  const w = world({ noLiquidity: 99 });
+  const stop = new AbortController();
+  w.deps.stop = () => stop.signal;
+  const asked = ask(w, { chain: "solana", origin_asset: BASE_USDC, amount: "25" });
+  while (w.sent.length < 1) await new Promise((ok) => setImmediate(ok));
+  stop.abort(new DOMException("signed out", "AbortError"));
+  assert.deepEqual(await asked, { error: "down" });
+  assert.equal(w.sent.length, 1);
+  assert.equal(w.took.length, 0);
+});

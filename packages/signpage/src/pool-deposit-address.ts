@@ -77,6 +77,9 @@ export interface PoolAddressDeps {
   floor?(chain: PoolChain, wallet: string): Promise<bigint | null>;
   checked?(id: string, chain: PoolChain, result: NonNullable<SignpageResults["pool.address"]["quote"]>, u: { scope: bigint; index: number; wallet: string; refundId: string }): Promise<void>;
   fetch?: typeof fetch;
+  /** The page's stop for the quote's asks (card helper-says-why-a-vendor-refused, review P3). Once it aborts no ask
+   *  leaves (packages/wallet/src/deposit/quote.ts askDepositQuoteAgain). */
+  stop?: () => AbortSignal;
   now?: () => number;
 }
 
@@ -214,7 +217,7 @@ export function poolAddressHost(deps: PoolAddressDeps): (params: Record<string, 
       let reply;
       try {
         // asked again on 1Click's no-liquidity answer, inside the one ask's window (card deposit-quote-no-liquidity)
-        reply = await askDepositQuoteAgain(request, deps.fetch);
+        reply = await askDepositQuoteAgain(request, deps.fetch, undefined, undefined, deps.stop?.());
       } catch {
         return void (out = { error: "down" });
       }
