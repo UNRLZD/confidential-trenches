@@ -15,6 +15,7 @@ import {
   amountWrong,
   busy,
   centsToDecimal,
+  coinTapKey,
   filledOut,
   fmtUsd,
   hasPool,
@@ -31,6 +32,7 @@ import {
   setMatches,
   tap,
   unavailable,
+  withCoinTap,
 } from "./model.ts";
 import type { Cents, Phase } from "./model.ts";
 import { EndLine, hasRunLabel, RunLabel, stateId } from "./States.tsx";
@@ -166,7 +168,30 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
   const amount = text === "" ? null : parseUsd(text);
   // the pool path (card trade-box-pool): a chain whose pool the signing page reports buys from it, one proof a tap; Bal
   // is the pool's balance and Max the most one tap can spend, in USD at the device's price. Other chains keep the vault.
-  const pools = signedOut ? undefined : snapshot.state?.pools;
+  const statePools = signedOut ? undefined : snapshot.state?.pools;
+  // Max for the coin on screen (card max-is-priced-for-the-coin): the page's pool.buy.dry, the tap's spend on this
+  // coin's own venue; state.pools' own (the costliest venue's) until it answers for this coin and these proofs
+  const coinKey = on ? coinTapKey(statePools, chain, token) : null;
+  const [coinTap, setCoinTap] = useState<{ key: string; tap_max: string } | null>(null);
+  const request = useRef(kit.request);
+  request.current = kit.request;
+  useEffect(() => {
+    const ask = request.current;
+    if (coinKey === null || !ask) return;
+    let live = true;
+    try {
+      ask("pool.buy.dry", { chain: "solana", token }).outcome.then(
+        (o) => live && o.ok && setCoinTap({ key: coinKey, tap_max: o.result.tap_max }),
+        () => {},
+      );
+    } catch {
+      // no client to ask: state.pools' Max stays
+    }
+    return () => {
+      live = false;
+    };
+  }, [coinKey, kit.request !== null]);
+  const pools = withCoinTap(statePools, chain, coinTap !== null && coinTap.key === coinKey ? coinTap.tap_max : null);
   const onPool = hasPool(pools, chain);
   const price = onPool ? kit.poolPrice(chain) : null;
   const pool = onPool ? poolView(pools, chain, price) : null;

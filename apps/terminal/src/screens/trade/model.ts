@@ -339,6 +339,30 @@ export function poolView(pools: SignpageState["pools"], chain: Chain, price: Poo
   return { asset: p.asset, balance: unitsToCents(bal, price), tapMax: tap === null ? null : unitsToCents(tap, price), proof: proofStatus(pools, chain) };
 }
 
+/**
+ * What Max for the coin on screen is asked for (card max-is-priced-for-the-coin): the signing page's pool.buy.dry, the
+ * chain's tap_max on the coin's own venue. The key names the coin and the proofs state.pools priced (its ready and
+ * tap_max): an answer counts only while they are the same. Null where state.pools' tap_max is already the coin's
+ * (Base and Robinhood: a tap spends a whole chunk) or there is none to price (no Solana pool, no proof ready).
+ */
+export function coinTapKey(pools: SignpageState["pools"], chain: Chain, token: string): string | null {
+  const p = chain === "solana" ? poolOf(pools, chain) : null;
+  return p && token !== "" && p.ready !== undefined && p.tap_max !== undefined ? JSON.stringify([token, p.ready, p.tap_max]) : null;
+}
+
+/** state.pools with the chain's tap_max the coin's (`coinTap`, pool.buy.dry's answer for coinTapKey's coin and proofs)
+ *  in place of the costliest venue's; as they are with none, or with one that is not a decimal at most the entry's
+ *  ready. Every Max of the box (poolView, poolBuyAsk, the presets) reads the pools it gives. */
+export function withCoinTap(pools: SignpageState["pools"], chain: Chain, coinTap: string | null): SignpageState["pools"] {
+  const p = coinTap === null || chain !== "solana" ? null : poolOf(pools, chain);
+  if (!p || p.ready === undefined || p.tap_max === undefined) return pools;
+  const d = POOL_ASSET_DECIMALS[p.asset];
+  const tap = decimalToUnits(coinTap!, d);
+  const ready = decimalToUnits(p.ready, d);
+  if (tap === null || ready === null || tap > ready) return pools;
+  return pools!.map((x) => (x === p ? { ...x, tap_max: coinTap! } : x));
+}
+
 export type PoolBuyAsk =
   | { ok: true; kind: "pool.buy"; params: SignpageParams["pool.buy"] }
   | { ok: false; why: "no_pool" | "no_price" | "no_proof" | "too_small" | "over_tap" | "chunk" };

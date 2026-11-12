@@ -6,7 +6,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { SignpageState } from "@blindfill/kit";
-import { amountText, amountWrong, centsToUnits, decimalToUnits, parseUsd, poolBuyAsk, poolSellAsk, poolView, presetsOf, PRESETS, unitsToCents, unitsToDecimal } from "../src/screens/trade/model.ts";
+import { amountText, amountWrong, centsToUnits, coinTapKey, decimalToUnits, parseUsd, poolBuyAsk, poolSellAsk, poolView, presetsOf, PRESETS, unitsToCents, unitsToDecimal, withCoinTap } from "../src/screens/trade/model.ts";
 
 type Pool = NonNullable<SignpageState["pools"]>[number];
 // Pyth SOL/USD as read on 4 Nov 07:40Z (packages/kit/src/price/pool-usd.ts): $93.01048308
@@ -118,4 +118,30 @@ test("the presets row: on Base and Robinhood one button holding the chunk's USD,
   assert.deepEqual(presetsOf("solana", null), PRESETS);
   assert.deepEqual(presetsOf("near", null), PRESETS);
   assert.equal(amountText(2_500n), "25");
+});
+
+test("Max for the coin on screen (card max-is-priced-for-the-coin): the page's pool.buy.dry in place of state.pools' tap_max, for that coin and those proofs only", () => {
+  // the owner's mainnet piece: one 0.01 SOL proof; state.pools prices the costliest venue (0.00038488 SOL), the page's
+  // pool.buy.dry the coin's own (a Token mint's coin with no cashback: 0.00337192 SOL)
+  const pools = [sol("0.01", "0.01", "0.00038488")];
+  const key = coinTapKey(pools, "solana", "Mint1");
+  assert.equal(key, JSON.stringify(["Mint1", "0.01", "0.00038488"]));
+  // the key moves with the coin and with the proofs, so an answer for another coin or other proofs is never used
+  assert.notEqual(coinTapKey(pools, "solana", "Mint2"), key);
+  assert.notEqual(coinTapKey([sol("0.02", "0.02", "0.00038488")], "solana", "Mint1"), key);
+  assert.notEqual(coinTapKey([sol("0.01", "0.01", "0.0004")], "solana", "Mint1"), key);
+  // nothing to ask: no proof ready, no tap_max, no token, Base and Robinhood (a whole chunk), no pool
+  for (const [p, chain, token] of [[[sol("0.01")], "solana", "Mint1"], [[sol("0.01", "0.01")], "solana", "Mint1"], [pools, "solana", ""], [[base("0.01", "0.01", "0.01")], "base", "0xT"], [undefined, "solana", "Mint1"]] as const)
+    assert.equal(coinTapKey(p as SignpageState["pools"], chain, token), null, JSON.stringify([p, chain]));
+  const coin = withCoinTap(pools, "solana", "0.00337192");
+  assert.deepEqual(coin, [sol("0.01", "0.01", "0.00337192")]);
+  // Max and the ask read it: $0.31 where the costliest venue gave $0.03, and an amount up to it asks the buy
+  assert.equal(poolView(pools, "solana", SOL)!.tapMax, 3n);
+  assert.equal(poolView(coin, "solana", SOL)!.tapMax, 31n);
+  assert.deepEqual(poolBuyAsk(pools, "solana", "Mint1", 31n, SOL, 300), { ok: false, why: "over_tap" });
+  const ask = poolBuyAsk(coin, "solana", "Mint1", 31n, SOL, 300);
+  assert.ok(ask.ok && decimalToUnits(ask.params.amount, 9)! <= 3_371_920n);
+  assert.deepEqual(poolBuyAsk(coin, "solana", "Mint1", 32n, SOL, 300), { ok: false, why: "over_tap" });
+  // as they are: no answer, an answer that is no decimal or more than ready, another chain
+  for (const [tap, chain] of [[null, "solana"], ["x", "solana"], ["0.02", "solana"], ["0.00337192", "base"]] as const) assert.equal(withCoinTap(pools, chain, tap), pools, JSON.stringify(tap));
 });
