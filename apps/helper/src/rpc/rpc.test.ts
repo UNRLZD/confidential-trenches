@@ -192,6 +192,43 @@ for (const [name, program, config] of ONE_OFF)
     }
     assert.equal(seen.length, 0, "nothing reached a provider");
   });
+// card buy-spends-several-pieces: getBlock only as the found W's header read (rpc.ts blockHeaderAllowed); each case below
+// differs from HEADER in one thing only
+const HEADER = { commitment: "finalized", encoding: "json", transactionDetails: "none", rewards: false, maxSupportedTransactionVersion: 0 };
+const block = (params: unknown) => ({ jsonrpc: "2.0", id: 4, method: "getBlock", params });
+test("getBlock (card buy-spends-several-pieces): the header read at finalized is forwarded on solana and solana-devnet, alone or in a batch", async () => {
+  next = { status: 200, type: JSON_T, body: echo };
+  const r = createRpc({ SOLANA_RPC_URL: `${base}/?api-key=${KEY}`, SOLANA_DEVNET_RPC_URL: `${base}/devnet` });
+  seen.length = 0;
+  for (const chain of ["solana", "solana-devnet"] as const) {
+    assert.equal((await call(r, chain, block([412_000_000, HEADER]))).status, 200, chain);
+    assert.equal((await call(r, chain, [{ jsonrpc: "2.0", id: 2, method: "getSlot" }, block([0, HEADER])])).status, 200, `${chain} in a batch`);
+  }
+  assert.equal(seen.length, 4);
+});
+for (const [name, params] of [
+  ["its transactions", [1, { ...HEADER, transactionDetails: "full" }]],
+  ["its signatures", [1, { ...HEADER, transactionDetails: "signatures" }]],
+  ["its rewards", [1, { ...HEADER, rewards: true }]],
+  ["no rewards key (the provider's default is true)", [1, (({ rewards: _r, ...c }) => c)(HEADER)]],
+  ["confirmed", [1, { ...HEADER, commitment: "confirmed" }]],
+  ["another encoding", [1, { ...HEADER, encoding: "base64" }]],
+  ["another key", [1, { ...HEADER, x: 1 }]],
+  ["no config", [1]],
+  ["a slot that is not a whole number", ["1", HEADER]],
+  ["a negative slot", [-1, HEADER]],
+  ["a third param", [1, HEADER, {}]],
+] as const)
+  test(`getBlock refused 400 before any call: ${name}`, async () => {
+    next = { status: 200, type: JSON_T, body: echo };
+    const r = createRpc({ SOLANA_RPC_URL: `${base}/?api-key=${KEY}`, SOLANA_DEVNET_RPC_URL: `${base}/devnet` });
+    seen.length = 0;
+    for (const b of [block(params), [{ jsonrpc: "2.0", id: 2, method: "getSlot" }, block(params)]]) {
+      const a = await call(r, "solana", b);
+      assert.deepEqual([a.status, code(a)], [400, "method_not_allowed"], JSON.stringify(b));
+    }
+    assert.equal(seen.length, 0, "nothing reached a provider");
+  });
 // card pool-senders-next-page-helper (the expand): POOL_SOLANA_PROGRAM_DEVNET may list several devnet programs, comma
 // apart, while a re-pinned devnet pool and the one before it are served side by side; mainnet stays exactly one
 test("getProgramAccounts: each devnet program the host lists, comma apart, is scanned; any other is refused; mainnet takes no list", async () => {

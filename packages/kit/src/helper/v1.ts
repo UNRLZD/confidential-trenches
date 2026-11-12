@@ -214,6 +214,10 @@ export const HELPER_RPC_METHODS = {
     "getFeeForMessage",
     "getBlockTime",
     "getEpochInfo",
+    // a found W's sweep (signpage pool-sell.ts foundQuiet, card buy-spends-several-pieces): the finalized height of the
+    // block W's latest transaction is in. The helper forwards it only as a header read (apps/helper/src/rpc/rpc.ts
+    // blockHeaderAllowed: transactionDetails none, no rewards, finalized), never a block's transactions
+    "getBlock",
     // a note restore's scan of the pool program (wallet pool/solana-restore.ts, memcmp-filtered). The heaviest read on
     // the list: the helper forwards it only on its own pinned pool program with a dataSize and a memcmp filter (review
     // L-2, apps/helper/src/rpc/rpc.ts scanAllowed), within the caller's share (16 per 10 s), the per-method budget, the

@@ -571,6 +571,21 @@ function scanAllowed(r: Record<string, unknown>, programs: readonly string[]): b
 }
 
 /**
+ * getBlock only as a header read (card buy-spends-several-pieces): the signing page reads the finalized height of one
+ * block, the one a found W's latest transaction is in (packages/signpage/src/pool-sell.ts foundQuiet), as params exactly
+ * [slot, { commitment: "finalized", encoding: "json", transactionDetails: "none", rewards: false,
+ * maxSupportedTransactionVersion: 0 }], the slot a whole number. A block's transactions, signatures or rewards (megabytes
+ * an answer) would spend the keyed provider's quota for every caller. Anything else is refused before any call.
+ */
+const BLOCK_HEADER = Object.freeze({ commitment: "finalized", encoding: "json", transactionDetails: "none", rewards: false, maxSupportedTransactionVersion: 0 });
+function blockHeaderAllowed(r: Record<string, unknown>): boolean {
+  const p = r.params;
+  if (!Array.isArray(p) || p.length !== 2 || !Number.isSafeInteger(p[0]) || (p[0] as number) < 0 || !isPlain(p[1])) return false;
+  const c = p[1];
+  return exactKeys(c, Object.keys(BLOCK_HEADER)) && Object.entries(BLOCK_HEADER).every(([k, v]) => c[k] === v);
+}
+
+/**
  * The mark scan's two providers (card sol-pools-mainnet-pin): `a`, the URL set under MARKS_A_ENV, and `b`, the
  * solana-marks route's keyed URLs, in order, whose company (operatorOf) is not a's. The signing page lists the mainnet
  * pool's marks on route b alone (packages/signpage/src/pool-testnet.ts pageSolanaLister) and reads each listed address on
@@ -601,6 +616,7 @@ function check(chain: RpcChain, r: unknown, scan: readonly string[] = []): Recor
   if (typeof r.method !== "string" || !RPC_METHODS[chain].includes(r.method)) return undefined;
   if (Object.hasOwn(r, "params") && !isPlain(r.params) && !Array.isArray(r.params)) return undefined;
   if (r.method === "getProgramAccounts" && !scanAllowed(r, scan)) return undefined;
+  if (r.method === "getBlock" && !blockHeaderAllowed(r)) return undefined;
   const out: Record<string, unknown> = { jsonrpc: "2.0", id, method: r.method };
   if (Object.hasOwn(r, "params")) out.params = r.params;
   return out;
