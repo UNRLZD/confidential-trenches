@@ -6,63 +6,83 @@
     "beforePrice": "card/round-trip-costs-less 591044f67 build (mainnet), the sale's closes taken out, before its price was read from recent fees: FAIL on the price rules alone"
   },
   "good": {
-    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-5nqwyZYXvkmrSRzwB6bfGrV2Wt8n5Jx6ds4vbG6QUKzaQ4hgkKxp5xo2Rz4qEclo\"></script>\n  </head>\n  <body></body>\n</html>\n",
-    "sha384": "sha384-5nqwyZYXvkmrSRzwB6bfGrV2Wt8n5Jx6ds4vbG6QUKzaQ4hgkKxp5xo2Rz4qEclo",
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-jispnv6q+KNL8sKrVIvEH23skAX3yfqyRQS4coDjjTN9ntI4Nj7999VMwzQzsBuQ\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-jispnv6q+KNL8sKrVIvEH23skAX3yfqyRQS4coDjjTN9ntI4Nj7999VMwzQzsBuQ",
     "carries": {
-      "the sale's price per compute unit is the lower of both RPCs' 75th percentile of recent fees on the accounts it writes, at least 1; a read that fails or is not a list of prices: none": true,
-      "the sale is priced at that, read beside its first simulation: the budget at the lower of that price and what the priority's cap buys, the cap where none was read": true,
+      "the sale's price per compute unit is the higher of both RPCs' 75th percentile of recent fees on the accounts it writes, at least 1, each read the RPC's optional read (once, its throttle reported to no lane, never to a host not open); a read that fails, is not a list of prices or is empty: none": true,
+      "the sale is priced at that only if it is answered by its first simulation, never waited for: the budget at the lower of that price and what the priority's cap buys, the cap where none was read; a W whose sale did not land pays the cap next, with no read, until one lands": true,
       "the sale's owed record keeps W's proven buy": true,
       "every W of the account's found on the helper's seat alone, in batches; one with no record the helper reads empty listed empty; a W read as at its last end on its own state read on neither seat; the load's own reads only with a W to pass": true,
       "the Ws passed in an order drawn from the device's random source, a second and up to a second more apart": true,
       "W's buy proven on the public seat alone, once, against the restore's rebuilt record or its no-buy mark": true,
       "an unproven W tried again on each load to its third pass, then held as its own state": true,
       "the positions' passes held only while a W is read": true,
-      "the page reads the restore's no-buy mark": true
+      "the page reads the restore's no-buy mark": true,
+      "the sell's rule refuses a sale that pays more than 100,000 lamports of priority (a price with no limit at 1,400,000 units, rounded up as the runtime charges it) and a full sell's fee over 105,000": true
     }
   },
   "bad": {
     "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-Dag0rSWPXOaLdRbi52nSQr0qxs9MDQCh5OuDtrcycwLRFkiKvf0gi6s9qDRyLM5A\"></script>\n  </head>\n  <body></body>\n</html>\n",
     "sha384": "sha384-Dag0rSWPXOaLdRbi52nSQr0qxs9MDQCh5OuDtrcycwLRFkiKvf0gi6s9qDRyLM5A",
     "carries": {
-      "the sale's price per compute unit is the lower of both RPCs' 75th percentile of recent fees on the accounts it writes, at least 1; a read that fails or is not a list of prices: none": false,
-      "the sale is priced at that, read beside its first simulation: the budget at the lower of that price and what the priority's cap buys, the cap where none was read": false,
+      "the sale's price per compute unit is the higher of both RPCs' 75th percentile of recent fees on the accounts it writes, at least 1, each read the RPC's optional read (once, its throttle reported to no lane, never to a host not open); a read that fails, is not a list of prices or is empty: none": false,
+      "the sale is priced at that only if it is answered by its first simulation, never waited for: the budget at the lower of that price and what the priority's cap buys, the cap where none was read; a W whose sale did not land pays the cap next, with no read, until one lands": false,
       "the sale's owed record keeps W's proven buy": false,
       "every W of the account's found on the helper's seat alone, in batches; one with no record the helper reads empty listed empty; a W read as at its last end on its own state read on neither seat; the load's own reads only with a W to pass": false,
       "the Ws passed in an order drawn from the device's random source, a second and up to a second more apart": false,
       "W's buy proven on the public seat alone, once, against the restore's rebuilt record or its no-buy mark": false,
       "an unproven W tried again on each load to its third pass, then held as its own state": false,
       "the positions' passes held only while a W is read": false,
-      "the page reads the restore's no-buy mark": false
+      "the page reads the restore's no-buy mark": false,
+      "the sell's rule refuses a sale that pays more than 100,000 lamports of priority (a price with no limit at 1,400,000 units, rounded up as the runtime charges it) and a full sell's fee over 105,000": false
     }
   },
   "beforeReview": {
     "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-Nkyl1yXuJqCdm7Pd7tifE0xi9Y6a26LmY4ECIOE1sBrzu+CCorl8Wt9G9ORmKXtT\"></script>\n  </head>\n  <body></body>\n</html>\n",
     "sha384": "sha384-Nkyl1yXuJqCdm7Pd7tifE0xi9Y6a26LmY4ECIOE1sBrzu+CCorl8Wt9G9ORmKXtT",
     "carries": {
-      "the sale's price per compute unit is the lower of both RPCs' 75th percentile of recent fees on the accounts it writes, at least 1; a read that fails or is not a list of prices: none": false,
-      "the sale is priced at that, read beside its first simulation: the budget at the lower of that price and what the priority's cap buys, the cap where none was read": false,
+      "the sale's price per compute unit is the higher of both RPCs' 75th percentile of recent fees on the accounts it writes, at least 1, each read the RPC's optional read (once, its throttle reported to no lane, never to a host not open); a read that fails, is not a list of prices or is empty: none": false,
+      "the sale is priced at that only if it is answered by its first simulation, never waited for: the budget at the lower of that price and what the priority's cap buys, the cap where none was read; a W whose sale did not land pays the cap next, with no read, until one lands": false,
       "the sale's owed record keeps W's proven buy": false,
       "every W of the account's found on the helper's seat alone, in batches; one with no record the helper reads empty listed empty; a W read as at its last end on its own state read on neither seat; the load's own reads only with a W to pass": false,
       "the Ws passed in an order drawn from the device's random source, a second and up to a second more apart": false,
       "W's buy proven on the public seat alone, once, against the restore's rebuilt record or its no-buy mark": false,
       "an unproven W tried again on each load to its third pass, then held as its own state": false,
       "the positions' passes held only while a W is read": false,
-      "the page reads the restore's no-buy mark": false
+      "the page reads the restore's no-buy mark": false,
+      "the sell's rule refuses a sale that pays more than 100,000 lamports of priority (a price with no limit at 1,400,000 units, rounded up as the runtime charges it) and a full sell's fee over 105,000": false
     }
   },
   "beforePrice": {
     "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-QCTSV07XQgquxrN9wYzYUzOxClEFzdoYsFA7gdvYarylPCm6s4mTn1SFO2yw68cR\"></script>\n  </head>\n  <body></body>\n</html>\n",
     "sha384": "sha384-QCTSV07XQgquxrN9wYzYUzOxClEFzdoYsFA7gdvYarylPCm6s4mTn1SFO2yw68cR",
     "carries": {
-      "the sale's price per compute unit is the lower of both RPCs' 75th percentile of recent fees on the accounts it writes, at least 1; a read that fails or is not a list of prices: none": false,
-      "the sale is priced at that, read beside its first simulation: the budget at the lower of that price and what the priority's cap buys, the cap where none was read": false,
+      "the sale's price per compute unit is the higher of both RPCs' 75th percentile of recent fees on the accounts it writes, at least 1, each read the RPC's optional read (once, its throttle reported to no lane, never to a host not open); a read that fails, is not a list of prices or is empty: none": false,
+      "the sale is priced at that only if it is answered by its first simulation, never waited for: the budget at the lower of that price and what the priority's cap buys, the cap where none was read; a W whose sale did not land pays the cap next, with no read, until one lands": false,
       "the sale's owed record keeps W's proven buy": true,
       "every W of the account's found on the helper's seat alone, in batches; one with no record the helper reads empty listed empty; a W read as at its last end on its own state read on neither seat; the load's own reads only with a W to pass": true,
       "the Ws passed in an order drawn from the device's random source, a second and up to a second more apart": true,
       "W's buy proven on the public seat alone, once, against the restore's rebuilt record or its no-buy mark": true,
       "an unproven W tried again on each load to its third pass, then held as its own state": true,
       "the positions' passes held only while a W is read": true,
-      "the page reads the restore's no-buy mark": true
+      "the page reads the restore's no-buy mark": true,
+      "the sell's rule refuses a sale that pays more than 100,000 lamports of priority (a price with no limit at 1,400,000 units, rounded up as the runtime charges it) and a full sell's fee over 105,000": false
+    }
+  },
+  "beforeFix": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-7aJJhdAtotPiErWkHUaqQukf/99BiYjB0sLc8xgsaETTuVW4rsyspifU+id4A3ad\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-7aJJhdAtotPiErWkHUaqQukf/99BiYjB0sLc8xgsaETTuVW4rsyspifU+id4A3ad",
+    "carries": {
+      "the sale's price per compute unit is the higher of both RPCs' 75th percentile of recent fees on the accounts it writes, at least 1, each read the RPC's optional read (once, its throttle reported to no lane, never to a host not open); a read that fails, is not a list of prices or is empty: none": false,
+      "the sale is priced at that only if it is answered by its first simulation, never waited for: the budget at the lower of that price and what the priority's cap buys, the cap where none was read; a W whose sale did not land pays the cap next, with no read, until one lands": false,
+      "the sale's owed record keeps W's proven buy": true,
+      "every W of the account's found on the helper's seat alone, in batches; one with no record the helper reads empty listed empty; a W read as at its last end on its own state read on neither seat; the load's own reads only with a W to pass": true,
+      "the Ws passed in an order drawn from the device's random source, a second and up to a second more apart": true,
+      "W's buy proven on the public seat alone, once, against the restore's rebuilt record or its no-buy mark": true,
+      "an unproven W tried again on each load to its third pass, then held as its own state": true,
+      "the positions' passes held only while a W is read": true,
+      "the page reads the restore's no-buy mark": true,
+      "the sell's rule refuses a sale that pays more than 100,000 lamports of priority (a price with no limit at 1,400,000 units, rounded up as the runtime charges it) and a full sell's fee over 105,000": false
     }
   }
 }

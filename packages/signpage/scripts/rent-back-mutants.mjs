@@ -19,7 +19,6 @@ const TB = "test/pool-buy.test.ts";
 const TESTNET = `${W}/src/pool-testnet.ts`;
 const TT = "test/pool-testnet.test.ts";
 const PAGE_RPC = `${W}/src/page-rpc.ts`;
-const RULES = `${W}/src/rules/pool.ts`;
 // [name, file, the test that kills it, from, to]; from an array of [from, to] pairs plants each one (a rule held twice,
 // as what W read as is: the pass's end names it W's own state, and the record keeps it only on those ends)
 export const M = [
@@ -173,17 +172,14 @@ export const M = [
   ["c9 the signer named to the read", SELL, T, "a.writable && !a.signer", "a.writable"],
   ["c10 one RPC's word for both", SELL, T, "const [a, b] = await both(rpcs, p75);", "const [a, b] = await both([rpcs[1], rpcs[1]], p75);"],
   // the review of 4f9217972: P3-1 an empty list is no read, and a W whose sale did not land pays the cap next; P2-1 the
-  // read is the RPCs' optional read (never retried, its throttle reported to no lane, never sent to a host not open);
-  // P2-2 the sell's rule bounds the priority and a full sell's fee on its own
+  // read is the RPCs' optional read (never retried, its throttle reported to no lane); P2-2's rule plants are in
+  // test/rules-pool-mutants.mjs. Left out to hold 126 plants (fourteen parts of 9): the optional read sent to a host not
+  // open now (test/page-rpc.test.ts P2-1 holds it; such a read reports nothing, so the send is not held by it)
   ["c11 an empty list priced", SELL, T, "if (!Array.isArray(got) || got.length === 0) throw", "if (!Array.isArray(got)) throw"],
   ["c12 a W whose sale did not land priced again at once", SELL, T, '    if ("stage" in a && a.stage === "not_landed") capNext.add(w.address);\n', ""],
   ["c13 the cap held after a sale landed", SELL, T, '    else if ("stage" in a && (a.stage === "filled" || a.stage === "refused")) capNext.delete(w.address);\n', ""],
   ["c14 the fee read on the laned client", SELL, "test/page-rpc.test.ts", "    const read = optionalRead(r);\n", "    const read = (m: string, q: readonly unknown[]) => r(m, q);\n"],
   ["c15 the optional read retried and reported", PAGE_RPC, "test/page-rpc.test.ts", "    return solanaJsonRpc(url, { ...(o.init ? { init: o.init } : {}), fetch, retry: { deadlineMs: retry.deadlineMs, backoffMs: retry.deadlineMs } })(method, params);", "    return go(method, params);"],
-  ["c16 the optional read sent to a paused host", PAGE_RPC, "test/page-rpc.test.ts", "    if (signal.aborted || !lane.open(kind)) return Promise.reject(", "    if (signal.aborted) return Promise.reject("],
-  ["c17 the sale's priority unbounded by the rule", RULES, "test/rules-pool.test.ts", '  if (priority > SOLANA_POOL_SELL_PRIORITY) return refuse("priority");\n', ""],
-  ["c18 a full sell's fee unbounded by the rule", RULES, "test/rules-pool.test.ts", '    if (p.fee > SOLANA_LAMPORTS_PER_SIGNATURE + SOLANA_POOL_SELL_PRIORITY) return refuse("reserve");\n', ""],
-  ["c19 a price with no limit priced at no units", RULES, "test/rules-pool.test.ts", "  let limit = BigInt(SOLANA_POOL_CU_LIMIT_MAX);\n", "  let limit = 0n;\n"],
 ];
 // every mutant's name, in the order the parts take them
 export const NAMES = M.map(([name]) => name);
