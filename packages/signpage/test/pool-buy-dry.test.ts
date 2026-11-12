@@ -13,7 +13,8 @@ import type { NoteRecord } from "../../wallet/src/notes/store.ts";
 import { poolBalances, solanaBalancePool, type BalanceProof } from "../../wallet/src/pool/balances.ts";
 import { SOL_LADDER, SOL_TIP_CAP } from "../../wallet/src/pool/solana.ts";
 import { evmBalancePool } from "../../wallet/src/pool/balances.ts";
-import { poolBuyDryKind, readCoinVenue, withSolanaRent, type PoolBuyDryDeps } from "../src/pools.ts";
+import { COIN_VENUE_KEEP_MS, poolBuyDryKind, readCoinVenue, withSolanaRent, type PoolBuyDryDeps } from "../src/pools.ts";
+import { APP_ORIGIN, signedOutState, startApi, type IncomingMessage } from "../src/api.ts";
 
 // mainnet's Rent sysvar (5,080 a byte-year, threshold 1.0), as the recorded reads hold it
 const RENT: SolanaRent = { lamportsPerByte: 5_080n, factor: 1n };
@@ -131,4 +132,75 @@ test("a coin's venue is read once on the page: the next ask makes no read", asyn
   assert.equal(reads, 2, "one read on each provider");
   assert.deepEqual(await ask(kind, { chain: "solana", token: fx.pump.mint }), { result: { tap_max: "0.00334652" } });
   assert.equal(reads, 2);
+});
+
+test("the page's message queue never waits for a coin's venue read: a state asked after pool.buy.dry is answered first", async () => {
+  let release!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  const slow = (p: 0 | 1): SolanaRpc => {
+    const r = replay(fx.pump, p);
+    return (async (m: string, q: readonly unknown[]) => (await gate, r(m, q))) as SolanaRpc;
+  };
+  const dry = poolBuyDryKind(deps({ rpcsOf: () => [slow(0), slow(1)] }));
+  const posted: { id?: string }[] = [];
+  const parent = { postMessage: (msg: unknown) => void posted.push(msg as { id?: string }) };
+  let listener: ((e: IncomingMessage) => void) | null = null;
+  startApi({ parent, listen: (fn) => (listener = fn), state: signedOutState, kinds: { "pool.buy.dry": (p) => dry(p) } });
+  const send = (data: unknown) => listener!({ origin: APP_ORIGIN, source: parent, data });
+  const [a, s] = [crypto.randomUUID(), crypto.randomUUID()];
+  send({ v: 1, id: a, type: "pool.buy.dry", chain: "solana", token: fx.pump.mint });
+  send({ v: 1, id: s, type: "state" });
+  await new Promise((ok) => setTimeout(ok, 300));
+  const stateFirst = posted.some((m) => m.id === s);
+  release();
+  const end = Date.now() + 2_000;
+  while (!posted.some((m) => m.id === a) && Date.now() < end) await new Promise((ok) => setTimeout(ok, 5));
+  assert.equal(stateFirst, true, "the state waited behind pool.buy.dry's venue read");
+  assert.deepEqual(posted.filter((m) => m.id === a || m.id === s).map((m) => (m.id === a ? "dry" : "state")), ["state", "dry"]);
+});
+
+/** One provider of a recorded pair that answers both coins' reads, the PumpSwap coin's pool a cashback one (byte 244),
+ *  so the two coins' Max differ; every read counted. */
+function bothCoins(p: 0 | 1, reads: { n: number }): SolanaRpc {
+  const pump = replay(fx.pump, p);
+  const swap = replay(fx.pumpswap, p, (_list, ans) => {
+    const d = Buffer.from(ans.value[1].data[0], "base64");
+    d[244] = 1;
+    ans.value[1].data[0] = d.toString("base64");
+    return ans;
+  });
+  return (async (m: string, q: readonly unknown[]) => {
+    reads.n++;
+    const k = JSON.stringify(q[0]);
+    if (fx.pump.reads[p][k]) return pump(m, q);
+    if (fx.pumpswap.reads[p][k]) return swap(m, q);
+    throw new Error(`no recorded read of ${k}`);
+  }) as SolanaRpc;
+}
+
+test("two coins on one page: each its own Max, the kept venue the asked coin's", async () => {
+  const reads = { n: 0 };
+  const kind = poolBuyDryKind(deps({ rpcsOf: () => [bothCoins(0, reads), bothCoins(1, reads)] }));
+  for (let i = 0; i < 2; i++) {
+    assert.deepEqual(await ask(kind, { chain: "solana", token: fx.pump.mint }), { result: { tap_max: "0.00334652" } });
+    assert.deepEqual(await ask(kind, { chain: "solana", token: fx.pumpswap.mint }), { result: { tap_max: "0.00185808" } });
+  }
+  // the curve coin one read a provider, the PumpSwap coin two (its curve, then its pool); the second round none
+  assert.equal(reads.n, 6);
+});
+
+test("a kept venue is read again once it is COIN_VENUE_KEEP_MS old: a coin's flags are never kept for the page's life", async () => {
+  assert.equal(COIN_VENUE_KEEP_MS, 60_000);
+  let now = 1_000_000;
+  const reads = { n: 0 };
+  const kind = poolBuyDryKind(deps({ rpcsOf: () => [bothCoins(0, reads), bothCoins(1, reads)], now: () => now }));
+  const mint = fx.pump.mint;
+  await ask(kind, { chain: "solana", token: mint });
+  assert.equal(reads.n, 2);
+  now += COIN_VENUE_KEEP_MS - 1;
+  await ask(kind, { chain: "solana", token: mint });
+  assert.equal(reads.n, 2, "kept inside the limit");
+  now += 1;
+  assert.deepEqual(await ask(kind, { chain: "solana", token: mint }), { result: { tap_max: "0.00334652" } });
+  assert.equal(reads.n, 4, "read again at the limit");
 });

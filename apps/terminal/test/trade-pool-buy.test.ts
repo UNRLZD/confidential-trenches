@@ -6,7 +6,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { SignpageState } from "@blindfill/kit";
-import { amountText, amountWrong, centsToUnits, coinTapKey, decimalToUnits, parseUsd, poolBuyAsk, poolSellAsk, poolView, presetsOf, PRESETS, unitsToCents, unitsToDecimal, withCoinTap } from "../src/screens/trade/model.ts";
+import { amountText, amountWrong, centsToUnits, coinTapAgainMs, coinTapKey, decimalToUnits, parseUsd, poolBuyAsk, poolSellAsk, poolView, presetsOf, PRESETS, unitsToCents, unitsToDecimal, withCoinTap } from "../src/screens/trade/model.ts";
 
 type Pool = NonNullable<SignpageState["pools"]>[number];
 // Pyth SOL/USD as read on 4 Nov 07:40Z (packages/kit/src/price/pool-usd.ts): $93.01048308
@@ -144,4 +144,10 @@ test("Max for the coin on screen (card max-is-priced-for-the-coin): the page's p
   assert.deepEqual(poolBuyAsk(coin, "solana", "Mint1", 32n, SOL, 300), { ok: false, why: "over_tap" });
   // as they are: no answer, an answer that is no decimal or more than ready, another chain
   for (const [tap, chain] of [[null, "solana"], ["x", "solana"], ["0.02", "solana"], ["0.00337192", "base"]] as const) assert.equal(withCoinTap(pools, chain, tap), pools, JSON.stringify(tap));
+});
+
+test("Max for the coin asked again while the page says not now: busy every second (a trade runs), down every 3 s (a provider failed), never on an answer that is no", () => {
+  assert.equal(coinTapAgainMs("busy"), 1_000);
+  assert.equal(coinTapAgainMs("down"), 3_000);
+  for (const code of ["not_allowed", "not_funded", "quote_check_failed", "timeout"]) assert.equal(coinTapAgainMs(code), null, code);
 });

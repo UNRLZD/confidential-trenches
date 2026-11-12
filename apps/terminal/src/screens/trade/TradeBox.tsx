@@ -15,6 +15,7 @@ import {
   amountWrong,
   busy,
   centsToDecimal,
+  coinTapAgainMs,
   coinTapKey,
   filledOut,
   fmtUsd,
@@ -179,16 +180,27 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
     const ask = request.current;
     if (coinKey === null || !ask) return;
     let live = true;
-    try {
-      ask("pool.buy.dry", { chain: "solana", token }).outcome.then(
-        (o) => live && o.ok && setCoinTap({ key: coinKey, tap_max: o.result.tap_max }),
-        () => {},
-      );
-    } catch {
-      // no client to ask: state.pools' Max stays
-    }
+    let t: ReturnType<typeof setTimeout> | undefined;
+    // asked again while the page says not now (busy, down), until the coin or its proofs change or the box goes
+    const once = (): void => {
+      try {
+        ask("pool.buy.dry", { chain: "solana", token }).outcome.then(
+          (o) => {
+            if (!live) return;
+            if (o.ok) return void setCoinTap({ key: coinKey, tap_max: o.result.tap_max });
+            const again = coinTapAgainMs(o.error.code);
+            if (again !== null) t = setTimeout(once, again);
+          },
+          () => {},
+        );
+      } catch {
+        // no client to ask: state.pools' Max stays
+      }
+    };
+    once();
     return () => {
       live = false;
+      clearTimeout(t);
     };
   }, [coinKey, kit.request !== null]);
   const pools = withCoinTap(statePools, chain, coinTap !== null && coinTap.key === coinKey ? coinTap.tap_max : null);

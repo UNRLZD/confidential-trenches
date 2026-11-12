@@ -363,6 +363,13 @@ export function withCoinTap(pools: SignpageState["pools"], chain: Chain, coinTap
   return pools!.map((x) => (x === p ? { ...x, tap_max: coinTap! } : x));
 }
 
+/** When Max for the coin is asked again, ms, after the page's refusal `code`: a trade running (busy) every second, a
+ *  provider that failed (down) every 3 s, as the sell box asks its preview again (positions/SellBox.tsx PREVIEW_BUSY_MS,
+ *  PREVIEW_AGAIN_MS); null for an answer that is no (that coin, those proofs: state.pools' Max stays). */
+export function coinTapAgainMs(code: string): number | null {
+  return code === "busy" ? 1_000 : code === "down" ? 3_000 : null;
+}
+
 export type PoolBuyAsk =
   | { ok: true; kind: "pool.buy"; params: SignpageParams["pool.buy"] }
   | { ok: false; why: "no_pool" | "no_price" | "no_proof" | "too_small" | "over_tap" | "chunk" };

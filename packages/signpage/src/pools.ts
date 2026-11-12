@@ -28,7 +28,7 @@ import { evmBalancePool, evmTapSpendOf, poolBalances, solanaBalancePool, solanaT
 import { EVM_CHAIN_IDS, EVM_POOLS, evmPoolScopeOf, type EvmNetwork } from "../../wallet/src/pool/evm.ts";
 import { POOL_TESTNET } from "../../wallet/src/pool/network.ts";
 import { SOL_POOLS, solanaPoolOf } from "../../wallet/src/pool/solana.ts";
-import type { Deferred } from "./api.ts";
+import type { Running } from "./api.ts";
 import { ANSWER_ROOM, pickOps } from "./state.ts";
 
 /** Each app chain's EVM network on the page's network. */
@@ -83,7 +83,8 @@ export type CoinVenue = Pick<SolanaPoolBuyVenue, "kind" | "tokenAccountSize" | "
  * curve while it is open, else the coin's canonical PumpSwap pool (a complete curve, or no curve, is no buy venue). A
  * coin with neither, or a read the two providers do not agree on, throws. A curve coin read before it graduates prices
  * no higher than its PumpSwap pool does (the curve's buy keeps PumpSwap's sell need with both cashback accounts the sell
- * makes), so a venue kept from an earlier read never prices a Max the buy cannot pay.
+ * makes), so a venue kept from an earlier read (at most COIN_VENUE_KEEP_MS) never prices a Max the buy cannot pay on a
+ * graduation.
  */
 export async function readCoinVenue(rpcs: readonly [SolanaRpc, SolanaRpc], token: string): Promise<CoinVenue> {
   const of = (v: SolanaPoolBuyVenue): CoinVenue => ({ kind: v.kind, tokenAccountSize: v.tokenAccountSize, cashback: v.cashback });
@@ -94,8 +95,10 @@ export async function readCoinVenue(rpcs: readonly [SolanaRpc, SolanaRpc], token
   }
 }
 
-/** How many coins' venues pool.buy.dry keeps for the page's life: a venue never prices higher than when it was read. */
+/** How many coins' venues pool.buy.dry keeps, and for how long: each is read again once it is COIN_VENUE_KEEP_MS old,
+ *  so a flag the coin's accounts change (its cashback) reaches Max within a minute, never only at a reload. */
 export const COIN_VENUES_KEPT = 256;
+export const COIN_VENUE_KEEP_MS = 60_000;
 
 export type PoolBuyDryDeps = {
   /** The page's pool table (PAGE_POOLS). */
@@ -109,6 +112,8 @@ export type PoolBuyDryDeps = {
   ready(): Promise<{ notes: readonly NoteRecord[]; ready?: readonly BalanceProof[]; open?: ReadonlySet<string>; landed?: ReadonlyMap<string, LandedRelease> } | null>;
   /** True while a trade runs on the page or holds a host of the pair: the preview waits for no trade. */
   trading(): boolean;
+  /** The page's clock, ms (performance.now): a kept venue's age. */
+  now?(): number;
 };
 
 /**
@@ -121,14 +126,16 @@ export type PoolBuyDryDeps = {
  */
 /** Not a HostAnswer, whose `then` would make an async function's answer a thenable. */
 type BuyDryAnswer = { result: PoolBuyDry } | { error: ErrorCode };
-export function poolBuyDryKind(d: PoolBuyDryDeps): (params: Record<string, unknown>) => Deferred<"pool.buy.dry"> {
-  const venues = new Map<string, CoinVenue>();
+export function poolBuyDryKind(d: PoolBuyDryDeps): (params: Record<string, unknown>) => Running<"pool.buy.dry"> {
+  const now = d.now ?? (() => performance.now());
+  const venues = new Map<string, { v: CoinVenue; at: number }>();
   const venueOf = async (rpcs: readonly [SolanaRpc, SolanaRpc], token: string): Promise<CoinVenue> => {
     const kept = venues.get(token);
-    if (kept !== undefined) return kept;
+    if (kept !== undefined && now() - kept.at < COIN_VENUE_KEEP_MS) return kept.v;
     const v = await readCoinVenue(rpcs, token);
+    venues.delete(token);
     if (venues.size >= COIN_VENUES_KEPT) venues.clear();
-    venues.set(token, v);
+    venues.set(token, { v, at: now() });
     return v;
   };
   const run = async (params: Record<string, unknown>): Promise<BuyDryAnswer> => {
@@ -155,7 +162,8 @@ export function poolBuyDryKind(d: PoolBuyDryDeps): (params: Record<string, unkno
       (a) => void (out = a),
       () => void (out = { error: "down" }),
     );
-    return { after, answer: () => out };
+    // a read that runs (Running), as pool.sell.dry: the page's message queue never waits for a coin's venue read
+    return { after, answer: () => out, running: true };
   };
 }
 
