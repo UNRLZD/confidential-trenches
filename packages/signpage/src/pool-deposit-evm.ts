@@ -231,12 +231,15 @@ const sameRef = (a: NoteRef, b: NoteRef): boolean => JSON.stringify(a, (_, v) =>
  *  hash (a send again of the very bytes restarts EVM_DEPOSIT_RESEND_MS). */
 type Run = { h: PoolDepositEvmHost; store: NoteStore; seed: Uint8Array; scope: bigint; chainId: bigint; keys: Uint8Array[]; ask: PoolAsk; sentAt: Map<string, bigint> };
 const nowOf = (r: Run): bigint => BigInt(Math.floor((r.h.now ?? Date.now)()));
-const sleepOf = (h: PoolDepositEvmHost) => h.wait ?? ((ms: number) => new Promise<void>((ok) => setTimeout(ok, ms)));
+/** The run's wait: the host's, else a timer a sign out (signal) or a stop ends at once (pool-deposit.ts followWait). */
+const sleepOf = (h: PoolDepositEvmHost) => h.wait ?? ((ms: number) => followWait(ms, h.signal && h.stop ? AbortSignal.any([h.signal, h.stop]) : (h.signal ?? h.stop)));
+/** Ended by a sign out (signal) or a stop: no read and no write after it. */
+const ended = (h: PoolDepositEvmHost): boolean => h.signal?.aborted === true || h.stop?.aborted === true;
 
 /** U's reads at one block both RPCs hold: the block, U's nonce and the base fee (agreed; each RPC's reading kept for
  *  the rule's own check) and its balance (each RPC's). */
 async function accountReads(r: Run, u: string): Promise<{ block: bigint; tag: string; baseFee: bigint; baseFees: [bigint, bigint]; nonce: bigint; nonces: [bigint, bigint]; balance: [bigint, bigint] }> {
-  const sleep = (ms: number) => (r.h.wait ?? ((x: number) => new Promise<void>((ok) => setTimeout(ok, x))))(ms);
+  const sleep = sleepOf(r.h);
   // the newest block both hold (a lag read again), then its base fee as each RPC answers it: the two the same
   const blk = await evmRetryLag(() => evmAgreedBlock(r.h.rpcs, "latest", undefined, sleep), sleep);
   const tag = qty(blk.number);
@@ -457,6 +460,7 @@ async function verdictOf(r: Run, n: NoteRecord, kept: (n: NoteRecord) => void = 
   // or not: a reorg that drops it backs the note out again (wallet evm-settle.ts)
   const pick = evmTakenNotes(r.seed, r.scope, round.events, first, round.finalBlock);
   if (pick.taken.some((t) => sameRef(t.ref, n.ref))) {
+    if (ended(r.h)) return { kind: "pending" }; // a sign out or a stop while the round was read: nothing written
     for (const c of await evmClaimTaken(r.store, pick.taken)) r.h.landed?.(c);
     const now = (await r.store.get(n.id))!;
     return { kind: "landed", note: now, filled: now.leaf?.value === n.evmSends?.[0]?.value };
@@ -493,7 +497,10 @@ async function follow(r: Run, n: NoteRecord, reads: number, wait: (ms: number) =
   let note = n;
   let rebuilds = 0;
   for (let k = 0; k < reads; k++) {
+    // a sign out or a stop before the wait, during it (the run's wait ends at once) or after it: no read again
+    if (k > 0 && ended(r.h)) return { kind: "pending" };
     if (k > 0) await wait(POOL_DEPOSIT_EVM_WAIT_MS);
+    if (k > 0 && ended(r.h)) return { kind: "pending" };
     // the kept block back as stored, while the note is the one this follow reads (INCOMING, its sends as read)
     // a read that fails with a read left (a provider's logs behind the pool's state at the newest block, right after the
     // send) is read again at the next read, never the run's answer; the last read's failure stands. So the run holds its
@@ -617,7 +624,7 @@ async function depositRunEvm(h: PoolDepositEvmHost, ask: PoolAsk | null, at: { f
   const landedTxs: TxRef[] = [];
   const sentTxs: TxRef[] = [];
   const chain = ask?.chain ?? (h.pin.network === "robinhood" || h.pin.network === "robinhood-testnet" ? "robinhood" : "base");
-  const wait = h.wait ?? ((ms: number) => new Promise<void>((ok) => setTimeout(ok, ms)));
+  const wait = sleepOf(h);
   // the ask's own notes that landed this run (each counted whether or not a tx is named for it)
   let landed = 0;
   // a send of the pass (an earlier note's, sent again) may land too: the run is never "failed" past it
