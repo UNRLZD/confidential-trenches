@@ -167,6 +167,7 @@ export const CHANGED = [
   "scripts/live-checks/pool-senders-next-page-helper.mjs",
   "scripts/live-checks/pool-sell-legs-side-by-side.mjs",
   "scripts/live-checks/pool-usd-price-never-stale.mjs",
+  "scripts/live-checks/pool-tree-read-waits-for-its-second.mjs",
   "scripts/live-checks/sol-settle-failed-is-not-unspent.mjs",
   "scripts/live-checks/signpage-throttled-read-is-not-asked-again-at-once.mjs",
   "scripts/live-checks/signpage-throttled-provider-has-a-spare.mjs",
@@ -257,6 +258,7 @@ export const CHANGED = [
   "scripts/live-checks/withdraw-fee-busy-waits.mjs",
   "scripts/live-checks/pool-sol-mainnet-run.mjs",
   "scripts/live-checks/pool-sol-mainnet-run.record.mjs",
+  "scripts/live-checks/withdraw-form-shows-what-you-can-send.mjs",
 ];
 
 // Scripts in the searched folders that open no connection from Node, and why.
