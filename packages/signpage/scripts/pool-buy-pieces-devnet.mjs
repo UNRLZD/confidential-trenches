@@ -336,12 +336,16 @@ const once = async (p, kind, params, noEnd = false) => {
 const lastStage = (p, kind) => stages.filter((x) => x.page === p.name && x.kind === kind).at(-1)?.stage ?? null;
 const stageName = (s) => (typeof s === "string" ? s : s?.stage ?? null);
 
-/** Each signature read on both RPCs at finalized: its error, or "missing". */
+/** Each signature read on both RPCs at finalized: its error, or "missing" once 30 s passed with an RPC not holding it
+ *  (the copy's engine stand-in lands a bundle one transaction at a time, each after the one before it confirmed, so
+ *  the helper's tip, last, can land after the page saw the tag 3 filled; a real engine lands the bundle at once). */
 const readBack = async (sigs) => {
   const out = {};
   for (const s of sigs) {
-    const st = await both(async (r) => (await r("getSignatureStatuses", [[s], { searchTransactionHistory: true }])).value[0]);
-    out[s] = st.map((x) => (x === null ? "missing" : x.err === null ? x.confirmationStatus : `err ${JSON.stringify(x.err)}`));
+    const read = async () => (await both(async (r) => (await r("getSignatureStatuses", [[s], { searchTransactionHistory: true }])).value[0])).map((x) => (x === null ? "missing" : x.err === null ? x.confirmationStatus : `err ${JSON.stringify(x.err)}`));
+    let st = await read();
+    for (let i = 0; i < 60 && st.includes("missing"); i++) await new Promise((r) => setTimeout(r, 500)), (st = await read());
+    out[s] = st;
   }
   return out;
 };
