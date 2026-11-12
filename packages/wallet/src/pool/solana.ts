@@ -204,11 +204,11 @@ export type SolanaPoolVenueName = "pump-curve" | "pumpswap";
  *  test/sol-pool-venue-tables.test.ts fails whenever a pin and its record differ, and the live check
  *  sol-pool-venue-tables reads these literals (keep each a string literal). A venue with no table here is refused by
  *  the signing page before anything is signed. Mainnet: the curve's first generation is the pool deploy's own table
- *  (SOL_MAINNET_DEPLOY.table); PumpSwap's comes with its paste. */
+ *  (SOL_MAINNET_DEPLOY.table); PumpSwap's first is the table frozen on 12 Nov (state pages 0 to 134, label pages 0 to 88). */
 export const SOL_POOL_TABLES: Readonly<Partial<Record<"devnet" | "mainnet", Readonly<Partial<Record<SolanaPoolVenueName, readonly string[]>>>>>> = Object.freeze(
   POOL_TESTNET
     ? { devnet: Object.freeze({ "pump-curve": Object.freeze(["C2vLuah7VtGDTVnFkBpY7DkNf135Wwu6Uv57qCXPb9qJ"]), pumpswap: Object.freeze(["4kG4g4fbSbwkxxdqT4G3cLeEbnvcbZTmBwJExK3ZGGAT", "J1R9px8LFg597sGfaME1qf7L5WGHGnn2YL2Vs2CwaWvU", "3uym947bDVPRHyzmzTAV8C4p4Du6s2wRjVr4AZpYQtBH"]) }) }
-    : { mainnet: Object.freeze({ "pump-curve": Object.freeze(["BShWZ8FbDPYGpoc1ebj4TiELvVFmBQwW4XMYuLtQoHYZ"]) }) },
+    : { mainnet: Object.freeze({ "pump-curve": Object.freeze(["BShWZ8FbDPYGpoc1ebj4TiELvVFmBQwW4XMYuLtQoHYZ"]), pumpswap: Object.freeze(["4PyMCJPKZQvrLsj8DKCG2Yddh3vDmTf1EWnjCL1Bk3Pc"]) }) },
 );
 
 /** The pinned pools by cluster: pool-sol-deploy writes each one (a fresh program id per cluster, lib.rs deploy rule).
