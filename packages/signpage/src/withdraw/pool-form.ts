@@ -25,8 +25,7 @@
 // - What the screen is for and what can go (card withdraw-form-shows-what-you-can-send): the chain's mark and name at the
 //   top (./chain-mark.ts, the app's own), the asset's symbol at the amount, and the amount that can be sent now, a value
 //   and its symbol that fills the field when tapped: exactly the largest amount the amount check accepts (poolSendable),
-//   so a tap never draws Insufficient or Try. Beside it the trade box's Max (the one word the screen takes from another
-//   screen, a draft there too); else values, symbols and marks only.
+//   so a tap never draws Insufficient or Try. No word is added: values, symbols and marks only.
 // - A pasted To carries what a copy carries (toCleaned): whitespace and invisible format characters are taken off its two
 //   ends, and the invisible joiners (zero-width space, non-joiner and joiner, word joiner, byte-order mark, soft hyphen)
 //   out of it anywhere. Whitespace inside is never taken out: it would glue two pieces of a row ("3<tab>address",
@@ -59,12 +58,10 @@ export const POOL_WITHDRAW_WORDS = {
   // a send owed whose fee rose past the Max fee drawn: "Network fee rose. New max fee: 0.000015 SOL." and its button
   "fee-rose": "Network fee rose. New max fee: ", // owner 8 Nov 07:55Z, kept (pw.feeRose)
   "fee-redraw": "Send at new fee", // owner 8 Nov 07:55Z, kept (pw.feeRoseSend)
-  // DRAFT COPY: the trade box's Max (apps/terminal/src/screens/trade/words.ts max, a draft there), beside what can be sent
-  max: "Max",
 } as const;
 
 /** The keys of POOL_WITHDRAW_WORDS the owner has not picked: their elements keep data-draft-copy. */
-export const POOL_DRAFT: ReadonlySet<string> = new Set(["to", "amount", "max"]);
+export const POOL_DRAFT: ReadonlySet<string> = new Set(["to", "amount"]);
 
 /** Each chain's pool asset, as the screen names it. */
 export const POOL_ASSET: Readonly<Record<PoolChain, { symbol: string; decimals: number }>> = Object.freeze({
@@ -266,12 +263,7 @@ export function drawPoolWithdrawForm(doc: Document, deps: PoolWithdrawFormDeps, 
   sendable.type = "button";
   sendable.dataset.action = "sendable";
   Object.assign(sendable.style, { minHeight: "44px", minWidth: "44px", padding: "0 12px", fontVariantNumeric: "tabular-nums" });
-  const maxWord = doc.createElement("span");
-  maxWord.dataset.word = "max";
-  maxWord.textContent = POOL_WITHDRAW_WORDS.max;
-  markDraft(maxWord, "max", POOL_DRAFT);
-  maxWord.style.marginRight = "8px"; // no display on the row: its `hidden` keeps it out until the funds are read
-  canRow.append(maxWord, sendable);
+  canRow.append(sendable);
   // the lines shown before the press: where the money lands and the most the relayer takes
   const shown = doc.createElement("dl");
   shown.dataset.lines = "pool-withdraw";

@@ -225,11 +225,3 @@ test("an amount above what can be sent: the line names what can be sent (Try 0.0
   assert.equal(none.form.find((e) => e.dataset.for === "amount")!.textContent, POOL_WITHDRAW_WORDS.insufficient);
 });
 
-test("what can be sent carries the trade box's Max beside its figure, once the funds are read", async () => {
-  const f = drawn("solana", async () => ONE);
-  await tick();
-  const max = f.row.children.find((e) => e.dataset.word === "max");
-  assert.ok(max, "a Max beside the figure");
-  assert.equal(max!.textContent, "Max");
-  assert.equal(f.row.children.indexOf(max!), f.row.children.indexOf(f.can) - 1, "Max, then the figure");
-});
