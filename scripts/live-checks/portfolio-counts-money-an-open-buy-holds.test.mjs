@@ -77,7 +77,8 @@ test("the marks on the builds' minified shapes, any quote; each old shape is no 
   const [read, carry] = NAMES.sign;
   const [sum, bought, value, axis] = NAMES.app;
   const signNew = [
-    "let a=await r(`getMultipleAccounts`,[i.map(([e])=>e),{encoding:`base64`,commitment:`finalized`,dataSlice:{offset:0,length:0}}])",
+    // the batched read (review P3-2): every W's accounts flattened into one call
+    "let n=t.flatMap(e=>e.keys.map(([e])=>e)),r=(await e(`getMultipleAccounts`,[n,{encoding:`base64`,commitment:`finalized`,dataSlice:{offset:0,length:0}}]))?.value",
     "{chain:`solana`,token:e,amount:t,cost:c,wallets:n.wallets,decimals:r,...a===null?{}:{asset_held:mk(a,SR)}}",
   ].join(";");
   assert.deepEqual(marksIn("sign", signNew), [read, carry]);
@@ -85,6 +86,8 @@ test("the marks on the builds' minified shapes, any quote; each old shape is no 
   // the finder's own read (no dataSlice), the token read at confirmed, a position with no asset_held, the key written
   // always (a part sum or "0" where a W was not read) are not the marks
   const signOld = [
+    // the read per W, one call each (before review P3-2)
+    "let a=await r(`getMultipleAccounts`,[i.map(([e])=>e),{encoding:`base64`,commitment:`finalized`,dataSlice:{offset:0,length:0}}])",
     "t[c](`getMultipleAccounts`,[d,{commitment:`finalized`,encoding:`base64`,...f>0?{minContextSlot:f}:{}}])",
     "r(`getMultipleAccounts`,[i.map(([e])=>e),{encoding:`base64`,commitment:`confirmed`,dataSlice:{offset:0,length:0}}])",
     "r(`getMultipleAccounts`,[i.map(([e])=>e),{encoding:`base64`,commitment:`finalized`}])",

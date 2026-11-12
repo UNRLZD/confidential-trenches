@@ -6,9 +6,9 @@
 // below what the user had; a row's Bought and Value were floored to the cent ($0.0999999 read $0.09), and the value
 // chart's axis labels could read alike. What this proves, and only that: each served script is the one its page pins
 // (its sha384), and it carries, each found by a mark of the bundle's shape:
-//   - SIGN_HOST (packages/signpage/src/positions.ts solanaAssetHeld, positionsOf): one getMultipleAccounts at finalized
-//     with a zero-length dataSlice reads the SOL a W holds, and a position carries it as asset_held in whole SOL (9
-//     decimals);
+//   - SIGN_HOST (packages/signpage/src/positions.ts solanaAssetHeld, positionsOf): one batched getMultipleAccounts at
+//     finalized with a zero-length dataSlice, every W's accounts flattened into it, reads the SOL each W holds, and a
+//     position carries it as asset_held in whole SOL (9 decimals);
 //   - APP_HOST (apps/terminal/src/screens/portfolio/model.ts): Portfolio's Positions and Total sum each position's
 //     asset_held (openBuysHold: none for a position whose wallet an arm record already counts), a row's Bought and
 //     Value read to the nearest cent (centsNear, mulCentsNear), and the chart's axis labels add decimals until no two
@@ -37,7 +37,7 @@ const q = (w) => `${Q}${w}${Q}`;
 /** Each host's marks: its name, and what the bundle holds when the change is in place. */
 export const MARKS = {
   sign: [
-    ["a W's SOL is read in one getMultipleAccounts at finalized with a zero dataSlice", new RegExp(`${q("getMultipleAccounts")},\\[${ID}\\.map\\([^;]{0,30}?\\),\\{encoding:${q("base64")},commitment:${q("finalized")},dataSlice:\\{offset:0,length:0\\}\\}\\]`)],
+    ["a W's SOL is read in one getMultipleAccounts at finalized with a zero dataSlice", new RegExp(`${ID}\\.flatMap\\(${ID}=>${ID}\\.keys\\.map\\(\\(\\[${ID}\\]\\)=>${ID}\\)\\),${ID}=\\(await ${ID}\\(${q("getMultipleAccounts")},\\[${ID},\\{encoding:${q("base64")},commitment:${q("finalized")},dataSlice:\\{offset:0,length:0\\}\\}\\]\\)\\)`)],
     ["a position carries asset_held in whole SOL, absent when a W was not read", new RegExp(`wallets:${ID}\\.wallets,decimals:${ID},\\.\\.\\.${ID}===null\\?\\{\\}:\\{asset_held:${ID}\\(${ID},${ID}\\)\\}`)],
   ],
   app: [
