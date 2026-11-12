@@ -10,34 +10,44 @@ import { CURVE_TOKEN, fakeChain, open, REC } from "../../../test/evm-swaps/robin
 import { toRows } from "./lists.ts";
 import { TOPIC } from "./swaps.ts";
 
-/** The recorded chain, counting each call by method and the token's own Transfer reads (the discovery's walk). */
-function rig() {
+/** The recorded chain, counting each call by method and the token's own Transfer reads (the discovery's walk).
+ *  `hold`: a post with a Transfer read of the token is held (and counted) only once it settles. */
+function rig(hold: Promise<void> | null = null) {
   const chain = fakeChain();
   chain.st.head = REC.lastHead;
   const calls = new Map<string, number>();
   let transfers = 0;
   const fetch = async (url: string, init: RequestInit): Promise<Response> => {
-    for (const r of JSON.parse(String(init.body)) as { method: string; params: { address?: string; topics?: unknown[] }[] }[]) {
+    const reqs = JSON.parse(String(init.body)) as { method: string; params: { address?: string; topics?: unknown[] }[] }[];
+    const walk = (r: (typeof reqs)[number]) => r.method === "eth_getLogs" && r.params[0]?.address === CURVE_TOKEN && r.params[0]?.topics?.[0] === TOPIC.transfer;
+    if (hold !== null && reqs.some(walk)) await hold;
+    for (const r of reqs) {
       calls.set(r.method, (calls.get(r.method) ?? 0) + 1);
-      const q = r.params[0];
-      if (r.method === "eth_getLogs" && q?.address === CURVE_TOKEN && q.topics?.[0] === TOPIC.transfer) transfers++;
+      if (walk(r)) transfers++;
     }
     return chain.fetch(url, init);
   };
   return { chain, fetch, calls, transfers: () => transfers };
 }
 const total = (m: Map<string, number>) => [...m.values()].reduce((a, b) => a + b, 0);
-const tape = async (hint: string | null) => {
-  const r = rig();
+/** A cold tape and the calls its open made up to its answer. `background`: the token's Transfer reads, which only the
+ *  helper's own background discovery of a hinted pool makes once the hint answered (card
+ *  helper-live-run-green-after-122, swaps.ts verify), are held until the answer, so they are not the open's. */
+const tape = async (hint: string | null, background = false) => {
+  let release = () => {};
+  const r = rig(background ? new Promise<void>((go) => (release = go)) : null);
   const s = open(r.chain, { t: 1_000_000 }, { pools: new Map(), fetch: r.fetch as never, hint: async () => hint });
   const a = await s.trades(CURVE_TOKEN, 50);
+  const calls = new Map(r.calls);
+  const transfers = r.transfers();
+  release();
   s.stop();
-  return { a, r };
+  return { a, r: { calls, transfers: () => transfers } };
 };
 
 test("a listed token whose list names its Pons curve: the curve, confirmed by the factory's record, is read at once: the same tape as the discovery's, no Transfer walk, fewer calls", async () => {
   const found = await tape(null);
-  const hinted = await tape(REC.curve);
+  const hinted = await tape(REC.curve, true);
   assert.equal(found.a.status, 200, found.a.body);
   assert.equal(hinted.a.status, 200, hinted.a.body);
   const trades = (b: string) => (JSON.parse(b) as { trades: unknown[] }).trades;

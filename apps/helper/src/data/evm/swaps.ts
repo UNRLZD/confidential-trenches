@@ -1443,8 +1443,11 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   // The main pool
   // -------------------------------------------------------------------------------------------------------------
 
-  type Found = { pool: Pool; decimals: number; seed?: { from: number; to: number; headN: number; logs: Log[] } };
-  const pools = new Map<string, { found: { pool: Pool; decimals: number } | null; at: number }>(); // a token's main pool, kept
+  /** `hint`: taken on the list's word (fromHint), the chain's confirmation that it is the token's, not yet the
+   *  discovery's that it is the main pool. */
+  type Found = { pool: Pool; decimals: number; seed?: { from: number; to: number; headN: number; logs: Log[] }; hint?: string };
+  // a token's main pool, kept; `hint` set while it is the list's pool the discovery has not yet decided on (verify)
+  const pools = new Map<string, { found: { pool: Pool; decimals: number } | null; at: number; hint?: string }>();
   // pools known from the start (a test's): kept as if just found
   for (const [t, f] of deps.pools ?? []) pools.set(t, { found: f, at: now() });
   const NONE_MS = 300_000; // a token with no pool read is looked for again after this
@@ -1523,6 +1526,10 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
    * ours, or the Pons factories' record naming it as the token's curve), with the token's decimals. Null when the chain
    * does not say so (a pool of no venue of ours, a v4 key the PositionManager does not hold): the token is discovered
    * as one in no list is. Its first read is the book's own (readBook), not the discovery's walks over every venue.
+   * The hint answers the first open only; the discovery decides the main pool (verify): a list's row may name any pool
+   * of the token, not the one that carries most of its swaps (card helper-live-run-green-after-122: PENNY's row named
+   * its minutes-old 7-swap v4 pool while its hooked v4 pool carried 44 swaps in the same 1,000 blocks, and the tape
+   * served the minor pool's 17 rows).
    */
   async function fromHint(token: string, hint: string): Promise<Found | null> {
     const head = await agreedHead();
@@ -1699,7 +1706,9 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   }
 
   /** A listed token's main pool, null when our reads find none (served as an empty chart), "unlisted" when no lists
-   *  answer of the last SERVED_MS held it (deps.listed: lists.ts listed, never only the newest answer). */
+   *  answer of the last SERVED_MS held it (deps.listed: lists.ts listed, never only the newest answer). The list's
+   *  pool, once the chain confirms it (fromHint), answers the first open at once and is kept as hinted; the discovery
+   *  (findPool) then decides the main pool in the background (verify, on the lists' search ahead). */
   async function mainPool(token: string): Promise<Found | null | "unlisted"> {
     const kept = pools.get(token);
     if (kept !== undefined && kept.found !== null && now() - kept.at < POOL_KEEP_MS) return { ...kept.found };
@@ -1713,7 +1722,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       p = lanes
         .run(lane, async () => {
           const hint = (await deps.hint?.(token)) ?? null;
-          return (hint !== null ? await fromHint(token, hint) : null) ?? findPool(token, hint);
+          const listed = hint !== null ? await fromHint(token, hint) : null;
+          return listed !== null ? { ...listed, hint: hint! } : findPool(token, hint);
         })
         .finally(() => (resolving.delete(token), resolvingLane.delete(token)));
       resolving.set(token, p);
@@ -1721,8 +1731,41 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     }
     const found = await p;
     if (pools.size >= POOLS_MAX) pools.delete(pools.keys().next().value!);
-    pools.set(token, { found: found === null ? null : { pool: found.pool, decimals: found.decimals }, at: now() });
+    pools.set(token, { found: found === null ? null : { pool: found.pool, decimals: found.decimals }, at: now(), ...(found?.hint === undefined ? {} : { hint: found.hint }) });
+    // the list's pool answered: the discovery decides the main pool, on the helper's own search (ahead)
+    if (found?.hint !== undefined) void ahead([token]);
     return found;
+  }
+
+  /** A kept pool taken on the list's word (fromHint), within POOL_KEEP_MS: the discovery has not decided on it. */
+  const hinted = (t: string): boolean => {
+    const kept = pools.get(t);
+    return kept?.hint !== undefined && kept.found !== null && now() - kept.at < POOL_KEEP_MS;
+  };
+  /**
+   * The discovery of a token kept on its list's pool (hinted), run on the search ahead (background, room-gated): its
+   * main pool is the pool that carried most of its swaps (findPool, the list's pool its tie-break). Another pool
+   * replaces the kept one and the token's book is dropped, so the next tape and chart open on the main pool; the same
+   * pool is kept as found. A discovery that throws or finds no pool leaves the list's pool kept and served, hinted, so
+   * the lists' next load (ahead) searches it again. Registered as a search in flight (resolving), so the lists' loads
+   * meanwhile queue no second one.
+   */
+  async function verify(token: string): Promise<void> {
+    const kept = pools.get(token)!;
+    const was = kept.found!.pool.id;
+    if (resolving.has(token)) return;
+    const lane = sharedLane();
+    const p = lanes.run(lane, () => findPool(token, kept.hint!)).finally(() => (resolving.delete(token), resolvingLane.delete(token)));
+    resolving.set(token, p);
+    resolvingLane.set(token, lane);
+    const found = await p;
+    // kept anew meanwhile (its keep ran out and an open read it again): that read stands
+    if (found === null || pools.get(token) !== kept) return;
+    pools.set(token, { found: found.pool.id === was ? kept.found : { pool: found.pool, decimals: found.decimals }, at: now() });
+    if (found.pool.id !== was) {
+      log(`${chain} pool ${token}: the list's pool ${was} is not the main pool; ${found.pool.id} is`);
+      books.delete(token);
+    }
   }
 
   /** The lists' tokens whose pool is not kept, looked for as the lists load (ahead), AHEAD_AT_ONCE at a time; none
@@ -1745,9 +1788,10 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   let aheadRun: Promise<void> | null = null;
   let opening = 0;
   const idle: (() => void)[] = [];
+  // a hinted pool is served, not searched: the search ahead decides it (verify)
   const known = (t: string): boolean => {
     const kept = pools.get(t);
-    return kept !== undefined && now() - kept.at < (kept.found === null ? NONE_MS : POOL_KEEP_MS);
+    return kept !== undefined && kept.hint === undefined && now() - kept.at < (kept.found === null ? NONE_MS : POOL_KEEP_MS);
   };
   function ahead(tokens: readonly string[]): Promise<void> {
     for (const x of tokens) {
@@ -1766,7 +1810,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
           if (t === undefined) return;
           aheadQueue.delete(t);
           // a read that fails is no answer: the token is looked for again at its first open or the lists' next load
-          if (!known(t)) await mainPool(t).catch(() => undefined);
+          if (!known(t)) await (hinted(t) ? verify(t) : mainPool(t)).catch(() => undefined);
         }
       };
       // the helper's own search: background, whatever lane asked for it (a lists answer built inside a caller's read)
