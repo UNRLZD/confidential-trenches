@@ -91,6 +91,7 @@ export const IN_PROCESS = [
   // the bundle part only (the tree sync's wait, the -32004 read again, the withdraw's cause line): mainnet's cadence on
   // two providers is past the build
   { key: "pool-tree-read-waits-for-its-second", host: "sign", load: () => import("../live-checks/pool-tree-read-waits-for-its-second.mjs"), run: async (m, f) => m.judgeBundle(await m.readBundle(f)) },
+  viaRead("fresh-money-spendable-at-once", () => import("../live-checks/fresh-money-spendable-at-once.mjs")),
   // the bundle part only (step 5's U_X read and carry): the providers' answers are past the build
   { key: "wallet-restore-reads-ux", host: "sign", load: () => import("../live-checks/wallet-restore-reads-ux.mjs"), run: async (m, f) => m.judgeBundle(await m.readBundle(f)) },
   // the sign part only, against the pin of the build it serves (live: this checkout's): the index pins its /app.js and
