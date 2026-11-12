@@ -4,7 +4,7 @@ import type { Chain } from "@blindfill/kit";
 import { fillOf, fillStore } from "../portfolio/fills.ts";
 import { heldOf } from "../portfolio/model.ts";
 import type { Row } from "../portfolio/model.ts";
-import { useHeld, useOffPool } from "../portfolio/source.tsx";
+import { useCashPart, useHeld, useOffPool } from "../portfolio/source.tsx";
 import { SellBox } from "../positions/SellBox.tsx";
 import { useSell } from "../positions/source.tsx";
 import { headerModel } from "../signin/model.ts";
@@ -16,8 +16,9 @@ import {
   busy,
   centsToDecimal,
   filledOut,
+  buyPath,
   fmtUsd,
-  hasPool,
+  nearBuyAsk,
   outcome,
   parseUsd,
   poolBuyAsk,
@@ -167,7 +168,10 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
   // the pool path (card trade-box-pool): a chain whose pool the signing page reports buys from it, one proof a tap; Bal
   // is the pool's balance and Max the most one tap can spend, in USD at the device's price. Other chains keep the vault.
   const pools = signedOut ? undefined : snapshot.state?.pools;
-  const onPool = hasPool(pools, chain);
+  // NEAR (card app-near-trading): the vault's Cash pays a fresh NEAR wallet that trades on Rhea, through the kit's
+  // pool.buy with chain near; Bal is that Cash, and one tap spends at most it (no per-tap most on NEAR, no Max line)
+  const path = buyPath(pools, chain);
+  const onPool = path === "pool";
   const price = onPool ? kit.poolPrice(chain) : null;
   const pool = onPool ? poolView(pools, chain, price) : null;
   // the proof's state reads state.pools alone: it draws with no price
@@ -176,9 +180,11 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
   // chain with one; one number for the amount gate. Signed out there is none to show: the signing page sends a state
   // with a zero one, which is not "$0" of anyone's
   const cash = useOffPool(snapshot);
-  const balance = tradeBal(onPool, pool, signedOut ? null : cash).cents;
-  const maxText = onPool ? null : kit.maxBuy(chain);
-  const max = onPool ? (pool?.tapMax ?? null) : maxText === null ? null : parseUsd(maxText);
+  // on NEAR, Cash's NEAR part (the vault's USDC, as Cash's hover draws it): the money a NEAR buy spends, never a pool's
+  const nearCash = useCashPart(snapshot, "near");
+  const balance = signedOut ? null : path === "near" ? nearCash : tradeBal(onPool, pool, cash).cents;
+  const maxText = path === "vault" ? kit.maxBuy(chain) : null;
+  const max = onPool ? (pool?.tapMax ?? null) : path === "near" ? balance : maxText === null ? null : parseUsd(maxText);
   const askable = (c: Cents | null) => c !== null && (!onPool || poolBuyAsk(pools, chain, token, c, price, slippageBps).ok);
   const running = busy(phase);
   // the pool cannot buy this token yet (Unavailable): Buy and the presets stay off on this token's page
@@ -252,10 +258,10 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
   function buy(c: Cents) {
     if (!ready || busy(phaseRef.current) || unavailable(phaseRef.current) || !amountOk(c, max, balance)) return;
     let h;
-    if (onPool) {
-      // only an ask the box's own checks passed: a proof ready, at most one tap's spend, the device's price as it is at
-      // the tap (a price past its bound since the last render prices nothing)
-      const ask = poolBuyAsk(pools, chain, token, c, kit.poolPrice(chain), slippageBps);
+    if (path !== "vault") {
+      // only an ask the box's own checks passed: on a pool, a proof ready, at most one tap's spend, the device's price as
+      // it is at the tap (a price past its bound since the last render prices nothing); on NEAR, the USD in USDC
+      const ask = path === "pool" ? poolBuyAsk(pools, chain, token, c, kit.poolPrice(chain), slippageBps) : nearBuyAsk(token, c, slippageBps);
       if (!ask.ok) return;
       h = kit.request!(ask.kind, ask.params);
     } else h = kit.request!("buy", { chain, token, side: "buy", amount: centsToDecimal(c), slippage_bps: slippageBps });
@@ -285,7 +291,7 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
     buy(p);
   }
 
-  return { chain, token, slippageBps, src, account, signedOut, text, setText, phase, route, dismissed, setDismissed, amount, pools, onPool, price, proof, balance, max, askable, running, ready, buy, presets, presetOff, tapPreset, preview, sell, side, setSide: pickSide, held, heldNow, onSell };
+  return { chain, token, slippageBps, src, account, signedOut, text, setText, phase, route, dismissed, setDismissed, amount, pools, path, onPool, price, proof, balance, max, askable, running, ready, buy, presets, presetOff, tapPreset, preview, sell, side, setSide: pickSide, held, heldNow, onSell };
 }
 
 /** A trade state as useTrade gives it. */
@@ -315,7 +321,7 @@ export function TradeFillToast({ t, symbol }: { t: Trade; symbol: string }) {
 
 /** The box drawn from a trade state; any number of views of one state draw the same trade. */
 export function TradeView({ t, symbol, footer, toast = true }: { t: Trade; symbol: string; footer?: ReactNode; toast?: boolean }) {
-  const { chain, token, slippageBps, src, account, signedOut, text, setText, phase, route, dismissed, amount, pools, onPool, price, proof, balance, max, askable, running, ready, buy, presets, presetOff, tapPreset, preview } = t;
+  const { chain, token, slippageBps, src, account, signedOut, text, setText, phase, route, dismissed, amount, pools, path, onPool, price, proof, balance, max, askable, running, ready, buy, presets, presetOff, tapPreset, preview } = t;
   const { kit } = src;
   const { setOpen: openSignin } = useSigninSheet();
   const [tab, setTab] = useState<OrderTab>("market");
@@ -346,7 +352,7 @@ export function TradeView({ t, symbol, footer, toast = true }: { t: Trade; symbo
       data-state={state}
       data-stage={phase.k === "ended" ? phase.stage : undefined}
       data-set={shown ? shown.slices.map((s) => s.usd).join("+") : undefined}
-      data-path={onPool ? "pool" : "vault"}
+      data-path={path}
       data-testid="trade-box"
     >
       <div className="trb-sides">
@@ -415,7 +421,7 @@ export function TradeView({ t, symbol, footer, toast = true }: { t: Trade; symbo
                 <W id={proof === "ready" ? "proofReady" : "proofMaking"} />
               </span>
             )}
-            {max !== null && (
+            {max !== null && path !== "near" && (
               <span>
                 <W id="max" /> {fmtUsd(max)}
               </span>

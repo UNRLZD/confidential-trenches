@@ -72,6 +72,7 @@ export const IN_PROCESS = [
   { key: "sol-settle-failed-is-not-unspent", host: "sign", load: () => import("../live-checks/sol-settle-failed-is-not-unspent.mjs"), run: async (m, f) => m.judge(await m.read(f), { ledger: false }) },
   { key: "signpage-throttled-read-is-not-asked-again-at-once", host: "sign", load: () => import("../live-checks/signpage-throttled-read-is-not-asked-again-at-once.mjs"), run: async (m, f) => m.judge(await m.read(f), { ledger: false }) },
   viaRead("solana-teardown-cashback", () => import("../live-checks/solana-teardown-cashback.mjs")),
+  { key: "near-private-trading", host: "sign", load: () => import("../live-checks/near-private-trading.mjs"), run: async (m, f) => m.judge(await m.read(f), { ledger: false }) },
   viaRead("sol-w-sweep", () => import("../live-checks/sol-w-sweep.mjs")),
   viaRead("intents-u-registered-first", () => import("../live-checks/intents-u-registered-first.mjs")),
   viaRead("sol-rent-back-dust-burn", () => import("../live-checks/sol-rent-back-dust-burn.mjs")),
@@ -164,6 +165,7 @@ export const OUT = {
   "app-in-shell": "a browser (its --harness run is in test-browser)",
   "app-discover-live": "a browser and the helper",
   "app-no-test-token": "a browser and the helper",
+  "app-near-trading": "a browser and the helper (its test holds its bundle marks to the build's own writing)",
   "app-launchpad-badges": "a browser and the helper",
   "app-token-lower-panel": "the helper's holders answer",
   "app-token-rail": "the helper's lists answer",
@@ -206,6 +208,7 @@ export const OUT = {
   "app-deposit-mount": "a browser (its --harness run is in test-browser)",
   "deposit-to-pool": "a browser (its --harness run is in test-browser)",
   "terminal-harness-sign-spa": "Pages' answer to a path with no file (the index), which no build file holds",
+  "near-view-rhea": "mainnet NEAR RPC reads of the Rhea pool and get_return on the two providers, never the build",
 };
 
 /** A fetch that answers from the build folders: SIGN_HOST's / and index.html, every other path public/<path>; APP_HOST's dist/<path>. */

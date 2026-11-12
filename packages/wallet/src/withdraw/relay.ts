@@ -272,8 +272,10 @@ export type RelayDeps = {
 };
 
 export type RelayOutcome =
-  /** The pages on both RPCs hold the spend and this seed's change leaf: the change is UNSPENT, the note SPENT. */
-  | { kind: "landed"; own: boolean; change: NoteRecord; spend: VaultSpendRow }
+  /** The pages on both RPCs hold the spend and this seed's change leaf: the change is UNSPENT, the note SPENT. `tx`: the
+   *  hash the relayer last answered submitted for these bytes in this call (a record of it, never the proof of the
+   *  landing, which is the pages'), null when this call had none. */
+  | { kind: "landed"; own: boolean; change: NoteRecord; spend: VaultSpendRow; tx: string | null }
   /**
    * Block time is past deadline_ms and the pages hold no spend of the note: it is UNSPENT again. route "self_submit"
    * when the relayer answered withdraw_failed (H3.6 route 2), else "relayer".
@@ -337,6 +339,7 @@ export async function relayWithdraw(seed64: Uint8Array, req: WithdrawRequest, de
   let waitRounds = 0;
   let route: "relayer" | "self_submit" = "relayer";
   let lastAnswer: string | null = null;
+  let lastTx: string | null = null;
   let feeMax: bigint | undefined; // the device's own, read before the first send
   for (;;) {
     signal?.throwIfAborted();
@@ -360,7 +363,7 @@ export async function relayWithdraw(seed64: Uint8Array, req: WithdrawRequest, de
       if (commitment === null || leaves.get(spend.newLeafIndex) !== commitment) return { kind: "unmatched", spend };
       const own = (note.contexts ?? []).some((c) => c.context === spend.context.toString());
       const leaf = { value, label, commitment, leafIndex: spend.newLeafIndex };
-      return { kind: "landed", own, change: await recordChange(notes, note, change, precommitment, leaf), spend };
+      return { kind: "landed", own, change: await recordChange(notes, note, change, precommitment, leaf), spend, tx: lastTx };
     }
 
     // 3. Nothing landed: the pages hold no spend, and the time of the block they were read at is past deadline_ms.
@@ -392,6 +395,7 @@ export async function relayWithdraw(seed64: Uint8Array, req: WithdrawRequest, de
       try {
         const a = await sendWithdraw(bytes, fetchFn, signal);
         lastAnswer = a.ok ? "submitted" : a.code;
+        if (a.ok) lastTx = a.txHash;
         if (a.ok || CARRIED.has(a.code)) waitRounds = resendRounds;
         else if (!AGAIN.has(a.code)) {
           sending = false; // a check refused it: the pages and the deadline settle the note

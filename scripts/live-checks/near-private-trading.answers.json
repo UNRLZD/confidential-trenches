@@ -1,0 +1,22 @@
+{
+ "_note": {
+  "good": "this card's SIGN_HOST build (mainnet): packages/signpage/index.html and public/app.js as build-app.mjs wrote them at 6d106542e: the NEAR buy record, the token lock, the sell bound to a buy record and the Rhea pool list: PASS against a release list holding it",
+  "bad": "SIGN_HOST read 2026-11-12T07:42Z, before this card's deploy (release-118): FAIL"
+ },
+ "good": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-vgNpPFYaxQLbw72Dzg9t1R3eaU8kmIKEhds+gwlVzHoINhcHuOVlHcww9GCpbJvX\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-vgNpPFYaxQLbw72Dzg9t1R3eaU8kmIKEhds+gwlVzHoINhcHuOVlHcww9GCpbJvX",
+  "record": true,
+  "lock": true,
+  "sell": true,
+  "pools": true
+ },
+ "bad": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-57zpoipdsCEuiBuPD+SDvYqmqsWexZwHClkTasN/kFzKmMhtpzr/f15zADtBC81A\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-57zpoipdsCEuiBuPD+SDvYqmqsWexZwHClkTasN/kFzKmMhtpzr/f15zADtBC81A",
+  "record": false,
+  "lock": false,
+  "sell": false,
+  "pools": false
+ }
+}

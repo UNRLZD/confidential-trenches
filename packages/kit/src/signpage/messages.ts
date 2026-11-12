@@ -55,6 +55,11 @@ deepFreeze(OPEN_KINDS);
 export type PoolChain = "solana" | "base" | "robinhood";
 export const POOL_CHAINS: readonly PoolChain[] = Object.freeze(["solana", "base", "robinhood"] as const);
 
+/** The chains a private trade (pool.buy, pool.sell) runs on: every pool's, and NEAR's, where the vault pays a fresh NEAR
+ *  wallet that trades on Rhea and its sale goes back into the vault. Added after the pool kinds without changing them. */
+export type TradeChain = PoolChain | "near";
+export const TRADE_CHAINS: readonly TradeChain[] = Object.freeze([...POOL_CHAINS, "near"] as const);
+
 /** The events, page to app. */
 export const SIGNPAGE_EVENTS = ["ready", "state", "progress"] as const;
 deepFreeze(SIGNPAGE_EVENTS);
@@ -132,7 +137,7 @@ export interface SignpageParams {
   /** Move `amount` of the chain pool's asset (POOL_ASSET_DECIMALS) that the device holds on that chain into the pool. */
   "pool.deposit": { chain: PoolChain; amount: string };
   /** A release from the chain's pool to a fresh wallet that buys `token` with `amount` of the pool's asset. */
-  "pool.buy": { chain: PoolChain; token: string; amount: string; slippage_bps: number };
+  "pool.buy": { chain: TradeChain; token: string; amount: string; slippage_bps: number };
   /**
    * Sell `token` from the user's fresh wallets; the proceeds go back into the chain's pool in the same transaction as each
    * wallet's sale. Either `amount`, the token amount in whole units at the token's decimals (a typed amount), or
@@ -141,7 +146,7 @@ export interface SignpageParams {
    * server's number (card pool-sell-share-across-wallets). One of the two, never both. A sale that takes more than one
    * wallet answers every wallet's transaction in `txs`, and part_filled when some of them did not fill.
    */
-  "pool.sell": { chain: PoolChain; token: string; slippage_bps: number } & ({ amount: string; share_bps?: never } | { share_bps: number; amount?: never });
+  "pool.sell": { chain: TradeChain; token: string; slippage_bps: number } & ({ amount: string; share_bps?: never } | { share_bps: number; amount?: never });
   /** Open SIGN_HOST's withdraw screen for the chain's pool. The address is typed there, never sent by the app. */
   "pool.withdraw": Open & { chain: PoolChain };
   /** The assets the device can quote a deposit from, each with its minimum and the most one deposit takes. Signs nothing

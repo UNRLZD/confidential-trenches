@@ -91,7 +91,10 @@ import { drawWithdrawForm } from "./withdraw/form.ts";
 import { drawHeldMoveOut, type HeldDeps } from "./withdraw/held.ts";
 import { archivalRpc, heldOpOf, moveOutHeld, moveOutRpc } from "../../wallet/src/deposit/moveout.ts";
 import type { DepositOp } from "../../wallet/src/deposit/follow.ts";
-import { PAGE_NETWORK, withdrawFormDeps, withdrawSettle } from "./withdraw/handoff.ts";
+import { PAGE_NETWORK, withdrawFormDeps, withdrawHandoff, withdrawSettle } from "./withdraw/handoff.ts";
+import { nearBuyKind, nearPositions, nearSellKind, resumeNearBuys, resumeNearSells, type NearBuyPage } from "./near-buy.ts";
+import { rheaPoolsKept } from "./near-pools.ts";
+import { pacedNearRpc } from "../../wallet/src/pace.ts";
 import { proverHost } from "./prover-host.ts";
 import { drawPoolWithdrawForm } from "./withdraw/pool-form.ts";
 import { releaseTradeDeps, tradeKind } from "./trade.ts";
@@ -232,7 +235,10 @@ else {
     },
   );
   const hasSolana = PAGE_POOLS.some((p) => p.chain === "solana");
-  const poolKindMap = poolKinds(poolDeps);
+  // a NEAR buy and sell (src/near-buy.ts, card near-private-trading): the vault pays a fresh NEAR wallet from a picked
+  // note, which buys on Rhea; its sell sells all of it back and moves the USDC into the vault; top-level only, as the
+  // pool flow
+  const poolKindMap = poolKinds(prover ? { ...poolDeps, near: { buy: (ask, ctx) => nearBuyKind(nearBuyPage()!)(ask, ctx), sell: (ask, ctx) => nearSellKind(nearBuyPage()!)(ask, ctx) } } : poolDeps);
   // the sell box's preview (src/pool-sell-dry.ts): the positions pass's holding as held, the sale's own quote on the
   // trades' paced pair as background reads, never while a trade runs: a pool buy from its tap to its first answer (its
   // early "sent", the app's Filled; its read-backs to Final hold no host), a pool sell from its tap to its run's end
@@ -345,7 +351,11 @@ else {
         prices.refresh((pooled.pools ?? []).map((p) => p.chain));
         // the tokens the pool's buys hold (src/positions.ts, card signpage-state-holdings): the last whole pass, never a
         // chain read inside this state read; the first signed-in read starts one, and a buy's or sell's end the next
-        return withPositions(pooled, s.signed_in && testnet ? await testnet.positions() : null);
+        const sol = s.signed_in && testnet ? await testnet.positions() : null;
+        // and NEAR's, from the buys' own records (src/near-buy.ts nearPositions): a record read, never a chain read
+        const nearPage = s.signed_in ? nearBuyPage() : null;
+        const near = nearPage ? await nearPositions(nearPage).catch(() => []) : [];
+        return withPositions(pooled, sol === null && near.length === 0 ? null : [...(sol ?? []), ...near]);
       }),
     // a store change, a new price read (or its next one due), the Rent read landing and a proof made
     watch: (fn) => {
@@ -619,6 +629,33 @@ function withdrawDeps() {
   const page = { store: () => open(), notes: async () => openNoteStore(await open()), seed64: () => openSeed64(), prover: prover!.vault, signal: withdrawWait.signal };
   return { ...withdrawFormDeps(page), unmatched: () => withdrawsUnmatched };
 }
+// The NEAR buy's page (src/near-buy.ts): the withdraw form's fee, hand-off and settle pass on the build's network, its
+// release pair at the provider's pace, and the candidate Rhea pools read once a session (src/near-pools.ts).
+// Made at its first use (a tap or the load's settle), never while the module is read: it names the sign out's signal
+// and the seed lock, defined further down.
+let nearPageMade: NearBuyPage | null | undefined;
+function nearBuyPage(): NearBuyPage | null {
+  if (nearPageMade !== undefined) return nearPageMade;
+  if (!prover) return (nearPageMade = null);
+  const vault = () => ({ store: () => open(), notes: async () => openNoteStore(await open()), seed64: () => openSeed64(), prover: prover.vault, signal: withdrawWait.signal });
+  const net = NEAR_NETWORKS[PAGE_NETWORK];
+  const pair = [pacedNearRpc(net.fastnear[0]), pacedNearRpc(net.drpc)] as const;
+  return (nearPageMade = {
+    network: PAGE_NETWORK,
+    store: () => open(),
+    notes: async () => openNoteStore(await open()),
+    seed64: () => openSeed64(),
+    seedLock: heldSeedLock,
+    fee: () => withdrawFormDeps(vault()).fee(),
+    // the hand-off on the sign out's signal of the moment it is asked
+    handoff: withdrawHandoff(vault()) === null ? null : (w, fee, note) => withdrawHandoff(vault())!(w, fee, note),
+    settle: () => withdrawSettle(vault()),
+    rpcs: () => pair,
+    signal: () => withdrawWait.signal,
+    pools: rheaPoolsKept(PAGE_NETWORK, () => pair),
+    log: (line) => console.info(line),
+  });
+}
 // How many RESERVED vault withdrawals the last settle pass read "unmatched" (a spend of the note whose change is not this
 // device's): kept for the form, never dropped (card wallet-withdraw-move-out).
 let withdrawsUnmatched = 0;
@@ -879,7 +916,15 @@ async function landed(l: Landing): Promise<void> {
   // a pool quote's money followed on into its pool from its stage (src/pool-deposit-follow.ts)
   void poolFollow?.settle().catch(() => {});
   // a vault withdrawal a reload cut short is followed to settled (src/withdraw/handoff.ts withdrawSettle)
-  void settleWithdraws().catch(() => {});
+  // then a NEAR buy a reload cut short goes on from its record (src/near-buy.ts), after its payout's note is settled
+  void settleWithdraws()
+    .catch(() => {})
+    .then(() => {
+      const page = nearBuyPage();
+      // then a NEAR sell a reload cut short, from the same records
+      return page ? resumeNearBuys(page).then(() => resumeNearSells(page)) : undefined;
+    })
+    .catch(() => {});
   // a held deposit's move out a reload cut short (src/withdraw/held.ts)
   void settleHeld().catch(() => {});
   // a restore a closed or reloaded page left running reads stalled, so the app offers Retry; then step 5, when a page

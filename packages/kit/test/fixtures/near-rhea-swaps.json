@@ -1,0 +1,125 @@
+{
+ "read": "archival-rpc.mainnet.fastnear.com, EXPERIMENTAL_tx_status and get_pool_by_ids at the block before each swap receipt, 2026-11-11 18:20-18:26Z",
+ "swaps": [
+  {
+   "tx": "F5eBVLfSWQjkZhmuyUGykV4ZU6aBdbRb6ccABmxjAJge",
+   "signer": "vx-zec.near",
+   "method": "swap",
+   "token": "wrap.near",
+   "amount": "7844661000000000000000000",
+   "msg": "{\"actions\":[{\"pool_id\":6065,\"token_in\":\"wrap.near\",\"token_out\":\"zec.omft.near\",\"amount_in\":\"7844661000000000000000000\",\"min_amount_out\":\"2903883\"}]}",
+   "swapBlock": 224101370,
+   "swapBlockHash": "GcMbqsXSHALajvUXzGzg73hCpGoXzDY1GioufxjiQhYu",
+   "pin": 224101369,
+   "logs": [
+    "Swapped 7844661000000000000000000 wrap.near for 2904109 zec.omft.near"
+   ],
+   "pools": {
+    "block_height": 224101369,
+    "block_hash": "H2tRfoeHdjP4cLpyYyZJXvgzFaRXmgoHj4jL119e9czZ",
+    "text": "[{\"pool_kind\":\"SIMPLE_POOL\",\"token_account_ids\":[\"wrap.near\",\"zec.omft.near\"],\"amounts\":[\"30563720043599189486435499542\",\"11317654771\"],\"total_fee\":0,\"shares_total_supply\":\"831745210022907681722357734\",\"amp\":0}]"
+   },
+   "state": "Running"
+  },
+  {
+   "tx": "mCB5kLKpkzj3V8wAMHG7YG9LhhNJF5FtXJxsbqmAzQ7",
+   "signer": "closemeat6237.near",
+   "method": "swap",
+   "token": "zec.omft.near",
+   "amount": "1400000",
+   "msg": "{\"actions\":[{\"pool_id\":6065,\"token_in\":\"zec.omft.near\",\"token_out\":\"wrap.near\",\"amount_in\":\"1400000\",\"min_amount_out\":\"3743440972871842000000000\"}]}",
+   "swapBlock": 224101367,
+   "swapBlockHash": "47n5QaHqiFVCm6f29RV7euxAB58ngNmJxtTTfKRhebrG",
+   "pin": 224101366,
+   "logs": [
+    "Swapped 1400000 zec.omft.near for 3781216394199089676982467 wrap.near"
+   ],
+   "pools": {
+    "block_height": 224101366,
+    "block_hash": "3PFPnxBrsLubczoMhsets8GJe7N1vpaDxjc3tmRGMHQr",
+    "text": "[{\"pool_kind\":\"SIMPLE_POOL\",\"token_account_ids\":[\"wrap.near\",\"zec.omft.near\"],\"amounts\":[\"30567501259993388576112482009\",\"11316254771\"],\"total_fee\":0,\"shares_total_supply\":\"831745210022907681722357734\",\"amp\":0}]"
+   },
+   "state": "Running"
+  },
+  {
+   "tx": "GWgtE1fJbAxd2GsdBzGrJmV4TQuP1EwJW8Ecre63rPc7",
+   "signer": "8f993a469b20827939f97b2354998210bb6b255727bcd81c89d6a272f5c7b91a",
+   "method": "swap",
+   "token": "wrap.near",
+   "amount": "10000575505207960988024832",
+   "msg": "{\"actions\":[{\"pool_id\":6065,\"token_in\":\"wrap.near\",\"token_out\":\"zec.omft.near\",\"amount_in\":\"10000575505207960988024832\",\"min_amount_out\":\"3701699\"}]}",
+   "swapBlock": 224101352,
+   "swapBlockHash": "8YXcAL865cqMCBATtp21LsPGgdZnDbK1wfsHSD9dKncC",
+   "pin": 224101351,
+   "logs": [
+    "Swapped 10000575505207960988024832 wrap.near for 3703550 zec.omft.near"
+   ],
+   "pools": {
+    "block_height": 224101351,
+    "block_hash": "EE1q1rKK1nT4ULEWFw3Yupz96AEB6sd3j21vnf8XWS7P",
+    "text": "[{\"pool_kind\":\"SIMPLE_POOL\",\"token_account_ids\":[\"wrap.near\",\"zec.omft.near\"],\"amounts\":[\"30557203676042406618116508385\",\"11320068275\"],\"total_fee\":0,\"shares_total_supply\":\"831745210007262056969270809\",\"amp\":0}]"
+   },
+   "state": "Running"
+  },
+  {
+   "tx": "7sGsNFDSFKzSNwFMz4Bibfp1DpXF36PtR4PScMsrLWR2",
+   "signer": "closemeat6237.near",
+   "method": "swap",
+   "token": "wrap.near",
+   "amount": "3781996443790937000000000",
+   "msg": "{\"actions\":[{\"pool_id\":6065,\"token_in\":\"wrap.near\",\"token_out\":\"zec.omft.near\",\"amount_in\":\"3781996443790937000000000\",\"min_amount_out\":\"1386000\"}]}",
+   "swapBlock": 224101364,
+   "swapBlockHash": "ERWhUgC3RDgK6JHAs1T4ZbJ5TuHCBT1vyufykvkFri1J",
+   "pin": 224101363,
+   "logs": [
+    "Swapped 3781996443790937000000000 wrap.near for 1400288 zec.omft.near"
+   ],
+   "pools": {
+    "block_height": 224101363,
+    "block_hash": "7raan8jZJneJuBcZJFvU6eSQ1J4wXFnCP9AKVzg1msiB",
+    "text": "[{\"pool_kind\":\"SIMPLE_POOL\",\"token_account_ids\":[\"wrap.near\",\"zec.omft.near\"],\"amounts\":[\"30563719263549597639112482009\",\"11317655059\"],\"total_fee\":0,\"shares_total_supply\":\"831745210016660548180808018\",\"amp\":0}]"
+   },
+   "state": "Running"
+  },
+  {
+   "tx": "HCB1gqo3FreoCKsvVh9yAsr32xjKBtHWeVRx79tRvviG",
+   "signer": "ayoublaf.near",
+   "method": "ft_transfer_call",
+   "token": "wrap.near",
+   "amount": "8026586358292179371007571",
+   "msg": "{\"force\":0,\"actions\":[{\"pool_id\":6458,\"token_in\":\"wrap.near\",\"token_out\":\"token.rhealab.near\",\"amount_in\":\"8026586358292179371007571\",\"min_amount_out\":\"774662906652057272320\"}]}",
+   "swapBlock": 224101365,
+   "swapBlockHash": "F8otT1me3yTqtE24GgQG6EE6y5JPiZwYRphDbmsjdQfo",
+   "pin": 224101364,
+   "logs": [
+    "Swapped 8026586358292179371007571 wrap.near for 775748955189322317998 token.rhealab.near"
+   ],
+   "pools": {
+    "block_height": 224101364,
+    "block_hash": "ERWhUgC3RDgK6JHAs1T4ZbJ5TuHCBT1vyufykvkFri1J",
+    "text": "[{\"pool_kind\":\"SIMPLE_POOL\",\"token_account_ids\":[\"token.rhealab.near\",\"wrap.near\"],\"amounts\":[\"10966797299744009946191848\",\"113123787328762615746898219027\"],\"total_fee\":30,\"shares_total_supply\":\"27957286183174744825482921351948\",\"amp\":0}]"
+   },
+   "state": "Running"
+  },
+  {
+   "tx": "Ey2jVgBgs5YXnHpMzizLc72TteZiHAafPDzeWGkqb3fX",
+   "signer": "ayoublaf.near",
+   "method": "ft_transfer_call",
+   "token": "wrap.near",
+   "amount": "8024178863899619438895165",
+   "msg": "{\"force\":0,\"actions\":[{\"pool_id\":6458,\"token_in\":\"wrap.near\",\"token_out\":\"token.rhealab.near\",\"amount_in\":\"8024178863899619438895165\",\"min_amount_out\":\"774540278613757001728\"}]}",
+   "swapBlock": 224101336,
+   "swapBlockHash": "6rzCV438YZk1tqVHyBohA4nEdEbKfW8TjFhi9PECDmRh",
+   "pin": 224101335,
+   "logs": [
+    "Swapped 8024178863899619438895165 wrap.near for 775626155231080456739 token.rhealab.near"
+   ],
+   "pools": {
+    "block_height": 224101335,
+    "block_hash": "kdpJTfebu5V4eNthAFjWtP5oC1vejmyXaArm4A4XTVM",
+    "text": "[{\"pool_kind\":\"SIMPLE_POOL\",\"token_account_ids\":[\"token.rhealab.near\",\"wrap.near\"],\"amounts\":[\"10967572925899241026648587\",\"113115763149898716127459323862\"],\"total_fee\":30,\"shares_total_supply\":\"27957285588248687600980947220936\",\"amp\":0}]"
+   },
+   "state": "Running"
+  }
+ ]
+}
