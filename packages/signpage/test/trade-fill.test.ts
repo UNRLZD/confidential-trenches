@@ -213,7 +213,7 @@ test("a PumpSwap buy (W's wrapped-SOL balance in its meta) gets no SOL from here
 });
 
 // ------------------------------------------------------------------------------------------------ an old sale's USD
-// The CO's 07:07Z piece: an old sale's dollar value from the SOL price at its own block, read from the page's own SOL/USD
+// An old sale's dollar value from the SOL price at its own block, read from the page's own SOL/USD
 // feed (the kit's POOL_USD_FEEDS.solana, Pyth's sponsored account): the newest write of it before the sale, its signed
 // price message (fixtures feed-*.json: getTransaction "json" at finalized, 12 Nov; feed-before-*.json: the account's
 // getSignaturesForAddress before each sale, finalized, limit 20 and 60).

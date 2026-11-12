@@ -35,7 +35,7 @@ export const MARKS = {
     ["the state sends an op's pool_amount", new RegExp(`${Q}units${Q},${Q}amount_usd${Q},${Q}pool_amount${Q}\\]`)],
     ["a filled pool buy's op names its SOL", new RegExp(`units:${ID}\\.out,pool_amount:${ID}\\(${ID}\\.spend,${ID}\\.spendDecimals\\)`)],
     ["the fill writes each trade's SOL from its transaction", new RegExp(`pool_amount:${ID}\\(${ID},9\\)`)],
-    // the CO's 07:07Z piece: an old sale's USD at its own block's SOL/USD feed write, marked as such
+    // an old sale's USD at its own block's SOL/USD feed write, marked as such
     ["an old sale's USD at its block's price, marked block", new RegExp(`\\[${ID}\\.amount_usd,${ID}\\.usd_from\\]=\\[${ID}\\(${ID},27\\),${Q}block${Q}\\]`)],
   ],
   app: [
