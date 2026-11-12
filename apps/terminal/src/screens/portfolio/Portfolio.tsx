@@ -599,7 +599,7 @@ function ClosedTr({ c }: { c: ClosedRow }) {
   return (
     <tr data-closed={c.key}>
       <td className="l"><div className="tok"><Avatar symbol={c.symbol} size={34} /><div className="ell"><div className="sy">{c.symbol}</div><div className="s2 ui ell">{c.name}</div></div></div></td>
-      <td>{usd(c.bought)}</td>
+      <td>{c.bought === null ? DASH : usd(c.bought)}</td>
       <td>{c.sold === null ? DASH : usd(c.sold)}</td>
       <td>0</td>
       <td>{DASH}</td>

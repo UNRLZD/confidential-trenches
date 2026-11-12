@@ -112,8 +112,8 @@ export interface PositionExtra {
 export interface ClosedTrade {
   chain: Chain;
   token: string;
-  /** USD decimal strings; sold null when a sale's record names no USD (a dash, never a made-up figure). */
-  bought: string;
+  /** USD decimal strings; each null when a record names no USD (a dash, never a made-up figure). */
+  bought: string | null;
   sold: string | null;
   opened_at: number;
   closed_at: number;
@@ -276,10 +276,12 @@ export function realized30(rows: readonly Row[], closed: readonly ClosedTrade[],
   // calendar and the rows add up
   for (const c of closed) {
     const sold = cents(c.sold);
-    if (sold === null || c.closed_at <= now - 30 * DAY || c.closed_at > now) continue;
+    const bought = cents(c.bought);
+    // a side with no USD: the realized is unknown, not counted
+    if (sold === null || bought === null || c.closed_at <= now - 30 * DAY || c.closed_at > now) continue;
     const sx = fx(c.sold ?? undefined);
-    const bx = fx(c.bought);
-    r += sx !== null && bx !== null ? (cents(unfx(sx - bx)) ?? 0n) : sold - (cents(c.bought) ?? 0n);
+    const bx = fx(c.bought ?? undefined);
+    r += sx !== null && bx !== null ? (cents(unfx(sx - bx)) ?? 0n) : sold - bought;
   }
   return r;
 }
@@ -339,7 +341,7 @@ export function tradeBook(ops: readonly Operation[], positions: readonly { chain
     closed.push({
       chain: c.chain,
       token: c.token,
-      bought: unfx(c.usdIn ?? 0n),
+      bought: c.usdIn === null ? null : unfx(c.usdIn),
       sold: c.usdOut === null ? null : unfx(c.usdOut),
       opened_at: c.opened,
       closed_at: c.last,
@@ -624,8 +626,8 @@ export interface ClosedRow {
   token: string;
   symbol: string;
   name: string;
-  bought: bigint;
-  /** Null: the sale's record names no USD (a dash). */
+  /** Null: the record names no USD (a dash). */
+  bought: bigint | null;
   sold: bigint | null;
   realized: bigint | null;
   realizedBps: number | null;
@@ -641,15 +643,16 @@ export function closedRows(d: PortfolioData): ClosedRow[] {
   return d.closed
     .map((c) => {
       const m = d.market(c.chain, c.token);
-      const bought = cents(c.bought) ?? 0n;
+      const bought = cents(c.bought);
       const sold = cents(c.sold);
       // realized from the exact figures, then to cents: two floors first would put a cent and its percent off (a
       // $0.0523 loss on $0.1000 drawn as −$0.06 and −60%)
       const bx = fx(c.bought ?? undefined);
       const sx = fx(c.sold ?? undefined);
       const exact = bx !== null && sx !== null ? sx - bx : null;
-      const realized = sold === null ? null : exact !== null ? cents(unfx(exact)) : sold - bought;
-      const realizedBps = realized === null ? null : exact !== null && bx !== null ? (bx === 0n ? null : Number((exact * 10000n) / bx)) : bps(realized, bought);
+      // a side with no USD: realized and its percent unknown (a dash), as for a sale with none
+      const realized = sold === null || bought === null ? null : exact !== null ? cents(unfx(exact)) : sold - bought;
+      const realizedBps = realized === null || bought === null ? null : exact !== null && bx !== null ? (bx === 0n ? null : Number((exact * 10000n) / bx)) : bps(realized, bought);
       const ai = fx(c.bought_asset ?? undefined);
       const ao = fx(c.sold_asset ?? undefined);
       const asset = c.asset ?? null;

@@ -70,6 +70,7 @@ const STATES = [
   ["pooltrades-stats", "S10.9", ["390"], true],
   ["pooltrades-activity", "S14.2", ["390", "1440"], true],
   ["pooltrades-open", "S10.9", ["390", "1440"], false],
+  ["pooltrades-mixed", "S10.10", ["1440"], false],
 ];
 // one balance (card portfolio-one-balance): each fixture's Cash tile in cents and its parts as drawn on hover (desktop) or
 // a tap (phone): [chain, the drawn row's text, data-cents, moving]. Vault $73.18; SOL at $150, ETH at $3,000.

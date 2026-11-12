@@ -105,6 +105,20 @@ export const FIXTURES: Record<string, Fx> = {
   pooltrades: { state: POOL_STATE, live: true, ui: { closed: true } },
   "pooltrades-stats": { state: POOL_STATE, live: true, ui: { pane: "stats" } },
   "pooltrades-activity": { state: POOL_STATE, live: true, ui: act() },
+  // review round: the first round trip as release 118 wrote it and no fill could complete (a buy with its USD only, a
+  // sale with its units only: dashes where the record holds nothing), the second as this release writes it
+  "pooltrades-mixed": {
+    state: {
+      ...POOL_STATE,
+      ops: POOL_OPS.map((o) => {
+        if (o.id === "pb1") return { id: o.id, kind: o.kind, stage: o.stage, txs: o.txs, created_ms: o.created_ms, chain: o.chain, token: o.token, amount_usd: o.amount_usd } as Operation;
+        if (o.id === "ps1") return { id: o.id, kind: o.kind, stage: o.stage, txs: o.txs, created_ms: o.created_ms, chain: o.chain, token: o.token, units: o.units } as Operation;
+        return o;
+      }),
+    },
+    live: true,
+    ui: { closed: true },
+  },
   // between the second buy and its sale: its open row, the first round trip closed
   "pooltrades-open": {
     state: { ...POOL_STATE, ops: POOL_OPS.slice(0, 4), positions: [{ chain: "solana", token: ICM, amount: "34154.038071", cost: "0.0999999427770536", wallets: ["8e8RsnpnL6Toqsa2Q1YPLvopDqPa3HFTdwEikCkqpQ7p"], decimals: 6 }] },

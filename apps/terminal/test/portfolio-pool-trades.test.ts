@@ -88,6 +88,17 @@ test("a record with no size of its own (a sale written before its proceeds were 
   assert.equal(c!.realizedAsset, null);
 });
 
+// R3 (review P2-3): recordPoolBuy writes no amount_usd when the page had no SOL price at the request (positions.ts)
+test("R3: a closed round trip whose buy names no USD draws a dash for bought, realized and its percent, and adds nothing to the total", () => {
+  const { amount_usd: _u, ...noUsd } = buy1 as Operation & { amount_usd?: string };
+  const snap = base([noUsd as Operation, sell1], []);
+  const d = heldData(snap, markets, new Map(), NOW);
+  const [c] = closedRows(d);
+  assert.deepEqual([c!.bought, c!.sold, c!.realized, c!.realizedBps], [null, 4n, null, null]);
+  assert.equal(c!.realizedAsset, "-0.000631252", "the SOL figures stand on their own");
+  assert.equal(portfolio(snap, d, NOW).totals!.realized30, 0n);
+});
+
 test("the same rows from Base, Robinhood and NEAR records: ETH on the EVM pools, USD only on NEAR", () => {
   for (const [chain, asset] of [["base", "ETH"], ["robinhood", "ETH"], ["near", null]] as const) {
     const t = chain === "near" ? "token.near" : "0xAbC0000000000000000000000000000000000001";
