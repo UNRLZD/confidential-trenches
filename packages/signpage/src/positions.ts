@@ -203,11 +203,13 @@ export async function solanaAssetHeld(rpc: SolanaRpc, address: string, mint: str
 
 /** A pass as kept: its positions, each "W mint" amount (base units, a decimal string) and each "W mint" the finder
  *  listed. */
-export type KeptPass = { positions: Position[]; held: Record<string, string>; listed: string[] };
-/** What a pass keeps for the next: each "W mint" last amount, what the finder listed, each mint's decimals. */
+export type KeptPass = { positions: Position[]; held: Record<string, string>; listed: string[]; lamports?: Record<string, string> };
+/** What a pass keeps for the next: each "W mint" last amount, what the finder listed, each mint's decimals, and each
+ *  held W's last asset_held read (`lamports`), which stands while a later pass reads W or when W's read fails, as a
+ *  token's last amount does, so a Total never dips while the page reads. */
 /** `waited`: the "W mint"s a round of retries looked for in vain this sign-in, each looked for no more (see PassResult). */
-export type PassMemo = { held: Map<string, bigint>; listed: Set<string>; decimals: Map<string, number>; loaded: boolean; stale?: boolean; waited: Set<string> };
-export const passMemo = (): PassMemo => ({ held: new Map(), listed: new Set(), decimals: new Map(), loaded: false, waited: new Set() });
+export type PassMemo = { held: Map<string, bigint>; listed: Set<string>; decimals: Map<string, number>; lamports: Map<string, bigint>; loaded: boolean; stale?: boolean; waited: Set<string> };
+export const passMemo = (): PassMemo => ({ held: new Map(), listed: new Set(), decimals: new Map(), lamports: new Map(), loaded: false, waited: new Set() });
 /** A pass's positions, whether every read in it held (when not, it runs again and is not kept), and the "W mint"s it
  *  looks for again though every read held (`wait`): a token sold in full the finder still lists, a buy this page ran the
  *  finder does not list yet. A pass with only these is whole, so it is kept; it runs again, but once a round of retries
@@ -271,6 +273,7 @@ function loadMemo(memo: PassMemo, v: unknown): void {
   if (typeof k !== "object" || k === null) return;
   if (typeof k.held === "object" && k.held !== null) for (const [key, a] of Object.entries(k.held)) if (typeof a === "string" && BASE.test(a)) memo.held.set(key, BigInt(a));
   if (Array.isArray(k.listed)) for (const key of k.listed) if (typeof key === "string") memo.listed.add(key);
+  if (typeof k.lamports === "object" && k.lamports !== null) for (const [w, a] of Object.entries(k.lamports)) if (typeof a === "string" && BASE.test(a)) memo.lamports.set(w, BigInt(a));
   // each kept position's decimals, so a load asks no RPC for a token it showed
   if (Array.isArray(k.positions)) for (const p of k.positions as unknown[]) {
     const q = p as { token?: unknown; decimals?: unknown } | null;
@@ -356,8 +359,10 @@ export async function positionsPass(r: PositionsReads, memo: PassMemo = passMemo
     return { held, listed, whole, waits };
   };
   // one position per mint, at its known decimals; an amount whose decimals are not known yet left for the end
-  // `lamports`: each W's asset_held read this pass (solanaAssetHeld); a position any of whose Ws is not in it has none
-  const positionsOf = (held: ReadonlyMap<string, { address: string; mint: string; amount: bigint | string }>, lamports?: ReadonlyMap<string, bigint>): Position[] => {
+  // `lamports`: each W's asset_held read this pass (solanaAssetHeld), else its last read (memo.lamports); a position any
+  // of whose Ws has neither has none
+  const positionsOf = (held: ReadonlyMap<string, { address: string; mint: string; amount: bigint | string }>, fresh: ReadonlyMap<string, bigint> = new Map()): Position[] => {
+    const lamports = r.assetHeld ? new Map([...memo.lamports, ...fresh]) : undefined;
     const by = new Map<string, { amount: bigint; wallets: string[]; held: { address: string; amount: bigint }[] }>();
     for (const h of held.values()) {
       const d = memo.decimals.get(h.mint);
@@ -454,11 +459,14 @@ export async function positionsPass(r: PositionsReads, memo: PassMemo = passMemo
     const amount = typeof h.amount === "bigint" ? h.amount : base(h.amount, d);
     if (amount !== null && amount > 0n) nextHeld.set(k, amount);
   }
-  const out = positionsOf(held, r.assetHeld ? lamports : undefined);
+  const out = positionsOf(held, lamports);
   memo.held = nextHeld;
   memo.listed = listed;
+  // each W still held: this pass's read, else its last; a W no longer held is dropped
+  const ws = new Set([...held.values()].map((h) => h.address));
+  memo.lamports = new Map([...memo.lamports, ...lamports].filter(([w]) => ws.has(w)));
   // only a whole pass is kept, never one a sign out overtook (its store is gone)
-  if (whole && !memo.stale) await r.keep?.({ positions: out, held: Object.fromEntries([...nextHeld].map(([k, a]) => [k, a.toString()])), listed: [...listed] }).catch(() => {});
+  if (whole && !memo.stale) await r.keep?.({ positions: out, held: Object.fromEntries([...nextHeld].map(([k, a]) => [k, a.toString()])), listed: [...listed], ...(memo.lamports.size === 0 ? {} : { lamports: Object.fromEntries([...memo.lamports].map(([w, a]) => [w, a.toString()])) }) }).catch(() => {});
   return { positions: out, whole, ...(wait.length > 0 ? { wait } : {}) };
 }
 

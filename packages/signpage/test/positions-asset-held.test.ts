@@ -10,7 +10,7 @@ import { solanaAta } from "../../kit/src/checks/solana/message.ts";
 import { SIGNPAGE_RESULT_SCHEMAS } from "../../kit/src/signpage/schema.ts";
 import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import { stateOf } from "../src/state.ts";
-import { keptPositions, positionsPass, solanaAssetHeld, withPositions, type FoundWallet, type PositionsReads } from "../src/positions.ts";
+import { keptPositions, passMemo, positionsPass, solanaAssetHeld, withPositions, type FoundWallet, type PositionsReads } from "../src/positions.ts";
 
 const SYSTEM = "11111111111111111111111111111111";
 // three public keys of no one (base58 of 32 bytes), never a key of ours
@@ -97,6 +97,38 @@ test("a W whose extra read fails: no asset_held for its position (never a part s
   const plain = await positionsPass(bare);
   assert.equal(Object.hasOwn(plain.positions[0]!, "asset_held"), false);
   assert.equal(plain.whole, true);
+});
+
+test("a later pass keeps each W's last asset_held while it reads (its shown rows) and when its read fails, so the Total never dips", async () => {
+  const memo = passMemo();
+  await positionsPass(reads(async (a) => (a === W1 ? 8_478_835n : 1_000_000_000n)), memo);
+  const shown: (string | undefined)[] = [];
+  const r = reads(async (a) => {
+    if (a === W2) throw new Error("429");
+    return 8_000_000n;
+  });
+  r.shown = (ps) => void shown.push(ps[0]?.asset_held);
+  const wallets = r.wallets;
+  r.wallets = async (only, o) => {
+    const all = await wallets(only, o);
+    for (const w of all) o?.each?.(w);
+    return all;
+  };
+  const got = await positionsPass(r, memo);
+  assert.equal(got.whole, false, "the failed read runs the pass again");
+  assert.equal(got.positions[0]!.asset_held, "1.008", "W1 read now, W2 at its last read");
+  assert.ok(shown.length > 0 && shown.every((x) => x === "1.008478835"), `rows shown while the pass reads: ${JSON.stringify(shown)}`);
+  // a kept pass carries each W's last read, so a load answers with it at once
+  const kept: unknown[] = [];
+  const again = reads(async () => 8_000_000n);
+  again.keep = async (k) => void kept.push(k);
+  await positionsPass(again, memo);
+  const fresh = passMemo();
+  const r2 = reads(async () => {
+    throw new Error("down");
+  });
+  r2.kept = async () => kept[0];
+  assert.equal((await positionsPass(r2, fresh)).positions[0]!.asset_held, "0.016");
 });
 
 test("the kit's schema: asset_held a decimal at SOL's 9 digits, on Solana only; a kept pass from before it still loads", () => {
