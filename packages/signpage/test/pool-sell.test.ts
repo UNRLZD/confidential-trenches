@@ -4194,8 +4194,20 @@ test("N6b: a plan refusal on reads that differ only in one account's lamports is
   assert.equal(w.told.at(-1)?.state, "gave_up");
 });
 
-// N10b: a W whose own lock another pass holds (another tab) is skipped, and the list goes on to the next W.
-test("N10b: a W whose rent back another pass holds is skipped and the next W still gets its pass", async () => {
+// N10b: a W whose own lock another pass holds (another tab) is skipped, and the list goes on to the next W. A load
+// passes its Ws in a random order (card round-trip-costs-less), so the test runs both orders: the held W first in one.
+test("N10b: a W whose rent back another pass holds is skipped and the next W still gets its pass, in either order", async () => {
+  const real = globalThis.crypto.getRandomValues.bind(globalThis.crypto);
+  try {
+    for (const draw of [0, 1]) {
+      globalThis.crypto.getRandomValues = (<T extends ArrayBufferView | null>(a: T): T => ((a as unknown as Uint32Array).fill(draw), a)) as typeof globalThis.crypto.getRandomValues;
+      await n10b(draw);
+    }
+  } finally {
+    globalThis.crypto.getRandomValues = real;
+  }
+});
+async function n10b(draw: number): Promise<void> {
   const w = await world({ ataLamports: TOKEN_RENT });
   await runPoolSell(w.host, ASK);
   const mem = new Map<string, unknown>();
@@ -4213,9 +4225,9 @@ test("N10b: a W whose rent back another pass holds is skipped and the next W sti
   await resumeRentBacks({ ...w.host, owed, wallets }, locks);
   leave();
   await other1;
-  assert.ok(w.told.some((t) => t.address === other && t.step === "rent_back"), "the list stopped at the W another pass holds");
+  assert.ok(w.told.some((t) => t.address === other && t.step === "rent_back"), `draw ${draw}: the list stopped at the W another pass holds`);
   assert.equal(w.c.calls.filter((c) => c.method === "getMultipleAccounts" && (c.params[0] as string[]).includes(W.address)).length > 0, true);
-});
+}
 
 // N12: what W reads as hashes the rules' version, so a release that changes the rules runs every skipped W again; since
 // the review of 20ba2481b (P1-2) it is the helper's read alone (W, its accounts and the Rent sysvar in one batch) and
