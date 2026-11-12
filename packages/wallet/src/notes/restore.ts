@@ -328,13 +328,26 @@ export function walkEnd(lane: number, found: readonly number[], gap: number, rea
   return Math.min(end, top);
 }
 
-/** Step 3 on pages both RPCs gave: the deposits, the spends and the whole state tree's leaves. */
-export function restorePages(
-  seed64: Uint8Array,
+type RestorePagesArgs = [
   scope: bigint,
   pages: { deposits: readonly VaultDepositRow[]; spends: readonly VaultSpendRow[]; leaves: readonly bigint[] },
-  opts: { gap?: number; reach?: readonly (number | null)[]; lanes?: readonly LaneWalk[] } = {},
-): Omit<NoteRestore, "height" | "finalHeights" | "blockHash" | "cursor"> {
+  opts?: { gap?: number; reach?: readonly (number | null)[]; lanes?: readonly LaneWalk[] },
+];
+export type PagesRestored = Omit<NoteRestore, "height" | "finalHeights" | "blockHash" | "cursor">;
+
+/** Step 3 on pages both RPCs gave: the deposits, the spends and the whole state tree's leaves. */
+export function restorePages(seed64: Uint8Array, ...args: RestorePagesArgs): PagesRestored {
+  const steps = restorePagesSteps(...args);
+  for (let r = steps.next(); ; r = steps.next(seed64)) if (r.done) return r.value;
+}
+
+/**
+ * restorePages a note derivation at a time: each step waits for the seed and reads it only until the next wait, so a
+ * page gives it the seed in short synchronous uses with the event loop a turn between them (the signing page's vault
+ * walk, packages/signpage/src/pool-restore.ts nearVaultRestoreNotes), as solanaRestoreSteps (../pool/solana-restore.ts).
+ * Its checks on the arguments and the pages run before the first wait.
+ */
+export function* restorePagesSteps(scope: bigint, pages: RestorePagesArgs[1], opts: NonNullable<RestorePagesArgs[2]> = {}): Generator<void, PagesRestored, Uint8Array> {
   const gap = opts.gap ?? RESTORE_GAP;
   const reach = checkReach(opts.reach);
   if (opts.lanes !== undefined && (!Array.isArray(opts.lanes) || opts.lanes.length !== RESTORE_LANES)) throw new Error("lanes: one walk per lane");
@@ -368,8 +381,8 @@ export function restorePages(
     queue.push(n);
   };
   // a note the vault holds as a deposit (deposit, return, move and second-arrival notes): matched by precommitment
-  const asDeposit = (ref: NoteRef): boolean => {
-    const P = noteSecrets(seed64, ref).precommitment;
+  const asDeposit = function* (ref: NoteRef): Generator<void, boolean, Uint8Array> {
+    const P = noteSecrets(yield, ref).precommitment;
     const r = byP.get(P);
     if (r === undefined) return false;
     const commitment = noteCommitment(r.value, r.label, P);
@@ -377,20 +390,21 @@ export function restorePages(
     put(ref, P, { value: r.value, label: r.label, commitment, leafIndex: r.leafIndex });
     return true;
   };
-  const seconds = (id: SecondId): void => {
-    for (let n = 0; n <= U32 && asDeposit({ kind: "second", id, n }); n++);
+  const seconds = function* (id: SecondId): Generator<void, void, Uint8Array> {
+    for (let n = 0; n <= U32 && (yield* asDeposit({ kind: "second", id, n })); n++);
   };
 
   // the deposit index walk, lane by lane
   const laneHighest: (number | null)[] = [];
   const laneWalked: number[] = [];
   for (let lane = 0; lane < RESTORE_LANES; lane++) {
+    const seed64: Uint8Array = yield;
     const w = opts.lanes ? opts.lanes[lane]! : walkLane(seed64, scope, lane, (P) => byP.has(P), gap, reach[lane]!);
     // a walk run elsewhere is held to a whole walk's end on this seed and scope; each index the vault holds (asDeposit below)
     const { found, end } = checkedWalk(w, lane, seed64, scope, gap, reach[lane]!);
     for (const i of found) {
       const ref: NoteRef = { kind: "deposit", s: scope, i };
-      if (!asDeposit(ref)) throw new Error(`deposit index ${i}: the walk's precommitment is not the note's`);
+      if (!(yield* asDeposit(ref))) throw new Error(`deposit index ${i}: the walk's precommitment is not the note's`);
     }
     laneHighest.push(found.length === 0 ? null : found[found.length - 1]!);
     laneWalked.push(end);
@@ -400,8 +414,8 @@ export function restorePages(
   for (let k = 0; k < queue.length; k++) {
     const note = queue[k]!;
     const ref = note.ref;
-    if (ref.kind === "deposit") seconds({ id: "U", s: ref.s, i: ref.i });
-    const spend = byNh.get(noteSecrets(seed64, ref).nullifierHash);
+    if (ref.kind === "deposit") yield* seconds({ id: "U", s: ref.s, i: ref.i });
+    const spend = byNh.get(noteSecrets(yield, ref).nullifierHash);
     if (spend === undefined) continue;
     note.state = "SPENT";
     const l = note.leaf.label;
@@ -413,7 +427,7 @@ export function restorePages(
     // the change note, at the leaf its commitment is; a ragequit inserts none
     if (spend.withdrawn > note.leaf.value) throw new Error(`spend ${spend.index} withdrew more than its note held`);
     const cref: NoteRef = { kind: "change", l, j };
-    const cP = noteSecrets(seed64, cref).precommitment;
+    const cP = noteSecrets(yield, cref).precommitment;
     const cValue = note.leaf.value - spend.withdrawn;
     const cCommitment = noteCommitment(cValue, l, cP);
     const cAt = leafAt.get(cCommitment);
@@ -426,7 +440,7 @@ export function restorePages(
     } else if (cAt !== undefined) put(cref, cP, { value: cValue, label: l, commitment: cCommitment, leafIndex: spend.newLeafIndex }, key);
     // the refund note the vault writes when a payout bounced (2.5.4-2.5.5), on this withdrawal's refund precommitment
     const rref: NoteRef = { kind: "refund", l, j };
-    const rP = noteSecrets(seed64, rref).precommitment;
+    const rP = noteSecrets(yield, rref).precommitment;
     // money came back on a refund precommitment of ours that is not refundNote(l, j): a drift; stop, never lose it
     if (spend.refundValue > 0n && spend.refundPrecommitment !== rP) throw new Error(`spend ${spend.index}: its refund is on a precommitment that is not refund note (l ${l}, j ${j})`);
     if (spend.refundValue > 0n) {
@@ -437,12 +451,12 @@ export function restorePages(
       } else if (spend.status === "refund_pending") pendingRefunds.push(mine);
     }
     // what the arm brings back, each on its own id: V's move note, R's return notes, and every second arrival
-    asDeposit({ kind: "move", l, j });
-    seconds({ id: "V", l, j });
-    seconds({ id: "A", l, j });
+    yield* asDeposit({ kind: "move", l, j });
+    yield* seconds({ id: "V", l, j });
+    yield* seconds({ id: "A", l, j });
     for (const c of CHAIN_TAGS) {
-      asDeposit({ kind: "return", c, l, j });
-      seconds({ id: "R", c, l, j });
+      yield* asDeposit({ kind: "return", c, l, j });
+      yield* seconds({ id: "R", c, l, j });
     }
   }
   spends.sort((x, y) => x.spend.index - y.spend.index);
