@@ -123,12 +123,17 @@ export function drawWithdrawForm(doc: Document, deps: WithdrawFormDeps, button: 
   const form = doc.createElement("div");
   form.dataset.withdraw = "form";
   form.dataset.state = "empty";
+  // the pool form's spacing (src/withdraw/pool-form.ts): one column, 12 px between rows, each field's name over its input
+  Object.assign(form.style, { display: "flex", flexDirection: "column", alignItems: "stretch", gap: "12px", maxWidth: "440px" });
   const field = (key: "to" | "amount"): { input: HTMLInputElement; line: HTMLParagraphElement; label: HTMLLabelElement } => {
     const label = doc.createElement("label");
+    Object.assign(label.style, { display: "flex", flexWrap: "wrap", alignItems: "center", gap: "6px 8px" });
     const name = doc.createElement("span");
     name.textContent = WITHDRAW_WORDS[key];
     markDraft(name, key, WITHDRAW_DRAFT);
+    Object.assign(name.style, { flexBasis: "100%" });
     const input = doc.createElement("input");
+    Object.assign(input.style, { flex: "1 1 0", minWidth: "0" });
     input.type = "text";
     input.dataset.input = key;
     input.autocomplete = "off";
