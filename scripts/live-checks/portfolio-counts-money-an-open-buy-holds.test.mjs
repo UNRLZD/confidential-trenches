@@ -99,7 +99,8 @@ test("the marks on the builds' minified shapes, any quote; each old shape is no 
   const appNew = [
     "for(let t of e.positions){if(t.asset_held===void 0||t.wallets.some(e=>n.has(`${t.chain}:${e}`)))continue;let a=1}",
     "let r=BigInt(t[2]+(n+`00`).slice(0,2))+(Number(n[2]??`0`)>=5?1n:0n);return r",
-    "return(2n*BigInt(n[1]+i)*BigInt(r[1]+a)*100n+o)/(2n*o)",
+    // nearCents: an exact figure to the nearest cent (review of 98d75c8cb: each row figure from the exact one)
+    "let n=(t*200n+Fs)/(2n*Fs);return e<0n?-n:n",
     "for(let e=2;new Set(a).size<n&&e<=8;e++)a=i(e);",
   ].join(";");
   assert.deepEqual(marksIn("app", appNew), [sum, bought, value, axis]);
@@ -110,6 +111,7 @@ test("the marks on the builds' minified shapes, any quote; each old shape is no 
     "for(let t of e.positions){if(t.wallets.some(e=>n.has(`${t.chain}:${e}`)))continue;let a=1}",
     "let r=BigInt(t[2]+(n+`00`).slice(0,2));return r",
     "return BigInt(n[1]+i)*BigInt(r[1]+a)*100n/o",
+    "Ys=e=>e*100n/Fs",
     "for(let e=2;e<=8;e++)a=i(e);",
     "a=i(2),new Set(a).size<n&&a",
     "{}.asset_held,t.wallets.some(",

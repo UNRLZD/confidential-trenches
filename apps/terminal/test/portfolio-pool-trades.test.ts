@@ -67,7 +67,8 @@ test("the whole sequence: nothing open, both round trips closed with their reali
   assert.equal(pf.totals!.realized30, -5n);
   // Activity: each trade with its own transaction and size
   const acts = activity(snap.state!.ops, d).filter((r) => r.kind === "buy" || r.kind === "sell");
-  assert.deepEqual(acts.map((r) => [r.kind, r.txs[0]!.hash, r.usd]), [["sell", TX.sell2, 9n], ["buy", TX.buy2, 9n], ["sell", TX.sell1, 4n], ["buy", TX.buy1, 10n]]);
+  // each to the nearest cent, as its closed row draws the same trade ($0.0999999 is $0.10)
+  assert.deepEqual(acts.map((r) => [r.kind, r.txs[0]!.hash, r.usd]), [["sell", TX.sell2, 10n], ["buy", TX.buy2, 10n], ["sell", TX.sell1, 5n], ["buy", TX.buy1, 10n]]);
 });
 
 test("between the second buy and its sale: one open row with size, cost and value, the first round trip closed", () => {
@@ -112,8 +113,9 @@ test("R4: an open row whose buy names no USD has no cost, bought or PnL, and add
   const pf = portfolio(snap, heldData(snap, markets, new Map(), NOW), NOW);
   const r = pf.rows[0]!;
   assert.deepEqual([r.cost, r.bought, r.value, r.pnl, r.pnlBps], [null, null, 8n, null, null]);
-  // the row's own $0.08 in the Positions tile (review P3-1: the tiles are the sums of the rows' figures)
-  assert.deepEqual([pf.totals!.inPos, pf.totals!.unreal], [8n, 0n]);
+  // the row draws its exact value to the nearest cent ($0.08); the Positions tile is the exact sum rounded down once
+  // ($0.07): a row and a total may differ by a cent, a total never shows more than there is
+  assert.deepEqual([pf.totals!.inPos, pf.totals!.unreal], [7n, 0n]);
   // beside a row with a known cost: only that row's PnL counts
   const known = { ...unknown, token: "So11111111111111111111111111111111111111112", cost: "0.05" };
   const two = base([noUsd as Operation], [unknown, known]);

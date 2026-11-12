@@ -1,7 +1,7 @@
-import { held, pct, units, usd } from "../portfolio/model.ts";
+import { bps as bpsOf, held, nearCents, pct, units, usd } from "../portfolio/model.ts";
 import type { Row } from "../portfolio/model.ts";
 import { busy } from "../trade/model.ts";
-import { initialsBps, pctLabel, QUICK, sellAmount, WHOLE } from "./model.ts";
+import { pctLabel, QUICK, sellAmount, WHOLE } from "./model.ts";
 import type { Sell } from "./source.tsx";
 import { W } from "./W.tsx";
 import "./positions.css";
@@ -33,8 +33,10 @@ export function PositionPanel({ row, s, now, onShare }: { row: Row; s: Sell; now
   const decimals = row.decimals;
   const running = busy(s.phase);
   const noRoute = row.mark === "noRoute";
-  const total = row.pnl === null ? null : row.pnl + row.realized;
-  const totalBps = total === null || row.cost === null || row.cost === 0n ? null : Number((total * 10_000n) / row.cost);
+  // the PnL and the realized part, exact, to the nearest cent; its percent from the exact figures
+  const totalX = row.valueX === null || row.costX === null ? null : row.valueX - row.costX + row.realizedX;
+  const total = totalX === null ? null : nearCents(totalX);
+  const totalBps = totalX === null || row.costX === null ? null : bpsOf(totalX, row.costX);
   const up = row.pnl === null ? undefined : String(row.pnl >= 0n);
 
   return (
@@ -72,7 +74,8 @@ export function PositionPanel({ row, s, now, onShare }: { row: Row; s: Sell; now
       </div>
       <div className="tk-quick" data-testid="position-quick">
         {QUICK.map((q) => {
-          const b = q === "initials" ? (row.cost === null ? null : initialsBps(row.cost, row.value)) : q;
+          // Initials from the exact cost and value (rowOf), never from the rounded cents: it is the share the device signs
+          const b = q === "initials" ? row.initials : q;
           const amount = b === null ? null : sellAmount(row.units, b, decimals);
           const live = running && b !== null && s.bps === b;
           const off = !s.ready || running || noRoute || amount === null;

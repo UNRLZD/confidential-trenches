@@ -90,7 +90,8 @@ const STATES = [
   ["quick-25", "up", '[data-quick="2500"]', 400, "S8.30", "Landing 0.4s", QUARTER, "0000", "0000"],
   ["S8.33", "noroute", null, 0, "S8.33", "No route", null, "0000", "0000"],
   ["down", "down", null, 0, "S8.29", "Sell 50%", null, "1111", "1110"],
-  // dust: 3 base units at $12,000 a token is $0.036 on a $0.03 cost, drawn $0.04 against $0.03: up, so Initials is on
+  // dust: 3 base units at $12,000 a token is $0.036 on a $0.03 cost, drawn $0.04 against $0.03: up on the exact figures,
+  // so Initials is on (8334 bps, from $0.03 / $0.036)
   // (card portfolio-counts-money-an-open-buy-holds: every figure to the nearest cent; 25% comes to no base unit)
   ["dust", "dust", null, 0, "S8.29", "Sell 50%", null, "0111", "0111"],
   ["nodec-25", "nodec", '[data-quick="2500"]', 400, "S8.30", "Landing 0.4s", QUARTER_NODEC, "0000", "0000"],
@@ -236,7 +237,8 @@ try {
         check(norm(await page.locator('[data-testid="position-pnl"]').innerText()) === "+$119.00", `${tag}: the PnL hero`);
         check(norm(await page.locator('[data-testid="pos-holding"]').innerText()) === "Holding $219.00 1.23M TORCH", `${tag}: the Holding row`);
         check(norm(await page.locator('[data-testid="pos-bought"]').innerText()) === "Bought $100.00", `${tag}: the Bought row`);
-        check(norm(await page.locator('[data-testid="pos-total"]').innerText()) === "Total PnL +$119.00 +119.0%", `${tag}: the Total PnL row`);
+        // its percent from the exact figures, cut toward zero like every percent here ($118.9999962 on $100 is +118.9%)
+        check(norm(await page.locator('[data-testid="pos-total"]').innerText()) === "Total PnL +$119.00 +118.9%", `${tag}: the Total PnL row`);
         check(norm(await page.locator('[data-testid="pos-held"]').innerText()) === "Held for 6d 6h", `${tag}: Held for`);
       }
       const m = await measure(page, w);

@@ -123,7 +123,7 @@ test("the value line: cash plus each position at its close, at its cost before i
   ]);
 });
 
-test("the value line: a priced token with no history is flat at its price; no positions is cash alone; each position to the nearest cent, the cash's as given", () => {
+test("the value line: a priced token with no history is flat at its price; no positions is cash alone; the exact sum rounded down once", () => {
   const s = heldValueSeries({
     positions: [{ chain: "base", token: BASE_T, amount: "3", cost: "1" }],
     markets: [{ chain: "base", token: BASE_T, symbol: "T", name: "T", price_usd: "0.3333" }],
@@ -132,11 +132,12 @@ test("the value line: a priced token with no history is flat at its price; no po
     base_usd: "0.005",
     now: 5 * H,
   });
-  // 3 x $0.3333 = $0.9999, drawn $1.00 as Portfolio's row (card portfolio-counts-money-an-open-buy-holds); $0.005 cash
-  // is the 0 cents it is given as
-  assert.deepEqual(s, [[5 * H, "1.00"]]);
-  const quarter = (price: string) => heldValueSeries({ positions: [{ chain: "base", token: BASE_T, amount: "1", cost: "1" }], markets: [{ chain: "base", token: BASE_T, symbol: "T", name: "T", price_usd: price }], history: new Map(), ops: [], base_usd: "0", now: H });
-  assert.deepEqual([quarter("0.004"), quarter("0.005")], [[[H, "0.00"]], [[H, "0.01"]]], "under half a cent down, half up");
+  // 3 x $0.3333 = $0.9999: $0.99, rounded down once
+  assert.deepEqual(s, [[5 * H, "0.99"]]);
+  // card portfolio-counts-money-an-open-buy-holds: twenty positions of $0.005 each are $0.10, the exact sum rounded once,
+  // never twenty rows rounded first ($0.20) nor twenty floored first ($0.00)
+  const dust = Array.from({ length: 20 }, () => ({ chain: "base" as const, token: BASE_T, amount: "1", cost: "0.004" }));
+  assert.deepEqual(heldValueSeries({ positions: dust, markets: [{ chain: "base", token: BASE_T, symbol: "T", name: "T", price_usd: "0.005" }], history: new Map(), ops: [], base_usd: "0", now: H }), [[H, "0.10"]]);
   assert.deepEqual(heldValueSeries({ positions: [], markets: [], history: new Map(), ops: [], base_usd: "12.5", now: H }), [[H, "12.50"]]);
   // bars after now are not drawn
   const later = heldValueSeries({ positions: [{ chain: "base", token: BASE_T, amount: "1", cost: "1" }], markets: [{ chain: "base", token: BASE_T, symbol: "T", name: "T", price_usd: "2" }], history: new Map([[`base:${BASE_T}`, [[H, "1"], [9 * H, "5"]] as [number, string][]]]), ops: [], base_usd: "0", now: 2 * H });

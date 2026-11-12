@@ -136,18 +136,18 @@ function centsOf(s: string): bigint | null {
   const d = dec(s);
   return d === null ? null : (d.n * 100n) / 10n ** BigInt(d.scale);
 }
-/** A non-negative ratio n / d in cents to the nearest, half up. */
-const near = (n: bigint, d: bigint): bigint => (2n * n + d) / (2n * d);
-/** USD cents of a decimal string to the nearest, half up: a position's cost as Portfolio's row draws it. */
-function centsNear(s: string): bigint | null {
+/** The exact sums' scale: USD at 80 decimals, past any amount's and price's own (78 digits at most each). */
+const EXACT = 80;
+/** A decimal string's USD exactly, at EXACT decimals. */
+function exact(s: string): bigint | null {
   const d = dec(s);
-  return d === null ? null : near(d.n * 100n, 10n ** BigInt(d.scale));
+  return d === null || d.scale > EXACT ? null : d.n * 10n ** BigInt(EXACT - d.scale);
 }
-/** amount x price in USD cents to the nearest, half up: a position's value as Portfolio's row draws it. */
-function mulCentsNear(amount: string, usd: string): bigint | null {
+/** amount x price in USD exactly, at EXACT decimals. */
+function mulExact(amount: string, usd: string): bigint | null {
   const a = dec(amount);
   const p = dec(usd);
-  return a === null || p === null ? null : near(a.n * p.n * 100n, 10n ** BigInt(a.scale + p.scale));
+  return a === null || p === null || a.scale + p.scale > EXACT ? null : a.n * p.n * 10n ** BigInt(EXACT - a.scale - p.scale);
 }
 const usd = (c: bigint): string => `${c / 100n}.${(c % 100n).toString().padStart(2, "0")}`;
 
@@ -167,8 +167,8 @@ export interface HeldValueInput {
 
 /**
  * The value line, oldest first, as [unix ms, USD decimal string]: at each hourly bar any held token has up to `now`, and
- * at `now`, the money not in a position plus each position's amount at that time's close, each position to the nearest
- * cent as Portfolio's rows draw it (its totals are their sums).
+ * at `now`, the money not in a position plus each position's amount at that time's close, the positions' exact sum
+ * rounded down once to the cent (as Portfolio's totals: never more than is there).
  * A position counts at its cost before its first filled buy (the money was cash then), at its cost throughout when no
  * price is known (as Portfolio's totals count it), and at its present price when it has no bar at or before that time.
  * The last point uses each token's present price, so it equals Portfolio's total. What it does not know: amounts sold
@@ -187,20 +187,20 @@ export function heldValueSeries(input: HeldValueInput): [number, string][] {
   const times = new Set<number>();
   for (const p of input.positions) for (const [t] of input.history.get(heldKey(p.chain, p.token)) ?? []) if (t < input.now) times.add(t);
   const at = (t: number, last: boolean): bigint => {
-    let c = baseC;
+    let x = 0n;
     for (const p of input.positions) {
       const k = heldKey(p.chain, p.token);
-      const cost = centsNear(p.cost) ?? 0n;
+      const cost = exact(p.cost) ?? 0n;
       const now = price.get(k) ?? null;
       if (now === null || (!last && t < (opened.get(k) ?? -Infinity))) {
-        c += cost;
+        x += cost;
         continue;
       }
       let close: string = now;
       if (!last) for (const [bt, bc] of input.history.get(k) ?? []) if (bt <= t) close = bc;
-      c += mulCentsNear(p.amount, close) ?? cost;
+      x += mulExact(p.amount, close) ?? cost;
     }
-    return c;
+    return baseC + (x * 100n) / 10n ** BigInt(EXACT);
   };
   return [...[...times].sort((a, b) => a - b).map((t): [number, string] => [t, usd(at(t, false))]), [input.now, usd(at(input.now, true))]];
 }

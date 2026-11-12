@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import type { Chain } from "@blindfill/kit";
 import { fillOf, fillStore } from "../portfolio/fills.ts";
-import { heldOf } from "../portfolio/model.ts";
+import { heldOf, soldOutRow } from "../portfolio/model.ts";
 import type { Row } from "../portfolio/model.ts";
 import { useHeld, useOffPool } from "../portfolio/source.tsx";
 import { SellBox } from "../positions/SellBox.tsx";
@@ -159,7 +159,7 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
   // A sale that sold it all (card app-holding-follows-a-fill): its Filled stays on the box where it was tapped, as a
   // buy's stays on the buy box, until the user acts (the next tap, Buy, another token); the box draws the holding as 0.
   const soldOut = heldNow === null && !busy(sell.phase) && (sell.phase.k === "filled" || sell.phase.k === "ended") && lastHeld.current !== null;
-  const held = heldNow ?? (soldOut ? { ...lastHeld.current!, units: "0", value: 0n } : busy(sell.phase) || sell.locked ? lastHeld.current : null);
+  const held = heldNow ?? (soldOut ? soldOutRow(lastHeld.current!) : busy(sell.phase) || sell.locked ? lastHeld.current : null);
   const onSell = side === "sell" && held !== null;
   // the side moves only while neither side runs: a running buy or sell keeps the box that draws its state
   const pickSide = (x: "buy" | "sell") => {

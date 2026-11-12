@@ -179,7 +179,7 @@ try {
       // sold and realized in USD and SOL from the device's records; the open row between them with its holding and cost
       if (f === "pooltrades") {
         const rows = await page.$$eval(".pf [data-closed]", (rs) => rs.filter((r) => r.getClientRects().length).map((r) => [...r.querySelectorAll("td")].map((c) => c.innerText.replace(/\s+/g, " ").trim()).join("|")));
-        const want = ["Ic Icm Internet cat money|$0.10|$0.10|0|—|—|+$0.00 −2.5% −0.0000298 SOL|—|1m|", "Ic Icm Internet cat money|$0.10|$0.05|0|—|—|−$0.05 −52.3% −0.000631 SOL|—|1m|"];
+        const want = ["Ic Icm Internet cat money|$0.10|$0.10|0|—|—|$0.00 −2.5% −0.0000298 SOL|—|1m|", "Ic Icm Internet cat money|$0.10|$0.05|0|—|—|−$0.05 −52.3% −0.000631 SOL|—|1m|"];
         check(JSON.stringify(rows) === JSON.stringify(want), `${tag}: closed rows ${JSON.stringify(rows)}`);
       }
       if (f === "pooltrades-open" && !phone) {

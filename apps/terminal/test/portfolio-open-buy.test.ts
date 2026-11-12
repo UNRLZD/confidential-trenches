@@ -39,14 +39,14 @@ test("end state 1: Total and Positions count what the open buy's wallet holds, a
   const t = portfolio(snap(s), data(s), NOW).totals!;
   // the pool: 0.030426 x 82.37 = $2.506 -> 250 cents (down)
   assert.equal(t.cash, 250n);
-  // the wallet's 0.008478835 SOL x 82.37 = $0.6983 -> 69 cents (down); the coin's row $0.0099 -> 1 cent as the row
-  // shows it (the totals are the sums of the rows' own figures, review P3-1)
+  // the wallet's 0.008478835 SOL x 82.37 = $0.6983 -> 69 cents (down); the coin's $0.0099210 adds 0 to the Positions
+  // tile (the exact sum rounded down once), though its row draws $0.01
   assert.equal(t.held, 69n);
-  assert.equal(t.inPos, 70n);
-  assert.equal(t.total, 320n);
+  assert.equal(t.inPos, 69n);
+  assert.equal(t.total, 319n);
   // the value line ends at the total
   const d = data(s);
-  assert.equal(d.series.at(-1)?.[1], "3.20");
+  assert.equal(d.series.at(-1)?.[1], "3.19");
 });
 
 test("end state 1: no asset_held (an earlier page) counts nothing for it; no price leaves it out, never made up", () => {

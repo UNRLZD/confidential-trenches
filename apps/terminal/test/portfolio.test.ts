@@ -71,7 +71,8 @@ test("money and percent text", () => {
   assert.equal(usd(123456n), "$1,234.56");
   assert.equal(usd(-408n), "−$4.08");
   assert.equal(usd(2963n, true), "+$29.63");
-  assert.equal(usd(0n, true), "+$0.00");
+  // a zero has no sign (review of 98d75c8cb: "$0.00 −2.5%", never "+$0.00")
+  assert.equal(usd(0n, true), "$0.00");
   assert.equal(pct(11900), "+119.0%");
   assert.equal(pct(-816), "−8.1%");
   assert.equal(pct(0), "0.0%");
@@ -116,14 +117,15 @@ test("S10.3 rows by value, the priceless one last; S10.4 a row with no price has
   const p = portfolio(snap(STATE), data(), NOW);
   assert.deepEqual(p.rows.map((r) => r.symbol), ["WTH", "boar", "swordcat", "NEAIR"]);
   const [wth, boar, swc, neair] = p.rows;
-  // 891,500 x 0.0000612 = $54.5598: the row's figure to the nearest cent (the totals' rounded down, $54.55)
+  // 891,500 x 0.0000612 = $54.5598: the row's figure to the nearest cent; its PnL the exact $29.5598 so, its percent
+  // from the exact figures (118.23%)
   assert.equal(wth!.value, 5456n);
   assert.equal(wth!.pnl, 2956n);
-  assert.equal(wth!.pnlBps, 11824);
-  // 20.25 x 0.5 = $10.125: $10.13 on the row
+  assert.equal(wth!.pnlBps, 11823);
+  // 20.25 x 0.5 = $10.125: $10.13 on the row; its PnL the exact −$1.975 to the nearest, −$1.98, and −16.32%
   assert.equal(boar!.value, 1013n);
-  assert.equal(boar!.pnl, -197n);
-  assert.equal(boar!.pnlBps, -1628);
+  assert.equal(boar!.pnl, -198n);
+  assert.equal(boar!.pnlBps, -1632);
   assert.equal(boar!.wallets, 2);
   assert.equal(neair!.value, null);
   assert.equal(neair!.pnl, null);
@@ -136,11 +138,12 @@ test("totals: cash is the vault plus ready wallets, on the way is arming and ret
   const t = portfolio(snap(STATE), data(), NOW).totals!;
   assert.equal(t.cash, 7318n + 1000n);
   assert.equal(t.onWay, 750n);
-  // the sums of the rows' own figures, each to the nearest cent (WTH $54.56, BOAR $10.13: card
-  // portfolio-counts-money-an-open-buy-holds, review P3-1)
-  assert.equal(t.inPos, 5456n + 1013n + 50n + 4000n);
+  // each total the exact sum rounded down once (card portfolio-counts-money-an-open-buy-holds): $54.5598 + $10.125 +
+  // $0.50 + the priceless row's $40.00 cost = $105.1848, so $105.18; never the rows' rounded cents added ($105.19)
+  assert.equal(t.inPos, 10518n);
   assert.equal(t.total, t.cash + t.onWay + t.inPos);
-  assert.equal(t.unreal, 2956n - 197n + (50n - 90n));
+  // $29.5598 − $1.975 − $0.40 = $27.1848, rounded down once
+  assert.equal(t.unreal, 2718n);
   assert.equal(t.partial, true);
   const priced = portfolio(snap({ ...STATE, positions: STATE.positions.filter((x) => x.token !== "NEAIR") }), data(), NOW).totals!;
   assert.equal(priced.partial, false);

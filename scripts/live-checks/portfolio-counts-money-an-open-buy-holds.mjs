@@ -11,7 +11,7 @@
 //     position carries it as asset_held in whole SOL (9 decimals);
 //   - APP_HOST (apps/terminal/src/screens/portfolio/model.ts): Portfolio's Positions and Total sum each position's
 //     asset_held (openBuysHold: none for a position whose wallet an arm record already counts), a row's Bought and
-//     Value read to the nearest cent (centsNear, mulCentsNear), and the chart's axis labels add decimals until no two
+//     Value read to the nearest cent (centsNear, nearCents), and the chart's axis labels add decimals until no two
 //     read alike (axisLabels).
 // It does not prove a figure: the rule is packages/signpage/test/positions-asset-held.test.ts and
 // apps/terminal/test/portfolio's own tests at the released commit. Each host's deploy runs its own half, so a host that
@@ -43,7 +43,7 @@ export const MARKS = {
   app: [
     ["Portfolio's positions sum each position's asset_held, none for a wallet already counted", new RegExp(`${ID}\\.asset_held===void 0\\|\\|${ID}\\.wallets\\.some\\(`)],
     ["a row's Bought reads to the nearest cent, half up", new RegExp(`\\+\\(Number\\(${ID}\\[2\\]\\?\\?${q("0")}\\)>=5\\?1n:0n\\)`)],
-    ["a row's Value reads to the nearest cent, half up", new RegExp(`\\(2n\\*BigInt\\(${ID}\\[1\\]\\+${ID}\\)\\*BigInt\\(${ID}\\[1\\]\\+${ID}\\)\\*100n\\+${ID}\\)\\/\\(2n\\*${ID}\\)`)],
+    ["a row's Value reads to the nearest cent, half up", new RegExp(`\\(${ID}\\*200n\\+${ID}\\)\\/\\(2n\\*${ID}\\)`)],
     ["the chart's axis labels add decimals until none read alike", new RegExp(`\\.size<${ID}&&${ID}<=8;${ID}\\+\\+\\)`)],
   ],
 };

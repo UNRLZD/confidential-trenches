@@ -12,6 +12,7 @@
 // or reverted mark; the closed positions; the value series; and the fees paid.
 import { moneyWallets, POOL_ASSET_DECIMALS, POOL_CHAINS } from "@blindfill/kit";
 import { small } from "../discover/format.ts";
+import { initialsBps } from "../positions/model.ts";
 import { reasonOf, statePoolPrice, unitsToCents } from "../trade/model.ts";
 import type { Reason } from "../trade/model.ts";
 import type { Chain, Operation, PoolAsset, SignpageClientSnapshot, SignpageState, TxRef } from "@blindfill/kit";
@@ -52,23 +53,12 @@ export function centsNear(s: string | null | undefined): bigint | null {
   return m[1] === "-" ? -c : c;
 }
 
-/** amount x price in cents to the nearest, half up: a row's Value. Null when either is not a number. */
-export function mulCentsNear(amount: string, price: string): bigint | null {
-  const a = /^(\d+)(?:\.(\d+))?$/.exec(amount.trim());
-  const p = /^(\d+)(?:\.(\d+))?$/.exec(price.trim());
-  if (!a || !p) return null;
-  const af = a[2] ?? "";
-  const pf = p[2] ?? "";
-  const den = 10n ** BigInt(af.length + pf.length);
-  return (2n * BigInt(a[1]! + af) * BigInt(p[1]! + pf) * 100n + den) / (2n * den);
-}
-
-/** "$1,234.56", "-$4.08" or "+$29.63" from cents. */
+/** "$1,234.56", "-$4.08" or "+$29.63" from cents; a zero has no sign ("$0.00"). */
 export function usd(c: bigint, plus = false): string {
   const neg = c < 0n;
   const a = neg ? -c : c;
   const whole = (a / 100n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-  return `${neg ? "−" : plus ? "+" : ""}$${whole}.${(a % 100n).toString().padStart(2, "0")}`;
+  return `${neg ? "−" : plus && c > 0n ? "+" : ""}$${whole}.${(a % 100n).toString().padStart(2, "0")}`;
 }
 
 /** Basis points of part / whole, truncated toward zero; null for a zero whole. */
@@ -182,17 +172,26 @@ export interface Row {
   /** The token's own decimals as the signing page's state names them (positions[].decimals, kit 1.8; card
    *  signpage-state-holdings); null from a page that names none. Never the helper's: a sell is sized from it. */
   decimals: number | null;
-  /** Null: unknown (the signing page's cost "0": a wallet's buy with no price read, src/positions.ts). To the nearest
-   *  cent, as every row figure: the totals are the sums of the figures the rows show. */
+  /** Null: unknown (the signing page's cost "0": a wallet's buy with no price read, src/positions.ts). Its exact figure
+   *  to the nearest cent, as every row figure; a total is the exact sum rounded down once (totals), never a sum of these. */
   cost: bigint | null;
-  /** Null: no price (S10.4). To the nearest cent. */
+  /** Null: no price (S10.4). The exact value to the nearest cent. */
   value: bigint | null;
+  /** The exact cost and value in USD at SCALE decimals (fx), for the totals, the share and Initials; null as above. */
+  costX: bigint | null;
+  valueX: bigint | null;
+  /** The exact PnL to the nearest cent, its percent from the exact figures. */
   pnl: bigint | null;
   pnlBps: number | null;
+  /** The share of the position whose value returns its cost, in basis points rounded up, from the exact figures: what
+   *  Initials sells (the share_bps the device signs). Null when the position is not up or a figure is unknown. */
+  initials: number | null;
   /** Null: no USD for the buys (and no cost). */
   bought: bigint | null;
   sold: bigint;
   realized: bigint;
+  /** The open position's realized part, exact (fx). */
+  realizedX: bigint;
   mark: Mark;
   exit: PositionExtra["exit"] | null;
   wallets: number;
@@ -252,12 +251,16 @@ function rowOf(p: SignpageState["positions"][number], d: PortfolioData, ops: rea
   const m = d.market(p.chain, p.token);
   const x = d.extra(p.chain, p.token) ?? {};
   // the signing page's cost "0" is unknown (src/positions.ts): no cost, so no bought and no PnL, never its value as profit
-  const cost = /[1-9]/.test(p.cost) ? centsNear(p.cost) : null;
+  const costX = /[1-9]/.test(p.cost) ? fx(p.cost) : null;
   // a zero price is no read (no route quoted it): the value is the dash, never $0.00 (owner 10 Nov 18:12Z); every row
-  // figure to the nearest cent (a $0.0099999 buy is $0.01), its PnL the difference of the two it shows
+  // figure is its exact figure to the nearest cent (a $0.0099999 buy is $0.01), its PnL the exact difference so
   const priced = m?.price != null && /[1-9]/.test(m.price) ? m.price : null;
-  const value = priced === null ? null : mulCentsNear(p.amount, priced);
-  const pnl = value === null || cost === null ? null : value - cost;
+  const amountX = fx(p.amount);
+  const priceX = priced === null ? null : fx(priced);
+  const valueX = amountX === null || priceX === null ? null : (amountX * priceX) / ONE;
+  const cost = costX === null ? null : nearCents(costX);
+  const value = valueX === null ? null : nearCents(valueX);
+  const pnlX = valueX === null || costX === null ? null : valueX - costX;
   let selling: Row["selling"] = null;
   for (const o of ops) {
     if (o.kind !== "sell" || (o.stage !== "signed" && o.stage !== "sent")) continue;
@@ -273,11 +276,15 @@ function rowOf(p: SignpageState["positions"][number], d: PortfolioData, ops: rea
     decimals: p.decimals ?? null,
     cost,
     value,
-    pnl,
-    pnlBps: pnl === null || cost === null ? null : bps(pnl, cost),
+    costX,
+    valueX,
+    pnl: pnlX === null ? null : nearCents(pnlX),
+    pnlBps: pnlX === null || costX === null ? null : bps(pnlX, costX),
+    initials: costX === null ? null : initialsBps(costX, valueX),
     bought: centsNear(x.bought) ?? cost,
     sold: centsNear(x.sold) ?? 0n,
     realized: centsNear(x.realized) ?? 0n,
+    realizedX: fxSigned(x.realized) ?? 0n,
     mark: x.mark ?? (m && m.route === false ? "noRoute" : null),
     exit: x.exit ?? null,
     wallets: p.wallets.length,
@@ -286,6 +293,14 @@ function rowOf(p: SignpageState["positions"][number], d: PortfolioData, ops: rea
     selling,
   };
 }
+
+/** A share of the position's value in cents (`b` basis points of the exact value, to the nearest cent, as a row figure);
+ *  null with no value. */
+export const shareOf = (r: Row, b: number): bigint | null => (r.valueX === null ? null : nearCents((r.valueX * BigInt(b)) / 10_000n));
+
+/** The row a sale that sold it all leaves on the trade box (card app-holding-follows-a-fill): nothing held, so no value,
+ *  no share and no Initials, every other figure as it was. */
+export const soldOutRow = (r: Row): Row => ({ ...r, units: "0", value: 0n, valueX: 0n, initials: null });
 
 /** Rows by value, largest first; a row with no price after the priced ones, by cost; ties by symbol. */
 export function sortRows(rows: readonly Row[]): Row[] {
@@ -301,17 +316,16 @@ export function sortRows(rows: readonly Row[]): Row[] {
 /** Realized PnL of the trades closed in the 30 days to now, plus the open positions' realized part. A close whose sale
  *  names no USD adds nothing. */
 export function realized30(rows: readonly Row[], closed: readonly ClosedTrade[], now: number): bigint {
-  let r = rows.reduce((a, x) => a + x.realized, 0n);
-  // each closed trade's realized as its row draws it (closedRows: its Sold less its Bought, each to the nearest cent),
-  // so the total, the calendar and the rows add up
+  // the exact sum rounded once toward zero, as every total (a total never shows more than there is)
+  let r = rows.reduce((a, x) => a + x.realizedX, 0n);
   for (const c of closed) {
-    const sold = centsNear(c.sold);
-    const bought = centsNear(c.bought);
+    const sx = fx(c.sold ?? undefined);
+    const bx = fx(c.bought ?? undefined);
     // a side with no USD: the realized is unknown, not counted
-    if (sold === null || bought === null || c.closed_at <= now - 30 * DAY || c.closed_at > now) continue;
-    r += sold - bought;
+    if (sx === null || bx === null || c.closed_at <= now - 30 * DAY || c.closed_at > now) continue;
+    r += sx - bx;
   }
-  return r;
+  return downCents(r);
 }
 
 // ------------------------------------------------------------------------------------------ the trade book (ops)
@@ -331,6 +345,22 @@ const unfx = (n: bigint): string => {
   const frac = s.slice(-SCALE).replace(/0+$/, "");
   return `${neg ? "-" : ""}${s.slice(0, -SCALE)}${frac ? `.${frac}` : ""}`;
 };
+/** One USD at SCALE decimals. */
+const ONE = 10n ** BigInt(SCALE);
+/** fx with a sign ("-0.05"), as the trade book writes a loss. */
+const fxSigned = (s: string | undefined): bigint | null => {
+  if (s === undefined) return null;
+  const v = fx(s.replace(/^-/, ""));
+  return v === null ? null : s.startsWith("-") ? -v : v;
+};
+/** An exact USD figure (fx) in cents to the nearest, half away from zero: a row's figure. */
+export const nearCents = (x: bigint): bigint => {
+  const a = x < 0n ? -x : x;
+  const c = (a * 200n + ONE) / (2n * ONE);
+  return x < 0n ? -c : c;
+};
+/** An exact USD figure (fx) in cents rounded toward zero: a total, rounded once, never more than there is. */
+export const downCents = (x: bigint): bigint => (x * 100n) / ONE;
 /** A sum that stays null once any part is unknown. */
 const add = (a: bigint | null, b: bigint | null): bigint | null => (a === null || b === null ? null : a + b);
 
@@ -499,21 +529,23 @@ export function totals(s: SignpageState, rows: readonly Row[], closed: readonly 
   let onWay = 0n;
   for (const w of s.wallets) if (w.state === "ARMING" || w.state === "RETURNING") onWay += cents(w.size) ?? 0n;
   const held = openBuysHold(s, now);
-  let inPos = held.cents;
-  let unreal = 0n;
   let partial = held.partial;
-  // the sums of the rows' own figures (each to the nearest cent), so the tiles and the rows add up
+  // each total the exact sum of the rows' exact figures, rounded down once (toward zero for a gain or a loss): never a
+  // sum of rounded rows, so it never shows more than the account has; a row and a total may differ by a cent
+  let posX = 0n;
+  let unrealX = 0n;
   for (const r of rows) {
-    if (r.value === null) {
+    if (r.valueX === null) {
       partial = true;
-      inPos += r.cost ?? 0n;
+      posX += r.costX ?? 0n;
     } else {
-      inPos += r.value;
+      posX += r.valueX;
       // a row of unknown cost has no PnL: its value is in the positions, none of it in the unrealized
-      if (r.pnl !== null) unreal += r.pnl;
+      if (r.costX !== null) unrealX += r.valueX - r.costX;
     }
   }
-  return { cash, parts, offPool, onWay, held: held.cents, inPos, total: cash + onWay + inPos, unreal, realized30: realized30(rows, closed, now), partial };
+  const inPos = held.cents + downCents(posX);
+  return { cash, parts, offPool, onWay, held: held.cents, inPos, total: cash + onWay + inPos, unreal: downCents(unrealX), realized30: realized30(rows, closed, now), partial };
 }
 
 /**
@@ -692,6 +724,8 @@ export interface ClosedRow {
   bought: bigint | null;
   sold: bigint | null;
   realized: bigint | null;
+  /** The realized exact (fx), for the calendar's days; null when unknown. */
+  realizedX: bigint | null;
   realizedBps: number | null;
   /** The pool asset (SOL, ETH) and the realized in it, exact ("-0.000631252"); null on NEAR or when unknown. */
   asset: PoolAsset | null;
@@ -705,20 +739,20 @@ export function closedRows(d: PortfolioData): ClosedRow[] {
   return d.closed
     .map((c) => {
       const m = d.market(c.chain, c.token);
-      // drawn to the nearest cent, as an open row's (a $0.0999999 buy is $0.10), the realized the Sold less the Bought it
-      // shows, so the row adds up; its percent from the exact figures (a $0.0523 loss on $0.1000 is −52.3%)
+      // each figure its exact figure to the nearest cent, as an open row's (a $0.0999999 buy is $0.10), the realized the
+      // exact difference so ($0.0025 lost reads $0.00), its percent from the exact figures (−2.5%)
       const bought = centsNear(c.bought);
       const sold = centsNear(c.sold);
       const bx = fx(c.bought ?? undefined);
       const sx = fx(c.sold ?? undefined);
       const exact = bx !== null && sx !== null ? sx - bx : null;
       // a side with no USD: realized and its percent unknown (a dash), as for a sale with none
-      const realized = sold === null || bought === null ? null : sold - bought;
+      const realized = sold === null || bought === null ? null : exact !== null ? nearCents(exact) : sold - bought;
       const realizedBps = realized === null || bought === null ? null : exact !== null && bx !== null ? (bx === 0n ? null : Number((exact * 10000n) / bx)) : bps(realized, bought);
       const ai = fx(c.bought_asset ?? undefined);
       const ao = fx(c.sold_asset ?? undefined);
       const asset = c.asset ?? null;
-      return { key: `${key(c.chain, c.token)}:${c.closed_at}`, chain: c.chain, token: c.token, symbol: m?.symbol ?? c.token.slice(0, 6), name: m?.name ?? "", bought, sold, realized, realizedBps, asset, realizedAsset: asset && ai !== null && ao !== null ? unfx(ao - ai) : null, heldMs: c.closed_at - c.opened_at, closedAt: c.closed_at };
+      return { key: `${key(c.chain, c.token)}:${c.closed_at}`, chain: c.chain, token: c.token, symbol: m?.symbol ?? c.token.slice(0, 6), name: m?.name ?? "", bought, sold, realized, realizedX: sold === null || bought === null ? null : exact, realizedBps, asset, realizedAsset: asset && ai !== null && ao !== null ? unfx(ao - ai) : null, heldMs: c.closed_at - c.opened_at, closedAt: c.closed_at };
     })
     .sort((a, b) => b.closedAt - a.closedAt);
 }
@@ -773,21 +807,24 @@ export function calendar(closed: readonly ClosedRow[], now: number): { year: num
   const month = n.getUTCMonth();
   const len = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
   const lead = (new Date(Date.UTC(year, month, 1)).getUTCDay() + 6) % 7;
+  // each day and the month the exact sum rounded once toward zero, as every total (a row with no exact figure: its cents)
   const per = new Map<number, bigint>();
   for (const c of closed) {
     const d = new Date(c.closedAt);
-    if (c.realized !== null && d.getUTCFullYear() === year && d.getUTCMonth() === month) per.set(d.getUTCDate(), (per.get(d.getUTCDate()) ?? 0n) + c.realized);
+    const x = c.realizedX ?? (c.realized === null ? null : (c.realized * ONE) / 100n);
+    if (x !== null && d.getUTCFullYear() === year && d.getUTCMonth() === month) per.set(d.getUTCDate(), (per.get(d.getUTCDate()) ?? 0n) + x);
   }
-  const days: Day[] = Array.from({ length: len }, (_, i) => ({ day: i + 1, pnl: per.get(i + 1) ?? null, future: i + 1 > n.getUTCDate(), today: i + 1 === n.getUTCDate() }));
-  let sum = 0n;
+  const days: Day[] = Array.from({ length: len }, (_, i) => ({ day: i + 1, pnl: per.has(i + 1) ? downCents(per.get(i + 1)!) : null, future: i + 1 > n.getUTCDate(), today: i + 1 === n.getUTCDate() }));
+  let sumX = 0n;
   let green = 0;
   let red = 0;
-  for (const v of per.values()) {
-    sum += v;
+  for (const x of per.values()) {
+    sumX += x;
+    const v = downCents(x);
     if (v > 0n) green++;
     if (v < 0n) red++;
   }
-  return { year, month, lead, days, sum, green, red };
+  return { year, month, lead, days, sum: downCents(sumX), green, red };
 }
 
 export type Range = "1D" | "1W" | "1M" | "All";
@@ -867,7 +904,7 @@ export function activity(ops: readonly Operation[] | null | undefined, d: Portfo
   for (const o of ops ?? []) {
     if (!SHOWN.has(o.kind)) continue;
     const moved = !NOT_MOVED.has(o.stage);
-    rows.push({ id: o.id, kind: o.kind as ActKind, stage: o.stage, at: o.created_ms ?? null, usd: moved ? cents(o.amount_usd) : null, units: moved ? (o.units ?? null) : null, chain: o.chain ?? null, token: o.token ?? null, txs: o.txs, address: null, failed: failedOf(o) });
+    rows.push({ id: o.id, kind: o.kind as ActKind, stage: o.stage, at: o.created_ms ?? null, usd: moved ? centsNear(o.amount_usd) : null, units: moved ? (o.units ?? null) : null, chain: o.chain ?? null, token: o.token ?? null, txs: o.txs, address: null, failed: failedOf(o) });
   }
   for (const e of d.exported) rows.push({ id: e.id, kind: "export", stage: "key_exported", at: e.at, usd: null, units: null, chain: e.chain, token: e.token, txs: [], address: e.address, failed: null });
   const timed = rows.filter((r) => r.at !== null).sort((a, b) => b.at! - a.at!);
