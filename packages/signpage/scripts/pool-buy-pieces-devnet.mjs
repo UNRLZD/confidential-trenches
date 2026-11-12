@@ -57,8 +57,11 @@ import { createRequire } from "node:module";
 import { IDBFactory } from "fake-indexeddb";
 import { base58, base64 } from "@scure/base";
 import { ed25519 } from "@noble/curves/ed25519.js";
+import { COPY, copyAirdrop, copyNet } from "./copy-net.mjs";
 
-globalThis.__SIGN_NETWORK__ = "testnet";
+// FLOW_COPY (./copy-net.mjs, run by ./sol-mainnet-copy.mjs SOL_COPY_FLOW=pieces): the mainnet build on a local copy of
+// mainnet, its helper the sender in process, every payment the copy's airdrop; else the testnet build on devnet
+globalThis.__SIGN_NETWORK__ = COPY ? "mainnet" : "testnet";
 const { entropyToWords, wordsToSeed64, depositId } = await import("../../wallet/src/derive/index.ts");
 const { freshWallet } = await import("../../wallet/src/derive/keys.ts");
 const { openWalletStore } = await import("../../wallet/src/store/index.ts");
@@ -80,13 +83,17 @@ const { WALLET_SEED_LOCK } = await import("@blindfill/wallet/store");
 const { TRADE_HELPER } = await import("../src/trade.ts");
 const { solanaAta, SOLANA_ATA_PROGRAM } = await import("../../kit/src/checks/solana/message.ts");
 const { SOLANA_SOL_MINT, SOLANA_TOKEN_PROGRAM } = await import("../../kit/src/checks/solana/checks.ts");
-if (POOL_TESTNET !== true || SOL_POOLS.devnet === undefined) throw new Error("not the testnet build's pins");
+if (!COPY && (POOL_TESTNET !== true || SOL_POOLS.devnet === undefined)) throw new Error("not the testnet build's pins");
+const { SOLANA_POOL_JITO_TIP } = await import("../../kit/src/checks/solana/checks.ts");
 
-const SCENARIOS = { "pieces-2": 2, "pieces-3": 3, "pieces-4": 4, "back-to-back": 4, "landed-reload": 2, "tag3-fail": 2, found: 0 };
+// copy-part1 (FLOW_COPY only): 6 deposits of 0.01 SOL, none enough alone; with all 6 ready, a buy that needs 5 (past
+// SOLANA_POOL_BUY_PIECES_MAX): refused, nothing taken or sent; a buy that needs 2 pieces; then Max, which takes the 4 left
+const SCENARIOS = { "copy-part1": 6, "pieces-2": 2, "pieces-3": 3, "pieces-4": 4, "back-to-back": 4, "landed-reload": 2, "tag3-fail": 2, found: 0 };
 const [SCENARIO, TABLE, MINT, OUT] = process.argv.slice(2);
 if (!OUT || !Object.hasOwn(SCENARIOS, SCENARIO)) throw new Error(`usage: pool-buy-pieces-devnet.mjs <${Object.keys(SCENARIOS).join("|")}> <table> <mint> <out.json>`);
-// the page loads the tables the testnet build pins (PAGE_TABLES); <table> names the pump-curve one the run expects
-if (!(SOL_POOL_TABLES.devnet?.["pump-curve"] ?? []).includes(TABLE)) throw new Error(`<table> is not a pump-curve table the testnet build pins: ${JSON.stringify(SOL_POOL_TABLES.devnet?.["pump-curve"] ?? [])}`);
+if (SCENARIO === "copy-part1" && !COPY) throw new Error("copy-part1 runs on the copy only (FLOW_COPY)");
+// the page loads the tables its build pins (PAGE_TABLES); <table> names the pump-curve one the run expects (the copy: pinned)
+if (COPY ? TABLE !== "pinned" : !(SOL_POOL_TABLES.devnet?.["pump-curve"] ?? []).includes(TABLE)) throw new Error(`<table> is not a pump-curve table the testnet build pins: ${JSON.stringify(SOL_POOL_TABLES.devnet?.["pump-curve"] ?? [])}`);
 const AFTER = process.env.FLOW_AFTER ?? "stay";
 if (!["stay", "reload", "stop"].includes(AFTER)) throw new Error("FLOW_AFTER is stay, reload or stop");
 const RESUME = process.env.FLOW_RESUME;
@@ -97,12 +104,12 @@ const PLANT = process.env.FLOW_PLANT ?? "none";
 if (!["none", "pay", "empty", "token"].includes(PLANT) || (PLANT !== "none" && SCENARIO !== "found")) throw new Error("FLOW_PLANT is none, pay, empty or token, on found only");
 const EXPECT = process.env.FLOW_EXPECT ?? (PLANT === "token" ? "held" : "swept");
 if (!["held", "swept"].includes(EXPECT)) throw new Error("FLOW_EXPECT is held or swept");
-const HELPER = process.env.FLOW_HELPER;
-if (!/^https?:\/\/[^/]+$/.test(HELPER ?? "")) throw new Error("FLOW_HELPER=<the helper's origin: https://ct-api.unrealized.trade, or a local helper's http://127.0.0.1:<port>>");
+const HELPER = COPY ? "the copy's sender, in process" : process.env.FLOW_HELPER;
+if (!COPY && !/^https?:\/\/[^/]+$/.test(HELPER ?? "")) throw new Error("FLOW_HELPER=<the helper's origin: https://ct-api.unrealized.trade, or a local helper's http://127.0.0.1:<port>>");
 // every call to the page's helper address goes to FLOW_HELPER (solanaJsonRpc and the pool's helper calls read the global
 // fetch at each call)
 const realFetch = globalThis.fetch;
-globalThis.fetch = (u, init) => {
+if (!COPY) globalThis.fetch = (u, init) => {
   const href = typeof u === "string" ? u : u instanceof URL ? u.href : u.url;
   if (!href.startsWith(`${TRADE_HELPER}/`)) return realFetch(u, init);
   const to = HELPER + href.slice(TRADE_HELPER.length);
@@ -129,8 +136,12 @@ console.warn = (...a) => {
   warn(...a);
 };
 
-// paced as the page's pair is (pool-testnet.ts pageSolanaRpcs)
-const rpcs = TESTNET_RPCS.solana.slice(0, 2).map((u) => solanaPacedRpc(testnetRpc(u)));
+// FLOW_COPY: the step under way, for the copy's record of each send and failed simulation
+let phase = "start";
+const copy = COPY ? await copyNet({ log, phase: () => phase }) : null;
+// paced as the page's pair is (pool-testnet.ts pageSolanaRpcs); the copy's one RPC under two names
+const rpcs = COPY ? copy.rpcs : TESTNET_RPCS.solana.slice(0, 2).map((u) => solanaPacedRpc(testnetRpc(u)));
+const PIN = COPY ? copy.pin : SOL_POOLS.devnet;
 /** This script's own reads: a provider's refusal is read again, 10 tries 3 s apart. */
 const again = async (f) => {
   for (let i = 0; ; i++) {
@@ -164,7 +175,7 @@ const vault = {
 };
 
 // the run's seed and F's key, kept before anything can move
-const DIR = process.env.FLOW_DIR ?? join(homedir(), ".ct-devnet-runs");
+const DIR = COPY ? COPY.dir : process.env.FLOW_DIR ?? join(homedir(), ".ct-devnet-runs");
 mkdirSync(DIR, { recursive: true, mode: 0o700 });
 chmodSync(DIR, 0o700);
 const STAMP = new Date().toISOString().replace(/[:.]/g, "-");
@@ -179,7 +190,7 @@ if (fKey.length !== 32) throw new Error("the funder's file holds no 32-byte key"
 if (!keptF) writeFileSync(join(DIR, `run-${STAMP}.funder`), Buffer.from(fKey).toString("hex") + "\n", { mode: 0o600, flag: "wx" });
 const F = base58.encode(ed25519.getPublicKey(fKey));
 const seed64 = wordsToSeed64(entropyToWords(Uint8Array.from(entropy)));
-const { scope } = solanaPoolOf(SOL_POOLS.devnet.program);
+const { scope } = solanaPoolOf(PIN.program);
 
 const balanceOf = async (a) => {
   const got = await both(async (r) => BigInt((await r("getBalance", [a, { commitment: "confirmed" }])).value));
@@ -205,6 +216,7 @@ const fSend = async (what, ixs) => {
   throw new Error(`F's ${what} not confirmed on both RPCs`);
 };
 const pay = (to, lamports) => {
+  if (COPY) return copyAirdrop(rpcs[0], to, lamports);
   const data = new Uint8Array(12);
   data[0] = 2;
   new DataView(data.buffer).setBigUint64(4, lamports, true);
@@ -223,6 +235,15 @@ const F_NEEDS = BigInt(N) * (NEED + FEE) + (SCENARIO === "tag3-fail" ? FRONT + s
 
 const idb = new IDBFactory();
 const store = await openWalletStore({ indexedDB: idb });
+// every W an owed record of a buy of several pieces names, in the order written (a landed buy's record goes at its end)
+const owedWs = [];
+const storeUpdate = store.update.bind(store);
+store.update = async (...a) => {
+  const r = await storeUpdate(...a);
+  const [name, key] = a;
+  if (name === "meta" && key === "owed/pieces-sol") for (const a of Object.keys((await store.get("meta", key)) ?? {})) if (!owedWs.includes(a)) owedWs.push(a);
+  return r;
+};
 await store.insertSeed({ v: 1, entropy: Uint8Array.from(entropy), source: "code", code_saved: true, created_ms: Date.now() });
 entropy.fill(0);
 let relayFee = null;
@@ -262,7 +283,7 @@ function page(name, w, hooks = {}) {
     return dead ? hang() : r;
   };
   const host = { store: async () => w, seed64: async () => seed64.slice() };
-  const t = testnetPool(host, { rpcs: prs, prover: { vault, stop: () => {} }, fetch: helperFetch });
+  const t = testnetPool(host, { rpcs: prs, prover: { vault, stop: () => {} }, fetch: helperFetch, ...(COPY ? { pin: copy.pin, holdings: copy.holdings } : {}) });
   const kinds = poolKinds({ ...testnetPoolDeps(t.flow), rpcs: (c) => (c === "solana" ? prs : testnetPoolDeps().rpcs(c)) });
   const notesOf = async () => (await (await openNoteStore(w)).list());
   const dry = poolBuyDryKind({ pools: PAGE_POOLS, rpcs: () => prs, rent: () => rent, ready: async () => {
@@ -274,7 +295,12 @@ function page(name, w, hooks = {}) {
     await r.after;
     return r.answer();
   };
-  return { name, w, t, kinds, ask, notesOf, cutP, cut: () => void ((dead = true), onCut()), get dead() { return dead; } };
+  const askMax = async () => {
+    const r = dry({ chain: "solana", token: MINT });
+    await r.after;
+    return r.answer();
+  };
+  return { name, w, t, kinds, ask, askMax, notesOf, cutP, cut: () => void ((dead = true), onCut()), get dead() { return dead; } };
 }
 
 const stages = [];
@@ -331,13 +357,15 @@ const wClock = async (W) => {
 
 const helperCommit = await fetch(`${TRADE_HELPER}/v1/health`).then((r) => r.headers.get("x-helper-commit"), () => null);
 log(`the helper at ${HELPER}: commit ${helperCommit}`);
-const out = { at: new Date().toISOString(), scenario: SCENARIO, after: AFTER, plant: PLANT, expect: EXPECT, cluster: "devnet", program: SOL_POOLS.devnet.program, table: TABLE, mint: MINT, seed: SEED_AT, F, helper: { base: HELPER, commit: helperCommit } };
+const out = { at: new Date().toISOString(), scenario: SCENARIO, after: AFTER, plant: PLANT, expect: EXPECT, cluster: COPY ? "mainnet copy" : "devnet", program: PIN.program, table: TABLE, mint: MINT, seed: SEED_AT, F, helper: { base: HELPER, commit: helperCommit } };
 const finish = (ok, why) => {
   out.ok = ok;
   out.why = why;
   out.stages = stages;
   out.sent = sent;
   out.told = told;
+  // FLOW_COPY: each send by its step (the copy's record reads each back), the helper's send lines, the stand-in's calls
+  if (copy) Object.assign(out, { steps: copy.sent.map((x) => ({ step: x.phase, signature: x.signature })), sendLines: copy.sendLines, engineCalls: copy.engineCalls, simFails: copy.simFails, fee: String(copy.fee) });
   writeFileSync(OUT, JSON.stringify(out, big, 2) + "\n");
   log(`${ok ? "PASS" : "FAIL"} ${SCENARIO}${SCENARIO === "tag3-fail" ? ` (${AFTER})` : ""}: ${why}`);
   seed64.fill(0);
@@ -347,6 +375,7 @@ const finish = (ok, why) => {
 
 /** Waits until F holds `need` lamports on both RPCs, after printing what to fund. */
 const fundF = async (need) => {
+  if (COPY) return void log(`F ${F} funded by the copy's airdrop: ${await copyAirdrop(rpcs[0], F, need)}`);
   log(`F ${F} (its key kept${keptF ? ` at ${keptF}` : ` at ${join(DIR, `run-${STAMP}.funder`)}`}); fund F with at least ${need} lamports on devnet`);
   for (let b = await balanceOf(F); b < need; b = await balanceOf(F)) {
     log(`F holds ${b}: waiting for at least ${need}`);
@@ -447,6 +476,7 @@ for (let i = 0; i < N; i++) {
   const U = base58.encode(id.publicKey);
   id.secretKey.fill(0);
   if ((await balanceOf(U)) !== 0n) throw new Error(`U ${U} is not empty`);
+  phase = `deposit-${i}`;
   await pay(U, NEED);
   const d = await once(A, "pool.deposit", { chain: "solana", amount: "0.01" });
   out.deposits.push({ U, ...d });
@@ -454,8 +484,8 @@ for (let i = 0; i < N; i++) {
 const landed = (await A.notesOf()).filter((n) => n.scope === scope && (n.state === "UNSPENT" || n.state === "HELD") && n.leaf);
 if (landed.length !== N) finish(false, `${landed.length} of ${N} deposits landed`);
 
-/** The most k pieces of 0.01 SOL spend on the coin's venue (devnet: no tip), as a pool.buy amount. */
-const maxOf = (k) => solanaPoolBuyMaxSpend(Array.from({ length: k }, () => ({ withdrawnValue: RUNG, relayFee })), VENUE, 0n, rent);
+/** The most k pieces of 0.01 SOL spend on the coin's venue (devnet: no tip; the copy: the mainnet tip), as a pool.buy amount. */
+const maxOf = (k) => solanaPoolBuyMaxSpend(Array.from({ length: k }, () => ({ withdrawnValue: RUNG, relayFee })), VENUE, COPY ? SOLANA_POOL_JITO_TIP : 0n, rent);
 /** The proof queue's passes until pool.buy.dry answers `k` pieces for `amount`; the ms it took. */
 const readyFor = async (k, amount) => {
   const t0 = performance.now();
@@ -472,16 +502,78 @@ if (relayFee === null) await A.t.proofs();
 if (relayFee === null) finish(false, "the helper's relay fee was not read");
 
 /** One buy of k pieces: its answer, its stages and times, its transactions read back, W and what W holds. */
-const buyOf = async (k, slippage = 300, noEnd = false) => {
-  const amount = solOf(maxOf(k));
+const buyOf = async (k, slippage = 300, noEnd = false, at = maxOf(k)) => {
+  const amount = solOf(at);
   const ready = await readyFor(k, amount);
   const spentBefore = (await A.notesOf()).filter((n) => n.state === "SPENT").length;
+  const wsBefore = owedWs.length;
   // a page closed at the helper's answer never answers: the run goes on from the cut
   const b = await Promise.race([once(A, "pool.buy", { chain: "solana", token: MINT, amount, slippage_bps: slippage }, noEnd), A.cutP.then(() => ({ answer: null, times: { cut: true } }))]);
-  const W = (Object.values((await store.get("meta", "owed/pieces-sol")) ?? {}).at(-1) ?? {}).address ?? null;
+  const W = owedWs.length > wsBefore ? owedWs.at(-1) : null;
   const txs = (b.answer?.result?.txs ?? []).map((x) => x.hash);
   return { k, amount, readyMs: ready, ...b, end: stageName(lastStage(A, "pool.buy")) ?? b.answer?.result?.stage ?? null, spent: (await A.notesOf()).filter((n) => n.state === "SPENT").length - spentBefore, W, txs };
 };
+
+if (SCENARIO === "copy-part1") {
+  const bundles = () => copy.engineCalls.filter((x) => x.call === "sendBundle");
+  const landedAll = (rb) => Object.values(rb).every((x) => x.every((st) => st === "confirmed" || st === "finalized"));
+  // the answer names the tag 3 alone; the engine's one bundle holds the k pieces and the tip, every one landed
+  const okBuy = (b, k) => b.end === "filled" && b.spent === k && b.txs.length === 1 && b.bundle?.txs === k + 1 && b.bundle.signatures.at(-2) === b.txs[0] && landedAll(b.readBack) && Object.keys(b.readBack).length === k + 1 && b.holds?.units.every((u) => u !== "0");
+  const filledMs = (b) => b.times.filled ?? b.times['"filled"'] ?? null;
+  const lamportsOf = (x) => BigInt(x.split(".")[0]) * 1_000_000_000n + BigInt((x.split(".")[1] ?? "").padEnd(9, "0").slice(0, 9));
+  /** pool.buy.dry's tap_max with no amount, once a set of `k` pieces pays it (the tap's Max prices the tip at the proofs'
+   *  tip cap, solanaPoolBuyTip's note, so it sits under maxOf(k)); the ms it took. */
+  const maxReady = async (k) => {
+    const t0 = performance.now();
+    for (let i = 0; i < 40; i++) {
+      await A.t.proofs();
+      const tapMax = (await A.askMax())?.result?.tap_max ?? null;
+      const at = tapMax ? await A.ask(tapMax) : null;
+      log(`Max: tap_max ${tapMax}; at it ${JSON.stringify(at)}`);
+      if (at?.result?.pieces === k) return { tapMax, ms: Math.round(performance.now() - t0) };
+      await sleep(3_000);
+    }
+    throw new Error(`Max not ready at ${k} pieces`);
+  };
+  // 1. with all 6 notes ready: a buy only 5 pieces pay, past the 4 one tap carries; refused before anything is taken or sent.
+  // Its amount: 0.001 SOL past what 4 pieces spend at no tip at all, so no set of 4 pays it at any tip, and 5 do.
+  phase = "ask-5";
+  const ready6 = await maxReady(4);
+  const four = solanaPoolBuyMaxSpend(Array.from({ length: 4 }, () => ({ withdrawnValue: RUNG, relayFee })), VENUE, 0n, rent);
+  const readyMs = ready6.ms;
+  const five = four + 1_000_000n;
+  // and under what 5 pieces would spend at the most a tap tips (SOL_TIP_CAP, 0.001 SOL): the kit prices 4 at most, so 5
+  // add up what each adds past its relay fee, less 5/4 of what 4 cost past theirs at that tip
+  const four1 = solanaPoolBuyMaxSpend(Array.from({ length: 4 }, () => ({ withdrawnValue: RUNG, relayFee })), VENUE, 1_000_000n, rent);
+  const fiveMost = 5n * (RUNG - relayFee) - (5n * (4n * (RUNG - relayFee) - four1) + 3n) / 4n;
+  if (five >= fiveMost) finish(false, `the 5-piece ask ${solOf(five)} is not under what 5 pieces spend (${solOf(fiveMost)})`);
+  const before = { sent: copy.sent.length, calls: copy.engineCalls.length, lines: copy.sendLines.length, reserved: (await A.notesOf()).filter((n) => n.state === "RESERVED").length };
+  const dry5 = await A.ask(solOf(five));
+  const ask5 = await once(A, "pool.buy", { chain: "solana", token: MINT, amount: solOf(five), slippage_bps: 300 });
+  const notes5 = (await A.notesOf()).filter((n) => n.scope === scope && n.ref.kind === "deposit");
+  out.five = { amount: solOf(five), fourMost: solOf(four), fiveMost: solOf(fiveMost), tapMax: ready6.tapMax, readyMs, dry: dry5, answer: ask5.answer, sent: copy.sent.length - before.sent, engineCalls: copy.engineCalls.length - before.calls, helperLines: copy.sendLines.length - before.lines, reserved: notes5.filter((n) => n.state === "RESERVED").length - before.reserved, notes: notes5.map((n) => n.state) };
+  log(`five: ${JSON.stringify(out.five, big)}`);
+  const okFive = ask5.answer?.error !== undefined && !("result" in (ask5.answer ?? {})) && dry5?.result?.pieces === undefined && out.five.sent === 0 && out.five.engineCalls === 0 && out.five.helperLines === 0 && out.five.reserved === 0 && notes5.length === 6 && notes5.every((n) => n.state !== "SPENT");
+  // 2. a buy one 0.01 SOL note cannot pay: 0.001 SOL past one piece's most
+  phase = "buy-2";
+  const two = await buyOf(2, 300, false, maxOf(1) + 1_000_000n);
+  two.bundle = bundles().at(-1) ?? null;
+  two.readBack = await readBack(two.bundle?.signatures ?? []);
+  two.holds = two.W ? await wHolds(two.W) : null;
+  out.two = two;
+  // 3. Max: pool.buy.dry's tap_max with no amount, once the set of the 4 notes left is ready at it
+  phase = "max";
+  const { tapMax } = await maxReady(4);
+  const max = await buyOf(4, 300, false, lamportsOf(tapMax));
+  max.bundle = bundles().at(-1) ?? null;
+  max.readBack = await readBack(max.bundle?.signatures ?? []);
+  max.holds = max.W ? await wHolds(max.W) : null;
+  out.max = { tapMax, ...max };
+  const notes = (await A.notesOf()).filter((n) => n.scope === scope).map((n) => ({ ref: n.ref.kind, state: n.state, value: n.leaf ? String(n.leaf.value) : null }));
+  out.notes = notes;
+  const allSpent = notes.filter((n) => n.ref === "deposit").length === 6 && notes.filter((n) => n.ref === "deposit").every((n) => n.state === "SPENT");
+  finish(okFive && okBuy(two, 2) && okBuy(max, 4) && allSpent && two.W !== max.W, `5 pieces asked (${out.five.amount} SOL, 4 pieces' most ${out.five.fourMost}): ${JSON.stringify(ask5.answer)}, dry ${JSON.stringify(dry5)}, ${out.five.sent} sent, ${out.five.engineCalls} engine calls, ${out.five.helperLines} helper sends, ${out.five.reserved} notes taken; 2 pieces: ${two.end}, ${two.spent} spent, bundle of ${two.bundle?.txs}, W ${two.W} holds ${JSON.stringify(two.holds)}, tap to filled ${filledMs(two) ?? "-"} ms; Max ${tapMax} SOL: ${max.end}, ${max.spent} spent, bundle of ${max.bundle?.txs}, W ${max.W} holds ${JSON.stringify(max.holds)}, tap to filled ${filledMs(max) ?? "-"} ms; every deposit note spent: ${allSpent}`);
+}
 
 if (SCENARIO.startsWith("pieces-")) {
   const b = await buyOf(N);
