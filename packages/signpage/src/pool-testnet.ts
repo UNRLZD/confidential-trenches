@@ -1367,10 +1367,10 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       seed64: page.seed64,
       // W's buy mint, written before the send: the rent back after a later sell holds while W holds any of it
       bought: buyMints(page.store),
-      // a buy of several pieces' owed record, before its take (resumePieces, on the state reads)
-      piecesOwed: piecesOwedOf(page.store),
       send: (pool, tx) => helperPoolSend(pool, tx, over.fetch),
       sendPieces: (pool, txs) => helperPoolSendPieces(pool, txs, over.fetch),
+      // a buy of several pieces' owed record, before its take (resumePieces, on the state reads)
+      piecesOwed: piecesOwedOf(page.store),
       // the received token's decimals, for W's buy record (src/positions.ts recordPoolBuy), and kept for the session: read
       // on both RPCs with the amount, so a sell of it asks no decimals read (card sell-first-read-waits-out-a-throttle)
       outDecimals: (wallet, d, mint) => {

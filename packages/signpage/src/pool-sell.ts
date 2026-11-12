@@ -2038,7 +2038,10 @@ export async function resumeRentBacks(h: PoolSellHost, locks: Locks | null = glo
   const wait = h.wait ?? ((ms: number) => new Promise<void>((res) => setTimeout(res, ms)));
   let setup: { store: NoteStore; sync: SolanaTreeSync; rent: SolanaRent; wallets: readonly ListedBuyWallet[] };
   try {
-    setup = { store: await h.notes(), sync: solanaTreeSync(rpcs, program), rent: await readSolanaRent(rpcs), wallets: await h.wallets(() => false) };
+    // W as the page's spent notes list it, and each owed W none lists (its own note not spent: a buy of several pieces
+    // whose pieces paid W and whose buy never landed, pool-buy.ts resumePieces; or one a restore found holding SOL) as
+    // its record names it: the pass derives W's key from l and j and signs nothing for another address (rentBack keyOf)
+    setup = { store: await h.notes(), sync: solanaTreeSync(rpcs, program), rent: await readSolanaRent(rpcs), wallets: withOwedWs(await h.wallets(() => false), owed, program) };
   } catch (e) {
     // this load's own reads failed (a provider down): told, each record kept for the next load, written under the sell
     // lock from the record as it is then (review 5 of 38e59182, info)
@@ -2060,10 +2063,7 @@ export async function resumeRentBacks(h: PoolSellHost, locks: Locks | null = glo
     const go = await withHolds(locks, address, true, wait, async (hold) => {
       // the record as it is now: a sell meanwhile may have written W's again or dropped it
       const o = (await h.owed!.list()).find((r) => r.address === address);
-      // W as the page's spent notes list it, or, for a W whose own note is not spent (a buy of several pieces whose
-      // pieces paid W and whose buy never landed, pool-buy.ts resumePieces; or one a restore found holding SOL), as the
-      // record names it: the pass derives W's key from l and j and signs nothing for another address (rentBack keyOf)
-      const w = o && (wallets.find((x) => x.chain === "sol" && x.address === o.address && x.l.toString() === o.l && x.j === o.j) ?? ownW(o, program));
+      const w = o && wallets.find((x) => x.chain === "sol" && x.address === o.address && x.l.toString() === o.l && x.j === o.j);
       if (o && w) await rentBackOwed(h, { rpcs, program, pool, scope, rent, store, sync, w, mints: o.mints, wait, ...(o.sell ? { sell: o.sell } : {}) }, o, hold);
     });
     if (!go) return;
@@ -2076,6 +2076,17 @@ async function ownsNoTokens(rpcs: Rpcs, owner: string): Promise<boolean> {
     rpcs.flatMap((r) => [SOLANA_TOKEN_PROGRAM, SOLANA_TOKEN_2022_PROGRAM].map((programId) => r("getTokenAccountsByOwner", [owner, { programId }, { encoding: "base64", commitment: "confirmed" }]))),
   );
   return reads.every((x) => Array.isArray((x as { value?: unknown } | null)?.value) && ((x as { value: unknown[] }).value.length === 0));
+}
+
+/** The listed buy wallets, then each owed record's W that none of them names (ownW). */
+function withOwedWs(listed: readonly ListedBuyWallet[], owed: readonly OwedRentBack[], program: string): readonly ListedBuyWallet[] {
+  const out = [...listed];
+  for (const o of owed) {
+    if (out.some((x) => x.chain === "sol" && x.address === o.address)) continue;
+    const w = ownW(o, program);
+    if (w) out.push(w);
+  }
+  return out;
 }
 
 /** An owed record's W with no spent note naming it (resumeRentBacks): its l and j as written, never read (holdings null). */

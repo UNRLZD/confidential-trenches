@@ -54,6 +54,7 @@ import {
   SOLANA_JITO_TIP_ACCOUNTS,
   SOLANA_JITO_TIP_MIN,
   SOLANA_LAMPORTS_PER_SIGNATURE,
+  SOLANA_POOL_JITO_TIP,
   SOLANA_PUMP_AMM_PROGRAM,
   SOLANA_PUMP_PROGRAM,
   SOLANA_SOL_MINT,
@@ -670,6 +671,17 @@ export function solanaPoolBuySellNeed(venue: Pick<SolanaPoolBuyVenue, "kind" | "
  * lookup table holding the state and root pages, which move as the tree grows: a table someone would keep extending.
  */
 export const SOLANA_POOL_BUY_PIECES_MAX = 4;
+
+/** The tip a pool buy's tag 3 pays out of its own chunk: on devnet none (no block engine); on mainnet one piece alone
+ *  SOLANA_POOL_JITO_TIP (its tag 3 is the bundle, and its tip is what the auction ranks); several pieces
+ *  SOLANA_JITO_TIP_MIN, the least a mainnet tag 3 carries, since the helper's own last transaction tips the auction for
+ *  the bundle out of the pieces' relay fees (apps/helper src/pool/solana.ts piecesTipCap). The buy (packages/signpage
+ *  src/pool-buy.ts), its Fee (pool.buy.dry's cost) and the tap's Max all price a set of `pieces` at this tip. */
+export function solanaPoolBuyTip(cluster: "mainnet" | "devnet", pieces: number): bigint {
+  if (!Number.isSafeInteger(pieces) || pieces < 1 || pieces > SOLANA_POOL_BUY_PIECES_MAX) throw new Error(`pieces: 1 to ${SOLANA_POOL_BUY_PIECES_MAX}`);
+  if (cluster === "devnet") return 0n;
+  return pieces === 1 ? SOLANA_POOL_JITO_TIP : SOLANA_JITO_TIP_MIN;
+}
 /** One piece of a buy: a release's withdrawnValue and the relay fee it pays out of it. */
 export type SolanaPoolBuyPiece = Pick<SolanaPoolRelease, "withdrawnValue" | "relayFee">;
 const piecesOf = (r: SolanaPoolBuyPiece | readonly SolanaPoolBuyPiece[]): readonly SolanaPoolBuyPiece[] => (Array.isArray(r) ? r : [r as SolanaPoolBuyPiece]);
