@@ -96,3 +96,23 @@ test("a move into a pool: its first note, then that id's second arrivals, under 
   assert.throws(() => poolDepositPlan(SEED, s, USDC_LADDER, { kind: "change", l: 1n, j: 0 }, usd(5)), /starts with a deposit, return or move note/);
   assert.deepEqual(poolDepositPlan(SEED, s, USDC_LADDER, { kind: "deposit", s, i: 4 }, usd(1.5)), { notes: [], left: usd(1.5) });
 });
+
+// Card buy-spends-several-pieces: a release withdraws a rung of SOL_PIECE_LADDER, from 0.005 SOL (the least the program's
+// backstop lets a release of the epoch fee withdraw: twice the fee, 2,600,000); deposits stay on SOL_LADDER, from 0.01.
+test("Solana pieces: the account's four notes give pieces of 10,000,000, 5,000,000, 5,000,000 and 5,000,000; the Solana pool releases on that ladder", async () => {
+  const { SOL_LADDER, SOL_PIECE_LADDER, solanaPool } = await import("../src/pool/solana.ts");
+  const { solanaPoolBuyMaxSpend, solanaPoolFee } = await import("@blindfill/kit");
+  const notes = [19_425_404n, 9_966_767n, 5_487_104n, 5_547_107n]; // the mainnet pool's marks, 12 Nov 2026
+  assert.deepEqual(notes.map((v) => chunkOf(SOL_PIECE_LADDER, v)), [10_000_000n, 5_000_000n, 5_000_000n, 5_000_000n]);
+  // on the deposit ladder only the first had a piece: 75% of the account could never buy
+  assert.deepEqual(notes.map((v) => chunkOf(SOL_LADDER, v)), [10_000_000n, null, null, null]);
+  assert.equal(SOL_LADDER.min, 10_000_000n);
+  // under the floor a release is refused on chain at the epoch fee: 2 x 1,300,000 is over 2,000,000
+  const rent = { lamportsPerByte: 5_080n, factor: 1n as const };
+  const fee = solanaPoolFee(rent);
+  assert.ok(2n * fee > 2_000_000n && 2n * fee <= SOL_PIECE_LADDER.min);
+  const pieces = notes.map((v) => ({ withdrawnValue: chunkOf(SOL_PIECE_LADDER, v)!, relayFee: fee }));
+  assert.equal(solanaPoolBuyMaxSpend(pieces, { kind: "pump-curve", tokenAccountSize: 165, cashback: false }, 1_000_000n, rent), 25_000_000n - 5_200_000n - 1_000_000n - 4_328_080n);
+  const pool = solanaPool({ pin: { program: "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF", feePayer: "CPWhFyFL8naX5W8DEB5XTrEUR2XtkHv7kyXdavpqDTTU" }, rpcs: [async () => null, async () => null], relayFee: async () => { throw new Error("no read"); } });
+  assert.deepEqual(pool.ladder, SOL_PIECE_LADDER);
+});

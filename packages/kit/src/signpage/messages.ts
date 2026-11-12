@@ -185,8 +185,10 @@ export interface SignpageParams {
    * sends nothing. Display only: a pool.buy at this amount or under passes the page's own funds rule on the same reads.
    * Solana only (an EVM tap spends a whole chunk); not_allowed elsewhere. Its refusals: not_allowed, not_funded (signed
    * out or no proof ready), quote_check_failed (no venue the two providers agree on) and busy (a trade runs).
+   * `amount` (kit 1.12, card buy-spends-several-pieces): a spend in whole SOL; the answer then also says how many pieces
+   * a pool.buy of it spends now and what it costs for good (PoolBuyDry pieces and cost).
    */
-  "pool.buy.dry": { chain: PoolChain; token: string };
+  "pool.buy.dry": { chain: PoolChain; token: string; amount?: string };
 }
 
 export interface TxRef {
@@ -239,9 +241,15 @@ export interface SignpageResults {
 }
 
 /** pool.buy.dry's answer: `tap_max`, in whole units of the chain pool's asset as state.pools' is, at most that entry's
- *  `ready`, "0" when no ready proof can pay the coin's venue. */
+ *  `ready`, "0" when no ready proof can pay the coin's venue. With the ask's `amount` at most tap_max (kit 1.12, card
+ *  buy-spends-several-pieces): `pieces`, how many of the ready proofs a pool.buy of it spends now (the pick of
+ *  src/pool-buy.ts: one wallet's, its own note's among them, the least released, then the fewest), and `cost`, what
+ *  that buy costs for good in the same whole units: each piece's relay fee and the tip; what W's accounts hold comes
+ *  back with the sale. Both absent with no amount or an amount over tap_max. */
 export interface PoolBuyDry {
   tap_max: string;
+  pieces?: number;
+  cost?: string;
 }
 
 /**
@@ -349,7 +357,7 @@ export interface ReadyEvent {
  * The page sends a client only the states, stages and facts its version reads. A change to what the page may send
  * (a state field, an op kind, a stage, a fact) raises it, and the page maps the version before it down.
  */
-export const SIGNPAGE_KIT_VERSION = "1.11";
+export const SIGNPAGE_KIT_VERSION = "1.12";
 
 /**
  * The client's half of the handshake, app to page (card kit-frame-version): its kit version, posted before every
@@ -582,11 +590,16 @@ export interface SignpageState {
    * is "12.5"). `asset` is the pool's, set by the device from the pool's kind; its decimals are POOL_ASSET_DECIMALS's
    * alone. `ready` is how much of it is ready to buy (chunks with a proof ready); absent while no proof
    * queue runs, never "0" in its place. `tap_max` is the most one tap can spend on the chain, in the same whole units:
-   * a tap spends one ready proof, so it is the largest spend among the ready proofs, never their sum: the chunk less
-   * what comes out of it before the venue (Solana: the relay fee, the tip and W's new accounts on the costliest venue,
-   * the kit's solanaPoolBuyMaxSpend; EVM: nothing, since an EVM tap asks for a whole chunk and the signing page refuses
-   * any other amount, rules/pool.ts checkEvmBuy). At most `ready`, never below "0". It
+   * Solana: a tap spends the ready proofs bound to one fresh wallet, that wallet's own note's among them, at most
+   * SOLANA_POOL_BUY_PIECES_MAX (card buy-spends-several-pieces), so it is the largest such set's chunks less what comes
+   * out of them before the venue (each piece's relay fee, the tip and W's new accounts on the costliest venue once, the
+   * kit's solanaPoolBuyMaxSpend); EVM: the largest one ready chunk, since an EVM tap asks for a whole chunk and the
+   * signing page refuses any other amount (rules/pool.ts checkEvmBuy). At most `ready`, never below "0". It
    * comes only with `ready`, and a page of an earlier release, or one that cannot price a pool, sends `ready` without it.
+   * `making` (kit 1.12, card buy-spends-several-pieces): how much of the balance the device is making a proof for now,
+   * none of it ready yet, in the same whole units; "0" when it makes none. It comes only with `ready`, at most the
+   * balance: an app tells "making a proof" only while it is above "0", never from `ready` being "0" alone (a balance
+   * no proof is being made for, too small for any proof or held by a running withdraw, has none).
    * Absent when the page is signed out or the notes could not be read. Totals
    * only, never a note; the app sees them each time the store changes, so two in a row can show one note's value.
    *
@@ -596,7 +609,7 @@ export interface SignpageState {
    * the page could not price, and once the read is older than the feed's bound (POOL_USD_FEEDS maxAgeS); an app checks
    * that bound again on its own clock, since the state it holds ages.
    */
-  readonly pools?: readonly { readonly chain: Chain; readonly asset: PoolAsset; readonly balance: string; readonly ready?: string; readonly tap_max?: string; readonly price?: PoolStatePrice }[];
+  readonly pools?: readonly { readonly chain: Chain; readonly asset: PoolAsset; readonly balance: string; readonly ready?: string; readonly tap_max?: string; readonly making?: string; readonly price?: PoolStatePrice }[];
   readonly wallets: readonly { readonly chain: Chain; readonly address: string; readonly role: "fresh" | "hop"; readonly size: string; readonly state: WalletState }[];
   /**
    * The tokens the device's buys hold. `decimals` (card signpage-state-holdings, additive) is the token's own decimals,
