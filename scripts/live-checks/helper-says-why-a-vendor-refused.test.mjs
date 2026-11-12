@@ -1,6 +1,6 @@
 // node --test scripts/live-checks/helper-says-why-a-vendor-refused.test.mjs: the live check replays its recorded answers
 // (helper-says-why-a-vendor-refused.answers.json, its _note says where each was read).
-//   good: a local helper from this card's tree, 1Click mocked with its own words: PASS.
+//   good: a local helper from this branch's tree, 1Click mocked with its own words: PASS.
 //   bad_base: the same at 059a7cef0 (the deployed helper's commit): its 400 names no refusal: FAIL.
 //   live_oneclick_down: the deployed helper while 1Click's quote API failed: 503 cause timeout: INCONCLUSIVE.
 // Planted on the good answer: a 400 with no message, a refusal named ours, a 400 to the 10 USDC quote that 1Click quotes
@@ -19,7 +19,7 @@ const plant = (f) => {
   return judge(a);
 };
 
-test("recorded good answer: a local helper from this card's tree: 1Click's 400 carries its message and refusal vendor: PASS", () => {
+test("recorded good answer: a local helper from this branch's tree: 1Click's 400 carries its message and refusal vendor: PASS", () => {
   const v = judge(A.good);
   assert.equal(v.verdict, "PASS", v.lines.join("\n"));
   assert.equal(EXIT[v.verdict], 0);

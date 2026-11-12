@@ -7,7 +7,7 @@
 //   - short: 1 base unit, a size 1Click refuses for its amount. It passes only when the helper answers 400 with 1Click's
 //     message in its body and refusal;desc="vendor" in its Server-Timing (apps/helper/src/proxy/proxy.ts handle): a
 //     device tells 1Click's refusal from the helper's own, and its message decides whether the page asks again
-//     (packages/wallet/src/deposit/quote.ts askAgainFor). A helper before this card names no refusal: FAIL;
+//     (packages/wallet/src/deposit/quote.ts askAgainFor). A helper before this change names no refusal: FAIL;
 //   - quote: 10 USDC, a size 1Click quotes. It passes on 200 or 201. When the helper answers it 400, the same body (its
 //     deadline renewed) goes to 1Click keyless (the twin): 1Click refusing it too, or failing, is 1Click's own trouble:
 //     INCONCLUSIVE (exit 3), the message on its line; 1Click quoting it keyless while the helper's path refused it is

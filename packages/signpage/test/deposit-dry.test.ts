@@ -332,8 +332,8 @@ test("deposit.dry: the helper's codes, busy and down not kept", async () => {
     assert.deepEqual((await frame({ quote: q }).ask(dry("25"))).error, { code }, code);
 });
 
-// Card helper-says-why-a-vendor-refused (replaces card deposit-quote-no-liquidity's review ruling a, that the display reads
-// ask once since the sheet asks again as the user types): the sheet asks deposit.assets once while it is open, and a
+// Card helper-says-why-a-vendor-refused (in place of card deposit-quote-no-liquidity's rule that the display reads ask
+// once since the sheet asks again as the user types): the sheet asks deposit.assets once while it is open, and a
 // refused list shows Not available with no Retry (apps/terminal/src/screens/deposit/DepositSheet.tsx S4.6), so a few
 // minutes of 1Click 400s (live run 43289730843) left the sheet Not available. A 1Click 400 that is not about the request is
 // asked again, twice inside the one ask's window, as the committed asks do; one about the request is shown at once.

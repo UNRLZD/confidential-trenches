@@ -136,7 +136,7 @@ test("the same line in one window is written once at once, then once with its co
 });
 
 // The answer says it too: a refusal's Server-Timing names whose it is, refusal;desc="vendor" or refusal;desc="ours", so a
-// device and a live check tell 1Click's 400 from the helper's own without a log (the live check of this card reads it).
+// device and a live check tell 1Click's 400 from the helper's own without a log (scripts/live-checks/helper-says-why-a-vendor-refused.mjs reads it).
 test("every answer that is not 2xx names whose refusal it is in its Server-Timing; a 2xx names none", async () => {
   const theirs = proxy(() => json(400, { message: "Failed to get quote" }));
   const a = await theirs.p.handle("oneclick", "/v0/quote", "", QUOTE, "203.0.113.7");
