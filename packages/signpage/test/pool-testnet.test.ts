@@ -1596,3 +1596,15 @@ test("card pool-buy-record-never-stays-sent: the page's buy host writes the take
   assert.deepEqual(posts, ["not_landed"], "posted once");
   await t.signedOut();
 });
+
+// review P2-2: a part W's reverted send left on W is kept in the op's record, by note, with W, its index and the amount
+test("mergeWithdrawOp keeps a part held on W by note (W, its index, the amount), beside the stage and the cleared owed send", () => {
+  const a = { chain: "base", noteId: "n1", w: "0x1111111111111111111111111111111111111111", l: "5", j: 0, amount: "100" } as const;
+  const b = { ...a, noteId: "n2", j: 1, amount: "7" } as const;
+  const r = mergeWithdrawOp({ kind: "withdraw", stage: "in_transit", txs: [], owed: "n1" }, { stage: "stopped", txs: [{ chain: "base", hash: "0xr" }], clear: "n1", held: a });
+  assert.equal(r.stage, "stopped");
+  assert.equal(r.owed, undefined);
+  assert.deepEqual(r.held, { n1: a });
+  assert.deepEqual(mergeWithdrawOp(r, { held: b }).held, { n1: a, n2: b });
+  assert.equal(mergeWithdrawOp({ kind: "withdraw" }, { stage: "stopped" }).held, undefined, "nothing held: no field");
+});

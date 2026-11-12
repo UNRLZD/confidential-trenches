@@ -81,7 +81,7 @@ import type { HostAnswer, HostRefusal, KindContext, Running } from "./api.ts";
 import { readSolanaRent, solanaPoolFee } from "../../kit/src/trade/solana/pool-buy.ts";
 import type { PoolStatePrice, TxRef, WithdrawStage } from "../../kit/src/signpage/messages.ts";
 import { finishPoolOnward, runPoolWithdraw, solanaOnwardFee, solanaWithdrawMinPart, withdrawSources, type Arrivals, type HistoryPlaces, type PendingOnward } from "./pool-withdraw.ts";
-import { evmKeptOnwards, evmWithdrawFunds, finishEvmOnward, runEvmPoolWithdraw, type EvmFinishState, type EvmPendingOnward, type EvmWithdrawHost } from "./pool-withdraw-evm.ts";
+import { evmKeptOnwards, evmWithdrawFunds, finishEvmOnward, runEvmPoolWithdraw, type EvmFinishState, type EvmHeldOnW, type EvmPendingOnward, type EvmWithdrawHost } from "./pool-withdraw-evm.ts";
 import { evmPoolSend } from "./evm-send.ts";
 import { evmPoolVenues } from "../../kit/src/trade/evm/buy-unpinned.ts";
 import type { PoolFunds, PoolReady, PoolWithdrawFormDeps } from "./withdraw/pool-form.ts";
@@ -255,13 +255,15 @@ const STAGE_RANK: Readonly<Record<WithdrawStage, number>> = { proving: 0, submit
  *  the op names only the note's random id. */
 export function mergeWithdrawOp(
   v: unknown,
-  w: { stage?: WithdrawStage; txs?: readonly TxRef[]; arrived?: Arrivals; owe?: string; clear?: string; feeNeeded?: string },
+  w: { stage?: WithdrawStage; txs?: readonly TxRef[]; arrived?: Arrivals; owe?: string; clear?: string; feeNeeded?: string; held?: EvmHeldOnW },
 ): Record<string, unknown> {
   const r = { ...(v as Record<string, unknown>) };
   const was = STAGE_RANK[r.stage as WithdrawStage] ?? -1;
   const ours = w.clear === undefined || r.owed === undefined || r.owed === w.clear;
   if (w.stage !== undefined && STAGE_RANK[w.stage] >= was && ours) r.stage = w.stage;
   if (w.feeNeeded !== undefined) r.fee_needed = w.feeNeeded;
+  // a part left on W by a send that reverted: its W, index and amount, by note (src/pool-withdraw-evm.ts EvmHeldOnW)
+  if (w.held !== undefined) r.held = { ...((r.held as Record<string, EvmHeldOnW> | undefined) ?? {}), [w.held.noteId]: w.held };
   const txs = [...((r.txs as TxRef[] | undefined) ?? [])];
   for (const t of w.txs ?? []) if (!txs.some((x) => x.hash === t.hash)) txs.push(t);
   r.txs = txs;
@@ -1887,7 +1889,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
           if (got && got.feeNeeded === undefined) {
             owedRetry.delete(k);
             evmStops.delete(k);
-            await ops.update("ops", k, (v) => mergeWithdrawOp(v, { stage: got.stage, txs: got.txs, arrived: got.arrived, clear: pending.noteId }));
+            await ops.update("ops", k, (v) => mergeWithdrawOp(v, { stage: got.stage, txs: got.txs, arrived: got.arrived, clear: pending.noteId, ...(got.held ? { held: got.held } : {}) }));
             await dropSend(ops, k, pending.noteId);
           } else {
             const waitMs = Math.min(Math.max(2_000, (retry?.waitMs ?? 1_000) * 2), 60_000);
@@ -2111,6 +2113,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         const end = await runEvmPoolWithdraw({ ...h, ...(q ? { drop: (id: string) => q.drop(id) } : {}), stage: write, owe, keep }, { ...ask }, ready.to, ready.amount, ready.maxFee, mine);
         write(end.stage, end.txs, end.pending, end.arrived);
         if (end.feeNeeded !== undefined) void (writes = writes.then(() => ops.update("ops", opId, (v) => mergeWithdrawOp(v, { feeNeeded: end.feeNeeded! }))).catch(() => {}));
+        if (end.held !== undefined) void (writes = writes.then(() => ops.update("ops", opId, (v) => mergeWithdrawOp(v, { held: end.held! }))).catch(() => {}));
         if (end.pending) owedScan = true;
       } finally {
         notes.close();

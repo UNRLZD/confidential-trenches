@@ -33,7 +33,12 @@
 //   send owed), sent (every part's onward read back on both RPCs), stopped. The owed send (EvmPendingOnward: the
 //   attempt, its context, To, the part, the release's nullifier, first block and deadline) is written to the wallet
 //   store's meta before the release leaves; the note is RESERVED before it leaves and settled by the EVM settle pass
-//   (evmSettleReserved). A restore from the 12 words finds W.
+//   (evmSettleReserved). A restore from the 12 words does not find a part on W today: the page restores the EVM notes
+//   with `wallets: false` (src/pool-restore.ts:678) and keeps only spends with a token (:682), so only this device's
+//   owed record finishes the send; card evm-restore-finds-w-part closes that.
+// - A W send that reverts (a To with code whose call fails, status 0 on both RPCs) used W's one nonce: the op ends
+//   stopped and its record names what W holds and W's index (EvmHeldOnW), for a send at the next nonce (card
+//   evm-withdraw-w-resend).
 // - Every read names the pool, a block, To or W (W only once its release landed: it is public then); no read carries a
 //   key or which note is whose. Nothing here logs.
 import { keccak_256 } from "@noble/hashes/sha3.js";
@@ -47,8 +52,8 @@ import type { NoteRecord, NoteStore } from "../../wallet/src/notes/store.ts";
 import { EVM_CHAIN_IDS, EVM_SEND_MARGIN_MS, evmAgreedBlock, evmRetryLag, type EvmPoolPin, type EvmPoolRequest, type EvmRpc } from "../../wallet/src/pool/evm.ts";
 import { checkBinding, type Pool } from "../../wallet/src/pool/pool.ts";
 import { jOf } from "../../wallet/src/pool/queue.ts";
-import { EVM_BUY_LAG_BLOCKS, EVM_BUY_LAG_MS } from "./pool-buy-evm.ts";
-import { EVM_WITHDRAW_SIGNATURE, EvmSendBusy, EvmSendRefused, evmBuyVerdict, evmHeadNumber, evmReleaseRead, evmWithdrawCalldata, type EvmReleaseRead } from "./evm-send.ts";
+import { EVM_BUY_HEAD_SPREAD, EVM_BUY_LAG_BLOCKS, EVM_BUY_LAG_MS } from "./pool-buy-evm.ts";
+import { EvmSendBusy, EvmSendRefused, evmBuyVerdict, evmHeadNumber, evmReleaseRead, evmWithdrawCalldata, type EvmReleaseRead } from "./evm-send.ts";
 import { planPoolWithdraw, withdrawSources, type Arrivals, type PendingOnward, type WithdrawPart } from "./pool-withdraw.ts";
 import {
   checkEvmOnwardSend, checkEvmWithdraw, EVM_ONWARD_GAS, EVM_ONWARD_GAS_MAX, EVM_PRECOMPILE_TOP, evmOnwardCodeGas, PoolRuleRefused, signEvmOnwardSend, signEvmWithdraw,
@@ -84,6 +89,10 @@ export type EvmPendingOnward = PendingOnward & { chain: Chain; part: string; nul
 /** Every W send kept for an owed part: `onwards` and `onward`, once each. */
 export const evmKeptOnwards = (p: Pick<EvmPendingOnward, "onward" | "onwards">): string[] => [...new Set([...(p.onwards ?? []), ...(p.onward !== undefined ? [p.onward] : [])])];
 
+/** A part held on W after W's one send reverted: W (its index: the note's label `l` and `j`), and what W holds, wei, a
+ *  decimal, as both RPCs read it. The op's record keeps it, for a send at W's next nonce. */
+export type EvmHeldOnW = { chain: Chain; noteId: string; w: string; l: string; j: number; amount: string };
+
 /** One op's finish state across its passes: each RPC's read stop, and when its release first read "none". */
 export type EvmFinishState = { stops: [bigint | null, bigint | null]; noneAt: bigint | null };
 
@@ -114,7 +123,7 @@ export type EvmWithdrawHost = {
   wait?(ms: number): Promise<void>;
 };
 
-export type EvmWithdrawAnswer = { stage: WithdrawStage; txs: TxRef[]; pending: EvmPendingOnward | null; arrived: Arrivals; feeNeeded?: string };
+export type EvmWithdrawAnswer = { stage: WithdrawStage; txs: TxRef[]; pending: EvmPendingOnward | null; arrived: Arrivals; feeNeeded?: string; held?: EvmHeldOnW };
 
 class Stop extends Error {}
 const stop = (why: string): never => {
@@ -237,23 +246,15 @@ const seedUse = async <T>(h: Pick<EvmWithdrawHost, "seed64">, f: (seed: Uint8Arr
 export const evmToRefused = (to: string, pin: EvmPoolPin, ws: readonly string[]): boolean =>
   !/^0x[0-9a-fA-F]{40}$/.test(to) || BigInt(to) < EVM_PRECOMPILE_TOP || [pin.pool, pin.feeRecipient, ...ws].some((x) => lower(x) === lower(to));
 
-/** The context a withdraw's calldata carries (its proof's eighth public signal: the head's word 16), or null when it is
- *  not a withdraw of this layout (a buy of the nullifier is another release: never this one's). */
-export function releaseContextOf(input: unknown): bigint | null {
-  if (typeof input !== "string" || !/^0x([0-9a-fA-F]{2})*$/.test(input) || input.length < 2 + 2 * (4 + 32 * 17)) return null;
-  const sel = lower(input.slice(2, 10));
-  if (sel !== WITHDRAW_SEL) return null;
-  return BigInt(`0x${input.slice(2 + 8 + 64 * 16, 2 + 8 + 64 * 17)}`);
-}
-const selOf = (s: string): string => Array.from(keccak_256(new TextEncoder().encode(s)).subarray(0, 4), (x) => x.toString(16).padStart(2, "0")).join("");
-const WITHDRAW_SEL = /* @__PURE__ */ selOf(EVM_WITHDRAW_SIGNATURE);
-
-/** A release's verdict for an owed part: "mine" (both RPCs read one Withdrawn of the nullifier paying W the chunk at a
- *  fee up to the cap, and its transaction's calldata, on both, carries this attempt's context), "other" (another
- *  release of the nullifier: another attempt's or device's), "none" (no release, both reads past the deadline at a
- *  safe block), or null (read again). */
+/** A release's verdict for an owed part: "mine" (both RPCs read the same one Withdrawn of the pinned pool for the
+ *  nullifier, paying W the chunk to the pinned fee recipient at a fee up to the cap), "other" (another release of the
+ *  nullifier: it spent the note elsewhere), "none" (no release, both reads past the deadline at a safe block), or null
+ *  (read again). The transaction that carried it is not read: a release sent through any contract (a wrapper that calls
+ *  the pool) changes nothing W receives. The event is the pool's own (its log address the pin's; PrivacyPool.sol
+ *  _release emits it in the call that pays W the chunk less the fee, W's signed relay data holding the fee cap), only
+ *  W's key moves what W then holds, and W's one send moves at most min(part, balance - bound) at nonce 0. */
 export type EvmReleaseVerdict = { end: "mine"; tx: string; block: bigint } | { end: "other" } | { end: "none" } | null;
-export async function evmReleaseOf(h: Pick<EvmWithdrawHost, "rpcs" | "pin">, p: Pick<EvmPendingOnward, "nullifier" | "from" | "deadlineMs" | "chunk" | "fee" | "context">, w: string, stops: [bigint | null, bigint | null]): Promise<EvmReleaseVerdict> {
+export async function evmReleaseOf(h: Pick<EvmWithdrawHost, "rpcs" | "pin">, p: Pick<EvmPendingOnward, "nullifier" | "from" | "deadlineMs" | "chunk" | "fee">, w: string, stops: [bigint | null, bigint | null]): Promise<EvmReleaseVerdict> {
   const reads = (await Promise.all(h.rpcs.map((rpc, k) => evmReleaseRead(rpc, h.pin.pool, BigInt(p.from), BigInt(p.deadlineMs), stops[k]!)))) as [EvmReleaseRead, EvmReleaseRead];
   stops[0] = reads[0].stop;
   stops[1] = reads[1].stop;
@@ -262,34 +263,55 @@ export async function evmReleaseOf(h: Pick<EvmWithdrawHost, "rpcs" | "pin">, p: 
   if (v === null) return null;
   if (v.end === "not_landed") return v.release === null ? { end: "none" } : { end: "other" };
   if (v.end !== "withdrawn") return { end: "other" };
-  // whose release: the transaction's own calldata on both RPCs names this attempt's context
-  const txs = await both(h.rpcs, async (rpc) => (await rpc("eth_getTransactionByHash", [v.release.tx])) as { input?: unknown; to?: unknown } | null);
-  const ctx = txs.map((t) => (typeof t?.to === "string" && lower(t.to) === lower(h.pin.pool) ? releaseContextOf(t.input) : null));
-  if (ctx[0] === null || ctx[1] === null) return null;
-  if (ctx[0] !== ctx[1]) return null;
-  return ctx[0] === BigInt(p.context) ? { end: "mine", tx: v.release.tx, block: v.release.block } : { end: "other" };
+  return { end: "mine", tx: v.release.tx, block: v.release.block };
 }
 
-type OnwardEnd = { state: "ok"; hash: string; value: bigint } | { state: "fee"; need: bigint } | { state: "empty" } | { state: "failed" } | { state: "unknown"; hash: string };
+type OnwardEnd = { state: "ok"; hash: string; value: bigint } | { state: "fee"; need: bigint } | { state: "empty" } | { state: "reverted"; hash: string; held: bigint } | { state: "failed" } | { state: "unknown"; hash: string };
 
-/** W's onward send: exactly the part to To (W's balance less its bound when the bound rose past what W holds beyond it),
- *  built from the device's reads on both RPCs, checked by the rule, signed by W, its hash kept before it leaves, sent to
- *  both RPCs and read back as a receipt of status 1 on both. W's nonce read past 0: W's one send was made (this tab's or
- *  another's): "empty". */
-async function sendOnward(h: EvmWithdrawHost, ask: PoolAsk, p: EvmPendingOnward, l: bigint, j: number, keep: (p: EvmPendingOnward) => Promise<void>): Promise<OnwardEnd> {
-  const wait = waitOf(h);
-  const w = await seedUse(h, (seed) => {
+/** W's kept sends read back on both RPCs: "ok" (one landed, status 1), "reverted" (one landed with status 0: every
+ *  kept send is W's nonce-0 send of this part, so the others can never land), else null. */
+async function keptEnd(rpcs: readonly [EvmRpc, EvmRpc], p: EvmPendingOnward, w: string): Promise<{ state: "ok" | "reverted"; hash: string } | null> {
+  let reverted: string | null = null;
+  for (const hash of evmKeptOnwards(p)) {
+    const r = await onwardReceipt(rpcs, hash, w, p.to);
+    if (r === "ok") return { state: "ok", hash };
+    if (r === "failed") reverted = hash;
+  }
+  return reverted !== null ? { state: "reverted", hash: reverted } : null;
+}
+
+/** W's address for the note's label `l` and `j`, its key wiped. */
+const wOf = (h: Pick<EvmWithdrawHost, "seed64">, l: bigint, j: number): Promise<string> =>
+  seedUse(h, (seed) => {
     const x = freshWallet(seed, "evm", l, j);
     x.secretKey.fill(0);
     return x.address;
   });
+
+/** What W holds, as both RPCs read it at `tag` (they must agree). */
+const heldOf = async (rpcs: readonly [EvmRpc, EvmRpc], w: string, tag: string): Promise<bigint> => agree(await both(rpcs, async (rpc) => quantity(await rpc("eth_getBalance", [w, tag]))));
+
+/** W's onward send: exactly the part to To (W's balance less its bound when the bound rose past what W holds beyond it),
+ *  built from the device's reads on both RPCs, checked by the rule, signed by W, its hash kept before it leaves, sent to
+ *  both RPCs and read back as a receipt of status 1 on both. W's nonce: two RPCs that differ read again ("unknown");
+ *  past 0 on both, W's one send was made (this tab's or another's): a kept one read back ("ok", or "reverted" with what
+ *  W holds), else "empty" (still owed: read again, never dropped). */
+async function sendOnward(h: EvmWithdrawHost, ask: PoolAsk, p: EvmPendingOnward, l: bigint, j: number, keep: (p: EvmPendingOnward) => Promise<void>): Promise<OnwardEnd> {
+  const wait = waitOf(h);
+  const w = await wOf(h, l, j);
   const part = BigInt(p.part);
   const feeCap = BigInt(p.feeCap);
   const blk = await latest(h.rpcs);
   const tag = qty(blk.number);
   const baseFee = blk.baseFeePerGas ?? stop("read");
   const nonce = await both(h.rpcs, async (rpc) => quantity(await rpc("eth_getTransactionCount", [w, tag])));
-  if (nonce[0] > 0n || nonce[1] > 0n) return { state: "empty" };
+  if (nonce[0] !== nonce[1]) return { state: "unknown", hash: "" };
+  if (nonce[0] > 0n) {
+    const k = await keptEnd(h.rpcs, p, w);
+    if (k?.state === "ok") return { state: "ok", hash: k.hash, value: BigInt(await sentValue(h.rpcs, k.hash)) };
+    if (k?.state === "reverted") return { state: "reverted", hash: k.hash, held: await heldOf(h.rpcs, w, tag) };
+    return { state: "empty" };
+  }
   const balance = await both(h.rpcs, async (rpc) => quantity(await rpc("eth_getBalance", [w, tag])));
   const bal = agree(balance);
   if (bal === 0n) return { state: "unknown", hash: "" };
@@ -348,7 +370,7 @@ async function sendOnward(h: EvmWithdrawHost, ask: PoolAsk, p: EvmPendingOnward,
     if (round % 5 === 0) await Promise.allSettled(h.rpcs.map((rpc) => rpc("eth_sendRawTransaction", [hexOf(raw)])));
     const got = await onwardReceipt(h.rpcs, hash, w, p.to);
     if (got === "ok") return { state: "ok", hash, value };
-    if (got === "failed") return { state: "failed" };
+    if (got === "failed") return { state: "reverted", hash, held: await heldOf(h.rpcs, w, qty((await latest(h.rpcs)).number)) };
     await wait(EVM_WITHDRAW_WAIT_MS);
   }
   return { state: "unknown", hash };
@@ -372,8 +394,9 @@ export async function runEvmPoolWithdraw(h: EvmWithdrawHost, ask: PoolAsk, to: s
   const arrived: Arrivals = {};
   let pending: EvmPendingOnward | null = null;
   let feeNeeded: bigint | null = null;
+  let held: EvmHeldOnW | null = null;
   const say = (s: WithdrawStage): void => h.stage?.(s, txs.slice(), pending, { ...arrived });
-  const end = (s: WithdrawStage): EvmWithdrawAnswer => (say(s), { stage: s, txs: txs.slice(), pending, arrived: { ...arrived }, ...(feeNeeded !== null ? { feeNeeded: feeNeeded.toString() } : {}) });
+  const end = (s: WithdrawStage): EvmWithdrawAnswer => (say(s), { stage: s, txs: txs.slice(), pending, arrived: { ...arrived }, ...(feeNeeded !== null ? { feeNeeded: feeNeeded.toString() } : {}), ...(held !== null ? { held } : {}) });
   try {
     if (ask.kind !== "pool.withdraw" || ask.chain !== h.chain) stop("kind");
     // the pin alone decides: this page's network's pin for the chain, or no withdraw
@@ -419,7 +442,13 @@ export async function runEvmPoolWithdraw(h: EvmWithdrawHost, ask: PoolAsk, to: s
       } else if (on.state === "fee") {
         feeNeeded = on.need;
         return end("in_transit");
-      } else if (on.state !== "empty") return end("in_transit");
+      } else if (on.state === "reverted") {
+        // W's one send reverted: the part stays on W, named in the op's record for a send at W's next nonce
+        txs.push({ chain: h.chain, hash: on.hash });
+        held = { chain: h.chain, noteId: pending!.noteId, w: await wOf(h, got.l, got.j), l: got.l.toString(), j: got.j, amount: on.held.toString() };
+        pending = null;
+        return end("stopped");
+      } else return end("in_transit"); // "empty", "unknown", "failed": the part still owed, for the state reads
       pending = null;
       if (i < plan!.length - 1) say("submitted");
     }
@@ -475,9 +504,12 @@ async function onePart(h: EvmWithdrawHost, ask: PoolAsk, notes: NoteStore, p: Wi
     const relay = binding.request.relay;
     const ctx = { nowMs: clock(), wallet: keys.w.address, feeCap: c.fee, evm: { venues: h.venues, feeRecipient: h.pin.feeRecipient } };
     checkEvmWithdraw(h.pin.pool, proof, relay, ask, ctx, h.testnet);
-    // where the read-back starts: under the lower of both RPCs' newest blocks, read before W signs
+    // where the read-back starts: under the lower of both RPCs' newest blocks, read before W signs; two heads further
+    // apart than the buy's and the sell's bound (EVM_BUY_HEAD_SPREAD) stop the part, so one RPC's low head never starts
+    // the read further under the chain than the read's span (EVM_BUY_LOG_SPAN) covers
     const heads = await Promise.all(h.rpcs.map((rpc) => evmHeadNumber(rpc)));
-    const lo = heads[0]! < heads[1]! ? heads[0]! : heads[1]!;
+    const [lo, hi] = heads[0]! < heads[1]! ? [heads[0]!, heads[1]!] : [heads[1]!, heads[0]!];
+    if (hi - lo > EVM_BUY_HEAD_SPREAD) stop("heads");
     const from = lo > EVM_BUY_LAG_BLOCKS ? lo - EVM_BUY_LAG_BLOCKS : 0n;
     const sig = await seedUse(h, (seed) => {
       const signer = freshWallet(seed, "evm", leaf.label, j);
@@ -556,9 +588,10 @@ async function onePart(h: EvmWithdrawHost, ask: PoolAsk, notes: NoteStore, p: Wi
 /** The state reads' pass for an owed EVM part (a reload, a crash, a lost send): its note still this attempt's
  *  (RESERVED by it, or SPENT with its context), its release read on both RPCs (none past the deadline on two passes
  *  the lag margin apart, as the run's own rule, or another's: stopped, nothing sent), then W's send: every hash kept
- *  read back first, then W's send onward, its hash kept before it leaves. W's nonce past 0 with a hash kept: one of
- *  them landed, read again until both RPCs hold its receipt. null: read again later (the money may be on W). */
-export async function finishEvmOnward(h: EvmWithdrawHost, pending: EvmPendingOnward, state: EvmFinishState = { stops: [null, null], noneAt: null }): Promise<{ stage: WithdrawStage; txs: TxRef[]; arrived: Arrivals; feeNeeded?: string } | null> {
+ *  read back first, then W's send onward, its hash kept before it leaves. W's nonce past 0 on both RPCs: a kept send
+ *  landed or will, read again until both hold its receipt; a kept send that reverted (status 0 on both) ends the op
+ *  stopped with what W holds (`held`). null: read again later (the money may be on W). */
+export async function finishEvmOnward(h: EvmWithdrawHost, pending: EvmPendingOnward, state: EvmFinishState = { stops: [null, null], noneAt: null }): Promise<{ stage: WithdrawStage; txs: TxRef[]; arrived: Arrivals; feeNeeded?: string; held?: EvmHeldOnW } | null> {
   const done = (stage: WithdrawStage, txs: TxRef[] = [], arrived: Arrivals = {}) => ({ stage, txs, arrived });
   try {
     const ask: PoolAsk = { kind: "pool.withdraw", chain: h.chain, token: null, amount: 0n, slippageBps: 0, decimals: 18 };
@@ -571,11 +604,8 @@ export async function finishEvmOnward(h: EvmWithdrawHost, pending: EvmPendingOnw
     const j = jOf(n.ref);
     const { w } = await seedUse(h, (seed) => spendOf(seed, n));
     // every send of W's kept: read back first
-    const kept = evmKeptOnwards(pending);
-    for (const hash of kept) {
-      const r = await onwardReceipt(h.rpcs, hash, w, pending.to);
-      if (r === "ok") return done(pending.last ? "sent" : "stopped", [{ chain: h.chain, hash }], { [hash]: await sentValue(h.rpcs, hash) });
-    }
+    const k = await keptEnd(h.rpcs, pending, w);
+    if (k?.state === "ok") return done(pending.last ? "sent" : "stopped", [{ chain: h.chain, hash: k.hash }], { [k.hash]: await sentValue(h.rpcs, k.hash) });
     const v = await evmReleaseOf(h, pending, w, state.stops);
     if (v === null) return null;
     if (v.end === "none") {
@@ -594,7 +624,7 @@ export async function finishEvmOnward(h: EvmWithdrawHost, pending: EvmPendingOnw
     });
     const rel: TxRef = { chain: h.chain, hash: v.tx };
     if (on.state === "ok") return done(pending.last ? "sent" : "stopped", [rel, { chain: h.chain, hash: on.hash }], { [on.hash]: on.value.toString() });
-    if (on.state === "empty") return kept.length > 0 ? null : done(pending.last ? "sent" : "stopped", [rel]);
+    if (on.state === "reverted") return { ...done("stopped", [rel, { chain: h.chain, hash: on.hash }]), held: { chain: h.chain, noteId: pending.noteId, w, l: l.toString(), j, amount: on.held.toString() } };
     if (on.state === "fee") return { stage: "in_transit", txs: [], arrived: {}, feeNeeded: on.need.toString() };
     return null;
   } catch {
