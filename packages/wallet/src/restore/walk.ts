@@ -21,8 +21,12 @@
 //   the pool program derives from the precommitment (a PDA, computed in the Worker as solana-restore.ts solanaMarkOf).
 // - Every walk a Worker hands back is checked on the page before a note is taken from it, as any walk handed in is
 //   (../notes/restore.ts checkedWalk, through each pool's laneOf): the lane's own indices, ascending; its last index
-//   the one a whole walk reads to; that index's precommitment recomputed from the seed. A wrong or short walk stops
-//   the restore with its lane named.
+//   the one a whole walk reads to; that index's precommitment recomputed from the seed. A walk that ends short, or on
+//   the wrong index, stops the restore with its lane named. What the check cannot see: a walk that reaches its end
+//   but leaves out a note found on the way (a middle index) passes it. That is why a Worker runs only the page's own
+//   file, /walk-worker.js from this origin (its bytes pinned by the release list, started through the Trusted Types
+//   policy walk-worker), the same walk code the page runs; walk-lanes.test.ts holds the Workers' walks equal to the
+//   page's, a dropped middle note included.
 // - A Worker that cannot start (no Worker in this browser, a policy that refuses the file, its load failing) walks
 //   that lane on the page instead, yielding as before (../notes/restore.ts walkLaneYielding); one that answers a
 //   refusal stops the restore.

@@ -390,6 +390,19 @@ test("a walk that throws at once frees the page's turn: the next pool's walk sti
   assert.ok(w.ends.at(-1)?.why.some((x) => x.includes("walk threw at once")), JSON.stringify(w.ends.at(-1)?.why));
 });
 
+test("the page's walk Workers reach every pool's walk: Solana's and each EVM pool's restore are handed the host's own `walkers` (review of b05ed10b3, P2)", async () => {
+  const walkers = (() => { throw new Error("not started here"); }) as never;
+  const got: { chain: string; walkers: unknown }[] = [];
+  const w = await world({
+    walkers,
+    solana: (async (a: { walkers?: unknown }) => (got.push({ chain: "solana", walkers: a.walkers }), { notes: notesOf(SOL_SCOPE, LABEL_S, 1000n), spends: [] })) as never,
+    evm: (async (a: { pin: { network: string }; walkers?: unknown }) => (got.push({ chain: a.pin.network, walkers: a.walkers }), { notes: notesOf(EVM_SCOPE, LABEL_E, 2000n), spends: [], elsewhere: [], wallets: [], block: 1n })) as never,
+  });
+  await w.r.auto();
+  assert.ok(got.some((x) => x.chain === "solana") && got.some((x) => x.chain !== "solana"), JSON.stringify(got.map((x) => x.chain)));
+  for (const x of got) assert.equal(x.walkers, walkers, `${x.chain}: the host's walkers`);
+});
+
 test("pagePools: the mainnet build pins the NEAR vault on its release pair (card signpage-restores-near-vault-notes), the Solana pool (card sol-pools-mainnet-pin), read on the page's Solana pair, then Base's and Robinhood's (card evm-pools-on-mainnet), each on its pool list", async () => {
   const { SOL_POOLS, solanaPoolOf } = await import("../../wallet/src/pool/solana.ts");
   const { EVM_POOLS, evmPoolScopeOf } = await import("../../wallet/src/pool/evm.ts");

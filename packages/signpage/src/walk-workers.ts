@@ -4,7 +4,8 @@
 // which worker-src 'self' refuses. SIGN_HOST's CSP requires Trusted Types for every script sink, so the URL is made a
 // TrustedScriptURL by the policy `walk-worker` (public/_headers: trusted-types prover-worker walk-worker), created once
 // per page, which turns exactly this origin's /walk-worker.js into one and refuses every other, as the kit's
-// proverWorkerScriptURL does for the prover's worker. The page side hands walkWorkerPort to walkInWorkers as its spawn.
+// proverWorkerScriptURL does for the prover's worker. main.ts hands walkWorkerPort to poolRestore as `walkers`, which
+// passes it to each pool's walk (walkLanes) as its spawn.
 import type { WalkPort } from "../../wallet/src/restore/walk.ts";
 
 export const WALK_POLICY_NAME = "walk-worker";
