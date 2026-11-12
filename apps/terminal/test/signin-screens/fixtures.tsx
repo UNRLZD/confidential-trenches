@@ -39,6 +39,8 @@ export const FIXTURES: Record<string, SignpageClientSnapshot> = {
   done: ready(st({ vault_balance: "73.18", ops: restore("done") })),
   nothing: ready(st({ ops: restore("done") })),
   offline: ready(st({ vault_balance: "12.50", ops: restore("stalled") })),
+  // the signing page down while the restore is stalled: money off, Retry drawn off (card restore-notice-redraw)
+  "offline-off": { status: "down", release: "signpage-v1", state: st({ vault_balance: "12.50", ops: restore("stalled") }), stale: true },
 };
 
 declare global {
