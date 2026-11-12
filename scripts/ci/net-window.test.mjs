@@ -172,6 +172,7 @@ export const CHANGED = [
   "scripts/live-checks/pool-usd-price-never-stale.mjs",
   "scripts/live-checks/pool-tree-read-waits-for-its-second.mjs",
   "scripts/live-checks/portfolio-shows-pool-trades.mjs",
+  "scripts/live-checks/closed-positions-after-a-restore.mjs",
   "scripts/live-checks/portfolio-counts-money-an-open-buy-holds.mjs",
   "scripts/live-checks/fresh-money-spendable-at-once.mjs",
   "scripts/live-checks/sol-settle-failed-is-not-unspent.mjs",
@@ -190,6 +191,7 @@ export const CHANGED = [
   "scripts/live-checks/signpage-buy-own-spend.mjs",
   "scripts/live-checks/sol-pool-buy-lands-on-mainnet.mjs",
   "scripts/live-checks/signpage-error-after-timeout.mjs",
+  "scripts/live-checks/evm-withdraw-mainnet.mjs",
   "scripts/live-checks/signpage-evm-pool-buy.mjs",
   "scripts/live-checks/signpage-evm-pool-sell.mjs",
   "scripts/live-checks/signpage-positions-evm.mjs",
@@ -266,6 +268,7 @@ export const CHANGED = [
   "scripts/live-checks/pool-sol-mainnet-run.mjs",
   "scripts/live-checks/pool-sol-mainnet-run.record.mjs",
   "scripts/live-checks/withdraw-form-shows-what-you-can-send.mjs",
+  "scripts/live-checks/restore-shows-the-balance-in-seconds.mjs",
 ];
 
 // Scripts in the searched folders that open no connection from Node, and why.

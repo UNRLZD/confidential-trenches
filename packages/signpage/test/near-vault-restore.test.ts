@@ -7,6 +7,7 @@
 import "fake-indexeddb/auto";
 import assert from "node:assert/strict";
 import { after, beforeEach, test } from "node:test";
+import { Worker } from "node:worker_threads";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { IDBFactory } from "fake-indexeddb";
 import { openWalletStore, type WalletStore } from "@blindfill/wallet/store";
@@ -20,6 +21,8 @@ import { VAULT_CONSTANTS, vaultLabelOf } from "../../kit/src/vault/shapes.ts";
 import type { VaultSyncRpc } from "../../kit/src/vault/sync.ts";
 import * as restoreKind from "../src/pool-restore.ts";
 import type { PoolRestoreHost, RestorePool } from "../src/pool-restore.ts";
+import { RESTORE_LANES } from "../../wallet/src/notes/restore.ts";
+import type { WalkPort } from "../../wallet/src/restore/walk.ts";
 import { PAGE_NETWORK } from "../src/withdraw/handoff.ts";
 import { vaultScope } from "../src/withdraw/checks.ts";
 import { vaultBalanceOf } from "../src/vault-balance.ts";
@@ -130,7 +133,19 @@ async function device(): Promise<WalletStore> {
   return st;
 }
 /** The page's restore over its own pool list, with only the vault entry kept and its pair the model's. */
-function hostOf(st: WalletStore, rpcs: () => [VaultSyncRpc, VaultSyncRpc], ends: { stage: string; why: readonly string[] }[]): PoolRestoreHost {
+// a Worker of the page's walk, on node:worker_threads (as restore-speed.test.ts), counted
+let spawned = 0;
+const nodeWalker = (): WalkPort => {
+  const w = new Worker(new URL("../../wallet/test/walk-worker-node.mjs", import.meta.url));
+  closers.push(() => void w.terminate());
+  spawned++;
+  return {
+    postMessage: (m) => w.postMessage(m),
+    addEventListener: (type, f) => void w.on(type, type === "message" ? (data: unknown) => f({ data }) : () => f({})),
+    terminate: () => void w.terminate(),
+  };
+};
+function hostOf(st: WalletStore, rpcs: () => [VaultSyncRpc, VaultSyncRpc], ends: { stage: string; why: readonly string[] }[], walkers?: () => WalkPort): PoolRestoreHost {
   const nearVault = (restoreKind as { nearVaultRestoreNotes?: (a: object) => Promise<unknown> }).nearVaultRestoreNotes;
   return {
     store: async () => st,
@@ -141,6 +156,7 @@ function hostOf(st: WalletStore, rpcs: () => [VaultSyncRpc, VaultSyncRpc], ends:
     pausesMs: [],
     ended: (stage, why) => void ends.push({ stage, why }),
     ...(nearVault ? { vault: ((a: object) => nearVault({ ...a, gap: GAP })) as never } : {}),
+    ...(walkers ? { walkers } : {}),
   };
 }
 async function notesIn(st: WalletStore) {
@@ -169,6 +185,17 @@ test("a new store restored from the same words holds every note of the NEAR vaul
   const ns = await openNoteStore(st);
   assert.equal(vaultBalanceOf(await ns.list(), SCOPE), 5_000_000n);
   ns.close();
+  assert.deepEqual(ends.at(-1)?.why, []);
+});
+
+test("the vault's lanes walk in the page's walk Workers when the page gives them: one a lane, the same notes as the page's own walk (review of b05ed10b3, P2)", async () => {
+  const { v, own } = lived();
+  const st = await device();
+  const ends: { stage: string; why: readonly string[] }[] = [];
+  spawned = 0;
+  await restoreKind.poolRestore(hostOf(st, () => pair(v), ends, nodeWalker)).auto();
+  assert.equal(spawned, RESTORE_LANES, "each of the vault's lanes in a Worker");
+  assert.deepEqual(sorted(await notesIn(st)), want(own));
   assert.deepEqual(ends.at(-1)?.why, []);
 });
 

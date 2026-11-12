@@ -31,11 +31,11 @@ export const NAMES_NOT_READS = Object.freeze({
   "scripts/ci/gitleaks-config.test.mjs": "the bundle's path as the name of a scanned text, never this checkout's file",
   "scripts/ci/gitleaks-scope.test.mjs": "writes a planted bundle into a planted repository",
 });
-const OUT = String.raw`(?:index\.html|public/app\.js|public/prover-worker\.js|public/prover-thread\.js)`;
+const OUT = String.raw`(?:index\.html|public/app\.js|public/prover-worker\.js|public/prover-thread\.js|public/walk-worker\.js)`;
 // a path literal (one quote kind, no space): the output under the package folder, or the folder alone
 const FULL_PATH = new RegExp(String.raw`(["'\x60])[^"'\x60\s]*packages/signpage/${OUT}\1`);
 const FOLDER = new RegExp(String.raw`(["'\x60])[^"'\x60\s]*packages/signpage/?\1|(["'\x60])packages\2\s*,\s*(["'\x60])signpage\3`);
-const OUT_NAME = new RegExp(String.raw`(["'\x60])/?${OUT}\1|(["'\x60])public\2\s*,\s*(["'\x60])(?:app|prover-worker|prover-thread)\.js\3`);
+const OUT_NAME = new RegExp(String.raw`(["'\x60])/?${OUT}\1|(["'\x60])public\2\s*,\s*(["'\x60])(?:app|prover-worker|prover-thread|walk-worker)\.js\3`);
 const CODE = /\.(?:m?js|cjs|tsx?)$/;
 const uncommented = (text) => text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
 

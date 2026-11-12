@@ -1,0 +1,40 @@
+{
+ "good": {
+  "at": "2026-11-12T13:44:10.495Z",
+  "sign": {
+   "source": "https://confidential.unrealized.trade/",
+   "pageStatus": 200,
+   "js": [
+    {
+     "url": "/app.js",
+     "status": 200,
+     "integrity": "sha384-72bepjmOxATIH6oRZhPQMY6/XDJvwLNWPFYFlZXpd7nkWuc5QglP1nUVnY/VI1UC",
+     "sha384": "sha384-72bepjmOxATIH6oRZhPQMY6/XDJvwLNWPFYFlZXpd7nkWuc5QglP1nUVnY/VI1UC",
+     "found": [
+      "a wallet's trades are read on from where the last read stopped",
+      "each trade becomes an op keyed by its signature",
+      "a wallet sold in full is read for good",
+      "a buy with no USD is priced at its block",
+      "an op with no figure is marked and not read again"
+     ]
+    }
+   ]
+  }
+ },
+ "bad": {
+  "at": "2026-11-12T12:52:12.445Z",
+  "sign": {
+   "source": "https://confidential.unrealized.trade/",
+   "pageStatus": 200,
+   "js": [
+    {
+     "url": "/app.js",
+     "status": 200,
+     "integrity": "sha384-1Cs+kXi4vC0MgG0eYnb/MVEEldR/qC5u+ZnVLhj+AfbJhb588o8ePhq8U2gSFgqv",
+     "sha384": "sha384-1Cs+kXi4vC0MgG0eYnb/MVEEldR/qC5u+ZnVLhj+AfbJhb588o8ePhq8U2gSFgqv",
+     "found": []
+    }
+   ]
+  }
+ }
+}

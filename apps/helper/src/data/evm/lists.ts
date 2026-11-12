@@ -28,7 +28,7 @@
 import { gzipSync } from "node:zlib";
 import { LOGOS } from "../logo.ts";
 import { dec, LIST_MAX, ROW_FIELDS, SERVED_MAX, SERVED_MS, servedTokens, text, type ListsAnswer, type Row } from "../solana/lists.ts";
-import { throttledUntil, type GeckoBudget } from "../gecko.ts";
+import { LIST_FLOOR, throttledUntil, WINDOW_MS, type GeckoBudget } from "../gecko.ts";
 import { evmThrottleS, upstreamRetryAfterS, type ProviderHolds } from "../../limits/limits.ts";
 
 export const EVM_CHAINS = ["base", "robinhood"] as const;
@@ -52,14 +52,18 @@ export const GT_READS = {
 } as const;
 /** A list is read again once its last read is this old, when the lists lane yields a call. */
 export const LIST_MS = 60_000;
-/** A list this old, or never read, is read even while pages are being opened (still leaving a page one call), so it
- *  never reaches STALE_MS and a helper started while token pages are open still serves its lists. */
-export const LIST_URGENT_MS = 240_000;
 /** The snapshot is rebuilt on the Solana lists' cadence (D-S2's 12 s): makers not settled yet are read again. */
 export const TICK_MS = 12_000;
 /** A snapshot whose oldest list read is older than this is behind: still served, dated by its oldest read, never
  *  passed as fresh; a warm file older than this is not taken over (../warm.ts). */
 export const STALE_MS = 300_000;
+/** A list this old, or never read, is read even while pages are being opened, so a
+ *  helper started while token pages are open still serves its lists and none reaches STALE_MS. While pages hold the
+ *  window the lists have only the floor (gecko.ts LIST_FLOOR calls per WINDOW_MS) for all of them, the stalest first
+ *  across both chains: the last of them to be read waits the others' turns, EVM_LISTS x WINDOW_MS / LIST_FLOOR, plus a
+ *  tick to notice a free call. Derived, so urgency starts early enough that the queue ends before STALE_MS. */
+const EVM_LISTS = EVM_CHAINS.length * LIST_KEYS.length;
+export const LIST_URGENT_MS = STALE_MS - Math.ceil((EVM_LISTS * WINDOW_MS) / LIST_FLOOR) - TICK_MS;
 /** A pool younger than this whose block shows no creation event is read again, since a provider may not hold its logs yet. */
 export const SETTLE_MS = 60_000;
 export const MAKER_MAX = 20_000;
@@ -766,8 +770,9 @@ export function createEvmLists(chain: EvmChain, gecko: GeckoBudget, deps: { fetc
   // hint, and its first open ran the whole pool discovery past swaps.ts OPEN_BOUND_MS, 503 at 12.1-12.6 s)
   const poolAt = new Map<string, { pool: string; at: number }>(); // the least recently named first
 
-  async function gt(path: string, urgent: boolean, first: boolean): Promise<Read | null> {
-    if (!gecko.take("lists", urgent, first)) return null;
+  /** `since`: when the list was last read (-Infinity: never), the place the budget gives it among both chains' lists. */
+  async function gt(path: string, urgent: boolean, first: boolean, since: number): Promise<Read | null> {
+    if (!gecko.take("lists", urgent, first, "", { source: chain, since })) return null;
     try {
       const r = await doFetch(`${GT_BASE}/networks/${GT_NETWORK[chain]}/${path}`, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(TIMEOUT_MS), redirect: "error" });
       if (r.status === 429) {
@@ -823,7 +828,7 @@ export function createEvmLists(chain: EvmChain, gecko: GeckoBudget, deps: { fetc
     // the stalest list first (a missing one before any), one call at a time while the lists lane yields one
     const age = (k: ListKey) => (reads[k] === undefined ? Infinity : now() - reads[k]!.at);
     for (const k of LIST_KEYS.filter((x) => age(x) >= LIST_MS).sort((a, b) => age(b) - age(a))) {
-      const r = await gt(GT_READS[k], age(k) >= LIST_URGENT_MS, reads[k] === undefined);
+      const r = await gt(GT_READS[k], age(k) >= LIST_URGENT_MS, reads[k] === undefined, reads[k]?.at ?? -Infinity);
       if (r === null) break;
       reads[k] = r;
     }
