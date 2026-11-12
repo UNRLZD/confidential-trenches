@@ -46,9 +46,7 @@ test("end state 1: Total and Positions count what the open buy's wallet holds, a
   assert.equal(t.total, 320n);
   // the value line ends at the total
   const d = data(s);
-  // (the line's points are the exact sums, cut to cents: $3.1999 against the rows' rounded $3.20, a cent apart at most)
-  assert.equal(d.series.at(-1)?.[1], "3.19");
-  assert.ok(Math.abs(Math.round(Number(d.series.at(-1)?.[1]) * 100) - Number(t.total)) <= 1);
+  assert.equal(d.series.at(-1)?.[1], "3.20");
 });
 
 test("end state 1: no asset_held (an earlier page) counts nothing for it; no price leaves it out, never made up", () => {

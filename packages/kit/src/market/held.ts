@@ -136,11 +136,18 @@ function centsOf(s: string): bigint | null {
   const d = dec(s);
   return d === null ? null : (d.n * 100n) / 10n ** BigInt(d.scale);
 }
-/** amount x price in USD cents, rounded down. */
-function mulCents(amount: string, usd: string): bigint | null {
+/** A non-negative ratio n / d in cents to the nearest, half up. */
+const near = (n: bigint, d: bigint): bigint => (2n * n + d) / (2n * d);
+/** USD cents of a decimal string to the nearest, half up: a position's cost as Portfolio's row draws it. */
+function centsNear(s: string): bigint | null {
+  const d = dec(s);
+  return d === null ? null : near(d.n * 100n, 10n ** BigInt(d.scale));
+}
+/** amount x price in USD cents to the nearest, half up: a position's value as Portfolio's row draws it. */
+function mulCentsNear(amount: string, usd: string): bigint | null {
   const a = dec(amount);
   const p = dec(usd);
-  return a === null || p === null ? null : (a.n * p.n * 100n) / 10n ** BigInt(a.scale + p.scale);
+  return a === null || p === null ? null : near(a.n * p.n * 100n, 10n ** BigInt(a.scale + p.scale));
 }
 const usd = (c: bigint): string => `${c / 100n}.${(c % 100n).toString().padStart(2, "0")}`;
 
@@ -159,8 +166,9 @@ export interface HeldValueInput {
 }
 
 /**
- * The value line, oldest first, as [unix ms, USD decimal string] with cents rounded down: at each hourly bar any held
- * token has up to `now`, and at `now`, the money not in a position plus each position's amount at that time's close.
+ * The value line, oldest first, as [unix ms, USD decimal string]: at each hourly bar any held token has up to `now`, and
+ * at `now`, the money not in a position plus each position's amount at that time's close, each position to the nearest
+ * cent as Portfolio's rows draw it (its totals are their sums).
  * A position counts at its cost before its first filled buy (the money was cash then), at its cost throughout when no
  * price is known (as Portfolio's totals count it), and at its present price when it has no bar at or before that time.
  * The last point uses each token's present price, so it equals Portfolio's total. What it does not know: amounts sold
@@ -182,7 +190,7 @@ export function heldValueSeries(input: HeldValueInput): [number, string][] {
     let c = baseC;
     for (const p of input.positions) {
       const k = heldKey(p.chain, p.token);
-      const cost = centsOf(p.cost) ?? 0n;
+      const cost = centsNear(p.cost) ?? 0n;
       const now = price.get(k) ?? null;
       if (now === null || (!last && t < (opened.get(k) ?? -Infinity))) {
         c += cost;
@@ -190,7 +198,7 @@ export function heldValueSeries(input: HeldValueInput): [number, string][] {
       }
       let close: string = now;
       if (!last) for (const [bt, bc] of input.history.get(k) ?? []) if (bt <= t) close = bc;
-      c += mulCents(p.amount, close) ?? cost;
+      c += mulCentsNear(p.amount, close) ?? cost;
     }
     return c;
   };
