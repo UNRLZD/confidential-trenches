@@ -676,7 +676,9 @@ export const SOLANA_POOL_BUY_PIECES_MAX = 4;
  *  SOLANA_POOL_JITO_TIP (its tag 3 is the bundle, and its tip is what the auction ranks); several pieces
  *  SOLANA_JITO_TIP_MIN, the least a mainnet tag 3 carries, since the helper's own last transaction tips the auction for
  *  the bundle out of the pieces' relay fees (apps/helper src/pool/solana.ts piecesTipCap). The buy (packages/signpage
- *  src/pool-buy.ts), its Fee (pool.buy.dry's cost) and the tap's Max all price a set of `pieces` at this tip. */
+ *  src/pool-buy.ts) and its Fee (pool.buy.dry's cost) price a set of `pieces` at this tip. The tap's Max does not: it
+ *  prices the tip at the largest of the proofs' tip caps (packages/wallet src/pool/balances.ts solanaTapSpendOf,
+ *  SOL_TIP_CAP 0.001 SOL), the most a release lets the tap tip, so a Max tap fills at any tip it may pay. */
 export function solanaPoolBuyTip(cluster: "mainnet" | "devnet", pieces: number): bigint {
   if (!Number.isSafeInteger(pieces) || pieces < 1 || pieces > SOLANA_POOL_BUY_PIECES_MAX) throw new Error(`pieces: 1 to ${SOLANA_POOL_BUY_PIECES_MAX}`);
   if (cluster === "devnet") return 0n;
