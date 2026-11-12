@@ -341,6 +341,8 @@ test("confirm first: the relayer's submitted answer and one RPC's pages record n
   assert.equal(out.kind, "landed");
   if (out.kind !== "landed") return;
   assert.equal(out.own, true);
+  // the relayer's submitted answer named its tx: kept with the landing, a record only (the pages are the proof)
+  assert.equal(out.tx, (A.withdraw.submitted.body as { tx_hash: string }).tx_hash);
   const change = await changeOf(v);
   assert.deepEqual(change, out.change);
   const leaf = (await v.ns.get(req.noteId))!.leaf!;
@@ -408,6 +410,8 @@ test("another device's spend of the note: its change (this seed's note j of labe
   assert.equal(out.kind, "landed");
   if (out.kind !== "landed") return;
   assert.equal(out.own, false);
+  // no answer of this call was submitted: no tx
+  assert.equal(out.tx, null);
   assert.deepEqual(out.change.leaf, { value, label: note.leaf!.label, commitment, leafIndex: 8n });
   assert.equal((await v.ns.get(req.noteId))!.state, "SPENT");
 });

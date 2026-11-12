@@ -114,6 +114,13 @@ export type WithdrawRequestArgs = {
    * A_{l,j}, the arming path's recipient.
    */
   to?: string;
+  /**
+   * The note to spend, when the caller picked it first: the NEAR buy derives W_{near,l,j} from the note's (l, j) and
+   * records W before the payout is asked (card near-private-trading). Refused unless it is a note the pick's own rule
+   * takes (UNSPENT, of this scope, covering the amount and its fee): a note RESERVED or SPENT by an earlier attempt is
+   * never paid again, and no other note is picked in its place.
+   */
+  note?: string;
   /** The withdrawal's deadline, in block time, ms (withdrawDeadlineMs). */
   deadlineMs: number;
   /** The newest final block's header.timestamp_nanosec, a decimal string: the lower of two RPCs'. */
@@ -179,7 +186,7 @@ export async function withdrawRequest(a: WithdrawRequestArgs): Promise<WithdrawR
     const withdrawn = amount + relayFee;
     const scope = vaultScopeOf(keccak_256, vaultId, token);
 
-    const note = pick(await notes.list(), scope, withdrawn);
+    const note = pick(await notes.list(), scope, withdrawn, a.note);
     const leaf = note.leaf!;
     const j = note.ref.kind === "change" ? changeIndex({ kind: "change", j: note.ref.j }) : changeIndex({ kind: "deposit" });
     const change: NoteRefChange = { kind: "change", l: leaf.label, j };
@@ -246,9 +253,11 @@ export async function withdrawRequest(a: WithdrawRequestArgs): Promise<WithdrawR
   }
 }
 
-// §2.5 step 1 (l.720): the smallest UNSPENT note of this scope that covers the amount plus its fee.
-function pick(all: NoteRecord[], scope: bigint, withdrawn: bigint): NoteRecord {
-  const mine = all.filter((n) => n.scope === scope && n.leaf !== undefined);
+// §2.5 step 1 (l.720): the smallest UNSPENT note of this scope that covers the amount plus its fee; with `id`, that
+// note alone, under the same rule.
+function pick(all: NoteRecord[], scope: bigint, withdrawn: bigint, id?: string): NoteRecord {
+  if (id !== undefined && (typeof id !== "string" || !all.some((n) => n.id === id))) throw new Error("note: the named note is not in the store");
+  const mine = all.filter((n) => n.scope === scope && n.leaf !== undefined && (id === undefined || n.id === id));
   const open = mine.filter((n) => n.state === "UNSPENT");
   const fits = open.filter((n) => n.leaf!.value >= withdrawn);
   if (fits.length === 0) {

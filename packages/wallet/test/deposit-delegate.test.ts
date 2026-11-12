@@ -36,10 +36,14 @@ import {
   type DepositDelegateArgs,
   DepositDelegateRefused,
   encodeDelegateAction,
+  moverAccount,
+  moverDepositDelegate,
   NEP366_PREFIX,
   RELEASE_BIND_URL,
   sendDepositDelegate,
 } from "../src/deposit/delegate.ts";
+import { freshWallet } from "../src/derive/keys.ts";
+import { nearSwapWallet } from "../src/near/swap-delegate.ts";
 import { depositId } from "../src/derive/keys.ts";
 import { BUSY_WAIT_FIRST_MS, BUSY_WAIT_MAX_MS } from "../src/busy.ts";
 import { type ReadKind, replayDepositReads } from "./replay-deposit-reads.ts";
@@ -127,6 +131,67 @@ test("the vector: the device's bytes equal the shared vector, and the helper's d
   for (const p of sent as Record<string, unknown>[]) assert.ok(p.account_id === U || p.account_id === NET.usdc, JSON.stringify(p));
 });
 
+test("a NEAR sell's return (card near-private-trading): W_{near,l,j} signs the same deposit call from its own key, read as U is, its depositor W, and the helper's checks 1-7 pass it", async () => {
+  const l = 7n;
+  const j = 3;
+  const w = nearSwapWallet(SEED, l, j);
+  assert.equal(moverAccount(SEED, { kind: "W", l, j }), w.id);
+  assert.equal(moverAccount(SEED, { kind: "U", s: S, i: I }), U);
+  const pub = `ed25519:${base58.encode(Buffer.from(w.id, "hex"))}`;
+  const sent: unknown[] = [];
+  const out = await moverDepositDelegate(SEED, { kind: "W", l, j }, ARGS, replayDepositReads("testnet", pub, { sent }));
+  const d = decodeSignedDelegate(bytesOf(out.signed_delegate));
+  assert.equal(d.sender_id, w.id);
+  assert.equal(out.public_key, pub);
+  assert.equal(d.receiver_id, NET.usdc);
+  const a = d.actions[0]!;
+  assert.ok(a.kind === "FunctionCall");
+  if (a.kind !== "FunctionCall") return;
+  const args = JSON.parse(Buffer.from(a.args).toString("utf8"));
+  assert.deepEqual(Object.keys(args), ["receiver_id", "amount", "msg"]);
+  assert.equal(args.receiver_id, NET.vault);
+  assert.equal(args.amount, AMOUNT.toString());
+  assert.deepEqual(JSON.parse(args.msg), { precommitment: P.toString(), depositor: w.id });
+  assert.equal(d.nonce, NONCE + 1n);
+  // the signature is W's key's (freshWallet near l j), never U's
+  const fw = freshWallet(SEED, "near", l, j);
+  assert.deepEqual(d.public_key, fw.publicKey);
+  fw.secretKey.fill(0);
+  // the helper's checks 1-7 pass W's call as they pass U's
+  const v = await checkBindDeposit({ signed_delegate: out.signed_delegate }, CFG, reads({ accessKey: async (acc, pk) => (acc === w.id && pk === pub ? { kind: "key", permission: "FullAccess", nonce: NONCE } : { kind: "no_key" }), ftBalance: async (acc) => (acc === w.id ? BALANCE : 0n) }), LEDGER);
+  assert.ok(v.ok, why(v));
+  // the reads name W or the token only
+  for (const p of sent as Record<string, unknown>[]) assert.ok(p.account_id === w.id || p.account_id === NET.usdc, JSON.stringify(p));
+  // a read of another key (U's key list for W's call) is refused before anything is signed
+  await assert.rejects(moverDepositDelegate(SEED, { kind: "W", l, j }, ARGS, replayDepositReads("testnet", PUB)), (e: unknown) => e instanceof DepositAccountRefused && e.code === "keys");
+  // a mover that is neither is refused
+  await assert.rejects(moverDepositDelegate(SEED, { kind: "X" } as never, ARGS, replayDepositReads("testnet", pub)), DepositDelegateRefused);
+});
+
+test("W's key is zeroed after each use: once by moverAccount, once more by the signer after it signs (each derivation zeroed)", async () => {
+  const l = 7n;
+  const j = 3;
+  const fw = freshWallet(SEED, "near", l, j);
+  const secret = Uint8Array.from(fw.secretKey);
+  fw.secretKey.fill(0);
+  const pub = `ed25519:${base58.encode(Buffer.from(nearSwapWallet(SEED, l, j).id, "hex"))}`;
+  const fill = Uint8Array.prototype.fill;
+  let zeroed = 0;
+  Uint8Array.prototype.fill = function (this: Uint8Array, ...a: Parameters<Uint8Array["fill"]>) {
+    if (a[0] === 0 && this.length === secret.length && this.every((b, k) => b === secret[k])) zeroed++;
+    return fill.apply(this, a);
+  } as Uint8Array["fill"];
+  try {
+    moverAccount(SEED, { kind: "W", l, j });
+    assert.equal(zeroed, 1, "moverAccount zeroes W's key");
+    await moverDepositDelegate(SEED, { kind: "W", l, j }, ARGS, replayDepositReads("testnet", pub));
+    assert.equal(zeroed, 3, "moverDepositDelegate zeroes both keys it derives (the account's and the signer's)");
+  } finally {
+    Uint8Array.prototype.fill = fill;
+  }
+  secret.fill(0);
+});
+
 test("the vault is the release's: each network's from its deployment file, none on mainnet until it has one, and no argument names one", async () => {
   const deployment = (name: string) => new URL(`../../../contracts/vault/deployments/${name}.json`, import.meta.url);
   const dep = JSON.parse(readFileSync(deployment("testnet-v1"), "utf8"));
@@ -170,6 +235,8 @@ test("no hand-made read is signed: the module exports no signer but depositDeleg
     "SEND_TIMEOUT_MS",
     "depositDelegate",
     "encodeDelegateAction",
+    "moverAccount",
+    "moverDepositDelegate",
     "sendDepositDelegate",
   ]);
   // The read and the call are on one network: mainnet's RPCs for a testnet call are refused before anything is signed.

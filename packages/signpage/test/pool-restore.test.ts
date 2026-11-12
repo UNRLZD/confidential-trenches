@@ -311,12 +311,15 @@ test("signed out mid-run: the run stops, its seed zeroed, nothing written after"
   assert.equal((await opOf(w.store, k!))?.stage, "reading");
 });
 
-test("pagePools: the mainnet build pins the Solana pool (card sol-pools-mainnet-pin), read on the page's Solana pair, then Base's and Robinhood's (card evm-pools-on-mainnet), each on its pool list", async () => {
+test("pagePools: the mainnet build pins the NEAR vault on its release pair (card signpage-restores-near-vault-notes), the Solana pool (card sol-pools-mainnet-pin), read on the page's Solana pair, then Base's and Robinhood's (card evm-pools-on-mainnet), each on its pool list", async () => {
   const { SOL_POOLS, solanaPoolOf } = await import("../../wallet/src/pool/solana.ts");
   const { EVM_POOLS, evmPoolScopeOf } = await import("../../wallet/src/pool/evm.ts");
   const { PAGE_SOL_CACHE, PAGE_SOL_MARK_BATCHES, pageEvmPoolRpcs, pageSolanaLister, pageSolanaSettleRpcs } = await import("../src/pool-testnet.ts");
+  const { vaultScope } = await import("../src/withdraw/checks.ts");
   const pin = SOL_POOLS.mainnet!;
-  const [sol, ...evm] = pagePools();
+  const [vault, sol, ...evm] = pagePools();
+  assert.ok(vault?.chain === "near");
+  assert.deepEqual([vault.network, vault.scope, vault.rpcs?.().map((r) => r.name)], ["mainnet", vaultScope("mainnet"), [NEAR_NETWORKS.mainnet.fastnear[0], NEAR_NETWORKS.mainnet.drpc]]);
   assert.deepEqual(sol, { chain: "solana", program: pin.program, scope: solanaPoolOf(pin.program).scope, rpcs: pageSolanaSettleRpcs, lister: pageSolanaLister, cache: PAGE_SOL_CACHE, markBatches: PAGE_SOL_MARK_BATCHES });
   assert.deepEqual(evm.map((p) => [p.chain, (p as { pin?: unknown }).pin, (p as { scope?: unknown }).scope]), [
     ["evm", EVM_POOLS.base, evmPoolScopeOf(EVM_POOLS.base!.pool, 8453n)],
@@ -327,7 +330,7 @@ test("pagePools: the mainnet build pins the Solana pool (card sol-pools-mainnet-
     assert.deepEqual(rpcs?.().map((r) => r.url), pageEvmPoolRpcs(chain)!.map((r) => (r as { url?: string }).url), `${chain}: its pool list`);
   }
   // the restore reads on the same cache as every settle of the page (review P2-2 of a34c1626): one object, not a copy
-  assert.equal((pagePools()[0] as { cache?: unknown }).cache, PAGE_SOL_CACHE);
+  assert.equal((pagePools()[1] as { cache?: unknown }).cache, PAGE_SOL_CACHE);
 });
 
 // review M1: a page closed or reloaded mid-run leaves its record running; the next signed-in load reads it stalled, so

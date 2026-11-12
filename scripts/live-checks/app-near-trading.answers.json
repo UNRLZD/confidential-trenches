@@ -1,0 +1,168 @@
+{
+ "good": {
+  "note": "card app-near-trading's build (12 Nov, 2d702946) at APP_HOST's name in the stand-in shell, signed out, HELPER_HOST live: the top of NEAR's Trending (zec.omft.near) draws ready, its trade box on NEAR's path, the JS carries pool.buy and pool.sell with chain near",
+  "source": "harness: the build dist-near at APP_HOST's name in the stand-in shell, signed out, HELPER_HOST live",
+  "at": "2026-11-12T07:02:49.233Z",
+  "browser": "157.0.8103.51",
+  "lists": {
+   "status": 200,
+   "rows": 17
+  },
+  "top": "zec.omft.near",
+  "loads": [
+   {
+    "width": "desktop",
+    "framed": true,
+    "route": "token",
+    "state": "ready",
+    "shown": "zec.omft.near",
+    "chain": "near",
+    "symbol": "ZEC",
+    "box": {
+     "path": "near",
+     "cta": "Sign in to trade",
+     "presets": 4
+    },
+    "scripts": [
+     {
+      "url": "https://ct-app.unrealized.trade/assets/index-CdclhctV.js",
+      "status": 200,
+      "bytes": 0,
+      "marks": {
+       "buy": false,
+       "sell": false
+      }
+     },
+     {
+      "url": "https://ct-app.unrealized.trade/assets/index-CdclhctV.js",
+      "status": 200,
+      "bytes": 966209,
+      "marks": {
+       "buy": true,
+       "sell": true
+      }
+     }
+    ],
+    "shot": "desktop.png"
+   },
+   {
+    "width": "phone",
+    "framed": true,
+    "route": "token",
+    "state": "ready",
+    "shown": "zec.omft.near",
+    "chain": "near",
+    "symbol": "ZEC",
+    "box": {
+     "path": "near",
+     "cta": "Sign in to trade",
+     "presets": 4
+    },
+    "scripts": [
+     {
+      "url": "https://ct-app.unrealized.trade/assets/index-CdclhctV.js",
+      "status": 200,
+      "bytes": 0,
+      "marks": {
+       "buy": false,
+       "sell": false
+      }
+     },
+     {
+      "url": "https://ct-app.unrealized.trade/assets/index-CdclhctV.js",
+      "status": 200,
+      "bytes": 966209,
+      "marks": {
+       "buy": true,
+       "sell": true
+      }
+     }
+    ],
+    "shot": "phone.png"
+   }
+  ]
+ },
+ "bad": {
+  "note": "APP_HOST as deployed on 12 Nov 07:03Z (main d97e984e, before NEAR trading): the NEAR token page draws, but its trade box takes the vault's path and the JS carries no NEAR request",
+  "source": "live",
+  "at": "2026-11-12T07:03:47.316Z",
+  "browser": "157.0.8103.51",
+  "lists": {
+   "status": 200,
+   "rows": 17
+  },
+  "top": "zec.omft.near",
+  "loads": [
+   {
+    "width": "desktop",
+    "framed": true,
+    "route": "token",
+    "state": "ready",
+    "shown": "zec.omft.near",
+    "chain": "near",
+    "symbol": "ZEC",
+    "box": {
+     "path": "vault",
+     "cta": "Sign in to trade",
+     "presets": 4
+    },
+    "scripts": [
+     {
+      "url": "https://ct-app.unrealized.trade/assets/index-CuFaRUG9.js",
+      "status": 200,
+      "bytes": 0,
+      "marks": {
+       "buy": false,
+       "sell": false
+      }
+     },
+     {
+      "url": "https://ct-app.unrealized.trade/assets/index-CuFaRUG9.js",
+      "status": 200,
+      "bytes": 960261,
+      "marks": {
+       "buy": false,
+       "sell": false
+      }
+     }
+    ],
+    "shot": "desktop.png"
+   },
+   {
+    "width": "phone",
+    "framed": true,
+    "route": "token",
+    "state": "ready",
+    "shown": "zec.omft.near",
+    "chain": "near",
+    "symbol": "ZEC",
+    "box": {
+     "path": "vault",
+     "cta": "Sign in to trade",
+     "presets": 4
+    },
+    "scripts": [
+     {
+      "url": "https://ct-app.unrealized.trade/assets/index-CuFaRUG9.js",
+      "status": 200,
+      "bytes": 0,
+      "marks": {
+       "buy": false,
+       "sell": false
+      }
+     },
+     {
+      "url": "https://ct-app.unrealized.trade/assets/index-CuFaRUG9.js",
+      "status": 200,
+      "bytes": 960261,
+      "marks": {
+       "buy": false,
+       "sell": false
+      }
+     }
+    ],
+    "shot": "phone.png"
+   }
+  ]
+ }
+}

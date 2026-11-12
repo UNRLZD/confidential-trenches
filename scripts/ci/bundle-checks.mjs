@@ -72,6 +72,7 @@ export const IN_PROCESS = [
   { key: "sol-settle-failed-is-not-unspent", host: "sign", load: () => import("../live-checks/sol-settle-failed-is-not-unspent.mjs"), run: async (m, f) => m.judge(await m.read(f), { ledger: false }) },
   { key: "signpage-throttled-read-is-not-asked-again-at-once", host: "sign", load: () => import("../live-checks/signpage-throttled-read-is-not-asked-again-at-once.mjs"), run: async (m, f) => m.judge(await m.read(f), { ledger: false }) },
   viaRead("solana-teardown-cashback", () => import("../live-checks/solana-teardown-cashback.mjs")),
+  { key: "near-private-trading", host: "sign", load: () => import("../live-checks/near-private-trading.mjs"), run: async (m, f) => m.judge(await m.read(f), { ledger: false }) },
   viaRead("sol-w-sweep", () => import("../live-checks/sol-w-sweep.mjs")),
   viaRead("intents-u-registered-first", () => import("../live-checks/intents-u-registered-first.mjs")),
   viaRead("sol-rent-back-dust-burn", () => import("../live-checks/sol-rent-back-dust-burn.mjs")),
@@ -91,6 +92,7 @@ export const IN_PROCESS = [
   // the bundle part only (the tree sync's wait, the -32004 read again, the withdraw's cause line): mainnet's cadence on
   // two providers is past the build
   { key: "pool-tree-read-waits-for-its-second", host: "sign", load: () => import("../live-checks/pool-tree-read-waits-for-its-second.mjs"), run: async (m, f) => m.judgeBundle(await m.readBundle(f)) },
+  viaRead("fresh-money-spendable-at-once", () => import("../live-checks/fresh-money-spendable-at-once.mjs")),
   // the bundle part only (step 5's U_X read and carry): the providers' answers are past the build
   { key: "wallet-restore-reads-ux", host: "sign", load: () => import("../live-checks/wallet-restore-reads-ux.mjs"), run: async (m, f) => m.judgeBundle(await m.readBundle(f)) },
   // the sign part only, against the pin of the build it serves (live: this checkout's): the index pins its /app.js and
@@ -164,6 +166,7 @@ export const OUT = {
   "app-in-shell": "a browser (its --harness run is in test-browser)",
   "app-discover-live": "a browser and the helper",
   "app-no-test-token": "a browser and the helper",
+  "app-near-trading": "a browser and the helper (its test holds its bundle marks to the build's own writing)",
   "app-launchpad-badges": "a browser and the helper",
   "app-token-lower-panel": "the helper's holders answer",
   "app-token-rail": "the helper's lists answer",
@@ -206,6 +209,7 @@ export const OUT = {
   "app-deposit-mount": "a browser (its --harness run is in test-browser)",
   "deposit-to-pool": "a browser (its --harness run is in test-browser)",
   "terminal-harness-sign-spa": "Pages' answer to a path with no file (the index), which no build file holds",
+  "near-view-rhea": "mainnet NEAR RPC reads of the Rhea pool and get_return on the two providers, never the build",
 };
 
 /** A fetch that answers from the build folders: SIGN_HOST's / and index.html, every other path public/<path>; APP_HOST's dist/<path>. */

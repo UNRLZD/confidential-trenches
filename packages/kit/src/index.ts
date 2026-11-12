@@ -60,6 +60,12 @@ export { EVM_SELL_SENT_MAX, type EvmReleasePending, type EvmSellReleases, type E
 // one reading of a signed sale's target and data as a route the builder makes, which the helper sends only on
 export { EVM_7702_AUTH_GAS, EVM_POOL_SELL_GAS, evmPoolSellTip, evmSellRouteOf, type EvmSignedSellCall } from "./trade/evm/sell-unpinned.ts";
 export { nearPairNetwork, nearPairRule, type NearNetwork } from "./near/networks.ts";
+// a quote on Rhea classic from the pools' own views on two NEAR providers at one block, with the token's own fee
+export { NEAR_RHEA, rheaQuote, RheaQuoteRefused, type RheaHop, type RheaQuote, type RheaQuoteArgs, type RheaRefusalCode } from "./near/rhea.ts";
+export type { NearTokenFee } from "./near/token-fee.ts";
+// the calls a fresh NEAR wallet signs for a Rhea classic trade and their checks, which the helper's trade carry runs
+// again on what it is asked to carry (card relayer-near-trade)
+export { NEAR_SWAP_GAS, NEAR_SWAP_STORAGE_MAX, nearSwapCalls, nearSwapCheck, nearSwapFloor, nearSwapMsg, NearSwapRefused, type NearSwapArgs, type NearSwapCall, type NearSwapRefusalCode, type NearSwapRequest } from "./trade/near/swap.ts";
 export * from "./price/pool-usd.ts";
 // the held tokens' market read and the value line (card market-token-reads)
 export * from "./market/held.ts";

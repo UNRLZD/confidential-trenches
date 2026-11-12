@@ -8,7 +8,7 @@ import { base58 } from "@scure/base";
 import { CHAINS, type Chain } from "../orders/record.ts";
 import {
   DEPOSIT_HELD_STAGES, DEPOSIT_HOLDS, DEPOSIT_REFUNDED_STAGES, DEPOSIT_STAGES, POOL_ASSET_DECIMALS, POOL_ASSETS, POOL_CHAINS,
-  POOL_DEPOSIT_REFUNDED_STAGES, POOL_DEPOSIT_STAGES, SIGNPAGE_KINDS,
+  POOL_DEPOSIT_REFUNDED_STAGES, POOL_DEPOSIT_STAGES, SIGNPAGE_KINDS, TRADE_CHAINS,
 } from "./messages.ts";
 import type { PoolAsset, SignpageKind } from "./messages.ts";
 import { deepFreeze } from "../freeze.ts";
@@ -134,6 +134,7 @@ const by = (key: string, cases: Record<string, SignpageSchema>): SignpageSchema 
 // ------------------------------------------------------------------------------------------------ messages.ts's types
 const chain = oneOf(CHAINS);
 const poolChain = oneOf(POOL_CHAINS);
+const tradeChain = oneOf(TRADE_CHAINS);
 const way = oneOf(["passkey", "words", "wallet"]);
 const DEPOSIT = DEPOSIT_STAGES;
 const WITHDRAW = ["proving", "submitted", "in_transit", "sent", "refunded", "stopped"] as const;
@@ -369,6 +370,7 @@ export const SIGNPAGE_RESULT_SCHEMAS = {
   "deposit.dry": depositDry,
   "pool.address": poolAddress,
   "pool.sell.dry": poolSellDry,
+  "pool.buy.dry": obj({ tap_max: dec }),
 } as const satisfies Record<SignpageKind, SignpageSchema>;
 deepFreeze(SIGNPAGE_RESULT_SCHEMAS);
 
@@ -376,8 +378,13 @@ const exit = obj({ trigger_price: dec, share_bps: bps(1) });
 
 /** pool.sell's params: a typed amount in units, or a share of the whole holding in basis points; exactly one of them
  *  (card pool-sell-share-across-wallets: a request with neither or both is refused, so the page never guesses which). */
-const poolSellBase = obj({ chain: poolChain, token: str, slippage_bps: bps(0) }, { amount: dec, share_bps: bps(1) });
+// Each written out as its own arrow (no factory): SIGN_HOST's bundle check of card pool-sell-share-across-wallets reads
+// pool.sell's schema in the built page as `name=e=>base(e)&&Object.hasOwn(e,"amount")!==Object.hasOwn(e,"share_bps")`.
+const poolSellBase = obj({ chain: tradeChain, token: str, slippage_bps: bps(0) }, { amount: dec, share_bps: bps(1) });
 const poolSell: SignpageSchema = (v) => poolSellBase(v) && Object.hasOwn(v as object, "amount") !== Object.hasOwn(v as object, "share_bps");
+/** pool.sell.dry previews a pool's sale only: a pool chain, never NEAR (no pool there to quote from). */
+const poolSellDryBase = obj({ chain: poolChain, token: str, slippage_bps: bps(0) }, { amount: dec, share_bps: bps(1) });
+const poolSellDryParams: SignpageSchema = (v) => poolSellDryBase(v) && Object.hasOwn(v as object, "amount") !== Object.hasOwn(v as object, "share_bps");
 
 /** The params of each kind, as SignpageParams names them: exactly its allowed fields (W §2.8 rows; APU-02). */
 export const SIGNPAGE_PARAM_SCHEMAS = {
@@ -399,13 +406,14 @@ export const SIGNPAGE_PARAM_SCHEMAS = {
   nav: obj({ path: navPath }),
   reload: obj({}),
   "pool.deposit": obj({ chain: poolChain, amount: dec }),
-  "pool.buy": obj({ chain: poolChain, token: str, amount: dec, slippage_bps: bps(0) }),
+  "pool.buy": obj({ chain: tradeChain, token: str, amount: dec, slippage_bps: bps(0) }),
   "pool.sell": poolSell,
   "pool.withdraw": obj({ return_key: returnKey, chain: poolChain }),
   "deposit.assets": obj({}),
   "deposit.dry": obj({ origin_asset: str, amount: dec }),
   "pool.address": poolAddressParams,
-  "pool.sell.dry": poolSell,
+  "pool.sell.dry": poolSellDryParams,
+  "pool.buy.dry": obj({ chain: poolChain, token: str }),
 } as const satisfies Record<SignpageKind, SignpageSchema>;
 deepFreeze(SIGNPAGE_PARAM_SCHEMAS);
 
@@ -439,11 +447,16 @@ const solSignature: SignpageSchema = (v) => {
     return false;
   }
 };
+/** A NEAR implicit account (a fresh NEAR wallet W): 64 lowercase hex. */
+const nearImplicit: SignpageSchema = (v) => typeof v === "string" && /^[0-9a-f]{64}$/.test(v);
+/** A Rhea pool's index on its exchange: a u32 in decimal, no leading zero. */
+const rheaPool: SignpageSchema = (v) => typeof v === "string" && /^(0|[1-9]\d{0,9})$/.test(v) && Number(v) <= 0xffffffff;
 /** A route event (messages.ts BuyRoute): a progress event with no stage and exactly one of its four shapes. W and the
- *  pool are addresses; the venue is the page's name for it, a free string; tx a signature. */
+ *  pool are addresses (on NEAR, W's implicit account and the Rhea pool's index); the venue is the page's name for it,
+ *  a free string; tx a Solana signature. */
 const routeHead = { v: lit(1), type: lit("progress"), id: str };
-const routeWallet = obj({ ...routeHead, wallet: solAddress });
-const routeVenue = obj({ ...routeHead, venue: str, pool: solAddress });
+const routeWallet = obj({ ...routeHead, wallet: (v) => solAddress(v) || nearImplicit(v) });
+const routeVenue = obj({ ...routeHead, venue: str, pool: (v) => solAddress(v) || rheaPool(v) });
 const routeOut = obj({ ...routeHead, out: routeOutAmount });
 const routeTx = obj({ ...routeHead, tx: solSignature });
 export const signpageProgressRouteSchema: SignpageSchema = (v) => routeWallet(v) || routeVenue(v) || routeOut(v) || routeTx(v);
@@ -452,6 +465,6 @@ export const signpageProgressRouteSchema: SignpageSchema = (v) => routeWallet(v)
 export const signpageAnswerOkSchema = obj({ v: lit(1), id: str, ok: lit(true), result: (v) => isPlainObject(v) });
 export const signpageAnswerErrorSchema = obj({ v: lit(1), id: str, ok: lit(false), error: obj({ code: errorCode }) });
 
-/** True when `kind` is one of the twenty-five. */
+/** True when `kind` is one of the twenty-six. */
 export const signpageIsKind = (kind: unknown): kind is SignpageKind =>
   typeof kind === "string" && (SIGNPAGE_KINDS as readonly string[]).includes(kind);

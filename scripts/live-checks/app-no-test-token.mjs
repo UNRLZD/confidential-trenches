@@ -7,7 +7,7 @@
 //     GlowFixtureCurve ids, the fixture source tag);
 //   - the page: main[data-route="token"] draws the page ready, and its data-token is the top of the Trending column
 //     (Discover's own order, columnRows in apps/terminal/src/screens/discover/model.ts) of every chain's lists answers
-//     the page itself read at HELPER_HOST (GET /v1/market/lists?chain=<chain> for Solana, Base and Robinhood, merged as
+//     the page itself read at HELPER_HOST (GET /v1/market/lists?chain=<chain> for Solana, Base, Robinhood and NEAR, merged as
 //     the app merges them, those that answered 200: card app-chains-evm-rail, / on the chain filter's default, All);
 //     the page read each chain's lists;
 //   - the token read: the page read GET /v1/market/token on that top's own chain for that same token, 200, and its row
@@ -29,8 +29,8 @@ import { named } from "./record-names.mjs";
 const KEY = "app-no-test-token";
 export const APP_HOST = "https://ct-app.unrealized.trade";
 export const HELPER_HOST = "https://ct-api.unrealized.trade";
-/** The chains whose lists / reads (apps/terminal/src/screens/discover/data.ts LIST_CHAINS), each named. */
-export const CHAINS = ["solana", "base", "robinhood"];
+/** The chains whose lists / reads (apps/terminal/src/screens/discover/data.ts LIST_CHAINS), each named; NEAR since card app-near-trading. */
+export const CHAINS = ["solana", "base", "robinhood", "near"];
 export const LISTS_URL = (chain) => `${HELPER_HOST}/v1/market/lists?chain=${chain}`;
 export const TOKEN_URL = (chain, mint) => `${HELPER_HOST}/v1/market/token?chain=${chain}&token=${encodeURIComponent(mint)}`;
 export const FIXTURE = /fixture/i;

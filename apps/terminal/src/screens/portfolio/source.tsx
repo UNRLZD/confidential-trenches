@@ -98,6 +98,14 @@ export function useOffPool(snapshot: SignpageClientSnapshot): bigint | null {
   return portfolio(snapshot, fixture?.data ?? NO_DATA, fixture?.now() ?? Date.now()).totals?.offPool ?? null;
 }
 
+/** One chain's part of Cash (Totals.parts, the parts Cash's hover draws): on NEAR the vault's USDC, what a NEAR buy
+ *  spends (card app-near-trading). Null before the first state, or while the part has no dollar figure. */
+export function useCashPart(snapshot: SignpageClientSnapshot, chain: Chain): bigint | null {
+  const fixture = useContext(Fixture);
+  const t = portfolio(snapshot, fixture?.data ?? NO_DATA, fixture?.now() ?? Date.now()).totals;
+  return t ? (t.parts.find((p) => p.chain === chain)?.cents ?? 0n) : null;
+}
+
 /** The open position on `chain` of `token` in `snapshot` (heldOf), from the same rows Portfolio draws, so the trade box's
  *  Sell side sells the number Portfolio shows; null with no snapshot (signed out) or no such position. */
 export function useHeld(snapshot: SignpageClientSnapshot | null, chain: Chain, token: string): Row | null {
