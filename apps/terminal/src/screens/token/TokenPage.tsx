@@ -520,7 +520,7 @@ function Ticket({ r, t, toast }: { r: Ready; t: Trade; toast?: boolean }) {
   return (
     <>
       <TradeView t={t} symbol={row.symbol} toast={toast} footer={<SafetyGrid row={row} risk={risk} nowMs={r.nowMs} filling={r.data.filling === true} />} />
-      <About row={row} />
+      <About row={row} links={r.data.links} />
     </>
   );
 }
@@ -563,13 +563,13 @@ function Desktop({ v, r, c, t, tape }: { v: TokenView | null; r: Ready | null; c
           </div>
           <div className="tkp-strip">
             <div className="tkp-mc">
-              <span className="tkp-lbl"><W id="mc" /></span>
+              <span className="tkp-lbl"><W id="mcLong" /></span>
               {v?.mc != null ? <span className="tkp-mcval">{v.mc}</span> : <SkLine cls="tkp-mcval" w={120} />}
             </div>
             <Tile k="price" label="price" value={s(v?.priceTile)} />
-            <Tile k="change" label="change" value={s(v?.chgTile)} dir={v?.chg?.dir} />
+            <Tile k="change" label="change" value={arrowed(s(v?.chgTile))} dir={v?.chg?.dir} />
             <Tile k="tax" label="tax" value={tax?.text ?? null} tone={tax?.tone} />
-            <Tile k="vol" label="vol" value={s(v?.vol)} />
+            <Tile k="vol" label="vol24" value={s(v?.vol)} />
             <Tile k="liq" label={v?.curve.on ? "inCurve" : "liq"} value={s(v?.liq)} />
             <Tile k="holders" label="holders" value={s(v?.holders)} />
           </div>
@@ -583,6 +583,9 @@ function Desktop({ v, r, c, t, tape }: { v: TokenView | null; r: Ready | null; c
     </div>
   );
 }
+
+/** The 24h change with UNRLZD's arrow (lib/format fmtArrowPct there): +11.27% is ▲ 11.27%, −4.10% is ▼ 4.10%. */
+const arrowed = (t: string | null): string | null => (t === null ? null : t.replace(/^\+/, "▲ ").replace(/^\u2212/, "▼ "));
 
 /** The sheet's head row (R5 token-390.html tradeSheet ms-head): the token's avatar, the symbol over the price. */
 function SheetHead({ v }: { v: TokenView }) {

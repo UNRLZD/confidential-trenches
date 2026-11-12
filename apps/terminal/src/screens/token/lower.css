@@ -101,3 +101,19 @@
   .tkl-list { overflow: visible; }
   .tkl-about { margin: 8px 16px 0; }
 }
+
+/* About's parity pass (UNRLZD ticket.module.css .aboutHead / .launched / .flow / .links; owner 12 Nov) */
+.tkl-ahead { display: flex; flex-direction: column; gap: 4px; }
+.tkl-ahead > .tkl-origin { font-size: 12px; font-weight: 400; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tkl-curve, .tkl-liq { display: flex; flex-direction: column; gap: 8px; font-size: 13px; }
+.tkl-curve > div:first-child, .tkl-liq > div { display: flex; justify-content: space-between; align-items: baseline; }
+.tkl-curve > div:first-child > span:first-child, .tkl-liq > div > span:first-child { color: var(--text-2); }
+.tkl-curvebar { height: 6px; border-radius: 3px; background: var(--bg-raised); overflow: hidden; }
+.tkl-curvebar > div { height: 100%; border-radius: 3px; background: linear-gradient(90deg, #808080, var(--text-1)); }
+.tkl-flow > div:first-child { align-items: baseline; }
+.tkl-flowwin { font: 11px var(--font-num); color: var(--text-3); }
+.tkl-links { display: flex; flex-wrap: wrap; gap: 6px; }
+.tkl-link { height: 28px; padding: 0 10px; display: inline-flex; align-items: center; border-radius: 8px; background: var(--bg-raised); color: var(--text-2); font: 500 12px var(--font-ui); transition: color 150ms ease; }
+.tkl-link:hover { color: var(--text-1); }
+/* on the phone each link is a 44 px tap target (BAR-10), as the page's other phone buttons */
+@media (max-width: 767.98px) { .tkl-link { height: 44px; padding: 0 14px; border-radius: 12px; font-size: 13px; } }

@@ -5,7 +5,7 @@
 // harnessRoute "tap"), HELPER_HOST answered from the recorded live answers (the recorded token read carries the `risk`
 // part the grid draws). At 1440 x 900 (dpr 1) and 390 x 844 (dpr 2, touch), each under a dark and a light colour scheme
 // (the terminal is dark only, as designed: the light run proves it does not turn light).
-//   1440: the right column holds the box (to the right of the chart, inside the window): `Bal —`, the exit plan block off
+//   1440: the right column holds the box (to the right of the chart, inside the window): `— available` (UNRLZD parity, owner 12 Nov; was `Bal —`), the exit plan block off
 //         with its line, the main button `Sign in to trade` (enabled), its state S8.1; the safety grid under the Route & fees
 //         line, twelve cells, each label and value the token read's (the recorded answer's numbers, below); the button
 //         opens the sign-in sheet (S2.1) and Escape closes it; a preset opens it too; no dialog, no confirm.
@@ -51,9 +51,9 @@ if (!KNOWN) throw new Error("trade-box-mount: the recorded token read is no long
 const SYMBOL = ROW.symbol;
 // id, label, value (null: an icon alone), cross (the cell draws the cross), verdict colour
 const CELLS = [
-  ["top10", "Top 10 %", "23%", false, "good"],
-  ["dev", "Dev %", "—", false, "unknown"],
-  ["snipers", "Snipers %", "—", false, "unknown"],
+  ["top10", "Top 10", "23%", false, "good"],
+  ["dev", "Dev", "—", false, "unknown"],
+  ["snipers", "Snipers", "—", false, "unknown"],
   ["holders", "Holders", "71.3K", false, "plain"],
   ["liq", "Liq", "$561.9K", false, "plain"],
   ["age", "Age", /^\d+d$/, false, "plain"],
@@ -101,8 +101,8 @@ async function judgeBox(tag, f, scope) {
   check(await box.isVisible(), `${tag}: the trade box is not visible`);
   const text = async (q) => ((await box.locator(q).first().textContent().catch(() => null)) ?? "").trim();
   check((await box.getAttribute("data-state")) === "S8.1", `${tag}: state ${await box.getAttribute("data-state")}, not S8.1`);
-  check((await text('[data-testid="trade-balance"]')) === "Bal —", `${tag}: the balance reads ${JSON.stringify(await text('[data-testid="trade-balance"]'))}, not "Bal —"`);
-  check(!/available/i.test(await box.innerText()), `${tag}: the box says "available"`);
+  check((await text('[data-testid="trade-balance"]')) === "— available", `${tag}: the balance reads ${JSON.stringify(await text('[data-testid="trade-balance"]'))}, not "— available" (UNRLZD parity, owner 12 Nov)`);
+  check(!/\bBal\b/.test(await box.innerText()), `${tag}: the box still says "Bal"`);
   const exit = box.locator('[data-testid="trade-exit"]');
   const exitText = (await exit.innerText().catch(() => "")).replace(/\s+/g, " ").trim();
   // orders are out of the plan for now (card app-orders-coming-soon): Coming soon where the switch was, no control

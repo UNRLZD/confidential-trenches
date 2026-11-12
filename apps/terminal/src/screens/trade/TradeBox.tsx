@@ -443,7 +443,7 @@ export function TradeView({ t, symbol, footer, toast = true }: { t: Trade; symbo
       <div className="trb-ot">
         <OrderTabs tab={tab} setTab={setTab} running={running} W={W} />
         <span className="trb-avail" data-testid="trade-balance">
-          {WORDS.bal.text} {balance === null ? "—" : fmtUsd(balance)}
+          {balance === null ? "—" : fmtUsd(balance)} {WORDS.available.text}
         </span>
       </div>
       {/* Limit and TP/SL: Coming soon in the box's place; Market: the box (two parts, the toast between them as before) */}

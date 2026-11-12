@@ -195,6 +195,8 @@ export interface AboutView {
   five: { vol: string; buys: string; sells: string; net: string; netTone: Tone };
   /** The 24h buys and sells; `buyPct` is the buys' share of the bar, null when neither is known. */
   flow: { buys: string; sells: string; buyPct: number | null };
+  /** The same for each window the row serves (UNRLZD About draws three flow bars): 24h, 1h, 5m. */
+  flows: { win: "24h" | "1h" | "5m"; buys: string; sells: string; buyPct: number | null }[];
 }
 
 const MINUS = "−";
@@ -219,5 +221,10 @@ export function aboutView(row: MarketRow): AboutView {
     windows: [win("5M", row.chg_5m_bps), win("1H", row.chg_1h_bps), win("4H", row.chg_4h_bps), win("1D", row.chg_24h_bps)],
     five: { vol: usd(row.vol_5m_usd), buys: count(row.buys_5m), sells: count(row.sells_5m), net: net.text, netTone: net.tone },
     flow: { buys: count(b), sells: count(s), buyPct: b !== null && s !== null && b + s > 0 ? Number(((b / (b + s)) * 100).toFixed(1)) : null },
+    flows: ([["24h", row.buys_24h, row.sells_24h], ["1h", row.buys_1h, row.sells_1h], ["5m", row.buys_5m, row.sells_5m]] as const).map(([win, bv, sv]) => {
+      const x = countOf(bv) ? bv! : null;
+      const y = countOf(sv) ? sv! : null;
+      return { win, buys: count(x), sells: count(y), buyPct: x !== null && y !== null && x + y > 0 ? Number(((x / (x + y)) * 100).toFixed(1)) : null };
+    }),
   };
 }

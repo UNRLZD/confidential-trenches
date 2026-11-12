@@ -183,6 +183,8 @@ export async function copyText(text: string, clip: { writeText(t: string): Promi
 /** The watchlist star (R5 token-watch): the tokens kept on this device, `chain/token`, in the browser's storage. A
  *  storage that throws or holds something else reads as an empty list and the star still toggles for the page. */
 export const WATCH_KEY = "ct.watch.v1";
+/** Fired on the window when a star toggles, so this page's rail Watchlist redraws at once (Rail.tsx useWatch). */
+export const WATCH_EVENT = "ct:watch";
 export function readWatch(store: Pick<Storage, "getItem"> | null): string[] {
   try {
     const v = JSON.parse(store?.getItem(WATCH_KEY) ?? "[]") as unknown;
@@ -200,5 +202,6 @@ export function toggleWatch(store: Pick<Storage, "getItem" | "setItem"> | null, 
   } catch {
     // the page's own state still shows the press
   }
+  if (typeof window !== "undefined" && typeof window.dispatchEvent === "function") window.dispatchEvent(new Event(WATCH_EVENT));
   return on;
 }
