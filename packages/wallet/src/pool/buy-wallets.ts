@@ -758,12 +758,33 @@ export function evmHelperKeyedRpc(origin: string, chain: "base" | "robinhood"): 
 //   own (buyGateOf): a throttle met here pauses these reads only, never the finder's next read or a trade's. Each call
 //   is one round of that gate and takes the host's pass turn (inTurn's lane), so the lane's pause and budget hold it.
 //   Every request names one W, or a signature of W's: no batch, no request carries two Ws.
-/** W's buy as its own transaction shows it: the mint it bought and the token program of W's account of it. */
-export type SolanaBuy = { mint: string; program: string };
+// - W's trades too (card closed-positions-after-a-restore): with a buy, the read hands back W's buy transaction and
+//   W's successful transactions after it, oldest first, as the route answered them ("json", finalized), read until the
+//   one that leaves W none of the bought mint (W's sale in full: what follows is W's teardown and sweep, never a trade)
+//   and SOL_TRADE_TXS of them at most. `soldOut` says that sale was read; without it (W still holds, the list cut
+//   short, a transaction the route no longer returns) the trades read so far are all that is known, and a later load
+//   reads W again from where this one ended (`from`, below). The device's ops are rebuilt from them
+//   (packages/signpage/src/sol-buy-records.ts restoredTradeOps): every request still names one W or a signature of W's.
+// - Each answer is the signature's own (review of 776d40528, P3-2): a transaction whose first signature is another, or
+//   with no block time, is read as one the route did not return, so the trades stop before it and the next read starts
+//   there; nothing after it is taken as read.
+// - The sale in full is W's own (review of 776d40528, P3-1): W signs it (W's key among the transaction's signers, as
+//   releaseTags asks of a buy), so a token's permanent delegate or any stranger who empties W's account is no sale.
+// - Read on (review of 776d40528, P2-1): `from` names W's mint, its token program and the last of W's transactions a
+//   read took (the device's cursor, sol-buy-records.ts TRADES_READ_KEY); W's signatures newer than it are read
+//   (getSignaturesForAddress `until` it, page by page as above, SOL_BUY_PAGES at most) and SOL_TRADE_TXS of them, oldest
+//   first, to W's sale in full. So a W with more trades than SOL_TRADE_TXS, or a transaction the route did not return,
+//   is read on from where it stopped at each load: a few calls a load, never its whole history again.
+/** W's buy as its own transaction shows it: the mint it bought and the token program of W's account of it; from the
+ *  reader, also W's buy and later transactions (see above). A read on (`after`) holds W's transactions after that
+ *  signature only, no buy. */
+export type SolanaBuy = { mint: string; program: string; txs?: readonly { signature: string; tx: unknown }[]; soldOut?: boolean; after?: string };
+/** Where a read of W's trades goes on from (see above). */
+export type SolanaTradesFrom = { mint: string; program: string; after: string };
 /** One W's buy read: "none" when W's whole history shows for good that it holds none, null when this reader cannot tell
- *  (see above). */
+ *  (see above). With `from`, W's trades after it only. */
 export interface SolanaBuyReader {
-  read(address: string, signal?: AbortSignal): Promise<SolanaBuy | "none" | null>;
+  read(address: string, signal?: AbortSignal, from?: SolanaTradesFrom): Promise<SolanaBuy | "none" | null>;
 }
 /** The most pages of W's signatures read, each of SOL_BUY_PAGE. */
 export const SOL_BUY_PAGES = 4;
@@ -771,6 +792,8 @@ export const SOL_BUY_PAGE = 1_000;
 /** The most of W's oldest successful transactions read for its buy: its release, after the sends a failed buy of W's
  *  can draw before its retry lands. */
 export const SOL_BUY_TXS = 8;
+/** The most of W's transactions after its buy read for its trades (see above): its sales up to the one in full. */
+export const SOL_TRADE_TXS = 8;
 /** The pool's release and its release-and-buy (the kit's SOLANA_POOL_TAG_RELEASE, SOLANA_POOL_TAG_RELEASE_AND_BUY). */
 const TAG_RELEASE = 2;
 const TAG_RELEASE_AND_BUY = 3;
@@ -834,12 +857,48 @@ export function solanaBuyIn(tx: unknown, w: string, pool: string): SolanaBuy | n
   return { mint: mint!, program: program! };
 }
 
+/** Whether W signs a transaction: W's key among its signers (see above). */
+export function solanaSignedBy(tx: unknown, w: string): boolean {
+  const m = (tx as Tx)?.transaction?.message;
+  const keys = m?.accountKeys;
+  const signers = m?.header?.numRequiredSignatures;
+  if (!Array.isArray(keys) || !Number.isSafeInteger(signers)) return false;
+  const at = keys.indexOf(w);
+  return at >= 0 && at < (signers as number);
+}
+/** Whether an answer is `signature`'s own transaction, with its block time (see above). */
+export function solanaOwnTx(tx: unknown, signature: string): boolean {
+  const t = tx as { blockTime?: unknown; transaction?: { signatures?: unknown } } | null;
+  return Array.isArray(t?.transaction?.signatures) && t.transaction.signatures[0] === signature && Number.isSafeInteger(t.blockTime) && (t.blockTime as number) > 0;
+}
+
+/** Whether a landed transaction W signs left W none of `mint` where W held some before it (W's sale in full); false for
+ *  any other, or a balance list it cannot read. */
+export function solanaSoldOutIn(tx: unknown, w: string, mint: string): boolean {
+  const t = tx as Tx;
+  if (!t?.meta || t.meta.err !== null || !solanaSignedBy(tx, w)) return false;
+  const sum = (list: unknown): bigint | null => {
+    if (!Array.isArray(list)) return null;
+    let n = 0n;
+    for (const b of list as TokenBalance[]) {
+      if (b?.owner !== w || b.mint !== mint) continue;
+      const u = units(b);
+      if (u === null) return null;
+      n += u;
+    }
+    return n;
+  };
+  const pre = sum(t.meta.preTokenBalances);
+  const post = sum(t.meta.postTokenBalances);
+  return pre !== null && post !== null && pre > 0n && post === 0n;
+}
+
 /** W's buy on one Solana route (production: solanaHelperBuys, solanaBuysAt), each call a round of the route's gate. */
 export function solanaBuyReader(rpc: SolanaRpc, pool: string, o: ReaderOpts = {}): SolanaBuyReader {
   const sleep = o.sleep ?? sleepFor;
   const a: Asker = { rpc, gate: o.gate ?? gateOf(rpc), ...(o.wait429 ? { hint: o.wait429 } : {}), ...(o.lane ? { lane: o.lane } : {}) };
   return {
-    async read(w, signal) {
+    async read(w, signal, from) {
       const by = Date.now() + HOLDINGS_THROTTLE_MAX_MS;
       // one call a round of the gate; the read whole is what clears its doubt, as the finder's whole round does, so a
       // provider throttling one method (getTransaction) stays in doubt and is refused past the bound, never asked again
@@ -847,23 +906,45 @@ export function solanaBuyReader(rpc: SolanaRpc, pool: string, o: ReaderOpts = {}
       const start = a.gate.epoch();
       const ask = (method: string, params: readonly unknown[]): Promise<unknown> => inTurn(a.gate, by, sleep, signal, () => call(a, method, params, signal), a.lane);
       const done = <T>(v: T): T => (a.gate.answered(start), v);
-      // newest first, page by page, to the oldest
+      // newest first, page by page, to the oldest (or to `from`'s signature, not included)
       const sigs: { signature: string; err: unknown }[] = [];
       for (let page = 0; ; page++) {
         if (page >= SOL_BUY_PAGES) return done(null);
         const before = sigs.at(-1)?.signature;
-        const got = await ask("getSignaturesForAddress", [w, { limit: SOL_BUY_PAGE, commitment: "finalized", ...(before === undefined ? {} : { before }) }]);
+        const got = await ask("getSignaturesForAddress", [w, { limit: SOL_BUY_PAGE, commitment: "finalized", ...(before === undefined ? {} : { before }), ...(from === undefined ? {} : { until: from.after }) }]);
         if (!Array.isArray(got) || !got.every((x) => typeof (x as { signature?: unknown })?.signature === "string")) throw new Error("getSignaturesForAddress: not a list of signatures");
         sigs.push(...(got as { signature: string; err: unknown }[]));
         if (got.length < SOL_BUY_PAGE) break;
       }
-      const oldest = sigs.filter((x) => x.err === null).reverse().slice(0, SOL_BUY_TXS);
-      for (const { signature } of oldest) {
-        const tx = await ask("getTransaction", [signature, { encoding: "json", commitment: "finalized", maxSupportedTransactionVersion: 0 }]);
+      const landed = sigs.filter((x) => x.err === null).reverse();
+      // an answer that is not the signature's own is none (see above)
+      const txOf = async (signature: string): Promise<unknown> => {
+        const t = await ask("getTransaction", [signature, { encoding: "json", commitment: "finalized", maxSupportedTransactionVersion: 0 }]);
+        return solanaOwnTx(t, signature) ? t : null;
+      };
+      // W's trades: its transactions after `at`, oldest first, to its sale in full, stopping before one not returned
+      const trades = async (at: number, mint: string, txs: { signature: string; tx: unknown }[]): Promise<{ txs: typeof txs; soldOut: boolean }> => {
+        let soldOut = false;
+        for (const later of landed.slice(at + 1, at + 1 + SOL_TRADE_TXS)) {
+          const t = await txOf(later.signature);
+          if (t === null) break;
+          txs.push({ signature: later.signature, tx: t });
+          if ((soldOut = solanaSoldOutIn(t, w, mint))) break;
+        }
+        return { txs, soldOut };
+      };
+      if (from !== undefined) {
+        // a list that names `from`'s signature is not the one asked for: no answer
+        if (landed.some((x) => x.signature === from.after)) return done(null);
+        return done({ mint: from.mint, program: from.program, after: from.after, ...(await trades(-1, from.mint, [])) });
+      }
+      const oldest = landed.slice(0, SOL_BUY_TXS);
+      for (const [at, { signature }] of oldest.entries()) {
+        const tx = await txOf(signature);
         // a signature listed whose transaction the route no longer returns: W's history is past it
         if (tx === null) return done(null);
         const buy = solanaBuyIn(tx, w, pool);
-        if (buy !== null) return done(buy);
+        if (buy !== null) return done({ ...buy, ...(await trades(at, buy.mint, [{ signature, tx }])) });
         // the pool's plain release naming W: W's note is spent with no buy, it has none for good; a tag 3 whose buy was
         // not read: no answer
         if (releaseIn(tx, w, pool)) return done(solanaReleaseIn(tx, w, pool) ? "none" : null);
