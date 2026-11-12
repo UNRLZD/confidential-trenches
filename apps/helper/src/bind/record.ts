@@ -1,8 +1,8 @@
 // POST /v1/bind/record (card near-holdings-restore): a device restoring from its 12 words asks, for each of its NEAR
 // trade wallets W, what the helper's trade store holds (trade.ts TradeRecord): the token W's first carried call named,
 // and every call carried for W with its relayer transaction's signed bytes, which hold W's own NEP-366
-// SignedDelegateAction. The device reads those transactions again on its own providers; nothing here is trusted for a
-// signature.
+// SignedDelegateAction. The device believes a call only when W's own signature checks (signpage near-w-calls.ts), and
+// a state here only for when to look again, never for what W holds; nothing here is trusted for a signature.
 //
 // Only a W the vault paid gets its record: the vault's spends list, both providers at one final block, a row whose
 // recipient is W, paid or settled with refund_value 0 (trade.ts createTradeReads payoutsLanded, the creation's rule),

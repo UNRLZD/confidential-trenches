@@ -38,7 +38,7 @@
 // - The rebuild (card near-holdings-restore, nearHoldingsPass): a store with no record of a W (a sign out, a new device,
 //   a restore from the 12 words) gets one back from the chain alone, on every load and after each restore's NEAR walk,
 //   so the coin W holds shows as a position and sells, and USDC left on W comes home by resumeNearSells.
-import { HELPER_BIND_TRADE_CODES, HELPER_CODE_STATUS, HELPER_FETCH_INIT, type HelperBindTradeRequest } from "../../kit/src/helper/v1.ts";
+import { HELPER_BIND_RECORD_WALLETS_MAX, HELPER_BIND_TRADE_CODES, HELPER_CODE_STATUS, HELPER_FETCH_INIT, type HelperBindRecord, type HelperBindRecordRequest, type HelperBindRecordState, type HelperBindTradeRequest } from "../../kit/src/helper/v1.ts";
 import { NEAR_NETWORKS, type NearNetwork, type NearRpc } from "../../kit/src/near/networks.ts";
 import { NEAR_RHEA, rheaQuote } from "../../kit/src/near/rhea.ts";
 import { vaultSync, vaultSyncStart, type VaultSpendRow } from "../../kit/src/vault/sync.ts";
@@ -889,8 +889,8 @@ export const NEAR_HOLDINGS_EMPTY_KEY = "near-holdings-empty:";
 export const NEAR_HOLDINGS_W_KEY = "near-holdings-w:";
 /** The slippage a rebuilt record keeps: its sell's bound only for a USDC-only W's way home (no swap), as a tap brings its own. */
 export const NEAR_RESTORED_SLIPPAGE_BPS = 100;
-/** Wallets asked of the helper in one POST /v1/bind/record (its body's cap). */
-export const NEAR_RECORD_WALLETS_MAX = 64;
+/** Wallets asked of the helper in one POST /v1/bind/record (the kit's cap on its body). */
+export const NEAR_RECORD_WALLETS_MAX = HELPER_BIND_RECORD_WALLETS_MAX;
 /** The longest record answer read: 64 Ws of a few carried calls each. */
 export const NEAR_RECORD_MAX_BYTES = 1_048_576;
 /** A delegate's life in blocks at most (the helper's EXPIRY_MAX_BLOCKS, bind/checks.ts): no call W signed lands after
@@ -901,24 +901,19 @@ export const NEAR_SEAT_LAG_MAX = 30;
 
 /** The helper's record of one W (POST /v1/bind/record): the token its first carried call named, each call's relayer
  *  transaction as signed and sent, and W's creation. Nothing here is believed but what W's own signature proves. */
-export type NearWRecord = {
-  wallet: string;
-  token: string | null;
-  calls: { tx_hash: string; signed_tx: string; method: string; side: string; state: string; refunded?: boolean }[];
-  created: { tx_hash: string; state: string; height: string } | null;
-};
+export type NearWRecord = HelperBindRecord;
 const RECORD_URL = RELEASE_BIND_URL.replace(/\/v1\/bind$/, "/v1/bind/record");
-const CALL_STATES = ["pending", "landed", "failed", "dropped"];
+const CALL_STATES: readonly HelperBindRecordState[] = ["pending", "landed", "failed", "dropped"];
 
 /** The helper's records of `wallets` (at most NEAR_RECORD_WALLETS_MAX), checked to the shape, one per wallet asked in order. */
 export async function nearWRecords(network: NearNetwork, wallets: readonly string[], fetchFn: typeof fetch = fetch, signal?: AbortSignal): Promise<NearWRecord[]> {
-  if (wallets.length < 1 || wallets.length > NEAR_RECORD_WALLETS_MAX || !wallets.every((w) => IMPLICIT_W.test(w))) throw new Error("record: 1 to 64 implicit ids");
+  if (wallets.length < 1 || wallets.length > NEAR_RECORD_WALLETS_MAX || !wallets.every((w) => IMPLICIT_W.test(w)) || new Set(wallets).size !== wallets.length) throw new Error("record: 1 to 64 distinct implicit ids");
   const res = await fetchFn(RECORD_URL, {
     ...HELPER_FETCH_INIT,
     method: "POST",
     redirect: "error",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ network, wallets }),
+    body: JSON.stringify({ network, wallets: [...wallets] } satisfies HelperBindRecordRequest),
     signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(SEND_TIMEOUT_MS)]) : AbortSignal.timeout(SEND_TIMEOUT_MS),
   });
   if (res.status !== 200) throw new Error(`record: HTTP ${res.status}`);
@@ -933,10 +928,10 @@ export async function nearWRecords(network: NearNetwork, wallets: readonly strin
   return recs.map((r, k): NearWRecord => {
     const str = (x: unknown) => typeof x === "string";
     if (!isObj(r) || r.wallet !== wallets[k] || !(r.token === null || (str(r.token) && ACCOUNT_ID.test(r.token as string))) || !Array.isArray(r.calls)) throw new Error("record: out of shape");
-    for (const c of r.calls) if (!isObj(c) || !str(c.tx_hash) || !str(c.signed_tx) || !str(c.method) || !str(c.side) || !CALL_STATES.includes(c.state as string)) throw new Error("record: a call out of shape");
+    for (const c of r.calls) if (!isObj(c) || !str(c.tx_hash) || !str(c.signed_tx) || !str(c.method) || !str(c.side) || !CALL_STATES.includes(c.state as HelperBindRecordState)) throw new Error("record: a call out of shape");
     const cr = r.created;
-    if (!(cr === null || (isObj(cr) && str(cr.tx_hash) && CALL_STATES.includes(cr.state as string) && str(cr.height) && /^(0|[1-9]\d{0,19})$/.test(cr.height as string)))) throw new Error("record: the creation out of shape");
-    return r as NearWRecord;
+    if (!(cr === null || (isObj(cr) && str(cr.tx_hash) && CALL_STATES.includes(cr.state as HelperBindRecordState) && str(cr.height) && /^(0|[1-9]\d{0,19})$/.test(cr.height as string)))) throw new Error("record: the creation out of shape");
+    return r as unknown as NearWRecord; // every field checked above
   });
 }
 const ACCOUNT_ID = /^(?=.{2,64}$)(([a-z\d]+[-_])*[a-z\d]+\.)*([a-z\d]+[-_])*[a-z\d]+$/;
@@ -1105,7 +1100,7 @@ export async function nearHoldingsPass(page: NearBuyPage, reads: NearHoldingsRea
         named.add(t.token);
         if (t.sellSwap && c.state === "landed") sold = true;
       }
-      const inFlight = rec.calls.some((c) => c.state === "pending");
+      const inFlight = rec.calls.some((c) => c.state === "pending") || rec.created?.state === "pending";
       if (named.size > 1 || (rec.token !== null && named.size === 1 && !named.has(rec.token))) {
         log("near holdings: a W's calls name more than one token, or not the helper's: nothing rebuilt");
         out.unread.push(a.w);

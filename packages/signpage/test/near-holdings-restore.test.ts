@@ -110,7 +110,7 @@ const register = (token = TOKEN): Call => ({ receiver: token, method: "storage_d
 const buySwap = (token = TOKEN, mbh?: bigint): Call => ({ receiver: USDC, method: "ft_transfer_call", args: { receiver_id: EX, amount: PAID.toString(), msg: JSON.stringify({ force: 0, actions: [{ pool_id: 9, token_in: USDC, token_out: token, min_amount_out: "1" }], skip_degen_price_sync: true, skip_unwrap_near: true }) }, ...(mbh === undefined ? {} : { mbh }) });
 const sellSwap = (token = TOKEN): Call => ({ receiver: token, method: "ft_transfer_call", args: { receiver_id: EX, amount: "7", msg: JSON.stringify({ force: 0, actions: [{ pool_id: 9, token_in: token, token_out: USDC, min_amount_out: "1" }], skip_degen_price_sync: true, skip_unwrap_near: true }) } });
 /** The helper's record of W: its token and each call with its state. */
-function recordOf(w: string, token: string | null, calls: { tx: string; state?: string; side?: string }[], created: NearWRecord["created"] = { tx_hash: "c", state: "landed", height: String(H - 900) }): NearWRecord {
+function recordOf(w: string, token: string | null, calls: { tx: string; state?: NearWRecord["calls"][number]["state"]; side?: "buy" | "sell" }[], created: NearWRecord["created"] = { tx_hash: "c", state: "landed", height: String(H - 900) }): NearWRecord {
   return { wallet: w, token, calls: calls.map((c, k) => ({ tx_hash: `t${k}`, signed_tx: c.tx, method: "m", side: c.side ?? "buy", state: c.state ?? "landed" })), created };
 }
 const none = (w: string): NearWRecord => ({ wallet: w, token: null, calls: [], created: null });
@@ -317,7 +317,7 @@ test("the token is proven by W's own signature: a call signed by another key, fr
 });
 
 test("rule 6: USDC on W goes home only once nothing of W is in flight and no call W signed can still land", async () => {
-  const usdcOnly = async (calls: (n: NoteRecord) => { tx: string; state?: string }[], created?: NearWRecord["created"], height = H) => {
+  const usdcOnly = async (calls: (n: NoteRecord) => Parameters<typeof recordOf>[2], created?: NearWRecord["created"], height = H) => {
     const v = await world([5_000_000n], [true]);
     const { w: W, note, nh } = v.ws[0]!;
     const rec = recordOf(W, TOKEN, calls(note), created);
@@ -335,9 +335,9 @@ test("rule 6: USDC on W goes home only once nothing of W is in flight and no cal
   // a call still pending at the helper: not yet
   assert.deepEqual((await usdcOnly((n) => [{ tx: relayed(n, buySwap(TOKEN, BigInt(H - 500))), state: "pending" }])).p.written, []);
   // no call yet: the creation's life must pass first; then home; with no creation at all, home at once
-  const young = { tx_hash: "c", state: "landed", height: String(H - Number(NEAR_DELEGATE_LIFE_BLOCKS)) };
+  const young: NearWRecord["created"] = { tx_hash: "c", state: "landed", height: String(H - Number(NEAR_DELEGATE_LIFE_BLOCKS)) };
   assert.deepEqual((await usdcOnly(() => [], young)).p.unread.length, 1);
-  const old = { tx_hash: "c", state: "landed", height: String(H - Number(NEAR_DELEGATE_LIFE_BLOCKS) - 1) };
+  const old: NearWRecord["created"] = { tx_hash: "c", state: "landed", height: String(H - Number(NEAR_DELEGATE_LIFE_BLOCKS) - 1) };
   assert.equal((await usdcOnly(() => [], old)).p.written.length, 1);
   assert.equal((await usdcOnly(() => [], null)).p.written.length, 1);
   // a creation still pending: not yet
