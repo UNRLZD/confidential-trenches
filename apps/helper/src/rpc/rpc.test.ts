@@ -1195,7 +1195,7 @@ test("card helper-gives-a-trade-its-reads: a route on our keyed providers gives 
   };
   assert.equal(await served({ SOLANA_RPC_URL: `https://mainnet.helius-rpc.invalid/?api-key=${KEY}` }, "solana", "getSlot", 43), 42, "Solana: the page's 42, the 43rd its own 429");
   assert.equal(await served({ BASE_RPC_URL: `https://base-mainnet.example.invalid/v2/${KEY}` }, "base", "eth_blockNumber", 31), 30, "Base: the page's 30");
-  for (const [name, bad] of [["RPC_BUDGET_SOLANA", "100,16"], ["RPC_BUDGET_SOLANA", "100,41"], ["RPC_BUDGET_SOLANA_DEVNET", "100,16"], ["RPC_BUDGET_SOLANA_MARKS", "100,29"], ["RPC_BUDGET_BASE", "100,29"], ["RPC_BUDGET_ROBINHOOD", "100,16"]] as const)
+  for (const [name, bad] of [["RPC_BUDGET_SOLANA", "100,16"], ["RPC_BUDGET_SOLANA", "100,41"], ["RPC_BUDGET_SOLANA_DEVNET", "100,16"], ["RPC_BUDGET_SOLANA_MARKS", "100,29"], ["RPC_BUDGET_BASE", "100,29"], ["RPC_BUDGET_ROBINHOOD", "100,16"], ["RPC_BUDGET_NEAR", "100,29"]] as const)
     assert.throws(() => createRpc({ [name]: bad }), (e: Error) => e.message.startsWith(`${name} must be`) && !e.message.includes(bad), `${name}=${bad}`);
-  assert.doesNotThrow(() => createRpc({ RPC_BUDGET_SOLANA: "100,42", RPC_BUDGET_SOLANA_DEVNET: "100,42", RPC_BUDGET_SOLANA_MARKS: "100,30", RPC_BUDGET_BASE: "100,30", RPC_BUDGET_ROBINHOOD: "100,30", RPC_BUDGET_NEAR: "100,16" }));
+  assert.doesNotThrow(() => createRpc({ RPC_BUDGET_SOLANA: "100,42", RPC_BUDGET_SOLANA_DEVNET: "100,42", RPC_BUDGET_SOLANA_MARKS: "100,30", RPC_BUDGET_BASE: "100,30", RPC_BUDGET_ROBINHOOD: "100,30", RPC_BUDGET_NEAR: "100,30" }));
 });

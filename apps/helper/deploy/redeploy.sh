@@ -270,8 +270,8 @@ plain_value() {
 # default): "<total>,<per client>" with the share under the total less the helper's own-read reserve (src/rpc/rpc.ts
 # RPC_RESERVE: Solana 3; src/proxy/proxy.ts PROXY_RESERVE: Jupiter 34; every other 0); for RPC_BUDGET_* the share at
 # least what one signing page draws from the route in its busiest 10 s (src/rpc/rpc.ts rpcLeastShare, RPC_PAGE_NEED:
-# Solana and its devnet 42, the mark list, Base and Robinhood 30, NEAR a full batch, RPC_BATCH_MAX 10; card
-# helper-gives-a-trade-its-reads) and an optional third number, one method's limit, from that share plus the reserve
+# Solana and its devnet 42, the mark list, Base, Robinhood and NEAR 30, every other chain a full batch, RPC_BATCH_MAX
+# 10; card helper-gives-a-trade-its-reads, NEAR's card near-quote-under-the-pace) and an optional third number, one method's limit, from that share plus the reserve
 # to the total; for PROXY_BUDGET_ONECLICK the share at least one deposit sheet open (src/proxy/proxy.ts PROXY_MIN_SHARE,
 # DEPOSIT_SHEET_CALLS: 5).
 budget_ok() {
@@ -280,7 +280,7 @@ budget_ok() {
   case "$name" in
     RPC_BUDGET_SOLANA) reserve=3 least=42 ;;
     RPC_BUDGET_SOLANA_DEVNET) least=42 ;;
-    RPC_BUDGET_SOLANA_MARKS | RPC_BUDGET_BASE | RPC_BUDGET_ROBINHOOD) least=30 ;;
+    RPC_BUDGET_SOLANA_MARKS | RPC_BUDGET_BASE | RPC_BUDGET_ROBINHOOD | RPC_BUDGET_NEAR) least=30 ;;
     RPC_BUDGET_*) least=10 ;;
     PROXY_BUDGET_JUPITER) reserve=34 ;;
     PROXY_BUDGET_ONECLICK) least=5 ;;
