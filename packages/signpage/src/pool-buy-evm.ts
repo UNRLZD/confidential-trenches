@@ -261,7 +261,9 @@ export async function runEvmPoolBuy(h: EvmPoolBuyHost, ask: PoolAsk): Promise<Ev
       const pins = venuePins(h.venues, network);
       if (pins.pool === undefined || lower(pins.pool) !== lower(h.pin.pool)) return no("not_allowed");
       // the proof: its chunk the ask's amount, its W an EVM one, no other tap's; claimed at once
-      const r = (await h.ready()).find((p) => p.wallet.chain === "evm" && p.chunk === ask.amount && !h.claimed?.has(p.noteId));
+      // a proof on the epoch root first; one on the newest root (a note that landed this epoch) only when none is the
+      // amount (card fresh-money-spendable-at-once)
+      const r = (await h.ready()).filter((p) => p.wallet.chain === "evm" && p.chunk === ask.amount && !h.claimed?.has(p.noteId)).sort((x, y) => (x.root === y.root ? 0 : x.root === "epoch" ? -1 : 1))[0];
       if (r === undefined) return no("not_funded");
       claim = r.noteId;
       h.claimed?.add(claim);

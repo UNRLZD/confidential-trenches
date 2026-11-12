@@ -1,0 +1,80 @@
+{
+ "good": {
+  "base": "http://127.0.0.1:18805",
+  "commit": "37472793d6e7ed419db50d526fbb5437bc1f9879",
+  "wallet": "3e6fd97c649476f4265bd2510e7d504cef8190ccb3c44e4d1387cdacd44e4a04",
+  "readAt": "2026-11-12T07:16:55.247Z",
+  "health": {
+   "status": 200,
+   "commit": "37472793d6e7ed419db50d526fbb5437bc1f9879",
+   "body": "{\"ok\":true,\"commit\":\"37472793d6e7ed419db50d526fbb5437bc1f9879\",\"release\":1,\"ready\":false,\"parts\":{\"proxy\":\"up\",\"relay\":\"up\",\"intents\":\"up\",\"delegate\":\"up\",\"orders\":\"down\",\"log\":\"down\"},\"solana\":{\"rpc\":\"public\",\"trades\":\"public\",\"stream\":\"public\"},\"rpc\":{\"solana\":[],\"base\":[],\"robinhood\":[],\"near\":[]},\"bind\":{\"testnet\":\"6e3d9e3a7b7faf0764ccb101490c1df95676fd7f9605756cd859082b62aa05cd\"}}"
+  },
+  "probes": {
+   "testnet": {
+    "status": 409,
+    "body": "{\"error\":{\"code\":\"no_payout\"}}"
+   }
+  },
+  "carries": {
+   "testnet": {
+    "signed": {
+     "wallet": "e2be17c2342060d32dda8c52f7232482314146e355979f14f7b71250389edaaa",
+     "status": 400,
+     "body": "{\"error\":{\"code\":\"no_account\"}}"
+    },
+    "flipped": {
+     "wallet": "b7afc03b310f463fcc6422405388b1b32f036fa054b5e0ef2ee99b304e2abff4",
+     "status": 400,
+     "body": "{\"error\":{\"code\":\"bad_signature\"}}"
+    }
+   }
+  }
+ },
+ "bad_deployed": {
+  "base": "https://ct-api.unrealized.trade",
+  "commit": "a1e175da87b538f9a571c54b4190c2dde0f1ebdf",
+  "wallet": "27c80b27a5b4281ac11c7ad8ef10ec62b7c4e694284a5b7af0d779bcbc8e9808",
+  "readAt": "2026-11-12T07:17:11.926Z",
+  "health": {
+   "status": 200,
+   "commit": "a1e175da87b538f9a571c54b4190c2dde0f1ebdf",
+   "body": "{\"ok\":true,\"commit\":\"a1e175da87b538f9a571c54b4190c2dde0f1ebdf\",\"release\":119,\"ready\":true,\"parts\":{\"proxy\":\"up\",\"relay\":\"up\",\"intents\":\"up\",\"delegate\":\"up\",\"orders\":\"down\",\"log\":\"down\"},\"solana\":{\"rpc\":\"keyed\",\"holders\":\"keyed\",\"trades\":\"keyed\",\"stream\":\"keyed\"},\"rpc\":{\"solana\":[\"helius-rpc.com answers\",\"quiknode.pro answers\"],\"base\":[\"quiknode.pro answers\",\"drpc.live key1 answers\",\"drpc.live key2 answers\",\"drpc.live key3 answers\"],\"robinhood\":[\"quiknode.pro answers\",\"drpc.live key1 answers\",\"drpc.live key2 answers\",\"drpc.live key3 answers\"],\"near\":[\"fastnear.com answers\"]},\"bind\":{\"mainnet\":\"f874a24241077a92d78daebf0e20585b2b6c89f7da30b05a67fb1969f70388cc\",\"testnet\":\"g-2b700409.bf-vt-20261102t071444.testnet\"}}"
+  },
+  "probes": {
+   "mainnet": {
+    "status": 400,
+    "body": "{\"error\":{\"code\":\"bad_shape\"}}"
+   },
+   "testnet": {
+    "status": 400,
+    "body": "{\"error\":{\"code\":\"bad_shape\"}}"
+   }
+  },
+  "carries": {
+   "mainnet": {
+    "signed": {
+     "wallet": "e0808f770b15f23a6a2eb5f5a539a74ec6ab2df559452a3f808b9dd5aa586102",
+     "status": 400,
+     "body": "{\"error\":{\"code\":\"bad_shape\"}}"
+    },
+    "flipped": {
+     "wallet": "4b0f89b40c11249da5d13ffec926ea9901e64b6de20feb1892c14f1b00e44457",
+     "status": 400,
+     "body": "{\"error\":{\"code\":\"bad_shape\"}}"
+    }
+   },
+   "testnet": {
+    "signed": {
+     "wallet": "66c0fc96e0a92296556065c7d26d50eefcc622e5f4f56e6d73c1831310beb6b6",
+     "status": 400,
+     "body": "{\"error\":{\"code\":\"bad_shape\"}}"
+    },
+    "flipped": {
+     "wallet": "4d42dbde561ef7d32b088954dc59959137912215e614706c3a71b9878825d8dc",
+     "status": 400,
+     "body": "{\"error\":{\"code\":\"bad_shape\"}}"
+    }
+   }
+  }
+ }
+}

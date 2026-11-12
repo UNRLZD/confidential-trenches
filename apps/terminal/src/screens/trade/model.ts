@@ -300,6 +300,61 @@ const poolOf = (pools: SignpageState["pools"], chain: Chain) => (isPoolChain(cha
  *  own entry in state.pools (its balance) is not a pool, so a NEAR token's box is a chain-with-no-pool box. */
 export const hasPool = (pools: SignpageState["pools"], chain: Chain): boolean => poolOf(pools, chain) !== null;
 
+/** How a buy goes on a chain: from its pool (a pool chain whose pool the state lists), from the vault's Cash to a fresh
+ *  NEAR wallet that trades on Rhea (NEAR: the kit's pool.buy with chain near, TRADE_CHAINS), or the vault's own buy (a
+ *  pool chain whose pool the state does not list yet). One switch over every chain, no default arm: a chain added to the
+ *  kit's Chain fails the typecheck here until it has a path. */
+export type BuyPath = "pool" | "near" | "vault";
+export function buyPath(pools: SignpageState["pools"], chain: Chain): BuyPath {
+  switch (chain) {
+    case "solana":
+    case "base":
+    case "robinhood":
+      return hasPool(pools, chain) ? "pool" : "vault";
+    case "near":
+      return "near";
+    default: {
+      const none: never = chain;
+      return none;
+    }
+  }
+}
+
+/** A NEAR buy's pool.buy: the typed USD in the vault's USDC (6 decimals; Cash is that USDC, drawn 1:1 as USD), the
+ *  signing page's rule (rules/near-trade.ts) taking 1 to 6 decimals above 0; too_small for nothing to buy. */
+export function nearBuyAsk(token: string, c: Cents, slippageBps: number): PoolBuyAsk {
+  if (c <= 0n) return { ok: false, why: "too_small" };
+  return { ok: true, kind: "pool.buy", params: { chain: "near", token, amount: centsToDecimal(c), slippage_bps: slippageBps } };
+}
+
+/** The whole holding, in basis points: the one share a NEAR sell takes. */
+const WHOLE_BPS = 10_000;
+
+/** Whether a sell of `bps` of the holding can be asked on `chain`: any share on a pool chain; on NEAR only the whole
+ *  holding (one buy and one full sell per one-time wallet in this release), so 25%, 50% and 75% stay off there. */
+export function sellShareOk(chain: Chain, bps: number): boolean {
+  switch (chain) {
+    case "solana":
+    case "base":
+    case "robinhood":
+      return true;
+    case "near":
+      return bps === WHOLE_BPS;
+    default: {
+      const none: never = chain;
+      return none;
+    }
+  }
+}
+
+/** The sell's request on any chain: pool.sell into the chain's pool (poolSellAsk), or on NEAR pool.sell of the whole
+ *  holding, whose proceeds go back into the vault's Cash; null where no such sell can be asked (no pool listed, or a
+ *  NEAR share that is not the whole). */
+export function tradeSellAsk(pools: SignpageState["pools"], chain: Chain, token: string, size: { share_bps: number }, slippageBps: number): { kind: "pool.sell"; params: SignpageParams["pool.sell"] } | null {
+  if (chain !== "near") return poolSellAsk(pools, chain, token, size, slippageBps);
+  return sellShareOk(chain, size.share_bps) ? { kind: "pool.sell", params: { chain: "near", token, share_bps: WHOLE_BPS, slippage_bps: slippageBps } } : null;
+}
+
 /** When the page's price for the pool's chain stops being used, unix ms: the kit's poolUsdGoodUntilS (the feed's bound
  *  from the earlier of its own time and the page's read); null with no price or no feed (NEAR). */
 export function poolPriceEnd(p: NonNullable<SignpageState["pools"]>[number]): number | null {
@@ -337,6 +392,37 @@ export function poolView(pools: SignpageState["pools"], chain: Chain, price: Poo
   if (bal === null) return null;
   const tap = p.tap_max === undefined ? null : decimalToUnits(p.tap_max, d);
   return { asset: p.asset, balance: unitsToCents(bal, price), tapMax: tap === null ? null : unitsToCents(tap, price), proof: proofStatus(pools, chain) };
+}
+
+/**
+ * What Max for the coin on screen is asked for (card max-is-priced-for-the-coin): the signing page's pool.buy.dry, the
+ * chain's tap_max on the coin's own venue. The key names the coin and the proofs state.pools priced (its ready and
+ * tap_max): an answer counts only while they are the same. Null where state.pools' tap_max is already the coin's
+ * (Base and Robinhood: a tap spends a whole chunk) or there is none to price (no Solana pool, no proof ready).
+ */
+export function coinTapKey(pools: SignpageState["pools"], chain: Chain, token: string): string | null {
+  const p = chain === "solana" ? poolOf(pools, chain) : null;
+  return p && token !== "" && p.ready !== undefined && p.tap_max !== undefined ? JSON.stringify([token, p.ready, p.tap_max]) : null;
+}
+
+/** state.pools with the chain's tap_max the coin's (`coinTap`, pool.buy.dry's answer for coinTapKey's coin and proofs)
+ *  in place of the costliest venue's; as they are with none, or with one that is not a decimal at most the entry's
+ *  ready. Every Max of the box (poolView, poolBuyAsk, the presets) reads the pools it gives. */
+export function withCoinTap(pools: SignpageState["pools"], chain: Chain, coinTap: string | null): SignpageState["pools"] {
+  const p = coinTap === null || chain !== "solana" ? null : poolOf(pools, chain);
+  if (!p || p.ready === undefined || p.tap_max === undefined) return pools;
+  const d = POOL_ASSET_DECIMALS[p.asset];
+  const tap = decimalToUnits(coinTap!, d);
+  const ready = decimalToUnits(p.ready, d);
+  if (tap === null || ready === null || tap > ready) return pools;
+  return pools!.map((x) => (x === p ? { ...x, tap_max: coinTap! } : x));
+}
+
+/** When Max for the coin is asked again, ms, after the page's refusal `code`: a trade running (busy) every second, a
+ *  provider that failed (down) every 3 s, as the sell box asks its preview again (positions/SellBox.tsx PREVIEW_BUSY_MS,
+ *  PREVIEW_AGAIN_MS); null for an answer that is no (that coin, those proofs: state.pools' Max stays). */
+export function coinTapAgainMs(code: string): number | null {
+  return code === "busy" ? 1_000 : code === "down" ? 3_000 : null;
 }
 
 export type PoolBuyAsk =

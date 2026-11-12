@@ -252,6 +252,133 @@ test("tx_hash: one call at U's nonce + 1, confirmed from the pages on both RPCs,
   assert.deepEqual(note.leaf, { value: AMOUNT, label: 1000n, commitment: noteCommitment(AMOUNT, 1000n, t.note.precommitment), leafIndex: 0n });
 });
 
+test("a NEAR sell's return (card near-private-trading): W_{near,l,j} binds its return note as U binds a deposit: W signs, W the depositor, the note UNSPENT from the pages; a U note or a mover that is neither is refused", async () => {
+  const store = await noteStore();
+  const l = 9n;
+  const j = 4;
+  const ref: NoteRef = { kind: "return", c: "near", l, j };
+  const note = await store.add({ ref, scope: 1n, precommitment: pc(ref), state: "PLANNED" });
+  const w = d.freshWallet(SEED, "near", l, j);
+  w.secretKey.fill(0);
+  const chain = new Chain(w.address);
+  const r = relayer(chain, ["tx"], lands(chain));
+  const deps = { store, rpcs: chain.rpcs(), fetchFn: r.fetchFn, sleep: async () => (chain.tick(), await turn()), signal: AbortSignal.timeout(20_000), relayerAccount: RELAYER };
+  const n0 = chain.a.nonce;
+  const out = landed(await bindDeposit(SEED, { network: "testnet", w: { l, j }, noteId: note.id, amount: AMOUNT }, deps));
+  assert.equal(r.sent.length, 1);
+  assert.equal(r.sent[0]!.sender, w.address);
+  assert.equal(r.sent[0]!.nonce, n0 + 1n);
+  assert.equal(r.sent[0]!.p, note.precommitment);
+  assert.equal(JSON.parse(JSON.parse(Buffer.from((r.sent[0]!.inner as { FunctionCall: { args: string } }).FunctionCall.args, "base64").toString()).msg).depositor, w.address);
+  assert.equal(out.state, "UNSPENT");
+  assert.equal(out.calls?.length, 1);
+  assert.equal(out.calls?.[0]?.sender_id, w.address);
+  // another W's note, U's arguments for W's note, and both movers named: refused before anything is sent
+  const other = await store.add({ ref: { kind: "return", c: "near", l, j: j + 1 }, scope: 1n, precommitment: pc({ kind: "return", c: "near", l, j: j + 1 }), state: "PLANNED" });
+  await assert.rejects(bindDeposit(SEED, { network: "testnet", w: { l, j }, noteId: other.id, amount: AMOUNT }, deps), (e: unknown) => e instanceof DepositBindRefused && e.code === "note");
+  await assert.rejects(bindDeposit(SEED, { network: "testnet", s: 1n, i: 0, noteId: other.id, amount: AMOUNT }, deps), (e: unknown) => e instanceof DepositBindRefused && e.code === "note");
+  await assert.rejects(bindDeposit(SEED, { network: "testnet", s: 1n, i: 0, w: { l, j }, noteId: other.id, amount: AMOUNT } as never, deps), (e: unknown) => e instanceof DepositBindRefused && e.code === "input");
+  await assert.rejects(bindDeposit(SEED, { network: "testnet", noteId: other.id, amount: AMOUNT } as never, deps), (e: unknown) => e instanceof DepositBindRefused && e.code === "input");
+  assert.equal(r.sent.length, 1);
+});
+
+test("a NEAR sell's proceeds over the deposit's cap: W binds its R second arrivals on NEAR after its return note, each its own P; a prepay_open on one waits for the note before it (R2); another W's, or another chain's, R note is refused", async () => {
+  const store = await noteStore();
+  const l = 9n;
+  const j = 4;
+  const ret: NoteRef = { kind: "return", c: "near", l, j };
+  const r0: NoteRef = { kind: "second", id: { id: "R", c: "near", l, j }, n: 0 };
+  const r1: NoteRef = { kind: "second", id: { id: "R", c: "near", l, j }, n: 1 };
+  const w = d.freshWallet(SEED, "near", l, j);
+  w.secretKey.fill(0);
+  const chain = new Chain(w.address);
+  // the relayer: the first R note's first send meets an open P of W's (R2), then lands
+  const r = relayer(chain, ["tx", "prepay_open", "tx", "tx"], lands(chain));
+  const deps = { store, rpcs: chain.rpcs(), fetchFn: r.fetchFn, sleep: async () => (chain.tick(), await turn()), signal: AbortSignal.timeout(20_000), relayerAccount: RELAYER };
+  const bind = (noteId: string) => bindDeposit(SEED, { network: "testnet", w: { l, j }, noteId, amount: AMOUNT }, deps);
+  const first = await store.add({ ref: ret, scope: 1n, precommitment: pc(ret), state: "PLANNED" });
+  landed(await bind(first.id));
+  const second = await store.add({ ref: r0, scope: 1n, precommitment: pc(r0), state: "PLANNED" });
+  const out0 = landed(await bind(second.id));
+  assert.equal(out0.state, "UNSPENT");
+  const third = await store.add({ ref: r1, scope: 1n, precommitment: pc(r1), state: "PLANNED" });
+  landed(await bind(third.id));
+  assert.deepEqual(r.sent.map((s) => s.p), [pc(ret), pc(r0), pc(r0), pc(r1)]);
+  assert.ok(r.sent.every((s) => s.sender === w.address));
+  // another W's R note, and W's R note on another chain: not W_{near,l,j}'s to move
+  for (const ref of [{ kind: "second", id: { id: "R", c: "near", l, j: j + 1 }, n: 0 }, { kind: "second", id: { id: "R", c: "sol", l, j }, n: 0 }] as NoteRef[]) {
+    const prev: NoteRef = { kind: "return", c: (ref as { id: { c: "near" | "sol" } }).id.c, l, j: (ref as { id: { j: number } }).id.j };
+    // the note before it, landed, so the store takes the R note
+    await store.add({ ref: prev, scope: 1n, precommitment: pc(prev), state: "UNSPENT", leaf: { value: AMOUNT, label: 7n, commitment: noteCommitment(AMOUNT, 7n, pc(prev)), leafIndex: 90n } });
+    const n = await store.add({ ref, scope: 1n, precommitment: pc(ref), state: "PLANNED" });
+    await assert.rejects(bind(n.id), (e: unknown) => e instanceof DepositBindRefused && e.code === "note");
+  }
+  assert.equal(r.sent.length, 4);
+});
+
+test("W's note that lapses is signed again as W at its own nonce (never as U), and lands; W's arguments on U's note, and W's return note on another chain, are refused before anything is signed", async () => {
+  const store = await noteStore();
+  const l = 9n;
+  const j = 4;
+  const ref: NoteRef = { kind: "return", c: "near", l, j };
+  const note = await store.add({ ref, scope: 1n, precommitment: pc(ref), state: "PLANNED" });
+  const w = d.freshWallet(SEED, "near", l, j);
+  w.secretKey.fill(0);
+  const chain = new Chain(w.address);
+  const r = relayer(chain, ["amount_above_balance", "tx"], lands(chain));
+  const deps = { store, rpcs: chain.rpcs(), fetchFn: r.fetchFn, sleep: async () => (chain.tick(), await turn()), signal: AbortSignal.timeout(20_000), relayerAccount: RELAYER };
+  landed(await bindDeposit(SEED, { network: "testnet", w: { l, j }, noteId: note.id, amount: AMOUNT }, deps));
+  assert.equal(r.sent.length, 2);
+  assert.ok(r.sent.every((x) => x.sender === w.address), "every call W's");
+  assert.equal(r.sent[1]!.nonce, r.sent[0]!.nonce);
+  assert.ok(r.sent[1]!.mbh > r.sent[0]!.mbh);
+  // U's deposit note under W's arguments
+  const u = await store.planDeposit(1n, pc);
+  await assert.rejects(bindDeposit(SEED, { network: "testnet", w: { l, j }, noteId: u.id, amount: AMOUNT }, deps), (e: unknown) => e instanceof DepositBindRefused && e.code === "note");
+  // W's return note on Solana (l and j W's own): not a NEAR note, never W_{near,l,j}'s to move
+  const sol: NoteRef = { kind: "return", c: "sol", l, j };
+  const solNote = await store.add({ ref: sol, scope: 1n, precommitment: pc(sol), state: "PLANNED" });
+  await assert.rejects(bindDeposit(SEED, { network: "testnet", w: { l, j }, noteId: solNote.id, amount: AMOUNT }, deps), (e: unknown) => e instanceof DepositBindRefused && e.code === "note");
+  assert.equal(r.sent.length, 2);
+});
+
+test("the store holds calls on a NEAR return note only: a return note on another chain holding a call is a record it refuses", async () => {
+  const store = await noteStore();
+  const t = await setup(["tx"]);
+  landed(await bindDeposit(SEED, t.args, t.deps));
+  const call = (await t.store.get(t.note.id))!.calls![0]!;
+  const { tx_hashes: _h, ...newCall } = call as typeof call & { tx_hashes?: unknown };
+  for (const c of ["near", "sol"] as const) {
+    const ref: NoteRef = { kind: "return", c, l: 9n, j: 4 };
+    const n = await store.add({ ref, scope: 1n, precommitment: pc(ref), state: "PLANNED" });
+    await store.move(n.id, "PLANNED", "INCOMING");
+    const add = store.addCall(n.id, newCall as never, 0, 0);
+    // the store's record check (on every read): a call on another chain's return note is a record it refuses
+    if (c === "sol") await assert.rejects(add.then(() => store.get(n.id)), /only a deposit, second-arrival or NEAR return note has calls/);
+    else assert.equal((await add).calls?.length, 1), assert.equal((await store.get(n.id))!.calls?.length, 1);
+  }
+});
+
+test("a mover's number out of range (s or l not a field element, i or j not a counter) is refused before the seed is copied; no copy of the seed outlives a refusal", async () => {
+  const store = await noteStore();
+  const rpcs = new Chain("ab".repeat(32)).rpcs();
+  const seed = new Uint8Array(64).fill(7);
+  const copies: Uint8Array[] = [];
+  const from = Uint8Array.from;
+  (Uint8Array as unknown as { from: unknown }).from = function (...a: unknown[]) {
+    const out = (from as (...x: unknown[]) => Uint8Array).apply(Uint8Array, a);
+    if (out.length === 64) copies.push(out);
+    return out;
+  };
+  try {
+    for (const m of [{ w: { l: 1n, j: -1 } }, { w: { l: 1n, j: 2 ** 32 } }, { w: { l: -1n, j: 0 } }, { s: 1n, i: -1 }, { s: 1n << 254n, i: 0 }])
+      await assert.rejects(bindDeposit(seed, { network: "testnet", ...m, noteId: "x", amount: AMOUNT } as BindDepositArgs, { store, rpcs, relayerAccount: RELAYER }), (e: unknown) => e instanceof DepositBindRefused && e.code === "input" && /counter|field element/.test(e.message), JSON.stringify(m, (_, v) => (typeof v === "bigint" ? String(v) : v)));
+  } finally {
+    (Uint8Array as unknown as { from: unknown }).from = from;
+  }
+  assert.ok(copies.every((c) => !c.every((b) => b === 7)), "a copy of the seed outlived the refusal");
+});
+
 test("planted: a page read from one RPC only does not confirm; the note stays INCOMING until both hold the row", async () => {
   let landedAt = -1;
   const t = await setup(["tx"], (c) => (s) => {
@@ -336,6 +463,26 @@ test("sender_struck (R3): stops at once, tells the caller to open the way out, a
   assert.equal(t.sent.length, 1);
   assert.equal(t.chain.readsOfKeys, reads); // not even read again
   assert.equal((await t.store.get(t.note.id))!.state, "INCOMING"); // the money is in U, not in the vault
+});
+
+test("seed: a bind refused at once for a struck U zeroes its copy of the seed before the throw", async () => {
+  const t = await setup(["sender_struck"]);
+  assert.deepEqual(await bindDeposit(SEED, t.args, t.deps), { kind: "struck", account: t.u });
+  const copies: Uint8Array[] = [];
+  const from = Uint8Array.from;
+  Uint8Array.from = function (this: typeof Uint8Array, ...a: Parameters<typeof Uint8Array.from>) {
+    const c = from.apply(this, a);
+    if (c.length === 64) copies.push(c);
+    return c;
+  } as typeof Uint8Array.from;
+  try {
+    await assert.rejects(bindDeposit(SEED, t.args, t.deps), (e: unknown) => e instanceof DepositBindRefused && e.code === "struck");
+  } finally {
+    Uint8Array.from = from;
+  }
+  assert.ok(copies.length >= 1, "the bind copies the seed");
+  assert.ok(copies.every((c) => c.every((b) => b === 0)), "every copy of the seed is zeroed");
+  assert.ok(SEED.some((b) => b !== 0), "the caller's seed is the caller's to zero");
 });
 
 for (const reply of ["tx", "lost"] as const) {

@@ -244,6 +244,23 @@ test("filled: one Bought for the nullifier, the same on both RPCs, paying W the 
   assert.equal(seen.settles, 1, "the settle pass ends the RESERVED note");
 });
 
+// card fresh-money-spendable-at-once: a tap spends one whole chunk, the ask's; among proofs of that chunk one on the
+// epoch root goes before one on the newest root (a note that landed this epoch), which is spent only when it alone is
+// the amount
+test("the pick takes a proof of the ask's chunk on the epoch root before one on the newest root, and the newest one when it alone is the amount", async () => {
+  const newest: ReadyProof<EvmPoolRequest> = { ...readyOf(relayOf(), "n0", "a0"), root: "newest" };
+  const a = host({ ready: [newest, readyOf()], ...both([release()]) });
+  assert.deepEqual(await runEvmPoolBuy(a.h, ASK), { stage: "filled", txs: [{ chain: "base", hash: TX }] });
+  assert.deepEqual(a.seen.takes, ["n1"], "the epoch-root proof");
+  const b = host({ ready: [newest], ...both([release()]) });
+  assert.deepEqual(await runEvmPoolBuy(b.h, ASK), { stage: "filled", txs: [{ chain: "base", hash: TX }] });
+  assert.deepEqual(b.seen.takes, ["n0"], "the newest-root proof alone");
+  // the chunk comes first: an epoch-root proof of another chunk is never the pick
+  const c = host({ ready: [{ ...readyOf(), chunk: CHUNK * 2n }, newest], ...both([release()]) });
+  assert.deepEqual(await runEvmPoolBuy(c.h, ASK), { stage: "filled", txs: [{ chain: "base", hash: TX }] });
+  assert.deepEqual(c.seen.takes, ["n0"]);
+});
+
 test("(ruling 2) the read-back names no W, nullifier or transaction to a public RPC: newest blocks and the pool's logs by address and topics only", async () => {
   const { h, seen } = host(both([release()]));
   await runEvmPoolBuy(h, ASK);

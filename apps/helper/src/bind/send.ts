@@ -26,7 +26,8 @@
 //      once, signed afresh.
 //   8. (i) the count is written before the send (R7). A send counts as failed only once the deposits pages, read at a
 //      height both providers' finals have passed beyond its last receipt, do not hold P for U; short of that it stays
-//      pending. It is not counted when the pages hold P for U, when USDC's own receipt failed with its paused error
+//      pending. It is not counted when the pages hold P for U, when the vault refused P as used and the pages hold P for
+//      another sender (a front-run), when USDC's own receipt failed with its paused error
 //      and the watch's pause history shows USDC paused at that receipt's height (R3's one exception), or when it was
 //      dropped. Any other outcome counts, an expired delegate (DelegateActionExpired) included.
 //      At three failures U is struck: sender_struck from then on, no top-up.
@@ -70,6 +71,8 @@ export const PREPAY_GAS = 30_000_000_000_000n;
  */
 export const PER_P_WORST_YOCTO = 30_252_600_000_000_000_000_000n;
 export const RELAYER_FLOOR_YOCTO = 300_000_000_000_000n * 1_000_000_000n + PER_P_WORST_YOCTO;
+/** The vault's refusal of a deposit on a precommitment a deposit already used (contracts/vault/src/deposit.rs row 3). */
+export const P_USED = "PrecommitmentAlreadyUsed";
 /** USDC's message for every call while paused (V 2.5.1 case 2). */
 export const USDC_PAUSED = "FiatToken: paused";
 /** How long a send's outcome is waited for at FINAL, and the pages for both finals, before it stays pending. */
@@ -107,7 +110,13 @@ export type Receipt = { executor: string; ok: boolean; failure: string; height: 
 
 /** One relayer transaction's outcome. */
 export type TxOutcome =
-  | { kind: "final"; tx_hash: string; receipts: Receipt[] }
+  | {
+      kind: "final";
+      tx_hash: string;
+      receipts: Receipt[];
+      /** What the transaction and every receipt it made burnt (their tokens_burnt), when both providers read the same. */
+      burnt?: bigint;
+    }
   /** It never landed and never can: (a2) K's nonce passed it at a block D whose changes do not name it, or (b) K's nonce is below its own at F past b0 + the validity period. */
   | { kind: "dropped"; tx_hash: string; why: string }
   /** Not known yet: it may still land. */
@@ -400,6 +409,12 @@ function carriedBy(store: DepositStore, raw: Uint8Array, sha: string): string | 
 
 /** U's one in-flight slot in this process (the store's lock makes it the only one): U -> the P being carried. */
 const inFlight = new Map<string, bigint>();
+/**
+ * One carry at a time per signing account across the kinds: a deposit and a trade (trade.ts) for the same 64-hex id
+ * never run at once, so their delegates' nonces never interleave in this process (a sell's move back to the vault is a
+ * deposit from W, right after W's swap).
+ */
+export const accountSlots = new Set<string>();
 
 /** R1-R3 and R7 for checks.ts, read only: nothing is written outside U's slot. */
 export function ledgerOf(store: DepositStore, reads: SendReads): BindLedger {
@@ -454,13 +469,16 @@ export async function carryDeposit(request: unknown, deps: SendDeps): Promise<An
   // 3. U's one in-flight slot: test-and-set with no await between, then the carried index again.
   const busy = inFlight.get(u);
   if (busy !== undefined) return no(busy === p ? "in_flight" : "prepay_open");
+  if (accountSlots.has(u)) return no("in_flight"); // a trade carry for the same account is running
   inFlight.set(u, p);
+  accountSlots.add(u);
   try {
     const was = carriedBy(store, raw!, sha!);
     if (was !== null) return sent(was);
     return await carryChecked(deps, d, sha!);
   } finally {
     inFlight.delete(u);
+    accountSlots.delete(u);
   }
 }
 
@@ -475,6 +493,10 @@ async function sendState(deps: SendDeps, u: string, p: bigint, amount: bigint, o
   const pages = await deps.reads.depositSettled(p, last);
   if (pages.state === "unknown") return "pending";
   if (pages.state === "held" && pages.depositor === u && pages.value === amount) return "landed";
+  // A front-run the chain proves: the vault's own receipt refused P as already used and the pages hold P for another
+  // sender. U's call was sound and U's USDC stays in U for its next P, so it is not counted (no strike for a stranger's
+  // deposit); the pages holding P free U for that next P (R2), and a used P takes no more sends (check 6).
+  if (pages.state === "held" && pages.depositor !== u && out.receipts.some((r) => !r.ok && r.executor === deps.cfg.vault && r.failure.includes(P_USED))) return "exempt";
   // Whatever else the outcome is, an expiry (DelegateActionExpired) included, it counts (R3, M284, V 2.10): the per-U
   // cost bound never rests on K's value.
   const paused = out.receipts.find((r) => !r.ok && r.executor === deps.cfg.token && r.failure.includes(USDC_PAUSED));
@@ -778,6 +800,15 @@ export function createSendReads(rpcs: readonly [Rpc, Rpc], cfg: { vault: string;
     accessKey: (account, publicKey) =>
       both(async (r, h): Promise<KeyRead> => {
         const { block: _block, ...k } = await readKey(r, { block_id: Number(h), account_id: account, public_key: publicKey });
+        if (k.kind !== "no_key") return k;
+        // nearcore answers a key read on an account that does not exist as an absent key (read 12 Nov on both testnet
+        // providers): the account is read at the same block, so a sender with no account reads as no_account
+        try {
+          await r("query", { request_type: "view_account", block_id: Number(h), account_id: account });
+        } catch (e) {
+          if (e instanceof RpcError && e.cause_name === "UNKNOWN_ACCOUNT") return { kind: "no_account" };
+          throw e;
+        }
         return k;
       }),
     ftBalance: (account) => both(async (r, h) => u128(await view(r, h, cfg.token, "ft_balance_of", { account_id: account }), "ft_balance_of")),
@@ -940,7 +971,7 @@ export async function startRelayer(rpcs: readonly [Rpc, Rpc], archival: Rpc | nu
 }
 
 /** One provider's lookup by hash, once FINAL: the block its transaction_outcome names and its receipts. */
-type Lookup = { at: unknown; receipts: Receipt[] };
+type Lookup = { at: unknown; receipts: Receipt[]; burnt: bigint | null };
 const isLookup = (x: Lookup | "forgot" | null): x is Lookup => x !== null && x !== "forgot";
 /** Two providers' receipt lists the same: each receipt's executor, ok, failure and height, in order. */
 export const sameReceipts = (a: readonly Receipt[], b: readonly Receipt[]): boolean =>
@@ -1153,13 +1184,21 @@ export function createRelayer(rpcs: readonly [Rpc, Rpc], archival: Rpc | null, a
       const a = await r("tx", { tx_hash: tx.tx_hash, sender_account_id: account, wait_until: "NONE" });
       if (!isObj(a) || a.final_execution_status !== "FINAL" || !Array.isArray(a.receipts_outcome)) return null;
       const receipts: Receipt[] = [];
+      // the gas the gas account paid for: the transaction's tokens_burnt and every receipt's (null when one is missing)
+      const burntOf = (o: unknown): bigint | null => {
+        const v = isObj(o) && isObj(o.outcome) ? o.outcome.tokens_burnt : undefined;
+        return typeof v === "string" && /^(0|[1-9][0-9]{0,38})$/.test(v) ? BigInt(v) : null;
+      };
+      let burnt: bigint | null = burntOf(a.transaction_outcome);
       for (const o of a.receipts_outcome) {
+        const b = burntOf(o);
+        burnt = burnt === null || b === null ? null : burnt + b;
         const out = isObj(o) && isObj(o.outcome) ? o.outcome : {};
         const st = isObj(out.status) ? out.status : {};
         const ok = Object.hasOwn(st, "SuccessValue") || Object.hasOwn(st, "SuccessReceiptId");
         receipts.push({ executor: typeof out.executor_id === "string" ? out.executor_id : "", ok, failure: ok ? "" : JSON.stringify(st), height: await heightOf(r, isObj(o) ? o.block_hash : undefined) });
       }
-      return { at: isObj(a.transaction_outcome) ? a.transaction_outcome.block_hash : undefined, receipts };
+      return { at: isObj(a.transaction_outcome) ? a.transaction_outcome.block_hash : undefined, receipts, burnt };
     } catch (e) {
       return e instanceof RpcError && e.cause_name === "UNKNOWN_TRANSACTION" ? "forgot" : null; // else an error: nothing read
     }
@@ -1211,7 +1250,9 @@ export function createRelayer(rpcs: readonly [Rpc, Rpc], archival: Rpc | null, a
     }
     if (reads.length < 2) return keep("applied at D; its outcome is not final on two providers yet");
     if (!sameReceipts(reads[0]!.receipts, reads[1]!.receipts)) return keep("applied at D; the providers' receipts differ");
-    return { kind: "final", tx_hash: tx.tx_hash, receipts: reads[0]!.receipts };
+    const [u0, u1] = [reads[0]!.burnt, reads[1]!.burnt];
+    if (u0 !== null && u1 !== null && u0 !== u1) return keep("applied at D; the providers' burnt tokens differ");
+    return { kind: "final", tx_hash: tx.tx_hash, receipts: reads[0]!.receipts, ...(u0 !== null && u0 === u1 && { burnt: u0 }) };
   };
   /** One round; any error, missing answer or disagreement keeps it. */
   const readOnce = async (tx: TxRef, fromBlocks = false): Promise<TxOutcome> => {

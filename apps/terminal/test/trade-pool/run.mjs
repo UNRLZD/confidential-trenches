@@ -189,6 +189,9 @@ try {
         }
         await common(page, w, tag, external, dialogs);
         if (SHOTS) (await page.screenshot({ path: path.join(SHOTS, `${name}-${w.name}-${scheme}.png`) }), shots++);
+        // the box's own read of this coin's Max (pool.buy.dry): one a state at most, on Solana only, and never a buy
+        const reads = await page.evaluate(() => window.__reads);
+        check(reads.length <= 1 && reads.every((c) => c.params.chain === "solana" && name.startsWith("sol")), `${tag}: the Max reads ${JSON.stringify(reads)}`);
         // one tap: the ask the box's own checks passed, or nothing
         await cta.click({ force: true });
         await page.clock.runFor(100);

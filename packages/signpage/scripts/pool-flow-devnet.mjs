@@ -70,13 +70,14 @@ const { entropyToWords, wordsToSeed64, depositId } = await import("../../wallet/
 const { openWalletStore } = await import("../../wallet/src/store/index.ts");
 const { openNoteStore } = await import("../../wallet/src/notes/store.ts");
 const { noteSecrets } = await import("../../wallet/src/notes/secrets.ts");
-const { SOL_POOLS, solanaPoolOf } = await import("../../wallet/src/pool/solana.ts");
+const { SOL_POOLS, SOL_TIP_CAP, solanaPoolOf } = await import("../../wallet/src/pool/solana.ts");
 const { solanaRestoreNotes } = await import("../../wallet/src/pool/solana-restore.ts");
 const { refKey } = await import("../../wallet/src/notes/store.ts");
-const { readSolanaRent, solanaRentMin, readSolanaPoolBuyVenue, solanaPoolBuyMaxSpend, solanaPoolBuySellNeed } = await import("../../kit/src/trade/solana/pool-buy.ts");
+const { readSolanaRent, solanaRentMin, readSolanaPoolBuyVenue, solanaPoolBuyMaxSpend, solanaPoolBuySellNeed, SOLANA_POOL_WORST_BUY_VENUE } = await import("../../kit/src/trade/solana/pool-buy.ts");
 const { ZK_SETUP_FILES } = await import("../../kit/src/zk/setup-files.ts");
 const { SOLANA_POOL_JITO_TIP, SOLANA_JITO_TIP_ACCOUNTS } = await import("../../kit/src/checks/solana/checks.ts");
 const { poolKinds } = await import("../src/pool-kinds.ts");
+const { poolBuyDryKind } = await import("../src/pools.ts");
 const { TESTNET_RPCS, testnetPool, testnetPoolDeps, testnetRpc, PAGE_TABLES } = await import("../src/pool-testnet.ts");
 const { POOL_TESTNET } = await import("../../wallet/src/pool/network.ts");
 if (!COPY && (POOL_TESTNET !== true || SOL_POOLS.devnet === undefined)) throw new Error("not the testnet build's pins");
@@ -445,6 +446,8 @@ if (RESUME && process.env.FLOW_SWEEP_W) {
 }
 const landed = deposit.notes?.some((n) => n.ref === "deposit" && n.state === "UNSPENT");
 let buy = null;
+// <spend> max: the page's pool.buy.dry answer the buy spends, the costliest venue's spend and the run's own reads' most
+let maxSpend = null;
 let proofWait = null;
 // FLOW_REFUSE: the Solana pool balance from the notes, as state.pools counts it, before the tap and after the run's end
 let refused = null;
@@ -473,9 +476,27 @@ else if (landed) {
   log(`pass ${JSON.stringify(pass, (k, v) => (typeof v === "bigint" ? String(v) : v))}`);
   let spend = SPEND;
   if (SPEND === "max") {
+    // the trade box's Max for this coin: the page's own pool.buy.dry (src/pools.ts poolBuyDryKind) on the notes and
+    // ready proofs as state.pools reads them, the coin's venue read on both RPCs, the proof's fee cap and tip cap; beside
+    // it the most the run's own reads let this tap spend (the helper's relay fee, the tip the buy pays), never below it
     const max = solanaPoolBuyMaxSpend({ withdrawnValue: RUNG, relayFee }, VENUE, COPY ? SOLANA_POOL_JITO_TIP : 0n, rent);
-    spend = `0.${String(max).padStart(9, "0")}`;
-    log(`max spend on ${VENUE.kind}: ${max} lamports at relay fee ${relayFee}; W keeps ${KEEPS}, its sell's need on any venue`);
+    const dry = poolBuyDryKind({
+      pools: [solanaBalancePool(`sol:${PIN.program}`, scope)],
+      rpcs: () => rpcs,
+      rent: () => rent,
+      ready: async () => {
+        const b = await t.readyWith(() => ns.list());
+        return { notes: b.value, ready: b.ready, open: b.open, landed: b.landed };
+      },
+      trading: () => false,
+    })({ chain: "solana", token: MINT });
+    await dry.after;
+    const answer = dry.answer();
+    if (!("result" in answer)) throw new Error(`pool.buy.dry refused: ${JSON.stringify(answer)}`);
+    spend = answer.result.tap_max;
+    const worst = solanaPoolBuyMaxSpend({ withdrawnValue: RUNG, relayFee }, SOLANA_POOL_WORST_BUY_VENUE, SOL_TIP_CAP, rent);
+    maxSpend = { page: spend, worstVenue: String(worst), runReads: String(max), venue: VENUE };
+    log(`max spend on ${VENUE.kind}: the page's pool.buy.dry ${spend} SOL (the costliest venue's ${worst} lamports, at most ${max} at the run's relay fee ${relayFee} and tip); W keeps at least ${KEEPS}, its sell's need on any venue`);
   }
   log(`pool.buy of ${spend} SOL of ${MINT}`);
   const before = REFUSE ? await poolBalance() : null;
@@ -580,7 +601,7 @@ const filled = REFUSE ? back : COPY && process.env.FLOW_COPY_STOP === "buy" ? la
 seed64.fill(0);
 // FLOW_COPY: each send by its step (the copy's record reads each back), the W of the buy and the tip accounts watched
 const steps = COPY ? copy.sent.map((s) => ({ step: s.phase, signature: s.signature, watch: { W: rentBack?.W ?? null, feePayer: PIN.feePayer, ...Object.fromEntries(SOLANA_JITO_TIP_ACCOUNTS.map((a, i) => [`tip${i}`, a])) } })) : undefined;
-writeFileSync(OUT, JSON.stringify({ at: new Date().toISOString(), cluster: COPY ? "mainnet copy" : "devnet", program: PIN.program, seedFile, steps, simFails: copy?.simFails, planted: copy?.planted, fee: copy ? String(copy.fee) : undefined, sendLines: copy?.sendLines, proofWait, engine: copy?.engine, engineCalls: copy?.engineCalls, pool, tables: TABLES, mint: MINT, spend: SPEND, resumed: Boolean(RESUME), burst: BURST, injected, dust: DUST ? { S: dust.S, sent: dust.sent, burned: dust.burned ?? null, txs: dustTxs } : null, U, need: String(NEED), deposit, buy, buyTimeline: timeline, refused, sell, rentBack, sentTxs, stages, notes, filled }, null, 2) + "\n");
+writeFileSync(OUT, JSON.stringify({ at: new Date().toISOString(), cluster: COPY ? "mainnet copy" : "devnet", program: PIN.program, seedFile, steps, simFails: copy?.simFails, planted: copy?.planted, fee: copy ? String(copy.fee) : undefined, sendLines: copy?.sendLines, proofWait, engine: copy?.engine, engineCalls: copy?.engineCalls, pool, tables: TABLES, mint: MINT, spend: SPEND, maxSpend, resumed: Boolean(RESUME), burst: BURST, injected, dust: DUST ? { S: dust.S, sent: dust.sent, burned: dust.burned ?? null, txs: dustTxs } : null, U, need: String(NEED), deposit, buy, buyTimeline: timeline, refused, sell, rentBack, sentTxs, stages, notes, filled }, null, 2) + "\n");
 await t.signedOut();
 ns.close();
 w.close();

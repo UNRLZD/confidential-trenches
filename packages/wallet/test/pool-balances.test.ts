@@ -223,6 +223,37 @@ test("the ladder's least rung at mainnet rent: every cost of src/pool/balances.t
   assert.notEqual(funds(items.spend + 1n, SOL_TIP_CAP), null);
 });
 
+test("the coin's own venue (card max-is-priced-for-the-coin): the least rung's tap spend on each venue and mint kind, each the most that venue's funds rule passes", () => {
+  const rent: SolanaRent = { lamportsPerByte: 5_080n, factor: 1n };
+  const chunk = SOL_LADDER.min;
+  const fee = solanaPoolFee(rent);
+  const cases = [
+    // a Token mint's coin with no cashback: the same on the curve and on PumpSwap
+    [{ kind: "pump-curve", tokenAccountSize: 165, cashback: false }, 3_371_920n],
+    [{ kind: "pumpswap", tokenAccountSize: 165, cashback: false }, 3_371_920n],
+    // Token-2022 at its largest
+    [{ kind: "pump-curve", tokenAccountSize: 195, cashback: false }, 3_219_520n],
+    [{ kind: "pumpswap", tokenAccountSize: 195, cashback: false }, 3_219_520n],
+    // cashback
+    [{ kind: "pumpswap", tokenAccountSize: 165, cashback: true }, 1_883_480n],
+    [{ kind: "pump-curve", tokenAccountSize: 165, cashback: true }, 537_280n],
+    [SOLANA_POOL_WORST_BUY_VENUE, 384_880n],
+  ] as const;
+  for (const [venue, spend] of cases) {
+    const at = JSON.stringify(venue);
+    assert.equal(solanaTapSpendOf(rent, venue)(chunk, fee, SOL_TIP_CAP), spend, at);
+    const funds = (s: bigint) => solanaPoolBuyFunds({ withdrawnValue: chunk, relayFee: fee } as SolanaPoolRelease, venue as never, { spend: s, tip: SOL_TIP_CAP }, rent).problem;
+    assert.equal(funds(spend), null, at);
+    assert.notEqual(funds(spend + 1n), null, at);
+  }
+  // with no venue: the costliest, as before
+  assert.equal(solanaTapSpendOf(rent)(chunk, fee, SOL_TIP_CAP), 384_880n);
+  const s = note(11n, "HELD", chunk);
+  const S = solanaBalancePool("s", 11n, solanaTapSpendOf(rent, { kind: "pump-curve", tokenAccountSize: 165, cashback: false }));
+  const sp = { ...proof(S, s, chunk, undefined, fee), binding: { feeCap: fee, request: { tipCap: SOL_TIP_CAP } } };
+  assert.deepEqual(poolBalances([s], [S], [sp]), [{ chain: "solana", asset: "SOL", balance: "0.01", ready: "0.01", tap_max: "0.00337192" }]);
+});
+
 test("one entry per chain in the order of the pool table: a configured chain with no notes is \"0\", two pools of one asset on one chain sum", () => {
   const SOL2: BalancePool = { id: "sol-pool-2", chain: "solana", scope: 44n, asset: "SOL" };
   const a = note(SOL.scope, "UNSPENT", 3n * LAMPORTS);

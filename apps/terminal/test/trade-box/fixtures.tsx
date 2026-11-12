@@ -43,10 +43,12 @@ const PER_CENT = 480_000_000n;
 declare global {
   interface Window {
     __calls: unknown[];
+    __reads: unknown[];
     __previews: number;
   }
 }
 window.__calls = [];
+window.__reads = [];
 window.__previews = 0;
 
 const q = new URLSearchParams(location.search);
@@ -101,6 +103,12 @@ const kit: TradeKit = {
   maxBuy: () => "100",
   poolPrice: (chain) => (POOL && chain === POOL.chain ? PRICES[POOL.chain] : null),
   request: ((kind: string, params: unknown) => {
+    // the box's own read of the coin's Max (pool.buy.dry) is no buy: recorded apart in window.__reads and answered as a
+    // read the page could not make, so the box keeps the Max of its state (the fixtures' own)
+    if (kind === "pool.buy.dry") {
+      window.__reads.push({ kind, params });
+      return { id: `read-${window.__reads.length}`, outcome: Promise.resolve({ ok: false, error: { code: "quote_check_failed" } }) };
+    }
     const id = `buy-${++n}`;
     window.__calls.push({ kind, params, id });
     const emit = (stage: Stage) => listeners.forEach((l) => l(id, stage));
