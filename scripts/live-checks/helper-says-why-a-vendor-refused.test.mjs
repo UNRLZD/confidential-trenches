@@ -2,6 +2,7 @@
 // (helper-says-why-a-vendor-refused.answers.json, its _note says where each was read).
 //   good: a local helper from this branch's tree, 1Click mocked with its own words: PASS.
 //   bad_base: the same at 059a7cef0 (the deployed helper's commit): its 400 names no refusal: FAIL.
+//   bad_live: the deployed helper read live at 20:52Z, 1Click answering: the same FAIL.
 //   live_oneclick_down: the deployed helper while 1Click's quote API failed: 503 cause timeout: INCONCLUSIVE.
 // Planted on the good answer: a 400 with no message, a refusal named ours, a 400 to the 10 USDC quote that 1Click quotes
 // keyless (FAIL), or refuses keyless too (INCONCLUSIVE). And read() is replayed: two quotes to the proxy path, the twin only
@@ -30,6 +31,11 @@ test("recorded bad answer: the helper at 059a7cef0 names no refusal on 1Click's 
   assert.equal(v.verdict, "FAIL");
   assert.deepEqual(v.lines, ['BAD short: the helper\'s 400 names no refusal in its Server-Timing, want refusal;desc="vendor"']);
   assert.equal(EXIT[v.verdict], 1);
+  // the deployed helper read live, 1Click answering again: the same FAIL, on 1Click's own words
+  const live = judge(A.bad_live);
+  assert.equal(live.verdict, "FAIL");
+  assert.deepEqual(live.lines, v.lines);
+  assert.match(A.bad_live.short.message, /^Amount is too low\b/);
 });
 
 test("recorded live answer: 1Click's quote API down, both 503 cause timeout: INCONCLUSIVE, exit 3", () => {

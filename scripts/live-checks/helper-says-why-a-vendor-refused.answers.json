@@ -1,5 +1,5 @@
 {
- "_note": "good: a local helper from this branch's tree (apps/helper/src/server.ts handler and proxy/proxy.ts createProxy, no key), 1Click mocked with its own words for a short amount (400 'Amount is too low for bridge, try at least 1000000', as research proofs/p3-coverage read it) and a 201 for 10 USDC, read by read() 12 Nov 20:17Z: PASS. bad_base: the same at 059a7cef0, the deployed helper's commit: its 400 names no refusal: FAIL. live_oneclick_down: the deployed helper read live 12 Nov 20:16Z while 1Click's quote API failed (keyless 1Click answered 500 'Failed to receive response within timeout of 25000ms' after 25 s at 20:10Z): both 503 cause timeout: INCONCLUSIVE. 1Click was not answering quotes when these were made, so good and bad_base mock it; a live good answer replaces good once the deployed helper runs this change.",
+ "_note": "good: a local helper from this branch's tree (apps/helper/src/server.ts handler and proxy/proxy.ts createProxy, no key), 1Click mocked with its own words for a short amount (400 'Amount is too low for bridge, try at least 1000000', as research proofs/p3-coverage read it) and a 201 for 10 USDC, read by read() 12 Nov 20:17Z: PASS. bad_base: the same at 059a7cef0, the deployed helper's commit: its 400 names no refusal: FAIL. live_oneclick_down: the deployed helper read live 12 Nov 20:16Z while 1Click's quote API failed (keyless 1Click answered 500 'Failed to receive response within timeout of 25000ms' after 25 s at 20:10Z): both 503 cause timeout: INCONCLUSIVE. 1Click was not answering quotes when these were made, so good and bad_base mock it; a live good answer replaces good once the deployed helper runs this change. bad_live: the deployed helper (059a7cef0) read live 12 Nov 20:52Z once 1Click answered again: 1Click's 400 for the amount passed with its message, no refusal named: FAIL.",
  "good": {
   "base": "a local helper from this branch's tree, 1Click mocked",
   "at": "2026-11-12T20:17:37.768Z",
@@ -52,6 +52,24 @@
    "message": "the helper's upstream",
    "refusal": null,
    "cause": "timeout"
+  }
+ },
+ "bad_live": {
+  "base": "https://ct-api.unrealized.trade",
+  "at": "2026-11-12T20:52:03.973Z",
+  "short": {
+   "status": 400,
+   "ms": 956,
+   "message": "Amount is too low for bridge, try at least 0",
+   "refusal": null,
+   "cause": null
+  },
+  "quote": {
+   "status": 201,
+   "ms": 1244,
+   "message": null,
+   "refusal": null,
+   "cause": null
   }
  }
 }
