@@ -48,7 +48,7 @@
 import { base58, base64 } from "@scure/base";
 import { SOLANA_RPC_RETRY, SOLANA_RPC_WINDOW_RETRY, solanaJsonRpc, solanaPacedRpc, solanaWrappedRpc, type SolanaRpc, type SolanaRpcRetry } from "../../kit/src/trade/solana/send.ts";
 import { lanedRpc, pageHelperRpc, pageHelperRpcStopped, pageRpc, seatHosts, seatRpc, type ReadKind } from "./page-rpc.ts";
-import { holdHosts, hostLane, laneFetch } from "../../wallet/src/throttle.ts";
+import { holdHosts, hostLane, laneFetch, stopHostLaneWaits } from "../../wallet/src/throttle.ts";
 import { HELPER_FETCH_INIT, HELPER_V1_PATHS } from "../../kit/src/helper/v1.ts";
 import type { VaultProver } from "../../kit/src/prover/prove.ts";
 import { WALLET_SEED_LOCK, type WalletStore } from "@blindfill/wallet/store";
@@ -767,13 +767,15 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   let follows = new AbortController();
   // A sign out's stops, this tab's (signingOut, at its tap) and another tab's (signedOut alone, as main.ts hears it) alike
   // (card sign-out-stops-the-pages-reads: another tab's sign out left the EVM reads bound to evmStop and signOuts running):
-  // the buy records' rebuild, the late buys, the turn pass, every Solana settle, and every EVM read on evmStop or the
-  // sign-out count. The page's gate (every wait for a turn on a host ended, nothing more sent past the page's origin)
-  // is main.ts's: it closes it before either sign out reaches here, and opens it at the next landing
+  // the buy records' rebuild, the late buys, the turn pass, every read waiting for its turn on a host (card
+  // signpage-passes-yield-to-a-trade), every Solana settle, and every EVM read on evmStop or the sign-out count. The
+  // page's gate (nothing more sent past the page's origin) is main.ts's: it closes it once the store's sign out holds the
+  // seed lock, or at another tab's, and the page then reloads
   function stopReads(): void {
     buyRecords.stop();
     lateBuys.clear();
     stopTurn();
+    stopHostLaneWaits();
     signOuts++;
     stopSolana();
     evmStop.abort();

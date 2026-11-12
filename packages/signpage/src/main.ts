@@ -104,7 +104,7 @@ import { settleTradeOps, timedStore, TRADE_STORE_MS, tradeSettleDue } from "./tr
 import { PAGE_TOKEN_DECIMALS, poolKinds } from "./pool-kinds.ts";
 import { liveRuns, poolSellDryKind } from "./pool-sell-dry.ts";
 import { PAGE_CLUSTER, PAGE_SOL_PIN, pageSolanaRpcs, testnetPool, testnetPoolDeps } from "./pool-testnet.ts";
-import { gatedFetch, hostLane, openHostLanes, stopHostLaneWaits } from "../../wallet/src/throttle.ts";
+import { closeHostLanes, gatedFetch, hostLane, hostLanesClosed } from "../../wallet/src/throttle.ts";
 import { poolRestore, restoreUxOf } from "./pool-restore.ts";
 import { walkWorkerPort } from "./walk-workers.ts";
 import type { PoolChain } from "./rules/pool.ts";
@@ -139,9 +139,18 @@ const WORDS = {
 
 const framed = window.top !== window;
 // the page's one gate (card sign-out-stops-the-pages-reads; ../../wallet/src/throttle.ts): every request of this page
-// past its own origin goes through it, whatever reader makes it. A sign out closes it (this tab's or another's, first
-// thing), a sign-in's landing opens it, and a sign out the store refused opens it again.
+// past its own origin goes through it, whatever reader makes it. It closes once this tab's sign out holds the seed lock
+// (the store's `locked`) or when another tab's sign out is heard, and nothing opens it again: the page reloads after a
+// sign out (reloadSignedOut), so every loop, timer and closure of the old account ends with it, and the next load
+// starts signed out with the gate open.
 globalThis.fetch = gatedFetch(globalThis.fetch.bind(globalThis), location.origin);
+// from a sign out's tap to its end (or its refusal): no new run of any kind starts on this page; a money run that
+// already holds the seed lock finishes, its reads open, before the store's sign out can take the lock
+let leaving = false;
+function reloadSignedOut(): void {
+  closeHostLanes();
+  location.reload();
+}
 const root = document.createElement("main");
 root.id = "signin";
 if (framed) root.dataset.framed = "true";
@@ -393,7 +402,7 @@ else {
       testnet?.watch(fn);
     },
     // deposit.quote's checked answer followed (its host's `checked`), deposit.confirm answered where it is (src/deposit-follow.ts)
-    kinds: follows!.withFollow({
+    kinds: whileSignedIn(follows!.withFollow({
       // src/pages/open.ts decides what each draws, from the page's own state and store. The answer goes first, then the
       // layer opens (and the frame leaves).
       "signin.open": (p) => openKind("signin.open", p.way),
@@ -419,7 +428,7 @@ else {
       "pool.buy.dry": (params) => poolBuyDry(params),
       // the rebuild from the chain (src/pool-restore.ts): answered started, its stages in state.ops and as progress
       ...(restore ? { restore: restore.kind } : {}),
-    }),
+    })),
   });
   shell.body.append(root);
   // the user's own Esc, close tap or scrim tap: Cancel's step, on a screen Cancel is drawn on (show() below). Esc leaves
@@ -429,6 +438,12 @@ else {
     if (by === "key" && copied) return;
     void run(cancel);
   };
+}
+
+// Every kind the shell answers, refused not_allowed from a sign out's tap to its end (`leaving`): no new run starts on an
+// account that is going (card sign-out-stops-the-pages-reads)
+function whileSignedIn<K extends Record<string, ((...a: never[]) => unknown) | undefined>>(kinds: K): K {
+  return Object.fromEntries(Object.entries(kinds).map(([k, f]) => [k, f === undefined ? f : (...a: never[]) => (leaving ? null : f(...a))])) as K;
 }
 
 // The account's open kinds (src/pages/open.ts): refused unless the page's state takes them; else the answer goes first,
@@ -863,13 +878,18 @@ function storeMoved(e: WalletEvent): void {
 // a page refused by that stop halved and asked again, went on until the store's channel's task). The restore, the
 // follows and the withdrawals first, then the pool flow, whose stop ends every wait for a turn on a host.
 function signedOutElsewhere(): void {
-  // the gate first: nothing past the page's origin leaves from here on, whatever is still running
-  stopHostLaneWaits();
+  // this tab's own sign out is heard here too (the shell's channel carries the store's post): its own path reloads once
+  // the database is deleted
+  if (leaving) return;
+  // the gate first: nothing past the page's origin leaves from here on, whatever is still running; then the page
+  // reloads signed out
+  closeHostLanes();
   restore?.signedOut();
   follows?.signedOut();
   poolFollow?.stop();
   withdrawsSignedOut();
   void testnet?.signedOut();
+  reloadSignedOut();
 }
 // the resync in flight, which open kinds wait for (openKind)
 let resyncing: Promise<void> | null = null;
@@ -959,8 +979,8 @@ function settleTrades(ifDue = false): Promise<void> {
 // Where a sign-in landed (words.ts): the backup screen for a no-PRF seed this sign-in made, else signed in on the seed
 // stored, which may be another tab's (never its words then).
 async function landed(l: Landing): Promise<void> {
-  // signed in: the page's gate opens (closed by a sign out, this tab's or another's)
-  openHostLanes();
+  // a page whose gate a sign out closed lands nowhere: it reloads, and the load lands on the store as it stands
+  if (hostLanesClosed()) return void (l.seed.entropy.fill(0), location.reload());
   namer.name(l.seed.entropy);
   // a deposit a reload cut short is finished now (src/pool-testnet.ts), not at the next ask; once the landing's naming
   // is written (card sol-pools-mainnet-pin, review P3-3): the run holds the seed lock shared across its RPC reads, which
@@ -1093,8 +1113,8 @@ async function cancel(): Promise<void> {
 async function signOut(): Promise<void> {
   topLevelOnly();
   const s = await open();
-  // the gate first: nothing past the page's origin leaves from the tap on
-  stopHostLaneWaits();
+  // from the tap: no new run starts here (whileSignedIn)
+  leaving = true;
   // a restore holds the seed lock shared, which the sign out waits for: it stops first
   restore?.signedOut();
   // a deposit's follow stops too: its op stays at its stage (src/deposit-follow.ts)
@@ -1103,18 +1123,29 @@ async function signOut(): Promise<void> {
   withdrawsSignedOut();
   // a Solana or EVM pool settle holds the seed lock shared, which the sign out waits for: each stops first
   testnet?.signingOut();
-  // the handle is dropped only once the store has signed out: a refused sign out leaves it open and still held, and
-  // the gate open again (still signed in)
-  await s.signOut().catch((e: unknown) => {
-    openHostLanes();
-    throw e;
-  });
+  // the gate closes once the store holds the seed lock exclusive, after its refusals: a money run that held the lock
+  // shared ran to its end with its reads open
+  const refused = await s.signOut({ locked: () => closeHostLanes() }).then(
+    () => null,
+    (e: unknown) => ({ e }),
+  );
+  if (refused !== null) {
+    // refused before the lock's end (the backup first) with this account's seed still stored: still signed in, the
+    // handle open and held; refused with none (another tab signed out first, the store closed) or past the gate's
+    // close: signed out
+    const still = hostLanesClosed() ? undefined : await readSeed().catch(() => undefined);
+    if (still !== undefined) {
+      still.entropy.fill(0);
+      leaving = false;
+      throw refused.e;
+    }
+    return reloadSignedOut();
+  }
   store = null;
   // after the store signed out: a deposit that landed while it waited cannot open the queue again (no seed)
   await testnet?.signedOut();
-  show("signed-out");
-  // signed out by the signout kind: back to the app, which shows signed out
-  if (openedBy === "signout") closeLayer();
+  // signed out: the page reloads, and with it the app, which then shows signed out
+  reloadSignedOut();
 }
 
 let busy = false;

@@ -9,8 +9,9 @@
 // - A throttle (HTTP 429, a 5xx, -32029 or -32429 in a 200) pauses the host for every reader by the one rule (from 1 s,
 //   doubling to 10 s, a Retry-After when longer; api.devnet.solana.com exposes none to a page), and the read that met it
 //   is asked again once, after that pause; an answer that is not JSON, a stall or a dropped connection is asked again
-//   once after the retry's backoff. A sign out closes the page's gate (stopHostLaneWaits): every wait on every host ends
-//   at once and no call is asked or asked again until a sign-in opens it. Never a third ask, and never a wait that would end past the call's bound: the call
+//   once after the retry's backoff. A sign out's tap ends every wait on every host at once (stopHostLaneWaits), and once
+//   its store holds the seed lock the page's gate closes (closeHostLanes): no call is asked or asked again after it, and
+//   the page reloads. Never a third ask, and never a wait that would end past the call's bound: the call
 //   then rejects naming its fault (SolanaRpcTransportError). So a trade's read waits for its turn at most
 //   TRADE_TURN_MAX_MS + PROBE_HELD_MAX_MS (15 s) from the turn's start, the host's pause (at most 10 s) and the probes
 //   after it (each read parked ahead may be one) together, then its bound (3.5 s; 12 s for a settle's
@@ -19,7 +20,7 @@
 import { readSolanaReference, type SolanaReference, type SolanaReferenceRequest } from "../../kit/src/trade/solana/pool.ts";
 import { HELPER_FETCH_INIT } from "../../kit/src/helper/v1.ts";
 import { SOLANA_RPC_RETRY, SolanaRpcTransportError, solanaHelperRpc, solanaJsonRpc, solanaSameProvider, solanaWrappedRpc, type SolanaFetch, type SolanaRpc, type SolanaRpcRetry } from "../../kit/src/trade/solana/send.ts";
-import { HostPaused, hostLane, laneSignal } from "../../wallet/src/throttle.ts";
+import { HostPaused, gateSignal, hostLane } from "../../wallet/src/throttle.ts";
 
 /** Whose read it is: a trade's own (first on its host) or a background pass's (on its host's budget). */
 export type ReadKind = "trade" | "pass";
@@ -44,8 +45,8 @@ export function lanedRpc(url: string, o: { kind?: ReadKind; retry?: SolanaRpcRet
   const once = (ms: number, method: string, params: readonly unknown[]): Promise<unknown> =>
     solanaJsonRpc(url, { ...(o.init ? { init: o.init } : {}), ...(o.fetch ? { fetch: o.fetch } : {}), retry: { deadlineMs: ms, backoffMs: ms } })(method, params);
   // every outcome reported to the lane: the gate's pause, and the probe's settle when this read was it
-  // `stop`: the lanes' sign-out stop as it stood when the call began (laneSignal), so an ask after a sign out that came
-  // during the call is never sent (card sign-out-stops-the-pages-reads)
+  // `stop`: the caller's signal and the page's gate (gateSignal), so an ask after the gate closed during the call is never
+  // sent (card sign-out-stops-the-pages-reads); its waits for a turn also end at a sign out's tap (HostLane.turn)
   const ask = async (end: number, stop: AbortSignal, method: string, params: readonly unknown[]): Promise<unknown> => {
     stop.throwIfAborted();
     const sentIn = lane.gate.epoch();
@@ -91,8 +92,8 @@ export function lanedRpc(url: string, o: { kind?: ReadKind; retry?: SolanaRpcRet
   // a read whose turn is open now goes out in this tick (a paced queue's slot calls it as its own)
   // (a trade's turn refused past its TRADE_TURN_MAX_MS is the host's throttle, never sent: HostPaused)
   const rpc = (method: string, params: readonly unknown[]): Promise<unknown> => {
-    // the caller's signal and the lanes' sign-out stop of this moment: every wait and ask of this call ends at either
-    const stop = laneSignal(o.signal);
+    // the caller's signal and the page's gate: every ask of this call ends at either
+    const stop = gateSignal(o.signal);
     // the gate closed (a sign out; throttle.ts): a call made after it, a paced slot's or a seat's failover included, is
     // refused here, never sent or counted
     if (stop.aborted) return Promise.reject(stop.reason);
