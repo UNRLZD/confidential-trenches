@@ -76,11 +76,17 @@ for (const [wname, width, height] of [["390", 390, 844], ["1440", 1440, 900]]) {
         return p.hidden ? null : [p.dataset.refusal, p.textContent, p.dataset.draftCopy ?? null];
       };
       const go = f.querySelector('[data-action="withdraw"]');
-      return { state: f.dataset.state, to: line("to"), amount: line("amount"), disabled: go.disabled, drafts: [...f.querySelectorAll("[data-draft-copy]")].filter((e) => !e.hidden).length };
+      // the gaps between the form's shown rows, top to bottom (To, its line, Amount, its line, Withdraw): px from one
+      // row's bottom to the next one's top
+      const rows = [...f.children].filter((e) => !e.hidden && e.getBoundingClientRect().height > 0).map((e) => e.getBoundingClientRect());
+      const gaps = rows.slice(1).map((r, i) => Math.round(r.top - rows[i].bottom));
+      return { state: f.dataset.state, to: line("to"), amount: line("amount"), disabled: go.disabled, drafts: [...f.querySelectorAll("[data-draft-copy]")].filter((e) => !e.hidden).length, gaps };
     });
     const lineOk = (k) => (want[k] ? got[k]?.[0] === want[k][0] && got[k]?.[1] === want[k][1] && (got[k]?.[2] ?? null) === (want[k][0] === "min" ? "min" : null) : got[k] === null || !want[k]);
     const ok = got.state === want.state && lineOk("to") && lineOk("amount") && got.disabled === (want.state !== "ready");
     say(ok, `${wname} ${name}: ${got.state}, to ${JSON.stringify(got.to?.slice(0, 2) ?? null)}, amount ${JSON.stringify(got.amount?.slice(0, 2) ?? null)}, Withdraw ${got.disabled ? "off" : "on"}`);
+    // the pool form's spacing (src/withdraw/pool-form.ts: 12 px between rows): no row drawn against the next
+    say(got.gaps.length > 0 && got.gaps.every((g) => g >= 8), `${wname} ${name}: the gaps between the form's rows ${JSON.stringify(got.gaps)} px, each at least 8`);
     if (SHOTS) await page.screenshot({ path: join(SHOTS, `withdraw-${name}-${wname}.png`), fullPage: true });
   }
   // the tap: checked again, then handed over once, as {recipient, amount}

@@ -105,6 +105,7 @@ function pkgCopy() {
 
 const WORKER_RULE = "/prover-worker.js\n  Content-Security-Policy: default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self'\n";
 const THREAD_RULE = "/prover-thread.js\n  Content-Security-Policy: default-src 'none'; script-src 'wasm-unsafe-eval'\n";
+const WALK_RULE = "/walk-worker.js\n  Content-Security-Policy: default-src 'none'; script-src 'self'\n";
 const ZK_RULE = "/assets/zk/*\n  Cache-Control: public, max-age=31536000, immutable\n";
 
 const swap = (from, to) => {
@@ -164,6 +165,21 @@ test("other policy breaks are refused", () => {
     "the thread's CSP on another path": swap(THREAD_RULE, THREAD_RULE.replace("/prover-thread.js", "/prover-*.js")),
     "the thread rule sets a second header": swap(THREAD_RULE, `${THREAD_RULE}  Cross-Origin-Embedder-Policy: require-corp\n`),
     "the thread rule removes the site's CSP": swap(THREAD_RULE, `${THREAD_RULE}  ! Content-Security-Policy\n`),
+    // the walk Worker's rule (card restore-shows-the-balance-in-seconds): exactly its own CSP, on that one path, and the
+    // site's trusted-types naming exactly the page's two policies
+    "no walk rule": swap(WALK_RULE, ""),
+    "the walk rule twice": `${REAL}${WALK_RULE}`,
+    "the walk's CSP without default-src": swap(WALK_RULE, WALK_RULE.replace("default-src 'none'; ", "")),
+    "the walk's CSP with 'wasm-unsafe-eval'": swap(WALK_RULE, WALK_RULE.replace("script-src 'self'", "script-src 'self' 'wasm-unsafe-eval'")),
+    "the walk's CSP with 'unsafe-eval'": swap(WALK_RULE, WALK_RULE.replace("script-src 'self'", "script-src 'self' 'unsafe-eval'")),
+    "the walk's CSP fetches": swap(WALK_RULE, WALK_RULE.replace("script-src 'self'", "script-src 'self'; connect-src 'self'")),
+    "the walk's CSP starts workers from data: blob:": swap(WALK_RULE, WALK_RULE.replace("script-src 'self'", "script-src 'self'; worker-src data: blob:")),
+    "the walk's CSP on another path": swap(WALK_RULE, WALK_RULE.replace("/walk-worker.js", "/*-worker.js")),
+    "the walk rule sets a second header": swap(WALK_RULE, `${WALK_RULE}  Cross-Origin-Resource-Policy: cross-origin\n`),
+    "the walk rule removes the site's CSP": swap(WALK_RULE, `${WALK_RULE}  ! Content-Security-Policy\n`),
+    "trusted-types without walk-worker": swap("trusted-types prover-worker walk-worker", "trusted-types prover-worker"),
+    "trusted-types with a third policy": swap("trusted-types prover-worker walk-worker", "trusted-types prover-worker walk-worker other"),
+    "trusted-types allows duplicates": swap("trusted-types prover-worker walk-worker", "trusted-types prover-worker walk-worker 'allow-duplicates'"),
     // the site's worker-src loosened to fit a library's thread workers
     "worker-src data:": swap("worker-src 'self';", "worker-src 'self' data:;"),
     "worker-src blob:": swap("worker-src 'self';", "worker-src 'self' blob:;"),
@@ -240,9 +256,9 @@ test("with the gate passed and no token, nothing is uploaded", async () => {
 // card signpage-generated-merge-free: the deploy builds index.html and app.js at HEAD from the sources, never from a
 // committed or local copy, and the newest release list still pins their bytes: a list that names another bundle (here
 // the same page with one unrelated copy change, its integrity re-pinned as build-app.mjs writes it) refuses the deploy
-test("the build's four output files are built at the deploy from the sources: a local build in the package is never copied", async () => {
+test("the build's five output files are built at the deploy from the sources: a local build in the package is never copied", async () => {
   const served = servedSources(PKG);
-  assert.deepEqual(served.filter((f) => ["index.html", "public/app.js", "public/prover-worker.js", "public/prover-thread.js"].includes(f)), []);
+  assert.deepEqual(served.filter((f) => ["index.html", "public/app.js", "public/prover-worker.js", "public/prover-thread.js", "public/walk-worker.js"].includes(f)), []);
   const fresh = await bundle();
   const dir = build();
   try {
@@ -250,6 +266,7 @@ test("the build's four output files are built at the deploy from the sources: a 
     assert.equal(readFileSync(join(dir, "index.html"), "utf8"), fresh.html);
     assert.ok(readFileSync(join(dir, "prover-worker.js")).equals(fresh.worker));
     assert.ok(readFileSync(join(dir, "prover-thread.js")).equals(fresh.thread));
+    assert.ok(readFileSync(join(dir, "walk-worker.js")).equals(fresh.walk));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -542,6 +559,8 @@ test("a build whose setup files or worker are not the pinned ones is refused", (
     "the worker missing": (d) => (rmSync(join(d, "prover-worker.js")), /prover-worker\.js is not the kit's prover worker build/),
     "the thread file changed": (d) => (writeFileSync(join(d, "prover-thread.js"), "postMessage(1)"), /prover-thread\.js is not the kit's prover thread build/),
     "the thread file missing": (d) => (rmSync(join(d, "prover-thread.js")), /prover-thread\.js is not the kit's prover thread build/),
+    "the walk worker missing": (d) => (rmSync(join(d, "walk-worker.js")), /walk-worker\.js: missing/),
+    "the walk worker imports": (d) => (writeFileSync(join(d, "walk-worker.js"), 'import{a}from"./x.js";a()'), /walk-worker\.js has a static import/),
     "the GPL text missing": (d) => (rmSync(join(d, "licenses", "GPL-3.0.txt")), /licenses\/GPL-3\.0\.txt: missing/),
   };
   for (const [name, plant] of Object.entries(plants)) {
