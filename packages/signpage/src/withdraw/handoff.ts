@@ -85,8 +85,9 @@ export type HandoffOver = {
   arrivalRpcs?: readonly [RelayRpc, RelayRpc];
 };
 
-/** What a tap's hand-off ends in: the relay's outcome, or a fresh quote above the fee the form drew (nothing proved). */
-export type HandoffEnd = { kind: RelayOutcome["kind"] | ArrivalOutcome["kind"] } | { kind: "fee"; fee: bigint };
+/** What a tap's hand-off ends in: the relay's outcome (with the relayer's tx hash of a landing, when it named one), or a
+ *  fresh quote above the fee the form drew (nothing proved). */
+export type HandoffEnd = { kind: RelayOutcome["kind"] | ArrivalOutcome["kind"]; tx?: string } | { kind: "fee"; fee: bigint };
 
 const pairOf = (network: NearNetwork): readonly [RelayRpc, RelayRpc] => {
   const net = NEAR_NETWORKS[network];
@@ -170,7 +171,7 @@ export function withdrawFormDeps(page: HandoffPage, over: HandoffOver = {}): Wit
  * (relayWithdraw takes its one derivation before its first await, relay.ts); the relay's wait ends on sign out or at
  * HANDOFF_WAIT_MAX_MS, its note left RESERVED with its request for the settle pass (withdrawSettle).
  */
-export function withdrawHandoff(page: HandoffPage, over: HandoffOver = {}): ((w: CheckedWithdraw, drawnFee: bigint) => Promise<HandoffEnd>) | null {
+export function withdrawHandoff(page: HandoffPage, over: HandoffOver = {}): ((w: CheckedWithdraw, drawnFee: bigint, note?: string) => Promise<HandoffEnd>) | null {
   const n = netOf(over);
   const { network, net, rpcs, priceRpcs, relayer, scope, fetchFn } = n;
   if (net.vault === null || scope === null || relayer === null) return null;
@@ -178,7 +179,8 @@ export function withdrawHandoff(page: HandoffPage, over: HandoffOver = {}): ((w:
   const sync = over.sync ?? (async () => treesOf(await vaultSync({ vault, rpcs, cursor: vaultSyncStart(vault), lists: ["leaves", "labels"] })));
   const blockNs = over.blockNs ?? (() => lowerFinalTime(rpcs));
   const relay = over.relay ?? relayWithdraw;
-  return async (w, drawnFee) => {
+  // `note`: the note the caller picked (the NEAR buy's, withdrawRequest's `note`); none: the request's own pick
+  return async (w, drawnFee, note) => {
     if (typeof drawnFee !== "bigint") throw new Error("drawnFee: not a bigint");
     ownPair(n);
     const quote = await askWithdrawFee({ token: net.usdc, relayer, amount: w.amount, fetchFn });
@@ -207,12 +209,16 @@ export function withdrawHandoff(page: HandoffPage, over: HandoffOver = {}): ((w:
         to: w.recipient,
         deadlineMs: withdrawDeadlineMs(ns),
         blockTimestampNanosec: ns,
+        // after the typed account's wiring, which wallet-withdraw-move-out reads in the build as it is minified
+        ...(note === undefined ? {} : { note }),
       });
       going = relay(seed, req, { notes, network, rpcs, priceRpcs, fetchFn, signal });
     } finally {
       seed.fill(0);
     }
-    return { kind: await arrivedOf(await going, w.recipient, n, over, signal) };
+    const o = await going;
+    const kind = await arrivedOf(o, w.recipient, n, over, signal);
+    return o.kind === "landed" && typeof o.tx === "string" ? { kind, tx: o.tx } : { kind };
   };
 }
 

@@ -71,9 +71,11 @@ test("money and percent text", () => {
   assert.equal(usd(123456n), "$1,234.56");
   assert.equal(usd(-408n), "−$4.08");
   assert.equal(usd(2963n, true), "+$29.63");
-  assert.equal(usd(0n, true), "+$0.00");
+  // a zero has no sign (review of 98d75c8cb: "$0.00 −2.5%", never "+$0.00")
+  assert.equal(usd(0n, true), "$0.00");
   assert.equal(pct(11900), "+119.0%");
-  assert.equal(pct(-816), "−8.1%");
+  // to the nearest tenth, as a figure to the nearest cent (round 3 of card portfolio-counts-money-an-open-buy-holds)
+  assert.equal(pct(-816), "−8.2%");
   assert.equal(pct(0), "0.0%");
   assert.equal(pct(null), "—");
   assert.equal(bps(2963n, 2500n), 11852);
@@ -116,12 +118,15 @@ test("S10.3 rows by value, the priceless one last; S10.4 a row with no price has
   const p = portfolio(snap(STATE), data(), NOW);
   assert.deepEqual(p.rows.map((r) => r.symbol), ["WTH", "boar", "swordcat", "NEAIR"]);
   const [wth, boar, swc, neair] = p.rows;
-  assert.equal(wth!.value, 5455n);
-  assert.equal(wth!.pnl, 2955n);
-  assert.equal(wth!.pnlBps, 11820);
-  assert.equal(boar!.value, 1012n);
+  // 891,500 x 0.0000612 = $54.5598: the row's figure to the nearest cent; its PnL the exact $29.5598 so, its percent
+  // from the exact figures (118.23%)
+  assert.equal(wth!.value, 5456n);
+  assert.equal(wth!.pnl, 2956n);
+  assert.equal(wth!.pnlBps, 11823);
+  // 20.25 x 0.5 = $10.125: $10.13 on the row; its PnL the exact −$1.975 to the nearest, −$1.98, and −16.32%
+  assert.equal(boar!.value, 1013n);
   assert.equal(boar!.pnl, -198n);
-  assert.equal(boar!.pnlBps, -1636);
+  assert.equal(boar!.pnlBps, -1632);
   assert.equal(boar!.wallets, 2);
   assert.equal(neair!.value, null);
   assert.equal(neair!.pnl, null);
@@ -134,9 +139,12 @@ test("totals: cash is the vault plus ready wallets, on the way is arming and ret
   const t = portfolio(snap(STATE), data(), NOW).totals!;
   assert.equal(t.cash, 7318n + 1000n);
   assert.equal(t.onWay, 750n);
-  assert.equal(t.inPos, 5455n + 1012n + 50n + 4000n);
+  // each total the exact sum rounded down once (card portfolio-counts-money-an-open-buy-holds): $54.5598 + $10.125 +
+  // $0.50 + the priceless row's $40.00 cost = $105.1848, so $105.18; never the rows' rounded cents added ($105.19)
+  assert.equal(t.inPos, 10518n);
   assert.equal(t.total, t.cash + t.onWay + t.inPos);
-  assert.equal(t.unreal, 2955n - 198n + (50n - 90n));
+  // $29.5598 − $1.975 − $0.40 = $27.1848, rounded down once
+  assert.equal(t.unreal, 2718n);
   assert.equal(t.partial, true);
   const priced = portfolio(snap({ ...STATE, positions: STATE.positions.filter((x) => x.token !== "NEAIR") }), data(), NOW).totals!;
   assert.equal(priced.partial, false);
@@ -313,12 +321,16 @@ test("pools: loading, offline, unread (none sent), empty, and rows in the pool's
   // a page that sends no pools: dashes, never 0
   assert.deepEqual(portfolio(snap(STATE), data(), NOW).pools, { view: "unread", rows: [] });
   assert.deepEqual(portfolio(snap(STATE, "down"), data(), NOW).pools, { view: "offline", rows: [] });
-  assert.deepEqual(portfolio(snap({ ...STATE, pools: [] }), data(), NOW).pools, { view: "empty", rows: [] });
+  // nothing in the vault or a pool: empty (the vault's row is there, at 0, as every configured chain's)
+  const none = { ...STATE, vault_balance: "0" };
+  const NEAR0 = { chain: "near", asset: "USDC", decimals: 6, balance: 0n, ready: null, pending: null };
+  assert.deepEqual(portfolio(snap({ ...none, pools: [] }), data(), NOW).pools, { view: "empty", rows: [NEAR0] });
   // a configured chain with none: still empty while no pool holds anything
-  assert.equal(portfolio(snap({ ...STATE, pools: [{ chain: "solana", asset: "SOL", balance: "0", ready: "0" }] }), data(), NOW).pools.view, "empty");
-  const p = portfolio(snap({ ...STATE, pools: [{ chain: "solana", asset: "SOL", balance: "12.5", ready: "10" }, { chain: "base", asset: "ETH", balance: "0.25" }, { chain: "robinhood", asset: "ETH", balance: "0", ready: "0" }] }), data(), NOW).pools;
+  assert.equal(portfolio(snap({ ...none, pools: [{ chain: "solana", asset: "SOL", balance: "0", ready: "0" }] }), data(), NOW).pools.view, "empty");
+  const p = portfolio(snap({ ...none, pools: [{ chain: "solana", asset: "SOL", balance: "12.5", ready: "10" }, { chain: "base", asset: "ETH", balance: "0.25" }, { chain: "robinhood", asset: "ETH", balance: "0", ready: "0" }] }), data(), NOW).pools;
   assert.equal(p.view, "rows");
   assert.deepEqual(p.rows, [
+    NEAR0,
     // 12.5 SOL in lamports (9 decimals, the kit's table), 10 of it ready
     { chain: "solana", asset: "SOL", decimals: 9, balance: 12_500_000_000n, ready: 10_000_000_000n, pending: 2_500_000_000n },
     // 0.25 ETH in wei (18 decimals); no ready sent: ready and pending are null (dashes)
@@ -326,6 +338,27 @@ test("pools: loading, offline, unread (none sent), empty, and rows in the pool's
     // a ready of 0 is a real 0
     { chain: "robinhood", asset: "ETH", decimals: 18, balance: 0n, ready: 0n, pending: 0n },
   ]);
+});
+
+// card app-faults-seen-on-122 (walk of release 122, row 4): NEAR's private balance is the vault's USDC (vault_balance),
+// which the page's pool table never holds (packages/signpage/src/pools.ts PAGE_POOLS: Solana, Base, Robinhood). It is a
+// row of the same list, first as in Cash's parts, in USDC; the vault sends no proof queue, so Ready and Pending are dashes.
+test("pools: NEAR's vault USDC is the list's first row, Ready and Pending dashes", () => {
+  const NEAR = (balance: bigint) => ({ chain: "near", asset: "USDC", decimals: 6, balance, ready: null, pending: null });
+  const sol = { chain: "solana" as const, asset: "SOL" as const, balance: "0.033928", ready: "0" };
+  // the walk's account: SOL in the pool, USDC in the vault
+  const p = portfolio(snap({ ...STATE, vault_balance: "2.75", pools: [sol, { chain: "base", asset: "ETH", balance: "0" }, { chain: "robinhood", asset: "ETH", balance: "0" }] }), data(), NOW).pools;
+  assert.equal(p.view, "rows");
+  assert.deepEqual(p.rows.map((r) => r.chain), ["near", "solana", "base", "robinhood"]);
+  assert.deepEqual(p.rows[0], NEAR(2_750_000n));
+  // the vault alone holds money: rows, never "No balance"
+  const v = portfolio(snap({ ...STATE, vault_balance: "73.189", pools: [{ chain: "solana", asset: "SOL", balance: "0", ready: "0" }] }), data(), NOW).pools;
+  assert.equal(v.view, "rows");
+  assert.deepEqual(v.rows[0], NEAR(73_189_000n));
+  // nothing anywhere: still empty
+  assert.equal(portfolio(snap({ ...STATE, vault_balance: "0", pools: [{ chain: "solana", asset: "SOL", balance: "0", ready: "0" }] }), data(), NOW).pools.view, "empty");
+  // a page that sent no pools (its notes unread): unread as before, no NEAR row made up beside it
+  assert.deepEqual(portfolio(snap({ ...STATE, vault_balance: "5" }), data(), NOW).pools, { view: "unread", rows: [] });
 });
 
 test("pools: amounts in the asset's own units, short and rounded down, never a dollar figure", () => {
@@ -352,7 +385,7 @@ test("pools: amounts in the asset's own units, short and rounded down, never a d
 
 test("pools: a ready above the balance is held to it; a garbled amount reads as 0", () => {
   const p = portfolio(snap({ ...STATE, pools: [{ chain: "solana", asset: "SOL", balance: "10", ready: "12" }, { chain: "base", asset: "ETH", balance: "x", ready: "1" }] }), data(), NOW).pools;
-  assert.deepEqual(p.rows, [
+  assert.deepEqual(p.rows.slice(1), [
     { chain: "solana", asset: "SOL", decimals: 9, balance: 10_000_000_000n, ready: 10_000_000_000n, pending: 0n },
     { chain: "base", asset: "ETH", decimals: 18, balance: 0n, ready: 0n, pending: 0n },
   ]);

@@ -1049,24 +1049,35 @@ export type EvmOnwardSend = {
   readonly accessList: readonly unknown[];
 };
 /** The device's reads for W's onward send, each as its two RPCs answered (they must agree): W's nonce, W's balance after
- *  the withdraw landed, whether the typed address has code and, when it has, eth_estimateGas of the send to it, the
- *  base fee, and the L1 data fee W must also hold on an OP Stack chain (Base: GasPriceOracle.getL1FeeUpperBound of the
- *  signed size; 0 on a chain without one); with the device's own cap on the priority fee. */
+ *  the withdraw landed, whether the typed address has code and, when it has, eth_estimateGas of the send to it and
+ *  whether eth_call of that very send (from W, the value, the gas limit) succeeded, the base fee, and the L1 data fee W
+ *  must also hold on an OP Stack chain (Base: GasPriceOracle.getL1FeeUpperBound of the signed size; 0 on a chain
+ *  without one); with the device's own cap on the priority fee and `part`, what this part sends to To by the device's
+ *  own plan (its owed record), the amount the user typed for it. */
 export type EvmOnwardReads = {
   readonly nonce: readonly [bigint, bigint];
   readonly balance: readonly [bigint, bigint];
   readonly toHasCode: readonly [boolean, boolean];
   readonly estimate: readonly [bigint, bigint] | null;
+  readonly simulated?: readonly [boolean, boolean] | null;
   readonly baseFee: readonly [bigint, bigint];
   readonly l1Fee: readonly [bigint, bigint];
   readonly priorityCap: bigint;
+  readonly part: bigint;
 };
-/** A plain transfer's gas, and the most a contract recipient (a smart wallet) may take: its estimate, never more. */
+/** A plain transfer's gas, and the most a contract recipient (a smart wallet) may take: its estimate and the margin,
+ *  never more. */
 export const EVM_ONWARD_GAS = 21_000n;
 export const EVM_ONWARD_GAS_MAX = 100_000n;
+/** The gas limit of a send to an address with code: its two-RPC estimate and a fifth more, so a receive whose cost moves
+ *  a little between the estimate and the block still lands [design: the estimate is the least that passed at one
+ *  block; a fifth covers a storage slot's cold read (2,100) on a 10,000-gas receive]. */
+export const evmOnwardCodeGas = (estimate: bigint): bigint => estimate + estimate / 5n;
+/** The addresses no user's wallet lives at: the precompiles (0x01 up, P256 at 0x100, Nitro's at 0x64 to 0xff), which
+ *  hold no code and take a transfer that no key can ever move again. */
+export const EVM_PRECOMPILE_TOP = 1n << 16n;
 const ONWARD_KEYS = "accessList,chainId,data,gasLimit,maxFeePerGas,maxPriorityFeePerGas,nonce,to,type,value";
 const U256 = 1n << 256n;
-const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 type OnwardRead = EvmOnwardSend & { readonly wallet: string };
 // each send a check passed, with the check's own copy of it: a signer signs only that copy, and only while the send
 // still reads as it
@@ -1088,8 +1099,9 @@ const agreed = <T>(pair: readonly [T, T] | null | undefined, ok: (x: unknown) =>
   return pair[0];
 };
 
-/** W's onward send of its whole balance, less the send's fee bound, to `to`, the address typed on SIGN_HOST, on the
- *  pinned chain: each field held to `reads`, the device's own two-RPC reads. */
+/** W's onward send of the part (reads.part; W's balance less the send's fee bound when that is less), to `to`, the
+ *  address typed on SIGN_HOST, on the pinned chain, its fee bound within ctx.feeCap: each field held to `reads`, the
+ *  device's own two-RPC reads. */
 export function checkEvmOnwardSend(tx: EvmOnwardSend, ask: PoolAsk, ctx: PoolContext, to: string, reads: EvmOnwardReads, testnet = false): PoolDraw {
   // only a pool withdraw's second step, on an EVM pool chain
   if (ask.kind !== "pool.withdraw") return refuse("kind");
@@ -1114,7 +1126,8 @@ export function checkEvmOnwardSend(tx: EvmOnwardSend, ask: PoolAsk, ctx: PoolCon
   // the pinned chain's id: no replay of W's send on another chain
   if (t.chainId !== pins.chainId) return refuse("chain_id");
   // the typed address: an address, never the zero address (a burn), the pool or W itself (the money back where it was)
-  if (typeof to !== "string" || !EVM_ADDRESS.test(to) || lower(to) === ZERO_ADDRESS || lower(to) === lower(pins.pool) || lower(to) === lower(ctx.wallet)) return refuse("to");
+  // nor a precompile (no key ever moves what is sent there)
+  if (typeof to !== "string" || !EVM_ADDRESS.test(to) || BigInt(to) < EVM_PRECOMPILE_TOP || lower(to) === lower(pins.pool) || lower(to) === lower(ctx.wallet)) return refuse("to");
   // the send goes to the typed address: no redirect
   if (lower(t.to) !== lower(to)) return refuse("transfer_to");
   // W's nonce on two RPCs: no replacing a send of W's, no queueing behind one
@@ -1127,19 +1140,28 @@ export function checkEvmOnwardSend(tx: EvmOnwardSend, ask: PoolAsk, ctx: PoolCon
     // no code at the address: a plain transfer's gas, no fee bound padded past it
     if (t.gasLimit !== EVM_ONWARD_GAS) return refuse("gas_limit");
   } else {
-    // a smart-wallet recipient, or any send on Nitro: its own two-RPC estimate, no padding past it
-    if (t.gasLimit !== estimate) return refuse("gas_estimate");
+    // a smart-wallet recipient: its own two-RPC estimate and the margin; any send on Nitro to an address with no code:
+    // the estimate, no padding past it
+    if (t.gasLimit !== (hasCode ? evmOnwardCodeGas(estimate) : estimate)) return refuse("gas_estimate");
     // and never more than the cap, so a recipient's code cannot burn the withdrawal as gas
     if (t.gasLimit > EVM_ONWARD_GAS_MAX) return refuse("gas_over_cap");
   }
+  // an address with code: the very send ran on both RPCs (eth_call from W, with the value and this gas) and returned
+  if (hasCode && agreed(reads.simulated, (x) => typeof x === "boolean") !== true) return refuse("simulation");
   // no tip that burns the withdrawal, nor one above the max fee (a send no node includes)
   if (t.maxPriorityFeePerGas > reads.priorityCap || t.maxPriorityFeePerGas > t.maxFeePerGas) return refuse("priority_fee");
   // no max fee past two base fees and the tip, the standard bound, nor under the base fee (a send that never lands,
   // its nonce held, the money stuck on W)
   if (t.maxFeePerGas > 2n * baseFee + reads.priorityCap || t.maxFeePerGas < baseFee) return refuse("max_fee");
-  // the whole balance less the fee bound: no skim left in W, no overspend, never nothing
+  // the fee bound within the part's share of the Max fee drawn (ctx.feeCap): never more than the screen showed
   const feeBound = t.gasLimit * t.maxFeePerGas + l1Fee;
-  if (t.value === 0n || t.value + feeBound !== balance) return refuse("value");
+  if (typeof ctx.feeCap !== "bigint" || feeBound > ctx.feeCap) return refuse("fee_cap");
+  // exactly the part the user typed arrives when W holds it beyond the fee bound; when the fee rose past what W holds
+  // beyond it (the Max fee drawn again), W's whole balance less the bound: never more than the part, never more than W
+  // can pay, never nothing. What the gas leaves unused stays on W, under the device's key.
+  if (!uint(reads.part) || reads.part === 0n) return refuse("reads");
+  const want = balance - feeBound < reads.part ? balance - feeBound : reads.part;
+  if (want <= 0n || t.value !== want) return refuse("value");
   ONWARD_CHECKED.set(tx, Object.freeze({ ...t, wallet: lower(ctx.wallet) }));
   return { chain: ask.chain, op: "pool.withdraw", token: null, amount: t.value, feeCap: feeBound, pool: pins.pool, to, decimals: ask.decimals, back: null };
 }

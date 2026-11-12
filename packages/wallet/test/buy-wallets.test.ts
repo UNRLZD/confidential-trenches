@@ -442,9 +442,21 @@ test("no second key derivation: only derive/keys.ts holds BIP-32, SLIP-10 or a w
   // an EVM pool sell signs at the tap (signpage src/pool-sell-evm.ts signPicked: W_{evm,l,j} of the buy record it sells,
   // refused unless it is that record's W, after its return note's evmNextNote pick, signs only the sim checkEvmSellSim,
   // the Sell checkEvmSell and the authorization checkEvmAuthorization passed, its key zeroed once it has signed and again
-  // in signLeg's finally; card signpage-evm-pool-sell).
+  // in signLeg's finally; card signpage-evm-pool-sell). And where an EVM pool withdraw signs (signpage
+  // src/pool-withdraw-evm.ts: onePart's release, W_{evm,l,j} of the note it proves, refused unless it is the binding's W
+  // and the relay data's recipient, signs only what checkEvmWithdraw passed; sendOnward's and resendHeld's send to To,
+  // refused unless the derived W is the W read, signs only the send checkEvmOnwardSend passed; each key zeroed in a
+  // finally, and every other call (spendOf, wOf, the plan's Ws) zeroes it at once for the address; card
+  // evm-withdraw-mainnet). And where a NEAR fresh wallet signs its Rhea calls (wallet
+  // src/near/swap-delegate.ts signNearSwapDelegates: W_{near,l,j}, refused unless it is the read's and the request's W,
+  // signs only the calls the kit's nearSwapCheck passed on its own copy, its key zeroed in a finally; nearSwapWallet
+  // zeroes it at once for the id; test/near-swap-delegate.test.ts; card near-private-trading). And where a NEAR sell's W
+  // moves its USDC back into the vault on its return note (wallet src/deposit/delegate.ts moverDepositDelegate: W_{near,l,j}
+  // in U's place, refused unless the two-RPC read is W's, signs only the release's vaultDepositCall with W the depositor,
+  // its key zeroed in a finally; moverAccount zeroes it at once for the id; test/deposit-delegate.test.ts; card
+  // near-private-trading).
   const calls = files.filter((f) => /\bfreshWallet\s*\(/.test(readFileSync(f, "utf8"))).map((f) => f.slice(root.length)).sort();
-  assert.deepEqual(calls, ["packages/signpage/src/pool-buy-evm.ts", "packages/signpage/src/pool-buy.ts", "packages/signpage/src/pool-sell-evm.ts", "packages/signpage/src/pool-sell.ts", "packages/signpage/src/pool-withdraw.ts", "packages/wallet/src/arming/records.ts", "packages/wallet/src/derive/keys.ts", "packages/wallet/src/pool/buy-wallets.ts", "packages/wallet/src/pool/evm-restore.ts", "packages/wallet/src/pool/queue.ts", "packages/wallet/src/pool/solana-restore.ts", "packages/wallet/src/restore/arms.ts", "packages/wallet/src/restore/wallets.ts"]);
+  assert.deepEqual(calls, ["packages/signpage/src/pool-buy-evm.ts", "packages/signpage/src/pool-buy.ts", "packages/signpage/src/pool-sell-evm.ts", "packages/signpage/src/pool-sell.ts", "packages/signpage/src/pool-withdraw-evm.ts", "packages/signpage/src/pool-withdraw.ts", "packages/wallet/src/arming/records.ts", "packages/wallet/src/deposit/delegate.ts", "packages/wallet/src/derive/keys.ts", "packages/wallet/src/near/swap-delegate.ts", "packages/wallet/src/pool/buy-wallets.ts", "packages/wallet/src/pool/evm-restore.ts", "packages/wallet/src/pool/queue.ts", "packages/wallet/src/pool/solana-restore.ts", "packages/wallet/src/restore/arms.ts", "packages/wallet/src/restore/wallets.ts"]);
 });
 
 // ---------- fold 2 ----------
@@ -1023,6 +1035,7 @@ test("item 6: a sale's wallet list on the mainnet pace: one finder round per pas
 }));
 
 // ---------- a W's buy from its own history (card restore-rebuilds-buy-records) ----------
+import * as buyWalletsModule from "../src/pool/buy-wallets.ts";
 import { SOL_BUY_PAGE, SOL_BUY_PAGES, SOL_BUY_TXS, SOL_TRADE_TXS, solanaBuyIn, solanaBuyReader, solanaHelperBuys, solanaReleaseIn, solanaSoldOutIn } from "../src/pool/buy-wallets.ts";
 
 const BUY_POOL = key32(40), FEE_PAYER = key32(41), STRANGER_KEY = key32(42), VENUE = key32(43);
@@ -1033,7 +1046,7 @@ function txOf(o: { signers: string[]; keys?: string[]; ix?: { program: string; t
   const keys = [...o.signers, ...(o.keys ?? []), BUY_POOL, VENUE];
   const at = (k: string) => (keys.includes(k) ? keys.indexOf(k) : keys.push(k) - 1);
   const instructions = (o.ix ?? []).map((x) => ({ programIdIndex: at(x.program), accounts: [at(BUY_POOL), at(x.to), at(FEE_PAYER)], data: base58.encode(Uint8Array.of(x.tag, 1, 2, 3)) }));
-  return { slot: 9, meta: { err: o.err ?? null, preTokenBalances: o.pre ?? [], postTokenBalances: o.post ?? [] }, transaction: { signatures: o.signers.map(() => "s"), message: { header: { numRequiredSignatures: o.signers.length }, accountKeys: keys, instructions } } };
+  return { slot: 9, meta: { err: o.err ?? null, preTokenBalances: o.pre ?? [], postTokenBalances: o.post ?? [] }, transaction: { message: { header: { numRequiredSignatures: o.signers.length }, accountKeys: keys, instructions } } };
 }
 const W = solW(0), W2 = solW(1);
 const buyTx = (w = W, mint = MINT_A, program = SOLANA_TOKEN_PROGRAM) => txOf({ signers: [FEE_PAYER, w], ix: [{ program: BUY_POOL, to: w, tag: 3 }], post: [tb(4, mint, w, 5_000_000n, program), tb(5, WSOL, w, 0n)], pre: [tb(5, WSOL, w, 0n)] });
@@ -1092,20 +1105,83 @@ test("a W's trades: read after its buy to its sale in full and no further; a sal
   assert.equal(f.soldOut, false);
 });
 
-/** A fake route of W's history: its signatures newest first, each with its transaction; every request logged. */
+// Review of 776d40528 (P3-1, P3-2, P2-1): the sale in full is W's own (W signs it), an answer that is not its
+// signature's own ends the read before it, and a W read part way is read on from where it stopped, never from its buy.
+test("a W's sale in full is one W signs: a stranger (a token's permanent delegate) who empties W's account is no sale", async () => {
+  const drain = txOf({ signers: [STRANGER_KEY], keys: [W], pre: [tb(4, MINT_A, W, 5_000_000n)], post: [tb(4, MINT_A, W, 0n)] });
+  assert.equal(solanaSoldOutIn(drain, W, MINT_A), false, "W does not sign it");
+  const sigs = ["drain", "buy"].map((signature) => ({ signature, err: null }));
+  const got = await solanaBuyReader(historyRpc(new Map([[W, { sigs, txs: new Map<string, unknown>([["buy", buyTx()], ["drain", drain]]) }]])).rpc, BUY_POOL).read(W);
+  assert.ok(got !== null && got !== "none");
+  assert.equal(got.soldOut, false, "W still counts as holding: no mark for good");
+});
+
+test("an answer that is not its signature's own, or has no block time, ends W's trades before it: nothing after it counts as read", async () => {
+  const sale = (left: bigint) => txOf({ signers: [W], pre: [tb(4, MINT_A, W, 5_000_000n)], post: [tb(4, MINT_A, W, left)] });
+  const sigs = ["sell2", "sell1", "buy"].map((signature) => ({ signature, err: null }));
+  for (const [what, bad] of [["another transaction", { ...(answered("other", sale(0n)) as object) }], ["no block time", { ...(answered("sell2", sale(0n)) as object), blockTime: null }]] as const) {
+    const got = await solanaBuyReader(historyRpc(new Map([[W, { sigs, txs: new Map<string, unknown>([["buy", buyTx()], ["sell1", sale(2_000_000n)], ["sell2", bad]]) }]])).rpc, BUY_POOL).read(W);
+    assert.ok(got !== null && got !== "none");
+    assert.deepEqual(got.txs?.map((t) => t.signature), ["buy", "sell1"], what);
+    assert.equal(got.soldOut, false, `${what}: the sale in full not taken`);
+  }
+});
+
+test("a W read part way is read on from its last transaction read (getSignaturesForAddress until it), to its sale in full, never from its buy again", async () => {
+  const read = (buyWalletsModule.solanaBuyReader as unknown as (rpc: SolanaRpc, pool: string) => { read(w: string, s?: AbortSignal, from?: { after: string; mint: string; program: string }): Promise<unknown> });
+  const sale = (left: bigint) => txOf({ signers: [W], pre: [tb(4, MINT_A, W, 5_000_000n)], post: [tb(4, MINT_A, W, left)] });
+  // the buy, SOL_TRADE_TXS + 2 sales in part, then the sale in full, then the teardown; newest first
+  const parts = Array.from({ length: SOL_TRADE_TXS + 2 }, (_, i) => `part${i}`);
+  const sigs = ["teardown", "sellAll", ...[...parts].reverse(), "buy"].map((signature) => ({ signature, err: null }));
+  const txs = new Map<string, unknown>([["buy", buyTx()], ["sellAll", sale(0n)], ["teardown", txOf({ signers: [W] })], ...parts.map((p) => [p, sale(1_000n)] as [string, unknown])]);
+  const h = historyRpc(new Map([[W, { sigs, txs }]]));
+  const first = (await read(h.rpc, BUY_POOL).read(W)) as { txs: { signature: string }[]; soldOut: boolean; mint: string; program: string };
+  assert.deepEqual(first.txs.map((t) => t.signature), ["buy", ...parts.slice(0, SOL_TRADE_TXS)]);
+  assert.equal(first.soldOut, false);
+  const at = h.log.length;
+  const from = { after: first.txs.at(-1)!.signature, mint: first.mint, program: first.program };
+  const next = (await read(h.rpc, BUY_POOL).read(W, undefined, from)) as { txs: { signature: string }[]; soldOut: boolean; after?: string; mint: string };
+  assert.deepEqual(next.txs.map((t) => t.signature), [...parts.slice(SOL_TRADE_TXS), "sellAll"], "the rest, to the sale in full; the buy not again");
+  assert.equal(next.soldOut, true);
+  assert.equal(next.after, from.after);
+  assert.equal(next.mint, MINT_A);
+  const asked = h.log.slice(at);
+  assert.deepEqual(asked.map((l) => [l.method, String(l.params[0])]), [["getSignaturesForAddress", W], ...[...parts.slice(SOL_TRADE_TXS), "sellAll"].map((s) => ["getTransaction", s])], "one list, then only the new transactions");
+  assert.equal((asked[0]!.params[1] as { until?: string }).until, from.after, "the list goes back to the cursor only");
+  // a transaction the route did not return: the read stops before it, and the next one starts there
+  const gone = historyRpc(new Map([[W, { sigs, txs: new Map([...txs].filter(([k]) => k !== parts[SOL_TRADE_TXS]!)) }]]));
+  const stopped = (await read(gone.rpc, BUY_POOL).read(W, undefined, from)) as { txs: unknown[]; soldOut: boolean };
+  assert.deepEqual([stopped.txs.length, stopped.soldOut], [0, false]);
+  // a list that still names the cursor is not the one asked for: no answer
+  const deaf = (async (m: string, p: readonly unknown[]) => (m === "getSignaturesForAddress" ? sigs : h.rpc(m, p))) as unknown as SolanaRpc;
+  assert.equal(await read(deaf, BUY_POOL).read(W, undefined, from), null);
+});
+
+/** A transaction as the route answers `sig`: the signature its first, a block time, unless the fixture names its own. */
+function answered(sig: string, tx: unknown): unknown {
+  const t = tx as { blockTime?: unknown; transaction?: { signatures?: unknown } } | null;
+  return t === null || typeof t !== "object" ? t : { blockTime: 1_794_000_000, ...t, transaction: { signatures: [sig], ...t.transaction } };
+}
+/** A fake route of W's history: its signatures newest first, each with its transaction (as a route answers it: the
+ *  signature its first, a block time, unless the fixture names its own); every request logged. */
 function historyRpc(hist: Map<string, { sigs: { signature: string; err: unknown }[]; txs: Map<string, unknown> }>) {
   const log: { method: string; params: unknown[] }[] = [];
   const rpc = (async (method: string, params: readonly unknown[]) => {
     log.push({ method, params: [...params] });
     if (method === "getSignaturesForAddress") {
       const h = hist.get(params[0] as string);
-      const o = params[1] as { limit: number; before?: string };
+      const o = params[1] as { limit: number; before?: string; until?: string };
       const all = h?.sigs ?? [];
       const from = o.before === undefined ? 0 : all.findIndex((x) => x.signature === o.before) + 1;
-      return all.slice(from, from + o.limit);
+      const to = o.until === undefined ? all.length : all.findIndex((x) => x.signature === o.until);
+      return all.slice(from, Math.min(from + o.limit, to < 0 ? all.length : to));
     }
     if (method === "getTransaction") {
-      for (const h of hist.values()) if (h.txs.has(params[0] as string)) return h.txs.get(params[0] as string);
+      const sig = params[0] as string;
+      for (const h of hist.values())
+        if (h.txs.has(sig)) {
+          return answered(sig, h.txs.get(sig));
+        }
       return null;
     }
     throw new Error(`unexpected ${method}`);
@@ -1165,7 +1241,7 @@ test("a W's history the reader cannot tell is no buy: none at all, a listed tran
   };
   // a failed buy, then four sends, then the retry's buy: its record back
   const failedFirst = after({ sigs: [...sends(4).sigs, { signature: "failed", err: { x: 1 } }], txs: sends(4).txs }, "buy", buyTx());
-  assert.deepEqual(await readOf(failedFirst), { got: { mint: MINT_A, program: SOLANA_TOKEN_PROGRAM, txs: [{ signature: "buy", tx: buyTx() }], soldOut: false }, calls: 1 + 5 }, "four sends then the buy");
+  assert.deepEqual(await readOf(failedFirst), { got: { mint: MINT_A, program: SOLANA_TOKEN_PROGRAM, txs: [{ signature: "buy", tx: answered("buy", buyTx()) }], soldOut: false }, calls: 1 + 5 }, "four sends then the buy");
   // no pool release among those read: null, never "none" (SOL_BUY_TXS sends; a provider's list cut short of the release)
   assert.deepEqual(await readOf(sends(SOL_BUY_TXS)), { got: null, calls: 1 + SOL_BUY_TXS }, "SOL_BUY_TXS sends, no release");
   assert.deepEqual(await readOf(sends(2)), { got: null, calls: 3 }, "a shortened list");

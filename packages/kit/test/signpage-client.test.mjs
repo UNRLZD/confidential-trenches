@@ -521,7 +521,7 @@ for (const kind of SIGNPAGE_KINDS) {
   });
 }
 
-test("the pool kinds (card signpage-pool-kinds): each builds from its own fields on a pool chain only; NEAR, another chain, a field it does not take, an amount that is not a decimal, a slippage over 10,000, a missing field and an address from the app cannot be built", () => {
+test("the pool kinds (card signpage-pool-kinds): each builds from its own fields on a pool chain only (pool.buy and pool.sell also on NEAR, TRADE_CHAINS); NEAR for a deposit or a withdraw, another chain, a field it does not take, an amount that is not a decimal, a slippage over 10,000, a missing field and an address from the app cannot be built", () => {
   const T = "0xF111111111111111111111111111111111111111";
   for (const [kind, good] of [
     ["pool.deposit", { chain: "solana", amount: "1.5" }],
@@ -530,9 +530,15 @@ test("the pool kinds (card signpage-pool-kinds): each builds from its own fields
     ["pool.withdraw", { return_key: "withdraw", chain: "solana" }],
   ]) {
     assert.deepEqual(C.signpageBuildRequest(kind, good, "id"), { ...good, v: 1, id: "id", type: kind }, kind);
+    const trade = kind === "pool.buy" || kind === "pool.sell";
+    if (trade) {
+      const near = { ...good, chain: "near", token: "wrap.near" };
+      assert.deepEqual(C.signpageBuildRequest(kind, near, "id"), { ...near, v: 1, id: "id", type: kind }, `${kind} on near`);
+    }
     const bad = [
-      { ...good, chain: "near" },
+      ...(trade ? [] : [{ ...good, chain: "near" }]),
       { ...good, chain: "ethereum" },
+      { ...good, chain: "NEAR" },
       { ...good, extra: "x" },
       ...(kind === "pool.withdraw"
         ? [{ ...good, address: "0xattacker" }, { ...good, to: "0xattacker" }, { chain: "solana" }]
@@ -541,6 +547,13 @@ test("the pool kinds (card signpage-pool-kinds): each builds from its own fields
     ];
     for (const b of bad) assert.throws(() => C.signpageBuildRequest(kind, b, "id"), TypeError, `${kind} ${JSON.stringify(b)}`);
   }
+});
+
+test("TRADE_CHAINS is the pool chains and NEAR, frozen, and POOL_CHAINS stays the three pool chains", () => {
+  assert.deepEqual([...MSG.POOL_CHAINS], ["solana", "base", "robinhood"]);
+  assert.deepEqual([...MSG.TRADE_CHAINS], ["solana", "base", "robinhood", "near"]);
+  assert.ok(Object.isFrozen(MSG.TRADE_CHAINS) && Object.isFrozen(MSG.POOL_CHAINS));
+  for (const kind of ["pool.deposit", "pool.address"]) assert.throws(() => C.signpageBuildRequest(kind, { chain: "near", amount: "1" }, "id"), TypeError, kind);
 });
 
 test("card pool-sell-share-across-wallets: pool.sell takes a share of the whole holding (share_bps, 1 to 10,000) or a typed amount, exactly one; an old amount-only request still builds", () => {
@@ -1189,6 +1202,16 @@ test("route events: out, wallet and pool are checked as the kit's own shapes; th
   assert.deepEqual(seen, []);
 });
 
+// card near-private-trading: a NEAR buy's route: W its implicit account, the pool a Rhea pool's index
+test("route events on NEAR: W a 64-hex implicit account, the pool a Rhea pool index (a u32 in decimal)", () => {
+  const at = (x) => S.signpageProgressRouteSchema({ v: 1, type: "progress", id: "x", ...x });
+  assert.equal(at({ wallet: "ab".repeat(32) }), true);
+  for (const wallet of ["AB".repeat(32), "ab".repeat(31), "ab".repeat(33), `${"ab".repeat(31)}zz`, "alice.near"]) assert.equal(at({ wallet }), false, wallet);
+  for (const pool of ["0", "7", "4512", "4294967295"]) assert.equal(at({ venue: "Rhea", pool }), true, pool);
+  for (const pool of ["", "01", "-1", "1.5", "4294967296", "12345678901", "ab".repeat(32), " 7"]) assert.equal(at({ venue: "Rhea", pool }), false, pool);
+  assert.equal(at({ venue: "", pool: "7" }), false);
+});
+
 // card pool-buy-send-fast: the buy's transaction as a route fact, so a mainnet bundle that lands past the client's 10 s
 // still names its transaction to the app: a base58 signature of exactly 64 bytes, nothing else
 const SIG = "48Xv1SNVzuNDAaB6FXW5MNUjCMW5LArZdeqJahVeQ3DrsXzBSPQQxiNjiV2wvuF5v58AXjSECU5LHuYfKb4nNBEv";
@@ -1624,7 +1647,7 @@ test("kit-deposit-calls: deposit.confirm answers the stage with its facts throug
 const HELLO = { v: 1, type: "hello", kit: MSG.SIGNPAGE_KIT_VERSION };
 
 test("kit-frame-version: the kit names its version in a hello to SIGN_HOST's origin, just before each handshake state request", async () => {
-  assert.equal(MSG.SIGNPAGE_KIT_VERSION, "1.10");
+  assert.equal(MSG.SIGNPAGE_KIT_VERSION, "1.11");
   const h = makeHost();
   const c = C.createSignpageClient({ url: URL_, host: h.host });
   await flush();

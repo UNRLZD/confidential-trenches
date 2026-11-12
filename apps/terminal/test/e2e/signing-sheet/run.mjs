@@ -13,6 +13,10 @@
 //   withdraw the account's Withdraw: the withdraw form
 //   poolwithdraw  pool.withdraw as the portfolio's pool row sends it (PortfolioMount.tsx), posted from the app's own
 //            document: the pool withdraw form (the harness holds no pool balance to draw the row)
+//   thief    both withdraw forms again, opened from an app that takes the keyboard's focus every 5 ms from before the
+//            open and reads every key, paste and text input it gets; the user taps To, types and pastes. The rule: the
+//            app reads nothing (0 keys, no paste), To holds it all and has the focus, the frame out of the page
+//            (packages/signpage/src/frame-cover.ts SEALED; the three engines: packages/signpage/scripts/focus-steal.e2e.mjs)
 // held (DepositSheet's Withdraw on a held deposit) is not driven: it opens only on a held deposit in SIGN_HOST's own
 // store, which the harness has none of; it is the withdraw form's path with the held op (src/main.ts openKind).
 // Per view it records: the sheet's box on screen, the frame #app still in the page and visible (its box the window's)
@@ -20,7 +24,9 @@
 // it before the first view) and its open sheet after the close. The verdict: every view draws in the sheet, the top
 // path stays the app's, and a close (Esc, the x, the scrim, Cancel) comes back to the same app document with its state; a
 // view with a field typed into (words, withdraw) or the 12 words shown (backup) has the frame out of the page while it
-// shows (src/shell.ts seal), every other view keeps it in the page, visible under the scrim. A close by a tap (the x, the
+// shows (src/shell.ts seal) and the page's own ground under it (the dot logo, every layer loaded under SIGN_HOST's
+// policy; packages/signpage/src/backdrop.ts drawSealedGround), every other view keeps it in the page, visible under the
+// scrim, with no ground. A close by a tap (the x, the
 // scrim, Saved, Cancel) is a double tap: its second tap, where the first was, lands on no app control (the frame stays
 // inert for 500 ms after a close; src/shell.ts close), counted by the app document's own trusted pointerdowns.
 // Then, under the choose sheet (the frame kept, its opening tap's activation fresh), the frame tries what a frame that
@@ -45,7 +51,7 @@ export const WIDTHS = [
   { name: "1440", viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, isMobile: false, hasTouch: false },
 ];
 /** The views with a field typed into: the frame is out of the page while they show. */
-// the views the frame leaves the page before (packages/signpage/src/main.ts TYPED): a field typed into, or the 12 words
+// the views the frame leaves the page before (packages/signpage/src/frame-cover.ts SEALED): a field typed into, or the 12 words
 export const TYPED = new Set(["words", "withdraw", "poolwithdraw", "backup", "backup2"]);
 // the closing controls a tap closes by: each is tapped twice, the second tap where the first was, as a double tap
 const TAPPED = new Set(["x", "scrim", "saved", "cancel"]);
@@ -53,6 +59,10 @@ export const VIEWS = ["signin", "words", "choose", "existing", "backup", "backup
 const ROUTE = "/discover";
 const GUARD_MS = 600; // past SIGN_HOST's 500 ms activation guard (packages/signpage/src/guard.ts)
 const WAIT_MS = 15_000;
+const KEYS = "abcdefgh";
+const PASTE = "PQR";
+/** The withdraw forms the thief step opens again. */
+export const THIEF = ["withdraw", "poolwithdraw"];
 
 /** The verdict on one record: { ok, lines }. */
 export function judge(rec) {
@@ -70,7 +80,11 @@ export function judge(rec) {
       if (v.topPath !== v.appPath) bad.push(`top path ${v.topPath}, the app's ${v.appPath}`);
       if (TYPED.has(name)) {
         if (v.frame !== "out") bad.push(`frame ${v.frame} under a typed view`);
-      } else if (v.frame !== "visible") bad.push(`frame ${v.frame}, not visible under the sheet`);
+        if (v.ground !== "logo") bad.push(`ground ${v.ground} under a typed view`);
+      } else {
+        if (v.frame !== "visible") bad.push(`frame ${v.frame}, not visible under the sheet`);
+        if (v.ground !== "none") bad.push(`ground ${v.ground} under a kept frame`);
+      }
       if (v.closed) {
         if (!v.closed.hidden) bad.push("the sheet did not close");
         if (!TYPED.has(name) && !v.closed.sameDoc) bad.push("a new app document after close: state lost");
@@ -81,7 +95,20 @@ export function judge(rec) {
         if (v.closed.topPath !== v.topPath) bad.push(`after close the top path is ${v.closed.topPath}`);
         if (TAPPED.has(v.closed.by) && v.closed.appTaps !== 0) bad.push(`the double tap's second tap landed in the app (${v.closed.appTaps ?? "not counted"})`);
       }
-      lines.push(`${bad.length ? "FAIL" : "ok  "} ${tag}: frame ${v.frame}, top ${v.topPath}${v.closed ? `, closed by ${TAPPED.has(v.closed.by) ? "a double tap on " : ""}${v.closed.by}${v.closed.sameDoc ? " to the same app document" : " to a new app document"}${TAPPED.has(v.closed.by) ? `, ${v.closed.appTaps} tap(s) in the app` : ""}` : ""}${v.closed?.paint ? `, app painted ${v.closed.paint.firstPaintMs} ms (content ${v.closed.paint.contentPaintMs} ms) after the close, dim faded at ${v.closed.paint.fadeMs} ms` : ""}${bad.length ? ` (${bad.join("; ")})` : ""}`);
+      lines.push(`${bad.length ? "FAIL" : "ok  "} ${tag}: frame ${v.frame}, ground ${v.ground}, top ${v.topPath}${v.closed ? `, closed by ${TAPPED.has(v.closed.by) ? "a double tap on " : ""}${v.closed.by}${v.closed.sameDoc ? " to the same app document" : " to a new app document"}${TAPPED.has(v.closed.by) ? `, ${v.closed.appTaps} tap(s) in the app` : ""}` : ""}${v.closed?.paint ? `, app painted ${v.closed.paint.firstPaintMs} ms (content ${v.closed.paint.contentPaintMs} ms) after the close, dim faded at ${v.closed.paint.fadeMs} ms` : ""}${bad.length ? ` (${bad.join("; ")})` : ""}`);
+    }
+    for (const name of THIEF) {
+      const t = w.thief?.[name];
+      if (!t) {
+        lines.push(`FAIL thief ${name} @${w.width}: not run (${w.error ?? "no record"})`);
+        continue;
+      }
+      const bad = [];
+      if (t.leaked.length) bad.push(`the app read ${JSON.stringify(t.leaked)}`);
+      if (t.value !== KEYS + PASTE) bad.push(`To holds "${t.value}"`);
+      if (t.focus !== "to") bad.push(`the focus on ${t.focus}`);
+      if (t.frame !== "out") bad.push(`frame ${t.frame}`);
+      lines.push(`${bad.length ? "FAIL" : "ok  "} thief ${name} @${w.width}: an app taking the focus every 5 ms; To holds "${t.value}", the app read ${t.leaked.length ? JSON.stringify(t.leaked) : "nothing"}, frame ${t.frame}, focus ${t.focus}${bad.length ? ` (${bad.join("; ")})` : ""}`);
     }
     const b = w.probes;
     if (!b) lines.push(`FAIL frame probes @${w.width}: not run (${w.error ?? "no record"})`);
@@ -193,6 +220,9 @@ async function oneWidth(h, w, shotDir, { cpu = 1, holdPaint = 0 } = {}) {
         }).observe(document, { childList: true });
       addEventListener("load", () => setTimeout(() => document.documentElement.style.removeProperty("display"), ms), { once: true });
     }, { host: REAL.app, ms: holdPaint });
+  // what an app document reads, reported from any frame (the thief step)
+  const leaked = [];
+  await context.exposeBinding("__ctLeak", (_src, k) => void leaked.push(String(k)));
   const page = await context.newPage();
   if (cpu > 1) await (await cdpFor(page)).send("Emulation.setCPUThrottlingRate", { rate: cpu });
   const auth = await addAuthenticator(page, { hasPrf: false });
@@ -213,7 +243,7 @@ async function oneWidth(h, w, shotDir, { cpu = 1, holdPaint = 0 } = {}) {
   const look = async (name, m, mask = []) => {
     // the screen shown (a build before the sheet draws it as a page of its own: shot and judged all the same)
     await top("#screen:not([hidden])").waitFor({ timeout: WAIT_MS });
-    await page.waitForTimeout(250); // past FRAME_LEAVE_MS
+    await page.waitForTimeout(250); // the screen settled
     const v = await page.evaluate(() => {
       const box = document.querySelector("#screen [data-sheet=box]");
       const b = box?.getBoundingClientRect();
@@ -224,6 +254,13 @@ async function oneWidth(h, w, shotDir, { cpu = 1, holdPaint = 0 } = {}) {
         sheet: Boolean(b && b.width > 0 && b.height > 0 && !document.querySelector("#screen").hidden),
         frame: !f ? "out" : fb.width >= innerWidth && fb.height >= innerHeight && fs.visibility === "visible" && fs.display !== "none" && Number(fs.opacity) > 0 ? "visible" : "hidden",
         topPath: location.pathname,
+        // the sealed screens' ground: "none" (hidden or absent), or shown with its logo's layers loaded or not
+        ground: (() => {
+          const g = document.querySelector("#ground");
+          if (!g || g.hidden || getComputedStyle(g).display === "none") return "none";
+          const imgs = [...g.querySelectorAll("img")];
+          return imgs.length > 0 && imgs.every((i) => i.complete && i.naturalWidth > 0) ? "logo" : "no logo";
+        })(),
       };
     });
     const d = v.frame === "out" ? null : await appDoc();
@@ -358,23 +395,26 @@ async function oneWidth(h, w, shotDir, { cpu = 1, holdPaint = 0 } = {}) {
     await vis('[data-header="S1.3"], [data-header="S1.4"]').waitFor({ timeout: WAIT_MS });
 
     // backup2: the account's Backup, the scrim back (a desktop width) or Esc
-    await account("acct-backup");
+    // the mark before the tap: a sealed screen takes the frame out in the open's own task
     m = await newMark();
+    await account("acct-backup");
     const list2 = top('#screen:not([hidden]) #signin[data-signin="backup"] [data-words="12"]');
     await list2.waitFor({ timeout: WAIT_MS });
     await look("backup2", m, [list2]);
     await closed("backup2", w.name === "1440" ? "scrim" : "esc");
 
     // signout: the account's Sign out, the x back
-    await account("acct-signout");
+    // the mark before the tap: a sealed screen takes the frame out in the open's own task
     m = await newMark();
+    await account("acct-signout");
     await top('#screen:not([hidden]) #signin[data-signin="signout"]').waitFor({ timeout: WAIT_MS });
     await look("signout", m);
     await closed("signout", "x");
 
     // withdraw: the account's Withdraw, Esc back
-    await account("acct-withdraw");
+    // the mark before the tap: a sealed screen takes the frame out in the open's own task
     m = await newMark();
+    await account("acct-withdraw");
     await top('#screen:not([hidden]) #signin[data-signin="withdraw"]').waitFor({ timeout: WAIT_MS });
     await look("withdraw", m);
     await closed("withdraw", "esc");
@@ -386,6 +426,37 @@ async function oneWidth(h, w, shotDir, { cpu = 1, holdPaint = 0 } = {}) {
     await top('#screen:not([hidden]) #signin[data-signin="pool-withdraw"]').waitFor({ timeout: WAIT_MS });
     await look("poolwithdraw", m);
     await closed("poolwithdraw", "x");
+
+    // thief: each withdraw form opened again from an app that takes the focus every 5 ms from before the open
+    out.thief = {};
+    for (const name of THIEF) {
+      await page.waitForTimeout(400);
+      await app.locator(":root").evaluate(() => {
+        addEventListener("keydown", (e) => void window.__ctLeak(e.key), true);
+        addEventListener("paste", (e) => void window.__ctLeak(`paste:${e.clipboardData?.getData("text") ?? ""}`), true);
+        addEventListener("beforeinput", (e) => void (e.data && window.__ctLeak(`input:${e.data}`)), true);
+        setInterval(() => (window.focus(), document.querySelector("input, button, a")?.focus()), 5);
+      });
+      leaked.length = 0;
+      if (name === "withdraw") await account("acct-withdraw");
+      else await app.locator(":root").evaluate(() => window.parent.postMessage({ v: 1, id: crypto.randomUUID(), type: "pool.withdraw", chain: "solana", return_key: "portfolio" }, "*"));
+      const state = name === "withdraw" ? "withdraw" : "pool-withdraw";
+      await top(`#screen:not([hidden]) #signin[data-signin="${state}"]`).waitFor({ timeout: WAIT_MS });
+      await page.waitForTimeout(GUARD_MS);
+      await tap(top('#signin input[data-input="to"]'));
+      await page.keyboard.type(KEYS, { delay: 30 });
+      await page.keyboard.insertText(PASTE);
+      await page.waitForTimeout(300);
+      const after = await page.evaluate(() => {
+        const a = document.activeElement;
+        return { frame: document.querySelector("iframe#app") ? "in" : "out", value: document.querySelector('#signin input[data-input="to"]')?.value ?? null, focus: a?.matches?.('input[data-input="to"]') ? "to" : a?.tagName === "IFRAME" ? "frame" : (a?.tagName ?? "none") };
+      });
+      out.thief[name] = { ...after, leaked: [...leaked] };
+      await shot(`thief-${name}-open`);
+      await page.keyboard.press("Escape");
+      await top("#screen").waitFor({ state: "hidden", timeout: WAIT_MS });
+      await app.locator(':root[data-signpage="ready"]').waitFor({ state: "attached", timeout: WAIT_MS });
+    }
   } catch (e) {
     out.error = String(e.message ?? e).split("\n")[0];
     await shot("error").catch(() => {});

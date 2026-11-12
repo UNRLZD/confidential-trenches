@@ -3,12 +3,15 @@
 // device restored from the 12 words had the notes and each fresh wallet's buy record, and no trade op, so Portfolio's
 // closed positions, its calendar and How you trade read nothing. It reads what SIGN_HOST serves: the page, then every
 // script the page names, and checks the bundle holds:
-//   - the restore's read of each fresh wallet hands back its buy and its later transactions, to its sale in full
-//     (packages/wallet/src/pool/buy-wallets.ts solanaBuyReader: txs and soldOut);
+//   - the restore's read of each fresh wallet hands back its buy and its later transactions, to its sale in full, and
+//     a wallet read part way is read on from its last transaction read (packages/wallet/src/pool/buy-wallets.ts
+//     solanaBuyReader: getSignaturesForAddress `until` the cursor);
 //   - each becomes the op this device would have written, keyed by its signature (src/sol-buy-records.ts
 //     restoredTradeOps: `restored/<signature>`, a buy, then each sale);
 //   - a wallet sold in full is marked and not read again (TRADES_READ_KEY, owed/trades-sol-read);
-//   - a buy with no USD (a rebuilt one) is priced at its own block (src/trade-fill.ts).
+//   - a buy with no USD (a rebuilt one) is priced at its own block (src/trade-fill.ts);
+//   - an op whose transactions were read and give no figure is marked and not read again (src/trade-fill.ts
+//     fill_none).
 // The behaviour (the owner's three round trips of 12 Nov, restored on the published test seed) is the package's own
 // test: packages/signpage/test/restore-trades.test.ts.
 // After: sign --host sign
@@ -29,10 +32,11 @@ const ID = "[\\w$]+";
 /** The marks, and what the bundle holds when the change is in place. */
 export const MARKS = {
   sign: [
-    ["the restore's read hands back a wallet's trades", new RegExp(`\\.\\.\\.${ID},txs:${ID},soldOut:${ID}\\}`)],
+    ["a wallet's trades are read on from where the last read stopped", new RegExp(`\\{until:${ID}\\.after\\}`)],
     ["each trade becomes an op keyed by its signature", new RegExp(`key:(?:\`restored/\\$\\{${ID}\\}\`|${Q}restored/${Q}\\+${ID}),rec:\\{kind:${Q}buy${Q}`)],
     ["a wallet sold in full is read for good", new RegExp(`${Q}owed/trades-sol-read${Q}`)],
     ["a buy with no USD is priced at its block", new RegExp(`${ID}\\.kind===${Q}buy${Q}&&${ID}\\.amount_usd===void 0`)],
+    ["an op with no figure is marked and not read again", /,fill_none:!0\}/],
   ],
 };
 export const NAMES = { sign: MARKS.sign.map(([n]) => n) };

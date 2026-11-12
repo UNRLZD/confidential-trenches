@@ -294,7 +294,12 @@ test("auto: a sign-in on an empty note store runs once under an op of its own; o
 test("signed out mid-run: the run stops, its seed zeroed, nothing written after", async () => {
   let release: () => void = () => {};
   const slow = new Promise<void>((r) => (release = r));
-  const w = await world({ solana: (async (a: { signal: AbortSignal }) => (await slow, a.signal.throwIfAborted(), { notes: notesOf(SOL_SCOPE, LABEL_S, 1000n), spends: [] })) as never });
+  // both pools held until the sign out: each pool's notes are written as its walk ends (card
+  // closed-positions-after-a-restore), so a pool that ended before the sign out has its notes written before it
+  const w = await world({
+    solana: (async (a: { signal: AbortSignal }) => (await slow, a.signal.throwIfAborted(), { notes: notesOf(SOL_SCOPE, LABEL_S, 1000n), spends: [] })) as never,
+    evm: (async (a: { signal: AbortSignal }) => (await slow, a.signal.throwIfAborted(), { notes: notesOf(EVM_SCOPE, LABEL_E, 2000n), spends: [], elsewhere: [], wallets: [], block: 1n })) as never,
+  });
   const run = w.r.auto();
   await until("reading", async () => (await w.store.keys("ops")).length === 1);
   w.r.signedOut();
@@ -306,12 +311,107 @@ test("signed out mid-run: the run stops, its seed zeroed, nothing written after"
   assert.equal((await opOf(w.store, k!))?.stage, "reading");
 });
 
-test("pagePools: the mainnet build pins the Solana pool (card sol-pools-mainnet-pin), read on the page's Solana pair, then Base's and Robinhood's (card evm-pools-on-mainnet), each on its pool list", async () => {
+// Review of 4dd90d23f, P2: a pool's notes are written as its walk ends, so a sign out between two pools' ends keeps the
+// first's and never writes the second's; and a floor that throws stops every floor after it, the run ending stalled
+test("signed out between two pools' ends: Solana's notes are written before it, the held EVM pool's never", async () => {
+  let release: () => void = () => {};
+  const slow = new Promise<void>((r) => (release = r));
+  const w = await world({
+    evm: (async (a: { signal: AbortSignal }) => (await slow, a.signal.throwIfAborted(), { notes: notesOf(EVM_SCOPE, LABEL_E, 2000n), spends: [], elsewhere: [], wallets: [], block: 1n })) as never,
+  });
+  const run = w.r.auto();
+  const sol = notesOf(SOL_SCOPE, LABEL_S, 1000n).map((n) => `${refKey(n.ref)} ${n.state}`).sort();
+  await until("Solana's notes written", async () => JSON.stringify(await listed(w.store)) === JSON.stringify(sol));
+  w.r.signedOut();
+  release();
+  assert.equal(await run, "stalled");
+  assert.deepEqual(await listed(w.store), sol, "the EVM pool, ended after the sign out, writes nothing");
+  assert.ok(w.seeds.every((s) => s.every((b) => b === 0)));
+});
+
+test("the first pool's write refused: no pool after it is written, and the run ends stalled", async () => {
+  let release: () => void = () => {};
+  const slow = new Promise<void>((r) => (release = r));
+  // the store refuses the Solana pool's floor (its deposit counter's raise): that pool's write throws
+  let refuse = true;
+  const inner = await openWalletStore({ name: `restore-refuse-${db++}`, indexedDB: new IDBFactory() });
+  closers.push(() => inner.close());
+  const refusing = new Proxy(inner, { get: (t, k) => (k === "raiseDepositIndex" ? (scope: bigint, n: number) => (refuse && scope === SOL_SCOPE ? Promise.reject(new Error("write refused")) : t.raiseDepositIndex(scope, n)) : typeof (t as never)[k] === "function" ? ((t as never)[k] as (...a: unknown[]) => unknown).bind(t) : (t as never)[k]) });
+  const w = await world({
+    store: async () => refusing,
+    evm: (async (a: { signal: AbortSignal }) => (await slow, a.signal.throwIfAborted(), { notes: notesOf(EVM_SCOPE, LABEL_E, 2000n), spends: [], elsewhere: [], wallets: [], block: 1n })) as never,
+  });
+  const run = w.r.auto();
+  await until("Solana's walk ended", async () => (await inner.keys("ops")).length === 1);
+  for (let i = 0; i < 10; i++) await new Promise((r) => setTimeout(r, 20));
+  release();
+  assert.equal(await run, "stalled");
+  refuse = false;
+  assert.deepEqual(await listed(inner), [], "neither pool written: Solana's refused, the EVM pool's after it never");
+  assert.equal(w.ends.at(-1)?.stage, "stalled");
+  assert.ok(w.ends.at(-1)?.why.some((x) => x.includes("write refused")), JSON.stringify(w.ends.at(-1)?.why));
+});
+
+test("a floor's throw and another pool's failed walk: the run's end names both (review of 4dd90d23f, P3)", async () => {
+  const inner = await openWalletStore({ name: `restore-refuse-${db++}`, indexedDB: new IDBFactory() });
+  closers.push(() => inner.close());
+  const refusing = new Proxy(inner, { get: (t, k) => (k === "raiseDepositIndex" ? (scope: bigint, n: number) => (scope === SOL_SCOPE ? Promise.reject(new Error("write refused")) : t.raiseDepositIndex(scope, n)) : typeof (t as never)[k] === "function" ? ((t as never)[k] as (...a: unknown[]) => unknown).bind(t) : (t as never)[k]) });
+  const w = await world({ store: async () => refusing, evm: (async () => { throw new Error("evm down"); }) as never });
+  assert.equal(await w.r.auto(), "stalled");
+  const why = w.ends.at(-1)?.why ?? [];
+  assert.ok(why.some((x) => x.includes("write refused")) && why.some((x) => x.includes("evm down")), JSON.stringify(why));
+});
+
+test("a walk that throws at once frees the page's turn: the next pool's walk still runs (review of 9de383865, P3)", async () => {
+  type Turn = <T>(walk: () => Promise<T>) => Promise<T>;
+  let threw = false;
+  let evmWalked = false;
+  const w = await world({
+    // Solana's walk throws before it returns a promise (not an async function's rejection)
+    solana: (async (a: { turn: Turn }) => {
+      await a.turn((() => {
+        threw = true;
+        throw new Error("walk threw at once");
+      }) as never);
+      return { notes: [], spends: [] };
+    }) as never,
+    // the EVM pool asks for the turn only once Solana's walk has thrown in it
+    evm: (async (a: { turn: Turn }) => {
+      for (let i = 0; i < 1000 && !threw; i++) await new Promise((r) => setImmediate(r));
+      await a.turn(async () => void (evmWalked = true));
+      return { notes: notesOf(EVM_SCOPE, LABEL_E, 2000n), spends: [], elsewhere: [], wallets: [], block: 1n };
+    }) as never,
+  });
+  const run = w.r.auto();
+  for (let i = 0; i < 2000 && !evmWalked; i++) await new Promise((r) => setImmediate(r));
+  assert.ok(threw, "Solana's walk threw in its turn");
+  assert.ok(evmWalked, "the EVM pool's walk had its turn after it");
+  assert.equal(await run, "stalled");
+  assert.ok(w.ends.at(-1)?.why.some((x) => x.includes("walk threw at once")), JSON.stringify(w.ends.at(-1)?.why));
+});
+
+test("the page's walk Workers reach every pool's walk: Solana's and each EVM pool's restore are handed the host's own `walkers` (review of b05ed10b3, P2)", async () => {
+  const walkers = (() => { throw new Error("not started here"); }) as never;
+  const got: { chain: string; walkers: unknown }[] = [];
+  const w = await world({
+    walkers,
+    solana: (async (a: { walkers?: unknown }) => (got.push({ chain: "solana", walkers: a.walkers }), { notes: notesOf(SOL_SCOPE, LABEL_S, 1000n), spends: [] })) as never,
+    evm: (async (a: { pin: { network: string }; walkers?: unknown }) => (got.push({ chain: a.pin.network, walkers: a.walkers }), { notes: notesOf(EVM_SCOPE, LABEL_E, 2000n), spends: [], elsewhere: [], wallets: [], block: 1n })) as never,
+  });
+  await w.r.auto();
+  assert.ok(got.some((x) => x.chain === "solana") && got.some((x) => x.chain !== "solana"), JSON.stringify(got.map((x) => x.chain)));
+  for (const x of got) assert.equal(x.walkers, walkers, `${x.chain}: the host's walkers`);
+});
+
+test("pagePools: the mainnet build pins the NEAR vault on its release pair (card signpage-restores-near-vault-notes), the Solana pool (card sol-pools-mainnet-pin), read on the page's Solana pair, then Base's and Robinhood's (card evm-pools-on-mainnet), each on its pool list", async () => {
   const { SOL_POOLS, solanaPoolOf } = await import("../../wallet/src/pool/solana.ts");
   const { EVM_POOLS, evmPoolScopeOf } = await import("../../wallet/src/pool/evm.ts");
   const { PAGE_SOL_CACHE, PAGE_SOL_MARK_BATCHES, pageEvmPoolRpcs, pageSolanaLister, pageSolanaSettleRpcs } = await import("../src/pool-testnet.ts");
+  const { vaultScope } = await import("../src/withdraw/checks.ts");
   const pin = SOL_POOLS.mainnet!;
-  const [sol, ...evm] = pagePools();
+  const [vault, sol, ...evm] = pagePools();
+  assert.ok(vault?.chain === "near");
+  assert.deepEqual([vault.network, vault.scope, vault.rpcs?.().map((r) => r.name)], ["mainnet", vaultScope("mainnet"), [NEAR_NETWORKS.mainnet.fastnear[0], NEAR_NETWORKS.mainnet.drpc]]);
   assert.deepEqual(sol, { chain: "solana", program: pin.program, scope: solanaPoolOf(pin.program).scope, rpcs: pageSolanaSettleRpcs, lister: pageSolanaLister, cache: PAGE_SOL_CACHE, markBatches: PAGE_SOL_MARK_BATCHES });
   assert.deepEqual(evm.map((p) => [p.chain, (p as { pin?: unknown }).pin, (p as { scope?: unknown }).scope]), [
     ["evm", EVM_POOLS.base, evmPoolScopeOf(EVM_POOLS.base!.pool, 8453n)],
@@ -322,7 +422,7 @@ test("pagePools: the mainnet build pins the Solana pool (card sol-pools-mainnet-
     assert.deepEqual(rpcs?.().map((r) => r.url), pageEvmPoolRpcs(chain)!.map((r) => (r as { url?: string }).url), `${chain}: its pool list`);
   }
   // the restore reads on the same cache as every settle of the page (review P2-2 of a34c1626): one object, not a copy
-  assert.equal((pagePools()[0] as { cache?: unknown }).cache, PAGE_SOL_CACHE);
+  assert.equal((pagePools()[1] as { cache?: unknown }).cache, PAGE_SOL_CACHE);
 });
 
 // review M1: a page closed or reloaded mid-run leaves its record running; the next signed-in load reads it stalled, so

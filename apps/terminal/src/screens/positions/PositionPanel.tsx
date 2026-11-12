@@ -1,7 +1,7 @@
-import { held, pct, units, usd } from "../portfolio/model.ts";
+import { bps as bpsOf, held, nearCents, pct, units, usd } from "../portfolio/model.ts";
 import type { Row } from "../portfolio/model.ts";
 import { busy } from "../trade/model.ts";
-import { initialsBps, pctLabel, QUICK, sellAmount, WHOLE } from "./model.ts";
+import { pctLabel, QUICK, sellAmount, WHOLE } from "./model.ts";
 import type { Sell } from "./source.tsx";
 import { W } from "./W.tsx";
 import "./positions.css";
@@ -26,16 +26,19 @@ function price(costCents: bigint, amount: string): string {
   return `$${p.toLocaleString("en-US", { maximumSignificantDigits: 4, maximumFractionDigits: 20 })}`;
 }
 
-const tone = (c: bigint | null) => (c === null ? undefined : String(c >= 0n));
+/** A tone from an exact figure (its sign, never the rounded cents): an exact zero neutral (no tone). */
+const tone = (x: bigint | null) => (x === null || x === 0n ? undefined : String(x > 0n));
 
 export function PositionPanel({ row, s, now, onShare }: { row: Row; s: Sell; now: number; onShare?: () => void }) {
   // the row's decimals, the signing page's, never the helper's (card app-sell-mount re-check 2)
   const decimals = row.decimals;
   const running = busy(s.phase);
   const noRoute = row.mark === "noRoute";
-  const total = row.pnl === null ? null : row.pnl + row.realized;
-  const totalBps = total === null || row.cost === null || row.cost === 0n ? null : Number((total * 10_000n) / row.cost);
-  const up = row.pnl === null ? undefined : String(row.pnl >= 0n);
+  // the PnL and the realized part, exact, to the nearest cent; its percent from the exact figures
+  const totalX = row.valueX === null || row.costX === null ? null : row.valueX - row.costX + row.realizedX;
+  const total = totalX === null ? null : nearCents(totalX);
+  const totalBps = totalX === null || row.costX === null ? null : bpsOf(totalX, row.costX);
+  const up = tone(row.pnlSign);
 
   return (
     <div className="tk-panel tk-position" data-testid="position-panel" data-state={s.phase.k}>
@@ -62,9 +65,9 @@ export function PositionPanel({ row, s, now, onShare }: { row: Row; s: Sell; now
         <div className="tk-posRow" data-testid="pos-bought"><span className="tk-posLabel"><W id="bought" /></span><span className="tk-posVal">{row.bought === null ? "—" : usd(row.bought)}</span><span className="tk-posUsd" /></div>
         <div className="tk-posRow" data-testid="pos-sold"><span className="tk-posLabel"><W id="sold" /></span><span className="tk-posVal">{usd(row.sold)}</span><span className="tk-posUsd" /></div>
         <div className="tk-posRow" data-testid="pos-holding"><span className="tk-posLabel"><W id="holding" /></span><span className="tk-posVal" data-unread={row.value === null || undefined}>{row.value === null ? "—" : usd(row.value)}</span><span className="tk-posUsd">{units(row.units)} {row.symbol}</span></div>
-        <div className="tk-posRow" data-testid="pos-realized"><span className="tk-posLabel"><W id="realized" /></span><span className="tk-posVal" data-tone={tone(row.realized)}>{usd(row.realized, true)}</span><span className="tk-posUsd" /></div>
+        <div className="tk-posRow" data-testid="pos-realized"><span className="tk-posLabel"><W id="realized" /></span><span className="tk-posVal" data-tone={tone(row.realizedX)}>{usd(row.realized, true)}</span><span className="tk-posUsd" /></div>
         <div className="tk-posRule" />
-        <div className="tk-posRow" data-testid="pos-total"><span className="tk-posLabel"><W id="totalPnl" /></span><span className="tk-posVal" data-tone={tone(total)}>{total === null ? "—" : usd(total, true)}</span><span className="tk-posUsd">{pct(totalBps)}</span></div>
+        <div className="tk-posRow" data-testid="pos-total"><span className="tk-posLabel"><W id="totalPnl" /></span><span className="tk-posVal" data-tone={tone(totalX)}>{total === null ? "—" : usd(total, true)}</span><span className="tk-posUsd">{pct(totalBps)}</span></div>
       </div>
       <div className="tk-posMeta">
         <div data-testid="pos-entry"><span className="tk-posLabel"><W id="avgEntry" /></span><span className="tk-posMetaVal">{row.cost === null ? "—" : price(row.cost, row.units)}</span></div>
@@ -72,10 +75,11 @@ export function PositionPanel({ row, s, now, onShare }: { row: Row; s: Sell; now
       </div>
       <div className="tk-quick" data-testid="position-quick">
         {QUICK.map((q) => {
-          const b = q === "initials" ? (row.cost === null ? null : initialsBps(row.cost, row.value)) : q;
+          // Initials from the exact cost and value (rowOf), never from the rounded cents: it is the share the device signs
+          const b = q === "initials" ? row.initials : q;
           const amount = b === null ? null : sellAmount(row.units, b, decimals);
           const live = running && b !== null && s.bps === b;
-          const off = !s.ready || running || noRoute || amount === null;
+          const off = !s.ready || running || noRoute || amount === null || !s.takes(b!);
           return (
             <button
               key={String(q)}

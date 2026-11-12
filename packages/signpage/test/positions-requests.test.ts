@@ -102,6 +102,11 @@ test("the positions on the mainnet build: no request names a W to any host but t
       return ok({ context: { slot: 100 }, value });
     }
     if (b.method === "getAccountInfo") return ok({ context: { slot: 100 }, value: { owner: SOLANA_TOKEN_PROGRAM, lamports: 1, data: [base64.encode(mintData), "base64"] } });
+    // each W's asset_held read (card portfolio-counts-money-an-open-buy-holds): W and its bought token account
+    if (b.method === "getMultipleAccounts") {
+      const keys = b.params[0] as string[];
+      return ok({ context: { slot: 100 }, value: keys.map((k) => (Ws.includes(k) ? { lamports: 5000, owner: "11111111111111111111111111111111", data: ["", "base64"] } : keys.indexOf(k) % 5 === 1 && names.get(k)?.startsWith("ATA") ? { lamports: 2_039_280, owner: SOLANA_TOKEN_PROGRAM, data: ["", "base64"] } : null)) });
+    }
     return ok(null);
   }) as typeof fetch;
 
@@ -120,6 +125,9 @@ test("the positions on the mainnet build: no request names a W to any host but t
   let tp = make();
   await tp.positions();
   await settled(tp, both);
+  // each W's SOL beside its token, read on the helper's keyed route (the log's checks below): W's 5,000 and its token
+  // account's 2,039,280
+  assert.deepEqual((await tp.positions())?.map((p) => p.asset_held), ["0.00204428", "0.00204428"]);
   phase = "2 W1's read fails, and its retry";
   mode.failW = Ws[1]!;
   timers.length = 0;
@@ -447,7 +455,9 @@ test("a restored device: each W's buy record back from its own buy on the helper
     if (b.method === "getTransaction") {
       if (b.params[0] === mode.holdTx) await new Promise<void>((r) => (release = r));
       if (b.params[0] === mode.failTx) return new Response(JSON.stringify({ jsonrpc: "2.0", id: b.id, error: { code: -32000, message: "no" } }), { status: 200 });
-      return ok(txs.get(b.params[0] as string) ?? null);
+      // as a route answers it: the signature its first, with a block time
+      const t = txs.get(b.params[0] as string) as { transaction: object } | null | undefined;
+      return ok(t ? { blockTime: 1_794_000_000, ...t, transaction: { signatures: [b.params[0]], ...t.transaction } } : null);
     }
     if (b.method === "getBalance") return ok({ context: { slot: 100 }, value: 5000 });
     if (b.method === "getTokenAccountsByOwner") {
@@ -540,6 +550,8 @@ test("a restored device: each W's buy record back from its own buy on the helper
   await until(async () => (await records())?.[Ws[1]!] !== undefined);
   assert.deepEqual(await records(), { [Ws[0]!]: { mint: BOUGHT, program: "kept as this device wrote it" }, [Ws[1]!]: { mint: OLD, program: SOLANA_TOKEN_PROGRAM, rebuilt: true } }, "W1's record back as sold whole (its buy's); W0's never replaced");
   await until(async () => JSON.stringify(show(await tp.positions())) === JSON.stringify([["BOUGHT", "4", ["W0"]]]));
+  // the Ws are read in a random order: W2's read may come after W1's record
+  await until(() => log.some((l) => l.phase === phase && l.method === "getSignaturesForAddress" && l.names.includes("W2")));
   assert.deepEqual(log.filter((l) => l.phase === phase && l.method === "getSignaturesForAddress").map((l) => l.names).sort(), [["W1"], ["W2"]], "W3's mark: never read again");
   phase = "3 a buy on this device writes W1's record while the run reads W1: the run never replaces it";
   await w.update("meta", "owed/buy-sol", (v) => {
@@ -563,6 +575,12 @@ test("a restored device: each W's buy record back from its own buy on the helper
     delete all[Ws[1]!];
     return all;
   });
+  // and W1's trades cursor (phase 2 read W1 to its sale's missing answer), so the run reads W1 from its buy again
+  await w.update("meta", "owed/trades-sol-read", (v) => {
+    const all = { ...(v as Record<string, unknown>) };
+    delete all[Ws[1]!];
+    return all;
+  });
   mode.holdTx = "s1buy";
   tp = make();
   await tp.settle();
@@ -579,6 +597,11 @@ test("a restored device: each W's buy record back from its own buy on the helper
   assert.deepEqual((await records())?.[Ws[1]!], { mint: OLD, program: SOLANA_TOKEN_PROGRAM, rebuilt: true }, "W1 read again after the sale");
   phase = "5 a restore's notes written (the proofs call it makes) starts the rebuild, with no state read";
   await w.update("meta", "owed/buy-sol", (v) => {
+    const all = { ...(v as Record<string, unknown>) };
+    delete all[Ws[1]!];
+    return all;
+  });
+  await w.update("meta", "owed/trades-sol-read", (v) => {
     const all = { ...(v as Record<string, unknown>) };
     delete all[Ws[1]!];
     return all;

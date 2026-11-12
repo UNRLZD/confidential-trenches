@@ -704,6 +704,9 @@ test("EVM withdraw: Withdraw(nullifier, context, value) on the pinned pool to W 
   const sig = signEvmWithdraw(EVM_SECRET, evmCtx(), ask, EVM_POOL, proof);
   const rec = secp256k1.Signature.fromBytes(sig.slice(0, 64), "compact").addRecoveryBit(sig[64]! - 27).recoverPublicKey(evmWithdrawDigest(BigInt(B.chainId), EVM_POOL, proof));
   assert.equal(hex(keccak_256(rec.toBytes(false).slice(1)).slice(12)), EVM_W, "the signature recovers to W");
+  // at the edges: a relay fee cap equal to the device's, a deadline a millisecond ahead of its clock
+  checkEvmWithdraw(EVM_POOL, proofOf(r), r, ask, evmCtx({ feeCap: r.feeCap }));
+  checkEvmWithdraw(EVM_POOL, proofOf(r), r, ask, evmCtx({ nowMs: r.deadlineMs - 1n }));
   const other = "0x2222222222222222222222222222222222222222";
   for (const [f, rule] of [
     [() => checkEvmWithdraw(other, proof, r, ask, evmCtx()), "pool"],
@@ -716,9 +719,43 @@ test("EVM withdraw: Withdraw(nullifier, context, value) on the pinned pool to W 
     // a venue list whose chain id is not a safe integer above 0 signs no domain
     [() => checkEvmWithdraw(EVM_POOL, proof, r, ask, evmCtx({ evm: { venues: Object.freeze({ base: pin(B, { pool: EVM_POOL, chainId: 0 }) }), feeRecipient: FEE_TO } })), "chain"],
     [() => checkEvmWithdraw(EVM_POOL, proof, r, ask, evmCtx({ evm: { venues: Object.freeze({ base: pin(B, { pool: EVM_POOL, chainId: 2 ** 53 }) }), feeRecipient: FEE_TO } })), "chain"],
+    // the relay fee paid to anyone but the pinned fee recipient, the proof bound to that relay data
+    [() => checkEvmWithdraw(EVM_POOL, proofOf(relay({ feeRecipient: other })), relay({ feeRecipient: other }), ask, evmCtx()), "fee_recipient"],
+    // a fee cap one wei over the device's
+    [() => checkEvmWithdraw(EVM_POOL, proofOf(relay({ feeCap: 10n ** 15n + 1n })), relay({ feeCap: 10n ** 15n + 1n }), ask, evmCtx()), "fee_cap_over_device_cap"],
+    // a deadline already behind the device's clock
+    [() => checkEvmWithdraw(EVM_POOL, proofOf(relay({ deadlineMs: NOW - 1n })), relay({ deadlineMs: NOW - 1n }), ask, evmCtx()), "deadline_past"],
+    // the context the check recomputes from the relay data on the pinned pool and chain id: a proof bound on another
+    // pool, another chain id, or other relay data is not this one
+    [() => checkEvmWithdraw(EVM_POOL, { ...proof, context: ctxOf(r, other) }, r, ask, evmCtx()), "context"],
+    [() => checkEvmWithdraw(EVM_POOL, { ...proof, context: evmPoolContextOf({ processooor: EVM_POOL, relay: r }, evmPoolScopeOf(EVM_POOL, 1n)) }, r, ask, evmCtx()), "context"],
+    [() => checkEvmWithdraw(EVM_POOL, proofOf(relay({ salt: "0x" + "cd".repeat(16) })), r, ask, evmCtx()), "context"],
+    // a pool that is not the pin, named in any case
+    [() => checkEvmWithdraw(other.toUpperCase().replace("0X", "0x"), proof, r, ask, evmCtx()), "pool"],
+    // nothing withdrawn
+    [() => checkEvmWithdraw(EVM_POOL, proofOf(r, 0n), r, ask, evmCtx()), "amount"],
   ] as const) {
     assert.throws(f, refusedAs(rule), rule);
   }
+  // the signer: only a binding checkEvmWithdraw passed, as it read it
+  // one no check saw, though it reads the same
+  assert.throws(() => signEvmWithdraw(EVM_SECRET, evmCtx(), ask, EVM_POOL, proofOf(r)), refusedAs("unchecked"));
+  // one the check refused at its last rule
+  const late = proofOf(relay({ feeRecipient: other }));
+  assert.throws(() => checkEvmWithdraw(EVM_POOL, late, relay({ feeRecipient: other }), ask, evmCtx()), refusedAs("fee_recipient"));
+  assert.throws(() => signEvmWithdraw(EVM_SECRET, evmCtx(), ask, EVM_POOL, late), refusedAs("unchecked"));
+  // one that passed, its value changed after
+  const moved = proofOf(r);
+  checkEvmWithdraw(EVM_POOL, moved, r, ask, evmCtx());
+  moved.value += 1n;
+  assert.throws(() => signEvmWithdraw(EVM_SECRET, evmCtx(), ask, EVM_POOL, moved), refusedAs("unchecked"));
+  // the passed one, under a context handed to the signer after with another chain id: the digest is the check's
+  const otherCtx = evmCtx({ evm: { venues: Object.freeze({ base: pin(B, { pool: EVM_POOL, chainId: 1 }) }), feeRecipient: FEE_TO } });
+  assert.deepEqual(signEvmWithdraw(EVM_SECRET, otherCtx, ask, EVM_POOL, proof), sig);
+  // r ‖ s ‖ v, s low, v 27 or 28
+  assert.equal(sig.length, 65);
+  assert.ok(sig[64] === 27 || sig[64] === 28);
+  assert.ok(BigInt(hex(sig.slice(32, 64))) <= secp256k1.Point.CURVE().n / 2n, "low s");
 });
 
 test("EVM sell and authorization: W's own Sell, built from the device's sell quote, into the pinned pool and the pinned delegate at W's two-RPC nonce pass and sign; each bad field is refused", async () => {

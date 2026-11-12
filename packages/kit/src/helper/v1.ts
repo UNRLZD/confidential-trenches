@@ -91,6 +91,15 @@ export const HELPER_CODE_STATUS = {
   receiver_is_vault: 403,
   prepay_open: 409,
   not_paid: 409,
+  no_payout: 409,
+  wallet_created: 409,
+  wallet_exists: 409,
+  not_registered: 409,
+  already_registered: 409,
+  token_mismatch: 409,
+  replayed: 409,
+  trade_used: 409,
+  carry_failed: 502,
   receiver_not_registered: 409,
   upstream: 503,
   token_halted: 503,
@@ -593,10 +602,117 @@ export const HELPER_BIND_ONWARD_CODES = [
 ] as const;
 deepFreeze(HELPER_BIND_ONWARD_CODES);
 
+/**
+ * A trade of a fresh NEAR wallet W on Rhea classic (card relayer-near-trade): the device's own request and the quote's
+ * hops and venue output (the kit's rheaQuote), which the helper runs the kit's nearSwapCheck against, never trusting
+ * them for anything else. W is a 64-hex implicit id whose key exists only on the device.
+ */
+export interface HelperNearTrade {
+  network: "mainnet" | "testnet";
+  side: "buy" | "sell";
+  /** The NEAR token bought or sold against the network's USDC. */
+  token: HelperNearAccount;
+  /** W, 64 lowercase hex. */
+  wallet: string;
+  /** What leaves W: USDC units on a buy, the token's on a sell. */
+  amount_in: HelperDecimal;
+  /** The user's slippage on what the exchange pays, 1 to 9,999 bps. */
+  slippage_bps: number;
+  /** What the quote's last hop pays (RheaQuote.venueOut): the floor is taken from it. */
+  venue_out: HelperDecimal;
+  /** The quote's hops, one or two. */
+  hops: { pool: number; token_in: HelperNearAccount; token_out: HelperNearAccount }[];
+}
+
+/**
+ * POST /v1/bind's trade kind. With signed_delegates empty, W does not exist yet: the helper creates it with one plain
+ * Transfer (HELPER_BIND_TRADE_CREATE_YOCTO plus, on a buy, the output token's storage minimum as read on two providers,
+ * at most HELPER_BIND_TRADE_STORAGE_MAX), once per W ever, and only after a vault payout to W reads as landed on two
+ * providers at final; the answer is that Transfer. Then the device reads W's key nonce and signs W's calls (the kit's
+ * nearSwapCalls), each one FunctionCall as its own NEP-366 SignedDelegateAction, in order and with rising nonces; the
+ * helper checks them all (the delegate checks and nearSwapCheck) before it sends any, then carries each in turn,
+ * paying the gas, and answers every transaction. A sell's USDC goes back to the vault as a deposit delegate
+ * (HelperBindDeposit) and W ends with a clean-up (HelperBindCleanup) whose beneficiary is the helper's gas account.
+ */
+export interface HelperBindTradeRequest {
+  trade: HelperNearTrade;
+  /** At most HELPER_BIND_TRADE_DELEGATES_MAX, each at most 4 KB of borsh in base64. */
+  signed_delegates: HelperBase64[];
+}
+
+export interface HelperBindTradeAnswer {
+  /** The helper's transactions, in order: the creation, or each carried delegate. */
+  tx_hashes: HelperTxHash[];
+}
+
+/** The most delegates one trade request carries: the registration, the swap and the lost-found claim. */
+export const HELPER_BIND_TRADE_DELEGATES_MAX = 3;
+/**
+ * What W's creation sends it, and all it sends: W's account and its one key, 182 B x 1e19 yocto, the same as one-time
+ * ids (helper bind/create.ts CREATE_YOCTO). The deposits W's calls attach (the registration's storage, each call's
+ * yocto) are paid by the relayer that carries them, never by W (nearcore core/primitives/src/fees.rs total_deposit).
+ */
+export const HELPER_BIND_TRADE_CREATE_YOCTO = 1_820_000_000_000_000_000_000n;
+/** The most a registration on the output token may attach: 0.0125 NEAR, the kit's NEAR_SWAP_STORAGE_MAX (N3). */
+export const HELPER_BIND_TRADE_STORAGE_MAX = 12_500_000_000_000_000_000_000n;
+
+/**
+ * The trade kind's codes, in the order the helper checks. swap_<n> is the kit's nearSwapCheck refusal of that name
+ * (swap_n2: a receiver that is not the input token, the output token or the exchange). no_payout: no vault payout to
+ * W reads as landed. wallet_created: W was created, or taken as it was, by this helper already (a paid W that someone
+ * else's Transfer made is taken with 200 and no transaction). wallet_exists: W came to exist between the helper's
+ * checks and its Transfer, so it is not sent to (ask again: it is taken as it is). storage_above_cap: the token's storage minimum is over HELPER_BIND_TRADE_STORAGE_MAX. replayed: a delegate
+ * this helper carried already, in another request. trade_used: W's buy, or its sell, is carried already (one swap
+ * per side per W, ever). bad_order: a registration and a swap in one request (the swap goes only once the registration
+ * reads back). not_registered: the helper's own read on two providers at one block does not show W registered on the
+ * output token (and on a sell the input token), so a swap is not carried. already_registered: a registration while W
+ * reads registered on the token, or after one was carried for W. token_mismatch: W's first carried call named another
+ * token. token_untrusted: a hop is not a Rhea pool holding its two tokens. trade_used also answers a second claim on a
+ * side, and a swap after TRADE_SWAP_FAILS_MAX (3) failed swaps whose input came back to W. upstream: a provider failed
+ * or the two disagreed: nothing was decided, ask again. carry_failed:
+ * a carried call failed on chain; nothing after it was sent.
+ */
+export const HELPER_BIND_TRADE_CODES = [
+  "bad_shape",
+  "bad_signature",
+  "bad_sender",
+  "no_payout",
+  "wallet_created",
+  "wallet_exists",
+  "storage_above_cap",
+  "no_account",
+  "bad_key",
+  "bad_nonce",
+  "expired",
+  "resign_needed",
+  "not_one_action",
+  "bad_order",
+  "not_registered",
+  "already_registered",
+  "token_mismatch",
+  "token_untrusted",
+  "swap_input",
+  "swap_n1",
+  "swap_n2",
+  "swap_n3",
+  "swap_n4",
+  "swap_n7",
+  "amount_above_balance",
+  "replayed",
+  "trade_used",
+  "in_flight",
+  "token_halted",
+  "relayer_low",
+  "carry_failed",
+  "upstream",
+] as const;
+deepFreeze(HELPER_BIND_TRADE_CODES);
+
 export type HelperBindCode =
   | (typeof HELPER_BIND_DEPOSIT_CODES)[number]
   | (typeof HELPER_BIND_CLEANUP_CODES)[number]
-  | (typeof HELPER_BIND_ONWARD_CODES)[number];
+  | (typeof HELPER_BIND_ONWARD_CODES)[number]
+  | (typeof HELPER_BIND_TRADE_CODES)[number];
 
 // ---------------------------------------------------------------------------------------------------------------
 // POST /v1/intents

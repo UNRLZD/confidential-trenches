@@ -8,7 +8,7 @@ import { request } from "node:http";
 import type { AddressInfo } from "node:net";
 import { test } from "node:test";
 import { start } from "../server.ts";
-import { createEvmLists, GT_BASE, GT_READS } from "./evm/lists.ts";
+import { createEvmLists, GT_BASE, GT_READS, STALE_MS, TICK_MS } from "./evm/lists.ts";
 import { geckoBudget, GT_LIMIT_PER_MIN, LIST_FLOOR, PAGE_PER_CLIENT, REFRESH_URGENT_MS, WINDOW_MS } from "./gecko.ts";
 import { createSolanaToken } from "./solana/token.ts";
 
@@ -61,7 +61,14 @@ async function world(handover?: unknown) {
   const candles = (mint: string, tf = "1h") => get(`/v1/market/candles?chain=solana&token=${mint}&tf=${tf}&limit=24`);
   const close = () => new Promise<void>((ok) => (server.closeAllConnections(), server.close(() => ok())));
   const listsAnswer = (c: string) => get(`/v1/market/lists?chain=${c}`);
-  return { clock, gt, lists, candles, listsAnswer, close };
+  /** A token page's GeckoTerminal read as the budget draws it (the "pages" lane, one caller), with no wait for a call: the
+   *  server's own candles path sleeps real time for a free call (takeOrWait), too slow for a simulated hour. */
+  const pageCall = async (): Promise<boolean> => {
+    if (!budget.take("pages", false, false, "page", { client: "one-address" })) return false;
+    await doFetch(`${GT_BASE}/networks/solana/tokens/${MINTS[0]}`);
+    return true;
+  };
+  return { clock, gt, lists, candles, listsAnswer, pageCall, close };
 }
 
 test("both EVM chains' lists warmed, then a token page: its candles answer 200, never 429", async (t) => {
@@ -208,6 +215,38 @@ test("card helper-chart-fresh: a held chart past REFRESH_URGENT_MS and a cold to
     assert.equal(cold.status, 200, `offset ${offset / 1000} s: the cold first open answered ${cold.status} ${cold.body}`);
     assert.equal(held.status, 200, `offset ${offset / 1000} s: held ${held.status}`);
     assert.ok(w.clock.now - (JSON.parse(held.body) as { as_of_ms: number }).as_of_ms < REFRESH_URGENT_MS, `offset ${offset / 1000} s: the held chart is read fresh`);
+    for (let s = NOW; s < w.clock.now; s += 1_000) assert.ok(w.gt.filter((x) => x.at <= s && s - x.at < WINDOW_MS).length <= 5, "GeckoTerminal never asked past its limit");
+  }
+});
+
+test("card app-faults-seen-on-122: both chains' lists, 40 minutes under token pages as often as the budget lets them in, are never served older than STALE_MS once read (live 15:55Z and 16:30Z: Base and Robinhood as_of_ms 316 s, 243 s and 248 s old with no 429 and every list read)", async (t) => {
+  // each order is the order the two chains' 12 s timers fire in: the chain that ticks first takes a freed call first
+  // and a page read every 4 s or every second: either way pages take every call the budget lets them
+  for (const [order, every] of [[["base", "robinhood"], 4_000], [["robinhood", "base"], 4_000], [["base", "robinhood"], 1_000]] as const) {
+    const w = await world();
+    t.after(w.close);
+    const seen = new Set<string>();
+    const worst = { base: 0, robinhood: 0 };
+    for (let step = 0; step < Math.ceil(2_400_000 / TICK_MS); step++) {
+      // each page read a cold one asking the budget for a call
+      for (let i = 0; i < TICK_MS / every; i++) {
+        await w.pageCall();
+        w.clock.now += every;
+      }
+      for (const c of order) await w.lists[c].tick();
+      for (const c of order) {
+        const a = await w.lists[c].get();
+        if (a.status !== 200) {
+          assert.ok(!seen.has(c), `${c}: answered ${a.status} after a full read`);
+          continue;
+        }
+        seen.add(c);
+        const age = w.clock.now - (JSON.parse(a.body as string) as { as_of_ms: number }).as_of_ms;
+        worst[c] = Math.max(worst[c], age);
+        assert.ok(age <= STALE_MS, `order ${order.join(",")}, a page every ${every / 1000} s: ${c}'s lists were ${Math.round(age / 1000)} s old at +${Math.round((w.clock.now - NOW) / 1000)} s (bound ${STALE_MS / 1000} s)`);
+      }
+    }
+    assert.deepEqual([...seen].sort(), ["base", "robinhood"], `order ${order.join(",")}, a page every ${every / 1000} s: both chains' lists were read`);
     for (let s = NOW; s < w.clock.now; s += 1_000) assert.ok(w.gt.filter((x) => x.at <= s && s - x.at < WINDOW_MS).length <= 5, "GeckoTerminal never asked past its limit");
   }
 });

@@ -57,6 +57,11 @@ deepFreeze(OPEN_KINDS);
 export type PoolChain = "solana" | "base" | "robinhood";
 export const POOL_CHAINS: readonly PoolChain[] = Object.freeze(["solana", "base", "robinhood"] as const);
 
+/** The chains a private trade (pool.buy, pool.sell) runs on: every pool's, and NEAR's, where the vault pays a fresh NEAR
+ *  wallet that trades on Rhea and its sale goes back into the vault. Added after the pool kinds without changing them. */
+export type TradeChain = PoolChain | "near";
+export const TRADE_CHAINS: readonly TradeChain[] = Object.freeze([...POOL_CHAINS, "near"] as const);
+
 /** The events, page to app. */
 export const SIGNPAGE_EVENTS = ["ready", "state", "progress"] as const;
 deepFreeze(SIGNPAGE_EVENTS);
@@ -134,7 +139,7 @@ export interface SignpageParams {
   /** Move `amount` of the chain pool's asset (POOL_ASSET_DECIMALS) that the device holds on that chain into the pool. */
   "pool.deposit": { chain: PoolChain; amount: string };
   /** A release from the chain's pool to a fresh wallet that buys `token` with `amount` of the pool's asset. */
-  "pool.buy": { chain: PoolChain; token: string; amount: string; slippage_bps: number };
+  "pool.buy": { chain: TradeChain; token: string; amount: string; slippage_bps: number };
   /**
    * Sell `token` from the user's fresh wallets; the proceeds go back into the chain's pool in the same transaction as each
    * wallet's sale. Either `amount`, the token amount in whole units at the token's decimals (a typed amount), or
@@ -143,7 +148,7 @@ export interface SignpageParams {
    * server's number (card pool-sell-share-across-wallets). One of the two, never both. A sale that takes more than one
    * wallet answers every wallet's transaction in `txs`, and part_filled when some of them did not fill.
    */
-  "pool.sell": { chain: PoolChain; token: string; slippage_bps: number } & ({ amount: string; share_bps?: never } | { share_bps: number; amount?: never });
+  "pool.sell": { chain: TradeChain; token: string; slippage_bps: number } & ({ amount: string; share_bps?: never } | { share_bps: number; amount?: never });
   /** Open SIGN_HOST's withdraw screen for the chain's pool. The address is typed there, never sent by the app. */
   "pool.withdraw": Open & { chain: PoolChain };
   /** The assets the device can quote a deposit from, each with its minimum and the most one deposit takes. Signs nothing
@@ -344,7 +349,7 @@ export interface ReadyEvent {
  * The page sends a client only the states, stages and facts its version reads. A change to what the page may send
  * (a state field, an op kind, a stage, a fact) raises it, and the page maps the version before it down.
  */
-export const SIGNPAGE_KIT_VERSION = "1.10";
+export const SIGNPAGE_KIT_VERSION = "1.11";
 
 /**
  * The client's half of the handshake, app to page (card kit-frame-version): its kit version, posted before every
@@ -598,8 +603,14 @@ export interface SignpageState {
    * as its mint or contract names them (a u8), so an app sizes a partial sell in base units; `amount` then has no more
    * fraction digits than that. Absent from a page of an earlier release: an app then reads the amount at its string's
    * own scale.
+   *
+   * `asset_held` (card portfolio-counts-money-an-open-buy-holds, additive) is the chain's pool asset (SOL on Solana)
+   * the position's wallets hold beside the token and get back at a full sell, in whole units as `pools[].balance` is:
+   * each wallet's own balance and that of its accounts a full sell closes back to it (its token account, its venue's
+   * volume accounts), read on chain. Never the fees already paid, never counted twice. Absent when any of the position's
+   * wallets was not read (never "0" in its place), on EVM, and from a page of an earlier release.
    */
-  readonly positions: readonly { readonly chain: Chain; readonly token: string; readonly amount: string; readonly cost: string; readonly wallets: readonly string[]; readonly decimals?: number }[];
+  readonly positions: readonly { readonly chain: Chain; readonly token: string; readonly amount: string; readonly cost: string; readonly wallets: readonly string[]; readonly decimals?: number; readonly asset_held?: string }[];
   readonly orders: readonly {
     readonly order_id: string;
     readonly chain: Chain;

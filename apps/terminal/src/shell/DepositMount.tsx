@@ -1,5 +1,5 @@
 import { DepositSheet } from "../screens/deposit/DepositSheet.tsx";
-import { useDepositSheet } from "../screens/deposit/source.tsx";
+import { useDepositAssetsWarm, useDepositSheet } from "../screens/deposit/source.tsx";
 import { WithdrawProgress } from "../screens/withdraw/WithdrawProgress.tsx";
 
 // The one deposit sheet and the one withdraw progress, in the shell on every route (card app-deposit-mount). The header's
@@ -8,6 +8,8 @@ import { WithdrawProgress } from "../screens/withdraw/WithdrawProgress.tsx";
 // kind never unmounts it.
 export function DepositMount() {
   const { open, setOpen } = useDepositSheet();
+  // the deposit sheet's asset list, read once the signing page is READY so the sheet opens on it (source.tsx)
+  useDepositAssetsWarm();
   return (
     <>
       {open && <DepositSheet onClose={() => setOpen(false)} />}

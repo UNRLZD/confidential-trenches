@@ -38,7 +38,8 @@ export const IN_PROCESS = [
   viaRead("pool-buy-filled-2s", () => import("../live-checks/pool-buy-filled-2s.mjs")),
   viaRead("sol-buy-reads-side-by-side", () => import("../live-checks/sol-buy-reads-side-by-side.mjs")),
   viaRead("signpage-error-after-timeout", () => import("../live-checks/signpage-error-after-timeout.mjs")),
-  viaRead("withdraw-form-shows-what-you-can-send", () => import("../live-checks/withdraw-form-shows-what-you-can-send.mjs")),
+  // reads both builds (SIGN_HOST's withdraw screen, APP_HOST's Withdraw pick): run with the app's checks, which have both
+  { key: "withdraw-form-shows-what-you-can-send", host: "app", load: () => import("../live-checks/withdraw-form-shows-what-you-can-send.mjs"), run: async (m, f) => m.judge(await m.read(f)) },
   viaRead("sol-buy-rent-back", () => import("../live-checks/sol-buy-rent-back.mjs")),
   viaRead("pool-read-down", () => import("../live-checks/pool-read-down.mjs")),
   viaRead("sell-first-read-waits-out-a-throttle", () => import("../live-checks/sell-first-read-waits-out-a-throttle.mjs")),
@@ -62,6 +63,7 @@ export const IN_PROCESS = [
   viaRead("pool-deposit-follow", () => import("../live-checks/pool-deposit-follow.mjs")),
   viaRead("evm-deposit-route-mainnet", () => import("../live-checks/evm-deposit-route-mainnet.mjs")),
   viaRead("solana-release-reads-paced", () => import("../live-checks/solana-release-reads-paced.mjs")),
+  { key: "restore-shows-the-balance-in-seconds", host: "sign", load: () => import("../live-checks/restore-shows-the-balance-in-seconds.mjs"), run: async (m, f) => m.judge(await m.collect({ fetchFn: f })) },
   viaRead("pool-buy-record-never-stays-sent", () => import("../live-checks/pool-buy-record-never-stays-sent.mjs")),
   viaRead("solana-legs-checked", () => import("../live-checks/solana-legs-checked.mjs")),
   viaRead("signers-own-bytes", () => import("../live-checks/signers-own-bytes.mjs")),
@@ -72,6 +74,7 @@ export const IN_PROCESS = [
   { key: "sol-settle-failed-is-not-unspent", host: "sign", load: () => import("../live-checks/sol-settle-failed-is-not-unspent.mjs"), run: async (m, f) => m.judge(await m.read(f), { ledger: false }) },
   { key: "signpage-throttled-read-is-not-asked-again-at-once", host: "sign", load: () => import("../live-checks/signpage-throttled-read-is-not-asked-again-at-once.mjs"), run: async (m, f) => m.judge(await m.read(f), { ledger: false }) },
   viaRead("solana-teardown-cashback", () => import("../live-checks/solana-teardown-cashback.mjs")),
+  { key: "near-private-trading", host: "sign", load: () => import("../live-checks/near-private-trading.mjs"), run: async (m, f) => m.judge(await m.read(f), { ledger: false }) },
   viaRead("sol-w-sweep", () => import("../live-checks/sol-w-sweep.mjs")),
   viaRead("intents-u-registered-first", () => import("../live-checks/intents-u-registered-first.mjs")),
   viaRead("sol-rent-back-dust-burn", () => import("../live-checks/sol-rent-back-dust-burn.mjs")),
@@ -106,6 +109,8 @@ export const IN_PROCESS = [
   { key: "portfolio-shows-pool-trades", host: "sign", load: () => import("../live-checks/portfolio-shows-pool-trades.mjs"), run: async (m, f) => m.judge(await m.collect({ hosts: ["sign"], fetchFn: f })) },
   { key: "portfolio-shows-pool-trades", host: "app", load: () => import("../live-checks/portfolio-shows-pool-trades.mjs"), run: async (m, f) => m.judge(await m.collect({ hosts: ["app"], fetchFn: f })) },
   { key: "closed-positions-after-a-restore", host: "sign", load: () => import("../live-checks/closed-positions-after-a-restore.mjs"), run: async (m, f) => m.judge(await m.collect({ fetchFn: f })) },
+  { key: "portfolio-counts-money-an-open-buy-holds", host: "sign", load: () => import("../live-checks/portfolio-counts-money-an-open-buy-holds.mjs"), run: async (m, f) => m.judge(await m.collect({ hosts: ["sign"], fetchFn: f })) },
+  { key: "portfolio-counts-money-an-open-buy-holds", host: "app", load: () => import("../live-checks/portfolio-counts-money-an-open-buy-holds.mjs"), run: async (m, f) => m.judge(await m.collect({ hosts: ["app"], fetchFn: f })) },
 ];
 /** The checks run in their own local mode, as a child process: the arguments after the check's path. */
 export const CHILD_RUNS = [
@@ -120,6 +125,7 @@ export const CHILD_RUNS = [
   { key: "chart-drags-and-tracks-the-pointer", host: "app", args: ["--root", "apps/terminal/dist"] },
   { key: "app-header-first-paint-auth", host: "app", args: ["--root", "apps/terminal/dist"] },
   { key: "app-orders-coming-soon", host: "app", args: ["--root", "apps/terminal/dist"] },
+  { key: "restore-notice-redraw", host: "app", args: ["--root", "apps/terminal/dist"] },
   { key: "words-nov8-final", host: "sign", args: ["--local", "--host", "sign"] },
   { key: "words-nov8-final", host: "app", args: ["--local", "--host", "app"] },
   { key: "signing-views-open-over-the-app", host: "sign", args: ["--local"] },
@@ -135,6 +141,7 @@ export const OUT = {
   "evm-pool-lists-mainnet": "mainnet Base and Robinhood RPC reads of the pool's logs on each chain's two seats, and SIGN_HOST's response headers (connect-src), never the build",
   "signpage-solana-trade": "the page's CSP header, and a run record's transactions on two RPCs",
   "signpage-evm-pool-buy": "a run record's buys on two testnet RPCs each and the helper's send route; on the build, the mainnet refusal its bundle part reads is held by packages/signpage/test/pool-network.test.ts (pool.buy on Base and Robinhood not_allowed)",
+  "evm-withdraw-mainnet": "a run record's withdraws (each a release and W's onward send) on two testnet RPCs each; on the build, its bundle part is held by packages/signpage/scripts/build-network.test.mjs (the EVM withdraw's release in the testnet build, none of it in the mainnet one)",
   "signpage-evm-pool-sell": "a run record's sales on two testnet RPCs each and the helper's sell route; on the build, the mainnet refusal its bundle part reads is held by packages/signpage/test/pool-network.test.ts (pool.sell on Base and Robinhood not_allowed)",
   "signpage-positions-evm": "a run record's Base Sepolia buy and sell, and W's balance, on two testnet RPCs; the testnet build's positions pass is held by packages/signpage/test/positions-evm.test.ts (the mainnet build pins no EVM pool)",
   "signpage-withdraw-handoff": "the page's CSP header, and the testnet fee read on the release helper and RPCs",
@@ -159,6 +166,7 @@ export const OUT = {
   "pool-usd-price-never-stale": "three minutes of mainnet Pyth reads on the page's own pair (its test holds its bundle marks on this tree's own build, planted)",
   "signpage-pool-mainnet": "a browser",
   "pool-restore-wired": "a browser",
+  "signpage-restores-near-vault-notes": "a browser (it runs pool-restore-wired)",
   "kit-deposit-assets-dry": "a browser",
   "deposit-quote-no-liquidity": "a browser, and the helper's real answer to the last ask",
   "app-shell": "a browser",
@@ -167,6 +175,7 @@ export const OUT = {
   "app-in-shell": "a browser (its --harness run is in test-browser)",
   "app-discover-live": "a browser and the helper",
   "app-no-test-token": "a browser and the helper",
+  "app-near-trading": "a browser and the helper (its test holds its bundle marks to the build's own writing)",
   "app-launchpad-badges": "a browser and the helper",
   "app-token-lower-panel": "the helper's holders answer",
   "app-token-rail": "the helper's lists answer",
@@ -208,7 +217,9 @@ export const OUT = {
   "token-page-fills-after": "a browser and the helper",
   "app-deposit-mount": "a browser (its --harness run is in test-browser)",
   "deposit-to-pool": "a browser (its --harness run is in test-browser)",
+  "app-faults-seen-on-122": "a browser (its --harness run is in test-browser)",
   "terminal-harness-sign-spa": "Pages' answer to a path with no file (the index), which no build file holds",
+  "near-view-rhea": "mainnet NEAR RPC reads of the Rhea pool and get_return on the two providers, never the build",
 };
 
 /** A fetch that answers from the build folders: SIGN_HOST's / and index.html, every other path public/<path>; APP_HOST's dist/<path>. */

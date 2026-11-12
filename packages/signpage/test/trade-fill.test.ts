@@ -183,6 +183,22 @@ test("at most FILL_OPS_MAX ops a run, newest first (review P3-1)", async () => {
   assert.equal(ops.get("b0")!.pool_amount, undefined, "the oldest wait for the next run");
 });
 
+// Card portfolio-counts-money-an-open-buy-holds, review of 98d75c8cb: the sign out's stop ends the run. A read that
+// answers after it writes nothing, and no other op is read. Red before: the loop had no stop, so every op was read and
+// written for an account already signed out.
+test("a stop mid-run: the op whose read answers after it is not written, and no other op is read", async () => {
+  const ops = new Map<string, Record<string, unknown>>();
+  for (let i = 0; i < 3; i++) ops.set(`b${i}`, { kind: "buy", stage: "filled", txs: [{ chain: "solana", hash: SIG.buy1 }], created_ms: i, chain: "solana", token: MINT });
+  const s: FillStore = { keys: async () => [...ops.keys()], get: async (_s, k) => ops.get(k), update: async (_s, k, f) => void ops.set(k, f(ops.get(k)) as Record<string, unknown>) };
+  const stop = new AbortController();
+  let reads = 0;
+  // the sign out comes while the first read is out; its answer comes after it
+  const wrote = await fillTradeOps({ store: s, read: async (sig) => (reads++, stop.abort(), TX[sig]), price: () => null, now: () => OLD, signal: stop.signal });
+  assert.equal(wrote, false);
+  assert.equal(reads, 1, "no other op read after the stop");
+  assert.ok([...ops.values()].every((o) => o.pool_amount === undefined), "nothing written after the stop");
+});
+
 // R1 (review P2-1): a PumpSwap sale as the kit builds it (pool-buy.ts solanaPoolSellSteps): W makes its wrapped-SOL
 // account (a system CreateAccount of rent(165) = 2,039,280 from W), PumpSwap pays the proceeds into it, and the close
 // gives W the proceeds and that rent back. Modelled on the real curve sale 32CSJ1 (no PumpSwap sale of ours is on
@@ -207,10 +223,62 @@ test("R1: a PumpSwap sale's wrapped-SOL account, made and closed in the sale, is
   assert.equal(solanaTradeLeg(t, "sell", MINT)!.lamports, 574_635n + 2_039_280n + 2_039_280n - 2_039_280n);
 });
 
-test("a PumpSwap buy (W's wrapped-SOL balance in its meta) gets no SOL from here: its transfer goes to W's own account", () => {
-  const t = structuredClone(TX[SIG.buy1]) as { meta: { preTokenBalances: unknown[]; postTokenBalances: unknown[] } };
-  t.meta.postTokenBalances.push({ accountIndex: 0, mint: "So11111111111111111111111111111111111111112", owner: W1, uiTokenAmount: { amount: "0", decimals: 9 } });
-  assert.equal(solanaTradeLeg(t, "buy", MINT), null);
+// Review of 776d40528, P2-2: a PumpSwap buy (a graduated coin) pays wrapped SOL. The owner's third buy of 12 Nov,
+// 4HSwog...Nd3 (fixtures/trade-fill/4HSwog.json, getTransaction "json" at finalized), wraps 121,165 lamports into W's
+// own wrapped-SOL account, pays 121,043 to the pool and 122 in fees from it, and closes it.
+const SIG3 = "4HSwogMa6ru6c61XhXgb1zxisrFaiPWTuWmhRDsxAaW8PwsWDJNHK9ydPq7GjGW28KC2vKiyKarAqKmfxyZANZd3";
+const MINT3 = "4CxjZyMNoF1p6eXHXHv1TWpS2X47CuUmLwtGe18spump";
+const W3 = "5Emfj9RxtcjtvDDe6CP1a2RWiG6tfURaEevb7L2m25E8";
+type Tx3 = { meta: { postBalances: number[]; preTokenBalances: Record<string, unknown>[]; postTokenBalances: Record<string, unknown>[]; innerInstructions: { instructions: { data: string; programIdIndex: number; accounts: number[] }[] }[] }; transaction: { message: { accountKeys: string[] } } };
+test("a PumpSwap buy's SOL is the wrapped SOL W's own account paid out, never what W wrapped into it: what the swap left comes back by the close", () => {
+  const t = fx("4HSwog") as unknown as Tx3;
+  assert.deepEqual(solanaTradeLeg(t, "buy", MINT3), { wallet: W3, units: 519_417n, decimals: 6, lamports: 121_165n });
+  // W wraps 50,000 more than the swap takes: the close hands them back, so the spend is the same
+  const more = structuredClone(t);
+  const wrap = more.meta.innerInstructions.flatMap((g) => g.instructions).find((i) => i.data === "3Bxs4Dst1KTvZaFZ")!;
+  const d = base58.decode(wrap.data);
+  new DataView(d.buffer, d.byteOffset).setBigUint64(4, 121_165n + 50_000n, true);
+  wrap.data = base58.encode(d);
+  more.meta.postBalances[1]! += 50_000;
+  assert.equal(solanaTradeLeg(more, "buy", MINT3)!.lamports, 121_165n, "the leftover is no spend");
+  // W's wrapped-SOL account kept open, as the meta lists it: the same
+  const kept = structuredClone(more);
+  kept.meta.postTokenBalances.push({ accountIndex: 4, mint: "So11111111111111111111111111111111111111112", owner: W3, programId: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", uiTokenAmount: { amount: "50000", decimals: 9 } });
+  assert.equal(solanaTradeLeg(kept, "buy", MINT3)!.lamports, 121_165n);
+  // another token instruction on W's wrapped-SOL account (an approve, tag 4): unknown
+  const odd = structuredClone(t);
+  const close = odd.meta.innerInstructions.flatMap((g) => g.instructions).find((i) => i.data === "A")!;
+  close.data = base58.encode(Uint8Array.of(4, 1, 0, 0, 0, 0, 0, 0, 0));
+  assert.equal(solanaTradeLeg(odd, "buy", MINT3), null);
+});
+
+test("a restored op whose transaction was read, its own, and gives no figure is marked and not read again; a read that failed is read again; this device's own op is never marked", async () => {
+  const unread = { kind: "buy", stage: "filled", txs: [{ chain: "solana", hash: SIG.buy1 }], created_ms: 1, chain: "solana", token: "So11111111111111111111111111111111111111112" };
+  const ops = new Map<string, Record<string, unknown>>([["x", unread]]);
+  const s: FillStore = { keys: async () => [...ops.keys()], get: async (_s, k) => ops.get(k), update: async (_s, k, f) => void ops.set(k, f(ops.get(k)) as Record<string, unknown>) };
+  const reads: string[] = [];
+  // the op a restore rebuilt
+  const K = `restored/${SIG.buy1}`;
+  ops.set(K, ops.get("x")!);
+  ops.delete("x");
+  // a read that fails, then one refused (another transaction's answer): nothing written, read again
+  await fillTradeOps({ store: s, read: async () => { throw new Error("429"); }, price: () => null, now: () => OLD });
+  await fillTradeOps({ store: s, read: async () => TX[SIG.sell1], price: () => null, now: () => OLD });
+  assert.equal(ops.get(K)!.fill_none, undefined);
+  // read, its own, no trade of that token: marked, and the next run reads nothing
+  assert.equal(await fillTradeOps({ store: s, read: async (sig) => (reads.push(sig), TX[sig]), price: () => null, now: () => OLD }), true);
+  assert.equal(ops.get(K)!.fill_none, true);
+  assert.equal(ops.get(K)!.pool_amount, undefined);
+  reads.length = 0;
+  assert.equal(await fillTradeOps({ store: s, read: async (sig) => (reads.push(sig), TX[sig]), price: () => null, now: () => OLD }), false);
+  assert.deepEqual(reads, []);
+  // this device's own op, the same answer: not marked, read again at the next run (review of f73ee1c82, P3-a)
+  ops.set("own", { ...unread });
+  await fillTradeOps({ store: s, read: async (sig) => TX[sig], price: () => null, now: () => OLD });
+  assert.equal(ops.get("own")!.fill_none, undefined);
+  const again: string[] = [];
+  await fillTradeOps({ store: s, read: async (sig) => (again.push(sig), TX[sig]), price: () => null, now: () => OLD });
+  assert.deepEqual(again, [SIG.buy1], "the own op read again");
 });
 
 // ------------------------------------------------------------------------------------------------ an old sale's USD

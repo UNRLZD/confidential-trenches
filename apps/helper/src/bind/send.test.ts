@@ -16,6 +16,7 @@ import { test } from "node:test";
 import { vaultDepositMessage } from "../../../../packages/kit/src/index.ts";
 import { NEP366_PREFIX, VAULT_TOKEN, base58, decodeSignedDelegate, type KeyRead } from "./checks.ts";
 import {
+  accountSlots,
   MAX_FAILED_SENDS,
   OUTCOME_WAIT_MS,
   PREPAY_BYTES,
@@ -610,11 +611,45 @@ test("(i) a third failure read in the settle stops the prepay too: sender_struck
   assert.deepEqual([rec(w).struck, rec(w).failed, rec(w).prepays.length, w.chain.sends().length], [true, 3, n, 0]);
 });
 
-test("(i) a send landed for U at another amount, or by a stranger on P, is not U's landing: counted", async () => {
+test("(i) a front-run the pages prove (the vault refused P as used, the pages hold P for another sender) is not U's landing and not counted: U goes on to its next P", async () => {
   const w = world();
   w.chain.fates = ["front_run"];
   ok(await w.carry(next(w)));
-  assert.deepEqual([rec(w).failed, rec(w).landed, rec(w).sends[0]!.state], [1, false, "failed"]);
+  assert.deepEqual([rec(w).failed, rec(w).struck, rec(w).landed, rec(w).sends[0]!.state], [0, false, false, "exempt"]);
+  ok(await w.carry(next(w, P + 1n)));
+  assert.equal(rec(w).p, (P + 1n).toString());
+});
+
+test("(i) a stranger who takes each P the moment its prepay names it never strikes U: three front-runs, one per P, then U's next P carries", async () => {
+  const w = world();
+  w.chain.fates = ["front_run", "front_run", "front_run", "lands"];
+  for (let i = 0n; i < BigInt(MAX_FAILED_SENDS); i++) {
+    ok(await w.carry(next(w, P + i)));
+    assert.deepEqual([rec(w).p, rec(w).failed, rec(w).struck], [(P + i).toString(), 0, false]);
+  }
+  ok(await w.carry(next(w, P + 3n)));
+  assert.deepEqual([rec(w).p, rec(w).landed, rec(w).struck], [(P + 3n).toString(), true, false]);
+});
+
+test("(i) a send the vault refused as P used while the pages hold P for U itself (at another amount) is no front-run: counted", async () => {
+  const w = world();
+  w.chain.fates = ["unknown"];
+  const h = ok(await w.carry(next(w)));
+  w.chain.pages.set(P.toString(), { depositor: w.u.id, value: AMOUNT - 1n });
+  w.chain.resolveAs.set(h, { kind: "final", tx_hash: h, receipts: [{ executor: VAULT, ok: false, failure: "Smart contract panicked: PrecommitmentAlreadyUsed", height: w.chain.final }] });
+  await lockRound(w.deps);
+  assert.deepEqual([rec(w).failed, rec(w).sends[0]!.state], [1, "failed"]);
+});
+
+test("(i) a send refused for any other reason while a stranger's deposit names P (no P-used refusal from the vault) still counts", async () => {
+  const w = world();
+  w.chain.fates = ["refused_by_vault"];
+  ok(await w.carry(next(w)));
+  w.chain.pages.set(P.toString(), { depositor: "stranger.near", value: AMOUNT });
+  assert.deepEqual([rec(w).failed, rec(w).sends[0]!.state], [1, "failed"]);
+});
+
+test("(i) a send landed for U at another amount is not U's landing: counted", async () => {
   const v = world();
   v.chain.fates = ["lands_short"];
   ok(await v.carry(next(v)));
@@ -2092,6 +2127,37 @@ async function everyKind(check: (node: Node, name: string, tx: TxRef) => Promise
   }
 }
 
+/** A `tx` answer whose transaction and receipts each burnt `each` yocto (tokens_burnt). */
+const burning = (each: bigint): Edit => onTx((a) => {
+  const add = <T extends { outcome?: object }>(o: T): T => ({ ...o, outcome: { ...o.outcome, tokens_burnt: each.toString() } });
+  return { ...a, transaction_outcome: add(a.transaction_outcome as TxAnswer["transaction_outcome"] & { outcome?: object }), receipts_outcome: a.receipts_outcome.map(add) };
+});
+
+test("burnt tokens: an outcome is final with what its transaction and receipts burnt only when both providers read the same sum; two sums are unknown; one provider without them leaves it unread", async () => {
+  await everyKind(async (node, name, tx) => {
+    if (name !== "the delegate") return;
+    const honest = (await node.relayer(50).resolve(tx, noResend)) as { kind: string; receipts: Receipt[]; burnt?: bigint };
+    const n = BigInt(honest.receipts.length + 1);
+    const both = (await relayerWith(node, { 0: burning(7n), 1: burning(7n) }).resolve(tx, noResend)) as { kind: string; burnt?: bigint };
+    assert.equal(both.kind, "final");
+    assert.equal(both.burnt, 7n * n);
+    for (const i of [0, 1] as const) {
+      const out = await relayerWith(node, { [i]: burning(7n), [1 - i]: burning(8n) }).resolve(tx, noResend);
+      assert.equal(out.kind, "unknown", `provider ${i}`);
+      assert.match((out as { why: string }).why, /burnt tokens differ/);
+      const one = (await relayerWith(node, { [i]: burning(7n) }).resolve(tx, noResend)) as { kind: string; burnt?: bigint };
+      assert.equal(one.kind, "final");
+      assert.equal(one.burnt, undefined, `only provider ${i} names them`);
+    }
+    assert.equal(honest.burnt, undefined);
+    // a receipt without its tokens_burnt on both: the sum is not known, never counted as 0
+    const txOnly = onTx((a) => ({ ...a, transaction_outcome: { ...a.transaction_outcome, outcome: { ...(a.transaction_outcome as { outcome?: object }).outcome, tokens_burnt: "7" } } as TxAnswer["transaction_outcome"] }));
+    const part = (await relayerWith(node, { 0: txOnly, 1: txOnly }).resolve(tx, noResend)) as { kind: string; burnt?: bigint };
+    assert.equal(part.kind, "final");
+    assert.equal(part.burnt, undefined);
+  });
+});
+
 test("two-agree (PR4-3, PR4-3b): one provider naming D with every receipt failed reads unknown, never final, on either provider and for every action a path acts on; both agreeing read final", async () => {
   await everyKind(async (node, name, tx) => {
     for (const i of [0, 1] as const) {
@@ -3010,6 +3076,27 @@ test("U's key read: nearcore answers an absent key with a result holding `error`
   await assert.rejects(reads(absent, { nonce: 5, permission: "FullAccess", block_height: 5, block_hash: "h" }).accessKey("ab".repeat(32), "ed25519:x"), /disagree/);
 });
 
+test("a key read on a sender with no account reads as no_account: nearcore answers it as an absent key, so the account is read at the same block", async () => {
+  const absent = { block_hash: "h", block_height: 5, error: "access key ed25519:x does not exist while viewing", logs: [] };
+  const gone = { name: "HANDLER_ERROR", cause: { name: "UNKNOWN_ACCOUNT", info: { block_height: 5 } } };
+  const asked: unknown[] = [];
+  const at = (account: "gone" | "there" | "fails"): Rpc => async (m, p) => {
+    if (m === "block") return { header: { height: 5 } };
+    const q = p as { request_type: string; block_id?: number };
+    if (q.request_type === "view_access_key") return absent;
+    asked.push(q);
+    if (account === "gone") throw new RpcError("query", gone);
+    if (account === "fails") throw new RpcError("query", { name: "HANDLER_ERROR", cause: { name: "UNKNOWN_BLOCK" } });
+    return { amount: "1", locked: "0", code_hash: "11111111111111111111111111111111", storage_usage: 182, block_height: 5, block_hash: "h" };
+  };
+  const reads = (a: "gone" | "there" | "fails", b: "gone" | "there" | "fails") => createSendReads([at(a), at(b)], { vault: VAULT, token: VAULT_TOKEN });
+  assert.deepEqual(await reads("gone", "gone").accessKey("ab".repeat(32), "ed25519:x"), { kind: "no_account" });
+  assert.deepEqual(asked[0], { request_type: "view_account", block_id: 5, account_id: "ab".repeat(32) });
+  assert.deepEqual(await reads("there", "there").accessKey("ab".repeat(32), "ed25519:x"), { kind: "no_key" });
+  await assert.rejects(reads("gone", "there").accessKey("ab".repeat(32), "ed25519:x"), /disagree/);
+  await assert.rejects(reads("fails", "fails").accessKey("ab".repeat(32), "ed25519:x"), /UNKNOWN_BLOCK/);
+});
+
 test("createRelayer refuses a key whose public half is not its seed's", () => {
   relayerKey(relayerSecret());
   const raw = base58decode(relayerSecret().slice(8));
@@ -3322,4 +3409,18 @@ test("two-agree, U's own storage_deposit on carry.ts: one provider (either) read
   assert.equal(both.signed.filter((x) => x.method === "storage_deposit").length, 1, "both agreeing: one registration so far");
   assert.equal(both.store.owed(both.u)?.tries, 1, "both agreeing: owed, tried once, again on the sweep's pace");
   both.store.close();
+});
+
+test("one carry at a time per account across the kinds: while a trade carry holds U's slot, a deposit from U answers in_flight and sends nothing; free again after", async () => {
+  const w = world();
+  const req = next(w);
+  accountSlots.add(w.u.id);
+  try {
+    assert.equal(code(await w.carry(req)), "in_flight");
+    assert.equal(w.chain.sends().length, 0);
+  } finally {
+    accountSlots.delete(w.u.id);
+  }
+  ok(await w.carry(req));
+  assert.equal(accountSlots.has(w.u.id), false);
 });

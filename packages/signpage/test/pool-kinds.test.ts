@@ -3,7 +3,8 @@
 // never from the app; a request that passed is handed to its flow, and with no flow it is refused.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readdirSync, statSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { throughApi } from "./api-ends.ts";
 import { ERC20_DECIMALS, keptTokenDecimals, poolKinds, tokenDecimalsKept, type PoolKindsDeps, type PoolRpc } from "../src/pool-kinds.ts";
@@ -316,6 +317,26 @@ const names = (files: readonly string[]) => files.map((f) => f.slice(ROOT.length
 /** The npm packages the page bundles, by name and version: a new one (a signing library) is read here first. */
 const BUNDLED_PACKAGES = ["@noble+curves@2.4.0", "@noble+hashes@2.4.0", "@scure+base@2.4.0", "@scure+bip32@2.4.0", "@scure+bip39@2.4.0", "@zk-kit+lean-imt@2.2.4", "@zk-kit+utils@1.4.1", "base64-js@1.5.1", "buffer@6.0.3", "ieee754@1.2.1", "poseidon-lite@0.3.0"];
 
+test("signer-guard-parser: build-app.mjs's page entry is its one app.js bundle; a third bundle or an input: written elsewhere is refused", () => {
+  const real = readFileSync(join(ROOT, "packages/signpage/scripts/build-app.mjs"), "utf8");
+  const d = mkdtempSync(join(tmpdir(), "ct-build-entry-"));
+  try {
+    mkdirSync(join(d, "scripts"));
+    const plant = (text: string) => {
+      writeFileSync(join(d, "scripts", "build-app.mjs"), text);
+      return () => buildEntry(join(d, "scripts", "build-app.mjs"));
+    };
+    assert.equal(plant(real)(), join(d, "src/main.ts"));
+    const call = 'await bundleOne(pkg, network, join(pkg, WALK_ENTRY), WALK_FILE);';
+    assert.ok(real.includes(call), "build-app.mjs bundles the walk Worker by WALK_ENTRY into WALK_FILE");
+    assert.throws(plant(real.replace(call, `${call}\n  await bundleOne(pkg, network, join(pkg, "src/other.ts"), "other.js");`)), /expected one page input/);
+    assert.throws(plant(real.replace(call, 'await bundleOne(pkg, network, join(pkg, "src/signer.ts"), WALK_FILE);')), /expected one page input/);
+    assert.throws(plant(`${real}\nconst x = { input: join(pkg, "src/main.ts") };\n`), /expected one page input/);
+  } finally {
+    rmSync(d, { recursive: true, force: true });
+  }
+});
+
 test("signer-guard-parser: the guard reads every module the page bundles, from the build's own entry", async () => {
   assert.equal(ENTRY, join(ROOT, "packages/signpage/src/main.ts"), "build-app.mjs input: join(pkg, \"src/main.ts\")");
   assert.ok(GUARD.graph.length > 50 && GUARD.graph.includes(ENTRY), "the build's graph was read");
@@ -450,4 +471,63 @@ test("signer-guard-parser: every planted signer and encoder in fixtures/signer-g
   // and under locks.request, passes; refused at 40115c3d
   for (const f of ["f01-nested-map.ts", "f03-lock-callback.ts"]) assert.ok(GUARD.sites(join(FIXTURES, "good", f)).some((s) => s.ok && /^calls .*#signEvmSell$/.test(s.what)), `${f}: the signer call in its callback is read and passes`);
   for (const f of ["reexports.ts", "shadow.ts", "default-reexport.ts"]) assert.deepEqual(GUARD.sites(join(FIXTURES, "good", f)), [], f);
+});
+
+test("a NEAR sell goes to the NEAR sell flow after its own rule: the whole of W's token (share_bps 10000), never an amount or a part", async () => {
+  const { calls, pair } = providers(() => mint(6));
+  const flows: PoolAsk[] = [];
+  const sells: unknown[] = [];
+  const running = { running: true as const, after: Promise.resolve(), answer: () => null };
+  const k = poolKinds({ pinned: () => true, rpcs: () => pair, flow: (ask) => (flows.push(ask), { error: "not_allowed" }), near: { sell: (ask) => (sells.push(ask), running) } });
+  assert.equal(k["pool.sell"]({ chain: "near", token: "wrap.near", share_bps: 10_000, slippage_bps: 100 }, ctx), running);
+  assert.deepEqual(sells, [{ token: "wrap.near", slippageBps: 100 }]);
+  for (const bad of [
+    { chain: "near", token: "wrap.near", amount: "1", slippage_bps: 100 },
+    { chain: "near", token: "wrap.near", share_bps: 5_000, slippage_bps: 100 },
+    { chain: "near", token: "wrap.near", share_bps: 10_000, amount: "1", slippage_bps: 100 },
+    { chain: "near", token: "Wrap.near", share_bps: 10_000, slippage_bps: 100 },
+    { chain: "near", token: "wrap.near", share_bps: 10_000, slippage_bps: 0 },
+    { chain: "near", token: "wrap.near", share_bps: 10_000, slippage_bps: 5001 },
+    { chain: "near", token: "wrap.near", share_bps: "10000", slippage_bps: 100 },
+  ]) assert.deepEqual(k["pool.sell"](bad, ctx), { error: "not_allowed" }, JSON.stringify(bad));
+  assert.equal(sells.length, 1);
+  // a buy on a page with only the sell's flow, and a sell on a page with only the buy's: refused, no read made
+  assert.deepEqual(k["pool.buy"]({ chain: "near", token: "wrap.near", amount: "1", slippage_bps: 100 }, ctx), { error: "not_allowed" });
+  const buyOnly = poolKinds({ pinned: () => true, rpcs: () => pair, near: { buy: () => running } });
+  assert.deepEqual(buyOnly["pool.sell"]({ chain: "near", token: "wrap.near", share_bps: 10_000, slippage_bps: 100 }, ctx), { error: "not_allowed" });
+  assert.deepEqual(calls, []);
+  assert.equal(flows.length, 0);
+});
+
+test("a trade on NEAR goes to the NEAR flow after its own rule, never to a pool's rule, pin or provider", async () => {
+  const { tradeRoute } = await import("../src/pool-kinds.ts");
+  assert.deepEqual((["solana", "base", "robinhood", "near"] as const).map(tradeRoute), ["pool", "pool", "pool", "near"]);
+  const { calls, pair } = providers(() => mint(6));
+  const flows: PoolAsk[] = [];
+  const near: unknown[] = [];
+  const running = { running: true as const, after: Promise.resolve(), answer: () => null };
+  const k = poolKinds({ pinned: () => true, rpcs: () => pair, flow: (ask) => (flows.push(ask), { error: "not_allowed" }), near: { buy: (ask) => (near.push(ask), running) } });
+  assert.equal(k["pool.buy"]({ chain: "near", token: "wrap.near", amount: "1.5", slippage_bps: 100 }, ctx), running);
+  assert.deepEqual(near, [{ token: "wrap.near", amount: 1_500_000n, slippageBps: 100 }]);
+  // the rule refuses, the flow is never asked: a token that is no account id, an amount past USDC's 6 decimals, 0, a
+  // share, a slippage of 0 or over the cap
+  for (const bad of [
+    { chain: "near", token: "Wrap.near", amount: "1", slippage_bps: 100 },
+    { chain: "near", token: "wrap.near", amount: "0.0000001", slippage_bps: 100 },
+    { chain: "near", token: "wrap.near", amount: "0", slippage_bps: 100 },
+    { chain: "near", token: "wrap.near", share_bps: 5000, slippage_bps: 100 },
+    { chain: "near", token: "wrap.near", amount: "1", slippage_bps: 0 },
+    { chain: "near", token: "wrap.near", amount: "1", slippage_bps: 5001 },
+  ]) assert.deepEqual(k["pool.buy"](bad, ctx), { error: "not_allowed" }, JSON.stringify(bad));
+  assert.equal(near.length, 1);
+  // a NEAR sell has no flow yet, a deposit or a withdraw on NEAR is no pool's: refused, no read made
+  assert.deepEqual(await settle(k["pool.sell"]({ chain: "near", token: "wrap.near", amount: "1", slippage_bps: 100 }, ctx)), { error: "not_allowed" });
+  assert.deepEqual(k["pool.deposit"]({ chain: "near", amount: "1" }, ctx), { error: "not_allowed" });
+  assert.deepEqual(k["pool.withdraw"]({ chain: "near" }, ctx), { error: "not_allowed" });
+  assert.deepEqual(calls, []);
+  assert.equal(flows.length, 0);
+  // no NEAR flow on this page: refused not_allowed
+  const none = poolKinds({ pinned: () => true, rpcs: () => pair, flow: (ask) => (flows.push(ask), { error: "not_allowed" }) });
+  assert.deepEqual(none["pool.buy"]({ chain: "near", token: "wrap.near", amount: "1", slippage_bps: 100 }, ctx), { error: "not_allowed" });
+  assert.equal(flows.length, 0);
 });

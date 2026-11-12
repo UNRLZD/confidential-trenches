@@ -22,11 +22,13 @@
 //     creation (closed: 0 lamports after) is not counted, or the sale would read 2,039,280 lamports high (review R1).
 //     On 32CSJ1...Kwn (12 Nov) that is 574,635 lamports: the curve's 581,910 less pump's fees.
 //   - a buy's SOL into the venue: every lamport W paid by a system transfer, its account creations (rent) apart. On
-//     5Qn5Lt...vB8Q that is 1,205,887 lamports, the BuyExactSolIn spend. A PumpSwap buy pays wrapped SOL: W's system
-//     transfer goes into W's own wrapped-SOL account (a wrapped-SOL balance of W's in the meta), and what the swap left
-//     comes back by that account's close, not by a transfer; so such a buy gets none here. Its op is written with its
-//     own spend as pool_amount at its end (positions.ts recordPoolBuy), so only a PumpSwap buy recorded before kit 1.10
-//     goes without.
+//     5Qn5Lt...vB8Q that is 1,205,887 lamports, the BuyExactSolIn spend. A PumpSwap buy (a graduated coin) pays wrapped
+//     SOL (review of 776d40528, P2-2): W wraps by a system transfer into W's own wrapped-SOL account (one W's token
+//     program initializes for the wrapped-SOL mint with W its owner, or one the meta lists as W's), the swap spends from
+//     it by token transfers, and the close hands what is left back to W with the rent. So a transfer into W's own
+//     wrapped-SOL account is no spend; the spend is the wrapped SOL moved out of it to others, less any moved into it.
+//     On 4HSwog...Nd3 (12 Nov) that is 121,165 lamports: 121,043 to the pool and 122 in fees, all W wrapped. Any other
+//     token instruction on W's wrapped-SOL account (an approve, a burn) makes the figure unknown.
 //   Any other system instruction W signs (a transfer with seed, an allocate) makes the figure unknown: nothing is
 //   written for it, never a guess.
 // - amount_usd on a sale: its SOL out at the page's own pool price (src/pool-price.ts), only when the price was read
@@ -45,7 +47,13 @@
 //   and a sale with pool "sol". At most FILL_OPS_MAX ops a run, newest first, so a backlog cannot fan out at every trade
 //   end. A sale younger than SALE_USD_MS with neither a fresh price nor its block's is left for the next run.
 // - Written once per op, in one store update that keeps every other field and re-checks the op still wants it; an op
-//   that has pool_amount is not read again. Display only: nothing here feeds a signature.
+//   that has pool_amount is not read again. An op whose transactions were read, each its signature's own, and whose
+//   figures are still unknown by these rules (no trade of its token, another wallet, a move these rules do not read)
+//   gets `fill_none` instead when a restore rebuilt it (its key `restored/<signature>`), since a landed transaction
+//   never changes, and is not read again either (review of 776d40528, P2-2: it took one of FILL_OPS_MAX each run for
+//   good); this device's own op is never marked, so one answer it cannot read (a malformed or hostile one) never blanks
+//   a real trade's figure for good (review of f73ee1c82, P3-a). A read that failed or was refused writes nothing.
+//   Display only: nothing here feeds a signature.
 import { base58 } from "@scure/base";
 import type { PoolStatePrice } from "../../kit/src/signpage/messages.ts";
 import { POOL_USD_FEEDS } from "../../kit/src/price/pool-usd.ts";
@@ -54,6 +62,11 @@ import { poolUnits } from "./rules/pool.ts";
 
 const SYSTEM = "11111111111111111111111111111111";
 const WSOL = "So11111111111111111111111111111111111111112";
+const TOKEN = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
+/** The token program's instructions on W's wrapped-SOL account that move no SOL out of W's reach: InitializeAccount (1,
+ *  16, 18), CloseAccount (9, its lamports back to W: checked below), SyncNative (17), GetAccountDataSize (21),
+ *  InitializeImmutableOwner (22). Transfer (3) and TransferChecked (12) are read; any other makes the figure unknown. */
+const WSOL_QUIET = new Set([1, 9, 16, 17, 18, 21, 22]);
 /** The page's price counts for a sale's USD only this fresh (its own read, ms). */
 export const PRICE_FRESH_MS = 120_000;
 /** A sale's USD is written only this soon after it: past it, the price now is not the sale's. */
@@ -127,6 +140,44 @@ export function solanaTradeLeg(t: unknown, side: "buy" | "sell", token: string):
   // every system instruction, top level and inner
   const ixs: Ix[] = Array.isArray(msg.instructions) ? [...(msg.instructions as Ix[])] : [];
   if (Array.isArray(meta.innerInstructions)) for (const g of meta.innerInstructions as { instructions?: unknown }[]) if (Array.isArray(g?.instructions)) ixs.push(...(g.instructions as Ix[]));
+  // W's wrapped-SOL accounts (see the top): listed as W's in the meta, or initialized here for the wrapped-SOL mint
+  // with W its owner
+  const wsol = new Set<string>();
+  for (const b of [...(meta.preTokenBalances as TokenBalance[]), ...(meta.postTokenBalances as TokenBalance[])]) if (b?.mint === WSOL && b.owner === w && Number.isSafeInteger(b.accountIndex) && keys[b.accountIndex as number] !== undefined) wsol.add(keys[b.accountIndex as number]!);
+  const tokenData = (ix: Ix): Uint8Array | null => {
+    if (!Number.isSafeInteger(ix.programIdIndex) || keys[ix.programIdIndex as number] !== TOKEN || !ints(ix.accounts) || typeof ix.data !== "string") return null;
+    try {
+      return base58.decode(ix.data);
+    } catch {
+      return null;
+    }
+  };
+  for (const ix of ixs) {
+    const d = tokenData(ix);
+    if (d === null || !ints(ix.accounts)) continue;
+    const a = ix.accounts.map((i) => keys[i]);
+    // InitializeAccount: account, mint, owner (an account); InitializeAccount2 and 3: account, mint, the owner in data
+    const owner = d[0] === 1 ? a[2] : (d[0] === 16 || d[0] === 18) && d.length >= 33 ? base58.encode(d.subarray(1, 33)) : undefined;
+    if (owner === w && a[1] === WSOL && a[0] !== undefined) wsol.add(a[0]);
+  }
+  // the wrapped SOL W's accounts paid to others, less what others paid into them
+  let wsolOut = 0n;
+  for (const ix of ixs) {
+    const d = tokenData(ix);
+    if (d === null || !ints(ix.accounts)) continue;
+    const a = ix.accounts.map((i) => keys[i]);
+    if (!a.some((k) => k !== undefined && wsol.has(k))) continue;
+    if ((d[0] === 3 && d.length === 9) || (d[0] === 12 && d.length === 10)) {
+      const [src, dst] = d[0] === 3 ? [a[0], a[1]] : [a[0], a[2]];
+      const n = u64(d, 1);
+      if (wsol.has(src!) && !wsol.has(dst!)) wsolOut += n;
+      else if (wsol.has(dst!) && !wsol.has(src!)) wsolOut -= n;
+    } else if (d[0] === 9) {
+      // a close of W's wrapped-SOL account hands its lamports to W, or the figure is unknown
+      if (wsol.has(a[0]!) && a[1] !== w) return null;
+    } else if (!WSOL_QUIET.has(d[0]!)) return null;
+  }
+  let wrapped = 0n;
   let out = 0n;
   let rents = 0n;
   let into = 0n;
@@ -145,8 +196,11 @@ export function solanaTradeLeg(t: unknown, side: "buy" | "sell", token: string):
     const tag = data.length >= 4 ? new DataView(data.buffer, data.byteOffset, 4).getUint32(0, true) : -1;
     if (tag === 2 && data.length === 12) {
       const l = u64(data, 4);
-      if (from === w && to !== w) out += l;
-      else if (to === w && from !== w) into += l;
+      if (from === w && to !== w) {
+        // a wrap into W's own wrapped-SOL account is no spend of a buy's (see the top)
+        if (wsol.has(to!)) wrapped += l;
+        else out += l;
+      } else if (to === w && from !== w) into += l;
     } else if (tag === 0 && data.length === 52 && from === w) {
       // an account W made that the transaction also closed gave its rent back with the close: not paid out
       const at = keys.indexOf(to!);
@@ -155,13 +209,12 @@ export function solanaTradeLeg(t: unknown, side: "buy" | "sell", token: string):
     } else return null;
   }
   if (side === "buy") {
-    // a wrapped-SOL buy pays its own account first: not what the venue took
-    if (tokenChanges(meta.preTokenBalances, meta.postTokenBalances, WSOL)?.has(w)) return null;
-    return { wallet: w, units, decimals, lamports: out };
+    const spent = out + wsolOut;
+    return spent > 0n ? { wallet: w, units, decimals, lamports: spent } : null;
   }
   const fee = wAt === 0 && Number.isSafeInteger(meta.fee) ? BigInt(meta.fee as number) : 0n;
   const delta = BigInt(meta.postBalances[wAt]!) - BigInt(meta.preBalances[wAt]!);
-  const got = delta + fee + out + rents - into;
+  const got = delta + fee + out + wrapped + rents - into;
   return got > 0n ? { wallet: w, units, decimals, lamports: got } : null;
 }
 
@@ -240,14 +293,16 @@ export type FillDeps = {
   /** The page's own SOL price now, if any. */
   price(): PoolStatePrice | null;
   now(): number;
+  /** The sign out's stop: once aborted, no op is read or written more. */
+  signal?: AbortSignal;
 };
 
-type OpRecord = { kind?: unknown; stage?: unknown; chain?: unknown; token?: unknown; txs?: unknown; created_ms?: unknown; pool_amount?: unknown; sha?: unknown; pool?: unknown; legs?: unknown; amount_usd?: unknown };
+type OpRecord = { kind?: unknown; stage?: unknown; chain?: unknown; token?: unknown; txs?: unknown; created_ms?: unknown; pool_amount?: unknown; sha?: unknown; pool?: unknown; legs?: unknown; amount_usd?: unknown; fill_none?: unknown };
 
 /** A pool buy or sale on Solana that filled, with its signatures, and no pool_amount yet (see the top). */
 function wants(r: OpRecord | undefined): r is OpRecord & { kind: "buy" | "sell"; token: string; txs: { hash: string }[] } {
   const pool = r?.kind === "buy" ? r.sha === undefined : r?.kind === "sell" && r.pool === "sol";
-  return pool && r!.stage === "filled" && r!.chain === "solana" && typeof r!.token === "string" && r!.pool_amount === undefined && Array.isArray(r!.txs) && r!.txs.length > 0 && r!.txs.every((t) => typeof (t as { hash?: unknown })?.hash === "string");
+  return pool && r!.stage === "filled" && r!.chain === "solana" && typeof r!.token === "string" && r!.pool_amount === undefined && r!.fill_none === undefined && Array.isArray(r!.txs) && r!.txs.length > 0 && r!.txs.every((t) => typeof (t as { hash?: unknown })?.hash === "string");
 }
 
 /** A sale's legs' wallets, when its op names them. */
@@ -271,18 +326,22 @@ export async function fillTradeOps(d: FillDeps): Promise<boolean> {
   const at = (r: OpRecord): number => (typeof r.created_ms === "number" ? r.created_ms : 0);
   found.sort((a, b) => at(b.rec) - at(a.rec));
   for (const { k, rec } of found.slice(0, FILL_OPS_MAX)) {
+    if (d.signal?.aborted) break;
     const sigs = rec.kind === "buy" ? [rec.txs[0]!.hash] : rec.txs.map((t) => t.hash);
     const walletsOk = rec.kind === "sell" ? legWallets(rec) : null;
     let units = 0n;
     let lamports = 0n;
     let decimals: number | null = null;
     let whole = true;
+    // every answer read and its own, yet no figure: for good (see the top)
+    let never = false;
     const legs: { sig: string; lamports: bigint; blockS: number | null }[] = [];
     for (const sig of sigs) {
       const a = own(await d.read(sig).catch(() => null), sig);
       const leg = solanaTradeLeg(a, rec.kind, rec.token);
       if (leg === null || (decimals !== null && leg.decimals !== decimals) || (walletsOk !== null && !walletsOk.has(leg.wallet))) {
         whole = false;
+        never = a !== null;
         break;
       }
       decimals = leg.decimals;
@@ -290,6 +349,16 @@ export async function fillTradeOps(d: FillDeps): Promise<boolean> {
       lamports += leg.lamports;
       const bt = (a as { blockTime?: unknown }).blockTime;
       legs.push({ sig, lamports: leg.lamports, blockS: Number.isSafeInteger(bt) ? (bt as number) : null });
+    }
+    // only an op a restore rebuilt (src/sol-buy-records.ts, `restored/<signature>`) is marked: this device's own op
+    // holds a real trade, so an answer it cannot read is the answer's fault and the op is read again (review of
+    // f73ee1c82, P3-a)
+    if (never && k.startsWith("restored/")) {
+      await d.store
+        .update("ops", k, (v) => (wants(v as OpRecord) ? { ...(v as object), fill_none: true } : v))
+        .then(() => (wrote = true))
+        .catch(() => {});
+      continue;
     }
     if (!whole || decimals === null) continue;
     const fill: Record<string, string> = { units: poolUnits(units, decimals), pool_amount: poolUnits(lamports, 9) };
@@ -324,6 +393,7 @@ export async function fillTradeOps(d: FillDeps): Promise<boolean> {
         else if (young) continue;
       }
     }
+    if (d.signal?.aborted) break;
     await d.store
       .update("ops", k, (v) => (wants(v as OpRecord) ? { ...(v as object), ...fill } : v))
       .then(() => (wrote = true))

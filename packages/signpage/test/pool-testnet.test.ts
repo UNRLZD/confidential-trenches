@@ -26,8 +26,9 @@ import { signalsProver } from "../../wallet/test/withdraw-fixture.ts";
 (globalThis as { __SIGN_NETWORK__?: string }).__SIGN_NETWORK__ = "testnet";
 const { SOL_POOLS, SOL_POOL_TABLES, solanaPoolOf, SOL_LADDER, SOL_EPOCH_MS, SOL_LIFE_MS, SOL_SEND_MARGIN_MS } = await import("../../wallet/src/pool/solana.ts");
 const { POOL_TESTNET } = await import("../../wallet/src/pool/network.ts");
+const { EVM_POOLS } = await import("../../wallet/src/pool/evm.ts");
 const { poolKinds } = await import("../src/pool-kinds.ts");
-const { PAGE_CLUSTER, TESTNET_RPCS, PAGE_SOL_MARK_BATCHES, testnetPoolDeps, testnetPool: makePool, poolRelayFee, helperPoolSend, POOL_SEND_TIMEOUT_MS, PAGE_TABLES, settleFreedOps, oweSend, dropSend, keepRelease, mergeWithdrawOp } = await import("../src/pool-testnet.ts");
+const { PAGE_CLUSTER, TESTNET_RPCS, PAGE_SOL_MARK_BATCHES, testnetPoolDeps, testnetPool: makePool, poolRelayFee, helperPoolSend, POOL_SEND_TIMEOUT_MS, PAGE_TABLES, settleFreedOps, oweSend, dropSend, keepRelease, keepEvmSend, mergeWithdrawOp, writeEvmStage, writeEvmFinish } = await import("../src/pool-testnet.ts");
 // Every page a test makes signs out at the test's end, as main.ts's sign out does (signingOut: its turn timer cleared).
 // A state read arms the page's EVM turn (src/pool-testnet.ts armTurn) on whichever clock is in place; a page left signed
 // in on the real clock can fire its turn inside a later test's test clock, which re-arms it there for good ("the test
@@ -550,7 +551,9 @@ test("review P2-1 and P2-2 of a34c1626, P2-1 and P3-3 of e3489b3b: every Solana 
   assert.equal([...src.matchAll(/outSignal: \(\) => solanaStop\.signal,/g)].length, 1);
   // the Solana deposit host's stop: its waits between attempts end at a sign out's tap (review of f0e7bd38, P2-1)
   assert.equal([...src.matchAll(/ stop: solanaStop\.signal,/g)].length, 1);
-  assert.equal([...src.matchAll(/solanaStop\.signal/g)].length, 8);
+  // the state read's pass: its one more pass after it never runs past a sign out
+  assert.equal([...src.matchAll(/const stop = solanaStop\.signal;\n {4}passing = proofs\(\)/g)].length, 1);
+  assert.equal([...src.matchAll(/solanaStop\.signal/g)].length, 9);
   // the settle pair: the page's two seats, the helper's with the window-long retry
   assert.match(src, /solanaPacedRpc\(pageHelperRpc\(TRADE_HELPER, SOLANA_RPC_WINDOW_RETRY, kind\)\)\]/);
   assert.match(src, /solanaPacedRpc\(testnetRpc\(TESTNET_RPCS\.solana\[1\], SOLANA_RPC_WINDOW_RETRY, kind\)\)\]/);
@@ -824,7 +827,7 @@ test("helperPoolSend gives the helper's 429 as busy, with its code and its Retry
   assert.match(String(await busy(answer(503, '{"error":{"code":"upstream"}}'))), /HTTP 503/);
 });
 
-test("pool.withdraw (card signpage-pool-withdraw-form): a checked Solana request opens the page's own screen with its id; no screen, or an EVM chain, is refused", async () => {
+test("pool.withdraw (card signpage-pool-withdraw-form): a checked request opens the page's own screen with its id, on Solana and on an EVM chain its pin names; no screen, or an EVM chain with no pin, is refused", async () => {
   const { w } = await wallet();
   const opened: [string, string][] = [];
   const answer = { result: { pending: true as const } };
@@ -832,7 +835,16 @@ test("pool.withdraw (card signpage-pool-withdraw-form): a checked Solana request
   const ask: Ask = { kind: "pool.withdraw", chain: "solana", token: null, amount: 0n, slippageBps: 0, decimals: 9 };
   assert.equal(with_.flow(ask, ctx), answer);
   assert.deepEqual(opened, [["solana", "r1"]]);
-  assert.deepEqual(with_.flow({ ...ask, chain: "base", decimals: 18 }, ctx), { error: "not_allowed" });
+  // Base and Robinhood: the chain's pin alone decides
+  assert.equal(with_.flow({ ...ask, chain: "base", decimals: 18 }, ctx), answer);
+  assert.equal(with_.flow({ ...ask, chain: "robinhood", decimals: 18 }, ctx), answer);
+  assert.deepEqual(opened, [["solana", "r1"], ["base", "r1"], ["robinhood", "r1"]]);
+  const unpinned = testnetPool({ store: async () => w, seed64: async () => SEED64.slice(), openWithdraw: (chain, c) => (opened.push([chain, c.id]), answer) }, { prover: { vault: signalsProver(), stop: () => {} }, locks: null, evmPin: () => undefined });
+  assert.deepEqual(unpinned.flow({ ...ask, chain: "base", decimals: 18 }, ctx), { error: "not_allowed" });
+  assert.deepEqual(unpinned.flow({ ...ask, chain: "robinhood", decimals: 18 }, ctx), { error: "not_allowed" });
+  assert.equal(opened.length, 3);
+  assert.equal(unpinned.withdrawDeps("base", "r1").handoff, undefined, "no pin: no withdraw");
+  await assert.rejects(unpinned.withdrawDeps("base", "r1").funds(), /no flow/);
   const refused = testnetPool({ store: async () => w, seed64: async () => SEED64.slice(), openWithdraw: () => null }, { prover: { vault: signalsProver(), stop: () => {} }, locks: null });
   assert.deepEqual(refused.flow(ask, ctx), { error: "not_allowed" });
   const none = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { prover: { vault: signalsProver(), stop: () => {} }, locks: null });
@@ -842,7 +854,9 @@ test("pool.withdraw (card signpage-pool-withdraw-form): a checked Solana request
   assert.equal(keys.pool, solanaPoolOf(SOL_POOLS.devnet!.program).pool);
   assert.equal(keys.program, SOL_POOLS.devnet!.program);
   assert.equal(keys.feePayer, SOL_POOLS.devnet!.feePayer);
-  assert.equal(with_.withdrawDeps("base", "r1").handoff, undefined, "no EVM flow on this page yet");
+  // the EVM screen's keys: the pinned pool; no Web Locks, no run
+  assert.equal(with_.withdrawDeps("base", "r1").keys.pool, EVM_POOLS["base-sepolia"]!.pool);
+  assert.equal(with_.withdrawDeps("base", "r1").handoff, undefined, "no Web Locks: no run");
 });
 
 // Review #232b LOW 2: the finish of an owed onward send takes the seed lock per use (a derive, a signature), never
@@ -1040,6 +1054,22 @@ test("a withdraw whose first run is still live beside the page opened again: one
   assert.equal(wd.onwards().length, 1, "one onward send, whichever page made it");
   assert.equal(wd.balance.get(W), 0n);
   assert.equal(wd.balance.get(TO), amount);
+});
+
+test("keepEvmSend keeps every W send signed for the part (a reload's, another tab's) beside the newest, and refuses, so nothing leaves unkept, once the send is no longer this attempt's", async () => {
+  const { w } = await wallet();
+  const p = { ...owedPending("n1", "0x1111111111111111111111111111111111111111"), chain: "base", part: "1", nullifier: "2", from: "3", deadlineMs: "4", chunk: "5", fee: "6" } as const;
+  await oweSend(w, "op1", p);
+  await keepEvmSend(w, "op1", { ...p, onward: "0xh1" });
+  // a second tab's send, from its own copy that never saw the first
+  await keepEvmSend(w, "op1", { ...p, onward: "0xh2" });
+  // the run's release-only keep after them keeps both
+  await keepEvmSend(w, "op1", { ...p, feeCap: "7000" });
+  assert.deepEqual(await w.get("meta", "owed/op1"), { n1: { ...p, feeCap: "7000", onward: "0xh2", onwards: ["0xh1", "0xh2"] } });
+  await assert.rejects(keepEvmSend(w, "op1", { ...p, attempt: "cd".repeat(16), onward: "0xh3" }), /not this attempt's/);
+  await dropSend(w, "op1", "n1");
+  await assert.rejects(keepEvmSend(w, "op1", { ...p, onward: "0xh4" }), /not this attempt's/);
+  assert.deepEqual(await w.get("meta", "owed/op1"), {});
 });
 
 // fold 4 (review LOW): the release's own signature is added to the send still stored, never a whole owe again
@@ -1588,6 +1618,145 @@ test("card pool-buy-record-never-stays-sent: the page's buy host writes the take
   await t.signedOut();
 });
 
+// review P2-2: a part W's reverted send left on W is kept in the op's record, by note, with W, its index and the amount
+test("mergeWithdrawOp keeps a part held on W by note (W, its index, the amount), beside the stage and the cleared owed send", () => {
+  const a = { chain: "base", noteId: "n1", w: "0x1111111111111111111111111111111111111111", l: "5", j: 0, amount: "100" } as const;
+  const b = { ...a, noteId: "n2", j: 1, amount: "7" } as const;
+  const r = mergeWithdrawOp({ kind: "withdraw", stage: "in_transit", txs: [], owed: "n1" }, { stage: "stopped", txs: [{ chain: "base", hash: "0xr" }], clear: "n1", held: a });
+  assert.equal(r.stage, "stopped");
+  assert.equal(r.owed, undefined);
+  assert.deepEqual(r.held, { n1: a });
+  assert.deepEqual(mergeWithdrawOp(r, { held: b }).held, { n1: a, n2: b });
+  assert.equal(mergeWithdrawOp({ kind: "withdraw" }, { stage: "stopped" }).held, undefined, "nothing held: no field");
+});
+
+// review 2 of e1f9e87a (P2-A, P3-1; the review's X10, X11): a part held on W is written in the stage's own write, and
+// the owed send stays until the op ends
+const HELD = { chain: "base", noteId: "n1", w: "0x1111111111111111111111111111111111111111", l: "5", j: 0, amount: "100" } as const;
+const evmOwed = (to: string) => ({ ...owedPending("n1", to), chain: "base", part: "1", nullifier: "2", from: "3", deadlineMs: "4", chunk: "5", fee: "6" }) as const;
+test("(X11) the EVM run's stage write: in_transit with `held` in one write, the owed send kept; an end with no owed send clears and drops it", async () => {
+  const { w } = await wallet();
+  const p = evmOwed("0x2222222222222222222222222222222222222222");
+  await w.put("ops", "op1", { kind: "withdraw", stage: "submitted", txs: [], owed: "n1" });
+  await oweSend(w, "op1", p);
+  const writes: unknown[] = [];
+  const update = w.update.bind(w);
+  (w as { update: unknown }).update = async (store: string, key: string, f: (v: unknown) => unknown) => update(store as never, key as never, (v: unknown) => {
+    const r = f(v);
+    if (store === "ops") writes.push(r);
+    return r as never;
+  });
+  await writeEvmStage(w, "op1", { stage: "in_transit", txs: [{ chain: "base", hash: "0xr" }, { chain: "base", hash: "0xw" }], arrived: {}, held: HELD }, null);
+  assert.equal(writes.length, 1, "one write");
+  const r = (await w.get("ops", "op1")) as Record<string, unknown>;
+  assert.deepEqual([r.stage, r.owed, r.held], ["in_transit", "n1", { n1: HELD }], "the stage and `held` together, still owed");
+  assert.deepEqual(Object.keys((await w.get("meta", "owed/op1")) as object), ["n1"], "the owed send kept");
+  await writeEvmStage(w, "op1", { stage: "stopped", txs: [], arrived: {} }, "n1");
+  assert.equal(((await w.get("ops", "op1")) as Record<string, unknown>).owed, undefined);
+  assert.deepEqual(await w.get("meta", "owed/op1"), {});
+});
+
+test("(X10) the EVM finish's write: in_transit (a part held on W, or the fee it needs) keeps the owed send with `held` or fee_needed in the same write; an end clears and drops it", async () => {
+  const { w } = await wallet();
+  const p = evmOwed("0x2222222222222222222222222222222222222222");
+  await w.put("ops", "op1", { kind: "withdraw", stage: "in_transit", txs: [], owed: "n1" });
+  await oweSend(w, "op1", p);
+  assert.equal(await writeEvmFinish(w, "op1", "n1", { stage: "in_transit", txs: [{ chain: "base", hash: "0xw" }], arrived: {}, held: HELD }), true);
+  let r = (await w.get("ops", "op1")) as Record<string, unknown>;
+  assert.deepEqual([r.stage, r.owed, r.held, r.txs], ["in_transit", "n1", { n1: HELD }, [{ chain: "base", hash: "0xw" }]]);
+  assert.deepEqual(Object.keys((await w.get("meta", "owed/op1")) as object), ["n1"], "the owed send kept");
+  assert.equal(await writeEvmFinish(w, "op1", "n1", { stage: "in_transit", txs: [], arrived: {}, feeNeeded: "9" }), true);
+  assert.equal(((await w.get("ops", "op1")) as Record<string, unknown>).fee_needed, "9");
+  assert.equal(await writeEvmFinish(w, "op1", "n1", { stage: "sent", txs: [{ chain: "base", hash: "0xs" }], arrived: { "0xs": "1" } }), false);
+  r = (await w.get("ops", "op1")) as Record<string, unknown>;
+  assert.deepEqual([r.stage, r.owed, r.fee_needed], ["sent", undefined, undefined]);
+  assert.deepEqual(r.held, { n1: HELD }, "what W held stays on the record");
+  assert.deepEqual(await w.get("meta", "owed/op1"), {});
+});
+
+test("keepEvmSend keeps every resend signed after a revert (a reload's, another tab's), each with its nonce, never one dropped", async () => {
+  const { w } = await wallet();
+  const p = evmOwed("0x2222222222222222222222222222222222222222");
+  await oweSend(w, "op1", p);
+  await keepEvmSend(w, "op1", { ...p, resends: [{ nonce: "1", hash: "0xa" }] });
+  await keepEvmSend(w, "op1", { ...p, resends: [{ nonce: "1", hash: "0xb" }] });
+  await keepEvmSend(w, "op1", { ...p, feeCap: "7" });
+  assert.deepEqual(((await w.get("meta", "owed/op1")) as Record<string, { resends?: unknown }>).n1!.resends, [{ nonce: "1", hash: "0xa" }, { nonce: "1", hash: "0xb" }]);
+});
+
+// review 3 of 972be65f (X10b): the state reads' owed pass hands the op's `held` to the EVM finish, so a part left on W
+// by a send that reverted gets its one resend at W's next nonce; without it the finish reads only the reverted send and
+// the op stays in_transit for good
+test("(X10b) the owed pass hands the op's `held` to the EVM finish: W's resend at nonce 1 is signed, kept before it leaves, and the op ends sent", async () => {
+  const { w, ns } = await wallet();
+  const { freshWallet } = await import("../../wallet/src/derive/keys.ts");
+  const { evmPoolScopeOf } = await import("../../wallet/src/pool/evm.ts");
+  const pin = EVM_POOLS["base-sepolia"]!;
+  const scope = evmPoolScopeOf(pin.pool, 84532n);
+  const ref: NoteRef = { kind: "deposit", s: scope, i: 0 };
+  const label = vaultLabelOf(keccak_256, scope, 1n);
+  const value = 10n ** 15n;
+  const pre = noteSecrets(SEED64, ref).precommitment;
+  let n = await ns.add({ ref, scope, precommitment: pre, state: "UNSPENT", leaf: { value, label, commitment: noteCommitment(value, label, pre), leafIndex: 0n } });
+  n = await ns.move(n.id, "UNSPENT", "HELD", { deadlineMs: 1_800_000_210_000n, context: "18" });
+  const attempt = n.attempt!;
+  n = await ns.move(n.id, "HELD", "RESERVED", { attempt });
+  const W = freshWallet(SEED64, "evm", label, 0).address;
+  const TO = "0x1111111111111111111111111111111111111111";
+  const H1 = "0x" + "c1".repeat(32);
+  const REL = "0x" + "ab".repeat(32);
+  const [part, fee, wFee] = [10n ** 14n, 2n * 10n ** 13n, 210_000_000_000n];
+  const chunk = part + fee + wFee;
+  const nullifier = noteSecrets(SEED64, ref).nullifierHash;
+  const held = { chain: "base", noteId: n.id, w: W, l: label.toString(), j: 0, amount: (part + wFee / 2n).toString() } as const;
+  await w.put("ops", "op1", { kind: "withdraw", stage: "in_transit", txs: [{ chain: "base", hash: REL }, { chain: "base", hash: H1 }], created_ms: 1, owed: n.id, held: { [n.id]: held } });
+  await oweSend(w, "op1", { noteId: n.id, attempt, context: "18", to: TO, last: true, feeCap: (10n ** 15n).toString(), chain: "base", part: part.toString(), nullifier: nullifier.toString(), from: "1", deadlineMs: "1800000210000", chunk: chunk.toString(), fee: fee.toString(), onward: H1, release: REL } as never);
+  // the chain: the pinned pool's Withdrawn of the nullifier paying W the chunk; W's nonce-0 send H1 reverted (status 0
+  // on both, at the safe block); W holds `held`; a send of W's lands once made
+  const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
+  const q = (v: bigint) => "0x" + v.toString(16);
+  const word = (v: bigint) => "0x" + v.toString(16).padStart(64, "0");
+  const hashOf = (raw: string) => "0x" + hex(keccak_256(Uint8Array.from(Buffer.from(raw.slice(2), "hex"))));
+  const topic = "0x" + hex(keccak_256(new TextEncoder().encode("Withdrawn(address,address,uint256,uint256,uint256,uint256)")));
+  const log = { address: pin.pool, topics: [topic, word(BigInt(W))], data: "0x" + [BigInt(pin.feeRecipient), chunk, fee, nullifier, 1n].map((v) => v.toString(16).padStart(64, "0")).join(""), blockNumber: "0xf0", logIndex: "0x0", transactionHash: REL, blockHash: "0x" + "bb".repeat(32) };
+  const sent: string[] = [];
+  const rpc = (k: string) => Object.assign(async (method: string, params: readonly unknown[] = []): Promise<unknown> => {
+    if (method === "eth_blockNumber") return "0x100";
+    if (method === "eth_getBlockByNumber") return { number: "0x100", hash: "0x" + "be".repeat(32), timestamp: q((1_800_000_000_000n + 600_000n) / 1000n), baseFeePerGas: q(10_000_000n) };
+    if (method === "eth_getLogs") return [log];
+    if (method === "eth_getTransactionCount") return q(sent.length > 0 ? 2n : 1n);
+    if (method === "eth_getBalance") return q(BigInt(held.amount));
+    if (method === "eth_getCode") return "0x";
+    if (method === "eth_estimateGas") return q(21_000n);
+    if (method === "eth_call") return (params[0] as { to: string }).to.toLowerCase() === "0x420000000000000000000000000000000000000f" ? word(900n) : "0x";
+    if (method === "eth_sendRawTransaction") return (sent.push(String(params[0])), hashOf(String(params[0])));
+    if (method === "eth_getTransactionReceipt") {
+      const h = String(params[0]);
+      const mine = sent.some((r) => hashOf(r) === h);
+      return h === H1 || mine ? { status: mine ? "0x1" : "0x0", from: W, to: TO, blockHash: "0x" + "ee".repeat(32), blockNumber: "0xf0" } : null;
+    }
+    if (method === "eth_getTransactionByHash") return { value: q(part) };
+    throw new Error(`${k}: no ${method}`);
+  }, { url: `https://${k}.invalid` });
+  const offline = Object.assign(async () => Promise.reject(new Error("offline")), { url: "https://sol.invalid" });
+  const t = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, {
+    rpcs: [offline, offline], prover: { vault: signalsProver(), stop: () => {} },
+    evmPin: (c) => (c === "base" ? pin : undefined), evmRpcs: (c) => (c === "base" ? [rpc("a"), rpc("b")] : null),
+    evmSync: () => ({ events: async () => Promise.reject(new Error("offline")) }),
+    evmQueuePool: () => ({ ...({} as Pool<unknown>), id: "evm:x", scope, now: async () => Promise.reject(new Error("offline")), trees: async () => Promise.reject(new Error("offline")) }) as unknown as Pool<unknown>,
+    wait: async () => {},
+  });
+  for (let i = 0; i < 5 && sent.length === 0; i++) await t.stateRead();
+  assert.ok(sent.length > 0, "W's resend signed and sent");
+  const tx = sent.map(hashOf);
+  const owed = (await w.get("meta", "owed/op1")) as Record<string, { resends?: { nonce: string; hash: string }[] }> | undefined;
+  const r = (await w.get("ops", "op1")) as { stage: string; arrived?: Record<string, string> };
+  assert.equal(r.stage, "sent", "the resend landed: the op ends sent");
+  assert.deepEqual(Object.keys(r.arrived ?? {}), [tx[0]]);
+  assert.deepEqual(owed ?? {}, {}, "the owed send dropped once sent");
+  await t.signedOut();
+});
+
 // card pool-tree-read-waits-for-its-second, round 3: the app's hidden frame and the top-level withdraw sheet, two pages
 // on one wallet store, each with its own proof queue. The frame's pass runs on its state reads, which every store
 // write wakes (the change event, below); here each wait of the sheet's run stands for one.
@@ -1610,13 +1779,30 @@ const twoDocs = async (values: bigint[], refs: (NoteRef | undefined)[], times: b
       await onWait?.();
     },
   });
-  const qPool = { ...wd.host.pool, bind: (b: Parameters<typeof wd.host.pool.bind>[0], s?: AbortSignal) => wd.host.pool.bind({ ...b, tipCap: b.tipCap ?? 1n }, s) };
+  // hold.on(): the frame's pass waits at its time read (past its skip read) until hold.off()
+  let gate: Promise<void> | null = null;
+  let open = (): void => {};
+  const hold = {
+    on: () => void (gate = new Promise<void>((r) => (open = r))),
+    off: () => {
+      gate = null;
+      open();
+    },
+  };
+  const qPool = {
+    ...wd.host.pool,
+    now: async (...a: Parameters<typeof wd.host.pool.now>) => {
+      if (gate !== null) await gate;
+      return wd.host.pool.now(...a);
+    },
+    bind: (b: Parameters<typeof wd.host.pool.bind>[0], s?: AbortSignal) => wd.host.pool.bind({ ...b, tipCap: b.tipCap ?? 1n }, s),
+  };
   const fetchFn = (async (_url: string, init: { body: string }) => {
     const { pool, tx } = JSON.parse(init.body) as { pool: string; tx: string };
     return new Response(JSON.stringify(await wd.host.send(pool, base64.decode(tx))), { status: 200 });
   }) as unknown as typeof fetch;
   const mk = (pool: unknown) => testnetPool({ store: async () => wd.w, seed64: async () => SEED64.slice() }, { pin: wd.host.pin, rpcs: wd.host.rpcs, pool: pool as never, prover: { vault: signalsProver(), stop: () => {} }, fetch: fetchFn, hardwareConcurrency: 4, now: () => NOW + slept, wait: wd.host.wait } as never);
-  return { wd, B, frame: mk(qPool), top: mk(wd.host.pool), onWait: (f: () => Promise<unknown>) => void (onWait = f) };
+  return { wd, B, hold, frame: mk(qPool), top: mk(wd.host.pool), onWait: (f: () => Promise<unknown>) => void (onWait = f) };
 };
 const RET: NoteRef = { kind: "return", c: "sol", l: 7n, j: 0 };
 
@@ -1629,6 +1815,33 @@ test("two pages, TOPO 1: the frame holds the user's note ready; the sheet's fund
   onWait(() => frame.proofs());
   await top.withdraw({ chain: "solana", to: WORLD.TO, amount: 5_000_000n, maxFee: WORLD.COST }, "op-w");
   assert.equal(wd.releases.length, 1, JSON.stringify(await wd.w.get("ops", "op-w")));
+});
+
+test("(review 4 P2) two pages, TOPO 1 with the frame's pass running when the keep-out is written: the one state read that write wakes asks one more pass after it, which lets the note go, and the run sends", async () => {
+  const { wd, hold, frame, top, onWait } = await twoDocs([30_000_000n], [undefined], [WORLD.NOW - 30_000n]);
+  await frame.proofs();
+  assert.equal((await wd.ns.get(wd.ids[0]!))?.state, "HELD", "the frame's ready proof");
+  // the frame's state read's pass, past its skip read, held at its time read
+  hold.on();
+  void frame.stateRead();
+  await new Promise((r) => setTimeout(r, 50));
+  let waits = 0;
+  onWait(async () => {
+    waits++;
+    // the keep-out write's one state read (its store change), while the pass still runs
+    if (waits === 1) await Promise.race([frame.stateRead(), new Promise((r) => setTimeout(r, 50))]);
+    // the running pass ends a few waits on, its own work done; no state read with it
+    if (waits === 3) {
+      hold.off();
+      await new Promise((r) => setTimeout(r, 50));
+    }
+  });
+  try {
+    await top.withdraw({ chain: "solana", to: WORLD.TO, amount: 5_000_000n, maxFee: WORLD.COST }, "op-w");
+    assert.equal(wd.releases.length, 1, JSON.stringify(await wd.w.get("ops", "op-w")));
+  } finally {
+    hold.off();
+  }
 });
 
 test("two pages, TOPO 2: a sell's return note, the frame's pass at the boundary: the record keeps the return note out and the sheet's run sends", async () => {
@@ -1679,7 +1892,7 @@ test("the kept-out record's write reaches another page as a store change (its st
   const fs = frameState(async () => null, (fn) => channel.addEventListener("message", (m) => (seen.push((m as MessageEvent).data), fn((m as MessageEvent).data))));
   fs.watch(() => void woke++);
   try {
-    await keepOutNotes(w, "op-w", ["n1"], BigInt(Date.now()) + 1_000n);
+    await keepOutNotes(w, "op-w", ["n1"], BigInt(Date.now()), 1_000n);
     for (let i = 0; i < 200 && woke === 0; i++) await new Promise((r) => setTimeout(r, 5));
     const e = seen.find((x) => (x as { key?: string }).key === WITHDRAW_PLANNED_KEY) as { kind: string; stores: string[] } | undefined;
     assert.deepEqual(e && { kind: e.kind, stores: e.stores }, { kind: "changed", stores: ["meta"] });
@@ -1762,4 +1975,151 @@ test("the rent backs run on the state reads: again after the wait while a W is l
   } finally {
     Date.now = realNow;
   }
+});
+
+// review 3 of 972be65f (P2-C, RR7) through the page's own host: the sheet's EVM withdraw of a change note that landed
+// this epoch, whose leaf the newest cut both RPCs agree on lags (card fresh-money-spendable-at-once: then the part waits
+// on the pool's time, here across the next boundary, whose root holds it); the app's hidden frame (a second page on the same store) runs its Base proof
+// queue's pass at that boundary. The run's keep-out record (meta owed/withdraw-sol, written through evmWithdrawRun's
+// keepOut) keeps the frame's queue off the note, so the part binds; the record is gone once the run ends.
+const evmTwoPages = async (heldFirst: boolean, midPass = false) => {
+  // midPass: the frame's pass is running when the run writes its keep-out (held at its time read, past its skip read),
+  // and the frame gets only the one state read that write wakes, at the run's first wait; the pass ends a few waits on
+  let hang = false;
+  let release: () => void = () => {};
+  const gate = new Promise<void>((r) => (release = r));
+  const { w, ns } = await wallet();
+  const { evmPoolScopeOf, EVM_EPOCH_MS, EVM_LIFE_MS, EVM_SEND_MARGIN_MS, EVM_LADDER } = await import("../../wallet/src/pool/evm.ts");
+  const { WITHDRAW_PLANNED_KEY } = await import("../src/pool-testnet.ts");
+  const pin = EVM_POOLS["base-sepolia"]!;
+  const scope = evmPoolScopeOf(pin.pool, 84532n);
+  const label = vaultLabelOf(keccak_256, scope, 1n);
+  const ref: NoteRef = { kind: "change", l: label, j: 0 };
+  const value = 10n ** 15n;
+  const pre = noteSecrets(SEED64, ref).precommitment;
+  const leaf = noteCommitment(value, label, pre);
+  const n = await ns.add({ ref, scope, precommitment: pre, state: "UNSPENT", leaf: { value, label, commitment: leaf, leafIndex: 0n } });
+  // the pool's time: an epoch's start and 1 s; the leaf landed this epoch and the newest cut lags it, so only the next
+  // boundary's root holds it
+  const E0 = 1_800_000_000_000n;
+  let slept = 0n;
+  let onWait: (() => Promise<unknown>) | null = null;
+  const binds: { page: string; chunk: bigint }[] = [];
+  const FEE = 10n ** 12n;
+  const PROBE = (1n << 127n) - 1n;
+  const poolOf = (page: string) => ({
+    id: `evm:base-sepolia:${pin.pool.toLowerCase()}`, chain: "evm", scope, ladder: EVM_LADDER, epochMs: EVM_EPOCH_MS, lifeMs: EVM_LIFE_MS, sendMarginMs: EVM_SEND_MARGIN_MS,
+    now: async () => {
+      if (page === "frame" && hang) await gate;
+      return E0 + 1_000n + slept;
+    },
+    trees: async (beforeMs: bigint, _s?: unknown, o?: { newest?: boolean }) => {
+      const has = o?.newest !== true && beforeMs > E0 + 500n;
+      const s = new VaultTree(has ? [leaf] : []), l = new VaultTree(has ? [label] : []);
+      return { stateTree: s, labelTree: l, stateRoot: s.root ?? 0n, labelRoot: l.root ?? 0n };
+    },
+    bind: async (b: { chunk: bigint; wallet: { address: string }; deadlineMs: bigint }) => {
+      if (b.chunk !== PROBE) binds.push({ page, chunk: b.chunk });
+      // the sheet's part stops at its bind: nothing is signed or sent here
+      if (page === "sheet" && b.chunk !== PROBE) throw new Error("the part reached its bind");
+      const bytes = new TextEncoder().encode(`${b.wallet.address}|${b.chunk}|${b.deadlineMs}`);
+      return { context: BigInt("0x" + Buffer.from(keccak_256(bytes)).toString("hex")) % VAULT_FIELD_P, feeCap: FEE, request: { w: b.wallet.address } };
+    },
+  }) as unknown as Pool<unknown>;
+  const q = (v: bigint) => "0x" + v.toString(16);
+  const rpc = (k: string) => Object.assign(async (method: string, params: readonly unknown[] = []): Promise<unknown> => {
+    if (method === "eth_blockNumber") return "0x100";
+    if (method === "eth_getBlockByNumber") return { number: "0x100", hash: "0x" + "be".repeat(32), timestamp: q((E0 + 1_000n + slept) / 1000n), baseFeePerGas: q(10_000_000n) };
+    if (method === "eth_getCode") return "0x";
+    if (method === "eth_estimateGas") return q(21_000n);
+    if (method === "eth_call") return (params[0] as { to: string }).to.toLowerCase() === "0x420000000000000000000000000000000000000f" ? "0x" + (900n).toString(16).padStart(64, "0") : "0x";
+    if (method === "eth_getLogs") return [];
+    throw new Error(`${k}: no ${method}`);
+  }, { url: `https://${k}.invalid` });
+  const offline = Object.assign(async () => Promise.reject(new Error("offline")), { url: "https://sol.invalid" });
+  const mk = (page: string) => testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, {
+    rpcs: [offline, offline], prover: { vault: signalsProver(), stop: () => {} }, hardwareConcurrency: 4,
+    evmPin: (c) => (c === "base" ? pin : undefined), evmRpcs: (c) => (c === "base" ? [rpc(`${page}-a`), rpc(`${page}-b`)] : null),
+    evmSync: () => ({ events: async () => Promise.reject(new Error("offline")) }),
+    evmQueuePool: () => poolOf(page),
+    now: () => E0 + 1_000n + slept,
+    wait: async (ms: number) => {
+      slept += BigInt(ms);
+      await onWait?.();
+    },
+  });
+  const frame = mk("frame");
+  const sheet = mk("sheet");
+  // the frame's pass before the boundary: the epoch's root lacks the leaf, so nothing is proved
+  await frame.stateRead();
+  assert.equal((await ns.get(n.id))?.state, "UNSPENT");
+  if (heldFirst) {
+    // past the boundary before the tap: the frame's pass proves the note and holds it (HELD) for its next buy
+    slept += 60_000n;
+    await frame.stateRead();
+    for (let i = 0; i < 100 && (await ns.get(n.id))?.state !== "HELD"; i++) await new Promise((r) => setTimeout(r, 10));
+    assert.equal((await ns.get(n.id))?.state, "HELD", "the frame holds the note");
+    binds.length = 0;
+  }
+  let atBoundary = 0;
+  if (midPass) {
+    hang = true;
+    void frame.stateRead();
+    await new Promise((r) => setTimeout(r, 50));
+    let waits = 0;
+    onWait = async () => {
+      waits++;
+      // the keep-out write's one state read (its store change), while the pass still runs
+      if (waits === 1) await Promise.race([frame.stateRead(), new Promise((r) => setTimeout(r, 50))]);
+      // the running pass ends 1.5 s in, its own work done; no state read with it
+      if (waits === 3) {
+        hang = false;
+        release();
+        await new Promise((r) => setTimeout(r, 50));
+      }
+    };
+  } else
+    // every wait of the sheet's run stands for one of the frame's state reads (which every store write wakes)
+    onWait = async () => {
+      if (slept >= 59_000n) atBoundary++;
+      await frame.stateRead();
+      // at the boundary: the frame's pass given 100 ms before the sheet goes on. It decides only which assertion catches
+      // a missing keep-out (with it the frame's bind lands before the sheet's; without it the sheet may bind first and
+      // the frame take the note after), never whether one does
+      if (slept >= 59_000n) await new Promise((r) => setTimeout(r, 100));
+    };
+  await sheet.withdraw({ chain: "base", to: "0x1111111111111111111111111111111111111111", amount: 5n * 10n ** 14n, maxFee: 10n ** 15n }, "op-w");
+  const planned = (await w.get("meta", WITHDRAW_PLANNED_KEY)) as Record<string, unknown> | undefined;
+  const state = (await ns.get(n.id))?.state;
+  const op = (await w.get("ops", "op-w")) as { stage?: string; cause?: string } | undefined;
+  hang = false;
+  release();
+  await frame.signedOut();
+  await sheet.signedOut();
+  return { atBoundary, binds, planned, state, op };
+};
+test("(RR7, the page's host) an EVM withdraw keeps its change note out of another page's proof queue while it waits for the boundary; the part binds and the keep-out is cleared at the run's end", async () => {
+  const { atBoundary, binds, planned, state } = await evmTwoPages(false);
+  assert.ok(atBoundary > 0, "the frame's pass ran at the boundary");
+  // the sheet's bind ends its run (a part that threw there): the keep-out is cleared then, and the frame's queue may take
+  // the free note after it, as it should; never before
+  const sheetAt = binds.findIndex((b) => b.page === "sheet");
+  assert.ok(sheetAt >= 0, "the part got its note back and reached its bind");
+  assert.deepEqual(binds.slice(0, sheetAt).filter((b) => b.page === "frame"), [], "the frame's queue never took the note while the run kept it out");
+  assert.equal(binds.filter((b) => b.page === "sheet").length, 1, "one bind of the sheet's");
+  assert.equal(planned?.["op-w"], undefined, "the keep-out cleared at the run's end (a part that threw)");
+  assert.ok(state === "UNSPENT" || (state === "HELD" && binds.at(-1)?.page === "frame"), `nothing the run moved: ${state}`);
+});
+test("(the page's host) an EVM withdraw of a note another page's queue already holds: the sheet counts it, the frame lets it go at its next pass once the keep-out is written, and the part binds", async () => {
+  const { binds, planned, state } = await evmTwoPages(true);
+  assert.equal(binds.filter((b) => b.page === "sheet").length, 1, "the part waited for the frame to let go and reached its bind");
+  assert.equal(planned?.["op-w"], undefined, "the keep-out cleared at the run's end");
+  assert.equal(state, "UNSPENT");
+});
+test("(review 4 P2, the page's host) an EVM withdraw of a note another page's queue holds, that page's pass running when the keep-out is written: the state read it wakes asks one more pass after it, which lets the note go, and the part binds", async () => {
+  const { binds, planned, state, op } = await evmTwoPages(true, true);
+  assert.equal(binds.filter((b) => b.page === "sheet").length, 1, `the part got its note and reached its bind: ${JSON.stringify(op)}`);
+  assert.equal(planned?.["op-w"], undefined, "the keep-out cleared at the run's end");
+  assert.equal(state, "UNSPENT");
+  assert.match(op?.cause ?? "", /^Error\b/, "the part's stop at its bind on the op's record");
 });

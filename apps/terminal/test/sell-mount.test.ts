@@ -93,8 +93,9 @@ test("the switch's Sell is live: on with a held position, it draws SellBox from 
   assert.match(box, /const sell = useSell\(chain, heldNow\?\.token \?\? token, slippageBps, heldNow\?\.units \?\? null\);/);
   // while the sell's lock holds (useSell), the box keeps the row it was tapped on, display only; no position, no box
   assert.doesNotMatch(box, /markEnd|endMark/, "the lock still keys on the state object's identity (re-check P2)");
-  // a 100% sale's end stays where it was tapped, its holding drawn as 0 (card app-holding-follows-a-fill)
-  assert.match(box, /const held = heldNow \?\? \(soldOut \? \{ \.\.\.lastHeld\.current!, units: "0", value: 0n \} : busy\(sell\.phase\) \|\| sell\.locked \? lastHeld\.current : null\);/);
+  // a 100% sale's end stays where it was tapped, its holding drawn as 0 (card app-holding-follows-a-fill), with no share
+  // and no Initials left (soldOutRow, portfolio-exact.test.ts)
+  assert.match(box, /const held = heldNow \?\? \(soldOut \? soldOutRow\(lastHeld\.current!\) : busy\(sell\.phase\) \|\| sell\.locked \? lastHeld\.current : null\);/);
   // the sell side reads the row's decimals, the signing page's, never the token read's (re-check 2 P2-2, sell-lock.test.ts)
   assert.match(src("screens/token/TokenPage.tsx"), /<TradeView t=\{t\} symbol=\{row\.symbol\} toast=\{toast\} footer=/);
   // the side never moves while a buy or a sell runs
@@ -105,7 +106,8 @@ test("the switch's Sell is live: on with a held position, it draws SellBox from 
 
 test("the sell asks pool.sell on a pool chain, from useSell only, and draws States.tsx's states", () => {
   const sell = src("screens/positions/source.tsx");
-  assert.match(sell, /const ask = poolSellAsk\(src\.snapshot\.state\?\.pools, chain, token, \{ share_bps: b \}, slippageBps\);/);
+  // tradeSellAsk: poolSellAsk on a pool chain, NEAR's whole-holding pool.sell on NEAR (card app-near-trading)
+  assert.match(sell, /const ask = tradeSellAsk\(src\.snapshot\.state\?\.pools, chain, token, \{ share_bps: b \}, slippageBps\);/);
   assert.match(sell, /if \(!ready \|\| amount === null \|\| busy\(ref\.current\)\) return;/, "a double tap can send two sells");
   const sb = src("screens/positions/SellBox.tsx");
   assert.match(sb, /import \{ EndLine, hasRunLabel, RunLabel, stateId \} from "\.\.\/trade\/States\.tsx";/);

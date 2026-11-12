@@ -8,11 +8,15 @@
 //   - the To field's cleaning of what a paste carries, its three patterns as written (CLEAN): whitespace and invisible
 //     characters off the two ends, the invisible joiners out anywhere, a direction control refused anywhere; and not the
 //     earlier whole-field pattern (GLUE), which took whitespace out inside too and so glued a row's pieces into one key.
+// And on APP_HOST (https://ct-app.unrealized.trade): the scripts its page names carry the Withdraw pick
+// (apps/terminal/src/screens/withdraw/WithdrawPick.tsx, data-sheet withdraw-pick), through which every Withdraw opens
+// the form of the place that holds the money (the owner's run, release 120: Portfolio's Withdraw opened the NEAR vault's
+// form for money in the Solana pool). Which form opens for which state is held by apps/terminal/test/withdraw-target.test.ts.
 // What the screen does with them (the value is the largest the amount check accepts, a tap fills it, a paste's address
 // passes, the press hands over only what was drawn) is held by packages/signpage/test/pool-withdraw-sendable.test.ts and
 // pool-withdraw-paste.test.ts, and drawn in Chrome under the page's policy by test/pool-withdraw-screens/run.mjs.
 // The recorded answers are facts() over packages/signpage/scripts/build-app.mjs builds (mainnet, as SIGN_HOST serves).
-// After: sign
+// After: app sign
 //   node scripts/live-checks/withdraw-form-shows-what-you-can-send.mjs [--record <file>] [--answer <file>]
 // PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";
@@ -22,6 +26,9 @@ import { fileURLToPath } from "node:url";
 
 const KEY = "withdraw-form-shows-what-you-can-send";
 export const SIGN = "https://confidential.unrealized.trade";
+export const APP = "https://ct-app.unrealized.trade";
+/** The Withdraw pick's mark in the app's scripts. */
+export const PICK = "withdraw-pick";
 const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}`;
 const sha256 = (b) => createHash("sha256").update(b).digest("hex");
 
@@ -55,7 +62,10 @@ export function facts(index, js) {
   };
 }
 
-/** The verdict on an answer { index, sha384, marks, sendable, clean, glue }. */
+/** Whether any of APP_HOST's page scripts carries the Withdraw pick. */
+export const pickOf = (scripts) => scripts.some((js) => js.includes(PICK));
+
+/** The verdict on an answer { index, sha384, marks, sendable, clean, glue, pick }. */
 export function judge(a) {
   const lines = [];
   const bad = (m) => lines.push(`BAD ${m}`);
@@ -68,16 +78,22 @@ export function judge(a) {
   const lacks = Object.keys(CLEAN).filter((k) => !(Array.isArray(a?.clean) && a.clean.includes(k)));
   if (lacks.length) bad(`the bundle's To lacks its paste cleaning (${lacks.join(", ")}): a paste's hidden characters are not handled as the screen's rule says`);
   if (a?.glue !== false) bad("the bundle's To takes whitespace out inside the field: a row's pieces can be glued into another key");
+  if (a?.pick !== true) bad("the app's scripts carry no Withdraw pick: a Withdraw can open a form other than the one of the place that holds the money");
   return { ok: lines.length === 0, lines };
 }
 
 export async function read(fetchFn = fetch) {
-  const get = async (path) => {
-    const r = await fetchFn(`${SIGN}${path}`, { redirect: "error" });
-    if (r.status !== 200) throw new Error(`${path}: HTTP ${r.status}`);
+  const get = async (origin, path) => {
+    const r = await fetchFn(`${origin}${path}`, { redirect: "error" });
+    if (r.status !== 200) throw new Error(`${origin}${path}: HTTP ${r.status}`);
     return r.text();
   };
-  return facts(await get("/"), await get("/app.js"));
+  const page = await get(APP, "/");
+  const srcs = [...page.matchAll(/<script\b[^>]*\bsrc="(\/[^"]+)"/gi)].map((m) => m[1]);
+  if (srcs.length === 0) throw new Error("APP_HOST's page names no script");
+  const scripts = [];
+  for (const src of srcs) scripts.push(await get(APP, src));
+  return { ...facts(await get(SIGN, "/"), await get(SIGN, "/app.js")), pick: pickOf(scripts) };
 }
 
 if (realpathSync(process.argv[1] ?? "") === realpathSync(fileURLToPath(import.meta.url))) {

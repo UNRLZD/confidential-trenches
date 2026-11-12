@@ -82,6 +82,12 @@ export const MUTANT_SECONDS = {
   "packages/kit: MUTANT_PART=2/2 node --test test/mutants/pool-usd-mutants.test.mjs": 69,
   "packages/kit: node --test test/mutants/pool-deposit-mutants.test.mjs": 11,
   "packages/kit: node --test test/mutants/vault-settle-mutants.test.mjs": 14,
+  // card near-private-trading: 13 mutants and the named tests once, 51 s on the test box as a whole job, its transfer
+  // in it (Linux, 11 Nov 18:36Z), at about 1.5 times that on a runner
+  "packages/kit: node --test test/mutants/near-rhea-mutants.test.mjs": 77,
+  // the NEAR swap calls' checks: 23 mutants and the named tests once, 111 s on the test box as a whole job (Linux, 11 Nov
+  // 18:47Z, its slot shared at load 10), at about 1.5 times that on a runner
+  "packages/kit: node --test test/mutants/near-swap-mutants.test.mjs": 167,
   // the quote sweep: 733 mutants and 340 named tests, 488.3 s in all on the queue's runner (job 129687360144): 150.3 s
   // for the named tests on the code as it is and 337.5 s for the mutants. A part runs the named tests of its mutants (233
   // of 340) and half the mutants: 150.3 * 233 / 340 + 337.5 * 367 / 733 = 272 s

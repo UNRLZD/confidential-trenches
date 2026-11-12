@@ -1,9 +1,12 @@
 import type { PoolChain, SignpageClientSnapshot, SignpageResults } from "@blindfill/kit";
 import type { ReactNode } from "react";
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import type { SignpageClient } from "@blindfill/kit";
 import { useReturnHop } from "../../shell/ReturnHop.tsx";
 import type { ReturnHopView } from "../../shell/ReturnHop.tsx";
 import { useSignpage } from "../../shell/signpage-frame.tsx";
+import { DEPOSIT_ASSETS } from "./assets.ts";
+import type { AssetsAsk } from "./assets.ts";
 import { assetOf, poolStatusFor, statusOf } from "./model.ts";
 import type { Asset, DepositStatus, DryQuote, PoolDepositStatus, QuoteRefusal } from "./model.ts";
 
@@ -62,23 +65,33 @@ const refusal = (code: string): QuoteRefusal => (KNOWN.has(code) ? (code as Quot
 /** The dry quote waits for the typing to pause this long, so one amount typed is one request, not one per key. */
 export const DRY_PAUSE_MS = 300;
 
+/** deposit.assets on `client`, as the held list's ask (assets.ts). */
+const assetsAsk =
+  (client: SignpageClient): AssetsAsk =>
+  () =>
+    client.request("deposit.assets", {}).outcome.then((o) => (o.ok ? { ok: true, list: o.result.assets.map(assetOf) } : { ok: false, code: refusal(o.error.code) }));
+
+/** The shell's warm read (DepositMount): the asset list asked once the signing page is READY, before any sheet opens,
+ *  and held (assets.ts DEPOSIT_ASSETS), so the first open draws it at once. */
+export function useDepositAssetsWarm(): void {
+  const { client, moneyOn } = useSignpage();
+  useEffect(() => {
+    if (client && moneyOn && DEPOSIT_ASSETS.view().list === null) DEPOSIT_ASSETS.ask(assetsAsk(client));
+  }, [client, moneyOn]);
+}
+
 export function useDepositSource(): DepositSource {
   const fixture = useContext(Fixture);
   const { client, snapshot, moneyOn } = useSignpage();
   const { hop, locked } = useReturnHop();
-  const [assets, setAssets] = useState<{ list: Asset[] | null; refused: QuoteRefusal | null }>({ list: null, refused: null });
+  // the held list (assets.ts): drawn at once when an earlier read answered, and asked again as the sheet opens so its
+  // minimum follows the live fees; Retry after a refusal asks again. The fixture brings its own.
+  const assets = useSyncExternalStore(DEPOSIT_ASSETS.subscribe, DEPOSIT_ASSETS.view);
   const [asks, setAsks] = useState(0);
-  // the asset list, asked once the signing page is READY and kept while the sheet is open (a READY again does not draw the
-  // skeleton over a list it has); asked again on Retry. The fixture brings its own. An older ask's answer never lands.
-  const loaded = assets.list !== null;
   useEffect(() => {
-    if (fixture || !client || !moneyOn || loaded) return;
-    let live = true;
-    void client.request("deposit.assets", {}).outcome.then((o) => {
-      if (live) setAssets(o.ok ? { list: o.result.assets.map(assetOf), refused: null } : { list: null, refused: refusal(o.error.code) });
-    });
-    return () => void (live = false);
-  }, [fixture, client, moneyOn, loaded, asks]);
+    if (fixture || !client || !moneyOn) return;
+    DEPOSIT_ASSETS.ask(assetsAsk(client));
+  }, [fixture, client, moneyOn, asks]);
   const typed = useRef(0);
   const dryQuote = useCallback<DepositSource["dryQuote"]>(
     async (asset, amount) => {
@@ -124,7 +137,7 @@ export function useDepositSource(): DepositSource {
     assets: assets.list,
     assetsRefused: assets.refused,
     retryAssets: () => {
-      setAssets({ list: null, refused: null });
+      DEPOSIT_ASSETS.retry();
       setAsks((n) => n + 1);
     },
     dryQuote,
