@@ -34,7 +34,7 @@ export function PositionPanel({ row, s, now, onShare }: { row: Row; s: Sell; now
   const running = busy(s.phase);
   const noRoute = row.mark === "noRoute";
   const total = row.pnl === null ? null : row.pnl + row.realized;
-  const totalBps = total === null || row.cost === 0n ? null : Number((total * 10_000n) / row.cost);
+  const totalBps = total === null || row.cost === null || row.cost === 0n ? null : Number((total * 10_000n) / row.cost);
   const up = row.pnl === null ? undefined : String(row.pnl >= 0n);
 
   return (
@@ -59,7 +59,7 @@ export function PositionPanel({ row, s, now, onShare }: { row: Row; s: Sell; now
         <span className="tk-posHeroUsd">{row.value === null ? "—" : usd(row.value)}</span>
       </div>
       <div className="tk-posRows">
-        <div className="tk-posRow" data-testid="pos-bought"><span className="tk-posLabel"><W id="bought" /></span><span className="tk-posVal">{usd(row.bought)}</span><span className="tk-posUsd" /></div>
+        <div className="tk-posRow" data-testid="pos-bought"><span className="tk-posLabel"><W id="bought" /></span><span className="tk-posVal">{row.bought === null ? "—" : usd(row.bought)}</span><span className="tk-posUsd" /></div>
         <div className="tk-posRow" data-testid="pos-sold"><span className="tk-posLabel"><W id="sold" /></span><span className="tk-posVal">{usd(row.sold)}</span><span className="tk-posUsd" /></div>
         <div className="tk-posRow" data-testid="pos-holding"><span className="tk-posLabel"><W id="holding" /></span><span className="tk-posVal" data-unread={row.value === null || undefined}>{row.value === null ? "—" : usd(row.value)}</span><span className="tk-posUsd">{units(row.units)} {row.symbol}</span></div>
         <div className="tk-posRow" data-testid="pos-realized"><span className="tk-posLabel"><W id="realized" /></span><span className="tk-posVal" data-tone={tone(row.realized)}>{usd(row.realized, true)}</span><span className="tk-posUsd" /></div>
@@ -67,12 +67,12 @@ export function PositionPanel({ row, s, now, onShare }: { row: Row; s: Sell; now
         <div className="tk-posRow" data-testid="pos-total"><span className="tk-posLabel"><W id="totalPnl" /></span><span className="tk-posVal" data-tone={tone(total)}>{total === null ? "—" : usd(total, true)}</span><span className="tk-posUsd">{pct(totalBps)}</span></div>
       </div>
       <div className="tk-posMeta">
-        <div data-testid="pos-entry"><span className="tk-posLabel"><W id="avgEntry" /></span><span className="tk-posMetaVal">{price(row.cost, row.units)}</span></div>
+        <div data-testid="pos-entry"><span className="tk-posLabel"><W id="avgEntry" /></span><span className="tk-posMetaVal">{row.cost === null ? "—" : price(row.cost, row.units)}</span></div>
         <div data-testid="pos-held"><span className="tk-posLabel"><W id="heldFor" /></span><span className="tk-posMetaVal">{row.openedAt === null ? "—" : held(now - row.openedAt)}</span></div>
       </div>
       <div className="tk-quick" data-testid="position-quick">
         {QUICK.map((q) => {
-          const b = q === "initials" ? initialsBps(row.cost, row.value) : q;
+          const b = q === "initials" ? (row.cost === null ? null : initialsBps(row.cost, row.value)) : q;
           const amount = b === null ? null : sellAmount(row.units, b, decimals);
           const live = running && b !== null && s.bps === b;
           const off = !s.ready || running || noRoute || amount === null;
