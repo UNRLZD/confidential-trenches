@@ -103,3 +103,25 @@ for (const [name, from, to, fails] of PLANTED) {
     assert.deepEqual(judge(f).lines, bad(...fails), name);
   });
 }
+
+// card evm-deposit-on-mainnet: the new shapes this check reads, each with its bad twin
+const pinned = (js) => facts(INDEX.replace(/integrity="sha384-[^"]+"/, `integrity="${facts("", js).sha384}"`), js);
+test("planted in the excerpt: depositFrom's Solana branch with the withdraw rule beside the pin guard: PASS; the rule in the pin guard's place: FAIL on fromUX", () => {
+  const site = /n===void 0\?\{error:`not_allowed`\}:C\(i,r,t\)/;
+  assert.equal((JS.match(new RegExp(site.source, "g")) ?? []).length, 1, "the plant's site is in the build once");
+  assert.deepEqual(judge(pinned(JS.replace(site, "n===void 0||!X(`solana`)?{error:`not_allowed`}:C(i,r,t)"))).lines, [], "the rule beside the pin guard");
+  assert.deepEqual(judge(pinned(JS.replace(site, "!X(`solana`)?{error:`not_allowed`}:C(i,r,t)"))).lines, bad("fromUX"), "the pin guard dropped for the rule");
+});
+
+test("planted in the excerpt: main.ts's reader as a call (wallet:e=>Z(e), the helper's route): PASS and wired; with it, a route that quotes a non-testnet page with no reader: FAIL on wired", () => {
+  const call = (js) => js.replace(/wallet:([\w$]+)=>void 0,notes:/, "wallet:$1=>Z($1),notes:");
+  const js = call(JS);
+  assert.notEqual(js, JS, "the reader's site is in the build");
+  assert.deepEqual(judge(pinned(js)).lines, []);
+  assert.equal(pinned(js).reader, "wired");
+  const guard = /network!==`testnet`&&r===void 0\?null:/;
+  assert.equal((js.match(new RegExp(guard.source, "g")) ?? []).length, 1, "the guard's site is in the build once");
+  assert.deepEqual(judge(pinned(js.replace(guard, ""))).lines, bad("wired"), "no reader still quotes");
+  // what the reader reads (the helper's /v1/rpc route, nothing else) is evm-deposit-on-mainnet's: its planted cases
+  // "a reader that is not our helper" and "no wallet reader" read false there
+});
