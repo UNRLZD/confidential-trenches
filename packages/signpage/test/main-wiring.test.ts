@@ -39,6 +39,9 @@ const TABLE = 'export const PAGE_POOLS: readonly BalancePool[] = pagePoolsOf(POO
 // nothing); the mainnet pin's own wiring, the landing's settle pass beside deposit.quote among it, is
 // test/main-mainnet-pools.test.ts's (card sol-pools-mainnet-pin)
 const SOL_PINS = "export const SOL_POOLS: Readonly<Partial<Record<\"devnet\" | \"mainnet\", SolanaPoolPin>>> = Object.freeze(";
+// and the restore's NEAR vault entry (card signpage-restores-near-vault-notes) left out too, so its restore reads nothing:
+// the vault's walk is test/near-vault-restore.test.ts's
+const VAULT_PIN = "  const vault = vaultScope(PAGE_NETWORK);";
 const EVM_PINS = "export const EVM_POOLS: Readonly<Partial<Record<EvmNetwork, EvmPoolPin>>> = Object.freeze(";
 // each call of the note store's openNoteStore and readNotes, with the stack it was called from
 const calls: { name: string; stack: string }[] = ((globalThis as { __ctNoteCalls?: unknown }).__ctNoteCalls = []) as never;
@@ -56,6 +59,11 @@ registerHooks({
       const src = String(r.source);
       if (!src.includes(TABLE)) throw new Error("pools.ts: PAGE_POOLS's line moved; update this test's hook");
       return { ...r, source: src.replace(TABLE, `export const PAGE_POOLS = Object.freeze([{ id: "near:t", chain: "near", scope: ${SCOPE}n, asset: "USDC" }]);`) };
+    }
+    if (url.endsWith("/signpage/src/pool-restore.ts")) {
+      const src = String(r.source);
+      if (!src.includes(VAULT_PIN)) throw new Error("pool-restore.ts: pagePools' vault line moved; update this test's hook");
+      return { ...r, source: src.replace(VAULT_PIN, "  const vault = null as bigint | null;") };
     }
     if (url.endsWith("/wallet/src/pool/solana.ts")) {
       const src = String(r.source);
