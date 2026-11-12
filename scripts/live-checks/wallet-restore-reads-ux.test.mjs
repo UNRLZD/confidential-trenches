@@ -122,6 +122,10 @@ test("the bundle facts hold this build's lines, never a carry, a read or a held 
   assert.equal(mut(/(\[`https:\/\/solana-rpc\.publicnode\.com`,)`https:\/\/solana\.api\.pocket\.network`\]\);function/, "$1`https://ct-api.unrealized.trade`]);function").ux_pair, false, "our helper as the second");
   assert.equal(mut(/(\[`https:\/\/solana-rpc\.publicnode\.com`,)`https:\/\/solana\.api\.pocket\.network`\]\);function/, "$1`https://api.mainnet-beta.solana.com`]);function").ux_pair, false, "the operator that refuses a page as the second");
   assert.equal(mut(/return\[([\w$]+)\(([\w$]+)\(([\w$]+)\[0\]\)\),\1\(\2\(\3\[1\]\)\)\]\}/, "return[$1($2($3[0])),$2($3[1])]}").ux_pair, false, "the second unpaced");
+  // review P2-3: the Base and Robinhood pair each on its queue by the same pacer, never handed bare
+  const evmPair = /rpcs:\[([\w$]+)\(([\w$]+)\.rpcs\[0\]\),\1\(\2\.rpcs\[1\]\)\],pin:\2\.pin,deposit:/;
+  assert.equal(mut(evmPair, "rpcs:$2.rpcs,pin:$2.pin,deposit:").ux_pair, false, "the EVM pair handed unpaced");
+  assert.equal(mut(evmPair, "rpcs:[$1($2.rpcs[0]),$2.rpcs[1]],pin:$2.pin,deposit:").ux_pair, false, "the EVM pair's second unpaced");
   assert.equal(mut(/\[([\w$]+),\[([\w$]+),([\w$]+)\]\]=await Promise\.all\(\[([\w$]+)\(([\w$]+),([\w$]+)\),([\w$]+)\.balances/, "[$1,[$2,$3]]=await Promise.all([$4($5,$6),$7.balancez").ux_read, false, "the U_X not read");
   assert.equal(mut(/if\(!([\w$]+)\)return\{why:`holds \$\{String\(([\w$]+)\)\}, with no deposit note/, "if(!1)return{why:`holds ${String($2)}, with no deposit note").ux_carry, false, "a U_X with no note here carried");
   assert.equal(mut(/,([\w$]+)\.has\(([\w$]+)\.i\),/, ",!0,").ux_carry, false, "the store's word on the index not asked");
