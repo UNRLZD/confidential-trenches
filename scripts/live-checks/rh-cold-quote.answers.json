@@ -94,6 +94,91 @@
    "pools": 101
   }
  },
+ "good_2026_11_12": {
+  "recorded": "2026-11-12T09:18:05.868Z",
+  "cold": {
+   "ms": 10533,
+   "code": "ok",
+   "hosts": [
+    {
+     "at": "rpc.mainnet.chain.robinhood.com eth_blockNumber",
+     "n": 1,
+     "p50": 382,
+     "max": 382,
+     "bad": 0,
+     "why": []
+    },
+    {
+     "at": "rpc.mainnet.chain.robinhood.com eth_getLogs+eth_getBlockByNumber",
+     "n": 19,
+     "p50": 309,
+     "max": 534,
+     "bad": 7,
+     "why": [
+      "HTTP 429: Too Many Requests"
+     ]
+    },
+    {
+     "at": "robinhood-rpc.publicnode.com eth_getBlockByNumber",
+     "n": 14,
+     "p50": 95,
+     "max": 268,
+     "bad": 0,
+     "why": []
+    },
+    {
+     "at": "robinhood.drpc.org eth_getBlockByNumber",
+     "n": 7,
+     "p50": 82,
+     "max": 268,
+     "bad": 0,
+     "why": []
+    },
+    {
+     "at": "robinhood-rpc.publicnode.com eth_call",
+     "n": 6,
+     "p50": 191,
+     "max": 255,
+     "bad": 0,
+     "why": []
+    },
+    {
+     "at": "robinhood.drpc.org eth_call",
+     "n": 6,
+     "p50": 105,
+     "max": 257,
+     "bad": 0,
+     "why": []
+    }
+   ]
+  },
+  "warm": [
+   {
+    "ms": 1403,
+    "code": "ok"
+   },
+   {
+    "ms": 1313,
+    "code": "ok"
+   },
+   {
+    "ms": 1450,
+    "code": "ok"
+   },
+   {
+    "ms": 1318,
+    "code": "ok"
+   },
+   {
+    "ms": 1280,
+    "code": "ok"
+   }
+  ],
+  "shape": {
+   "head": 112416529,
+   "pools": 37
+  }
+ },
  "bad": {
   "recorded": "2026-11-06T02:17:38.335Z",
   "cold": {
