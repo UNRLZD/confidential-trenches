@@ -219,12 +219,15 @@ test("card app-faults-seen-on-122: while an urgent list waits, pages leave the l
   assert.equal(b.take("pages", false, false, "page", { client: "c9" }), false);
 });
 
-test("card app-faults-seen-on-122: an urgent list's floor call is the lists' own share, taken as the window's last call although one caller holds more than its PAGE_PER_CLIENT", () => {
+test("card app-faults-seen-on-122: while an urgent list waits, one caller holds its PAGE_PER_CLIENT and no more, so the floor, a second caller's page and the heavy caller's calls all fit the window", () => {
   const t = 1_800_000_000_000;
   const b = geckoBudget(() => t);
-  b.seed([t - 70_000], "seed"); // another process's call
-  for (let i = 0; i < PAGE_PER_CLIENT + 1; i++) assert.equal(b.take("pages", false, false, "page", { client: "one" }), true);
-  assert.equal(b.take("lists", false, false, "", { source: "base", since: t - 70_000 }), false, "a list that is not urgent leaves the last call to another caller's page");
-  assert.equal(b.take("lists", true, false, "", { source: "base", since: t - 200_000 }), true, "an urgent one takes it: the floor is what holds the lists under STALE_MS");
-  assert.equal(b.take("lists", true, false, "", { source: "base", since: t - 190_000 }), false, "the window is full");
+  b.hold();
+  assert.equal(b.take("lists", true, false, "", { source: "base", since: t - 200_000 }), false); // an urgent list left waiting
+  b.release();
+  const one = () => b.take("pages", false, false, "page", { client: "one" });
+  for (let i = 0; i < PAGE_PER_CLIENT; i++) assert.equal(one(), true);
+  assert.equal(one(), false, "the caller holds its share and no more: no call past it that would leave the floor one call");
+  assert.equal(b.take("pages", false, false, "page", { client: "two" }), true, "another caller's first page finds its call");
+  for (let i = 0; i < LIST_FLOOR; i++) assert.equal(b.take("lists", true, false, "", { source: "base", since: t - 200_000 + i }), true, "and both of the floor's calls go");
 });

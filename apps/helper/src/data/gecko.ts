@@ -247,11 +247,11 @@ export function geckoBudget(now: () => number, perMin = GT_LIMIT_PER_MIN): Gecko
     // a caller past its share leaves the window's last free call for someone else, and while it holds more than its
     // share no background lane takes that call either: a second caller's first page always finds it. Alone, a caller
     // takes perMin - 1 at once; with another caller waiting, none past its share
+    // (while a list waits for the floor, the call kept for the other caller is one more than the floor's: the caller past its
+    // share holds PAGE_PER_CLIENT and no more, so the floor's calls, the other caller's and the heavy caller's all fit)
     const past = byClient(by.client) >= PAGE_PER_CLIENT;
-    if (lane === "pages" && past && (calls.length >= perMin - 1 || waiting.some((w) => w.client !== by.client))) return false;
-    // an urgent list's read within the floor is the lists' own share of the window, taken even as its last call
-    const floor = lane === "lists" && urgent && calls.filter((c) => c.lane === "lists").length < LIST_FLOOR;
-    if (lane !== "pages" && !floor && calls.length >= perMin - 1 && heavy()) return false;
+    if (lane === "pages" && past && (calls.length >= perMin - 1 - reserved(lane, t) || waiting.some((w) => w.client !== by.client))) return false;
+    if (lane !== "pages" && calls.length >= perMin - 1 && heavy()) return false;
     if (waiting.length > 0 && (lane !== "pages" || !turnOf(by.ticket, by.client))) return false;
     if (lane === "refresh" && calls.length >= perMin - COLD_RESERVE) return false;
     if (lane === "stale" && calls.length >= perMin - STALE_RESERVE) return false;
@@ -263,6 +263,7 @@ export function geckoBudget(now: () => number, perMin = GT_LIMIT_PER_MIN): Gecko
     if (lane === "lists" && !urgent && backlog()) return false;
     if (lane === "lists" && by.source !== undefined && behind(by.source, by.since ?? t, t)) return false;
     if (lane === "lists") {
+      const floor = urgent && calls.filter((c) => c.lane === "lists").length < LIST_FLOOR;
       if (!floor && (calls.length >= perMin - PAGE_RESERVE - (first ? 0 : REFRESH_SLOT) || calls.some((c) => c.lane !== "lists" && c.lane !== "seed" && c.lane !== "ahead" && c.lane !== SEED_LANE && t - c.at < YIELD_MS))) return false;
     }
     return true;
