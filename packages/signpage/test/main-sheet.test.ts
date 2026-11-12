@@ -11,6 +11,8 @@
 //   frame in, it fails);
 // - onDismiss: the user's Esc on a screen Cancel is drawn on goes back to the app;
 // - dismissible(cancellable): Esc on the backup a new account lands on (no Cancel drawn) does nothing;
+// - cancel()'s redraw: Esc, Cancel, the x or the scrim on the 12 words' field or Invalid code, with no account stored,
+//   leaves no field in the hidden screen (the typed words with it);
 // - the clipboard: Copy on the backup puts the 12 words there, and Saved, in its own tap, writes it empty (a write that
 //   fails is let go, and the words are saved).
 // The seal and open(typed) steps fail together when both seals go. openPoolWithdraw's sheetShown has no step: no shown
@@ -178,6 +180,14 @@ Object.defineProperty(globalThis.navigator, "clipboard", {
     writeText: (t: string) => (clip.push(t), t !== "" ? new Promise<void>((ok) => setTimeout(ok, 50)) : clipFails ? Promise.reject(new Error("NotAllowedError")) : Promise.resolve()),
   },
 });
+// the user's own tap on the sheet's x or its scrim
+const tapSheet = (part: "close" | "scrim") => {
+  const el = find(doc.body, (e) => e.dataset.sheet === part)!;
+  tapAt += 2 * PROTECT_MS;
+  for (const fn of el.ls.click ?? []) fn({ type: "click", isTrusted: true, timeStamp: tapAt });
+};
+// the 12 words' field, anywhere in the page
+const wordsBox = () => find(doc.body, (e) => e.dataset.input === "words");
 const esc = () => {
   for (const fn of keydowns) fn({ type: "keydown", key: "Escape", isTrusted: true, repeat: false, timeStamp: performance.now() + PROTECT_MS + 1 });
 };
@@ -246,9 +256,10 @@ test("main.ts's sheet: a kind under a shown sheet refused, the frame out under a
   await until("the frame out under the words field drawn on a shown sheet", () => !frameIn(), 1000);
   assert.deepEqual(fieldDrawn, [{ state: "words", frame: false }], "the frame was out when the field entered the page");
 
-  // onDismiss: Esc on a screen with Cancel goes back to the app, a new frame under it
+  // onDismiss: Esc on a screen with Cancel goes back to the app, a new frame under it, and the field leaves the screen
   esc();
   await until("Esc back to the app", () => !shown());
+  assert.equal(wordsBox(), undefined, "Esc on the words field: no field left in the hidden screen");
   await until("a new frame", frameIn);
 
   // openLayer's open(typed): a sheet opened straight on the words field takes the frame out
@@ -257,9 +268,37 @@ test("main.ts's sheet: a kind under a shown sheet refused, the frame out under a
   assert.equal(frameIn(), false, "the frame out in the open's own task: no wait for the answer");
   await until("the words field drawn", () => fieldDrawn.length === 2);
   assert.deepEqual(fieldDrawn[1], { state: "words", frame: false }, "on an open straight onto the words, the field entered the page with the frame out");
-  esc();
-  await until("Esc back to the app", () => !shown());
+  press("cancel");
+  await until("Cancel back to the app", () => !shown());
+  assert.equal(wordsBox(), undefined, "Cancel on the words field: no field left in the hidden screen");
   await until("a new frame", frameIn);
+
+  // cancel()'s redraw on Invalid code and on the words field, by the scrim, the x and Esc: no field left after any
+  const wordsOpen = async (): Promise<void> => {
+    assert.equal((await answer(send({ type: "signin.open", way: "words", return_key: "portfolio" })))?.ok, true);
+    await until("the words field", () => shown() && root().dataset.signin === "words" && !!wordsBox());
+  };
+  const invalid = async (): Promise<void> => {
+    await wordsOpen();
+    (wordsBox() as unknown as { value: string }).value = "these are not the twelve words";
+    press("next");
+    await until("Invalid code", () => root().dataset.signin === "invalid-code" && !!wordsBox());
+    (wordsBox() as unknown as { value: string }).value = "typed again";
+  };
+  for (const [screen, leave] of [
+    [invalid, () => tapSheet("scrim")],
+    [invalid, () => tapSheet("close")],
+    [invalid, esc],
+    [wordsOpen, () => tapSheet("scrim")],
+    [wordsOpen, () => tapSheet("close")],
+  ] as const) {
+    await screen();
+    const on = root().dataset.signin;
+    leave();
+    await until(`back to the app from ${on}`, () => !shown());
+    assert.equal(wordsBox(), undefined, `no field left in the hidden screen after leaving ${on}`);
+    await until("a new frame", frameIn);
+  }
 
   // dismissible(cancellable): the backup a new account lands on draws no Cancel, and Esc there does nothing
   assert.equal((await answer(send({ type: "signin.open", way: "passkey", return_key: "portfolio" })))?.ok, true);

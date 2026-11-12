@@ -1001,7 +1001,9 @@ async function cancel(): Promise<void> {
   uncopy();
   const s = shell ? await readSeed().catch(() => undefined) : undefined;
   if (s) return show("signed-in", shown(s));
-  if (root.dataset.signin === "error") show(typeof PublicKeyCredential === "undefined" ? "unsupported" : "signed-out");
+  // the error screen, and a sealed one (the 12 words' field, Invalid code), is not left in the hidden screen: the words
+  // typed there go with it
+  if (root.dataset.signin === "error" || SEALED.has(root.dataset.signin ?? "")) show(typeof PublicKeyCredential === "undefined" ? "unsupported" : "signed-out");
   closeLayer();
 }
 

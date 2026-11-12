@@ -23,8 +23,8 @@
 //   A screen with a field typed into (the 12 words, the withdraw forms) takes the frame out of the document first, in the
 //   open's own task: a frame left in the page takes the keyboard's focus back and reads what is typed or pasted, even
 //   with no field drawn yet (Firefox, measured by scripts/focus-steal.e2e.mjs), so it is never in the page under such a
-//   screen (open(typed), seal()). The answer to the kind that opened it is then never delivered: the app document it
-//   was posted to is gone, and the app loads new at close and reads the state.
+//   screen (open(typed), seal()). The answer to the kind that opened it may reach the app before it leaves; nothing waits
+//   on it: the app loads new at close and reads the state.
 //   At close a kept frame is live again as it was; a frame taken out comes back new, at the top window's address.
 // - nav: the app says where it is, and the shell puts that path and query in the top window's address with
 //   history.replaceState (never a navigation), so the address bar, a reload, a new frame and a shared link follow the

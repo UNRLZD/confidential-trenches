@@ -500,7 +500,7 @@ test("a kind the host answers (signin.open): its answer goes to the frame before
   assert.deepEqual(await answerTo(d, m.id), { v: 1, id: m.id, ok: true, result: { pending: true } });
   await until(() => order.length > 0, "then() opens the layer");
   assert.deepEqual(order, [`open after ${d.posted.length} posts`]);
-  assert.equal(d.frames().length, 0, "the frame out in the open's own task: the answer posted to it before is never delivered");
+  assert.equal(d.frames().length, 0, "the frame out in the open's own task: the answer posted before may reach it; nothing waits on it");
   // backup.open has no handler: refused, and so is a signin.open the handler refuses (a new frame first)
   sh.close();
   const w2 = d.frames()[0]!.contentWindow;
