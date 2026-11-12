@@ -482,6 +482,8 @@ type RunPlant = {
   bindFee?: bigint; recipient?: string;
   /** the note a change note (not a deposit's own), and landed this epoch: the epoch's trees lack it */
   change?: boolean; thisEpoch?: boolean;
+  /** the epoch trees hold the note only from this time on (default: past NOW when `thisEpoch`) */
+  inFromMs?: bigint;
 };
 async function runWorld(plant: RunPlant = {}) {
   const ws = await openWalletStore({ indexedDB: new IDBFactory() });
@@ -503,15 +505,15 @@ async function runWorld(plant: RunPlant = {}) {
   const w = freshWallet(SEED, "evm", label, jOf(ref)).address;
   const nullifier = noteSecrets(SEED, ref).nullifierHash;
   const clock = { ms: NOW };
-  const chain = { logs: [] as unknown[], balance: 0n, sent: [] as string[], sentAt: null as bigint | null, binds: [] as bigint[], sends: 0, keeps: [] as EvmPendingOnward[], owes: [] as EvmPendingOnward[], stages: [] as string[], trees: [] as { beforeMs: bigint; newest: boolean }[] };
+  const chain = { logs: [] as unknown[], balance: 0n, sent: [] as string[], sentAt: null as bigint | null, binds: [] as bigint[], sends: 0, keeps: [] as EvmPendingOnward[], owes: [] as EvmPendingOnward[], stages: [] as string[], trees: [] as { beforeMs: bigint; newest: boolean; signal: boolean }[] };
   const tree = (xs: bigint[]) => new VaultTree(xs);
   const pool = {
     id: `evm:${POOL}`, chain: "evm", scope: RUN_SCOPE, ladder: [], epochMs: 60_000n, lifeMs: 210_000n, sendMarginMs: 30_000n,
     now: async () => clock.ms,
     trees: async (beforeMs: bigint, _s?: unknown, o?: { newest?: boolean }) => {
-      chain.trees.push({ beforeMs, newest: o?.newest === true });
+      chain.trees.push({ beforeMs, newest: o?.newest === true, signal: _s instanceof AbortSignal });
       // landed this epoch: the epoch's own trees (up to NOW, an epoch's start) do not hold it
-      if (plant.thisEpoch && o?.newest !== true && beforeMs <= NOW) return { stateTree: { size: 0 }, labelTree: { size: 0 }, stateRoot: 0n, labelRoot: 0n };
+      if (plant.thisEpoch && o?.newest !== true && (plant.inFromMs !== undefined ? beforeMs < plant.inFromMs : beforeMs <= NOW)) return { stateTree: { size: 0 }, labelTree: { size: 0 }, stateRoot: 0n, labelRoot: 0n };
       return { stateTree: tree([leafOf]), labelTree: tree([label]), stateRoot: tree([leafOf]).root!, labelRoot: tree([label]).root! };
     },
     bind: async (b: { chunk: bigint; wallet: { address: string }; refundPrecommitment: bigint; deadlineMs: bigint }) => {
@@ -945,4 +947,20 @@ test("(review 3 P2-C) a note the page's queue is still proving when the part nee
   assert.equal((await runEvmPoolWithdraw(stuck.h, RUN_ASK, TO, PART, MAX)).stage, "stopped");
   assert.ok(stuck.clock.ms - t0 >= 60_000n, "waited out the free budget past the boundary");
   assert.deepEqual([stuck.chain.sends, stuck.chain.sent.length], [0, 0]);
+});
+
+test("(review 3 P2-C) a pool time read behind the leaf's own block: the epoch root at the next boundary lacks it, so the part waits on to the boundary after, in the same budget, then proves there; every tree read is bounded in time", async () => {
+  // the pool's time 50 s into the epoch, the leaf only in the roots from NOW + 120 s: 10 s and 60 s of waits, under one
+  // epoch and the boundary lag (90 s)
+  const late = await runWorld({ change: true, thisEpoch: true, inFromMs: NOW + 120_000n });
+  late.clock.ms = NOW + 50_000n;
+  assert.equal((await runEvmPoolWithdraw(late.h, RUN_ASK, TO, PART, MAX)).stage, "sent");
+  assert.deepEqual(late.chain.trees.filter((t) => !t.newest).map((t) => t.beforeMs), [NOW, NOW + 60_000n, NOW + 120_000n]);
+  assert.ok(late.chain.trees.every((t) => t.signal), "each tree read carries its time limit");
+  // past the budget (the leaf only from NOW + 180 s): stopped, nothing bound or sent
+  const never = await runWorld({ change: true, thisEpoch: true, inFromMs: NOW + 180_000n });
+  never.clock.ms = NOW + 50_000n;
+  assert.equal((await runEvmPoolWithdraw(never.h, RUN_ASK, TO, PART, MAX)).stage, "stopped");
+  assert.deepEqual([never.chain.binds.length, never.chain.sends], [0, 0]);
+  assert.equal((await never.notes.get(never.noteId))?.state, "UNSPENT");
 });
