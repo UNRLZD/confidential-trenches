@@ -2,6 +2,7 @@
 // runs 43276439006 and 43289730843 had every 1Click quote answered 400 and no BAD line said why. The live checks that read
 // the helper's 1Click proxy keep it in their record and print it on their BAD line. Hostile input: only strings are read,
 // every control or line-separator character is a space, and it is cut to SAID_MAX characters.
+// Runs: once, no check: a module the 1Click live checks share to read a refusal's message
 
 /** The most of a vendor's message a check keeps, as the helper's own log line (apps/helper/src/proxy/proxy.ts
  *  VENDOR_MESSAGE_MAX). */
