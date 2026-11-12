@@ -53,6 +53,7 @@ export const CHANGED = [
   "scripts/live-checks/app-token-rail.mjs",
   "scripts/live-checks/app-token-route.mjs",
   "scripts/live-checks/base-200ms-blocks.mjs",
+  "scripts/live-checks/buy-spends-several-pieces-screens.mjs",
   "scripts/live-checks/buy-spends-several-pieces.mjs",
   "scripts/live-checks/chart-drags-and-tracks-the-pointer.mjs",
   "scripts/live-checks/delete-refund-readback.mjs",
