@@ -13,7 +13,7 @@ import { openWalletStore } from "@blindfill/wallet/store";
 import { depositIdEvm } from "../../wallet/src/derive/keys.ts";
 import { noteCommitment, noteSecrets, type NoteRef } from "../../wallet/src/notes/secrets.ts";
 import { openNoteStore, type NoteRecord, type NoteStore } from "../../wallet/src/notes/store.ts";
-import { evmPoolScopeOf, EVM_LADDER, type EvmPoolEvent, type EvmPoolPin } from "../../wallet/src/pool/evm.ts";
+import { EVM_CHAIN_IDS, evmPoolScopeOf, EVM_LADDER, type EvmNetwork, type EvmPoolEvent, type EvmPoolPin } from "../../wallet/src/pool/evm.ts";
 import { vaultLabelOf } from "../../kit/src/vault/shapes.ts";
 import { EVM_POOL_MIN_DEPOSIT } from "../../kit/src/trade/evm/pool-fee.ts";
 import { ladderSplit } from "../../wallet/src/pool/ladder.ts";
@@ -29,10 +29,17 @@ import type { PoolAsk } from "../src/rules/pool.ts";
 const ENTROPY = () => new Uint8Array(16);
 const SEED = wordsToSeed64(entropyToWords(ENTROPY()));
 const POOL = "0x00000000000000000000000000000000000f0011";
-const PIN: EvmPoolPin = Object.freeze({ network: "base-sepolia", pool: POOL, feeRecipient: "0x0000000000000000000000000000000000000fee", fromBlock: 1n });
-const SCOPE = evmPoolScopeOf(POOL, 84532n);
+// the network this file runs on: Base Sepolia, or the one test/pool-deposit-evm-mainnet.test.ts names before it imports
+// this file (Base and Robinhood mainnet, card evm-deposit-on-mainnet: every edge below on SIGN_HOST's own networks)
+const NET: EvmNetwork = (globalThis as { __ctEvmDepositNet?: EvmNetwork }).__ctEvmDepositNet ?? "base-sepolia";
+const TESTNET = NET === "base-sepolia" || NET === "robinhood-testnet";
+const CHAIN: "base" | "robinhood" = NET === "base" || NET === "base-sepolia" ? "base" : "robinhood";
+const PIN: EvmPoolPin = Object.freeze({ network: NET, pool: POOL, feeRecipient: "0x0000000000000000000000000000000000000fee", fromBlock: 1n });
+const SCOPE = evmPoolScopeOf(POOL, EVM_CHAIN_IDS[NET]);
 const RUNG = EVM_LADDER.min; // 0.001 ETH
-const ASK: PoolAsk = { kind: "pool.deposit", chain: "base", token: null, amount: RUNG, slippageBps: 0, decimals: 18 };
+const ASK: PoolAsk = { kind: "pool.deposit", chain: CHAIN, token: null, amount: RUNG, slippageBps: 0, decimals: 18 };
+/** The L1 fee bound the mock's oracle answers (Base's and Base Sepolia's GasPriceOracle); a Robinhood deposit reads none. */
+const L1 = CHAIN === "base" ? 7_000n : 0n;
 const FEE = 1_000_000n * 3_000_000n + 10n ** 13n; // well above the cap's fee bound at the mocked base fee
 const q = (v: bigint) => "0x" + v.toString(16);
 const sel = (sig: string) => "0x" + Buffer.from(keccak_256(new TextEncoder().encode(sig))).toString("hex").slice(0, 8);
@@ -170,7 +177,7 @@ function hostOf(ch: ReturnType<typeof chain>, ns: NoteStore, o: Partial<PoolDepo
   return {
     seeds,
     pin: PIN,
-    testnet: true,
+    testnet: TESTNET,
     rpcs: ch.rpcs,
     round: async () => ({ events: [...ch.c.events], finalBlock: ch.c.fin }),
     notes: async () => ns,
@@ -204,7 +211,7 @@ test("a funded U deposits its rung: INCOMING with { hash, nonce, value } before 
   const a = await runPoolDepositEvm(h, ASK);
   assert.equal(ch.c.sent.length, 1);
   const s = sentOf(ch.c.sent[0]!);
-  assert.deepEqual(a, { stage: "filled", txs: [{ chain: "base", hash: s.hash }] });
+  assert.deepEqual(a, { stage: "filled", txs: [{ chain: CHAIN, hash: s.hash }] });
   await new Promise((r) => setTimeout(r, 0));
   assert.equal(atSend[0]!.state, "INCOMING", "INCOMING before the tx left");
   assert.deepEqual(atSend[0]!.evmSends, [{ hash: s.hash, nonce: 0n, value: RUNG, sentMs: 5_000n }], "sentMs: the device's clock as it left");
@@ -670,8 +677,8 @@ test("a take of U's deposit note in a block not final yet: nothing signed, the r
 
 test("a rule refusal answers not_allowed, by its class (a PoolRuleRefused), whatever its name", async () => {
   const { ch, ns } = await funded(RUNG + FEE);
-  // a Robinhood ask on Base Sepolia's pin: the rule refuses the pin (evm_not_pinned)
-  const a = await runPoolDepositEvm(hostOf(ch, ns), { ...ASK, chain: "robinhood" });
+  // the other chain's ask on this chain's pin: the rule refuses the pin (evm_not_pinned)
+  const a = await runPoolDepositEvm(hostOf(ch, ns), { ...ASK, chain: CHAIN === "base" ? "robinhood" : "base" });
   assert.deepEqual(a, { error: "not_allowed" });
   assert.equal(ch.c.sent.length, 0);
   // an error that only names itself PoolRuleRefused is not a rule refusal
@@ -683,18 +690,19 @@ test("a rule refusal answers not_allowed, by its class (a PoolRuleRefused), what
 test("the rule holds the pin to the page's network, never to the pin's own: a testnet pin on a mainnet page, or a mainnet pin on a testnet page, signs nothing (not_allowed)", async () => {
   {
     const { ch, ns } = await funded(RUNG + FEE);
-    assert.deepEqual(await runPoolDepositEvm(hostOf(ch, ns, { testnet: false }), ASK), { error: "not_allowed" }, "Base Sepolia's pin under SIGN_HOST");
+    assert.deepEqual(await runPoolDepositEvm(hostOf(ch, ns, { testnet: false, pin: { ...PIN, network: CHAIN === "base" ? "base-sepolia" : "robinhood-testnet" } }), ASK), { error: "not_allowed" }, "the testnet pin under SIGN_HOST");
     assert.equal(ch.c.sent.length, 0);
   }
   {
     const { ch, ns } = await funded(RUNG + FEE);
-    assert.deepEqual(await runPoolDepositEvm(hostOf(ch, ns, { testnet: true, pin: { ...PIN, network: "base" } }), ASK), { error: "not_allowed" }, "Base mainnet's pin under the testnet page");
+    assert.deepEqual(await runPoolDepositEvm(hostOf(ch, ns, { testnet: true, pin: { ...PIN, network: CHAIN } }), ASK), { error: "not_allowed" }, "the mainnet pin under the testnet page");
     assert.equal(ch.c.sent.length, 0);
   }
 });
 
 test("before a send, two RPCs that read apart (U's nonce, the estimate, the chain fee, the base fee) answer failed; a provider down past the page's retry answers down", async () => {
-  for (const [k, d] of [["nonce", 1n], ["estimate", 1n], ["l1", 1n], ["baseFee", 1n]] as const) {
+  // the L1 fee is Base's alone: a Robinhood deposit reads none, so none can read apart there
+  for (const [k, d] of ([["nonce", 1n], ["estimate", 1n], ["l1", 1n], ["baseFee", 1n]] as const).filter(([k]) => k !== "l1" || L1 > 0n)) {
     const { ch, ns, planned } = await funded(RUNG + FEE);
     ch.c.off[k] = d;
     assert.deepEqual(await runPoolDepositEvm(hostOf(ch, ns), ASK), { error: "failed" }, k);
@@ -717,7 +725,7 @@ test("not_funded names the ask's first rung and the fee bound less U's lower bal
   const shorts: [string, bigint][] = [];
   const a = await runPoolDepositEvm(hostOf(ch, ns, { short: (x, w) => void shorts.push([x, w]) }), { ...ASK, amount: want });
   assert.deepEqual(a, { error: "not_funded" });
-  const bound = (EVM_DEPOSIT_GAS_MAX + evmDepositHeadroom(0n, 0n)) * (2n * ch.c.baseFee + EVM_DEPOSIT_PRIORITY_CAP) + 7_000n; // the cap's gas and the tree's headroom at the max fee, and the L1 fee bound
+  const bound = (EVM_DEPOSIT_GAS_MAX + evmDepositHeadroom(0n, 0n)) * (2n * ch.c.baseFee + EVM_DEPOSIT_PRIORITY_CAP) + L1; // the cap's gas and the tree's headroom at the max fee, and the L1 fee bound
   assert.deepEqual(shorts, [[u, first + bound - 5n * 10n ** 14n]]);
   assert.ok(first > EVM_POOL_MIN_DEPOSIT, "the ask's rung, not the pool's least deposit");
 });
@@ -788,10 +796,10 @@ test("a send again of the very bytes restarts the wait: within one run it is not
 });
 
 // The slice 3 review's scenarios (R1, R2), on the mock above.
-const capBound = (c: { baseFee: bigint; depth: bigint[] }) => (EVM_DEPOSIT_GAS_MAX + evmDepositHeadroom(c.depth[0]!, c.depth[1]!)) * (2n * c.baseFee + EVM_DEPOSIT_PRIORITY_CAP) + 7_000n;
+const capBound = (c: { baseFee: bigint; depth: bigint[] }) => (EVM_DEPOSIT_GAS_MAX + evmDepositHeadroom(c.depth[0]!, c.depth[1]!)) * (2n * c.baseFee + EVM_DEPOSIT_PRIORITY_CAP) + L1;
 /** One deposit's fee at the run's own need (card evm-deposit-route-mainnet review P2b): the mock's estimate (250,000)
  *  and the tree's headroom, at 2 x base fee + tip, and the mock's L1 fee. */
-const estBound = (c: { baseFee: bigint; depth: bigint[] }) => (250_000n + evmDepositHeadroom(c.depth[0]!, c.depth[1]!)) * (2n * c.baseFee + EVM_DEPOSIT_PRIORITY_CAP) + 7_000n;
+const estBound = (c: { baseFee: bigint; depth: bigint[] }) => (250_000n + evmDepositHeadroom(c.depth[0]!, c.depth[1]!)) * (2n * c.baseFee + EVM_DEPOSIT_PRIORITY_CAP) + L1;
 
 test("R1: an earlier ask's note that lands later is settled by the next run, never credited to it: the later ask sends its own deposit and answers with its own tx", async () => {
   const { ch, ns, planned } = await funded(0n);
@@ -817,7 +825,7 @@ test("R1: an earlier ask's note that lands later is settled by the next run, nev
   assert.equal(ch.c.sent.length, 2, "Y sent its own deposit");
   const y = sentOf(ch.c.sent[1]!).hash;
   assert.notEqual(y, x);
-  assert.deepEqual(b, { stage: "filled", txs: [{ chain: "base", hash: y }] }, "Y answered with Y's tx, never X's");
+  assert.deepEqual(b, { stage: "filled", txs: [{ chain: CHAIN, hash: y }] }, "Y answered with Y's tx, never X's");
   assert.deepEqual(sent, [y], "the app hears only Y's send");
   assert.equal((await ns.get(planned.id))!.state, "UNSPENT", "X settled as its own note");
   assert.equal((await ours(ns)).filter((n) => n.state === "UNSPENT").length, 2, "two notes: X's and Y's");
@@ -963,7 +971,7 @@ test("pool-deposit-sent-end (EVM): a send that lands after the run, its Deposite
   const f = followedEvm(ch, ns);
   await f.r.after;
   const s = sentOf(ch.c.sent[0]!);
-  assert.deepEqual(f.r.answer(), { result: { stage: "sent", txs: [{ chain: "base", hash: s.hash }] } });
+  assert.deepEqual(f.r.answer(), { result: { stage: "sent", txs: [{ chain: CHAIN, hash: s.hash }] } });
   await f.runEnd;
   assert.deepEqual(f.stages, []);
   assert.equal(await f.parked(), true, "the end's reads go on after the run: the app is never left at sent");
@@ -1033,7 +1041,7 @@ test("pool-deposit-sent-end fold review 1 (EVM): an ask whose two notes both lan
   await f.r.after;
   await f.runEnd;
   assert.equal(ch.c.sent.length, 2, "both notes sent");
-  assert.deepEqual(f.r.answer(), { result: { stage: "sent", txs: [{ chain: "base", hash: sentOf(ch.c.sent[0]!).hash }] } });
+  assert.deepEqual(f.r.answer(), { result: { stage: "sent", txs: [{ chain: CHAIN, hash: sentOf(ch.c.sent[0]!).hash }] } });
   assert.deepEqual(f.stages, ["sent", "filled"], "the second send, then the ask's one end");
   assert.equal(await f.parked(), false, "an ask that ended is not followed");
 });
@@ -1122,7 +1130,7 @@ test("pool-deposit-sent-end fold: the verdict reads U's nonce (at the newest blo
   const a = await runPoolDepositEvm(hostOf(ch, ns, { rpcs: [at(ch.rpcs[0]), at(ch.rpcs[1])] as const }), ASK);
   assert.equal(landed, true, "the planted landing happened");
   assert.equal(ch.c.sent.length, 1, "never built again on a nonce read before its Deposited");
-  assert.deepEqual(a, { stage: "filled", txs: [{ chain: "base", hash: sentOf(ch.c.sent[0]!).hash }] });
+  assert.deepEqual(a, { stage: "filled", txs: [{ chain: CHAIN, hash: sentOf(ch.c.sent[0]!).hash }] });
   assert.equal((await ns.get(planned.id))!.state, "UNSPENT");
 });
 

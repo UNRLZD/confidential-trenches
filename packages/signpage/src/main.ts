@@ -103,7 +103,7 @@ import { releaseTradeDeps, tradeKind } from "./trade.ts";
 import { settleTradeOps, timedStore, TRADE_STORE_MS, tradeSettleDue } from "./trade.ts";
 import { PAGE_TOKEN_DECIMALS, poolKinds } from "./pool-kinds.ts";
 import { liveRuns, poolSellDryKind } from "./pool-sell-dry.ts";
-import { PAGE_CLUSTER, PAGE_SOL_PIN, pageSolanaRpcs, poolWayOut, testnetPool, testnetPoolDeps } from "./pool-testnet.ts";
+import { PAGE_CLUSTER, PAGE_SOL_PIN, pageEvmWalletRpc, pageSolanaRpcs, poolWayOut, testnetPool, testnetPoolDeps } from "./pool-testnet.ts";
 import { hostLane } from "../../wallet/src/throttle.ts";
 import { poolRestore, restoreUxOf } from "./pool-restore.ts";
 import { walkWorkerPort } from "./walk-workers.ts";
@@ -173,10 +173,11 @@ const restore = !framed
       holdingsWritten: (chain) => testnet?.evmHoldingsRestored(chain),
       written: () => void testnet?.proofs().catch(() => {}),
       // a pool's U_X reads and carry on its chain (card wallet-restore-reads-ux, src/pool-restore.ts restoreUxOf): the
-      // follow's own reader on the restore's two public operators (never our helper relay), and the follow's own deposit
-      // (poolFollowDeps below), so a restore and a live pool deposit read U_X and carry it the same way; null on a chain
-      // the follow has no reads for (the restore then names U_X unread there)
-      ux: (chain) => restoreUxOf(chain, poolFollowDeps({ chain, s: "", i: 0, u: "", refund_id: "", address: "", deadline_ms: 0, origin: "", min_out: "" }, UX_ONLY), PAGE_SOL_PIN?.program),
+      // follow's own reader on the restore's two public operators (never our helper relay: on Base and Robinhood the
+      // pool's own pair, card evm-deposit-on-mainnet), and the follow's own deposit (poolFollowDeps below), so a restore
+      // and a live pool deposit read U_X and carry it the same way; null on a chain the follow has no reads for (the
+      // restore then names U_X unread there)
+      ux: (chain) => restoreUxOf(chain, poolFollowDeps({ chain, s: "", i: 0, u: "", refund_id: "", address: "", deadline_ms: 0, origin: "", min_out: "" }, UX_ONLY), PAGE_SOL_PIN?.program, undefined, (c) => testnet?.evmPoolOf(c) ?? null),
       // each reason a run ends stalled, on this device's console only: lanes, indices, providers, scopes and the user's own
       // note amounts (an EVM release's "withdrew X of Y", ../../wallet/src/pool/evm-restore.ts), a one-time wallet U_X
       // and its balance; no key, no words
@@ -300,9 +301,9 @@ else {
   // there (the wallet's EVM_POOLS, src/pool-testnet.ts evmPoolOf: its pin and the deposit's own pair) and the one reader
   // U_X's balance is polled on: on a testnet page the pool's pair (no reader: no quote is asked there, 1Click pays out on
   // mainnet only); on mainnet the helper's POST /v1/rpc/{chain} alone (decision M359: a one-time account's holdings
-  // never reach a public provider from the device), evmWalletRpc. With no pool, or on mainnet with no reader: no floor,
-  // so no quote, and no follow
-  const evmWalletRpc = (_chain: "base" | "robinhood"): EvmRpc | undefined => undefined;
+  // never reach a public provider from the device), src/pool-testnet.ts pageEvmWalletRpc, none on a testnet page. With
+  // no pool, or on mainnet with no reader: no floor, so no quote, and no follow
+  const evmWalletRpc = (chain: "base" | "robinhood"): EvmRpc | undefined => pageEvmWalletRpc(chain);
   const evmRoute = evmQuoteRoute({ network: PAGE_NETWORK, pool: (chain) => testnet?.evmPoolOf(chain) ?? null, wallet: evmWalletRpc, notes: () => pageNotes() });
   // the quote's floor on X's pool, read now on its two RPCs (pool-deposit-address.ts readSolanaPoolFloor on Solana,
   // readEvmPoolFloor on Base and Robinhood); none on a chain the page pins no pool on

@@ -10,6 +10,8 @@
 //   request with an Origin header 403 (re-recorded 13:26Z through provider-answer.mjs: a JSON-RPC error, code 403
 //   "Access forbidden", ACAO *; the non-JSON 403 with no ACAO a page would get is planted below): FAIL;
 // - bad_live_before: the live SIGN_HOST before this card's release, whose step 5 reads no U_X: FAIL on the bundle alone;
+// - bad_before_evm_ux: the live SIGN_HOST of release 124 (12 Nov 21:42Z), whose restore reads no Base or Robinhood U_X
+//   (card evm-deposit-on-mainnet re-recorded good from its build): FAIL on the U_X pair and its wiring;
 // - bad_one_provider and bad_dead_held_binding: the delta review's P2-2 plants on this card's build (the held reader's two
 //   amounts from one provider's map; step 5's held reader returning nothing beside a dead live-looking copy of the head);
 // - bad_dead_copy and bad_reader_not_handed: review P2's plant-ux.mjs (the real reader broken, a dead same-shaped copy
@@ -73,6 +75,12 @@ test("the recorded bad runs fail: our helper relay among the restore's providers
   const l = judge(A.bad_live_before);
   assert.equal(l.ok, false);
   assert.deepEqual(l.lines, Object.values(BUNDLE_WHY).map((w) => `BAD ${w}`));
+});
+
+test("card evm-deposit-on-mainnet: the live SIGN_HOST before it (release 124), whose restore reads no Base or Robinhood U_X, fails on the U_X pair and its wiring alone", () => {
+  const l = judge(A.bad_before_evm_ux);
+  assert.equal(l.ok, false);
+  assert.deepEqual(l.lines, [`BAD ${BUNDLE_WHY.ux_pair}`, `BAD ${BUNDLE_WHY.ux_wired}`]);
 });
 
 test("planted: no preflight read is a FAIL", () => {

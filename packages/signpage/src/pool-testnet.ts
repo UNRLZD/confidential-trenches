@@ -6,8 +6,9 @@
 //   wallet's EVM_POOLS holds its testnet pool (SIGN_HOST's build: its mainnet one, card evm-pools-on-mainnet).
 // - The flow (card signpage-pool-notes): pool.deposit on the devnet pool (src/pool-deposit.ts), with the page's own
 //   note store and seed; on Base or Robinhood (card pool-deposits) pool.deposit goes to src/pool-deposit-evm.ts when that
-//   chain's EVM pin exists on the page's network and the page has its two RPCs (else refused not_allowed); every other
-//   op is refused until its card. On mainnet the EVM positions read each W on the helper's route alone
+//   chain's EVM pin exists on the page's network and the page has its two RPCs (else refused not_allowed). One rule holds
+//   every chain (poolWayOut, card evm-deposit-on-mainnet): a pool's deposit address, its deposit and its every trade
+//   open only where this build carries its withdraw. On mainnet the EVM positions read each W on the helper's route alone
 //   (pageEvmPassReads), and a sale's finding reads, on the pool's two RPCs, only the Ws whose buy record names its token
 //   (planEvmSell). A signed-in load
 //   finishes the pool's INCOMING notes, and so does each state read of the page while one is open (card
@@ -213,9 +214,9 @@ export const evmEpochFee = (at: { baseFeePerGas: bigint; depth: number; chainFee
 export const PAGE_SOL_PIN: SolanaPoolPin | undefined = POOL_TESTNET ? SOL_POOLS.devnet : SOL_POOLS.mainnet;
 /** The page's Solana cluster: the fee route's and pool.buy's (its tip). */
 export const PAGE_CLUSTER: "mainnet" | "devnet" = POOL_TESTNET ? "devnet" : "mainnet";
-/** The pool chains whose withdraw this build carries (card evm-deposit-on-mainnet): Solana's on every build; Base's and
- *  Robinhood's (src/pool-withdraw-evm.ts) in the testnet build only, folded out of SIGN_HOST's. */
-export const POOL_WITHDRAW_BUILT: Readonly<Record<"solana" | "base" | "robinhood", boolean>> = Object.freeze({ solana: true, base: POOL_TESTNET, robinhood: POOL_TESTNET });
+/** The pool chains whose withdraw this build carries (card evm-deposit-on-mainnet): Solana's, Base's and Robinhood's
+ *  (src/pool-withdraw-evm.ts) on both builds. */
+export const POOL_WITHDRAW_BUILT: Readonly<Record<"solana" | "base" | "robinhood", boolean>> = Object.freeze({ solana: true, base: true, robinhood: true });
 /** The one rule (card evm-deposit-on-mainnet): a pool's deposit address (main.ts pageAddressPools), its deposit and its
  *  every trade open only on a chain whose withdraw is in the same build, so money never goes where the page cannot take
  *  it out. `built`: POOL_WITHDRAW_BUILT, or a test's plant. */
@@ -950,8 +951,9 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     });
   };
   // the kit-call deposit: open only where this build carries the chain's withdraw (poolWayOut, as the deposit-address
-  // path in main.ts): the testnet build only, as SIGN_HOST's carries no EVM withdraw yet; the RESERVED settle above is a
-  // deposit's own end and stays on every pinned network
+  // path in main.ts), both builds since card evm-deposit-on-mainnet. No exit tool reads these pools yet: money leaves
+  // them through this page's withdraw, the helper relaying its release (card exit-evm-pool adds the way out with no
+  // server of ours). The RESERVED settle above is a deposit's own end and stays on every pinned network
   const evmDeposit = (chain: "base" | "robinhood") => (wayOut(chain) ? evmKind(chain) : null);
   // pool.buy on an EVM chain (card signpage-evm-pool-buy, src/pool-buy-evm.ts): the chain's queue, the kit's quote and
   // build, the helper's send, the deposit's pair for the read-back, and the chain's RESERVED settle; on each build whose
@@ -2152,8 +2154,9 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
           continue;
         }
         const evmChain = (pending as Partial<EvmPendingOnward>).chain;
-        // an EVM pool's owed send: its chain's finish (src/pool-withdraw-evm.ts); a chain with no pool here is read again
-        if (POOL_TESTNET && (evmChain === "base" || evmChain === "robinhood")) {
+        // an EVM pool's owed send: its chain's finish (src/pool-withdraw-evm.ts); a chain with no pool or no withdraw here
+        // is read again
+        if (evmChain === "base" || evmChain === "robinhood") {
           const eh = evmWithdrawHost(evmChain, notes);
           // the finish's own send kept as the run's is, before it leaves
           const got = eh === null ? null : await locks.request(WALLET_SEED_LOCK, { mode: "shared" }, () => finishEvmOnward({ ...eh, keep: (q) => keepEvmSend(ops, k, q) }, pending as EvmPendingOnward, evmStopsOf(k), held));
@@ -2282,7 +2285,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     }
   };
   const withdraw = async (ready: PoolReady, opId: string): Promise<void> => {
-    if (!locks || (ready.chain === "solana" ? pin === undefined : !POOL_TESTNET || evmPool(ready.chain) === null)) return;
+    if (!locks || !wayOut(ready.chain) || (ready.chain === "solana" ? pin === undefined : evmPool(ready.chain) === null)) return;
     withdrawing.add(opId);
     try {
       await (ready.chain === "solana" ? withdrawRun(ready, opId) : evmWithdrawRun(ready.chain, ready, opId));
@@ -2300,8 +2303,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     return s;
   };
   const evmWithdrawHost = (chain: "base" | "robinhood", notes: NoteStore): EvmWithdrawHost | null => {
-    // folded at build time, as the EVM buy and sale: the mainnet bundle carries none of the withdraw
-    if (!POOL_TESTNET) return null;
+    // on every build that carries the chain's withdraw (poolWayOut: SIGN_HOST's too, card evm-deposit-on-mainnet)
+    if (!wayOut(chain)) return null;
     const e = evmPool(chain);
     if (e === null) return null;
     const pool =
@@ -2337,7 +2340,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     return q ? (((await q.catch(() => null))?.queue as ProofQueue<EvmPoolRequest> | undefined) ?? null) : null;
   };
   const evmFunds = async (chain: "base" | "robinhood", to?: string): Promise<PoolFunds> => {
-    if (!POOL_TESTNET) throw new Error("no flow for this chain");
+    if (!wayOut(chain)) throw new Error("no flow for this chain");
     const notes = await openNoteStore(await page.store());
     try {
       const h = evmWithdrawHost(chain, notes);
@@ -2348,7 +2351,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     }
   };
   const evmWithdrawRun = async (chain: "base" | "robinhood", ready: PoolReady, opId: string): Promise<void> => {
-    if (!POOL_TESTNET || !locks) return;
+    if (!wayOut(chain) || !locks) return;
     const ops = await page.store();
     const created_ms = Date.now();
     let writes: Promise<unknown> = ops.put("ops", opId, { kind: "withdraw", stage: "proving", txs: [], created_ms }).catch(() => {});
@@ -2398,7 +2401,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     if (evmQueues.has(chain)) void evmProofs(chain);
   };
   const evmWithdrawDeps = (chain: "base" | "robinhood", opId: string): PoolWithdrawFormDeps => {
-    const e = POOL_TESTNET ? evmPool(chain) : null;
+    const e = wayOut(chain) ? evmPool(chain) : null;
     return {
       chain,
       keys: { pool: e?.pin.pool ?? "" },
@@ -2544,7 +2547,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
             ? evmRun(ask.chain, ask, ctx, evmBuy(ask.chain) ?? undefined)
             : ask.kind === "pool.sell"
               ? evmRun(ask.chain, ask, ctx, evmSell(ask.chain) ?? undefined)
-              : ask.kind === "pool.withdraw" && POOL_TESTNET && wayOut(ask.chain) && page.openWithdraw && evmPool(ask.chain) !== null
+              : ask.kind === "pool.withdraw" && wayOut(ask.chain) && page.openWithdraw && evmPool(ask.chain) !== null
                 ? (page.openWithdraw(ask.chain, ctx) ?? { error: "not_allowed" })
                 : { error: "not_allowed" }
         : pin === undefined || !wayOut("solana")

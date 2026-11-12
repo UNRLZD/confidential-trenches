@@ -293,7 +293,7 @@ test("pool.address's quote reads the price for the origin asked (main.ts pricedF
   assert.deepEqual(calls.slice(from).filter((c) => c.url.includes("/oneclick/")), [], "no quote asked for an unpriced origin");
 });
 
-test("review of d5699312: on the mainnet build pool.address gives no Base or Robinhood U_X (the pools are pinned, but a deposit there has no carry into the pool nor a way out yet): refused not_allowed, as Solana's is answered", async () => {
+test("card evm-deposit-on-mainnet: on the mainnet build pool.address gives Base's and Robinhood's U_X as it gives Solana's, each the one-time wallet of the chain's pool scope (the build carries their withdraw)", async () => {
   const ask = async (data: Record<string, unknown>): Promise<{ ok?: boolean; result?: unknown; error?: { code: string } }> => {
     const id = crypto.randomUUID();
     const e = new Event("message");
@@ -310,15 +310,20 @@ test("review of d5699312: on the mainnet build pool.address gives no Base or Rob
   for (let t = 0; t < 50 && !named.ok; t++) named = await ask({ chain: "solana" });
   assert.equal(named.ok, true, JSON.stringify(named));
   for (const chain of ["base", "robinhood"]) {
-    const got = await ask({ chain });
-    assert.equal(got.error?.code, "not_allowed", `${chain}: ${JSON.stringify(got)}`);
+    let got: { ok?: boolean; result?: unknown; error?: { code: string } } = {};
+    for (let t = 0; t < 50 && !got.ok; t++) got = await ask({ chain });
+    assert.equal(got.ok, true, `${chain}: ${JSON.stringify(got)}`);
+    const address = (got.result as { address?: unknown } | undefined)?.address;
+    assert.match(String(address), /^0x[0-9a-fA-F]{40}$/, `${chain}: an EVM U_X`);
   }
 });
 
-test("review of 56a57ed2: main.ts's restore host says this mainnet build gives a deposit address on Solana alone, as pool.address does, so a Solana-only restore still reads Solana's U_X and no Base or Robinhood pool stalls it", () => {
-  const h = (globalThis as { __ctRestoreHost?: { addressed?: (chain: string) => boolean } }).__ctRestoreHost;
+test("review of 56a57ed2, card evm-deposit-on-mainnet: main.ts's restore host says this mainnet build gives a deposit address on Solana, Base and Robinhood, as pool.address does", () => {
+  const h = (globalThis as { __ctRestoreHost?: { addressed?: (chain: string) => boolean; ux?: (chain: string) => unknown } }).__ctRestoreHost;
   assert.ok(h?.addressed, "the page's restore host has its addressed wiring");
-  assert.deepEqual(["solana", "base", "robinhood"].map((c) => [c, h.addressed!(c)]), [["solana", true], ["base", false], ["robinhood", false]]);
+  assert.deepEqual(["solana", "base", "robinhood"].map((c) => [c, h.addressed!(c)]), [["solana", true], ["base", true], ["robinhood", true]]);
+  // and each addressed chain has its U_X reads, so a restore reads every U_X it could have paid and none stalls it unread
+  assert.deepEqual(["solana", "base", "robinhood"].map((c) => [c, h.ux?.(c) != null]), [["solana", true], ["base", true], ["robinhood", true]]);
 });
 
 // last in this file: pool.withdraw opens the page's screen, and while a sheet shows the shell reads no message from the

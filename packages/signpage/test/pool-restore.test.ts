@@ -1003,6 +1003,40 @@ test("planted (fold 04:33Z): every restore U_X read, balances and costs alike, g
   assert.equal(restoreKind.restoreUxOf("base", f, "Prog111"), null);
 });
 
+test("card evm-deposit-on-mainnet: a Base or Robinhood U_X is read on both of the pool's two RPCs, never the helper's wallet route, with the follow's own deposit; no pool or no follow, no reads", async () => {
+  const PIN = { network: "base", pool: "0x" + "0f".repeat(20), feeRecipient: "0x" + "0e".repeat(20), fromBlock: 1n } as const;
+  const asked: string[] = [];
+  const rpc = (url: string) =>
+    Object.assign(async (m: string, p: readonly unknown[]) => {
+      asked.push(`${url} ${m} ${JSON.stringify(p)}`);
+      if (m === "eth_getBalance") return "0x5";
+      throw new Error(`unmocked ${m}`);
+    }, { url });
+  const pair = [rpc("https://a.example"), rpc("https://b.example")] as const;
+  const f = uxOf(new Map()).reads;
+  const fetched: string[] = [];
+  const real = globalThis.fetch;
+  globalThis.fetch = (async (u: string | URL | Request) => (fetched.push(String(u instanceof Request ? u.url : u)), new Response("{}", { status: 500 }))) as typeof fetch;
+  try {
+    for (const chain of ["base", "robinhood"] as const) {
+      asked.length = 0;
+      const ux = restoreKind.restoreUxOf(chain, f, undefined, undefined, (c) => (c === chain ? { pin: { ...PIN, network: chain }, rpcs: pair } : null));
+      assert.ok(ux !== null, `${chain}: U_X reads`);
+      const U = "0x" + "77".repeat(20);
+      assert.deepEqual(await ux.balances({ u: U }), [5n, 5n], `${chain}: one balance per RPC`);
+      assert.deepEqual(asked.map((a) => a.split(" ")[0]).sort(), ["https://a.example", "https://b.example"], `${chain}: both of the pool's RPCs, once each`);
+      assert.ok(asked.every((a) => a.includes(U.slice(2))), `${chain}: U_X alone in each read`);
+      assert.equal(ux.deposit, f.deposit, `${chain}: the follow's own deposit`);
+      assert.equal(restoreKind.restoreUxOf(chain, null, undefined, undefined, () => ({ pin: { ...PIN, network: chain }, rpcs: pair })), null, `${chain}: no follow`);
+      assert.equal(restoreKind.restoreUxOf(chain, f, undefined, undefined, () => null), null, `${chain}: no pool`);
+      assert.equal(restoreKind.restoreUxOf(chain, f, undefined), null, `${chain}: none given`);
+    }
+  } finally {
+    globalThis.fetch = real;
+  }
+  assert.deepEqual(fetched, [], "no fetch: nothing reaches the helper's route");
+});
+
 test("measured (fold 04:33Z): each id's U_X read runs beside its NEAR read, so step 5 on a planted scope takes about as long with the U_X reads as without them", async () => {
   const slow = (r: NearRpc): NearRpc => ({ name: r.name, query: async (p) => (await new Promise((x) => setTimeout(x, 2)), r.query(p)) });
   const time = async (ux: PoolRestoreHost["ux"]) => {
