@@ -55,8 +55,14 @@ export const CSP = [
   ["form-action", "'none'"],
   ["object-src", "'none'"],
   ["require-trusted-types-for", "'script'"],
-  ["trusted-types", "prover-worker"],
+  // the restore's walk Workers are started through the page's second policy (card restore-shows-the-balance-in-seconds)
+  ["trusted-types", "prover-worker walk-worker"],
 ];
+// the walk Worker's file and its own policy, which Pages joins to the /* rule's (card restore-shows-the-balance-in-seconds):
+// it computes only, so it may load no script but its own and fetch, start or frame nothing; deploy.mjs holds the build's
+// _headers to it
+export const WALK_PATH = "/walk-worker.js";
+export const WALK_CSP = "default-src 'none'; script-src 'self'";
 // Integrity-Policy from the wallet paper's block; the rest from the app paper's SIGN_HOST column (app.md 2.3)
 export const HEADERS = {
   "integrity-policy": "blocked-destinations=(script)",

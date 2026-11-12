@@ -64,7 +64,7 @@ export const VEIL_CAP_MS = 2_000;
  * index.html and public/) is the source: test/shell.test.ts fails when a file in it is missing here. A directory in
  * it is listed with a trailing slash and covers every path under it.
  */
-export const SERVED_FILES: readonly string[] = ["/_headers", "/app.js", "/assets/", "/index.html", "/licenses/", "/prover-thread.js", "/prover-worker.js"];
+export const SERVED_FILES: readonly string[] = ["/_headers", "/app.js", "/assets/", "/index.html", "/licenses/", "/prover-thread.js", "/prover-worker.js", "/walk-worker.js"];
 
 /** True when `pathname` (as the URL parser gives it) names a file the build serves, in any spelling a server reads as it. */
 function servedFile(pathname: string): boolean {
