@@ -2426,6 +2426,36 @@ test("pieces: the releases land and the buy does not (a helper that sent the tag
   assert.deepEqual(await owed.list(), []);
 });
 
+test("pieces: each round settles every note left on one read of the pool's marks (settleSet), never one read a note; a note found spent is not asked again", async () => {
+  const own = pieceProof("note-1", BigInt("0x" + Buffer.from(unhex(r.nullifier_hash)).toString("hex")), BigInt(r.withdrawn), true);
+  const other = pieceProof("note-2", 777n, 5_000_000n);
+  const s = await setup("pump", SPEND);
+  const spend = solanaPoolBuyMaxSpend([relOf(own)], s.venue, SOLANA_POOL_JITO_TIP, rent) + 1_000_000n;
+  const w = await world({ readies: [[other, own]], finalHeight: () => 1_000 });
+  w.host.piecesOwed = owedMem();
+  w.host.reads = 4;
+  w.host.takeSet = async (items) => items.map((x) => (x.noteId === own.noteId ? own : other));
+  w.host.sendPieces = async () => {
+    throw new Error("pool send: HTTP 502");
+  };
+  w.host.settle = async () => assert.fail("one note at a time: the marks listed once a note");
+  const sets: string[][] = [];
+  // the piece reads spent from the first round on; the buy's own note never
+  w.host.settleSet = async (ids) => (sets.push([...ids]), ids.map((id) => ({ kind: id === "note-2" ? ("spent" as const) : ("unspent" as const) })));
+  const a = await runPoolBuy(w.host, { ...ASK, amount: spend });
+  assert.equal("stage" in a && a.stage, "not_landed", JSON.stringify(a));
+  assert.deepEqual(sets[0], ["note-2", "note-1"]);
+  assert.ok(sets.slice(1).every((x) => x.length === 1 && x[0] === "note-1"), JSON.stringify(sets));
+  // a verdict list of another length is no answer
+  const v = await world({ readies: [[other, own]], finalHeight: () => 1_000 });
+  v.host.piecesOwed = owedMem();
+  v.host.takeSet = w.host.takeSet;
+  v.host.sendPieces = w.host.sendPieces;
+  v.host.settleSet = async () => [{ kind: "spent" }];
+  const b = await runPoolBuy(v.host, { ...ASK, amount: spend });
+  assert.ok("stage" in b && b.stage !== "filled", JSON.stringify(b));
+});
+
 /** An owed-pieces store in memory, as the page's (pool-testnet.ts piecesOwedOf): one record a W. */
 function owedMem(): PiecesOwed & { all: Map<string, OwedPieces> } {
   const all = new Map<string, OwedPieces>();

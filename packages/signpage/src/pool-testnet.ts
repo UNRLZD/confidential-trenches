@@ -59,7 +59,7 @@ import { poolDepositKind, type PoolDepositFrom, type PoolDepositHost } from "./p
 import { proverHost } from "./prover-host.ts";
 import { SOLANA_PUBLIC_SEAT, TRADE_HELPER, type TradeStore } from "./trade.ts";
 import { SOL_POOL_TABLES, SOL_POOLS, solanaNow, solanaPool, solanaPoolOf, type SolanaFeeAnswer, type SolanaPoolPin, type SolanaReleaseRequest } from "../../wallet/src/pool/solana.ts";
-import { SOL_MARK_READ_BATCH, SOL_MARK_READ_BATCH_MAX, solanaSettleReserved, solanaSettleSpent, type SolanaPoolCache } from "../../wallet/src/pool/solana-restore.ts";
+import { SOL_MARK_READ_BATCH, SOL_MARK_READ_BATCH_MAX, solanaSettleReserved, solanaSettleSpent, solanaSettleSpentSet, type SolanaPoolCache } from "../../wallet/src/pool/solana-restore.ts";
 import { POOL_TESTNET } from "../../wallet/src/pool/network.ts";
 import { askWhileBusy, type BusyOpts } from "../../wallet/src/busy.ts";
 import { lateBuyEnd, POOL_SEND_BUSY_WAIT_MS, PoolSendBusy, PoolSendRefused, poolBuyKind, resumePieces, type OwedPieces, type PiecesOwed, type PoolBuyHost } from "./pool-buy.ts";
@@ -1386,6 +1386,18 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
           notes ??= await openNoteStore(await page.store());
           const kind = reads.kind();
           return await solanaSettleSpent({ seed64, notes, noteId, program: pin!.program, minSlots, rpcs: settleRpcs(kind), lister: lister(kind), signal, cache, markBatches: PAGE_SOL_MARK_BATCHES });
+        } finally {
+          seed64.fill(0);
+        }
+      },
+      // a buy of several pieces: every piece's note on one read of the marks a round
+      settleSet: async (noteIds, minSlots) => {
+        const signal = solanaStop.signal;
+        const seed64 = await page.seed64();
+        try {
+          notes ??= await openNoteStore(await page.store());
+          const kind = reads.kind();
+          return await solanaSettleSpentSet({ seed64, notes, noteIds, program: pin!.program, minSlots, rpcs: settleRpcs(kind), lister: lister(kind), signal, cache, markBatches: PAGE_SOL_MARK_BATCHES });
         } finally {
           seed64.fill(0);
         }

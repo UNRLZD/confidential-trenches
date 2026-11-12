@@ -186,6 +186,10 @@ export type PoolBuyHost = {
   /** The wallet's solanaSettleSpent for this note: "spent" once its change is written and the note is SPENT. minSlots:
    *  each RPC's reads at or past it (the not_landed verdict's, pastAt's slots). A throw is no answer, never "unspent". */
   settle(noteId: string, minSlots?: readonly [number, number]): Promise<{ kind: "spent" | "unspent" }>;
+  /** Several notes settled on one read of the pool's marks (the wallet's solanaSettleSpentSet; card
+   *  buy-spends-several-pieces): each note's verdict in order, a note's own refusal `{ error }`; a read that fails
+   *  throws. A host without it settles each note with `settle`. */
+  settleSet?(noteIds: readonly string[], minSlots?: readonly [number, number]): Promise<({ kind: "spent" | "unspent" } | { error: unknown })[]>;
   /** The device's clock, ms. */
   now?(): bigint;
   /** Read-back reads and the wait between them. */
@@ -896,7 +900,7 @@ async function buyRun(h: PoolBuyHost, ask: PoolAsk, at: { fault?: unknown }): Pr
  *  fill: the buy's route, told as the run goes (W and the venue with its pool once the take holds the note, the amount
  *  out once the transaction reads back); none for a pool withdraw, whose release tells no buy route. */
 export async function sendAndSettle(
-  h: Pick<PoolBuyHost, "rpcs" | "take" | "takeSet" | "send" | "sendPieces" | "settle" | "now" | "reads" | "named" | "sent" | "landed">, r: Ready, release: SolanaPoolRelease, pool: string, signed: Uint8Array, lastHeight: number, wait: (ms: number) => Promise<void>,
+  h: Pick<PoolBuyHost, "rpcs" | "take" | "takeSet" | "send" | "sendPieces" | "settle" | "settleSet" | "now" | "reads" | "named" | "sent" | "landed">, r: Ready, release: SolanaPoolRelease, pool: string, signed: Uint8Array, lastHeight: number, wait: (ms: number) => Promise<void>,
   fill?: { token: string; minOut: bigint; tell: (x: BuyRoute) => void; bound: readonly BuyRoute[]; decimals?: (d: number) => void; early?: Promise<ChainNow> },
   before: readonly { r: Ready; release: SolanaPoolRelease; signed: Uint8Array }[] = [],
 ): Promise<PoolBuyAnswer> {
@@ -942,16 +946,17 @@ export async function sendAndSettle(
   const noteSet = {
     settle: async (id: string, minSlots?: readonly [number, number]): Promise<{ kind: "spent" | "unspent" }> => {
       if (parts.length === 1) return h.settle(id, minSlots);
-      let thrown: { e: unknown } | null = null;
-      for (const n of [...left]) {
-        try {
-          if ((await h.settle(n, minSlots)).kind === "spent") left.splice(left.indexOf(n), 1);
-        } catch (e) {
-          thrown ??= { e };
-        }
-      }
+      // one read of the marks a round for every note left (settleSet), not one a note
+      const ids = [...left];
+      const got = h.settleSet ? await h.settleSet(ids, minSlots) : await Promise.all(ids.map((n) => h.settle(n, minSlots).catch((error: unknown) => ({ error }))));
+      if (got.length !== ids.length) throw new Error("settle: not one verdict a note");
+      const thrown = got.find((g): g is { error: unknown } => "error" in g);
+      ids.forEach((n, k) => {
+        const g = got[k]!;
+        if (!("error" in g) && g.kind === "spent") left.splice(left.indexOf(n), 1);
+      });
       if (left.length === 0) return { kind: "spent" };
-      if (thrown !== null) throw thrown.e;
+      if (thrown !== undefined) throw thrown.error;
       return { kind: "unspent" };
     },
   };

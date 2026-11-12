@@ -528,19 +528,20 @@ test("review P2-1 of a34c1626: a sign out stops the Solana RESERVED pass's settl
 
 test("review P2-1 and P2-2 of a34c1626, P2-1 and P3-3 of e3489b3b: every Solana settle on the page reads on the settle pair with the page's batches, and passes the sign-out stop's signal taken before its first wait and the page's cache, in every path (buy, reserved pass, owed finish, withdraw)", () => {
   const src = readFileSync(new URL("../src/pool-testnet.ts", import.meta.url), "utf8");
-  const calls = [...src.matchAll(/solanaSettle(?:Spent|Reserved)\(\{[^}]*\}\)/g)].map((m) => m[0]);
-  assert.equal(calls.length, 4);
+  // the buy's set settle (card buy-spends-several-pieces: every piece's note on one read of the marks) one more site
+  const calls = [...src.matchAll(/solanaSettle(?:SpentSet|Spent|Reserved)\(\{[^}]*\}\)/g)].map((m) => m[0]);
+  assert.equal(calls.length, 5);
   // the reserved pass's on the pair's pass reads (card signpage-passes-yield-to-a-trade), the rest on its trade reads, and
   // the buy's on its own kind: a trade's to its release, a pass's after it (card sell-right-after-a-buy), its one call so
   for (const c of calls) assert.match(c, /, rpcs: settleRpcs\((?:"pass"|kind)?\), lister: lister\((?:"pass"|kind)?\), signal, cache, markBatches: PAGE_SOL_MARK_BATCHES \}\)$/, c);
   assert.deepEqual(calls.filter((c) => c.includes("(kind)")), calls.filter((c) => c.includes("minSlots, rpcs: settleRpcs(kind), lister: lister(kind),")), "a kind only where the pair and the lister both take it");
-  assert.equal(calls.filter((c) => c.includes("settleRpcs(kind)")).length, 1, "the buy's alone");
+  assert.equal(calls.filter((c) => c.includes("settleRpcs(kind)")).length, 2, "the buy's alone: its settle and its set settle");
   // each site's signal is the stop's when the call began: four takes, and the stop read elsewhere only where a trade's
   // reads wait before a signature (card start-reads-wait-out-a-throttle): the buy's and the sell's host, each taken when
   // the host is made, and a pool kind's request (outSignal), each ending its waits at the next sign out. The sell host's
   // one take also stops its sale's finder list (card wallets-found-in-one-read, review P3 of 8da6b97f): the host's
   // signal and the list's reads are the same stop, taken once when the host is made
-  assert.equal([...src.matchAll(/const signal = solanaStop\.signal;/g)].length, 5, "the four settles' and the sell host's");
+  assert.equal([...src.matchAll(/const signal = solanaStop\.signal;/g)].length, 6, "the five settles' and the sell host's");
   const sellHost = src.slice(src.indexOf("const sellHost = "), src.indexOf("const sell = (over.tradeKinds?.sell"));
   assert.equal([...sellHost.matchAll(/const signal = solanaStop\.signal;/g)].length, 1, "the sell host's take, when the host is made");
   assert.ok(sellHost.indexOf("const signal = solanaStop.signal;") < sellHost.indexOf("return {"), "taken before the host's first wait");
@@ -550,7 +551,7 @@ test("review P2-1 and P2-2 of a34c1626, P2-1 and P3-3 of e3489b3b: every Solana 
   assert.equal([...src.matchAll(/outSignal: \(\) => solanaStop\.signal,/g)].length, 1);
   // the Solana deposit host's stop: its waits between attempts end at a sign out's tap (review of f0e7bd38, P2-1)
   assert.equal([...src.matchAll(/ stop: solanaStop\.signal,/g)].length, 1);
-  assert.equal([...src.matchAll(/solanaStop\.signal/g)].length, 8);
+  assert.equal([...src.matchAll(/solanaStop\.signal/g)].length, 9);
   // the settle pair: the page's two seats, the helper's with the window-long retry
   assert.match(src, /solanaPacedRpc\(pageHelperRpc\(TRADE_HELPER, SOLANA_RPC_WINDOW_RETRY, kind\)\)\]/);
   assert.match(src, /solanaPacedRpc\(testnetRpc\(TESTNET_RPCS\.solana\[1\], SOLANA_RPC_WINDOW_RETRY, kind\)\)\]/);
@@ -759,6 +760,8 @@ test("card buy-spends-several-pieces: helperPoolSendPieces posts {pool, txs} in 
   assert.match(src, /sendPieces: \(pool, txs\) => helperPoolSendPieces\(pool, txs, over\.fetch\)/);
   assert.match(src, /takeSet: async \(items, early, lastHeight\)/);
   assert.match(src, /piecesOwed: piecesOwedOf\(page\.store\)/, "the buy host writes a buy of several pieces' owed record");
+  // a buy of several pieces settles every note left on one read of the marks a round (the wallet's set settle)
+  assert.match(src, /settleSet: async \(noteIds, minSlots\) => \{[\s\S]{0,400}?solanaSettleSpentSet\(\{ seed64, notes, noteIds,/);
   // the owed record's end is decided on each state read and from followBuys (the pass a buy that ended "sent" starts)
   assert.match(src, /await followBuys\(notes\);\s*await resumeOwedPieces\(/);
   assert.match(src, /now = new Map\(\(await readNotes\(await page\.store\(\)\)\)[^\n]*\n\s*await resumeOwedPieces\(/);
