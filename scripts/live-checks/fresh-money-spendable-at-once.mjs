@@ -8,7 +8,7 @@
 // shape (packages/wallet/src/pool/queue.ts, packages/signpage/src/pool-withdraw.ts, packages/signpage/src/pool-buy.ts):
 //   - the queue proves a note of any kind that landed this epoch on the newest root, once that cut holds its leaf;
 //   - a withdraw part proves such a note on the newest root, with no boundary wait;
-//   - a buy spends a proof on the epoch root before one on the newest root;
+//   - a buy spends the smallest chunk that pays, and of one chunk a proof on the epoch root before one on the newest root;
 //   - a root index is named only below the tree size both RPCs agreed on.
 // It does not prove a tap's timing: that is packages/wallet/test/pool-queue.test.ts, packages/signpage/test/
 // pool-withdraw.test.ts and pool-buy.test.ts at the released commit, and the mainnet copy's run. The check runs on a
@@ -35,8 +35,8 @@ export const MARKS = Object.freeze({
   "a withdraw part proves a fresh note on the newest root with no boundary wait": new RegExp(
     `=${s("epoch")};for\\(let ${I}=!1;!${I}\\(${I}\\);\\)\\{let ${I}=await ${I}\\(${I}\\+1n,\\{newest:!0\\}\\);if\\(${I}\\(${I}\\)\\)\\{${I}=${I},${I}=${s("newest")}`,
   ),
-  "a buy spends a proof on the epoch root before one on the newest root": new RegExp(
-    `\\.sort\\(\\((${I}),(${I})\\)=>\\1\\.root===\\2\\.root\\?[^;]{0,80}:\\1\\.root===${s("epoch")}\\?-1:1\\)`,
+  "a buy spends the smallest chunk that pays, and of one chunk a proof on the epoch root before one on the newest root": new RegExp(
+    `\\.sort\\(\\((${I}),(${I})\\)=>\\1\\.chunk<\\2\\.chunk\\?-1:[^;]{0,40}\\1\\.root===\\2\\.root\\?0:\\1\\.root===${s("epoch")}\\?-1:1\\)`,
   ),
   "a root index is named only below the tree size both RPCs agreed on": new RegExp(
     `Math\\.min\\(\\(${I}\\.data\\.length-${I}\\)\\/${I},${I}-${I}\\*${I}\\);for\\(let ${I}=${I}-1;${I}>=0;${I}--\\)`,

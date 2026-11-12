@@ -638,6 +638,19 @@ test("the pick takes a proof on the epoch root before one on the newest root, an
   assert.equal(tag3StateRootIndex(n.sentTx()!), 4, "the newest root's index");
 });
 
+// the rested preference never changes what a tap costs or parks: the smallest chunk that pays comes first, and the epoch
+// root wins only among proofs of that one chunk
+test("the pick takes the smallest chunk that pays before a larger one on the epoch root, so a tap parks no more on its W", async () => {
+  const bigEpoch: ReadyProof<SolanaReleaseRequest> = { ...readyProof(), chunk: 2n * BigInt(r.withdrawn) };
+  const newestP: ReadyProof<SolanaReleaseRequest> = { ...readyProof({ stateRoot: 1004n, attempt: "attempt-n" }), noteId: "note-2", root: "newest" };
+  const w = await world({ readies: [[newestP, bigEpoch]] });
+  const take = w.host.take.bind(w.host);
+  w.host.take = async (id, _attempt, early, lastHeight) => (await take(id, newestP.attempt, early, lastHeight), id === "note-1" ? bigEpoch : newestP);
+  assert.deepEqual(await runPoolBuy(w.host, ASK), { stage: "filled", txs: [{ chain: "solana", hash: SIG }] });
+  assert.ok(w.log.includes("take:note-2") && !w.log.includes("take:note-1"), w.log.filter((x) => x.startsWith("take")).join(","));
+  assert.equal(tag3StateRootIndex(w.sentTx()!), 4, "the smaller chunk's own (newest) root");
+});
+
 test("a helper answer whose tx does not read back, or reads back as another tx, never marks the note spent: the settle is tried first", async () => {
   for (const readBack of ["none", "other"] as const) {
     const w = await world({ readBack });

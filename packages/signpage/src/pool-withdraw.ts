@@ -347,9 +347,12 @@ export async function runPoolWithdraw(h: PoolWithdrawHost, ask: PoolAsk, to: str
     const owedNotes = (await h.owedNotes?.()) ?? new Set<string>();
     const list = await notes.list();
     const sources = withdrawSources(list, scope).filter((n) => !owedNotes.has(n.id));
-    // the notes under the epoch root first: a note that landed this epoch only when they cannot send the amount
+    // the notes under the epoch root first, but never in more parts than the plan over every note: the screen drew its
+    // Max fee on that one (withdraw/pool-form.ts over withdrawSources), so the rested preference never costs more
     const rested = await restedNotes(h.pool, list);
-    const plan = (rested === null ? null : planPoolWithdraw(sources.filter((n) => rested.has(n.id)), amount, costs)) ?? planPoolWithdraw(sources, amount, costs);
+    const all = planPoolWithdraw(sources, amount, costs);
+    const quiet = rested === null ? null : planPoolWithdraw(sources.filter((n) => rested.has(n.id)), amount, costs);
+    const plan = quiet !== null && all !== null && quiet.length <= all.length ? quiet : all;
     if (plan === null) stop("plan");
     // review #232 MEDIUM 1: never more than the Max fee the screen showed
     if (BigInt(plan!.length) * (fee + wFee) > maxFee) stop("max_fee");

@@ -280,8 +280,15 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
     // only, and the epoch's remakes and the epoch's notes still run
     let newest: PoolTrees | Error | undefined;
     const todo: { n: NoteRecord; trees: PoolTrees; root: "epoch" | "newest"; prev?: ReadyProof<R> }[] = [];
-    // the ready set's own notes first (each landed before the epoch began), then the open notes
-    for (const n of again.sort(byChunkThenLeaf(pool.ladder))) todo.push({ n, trees: epochTrees, root: "epoch", prev: ready.get(n.id)! });
+    // the ready set's own notes first (each landed before the epoch began), then the open notes; among the remakes a
+    // newest-root proof first (take refuses it NEWEST_GRACE_MS past the boundary, an epoch-root one stays takeable all
+    // epoch), then by chunk and leaf
+    const byChunk = byChunkThenLeaf(pool.ladder);
+    const newestFirst = (x: NoteRecord, y: NoteRecord): number => {
+      const a = ready.get(x.id)!.root === "newest", b = ready.get(y.id)!.root === "newest";
+      return a !== b ? (a ? -1 : 1) : byChunk(x, y);
+    };
+    for (const n of again.sort(newestFirst)) todo.push({ n, trees: epochTrees, root: "epoch", prev: ready.get(n.id)! });
     for (const n of open) {
       if (todo.length === want) break;
       if (n.leaf!.leafIndex < BigInt(epochTrees.stateTree.size)) todo.push({ n, trees: epochTrees, root: "epoch" });

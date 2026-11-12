@@ -43,9 +43,11 @@ test("the marks read the new shapes, never the old ones", () => {
   // the withdraw: the loop that proves on the newest root; the old one-shot newest read for a deposit's note is not it
   assert.equal(has("C),T=`epoch`;for(let e=!1;!S(w);){let t=await x(y+1n,{newest:!0});if(S(t)){w=t,T=`newest`,e&&(_=await g());break}")[KEYS[1]], true);
   assert.equal(has("dex>=BigInt(T.stateTree.size)&&(T=await l.trees(g+1n,void 0,{newest:!0}));")[KEYS[1]], false);
-  // the buy: epoch-root proofs first; the smallest chunk alone is not it
-  assert.equal(has("ee=f(await e.ready()).sort((e,t)=>e.root===t.root?e.chunk<t.chunk?-1:+(e.chunk>t.chunk):e.root===`epoch`?-1:1).filter(")[KEYS[2]], true);
+  // the buy: the smallest chunk first, the epoch root first only within one chunk; the smallest chunk alone, or the
+  // epoch root ahead of the chunk, is not it
+  assert.equal(has("ee=f(await e.ready()).sort((e,t)=>e.chunk<t.chunk?-1:e.chunk>t.chunk?1:e.root===t.root?0:e.root===`epoch`?-1:1).filter(")[KEYS[2]], true);
   assert.equal(has("ee=f(await e.ready()).sort((e,t)=>e.chunk<t.chunk?-1:+(e.chunk>t.chunk)).filter(")[KEYS[2]], false);
+  assert.equal(has("ee=f(await e.ready()).sort((e,t)=>e.root===t.root?e.chunk<t.chunk?-1:+(e.chunk>t.chunk):e.root===`epoch`?-1:1).filter(")[KEYS[2]], false);
   // the root index: bounded by the agreed size; the page's own length alone is not it
   assert.equal(has("let a=Math.min((t.data.length-pH)/mH,n-r*hH);for(let e=a-1;e>=0;e--){")[KEYS[3]], true);
   assert.equal(has("let a=(t.data.length-pH)/mH;for(let e=a-1;e>=0;e--){")[KEYS[3]], false);

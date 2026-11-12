@@ -305,6 +305,25 @@ test("a note held by an old page's queue during the part's wait (no planned reco
   assert.ok(held !== undefined, "the old queue held it during the wait");
 });
 
+test("a note held by an old page's queue during a wait that crosses a boundary is dropped again before the part holds it on the new epoch's root", async () => {
+  let slept = 0n;
+  let held: string | undefined;
+  const wd = await world([1_000n, 30_000_000n, 1_000n], {
+    trees: cutAt([BOUNDARY - 40_000n, BOUNDARY - 500n, BOUNDARY + 2_000n]), refs: [undefined, RETURN], now: () => (slept > 0n ? BOUNDARY + 3_000n : BOUNDARY - 2_000n),
+    wait: async (ms) => {
+      slept += BigInt(ms);
+      if (held === undefined) held = (await wd.ns.move(wd.ids[1]!, "UNSPENT", "HELD", { deadlineMs: BOUNDARY + E + SOL_LIFE_MS, context: "1" })).attempt!;
+    },
+  });
+  const drop = async (id: string) => void (held !== undefined && (await wd.ns.move(id, "HELD", "UNSPENT", { attempt: held })));
+  const a = await runPoolWithdraw({ ...wd.host, drop }, ASK, TO, 2_000_000n + MIN, COST);
+  assert.equal(a.stage, "sent", a.cause);
+  assert.ok(held !== undefined, "the old queue held it during the wait");
+  assert.equal(slept, 1_000n);
+  assert.equal(rootIndexOf(wd), 1, "the new epoch's root (leaves 0..1)");
+  assert.equal(wd.binds[0]!.deadlineMs, BOUNDARY + SOL_LIFE_MS);
+});
+
 /** The planned notes' record on the world's store, as the page writes it, and a queue in another context reading it. */
 function otherContext(wd: Awaited<ReturnType<typeof world>>, prover = wd.host.prover) {
   const pool = { ...wd.host.pool, bind: (b: Parameters<typeof wd.host.pool.bind>[0], s?: AbortSignal) => wd.host.pool.bind({ ...b, tipCap: b.tipCap ?? 1n }, s) };

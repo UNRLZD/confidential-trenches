@@ -651,12 +651,12 @@ async function buyRun(h: PoolBuyHost, ask: PoolAsk, at: { fault?: unknown }): Pr
       const bh = nowMs() - slotAt > POOL_BUY_SLOT_STALE_MS ? await blockhashOf(h.rpcs) : first;
       const minOut = (best.expectedOut * BigInt(10_000 - ask.slippageBps)) / 10_000n;
       // the pick, from the ready proofs as they are now (a remake or another tab may have changed them during the
-      // reads): a proof on the epoch root first, then one on the newest root (a note that landed this epoch: its root is
-      // easier to tie to that landing, so it is spent only when no rested note pays, card fresh-money-spendable-at-once);
-      // within each, the smallest chunk that pays the spend and W's accounts; filtered and claimed in one turn, so two
-      // runs of this page never claim one note
+      // reads): the smallest chunk that pays the spend and W's accounts, so a tap never parks more on its W than it
+      // needs; among proofs of that one chunk, one on the epoch root before one on the newest root (a note that landed
+      // this epoch: its root is easier to tie to that landing, card fresh-money-spendable-at-once); filtered and
+      // claimed in one turn, so two runs of this page never claim one note
       const fundable = mine(await h.ready())
-        .sort((x, y) => (x.root !== y.root ? (x.root === "epoch" ? -1 : 1) : x.chunk < y.chunk ? -1 : x.chunk > y.chunk ? 1 : 0))
+        .sort((x, y) => (x.chunk < y.chunk ? -1 : x.chunk > y.chunk ? 1 : x.root === y.root ? 0 : x.root === "epoch" ? -1 : 1))
         .filter((p) => solanaPoolBuyFunds({ withdrawnValue: p.chunk, relayFee: p.binding.request.relayFee } as SolanaPoolRelease, venue, { spend: ask.amount, tip }, rent).problem === null);
       if (fundable.length === 0) return no("not_funded");
       const r = fundable.find((p) => indexOf(p) !== null);
