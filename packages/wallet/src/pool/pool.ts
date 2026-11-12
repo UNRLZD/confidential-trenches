@@ -15,12 +15,12 @@
 // - Epochs: the pool's time is cut into epochs of epochMs. Every proof made in epoch e proves against e's epoch root
 //   (the newest root whose leaf landed before e's start: trees(e's start)), binds the deadline e's start + lifeMs and
 //   the relayer's fee for e, so every proof of that epoch, from every user, shares its root, label root, deadline and
-//   fee. The queue makes its ready proofs again at each new epoch. One exception: a deposit's own note (a deposit note,
-//   or a second arrival of a deposit from U) is proved at once on the newest root, so the first buy never waits for a
-//   boundary. That proof is made again at the next epoch and is handed out only until its replacement is made, and
-//   never past the next boundary + NEWEST_GRACE_MS. Every other note (change, refund, return, move, and second
-//   arrivals of a return or a move) waits for the next boundary: a root right after its own leaf would link the W it
-//   pays to the earlier W whose money made that leaf.
+//   fee. The queue makes its ready proofs again at each new epoch. One exception: a note that landed after the epoch's
+//   start, of any kind, is proved at once on the newest root, so no tap waits for a boundary (card
+//   fresh-money-spendable-at-once; the owner's rule: only chain finality may make a user wait). That proof is made
+//   again at the next epoch and is handed out only until its replacement is made, and never past the next boundary +
+//   NEWEST_GRACE_MS. A root right after a note's own leaf is easier to tie to the earlier W whose money made that leaf,
+//   so a tap spends a newest-root proof only when no epoch-root proof covers it (the signing page's picks).
 // - now and trees: the pool's time and its two trees cut at a time, each read on two RPCs by the pool's own reader.
 //   Never the device clock, and never one RPC's word. The tree source must know each leaf's chain time.
 // - Two duties on every adapter, which the queue cannot check (the NEAR leaf-time sync and each pool adapter hold
@@ -87,7 +87,7 @@ export interface Pool<R = unknown> {
   /** The pool's time in ms (its chain's newest final block, the lower of two RPCs). */
   now(signal?: AbortSignal): Promise<bigint>;
   /** The tree source: both trees holding only the leaves that landed before `beforeMs`, and their roots. `newest`: the
-   * read for a deposit's own note (beforeMs = now + 1), which a pool may make at a lower commitment than its epoch
+   * read for a note that landed this epoch (beforeMs = now + 1), which a pool may make at a lower commitment than its epoch
    * roots (Solana: confirmed, M355 (5)); its failure fails only the notes that wait on it. */
   trees(beforeMs: bigint, signal?: AbortSignal, opts?: { newest?: boolean }): Promise<PoolTrees>;
   /** The context function. */
@@ -115,7 +115,7 @@ export type ReadyProof<R = unknown> = {
 /** take() hands a proof out only with more than sendMarginMs + this left before its deadline (clock skew between the
  * pool's time and the relayer's). */
 export const TAKE_SLACK_MS = 15_000n;
-/** A newest-root proof (a deposit's own note) is handed out past its epoch only until its replacement is made, and
+/** A newest-root proof (a note that landed in its epoch) is handed out past its epoch only until its replacement is made, and
  * never past the next boundary + this: it bounds how long the root right after the deposit stays in use. */
 export const NEWEST_GRACE_MS = 15_000n;
 

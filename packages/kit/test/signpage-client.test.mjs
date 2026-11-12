@@ -474,9 +474,9 @@ test("a request's id is known at once and is the id posted, so progress events c
   assert.deepEqual(seen, [[id, "filled"]]);
 });
 
-// -------------------------------------------------------------------------------------------- the twenty-five kinds
-test("every kind of the twenty-five has a fixture, and only the twenty-five do", () => {
-  assert.equal(SIGNPAGE_KINDS.length, 25);
+// -------------------------------------------------------------------------------------------- the twenty-six kinds
+test("every kind of the twenty-six has a fixture, and only the twenty-six do", () => {
+  assert.equal(SIGNPAGE_KINDS.length, 26);
   assert.deepEqual(Object.keys(FIXTURES).sort(), [...SIGNPAGE_KINDS].sort());
 });
 
@@ -1426,6 +1426,7 @@ test("each kind's timeout is the table's (app.md §2.1 item 3); restore has none
     "pool.address": 15_000,
     // the sell box's preview (card app-sell-shows-what-you-receive): pool reads on two providers, as pool.sell's
     "pool.sell.dry": 10_000,
+    "pool.buy.dry": 10_000,
   });
 });
 

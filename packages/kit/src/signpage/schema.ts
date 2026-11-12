@@ -370,6 +370,7 @@ export const SIGNPAGE_RESULT_SCHEMAS = {
   "deposit.dry": depositDry,
   "pool.address": poolAddress,
   "pool.sell.dry": poolSellDry,
+  "pool.buy.dry": obj({ tap_max: dec }),
 } as const satisfies Record<SignpageKind, SignpageSchema>;
 deepFreeze(SIGNPAGE_RESULT_SCHEMAS);
 
@@ -412,6 +413,7 @@ export const SIGNPAGE_PARAM_SCHEMAS = {
   "deposit.dry": obj({ origin_asset: str, amount: dec }),
   "pool.address": poolAddressParams,
   "pool.sell.dry": poolSellDryParams,
+  "pool.buy.dry": obj({ chain: poolChain, token: str }),
 } as const satisfies Record<SignpageKind, SignpageSchema>;
 deepFreeze(SIGNPAGE_PARAM_SCHEMAS);
 
@@ -463,6 +465,6 @@ export const signpageProgressRouteSchema: SignpageSchema = (v) => routeWallet(v)
 export const signpageAnswerOkSchema = obj({ v: lit(1), id: str, ok: lit(true), result: (v) => isPlainObject(v) });
 export const signpageAnswerErrorSchema = obj({ v: lit(1), id: str, ok: lit(false), error: obj({ code: errorCode }) });
 
-/** True when `kind` is one of the twenty-five. */
+/** True when `kind` is one of the twenty-six. */
 export const signpageIsKind = (kind: unknown): kind is SignpageKind =>
   typeof kind === "string" && (SIGNPAGE_KINDS as readonly string[]).includes(kind);

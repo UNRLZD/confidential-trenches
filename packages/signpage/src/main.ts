@@ -75,7 +75,7 @@ import { followRpc, readMoveAt } from "../../wallet/src/deposit/follow.ts";
 import { NEAR_NETWORKS } from "../../wallet/src/deposit/account.ts";
 import { ONECLICK_USDC_ASSETS } from "../../kit/src/checks/oneclick.ts";
 import { POOL_ASSET_DECIMALS, type PoolStatePrice } from "../../kit/src/signpage/messages.ts";
-import { PAGE_POOLS, rentOnce, withPools, withSolanaRent } from "./pools.ts";
+import { PAGE_POOLS, poolBuyDryKind, rentOnce, withPools, withSolanaRent } from "./pools.ts";
 import { poolPrices, wakeWhenShown } from "./pool-price.ts";
 import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import { readSolanaRent } from "../../kit/src/trade/solana/pool-buy.ts";
@@ -269,6 +269,19 @@ else {
     // every start and end of a pool trade of this page: nothing a preview read before it is used after it
     trades: () => buys.edges() + sells.edges() + deposits.edges() + withdraws.edges(),
   });
+  // Max for the coin on screen (src/pools.ts poolBuyDryKind): state.pools' tap_max on the coin's own venue, read on the
+  // same paced pair as background reads, never while a trade runs; the notes and ready proofs as state.pools reads them
+  const poolBuyDry = poolBuyDryKind({
+    pools: PAGE_POOLS,
+    rpcs: dryPair,
+    rent: () => (hasSolana ? rent.get() : null),
+    ready: async () => {
+      if (!testnet || !(await fs.state()).signed_in) return null;
+      const both = await testnet.readyWith(pageNotes);
+      return { notes: both.value, ready: both.ready, open: both.open, landed: both.landed };
+    },
+    trading: () => buys.live() + sells.live() > 0 || (dryPair() ?? []).some((r) => r.url !== undefined && hostLane(r.url).trading()),
+  });
   // a pool quote's price reads (pool-deposit-address.ts priced): USDC in at 1 USD on both reads, X's coin at the page's
   // own Pyth read on its two RPCs (src/pool-price.ts); any other origin has none yet, so it gets no quote
   const pricedFor = (chain: PoolChain, origin: string): PoolQuotePricing | null => poolQuotePricing(prices.get(chain), origin);
@@ -388,6 +401,7 @@ else {
       // on two providers
       ...poolKindMap,
       "pool.sell.dry": (params) => poolSellDry(params),
+      "pool.buy.dry": (params) => poolBuyDry(params),
       // the rebuild from the chain (src/pool-restore.ts): answered started, its stages in state.ops and as progress
       ...(restore ? { restore: restore.kind } : {}),
     }),

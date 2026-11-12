@@ -973,6 +973,28 @@ test("RV9: the newest read (trees(now + 1), right after now) is at confirmed on 
   assert.equal((await p.trees(nowMs)).stateTree.size, 6, "the epoch read is finalized and held nothing from the confirmed one");
 });
 
+// card fresh-money-spendable-at-once: every note that landed this epoch proves on the newest read, so its root must be
+// one both providers hold: a leaf under the cut on one provider's confirmed pages only is refused, never proved on
+test("RV9b: the newest read names no root one provider alone holds: a leaf under the cut on one provider only is refused", async () => {
+  const fin = relChain();
+  const spend = { leaf: big(R.spends[0]!.new_commitment), t: REL_RELEASE_T };
+  const lone = { leaf: noteCommitment(10_000_000n, vaultLabelOf(keccak_256, SCOPE, 8n), 4343n), t: REL_RELEASE_T };
+  const labels = R.deposits.map((x, i) => ({ leaf: big(x.label), t: T(i) }));
+  const confOf = (state: { leaf: bigint; t: bigint }[]): Chain => ({ ...fin, slot: 530, accounts: new Map([...pages(0, entries(state)), ...pages(1, entries(labels))]) });
+  const both = confOf([...REL_DEP, spend]);
+  const one = confOf([...REL_DEP, spend, lone]);
+  const at = (url: string, conf: Chain): SolanaRpc => Object.assign(async (m: string, p: readonly unknown[]) => {
+    const commitment = (p.at(-1) as { commitment?: string } | undefined)?.commitment;
+    const c = m === "getMultipleAccounts" && commitment === "confirmed" ? conf : fin;
+    return rpc({ ...c, time: (sl) => (sl >= 530 ? REL_RELEASE_T + 13n : REL_RELEASE_T) }, MAINNET)(m, p);
+  }, { url });
+  const nowMs = REL_RELEASE_T * 1000n;
+  for (const rs of [[at("https://a.example", one), at("https://b.example", both)], [at("https://a.example", both), at("https://b.example", one)]] as [SolanaRpc, SolanaRpc][])
+    await assert.rejects(poolWith(rs).trees(nowMs + 1n, undefined, { newest: true }), /tree 0: the two RPCs differ below the cut/);
+  // both hold it: the newest root names it
+  assert.equal((await poolWith([at("https://a.example", one), at("https://b.example", one)]).trees(nowMs + 1n, undefined, { newest: true })).stateTree.size, 8);
+});
+
 // card pool-tree-read-waits-for-its-second: mainnet's confirmed slot read equal to its finalized slot (19:00Z, 11 Nov), so
 // a newest read right after now (now + 1) is in now's own block-second until the chain makes its next one
 test("the newest read at now + 1 waits a slot at a time for the chain's next block-second, the note that landed now in its tree", async () => {

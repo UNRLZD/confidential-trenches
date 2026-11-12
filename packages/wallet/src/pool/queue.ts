@@ -10,11 +10,13 @@
 //   of an epoch shares its root, label root, deadline and fee. At each new epoch the ready set is made again, and a
 //   proof of the epoch before stays ready and takeable while its note's new proof is made: the new one replaces it in
 //   one store write (HELD -> HELD, the old context pruned), so the ready set never empties at a boundary and a tap
-//   during the remake takes the old proof. A remake that finishes after that take is dropped, never sent. A deposit's
-//   own note (a deposit note, or a second arrival of a deposit from U) that landed after the epoch's start is proved
-//   at once on the newest root, so the first buy never waits for a boundary; take() hands that proof out past its
-//   epoch only until its replacement is made and never past the next boundary + NEWEST_GRACE_MS. Every other note
-//   (change, refund, return, move) waits for the next epoch: a root right after its own leaf would link two Ws.
+//   during the remake takes the old proof. A remake that finishes after that take is dropped, never sent. A note of
+//   any kind (deposit, change, refund, return, move, second arrival) that landed after the epoch's start is proved at
+//   once on the newest root both RPCs agree on (card fresh-money-spendable-at-once: no tap waits for a boundary, only
+//   for chain finality and the proof); take() hands that proof out past its epoch only until its replacement on the
+//   epoch root is made and never past the next boundary + NEWEST_GRACE_MS. A root right after its own leaf is easier
+//   to tie to the W whose money made that leaf, so a tap spends such a proof only when no epoch-root proof covers it
+//   (the signing page's buy and withdraw pick the rested note first).
 // - W: the fresh wallet W_{chain, l, j} (derive/keys.ts freshWallet), with l the note's label and j its change index
 //   (keys.ts changeIndex: a label's first note gives 0, change note k gives k + 1). So each note has its own W, fixed
 //   by the note, and a restore finds it. W's secret key is zeroed at once; the pool gets only its address and public
@@ -110,12 +112,6 @@ const msg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
 /** The change index of the spend of this note (keys.ts changeIndex): its W is W_{chain, label, jOf(ref)}. */
 export function jOf(ref: NoteRef): number {
   return ref.kind === "change" ? changeIndex({ kind: "change", j: ref.j }) : changeIndex({ kind: "deposit" });
-}
-
-/** A deposit's own note (a deposit note, or a second arrival of a deposit from U): the one kind proved at once on the
- *  newest root when it landed this epoch (pool.ts "Epochs"); every other waits for the next boundary. */
-export function provesOnNewest(ref: NoteRef): boolean {
-  return ref.kind === "deposit" || (ref.kind === "second" && ref.id.id === "U");
 }
 
 const notHidden = (): boolean => (globalThis as { document?: { visibilityState?: string } }).document?.visibilityState !== "hidden";
@@ -280,20 +276,29 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
       .sort(byChunkThenLeaf(pool.ladder));
     if (open.length === 0 && again.length === 0) return out;
     const epochTrees = await pool.trees(start, signal);
-    // the newest trees, read once for every deposit note of this pass; a failed read fails those notes only, and the
-    // epoch's remakes and other notes still run
+    // the newest trees, read once for every note of this pass that landed this epoch; a failed read fails those notes
+    // only, and the epoch's remakes and the epoch's notes still run
     let newest: PoolTrees | Error | undefined;
     const todo: { n: NoteRecord; trees: PoolTrees; root: "epoch" | "newest"; prev?: ReadyProof<R> }[] = [];
-    // the ready set's own notes first (each landed before the epoch began), then the open notes
-    for (const n of again.sort(byChunkThenLeaf(pool.ladder))) todo.push({ n, trees: epochTrees, root: "epoch", prev: ready.get(n.id)! });
+    // the ready set's own notes first (each landed before the epoch began), then the open notes; among the remakes a
+    // newest-root proof first (take refuses it NEWEST_GRACE_MS past the boundary, an epoch-root one stays takeable all
+    // epoch), then by chunk and leaf
+    const byChunk = byChunkThenLeaf(pool.ladder);
+    const newestFirst = (x: NoteRecord, y: NoteRecord): number => {
+      const a = ready.get(x.id)!.root === "newest", b = ready.get(y.id)!.root === "newest";
+      return a !== b ? (a ? -1 : 1) : byChunk(x, y);
+    };
+    // a take or a drop during the epoch-tree read above removes a ready proof: that note is left out of the remakes
+    for (const n of again.filter((x) => ready.has(x.id)).sort(newestFirst)) todo.push({ n, trees: epochTrees, root: "epoch", prev: ready.get(n.id)! });
     for (const n of open) {
       if (todo.length === want) break;
       if (n.leaf!.leafIndex < BigInt(epochTrees.stateTree.size)) todo.push({ n, trees: epochTrees, root: "epoch" });
-      else if (provesOnNewest(n.ref)) {
+      else {
         newest ??= await pool.trees(nowMs + 1n, signal, { newest: true }).catch((e: unknown) => (e instanceof Error ? e : new Error(String(e)))); // every leaf up to now
         if (newest instanceof Error) out.failed.push({ noteId: n.id, error: msg(newest) });
-        else todo.push({ n, trees: newest, root: "newest" });
-      } // any other note that landed in this epoch (change, refund, return, move) waits for the next
+        // a leaf past the pool's time (its landing read before both RPCs' final block reached it) waits for the next pass
+        else if (n.leaf!.leafIndex < BigInt(newest.stateTree.size)) todo.push({ n, trees: newest, root: "newest" });
+      }
     }
     let k = 0;
     const lane = async (prover: VaultProver): Promise<void> => {
