@@ -99,8 +99,9 @@ test("the marks on the builds' minified shapes, any quote; each old shape is no 
   const appNew = [
     "for(let t of e.positions){if(t.asset_held===void 0||t.wallets.some(e=>n.has(`${t.chain}:${e}`)))continue;let a=1}",
     "let r=BigInt(t[2]+(n+`00`).slice(0,2))+(Number(n[2]??`0`)>=5?1n:0n);return r",
-    // nearCents: an exact figure to the nearest cent (review of 98d75c8cb: each row figure from the exact one)
-    "let n=(t*200n+Fs)/(2n*Fs);return e<0n?-n:n",
+    // nearCents: an exact figure to the nearest cent (review of 98d75c8cb: each row figure from the exact one), as this
+    // card's vite build writes it (its absolute value inlined)
+    "kh=e=>{let t=((e<0n?-e:e)*200n+Dh)/(2n*Dh);return e<0n?-t:t}",
     "for(let e=2;new Set(a).size<n&&e<=8;e++)a=i(e);",
   ].join(";");
   assert.deepEqual(marksIn("app", appNew), [sum, bought, value, axis]);
