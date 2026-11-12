@@ -523,7 +523,10 @@ test("APP_HOST's part of a list is built by the terminal deploy's own build(), s
 // internal (check:imports' kit-reach refuses even the path), so this test holds its two prover entries to those names
 test("SIGN_BUILD_OUTPUTS names the prover's files by the kit's PROVER_WORKER_FILE and PROVER_THREAD_FILE, and .gitignore ignores each", async () => {
   const { PROVER_THREAD_FILE, PROVER_WORKER_FILE } = await import("../../kit/src/prover/build.mjs");
-  assert.deepEqual(SIGN_BUILD_OUTPUTS.slice(2), [`packages/signpage/public/${PROVER_WORKER_FILE}`, `packages/signpage/public/${PROVER_THREAD_FILE}`]);
+  assert.deepEqual(SIGN_BUILD_OUTPUTS.slice(2, 4), [`packages/signpage/public/${PROVER_WORKER_FILE}`, `packages/signpage/public/${PROVER_THREAD_FILE}`]);
+  // the fifth, the restore's walk Worker, is named by build-app.mjs (card restore-shows-the-balance-in-seconds)
+  const { WALK } = await import("./build-app.mjs");
+  assert.deepEqual(SIGN_BUILD_OUTPUTS.slice(4), [`packages/signpage/${WALK}`]);
   const ignore = readFileSync(join(PKG, "..", "..", ".gitignore"), "utf8").split("\n");
   for (const f of SIGN_BUILD_OUTPUTS) assert.ok(ignore.includes(`/${f}`), `.gitignore names /${f}`);
 });

@@ -21,7 +21,7 @@ import type { Holdings, HoldingsReader } from "../../wallet/src/pool/buy-wallets
 import { solanaPoolOf } from "../../wallet/src/pool/solana.ts";
 import { freshWallet } from "../../wallet/src/derive/keys.ts";
 import { jOf } from "../../wallet/src/pool/queue.ts";
-import { POSITION_COSTS_KEY, positionsPass, type FoundWallet } from "../src/positions.ts";
+import { POSITION_COSTS_KEY, POSITIONS_KEPT_KEY, positionsPass, type FoundWallet } from "../src/positions.ts";
 import { testnetPool } from "../src/pool-testnet.ts";
 import { BUY_MINTS_KEY, planPoolSell, runPoolSell, type PoolSellHost } from "../src/pool-sell.ts";
 import { poolSellDry } from "../src/pool-sell-dry.ts";
@@ -392,12 +392,29 @@ test("the preview right after a buy's read-back, the pass's finder read still he
   assert.ok(a.result && Number(a.result.out) > 0, `a number on the first ask: ${JSON.stringify(a)}`);
   assert.equal(f.st.reads, reads, "the preview reads no finder");
   assert.deepEqual(await ask([null, null]), { error: "not_funded" }, "W holds nothing on both: as the sale, nothing");
-  // the pass's finder read freed, listing W's token: the pass's holding, the same number, W no longer one bought since
+  // the pass's finder read freed, listing W's token: the pass's holding, the same number, W no longer one bought since.
+  // The pass shows W's row as soon as W is read (positions.ts positionsCache `shown`) and keeps its listing in the store
+  // at its end (positionsPass `keep`, POSITIONS_KEPT_KEY), which boughtSince reads: between the two, W is both the
+  // pass's and one bought since. That window is held open here (the keep's write waits), so the preview is asked in it
+  // every time, not when the store's write happens to be slow (main 16:02Z, line 400 then)
+  let keepGo!: () => void;
+  const keepHeld = new Promise<void>((r) => (keepGo = r));
+  let keeps = 0;
+  const put = w.put.bind(w);
+  w.put = async (store, key, value) => {
+    if (store === "meta" && key === POSITIONS_KEPT_KEY) (keeps++, await keepHeld);
+    return put(store, key, value);
+  };
   f.st.listed = OUT_UNITS;
   free();
   f.st.held = null;
   await until(() => (tp.positionsNow() ?? []).some((p) => p.token === MINT), "the pass lists W's token");
-  assert.deepEqual((await tp.boughtSince(MINT)).since, [], "listed by the pass: not one bought since");
+  await until(() => keeps > 0, "the pass keeps its listing, held");
+  assert.equal((await tp.boughtSince(MINT)).since.length, 1, "the window: the pass lists W, its listing not yet kept");
+  const inWindow = (await ask([OUT_UNITS, OUT_UNITS])) as { result?: { out: string } };
+  assert.equal(inWindow.result?.out, a.result!.out, `in the window W is counted once (pool-sell-dry.ts: a W the pass holds is not one bought since): ${JSON.stringify(inWindow)}`);
+  keepGo();
+  await until(async () => (await tp.boughtSince(MINT)).since.length === 0, "the listing kept: not one bought since");
   const listed = (await ask([OUT_UNITS, OUT_UNITS])) as { result?: { out: string } };
   assert.equal(listed.result?.out, a.result!.out, `the pass's holding, the same number: ${JSON.stringify(listed)}`);
 });

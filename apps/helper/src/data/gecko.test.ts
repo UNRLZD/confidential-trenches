@@ -3,7 +3,7 @@
 // the last YIELD_MS, except urgent reads within the lists' own LIST_FLOOR); a 429 pausing every lane.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { AHEAD_PER_WINDOW, COLD_RESERVE, geckoBudget, GT_LIMIT_PER_MIN, LIST_FLOOR, PAGE_RESERVE, REFRESH_SLOT, throttledUntil, WINDOW_MS } from "./gecko.ts";
+import { AHEAD_PER_WINDOW, COLD_RESERVE, geckoBudget, GT_LIMIT_PER_MIN, LIST_FLOOR, LIST_TURN_MS, PAGE_PER_CLIENT, PAGE_RESERVE, REFRESH_SLOT, throttledUntil, WINDOW_MS } from "./gecko.ts";
 
 test("the measured keyless limit: 5 calls a minute from one address (the published 10 met 429s)", () => assert.equal(GT_LIMIT_PER_MIN, 5));
 
@@ -178,4 +178,56 @@ test("card helper-crowd-429: the minute's count line names each lane and read ta
   t += WINDOW_MS;
   assert.equal(b.take("pages", false, false, "sol bars"), true);
   assert.equal(b.minute(), "geckoterminal calls: pages sol bars 1; refused: none; 429 0; seeded 0; window 1 of 5");
+});
+
+test("card app-faults-seen-on-122: the lists' floor goes to the stalest list of every chain, whichever chain asks first", () => {
+  const t0 = 1_800_000_000_000;
+  let t = t0;
+  const b = geckoBudget(() => t);
+  const base = (since: number) => b.take("lists", true, false, "", { source: "base", since });
+  const rh = (since: number) => b.take("lists", true, false, "", { source: "robinhood", since });
+  for (let i = 0; i < LIST_FLOOR; i++) assert.equal(base(t - 200_000), true, "the floor, taken by the chain that asks first");
+  t = t0 + 12_000;
+  assert.equal(rh(t0 - 250_000), false, "the other chain's older list waits: the floor is spent");
+  t = t0 + WINDOW_MS - 12_000;
+  assert.equal(rh(t0 - 250_000), false, "still spent, and it keeps asking each tick");
+  t = t0 + WINDOW_MS;
+  assert.equal(base(t0 - 100_000), false, "the floor is free, but it is the other chain's, whose list is older");
+  assert.equal(rh(t0 - 250_000), true);
+  assert.equal(rh(t0 - 240_000), true, "and its next, the floor's second call");
+  t += WINDOW_MS;
+  assert.equal(base(t0 - 100_000), true, "nobody older waits: the floor goes to this one");
+  // a chain that asked more than LIST_TURN_MS ago is not waiting
+  assert.equal(rh(t0 - 240_000), true);
+  t += WINDOW_MS;
+  assert.equal(base(t0 - 90_000), true, "the other chain's last ask is long past: this one goes");
+  assert.ok(LIST_TURN_MS > 12_000, "a wait outlasts the lists' own tick");
+});
+
+test("card app-faults-seen-on-122: while an urgent list waits, pages leave the lists' LIST_FLOOR calls of the window free (without one waiting they take the window)", () => {
+  const t = 1_800_000_000_000;
+  const free = geckoBudget(() => t);
+  for (let i = 0; i < GT_LIMIT_PER_MIN; i++) assert.equal(free.take("pages", false, false, "page", { client: `c${i}` }), true, "no list waits: pages take every call");
+  const b = geckoBudget(() => t);
+  b.hold(); // a call the lists could not take (a helper just started): the urgent list is left waiting
+  assert.equal(b.take("lists", true, false, "", { source: "base", since: t - 200_000 }), false);
+  b.release();
+  for (let i = 0; i < GT_LIMIT_PER_MIN - LIST_FLOOR; i++) assert.equal(b.take("pages", false, false, "page", { client: `c${i}` }), true, "the pages keep perMin - LIST_FLOOR");
+  assert.equal(b.take("pages", false, false, "page", { client: "c9" }), false, "the floor's calls stay free");
+  assert.equal(b.take("refresh", false, false, "bars"), false, "from every lane but the lists'");
+  for (let i = 0; i < LIST_FLOOR; i++) assert.equal(b.take("lists", true, false, "", { source: "base", since: t - 200_000 + i }), true, "and the list takes them");
+  assert.equal(b.take("pages", false, false, "page", { client: "c9" }), false);
+});
+
+test("card app-faults-seen-on-122: while an urgent list waits, one caller holds its PAGE_PER_CLIENT and no more, so the floor, a second caller's page and the heavy caller's calls all fit the window", () => {
+  const t = 1_800_000_000_000;
+  const b = geckoBudget(() => t);
+  b.hold();
+  assert.equal(b.take("lists", true, false, "", { source: "base", since: t - 200_000 }), false); // an urgent list left waiting
+  b.release();
+  const one = () => b.take("pages", false, false, "page", { client: "one" });
+  for (let i = 0; i < PAGE_PER_CLIENT; i++) assert.equal(one(), true);
+  assert.equal(one(), false, "the caller holds its share and no more: no call past it that would leave the floor one call");
+  assert.equal(b.take("pages", false, false, "page", { client: "two" }), true, "another caller's first page finds its call");
+  for (let i = 0; i < LIST_FLOOR; i++) assert.equal(b.take("lists", true, false, "", { source: "base", since: t - 200_000 + i }), true, "and both of the floor's calls go");
 });

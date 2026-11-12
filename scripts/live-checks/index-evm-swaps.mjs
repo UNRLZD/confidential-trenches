@@ -17,7 +17,8 @@
 //     sits in the block whose Base clock time is the trade's, was sent by the trade's trader (for a bundle sent to an
 //     ERC-4337 EntryPoint, the account of the user operation whose run holds the trade's swap, read from the receipt
 //     here, never the helper's code); the pool being the emitter (and for v4 the pool id) of the Swap log every sampled
-//     receipt shares, a v4 trade's `amt` is exactly this pool's own Swap leg of the token in the receipt the two
+//     receipt shares (where they share more than one, each a route through two pools of the token, the one with most
+//     swap transactions over the window, each key's logs read on two providers), a v4 trade's `amt` is exactly this pool's own Swap leg of the token in the receipt the two
 //     providers agreed on (two that answered and differ fail, naming each one's leg), less a hook's cut where one is
 //     read: what the trade's sender, whose one swap it is, moved with the PoolManager (helper-v4-hook-liquidity's
 //     judgeable), or for a route, whose sender swaps more than once and nets the token inside the PoolManager, one take
@@ -62,6 +63,8 @@ export const MARGIN_BLOCKS = MARGIN.base;
 const SPAN = { base: 1000, robinhood: 100 };
 const BACK = { base: 6000, robinhood: 1000 };
 const LAG = { base: 50, robinhood: 50 };
+/** The most shared pool keys whose logs a run reads to find the busiest (a route's pools: two in every one read). */
+export const SHARED_MAX = 3;
 const CLOCK = BLOCK_CLOCK.base;
 const SHA = /^[0-9a-f]{40}$/;
 const ISO = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d{1,3})?Z$/;
@@ -297,10 +300,14 @@ export function judge(run) {
     t.moves = moves.map((l) => [topicAddr(l.topics[1]), topicAddr(l.topics[2])]);
     t.swapEmitters = swaps.map((l) => l.address);
   }
-  // the pool: the one Swap-log key every sampled receipt holds
+  // the pool: the one Swap-log key every sampled receipt holds; where they share more than one (each a route through
+  // two pools of the token), the one with most swap transactions over the window, from each key's logs the run read
+  // (card helper-live-run-green-after-122: live run 43250937996 took the first key of the first receipt, PENNY's 6%
+  // side pool, though its other pool carried 44 of the 1,000 blocks' swaps to its 7)
   const common = keys.length === 0 ? [] : [...keys[0]].filter((k) => keys.every((s) => s.has(k)));
-  say(common.length >= 1, `the sampled trades share a pool: ${show(common)}`);
-  const pool = common[0];
+  const counted = common.length > 1 ? sharedCounts(c.shared, common) : null;
+  const pool = counted === null ? common[0] : counted[0]?.key;
+  say(common.length === 1 || (counted !== null && counted.length === common.length), `the sampled trades share a pool: ${show(common)}${common.length > 1 ? (counted !== null && counted.length === common.length ? `; judged on the busiest over the window, ${counted.map((x) => `${x.key} ${x.txs} swap transaction${x.txs === 1 ? "" : "s"}`).join(", ")}` : "; no swap count read for each of them") : ""}`);
   const poolAddr = pool === undefined ? null : pool.split(":")[0];
   const agreedReceipt = (t) => (isObj(c.receipts?.[t.tx]) && !Array.isArray(c.receipts[t.tx].differ) ? c.receipts[t.tx] : null);
   const v4 = pool !== undefined && poolAddr === VENUES[net].poolManager;
@@ -393,6 +400,18 @@ export function judge(run) {
     say(missing.length === 0, `${due.length} swap transaction${due.length === 1 ? "" : "s"} of the pool in blocks ${from} to ${last}${net === "base" ? "" : ` after the oldest trade's time`}, ${missing.length} missing from the tape${missing.length ? `: ${missing.slice(0, 3).join(", ")}` : ""}`);
   }
   return withReads(run, lines);
+}
+
+/** Each shared key's swap transactions over the run's window (c.shared: [{ key, from, to, logs }] as read() reads them),
+ *  busiest first (ties: the order the keys came in), or null when the run read none; a key with no read is left out. */
+export function sharedCounts(shared, keys) {
+  if (!Array.isArray(shared)) return null;
+  const out = [];
+  for (const [i, key] of keys.entries()) {
+    const s = shared.find((x) => isObj(x) && x.key === key && Array.isArray(x.logs));
+    if (s !== undefined) out.push({ key, i, txs: new Set(s.logs.map((l) => l.transactionHash)).size });
+  }
+  return out.sort((a, b) => b.txs - a.txs || a.i - b.i).map(({ key, txs }) => ({ key, txs }));
 }
 
 /** The verdict, and on FAIL a line for each read the helper answered: status, time, Server-Timing. */
@@ -553,30 +572,40 @@ export async function read(base = BASE, token, fetchFn = fetch, rpcs, net = "bas
   for (const tr of tape) run.chain.receipts[tr.tx] = await agreed("eth_getTransactionReceipt", [tr.tx], fetchFn, rpcs, receiptOf, true);
   // the pool: the Swap-log key every sampled receipt holds, then its logs over the blocks the tape covers
   const keys = tape.map((tr) => new Set((one(run.chain.receipts[tr.tx])?.logs ?? []).filter((l) => SWAP_TOPICS.includes(l.topics?.[0])).map((l) => poolKey(l, net))));
-  const pool = keys.length === 0 ? undefined : [...keys[0]].find((k) => keys.every((s) => s.has(k)));
+  const common = keys.length === 0 ? [] : [...keys[0]].filter((k) => keys.every((s) => s.has(k)));
   run.chain.poolLogs = null;
-  if (pool !== undefined && heads.length === 2) {
+  if (common.length > 0 && heads.length === 2) {
     const last = Math.min(...heads) - MARGIN[net];
-    const [address, id] = pool.split(":");
     const oldest = net === "base" ? blockOf(JSON.parse(reads.trades.body).trades.at(-1).t_ms / 1000) : -Infinity;
     const from = Math.max(oldest - 1, last - BACK[net]);
-    const topic0 = (one(run.chain.receipts[tape[0].tx]).logs ?? []).find((l) => poolKey(l, net) === pool).topics[0];
-    const topics = id === undefined ? [topic0 === TOPIC.curveBuy || topic0 === TOPIC.curveSell ? [TOPIC.curveBuy, TOPIC.curveSell] : topic0] : [TOPIC.swap4, id];
-    const all = [];
     // on Robinhood each log's time is part of what two providers must agree on, so only providers that log it pair:
     // the chain's own RPC logs blockTimestamp 0x0 (HEADER_TIMED) and, second in SWAP_RPCS, never agreed with the first
     // on a span with a swap (card helper-restart-fresh: live run 41871356171, "blocks none to none")
     const logRpcs = net === "base" ? rpcs : rpcs.filter((u) => !HEADER_TIMED.has(u));
-    for (let lo = from; lo <= last; lo += SPAN[net]) {
-      const logs = await agreed("eth_getLogs", [{ address, topics, fromBlock: hex(lo), toBlock: hex(Math.min(last, lo + SPAN[net] - 1)) }], fetchFn, logRpcs, (ls) => ls.map((l) => ({ blockNumber: l.blockNumber, transactionHash: l.transactionHash, logIndex: l.logIndex, ...(net === "base" ? {} : { t: Number.parseInt(l.blockTimestamp, 16) }) })));
-      if (!Array.isArray(logs)) {
-        all.length = 0;
-        all.push(null);
-        break;
+    /** One shared key's Swap logs over the window, on two agreeing providers; null when a span was not agreed. */
+    const poolLogsOf = async (pool) => {
+      const [address, id] = pool.split(":");
+      const topic0 = (one(run.chain.receipts[tape[0].tx]).logs ?? []).find((l) => poolKey(l, net) === pool).topics[0];
+      const topics = id === undefined ? [topic0 === TOPIC.curveBuy || topic0 === TOPIC.curveSell ? [TOPIC.curveBuy, TOPIC.curveSell] : topic0] : [TOPIC.swap4, id];
+      const all = [];
+      for (let lo = from; lo <= last; lo += SPAN[net]) {
+        const logs = await agreed("eth_getLogs", [{ address, topics, fromBlock: hex(lo), toBlock: hex(Math.min(last, lo + SPAN[net] - 1)) }], fetchFn, logRpcs, (ls) => ls.map((l) => ({ blockNumber: l.blockNumber, transactionHash: l.transactionHash, logIndex: l.logIndex, ...(net === "base" ? {} : { t: Number.parseInt(l.blockTimestamp, 16) }) })));
+        if (!Array.isArray(logs)) return null;
+        all.push(...logs);
       }
-      all.push(...logs);
+      return { key: pool, from, to: last, logs: all.map((l) => ({ blockNumber: l.blockNumber, transactionHash: l.transactionHash, ...(net === "base" ? {} : { t: l.t }) })) };
+    };
+    if (common.length === 1) run.chain.poolLogs = await poolLogsOf(common[0]);
+    else {
+      // more than one shared key: each one's logs (SHARED_MAX at most), so judge() takes the busiest
+      run.chain.shared = [];
+      for (const k of common.slice(0, SHARED_MAX)) {
+        const got = await poolLogsOf(k);
+        if (got !== null) run.chain.shared.push(got);
+      }
+      const busiest = sharedCounts(run.chain.shared, common)?.[0]?.key;
+      run.chain.poolLogs = run.chain.shared.find((x) => x.key === busiest) ?? null;
     }
-    if (!all.includes(null)) run.chain.poolLogs = { key: pool, from, to: last, logs: all.map((l) => ({ blockNumber: l.blockNumber, transactionHash: l.transactionHash, ...(net === "base" ? {} : { t: l.t }) })) };
   }
   if (net !== "base") {
     // the block times the check needs: the heads', the sampled trades', and the pool read's first block

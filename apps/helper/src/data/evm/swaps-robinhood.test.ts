@@ -496,11 +496,13 @@ test("card helper-chart-fresh: a quiet token's discovery walks the whole cold wi
 
 // card helper-robinhood-capacity fold 7: a pool of a Slipstream-kind CL factory (ROBINHOOD_VENUES.cl) is read only once
 // that factory names it by getPool(token0, token1, tickSpacing), as 0xe0c4ceb9... names 0xf2a0be59... (04:2xZ read)
-function withCl(c: ReturnType<typeof fakeChain>, coin: string, pool: string, names: string) {
+/** `hold`: a post with a Transfer read is held (and counted) only once it settles. */
+function withCl(c: ReturnType<typeof fakeChain>, coin: string, pool: string, names: string, hold: Promise<void> | null = null) {
   const w = (a: string) => `0x${a.slice(2).padStart(64, "0")}`;
   const asked = { transfers: 0, getPool: 0 };
+  const isTransfers = (r: { method: string; params: unknown[] }) => r.method === "eth_getLogs" && (r.params[0] as { topics: unknown[] }).topics[0] === TOPIC.transfer;
   const local = (r: { method: string; params: unknown[] }): unknown => {
-    if (r.method === "eth_getLogs" && ((r.params[0] as { topics: unknown[] }).topics[0] === TOPIC.transfer)) asked.transfers++;
+    if (isTransfers(r)) asked.transfers++;
     if (r.method !== "eth_call") return undefined;
     const q = r.params[0] as { to: string; data: string };
     if (q.to === pool && q.data === "0xc45a0155") return w(ROBINHOOD_VENUES.cl);
@@ -512,6 +514,7 @@ function withCl(c: ReturnType<typeof fakeChain>, coin: string, pool: string, nam
   };
   const fetch = async (url: string, init: RequestInit): Promise<Response> => {
     const reqs = JSON.parse(String(init.body)) as { id: number; method: string; params: unknown[] }[];
+    if (hold !== null && reqs.some(isTransfers)) await hold;
     const mine = reqs.map((r) => local(r));
     const rest = reqs.filter((_, i) => mine[i] === undefined);
     const fwd = rest.length === 0 ? [] : ((await (await c.fetch(url, { ...init, body: JSON.stringify(rest) })).json()) as { id: number }[]);
@@ -528,13 +531,19 @@ test("fold 7: a Slipstream-kind CL pool the lists name is the token's pool once 
   for (const [names, read] of [[pool, true], [`0x${"0b".repeat(20)}`, false]] as const) {
     const chain = fakeChain();
     chain.st.head = REC.lastHead;
-    const cl = withCl(chain, coin, pool, names);
+    // a confirmed hint leaves the helper's own background discovery (card helper-live-run-green-after-122, swaps.ts
+    // verify): its Transfer reads are held until the open has answered, so only the open's own reads are counted
+    let release = () => {};
+    const cl = withCl(chain, coin, pool, names, read ? new Promise<void>((go) => (release = go)) : null);
     const s = open(chain, undefined, { fetch: cl.fetch, pools: new Map(), hint: async () => pool });
     const r = await s.trades(coin, 50);
+    const transfers = cl.asked.transfers;
+    release();
     s.stop();
     assert.equal(r.status, 200);
     assert.ok(cl.asked.getPool > 0, "the factory was asked");
-    if (read) assert.equal(cl.asked.transfers, 0, "the confirmed pool is the token's: no walk of its transfers");
+    if (read) assert.equal(JSON.parse(r.body).filling, undefined, "answered within its bound, waiting on no walk");
+    if (read) assert.equal(transfers, 0, "the confirmed pool is the token's: no walk of its transfers");
     else assert.ok(cl.asked.transfers > 0, "an unconfirmed pool is no pool: the discovery walks the token's transfers");
   }
 });

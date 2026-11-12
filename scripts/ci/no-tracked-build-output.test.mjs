@@ -126,6 +126,7 @@ const READS = {
   "scripts/live-checks/folder.mjs": 'const SIGNPAGE = path.resolve(HERE, "../../packages/signpage");\nexport const js = () => readFileSync(path.join(SIGNPAGE, "public/app.js"));\n',
   "scripts/live-checks/segments.test.mjs": 'const w = readFileSync(path.join(ROOT, "packages", "signpage", "public", "prover-worker.js"));\n',
   "apps/terminal/test/url.mjs": 'const t = readFileSync(new URL("../../../packages/signpage/public/prover-thread.js", import.meta.url));\n',
+  "apps/terminal/test/walk.mjs": 'const w = readFileSync(path.join(ROOT, "packages", "signpage", "public", "walk-worker.js"));\n',
 };
 const refusal = (f) => `${f} reads the signing page's build output without signBuilt(): no checkout holds it until a build makes it; read it at path.join(signBuilt(), <file>) (scripts/signpage-built.mjs)`;
 

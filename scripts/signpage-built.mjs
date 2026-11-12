@@ -1,5 +1,6 @@
 // The signing page's build, made from this tree's sources before anything here reads it (card
-// signpage-generated-merge-free). index.html, public/app.js, public/prover-worker.js and public/prover-thread.js are
+// signpage-generated-merge-free). index.html, public/app.js, public/prover-worker.js, public/prover-thread.js and
+// public/walk-worker.js are
 // build output and never committed (scripts/ci/sign-build-inputs.mjs SIGN_BUILD_OUTPUTS), so every script, test,
 // harness and live check that reads them calls signBuilt() first: it runs build-app.mjs once per process (under a second
 // on a laptop) and returns the package folder, so what is read is always the build of the sources beside it, never a
@@ -23,7 +24,7 @@ export function runBuild(script = BUILD_APP) {
 }
 
 let built = false;
-/** Builds the signing page's four output files in its package folder (once per process) and returns that folder. */
+/** Builds the signing page's five output files in its package folder (once per process) and returns that folder. */
 export function signBuilt() {
   if (!built) runBuild();
   built = true;

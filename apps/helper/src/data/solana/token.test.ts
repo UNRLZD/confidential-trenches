@@ -8,7 +8,7 @@ import type { AddressInfo } from "node:net";
 import { after, before, test } from "node:test";
 import { enableTimers, resetTimers } from "../../../test/mock-timers.ts";
 import { start } from "../../server.ts";
-import { geckoBudget, PAGE_RESERVE, REFRESH_SLOT, WINDOW_MS } from "../gecko.ts";
+import { COLD_RESERVE, geckoBudget, PAGE_RESERVE, REFRESH_SLOT, WINDOW_MS } from "../gecko.ts";
 import { createProxy } from "../../proxy/proxy.ts";
 import { createRpc } from "../../rpc/rpc.ts";
 import { b58decode, pumpCurveAddress, ROW_FIELDS, toRow } from "./lists.ts";
@@ -921,4 +921,83 @@ test("card token-page-data-complete-and-fast: with a holders provider the page's
   assert.equal(shared.calls.some((c) => c.method === "getSignaturesForAddress" || c.method === "getTransaction"), false, "never on the shared path");
   const none = JSON.parse((await createSolanaToken(fakeProxy(), fakeRpc(), { now: () => NOW }).page(PUMP)).body);
   assert.deepEqual([none.risk.snipers_bps.src, none.risk.bundlers_bps.src], ["none", "none"]);
+});
+
+// ---- card app-faults-seen-on-122: a coin's chart leaves its curve's pool when the coin graduates ---------------
+
+/** A pump.fun coin read on its curve and, 11 minutes on, graduated: GeckoTerminal's top pool for it is now its PumpSwap pool
+ *  (the one Jupiter names), the curve's bars end at the graduation, and the budget refuses a held pool's refresh while it
+ *  still lets the chart's own bars read through (release 122: 5qaP7oK...pump drew 2 bars from the curve's pool for a day). */
+const SWAP_POOL = "Eoe22HdCa9rhtBwKL6nNZmZxfuzF35xkxobcvfaF1vWQ";
+function graduating() {
+  const curve = pumpCurveAddress(CURVE);
+  let now = NOW;
+  let graduated = false;
+  const gt = (id: string) => ({ ...clone(FX.gt_token), data: { ...FX.gt_token.data, relationships: { top_pools: { data: [{ id: `solana_${id}`, type: "pool" }] } } } });
+  const shift = (s: number) => ({ data: { attributes: { ohlcv_list: FX.gt_ohlcv.data.attributes.ohlcv_list.map((b: number[]) => [b[0]! + s, ...b.slice(1)]) } } });
+  const urls: string[] = [];
+  const fetch = async (url: string) => {
+    urls.push(url);
+    // the token's top pool: the curve's before graduation, the PumpSwap pool after; each pool's own bars, the swap pool's 10 minutes on
+    const body = url.includes("/ohlcv/") ? (url.includes(`/pools/${SWAP_POOL}/`) ? shift(600) : shift(0)) : gt(graduated ? SWAP_POOL : curve);
+    return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  const inner = fakeRpc();
+  const rpc = {
+    async handle(c: string, ct: string | undefined, body: string, client?: string) {
+      const a = await inner.handle(c, ct, body);
+      if (!graduated || a.status !== 200) return a;
+      // the curve account's `complete` flag (byte 48) set: off its curve
+      const j = JSON.parse(a.body) as { result?: { value?: ({ data: [string, string] } | null)[] } };
+      for (const v of j.result?.value ?? []) if (v !== null && v !== undefined && Array.isArray(v.data) && v.data[1] === "base64") {
+        const d = Buffer.from(v.data[0], "base64");
+        if (d.length > 48) (d[48] = 1), (v.data[0] = d.toString("base64"));
+      }
+      return { status: a.status, body: JSON.stringify(j) };
+    },
+  };
+  const proxy = fakeProxy({ search: (m) => (FX.tokens[m]?.search ?? []).map((r: Record<string, unknown>) => (graduated ? { ...r, graduatedPool: SWAP_POOL } : r)) });
+  const shared = geckoBudget(() => now);
+  const sleep = async (ms: number) => void (now += ms);
+  const t = createSolanaToken(proxy, rpc as never, { now: () => now, sleep, fetch: fetch as never, gecko: shared });
+  return {
+    t, urls, shared, curve,
+    /** 11 minutes on, graduated; the budget's calls are spent down to where a refresh is refused and a stale read is not. */
+    async graduate() {
+      now += 660_000;
+      graduated = true;
+      for (let i = 0; i < GT_PER_MIN - COLD_RESERVE; i++) assert.equal(shared.take("pages"), true);
+      assert.equal(shared.take("refresh"), false, "a held pool's refresh is refused");
+    },
+    /** The budget's window passes: every lane has its calls again. */
+    pass: () => void (now += WINDOW_MS + 1_000),
+  };
+}
+const newest = (a: { body: string }) => (JSON.parse(a.body) as { candles: number[][] }).candles.at(-1)![0]!;
+
+test("card app-faults-seen-on-122: a chart read after the coin graduated draws its bars from the graduated pool, not the curve pool it held (the refresh of the pool refused)", async () => {
+  const g = graduating();
+  const curveBars = await g.t.candles(CURVE, "1m", null, 500);
+  assert.equal(curveBars.status, 200);
+  assert.ok(g.urls[1]!.includes(`/pools/${g.curve}/ohlcv/`), "on its curve: the curve's pool");
+  const before = newest(curveBars);
+  await g.graduate();
+  const page = JSON.parse((await g.t.page(CURVE)).body) as { pool: string; row: { curve_bps: number } };
+  assert.deepEqual([page.row.curve_bps, page.pool], [10_000, SWAP_POOL], "the page knows it graduated, to the PumpSwap pool");
+  const a = await g.t.candles(CURVE, "1m", null, 500);
+  assert.equal(a.status, 200);
+  assert.ok(g.urls.at(-1)!.includes(`/pools/${SWAP_POOL}/ohlcv/`), `the bars were read from ${g.urls.at(-1)}`);
+  assert.equal(newest(a), before + 600, "the graduated pool's bars, not the curve's");
+});
+
+test("card app-faults-seen-on-122: the ahead lane's bars read of a graduated coin takes the graduated pool, not the curve pool it held", async () => {
+  const g = graduating();
+  await g.t.candles(CURVE, "1m", null, 500);
+  await g.graduate();
+  await g.t.page(CURVE);
+  const spent = g.urls.length;
+  g.pass(); // the budget's window passes: the ahead lane has its call
+  assert.equal(await g.t.ahead(), `${CURVE}:1m`);
+  assert.equal(g.urls.length, spent + 1, "one call");
+  assert.ok(g.urls.at(-1)!.includes(`/pools/${SWAP_POOL}/ohlcv/`), `the bars were read from ${g.urls.at(-1)}`);
 });

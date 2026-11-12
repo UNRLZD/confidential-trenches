@@ -17,9 +17,8 @@
 //   - signin.open {way: words} the same; then the test words (the a8 vector's entropy, all zero: BIP-39's first
 //     published vector) are typed with trusted keys while the APP_HOST page calls focus() on its own input every 20 ms:
 //     the field is clicked and typed into as soon as it shows (trusted keys on Chromium and Firefox; on WebKit each
-//     character goes to the top document's focus, so a frame holding it keeps it from the field; the frame may still be
-//     there, inert, for its last
-//     FRAME_LEAVE_MS); the shell's field holds all 12 words and the app none (its count of characters only); Continue signs
+//     character goes to the top document's focus, so a frame holding it keeps it from the field; the frame leaves in
+//     the open's own task, before the field exists); the shell's field holds all 12 words and the app none (its count of characters only); Continue signs
 //     in, the layer closes, and the new frame answers signed in, way words, code_saved true (typed words are stored
 //     saved, words.ts ses.12);
 //   - nav {path}: answered ok, the top window's address becomes SIGN_HOST with that path and query, no navigation; nav
@@ -531,7 +530,7 @@ export async function collect({ engine, site, live, width = "desktop" }) {
     }
     // the words, typed by trusted keys while the app takes the focus back every 20 ms
     await d.evaluateFrame(APP_HOST, "window.__steal(); return true;");
-    // the field clicked and typed into as soon as it shows, inside the frame's last FRAME_LEAVE_MS (it is inert then)
+    // the field clicked and typed into as soon as it shows (the frame is out by then: it leaves in the open's own task)
     const wordsOpenId = await send("signin.open", { return_key: "deposit", way: "words" });
     rec.steps.wordsIn = { openId: wordsOpenId };
     if (!(await until(() => d.evaluate(`return !!document.querySelector('[data-input="words"]');`), 3_000))) {
