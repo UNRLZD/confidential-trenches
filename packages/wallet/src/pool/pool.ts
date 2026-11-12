@@ -8,7 +8,10 @@
 //   (NoteRecord.scope), every label the pool writes hashes it, and so does every context, so a proof made for one pool
 //   is refused by any other.
 // - chain: which fresh wallet a chunk goes to. W = W_{chain, l, j} (derive/keys.ts walletPath), with (l, j) the spent
-//   note's label and change index (keys.ts changeIndex), so each note has its own W and no W serves two notes.
+//   note's label and change index (keys.ts changeIndex), so each note has its own W and no W serves two notes. A pool
+//   with piecesMax above 1 (card buy-spends-several-pieces) has one buy pay one W from several notes: the queue binds
+//   every ready proof to one W, the W of one of the ready notes (its owner), and a buy spends a set of them that holds
+//   that note, so each W a buy paid is still the W of a note it spent and a restore finds it the same way.
 // - ladder: the rungs in the pool's asset (./ladder.ts). A proof withdraws exactly one rung (withdrawnValue, public),
 //   so every release from every user is one of a few standard sizes. The fee is paid from the chunk, never added to
 //   it: a fee read at another time would otherwise make another size.
@@ -77,6 +80,9 @@ export interface Pool<R = unknown> {
   readonly scope: bigint;
   /** The chunk sizes, in the pool's asset. */
   readonly ladder: Ladder;
+  /** The most notes one buy pays one W from (card buy-spends-several-pieces); absent or 1: each proof pays its own
+   *  note's W. */
+  readonly piecesMax?: number;
   /** E: the length of an epoch of the pool's time, ms. */
   readonly epochMs: bigint;
   /** L: every proof of an epoch has the deadline epoch start + L. At least 2E + sendMarginMs; 2E + sendMarginMs +
@@ -159,6 +165,7 @@ export function checkPool(p: Pool): void {
   // below the slack would leave no time in which take() hands a proof out
   if (p.epochMs <= TAKE_SLACK_MS) throw new Error(`pool ${p.id}: epochMs is at most the take slack (${TAKE_SLACK_MS} ms)`);
   for (const f of ["now", "trees", "bind"] as const) if (typeof p[f] !== "function") throw new Error(`pool ${p.id}: ${f} is not a function`);
+  if (p.piecesMax !== undefined && (!Number.isInteger(p.piecesMax) || p.piecesMax < 1)) throw new Error(`pool ${p.id}: piecesMax is an integer at least 1`);
 }
 
 /** Refuses a binding the queue cannot hold a note under: a context not below p, a fee cap at or above the chunk. */

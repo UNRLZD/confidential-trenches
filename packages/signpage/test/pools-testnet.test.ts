@@ -54,7 +54,7 @@ const held = (id: string, attempt: string, value = CHUNK): NoteRecord => ({
   deadlineMs: 1n,
   leaf: { value, label: 1n, commitment: 1n, leafIndex: 0n },
 });
-const ready = (noteId: string, attempt: string, chunk = CHUNK) => [{ noteId, attempt, poolId: KIND.id, chunk, binding: { feeCap: FEE_CAP, request: { tipCap: SOL_TIP_CAP } } }];
+const ready = (noteId: string, attempt: string, chunk = CHUNK) => [{ noteId, attempt, poolId: KIND.id, chunk, wallet: { l: 1n, j: 0, address: "W" }, binding: { feeCap: FEE_CAP, request: { tipCap: SOL_TIP_CAP } } }];
 
 test("the testnet build's pool table is its pins: the devnet Solana pool under its pool kind's id and scope, and each pinned EVM testnet pool", () => {
   assert.equal(POOL_TESTNET, true, "this process runs as the testnet build");
@@ -74,7 +74,7 @@ test("a ready proof of the devnet pool reaches state.pools as ready, and as tap_
   const before = await pools.withPools(SIGNED_IN, notes, pools.PAGE_POOLS, ready("n1", "a1"));
   assert.deepEqual(before.pools?.find((p) => p.chain === "solana"), { chain: "solana", asset: "SOL", balance: "0.05", ready: "0.05" });
   const priced = await pools.withPools(SIGNED_IN, notes, pools.withSolanaRent(pools.PAGE_POOLS, RENT), ready("n1", "a1"));
-  const spend = solanaTapSpendOf(RENT)(CHUNK, FEE_CAP, SOL_TIP_CAP);
+  const spend = solanaTapSpendOf(RENT)([{ chunk: CHUNK, feeCap: FEE_CAP, tipCap: SOL_TIP_CAP }]);
   assert.ok(spend > 0n && spend < CHUNK, `the tap spends ${spend} of the ${CHUNK} chunk`);
   const tapMax = `0.${spend.toString().padStart(9, "0")}`.replace(/0+$/, "");
   assert.deepEqual(priced.pools?.find((p) => p.chain === "solana"), { chain: "solana", asset: "SOL", balance: "0.05", ready: "0.05", tap_max: tapMax });
@@ -114,7 +114,7 @@ test("an EVM pin goes in under its pool kind's id and scope, on its app chain, s
   const [e, ...rest] = pools.pagePoolsOf("testnet", {}, { "base-sepolia": EVM_PIN });
   assert.equal(rest.length, 0);
   assert.deepEqual({ id: e!.id, chain: e!.chain, scope: e!.scope, asset: e!.asset }, { id: k.id, chain: "base", scope: k.scope, asset: "ETH" });
-  assert.equal(e!.spendOf?.(7n, 1n, undefined), 7n);
+  assert.equal(e!.spendOf?.([{ chunk: 7n, feeCap: 1n, tipCap: undefined }]), 7n);
   // the testnet table takes the testnet networks only, mainnet's the mainnet ones
   assert.deepEqual(pools.pagePoolsOf("mainnet", {}, { "base-sepolia": EVM_PIN }), []);
   assert.deepEqual(pools.pagePoolsOf("testnet", { mainnet: SOL_POOLS.devnet! }, {}), []);

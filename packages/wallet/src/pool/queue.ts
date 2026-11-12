@@ -21,6 +21,15 @@
 //   (keys.ts changeIndex: a label's first note gives 0, change note k gives k + 1). So each note has its own W, fixed
 //   by the note, and a restore finds it. W's secret key is zeroed at once; the pool gets only its address and public
 //   key.
+// - Pieces (card buy-spends-several-pieces): a pool with piecesMax above 1 (Solana) has one buy pay one W from several
+//   notes. Every ready proof is then bound to one W, the owner's: the W_{chain, l, j} of the ready note with the
+//   smallest chunk (ties: the later leaf), so a buy that must hold the owner's note spends no larger piece than it
+//   needs, and every W a buy paid is the W of a note it spent (the restore finds it as before, ./buy-wallets.ts). When
+//   the owner changes (its note taken, dropped, or a smaller note ready), every proof bound to another W is made again
+//   for the new one, its old proof kept ready meanwhile as a remake's (a set of them holds no owner's note, so neither
+//   the tap nor the balances' Max uses it). The ready set holds as many notes as the prover makes in half an epoch at
+//   the time its proofs have taken (the mean of the last PROOF_TIMES), at least 1 and at most piecesMax, the largest
+//   chunks first; before any proof is timed, readySetSize. A slow device keeps fewer ready, and Max says so.
 // - One proof per note: only an UNSPENT note is proved, passes run one after another, and the store's compare-and-set
 //   move UNSPENT -> HELD refuses a note another tab or pass holds. The context goes on the note with that move, before
 //   the proof starts (notes/store.ts).
@@ -75,7 +84,20 @@ export type ProofQueueArgs<R> = {
   inFront?: () => boolean;
   /** Notes the queue leaves alone, read each pass: a note a withdraw still owes a send for (its W is the spend's W). */
   skip?: () => Promise<ReadonlySet<string>>;
+  /** Tests only: the monotonic clock proofs are timed on (performance.now unless given). */
+  monoNow?: () => number;
 };
+
+/** How many of the last proofs' times the ready set's size is worked out from (card buy-spends-several-pieces). */
+export const PROOF_TIMES = 5;
+/** A pool with piecesMax above 1 keeps ready as many proofs as the prover makes in this share of an epoch, at the
+ *  proofs' mean time (card buy-spends-several-pieces): half, so the epoch's remakes never take the whole epoch. */
+export function piecesReadySize(epochMs: bigint, proofMs: readonly number[], piecesMax: number, hardwareConcurrency: number | undefined): number {
+  if (proofMs.length === 0) return Math.min(readySetSize(hardwareConcurrency), piecesMax);
+  const mean = proofMs.reduce((a, b) => a + b, 0) / proofMs.length;
+  const fit = Math.floor(Number(epochMs) / 2 / Math.max(mean, 1));
+  return Math.max(1, Math.min(fit, piecesMax));
+}
 
 /** What one pass did: the notes it proved, the notes whose proof was made again, and each failure. */
 export type QueuePass = { made: string[]; remade: string[]; failed: { noteId: string; error: string }[] };
@@ -130,7 +152,13 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
   const { notes, pool } = a;
   const inFront = a.inFront ?? notHidden;
   const provers = a.provers.slice(0, proofPoolSize(a.hardwareConcurrency));
-  const readySize = readySetSize(a.hardwareConcurrency);
+  const shared = (pool.piecesMax ?? 1) > 1;
+  const monoNow = a.monoNow ?? (() => performance.now());
+  const proofMs: number[] = []; // the last PROOF_TIMES proofs' times, ms
+  const readySize = (): number => (shared ? piecesReadySize(pool.epochMs, proofMs, pool.piecesMax!, a.hardwareConcurrency) : readySetSize(a.hardwareConcurrency));
+  // the W every ready proof is bound to, with piecesMax above 1: the owner note's own (null: none chosen yet)
+  type Owner = { noteId: string; l: bigint; j: number; address: string };
+  let owner: Owner | null = null;
   const ready = new Map<string, ReadyProof<R>>();
   const inFlight = new Map<string, { dropped: boolean }>();
   const order = new Map<string, bigint>(); // a note's leaf index, for ready()'s leaf order
@@ -172,12 +200,15 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
 
   // A fresh proof (prev undefined) holds its UNSPENT note first; a remake (prev: the note's ready proof of an earlier
   // epoch) leaves prev ready and the note HELD while it proves, then replaces prev in one write.
-  async function prove(n: NoteRecord, prover: VaultProver, trees: PoolTrees, root: "epoch" | "newest", epochStartMs: bigint, prev: ReadyProof<R> | undefined, signal?: AbortSignal): Promise<void> {
+  async function prove(n: NoteRecord, prover: VaultProver, trees: PoolTrees, root: "epoch" | "newest", epochStartMs: bigint, prev: ReadyProof<R> | undefined, to: Owner | null, signal?: AbortSignal): Promise<void> {
     const flight = inFlight.get(n.id)!;
     const leaf = n.leaf!;
     const chunk = chunkOf(pool.ladder, leaf.value)!;
     const j = jOf(n.ref);
-    const w = freshWallet(seed, pool.chain, leaf.label, j);
+    // W: the owner's with piecesMax above 1, else this note's own
+    const wl = to === null ? leaf.label : to.l;
+    const wj = to === null ? j : to.j;
+    const w = freshWallet(seed, pool.chain, wl, wj);
     w.secretKey.fill(0);
     const deadlineMs = epochStartMs + pool.lifeMs;
     const refundPrecommitment = noteSecrets(seed, { kind: "refund", l: leaf.label, j }).precommitment;
@@ -191,6 +222,7 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
       live(); // closed during the write: the seed's copy may be zeroed
       const spent = noteSecrets(seed, n.ref);
       const next = noteSecrets(seed, { kind: "change", l: leaf.label, j });
+      const t0 = monoNow();
       const p = await poolProveWithdraw(prover, {
         stateTree: trees.stateTree,
         labelTree: trees.labelTree,
@@ -203,13 +235,15 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
         context: binding.context,
       });
       // the kit refused any answer whose 8 signals are not this input's: the chunk, the trees' roots and the context
+      proofMs.push(monoNow() - t0);
+      if (proofMs.length > PROOF_TIMES) proofMs.shift();
       live();
       if (flight.dropped) throw new Error("dropped while it was proved");
       const made = (holder: string): ReadyProof<R> => ({
         noteId: n.id,
         attempt: holder,
         poolId: pool.id,
-        wallet: { chain: pool.chain, l: leaf.label, j, path: w.path, address: w.address },
+        wallet: { chain: pool.chain, l: wl, j: wj, path: w.path, address: w.address },
         chunk,
         epochStartMs,
         deadlineMs,
@@ -263,17 +297,46 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
     // let go of proofs whose note the store moved; those of an earlier epoch stay ready (and HELD) until remade
     const all = await notes.list();
     const byId = new Map(all.map((n) => [n.id, n]));
-    const again: NoteRecord[] = [];
     for (const r of [...ready.values()]) {
       const n = byId.get(r.noteId);
       if (n === undefined || n.state !== "HELD" || n.attempt !== r.attempt) ready.delete(r.noteId);
-      else if (r.epochStartMs < start) again.push(n);
     }
-    const want = readySize - ready.size + again.length;
-    if (want <= 0) return out;
-    const open = all
+    const size = readySize();
+    const byChunk = byChunkThenLeaf(pool.ladder);
+    let open = all
       .filter((n) => n.scope === pool.scope && n.state === "UNSPENT" && n.leaf !== undefined && chunkOf(pool.ladder, n.leaf.value) !== null && !skipped.has(n.id))
-      .sort(byChunkThenLeaf(pool.ladder));
+      .sort(byChunk);
+    let to: Owner | null = null;
+    if (shared) {
+      // the set to keep ready: the largest chunks of the held and the open notes, `size` of them; a held note past it
+      // is let go (a slower prover keeps fewer), an open one past it waits
+      const held = [...ready.values()].map((r) => byId.get(r.noteId)!);
+      const keep = [...held, ...open].sort(byChunk).slice(0, size);
+      const kept = new Set(keep.map((n) => n.id));
+      for (const n of held)
+        if (!kept.has(n.id))
+          await onNote(n.id, async () => {
+            const r = ready.get(n.id);
+            if (r === undefined) return;
+            ready.delete(n.id);
+            await free(n.id, r.attempt);
+          });
+      open = open.filter((n) => kept.has(n.id));
+      // the owner: the kept note with the smallest chunk, the later leaf on a tie
+      const o = keep[keep.length - 1];
+      if (o === undefined) owner = null;
+      else if (owner?.noteId !== o.id) {
+        const j = jOf(o.ref);
+        const w = freshWallet(seed, pool.chain, o.leaf!.label, j);
+        w.secretKey.fill(0);
+        owner = { noteId: o.id, l: o.leaf!.label, j, address: w.address };
+      }
+      to = owner;
+    }
+    const again: NoteRecord[] = [];
+    for (const r of ready.values()) if (r.epochStartMs < start || (to !== null && r.wallet.address !== to.address)) again.push(byId.get(r.noteId)!);
+    const want = (shared ? size : readySize()) - ready.size + again.length;
+    if (want <= 0) return out;
     if (open.length === 0 && again.length === 0) return out;
     const epochTrees = await pool.trees(start, signal);
     // the newest trees, read once for every note of this pass that landed this epoch; a failed read fails those notes
@@ -282,9 +345,11 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
     const todo: { n: NoteRecord; trees: PoolTrees; root: "epoch" | "newest"; prev?: ReadyProof<R> }[] = [];
     // the ready set's own notes first (each landed before the epoch began), then the open notes; among the remakes a
     // newest-root proof first (take refuses it NEWEST_GRACE_MS past the boundary, an epoch-root one stays takeable all
-    // epoch), then by chunk and leaf
-    const byChunk = byChunkThenLeaf(pool.ladder);
+    // epoch), then by chunk and leaf; with piecesMax above 1 the owner's note before every other (its proof is what
+    // makes the others a set a buy can spend)
+    if (to !== null) open.sort((x, y) => (x.id === to.noteId ? -1 : y.id === to.noteId ? 1 : 0));
     const newestFirst = (x: NoteRecord, y: NoteRecord): number => {
+      if (to !== null && (x.id === to.noteId || y.id === to.noteId)) return x.id === to.noteId ? -1 : 1;
       const a = ready.get(x.id)!.root === "newest", b = ready.get(y.id)!.root === "newest";
       return a !== b ? (a ? -1 : 1) : byChunk(x, y);
     };
@@ -306,7 +371,7 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
         if (closed || signal?.aborted) return;
         inFlight.set(t.n.id, { dropped: false });
         try {
-          await prove(t.n, prover, t.trees, t.root, start, t.prev, signal);
+          await prove(t.n, prover, t.trees, t.root, start, t.prev, to, signal);
           (t.prev !== undefined ? out.remade : out.made).push(t.n.id);
         } catch (e) {
           out.failed.push({ noteId: t.n.id, error: msg(e) });

@@ -43,7 +43,7 @@ import { ed25519 } from "@noble/curves/ed25519.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { base58, base64 } from "@scure/base";
-import { readSolanaRent, SOLANA_ANSWER_MAX_BYTES, SOLANA_POOL_FEE_STEP, SOLANA_POOL_SEND_MARGIN_MS, solanaPoolFee, solanaPoolReleaseCost, solanaRentMin, solanaSameProvider, VAULT_FIELD_P, VaultTree, type SolanaRent, type SolanaRpc } from "@blindfill/kit";
+import { readSolanaRent, SOLANA_ANSWER_MAX_BYTES, SOLANA_POOL_BUY_PIECES_MAX, SOLANA_POOL_FEE_STEP, SOLANA_POOL_SEND_MARGIN_MS, solanaPoolFee, solanaPoolReleaseCost, solanaRentMin, solanaSameProvider, VAULT_FIELD_P, VaultTree, type SolanaRent, type SolanaRpc } from "@blindfill/kit";
 import { POOL_TESTNET } from "./network.ts";
 import type { Ladder } from "./ladder.ts";
 import { TAKE_SLACK_MS, type Pool, type PoolTrees } from "./pool.ts";
@@ -563,6 +563,7 @@ export function solanaPool(a: SolanaPoolArgs): Pool<SolanaReleaseRequest> {
     chain: "sol",
     scope,
     ladder: SOL_PIECE_LADDER,
+    piecesMax: SOLANA_POOL_BUY_PIECES_MAX,
     epochMs: SOL_EPOCH_MS,
     lifeMs: SOL_LIFE_MS,
     sendMarginMs: SOL_SEND_MARGIN_MS,

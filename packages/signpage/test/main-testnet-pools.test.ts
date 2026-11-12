@@ -175,14 +175,14 @@ test("the testnet build's state: the devnet pool with the queue's ready proof as
   await ns.move(p.id, "INCOMING", "UNSPENT", { leaf: { value: CHUNK, label: 1n, commitment: noteCommitment(CHUNK, 1n, p.precommitment), leafIndex: 0n } });
   // the holding tab's note store stays open, as the queue's does: a closed one is a dead tab, whose HELD notes are freed
   const held = await ns.move(p.id, "UNSPENT", "HELD", { deadlineMs: BigInt(Date.now() + 600_000), context: "1" });
-  g.__ctReady = [{ noteId: held.id, attempt: held.attempt, poolId: `sol:${PROGRAM}`, chunk: CHUNK, binding: { feeCap: FEE_CAP, request: { tipCap: SOL_TIP_CAP } } }];
+  g.__ctReady = [{ noteId: held.id, attempt: held.attempt, poolId: `sol:${PROGRAM}`, chunk: CHUNK, wallet: { l: 1n, j: 0, address: "W" }, binding: { feeCap: FEE_CAP, request: { tipCap: SOL_TIP_CAP } } }];
 
   await import("../src/main.ts");
   const app = doc.body.children.find((c) => c.tagName === "iframe");
   assert.ok(app, "the shell framed APP_HOST");
   app.dispatchEvent(new Event("load"));
 
-  const want = `0.${solanaTapSpendOf(RENT)(CHUNK, FEE_CAP, SOL_TIP_CAP).toString().padStart(9, "0")}`.replace(/0+$/, "");
+  const want = `0.${solanaTapSpendOf(RENT)([{ chunk: CHUNK, feeCap: FEE_CAP, tipCap: SOL_TIP_CAP }]).toString().padStart(9, "0")}`.replace(/0+$/, "");
   let pool: NonNullable<Awaited<ReturnType<typeof askState>>["pools"]>[number] | undefined;
   // the first state starts the price and Rent reads; each landing is heard, so a later state carries them
   for (let t = 0; t < 300; t++) {

@@ -13,10 +13,13 @@
 //   attempt (a proof whose note moved is not ready), each note counted once. Absent from every entry when no ready list
 //   is given (no queue runs), never "0" in its place; with `open` (the pool ids whose queue runs), absent from each chain
 //   none of whose pools is in it, so a chain whose queue is not open never reads ready "0".
-// - tap_max: the most one tap can spend on the chain. A tap spends one ready proof, one note's chunk (./queue.ts
-//   header, ./ladder.ts chunkOf), less what comes out of it before the spend: so it is the largest spendOf(chunk, the
-//   proof's fee cap, its tip cap) among the proofs `ready` counts, across the chain's pools, never their sum and never
-//   below 0. spendOf is the pool's, from its caller: solanaTapSpendOf (the kit's solanaPoolBuyMaxSpend on the worst
+// - tap_max: the most one tap can spend on the chain. A tap spends the ready proofs bound to one W (card
+//   buy-spends-several-pieces: a pool with piecesMax above 1 binds them all to its owner's W, ./queue.ts; any other
+//   pool gives each note its own W, so one proof), and only a set that holds the owner's note, the note whose own W it
+//   is (its label and jOf(ref) are the W's l and j), so every W a buy pays is a spent note's own. So tap_max is the
+//   largest spendOf(the set's pieces: each chunk, fee cap and tip cap) over the sets of proofs `ready` counts, across
+//   the chain's pools, never their sum and never below 0. A set with no owner's note (proofs left bound to a W whose
+//   note a buy took, until the queue makes them again) counts nothing. spendOf is the pool's, from its caller: solanaTapSpendOf (the kit's solanaPoolBuyMaxSpend on the worst
 //   venue, or on the coin's own for pool.buy.dry, at the proof's own tip cap, the most tip its release lets the tap
 //   pay, and the rent the caller read on two RPCs) or evmTapSpendOf (the chunk itself: an EVM tap asks for a whole
 //   chunk, the signing page's checkEvmBuy refusing any other amount, and the relay fee comes out on chain). Present only
@@ -41,16 +44,19 @@ import {
 } from "@blindfill/kit";
 import type { NoteRecord } from "../notes/store.ts";
 import type { ReadyProof } from "./pool.ts";
+import { jOf } from "./queue.ts";
 
-/** What one ready proof of a chunk, under the proof's fee cap and tip cap (its binding's request.tipCap; undefined when
- * the request names none), can spend at the tap, in base units. */
-export type TapSpendOf = (chunk: bigint, feeCap: bigint, tipCap: bigint | undefined) => bigint;
+/** One ready proof as a piece of a tap: its chunk, its fee cap and its tip cap (its binding's request.tipCap; undefined
+ * when the request names none). */
+export type TapPiece = { chunk: bigint; feeCap: bigint; tipCap: bigint | undefined };
+/** What the ready proofs bound to one W can spend at one tap, in base units. */
+export type TapSpendOf = (pieces: readonly TapPiece[]) => bigint;
 /** A pool on the device's pool table: its id (ReadyProof.poolId), the app chain, its scope and its asset, and what one
  * of its ready proofs can spend (none: its chain's entry has no tap_max). Built with solanaBalancePool or
  * evmBalancePool, so the asset follows the pool's kind. */
 export type BalancePool = { id: string; chain: Chain; scope: bigint; asset: PoolAsset; spendOf?: TapSpendOf };
 /** What poolBalances reads of a ready proof. */
-export type BalanceProof = Pick<ReadyProof, "noteId" | "attempt" | "poolId" | "chunk"> & { binding: Pick<ReadyProof["binding"], "feeCap"> & { request?: unknown } };
+export type BalanceProof = Pick<ReadyProof, "noteId" | "attempt" | "poolId" | "chunk"> & { wallet: Pick<ReadyProof["wallet"], "l" | "j" | "address">; binding: Pick<ReadyProof["binding"], "feeCap"> & { request?: unknown } };
 export type PoolBalance = { chain: Chain; asset: PoolAsset; balance: string; ready?: string; tap_max?: string };
 /** A RESERVED note's release the device read landed, by note id: the attempt that sent it and the value it withdrew. */
 export type LandedRelease = { attempt: string; withdrawn: bigint };
@@ -109,8 +115,9 @@ export function evmBalancePool(id: string, chain: "base" | "robinhood", scope: b
 // sell come back to W, and into the user's pool balance when the sweep runs, less the teardown's and its own costs above.
 // On this rung after a full curve sell W holds about 3.6M after its teardown, a note of about 2.15M: under the floor,
 // so those lamports stay on W (devnet run of 5 Nov 21:12Z, W HFGAyAxq…, before the floor: its sweep made 2,154,336).
-/** A Solana proof's spend at the tap: the kit's solanaPoolBuyMaxSpend on `venue`, the relay fee at the proof's fee cap,
- * the tip at the proof's tip cap (./solana.ts SOL_TIP_CAP, 0.001 SOL: the most the release lets the tap tip, so a tap at
+/** A Solana tap's spend from the ready proofs bound to one W: the kit's solanaPoolBuyMaxSpend over them as pieces (card
+ * buy-spends-several-pieces: each pays its chunk less its relay fee, the tip and W's costs once) on `venue`, each relay
+ * fee at the proof's fee cap, the tip at the largest of the proofs' tip caps (./solana.ts SOL_TIP_CAP, 0.001 SOL: the most the release lets the tap tip, so a tap at
  * any tip it may pay fills) and `rent`, the Rent sysvar the caller read on two RPCs (./solana.ts solanaCostReads, the
  * kit's readSolanaRent). `venue`: the coin's own (its kind, token account size and cashback, as the kit's
  * readSolanaPoolBuyVenue reads them on two providers: card max-is-priced-for-the-coin, the 0.01 SOL rung spends
@@ -118,15 +125,19 @@ export function evmBalancePool(id: string, chain: "base" | "robinhood", scope: b
  * SOLANA_POOL_WORST_BUY_VENUE (384,880 on that rung), which any coin's venue funds. A proof whose request names no tip
  * cap is refused. */
 export function solanaTapSpendOf(rent: SolanaRent, venue: Pick<SolanaPoolBuyVenue, "kind" | "tokenAccountSize" | "cashback"> = SOLANA_POOL_WORST_BUY_VENUE): TapSpendOf {
-  return (chunk, feeCap, tipCap) => {
-    if (typeof tipCap !== "bigint" || tipCap < 0n) throw new Error("a Solana proof's request names no tip cap");
-    return solanaPoolBuyMaxSpend({ withdrawnValue: chunk, relayFee: feeCap }, venue, tipCap, rent);
+  return (pieces) => {
+    let tip = 0n;
+    for (const { tipCap } of pieces) {
+      if (typeof tipCap !== "bigint" || tipCap < 0n) throw new Error("a Solana proof's request names no tip cap");
+      if (tipCap > tip) tip = tipCap;
+    }
+    return solanaPoolBuyMaxSpend(pieces.map((p) => ({ withdrawnValue: p.chunk, relayFee: p.feeCap })), venue, tip, rent);
   };
 }
 /** An EVM proof's ask at the tap: the whole chunk. The signing page's checkEvmBuy (signpage src/rules/pool.ts) refuses
  * an EVM pool.buy whose amount is not the proof's value; the relay fee comes out of it on chain (contracts/pool-evm
  * PrivacyPoolSimple.sol:64), so the trade box asks for chunks on EVM. */
-export const evmTapSpendOf: TapSpendOf = (chunk) => chunk;
+export const evmTapSpendOf: TapSpendOf = (pieces) => pieces.reduce((m, p) => (p.chunk > m ? p.chunk : m), 0n);
 
 /** The asset's decimals from the kit's table; an asset not in it is refused. */
 function decimalsOf(p: BalancePool): number {
@@ -169,6 +180,7 @@ export function poolBalances(notes: readonly NoteRecord[], pools: readonly Balan
   }
   const byId = new Map(notes.map((n) => [n.id, n]));
   const counted = new Set<string>(); // a note's proof counts once
+  const sets = new Map<string, { owned: boolean; pieces: TapPiece[] }>(); // a pool's counted proofs by their W
   for (const p of pools) {
     const c = chains.get(p.chain)!;
     for (const n of notes) {
@@ -192,11 +204,24 @@ export function poolBalances(notes: readonly NoteRecord[], pools: readonly Balan
       if (typeof feeCap !== "bigint" || feeCap < 0n) throw new Error(`ready proof for note ${r.noteId}: its fee cap is not a bigint at least 0`);
       const tipCap = (r.binding.request as { tipCap?: unknown } | undefined)?.tipCap;
       if (tipCap !== undefined && (typeof tipCap !== "bigint" || tipCap < 0n)) throw new Error(`ready proof for note ${r.noteId}: its tip cap is not a bigint at least 0`);
-      let spend = p.spendOf(r.chunk, feeCap, tipCap as bigint | undefined);
-      if (typeof spend !== "bigint" || spend > r.chunk) throw new Error(`pool ${p.id}: the spend of a ${r.chunk} chunk is not a bigint at most the chunk`);
+      const address = r.wallet?.address;
+      if (typeof address !== "string") throw new Error(`ready proof for note ${r.noteId}: no wallet`);
+      const set = sets.get(address) ?? { owned: false, pieces: [] };
+      sets.set(address, set);
+      set.pieces.push({ chunk: r.chunk, feeCap, tipCap: tipCap as bigint | undefined });
+      // the owner's note: the one whose own W this is
+      if (r.wallet.l === n.leaf?.label && r.wallet.j === jOf(n.ref)) set.owned = true;
+    }
+    if (p.spendOf === undefined) continue;
+    for (const set of sets.values()) {
+      if (!set.owned) continue;
+      let spend = p.spendOf(set.pieces);
+      const sum = set.pieces.reduce((a, x) => a + x.chunk, 0n);
+      if (typeof spend !== "bigint" || spend > sum) throw new Error(`pool ${p.id}: the spend of ${sum} in chunks is not a bigint at most them`);
       if (spend < 0n) spend = 0n;
       if (spend > c.tapMax) c.tapMax = spend;
     }
+    sets.clear();
   }
   return [...chains].map(([chain, c]) => ({
     chain,

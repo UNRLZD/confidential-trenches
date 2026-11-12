@@ -23,7 +23,7 @@ const RUNG = SOL_LADDER.min; // 0.01 SOL
 const SOL = solanaBalancePool("sol:p", 11n);
 const BASE = evmBalancePool("evm:b", "base", 22n);
 const held: NoteRecord = { id: "n1", ref: { kind: "deposit", s: 11n, i: 0 }, scope: 11n, precommitment: 1n, state: "HELD", attempt: "a1", deadlineMs: 1n, leaf: { value: RUNG, label: 1n, commitment: 1n, leafIndex: 0n } };
-const ready: BalanceProof = { noteId: "n1", attempt: "a1", poolId: SOL.id, chunk: RUNG, binding: { feeCap: FEE, request: { tipCap: SOL_TIP_CAP } } };
+const ready: BalanceProof = { noteId: "n1", attempt: "a1", poolId: SOL.id, chunk: RUNG, wallet: { l: 1n, j: 0, address: "W" }, binding: { feeCap: FEE, request: { tipCap: SOL_TIP_CAP } } };
 const pair = (k: "pump" | "pumpswap"): readonly [SolanaRpc, SolanaRpc] => [replay(fx[k], 0), replay(fx[k], 1)];
 
 function deps(over: Partial<PoolBuyDryDeps> & { rpcsOf?: () => readonly [SolanaRpc, SolanaRpc] } = {}): PoolBuyDryDeps {
