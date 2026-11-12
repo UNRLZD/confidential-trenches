@@ -491,7 +491,7 @@ type RunPlant = {
   fresh?: bigint;
   /** deposit notes of these values that landed before the epoch (leaves 0 to k-1, the run's note leaf k): every tree
    *  holds them; each has its own W, which the helper's bind and the chain here do not serve */
-  rested?: bigint[];
+  rested?: readonly bigint[];
   /** an address with code (eth_getCode answers 0x6080 and a send to it is estimated at 30,000 gas) */
   codeAt?: string;
   /** that send's estimate by its sender (default 30,000) */
