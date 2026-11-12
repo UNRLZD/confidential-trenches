@@ -75,7 +75,8 @@ const tied = (re, more) => ({
 // own W of an unspent note a buy of several pieces paid) is swept only when, read in the sweep's own pass on both RPCs:
 // W owns no token account of either token program (getTokenAccountsByOwner, W alone, none at all, a zero-balance one
 // included); W's latest transaction (getSignaturesForAddress, W alone) is the same signature and slot on both; that
-// block's height at finalized is the same on both; and each RPC's finalized block height is past it + 151, so no
+// block's height at finalized is the same on both (getBlock with the one config the helper forwards, the kit's
+// HELPER_SOLANA_BLOCK_HEADER, whole); and each RPC's finalized block height is past it + 151, so no
 // transaction signed before W's latest (another device's buy, signed before its pieces paid W) can still land. W's latest
 // transaction read again on both RPCs between the signing and the send drops the sweep when it changed.
 const FOUND = "a found W is swept only once both RPCs read it owning no token account and past its latest transaction's blockhash life, the same latest transaction on both, read in the sweep's pass and again before its send";
@@ -83,14 +84,17 @@ const found = {
   test(js) {
     const s = new RegExp(`;let (?<h>${I})=(?<t>${I})\\.bare===!0\\?await (?<fq>${I})\\((?<r>${I}),(?<w>${I})\\.address\\)\\.catch\\(\\(\\)=>null\\):void 0;if\\(\\k<h>===null\\)return\\{end:\`holds\`,steady:!1,[^]{0,3000}?let\\[${I}\\]=await ${I}\\(\\[${I}\\]\\);return \\k<h>!==void 0&&await (?<lo>${I})\\(\\k<r>,\\k<w>\\.address\\)\\.catch\\(\\(\\)=>null\\)!==\\k<h>\\?\\{end:\`holds\`,steady:!1,`).exec(js)?.groups;
     if (!s) return false;
-    const q = new RegExp(`async function ${esc(s.fq)}\\((?<r>${I}),(?<o>${I})\\)\\{if\\(!await (?<nt>${I})\\(\\k<r>,\\k<o>\\)\\)return null;let (?<l>${I})=await (?<la>${I})\\(\\k<r>,\\k<o>\\);if\\(\\k<l>===null\\)return null;let (?<b>${I})=\\(await (?<bo>${I})\\(\\k<r>,async (?<p>${I})=>await \\k<p>\\(\`getBlock\`,\\[\\k<l>\\.slot,\\{commitment:\`finalized\`,[^{}]*\\}\\]\\)\\)\\)\\.map\\((?<e>${I})=>\\k<e>\\?\\.blockHeight\\);return!\\k<b>\\.every\\((?<f>${I})=>Number\\.isSafeInteger\\(\\k<f>\\)\\)\\|\\|\\k<b>\\[0\\]!==\\k<b>\\[1\\]\\?null:\\(await \\k<bo>\\(\\k<r>,async (?<p2>${I})=>await \\k<p2>\\(\`getBlockHeight\`,\\[\\{commitment:\`finalized\`\\}\\]\\)\\)\\)\\.every\\((?<g>${I})=>Number\\.isSafeInteger\\(\\k<g>\\)&&\\k<g>>\\k<b>\\[0\\]\\+(?<life>${I})\\)\\?\\k<l>\\.signature:null\\}`).exec(js)?.groups;
+    const q = new RegExp(`async function ${esc(s.fq)}\\((?<r>${I}),(?<o>${I})\\)\\{if\\(!await (?<nt>${I})\\(\\k<r>,\\k<o>\\)\\)return null;let (?<l>${I})=await (?<la>${I})\\(\\k<r>,\\k<o>\\);if\\(\\k<l>===null\\)return null;let (?<b>${I})=\\(await (?<bo>${I})\\(\\k<r>,async (?<p>${I})=>await \\k<p>\\(\`getBlock\`,\\[\\k<l>\\.slot,(?<hd>${I})\\]\\)\\)\\)\\.map\\((?<e>${I})=>\\k<e>\\?\\.blockHeight\\);return!\\k<b>\\.every\\((?<f>${I})=>Number\\.isSafeInteger\\(\\k<f>\\)\\)\\|\\|\\k<b>\\[0\\]!==\\k<b>\\[1\\]\\?null:\\(await \\k<bo>\\(\\k<r>,async (?<p2>${I})=>await \\k<p2>\\(\`getBlockHeight\`,\\[\\{commitment:\`finalized\`\\}\\]\\)\\)\\)\\.every\\((?<g>${I})=>Number\\.isSafeInteger\\(\\k<g>\\)&&\\k<g>>\\k<b>\\[0\\]\\+(?<life>${I})\\)\\?\\k<l>\\.signature:null\\}`).exec(js)?.groups;
     if (!q) return false;
     const is = (name, v) => new RegExp(`[,; ]${esc(name)}=${v}[,;]`).test(js);
     const latest = new RegExp(`async function ${esc(q.la)}\\((?<r>${I}),(?<o>${I})\\)\\{let (?<n>${I})=\\(await ${esc(q.bo)}\\(\\k<r>,async (?<p>${I})=>await \\k<p>\\(\`getSignaturesForAddress\`,\\[\\k<o>,\\{limit:1,commitment:\`confirmed\`\\}\\]\\)\\)\\)\\.map\\([^]{0,400}?\\);return \\k<n>\\[0\\]&&\\k<n>\\[1\\]&&\\k<n>\\[0\\]\\.signature===\\k<n>\\[1\\]\\.signature&&\\k<n>\\[0\\]\\.slot===\\k<n>\\[1\\]\\.slot\\?\\k<n>\\[0\\]:null\\}`).test(js);
     const again = new RegExp(`[,; ]${esc(s.lo)}=async\\((?<r>${I}),(?<o>${I})\\)=>\\(await ${esc(q.la)}\\(\\k<r>,\\k<o>\\)\\)\\?\\.signature\\?\\?null[,;]`).test(js);
     const t = new RegExp(`async function ${esc(q.nt)}\\((?<r>${I}),(?<o>${I})\\)\\{return\\(await Promise\\.all\\(\\k<r>\\.flatMap\\((?<p>${I})=>\\[(?<a>${I}),(?<b>${I})\\]\\.map\\((?<i>${I})=>\\k<p>\\(\`getTokenAccountsByOwner\`,\\[\\k<o>,\\{programId:\\k<i>\\},\\{encoding:\`base64\`,commitment:\`confirmed\`\\}\\]\\)\\)\\)\\)\\)\\.every\\((?<e>${I})=>Array\\.isArray\\(\\k<e>\\?\\.value\\)&&\\k<e>\\.value\\.length===0\\)\\}`).exec(js)?.groups;
     const both = new RegExp(`[,; ]${esc(q.bo)}=\\((?<r>${I}),(?<f>${I})\\)=>Promise\\.all\\(\\[\\k<f>\\(\\k<r>\\[0\\]\\),\\k<f>\\(\\k<r>\\[1\\]\\)\\]\\)[,;]`).test(js);
-    return latest && again && both && Boolean(t) && is(q.life, "151") && is(t.a, "`TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA`") && is(t.b, "`TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb`");
+    // the getBlock config, whole: the one object the helper forwards (the kit's HELPER_SOLANA_BLOCK_HEADER), so a drift of
+    // either side is red here, never a found W that holds for good on mainnet
+    const header = is(q.hd, "Object\\.freeze\\(\\{commitment:`finalized`,encoding:`json`,transactionDetails:`none`,rewards:!1,maxSupportedTransactionVersion:0\\}\\)");
+    return header && latest && again && both && Boolean(t) && is(q.life, "151") && is(t.a, "`TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA`") && is(t.b, "`TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb`");
   },
 };
 /** Each rule's mark in the bundle, by what it holds. */

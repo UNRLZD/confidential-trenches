@@ -69,6 +69,7 @@ import { SOLANA_COMPUTE_BUDGET_PROGRAM, SOLANA_CU_PRICE_MAX, SOLANA_PUMP_AMM_PRO
 import { SolanaRpcTransportError, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import { vaultLabelOf } from "../../kit/src/vault/shapes.ts";
 import type { ErrorCode, TradeStage, TxRef } from "../../kit/src/signpage/messages.ts";
+import { HELPER_SOLANA_BLOCK_HEADER } from "../../kit/src/helper/v1.ts";
 import { freshWallet } from "../../wallet/src/derive/keys.ts";
 import { noteCommitment, noteSecrets, type NoteRef } from "../../wallet/src/notes/secrets.ts";
 import { refKey, type Leaf, type NoteRecord, type NoteStore } from "../../wallet/src/notes/store.ts";
@@ -2091,7 +2092,7 @@ async function foundQuiet(rpcs: Rpcs, owner: string): Promise<string | null> {
   if (!(await ownsNoTokens(rpcs, owner))) return null;
   const last = await latestAt(rpcs, owner);
   if (last === null) return null;
-  const blocks = await both(rpcs, async (r) => (await r("getBlock", [last.slot, { commitment: "finalized", encoding: "json", transactionDetails: "none", rewards: false, maxSupportedTransactionVersion: 0 }])) as { blockHeight?: unknown } | null);
+  const blocks = await both(rpcs, async (r) => (await r("getBlock", [last.slot, HELPER_SOLANA_BLOCK_HEADER])) as { blockHeight?: unknown } | null);
   const heights = blocks.map((b) => b?.blockHeight);
   if (!heights.every((x) => Number.isSafeInteger(x)) || heights[0] !== heights[1]) return null;
   const past = await both(rpcs, async (r) => (await r("getBlockHeight", [{ commitment: "finalized" }])) as unknown);

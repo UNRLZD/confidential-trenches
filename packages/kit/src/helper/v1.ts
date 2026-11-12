@@ -187,6 +187,12 @@ export type HelperProxyCode = "path_not_allowed";
 // POST /v1/rpc/{chain}
 // ---------------------------------------------------------------------------------------------------------------
 
+/** The one getBlock config the Solana routes forward (card buy-spends-several-pieces): a block's header at finalized,
+ *  no transactions, signatures or rewards. The signing page's found W rule reads it (pool-sell.ts foundQuiet) and the
+ *  helper forwards getBlock only with exactly this (apps/helper/src/rpc/rpc.ts blockHeaderAllowed), from this one
+ *  object, so the two never drift apart. */
+export const HELPER_SOLANA_BLOCK_HEADER = Object.freeze({ commitment: "finalized", encoding: "json", transactionDetails: "none", rewards: false, maxSupportedTransactionVersion: 0 } as const);
+
 /** The method allowlist per chain (H7 with 7.1's second-provider reads). Base and Robinhood are EVM. */
 export const HELPER_RPC_METHODS = {
   solana: [

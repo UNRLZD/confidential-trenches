@@ -49,6 +49,7 @@
 //                           not { jsonrpc: "2.0", id, method, params? } with an integer or string id and object or array
 //                           params, and a method off the list in any request of a batch.
 import { AsyncLocalStorage } from "node:async_hooks";
+import { HELPER_SOLANA_BLOCK_HEADER } from "@blindfill/kit";
 import { budgetFromEnv, EVM_RANGE_MESSAGE, evmThrottleS, KEYED_COST, KEYED_DAY, KEYED_PACE, keyedDayEnv, LIMIT_WINDOW_MS, LOGS_REFUSED, PROVIDER_PACE, providerHolds, RETRY_AFTER_MAX_S, throttled, upstreamBudget, upstreamRetryAfterS, type BudgetLimits, type KeyedProvider, type Pace, type ProviderHolds } from "../limits/limits.ts";
 import { RPC_BATCH_MAX, RPC_BODY_MAX, RPC_CHAINS, RPC_METHODS, type RpcChain } from "./methods.ts";
 import { createSlot, CREDITS, type Slot, type SlotName } from "./slot.ts";
@@ -573,11 +574,11 @@ function scanAllowed(r: Record<string, unknown>, programs: readonly string[]): b
 /**
  * getBlock only as a header read (card buy-spends-several-pieces): the signing page reads the finalized height of one
  * block, the one a found W's latest transaction is in (packages/signpage/src/pool-sell.ts foundQuiet), as params exactly
- * [slot, { commitment: "finalized", encoding: "json", transactionDetails: "none", rewards: false,
- * maxSupportedTransactionVersion: 0 }], the slot a whole number. A block's transactions, signatures or rewards (megabytes
+ * [slot, the kit's HELPER_SOLANA_BLOCK_HEADER] (finalized, json, transactionDetails none, rewards false,
+ * maxSupportedTransactionVersion 0: the page reads with the same object), the slot a whole number. A block's transactions, signatures or rewards (megabytes
  * an answer) would spend the keyed provider's quota for every caller. Anything else is refused before any call.
  */
-const BLOCK_HEADER = Object.freeze({ commitment: "finalized", encoding: "json", transactionDetails: "none", rewards: false, maxSupportedTransactionVersion: 0 });
+export const BLOCK_HEADER: Readonly<Record<string, unknown>> = HELPER_SOLANA_BLOCK_HEADER;
 function blockHeaderAllowed(r: Record<string, unknown>): boolean {
   const p = r.params;
   if (!Array.isArray(p) || p.length !== 2 || !Number.isSafeInteger(p[0]) || (p[0] as number) < 0 || !isPlain(p[1])) return false;

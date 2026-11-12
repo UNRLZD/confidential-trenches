@@ -1,14 +1,14 @@
 {
   "_note": {
-    "good": "card/buy-spends-several-pieces's build (mainnet; main 7635cb52 merged): packages/signpage/index.html and public/app.js as build-app.mjs wrote them on that branch, the found W's rule in it: PASS",
+    "good": "card/buy-spends-several-pieces's build (mainnet; main 2498306e9 merged): packages/signpage/index.html and public/app.js as build-app.mjs wrote them on that branch, the found W's rule in it and its getBlock params the kit's HELPER_SOLANA_BLOCK_HEADER: PASS",
     "bad": "11c963f9's build (mainnet), the committed packages/signpage/index.html and public/app.js there: W's surplus left on W, no sweep past a kept account: FAIL",
     "beforeFold": "08290868's build (mainnet), the committed packages/signpage/index.html and public/app.js there, before delta review 7's fold (no buy record: an airdrop's full sell swept W with its own coin held): FAIL on the seen and the own-coin rules alone",
     "beforeFold8": "5697d7a1's build (mainnet), the committed packages/signpage/index.html and public/app.js there, before delta review 8's fold (no buy record: the page's holdings, the helper's word on mainnet, decided the pass and were part of what W read as): FAIL on the seen and own-coin rules",
     "beforeFloor": "main 383b1ffe's build (mainnet; release-102, kit-sol-pool-deposit-floor merged), the committed packages/signpage/index.html and public/app.js there: the sell's rule refuses only a note under the pool's least deposit, so it signs a deposit back under the kit's release floor: FAIL on the sell's rule alone"
   },
   "good": {
-    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-Z15RIRWep6F77eXA7dgCrFo+nX+nItsxIktcGyh3fvguaSRRQ5Svh3qFJxjbELlI\"></script>\n  </head>\n  <body></body>\n</html>\n",
-    "sha384": "sha384-Z15RIRWep6F77eXA7dgCrFo+nX+nItsxIktcGyh3fvguaSRRQ5Svh3qFJxjbELlI",
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-eQA5HViVlU4HkJbEurU6nVpIzxGYmcCUhoCbA//xFRBcLhBSaD0ETUQwSBol8dDG\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-eQA5HViVlU4HkJbEurU6nVpIzxGYmcCUhoCbA//xFRBcLhBSaD0ETUQwSBol8dDG",
     "carries": {
       "a full sell deposits W's surplus": true,
       "a full sell keeps what lifts the sweep to the floor, a page's opening on each tree and each owed claim's cost": true,

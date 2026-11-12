@@ -784,7 +784,9 @@ function chain(plant: Plant = {}) {
           assert.deepEqual(params[1], { limit: 1, commitment: "confirmed" });
           return [{ signature: wLatest.signature, slot: wLatest.slot, err: null, memo: null, blockTime: null, confirmationStatus: "finalized" }];
         case "getBlock": {
-          assert.equal((params[1] as { commitment: string }).commitment, "finalized");
+          // exactly the one config the helper forwards (apps/helper/src/rpc/rpc.ts BLOCK_HEADER, its test pins the same)
+          assert.deepEqual({ ...(params[1] as object) }, { commitment: "finalized", encoding: "json", transactionDetails: "none", rewards: false, maxSupportedTransactionVersion: 0 });
+          assert.equal(params.length, 2);
           const h = heightAt.get(params[0] as number);
           return h === undefined ? null : { blockHeight: h, blockhash: BLOCKHASH, parentSlot: (params[0] as number) - 1, blockTime: null };
         }
