@@ -1,0 +1,236 @@
+{
+ "good": {
+  "base": "http://127.0.0.1:18931",
+  "at": "2026-11-12T17:58:39.062Z",
+  "reads": [
+   {
+    "route": "solana",
+    "read": "slot",
+    "id": 1,
+    "ms": 79,
+    "status": 200,
+    "headers": {
+     "x-helper-commit": "b72cb2c33e121d62f8d033d3ef0bf462d85cd790",
+     "access-control-allow-origin": "https://confidential.unrealized.trade"
+    },
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":468617386}"
+   },
+   {
+    "route": "solana",
+    "read": "header",
+    "id": 2,
+    "ms": 107,
+    "status": 200,
+    "headers": {
+     "x-helper-commit": "b72cb2c33e121d62f8d033d3ef0bf462d85cd790",
+     "access-control-allow-origin": "https://confidential.unrealized.trade"
+    },
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"keys\":[\"blockHeight\",\"blockTime\",\"blockhash\",\"parentSlot\",\"previousBlockhash\"],\"blockHeight\":446633024}}"
+   },
+   {
+    "route": "solana",
+    "read": "full",
+    "id": 3,
+    "ms": 1,
+    "status": 400,
+    "headers": {
+     "x-helper-commit": "b72cb2c33e121d62f8d033d3ef0bf462d85cd790",
+     "access-control-allow-origin": "https://confidential.unrealized.trade"
+    },
+    "body": "{\"error\":{\"code\":\"method_not_allowed\"}}"
+   },
+   {
+    "route": "solana-devnet",
+    "read": "slot",
+    "id": 4,
+    "ms": 342,
+    "status": 200,
+    "headers": {
+     "x-helper-commit": "b72cb2c33e121d62f8d033d3ef0bf462d85cd790",
+     "access-control-allow-origin": "https://confidential.unrealized.trade"
+    },
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":4,\"result\":521545805}"
+   },
+   {
+    "route": "solana-devnet",
+    "read": "header",
+    "id": 5,
+    "ms": 72,
+    "status": 200,
+    "headers": {
+     "x-helper-commit": "b72cb2c33e121d62f8d033d3ef0bf462d85cd790",
+     "access-control-allow-origin": "https://confidential.unrealized.trade"
+    },
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":5,\"result\":{\"keys\":[\"blockHeight\",\"blockTime\",\"blockhash\",\"parentSlot\",\"previousBlockhash\"],\"blockHeight\":508676579}}"
+   },
+   {
+    "route": "solana-devnet",
+    "read": "full",
+    "id": 6,
+    "ms": 2,
+    "status": 400,
+    "headers": {
+     "x-helper-commit": "b72cb2c33e121d62f8d033d3ef0bf462d85cd790",
+     "access-control-allow-origin": "https://confidential.unrealized.trade"
+    },
+    "body": "{\"error\":{\"code\":\"method_not_allowed\"}}"
+   }
+  ]
+ },
+ "bad_before": {
+  "base": "https://ct-api.unrealized.trade",
+  "at": "2026-11-12T17:57:22.622Z",
+  "reads": [
+   {
+    "route": "solana",
+    "read": "slot",
+    "id": 1,
+    "ms": 863,
+    "status": 200,
+    "headers": {
+     "x-helper-commit": "7635cb5245bb71fa5e6294987c2d5a03737e7bf4",
+     "access-control-allow-origin": "https://confidential.unrealized.trade"
+    },
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":468617019}"
+   },
+   {
+    "route": "solana",
+    "read": "header",
+    "id": 2,
+    "ms": 775,
+    "status": 400,
+    "headers": {
+     "x-helper-commit": "7635cb5245bb71fa5e6294987c2d5a03737e7bf4",
+     "access-control-allow-origin": "https://confidential.unrealized.trade"
+    },
+    "body": "{\"error\":{\"code\":\"method_not_allowed\"}}"
+   },
+   {
+    "route": "solana",
+    "read": "full",
+    "id": 3,
+    "ms": 273,
+    "status": 400,
+    "headers": {
+     "x-helper-commit": "7635cb5245bb71fa5e6294987c2d5a03737e7bf4",
+     "access-control-allow-origin": "https://confidential.unrealized.trade"
+    },
+    "body": "{\"error\":{\"code\":\"method_not_allowed\"}}"
+   },
+   {
+    "route": "solana-devnet",
+    "read": "slot",
+    "id": 4,
+    "ms": 524,
+    "status": 200,
+    "headers": {
+     "x-helper-commit": "7635cb5245bb71fa5e6294987c2d5a03737e7bf4",
+     "access-control-allow-origin": "https://confidential.unrealized.trade"
+    },
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":4,\"result\":521545483}"
+   },
+   {
+    "route": "solana-devnet",
+    "read": "header",
+    "id": 5,
+    "ms": 238,
+    "status": 400,
+    "headers": {
+     "x-helper-commit": "7635cb5245bb71fa5e6294987c2d5a03737e7bf4",
+     "access-control-allow-origin": "https://confidential.unrealized.trade"
+    },
+    "body": "{\"error\":{\"code\":\"method_not_allowed\"}}"
+   },
+   {
+    "route": "solana-devnet",
+    "read": "full",
+    "id": 6,
+    "ms": 285,
+    "status": 400,
+    "headers": {
+     "x-helper-commit": "7635cb5245bb71fa5e6294987c2d5a03737e7bf4",
+     "access-control-allow-origin": "https://confidential.unrealized.trade"
+    },
+    "body": "{\"error\":{\"code\":\"method_not_allowed\"}}"
+   }
+  ]
+ },
+ "bad_full_forwarded": {
+  "base": "http://127.0.0.1:18931",
+  "at": "2026-11-12T17:58:39.062Z",
+  "reads": [
+   {
+    "route": "solana",
+    "read": "slot",
+    "id": 1,
+    "ms": 79,
+    "status": 200,
+    "headers": {
+     "x-helper-commit": "b72cb2c33e121d62f8d033d3ef0bf462d85cd790",
+     "access-control-allow-origin": "https://confidential.unrealized.trade"
+    },
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":468617386}"
+   },
+   {
+    "route": "solana",
+    "read": "header",
+    "id": 2,
+    "ms": 107,
+    "status": 200,
+    "headers": {
+     "x-helper-commit": "b72cb2c33e121d62f8d033d3ef0bf462d85cd790",
+     "access-control-allow-origin": "https://confidential.unrealized.trade"
+    },
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"keys\":[\"blockHeight\",\"blockTime\",\"blockhash\",\"parentSlot\",\"previousBlockhash\"],\"blockHeight\":446633024}}"
+   },
+   {
+    "route": "solana",
+    "read": "full",
+    "id": 3,
+    "ms": 1,
+    "status": 200,
+    "headers": {
+     "x-helper-commit": "b72cb2c33e121d62f8d033d3ef0bf462d85cd790",
+     "access-control-allow-origin": "https://confidential.unrealized.trade"
+    },
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":3,\"result\":{\"keys\":[\"blockHeight\",\"blockTime\",\"blockhash\",\"parentSlot\",\"previousBlockhash\",\"rewards\",\"transactions\"],\"blockHeight\":446633024}}"
+   },
+   {
+    "route": "solana-devnet",
+    "read": "slot",
+    "id": 4,
+    "ms": 342,
+    "status": 200,
+    "headers": {
+     "x-helper-commit": "b72cb2c33e121d62f8d033d3ef0bf462d85cd790",
+     "access-control-allow-origin": "https://confidential.unrealized.trade"
+    },
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":4,\"result\":521545805}"
+   },
+   {
+    "route": "solana-devnet",
+    "read": "header",
+    "id": 5,
+    "ms": 72,
+    "status": 200,
+    "headers": {
+     "x-helper-commit": "b72cb2c33e121d62f8d033d3ef0bf462d85cd790",
+     "access-control-allow-origin": "https://confidential.unrealized.trade"
+    },
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":5,\"result\":{\"keys\":[\"blockHeight\",\"blockTime\",\"blockhash\",\"parentSlot\",\"previousBlockhash\"],\"blockHeight\":508676579}}"
+   },
+   {
+    "route": "solana-devnet",
+    "read": "full",
+    "id": 6,
+    "ms": 2,
+    "status": 400,
+    "headers": {
+     "x-helper-commit": "b72cb2c33e121d62f8d033d3ef0bf462d85cd790",
+     "access-control-allow-origin": "https://confidential.unrealized.trade"
+    },
+    "body": "{\"error\":{\"code\":\"method_not_allowed\"}}"
+   }
+  ]
+ }
+}
