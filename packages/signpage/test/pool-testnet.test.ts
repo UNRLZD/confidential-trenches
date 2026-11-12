@@ -438,9 +438,10 @@ test("a state read runs the RESERVED pass (card signpage-pool-buy fold 1): a not
   assert.deepEqual(await states(ns), ["RESERVED"]);
   assert.equal(seeds.length, 1);
   assert.ok(seeds[0]!.every((b) => b === 0), "the pass's seed copy is zeroed");
-  // a later read tries again
+  // a later read tries again (the load's rent backs, card round-trip-costs-less, read on their own: the Rent sysvar for
+  // the W this note paid, in the background)
   await t.stateRead();
-  assert.equal(calls.length, 4);
+  assert.equal(calls.filter((m) => m === "getSlot").length, 4);
   assert.deepEqual(await states(ns), ["RESERVED"]);
 });
 
