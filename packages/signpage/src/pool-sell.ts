@@ -1897,6 +1897,11 @@ async function rentBack(h: PoolSellHost, x: RentBack, hold?: Hold): Promise<Ende
       const lamports = a!;
       // W at 0 with a claim still owed is owed, never dropped (review 5 of 38e59182, info)
       if (lamports === 0n) return { end: owed > 0 ? ("owed" as const) : ("nothing" as const), detail: owed > 0 ? `W holds nothing, owed ${owed} cashback claim${owed > 1 ? "s" : ""}` : "W holds nothing" };
+      // a found W (no buy recorded, card buy-spends-several-pieces): swept only on the found W's rule, read here, in the
+      // pass that reads the lamports the sweep signs for; short of it W holds, not as its own state, so every later pass
+      // reads it again
+      const quiet = x.bare === true ? await foundQuiet(rpcs, w.address).catch(() => null) : undefined;
+      if (quiet === null) return { end: "holds" as const, steady: false, detail: "a found W: not yet past its last transaction's blockhash, or owning a token account, on both RPCs" };
       // the gate; the sizes the sweep is priced on are read again with its pages (depositHeld, review P2-1 of 77055f4e)
       let sizes = await treeSizes(rpcs, x.program, x.pool, wait);
       const s = await seed();
@@ -1928,6 +1933,8 @@ async function rentBack(h: PoolSellHost, x: RentBack, hold?: Hold): Promise<Ende
       // a simulation that fails on either RPC (one a slot behind, a page another deposit just filled): read again
       if (!sims.every((v) => v !== undefined && v !== null && v.err === null)) throw new Error(`the sweep simulates ${JSON.stringify(sims.map((v) => v?.err ?? null))}`);
       const [one] = await signAll([wire]);
+      // a found W's latest transaction read again on both RPCs: one landed since the rule's read drops the sweep
+      if (quiet !== undefined && (await latestOf(rpcs, w.address).catch(() => null)) !== quiet) return { end: "holds" as const, steady: false, detail: "a found W: a transaction landed on W after the rule's read" };
       return { end: "sent" as const, ref, precommitment, planned, value, one: one!, last: bh.lastHeight };
     });
     if (sweep === null) return end("gave_up", "the sweep");
@@ -1994,10 +2001,9 @@ async function rentBackOwed(h: PoolSellHost, given: RentBack, o: OwedRentBack, h
   // writes the record before its send without the mark, names W's own coin to the sweep
   const rec = await Promise.resolve(h.bought?.get(given.w.address)).catch(() => undefined);
   const buy = rec && rec.rebuilt !== true ? rec : undefined;
-  // a W found holding SOL with no buy recorded (o.found): swept only while both RPCs read it owning no token account,
-  // of either token program; one that owns any holds, as a W with no record always does
-  const bare = !buy && o.found === true && (await ownsNoTokens(given.rpcs, given.w.address).catch(() => false));
-  const x: RentBack = buy ? { ...given, mints: mintsOf(given.mints, [buy]), buy } : { ...given, buy: null, ...(bare ? { bare: true as const } : {}) };
+  // a W found holding SOL with no buy recorded (o.found): the pass runs, and its sweep is built only on the found W's
+  // rule (foundQuiet), read in the sweep's own pass
+  const x: RentBack = buy ? { ...given, mints: mintsOf(given.mints, [buy]), buy } : { ...given, buy: null, ...(o.found === true ? { bare: true as const } : {}) };
   const seen = await heldSeen(x).catch(() => undefined);
   if (seen !== undefined && seen === o.seen) return;
   const r = await rentBack(h, x, hold);
@@ -2069,6 +2075,40 @@ export async function resumeRentBacks(h: PoolSellHost, locks: Locks | null = glo
     if (!go) return;
   }
 }
+
+/**
+ * The found W's rule (card buy-spends-several-pieces): a W the device found holding SOL with no buy of its recorded (the
+ * own W of an UNSPENT note: a buy of several pieces whose pieces paid W and whose buy, maybe still in flight on another
+ * device on the same 12 words, has not landed) is swept only when, on both RPCs:
+ *  - W owns no token account of either token program, a zero-balance one included (getTokenAccountsByOwner, W alone);
+ *  - W's latest transaction (getSignaturesForAddress, W alone, the same signature on both) is in a finalized block, and
+ *    each RPC's finalized block height is past that block's height + 151: past the life of any blockhash a transaction
+ *    signed before it carries, so no buy that relies on the SOL already on W can still land (its tag 3 was signed
+ *    before its pieces landed). A later buy is paid by its own pieces and never relies on what W holds.
+ * Either RPC failing, lagging or disagreeing: null, W holds. The chain's own bound, no clock. W's latest signature, or null.
+ */
+async function foundQuiet(rpcs: Rpcs, owner: string): Promise<string | null> {
+  if (!(await ownsNoTokens(rpcs, owner))) return null;
+  const last = await latestAt(rpcs, owner);
+  if (last === null) return null;
+  const blocks = await both(rpcs, async (r) => (await r("getBlock", [last.slot, { commitment: "finalized", encoding: "json", transactionDetails: "none", rewards: false, maxSupportedTransactionVersion: 0 }])) as { blockHeight?: unknown } | null);
+  const heights = blocks.map((b) => b?.blockHeight);
+  if (!heights.every((x) => Number.isSafeInteger(x)) || heights[0] !== heights[1]) return null;
+  const past = await both(rpcs, async (r) => (await r("getBlockHeight", [{ commitment: "finalized" }])) as unknown);
+  return past.every((x) => Number.isSafeInteger(x) && (x as number) > (heights[0] as number) + FOUND_BLOCKHASH_LIFE) ? last.signature : null;
+}
+/** A blockhash's life in block heights, as the buy reads it (pool-buy.ts BLOCKHASH_LIFE). */
+const FOUND_BLOCKHASH_LIFE = 151;
+/** W's latest transaction on both RPCs (getSignaturesForAddress, W alone): the same signature and slot on both, or null. */
+async function latestAt(rpcs: Rpcs, owner: string): Promise<{ signature: string; slot: number } | null> {
+  const got = await both(rpcs, async (r) => (await r("getSignaturesForAddress", [owner, { limit: 1, commitment: "confirmed" }])) as unknown);
+  const one = got.map((x) => {
+    const e = Array.isArray(x) && x.length === 1 ? (x[0] as { signature?: unknown; slot?: unknown } | null) : null;
+    return e && typeof e.signature === "string" && /^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(e.signature) && Number.isSafeInteger(e.slot) && (e.slot as number) >= 0 ? { signature: e.signature, slot: e.slot as number } : null;
+  });
+  return one[0] && one[1] && one[0].signature === one[1].signature && one[0].slot === one[1].slot ? one[0] : null;
+}
+const latestOf = async (rpcs: Rpcs, owner: string): Promise<string | null> => (await latestAt(rpcs, owner))?.signature ?? null;
 
 /** Both RPCs read `owner` owning no token account of either token program (four calls, each naming W alone). */
 async function ownsNoTokens(rpcs: Rpcs, owner: string): Promise<boolean> {

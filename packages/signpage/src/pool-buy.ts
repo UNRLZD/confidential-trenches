@@ -872,8 +872,6 @@ async function buyRun(h: PoolBuyHost, ask: PoolAsk, at: { fault?: unknown }): Pr
       // the route as bound, told once the take holds the note (sendAndSettle): W, then the venue the check passed and its
       // pool (the curve's account or the AMM pool's)
       const bound: readonly BuyRoute[] = [{ wallet: w.address }, { venue: venue.kind, pool: venue.kind === "pump-curve" ? venue.curve : venue.pool }];
-      // W's buy mint, written before the send (delta review 7 of 08290868): the rent back holds while W holds any of it
-      await h.bought?.put(w.address, { mint: venue.mint, program: venue.tokenProgram });
       // a buy of several pieces: its owed record before the take, so a page that closes from here on leaves W found
       // (resumePieces); none written, nothing taken or sent
       if (before.length > 0) {
@@ -888,6 +886,8 @@ async function buyRun(h: PoolBuyHost, ask: PoolAsk, at: { fault?: unknown }): Pr
           /* thrown */
         }
       };
+      // W's buy mint, written before the send (delta review 7 of 08290868): the rent back holds while W holds any of it
+      await h.bought?.put(w.address, { mint: venue.mint, program: venue.tokenProgram });
       return await sendAndSettle(h, r, release, pool, signed, bh.lastHeight, wait, { token, minOut, tell, bound, decimals, early }, before);
     }
   } catch (e) {
