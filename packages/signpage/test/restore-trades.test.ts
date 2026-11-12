@@ -9,6 +9,7 @@ import assert from "node:assert/strict";
 import { readFileSync, existsSync } from "node:fs";
 import { after, test } from "node:test";
 import { IDBFactory } from "fake-indexeddb";
+import { base58 } from "@scure/base";
 import { entropyToWords, wordsToSeed64 } from "@blindfill/wallet/derive";
 import { openWalletStore } from "@blindfill/wallet/store";
 import { noteCommitment, noteSecrets } from "../../wallet/src/notes/secrets.ts";
@@ -71,6 +72,7 @@ test("a device restored from the words reads back every round trip: two closed a
   const lists: { w: string; until?: string }[] = [];
   // a route that answers a signature with a transaction not its own (review of 776d40528, P3-2)
   let lie: string | null = null;
+  let lied = 0;
   globalThis.fetch = (async (_url: string | URL, init?: RequestInit) => {
     const b = JSON.parse(String(init?.body)) as { id: string; method: string; params: unknown[] };
     const ok = (result: unknown) => new Response(JSON.stringify({ jsonrpc: "2.0", id: b.id, result }), { status: 200, headers: { "content-type": "application/json" } });
@@ -85,7 +87,7 @@ test("a device restored from the words reads back every round trip: two closed a
     }
     if (b.method === "getTransaction") {
       gets++;
-      if (p0 === lie) return ok({ ...txs.get(p0), transaction: { ...(txs.get(p0) as unknown as { transaction: object }).transaction, signatures: [buy0.sig] } });
+      if (p0 === lie) return (lied++, ok({ ...txs.get(p0), transaction: { ...(txs.get(p0) as unknown as { transaction: object }).transaction, signatures: [buy0.sig] } }));
       if (txs.has(p0)) return ok(txs.get(p0));
       // the feed's writes recorded; its other transactions are version 1, which a "json" read at version 0 refuses
       if (existsSync(new URL(`feed-${p0.slice(0, 6)}.json`, DIR))) return ok(JSON.parse(raw(`feed-${p0.slice(0, 6)}`)));
@@ -132,12 +134,12 @@ test("a device restored from the words reads back every round trip: two closed a
   history.set(Ws[2]!, [sell2!, buy2!]);
   lie = sell2!.sig;
   lists.length = 0;
-  const lieFrom = gets;
   tp = make();
   await tp.positions();
   await tp.settle();
-  for (let i = 0; i < 100 && gets === lieFrom; i++) await new Promise((r) => setTimeout(r, 50));
-  await new Promise((r) => setTimeout(r, 500));
+  // until the run has read W2's sale (the answer not its own) and written what it does after it
+  for (let i = 0; i < 2_400 && lied === 0; i++) await new Promise((r) => setTimeout(r, 50));
+  for (let i = 0; i < 20; i++) await new Promise((r) => setTimeout(r, 50));
   assert.deepEqual(lists, [{ w: Ws[2]!, until: buy2!.sig }], "only the open W is read, on from its buy");
   assert.notEqual((await marks())[Ws[2]!], true, "no mark for good on a sale whose answer was not its own");
   assert.ok(!(await w.keys("ops")).includes(`restored/${sell2!.sig}`));
@@ -210,10 +212,18 @@ test("a sale W does not sign gives no op; the mark is for good only with the sal
   assert.deepEqual(mark(st), { after: bs, mint: MINT, program: "P" }, "a cursor before the answer that was not its own");
   assert.deepEqual([...((await tradesDone!(st, "owed/buy-sol")) as Set<string>)], [], "a cursor is read again");
   assert.deepEqual([...((await tradesFrom!(st)) as Map<string, unknown>)], [[W, { after: bs, mint: MINT, program: "P" }]]);
-  // sold out by a transaction W does not sign: no sale op, no mark for good
+  // a signed sale in full whose figures cannot be read (a transfer with seed, tag 11): no sale op, yet W's trades end
+  // there for good (review of f73ee1c82, P3-b)
+  const odd = structuredClone(sale) as unknown as { meta: { innerInstructions: { instructions: { data: string; programIdIndex: number; accounts: number[] }[] }[] }; transaction: { message: { accountKeys: string[] } } };
+  const oddKeys = odd.transaction.message.accountKeys;
+  const tix = odd.meta.innerInstructions.flatMap((g) => g.instructions).find((i) => oddKeys[i.programIdIndex] === "11111111111111111111111111111111" && oddKeys[i.accounts[0]!] === W && base58.decode(i.data)[0] === 2)!;
+  const td = base58.decode(tix.data);
+  td[0] = 11;
+  tix.data = base58.encode(td);
+  assert.deepEqual(restoredTradeOps(W, { mint: MINT, program: "P", txs: [{ signature: bs, tx: buy }, { signature: ss, tx: odd }] }).map((o) => o.rec.kind), ["buy"], "no sale op from it");
   st = storeOf();
-  await writeTradeOps!(st, W, { mint: MINT, program: "P", txs: [{ signature: bs, tx: buy }, { signature: ss, tx: unsigned }], soldOut: true });
-  assert.deepEqual(mark(st), { after: ss, mint: MINT, program: "P" });
+  await writeTradeOps!(st, W, { mint: MINT, program: "P", txs: [{ signature: bs, tx: buy }, { signature: ss, tx: odd }], soldOut: true });
+  assert.equal(mark(st), true, "for good: never read on");
   // the sale in full with its op: for good, and a later cursor never takes it back
   st = storeOf();
   await writeTradeOps!(st, W, { mint: MINT, program: "P", txs: [{ signature: bs, tx: buy }, { signature: ss, tx: sale }], soldOut: true });

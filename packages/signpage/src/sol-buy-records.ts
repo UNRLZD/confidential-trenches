@@ -47,8 +47,11 @@
 //   any record that lacks them. An op is written only where no op of the store names its signature (this device's own
 //   ops win), so a rerun adds nothing twice.
 // - Which Ws: every W with no buy record of this device's own (none, or a `rebuilt` one) and no final "trades read" mark
-//   (TRADES_READ_KEY true): a W whose sale in full was read, and gave its sale op, gets the mark and is not read again
-//   (review of 776d40528, P3-2: never when that sale's answer was not its own, so its op is never lost); a W still
+//   (TRADES_READ_KEY true): a W whose sale in full was read, every answer up to it its signature's own, gets the mark
+//   and is not read again (review of 776d40528, P3-2: never when that sale's answer was not its own, so its op is never
+//   lost), with a sale op or without one (review of f73ee1c82, P3-b: a signed sale in full trade-fill.ts cannot read
+//   still ends W's trades; read on, W would cost a list call every load for good, and a later dust burn and close
+//   would read as a sale paid with the rent back); a W still
 //   holding (an open buy, a sale in part, a read cut short) gets the mark as a cursor, { after, mint, program }: the
 //   last of its transactions read, and the next load reads W on from there only (buy-wallets.ts `from`: one
 //   getSignaturesForAddress `until` it and up to SOL_TRADE_TXS getTransaction), so a sale it makes from another device
@@ -117,8 +120,7 @@ export async function tradesFrom(st: Pick<TradesStore, "get">): Promise<Readonly
 }
 
 /** Writes W's trade ops (restoredTradeOps) where no op of the store names their signatures, then W's "trades read"
- *  mark: final only when the read reached W's sale in full and that sale is an op (written here, or the device's own);
- *  else a cursor at the last transaction read whose answer was its own (see the top). Whether it wrote an op. */
+ *  mark: final once the read reached W's sale in full with every answer its own (see the top); else a cursor at the last transaction read whose answer was its own (see the top). Whether it wrote an op. */
 export async function writeTradeOps(st: TradesStore, w: string, buy: SolanaBuy): Promise<boolean> {
   const ops = restoredTradeOps(w, buy);
   const named = new Set<string>();
@@ -135,7 +137,7 @@ export async function writeTradeOps(st: TradesStore, w: string, buy: SolanaBuy):
   const taken = txs.findIndex(({ signature, tx }) => !solanaOwnTx(tx, signature));
   const read = taken < 0 ? txs : txs.slice(0, taken);
   const last = read.at(-1)?.signature;
-  const sold = buy.soldOut === true && taken < 0 && last !== undefined && (named.has(last) || ops.some((o) => o.rec.kind === "sell" && o.rec.txs[0]!.hash === last));
+  const sold = buy.soldOut === true && taken < 0 && last !== undefined;
   if (sold || last !== undefined) {
     const mark: true | SolanaTradesFrom = sold ? true : { after: last!, mint: buy.mint, program: buy.program };
     // a final mark stays final
