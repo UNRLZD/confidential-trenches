@@ -355,6 +355,20 @@ function keyForms(keys: Partial<Record<VendorName, string>>): Buffer[] {
   return [...forms].map((f) => Buffer.from(f, "utf8"));
 }
 
+/** Every string of a parsed JSON value, its keys included, one a line (no key form holds a line break, KEY_SHAPE), so a
+ *  key the JSON spelt escaped is read as it is. Walked without recursion: a 4 MB answer may nest deep. */
+function decodedStrings(v: unknown): string {
+  const out: string[] = [];
+  const todo: unknown[] = [v];
+  while (todo.length > 0) {
+    const x = todo.pop();
+    if (typeof x === "string") out.push(x);
+    else if (Array.isArray(x)) for (const y of x) todo.push(y);
+    else if (typeof x === "object" && x !== null) for (const [k, y] of Object.entries(x)) out.push(k), todo.push(y);
+  }
+  return out.join("\n");
+}
+
 /** A reset header in seconds from now, or an epoch in seconds or milliseconds; Retry-After also as an HTTP date. */
 export function resetMs(h: Headers, now: number): number {
   const retry = h.get("retry-after");
@@ -750,12 +764,15 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
       if (r.status === 401 || r.status === 403) return { ...UPSTREAM("key", `${name} key`, waits()), said };
       if (r.status < 200 || (r.status >= 300 && r.status < 400)) return { ...UPSTREAM("answer", `${name} answer`, waits()), said };
       if (text === undefined || !/^application\/([a-z0-9.+-]+\+)?json\s*(;|$)/i.test(r.headers.get("content-type") ?? "")) return { ...UPSTREAM("answer", `${name} answer`, waits()), said: { status: r.status } };
+      let parsed: unknown;
       try {
-        JSON.parse(text);
+        parsed = JSON.parse(text);
       } catch {
         return { ...UPSTREAM("answer", `${name} answer`, waits()), said: { status: r.status } };
       }
-      if (holdsKey(text)) return { ...UPSTREAM("answer", `${name} answer`, waits()), said: { status: r.status } };
+      // card helper-says-why-a-vendor-refused, review P3: a key holding ", \ or / is spelt escaped in JSON; its decoded
+      // strings are read too
+      if (holdsKey(text) || holdsKey(decodedStrings(parsed))) return { ...UPSTREAM("answer", `${name} answer`, waits()), said: { status: r.status } };
       const timing = [...waits(), `send;dur=${Math.round(mono() - sentAt)}`];
       return { status: r.status, body: text, fetchedAt, timing, ...(r.status >= 200 && r.status < 300 ? {} : { said }) };
     }
