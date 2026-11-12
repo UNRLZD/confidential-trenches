@@ -71,18 +71,23 @@ export function toTrades(body: unknown): Trade[] | null {
   return out;
 }
 
-/** A tape's text, a read's body or a pushed message, as trades: null when it is over BODY_MAX, not JSON or not of the shape. */
-function parseTape(text: string): Trade[] | null {
+/** A tape as read: its trades, and whether the helper said its older trades are still being read (`filling` true:
+ *  the helper's cold tape, apps/helper/src/data/solana/trades.ts and ../evm/swaps.ts). */
+type Read = { trades: Trade[]; filling: boolean };
+
+/** A tape's text, a read's body or a pushed message: null when it is over BODY_MAX, not JSON or not of the shape. */
+function parseTape(text: string): Read | null {
   if (text.length > BODY_MAX) return null;
   try {
-    return toTrades(JSON.parse(text));
+    const body = JSON.parse(text) as unknown;
+    const trades = toTrades(body);
+    return trades === null ? null : { trades, filling: isObject(body) && body.filling === true };
   } catch {
     return null;
   }
 }
 
-/** One read of the helper; no marks (null) on a non-200, a throw or an answer not of the shape. */
-export async function readTrades(chain: MarketChain, token: string, fetchFn: typeof fetch = fetch, signal?: AbortSignal): Promise<Trade[] | null> {
+async function readTape(chain: MarketChain, token: string, fetchFn: typeof fetch, signal?: AbortSignal): Promise<Read | null> {
   try {
     const timeout = AbortSignal.timeout(TIMEOUT_MS);
     const r = await fetchFn(TRADES_URL(chain, token), { ...HELPER_FETCH_INIT, signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
@@ -93,13 +98,19 @@ export async function readTrades(chain: MarketChain, token: string, fetchFn: typ
   }
 }
 
+/** One read of the helper; no marks (null) on a non-200, a throw or an answer not of the shape. */
+export async function readTrades(chain: MarketChain, token: string, fetchFn: typeof fetch = fetch, signal?: AbortSignal): Promise<Trade[] | null> {
+  return (await readTape(chain, token, fetchFn, signal))?.trades ?? null;
+}
+
 const same = (a: readonly Trade[], b: readonly Trade[]): boolean =>
   a.length === b.length && a.every((t, i) => t.tx === b[i]!.tx && t.t_ms === b[i]!.t_ms && t.side === b[i]!.side && t.usd === b[i]!.usd && t.amt === b[i]!.amt && t.trader === b[i]!.trader);
 
 const NONE: readonly Trade[] = [];
 
-/** The tape as the page draws it: `loading` until the first read ends, `none` when the last read failed (no marks, the
- *  Trades tab's empty state), `ready` with the rows of the last good read (which may be none). */
+/** The tape as the page draws it: `loading` until the first read ends or while the helper's tape is filling with no row
+ *  yet, `none` when the last read failed (no marks, the Trades tab's empty state), `ready` with the rows of the last good
+ *  read (which may be none). */
 export interface Tape {
   trades: readonly Trade[];
   status: "loading" | "ready" | "none";
@@ -184,15 +195,16 @@ export function followTape(chain: MarketChain, token: string, onTape: (t: Tape) 
     if (hidden()) return readIn(TRADES_POLL_MS);
     const mine = new AbortController();
     out = mine;
-    const t = await readTrades(chain, token, fetchFn, mine.signal);
+    const t = await readTape(chain, token, fetchFn, mine.signal);
     if (stopped || mine.signal.aborted) return;
     out = null;
     // a failed read draws no marks and waits longer each time (nextWait), unless a socket sends the tape; a good read
-    // goes back to TRADES_POLL_MS
+    // goes back to TRADES_POLL_MS. A filling tape (the helper still reads its older trades) is loading while it has no
+    // row, and is read again at TRADES_POLL_MS whatever the socket sends, until the helper's mark goes
     fails = t === null ? fails + 1 : 0;
-    if (t !== null) show({ trades: t, status: "ready" });
+    if (t !== null) show(t.filling && t.trades.length === 0 ? LOADING : { trades: t.trades, status: "ready" });
     else if (!pushed) show({ trades: NONE, status: "none" });
-    readIn(pushed ? TRADES_PUSHED_POLL_MS : nextWait(fails));
+    readIn(t?.filling === true ? TRADES_POLL_MS : pushed ? TRADES_PUSHED_POLL_MS : nextWait(fails));
   }
   /** The socket closed, failed or sent what is not a tape: read now, open again after nextWait of the drops. */
   const dropped = (s: PushSocket | null) => {
@@ -228,8 +240,8 @@ export function followTape(chain: MarketChain, token: string, onTape: (t: Tape) 
       fails = 0;
       out?.abort();
       out = null;
-      readIn(TRADES_PUSHED_POLL_MS);
-      show({ trades: t, status: "ready" });
+      readIn(t.filling ? TRADES_POLL_MS : TRADES_PUSHED_POLL_MS);
+      show(t.filling && t.trades.length === 0 ? LOADING : { trades: t.trades, status: "ready" });
     };
   }
 

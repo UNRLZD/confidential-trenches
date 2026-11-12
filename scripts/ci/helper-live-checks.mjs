@@ -130,6 +130,9 @@ export const SERIAL_GROUPS = {
     "helper-page-jup-429",
     // a page check (the lists, one listed pump.fun token's page and three tapes): last of the pages, before the builds
     "token-page-data-complete-and-fast",
+    // a page check (the newest pump.fun token's page, read until its chain fields land, READ_MS at most): a listed token,
+    // so its page draws no search of its own once listed; with the pages, before the builds
+    "token-page-chain-risk",
     "solana-legs-share-wait",
     "solana-jupiter-build",
     "app-a2-e2e",

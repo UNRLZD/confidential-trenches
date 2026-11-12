@@ -114,6 +114,7 @@ export const CHANGED = [
   "scripts/live-checks/index-evm-swaps.mjs",
   "scripts/live-checks/index-sol-trades.mjs",
   "scripts/live-checks/token-page-data-complete-and-fast.mjs",
+  "scripts/live-checks/token-page-chain-risk.mjs",
   "scripts/live-checks/kit-entry-signpage-api.mjs",
   "scripts/live-checks/kit-freeze-helper-api.mjs",
   "scripts/live-checks/kit-freeze-keys.mjs",

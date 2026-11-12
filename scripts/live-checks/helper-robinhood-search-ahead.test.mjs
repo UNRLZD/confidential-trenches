@@ -80,3 +80,33 @@ test("read() asks the lists with the app's Origin, then every token's tape at on
   assert.ok(run.answers.every((x) => !("body" in x) && x.shape === "tape"));
   assert.equal(judge(run).ok, true);
 });
+
+// card token-page-data-complete-and-fast: a tape that answered filling passes only once it filled within FILLED_MS
+test("card token-page-data-complete-and-fast: planted on the good answer: a filling tape filled within FILLED_MS passes; still filling, a 503 after filling, or never read again fails", async () => {
+  const { FILLED_MS } = await import("./tape-read.mjs");
+  const plant = (filled) => {
+    const run = structuredClone(A.good);
+    Object.assign(run.answers[0], { filling: true, ...(filled === undefined ? {} : { filled }) });
+    return judge(run);
+  };
+  const tape = { status: 200, filling: false, shape: "tape", ms: 4_000, reads: 2 };
+  assert.equal(plant(tape).ok, true, plant(tape).lines.join("\n"));
+  assert.ok(plant(tape).lines.some((l) => /^ok  trades 0x[0-9a-f]{40}: filled 4000 ms after its first read \(2 reads\)$/.test(l)));
+  for (const [what, f] of [["still filling", { ...tape, filling: true, ms: FILLED_MS + 500, reads: 23 }], ["a 503 after filling", { ...tape, status: 503, filling: false, shape: null, body: "{}" }], ["filled too late", { ...tape, ms: FILLED_MS + 1 }], ["never read again", undefined]]) {
+    const r = plant(f);
+    assert.equal(r.ok, false, what);
+  }
+});
+
+test("card token-page-data-complete-and-fast: read() reads a filling tape again until its mark goes", async () => {
+  const T = `0x${"a".repeat(40)}`;
+  let tapes = 0;
+  const fetchFn = async (url) => {
+    if (new URL(url).pathname === "/v1/market/lists") return new Response(JSON.stringify({ lists: { trending_1h: [{ token: T }] } }), { status: 200 });
+    tapes++;
+    return new Response(JSON.stringify({ trades: [], ...(tapes < 3 ? { filling: true } : {}), src: "chain", as_of_ms: 1 }), { status: 200 });
+  };
+  const run = await read("https://h.test", fetchFn, { sleep: async () => {}, pollMs: 0 });
+  assert.equal(run.answers[0].filling, true);
+  assert.deepEqual([run.answers[0].filled.status, run.answers[0].filled.filling, run.answers[0].filled.reads], [200, false, 2]);
+});

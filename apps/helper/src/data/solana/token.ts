@@ -22,9 +22,10 @@
 // vendor and RPC value is hostile input: a mint must be an account the token programs own, typed `mint`; every number
 // is checked finite and in range or becomes null; the caches hold at most CACHE_MAX tokens each.
 import { address, b58decode, b58encode, dec, ROW_FIELDS, text, toRow, type Row } from "./lists.ts";
-import { LOGOS } from "../logo.ts";
+import { LOGOS, type Logos } from "../logo.ts";
 import { LINKS, type Links } from "../links.ts";
-import { createOrigins, hintsOf, pda, rpcAccounts, type Hint, type Origin } from "./origin.ts";
+import { readFirstBuys, readHeld, shares, type FirstBuys, type Shares } from "./first-buyers.ts";
+import { createOrigins, hintsOf, onCurve, pda, rpcAccounts, type Hint, type Origin } from "./origin.ts";
 import { geckoBudget, GT_LIMIT_PER_MIN, GT_PAGE_WAIT_MS, GT_SERVE_MS, refreshLane, takeOrWait, throttledUntil, type GeckoBudget } from "../gecko.ts";
 import { retryAfterOf, secondsUntil, Throttled } from "../../limits/limits.ts";
 import { BURST_MS, QUERY_MAX, VENDOR_WINDOW_MS } from "../../proxy/proxy.ts";
@@ -103,6 +104,8 @@ export const metadataAddress = (mint: string): string => pda([new TextEncoder().
 /** Tokens held per cache; the oldest goes first. */
 export const CACHE_MAX = 2_000;
 export const HOLDERS_MAX = 20;
+/** A token whose first buys could not be read is read again after this. */
+export const FIRST_NONE_MS = 600_000;
 export const CANDLES_MAX = 500;
 const ANSWER_MAX = 2 * 1024 * 1024;
 const TIMEOUT_MS = 8_000;
@@ -150,7 +153,8 @@ const u64 = (v: unknown): bigint | null => (typeof v === "string" && U64.test(v)
 // The mint account (D-S12)
 // ---------------------------------------------------------------------------------------------------------------
 
-export type Mint = { decimals: number; supply: bigint; mintAuth: boolean; freezeAuth: boolean; feeBps: number };
+/** `program`: the token program that owns the mint (its holders' associated accounts are under it). */
+export type Mint = { decimals: number; supply: bigint; mintAuth: boolean; freezeAuth: boolean; feeBps: number; program: string };
 /** A token's name as its mint names it on chain, each part bounded text or null (hostile input). */
 export type Identity = { name: string | null; symbol: string | null; uri: string | null };
 const NO_NAME: Identity = { name: null, symbol: null, uri: null };
@@ -241,7 +245,7 @@ export function toMint(account: unknown, slot: number): Mint | null {
   // a classic SPL mint has no extensions and no transfer fee
   const feeBps = a.owner === TOKEN_PROGRAM ? 0 : transferFee(info.extensions, slot);
   if (!Number.isInteger(decimals) || (decimals as number) < 0 || (decimals as number) > 255 || supply === null || mintAuth === undefined || freezeAuth === undefined || feeBps === undefined) return null;
-  return { decimals: decimals as number, supply, mintAuth, freezeAuth, feeBps };
+  return { decimals: decimals as number, supply, mintAuth, freezeAuth, feeBps, program: a.owner as string };
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -266,8 +270,12 @@ export function jupiterPool(jup: Record<string, unknown>): string | null {
  *  and the token's launch as read on chain (origin.ts; null for none, undefined when not read). The launch names the
  *  row's launchpad: a Discover row keeps its own (read on chain by the lists, with Jupiter's config) when this read
  *  finds none; a row from Jupiter's search never keeps Jupiter's tag alone. */
-export function toPage(mint: Mint, base: Row, jupPool: string | null, origin: Origin | null | undefined, listed: boolean, chainAtMs: number, jupAtMs: number, filling = false, dev: { bps: number; at: number } | null = null): TokenPage {
+export function toPage(mint: Mint, base: Row, jupPool: string | null, origin: Origin | null | undefined, listed: boolean, chainAtMs: number, jupAtMs: number, filling = false, dev: { bps: number; at: number } | null = null, top10: { bps: number; at: number } | null = null, first: (Shares & { at: number }) | null = null): TokenPage {
   const row: Row = { ...base };
+  // the first buyers' shares read on chain (first-buyers.ts): the snipers cell reads the row
+  if (first !== null) row.snipers_bps = first.snipers_bps;
+  // the top 10 wallets' share read on chain (walletsTop10, the holders read) wins over Jupiter's
+  if (top10 !== null) row.top10_bps = top10.bps;
   // the creator's share read on chain (devShare) where Jupiter's row has none
   if (row.dev_bps === null && dev !== null) row.dev_bps = dev.bps;
   row.launchpad = origin?.pad ?? (listed ? base.launchpad : null);
@@ -293,9 +301,10 @@ export function toPage(mint: Mint, base: Row, jupPool: string | null, origin: Or
       freeze_auth: chain(mint.freezeAuth),
       // a launchpad curve is `curve`; other Solana pools have no named read yet (06b `lp`), so null
       lp: onCurve ? chain({ class: "curve", bps: null }) : { ...none },
-      top10_bps: jupiter(row.top10_bps),
+      top10_bps: top10 !== null ? { v: top10.bps, src: "chain", as_of_ms: top10.at } : jupiter(row.top10_bps),
       dev_bps: base.dev_bps === null && dev !== null ? { v: dev.bps, src: "chain", as_of_ms: dev.at } : jupiter(row.dev_bps),
-      snipers_bps: { ...none }, // D-S13: no free source at list scale
+      // our chain read of the first trades (first-buyers.ts) where it can be had; else none (D-S13: no free source)
+      snipers_bps: first !== null ? { v: first.snipers_bps, src: "chain", as_of_ms: first.at } : { ...none },
       holders: jupiter(row.holders),
       liq_usd: jupiter(row.liq_usd),
       age_s: jupiter(created === null ? null : Math.max(0, Math.floor(jupAtMs / 1000) - created)),
@@ -303,7 +312,7 @@ export function toPage(mint: Mint, base: Row, jupPool: string | null, origin: Or
       tax: chain({ buy_bps: mint.feeBps, sell_bps: mint.feeBps }),
       honeypot: { ...none }, // 06c §3.8 mintRisk is not built
       insiders_bps: { ...none },
-      bundlers_bps: { ...none },
+      bundlers_bps: first !== null ? { v: first.bundlers_bps, src: "chain", as_of_ms: first.at } : { ...none },
       fresh_bps: { ...none },
     },
     // whether a token routes is the device's reference-pool read at the quote (S12), never the data part's call
@@ -337,6 +346,33 @@ export function toHolders(largest: unknown, owners: readonly unknown[], supply: 
       if (addr === INCINERATOR) h.kind = "burn";
       return h;
     });
+}
+
+/**
+ * The top 10 holders' share of the supply, in basis points, as the holder panels of trading terminals count it: the ten
+ * largest wallets, the pool, the launchpad's curve and the burn address left out (the main product's token page does
+ * the same, "NEAR trading terminal" services/engine/src/core/holders.ts:34-63 and :880-906: pools, burn, bridges,
+ * lockers and vesting removed, the rest summed over the total supply). On Solana every account that holds a pool's, a
+ * curve's, a vault's or a locker's tokens is owned by a program address, which is never a point on ed25519, so a holder
+ * off the curve is left out by that rule alone, without a list of programs; the incinerator by its address. Null when
+ * the rows hold no wallet. `rows` are toHolders' (getTokenLargestAccounts' 20 largest accounts, merged by owner), so
+ * the ten wallets are among them whenever fewer than 11 of those 20 are program accounts.
+ */
+/** The holders answer's top 10 share when it is our own chain read: its top_bps and as-of, else null. */
+export function top10Of(a: DataAnswer): { bps: number; at: number } | null {
+  if (a.status !== 200) return null;
+  try {
+    const h = JSON.parse(a.body) as Partial<Holders>;
+    return h.src === "chain" && Number.isInteger(h.top_bps) && h.top_bps! >= 0 && h.top_bps! <= 10_000 && Number.isSafeInteger(h.as_of_ms) ? { bps: h.top_bps!, at: h.as_of_ms! } : null;
+  } catch {
+    return null;
+  }
+}
+
+export function walletsTop10(rows: readonly Holder[]): number | null {
+  const wallets = rows.filter((h) => h.kind !== "burn" && h.addr !== INCINERATOR && h.bps !== null && onCurve(b58decode(h.addr) ?? new Uint8Array()));
+  if (wallets.length === 0) return null;
+  return Math.min(10_000, wallets.slice(0, 10).reduce((s, h) => s + h.bps!, 0));
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -563,7 +599,7 @@ const rpcBody = (method: string, params: unknown[]) => JSON.stringify({ jsonrpc:
  *  429 on it would be the device's own reads' and sends' 429 too. */
 /** `sleep`: the GeckoTerminal budget's wait (setTimeout unless a test passes its clock's beside `now`, card
  *  helper-pace-test-clock). */
-export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch; now?: () => number; sleep?: (ms: number) => Promise<unknown>; listed?: () => Promise<DataAnswer>; holdersRpc?: Rpc; gecko?: GeckoBudget } = {}) {
+export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch; now?: () => number; sleep?: (ms: number) => Promise<unknown>; listed?: () => Promise<DataAnswer>; holdersRpc?: Rpc; gecko?: GeckoBudget; metaLogos?: Pick<Logos, "fromMeta"> } = {}) {
   const now = deps.now ?? Date.now;
   const sleep = deps.sleep ?? ((ms: number) => new Promise((ok) => setTimeout(ok, ms)));
   const doFetch = deps.fetch ?? fetch;
@@ -774,9 +810,9 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
     return origins.get(mint);
   };
   // each token's last page as built, `answer` as the cache keeps it and `filled` once its launch came in after
-  type Built = { m: Mint; base: Row; pool: string | null; listed: boolean; chainAt: number; jupAt: number; origin: Origin | null | undefined; answer?: DataAnswer; filled?: DataAnswer; rowLater?: boolean; dev?: { bps: number; at: number } | null };
+  type Built = { m: Mint; base: Row; pool: string | null; listed: boolean; chainAt: number; jupAt: number; origin: Origin | null | undefined; answer?: DataAnswer; filled?: DataAnswer; rowLater?: boolean; dev?: { bps: number; at: number } | null; top10?: { bps: number; at: number } | null; first?: (Shares & { at: number }) | null };
   const built = bounded<Built>(CACHE_MAX);
-  const pageOf = (b: Built): DataAnswer => ({ status: 200, body: JSON.stringify(toPage(b.m, b.base, b.pool, b.origin, b.listed, b.chainAt, b.jupAt, b.rowLater === true, b.dev ?? null)), src: b.base.src === "chain" ? "chain" : "jupiter", asOfMs: Math.min(b.chainAt, b.jupAt) });
+  const pageOf = (b: Built): DataAnswer => ({ status: 200, body: JSON.stringify(toPage(b.m, b.base, b.pool, b.origin, b.listed, b.chainAt, b.jupAt, b.rowLater === true, b.dev ?? null, b.top10 ?? null, b.first ?? null)), src: b.base.src === "chain" ? "chain" : "jupiter", asOfMs: Math.min(b.chainAt, b.jupAt) });
   /** Card helper-page-jup-429: the page's Jupiter row within JUP_PAGE_WAIT_MS, else a row held from an earlier read,
    *  under STALE_MS old, else null (the page is named on chain); the search goes on and its row is held for the next
    *  read. A search that fails (Jupiter's 429 or its hold past SEARCH_HOLD_WAIT_MS) is answered the same way. */
@@ -822,6 +858,43 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
     return bps > 10_000 ? null : { bps, at: now() };
   }
 
+  /** A token's first buys (first-buyers.ts), read once and kept (they never change; none is kept FIRST_NONE_MS, since
+   *  a fresh token's first trades are not all signed yet), each mint's read in flight joined. */
+  const firsts = bounded<{ f: FirstBuys | null; at: number }>(CACHE_MAX);
+  const firstsOut = new Map<string, Promise<FirstBuys | null>>();
+  /** The snipers' and bundlers' shares now: the first buys, and what those wallets hold, read on chain; null when the
+   *  reads cannot give them. */
+  async function firstShares(mint: string, creator: string | null, m: Mint, client?: string): Promise<(Shares & { at: number }) | null> {
+    // on the holders' own provider, as the holders read: its many reads never draw on the shared path the device's
+    // reads and sends use (a 429 there would pause them); none configured, none read
+    const own = deps.holdersRpc;
+    if (own === undefined) return null;
+    // the result as answered (call() keeps an object's only: getSignaturesForAddress answers a list)
+    const via = async (method: string, params: unknown[]): Promise<unknown> => {
+      const a = await own.handle("solana", "application/json", rpcBody(method, params), client);
+      if (a.status === 429) throw new Throttled(retryAfterOf(a.headers), a.why);
+      if (a.status !== 200 || a.body.length > ANSWER_MAX) throw new Upstream(`solana rpc: ${a.why ?? a.status}`, causeOf("rpc", a.why ?? String(a.status)));
+      const r = obj(JSON.parse(a.body)).result;
+      return method === "getMultipleAccounts" ? obj(r).value : r;
+    };
+    const kept = firsts.get(mint);
+    let f: FirstBuys | null;
+    if (kept !== undefined && (kept.f !== null || now() - kept.at < FIRST_NONE_MS)) f = kept.f;
+    else {
+      let p = firstsOut.get(mint);
+      if (p === undefined) {
+        p = readFirstBuys(via, mint, creator).finally(() => firstsOut.delete(mint));
+        firstsOut.set(mint, p);
+      }
+      f = await p;
+      firsts.set(mint, { f, at: now() });
+    }
+    if (f === null) return null;
+    const held = await readHeld(via, f, mint, m.program);
+    const s = held === null ? null : shares(f, held, m.supply);
+    return s === null ? null : { ...s, at: now() };
+  }
+
   async function jupiterWithin(mint: string, cold: boolean): Promise<JupRow | null> {
     // a held row past STALE_MS is not served (its price would be a minute old); the page is named on chain instead
     const kept = jrows.get(mint);
@@ -864,17 +937,34 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
     // card token-page-data-complete-and-fast: the creator's holding, read on chain alongside the launch (no wait of its
     // own) where Jupiter's row has no dev share: 9 of 10 pages read 11 Nov 15:10Z had none
     const devRead = base.dev_bps === null && typeof base.creator === "string" ? devShare(mint, base.creator, m.mint.supply, client) : Promise.resolve(null);
-    const [origin, dev] = await Promise.all([
+    // the top 10 wallets' share from the holders read (walletsTop10; the Holders tab's own cache), alongside them
+    // only with a holders provider: without one the Holders tab's answer is Jupiter's, read once by the page already
+    const topRead = deps.holdersRpc === undefined ? Promise.resolve(null) : holders.get(mint, client).then(top10Of);
+    const firstRead = firstShares(mint, typeof base.creator === "string" ? base.creator : null, m.mint, client);
+    const [origin, dev, top10, first] = await Promise.all([
       settled(mint, early ?? launch(mint, j?.row ? hintsOf([j.row]).get(mint) : undefined, base.created_s, client)),
       Promise.race([devRead.catch(() => null), new Promise<null>((ok) => setTimeout(() => ok(null), LAUNCH_WAIT_MS).unref?.())]),
+      Promise.race([topRead.catch(() => null), new Promise<null>((ok) => setTimeout(() => ok(null), LAUNCH_WAIT_MS).unref?.())]),
+      Promise.race([firstRead.catch(() => null), new Promise<null>((ok) => setTimeout(() => ok(null), LAUNCH_WAIT_MS).unref?.())]),
     ]);
     const timing = [`lists;dur=${listsMs}`, ...m.timing, ...(j?.timing ?? []), `launch;dur=${Math.round(performance.now() - t1)}`, `read;dur=${Math.round(performance.now() - t0)}`];
-    const b: Built = { m: m.mint, base, pool, listed: listed !== null, chainAt: m.at, jupAt: at, origin, rowLater: j?.later === true, dev };
+    const b: Built = { m: m.mint, base, pool, listed: listed !== null, chainAt: m.at, jupAt: at, origin, rowLater: j?.later === true, dev, top10, first };
     b.answer = { ...pageOf(b), timing: timing.join(", ") };
     built.set(mint, b);
     // a creator's share read after the page was built joins it, as a late launch does
     if (dev === null) void devRead.then((d) => {
       if (d !== null && built.get(mint) === b) (b.dev = d), (b.filled = pageOf(b));
+    }, () => undefined);
+    if (first === null) void firstRead.then((f) => {
+      if (f !== null && built.get(mint) === b) (b.first = f), (b.filled = pageOf(b));
+    }, () => undefined);
+    if (top10 === null) void topRead.then((t) => {
+      if (t !== null && built.get(mint) === b) (b.top10 = t), (b.filled = pageOf(b));
+    }, () => undefined);
+    // a token whose list source gave no logo takes its metadata's image (../logo.ts fromMeta), once Jupiter has
+    // answered (its row would give one first); its row's icon is set when the URL is known
+    if (deps.metaLogos !== undefined && j?.later !== true && base.icon !== true && m.id.uri !== null) void deps.metaLogos.fromMeta("solana", mint, m.id.uri).then((ok) => {
+      if (ok && built.get(mint) === b) (b.base = { ...b.base, icon: true }), (b.filled = pageOf(b));
     }, () => undefined);
     return b.answer;
   }, {
@@ -917,11 +1007,12 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
       const owners = accts.length === 0 ? [] : (await call("getMultipleAccounts", [accts, { encoding: "jsonParsed", commitment: "confirmed" }], deps.holdersRpc, client)).result.value;
       const rows = toHolders(largest.slice(0, HOLDERS_MAX), Array.isArray(owners) ? owners : [], m.mint.supply);
       if (rows === null) throw new Upstream();
-      const top = rows.slice(0, 10).reduce((s, h) => s + (h.bps ?? 0), 0);
+      // the ten largest wallets, pools, curves and the burn address left out (walletsTop10)
+      const top = walletsTop10(rows);
       const r = await rowOf(mint).catch(() => null);
       const total = (r?.row.holders ?? null) as number | null;
       const at = now();
-      const body: Holders = { holders: rows, total, top_bps: rows.length > 0 && m.mint.supply > 0n ? Math.min(10_000, top) : null, src: "chain", as_of_ms: at };
+      const body: Holders = { holders: rows, total, top_bps: m.mint.supply > 0n ? top : null, src: "chain", as_of_ms: at };
       return { status: 200, body: JSON.stringify(body), src: "chain", asOfMs: at };
     } catch {
       // the fallback (06b v1.36): no rows, Jupiter's holder count and top-holders share

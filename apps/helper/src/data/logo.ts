@@ -22,6 +22,17 @@
 // - at most HELPER_LOGO_MAX_BYTES read, at most FETCH_MS for the whole fetch, at most PARALLEL fetches at once.
 // Answers are cached in memory (CACHE_BYTES and CACHE_ENTRIES bound), the registry of URLs too (URLS_MAX). A full queue
 // is "busy" (the route's 503, never cached); refusals are logged by rule, at most once per LOG_MS, never with a URL.
+//
+// A token whose list source gives no logo URL may have one in its own metadata (card token-page-data-complete-and-fast:
+// on Solana, the JSON its metadata `uri` names, the Metaplex standard's `image`). That JSON is fetched under every rule
+// above, the type rule aside: only a 200 declared application/json or text/plain, at most META_MAX_BYTES, parsed as
+// JSON and read for `image` alone, which is then a logo URL like any list source's (logoUrl, then the logo fetch's own
+// rules). One read per token per LOGO_OK_MS (LOGO_NONE_MS after a refusal), in the same PARALLEL turns as the logos.
+// What a hostile metadata JSON can do: be large or slow (refused at META_MAX_BYTES and FETCH_MS), redirect or resolve
+// to a private address (refused, the address pinned), nest deep (16 KiB at most, and V8's JSON parser is not
+// recursive), carry `__proto__` or any other key (read as data, only `image` is looked at, as a string), or name an
+// image that is SVG, private, large or not an image (each refused by the logo fetch). It learns that the helper read
+// the token, never which user looks at it: the browser only ever asks the helper.
 import { BlockList, isIP } from "node:net";
 import { Resolver } from "node:dns/promises";
 import { Agent, request } from "node:https";
@@ -42,6 +53,8 @@ export const LOGO_NONE_MS = 10 * 60_000;
 export const CACHE_BYTES = 64 * 1024 * 1024;
 export const CACHE_ENTRIES = 5_000;
 export const URLS_MAX = 20_000;
+export const META_MAX_BYTES = 16 * 1024;
+export const META_TYPES = ["application/json", "text/plain"] as const;
 
 /** Every range a server-side fetch must never reach (IANA special-purpose registries, both families). */
 const BLOCKED = new BlockList();
@@ -101,8 +114,9 @@ export function sniff(b: Uint8Array): HelperLogoType | null {
 
 /** One HTTP response as the fetcher reads it. */
 export type Got = { status: number; headers: Record<string, string | string[] | undefined>; body: AsyncIterable<Uint8Array>; destroy(): void };
-/** One GET of `url` over a connection to one of `addrs` (every one already checked), bounded by `signal`. */
-export type Get = (url: URL, addrs: { address: string; family: number }[], signal: AbortSignal) => Promise<Got>;
+/** One GET of `url` over a connection to one of `addrs` (every one already checked), bounded by `signal`, asking for
+ *  `accept` (the logo types when not given). */
+export type Get = (url: URL, addrs: { address: string; family: number }[], signal: AbortSignal, accept?: string) => Promise<Got>;
 export type Resolve = (host: string, signal: AbortSignal) => Promise<{ address: string; family: number }[]>;
 
 /** The host's A and AAAA answers through c-ares, one try under DNS_MS, cancelled when `signal` ends (`servers` only
@@ -162,7 +176,7 @@ const AGENT = new Agent({ keepAlive: false });
 
 /** node:https with its lookup pinned to the checked addresses (both families, so the standard happy-eyeballs connect
  *  picks one that answers; SNI and the certificate still the URL's host). */
-export const httpsGet: Get = (url, addrs, signal) =>
+export const httpsGet: Get = (url, addrs, signal, accept = HELPER_LOGO_TYPES.join(",")) =>
   new Promise((ok, fail) => {
     const req = request(
       url,
@@ -170,7 +184,7 @@ export const httpsGet: Get = (url, addrs, signal) =>
         method: "GET",
         agent: AGENT,
         signal,
-        headers: { accept: HELPER_LOGO_TYPES.join(","), "user-agent": "helper-logo/1" },
+        headers: { accept, "user-agent": "helper-logo/1" },
         lookup: (_host, opts, cb) => {
           const o = opts as { all?: boolean };
           const first = addrs.find((a) => a.family === 4) ?? addrs[0]!;
@@ -188,8 +202,33 @@ export type Logo = { type: HelperLogoType; bytes: Buffer };
 /** Why a fetch gave no logo (logged by count, never with the URL). */
 export class Refused extends Error {}
 
+type FetchDeps = { resolve?: Resolve; get?: Get; timeoutMs?: number };
+
 /** Fetches one logo under every rule in the header; throws Refused naming the rule that refused it. */
-export async function fetchLogo(start: URL, deps: { resolve?: Resolve; get?: Get; timeoutMs?: number } = {}): Promise<Logo> {
+export async function fetchLogo(start: URL, deps: FetchDeps = {}): Promise<Logo> {
+  const { declared, bytes } = await fetchGuarded(start, deps, HELPER_LOGO_TYPES, HELPER_LOGO_MAX_BYTES);
+  const type = sniff(bytes);
+  if (type === null || type !== declared) throw new Refused("bytes");
+  return { type, bytes };
+}
+
+/** A token's metadata JSON's `image`, as a logo URL (logoUrl), or null when it has none; throws Refused naming the
+ *  rule that refused the JSON. Only `image` is read. */
+export async function fetchMetaImage(start: URL, deps: FetchDeps = {}): Promise<URL | null> {
+  const { bytes } = await fetchGuarded(start, deps, META_TYPES, META_MAX_BYTES);
+  let j: unknown;
+  try {
+    j = JSON.parse(bytes.toString("utf8"));
+  } catch {
+    throw new Refused("json");
+  }
+  const image = typeof j === "object" && j !== null && !Array.isArray(j) && Object.hasOwn(j, "image") ? (j as { image?: unknown }).image : undefined;
+  return logoUrl(image);
+}
+
+/** One GET under the header's address, redirect, size and time rules, whose 200 is declared one of `types`: its type
+ *  and at most `max` bytes. */
+async function fetchGuarded(start: URL, deps: FetchDeps, types: readonly string[], max: number): Promise<{ declared: string; bytes: Buffer }> {
   const resolve = deps.resolve ?? systemResolve;
   const get = deps.get ?? httpsGet;
   const signal = AbortSignal.timeout(deps.timeoutMs ?? FETCH_MS);
@@ -203,7 +242,7 @@ export async function fetchLogo(start: URL, deps: { resolve?: Resolve; get?: Get
       throw new Refused(e === SLOT_WAIT ? "busy" : signal.aborted ? "timeout" : "dns");
     }
     if (addrs.length === 0 || addrs.some((a) => blockedAddress(a.address))) throw new Refused("address");
-    const r = await get(url, addrs, signal).catch((e: unknown) => {
+    const r = await get(url, addrs, signal, types.join(",")).catch((e: unknown) => {
       throw new Refused(signal.aborted ? "timeout" : `connect ${(e as Error).name}`);
     });
     if ([301, 302, 303, 307, 308].includes(r.status)) {
@@ -225,12 +264,12 @@ export async function fetchLogo(start: URL, deps: { resolve?: Resolve; get?: Get
       throw new Refused(`status ${r.status}`);
     }
     const declared = String(r.headers["content-type"] ?? "").split(";")[0]!.trim().toLowerCase();
-    if (!(HELPER_LOGO_TYPES as readonly string[]).includes(declared)) {
+    if (!types.includes(declared)) {
       r.destroy();
       throw new Refused("type");
     }
     const length = Number(r.headers["content-length"] ?? "0");
-    if (length > HELPER_LOGO_MAX_BYTES) {
+    if (length > max) {
       r.destroy();
       throw new Refused("size");
     }
@@ -239,7 +278,7 @@ export async function fetchLogo(start: URL, deps: { resolve?: Resolve; get?: Get
     try {
       for await (const c of r.body) {
         n += c.byteLength;
-        if (n > HELPER_LOGO_MAX_BYTES) {
+        if (n > max) {
           r.destroy();
           throw new Refused("size");
         }
@@ -250,10 +289,7 @@ export async function fetchLogo(start: URL, deps: { resolve?: Resolve; get?: Get
       if (e instanceof Refused) throw e;
       throw new Refused(signal.aborted ? "timeout" : "body");
     }
-    const bytes = Buffer.concat(chunks);
-    const type = sniff(bytes);
-    if (type === null || type !== declared) throw new Refused("bytes");
-    return { type, bytes };
+    return { declared, bytes: Buffer.concat(chunks) };
   }
 }
 
@@ -270,6 +306,14 @@ export function createLogos(deps: { resolve?: Resolve; get?: Get; now?: () => nu
   const log = deps.log ?? ((line: string) => console.log(line));
   let loggedAt = -Infinity;
   const key = (chain: string, token: string) => `${chain}:${token}`;
+  /** Each token's last metadata read (its uri, when, whether it gave an image), URLS_MAX at most. */
+  const metas = new Map<string, { uri: string; at: number; ok: boolean }>();
+  const metaOut = new Map<string, Promise<boolean>>();
+  const keepMeta = (k: string, v: { uri: string; at: number; ok: boolean }) => {
+    metas.delete(k);
+    if (metas.size >= URLS_MAX) metas.delete(metas.keys().next().value!);
+    metas.set(k, v);
+  };
 
   function keep(k: string, logo: Logo | null): void {
     const old = cache.get(k);
@@ -313,6 +357,37 @@ export function createLogos(deps: { resolve?: Resolve; get?: Get; now?: () => nu
         if (cache.get(k)?.logo === null) cache.delete(k); // a new URL is tried again at once
       }
       return true;
+    },
+    /** A token's logo URL from its own metadata JSON at `uri` (the header), when no list source gave one: read once per
+     *  LOGO_OK_MS (LOGO_NONE_MS after a refusal or no image), in the logos' turns; true when the token then has a logo
+     *  URL. Never throws. */
+    async fromMeta(chain: LogoChain, token: string, uri: unknown): Promise<boolean> {
+      const k = key(chain, token);
+      if (urls.has(k)) return true;
+      const u = logoUrl(uri);
+      if (u === null) return false;
+      const seen = metas.get(k);
+      if (seen !== undefined && seen.uri === u.href && now() - seen.at < (seen.ok ? LOGO_OK_MS : LOGO_NONE_MS)) return urls.has(k);
+      let p = metaOut.get(k);
+      if (p === undefined) {
+        p = turn(() => fetchMetaImage(u, deps))
+          .then(
+            (image) => {
+              keepMeta(k, { uri: u.href, at: now(), ok: image !== null });
+              return image !== null && this_.remember(chain, token, image.href);
+            },
+            (e: unknown) => {
+              const why = e instanceof Refused ? e.message : "internal";
+              if (why === "busy") return false;
+              refused.set(`meta ${why}`, (refused.get(`meta ${why}`) ?? 0) + 1);
+              keepMeta(k, { uri: u.href, at: now(), ok: false });
+              return false;
+            },
+          )
+          .finally(() => metaOut.delete(k));
+        metaOut.set(k, p);
+      }
+      return p;
     },
     /** Whether a token has a logo URL (a page's row built before its list row sets `icon` from this). */
     has(chain: LogoChain, token: string): boolean {

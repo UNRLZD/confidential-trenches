@@ -54,14 +54,15 @@ test("card helper-robinhood-capacity: 12 cold tokens at once, the chain's own RP
   // PROVIDER_PACE) refill as the run's own time passes, never as fast as the machine is
   const clock = { get t() { return Date.now(); } };
   // half the providers refusing every read: at c48a98f the slowest of the 12 took 20.8 s; a first open now answers
-  // within OPEN_BOUND_MS (card helper-robinhood-trades-hang), 503 past it, and its read goes on, so the page's next ask
-  // has the tape
+  // within OPEN_BOUND_MS (card helper-robinhood-trades-hang), 200 filling past it (card token-page-data-complete-and-fast;
+  // 503 before it), and its read goes on, so the page's next ask has the tape
   const { value: { first, firstMs, got }, ms } = await onVirtualTime(9_000_000, async () => {
     const s = open(r.chain, clock, { pools: new Map(), rpcs: SWAP_RPCS.robinhood, headerTimed: HEADER_TIMED, fetch: r.fetch as never });
     const t0 = Date.now();
     const first = await Promise.all(TOKENS.map((t) => s.trades(t, 50)));
     const firstMs = Date.now() - t0;
-    const got = await Promise.all(first.map((a, i) => (a.status === 503 ? s.trades(TOKENS[i]!, 50) : a)));
+    const cold = (a: { status: number; body: string }) => a.status === 503 || (JSON.parse(a.body) as { filling?: boolean }).filling === true;
+    const got = await Promise.all(first.map((a, i) => (cold(a) ? s.trades(TOKENS[i]!, 50) : a)));
     s.stop();
     return { first, firstMs, got };
   });

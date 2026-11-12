@@ -11,9 +11,9 @@ import { start } from "../../server.ts";
 import { geckoBudget, PAGE_RESERVE, REFRESH_SLOT, WINDOW_MS } from "../gecko.ts";
 import { createProxy } from "../../proxy/proxy.ts";
 import { createRpc } from "../../rpc/rpc.ts";
-import { pumpCurveAddress, ROW_FIELDS, toRow } from "./lists.ts";
+import { b58decode, pumpCurveAddress, ROW_FIELDS, toRow } from "./lists.ts";
 import {
-  CANDLES_FIELDS, createSolanaToken, GT_PAGE_WAIT_MS, GT_PER_MIN, HOLDERS_FIELDS, JUP_GAP_MS, JUP_PAGE_WAIT_MS, LAUNCH_WAIT_MS, metadataAddress, PAGE_FIELDS, RISK_FIELDS, toCandles, toHolders, toMint, TOKEN_2022_PROGRAM, TOKEN_PROGRAM, topPool,
+  CANDLES_FIELDS, createSolanaToken, GT_PAGE_WAIT_MS, GT_PER_MIN, HOLDERS_FIELDS, JUP_GAP_MS, JUP_PAGE_WAIT_MS, LAUNCH_WAIT_MS, metadataAddress, PAGE_FIELDS, RISK_FIELDS, toCandles, toHolders, toMint, TOKEN_2022_PROGRAM, TOKEN_PROGRAM, top10Of, topPool, walletsTop10,
 } from "./token.ts";
 
 const FX = JSON.parse(readFileSync(new URL("./fixtures/token-page.json", import.meta.url), "utf8"));
@@ -415,7 +415,7 @@ test("toMint: decimals, supply, authorities and the Token-2022 fee in force at t
     ...base,
     data: { parsed: { type: "mint", info: { ...base.data.parsed.info, extensions: [{ extension: "transferFeeConfig", state: { olderTransferFee: { epoch: 0, transferFeeBasisPoints: older, maximumFee: 1 }, newerTransferFee: { epoch, transferFeeBasisPoints: newer, maximumFee: 1 } } }] } } },
   });
-  assert.deepEqual(toMint(base, 1), { decimals: 9, supply: 1000n, mintAuth: false, freezeAuth: true, feeBps: 0 });
+  assert.deepEqual(toMint(base, 1), { decimals: 9, supply: 1000n, mintAuth: false, freezeAuth: true, feeBps: 0, program: base.owner });
   assert.equal(toMint(fee(100, 250, 1075), 1075 * 432_000)!.feeBps, 250, "the newer fee from its epoch");
   assert.equal(toMint(fee(100, 250, 1076), 1075 * 432_000)!.feeBps, 100, "the older fee before it");
   assert.equal(toMint({ ...base, owner: TOKEN_PROGRAM }, 1)!.feeBps, 0);
@@ -462,7 +462,9 @@ test("holders: 20 rows at most, merged per owner, bps of the supply, the burn ad
     { addr: OWNER[1], amt: "600000", bps: 6000, kind: "burn" },
     { addr: OWNER[0], amt: "300000", bps: 3000 },
   ]);
-  assert.equal(h.top_bps, 9000);
+  // card token-page-data-complete-and-fast: the top 10 is the wallets' (walletsTop10): the burn address and an owner off
+  // the curve (7vfCX..., a program address) are left out, so these rows hold no wallet
+  assert.equal(h.top_bps, null);
   assert.equal(h.total, FX.tokens[PUMP].search[0].holderCount);
   assert.equal(h.src, "chain");
 });
@@ -843,4 +845,80 @@ test("a page whose Jupiter row has no dev share takes the creator's share read o
   const t2 = createSolanaToken(fakeProxy({ search: (m) => (m === PUMP ? [row] : []) }), fakeRpc({ byOwner: () => [acct(PUMP, 1n), acct("So11111111111111111111111111111111111111112", 5n)] }), { now: () => NOW });
   const p2 = JSON.parse((await t2.page(PUMP)).body);
   assert.deepEqual([p2.row.dev_bps, p2.risk.dev_bps.v], [null, null]);
+});
+
+// card token-page-data-complete-and-fast: the top 10 as terminals count it, the ten largest wallets only. The wallet is
+// the RFC 8032 all-zero seed's public key (on ed25519); 7vfCX... is off the curve, as every pool, curve and vault
+// owner on Solana is (a program address)
+test("walletsTop10: the ten largest wallets' share; program-address owners (pools, curves, vaults) and the burn address left out; none is null", () => {
+  const W = "4zvwRjXUKGfvwnParsHAS3HuSVzV5cA4McphgmoCtajS";
+  const PDA = "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs";
+  const rows = [{ addr: PDA, amt: "800", bps: 8000 }, { addr: OWNER[1]!, amt: "100", bps: 1000, kind: "burn" as const }, { addr: W, amt: "50", bps: 500 }];
+  assert.equal(walletsTop10(rows), 500, "the curve's 80% and the burned 10% are no holder's");
+  assert.equal(walletsTop10(rows.slice(0, 2)), null);
+  assert.equal(walletsTop10(Array.from({ length: 12 }, () => ({ addr: W, amt: "1", bps: 100 }))), 1000, "ten of them");
+  assert.equal(walletsTop10([{ addr: W, amt: "1", bps: null }]), null, "a share not read is none");
+});
+
+test("top10Of: the holders answer's share only when it is our chain read", () => {
+  const body = (o: object) => ({ status: 200, body: JSON.stringify({ holders: [], total: null, top_bps: 1234, src: "chain", as_of_ms: 5, ...o }) });
+  assert.deepEqual(top10Of(body({})), { bps: 1234, at: 5 });
+  assert.equal(top10Of(body({ src: "jupiter" })), null);
+  assert.equal(top10Of(body({ top_bps: null })), null);
+  assert.equal(top10Of(body({ top_bps: 10_001 })), null);
+  assert.equal(top10Of({ status: 503, body: "{}" }), null);
+  assert.equal(top10Of({ status: 200, body: "not json" }), null);
+});
+
+test("card token-page-data-complete-and-fast: with a holders provider the page's top 10 is our chain read of the ten largest wallets (row and risk, src chain), not Jupiter's", async () => {
+  const W = "4zvwRjXUKGfvwnParsHAS3HuSVzV5cA4McphgmoCtajS";
+  const supplyAccounts = (mint: string) => {
+    const rec = FX.tokens[mint].accounts;
+    const m = structuredClone(rec.result.value[0]);
+    m.data.parsed.info.supply = "1000000";
+    return { ...rec, result: { ...rec.result, value: [m] } };
+  };
+  // the curve (a program address) holds 50%, the burn 30%, one wallet 10%
+  const keyed = fakeRpc({ largest, owners: { context: { slot: 1 }, value: [tokenAcct("7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs"), tokenAcct(OWNER[1]!), tokenAcct(W)] } });
+  const t = createSolanaToken(fakeProxy(), fakeRpc({ accounts: supplyAccounts }), { now: () => NOW, holdersRpc: keyed });
+  const p = JSON.parse((await t.page(PUMP)).body);
+  assert.deepEqual(p.risk.top10_bps, { v: 1000, src: "chain", as_of_ms: NOW });
+  assert.equal(p.row.top10_bps, 1000, "the safety grid's cell reads the row");
+});
+
+test("card token-page-data-complete-and-fast: with a holders provider the page's snipers and bundlers are our chain read of the first trades (first-buyers.ts), on that provider alone; without one, none", async () => {
+  const FT = JSON.parse(readFileSync(new URL("./fixtures/sol-trades-txs.json", import.meta.url), "utf8")) as { txs: Record<string, { result: { meta: { logMessages: string[] } } }> };
+  // the recorded mainnet pump.fun buy, its event's mint set to this page's: two first buys in slot 200 by its buyer
+  const logs = FT.txs["pump-buy"]!.result.meta.logMessages.map((l) => {
+    if (!l.startsWith("Program data: vdt/")) return l;
+    const b = Buffer.from(l.slice("Program data: ".length), "base64");
+    Buffer.from(b58decode(PUMP)!).copy(b, 8);
+    return `Program data: ${b.toString("base64")}`;
+  });
+  const buyer = "4ZvukwqXc2AFAHcuvW8VrKD9j3zGHuoqW4hvEQfANH2n";
+  const supply = toMint(FX.tokens[PUMP].accounts.result.value[0], 1)!.supply;
+  const methods: string[] = [];
+  const own = {
+    async handle(_c: string, _ct: string | undefined, body: string) {
+      const r = JSON.parse(body) as RpcCall;
+      methods.push(r.method);
+      const ok = (result: unknown) => ({ status: 200, body: JSON.stringify({ jsonrpc: "2.0", id: 1, result }) });
+      if (r.method === "getSignaturesForAddress") return ok([{ signature: "b1", slot: 200, err: null }, { signature: "b0", slot: 199, err: null }]);
+      if (r.method === "getTransaction") return ok({ meta: { err: null, logMessages: logs } });
+      if (r.method === "getMultipleAccounts") return ok({ context: { slot: 1 }, value: [{ data: { parsed: { info: { owner: buyer, mint: PUMP, tokenAmount: { amount: (supply / 20n).toString() } } } } }] });
+      return { status: 503, body: '{"error":{"code":"upstream"}}' };
+    },
+  };
+  const shared = fakeRpc();
+  const t = createSolanaToken(fakeProxy(), shared, { now: () => NOW, holdersRpc: own });
+  const p = JSON.parse((await t.page(PUMP)).body);
+  const bps = Number(((supply / 20n) * 10_000n) / supply); // a twentieth of the supply, in whole basis points
+  assert.deepEqual(p.risk.snipers_bps, { v: bps, src: "chain", as_of_ms: NOW });
+  assert.equal(p.row.snipers_bps, bps, "the safety grid's cell reads the row");
+  // one wallet in the first slot is no bundle
+  assert.deepEqual(p.risk.bundlers_bps, { v: 0, src: "chain", as_of_ms: NOW });
+  assert.deepEqual(methods.filter((m) => m !== "getTokenLargestAccounts"), ["getSignaturesForAddress", "getTransaction", "getTransaction", "getMultipleAccounts"]);
+  assert.equal(shared.calls.some((c) => c.method === "getSignaturesForAddress" || c.method === "getTransaction"), false, "never on the shared path");
+  const none = JSON.parse((await createSolanaToken(fakeProxy(), fakeRpc(), { now: () => NOW }).page(PUMP)).body);
+  assert.deepEqual([none.risk.snipers_bps.src, none.risk.bundlers_bps.src], ["none", "none"]);
 });

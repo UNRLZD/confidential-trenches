@@ -562,5 +562,12 @@ test("a first tape read answers after the walk's newest round, with the newest t
   const rows = (JSON.parse((await t.trades(MINT, 50)).body) as { trades: { tx: string }[] }).trades;
   assert.ok(slowOpen > 0, "answered while the older reads still ran (the whole walk waited for: none open)");
   assert.deepEqual(rows.map((r) => r.tx).sort(), sigs.slice(5).sort(), "the 5 newest trades");
+  // card token-page-data-complete-and-fast: an answer while the walk still reads is marked filling, and the mark goes
+  // once the walk has ended
+  assert.equal((JSON.parse((await t.trades(MINT, 50)).body) as { filling?: boolean }).filling, true, "filling while older reads run");
+  await new Promise((r) => setTimeout(r, 2_700));
+  const done = JSON.parse((await t.trades(MINT, 50)).body) as { trades: unknown[]; filling?: boolean };
+  assert.equal(done.filling, undefined, "the walk ended: no mark");
+  assert.equal(done.trades.length, 10);
   t.stop();
 });

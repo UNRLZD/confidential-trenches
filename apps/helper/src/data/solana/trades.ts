@@ -46,7 +46,7 @@
 // Display only: nothing here feeds a signature. Every provider value is hostile: bounded answers, decoders that check
 // every byte they read (decode.ts), PumpSwap pools taken only when the PumpSwap program owns them and their base mint
 // is the token, bounded books, subscriptions and caches.
-import { createBook, TFS, type Book, type Candle, type Event, type Swap, type Tf } from "../candles.ts";
+import { change4h, createBook, TFS, type Book, type Candle, type Event, type Swap, type Tf } from "../candles.ts";
 import { address } from "./lists.ts";
 import { type DataAnswer } from "./token.ts";
 import { fromInner, fromLogs, poolMints, PUMP_AMM, USDC, WSOL, type RawTrade } from "./decode.ts";
@@ -777,6 +777,13 @@ export function createSolanaTrades(deps: {
       timer = null;
       source.close();
     },
+    /** The 4h change from our own bars of a token whose tape is open (candles.ts change4h); null otherwise, never an
+     *  open of its own. */
+    change4h(token: string): number | null {
+      const mint = address(token);
+      const e = mint === null ? undefined : entries.get(mint);
+      return e === undefined || e.book === null ? null : change4h(e.book, Math.floor(now() / 1000));
+    },
     /** 06b Candles for a listed Solana token: our own bars (1s included), and the history source's before our first. */
     async candles(token: string, tf: string, to: number | null, limit: number, client?: string): Promise<DataAnswer> {
       const mint = address(token);
@@ -818,7 +825,10 @@ export function createSolanaTrades(deps: {
       const rows = e.book === null ? [] : e.book.tape(limit);
       const at = e.readAt ?? now();
       const trades = rows.map((r) => ({ t_ms: r.t_ms, side: r.side, usd: r.usd, amt: r.amt, trader: traders.get(r.tx) ?? null, tx: r.tx }));
-      return { status: 200, body: JSON.stringify({ trades, src: "chain", as_of_ms: at }), src: "chain", asOfMs: at };
+      // `filling` while the cold walk still reads the token's older trades (first() answered at COLD_WAIT_MS or its first
+      // round): the rows so far, more to come; the Base and Robinhood tapes answer the same at their bound (../evm/swaps.ts)
+      const fill = e.state === "cold" && rows.length < limit ? { filling: true } : {};
+      return { status: 200, body: JSON.stringify({ trades, ...fill, src: "chain", as_of_ms: at }), src: "chain", asOfMs: at };
     },
   };
 
