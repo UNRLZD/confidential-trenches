@@ -12,8 +12,8 @@
 //   (apps/helper/src/pool/evm.ts) on the fork with the published test key sha256("helper-pool-senders/test-key/EVM_SENDER")
 //   (funded on the fork only, anvil_setBalance) and its /v1/rpc route the helper's createRpc with the fork as its keyed
 //   provider. A request to any other host throws: nothing reaches a real chain or the real helper.
-// - This run mines no block itself: each block anvil mines costs one recorded upstream read. The only block is the
-//   buy's own (anvil's automine at its send). The chain's time is the head pool-fork-evm.mjs left, seconds old, which
+// - This run mines one block itself, past the epoch start after the note's block (each block anvil mines costs one
+//   recorded upstream read), and the buy's own (anvil's automine at its send). The chain's time is the head pool-fork-evm.mjs left, seconds old, which
 //   the epoch, the proof's deadline and the quotes' head checks read; the run prints its age.
 // - The seed is the published all-zero test vector (packages/wallet/test/vectors/a8.json); the note comes back from the
 //   seed alone on a fresh profile (the wallet's evmRestoreNotes, notes only), each note above the round's finalized
@@ -69,7 +69,7 @@ globalThis.fetch = async (input, init) => {
 const { entropyToWords, wordsToSeed64 } = await import("../../wallet/src/derive/index.ts");
 const { openWalletStore, WALLET_SEED_LOCK } = await import("../../wallet/src/store/index.ts");
 const { openNoteStore } = await import("../../wallet/src/notes/store.ts");
-const { EVM_POOLS } = await import("../../wallet/src/pool/evm.ts");
+const { EVM_EPOCH_MS, EVM_POOLS } = await import("../../wallet/src/pool/evm.ts");
 const { evmRestoreNotes } = await import("../../wallet/src/pool/evm-restore.ts");
 const { POOL_TESTNET } = await import("../../wallet/src/pool/network.ts");
 const { ZK_SETUP_FILES } = await import("../../kit/src/zk/setup-files.ts");
@@ -199,7 +199,16 @@ const page = { store: async () => w, held: async () => w, seed64: async () => se
 const t = testnetPool(page, { prover: { vault, stop: () => {} }, fetch: helperFetch });
 const kinds = poolKinds(testnetPoolDeps(t.flow));
 
-// 2. the proof queue's proof: the state read starts the chain's pass; its ready proof
+// 2. the proof queue's proof: the state read starts the chain's pass; its ready proof. The queue proves at an epoch's
+// start (EVM_EPOCH_MS) on the tree of the leaves before it, once the newest block both RPCs agree on is past that start
+// ("no leaf before" until then). Mainnet makes a block every 200 ms (Base) or 110 ms (Robinhood); this fork mines only
+// on a send, so once the epoch after the note's block has begun, one block is mined (its one recorded read)
+const EPOCH_MS = Number(EVM_EPOCH_MS);
+const nextEpoch = (Math.floor((Number(BigInt(head.timestamp)) * 1000) / EPOCH_MS) + 1) * EPOCH_MS;
+const epochWaitMs = Math.max(0, nextEpoch + 1_000 - Date.now());
+await sleep(epochWaitMs);
+await anvil("evm_mine", []);
+log("epoch", { start: new Date(nextEpoch).toISOString(), waitedMs: epochWaitMs });
 const proveAt = Date.now();
 await t.stateRead();
 let ready = [];

@@ -48,7 +48,6 @@ const LAG_AT = process.argv.indexOf("--lag");
 const LAG = LAG_AT > 0 && /^\d+$/.test(process.argv[LAG_AT + 1] ?? "") ? BigInt(process.argv[LAG_AT + 1]) : 0n;
 if ((CHAIN !== "base" && CHAIN !== "robinhood") || !/^http:\/\/127\.0\.0\.1:\d+$/.test(ANVIL ?? "") || !OUT || SLOTS <= 0n || LAG < 2n * SLOTS)
   throw new Error("usage: pool-fork-evm.mjs <base|robinhood> http://127.0.0.1:<port> <out.json> --slots <n> --lag <s, at least 2n>");
-const SPACING = LAG / (2n * SLOTS);
 const PIN = EVM_POOLS[CHAIN];
 const URLS = MAINNET_POOL_RPCS[CHAIN];
 const HOSTS = new Set(URLS.map((u) => new URL(u).host));
@@ -123,7 +122,6 @@ const record = {
     slots: String(SLOTS),
     trailBlocks: String(2n * SLOTS),
     lagS: String(LAG),
-    trailSpacingS: String(SPACING),
     seed: "the all-zero test vector (packages/wallet/test/vectors/a8.json)",
     funded: "U's balance set to the wei the first ask names short (anvil_setBalance), on the fork only",
     reorg: "evm_revert to before the deposit, then empty blocks to its height",
@@ -134,15 +132,23 @@ const record = {
 };
 const step = (name, o) => ((o = { ...o, rpc: took() }), record.steps.push({ name, atMs: at(), ...o }), log(`${name}: ${JSON.stringify(o, (_, v) => (typeof v === "bigint" ? v.toString() : v))}`));
 
-// the trail: 2 x slots + 1 blocks SPACING s apart ending now, so "finalized" is this fork's first block, LAG s back
+// the trail: 2 x slots + 1 blocks SPACING s apart ending now, so "finalized" is this fork's first block, LAG s back. A
+// fork block younger than LAG (the run that records a chain whose providers keep only minutes of state, Robinhood)
+// trails from just past the fork block instead: that run's trail is shorter, every replay after it the full LAG
 const forked = await block("latest");
-await anvil("evm_setNextBlockTimestamp", [hex(BigInt(Math.floor(Date.now() / 1000)) - 2n * SLOTS * SPACING)]);
+const nowS = BigInt(Math.floor(Date.now() / 1000));
+const TRAIL = nowS - LAG > forked.timestamp ? LAG : nowS - forked.timestamp - 1n;
+const SPACING = TRAIL / (2n * SLOTS);
+if (SPACING < 1n) throw new Error(`the fork block is ${nowS - forked.timestamp} s old: too young for a trail`);
+await anvil("evm_setNextBlockTimestamp", [hex(nowS - 2n * SLOTS * SPACING)]);
 await anvil("anvil_mine", [hex(2n * SLOTS + 1n), hex(SPACING)]);
 const head0 = await block("latest");
 const fin0 = await block("finalized");
 step("trail", { forkBlock: forked.number, head: head0.number, finalized: fin0.number, trailBlocks: head0.number - fin0.number, headTime: head0.timestamp, finalizedTime: fin0.timestamp });
 if (fin0.number <= forked.number || head0.number - fin0.number !== 2n * SLOTS) throw new Error("finalized is not 2 x slots blocks back in this fork");
-if (Math.abs(Number(head0.timestamp) - Date.now() / 1000) > 30 || head0.timestamp - fin0.timestamp < LAG - SPACING) throw new Error(`the trail is not now less ${LAG} s: head ${head0.timestamp}, finalized ${fin0.timestamp}`);
+if (Math.abs(Number(head0.timestamp) - Date.now() / 1000) > 30 || head0.timestamp - fin0.timestamp < TRAIL - SPACING) throw new Error(`the trail is not now less ${TRAIL} s: head ${head0.timestamp}, finalized ${fin0.timestamp}`);
+record.set.trailS = String(head0.timestamp - fin0.timestamp);
+record.set.trailSpacingS = String(SPACING);
 
 const scope = evmPoolScopeOf(PIN.pool, EVM_CHAIN_IDS[CHAIN]);
 const ENTROPY = new Uint8Array(16); // the all-zero test vector

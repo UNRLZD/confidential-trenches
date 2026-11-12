@@ -24,9 +24,10 @@ const BOOKS = {
   forge: { file: "fixtures/fork-rpc.json", upstream: { base: "https://mainnet.base.org", robinhood: "https://rpc.mainnet.chain.robinhood.com" } },
   pools: { file: "fixtures/fork-rpc-pools.json", upstream: { base: "https://base-rpc.publicnode.com", robinhood: "https://rpc.mainnet.chain.robinhood.com" } },
 };
-/** The pools' fork blocks: after each pool's deploy (wallet EVM_POOLS fromBlock 54,325,671 and 108,420,674), read
- *  12 Nov 20:49Z as both providers' agreed head less a few hundred blocks. */
-export const POOLS_FORK_BLOCKS = Object.freeze({ base: 56_630_000, robinhood: 112_819_000 });
+/** The pools' fork blocks: after each pool's deploy (wallet EVM_POOLS fromBlock 54,325,671 and 108,420,674). Base: read
+ *  12 Nov 20:49Z as both providers' agreed head less a few hundred blocks. Robinhood: its own RPC's head less 200, read
+ *  12 Nov 22:0xZ and recorded at once, since it keeps state about 3,000 blocks back (5 min) and Pocket's less. */
+export const POOLS_FORK_BLOCKS = Object.freeze({ base: 56_630_000, robinhood: 112_859_537 });
 const bookArg = process.argv.indexOf("--book");
 const BOOK = BOOKS[bookArg > 0 && process.argv.indexOf("--") > bookArg ? process.argv[bookArg + 1] : "forge"];
 if (!BOOK) throw new Error("fork-rpc: --book is forge or pools");
