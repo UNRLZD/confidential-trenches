@@ -118,7 +118,7 @@ import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import { NEAR_NETWORKS, type NearRpc } from "../../wallet/src/deposit/account.ts";
 import { depositIdEvm } from "../../wallet/src/derive/keys.ts";
 import { POOL_DEPOSIT_NETWORK } from "../../wallet/src/deposit/quote.ts";
-import { readConfig, RESTORE_GAP, RESTORE_LANES, restorePages, walkEnd, walkLaneYielding, withSeed, writeRestored, type LaneWalk, type RestoredNote, type SeedUse } from "../../wallet/src/notes/restore.ts";
+import { readConfig, RESTORE_GAP, RESTORE_LANES, restorePagesSteps, slices, walkEnd, walkLaneYielding, withSeed, writeRestored, type LaneWalk, type PagesRestored, type RestoredNote, type SeedUse } from "../../wallet/src/notes/restore.ts";
 import { masters } from "../../wallet/src/derive/notes.ts";
 import { vaultSync, vaultSyncStart, type VaultSyncRpc } from "../../kit/src/vault/sync.ts";
 import { nearPairNetwork, nearPairRule, type NearNetwork } from "../../kit/src/near/networks.ts";
@@ -714,8 +714,9 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
           return r.notes;
         });
         const walked: Walked[] = [];
-        // the NEAR vault's notes, walked: written and their counter raised with the pools', never read by step 5 (its
-        // deposit ids are the vault deposit's own follow's, src/deposit-follow.ts)
+        // the NEAR vault's notes, walked: written and their counter raised with the pools', with no step 5 read. On a
+        // restored device nothing on the page reads a vault deposit id the lost device left money on; that was so
+        // before this walk too
         const vaults: { scope: bigint; notes: readonly RestoredNote[] }[] = [];
         (await Promise.allSettled(reads)).forEach((r, k) => {
           const p = pools[k]!;
@@ -1020,9 +1021,11 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
  *   equal on both (the kit's vaultSync: a provider that differs by one byte, or a page past the list's length, stops
  *   the read, and nothing is returned), and the vault's config read on both: its scope the one computed from the
  *   page's pinned vault and USDC, its asset that USDC (the wallet's readConfig);
- * - each lane walked off the deposit masters of one short use of the seed (walkLaneYielding: never one stretch on the
- *   page's thread), then the notes from the pages in one more short use (restorePages): every note of the scope with
- *   its state, UNSPENT or SPENT, parents first.
+ * - each lane walked off the deposit masters of one short use of the seed (walkLaneYielding), then the notes from the
+ *   pages (restorePagesSteps): every note of the scope with its state, UNSPENT or SPENT, parents first. The walk and
+ *   the notes run on one clock of slices (slices): the seed is opened for one slice's work at a time (WALK_SLICE_MS),
+ *   the page's thread given a turn and the signal checked between slices, so no history, however long, holds either
+ *   for more than a slice.
  * A read that fails throws: the run names the vault stalled and writes none of its notes; the next run reads it again.
  */
 export async function nearVaultRestoreNotes(a: { network: NearNetwork; rpcs: readonly [VaultSyncRpc, VaultSyncRpc]; seed64: SeedUse; signal?: AbortSignal; gap?: number }): Promise<{ scope: bigint; notes: RestoredNote[] }> {
@@ -1037,8 +1040,20 @@ export async function nearVaultRestoreNotes(a: { network: NearNetwork; rpcs: rea
   const ps: ReadonlySet<bigint> = new Set(s.deposits.map((r) => r.precommitment));
   const m = await withSeed(a.seed64, (seed64) => masters(seed64, "deposit"));
   const lanes: LaneWalk[] = [];
-  for (let lane = 0; lane < RESTORE_LANES; lane++) lanes.push(await walkLaneYielding(m, scope, lane, (P) => ps.has(P), gap, null, a.signal));
+  const slice = slices(a.signal);
+  for (let lane = 0; lane < RESTORE_LANES; lane++) lanes.push(await walkLaneYielding(m, scope, lane, (P) => ps.has(P), gap, null, a.signal, slice));
   a.signal?.throwIfAborted();
-  const r = await withSeed(a.seed64, (seed64) => restorePages(seed64, scope, s, { gap, lanes }));
-  return { scope, notes: r.notes };
+  const steps = restorePagesSteps(scope, s, { gap, lanes });
+  let step = steps.next();
+  while (!step.done) {
+    const at = step;
+    step = await withSeed(a.seed64, (seed64) => {
+      let r: IteratorResult<void, PagesRestored> = at;
+      do r = steps.next(seed64);
+      while (!r.done && !slice.due());
+      return r;
+    });
+    if (!step.done) await slice.pass();
+  }
+  return { scope, notes: step.value.notes };
 }

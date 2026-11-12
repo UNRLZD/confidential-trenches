@@ -13,6 +13,7 @@ import { openWalletStore, type WalletStore } from "@blindfill/wallet/store";
 import { resetPaces } from "../../wallet/src/pace.ts";
 import { entropyToWords, wordsToSeed64 } from "../../wallet/src/derive/index.ts";
 import { noteCommitment, noteSecrets, type NoteRef } from "../../wallet/src/notes/secrets.ts";
+import { turn } from "../../wallet/src/notes/restore.ts";
 import { openNoteStore, refKey } from "../../wallet/src/notes/store.ts";
 import { NEAR_NETWORKS } from "../../kit/src/near/networks.ts";
 import { VAULT_CONSTANTS, vaultLabelOf } from "../../kit/src/vault/shapes.ts";
@@ -38,7 +39,7 @@ const H = 190_000_000;
 class Vault {
   nonce = 0n;
   deposits: { P: bigint; label: bigint; value: bigint; leaf: number }[] = [];
-  spends: { nh: bigint; withdrawn: bigint; newLeaf: number }[] = [];
+  spends: { nh: bigint; withdrawn: bigint; newLeaf: number; context?: string }[] = [];
   leaves: bigint[] = [];
   deposit(P: bigint, value: bigint) {
     this.nonce += 1n;
@@ -54,6 +55,10 @@ class Vault {
     this.spends.push({ nh, withdrawn, newLeaf });
     return { value: change.value, label: change.label, commitment, leafIndex: BigInt(newLeaf) };
   }
+  // a ragequit: the whole note out, no change inserted, context 0 (vault.md l.99)
+  ragequit(nh: bigint, withdrawn: bigint) {
+    this.spends.push({ nh, withdrawn, newLeaf: 0, context: "0" });
+  }
   views() {
     const tree = (n: number) => ({ size: n, depth: n <= 1 ? 0 : Math.ceil(Math.log2(n)), root: "7" });
     return {
@@ -63,7 +68,7 @@ class Vault {
       spends: this.spends.map((s, index) => ({
         index, nullifier_hash: String(s.nh), withdrawn: String(s.withdrawn), new_leaf_index: s.newLeaf, refund_precommitment: "1",
         refund_value: "0", refund_label: "0", refund_leaf_index: 0, status: "settled",
-        payer: "relayer.near", reserve: "0", recipient: "b".repeat(64), fee: "30000", context: "5",
+        payer: "relayer.near", reserve: "0", recipient: "b".repeat(64), fee: "30000", context: s.context ?? "5",
       })),
       leaves: this.leaves.map(String),
       labels: [] as string[],
@@ -171,6 +176,8 @@ test("a provider that lies about a page, or serves one past the list's length: n
   for (const [name, lie] of [
     ["a deposit's value changed on one provider", (m: string, view: unknown) => (m === "deposits" && Array.isArray(view) && view.length > 0 ? view.map((r, k) => (k === 0 ? { ...(r as object), value: "1" } : r)) : view)],
     ["a page past the list's length", (m: string, view: unknown) => (m === "spends" && Array.isArray(view) ? [...view, ...view] : view)],
+    // the second provider's config read on its own: a check that read one provider's config twice passes this
+    ["the config's asset another token on one provider", (m: string, view: unknown) => (m === "config" ? { ...(view as object), asset: "other.near" } : view)],
   ] as const) {
     const { v, own } = lived();
     const st = await device();
@@ -237,4 +244,75 @@ test("the vault's walk owes no deposit id read: no step 5 marker is written for 
   await r.idle();
   assert.equal((await notesIn(st)).length, 3);
   assert.equal(await st.get("meta", restoreKind.RESTORE_IDS_KEY), undefined);
+});
+
+test("a ragequit (the whole note out, no change) comes back SPENT with no change note, and a ragequit the lost device lands after the restore moves its note SPENT on the next run", async () => {
+  const v = new Vault();
+  const d0: NoteRef = { kind: "deposit", s: SCOPE, i: 0 };
+  const d1: NoteRef = { kind: "deposit", s: SCOPE, i: 1 };
+  v.deposit(noteSecrets(SEED, d0).precommitment, 9_000_000n);
+  v.deposit(noteSecrets(SEED, d1).precommitment, 2_000_000n);
+  v.ragequit(noteSecrets(SEED, d0).nullifierHash, 9_000_000n);
+  const st = await device();
+  await restoreKind.poolRestore(hostOf(st, () => pair(v), [])).auto();
+  assert.deepEqual(sorted(await notesIn(st)).map((x) => [x.key, x.state]), sorted([{ key: refKey(d0), state: "SPENT" }, { key: refKey(d1), state: "UNSPENT" }]).map((x) => [x.key, x.state]));
+  const ns = await openNoteStore(st);
+  assert.equal(vaultBalanceOf(await ns.list(), SCOPE), 2_000_000n);
+  ns.close();
+  // the lost device's ragequit of d1 lands after the restore: a Sync moves it SPENT
+  v.ragequit(noteSecrets(SEED, d1).nullifierHash, 2_000_000n);
+  const r = restoreKind.poolRestore(hostOf(st, () => pair(v), []));
+  r.kind({}, { id: crypto.randomUUID(), sha: "0".repeat(64), progress: () => {} } as never);
+  await new Promise((ok) => setTimeout(ok, 0));
+  await r.idle();
+  assert.deepEqual((await notesIn(st)).map((x) => x.state), ["SPENT", "SPENT"]);
+});
+
+test("a history of 100 withdrawals (150 notes): the seed is opened a slice at a time and the page's thread is never held longer than a slice", async () => {
+  const v = new Vault();
+  for (let i = 0; i < 50; i++) {
+    const d: NoteRef = { kind: "deposit", s: SCOPE, i };
+    const l = v.deposit(noteSecrets(SEED, d).precommitment, 9_000_000n);
+    const c0: NoteRef = { kind: "change", l: l.label, j: 0 };
+    v.withdraw(noteSecrets(SEED, d).nullifierHash, 1_000_000n, { P: noteSecrets(SEED, c0).precommitment, value: 8_000_000n, label: l.label });
+    const c1: NoteRef = { kind: "change", l: l.label, j: 1 };
+    v.withdraw(noteSecrets(SEED, c0).nullifierHash, 1_000_000n, { P: noteSecrets(SEED, c1).precommitment, value: 7_000_000n, label: l.label });
+  }
+  // each use of the seed timed from its open to its end
+  const uses: number[] = [];
+  const seed64 = (async (use: (s: Uint8Array) => unknown) => {
+    const s = Uint8Array.from(SEED);
+    const t = performance.now();
+    try {
+      return use(s);
+    } finally {
+      uses.push(performance.now() - t);
+      s.fill(0);
+    }
+  }) as never;
+  // the page's thread: the longest wait of another task that asks for every turn, as the page's own messages do
+  let longest = 0;
+  let on = true;
+  let at = performance.now();
+  void (async () => {
+    while (on) {
+      await turn();
+      const t = performance.now();
+      longest = Math.max(longest, t - at);
+      at = t;
+    }
+  })();
+  // each answer on a turn of its own, as a provider's answer comes over the network
+  const net = (x: VaultSyncRpc): VaultSyncRpc => ({ name: x.name, query: async (p, s) => (await turn(), x.query(p, s)) });
+  const [a, b] = pair(v);
+  const r = await restoreKind.nearVaultRestoreNotes({ network: PAGE_NETWORK, rpcs: [net(a), net(b)], seed64, gap: GAP });
+  on = false;
+  assert.equal(r.notes.length, 150);
+  assert.equal(r.notes.filter((n) => n.state === "UNSPENT").length, 50);
+  // a slice is WALK_SLICE_MS (8 ms) of work and the step it ends on, about 10 ms here; the bound leaves a loaded machine
+  // its room (before the notes were sliced, one use held the seed and the thread for the whole history, seconds)
+  const SLICE_BOUND_MS = 50;
+  assert.ok(uses.length > 20, `the seed was opened ${uses.length} times`);
+  assert.ok(Math.max(...uses) <= SLICE_BOUND_MS, `the longest use of the seed: ${Math.max(...uses).toFixed(1)} ms`);
+  assert.ok(longest <= SLICE_BOUND_MS, `the longest the thread was held: ${longest.toFixed(1)} ms`);
 });
