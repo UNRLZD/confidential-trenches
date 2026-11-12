@@ -143,11 +143,13 @@ function exact(s: string): bigint | null {
   const d = dec(s);
   return d === null || d.scale > EXACT ? null : d.n * 10n ** BigInt(EXACT - d.scale);
 }
-/** amount x price in USD exactly, at EXACT decimals. */
+/** amount x price in USD at EXACT decimals, cut past them (an amount and a price of 78 decimals each have 156). */
 function mulExact(amount: string, usd: string): bigint | null {
   const a = dec(amount);
   const p = dec(usd);
-  return a === null || p === null || a.scale + p.scale > EXACT ? null : a.n * p.n * 10n ** BigInt(EXACT - a.scale - p.scale);
+  if (a === null || p === null) return null;
+  const s = a.scale + p.scale;
+  return s > EXACT ? (a.n * p.n) / 10n ** BigInt(s - EXACT) : a.n * p.n * 10n ** BigInt(EXACT - s);
 }
 const usd = (c: bigint): string => `${c / 100n}.${(c % 100n).toString().padStart(2, "0")}`;
 

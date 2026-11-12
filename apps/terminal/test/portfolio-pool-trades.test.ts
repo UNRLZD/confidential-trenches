@@ -63,8 +63,8 @@ test("the whole sequence: nothing open, both round trips closed with their reali
   assert.equal(first!.symbol, "Icm");
   // the header's figures follow the closed list
   assert.equal(stats(closed).trades, 2);
-  // the rows' own figures added, as the calendar adds them
-  assert.equal(pf.totals!.realized30, -5n);
+  // the exact sum (−$0.0548…) rounded down once, toward minus infinity: never less of a loss than there is
+  assert.equal(pf.totals!.realized30, -6n);
   // Activity: each trade with its own transaction and size
   const acts = activity(snap.state!.ops, d).filter((r) => r.kind === "buy" || r.kind === "sell");
   // each to the nearest cent, as its closed row draws the same trade ($0.0999999 is $0.10)

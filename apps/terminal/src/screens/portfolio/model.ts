@@ -349,10 +349,11 @@ function realized30X(rows: readonly Row[], closed: readonly ClosedTrade[], now: 
 /** Each chain's pool asset, for a trade op's pool_amount (kit OpDetail): NEAR's money is the vault's USDC, whose USD
  *  is amount_usd itself. */
 const TRADE_ASSET: Readonly<Record<Chain, PoolAsset | null>> = { solana: "SOL", base: "ETH", robinhood: "ETH", near: null };
-/** Fixed scale for summing decimal strings exactly (a token's or asset's whole units, USD). */
-const SCALE = 40;
+/** Fixed scale for summing decimal strings exactly (a token's or asset's whole units, USD): every decimal the kit's
+ *  state schema allows (78, schema.ts dec), so no figure it sends is refused here. */
+const SCALE = 78;
 const fx = (s: string | undefined): bigint | null => {
-  const m = s === undefined ? null : /^(\d{1,78})(?:\.(\d{1,40}))?$/.exec(s);
+  const m = s === undefined ? null : /^(\d{1,78})(?:\.(\d{1,78}))?$/.exec(s);
   return m ? BigInt(m[1]! + (m[2] ?? "").padEnd(SCALE, "0")) : null;
 };
 const unfx = (n: bigint): string => {
@@ -375,8 +376,9 @@ export const nearCents = (x: bigint): bigint => {
   const c = (a * 200n + ONE) / (2n * ONE);
   return x < 0n ? -c : c;
 };
-/** An exact USD figure (fx) in cents rounded toward zero: a total, rounded once, never more than there is. */
-export const downCents = (x: bigint): bigint => (x * 100n) / ONE;
+/** An exact USD figure (fx) in cents rounded down (toward minus infinity): a total, rounded once, never better than
+ *  the exact figure (never more than there is, and a loss never less than it is). */
+export const downCents = (x: bigint): bigint => (x >= 0n ? (x * 100n) / ONE : -((-x * 100n + ONE - 1n) / ONE));
 /** A sum that stays null once any part is unknown. */
 const add = (a: bigint | null, b: bigint | null): bigint | null => (a === null || b === null ? null : a + b);
 
@@ -546,8 +548,8 @@ export function totals(s: SignpageState, rows: readonly Row[], closed: readonly 
   for (const w of s.wallets) if (w.state === "ARMING" || w.state === "RETURNING") onWay += cents(w.size) ?? 0n;
   const held = openBuysHold(s, now);
   let partial = held.partial;
-  // each total the exact sum of the rows' exact figures, rounded down once (toward zero for a gain or a loss): never a
-  // sum of rounded rows, so it never shows more than the account has; a row and a total may differ by a cent
+  // each total the exact sum of the rows' exact figures, rounded down once (downCents): never a sum of rounded rows, so
+  // it never shows better than the account is; a row and a total may differ by a cent
   let posX = 0n;
   let unrealX = 0n;
   for (const r of rows) {

@@ -43,7 +43,7 @@ export const MARKS = {
   app: [
     ["Portfolio's positions sum each position's asset_held, none for a wallet already counted", new RegExp(`${ID}\\.asset_held===void 0\\|\\|${ID}\\.wallets\\.some\\(`)],
     ["a row's Bought reads to the nearest cent, half up", new RegExp(`\\+\\(Number\\(${ID}\\[2\\]\\?\\?${q("0")}\\)>=5\\?1n:0n\\)`)],
-    ["a row's Value reads to the nearest cent, half up", new RegExp(`\\*200n\\+${ID}\\)\\/\\(2n\\*${ID}\\)`)],
+    ["a row's Value reads to the nearest cent, half up", new RegExp(`\\*200n\\+(${ID})\\)\\/\\(2n\\*\\1\\)`)],
     ["the chart's axis labels add decimals until none read alike", new RegExp(`\\.size<${ID}&&${ID}<=8;${ID}\\+\\+\\)`)],
   ],
 };

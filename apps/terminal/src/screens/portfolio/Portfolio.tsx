@@ -211,13 +211,13 @@ function Equity({ src, t, pools, loading, offline, rows, ui, setUi, now }: HeadP
           <div className="lb"><span className="t3"><W id="total" /></span>{offline && <span className="tag warn" data-offline-tag><W id="offline" /></span>}</div>
           <div className="row-flex tl">
             <div className="tot num" data-total={t ? t.total.toString() : undefined}>{loading ? <Sk w={170} h={30} /> : usd(t?.total ?? 0n)}</div>
-            {change !== null && <span className={`pill2 ${change >= 0n ? "g" : "r"}`}>{usd(change, true)}</span>}
+            {change !== null && <span className={`pill2 ${change > 0n ? "g" : change < 0n ? "r" : ""}`}>{usd(change, true)}</span>}
           </div>
         </div>
         <span className="grow" />
         <div className="brk">
           <div><div className="k"><W id="unrealized" /></div><div className="v num">{v(t && rows.length ? t.unreal : null, t?.unrealSign ?? null)}</div></div>
-          <div><div className="k"><W id="realized30" /></div><div className="v num">{v(t && (src.data.closed.length || t.realized30) ? t.realized30 : null, t?.realized30Sign ?? null)}</div></div>
+          <div><div className="k"><W id="realized30" /></div><div className="v num">{v(t && (src.data.closed.length || t.realized30Sign !== 0n) ? t.realized30 : null, t?.realized30Sign ?? null)}</div></div>
         </div>
       </div>
       <div className="eqsplit">
@@ -540,7 +540,7 @@ function PosTr({ r, now, menu, setMenu, act }: { r: Row; now: number; menu: "mor
       <td>{units(r.units)}<div className="s2">{r.symbol}</div></td>
       <td data-value data-unread={r.value === null || undefined}>{r.value === null ? DASH : usd(r.value)}</td>
       <td className={sgn(r.pnlSign)} data-pnl>{r.pnl === null ? DASH : <>{usd(r.pnl, true)}<div className={`s2 ${sgn(r.pnlSign)}`}>{pct(r.pnlBps)}</div></>}</td>
-      <td className={r.realized ? sgn(signOf(r.realizedX)) : ""}>{r.realized ? usd(r.realized, true) : DASH}</td>
+      <td className={sgn(signOf(r.realizedX))}>{r.realizedX !== 0n ? usd(r.realized, true) : DASH}</td>
       <td className="l">
         {r.exit ? (
           <span className="xs"><span className="xt tp num">TP {pct(r.exit.tp_bps).replace(".0", "")}</span><span className="xt sl num">SL {pct(-r.exit.sl_bps).replace(".0", "")}</span></span>
@@ -696,7 +696,7 @@ function PhoneTop({ src, t, pools, loading, offline, rows, ui, setUi, now }: Hea
       </div>
       <div className="brk two">
         <div><div className="k"><W id="unrealized" /></div><div className="v num">{v(t && rows.length ? t.unreal : null, t?.unrealSign ?? null)}</div></div>
-        <div><div className="k"><W id="realized30" /></div><div className="v num">{v(t && (src.data.closed.length || t.realized30) ? t.realized30 : null, t?.realized30Sign ?? null)}</div></div>
+        <div><div className="k"><W id="realized30" /></div><div className="v num">{v(t && (src.data.closed.length || t.realized30Sign !== 0n) ? t.realized30 : null, t?.realized30Sign ?? null)}</div></div>
       </div>
       <div className="mwhere">
         <div className="lbl2"><W id="whereItIs" /></div>

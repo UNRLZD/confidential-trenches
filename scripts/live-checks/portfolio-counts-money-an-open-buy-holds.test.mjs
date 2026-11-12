@@ -113,6 +113,8 @@ test("the marks on the builds' minified shapes, any quote; each old shape is no 
     "let r=BigInt(t[2]+(n+`00`).slice(0,2));return r",
     "return BigInt(n[1]+i)*BigInt(r[1]+a)*100n/o",
     "Ys=e=>e*100n/Fs",
+    // the half-up step over two different scales is not the mark: its two names must be one
+    "let t=((e<0n?-e:e)*200n+Dh)/(2n*Xh)",
     "for(let e=2;e<=8;e++)a=i(e);",
     "a=i(2),new Set(a).size<n&&a",
     "{}.asset_held,t.wallets.some(",
