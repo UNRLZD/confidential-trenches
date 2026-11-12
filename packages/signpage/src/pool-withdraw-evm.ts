@@ -128,9 +128,10 @@ export type EvmWithdrawHost = {
   /** The owed send's record updated (its release read back, W's send's hash before it leaves), awaited. */
   keep?(p: EvmPendingOnward): Promise<void>;
   owedNotes?(): Promise<ReadonlySet<string>>;
-  /** The run's planned notes kept out of every proof queue (any tab's) and every other plan until `untilMs` (pool ms,
-   *  the latest deadline the run can bind), written before a part's wait for its boundary; [] clears them, at every end. */
-  keepOut?(noteIds: readonly string[], untilMs: bigint): Promise<void>;
+  /** The run's planned notes kept out of every proof queue (any tab's) and every other plan for `spanMs` from now on the
+   *  device's clock (the longest a part can take to bind), written before any part and again before each part's wait for
+   *  its boundary; [] clears them, at every end (the Solana withdraw's keepOut, src/pool-withdraw.ts). */
+  keepOut?(noteIds: readonly string[], spanMs: bigint): Promise<void>;
   /** The op's stage; `held` (a part left on W by a send that reverted) in the same call, so one write holds both. */
   stage?(stage: WithdrawStage, txs: TxRef[], pending: EvmPendingOnward | null, arrived: Arrivals, held?: EvmHeldOnW): void;
   now?(): bigint;
@@ -490,7 +491,7 @@ export async function onwardReceipt(rpcs: readonly [EvmRpc, EvmRpc], hash: strin
 }
 
 /** One withdraw of `amount` (wei arriving at `to`), `maxFee` the Max fee the screen drew. */
-export async function runEvmPoolWithdraw(h: EvmWithdrawHost, ask: PoolAsk, to: string, amount: bigint, maxFee: bigint, mine: ReadonlySet<string> = new Set()): Promise<EvmWithdrawAnswer> {
+export async function runEvmPoolWithdraw(h: EvmWithdrawHost, ask: PoolAsk, to: string, amount: bigint, maxFee: bigint): Promise<EvmWithdrawAnswer> {
   const txs: TxRef[] = [];
   const arrived: Arrivals = {};
   let pending: EvmPendingOnward | null = null;
@@ -506,7 +507,8 @@ export async function runEvmPoolWithdraw(h: EvmWithdrawHost, ask: PoolAsk, to: s
     if (typeof maxFee !== "bigint" || maxFee < 0n) stop("max_fee");
     const notes = await h.notes();
     const owed = (await h.owedNotes?.()) ?? new Set<string>();
-    const sources = withdrawSources(await notes.list(), h.pool.scope, mine).filter((n) => !owed.has(n.id));
+    // UNSPENT and HELD notes (a HELD one any tab's proof queue holds lets go: free()), less the owed and kept-out ones
+    const sources = withdrawSources(await notes.list(), h.pool.scope).filter((n) => !owed.has(n.id));
     // the first plan at a plain send's cost names the notes, and so the first W the To check runs from
     const first = await evmWithdrawCosts(h);
     const plan0 = planPoolWithdraw(sources, amount, first);
@@ -524,8 +526,8 @@ export async function runEvmPoolWithdraw(h: EvmWithdrawHost, ask: PoolAsk, to: s
     if (BigInt(plan!.length) * (costs.fee + costs.wFee) > maxFee) stop("max_fee");
     const wCap = maxFee / BigInt(plan!.length) - costs.fee;
     // from here to the run's end no proof queue (any tab's) takes a planned note; each part moves the deadline on
-    const keepOut = async (untilMs: bigint): Promise<void> => h.keepOut?.(plan!.map((x) => x.noteId), untilMs);
-    await keepOut(evmKeptUntil(h.pool, await h.pool.now()));
+    const keepOut = async (): Promise<void> => h.keepOut?.(plan!.map((x) => x.noteId), evmKeepSpan(h.pool));
+    await keepOut();
     for (const [i, p] of plan!.entries()) {
       say("proving");
       const got = await onePart(h, ask, notes, p, costs, { to, last: i === plan!.length - 1, feeCap: wCap.toString() }, (o) => void (pending = o), keepOut);
@@ -574,8 +576,8 @@ export const EVM_WITHDRAW_FREE_MS = 30_000;
 /** A part's tree read, bounded in wall-clock time (the pool's trees() takes the signal). */
 export const EVM_WITHDRAW_TREES_MS = 30_000;
 
-/** The latest deadline a part bound from pool time `nowMs` can carry: its wait for the next boundary and a proof's life. */
-const evmKeptUntil = (P: Pick<Pool<EvmPoolRequest>, "epochMs" | "lifeMs">, nowMs: bigint): bigint => nowMs + P.epochMs + EVM_WITHDRAW_BOUNDARY_LAG_MS + P.lifeMs;
+/** The longest a part can take to bind from its start: its wait for the next boundary and a proof's life. */
+const evmKeepSpan = (P: Pick<Pool<EvmPoolRequest>, "epochMs" | "lifeMs">): bigint => P.epochMs + EVM_WITHDRAW_BOUNDARY_LAG_MS + P.lifeMs;
 
 /** Waits until the pool's time (P.now, never the device clock) reaches `boundary`, out of `left.ms` of waits (one
  *  part's budget, one epoch and EVM_WITHDRAW_BOUNDARY_LAG_MS, shared by every boundary it waits for); returns that time. */
@@ -594,7 +596,7 @@ async function evmPoolTimeAt(P: Pool<EvmPoolRequest>, wait: (ms: number) => Prom
 /** One part's release to W: hold the note, bind and prove part + fee + W's fee to W, check, sign as W, RESERVED, the
  *  owed send written, then the helper's send and the read-back on both RPCs. "stopped": nothing left the device, or
  *  the chain says it never lands; "sent": no end in the tap's bound (owed, for the state reads). */
-async function onePart(h: EvmWithdrawHost, ask: PoolAsk, notes: NoteStore, p: WithdrawPart, c: EvmWithdrawCosts, base: Pick<PendingOnward, "to" | "last" | "feeCap">, owing: (o: EvmPendingOnward) => void, keepOut: (untilMs: bigint) => Promise<void>): Promise<{ end: "mine" | "stopped" | "sent"; tx: string; l: bigint; j: number }> {
+async function onePart(h: EvmWithdrawHost, ask: PoolAsk, notes: NoteStore, p: WithdrawPart, c: EvmWithdrawCosts, base: Pick<PendingOnward, "to" | "last" | "feeCap">, owing: (o: EvmPendingOnward) => void, keepOut: () => Promise<void>): Promise<{ end: "mine" | "stopped" | "sent"; tx: string; l: bigint; j: number }> {
   const P = h.pool;
   let attempt: string | null = null;
   let reserved = false;
@@ -602,12 +604,13 @@ async function onePart(h: EvmWithdrawHost, ask: PoolAsk, notes: NoteStore, p: Wi
   const clock = clockOf(h);
   const wait = waitOf(h);
   try {
-    // the note, dropped first when the page's proof queue holds it for the next buy; one whose proof is still being
-    // made comes back UNSPENT when that proof ends (queue.ts drop), waited for at most EVM_WITHDRAW_FREE_MS
+    // the note, dropped first when this page's proof queue holds it for the next buy; one it is still proving, or
+    // another tab's queue holds, comes back UNSPENT when that proof ends or at that queue's next pass (the keep-out
+    // record's write wakes it: queue.ts skip), waited for at most EVM_WITHDRAW_FREE_MS
     const free = async (): Promise<NoteRecord> => {
       let n = await notes.get(p.noteId);
-      if (n?.state === "HELD" && h.drop) {
-        await h.drop(p.noteId);
+      if (n?.state === "HELD") {
+        await h.drop?.(p.noteId);
         for (let waited = 0; (n = await notes.get(p.noteId))?.state === "HELD" && waited < EVM_WITHDRAW_FREE_MS; waited += 500) await wait(500);
       }
       if (n === undefined || n.state !== "UNSPENT" || n.leaf === undefined) stop("note");
@@ -622,7 +625,7 @@ async function onePart(h: EvmWithdrawHost, ask: PoolAsk, notes: NoteStore, p: Wi
     let nowMs = await P.now();
     // the run's notes out of every queue's pass (any tab's) past the latest deadline this part can bind, so no queue
     // takes this note at the boundary it may wait for
-    await keepOut(evmKeptUntil(P, nowMs));
+    await keepOut();
     let epochStartMs = nowMs - (nowMs % P.epochMs);
     let trees = await P.trees(epochStartMs, AbortSignal.timeout(EVM_WITHDRAW_TREES_MS));
     if (leaf.leafIndex >= BigInt(trees.stateTree.size)) {
@@ -804,10 +807,10 @@ async function sentValue(rpcs: readonly [EvmRpc, EvmRpc], hash: string): Promise
 
 /** The screen's funds on an EVM pool: the landed notes of the pool's scope this page may spend, and this chain's
  *  costs (a plain send's, or To's when typed). */
-export async function evmWithdrawFunds(h: Pick<EvmWithdrawHost, "chain" | "pin" | "rpcs" | "pool" | "notes" | "seed64" | "owedNotes">, mine: ReadonlySet<string>, to?: string): Promise<{ notes: ReturnType<typeof withdrawSources>; fee: bigint; wFee: bigint; minPart: bigint }> {
+export async function evmWithdrawFunds(h: Pick<EvmWithdrawHost, "chain" | "pin" | "rpcs" | "pool" | "notes" | "seed64" | "owedNotes">, to?: string): Promise<{ notes: ReturnType<typeof withdrawSources>; fee: bigint; wFee: bigint; minPart: bigint }> {
   const notes = await h.notes();
   const owed = (await h.owedNotes?.()) ?? new Set<string>();
-  const list = withdrawSources(await notes.list(), h.pool.scope, mine).filter((n) => !owed.has(n.id));
+  const list = withdrawSources(await notes.list(), h.pool.scope).filter((n) => !owed.has(n.id));
   let c = await evmWithdrawCosts(h);
   if (to !== undefined && !evmToRefused(to, h.pin, []) && list.length > 0) {
     const plan = planPoolWithdraw(list, list.reduce((a, n) => (n.value > a ? n.value : a), 0n) - c.fee - c.wFee, c) ?? [];

@@ -1854,3 +1854,104 @@ test("the kept-out record's write reaches another page as a store change (its st
     w.close();
   }
 });
+
+// review 3 of 972be65f (P2-C, RR7) through the page's own host: the sheet's EVM withdraw of a change note that landed
+// this epoch waits for the next boundary; the app's hidden frame (a second page on the same store) runs its Base proof
+// queue's pass at that boundary. The run's keep-out record (meta owed/withdraw-sol, written through evmWithdrawRun's
+// keepOut) keeps the frame's queue off the note, so the part binds; the record is gone once the run ends.
+const evmTwoPages = async (heldFirst: boolean) => {
+  const { w, ns } = await wallet();
+  const { evmPoolScopeOf, EVM_EPOCH_MS, EVM_LIFE_MS, EVM_SEND_MARGIN_MS, EVM_LADDER } = await import("../../wallet/src/pool/evm.ts");
+  const { WITHDRAW_PLANNED_KEY } = await import("../src/pool-testnet.ts");
+  const pin = EVM_POOLS["base-sepolia"]!;
+  const scope = evmPoolScopeOf(pin.pool, 84532n);
+  const label = vaultLabelOf(keccak_256, scope, 1n);
+  const ref: NoteRef = { kind: "change", l: label, j: 0 };
+  const value = 10n ** 15n;
+  const pre = noteSecrets(SEED64, ref).precommitment;
+  const leaf = noteCommitment(value, label, pre);
+  const n = await ns.add({ ref, scope, precommitment: pre, state: "UNSPENT", leaf: { value, label, commitment: leaf, leafIndex: 0n } });
+  // the pool's time: an epoch's start and 1 s; the leaf landed this epoch, so only the next boundary's root holds it
+  const E0 = 1_800_000_000_000n;
+  let slept = 0n;
+  let onWait: (() => Promise<unknown>) | null = null;
+  const binds: { page: string; chunk: bigint }[] = [];
+  const FEE = 10n ** 12n;
+  const PROBE = (1n << 127n) - 1n;
+  const poolOf = (page: string) => ({
+    id: `evm:base-sepolia:${pin.pool.toLowerCase()}`, chain: "evm", scope, ladder: EVM_LADDER, epochMs: EVM_EPOCH_MS, lifeMs: EVM_LIFE_MS, sendMarginMs: EVM_SEND_MARGIN_MS,
+    now: async () => E0 + 1_000n + slept,
+    trees: async (beforeMs: bigint) => {
+      const s = new VaultTree(beforeMs > E0 + 500n ? [leaf] : []), l = new VaultTree(beforeMs > E0 + 500n ? [label] : []);
+      return { stateTree: s, labelTree: l, stateRoot: s.root ?? 0n, labelRoot: l.root ?? 0n };
+    },
+    bind: async (b: { chunk: bigint; wallet: { address: string }; deadlineMs: bigint }) => {
+      if (b.chunk !== PROBE) binds.push({ page, chunk: b.chunk });
+      // the sheet's part stops at its bind: nothing is signed or sent here
+      if (page === "sheet" && b.chunk !== PROBE) throw new Error("the part reached its bind");
+      const bytes = new TextEncoder().encode(`${b.wallet.address}|${b.chunk}|${b.deadlineMs}`);
+      return { context: BigInt("0x" + Buffer.from(keccak_256(bytes)).toString("hex")) % VAULT_FIELD_P, feeCap: FEE, request: { w: b.wallet.address } };
+    },
+  }) as unknown as Pool<unknown>;
+  const q = (v: bigint) => "0x" + v.toString(16);
+  const rpc = (k: string) => Object.assign(async (method: string, params: readonly unknown[] = []): Promise<unknown> => {
+    if (method === "eth_blockNumber") return "0x100";
+    if (method === "eth_getBlockByNumber") return { number: "0x100", hash: "0x" + "be".repeat(32), timestamp: q((E0 + 1_000n + slept) / 1000n), baseFeePerGas: q(10_000_000n) };
+    if (method === "eth_getCode") return "0x";
+    if (method === "eth_estimateGas") return q(21_000n);
+    if (method === "eth_call") return (params[0] as { to: string }).to.toLowerCase() === "0x420000000000000000000000000000000000000f" ? "0x" + (900n).toString(16).padStart(64, "0") : "0x";
+    if (method === "eth_getLogs") return [];
+    throw new Error(`${k}: no ${method}`);
+  }, { url: `https://${k}.invalid` });
+  const offline = Object.assign(async () => Promise.reject(new Error("offline")), { url: "https://sol.invalid" });
+  const mk = (page: string) => testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, {
+    rpcs: [offline, offline], prover: { vault: signalsProver(), stop: () => {} }, hardwareConcurrency: 4,
+    evmPin: (c) => (c === "base" ? pin : undefined), evmRpcs: (c) => (c === "base" ? [rpc(`${page}-a`), rpc(`${page}-b`)] : null),
+    evmSync: () => ({ events: async () => Promise.reject(new Error("offline")) }),
+    evmQueuePool: () => poolOf(page),
+    now: () => E0 + 1_000n + slept,
+    wait: async (ms: number) => {
+      slept += BigInt(ms);
+      await onWait?.();
+    },
+  });
+  const frame = mk("frame");
+  const sheet = mk("sheet");
+  // the frame's pass before the boundary: the epoch's root lacks the leaf, so nothing is proved
+  await frame.stateRead();
+  assert.equal((await ns.get(n.id))?.state, "UNSPENT");
+  if (heldFirst) {
+    // past the boundary before the tap: the frame's pass proves the note and holds it (HELD) for its next buy
+    slept += 60_000n;
+    await frame.stateRead();
+    for (let i = 0; i < 100 && (await ns.get(n.id))?.state !== "HELD"; i++) await new Promise((r) => setTimeout(r, 10));
+    assert.equal((await ns.get(n.id))?.state, "HELD", "the frame holds the note");
+    binds.length = 0;
+  }
+  let atBoundary = 0;
+  // every wait of the sheet's run stands for one of the frame's state reads (which every store write wakes)
+  onWait = async () => {
+    if (slept >= 59_000n) atBoundary++;
+    await frame.stateRead();
+  };
+  await sheet.withdraw({ chain: "base", to: "0x1111111111111111111111111111111111111111", amount: 5n * 10n ** 14n, maxFee: 10n ** 15n }, "op-w");
+  const planned = (await w.get("meta", WITHDRAW_PLANNED_KEY)) as Record<string, unknown> | undefined;
+  const state = (await ns.get(n.id))?.state;
+  await frame.signedOut();
+  await sheet.signedOut();
+  return { atBoundary, binds, planned, state };
+};
+test("(RR7, the page's host) an EVM withdraw keeps its change note out of another page's proof queue while it waits for the boundary; the part binds and the keep-out is cleared at the run's end", async () => {
+  const { atBoundary, binds, planned, state } = await evmTwoPages(false);
+  assert.ok(atBoundary > 0, "the frame's pass ran at the boundary");
+  assert.deepEqual(binds.filter((b) => b.page === "frame"), [], "the frame's queue never took the note");
+  assert.equal(binds.filter((b) => b.page === "sheet").length, 1, "the part got its note back and reached its bind");
+  assert.equal(planned?.["op-w"], undefined, "the keep-out cleared at the run's end (a part that threw)");
+  assert.equal(state, "UNSPENT", "nothing moved");
+});
+test("(the page's host) an EVM withdraw of a note another page's queue already holds: the sheet counts it, the frame lets it go at its next pass once the keep-out is written, and the part binds", async () => {
+  const { binds, planned, state } = await evmTwoPages(true);
+  assert.equal(binds.filter((b) => b.page === "sheet").length, 1, "the part waited for the frame to let go and reached its bind");
+  assert.equal(planned?.["op-w"], undefined, "the keep-out cleared at the run's end");
+  assert.equal(state, "UNSPENT");
+});

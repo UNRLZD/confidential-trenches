@@ -123,10 +123,10 @@ test("the plan: exactly the amount leaves as parts, each chunk part + fee + W's 
   assert.equal(planPoolWithdraw(notes, 2n * 10n ** 15n, c), null, "more than the notes give after fees: no plan");
 });
 
-test("the screen's notes: landed UNSPENT notes of the pool's scope, and HELD ones only when the page's own queue holds them", () => {
+test("the screen's notes: landed UNSPENT and HELD notes of the pool's scope (a HELD one's queue lets go when the run frees it)", () => {
   const n = (id: string, state: NoteRecord["state"], scope = 7n) => ({ id, state, scope, leaf: { value: 10n ** 15n, label: L, leafIndex: 0n } }) as unknown as NoteRecord;
-  const got = withdrawSources([n("u", "UNSPENT"), n("h", "HELD"), n("mine", "HELD"), n("r", "RESERVED"), n("other", "UNSPENT", 8n)], 7n, new Set(["mine"]));
-  assert.deepEqual(got.map((x) => x.id), ["u", "mine"]);
+  const got = withdrawSources([n("u", "UNSPENT"), n("h", "HELD"), n("r", "RESERVED"), n("other", "UNSPENT", 8n)], 7n);
+  assert.deepEqual(got.map((x) => x.id), ["u", "h"]);
 });
 
 test("To refused before any note moves: the zero address, every precompile under 0x10000, the pool, the fee recipient, a W of the plan, a malformed address", () => {
@@ -897,11 +897,13 @@ test("(review 3 P2-B) every run of W's send carries its fee fields: the resend's
 // (HELD, its proof in flight) unless a withdraw's keep-out names it; a drop of an in-flight proof only marks it, and the
 // note comes back UNSPENT when that proof ends (queue.ts drop)
 const queueAtBoundary = (world: Awaited<ReturnType<typeof runWorld>>, o: { proofEndsMs?: bigint } = {}) => {
-  const kept = { ids: new Set<string>(), until: 0n, calls: [] as [string[], bigint][] };
-  world.h.keepOut = async (ids, untilMs) => {
-    kept.calls.push([[...ids], untilMs]);
+  const kept = { ids: new Set<string>(), until: 0n, calls: [] as [string[], bigint][], at: [] as { ms: bigint; trees: number }[] };
+  // the host's record: the span from now (the device's clock, here the world's)
+  world.h.keepOut = async (ids, spanMs) => {
+    kept.calls.push([[...ids], spanMs]);
+    kept.at.push({ ms: world.clock.ms, trees: world.chain.trees.length });
     kept.ids = new Set(ids);
-    kept.until = untilMs;
+    kept.until = world.clock.ms + spanMs;
   };
   const took = { at: null as bigint | null, dropped: false };
   const wait0 = world.h.wait!;
@@ -928,8 +930,13 @@ test("(review 3 P2-C, RR7) the root wait on EVM: the run keeps its planned notes
   assert.equal(world.chain.sends, 1);
   assert.ok(kept.calls.length >= 2, "kept out before the wait, cleared at the end");
   assert.deepEqual(kept.calls[0]![0], [world.noteId], "the plan's notes");
-  assert.ok(kept.calls[0]![1] >= NOW + 60_000n + 210_000n, "past the latest deadline the part can bind (the next boundary's epoch and a proof's life)");
+  assert.equal(kept.calls[0]![1], 60_000n + 30_000n + 210_000n, "for the longest a part can take to bind: the next boundary's epoch, its lag and a proof's life");
   assert.deepEqual(kept.calls.at(-1), [[], 0n], "cleared at the run's end");
+  // written before any part, again by the part before its first tree read and its wait (each part moves the record on),
+  // then cleared: three writes
+  const SPAN = 60_000n + 30_000n + 210_000n;
+  assert.deepEqual(kept.calls, [[[world.noteId], SPAN], [[world.noteId], SPAN], [[], 0n]]);
+  assert.deepEqual(kept.at.slice(0, 2), [{ ms: NOW, trees: 0 }, { ms: NOW, trees: 0 }], "both before the part's tree read and its wait");
 });
 
 test("(review 3 P2-C) a note the page's queue is still proving when the part needs it: dropped, then waited for until that proof ends and frees it; the part goes on. A proof that never ends stops the part, nothing signed", async () => {
