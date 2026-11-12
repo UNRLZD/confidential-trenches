@@ -38,6 +38,7 @@ export const IN_PROCESS = [
   viaRead("pool-buy-filled-2s", () => import("../live-checks/pool-buy-filled-2s.mjs")),
   viaRead("sol-buy-reads-side-by-side", () => import("../live-checks/sol-buy-reads-side-by-side.mjs")),
   viaRead("signpage-error-after-timeout", () => import("../live-checks/signpage-error-after-timeout.mjs")),
+  viaRead("withdraw-form-shows-what-you-can-send", () => import("../live-checks/withdraw-form-shows-what-you-can-send.mjs")),
   viaRead("sol-buy-rent-back", () => import("../live-checks/sol-buy-rent-back.mjs")),
   viaRead("pool-read-down", () => import("../live-checks/pool-read-down.mjs")),
   viaRead("sell-first-read-waits-out-a-throttle", () => import("../live-checks/sell-first-read-waits-out-a-throttle.mjs")),
