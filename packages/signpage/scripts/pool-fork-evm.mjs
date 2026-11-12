@@ -32,7 +32,7 @@ import { dirname } from "node:path";
 import { IDBFactory } from "fake-indexeddb";
 import { entropyToWords, wordsToSeed64 } from "../../wallet/src/derive/index.ts";
 import { depositIdEvm } from "../../wallet/src/derive/keys.ts";
-import { openWalletStore, WALLET_LANES } from "../../wallet/src/store/index.ts";
+import { openWalletStore } from "../../wallet/src/store/index.ts";
 import { openNoteStore, readNotes, refKey } from "../../wallet/src/notes/store.ts";
 import { writeRestored } from "../../wallet/src/notes/restore.ts";
 import { EVM_CHAIN_IDS, EVM_LADDER, EVM_POOLS, evmPoolScopeOf, evmTreeSync } from "../../wallet/src/pool/evm.ts";
@@ -123,6 +123,7 @@ const record = {
     trailBlocks: String(2n * SLOTS),
     lagS: String(LAG),
     seed: "the all-zero test vector (packages/wallet/test/vectors/a8.json)",
+    lane: "the device's lane, FORK_LANES (the page draws it at random), so a replay asks only what was recorded",
     funded: "U's balance set to the wei the first ask names short (anvil_setBalance), on the fork only",
     reorg: "evm_revert to before the deposit, then empty blocks to its height",
     why: "lagS is the head-to-finalized lag read on the chain's mainnet pair (live check evm-money-shows-and-spends-at-once); the trail's 2 x slots blocks span it, so finalized trails the head by about that many seconds",
@@ -153,11 +154,22 @@ record.set.trailSpacingS = String(SPACING);
 const scope = evmPoolScopeOf(PIN.pool, EVM_CHAIN_IDS[CHAIN]);
 const ENTROPY = new Uint8Array(16); // the all-zero test vector
 const seed64 = wordsToSeed64(entropyToWords(ENTROPY));
-// the device's lane is drawn at random as on the page (store/index.ts readLane), so its first U is one of eight: each
-// one's account is read on the fork first, so the fixture holds all eight at the fork block and any lane replays
-for (let d = 0; d < WALLET_LANES; d++) await anvil("eth_getBalance", [depositIdEvm(seed64, scope, d).address, "latest"]);
+// the device's lane, set per chain: the page draws it once at random (store/index.ts readLane, one random byte mod 8),
+// and its deposit index, U and the pool's slot for its precommitment follow from it, so a replay asks the fixture only
+// what the recording asked. The draw is answered with this lane while the store opens, nothing else changed
+const FORK_LANES = Object.freeze({ base: 4, robinhood: 6 });
+const openAtLane = async () => {
+  const draw = globalThis.crypto.getRandomValues.bind(globalThis.crypto);
+  globalThis.crypto.getRandomValues = (a) => (a instanceof Uint8Array && a.length === 1 ? ((a[0] = FORK_LANES[CHAIN]), a) : draw(a));
+  try {
+    return await openWalletStore({ indexedDB: new IDBFactory() });
+  } finally {
+    globalThis.crypto.getRandomValues = draw;
+  }
+};
 const device = async () => {
-  const w = await openWalletStore({ indexedDB: new IDBFactory() });
+  const w = await openAtLane();
+  if (w.lane !== FORK_LANES[CHAIN]) throw new Error(`the device's lane is ${w.lane}, not ${FORK_LANES[CHAIN]}`);
   await w.insertSeed({ v: 1, entropy: new Uint8Array(16), source: "code", code_saved: true, created_ms: Date.now() });
   const ns = await openNoteStore(w);
   const rpcs = [rpcOf(URLS[0]), rpcOf(URLS[1])];
