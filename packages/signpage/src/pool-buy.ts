@@ -145,10 +145,12 @@ export type BuyMints = { get(address: string): Promise<{ mint: string; program: 
 /**
  * A buy of several pieces owed its end (card buy-spends-several-pieces), written before anything of it leaves: W (its
  * l and j: W again from the seed), the note whose tag 3 buys (`primary`, W's own), the notes whose tag 2s pay W
- * (`pieces`), the last block height its signed transactions can land at, and the coin it buys. When a piece of it is
- * spent and the buy can no longer land, what the pieces paid W goes back into the pool (resumePieces).
+ * (`pieces`), the last block height its signed transactions can land at, the coin it buys, and what names its tag 3's
+ * spend (`spend`: the pool program and fee payer of its release, its context and the note's nullifier hash, read by
+ * pool-spend.ts spendOwner). When a piece of it is spent and the buy can no longer land, what the pieces paid W goes
+ * back into the pool (resumePieces).
  */
-export type OwedPieces = { address: string; l: string; j: number; primary: string; pieces: string[]; lastHeight: string; mint: string; program: string };
+export type OwedPieces = { address: string; l: string; j: number; primary: string; pieces: string[]; lastHeight: string; mint: string; program: string; spend: { program: string; feePayer: string; context: string; nullifier: string } };
 export type PiecesOwed = { list(): Promise<OwedPieces[]>; put(r: OwedPieces): Promise<void>; drop(address: string): Promise<void> };
 
 export type PoolBuyHost = {
@@ -674,13 +676,15 @@ export function solanaPieceWire(cfg: { program: string; pool: string }, wallet: 
 /**
  * The buys of several pieces owed their end (card buy-spends-several-pieces), on each Solana state read, with no tap:
  * each record's notes as the state reads left them. Any still RESERVED: its end is not known yet (the settle reads it
- * on). The buy's own note SPENT: it landed, W holds its coin, the record goes. Else the buy can no longer land (its
- * note freed: both RPCs read its blockhash past with no spent mark): a piece SPENT means its release paid W, and what
- * W holds goes back into the pool (`strand`: the rent back's sweep, W's own owed record), then the record goes; no
- * piece spent, nothing reached W, the record goes. A note that cannot be read keeps the record for the next read, and
- * so does a strand that fails. The number stranded.
+ * on). The buy landed only when its own note is SPENT by this buy's own tag 3 (`owner`: whose spend the note's spent
+ * mark is, read on both RPCs from W's history, pool-spend.ts spendOwner on the record's `spend`; review P3-4 of
+ * c7b85ba3a: the note freed and spent by a later buy, a one-piece buy from the same W included, is SPENT too): W holds
+ * its coin, the record goes. Not known yet: the record is kept. Else the buy can no longer land (its note freed, or
+ * spent by another): a piece SPENT means its release paid W, and what W holds goes back into the pool (`strand`: the
+ * rent back's sweep, W's own owed record), then the record goes; no piece spent, nothing reached W, the record goes. A
+ * note that cannot be read keeps the record for the next read, and so does a strand that fails. The number stranded.
  */
-export async function resumePieces(o: { owed: PiecesOwed; state(noteId: string): Promise<string | undefined>; strand(r: OwedPieces): Promise<void> }): Promise<number> {
+export async function resumePieces(o: { owed: PiecesOwed; state(noteId: string): Promise<string | undefined>; owner(r: OwedPieces): Promise<"mine" | "other" | null>; strand(r: OwedPieces): Promise<void> }): Promise<number> {
   let stranded = 0;
   for (const r of await o.owed.list()) {
     let states: (string | undefined)[];
@@ -691,8 +695,15 @@ export async function resumePieces(o: { owed: PiecesOwed; state(noteId: string):
     }
     const [own, ...pieces] = states;
     if (own === "RESERVED" || pieces.includes("RESERVED")) continue;
+    // the buy's own note SPENT: by this buy's tag 3, or by another spend of it; not known yet keeps the record
+    let landed = false;
+    if (own === "SPENT") {
+      const who = await o.owner(r).catch(() => null);
+      if (who === null) continue;
+      landed = who === "mine";
+    }
     try {
-      if (own !== "SPENT" && pieces.includes("SPENT")) {
+      if (!landed && pieces.includes("SPENT")) {
         await o.strand(r);
         stranded++;
       }
@@ -879,7 +890,11 @@ async function buyRun(h: PoolBuyHost, ask: PoolAsk, at: { fault?: unknown }): Pr
       // (resumePieces); none written, nothing taken or sent
       if (before.length > 0) {
         if (!h.piecesOwed) return no();
-        await h.piecesOwed.put({ address: w.address, l: r.wallet.l.toString(), j: r.wallet.j, primary: r.noteId, pieces: before.map((b) => b.r.noteId), lastHeight: String(bh.lastHeight), mint: venue.mint, program: venue.tokenProgram });
+        await h.piecesOwed.put({
+          address: w.address, l: r.wallet.l.toString(), j: r.wallet.j, primary: r.noteId, pieces: before.map((b) => b.r.noteId),
+          lastHeight: String(bh.lastHeight), mint: venue.mint, program: venue.tokenProgram,
+          spend: { program: r.binding.request.program, feePayer: r.binding.request.feePayer, context: r.binding.context.toString(), nullifier: BigInt(r.publicSignals[1]).toString() },
+        });
       }
       const decimals = (d: number): void => {
         // a record's decimals never stop a buy: a listener that throws, or rejects

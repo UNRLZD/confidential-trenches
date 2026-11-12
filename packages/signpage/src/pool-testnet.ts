@@ -2022,6 +2022,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   let backsResumed = false;
   let foundScanned = false;
   const piecesOwed = piecesOwedOf(page.store);
+  // W's history places a buy of several pieces' owner read has reached, by W (spendOwner's HistoryPlaces)
+  const piecesPlaces = new Map<string, HistoryPlaces>();
   /** The buys of several pieces owed their end, decided from their notes' states (pool-buy.ts resumePieces): a W whose
    *  pieces paid it and whose buy can no longer land is owed a rent back (merged into W's own record, the buy's mint
    *  among its mints), which this load's background run of resumeRentBacks sweeps into the pool with no tap. Run on each
@@ -2031,6 +2033,17 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     const stranded = await resumePieces({
       owed: piecesOwed,
       state,
+      // whose spend the buy's own note is, on both RPCs at finalized (pool-spend.ts spendOwner, as followBuys reads a
+      // buy's): this buy's tag 3, another's, or not known yet; W's history read on across the state reads from piecesPlaces
+      owner: async (r) => {
+        const rs = settleRpcs("pass");
+        const slots = await Promise.all(rs.map((rpc) => rpc("getSlot", [{ commitment: "finalized" }])));
+        if (!slots.every((x) => Number.isSafeInteger(x))) return null;
+        let places = piecesPlaces.get(r.address);
+        if (!places) piecesPlaces.set(r.address, (places = new Map()));
+        const o = await spendOwner(rs, { program: r.spend.program, feePayer: r.spend.feePayer }, r.address, BigInt(r.spend.nullifier), r.spend.context, Math.max(...(slots as number[])), undefined, places);
+        return o === null ? null : o === "other" ? "other" : "mine";
+      },
       strand: async (r) => {
         const o = owedNoted(page.store);
         const had = (await o.list()).find((x) => x.address === r.address);

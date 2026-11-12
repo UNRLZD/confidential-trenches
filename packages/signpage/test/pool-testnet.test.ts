@@ -765,6 +765,8 @@ test("card buy-spends-several-pieces: helperPoolSendPieces posts {pool, txs} in 
   // the owed record's end is decided on each state read and from followBuys (the pass a buy that ended "sent" starts)
   assert.match(src, /await followBuys\(notes\);\s*await resumeOwedPieces\(/);
   assert.match(src, /now = new Map\(\(await readNotes\(await page\.store\(\)\)\)[^\n]*\n\s*await resumeOwedPieces\(/);
+  // whose spend the buy's own note is: spendOwner on the record's own spend (review P3-4 of c7b85ba3a), on the settle pair
+  assert.match(src, /owner: async \(r\) => \{\s*const rs = settleRpcs\("pass"\);[\s\S]{0,400}?spendOwner\(rs, \{ program: r\.spend\.program, feePayer: r\.spend\.feePayer \}, r\.address, BigInt\(r\.spend\.nullifier\), r\.spend\.context, /);
   // a restore's scan: the batch on the helper's seat on mainnet, never a public provider; the testnet build one W a request
   assert.match(src, /const batch = POOL_TESTNET \? null : over\.rpcs \? over\.rpcs\[1\] : solanaPacedRpc\(pageHelperRpc\(TRADE_HELPER,/);
   assert.match(src, /if \(scan\) await findHeldWs\(mine\)\.catch\(\(\) => \{\}\);\s*await resumeRentBacks\(h, locks\);/);
@@ -774,7 +776,7 @@ test("card buy-spends-several-pieces: piecesOwedOf keeps one record a W in the s
   // the real wallet store: the key is one its caller check allows, and a drop of no record writes nothing
   const { w } = await wallet();
   const o = piecesOwedOf(async () => w);
-  const rec = { address: "W1", l: "3", j: 0, primary: "n1", pieces: ["n2"], lastHeight: "151", mint: "M", program: "T" };
+  const rec = { address: "W1", l: "3", j: 0, primary: "n1", pieces: ["n2"], lastHeight: "151", mint: "M", program: "T", spend: { program: "P", feePayer: "F", context: "7", nullifier: "9" } };
   await o.put(rec);
   await o.put({ ...rec, address: "W2" });
   await o.put({ ...rec, pieces: ["n2", "n3"] });

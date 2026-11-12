@@ -2416,16 +2416,19 @@ test("pieces: the releases land and the buy does not (a helper that sent the tag
   assert.equal(settled.filter((x) => x === "note-2:spent").length, 1, settled.join(","));
   assert.ok(settled.includes("note-1:unspent"), settled.join(","));
   // the owed record, written before the send, outlives the run: W's l and j, the buy's own note, the pieces, the
-  // blockhash's last height, the coin and its token program
+  // blockhash's last height, the coin and its token program, and what names the buy's own tag 3's spend (its release's
+  // pool program and fee payer, its context, the note's nullifier hash)
   const rec = await owed.list();
-  assert.deepEqual(rec, [{ address: W.address, l: L.toString(), j: J, primary: "note-1", pieces: ["note-2"], lastHeight: "151", mint: fx.pump.mint, program: rec[0]!.program }]);
+  const named = { program: own.binding.request.program, feePayer: own.binding.request.feePayer, context: own.binding.context.toString(), nullifier: BigInt(own.publicSignals[1]).toString() };
+  assert.deepEqual(rec, [{ address: W.address, l: L.toString(), j: J, primary: "note-1", pieces: ["note-2"], lastHeight: "151", mint: fx.pump.mint, program: rec[0]!.program, spend: named }]);
   assert.match(rec[0]!.program, /^Token/);
+  assert.equal(named.program, PROGRAM);
   // the page's next state read, the buy's own note freed and the piece SPENT: W is swept back into the pool with no tap
   // (the strand puts the rent back owed on W, pool-sell.test.ts "a W no spent note lists": derived from l and j, swept
   // into the return note), then the record goes
   const stranded: OwedPieces[] = [];
   const states: Record<string, string> = { "note-1": "UNSPENT", "note-2": "SPENT" };
-  assert.equal(await resumePieces({ owed, state: async (id) => states[id], strand: async (r) => void stranded.push(r) }), 1);
+  assert.equal(await resumePieces({ owed, state: async (id) => states[id], owner: async () => assert.fail("an unspent note's owner is never read"), strand: async (r) => void stranded.push(r) }), 1);
   assert.deepEqual(stranded, rec);
   assert.deepEqual(await owed.list(), []);
 });
@@ -2560,22 +2563,37 @@ test("pieces: the helper refused the bundle (a 4xx: a refusal, or a 404 from a h
   assert.ok(!w.log.some((x) => x.endsWith("getTransaction")));
 });
 
-test("pieces: resumePieces on a reload mid-buy and after: RESERVED keeps, the buy's note SPENT drops, a freed buy with a piece SPENT is swept back, nothing spent drops, a failing read or strand keeps", async () => {
-  const rec = (address: string): OwedPieces => ({ address, l: "3", j: 0, primary: `${address}-own`, pieces: [`${address}-p1`, `${address}-p2`], lastHeight: "151", mint: "M", program: "T" });
-  const cases: [string, Record<string, string | undefined>, "keep" | "drop" | "strand"][] = [
-    ["a reload mid-buy: every note RESERVED", { own: "RESERVED", p1: "RESERVED", p2: "RESERVED" }, "keep"],
-    ["one piece settled, the rest RESERVED", { own: "RESERVED", p1: "SPENT", p2: "RESERVED" }, "keep"],
-    ["the buy landed", { own: "SPENT", p1: "SPENT", p2: "SPENT" }, "drop"],
-    ["the buy freed, one piece landed", { own: "UNSPENT", p1: "SPENT", p2: "UNSPENT" }, "strand"],
-    ["the buy freed HELD, every piece landed", { own: "HELD", p1: "SPENT", p2: "SPENT" }, "strand"],
-    ["nothing landed", { own: "UNSPENT", p1: "UNSPENT", p2: "HELD" }, "drop"],
-    ["a note gone from the store", { own: undefined, p1: "UNSPENT", p2: "UNSPENT" }, "drop"],
+// Review P3-4 of c7b85ba3a: the buy's own note SPENT was read as this buy landed, so a note freed and then spent by a
+// later buy (a one-piece buy from the same W) dropped the record and left the pieces' SOL on W with nothing owed. The
+// buy landed only when the spend is its own tag 3's (`owner`, pool-spend.ts spendOwner); another's strands W when a
+// piece paid it; not known yet keeps the record.
+test("pieces: resumePieces on a reload mid-buy and after: RESERVED keeps, the buy's note SPENT by its own tag 3 drops, SPENT by another or freed with a piece SPENT is swept back, nothing spent drops, a failing read, owner or strand keeps", async () => {
+  const rec = (address: string): OwedPieces => ({ address, l: "3", j: 0, primary: `${address}-own`, pieces: [`${address}-p1`, `${address}-p2`], lastHeight: "151", mint: "M", program: "T", spend: { program: "P", feePayer: "F", context: "7", nullifier: "9" } });
+  const cases: [string, Record<string, string | undefined>, "mine" | "other" | null | "unread", "keep" | "drop" | "strand"][] = [
+    ["a reload mid-buy: every note RESERVED", { own: "RESERVED", p1: "RESERVED", p2: "RESERVED" }, "unread", "keep"],
+    ["one piece settled, the rest RESERVED", { own: "RESERVED", p1: "SPENT", p2: "RESERVED" }, "unread", "keep"],
+    ["the buy landed: its own tag 3 spent its note", { own: "SPENT", p1: "SPENT", p2: "SPENT" }, "mine", "drop"],
+    ["the note spent by another (a later one-piece buy from W), the pieces landed", { own: "SPENT", p1: "SPENT", p2: "SPENT" }, "other", "strand"],
+    ["the note spent by another, one piece landed", { own: "SPENT", p1: "SPENT", p2: "UNSPENT" }, "other", "strand"],
+    ["the note spent by another, no piece landed", { own: "SPENT", p1: "UNSPENT", p2: "UNSPENT" }, "other", "drop"],
+    ["the note spent, whose spend not known yet", { own: "SPENT", p1: "SPENT", p2: "SPENT" }, null, "keep"],
+    ["the buy freed, one piece landed", { own: "UNSPENT", p1: "SPENT", p2: "UNSPENT" }, "unread", "strand"],
+    ["the buy freed HELD, every piece landed", { own: "HELD", p1: "SPENT", p2: "SPENT" }, "unread", "strand"],
+    ["nothing landed", { own: "UNSPENT", p1: "UNSPENT", p2: "HELD" }, "unread", "drop"],
+    ["a note gone from the store", { own: undefined, p1: "UNSPENT", p2: "UNSPENT" }, "unread", "drop"],
   ];
-  for (const [name, st, want] of cases) {
+  for (const [name, st, who, want] of cases) {
     const owed = owedMem();
     await owed.put(rec("W"));
     const stranded: string[] = [];
-    const n = await resumePieces({ owed, state: async (id) => st[id.slice(2)], strand: async (r) => void stranded.push(r.address) });
+    const asked: OwedPieces[] = [];
+    const owner = async (r: OwedPieces): Promise<"mine" | "other" | null> => {
+      asked.push(r);
+      if (who === "unread") return assert.fail(`${name}: the owner is read only for a SPENT note`);
+      return who;
+    };
+    const n = await resumePieces({ owed, state: async (id) => st[id.slice(2)], owner, strand: async (r) => void stranded.push(r.address) });
+    assert.deepEqual(asked, who === "unread" ? [] : [rec("W")], name);
     assert.equal(n, want === "strand" ? 1 : 0, name);
     assert.deepEqual(stranded, want === "strand" ? ["W"] : [], name);
     assert.equal(owed.all.size, want === "keep" ? 1 : 0, name);
@@ -2584,8 +2602,11 @@ test("pieces: resumePieces on a reload mid-buy and after: RESERVED keeps, the bu
   const owed = owedMem();
   await owed.put(rec("A"));
   await owed.put(rec("B"));
-  assert.equal(await resumePieces({ owed, state: async (id) => { if (id.startsWith("A")) throw new Error("idb"); return id.endsWith("own") ? "UNSPENT" : "SPENT"; }, strand: async () => {} }), 1);
+  assert.equal(await resumePieces({ owed, state: async (id) => { if (id.startsWith("A")) throw new Error("idb"); return id.endsWith("own") ? "UNSPENT" : "SPENT"; }, owner: async () => null, strand: async () => {} }), 1);
   assert.deepEqual([...owed.all.keys()], ["A"]);
-  assert.equal(await resumePieces({ owed, state: async (id) => (id.endsWith("own") ? "UNSPENT" : "SPENT"), strand: async () => { throw new Error("idb"); } }), 0);
+  assert.equal(await resumePieces({ owed, state: async (id) => (id.endsWith("own") ? "UNSPENT" : "SPENT"), owner: async () => null, strand: async () => { throw new Error("idb"); } }), 0);
+  assert.deepEqual([...owed.all.keys()], ["A"]);
+  // an owner read that throws (an RPC down): not known yet, kept
+  assert.equal(await resumePieces({ owed, state: async () => "SPENT", owner: async () => { throw new Error("HTTP 503"); }, strand: async () => assert.fail("never stranded") }), 0);
   assert.deepEqual([...owed.all.keys()], ["A"]);
 });
