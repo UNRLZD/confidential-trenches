@@ -145,13 +145,15 @@ const doc = Object.assign(new EventTarget(), {
   createElement: (t: string) => (t === "iframe" ? new Frame(t) : new El(t)),
 });
 const g = globalThis as Record<string, unknown>;
+// each reload the page asks for (a landed sign out, a landing on a closed gate): the stub keeps this document
+let reloads = 0;
 Object.assign(g, {
   window: globalThis,
   top: globalThis,
   document: doc,
   addEventListener: win.addEventListener.bind(win),
   removeEventListener: win.removeEventListener.bind(win),
-  location: { origin: "https://sign.test", pathname: "/", search: "", href: "https://sign.test/", reload() {} },
+  location: { origin: "https://sign.test", pathname: "/", search: "", href: "https://sign.test/", reload: () => void reloads++ },
   history: { replaceState() {} },
   matchMedia: () => Object.assign(new EventTarget(), { matches: false }),
   requestAnimationFrame: (f: () => void) => setTimeout(f, 0),
@@ -226,7 +228,7 @@ async function until(what: string, ok: () => Promise<boolean>): Promise<void> {
   throw new Error(`never: ${what}`);
 }
 
-test("main.ts wires the namer: a landing names, a quote waits for it, a notes change and a resync name again", async () => {
+test("main.ts wires the namer: a landing names, a quote waits for it, a notes change names again; after another tab's sign out, its sign in reloads and never names", async () => {
   // another tab signed in before this page loads: the 12 words typed, saved
   let other = await openWalletStore({});
   await other.insertSeed({ v: 1, entropy: ENTROPY(), source: "code", code_saved: true, created_ms: 1 });
@@ -276,15 +278,20 @@ test("main.ts wires the namer: a landing names, a quote waits for it, a notes ch
   assert.deepEqual((await askState()).pools, [{ chain: "near", asset: "USDC", balance: "25" }]);
   assert.equal(fromPageNotes("openNoteStore").length, 0, "pageNotes opened the note store");
 
-  // 3. another tab signs out and signs in again: the store starts over (no record), the page resyncs and names; a quote
-  // asked as the resync starts waits for that naming
+  // 3. another tab signs out and signs in again (card sign-out-stops-the-pages-reads): the sign out closes this page's
+  // gate and reloads it; this document, kept by the stub, hears the sign in, resyncs and lands on a closed gate, which
+  // reloads again and never signs in: a quote asked as the resync starts is refused, nothing named on the new store
   // the screens draw in the sheet's body, inside the layer (src/sheet.ts)
   const layer = doc.body.children.find((c) => c.tagName === "section")!;
   const inside = (e: El): El[] => e.children.flatMap((c) => [c, ...inside(c)]);
   const root = inside(layer).find((c) => c.tagName === "main")!;
   assert.equal(root.dataset.signin, "signed-in");
+  const reloadsAtSignOut = reloads;
   await other.signOut();
   await until("this page shows signed out", async () => root.dataset.signin !== "signed-in");
+  // both channels hear it (the shell's and the store's own), each asking for the reload: one reload in a browser
+  assert.ok(reloads > reloadsAtSignOut, "another tab's sign out reloads this page");
+  const reloadsSignedOut = reloads;
   other = await openWalletStore({});
   await new Promise((ok) => setTimeout(ok, 50));
   assert.equal(await recordOf(other), undefined);
@@ -301,9 +308,10 @@ test("main.ts wires the namer: a landing names, a quote waits for it, a notes ch
   await other.insertSeed({ v: 1, entropy: ENTROPY(), source: "code", code_saved: true, created_ms: 2 });
   const third = await asking;
   heard.close();
-  assert.equal(third.code, "down", "a quote asked as the resync started did not wait for the resync's naming");
-  const rec3 = (await recordOf(other))!;
-  assert.ok(third.body?.includes(U(rec3.index)));
+  assert.equal(third.code, "not_allowed", "a quote asked as the resync started reached the helper on a signed-out page");
+  await until("the landing on a closed gate reloads", async () => reloads > reloadsSignedOut);
+  assert.notEqual(root.dataset.signin, "signed-in", "a page whose gate is closed showed signed in");
+  assert.equal(await recordOf(other), undefined, "a page whose gate is closed named on the new store");
   other.close();
 });
 
