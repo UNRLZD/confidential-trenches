@@ -159,6 +159,17 @@ export const M = [
   ["a19 the record's proven buy proven again", SELL, T, "  let proven = o.buy;\n", "  let proven: SolanaBuy | null | undefined = undefined;\n"],
   ["a20 a sale's rent back keeps no seen", SELL, T, "owedRec, hold, await seenOf(h, w.address, owedRec.mints))));", "owedRec, hold, undefined)));"],
   ["a21 a plain release's W read again on every load", SELL, T, "const x: RentBack = buy ? { ...given, mints: mintsOf(given.mints, [buy]), buy } : { ...given, buy: null, ...(unproven ? { unproven } : {}) };", "const x: RentBack = buy ? { ...given, mints: mintsOf(given.mints, [buy]), buy } : { ...given, buy: null, unproven: \"again\" };"],
+  // card round-trip-costs-less c: the sale's price per compute unit from recent fees (solanaSellPrice), its use in the budget
+  ["c1 the price at the median, not the 75th percentile", SELL, T, "Math.ceil((fees.length * 3) / 4) - 1", "Math.ceil(fees.length / 2) - 1"],
+  ["c2 the higher RPC's price", SELL, T, "    const low = a < b ? a : b;\n", "    const low = a < b ? b : a;\n"],
+  ["c3 no floor under the price", SELL, T, "return low > SOLANA_POOL_SELL_PRICE_FLOOR ? low : SOLANA_POOL_SELL_PRICE_FLOOR;", "return low;"],
+  ["c4 a negative price taken", SELL, T, "!Number.isSafeInteger(f) || f < 0) throw new Error(\"not a price\");", "!Number.isSafeInteger(f)) throw new Error(\"not a price\");"],
+  ["c5 a failed read priced at the floor", SELL, T, "return low > SOLANA_POOL_SELL_PRICE_FLOOR ? low : SOLANA_POOL_SELL_PRICE_FLOOR;\n  } catch {\n    return null;", "return low > SOLANA_POOL_SELL_PRICE_FLOOR ? low : SOLANA_POOL_SELL_PRICE_FLOOR;\n  } catch {\n    return SOLANA_POOL_SELL_PRICE_FLOOR;"],
+  ["c6 the budget ignores the price asked", SELL, T, "const price = want !== undefined && want < capped ? want : capped;", "const price = capped;"],
+  ["c7 a price over what the cap buys taken", SELL, T, "const price = want !== undefined && want < capped ? want : capped;", "const price = want ?? capped;"],
+  ["c8 the sale never takes the price read", SELL, T, "        const want = (await priced) ?? undefined;\n", "        const want = undefined;\n"],
+  ["c9 the signer named to the read", SELL, T, "a.writable && !a.signer", "a.writable"],
+  ["c10 one RPC's word for both", SELL, T, "const [a, b] = await both(rpcs, p75);", "const [a, b] = await both([rpcs[1], rpcs[1]], p75);"],
 ];
 // every mutant's name, in the order the parts take them
 export const NAMES = M.map(([name]) => name);

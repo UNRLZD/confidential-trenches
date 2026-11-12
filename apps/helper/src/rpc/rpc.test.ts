@@ -75,6 +75,46 @@ test("card live-check-devnet-pair: solana-devnet forwards getGenesisHash to SOLA
   assert.deepEqual([m.status, code(m), seen.length], [400, "method_not_allowed", 0]);
 });
 
+// card round-trip-costs-less: a mainnet pool sale prices its compute from getRecentPrioritizationFees over the accounts
+// it writes (packages/signpage/src/pool-sell.ts solanaSellPrice) on both of its RPCs, this route the second. The account
+// list passes unchanged at any size a transaction can name: 64 addresses here, more than a 1,232-byte transaction holds
+// (packages/signpage/test/pool-sell.test.ts holds every sale form's set under 64)
+const WRITES = Array.from({ length: 64 }, (_, i) => `${String.fromCharCode(65 + (i % 26))}${String(i).padStart(2, "0")}${"1".repeat(41)}`);
+test("card round-trip-costs-less: getRecentPrioritizationFees on solana and solana-devnet passes to the provider with its account list unchanged, the largest a sale names and more", async () => {
+  next = { status: 200, type: JSON_T, body: echo };
+  const r = createRpc({ SOLANA_RPC_URL: `${base}/?api-key=${KEY}`, SOLANA_DEVNET_RPC_URL: `${base}/devnet` });
+  for (const chain of ["solana", "solana-devnet"]) {
+    seen.length = 0;
+    const a = await call(r, chain, { jsonrpc: "2.0", id: 9, method: "getRecentPrioritizationFees", params: [WRITES] });
+    assert.equal(a.status, 200, chain);
+    assert.deepEqual(JSON.parse(seen[0]!.body), { jsonrpc: "2.0", id: 9, method: "getRecentPrioritizationFees", params: [WRITES] }, chain);
+  }
+});
+
+// The page's share of this route is RPC_PAGE_NEED.solana (42) in any 10 s: the page's passes are held to 20 beside a trade
+// (packages/wallet/src/throttle.ts PASS_BUDGET_TRADING), and a mainnet sale draws this route 17 times up to and with its
+// send, the fee read one of them (pool-sell.test.ts's mainnet sale: 2 getAccountInfo, ..., getRecentPrioritizationFees,
+// two getFeeForMessage and simulateTransaction, the send). 37: the send is never the call past the share. On a plan
+// with a limit per method the read draws its own method's, never sendTransaction's or simulateTransaction's
+test("card round-trip-costs-less: a page at its passes' trading cap whose sale reads the fees still sends inside its share, and other callers' fee reads leave the send its method's room", async () => {
+  let t = 1_800_000_000_000;
+  const r = createRpc({ RPC_BUDGET_SOLANA: `${RPC_CHAIN_MAX},${SOL_SHARE},45` }, { now: () => (t += 1), fetch: (async () => new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: 1 }), { status: 200, headers: { "content-type": "application/json" } })) as never });
+  const req = (method: string, params: unknown[] = []) => JSON.stringify({ jsonrpc: "2.0", id: 1, method, params });
+  // other callers' fee reads up to the method's limit less the helper's own reserve
+  let others = 0;
+  for (let i = 0; i < 45; i++) if ((await r.handle("solana", JSON_T, req("getRecentPrioritizationFees", [WRITES.slice(0, 12)]), `198.51.100.${i}`)).status === 200) others++;
+  assert.equal(others, 45 - 3, "the method's 45 less the helper's own reserve of 3");
+  const page = "192.0.2.77";
+  for (let i = 0; i < 20; i++) assert.equal((await r.handle("solana", JSON_T, req("getMultipleAccounts", [[WRITES[0]]]), page)).status, 200, `pass read ${i}`);
+  const sale = ["getAccountInfo", "getAccountInfo", "getMultipleAccounts", "getAccountInfo", "getMultipleAccounts", "getMultipleAccounts", "getAccountInfo", "getMultipleAccounts", "getMultipleAccounts", "isBlockhashValid", "getEpochInfo", "getFeeForMessage", "simulateTransaction", "getFeeForMessage", "simulateTransaction"];
+  for (const m of sale) assert.equal((await r.handle("solana", JSON_T, req(m), page)).status, 200, m);
+  // the page's own fee read past the method's limit others spent: refused, the sale then prices at its cap and sends
+  const fees = await r.handle("solana", JSON_T, req("getRecentPrioritizationFees", [WRITES.slice(0, 12)]), page);
+  assert.equal(fees.status, 429, "the method's budget is the others'");
+  assert.equal((await r.handle("solana", JSON_T, req("sendTransaction", ["AQ=="]), page)).status, 200, "the send, the page's 37th call");
+  assert.ok(20 + sale.length + 2 <= SOL_SHARE);
+});
+
 test("an allowlisted call on each chain is forwarded to that chain's provider and its answer passed back", async () => {
   next = { status: 200, type: "application/json; charset=utf-8", body: echo };
   const r = rpc();

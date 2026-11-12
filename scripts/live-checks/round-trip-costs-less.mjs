@@ -5,6 +5,9 @@
 // pool-sell.ts) gets them back for any browser of the account, which finishes any of its Ws. What it proves, and only
 // that: the served /app.js is the one index.html pins (its sha384), and its text carries the card's rules, each found by
 // a mark of the bundle's shape (the minifier renames, never restructures them):
+//   - the sale's price per compute unit: the lower of both RPCs' 75th percentile of recent fees on the accounts it
+//     writes (getRecentPrioritizationFees), at least 1, read beside its first simulation; the budget at the lower of
+//     that price and what the priority's cap (100,000 lamports in all) buys, the cap where no price was read;
 //   - the sale's owed record keeps W's proven buy;
 //   - the rent backs: every W of the account's (derived from the pool's spent notes, nothing read) found on the
 //     helper's seat alone, in batches; a W with no record the helper reads empty listed empty, a W the helper reads as
@@ -44,6 +47,20 @@ const R = String.raw;
 
 /** Each rule's mark in the bundle, by what it holds. */
 export const MARKS = Object.freeze({
+  "the sale's price per compute unit is the lower of both RPCs' 75th percentile of recent fees on the accounts it writes, at least 1; a read that fails or is not a list of prices: none": tied(
+    re(R`async function (?<sp>${I})\((?<r>${I}),(?<a>${I})\)\{let (?<p>${I})=async (?<q>${I})=>\{let (?<n>${I})=await \k<q>\(` + "`getRecentPrioritizationFees`" + R`,\[\[\.\.\.\k<a>\]\]\);if\(!Array\.isArray\(\k<n>\)\)throw Error\(` + "`not a list`" + R`\);let (?<f>${I})=\k<n>\.map\((?<e>${I})=>\{let (?<t>${I})=\k<e>\?\.prioritizationFee;if\(typeof \k<t>!=` + "`number`" + R`\|\|!Number\.isSafeInteger\(\k<t>\)\|\|\k<t><0\)throw Error\(` + "`not a price`" + R`\);return BigInt\(\k<t>\)\}\);return \k<f>\.sort\(\((?<u>${I}),(?<v>${I})\)=>\k<u><\k<v>\?-1:\+\(\k<u>>\k<v>\)\),\k<f>\.length===0\?0n:\k<f>\[Math\.ceil\(\k<f>\.length\*3/4\)-1\]\};try\{let\[(?<x>${I}),(?<y>${I})\]=await (?<bo>${I})\(\k<r>,\k<p>\),(?<lo>${I})=\k<x><\k<y>\?\k<x>:\k<y>;return \k<lo>>(?:1n|(?<fl>${I}))\?\k<lo>:(?<fm>${I})\}catch\{return null\}\}`),
+    // the floor 1, both RPCs asked, and the accounts the sale writes that no one signs
+    (g) => [R`[,; ]${esc(g.fm)}=1n[,;]`, ...(g.fl ? [R`[,; ]${esc(g.fl)}=1n[,;]`] : []), R`[,; ]${esc(g.bo)}=\((${I}),(${I})\)=>Promise\.all\(\[\2\(\1\[0\]\),\2\(\1\[1\]\)\]\)[,;]`],
+  ),
+  "the sale is priced at that, read beside its first simulation: the budget at the lower of that price and what the priority's cap buys, the cap where none was read": tied(
+    re(R`(?<bu>${I})=(?<sb>${I})\(null,(?<pr>${I})\((?<rm>${I})\)\),(?<cap>${I})=\k<bu>===null\?0n:\k<pr>\(\k<rm>\),(?<pd>${I})=\k<bu>===null\?null:${I}\((?<sp>${I})\(${I},(?<wr>${I})\((?<st>${I})\)\)\);`),
+    (g) => [
+      R`[,; ](${I})=await ${esc(g.pd)}\?\?void 0,(${I})=${esc(g.sb)}\((${I})\.every\(\(?(${I})\)?=>Number\.isSafeInteger\(\4\)\)\?Math\.max\(\.\.\.\3\):null,${esc(g.cap)},\1\)`,
+      R`function ${esc(g.sb)}\((${I}),(${I})=(${I}),(${I})\)\{[^}]*?,(${I})=(${I})<1000000n\?\6:${I},(${I})=\4!==void 0&&\4<\5\?\4:\5;return \7<=0n\?null:\{limit:(${I}),price:\7,priority:\(BigInt\(\8\)\*\7\+999999n\)/1000000n\}\}`,
+      R`[,; ]${esc(g.wr)}=(${I})=>\[\.\.\.new Set\(\1\.flatMap\((${I})=>\2\.accounts\.filter\((${I})=>\3\.writable&&!\3\.signer\)\.map\((${I})=>\4\.key\)\)\)\][,;]`,
+      R`async function ${esc(g.sp)}\(`,
+    ],
+  ),
   "the sale's owed record keeps W's proven buy": re(R`(?<p>${I})\?\.buy!==void 0&&\((?<o>${I})\.buy=\k<p>\.buy\),await ${I}\.owed\?\.put\(\k<o>\)`),
   "every W of the account's found on the helper's seat alone, in batches; one with no record the helper reads empty listed empty; a W read as at its last end on its own state read on neither seat; the load's own reads only with a W to pass": tied(
     re(R`let (?<rd>${I})=await (?<fo>${I})\((?<rp>${I})\[1\],(?<ls>${I})\)\.catch\(\(\)=>null\),(?<td>${I})=\[\];for\(let\{address:(?<a>${I})\}of \k<ls>\)\{let (?<o>${I})=${I}\.find\((?<q>${I})=>\k<q>\.address===\k<a>\),(?<r>${I})=\k<rd>\?\.get\(\k<a>\);\k<o>\?\(\k<r>===void 0\?\k<o>\.seen===void 0:\k<o>\.seen!==\k<r>\.seen\)&&\k<td>\.push\(\k<a>\):\k<r>!==void 0&&\(\k<r>\.any\?\k<td>\.push\(\k<a>\):await Promise\.resolve\(${I}\.owed\.markEmpty\?\.\(\k<a>\)\)\.catch\(\(\)=>\{\}\)\)\}if\(\k<td>\.length===0\)return ${I}!==null\|\|\k<rd>===null;`),

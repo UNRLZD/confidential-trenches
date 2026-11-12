@@ -102,7 +102,7 @@ test("card helper-rpc-sell-methods: every Solana method the page's files name is
 
 test("card helper-rpc-sell-methods: a planted call the hand list and its filter passed over goes red (a file it did not name, a method it did not know)", () => {
   const files = pageFiles();
-  for (const [f, m] of [["signpage/src/trade.ts", "getTokenAccountBalance"], ["kit/src/trade/solana/flow.ts", "getRecentPrioritizationFees"], ["signpage/src/pool-sell.ts", "getTokenSupply"]] as const) {
+  for (const [f, m] of [["signpage/src/trade.ts", "getTokenAccountBalance"], ["kit/src/trade/solana/flow.ts", "getVoteAccounts"], ["signpage/src/pool-sell.ts", "getTokenSupply"]] as const) {
     const href = new URL(f, PACKAGES).href;
     const planted = new Map(files).set(href, `${files.get(href)}\nawait rpc("${m}", []);\n`);
     assert.deepEqual(scan(planted).off, [`${m} (${f})`]);

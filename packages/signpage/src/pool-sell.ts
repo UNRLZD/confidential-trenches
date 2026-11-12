@@ -34,7 +34,8 @@
 //   mark's rent and each tree page's growth, as pool-deposit.ts counts them) and an empty account's rent W must keep,
 //   less what W holds. On devnet no compute budget instruction: no priority fee; on mainnet a limit and a price
 //   (solanaSellBudget: SOLANA_POOL_SELL_PRIORITY in all, or what W holds beyond the sell's need under it, none at 0;
-//   only on a form with room for it under 1,232 bytes, solanaSellBudgetFits; the limit sized from the simulation), in
+//   only on a form with room for it under 1,232 bytes, solanaSellBudgetFits; the limit sized from the simulation; the
+//   price the lower of what recent fees ask on both RPCs, solanaSellPrice, when that is under what the cap buys), in
 //   the fee both RPCs price, so the reserve, the funds check and the rule count it; a partial sell keeps it on W too. A reserve over SOLANA_POOL_SELL_RESERVE_MAX or
 //   at least min out is refused.
 // - Built here (the kit's solanaPoolSellSteps, then the tag 1 deposit of min out less the reserve with the return note's
@@ -1288,10 +1289,14 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later, w: ListedBuy
     sizes = deposit.sizes;
     // mainnet: W's compute budget first (solanaSellBudget), its limit sized once the simulation has read the units, for
     // what W holds beyond the sell's need, at most SOLANA_POOL_SELL_PRIORITY (never a reason to refuse: none, no budget),
-    // and only on a form with room for it (solanaSellBudgetFits, the preview's decision too)
+    // and only on a form with room for it (solanaSellBudgetFits, the preview's decision too); a partial sell keeps the cap
+    // itself for the next one, the most its price can ask
     const room = h.cluster === "mainnet" && solanaSellBudgetFits(venue.kind, venue.cashback) ? lamports - need : 0n;
     let budget = solanaSellBudget(null, solanaSellPriority(room));
     const cap = budget === null ? 0n : solanaSellPriority(room);
+    // the price the market asks on the sale's own accounts (solanaSellPrice, card round-trip-costs-less), read beside the
+    // first simulation and taken where the limit is sized from it, so it adds no round trip
+    const priced = budget === null ? null : quiet(solanaSellPrice(rpcs, writableOf(steps)));
     // the largest form decides (above); this sell's own six, compiled, never over the size with it either
     if (budget !== null && wireOf(solanaCompileV0(w.address, [...budgetIxs(budget), ...steps, depositIx(program, pool, w.address, sizes, pre, minOut, false)], bh.blockhash, []).message).length > SOLANA_MAX_TX_BYTES) budget = null;
     // the deposit's form: the eight names each tree's next page, so it lands when inserts that land first carry an entry
@@ -1381,7 +1386,8 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later, w: ListedBuy
       if (!sized) {
         sized = true;
         const units = sims.map((v) => (v as { unitsConsumed?: unknown }).unitsConsumed);
-        const again = solanaSellBudget(units.every((u) => Number.isSafeInteger(u)) ? Math.max(...(units as number[])) : null, cap);
+        const want = (await priced) ?? undefined;
+        const again = solanaSellBudget(units.every((u) => Number.isSafeInteger(u)) ? Math.max(...(units as number[])) : null, cap, want);
         if (again?.limit !== budget?.limit || again?.price !== budget?.price) {
           budget = again;
           fee = SOLANA_POOL_SELL_FEE + (again?.priority ?? 0n);
@@ -1514,13 +1520,47 @@ export const SOLANA_POOL_SELL_PRIORITY = 100_000n;
  *  and the price that makes limit x price `cap` at most (never over SOLANA_CU_PRICE_MAX), with the priority fee the
  *  runtime charges for them (rounded up): `cap` itself at any limit up to 1,000,000, a lamport under it at most past
  *  that. null when it buys no price (a `cap` of 0): the sell goes without a compute budget. */
-export function solanaSellBudget(units: number | null, cap: bigint = SOLANA_POOL_SELL_PRIORITY): { limit: number; price: bigint; priority: bigint } | null {
+export function solanaSellBudget(units: number | null, cap: bigint = SOLANA_POOL_SELL_PRIORITY, want?: bigint): { limit: number; price: bigint; priority: bigint } | null {
   const sized = units !== null && Number.isSafeInteger(units) && units > 0 ? Math.ceil((units * 6) / 5) : SOLANA_POOL_CU_LIMIT_MAX;
   const limit = Math.min(Math.max(sized, SOLANA_POOL_SELL_CU_MIN), SOLANA_POOL_CU_LIMIT_MAX);
   const fit = cap > 0n ? (cap * 1_000_000n) / BigInt(limit) : 0n;
-  const price = fit < SOLANA_CU_PRICE_MAX ? fit : SOLANA_CU_PRICE_MAX;
-  return price === 0n ? null : { limit, price, priority: (BigInt(limit) * price + 999_999n) / 1_000_000n };
+  const capped = fit < SOLANA_CU_PRICE_MAX ? fit : SOLANA_CU_PRICE_MAX;
+  // card round-trip-costs-less: the price the market asks (solanaSellPrice), when it is under what the cap buys
+  const price = want !== undefined && want < capped ? want : capped;
+  return price <= 0n ? null : { limit, price, priority: (BigInt(limit) * price + 999_999n) / 1_000_000n };
 }
+/** The least price a mainnet sale asks per compute unit, micro-lamports (card round-trip-costs-less): the 75th percentile
+ *  is often 0 on pump's accounts, whose traders pay block engine tips instead (12 Nov, mainnet, 150 slots: p25, p50 and
+ *  p75 0 on both programs), and a sale priced at 1 still ranks over every unpriced one on the same accounts, for 1
+ *  lamport at a limit under 1,000,000. */
+export const SOLANA_POOL_SELL_PRICE_FLOOR = 1n;
+/** The price a mainnet sale asks per compute unit (card round-trip-costs-less), micro-lamports: what landed lately on the
+ *  accounts it writes, each RPC's getRecentPrioritizationFees over them (its last 150 slots) at the 75th percentile (the
+ *  industry's "high" level), the lower of the two so one RPC's word never raises it, at least
+ *  SOLANA_POOL_SELL_PRICE_FLOOR. null when either read fails or is not a list of prices: the sale prices at its cap, the
+ *  form before. The cap (SOLANA_POOL_SELL_PRIORITY in all) bounds what any answer can make the sale pay. */
+export async function solanaSellPrice(rpcs: Rpcs, accounts: readonly string[]): Promise<bigint | null> {
+  const p75 = async (r: SolanaRpc): Promise<bigint> => {
+    const got = await r("getRecentPrioritizationFees", [[...accounts]]);
+    if (!Array.isArray(got)) throw new Error("not a list");
+    const fees = got.map((x) => {
+      const f = (x as { prioritizationFee?: unknown } | null)?.prioritizationFee;
+      if (typeof f !== "number" || !Number.isSafeInteger(f) || f < 0) throw new Error("not a price");
+      return BigInt(f);
+    });
+    fees.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+    return fees.length === 0 ? 0n : fees[Math.ceil((fees.length * 3) / 4) - 1]!;
+  };
+  try {
+    const [a, b] = await both(rpcs, p75);
+    const low = a < b ? a : b;
+    return low > SOLANA_POOL_SELL_PRICE_FLOOR ? low : SOLANA_POOL_SELL_PRICE_FLOOR;
+  } catch {
+    return null;
+  }
+}
+/** The accounts a sale's venue steps write that no one signs: what its price is read on (solanaSellPrice). */
+const writableOf = (steps: readonly { accounts: readonly { key: string; signer: boolean; writable: boolean }[] }[]): string[] => [...new Set(steps.flatMap((x) => x.accounts.filter((a) => a.writable && !a.signer).map((a) => a.key)))];
 /** The priority a mainnet sell from a W holding `room` lamports beyond the sell's need pays, on a form with room for the
  *  compute budget (solanaSellBudgetFits): SOLANA_POOL_SELL_PRIORITY, or all of `room` under it, or none when that buys
  *  no price (solanaSellBudget). The sale pays it (to the lamport at any limit up to 1,000,000) and the preview counts it. */

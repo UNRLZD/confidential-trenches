@@ -50,7 +50,9 @@
 //   note after it; `min_out`, the same at the user's slippage floor (the floor the sale signs, solanaSellFloor);
 //   `network`, the sale's one signature fee (SOLANA_POOL_SELL_FEE) and on mainnet its priority fee as the sale pays it
 //   (pool-sell.ts solanaSellPriority: up to SOLANA_POOL_SELL_PRIORITY from what W holds beyond the sale's need, none on
-//   a form with no room for it), inside both already; `fee_bps` 0: a Solana pool sale is the venue's sell and the deposit back, nothing else
+//   a form with no room for it), inside both already. That priority is the most the sale can pay: since card
+//   round-trip-costs-less the sale pays the price recent fees ask (pool-sell.ts solanaSellPrice), at most it, so the
+//   sale's own fee is that or less and its note that or more; no read here, so a preview keeps its calls; `fee_bps` 0: a Solana pool sale is the venue's sell and the deposit back, nothing else
 //   (rules/pool.ts checkSolanaSell).
 import { SOLANA_LAMPORTS_PER_SIGNATURE, SOLANA_PUMP_AMM_PROGRAM, SOLANA_PUMP_PROGRAM, solanaVolumeAccumulator, solanaVolumeClaimable } from "../../kit/src/checks/solana/checks.ts";
 import type { ErrorCode, PoolSellDry } from "../../kit/src/signpage/messages.ts";

@@ -199,6 +199,9 @@ export const HELPER_RPC_METHODS = {
     "getFeeForMessage",
     "getBlockTime",
     "getEpochInfo",
+    // the price a mainnet pool sale asks per compute unit (signpage pool-sell.ts solanaSellPrice, card
+    // round-trip-costs-less): the fees landed lately on the accounts the sale writes, a read whose params pass unchanged
+    "getRecentPrioritizationFees",
     // a note restore's scan of the pool program (wallet pool/solana-restore.ts, memcmp-filtered). The heaviest read on
     // the list: the helper forwards it only on its own pinned pool program with a dataSize and a memcmp filter (review
     // L-2, apps/helper/src/rpc/rpc.ts scanAllowed), within the caller's share (16 per 10 s), the per-method budget, the

@@ -2,7 +2,8 @@
 // (round-trip-costs-less.answers.json). good: this card's build, any browser of the account finishing its Ws: PASS.
 // bad: main b9361e809's build, before this card: FAIL, every mark named. beforeReview: this card's 20ba2481b build,
 // before the review of it was folded: FAIL on the rules that review moved (the proven buy kept, and the rent backs'
-// reads). Planted on the good one: another /app.js, no pin, each mark taken away: each FAIL; and the good build's lines
+// reads), and the price rules. beforePrice: its 591044f67 build, the sale's closes out, before the price read from recent
+// fees: FAIL on the price rules alone. Planted on the good one: another /app.js, no pin, each mark taken away: each FAIL; and the good build's lines
 // (round-trip-costs-less.excerpt.txt, cut from its public/app.js) with one rule changed: each FAIL on that rule's mark
 // alone.
 import assert from "node:assert/strict";
@@ -28,7 +29,13 @@ test("recorded bad answer (main b9361e809's build): FAIL, every mark named", () 
 test("recorded answer beforeReview (20ba2481b's build): FAIL on the rules the review moved", () => {
   const v = judge(ANSWERS.beforeReview);
   assert.equal(v.ok, false);
-  assert.deepEqual(v.lines, [0, 1, 2, 3, 4, 5, 6].map((i) => ALL[i]));
+  assert.deepEqual(v.lines, [0, 1, 2, 3, 4, 5, 6, 7, 8].map((i) => ALL[i]));
+});
+
+test("recorded answer beforePrice (591044f67's build, the closes out and no price read): FAIL on the price rules alone", () => {
+  const v = judge(ANSWERS.beforePrice);
+  assert.equal(v.ok, false);
+  assert.deepEqual(v.lines, [ALL[0], ALL[1]]);
 });
 
 test("planted on the good answer: each fact taken away FAILs", () => {
@@ -43,35 +50,48 @@ const JS = readFileSync(new URL("./round-trip-costs-less.excerpt.txt", import.me
 test("the good build's lines carry every mark; each with its rule changed FAILs on that mark alone", () => {
   assert.deepEqual(Object.values(facts("", JS).carries), Object.keys(MARKS).map(() => true));
   const planted = [
+    // the price: the 75th percentile, the lower RPC, the floor, a bad answer none; its use beside the first simulation
+    ["Math.ceil(r.length*3/4)-1", "Math.ceil(r.length*1/2)-1", 0],
+    ["i=t<r?t:r;", "i=t<r?r:t;", 0],
+    ["return i>1n?i:oG}", "return i>0n?i:oG}", 0],
+    [" oG=1n;", " oG=0n;", 0],
+    ["||t<0)throw Error(`not a price`)", ")throw Error(`not a price`)", 0],
+    ["catch{return null}}", "catch{return 1n}}", 0],
+    ["[t(e[0]),t(e[1])]", "[t(e[0]),t(e[0])]", 0],
+    ["e.writable&&!e.signer", "e.writable", 1],
+    ["Oe=Ee===null?null:S(sG(y,cG(ve)))", "Oe=null", 1],
+    [":null,De,t)", ":null,De)", 1],
+    ["s=n!==void 0&&n<o?n:o;", "s=o;", 1],
+    ["s=n!==void 0&&n<o?n:o;", "s=n??o;", 1],
     // the record's buy
-    ["t?.buy!==void 0&&(Xe.buy=t.buy),", "", 0],
+    ["t?.buy!==void 0&&(Ze.buy=t.buy),", "", 2],
     // the finding read, the settled skip, the empty list, the setup only with a W
-    ["let p=await EG(o[1],f)", "let p=await EG(o[0],f)", 1],
-    ["r.seen===void 0:r.seen!==i.seen)&&m.push(t)", "!0:!0)&&m.push(t)", 1],
-    ["i.any?m.push(t):await Promise.resolve(e.owed.markEmpty?.(t)).catch(()=>{})", "m.push(t)", 1],
-    ["if(m.length===0)return l!==null||p===null;", "", 1],
-    [",wG=100,", ",wG=1000,", 1],
-    ["c=await e.wallets(jG)}", "c=await e.wallets()}", 1],
+    ["let p=await kG(o[1],f)", "let p=await kG(o[0],f)", 3],
+    ["r.seen===void 0:r.seen!==i.seen)&&m.push(t)", "!0:!0)&&m.push(t)", 3],
+    ["i.any?m.push(t):await Promise.resolve(e.owed.markEmpty?.(t)).catch(()=>{})", "m.push(t)", 3],
+    ["if(m.length===0)return l!==null||p===null;", "", 3],
+    [",DG=100,", ",DG=1000,", 3],
+    ["c=await e.wallets(PG)}", "c=await e.wallets()}", 3],
     // the order and the gap
-    ["[m[e],m[t]]=[m[t],m[e]]", "[m[e],m[t]]=[m[e],m[t]]", 2],
-    ["if(n>0&&await s(TG+NG(TG))", "if(n>0&&await s(0+NG(TG))", 2],
-    [",TG=1e3;", ",TG=0;", 2],
-    ["globalThis.crypto.getRandomValues(n),n[0]<t", "n[0]=Math.random()*t,n[0]<t", 2],
+    ["[m[e],m[t]]=[m[t],m[e]]", "[m[e],m[t]]=[m[e],m[t]]", 4],
+    ["if(n>0&&await s(OG+IG(OG))", "if(n>0&&await s(0+IG(OG))", 4],
+    [",OG=1e3;", ",OG=0;", 4],
+    ["globalThis.crypto.getRandomValues(n),n[0]<t", "n[0]=Math.random()*t,n[0]<t", 4],
     // the proof
-    ["(s=await DG(t.rpcs[0],", "(s=await DG(t.rpcs[1],", 3],
-    ["if(r===null)return i===`none`?null:void 0;", "if(r===null)return null;", 3],
-    ["&&i.mint===r.mint&&i.program===r.program)", ")", 3],
+    ["(s=await AG(t.rpcs[0],", "(s=await AG(t.rpcs[1],", 5],
+    ["if(r===null)return i===`none`?null:void 0;", "if(r===null)return null;", 5],
+    ["&&i.mint===r.mint&&i.program===r.program)", ")", 5],
     // an unproven W
-    ["n.passes+1>=3?`steady`:`again`", "n.passes+1>=1?`steady`:`again`", 4],
-    ["||c===`again`", "", 4],
-    ["t.unproven!==`again`);", "!0);", 4],
+    ["n.passes+1>=3?`steady`:`again`", "n.passes+1>=1?`steady`:`again`", 6],
+    ["||c===`again`", "", 6],
+    ["t.unproven!==`again`);", "!0);", 6],
     // the positions' hold
-    ["b=e.preempt?.();try{for(", "b=void 0;try{for(", 5],
-    ["}finally{b?.()}return y}", "}finally{}return y}", 5],
-    ["let r=n===jG?null:Ke.preempt(),", "let r=Ke.preempt(),", 5],
+    ["b=e.preempt?.();try{for(", "b=void 0;try{for(", 7],
+    ["}finally{b?.()}return y}", "}finally{}return y}", 7],
+    ["let r=n===PG?null:Ke.preempt(),", "let r=Ke.preempt(),", 7],
     // the no-buy mark
-    ["fJ=`owed/buy-sol-none`", "fJ=`owed/buy-sol`", 6],
-    ["buyNone:async t=>Object.hasOwn(Qe(await(await e.store()).get(`meta`,fJ)),t)", "buyNone:async t=>!1", 6],
+    ["hJ=`owed/buy-sol-none`", "hJ=`owed/buy-sol`", 8],
+    ["buyNone:async t=>Object.hasOwn(Qe(await(await e.store()).get(`meta`,hJ)),t)", "buyNone:async t=>!1", 8],
   ];
   for (const [from, to, i] of planted) {
     assert.equal(JS.split(from).length, 2, `once: ${from}`);

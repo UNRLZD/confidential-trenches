@@ -7,8 +7,8 @@
     "beforeFloor": "main 383b1ffe's build (mainnet; release-102, kit-sol-pool-deposit-floor merged), the committed packages/signpage/index.html and public/app.js there: the sell's rule refuses only a note under the pool's least deposit, so it signs a deposit back under the kit's release floor: FAIL on the sell's rule alone; its facts read again from that commit's committed bundle under the marks as card round-trip-costs-less has them"
   },
   "good": {
-    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-QCTSV07XQgquxrN9wYzYUzOxClEFzdoYsFA7gdvYarylPCm6s4mTn1SFO2yw68cR\"></script>\n  </head>\n  <body></body>\n</html>\n",
-    "sha384": "sha384-QCTSV07XQgquxrN9wYzYUzOxClEFzdoYsFA7gdvYarylPCm6s4mTn1SFO2yw68cR",
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-5nqwyZYXvkmrSRzwB6bfGrV2Wt8n5Jx6ds4vbG6QUKzaQ4hgkKxp5xo2Rz4qEclo\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-5nqwyZYXvkmrSRzwB6bfGrV2Wt8n5Jx6ds4vbG6QUKzaQ4hgkKxp5xo2Rz4qEclo",
     "carries": {
       "a full sell deposits W's surplus": true,
       "a full sell keeps what lifts the sweep to the floor, a page's opening on each tree and each owed claim's cost": true,
