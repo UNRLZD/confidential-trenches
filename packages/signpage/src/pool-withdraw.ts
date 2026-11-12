@@ -618,19 +618,34 @@ async function onePart(h: PoolWithdrawHost, ask: PoolAsk, notes: NoteStore, p: W
     // the run's notes stay out of every queue's pass (any tab's) past the latest deadline this part can bind: so no
     // queue holds this note at the boundary it may wait for
     await keep();
+    // one budget for every wait of this part on chain time: the boundary's and a tree read's lag
+    const left = { ms: P.epochMs + WITHDRAW_BOUNDARY_LAG_MS };
+    // a provider's read still short of the cut past the sync's own waits (solana.ts, code not_reached) is a lag, as the
+    // EVM sync's anchor lag is: read again a second later out of the budget, and stopped only once it is spent
+    const read = async (cut: bigint, opts?: Parameters<typeof P.trees>[2]): ReturnType<typeof P.trees> => {
+      for (;;) {
+        try {
+          return await P.trees(cut, AbortSignal.timeout(WITHDRAW_TREES_MS), opts);
+        } catch (e) {
+          if ((e as { code?: unknown } | null)?.code !== "not_reached" || left.ms <= 0n) throw e;
+          const ms = left.ms < 1_000n ? left.ms : 1_000n;
+          await wait(Number(ms));
+          left.ms -= ms;
+        }
+      }
+    };
     let epochStartMs = nowMs - (nowMs % P.epochMs);
-    let trees = await P.trees(epochStartMs, AbortSignal.timeout(WITHDRAW_TREES_MS));
+    let trees = await read(epochStartMs);
     if (leaf.leafIndex >= BigInt(trees.stateTree.size)) {
-      if (provesOnNewest(n.ref)) trees = await P.trees(nowMs + 1n, AbortSignal.timeout(WITHDRAW_TREES_MS), { newest: true });
+      if (provesOnNewest(n.ref)) trees = await read(nowMs + 1n, { newest: true });
       else {
-        const left = { ms: P.epochMs + WITHDRAW_BOUNDARY_LAG_MS };
         // the next boundary whose epoch root holds the leaf: one more when the first time read was behind the leaf's own;
         // two at most, and every wait out of one budget
         for (let boundaries = 0; leaf.leafIndex >= BigInt(trees.stateTree.size); boundaries++) {
           if (boundaries === 2) stop("boundary");
           nowMs = await poolTimeAt(P, wait, epochStartMs + P.epochMs, left);
           epochStartMs = nowMs - (nowMs % P.epochMs);
-          trees = await P.trees(epochStartMs, AbortSignal.timeout(WITHDRAW_TREES_MS));
+          trees = await read(epochStartMs);
         }
         // a queue that held it before the record was written: dropped as at the start
         n = await free();

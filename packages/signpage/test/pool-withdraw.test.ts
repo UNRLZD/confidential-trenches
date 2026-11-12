@@ -106,7 +106,7 @@ test("the plan finds an exact plan the largest-first walk misses, and names the 
 // card pool-tree-read-waits-for-its-second: the wallet's real tree sync on two providers whose confirmed block is the
 // finalized one (mainnet, 11 Nov 19:00Z): leaf 0 landed before the epoch, leaf 1 (the note withdrawn) in now's own
 // block-second, so the epoch cut lacks it and the newest read at now + 1 must wait for the chain's next second
-function syncedTrees(advance: () => boolean, waits: number[]) {
+function syncedTrees(advance: (url: string) => boolean, waits: number[]) {
   return (state: readonly bigint[], labels: readonly bigint[]) => {
     const nowS = NOW / 1000n;
     const times = state.map((_, i) => (i === 0 ? nowS - 30n : nowS));
@@ -124,7 +124,7 @@ function syncedTrees(advance: () => boolean, waits: number[]) {
     };
     const pages = new Map([[solanaPageOf(PROGRAM, 0, 0), pageOf(0, state)], [solanaPageOf(PROGRAM, 1, 0), pageOf(1, labels)]]);
     const at = (url: string): SolanaRpc => Object.assign(async (m: string, p: readonly unknown[]): Promise<unknown> => {
-      if (m === "getBlockTime") return Number(nowS + (advance() ? 1n : 0n));
+      if (m === "getBlockTime") return Number(nowS + (advance(url) ? 1n : 0n));
       if (m !== "getMultipleAccounts") throw new Error(`no ${m}`);
       return { context: { slot: 500 }, value: (p[0] as string[]).map((k) => (pages.has(k) ? { owner: PROGRAM, lamports: 1, executable: false, rentEpoch: 0, data: [base64.encode(pages.get(k)!), "base64"] } : null)) };
     }, { url });
@@ -146,14 +146,35 @@ test("a withdraw of a note that landed in now's block-second waits for the chain
   assert.equal(solanaDecodePoolRelease(read(wd.releases[0]!).ixs.at(-1)!.data).stateRootIndex, 1, "the proof's root holds leaf 1");
 });
 
-test("a withdraw whose providers never reach now + 1 ends stopped after the cap, its cause kept", async () => {
+// the mainnet copy's run 1 (12 Nov 07:56Z): a read 1 ms short of the cut (slot 485 at 1794470631000 ms, the cut
+// 1794470631001) past the sync's own waits is a lag the run waits out inside its budget, on one provider or both
+for (const short of [["https://a.example"], ["https://a.example", "https://b.example"]]) {
+  test(`a withdraw whose ${short.length === 1 ? "one provider's read is" : "providers' reads are"} 1 ms short of the cut past the sync's own ${SOL_REACH_WAITS} waits waits it out inside its budget and sends`, async () => {
+    const waits: number[] = [];
+    let runWaits = 0;
+    const wd = await world([1_000n, 30_000_000n], {
+      trees: syncedTrees((url) => !short.includes(url) || runWaits >= 2, waits),
+      wait: async () => void runWaits++,
+    });
+    const amount = 2_000_000n + MIN;
+    const a = await runPoolWithdraw(wd.host, ASK, TO, amount, COST);
+    assert.equal(a.stage, "sent", a.cause);
+    assert.equal(wd.balance.get(TO), amount);
+    assert.ok(waits.length > SOL_REACH_WAITS, `the sync's own cap passed: ${waits.length} waits`);
+    assert.equal(solanaDecodePoolRelease(read(wd.releases[0]!).ixs.at(-1)!.data).stateRootIndex, 1, "the proof's root holds leaf 1");
+  });
+}
+
+test("a withdraw whose providers never reach now + 1 ends stopped once its budget is spent, its cause kept", async () => {
   const waits: number[] = [];
-  const wd = await world([1_000n, 30_000_000n], { trees: syncedTrees(() => false, waits) });
+  let slept = 0n;
+  const wd = await world([1_000n, 30_000_000n], { trees: syncedTrees(() => false, waits), wait: async (ms) => void (slept += BigInt(ms)) });
   const a = await runPoolWithdraw(wd.host, ASK, TO, 2_000_000n + MIN, COST);
   assert.equal(a.stage, "stopped");
   assert.equal(wd.releases.length, 0, "nothing sent");
   assert.ok(waits.length >= SOL_REACH_WAITS, `${waits.length} waits`);
   assert.match(a.cause ?? "", /^SolanaNotReachedError not_reached\b/);
+  assert.equal(slept, E + WITHDRAW_BOUNDARY_LAG_MS, "the run waited its one budget out, no more");
   // the note is back to UNSPENT, for the next try
   assert.equal((await wd.ns.get(wd.ids[1]!))?.state, "UNSPENT");
   // the op's record keeps it

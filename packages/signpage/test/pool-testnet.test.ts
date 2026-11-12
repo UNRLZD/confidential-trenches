@@ -1636,6 +1636,21 @@ test("two pages, TOPO 2: a sell's return note, the frame's pass at the boundary:
   assert.equal(wd.releases.length, 1, JSON.stringify(await wd.w.get("ops", "op-w")));
 });
 
+test("two pages, TOPO 2 with the device's clock a day ahead of the pool's: the record stands on the device's clock, so the frame still lets the return note go and the run sends", async () => {
+  const realNow = Date.now;
+  const t0 = realNow();
+  Date.now = () => Number(WORLD.NOW) + 86_400_000 + (realNow() - t0);
+  try {
+    const { wd, frame, top, onWait } = await twoDocs([30_000_000n, 30_000_000n], [undefined, RET], [WORLD.NOW - 30_000n, WORLD.NOW - 1n]);
+    await frame.proofs();
+    onWait(() => frame.proofs());
+    await top.withdraw({ chain: "solana", to: WORLD.TO, amount: 2_000_000n + WORLD.MIN, maxFee: WORLD.COST }, "op-w");
+    assert.equal(wd.releases.length, 1, JSON.stringify(await wd.w.get("ops", "op-w")));
+  } finally {
+    Date.now = realNow;
+  }
+});
+
 test("two pages, TOPO 3: the frame's pass after the boundary holds the return note before the tap: the sheet's funds still count it and the run sends", async () => {
   const { wd, B, frame, top, onWait } = await twoDocs([30_000_000n, 30_000_000n], [undefined, RET], [WORLD.NOW - 30_000n, WORLD.NOW - 1n]);
   await frame.proofs();
