@@ -88,8 +88,8 @@ const ALL_OPS = [...OPS, ...POOL_OPS];
 const DETAIL: Record<string, Record<string, unknown>> = {
   "d-done": { created_ms: 1 },
   w: { created_ms: 2 },
-  b: { created_ms: 3, chain: "solana", token: "T", amount_usd: "25" },
-  s: { created_ms: 4, chain: "solana", token: "T", units: "1.5" },
+  b: { created_ms: 3, chain: "solana", token: "T", amount_usd: "25", units: "1.5", pool_amount: "0.1" },
+  s: { created_ms: 4, chain: "solana", token: "T", units: "1.5", amount_usd: "20", pool_amount: "0.08" },
   x: { created_ms: 5 },
   "p-in": { created_ms: 6 },
 };
@@ -139,6 +139,10 @@ const FULL_V1_7 = { ...FULL, positions: POSITIONS_V1_7, ops: ALL_OPS } as Signpa
 /** What kit-v1.8 is sent (card kit-portfolio-reads): FULL with each op's detail left out, for which kit-v1.8's client
  *  drops the whole op; a deposit's amount_usd and a pool deposit's chain kept; everything else as it is. */
 const FULL_V1_8 = { ...FULL, ops: ALL_OPS } as SignpageState;
+
+/** What kit-v1.9 is sent (card portfolio-shows-pool-trades): FULL with each op's pool_amount left out, for which
+ *  kit-v1.9's client drops the whole op; every other detail as it is. */
+const FULL_V1_9 = { ...FULL, ops: DETAILED_OPS.map(({ pool_amount: _p, ...o }: Record<string, unknown>) => o) } as unknown as SignpageState;
 
 /** What deposit.confirm answers, by its address: the stage named, with the facts that stage carries in OPS. */
 const confirmOf = (address: string) => {
@@ -324,7 +328,7 @@ test("hello at the kit's own version: every message as it is, and the kit's own 
 
 test("a hello gets no answer; a later or higher version reads everything, an older, malformed or extra-keyed one is kit-v1.4", async () => {
   for (const [msg, full] of [
-    [hello(SIGNPAGE_KIT_VERSION), FULL], [hello("1.12"), FULL], [hello("2.0"), FULL], [hello("1.8"), FULL_V1_8], [hello("1.7"), FULL_V1_7], [hello("1.6"), FULL_V1_6], [hello("1.5"), FULL_V1_5],
+    [hello(SIGNPAGE_KIT_VERSION), FULL], [hello("1.12"), FULL], [hello("2.0"), FULL], [hello("1.9"), FULL_V1_9], [hello("1.8"), FULL_V1_8], [hello("1.7"), FULL_V1_7], [hello("1.6"), FULL_V1_6], [hello("1.5"), FULL_V1_5],
     [hello("1.4"), FULL_V1_4], [hello("1.0"), FULL_V1_4], [hello("1.5.0"), FULL_V1_4], [hello("v1.5"), FULL_V1_4], [hello(15), FULL_V1_4],
     [{ ...hello(SIGNPAGE_KIT_VERSION), id: crypto.randomUUID() }, FULL_V1_4], [{ v: 2, type: "hello", kit: SIGNPAGE_KIT_VERSION }, FULL_V1_4],
   ] as const) {
@@ -358,10 +362,10 @@ test("in the shell's order (hello, a 1.5 answer, the next document's ready, a st
   assert.deepEqual(ev, [{ v: 1, type: "state", state: { ...FULL, vault_balance: "100" } }], "events again after its answer, in its own shape");
 });
 
-test("the version the page reads every kit at in full is the kit's own SIGNPAGE_KIT_VERSION; the one before it is kit-v1.8's", async () => {
+test("the version the page reads every kit at in full is the kit's own SIGNPAGE_KIT_VERSION; the one before it is kit-v1.9's", async () => {
   const [major, minor] = SIGNPAGE_KIT_VERSION.split(".").map(Number) as [number, number];
-  assert.equal(`${major}.${minor - 1}`, "1.8", "raising the version again adds its level here");
-  for (const [kit, want] of [[SIGNPAGE_KIT_VERSION, FULL], [`${major}.${minor - 1}`, FULL_V1_8], [`${major}.${minor - 2}`, FULL_V1_7], [`${major}.${minor - 3}`, FULL_V1_6], [`${major}.${minor - 4}`, FULL_V1_5], [`${major}.${minor + 1}`, FULL]] as const) {
+  assert.equal(`${major}.${minor - 1}`, "1.9", "raising the version again adds its level here");
+  for (const [kit, want] of [[SIGNPAGE_KIT_VERSION, FULL], [`${major}.${minor - 1}`, FULL_V1_9], [`${major}.${minor - 2}`, FULL_V1_8], [`${major}.${minor - 3}`, FULL_V1_7], [`${major}.${minor - 4}`, FULL_V1_6], [`${major}.${minor - 5}`, FULL_V1_5], [`${major}.${minor + 1}`, FULL]] as const) {
     const p = page();
     p.send(hello(kit));
     const id = await p.ask();
@@ -541,8 +545,8 @@ test("hello kit 1.7: every position with no decimals, everything else as it is, 
   assert.ok(reads(V17, ev[0], "state"));
 });
 
-test("hello at the kit's own version (1.9): each position's decimals as they are, and the kit's schema reads them", async () => {
-  assert.equal(SIGNPAGE_KIT_VERSION, "1.9");
+test("hello at the kit's own version (1.10): each position's decimals as they are, and the kit's schema reads them", async () => {
+  assert.equal(SIGNPAGE_KIT_VERSION, "1.10");
   const p = page();
   p.send(hello(SIGNPAGE_KIT_VERSION));
   const id = await p.ask();

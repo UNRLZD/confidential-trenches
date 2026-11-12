@@ -1060,7 +1060,7 @@ test("a pool buy's records: filled, its ops record (time, chain, token, USD) and
   const s = memStore();
   s.meta.set(POSITION_COSTS_KEY, { [W2]: rec(MINT2, "4") });
   await recordPoolBuy(s, "b1", FACTS, { result: { stage: "filled", txs: [{ chain: "solana", hash: "Sig1" }] } });
-  assert.deepEqual(opOf("b1", s.ops.get("b1")), { id: "b1", kind: "buy", stage: "filled", txs: [{ chain: "solana", hash: "Sig1" }], created_ms: 1_800_000_000_000, chain: "solana", token: MINT, amount_usd: "1.5" });
+  assert.deepEqual(opOf("b1", s.ops.get("b1")), { id: "b1", kind: "buy", stage: "filled", txs: [{ chain: "solana", hash: "Sig1" }], created_ms: 1_800_000_000_000, chain: "solana", token: MINT, amount_usd: "1.5", units: "1081590.213565", pool_amount: "0.01" });
   assert.deepEqual(s.meta.get(POSITION_COSTS_KEY), { [W2]: rec(MINT2, "4"), [W1]: { mint: MINT, decimals: 6, cost_usd: "1.5", received: "1081590.213565" } }, "W1's record beside W2's");
   await recordPoolBuy(s, "b2", { ...FACTS, wallet: "W3" }, { error: "quote_check_failed" });
   assert.deepEqual(opOf("b2", s.ops.get("b2")), { id: "b2", kind: "buy", stage: "refused", txs: [], code: "quote_check_failed", created_ms: 1_800_000_000_000, chain: "solana", token: MINT, amount_usd: "1.5" });
