@@ -141,11 +141,6 @@ export const pageEvmHistory = (pin: EvmPoolPin): readonly EvmRpc[] => {
   if (h === undefined) HISTORY.set(pin.network, (h = Object.freeze([evmHelperKeyedRpc(TRADE_HELPER, pin.network), ...MAINNET_POOL_HISTORY[pin.network].map((u) => pageRpc(u))])));
   return h;
 };
-/** Where a mainnet W's balance is read for its positions (decision M359): the helper's route alone (POST
- *  /v1/rpc/{chain}, the wallet's evmHelperRpc, the holdings readers' one paced queue, which the restore's W reads share),
- *  so a provider the device reaches itself is never named a W of it, nor two in one burst. A sale reads none of it: its
- *  finding gates its signature, so it reads on the pool's two RPCs (src/pool-sell-evm.ts planEvmSell). None in the
- *  testnet build, whose helper has no route for the chain: there the pool's two RPCs read each W, as before. */
 /** The read of each W's asset_held (card portfolio-counts-money-an-open-buy-holds) on the finder's own route, never a
  *  public provider: on mainnet the helper's keyed route with the pass's stop in its every fetch, so nothing of a
  *  signed-out account's is sent after the sign out, queued or tried again (as the pass's decimals read); in the testnet
@@ -153,6 +148,11 @@ export const pageEvmHistory = (pin: EvmPoolPin): readonly EvmRpc[] => {
 export const pageAssetHeldRpc = (signal: AbortSignal): SolanaRpc =>
   solanaPacedRpc(POOL_TESTNET ? testnetRpc(TESTNET_RPCS.solana[0], SOLANA_RPC_RETRY, "pass") : pageHelperRpcStopped(TRADE_HELPER, signal, "pass"));
 
+/** Where a mainnet W's balance is read for its positions (decision M359): the helper's route alone (POST
+ *  /v1/rpc/{chain}, the wallet's evmHelperRpc, the holdings readers' one paced queue, which the restore's W reads share),
+ *  so a provider the device reaches itself is never named a W of it, nor two in one burst. A sale reads none of it: its
+ *  finding gates its signature, so it reads on the pool's two RPCs (src/pool-sell-evm.ts planEvmSell). None in the
+ *  testnet build, whose helper has no route for the chain: there the pool's two RPCs read each W, as before. */
 export const pageEvmWalletRpc = (chain: "base" | "robinhood", testnet: boolean = POOL_TESTNET): EvmRpc | undefined => {
   if (testnet) return undefined;
   let r = WALLET_RPCS.get(chain);
