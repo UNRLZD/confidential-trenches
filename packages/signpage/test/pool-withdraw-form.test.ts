@@ -47,8 +47,10 @@ test("Amount: refused above what the notes can send, under the smallest part, or
   assert.equal(parseUnits("1.0000000001", 9), null);
   assert.equal(formatUnits(2_600_000n, 9), "0.0026");
   const most = 40_000_000n - 2n * (FEE + W_FEE);
-  assert.deepEqual(checkPoolAmount("solana", formatUnits(most + 1n, 9), FUNDS), { ok: false, code: "insufficient" });
-  assert.deepEqual(checkPoolAmount("solana", "1", FUNDS), { ok: false, code: "insufficient" });
+  // above it: refused, naming what can be sent (card withdraw-form-shows-what-you-can-send); none sendable names nothing
+  assert.deepEqual(checkPoolAmount("solana", formatUnits(most + 1n, 9), FUNDS), { ok: false, code: "insufficient", below: most });
+  assert.deepEqual(checkPoolAmount("solana", "1", FUNDS), { ok: false, code: "insufficient", below: most });
+  assert.deepEqual(checkPoolAmount("solana", "1", { ...FUNDS, notes: [] }), { ok: false, code: "insufficient" });
   assert.deepEqual(checkPoolAmount("solana", formatUnits(MIN - 1n, 9), FUNDS), { ok: false, code: "min", min: MIN });
   for (const bad of ["", "0", "-1", "1e3", "0.0000000001", "abc"]) assert.deepEqual(checkPoolAmount("solana", bad, FUNDS), { ok: false, code: "amount" }, bad);
   assert.deepEqual(checkPoolAmount("solana", "0.002", null), { ok: false, code: "unread" });
@@ -124,8 +126,9 @@ test("the drawn screen: To and Max fee shown before the press, the press hands o
   assert.equal(f.form.dataset.state, "refused");
   const refusal = f.form.find((e) => e.dataset.for === "amount")!;
   assert.equal(refusal.dataset.refusal, "insufficient");
-  assert.equal(refusal.textContent, POOL_WITHDRAW_WORDS.insufficient);
-  assert.equal(refusal.dataset.draftCopy, undefined, "Insufficient was kept (owner 8 Nov 07:55Z): no draft mark");
+  // what can be sent, in the nearest-amounts words (card withdraw-form-shows-what-you-can-send)
+  assert.equal(refusal.textContent, `${POOL_WITHDRAW_WORDS.try}0.03739 SOL`);
+  assert.equal(refusal.dataset.draftCopy, undefined, "Insufficient and Try were kept (owner 8 Nov 07:55Z): no draft mark");
   assert.equal(f.go.disabled, true);
   await f.tap();
   assert.deepEqual(f.handed, [], "a refused screen hands nothing over");

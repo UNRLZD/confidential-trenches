@@ -39,6 +39,7 @@ export const WITHDRAW_WORDS = {
   min: "Min $", // S12.7's draft "Min $X" (09-design-brief.md:1403), X the smallest amount above the fee
   busy: "Busy · Retry", // S12.10 (09-design-brief.md:1405), for a check the RPCs could not answer; owner 8 Nov 07:55Z, kept
   unmatched: "Withdrawal unmatched", // new, card wallet-withdraw-move-out: a settle pass's drift note left RESERVED; the owner picks
+  try: "Try ", // above what the note sends, "Try 9.88 USDC" (card withdraw-form-shows-what-you-can-send): pw.tryOne, owner 8 Nov 07:55Z, kept
 } as const;
 
 /** The keys of WITHDRAW_WORDS the owner has not picked: their elements keep data-draft-copy. */
@@ -103,10 +104,11 @@ export function formatUnits(units: bigint): string {
 }
 
 /** The words a refusal draws, by its code. */
-export function refusalWords(code: AddressCode | AmountCode, min?: bigint): string {
+export function refusalWords(code: AddressCode | AmountCode, min?: bigint, below?: bigint): string {
   if (code === "unread") return WITHDRAW_WORDS.busy;
   if (code === "amount") return WITHDRAW_WORDS["invalid-amount"];
-  if (code === "insufficient") return WITHDRAW_WORDS.insufficient;
+  // above what the note can send: what can be, in the pool form's nearest-amounts words with the asset's symbol
+  if (code === "insufficient") return below ? `${WITHDRAW_WORDS.try}${formatUnits(below)} USDC` : WITHDRAW_WORDS.insufficient;
   if (code === "min") return `${WITHDRAW_WORDS.min}${formatUnits(min ?? 0n)}`;
   return WITHDRAW_WORDS["invalid-address"];
 }
@@ -167,10 +169,10 @@ export function drawWithdrawForm(doc: Document, deps: WithdrawFormDeps, button: 
     view = v;
     form.dataset.state = v.state;
     line(to.line, v.address && !v.address.ok ? v.address.code : null);
-    line(amount.line, v.amount && !v.amount.ok ? v.amount.code : null, v.amount && !v.amount.ok && v.amount.code === "min" ? v.amount.min : undefined);
+    line(amount.line, v.amount && !v.amount.ok ? v.amount.code : null, v.amount && !v.amount.ok && v.amount.code === "min" ? v.amount.min : undefined, v.amount && !v.amount.ok && v.amount.code === "insufficient" ? v.amount.below : undefined);
     go.disabled = v.state !== "ready" || !deps.handoff;
   };
-  const line = (p: HTMLParagraphElement, code: AddressCode | AmountCode | null, min?: bigint): void => {
+  const line = (p: HTMLParagraphElement, code: AddressCode | AmountCode | null, min?: bigint, below?: bigint): void => {
     p.hidden = code === null;
     if (code === null) {
       delete p.dataset.refusal;
@@ -178,8 +180,8 @@ export function drawWithdrawForm(doc: Document, deps: WithdrawFormDeps, button: 
       return void p.replaceChildren();
     }
     p.dataset.refusal = code;
-    markDraft(p, code === "unread" ? "busy" : code === "amount" ? "invalid-amount" : code === "insufficient" || code === "min" ? code : "invalid-address", WITHDRAW_DRAFT);
-    if (code !== "unread") return void (p.textContent = refusalWords(code, min));
+    markDraft(p, code === "unread" ? "busy" : code === "amount" ? "invalid-amount" : code === "insufficient" && below ? "try" : code === "insufficient" || code === "min" ? code : "invalid-address", WITHDRAW_DRAFT);
+    if (code !== "unread") return void (p.textContent = refusalWords(code, min, below));
     // Busy · Retry: a tap checks again now
     const again = doc.createElement("button");
     again.type = "button";
