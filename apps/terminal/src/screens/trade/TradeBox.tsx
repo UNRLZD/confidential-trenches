@@ -181,7 +181,9 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
     if (coinKey === null || !ask) return;
     let live = true;
     let t: ReturnType<typeof setTimeout> | undefined;
-    // asked again while the page says not now (busy, down), until the coin or its proofs change or the box goes
+    let downs = 0;
+    // asked again while the page says not now: busy until the trade ends, down three times at most (a provider that
+    // keeps failing is not asked on), until the coin or its proofs change or the box goes
     const once = (): void => {
       try {
         ask("pool.buy.dry", { chain: "solana", token }).outcome.then(
@@ -189,7 +191,7 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
             if (!live) return;
             if (o.ok) return void setCoinTap({ key: coinKey, tap_max: o.result.tap_max });
             const again = coinTapAgainMs(o.error.code);
-            if (again !== null) t = setTimeout(once, again);
+            if (again !== null && (o.error.code !== "down" || downs++ < 3)) t = setTimeout(once, again);
           },
           () => {},
         );

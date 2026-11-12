@@ -95,8 +95,8 @@ export async function readCoinVenue(rpcs: readonly [SolanaRpc, SolanaRpc], token
   }
 }
 
-/** How many coins' venues pool.buy.dry keeps, and for how long: each is read again once it is COIN_VENUE_KEEP_MS old,
- *  so a flag the coin's accounts change (its cashback) reaches Max within a minute, never only at a reload. */
+/** How many coins' venues pool.buy.dry keeps, and for how long: an ask of a venue COIN_VENUE_KEEP_MS old reads it
+ *  again, so a flag the coin's accounts change (its cashback) reaches the next ask after a minute, never only a reload. */
 export const COIN_VENUES_KEPT = 256;
 export const COIN_VENUE_KEEP_MS = 60_000;
 
