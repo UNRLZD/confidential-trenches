@@ -4,14 +4,21 @@ import { fileURLToPath } from "node:url";
 import { runSync } from "../../../scripts/group-run.mjs";
 const W = fileURLToPath(new URL("..", import.meta.url)).replace(/\/$/, "");
 const S = `${W}/src/pool/evm.ts`, R = `${W}/src/pool/evm-restore.ts`, H = `${W}/src/pool/evm-hold-store.ts`;
-const T = "test/pool-evm-restore.test.ts", TE = "test/pool-evm.test.ts";
+const ST = `${W}/src/pool/evm-settle.ts`, N = `${W}/src/notes/store.ts`;
+const T = "test/pool-evm-restore.test.ts", TE = "test/pool-evm.test.ts", TS = "test/pool-evm-settle.test.ts";
 // [file, find, replace, test file, test name pattern]
 const M = [
   // the restore's checks on the pool's events
-  // review P3-4 of 53f5e92f and its delta P3-E (card restore-first-sign-in-under-two-minutes): the restore of the chain
-  // at its finalized block, the events cut before it: up to the newest agreed block, or one block short of the finalized
-  [R, "const final = r.events.filter((e) => e.block <= r.fin.number);", "const final = r.events.filter((e) => e.block <= r.anchor.number);", T, "P3-"],
-  [R, "const final = r.events.filter((e) => e.block <= r.fin.number);", "const final = r.events.filter((e) => e.block < r.fin.number);", T, "P3-E"],
+  // card evm-money-shows-and-spends-at-once: the restore at the newest agreed block, every event of the round kept; the
+  // old cut at the finalized block, or one block short of the head, hides a deposit or a release that has landed
+  [R, "const final = r.events;", "const final = r.events.filter((e) => e.block <= r.fin.number);", T, "^head: "],
+  [R, "const final = r.events;", "const final = r.events.filter((e) => e.block < r.anchor.number);", T, "^head: "],
+  // the hazard the finalized cut guarded (review P3-4 of 53f5e92f): a note landed on a block a reorg can drop, or SPENT on
+  // a release not final. Now held by the tail mark, the heal and the store's refusal to back out a finalized fact
+  [R, "const landed = a.fin !== undefined && block > a.fin ? { landed: { block, fin: a.fin } } : {};", "const landed = {};", T, "^head: a deposit 4 s old"],
+  [ST, "        await a.notes.backOut(n.id, r.fin.number, anchorMs + EVM_LIFE_MS);\n        out.backedOut.push(n.id);\n", "", TS, "^head: a reorg drops"],
+  [ST, "  await a.notes.finalized(a.scope, r.fin.number);\n", "", TS, "^head: a finalized fact never backs out"],
+  [N, "if (block === undefined || block <= final) throw", "if (block === undefined) throw", TS, "^head: a finalized fact never backs out"],
   [R, "if (leaves.has(e.state)) throw", "if (false) throw", T, "evmRestore refuses"],
   [R, "if (byPre.has(e.precommitment!)) throw", "if (false) throw", T, "evmRestore refuses"],
   [R, "if (byNull.has(e.nullifier!)) throw", "if (false) throw", T, "evmRestore refuses"],

@@ -56,7 +56,7 @@ import { masters } from "../derive/index.ts";
 import { laneOf, type LaneWalk, RESTORE_GAP, RESTORE_LANES, type SeedUse, slices, walkLane, withSeed } from "../notes/restore.ts";
 import { walkLanes, type WalkPort } from "../restore/walk.ts";
 import { noteCommitment, noteSecrets, type NoteRef } from "../notes/secrets.ts";
-import { refKey, type Leaf, type NoteRecord, type NoteStore } from "../notes/store.ts";
+import { refKey, type Landed, type Leaf, type NoteRecord, type NoteStore } from "../notes/store.ts";
 import { solanaSameProvider } from "@blindfill/kit";
 import { evmHelperRpc } from "./buy-wallets.ts";
 import { EVM_CHAIN_IDS, EVM_EPOCH_MS, EVM_LOG_PAGE_BLOCKS, EvmLagError, evmHoldsAnchor, evmLatestHigh, evmPair, evmPoolScopeOf, evmRetryLag, evmTokensSentTo, evmTokensSentToOne, evmTreeSync, type EvmPoolEvent, type EvmPoolPin, type EvmRpc, type EvmSyncHold } from "./evm.ts";
@@ -65,7 +65,9 @@ import { jOf } from "./queue.ts";
 const U32 = 0xffffffff;
 const CHAIN_TAGS = Object.keys(CHAINS) as Chain[];
 
-export type EvmRestoredNote = { ref: NoteRef; scope: bigint; precommitment: bigint; leaf: Leaf; state: "UNSPENT" | "SPENT"; parent?: string };
+/** `landed`: the note's leaf (a change note's: its release) is in a block above the round's finalized one, so a reorg
+ *  can still drop it; the store keeps that block and backs the note out if one does (../notes/store.ts backOut). */
+export type EvmRestoredNote = { ref: NoteRef; scope: bigint; precommitment: bigint; leaf: Leaf; state: "UNSPENT" | "SPENT"; parent?: string; landed?: Landed };
 /** A spent note of ours: its release (l, j), the W it paid (lowercase), what it withdrew, the release's block, a buy's
  * token (lowercase; null for a withdraw), and the release log's block hash and log index. */
 export type EvmRestoredSpend = { l: bigint; j: number; note: string; w: string; withdrawn: bigint; block: bigint; token: string | null; blockHash: string; logIndex: bigint };
@@ -82,6 +84,8 @@ export type EvmRestoreArgs = {
   scope: bigint;
   /** Every leaf event of the pool, in log order, as evmTreeSync's events() gives them. */
   events: readonly EvmPoolEvent[];
+  /** The round's finalized block: a note whose leaf is in a block above it carries `landed`. None: no note does. */
+  fin?: bigint;
   /** tests only: RESTORE_GAP unless given */
   gap?: number;
   /** The 8 lanes already walked (walkLaneYielding, by the async restore below); walked here with walkLane when not given.
@@ -161,7 +165,9 @@ function* evmRestoreSteps(a: Omit<EvmRestoreArgs, "seed64">): Generator<void, Ev
     const key = refKey(ref);
     if (seen.has(key)) return;
     seen.add(key);
-    notes.push({ ref, scope, precommitment, leaf, state: "UNSPENT", ...(parent === undefined ? {} : { parent }) });
+    const block = events[Number(leaf.leafIndex)]!.block;
+    const landed = a.fin !== undefined && block > a.fin ? { landed: { block, fin: a.fin } } : {};
+    notes.push({ ref, scope, precommitment, leaf, state: "UNSPENT", ...(parent === undefined ? {} : { parent }), ...landed });
   };
   // a note the pool holds as a deposit: its Deposited event, its label and commitment checked
   // each note's derivation waits for the seed first (a page gives it in short uses, the event loop a turn between)
@@ -244,20 +250,23 @@ export class EvmNotFinalError extends Error {
  *
  * The chain of notes a deposit or a sell signs on, from `first`: a deposit's U note then U's second arrivals, a sell's
  * return note (c, l, j) then R's, a move's V. Read against the pool's events as evmTreeSync's events() gives them (both
- * RPCs byte for byte, the trees checked against the pool's views), every note of the chain a Deposited already names
- * is `taken`, with its leaf at the value that deposit carried (MIN_DEPOSIT or any other), and `next` is the first one
- * none names: the one to sign. Called before each signature and again after a revert, so the device never signs a
- * precommitment the pool already holds, and a sell signed in advance whose deposit reverted is signed again on `next`.
- * Only a Deposited at or below `finalBlock` (the round's finalized anchor, evmTreeSync's `fin`) is `taken`, so a note
- * is stored only from a block that never moves; one in the tail above it is `pending`: passed over for `next`, never
- * written, and taken at a later round once its block is final (a reorg that drops it leaves the note as it was). If
- * that reorg drops it and nothing else lands on its precommitment, the chain holds an empty note before the one signed
- * next: evmRestore's second-arrival walk reads past SECOND_GAP - 1 of them, and this refuses to name a note past
- * SECOND_GAP pending takes in a row (the next round, with those blocks final, names it), so a restore from the words
- * never misses a signed note. Both waits for finality (that one, and a deposit note taken in a block not final yet)
- * throw EvmNotFinalError; every other refusal is a plain Error. The device also names that empty note as `next` at its next call, which fills the gap.
+ * RPCs byte for byte up to the newest block both agree on by hash, the trees checked against the pool's views), every
+ * note of the chain a Deposited already names is `taken`, with its leaf at the value that deposit carried (MIN_DEPOSIT or
+ * any other), and `next` is the first one none names: the one to sign. Called before each signature and again after a
+ * revert, so the device never signs a precommitment the pool already holds, and a sell signed in advance whose deposit
+ * reverted is signed again on `next`.
+ * A take in a block above `finalBlock` (the round's finalized anchor, evmTreeSync's `fin`) is taken all the same (card
+ * evm-money-shows-and-spends-at-once: money shows and spends once the newest agreed block holds it), carries `landed`
+ * so the store backs it out if a reorg drops it (../notes/store.ts backOut, run by ./evm-settle.ts), and is also listed
+ * in `pending`: a reorg can still leave its note empty before the one signed next. evmRestore's second-arrival walk
+ * reads past SECOND_GAP - 1 empty notes, and evmNextNote refuses to name a note past SECOND_GAP pending takes in a row
+ * (the next round, with those blocks final, names it), so a restore from the words never misses a signed note; and it
+ * never names a note past a deposit note taken in a block not final yet, whose index the restore finds by that note
+ * alone. Both waits throw EvmNotFinalError, from evmNextNote only: evmTakenNotes gives the taken notes whatever comes
+ * next, for a caller that writes them and signs nothing. The device names a backed-out empty note as `next` at its next
+ * call, which fills the gap.
  */
-export function evmNextNote(seed64: Uint8Array, scope: bigint, events: readonly EvmPoolEvent[], first: NoteRef, finalBlock: bigint): { taken: EvmRestoredNote[]; pending: NoteRef[]; next: { ref: NoteRef; precommitment: bigint } } {
+export function evmTakenNotes(seed64: Uint8Array, scope: bigint, events: readonly EvmPoolEvent[], first: NoteRef, finalBlock: bigint): { taken: EvmRestoredNote[]; pending: NoteRef[]; next: { ref: NoteRef; precommitment: bigint }; wait: string | null } {
   if (typeof finalBlock !== "bigint" || finalBlock < 0n) throw new Error("finalBlock: the round's finalized block number");
   if (first.kind === "deposit" && first.s !== scope) throw new Error("a deposit note's scope is its s");
   const id: SecondId =
@@ -269,18 +278,21 @@ export function evmNextNote(seed64: Uint8Array, scope: bigint, events: readonly 
   const taken: EvmRestoredNote[] = [];
   const pending: NoteRef[] = [];
   let run = 0; // pending takes in a row: each may yet be dropped, an empty note before `next`
+  let wait: string | null = null;
   for (let n = -1; n <= U32; n++) {
     const ref: NoteRef = n < 0 ? first : { kind: "second", id, n };
     const precommitment = noteSecrets(seed64, ref).precommitment;
     const leaf = depositLeaf(scope, events, ix, precommitment, refKey(ref));
     if (leaf === null) {
-      if (run >= SECOND_GAP) throw new EvmNotFinalError(`${refKey(ref)}: ${run} pending takes in a row before it, past the restore's gap of ${SECOND_GAP}: signed once they are final`);
-      return { taken, pending, next: { ref, precommitment } };
+      if (wait === null && run >= SECOND_GAP) wait = `${refKey(ref)}: ${run} pending takes in a row before it, past the restore's gap of ${SECOND_GAP}: signed once they are final`;
+      return { taken, pending, next: { ref, precommitment }, wait };
     }
-    if (events[Number(leaf.leafIndex)]!.block > finalBlock) {
+    const block = events[Number(leaf.leafIndex)]!.block;
+    if (block > finalBlock) {
       // a deposit index is found by its deposit note alone (walkLane), so an empty deposit note hides its whole chain:
-      // the one take never passed over while pending
-      if (n < 0 && first.kind === "deposit") throw new EvmNotFinalError(`${refKey(ref)}: taken in a block not final yet; the deposit index is found by this note alone, so its chain is signed once that block is final`);
+      // no note past it is signed while it is pending
+      if (n < 0 && first.kind === "deposit") wait = `${refKey(ref)}: taken in a block not final yet; the deposit index is found by this note alone, so its chain is signed once that block is final`;
+      taken.push({ ref, scope, precommitment, leaf, state: "UNSPENT", landed: { block, fin: finalBlock } });
       pending.push(ref);
       run++;
     } else {
@@ -289,6 +301,13 @@ export function evmNextNote(seed64: Uint8Array, scope: bigint, events: readonly 
     }
   }
   throw new Error("no second arrival left on this id");
+}
+
+/** evmTakenNotes for a signature: its wait (EvmNotFinalError) thrown, else the taken notes, the pending ones and `next`. */
+export function evmNextNote(seed64: Uint8Array, scope: bigint, events: readonly EvmPoolEvent[], first: NoteRef, finalBlock: bigint): { taken: EvmRestoredNote[]; pending: NoteRef[]; next: { ref: NoteRef; precommitment: bigint } } {
+  const { taken, pending, next, wait } = evmTakenNotes(seed64, scope, events, first, finalBlock);
+  if (wait !== null) throw new EvmNotFinalError(wait);
+  return { taken, pending, next };
 }
 
 /**
@@ -304,10 +323,11 @@ export async function evmClaimTaken(store: NoteStore, taken: readonly EvmRestore
   for (const t of taken) {
     const h = held.get(refKey(t.ref));
     if (h !== undefined && (h.precommitment !== t.precommitment || h.scope !== t.scope)) throw new Error(`${refKey(t.ref)}: the store holds another note on this ref`);
-    if (h === undefined) out.push(await store.add({ ref: t.ref, scope: t.scope, precommitment: t.precommitment, state: "UNSPENT", leaf: t.leaf }));
+    const landed = t.landed === undefined ? {} : { landed: t.landed };
+    if (h === undefined) out.push(await store.add({ ref: t.ref, scope: t.scope, precommitment: t.precommitment, state: "UNSPENT", leaf: t.leaf, ...landed }));
     else if (h.state === "PLANNED" || h.state === "INCOMING") {
       const incoming = h.state === "PLANNED" ? await store.move(h.id, "PLANNED", "INCOMING") : h;
-      out.push(await store.move(incoming.id, "INCOMING", "UNSPENT", { leaf: t.leaf }));
+      out.push(await store.move(incoming.id, "INCOMING", "UNSPENT", { leaf: t.leaf, ...landed }));
     } else if (h.leaf !== undefined && (h.leaf.commitment !== t.leaf.commitment || h.leaf.leafIndex !== t.leaf.leafIndex)) throw new Error(`${refKey(t.ref)}: the store holds this note at another leaf`);
   }
   return out;
@@ -408,11 +428,12 @@ export async function evmRestoreNotes(a: EvmRestoreNotesArgs): Promise<{ notes: 
     if (r.anchor.timestamp * 1000n + EVM_EPOCH_MS < high) throw new EvmLagError(`the newest agreed block ${r.anchor.number} is more than an epoch behind an RPC's latest block`);
     return r;
   }, sleep, a.signal);
-  // the restore of the chain as it stands at the round's finalized block, as the deposit path takes a note
-  // (evmNextNote's finalBlock): a note, a spend or a change above it is left to a later restore, so the page never lands
-  // a PLANNED note on a block a reorg can drop, nor writes a note SPENT on a spend that is not final (review P3-4 of
-  // 53f5e92f; delta review P3-E: the events cut before the restore, never its notes after)
-  const final = r.events.filter((e) => e.block <= r.fin.number);
+  // the restore of the chain as it stands at the newest block both RPCs agree on by hash (the round's anchor; card
+  // evm-money-shows-and-spends-at-once), never at its finalized block, which trails the head by minutes on Base and
+  // Robinhood (and one provider's answer may be far behind): a deposit or a spend seconds old is restored as it is. A
+  // note whose leaf is above the finalized block carries `landed`, so a reorg that drops it is backed out of the store
+  // (./evm-settle.ts, ../notes/store.ts backOut), never left standing (the reason review P3-4 of 53f5e92f cut here)
+  const final = r.events;
   // the walk off the seed, yielding as it goes (walkLaneYielding: never one stretch on the page's thread, ended by the
   // signal), from the deposit masters of one short use of the seed; then the restore on those lanes
   const { notes, spends, elsewhere } = await (a.turn ?? ((walk) => walk()))(async () => {
@@ -425,7 +446,7 @@ export async function evmRestoreNotes(a: EvmRestoreNotesArgs): Promise<{ notes: 
     lanes.push(...(await walkLanes({ m, scope, match: { kind: "pre", precommitments: [...byPre.keys()] }, gap: a.gap ?? RESTORE_GAP, ...(a.signal ? { signal: a.signal } : {}), slice, ...(a.walkers ? { spawn: a.walkers } : {}) })));
     // then the notes a slice at a time: one short use of the seed a slice (WALK_SLICE_MS of work), the event loop a turn
     // and the signal checked between slices
-    const steps = evmRestoreSteps({ scope, events: final, lanes, ...(a.gap === undefined ? {} : { gap: a.gap }) });
+    const steps = evmRestoreSteps({ scope, events: final, fin: r.fin.number, lanes, ...(a.gap === undefined ? {} : { gap: a.gap }) });
     let step = steps.next();
     while (!step.done) {
       const at = step;

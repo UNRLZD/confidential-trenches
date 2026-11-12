@@ -70,6 +70,13 @@
 //   context is in the list is this device's own (the check itself is the sync and arming cards'). The list stays
 //   small, as each new attempt needs the note freed or expired first. Nothing in it is secret: the context goes on
 //   chain with the proof, and the ops records, which the frame reads, never hold it.
+// - An EVM pool's tail (card evm-money-shows-and-spends-at-once): a note lands, and a release spends, as soon as the
+//   newest block both RPCs agree on by hash holds it, before the chain's finalized block reaches it. Such a write carries
+//   `landed` (the block and the round's finalized block), and the store keeps the note's block beside it (EvmLandings,
+//   never in the note record) while that block is above the highest finalized block the store was ever told for the
+//   scope (only ever raised). A reorg that drops the leaf or the release is undone by backOut, and only for a note whose
+//   kept block is above that highest finalized block at the time of the call: a fact at or under a finalized block never
+//   backs out, whatever block a caller names (a stale or backwards answer included).
 import { VAULT_FIELD_P, vaultSyncStart, type VaultSyncCursor } from "@blindfill/kit";
 import { CHAINS } from "../derive/index.ts";
 import { WALLET_SYNC_PREFIX, type WalletStore } from "../store/index.ts";
@@ -131,6 +138,34 @@ export type NoteRecord = {
   contexts?: AttemptContext[]; // from its first HELD on: every attempt's context and deadline_ms, in the order written
   request?: string; // RESERVED: the vault withdrawal's request body as sent (JSON), written with HELD -> RESERVED, so a later page sends the same bytes again
 };
+/** An EVM pool note's landing in a block above the round's finalized block (`fin`), both read on two RPCs. */
+export type Landed = { block: bigint; fin: bigint };
+
+/**
+ * An EVM pool's tail beside the notes, never in them (as ReservedMark: every earlier release's reader accepts each note
+ * this one writes): one meta record (EVM_LANDINGS_KEY), `final` the highest finalized block the store was told for each
+ * scope (decimal), only ever raised, and `block` each landed note's block (a change note's: its release's) while above
+ * its scope's. Written before the note it names (a crash between leaves a block no rule reads: backOut takes only a
+ * landed note's), and dropped once its scope's finalized block reaches it or the note backs out or leaves the landed
+ * states.
+ */
+export type EvmLandings = { final: Map<string, bigint>; block: Map<string, bigint> };
+/** meta/owed/evm-landed: an owed/ key, which no reader of any release lists (store keys() leaves owed/ out). */
+export const EVM_LANDINGS_KEY = "owed/evm-landed";
+
+function landingsOf(v: unknown): EvmLandings {
+  const out: EvmLandings = { final: new Map(), block: new Map() };
+  if (v === null || typeof v !== "object") return out;
+  const big = (x: unknown): x is bigint => typeof x === "bigint" && x >= 0n && x < 1n << 256n;
+  const r = v as { final?: unknown; block?: unknown };
+  for (const [k, into] of [["final", out.final], ["block", out.block]] as const) {
+    const m = r[k];
+    if (m === null || typeof m !== "object") continue;
+    for (const [id, b] of Object.entries(m as Record<string, unknown>)) if (big(b)) into.set(id, b);
+  }
+  return out;
+}
+const landingsRecord = (l: EvmLandings) => ({ final: Object.fromEntries(l.final), block: Object.fromEntries(l.block) });
 
 /**
  * What a RESERVED note's spend left beside the note, never in it (card pool-buy-record-never-stays-sent): the record's
@@ -210,6 +245,8 @@ export type NewNote = {
   state: "PLANNED" | "UNSPENT";
   parent?: string;
   leaf?: Leaf;
+  /** UNSPENT only: an EVM pool note whose leaf (a change note: its release) is in a block above the round's finalized one */
+  landed?: Landed;
 };
 
 // leaf: INCOMING -> UNSPENT. deadlineMs and context: UNSPENT -> HELD, and the holder's HELD -> HELD (with its attempt).
@@ -219,7 +256,8 @@ export type NewNote = {
 // lastHeight, nullifier: the holder's HELD -> RESERVED only, written to the note's mark (ReservedMark), never the note.
 // finalHeight: RESERVED -> UNSPENT, the lower of both RPCs' finalized block heights, past its mark's lastHeight (card
 // pool-buy-record-never-stays-sent).
-export type MoveFields = { leaf?: Leaf; deadlineMs?: bigint; context?: string; attempt?: string; blockTimeMs?: bigint; send?: PoolSend; evmSend?: EvmPoolSend; request?: string; lastHeight?: bigint; nullifier?: bigint; finalHeight?: bigint };
+// landed: INCOMING -> UNSPENT only, with its leaf (an EVM pool note landed above the round's finalized block).
+export type MoveFields = { leaf?: Leaf; deadlineMs?: bigint; context?: string; attempt?: string; blockTimeMs?: bigint; send?: PoolSend; evmSend?: EvmPoolSend; request?: string; lastHeight?: bigint; nullifier?: bigint; finalHeight?: bigint; landed?: Landed };
 /** The longest request body a RESERVED note holds: the helper's POST /v1/withdraw limit (8 KiB). */
 export const NOTE_REQUEST_MAX = 8_192;
 
@@ -236,6 +274,22 @@ export interface NoteStore {
   landed(id: string, attempt: string, withdrawn: bigint, block?: bigint): Promise<void>;
   /** Takes the landed value off the note's mark of `attempt` (its release no longer on the chain's final blocks). */
   unlanded(id: string, attempt: string): Promise<void>;
+  /**
+   * Undoes an EVM pool note's landing that a reorg dropped (card evm-money-shows-and-spends-at-once), given the round's
+   * finalized block `fin`: refused unless the note's `block` is above the highest finalized block the store was told for
+   * its scope (`fin` raises it first) and no note names it as parent. A note of its own deposit (UNSPENT, HELD or
+   * RESERVED) goes back to INCOMING, its leaf gone, so it leaves the balance and the spendable notes in one write. A
+   * change or refund note (its release dropped) goes, and its parent goes from SPENT back to RESERVED (written first,
+   * so a page killed between the two finishes the parent back to SPENT and the next pass undoes it again): its last
+   * attempt's deadline when it holds one, else `deadlineMs` (a release no attempt of this store sent: the latest its
+   * proof could still land), so the settle frees it past that deadline or reads its release again.
+   */
+  backOut(id: string, fin: bigint, deadlineMs?: bigint): Promise<void>;
+  /** Raises the scope's highest finalized block to `fin` and drops the kept block of each of its notes at or below it:
+   *  those landings are final and never back out. */
+  finalized(scope: bigint, fin: bigint): Promise<void>;
+  /** Each landed note's kept block (EvmLandings), for the notes still landed and above their scope's finalized block. */
+  landings(): Promise<ReadonlyMap<string, bigint>>;
   /**
    * Writes a call U signed for an INCOMING note, before it is sent, when the note still holds `seen` calls (else
    * nothing is written: another bind's call came first). Returns the note as stored. The first call may carry the
@@ -703,7 +757,7 @@ export async function openNoteStore(store: WalletStore, opts: NoteStoreOptions =
   async function moveLocked(id: string, from: NoteState, to: NoteState, fields: MoveFields = {}): Promise<NoteRecord> {
     if (!NOTE_STATES.includes(from) || !NOTE_STATES.includes(to)) throw new Error("unknown note state");
     if (fields === null || typeof fields !== "object") throw new Error("fields is an object");
-    onlyKeys(fields, ["leaf", "deadlineMs", "context", "attempt", "blockTimeMs", "send", "evmSend", "request", "lastHeight", "nullifier", "finalHeight"], "a move");
+    onlyKeys(fields, ["leaf", "deadlineMs", "context", "attempt", "blockTimeMs", "send", "evmSend", "request", "lastHeight", "nullifier", "finalHeight", "landed"], "a move");
     const all = await settle();
     const cur = all.find((n) => n.id === id);
     if (cur === undefined) throw new Error(`no note ${id}`);
@@ -739,6 +793,9 @@ export async function openNoteStore(store: WalletStore, opts: NoteStoreOptions =
       const mark: ReservedMark = { attempt: fields.attempt!, ...(fields.lastHeight === undefined ? {} : { lastHeight: u64(fields.lastHeight, "lastHeight") }), ...(fields.nullifier === undefined ? {} : { nullifier: fields.nullifier }) };
       await store.update("meta", RESERVED_MARKS_KEY, (v) => ({ ...Object.fromEntries(marksOf(v)), [id]: mark }));
     }
+    if (fields.landed !== undefined && !(from === "INCOMING" && to === "UNSPENT")) throw new Error("a landing is written with the move INCOMING -> UNSPENT only");
+    // the landing first, then the note (one with no landing clears any block kept for it)
+    if (from === "INCOMING" && to === "UNSPENT") await keepLanding(id, cur.scope, fields.landed);
     const out = await put(cur, to, { leaf: fields.leaf, deadlineMs: fields.deadlineMs, context: fields.context, request: fields.request });
     // out of RESERVED: its mark goes (one left by a failed write is dropped at the next read of the marks)
     if (from === "RESERVED" && to !== "RESERVED") await dropMarks((m) => m.has(id) ? [id] : []).catch(() => {});
@@ -795,7 +852,7 @@ export async function openNoteStore(store: WalletStore, opts: NoteStoreOptions =
 
   async function addLocked(note: NewNote): Promise<NoteRecord> {
     if (note === null || typeof note !== "object") throw new Error("a note is an object");
-    onlyKeys(note, ["ref", "scope", "precommitment", "state", "parent", "leaf"], "a new note");
+    onlyKeys(note, ["ref", "scope", "precommitment", "state", "parent", "leaf", "landed"], "a new note");
     const key = refKey(note.ref);
     const scope = field(note.scope, "scope");
     const precommitment = field(note.precommitment, "precommitment");
@@ -843,9 +900,122 @@ export async function openNoteStore(store: WalletStore, opts: NoteStoreOptions =
     } else throw new Error("a note is born PLANNED or UNSPENT");
     if (all.some((x) => refKey(x.ref) === key)) throw new Error(`note ${key} is already in the store`);
     if (all.some((x) => x.precommitment === precommitment)) throw new Error("that precommitment is already in the store");
+    if (note.landed !== undefined && note.state !== "UNSPENT") throw new Error("a landing is written with an UNSPENT note only");
+    if (note.landed !== undefined) await keepLanding(n.id, scope, note.landed); // the landing before the note it names
     await write(n); // the child first ...
     if (parent !== undefined && parent.state !== "SPENT") await put(parent, "SPENT"); // ... then its parent
     return n;
+  }
+
+  // one compare-and-set of the landings: `f` changes them in place and says whether it did (nothing written when not)
+  async function landingsUpdate(f: (l: EvmLandings) => boolean): Promise<EvmLandings> {
+    if (closed) throw new Error("the note store is closed");
+    let seen = landingsOf(undefined);
+    await store.update("meta", EVM_LANDINGS_KEY, (v) => {
+      seen = landingsOf(v);
+      return f(seen) ? landingsRecord(seen) : undefined;
+    });
+    return seen;
+  }
+  const raise = (l: EvmLandings, scope: bigint, fin: bigint): boolean => {
+    const k = scope.toString();
+    const had = l.final.get(k);
+    if (had !== undefined && had >= fin) return false;
+    l.final.set(k, fin);
+    return true;
+  };
+  const checkFin = (fin: unknown): bigint => {
+    if (typeof fin !== "bigint" || fin < 0n) throw new Error("fin is a block number");
+    return fin;
+  };
+  // a note's landing: its block kept while above the scope's highest finalized block (raised to the landing's `fin`
+  // first), else none, and any block kept for the note before cleared (a landing at or under it is final)
+  async function keepLanding(id: string, scope: bigint, landed: unknown): Promise<void> {
+    let block: bigint | undefined;
+    let fin: bigint | undefined;
+    if (landed !== undefined) {
+      if (landed === null || typeof landed !== "object") throw new Error("landed is { block, fin }");
+      onlyKeys(landed, ["block", "fin"], "a landing");
+      ({ block, fin } = landed as Landed);
+      if (typeof block !== "bigint" || block < 0n) throw new Error("landed.block is a block number");
+      checkFin(fin);
+    }
+    await landingsUpdate((l) => {
+      let changed = fin !== undefined && raise(l, scope, fin);
+      const final = l.final.get(scope.toString());
+      if (block !== undefined && (final === undefined || block > final)) {
+        if (l.block.get(id) !== block) (l.block.set(id, block), (changed = true));
+      } else if (l.block.delete(id)) changed = true;
+      return changed;
+    });
+  }
+
+  async function backOutLocked(id: string, fin: bigint, deadlineMs?: bigint): Promise<void> {
+    const all = await settle();
+    const cur = all.find((n) => n.id === id);
+    if (cur === undefined) throw new Error(`no note ${id}`);
+    checkFin(fin);
+    const l = await landingsUpdate((x) => raise(x, cur.scope, fin));
+    const final = l.final.get(cur.scope.toString())!;
+    const block = l.block.get(id);
+    // the guard (a fact at or under a finalized block never backs out): only a landing the store kept above every
+    // finalized block it was told for the scope
+    if (block === undefined || block <= final) throw new Error(`note ${id} landed at or below the finalized block ${final}: it never backs out`);
+    if (cur.state !== "UNSPENT" && cur.state !== "HELD" && cur.state !== "RESERVED") throw new Error(`note ${id} is ${cur.state}: only an unspent, held or reserved note backs out`);
+    if (all.some((c) => c.parent === id)) throw new Error(`note ${id} is a parent: its child backs out first`);
+    const dropMark = async () => {
+      await dropMarks((m) => (m.has(id) ? [id] : [])).catch(() => {});
+      await landingsUpdate((x) => x.block.delete(id)).catch(() => {});
+    };
+    if (cur.ref.kind !== "change" && cur.ref.kind !== "refund") {
+      // its own deposit: back to INCOMING, its leaf and every proof field gone (one write: out of the balance and the
+      // spendable notes at once); its sends stay, so the deposit's follow reads them again
+      const { leaf: _l, deadlineMs: _d, attempt: _a, tab: _t, request: _r, contexts: _c, ...rest } = cur;
+      await write({ ...rest, state: "INCOMING" });
+      await dropMark();
+      return;
+    }
+    const p = cur.parent === undefined ? undefined : all.find((n) => n.id === cur.parent);
+    if (p !== undefined) {
+      if (p.state !== "SPENT") throw new Error(`parent ${p.id} is ${p.state}, not SPENT`);
+      const last = p.contexts?.[p.contexts.length - 1];
+      const deadline = last?.deadlineMs ?? u64(deadlineMs, "deadlineMs");
+      const contexts = last !== undefined ? p.contexts! : [{ context: "0", deadlineMs: deadline }];
+      // the parent first: killed here, settle finishes it back to SPENT (its child is still stored), and the next pass
+      // undoes it again
+      await write({ ...p, state: "RESERVED", deadlineMs: deadline, attempt: newId(), contexts });
+    }
+    await dropMark();
+    if (closed) throw new Error("the note store is closed");
+    await store.delete("notes", id);
+  }
+
+  async function finalizedLocked(scope: bigint, fin: bigint): Promise<void> {
+    field(scope, "scope");
+    checkFin(fin);
+    const byId = new Map((await settle()).map((n) => [n.id, n]));
+    await landingsUpdate((l) => {
+      let changed = raise(l, scope, fin);
+      const final = l.final.get(scope.toString())!;
+      for (const [id, b] of [...l.block]) {
+        const n = byId.get(id);
+        // a block of this scope's at or under its finalized block, or of a note no longer landed (or gone)
+        if (n === undefined || !LANDED.includes(n.state) || (n.scope === scope && b <= final)) (l.block.delete(id), (changed = true));
+      }
+      return changed;
+    });
+  }
+
+  async function landingsLocked(): Promise<ReadonlyMap<string, bigint>> {
+    const all = await settle();
+    const l = landingsOf(await store.get("meta", EVM_LANDINGS_KEY));
+    const out = new Map<string, bigint>();
+    for (const n of all) {
+      const b = l.block.get(n.id);
+      const final = l.final.get(n.scope.toString());
+      if (b !== undefined && LANDED.includes(n.state) && (final === undefined || b > final)) out.set(n.id, b);
+    }
+    return out;
   }
 
   async function addCallLocked(id: string, call: NewBindCall, seen: number, searchFrom?: number): Promise<NoteRecord> {
@@ -951,6 +1121,9 @@ export async function openNoteStore(store: WalletStore, opts: NoteStoreOptions =
     marks: () => locked(marksLocked),
     landed: (id, attempt, withdrawn, block) => locked(() => landedLocked(id, attempt, withdrawn, block)),
     unlanded: (id, attempt) => locked(() => unlandedLocked(id, attempt)),
+    backOut: (id, fin, deadlineMs) => locked(() => backOutLocked(id, fin, deadlineMs)),
+    finalized: (scope, fin) => locked(() => finalizedLocked(scope, fin)),
+    landings: () => locked(landingsLocked),
     addCall: (id, call, seen, searchFrom) => locked(() => addCallLocked(id, call, seen, searchFrom)),
     syncCursor: (vault) => locked(() => syncCursorLocked(vault)),
     saveSyncCursor: (cursor) => locked(() => saveSyncCursorLocked(cursor)),

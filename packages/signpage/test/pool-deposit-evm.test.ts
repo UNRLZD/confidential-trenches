@@ -656,7 +656,7 @@ test("one index across asks until money reaches it: planDeposit hands the same P
   assert.equal(ch.c.sent.length, 0);
 });
 
-test("a take of U's deposit note in a block not final yet: nothing signed, the run's wait rejects with EvmNotFinalError (pool-kinds answers busy)", async () => {
+test("a take of U's deposit note in a block not final yet: the note is the user's at once (UNSPENT at the take's value, its block kept), nothing more signed past it, the run's wait rejects with EvmNotFinalError (pool-kinds answers busy)", async () => {
   const { ch, ns, planned } = await funded(RUNG + FEE);
   ch.deposit(planned.precommitment, EVM_POOL_MIN_DEPOSIT);
   ch.c.events[0]!.block = ch.c.fin + 1n; // above the round's finalized block
@@ -665,7 +665,11 @@ test("a take of U's deposit note in a block not final yet: nothing signed, the r
   const run = kind(ASK, null) as { after: Promise<void>; answer(): unknown };
   await assert.rejects(run.after, (e: unknown) => e instanceof EvmNotFinalError);
   assert.equal(ch.c.sent.length, 0, "nothing sent");
-  assert.equal((await ns.get(planned.id))!.state, "PLANNED");
+  // card evm-money-shows-and-spends-at-once: the newest agreed block holds the take, so the note shows now
+  const got = (await ns.get(planned.id))!;
+  assert.equal(got.state, "UNSPENT");
+  assert.equal(got.leaf?.value, EVM_POOL_MIN_DEPOSIT);
+  assert.equal((await ns.landings()).get(got.id), ch.c.fin + 1n, "its block kept beside it");
 });
 
 test("a rule refusal answers not_allowed, by its class (a PoolRuleRefused), whatever its name", async () => {
@@ -796,11 +800,11 @@ const estBound = (c: { baseFee: bigint; depth: bigint[] }) => (250_000n + evmDep
 test("R1: an earlier ask's note that lands later is settled by the next run, never credited to it: the later ask sends its own deposit and answers with its own tx", async () => {
   const { ch, ns, planned } = await funded(0n);
   ch.c.balance = [RUNG + capBound(ch.c), RUNG + capBound(ch.c)];
-  // ask X: sent, its Deposited in a block not final within the run (finality ~18 to 24 min on all four networks)
+  // ask X: sent, its Deposited not in any round within the run (mined after the run's last read)
+  let landX = () => {};
   ch.c.onSend = (raw) => {
     const s = sentOf(raw);
-    ch.deposit(s.pre, s.value);
-    ch.c.events.at(-1)!.block = ch.c.fin + 10n;
+    landX = () => ch.deposit(s.pre, s.value);
     ch.c.nonce = s.nonce + 1n;
     ch.c.balance = ch.c.balance.map((b) => b - s.value - 250_000n * (ch.c.baseFee + EVM_DEPOSIT_PRIORITY_CAP));
   };
@@ -808,8 +812,8 @@ test("R1: an earlier ask's note that lands later is settled by the next run, nev
   assert.equal("stage" in a && a.stage, "sent");
   const x = sentOf(ch.c.sent[0]!).hash;
   assert.equal((await ns.get(planned.id))!.state, "INCOMING");
-  // later: X's block is final; the user funds U for a second deposit Y of one rung and asks it
-  ch.c.fin += 20n;
+  // later: X's Deposited is in the round and final (Y's deposit index is found past X's note, so Y is signed once X's block is final); the user funds U for a second deposit Y of one rung and asks it
+  landX();
   ch.c.balance = ch.c.balance.map((b) => b + RUNG + capBound(ch.c));
   ch.c.onSend = (raw) => ch.land(raw);
   const sent: string[] = [];
@@ -958,7 +962,7 @@ function followedEvm(ch: ReturnType<typeof chain>, ns: NoteStore, o: Partial<Poo
   };
 }
 
-test("pool-deposit-sent-end (EVM): a send that lands after the run, its Deposited final only later, gives filled; while that block is not final, nothing", async () => {
+test("pool-deposit-sent-end (EVM): a send that lands after the run gives filled as soon as its Deposited is in the round, its block not final yet; before it lands, nothing", async () => {
   const { ch, ns } = await funded(RUNG + FEE);
   const f = followedEvm(ch, ns);
   await f.r.after;
@@ -967,16 +971,17 @@ test("pool-deposit-sent-end (EVM): a send that lands after the run, its Deposite
   await f.runEnd;
   assert.deepEqual(f.stages, []);
   assert.equal(await f.parked(), true, "the end's reads go on after the run: the app is never left at sent");
-  // it lands in a block not final yet: nothing told
-  ch.land(ch.c.sent[0]!); // its Deposited at block 100
-  ch.c.fin = 90n; // finalized only up to 90
+  // not landed yet: nothing told
   f.go();
   assert.equal(await f.parked(), true);
-  assert.deepEqual(f.stages, [], "a Deposited above the finalized block tells nothing");
-  ch.c.fin = 100n;
+  assert.deepEqual(f.stages, [], "no Deposited in the round tells nothing");
+  // it lands in a block not final yet: filled at once (card evm-money-shows-and-spends-at-once)
+  ch.land(ch.c.sent[0]!);
+  ch.c.events.at(-1)!.block = 100n; // the newest agreed block
+  ch.c.fin = 90n; // finalized only up to 90
   f.go();
   assert.equal(await f.staged(1), true);
-  assert.deepEqual(f.stages, ["filled"]);
+  assert.deepEqual(f.stages, ["filled"], "a Deposited above the finalized block, in the round, is filled");
   assert.equal(ch.c.sent.length, 1, "never sent again");
 });
 

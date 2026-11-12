@@ -153,7 +153,7 @@ test("without the chain's EVM pin, a landed note of that pool opens no queue and
   assert.equal(prover.log.length, 0);
 });
 
-test("a state read settles the EVM pool's RESERVED notes on the chain's sync: held while its release can land, spent with its change once final, freed past the deadline", async () => {
+test("a state read settles the EVM pool's RESERVED notes on the chain's sync: spent with its change once the newest agreed block holds its release, held while it can land, freed past the deadline", async () => {
   const deadlineMs = 1_800_000_210_000n;
   const reserve = async (ns: NoteStore) => {
     const n = await landed(ns);
@@ -163,7 +163,8 @@ test("a state read settles the EVM pool's RESERVED notes on the chain's sync: he
   };
   const deposit = ev(10n, { kind: "deposit", state: noteCommitment(RUNG, L0, P(D0)), label: L0, value: RUNG, precommitment: P(D0) });
   const release = ev(20n, { kind: "buy", state: noteCommitment(RUNG - 4n * 10n ** 14n, L0, P(C0)), value: 4n * 10n ** 14n, nullifier: noteSecrets(SEED64, D0).nullifierHash });
-  const run = async (round: { fin: { number: bigint; timestamp: bigint }; events: EvmPoolEvent[] }) => {
+  // `at`: the time of the newest agreed block (40), which settles; `fin`: the finalized block, which only marks landings
+  const run = async (round: { fin: { number: bigint; timestamp: bigint }; at: bigint; events: EvmPoolEvent[] }) => {
     const { w, ns } = await wallet();
     const id = await reserve(ns);
     let reads = 0;
@@ -171,27 +172,29 @@ test("a state read settles the EVM pool's RESERVED notes on the chain's sync: he
       prover: { vault: signalsProver(), stop: () => {} },
       evmPin: (c) => (c === "base" ? PIN : undefined),
       evmRpcs: unread,
-      evmSync: () => ({ events: async () => (reads++, { ...round, anchor: { number: 40n, hash: "", timestamp: 0n, baseFeePerGas: null }, fin: { ...round.fin, hash: "", baseFeePerGas: null } }) }),
+      evmSync: () => ({ events: async () => (reads++, { ...round, anchor: { number: 40n, hash: "", timestamp: round.at, baseFeePerGas: null }, fin: { ...round.fin, hash: "", baseFeePerGas: null } }) }),
       evmQueuePool: () => fakeEvmPool(),
     });
     await t.stateRead();
     return { ns, id, reads, list: await ns.list() };
   };
-  // the release in a block above the finalized anchor: held
-  const tail = await run({ fin: { number: 15n, timestamp: 1_800_000_100n }, events: [deposit, release] });
+  // the release in a block above the finalized one, at or under the newest agreed block: SPENT at once, its change
+  // marked with the release's block (card evm-money-shows-and-spends-at-once)
+  const tail = await run({ fin: { number: 15n, timestamp: 1_800_000_100n }, at: 1_800_000_100n, events: [deposit, release] });
   assert.equal(tail.reads, 1);
-  assert.equal((await tail.ns.get(tail.id))!.state, "RESERVED");
+  assert.equal((await tail.ns.get(tail.id))!.state, "SPENT");
+  assert.equal((await tail.ns.landings()).get(tail.list.find((n) => refKey(n.ref) === refKey(C0))!.id), 20n);
   // final: SPENT, with its change note at the release's leaf
-  const spent = await run({ fin: { number: 30n, timestamp: 1_800_000_300n }, events: [deposit, release] });
+  const spent = await run({ fin: { number: 30n, timestamp: 1_800_000_300n }, at: 1_800_000_300n, events: [deposit, release] });
   assert.equal((await spent.ns.get(spent.id))!.state, "SPENT");
   const change = spent.list.find((n) => refKey(n.ref) === refKey(C0));
   assert.equal(change?.parent, spent.id);
   assert.equal(change?.leaf?.leafIndex, 1n);
-  // no release, the final block's time past the deadline: freed
-  const freed = await run({ fin: { number: 30n, timestamp: 1_800_000_211n }, events: [deposit] });
+  // no release, the newest agreed block's time past the deadline: freed
+  const freed = await run({ fin: { number: 30n, timestamp: 1_800_000_100n }, at: 1_800_000_211n, events: [deposit] });
   assert.ok(["UNSPENT", "HELD"].includes((await freed.ns.get(freed.id))!.state), "freed, and proved again by a queue that is open");
-  // no release, the final block's time at the deadline: held
-  const at = await run({ fin: { number: 30n, timestamp: 1_800_000_210n }, events: [deposit] });
+  // no release, the newest agreed block's time at the deadline: held
+  const at = await run({ fin: { number: 30n, timestamp: 1_800_000_100n }, at: 1_800_000_210n, events: [deposit] });
   assert.equal((await at.ns.get(at.id))!.state, "RESERVED");
 });
 
@@ -207,7 +210,7 @@ async function reserved(ns: NoteStore): Promise<string> {
 }
 const DEPOSIT = ev(10n, { kind: "deposit", state: noteCommitment(RUNG, L0, P(D0)), label: L0, value: RUNG, precommitment: P(D0) });
 /** A round past the deadline with no release: the note it settles is freed. */
-const FREEING = { fin: { number: 30n, timestamp: 1_800_000_300n, hash: "", baseFeePerGas: null }, anchor: { number: 40n, hash: "", timestamp: 0n, baseFeePerGas: null }, events: [DEPOSIT] };
+const FREEING = { fin: { number: 30n, timestamp: 1_800_000_300n, hash: "", baseFeePerGas: null }, anchor: { number: 40n, hash: "", timestamp: 1_800_000_300n, baseFeePerGas: null }, events: [DEPOSIT] };
 /** A sync whose rounds wait until `go()` (or their signal's abort): `started` counts the rounds begun. */
 function slowSync() {
   let started = 0;
