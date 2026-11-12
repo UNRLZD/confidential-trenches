@@ -79,7 +79,7 @@ import { blockhashOf, blockhashRead, blockhashValid, pastOnBoth, readBack, readB
 import { afterOf, clockOf, keptReads, READ_WAIT, readWaits, forgetYoung, solanaSaleReads, solanaStableReads, tapDone, tapWaits, waitsOn, waitUnless, youngReads, type ReadWaits } from "./read-waits.ts";
 import { throttleWaitMs } from "../../wallet/src/throttle.ts";
 import { fromRecord, timedStore, TRADE_STORE_MS, tradeLock, type TradeStore } from "./trade.ts";
-import { checkSolanaSell, checkSolanaSweep, checkSolanaTeardownFrames, PoolRuleRefused, poolUnits, signSolana, SOLANA_POOL_CU_LIMIT_MAX, SOLANA_POOL_MIN_DEPOSIT, SOLANA_POOL_SELL_RESERVE_MAX, SOLANA_SWEEP_OWED_MAX, solanaDepositRents, solanaSellAfterFull, solanaSellCloses, solanaSweepFloor, solanaSweepKeep, type PoolAsk, type SolanaDepositHeld, type SolanaSellClose } from "./rules/pool.ts";
+import { checkSolanaSell, checkSolanaSweep, checkSolanaTeardownFrames, PoolRuleRefused, poolUnits, signSolana, SOLANA_POOL_CU_LIMIT_MAX, SOLANA_POOL_MIN_DEPOSIT, SOLANA_POOL_SELL_RESERVE_MAX, SOLANA_SWEEP_OWED_MAX, solanaDepositRents, solanaSellAfterFull, solanaSellCloses, solanaSweepCost, solanaSweepFloor, solanaSweepKeep, type PoolAsk, type SolanaDepositHeld, type SolanaSellClose } from "./rules/pool.ts";
 // the full sell's keep is priced by the sell's rule too (rules/pool.ts checkSolanaSell, review L1 of 38faee89)
 export { solanaSellAfterFull };
 import type { HostAnswer, HostRefusal, KindContext, Running } from "./api.ts";
@@ -1356,8 +1356,16 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later, w: ListedBuy
     // teardown after the fill closes the rest, as before). Never with a tree within SOLANA_POOL_NEXT_PAGE_WINDOW of its
     // page's end: the eight is priced there at a next page's opening that an insert landing first may not need, and what
     // it does not spend would stay on W under the sweep's floor; the form before the card sweeps it into the note
+    // Only where it costs less: W keeps rent(0) and what the venue pays over min out (the quote's expected out less min
+    // out), which the rent back sweeps only once it makes a note at the floor. Kept under one more deposit's cost, or
+    // past where the rent back sweeps it, the one deposit costs less; between the two, the form before (W's keep for the
+    // sweep, then every lamport into the note, W at 0) does
     const named = new Set(steps.flatMap((x) => x.accounts.map((a) => a.key)));
-    let closes: SolanaSellClose[] = !keeps && owed === 0 && later.bare !== true && !near(sizes.stateSize) && !near(sizes.labelSize) ? solanaSellClosesOf(w.address, token, tokens.program, tokens.accounts, named) : [];
+    const expected = reference?.pools.find((x) => x.address === (venue.kind === "pump-curve" ? venue.curve : venue.pool) && x.venue === venue.kind)?.expectedOut ?? minOut;
+    const strands = solanaRentMin(rent, 0) + (expected > minOut ? expected - minOut : 0n);
+    const sweepFloor = solanaSweepFloor(rent) > SOLANA_POOL_MIN_DEPOSIT ? solanaSweepFloor(rent) : SOLANA_POOL_MIN_DEPOSIT;
+    const cheaper = strands < solanaSweepCost(rent) || strands >= sweepFloor + solanaSweepCost(rent);
+    let closes: SolanaSellClose[] = !keeps && owed === 0 && cheaper && later.bare !== true && !near(sizes.stateSize) && !near(sizes.labelSize) ? solanaSellClosesOf(w.address, token, tokens.program, tokens.accounts, named) : [];
     const sixFits = (cs: readonly SolanaSellClose[]): boolean => wireOf(solanaCompileV0(w.address, [...budgetIxs(budget), ...steps, ...solanaSellCloses(w.address, cs), depositIx(program, pool, w.address, sizes, pre, minOut, false)], bh.blockhash, []).message).length <= SOLANA_MAX_TX_BYTES;
     if (closes.length > 0 && !sixFits(closes)) closes = closes.filter((c) => c.kind === "token");
     if (closes.length > 0 && !sixFits(closes)) closes = [];

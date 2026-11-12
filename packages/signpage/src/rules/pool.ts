@@ -788,6 +788,9 @@ export function solanaDepositRents(rent: SolanaRent, sizes: { stateSize: number;
  * of the claim account its claim opens (rent(165)), and rent(0), so W stays an account; none when nothing is owed.
  */
 export const SOLANA_SWEEP_OWED_MAX = 2;
+/** What one more deposit of W's costs W outside the window of a page's end (card round-trip-costs-less): its fee, its
+ *  mark's rent and one entry's growth on each tree; the pool program never closes either. */
+export const solanaSweepCost = (rent: SolanaRent): bigint => SOLANA_LAMPORTS_PER_SIGNATURE + solanaRentMin(rent, SWEEP_MARK_LEN) + 2n * (solanaRentMin(rent, SWEEP_PAGE_ENTRY) - solanaRentMin(rent, 0));
 export const solanaSweepKeep = (rent: SolanaRent, owed: number): bigint =>
   owed === 0 ? 0n : solanaRentMin(rent, 0) + BigInt(owed) * (SOLANA_LAMPORTS_PER_SIGNATURE + solanaRentMin(rent, 165));
 
