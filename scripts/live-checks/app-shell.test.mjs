@@ -496,10 +496,13 @@ test("planted: a pair is down when every one of its RPCs failed a load, tagged o
   const b = outages([load(rpcs[0], "footer"), load(rpcs[1])], rows("warn", "warn"), "mainnet", on);
   assert.ok(refused(b, 2) && b.down.length === 0, JSON.stringify(b));
   assert.equal(outages([load(rpcs[0], "footer")], rows("ok", "ok"), "mainnet", on).kept.length, 0, "the footer read alone is let through");
-  // (c) both Solana pool RPCs fail with the solana row warn: refused; one alone is let through
-  const c = outages([load(pools.solana.rpcs[0]), load(pools.solana.rpcs[1])], rows("ok", "ok", "warn"), "mainnet", on);
-  assert.ok(refused(c, 2) && c.down.length === 0, JSON.stringify(c));
+  // (c) every Solana pool RPC fails with the solana row warn: refused; fewer (one, or two of its three, card
+  // verify-row-survives-one-provider: a pool's list is down only when all of it is, as an EVM list) are let through
+  assert.equal(pools.solana.rpcs.length, 3);
+  const c = outages(pools.solana.rpcs.map((u) => load(u)), rows("ok", "ok", "warn"), "mainnet", on);
+  assert.ok(refused(c, 3) && c.down.length === 0, JSON.stringify(c));
   assert.equal(outages([load(pools.solana.rpcs[1])], rows("ok", "ok", "warn"), "mainnet", on).kept.length, 0);
+  assert.equal(outages([load(pools.solana.rpcs[0]), load(pools.solana.rpcs[1])], rows("ok", "ok", "warn"), "mainnet", on).kept.length, 0);
   // a failed preflight line counts toward the pair as well as a failed load
   const cors = (u) => consoleLine(`Access to fetch at '${new URL(u).origin}/' from origin 'https://ct-app.unrealized.trade' has been blocked by CORS policy: Response to preflight request doesn't pass access control check: It does not have HTTP ok status.`, "https://ct-app.unrealized.trade/verify");
   assert.ok(refused(outages([cors(rpcs[0]), load(rpcs[1])], rows("warn", "warn"), "mainnet", on), 2));

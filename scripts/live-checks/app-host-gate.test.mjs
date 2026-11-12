@@ -3,7 +3,9 @@
 // wrangler 4.151.1 on a Mac, 2026-11-01, re-recorded for card page-evm-rpc-csp (the kit's EVM providers in connect-src:
 // apps/terminal/scripts/deploy.mjs --dry-run's build served by the same runtime, 2026-11-07), and again for card
 // verify-pools (the Solana pair Verify reads the pool program on: `pnpm --filter terminal build` served by the Pages
-// runtime of wrangler 4.151.1 on a Mac, 2026-11-08): PASS. beforeSolana: the good answer before card verify-pools: FAIL.
+// runtime of wrangler 4.151.1 on a Mac, 2026-11-08), and for card verify-row-survives-one-provider (Solana's spare,
+// public.rpc.solanavibestation.com: the same build and runtime, 2026-11-12): PASS. beforeSpare: the good answer before
+// card verify-row-survives-one-provider: FAIL. beforeSolana: the good answer before card verify-pools: FAIL.
 // beforeEvm: the good answer before card page-evm-rpc-csp: FAIL. liveBefore: the live APP_HOST read the same day before app-in-shell's
 // deploy (frame-ancestors 'none', frame-src SIGN_HOST, X-Frame-Options DENY): FAIL. The other bad answers are the good
 // one with 'wasm-unsafe-eval' added to script-src, and with frame-ancestors *: FAIL. predeploy: APP_HOST's real 522
@@ -53,7 +55,14 @@ test("recorded bad answer: the good build before card verify-pools (no Solana pa
   const r = judge(await read(undefined, replay(ANSWERS.beforeSolana)));
   assert.equal(r.ok, false);
   assert.deepEqual(r.lines.filter((l) => l.startsWith("BAD")), [`BAD CSP connect-src: "${connectOf(ANSWERS.beforeSolana)}", want "${WANT_CONNECT}"`]);
-  assert.ok(WANT_CONNECT.includes(" https://solana-rpc.publicnode.com https://solana.api.pocket.network https://rpc.mainnet.fastnear.com "));
+  assert.ok(WANT_CONNECT.includes(" https://solana-rpc.publicnode.com https://solana.api.pocket.network https://public.rpc.solanavibestation.com https://rpc.mainnet.fastnear.com "));
+});
+
+test("recorded bad answer: the good build before card verify-row-survives-one-provider (no Solana spare in connect-src): FAIL on connect-src alone", async () => {
+  const r = judge(await read(undefined, replay(ANSWERS.beforeSpare)));
+  assert.equal(r.ok, false);
+  assert.deepEqual(r.lines.filter((l) => l.startsWith("BAD")), [`BAD CSP connect-src: "${connectOf(ANSWERS.beforeSpare)}", want "${WANT_CONNECT}"`]);
+  assert.ok(!connectOf(ANSWERS.beforeSpare).includes("solanavibestation") && connectOf(ANSWERS.good).includes(" https://solana.api.pocket.network https://public.rpc.solanavibestation.com "));
 });
 
 test("recorded bad answer: the live APP_HOST before app-in-shell (not frameable by the shell, frames SIGN_HOST): FAIL", async () => {

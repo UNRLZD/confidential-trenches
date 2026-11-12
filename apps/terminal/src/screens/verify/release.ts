@@ -10,11 +10,16 @@
 // programdata, codeLen = so_len, codeSha256 = so_sha256) and contracts/pool-evm/deployments/<chain>.json (address =
 // contracts.PrivacyPoolSimple.address); each EVM code hash is the keccak256 of that address's eth_getCode in
 // scripts/live-checks/pool-evm-deploy-mainnet.answers.json (the deploy's read-back), the same on both of its RPCs.
-// scripts/live-checks/verify-pools.test.mjs holds every pin to those files. Each pair is two operators, each answering a
-// browser on the app's origin: Solana's publicnode (the signing page's SOLANA_PROVIDER_A, a side of the pool deploy
-// check's pair) and Pocket's gateway (whose Base and Robinhood gateways are in the kit's lists); Solana's own
-// api.mainnet-beta.solana.com answers any request with an Origin header 403 "Access forbidden" (read 2026-11-08 20:10Z
-// from the app's origin and in the harness), so a page cannot read it. Each EVM chain's list is the kit's read list
+// scripts/live-checks/verify-pools.test.mjs holds every pin to those files. Solana's list is three operators, each
+// answering a browser on the app's origin, read as two (pools.ts readPool, the walk the EVM lists use): publicnode (the
+// signing page's SOLANA_PROVIDER_A, a side of the pool deploy check's pair), Pocket's gateway (whose Base and Robinhood
+// gateways are in the kit's lists) and, as the spare, Solana Vibe Station's public RPC (card
+// verify-row-survives-one-provider: Pocket answered the page's getMultipleAccounts HTTP 400 in two app live runs in a
+// row on 12 Nov from GitHub's runners, and the fixed pair drew the row Unverified). The page's own request from the
+// app's origin, 12 Nov 23:45Z: publicnode and Vibe Station 200 with the same accounts and access-control-allow-origin
+// *, Pocket 200 from the Mac; OnFinality's public 429 "apply an API key", dRPC 400 "chain is not available on free
+// plan", omniatech 521. Solana's own api.mainnet-beta.solana.com answers any request with an Origin header 403 "Access
+// forbidden" (read 2026-11-08 20:10Z from the app's origin and in the harness), so a page cannot read it. Each EVM chain's list is the kit's read list
 // (evmReadProvidersOf(evmPoolVenues()[chain]), copied so the app bundles no venue table; test/verify-pools.test.ts holds
 // each equal to the kit's), two operators of it read (card device-evm-fee-read-walks-operators).
 import { VAULT_TOKEN_CODE_HASH, type NearNetwork } from "@blindfill/kit";
@@ -49,7 +54,7 @@ export const VERIFY_RELEASES: Readonly<Record<NearNetwork, VerifyRelease>> = {
     pools: {
       solana: {
         chain: "solana",
-        rpcs: ["https://solana-rpc.publicnode.com", "https://solana.api.pocket.network"],
+        rpcs: ["https://solana-rpc.publicnode.com", "https://solana.api.pocket.network", "https://public.rpc.solanavibestation.com"],
         pin: {
           program: "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF", // gitleaks:allow (a public program id)
           programdata: "EuoumSLYMugNL6TsEKRby4bYXH4EcEgwASFdWhWNBQxM", // gitleaks:allow (a public account id)
