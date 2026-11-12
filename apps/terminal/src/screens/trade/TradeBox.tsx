@@ -17,6 +17,9 @@ import {
   centsToDecimal,
   coinTapAgainMs,
   coinTapKey,
+  feeAskAmount,
+  feeShown,
+  type FeeRead,
   filledOut,
   buyPath,
   fmtUsd,
@@ -49,6 +52,9 @@ import type { SetPreview } from "./source.tsx";
 import { WORDS } from "./words.ts";
 import type { WordId } from "./words.ts";
 import "./trade.css";
+
+/** How long the typed amount rests before the Fee is asked for it [design: a keystroke's gap, so a typed number is one ask]. */
+const FEE_ASK_SETTLE_MS = 250;
 
 // S8 the trade box, the buy side (A2.3, app.md:1448 at research; 09-design-brief S8 "Desktop (1440), the trade
 // column"), drawn after R5's ticket (design/proto at design-lock-r5: assets/token.js U.ticket, trenches-1440.html's
@@ -213,6 +219,42 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
   const onPool = path === "pool";
   const price = onPool ? kit.poolPrice(chain) : null;
   const pool = onPool ? poolView(pools, chain, price) : null;
+  // Fee (card buy-spends-several-pieces; owner 12 Nov 13:40Z): the page's pool.buy.dry for the typed amount, its `cost`
+  // in USD; a dash until it answers for this coin, these proofs and this amount, never a guess
+  // asked once per amount the box rests on, keyed on the typed USD (never on a price tick); the price is read at the ask
+  const priceNow = useRef(price);
+  priceNow.current = price;
+  const [feeRead, setFeeRead] = useState<FeeRead | null>(null);
+  useEffect(() => {
+    const ask = request.current;
+    const feeAmount = coinKey !== null ? feeAskAmount(amount, priceNow.current) : null;
+    if (coinKey === null || feeAmount === null || !ask) return;
+    let live = true;
+    let t: ReturnType<typeof setTimeout> | undefined;
+    let downs = 0;
+    const once = (): void => {
+      try {
+        ask("pool.buy.dry", { chain: "solana", token, amount: feeAmount }).outcome.then(
+          (o) => {
+            if (!live) return;
+            if (o.ok) return void (o.result.cost !== undefined && setFeeRead({ key: coinKey, cost: o.result.cost }));
+            const again = coinTapAgainMs(o.error.code);
+            if (again !== null && (o.error.code !== "down" || downs++ < 3)) t = setTimeout(once, again);
+          },
+          () => {},
+        );
+      } catch {
+        // no client to ask: the dash stays
+      }
+    };
+    // typing settles before the page is asked: one ask per amount the box rests on
+    t = setTimeout(once, FEE_ASK_SETTLE_MS);
+    return () => {
+      live = false;
+      clearTimeout(t);
+    };
+  }, [coinKey, amount, kit.request !== null]);
+  const fee = onPool ? feeShown(feeRead, coinKey, amount, price) : null;
   // the proof's state reads state.pools alone: it draws with no price
   const proof = onPool ? proofStatus(pools, chain) : "none";
   // Bal: the vault path's money (Cash less the SOL and ETH pools, useOffPool) on a chain with no pool, the pool's on a
@@ -330,7 +372,7 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
     buy(p);
   }
 
-  return { chain, token, slippageBps, src, account, signedOut, text, setText, phase, route, dismissed, setDismissed, amount, pools, path, onPool, price, proof, balance, max, askable, running, ready, buy, presets, presetOff, tapPreset, preview, sell, side, setSide: pickSide, held, heldNow, onSell };
+  return { chain, token, slippageBps, src, account, signedOut, text, setText, phase, route, dismissed, setDismissed, amount, pools, path, onPool, price, proof, balance, max, fee, feeShown: coinKey !== null, askable, running, ready, buy, presets, presetOff, tapPreset, preview, sell, side, setSide: pickSide, held, heldNow, onSell };
 }
 
 /** A trade state as useTrade gives it. */
@@ -360,7 +402,7 @@ export function TradeFillToast({ t, symbol }: { t: Trade; symbol: string }) {
 
 /** The box drawn from a trade state; any number of views of one state draw the same trade. */
 export function TradeView({ t, symbol, footer, toast = true }: { t: Trade; symbol: string; footer?: ReactNode; toast?: boolean }) {
-  const { chain, token, slippageBps, src, account, signedOut, text, setText, phase, route, dismissed, amount, pools, path, onPool, price, proof, balance, max, askable, running, ready, buy, presets, presetOff, tapPreset, preview } = t;
+  const { chain, token, slippageBps, src, account, signedOut, text, setText, phase, route, dismissed, amount, pools, path, onPool, price, proof, balance, max, fee, feeShown, askable, running, ready, buy, presets, presetOff, tapPreset, preview } = t;
   const { kit } = src;
   const { setOpen: openSignin } = useSigninSheet();
   const [tab, setTab] = useState<OrderTab>("market");
@@ -450,6 +492,12 @@ export function TradeView({ t, symbol, footer, toast = true }: { t: Trade; symbo
         <span><W id="receive" /></span>
         <span data-pending={pending || undefined} data-testid="trade-receive">{est}</span>
       </div>
+      {feeShown && (
+        <div className="trb-receive" data-testid="trade-cost">
+          <span><W id="buyFee" /></span>
+          <span>{fee === null ? "—" : fmtUsd(fee)}</span>
+        </div>
+      )}
       <div className="trb-warn" data-testid="trade-max">
         {phase.k === "ended" ? (
           <EndLine phase={phase} side="buy" part={kit.part?.(phase.id) ?? null} />

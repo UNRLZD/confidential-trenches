@@ -3,11 +3,12 @@ import { Fragment, useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router";
 import type { RouteId } from "../../routes/routes.ts";
 import { ROUTES } from "../../routes/routes.ts";
+import { DotMark } from "./DotMark.tsx";
 import { HopLine } from "./HopLine.tsx";
 import { Icon } from "./Icon.tsx";
 import type { IconName } from "./Icon.tsx";
 import { useBalance } from "../portfolio/source.tsx";
-import { restoreModel, showRestore, signinWays, usd } from "./model.ts";
+import { restoreModel, restoreView, showRestore, signinWays, usd } from "./model.ts";
 import type { RestoreModel } from "./model.ts";
 import { useSigninSheet, useSigninSource } from "./source.tsx";
 import { text, W } from "./Word.tsx";
@@ -19,8 +20,9 @@ import "./signin.css";
 // way (CH-011); the 12 words and the key ceremony live only there. A way the page refuses or does not answer shows
 // HopLine under it (card app-hop-refused). After a sign-in that restores an account (Face ID or
 // the 12 words, or the wallet way's "I already have one"), the sheet shows the `restore` operation from `state`:
-// scanning with the balance growing, done, nothing found, or offline with Retry. A new account shows no sheet: the
-// header goes to S1.3 with the Backup dot until the 12 words are saved.
+// scanning with the balance growing, done, nothing found, or offline with Retry, drawn as the amount under the dot
+// mark (card restore-notice-redraw, direction A, owner pick 12 Nov 18:55Z). A new account shows no sheet: the header
+// goes to S1.3 with the Backup dot until the 12 words are saved.
 
 const WAYS: Record<SigninWay, { word: WordId; icon: IconName }> = {
   passkey: { word: "usePasskey", icon: "key" },
@@ -70,8 +72,12 @@ export function SigninSheet() {
         <div className="grab">
           <i />
         </div>
-        <div className="sgn-hd">
-          <h2 id="sgn-title">{title(restoring ? r : null)}</h2>
+        <div className={restoring ? "sgn-hd bare" : "sgn-hd"}>
+          {!restoring && (
+            <h2 id="sgn-title">
+              <W id="signIn" />
+            </h2>
+          )}
           <button type="button" className="sgn-x" aria-label={text("close")} onClick={close}>
             <Icon name="x" size={14} stroke={1.4} />
           </button>
@@ -80,13 +86,6 @@ export function SigninSheet() {
       </div>
     </div>
   );
-}
-
-function title(r: RestoreModel | null) {
-  if (!r) return <W id="signIn" />;
-  if (r.kind === "nothing") return <W id="nothingFound" />;
-  if (r.kind === "done") return <Icon name="check" size={18} stroke={1.5} />;
-  return <W id="restoring" />;
 }
 
 const restoreState = (r: RestoreModel) => ({ scanning: "S19.1", done: "S19.3", nothing: "S19.4", offline: "S19.5" })[r.kind];
@@ -125,16 +124,26 @@ function Ways({ route }: { route: RouteId }) {
   );
 }
 
-/** S19: the balance as the scan finds it, then done, nothing found, or offline with Retry (a new `restore`). */
+/**
+ * S19 (direction A): the dot mark (DotMark), the amount as the scan finds it, and under it one word (Restoring, Nothing
+ * found) or Offline with Retry (a new `restore`). Done is the tick and the amount, no word. The amount names the
+ * dialog. Each state draws the moment `state` says so: no transition holds the end back.
+ */
 function Restore({ r, retry, off }: { r: RestoreModel; retry: () => void; off: boolean }) {
+  const v = restoreView(r);
   return (
     <div className="sgn-restore" data-restore={r.kind}>
-      <div className={r.kind === "nothing" ? "rbal dim" : "rbal"} data-balance={usd(r.cents)}>
+      <DotMark kind={v.mark} />
+      <div id="sgn-title" className={r.kind === "nothing" ? "rbal dim" : "rbal"} data-balance={usd(r.cents)}>
         {usd(r.cents)}
       </div>
-      {r.kind === "scanning" && <div className="rbar" aria-hidden="true"><i /></div>}
+      {v.word && (
+        <div className="rword" data-word={v.word}>
+          <W id={v.word} />
+        </div>
+      )}
       {r.kind === "offline" && (
-        <div className="rline row">
+        <div className="rline">
           <span className="warn">
             <W id="offline" />
           </span>

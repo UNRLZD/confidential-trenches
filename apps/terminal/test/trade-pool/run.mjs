@@ -50,6 +50,7 @@ const SCHEMES = ["dark", "light"];
 // request one tap sends (null: none)
 const BUYS = [
   ["sol-ready", "pool=sol-ready&amt=0.16", "pool", "ready", "Bal $0.93", "Proof ready Max $0.16", true, { kind: "pool.buy", params: { chain: "solana", token: MINT, amount: "0.001720236", slippage_bps: 1000 } }],
+  ["sol-feedown", "pool=sol-ready&amt=0.16&fee=down", "pool", "ready", "Bal $0.93", "Proof ready Max $0.16", true, { kind: "pool.buy", params: { chain: "solana", token: MINT, amount: "0.001720236", slippage_bps: 1000 } }],
   ["sol-over", "pool=sol-ready&amt=0.17", "pool", "ready", "Bal $0.93", "Proof ready Max $0.16", false, null],
   ["sol-making", "pool=sol-making&amt=0.16", "pool", "making", "Bal $0.93", "Making proof", false, null],
   ["base-chunk", "pool=base-ready&amt=3.50", "pool", "ready", "Bal $10.50", "Proof ready Max $3.50", true, { kind: "pool.buy", params: { chain: "base", token: EVM, amount: "0.001", slippage_bps: 1000 } }],
@@ -57,14 +58,17 @@ const BUYS = [
   ["base-making", "pool=base-making&amt=3.50", "pool", "making", "Bal $10.50", "Making proof", false, null],
   ["vault", "amt=25", "vault", null, "Bal $73.18", "Max $100", true, { kind: "buy", params: { chain: "solana", token: MINT, side: "buy", amount: "25.00", slippage_bps: 1000 } }],
 ];
+// the Fee row: on a Solana pool buy whose Max the box reads for the coin (coinTapKey), the typed amount's cost; none else
+const FEE = { "sol-ready": "Fee $0.14", "sol-feedown": "Fee —", "sol-over": "Fee $0.14", "sol-making": null, "base-chunk": null, "base-other": null, "base-making": null, vault: null };
 // the amount field marked wrong: over one tap, or not a whole chunk on Base; never while a proof is still making (the
 // amount is not what is wrong) or on an amount the pool can take
-const BAD = { "sol-ready": "false", "sol-over": "true", "sol-making": "false", "base-chunk": "false", "base-other": "true", "base-making": "false", vault: "false" };
+const BAD = { "sol-ready": "false", "sol-feedown": "false", "sol-over": "true", "sol-making": "false", "base-chunk": "false", "base-other": "true", "base-making": "false", vault: "false" };
 // the presets row as data-preset:disabled:text per button: the four on Solana (all over one tap's most on the pool, $100
 // over the vault's max); on Base the chunk's one button, "—" and off while no proof is ready
 const FOUR_OFF = "10.00:true:$10 25.00:true:$25 50.00:true:$50 100.00:true:$100";
 const PRESET_ROW = {
   "sol-ready": FOUR_OFF,
+  "sol-feedown": FOUR_OFF,
   "sol-over": FOUR_OFF,
   "sol-making": FOUR_OFF,
   "base-chunk": "3.50:false:$3.50",
@@ -189,9 +193,18 @@ try {
         }
         await common(page, w, tag, external, dialogs);
         if (SHOTS) (await page.screenshot({ path: path.join(SHOTS, `${name}-${w.name}-${scheme}.png`) }), shots++);
-        // the box's own read of this coin's Max (pool.buy.dry): one a state at most, on Solana only, and never a buy
+        // the Fee row (owner 12 Nov 13:40Z, card buy-spends-several-pieces): on a Solana pool buy only, the cost of the typed
+        // amount in USD, rounded up (0.0014 SOL at $93.01 is $0.1302: $0.14); a dash while it is not read
+        await page.clock.runFor(300);
+        const feeEl = page.locator('[data-testid="trade-cost"]');
+        const gotFee = (await feeEl.count()) ? await settle(async () => norm(await feeEl.innerText()), FEE[name]) : null;
+        check(gotFee === FEE[name], `${tag}: the Fee row "${gotFee}", want "${FEE[name]}"`);
+        // the box's own reads (pool.buy.dry): this coin's Max, one a state at most, and the Fee of the typed amount, one an
+        // amount; on Solana only, and never a buy
         const reads = await page.evaluate(() => window.__reads);
-        check(reads.length <= 1 && reads.every((c) => c.params.chain === "solana" && name.startsWith("sol")), `${tag}: the Max reads ${JSON.stringify(reads)}`);
+        const maxReads = reads.filter((c) => c.params.amount === undefined);
+        const feeReads = reads.filter((c) => c.params.amount !== undefined);
+        check(maxReads.length <= 1 && feeReads.length <= 1 && reads.every((c) => c.params.chain === "solana" && name.startsWith("sol")), `${tag}: the Max and Fee reads ${JSON.stringify(reads)}`);
         // one tap: the ask the box's own checks passed, or nothing
         await cta.click({ force: true });
         await page.clock.runFor(100);

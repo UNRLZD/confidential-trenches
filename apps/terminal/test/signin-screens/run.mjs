@@ -39,12 +39,14 @@ const SHOTS_LIST = [
   { id: "S1.4-balance", f: "balance", expect: (w) => `${hdr(w)}[data-header="S1.4"]` },
   { id: "S1.16-menu", f: "new-unsaved", act: "menu", expect: () => '.amenu [data-control="acct-backup"]' },
   { id: "S1.16-menu-wallet", f: "wallet-new", act: "menu", expect: () => ".amenu [data-wallet-label]" },
-  { id: "S19.1-scanning", f: "scanning", expect: () => '.sgn[data-state="S19.1"]' },
-  { id: "S19.2-growing", f: "growing", expect: () => '.sgn[data-state="S19.1"] [data-balance="$41.06"]' },
-  { id: "S19.3-done", f: "growing", to: ["done"], expect: () => '.sgn[data-state="S19.3"]' },
-  { id: "S19.4-nothing-found", f: "scanning", to: ["nothing"], expect: () => '.sgn[data-state="S19.4"]' },
-  { id: "S19.5-offline", f: "offline", expect: () => '.sgn[data-state="S19.5"]' },
-  { id: "wallet-restored-S19.3", f: "scanning", to: ["wallet-restored"], expect: () => '.sgn[data-state="S19.3"]' },
+  // S19 (card restore-notice-redraw, direction A): each state's dot mark, its amount and its one word (none when done)
+  { id: "S19.1-scanning", f: "scanning", expect: () => '.sgn[data-state="S19.1"]', s19: { mark: "run", bal: "$0.00", word: "Restoring" } },
+  { id: "S19.2-growing", f: "growing", expect: () => '.sgn[data-state="S19.1"] [data-balance="$41.06"]', s19: { mark: "run", bal: "$41.06", word: "Restoring" } },
+  { id: "S19.3-done", f: "growing", to: ["done"], expect: () => '.sgn[data-state="S19.3"]', s19: { mark: "done", bal: "$73.18", word: null } },
+  { id: "S19.4-nothing-found", f: "scanning", to: ["nothing"], expect: () => '.sgn[data-state="S19.4"]', s19: { mark: "nothing", bal: "$0.00", word: "Nothing found" } },
+  { id: "S19.5-offline", f: "offline", expect: () => '.sgn[data-state="S19.5"]', s19: { mark: "off", bal: "$12.50", word: null, retry: "on" } },
+  { id: "S19.5-offline-money-off", f: "offline-off", expect: () => '.sgn[data-state="S19.5"]', s19: { mark: "off", bal: "$12.50", word: null, retry: "off" } },
+  { id: "wallet-restored-S19.3", f: "scanning", to: ["wallet-restored"], expect: () => '.sgn[data-state="S19.3"]', s19: { mark: "done", bal: "$73.18", word: null } },
   { id: "wallet-restored-S1.4", f: "scanning", to: ["wallet-restored"], act: "close", expect: (w) => `${hdr(w)}[data-header="S1.4"]` },
 ];
 
@@ -88,6 +90,45 @@ async function openAt(browser, w, scheme, f, p) {
   return { ctx, page, external };
 }
 
+// S19's faults on one shot: the mark and the amount drawn and in view, the word (or none: done has no title word and
+// no sentence), the sheet's own words only, and Retry on or drawn off (text-3) with money off
+const TEXT_3 = "rgb(110, 110, 110)";
+async function s19Faults(page, want) {
+  const got = await page.evaluate(() => {
+    const box = document.querySelector(".sgn-box");
+    const r = box?.querySelector(".sgn-restore");
+    const mark = r?.querySelector(".rn-mark");
+    const mr = mark?.getBoundingClientRect();
+    const retry = r?.querySelector(".retry");
+    return {
+      mark: mark?.getAttribute("data-mark") ?? null,
+      markW: mr ? Math.round(mr.width) : 0,
+      inView: !!mr && mr.top >= 0 && mr.bottom <= innerHeight,
+      tick: r?.querySelectorAll(".rn-tick circle").length ?? 0,
+      bal: r?.querySelector("[data-balance]")?.getAttribute("data-balance") ?? null,
+      named: document.getElementById("sgn-title")?.textContent ?? null,
+      word: r?.querySelector(".rword")?.textContent ?? null,
+      h2: box?.querySelectorAll("h2").length ?? -1,
+      text: box?.textContent ?? "",
+      retry: retry ? { disabled: retry.disabled, color: getComputedStyle(retry).color } : null,
+    };
+  });
+  const f = [];
+  if (got.mark !== want.mark) f.push(`mark ${got.mark}, want ${want.mark}`);
+  if (got.markW < 90) f.push(`mark ${got.markW} px wide, under 90`);
+  if (!got.inView) f.push("mark not in view");
+  if ((want.mark === "done") !== got.tick > 0) f.push(`${got.tick} tick dots in mark ${got.mark}`);
+  if (got.bal !== want.bal || got.named !== want.bal) f.push(`amount ${got.bal} (names the dialog: ${got.named}), want ${want.bal}`);
+  if (got.word !== want.word) f.push(`word ${JSON.stringify(got.word)}, want ${JSON.stringify(want.word)}`);
+  if (got.h2 !== 0) f.push(`${got.h2} title(s) over the notice`);
+  const extra = got.text.replace(want.bal, "").replace(want.word ?? "", "").replace(want.retry ? "Offline" : "", "").replace(want.retry ? "Retry" : "", "").trim();
+  if (extra) f.push(`other words on the notice: ${JSON.stringify(extra)}`);
+  if (!want.retry && got.retry) f.push("a Retry with no stall");
+  if (want.retry === "on" && (!got.retry || got.retry.disabled || got.retry.color === TEXT_3)) f.push(`Retry not on: ${JSON.stringify(got.retry)}`);
+  if (want.retry === "off" && (!got.retry || !got.retry.disabled || got.retry.color !== TEXT_3)) f.push(`Retry not drawn off with money off: ${JSON.stringify(got.retry)}`);
+  return f;
+}
+
 let BASE = "";
 const dir = await build();
 const server = await serve(dir);
@@ -109,6 +150,7 @@ try {
         if (s.act === "close") await page.locator(".sgn-x").click();
         const shown = await page.locator(s.expect(w.name)).first().isVisible().catch(() => false);
         check(shown, `${tag}: ${s.expect(w.name)} not visible`);
+        if (s.s19) for (const f of await s19Faults(page, s.s19)) check(false, `${tag}: ${f}`);
         const scroll = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
         check(scroll <= 0, `${tag}: horizontal scroll ${scroll}px`);
         check(external.length === 0, `${tag}: external requests ${external.join(" ")}`);
@@ -143,6 +185,40 @@ try {
     {
       const { ctx, page } = await openAt(browser, w, "dark", "balance", "/discover");
       check((await page.locator(".sgn").count()) === 0 && (await page.locator('[data-header="S1.1"]:visible').count()) === 0, `@${w.name}: signed in shows a way in`);
+      await ctx.close();
+    }
+    // S19's motion (card restore-notice-redraw): the arc sweeps with motion on and rests with reduced motion; the tick
+    // draws in the same frame the done state arrives, with no animation or transition on it (no wait)
+    for (const motion of ["no-preference", "reduce"]) {
+      const ctx = await browser.newContext({ viewport: w.viewport, deviceScaleFactor: w.deviceScaleFactor, isMobile: w.isMobile, hasTouch: w.hasTouch, colorScheme: "dark", reducedMotion: motion });
+      const page = await ctx.newPage();
+      await page.goto(`${BASE}/?f=growing&path=%2Fdiscover`);
+      const swept = await page.waitForSelector(".rn-arc circle", { timeout: 5_000 }).then(() => true, () => false);
+      check(swept, `@${w.name} ${motion}: no sweep (.rn-arc) while the restore runs`);
+      if (!swept) {
+        await ctx.close();
+        continue;
+      }
+      const sweep = await page.evaluate(() => [...document.querySelectorAll(".rn-arc circle")].map((c) => c.getAnimations().length));
+      const moving = sweep.filter((n) => n > 0).length;
+      check(motion === "reduce" ? moving === 0 : moving === sweep.length, `@${w.name} ${motion}: ${moving} of ${sweep.length} arc dots animate`);
+      const lit = await page.evaluate(() => [...document.querySelectorAll(".rn-arc circle")].filter((c) => Number(getComputedStyle(c).opacity) > 0.5).length);
+      check(lit > 10, `@${w.name} ${motion}: ${lit} arc dots lit`);
+      const end = await page.evaluate(
+        () =>
+          new Promise((done) => {
+            const t0 = performance.now();
+            new MutationObserver((_, o) => {
+              const tick = document.querySelector(".rn-tick");
+              if (!tick) return;
+              o.disconnect();
+              const mark = document.querySelector(".rn-mark");
+              done({ ms: performance.now() - t0, anims: mark.getAnimations({ subtree: true }).length, arc: !!document.querySelector(".rn-arc"), state: document.querySelector(".sgn")?.getAttribute("data-state") });
+            }).observe(document.body, { subtree: true, childList: true, attributes: true });
+            window.__fixture("done");
+          }),
+      );
+      check(end.state === "S19.3" && end.anims === 0 && !end.arc && end.ms < 100, `@${w.name} ${motion}: done drew ${JSON.stringify(end)}`);
       await ctx.close();
     }
     // Sync starts restore; Retry on S19.5 starts restore

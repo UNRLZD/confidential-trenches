@@ -106,6 +106,9 @@ export const WORDS = {
   wallets: ok("Wallets", "owner 8 Nov 07:55Z, kept; drafted on card app-export-every-wallet: the heading over the wallets that hold money and no position (words-pending)"),
   // the exit plan cell and row, and the Orders route (card app-orders-coming-soon): orders are out of the plan for now
   soon: ok("Coming soon", "owner 10 Nov, owner-decisions row \"Order of the returned feature groups\": orders are out of the plan for now, the UI says Coming soon (card app-orders-coming-soon)"),
+  // the Positions tile's two parts (card app-faults-seen-on-122): drawn only there and on Allocation's Reserve tile
+  coins: ok("Coins", "owner 12 Nov 16:17:50Z, picks page LXQtQC9kZJmGNQxpQGGmow (picks/r123), owner-decisions row \"What sits behind the withdraw form, and where Portfolio shows the SOL an open buy holds\": \"Coins\" for the coins part (over \"Tokens\")"),
+  reserve: ok("Reserve", "owner 12 Nov 16:17:50Z, picks page LXQtQC9kZJmGNQxpQGGmow (picks/r123), owner-decisions row \"What sits behind the withdraw form, and where Portfolio shows the SOL an open buy holds\": \"Reserve\" for the SOL held (over \"Refund\", \"Held\")"),
 } as const satisfies Record<string, Word>;
 
 export type WordId = keyof typeof WORDS;

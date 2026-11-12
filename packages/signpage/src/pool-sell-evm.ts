@@ -77,7 +77,7 @@ import { jOf } from "../../wallet/src/pool/queue.ts";
 import { WALLET_SEED_LOCK, type WalletStore } from "@blindfill/wallet/store";
 import { checkEvmAuthorization, checkEvmSell, checkEvmSellSim, PoolRuleRefused, signEvmAuthorization, signEvmSell, signEvmSellSim, tokenDecimalsOf, type PoolAsk, type PoolContext } from "./rules/pool.ts";
 import { EvmSendBusy, EvmSendRefused, evmBuyCalldataRead, evmSellSelector, evmDepositedRead, evmHeadNumber, evmSellCalldata, evmSellSend, evmSellVerdict, type EvmDepositedRead, type EvmSellAuthorization, type EvmSellVerdict } from "./evm-send.ts";
-import { EVM_BUY_HEAD_SPREAD, EVM_BUY_LAG_MS, EVM_POSITION_COSTS_KEY, type EvmHolding } from "./pool-buy-evm.ts";
+import { EVM_BUY_HEAD_SPREAD, EVM_BUY_LAG_BLOCKS, EVM_BUY_LAG_MS, EVM_POSITION_COSTS_KEY, type EvmHolding } from "./pool-buy-evm.ts";
 import { ERC20_DECIMALS, keptTokenDecimals, type PoolRpc } from "./pool-kinds.ts";
 import { stageOfLegs, type PoolSellAnswer, type PoolSellLeg } from "./pool-sell.ts";
 import { clockOf as readClockOf, readWaits, stopOf, tapDone, tapWaits, waitsOn, waitUnless, type ReadWaits } from "./read-waits.ts";
@@ -109,7 +109,7 @@ export const EVM_SELL_USED_GRACE_MS = 600_000;
 /** Past every deadline the reads slow to this, until an end. */
 export const EVM_SELL_SLOW_WAIT_MS = 30_000;
 /** The read-back starts this many blocks under the lower newest block read before the send (the buy's margin). */
-export const EVM_SELL_LAG_BLOCKS = 100n;
+export const EVM_SELL_LAG_BLOCKS = EVM_BUY_LAG_BLOCKS;
 /** A busy wait's slices: it ends within one once a sign out starts. */
 const STOP_POLL_MS = 250;
 /** SellDelegate.nonce() (contracts/pool-evm/src/SellDelegate.sol:127), called on W. */

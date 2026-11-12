@@ -52,23 +52,24 @@ import { holdHosts, hostLane, laneFetch, stopHostLaneWaits } from "../../wallet/
 import { HELPER_FETCH_INIT, HELPER_V1_PATHS } from "../../kit/src/helper/v1.ts";
 import type { VaultProver } from "../../kit/src/prover/prove.ts";
 import { WALLET_SEED_LOCK, type WalletStore } from "@blindfill/wallet/store";
-import { openNoteStore, readNotes, readReservedMarks, type NoteStore } from "../../wallet/src/notes/store.ts";
+import { openNoteStore, readNotes, readReservedMarks, type NoteRecord, type NoteStore } from "../../wallet/src/notes/store.ts";
 import { chainNow, type Pool, type ReadyProof } from "../../wallet/src/pool/pool.ts";
 import { openProofQueue, type ProofQueue, type QueuePass } from "../../wallet/src/pool/queue.ts";
 import { poolDepositKind, type PoolDepositFrom, type PoolDepositHost } from "./pool-deposit.ts";
 import { proverHost } from "./prover-host.ts";
-import { SOLANA_PUBLIC_SEAT, TRADE_HELPER } from "./trade.ts";
-import { SOL_POOL_TABLES, SOL_POOLS, solanaNow, solanaPool, solanaPoolOf, type SolanaFeeAnswer, type SolanaPoolPin, type SolanaReleaseRequest } from "../../wallet/src/pool/solana.ts";
-import { SOL_MARK_READ_BATCH, SOL_MARK_READ_BATCH_MAX, solanaSettleReserved, solanaSettleSpent, type SolanaPoolCache } from "../../wallet/src/pool/solana-restore.ts";
+import { SOLANA_PUBLIC_SEAT, TRADE_HELPER, type TradeStore } from "./trade.ts";
+import { SOL_EPOCH_MS, SOL_LIFE_MS, SOL_POOL_TABLES, SOL_POOLS, solanaNow, solanaPool, solanaPoolOf, type SolanaFeeAnswer, type SolanaPoolPin, type SolanaReleaseRequest } from "../../wallet/src/pool/solana.ts";
+import { SOL_MARK_READ_BATCH, SOL_MARK_READ_BATCH_MAX, solanaSettleReserved, solanaSettleSpent, solanaSettleSpentSet, type SolanaPoolCache } from "../../wallet/src/pool/solana-restore.ts";
 import { POOL_TESTNET } from "../../wallet/src/pool/network.ts";
 import { askWhileBusy, type BusyOpts } from "../../wallet/src/busy.ts";
-import { lateBuyEnd, POOL_SEND_BUSY_WAIT_MS, PoolSendBusy, poolBuyKind, type PoolBuyHost } from "./pool-buy.ts";
+import { lateBuyEnd, POOL_SEND_BUSY_WAIT_MS, PoolSendBusy, PoolSendRefused, poolBuyKind, resumePieces, type OwedPieces, type PiecesOwed, type PoolBuyHost } from "./pool-buy.ts";
+import { heldWs, ownWs } from "./pool-found.ts";
 import { boughtSincePass, keptHeldOf, type StoreWs } from "./pool-sell-dry.ts";
 import { BUY_MINTS_KEY, buyMints, keptSells, owedRentBacks, poolSellKind, resumeRentBacks, settleDeadSellOps, settlePoolSells, settleSellOps, type PoolSellKindHost } from "./pool-sell.ts";
 import { derivedBuyWallets, evmHelperKeyedRpc, evmHelperRpc, solanaHelperHoldings, solanaHoldingsAt, spentNotesOf, wantedBuyWallets, type BuyWallet, type HoldingsReader, type ListedBuyWallet } from "../../wallet/src/pool/buy-wallets.ts";
 import { keptListed, keptPositions, POSITION_COSTS_KEY, POSITIONS_KEPT_KEY, POSITIONS_SOLD_KEY, POSITIONS_SOLD_TX_KEY, POSITIONS_UNLANDED_KEY, positionsCache, positionsPass, recordBoughtOut, solanaAssetHeld, recordPoolBuy, routeInto, type BuyRecordStore, type FoundWallet, type PoolBuyFacts, type Position, type PositionCosts } from "./positions.ts";
 import { evmStoredHold } from "../../wallet/src/pool/evm-hold-store.ts";
-import { EVM_CHAIN_IDS, EVM_EPOCH_MS, EVM_POOLS, evmNow, evmPair, evmRetryLag, evmPool as walletEvmPool, evmPoolScopeOf, evmTreeSync, type EvmFeeAnswer, type EvmPoolOf, type EvmPoolPin, type EvmPoolRequest, type EvmRpc, type EvmSyncHold, type EvmTreeSync } from "../../wallet/src/pool/evm.ts";
+import { EVM_CHAIN_IDS, EVM_EPOCH_MS, EVM_LIFE_MS, EVM_POOLS, evmNow, evmPair, evmRetryLag, evmPool as walletEvmPool, evmPoolScopeOf, evmTreeSync, type EvmFeeAnswer, type EvmPoolOf, type EvmPoolPin, type EvmPoolRequest, type EvmRpc, type EvmSyncHold, type EvmTreeSync } from "../../wallet/src/pool/evm.ts";
 import { evmSettleOpen, evmSettleReserved } from "../../wallet/src/pool/evm-settle.ts";
 import type { LandedRelease } from "../../wallet/src/pool/balances.ts";
 import { spendOwner } from "./pool-spend.ts";
@@ -83,7 +84,10 @@ import { checkPoolRequest, tokenDecimalsShown, type PoolAsk, type PoolChain, typ
 import type { HostAnswer, HostRefusal, KindContext, Running } from "./api.ts";
 import { readSolanaRent, solanaPoolFee } from "../../kit/src/trade/solana/pool-buy.ts";
 import type { PoolStatePrice, TxRef, WithdrawStage } from "../../kit/src/signpage/messages.ts";
-import { finishPoolOnward, runPoolWithdraw, solanaOnwardFee, solanaWithdrawMinPart, withdrawSources, type Arrivals, type HistoryPlaces, type PendingOnward } from "./pool-withdraw.ts";
+import { WITHDRAW_BOUNDARY_LAG_MS, finishPoolOnward, runPoolWithdraw, solanaOnwardFee, solanaWithdrawMinPart, withdrawSources, type Arrivals, type HistoryPlaces, type PendingOnward } from "./pool-withdraw.ts";
+import { EVM_WITHDRAW_BOUNDARY_LAG_MS, evmKeptOnwards, evmWithdrawFunds, finishEvmOnward, runEvmPoolWithdraw, type EvmFinishState, type EvmHeldOnW, type EvmPendingOnward, type EvmWithdrawHost } from "./pool-withdraw-evm.ts";
+import { evmPoolSend } from "./evm-send.ts";
+import { evmPoolVenues } from "../../kit/src/trade/evm/buy-unpinned.ts";
 import type { PoolFunds, PoolReady, PoolWithdrawFormDeps } from "./withdraw/pool-form.ts";
 import { EVM_POOL_HISTORY } from "../../kit/src/trade/evm/buy-unpinned.ts";
 import { solanaBuysAt, solanaHelperBuys } from "../../wallet/src/pool/buy-wallets.ts";
@@ -210,6 +214,25 @@ export const evmEpochFee = (at: { baseFeePerGas: bigint; depth: number; chainFee
 export const PAGE_SOL_PIN: SolanaPoolPin | undefined = POOL_TESTNET ? SOL_POOLS.devnet : SOL_POOLS.mainnet;
 /** The page's Solana cluster: the fee route's and pool.buy's (its tip). */
 export const PAGE_CLUSTER: "mainnet" | "devnet" = POOL_TESTNET ? "devnet" : "mainnet";
+/** The buys of several pieces owed their end (pool-buy.ts OwedPieces), in the wallet store's meta/owed/pieces-sol (meta/owed/
+ *  is never read or listed by the frame), by W's address. */
+export const piecesOwedOf = (store: () => Promise<Pick<TradeStore, "get" | "update">>): PiecesOwed => {
+  const KEY = "owed/pieces-sol";
+  type All = Record<string, OwedPieces>;
+  return {
+    list: async () => Object.values(((await (await store()).get("meta", KEY)) as All | undefined) ?? {}),
+    put: async (r) =>
+      void (await (await store()).update("meta", KEY, (v) => ({ ...((v as All | undefined) ?? {}), [r.address]: r }))),
+    drop: async (address) =>
+      void (await (await store()).update("meta", KEY, (v) => {
+        const all = { ...((v as All | undefined) ?? {}) };
+        if (!Object.hasOwn(all, address)) return undefined;
+        delete all[address];
+        return all;
+      })),
+  };
+};
+
 /** The helper's route for the mainnet mark list (card sol-pools-mainnet-pin): getProgramAccounts in the note restore's
  *  exact shape alone, answered by another company's provider than /v1/rpc/solana's (apps/helper/src/rpc/rpc.ts
  *  marksRoutes). No keyless mainnet provider answers that scan (publicnode 403 "Indexed requests require a personal
@@ -287,7 +310,7 @@ const STAGE_RANK: Readonly<Record<WithdrawStage, number>> = { proving: 0, submit
  *  the op names only the note's random id. */
 export function mergeWithdrawOp(
   v: unknown,
-  w: { stage?: WithdrawStage; txs?: readonly TxRef[]; arrived?: Arrivals; owe?: string; clear?: string; feeNeeded?: string; cause?: string },
+  w: { stage?: WithdrawStage; txs?: readonly TxRef[]; arrived?: Arrivals; owe?: string; clear?: string; feeNeeded?: string; cause?: string; held?: EvmHeldOnW },
 ): Record<string, unknown> {
   const r = { ...(v as Record<string, unknown>) };
   const was = STAGE_RANK[r.stage as WithdrawStage] ?? -1;
@@ -297,6 +320,8 @@ export function mergeWithdrawOp(
   if (w.cause !== undefined) r.cause = w.cause;
   // why an earlier run ended is no longer the op's once it ends sent
   if (r.stage === "sent") delete r.cause;
+  // a part left on W by a send that reverted: its W, index and amount, by note (src/pool-withdraw-evm.ts EvmHeldOnW)
+  if (w.held !== undefined) r.held = { ...((r.held as Record<string, EvmHeldOnW> | undefined) ?? {}), [w.held.noteId]: w.held };
   const txs = [...((r.txs as TxRef[] | undefined) ?? [])];
   for (const t of w.txs ?? []) if (!txs.some((x) => x.hash === t.hash)) txs.push(t);
   r.txs = txs;
@@ -328,6 +353,22 @@ export const keepRelease = (w: WalletStore, opId: string, noteId: string, attemp
     if (p === undefined || p.attempt !== attempt || p.release === release) return undefined;
     return { ...r, [noteId]: { ...p, release } };
   });
+/** An EVM part's owed send kept (its release read back, W's send's hash before it leaves), only while it is still this
+ *  attempt's: every W send hash signed for it stays in `onwards` (and every resend after a revert in `resends`), so
+ *  whichever lands (a reload's, another tab's) is read back. One that is no longer this attempt's throws, so no send leaves unkept. */
+export const keepEvmSend = async (w: WalletStore, opId: string, q: EvmPendingOnward): Promise<void> => {
+  const got = await w.update("meta", owedKey(opId), (v) => {
+    const r = v as OwedSends | undefined;
+    const had = (r !== undefined && Object.hasOwn(r, q.noteId) ? r[q.noteId] : undefined) as EvmPendingOnward | undefined;
+    if (had === undefined || had.attempt !== q.attempt) return undefined;
+    const onwards = evmKeptOnwards({ onwards: [...evmKeptOnwards(had), ...evmKeptOnwards(q)] });
+    const onward = q.onward ?? had.onward;
+    // every resend after a revert, by hash, each with its nonce (src/pool-withdraw-evm.ts resendHeld)
+    const resends = [...(had.resends ?? []), ...(q.resends ?? [])].filter((x, i, all) => all.findIndex((y) => y.hash === x.hash) === i);
+    return { ...r, [q.noteId]: { ...had, ...q, ...(onward !== undefined ? { onward } : {}), ...(onwards.length > 0 ? { onwards } : {}), ...(resends.length > 0 ? { resends } : {}) } };
+  });
+  if (got === undefined) throw new Error("owed send: not this attempt's");
+};
 /** The op's owed send for `noteId` dropped, once the op no longer owes it; a later part's stays (one compare-and-set). */
 export const dropSend = (w: WalletStore, opId: string, noteId: string): Promise<unknown> =>
   w.update("meta", owedKey(opId), (v) => {
@@ -342,18 +383,46 @@ export const dropSend = (w: WalletStore, opId: string, noteId: string): Promise<
  *  (the store's change event), whose state read runs their queue's pass, which lets go of these notes (queue.ts skip). */
 export const WITHDRAW_PLANNED_KEY = "owed/withdraw-sol";
 type WithdrawPlanned = Record<string, { notes: string[]; until_ms: string }>;
-/** The op's planned notes and its deadline written ([] drops its entry); another op's entry kept. */
-export const keepOutNotes = (w: WalletStore, opId: string, noteIds: readonly string[], untilMs: bigint): Promise<unknown> =>
+/** The longest span any withdraw run writes (the Solana run's keepSpan, the EVM run's evmKeepSpan, on their pools'
+ *  epochs and lives): an entry whose deadline is further from now than this was written on a clock since set back. */
+export const WITHDRAW_KEEP_MAX_MS = [SOL_EPOCH_MS + WITHDRAW_BOUNDARY_LAG_MS + SOL_LIFE_MS, EVM_EPOCH_MS + EVM_WITHDRAW_BOUNDARY_LAG_MS + EVM_LIFE_MS].reduce((a, b) => (a > b ? a : b));
+/** An entry that stands at `nowMs`: its deadline still to come, and no further than the longest span. */
+const standing = (e: { until_ms?: unknown } | undefined, nowMs: bigint): boolean =>
+  typeof e?.until_ms === "string" && /^[0-9]{1,20}$/.test(e.until_ms) && BigInt(e.until_ms) > nowMs && BigInt(e.until_ms) <= nowMs + WITHDRAW_KEEP_MAX_MS;
+/** The op's planned notes written to stand for `spanMs` from `nowMs` ([] drops its entry); another op's entry kept
+ *  while it stands (a dead run's past its deadline, or one from a clock set back, dropped). */
+export const keepOutNotes = (w: WalletStore, opId: string, noteIds: readonly string[], nowMs: bigint, spanMs: bigint): Promise<unknown> =>
   w.update("meta", WITHDRAW_PLANNED_KEY, (v) => {
-    const { [opId]: _was, ...r } = (v as WithdrawPlanned | undefined) ?? {};
-    return noteIds.length === 0 ? r : { ...r, [opId]: { notes: [...noteIds], until_ms: untilMs.toString() } };
+    const { [opId]: _was, ...was } = (v as WithdrawPlanned | undefined) ?? {};
+    const r = Object.fromEntries(Object.entries(was).filter(([, e]) => standing(e, nowMs)));
+    return noteIds.length === 0 ? r : { ...r, [opId]: { notes: [...noteIds], until_ms: (nowMs + spanMs).toString() } };
   });
-/** The notes a withdraw run still holds out at `nowMs`: every entry whose deadline is still to come. */
+/** The notes a withdraw run still holds out at `nowMs`: every entry that stands. */
 export async function keptOutNotes(w: WalletStore, nowMs: bigint): Promise<Set<string>> {
   const r = ((await w.get("meta", WITHDRAW_PLANNED_KEY)) as WithdrawPlanned | undefined) ?? {};
   const out = new Set<string>();
-  for (const e of Object.values(r)) if (/^[0-9]{1,20}$/.test(e?.until_ms ?? "") && BigInt(e.until_ms) > nowMs) for (const id of e.notes ?? []) out.add(id);
+  for (const e of Object.values(r)) if (standing(e, nowMs)) for (const id of e.notes ?? []) out.add(id);
   return out;
+}
+/** An EVM run's stage written (its stage hook): the stage, its txs and arrivals, and `held` (a part left on W by a send
+ *  that reverted) in one merge, so a page closed after it never loses `held`; with no owed send left (`cleared`, the
+ *  note it owed), that note's owed send cleared and dropped. */
+export async function writeEvmStage(ops: WalletStore, opId: string, w: { stage: WithdrawStage; txs: TxRef[]; arrived: Arrivals; held?: EvmHeldOnW | undefined }, cleared: string | null): Promise<void> {
+  await ops.update("ops", opId, (v) => mergeWithdrawOp(v, { stage: w.stage, txs: w.txs, arrived: w.arrived, ...(w.held ? { held: w.held } : {}), ...(cleared ? { clear: cleared } : {}) }));
+  if (cleared) await dropSend(ops, opId, cleared);
+}
+/** An EVM finish's answer written (src/pool-withdraw-evm.ts finishEvmOnward): in_transit (the fee it needs, or a part
+ *  held on W) merged with `fee_needed` and `held` in one write, the owed send kept for the next pass (true); any other end
+ *  merged and the owed send for `noteId` cleared and dropped (false). */
+export async function writeEvmFinish(ops: WalletStore, opId: string, noteId: string, got: { stage: WithdrawStage; txs: TxRef[]; arrived: Arrivals; feeNeeded?: string; held?: EvmHeldOnW }): Promise<boolean> {
+  const w = { stage: got.stage, txs: got.txs, arrived: got.arrived, ...(got.feeNeeded !== undefined ? { feeNeeded: got.feeNeeded } : {}), ...(got.held ? { held: got.held } : {}) };
+  if (got.stage === "in_transit") {
+    await ops.update("ops", opId, (v) => mergeWithdrawOp(v, w));
+    return true;
+  }
+  await ops.update("ops", opId, (v) => mergeWithdrawOp(v, { ...w, clear: noteId }));
+  await dropSend(ops, opId, noteId);
+  return false;
 }
 /** The op's owed send for `noteId`, or none. */
 export async function owedSendOf(w: WalletStore, opId: string, noteId: string): Promise<PendingOnward | undefined> {
@@ -477,16 +546,23 @@ export const PAGE_TABLES: Readonly<Partial<Record<"pump-curve" | "pumpswap", rea
 export const POOL_SEND_TIMEOUT_MS = 120_000;
 
 /** POST /v1/pool/solana/send: the helper's answer as it came (pool-buy.ts reads it back on two RPCs). */
-export async function helperPoolSend(pool: string, tx: Uint8Array, fetchFn: typeof fetch = laneFetch()): Promise<unknown> {
+export const helperPoolSend = (pool: string, tx: Uint8Array, fetchFn: typeof fetch = laneFetch()): Promise<unknown> =>
+  helperPoolPost("/v1/pool/solana/send", { pool, tx: base64.encode(tx) }, fetchFn);
+/** POST /v1/pool/solana/pieces (card buy-spends-several-pieces): a buy's pieces, every release first and the buy last,
+ *  sent by the helper as one bundle, all landing or none; its answer as it came (pool-buy.ts reads each back on two
+ *  RPCs). The same timeout, busy and size rules as one send. */
+export const helperPoolSendPieces = (pool: string, txs: readonly Uint8Array[], fetchFn: typeof fetch = laneFetch()): Promise<unknown> =>
+  helperPoolPost("/v1/pool/solana/pieces", { pool, txs: txs.map((t) => base64.encode(t)) }, fetchFn);
+async function helperPoolPost(path: "/v1/pool/solana/send" | "/v1/pool/solana/pieces", payload: unknown, fetchFn: typeof fetch): Promise<unknown> {
   const window = new AbortController();
   const t = setTimeout(() => window.abort(new DOMException(`pool send: no answer in ${POOL_SEND_TIMEOUT_MS} ms`, "TimeoutError")), POOL_SEND_TIMEOUT_MS);
   try {
-    const res = await fetchFn(`${TRADE_HELPER}/v1/pool/solana/send`, {
+    const res = await fetchFn(`${TRADE_HELPER}${path}`, {
       ...HELPER_FETCH_INIT,
       redirect: "error",
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ pool, tx: base64.encode(tx) }),
+      body: JSON.stringify(payload),
       signal: window.signal,
     });
     if (res.status === 429) {
@@ -505,8 +581,22 @@ export async function helperPoolSend(pool: string, tx: Uint8Array, fetchFn: type
       }
       throw new PoolSendBusy(code, ms);
     }
+    // refused before anything was sent (any other 4xx: a shape, wallet, fee, blockhash or simulation the helper refused,
+    // or a route an older helper does not have, 404): pool-buy.ts ends the run at once, its notes RESERVED until the
+    // state reads free them
+    if (res.status >= 400 && res.status < 500) {
+      const body = new Uint8Array(await res.arrayBuffer());
+      let code = "refused";
+      try {
+        const c = body.length <= 4_096 ? (JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(body)) as { error?: { code?: unknown } })?.error?.code : undefined;
+        if (typeof c === "string" && /^[a-z_]{1,40}$/.test(c)) code = c;
+      } catch {
+        // a body that is not the helper's: still its refusal
+      }
+      throw new PoolSendRefused(res.status, code);
+    }
     if (res.status !== 200) throw new Error(`pool send: HTTP ${res.status}`);
-    const SEND_ANSWER_MAX = HELPER_V1_PATHS.find((p) => p.method === "POST" && p.path === "/v1/pool/solana/send")!.limitBytes!;
+    const SEND_ANSWER_MAX = HELPER_V1_PATHS.find((p) => p.method === "POST" && p.path === path)!.limitBytes!;
     const bytes = new Uint8Array(await res.arrayBuffer());
     if (bytes.length > SEND_ANSWER_MAX) throw new Error(`pool send: an answer over ${SEND_ANSWER_MAX} B`);
     return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
@@ -578,8 +668,9 @@ export type TestnetPool = {
   /** state.pools' `ready` (src/pools.ts) with `read`'s notes, in one turn of the queue's view (queue.ts readyWith), so
    * a remake's swap never falls between the two (card pool-ready-no-flicker); `ready` undefined while no queue is open.
    * `open`: the ids of the pools whose queue is open, so a chain with no open queue reads no ready (src/pools.ts
-   * withPools). `read` waits for nothing of the queue's. */
-  readyWith<T>(read: () => Promise<T>): Promise<{ ready: readonly ReadyProof[] | undefined; value: T; open: ReadonlySet<string>; landed?: ReadonlyMap<string, LandedRelease> }>;
+   * withPools). `read` waits for nothing of the queue's. `making`: the notes each open queue makes a first proof for now
+   * (queue.ts readyWith; card buy-spends-several-pieces), for state.pools' making. */
+  readyWith<T>(read: () => Promise<T>): Promise<{ ready: readonly ReadyProof[] | undefined; value: T; open: ReadonlySet<string>; landed?: ReadonlyMap<string, LandedRelease>; making?: ReadonlySet<string> }>;
   /** `fn` runs after each pass that made or remade a proof: a proof made changes no store record (its note was HELD
    * before it began), so the page's state is read again on this. */
   watch(fn: () => void): void;
@@ -1143,6 +1234,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         seed64 = await page.seed64();
         // a pass: each round of the deposit's sync starts once no trade holds the list's hosts
         const pass = await evmSettleReserved({ seed64, notes, scope: e.scope, round: async (s) => (await passTurn(e.list, s), e.sync.events(s)), signal });
+        // a freed note's release never landed: a withdraw op owing its send is settled stopped, nothing sent
+        if (pass.freed.length > 0) await settleFreedOps(await page.store(), pass.freed);
         if (pass.freed.length > 0 || pass.spent.length > 0) void evmProofs(chain);
       } finally {
         seed64?.fill(0);
@@ -1164,6 +1257,20 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   // a state read's EVM part: its INCOMING notes, then per pinned chain, each beside the other, its queue's pass (one at
   // a time per chain) while the queue is open or the chain's notes are landed, and its settle (RESERVED and unfinal notes)
   const evmPassing = new Map<"base" | "robinhood", Promise<unknown>>();
+  // a read that finds the chain's pass running asks for one more after it (one, never a queue): that pass began before
+  // what woke the read (a withdraw's kept-out record, any tab's) and read the queue's skip before it, so only a pass
+  // after it lets those notes go (queue.ts skip)
+  const evmPassAgain = new Set<"base" | "robinhood">();
+  const evmPass = (chain: "base" | "robinhood", stop: AbortSignal): void => {
+    if (evmPassing.has(chain)) return void evmPassAgain.add(chain);
+    evmPassing.set(
+      chain,
+      evmProofs(chain).finally(() => {
+        evmPassing.delete(chain);
+        if (evmPassAgain.delete(chain) && !stop.aborted) evmPass(chain, stop);
+      }),
+    );
+  };
   const evmRead = async (): Promise<void> => {
     const stop = evmStop.signal;
     await settleEvmOpen().catch(() => {});
@@ -1178,8 +1285,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       chains.map(async (chain) => {
         const mine = all.filter((n) => n.scope === evmPool(chain)!.scope);
         // a sign out since the read began: no pass, and the settle stops on its signal
-        if (!stop.aborted && !evmPassing.has(chain) && (evmQueues.has(chain) || mine.some((n) => n.state === "UNSPENT" || n.state === "HELD")))
-          evmPassing.set(chain, evmProofs(chain).finally(() => evmPassing.delete(chain)));
+        if (!stop.aborted && (evmQueues.has(chain) || mine.some((n) => n.state === "UNSPENT" || n.state === "HELD"))) evmPass(chain, stop);
         // the settle on every chain holding a note of the scope: it reads a round only while the wallet's rule finds one
         // open (evmSettleOpen), so a reorg that drops a fresh deposit or a release after its change was written is
         // healed with nothing RESERVED (card evm-money-shows-and-spends-at-once, review G)
@@ -1247,7 +1353,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         // unless this tab signed out meanwhile
         await evmPassing.get(chain)?.catch(() => {});
         if (signal.aborted) return;
-        if (!evmPassing.has(chain)) evmPassing.set(chain, evmProofs(chain).finally(() => evmPassing.delete(chain)));
+        if (!evmPassing.has(chain)) evmPass(chain, signal);
         await evmPassing.get(chain);
       }),
     );
@@ -1330,6 +1436,12 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       },
       take: async (id, attempt, early, lastHeight) => (taken = await (await q()).take(id, attempt, early, lastHeight)),
       chainNow: () => chainNow(over.pool ?? { now: (signal) => solanaNow(rpcs(), signal) }),
+      // a buy's pieces, all RESERVED or none (card buy-spends-several-pieces); the run's buy is the last, its tag 3
+      takeSet: async (items, early, lastHeight) => {
+        const got = await (await q()).takeSet(items, early, lastHeight);
+        taken = got[got.length - 1] ?? null;
+        return got;
+      },
       // the run ended "sent": its note is followed by the state reads' pass until its end is known (followBuys)
       follow: (post) => {
         if (taken === null) return;
@@ -1340,6 +1452,9 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       // W's buy mint, written before the send: the rent back after a later sell holds while W holds any of it
       bought: buyMints(page.store),
       send: (pool, tx) => helperPoolSend(pool, tx, over.fetch),
+      sendPieces: (pool, txs) => helperPoolSendPieces(pool, txs, over.fetch),
+      // a buy of several pieces' owed record, before its take (resumePieces, on the state reads)
+      piecesOwed: piecesOwedOf(page.store),
       // the received token's decimals, for W's buy record (src/positions.ts recordPoolBuy), and kept for the session: read
       // on both RPCs with the amount, so a sell of it asks no decimals read (card sell-first-read-waits-out-a-throttle)
       outDecimals: (wallet, d, mint) => {
@@ -1355,6 +1470,18 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
           notes ??= await openNoteStore(await page.store());
           const kind = reads.kind();
           return await solanaSettleSpent({ seed64, notes, noteId, program: pin!.program, minSlots, rpcs: settleRpcs(kind), lister: lister(kind), signal, cache, markBatches: PAGE_SOL_MARK_BATCHES });
+        } finally {
+          seed64.fill(0);
+        }
+      },
+      // a buy of several pieces: every piece's note on one read of the marks a round
+      settleSet: async (noteIds, minSlots) => {
+        const signal = solanaStop.signal;
+        const seed64 = await page.seed64();
+        try {
+          notes ??= await openNoteStore(await page.store());
+          const kind = reads.kind();
+          return await solanaSettleSpentSet({ seed64, notes, noteIds, program: pin!.program, minSlots, rpcs: settleRpcs(kind), lister: lister(kind), signal, cache, markBatches: PAGE_SOL_MARK_BATCHES });
         } finally {
           seed64.fill(0);
         }
@@ -1963,14 +2090,80 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     });
   };
   // one state read's pass at a time: set before its first await, so a read that comes while it runs (its note read
-  // included) gets the same promise and never starts a second pass. No follow-up pass: a note turns INCOMING only in an
-  // ask's run, which holds POOL_DEPOSIT_LOCK and finishes that note itself; a later state read settles what it leaves.
+  // included) gets the same promise and never starts a second read (its proof pass part: statePass). No follow-up read:
+  // a note turns INCOMING only in an ask's run, which holds POOL_DEPOSIT_LOCK and finishes that note itself; a later
+  // state read settles what it leaves.
   let reading: Promise<void> | null = null;
   // a state read's proof pass, while it runs (a landing's or a tap's pass runs on its own)
   let passing: Promise<unknown> | null = null;
+  // a read that finds that pass running (or comes while another read runs, the queue open) asks for one more after it
+  // (one, never a queue): the running pass read the queue's skip before what woke the read (a withdraw's kept-out
+  // record, any tab's), so only a pass after it lets those notes go (queue.ts skip)
+  let passAgain = false;
+  const statePass = (): void => {
+    if (passing !== null) return void (passAgain = true);
+    const stop = solanaStop.signal;
+    passing = proofs().finally(() => {
+      passing = null;
+      const again = passAgain;
+      passAgain = false;
+      if (again && !stop.aborted) statePass();
+    });
+  };
   // the dead pending sell records are settled once per page load, not on every state read (a re-ask settles its own)
   let deadSettled = false;
   let backsResumed = false;
+  let foundScanned = false;
+  const piecesOwed = piecesOwedOf(page.store);
+  // W's history places a buy of several pieces' owner read has reached, by W (spendOwner's HistoryPlaces)
+  const piecesPlaces = new Map<string, HistoryPlaces>();
+  /** The buys of several pieces owed their end, decided from their notes' states (pool-buy.ts resumePieces): a W whose
+   *  pieces paid it and whose buy can no longer land is owed a rent back (merged into W's own record, the buy's mint
+   *  among its mints), which this load's background run of resumeRentBacks sweeps into the pool with no tap. Run on each
+   *  state read and from followBuys (the settle pass a buy that ended "sent" starts). */
+  const resumeOwedPieces = async (state: (noteId: string) => Promise<string | undefined>): Promise<void> => {
+    if ((await piecesOwed.list().catch(() => [])).length === 0) return;
+    const stranded = await resumePieces({
+      owed: piecesOwed,
+      state,
+      // whose spend the buy's own note is, on both RPCs at finalized (pool-spend.ts spendOwner, as followBuys reads a
+      // buy's): this buy's tag 3, another's, or not known yet; W's history read on across the state reads from piecesPlaces
+      owner: async (r) => {
+        const rs = settleRpcs("pass");
+        const slots = await Promise.all(rs.map((rpc) => rpc("getSlot", [{ commitment: "finalized" }])));
+        if (!slots.every((x) => Number.isSafeInteger(x))) return null;
+        let places = piecesPlaces.get(r.address);
+        if (!places) piecesPlaces.set(r.address, (places = new Map()));
+        const o = await spendOwner(rs, { program: r.spend.program, feePayer: r.spend.feePayer }, r.address, BigInt(r.spend.nullifier), r.spend.context, Math.max(...(slots as number[])), undefined, places);
+        return o === null ? null : o === "other" ? "other" : "mine";
+      },
+      strand: async (r) => {
+        const o = owedNoted(page.store);
+        const had = (await o.list()).find((x) => x.address === r.address);
+        await o.put({ ...(had ?? { passes: 0 }), address: r.address, l: r.l, j: r.j, mints: [...(had?.mints ?? []).filter((m) => m.mint !== r.mint), { mint: r.mint, program: r.program }] });
+      },
+    }).catch(() => 0);
+    if (stranded > 0) backsResumed = false;
+  };
+  /** The scan of pool-found.ts on `mine` (under the seed's shared lock, the caller's): each W holding SOL that no owed
+   *  record names gets one, `found`. */
+  const findHeldWs = async (mine: readonly NoteRecord[]): Promise<void> => {
+    // no note whose own W the scan reads: the seed is not read
+    if (scope === null || !mine.some((n) => n.scope === scope && (n.state === "UNSPENT" || n.state === "HELD") && n.leaf !== undefined)) return;
+    const o = owedNoted(page.store);
+    const skip = new Set([...(await o.list()).map((x) => x.address), ...(await piecesOwed.list()).map((x) => x.address)]);
+    const seed64 = await page.seed64();
+    let ws: ReturnType<typeof ownWs>;
+    try {
+      ws = ownWs(seed64, mine, scope, skip);
+    } finally {
+      seed64.fill(0);
+    }
+    if (ws.length === 0) return;
+    // the helper's seat for the batch (never a public provider); the testnet build, with none, one W a request
+    const batch = POOL_TESTNET ? null : over.rpcs ? over.rpcs[1] : solanaPacedRpc(pageHelperRpc(TRADE_HELPER, SOLANA_RPC_RETRY, "pass"));
+    for (const w of await heldWs(ws, batch, rpcs("pass")[0])) await o.put({ address: w.address, l: w.l.toString(), j: w.j, mints: [], passes: 0, found: true });
+  };
   // the RESERVED notes a buy left (filled, refused, never answered, or its page closed mid-send): settled spent, freed
   // once both RPCs' finalized height is past the signed transaction's last height, or their block time past the
   // deadline, with no spent mark, or held (../../wallet/src/pool/solana-restore.ts solanaSettleReserved); a freed note is
@@ -1991,6 +2184,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         signal.throwIfAborted();
         const pass = await solanaSettleReserved({ seed64, notes, program: pin!.program, rpcs: settleRpcs("pass"), lister: lister("pass"), signal, cache, markBatches: PAGE_SOL_MARK_BATCHES });
         await followBuys(notes);
+        await resumeOwedPieces(async (id) => (await notes.get(id))?.state);
         // a freed note's release never landed: an op owing its send is settled stopped, nothing sent, before the note
         // can be spent again
         if (pass.freed.length > 0) await settleFreedOps(await page.store(), pass.freed);
@@ -2030,32 +2224,52 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         seed64.fill(0);
       }
     });
-  const finishOnward = async (): Promise<void> => {
-    if (!locks || pin === undefined || !owedScan) return;
+  let finishing: Promise<void> | null = null;
+  const finishOnward = (): Promise<void> => (finishing ??= finishOnwardOnce().finally(() => (finishing = null)));
+  const finishOnwardOnce = async (): Promise<void> => {
+    if (!locks || !owedScan) return;
     owedScan = false;
     const ops = await page.store();
-    const owed: [string, PendingOnward][] = [];
+    const owed: [string, PendingOnward, EvmHeldOnW | undefined][] = [];
     for (const k of await ops.keys("ops")) {
       if (withdrawing.has(k)) continue;
-      const rec = (await ops.get("ops", k)) as { kind?: unknown; owed?: unknown; pending?: PendingOnward } | undefined;
+      const rec = (await ops.get("ops", k)) as { kind?: unknown; owed?: unknown; pending?: PendingOnward; held?: Record<string, EvmHeldOnW> } | undefined;
       if (rec?.kind !== "withdraw") continue;
       if (rec.pending) await moveLegacyPending(ops, k, rec.pending);
       const id = rec.pending?.noteId ?? rec.owed;
       // any stage: `owed` names the note whose send the op owes (a tab closed during the release leaves "proving");
       // its send is meta/owed/<op id>'s record (none yet: written but not marked, or the other way: read again later)
       const p = typeof id === "string" ? await owedSendOf(ops, k, id) : undefined;
-      if (p) owed.push([k, p]);
+      // a part held on W (its send reverted): the finish sends it at W's next nonce, never at 0 again
+      if (p) owed.push([k, p, rec.held !== undefined && typeof rec.held === "object" && Object.hasOwn(rec.held, p.noteId) ? rec.held[p.noteId] : undefined]);
       else if (typeof id === "string") owedScan = true;
     }
     if (owed.length === 0) return;
     const notes = await openNoteStore(await page.store());
     try {
-      for (const [k, pending] of owed) {
+      for (const [k, pending, held] of owed) {
         const retry = owedRetry.get(k);
         if (retry && Date.now() < retry.at) {
           owedScan = true;
           continue;
         }
+        const evmChain = (pending as Partial<EvmPendingOnward>).chain;
+        // an EVM pool's owed send: its chain's finish (src/pool-withdraw-evm.ts); a chain with no pool here is read again
+        if (POOL_TESTNET && (evmChain === "base" || evmChain === "robinhood")) {
+          const eh = evmWithdrawHost(evmChain, notes);
+          // the finish's own send kept as the run's is, before it leaves
+          const got = eh === null ? null : await locks.request(WALLET_SEED_LOCK, { mode: "shared" }, () => finishEvmOnward({ ...eh, keep: (q) => keepEvmSend(ops, k, q) }, pending as EvmPendingOnward, evmStopsOf(k), held));
+          if (got !== null && !(await writeEvmFinish(ops, k, pending.noteId, got))) {
+            owedRetry.delete(k);
+            evmStops.delete(k);
+          } else {
+            const waitMs = Math.min(Math.max(2_000, (retry?.waitMs ?? 1_000) * 2), 60_000);
+            owedRetry.set(k, { at: Date.now() + waitMs, waitMs });
+            owedScan = true;
+          }
+          continue;
+        }
+        if (pin === undefined) continue;
         const got = await finishPoolOnward(
           {
             pin,
@@ -2097,24 +2311,37 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   // the other
   const stateRead = (): Promise<void> => {
     armTurn();
-    const evm = evmRead().catch(() => {});
+    const evm = evmRead().then(() => finishOnward()).catch(() => {});
     if (scope === null) return evm;
     return Promise.all([evm, solanaRead()]).then(() => {});
   };
   const solanaRead = (): Promise<void> => {
-    if (reading) return reading;
+    if (reading) {
+      // this read's own pass part, though the read itself is the running one's
+      if (open !== null) statePass();
+      return reading;
+    }
     const p = (async () => {
       try {
-        if (settling) return await settling;
+        if (settling) {
+          if (open !== null) statePass();
+          return await settling;
+        }
         const mine = (await readNotes(await page.store())).filter((n) => n.scope === scope);
         if (mine.some((n) => n.state === "INCOMING")) await settleSolana();
         // a failed reserved pass never holds back a send owed (the money on W): the finish below still runs
         if (mine.some((n) => n.state === "RESERVED") || lateBuys.size > 0) await settleReserved().catch(() => {});
+        // a buy of several pieces whose pieces paid W and whose buy can no longer land: what W holds goes back into the
+        // pool by the rent back (W's own owed record), run in this load's background below, with no tap
+        if ((await piecesOwed.list().catch(() => [])).length > 0) {
+          const now = new Map((await readNotes(await page.store())).map((n) => [n.id, n.state]));
+          await resumeOwedPieces(async (id) => now.get(id));
+        }
         // a sell's note left INCOMING, or a sell with no deposit back (no note) left sent: both settled by the sell's verdict
         if (mine.some((n) => n.state === "INCOMING" && (n.ref.kind === "return" || (n.ref.kind === "second" && n.ref.id.id === "R"))) || (await keptSells(page.store).list().catch(() => [])).length > 0) await settleSells();
         // the next buy's proofs (card signpage-pool-pins): a page that loads with the pool's notes landed opens the
         // queue, and each read while it is open makes the epoch's proofs again, one pass at a time
-        if (open !== null || mine.some((n) => n.state === "UNSPENT" || n.state === "HELD")) passing ??= proofs().finally(() => (passing = null));
+        if (open !== null || mine.some((n) => n.state === "UNSPENT" || n.state === "HELD")) statePass();
         await finishOnward();
         // a sell request whose page closed before it signed: refused "failed", so its id is never id_reused for good
         if (locks && !deadSettled) {
@@ -2125,10 +2352,16 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         // the sells settle, in the background (it reads, checks and sends), under the seed's shared lock and the sell lock
         if (locks && !backsResumed) {
           backsResumed = true;
+          const scan = !foundScanned;
+          foundScanned = true;
           void locks
             .request(WALLET_SEED_LOCK, { mode: "shared" }, async () => {
               const h = sellHost();
               try {
+                // once a load: the own W of each UNSPENT or HELD note that holds SOL (pool-found.ts), owed a rent back
+                // that sweeps it only while both RPCs read it owning no token account; a restored device finds there a
+                // buy of several pieces whose pieces paid W and whose buy never landed
+                if (scan) await findHeldWs(mine).catch(() => {});
                 await resumeRentBacks(h, locks);
               } finally {
                 h.end();
@@ -2163,13 +2396,129 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     }
   };
   const withdraw = async (ready: PoolReady, opId: string): Promise<void> => {
-    if (ready.chain !== "solana" || pin === undefined || !locks) return;
+    if (!locks || (ready.chain === "solana" ? pin === undefined : !POOL_TESTNET || evmPool(ready.chain) === null)) return;
     withdrawing.add(opId);
     try {
-      await withdrawRun(ready, opId);
+      await (ready.chain === "solana" ? withdrawRun(ready, opId) : evmWithdrawRun(ready.chain, ready, opId));
     } finally {
       withdrawing.delete(opId);
     }
+  };
+  // pool.withdraw on Base or Robinhood (src/pool-withdraw-evm.ts): the chain's pool (its pin decides: none, no
+  // withdraw), the wallet's evmPool on the trade's pair for the bind, the page's prover and note store, the helper's
+  // send, the chain's RESERVED settle; the op record and its owed send as Solana's (meta/owed/<op id>)
+  const evmStops = new Map<string, EvmFinishState>();
+  const evmStopsOf = (k: string): EvmFinishState => {
+    let s = evmStops.get(k);
+    if (!s) evmStops.set(k, (s = { stops: [null, null], noneAt: null }));
+    return s;
+  };
+  const evmWithdrawHost = (chain: "base" | "robinhood", notes: NoteStore): EvmWithdrawHost | null => {
+    // folded at build time, as the EVM buy and sale: the mainnet bundle carries none of the withdraw
+    if (!POOL_TESTNET) return null;
+    const e = evmPool(chain);
+    if (e === null) return null;
+    const pool =
+      (over.evmQueuePool?.(chain) as Pool<EvmPoolRequest> | undefined) ??
+      walletEvmPool({
+        pin: e.pin,
+        rpcs: e.list,
+        feeRpcs: pageEvmFeeRpcs(chain),
+        held: pageEvmHold(e.pin, () => (page.held ? page.held() : page.store())),
+        history: [...e.list, ...pageEvmHistory(e.pin)],
+        relayFee: (ep, sg) => evmPoolRelayFee(e.pin.pool, ep, sg, over.fetch),
+        epochFee: evmEpochFee,
+      });
+    return {
+      chain,
+      testnet: POOL_TESTNET,
+      pin: e.pin,
+      venues: evmPoolVenues(),
+      rpcs: e.rpcs,
+      pool,
+      prover: prover.vault,
+      notes: async () => notes,
+      seed64: page.seed64,
+      send: (body) => evmPoolSend(TRADE_HELPER, body, over.fetch),
+      settle: () => void reserveEvm(chain).catch(() => {}),
+      owedNotes,
+      ...(over.now ? { now: over.now } : {}),
+      ...(over.wait ? { wait: over.wait } : {}),
+    };
+  };
+  const evmQueueOf = async (chain: "base" | "robinhood"): Promise<ProofQueue<EvmPoolRequest> | null> => {
+    const q = evmQueues.get(chain);
+    return q ? (((await q.catch(() => null))?.queue as ProofQueue<EvmPoolRequest> | undefined) ?? null) : null;
+  };
+  const evmFunds = async (chain: "base" | "robinhood", to?: string): Promise<PoolFunds> => {
+    if (!POOL_TESTNET) throw new Error("no flow for this chain");
+    const notes = await openNoteStore(await page.store());
+    try {
+      const h = evmWithdrawHost(chain, notes);
+      if (h === null) throw new Error("no pool for this chain");
+      return await evmWithdrawFunds(h, to);
+    } finally {
+      notes.close();
+    }
+  };
+  const evmWithdrawRun = async (chain: "base" | "robinhood", ready: PoolReady, opId: string): Promise<void> => {
+    if (!POOL_TESTNET || !locks) return;
+    const ops = await page.store();
+    const created_ms = Date.now();
+    let writes: Promise<unknown> = ops.put("ops", opId, { kind: "withdraw", stage: "proving", txs: [], created_ms }).catch(() => {});
+    let owedNote: string | null = null;
+    const write = (stage: WithdrawStage, txs: TxRef[], pending: PendingOnward | null, arrived: Arrivals, held?: EvmHeldOnW) => {
+      const cleared = pending ? null : owedNote;
+      void (writes = writes.then(() => writeEvmStage(ops, opId, { stage, txs, arrived, held }, cleared)).catch(() => {}));
+    };
+    const owe = async (pending: EvmPendingOnward): Promise<void> => {
+      owedNote = pending.noteId;
+      const w = writes.then(async () => {
+        await oweSend(ops, opId, pending);
+        await ops.update("ops", opId, (v) => mergeWithdrawOp(v, { stage: "in_transit", owe: pending.noteId }));
+      });
+      writes = w.catch(() => {});
+      await w;
+    };
+    const keep = async (q: EvmPendingOnward): Promise<void> => {
+      const w = writes.then(() => keepEvmSend(ops, opId, q));
+      writes = w.catch(() => {});
+      await w;
+    };
+    await locks.request(WALLET_SEED_LOCK, { mode: "shared" }, async () => {
+      const notes = await openNoteStore(await page.store());
+      try {
+        const h = evmWithdrawHost(chain, notes);
+        if (h === null) return write("stopped", [], null, {});
+        const q = await evmQueueOf(chain);
+        const ask = { kind: "pool.withdraw", chain, token: null, amount: 0n, slippageBps: 0, decimals: 18 } as const;
+        // the run's planned notes out of every tab's proof queue and every other plan until it ends (as the Solana run's)
+        const keepOut = async (ids: readonly string[], spanMs: bigint): Promise<void> => void (await keepOutNotes(ops, opId, ids, BigInt(Date.now()), spanMs));
+        const end = await runEvmPoolWithdraw({ ...h, ...(q ? { drop: (id: string) => q.drop(id) } : {}), stage: write, owe, keep, keepOut }, { ...ask }, ready.to, ready.amount, ready.maxFee);
+        write(end.stage, end.txs, end.pending, end.arrived, end.held);
+        if (end.feeNeeded !== undefined) void (writes = writes.then(() => ops.update("ops", opId, (v) => mergeWithdrawOp(v, { feeNeeded: end.feeNeeded! }))).catch(() => {}));
+        // why a run or a part ended on a throw, on the record and the page's console (public words only: legCause), as
+        // the Solana run's
+        if (end.cause !== undefined) {
+          console.warn(`withdraw ${end.stage}: ${end.cause}`);
+          void (writes = writes.then(() => ops.update("ops", opId, (v) => mergeWithdrawOp(v, { cause: end.cause! }))).catch(() => {}));
+        }
+        if (end.pending) owedScan = true;
+      } finally {
+        notes.close();
+      }
+    });
+    await writes;
+    if (evmQueues.has(chain)) void evmProofs(chain);
+  };
+  const evmWithdrawDeps = (chain: "base" | "robinhood", opId: string): PoolWithdrawFormDeps => {
+    const e = POOL_TESTNET ? evmPool(chain) : null;
+    return {
+      chain,
+      keys: { pool: e?.pin.pool ?? "" },
+      funds: (to?: string) => (e === null ? Promise.reject(new Error("no flow for this chain")) : evmFunds(chain, to)),
+      ...(e !== null && locks ? { handoff: (r: PoolReady) => void withdraw(r, opId), owedFees, redraw } : {}),
+    };
   };
   const withdrawRun = async (ready: PoolReady, opId: string): Promise<void> => {
     if (pin === undefined || !locks) return;
@@ -2232,7 +2581,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
             ...(over.wait ? { wait: over.wait } : {}),
             keepRelease: async (noteId, attempt, release) => void (await keepRelease(ops, opId, noteId, attempt, release)),
             owedNotes,
-            keepOut: async (ids, spanMs) => void (await keepOutNotes(ops, opId, ids, BigInt(Date.now()) + spanMs)),
+            keepOut: async (ids, spanMs) => void (await keepOutNotes(ops, opId, ids, BigInt(Date.now()), spanMs)),
             // the release's withdrawn value is on the note's mark: the app reads the state again, as after a buy's
             marked: () => {
               for (const f of watchers) f();
@@ -2294,7 +2643,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     owedScan = true;
     await stateRead();
   };
-  const withdrawDeps = (chain: PoolChain, opId: string): PoolWithdrawFormDeps => ({
+  const withdrawDeps = (chain: PoolChain, opId: string): PoolWithdrawFormDeps => chain !== "solana" ? evmWithdrawDeps(chain, opId) : ({
     chain,
     keys: chain === "solana" && pin !== undefined ? { pool: solanaPoolOf(pin.program).pool, program: pin.program, feePayer: pin.feePayer } : { pool: "" },
     funds: () => (chain === "solana" && pin !== undefined ? funds() : Promise.reject(new Error("no flow for this chain"))),
@@ -2309,7 +2658,9 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
             ? evmRun(ask.chain, ask, ctx, evmBuy(ask.chain) ?? undefined)
             : ask.kind === "pool.sell"
               ? evmRun(ask.chain, ask, ctx, evmSell(ask.chain) ?? undefined)
-              : { error: "not_allowed" }
+              : ask.kind === "pool.withdraw" && POOL_TESTNET && page.openWithdraw && evmPool(ask.chain) !== null
+                ? (page.openWithdraw(ask.chain, ctx) ?? { error: "not_allowed" })
+                : { error: "not_allowed" }
         : pin === undefined
         ? { error: "not_allowed" }
         : ask.kind === "pool.deposit"
@@ -2395,14 +2746,16 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         return { ready: undefined, value, open: ids, landed: await landed() };
       }
       const ready: ReadyProof[] = [];
+      const making = new Set<string>();
       const turn = async (i: number): Promise<T> => {
         if (i === qs.length) return read();
         const r = await qs[i]!.readyWith(() => turn(i + 1));
         ready.unshift(...r.ready);
+        for (const id of r.making) making.add(id);
         return r.value;
       };
       const value = await turn(0);
-      return { ready, value, open: ids, landed: await landed() };
+      return { ready, value, open: ids, landed: await landed(), making };
     },
     watch: (fn) => void watchers.add(fn),
     signingOut: () => {

@@ -6,7 +6,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { SignpageState } from "@blindfill/kit";
-import { amountText, amountWrong, centsToUnits, coinTapAgainMs, coinTapKey, decimalToUnits, parseUsd, poolBuyAsk, poolSellAsk, poolView, presetsOf, PRESETS, unitsToCents, unitsToDecimal, withCoinTap } from "../src/screens/trade/model.ts";
+import { amountText, amountWrong, centsToUnits, coinTapAgainMs, coinTapKey, decimalToUnits, feeAskAmount, feeCents, feeShown, parseUsd, poolBuyAsk, poolSellAsk, poolView, presetsOf, PRESETS, unitsToCents, unitsToDecimal, withCoinTap } from "../src/screens/trade/model.ts";
 
 type Pool = NonNullable<SignpageState["pools"]>[number];
 // Pyth SOL/USD as read on 4 Nov 07:40Z (packages/kit/src/price/pool-usd.ts): $93.01048308
@@ -41,7 +41,9 @@ test("a whole-unit decimal to base units and back: plain decimals only, never mo
 
 test("the pool as the box draws it: balance and the per-tap max in USD, the proof's state; none without a price or an entry", () => {
   assert.deepEqual(poolView([sol("1.25", "0.4", "0.3")], "solana", SOL), { asset: "SOL", balance: 11_626n, tapMax: 2_790n, proof: "ready" });
-  assert.deepEqual(poolView([sol("0.2", "0")], "solana", SOL), { asset: "SOL", balance: 1_860n, tapMax: null, proof: "making" });
+  // Making proof only while a proof is being made (kit 1.12 making); none ready and none being made reads none
+  assert.deepEqual(poolView([{ ...sol("0.2", "0"), making: "0.2" }], "solana", SOL), { asset: "SOL", balance: 1_860n, tapMax: null, proof: "making" });
+  assert.deepEqual(poolView([sol("0.2", "0")], "solana", SOL), { asset: "SOL", balance: 1_860n, tapMax: null, proof: "none" });
   assert.equal(poolView([sol("0.2", "0.2", "0.1")], "solana", null), null);
   assert.equal(poolView([], "solana", SOL), null);
   assert.equal(poolView(undefined, "solana", SOL), null);
@@ -150,4 +152,25 @@ test("Max for the coin asked again while the page says not now: busy every secon
   assert.equal(coinTapAgainMs("busy"), 1_000);
   assert.equal(coinTapAgainMs("down"), 3_000);
   for (const code of ["not_allowed", "not_funded", "quote_check_failed", "timeout"]) assert.equal(coinTapAgainMs(code), null, code);
+});
+
+test("card buy-spends-several-pieces: the Fee row asks the cost of the typed amount in SOL and draws it in USD, rounded up; a dash until it is read", () => {
+  // $0.16 at $93.01 is the buy's own amount (poolBuyAsk asks 0.001720236 for it)
+  assert.equal(feeAskAmount(16n, SOL), "0.001720236");
+  assert.equal(feeAskAmount(null, SOL), null);
+  assert.equal(feeAskAmount(0n, SOL), null);
+  assert.equal(feeAskAmount(16n, null), null);
+  // 0.0014 SOL (one piece's 1,300,000 relay fee and the 100,000 tip) is $0.1302: never drawn under what it costs
+  assert.equal(feeCents("0.0014", SOL), 14n);
+  assert.equal(feeCents("0.10751476", SOL), 1_000n); // $10.00, the $9.99 rounded down read up
+  for (const bad of [undefined, "", "-1", "1e3", "0x10", "0.0000000001"]) assert.equal(feeCents(bad, SOL), null, String(bad));
+  assert.equal(feeCents("0.0014", null), null);
+  // the row keeps the coin's last answer while a newer amount is asked and as the price ticks; another coin's, none
+  const read = { key: "solana:MINT", cost: "0.0014" };
+  assert.equal(feeShown(read, "solana:MINT", 16n, SOL), 14n);
+  assert.equal(feeShown(read, "solana:MINT", 99n, SOL), 14n, "a newer amount typed: the last cost until its own answer");
+  assert.equal(feeShown(read, "solana:MINT", 16n, { ...SOL, price: SOL.price * 2n }), 27n, "a price tick reprices the same cost (0.0014 SOL at $186.02, rounded up)");
+  assert.equal(feeShown(read, "solana:OTHER", 16n, SOL), null, "another coin's answer is never shown");
+  assert.equal(feeShown(null, "solana:MINT", 16n, SOL), null);
+  assert.equal(feeShown(read, "solana:MINT", null, SOL), null, "no amount typed");
 });

@@ -64,7 +64,11 @@ test("readAllLists: one read of each chain's lists on HELPER_HOST, merged; Disco
   assert.deepEqual(h.calls, LIST_CHAINS.map(listsUrl));
   assert.deepEqual(h.calls, ["solana", "base", "robinhood", "near"].map((c) => `https://ct-api.unrealized.trade/v1/market/lists?chain=${c}`));
   assert.equal(s.chain, "all");
-  assert.equal(s.as_of_ms, Math.min(...Object.values(ANSWERS).map((a) => a.as_of_ms)));
+  // card app-faults-seen-on-122 (walk of release 122, row 5): under All the stamp is the newest chain's read, so one
+  // slow chain never ages the whole page ("Updated 4m ago" while Solana's lists were seconds old); each chain's own pick
+  // keeps its own read (pickSnapshot, below)
+  assert.equal(s.as_of_ms, Math.max(...Object.values(ANSWERS).map((a) => a.as_of_ms)));
+  assert.ok(Math.min(...Object.values(ANSWERS).map((a) => a.as_of_ms)) < s.as_of_ms, "the recorded answers' reads differ, so the test tells newest from oldest");
   for (const c of LIST_CHAINS) {
     for (const k of ["new", "trending"] as const) assert.ok(columnRows(s, k).some((r) => r.chain === c), `${c} in ${k}`);
   }

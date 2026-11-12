@@ -83,4 +83,15 @@ test("facts reads each line by the bundle's shape, with the registry's own names
     assert.equal(c[RENT], false, to);
     assert.equal(c[TEARDOWN], true, to);
   }
+  // card buy-spends-several-pieces: the checked copies signed first, then returned after a found W's latest is read
+  // again; the same rule, so the same plants FAIL it
+  const named = all.replace(rent, "let c=await BP(o),l=await J(s.address,r,n,[t[0][0]?.lamports??0n,t[1][0]?.lamports??0n],{blockhash:c.blockhash,lastValidBlockHeight:c.lastHeight},async e=>{let t=[];for(let n of e)t.push(await OR(o,e=>Mg(e,n.wire,s.address,i)));return t},r.burn);KE(l.wires,p,l.reads);let u=await a(l.wires);return e!==void 0&&await Dq(o,s.address).catch(()=>null)!==e?{young:!0,keep:[],signed:[],last:0,unclaimed:void 0,since:void 0}:{keep:l.plan.keep,signed:u,last:c.lastHeight,unclaimed:l.reads.unclaimed,since:e}});");
+  assert.notEqual(named, all);
+  assert.deepEqual(Object.values(facts("", named).carries), MARKS.map(() => true));
+  for (const [from, to] of [["KE(l.wires,p,l.reads);let u=await a(l.wires);", "KE(l.frames.map(e=>e.wire),p,l.reads);let u=await a(l.frames.map(e=>e.wire));"], ["let u=await a(l.wires);", "let u=await a(l.frames.map(e=>e.wire));"], ["KE(l.wires,p,l.reads);let u", "let u"], ["signed:u,", "signed:l.frames,"], ["l=await J(", "l=await Q("]]) {
+    assert.ok(named.includes(from), from);
+    const c = facts("", named.replace(from, to)).carries;
+    assert.equal(c[RENT], false, to);
+    assert.equal(c[TEARDOWN], true, to);
+  }
 });
