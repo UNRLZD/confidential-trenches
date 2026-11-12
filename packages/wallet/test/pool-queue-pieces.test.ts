@@ -1,17 +1,19 @@
 // node --test packages/wallet/test/pool-queue-pieces.test.ts: the proof queue for a pool whose buy pays one W from
-// several notes (card buy-spends-several-pieces, src/pool/queue.ts "Pieces"): every ready proof bound to the W of the
-// ready note with the smallest chunk (its owner), made again for the next owner once a buy takes it, the ready set
-// sized by the prover's measured time, and the balances' Max over the set bound to one W. The notes are
-// withdraw-fixture.ts's (the all-zero test seed, a fixture vault); the prover answers the signals without proving.
+// several notes (card buy-spends-several-pieces, src/pool/queue.ts "Pieces"): tier 1, each ready note's proof on its own
+// W as on a pool of one piece; tier 2, made only once tier 1 has nothing left to make, a second proof of the largest
+// other notes bound to the primary's W (the ready note with the largest chunk). A buy that takes one note leaves every
+// other tier 1 proof ready; tier 2 is made again for the next primary. The notes are withdraw-fixture.ts's (the
+// all-zero test seed, a fixture vault); the prover answers the signals without proving.
 import assert from "node:assert/strict";
 import { after, test } from "node:test";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { VAULT_FIELD_P, VaultTree, type VaultProver } from "@blindfill/kit";
 import * as d from "../src/derive/index.ts";
 import type { NoteRef } from "../src/notes/secrets.ts";
+import type { NoteRecord } from "../src/notes/store.ts";
 import { USDC_LADDER } from "../src/pool/near.ts";
-import type { Pool, PoolBindArgs, PoolTrees } from "../src/pool/pool.ts";
-import { openProofQueue, piecesReadySize, type ProofQueue } from "../src/pool/queue.ts";
+import type { Pool, PoolBindArgs, PoolTrees, ReadyProof } from "../src/pool/pool.ts";
+import { openProofQueue, type ProofQueue } from "../src/pool/queue.ts";
 import { poolBalances, type BalancePool, type TapSpendOf } from "../src/pool/balances.ts";
 import { buyWalletsOf } from "../src/pool/buy-wallets.ts";
 import { BLOCK_MS, closeVaults, SCOPE, SEED, signalsProver, vaultWith, type Vault } from "./withdraw-fixture.ts";
@@ -21,9 +23,10 @@ const usd = (x: number): bigint => BigInt(Math.round(x * 1_000_000));
 const E = 60_000n;
 const START = BigInt(BLOCK_MS) - (BigInt(BLOCK_MS) % E);
 
-/** A pool on the fixture vault, every leaf landed an hour before START, with piecesMax pieces a buy. */
-function piecesPool(v: Vault, piecesMax = 5): Pool<{ n: number }> & { binds: PoolBindArgs[] } {
+/** A pool on the fixture vault, every leaf landed an hour before START, with piecesMax pieces a buy; `t.now` its time. */
+function piecesPool(v: Vault, piecesMax = 4): Pool<{ n: number }> & { binds: PoolBindArgs[]; t: { now: bigint } } {
   const binds: PoolBindArgs[] = [];
+  const t = { now: START + 1_000n };
   const trees = (): PoolTrees => {
     const s = new VaultTree(v.stateLeaves), l = new VaultTree(v.labelLeaves);
     return { stateTree: s, labelTree: l, stateRoot: s.root!, labelRoot: l.root! };
@@ -38,7 +41,8 @@ function piecesPool(v: Vault, piecesMax = 5): Pool<{ n: number }> & { binds: Poo
     lifeMs: 270_000n,
     sendMarginMs: 120_000n,
     binds,
-    now: async () => START + 1_000n,
+    t,
+    now: async () => t.now,
     trees: async () => trees(),
     async bind(b) {
       binds.push(b);
@@ -51,115 +55,251 @@ const open: ProofQueue<unknown>[] = [];
 after(async () => {
   for (const q of open) await q.close();
 });
-function queue<R>(v: Vault, pool: Pool<R>, monoNow?: () => number): ProofQueue<R> {
-  const q = openProofQueue({ seed64: SEED, notes: v.ns, pool, provers: [signalsProver() as VaultProver], hardwareConcurrency: 16, ...(monoNow ? { monoNow } : {}) });
+function queue<R>(v: Vault, pool: Pool<R>): ProofQueue<R> {
+  const q = openProofQueue({ seed64: SEED, notes: v.ns, pool, provers: [signalsProver() as VaultProver], hardwareConcurrency: 16 });
   open.push(q as ProofQueue<unknown>);
   return q;
 }
 const jOf = (ref: NoteRef): number => (ref.kind === "change" ? ref.j + 1 : 0);
-const W = (label: bigint, ref: NoteRef): string => {
-  const w = d.freshWallet(SEED, "sol", label, jOf(ref));
+const W = (n: NoteRecord): string => {
+  const w = d.freshWallet(SEED, "sol", n.leaf!.label, jOf(n.ref));
   w.secretKey.fill(0);
   return w.address;
 };
 /** A planted Max rule: each piece adds its chunk less its fee cap, the set pays 1,000 once. */
 const sumLess: TapSpendOf = (ps) => ps.reduce((a, p) => a + p.chunk - p.feeCap, 0n) - 1_000n;
 const BAL: BalancePool = { id: "test:pieces", chain: "solana", scope: SCOPE, asset: "SOL", spendOf: sumLess };
+const VALUES = [usd(2), usd(5.5), usd(10), usd(20)];
+/** The note of leaf value `x`. */
+const noteOf = async (v: Vault, x: bigint): Promise<NoteRecord> => (await v.ns.list()).find((n) => n.leaf?.value === x)!;
+/** The note's tier 1 proof (its own W) and its tier 2 proof (another note's W), as ready() lists them. */
+const tiers = (q: ProofQueue<unknown>, id: string): { own?: ReadyProof<unknown>; piece?: ReadyProof<unknown> } => {
+  const rs = q.ready().filter((r) => r.noteId === id);
+  return { own: rs.find((r) => r.own === true), piece: rs.find((r) => r.own !== true) };
+};
+const bal = async (v: Vault, q: ProofQueue<unknown>) => poolBalances(await v.ns.list(), [BAL], q.ready())[0]!;
 
-test("pieces: every ready proof binds the W of the ready note with the smallest chunk, and the restore finds that W from the notes a buy spends", async () => {
-  const v = await vaultWith([usd(2), usd(5.5), usd(10), usd(20)]);
+test("tiers: each ready note's proof pays its own W (tier 1); once tier 1 has nothing left to make, the largest other notes get a second proof to the primary's W (tier 2), and the restore finds that W", async () => {
+  const v = await vaultWith(VALUES);
   const pool = piecesPool(v);
-  const q = queue(v, pool);
-  await q.refresh();
-  const ready = q.ready();
-  // no proof timed yet: readySetSize(16) = 3, the largest chunks: 20, 10 and 5 (the 5.5 note's)
-  assert.deepEqual(ready.map((r) => r.chunk).sort((a, b) => (a < b ? -1 : 1)), [usd(5), usd(10), usd(20)]);
-  const notes = await Promise.all(ready.map(async (r) => (await v.ns.get(r.noteId))!));
-  const owner = notes.find((n) => n.leaf!.value === usd(5.5))!;
-  const w = W(owner.leaf!.label, owner.ref);
-  for (const r of ready) assert.equal(r.wallet.address, w, `the ${r.chunk} proof pays the smallest piece's W`);
-  for (const r of ready) assert.deepEqual([r.wallet.l, r.wallet.j], [owner.leaf!.label, jOf(owner.ref)]);
-  for (const b of pool.binds) assert.equal(b.wallet.address, w);
-  // a buy that spends all three: the restore lists each spent note's own W, the shared one among them, so it is found
-  const restored = buyWalletsOf(SEED, [{ id: pool.id, chain: "sol", spent: notes.map((n) => ({ ref: n.ref, label: n.leaf!.label })) }]);
+  const q = queue(v, pool as Pool<unknown>);
+  const first = await q.refresh();
+  // tier 1 as a pool of one piece: readySetSize(16) = 3, the largest chunks (20, 10 and the 5.5 note's 5), each its own W
+  assert.equal(first.made.length, 3);
+  const one = q.ready();
+  assert.deepEqual(one.map((r) => r.chunk).sort((a, b) => (a < b ? -1 : 1)), [usd(5), usd(10), usd(20)]);
+  for (const r of one) {
+    const n = (await v.ns.get(r.noteId))!;
+    assert.equal(r.own, true);
+    assert.equal(r.wallet.address, W(n), `the ${r.chunk} proof pays its own note's W`);
+  }
+  // tier 2 in the next pass: the primary is the 20 note; up to piecesMax - 1 = 3 others, the largest: 10, 5.5 and 2
+  const second = await q.refresh();
+  const P = await noteOf(v, usd(20));
+  assert.deepEqual(second.remade, []);
+  assert.equal(second.made.length, 3);
+  assert.ok(!second.made.includes(P.id), "the primary needs no second proof: its own is the set's own");
+  const pieces = q.ready().filter((r) => r.own !== true);
+  assert.equal(pieces.length, 3);
+  for (const r of pieces) assert.equal(r.wallet.address, W(P), "a tier 2 proof pays the primary's W");
+  for (const x of [usd(10), usd(5.5)]) {
+    const n = await noteOf(v, x);
+    const t = tiers(q as ProofQueue<unknown>, n.id);
+    assert.equal(n.state, "HELD");
+    assert.equal(n.attempt, t.own!.attempt, "its tier 1 proof holds it");
+    assert.equal(n.second?.attempt, t.piece!.attempt, "and its tier 2 proof is its second attempt");
+  }
+  const two = await noteOf(v, usd(2));
+  assert.equal(two.attempt, tiers(q as ProofQueue<unknown>, two.id).piece!.attempt, "a note out of tier 1 is held by its tier 2 proof alone");
+  // every W a buy can pay is a spent note's own: a tier 2 set always spends the primary
+  const restored = buyWalletsOf(SEED, [{ id: pool.id, chain: "sol", spent: [P, two].map((n) => ({ ref: n.ref, label: n.leaf!.label })) }]);
   assert.deepEqual(restored.failed, []);
-  assert.ok(restored.wallets.some((x) => x.address === w), "the W every piece paid is a spent note's own");
-  // the balances' Max: the three pieces as one set, the 1,000 once
-  assert.equal(poolBalances(await v.ns.list(), [BAL], ready)[0]!.tap_max, "0.034699");
+  assert.ok(restored.wallets.some((x) => x.address === W(P)));
+  // Max: the primary and its three pieces, 37 less four fees and the 1,000 once, over the 20 alone; each note ready once
+  const b = await bal(v, q as ProofQueue<unknown>);
+  assert.equal(b.ready, "0.037");
+  assert.equal(b.tap_max, "0.036599");
+  // nothing more to make
+  assert.deepEqual(await q.refresh(), { made: [], remade: [], failed: [] });
 });
 
-test("pieces: once a buy takes the owner's note, the proofs left are made again for the next smallest; until then Max counts none of them", async () => {
-  const v = await vaultWith([usd(2), usd(5.5), usd(10), usd(20)]);
+test("tiers: after a buy takes one note's tier 1 proof, every other tier 1 proof is still ready and takeable with no remake; tier 2 is made again for the next primary", async () => {
+  const v = await vaultWith(VALUES);
   const pool = piecesPool(v);
-  const q = queue(v, pool);
+  const q = queue(v, pool as Pool<unknown>);
   await q.refresh();
-  const first = q.ready();
-  const ownerId = first.find((r) => r.chunk === usd(5))!.noteId;
-  const oldW = first[0]!.wallet.address;
-  await q.take(ownerId);
-  // left bound to a W whose note a buy took: no set holds its owner, so Max is 0
-  assert.equal(poolBalances(await v.ns.list(), [BAL], q.ready())[0]!.tap_max, "0");
   await q.refresh();
-  const next = q.ready();
-  // the 2 note joins (the set's room), the smallest, and every proof is made again for its W
-  assert.deepEqual(next.map((r) => r.chunk).sort((a, b) => (a < b ? -1 : 1)), [usd(2), usd(10), usd(20)]);
-  const two = (await v.ns.list()).find((n) => n.leaf?.value === usd(2))!;
-  for (const r of next) assert.equal(r.wallet.address, W(two.leaf!.label, two.ref));
-  assert.notEqual(next[0]!.wallet.address, oldW);
-  assert.equal(poolBalances(await v.ns.list(), [BAL], next)[0]!.tap_max, "0.031699");
+  const [P, X, Y, Z] = await Promise.all([usd(20), usd(10), usd(5.5), usd(2)].map((x) => noteOf(v, x)));
+  const before = new Map(q.ready().filter((r) => r.own === true).map((r) => [r.noteId, r.attempt]));
+  // a buy the primary's note pays alone: one piece
+  const taken = await q.take(P!.id, before.get(P!.id));
+  assert.equal(taken.own, true);
+  assert.equal((await v.ns.get(P!.id))!.state, "RESERVED");
+  // no pass between: the others' tier 1 proofs are the same attempts, still ready
+  for (const n of [X!, Y!]) assert.equal(tiers(q as ProofQueue<unknown>, n.id).own?.attempt, before.get(n.id), "no remake");
+  // the balances right after the buy: the 10 and the 5.5 notes' own proofs; the 2 note's only proof pays a W whose note
+  // is taken, so it is not ready, and nothing says "ready" with Max 0
+  const b = await bal(v, q as ProofQueue<unknown>);
+  assert.equal(b.ready, "0.015");
+  assert.equal(b.tap_max, "0.009899");
+  // and takeable at once, with no pass: the 5.5 note's
+  assert.equal((await q.take(Y!.id, before.get(Y!.id))).noteId, Y!.id);
+  // the next pass fills tier 1 (the 2 note joins, beside its tier 2 proof); the one after makes tier 2 for the new
+  // primary, the 10 note: its own old piece goes, the 2 note's piece is made again for the 10's W
+  const fill = await q.refresh();
+  assert.deepEqual(fill.made, [Z!.id]);
+  assert.deepEqual(fill.remade, []);
+  const again = await q.refresh();
+  assert.deepEqual(again.remade, [Z!.id]);
+  assert.deepEqual(again.made, []);
+  assert.equal(tiers(q as ProofQueue<unknown>, X!.id).piece, undefined, "the primary keeps its own proof only");
+  assert.equal((await v.ns.get(X!.id))!.second, undefined);
+  assert.equal((await v.ns.get(X!.id))!.attempt, before.get(X!.id), "and that proof was never made again");
+  assert.equal(tiers(q as ProofQueue<unknown>, Z!.id).piece!.wallet.address, W(X!));
+  const after = await bal(v, q as ProofQueue<unknown>);
+  assert.equal(after.ready, "0.012");
+  assert.equal(after.tap_max, "0.011799", "the 10 and the 2 to the 10's W: 12 less two fees and the 1,000");
 });
 
-test("pieces: the ready set is what the prover makes in half an epoch at its measured time, at least 1, at most piecesMax; a slow prover keeps fewer and Max says so", async () => {
-  // the rule
-  assert.equal(piecesReadySize(E, [], 5, 16), 3, "no proof timed yet: readySetSize");
-  assert.equal(piecesReadySize(E, [], 5, 2), 1);
-  assert.equal(piecesReadySize(E, [1_500, 1_400, 1_600], 5, 16), 5, "a desktop: 30 s / 1.5 s is 20, at most 5");
-  assert.equal(piecesReadySize(E, [8_300], 5, 16), 3, "a phone on one thread: 30 s / 8.3 s");
-  assert.equal(piecesReadySize(E, [12_000, 14_000], 5, 16), 2);
-  assert.equal(piecesReadySize(E, [40_000], 5, 16), 1, "slower than half an epoch: still 1");
-  // a slow prover: 20 s a proof, so one fits in half an epoch
-  const v = await vaultWith([usd(2), usd(5.5), usd(10), usd(20)]);
+test("tiers: tier 2 waits until tier 1 has nothing left to make, holds at most piecesMax - 1 notes, and a pool of one piece makes none", async () => {
+  const v = await vaultWith([usd(2), usd(5), usd(10), usd(20), usd(50), usd(100)]);
+  const q = queue(v, piecesPool(v, 4) as Pool<unknown>);
+  await q.refresh();
+  assert.ok(q.ready().every((r) => r.own === true), "the first pass is tier 1 only");
+  await q.refresh();
+  const P = await noteOf(v, usd(100));
+  const pieces = q.ready().filter((r) => r.own !== true);
+  assert.deepEqual(pieces.map((r) => r.chunk).sort((a, b) => (a < b ? -1 : 1)), [usd(10), usd(20), usd(50)]);
+  for (const r of pieces) assert.equal(r.wallet.address, W(P));
+  // the notes past the room stay UNSPENT
+  for (const x of [usd(2), usd(5)]) assert.equal((await noteOf(v, x)).state, "UNSPENT");
+  const v1 = await vaultWith(VALUES);
+  const q1 = queue(v1, piecesPool(v1, 1) as Pool<unknown>);
+  await q1.refresh();
+  assert.deepEqual(await q1.refresh(), { made: [], remade: [], failed: [] });
+  assert.ok(q1.ready().every((r) => r.own === true));
+});
+
+test("tiers: a note with both proofs is sent once: taking either leaves the other untakeable, in the queue and in the store", async () => {
+  for (const by of ["own", "piece"] as const) {
+    const v = await vaultWith(VALUES);
+    const q = queue(v, piecesPool(v) as Pool<unknown>);
+    await q.refresh();
+    await q.refresh();
+    const [P, X] = await Promise.all([usd(20), usd(10)].map((x) => noteOf(v, x)));
+    const t = tiers(q as ProofQueue<unknown>, X!.id);
+    const p = tiers(q as ProofQueue<unknown>, P!.id).own!;
+    const [won, lost] = by === "own" ? [t.own!, t.piece!] : [t.piece!, t.own!];
+    if (by === "own") await q.take(X!.id, won.attempt, undefined, 50n);
+    else await q.takeSet([{ noteId: X!.id, attempt: won.attempt }, { noteId: P!.id, attempt: p.attempt }], undefined, 50n);
+    const n = (await v.ns.get(X!.id))!;
+    assert.equal(n.state, "RESERVED");
+    assert.equal(n.attempt, won.attempt, `${by}: RESERVED by the proof taken`);
+    assert.equal(n.contexts!.at(-1)!.context, won.binding.context.toString(), `${by}: its context last`);
+    assert.ok(!n.contexts!.some((c) => c.context === lost.binding.context.toString()), `${by}: the other's unsent context gone`);
+    assert.equal(q.ready().some((r) => r.noteId === X!.id), false, `${by}: no proof of the note left in the queue`);
+    await assert.rejects(q.take(X!.id, lost.attempt), /no ready proof|another attempt/);
+    await assert.rejects(q.takeSet([{ noteId: X!.id, attempt: lost.attempt }]), /no ready proof|another attempt/);
+    await assert.rejects(v.ns.move(X!.id, "HELD", "RESERVED", { attempt: lost.attempt }), /RESERVED, not HELD/);
+  }
+});
+
+test("takeSet, two at once on one note (its tier 1 and its tier 2 proof): one wins, the other is refused, nothing RESERVED twice", async () => {
+  const v = await vaultWith(VALUES);
+  const q = queue(v, piecesPool(v) as Pool<unknown>);
+  await q.refresh();
+  await q.refresh();
+  const [P, X] = await Promise.all([usd(20), usd(10)].map((x) => noteOf(v, x)));
+  const t = tiers(q as ProofQueue<unknown>, X!.id);
+  const p = tiers(q as ProofQueue<unknown>, P!.id).own!;
+  const got = await Promise.allSettled([q.takeSet([{ noteId: X!.id, attempt: t.piece!.attempt }, { noteId: P!.id, attempt: p.attempt }], undefined, 60n), q.takeSet([{ noteId: X!.id, attempt: t.own!.attempt }], undefined, 61n)]);
+  assert.equal(got.filter((x) => x.status === "fulfilled").length, 1);
+  assert.match(String((got.find((x) => x.status === "rejected") as PromiseRejectedResult).reason), /no ready proof|another attempt/);
+  const n = (await v.ns.get(X!.id))!;
+  assert.equal(n.state, "RESERVED");
+  const marks = await v.ns.marks();
+  if (got[0]!.status === "fulfilled") {
+    assert.equal(n.attempt, t.piece!.attempt);
+    assert.equal((await v.ns.get(P!.id))!.state, "RESERVED");
+    assert.equal(marks.get(X!.id)?.lastHeight, 60n);
+  } else {
+    assert.equal(n.attempt, t.own!.attempt);
+    assert.equal((await v.ns.get(P!.id))!.state, "HELD", "the losing set's other note is not RESERVED");
+    assert.equal(tiers(q as ProofQueue<unknown>, P!.id).own, p, "and its proof is still ready");
+    assert.equal(marks.get(X!.id)?.lastHeight, 61n);
+  }
+});
+
+test("takeSet's late proof: its attempt let go and made again, the set's others HELD with their proofs ready, nothing RESERVED; the note keeps its tier 1 proof", async () => {
+  const v = await vaultWith(VALUES);
   const pool = piecesPool(v);
-  let clock = 0;
-  const q = queue(v, pool, () => (clock += 20_000)); // each proof reads the clock before and after: 20 s
+  const q = queue(v, pool as Pool<unknown>);
   await q.refresh();
-  assert.equal(q.ready().length, 3, "the first pass, before any proof is timed");
   await q.refresh();
-  const kept = q.ready();
-  assert.deepEqual(kept.map((r) => r.chunk), [usd(20)], "the piece that adds the most");
-  const twenty = (await v.ns.list()).find((n) => n.leaf?.value === usd(20))!;
-  assert.equal(kept[0]!.wallet.address, W(twenty.leaf!.label, twenty.ref), "its own W: it is the owner now");
-  assert.equal(poolBalances(await v.ns.list(), [BAL], kept)[0]!.tap_max, "0.019899");
-  // the notes let go are UNSPENT again, never held by a proof no one keeps
-  for (const n of await v.ns.list()) if (n.leaf && n.leaf.value !== usd(20)) assert.equal(n.state, "UNSPENT", String(n.leaf.value));
-  // a fast prover: as many as piecesMax
-  const v2 = await vaultWith([usd(2), usd(5), usd(10), usd(20), usd(50), usd(100)]);
-  let c2 = 0;
-  const q2 = queue(v2, piecesPool(v2), () => (c2 += 500));
-  await q2.refresh();
-  await q2.refresh();
-  assert.equal(q2.ready().length, 5);
-  assert.deepEqual(q2.ready().map((r) => r.chunk).sort((a, b) => (a < b ? -1 : 1)), [usd(5), usd(10), usd(20), usd(50), usd(100)]);
+  const [P, X] = await Promise.all([usd(20), usd(10)].map((x) => noteOf(v, x)));
+  const old = tiers(q as ProofQueue<unknown>, X!.id).piece!;
+  // two epochs on: tier 1 is made again first (tier 2 waits), so the tier 2 proofs are from before the previous epoch
+  pool.t.now = START + 2n * E + 1_000n;
+  assert.equal((await q.refresh()).remade.length, 3);
+  const p = tiers(q as ProofQueue<unknown>, P!.id).own!;
+  const own = tiers(q as ProofQueue<unknown>, X!.id).own!;
+  assert.equal(p.epochStartMs, START + 2n * E);
+  await assert.rejects(q.takeSet([{ noteId: X!.id, attempt: old.attempt }, { noteId: P!.id, attempt: p.attempt }], undefined, 70n), /before the previous epoch: it is made again first/);
+  const n = (await v.ns.get(X!.id))!;
+  assert.equal(n.state, "HELD");
+  assert.equal(n.attempt, own.attempt, "held by its tier 1 proof");
+  assert.equal(n.second, undefined, "the late attempt let go");
+  assert.equal(tiers(q as ProofQueue<unknown>, X!.id).own, own, "its tier 1 proof still ready");
+  assert.equal((await v.ns.get(P!.id))!.state, "HELD");
+  assert.equal(tiers(q as ProofQueue<unknown>, P!.id).own, p);
+  for (const m of await v.ns.list()) assert.notEqual(m.state, "RESERVED");
+  // the next pass makes tier 2 again on this epoch
+  const next = await q.refresh();
+  assert.ok(next.made.includes(X!.id), JSON.stringify(next));
+  assert.equal(tiers(q as ProofQueue<unknown>, X!.id).piece!.epochStartMs, START + 2n * E);
 });
 
-test("pieces: the owner's proof alone says its W is its note's own; takeSet reserves the whole set or none", async () => {
-  const v = await vaultWith([usd(2), usd(5.5), usd(10), usd(20)]);
-  const q = queue(v, piecesPool(v));
+test("takeSet, a write failing part way: the ones before it RESERVED with the last height, the failing one's attempt let go (its note HELD by its other proof), the rest HELD", async () => {
+  const v = await vaultWith(VALUES);
+  const q = queue(v, piecesPool(v) as Pool<unknown>);
   await q.refresh();
-  const ready = q.ready();
-  const own = ready.filter((r) => r.own === true);
-  assert.equal(own.length, 1);
-  assert.equal(own[0]!.chunk, usd(5), "the smallest ready chunk's note owns W");
+  await q.refresh();
+  const [P, X, Y] = await Promise.all([usd(20), usd(10), usd(5.5)].map((x) => noteOf(v, x)));
+  const x = tiers(q as ProofQueue<unknown>, X!.id), y = tiers(q as ProofQueue<unknown>, Y!.id);
+  const p = tiers(q as ProofQueue<unknown>, P!.id).own!;
+  v.failPut.on = (rec) => (rec as { id?: string; state?: string }).id === Y!.id && (rec as { state?: string }).state === "RESERVED";
+  await assert.rejects(q.takeSet([{ noteId: X!.id, attempt: x.piece!.attempt }, { noteId: Y!.id, attempt: y.piece!.attempt }, { noteId: P!.id, attempt: p.attempt }], undefined, 77n), /refused the write/);
+  v.failPut.on = undefined;
+  const nx = (await v.ns.get(X!.id))!, ny = (await v.ns.get(Y!.id))!, np = (await v.ns.get(P!.id))!;
+  assert.equal(nx.state, "RESERVED");
+  assert.equal(nx.attempt, x.piece!.attempt);
+  assert.equal((await v.ns.marks()).get(X!.id)?.lastHeight, 77n);
+  assert.equal(ny.state, "HELD");
+  assert.equal(ny.attempt, y.own!.attempt, "the failing one's attempt let go, its tier 1 proof holds it");
+  assert.equal(ny.second, undefined);
+  assert.equal(tiers(q as ProofQueue<unknown>, Y!.id).own, y.own, "and is still ready");
+  assert.equal(np.state, "HELD");
+  assert.equal(np.attempt, p.attempt);
+  assert.equal(tiers(q as ProofQueue<unknown>, P!.id).own, p);
+});
+
+test("takeSet: one attempt that is not the ready one is refused before any write; a note twice is refused; the set is RESERVED whole, in the order given", async () => {
+  const v = await vaultWith(VALUES);
+  const q = queue(v, piecesPool(v) as Pool<unknown>);
+  await q.refresh();
+  await q.refresh();
+  const P = await noteOf(v, usd(20));
+  const set = q.ready().filter((r) => r.wallet.address === W(P));
+  assert.equal(set.length, 4);
+  assert.equal(set.filter((r) => r.own === true).length, 1, "one own proof in the primary's set: the primary's");
+  const items = [...set.filter((r) => r.own !== true), set.find((r) => r.own === true)!].map((r) => ({ noteId: r.noteId, attempt: r.attempt }));
   const state = async (id: string) => (await v.ns.get(id))!.state;
-  // one attempt that is not the ready one: refused before any write, every note still HELD with its proof ready
-  const items = ready.map((r) => ({ noteId: r.noteId, attempt: r.attempt }));
   await assert.rejects(q.takeSet([...items.slice(0, -1), { ...items.at(-1)!, attempt: "another" }], undefined, 99n), /another attempt/);
-  for (const r of ready) assert.equal(await state(r.noteId), "HELD");
-  assert.equal(q.ready().length, ready.length);
+  for (const r of set) assert.equal(await state(r.noteId), "HELD");
+  assert.equal(q.ready().length, 6);
   await assert.rejects(q.takeSet([items[0]!, items[0]!]), /each once/);
-  // the set: every note RESERVED, in the order given, each with the one last height on its mark
   const got = await q.takeSet(items, undefined, 99n);
   assert.deepEqual(got.map((r) => r.noteId), items.map((x) => x.noteId));
-  for (const r of ready) assert.equal(await state(r.noteId), "RESERVED");
-  assert.equal(q.ready().length, 0);
+  for (const r of set) assert.equal(await state(r.noteId), "RESERVED");
+  assert.equal(q.ready().length, 0, "the tier 1 proofs of the notes taken go with them");
 });

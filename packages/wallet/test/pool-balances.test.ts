@@ -371,3 +371,35 @@ test("making (card buy-spends-several-pieces): the value of the HELD notes whose
   assert.equal("making" in poolBalances(notes, [SOL], ready)[0]!, false);
   assert.equal("making" in poolBalances(notes, [SOL], undefined, undefined, undefined, new Set([held.id]))[0]!, false);
 });
+
+test("tiers (card buy-spends-several-pieces): tap_max is the most of the largest single piece and the primary with its ready tier 2 pieces; a note held twice is ready once; making only above ready; ready right after a buy", () => {
+  const L = LAMPORTS;
+  const S: BalancePool = { ...SOL, spendOf: (ps) => ps.reduce((a, p) => a + p.chunk - p.feeCap, 0n) - 1_000n };
+  // a note held by its tier 1 proof (its attempt) and its tier 2 proof (its second attempt, notes/store.ts)
+  const twice = (x: NoteRecord, a2: string): NoteRecord => ({ ...x, second: { attempt: a2, deadlineMs: 2n, context: "2" } });
+  const P = note(S.scope, "HELD", 20n * L);
+  const X = twice(note(S.scope, "HELD", 10n * L), "x2");
+  const Y = twice(note(S.scope, "HELD", 5n * L), "y2");
+  const own = (x: NoteRecord, chunk: bigint, feeCap = 0n): BalanceProof => proof(S, x, chunk, x.attempt!, feeCap);
+  // a proof of x paying by's own W
+  const to = (x: NoteRecord, by: NoteRecord, attempt: string, chunk: bigint, feeCap = 0n): BalanceProof => ({ ...proof(S, x, chunk, attempt, feeCap), wallet: { l: by.leaf!.label, j: 0, address: `w-${by.id}` } });
+  const ready = [own(P, 20n * L), own(X, 10n * L), own(Y, 5n * L), to(X, P, "x2", 10n * L), to(Y, P, "y2", 5n * L)];
+  const read = (r: readonly BalanceProof[] = ready, notes: readonly NoteRecord[] = [P, X, Y], making?: ReadonlySet<string>) => poolBalances(notes, [S], r, undefined, undefined, making)[0]!;
+  // each note once: 35; Max: the primary and its two pieces, 35 less the 1,000, over the 20 alone
+  assert.equal(read().ready, "35");
+  assert.equal(read().tap_max, "34.999999");
+  // a piece that adds less than nothing (its fee over its chunk): the primary alone is more
+  assert.equal(read([own(P, 20n * L), own(X, 10n * L), to(X, P, "x2", L, 3n * L)]).tap_max, "19.999999");
+  // making: Q's first proof and R's own proof are being made (R's one ready proof pays a W whose note is gone, so it is
+  // not ready); X's piece is being made again, but X is ready already
+  const Q = note(S.scope, "HELD", 7n * L);
+  const R = note(S.scope, "HELD", 3n * L);
+  const gone = { ...P, id: "gone" };
+  const m = read([...ready, to(R, gone, R.attempt!, 3n * L)], [P, X, Y, Q, R], new Set([X.id, Q.id, R.id]));
+  assert.equal(m.ready, "35", "R's piece to a W whose note is gone is not ready");
+  assert.equal(m.making, "10", "Q's and R's values only: making is what is not ready yet");
+  // right after a buy took P: X and Y are ready by their own proofs; their pieces to P's W are not, and Max is X's
+  const after = read(ready, [{ ...P, state: "RESERVED" }, X, Y]);
+  assert.equal(after.ready, "15");
+  assert.equal(after.tap_max, "9.999999");
+});
