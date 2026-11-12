@@ -1,0 +1,53 @@
+{
+ "good": {
+  "at": "2026-11-12T14:52:54.389Z",
+  "sign": {
+   "source": "https://confidential.unrealized.trade/",
+   "pageStatus": 200,
+   "js": [
+    {
+     "url": "/app.js",
+     "status": 200,
+     "integrity": "sha384-2VYsyTuX+Z1WHrisxFwMPx6x1TzQFopKMnjAf3YRKNpCCOK96fM9J/vXgzVdG3hn",
+     "sha384": "sha384-2VYsyTuX+Z1WHrisxFwMPx6x1TzQFopKMnjAf3YRKNpCCOK96fM9J/vXgzVdG3hn",
+     "found": [
+      "each lane walks in a module Worker of /walk-worker.js",
+      "its URL is made by the policy walk-worker",
+      "the page hands the restore its Workers"
+     ]
+    }
+   ],
+   "walk": {
+    "url": "/walk-worker.js",
+    "status": 200,
+    "sha384": "sha384-hm9u/qpz1mS6nLPt/si4meY50ij4AzeFAI7R2vXTUt+HavHERT/VXMXhgNG2eeTd",
+    "found": [
+     "the walk Worker refuses a lane outside 0 to 7",
+     "the walk Worker refuses masters that are not bigints"
+    ]
+   }
+  }
+ },
+ "bad": {
+  "at": "2026-11-12T14:52:55.816Z",
+  "sign": {
+   "source": "https://confidential.unrealized.trade/",
+   "pageStatus": 200,
+   "js": [
+    {
+     "url": "/app.js",
+     "status": 200,
+     "integrity": "sha384-1Cs+kXi4vC0MgG0eYnb/MVEEldR/qC5u+ZnVLhj+AfbJhb588o8ePhq8U2gSFgqv",
+     "sha384": "sha384-1Cs+kXi4vC0MgG0eYnb/MVEEldR/qC5u+ZnVLhj+AfbJhb588o8ePhq8U2gSFgqv",
+     "found": []
+    }
+   ],
+   "walk": {
+    "url": "/walk-worker.js",
+    "status": 200,
+    "sha384": "sha384-5H16G80v+uqc2TybMe69s3ilWtyeUQk2OmT5AQ0ZN8ASa8EJoN9rB25OvrxEIn0S",
+    "found": []
+   }
+  }
+ }
+}

@@ -170,10 +170,6 @@ const restore = !framed
       // `written`, whose neighbours wallet-restore-reads-ux's bundle check reads
       holdingsWritten: (chain) => testnet?.evmHoldingsRestored(chain),
       written: () => void testnet?.proofs().catch(() => {}),
-      // each pool's walk in Workers (card restore-shows-the-balance-in-seconds): a module Worker per lane from this
-      // origin's /walk-worker.js, through the Trusted Types policy walk-worker (src/walk-workers.ts); a lane whose Worker
-      // cannot start walks on the page
-      walkers: walkWorkerPort,
       // a pool's U_X reads and carry on its chain (card wallet-restore-reads-ux, src/pool-restore.ts restoreUxOf): the
       // follow's own reader on the restore's two public operators (never our helper relay), and the follow's own deposit
       // (poolFollowDeps below), so a restore and a live pool deposit read U_X and carry it the same way; null on a chain
@@ -190,6 +186,10 @@ const restore = !framed
         const unread = [...e.held, ...e.retry];
         if (unread.length > 0) console.warn(`restore ids unread: try ${e.tries}, asked again: ${unread.join("; ")}`);
       },
+      // each pool's walk in Workers (card restore-shows-the-balance-in-seconds): a module Worker per lane from this
+      // origin's /walk-worker.js, through the Trusted Types policy walk-worker (src/walk-workers.ts); a lane whose Worker
+      // cannot start walks on the page. Last, so the neighbours other bundle checks read keep their order
+      walkers: walkWorkerPort,
     })
   : null;
 // a deposit carried from its checked address to its note with no tap (src/deposit-follow.ts, card wallet-deposit-follow):

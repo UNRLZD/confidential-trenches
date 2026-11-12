@@ -62,6 +62,7 @@ export const IN_PROCESS = [
   viaRead("pool-deposit-follow", () => import("../live-checks/pool-deposit-follow.mjs")),
   viaRead("evm-deposit-route-mainnet", () => import("../live-checks/evm-deposit-route-mainnet.mjs")),
   viaRead("solana-release-reads-paced", () => import("../live-checks/solana-release-reads-paced.mjs")),
+  { key: "restore-shows-the-balance-in-seconds", host: "sign", load: () => import("../live-checks/restore-shows-the-balance-in-seconds.mjs"), run: async (m, f) => m.judge(await m.collect({ fetchFn: f })) },
   viaRead("pool-buy-record-never-stays-sent", () => import("../live-checks/pool-buy-record-never-stays-sent.mjs")),
   viaRead("solana-legs-checked", () => import("../live-checks/solana-legs-checked.mjs")),
   viaRead("signers-own-bytes", () => import("../live-checks/signers-own-bytes.mjs")),

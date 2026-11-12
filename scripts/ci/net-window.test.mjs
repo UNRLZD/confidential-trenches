@@ -265,6 +265,7 @@ export const CHANGED = [
   "scripts/live-checks/pool-sol-mainnet-run.mjs",
   "scripts/live-checks/pool-sol-mainnet-run.record.mjs",
   "scripts/live-checks/withdraw-form-shows-what-you-can-send.mjs",
+  "scripts/live-checks/restore-shows-the-balance-in-seconds.mjs",
 ];
 
 // Scripts in the searched folders that open no connection from Node, and why.
