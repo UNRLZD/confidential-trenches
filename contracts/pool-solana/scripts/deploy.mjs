@@ -218,6 +218,10 @@ const raise = (floor, slot) => {
  * finality depth, as the wallet's SOL_LAG_SLOTS), then it is thrown transient for the caller's own read-again. */
 const LAG_TRIES = 32;
 const LAG_MS = 400;
+/** A send's preflight answer from a node that does not hold its blockhash: err BlockhashNotFound in the simulation
+ * failure's data, as a provider answered the PumpSwap table paste (12 Nov 05:57Z: message "Transaction simulation
+ * failed", the reason only in data.err), or Agave's own "Blockhash not found" in the message. */
+const blockhashNotFound = (e) => e?.rpcError?.data?.err === "BlockhashNotFound" || /Blockhash not found/i.test(String(e?.rpcError?.message ?? e?.message ?? ""));
 
 /**
  * Sends a transaction and waits until it is confirmed with no error, resending while it is not. `journal.signed` is
@@ -258,12 +262,19 @@ export async function sendAndConfirm(fetchFn, url, ixs, payer, keys, { step = "a
       await call("sendTransaction", [tx.base64, { encoding: "base64", preflightCommitment: "confirmed" }]);
     } catch (e) {
       // a resend of a transaction that already landed ("already been processed") is not a failure: its status says;
-      // a send that failed past its tries, or that a load-balanced RPC's node answered "Blockhash not found" (-32002:
-      // that node is behind the one the blockhash came from) or "node is behind" (-32005), is sent again at the next
-      // pass: the same bytes, the same signature, so it lands at most once
+      // a send that failed past its tries, or that a load-balanced RPC's node answered BlockhashNotFound (-32002: that
+      // node is behind the one the blockhash came from) or "node is behind" (-32005), is sent again at the next pass:
+      // the same bytes, the same signature, so it lands at most once
+      const behind = blockhashNotFound(e);
+      // the block height before the status (as the settle reads them): past the blockhash's last valid one with no
+      // status after it, the send can never land, and the step stops by name instead of waiting out its deadline
+      const height = behind ? await call("getBlockHeight", [{ commitment: "confirmed" }]).catch(() => null) : null;
       if (seen(await status(true))) return tx.signature;
       lastSend = e.message;
-      if (!e.transient && !/already been processed|Blockhash not found|"code":-32005/i.test(e.message)) throw e;
+      if (Number.isSafeInteger(height) && height > value.lastValidBlockHeight) {
+        throw new Error(`${step}: its blockhash expired (block height ${height}, past its last valid ${value.lastValidBlockHeight}) and ${tx.signature} has no status: it can no longer land (the last send's answer: ${lastSend})`);
+      }
+      if (!e.transient && !behind && !/already been processed|"code":-32005/i.test(e.message)) throw e;
     }
     for (let i = 0; i < 4; i++) {
       await wait(500);
