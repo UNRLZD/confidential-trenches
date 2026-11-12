@@ -1,5 +1,5 @@
 // A deposit, buy, sell and withdraw of the Solana pool on a local copy of mainnet, with no real money.
-//   <heavy.sh> sol-copy -- node packages/signpage/scripts/sol-mainnet-copy.mjs <out.json> [curve=<mint>] [mayhem=<mint>] [graduated=<mint>]
+//   node packages/signpage/scripts/sol-mainnet-copy.mjs <out.json> [curve=<mint>] [mayhem=<mint>] [graduated=<mint>]
 // - Picks one coin of each kind (an open bonding curve, a Mayhem curve, a graduated PumpSwap coin) from the helper's
 //   GET /v1/market/lists?chain=solana unless given, each classified by its own accounts read on mainnet.
 // - Reads, on public mainnet RPCs only and paced (read-only: nothing is signed or sent there), every account the pool
