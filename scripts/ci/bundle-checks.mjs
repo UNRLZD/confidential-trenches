@@ -97,6 +97,9 @@ export const IN_PROCESS = [
   viaRead("fresh-money-spendable-at-once", () => import("../live-checks/fresh-money-spendable-at-once.mjs")),
   // the bundle part only (step 5's U_X read and carry): the providers' answers are past the build
   { key: "wallet-restore-reads-ux", host: "sign", load: () => import("../live-checks/wallet-restore-reads-ux.mjs"), run: async (m, f) => m.judgeBundle(await m.readBundle(f)) },
+  // the bundle part only (the one rule, the deposit address, the follow's reader, the withdraw): the pools on two RPCs
+  // and the helper's fee against the device's are past the build
+  { key: "evm-deposit-on-mainnet", host: "sign", load: () => import("../live-checks/evm-deposit-on-mainnet.mjs"), run: async (m, f) => m.judgeBundle(await m.readBundle(f)) },
   // the sign part only, against the pin of the build it serves (live: this checkout's): the index pins its /app.js and
   // serves that file; the helper part reads the helper, past the build
   { key: "withdraw-fee-busy-waits", host: "sign", load: () => import("../live-checks/withdraw-fee-busy-waits.mjs"), run: async (m, f, dirs) => m.judgeSign(await m.readSign(SIGN, f, m.pinOf(readFileSync(path.join(dirs.sign, "index.html"), "utf8")))) },
@@ -140,7 +143,6 @@ export const OUT = {
   "signpage-solana-trade": "the page's CSP header, and a run record's transactions on two RPCs",
   "signpage-evm-pool-buy": "a run record's buys on two testnet RPCs each and the helper's send route; on the build, the mainnet refusal its bundle part reads is held by packages/signpage/test/pool-network.test.ts (pool.buy on Base and Robinhood not_allowed)",
   "evm-withdraw-mainnet": "a run record's withdraws (each a release and W's onward send) on two testnet RPCs each; on the build, its bundle part is held by packages/signpage/scripts/build-network.test.mjs (the EVM withdraw's release in both builds)",
-  "evm-deposit-on-mainnet": "mainnet Base and Robinhood RPC reads of each pool's code and scope on its two RPCs, and the helper's /v1/pool/fee for each, never the build alone; on the build, its page part is held by packages/signpage/test/pool-way-out.test.ts and main-mainnet-pools.test.ts, and by packages/signpage/scripts/build-network.test.mjs (the EVM deposit and withdraw in both builds)",
   "signpage-evm-pool-sell": "a run record's sales on two testnet RPCs each and the helper's sell route; on the build, the mainnet refusal its bundle part reads is held by packages/signpage/test/pool-network.test.ts (pool.sell on Base and Robinhood not_allowed)",
   "signpage-positions-evm": "a run record's Base Sepolia buy and sell, and W's balance, on two testnet RPCs; the testnet build's positions pass is held by packages/signpage/test/positions-evm.test.ts (the mainnet build pins no EVM pool)",
   "signpage-withdraw-handoff": "the page's CSP header, and the testnet fee read on the release helper and RPCs",

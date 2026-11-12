@@ -41,10 +41,24 @@ test("the excerpt of this build: every mark holds, no wallet reader yet", () => 
   assert.equal(f.reader, "none");
 });
 
-test("the wallet reader wired: read as wired, never judged", () => {
-  const f = facts(INDEX, JS.replace(/wallet:[\w$]+=>void 0,notes:/, "wallet:pageEvmWalletRpc,notes:"));
+// pool-testnet.ts pageEvmWalletRpc as SIGN_HOST's build minifies it (evm-deposit-on-mainnet.test.mjs plants the same), and
+// its helper address: planted beside the excerpt, which holds neither
+const HELPER_READER =
+  ";var H=`https://ct-api.unrealized.trade`;var pageEvmWalletRpc=(e,t=!1)=>{if(t)return;let n=M.get(e);if(n===void 0){let t=C(H,e);M.set(e,n=Object.assign((e,n)=>t(e,n),{url:`${H}/v1/rpc/${e}`}))}return n};";
+
+test("the wallet reader wired (the helper's reader by its name): read as wired, never judged", () => {
+  const f = facts(INDEX, JS.replace(/wallet:[\w$]+=>void 0,notes:/, "wallet:pageEvmWalletRpc,notes:") + HELPER_READER);
   assert.equal(f.reader, "wired");
   for (const k of MARKS) assert.equal(f[k], true, k);
+});
+
+test("review P3-4: a wallet reader that is not the helper's route (another function, or the reader with another address) reads other and FAILs on wired", () => {
+  const other = facts(INDEX, JS.replace(/wallet:[\w$]+=>void 0,notes:/, "wallet:e=>Y(e),notes:") + HELPER_READER + "var Y=e=>fetch(e);");
+  assert.equal(other.reader, "other");
+  assert.equal(other.wired, false);
+  const elsewhere = facts(INDEX, JS.replace(/wallet:[\w$]+=>void 0,notes:/, "wallet:pageEvmWalletRpc,notes:") + HELPER_READER.replace("https://ct-api.unrealized.trade", "https://rpc.example"));
+  assert.equal(elsewhere.reader, "other");
+  assert.equal(elsewhere.wired, false);
 });
 
 const PLANTED = [
@@ -114,7 +128,7 @@ test("planted in the excerpt: depositFrom's Solana branch with the withdraw rule
 });
 
 test("planted in the excerpt: main.ts's reader as a call (wallet:e=>Z(e), the helper's route): PASS and wired; with it, a route that quotes a non-testnet page with no reader: FAIL on wired", () => {
-  const call = (js) => js.replace(/wallet:([\w$]+)=>void 0,notes:/, "wallet:$1=>Z($1),notes:");
+  const call = (js) => js.replace(/wallet:([\w$]+)=>void 0,notes:/, "wallet:$1=>pageEvmWalletRpc($1),notes:") + HELPER_READER;
   const js = call(JS);
   assert.notEqual(js, JS, "the reader's site is in the build");
   assert.deepEqual(judge(pinned(js)).lines, []);
