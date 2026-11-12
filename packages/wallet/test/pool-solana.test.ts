@@ -11,7 +11,7 @@ import { base58, base64 } from "@scure/base";
 import { SOLANA_ANSWER_MAX_BYTES, VaultTree, solanaJsonRpc, vaultLabelOf, type SolanaRpc } from "@blindfill/kit";
 import * as d from "../src/derive/index.ts";
 import { noteCommitment, noteSecrets } from "../src/notes/secrets.ts";
-import { SOL_MARK_BUCKET, SOL_MARK_READ_BATCH, SOL_MARK_READ_BATCH_MAX, SOL_MARK_TAG, SOL_PRE_MARK_LEN, SOL_SETTLE_ROUNDS, SOL_SPENT_MARK_LEN, type SolanaPoolCache, type SolanaSettled, solanaMarkOf, solanaMarksListed, solanaMarksUnion, solanaRestore, solanaRestoreNotes, solanaSettleReserved, solanaSettleSpent, type SolanaSpentMark } from "../src/pool/solana-restore.ts";
+import { SOL_MARK_BUCKET, SOL_MARK_READ_BATCH, SOL_MARK_READ_BATCH_MAX, SOL_MARK_READS_IN_FLIGHT, SOL_MARK_TAG, SOL_PRE_MARK_LEN, SOL_SETTLE_ROUNDS, SOL_SPENT_MARK_LEN, type SolanaPoolCache, type SolanaSettled, solanaMarkOf, solanaMarksListed, solanaMarksUnion, solanaRestore, solanaRestoreNotes, solanaSettleReserved, solanaSettleSpent, type SolanaSpentMark } from "../src/pool/solana-restore.ts";
 import { IDBFactory } from "fake-indexeddb";
 import { createRpc as createHelperRpc } from "../../../apps/helper/src/rpc/rpc.ts";
 import { SOLANA_RPC_WINDOW_RETRY, solanaHelperRpc, solanaPacedRpc } from "../../kit/src/trade/solana/send.ts";
@@ -2187,6 +2187,27 @@ test("sol-marks-scale: a lister naming a bucket full of made-up marks, a slot pa
   await assert.rejects(solanaMarksListed(liar, [honest("https://a.example"), honest("https://b.example")], PROGRAM), new RegExp(`^Error: rpc [01]: listed mark ${fake(0, 301)[0]} is not on it$`));
   // the deposit marks' buckets 0 and 1, the refusal at bucket 1's read: no list after it
   assert.deepEqual(log, ["l 0", "l 1"]);
+});
+
+// Review of 4dd90d23f, P3: a list's mark batches go side by side, SOL_MARK_READS_IN_FLIGHT at a time on each RPC, and
+// one refused stops the rest: no batch starts after it (before, every batch of the list was handed to the queue at once
+// and went out after the refusal too)
+test("a refused mark batch: no other batch starts after it, on either RPC; those already out are the in-flight few", async () => {
+  const { chain } = bigPool(300, 10);
+  const sent = [0, 0];
+  const slow = (k: 0 | 1, url: string): SolanaRpc => Object.assign(async (m: string, p: readonly unknown[]) => {
+    if (m === "getMultipleAccounts") {
+      sent[k]!++;
+      await new Promise((r) => setTimeout(r, 5));
+      if (k === 0 && sent[0] === 1) throw new Error("refused");
+    }
+    return rpc({ ...chain, slot: Math.max(chain.slot, (p[1] as { minContextSlot?: number } | undefined)?.minContextSlot ?? 0) }, MAINNET)(m, p);
+  }, { url });
+  const lister: SolanaRpc = Object.assign(async (m: string, p: readonly unknown[]) => rpc(chain, MAINNET)(m, p), { url: "https://l.example" });
+  await assert.rejects(solanaMarksListed(lister, [slow(0, "https://a.example"), slow(1, "https://b.example")], PROGRAM, undefined, undefined, undefined, undefined, { batches: [1, 1] }), /refused/);
+  await new Promise((r) => setTimeout(r, 50));
+  // bucket 0 lists 256 marks: 256 batches of one on each RPC; the refusal is RPC 0's first
+  assert.ok(sent[0]! <= SOL_MARK_READS_IN_FLIGHT && sent[1]! <= SOL_MARK_READS_IN_FLIGHT, `batches out after the refusal: ${sent.join(", ")}`);
 });
 
 test("sol-marks-scale: a listed mark outside the bucket asked for is refused (a lister that ignores the filter)", async () => {

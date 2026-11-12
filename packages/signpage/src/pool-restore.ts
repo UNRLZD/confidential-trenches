@@ -779,7 +779,6 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
         // read. On a restored device nothing on the page reads a vault deposit id the lost device left money on; that
         // was so before this walk too
         const settled = await Promise.allSettled(reads);
-        if (floorFailed !== null) throw (floorFailed as { e: unknown }).e;
         settled.forEach((r, k) => {
           const p = pools[k]!;
           if (p.chain === "near") {
@@ -793,6 +792,9 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
             // two open together), which holds no note of this device: it holds back no other chain's restore
           } else if (h.addressed?.(chainOf(p)) ?? true) why.push(`${label(p)}: ${r.reason instanceof Error ? r.reason.message : "the walk failed"}`);
         });
+        // a floor that threw ends the run on its error, after every other pool's reason is in `why` (the catch below
+        // adds its own)
+        if (floorFailed !== null) throw (floorFailed as { e: unknown }).e;
         signal.throwIfAborted();
         // a walk that failed: the next load walks that pool again, so step 5 stays owed after it (the marker)
         const walkFailed = why.length > 0;

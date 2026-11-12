@@ -176,6 +176,9 @@ export async function solanaMarksListed(lister: SolanaRpc, rpcs: readonly [Solan
   }
 }
 
+/** The most of one RPC's mark batches out at once in a list's read (see listed's `read`). */
+export const SOL_MARK_READS_IN_FLIGHT = 4;
+
 /** Mark accounts' bytes as SolanaMarks: z 0 the spent marks', 1 the pre-marks'. */
 function marksOf(spentBytes: ReadonlyMap<string, Uint8Array>, preBytes: ReadonlyMap<string, Uint8Array>, slot: number): SolanaMarks {
   const u64 = (d: Uint8Array, at: number): bigint => new DataView(d.buffer, d.byteOffset, d.length).getBigUint64(at, true);
@@ -206,14 +209,21 @@ async function listed(lister: SolanaRpc, rpcs: readonly [SolanaRpc, SolanaRpc], 
     return b;
   };
   // both RPCs' bytes of `keys`, each at or past `min` and its own last slot. Each RPC's batches go side by side (card
-  // closed-positions-after-a-restore): its paced queue (the kit's solanaPacedRpc) holds them to the provider's limit, and
-  // every answer is held to the same slot rule and the same per-account checks as one read after another was
+  // closed-positions-after-a-restore), SOL_MARK_READS_IN_FLIGHT at a time: its paced queue (the kit's solanaPacedRpc)
+  // holds them to the provider's limit, and every answer is held to the same slot rule and the same per-account checks
+  // as one read after another was. A batch starts only while the run is on, so after a refusal no batch goes out but
+  // those already sent beside it (SOL_MARK_READS_IN_FLIGHT - 1 at most on each RPC), never one still waiting to start
   const read = async (keys: readonly string[], min: number): Promise<string[]> => {
     const got = await Promise.all(([0, 1] as const).map(async (k) => {
       const parts: string[][] = [];
       for (let i = 0; i < keys.length; i += batches[k]) parts.push(keys.slice(i, i + batches[k]));
       const at = Math.max(min, slots[k]!);
-      const datas = await Promise.all(parts.map(async (part) => {
+      const datas: string[][] = new Array(parts.length);
+      let nextPart = 0;
+      const runner = async (): Promise<void> => {
+        for (let j = nextPart++; j < parts.length; j = nextPart++) datas[j] = await one(parts[j]!);
+      };
+      const one = async (part: string[]): Promise<string[]> => {
         signal.throwIfAborted();
         const a = (await solanaLagRetry(() => rpcs[k]("getMultipleAccounts", [part, { commitment: "finalized", encoding: "base64", ...(at > 0 ? { minContextSlot: at } : {}) }]), lagWait, signal)) as { context?: { slot?: unknown }; value?: unknown };
         const slot = a?.context?.slot;
@@ -225,7 +235,9 @@ async function listed(lister: SolanaRpc, rpcs: readonly [SolanaRpc, SolanaRpc], 
           if (x?.owner !== program || !Array.isArray(d) || d[1] !== "base64" || typeof d[0] !== "string") throw new Error(`rpc ${k}: listed mark ${part[j]}: not the program's account`);
           return d[0];
         });
-      }));
+      };
+      // the first refusal stops the run (`signal`): no runner starts another batch
+      await Promise.all(Array.from({ length: Math.min(SOL_MARK_READS_IN_FLIGHT, parts.length) }, runner));
       return datas.flat();
     }));
     keys.forEach((key, j) => {

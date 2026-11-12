@@ -311,6 +311,57 @@ test("signed out mid-run: the run stops, its seed zeroed, nothing written after"
   assert.equal((await opOf(w.store, k!))?.stage, "reading");
 });
 
+// Review of 4dd90d23f, P2: a pool's notes are written as its walk ends, so a sign out between two pools' ends keeps the
+// first's and never writes the second's; and a floor that throws stops every floor after it, the run ending stalled
+test("signed out between two pools' ends: Solana's notes are written before it, the held EVM pool's never", async () => {
+  let release: () => void = () => {};
+  const slow = new Promise<void>((r) => (release = r));
+  const w = await world({
+    evm: (async (a: { signal: AbortSignal }) => (await slow, a.signal.throwIfAborted(), { notes: notesOf(EVM_SCOPE, LABEL_E, 2000n), spends: [], elsewhere: [], wallets: [], block: 1n })) as never,
+  });
+  const run = w.r.auto();
+  const sol = notesOf(SOL_SCOPE, LABEL_S, 1000n).map((n) => `${refKey(n.ref)} ${n.state}`).sort();
+  await until("Solana's notes written", async () => JSON.stringify(await listed(w.store)) === JSON.stringify(sol));
+  w.r.signedOut();
+  release();
+  assert.equal(await run, "stalled");
+  assert.deepEqual(await listed(w.store), sol, "the EVM pool, ended after the sign out, writes nothing");
+  assert.ok(w.seeds.every((s) => s.every((b) => b === 0)));
+});
+
+test("the first pool's write refused: no pool after it is written, and the run ends stalled", async () => {
+  let release: () => void = () => {};
+  const slow = new Promise<void>((r) => (release = r));
+  // the store refuses the Solana pool's floor (its deposit counter's raise): that pool's write throws
+  let refuse = true;
+  const inner = await openWalletStore({ name: `restore-refuse-${db++}`, indexedDB: new IDBFactory() });
+  closers.push(() => inner.close());
+  const refusing = new Proxy(inner, { get: (t, k) => (k === "raiseDepositIndex" ? (scope: bigint, n: number) => (refuse && scope === SOL_SCOPE ? Promise.reject(new Error("write refused")) : t.raiseDepositIndex(scope, n)) : typeof (t as never)[k] === "function" ? ((t as never)[k] as (...a: unknown[]) => unknown).bind(t) : (t as never)[k]) });
+  const w = await world({
+    store: async () => refusing,
+    evm: (async (a: { signal: AbortSignal }) => (await slow, a.signal.throwIfAborted(), { notes: notesOf(EVM_SCOPE, LABEL_E, 2000n), spends: [], elsewhere: [], wallets: [], block: 1n })) as never,
+  });
+  const run = w.r.auto();
+  await until("Solana's walk ended", async () => (await inner.keys("ops")).length === 1);
+  for (let i = 0; i < 10; i++) await new Promise((r) => setTimeout(r, 20));
+  release();
+  assert.equal(await run, "stalled");
+  refuse = false;
+  assert.deepEqual(await listed(inner), [], "neither pool written: Solana's refused, the EVM pool's after it never");
+  assert.equal(w.ends.at(-1)?.stage, "stalled");
+  assert.ok(w.ends.at(-1)?.why.some((x) => x.includes("write refused")), JSON.stringify(w.ends.at(-1)?.why));
+});
+
+test("a floor's throw and another pool's failed walk: the run's end names both (review of 4dd90d23f, P3)", async () => {
+  const inner = await openWalletStore({ name: `restore-refuse-${db++}`, indexedDB: new IDBFactory() });
+  closers.push(() => inner.close());
+  const refusing = new Proxy(inner, { get: (t, k) => (k === "raiseDepositIndex" ? (scope: bigint, n: number) => (scope === SOL_SCOPE ? Promise.reject(new Error("write refused")) : t.raiseDepositIndex(scope, n)) : typeof (t as never)[k] === "function" ? ((t as never)[k] as (...a: unknown[]) => unknown).bind(t) : (t as never)[k]) });
+  const w = await world({ store: async () => refusing, evm: (async () => { throw new Error("evm down"); }) as never });
+  assert.equal(await w.r.auto(), "stalled");
+  const why = w.ends.at(-1)?.why ?? [];
+  assert.ok(why.some((x) => x.includes("write refused")) && why.some((x) => x.includes("evm down")), JSON.stringify(why));
+});
+
 test("pagePools: the mainnet build pins the NEAR vault on its release pair (card signpage-restores-near-vault-notes), the Solana pool (card sol-pools-mainnet-pin), read on the page's Solana pair, then Base's and Robinhood's (card evm-pools-on-mainnet), each on its pool list", async () => {
   const { SOL_POOLS, solanaPoolOf } = await import("../../wallet/src/pool/solana.ts");
   const { EVM_POOLS, evmPoolScopeOf } = await import("../../wallet/src/pool/evm.ts");
