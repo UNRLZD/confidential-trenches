@@ -3,6 +3,7 @@
 // one W a request.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readdirSync, readFileSync } from "node:fs";
 import { entropyToWords, freshWallet, wordsToSeed64 } from "@blindfill/wallet/derive";
 import type { NoteRecord } from "../../wallet/src/notes/store.ts";
 import { jOf } from "../../wallet/src/pool/queue.ts";
@@ -86,4 +87,34 @@ test("heldWs: an answer out of shape throws, so nothing is found on it", async (
   }
   await assert.rejects(heldWs(ws(1), null, (async () => null) as unknown as SolanaRpc), /no value/);
   await assert.rejects(heldWs(ws(1), null, (async () => ({ value: { lamports: 1.5 } })) as unknown as SolanaRpc), /not a count/);
+});
+
+// The found W's rule sweeps only a W whose owed record says `found: true` (pool-sell.ts rentBackRun's `bare`): one writer
+// of that key, pool-testnet.ts's findHeldWs, after both RPCs read W holding SOL and its own note UNSPENT or HELD. A second
+// writer anywhere in the page or the wallet would make a W the rule never read the same way.
+const FOUND_WRITE = /\bfound\s*:\s*(?:true|!0)\b/g;
+/** Each `found: true` written in `files` ({ path: source }), as "path:line". */
+function foundWriters(files: Record<string, string>): string[] {
+  const out: string[] = [];
+  for (const [path, src] of Object.entries(files))
+    src.split("\n").forEach((l, i) => {
+      if (FOUND_WRITE.test(l)) out.push(`${path}:${i + 1}`);
+      FOUND_WRITE.lastIndex = 0;
+    });
+  return out;
+}
+const sources = (dir: URL): Record<string, string> => {
+  const out: Record<string, string> = {};
+  for (const f of readdirSync(dir, { recursive: true }) as string[]) if (f.endsWith(".ts")) out[`${dir.pathname.split("/packages/")[1]}${f}`] = readFileSync(new URL(f, dir), "utf8");
+  return out;
+};
+test("an owed rent back is written found: true in one place only, pool-testnet.ts's findHeldWs", () => {
+  const files = { ...sources(new URL("../src/", import.meta.url)), ...sources(new URL("../../wallet/src/", import.meta.url)) };
+  const got = foundWriters(files);
+  assert.equal(got.length, 1, got.join(", "));
+  assert.match(got[0]!, /^signpage\/src\/pool-testnet\.ts:\d+$/);
+  const line = files["signpage/src/pool-testnet.ts"]!.split("\n")[Number(got[0]!.split(":")[1]) - 1]!;
+  assert.match(line, /for \(const w of await heldWs\(ws, batch, rpcs\("pass"\)\[0\]\)\) await o\.put\(\{ address: w\.address, l: w\.l\.toString\(\), j: w\.j, mints: \[\], passes: 0, found: true \}\);/);
+  // planted: a second writer, as written or as minified, is named
+  assert.deepEqual(foundWriters({ ...files, "x.ts": "await o.put({ ...r, found: true });\nconst y = { found: !0 };" }).length, 3);
 });

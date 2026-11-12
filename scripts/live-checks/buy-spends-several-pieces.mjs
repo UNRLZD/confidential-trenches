@@ -7,8 +7,11 @@
 //   - "two_wallets": a tag 2 signed by one W, then a tag 3 signed by another: refused on the bytes, 422 wallets_differ;
 //   - "one_tx": the tag 3 alone: no bundle of pieces, refused on the bytes, 400 bad_shape;
 //   - "one_wallet": a tag 2 and a tag 3 of the same W: every check on the bytes passes, so the helper reaches its reads
-//     and refuses the plant's junk blockhash, 422 blockhash_not_found (simulation_failed when a provider replaces it),
-//     or, on mainnet at an epoch whose fee prices the plant's relay fee under the bundle's cost, fee_below_cost first.
+//     and refuses the plant's junk blockhash, 422 blockhash_not_found (simulation_failed when a provider replaces it).
+//     Its relay fee is the fee GET /v1/pool/fee answers now, the epoch's, and it sets no priority fee, so the bundle's
+//     tip cap is twice the kit's priority budget at that fee less the tip's own 5,000 (at least two fee steps less the
+//     page reserve each, the kit's solanaPoolFee): over SOLANA_JITO_TIP_MIN at any rent up to 100 times today's, so a
+//     mainnet helper never answers it fee_below_cost before its reads (the test pins it over that range of rents).
 // None answers a signature. A helper before the card has no such route: 404 for each, and FAILs. Nothing is sent and
 // the fee payer signs none of them. It does not prove a bundle lands: only a mainnet buy of several pieces does, read
 // on two RPCs (the run record's Tx lines).
@@ -29,7 +32,6 @@ export const WANT = Object.freeze({
   one_wallet: [
     [422, "blockhash_not_found"],
     [422, "simulation_failed"],
-    [422, "fee_below_cost"],
   ],
 });
 const SHA = /^[0-9a-f]{40}$/;

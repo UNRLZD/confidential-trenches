@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { judgeAll, plants, WANT } from "./buy-spends-several-pieces.mjs";
+import { SOLANA_JITO_TIP_MIN, solanaPoolFee, solanaPoolPriorityBudget } from "../../packages/kit/src/index.ts";
 
 const A = JSON.parse(readFileSync(new URL("./buy-spends-several-pieces.answers.json", import.meta.url), "utf8"));
 const edit = (runs, asked, f) => runs.map((run) => ({ ...run, reads: run.reads.map((x) => (x.asked === asked ? f(x) : x)) }));
@@ -40,4 +41,15 @@ test("the plants: two wallets sign the two_wallets pair, one W both of one_walle
   assert.notEqual(w(p.two_wallets[0]), w(p.two_wallets[1]));
   assert.equal(w(p.one_wallet[0]), w(p.one_wallet[1]));
   assert.equal(p.one_tx.length, 1);
+});
+
+test("the one_wallet plant reaches the helper's reads on mainnet: at the epoch fee, no priority, the bundle's tip cap is over SOLANA_JITO_TIP_MIN at any rent up to 100 times today's (3,480 a byte); a fee_below_cost answer FAILs", () => {
+  // the helper's cap (apps/helper/src/pool/solana-pieces.ts piecesTipCap): each W-signed transaction's budget less its
+  // priority fee (the plant sets none), less the tip transaction's 5,000
+  for (const lamportsPerByte of [1n, 3_480n, 5_080n, 348_000n]) {
+    const rent = { lamportsPerByte, factor: 2n };
+    const cap = 2n * solanaPoolPriorityBudget(rent, solanaPoolFee(rent)) - 5_000n;
+    assert.ok(cap >= SOLANA_JITO_TIP_MIN, `${lamportsPerByte} a byte: cap ${cap}`);
+  }
+  assert.equal(judgeAll(edit(A.good, "one_wallet", (x) => ({ ...x, status: 422, body: '{"error":{"code":"fee_below_cost"}}' }))).ok, false);
 });
