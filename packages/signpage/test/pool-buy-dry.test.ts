@@ -35,10 +35,10 @@ function deps(over: Partial<PoolBuyDryDeps> & { rpcsOf?: () => readonly [SolanaR
     ...over,
   };
 }
-async function ask(kind: ReturnType<typeof poolBuyDryKind>, params: Record<string, unknown>) {
+/** The kind's answer once it settles (a plain value: HostAnswer's optional `then` makes it no async result). */
+function ask(kind: ReturnType<typeof poolBuyDryKind>, params: Record<string, unknown>): Promise<unknown> {
   const r = kind(params);
-  await r.after;
-  return r.answer();
+  return r.after.then(() => r.answer() as unknown);
 }
 
 test("the coin's own venue: the 0.01 SOL piece's Max on a curve coin and a PumpSwap coin, where state.pools reads the costliest venue's", async () => {
