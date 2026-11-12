@@ -109,6 +109,8 @@ export function checkAmount(typed: unknown, { available, fee }: { available: big
   if (fee !== null && amount <= fee) return { ok: false, code: "min", min: fee + 1n };
   if (available === null) return { ok: false, code: "unread" };
   // above what the note can send: `below` is what can be (the note less the fee), when the fee is read and some can
+  // the fee unread while the note can send some: what can be sent is not known yet, so the amount waits (unread)
+  if (fee === null && available > 0n && amount > available) return { ok: false, code: "unread" };
   if (amount > available || (fee !== null && amount + fee > available)) return fee !== null && available - fee > fee ? { ok: false, code: "insufficient", below: available - fee } : { ok: false, code: "insufficient" };
   if (fee === null) return { ok: false, code: "unread" };
   return { ok: true, amount };

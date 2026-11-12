@@ -42,8 +42,8 @@ try {
 const SOL_TO = "3NSPoKXm5PNTLurbAcJiYRB6oEuK4dfrxJy26JvzMqKx";
 const EVM_TO = "0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed";
 const CHAIN = {
-  solana: { to: SOL_TO, name: "Solana", symbol: "SOL", can: "0.048695 SOL", over: "0.1", sendable: "48695000", maxFee: "1305000" },
-  base: { to: EVM_TO, name: "Base", symbol: "ETH", can: "0.009979 ETH", over: "0.02", sendable: "9979000000000000", maxFee: "21000000000000" },
+  solana: { to: SOL_TO, name: "Solana", symbol: "SOL", can: "0.048695 SOL", chip: "Max 0.048695 SOL", over: "0.1", sendable: "48695000", maxFee: "1305000" },
+  base: { to: EVM_TO, name: "Base", symbol: "ETH", can: "0.009979 ETH", chip: "Max 0.009979 ETH", over: "0.02", sendable: "9979000000000000", maxFee: "21000000000000" },
 };
 const states = (c) => [
   // name, To, Amount, tap what can be sent, what the screen must show
@@ -108,7 +108,7 @@ for (const chain of ["solana", "base"]) {
       });
       const lineOk = (k) => (want[k] ? got[k]?.[0] === want[k][0] && got[k]?.[1] === want[k][1] : got[k] === null);
       const shownOk = want.lines ? got.shown.to === want.lines.to && got.amountValue === c.can.split(" ")[0] : Object.keys(got.shown).length === 0;
-      const drawnOk = got.mark === chain && got.loaded && got.name === c.name && got.symbol === c.symbol && got.can === c.can && got.canValue === c.sendable
+      const drawnOk = got.mark === chain && got.loaded && got.name === c.name && got.symbol === c.symbol && got.can === c.chip && got.canValue === c.sendable
         && (width > 400 || got.canH >= 44) && got.canW >= 44 && !got.wide;
       const ok = got.state === want.state && lineOk("to") && lineOk("amount") && shownOk && drawnOk && got.go === (want.state !== "ready") && got.goPaper === (want.state === "ready");
       say(ok, `${chain} ${wname} ${name}: ${got.state}, to ${JSON.stringify(got.to)}, amount ${JSON.stringify(got.amount)}, mark ${got.mark}${got.loaded ? " loaded" : " NOT LOADED"} ${got.name}, symbol ${got.symbol}, can ${JSON.stringify(got.can)} ${Math.round(got.canW)}x${Math.round(got.canH)} px, field ${JSON.stringify(got.amountValue)}${want.lines ? `, To line ${got.shown.to}` : ""}${got.wide ? ", WIDER THAN THE WINDOW" : ""}, Withdraw ${got.go ? "off" : "on"} ${got.goPaper ? "paper" : "quiet"}`);

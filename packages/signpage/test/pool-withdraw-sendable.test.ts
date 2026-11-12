@@ -148,12 +148,12 @@ test("what can be sent: hidden until the funds are read, then the value and its 
   open(ONE);
   await tick();
   assert.equal(f.row.hidden, false);
-  assert.equal(f.can.textContent, "0.048695 SOL");
+  assert.equal(f.can.textContent, "Max 0.048695 SOL", "the owner's Max (12 Nov 13:03Z), then the figure");
   assert.equal(f.can.disabled, false);
   assert.equal(f.can.style.minHeight, "44px", "the phone's tap target");
   const none = drawn("base", async () => ({ ...ONE, notes: [] }));
   await tick();
-  assert.equal(none.can.textContent, "0 ETH");
+  assert.equal(none.can.textContent, "Max 0 ETH");
   assert.equal(none.can.disabled, true);
   const unread = drawn("solana", async () => Promise.reject(new Error("down")));
   await tick();
@@ -189,7 +189,7 @@ test("the press after a tap: a note spent since hands nothing over, and the figu
   await f.press();
   assert.deepEqual(f.handed, []);
   assert.equal(f.form.dataset.state, "refused");
-  assert.equal(f.can.textContent, `${formatUnits(poolSendable(funds), 9)} SOL`);
+  assert.equal(f.can.textContent, `Max ${formatUnits(poolSendable(funds), 9)} SOL`);
 });
 
 test("no new word: every text the screen draws is a kept word, a chain name, a symbol or a value", async () => {
@@ -199,7 +199,7 @@ test("no new word: every text the screen draws is a kept word, a chain name, a s
   f.can.fire("click");
   await tick();
   const words = new Set<string>([...Object.values(POOL_WITHDRAW_WORDS), ...CHAINS.map((c) => POOL_CHAIN_MARK[c].name), "SOL", "ETH"]);
-  const value = /^\d+(?:\.\d+)? (?:SOL|ETH)$/;
+  const value = /^(?:Max )?\d+(?:\.\d+)? (?:SOL|ETH)$/;
   for (const e of f.form.all().filter((x) => x.textContent && x.children.length === 0)) {
     assert.ok(words.has(e.textContent) || value.test(e.textContent) || e.textContent === TO, JSON.stringify(e.textContent));
   }

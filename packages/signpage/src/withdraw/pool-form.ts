@@ -25,7 +25,8 @@
 // - What the screen is for and what can go (card withdraw-form-shows-what-you-can-send): the chain's mark and name at the
 //   top (./chain-mark.ts, the app's own), the asset's symbol at the amount, and the amount that can be sent now, a value
 //   and its symbol that fills the field when tapped: exactly the largest amount the amount check accepts (poolSendable),
-//   so a tap never draws Insufficient or Try. No word is added: values, symbols and marks only.
+//   so a tap never draws Insufficient or Try. Its label is the owner's Max (12 Nov 13:03Z), the trade box's word: the
+//   chip reads "Max 0.048695 SOL".
 // - A pasted To carries what a copy carries (toCleaned): whitespace and invisible format characters are taken off its two
 //   ends, and the invisible joiners (zero-width space, non-joiner and joiner, word joiner, byte-order mark, soft hyphen)
 //   out of it anywhere. Whitespace inside is never taken out: it would glue two pieces of a row ("3<tab>address",
@@ -58,6 +59,7 @@ export const POOL_WITHDRAW_WORDS = {
   // a send owed whose fee rose past the Max fee drawn: "Network fee rose. New max fee: 0.000015 SOL." and its button
   "fee-rose": "Network fee rose. New max fee: ", // owner 8 Nov 07:55Z, kept (pw.feeRose)
   "fee-redraw": "Send at new fee", // owner 8 Nov 07:55Z, kept (pw.feeRoseSend)
+  max: "Max", // owner 12 Nov 13:03Z, "Add Max, the same word the trade box uses": the label of what can be sent, "Max 0.048695 SOL"
 } as const;
 
 /** The keys of POOL_WITHDRAW_WORDS the owner has not picked: their elements keep data-draft-copy. */
@@ -315,7 +317,7 @@ export function drawPoolWithdrawForm(doc: Document, deps: PoolWithdrawFormDeps, 
     canRow.hidden = can === null;
     sendable.disabled = !can;
     Object.assign(sendable.style, { opacity: can ? "" : "0.5", cursor: can ? "pointer" : "default" }); // 0: shown, not offered
-    sendable.textContent = can === null ? "" : `${formatUnits(can, decimals)} ${symbol}`;
+    sendable.textContent = can === null ? "" : `${POOL_WITHDRAW_WORDS.max} ${formatUnits(can, decimals)} ${symbol}`;
     if (can === null) delete sendable.dataset.value;
     else sendable.dataset.value = String(can);
   };

@@ -30,6 +30,25 @@ export function withdrawPlaces(state: SignpageState | null | undefined): Withdra
 /** What a Withdraw tap does: open one form, or let the user pick among the places that hold money. */
 export type WithdrawOpen = { to: "open"; place: WithdrawPlace | null } | { to: "pick"; places: WithdrawPlace[] };
 
+/** A row of the pick: one open at a time (a second row does nothing meanwhile, `busy` keeps the rows off), and the pick
+ *  closes only on the shell's ok; a refused or silent open leaves it up, where its HopLine draws why. */
+export function pickRunner<P>(start: (p: P) => Promise<{ ok: boolean } | null>, ui: { busy(b: boolean): void; close(): void }): (p: P) => Promise<void> {
+  let running = false;
+  return async (p) => {
+    if (running) return;
+    running = true;
+    ui.busy(true);
+    let ok = false;
+    try {
+      ok = (await start(p))?.ok === true;
+    } finally {
+      running = false;
+      ui.busy(false);
+    }
+    if (ok) ui.close();
+  };
+}
+
 /** One place: its form; several: the pick; none: the vault's form (place null), as every Withdraw opened before. */
 export function withdrawOpen(state: SignpageState | null | undefined): WithdrawOpen {
   const places = withdrawPlaces(state);

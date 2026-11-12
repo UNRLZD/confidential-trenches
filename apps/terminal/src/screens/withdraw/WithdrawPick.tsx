@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useState } from "react";
+import { createContext, useCallback, useContext, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { useReturnHop } from "../../shell/ReturnHop.tsx";
 import type { HopView } from "../../shell/return-hop.ts";
@@ -6,7 +6,7 @@ import { useSignpage } from "../../shell/signpage-frame.tsx";
 import { HopLine } from "../signin/HopLine.tsx";
 import { Icon } from "../signin/Icon.tsx";
 import { chainOf } from "../market/pads.ts";
-import { withdrawOpen } from "./target.ts";
+import { pickRunner, withdrawOpen } from "./target.ts";
 import type { WithdrawPlace } from "./target.ts";
 import { WORDS } from "./words.ts";
 import "../deposit/deposit.css";
@@ -44,11 +44,14 @@ export function WithdrawPickProvider({ children }: { children: ReactNode }) {
     },
     [snapshot.state, hop],
   );
-  const close = () => setPick(null);
+  const [busy, setBusy] = useState(false);
+  const close = useCallback(() => setPick(null), []);
+  // one open from the pick at a time; the pick closes on the shell's ok only, a refusal stays with its HopLine
+  const onPick = useMemo(() => (pick ? pickRunner((p: WithdrawPlace) => opener(hop, p, pick.view), { busy: setBusy, close }) : null), [pick, hop, close]);
   return (
     <Ctx.Provider value={open}>
       {children}
-      {pick && <WithdrawPickSheet places={pick.places} locked={locked} control={pick.view.control} onPick={(p) => (void opener(hop, p, pick.view), close())} onClose={close} />}
+      {pick && onPick && <WithdrawPickSheet places={pick.places} locked={busy ? pick.view.control : locked} control={pick.view.control} onPick={(p) => void onPick(p)} onClose={close} />}
     </Ctx.Provider>
   );
 }

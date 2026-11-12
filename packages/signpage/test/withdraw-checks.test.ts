@@ -166,6 +166,8 @@ test("the amount is refused above what one note can pay with its fee, and at or 
   assert.deepEqual(checkAmount("5", { available: 0n, fee: null }), { ok: false, code: "insufficient" });
   // the fee not read yet: an amount the notes could hold waits for it, never passes
   assert.deepEqual(checkAmount("5", { available, fee: null }), { ok: false, code: "unread" });
+  // ...and one above the note waits too while some can be sent (review of 3e8422132, P3): never Insufficient unread
+  assert.deepEqual(checkAmount("50", { available, fee: null }), { ok: false, code: "unread" });
   // the notes not read: never insufficient on a read that did not happen, and never passed
   assert.deepEqual(checkAmount("5", { available: null, fee }), { ok: false, code: "unread" });
   assert.deepEqual(checkAmount("0.1", { available: null, fee }), { ok: false, code: "min", min: fee + 1n });

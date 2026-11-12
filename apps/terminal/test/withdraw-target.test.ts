@@ -38,3 +38,27 @@ test("no money, or no state read: the vault's form as before; a NEAR pool row or
   assert.deepEqual(withdrawOpen(state("0", [])), { to: "open", place: null });
   assert.deepEqual(withdrawPlaces(state("0.000", [{ chain: "near", asset: "USDC", balance: "5" }, { chain: "solana", asset: "SOL", balance: "-1" }])), []);
 });
+
+// review of 3e8422132 (P2): a row's open runs alone and closes the pick only on the shell's ok; a refused or silent open
+// leaves the pick up (its HopLine draws why), and no second row starts a second open meanwhile.
+test("the pick's row: one open at a time, the pick closed only on ok", async () => {
+  const { pickRunner } = await import("../src/screens/withdraw/target.ts");
+  const log: string[] = [];
+  let answer: (r: { ok: boolean } | null) => void = () => {};
+  const run = pickRunner((p: string) => (log.push(`open ${p}`), new Promise((r) => (answer = r))), { busy: (b) => log.push(`busy ${b}`), close: () => log.push("close") });
+  const first = run("solana");
+  await run("base"); // a second row while the first is under way: nothing
+  answer({ ok: false });
+  await first;
+  assert.deepEqual(log, ["busy true", "open solana", "busy false"], "refused: the pick stays up");
+  log.length = 0;
+  const silent = run("base");
+  answer(null);
+  await silent;
+  assert.deepEqual(log, ["busy true", "open base", "busy false"], "no answer: the pick stays up");
+  log.length = 0;
+  const ok = run("near");
+  answer({ ok: true });
+  await ok;
+  assert.deepEqual(log, ["busy true", "open near", "busy false", "close"]);
+});

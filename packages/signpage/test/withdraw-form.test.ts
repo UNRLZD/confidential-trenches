@@ -210,6 +210,8 @@ test("no draft mark on the kept words: Withdraw and each refusal; To, Amount and
   await settle();
   // above what can be sent the line is "Try X USDC": Try was kept too (pw.tryOne), no mark
   assert.deepEqual(marks(), [["insufficient", undefined]]);
+  // the drawn line names what can be sent (review of 3e8422132, P3: the draw, not only refusalWords)
+  assert.equal(f.form.children.find((e) => e.tag === "p" && e.dataset.for === "amount")!.textContent, "Try 9.88 USDC");
   assert.equal(f.go.dataset.draftCopy, undefined);
 });
 
