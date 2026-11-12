@@ -7,7 +7,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { base58 } from "@scure/base";
-import { FILL_OPS_MAX, feedWritePrice, fillTradeOps, solanaTradeLeg, type FillStore } from "../src/trade-fill.ts";
+import { FEED_READS_MAX, FILL_OPS_MAX, feedWritePrice, fillTradeOps, solanaTradeLeg, type FillStore } from "../src/trade-fill.ts";
+import { POOL_USD_FEEDS } from "../../kit/src/price/pool-usd.ts";
 
 const MINT = "78GaXFTJzkCWpdxkNHMSP3TXEKbhQTpb3EqMt7Uupump";
 const fx = (f: string): Record<string, unknown> => JSON.parse(readFileSync(new URL(`./fixtures/trade-fill/${f}.json`, import.meta.url), "utf8"));
@@ -268,4 +269,118 @@ test("never a guess: no write within a minute of the sale's block, no write in t
   const other = store118();
   await fillTradeOps({ store: other, read: async (sig) => (sig in WRITES ? Object.values(WRITES).find((w) => w !== WRITES[sig]) : both(sig)), feedBefore, price: () => null, now: () => 1e12 });
   assert.equal(other.ops.get("s1")!.amount_usd, undefined);
+});
+
+// The delta review of 7821afea9..30bd5fcd5: one test per guard of the block price, each on the real write 5yEBxD
+// changed in one place (its push-oracle instruction's price message, or the transaction around it), and a sale of two
+// legs with one leg unpriced. The sale is 32CSJ1 (block 1794461912; the write's block 1794461908, published 1794461905).
+const W5 = "5yEBxDX1FsLJBBRoj47D95QCH6xDQxNW45P1Wyqo8g9QAEmPT6WiXZiCuCM9zyv7ay9YHjN5pyQgRaghxKvzJxcD";
+const FEED = POOL_USD_FEEDS.solana;
+type WIx = { programIdIndex: number; accounts: number[]; data: string };
+type WTx = { blockTime: number; transaction: { message: { accountKeys: string[]; instructions: WIx[] } }; meta: { innerInstructions: { instructions: WIx[] }[] } };
+const write5 = (): WTx => structuredClone(WRITES[W5]) as unknown as WTx;
+const pushIx = (w: WTx): WIx => [...w.transaction.message.instructions, ...w.meta.innerInstructions.flatMap((g) => g.instructions)].find((i) => w.transaction.message.accountKeys[i.programIdIndex] === FEED.pushOracle)!;
+/** 5yEBxD with its price message changed by `f` (at: the message's type byte; price +33, conf +41, expo +49, publish +53). */
+function forged(f: (v: DataView, at: number, d: Uint8Array) => void, w: WTx = write5()): WTx {
+  const ix = pushIx(w);
+  const d = base58.decode(ix.data);
+  const at = Buffer.from(d).toString("hex").indexOf("00" + FEED.feedId.slice(2)) / 2;
+  assert.ok(Number.isInteger(at) && at >= 4, "the message found");
+  f(new DataView(d.buffer, d.byteOffset, d.byteLength), at, d);
+  ix.data = base58.encode(d);
+  return w;
+}
+/** Sale s1's block USD when the feed's newest write before it answers `write` (the list as recorded). */
+async function blockUsd(write: unknown, list: (sig: string) => Promise<string[]> = feedBefore): Promise<unknown> {
+  const s = store118();
+  await fillTradeOps({ store: s, read: async (sig) => (sig === W5 ? write : both(sig)), feedBefore: list, price: () => null, now: () => 1e12 });
+  assert.equal(s.ops.get("s1")!.pool_amount, "0.000574635", "the SOL always written");
+  return s.ops.get("s1")!.amount_usd;
+}
+const SALE_BLOCK = (TX[SIG.sell1] as { blockTime: number }).blockTime;
+
+test("the forging helper: 5yEBxD unchanged gives the replay's USD", async () => {
+  assert.equal(await blockUsd(forged(() => {})), "0.04768764243129345");
+});
+
+test("D20: a sale of two legs with one leg unpriced writes no USD at all, never the priced leg's alone; both priced, their sum", async () => {
+  const two = () => {
+    const ops = new Map<string, Record<string, unknown>>([["s", { kind: "sell", pool: "sol", stage: "filled", txs: [{ chain: "solana", hash: SIG.sell1 }, { chain: "solana", hash: SIG.sell2 }], created_ms: 2, chain: "solana", token: MINT, legs: [{ wallet: W1 }, { wallet: W2 }] }]]);
+    return { ops, keys: async () => [...ops.keys()], get: async (_s: string, k: string) => ops.get(k), update: async (_s: string, k: string, f: (v: unknown) => unknown) => void ops.set(k, f(ops.get(k)) as Record<string, unknown>) } as FillStore & { ops: Map<string, Record<string, unknown>> };
+  };
+  const one = two();
+  await fillTradeOps({ store: one, read: both, feedBefore: async (sig) => (sig === SIG.sell2 ? [] : feedBefore(sig)), price: () => null, now: () => 1e12 });
+  assert.equal(one.ops.get("s")!.pool_amount, "0.001749301", "both legs' SOL");
+  assert.equal(one.ops.get("s")!.amount_usd, undefined, "one leg unpriced: no USD");
+  assert.equal(one.ops.get("s")!.usd_from, undefined);
+  const all = two();
+  await fillTradeOps({ store: all, read: both, feedBefore, price: () => null, now: () => 1e12 });
+  assert.equal(all.ops.get("s")!.amount_usd, "0.14518367436909397", "each leg at its own block, summed");
+  assert.equal(all.ops.get("s")!.usd_from, "block");
+});
+
+test("D3: a push-oracle write to another account than the feed's is no price", async () => {
+  const w = write5();
+  const keys = w.transaction.message.accountKeys;
+  keys[keys.indexOf(FEED.account)] = "So11111111111111111111111111111111111111112";
+  assert.equal(feedWritePrice(w), null);
+  assert.equal(await blockUsd(w), undefined);
+});
+
+test("D4: a price message for another feed id is no price", async () => {
+  const w = forged((_v, at, d) => void (d[at + 1] = d[at + 1]! ^ 1));
+  assert.equal(feedWritePrice(w), null);
+  assert.equal(await blockUsd(w), undefined);
+});
+
+test("D12: a message published after the sale's block is no price for it", async () => {
+  const w = forged((v, at) => v.setBigInt64(at + 53, BigInt(SALE_BLOCK + 1), false));
+  assert.equal(feedWritePrice(w)!.publishedS, SALE_BLOCK + 1, "a price of its own");
+  assert.equal(await blockUsd(w), undefined);
+});
+
+test("D14: a write landed after the sale's block is no price for it", async () => {
+  const w = write5();
+  w.blockTime = SALE_BLOCK + 1;
+  assert.ok(feedWritePrice(w), "a price of its own");
+  assert.equal(await blockUsd(w), undefined);
+});
+
+test("D8 to D10: a price of zero or below, an exponent above zero or below -18, or a confidence past the feed's bound is no price", async () => {
+  // D8: zero, its confidence zero too so only the price's own bound refuses it; and below zero
+  for (const p of [0n, -1n]) assert.equal(feedWritePrice(forged((v, at) => (v.setBigInt64(at + 33, p, false), v.setBigUint64(at + 41, 0n, false)))), null, `price ${p}`);
+  // D9
+  for (const e of [1, -19]) assert.equal(feedWritePrice(forged((v, at) => v.setInt32(at + 49, e, false))), null, `expo ${e}`);
+  // D10: at the bound it stands, one past it is refused
+  const price = feedWritePrice(write5())!.price;
+  const bound = (price * BigInt(FEED.maxConfBps)) / 10_000n;
+  assert.ok(feedWritePrice(forged((v, at) => v.setBigUint64(at + 41, bound, false))), "at the bound");
+  const past = forged((v, at) => v.setBigUint64(at + 41, bound + 1n, false));
+  assert.equal(feedWritePrice(past), null, "past the bound");
+  assert.equal(await blockUsd(past), undefined);
+});
+
+test("D7: one transaction with two different price messages for the feed is no price; the same message twice is", async () => {
+  const twice = (change: boolean) => {
+    const w = write5();
+    const copy = structuredClone(pushIx(w));
+    w.transaction.message.instructions.push(copy);
+    if (change) {
+      const d = base58.decode(copy.data);
+      const at = Buffer.from(d).toString("hex").indexOf("00" + FEED.feedId.slice(2)) / 2;
+      const v = new DataView(d.buffer, d.byteOffset, d.byteLength);
+      v.setBigInt64(at + 33, v.getBigInt64(at + 33, false) * 2n, false);
+      copy.data = base58.encode(d);
+    }
+    return w;
+  };
+  assert.ok(feedWritePrice(twice(false)), "the same message twice");
+  assert.equal(feedWritePrice(twice(true)), null);
+  assert.equal(await blockUsd(twice(true)), undefined);
+});
+
+test("D17: at most FEED_READS_MAX feed transactions are read for one sale: the write past them is not reached", async () => {
+  const readers = (n: number) => Array.from({ length: n }, (_, i) => `Reader${i}`);
+  assert.equal(await blockUsd(write5(), async () => [...readers(FEED_READS_MAX - 1), W5]), "0.04768764243129345", "the write the last read");
+  assert.equal(await blockUsd(write5(), async () => [...readers(FEED_READS_MAX), W5]), undefined, "one read past");
 });

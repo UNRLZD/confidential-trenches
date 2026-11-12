@@ -35,9 +35,9 @@
 //   own SOL/USD feed (the kit's POOL_USD_FEEDS.solana, Pyth's sponsored account) is written on chain about each minute,
 //   and each write carries Pyth's signed price message, which the push oracle checks before it writes. The newest write
 //   before the sale (the account's getSignaturesForAddress before the sale's signature, then getTransaction of each
-//   until a write, on both RPCs, the two decoding the same) gives the price, taken only when its publish time is within
-//   BLOCK_PRICE_S at or before the sale's block time and its confidence within the feed's maxConfBps; else no USD, never
-//   a guess. On 32CSJ1...Kwn: $82.98770947 published 7 s before its block. usd_from stays on the device's record (the
+//   until a write, on the fill's one reader, the helper's route: src/pool-testnet.ts fillTrades) gives the price, taken
+//   only when its publish time is within BLOCK_PRICE_S at or before the sale's block time and its confidence within the
+//   feed's maxConfBps; else no USD, never a guess. On 32CSJ1...Kwn: $82.98770947 published 7 s before its block. usd_from stays on the device's record (the
 //   state sends only src/state.ts's detail keys), so the two sources are never confused.
 // - Pool ops only: a buy with no `sha` (positions.ts recordPoolBuy; a trade-box buy carries its quote's sha, trade.ts)
 //   and a sale with pool "sol". At most FILL_OPS_MAX ops a run, newest first, so a backlog cannot fan out at every trade
