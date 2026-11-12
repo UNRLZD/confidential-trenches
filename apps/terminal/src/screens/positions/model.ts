@@ -88,11 +88,6 @@ export function initialsBps(cost: bigint, value: bigint | null): number | null {
   return Number((cost * BigInt(WHOLE) + value - 1n) / value);
 }
 
-/** The share's value in cents, rounded down; null with no value. */
-export function shareCents(value: bigint | null, bps: number): bigint | null {
-  return value === null ? null : (value * BigInt(bps)) / BigInt(WHOLE);
-}
-
 /** Basis points as the presets draw them: "25%", "12.5%". */
 export function pctLabel(bps: number): string {
   const w = Math.trunc(bps / 100);

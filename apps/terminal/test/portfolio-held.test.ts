@@ -56,8 +56,8 @@ test("the value line ends at Portfolio's total and rises with the token's closes
   const pts = line(d.series, "1D", NOW);
   assert.equal(pts.at(-1)![0], NOW);
   assert.equal(pts.at(-1)![1], total);
-  // in positions now: $5.00 + $0.00 (1 x 0.005, rounded down) + the unpriced token's $1.00 cost = 600 cents. Before the
-  // buy the two MINTA rows count at their cost (306 + 1); after it at each close, each row rounded down
+  // in positions now: $5.00 + $0.005 (1 x 0.005) + the unpriced token's $1.00 cost = $6.005, rounded down once to 600
+  // cents. Before the buy the two MINTA rows count at their cost; after it at each close, the exact sum rounded once
   assert.deepEqual(pts.map(([, c]) => total - c), [600n - 407n, 600n - 300n, 600n - 500n, 0n]);
 });
 
