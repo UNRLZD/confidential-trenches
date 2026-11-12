@@ -54,7 +54,8 @@ import { keccak_256 } from "@noble/hashes/sha3.js";
 import { SOLANA_POOL_SPENT_MARK_LEN, vaultLabelOf, type SolanaRpc } from "@blindfill/kit";
 import { CHAINS, type Chain, freshWallet, type SecondId } from "../derive/index.ts";
 import { masters } from "../derive/index.ts";
-import { laneOf, type LaneWalk, RESTORE_GAP, RESTORE_LANES, type SeedUse, slices, walkLane, walkLaneYielding, withSeed } from "../notes/restore.ts";
+import { laneOf, type LaneWalk, RESTORE_GAP, RESTORE_LANES, type SeedUse, slices, walkLane, withSeed } from "../notes/restore.ts";
+import { walkLanes, type WalkPort } from "../restore/walk.ts";
 import { noteCommitment, noteSecrets, type NoteRef } from "../notes/secrets.ts";
 import { refKey, type Leaf, type NoteRecord, type NoteStore } from "../notes/store.ts";
 import { checkSolanaRpcs, type SolanaLagWait, solanaFinalTimes, solanaLagRetry, solanaPda, solanaPoolOf, solanaTreeSync, type SolanaTreeSync } from "./solana.ts";
@@ -532,6 +533,9 @@ export async function solanaRestoreNotes(a: {
   cache?: SolanaPoolCache;
   /** marks per getMultipleAccounts on each RPC (solanaMarksListed's batches) */
   markBatches?: readonly [number, number];
+  /** The page's walk Workers (card restore-shows-the-balance-in-seconds, ../restore/walk.ts walkLanes): one started a
+   *  call; none, every lane on the page's thread. */
+  walkers?: () => WalkPort;
   /** The page's one turn for a walk (card closed-positions-after-a-restore): the walk and the notes after it run inside
    *  it, so pools walked on one thread go one after another and the first one's notes are written one walk in, never
    *  after every pool's walk; at once when not given. */
@@ -562,7 +566,9 @@ export async function solanaRestoreNotes(a: {
           const m = await withSeed(a.seed64, (seed64) => masters(seed64, "deposit"));
           const lanes: LaneWalk[] = [];
           const slice = slices(a.signal, a.now);
-          for (let lane = 0; lane < RESTORE_LANES; lane++) lanes.push(await walkLaneYielding(m, scope, lane, (P) => walked.pre.has(solanaMarkOf(a.program, "pre", P)), a.gap ?? RESTORE_GAP, null, a.signal, slice));
+          // the 8 lanes in the page's walk Workers when it gives them (../restore/walk.ts walkLanes), each matched on the
+          // pool's precommitment marks; every walk checked again by laneOf below before a note is taken
+          lanes.push(...(await walkLanes({ m, scope, match: { kind: "solana", program: a.program, marks: [...walked.pre.keys()] }, gap: a.gap ?? RESTORE_GAP, ...(a.signal ? { signal: a.signal } : {}), slice, ...(a.walkers ? { spawn: a.walkers } : {}) })));
           // then the notes a slice at a time: one short use of the seed a slice (WALK_SLICE_MS of work), the event loop a
           // turn and the signal checked between slices
           const steps = solanaRestoreSteps({ program: a.program, scope, stateLeaves: leaves.state, labelLeaves: leaves.label, marks: walked, lanes, ...(a.gap === undefined ? {} : { gap: a.gap }) });

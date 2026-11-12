@@ -53,7 +53,8 @@ import { keccak_256 } from "@noble/hashes/sha3.js";
 import { vaultLabelOf } from "@blindfill/kit";
 import { CHAINS, type Chain, freshWallet, type SecondId } from "../derive/index.ts";
 import { masters } from "../derive/index.ts";
-import { laneOf, type LaneWalk, RESTORE_GAP, RESTORE_LANES, type SeedUse, slices, walkLane, walkLaneYielding, withSeed } from "../notes/restore.ts";
+import { laneOf, type LaneWalk, RESTORE_GAP, RESTORE_LANES, type SeedUse, slices, walkLane, withSeed } from "../notes/restore.ts";
+import { walkLanes, type WalkPort } from "../restore/walk.ts";
 import { noteCommitment, noteSecrets, type NoteRef } from "../notes/secrets.ts";
 import { refKey, type Leaf, type NoteRecord, type NoteStore } from "../notes/store.ts";
 import { solanaSameProvider } from "@blindfill/kit";
@@ -357,6 +358,8 @@ export type EvmRestoreNotesArgs = {
   /** Where else the pool's events may be read (evm.ts EvmSyncArgs history), before the providers of `rpcs`: never one
    * operator's word, two operators' same logs making the pool's trees at the head. */
   history?: readonly EvmRpc[];
+  /** The page's walk Workers (solanaRestoreNotes's `walkers`). */
+  walkers?: () => WalkPort;
   /** The page's one turn for a walk (card closed-positions-after-a-restore; solanaRestoreNotes's `turn`): the walk and
    *  the notes after it run inside it; at once when not given. */
   turn?: <T>(walk: () => Promise<T>) => Promise<T>;
@@ -417,7 +420,9 @@ export async function evmRestoreNotes(a: EvmRestoreNotesArgs): Promise<{ notes: 
     const m = await withSeed(a.seed64, (seed64) => masters(seed64, "deposit"));
     const lanes: LaneWalk[] = [];
     const slice = slices(a.signal, a.now);
-    for (let lane = 0; lane < RESTORE_LANES; lane++) lanes.push(await walkLaneYielding(m, scope, lane, (P) => byPre.has(P), a.gap ?? RESTORE_GAP, null, a.signal, slice));
+    // the 8 lanes in the page's walk Workers when it gives them (../restore/walk.ts walkLanes); every walk checked again
+    // by laneOf (evmRestoreSteps) before a note is taken
+    lanes.push(...(await walkLanes({ m, scope, match: { kind: "pre", precommitments: [...byPre.keys()] }, gap: a.gap ?? RESTORE_GAP, ...(a.signal ? { signal: a.signal } : {}), slice, ...(a.walkers ? { spawn: a.walkers } : {}) })));
     // then the notes a slice at a time: one short use of the seed a slice (WALK_SLICE_MS of work), the event loop a turn
     // and the signal checked between slices
     const steps = evmRestoreSteps({ scope, events: final, lanes, ...(a.gap === undefined ? {} : { gap: a.gap }) });
