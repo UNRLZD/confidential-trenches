@@ -38,7 +38,8 @@
 //                       FLOW_EXPECT=held (any plant) passes when W keeps its SOL for 2 loads past + 151, as a helper
 //                       that refuses the header read leaves it; else (swept) PASS needs every load before + 151 held
 //                       and W swept within SWEEP_WAIT_MS.
-// - A seed made in this run only (16 random bytes), never printed, kept at ~/.ct-devnet-runs/run-<time>.seed (0600), and
+// - A seed made in this run only (16 random bytes), never printed, kept at ~/.ct-devnet-runs/run-<time>.seed (0600;
+//   FLOW_DIR=<folder> keeps it there instead, the folder made 0700), and
 //   a funder F's key beside it (run-<time>.funder, 0600; FLOW_FUNDER=<file> uses a kept one). F's address and what it
 //   must hold are printed first; someone else funds F, and this waits. FLOW_SWEEP_F_TO=<address> with FLOW_FUNDER: F's
 //   balance back, no run.
@@ -163,7 +164,7 @@ const vault = {
 };
 
 // the run's seed and F's key, kept before anything can move
-const DIR = join(homedir(), ".ct-devnet-runs");
+const DIR = process.env.FLOW_DIR ?? join(homedir(), ".ct-devnet-runs");
 mkdirSync(DIR, { recursive: true, mode: 0o700 });
 chmodSync(DIR, 0o700);
 const STAMP = new Date().toISOString().replace(/[:.]/g, "-");
