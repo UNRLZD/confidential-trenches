@@ -486,8 +486,14 @@ type RunPlant = {
   inFromMs?: bigint;
   /** the newest trees hold the note only from this time on (its landing read ahead of both RPCs' agreed block) */
   newestFromMs?: bigint;
-  /** a second note of this value, a deposit's, that landed this epoch (leaf 1): only the newest trees hold it */
+  /** a second note of this value, a deposit's, that landed this epoch (the leaf after the run's note): only the newest
+   *  trees hold it */
   fresh?: bigint;
+  /** deposit notes of these values that landed before the epoch (leaves 0 to k-1, the run's note leaf k): every tree
+   *  holds them; each has its own W, which the helper's bind and the chain here do not serve */
+  rested?: bigint[];
+  /** an address with code (eth_getCode answers 0x6080 and a send to it is estimated at 30,000 gas) */
+  codeAt?: string;
 };
 async function runWorld(plant: RunPlant = {}) {
   const ws = await openWalletStore({ indexedDB: new IDBFactory() });
@@ -504,8 +510,18 @@ async function runWorld(plant: RunPlant = {}) {
   const commitment = noteCommitment(value, label, inc.precommitment);
   // the pool's tree holds the leaf the note's own secrets make (the store's record keeps its deposit's)
   const leafOf = noteCommitment(value, label, noteSecrets(SEED, ref).precommitment);
-  await notes.move(inc.id, "INCOMING", "UNSPENT", { leaf: { value, label, commitment, leafIndex: 0n } });
+  const k = BigInt(plant.rested?.length ?? 0);
+  await notes.move(inc.id, "INCOMING", "UNSPENT", { leaf: { value, label, commitment, leafIndex: k } });
   const noteId = inc.id;
+  // rested notes, under every root: leaves 0 to k-1, the run's note k
+  const extras: { id: string; leaf: bigint; label: bigint; w: string }[] = [];
+  for (const [i, v] of (plant.rested ?? []).entries()) {
+    const pr = await notes.planDeposit(RUN_SCOPE, (r) => noteSecrets(SEED, r).precommitment);
+    const ir = await notes.move(pr.id, "PLANNED", "INCOMING", { send: { signature: String(7 + i).repeat(87).slice(0, 87), value: v, last_valid_block_height: 1_000n } });
+    const lb = vaultLabelOf(keccak_256, RUN_SCOPE, BigInt(10 + i));
+    await notes.move(ir.id, "INCOMING", "UNSPENT", { leaf: { value: v, label: lb, commitment: noteCommitment(v, lb, ir.precommitment), leafIndex: BigInt(i) } });
+    extras.push({ id: ir.id, leaf: noteCommitment(v, lb, noteSecrets(SEED, ir.ref).precommitment), label: lb, w: freshWallet(SEED, "evm", lb, jOf(ir.ref)).address });
+  }
   // a second note that landed this epoch, larger, so a plan over every note picks it first
   const label2 = vaultLabelOf(keccak_256, RUN_SCOPE, 2n);
   let freshLeaf = 0n;
@@ -514,29 +530,35 @@ async function runWorld(plant: RunPlant = {}) {
     const p2 = await notes.planDeposit(RUN_SCOPE, (r) => noteSecrets(SEED, r).precommitment);
     const i2 = await notes.move(p2.id, "PLANNED", "INCOMING", { send: { signature: "6".repeat(87), value: plant.fresh, last_valid_block_height: 1_000n } });
     freshLeaf = noteCommitment(plant.fresh, label2, noteSecrets(SEED, i2.ref).precommitment);
-    await notes.move(i2.id, "INCOMING", "UNSPENT", { leaf: { value: plant.fresh, label: label2, commitment: noteCommitment(plant.fresh, label2, i2.precommitment), leafIndex: 1n } });
+    await notes.move(i2.id, "INCOMING", "UNSPENT", { leaf: { value: plant.fresh, label: label2, commitment: noteCommitment(plant.fresh, label2, i2.precommitment), leafIndex: k + 1n } });
     freshId = i2.id;
   }
   const w = freshWallet(SEED, "evm", label, jOf(ref)).address;
   const nullifier = noteSecrets(SEED, ref).nullifierHash;
   const clock = { ms: NOW };
-  const chain = { logs: [] as unknown[], balance: 0n, sent: [] as string[], sentAt: null as bigint | null, binds: [] as bigint[], sends: 0, keeps: [] as EvmPendingOnward[], owes: [] as EvmPendingOnward[], stages: [] as string[], trees: [] as { beforeMs: bigint; newest: boolean; signal: boolean }[] };
+  const chain = { calls: [] as { method: string; from?: string; to?: string; binds: number }[], bound: [] as string[], logs: [] as unknown[], balance: 0n, sent: [] as string[], sentAt: null as bigint | null, binds: [] as bigint[], sends: 0, keeps: [] as EvmPendingOnward[], owes: [] as EvmPendingOnward[], stages: [] as string[], trees: [] as { beforeMs: bigint; newest: boolean; signal: boolean }[] };
   const tree = (xs: bigint[]) => new VaultTree(xs);
   const pool = {
     id: `evm:${POOL}`, chain: "evm", scope: RUN_SCOPE, ladder: [], epochMs: 60_000n, lifeMs: 210_000n, sendMarginMs: 30_000n,
     now: async () => clock.ms,
     trees: async (beforeMs: bigint, _s?: unknown, o?: { newest?: boolean }) => {
       chain.trees.push({ beforeMs, newest: o?.newest === true, signal: _s instanceof AbortSignal });
-      // landed this epoch: the epoch's own trees (up to NOW, an epoch's start) do not hold it
-      if (plant.thisEpoch && o?.newest !== true && (plant.inFromMs !== undefined ? beforeMs < plant.inFromMs : beforeMs <= NOW)) return { stateTree: { size: 0 }, labelTree: { size: 0 }, stateRoot: 0n, labelRoot: 0n };
-      if (o?.newest === true && plant.newestFromMs !== undefined && beforeMs < plant.newestFromMs) return { stateTree: { size: 0 }, labelTree: { size: 0 }, stateRoot: 0n, labelRoot: 0n };
-      // a fresh second note: in the newest trees only (leaf 1)
-      const both = plant.fresh !== undefined && o?.newest === true;
-      const leaves = both ? [leafOf, freshLeaf] : [leafOf], labels = both ? [label, label2] : [label];
-      return { stateTree: tree(leaves), labelTree: tree(labels), stateRoot: tree(leaves).root!, labelRoot: tree(labels).root! };
+      // the rested notes in every tree; the run's note out of the epoch's own trees (up to NOW, an epoch's start) when it
+      // landed this epoch, and out of the newest while that cut lags it
+      const leaves = extras.map((e) => e.leaf), labels = extras.map((e) => e.label);
+      const out = (plant.thisEpoch && o?.newest !== true && (plant.inFromMs !== undefined ? beforeMs < plant.inFromMs : beforeMs <= NOW)) || (o?.newest === true && plant.newestFromMs !== undefined && beforeMs < plant.newestFromMs);
+      if (!out) {
+        leaves.push(leafOf);
+        labels.push(label);
+        // a fresh second note: in the newest trees only (the leaf after the run's)
+        if (plant.fresh !== undefined && o?.newest === true) leaves.push(freshLeaf), labels.push(label2);
+      }
+      const st = tree(leaves), lt = tree(labels);
+      return { stateTree: st, labelTree: lt, stateRoot: st.root ?? 0n, labelRoot: lt.root ?? 0n };
     },
     bind: async (b: { chunk: bigint; wallet: { address: string }; refundPrecommitment: bigint; deadlineMs: bigint }) => {
       const isW = lower(b.wallet.address) === lower(w);
+      chain.bound.push(lower(b.wallet.address));
       const fee = isW ? (plant.bindFee ?? FEE) : FEE;
       const relay: EvmRelayData = { recipient: isW ? (plant.recipient ?? b.wallet.address) : b.wallet.address, feeRecipient: RUN_FEE_TO, feeCap: fee, deadlineMs: b.deadlineMs, refundPrecommitment: b.refundPrecommitment, salt: "0x" + (chain.binds.length + 1).toString(16).padStart(32, "0") };
       if (isW) chain.binds.push(b.chunk);
@@ -560,8 +582,13 @@ async function runWorld(plant: RunPlant = {}) {
     }
     if (method === "eth_getLogs") return chain.sentAt !== null && clock.ms - chain.sentAt >= (plant.lateMs ?? 0n) ? chain.logs : [];
     if (method === "eth_getBalance") return q(lower(String(params[0])) === lower(w) ? chain.balance : 0n);
-    if (method === "eth_getCode") return "0x";
-    if (method === "eth_estimateGas") return q(EVM_ONWARD_GAS);
+    if (method === "eth_estimateGas" || method === "eth_call") {
+      const c = params[0] as { from?: string; to?: string };
+      chain.calls.push({ method, from: c.from && lower(c.from), to: c.to && lower(c.to), binds: chain.bound.length });
+    }
+    const coded = (a: unknown) => plant.codeAt !== undefined && lower(String(a)) === lower(plant.codeAt);
+    if (method === "eth_getCode") return coded(params[0]) ? "0x6080" : "0x";
+    if (method === "eth_estimateGas") return q(coded((params[0] as { to?: string }).to) ? 30_000n : EVM_ONWARD_GAS);
     if (method === "eth_call") {
       const c = params[0] as { to: string; data?: string };
       if (c.to.toLowerCase() === "0x420000000000000000000000000000000000000f") return word(c.data!.startsWith("0xf1c7a58b") ? 900n : 0n);
@@ -600,7 +627,7 @@ async function runWorld(plant: RunPlant = {}) {
     wait: async (ms) => void (clock.ms += BigInt(ms)),
   };
   if (plant.release === "never") h.send = async () => ((chain.sentAt = clock.ms), chain.sends++, "0x" + "ab".repeat(32));
-  return { h, notes, noteId, chain, clock, w, label, freshId };
+  return { h, notes, noteId, chain, clock, w, label, freshId, extras };
 }
 const MAX = FEE + RUN_WFEE;
 
@@ -1044,4 +1071,57 @@ test("(card fresh-money-spendable-at-once, on EVM) a wait that crosses a boundar
   assert.equal(never.clock.ms - (NOW + 50_000n) <= 90_000n + 30_000n, true, "within the one budget (and the free wait)");
   assert.deepEqual([never.chain.binds.length, never.chain.sends], [0, 0]);
   assert.equal((await never.notes.get(never.noteId))?.state, "UNSPENT");
+});
+
+// ---------- review of cb287f4f5 (verdict FIX): the rested preference's guard and the free() after a newest-root wait ----------
+
+const RUN_COSTS = { fee: FEE, wFee: RUN_WFEE, minPart: evmWithdrawMinPart(FEE, RUN_WFEE) };
+
+test("(review of cb287f4f5 P2-1) two rested notes and one fresh note that sends the amount alone: the rested plan's two parts are never taken over the one part the Max fee priced; the run sends from the fresh note, one bind", async () => {
+  const world = await runWorld({ thisEpoch: true, rested: [10n ** 14n, 10n ** 14n] });
+  const list = withdrawSources(await world.notes.list(), RUN_SCOPE);
+  const restedOnly = list.filter((n) => world.extras.some((e) => e.id === n.id));
+  assert.equal(planPoolWithdraw(restedOnly, PART, RUN_COSTS)?.length, 2, "the rested notes alone need two parts");
+  assert.equal(planPoolWithdraw(list, PART, RUN_COSTS)?.length, 1, "every note: the fresh one alone");
+  // the screen's Max fee: one part's
+  const got = await runEvmPoolWithdraw(world.h, RUN_ASK, TO, PART, FEE + RUN_WFEE);
+  assert.equal(got.stage, "sent", got.cause);
+  // the notes' binds (the fee read's probe bind is no note's)
+  const notesBound = (wd: typeof world) => wd.chain.bound.filter((x) => x === lower(wd.w) || wd.extras.some((e) => lower(e.w) === x));
+  assert.deepEqual(notesBound(world), [lower(world.w)], "one bind, the fresh note's W");
+  for (const e of world.extras) assert.equal((await world.notes.get(e.id))?.state, "UNSPENT", "the rested notes stay");
+});
+
+test("(review of cb287f4f5 P2-1) an amount above what the rested note can send goes to the fresh note, on the newest root at once; the rested note stays", async () => {
+  const world = await runWorld({ thisEpoch: true, rested: [10n ** 14n] });
+  const got = await runEvmPoolWithdraw(world.h, RUN_ASK, TO, PART, MAX);
+  assert.equal(got.stage, "sent", got.cause);
+  assert.deepEqual(world.chain.bound.filter((x) => x === lower(world.w) || lower(world.extras[0]!.w) === x), [lower(world.w)], "one bind, the fresh note's W");
+  assert.ok(world.chain.trees.some((t) => t.newest), "the fresh note's newest root");
+  assert.equal((await world.notes.get(world.extras[0]!.id))?.state, "UNSPENT");
+});
+
+test("(review of cb287f4f5 P3-1) a queue that takes the note during the part's waits for the newest cut (no keep-out record): the part drops it, gets it back and sends", async () => {
+  const world = await runWorld({ change: true, thisEpoch: true, newestFromMs: NOW + 3_001n });
+  world.h.keepOut = async () => {};
+  const took = { at: null as bigint | null, dropped: 0 };
+  const wait0 = world.h.wait!;
+  world.h.wait = async (ms) => {
+    await wait0(ms);
+    if (took.at === null && (await world.notes.get(world.noteId))?.state === "UNSPENT") {
+      took.at = world.clock.ms;
+      await world.notes.move(world.noteId, "UNSPENT", "HELD", { deadlineMs: NOW + 400_000n, context: "1" });
+    }
+  };
+  // the queue's drop of a ready proof: the note back UNSPENT at once
+  world.h.drop = async (id) => {
+    took.dropped++;
+    const n = await world.notes.get(id);
+    if (n?.state === "HELD") await world.notes.move(id, "HELD", "UNSPENT", { attempt: n.attempt! });
+  };
+  const got = await runEvmPoolWithdraw(world.h, RUN_ASK, TO, PART, MAX);
+  assert.ok(took.at !== null && took.at < NOW + 60_000n, "taken during the newest-cut waits, inside the epoch");
+  assert.equal(took.dropped, 1, "dropped once, after the wait");
+  assert.equal(got.stage, "sent", got.cause);
+  assert.ok(world.chain.trees.some((t) => t.newest && t.beforeMs === NOW + 3_001n), "proved on the newest cut that holds it");
 });
