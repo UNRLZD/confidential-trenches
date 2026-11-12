@@ -245,6 +245,18 @@ test("the pool's time read behind the note's own leaf: read again a second apart
   assert.equal(wd.binds[0]!.deadlineMs, BOUNDARY - E + SOL_LIFE_MS);
 });
 
+// a finalized clock a whole finality depth (32 slots, ~13 s) behind the leaf's block: the run waits it out in one-second
+// reads inside its one budget and sends in the same run, never a failed tap
+test("the pool's time 13 s behind the note's own leaf: read once a second until finalized reaches it, then sent on the newest root in the same run", async () => {
+  let slept = 0n;
+  const wd = await world([1_000n, 30_000_000n, 1_000n], { trees: cutAt([NOW - 30_000n, NOW + 13_000n, NOW + 29_000n]), refs: [undefined, RETURN], now: () => NOW + slept, wait: async (ms) => void (slept += BigInt(ms)) });
+  const a = await runPoolWithdraw(wd.host, ASK, TO, 2_000_000n + MIN, COST);
+  assert.equal(a.stage, "sent", a.cause);
+  assert.equal(slept, 13_000n, "thirteen one-second reads of the pool's time, no more");
+  assert.equal(rootIndexOf(wd), 1, "leaf 1 in, leaf 2 (after now) out");
+  assert.equal(wd.binds[0]!.deadlineMs, BOUNDARY - E + SOL_LIFE_MS);
+});
+
 test("a wait that crosses a boundary proves on the new epoch's root once it holds the leaf", async () => {
   let slept = 0n;
   const wd = await world([1_000n, 30_000_000n, 1_000n], { trees: cutAt([BOUNDARY - 40_000n, BOUNDARY - 500n, BOUNDARY + 2_000n]), refs: [undefined, RETURN], now: () => (slept > 0n ? BOUNDARY + 3_000n : BOUNDARY - 2_000n), wait: async (ms) => void (slept += BigInt(ms)) });
