@@ -18,7 +18,7 @@
 import "../net-window.mjs";
 import { writeFileSync, realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { evmOrigins } from "./page-evm-rpc-csp.mjs";
+import { evmOrigins, SIGN_CHAINS, venuesOf } from "./page-evm-rpc-csp.mjs";
 
 const KEY = "signpage-skeleton";
 export const SIGN = "https://confidential.unrealized.trade";
@@ -32,8 +32,9 @@ const RPCS = "https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org http
 // (packages/kit/src/trade/solana/send.ts); packages/signpage/test/trade.test.ts reads them from the page's trade deps;
 // and Pocket's gateway, the second of the restore's U_X pair (card wallet-restore-reads-ux, pool-restore.ts RESTORE_UX_SOLANA)
 const SOLANA = "https://solana-rpc.publicnode.com https://solana.api.pocket.network https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com";
-// the kit's EVM providers' origins (card page-evm-rpc-csp), read from the kit's venue lists
-const EVM = evmOrigins().join(" ");
+// the kit's EVM providers' origins (card page-evm-rpc-csp), read from the kit's venue lists: the mainnets' alone, the
+// venues SIGN_HOST's build carries (card evm-pools-on-mainnet)
+const EVM = evmOrigins(venuesOf(SIGN_CHAINS)).join(" ");
 // the signing page's deep public pool sources the kit's venue origins (EVM above) leave out (card evm-pool-sync-holds:
 // the kit's EVM_POOL_HISTORY, which the page reads as MAINNET_POOL_HISTORY; Tenderly's is in EVM already);
 // signpage-skeleton.test.mjs holds this to exactly those origins
@@ -67,8 +68,9 @@ export const HEADERS = {
   "x-content-type-options": "nosniff",
   "permissions-policy":
     "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), " +
-    "display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), " +
-    "publickey-credentials-create=(self), publickey-credentials-get=(self), serial=(), usb=(), xr-spatial-tracking=()",
+    "display-capture=(), fullscreen=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), " +
+    "payment=(), picture-in-picture=(), publickey-credentials-create=(self), publickey-credentials-get=(self), serial=(), " +
+    "usb=(), xr-spatial-tracking=()", // fullscreen and picture-in-picture denied: card signing-views-open-over-the-app
 };
 // X-Frame-Options would repeat frame-ancestors, so it is not sent; no cross-origin isolation (COEP would make the APP_HOST
 // frame need CORP and COEP of its own); no policy left report-only

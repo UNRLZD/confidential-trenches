@@ -25,7 +25,7 @@ import type { EvmPoolSellQuoteRequest } from "../../kit/src/checks/evm/quote.ts"
 import { BOUGHT, flat, provider, refreshHead, sellQuoteWith, TOKEN } from "../../kit/test/evm-sell-quote-fx.ts";
 import { EVM_POSITION_COSTS_KEY, type EvmHolding } from "../src/pool-buy-evm.ts";
 import { EvmSendBusy, EvmSendNoAnswer, EvmSendRefused, evmBuyCalldata, evmSellSend } from "../src/evm-send.ts";
-import { EVM_OPEN_SELLS_KEY, evmBuyRouteRead, evmSellPlanQuote, followEvmSells, runEvmPoolSell, type EvmOpenSell, type EvmSellHost } from "../src/pool-sell-evm.ts";
+import { EVM_OPEN_SELLS_KEY, evmBuyRouteRead, evmSellPlanQuote, followEvmSells, planEvmSell, runEvmPoolSell, type EvmOpenSell, type EvmSellHost } from "../src/pool-sell-evm.ts";
 import type { PoolAsk } from "../src/rules/pool.ts";
 import { SolanaRpcTransportError } from "../../kit/src/trade/solana/send.ts";
 import { READ_WAIT_TOTAL_MS } from "../src/read-waits.ts";
@@ -273,6 +273,47 @@ test("the calldata is byte for byte the encoding the pool's testnet run sends (t
   assert.equal("0x" + h, again);
 });
 
+test("the sale's finding reads only the Ws whose own buy record names the token sold: another W of the device, holding another token, is never named to the pool's RPCs (card evm-pools-on-mainnet)", async () => {
+  const store = await notes();
+  // a second note the device spent, paying its own W2, whose buy record names another token
+  const DEP2: NoteRef = { kind: "deposit", s: SCOPE, i: 1 };
+  const L2 = vaultLabelOf(keccak_256, SCOPE, 2n);
+  const pre2 = noteSecrets(SEED, DEP2).precommitment;
+  const n2 = await store.add({ ref: DEP2, scope: SCOPE, precommitment: pre2, state: "UNSPENT", leaf: { value: 2n * 10n ** 15n, label: L2, commitment: noteCommitment(2n * 10n ** 15n, L2, pre2), leafIndex: 1n } });
+  await store.move(n2.id, "UNSPENT", "SPENT");
+  const W2 = freshWallet(SEED, "evm", L2, jOf(DEP2)).address.toLowerCase();
+  assert.notEqual(W2, W);
+  const OTHER = "0x" + "c0".repeat(20);
+  const md = meta({ [EVM_POSITION_COSTS_KEY]: { [W]: ROUTE_REC, [W2]: { ...ROUTE_REC, mint: OTHER } } });
+  const x = await world({ store, md });
+  const named: string[] = [];
+  const watch = (rpc: EvmRpc): EvmRpc => Object.assign(async (m: string, params: readonly unknown[]) => {
+    named.push(JSON.stringify(params).toLowerCase());
+    return rpc(m, params);
+  }, { url: (rpc as { url?: string }).url });
+  const plan = await planEvmSell({ ...x.h, rpcs: [watch(x.h.rpcs[0]), watch(x.h.rpcs[1])] as const }, ASK);
+  assert.ok("legs" in plan, JSON.stringify(plan, (_k, v) => (typeof v === "bigint" ? v.toString() : v)));
+  assert.ok(named.some((n) => n.includes(W.slice(2))), "W, the token's holder, is read");
+  assert.ok(named.every((n) => !n.includes(W2.slice(2))), "W2 is never named to a pool RPC");
+});
+
+test("a pool RPC behind a W's buy block: the plan waits until both are past it, then reads W's tokens (a 100 % sale never plans without them)", async () => {
+  const x = await world();
+  // the buy record's block is 256: provider 1 reads two blocks under it
+  x.c.lowBy[1] = x.c.head - 254n;
+  await assert.rejects(planEvmSell(x.h, { ...ASK, amount: 0n, shareBps: 10_000 }), (e: Error) => e.name === "EvmLagError" && /under the buy at block 256/.test(e.message));
+  // inside the tap's bound, a wait the provider catches up during plans W with all its units
+  let waited = 0;
+  x.h.wait = async (ms) => {
+    waited++;
+    tick(ms);
+    x.c.lowBy[1] = 0n;
+  };
+  const { plan } = await evmSellPlanQuote(x.h, { ...ASK, amount: 0n, shareBps: 10_000 });
+  assert.ok(waited >= 1, "the plan waited");
+  assert.deepEqual(plan.legs.map((l) => [l.w.w, l.units]), [[W, UNITS]]);
+});
+
 test("a W whose buy record holds no route, or no block, is refused not_allowed: nothing read past the plan, nothing sent", async () => {
   for (const holding of [{ ...ROUTE_REC, route: undefined }, { ...ROUTE_REC, route: { ...ROUTE_REC.route, block: undefined } }, { ...ROUTE_REC, state: "pending" }]) {
     const x = await world({ holding });
@@ -473,7 +514,7 @@ test("restore: the route read back from the buy's own transaction on two RPCs eq
   await assert.rejects(evmBuyRouteRead([rpc(), rpc(true)], "base", POOL, { w: W, token: TOKEN, block: 0x100n, blockHash: BH, logIndex: 3n }), /another buy/);
 });
 
-test("the live check's own constants are the page's: the sell selector, the Deposited topic, the testnet RPC pairs and chain ids, each testnet's sell delegate and sender, the open sale's key", async () => {
+test("the live check's own constants are the page's: the sell selector, the Deposited topic, the testnet RPC pairs and chain ids, each testnet's sell delegate and sender, the sale's mark", async () => {
   const lc = (await import(new URL("../../../scripts/live-checks/signpage-evm-pool-sell.mjs", import.meta.url).href)) as Record<string, unknown>;
   const { EVM_SELL_SIGNATURE } = await import("../src/evm-send.ts");
   const { TESTNET_RPCS } = await import("../src/pool-testnet.ts");
@@ -484,8 +525,11 @@ test("the live check's own constants are the page's: the sell selector, the Depo
   assert.deepEqual(lc.CHAIN_IDS, { "base-sepolia": EVM_CHAIN_IDS["base-sepolia"], "robinhood-testnet": EVM_CHAIN_IDS["robinhood-testnet"] });
   const v = evmPoolVenues();
   for (const n of ["base-sepolia", "robinhood-testnet"] as const) assert.deepEqual((lc.SELL_PINS as Record<string, unknown>)[n], { sellDelegate: v[n]!.sellDelegate!.toLowerCase(), sellSender: v[n]!.sellSender!.toLowerCase() });
-  assert.ok((lc.EVM_SELL_MARKS as string[]).includes(EVM_OPEN_SELLS_KEY));
-  assert.ok((lc.EVM_SELL_MARKS as string[]).includes(EVM_POSITION_COSTS_KEY), "the buy records' key: no mainnet bundle carries it");
+  // the open sales' and the buy records' keys are no marks: the mainnet positions pass reads both (card evm-pools-on-mainnet)
+  assert.ok(!(lc.EVM_SELL_MARKS as string[]).includes(EVM_OPEN_SELLS_KEY));
+  assert.ok(!(lc.EVM_SELL_MARKS as string[]).includes(EVM_POSITION_COSTS_KEY));
+  // the sale's typed data, whole: the kit's own type string (packages/kit/src/trade/evm/sell-unpinned.ts)
+  assert.deepEqual(lc.EVM_SELL_MARKS, ["nonce()", "Sell(address token,uint256 amount,address target,bytes data,uint256 minOut,address pool,uint256 precommitment,uint256 feeCap,address feeRecipient,uint256 deadline,uint256 nonce)"]);
 });
 
 // ---- the review of 1004e598..617fcd62 (card signpage-evm-pool-sell) ----

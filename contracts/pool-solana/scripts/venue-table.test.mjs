@@ -28,7 +28,10 @@ const REPO = path.join(HERE, "../../..");
 const fx = JSON.parse(readFileSync(path.join(REPO, "packages/kit/test/fixtures/solana-pool-buy.json"), "utf8"));
 const kit = await import(path.join(REPO, "packages/kit/src/index.ts"));
 const MAINNET_FILE = path.join(REPO, "contracts/pool-solana/deployments/mainnet.json");
-const MAINNET = JSON.parse(readFileSync(MAINNET_FILE, "utf8"));
+/** The repo's mainnet record as it is (PumpSwap's generation 1 frozen on 12 Nov). */
+const REAL = JSON.parse(readFileSync(MAINNET_FILE, "utf8"));
+/** The tests' base: the record before PumpSwap's first generation, the real one without tables.pumpswap. */
+const MAINNET = (({ pumpswap, ...tables }) => ({ ...REAL, tables }))(REAL.tables);
 const FX = { "pump-curve": "pump", pumpswap: "pumpswap" };
 const { release: fxRelease, FEE_PAYER, W, rent } = await import(path.join(REPO, "packages/kit/test/solana-pool-buy-fx.ts"));
 const req = (kind) => ({ wallet: W, feePayer: FEE_PAYER, token: fx[FX[kind]].mint, spend: 5_000_000n, minOut: 1n, tip: 0n, cuPrice: 1n, cluster: "devnet" });
@@ -398,6 +401,28 @@ test("refused: nothing to add when the newest generation holds every page of the
   assert.deepEqual(changed.list, kit.solanaPoolVenueTableList(CFG, tvOf("pumpswap", newProtocolFeeRecipient), range));
   // the other venue is its own list: the curve's generation 1 is the record's, unchanged, so nothing to add there
   await assert.rejects(planOn(k(), "pump-curve", recordDir(tables)), /nothing to add: pump-curve's buy fits/);
+});
+
+test("the real record (PumpSwap's generation 1 frozen on 12 Nov): nothing to add with the trees where they are; grown trees name generation 2 with the next range", async () => {
+  const g1 = REAL.tables.pumpswap[0];
+  const tv = tvOf("pumpswap");
+  assert.equal(REAL.tables.pumpswap.length, 1);
+  assert.deepEqual(kit.solanaPoolVenueTableList(CFG, tv, g1.pages), g1.addresses, "the record's 256 addresses are the kit's own for its pages");
+  const dir = mkdtempSync(path.join(tmpdir(), "venue-table-rec-"));
+  writeFileSync(path.join(dir, "mainnet.json"), readFileSync(MAINNET_FILE));
+  for (const sizes of [{ state: 0, label: 0 }, g1.made_at])
+    await assert.rejects(
+      planOn(fakeCluster({ sizes: [sizes, sizes] }), "pumpswap", dir),
+      new RegExp(`^Error: nothing to add: pumpswap's generation 1 \\(${g1.table}, state pages 0 to 134, label pages 0 to 88\\) holds every page of the next range \\(state pages 0 to 134, label pages 0 to 88, for trees of ${sizes.state} and ${sizes.label} entries\\) and the venue's accounts are unchanged$`),
+    );
+  const grownSizes = { state: 9_000, label: 3_000 };
+  const grown = await planOn(fakeCluster({ sizes: [grownSizes, grownSizes] }), "pumpswap", dir);
+  const range = kit.solanaPoolNextTableRange(CFG, tv, grownSizes);
+  assert.equal(grown.generation, 2);
+  assert.deepEqual(grown.range, range);
+  assert.deepEqual([range.state, range.label], [[7, 141], [1, 89]], "the next range starts where the grown trees end");
+  assert.deepEqual(grown.list, kit.solanaPoolVenueTableList(CFG, tv, range));
+  assert.ok(readFileSync(path.join(dir, "mainnet.json")).equals(readFileSync(MAINNET_FILE)), "a plan writes nothing");
 });
 
 test("each built transaction fits 1,232 B; the create comes first, the freeze last; the extends hold exactly the list", () => {

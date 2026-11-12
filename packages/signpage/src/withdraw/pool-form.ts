@@ -21,11 +21,22 @@
 //   over the fee shown, never one read after.
 // - Every word but To and Amount was kept as drafted (owner 8 Nov 07:55Z, the 8 Nov words page: pw.*) and carries no
 //   data-draft-copy; those two keep it (POOL_DRAFT).
+// - What the screen is for and what can go (card withdraw-form-shows-what-you-can-send): the chain's mark and name at the
+//   top (./chain-mark.ts, the app's own), the asset's symbol at the amount, and the amount that can be sent now, a value
+//   and its symbol that fills the field when tapped: exactly the largest amount the amount check accepts (poolSendable),
+//   so a tap never draws Insufficient or Try. No word is added: values, symbols and marks only.
+// - A pasted To carries what a copy carries (toCleaned): whitespace and invisible format characters are taken off its two
+//   ends, and the invisible joiners (zero-width space, non-joiner and joiner, word joiner, byte-order mark, soft hyphen)
+//   out of it anywhere. Whitespace inside is never taken out: it would glue two pieces of a row ("3<tab>address",
+//   "address 5") into one valid key nobody holds, so it is refused. A direction control anywhere (it can show other
+//   characters than the field holds) is refused, and so is anything else not an address, a "solana:" link's prefix
+//   included. The To line drawn before the press shows the address the check passed, the one handed over.
 // - DOM by createElement and textContent only: the page's CSP requires Trusted Types for every script sink.
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { base58 } from "@scure/base";
 import { nearestPlannable, planPoolWithdraw, poolWithdrawable, type WithdrawSource } from "../pool-withdraw.ts";
 import { EVM_ADDRESS, SOL_KEY, SOLANA_RESERVED_KEYS, type PoolChain } from "../rules/pool.ts";
+import { POOL_CHAIN_MARK } from "./chain-mark.ts";
 import { CHECK_IDLE_MS, markDraft, WITHDRAW_WORDS } from "./form.ts";
 
 // Kept as drafted, owner 8 Nov 07:55Z: withdraw, invalid-address, invalid-amount, insufficient, busy (the vault form's own),
@@ -81,10 +92,23 @@ export function eip55(address: string): string {
   return "0x" + [...lower].map((c, i) => (((h[i >> 1]! >> (i % 2 === 0 ? 4 : 0)) & 15) >= 8 ? c.toUpperCase() : c)).join("");
 }
 
+/** What a copy carries around an address: whitespace and invisible format characters at either end. */
+const ENDS = /^[\p{White_Space}\p{Cf}]+|[\p{White_Space}\p{Cf}]+$/gu;
+/** The invisible joiners a copy can leave inside an address: zero-width space, non-joiner and joiner, word joiner,
+ *  byte-order mark, soft hyphen. They separate nothing a person sees. */
+const JOINERS = /[\u200B\u200C\u200D\u2060\uFEFF\u00AD]/gu;
+/** The direction controls (Arabic letter mark, LRM and RLM, the embeddings and overrides, the isolates): a field holding
+ *  one can show other characters, or another order, than it holds. */
+const DIRECTION = /[\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/u;
+
+/** A typed or pasted To with what a copy carries taken out (ENDS, then JOINERS); null when it holds a direction control. */
+export const toCleaned = (raw: string): string | null => (DIRECTION.test(raw) ? null : raw.replace(ENDS, "").replace(JOINERS, ""));
+
 /** To, on the pool's chain. */
 export function checkPoolTo(chain: PoolChain, raw: string, keys: PoolKeys): PoolAddressCheck {
-  const to = raw.trim();
+  const to = toCleaned(raw);
   const no: PoolAddressCheck = { ok: false, code: "address" };
+  if (to === null) return no;
   if (chain === "solana") {
     if (!SOL_KEY(to) || base58.encode(base58.decode(to)) !== to) return no;
     // nor a key the runtime keeps read-only (a sysvar or a builtin program, System among them): nothing lands there
@@ -125,9 +149,14 @@ export function checkPoolAmount(chain: PoolChain, raw: string, funds: PoolFunds 
   return { ok: true, amount, parts: plan.length, maxFee: BigInt(plan.length) * (funds.fee + funds.wFee) };
 }
 
+/** What can be sent now: poolWithdrawable, the Insufficient rule's own sum. It is the largest amount checkPoolAmount
+ *  accepts: each note sent whole is a plan, so the sum always has one (test/pool-withdraw-sendable.test.ts holds it on
+ *  random note sets); 0n when no note gives the smallest part. */
+export const poolSendable = (funds: PoolFunds): bigint => poolWithdrawable(funds.notes, funds);
+
 /** The screen's view of both fields, checked now. */
 export function evaluatePool(chain: PoolChain, to: string, amount: string, keys: PoolKeys, funds: PoolFunds | null): PoolFormView {
-  const blankTo = to.trim() === "";
+  const blankTo = toCleaned(to) === "";
   const blankAmount = amount.trim() === "";
   const a = blankTo ? null : checkPoolTo(chain, to, keys);
   const m = blankAmount ? null : checkPoolAmount(chain, amount, funds);
@@ -174,12 +203,17 @@ export function drawPoolWithdrawForm(doc: Document, deps: PoolWithdrawFormDeps, 
   form.dataset.withdraw = "pool";
   form.dataset.chain = chain;
   form.dataset.state = "empty";
+  // one column, no wider than the app's drawer: each field's name over its input, the symbol beside the amount's
+  Object.assign(form.style, { display: "flex", flexDirection: "column", alignItems: "stretch", gap: "12px", maxWidth: "440px" });
   const field = (key: "to" | "amount") => {
     const label = doc.createElement("label");
+    Object.assign(label.style, { display: "flex", flexWrap: "wrap", alignItems: "center", gap: "6px 8px" });
     const name = doc.createElement("span");
     name.textContent = POOL_WITHDRAW_WORDS[key];
     markDraft(name, key, POOL_DRAFT);
+    Object.assign(name.style, { flexBasis: "100%" });
     const input = doc.createElement("input");
+    Object.assign(input.style, { flex: "1 1 0", minWidth: "0" });
     input.type = "text";
     input.dataset.input = key;
     input.autocomplete = "off";
@@ -188,13 +222,46 @@ export function drawPoolWithdrawForm(doc: Document, deps: PoolWithdrawFormDeps, 
     input.setAttribute("autocorrect", "off");
     if (key === "amount") input.inputMode = "decimal";
     label.append(name, input);
+    if (key === "amount") {
+      // the asset's symbol at the amount
+      const unit = doc.createElement("span");
+      unit.dataset.symbol = symbol;
+      unit.textContent = symbol;
+      Object.assign(unit.style, { flex: "none" });
+      label.append(unit);
+    }
     const line = doc.createElement("p");
     line.dataset.for = key;
     line.hidden = true;
     return { input, line, label };
   };
+  // the chain: its mark in the app's round black badge, then its name
+  const mark = POOL_CHAIN_MARK[chain];
+  const head = doc.createElement("div");
+  head.dataset.mark = chain;
+  Object.assign(head.style, { display: "flex", alignItems: "center", gap: "8px", minHeight: "44px" });
+  const badge = doc.createElement("span");
+  Object.assign(badge.style, { display: "block", flex: "none", width: "20px", height: "20px", padding: `${Math.round(20 * mark.inset)}px`, boxSizing: "border-box", borderRadius: "50%", background: "#000", overflow: "hidden" });
+  const logo = doc.createElement("img");
+  logo.src = mark.logo;
+  logo.alt = "";
+  Object.assign(logo.style, { display: "block", width: "100%", height: "100%", objectFit: "contain" });
+  badge.append(logo);
+  const chainName = doc.createElement("span");
+  chainName.textContent = mark.name;
+  head.append(badge, chainName);
   const to = field("to");
   const amount = field("amount");
+  // what can be sent now, a value and its symbol, drawn once the funds are read; a tap puts it in the amount. Its row
+  // carries `hidden`, so a style given to the button itself (display) can never show it before the funds are read.
+  const canRow = doc.createElement("div");
+  canRow.dataset.row = "sendable";
+  canRow.hidden = true;
+  const sendable = doc.createElement("button");
+  sendable.type = "button";
+  sendable.dataset.action = "sendable";
+  Object.assign(sendable.style, { minHeight: "44px", minWidth: "44px", padding: "0 12px", fontVariantNumeric: "tabular-nums" });
+  canRow.append(sendable);
   // the lines shown before the press: where the money lands and the most the relayer takes
   const shown = doc.createElement("dl");
   shown.dataset.lines = "pool-withdraw";
@@ -205,7 +272,7 @@ export function drawPoolWithdrawForm(doc: Document, deps: PoolWithdrawFormDeps, 
   const rose = doc.createElement("div");
   rose.dataset.lines = "fee-rose";
   rose.hidden = true;
-  form.append(rose, to.label, to.line, amount.label, amount.line, shown, go);
+  form.append(head, rose, to.label, to.line, amount.label, canRow, amount.line, shown, go);
   if (deps.owedFees && deps.redraw) {
     const redraw = deps.redraw;
     const owedFees = deps.owedFees;
@@ -243,7 +310,16 @@ export function drawPoolWithdrawForm(doc: Document, deps: PoolWithdrawFormDeps, 
   let funds: PoolFunds | null = null;
   // the To the funds were read for (Base and Robinhood: W's send to it is priced)
   let fundsTo: string | undefined;
-  const load = (): Promise<void> => deps.funds(fundsTo).then((f) => void (funds = f), () => void (funds = null));
+  const drawSendable = (): void => {
+    const can = funds === null ? null : poolSendable(funds);
+    canRow.hidden = can === null;
+    sendable.disabled = !can;
+    Object.assign(sendable.style, { opacity: can ? "" : "0.5", cursor: can ? "pointer" : "default" }); // 0: shown, not offered
+    sendable.textContent = can === null ? "" : `${formatUnits(can, decimals)} ${symbol}`;
+    if (can === null) delete sendable.dataset.value;
+    else sendable.dataset.value = String(can);
+  };
+  const load = (): Promise<void> => deps.funds(fundsTo).then((f) => void (funds = f), () => void (funds = null)).then(drawSendable);
   let loaded = load();
   let seq = 0;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -286,6 +362,7 @@ export function drawPoolWithdrawForm(doc: Document, deps: PoolWithdrawFormDeps, 
         const dd = doc.createElement("dd");
         dd.textContent = value;
         dd.dataset.line = key;
+        dd.style.overflowWrap = "anywhere"; // a whole address on a phone: it wraps, never wider than the screen
         shown.append(dt, dd);
       }
     }
@@ -310,12 +387,19 @@ export function drawPoolWithdrawForm(doc: Document, deps: PoolWithdrawFormDeps, 
   const typed = (): void => {
     clearTimeout(timer);
     seq += 1;
-    const blank = to.input.value.trim() === "" && amount.input.value.trim() === "";
+    const blank = toCleaned(to.input.value) === "" && amount.input.value.trim() === "";
     draw({ state: blank ? "empty" : "typing", address: null, amount: null, ready: null });
     if (!blank) timer = setTimeout(() => void check(), CHECK_IDLE_MS);
   };
   to.input.addEventListener("input", typed);
   amount.input.addEventListener("input", typed);
+  // the tap on what can be sent: that amount in the field, checked now against the same funds
+  sendable.addEventListener("click", () => {
+    if (funds === null || sendable.disabled) return;
+    amount.input.value = formatUnits(poolSendable(funds), decimals);
+    clearTimeout(timer);
+    void check();
+  });
 
   // the press: the funds read again, both fields checked again; only the answer drawn goes on
   async function withdraw(): Promise<void> {

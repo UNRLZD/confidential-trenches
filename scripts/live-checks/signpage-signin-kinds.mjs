@@ -7,8 +7,8 @@
 //     closes, back to the app with a frame again; that frame takes the signed-in state, pools included (live: the
 //     deployed terminal's own kit client reaches ready, <html data-signpage>, never down; both: the state the shell
 //     answers is signed in, holds pools and passes the kit's client, scripts/signpage-state.mjs). backup.open draws the 12 words in the layer (counted, never read) and
-//     Cancel goes back to the app, still signed in. signout opens the sign-out page in the top window (the frame out of
-//     the document, no Sign out in any frame); Sign out deletes the store and goes back to the app, signed out. A
+//     Cancel goes back to the app, still signed in. signout opens the sign-out page in the top window (no Sign out in
+//     any frame); Sign out deletes the store and goes back to the app, signed out. A
 //     signout sent signed out, and a backup.open sent signed out, are refused (not_allowed). Signed in, a signin.open is
 //     refused (a seed is never replaced), and a press on Sign out within 500 ms of the sign-out page opening does
 //     nothing. Signed in, a blank page of the check's own (APP_HOST frames nothing: its frame-src 'none') puts SIGN_HOST
@@ -29,6 +29,8 @@
 //   broken store: signin.open opens the passkey page; a seed record that decrypts but fails checkSeed is put in the
 //     store; Cancel still goes back to the app.
 //   Every press waits out the page's 500 ms activation guard first, which each layer opening restarts.
+//   Every screen above opens as a sheet over the app with the APP_HOST frame kept in the page under it (card
+//   signing-views-open-over-the-app); none of them has a field typed into, the one kind of screen that takes it out.
 // After: sign
 //   node scripts/live-checks/signpage-signin-kinds.mjs [--url <origin>] [--record <file>]
 //   node scripts/live-checks/signpage-signin-kinds.mjs --harness [--site <dir>] ...   the same steps on the app's
@@ -47,6 +49,7 @@ import { browserLabel, launchBrowser } from "../browsers.mjs";
 import { kitTakesState } from "../signpage-state.mjs";
 import { SIGNPAGE_KIT_VERSION } from "../../packages/kit/src/index.ts";
 import { consoleError } from "./console-errors.mjs";
+import { CSP } from "./signpage-skeleton.mjs";
 
 const KEY = "signpage-signin-kinds";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -112,7 +115,7 @@ export function judge(rec) {
   const p = rec.prf ?? {};
   const pending = (a) => a?.ok === true && a?.result?.pending === true;
   const refusedNA = (a) => a?.ok === false && a?.error?.code === "not_allowed";
-  const inLayer = (x, state) => x?.state === state && x?.layer === "shown" && x?.frame === false && x?.top === true;
+  const inLayer = (x, state) => x?.state === state && x?.layer === "shown" && x?.top === true;
   const backToApp = (x, state) => x?.state === state && x?.layer === "hidden" && x?.frame === true;
 
   say(pending(p.signin?.answer) && inLayer(p.signin?.page, "signed-out") && p.signin?.page?.create === 1,
@@ -177,7 +180,22 @@ export function judge(rec) {
   const bk = rec.broken ?? {};
   say(inLayer(bk.open, "signed-out") && bk.planted === true && bk.cancel?.layer === "hidden" && bk.cancel?.frame === true,
     `broken store: Cancel goes back to the app when the stored seed cannot be read (${bk.cancel?.state ?? "no step"}, layer ${bk.cancel?.layer ?? "?"})`);
-  say(Array.isArray(rec.errors) && rec.errors.length === 0, `no page error or CSP violation (${Array.isArray(rec.errors) ? rec.errors.length : "no record"})${Array.isArray(rec.errors) && rec.errors.length ? `: ${rec.errors.join("; ")}` : ""}`);
+  // card signing-views-open-over-the-app: every screen above opens as a sheet over the app, its frame kept in the page,
+  // but the 12 words shown (backup), before which the frame leaves (src/main.ts TYPED) and stays out for the rest of that
+  // sheet (Saved going on to the sign-out page)
+  // under it (only a screen with a field typed into takes the frame out, and none of these has one)
+  const sheets = [p.signin?.page, so.page, so.early, w.choose, w.existing, ex, bk.open];
+  const words = [p.backup?.page, n.signout?.page, t.backup?.page, n.saved];
+  const kept = sheets.filter((x) => x?.layer === "shown" && x?.frame === true).length;
+  const out = words.filter((x) => x?.layer === "shown" && x?.frame === false).length;
+  say(kept === sheets.length && out === words.length, `the sheet keeps the app's frame in the page under every screen it draws but the 12 words, and takes it out under those and after them (${kept} of ${sheets.length} kept, ${out} of ${words.length} out)`);
+  // the harness maps every name but its own to not found (launch(): MAP * ~NOTFOUND), so a page's reads of outside hosts
+  // (public RPCs, the helper) fail there by design: on a harness run those lines alone are not the page's errors. Any
+  // other line, and the same line on the live host, still is.
+  const errors = Array.isArray(rec.errors) ? rec.errors.filter((e) => !(rec.mode === "harness" && HARNESS_UNRESOLVED.test(e))) : null;
+  const skipped = Array.isArray(rec.errors) ? rec.errors.length - errors.length : 0;
+  say(errors !== null && errors.length === 0, `no page error or CSP violation (${errors ? errors.length : "no record"})${errors?.length ? `: ${errors.join("; ")}` : ""}`);
+  if (skipped) say(true, `harness: ${skipped} console line(s) for outside names it leaves unresolved, not counted`);
   return { pass: lines.every((l) => l.startsWith("ok ")), lines };
 }
 
@@ -240,6 +258,14 @@ async function passkeyNoPrf(page) {
 
 /** The check's page and console hooks: a page error, and a console error kept through the shared collector
  *  (console-errors.mjs) as its text and its address's origin and path. */
+/** A console line on the harness for a name it does not serve: the resource failed to resolve, nothing else. */
+const UNRESOLVED = /^console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED \((https:\/\/[^/)]+)\/[^)]*\)$/;
+/** SIGN_HOST's own connect-src origins, as pinned by its skeleton check (never read from the repo's _headers). */
+export const SIGN_CONNECT = new Set(CSP.find(([k]) => k === "connect-src")[1].split(" ").filter((o) => o.startsWith("https://")));
+/** A console line on the harness for an outside name it leaves unresolved: a resource of one of the hosts SIGN_HOST may
+ *  reach (its connect-src) failed to resolve, nothing else; any other host, or no address, is the page's error. */
+export const HARNESS_UNRESOLVED = { test: (e) => SIGN_CONNECT.has(UNRESOLVED.exec(String(e))?.[1] ?? "") };
+
 export function watch(page, errors) {
   page.on("pageerror", (e) => errors.push(`pageerror: ${e.message}`));
   page.on("console", (m) => m.type() === "error" && errors.push(`console: ${consoleError(m)}`));
@@ -286,7 +312,7 @@ async function framedTry(page) {
   return { answer, loaded, signoutButtons, refusals: refusals.length, errors };
 }
 
-// The APP_HOST frame the shell holds now (a new one comes each time the layer closes).
+// The APP_HOST frame the shell holds now (kept under the sheet; a new one comes only after a screen with a typed field).
 async function appFrame(page) {
   const until = Date.now() + WAIT_MS;
   for (;;) {
@@ -299,7 +325,7 @@ async function appFrame(page) {
 
 // Posts one kind from inside the APP_HOST frame to the shell, as the terminal does, and returns the shell's answer.
 async function send(page, type, params = {}) {
-  // no frame: the layer is open (an open kind a page should have refused took it), so no kind can be sent
+  // no frame: a screen with a typed field is open, so no kind can be sent (under any other sheet one goes unread)
   const f = await appFrame(page).catch(() => null);
   if (!f) return { noFrame: true };
   return f.evaluate(({ type, params, origin, hello }) => new Promise((done) => {
@@ -337,7 +363,7 @@ async function read(page, not = []) {
     const s = document.getElementById("signin")?.dataset.signin;
     return s && s !== "loading" && !not.includes(s);
   }, not, { timeout: WAIT_MS }).catch(() => {});
-  // the frame leaves FRAME_LEAVE_MS (100 ms) after the layer shows, and a new one comes at close
+  // a screen with a typed field takes the frame out FRAME_LEAVE_MS (100 ms) after the layer shows; every other keeps it
   await page.waitForTimeout(300);
   const r = await page.evaluate(async () => {
     const m = document.getElementById("signin");

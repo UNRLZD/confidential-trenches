@@ -16,6 +16,7 @@ function rig(answer: (kind: string) => unknown = () => ({ ok: true, result: { pe
   const locks: (string | null)[] = [];
   const fails: (HopFailure | null)[] = [];
   const timers: { ms: number; fn: () => void; live: boolean }[] = [];
+  const takers: { fn: () => void; live: boolean }[] = [];
   const g = hopGate({
     request: async (kind) => {
       sent.push(kind);
@@ -28,11 +29,19 @@ function rig(answer: (kind: string) => unknown = () => ({ ok: true, result: { pe
       timers.push(t);
       return () => void (t.live = false);
     },
+    taken: (fn) => {
+      const t = { fn, live: true };
+      takers.push(t);
+      return () => void (t.live = false);
+    },
   });
   const fire = () => {
     for (const t of timers.splice(0)) if (t.live) t.fn();
   };
-  return { g, sent, locks, fails, timers, fire };
+  const take = () => {
+    for (const t of takers.splice(0)) if (t.live) t.fn();
+  };
+  return { g, sent, locks, fails, timers, fire, take };
 }
 const tick = () => new Promise((r) => setTimeout(r, 0));
 
@@ -102,4 +111,27 @@ test("no client: down, shown as silent, nothing sent, unlocked", async () => {
   assert.equal((await g.hop("signin.open", { way: "passkey" }, view("signin-passkey")))?.ok, false);
   assert.deepEqual(locks, ["signin-passkey", null]);
   assert.equal(fails.at(-1)?.why, "silent");
+});
+
+test("the sheet takes this frame's focus: the control unlocks with no line, the window's timer cancelled, and the next open goes (card signing-views-open-over-the-app)", async () => {
+  const r = rig();
+  assert.equal((await r.g.hop("signin.open", { way: "passkey" }, view("signin-passkey")))?.ok, true);
+  assert.deepEqual(r.locks, ["signin-passkey"]);
+  r.take();
+  assert.deepEqual(r.locks, ["signin-passkey", null], "unlocked once the sheet took the focus");
+  r.fire();
+  assert.deepEqual(r.fails, [null], "no silent line: the window's timer was cancelled");
+  // the sheet closed, the frame kept: the next tap opens again
+  assert.equal((await r.g.hop("backup.open", {}, view("acct-backup")))?.ok, true);
+  assert.deepEqual(r.sent, ["signin.open", "backup.open"]);
+});
+
+test("no focus taken within the kind's window: the silent line, and a late blur changes nothing", async () => {
+  const r = rig();
+  await r.g.hop("withdraw.open", {}, view("acct-withdraw"));
+  r.fire();
+  assert.equal(r.fails.at(-1)?.why, "silent");
+  const n = r.locks.length;
+  r.take();
+  assert.equal(r.locks.length, n, "the blur listener was removed with the timer");
 });

@@ -1,0 +1,1490 @@
+{
+  "at": "2026-11-11T19:18:35.119Z",
+  "what": "deposit, buy, sell and withdraw of the Solana pool on a local copy of mainnet (solana-test-validator, mainnet's feature set, mainnet accounts cloned)",
+  "validator": {
+    "feature-set": 3383571666,
+    "solana-core": "4.3.2"
+  },
+  "mainnetSlot": 468237610,
+  "rent": {
+    "mainnet": "d813000000000000000000000000f03f32",
+    "copy": "d813000000000000000000000000f03f32"
+  },
+  "clock": [
+    {
+      "wallMs": 1794424666299,
+      "confirmed": {
+        "slot": 34,
+        "time": 1794424666
+      },
+      "finalized": {
+        "slot": 34,
+        "time": 1794424666
+      }
+    },
+    {
+      "wallMs": 1794424666806,
+      "confirmed": {
+        "slot": 37,
+        "time": 1794424666
+      },
+      "finalized": {
+        "slot": 37,
+        "time": 1794424666
+      }
+    }
+  ],
+  "mainnetReads": 5,
+  "plant": "mayhem-drop",
+  "copyTables": {},
+  "engine": "swallow",
+  "coins": {
+    "mayhem": {
+      "mint": "Dr4ckobqnVFkGewZDMApNWAAotc6c5txKE3Nordepump",
+      "list": "new",
+      "symbol": "uinhim"
+    }
+  },
+  "skippedCoins": [],
+  "cloned": {
+    "accounts": [
+      "7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8",
+      "ELkTShr5bKWSwntTpF238dq3r5ha2oVsNyApMk19x4AJ",
+      "EesTGaxwD6izcU1Nr78dk346UqoNA11SQbsbRQkg2pYn",
+      "So11111111111111111111111111111111111111112",
+      "4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4Jjaxnjf",
+      "62qc2CNXwrYqQScmEdiZFFAnJR262PxWEuNQtxfafNgV",
+      "Ce6TQqeHC9p8KetsN6JsjHK7UTZk7nasjjnr7XxXp9F1",
+      "Hq2wp8uJ9jCPsYgNHex8RtqdvMPfVGoYwjvF1ATiwn2Y",
+      "8Wf5TiAheLUqBrKXeYg2JtAFFMWtKdG2BSFgqUcPVwTt",
+      "5YxQFdt3Tr9zJLvkFccqXVUwhdTWJQc1fFg2YPbxvxeD",
+      "9M4giFFMxmFGXtc3feFzRai56WbBqehoSeRE5GK7gf7",
+      "GXPFM2caqTtQYC2cJ5yJRi9VDkpsYZXzYdwYpGnLmtDL",
+      "3BpXnfJaUTiwXnJNe7Ej1rcbzqTTQUvLShZaWazebsVR",
+      "5cjcW9wExnJJiqgLjq7DEG75Pm6JBgE1hNv4B2vHXUW6",
+      "EHAAiTxcdDwQ3U4bU6YcMsQGaekdzLS3B5SmYo46kJtL",
+      "5eHhjP8JaYkz83CWwvGU2uMUXefd3AazWGx4gpcuEEYD",
+      "A7hAgCzFw14fejgCp387JUJRMNyz4j89JKnhtKU8piqW",
+      "BShWZ8FbDPYGpoc1ebj4TiELvVFmBQwW4XMYuLtQoHYZ",
+      "ADaUMid9yfUytqMBgopwjb2DTLSokTSzL1zt6iGPaS49",
+      "HFqU5x63VTqvQss8hp11i4wVV8bD44PvwucfZ2bU7gRe",
+      "DfXygSm4jCyNCybVYYK6DwvWqjKee8pbDmJGcLWNDXjh",
+      "DttWaMuVvTiduZRnguLF7jNxTgiMBZ1hyAumKUiL2KRL",
+      "ADuUkR4vqLUMWXxW9gh6D6L8pMSawimctcNZ5pGwDcEt",
+      "96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5",
+      "Cw8CFyM9FkoMi7K7Crf6HNQqf4uEMzpKw6QNghXLvLkY",
+      "3AVi9Tg9Uo68tJfuvoKvqKNWKkC5wPdSSdeBnizKZ6jT",
+      "Dr4ckobqnVFkGewZDMApNWAAotc6c5txKE3Nordepump",
+      "GesfTA3X2arioaHp8bbKdjG9vJtskViWACZoYvxp4twS",
+      "EGBUWTS51o5bT6QnrUtFbfZ8oqBUNfsL4pZPS1VM6o51",
+      "4X6Xa25Bq4WkEM531vKUvQbxzphkCXdcfVkZorXDxWq9",
+      "7BpCSLe8ZZ4M8po4jp8uHpU3du81n8fPLbNwWF3HpkoB",
+      "ADyA8hdefvWN2dbGGWFotbzWxrAvLW83WG6QCVXvJKqw",
+      "5PHirr8joyTMp9JMm6nW7hNDVyEYdkzDqazxPD7RaTjx",
+      "C93K8DX4YsABYJtHX9awzgZW3LWzBqBVezEbbLJH4yet",
+      "4budycTjhs9fD6xw62VBducVTNgMgJJ5BgtKq7mAZwn6",
+      "Bckr4rY4rUGvWtwqC9mnWN35LKzfPRcmsoMRYq6DFEjN",
+      "8SBKzEQU4nLSzcwF4a74F2iaUDQyTfjGndn6qUWBnrpR",
+      "9tvBjCQ4m3954ESgxW9PnBPvW8afHEjKpkNEAdfN2D8U",
+      "4UQeTP1T39KZ9Sfxzo3WR5skgsaP6NZa87BAkuazLEKH",
+      "CoRuMWRuDAsjB5SDMmYEcDuyQyaH3L2vVFvwBy1FF8Kr",
+      "8sNeir4QsLsJdYpc9RZacohhK1Y5FLU3nC5LXgYB4aa6",
+      "21L1QB6DJ9HBvePgwN6jFuK3UT9mq2SgTq1oJ7D6cNiV",
+      "Fh9HmeLNUMVCvejxCtCL2DbYaRyBFVJ5xrWkLnMH6fdk",
+      "2i3uCDzDhr3pSvMPF5uBpUckLAv7XGdo2a8soiqNJMHk",
+      "463MEnMeGyJekNZFQSTUABBEbLnvMTALbT6ZmsxAbAdq",
+      "BZeq7y8ajn5Pjpy5KjEhF6eBY2H9ippTpqCtQLQPsmJf",
+      "6AUH3WEHucYZyC61hqpqYUWVto5qA5hjHuNQ32GNnNxA",
+      "ghSBUgyxyvyurm1vJBkU4rUyLJoUipCZhFeiBogKCSy",
+      "B3DXFHBR6HSHR57dYYyTfQXmJkyj9786ndAnpE6wjYKE"
+    ],
+    "programs": [
+      "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+      "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+      "pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ",
+      "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
+      "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+      "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA"
+    ],
+    "absentOnMainnet": [
+      "ECSchKJGQPtfHC4TLFp78Ao9g51EawTgmQPbmA1cFb5y",
+      "9uZjezZDJjNyqz4gvQkALs9ksHA7UqmdPHsJi5Zjv7Ge",
+      "4nXspGHnWkKcm5Rpg5YZqE1r4CPVi9FSUwUUTf4wVbw6",
+      "AevzuoCXDzuFkyP1ymd13R2SsN3gU8BsZyVjAiMwSP8R",
+      "ASLbAvyGApG7s6jCcgzPgnBMx2WC7CbR29nz76gjRTNM",
+      "8CCnW1GKQEiyGfH7bEFZdyYq1BTZ6bYhcQGYchhbyPhV",
+      "8GbhAqcFx3qVrpZSj6KWCE3UGY6zJUEdJQR9jxYhvxuL",
+      "5coxd6WhFJhAWEbaqkEZLvJZQ8LQDCmxZNp2TMC5nDkh"
+    ],
+    "tablesReset": [
+      "BShWZ8FbDPYGpoc1ebj4TiELvVFmBQwW4XMYuLtQoHYZ"
+    ]
+  },
+  "records": [
+    {
+      "coin": "mayhem",
+      "step": "deposit",
+      "signature": "4e1uAMyToKHtFq2VnpPRr2qXy3htkstGkmh5XqafNb7Jq3U9s4kBoa4crT2U7QdStBSnXf8CP8BAVnAgd2i31Zed",
+      "found": true,
+      "slot": 44,
+      "ok": true,
+      "err": null,
+      "cu": 23838,
+      "cuLimit": null,
+      "fee": 5000,
+      "accounts": 9,
+      "lookups": [],
+      "programs": [
+        "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF"
+      ]
+    },
+    {
+      "coin": "mayhem",
+      "step": "buy",
+      "ok": false,
+      "simulation": {
+        "phase": "buy",
+        "err": {
+          "InstructionError": [
+            2,
+            {
+              "Custom": 6000
+            }
+          ]
+        },
+        "cu": 208827,
+        "logsTail": [
+          "Program TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb success",
+          "Program ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL consumed 19540 of 150481 compute units",
+          "Program ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL success",
+          "Program 6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P invoke [2]",
+          "Program log: Instruction: BuyExactSolIn",
+          "Program 11111111111111111111111111111111 invoke [3]",
+          "Program 11111111111111111111111111111111 success",
+          "Program log: AnchorError thrown in programs/pump/src/fee_recipient.rs:19. Error Code: NotAuthorized. Error Number: 6000. Error Message: The given account is not authorized to execute this instruction..",
+          "Program 6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P consumed 34641 of 125814 compute units",
+          "Program 6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P failed: custom program error: 0x1770",
+          "Program EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF consumed 208527 of 299700 compute units",
+          "Program EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF failed: custom program error: 0x1770"
+        ]
+      }
+    },
+    {
+      "coin": "mayhem",
+      "step": "flow",
+      "ok": false,
+      "exit": 1,
+      "buyAnswer": {
+        "result": {
+          "stage": "not_landed",
+          "txs": []
+        }
+      },
+      "sellAnswer": null
+    }
+  ],
+  "runs": {
+    "mayhem": {
+      "exit": 1,
+      "flow": {
+        "at": "2026-11-11T19:18:35.105Z",
+        "cluster": "mainnet copy",
+        "program": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+        "seedFile": "/tmp/sol-copy-aiC0Ut/mayhem/run-2026-11-11T19-17-47-245Z.seed",
+        "steps": [
+          {
+            "step": "deposit",
+            "signature": "4e1uAMyToKHtFq2VnpPRr2qXy3htkstGkmh5XqafNb7Jq3U9s4kBoa4crT2U7QdStBSnXf8CP8BAVnAgd2i31Zed",
+            "watch": {
+              "W": null,
+              "feePayer": "J5hnsTEmRr3YsTrGetFkkMaeq1Uk6E9Q6HmpUXAzWzf7",
+              "tip0": "ADaUMid9yfUytqMBgopwjb2DTLSokTSzL1zt6iGPaS49",
+              "tip1": "HFqU5x63VTqvQss8hp11i4wVV8bD44PvwucfZ2bU7gRe",
+              "tip2": "DfXygSm4jCyNCybVYYK6DwvWqjKee8pbDmJGcLWNDXjh",
+              "tip3": "DttWaMuVvTiduZRnguLF7jNxTgiMBZ1hyAumKUiL2KRL",
+              "tip4": "ADuUkR4vqLUMWXxW9gh6D6L8pMSawimctcNZ5pGwDcEt",
+              "tip5": "96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5",
+              "tip6": "Cw8CFyM9FkoMi7K7Crf6HNQqf4uEMzpKw6QNghXLvLkY",
+              "tip7": "3AVi9Tg9Uo68tJfuvoKvqKNWKkC5wPdSSdeBnizKZ6jT"
+            }
+          },
+          {
+            "step": "deposit",
+            "signature": "4e1uAMyToKHtFq2VnpPRr2qXy3htkstGkmh5XqafNb7Jq3U9s4kBoa4crT2U7QdStBSnXf8CP8BAVnAgd2i31Zed",
+            "watch": {
+              "W": null,
+              "feePayer": "J5hnsTEmRr3YsTrGetFkkMaeq1Uk6E9Q6HmpUXAzWzf7",
+              "tip0": "ADaUMid9yfUytqMBgopwjb2DTLSokTSzL1zt6iGPaS49",
+              "tip1": "HFqU5x63VTqvQss8hp11i4wVV8bD44PvwucfZ2bU7gRe",
+              "tip2": "DfXygSm4jCyNCybVYYK6DwvWqjKee8pbDmJGcLWNDXjh",
+              "tip3": "DttWaMuVvTiduZRnguLF7jNxTgiMBZ1hyAumKUiL2KRL",
+              "tip4": "ADuUkR4vqLUMWXxW9gh6D6L8pMSawimctcNZ5pGwDcEt",
+              "tip5": "96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5",
+              "tip6": "Cw8CFyM9FkoMi7K7Crf6HNQqf4uEMzpKw6QNghXLvLkY",
+              "tip7": "3AVi9Tg9Uo68tJfuvoKvqKNWKkC5wPdSSdeBnizKZ6jT"
+            }
+          }
+        ],
+        "simFails": [
+          {
+            "phase": "buy",
+            "err": {
+              "InstructionError": [
+                2,
+                {
+                  "Custom": 6000
+                }
+              ]
+            },
+            "cu": 208827,
+            "logsTail": [
+              "Program TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb success",
+              "Program ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL consumed 19540 of 150481 compute units",
+              "Program ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL success",
+              "Program 6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P invoke [2]",
+              "Program log: Instruction: BuyExactSolIn",
+              "Program 11111111111111111111111111111111 invoke [3]",
+              "Program 11111111111111111111111111111111 success",
+              "Program log: AnchorError thrown in programs/pump/src/fee_recipient.rs:19. Error Code: NotAuthorized. Error Number: 6000. Error Message: The given account is not authorized to execute this instruction..",
+              "Program 6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P consumed 34641 of 125814 compute units",
+              "Program 6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P failed: custom program error: 0x1770",
+              "Program EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF consumed 208527 of 299700 compute units",
+              "Program EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF failed: custom program error: 0x1770"
+            ]
+          }
+        ],
+        "planted": {
+          "reads": 8
+        },
+        "fee": "1300000",
+        "sendLines": [
+          {
+            "phase": "buy",
+            "line": "pool send solana mainnet send outcome=simulation_failed status=422 ms=43 tag=3 err={\"InstructionError\":[2,{\"Custom\":6000}]}"
+          }
+        ],
+        "proofWait": {
+          "passes": 13,
+          "ms": 16942,
+          "made": true
+        },
+        "engine": "swallow",
+        "engineCalls": [],
+        "pool": "7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8",
+        "tables": {
+          "pump-curve": [
+            "BShWZ8FbDPYGpoc1ebj4TiELvVFmBQwW4XMYuLtQoHYZ"
+          ]
+        },
+        "mint": "Dr4ckobqnVFkGewZDMApNWAAotc6c5txKE3Nordepump",
+        "spend": "max",
+        "resumed": false,
+        "burst": false,
+        "injected": {
+          "rpc": 0,
+          "send": 0
+        },
+        "dust": null,
+        "U": "CCVt6ZxkTr5ozSrmEEnqZeRSaz82u7b683hPtLi7oCua",
+        "need": "11473120",
+        "deposit": {
+          "answer": {
+            "result": {
+              "stage": "sent",
+              "txs": [
+                {
+                  "chain": "solana",
+                  "hash": "4e1uAMyToKHtFq2VnpPRr2qXy3htkstGkmh5XqafNb7Jq3U9s4kBoa4crT2U7QdStBSnXf8CP8BAVnAgd2i31Zed"
+                }
+              ]
+            }
+          },
+          "notes": [
+            {
+              "ref": "deposit",
+              "state": "UNSPENT",
+              "value": "10000000",
+              "leafIndex": "1",
+              "sends": [
+                "4e1uAMyToKHtFq2VnpPRr2qXy3htkstGkmh5XqafNb7Jq3U9s4kBoa4crT2U7QdStBSnXf8CP8BAVnAgd2i31Zed"
+              ]
+            }
+          ]
+        },
+        "buy": {
+          "answer": {
+            "result": {
+              "stage": "not_landed",
+              "txs": []
+            }
+          },
+          "notes": [
+            {
+              "ref": "deposit",
+              "state": "UNSPENT",
+              "value": "10000000",
+              "leafIndex": "1",
+              "sends": [
+                "4e1uAMyToKHtFq2VnpPRr2qXy3htkstGkmh5XqafNb7Jq3U9s4kBoa4crT2U7QdStBSnXf8CP8BAVnAgd2i31Zed"
+              ]
+            }
+          ]
+        },
+        "buyTimeline": [
+          {
+            "what": "rpc localhost:22231 getSlot",
+            "at": 2,
+            "ms": 6
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getSlot",
+            "at": 1,
+            "ms": 7
+          },
+          {
+            "what": "rpc localhost:22231 getAccountInfo",
+            "at": 2,
+            "ms": 7
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getAccountInfo",
+            "at": 2,
+            "ms": 7
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getAccountInfo",
+            "at": 2,
+            "ms": 8
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getAccountInfo",
+            "at": 4,
+            "ms": 6
+          },
+          {
+            "what": "rpc localhost:22231 getAccountInfo",
+            "at": 2,
+            "ms": 10
+          },
+          {
+            "what": "rpc localhost:22231 getAccountInfo",
+            "at": 5,
+            "ms": 8
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getMultipleAccounts",
+            "at": 6,
+            "ms": 7
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getMultipleAccounts",
+            "at": 6,
+            "ms": 8
+          },
+          {
+            "what": "rpc localhost:22231 getBlockTime",
+            "at": 8,
+            "ms": 6
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getBlockTime",
+            "at": 8,
+            "ms": 6
+          },
+          {
+            "what": "rpc localhost:22231 getMultipleAccounts",
+            "at": 6,
+            "ms": 9
+          },
+          {
+            "what": "rpc localhost:22231 getMultipleAccounts",
+            "at": 6,
+            "ms": 10
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getLatestBlockhash",
+            "at": 19,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getAccountInfo",
+            "at": 16,
+            "ms": 4
+          },
+          {
+            "what": "rpc localhost:22231 getAccountInfo",
+            "at": 17,
+            "ms": 4
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getAccountInfo",
+            "at": 17,
+            "ms": 4
+          },
+          {
+            "what": "rpc localhost:22231 getAccountInfo",
+            "at": 18,
+            "ms": 4
+          },
+          {
+            "what": "rpc localhost:22231 getMultipleAccounts",
+            "at": 19,
+            "ms": 3
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getMultipleAccounts",
+            "at": 19,
+            "ms": 3
+          },
+          {
+            "what": "rpc localhost:22231 isBlockhashValid",
+            "at": 20,
+            "ms": 5
+          },
+          {
+            "what": "rpc localhost:22231 getEpochInfo",
+            "at": 20,
+            "ms": 5
+          },
+          {
+            "what": "route wallet",
+            "at": 39,
+            "ms": 0
+          },
+          {
+            "what": "route venue,pool",
+            "at": 39,
+            "ms": 0
+          },
+          {
+            "what": "helper POST /v1/pool/solana/send HTTP 422",
+            "at": 39,
+            "ms": 43
+          },
+          {
+            "what": "rpc localhost:22231 getEpochInfo",
+            "at": 83,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getEpochInfo",
+            "at": 83,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getProgramAccounts",
+            "at": 86,
+            "ms": 17
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getProgramAccounts",
+            "at": 103,
+            "ms": 16
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getMultipleAccounts",
+            "at": 120,
+            "ms": 1
+          },
+          {
+            "what": "rpc localhost:22231 getMultipleAccounts",
+            "at": 120,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getMultipleAccounts",
+            "at": 122,
+            "ms": 2
+          },
+          {
+            "what": "rpc localhost:22231 getMultipleAccounts",
+            "at": 123,
+            "ms": 1
+          },
+          {
+            "what": "rpc localhost:22231 getEpochInfo",
+            "at": 1128,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getEpochInfo",
+            "at": 1127,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getProgramAccounts",
+            "at": 1130,
+            "ms": 20
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getProgramAccounts",
+            "at": 1151,
+            "ms": 16
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getMultipleAccounts",
+            "at": 1168,
+            "ms": 2
+          },
+          {
+            "what": "rpc localhost:22231 getMultipleAccounts",
+            "at": 1169,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getEpochInfo",
+            "at": 2173,
+            "ms": 1
+          },
+          {
+            "what": "rpc localhost:22231 getEpochInfo",
+            "at": 2173,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getProgramAccounts",
+            "at": 2175,
+            "ms": 16
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getProgramAccounts",
+            "at": 2191,
+            "ms": 15
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getMultipleAccounts",
+            "at": 2208,
+            "ms": 2
+          },
+          {
+            "what": "rpc localhost:22231 getMultipleAccounts",
+            "at": 2209,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getEpochInfo",
+            "at": 3213,
+            "ms": 1
+          },
+          {
+            "what": "rpc localhost:22231 getEpochInfo",
+            "at": 3213,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getProgramAccounts",
+            "at": 3215,
+            "ms": 16
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getProgramAccounts",
+            "at": 3231,
+            "ms": 15
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getMultipleAccounts",
+            "at": 3247,
+            "ms": 2
+          },
+          {
+            "what": "rpc localhost:22231 getMultipleAccounts",
+            "at": 3248,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getEpochInfo",
+            "at": 4252,
+            "ms": 1
+          },
+          {
+            "what": "rpc localhost:22231 getEpochInfo",
+            "at": 4252,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getProgramAccounts",
+            "at": 4254,
+            "ms": 15
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getProgramAccounts",
+            "at": 4269,
+            "ms": 15
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getMultipleAccounts",
+            "at": 4286,
+            "ms": 2
+          },
+          {
+            "what": "rpc localhost:22231 getMultipleAccounts",
+            "at": 4287,
+            "ms": 1
+          },
+          {
+            "what": "rpc localhost:22231 getEpochInfo",
+            "at": 5290,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getEpochInfo",
+            "at": 5290,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getProgramAccounts",
+            "at": 5293,
+            "ms": 18
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getProgramAccounts",
+            "at": 5311,
+            "ms": 15
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getMultipleAccounts",
+            "at": 5327,
+            "ms": 2
+          },
+          {
+            "what": "rpc localhost:22231 getMultipleAccounts",
+            "at": 5328,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getEpochInfo",
+            "at": 6332,
+            "ms": 1
+          },
+          {
+            "what": "rpc localhost:22231 getEpochInfo",
+            "at": 6332,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getProgramAccounts",
+            "at": 6334,
+            "ms": 17
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getProgramAccounts",
+            "at": 6351,
+            "ms": 17
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getMultipleAccounts",
+            "at": 6369,
+            "ms": 3
+          },
+          {
+            "what": "rpc localhost:22231 getMultipleAccounts",
+            "at": 6371,
+            "ms": 1
+          },
+          {
+            "what": "rpc localhost:22231 getEpochInfo",
+            "at": 7374,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getEpochInfo",
+            "at": 7374,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getProgramAccounts",
+            "at": 7376,
+            "ms": 16
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getProgramAccounts",
+            "at": 7392,
+            "ms": 16
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getMultipleAccounts",
+            "at": 7409,
+            "ms": 3
+          },
+          {
+            "what": "rpc localhost:22231 getMultipleAccounts",
+            "at": 7411,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getEpochInfo",
+            "at": 8415,
+            "ms": 1
+          },
+          {
+            "what": "rpc localhost:22231 getEpochInfo",
+            "at": 8415,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getProgramAccounts",
+            "at": 8418,
+            "ms": 16
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getProgramAccounts",
+            "at": 8434,
+            "ms": 16
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getMultipleAccounts",
+            "at": 8452,
+            "ms": 3
+          },
+          {
+            "what": "rpc localhost:22231 getMultipleAccounts",
+            "at": 8454,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getEpochInfo",
+            "at": 9458,
+            "ms": 1
+          },
+          {
+            "what": "rpc localhost:22231 getEpochInfo",
+            "at": 9458,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getProgramAccounts",
+            "at": 9461,
+            "ms": 17
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getProgramAccounts",
+            "at": 9477,
+            "ms": 15
+          },
+          {
+            "what": "rpc localhost:22231 getMultipleAccounts",
+            "at": 9497,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getMultipleAccounts",
+            "at": 9495,
+            "ms": 3
+          },
+          {
+            "what": "rpc localhost:22231 getEpochInfo",
+            "at": 10501,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getEpochInfo",
+            "at": 10500,
+            "ms": 2
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getProgramAccounts",
+            "at": 10503,
+            "ms": 17
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getProgramAccounts",
+            "at": 10520,
+            "ms": 18
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getMultipleAccounts",
+            "at": 10540,
+            "ms": 3
+          },
+          {
+            "what": "rpc localhost:22231 getMultipleAccounts",
+            "at": 10542,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getEpochInfo",
+            "at": 11546,
+            "ms": 1
+          },
+          {
+            "what": "rpc localhost:22231 getEpochInfo",
+            "at": 11547,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getProgramAccounts",
+            "at": 11549,
+            "ms": 17
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getProgramAccounts",
+            "at": 11566,
+            "ms": 15
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getMultipleAccounts",
+            "at": 11583,
+            "ms": 3
+          },
+          {
+            "what": "rpc localhost:22231 getMultipleAccounts",
+            "at": 11584,
+            "ms": 1
+          },
+          {
+            "what": "rpc localhost:22231 getEpochInfo",
+            "at": 12588,
+            "ms": 2
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getEpochInfo",
+            "at": 12588,
+            "ms": 2
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getProgramAccounts",
+            "at": 12591,
+            "ms": 17
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getProgramAccounts",
+            "at": 12609,
+            "ms": 16
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getMultipleAccounts",
+            "at": 12626,
+            "ms": 2
+          },
+          {
+            "what": "rpc localhost:22231 getMultipleAccounts",
+            "at": 12628,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getEpochInfo",
+            "at": 13631,
+            "ms": 1
+          },
+          {
+            "what": "rpc localhost:22231 getEpochInfo",
+            "at": 13631,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getProgramAccounts",
+            "at": 13633,
+            "ms": 16
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getProgramAccounts",
+            "at": 13650,
+            "ms": 16
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getMultipleAccounts",
+            "at": 13667,
+            "ms": 2
+          },
+          {
+            "what": "rpc localhost:22231 getMultipleAccounts",
+            "at": 13668,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getEpochInfo",
+            "at": 14671,
+            "ms": 1
+          },
+          {
+            "what": "rpc localhost:22231 getEpochInfo",
+            "at": 14672,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getProgramAccounts",
+            "at": 14674,
+            "ms": 15
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getProgramAccounts",
+            "at": 14689,
+            "ms": 15
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getMultipleAccounts",
+            "at": 14706,
+            "ms": 3
+          },
+          {
+            "what": "rpc localhost:22231 getMultipleAccounts",
+            "at": 14708,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getEpochInfo",
+            "at": 15712,
+            "ms": 1
+          },
+          {
+            "what": "rpc localhost:22231 getEpochInfo",
+            "at": 15712,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getProgramAccounts",
+            "at": 15714,
+            "ms": 16
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getProgramAccounts",
+            "at": 15730,
+            "ms": 15
+          },
+          {
+            "what": "rpc localhost:22231 getMultipleAccounts",
+            "at": 15748,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getMultipleAccounts",
+            "at": 15747,
+            "ms": 3
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getEpochInfo",
+            "at": 16752,
+            "ms": 1
+          },
+          {
+            "what": "rpc localhost:22231 getEpochInfo",
+            "at": 16752,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getProgramAccounts",
+            "at": 16754,
+            "ms": 16
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getProgramAccounts",
+            "at": 16770,
+            "ms": 16
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getMultipleAccounts",
+            "at": 16787,
+            "ms": 3
+          },
+          {
+            "what": "rpc localhost:22231 getMultipleAccounts",
+            "at": 16789,
+            "ms": 1
+          },
+          {
+            "what": "rpc localhost:22231 getEpochInfo",
+            "at": 17792,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getEpochInfo",
+            "at": 17792,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getProgramAccounts",
+            "at": 17795,
+            "ms": 16
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getProgramAccounts",
+            "at": 17810,
+            "ms": 16
+          },
+          {
+            "what": "rpc localhost:22231 getMultipleAccounts",
+            "at": 17829,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getMultipleAccounts",
+            "at": 17828,
+            "ms": 3
+          },
+          {
+            "what": "rpc localhost:22231 getEpochInfo",
+            "at": 18833,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getEpochInfo",
+            "at": 18833,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getProgramAccounts",
+            "at": 18835,
+            "ms": 20
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getProgramAccounts",
+            "at": 18855,
+            "ms": 17
+          },
+          {
+            "what": "rpc localhost:22231 getMultipleAccounts",
+            "at": 18875,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getMultipleAccounts",
+            "at": 18874,
+            "ms": 3
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getEpochInfo",
+            "at": 19878,
+            "ms": 1
+          },
+          {
+            "what": "rpc localhost:22231 getEpochInfo",
+            "at": 19879,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getProgramAccounts",
+            "at": 19881,
+            "ms": 16
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getProgramAccounts",
+            "at": 19897,
+            "ms": 15
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getMultipleAccounts",
+            "at": 19914,
+            "ms": 3
+          },
+          {
+            "what": "rpc localhost:22231 getMultipleAccounts",
+            "at": 19916,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getEpochInfo",
+            "at": 20919,
+            "ms": 1
+          },
+          {
+            "what": "rpc localhost:22231 getEpochInfo",
+            "at": 20919,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getProgramAccounts",
+            "at": 20921,
+            "ms": 16
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getProgramAccounts",
+            "at": 20936,
+            "ms": 15
+          },
+          {
+            "what": "rpc localhost:22231 getMultipleAccounts",
+            "at": 20954,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getMultipleAccounts",
+            "at": 20952,
+            "ms": 3
+          },
+          {
+            "what": "rpc localhost:22231 getEpochInfo",
+            "at": 21959,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getEpochInfo",
+            "at": 21958,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getProgramAccounts",
+            "at": 21960,
+            "ms": 16
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getProgramAccounts",
+            "at": 21976,
+            "ms": 17
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getMultipleAccounts",
+            "at": 21995,
+            "ms": 2
+          },
+          {
+            "what": "rpc localhost:22231 getMultipleAccounts",
+            "at": 21996,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getEpochInfo",
+            "at": 22999,
+            "ms": 1
+          },
+          {
+            "what": "rpc localhost:22231 getEpochInfo",
+            "at": 23000,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getProgramAccounts",
+            "at": 23002,
+            "ms": 16
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getProgramAccounts",
+            "at": 23018,
+            "ms": 15
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getMultipleAccounts",
+            "at": 23035,
+            "ms": 3
+          },
+          {
+            "what": "rpc localhost:22231 getMultipleAccounts",
+            "at": 23036,
+            "ms": 2
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getEpochInfo",
+            "at": 24041,
+            "ms": 1
+          },
+          {
+            "what": "rpc localhost:22231 getEpochInfo",
+            "at": 24041,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getProgramAccounts",
+            "at": 24043,
+            "ms": 16
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getProgramAccounts",
+            "at": 24060,
+            "ms": 16
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getMultipleAccounts",
+            "at": 24077,
+            "ms": 3
+          },
+          {
+            "what": "rpc localhost:22231 getMultipleAccounts",
+            "at": 24078,
+            "ms": 1
+          },
+          {
+            "what": "rpc localhost:22231 getEpochInfo",
+            "at": 25081,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getEpochInfo",
+            "at": 25081,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getProgramAccounts",
+            "at": 25083,
+            "ms": 18
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getProgramAccounts",
+            "at": 25102,
+            "ms": 18
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getMultipleAccounts",
+            "at": 25121,
+            "ms": 2
+          },
+          {
+            "what": "rpc localhost:22231 getMultipleAccounts",
+            "at": 25122,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getEpochInfo",
+            "at": 26125,
+            "ms": 1
+          },
+          {
+            "what": "rpc localhost:22231 getEpochInfo",
+            "at": 26125,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getProgramAccounts",
+            "at": 26127,
+            "ms": 18
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getProgramAccounts",
+            "at": 26145,
+            "ms": 16
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getMultipleAccounts",
+            "at": 26162,
+            "ms": 2
+          },
+          {
+            "what": "rpc localhost:22231 getMultipleAccounts",
+            "at": 26163,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getEpochInfo",
+            "at": 27167,
+            "ms": 1
+          },
+          {
+            "what": "rpc localhost:22231 getEpochInfo",
+            "at": 27167,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getProgramAccounts",
+            "at": 27169,
+            "ms": 16
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getProgramAccounts",
+            "at": 27185,
+            "ms": 16
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getMultipleAccounts",
+            "at": 27202,
+            "ms": 2
+          },
+          {
+            "what": "rpc localhost:22231 getMultipleAccounts",
+            "at": 27203,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getEpochInfo",
+            "at": 28205,
+            "ms": 1
+          },
+          {
+            "what": "rpc localhost:22231 getEpochInfo",
+            "at": 28206,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getProgramAccounts",
+            "at": 28208,
+            "ms": 16
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getProgramAccounts",
+            "at": 28224,
+            "ms": 15
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getMultipleAccounts",
+            "at": 28240,
+            "ms": 2
+          },
+          {
+            "what": "rpc localhost:22231 getMultipleAccounts",
+            "at": 28241,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getEpochInfo",
+            "at": 29244,
+            "ms": 1
+          },
+          {
+            "what": "rpc localhost:22231 getEpochInfo",
+            "at": 29244,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getProgramAccounts",
+            "at": 29246,
+            "ms": 16
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getProgramAccounts",
+            "at": 29262,
+            "ms": 15
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getMultipleAccounts",
+            "at": 29279,
+            "ms": 2
+          },
+          {
+            "what": "rpc localhost:22231 getMultipleAccounts",
+            "at": 29280,
+            "ms": 1
+          },
+          {
+            "what": "progress not_landed",
+            "at": 29283,
+            "ms": 0
+          },
+          {
+            "what": "answer {\"result\":{\"stage\":\"not_landed\",\"txs\":[]",
+            "at": 29283,
+            "ms": 0
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getSlot",
+            "at": 29285,
+            "ms": 1
+          },
+          {
+            "what": "rpc localhost:22231 getSlot",
+            "at": 29285,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getBlockTime",
+            "at": 29286,
+            "ms": 1
+          },
+          {
+            "what": "rpc localhost:22231 getBlockTime",
+            "at": 29286,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getEpochInfo",
+            "at": 29288,
+            "ms": 0
+          },
+          {
+            "what": "rpc localhost:22231 getEpochInfo",
+            "at": 29288,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getProgramAccounts",
+            "at": 29290,
+            "ms": 16
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getProgramAccounts",
+            "at": 29305,
+            "ms": 15
+          },
+          {
+            "what": "rpc 127.0.0.1:22231 getMultipleAccounts",
+            "at": 29322,
+            "ms": 3
+          },
+          {
+            "what": "rpc localhost:22231 getMultipleAccounts",
+            "at": 29323,
+            "ms": 2
+          }
+        ],
+        "refused": null,
+        "sell": null,
+        "rentBack": null,
+        "sentTxs": [],
+        "stages": [
+          {
+            "kind": "pool.deposit",
+            "stage": "filled"
+          },
+          {
+            "kind": "pool.buy",
+            "stage": "not_landed"
+          }
+        ],
+        "notes": [
+          {
+            "ref": "deposit",
+            "state": "UNSPENT",
+            "value": "10000000",
+            "leafIndex": "1",
+            "sends": [
+              "4e1uAMyToKHtFq2VnpPRr2qXy3htkstGkmh5XqafNb7Jq3U9s4kBoa4crT2U7QdStBSnXf8CP8BAVnAgd2i31Zed"
+            ]
+          }
+        ],
+        "filled": false
+      },
+      "tail": [
+        "2026-11-11T19:18:32.978Z t+27203 ms rpc localhost:22231 getMultipleAccounts 1 ms",
+        "2026-11-11T19:18:33.981Z t+28205 ms rpc 127.0.0.1:22231 getEpochInfo 1 ms",
+        "2026-11-11T19:18:33.981Z t+28206 ms rpc localhost:22231 getEpochInfo 1 ms",
+        "2026-11-11T19:18:33.998Z t+28208 ms rpc 127.0.0.1:22231 getProgramAccounts 16 ms",
+        "2026-11-11T19:18:34.014Z t+28224 ms rpc 127.0.0.1:22231 getProgramAccounts 15 ms",
+        "2026-11-11T19:18:34.017Z t+28240 ms rpc 127.0.0.1:22231 getMultipleAccounts 2 ms",
+        "2026-11-11T19:18:34.017Z t+28241 ms rpc localhost:22231 getMultipleAccounts 1 ms",
+        "2026-11-11T19:18:35.019Z t+29244 ms rpc 127.0.0.1:22231 getEpochInfo 1 ms",
+        "2026-11-11T19:18:35.019Z t+29244 ms rpc localhost:22231 getEpochInfo 1 ms",
+        "2026-11-11T19:18:35.037Z t+29246 ms rpc 127.0.0.1:22231 getProgramAccounts 16 ms",
+        "2026-11-11T19:18:35.052Z t+29262 ms rpc 127.0.0.1:22231 getProgramAccounts 15 ms",
+        "2026-11-11T19:18:35.055Z t+29279 ms rpc 127.0.0.1:22231 getMultipleAccounts 2 ms",
+        "2026-11-11T19:18:35.056Z t+29280 ms rpc localhost:22231 getMultipleAccounts 1 ms",
+        "2026-11-11T19:18:35.057Z t+29283 ms progress not_landed 0 ms",
+        "2026-11-11T19:18:35.057Z pool.buy progress \"not_landed\"",
+        "2026-11-11T19:18:35.058Z t+29283 ms answer {\"result\":{\"stage\":\"not_landed\",\"txs\":[] 0 ms",
+        "2026-11-11T19:18:35.058Z pool.buy answered {\"result\":{\"stage\":\"not_landed\",\"txs\":[]}}; waiting for its run to end",
+        "2026-11-11T19:18:35.060Z t+29285 ms rpc 127.0.0.1:22231 getSlot 1 ms",
+        "2026-11-11T19:18:35.061Z t+29285 ms rpc localhost:22231 getSlot 1 ms",
+        "2026-11-11T19:18:35.061Z t+29286 ms rpc 127.0.0.1:22231 getBlockTime 1 ms",
+        "2026-11-11T19:18:35.062Z t+29286 ms rpc localhost:22231 getBlockTime 1 ms",
+        "2026-11-11T19:18:35.063Z t+29288 ms rpc 127.0.0.1:22231 getEpochInfo 0 ms",
+        "2026-11-11T19:18:35.063Z t+29288 ms rpc localhost:22231 getEpochInfo 1 ms",
+        "2026-11-11T19:18:35.080Z t+29290 ms rpc 127.0.0.1:22231 getProgramAccounts 16 ms",
+        "2026-11-11T19:18:35.095Z t+29305 ms rpc 127.0.0.1:22231 getProgramAccounts 15 ms",
+        "2026-11-11T19:18:35.099Z t+29322 ms rpc 127.0.0.1:22231 getMultipleAccounts 3 ms",
+        "2026-11-11T19:18:35.099Z t+29323 ms rpc localhost:22231 getMultipleAccounts 2 ms",
+        "2026-11-11T19:18:35.104Z buy {\"answer\":{\"result\":{\"stage\":\"not_landed\",\"txs\":[]}},\"notes\":[{\"ref\":\"deposit\",\"state\":\"UNSPENT\",\"value\":\"10000000\",\"leafIndex\":\"1\",\"sends\":[\"4e1uAMyToKHtFq2VnpPRr2qXy3htkstGkmh5XqafNb7Jq3U9s4kBoa4crT2U7QdStBSnXf8CP8BAVnAgd2i31Zed\"]}]}",
+        "2026-11-11T19:18:35.105Z notes [{\"ref\":\"deposit\",\"state\":\"UNSPENT\",\"value\":\"10000000\",\"leafIndex\":\"1\",\"sends\":[\"4e1uAMyToKHtFq2VnpPRr2qXy3htkstGkmh5XqafNb7Jq3U9s4kBoa4crT2U7QdStBSnXf8CP8BAVnAgd2i31Zed\"]}]",
+        ""
+      ],
+      "proofWait": {
+        "passes": 13,
+        "ms": 16942,
+        "made": true
+      },
+      "buySend": {
+        "lines": [
+          "pool send solana mainnet send outcome=simulation_failed status=422 ms=43 tag=3 err={\"InstructionError\":[2,{\"Custom\":6000}]}"
+        ],
+        "sendStartMs": 39,
+        "helperMs": 43,
+        "filledMs": null,
+        "sendToFilledMs": null,
+        "engineCalls": []
+      }
+    }
+  },
+  "cannotShow": [
+    "whether a block builder or a leader includes the transaction: the copy has no Jito block engine and one leader, itself; the helper's engine is a local stand-in (busy, refused, swallowing or landing the bundle) and its plain copies go to the copy",
+    "the real engines' answers and their timing: the stand-in answers at once",
+    "a graduated coin's buy on mainnet's own PumpSwap table: mainnet has none yet, so the copy makes one with the same list (contracts/pool-solana/scripts/venue-table.mjs's steps) from a key it funds",
+    "priority fee levels: the copy's only transactions are the run's own, so no fee market",
+    "rate limits of real providers: the page reads the copy's one RPC under two names",
+    "the helper's mainnet fee payer: the copy's fee payer is a fresh local key (the pool program binds the fee payer only through the proof's context, release.rs, so any key it signs with is accepted)",
+    "mainnet's slot and clock: the copy starts near slot 0 on this machine's clock; accounts are as of the clone slot"
+  ]
+}

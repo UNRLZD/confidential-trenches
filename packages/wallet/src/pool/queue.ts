@@ -246,6 +246,19 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
   async function pass(signal?: AbortSignal): Promise<QueuePass> {
     live();
     const out = NOTHING();
+    // a note in skip (a withdraw planned it, any tab's) is let go, in front or not: its ready proof freed, one in flight never kept
+    const skipped = (await a.skip?.()) ?? new Set<string>();
+    for (const id of skipped) {
+      const f = inFlight.get(id);
+      if (f !== undefined) f.dropped = true;
+      if (ready.has(id))
+        await onNote(id, async () => {
+          const r = ready.get(id);
+          if (r === undefined) return;
+          ready.delete(id);
+          await free(id, r.attempt);
+        });
+    }
     if (!inFront()) return out;
     const nowMs = await pool.now(signal);
     if (typeof nowMs !== "bigint" || nowMs < 0n) throw new Error(`pool ${pool.id}: now is not a bigint`);
@@ -262,7 +275,6 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
     }
     const want = readySize - ready.size + again.length;
     if (want <= 0) return out;
-    const skipped = (await a.skip?.()) ?? new Set<string>();
     const open = all
       .filter((n) => n.scope === pool.scope && n.state === "UNSPENT" && n.leaf !== undefined && chunkOf(pool.ladder, n.leaf.value) !== null && !skipped.has(n.id))
       .sort(byChunkThenLeaf(pool.ladder));

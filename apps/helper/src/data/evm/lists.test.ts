@@ -619,6 +619,27 @@ test("card robinhood-listed-tape-opens: a token the lists' last answer held and 
   assert.equal(off.status, 404, "a token no answer held is refused");
 });
 
+// card token-page-data-complete-and-fast: release 117's helper live run read three Base tapes of tokens just dropped from
+// the lists answer 503 after 12.1-12.6 s: the swap reads' pool hint came from the newest answer only, so a dropped token
+// had none and its first open ran the whole discovery (transfers, factories, getPools, swaps: 7 answer times) past
+// OPEN_BOUND_MS. The pool the last answer that held it named is the hint for as long as the token is listed.
+test("a token the newest lists answer dropped keeps the pool an earlier answer named as its hint: its cold tape checks that pool, never the whole discovery", async () => {
+  const now = { t: NOW };
+  const first = dropping();
+  const pre = createEvmLists("base", geckoBudget(() => now.t), { fetch: first.fetch, now: () => now.t });
+  await pre.tick();
+  const pools0 = (JSON.parse((await pre.get()).body) as { pools: Record<string, string> }).pools;
+  const { l, token } = await droppedAfterOne(now);
+  const named = pools0[token];
+  assert.ok(named, "the first answer named the token's pool");
+  assert.ok(!Object.hasOwn((JSON.parse((await l.get()).body) as { pools: Record<string, string> }).pools, token), "the newest answer names none");
+  assert.equal(l.pool?.(token), named, "the lists keep the pool the last answer holding the token named");
+  assert.equal(l.pool?.(`0x${"56".repeat(20)}`), null);
+  // SERVED_MS after the last answer that held it, the pool goes with the token
+  now.t += SERVED_MS + 1;
+  assert.equal(l.pool?.(token), null);
+});
+
 test("card robinhood-listed-tape-opens: the lists keep every token an answer held for SERVED_MS after the last that held it, across a restart (the warm state, hostile pairs dropped); never a token no answer held", async () => {
   const now = { t: NOW };
   const { l, token, fetch: f } = await droppedAfterOne(now);

@@ -115,6 +115,9 @@ test("from another chain: a quote to U_X, its refund under U_{s,i}'s id, checked
   assert.equal(r.address, SOL_U);
   assert.equal(r.quote.deposit_address, ADDRESS);
   assert.equal(r.quote.amount_in, "25");
+  // the request asks the user's own amount, exactly (evm-deposit-route-mainnet round 3: EXACT_INPUT of the whole amount)
+  assert.equal(w.sent[0]!.swapType, "EXACT_INPUT");
+  assert.equal(w.sent[0]!.amount, "25000000");
   assert.match(r.quote.min_amount_out, /^0\.\d{1,9}$/);
   assert.equal(w.sent.length, 1);
   assert.equal(w.sent[0]!.recipient, SOL_U);
@@ -256,6 +259,40 @@ test("pool-deposit-follow floor: readSolanaPoolFloor reads the rent on both RPCs
   await assert.rejects(readSolanaPoolFloor([rpcOf("https://a.example", 5_000), rpcOf("https://b.example", null)], program, SOL_U));
   await assert.rejects(readSolanaPoolFloor([rpcOf("https://a.example", 5_000), rpcOf("https://b.example", 5_000, 6_000n)], program, SOL_U));
   await assert.rejects(readSolanaPoolFloor([rpcOf("https://a.example", 5_000), rpcOf("https://a.example", 5_000)], program, SOL_U));
+});
+
+// card evm-deposit-route-mainnet: the floor of a quote into an EVM pool's U_X, read now on the pool's two RPCs (names no
+// account): the base fee and the two tree depths both read alike, the L1 fee bound on Base (0 on Robinhood), at the tip
+// U offers; evmPoolDepositFloor of those, the price the deposit run's own bound is (pool-deposit-evm.ts tryNote)
+test("evm-deposit-route-mainnet: readEvmPoolFloor reads the base fee, the depths and Base's L1 fee on both RPCs; reads apart or a failed one give no floor", async () => {
+  const { readEvmPoolFloor } = await import("../src/pool-deposit-address.ts");
+  const { evmPoolDepositFloor } = await import("../src/pool-deposit-quote.ts");
+  const { EVM_DEPOSIT_PRIORITY_CAP } = await import("../src/pool-deposit-evm.ts");
+  const { keccak_256 } = await import("@noble/hashes/sha3.js");
+  const sel = (sig: string) => "0x" + Buffer.from(keccak_256(new TextEncoder().encode(sig))).toString("hex").slice(0, 8);
+  const word = (v: bigint) => "0x" + v.toString(16).padStart(64, "0");
+  type W = { baseFee: bigint; state: bigint; label: bigint; l1: bigint; down?: string };
+  const asked: string[] = [];
+  const rpcOf = (w: W) => (async (method: string, params: readonly unknown[]) => {
+    asked.push(JSON.stringify([method, params]));
+    if (w.down === method) throw new Error(`${method} down`);
+    if (method === "eth_getBlockByNumber") return { number: "0x64", hash: `0x${"11".repeat(32)}`, timestamp: "0x1", baseFeePerGas: "0x" + w.baseFee.toString(16) };
+    if (method === "eth_call") {
+      const data = (params[0] as { data: string }).data;
+      if (data === sel("currentTreeDepth()")) return word(w.state);
+      if (data === sel("currentLabelTreeDepth()")) return word(w.label);
+      if (data.startsWith("0xf1c7a58b")) return word(w.l1); // getL1FeeUpperBound
+      return word(0n); // the operator fee
+    }
+    throw new Error(`unmocked ${method}`);
+  }) as unknown as import("../../wallet/src/pool/evm.ts").EvmRpc;
+  const W0: W = { baseFee: 5_000_000n, state: 3n, label: 2n, l1: 7_000_000_000n };
+  const pin = (network: "base" | "robinhood") => ({ network, pool: "0x00000000000000000000000000000000000f0011", feeRecipient: "0x0000000000000000000000000000000000000fee", fromBlock: 1n }) as const;
+  assert.equal(await readEvmPoolFloor([rpcOf(W0), rpcOf(W0)], pin("base")), evmPoolDepositFloor({ baseFee: 5_000_000n, tip: EVM_DEPOSIT_PRIORITY_CAP, l1Fee: 7_000_000_000n, stateDepth: 3n, labelDepth: 2n }));
+  assert.equal(await readEvmPoolFloor([rpcOf(W0), rpcOf(W0)], pin("robinhood")), evmPoolDepositFloor({ baseFee: 5_000_000n, tip: EVM_DEPOSIT_PRIORITY_CAP, l1Fee: 0n, stateDepth: 3n, labelDepth: 2n }), "Robinhood: no L1 fee");
+  assert.ok(asked.every((a) => !a.toLowerCase().includes(BASE_U.slice(2).toLowerCase()) && !/"from"/.test(a)), "no read names U_X or any sender");
+  for (const [what, b] of [["the base fee", { ...W0, baseFee: 5_000_001n }], ["the state depth", { ...W0, state: 4n }], ["the L1 fee", { ...W0, l1: 7_000_000_001n }], ["a read that fails", { ...W0, down: "eth_call" }]] as const)
+    await assert.rejects(readEvmPoolFloor([rpcOf(W0), rpcOf(b)], pin("base")), what);
 });
 
 // Card deposit-quote-no-liquidity: a pool's quote asks again on 1Click's no-liquidity answer, as the vault's does (one
@@ -407,4 +444,38 @@ test("card pool-usd-price-never-stale, review P1: the quote is checked at the pr
   assert.notEqual(fresh.held, null, "the page holds the newer price");
   assert.ok(fresh.out.error === "not_allowed" || fresh.out.error === "quote_check_failed", JSON.stringify(fresh.out));
   assert.equal(fresh.took.length, 0);
+});
+
+// card evm-deposit-route-mainnet review: the floor's reads each held by a test that dies with them changed. The chain
+// moves (the two RPCs' heads apart, every value at `latest` other than at the block both hold) and the operator fee is
+// gas-priced, so the floor is the agreed block's base fee, depths and L1 fee bound at the cap's gas with the headroom.
+test("evm-deposit-route-mainnet review: readEvmPoolFloor reads every value at the block both RPCs hold, and the L1 fee at the cap's gas with the tree's headroom", async () => {
+  const { readEvmPoolFloor } = await import("../src/pool-deposit-address.ts");
+  const { evmPoolDepositFloor } = await import("../src/pool-deposit-quote.ts");
+  const { EVM_DEPOSIT_PRIORITY_CAP } = await import("../src/pool-deposit-evm.ts");
+  const { EVM_DEPOSIT_GAS_MAX, evmDepositHeadroom } = await import("../src/rules/pool.ts");
+  const { keccak_256 } = await import("@noble/hashes/sha3.js");
+  const sel = (sig: string) => "0x" + Buffer.from(keccak_256(new TextEncoder().encode(sig))).toString("hex").slice(0, 8);
+  const word = (v: bigint) => "0x" + v.toString(16).padStart(64, "0");
+  const AT = 0x64;
+  const block = (n: number) => ({ number: "0x" + n.toString(16), hash: "0x" + n.toString(16).padStart(64, "0"), timestamp: "0x" + n.toString(16), baseFeePerGas: "0x" + (5_000_000 + (n - AT) * 1_000).toString(16) });
+  const rpcOf = (head: number) => (async (method: string, params: readonly unknown[]) => {
+    const tag = method === "eth_call" ? (params[1] as string) : (params[0] as string);
+    const newest = tag === "latest";
+    if (method === "eth_getBlockByNumber") return block(newest ? head : Number(tag));
+    if (method === "eth_call") {
+      const data = (params[0] as { data: string }).data;
+      if (data === sel("currentTreeDepth()")) return word(newest ? 9n : 3n);
+      if (data === sel("currentLabelTreeDepth()")) return word(newest ? 9n : 2n);
+      if (data.startsWith("0xf1c7a58b")) return word(newest ? 1n : 7_000_000_000n); // getL1FeeUpperBound
+      return word(BigInt("0x" + data.slice(-64)) * 3n); // the operator fee: 3 wei a gas of the gas it is asked at
+    }
+    throw new Error(`unmocked ${method}`);
+  }) as unknown as import("../../wallet/src/pool/evm.ts").EvmRpc;
+  const pin = { network: "base", pool: "0x00000000000000000000000000000000000f0011", feeRecipient: "0x0000000000000000000000000000000000000fee", fromBlock: 1n } as const;
+  const gas = EVM_DEPOSIT_GAS_MAX + evmDepositHeadroom(3n, 2n);
+  assert.equal(
+    await readEvmPoolFloor([rpcOf(AT + 1), rpcOf(AT)], pin),
+    evmPoolDepositFloor({ baseFee: 5_000_000n, tip: EVM_DEPOSIT_PRIORITY_CAP, l1Fee: 7_000_000_000n + gas * 3n, stateDepth: 3n, labelDepth: 2n }),
+  );
 });

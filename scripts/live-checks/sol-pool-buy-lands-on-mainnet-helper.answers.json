@@ -1,0 +1,195 @@
+{
+ "_about": "good: this card's helper in process (record-local.mjs); bad_before_card: the helper at c338a184, the release that did not land (record-local.mjs with its solana.ts and send-log.ts)",
+ "good": [
+  {
+   "cluster": "devnet",
+   "program": "5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ",
+   "pool": "2S5wpE7U7GoJRVqox1dXmTQm38SmseG8A4F9eReWwYwr",
+   "reads": [
+    {
+     "asked": "fee",
+     "readAt": "2026-11-11T18:40:49.528Z",
+     "status": 200,
+     "headers": {
+      "content-type": "application/json",
+      "x-helper-commit": "85b15bff758c6fe49d760bcdd55d2fb396827954"
+     },
+     "body": "{\"chain\":\"solana\",\"cluster\":\"devnet\",\"program\":\"5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ\",\"pool\":\"2S5wpE7U7GoJRVqox1dXmTQm38SmseG8A4F9eReWwYwr\",\"fee_payer\":\"sMnyzfvvEuCmHk6DADYeThBFD8PPZpUB5DXZLisZGNA\",\"epoch_ms\":60000,\"epoch_start_ms\":1794422400000,\"fee\":\"1300000\",\"step\":\"100000\"}"
+    },
+    {
+     "asked": "next_tag2",
+     "readAt": "2026-11-11T18:40:49.541Z",
+     "status": 422,
+     "headers": {
+      "content-type": "application/json",
+      "x-helper-commit": "85b15bff758c6fe49d760bcdd55d2fb396827954"
+     },
+     "body": "{\"error\":{\"code\":\"blockhash_not_found\"}}"
+    },
+    {
+     "asked": "next_tag3",
+     "readAt": "2026-11-11T18:40:49.544Z",
+     "status": 422,
+     "headers": {
+      "content-type": "application/json",
+      "x-helper-commit": "85b15bff758c6fe49d760bcdd55d2fb396827954"
+     },
+     "body": "{\"error\":{\"code\":\"blockhash_not_found\"}}"
+    },
+    {
+     "asked": "ten_tag2",
+     "readAt": "2026-11-11T18:40:49.547Z",
+     "status": 422,
+     "headers": {
+      "content-type": "application/json",
+      "x-helper-commit": "85b15bff758c6fe49d760bcdd55d2fb396827954"
+     },
+     "body": "{\"error\":{\"code\":\"not_pool\",\"detail\":\"not the release's accounts\"}}"
+    }
+   ]
+  },
+  {
+   "cluster": "devnet",
+   "program": "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8",
+   "pool": "92YuYhb4Cj2UM3JxFAWB2kyHcdaPkWCnoNkoUAZZK2cr",
+   "reads": [
+    {
+     "asked": "fee",
+     "readAt": "2026-11-11T18:40:49.547Z",
+     "status": 200,
+     "headers": {
+      "content-type": "application/json",
+      "x-helper-commit": "85b15bff758c6fe49d760bcdd55d2fb396827954"
+     },
+     "body": "{\"chain\":\"solana\",\"cluster\":\"devnet\",\"program\":\"9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8\",\"pool\":\"92YuYhb4Cj2UM3JxFAWB2kyHcdaPkWCnoNkoUAZZK2cr\",\"fee_payer\":\"sMnyzfvvEuCmHk6DADYeThBFD8PPZpUB5DXZLisZGNA\",\"epoch_ms\":60000,\"epoch_start_ms\":1794422400000,\"fee\":\"1300000\",\"step\":\"100000\"}"
+    },
+    {
+     "asked": "next_tag2",
+     "readAt": "2026-11-11T18:40:49.549Z",
+     "status": 422,
+     "headers": {
+      "content-type": "application/json",
+      "x-helper-commit": "85b15bff758c6fe49d760bcdd55d2fb396827954"
+     },
+     "body": "{\"error\":{\"code\":\"blockhash_not_found\"}}"
+    },
+    {
+     "asked": "next_tag3",
+     "readAt": "2026-11-11T18:40:49.552Z",
+     "status": 422,
+     "headers": {
+      "content-type": "application/json",
+      "x-helper-commit": "85b15bff758c6fe49d760bcdd55d2fb396827954"
+     },
+     "body": "{\"error\":{\"code\":\"blockhash_not_found\"}}"
+    },
+    {
+     "asked": "ten_tag2",
+     "readAt": "2026-11-11T18:40:49.555Z",
+     "status": 422,
+     "headers": {
+      "content-type": "application/json",
+      "x-helper-commit": "85b15bff758c6fe49d760bcdd55d2fb396827954"
+     },
+     "body": "{\"error\":{\"code\":\"not_pool\",\"detail\":\"not the release's accounts\"}}"
+    }
+   ]
+  }
+ ],
+ "bad_before_card": [
+  {
+   "cluster": "devnet",
+   "program": "5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ",
+   "pool": "2S5wpE7U7GoJRVqox1dXmTQm38SmseG8A4F9eReWwYwr",
+   "reads": [
+    {
+     "asked": "fee",
+     "readAt": "2026-11-11T18:11:01.617Z",
+     "status": 200,
+     "headers": {
+      "content-type": "application/json",
+      "x-helper-commit": "c338a184cbd53d6804f53c5271b04c7b761c244e"
+     },
+     "body": "{\"chain\":\"solana\",\"cluster\":\"devnet\",\"program\":\"5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ\",\"pool\":\"2S5wpE7U7GoJRVqox1dXmTQm38SmseG8A4F9eReWwYwr\",\"fee_payer\":\"4KFtNMQxcm8bmsVdqE2GiKKX5xDEzkuFPK8QHbuxggTA\",\"epoch_ms\":60000,\"epoch_start_ms\":1794420660000,\"fee\":\"1300000\",\"step\":\"100000\"}"
+    },
+    {
+     "asked": "next_tag2",
+     "readAt": "2026-11-11T18:11:01.629Z",
+     "status": 422,
+     "headers": {
+      "content-type": "application/json",
+      "x-helper-commit": "c338a184cbd53d6804f53c5271b04c7b761c244e"
+     },
+     "body": "{\"error\":{\"code\":\"simulation_failed\",\"detail\":\"\\\"BlockhashNotFound\\\"\"}}"
+    },
+    {
+     "asked": "next_tag3",
+     "readAt": "2026-11-11T18:11:01.633Z",
+     "status": 422,
+     "headers": {
+      "content-type": "application/json",
+      "x-helper-commit": "c338a184cbd53d6804f53c5271b04c7b761c244e"
+     },
+     "body": "{\"error\":{\"code\":\"simulation_failed\",\"detail\":\"\\\"BlockhashNotFound\\\"\"}}"
+    },
+    {
+     "asked": "ten_tag2",
+     "readAt": "2026-11-11T18:11:01.635Z",
+     "status": 422,
+     "headers": {
+      "content-type": "application/json",
+      "x-helper-commit": "c338a184cbd53d6804f53c5271b04c7b761c244e"
+     },
+     "body": "{\"error\":{\"code\":\"not_pool\",\"detail\":\"not the release's accounts\"}}"
+    }
+   ]
+  },
+  {
+   "cluster": "devnet",
+   "program": "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8",
+   "pool": "92YuYhb4Cj2UM3JxFAWB2kyHcdaPkWCnoNkoUAZZK2cr",
+   "reads": [
+    {
+     "asked": "fee",
+     "readAt": "2026-11-11T18:11:01.635Z",
+     "status": 200,
+     "headers": {
+      "content-type": "application/json",
+      "x-helper-commit": "c338a184cbd53d6804f53c5271b04c7b761c244e"
+     },
+     "body": "{\"chain\":\"solana\",\"cluster\":\"devnet\",\"program\":\"9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8\",\"pool\":\"92YuYhb4Cj2UM3JxFAWB2kyHcdaPkWCnoNkoUAZZK2cr\",\"fee_payer\":\"4KFtNMQxcm8bmsVdqE2GiKKX5xDEzkuFPK8QHbuxggTA\",\"epoch_ms\":60000,\"epoch_start_ms\":1794420660000,\"fee\":\"1300000\",\"step\":\"100000\"}"
+    },
+    {
+     "asked": "next_tag2",
+     "readAt": "2026-11-11T18:11:01.638Z",
+     "status": 422,
+     "headers": {
+      "content-type": "application/json",
+      "x-helper-commit": "c338a184cbd53d6804f53c5271b04c7b761c244e"
+     },
+     "body": "{\"error\":{\"code\":\"simulation_failed\",\"detail\":\"\\\"BlockhashNotFound\\\"\"}}"
+    },
+    {
+     "asked": "next_tag3",
+     "readAt": "2026-11-11T18:11:01.640Z",
+     "status": 422,
+     "headers": {
+      "content-type": "application/json",
+      "x-helper-commit": "c338a184cbd53d6804f53c5271b04c7b761c244e"
+     },
+     "body": "{\"error\":{\"code\":\"simulation_failed\",\"detail\":\"\\\"BlockhashNotFound\\\"\"}}"
+    },
+    {
+     "asked": "ten_tag2",
+     "readAt": "2026-11-11T18:11:01.643Z",
+     "status": 422,
+     "headers": {
+      "content-type": "application/json",
+      "x-helper-commit": "c338a184cbd53d6804f53c5271b04c7b761c244e"
+     },
+     "body": "{\"error\":{\"code\":\"not_pool\",\"detail\":\"not the release's accounts\"}}"
+    }
+   ]
+  }
+ ]
+}

@@ -56,6 +56,7 @@ export const FRAMES = {
 export const BOUND = {
   blankMs: 100, // BAR-03
   clsPage: 0.1, // BAR-04 per page load
+  signinSwap: 0.005, // BAR-04 in the step the sign-in lands in, the account slot's growth only (measured 0.0021 / 0.0016)
   boxPx: 1, // BAR-05
   scrollPx: 2, // BAR-02
   landMs: 2_500, // BAR-06
@@ -70,6 +71,21 @@ const WAIT_MS = 15_000;
 const VECTOR_WORDS = `${"abandon ".repeat(11)}about`; // entropy 00..00, packages/wallet/test/vectors/a8.json
 
 // ------------------------------------------------------------------------------------------------ the verdict
+/**
+ * BAR-04's one allowance (card signing-views-open-over-the-app): the sign-in now lands in the same APP_HOST document,
+ * under SIGN_HOST's sheet, so the header's account slot grows from Sign in's width to the signed-in box there
+ * (shell/search.css .tb-acct, .phh-acct; signin/hint.ts) and moves the neighbours packed against it. On main the same
+ * change came with a whole new document, which this bar never counted; in place it is the one visible result of
+ * signing in. A step's shift passes only when all hold: the sign-in landed in that step (the app's signed-in header
+ * drew in it), every node that moved is on this list (each layout-shift entry names at most 5 sources, so an entry
+ * with 5 may hide more and never passes), and the step's total is at most BOUND.signinSwap.
+ */
+export const SIGNIN_SWAP_NODES = ["div.tb-acct", "div.phh-acct", "div.search", "div.srch-chip", "button.hit44.sfi"];
+export function signinSwap(s) {
+  if (!s.landed || !Array.isArray(s.entries) || s.entries.length === 0 || !(s.sum <= BOUND.signinSwap)) return false;
+  return s.entries.every((e) => Array.isArray(e.sources) && e.sources.length > 0 && e.sources.length < 5 && e.sources.every((x) => SIGNIN_SWAP_NODES.includes(String(x).split(" ")[0])));
+}
+
 /** One launch's verdict lines from what run() recorded (its shots as listed on disk after the run). */
 export function judge(rec) {
   const lines = [];
@@ -133,7 +149,11 @@ export function judge(rec) {
     if (b.hops?.length) lines.push(`note ${at} BAR-03 hop back: the app's first paint ${b.hops.join(", ")} ms after SIGN_HOST's layer closed`);
     // BAR-04: CLS per page load, and none inside a step on a READY APP_HOST page
     for (const p of w.cls?.pages ?? []) say(p.sum <= BOUND.clsPage, `${at} BAR-04 CLS ${p.host}${p.top ? " (top)" : ""} doc ${p.doc}: ${p.sum.toFixed(4)}${p.sum > 0 && p.sources?.length ? ` (${p.sources.join("; ")})` : ""}`);
-    for (const s of w.cls?.steps ?? []) say(s.sum === 0, `${at} BAR-04 CLS in step ${s.step}: ${s.sum.toFixed(4)}`);
+    for (const s of w.cls?.steps ?? []) {
+      const why = s.sum > 0 && s.sources?.length ? ` (${s.sources.join("; ")})` : "";
+      if (s.sum > 0 && signinSwap(s)) say(true, `${at} BAR-04 CLS in step ${s.step}: ${s.sum.toFixed(4)}, the header's account slot taking its signed-in width as the sign-in lands, at most ${BOUND.signinSwap}${why}`);
+      else say(s.sum === 0, `${at} BAR-04 CLS in step ${s.step}: ${s.sum.toFixed(4)}${why}`);
+    }
     // BAR-06: the last action to the first paint of the signed-in header
     say(typeof w.landMs === "number" && w.landMs <= BOUND.landMs, `${at} BAR-06 to signed in: ${w.landMs ?? "-"} ms`);
     // BAR-07: taps
@@ -491,11 +511,16 @@ async function oneWidth(h, runName, w, { plant, shotDir, cpu }) {
     const [a, b] = [marks[i], marks[i + 1]];
     if (a.step === "P0") continue;
     let sum = 0;
+    const sources = [];
+    const entries = [];
+    let landed = false;
     for (const [id, d] of docs) {
       if (d.host !== REAL.app || !(readyAt.get(id) <= a.t)) continue;
-      for (const s of d.shifts) if (s.t >= a.t && s.t < b.t) sum += s.value;
+      for (const s of d.shifts) if (s.t >= a.t && s.t < b.t) (sum += s.value), sources.push(...(s.sources ?? [])), entries.push({ value: s.value, sources: s.sources ?? [] });
+      // the sign-in landed in this step: the app's signed-in header drew in this document within it
+      landed ||= events.some((e) => e.kind === "landed" && e.doc === id && e.t >= a.t && e.t < b.t);
     }
-    steps.push({ step: a.step, sum });
+    steps.push({ step: a.step, sum, sources: sources.slice(0, 6), entries, landed });
   }
   out.cls = {
     pages: [...docs.entries()].filter(([, d]) => d.host === REAL.app || d.host === REAL.sign).map(([id, d]) => ({ doc: id, host: d.host, top: d.top, sum: d.sum, sources: d.shifts.flatMap((x) => x.sources ?? []).slice(0, 6) })),

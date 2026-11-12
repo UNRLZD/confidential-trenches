@@ -23,12 +23,16 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { setDefaultAutoSelectFamilyAttemptTimeout } from "node:net";
 import { HELPER_BIND_ANSWER_MS, HELPER_CODE_STATUS, HELPER_COMMIT_HEADER, HELPER_CORS, HELPER_FETCHED_AT_HEADER, HELPER_SOURCE_HEADER } from "@blindfill/kit";
+import { withChange4h } from "./data/candles.ts";
 import { address as solanaAddress, createSolanaLists } from "./data/solana/lists.ts";
 import { LOGO_NONE_MS, LOGOS, type LogoChain, type Logos } from "./data/logo.ts";
 import { createEvmLists, type EvmChain } from "./data/evm/lists.ts";
 import { createSwaps, INDEX_RPCS, SWAP_RPCS, TRADES_MAX, type EvmSwaps } from "./data/evm/swaps.ts";
 import { createEvmToken, type EvmToken } from "./data/evm/token.ts";
 import { createHeld, parseHeld, type Held } from "./data/held.ts";
+import { createNearLists } from "./data/near/lists.ts";
+import { createNearToken, type NearMarket } from "./data/near/token.ts";
+import { createNearTrades } from "./data/near/trades.ts";
 import { geckoBudget, GT_LIMIT_PER_MIN, type GeckoBudget } from "./data/gecko.ts";
 import { AHEAD_TICK_MS, CANDLES_MAX, createSolanaToken, type DataAnswer } from "./data/solana/token.ts";
 import { createSolanaTrades, TRADES_RPCS, type SolanaTrades } from "./data/solana/trades.ts";
@@ -259,6 +263,9 @@ export function handler(
   sendLog: (line: string) => void = (line) => console.log(`helper: ${line}`),
   // GET /v1/logo/{chain}/{token} (src/data/logo.ts): the registry the list builders fill
   logos: Logos = LOGOS,
+  // card helper-near-lists-and-token: chain=near's lists, token page, holders, candles and tape (src/data/near/); none
+  // mounted answers 404 as before
+  near: NearMarket | undefined = undefined,
 ) {
   if (!SHA.test(commit)) throw new Error("HELPER_COMMIT must be a full 40-hex commit");
   // card helper-id-intents: a mainnet withdrawal that landed to an arming account A makes A a seen signer on POST
@@ -563,14 +570,15 @@ export function handler(
         // (src/data/evm/lists.ts)
         const chains = new URL(req.url ?? "/", "http://helper.invalid").searchParams.getAll("chain");
         const evm = chains.length === 1 && Object.hasOwn(evmLists, chains[0]!) ? evmLists[chains[0] as EvmChain] : undefined;
-        if (chains.length !== 1 || (chains[0] !== "solana" && evm === undefined)) return send(404, { error: { code: "not_found" } }, cors(req));
-        void (evm ?? lists)
+        const nearLists = chains.length === 1 && chains[0] === "near" ? near?.lists : undefined;
+        if (chains.length !== 1 || (chains[0] !== "solana" && evm === undefined && nearLists === undefined)) return send(404, { error: { code: "not_found" } }, cors(req));
+        void (evm ?? nearLists ?? lists)
           .get()
           .then((a) => {
             const h: Headers = { ...base, ...cors(req), Vary: "Origin, Accept-Encoding", "Content-Type": "application/json; charset=utf-8" };
             if (a.status === 429) return reply(throttled(a.retryAfterS ?? 1, undefined, a.why));
             if (a.status !== 200 || a.asOfMs === undefined) return send(a.status, JSON.parse(a.body), cors(req));
-            h[HELPER_SOURCE_HEADER] = evm === undefined ? "jupiter" : "geckoterminal";
+            h[HELPER_SOURCE_HEADER] = nearLists !== undefined ? "chain" : evm === undefined ? "jupiter" : "geckoterminal";
             h[HELPER_FETCHED_AT_HEADER] = new Date(a.asOfMs).toISOString();
             const gzip = a.gzip !== undefined && /\bgzip\b/i.test(String(req.headers["accept-encoding"] ?? ""));
             const out = gzip ? a.gzip! : Buffer.from(a.body, "utf8");
@@ -605,6 +613,24 @@ export function handler(
         const mint = one("token");
         const swaps = chain !== null && Object.hasOwn(evmSwaps, chain) ? evmSwaps[chain as EvmChain | "solana"] : undefined;
         const evmToken = chain !== null && Object.hasOwn(evmTokens, chain) ? evmTokens[chain as EvmChain] : undefined;
+        // chain=near: the four reads from src/data/near/, their own bounds as the other chains'
+        if (chain === "near" && near !== undefined && mint !== null) {
+          const began = performance.now();
+          if (path === MARKET_TRADES) {
+            const limit = most("limit");
+            if (limit === null || !/^(|[1-9]\d?)$/.test(limit) || Number(limit) > TRADES_MAX) return send(404, { error: { code: "not_found" } }, cors(req));
+            settle(near.trades.trades(mint, limit === "" ? TRADES_MAX : Number(limit)), began);
+          } else if (path === MARKET_CANDLES) {
+            const tf = one("tf");
+            const to = most("to");
+            const limit = most("limit");
+            if (tf === null || to === null || limit === null || !/^(|[1-9]\d{0,10})$/.test(to) || !/^(|[1-9]\d{0,2})$/.test(limit) || Number(limit) > CANDLES_MAX) {
+              return send(404, { error: { code: "not_found" } }, cors(req));
+            }
+            settle(near.trades.candles(mint, tf, to === "" ? null : Number(to), limit === "" ? CANDLES_MAX : Number(limit)), began);
+          } else settle(path === MARKET_TOKEN ? near.token.page(mint) : near.token.holders(mint), began);
+          return;
+        }
         if (mint === null || (path === MARKET_TRADES ? swaps === undefined : path === MARKET_CANDLES ? chain !== "solana" && swaps === undefined : chain !== "solana" && evmToken === undefined)) return send(404, { error: { code: "not_found" } }, cors(req));
         const began = performance.now();
         let read: Promise<DataAnswer>;
@@ -622,6 +648,9 @@ export function handler(
           read = swaps !== undefined ? swaps.candles(mint, tf, to === "" ? null : Number(to), limit === "" ? CANDLES_MAX : Number(limit), clientOf(req)) : token.candles(mint, tf, to === "" ? null : Number(to), limit === "" ? CANDLES_MAX : Number(limit), clientOf(req));
         } else if (evmToken !== undefined) read = path === MARKET_TOKEN ? evmToken.page(mint, clientOf(req)) : evmToken.holders(mint, clientOf(req));
         else read = path === MARKET_TOKEN ? token.page(mint, clientOf(req)) : token.holders(mint, clientOf(req));
+        // the 4h change from our own bars where the page's source has none (card token-page-data-complete-and-fast:
+        // Jupiter and the EVM lists carry no 4h window), read when the page answers, so it is as fresh as the tape
+        if (path === MARKET_TOKEN && swaps !== undefined) read = read.then((a) => withChange4h(a, swaps.change4h(mint)));
         settle(read, began);
         return;
       }
@@ -743,7 +772,7 @@ export function solanaTokenFromEnv(env: Record<string, string | undefined>, prox
   const holdersRpc =
     holders === undefined || holders === "" ? undefined : createRpc({ SOLANA_RPC_URL: holders }, { slot: "holders", publicFallback: false, ...(holders === env.SOLANA_RPC_URL ? { pacer: rpc.pacer } : {}) });
   if (holdersRpc !== undefined) slots?.set("holders", holdersRpc.slot);
-  return createSolanaToken(proxy, rpc, { gecko, listed: lists.get, holdersRpc });
+  return createSolanaToken(proxy, rpc, { gecko, listed: lists.get, holdersRpc, metaLogos: LOGOS });
 }
 
 /**
@@ -780,10 +809,11 @@ export function evmSwapsFromEnv(env: Record<string, string | undefined>, evmList
       // every token an answer of the last SERVED_MS held, not only the newest answer's: a user taps what they read, and a
       // refresh between drops tokens (card robinhood-listed-tape-opens)
       listed: lists.listed,
-      // a hint only: swaps.ts fromHint takes it once the chain says the pool is the token's
+      // a hint only: swaps.ts fromHint takes it once the chain says the pool is the token's; the pool the last answer that
+      // held the token named (lists.pool), so a token a refresh dropped opens from it, not the whole discovery
       hint: async (token) => {
         const s = await snapshot();
-        return s !== null && Object.hasOwn(s.pools, token) ? s.pools[token]! : null;
+        return s !== null && Object.hasOwn(s.pools, token) ? s.pools[token]! : (lists.pool?.(token) ?? null);
       },
       // the same rows' price_usd, as the last answer read held it: a book off it by SCALE_BOUND is not served as ours
       price: (token) => seen?.prices.get(token) ?? null,
@@ -1016,12 +1046,12 @@ export function readyGate(warm: Promise<void>, checked: Promise<void>): { ready:
   return { ready: () => ready, warmed };
 }
 
-export function start(commit: string, port: number, proxy?: Proxy, rpc?: Rpc, watches?: TokenWatches, lists?: Lists, fee?: Fee, withdraw?: WithdrawSender, token?: Token, bind?: BindSender, pools?: ReadonlyMap<string, SolanaPoolSender>, evmLists?: EvmLists, evmSwaps?: Swaps, ready?: () => boolean, senders: Promise<unknown> = Promise.resolve(), solana?: () => Partial<Record<SlotName, SlotState>>, release?: number | null, evmPools?: ReadonlyMap<string, EvmPoolSender>, evmTokens?: EvmTokens, held?: Held): Server {
+export function start(commit: string, port: number, proxy?: Proxy, rpc?: Rpc, watches?: TokenWatches, lists?: Lists, fee?: Fee, withdraw?: WithdrawSender, token?: Token, bind?: BindSender, pools?: ReadonlyMap<string, SolanaPoolSender>, evmLists?: EvmLists, evmSwaps?: Swaps, ready?: () => boolean, senders: Promise<unknown> = Promise.resolve(), solana?: () => Partial<Record<SlotName, SlotState>>, release?: number | null, evmPools?: ReadonlyMap<string, EvmPoolSender>, evmTokens?: EvmTokens, held?: Held, near?: NearMarket): Server {
   const server = createServer(
     // Caddy keeps its upstream connections idle for 30 s (deploy/Caddyfile); ours outlive that, so no reused
     // connection is closed under a request
     { headersTimeout: 10_000, requestTimeout: 15_000, keepAliveTimeout: 65_000 },
-    handler(commit, proxy, rpc, watches, lists, fee, withdraw, token, bind, release, pools, evmPools, undefined, evmLists, evmSwaps, ready, senders, solana, undefined, evmTokens, held),
+    handler(commit, proxy, rpc, watches, lists, fee, withdraw, token, bind, release, pools, evmPools, undefined, evmLists, evmSwaps, ready, senders, solana, undefined, evmTokens, held, undefined, undefined, near),
   );
   // card market-data-push: the push socket, upgraded for APP_HOST's Origin only, in its own window per client
   attachPush(server, { commit, readers: evmSwaps ?? {}, allowed: (req) => originIn(req, PUSH_ORIGINS) !== null, client: clientOf, take: clientWindow(API_RATE_MAX).take });
@@ -1164,6 +1194,10 @@ if (import.meta.main) {
     const evmTokens: EvmTokens = Object.fromEntries(SERVED_EVM.map((c) => [c, createEvmToken(c, { lists: evmLists[c]!, gecko, kept: swaps[c]?.kept })]));
     if (warm !== null) restoreEvmMarket(warm, SERVED_EVM, (c) => ({ tokens: evmTokens[c as EvmChain], swaps: swaps[c as EvmChain] }));
     const held = heldFrom(token, evmLists);
+    // card helper-near-lists-and-token: NEAR's lists from Rhea classic's views, read now and on their cadence
+    const nearLists = createNearLists();
+    const near: NearMarket = { lists: nearLists, token: createNearToken(nearLists), trades: createNearTrades(nearLists) };
+    nearLists.warm();
     lists.warm();
     for (const l of Object.values(evmLists)) l.warm();
     setInterval(saveWarm, TICK_MS).unref();
@@ -1180,7 +1214,7 @@ if (import.meta.main) {
     // that cluster's rent reads fail (each failure logged, pool/solana.ts), and redeploy.sh keeps the old one serving.
     const { ready, warmed } = readyGate(warmUntilReady({ lists, evmLists, token }), checked);
     const listen = () => {
-      server = start(commit, port, proxy, rpc, watches, lists, fee, withdraw, token, bind, pools, evmLists, swaps, ready, senders.held, () => Object.fromEntries([...slots].map(([k, v]) => [k, v.state()])), release, evmPools, evmTokens, held); // warms both relayers once the senders are ours
+      server = start(commit, port, proxy, rpc, watches, lists, fee, withdraw, token, bind, pools, evmLists, swaps, ready, senders.held, () => Object.fromEntries([...slots].map(([k, v]) => [k, v.state()])), release, evmPools, evmTokens, held, near); // warms both relayers once the senders are ours
       drain = drainer(server);
       server.on("listening", () => console.log(`helper: listening on ${port}, commit ${commit}${ready() ? "" : ", warming"}`));
     };

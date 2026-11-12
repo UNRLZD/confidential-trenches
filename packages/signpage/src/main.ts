@@ -44,7 +44,8 @@
 //   store (the read-only reader: the state needs the seed's key, the status record and the ops, never the seed, and
 //   it makes no database before a sign-in). These screens draw in the shell's layer over the frame, hidden in every
 //   state until the app sends signin.open (signed out: the passkey or the words screen), and closed again on signed in
-//   or Cancel, so the terminal shows signed out too. While the layer shows, the frame is out of the document (src/shell.ts).
+//   or Cancel, so the terminal shows signed out too. The layer is one sheet over the app (src/sheet.ts): the frame stays
+//   under it, inert, its messages dropped, and leaves the document only for a screen with a typed field (src/shell.ts).
 //   Card signpage-signin-kinds adds the account's other open kinds (src/pages/open.ts decides which page each draws):
 //   signout (the backup first while the 12 words are the only copy, then Sign out, which closes the layer back to the
 //   app signed out), backup.open (the 12 words, then Saved or Cancel back to the app) and signin.open's wallet way (the
@@ -67,8 +68,9 @@ import { depositQuoteHost, depositReadHosts } from "./deposit-wire.ts";
 import { depositNamer } from "./deposit-name.ts";
 import { poolAddressHost } from "./pool-deposit-address.ts";
 import { depositFollows, FOLLOW_LOCK } from "./deposit-follow.ts";
-import { depositToEnd, poolFollows, poolRefundMover, solanaPoolFollowDeps, type PoolFollowHost } from "./pool-deposit-follow.ts";
+import { depositToEnd, evmQuoteRoute, poolFollows, poolRefundMover, solanaPoolFollowDeps, uxNoteLanded, uxNoteOpen, type PoolFollowHost, type PoolFollowRecord } from "./pool-deposit-follow.ts";
 import { POOL_ADDRESS_ASSET, poolQuotePricing, readSolanaPoolFloor, type PoolQuotePricing } from "./pool-deposit-address.ts";
+import type { EvmRpc } from "../../wallet/src/pool/evm.ts";
 import { followRpc, readMoveAt } from "../../wallet/src/deposit/follow.ts";
 import { NEAR_NETWORKS } from "../../wallet/src/deposit/account.ts";
 import { ONECLICK_USDC_ASSETS } from "../../kit/src/checks/oneclick.ts";
@@ -158,6 +160,8 @@ const restore = !framed
         s?.entropy.fill(0);
         return s !== undefined;
       },
+      // a chain this build gives no deposit address on (pageAddressPools): no U_X there to read, so no stall reason
+      addressed: (chain) => pageAddressPools().some((p) => p.chain === chain),
       // a chain's buy records written (card signpage-positions-evm): its positions read again, with no reload; ahead of
       // `written`, whose neighbours wallet-restore-reads-ux's bundle check reads
       holdingsWritten: (chain) => testnet?.evmHoldingsRestored(chain),
@@ -263,34 +267,50 @@ else {
   // own Pyth read on its two RPCs (src/pool-price.ts); any other origin has none yet, so it gets no quote
   const pricedFor = (chain: PoolChain, origin: string): PoolQuotePricing | null => poolQuotePricing(prices.get(chain), origin);
   const solPair = (): readonly [SolanaRpc, SolanaRpc] | null => (PAGE_SOL_PIN === undefined ? null : (poolDeps.rpcs("solana") as unknown as readonly [SolanaRpc, SolanaRpc] | null));
-  // the quote's floor on X's pool, read now on its two RPCs (pool-deposit-address.ts readSolanaPoolFloor); none on a
-  // chain whose reads are not built here yet (Base and Robinhood: no mainnet pool is pinned)
+  // Base's and Robinhood's pool for a quote into U_X (card evm-deposit-route-mainnet): the pool the page's network pins
+  // there (the wallet's EVM_POOLS, src/pool-testnet.ts evmPoolOf: its pin and the deposit's own pair) and the one reader
+  // U_X's balance is polled on: on a testnet page the pool's pair (no reader: no quote is asked there, 1Click pays out on
+  // mainnet only); on mainnet the helper's POST /v1/rpc/{chain} alone (decision M359: a one-time account's holdings
+  // never reach a public provider from the device), evmWalletRpc. With no pool, or on mainnet with no reader: no floor,
+  // so no quote, and no follow
+  const evmWalletRpc = (_chain: "base" | "robinhood"): EvmRpc | undefined => undefined;
+  const evmRoute = evmQuoteRoute({ network: PAGE_NETWORK, pool: (chain) => testnet?.evmPoolOf(chain) ?? null, wallet: evmWalletRpc, notes: () => pageNotes() });
+  // the quote's floor on X's pool, read now on its two RPCs (pool-deposit-address.ts readSolanaPoolFloor on Solana,
+  // readEvmPoolFloor on Base and Robinhood); none on a chain the page pins no pool on
   const floorFor = async (chain: PoolChain, wallet: string): Promise<bigint | null> => {
+    if (chain !== "solana") return evmRoute.floor(chain);
     const pair = solPair();
-    return chain === "solana" && pair !== null && PAGE_SOL_PIN !== undefined ? readSolanaPoolFloor(pair, PAGE_SOL_PIN.program, wallet) : null;
+    return pair !== null && PAGE_SOL_PIN !== undefined ? readSolanaPoolFloor(pair, PAGE_SOL_PIN.program, wallet) : null;
   };
   const nearPair = () => [followRpc(NEAR_NETWORKS.mainnet.fastnear[0]), followRpc(NEAR_NETWORKS.mainnet.drpc)] as const;
-  poolFollowDeps = (f, op) => {
-    const pair = solPair();
-    if (f.chain !== "solana" || pair === null || PAGE_SOL_PIN === undefined) return null;
-    const program = PAGE_SOL_PIN.program;
-    return solanaPoolFollowDeps({
-      rpcs: pair,
-      program,
-      // from U_X alone (review H1): pool.deposit run with the op's own U_{s,i} as its fixed source, never the newest U
-      deposit: (g, amount, signal) =>
-        depositToEnd((p, ctx) => (testnet === null ? null : testnet.depositFrom(p, { s: BigInt(g.s), i: g.i, u: g.u }, ctx as KindContext)), "solana", POOL_ASSET_DECIMALS.SOL, amount, signal),
-      refund: poolRefundMover({
-        read: (g, nonce) => readMoveAt("intents.near", g.refund_id, nonce, g.origin, nearPair(), NEAR_NETWORKS.mainnet.usdc),
-        floor: async (g) => readSolanaPoolFloor(pair, program, g.u),
-        priced: (g) => pricedFor(g.chain, g.origin),
-        decimals: (c) => POOL_ASSET_DECIMALS[POOL_ADDRESS_ASSET[c]],
-        seed64: () => openSeed64(),
-        seedLock: (fn) => navigator.locks.request(WALLET_SEED_LOCK, { mode: "shared" }, fn),
-        move: op.move,
-        record: op.record,
-      }),
+  // from U_X alone (review H1): pool.deposit run with the op's own U_{s,i} as its fixed source, never the newest U
+  const depositFromUx = (g: PoolFollowRecord, amount: bigint, signal: AbortSignal) =>
+    depositToEnd((p, ctx) => (testnet === null ? null : testnet.depositFrom(p, { s: BigInt(g.s), i: g.i, u: g.u }, ctx as KindContext)), g.chain, POOL_ASSET_DECIMALS[POOL_ADDRESS_ASSET[g.chain]], amount, signal);
+  // a landed note of U_X's own in this page's store (review P2a): a follow resumed while a rung was landing ends
+  const uxNoted = async (g: PoolFollowRecord) => uxNoteLanded(await pageNotes(), g);
+  // a note of U_X's still landing holds in_pool and the end on every chain (card evm-deposit-route-mainnet review)
+  const uxOpen = async (g: PoolFollowRecord) => uxNoteOpen(await pageNotes(), g);
+  // the refund carry, at X's pool's floor read now
+  const refundAt = (floor: (g: PoolFollowRecord) => Promise<bigint>, op: Parameters<PoolFollowHost["deps"]>[1]) =>
+    poolRefundMover({
+      read: (g, nonce) => readMoveAt("intents.near", g.refund_id, nonce, g.origin, nearPair(), NEAR_NETWORKS.mainnet.usdc),
+      floor,
+      priced: (g) => pricedFor(g.chain, g.origin),
+      decimals: (c) => POOL_ASSET_DECIMALS[POOL_ADDRESS_ASSET[c]],
+      seed64: () => openSeed64(),
+      seedLock: (fn) => navigator.locks.request(WALLET_SEED_LOCK, { mode: "shared" }, fn),
+      move: op.move,
+      record: op.record,
     });
+  poolFollowDeps = (f, op) => {
+    if (f.chain !== "solana") {
+      const d = evmRoute.deps(f.chain, depositFromUx, (floor) => refundAt(floor, op));
+      return d === null ? null : { ...d, noted: uxNoted, open: uxOpen };
+    }
+    const pair = solPair();
+    if (pair === null || PAGE_SOL_PIN === undefined) return null;
+    const program = PAGE_SOL_PIN.program;
+    return { ...solanaPoolFollowDeps({ rpcs: pair, program, deposit: depositFromUx, refund: refundAt(async (g) => readSolanaPoolFloor(pair, program, g.u), op) }), noted: uxNoted, open: uxOpen };
   };
   // a buy or a sell from the trade box (src/trade.ts): legs from this device's own arm records only, signed here
   const trades = tradeKind({ store: () => open(), seed64: () => openSeed64(), deps: releaseTradeDeps() });
@@ -350,7 +370,7 @@ else {
       // where money for a pool goes (src/pool-deposit-address.ts): U_X from its scope's public record, named ahead by this
       // page; a quote from another chain at the device's own price reads and floor, its address only once the follow
       // took it (src/pool-deposit-follow.ts), on mainnet only
-      "pool.address": poolAddressHost({ pools: pagePoolScopes, network: PAGE_NETWORK, read: fs.depositRead, named: () => namer.named(), priced: pricedFor, floor: floorFor, checked: (id, chain, quote, u) => poolFollow!.quoted(id, chain, quote, u) }),
+      "pool.address": poolAddressHost({ pools: pageAddressPools, network: PAGE_NETWORK, read: fs.depositRead, named: () => namer.named(), priced: pricedFor, floor: floorFor, checked: (id, chain, quote, u) => poolFollow!.quoted(id, chain, quote, u) }),
       buy: trades,
       // the pool kinds (src/pool-kinds.ts): each checked by src/rules/pool.ts, answered only on a pool this page's
       // network pins (src/pool-testnet.ts, whose flow runs deposit, buy, sell and withdraw on every build; a network with
@@ -362,7 +382,9 @@ else {
       ...(restore ? { restore: restore.kind } : {}),
     }),
   });
-  shell.layer.append(root);
+  shell.body.append(root);
+  // the user's own Esc, close tap or scrim tap: Cancel's step, on a screen Cancel is drawn on (show() below)
+  shell.onDismiss = () => void run(cancel);
 }
 
 // The account's open kinds (src/pages/open.ts): refused unless the page's state takes them; else the answer goes first,
@@ -383,7 +405,8 @@ async function resynced(): Promise<void> {
 }
 type OpenAnswer = { result: { pending: true }; then: () => void } | null;
 function decide(kind: AccountKind, way: unknown, fromId?: string): OpenAnswer {
-  if (!takes(kind, root.dataset.signin, busy)) return null;
+  // a sheet shown already is never redrawn by the app: a kind the frame sent before it opened is refused
+  if (sheetShown() || !takes(kind, root.dataset.signin, busy)) return null;
   return {
     result: { pending: true },
     then: () =>
@@ -415,7 +438,7 @@ function decide(kind: AccountKind, way: unknown, fromId?: string): OpenAnswer {
 // answer goes first, then the screen where the user types To and the amount, never passed in by the app; the run's
 // stages go to the op under the request's id.
 function openPoolWithdraw(chain: PoolChain, opId: string): { result: { pending: true }; then: () => void } | null {
-  if (framed || !testnet || !takes("withdraw.open", root.dataset.signin, busy)) return null;
+  if (framed || !testnet || sheetShown() || !takes("withdraw.open", root.dataset.signin, busy)) return null;
   return {
     result: { pending: true },
     then: () =>
@@ -426,9 +449,10 @@ function openPoolWithdraw(chain: PoolChain, opId: string): { result: { pending: 
       }),
   };
 }
+const sheetShown = (): boolean => shell !== null && !shell.layer.hidden;
 // The layer opens, and the activation guard restarts its 500 ms: a click lined up before cannot act on what it shows.
 function openLayer(): void {
-  shell?.open();
+  shell?.open(TYPED.has(root.dataset.signin ?? ""));
   reshown();
 }
 // Back to the app: the layer closes on the page's signed-in or signed-out state.
@@ -452,6 +476,11 @@ const input = (e: Event): void => {
 addEventListener("pointerdown", input, true);
 addEventListener("keydown", input, true);
 
+// The screens the APP_HOST frame must not sit under (src/shell.ts seal: it leaves the document before they show): those
+// with a field typed into (the 12 words, the withdraw forms' address and amount), so no key typed or pasted there can
+// reach it; and the 12 words shown (backup), since a frame under them keeps the opening tap's activation for seconds and
+// could put its own words on the clipboard over the user's Copy, or float a Picture-in-Picture window over them.
+const TYPED = new Set<string>(["words", "invalid-code", "withdraw", "pool-withdraw", "held", "backup"]);
 const GUARDED = new Set(["signout", "saved", "backup", "copy", "withdraw", "move-out"]);
 function button(action: string, label: string, onClick: () => void): HTMLButtonElement {
   const b = document.createElement("button");
@@ -578,6 +607,8 @@ function show(state: State, seed?: { account: string; code_saved: boolean; signo
   // and from a backup or sign-out page an open kind drew over a signed-in account (the words saved or not, as they were)
   const cancellable = state !== "loading" && state !== "signed-in" && (state !== "backup" || openedBy === "backup.open" || openedBy === "signout");
   if (shell && cancellable) parts.push(button("cancel", WORDS.cancel, () => void run(cancel)));
+  shell?.dismissible(cancellable);
+  if (TYPED.has(state)) shell?.seal();
   root.replaceChildren(...parts);
 }
 
@@ -781,6 +812,11 @@ function pageScope(): bigint | null {
 // answers its U_X from that record
 function pagePoolScopes(): { chain: PoolChain; scope: bigint }[] {
   return PAGE_POOLS.flatMap((p) => (p.chain === "near" ? [] : [{ chain: p.chain, scope: p.scope }]));
+}
+// the pools pool.address gives a U_X for: on mainnet Solana's alone (card evm-pools-on-mainnet), as a Base or Robinhood
+// pool there has no carry from U_X into the pool nor a way out of it yet, so money is never sent to an address there
+function pageAddressPools(): { chain: PoolChain; scope: bigint }[] {
+  return pagePoolScopes().filter((p) => PAGE_NETWORK !== "mainnet" || p.chain === "solana");
 }
 const namer = depositNamer({
   top: !framed,

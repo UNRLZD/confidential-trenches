@@ -203,6 +203,28 @@ test("no WebSocket in the runtime: the tape is read every TRADES_POLL_MS as befo
   assert.deepEqual(tapes.map((t) => t.status), ["ready", "none", "ready"]);
 });
 
+// card token-page-data-complete-and-fast: a cold tape the helper still fills (`filling` true, apps/helper/src/data/evm/
+// swaps.ts at its open's bound) is the Trades tab's loading state while it has no row, read again every TRADES_POLL_MS
+// whatever the socket sends, and drawn once its rows come; never the empty state of a tape with no trades
+test("a filling tape with no row stays loading and is read again at TRADES_POLL_MS; its rows are drawn when they come", async () => {
+  const filling = (trades: Trade[]) => JSON.stringify({ ...JSON.parse(body(trades)), filling: true });
+  const a = trade("tx-a", 60_000);
+  const answers = [answer(200, filling([])), answer(200, filling([])), answer(200, filling([a])), answer(200, body([a]))];
+  const { c, sockets, tapes } = rig((async () => answers.shift()!) as typeof fetch);
+  await c.settle();
+  assert.deepEqual(tapes, [], "still loading: nothing handed on");
+  assert.deepEqual(c.pending().sort(), [TRADES_POLL_MS].sort(), "read again at TRADES_POLL_MS");
+  sockets[0]!.send(filling([]));
+  assert.deepEqual(tapes, [], "a pushed filling tape with no row is loading too");
+  assert.equal(await c.tick(), TRADES_POLL_MS, "a filling push keeps the read at TRADES_POLL_MS");
+  assert.deepEqual(tapes, [], "the second filling read: loading");
+  assert.equal(await c.tick(), TRADES_POLL_MS);
+  assert.deepEqual(tapes.at(-1), { trades: [a], status: "ready" }, "the rows so far, drawn");
+  assert.equal(await c.tick(), TRADES_POLL_MS);
+  assert.deepEqual(tapes.map((t) => t.status), ["ready"], "filled: the same rows, nothing redrawn");
+  assert.deepEqual(c.pending(), [TRADES_PUSHED_POLL_MS], "filled with the socket sending: back to its pace");
+});
+
 // ------------------------------------------------------------------------------------------------ the chart's wake
 const own = (candles: unknown[]) => ({ tf: "1m", candles, src: "chain", own_from_s: 60, as_of_ms: 1 });
 const row = (t: number, c: string) => [t * 60, "1", c > "1" ? c : "1", c < "1" ? c : "1", c, "1"];

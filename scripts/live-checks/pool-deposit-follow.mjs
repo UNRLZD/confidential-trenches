@@ -57,13 +57,26 @@ const QUOTE_FLOOR = new RegExp(
 const WIRED = new RegExp(
   `"pool\\.address":${N}\\(\\{pools:${N},network:${N},read:${N}\\.depositRead,named:\\(\\)=>${N}\\.named\\(\\),priced:${N},floor:(${N}),checked:\\((${N}),(${N}),(${N}),(${N})\\)=>(${N})\\.quoted\\(\\2,\\3,\\4,\\5\\)\\}\\)`,
 );
+// (card evm-deposit-route-mainnet: Base's and Robinhood's floor goes first, its own check's mark; Solana's as before)
 const FLOOR_WIRE = (u) =>
-  new RegExp(`[,;]${esc(u)}=async\\((${N}),(${N})\\)=>\\{let (${N})=${N}\\(\\);return \\1===${Q}solana${Q}&&\\3!==null&&${N}!==void 0\\?${N}\\(\\3,${N}\\.program,\\2\\):null\\}`);
+  new RegExp(
+    `[,;]${esc(u)}=async\\((${N}),(${N})\\)=>\\{if\\(\\1!==${Q}solana${Q}\\)return ${N}\\.floor\\(\\1\\);` +
+      `let (${N})=${N}\\(\\);return \\3!==null&&${N}!==void 0\\?${N}\\(\\3,${N}\\.program,\\2\\):null\\}`,
+  );
 const FOLLOW_INST = (f) => new RegExp(`[,;]${esc(f)}=${N}\\?null:${N}\\(\\{store:\\(\\)=>${N}\\(\\),decimals:${N}=>${N}\\[${N}\\[${N}\\]\\],deps:\\((${N}),(${N})\\)=>(${N})\\(\\1,\\2\\)\\}\\)`);
+// (card evm-deposit-route-mainnet: Base's and Robinhood's deps go first, its own check's mark; the deposit from U_X and
+// the refund mover are one function each, shared by every chain)
 const FOLLOW_DEPS = (d) =>
   new RegExp(
-    `[,;]${esc(d)}=\\(${N},${N}\\)=>\\{let (${N})=${N}\\(\\);if\\(${N}\\.chain!==${Q}solana${Q}\\|\\|\\1===null\\|\\|${N}===void 0\\)return null;let ${N}=${N}\\.program;return (${N})\\(\\{rpcs:\\1,program:${N},deposit:\\((${N}),(${N}),(${N})\\)=>${N}\\(\\((${N}),(${N})\\)=>(${N})===null\\?null:\\8\\.depositFrom\\(\\6,\\{s:BigInt\\(\\3\\.s\\),i:\\3\\.i,u:\\3\\.u\\},\\7\\),${Q}solana${Q},${N}\\.SOL,\\4,\\5\\),refund:${N}\\(\\{`,
+    `[,;]${esc(d)}=\\((${N}),(${N})\\)=>\\{if\\(\\1\\.chain!==${Q}solana${Q}\\)\\{[^]{0,400}?\\}let (${N})=${N}\\(\\);if\\(\\3===null\\|\\|${N}===void 0\\)return null;let (${N})=${N}\\.program;` +
+      `return\\{\\.\\.\\.${N}\\(\\{rpcs:\\3,program:\\4,deposit:(${N}),refund:(${N})\\(async (${N})=>${N}\\(\\3,\\4,\\7\\.u\\),\\2\\)\\}\\),noted:${N},open:${N}\\}\\}`,
   );
+// the follow's deposit: the flow's depositFrom with the op's own U_{s,i}, on the op's chain at its coin's decimals
+const DEPOSIT_FN = (v) =>
+  new RegExp(`[,;]${esc(v)}=\\((${N}),(${N}),(${N})\\)=>${N}\\(\\((${N}),(${N})\\)=>(${N})===null\\?null:\\6\\.depositFrom\\(\\4,\\{s:BigInt\\(\\1\\.s\\),i:\\1\\.i,u:\\1\\.u\\},\\5\\),\\1\\.chain,${N}\\[${N}\\[\\1\\.chain\\]\\],\\2,\\3\\)`);
+// the refund mover at the floor it is handed, the op's own move and record
+const REFUND_FN = (y) =>
+  new RegExp(`[,;]${esc(y)}=\\((${N}),(${N})\\)=>${N}\\(\\{read:\\((${N}),(${N})\\)=>${N}\\(${Q}intents\\.near${Q},\\3\\.refund_id,\\4,\\3\\.origin,[^]{0,200}?floor:\\1,priced:[^]{0,300}?move:\\2\\.move,record:\\2\\.record\\}\\)`);
 // pool-deposit-follow.ts solanaPoolFollowDeps: both RPCs; the status with the refund id; the balance at finalized; the floor.
 const READS =
   new RegExp(
@@ -74,7 +87,18 @@ const READS =
 // followPoolQuote: the lower balance; at or over the floor, the deposit; filled or part_filled counts as landed (the run's
 // end read from its {end, txs}, card pool-deposit-op-txs).
 const LOOP = new RegExp(
-  `let\\[(${N}),(${N})\\]=await (${N})\\.balances\\((${N})\\),(${N})=\\1<\\2\\?\\1:\\2,(${N})=\\5>=\\3\\.ladder\\.min\\?await \\3\\.costs\\(\\4\\):null;if\\(\\6!==null&&\\5>=\\6\\.floor\\)\\{let (${N})=${N}\\(\\3\\.ladder,\\5,\\6\\.perRung,\\6\\.keep\\);if\\(\\7>0n\\)\\{let\\{end:(${N}),txs:${N}\\}=await \\3\\.deposit\\(\\4,\\7,\\3\\.signal\\);\\(\\8===${Q}filled${Q}\\|\\|\\8===${Q}part_filled${Q}\\)&&`,
+  // the carry (card evm-deposit-route-mainnet review P1): the largest ask the reading pays, deposited; filled or
+  // part_filled counts as landed only with no note of U_X's still landing (review), and a carry U_X cannot pay with its
+  // fee, before any rung is in, shows short (re-read P3-2)
+  `(${N})=async\\((${N}),(${N})\\)=>\\{let (${N})=${N}\\((${N})\\.ladder,\\2,\\3\\.perRung,\\3\\.keep\\);if\\(\\4===0n\\)return!1;let\\{end:(${N}),txs:${N}\\}=await \\5\\.deposit\\((${N}),\\4,\\5\\.signal\\),(${N})=\\(\\6===${Q}filled${Q}\\|\\|\\6===${Q}part_filled${Q}\\)&&!await (${N})\\(\\);` +
+    `return \\8&&\\((${N})=!0,await (${N})\\(${Q}in_pool${Q}\\)\\),\\6===${Q}not_funded${Q}&&!\\10&&await \\11\\(${Q}short${Q}\\),` +
+    // the round: a landed note of U_X's counts only with none landing and once this quote's own SUCCESS is read (re-read
+    // P2-1); the lower balance; the costs only once it holds a rung; at or over the floor, the carry; else, landed, no
+    // in_pool and no end while a note of U_X's is landing
+    `[^]{0,700}?let (${N})=await \\9\\(\\);!\\10&&!\\12&&(${N})&&\\5\\.noted!==void 0&&await \\5\\.noted\\(\\7\\)&&\\(\\10=!0\\);` +
+    `let\\[(${N}),(${N})\\]=await \\5\\.balances\\(\\7\\),(${N})=\\14<\\15\\?\\14:\\15,(${N})=\\16>=\\5\\.ladder\\.min\\?${N}\\(await \\5\\.costs\\(\\7\\)\\):null;if\\(\\17!==null&&\\16>=\\17\\.floor\\)await \\1\\(\\16,\\17\\)&&\\((${N})=!0\\);` +
+    `else if\\(\\10\\)\\{if\\(!\\12&&(${N})!==${Q}in_pool${Q}&&await \\11\\(${Q}in_pool${Q}\\),!\\12&&await \\5\\.past\\(\\7\\)\\)` +
+    `[^]{0,1200}?\\.status===${Q}SUCCESS${Q}&&\\(\\13=!0\\),`,
 );
 // pool-deposit.ts runPoolDeposit's fixed source (review H1): U_{s,i}'s own deposit note or its next arrival, a U the
 // store never planned refused, and the newest-used-or-planned fallback skipped; pool-testnet.ts depositFrom: the request
@@ -87,9 +111,10 @@ const FIXED = new RegExp(
 );
 // pool-deposit.ts poolDepositKind: the kind's third parameter (the fixed source) is the run's third argument (review 2 L1)
 const KIND = new RegExp(`return\\((${N}),(${N}),(${N})\\)=>\\{if\\(\\1!==null&&\\(\\1\\.kind!==${Q}pool\\.deposit${Q}[^]{0,1600}?=await ${N}\\(${N},\\1,\\3(?:,${N})?\\)\\}finally\\{`);
+// (card evm-deposit-route-mainnet: Base and Robinhood to the chain's EVM kind with the same fixed source)
 const FROM_ENTRY = new RegExp(
   `depositFrom:\\((${N}),(${N}),(${N})\\)=>\\{let (${N});try\\{\\4=${N}\\(\\{\\.\\.\\.\\1,kind:${Q}pool\\.deposit${Q}\\}\\)\\}catch\\{return\\{error:${Q}not_allowed${Q}\\}\\}` +
-    `return \\4\\.chain!==${Q}solana${Q}\\|\\|${N}===void 0\\?\\{error:${Q}not_allowed${Q}\\}:${N}\\(\\4,\\3,\\2\\)\\}`,
+    `return \\4\\.chain===${Q}solana${Q}\\?${N}===void 0\\?\\{error:${Q}not_allowed${Q}\\}:${N}\\(\\4,\\3,\\2\\):${N}\\(\\4\\.chain\\)\\?\\.\\(\\4,\\3,\\2\\)\\?\\?\\{error:${Q}not_allowed${Q}\\}\\}`,
 );
 // rules/refund.ts checkPoolRefundQuote, and the mover's key open (poolRefundMover).
 const REFUND_RULE = new RegExp(
@@ -111,7 +136,7 @@ export function facts(index, js) {
     sha384: sha384(js),
     floor: !!fl && LADDER(fl[4]).test(js) && QUOTE_FLOOR.test(js),
     floorRead: !!rd && COSTS(rd[7]).test(js),
-    wired: !!wired && FLOOR_WIRE(wired[1]).test(js) && !!deps,
+    wired: !!wired && FLOOR_WIRE(wired[1]).test(js) && !!deps && DEPOSIT_FN(deps[5]).test(js) && REFUND_FN(deps[6]).test(js),
     chainFirst: READS.test(js) && LOOP.test(js),
     fromUX: FIXED.test(js) && KIND.test(js) && FROM_ENTRY.test(js),
     refundCarry: REFUND_HEAD.test(js) && REFUND_RULE.test(js) && REFUND_KEY.test(js),
@@ -122,7 +147,7 @@ export const WHY = {
   floor: "a pool quote is not refused floor under the rung (0.01 SOL) plus the worst-case deposit cost plus U_X's rent floor, on its min out after the kit's check",
   floorRead: "the floor is not read at quote time from the fee on both RPCs (the higher) and the rent",
   wired: "pool.address is not handed the floor read and the follow's quoted, or the follow's deps do not run pool.deposit on Solana with the refund mover",
-  chainFirst: "the follow does not read U_X's balance at finalized on both RPCs (the lower counting), deposit only at or over the floor, count only filled or part_filled, or read the status with the op's refund id",
+  chainFirst: "the follow does not read U_X's balance at finalized on both RPCs (the lower counting), deposit only at or over the floor, count only filled or part_filled with no note of U_X's landing, show short on a carry it cannot pay, count a landed note only after this quote's own SUCCESS, or read the status with the op's refund id",
   fromUX: "the follow's deposit does not run from U_X alone (its own deposit note or next arrival, never the newest used or the planned U, and only a U whose address is the op's U_X), the kind does not hand the run its fixed source, or the page's depositFrom does not check the request by the pool rule first",
   refundCarry: "a refund's move is not held to X's own coin, to U_X, refunding to U_{s,i}, with min out at least the floor, or its key is not the op's own refund id",
 };

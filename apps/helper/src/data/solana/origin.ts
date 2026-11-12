@@ -63,7 +63,9 @@ const DBC = { size: 424, config: 72, baseMint: 136, quoteReserve: 240, isMigrate
  *  ConfigWithTransferHook, which starts with the same fields). */
 const DBC_CFG = { sizes: [1048, 1128], quoteMint: 8, threshold: 264 } as const;
 
-function onCurve(bytes: Uint8Array): boolean {
+/** Whether 32 bytes are a point on ed25519: a key a wallet signs with; a program address (a pool, a curve, a vault, a
+ *  locker) is never one. */
+export function onCurve(bytes: Uint8Array): boolean {
   try {
     ed25519.Point.fromBytes(bytes);
     return true;
