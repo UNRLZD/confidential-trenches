@@ -162,6 +162,9 @@ async function runOne(browser, w, scheme, shots, route) {
     if (taps.withdraw === null && rows.length) {
       taps.withdraw = `pick ${rows.join(" ")}`;
       taps.pick = (await tap(page, f, "[data-sheet='withdraw-pick'] .wpk-row[data-place='solana']"))[0] ?? null;
+      // this stand-in shell refuses pool.withdraw, and a refused open leaves the pick up with its line: its x closes it
+      await f.locator("[data-sheet='withdraw-pick'] .dep-x").filter({ visible: true }).first().click({ timeout: 2_000 }).catch(() => {});
+      await page.waitForTimeout(300);
     }
     if (w.name === "desktop") {
       // the row's Export key icon (card app-export-every-wallet), in the row's icon row
