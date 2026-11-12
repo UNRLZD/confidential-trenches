@@ -1,0 +1,273 @@
+{
+ "note": "recorded 2026-11-12T20:49:47.351Z: bad is SIGN_HOST as deployed then (before this card: no head rule) with the two mainnet pool pairs read live; good is the same chain reads with this branch's signing page build (build-app.mjs --out)",
+ "good": {
+  "sign": {
+   "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-n/mYnTJGVD/fU6peeBKANj2jz8ymsrNmsmQPRccQxkPsnnAQUW9xtZP7yIScFOhh\"></script>\n  </head>\n  <body></body>\n</html>\n",
+   "sha384": "sha384-n/mYnTJGVD/fU6peeBKANj2jz8ymsrNmsmQPRccQxkPsnnAQUW9xtZP7yIScFOhh",
+   "finalKey": true,
+   "guard": true
+  },
+  "at": 1794516587351,
+  "chains": {
+   "base": {
+    "chainId": [
+     {
+      "result": "0x2105"
+     },
+     {
+      "result": "0x2105"
+     }
+    ],
+    "tries": [
+     {
+      "newest": [
+       {
+        "result": {
+         "number": "0x3601efd",
+         "hash": "0x690325416fabce6e5bac3e29471a4dbcf0d38ceb5ca838c78222ed1a18d41d1e",
+         "timestamp": "0x6af62667"
+        }
+       },
+       {
+        "result": {
+         "number": "0x3601f01",
+         "hash": "0xdf59a5850ef507f420fab1f1af3317b45e3f29f6667e1f4fb2bc44ea422d467a",
+         "timestamp": "0x6af62667"
+        }
+       }
+      ],
+      "byNumber": [
+       {
+        "result": {
+         "number": "0x3601efd",
+         "hash": "0x690325416fabce6e5bac3e29471a4dbcf0d38ceb5ca838c78222ed1a18d41d1e",
+         "timestamp": "0x6af62667"
+        }
+       },
+       {
+        "result": {
+         "number": "0x3601efd",
+         "hash": "0x690325416fabce6e5bac3e29471a4dbcf0d38ceb5ca838c78222ed1a18d41d1e",
+         "timestamp": "0x6af62667"
+        }
+       }
+      ]
+     }
+    ],
+    "finalized": [
+     {
+      "result": {
+       "number": "0x3600a58",
+       "hash": "0xf246eb2a0e5125cdac06c0fbc4417f5a1319dc7c8182bd8bfed99193a86d153f",
+       "timestamp": "0x6af62246"
+      }
+     },
+     {
+      "result": {
+       "number": "0x3600a58",
+       "hash": "0xf246eb2a0e5125cdac06c0fbc4417f5a1319dc7c8182bd8bfed99193a86d153f",
+       "timestamp": "0x6af62246"
+      }
+     }
+    ]
+   },
+   "robinhood": {
+    "chainId": [
+     {
+      "result": "0x1237"
+     },
+     {
+      "result": "0x1237"
+     }
+    ],
+    "tries": [
+     {
+      "newest": [
+       {
+        "result": {
+         "number": "0x6b97eab",
+         "hash": "0xba7a7b31a79fc442b60132ffb4af9af69b077ac5ac6a65da3baa1f963562071f",
+         "timestamp": "0x6af62668"
+        }
+       },
+       {
+        "result": {
+         "number": "0x6b97eb8",
+         "hash": "0x89e97a17950ae72cc6e7ea70bb768365d565ad854d2fc6f7d01d5ca8ec01741f",
+         "timestamp": "0x6af6266a"
+        }
+       }
+      ],
+      "byNumber": [
+       {
+        "result": {
+         "number": "0x6b97eab",
+         "hash": "0xba7a7b31a79fc442b60132ffb4af9af69b077ac5ac6a65da3baa1f963562071f",
+         "timestamp": "0x6af62668"
+        }
+       },
+       {
+        "result": {
+         "number": "0x6b97eab",
+         "hash": "0xba7a7b31a79fc442b60132ffb4af9af69b077ac5ac6a65da3baa1f963562071f",
+         "timestamp": "0x6af62668"
+        }
+       }
+      ]
+     }
+    ],
+    "finalized": [
+     {
+      "result": {
+       "number": "0x6b95651",
+       "hash": "0xecb28ae573b73d36cfe732994925d98a53475d15722a81a7a9c0d5fbf42dab06",
+       "timestamp": "0x6af62233"
+      }
+     },
+     {
+      "result": {
+       "number": "0x6b95651",
+       "hash": "0xecb28ae573b73d36cfe732994925d98a53475d15722a81a7a9c0d5fbf42dab06",
+       "timestamp": "0x6af62233"
+      }
+     }
+    ]
+   }
+  }
+ },
+ "bad": {
+  "sign": {
+   "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-MXtxRQ69yMzIwXstvbHh6uFRsGMpLRvRwGrrOBZL/HOsGOUCrvjyD/72JuWZKdU7\"></script>\n  </head>\n  <body></body>\n</html>\n",
+   "sha384": "sha384-MXtxRQ69yMzIwXstvbHh6uFRsGMpLRvRwGrrOBZL/HOsGOUCrvjyD/72JuWZKdU7",
+   "finalKey": false,
+   "guard": false
+  },
+  "at": 1794516587351,
+  "chains": {
+   "base": {
+    "chainId": [
+     {
+      "result": "0x2105"
+     },
+     {
+      "result": "0x2105"
+     }
+    ],
+    "tries": [
+     {
+      "newest": [
+       {
+        "result": {
+         "number": "0x3601efd",
+         "hash": "0x690325416fabce6e5bac3e29471a4dbcf0d38ceb5ca838c78222ed1a18d41d1e",
+         "timestamp": "0x6af62667"
+        }
+       },
+       {
+        "result": {
+         "number": "0x3601f01",
+         "hash": "0xdf59a5850ef507f420fab1f1af3317b45e3f29f6667e1f4fb2bc44ea422d467a",
+         "timestamp": "0x6af62667"
+        }
+       }
+      ],
+      "byNumber": [
+       {
+        "result": {
+         "number": "0x3601efd",
+         "hash": "0x690325416fabce6e5bac3e29471a4dbcf0d38ceb5ca838c78222ed1a18d41d1e",
+         "timestamp": "0x6af62667"
+        }
+       },
+       {
+        "result": {
+         "number": "0x3601efd",
+         "hash": "0x690325416fabce6e5bac3e29471a4dbcf0d38ceb5ca838c78222ed1a18d41d1e",
+         "timestamp": "0x6af62667"
+        }
+       }
+      ]
+     }
+    ],
+    "finalized": [
+     {
+      "result": {
+       "number": "0x3600a58",
+       "hash": "0xf246eb2a0e5125cdac06c0fbc4417f5a1319dc7c8182bd8bfed99193a86d153f",
+       "timestamp": "0x6af62246"
+      }
+     },
+     {
+      "result": {
+       "number": "0x3600a58",
+       "hash": "0xf246eb2a0e5125cdac06c0fbc4417f5a1319dc7c8182bd8bfed99193a86d153f",
+       "timestamp": "0x6af62246"
+      }
+     }
+    ]
+   },
+   "robinhood": {
+    "chainId": [
+     {
+      "result": "0x1237"
+     },
+     {
+      "result": "0x1237"
+     }
+    ],
+    "tries": [
+     {
+      "newest": [
+       {
+        "result": {
+         "number": "0x6b97eab",
+         "hash": "0xba7a7b31a79fc442b60132ffb4af9af69b077ac5ac6a65da3baa1f963562071f",
+         "timestamp": "0x6af62668"
+        }
+       },
+       {
+        "result": {
+         "number": "0x6b97eb8",
+         "hash": "0x89e97a17950ae72cc6e7ea70bb768365d565ad854d2fc6f7d01d5ca8ec01741f",
+         "timestamp": "0x6af6266a"
+        }
+       }
+      ],
+      "byNumber": [
+       {
+        "result": {
+         "number": "0x6b97eab",
+         "hash": "0xba7a7b31a79fc442b60132ffb4af9af69b077ac5ac6a65da3baa1f963562071f",
+         "timestamp": "0x6af62668"
+        }
+       },
+       {
+        "result": {
+         "number": "0x6b97eab",
+         "hash": "0xba7a7b31a79fc442b60132ffb4af9af69b077ac5ac6a65da3baa1f963562071f",
+         "timestamp": "0x6af62668"
+        }
+       }
+      ]
+     }
+    ],
+    "finalized": [
+     {
+      "result": {
+       "number": "0x6b95651",
+       "hash": "0xecb28ae573b73d36cfe732994925d98a53475d15722a81a7a9c0d5fbf42dab06",
+       "timestamp": "0x6af62233"
+      }
+     },
+     {
+      "result": {
+       "number": "0x6b95651",
+       "hash": "0xecb28ae573b73d36cfe732994925d98a53475d15722a81a7a9c0d5fbf42dab06",
+       "timestamp": "0x6af62233"
+      }
+     }
+    ]
+   }
+  }
+ }
+}

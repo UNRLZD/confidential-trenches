@@ -209,6 +209,7 @@ export const OUT = {
   "evm-pool-index": "EVM RPC index reads on the venue's two index readers",
   "evm-sell-hook-intrablock": "EVM RPC traces and replays",
   "device-evm-fee-read-walks-operators": "EVM RPC reads on the kit's read lists",
+  "evm-money-shows-and-spends-at-once": "EVM RPC reads of the page's two mainnet pool RPCs beside its build",
   "evm-device-reads-need-no-old-state": "EVM RPC reads on the kit's read lists",
   "rh-cold-quote": "EVM RPC quotes",
   "token-page-fills-after": "a browser and the helper",
