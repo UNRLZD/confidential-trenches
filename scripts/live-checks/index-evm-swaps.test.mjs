@@ -12,6 +12,8 @@
 // robinhood_routed_v4 (card index-evm-swaps-check-reads-the-pool-leg): live run 42908764691's two routed v4 trades, no
 // Transfer of their amt in either receipt, each its pool's own Swap leg: PASS; an amt one unit off the leg, a sender's
 // one swap whose Transfer does not match, two providers' differing legs: each FAIL by name.
+// penny_two_pools (card helper-live-run-green-after-122): the deployed helper's PENNY tape, its side pool's, every sampled
+// trade a route through two of the token's pools: judged on the busier over the window, a FAIL or a PASS by which is busier.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -634,4 +636,64 @@ test("headTime: a null block is read again; still null is the providers behind; 
   assert.deepEqual(await check.headTime(16, answers({ "a.example": [null], "b.example": [null], "c.example": [blk("0x5")] }), rpcs, 5, sleep), { behind: ["a.example", "b.example"] });
   assert.equal(waits.length, 4);
   assert.deepEqual(await check.headTime(16, answers({ "a.example": [blk("0x5")], "b.example": [blk("0x6")], "c.example": [blk("0x5")] }), rpcs, 5, sleep), { behind: [] }, "two that differ");
+});
+
+// card helper-live-run-green-after-122: live run 43250937996 judged PENNY's tape on the first Swap key of the first
+// receipt, though every sampled trade was a route through two of its pools. penny_two_pools is the deployed helper read at
+// 16:46Z (its tape the side pool's); made from it: the busy pool carrying more swaps over the window than the tape's pool
+// FAILs, judged on the busy pool, and the tape's pool carrying more PASSES; shared keys with no swap count read FAIL.
+const PENNY = A.penny_two_pools;
+const [BUSY, SIDE] = ["0x498581ff718922c3f8e6a244956af099b2652b2b:0xeae6a45e7b72b1ad74bddb5f8c74a1f6b6d8748ff1d74319ec671e37ab7b4f55", "0x498581ff718922c3f8e6a244956af099b2652b2b:0x724b25c5d56e61ef328641ef669e9c4cb16d7c697a7c78efb609ea20085d50d0"];
+/** PENNY's run with `n` more swap transactions of pool `key` inside the window, its logs read as the busiest's if so. */
+const withSwaps = (key, n) => {
+  const rec = structuredClone(PENNY);
+  const s = rec.chain.shared.find((x) => x.key === key);
+  for (let i = 0; i < n; i++) s.logs.push({ blockNumber: hex(s.to - i), transactionHash: `0x${(i + 1).toString(16).padStart(64, "a")}` });
+  rec.chain.poolLogs = rec.chain.shared.find((x) => x.key === check.sharedCounts(rec.chain.shared, [BUSY, SIDE])[0].key);
+  return rec;
+};
+
+test("card helper-live-run-green-after-122: sampled trades that share two pools are judged on the busier over the window: the tape of the side pool FAILs once the other pool is busier, naming both counts", () => {
+  const r = run(withSwaps(BUSY, 3));
+  assert.equal(r.ok, false);
+  assert.ok(r.lines.some((l) => l.startsWith("ok ") && l.includes(`judged on the busiest over the window, ${BUSY} 3 swap transactions, ${SIDE} 0 swap transactions`)), r.lines.join("\n"));
+  assert.ok(bad(r).some((l) => /is not this pool's Swap leg/.test(l)), bad(r).join("\n"));
+  assert.ok(bad(r).some((l) => /3 missing from the tape/.test(l)), bad(r).join("\n"));
+});
+
+test("card helper-live-run-green-after-122: the same tape PASSES where its own pool is the busier: the verdict follows the busier pool, never the receipts' log order", () => {
+  const rec = withSwaps(SIDE, 1);
+  // the one swap added is the tape's own trade's transaction: on the tape, nothing missing
+  rec.chain.shared.find((x) => x.key === SIDE).logs[0].transactionHash = JSON.parse(rec.reads.trades.body).trades[0].tx;
+  const r = run(rec);
+  assert.deepEqual(bad(r), []);
+  assert.ok(r.lines.some((l) => l.includes(`judged on the busiest over the window, ${SIDE} 1 swap transaction, ${BUSY} 0 swap transactions`)), r.lines.join("\n"));
+});
+
+test("card helper-live-run-green-after-122: sampled trades that share two pools with no swap count read for each FAIL, named", () => {
+  for (const fn of [(r) => delete r.chain.shared, (r) => r.chain.shared.pop()]) {
+    const rec = structuredClone(PENNY);
+    fn(rec);
+    const r = run(rec);
+    assert.equal(r.ok, false);
+    assert.ok(bad(r).some((l) => l.includes("no swap count read for each of them")), bad(r).join("\n"));
+  }
+  assert.deepEqual(check.sharedCounts(undefined, [BUSY]), null);
+});
+
+test("card helper-live-run-green-after-122: read() reads each shared key's logs over one window and keeps the busier as the pool's", async () => {
+  const rec = withSwaps(BUSY, 2);
+  const f = async (url, init) => {
+    if (url.startsWith("https://ct-api.unrealized.trade")) return replay(rec)(url, init);
+    const req = JSON.parse(init.body);
+    if (req.method !== "eth_getLogs") return replay(rec)(url, init);
+    const q = req.params[0];
+    const s = rec.chain.shared.find((x) => x.key === `${q.address}:${q.topics[1]}`);
+    assert.ok(s, `${q.address} ${q.topics[1]}`);
+    const [lo, hi] = [Number.parseInt(q.fromBlock, 16), Number.parseInt(q.toBlock, 16)];
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id: req.id, result: s.logs.filter((l) => Number.parseInt(l.blockNumber, 16) >= lo && Number.parseInt(l.blockNumber, 16) <= hi).map((l) => ({ ...l, logIndex: "0x0" })) }), { status: 200 });
+  };
+  const again = await read("https://ct-api.unrealized.trade", rec.coin, f, undefined, "base", candlesReader(), async () => undefined);
+  assert.deepEqual(again.chain.shared.map((x) => [x.key, x.logs.length]), [[BUSY, 2], [SIDE, 0]]);
+  assert.equal(again.chain.poolLogs.key, BUSY);
 });
