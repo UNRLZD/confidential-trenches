@@ -1124,6 +1124,25 @@ test("skip: a note the page's withdraw still owes a send for is never proved nor
   assert.deepEqual(q.ready().map((r) => r.noteId).sort(), [...ids].sort());
 });
 
+// card pool-tree-read-waits-for-its-second: a page out of front (a hidden tab, the app's frame) proves nothing new, yet
+// its pass still lets go of a ready proof whose note another page's withdraw keeps out, so that withdraw can spend it
+test("skip out of front: a ready proof whose note comes into skip is freed at the next pass, the rest kept", async () => {
+  const v = await vaultWith([usd(10), usd(20)]);
+  const ids = (await v.ns.list()).map((n) => n.id);
+  let front = true;
+  let kept = new Set<string>();
+  const q = openProofQueue({ seed64: SEED, notes: v.ns, pool: fakePool(v), provers: provers3(), hardwareConcurrency: 4, inFront: () => front, skip: async () => kept });
+  open.push(q as ProofQueue<unknown>);
+  await q.refresh();
+  assert.deepEqual(q.ready().map((r) => r.noteId).sort(), [...ids].sort());
+  front = false;
+  kept = new Set([ids[1]!]);
+  await q.refresh();
+  assert.deepEqual(q.ready().map((r) => r.noteId), [ids[0]], "the kept-out note's proof let go, the other kept");
+  assert.equal((await state(v, ids[1]!)).state, "UNSPENT");
+  assert.equal((await state(v, ids[0]!)).state, "HELD");
+});
+
 // Card sol-buy-reads-side-by-side: the take accepts the pool's time read earlier (a buy starts it beside its first
 // reads), as that read's ms plus the time since the read started, the larger of the device's monotonic and wall
 // clock's; past NOW_REUSE_MS on either, or when the early read failed, it reads the pool's time again. Every check of
