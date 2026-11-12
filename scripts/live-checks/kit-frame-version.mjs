@@ -28,6 +28,17 @@
 //     level below the current one each op with no detail (`let n={...t,ops:t.ops.map(jl)};if(e===\`1.8\`)return n;`, jl
 //     taking created_ms, token and units, and chain and amount_usd but on a pool deposit and a deposit, whose own they
 //     are): a kit-v1.8 app drops an op that carries one, so it would lose that row; its answers go through its own level;
+//   - (card portfolio-counts-money-an-open-buy-holds) kit-v1.10 is a level of its own below kit 1.11, and the state shaper
+//     first takes each position's asset_held from the state (`let n=Vl(t);if(e===\`1.10\`)return n;`, Vl being
+//     `e=>({...e,positions:e.positions.map(({asset_held:e,...t})=>t)})`), every lower level built on that: kit-v1.10's
+//     schema refuses the key, whole state and all; its answers go through its own level;
+//   - (card buy-spends-several-pieces) kit-v1.11 is a level of its own below kit 1.12: the state shaper first takes each
+//     pool entry's making (`let n=i_(t);if(e===\`1.11\`)return n;`, i_ being
+//     `e=>e.pools===void 0?e:{...e,pools:e.pools.map(({making:e,...t})=>t)}`), the asset_held strip and every lower level
+//     built on that; the answer shaper first takes a pool.buy.dry answer's pieces and cost at every level below the
+//     current one (`let r=a_(t,n);`, a_ being `(e,t)=>{if(e!==\`pool.buy.dry\`||typeof t!=\`object\`||!t)return t;
+//     let{pieces:n,cost:r,...i}=t;return i}`), its kit-v1.11 branch reading that: kit-v1.11's schema refuses the whole
+//     state for a making and the whole answer for pieces or cost;
 //   - (card pool-deposit-op-txs) a kit-v1.7+ app's pool_deposit op carries the txs that moved its money, each shown only
 //     on the device's own reads: the follow's Solana read lists U_X's finalized signatures (getSignaturesForAddress,
 //     finalized, limit 1e3) and keeps a tx only when every RPC's finalized getTransaction reads it a deposit (`.every(`);
@@ -49,8 +60,8 @@ import { fileURLToPath } from "node:url";
 const KEY = "kit-frame-version";
 /** The kit version the page reads every app at in full (packages/kit/src/signpage/messages.ts SIGNPAGE_KIT_VERSION), and
  *  its levels below that, newest first, down to kit-v1.4's (packages/signpage/src/kit-version.ts KitLevel). */
-export const KIT = "1.10";
-export const LEVELS = ["1.9", "1.8", "1.7", "1.6", "1.5"];
+export const KIT = "1.12";
+export const LEVELS = ["1.11", "1.10", "1.9", "1.8", "1.7", "1.6", "1.5"];
 export const SIGN = "https://confidential.unrealized.trade";
 const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}`;
 
@@ -83,6 +94,14 @@ const NO_DETAIL = /function ([\w$]+)\(([\w$]+)\)\{let\{created_ms:[\w$]+,token:[
 /** An op with no pool_amount (card portfolio-shows-pool-trades), as minified: the op as it is when it has none, else
  *  the op with that key taken. */
 const NO_POOL_AMOUNT = /function ([\w$]+)\(([\w$]+)\)\{if\(![\w$]+\(\2,`pool_amount`\)\)return \2;let\{pool_amount:[\w$]+,\.\.\.([\w$]+)\}=\2;return \3\}/;
+/** The positions with no asset_held (card portfolio-counts-money-an-open-buy-holds), as minified. */
+const NO_ASSET_HELD = /(?:^|[^\w$])([\w$]+)=([\w$]+)=>\(\{\.\.\.\2,positions:\2\.positions\.map\(\(\{asset_held:[\w$]+,\.\.\.([\w$]+)\}\)=>\3\)\}\)/;
+
+/** The pools with no making (card buy-spends-several-pieces), as minified. */
+const NO_MAKING = /(?:^|[^\w$])([\w$]+)=([\w$]+)=>\2\.pools===void 0\?\2:\{\.\.\.\2,pools:\2\.pools\.map\(\(\{making:[\w$]+,\.\.\.([\w$]+)\}\)=>\3\)\}/;
+/** pool.buy.dry's answer with no pieces and cost (card buy-spends-several-pieces), as minified: any other kind's result,
+ *  and one that is no object, as it is. */
+const NO_DRY = /(?:^|[^\w$])([\w$]+)=\(([\w$]+),([\w$]+)\)=>\{if\(\2!==`pool\.buy\.dry`\|\|typeof \3!=`object`\|\|!\3\)return \3;let\{pieces:[\w$]+,cost:[\w$]+,\.\.\.([\w$]+)\}=\3;return \4\}/;
 
 /** The pairs of a `key:\`value\`` object literal, as an object. */
 const pairsOf = (src) => Object.fromEntries(src.split(",").map((p) => p.split(":").map((x) => x.replace(/`/g, ""))));
@@ -121,7 +140,15 @@ function helloPath(js) {
           // card kit-portfolio-reads: every level below the current one first takes each op's detail, kit-v1.8 its own level
           // (the op map read as any function here; `detail` below holds it to the strip NO_DETAIL reads)
           // card portfolio-shows-pool-trades: kit-v1.9 its own level first, each op with no pool_amount (`amount` below)
-          new RegExp(`function ${stateFn}\\(([\\w$]+),([\\w$]+)\\)\\{if\\(\\1===\`current\`\\)return \\2;(?:if\\(\\1===\`1\\.9\`\\)return\\{\\.\\.\\.\\2,ops:\\2\\.ops\\.map\\([\\w$]+\\)\\};)?let ([\\w$]+)=\\{\\.\\.\\.\\2,ops:\\2\\.ops\\.map\\([\\w$]+\\)\\};if\\(\\1===\`1\\.8\`\\)return \\3;let ([\\w$]+)=${esc(noDec)}\\(\\3\\);if\\(\\1===\`1\\.7\`\\)return \\4;if\\(\\1===\`1\\.6\`\\)return\\{\\.\\.\\.\\4,ops:${esc(filter)}\\(\\4\\.ops\\)\\};if\\(\\1===\`1\\.5\`\\)return\\{\\.\\.\\.\\4,ops:${esc(filter)}\\(\\4\\.ops\\)\\.map\\(`).exec(js)?.[0] ?? null
+          new RegExp(`function ${stateFn}\\(([\\w$]+),([\\w$]+)\\)\\{if\\(\\1===\`current\`\\)return \\2;(?:if\\(\\1===\`1\\.9\`\\)return\\{\\.\\.\\.\\2,ops:\\2\\.ops\\.map\\([\\w$]+\\)\\};)?let ([\\w$]+)=\\{\\.\\.\\.\\2,ops:\\2\\.ops\\.map\\([\\w$]+\\)\\};if\\(\\1===\`1\\.8\`\\)return \\3;let ([\\w$]+)=${esc(noDec)}\\(\\3\\);if\\(\\1===\`1\\.7\`\\)return \\4;if\\(\\1===\`1\\.6\`\\)return\\{\\.\\.\\.\\4,ops:${esc(filter)}\\(\\4\\.ops\\)\\};if\\(\\1===\`1\\.5\`\\)return\\{\\.\\.\\.\\4,ops:${esc(filter)}\\(\\4\\.ops\\)\\.map\\(`).exec(js)?.[0] ??
+          // card portfolio-counts-money-an-open-buy-holds: every level below the current one first takes each position's
+          // asset_held (the strip read as any function here; `held` below holds it to NO_ASSET_HELD and kit-v1.10's level
+          // to it), kit-v1.9 and every level below built on what it returns
+          new RegExp(`function ${stateFn}\\(([\\w$]+),([\\w$]+)\\)\\{if\\(\\1===\`current\`\\)return \\2;let ([\\w$]+)=[\\w$]+\\(\\2\\);(?:if\\(\\1===\`1\\.10\`\\)return [\\w$]+;)?(?:if\\(\\1===\`1\\.9\`\\)return\\{\\.\\.\\.\\3,ops:\\3\\.ops\\.map\\([\\w$]+\\)\\};)?let ([\\w$]+)=\\{\\.\\.\\.\\3,ops:\\3\\.ops\\.map\\([\\w$]+\\)\\};if\\(\\1===\`1\\.8\`\\)return \\4;let ([\\w$]+)=${esc(noDec)}\\(\\4\\);if\\(\\1===\`1\\.7\`\\)return \\5;if\\(\\1===\`1\\.6\`\\)return\\{\\.\\.\\.\\5,ops:${esc(filter)}\\(\\5\\.ops\\)\\};if\\(\\1===\`1\\.5\`\\)return\\{\\.\\.\\.\\5,ops:${esc(filter)}\\(\\5\\.ops\\)\\.map\\(`).exec(js)?.[0] ??
+          // card buy-spends-several-pieces: every level below the current one first takes each pool entry's making, kit-v1.11
+          // its own level (`making` below holds the strip to NO_MAKING), the asset_held strip built on what it returns and
+          // kit-v1.10 its own level on that, every lower level built on the asset_held strip's result
+          new RegExp(`function ${stateFn}\\(([\\w$]+),([\\w$]+)\\)\\{if\\(\\1===\`current\`\\)return \\2;let ([\\w$]+)=[\\w$]+\\(\\2\\);if\\(\\1===\`1\\.11\`\\)return \\3;let ([\\w$]+)=[\\w$]+\\(\\3\\);if\\(\\1===\`1\\.10\`\\)return \\4;if\\(\\1===\`1\\.9\`\\)return\\{\\.\\.\\.\\4,ops:\\4\\.ops\\.map\\([\\w$]+\\)\\};let ([\\w$]+)=\\{\\.\\.\\.\\4,ops:\\4\\.ops\\.map\\([\\w$]+\\)\\};if\\(\\1===\`1\\.8\`\\)return \\5;let ([\\w$]+)=${esc(noDec)}\\(\\5\\);if\\(\\1===\`1\\.7\`\\)return \\6;if\\(\\1===\`1\\.6\`\\)return\\{\\.\\.\\.\\6,ops:${esc(filter)}\\(\\6\\.ops\\)\\};if\\(\\1===\`1\\.5\`\\)return\\{\\.\\.\\.\\6,ops:${esc(filter)}\\(\\6\\.ops\\)\\.map\\(`).exec(js)?.[0] ?? null
         : null))
     : null;
   const decimals = noDec && poolOps && poolOps.includes(`=${noDec}(`) ? poolOps : null;
@@ -131,9 +158,23 @@ function helloPath(js) {
   const noPool = NO_POOL_AMOUNT.exec(js)?.[1];
   const strip = noDet ? NO_DETAIL.exec(js)?.[0] : undefined;
   const amount = noPool && detail && new RegExp(`===\`1\\.9\`\\)return\\{\\.\\.\\.[\\w$]+,ops:[\\w$]+\\.ops\\.map\\(${esc(noPool)}\\)\\};`).test(detail) && strip?.includes(`=${noPool}(`) ? detail : null;
+  // card portfolio-counts-money-an-open-buy-holds: kit-v1.10's level returns the state with no asset_held, the one every
+  // lower level is built on (`poolOps`' last form reads that every level below builds on the strip's result)
+  const noHeld = NO_ASSET_HELD.exec(js)?.[1];
+  // (card buy-spends-several-pieces: or on the making strip's result, kit-v1.11's level, which the given state is not)
+  const held = noHeld && poolOps && new RegExp(`\\{if\\(([\\w$]+)===\`current\`\\)return ([\\w$]+);(?:let ([\\w$]+)=[\\w$]+\\(\\2\\);if\\(\\1===\`1\\.11\`\\)return \\3;let ([\\w$]+)=${esc(noHeld)}\\(\\3\\);if\\(\\1===\`1\\.10\`\\)return \\4;|let ([\\w$]+)=${esc(noHeld)}\\(\\2\\);if\\(\\1===\`1\\.10\`\\)return \\5;)`).test(poolOps) ? poolOps : null;
+  // card buy-spends-several-pieces: kit-v1.11's level returns the state with no making, the one the asset_held strip and
+  // every lower level is built on (`poolOps`' last form)
+  const noMaking = NO_MAKING.exec(js)?.[1];
+  const making = noMaking && poolOps && new RegExp(`\\{if\\(([\\w$]+)===\`current\`\\)return ([\\w$]+);let ([\\w$]+)=${esc(noMaking)}\\(\\2\\);if\\(\\1===\`1\\.11\`\\)return \\3;let [\\w$]+=[\\w$]+\\(\\3\\);`).test(poolOps) ? poolOps : null;
   const result16 = shaper && stateFn
-    ? (new RegExp(`function ${esc(shaper[4])}\\(([\\w$]+),([\\w$]+),([\\w$]+)\\)\\{if\\(\\1===\`current\`\\)return \\3;if\\((?:\\1===\`1\\.[789]\`\\|\\|)*\\1===\`1\\.6\`\\)return \\2===\`state\`\\?${stateFn}\\(\\1,\\3\\):\\3;`).exec(js)?.[0] ?? null)
+    ? (new RegExp(`function ${esc(shaper[4])}\\(([\\w$]+),([\\w$]+),([\\w$]+)\\)\\{if\\(\\1===\`current\`\\)return \\3;if\\((?:\\1===\`1\\.(?:[789]|10)\`\\|\\|)*\\1===\`1\\.6\`\\)return \\2===\`state\`\\?${stateFn}\\(\\1,\\3\\):\\3;`).exec(js)?.[0] ??
+      // card buy-spends-several-pieces: every level below the current one reads the result with no dry pieces and cost
+      // (`dry` below holds the function to NO_DRY), every branch on that
+      new RegExp(`function ${esc(shaper[4])}\\(([\\w$]+),([\\w$]+),([\\w$]+)\\)\\{if\\(\\1===\`current\`\\)return \\3;let ([\\w$]+)=[\\w$]+\\(\\2,\\3\\);if\\((?:\\1===\`1\\.(?:[789]|1[01])\`\\|\\|)*\\1===\`1\\.6\`\\)return \\2===\`state\`\\?${stateFn}\\(\\1,\\4\\):\\4;`).exec(js)?.[0] ?? null)
     : null;
+  const noDry = NO_DRY.exec(js)?.[1];
+  const dry = noDry && result16 && new RegExp(`\\)return [\\w$]+;let [\\w$]+=${esc(noDry)}\\(`).test(result16) ? result16 : null;
   // review of edc6815f: at 1.8 the answer shaper's kit-v1.6 branch also takes kit-v1.7 (`e===\`1.7\`||e===\`1.6\``), so a
   // kit-v1.7 app's deposit.confirm keeps its facts; a 1.7-era build has no such alternative
   const result17 = result16 && /===`1\.7`\|\|/.test(result16) ? result16 : null;
@@ -141,6 +182,10 @@ function helloPath(js) {
   const result18 = result16 && /===`1\.8`\|\|/.test(result16) ? result16 : null;
   // card portfolio-shows-pool-trades: at 1.10 it takes kit-v1.9 too
   const result19 = result16 && /===`1\.9`\|\|/.test(result16) ? result16 : null;
+  // card portfolio-counts-money-an-open-buy-holds: at 1.11 it takes kit-v1.10 too
+  const result110 = result16 && /===`1\.10`\|\|/.test(result16) ? result16 : null;
+  // card buy-spends-several-pieces: at 1.12 it takes kit-v1.11 too
+  const result111 = result16 && /===`1\.11`\|\|/.test(result16) ? result16 : null;
   const post = shaper ? new RegExp(`=\\(([\\w$]+),([\\w$]+)\\)=>\\{let ([\\w$]+)=${esc(shaper[1])}\\(\\1,\\2\\);\\3!==null&&[\\w$]+\\.parent\\.postMessage\\(\\3,`).exec(js) : null;
   // the progress branch, read where the shaper's state branch ends (sticky): a route event (no stage) is sent at every
   // level but kit-v1.4 (the current level only, before kit-v1.5 had its own), a stage through the stage function at the level, dropped when it gives null
@@ -170,6 +215,11 @@ function helloPath(js) {
     result18,
     amount,
     result19,
+    held,
+    result110,
+    making,
+    dry,
+    result111,
   };
 }
 
@@ -220,7 +270,7 @@ export function judge(a, era = ERA) {
   else if (!sameMap(h.progressMap, MAP)) bad(`the progress stage function reads a map other than kit-v1.4's (${JSON.stringify(h.progressMap)})`);
   // card pool-deposit-stages: the version read in full, the levels below it, the pool deposit's op left out below it
   if (typeof h?.assign === "string" && typeof h?.shaper === "string" && typeof h?.post === "string") {
-    if (h.kit !== era.kit) bad(`the page reads an app in full from kit-v${h.kit ?? "?"}, not kit-v${era.kit}: a kit-v${era.kit} app's ${era.kit === "1.7" ? "pool deposit op" : era.kit === "1.8" ? "position decimals" : era.kit === "1.9" ? "op detail" : "op pool_amount"} has no level of its own`);
+    if (h.kit !== era.kit) bad(`the page reads an app in full from kit-v${h.kit ?? "?"}, not kit-v${era.kit}: a kit-v${era.kit} app's ${era.kit === "1.7" ? "pool deposit op" : era.kit === "1.8" ? "position decimals" : era.kit === "1.9" ? "op detail" : era.kit === "1.10" ? "op pool_amount" : era.kit === "1.11" ? "position asset_held" : "pool making"} has no level of its own`);
     if (!same(h.levels, era.levels)) bad(`the page's levels below the current one are ${JSON.stringify(h.levels)}, not ${JSON.stringify(era.levels)}: an older kit's app is sent what it cannot read`);
     if (era.kit !== "1.7" && typeof h.decimals !== "string") bad("the state sent below the current level keeps each position's decimals, which kit-v1.7 refuses the whole state for");
     if (typeof h.poolOps !== "string") bad("the state sent to kit-v1.6 and kit-v1.5 does not leave the pool_deposit op out");
@@ -231,6 +281,13 @@ export function judge(a, era = ERA) {
     const before19 = ["1.7", "1.8", "1.9"].includes(era.kit);
     if (!before19 && typeof h.amount !== "string") bad("the state sent below the current level keeps each op's pool_amount, for which a kit-v1.9 app drops the op");
     if (!before19 && typeof h.result19 !== "string") bad("kit-v1.9's answers do not go through its own level: its deposit.confirm is sent with no facts");
+    const before110 = before19 || era.kit === "1.10";
+    if (!before110 && typeof h.held !== "string") bad("the state sent below the current level keeps each position's asset_held, which kit-v1.10 refuses the whole state for");
+    if (!before110 && typeof h.result110 !== "string") bad("kit-v1.10's answers do not go through its own level: its deposit.confirm is sent with no facts");
+    const before111 = before110 || era.kit === "1.11";
+    if (!before111 && typeof h.making !== "string") bad("the state sent below the current level keeps each pool entry's making, which kit-v1.11 refuses the whole state for");
+    if (!before111 && typeof h.dry !== "string") bad("pool.buy.dry's answer sent below the current level keeps its pieces and cost, which kit-v1.11 refuses the whole answer for");
+    if (!before111 && typeof h.result111 !== "string") bad("kit-v1.11's answers do not go through its own level: its deposit.confirm is sent with no facts");
   }
   if (a?.posts !== 1)
     bad(`the bundle holds ${Number.isInteger(a?.posts) ? a.posts : "no count of"} parent.postMessage( calls, not exactly one: a post past the shaper sends an older kit what it cannot read`);

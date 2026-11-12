@@ -247,7 +247,7 @@ const positive = (s: string): boolean | null => (/^\d+(?:\.\d+)?$/.test(s) ? /[1
 
 /**
  * Read only from the signing page's `state.pools` (messages.ts): `ready` is the chunks with a proof ready, absent while
- * no proof queue runs and never "0" in its place. Ready when it is above zero; making only while `making` (kit 1.11,
+ * no proof queue runs and never "0" in its place. Ready when it is above zero; making only while `making` (kit 1.12,
  * card buy-spends-several-pieces) is above zero: the device is making a proof now. A balance with no proof ready and
  * none being made (too small for any proof, held by a running withdraw, a page that sends no making) is none, so the
  * box never says a proof is coming when none is; none too for a total that is not a plain decimal, so the box never

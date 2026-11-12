@@ -206,7 +206,7 @@ test("a kept venue is read again once it is COIN_VENUE_KEEP_MS old: a coin's fla
   assert.equal(reads.n, 4, "read again at the limit");
 });
 
-test("with an amount (kit 1.11, card buy-spends-several-pieces): the pieces a buy of it spends and what it costs for good, from the same ready set", async () => {
+test("with an amount (kit 1.12, card buy-spends-several-pieces): the pieces a buy of it spends and what it costs for good, from the same ready set", async () => {
   // the own note's 0.01 piece and two 0.02 pieces bound to its W (another note's each)
   const n = (id: string, label: bigint, value: bigint): NoteRecord => ({ ...held, id, attempt: `a-${id}`, leaf: { ...held.leaf!, value, label } });
   const notes = [n("own", 1n, RUNG), n("p2", 2n, 2n * RUNG), n("p3", 3n, 2n * RUNG)];

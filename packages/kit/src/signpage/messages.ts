@@ -185,7 +185,7 @@ export interface SignpageParams {
    * sends nothing. Display only: a pool.buy at this amount or under passes the page's own funds rule on the same reads.
    * Solana only (an EVM tap spends a whole chunk); not_allowed elsewhere. Its refusals: not_allowed, not_funded (signed
    * out or no proof ready), quote_check_failed (no venue the two providers agree on) and busy (a trade runs).
-   * `amount` (kit 1.11, card buy-spends-several-pieces): a spend in whole SOL; the answer then also says how many pieces
+   * `amount` (kit 1.12, card buy-spends-several-pieces): a spend in whole SOL; the answer then also says how many pieces
    * a pool.buy of it spends now and what it costs for good (PoolBuyDry pieces and cost).
    */
   "pool.buy.dry": { chain: PoolChain; token: string; amount?: string };
@@ -241,7 +241,7 @@ export interface SignpageResults {
 }
 
 /** pool.buy.dry's answer: `tap_max`, in whole units of the chain pool's asset as state.pools' is, at most that entry's
- *  `ready`, "0" when no ready proof can pay the coin's venue. With the ask's `amount` at most tap_max (kit 1.11, card
+ *  `ready`, "0" when no ready proof can pay the coin's venue. With the ask's `amount` at most tap_max (kit 1.12, card
  *  buy-spends-several-pieces): `pieces`, how many of the ready proofs a pool.buy of it spends now (the pick of
  *  src/pool-buy.ts: one wallet's, its own note's among them, the least released, then the fewest), and `cost`, what
  *  that buy costs for good in the same whole units: each piece's relay fee and the tip; what W's accounts hold comes
@@ -357,7 +357,7 @@ export interface ReadyEvent {
  * The page sends a client only the states, stages and facts its version reads. A change to what the page may send
  * (a state field, an op kind, a stage, a fact) raises it, and the page maps the version before it down.
  */
-export const SIGNPAGE_KIT_VERSION = "1.11";
+export const SIGNPAGE_KIT_VERSION = "1.12";
 
 /**
  * The client's half of the handshake, app to page (card kit-frame-version): its kit version, posted before every
@@ -596,7 +596,7 @@ export interface SignpageState {
    * kit's solanaPoolBuyMaxSpend); EVM: the largest one ready chunk, since an EVM tap asks for a whole chunk and the
    * signing page refuses any other amount (rules/pool.ts checkEvmBuy). At most `ready`, never below "0". It
    * comes only with `ready`, and a page of an earlier release, or one that cannot price a pool, sends `ready` without it.
-   * `making` (kit 1.11, card buy-spends-several-pieces): how much of the balance the device is making a proof for now,
+   * `making` (kit 1.12, card buy-spends-several-pieces): how much of the balance the device is making a proof for now,
    * none of it ready yet, in the same whole units; "0" when it makes none. It comes only with `ready`, at most the
    * balance: an app tells "making a proof" only while it is above "0", never from `ready` being "0" alone (a balance
    * no proof is being made for, too small for any proof or held by a running withdraw, has none).
@@ -616,8 +616,14 @@ export interface SignpageState {
    * as its mint or contract names them (a u8), so an app sizes a partial sell in base units; `amount` then has no more
    * fraction digits than that. Absent from a page of an earlier release: an app then reads the amount at its string's
    * own scale.
+   *
+   * `asset_held` (card portfolio-counts-money-an-open-buy-holds, additive) is the chain's pool asset (SOL on Solana)
+   * the position's wallets hold beside the token and get back at a full sell, in whole units as `pools[].balance` is:
+   * each wallet's own balance and that of its accounts a full sell closes back to it (its token account, its venue's
+   * volume accounts), read on chain. Never the fees already paid, never counted twice. Absent when any of the position's
+   * wallets was not read (never "0" in its place), on EVM, and from a page of an earlier release.
    */
-  readonly positions: readonly { readonly chain: Chain; readonly token: string; readonly amount: string; readonly cost: string; readonly wallets: readonly string[]; readonly decimals?: number }[];
+  readonly positions: readonly { readonly chain: Chain; readonly token: string; readonly amount: string; readonly cost: string; readonly wallets: readonly string[]; readonly decimals?: number; readonly asset_held?: string }[];
   readonly orders: readonly {
     readonly order_id: string;
     readonly chain: Chain;

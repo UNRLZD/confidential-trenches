@@ -130,7 +130,7 @@ export type PoolBuyDryDeps = {
  * proofs' cap. Display only: nothing is
  * signed, written or sent. Solana only; a token whose venue is not read answers quote_check_failed (down for a provider
  * that failed), and the app keeps state.pools' tap_max.
- * With the ask's `amount` (kit 1.11, card buy-spends-several-pieces), at most that tap_max: `pieces`, the count of the
+ * With the ask's `amount` (kit 1.12, card buy-spends-several-pieces), at most that tap_max: `pieces`, the count of the
  * set src/pool-buy.ts's pick (pickPieces) spends for it from the same ready proofs (each still HELD by its attempt, as
  * poolBalances counts them) on the same venue and rent, and `cost`, that set's relay fees and the page's tip: what the
  * buy costs for good (W's accounts' rent comes back with the sale). An amount that is not a SOL decimal: not_allowed.

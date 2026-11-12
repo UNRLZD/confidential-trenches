@@ -62,9 +62,9 @@ const WIDTHS = [
   { name: "390", viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true },
   { name: "1440", viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, isMobile: false, hasTouch: false },
 ];
-// Exact amounts for the fixture's 1234567.891234 units at $0.00017739 (value 21899 cents, cost $100): 50% is
-// 617283.945617 (617283945617 base units, exact: 1234567891234 is even); 25% is 308641.972808 (rounded down from .5); Initials is ceil(1e8 / 21899)
-// = 4567 bps, 563827.155926.
+// Exact amounts for the fixture's 1234567.891234 units at $0.00017739 (value $218.9999962, drawn 21900 cents to the
+// nearest, cost $100): 50% is 617283.945617 (617283945617 base units, exact: 1234567891234 is even); 25% is
+// 308641.972808 (rounded down from .5); Initials is ceil(1e8 / 21900) = 4567 bps, 563827.155926.
 const HALF = vault("617283945617");
 const QUARTER = vault("308641972808");
 const INITIALS = vault("563827155926");
@@ -90,7 +90,10 @@ const STATES = [
   ["quick-25", "up", '[data-quick="2500"]', 400, "S8.30", "Landing 0.4s", QUARTER, "0000", "0000"],
   ["S8.33", "noroute", null, 0, "S8.33", "No route", null, "0000", "0000"],
   ["down", "down", null, 0, "S8.29", "Sell 50%", null, "1111", "1110"],
-  ["dust", "dust", null, 0, "S8.29", "Sell 50%", null, "0111", "0110"],
+  // dust: 3 base units at $12,000 a token is $0.036 on a $0.03 cost, drawn $0.04 against $0.03: up on the exact figures,
+  // so Initials is on (8334 bps, from $0.03 / $0.036)
+  // (card portfolio-counts-money-an-open-buy-holds: every figure to the nearest cent; 25% comes to no base unit)
+  ["dust", "dust", null, 0, "S8.29", "Sell 50%", null, "0111", "0111"],
   ["nodec-25", "nodec", '[data-quick="2500"]', 400, "S8.30", "Landing 0.4s", QUARTER_NODEC, "0000", "0000"],
   // no decimals on the vault's path: refused here, nothing sent (re-check 2 P3-3)
   ["nodec-vault-25", "nodec-vault", '[data-quick="2500"]', 400, "S8.32", "Retry", null, "1111", "1111"],
@@ -225,14 +228,19 @@ try {
       if (f === "dust") check(norm(await page.locator('[data-testid="sell-held"]').innerText()) === "0.0₅3 TORCH held", `${tag}: held line is the real amount, never 0`);
       if (f === "up" && !tapIt) {
         check(norm(await page.locator('[data-testid="sell-held"]').innerText()) === "1.23M TORCH held", `${tag}: held line`);
-        const share = await settle(async () => norm(await page.locator('[data-testid="sell-share"]').innerText()), "≈ $109.49");
-        check(share === "≈ $109.49", `${tag}: the share's value "${share}"`);
+        const share = await settle(async () => norm(await page.locator('[data-testid="sell-share"]').innerText()), "≈ $109.50");
+        check(share === "≈ $109.50", `${tag}: the share's value "${share}"`);
         const receive = await settle(async () => norm(await page.locator('[data-testid="sell-receive"]').innerText()), "≈ $108.40");
         check(receive === "≈ $108.40", `${tag}: You receive "${receive}"`);
-        check(norm(await page.locator('[data-testid="position-pnl"]').innerText()) === "+$118.99", `${tag}: the PnL hero`);
-        check(norm(await page.locator('[data-testid="pos-holding"]').innerText()) === "Holding $218.99 1.23M TORCH", `${tag}: the Holding row`);
+        // card portfolio-counts-money-an-open-buy-holds: every figure to the nearest cent ($218.9999962 reads $219.00),
+        // the 50% share half of the value shown ($109.50)
+        check(norm(await page.locator('[data-testid="position-pnl"]').innerText()) === "+$119.00", `${tag}: the PnL hero`);
+        check(norm(await page.locator('[data-testid="pos-holding"]').innerText()) === "Holding $219.00 1.23M TORCH", `${tag}: the Holding row`);
         check(norm(await page.locator('[data-testid="pos-bought"]').innerText()) === "Bought $100.00", `${tag}: the Bought row`);
-        check(norm(await page.locator('[data-testid="pos-total"]').innerText()) === "Total PnL +$118.99 +118.9%", `${tag}: the Total PnL row`);
+        // its percent from the exact figures to the nearest tenth, as the amount to the nearest cent ($118.9999962 on $100
+        // is +119.0%, never +118.9% beside +$119.00)
+        check(norm(await page.locator('[data-testid="pos-total"]').innerText()) === "Total PnL +$119.00 +119.0%", `${tag}: the Total PnL row`);
+        check(norm(await page.locator(".tk-posHeroPct").innerText()) === "+119.0%", `${tag}: the PnL hero's percent`);
         check(norm(await page.locator('[data-testid="pos-held"]').innerText()) === "Held for 6d 6h", `${tag}: Held for`);
       }
       const m = await measure(page, w);

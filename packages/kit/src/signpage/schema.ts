@@ -195,7 +195,7 @@ const unitsAt = (s: string, d: number): bigint | null => {
 /** The private balance per chain's pool: each entry exact, its asset one of POOL_ASSETS (no decimals key: they come
  * from POOL_ASSET_DECIMALS only) and the one its chain's pool holds, its amounts with no more fraction digits than the
  * asset has decimals, its ready at most its balance, its tap_max only with a ready and at most that ready (one tap's
- * spend, at most its chunks; "0" when the fees and W's new accounts eat every chunk), its making (kit 1.11) only with a
+ * spend, at most its chunks; "0" when the fees and W's new accounts eat every chunk), its making (kit 1.12) only with a
  * ready and at most its balance, one entry per chain (a chain twice is refused). */
 /** The pool asset's USD price as the page read it (card signpage-pool-price): one asset is price x 10^expo USD, price a
  * positive integer with no leading zero, expo an integer in -18..0 (poolUsdPrice's bounds), published_s the feed's own
@@ -245,10 +245,13 @@ const depositWallets: SignpageSchema = (v) =>
 
 /** A position (card signpage-state-holdings): exact, its optional decimals the token's own (a u8, as an SPL mint's and an
  * ERC-20's are), and its amount with no more fraction digits than those decimals when named. */
-const positionEntry = obj({ chain, token: str, amount: dec, cost: dec, wallets: arr(str) }, { decimals: (v) => uint(v) && (v as number) <= 255 });
+const positionEntry = obj({ chain, token: str, amount: dec, cost: dec, wallets: arr(str) }, { decimals: (v) => uint(v) && (v as number) <= 255, asset_held: dec });
+/** asset_held (card portfolio-counts-money-an-open-buy-holds): the pool asset of its chain, so Solana's SOL at its
+ * decimals only; an EVM position carries none. */
 const positionFits: SignpageSchema = (v) => {
   if (!positionEntry(v)) return false;
-  const p = v as { amount: string; decimals?: number };
+  const p = v as { chain: Chain; amount: string; decimals?: number; asset_held?: string };
+  if (p.asset_held !== undefined && (p.chain !== "solana" || unitsAt(p.asset_held, POOL_ASSET_DECIMALS[POOL_CHAIN_ASSET.solana]) === null)) return false;
   return p.decimals === undefined || unitsAt(p.amount, p.decimals) !== null;
 };
 
