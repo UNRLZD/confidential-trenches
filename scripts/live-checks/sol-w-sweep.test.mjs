@@ -13,9 +13,9 @@ import { facts, judge, MARKS } from "./sol-w-sweep.mjs";
 
 const ANSWERS = JSON.parse(readFileSync(new URL("./sol-w-sweep.answers.json", import.meta.url), "utf8"));
 const ALL = Object.keys(MARKS).map((k) => `BAD the served bundle has no ${k}`);
-// The rules card round-trip-costs-less moved, so no build before it carries them: the sell's rule with a sale's closes,
-// what W read as (the helper's batched read), the record (listed empty, its proven buy kept), the list a failed load keeps
-const MOVED = [6, 11, 12, 14];
+// The rules card round-trip-costs-less moved, so no build before it carries them: what W read as (the helper's batched
+// read), the record (listed empty, its proven buy kept), the list a failed load keeps
+const MOVED = [11, 12, 14];
 const moved = (...more) => [...new Set([...MOVED, ...more])].sort((a, b) => a - b).map((i) => ALL[i]);
 
 test("recorded good answer: this card's build: PASS", () => {
@@ -32,19 +32,20 @@ test("recorded bad answer (11c963f9's build): FAIL, every mark named", () => {
 
 // Delta review 7 of 08290868: that build swept W to 0 after an airdrop's full sell with W's own coin held: FAIL on the
 // seen rule (the buy record read into the pass) and the own-coin rule, with the moved ones and the plan refusal's shape
-// as card sol-rent-back-dust-burn wrote it later (16)
+// as card sol-rent-back-dust-burn wrote it later (16); and, older than main 383b1ffe, the sell's rule under the floor (6)
 test("recorded answer beforeFold (08290868's build): FAIL on the seen and own-coin rules and those moved since", () => {
   const v = judge(ANSWERS.beforeFold);
   assert.equal(v.ok, false);
-  assert.deepEqual(v.lines, moved(11, 16, 25));
+  assert.deepEqual(v.lines, moved(6, 11, 16, 25));
 });
 
 // Delta review 8 of 5697d7a1: with no buy record, that build swept W on the page's holdings (the helper's word on
-// mainnet), and hashed them into what W read as: FAIL on the seen and own-coin rules and those moved since
+// mainnet), and hashed them into what W read as: FAIL on the seen and own-coin rules and those moved since (the
+// floor's sell rule among them, as for beforeFold)
 test("recorded answer beforeFold8 (5697d7a1's build): FAIL on the seen and own-coin rules and those moved since", () => {
   const v = judge(ANSWERS.beforeFold8);
   assert.equal(v.ok, false);
-  assert.deepEqual(v.lines, moved(11, 16, 25));
+  assert.deepEqual(v.lines, moved(6, 11, 16, 25));
 });
 
 // This card's base: main 383b1ffe's build signs a sell's deposit back under the kit's release floor (its rule refuses
@@ -71,7 +72,7 @@ const JS = [
   "ie=k.kind===`pumpswap`?gf:Qu,[ae,oe]=await Promise.all([UR(g,p,v,F,c),Promise.all([Qu,gf].map(async e=>k.cashback&&e===ie?!0:(await wR(g,t=>TR(t,Sf(f.address,e),`confirmed`))).some(t=>!(`none`in t)&&t.owner===e&&Mf(e,t.data)>0n))).then(e=>e.filter(Boolean).length)]),se=I?vy(k,_):GE(_,oe),ce=HE(_)>1000000n?HE(_):FE,",
   "let a=ay(_,0),o=BR({fee:r,made:M,rents:UE(_,v,ae,e),after:se,lamports:b,minOut:ee,keeps:I,...I?{}:{swept:se-a,base:a,floor:ce}});",
   "var sd=5000n,ad=1000000n,nE=sd+BigInt(14e5)*ad/1000000n,rE=6960n,iE=nE+145n*rE+2n*216n*rE;",
-  "let _=wE(g.data,16);if(_<u)return X(`min_out`);let v=ly(r,n.wallet,t.amount,_);if(typeof s!=`bigint`||s>=_)return X(`reserve`);let y=0n,b=c;if(b!==void 0&&b.full===!0){if(typeof b.lamports!=`bigint`||typeof b.fee!=`bigint`||typeof b.made!=`bigint`||b.fee<0n||b.made<0n||typeof b.next!=`boolean`||typeof b.rent?.lamportsPerByte!=`bigint`||typeof b.rent.factor!=`bigint`||b.rent.lamportsPerByte<0n||b.rent.factor<0n||b.rent.lamportsPerByte*b.rent.factor>6960n||!Number.isSafeInteger(b.owed)||b.owed<0||b.owed>2)return X(`reserve`);let e=b.fee+b.made+UE(b.rent,o,b.held,b.next)-b.lamports,n=ay(b.rent,0);if(b.closes!==void 0&&b.closes.length>0){if(b.owed!==0)return X(`closes`);let r=0n;for(let e of b.closes){if(typeof e.lamports!=`bigint`||e.lamports<0n||e.kind===`token`&&e.mint!==t.token)return X(`closes`);r+=e.lamports}if(s!==e+n-r)return X(`reserve`)}else{let t=GE(b.rent,b.owed),r=HE(b.rent)>1000000n?HE(b.rent):FE,i=e+t,a=i-(t-n)<=iE&&i<_&&_-i>=r;if(s!==(a?i:e+n))return X(`reserve`);a&&(y=t-n)}}else if(s<0n||b?.closes!==void 0&&b.closes.length>0)return X(`reserve`);if(s-y>iE)return X(`reserve`);let w=b?.rent;if(w===void 0||typeof w.lamportsPerByte!=`bigint`||w.lamportsPerByte<1n||w.lamportsPerByte>1000000n||w.factor!==1n&&w.factor!==2n)return X(`reserve`);let k=_-s<Qy(w),x=p.at(-1);if(k&&x.program===l.program)return X(`deposit_floor`);let S=k?p:p.slice(0,-1);if(S.length!==v.length)return X(`sell`);for(let e=0;e<v.length;e++){let t=v[e],n=S[e];if(n.program!==t.program||n.data.length!==t.data.length||n.data.some((e,n)=>e!==t.data[n]))return X(`sell`);if(!jE(n.accounts,t.accounts))return X(`sell_accounts`)}if(k)return uE(e),{chain:`solana`,op:t.kind,token:t.token,amount:t.amount,feeCap:0n,pool:l.pool,to:n.wallet,decimals:t.decimals,back:null};let C=OE(x,l,n.wallet,n.precommitment,o,!0);return C===_-s?",
+  "let _=wE(g.data,16);if(_<u)return X(`min_out`);let v=ly(r,n.wallet,t.amount,_);if(typeof s!=`bigint`||s>=_)return X(`reserve`);let y=0n,b=c;if(b!==void 0&&b.full===!0){if(typeof b.lamports!=`bigint`||typeof b.fee!=`bigint`||typeof b.made!=`bigint`||b.fee<0n||b.made<0n||typeof b.next!=`boolean`||typeof b.rent?.lamportsPerByte!=`bigint`||typeof b.rent.factor!=`bigint`||b.rent.lamportsPerByte<0n||b.rent.factor<0n||b.rent.lamportsPerByte*b.rent.factor>6960n||!Number.isSafeInteger(b.owed)||b.owed<0||b.owed>2)return X(`reserve`);let e=b.fee+b.made+UE(b.rent,o,b.held,b.next)-b.lamports,t=GE(b.rent,b.owed),n=ay(b.rent,0),r=HE(b.rent)>1000000n?HE(b.rent):FE,i=e+t,a=i-(t-n)<=iE&&i<_&&_-i>=r;if(s!==(a?i:e+n))return X(`reserve`);a&&(y=t-n)}else if(s<0n)return X(`reserve`);if(s-y>iE)return X(`reserve`);let w=b?.rent;if(w===void 0||typeof w.lamportsPerByte!=`bigint`||w.lamportsPerByte<1n||w.lamportsPerByte>1000000n||w.factor!==1n&&w.factor!==2n)return X(`reserve`);let k=_-s<Qy(w),x=p.at(-1);if(k&&x.program===l.program)return X(`deposit_floor`);let S=k?p:p.slice(0,-1);if(S.length!==v.length)return X(`sell`);for(let e=0;e<v.length;e++){let t=v[e],n=S[e];if(n.program!==t.program||n.data.length!==t.data.length||n.data.some((e,n)=>e!==t.data[n]))return X(`sell`);if(!jE(n.accounts,t.accounts))return X(`sell_accounts`)}if(k)return uE(e),{chain:`solana`,op:t.kind,token:t.token,amount:t.amount,feeCap:0n,pool:l.pool,to:n.wallet,decimals:t.decimals,back:null};let C=OE(x,l,n.wallet,n.precommitment,o,!0);return C===_-s?",
   "var UE=(e,t)=>t===0?0n:iy(e,0)+BigInt(t)*(sd+iy(e,165));",
   "return typeof r!=`bigint`||!Number.isSafeInteger(o)||o<0||o>2?X(`sweep_reads`):l+5000n+HE(i,n,a)+UE(i,o)===r?l:X(`sweep_amount`)}",
   "function qR(e){return e.length>2||e.some(e=>e.cashback!==!0)?null:e.length}",
@@ -135,12 +136,6 @@ test("the facts read from a bundle; a planted line with its rule changed FAILs",
     [JS.replace("iE=nE+145n*rE+2n*216n*rE", "iE=nE+145n*rE+2n*217n*rE"), 6],
     [JS.replace("rE=6960n", "rE=6961n"), 6],
     [JS.replace("if(s-y>iE)", "if(s>iE)"), 6],
-    // card round-trip-costs-less: a sale's closes only with no claim owed, each W's own sold coin's or a volume
-    // account's, their rent all in the note, and none on a partial sell
-    [JS.replace("if(b.owed!==0)return X(`closes`);", ""), 6],
-    [JS.replace("||e.kind===`token`&&e.mint!==t.token", ""), 6],
-    [JS.replace("if(s!==e+n-r)", "if(s!==e+n)"), 6],
-    [JS.replace("||b?.closes!==void 0&&b.closes.length>0)return X(`reserve`)", ")return X(`reserve`)"), 6],
     [JS.replace("iy(e,0)+BigInt(t)*", "BigInt(t)*"), 7],
     [JS.replace("+UE(i,o)===r", "===r"), 8],
     [JS.replace("||o>2?", "?"), 8],
@@ -235,24 +230,3 @@ test("the side-by-side sell's owed claims hold, and each break of them in place 
   }
 });
 
-// card round-trip-costs-less: the read returns W's accounts too, so the bundle names the owes first; the full sell's
-// price takes the sale's closes first, the fallback at the sweep's floor after them. Cut from that card's build: each
-// holds; each broken in place FAILs.
-test("the shapes since the sale closes W's accounts hold, and each break of them in place FAILs", () => {
-  const OWES = "the full sell's keep counts W's volume accounts owed a claim, on either RPC's read";
-  const FALLBACK = "the sell prices a full sell with that fallback, at the sweep's floor";
-  const owes = ",l=o.map((e,n)=>t.some(t=>t[2+n]!=null&&t[2+n].owner===e&&np(e,t[2+n].data)>0n)),u=e=>e==null?null:e;return{program:r,amount:n,lamports:a,owes:l,accounts:u};xe=[yd,zf].filter((e,t)=>le.cashback&&e===be||F.owes[t]).length,Se=ye?sb(le,N):HO(N,xe)";
-  const fallback = "Ne=RO(N)>1000000n?RO(N):jO,Pe=Vb(N),Le=(e,n)=>{if(R<pe-rb+n)return $(`not_funded`);let r=qy(N,0),i=Ae.reduce((e,t)=>e+t.lamports,0n),a=Ae.length>0?mG({fee:n,made:me,rents:zO(N,L,we,e),after:r,lamports:R+i,minOut:_e,keeps:!1,noteFloor:Pe}):mG({fee:n,made:me,rents:zO(N,L,we,e),after:Se+Ce,lamports:R,minOut:_e,keeps:ye,noteFloor:Pe,...ye?{}:{swept:Se-r,base:r,floor:Ne}})";
-  assert.equal(MARKS[OWES].test(owes), true);
-  assert.equal(MARKS[FALLBACK].test(fallback), true);
-  for (const [key, ex, from, to] of [
-    [OWES, owes, "owes:l,", "owes:[!1,!1],"],
-    [OWES, owes, ".some(t=>t[2+n]", ".every(t=>t[2+n]"],
-    [FALLBACK, fallback, "floor:Ne}", "floor:jO}"],
-    [FALLBACK, fallback, "Ne=RO(N)>1000000n?RO(N):jO,", "Ne=jO,"],
-  ]) {
-    const bad = ex.replace(from, to);
-    assert.notEqual(bad, ex, from);
-    assert.equal(MARKS[key].test(bad), false, from);
-  }
-});

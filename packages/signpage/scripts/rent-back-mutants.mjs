@@ -59,7 +59,7 @@ export const M = [
   ["review X2 a burn's next close of another account", KIT, K, " && next.data[0] === 9 && next.accounts[0]?.key === h?.address;\n          if (!h || h.kind !== \"token\" || h.burn", " && next.data[0] === 9;\n          if (!h || h.kind !== \"token\" || h.burn"],
   ["review Y2 leftAfter counts another owner's account", SELL, T, "if (b.mint !== mint || b.owner !== owner) continue;", "if (b.mint !== mint) continue;"],
   ["review Y3 leftAfter counts another mint's account", SELL, T, "if (b.mint !== mint || b.owner !== owner) continue;", "if (b.owner !== owner) continue;"],
-  ["review Y4 a list with no W entry read as 0", SELL, T, "  if (!Array.isArray(pre)) return null;", "  if (!Array.isArray(pre)) return 0n;"],
+  ["review Y4 a list with no W entry read as 0", SELL, T, "    total = (total ?? 0n) + BigInt(amount);\n  }\n  return total;", "    total = (total ?? 0n) + BigInt(amount);\n  }\n  return total ?? 0n;"],
   ["review Y7 another mint's sell used", SELL, T, "const by = x.sell?.[m];", "const by = Object.values(x.sell ?? {})[0];"],
   ["review F5a the sell read at confirmed", SELL, T, 'signed, "finalized"));', "signed));"],
   ["review F5b the sell read after W's accounts", SELL, T, [["      for (const m of x.mints) if (x.sell?.[m.mint] !== undefined) sells.set(m.mint, await soldOne(m.mint).catch((e: unknown) => ({ fault: e })));\n      const held = await both(rpcs, (r) => accountsOf(r, [w.address, ...addresses]));\n", "      const held = await both(rpcs, (r) => accountsOf(r, [w.address, ...addresses]));\n      for (const m of x.mints) if (x.sell?.[m.mint] !== undefined) sells.set(m.mint, await soldOne(m.mint).catch((e: unknown) => ({ fault: e })));\n"]]],
@@ -107,7 +107,7 @@ export const M = [
   ["floor F2 no floor taken", SELL, T, '  if (typeof p.noteFloor !== "bigint" || p.noteFloor < SOLANA_POOL_MIN_DEPOSIT) return { refused: "quote_check_failed" };\n', ""],
   ["floor F3 the pool's least deposit for the floor", SELL, T, "const noteFloor = solanaPoolNoteFloor(rent);", "const noteFloor = SOLANA_POOL_MIN_DEPOSIT;"],
   ["floor F4 an eight under the floor kept, never the six", SELL, T, '      if (next && r.value === 0n) return no("quote_check_failed");\n', ""],
-  ["floor F5 a value of 0 built as a deposit", SELL, T, "value === 0n ? [...steps, ...shut] : [...steps, ...shut, depositIx(", "false ? [...steps, ...shut] : [...steps, ...shut, depositIx("],
+  ["floor F5 a value of 0 built as a deposit", SELL, T, "value === 0n ? steps : [...steps, depositIx(", "false ? steps : [...steps, depositIx("],
   ["floor F6 one RPC's read of the sell filled", SELL, T, "if (got[0].got === \"ok\" && got[1].got === \"ok\") return \"filled\";", "if (got[0].got === \"ok\" || got[1].got === \"ok\") return \"filled\";"],
   ["floor F7 one RPC's silence not_landed", SELL, T, "if (got[0].got === \"none\" && got[1].got === \"none\" && (await goneOnBoth(", "if ((got[0].got === \"none\" || got[1].got === \"none\") && (await goneOnBoth("],
   ["floor F10 not_landed before both are past", SELL, T, "const at = await pastAt(rpcs, last);", "const at = [0, 0] as const;"],
@@ -130,31 +130,11 @@ export const M = [
   ["a sell leg's record names its signature only after the send", SELL, T, [["        await hooks.signed?.(i, signature);\n        await h.signed?.(signature);\n", "        await h.signed?.(signature);\n"], ["        open();\n        hooks.sent?.(i, signature);\n", "        open();\n        void hooks.signed?.(i, signature);\n        hooks.sent?.(i, signature);\n"]]],
   // review of 5de2165e: P3-2 the state read's kept list read unguarded (one that always fails ends the read early)
   ["review P3-2 the kept list read unguarded", TESTNET, TT, "(await keptSells(page.store).list().catch(() => [])).length > 0", "(await keptSells(page.store).list()).length > 0"],
-  // card round-trip-costs-less, review of 20ba2481b: P7 a close that failed on chain builds the sale again, never ends
-  // the request on it; P16 and P17 the rent backs' runs on the state reads
-  ["review P7 a failed close ends the request", SELL, T, "const again = dead && !later.last && got.every((g) => wrongAccount(g.err, depositAt) || failedAt(g.err, shutAt));", "const again = dead && !later.last && got.every((g) => wrongAccount(g.err, depositAt));"],
+  // card round-trip-costs-less, review of 20ba2481b: P16 and P17 the rent backs' runs on the state reads
   ["review P16 a full sell's new record runs no rent back", TESTNET, TT, "        if (rec.passes === 0) backs.again();\n", ""],
   ["review P17a a run with a W left books none", TESTNET, TT, "(more) => backs.ended(more === true),", "(more) => backs.ended(false),"],
   ["review P17b a run with none left books one", TESTNET, TT, "(more) => backs.ended(more === true),", "(more) => backs.ended(true),"],
-  // step b: the sale's closes and its cost rule (P1-3), its record (P3-11), its read of what the sale left (P3-9)
-  ["b1 the closes even where they cost more", SELL, T, "      if (r0 + open + surplus > least) closes = [];\n", ""],
-  ["b2 the closes on the sale's last build", SELL, T, " && later.bare !== true && !later.last && !near(", " && later.bare !== true && !near("],
-  ["b3 the closes on a sale built bare", SELL, T, "owed === 0 && later.bare !== true && !later.last", "owed === 0 && !later.last"],
-  ["b4 the closes with a tree near its page's end", SELL, T, " && !near(sizes.stateSize) && !near(sizes.labelSize);\n    let closes", ";\n    let closes"],
-  ["b5 the closes with a claim owed", SELL, T, "const may = !keeps && owed === 0 && ", "const may = !keeps && "],
-  // (every account's rent counted with the sale's named accounts left out is no plant, nor that rent left out of what
-  // the one deposit loses: a sale names a volume account only on a cashback coin, whose cashback is then owed, and no
-  // close is weighed with a claim owed, so no account is left open where the closes are weighed)
-  ["b9 the form before always makes a deposit back", SELL, T, "\"refused\" in keep || keep.value === 0n ? frame : ", ""],
-  ["b10 the quote's surplus left out", SELL, T, "const surplus = expected > minOut ? expected - minOut : 0n;", "const surplus = 0n;"],
-  ["b8 the form before's least its frame's fee and the sweep's cost even where it makes no deposit back", SELL, T, "base: r0, floor: sweepFloor });", "});"],
-  // (no plant for the least the form before keeps where it makes no note: rent(0) and the token account's rent, less a
-  // frame's fee, pass the sweep's cost at any rate the Rent sysvar gives, so that term never decides a sale)
-  ["b12 a simulation refusing the closes refuses the sale", SELL, T, "        if (closes.length > 0) {\n          closes = [];\n          continue;\n        }\n", ""],
-  ["b13 a failed close not built bare", SELL, T, "      if (shutFailed) later.bare = true;\n", ""],
-  ["b14 the sale's record drops W's proven buy", SELL, T, "      if (prior?.buy !== undefined) owedRec.buy = prior.buy;\n", ""],
-  ["b15 a closed account read as unknown", SELL, T, "    if (b.mint === mint && b.owner === owner) return 0n;\n", ""],
-  ["b16 another owner's closed account read as W's", SELL, T, "    if (b.mint === mint && b.owner === owner) return 0n;", "    if (b.mint === mint) return 0n;"],
+  ["P3-11 the sale's record drops W's proven buy", SELL, T, "      if (prior?.buy !== undefined) owedRec.buy = prior.buy;\n", ""],
   // step a: the account's Ws found on the helper alone, batched (P1-2); one W a public request, in a random order, apart;
   // a settled W read on neither seat (P2-4); an unproven W steady after its third pass (P2-6); the buy proven once on the
   // public seat; the positions held only while a W is read (P3-8)

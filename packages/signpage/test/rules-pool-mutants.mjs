@@ -162,16 +162,7 @@ export const MUTANTS = [
   // venue's sell alone, drawn with no deposit, to W
   ["const kept = minOut - reserve < solanaPoolNoteFloor(rent);", "const kept = minOut - reserve < SOLANA_POOL_MIN_DEPOSIT;", SELL],
   ['if (kept && last.program === pin.program) return refuse("deposit_floor");', "", SELL],
-  ["const withCloses = kept ? body : body.slice(0, -1);", "const withCloses = body.slice(0, -1);", SELL],
-  // card round-trip-costs-less: the closes a full sell carries before its one deposit, each checked
-  ['      if (p.owed !== 0) return refuse("closes");\n', "", SELL],
-  [' || (c.kind === "token" && c.mint !== ask.token)) return refuse("closes");', ') return refuse("closes");', SELL],
-  ["if (reserve !== short + r0 - closed) return refuse(\"reserve\");", "if (reserve !== short + r0) return refuse(\"reserve\");", SELL],
-  ["} else if (reserve < 0n || (p?.closes !== undefined && p.closes.length > 0)) return refuse(\"reserve\");", "} else if (reserve < 0n) return refuse(\"reserve\");", SELL],
-  ['    if (seen.has(c.address)) return refuse("closes");\n', "", SELL],
-  ["!SOLANA_VOLUME_PROGRAMS.includes(c.program) || c.address !== solanaVolumeAccumulator(wallet, c.program)", "!SOLANA_VOLUME_PROGRAMS.includes(c.program)", SELL],
-  ["|| c.address !== solanaAta(wallet, c.mint, c.program) ||", "||", SELL],
-  [" || !sameList(g.accounts, w.accounts)) return refuse(\"closes\");", ") return refuse(\"closes\");", SELL],
+  ["const sell = kept ? body : body.slice(0, -1);", "const sell = body.slice(0, -1);", SELL],
   ['  if (rent === undefined || typeof rent.lamportsPerByte !== "bigint" || rent.lamportsPerByte < 1n || rent.lamportsPerByte > 1_000_000n || (rent.factor !== 1n && rent.factor !== 2n)) return refuse("reserve");\n', "", SELL],
   ["rent.lamportsPerByte < 1n || rent.lamportsPerByte > 1_000_000n || (rent.factor", "(rent.factor", SELL],
   ['(rent.factor !== 1n && rent.factor !== 2n)) return refuse("reserve");\n  const kept', 'false) return refuse("reserve");\n  const kept', SELL],

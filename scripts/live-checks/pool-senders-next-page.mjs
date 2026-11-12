@@ -32,9 +32,8 @@ const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}
 
 const N = "[\\w$]+";
 // near(size): the entries left on the size's page are within the window (SOLANA_POOL_NEXT_PAGE_WINDOW, 64), and the
-// eight only when the message fits and, on a partial sell, both trees are near (since card round-trip-costs-less the
-// sale's closes are decided between the two)
-const WINDOW = new RegExp(`(${N})=(${N})=>${N}-\\2%${N}<=64(?:,|[^]{0,3000}?[;}]let )${N}=${N}\\(${N}\\(${N}\\.address,\\[[^\\]]{0,200}\\],${N}\\.blockhash,\\[\\]\\)\\.message\\)\\.length<=1232&&\\(!${N}\\|\\|\\1\\(${N}\\.stateSize\\)&&\\1\\(${N}\\.labelSize\\)\\)`);
+// eight only when the message fits and, on a partial sell, both trees are near
+const WINDOW = new RegExp(`(${N})=(${N})=>${N}-\\2%${N}<=64,${N}=${N}\\(${N}\\(${N}\\.address,\\[[^\\]]{0,200}\\],${N}\\.blockhash,\\[\\]\\)\\.message\\)\\.length<=1232&&\\(!${N}\\|\\|\\1\\(${N}\\.stateSize\\)&&\\1\\(${N}\\.labelSize\\)\\)`);
 // the eight tried, a refusal of it caught (two refusal classes, any other error thrown), then the six
 const FALLBACK = new RegExp(`if\\((${N})\\)try\\{(${N})=await (${N})\\(!0\\)\\}catch\\((${N})\\)\\{if\\(!\\(\\4 instanceof ${N}\\|\\|\\4 instanceof ${N}\\)\\)throw \\4\\}let\\{wire:${N},value:${N}\\}=\\2\\?\\?await \\3\\(!1\\)`);
 // since card pool-sell-legs-side-by-side (its fee read beside the simulations): the form tried, the eight's refusal

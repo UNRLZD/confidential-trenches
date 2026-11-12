@@ -85,9 +85,7 @@ const freshOf = (js) => {
   // old (its own wait, or the plan's) right before the quote's age rule: priced again, nothing built
   const stale = new RegExp(`if\\(${old}\\|\\|${N}\\?\\.waited\\?\\.\\(\\)\\)return ${N}\\.reprice=!0,\\{error:\`failed\`\\};let ${N}=${N},${N}=\\{amount:`);
   // a simulation refused while an earlier leg is in flight: a wait, then priced again; else the cause names each provider
-  // since card round-trip-costs-less a sale with closes whose simulation refused is tried once more with none before the
-  // cause, so the wait is its own statement
-  const sim = new RegExp(`\\.inFlight\\?\\.\\(\\)&&\\(${N}\\.simWaited\\?\\?0\\)<${N}(?:\\?\\(|\\)return )${N}\\.simWaited=\\(${N}\\.simWaited\\?\\?0\\)\\+500,await ${wait}\\(500\\),${N}\\.reprice=!0,\\{error:\`failed\`\\}(?:\\):|;if\\((${N})\\.length>0\\)\\{\\1=\\[\\];continue\\}return )${N}\\(\`failed\`,\`sim\`,${N}\\.flatMap\\(\\(${N},${N}\\)=>[^]{0,80}?\`RPC \\$\\{`);
+  const sim = new RegExp(`\\.inFlight\\?\\.\\(\\)&&\\(${N}\\.simWaited\\?\\?0\\)<${N}\\?\\(${N}\\.simWaited=\\(${N}\\.simWaited\\?\\?0\\)\\+500,await ${wait}\\(500\\),${N}\\.reprice=!0,\\{error:\`failed\`\\}\\):${N}\\(\`failed\`,\`sim\`,${N}\\.flatMap\\(\\(${N},${N}\\)=>[^]{0,80}?\`RPC \\$\\{`);
   return stale.test(js) && sim.test(js);
 };
 

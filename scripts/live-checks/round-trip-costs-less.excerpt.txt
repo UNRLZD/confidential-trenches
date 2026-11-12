@@ -1,23 +1,14 @@
-,td=1232,
-S=b?p:p.slice(0,-1),C=kO(n.wallet,v?.closes??[]);if(S.length<C.length)return X(`closes`);let w=S.slice(0,S.length-C.length),T=S.slice(S.length-C.length);for(let e=0;e<C.length;e++){let t=C[e],n=T[e];if(n.program!==t.program||n.data.length!==t.data.length||n.data.some((e,n)=>e!==t.data[n])||!SO(n.accounts,t.accounts))return X(`closes`)}
- BO=e=>kd+qy(e,MO)+2n*(qy(e,PO)-qy(e,0)),
- Oe=e=>Qv-e%Qv<=64,
-Ae=!ye&&xe===0&&n.bare!==!0&&!n.last&&!Oe(L.stateSize)&&!Oe(L.labelSize)?aG(r.address,i,F.program,F.accounts,ke):[];if(Ae.length>0&&!(e=>SG(r_(r.address,[...pG(Ee),...ve,...kO(r.address,e),xG(g,_,r.address,L,ie,_e,!1)],he.blockhash,[]).message).length<=td)(Ae)&&(Ae=[]),Ae.length>0){let e=aG(r.address,i,F.program,F.accounts,new Set),t=qy(N,0),n=ae?.pools.find(e=>e.address===(le.kind===`pump-curve`?le.curve:le.pool)&&e.venue===le.kind)?.expectedOut??_e,a=n>_e?n-_e:0n,o=RO(N)>1000000n?RO(N):jO,s=BO(N),c=e=>e.reduce((e,t)=>e+t.lamports,0n),l=c(e)-c(Ae),u=rb,d=mG({fee:rb+(Ee?.priority??0n),made:me,rents:zO(N,L,we,!1),after:Se,lamports:R,minOut:_e,keeps:!1,noteFloor:Vb(N),swept:Se-t,base:t,floor:o}),f=t+c(e)-u,p=`refused`in d||d.value===0n?u:u+(s<f?s:f);t+l+a>p&&(Ae=[])}
-let r=qy(N,0),i=Ae.reduce((e,t)=>e+t.lamports,0n),a=Ae.length>0?mG({fee:n,made:me,rents:zO(N,L,we,e),after:r,lamports:R+i,minOut:_e,keeps:!1,noteFloor:Ne}):mG({
-if(Ae.length>0){Ae=[];continue}return $(`failed`,`sim`
-t?.buy!==void 0&&(et.buy=t.buy),await e.owed?.put(et)
-o=i&&r.every(e=>gG(e.err,Ke)),s=i&&!n.last&&r.every(e=>_G(e.err,a)||gG(e.err,Ke)),{end:c}=await PW(y,g,v,x,b,$e,i,(t,n,r)=>s&&r===`dropped`?void 0:e.settled?.(t,n));if(i&&c===`dropped`&&r.every(e=>_G(e.err,a)||gG(e.err,Ke))&&(n.rebuild=!0),o&&(n.bare=!0)
+t?.buy!==void 0&&(Xe.buy=t.buy),await e.owed?.put(Xe)
 ;try{if(!t.buy)return g(`holds`,`no buy of W's is recorded`,t.unproven!==`again`);
-if(i!==null)return i;let a=e?.preTokenBalances;if(!Array.isArray(a))return null;for(let e of a){let r=e;if(typeof r!=`object`||!r)return null;if(r.mint===n&&r.owner===t)return 0n}return null}
-,OG=100,kG=1e3;async function AG(e,t){let n=t.map(e=>{try{return[e.address,...tp(e.address,e.mints)]}catch{return[e.address]}}),r=[Uy,...n.flat()],i=[];for(let t=0;t<r.length;t+=OG)i.push(...await SW(e,r.slice(t,t+OG)))
-async function jG(e,t,n,r){try{let i=await Ij(e,t).read(n);if(r===null)return i===`none`?null:void 0;if(i!==null&&i!==`none`&&i.mint===r.mint&&i.program===r.program)return{mint:i.mint,program:i.program}}catch{}}
-s=n.buy;o===void 0&&s===void 0&&(a.rec!==void 0||a.none)&&(s=await jG(t.rpcs[0],
+,wG=100,TG=1e3;async function EG(e,t){let n=t.map(e=>{try{return[e.address,...tp(e.address,e.mints)]}catch{return[e.address]}}),r=[Uy,...n.flat()],i=[];for(let t=0;t<r.length;t+=wG)i.push(...await bW(e,r.slice(t,t+wG)))
+async function DG(e,t,n,r){try{let i=await Pj(e,t).read(n);if(r===null)return i===`none`?null:void 0;if(i!==null&&i!==`none`&&i.mint===r.mint&&i.program===r.program)return{mint:i.mint,program:i.program}}catch{}}
+s=n.buy;o===void 0&&s===void 0&&(a.rec!==void 0||a.none)&&(s=await DG(t.rpcs[0],
 c=o===void 0&&s===void 0?n.passes+1>=3?`steady`:`again`:void 0
 ||l.end===`owed`||c===`again`
-c=await e.wallets(FG)}catch(e){l=e}
-let p=await AG(o[1],f).catch(()=>null),m=[];for(let{address:t}of f){let r=n.find(e=>e.address===t),i=p?.get(t);r?(i===void 0?r.seen===void 0:r.seen!==i.seen)&&m.push(t):i!==void 0&&(i.any?m.push(t):await Promise.resolve(e.owed.markEmpty?.(t)).catch(()=>{}))}if(m.length===0)return l!==null||p===null;for(let e=m.length-1;e>0;e--){let t=LG(e+1);[m[e],m[t]]=[m[t],m[e]]}let h;try{if(c===null)throw l;h={store:await e.notes(),sync:Uw(o,r),rent:await Jy(o),wallets:c}}catch(n){for(let r of m)if(!await VG(t,r,!0,s,async()=>{let t=(await e.owed.list()).find(e=>e.address===r);t&&(e.told?.({address:r,step:`rent_back`,state:`gave_up`,detail:`this load's reads: ${bG(n)}`}),await PG(e,t,`gave_up`))}))return!0;return!0}let{store:g,sync:_,rent:v}=h,y=p===null,b=e.preempt?.();try{for(let[n,c]of m.entries())if(n>0&&await s(kG+LG(kG))
-}finally{b?.()}return y}function LG(e){if(e<=1)return 0;let t=Math.floor(4294967296/e)*e,n=new Uint32Array(1);for(;;)if(globalThis.crypto.getRandomValues(n),n[0]<t)return n[0]%e}
- gJ=`owed/buy-sol-none`,
-wallets:async n=>{let r=n===FG?null:Ke.preempt(),
-buyNone:async t=>Object.hasOwn(Qe(await(await e.store()).get(`meta`,gJ)),t)
+c=await e.wallets(jG)}catch(e){l=e}
+let p=await EG(o[1],f).catch(()=>null),m=[];for(let{address:t}of f){let r=n.find(e=>e.address===t),i=p?.get(t);r?(i===void 0?r.seen===void 0:r.seen!==i.seen)&&m.push(t):i!==void 0&&(i.any?m.push(t):await Promise.resolve(e.owed.markEmpty?.(t)).catch(()=>{}))}if(m.length===0)return l!==null||p===null;for(let e=m.length-1;e>0;e--){let t=NG(e+1);[m[e],m[t]]=[m[t],m[e]]}let h;try{if(c===null)throw l;h={store:await e.notes(),sync:Uw(o,r),rent:await Jy(o),wallets:c}}catch(n){for(let r of m)if(!await LG(t,r,!0,s,async()=>{let t=(await e.owed.list()).find(e=>e.address===r);t&&(e.told?.({address:r,step:`rent_back`,state:`gave_up`,detail:`this load's reads: ${gG(n)}`}),await AG(e,t,`gave_up`))}))return!0;return!0}let{store:g,sync:_,rent:v}=h,y=p===null,b=e.preempt?.();try{for(let[n,c]of m.entries())if(n>0&&await s(TG+NG(TG))
+}finally{b?.()}return y}function NG(e){if(e<=1)return 0;let t=Math.floor(4294967296/e)*e,n=new Uint32Array(1);for(;;)if(globalThis.crypto.getRandomValues(n),n[0]<t)return n[0]%e}
+ fJ=`owed/buy-sol-none`,
+wallets:async n=>{let r=n===jG?null:Ke.preempt(),
+buyNone:async t=>Object.hasOwn(Qe(await(await e.store()).get(`meta`,fJ)),t)
 preempt:()=>{let e=Ke.preempt();return()=>e.release()}

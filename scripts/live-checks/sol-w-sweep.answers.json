@@ -1,14 +1,14 @@
 {
   "_note": {
-    "good": "card/round-trip-costs-less build (mainnet): packages/signpage/index.html and public/app.js as build-app.mjs wrote them on that branch, the sale closing W's accounts and the rent back's batched read: PASS",
+    "good": "card/round-trip-costs-less build (mainnet): packages/signpage/index.html and public/app.js as build-app.mjs wrote them on that branch, the rent back's batched read and its proven buy: PASS",
     "bad": "11c963f9's build (mainnet), the committed packages/signpage/index.html and public/app.js there: W's surplus left on W, no sweep past a kept account: FAIL; its facts read again from that commit's committed bundle under the marks as card round-trip-costs-less has them",
     "beforeFold": "08290868's build (mainnet), the committed packages/signpage/index.html and public/app.js there, before delta review 7's fold (no buy record: an airdrop's full sell swept W with its own coin held): FAIL on the seen and the own-coin rules alone; its facts read again from that commit's committed bundle under the marks as card round-trip-costs-less has them",
     "beforeFold8": "5697d7a1's build (mainnet), the committed packages/signpage/index.html and public/app.js there, before delta review 8's fold (no buy record: the page's holdings, the helper's word on mainnet, decided the pass and were part of what W read as): FAIL on the seen and own-coin rules; its facts read again from that commit's committed bundle under the marks as card round-trip-costs-less has them",
     "beforeFloor": "main 383b1ffe's build (mainnet; release-102, kit-sol-pool-deposit-floor merged), the committed packages/signpage/index.html and public/app.js there: the sell's rule refuses only a note under the pool's least deposit, so it signs a deposit back under the kit's release floor: FAIL on the sell's rule alone; its facts read again from that commit's committed bundle under the marks as card round-trip-costs-less has them"
   },
   "good": {
-    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-zaK3/UZqe4xRcamg/wM+Vxg0M5v7LryrhdtkOwPbOTIYsqffNl6U7vga6F2W/RRM\"></script>\n  </head>\n  <body></body>\n</html>\n",
-    "sha384": "sha384-zaK3/UZqe4xRcamg/wM+Vxg0M5v7LryrhdtkOwPbOTIYsqffNl6U7vga6F2W/RRM",
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-QCTSV07XQgquxrN9wYzYUzOxClEFzdoYsFA7gdvYarylPCm6s4mTn1SFO2yw68cR\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-QCTSV07XQgquxrN9wYzYUzOxClEFzdoYsFA7gdvYarylPCm6s4mTn1SFO2yw68cR",
     "carries": {
       "a full sell deposits W's surplus": true,
       "a full sell keeps what lifts the sweep to the floor, a page's opening on each tree and each owed claim's cost": true,

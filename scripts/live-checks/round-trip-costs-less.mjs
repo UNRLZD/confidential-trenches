@@ -1,22 +1,12 @@
 #!/usr/bin/env node
 // Live check of card round-trip-costs-less on SIGN_HOST (https://confidential.unrealized.trade). A round trip (a pool
 // buy, then a full sell of it) lost the most to what the sell left on W: its token account's and its volume account's
-// rent, a teardown frame and a second deposit to carry them into the pool. The signing page
-// (packages/signpage/src/pool-sell.ts, checked by rules/pool.ts) now closes them inside the sale where that costs less,
-// and any browser of the account finishes any of its Ws. What it proves, and only that: the served /app.js is the one
-// index.html pins (its sha384), and its text carries the card's rules, each found by a mark of the bundle's shape (the
-// minifier renames, never restructures them):
-//   - step b, the sale: a full sell with no claim owed closes W's token account and its volume accounts after the
-//     venue's sell and before the deposit, never on its last build, a bare one, or a tree near its page's end; all of
-//     them where they fit 1,232 bytes, else none; only where, at every fill from min out to the
-//     quote's expected out, that loses no more than the least the form before can (what W keeps under one more
-//     deposit's cost or past the rent back's sweep floor, each account left open a teardown frame's fee; a frame's fee
-//     alone where that form's sale makes no deposit back); the deposit takes the closes'
-//     rent, W kept at rent(0); a simulation that refuses the closes sells with none, a close failed on chain builds the
-//     sale again bare and never ends the request on it; the signing rule takes each close as the sale's own, exactly,
-//     before the deposit; what the sale left on W's token account is 0 when the sale closed it; the sale's owed record
-//     keeps W's proven buy;
-//   - step a, the rent backs: every W of the account's (derived from the pool's spent notes, nothing read) found on the
+// rent, a teardown frame and a second deposit to carry them into the pool. The signing page (packages/signpage/src/
+// pool-sell.ts) gets them back for any browser of the account, which finishes any of its Ws. What it proves, and only
+// that: the served /app.js is the one index.html pins (its sha384), and its text carries the card's rules, each found by
+// a mark of the bundle's shape (the minifier renames, never restructures them):
+//   - the sale's owed record keeps W's proven buy;
+//   - the rent backs: every W of the account's (derived from the pool's spent notes, nothing read) found on the
 //     helper's seat alone, in batches; a W with no record the helper reads empty listed empty, a W the helper reads as
 //     at its last end on W's own state read on neither seat and passed not, the load's own reads only with a W to pass;
 //     the Ws passed in an order drawn from the device's random source, a second and up to a second more apart; W's buy
@@ -54,22 +44,6 @@ const R = String.raw;
 
 /** Each rule's mark in the bundle, by what it holds. */
 export const MARKS = Object.freeze({
-  "a full sell with no claim owed closes W's accounts in the sale, never on its last build, a bare one or a tree near its page's end; all of them where they fit the size, else none": tied(
-    re(R`(?<may>${I})=!(?<k>${I})&&(?<o>${I})===0&&(?<l>${I})\.bare!==!0&&!\k<l>\.last&&!(?<nr>${I})\((?<sz>${I})\.stateSize\)&&!\k<nr>\(\k<sz>\.labelSize\)\?(?<co>${I})\(${I}\.address,${I},${I}\.program,${I}\.accounts,${I}\):\[\];if\(\k<may>\.length>0&&!\((?<c>${I})=>${I}\(${I}\(${I}\.address,\[\.\.\.${I}\(${I}\),\.\.\.${I},\.\.\.(?<sh>${I})\(${I}\.address,\k<c>\),${I}\(${I},${I},${I}\.address,${I},${I},${I},!1\)\],${I}\.blockhash,\[\]\)\.message\)\.length<=(?<max>${I})\)\(\k<may>\)&&\(\k<may>=\[\]\),\k<may>\.length>0\)\{`),
-    (g) => [R`[,; ]${esc(g.max)}=1232[,;]`, R`[,; ]${esc(g.nr)}=(${I})=>${I}-\1%${I}<=64[,;]`],
-  ),
-  "the closes only where, at every fill from min out to the expected out, they lose no more than the least the form before can: one more deposit's cost under the sweep's floor, a teardown frame's fee for each account left open, a frame's fee alone where that form makes no deposit back": tied(
-    re(R`\{let (?<ev>${I})=(?<co>${I})\(${I}\.address,${I},${I}\.program,${I}\.accounts,new Set\),(?<r0>${I})=${I}\((?<rn>${I}),0\),(?<ex>${I})=${I}\?\.pools\.find\([^;]*?\)\?\.expectedOut\?\?(?<mo>${I}),(?<su>${I})=\k<ex>>\k<mo>\?\k<ex>-\k<mo>:0n,(?<fl>${I})=(?<sf>${I})\(\k<rn>\)>1000000n\?\k<sf>\(\k<rn>\):${I},(?<sc>${I})=(?<cf>${I})\(\k<rn>\),(?<rs>${I})=(?<cs>${I})=>\k<cs>\.reduce\(\((?<t1>${I}),(?<t2>${I})\)=>\k<t1>\+\k<t2>\.lamports,0n\),(?<op>${I})=\k<rs>\(\k<ev>\)-\k<rs>\((?<cl>${I})\),(?<fr>${I})=(?<fee>${I}),(?<kp>${I})=${I}\(\{fee:\k<fee>\+\(${I}\?\.priority\?\?0n\),made:${I},rents:${I}\(\k<rn>,${I},${I},!1\),after:(?<af>${I}),lamports:${I},minOut:\k<mo>,keeps:!1,noteFloor:${I}\(\k<rn>\),swept:\k<af>-\k<r0>,base:\k<r0>,floor:\k<fl>\}\),(?<kt>${I})=\k<r0>\+\k<rs>\(\k<ev>\)-\k<fr>,(?<le>${I})=` + "`refused`" + R`in \k<kp>\|\|\k<kp>\.value===0n\?\k<fr>:\k<fr>\+\(\k<sc><\k<kt>\?\k<sc>:\k<kt>\);\k<r0>\+\k<op>\+\k<su>>\k<le>&&\(\k<cl>=\[\]\)\}`),
-    // one more deposit's cost: a frame's fee, the mark's rent and a page entry on each tree
-    (g) => [R`[,; ]${esc(g.cf)}=(${I})=>(${I})\+(${I})\(\1,(${I})\)\+2n\*\(\3\(\1,(${I})\)-\3\(\1,0\)\)[,;]`],
-  ),
-  "the sale's deposit takes the closes' rent, W kept at rent(0)": re(R`let (?<r>${I})=${I}\((?<rn>${I}),0\),(?<i>${I})=(?<cl>${I})\.reduce\(\(${I},${I}\)=>${I}\+${I}\.lamports,0n\),(?<a>${I})=\k<cl>\.length>0\?(?<res>${I})\(\{fee:(?<f>${I}),made:${I},rents:${I}\(\k<rn>,${I},${I},${I}\),after:\k<r>,lamports:${I}\+\k<i>,minOut:${I},keeps:!1,noteFloor:${I}\}\):\k<res>\(\{`),
-  "a simulation that refuses the closes sells with none; a close failed on chain builds the sale again bare, never ending the request on it": tied(
-    re(R`(?<sf>${I})=(?<d>${I})&&(?<g>${I})\.every\((?<e>${I})=>(?<fa>${I})\(\k<e>\.err,(?<at>${I})\)\),(?<ag>${I})=\k<d>&&!(?<l>${I})\.last&&\k<g>\.every\((?<e2>${I})=>${I}\(\k<e2>\.err,${I}\)\|\|\k<fa>\(\k<e2>\.err,\k<at>\)\),\{end:${I}\}=await ${I}\([^;]*?\(${I},${I},(?<st>${I})\)=>\k<ag>&&\k<st>===` + "`dropped`" + R`\?void 0:${I}\.settled\?\.\(${I},${I}\)\);if\([^;]*?,\k<sf>&&\(\k<l>\.bare=!0\)`),
-    () => [R`if\((${I})\.length>0\)\{\1=\[\];continue\}return ${I}\(` + "`failed`,`sim`"],
-  ),
-  "the signing rule takes each close as the sale's own, exactly, before the deposit": re(R`(?<S>${I})=(?<b>${I})\?(?<p>${I}):\k<p>\.slice\(0,-1\),(?<C>${I})=${I}\(${I}\.wallet,${I}\?\.closes\?\?\[\]\);if\(\k<S>\.length<\k<C>\.length\)return (?<x>${I})\(` + "`closes`" + R`\);let (?<w>${I})=\k<S>\.slice\(0,\k<S>\.length-\k<C>\.length\),(?<T>${I})=\k<S>\.slice\(\k<S>\.length-\k<C>\.length\);for\(let (?<e>${I})=0;\k<e><\k<C>\.length;\k<e>\+\+\)\{let (?<t>${I})=\k<C>\[\k<e>\],(?<m>${I})=\k<T>\[\k<e>\];if\(\k<m>\.program!==\k<t>\.program\|\|\k<m>\.data\.length!==\k<t>\.data\.length\|\|\k<m>\.data\.some\(\((?<u>${I}),(?<v>${I})\)=>\k<u>!==\k<t>\.data\[\k<v>\]\)\|\|!${I}\(\k<m>\.accounts,\k<t>\.accounts\)\)return \k<x>\(` + "`closes`" + R`\)\}`),
-  "what the sale left on W's token account is 0 when the sale closed it: an entry before it, none after": re(R`if\((?<t>${I})!==null\)return \k<t>;let (?<p>${I})=(?<m>${I})\?\.preTokenBalances;if\(!Array\.isArray\(\k<p>\)\)return null;for\(let ${I} of \k<p>\)\{let (?<b>${I})=${I};if\(typeof \k<b>!=` + "`object`" + R`\|\|!\k<b>\)return null;if\(\k<b>\.mint===${I}&&\k<b>\.owner===${I}\)return 0n\}return null\}`),
   "the sale's owed record keeps W's proven buy": re(R`(?<p>${I})\?\.buy!==void 0&&\((?<o>${I})\.buy=\k<p>\.buy\),await ${I}\.owed\?\.put\(\k<o>\)`),
   "every W of the account's found on the helper's seat alone, in batches; one with no record the helper reads empty listed empty; a W read as at its last end on its own state read on neither seat; the load's own reads only with a W to pass": tied(
     re(R`let (?<rd>${I})=await (?<fo>${I})\((?<rp>${I})\[1\],(?<ls>${I})\)\.catch\(\(\)=>null\),(?<td>${I})=\[\];for\(let\{address:(?<a>${I})\}of \k<ls>\)\{let (?<o>${I})=${I}\.find\((?<q>${I})=>\k<q>\.address===\k<a>\),(?<r>${I})=\k<rd>\?\.get\(\k<a>\);\k<o>\?\(\k<r>===void 0\?\k<o>\.seen===void 0:\k<o>\.seen!==\k<r>\.seen\)&&\k<td>\.push\(\k<a>\):\k<r>!==void 0&&\(\k<r>\.any\?\k<td>\.push\(\k<a>\):await Promise\.resolve\(${I}\.owed\.markEmpty\?\.\(\k<a>\)\)\.catch\(\(\)=>\{\}\)\)\}if\(\k<td>\.length===0\)return ${I}!==null\|\|\k<rd>===null;`),
