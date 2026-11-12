@@ -566,7 +566,8 @@ test("a newer deposit.dry ends the one before it in its pause: the older asks no
   assert.deepEqual(older.answer(), { error: "down" });
   assert.equal(h.sent.filter((s) => s.body?.originAsset === SOL_USDC).length, 1);
   await newer.after;
-  assert.ok("result" in newer.answer(), JSON.stringify(newer.answer()));
+  const got = newer.answer();
+  assert.ok(got !== null && "result" in got, JSON.stringify(got));
 });
 
 test("the page's stop ends every read in its pause: no re-ask leaves after it", async () => {
