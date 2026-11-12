@@ -64,7 +64,7 @@ const { openWalletStore } = await import("../../wallet/src/store/index.ts");
 const { openNoteStore } = await import("../../wallet/src/notes/store.ts");
 const { noteSecrets } = await import("../../wallet/src/notes/secrets.ts");
 const { jOf } = await import("../../wallet/src/pool/queue.ts");
-const { SOL_POOLS, solanaPoolOf } = await import("../../wallet/src/pool/solana.ts");
+const { SOL_POOLS, SOL_POOL_TABLES, solanaPoolOf } = await import("../../wallet/src/pool/solana.ts");
 const { readSolanaRent, solanaRentMin, readSolanaPoolBuyVenue, solanaPoolBuyMaxSpend, solanaPoolBuySteps } = await import("../../kit/src/trade/solana/pool-buy.ts");
 const { ZK_SETUP_FILES } = await import("../../kit/src/zk/setup-files.ts");
 const { HELPER_SOLANA_BLOCK_HEADER } = await import("../../kit/src/index.ts");
@@ -84,6 +84,8 @@ if (POOL_TESTNET !== true || SOL_POOLS.devnet === undefined) throw new Error("no
 const SCENARIOS = { "pieces-2": 2, "pieces-3": 3, "pieces-4": 4, "back-to-back": 4, "landed-reload": 2, "tag3-fail": 2, found: 0 };
 const [SCENARIO, TABLE, MINT, OUT] = process.argv.slice(2);
 if (!OUT || !Object.hasOwn(SCENARIOS, SCENARIO)) throw new Error(`usage: pool-buy-pieces-devnet.mjs <${Object.keys(SCENARIOS).join("|")}> <table> <mint> <out.json>`);
+// the page loads the tables the testnet build pins (PAGE_TABLES); <table> names the pump-curve one the run expects
+if (!(SOL_POOL_TABLES.devnet?.["pump-curve"] ?? []).includes(TABLE)) throw new Error(`<table> is not a pump-curve table the testnet build pins: ${JSON.stringify(SOL_POOL_TABLES.devnet?.["pump-curve"] ?? [])}`);
 const AFTER = process.env.FLOW_AFTER ?? "stay";
 if (!["stay", "reload", "stop"].includes(AFTER)) throw new Error("FLOW_AFTER is stay, reload or stop");
 const RESUME = process.env.FLOW_RESUME;
@@ -95,7 +97,7 @@ if (!["none", "pay", "empty", "token"].includes(PLANT) || (PLANT !== "none" && S
 const EXPECT = process.env.FLOW_EXPECT ?? (PLANT === "token" ? "held" : "swept");
 if (!["held", "swept"].includes(EXPECT)) throw new Error("FLOW_EXPECT is held or swept");
 const HELPER = process.env.FLOW_HELPER;
-if (!/^https?:\/\/[^/]+$/.test(HELPER ?? "")) throw new Error("FLOW_HELPER=<the helper's origin, as http://127.0.0.1:18931: this branch's helper started locally>");
+if (!/^https?:\/\/[^/]+$/.test(HELPER ?? "")) throw new Error("FLOW_HELPER=<the helper's origin: https://ct-api.unrealized.trade, or a local helper's http://127.0.0.1:<port>>");
 // every call to the page's helper address goes to FLOW_HELPER (solanaJsonRpc and the pool's helper calls read the global
 // fetch at each call)
 const realFetch = globalThis.fetch;
@@ -259,7 +261,7 @@ function page(name, w, hooks = {}) {
     return dead ? hang() : r;
   };
   const host = { store: async () => w, seed64: async () => seed64.slice() };
-  const t = testnetPool(host, { rpcs: prs, prover: { vault, stop: () => {} }, table: TABLE, fetch: helperFetch });
+  const t = testnetPool(host, { rpcs: prs, prover: { vault, stop: () => {} }, fetch: helperFetch });
   const kinds = poolKinds({ ...testnetPoolDeps(t.flow), rpcs: (c) => (c === "solana" ? prs : testnetPoolDeps().rpcs(c)) });
   const notesOf = async () => (await (await openNoteStore(w)).list());
   const dry = poolBuyDryKind({ pools: PAGE_POOLS, rpcs: () => prs, rent: () => rent, ready: async () => {
