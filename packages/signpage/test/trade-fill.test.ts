@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { base58 } from "@scure/base";
-import { feedWritePrice, fillTradeOps, solanaTradeLeg, type FillStore } from "../src/trade-fill.ts";
+import { FILL_OPS_MAX, feedWritePrice, fillTradeOps, solanaTradeLeg, type FillStore } from "../src/trade-fill.ts";
 
 const MINT = "78GaXFTJzkCWpdxkNHMSP3TXEKbhQTpb3EqMt7Uupump";
 const fx = (f: string): Record<string, unknown> => JSON.parse(readFileSync(new URL(`./fixtures/trade-fill/${f}.json`, import.meta.url), "utf8"));
@@ -50,9 +50,9 @@ test("never a guess: the wrong side, another token, a failed transaction, an unk
 /** The ops store with release 118's records of the four trades. */
 function store118(): FillStore & { ops: Map<string, Record<string, unknown>> } {
   const ops = new Map<string, Record<string, unknown>>([
-    ["b1", { kind: "buy", stage: "filled", txs: [{ chain: "solana", hash: SIG.buy1 }], created_ms: 1, chain: "solana", token: MINT, amount_usd: "0.19294192" }],
+    ["b1", { kind: "buy", stage: "filled", txs: [{ chain: "solana", hash: SIG.buy1 }], created_ms: 1, chain: "solana", token: MINT, amount_usd: "0.10002700069283141" }],
     ["s1", { kind: "sell", pool: "sol", sha: "x", stage: "filled", txs: [{ chain: "solana", hash: SIG.sell1 }], created_ms: 2, chain: "solana", token: MINT, units: "16041.923776", legs: [{ wallet: W1, units: "16041.923776", tx: SIG.sell1, stage: "filled" }] }],
-    ["b2", { kind: "buy", stage: "filled", txs: [{ chain: "solana", hash: SIG.buy2 }], created_ms: 3, chain: "solana", token: MINT, amount_usd: "0.19272832" }],
+    ["b2", { kind: "buy", stage: "filled", txs: [{ chain: "solana", hash: SIG.buy2 }], created_ms: 3, chain: "solana", token: MINT, amount_usd: "0.0999999427770536" }],
     ["s2", { kind: "sell", pool: "sol", sha: "y", stage: "filled", txs: [{ chain: "solana", hash: SIG.sell2 }], created_ms: 4, chain: "solana", token: MINT, units: "34154.038071" }],
     ["d1", { kind: "pool_deposit", stage: "in_pool", txs: [] }],
     ["r1", { kind: "sell", pool: "sol", stage: "refused", txs: [], code: "failed", chain: "solana", token: MINT }],
@@ -65,53 +65,151 @@ function store118(): FillStore & { ops: Map<string, Record<string, unknown>> } {
   };
 }
 const PRICE = { price: "16000000000", expo: -8, published_s: 1, read_ms: 0 };
+const OLD = 10 * 86_400_000;
 
-test("release 118's records filled from the chain: units and SOL on each, every other field kept; an old sale gets no USD", async () => {
+test("release 118's records filled from the chain on one reader: units and SOL on each, every other field kept", async () => {
   const s = store118();
   const reads: string[] = [];
-  const wrote = await fillTradeOps({ store: s, read: async (sig) => (reads.push(sig), [TX[sig], structuredClone(TX[sig])]), price: () => ({ ...PRICE, read_ms: 10 * 86_400_000 }), now: () => 10 * 86_400_000 });
+  const wrote = await fillTradeOps({ store: s, read: async (sig) => (reads.push(sig), TX[sig]), price: () => ({ ...PRICE, read_ms: OLD }), now: () => OLD });
   assert.equal(wrote, true);
-  assert.deepEqual(reads.sort(), Object.values(SIG).sort(), "each trade's own signature, nothing else");
-  assert.deepEqual(s.ops.get("b1"), { kind: "buy", stage: "filled", txs: [{ chain: "solana", hash: SIG.buy1 }], created_ms: 1, chain: "solana", token: MINT, amount_usd: "0.19294192", units: "16041.923776", pool_amount: "0.001205887" });
+  assert.deepEqual(reads.sort(), Object.values(SIG).sort(), "each trade's own signature, once, nothing else");
+  assert.deepEqual(s.ops.get("b1"), { kind: "buy", stage: "filled", txs: [{ chain: "solana", hash: SIG.buy1 }], created_ms: 1, chain: "solana", token: MINT, amount_usd: "0.10002700069283141", units: "16041.923776", pool_amount: "0.001205887" });
   assert.equal(s.ops.get("s1")!.pool_amount, "0.000574635");
-  assert.equal(s.ops.get("s1")!.amount_usd, undefined, "a sale days old: the price now is not its price");
+  assert.equal(s.ops.get("s1")!.amount_usd, undefined, "a sale days old with no feed reader: the price now is not its price");
   assert.equal((s.ops.get("s1")!.legs as unknown[]).length, 1);
   assert.equal(s.ops.get("b2")!.pool_amount, "0.001204552");
   assert.equal(s.ops.get("s2")!.pool_amount, "0.001174666");
   assert.equal(s.ops.get("r1")!.pool_amount, undefined, "a refused sale moved nothing");
   // filled once: a second pass reads nothing
   reads.length = 0;
-  assert.equal(await fillTradeOps({ store: s, read: async (sig) => (reads.push(sig), [TX[sig], TX[sig]]), price: () => null, now: () => 0 }), false);
+  assert.equal(await fillTradeOps({ store: s, read: async (sig) => (reads.push(sig), TX[sig]), price: () => null, now: () => OLD }), false);
   assert.equal(reads.length, 0);
 });
 
-test("a sale filled at its end gets its USD at the page's fresh price; a stale price gives none", async () => {
+test("a young sale at its end gets its USD at the page's fresh price; with none, and none at its block, it waits for the next run (review R2)", async () => {
   const s = store118();
-  await fillTradeOps({ store: s, read: async (sig) => [TX[sig], TX[sig]], price: () => ({ ...PRICE, read_ms: 4 }), now: () => 60_000 });
+  await fillTradeOps({ store: s, read: async (sig) => TX[sig], price: () => ({ ...PRICE, read_ms: 4 }), now: () => 60_000 });
   assert.equal(s.ops.get("s1")!.amount_usd, "0.0919416");
+  assert.equal(s.ops.get("s1")!.usd_from, "live");
+  // R2: the end's read fails; a reload before the price is read; then a run with a fresh price
   const t = store118();
-  await fillTradeOps({ store: t, read: async (sig) => [TX[sig], TX[sig]], price: () => ({ ...PRICE, read_ms: 0 }), now: () => 200_000 });
-  assert.equal(t.ops.get("s1")!.amount_usd, undefined);
-  assert.equal(t.ops.get("s1")!.pool_amount, "0.000574635");
+  assert.equal(await fillTradeOps({ store: t, read: async () => { throw new Error("429"); }, price: () => ({ ...PRICE, read_ms: 4 }), now: () => 5_000 }), false);
+  await fillTradeOps({ store: t, read: async (sig) => TX[sig], price: () => null, now: () => 60_000 });
+  assert.equal(t.ops.get("s1")!.pool_amount, undefined, "not marked done with no USD while young");
+  assert.equal(t.ops.get("b1")!.pool_amount, "0.001205887", "a buy needs no price");
+  await fillTradeOps({ store: t, read: async (sig) => TX[sig], price: () => ({ ...PRICE, read_ms: 69_000 }), now: () => 70_000 });
+  assert.equal(t.ops.get("s1")!.amount_usd, "0.0919416");
+  // past SALE_USD_MS with no price at its block: written with no USD, the app's dash
+  const u = store118();
+  await fillTradeOps({ store: u, read: async (sig) => TX[sig], price: () => null, now: () => 700_000 });
+  assert.equal(u.ops.get("s1")!.pool_amount, "0.000574635");
+  assert.equal(u.ops.get("s1")!.amount_usd, undefined);
 });
 
-test("two RPCs that differ, or a read that fails, write nothing for that op", async () => {
+test("refused: a read that fails, an answer for another signature, a sale whose W is none of its legs' wallets", async () => {
   const s = store118();
-  const other = structuredClone(TX[SIG.sell1]) as { meta: { postBalances: number[] }; transaction: { message: { accountKeys: string[] } } };
-  other.meta.postBalances[other.transaction.message.accountKeys.indexOf(W1)]! += 1;
+  s.ops.set("s1", { ...s.ops.get("s1")!, legs: [{ wallet: W2, units: "16041.923776", tx: SIG.sell1, stage: "filled" }] });
   await fillTradeOps({
     store: s,
     read: async (sig) => {
       if (sig === SIG.buy2) throw new Error("429");
-      return [TX[sig], sig === SIG.sell1 ? other : TX[sig]];
+      if (sig === SIG.sell2) return TX[SIG.sell1]; // the answer for another signature
+      return TX[sig];
     },
     price: () => null,
-    now: () => 0,
+    now: () => OLD,
   });
-  assert.equal(s.ops.get("s1")!.pool_amount, undefined);
+  assert.equal(s.ops.get("s1")!.pool_amount, undefined, "W1 sold, the op names W2");
   assert.equal(s.ops.get("b2")!.pool_amount, undefined);
+  assert.equal(s.ops.get("s2")!.pool_amount, undefined);
   assert.equal(s.ops.get("b1")!.pool_amount, "0.001205887");
-  assert.equal(s.ops.get("s2")!.pool_amount, "0.001174666");
+});
+
+test("pool ops only: a trade-box buy (its quote's sha) and a sale with no pool are left alone (review P3-5)", async () => {
+  const s = store118();
+  s.ops.set("b1", { ...s.ops.get("b1")!, sha: "q" });
+  const { pool: _p, ...noPool } = s.ops.get("s1")!;
+  s.ops.set("s1", noPool);
+  const reads: string[] = [];
+  await fillTradeOps({ store: s, read: async (sig) => (reads.push(sig), TX[sig]), price: () => null, now: () => OLD });
+  assert.ok(!reads.includes(SIG.buy1) && !reads.includes(SIG.sell1), reads.join(","));
+  assert.equal(s.ops.get("b1")!.pool_amount, undefined);
+  assert.equal(s.ops.get("s1")!.pool_amount, undefined);
+});
+
+test("a sale over several legs: each leg's W, units and SOL summed; one leg unread or of other decimals writes nothing", async () => {
+  const two = (): FillStore & { ops: Map<string, Record<string, unknown>> } => {
+    const s = store118();
+    for (const k of ["b1", "b2", "s2"]) s.ops.delete(k);
+    s.ops.set("s1", { ...s.ops.get("s1")!, txs: [{ chain: "solana", hash: SIG.sell1 }, { chain: "solana", hash: SIG.sell2 }], legs: [{ wallet: W1 }, { wallet: W2 }] });
+    return s;
+  };
+  const s = two();
+  await fillTradeOps({ store: s, read: async (sig) => TX[sig], price: () => null, now: () => OLD });
+  assert.equal(s.ops.get("s1")!.units, "50195.961847");
+  assert.equal(s.ops.get("s1")!.pool_amount, "0.001749301");
+  const t = two();
+  await fillTradeOps({ store: t, read: async (sig) => (sig === SIG.sell2 ? null : TX[sig]), price: () => null, now: () => OLD });
+  assert.equal(t.ops.get("s1")!.pool_amount, undefined, "the first leg alone is not the sale");
+  const u = two();
+  const nine = structuredClone(TX[SIG.sell2]) as { meta: { preTokenBalances: { uiTokenAmount: { decimals: number } }[]; postTokenBalances: { uiTokenAmount: { decimals: number } }[] } };
+  for (const b of [...nine.meta.preTokenBalances, ...nine.meta.postTokenBalances]) b.uiTokenAmount.decimals = 9;
+  await fillTradeOps({ store: u, read: async (sig) => (sig === SIG.sell2 ? nine : TX[sig]), price: () => null, now: () => OLD });
+  assert.equal(u.ops.get("s1")!.pool_amount, undefined, "legs of other decimals are not summed");
+});
+
+test("a fill written meanwhile (another tab) is kept: the update re-checks the op", async () => {
+  const s = store118();
+  const update = s.update;
+  s.update = async (st, k, f) => {
+    const v = s.ops.get(k)!;
+    s.ops.set(k, { ...v, pool_amount: "9" });
+    return update(st, k, f);
+  };
+  await fillTradeOps({ store: s, read: async (sig) => TX[sig], price: () => null, now: () => OLD });
+  assert.equal(s.ops.get("b1")!.pool_amount, "9");
+  assert.equal(s.ops.get("b1")!.units, undefined);
+});
+
+test("at most FILL_OPS_MAX ops a run, newest first (review P3-1)", async () => {
+  const ops = new Map<string, Record<string, unknown>>();
+  for (let i = 0; i < FILL_OPS_MAX + 5; i++) ops.set(`b${i}`, { kind: "buy", stage: "filled", txs: [{ chain: "solana", hash: SIG.buy1 }], created_ms: i, chain: "solana", token: MINT });
+  const s: FillStore = { keys: async () => [...ops.keys()], get: async (_s, k) => ops.get(k), update: async (_s, k, f) => void ops.set(k, f(ops.get(k)) as Record<string, unknown>) };
+  let reads = 0;
+  await fillTradeOps({ store: s, read: async (sig) => (reads++, TX[sig]), price: () => null, now: () => OLD });
+  assert.equal(reads, FILL_OPS_MAX);
+  assert.equal(ops.get(`b${FILL_OPS_MAX + 4}`)!.pool_amount, "0.001205887");
+  assert.equal(ops.get("b0")!.pool_amount, undefined, "the oldest wait for the next run");
+});
+
+// R1 (review P2-1): a PumpSwap sale as the kit builds it (pool-buy.ts solanaPoolSellSteps): W makes its wrapped-SOL
+// account (a system CreateAccount of rent(165) = 2,039,280 from W), PumpSwap pays the proceeds into it, and the close
+// gives W the proceeds and that rent back. Modelled on the real curve sale 32CSJ1 (no PumpSwap sale of ours is on
+// record: the devnet runs of scripts/live-checks/sol-pool-venue-tables.md hold no swap of W's); its proceeds reach W by
+// the close instead of the curve, W's lamports after the same, the wrapped account's create and close added.
+test("R1: a PumpSwap sale's wrapped-SOL account, made and closed in the sale, is not counted out of W", () => {
+  const t = structuredClone(TX[SIG.sell1]) as { transaction: { message: { accountKeys: string[] } }; meta: { preBalances: number[]; postBalances: number[]; innerInstructions: { index: number; instructions: unknown[] }[] } };
+  const keys = t.transaction.message.accountKeys;
+  const at = keys.length;
+  keys.push("Wsoi1AtaWsoi1AtaWsoi1AtaWsoi1AtaWsoi1AtaWso");
+  t.meta.preBalances.splice(at, 0, 0);
+  t.meta.postBalances.splice(at, 0, 0); // closed in the same transaction
+  const data = new Uint8Array(52);
+  const v = new DataView(data.buffer);
+  v.setUint32(0, 0, true);
+  v.setBigUint64(4, 2_039_280n, true);
+  v.setBigUint64(12, 165n, true);
+  t.meta.innerInstructions.push({ index: 2, instructions: [{ programIdIndex: keys.indexOf("11111111111111111111111111111111"), accounts: [keys.indexOf(W1), at], data: base58.encode(data), stackHeight: 2 }] });
+  assert.equal(solanaTradeLeg(t, "sell", MINT)!.lamports, 574_635n);
+  // the same account still open after (a rent W paid for good) is counted out of W, as the mark's is
+  t.meta.postBalances[at] = 2_039_280;
+  assert.equal(solanaTradeLeg(t, "sell", MINT)!.lamports, 574_635n + 2_039_280n + 2_039_280n - 2_039_280n);
+});
+
+test("a PumpSwap buy (W's wrapped-SOL balance in its meta) gets no SOL from here: its transfer goes to W's own account", () => {
+  const t = structuredClone(TX[SIG.buy1]) as { meta: { preTokenBalances: unknown[]; postTokenBalances: unknown[] } };
+  t.meta.postTokenBalances.push({ accountIndex: 0, mint: "So11111111111111111111111111111111111111112", owner: W1, uiTokenAmount: { amount: "0", decimals: 9 } });
+  assert.equal(solanaTradeLeg(t, "buy", MINT), null);
 });
 
 // ------------------------------------------------------------------------------------------------ an old sale's USD
@@ -123,8 +221,8 @@ const FEED_BEFORE: Record<string, { signature: string; err: unknown }[]> = { [SI
 const WRITES: Record<string, Record<string, unknown>> = { "5yEBxDX1FsLJBBRoj47D95QCH6xDQxNW45P1Wyqo8g9QAEmPT6WiXZiCuCM9zyv7ay9YHjN5pyQgRaghxKvzJxcD": fx("feed-5yEBxD"), "4JFB6zkT6UBujxAi7ToPNbSw32RiSLe2tFeL3UN5Z4GCmbtWAjAMBB3QoVroRAp8BzMuJmnhifWNVAMTXewfeizx": fx("feed-4JFB6z") };
 const ALL: Record<string, Record<string, unknown>> = { ...TX, ...WRITES };
 const feedBefore = async (sig: string) => (FEED_BEFORE[sig] ?? []).filter((s) => s.err === null).map((s) => s.signature);
-/** A read of `sig` as both RPCs answer it: a feed reader's transaction (not recorded) answers null, as a version-1 one does. */
-const both = async (sig: string) => [ALL[sig] ?? null, ALL[sig] ?? null] as const;
+/** A read of `sig` on the helper: a feed reader's transaction (not recorded) answers null, as a version-1 one does. */
+const both = async (sig: string) => ALL[sig] ?? null;
 
 test("a feed write's signed SOL/USD: price, confidence, exponent and publish time from its message; any other transaction none", () => {
   assert.deepEqual(feedWritePrice(WRITES["5yEBxDX1FsLJBBRoj47D95QCH6xDQxNW45P1Wyqo8g9QAEmPT6WiXZiCuCM9zyv7ay9YHjN5pyQgRaghxKvzJxcD"]), { price: 8298770947n, conf: 2770833n, expo: -8, publishedS: 1794461905, blockS: 1794461908 });
@@ -146,15 +244,19 @@ test("release 118's sales get their USD at the SOL price of their own block, mar
   const t = store118();
   await fillTradeOps({ store: t, read: both, feedBefore, price: () => ({ ...PRICE, read_ms: 4 }), now: () => 60_000 });
   assert.equal(t.ops.get("s1")!.usd_from, "live");
+  // a young sale with no fresh price takes its block's
+  const y = store118();
+  await fillTradeOps({ store: y, read: both, feedBefore, price: () => null, now: () => 60_000 });
+  assert.equal(y.ops.get("s1")!.usd_from, "block");
 });
 
-test("never a guess: no write within a minute of the sale's block, no write in the list, or two RPCs that differ on it: no USD", async () => {
+test("never a guess: no write within a minute of the sale's block, no write in the list, or an answer for another signature: no USD", async () => {
   const late = store118();
   // the sale read as 2 minutes after its block: the write before it is too old to be that minute's price
   const shifted = (sig: string) => {
     const t = structuredClone(ALL[sig] ?? null) as { blockTime?: number } | null;
     if (t && (sig === SIG.sell1 || sig === SIG.sell2)) t.blockTime! += 120;
-    return [t, t] as const;
+    return t;
   };
   await fillTradeOps({ store: late, read: async (sig) => shifted(sig), feedBefore, price: () => null, now: () => 1e12 });
   assert.equal(late.ops.get("s1")!.amount_usd, undefined);
@@ -162,18 +264,8 @@ test("never a guess: no write within a minute of the sale's block, no write in t
   const none = store118();
   await fillTradeOps({ store: none, read: both, feedBefore: async () => [], price: () => null, now: () => 1e12 });
   assert.equal(none.ops.get("s1")!.amount_usd, undefined);
-  const split = store118();
-  await fillTradeOps({
-    store: split,
-    read: async (sig) => {
-      if (!(sig in WRITES)) return both(sig);
-      const o = structuredClone(WRITES[sig]) as { blockTime: number };
-      o.blockTime += 1;
-      return [WRITES[sig], o] as const;
-    },
-    feedBefore,
-    price: () => null,
-    now: () => 1e12,
-  });
-  assert.equal(split.ops.get("s1")!.amount_usd, undefined);
+  // a feed answer for another signature than the one asked is refused
+  const other = store118();
+  await fillTradeOps({ store: other, read: async (sig) => (sig in WRITES ? Object.values(WRITES).find((w) => w !== WRITES[sig]) : both(sig)), feedBefore, price: () => null, now: () => 1e12 });
+  assert.equal(other.ops.get("s1")!.amount_usd, undefined);
 });

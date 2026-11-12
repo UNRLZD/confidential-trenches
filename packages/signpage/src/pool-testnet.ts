@@ -1687,14 +1687,14 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   const fillTrades = (): void => {
     if (pin === undefined) return;
     if (filling) return void (fillAgain = true);
-    const r = rpcs("pass");
-    const tx = (rpc: SolanaRpc, sig: string): Promise<unknown> => rpc("getTransaction", [sig, { encoding: "json", commitment: "finalized", maxSupportedTransactionVersion: 0 }]);
-    const read = (sig: string): Promise<readonly [unknown, unknown]> => Promise.all([tx(r[0], sig), tx(r[1], sig)]);
+    // one reader, the helper's route (the positions finder's): no read names a W or a signature to a public provider
+    const one = POOL_TESTNET ? rpcs("pass")[0] : over.rpcs ? over.rpcs[1] : solanaPacedRpc(pageHelperRpc(TRADE_HELPER, SOLANA_RPC_RETRY, "pass"));
+    const read = (sig: string): Promise<unknown> => one("getTransaction", [sig, { encoding: "json", commitment: "finalized", maxSupportedTransactionVersion: 0 }]);
     filling = (async () => {
       const store = (await page.store()) as unknown as FillStore;
       // an old sale's USD at its own block: the page's SOL/USD feed account's writes before it (trade-fill.ts blockPrice)
       const feedBefore = async (sig: string): Promise<readonly string[]> => {
-        const l = await r[0]("getSignaturesForAddress", [POOL_USD_FEEDS.solana.account, { before: sig, limit: 100, commitment: "finalized" }]);
+        const l = await one("getSignaturesForAddress", [POOL_USD_FEEDS.solana.account, { before: sig, limit: 100, commitment: "finalized" }]);
         return Array.isArray(l) ? l.flatMap((e) => (e !== null && typeof e === "object" && (e as { err?: unknown }).err === null && typeof (e as { signature?: unknown }).signature === "string" ? [(e as { signature: string }).signature] : [])) : [];
       };
       if (await fillTradeOps({ store, read, feedBefore, price: () => page.price?.("solana") ?? null, now: Date.now })) for (const f of watchers) f();
