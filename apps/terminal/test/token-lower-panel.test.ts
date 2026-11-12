@@ -5,7 +5,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { MarketRow } from "../src/screens/discover/fields.ts";
-import { aboutView, HOLDERS_URL, holdersSummary, holderViews, pausedTape, readHolders, tapeViews, toHolders } from "../src/screens/token/lower.ts";
+import { compact } from "../src/screens/discover/format.ts";
+import { aboutView, HOLDERS_URL, holdersSummary, holderViews, pausedTape, readHolders, tapeViews, toHolders, tokenAmount } from "../src/screens/token/lower.ts";
 import type { Trade } from "../src/screens/token/trades.ts";
 
 const A = "9DrvZvyWh1HuAoZxvYWMvkf2XCzryCpGgHqrMjyDWpmo";
@@ -155,4 +156,15 @@ test("Pause holds the trades as they stood, counts the newer ones, and appends o
   const p = pausedTape(live, frozen);
   assert.deepEqual(p.shown.map((t) => t.tx), ["c", "b", "a"]);
   assert.equal(p.fresh, 2);
+});
+
+test("a small amount keeps its digits: below 1 up to 6 decimals, under that <0.000001, never 0.00 (the signed-in walk of release 124, 12 Nov: a NEAR trade of a little ZEC read Amount 0.00)", () => {
+  assert.equal(tokenAmount(0.0012), "0.0012");
+  assert.equal(tokenAmount(0.5), "0.5");
+  assert.equal(tokenAmount(0.123456789), "0.123457");
+  assert.equal(tokenAmount(0.0000004), "<0.000001");
+  assert.equal(tokenAmount(0.0000009999), "0.000001");
+  assert.equal(tokenAmount(0), "0.00");
+  assert.equal(tokenAmount(1), "1.00");
+  assert.equal(tokenAmount(1234), compact(1234));
 });

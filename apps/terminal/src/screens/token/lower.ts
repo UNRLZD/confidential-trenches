@@ -123,6 +123,15 @@ export function holdersSummary(read: HoldersRead | null, row: Pick<MarketRow, "h
 /** A non-negative number as the decimal string the formats read (never an exponent form). */
 const dec = (n: number): string | null => (Number.isFinite(n) && n >= 0 ? n.toFixed(18).replace(/\.?0+$/, "") : null);
 
+/** A token amount as a row draws it: below 1 its own digits, up to 6 decimals (Portfolio's amount rule, model.ts), and
+ *  "<0.000001" for a nonzero amount under that, never "0.00" (the signed-in walk of release 124, 12 Nov: a NEAR trade of a
+ *  little ZEC read Amount 0.00); from 1 up, compact as before. */
+export function tokenAmount(n: number): string {
+  if (!(n > 0) || n >= 1) return compact(n);
+  const s = n.toFixed(6).replace(/0+$/, "").replace(/\.$/, "");
+  return s === "0" ? "<0.000001" : s;
+}
+
 export interface HolderView {
   addr: string;
   usd: string;
@@ -146,7 +155,7 @@ export function holderViews(rows: readonly Holder[], o: { decimals: number | nul
     return {
       addr: h.addr,
       usd: value === null ? DASH : usd(value),
-      amount: amount === null ? DASH : compact(Number(amount)),
+      amount: amount === null ? DASH : tokenAmount(Number(amount)),
       share: h.bps === null ? DASH : `${(h.bps / 100).toFixed(1)}%`,
       width: h.bps === null ? 0 : Math.min(100, Number(((h.bps / max) * 100).toFixed(1))),
       burn: h.kind === "burn",
@@ -200,7 +209,7 @@ export function tapeViews(trades: readonly Trade[], o: { supply: number | null; 
       age: age(Math.floor(t.t_ms / 1000), o.nowMs),
       side: t.side,
       mc: mc === null ? DASH : usd(mc),
-      amount: compact(Number(t.amt)),
+      amount: tokenAmount(Number(t.amt)),
       total: price(t.usd),
       width: Math.min(100, Number(((u / max) * 100).toFixed(1))),
       trader: t.trader,
