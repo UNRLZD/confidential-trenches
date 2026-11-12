@@ -1,4 +1,6 @@
 // node packages/signpage/scripts/focus-steal.e2e.mjs [--engines chromium,firefox,webkit] [--record <file>]
+// With no --engines it runs on the installed Chrome, the one browser every test job has (the package's test:e2e, on
+// each pull request); Firefox and WebKit are Playwright's own builds and run when named.
 // The rule: under a typed screen (src/frame-cover.ts SEALED: the 12 words, the withdraw forms, held) no key and no paste
 // reaches the app. On each engine, SIGN_HOST's real shell (bundled from src/shell.ts with one field on its sheet,
 // scripts/focus-steal.entry.ts) frames an APP_HOST page; Playwright answers both hosts, no network. The app is a thief:
@@ -207,7 +209,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
   const a = process.argv.slice(2);
   const opt = (k) => (a.includes(k) ? a[a.indexOf(k) + 1] : null);
   try {
-    const rec = await run(opt("--engines")?.split(",") ?? ENGINES);
+    const rec = await run(opt("--engines")?.split(",") ?? ["chromium"]);
     if (opt("--record")) {
       mkdirSync(dirname(opt("--record")), { recursive: true });
       writeFileSync(opt("--record"), `${JSON.stringify(rec, null, 1)}\n`);
