@@ -3,7 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createServer, request } from "node:http";
 import { HELPER_LOGO_MAX_BYTES } from "@blindfill/kit";
-import { blockedAddress, createLogos, fetchLogo, logoUrl, Refused, REDIRECTS_MAX, sniff, type Get, type Got, type Resolve } from "./logo.ts";
+import { blockedAddress, createLogos, fetchLogo, fetchMetaImage, logoUrl, META_MAX_BYTES, Refused, REDIRECTS_MAX, sniff, type Get, type Got, type Resolve } from "./logo.ts";
 import { handler } from "../server.ts";
 import { toRow } from "./solana/lists.ts";
 import { readFileSync } from "node:fs";
@@ -361,4 +361,51 @@ test("the default lookup is c-ares on the logo resolver's servers, never dns.loo
     L.LOGO_DNS.servers = was;
     silent.close();
   }
+});
+
+// card token-page-data-complete-and-fast: a token's metadata JSON, its `image` the logo URL when no list source gave one
+const META = "https://ipfs.io/ipfs/bafymeta";
+const IMG = "https://ipfs.io/ipfs/bafyimage";
+const json = (v: unknown, type = "application/json") => () => got(200, { "content-type": type }, Buffer.from(JSON.stringify(v)));
+
+test("fetchMetaImage: the JSON's image as a logo URL, under the logo fetch's address, redirect, size and time rules; JSON only, image only", async () => {
+  const seen: { url: string; address: string }[] = [];
+  assert.equal((await fetchMetaImage(new URL(META), { resolve: PUBLIC, get: fakeGet({ [META]: json({ name: "x", image: IMG, description: "y" }) }, seen) }))?.href, IMG);
+  assert.equal((await fetchMetaImage(new URL(META), { resolve: PUBLIC, get: fakeGet({ [META]: json({ image: IMG }, "text/plain; charset=utf-8") }) }))?.href, IMG, "IPFS gateways serve text/plain");
+  // no image, an image that is no logo URL, a prototype key: no URL
+  for (const v of [{}, { image: "http://ipfs.io/x" }, { image: "https://127.0.0.1/x" }, { image: ["https://a.b/x"] }, JSON.parse('{"__proto__": {"image": "https://a.b/x"}}'), [IMG], "x", null])
+    assert.equal(await fetchMetaImage(new URL(META), { resolve: PUBLIC, get: fakeGet({ [META]: json(v) }) }), null, JSON.stringify(v));
+  const refused = async (get: Get, why: string, resolve: Resolve = PUBLIC) => assert.rejects(fetchMetaImage(new URL(META), { resolve, get }), refusedAs(why));
+  await refused(fakeGet({ [META]: json({ image: IMG }, "text/html") }), "type");
+  await refused(fakeGet({ [META]: () => got(200, { "content-type": "application/json" }, Buffer.from("{not json")) }), "json");
+  await refused(fakeGet({ [META]: () => got(200, { "content-type": "application/json", "content-length": String(META_MAX_BYTES + 1) }) }), "size");
+  await refused(fakeGet({ [META]: () => got(200, { "content-type": "application/json" }, Buffer.alloc(META_MAX_BYTES + 1, 0x20)) }), "size");
+  await refused(fakeGet({ [META]: () => got(302, { location: "https://10.0.0.1/x" }) }), "redirect target");
+  await refused(fakeGet({}), "address", async () => [{ address: "169.254.169.254", family: 4 }]);
+  // the request asks for JSON, never an image
+  let accept: string | undefined;
+  await fetchMetaImage(new URL(META), { resolve: PUBLIC, get: async (_u, _a, _s, a) => ((accept = a), json({ image: IMG })()) });
+  assert.equal(accept, "application/json,text/plain");
+});
+
+test("fromMeta: a token with no list logo takes its metadata image, read once per period; a list logo is never replaced; a refusal is kept LOGO_NONE_MS", async () => {
+  let t = 1_000;
+  let reads = 0;
+  const get: Get = async (url) => (reads++, url.href === META ? json({ image: IMG })() : got(404, {}));
+  const logos = createLogos({ resolve: PUBLIC, get, now: () => t, log: () => undefined });
+  assert.equal(await logos.fromMeta("solana", "MintA", META), true);
+  assert.equal(logos.has("solana", "MintA"), true);
+  assert.equal(await logos.fromMeta("solana", "MintA", META), true);
+  assert.equal(reads, 1, "one read");
+  logos.remember("solana", "MintB", "https://list.example/b.png");
+  assert.equal(await logos.fromMeta("solana", "MintB", META), true);
+  assert.equal(reads, 1, "the list's logo stands, no metadata read");
+  assert.equal(await logos.fromMeta("solana", "MintC", "https://ipfs.io/missing"), false);
+  assert.equal(await logos.fromMeta("solana", "MintC", "https://ipfs.io/missing"), false);
+  assert.equal(reads, 2, "a refusal is kept");
+  t += 10 * 60_000;
+  assert.equal(await logos.fromMeta("solana", "MintC", "https://ipfs.io/missing"), false);
+  assert.equal(reads, 3, "read again after LOGO_NONE_MS");
+  assert.equal(await logos.fromMeta("solana", "MintD", "javascript:alert(1)"), false);
+  assert.equal(reads, 3, "a uri that is no URL of ours is never read");
 });

@@ -60,7 +60,8 @@ async function coldCandles(load: boolean) {
       assert.ok(JSON.parse((await lists.get()).body).unsettled.length >= 20, "every none of a file with no clock read again");
       stopLists = lists.warm();
       // 39 books open and read, then kept open (a page polls each well inside IDLE_MS), each ticking every TICK_MS
-      for (let k = 0; k < 10; k++) if ((await Promise.all(BOOKS.map((t) => s.trades(t, 50)))).every((a) => a.status === 200)) break;
+      // (each read until its book is read: a 200 not filling, card token-page-data-complete-and-fast)
+      for (let k = 0; k < 10; k++) if ((await Promise.all(BOOKS.map((t) => s.trades(t, 50)))).every((a) => a.status === 200 && !a.body.includes('"filling":true'))) break;
       void s.ahead(SEARCHED);
       await new Promise((go) => setTimeout(go, 3_000));
     }

@@ -270,8 +270,10 @@ test("main.ts wires the namer: a landing names, a quote waits for it, a notes ch
 
   // 3. another tab signs out and signs in again: the store starts over (no record), the page resyncs and names; a quote
   // asked as the resync starts waits for that naming
+  // the screens draw in the sheet's body, inside the layer (src/sheet.ts)
   const layer = doc.body.children.find((c) => c.tagName === "section")!;
-  const root = layer.children.find((c) => c.tagName === "main")!;
+  const inside = (e: El): El[] => e.children.flatMap((c) => [c, ...inside(c)]);
+  const root = inside(layer).find((c) => c.tagName === "main")!;
   assert.equal(root.dataset.signin, "signed-in");
   await other.signOut();
   await until("this page shows signed out", async () => root.dataset.signin !== "signed-in");

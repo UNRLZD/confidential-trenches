@@ -27,7 +27,7 @@
 // and token word match the table exactly.
 import { gzipSync } from "node:zlib";
 import { LOGOS } from "../logo.ts";
-import { dec, LIST_MAX, ROW_FIELDS, SERVED_MAX, servedTokens, text, type ListsAnswer, type Row } from "../solana/lists.ts";
+import { dec, LIST_MAX, ROW_FIELDS, SERVED_MAX, SERVED_MS, servedTokens, text, type ListsAnswer, type Row } from "../solana/lists.ts";
 import { throttledUntil, type GeckoBudget } from "../gecko.ts";
 import { evmThrottleS, upstreamRetryAfterS, type ProviderHolds } from "../../limits/limits.ts";
 
@@ -761,6 +761,10 @@ export function createEvmLists(chain: EvmChain, gecko: GeckoBudget, deps: { fetc
   let running: Promise<void> | null = null;
   // every token an answer held, and when (listed)
   const served = servedTokens(now);
+  // the pool the last answer holding each token named, and when (pool): the swap reads' hint for as long as the token is
+  // listed, not only while the newest answer holds it (card token-page-data-complete-and-fast: a dropped token had no
+  // hint, and its first open ran the whole pool discovery past swaps.ts OPEN_BOUND_MS, 503 at 12.1-12.6 s)
+  const poolAt = new Map<string, { pool: string; at: number }>(); // the least recently named first
 
   async function gt(path: string, urgent: boolean, first: boolean): Promise<Read | null> {
     if (!gecko.take("lists", urgent, first)) return null;
@@ -799,6 +803,11 @@ export function createEvmLists(chain: EvmChain, gecko: GeckoBudget, deps: { fetc
     for (const r of [read.trending_1h, read.trending_5m, read.new]) for (const [t, p] of r.pools) if (!Object.hasOwn(pools, t)) pools[t] = p;
     const body = JSON.stringify({ chain, lists, as_of_ms: asOf, unsettled, pools } satisfies EvmSnapshot);
     served.add(Object.values(lists).flatMap((rows) => rows.map((r) => r.token as string)));
+    for (const [t, p] of Object.entries(pools)) {
+      poolAt.delete(t);
+      poolAt.set(t, { pool: p, at: now() });
+      while (poolAt.size > SERVED_MAX) poolAt.delete(poolAt.keys().next().value!);
+    }
     last = { status: 200, body, gzip: gzipSync(body), asOfMs: asOf };
     for (const fn of listeners) fn();
   }
@@ -918,5 +927,12 @@ export function createEvmLists(chain: EvmChain, gecko: GeckoBudget, deps: { fetc
     return all() !== null;
   }
 
-  return { get, warm, tick, state, restore, onAnswer, listed };
+  /** The pool the last answer that held the token named, while it is SERVED_MS old at most; null otherwise. A hint only:
+   *  swaps.ts fromHint takes it once the chain says the pool is the token's. */
+  function pool(token: string): string | null {
+    const x = poolAt.get(token);
+    return x !== undefined && now() - x.at <= SERVED_MS ? x.pool : null;
+  }
+
+  return { get, warm, tick, state, restore, onAnswer, listed, pool };
 }

@@ -139,6 +139,10 @@ test("tape faults fail: oldest first, a bad side, an extra field, a trader that 
     assert.equal(run(rec).ok, false, what);
   }
   assert.equal(tradesFault(JSON.parse(A.good.reads.trades.body)), null);
+  // a tape still filling carries `filling: true` between trades and src; any other value or place is a fault
+  const g = JSON.parse(A.good.reads.trades.body);
+  assert.equal(tradesFault({ trades: g.trades, filling: true, src: g.src, as_of_ms: g.as_of_ms }), null);
+  assert.match(tradesFault({ trades: g.trades, filling: 1, src: g.src, as_of_ms: g.as_of_ms }), /keys/);
 });
 
 test("a stale read and a missing CORS echo fail", () => {

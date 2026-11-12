@@ -59,3 +59,22 @@ test("an answer that is not a 429 is returned at once, unchanged; a Response kee
   assert.equal(p.clock.t, 2_000);
   assert.equal((await reader.read(answers({ status: 503, headers: {} }))).status, 503);
 });
+
+// card token-page-data-complete-and-fast: a filling chart is read again as the page reads it (loadCandles FILL_WAIT_MS)
+test("a 200 filling with no bars: read again every FILL_WAIT_MS inside the span, the bars after it kept; one still filling at the span's end is the answer", async () => {
+  const fill = { status: 200, headers: {}, body: JSON.stringify({ tf: "1m", candles: [], filling: true, src: "chain", as_of_ms: 1 }) };
+  const bars = { status: 200, headers: {}, body: JSON.stringify({ tf: "1m", candles: [[60, "1", "1", "1", "1", "1"]], src: "chain", as_of_ms: 1 }) };
+  let p = planted();
+  let r = await candlesReader(p).read(answers(fill, fill, bars));
+  assert.equal(r.body, bars.body);
+  assert.deepEqual(r.waits, [2_000, 2_000]);
+  p = planted();
+  r = await candlesReader(p).read(answers(fill));
+  assert.equal(r.body, fill.body, "still filling at the span's end: the filling answer, judged by the check");
+  assert.equal(r.waits.reduce((a, b) => a + b, 0), THROTTLE_SPAN_S * 1000);
+  // a 200 with bars that says filling is the answer at once; a Response is read through a clone, its body left whole
+  p = planted();
+  const res = new Response(fill.body, { status: 200 });
+  const got = await candlesReader(p).read(answers(res, new Response(bars.body, { status: 200 })));
+  assert.equal(await got.text(), bars.body);
+});

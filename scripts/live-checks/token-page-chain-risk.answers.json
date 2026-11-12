@@ -1,0 +1,764 @@
+{
+ "_about": {
+  "bad_deployed": "live run of this check on the deployed helper (a release before the card), 2026-11-11T18:50:58.334Z: top 10 Jupiter's, snipers none",
+  "good": "the same run with the card's fields as the branch computes them for that token from real reads at 2026-11-11T18:51:33.661Z: first-buyers.ts readFirstBuys, readHeld and shares over api.mainnet-beta.solana.com (public reads), walletsTop10 over the deployed helper's holders answer; nothing else changed",
+  "bad_guess": "the good run with bundlers a value whose source is none (a guess)",
+  "kept": "each page answer as the check keeps it (read's kept(): the three risk fields, their row cells and the 4h change)"
+ },
+ "good": {
+  "base": "https://ct-api.unrealized.trade",
+  "at": "2026-11-11T18:50:58.334Z",
+  "holders": "keyed",
+  "lists": 200,
+  "mint": "8VQZBy9pV6ZyQcxu8CGag2yJHSMELrA9GZhLM9c4pump",
+  "pages": [
+   {
+    "status": 200,
+    "body": {
+     "risk": {
+      "top10_bps": {
+       "v": null,
+       "src": "jupiter",
+       "as_of_ms": 1794423030942
+      },
+      "snipers_bps": {
+       "v": null,
+       "src": "none",
+       "as_of_ms": 1794423039953
+      },
+      "bundlers_bps": {
+       "v": null,
+       "src": "none",
+       "as_of_ms": 1794423039953
+      }
+     },
+     "row": {
+      "top10_bps": null,
+      "snipers_bps": null,
+      "chg_4h_bps": null
+     }
+    }
+   },
+   {
+    "status": 200,
+    "body": {
+     "risk": {
+      "top10_bps": {
+       "v": null,
+       "src": "jupiter",
+       "as_of_ms": 1794423030942
+      },
+      "snipers_bps": {
+       "v": null,
+       "src": "none",
+       "as_of_ms": 1794423039953
+      },
+      "bundlers_bps": {
+       "v": null,
+       "src": "none",
+       "as_of_ms": 1794423039953
+      }
+     },
+     "row": {
+      "top10_bps": null,
+      "snipers_bps": null,
+      "chg_4h_bps": null
+     }
+    }
+   },
+   {
+    "status": 200,
+    "body": {
+     "risk": {
+      "top10_bps": {
+       "v": null,
+       "src": "jupiter",
+       "as_of_ms": 1794423030942
+      },
+      "snipers_bps": {
+       "v": null,
+       "src": "none",
+       "as_of_ms": 1794423039953
+      },
+      "bundlers_bps": {
+       "v": null,
+       "src": "none",
+       "as_of_ms": 1794423039953
+      }
+     },
+     "row": {
+      "top10_bps": null,
+      "snipers_bps": null,
+      "chg_4h_bps": null
+     }
+    }
+   },
+   {
+    "status": 200,
+    "body": {
+     "risk": {
+      "top10_bps": {
+       "v": null,
+       "src": "jupiter",
+       "as_of_ms": 1794423030942
+      },
+      "snipers_bps": {
+       "v": null,
+       "src": "none",
+       "as_of_ms": 1794423039953
+      },
+      "bundlers_bps": {
+       "v": null,
+       "src": "none",
+       "as_of_ms": 1794423039953
+      }
+     },
+     "row": {
+      "top10_bps": null,
+      "snipers_bps": null,
+      "chg_4h_bps": null
+     }
+    }
+   },
+   {
+    "status": 200,
+    "body": {
+     "risk": {
+      "top10_bps": {
+       "v": null,
+       "src": "jupiter",
+       "as_of_ms": 1794423034942
+      },
+      "snipers_bps": {
+       "v": null,
+       "src": "none",
+       "as_of_ms": 1794423046799
+      },
+      "bundlers_bps": {
+       "v": null,
+       "src": "none",
+       "as_of_ms": 1794423046799
+      }
+     },
+     "row": {
+      "top10_bps": null,
+      "snipers_bps": null,
+      "chg_4h_bps": null
+     }
+    }
+   },
+   {
+    "status": 200,
+    "body": {
+     "risk": {
+      "top10_bps": {
+       "v": null,
+       "src": "jupiter",
+       "as_of_ms": 1794423034942
+      },
+      "snipers_bps": {
+       "v": null,
+       "src": "none",
+       "as_of_ms": 1794423046799
+      },
+      "bundlers_bps": {
+       "v": null,
+       "src": "none",
+       "as_of_ms": 1794423046799
+      }
+     },
+     "row": {
+      "top10_bps": null,
+      "snipers_bps": null,
+      "chg_4h_bps": null
+     }
+    }
+   },
+   {
+    "status": 200,
+    "body": {
+     "risk": {
+      "top10_bps": {
+       "v": null,
+       "src": "jupiter",
+       "as_of_ms": 1794423034942
+      },
+      "snipers_bps": {
+       "v": null,
+       "src": "none",
+       "as_of_ms": 1794423046799
+      },
+      "bundlers_bps": {
+       "v": null,
+       "src": "none",
+       "as_of_ms": 1794423046799
+      }
+     },
+     "row": {
+      "top10_bps": null,
+      "snipers_bps": null,
+      "chg_4h_bps": null
+     }
+    }
+   },
+   {
+    "status": 200,
+    "body": {
+     "risk": {
+      "top10_bps": {
+       "v": 5041,
+       "src": "jupiter",
+       "as_of_ms": 1794423042960
+      },
+      "snipers_bps": {
+       "v": null,
+       "src": "none",
+       "as_of_ms": 1794423053621
+      },
+      "bundlers_bps": {
+       "v": null,
+       "src": "none",
+       "as_of_ms": 1794423053621
+      }
+     },
+     "row": {
+      "top10_bps": 5041,
+      "snipers_bps": null,
+      "chg_4h_bps": null
+     }
+    }
+   },
+   {
+    "status": 200,
+    "body": {
+     "risk": {
+      "top10_bps": {
+       "v": 0,
+       "src": "chain",
+       "as_of_ms": 1794423093661
+      },
+      "snipers_bps": {
+       "v": 0,
+       "src": "chain",
+       "as_of_ms": 1794423093661
+      },
+      "bundlers_bps": {
+       "v": 0,
+       "src": "chain",
+       "as_of_ms": 1794423093661
+      }
+     },
+     "row": {
+      "top10_bps": 0,
+      "snipers_bps": 0,
+      "chg_4h_bps": null
+     }
+    }
+   }
+  ]
+ },
+ "bad_deployed": {
+  "base": "https://ct-api.unrealized.trade",
+  "at": "2026-11-11T18:50:58.334Z",
+  "holders": "keyed",
+  "lists": 200,
+  "mint": "8VQZBy9pV6ZyQcxu8CGag2yJHSMELrA9GZhLM9c4pump",
+  "pages": [
+   {
+    "status": 200,
+    "body": {
+     "risk": {
+      "top10_bps": {
+       "v": null,
+       "src": "jupiter",
+       "as_of_ms": 1794423030942
+      },
+      "snipers_bps": {
+       "v": null,
+       "src": "none",
+       "as_of_ms": 1794423039953
+      },
+      "bundlers_bps": {
+       "v": null,
+       "src": "none",
+       "as_of_ms": 1794423039953
+      }
+     },
+     "row": {
+      "top10_bps": null,
+      "snipers_bps": null,
+      "chg_4h_bps": null
+     }
+    }
+   },
+   {
+    "status": 200,
+    "body": {
+     "risk": {
+      "top10_bps": {
+       "v": null,
+       "src": "jupiter",
+       "as_of_ms": 1794423030942
+      },
+      "snipers_bps": {
+       "v": null,
+       "src": "none",
+       "as_of_ms": 1794423039953
+      },
+      "bundlers_bps": {
+       "v": null,
+       "src": "none",
+       "as_of_ms": 1794423039953
+      }
+     },
+     "row": {
+      "top10_bps": null,
+      "snipers_bps": null,
+      "chg_4h_bps": null
+     }
+    }
+   },
+   {
+    "status": 200,
+    "body": {
+     "risk": {
+      "top10_bps": {
+       "v": null,
+       "src": "jupiter",
+       "as_of_ms": 1794423030942
+      },
+      "snipers_bps": {
+       "v": null,
+       "src": "none",
+       "as_of_ms": 1794423039953
+      },
+      "bundlers_bps": {
+       "v": null,
+       "src": "none",
+       "as_of_ms": 1794423039953
+      }
+     },
+     "row": {
+      "top10_bps": null,
+      "snipers_bps": null,
+      "chg_4h_bps": null
+     }
+    }
+   },
+   {
+    "status": 200,
+    "body": {
+     "risk": {
+      "top10_bps": {
+       "v": null,
+       "src": "jupiter",
+       "as_of_ms": 1794423030942
+      },
+      "snipers_bps": {
+       "v": null,
+       "src": "none",
+       "as_of_ms": 1794423039953
+      },
+      "bundlers_bps": {
+       "v": null,
+       "src": "none",
+       "as_of_ms": 1794423039953
+      }
+     },
+     "row": {
+      "top10_bps": null,
+      "snipers_bps": null,
+      "chg_4h_bps": null
+     }
+    }
+   },
+   {
+    "status": 200,
+    "body": {
+     "risk": {
+      "top10_bps": {
+       "v": null,
+       "src": "jupiter",
+       "as_of_ms": 1794423034942
+      },
+      "snipers_bps": {
+       "v": null,
+       "src": "none",
+       "as_of_ms": 1794423046799
+      },
+      "bundlers_bps": {
+       "v": null,
+       "src": "none",
+       "as_of_ms": 1794423046799
+      }
+     },
+     "row": {
+      "top10_bps": null,
+      "snipers_bps": null,
+      "chg_4h_bps": null
+     }
+    }
+   },
+   {
+    "status": 200,
+    "body": {
+     "risk": {
+      "top10_bps": {
+       "v": null,
+       "src": "jupiter",
+       "as_of_ms": 1794423034942
+      },
+      "snipers_bps": {
+       "v": null,
+       "src": "none",
+       "as_of_ms": 1794423046799
+      },
+      "bundlers_bps": {
+       "v": null,
+       "src": "none",
+       "as_of_ms": 1794423046799
+      }
+     },
+     "row": {
+      "top10_bps": null,
+      "snipers_bps": null,
+      "chg_4h_bps": null
+     }
+    }
+   },
+   {
+    "status": 200,
+    "body": {
+     "risk": {
+      "top10_bps": {
+       "v": null,
+       "src": "jupiter",
+       "as_of_ms": 1794423034942
+      },
+      "snipers_bps": {
+       "v": null,
+       "src": "none",
+       "as_of_ms": 1794423046799
+      },
+      "bundlers_bps": {
+       "v": null,
+       "src": "none",
+       "as_of_ms": 1794423046799
+      }
+     },
+     "row": {
+      "top10_bps": null,
+      "snipers_bps": null,
+      "chg_4h_bps": null
+     }
+    }
+   },
+   {
+    "status": 200,
+    "body": {
+     "risk": {
+      "top10_bps": {
+       "v": 5041,
+       "src": "jupiter",
+       "as_of_ms": 1794423042960
+      },
+      "snipers_bps": {
+       "v": null,
+       "src": "none",
+       "as_of_ms": 1794423053621
+      },
+      "bundlers_bps": {
+       "v": null,
+       "src": "none",
+       "as_of_ms": 1794423053621
+      }
+     },
+     "row": {
+      "top10_bps": 5041,
+      "snipers_bps": null,
+      "chg_4h_bps": null
+     }
+    }
+   },
+   {
+    "status": 200,
+    "body": {
+     "risk": {
+      "top10_bps": {
+       "v": 5041,
+       "src": "jupiter",
+       "as_of_ms": 1794423042960
+      },
+      "snipers_bps": {
+       "v": null,
+       "src": "none",
+       "as_of_ms": 1794423053621
+      },
+      "bundlers_bps": {
+       "v": null,
+       "src": "none",
+       "as_of_ms": 1794423053621
+      }
+     },
+     "row": {
+      "top10_bps": 5041,
+      "snipers_bps": null,
+      "chg_4h_bps": null
+     }
+    }
+   }
+  ]
+ },
+ "bad_guess": {
+  "base": "https://ct-api.unrealized.trade",
+  "at": "2026-11-11T18:50:58.334Z",
+  "holders": "keyed",
+  "lists": 200,
+  "mint": "8VQZBy9pV6ZyQcxu8CGag2yJHSMELrA9GZhLM9c4pump",
+  "pages": [
+   {
+    "status": 200,
+    "body": {
+     "risk": {
+      "top10_bps": {
+       "v": null,
+       "src": "jupiter",
+       "as_of_ms": 1794423030942
+      },
+      "snipers_bps": {
+       "v": null,
+       "src": "none",
+       "as_of_ms": 1794423039953
+      },
+      "bundlers_bps": {
+       "v": null,
+       "src": "none",
+       "as_of_ms": 1794423039953
+      }
+     },
+     "row": {
+      "top10_bps": null,
+      "snipers_bps": null,
+      "chg_4h_bps": null
+     }
+    }
+   },
+   {
+    "status": 200,
+    "body": {
+     "risk": {
+      "top10_bps": {
+       "v": null,
+       "src": "jupiter",
+       "as_of_ms": 1794423030942
+      },
+      "snipers_bps": {
+       "v": null,
+       "src": "none",
+       "as_of_ms": 1794423039953
+      },
+      "bundlers_bps": {
+       "v": null,
+       "src": "none",
+       "as_of_ms": 1794423039953
+      }
+     },
+     "row": {
+      "top10_bps": null,
+      "snipers_bps": null,
+      "chg_4h_bps": null
+     }
+    }
+   },
+   {
+    "status": 200,
+    "body": {
+     "risk": {
+      "top10_bps": {
+       "v": null,
+       "src": "jupiter",
+       "as_of_ms": 1794423030942
+      },
+      "snipers_bps": {
+       "v": null,
+       "src": "none",
+       "as_of_ms": 1794423039953
+      },
+      "bundlers_bps": {
+       "v": null,
+       "src": "none",
+       "as_of_ms": 1794423039953
+      }
+     },
+     "row": {
+      "top10_bps": null,
+      "snipers_bps": null,
+      "chg_4h_bps": null
+     }
+    }
+   },
+   {
+    "status": 200,
+    "body": {
+     "risk": {
+      "top10_bps": {
+       "v": null,
+       "src": "jupiter",
+       "as_of_ms": 1794423030942
+      },
+      "snipers_bps": {
+       "v": null,
+       "src": "none",
+       "as_of_ms": 1794423039953
+      },
+      "bundlers_bps": {
+       "v": null,
+       "src": "none",
+       "as_of_ms": 1794423039953
+      }
+     },
+     "row": {
+      "top10_bps": null,
+      "snipers_bps": null,
+      "chg_4h_bps": null
+     }
+    }
+   },
+   {
+    "status": 200,
+    "body": {
+     "risk": {
+      "top10_bps": {
+       "v": null,
+       "src": "jupiter",
+       "as_of_ms": 1794423034942
+      },
+      "snipers_bps": {
+       "v": null,
+       "src": "none",
+       "as_of_ms": 1794423046799
+      },
+      "bundlers_bps": {
+       "v": null,
+       "src": "none",
+       "as_of_ms": 1794423046799
+      }
+     },
+     "row": {
+      "top10_bps": null,
+      "snipers_bps": null,
+      "chg_4h_bps": null
+     }
+    }
+   },
+   {
+    "status": 200,
+    "body": {
+     "risk": {
+      "top10_bps": {
+       "v": null,
+       "src": "jupiter",
+       "as_of_ms": 1794423034942
+      },
+      "snipers_bps": {
+       "v": null,
+       "src": "none",
+       "as_of_ms": 1794423046799
+      },
+      "bundlers_bps": {
+       "v": null,
+       "src": "none",
+       "as_of_ms": 1794423046799
+      }
+     },
+     "row": {
+      "top10_bps": null,
+      "snipers_bps": null,
+      "chg_4h_bps": null
+     }
+    }
+   },
+   {
+    "status": 200,
+    "body": {
+     "risk": {
+      "top10_bps": {
+       "v": null,
+       "src": "jupiter",
+       "as_of_ms": 1794423034942
+      },
+      "snipers_bps": {
+       "v": null,
+       "src": "none",
+       "as_of_ms": 1794423046799
+      },
+      "bundlers_bps": {
+       "v": null,
+       "src": "none",
+       "as_of_ms": 1794423046799
+      }
+     },
+     "row": {
+      "top10_bps": null,
+      "snipers_bps": null,
+      "chg_4h_bps": null
+     }
+    }
+   },
+   {
+    "status": 200,
+    "body": {
+     "risk": {
+      "top10_bps": {
+       "v": 5041,
+       "src": "jupiter",
+       "as_of_ms": 1794423042960
+      },
+      "snipers_bps": {
+       "v": null,
+       "src": "none",
+       "as_of_ms": 1794423053621
+      },
+      "bundlers_bps": {
+       "v": null,
+       "src": "none",
+       "as_of_ms": 1794423053621
+      }
+     },
+     "row": {
+      "top10_bps": 5041,
+      "snipers_bps": null,
+      "chg_4h_bps": null
+     }
+    }
+   },
+   {
+    "status": 200,
+    "body": {
+     "risk": {
+      "top10_bps": {
+       "v": 0,
+       "src": "chain",
+       "as_of_ms": 1794423093661
+      },
+      "snipers_bps": {
+       "v": 0,
+       "src": "chain",
+       "as_of_ms": 1794423093661
+      },
+      "bundlers_bps": {
+       "v": 300,
+       "src": "none",
+       "as_of_ms": 1794423093661
+      }
+     },
+     "row": {
+      "top10_bps": 0,
+      "snipers_bps": 0,
+      "chg_4h_bps": null
+     }
+    }
+   }
+  ]
+ }
+}

@@ -241,67 +241,6 @@ test("the mainnet build's state with a pinned pool: the queue's ready proof as r
   w.close();
 });
 
-test("with a mainnet pin, pool.deposit, pool.buy, pool.sell and pool.withdraw reach the page's pool flow: none is refused not_allowed", async () => {
-  // a note of the pool's scope another device spent: its buy's W is the sell's to read, on the helper's keyed route only
-  const w = await openWalletStore({});
-  const ns = await openNoteStore(w);
-  const p = await ns.planDeposit(SCOPE, () => 2n);
-  await ns.move(p.id, "PLANNED", "INCOMING", { send: { signature: "2".repeat(64), value: CHUNK, last_valid_block_height: 1n } });
-  await ns.move(p.id, "INCOMING", "UNSPENT", { leaf: { value: CHUNK, label: 2n, commitment: noteCommitment(CHUNK, 2n, p.precommitment), leafIndex: 1n } });
-  await ns.move(p.id, "UNSPENT", "SPENT", {});
-  const ask = async (data: Record<string, unknown>): Promise<Record<string, unknown>> => {
-    const id = crypto.randomUUID();
-    const e = new Event("message");
-    Object.defineProperties(e, { origin: { value: APP_ORIGIN }, source: { value: frameWindow }, data: { value: { v: 1, id, ...data } } });
-    win.dispatchEvent(e);
-    let a: { ok?: boolean; error?: { code: string } } | undefined;
-    for (let t = 0; t < 1500 && !a; t++) {
-      a = posted.find((m) => m.id === id) as typeof a;
-      if (!a) await new Promise((ok) => setTimeout(ok, 10));
-    }
-    assert.ok(a, `${String(data.type)}: answered`);
-    assert.notEqual(a?.error?.code, "not_allowed", `${String(data.type)} was refused not_allowed: it never reached the flow`);
-    const { v: _v, id: _id, ...got } = a as Record<string, unknown>;
-    return got;
-  };
-  let from = calls.length;
-  // each answer is the flow's own (src/pool-testnet.ts): the deposit's reads fail on this test's RPCs, the buy finds no
-  // proof it may spend and the sell no W holding the token, and the withdraw opens the page's screen
-  for (const [data, want] of [
-    [{ type: "pool.deposit", chain: "solana", amount: "0.02" }, { ok: false, error: { code: "failed" } }],
-    [{ type: "pool.buy", chain: "solana", token: "So11111111111111111111111111111111111111112", amount: "0.001", slippage_bps: 100 }, { ok: false, error: { code: "not_funded" } }],
-    [{ type: "pool.sell", chain: "solana", token: SELL_MINT, amount: "1", slippage_bps: 100 }, { ok: false, error: { code: "not_funded" } }],
-  ] as const) {
-    assert.deepEqual(await ask(data), want, `${data.type}: the flow's own answer`);
-  }
-  // the page's own positions pass at sign in kept a whole pass that lists no W (card pool-sell-legs-side-by-side):
-  // this device has no buy record of its W, so the sell reads that W through the finder, on the helper's keyed route
-  // only (review of 55d4c6eb, P2-A: a W from before a sign out); no provider is asked for any W's accounts
-  const reads = (c: { method: string }) => c.method === "getBalance" || c.method === "getTokenAccountsByOwner" || c.method === "getMultipleAccounts";
-  const kept = calls.slice(from).filter(reads);
-  assert.ok(kept.some((c) => c.method === "getTokenAccountsByOwner"), "the unrecorded W read through the finder");
-  assert.deepEqual([...new Set(kept.map((c) => c.url))], ["https://ct-api.unrealized.trade/v1/rpc/solana"], "a kept pass and an unrecorded W: the W's reads on the helper's route only");
-  // with no pass kept (a device whose passes have not run), the sell finds its Ws by their holdings, and only through
-  // the helper's keyed route: never on the public provider, which would see the user's W asked from the user's own address
-  await w.delete("meta", "owed/positions-sol");
-  from = calls.length;
-  const sell = { type: "pool.sell", chain: "solana", token: SELL_MINT, amount: "1", slippage_bps: 100 } as const;
-  assert.deepEqual(await ask(sell), { ok: false, error: { code: "not_funded" } }, "pool.sell with no pass kept: the flow's own answer");
-  const holdings = calls.slice(from).filter((c) => c.method === "getBalance" || c.method === "getTokenAccountsByOwner");
-  assert.ok(holdings.length >= 3, `the sell's W holdings were read: ${holdings.length} call(s)`);
-  assert.deepEqual([...new Set(holdings.map((c) => c.url))], ["https://ct-api.unrealized.trade/v1/rpc/solana"], "the W's holdings on the helper's route only");
-  // pool.withdraw last: its flow opens the page's screen, which takes the app's frame away (shell.ts open, after
-  // FRAME_LEAVE_MS), so an answer after it reaches no frame; its flow opens the screen only as withdraw.open does, on the
-  // signed-in page (main.ts openPoolWithdraw): the page is set to it here, since this DOM draws no page
-  const find = (el: El): El | undefined => (el.id === "signin" ? el : el.children.map(find).find((x) => x !== undefined));
-  const root = find(doc.body);
-  assert.ok(root, "the page's root is in the document");
-  root.dataset.signin = "signed-in";
-  assert.deepEqual(await ask({ type: "pool.withdraw", chain: "solana", return_key: "portfolio" }), { ok: true, result: { pending: true } }, "pool.withdraw: the flow's own answer");
-  ns.close();
-  w.close();
-});
-
 test("the mainnet build's pool reads on the network's own pair and fee route: SIGN_HOST's provider A and the helper's keyed route, and GET /v1/pool/fee with cluster=mainnet", async () => {
   const { pageSolanaRpcs, poolRelayFee, PAGE_CLUSTER, PAGE_SOL_PIN, PAGE_TABLES } = await import("../src/pool-testnet.ts");
   const { SOL_MAINNET_DEPLOY, SOL_POOL_TABLES } = await import("../../wallet/src/pool/solana.ts");
@@ -380,4 +319,67 @@ test("review of 56a57ed2: main.ts's restore host says this mainnet build gives a
   const h = (globalThis as { __ctRestoreHost?: { addressed?: (chain: string) => boolean } }).__ctRestoreHost;
   assert.ok(h?.addressed, "the page's restore host has its addressed wiring");
   assert.deepEqual(["solana", "base", "robinhood"].map((c) => [c, h.addressed!(c)]), [["solana", true], ["base", false], ["robinhood", false]]);
+});
+
+// last in this file: pool.withdraw opens the page's screen, and while a sheet shows the shell reads no message from the
+// frame (src/shell.ts listen), so a test after it would get no answer (card signing-views-open-over-the-app)
+test("with a mainnet pin, pool.deposit, pool.buy, pool.sell and pool.withdraw reach the page's pool flow: none is refused not_allowed", async () => {
+  // a note of the pool's scope another device spent: its buy's W is the sell's to read, on the helper's keyed route only
+  const w = await openWalletStore({});
+  const ns = await openNoteStore(w);
+  const p = await ns.planDeposit(SCOPE, () => 2n);
+  await ns.move(p.id, "PLANNED", "INCOMING", { send: { signature: "2".repeat(64), value: CHUNK, last_valid_block_height: 1n } });
+  await ns.move(p.id, "INCOMING", "UNSPENT", { leaf: { value: CHUNK, label: 2n, commitment: noteCommitment(CHUNK, 2n, p.precommitment), leafIndex: 1n } });
+  await ns.move(p.id, "UNSPENT", "SPENT", {});
+  const ask = async (data: Record<string, unknown>): Promise<Record<string, unknown>> => {
+    const id = crypto.randomUUID();
+    const e = new Event("message");
+    Object.defineProperties(e, { origin: { value: APP_ORIGIN }, source: { value: frameWindow }, data: { value: { v: 1, id, ...data } } });
+    win.dispatchEvent(e);
+    let a: { ok?: boolean; error?: { code: string } } | undefined;
+    for (let t = 0; t < 1500 && !a; t++) {
+      a = posted.find((m) => m.id === id) as typeof a;
+      if (!a) await new Promise((ok) => setTimeout(ok, 10));
+    }
+    assert.ok(a, `${String(data.type)}: answered`);
+    assert.notEqual(a?.error?.code, "not_allowed", `${String(data.type)} was refused not_allowed: it never reached the flow`);
+    const { v: _v, id: _id, ...got } = a as Record<string, unknown>;
+    return got;
+  };
+  let from = calls.length;
+  // each answer is the flow's own (src/pool-testnet.ts): the deposit's reads fail on this test's RPCs, the buy finds no
+  // proof it may spend and the sell no W holding the token, and the withdraw opens the page's screen
+  for (const [data, want] of [
+    [{ type: "pool.deposit", chain: "solana", amount: "0.02" }, { ok: false, error: { code: "failed" } }],
+    [{ type: "pool.buy", chain: "solana", token: "So11111111111111111111111111111111111111112", amount: "0.001", slippage_bps: 100 }, { ok: false, error: { code: "not_funded" } }],
+    [{ type: "pool.sell", chain: "solana", token: SELL_MINT, amount: "1", slippage_bps: 100 }, { ok: false, error: { code: "not_funded" } }],
+  ] as const) {
+    assert.deepEqual(await ask(data), want, `${data.type}: the flow's own answer`);
+  }
+  // the page's own positions pass at sign in kept a whole pass that lists no W (card pool-sell-legs-side-by-side):
+  // this device has no buy record of its W, so the sell reads that W through the finder, on the helper's keyed route
+  // only (review of 55d4c6eb, P2-A: a W from before a sign out); no provider is asked for any W's accounts
+  const reads = (c: { method: string }) => c.method === "getBalance" || c.method === "getTokenAccountsByOwner" || c.method === "getMultipleAccounts";
+  const kept = calls.slice(from).filter(reads);
+  assert.ok(kept.some((c) => c.method === "getTokenAccountsByOwner"), "the unrecorded W read through the finder");
+  assert.deepEqual([...new Set(kept.map((c) => c.url))], ["https://ct-api.unrealized.trade/v1/rpc/solana"], "a kept pass and an unrecorded W: the W's reads on the helper's route only");
+  // with no pass kept (a device whose passes have not run), the sell finds its Ws by their holdings, and only through
+  // the helper's keyed route: never on the public provider, which would see the user's W asked from the user's own address
+  await w.delete("meta", "owed/positions-sol");
+  from = calls.length;
+  const sell = { type: "pool.sell", chain: "solana", token: SELL_MINT, amount: "1", slippage_bps: 100 } as const;
+  assert.deepEqual(await ask(sell), { ok: false, error: { code: "not_funded" } }, "pool.sell with no pass kept: the flow's own answer");
+  const holdings = calls.slice(from).filter((c) => c.method === "getBalance" || c.method === "getTokenAccountsByOwner");
+  assert.ok(holdings.length >= 3, `the sell's W holdings were read: ${holdings.length} call(s)`);
+  assert.deepEqual([...new Set(holdings.map((c) => c.url))], ["https://ct-api.unrealized.trade/v1/rpc/solana"], "the W's holdings on the helper's route only");
+  // pool.withdraw last: its flow opens the page's screen, which takes the app's frame away (shell.ts open, after
+  // FRAME_LEAVE_MS), so an answer after it reaches no frame; its flow opens the screen only as withdraw.open does, on the
+  // signed-in page (main.ts openPoolWithdraw): the page is set to it here, since this DOM draws no page
+  const find = (el: El): El | undefined => (el.id === "signin" ? el : el.children.map(find).find((x) => x !== undefined));
+  const root = find(doc.body);
+  assert.ok(root, "the page's root is in the document");
+  root.dataset.signin = "signed-in";
+  assert.deepEqual(await ask({ type: "pool.withdraw", chain: "solana", return_key: "portfolio" }), { ok: true, result: { pending: true } }, "pool.withdraw: the flow's own answer");
+  ns.close();
+  w.close();
 });

@@ -8,13 +8,20 @@
 // them again every POLL_MS until a token of the first answer is gone from the newest (at most WAIT_MS), and reads
 // GET /v1/market/trades?chain=<chain>&token=<t>&limit=50 for up to DROPPED_MAX such tokens. A chain whose lists drop
 // none in WAIT_MS is named and proves nothing.
-// PASS when at least one chain dropped a token and every dropped token's tape answers 200 JSON { trades: [...] }; FAIL
-// when one answers otherwise (a 404 is the bug) or a lists read fails; INCONCLUSIVE (exit 3) when no chain dropped one.
+// A cold tape answers at the route's bound with what it holds and `filling: true` while its reads go on (card
+// token-page-data-complete-and-fast: ten cold Base tapes opened at once from the Mac answered 503 at 12 s in 6 of 10
+// before it, two seconds after the token page had given up on them at 10 s), so a tape
+// that answers filling is read again every FILL_POLL_MS until the mark goes, for FILLED_MS at most from its first read.
+// PASS when at least one chain dropped a token and every dropped token's tape answers 200 JSON { trades: [...] } within
+// ANSWER_MS and, when it answered filling, is filled within FILLED_MS; FAIL when one answers otherwise (a 404 is the
+// bug, a 503 a failed read), answers past ANSWER_MS, is still filling at FILLED_MS, or a lists read fails; INCONCLUSIVE
+// (exit 3) when no chain dropped one.
 // After: helper
 //   node scripts/live-checks/robinhood-listed-tape-opens.mjs [--base <url>] [--wait-ms <n>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3. --record writes what the run read, for the test.
 import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
+import { FILL_POLL_MS, FILLED_MS, fillingOf, filledVerdict, readFilled } from "./tape-read.mjs";
 
 const KEY = "robinhood-listed-tape-opens";
 export const BASE = "https://ct-api.unrealized.trade";
@@ -25,6 +32,11 @@ export const CHAINS = ["robinhood", "base", "solana"];
 export const WAIT_MS = 300_000;
 export const POLL_MS = 15_000;
 export const DROPPED_MAX = 6;
+/** A tape's first answer: within the token page's read of it, which gives up at 10 s (apps/terminal/src/screens/token/
+ *  trades.ts TIMEOUT_MS); past it the page shows no tape whatever the helper answers. The route answers at its bound
+ *  (apps/helper/src/data/evm/swaps.ts OPEN_BOUND_MS, 8 s) with what it holds. */
+export const ANSWER_MS = 10_000;
+export { FILL_POLL_MS, FILLED_MS } from "./tape-read.mjs";
 const ADDRESS = { robinhood: /^0x[0-9a-f]{40}$/, base: /^0x[0-9a-f]{40}$/, solana: /^[1-9A-HJ-NP-Za-km-z]{32,44}$/ };
 
 async function get(base, path, fetchFn) {
@@ -60,7 +72,7 @@ const shapeOf = (body) => {
 };
 
 /** One chain: its lists, read again until a token of the first answer is gone, then those tokens' tapes. */
-async function chainRun(base, chain, fetchFn, waitMs, pollMs, sleep) {
+async function chainRun(base, chain, fetchFn, waitMs, pollMs, sleep, filledMs, fillPollMs) {
   const first = await get(base, `/v1/market/lists?chain=${chain}`, fetchFn);
   const held = first.status === 200 ? tokensOf(chain, first.body) : [];
   const run = { lists: { status: first.status, tokens: held.length }, reads: 1, waitedMs: 0, dropped: [] };
@@ -78,8 +90,14 @@ async function chainRun(base, chain, fetchFn, waitMs, pollMs, sleep) {
   run.waitedMs = Math.round(performance.now() - t0);
   run.dropped = await Promise.all(
     gone.map(async (t) => {
-      const a = await get(base, `/v1/market/trades?chain=${chain}&token=${t}&limit=50`, fetchFn);
-      return { address: t, status: a.status, ms: a.ms, shape: a.status === 200 ? shapeOf(a.body) : null, ...(a.error ? { error: a.error } : {}), ...(a.status !== 200 ? { body: a.body.slice(0, 120) } : {}) };
+      const path = `/v1/market/trades?chain=${chain}&token=${t}&limit=50`;
+      const a = await get(base, path, fetchFn);
+      const d = { address: t, status: a.status, ms: a.ms, shape: a.status === 200 ? shapeOf(a.body) : null, ...(a.error ? { error: a.error } : {}), ...(a.status !== 200 ? { body: a.body.slice(0, 120) } : {}) };
+      if (a.status !== 200 || !fillingOf(a.body)) return d;
+      // filling: read again until the mark goes, a read fails, or FILLED_MS from the first read (tape-read.mjs)
+      d.filling = true;
+      d.filled = await readFilled(() => get(base, path, fetchFn), shapeOf, { sleep, filledMs, pollMs: fillPollMs });
+      return d;
     }),
   );
   return run;
@@ -88,7 +106,7 @@ async function chainRun(base, chain, fetchFn, waitMs, pollMs, sleep) {
 export async function read(base = BASE, fetchFn = fetch, o = {}) {
   const at = new Date().toISOString();
   const sleep = o.sleep ?? ((ms) => new Promise((ok) => setTimeout(ok, ms)));
-  const runs = await Promise.all(CHAINS.map((c) => chainRun(base, c, fetchFn, o.waitMs ?? WAIT_MS, o.pollMs ?? POLL_MS, sleep)));
+  const runs = await Promise.all(CHAINS.map((c) => chainRun(base, c, fetchFn, o.waitMs ?? WAIT_MS, o.pollMs ?? POLL_MS, sleep, o.filledMs ?? FILLED_MS, o.fillPollMs ?? FILL_POLL_MS)));
   return { base, at, chains: Object.fromEntries(CHAINS.map((c, i) => [c, runs[i]])) };
 }
 
@@ -112,9 +130,15 @@ export function judge(run) {
     seen++;
     lines.push(`ok  ${c}: ${dropped.length} of the first answer's ${r.lists.tokens} tokens gone from the lists after ${Math.round(r.waitedMs / 1000)} s`);
     for (const d of dropped) {
-      const ok = d.status === 200 && d.shape === "tape";
+      const inTime = Number.isSafeInteger(d.ms) && d.ms <= ANSWER_MS;
+      const ok = d.status === 200 && d.shape === "tape" && inTime;
       if (!ok) bad = true;
-      lines.push(`${ok ? "ok " : "BAD"} ${c} trades ${d.address} (dropped): ${d.status}${d.status === 200 ? ` ${d.shape}` : ` ${d.body ?? ""}`}${d.error ? ` ${d.error}` : ""} in ${d.ms} ms`);
+      lines.push(`${ok ? "ok " : "BAD"} ${c} trades ${d.address} (dropped): ${d.status}${d.status === 200 ? ` ${d.shape}${d.filling ? " filling" : ""}` : ` ${d.body ?? ""}`}${d.error ? ` ${d.error}` : ""} in ${d.ms} ms${d.status === 200 && !inTime ? `, past ${ANSWER_MS} ms` : ""}`);
+      if (!ok || d.filling !== true) continue;
+      // a filling first answer: filled (a 200 tape with no mark) within FILLED_MS, never still filling or a failed read
+      const v = filledVerdict(d.filled);
+      if (!v.ok) bad = true;
+      lines.push(`${v.ok ? "ok " : "BAD"} ${c} trades ${d.address} (dropped): ${v.text}`);
     }
   }
   return { verdict: bad ? "FAIL" : seen === 0 ? "INCONCLUSIVE" : "PASS", lines };

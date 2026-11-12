@@ -1,0 +1,2632 @@
+{
+  "at": "2026-11-11T19:09:35.171Z",
+  "what": "deposit, buy, sell and withdraw of the Solana pool on a local copy of mainnet (solana-test-validator, mainnet's feature set, mainnet accounts cloned)",
+  "validator": {
+    "feature-set": 3383571666,
+    "solana-core": "4.3.2"
+  },
+  "mainnetSlot": 468234489,
+  "rent": {
+    "mainnet": "d813000000000000000000000000f03f32",
+    "copy": "d813000000000000000000000000f03f32"
+  },
+  "clock": [
+    {
+      "wallMs": 1794423996174,
+      "confirmed": {
+        "slot": 32,
+        "time": 1794423996
+      },
+      "finalized": {
+        "slot": 32,
+        "time": 1794423996
+      }
+    },
+    {
+      "wallMs": 1794423996684,
+      "confirmed": {
+        "slot": 35,
+        "time": 1794423996
+      },
+      "finalized": {
+        "slot": 35,
+        "time": 1794423996
+      }
+    }
+  ],
+  "mainnetReads": 6,
+  "plant": null,
+  "copyTables": {
+    "pumpswap": {
+      "venue": "pumpswap",
+      "table": "FgEMbfTgkWjN663EmGTRheisjn9AqUAQkWaoxNy3Q3Dh",
+      "range": {
+        "state": [
+          0,
+          134
+        ],
+        "label": [
+          0,
+          88
+        ]
+      },
+      "addresses": 256,
+      "txs": [
+        {
+          "step": "lookup table: create and extend with 30 addresses",
+          "signature": "2kdyJq6dbrPYMKEPhaCC9GJUj6JBDm1wBgyTYsfaGLfmRu1dkiMymZD7VXFHxTS4ZVGdHYExhaySndHXN3sf3ZMA"
+        },
+        {
+          "step": "lookup table: extend with 30 addresses",
+          "signature": "ikpaZTwaRFNyxcYv2YQDZDdFbt5LeViL1ds9KCSbQybFrgW4wQucFuJ8fYwJrC5d7E55BkeT1HhiMxxuF8b6cwS"
+        },
+        {
+          "step": "lookup table: extend with 30 addresses",
+          "signature": "2PaxcsZC6tknuaH1KrvhW28JmD8iUhb9qygcD1C9nDZxLap1bLEer6RASiUPGhLKABoL3FGGrLGwGRXnf21m9z8m"
+        },
+        {
+          "step": "lookup table: extend with 30 addresses",
+          "signature": "42L1ZrLmUjhrrC3XebsXu9Aag57JuCLJjhL8EQ8WkpxpkHgLoadek7Vc4qBWtGdH5FkrGMxELPL4X35kACN6euUf"
+        },
+        {
+          "step": "lookup table: extend with 30 addresses",
+          "signature": "2RE3svDvcA2wDzXo31oTc13YtYdD5rYD1qdRRX85ib6A5HmJ48FhYzBtMVeKXk68Dc5d1Tjsxu3BK4gkjdwitJ77"
+        },
+        {
+          "step": "lookup table: extend with 30 addresses",
+          "signature": "3mZcdAbyqGYTorKJ2yNet5ep5UcmpcuK2xAcW5zHxxDQ29TGBtRJzAyrFJfP5xPHrFvJQEvfNY5gyorhUAk31HEF"
+        },
+        {
+          "step": "lookup table: extend with 30 addresses",
+          "signature": "3DsdkFcisV4mWHvA5sBVRBFurMovMX8hW8tZABsPknCgyE395VHZSymvn6AD7qVDqhzLUxWWPLBpDXEcG4JDSBA7"
+        },
+        {
+          "step": "lookup table: extend with 30 addresses",
+          "signature": "h7aE51KqbdJK8tCP7ZtiPtF4jUmspotLrCGosCcHYHm9bmyP2Y1435dLZDr3DxMYHtsp4x9h7hNzwZB3smJJT8M"
+        },
+        {
+          "step": "lookup table: extend with 16 addresses",
+          "signature": "hrkiy2a2877hnv9otDQY25GfNikpee7rGBF5rWQzihgbRyic1rJKpBWhMMX7BEsXZz7nB5abPsWjJU7HVu9Vbbp"
+        },
+        {
+          "step": "lookup table: freeze (authority none)",
+          "signature": "7myMFMZpAvLBRpo3PGqhzVdYJqC9VUmHiMATQe5hDftJQeF3bscWk2pWbc4WK4xeY62HGcxbqv4epBufp1Du35w"
+        }
+      ]
+    }
+  },
+  "engine": "swallow",
+  "coins": {
+    "curve": {
+      "mint": "CK5Vqvx9pivAj3KdgRRs9LrpG8EDUvVMHMrFguBHpump",
+      "list": "new",
+      "symbol": "CHILLDOG"
+    },
+    "graduated": {
+      "mint": "CGEDT9QZDvvH5GmVkWJH2BXiMJqMJySC9ihWyr7Spump",
+      "list": "trending",
+      "symbol": "BURNIE"
+    }
+  },
+  "skippedCoins": [],
+  "cloned": {
+    "accounts": [
+      "7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8",
+      "ELkTShr5bKWSwntTpF238dq3r5ha2oVsNyApMk19x4AJ",
+      "EesTGaxwD6izcU1Nr78dk346UqoNA11SQbsbRQkg2pYn",
+      "So11111111111111111111111111111111111111112",
+      "4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4Jjaxnjf",
+      "62qc2CNXwrYqQScmEdiZFFAnJR262PxWEuNQtxfafNgV",
+      "Ce6TQqeHC9p8KetsN6JsjHK7UTZk7nasjjnr7XxXp9F1",
+      "Hq2wp8uJ9jCPsYgNHex8RtqdvMPfVGoYwjvF1ATiwn2Y",
+      "8Wf5TiAheLUqBrKXeYg2JtAFFMWtKdG2BSFgqUcPVwTt",
+      "5YxQFdt3Tr9zJLvkFccqXVUwhdTWJQc1fFg2YPbxvxeD",
+      "9M4giFFMxmFGXtc3feFzRai56WbBqehoSeRE5GK7gf7",
+      "GXPFM2caqTtQYC2cJ5yJRi9VDkpsYZXzYdwYpGnLmtDL",
+      "3BpXnfJaUTiwXnJNe7Ej1rcbzqTTQUvLShZaWazebsVR",
+      "5cjcW9wExnJJiqgLjq7DEG75Pm6JBgE1hNv4B2vHXUW6",
+      "EHAAiTxcdDwQ3U4bU6YcMsQGaekdzLS3B5SmYo46kJtL",
+      "5eHhjP8JaYkz83CWwvGU2uMUXefd3AazWGx4gpcuEEYD",
+      "A7hAgCzFw14fejgCp387JUJRMNyz4j89JKnhtKU8piqW",
+      "BShWZ8FbDPYGpoc1ebj4TiELvVFmBQwW4XMYuLtQoHYZ",
+      "ADaUMid9yfUytqMBgopwjb2DTLSokTSzL1zt6iGPaS49",
+      "HFqU5x63VTqvQss8hp11i4wVV8bD44PvwucfZ2bU7gRe",
+      "DfXygSm4jCyNCybVYYK6DwvWqjKee8pbDmJGcLWNDXjh",
+      "DttWaMuVvTiduZRnguLF7jNxTgiMBZ1hyAumKUiL2KRL",
+      "ADuUkR4vqLUMWXxW9gh6D6L8pMSawimctcNZ5pGwDcEt",
+      "96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5",
+      "Cw8CFyM9FkoMi7K7Crf6HNQqf4uEMzpKw6QNghXLvLkY",
+      "3AVi9Tg9Uo68tJfuvoKvqKNWKkC5wPdSSdeBnizKZ6jT",
+      "CK5Vqvx9pivAj3KdgRRs9LrpG8EDUvVMHMrFguBHpump",
+      "8NP7DJynoSFzNBerqFumYCxkBPJdoT5cxQs18PAD86XH",
+      "EvSwAouaVz17MmidnjHvw3BYemj9BW3q25oEQz5zfwqt",
+      "8UJoeVGxyYJGTVLSqe1YzuAWAnjfu2JL26UDthygyY8M",
+      "ADyA8hdefvWN2dbGGWFotbzWxrAvLW83WG6QCVXvJKqw",
+      "5PHirr8joyTMp9JMm6nW7hNDVyEYdkzDqazxPD7RaTjx",
+      "CGEDT9QZDvvH5GmVkWJH2BXiMJqMJySC9ihWyr7Spump",
+      "5tYFviFWQRKV9BJSTHGitbdqEYC1BGUgRUDnSADUXqJP",
+      "Ba1GEzRm1J1prQDoFutCwQ1SQb8rXgBgA4NTSgjKvfWY",
+      "3MxeQVLjt5YfBe1HKVu62pAQ5b9a6Q6zrWeWkyhPAtrE",
+      "94qWNrtmfn42h3ZjUZwWvK1MEo9uVmmrBPd2hpNjYDjb",
+      "GS4CU59F31iL7aR2Q8zVS8DRrcRnXX1yjQ66TqNVQnaR",
+      "xv27YVBSmoeWi3MmUcQjSNV8kGLHQVN21HFUWyZqxJH",
+      "C2aFPdENg4A2HQsmrd5rTw5TaYBX5Ku887cWjbFKtZpw",
+      "B5CwJoPhLpH4pNAZze7iF84in4DuWa984LJCGSqQ9kEG",
+      "HjQjngTDqoHE6aaGhUqfz9aQ7WZcBRjy5xB8PScLSr8i",
+      "7bL2gEHz22f5NvkFj4iTZ8zxStQqD1uFyoJtGtRS5Nb9",
+      "67AyuATMrfhjxp6ucZDxCjGRSRrdwQSpoPaWaqmmy1PD",
+      "GesfTA3X2arioaHp8bbKdjG9vJtskViWACZoYvxp4twS",
+      "C93K8DX4YsABYJtHX9awzgZW3LWzBqBVezEbbLJH4yet",
+      "4budycTjhs9fD6xw62VBducVTNgMgJJ5BgtKq7mAZwn6",
+      "Bckr4rY4rUGvWtwqC9mnWN35LKzfPRcmsoMRYq6DFEjN",
+      "8SBKzEQU4nLSzcwF4a74F2iaUDQyTfjGndn6qUWBnrpR",
+      "9tvBjCQ4m3954ESgxW9PnBPvW8afHEjKpkNEAdfN2D8U",
+      "4UQeTP1T39KZ9Sfxzo3WR5skgsaP6NZa87BAkuazLEKH",
+      "CoRuMWRuDAsjB5SDMmYEcDuyQyaH3L2vVFvwBy1FF8Kr",
+      "8sNeir4QsLsJdYpc9RZacohhK1Y5FLU3nC5LXgYB4aa6",
+      "21L1QB6DJ9HBvePgwN6jFuK3UT9mq2SgTq1oJ7D6cNiV",
+      "Fh9HmeLNUMVCvejxCtCL2DbYaRyBFVJ5xrWkLnMH6fdk",
+      "2i3uCDzDhr3pSvMPF5uBpUckLAv7XGdo2a8soiqNJMHk",
+      "463MEnMeGyJekNZFQSTUABBEbLnvMTALbT6ZmsxAbAdq",
+      "BZeq7y8ajn5Pjpy5KjEhF6eBY2H9ippTpqCtQLQPsmJf",
+      "6AUH3WEHucYZyC61hqpqYUWVto5qA5hjHuNQ32GNnNxA",
+      "ghSBUgyxyvyurm1vJBkU4rUyLJoUipCZhFeiBogKCSy",
+      "B3DXFHBR6HSHR57dYYyTfQXmJkyj9786ndAnpE6wjYKE"
+    ],
+    "programs": [
+      "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+      "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+      "pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ",
+      "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
+      "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+      "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA"
+    ],
+    "absentOnMainnet": [
+      "ECSchKJGQPtfHC4TLFp78Ao9g51EawTgmQPbmA1cFb5y",
+      "9uZjezZDJjNyqz4gvQkALs9ksHA7UqmdPHsJi5Zjv7Ge",
+      "BXyAJ2ynRqe5Y1rHz9pZW9PgxcK7o3NK7pVZuUGGTMES",
+      "HgbSHhh7hnYnUfFcAwmFGpdRheRJSUuiueVpwfhVLYCL",
+      "33SHL3RsMH6vEZink1xnxsNRqCRA6iDS1iksUE81hZKD",
+      "26zyL6nFkfLiLrt2rKjEoxMUH5fZAMtyYcoySBw7YhAT",
+      "V8LvW438qfk6EzUT5Q4uuRTshGJvVNNftfNjsd95ZJF",
+      "2FvE26r98FC8KLm6r6SNwmqoHZXfmVgR6CHZim7R64jU",
+      "CF3i8KQduKSr1v1BaSEHWkQwskANaLscYo8GVtEPhaxH",
+      "8WE7mA1aX3J4xy8fn1CwnVxq5CuQSTgrUR5mMiwiFiwN",
+      "2oQL3mBdvjEs94umLG53FnFiKqfM2XnhsjdZhUSZwHd2"
+    ],
+    "tablesReset": [
+      "BShWZ8FbDPYGpoc1ebj4TiELvVFmBQwW4XMYuLtQoHYZ"
+    ]
+  },
+  "records": [
+    {
+      "coin": "curve",
+      "step": "deposit",
+      "signature": "2QhEHioaNWjpfiqgAXssK7CHiXNLqpKRAQwkC8D5v9ePXNZ9HAvMnSQmKTayQMmST4fEQsCgi8G5eMFX5CyQvayv",
+      "found": true,
+      "slot": 44,
+      "ok": true,
+      "err": null,
+      "cu": 19338,
+      "cuLimit": null,
+      "fee": 5000,
+      "accounts": 9,
+      "lookups": [],
+      "programs": [
+        "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF"
+      ]
+    },
+    {
+      "coin": "curve",
+      "step": "buy",
+      "signature": "3j2SQ7vfZzLGFrYek3LQJ31JzULpchGgDAGntKFfcryVSeduTwy4ov63rj2bpFC7VQcf2zSKsznoi6owai1k2QrU",
+      "found": true,
+      "slot": 189,
+      "ok": true,
+      "err": null,
+      "cu": 245593,
+      "cuLimit": 300000,
+      "fee": 217245,
+      "accounts": 28,
+      "lookups": [
+        "BShWZ8FbDPYGpoc1ebj4TiELvVFmBQwW4XMYuLtQoHYZ"
+      ],
+      "programs": [
+        "ComputeBudget111111111111111111111111111111",
+        "ComputeBudget111111111111111111111111111111",
+        "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF"
+      ],
+      "lamports": {
+        "W": {
+          "before": 0,
+          "after": 1493440,
+          "change": 1493440
+        },
+        "feePayer": {
+          "before": 10000000000,
+          "after": 10000000715,
+          "change": 715
+        },
+        "tip0": {
+          "before": 1284601,
+          "after": 1384601,
+          "change": 100000
+        }
+      }
+    },
+    {
+      "coin": "curve",
+      "step": "sell",
+      "signature": "4tY9vdRtd2dn4gHSWPkz6ejFUdxQYGwjG3gFZ3kbT1hdN9PCtJVVxUWKVM5ZpkPgNAb7EcFjABfEnzUCWY27NZJm",
+      "found": true,
+      "slot": 192,
+      "ok": true,
+      "err": null,
+      "cu": 74494,
+      "cuLimit": 100000,
+      "fee": 105000,
+      "accounts": 24,
+      "lookups": [],
+      "programs": [
+        "ComputeBudget111111111111111111111111111111",
+        "ComputeBudget111111111111111111111111111111",
+        "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
+        "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF"
+      ],
+      "lamports": {
+        "W": {
+          "before": 1493440,
+          "after": 774490,
+          "change": -718950
+        }
+      }
+    },
+    {
+      "coin": "curve",
+      "step": "sell",
+      "signature": "2TBCfxRULrHdcnsDgNoSHM3LNPQLehmfAs3tB9BrmgVQ1L1F9MikYwp3zwFxQ5SYvJNyy2bpkUeNReQYDjGRFK9U",
+      "found": true,
+      "slot": 198,
+      "ok": true,
+      "err": null,
+      "cu": 1616,
+      "cuLimit": 6600,
+      "fee": 5000,
+      "accounts": 4,
+      "lookups": [],
+      "programs": [
+        "ComputeBudget111111111111111111111111111111",
+        "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+      ],
+      "lamports": {
+        "W": {
+          "before": 774490,
+          "after": 2283330,
+          "change": 1508840
+        }
+      }
+    },
+    {
+      "coin": "curve",
+      "step": "sell",
+      "signature": "3pALdPVZ8cQpBUVXbECobEewKb28DfdtNr3uQrzk63VFvrVGTHuLXHStTXK1EKbGXQf2NUZJHkwaUqYrcXz3cyDw",
+      "found": true,
+      "slot": 198,
+      "ok": true,
+      "err": null,
+      "cu": 12048,
+      "cuLimit": 25600,
+      "fee": 5000,
+      "accounts": 5,
+      "lookups": [],
+      "programs": [
+        "ComputeBudget111111111111111111111111111111",
+        "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
+      ],
+      "lamports": {
+        "W": {
+          "before": 2283330,
+          "after": 3624530,
+          "change": 1341200
+        }
+      }
+    },
+    {
+      "coin": "curve",
+      "step": "withdraw: release",
+      "signature": "2DpW3SHpeQGdkqpwtwVC5rpbovTVaPPv9meoR6ZaChbW5MPb7xGihppi7jcegib7521qk5ZxFpzo5AfJZU2hipmr",
+      "found": true,
+      "slot": 490,
+      "ok": true,
+      "err": null,
+      "cu": 122546,
+      "cuLimit": 400000,
+      "fee": 10000,
+      "accounts": 10,
+      "lookups": [],
+      "programs": [
+        "ComputeBudget111111111111111111111111111111",
+        "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF"
+      ],
+      "lamports": {
+        "feePayer": {
+          "before": 10000000715,
+          "after": 10000208675,
+          "change": 207960
+        }
+      }
+    },
+    {
+      "coin": "curve",
+      "step": "withdraw: onward to To",
+      "signature": "7EQLo1Qeg5A9wUFMJbDx3Xh8upeSaPjWT6wA44qnUWzDeCS6Fo1ndreYNwep8N4cDDGYiEiHC8CaWY8f7CxuQq1",
+      "found": true,
+      "slot": 493,
+      "ok": true,
+      "err": null,
+      "cu": 150,
+      "cuLimit": null,
+      "fee": 5000,
+      "accounts": 3,
+      "lookups": [],
+      "programs": [
+        "11111111111111111111111111111111"
+      ],
+      "lamports": {
+        "to": {
+          "before": 0,
+          "after": 1982495,
+          "change": 1982495
+        }
+      }
+    },
+    {
+      "coin": "graduated",
+      "step": "deposit",
+      "signature": "4fctASQt2V8nDHVZZKmxW5fcjrUhHLnLn8Mn27k3M7oKWuUQcFM4kqbqqxoCVEv2znD7QfwuHkLXmzW2J5Lm7e8o",
+      "found": true,
+      "slot": 551,
+      "ok": true,
+      "err": null,
+      "cu": 23998,
+      "cuLimit": null,
+      "fee": 5000,
+      "accounts": 9,
+      "lookups": [],
+      "programs": [
+        "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF"
+      ]
+    },
+    {
+      "coin": "graduated",
+      "step": "buy",
+      "ok": false,
+      "simulation": {
+        "phase": "buy",
+        "err": {
+          "InstructionError": [
+            2,
+            {
+              "Custom": 1
+            }
+          ]
+        },
+        "cu": 300885,
+        "logsTail": [
+          "Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA consumed 179 of 102239 compute units",
+          "Program return: TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA pQAAAAAAAAA=",
+          "Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA success",
+          "Program 11111111111111111111111111111111 invoke [4]",
+          "Transfer: insufficient lamports 5000, need 1488440",
+          "Program 11111111111111111111111111111111 failed: custom program error: 0x1",
+          "Program ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL consumed 8553 of 107668 compute units",
+          "Program ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL failed: custom program error: 0x1",
+          "Program pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA consumed 92898 of 192013 compute units",
+          "Program pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA failed: custom program error: 0x1",
+          "Program EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF consumed 300585 of 399700 compute units",
+          "Program EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF failed: custom program error: 0x1"
+        ]
+      }
+    },
+    {
+      "coin": "graduated",
+      "step": "flow",
+      "ok": false,
+      "exit": 1,
+      "buyAnswer": {
+        "result": {
+          "stage": "not_landed",
+          "txs": []
+        }
+      },
+      "sellAnswer": null
+    }
+  ],
+  "runs": {
+    "curve": {
+      "exit": 0,
+      "flow": {
+        "at": "2026-11-11T19:07:07.896Z",
+        "cluster": "mainnet copy",
+        "program": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+        "seedFile": "/tmp/sol-copy-V4Wn5P/curve/run-2026-11-11T19-06-37-529Z.seed",
+        "steps": [
+          {
+            "step": "deposit",
+            "signature": "2QhEHioaNWjpfiqgAXssK7CHiXNLqpKRAQwkC8D5v9ePXNZ9HAvMnSQmKTayQMmST4fEQsCgi8G5eMFX5CyQvayv",
+            "watch": {
+              "W": "HmVhbevZ8siL1funhmNB1wvXnZ4gs4WxadetyQGE1Jwy",
+              "feePayer": "D6zfDjp7h9jifbMVp5qpndYk5eoBRcWVKXVN3sdTeNSC",
+              "tip0": "ADaUMid9yfUytqMBgopwjb2DTLSokTSzL1zt6iGPaS49",
+              "tip1": "HFqU5x63VTqvQss8hp11i4wVV8bD44PvwucfZ2bU7gRe",
+              "tip2": "DfXygSm4jCyNCybVYYK6DwvWqjKee8pbDmJGcLWNDXjh",
+              "tip3": "DttWaMuVvTiduZRnguLF7jNxTgiMBZ1hyAumKUiL2KRL",
+              "tip4": "ADuUkR4vqLUMWXxW9gh6D6L8pMSawimctcNZ5pGwDcEt",
+              "tip5": "96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5",
+              "tip6": "Cw8CFyM9FkoMi7K7Crf6HNQqf4uEMzpKw6QNghXLvLkY",
+              "tip7": "3AVi9Tg9Uo68tJfuvoKvqKNWKkC5wPdSSdeBnizKZ6jT"
+            }
+          },
+          {
+            "step": "deposit",
+            "signature": "2QhEHioaNWjpfiqgAXssK7CHiXNLqpKRAQwkC8D5v9ePXNZ9HAvMnSQmKTayQMmST4fEQsCgi8G5eMFX5CyQvayv",
+            "watch": {
+              "W": "HmVhbevZ8siL1funhmNB1wvXnZ4gs4WxadetyQGE1Jwy",
+              "feePayer": "D6zfDjp7h9jifbMVp5qpndYk5eoBRcWVKXVN3sdTeNSC",
+              "tip0": "ADaUMid9yfUytqMBgopwjb2DTLSokTSzL1zt6iGPaS49",
+              "tip1": "HFqU5x63VTqvQss8hp11i4wVV8bD44PvwucfZ2bU7gRe",
+              "tip2": "DfXygSm4jCyNCybVYYK6DwvWqjKee8pbDmJGcLWNDXjh",
+              "tip3": "DttWaMuVvTiduZRnguLF7jNxTgiMBZ1hyAumKUiL2KRL",
+              "tip4": "ADuUkR4vqLUMWXxW9gh6D6L8pMSawimctcNZ5pGwDcEt",
+              "tip5": "96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5",
+              "tip6": "Cw8CFyM9FkoMi7K7Crf6HNQqf4uEMzpKw6QNghXLvLkY",
+              "tip7": "3AVi9Tg9Uo68tJfuvoKvqKNWKkC5wPdSSdeBnizKZ6jT"
+            }
+          },
+          {
+            "step": "buy",
+            "signature": "3j2SQ7vfZzLGFrYek3LQJ31JzULpchGgDAGntKFfcryVSeduTwy4ov63rj2bpFC7VQcf2zSKsznoi6owai1k2QrU",
+            "watch": {
+              "W": "HmVhbevZ8siL1funhmNB1wvXnZ4gs4WxadetyQGE1Jwy",
+              "feePayer": "D6zfDjp7h9jifbMVp5qpndYk5eoBRcWVKXVN3sdTeNSC",
+              "tip0": "ADaUMid9yfUytqMBgopwjb2DTLSokTSzL1zt6iGPaS49",
+              "tip1": "HFqU5x63VTqvQss8hp11i4wVV8bD44PvwucfZ2bU7gRe",
+              "tip2": "DfXygSm4jCyNCybVYYK6DwvWqjKee8pbDmJGcLWNDXjh",
+              "tip3": "DttWaMuVvTiduZRnguLF7jNxTgiMBZ1hyAumKUiL2KRL",
+              "tip4": "ADuUkR4vqLUMWXxW9gh6D6L8pMSawimctcNZ5pGwDcEt",
+              "tip5": "96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5",
+              "tip6": "Cw8CFyM9FkoMi7K7Crf6HNQqf4uEMzpKw6QNghXLvLkY",
+              "tip7": "3AVi9Tg9Uo68tJfuvoKvqKNWKkC5wPdSSdeBnizKZ6jT"
+            }
+          },
+          {
+            "step": "buy",
+            "signature": "3j2SQ7vfZzLGFrYek3LQJ31JzULpchGgDAGntKFfcryVSeduTwy4ov63rj2bpFC7VQcf2zSKsznoi6owai1k2QrU",
+            "watch": {
+              "W": "HmVhbevZ8siL1funhmNB1wvXnZ4gs4WxadetyQGE1Jwy",
+              "feePayer": "D6zfDjp7h9jifbMVp5qpndYk5eoBRcWVKXVN3sdTeNSC",
+              "tip0": "ADaUMid9yfUytqMBgopwjb2DTLSokTSzL1zt6iGPaS49",
+              "tip1": "HFqU5x63VTqvQss8hp11i4wVV8bD44PvwucfZ2bU7gRe",
+              "tip2": "DfXygSm4jCyNCybVYYK6DwvWqjKee8pbDmJGcLWNDXjh",
+              "tip3": "DttWaMuVvTiduZRnguLF7jNxTgiMBZ1hyAumKUiL2KRL",
+              "tip4": "ADuUkR4vqLUMWXxW9gh6D6L8pMSawimctcNZ5pGwDcEt",
+              "tip5": "96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5",
+              "tip6": "Cw8CFyM9FkoMi7K7Crf6HNQqf4uEMzpKw6QNghXLvLkY",
+              "tip7": "3AVi9Tg9Uo68tJfuvoKvqKNWKkC5wPdSSdeBnizKZ6jT"
+            }
+          },
+          {
+            "step": "sell",
+            "signature": "4tY9vdRtd2dn4gHSWPkz6ejFUdxQYGwjG3gFZ3kbT1hdN9PCtJVVxUWKVM5ZpkPgNAb7EcFjABfEnzUCWY27NZJm",
+            "watch": {
+              "W": "HmVhbevZ8siL1funhmNB1wvXnZ4gs4WxadetyQGE1Jwy",
+              "feePayer": "D6zfDjp7h9jifbMVp5qpndYk5eoBRcWVKXVN3sdTeNSC",
+              "tip0": "ADaUMid9yfUytqMBgopwjb2DTLSokTSzL1zt6iGPaS49",
+              "tip1": "HFqU5x63VTqvQss8hp11i4wVV8bD44PvwucfZ2bU7gRe",
+              "tip2": "DfXygSm4jCyNCybVYYK6DwvWqjKee8pbDmJGcLWNDXjh",
+              "tip3": "DttWaMuVvTiduZRnguLF7jNxTgiMBZ1hyAumKUiL2KRL",
+              "tip4": "ADuUkR4vqLUMWXxW9gh6D6L8pMSawimctcNZ5pGwDcEt",
+              "tip5": "96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5",
+              "tip6": "Cw8CFyM9FkoMi7K7Crf6HNQqf4uEMzpKw6QNghXLvLkY",
+              "tip7": "3AVi9Tg9Uo68tJfuvoKvqKNWKkC5wPdSSdeBnizKZ6jT"
+            }
+          },
+          {
+            "step": "sell",
+            "signature": "4tY9vdRtd2dn4gHSWPkz6ejFUdxQYGwjG3gFZ3kbT1hdN9PCtJVVxUWKVM5ZpkPgNAb7EcFjABfEnzUCWY27NZJm",
+            "watch": {
+              "W": "HmVhbevZ8siL1funhmNB1wvXnZ4gs4WxadetyQGE1Jwy",
+              "feePayer": "D6zfDjp7h9jifbMVp5qpndYk5eoBRcWVKXVN3sdTeNSC",
+              "tip0": "ADaUMid9yfUytqMBgopwjb2DTLSokTSzL1zt6iGPaS49",
+              "tip1": "HFqU5x63VTqvQss8hp11i4wVV8bD44PvwucfZ2bU7gRe",
+              "tip2": "DfXygSm4jCyNCybVYYK6DwvWqjKee8pbDmJGcLWNDXjh",
+              "tip3": "DttWaMuVvTiduZRnguLF7jNxTgiMBZ1hyAumKUiL2KRL",
+              "tip4": "ADuUkR4vqLUMWXxW9gh6D6L8pMSawimctcNZ5pGwDcEt",
+              "tip5": "96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5",
+              "tip6": "Cw8CFyM9FkoMi7K7Crf6HNQqf4uEMzpKw6QNghXLvLkY",
+              "tip7": "3AVi9Tg9Uo68tJfuvoKvqKNWKkC5wPdSSdeBnizKZ6jT"
+            }
+          },
+          {
+            "step": "sell",
+            "signature": "2TBCfxRULrHdcnsDgNoSHM3LNPQLehmfAs3tB9BrmgVQ1L1F9MikYwp3zwFxQ5SYvJNyy2bpkUeNReQYDjGRFK9U",
+            "watch": {
+              "W": "HmVhbevZ8siL1funhmNB1wvXnZ4gs4WxadetyQGE1Jwy",
+              "feePayer": "D6zfDjp7h9jifbMVp5qpndYk5eoBRcWVKXVN3sdTeNSC",
+              "tip0": "ADaUMid9yfUytqMBgopwjb2DTLSokTSzL1zt6iGPaS49",
+              "tip1": "HFqU5x63VTqvQss8hp11i4wVV8bD44PvwucfZ2bU7gRe",
+              "tip2": "DfXygSm4jCyNCybVYYK6DwvWqjKee8pbDmJGcLWNDXjh",
+              "tip3": "DttWaMuVvTiduZRnguLF7jNxTgiMBZ1hyAumKUiL2KRL",
+              "tip4": "ADuUkR4vqLUMWXxW9gh6D6L8pMSawimctcNZ5pGwDcEt",
+              "tip5": "96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5",
+              "tip6": "Cw8CFyM9FkoMi7K7Crf6HNQqf4uEMzpKw6QNghXLvLkY",
+              "tip7": "3AVi9Tg9Uo68tJfuvoKvqKNWKkC5wPdSSdeBnizKZ6jT"
+            }
+          },
+          {
+            "step": "sell",
+            "signature": "2TBCfxRULrHdcnsDgNoSHM3LNPQLehmfAs3tB9BrmgVQ1L1F9MikYwp3zwFxQ5SYvJNyy2bpkUeNReQYDjGRFK9U",
+            "watch": {
+              "W": "HmVhbevZ8siL1funhmNB1wvXnZ4gs4WxadetyQGE1Jwy",
+              "feePayer": "D6zfDjp7h9jifbMVp5qpndYk5eoBRcWVKXVN3sdTeNSC",
+              "tip0": "ADaUMid9yfUytqMBgopwjb2DTLSokTSzL1zt6iGPaS49",
+              "tip1": "HFqU5x63VTqvQss8hp11i4wVV8bD44PvwucfZ2bU7gRe",
+              "tip2": "DfXygSm4jCyNCybVYYK6DwvWqjKee8pbDmJGcLWNDXjh",
+              "tip3": "DttWaMuVvTiduZRnguLF7jNxTgiMBZ1hyAumKUiL2KRL",
+              "tip4": "ADuUkR4vqLUMWXxW9gh6D6L8pMSawimctcNZ5pGwDcEt",
+              "tip5": "96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5",
+              "tip6": "Cw8CFyM9FkoMi7K7Crf6HNQqf4uEMzpKw6QNghXLvLkY",
+              "tip7": "3AVi9Tg9Uo68tJfuvoKvqKNWKkC5wPdSSdeBnizKZ6jT"
+            }
+          },
+          {
+            "step": "sell",
+            "signature": "3pALdPVZ8cQpBUVXbECobEewKb28DfdtNr3uQrzk63VFvrVGTHuLXHStTXK1EKbGXQf2NUZJHkwaUqYrcXz3cyDw",
+            "watch": {
+              "W": "HmVhbevZ8siL1funhmNB1wvXnZ4gs4WxadetyQGE1Jwy",
+              "feePayer": "D6zfDjp7h9jifbMVp5qpndYk5eoBRcWVKXVN3sdTeNSC",
+              "tip0": "ADaUMid9yfUytqMBgopwjb2DTLSokTSzL1zt6iGPaS49",
+              "tip1": "HFqU5x63VTqvQss8hp11i4wVV8bD44PvwucfZ2bU7gRe",
+              "tip2": "DfXygSm4jCyNCybVYYK6DwvWqjKee8pbDmJGcLWNDXjh",
+              "tip3": "DttWaMuVvTiduZRnguLF7jNxTgiMBZ1hyAumKUiL2KRL",
+              "tip4": "ADuUkR4vqLUMWXxW9gh6D6L8pMSawimctcNZ5pGwDcEt",
+              "tip5": "96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5",
+              "tip6": "Cw8CFyM9FkoMi7K7Crf6HNQqf4uEMzpKw6QNghXLvLkY",
+              "tip7": "3AVi9Tg9Uo68tJfuvoKvqKNWKkC5wPdSSdeBnizKZ6jT"
+            }
+          },
+          {
+            "step": "sell",
+            "signature": "3pALdPVZ8cQpBUVXbECobEewKb28DfdtNr3uQrzk63VFvrVGTHuLXHStTXK1EKbGXQf2NUZJHkwaUqYrcXz3cyDw",
+            "watch": {
+              "W": "HmVhbevZ8siL1funhmNB1wvXnZ4gs4WxadetyQGE1Jwy",
+              "feePayer": "D6zfDjp7h9jifbMVp5qpndYk5eoBRcWVKXVN3sdTeNSC",
+              "tip0": "ADaUMid9yfUytqMBgopwjb2DTLSokTSzL1zt6iGPaS49",
+              "tip1": "HFqU5x63VTqvQss8hp11i4wVV8bD44PvwucfZ2bU7gRe",
+              "tip2": "DfXygSm4jCyNCybVYYK6DwvWqjKee8pbDmJGcLWNDXjh",
+              "tip3": "DttWaMuVvTiduZRnguLF7jNxTgiMBZ1hyAumKUiL2KRL",
+              "tip4": "ADuUkR4vqLUMWXxW9gh6D6L8pMSawimctcNZ5pGwDcEt",
+              "tip5": "96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5",
+              "tip6": "Cw8CFyM9FkoMi7K7Crf6HNQqf4uEMzpKw6QNghXLvLkY",
+              "tip7": "3AVi9Tg9Uo68tJfuvoKvqKNWKkC5wPdSSdeBnizKZ6jT"
+            }
+          }
+        ],
+        "simFails": [],
+        "planted": {
+          "reads": 0
+        },
+        "fee": "1300000",
+        "sendLines": [
+          {
+            "phase": "buy",
+            "line": "pool send solana mainnet send outcome=filled status=200 ms=451 tag=3 via=jito region=engine-stand-in bundle=named end=filled rebroadcasts=1 misses=0 plain=2 hash_ms=>441"
+          }
+        ],
+        "proofWait": {
+          "passes": 22,
+          "ms": 26044,
+          "made": true
+        },
+        "engine": "swallow",
+        "engineCalls": [
+          {
+            "at": 1794424025292,
+            "call": "send",
+            "mode": "swallow"
+          },
+          {
+            "at": 1794424025294,
+            "call": "rebroadcast",
+            "mode": "swallow"
+          }
+        ],
+        "pool": "7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8",
+        "tables": {
+          "pump-curve": [
+            "BShWZ8FbDPYGpoc1ebj4TiELvVFmBQwW4XMYuLtQoHYZ"
+          ]
+        },
+        "mint": "CK5Vqvx9pivAj3KdgRRs9LrpG8EDUvVMHMrFguBHpump",
+        "spend": "max",
+        "resumed": false,
+        "burst": false,
+        "injected": {
+          "rpc": 0,
+          "send": 0
+        },
+        "dust": null,
+        "U": "8b2UWwvY9rBkYK23av8JTuq7GR4kPFAJQLDU5sjN3V4d",
+        "need": "11473120",
+        "deposit": {
+          "answer": {
+            "result": {
+              "stage": "sent",
+              "txs": [
+                {
+                  "chain": "solana",
+                  "hash": "2QhEHioaNWjpfiqgAXssK7CHiXNLqpKRAQwkC8D5v9ePXNZ9HAvMnSQmKTayQMmST4fEQsCgi8G5eMFX5CyQvayv"
+                }
+              ]
+            }
+          },
+          "notes": [
+            {
+              "ref": "deposit",
+              "state": "UNSPENT",
+              "value": "10000000",
+              "leafIndex": "1",
+              "sends": [
+                "2QhEHioaNWjpfiqgAXssK7CHiXNLqpKRAQwkC8D5v9ePXNZ9HAvMnSQmKTayQMmST4fEQsCgi8G5eMFX5CyQvayv"
+              ]
+            }
+          ]
+        },
+        "buy": {
+          "answer": {
+            "result": {
+              "stage": "sent",
+              "txs": [
+                {
+                  "chain": "solana",
+                  "hash": "3j2SQ7vfZzLGFrYek3LQJ31JzULpchGgDAGntKFfcryVSeduTwy4ov63rj2bpFC7VQcf2zSKsznoi6owai1k2QrU"
+                }
+              ]
+            }
+          },
+          "notes": [
+            {
+              "ref": "deposit",
+              "state": "SPENT",
+              "value": "10000000",
+              "leafIndex": "1",
+              "sends": [
+                "2QhEHioaNWjpfiqgAXssK7CHiXNLqpKRAQwkC8D5v9ePXNZ9HAvMnSQmKTayQMmST4fEQsCgi8G5eMFX5CyQvayv"
+              ]
+            },
+            {
+              "ref": "change",
+              "state": "UNSPENT",
+              "value": "0",
+              "leafIndex": "2",
+              "sends": []
+            }
+          ]
+        },
+        "buyTimeline": [
+          {
+            "what": "rpc 127.0.0.1:26559 getSlot",
+            "at": 5,
+            "ms": 6
+          },
+          {
+            "what": "rpc localhost:26559 getSlot",
+            "at": 5,
+            "ms": 6
+          },
+          {
+            "what": "rpc localhost:26559 getAccountInfo",
+            "at": 5,
+            "ms": 6
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getAccountInfo",
+            "at": 5,
+            "ms": 6
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getAccountInfo",
+            "at": 5,
+            "ms": 8
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getAccountInfo",
+            "at": 7,
+            "ms": 6
+          },
+          {
+            "what": "rpc localhost:26559 getAccountInfo",
+            "at": 5,
+            "ms": 9
+          },
+          {
+            "what": "rpc localhost:26559 getAccountInfo",
+            "at": 7,
+            "ms": 7
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getMultipleAccounts",
+            "at": 8,
+            "ms": 6
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getMultipleAccounts",
+            "at": 9,
+            "ms": 6
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getBlockTime",
+            "at": 10,
+            "ms": 5
+          },
+          {
+            "what": "rpc localhost:26559 getMultipleAccounts",
+            "at": 9,
+            "ms": 7
+          },
+          {
+            "what": "rpc localhost:26559 getMultipleAccounts",
+            "at": 9,
+            "ms": 7
+          },
+          {
+            "what": "rpc localhost:26559 getBlockTime",
+            "at": 11,
+            "ms": 9
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getLatestBlockhash",
+            "at": 19,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getAccountInfo",
+            "at": 18,
+            "ms": 4
+          },
+          {
+            "what": "rpc localhost:26559 getAccountInfo",
+            "at": 18,
+            "ms": 4
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getAccountInfo",
+            "at": 18,
+            "ms": 4
+          },
+          {
+            "what": "rpc localhost:26559 getAccountInfo",
+            "at": 18,
+            "ms": 4
+          },
+          {
+            "what": "rpc localhost:26559 getMultipleAccounts",
+            "at": 20,
+            "ms": 2
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getMultipleAccounts",
+            "at": 19,
+            "ms": 3
+          },
+          {
+            "what": "rpc localhost:26559 isBlockhashValid",
+            "at": 21,
+            "ms": 4
+          },
+          {
+            "what": "rpc localhost:26559 getEpochInfo",
+            "at": 21,
+            "ms": 4
+          },
+          {
+            "what": "route wallet",
+            "at": 38,
+            "ms": 0
+          },
+          {
+            "what": "route venue,pool",
+            "at": 38,
+            "ms": 0
+          },
+          {
+            "what": "helper POST /v1/pool/solana/send HTTP 200",
+            "at": 38,
+            "ms": 451
+          },
+          {
+            "what": "rpc localhost:26559 getTransaction",
+            "at": 489,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getTransaction",
+            "at": 489,
+            "ms": 2
+          },
+          {
+            "what": "route tx",
+            "at": 491,
+            "ms": 0
+          },
+          {
+            "what": "route out",
+            "at": 492,
+            "ms": 0
+          },
+          {
+            "what": "answer {\"result\":{\"stage\":\"sent\",\"txs\":[{\"chain",
+            "at": 492,
+            "ms": 0
+          },
+          {
+            "what": "rpc localhost:26559 getSlot",
+            "at": 492,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getSlot",
+            "at": 492,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getProgramAccounts",
+            "at": 497,
+            "ms": 17
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getMultipleAccounts",
+            "at": 515,
+            "ms": 1
+          },
+          {
+            "what": "rpc localhost:26559 getMultipleAccounts",
+            "at": 515,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getProgramAccounts",
+            "at": 516,
+            "ms": 16
+          },
+          {
+            "what": "rpc localhost:26559 getMultipleAccounts",
+            "at": 533,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getMultipleAccounts",
+            "at": 533,
+            "ms": 2
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getMultipleAccounts",
+            "at": 536,
+            "ms": 3
+          },
+          {
+            "what": "rpc localhost:26559 getMultipleAccounts",
+            "at": 538,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getSlot",
+            "at": 545,
+            "ms": 1
+          },
+          {
+            "what": "rpc localhost:26559 getSlot",
+            "at": 545,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getTransaction",
+            "at": 546,
+            "ms": 1
+          },
+          {
+            "what": "rpc localhost:26559 getTransaction",
+            "at": 546,
+            "ms": 2
+          },
+          {
+            "what": "progress filled",
+            "at": 548,
+            "ms": 0
+          }
+        ],
+        "refused": null,
+        "sell": {
+          "answer": {
+            "result": {
+              "stage": "sent",
+              "txs": [
+                {
+                  "chain": "solana",
+                  "hash": "4tY9vdRtd2dn4gHSWPkz6ejFUdxQYGwjG3gFZ3kbT1hdN9PCtJVVxUWKVM5ZpkPgNAb7EcFjABfEnzUCWY27NZJm"
+                }
+              ]
+            }
+          },
+          "notes": [
+            {
+              "ref": "deposit",
+              "state": "SPENT",
+              "value": "10000000",
+              "leafIndex": "1",
+              "sends": [
+                "2QhEHioaNWjpfiqgAXssK7CHiXNLqpKRAQwkC8D5v9ePXNZ9HAvMnSQmKTayQMmST4fEQsCgi8G5eMFX5CyQvayv"
+              ]
+            },
+            {
+              "ref": "change",
+              "state": "UNSPENT",
+              "value": "0",
+              "leafIndex": "2",
+              "sends": []
+            },
+            {
+              "ref": "return",
+              "state": "UNSPENT",
+              "value": "3287495",
+              "leafIndex": "3",
+              "sends": [
+                "4tY9vdRtd2dn4gHSWPkz6ejFUdxQYGwjG3gFZ3kbT1hdN9PCtJVVxUWKVM5ZpkPgNAb7EcFjABfEnzUCWY27NZJm"
+              ]
+            }
+          ]
+        },
+        "rentBack": {
+          "W": "HmVhbevZ8siL1funhmNB1wvXnZ4gs4WxadetyQGE1Jwy",
+          "tokenAccount": null,
+          "pumpVolume": null,
+          "ammVolume": null,
+          "w": 3624530
+        },
+        "sentTxs": [],
+        "stages": [
+          {
+            "kind": "pool.deposit",
+            "stage": "filled"
+          },
+          {
+            "kind": "pool.buy",
+            "stage": "filled"
+          },
+          {
+            "kind": "pool.sell",
+            "stage": "filled"
+          }
+        ],
+        "notes": [
+          {
+            "ref": "deposit",
+            "state": "SPENT",
+            "value": "10000000",
+            "leafIndex": "1",
+            "sends": [
+              "2QhEHioaNWjpfiqgAXssK7CHiXNLqpKRAQwkC8D5v9ePXNZ9HAvMnSQmKTayQMmST4fEQsCgi8G5eMFX5CyQvayv"
+            ]
+          },
+          {
+            "ref": "change",
+            "state": "UNSPENT",
+            "value": "0",
+            "leafIndex": "2",
+            "sends": []
+          },
+          {
+            "ref": "return",
+            "state": "UNSPENT",
+            "value": "3287495",
+            "leafIndex": "3",
+            "sends": [
+              "4tY9vdRtd2dn4gHSWPkz6ejFUdxQYGwjG3gFZ3kbT1hdN9PCtJVVxUWKVM5ZpkPgNAb7EcFjABfEnzUCWY27NZJm"
+            ]
+          }
+        ],
+        "filled": true
+      },
+      "tail": [
+        "2026-11-11T19:07:05.700Z t+492 ms route out 0 ms",
+        "2026-11-11T19:07:05.700Z t+492 ms answer {\"result\":{\"stage\":\"sent\",\"txs\":[{\"chain 0 ms",
+        "2026-11-11T19:07:05.700Z pool.buy answered {\"result\":{\"stage\":\"sent\",\"txs\":[{\"chain\":\"solana\",\"hash\":\"3j2SQ7vfZzLGFrYek3LQJ31JzULpchGgDAGntKFfcryVSeduTwy4ov63rj2bpFC7VQcf2zSKsznoi6owai1k2QrU\"}]}}; waiting for its run to end",
+        "2026-11-11T19:07:05.701Z t+492 ms rpc localhost:26559 getSlot 1 ms",
+        "2026-11-11T19:07:05.701Z t+492 ms rpc 127.0.0.1:26559 getSlot 1 ms",
+        "2026-11-11T19:07:05.723Z t+497 ms rpc 127.0.0.1:26559 getProgramAccounts 17 ms",
+        "2026-11-11T19:07:05.724Z t+515 ms rpc 127.0.0.1:26559 getMultipleAccounts 1 ms",
+        "2026-11-11T19:07:05.724Z t+515 ms rpc localhost:26559 getMultipleAccounts 1 ms",
+        "2026-11-11T19:07:05.741Z t+516 ms rpc 127.0.0.1:26559 getProgramAccounts 16 ms",
+        "2026-11-11T19:07:05.742Z t+533 ms rpc localhost:26559 getMultipleAccounts 1 ms",
+        "2026-11-11T19:07:05.743Z t+533 ms rpc 127.0.0.1:26559 getMultipleAccounts 2 ms",
+        "2026-11-11T19:07:05.747Z t+536 ms rpc 127.0.0.1:26559 getMultipleAccounts 3 ms",
+        "2026-11-11T19:07:05.747Z t+538 ms rpc localhost:26559 getMultipleAccounts 1 ms",
+        "2026-11-11T19:07:05.754Z t+545 ms rpc 127.0.0.1:26559 getSlot 1 ms",
+        "2026-11-11T19:07:05.754Z t+545 ms rpc localhost:26559 getSlot 1 ms",
+        "2026-11-11T19:07:05.755Z t+546 ms rpc 127.0.0.1:26559 getTransaction 1 ms",
+        "2026-11-11T19:07:05.756Z t+546 ms rpc localhost:26559 getTransaction 2 ms",
+        "2026-11-11T19:07:05.756Z t+548 ms progress filled 0 ms",
+        "2026-11-11T19:07:05.756Z pool.buy progress \"filled\"",
+        "2026-11-11T19:07:05.758Z buy {\"answer\":{\"result\":{\"stage\":\"sent\",\"txs\":[{\"chain\":\"solana\",\"hash\":\"3j2SQ7vfZzLGFrYek3LQJ31JzULpchGgDAGntKFfcryVSeduTwy4ov63rj2bpFC7VQcf2zSKsznoi6owai1k2QrU\"}]}},\"notes\":[{\"ref\":\"deposit\",\"state\":\"SPENT\",\"value\":\"10000000\",\"leafIndex\":\"1\",\"sends\":[\"2QhEHioaNWjpfiqgAXssK7CHiXNLqpKRAQwkC8D5v9ePXNZ9HAvMnSQmKTayQMmST4fEQsCgi8G5eMFX5CyQvayv\"]},{\"ref\":\"change\",\"state\":\"UNSPENT\",\"value\":\"0\",\"leafIndex\":\"2\",\"sends\":[]}]}",
+        "2026-11-11T19:07:05.776Z W HmVhbevZ8siL1funhmNB1wvXnZ4gs4WxadetyQGE1Jwy holds 1493440 lamports after the buy",
+        "2026-11-11T19:07:05.776Z pool.sell of 149489.044612 of CK5Vqvx9pivAj3KdgRRs9LrpG8EDUvVMHMrFguBHpump from W HmVhbevZ8siL1funhmNB1wvXnZ4gs4WxadetyQGE1Jwy",
+        "sell form: priority 100000, deposit eight",
+        "2026-11-11T19:07:05.820Z pool.sell answered {\"result\":{\"stage\":\"sent\",\"txs\":[{\"chain\":\"solana\",\"hash\":\"4tY9vdRtd2dn4gHSWPkz6ejFUdxQYGwjG3gFZ3kbT1hdN9PCtJVVxUWKVM5ZpkPgNAb7EcFjABfEnzUCWY27NZJm\"}]}}; waiting for its run to end",
+        "2026-11-11T19:07:06.847Z pool.sell progress \"filled\"",
+        "rent back HmVhbevZ8siL1funhmNB1wvXnZ4gs4WxadetyQGE1Jwy rent_back floor: W's 3624530 would make a note of 2151410, under 2600000: kept on W",
+        "2026-11-11T19:07:07.891Z sell {\"answer\":{\"result\":{\"stage\":\"sent\",\"txs\":[{\"chain\":\"solana\",\"hash\":\"4tY9vdRtd2dn4gHSWPkz6ejFUdxQYGwjG3gFZ3kbT1hdN9PCtJVVxUWKVM5ZpkPgNAb7EcFjABfEnzUCWY27NZJm\"}]}},\"notes\":[{\"ref\":\"deposit\",\"state\":\"SPENT\",\"value\":\"10000000\",\"leafIndex\":\"1\",\"sends\":[\"2QhEHioaNWjpfiqgAXssK7CHiXNLqpKRAQwkC8D5v9ePXNZ9HAvMnSQmKTayQMmST4fEQsCgi8G5eMFX5CyQvayv\"]},{\"ref\":\"change\",\"state\":\"UNSPENT\",\"value\":\"0\",\"leafIndex\":\"2\",\"sends\":[]},{\"ref\":\"return\",\"state\":\"UNSPENT\",\"value\":\"3287495\",\"leafIndex\":\"3\",\"sends\":[\"4tY9vdRtd2dn4gHSWPkz6ejFUdxQYGwjG3gFZ3kbT1hdN9PCtJVVxUWKVM5ZpkPgNAb7EcFjABfEnzUCWY27NZJm\"]}]}",
+        "2026-11-11T19:07:07.895Z after the rent back {\"W\":\"HmVhbevZ8siL1funhmNB1wvXnZ4gs4WxadetyQGE1Jwy\",\"tokenAccount\":null,\"pumpVolume\":null,\"ammVolume\":null,\"w\":3624530}",
+        "2026-11-11T19:07:07.896Z notes [{\"ref\":\"deposit\",\"state\":\"SPENT\",\"value\":\"10000000\",\"leafIndex\":\"1\",\"sends\":[\"2QhEHioaNWjpfiqgAXssK7CHiXNLqpKRAQwkC8D5v9ePXNZ9HAvMnSQmKTayQMmST4fEQsCgi8G5eMFX5CyQvayv\"]},{\"ref\":\"change\",\"state\":\"UNSPENT\",\"value\":\"0\",\"leafIndex\":\"2\",\"sends\":[]},{\"ref\":\"return\",\"state\":\"UNSPENT\",\"value\":\"3287495\",\"leafIndex\":\"3\",\"sends\":[\"4tY9vdRtd2dn4gHSWPkz6ejFUdxQYGwjG3gFZ3kbT1hdN9PCtJVVxUWKVM5ZpkPgNAb7EcFjABfEnzUCWY27NZJm\"]}]",
+        ""
+      ],
+      "withdraw": {
+        "exit": 0,
+        "out": {
+          "at": "2026-11-11T19:07:55.037Z",
+          "cluster": "mainnet copy",
+          "program": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+          "pool": "7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8",
+          "to": "2oaULmAtFcF3H3p59JxsCKPt56HRtjAdCWZxjACQsP28",
+          "amount": "0.001982495",
+          "dry": false,
+          "answer": {
+            "result": {
+              "pending": true
+            }
+          },
+          "opened": {
+            "chain": "solana",
+            "opId": "pool-withdraw-devnet"
+          },
+          "view": {
+            "state": "ready",
+            "address": {
+              "ok": true,
+              "to": "2oaULmAtFcF3H3p59JxsCKPt56HRtjAdCWZxjACQsP28"
+            },
+            "amount": {
+              "ok": true,
+              "amount": "1982495",
+              "parts": 1,
+              "maxFee": "1305000"
+            },
+            "ready": {
+              "chain": "solana",
+              "to": "2oaULmAtFcF3H3p59JxsCKPt56HRtjAdCWZxjACQsP28",
+              "amount": "1982495",
+              "maxFee": "1305000"
+            }
+          },
+          "plan": [
+            {
+              "noteId": "94c2af1ae027de3f30b64a696da4cff8",
+              "part": "1982495",
+              "chunk": "3287495"
+            }
+          ],
+          "before": [
+            {
+              "ref": "change",
+              "state": "UNSPENT",
+              "value": "0",
+              "leafIndex": "2"
+            },
+            {
+              "ref": "deposit",
+              "state": "SPENT",
+              "value": "10000000",
+              "leafIndex": "1"
+            },
+            {
+              "ref": "return",
+              "state": "UNSPENT",
+              "value": "3287495",
+              "leafIndex": "3"
+            }
+          ],
+          "op": {
+            "kind": "withdraw",
+            "stage": "sent",
+            "txs": [
+              {
+                "chain": "solana",
+                "hash": "2DpW3SHpeQGdkqpwtwVC5rpbovTVaPPv9meoR6ZaChbW5MPb7xGihppi7jcegib7521qk5ZxFpzo5AfJZU2hipmr"
+              },
+              {
+                "chain": "solana",
+                "hash": "7EQLo1Qeg5A9wUFMJbDx3Xh8upeSaPjWT6wA44qnUWzDeCS6Fo1ndreYNwep8N4cDDGYiEiHC8CaWY8f7CxuQq1"
+              }
+            ],
+            "created_ms": 1794424075037,
+            "arrived": {
+              "7EQLo1Qeg5A9wUFMJbDx3Xh8upeSaPjWT6wA44qnUWzDeCS6Fo1ndreYNwep8N4cDDGYiEiHC8CaWY8f7CxuQq1": "1982495"
+            }
+          },
+          "checks": [
+            {
+              "release": "2DpW3SHpeQGdkqpwtwVC5rpbovTVaPPv9meoR6ZaChbW5MPb7xGihppi7jcegib7521qk5ZxFpzo5AfJZU2hipmr",
+              "onward": "7EQLo1Qeg5A9wUFMJbDx3Xh8upeSaPjWT6wA44qnUWzDeCS6Fo1ndreYNwep8N4cDDGYiEiHC8CaWY8f7CxuQq1",
+              "part": "1982495",
+              "reads": [
+                {
+                  "release": true,
+                  "onward": true,
+                  "toDelta": "1982495",
+                  "wAfter": "0"
+                },
+                {
+                  "release": true,
+                  "onward": true,
+                  "toDelta": "1982495",
+                  "wAfter": "0"
+                }
+              ],
+              "landed": true
+            }
+          ],
+          "notes": [
+            {
+              "ref": "change",
+              "state": "UNSPENT",
+              "value": "0",
+              "leafIndex": "2"
+            },
+            {
+              "ref": "deposit",
+              "state": "SPENT",
+              "value": "10000000",
+              "leafIndex": "1"
+            },
+            {
+              "ref": "change",
+              "state": "UNSPENT",
+              "value": "0",
+              "leafIndex": "4"
+            },
+            {
+              "ref": "return",
+              "state": "SPENT",
+              "value": "3287495",
+              "leafIndex": "3"
+            }
+          ],
+          "sent": true,
+          "steps": [
+            {
+              "step": "withdraw: release",
+              "signature": "2DpW3SHpeQGdkqpwtwVC5rpbovTVaPPv9meoR6ZaChbW5MPb7xGihppi7jcegib7521qk5ZxFpzo5AfJZU2hipmr",
+              "watch": {
+                "to": "2oaULmAtFcF3H3p59JxsCKPt56HRtjAdCWZxjACQsP28",
+                "feePayer": "D6zfDjp7h9jifbMVp5qpndYk5eoBRcWVKXVN3sdTeNSC"
+              }
+            },
+            {
+              "step": "withdraw: release",
+              "signature": "2DpW3SHpeQGdkqpwtwVC5rpbovTVaPPv9meoR6ZaChbW5MPb7xGihppi7jcegib7521qk5ZxFpzo5AfJZU2hipmr",
+              "watch": {
+                "to": "2oaULmAtFcF3H3p59JxsCKPt56HRtjAdCWZxjACQsP28",
+                "feePayer": "D6zfDjp7h9jifbMVp5qpndYk5eoBRcWVKXVN3sdTeNSC"
+              }
+            },
+            {
+              "step": "withdraw: onward to To",
+              "signature": "7EQLo1Qeg5A9wUFMJbDx3Xh8upeSaPjWT6wA44qnUWzDeCS6Fo1ndreYNwep8N4cDDGYiEiHC8CaWY8f7CxuQq1",
+              "watch": {
+                "to": "2oaULmAtFcF3H3p59JxsCKPt56HRtjAdCWZxjACQsP28",
+                "feePayer": "D6zfDjp7h9jifbMVp5qpndYk5eoBRcWVKXVN3sdTeNSC"
+              }
+            },
+            {
+              "step": "withdraw: onward to To",
+              "signature": "7EQLo1Qeg5A9wUFMJbDx3Xh8upeSaPjWT6wA44qnUWzDeCS6Fo1ndreYNwep8N4cDDGYiEiHC8CaWY8f7CxuQq1",
+              "watch": {
+                "to": "2oaULmAtFcF3H3p59JxsCKPt56HRtjAdCWZxjACQsP28",
+                "feePayer": "D6zfDjp7h9jifbMVp5qpndYk5eoBRcWVKXVN3sdTeNSC"
+              }
+            },
+            {
+              "step": "withdraw: onward to To",
+              "signature": "7EQLo1Qeg5A9wUFMJbDx3Xh8upeSaPjWT6wA44qnUWzDeCS6Fo1ndreYNwep8N4cDDGYiEiHC8CaWY8f7CxuQq1",
+              "watch": {
+                "to": "2oaULmAtFcF3H3p59JxsCKPt56HRtjAdCWZxjACQsP28",
+                "feePayer": "D6zfDjp7h9jifbMVp5qpndYk5eoBRcWVKXVN3sdTeNSC"
+              }
+            },
+            {
+              "step": "withdraw: onward to To",
+              "signature": "7EQLo1Qeg5A9wUFMJbDx3Xh8upeSaPjWT6wA44qnUWzDeCS6Fo1ndreYNwep8N4cDDGYiEiHC8CaWY8f7CxuQq1",
+              "watch": {
+                "to": "2oaULmAtFcF3H3p59JxsCKPt56HRtjAdCWZxjACQsP28",
+                "feePayer": "D6zfDjp7h9jifbMVp5qpndYk5eoBRcWVKXVN3sdTeNSC"
+              }
+            }
+          ],
+          "simFails": [],
+          "sendLines": [
+            {
+              "phase": "withdraw",
+              "line": "pool send solana mainnet send outcome=sent status=200 ms=34 tag=2 via=plain"
+            }
+          ]
+        },
+        "to": "2oaULmAtFcF3H3p59JxsCKPt56HRtjAdCWZxjACQsP28",
+        "tail": [
+          "(node:639323) ExperimentalWarning: SQLite is an experimental feature and might change at any time",
+          "(Use `node --trace-warnings ...` to show where the warning was created)",
+          "2026-11-11T19:07:08.367Z copy: the mainnet build on http://127.0.0.1:26559 and http://localhost:26559; pool 7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8; fee payer D6zfDjp7h9jifbMVp5qpndYk5eoBRcWVKXVN3sdTeNSC; fee 1300000; engine stand-in swallow",
+          "2026-11-11T19:07:55.027Z restored from the seed file: [{\"ref\":\"change\",\"state\":\"UNSPENT\",\"value\":\"0\",\"leafIndex\":\"2\"},{\"ref\":\"deposit\",\"state\":\"SPENT\",\"value\":\"10000000\",\"leafIndex\":\"1\"},{\"ref\":\"return\",\"state\":\"UNSPENT\",\"value\":\"3287495\",\"leafIndex\":\"3\"}]",
+          "2026-11-11T19:07:55.027Z pool.withdraw answered {\"result\":{\"pending\":true}}; screen opened {\"chain\":\"solana\",\"opId\":\"pool-withdraw-devnet\"}",
+          "2026-11-11T19:07:55.037Z screen ready: {\"view\":{\"state\":\"ready\",\"address\":{\"ok\":true,\"to\":\"2oaULmAtFcF3H3p59JxsCKPt56HRtjAdCWZxjACQsP28\"},\"amount\":{\"ok\":true,\"amount\":\"1982495\",\"parts\":1,\"maxFee\":\"1305000\"},\"ready\":{\"chain\":\"solana\",\"to\":\"2oaULmAtFcF3H3p59JxsCKPt56HRtjAdCWZxjACQsP28\",\"amount\":\"1982495\",\"maxFee\":\"1305000\"}},\"plan\":[{\"noteId\":\"94c2af1ae027de3f30b64a696da4cff8\",\"part\":\"1982495\",\"chunk\":\"3287495\"}],\"fee\":\"1300000\",\"wFee\":\"5000\",\"minPart\":\"1295000\"}",
+          "2026-11-11T19:07:55.037Z the press",
+          "2026-11-11T19:07:55.083Z helper GET /v1/pool/fee: HTTP 200",
+          "DEBUG waiting 1100 ms before the newest read",
+          "2026-11-11T19:08:01.433Z proved in 5211 ms",
+          "2026-11-11T19:08:01.523Z helper: pool send solana mainnet send outcome=sent status=200 ms=34 tag=2 via=plain",
+          "2026-11-11T19:08:01.523Z helper POST /v1/pool/solana/send: HTTP 200",
+          "2026-11-11T19:08:04.024Z op {\"kind\":\"withdraw\",\"stage\":\"sent\",\"txs\":[{\"chain\":\"solana\",\"hash\":\"2DpW3SHpeQGdkqpwtwVC5rpbovTVaPPv9meoR6ZaChbW5MPb7xGihppi7jcegib7521qk5ZxFpzo5AfJZU2hipmr\"},{\"chain\":\"solana\",\"hash\":\"7EQLo1Qeg5A9wUFMJbDx3Xh8upeSaPjWT6wA44qnUWzDeCS6Fo1ndreYNwep8N4cDDGYiEiHC8CaWY8f7CxuQq1\"}],\"created_ms\":1794424075037,\"arrived\":{\"7EQLo1Qeg5A9wUFMJbDx3Xh8upeSaPjWT6wA44qnUWzDeCS6Fo1ndreYNwep8N4cDDGYiEiHC8CaWY8f7CxuQq1\":\"1982495\"}}",
+          "2026-11-11T19:08:04.034Z checks [{\"release\":\"2DpW3SHpeQGdkqpwtwVC5rpbovTVaPPv9meoR6ZaChbW5MPb7xGihppi7jcegib7521qk5ZxFpzo5AfJZU2hipmr\",\"onward\":\"7EQLo1Qeg5A9wUFMJbDx3Xh8upeSaPjWT6wA44qnUWzDeCS6Fo1ndreYNwep8N4cDDGYiEiHC8CaWY8f7CxuQq1\",\"part\":\"1982495\",\"reads\":[{\"release\":true,\"onward\":true,\"toDelta\":\"1982495\",\"wAfter\":\"0\"},{\"release\":true,\"onward\":true,\"toDelta\":\"1982495\",\"wAfter\":\"0\"}],\"landed\":true}]; sent true",
+          ""
+        ]
+      },
+      "proofWait": {
+        "passes": 22,
+        "ms": 26044,
+        "made": true
+      },
+      "buySend": {
+        "lines": [
+          "pool send solana mainnet send outcome=filled status=200 ms=451 tag=3 via=jito region=engine-stand-in bundle=named end=filled rebroadcasts=1 misses=0 plain=2 hash_ms=>441"
+        ],
+        "sendStartMs": 38,
+        "helperMs": 451,
+        "filledMs": 548,
+        "sendToFilledMs": 510,
+        "engineCalls": [
+          {
+            "at": 1794424025292,
+            "call": "send",
+            "mode": "swallow"
+          },
+          {
+            "at": 1794424025294,
+            "call": "rebroadcast",
+            "mode": "swallow"
+          }
+        ]
+      }
+    },
+    "graduated": {
+      "exit": 1,
+      "flow": {
+        "at": "2026-11-11T19:09:35.155Z",
+        "cluster": "mainnet copy",
+        "program": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+        "seedFile": "/tmp/sol-copy-V4Wn5P/graduated/run-2026-11-11T19-08-12-298Z.seed",
+        "steps": [
+          {
+            "step": "deposit",
+            "signature": "4fctASQt2V8nDHVZZKmxW5fcjrUhHLnLn8Mn27k3M7oKWuUQcFM4kqbqqxoCVEv2znD7QfwuHkLXmzW2J5Lm7e8o",
+            "watch": {
+              "W": null,
+              "feePayer": "D6zfDjp7h9jifbMVp5qpndYk5eoBRcWVKXVN3sdTeNSC",
+              "tip0": "ADaUMid9yfUytqMBgopwjb2DTLSokTSzL1zt6iGPaS49",
+              "tip1": "HFqU5x63VTqvQss8hp11i4wVV8bD44PvwucfZ2bU7gRe",
+              "tip2": "DfXygSm4jCyNCybVYYK6DwvWqjKee8pbDmJGcLWNDXjh",
+              "tip3": "DttWaMuVvTiduZRnguLF7jNxTgiMBZ1hyAumKUiL2KRL",
+              "tip4": "ADuUkR4vqLUMWXxW9gh6D6L8pMSawimctcNZ5pGwDcEt",
+              "tip5": "96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5",
+              "tip6": "Cw8CFyM9FkoMi7K7Crf6HNQqf4uEMzpKw6QNghXLvLkY",
+              "tip7": "3AVi9Tg9Uo68tJfuvoKvqKNWKkC5wPdSSdeBnizKZ6jT"
+            }
+          },
+          {
+            "step": "deposit",
+            "signature": "4fctASQt2V8nDHVZZKmxW5fcjrUhHLnLn8Mn27k3M7oKWuUQcFM4kqbqqxoCVEv2znD7QfwuHkLXmzW2J5Lm7e8o",
+            "watch": {
+              "W": null,
+              "feePayer": "D6zfDjp7h9jifbMVp5qpndYk5eoBRcWVKXVN3sdTeNSC",
+              "tip0": "ADaUMid9yfUytqMBgopwjb2DTLSokTSzL1zt6iGPaS49",
+              "tip1": "HFqU5x63VTqvQss8hp11i4wVV8bD44PvwucfZ2bU7gRe",
+              "tip2": "DfXygSm4jCyNCybVYYK6DwvWqjKee8pbDmJGcLWNDXjh",
+              "tip3": "DttWaMuVvTiduZRnguLF7jNxTgiMBZ1hyAumKUiL2KRL",
+              "tip4": "ADuUkR4vqLUMWXxW9gh6D6L8pMSawimctcNZ5pGwDcEt",
+              "tip5": "96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5",
+              "tip6": "Cw8CFyM9FkoMi7K7Crf6HNQqf4uEMzpKw6QNghXLvLkY",
+              "tip7": "3AVi9Tg9Uo68tJfuvoKvqKNWKkC5wPdSSdeBnizKZ6jT"
+            }
+          }
+        ],
+        "simFails": [
+          {
+            "phase": "buy",
+            "err": {
+              "InstructionError": [
+                2,
+                {
+                  "Custom": 1
+                }
+              ]
+            },
+            "cu": 300885,
+            "logsTail": [
+              "Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA consumed 179 of 102239 compute units",
+              "Program return: TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA pQAAAAAAAAA=",
+              "Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA success",
+              "Program 11111111111111111111111111111111 invoke [4]",
+              "Transfer: insufficient lamports 5000, need 1488440",
+              "Program 11111111111111111111111111111111 failed: custom program error: 0x1",
+              "Program ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL consumed 8553 of 107668 compute units",
+              "Program ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL failed: custom program error: 0x1",
+              "Program pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA consumed 92898 of 192013 compute units",
+              "Program pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA failed: custom program error: 0x1",
+              "Program EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF consumed 300585 of 399700 compute units",
+              "Program EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF failed: custom program error: 0x1"
+            ]
+          }
+        ],
+        "planted": {
+          "reads": 0
+        },
+        "fee": "1300000",
+        "sendLines": [
+          {
+            "phase": "buy",
+            "line": "pool send solana mainnet send outcome=simulation_failed status=422 ms=40 tag=3 err={\"InstructionError\":[2,{\"Custom\":1}]}"
+          }
+        ],
+        "proofWait": {
+          "passes": 47,
+          "ms": 51789,
+          "made": true
+        },
+        "engine": "swallow",
+        "engineCalls": [],
+        "pool": "7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8",
+        "tables": {
+          "pump-curve": [
+            "BShWZ8FbDPYGpoc1ebj4TiELvVFmBQwW4XMYuLtQoHYZ"
+          ],
+          "pumpswap": [
+            "FgEMbfTgkWjN663EmGTRheisjn9AqUAQkWaoxNy3Q3Dh"
+          ]
+        },
+        "mint": "CGEDT9QZDvvH5GmVkWJH2BXiMJqMJySC9ihWyr7Spump",
+        "spend": "max",
+        "resumed": false,
+        "burst": false,
+        "injected": {
+          "rpc": 0,
+          "send": 0
+        },
+        "dust": null,
+        "U": "DfCdCSW1b5NAQXzW4VF4WtQ8zMYLXZNWRXAR9F8SnkHM",
+        "need": "11473120",
+        "deposit": {
+          "answer": {
+            "result": {
+              "stage": "sent",
+              "txs": [
+                {
+                  "chain": "solana",
+                  "hash": "4fctASQt2V8nDHVZZKmxW5fcjrUhHLnLn8Mn27k3M7oKWuUQcFM4kqbqqxoCVEv2znD7QfwuHkLXmzW2J5Lm7e8o"
+                }
+              ]
+            }
+          },
+          "notes": [
+            {
+              "ref": "deposit",
+              "state": "UNSPENT",
+              "value": "10000000",
+              "leafIndex": "5",
+              "sends": [
+                "4fctASQt2V8nDHVZZKmxW5fcjrUhHLnLn8Mn27k3M7oKWuUQcFM4kqbqqxoCVEv2znD7QfwuHkLXmzW2J5Lm7e8o"
+              ]
+            }
+          ]
+        },
+        "buy": {
+          "answer": {
+            "result": {
+              "stage": "not_landed",
+              "txs": []
+            }
+          },
+          "notes": [
+            {
+              "ref": "deposit",
+              "state": "UNSPENT",
+              "value": "10000000",
+              "leafIndex": "5",
+              "sends": [
+                "4fctASQt2V8nDHVZZKmxW5fcjrUhHLnLn8Mn27k3M7oKWuUQcFM4kqbqqxoCVEv2znD7QfwuHkLXmzW2J5Lm7e8o"
+              ]
+            }
+          ]
+        },
+        "buyTimeline": [
+          {
+            "what": "rpc 127.0.0.1:26559 getSlot",
+            "at": 7,
+            "ms": 12
+          },
+          {
+            "what": "rpc localhost:26559 getSlot",
+            "at": 7,
+            "ms": 13
+          },
+          {
+            "what": "rpc localhost:26559 getAccountInfo",
+            "at": 8,
+            "ms": 14
+          },
+          {
+            "what": "rpc localhost:26559 getAccountInfo",
+            "at": 8,
+            "ms": 14
+          },
+          {
+            "what": "rpc localhost:26559 getAccountInfo",
+            "at": 10,
+            "ms": 11
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getAccountInfo",
+            "at": 7,
+            "ms": 15
+          },
+          {
+            "what": "rpc localhost:26559 getAccountInfo",
+            "at": 7,
+            "ms": 15
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getAccountInfo",
+            "at": 8,
+            "ms": 15
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getAccountInfo",
+            "at": 8,
+            "ms": 17
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getAccountInfo",
+            "at": 10,
+            "ms": 15
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getMultipleAccounts",
+            "at": 12,
+            "ms": 13
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getMultipleAccounts",
+            "at": 12,
+            "ms": 13
+          },
+          {
+            "what": "rpc localhost:26559 getMultipleAccounts",
+            "at": 12,
+            "ms": 14
+          },
+          {
+            "what": "rpc localhost:26559 getMultipleAccounts",
+            "at": 13,
+            "ms": 15
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getBlockTime",
+            "at": 19,
+            "ms": 14
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getAccountInfo",
+            "at": 30,
+            "ms": 5
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getLatestBlockhash",
+            "at": 32,
+            "ms": 3
+          },
+          {
+            "what": "rpc localhost:26559 getAccountInfo",
+            "at": 30,
+            "ms": 5
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getAccountInfo",
+            "at": 31,
+            "ms": 5
+          },
+          {
+            "what": "rpc localhost:26559 getAccountInfo",
+            "at": 31,
+            "ms": 5
+          },
+          {
+            "what": "rpc localhost:26559 getMultipleAccounts",
+            "at": 32,
+            "ms": 4
+          },
+          {
+            "what": "rpc localhost:26559 getBlockTime",
+            "at": 20,
+            "ms": 17
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getMultipleAccounts",
+            "at": 32,
+            "ms": 4
+          },
+          {
+            "what": "rpc localhost:26559 isBlockhashValid",
+            "at": 35,
+            "ms": 6
+          },
+          {
+            "what": "rpc localhost:26559 getEpochInfo",
+            "at": 35,
+            "ms": 6
+          },
+          {
+            "what": "route wallet",
+            "at": 66,
+            "ms": 0
+          },
+          {
+            "what": "route venue,pool",
+            "at": 67,
+            "ms": 0
+          },
+          {
+            "what": "helper POST /v1/pool/solana/send HTTP 422",
+            "at": 67,
+            "ms": 40
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getEpochInfo",
+            "at": 107,
+            "ms": 1
+          },
+          {
+            "what": "rpc localhost:26559 getEpochInfo",
+            "at": 107,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getProgramAccounts",
+            "at": 110,
+            "ms": 20
+          },
+          {
+            "what": "rpc localhost:26559 getMultipleAccounts",
+            "at": 131,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getMultipleAccounts",
+            "at": 131,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getProgramAccounts",
+            "at": 132,
+            "ms": 17
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getMultipleAccounts",
+            "at": 149,
+            "ms": 1
+          },
+          {
+            "what": "rpc localhost:26559 getMultipleAccounts",
+            "at": 149,
+            "ms": 1
+          },
+          {
+            "what": "rpc localhost:26559 getMultipleAccounts",
+            "at": 153,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getMultipleAccounts",
+            "at": 152,
+            "ms": 3
+          },
+          {
+            "what": "rpc localhost:26559 getEpochInfo",
+            "at": 1157,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getEpochInfo",
+            "at": 1157,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getProgramAccounts",
+            "at": 1159,
+            "ms": 17
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getProgramAccounts",
+            "at": 1176,
+            "ms": 16
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getMultipleAccounts",
+            "at": 1193,
+            "ms": 3
+          },
+          {
+            "what": "rpc localhost:26559 getMultipleAccounts",
+            "at": 1195,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getEpochInfo",
+            "at": 2199,
+            "ms": 1
+          },
+          {
+            "what": "rpc localhost:26559 getEpochInfo",
+            "at": 2199,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getProgramAccounts",
+            "at": 2201,
+            "ms": 17
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getProgramAccounts",
+            "at": 2219,
+            "ms": 18
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getMultipleAccounts",
+            "at": 2237,
+            "ms": 4
+          },
+          {
+            "what": "rpc localhost:26559 getMultipleAccounts",
+            "at": 2240,
+            "ms": 2
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getEpochInfo",
+            "at": 3244,
+            "ms": 1
+          },
+          {
+            "what": "rpc localhost:26559 getEpochInfo",
+            "at": 3244,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getProgramAccounts",
+            "at": 3246,
+            "ms": 18
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getProgramAccounts",
+            "at": 3264,
+            "ms": 16
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getMultipleAccounts",
+            "at": 3282,
+            "ms": 2
+          },
+          {
+            "what": "rpc localhost:26559 getMultipleAccounts",
+            "at": 3283,
+            "ms": 1
+          },
+          {
+            "what": "rpc localhost:26559 getEpochInfo",
+            "at": 4287,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getEpochInfo",
+            "at": 4286,
+            "ms": 2
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getProgramAccounts",
+            "at": 4289,
+            "ms": 19
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getProgramAccounts",
+            "at": 4309,
+            "ms": 17
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getMultipleAccounts",
+            "at": 4327,
+            "ms": 2
+          },
+          {
+            "what": "rpc localhost:26559 getMultipleAccounts",
+            "at": 4328,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getEpochInfo",
+            "at": 5332,
+            "ms": 1
+          },
+          {
+            "what": "rpc localhost:26559 getEpochInfo",
+            "at": 5332,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getProgramAccounts",
+            "at": 5334,
+            "ms": 17
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getProgramAccounts",
+            "at": 5350,
+            "ms": 17
+          },
+          {
+            "what": "rpc localhost:26559 getMultipleAccounts",
+            "at": 5370,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getMultipleAccounts",
+            "at": 5368,
+            "ms": 2
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getEpochInfo",
+            "at": 6374,
+            "ms": 1
+          },
+          {
+            "what": "rpc localhost:26559 getEpochInfo",
+            "at": 6374,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getProgramAccounts",
+            "at": 6376,
+            "ms": 18
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getProgramAccounts",
+            "at": 6394,
+            "ms": 16
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getMultipleAccounts",
+            "at": 6412,
+            "ms": 2
+          },
+          {
+            "what": "rpc localhost:26559 getMultipleAccounts",
+            "at": 6413,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getEpochInfo",
+            "at": 7416,
+            "ms": 1
+          },
+          {
+            "what": "rpc localhost:26559 getEpochInfo",
+            "at": 7416,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getProgramAccounts",
+            "at": 7418,
+            "ms": 19
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getProgramAccounts",
+            "at": 7438,
+            "ms": 20
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getMultipleAccounts",
+            "at": 7460,
+            "ms": 3
+          },
+          {
+            "what": "rpc localhost:26559 getMultipleAccounts",
+            "at": 7461,
+            "ms": 2
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getEpochInfo",
+            "at": 8465,
+            "ms": 1
+          },
+          {
+            "what": "rpc localhost:26559 getEpochInfo",
+            "at": 8465,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getProgramAccounts",
+            "at": 8467,
+            "ms": 21
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getProgramAccounts",
+            "at": 8489,
+            "ms": 16
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getMultipleAccounts",
+            "at": 8506,
+            "ms": 2
+          },
+          {
+            "what": "rpc localhost:26559 getMultipleAccounts",
+            "at": 8507,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getEpochInfo",
+            "at": 9511,
+            "ms": 1
+          },
+          {
+            "what": "rpc localhost:26559 getEpochInfo",
+            "at": 9511,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getProgramAccounts",
+            "at": 9513,
+            "ms": 17
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getProgramAccounts",
+            "at": 9531,
+            "ms": 17
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getMultipleAccounts",
+            "at": 9549,
+            "ms": 2
+          },
+          {
+            "what": "rpc localhost:26559 getMultipleAccounts",
+            "at": 9550,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getEpochInfo",
+            "at": 10553,
+            "ms": 1
+          },
+          {
+            "what": "rpc localhost:26559 getEpochInfo",
+            "at": 10553,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getProgramAccounts",
+            "at": 10555,
+            "ms": 18
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getProgramAccounts",
+            "at": 10573,
+            "ms": 16
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getMultipleAccounts",
+            "at": 10591,
+            "ms": 3
+          },
+          {
+            "what": "rpc localhost:26559 getMultipleAccounts",
+            "at": 10592,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getEpochInfo",
+            "at": 11596,
+            "ms": 1
+          },
+          {
+            "what": "rpc localhost:26559 getEpochInfo",
+            "at": 11596,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getProgramAccounts",
+            "at": 11598,
+            "ms": 18
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getProgramAccounts",
+            "at": 11616,
+            "ms": 16
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getMultipleAccounts",
+            "at": 11634,
+            "ms": 3
+          },
+          {
+            "what": "rpc localhost:26559 getMultipleAccounts",
+            "at": 11636,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getEpochInfo",
+            "at": 12639,
+            "ms": 1
+          },
+          {
+            "what": "rpc localhost:26559 getEpochInfo",
+            "at": 12639,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getProgramAccounts",
+            "at": 12641,
+            "ms": 21
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getProgramAccounts",
+            "at": 12662,
+            "ms": 19
+          },
+          {
+            "what": "rpc localhost:26559 getMultipleAccounts",
+            "at": 12684,
+            "ms": 2
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getMultipleAccounts",
+            "at": 12682,
+            "ms": 5
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getEpochInfo",
+            "at": 13701,
+            "ms": 1
+          },
+          {
+            "what": "rpc localhost:26559 getEpochInfo",
+            "at": 13701,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getProgramAccounts",
+            "at": 13704,
+            "ms": 17
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getProgramAccounts",
+            "at": 13720,
+            "ms": 16
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getMultipleAccounts",
+            "at": 13738,
+            "ms": 2
+          },
+          {
+            "what": "rpc localhost:26559 getMultipleAccounts",
+            "at": 13739,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getEpochInfo",
+            "at": 14742,
+            "ms": 1
+          },
+          {
+            "what": "rpc localhost:26559 getEpochInfo",
+            "at": 14743,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getProgramAccounts",
+            "at": 14745,
+            "ms": 21
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getProgramAccounts",
+            "at": 14767,
+            "ms": 18
+          },
+          {
+            "what": "rpc localhost:26559 getMultipleAccounts",
+            "at": 14787,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getMultipleAccounts",
+            "at": 14786,
+            "ms": 3
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getEpochInfo",
+            "at": 15790,
+            "ms": 1
+          },
+          {
+            "what": "rpc localhost:26559 getEpochInfo",
+            "at": 15791,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getProgramAccounts",
+            "at": 15793,
+            "ms": 18
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getProgramAccounts",
+            "at": 15811,
+            "ms": 17
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getMultipleAccounts",
+            "at": 15830,
+            "ms": 2
+          },
+          {
+            "what": "rpc localhost:26559 getMultipleAccounts",
+            "at": 15831,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getEpochInfo",
+            "at": 16833,
+            "ms": 1
+          },
+          {
+            "what": "rpc localhost:26559 getEpochInfo",
+            "at": 16834,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getProgramAccounts",
+            "at": 16835,
+            "ms": 17
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getProgramAccounts",
+            "at": 16852,
+            "ms": 17
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getMultipleAccounts",
+            "at": 16870,
+            "ms": 3
+          },
+          {
+            "what": "rpc localhost:26559 getMultipleAccounts",
+            "at": 16872,
+            "ms": 2
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getEpochInfo",
+            "at": 17876,
+            "ms": 1
+          },
+          {
+            "what": "rpc localhost:26559 getEpochInfo",
+            "at": 17876,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getProgramAccounts",
+            "at": 17878,
+            "ms": 16
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getProgramAccounts",
+            "at": 17894,
+            "ms": 17
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getMultipleAccounts",
+            "at": 17912,
+            "ms": 2
+          },
+          {
+            "what": "rpc localhost:26559 getMultipleAccounts",
+            "at": 17913,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getEpochInfo",
+            "at": 18916,
+            "ms": 1
+          },
+          {
+            "what": "rpc localhost:26559 getEpochInfo",
+            "at": 18917,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getProgramAccounts",
+            "at": 18919,
+            "ms": 18
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getProgramAccounts",
+            "at": 18937,
+            "ms": 17
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getMultipleAccounts",
+            "at": 18954,
+            "ms": 2
+          },
+          {
+            "what": "rpc localhost:26559 getMultipleAccounts",
+            "at": 18955,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getEpochInfo",
+            "at": 19958,
+            "ms": 1
+          },
+          {
+            "what": "rpc localhost:26559 getEpochInfo",
+            "at": 19958,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getProgramAccounts",
+            "at": 19960,
+            "ms": 17
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getProgramAccounts",
+            "at": 19977,
+            "ms": 15
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getMultipleAccounts",
+            "at": 19993,
+            "ms": 2
+          },
+          {
+            "what": "rpc localhost:26559 getMultipleAccounts",
+            "at": 19994,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getEpochInfo",
+            "at": 20997,
+            "ms": 1
+          },
+          {
+            "what": "rpc localhost:26559 getEpochInfo",
+            "at": 20998,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getProgramAccounts",
+            "at": 20999,
+            "ms": 17
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getProgramAccounts",
+            "at": 21016,
+            "ms": 16
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getMultipleAccounts",
+            "at": 21034,
+            "ms": 2
+          },
+          {
+            "what": "rpc localhost:26559 getMultipleAccounts",
+            "at": 21035,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getEpochInfo",
+            "at": 22038,
+            "ms": 1
+          },
+          {
+            "what": "rpc localhost:26559 getEpochInfo",
+            "at": 22039,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getProgramAccounts",
+            "at": 22041,
+            "ms": 16
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getProgramAccounts",
+            "at": 22057,
+            "ms": 15
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getMultipleAccounts",
+            "at": 22073,
+            "ms": 2
+          },
+          {
+            "what": "rpc localhost:26559 getMultipleAccounts",
+            "at": 22074,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getEpochInfo",
+            "at": 23078,
+            "ms": 1
+          },
+          {
+            "what": "rpc localhost:26559 getEpochInfo",
+            "at": 23078,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getProgramAccounts",
+            "at": 23080,
+            "ms": 17
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getProgramAccounts",
+            "at": 23097,
+            "ms": 17
+          },
+          {
+            "what": "rpc localhost:26559 getMultipleAccounts",
+            "at": 23116,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getMultipleAccounts",
+            "at": 23115,
+            "ms": 3
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getEpochInfo",
+            "at": 24120,
+            "ms": 1
+          },
+          {
+            "what": "rpc localhost:26559 getEpochInfo",
+            "at": 24120,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getProgramAccounts",
+            "at": 24122,
+            "ms": 16
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getProgramAccounts",
+            "at": 24138,
+            "ms": 17
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getMultipleAccounts",
+            "at": 24156,
+            "ms": 2
+          },
+          {
+            "what": "rpc localhost:26559 getMultipleAccounts",
+            "at": 24157,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getEpochInfo",
+            "at": 25160,
+            "ms": 1
+          },
+          {
+            "what": "rpc localhost:26559 getEpochInfo",
+            "at": 25161,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getProgramAccounts",
+            "at": 25163,
+            "ms": 18
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getProgramAccounts",
+            "at": 25181,
+            "ms": 16
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getMultipleAccounts",
+            "at": 25198,
+            "ms": 2
+          },
+          {
+            "what": "rpc localhost:26559 getMultipleAccounts",
+            "at": 25199,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getEpochInfo",
+            "at": 26201,
+            "ms": 1
+          },
+          {
+            "what": "rpc localhost:26559 getEpochInfo",
+            "at": 26202,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getProgramAccounts",
+            "at": 26204,
+            "ms": 16
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getProgramAccounts",
+            "at": 26220,
+            "ms": 16
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getMultipleAccounts",
+            "at": 26236,
+            "ms": 2
+          },
+          {
+            "what": "rpc localhost:26559 getMultipleAccounts",
+            "at": 26237,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getEpochInfo",
+            "at": 27240,
+            "ms": 1
+          },
+          {
+            "what": "rpc localhost:26559 getEpochInfo",
+            "at": 27240,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getProgramAccounts",
+            "at": 27242,
+            "ms": 18
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getProgramAccounts",
+            "at": 27260,
+            "ms": 17
+          },
+          {
+            "what": "rpc localhost:26559 getMultipleAccounts",
+            "at": 27280,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getMultipleAccounts",
+            "at": 27279,
+            "ms": 2
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getEpochInfo",
+            "at": 28283,
+            "ms": 1
+          },
+          {
+            "what": "rpc localhost:26559 getEpochInfo",
+            "at": 28284,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getProgramAccounts",
+            "at": 28285,
+            "ms": 16
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getProgramAccounts",
+            "at": 28302,
+            "ms": 16
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getMultipleAccounts",
+            "at": 28319,
+            "ms": 2
+          },
+          {
+            "what": "rpc localhost:26559 getMultipleAccounts",
+            "at": 28320,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getEpochInfo",
+            "at": 29322,
+            "ms": 1
+          },
+          {
+            "what": "rpc localhost:26559 getEpochInfo",
+            "at": 29323,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getProgramAccounts",
+            "at": 29324,
+            "ms": 18
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getProgramAccounts",
+            "at": 29343,
+            "ms": 14
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getMultipleAccounts",
+            "at": 29358,
+            "ms": 2
+          },
+          {
+            "what": "rpc localhost:26559 getMultipleAccounts",
+            "at": 29359,
+            "ms": 1
+          },
+          {
+            "what": "progress not_landed",
+            "at": 29362,
+            "ms": 0
+          },
+          {
+            "what": "answer {\"result\":{\"stage\":\"not_landed\",\"txs\":[]",
+            "at": 29362,
+            "ms": 0
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getSlot",
+            "at": 29364,
+            "ms": 0
+          },
+          {
+            "what": "rpc localhost:26559 getSlot",
+            "at": 29364,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getBlockTime",
+            "at": 29364,
+            "ms": 1
+          },
+          {
+            "what": "rpc localhost:26559 getBlockTime",
+            "at": 29365,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getEpochInfo",
+            "at": 29366,
+            "ms": 0
+          },
+          {
+            "what": "rpc localhost:26559 getEpochInfo",
+            "at": 29367,
+            "ms": 1
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getProgramAccounts",
+            "at": 29368,
+            "ms": 16
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getProgramAccounts",
+            "at": 29385,
+            "ms": 15
+          },
+          {
+            "what": "rpc 127.0.0.1:26559 getMultipleAccounts",
+            "at": 29401,
+            "ms": 2
+          },
+          {
+            "what": "rpc localhost:26559 getMultipleAccounts",
+            "at": 29402,
+            "ms": 1
+          }
+        ],
+        "refused": null,
+        "sell": null,
+        "rentBack": null,
+        "sentTxs": [],
+        "stages": [
+          {
+            "kind": "pool.deposit",
+            "stage": "filled"
+          },
+          {
+            "kind": "pool.buy",
+            "stage": "not_landed"
+          }
+        ],
+        "notes": [
+          {
+            "ref": "deposit",
+            "state": "UNSPENT",
+            "value": "10000000",
+            "leafIndex": "5",
+            "sends": [
+              "4fctASQt2V8nDHVZZKmxW5fcjrUhHLnLn8Mn27k3M7oKWuUQcFM4kqbqqxoCVEv2znD7QfwuHkLXmzW2J5Lm7e8o"
+            ]
+          }
+        ],
+        "filled": false
+      },
+      "tail": [
+        "2026-11-11T19:09:33.027Z t+27279 ms rpc 127.0.0.1:26559 getMultipleAccounts 2 ms",
+        "2026-11-11T19:09:34.030Z t+28283 ms rpc 127.0.0.1:26559 getEpochInfo 1 ms",
+        "2026-11-11T19:09:34.030Z t+28284 ms rpc localhost:26559 getEpochInfo 1 ms",
+        "2026-11-11T19:09:34.048Z t+28285 ms rpc 127.0.0.1:26559 getProgramAccounts 16 ms",
+        "2026-11-11T19:09:34.064Z t+28302 ms rpc 127.0.0.1:26559 getProgramAccounts 16 ms",
+        "2026-11-11T19:09:34.067Z t+28319 ms rpc 127.0.0.1:26559 getMultipleAccounts 2 ms",
+        "2026-11-11T19:09:34.067Z t+28320 ms rpc localhost:26559 getMultipleAccounts 1 ms",
+        "2026-11-11T19:09:35.069Z t+29322 ms rpc 127.0.0.1:26559 getEpochInfo 1 ms",
+        "2026-11-11T19:09:35.069Z t+29323 ms rpc localhost:26559 getEpochInfo 1 ms",
+        "2026-11-11T19:09:35.088Z t+29324 ms rpc 127.0.0.1:26559 getProgramAccounts 18 ms",
+        "2026-11-11T19:09:35.103Z t+29343 ms rpc 127.0.0.1:26559 getProgramAccounts 14 ms",
+        "2026-11-11T19:09:35.106Z t+29358 ms rpc 127.0.0.1:26559 getMultipleAccounts 2 ms",
+        "2026-11-11T19:09:35.106Z t+29359 ms rpc localhost:26559 getMultipleAccounts 1 ms",
+        "2026-11-11T19:09:35.108Z t+29362 ms progress not_landed 0 ms",
+        "2026-11-11T19:09:35.108Z pool.buy progress \"not_landed\"",
+        "2026-11-11T19:09:35.108Z t+29362 ms answer {\"result\":{\"stage\":\"not_landed\",\"txs\":[] 0 ms",
+        "2026-11-11T19:09:35.108Z pool.buy answered {\"result\":{\"stage\":\"not_landed\",\"txs\":[]}}; waiting for its run to end",
+        "2026-11-11T19:09:35.110Z t+29364 ms rpc 127.0.0.1:26559 getSlot 0 ms",
+        "2026-11-11T19:09:35.111Z t+29364 ms rpc localhost:26559 getSlot 1 ms",
+        "2026-11-11T19:09:35.111Z t+29364 ms rpc 127.0.0.1:26559 getBlockTime 1 ms",
+        "2026-11-11T19:09:35.112Z t+29365 ms rpc localhost:26559 getBlockTime 1 ms",
+        "2026-11-11T19:09:35.113Z t+29366 ms rpc 127.0.0.1:26559 getEpochInfo 0 ms",
+        "2026-11-11T19:09:35.113Z t+29367 ms rpc localhost:26559 getEpochInfo 1 ms",
+        "2026-11-11T19:09:35.130Z t+29368 ms rpc 127.0.0.1:26559 getProgramAccounts 16 ms",
+        "2026-11-11T19:09:35.146Z t+29385 ms rpc 127.0.0.1:26559 getProgramAccounts 15 ms",
+        "2026-11-11T19:09:35.149Z t+29401 ms rpc 127.0.0.1:26559 getMultipleAccounts 2 ms",
+        "2026-11-11T19:09:35.149Z t+29402 ms rpc localhost:26559 getMultipleAccounts 1 ms",
+        "2026-11-11T19:09:35.154Z buy {\"answer\":{\"result\":{\"stage\":\"not_landed\",\"txs\":[]}},\"notes\":[{\"ref\":\"deposit\",\"state\":\"UNSPENT\",\"value\":\"10000000\",\"leafIndex\":\"5\",\"sends\":[\"4fctASQt2V8nDHVZZKmxW5fcjrUhHLnLn8Mn27k3M7oKWuUQcFM4kqbqqxoCVEv2znD7QfwuHkLXmzW2J5Lm7e8o\"]}]}",
+        "2026-11-11T19:09:35.155Z notes [{\"ref\":\"deposit\",\"state\":\"UNSPENT\",\"value\":\"10000000\",\"leafIndex\":\"5\",\"sends\":[\"4fctASQt2V8nDHVZZKmxW5fcjrUhHLnLn8Mn27k3M7oKWuUQcFM4kqbqqxoCVEv2znD7QfwuHkLXmzW2J5Lm7e8o\"]}]",
+        ""
+      ],
+      "proofWait": {
+        "passes": 47,
+        "ms": 51789,
+        "made": true
+      },
+      "buySend": {
+        "lines": [
+          "pool send solana mainnet send outcome=simulation_failed status=422 ms=40 tag=3 err={\"InstructionError\":[2,{\"Custom\":1}]}"
+        ],
+        "sendStartMs": 67,
+        "helperMs": 40,
+        "filledMs": null,
+        "sendToFilledMs": null,
+        "engineCalls": []
+      }
+    }
+  },
+  "cannotShow": [
+    "whether a block builder or a leader includes the transaction: the copy has no Jito block engine and one leader, itself; the helper's bundle step is a plain send to the copy",
+    "priority fee levels: the copy's only transactions are the run's own, so no fee market",
+    "rate limits of real providers: the page reads the copy's one RPC under two names",
+    "the helper's mainnet fee payer: the copy's fee payer is a fresh local key (the pool program binds the fee payer only through the proof's context, release.rs, so any key it signs with is accepted)",
+    "mainnet's slot and clock: the copy starts near slot 0 on this machine's clock; accounts are as of the clone slot"
+  ]
+}

@@ -19,7 +19,8 @@
 //   the testnet build gives the same-chain U_X but refuses a quote not_allowed, nothing sent.
 // - A quote whose min out is under the device's own floor for X's pool is refused not_allowed (pool-deposit-quote.ts
 //   "floor"; card pool-deposit-follow): the rung plus one deposit's worst-case cost (and on Solana the rent U_X keeps),
-//   read at quote time on two RPCs (`floor`: readSolanaPoolFloor on Solana). No floor read, or one that answers null:
+//   read at quote time on two RPCs (`floor`: readSolanaPoolFloor on Solana, readEvmPoolFloor on Base and Robinhood). No
+//   floor read, or one that answers null:
 //   not_allowed, nothing sent; a read that throws: down.
 import { base58, base64, hex } from "@scure/base";
 import { backupFirst, type DepositRecord } from "@blindfill/wallet/store";
@@ -29,7 +30,9 @@ import { POOL_ASSET_DECIMALS, type PoolAsset, type PoolChain, type PoolStatePric
 import { POOL_DEPOSIT_NETWORK, askDepositQuoteAgain, poolDepositQuoteRequest } from "../../wallet/src/deposit/quote.ts";
 import type { Deferred, HostAnswer, HostRefusal } from "./api.ts";
 import type { DepositPublic } from "./deposit-wire.ts";
-import { checkPoolDepositQuote, solanaPoolDepositFloor } from "./pool-deposit-quote.ts";
+import { checkPoolDepositQuote, evmPoolDepositFloor, solanaPoolDepositFloor } from "./pool-deposit-quote.ts";
+import { readEvmDepositPrice } from "./pool-deposit-evm.ts";
+import type { EvmPoolPin, EvmRpc } from "../../wallet/src/pool/evm.ts";
 import { readSolanaRent, type SolanaRent } from "../../kit/src/trade/solana/pool-buy.ts";
 import { solanaPoolDepositTx } from "../../kit/src/trade/solana/pool-deposit.ts";
 import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
@@ -135,6 +138,16 @@ function aboveCap(amount: bigint, decimalsIn: number, reads: readonly [string, s
 export async function readSolanaPoolFloor(rpcs: readonly [SolanaRpc, SolanaRpc], program: string, wallet: string): Promise<bigint> {
   const { fee, rent } = await readSolanaPoolCosts(rpcs, program, wallet);
   return solanaPoolDepositFloor(fee, rent);
+}
+
+/**
+ * The EVM floor at quote time (card evm-deposit-route-mainnet): the rung plus one deposit at the rule's capped gas and
+ * the tree's headroom, at 2 x base fee + U's tip, plus the L1 fee bound (Base; 0 on Robinhood), each read now on the
+ * pool's two RPCs (pool-deposit-evm.ts readEvmDepositPrice; names no account), the price the deposit run's own bound
+ * is. Reads apart or one that does not answer throw (the host answers down).
+ */
+export async function readEvmPoolFloor(rpcs: readonly [EvmRpc, EvmRpc], pin: EvmPoolPin): Promise<bigint> {
+  return evmPoolDepositFloor(await readEvmDepositPrice(rpcs, pin));
 }
 
 /** The reads readSolanaPoolFloor prices the floor at: the Rent sysvar on both RPCs, and the higher of the two RPCs' fee

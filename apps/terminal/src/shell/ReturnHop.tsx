@@ -8,7 +8,7 @@ import { useSignpage } from "./signpage-frame.tsx";
 // Opening one of the five open kinds on SIGN_HOST's shell (return-hop.ts). A screen calls hop(kind, params, view): the
 // tapped control is locked at once, in hop() itself (hop-gate.ts), and a second tap does nothing; the kind is posted to
 // the shell. The shell's ok means the flow is set up and its screen is coming over the app in place: the lock holds
-// until that screen takes this frame, nothing navigates, and the flow's outcome arrives through the state events. A
+// until that screen takes this frame's focus, nothing navigates, and the flow's outcome arrives through the state events. A
 // refused or failed kind, or one with no answer within the kit's window for it, unlocks the control and keeps the
 // outcome as `failed` (the control, why, and its Retry), which the screen draws in place with HopLine
 // (screens/signin/HopLine.tsx), so a tap never ends in nothing.
@@ -46,6 +46,11 @@ export function ReturnHopProvider({ children }: { children: ReactNode }) {
         after: (ms, fn) => {
           const t = setTimeout(fn, ms);
           return () => clearTimeout(t);
+        },
+        // the sheet over the app moves the focus to itself: this frame's window blurs
+        taken: (fn) => {
+          addEventListener("blur", fn, { once: true });
+          return () => removeEventListener("blur", fn);
         },
       }),
     [client],

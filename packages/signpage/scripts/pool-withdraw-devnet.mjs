@@ -18,8 +18,10 @@ import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { IDBFactory } from "fake-indexeddb";
+import { COPY, copyNet } from "./copy-net.mjs";
 
-globalThis.__SIGN_NETWORK__ = "testnet";
+// FLOW_COPY (./copy-net.mjs): the mainnet build, on a local copy of mainnet
+globalThis.__SIGN_NETWORK__ = COPY ? "mainnet" : "testnet";
 const { entropyToWords, wordsToSeed64 } = await import("../../wallet/src/derive/index.ts");
 const { openWalletStore } = await import("../../wallet/src/store/index.ts");
 const { openNoteStore, refKey } = await import("../../wallet/src/notes/store.ts");
@@ -31,7 +33,7 @@ const { TESTNET_RPCS, testnetPool, testnetPoolDeps, testnetRpc } = await import(
 const { evaluatePool } = await import("../src/withdraw/pool-form.ts");
 const { planPoolWithdraw } = await import("../src/pool-withdraw.ts");
 const { POOL_TESTNET } = await import("../../wallet/src/pool/network.ts");
-if (POOL_TESTNET !== true || SOL_POOLS.devnet === undefined) throw new Error("not the testnet build's pins");
+if (!COPY && (POOL_TESTNET !== true || SOL_POOLS.devnet === undefined)) throw new Error("not the testnet build's pins");
 
 const [TO, AMOUNT, OUT] = process.argv.slice(2);
 const RESUME = process.env.FLOW_RESUME;
@@ -40,7 +42,10 @@ if (!OUT || !RESUME) throw new Error("usage: FLOW_RESUME=<seed file> pool-withdr
 const log = (s) => console.log(`${new Date().toISOString()} ${s}`);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const big = (_k, v) => (typeof v === "bigint" ? String(v) : v);
-const rpcs = [testnetRpc(TESTNET_RPCS.solana[0]), testnetRpc(TESTNET_RPCS.solana[1])];
+let phase = "start";
+const copy = COPY ? await copyNet({ log, phase: () => phase }) : null;
+const rpcs = COPY ? copy.rpcs : [testnetRpc(TESTNET_RPCS.solana[0]), testnetRpc(TESTNET_RPCS.solana[1])];
+const PIN = COPY ? copy.pin : SOL_POOLS.devnet;
 
 const KIT_ZK = new URL("../../kit/zk/", import.meta.url);
 const file = (name) => {
@@ -80,12 +85,12 @@ const page = {
   // the page's screen, as main.ts opens it: the chain the app named and the request's id
   openWithdraw: (chain, ctx) => ((opened = { chain, opId: ctx.id }), { result: { pending: true } }),
 };
-const t = testnetPool(page, { rpcs, prover: { vault, stop: () => {} }, fetch: helperFetch });
+const t = testnetPool(page, { rpcs, prover: { vault, stop: () => {} }, fetch: helperFetch, ...(COPY ? { pin: copy.pin, holdings: copy.holdings } : {}) });
 const kinds = poolKinds({ ...testnetPoolDeps(t.flow), rpcs: (c) => (c === "solana" ? rpcs : testnetPoolDeps().rpcs(c)) });
 
-const { pool } = solanaPoolOf(SOL_POOLS.devnet.program);
+const { pool } = solanaPoolOf(PIN.program);
 const ns = await openNoteStore(w);
-const r = await solanaRestoreNotes({ seed64, program: SOL_POOLS.devnet.program, rpcs });
+const r = await solanaRestoreNotes({ seed64, program: PIN.program, rpcs });
 const ids = new Map();
 for (const n of r.notes) {
   const rec = await ns.add({ ref: n.ref, scope: n.scope, precommitment: n.precommitment, state: "UNSPENT", leaf: n.leaf, ...(n.parent === undefined ? {} : { parent: ids.get(n.parent) }) });
@@ -101,10 +106,14 @@ log(`pool.withdraw answered ${JSON.stringify(answer)}; screen opened ${JSON.stri
 if (!opened) throw new Error("pool.withdraw did not open the screen");
 const deps = t.withdrawDeps("solana", opId);
 const funds = await deps.funds();
-const view = evaluatePool("solana", TO, AMOUNT, deps.keys, funds);
+// "max" (FLOW_COPY's run): the most the screen takes from these notes
+const { poolWithdrawable } = await import("../src/pool-withdraw.ts");
+const { formatUnits } = await import("../src/withdraw/pool-form.ts");
+const amount = AMOUNT === "max" ? formatUnits(poolWithdrawable(funds.notes, funds), 9) : AMOUNT;
+const view = evaluatePool("solana", TO, amount, deps.keys, funds);
 const plan = view.ready ? planPoolWithdraw(funds.notes, view.ready.amount, funds) : null;
 log(`screen ${view.state}: ${JSON.stringify({ view, plan, fee: funds.fee, wFee: funds.wFee, minPart: funds.minPart }, big)}`);
-const record = { at: new Date().toISOString(), cluster: "devnet", program: SOL_POOLS.devnet.program, pool, to: TO, amount: AMOUNT, dry: DRY, answer, opened, view, plan, before };
+const record = { at: new Date().toISOString(), cluster: COPY ? "mainnet copy" : "devnet", program: PIN.program, pool, to: TO, amount, dry: DRY, answer, opened, view, plan, before };
 if (DRY || !view.ready) {
   writeFileSync(OUT, JSON.stringify(record, big, 2) + "\n");
   log(DRY ? "dry: stopped before the press" : "the screen refused it");
@@ -112,6 +121,7 @@ if (DRY || !view.ready) {
   process.exit(view.ready ? 0 : 1);
 }
 log("the press");
+phase = "withdraw";
 await t.withdraw(view.ready, opId);
 const op = await w.get("ops", opId);
 log(`op ${JSON.stringify(op)}`);
@@ -147,7 +157,9 @@ for (let k = 0; k * 2 < txs.length; k++) {
 }
 const notes = await noteList();
 const sent = op?.stage === "sent" && checks.length === (plan?.length ?? -1) && checks.every((c) => c.landed);
-writeFileSync(OUT, JSON.stringify({ ...record, op, checks, notes, sent }, big, 2) + "\n");
+// FLOW_COPY: each send by its step, To and the fee payer watched
+const steps = COPY ? copy.sent.map((x, i) => ({ step: txs.findIndex((y) => y.hash === x.signature) % 2 === 1 ? "withdraw: onward to To" : "withdraw: release", signature: x.signature, watch: { to: TO, feePayer: PIN.feePayer } })) : undefined;
+writeFileSync(OUT, JSON.stringify({ ...record, op, checks, notes, sent, steps, simFails: copy?.simFails, sendLines: copy?.sendLines }, big, 2) + "\n");
 log(`checks ${JSON.stringify(checks)}; sent ${sent}`);
 seed64.fill(0);
 await t.signedOut();

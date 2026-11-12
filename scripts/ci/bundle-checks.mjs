@@ -59,6 +59,7 @@ export const IN_PROCESS = [
   viaRead("pool-deposit-sent-end", () => import("../live-checks/pool-deposit-sent-end.mjs")),
   viaRead("pool-deposit-address", () => import("../live-checks/pool-deposit-address.mjs")),
   viaRead("pool-deposit-follow", () => import("../live-checks/pool-deposit-follow.mjs")),
+  viaRead("evm-deposit-route-mainnet", () => import("../live-checks/evm-deposit-route-mainnet.mjs")),
   viaRead("solana-release-reads-paced", () => import("../live-checks/solana-release-reads-paced.mjs")),
   viaRead("pool-buy-record-never-stays-sent", () => import("../live-checks/pool-buy-record-never-stays-sent.mjs")),
   viaRead("solana-legs-checked", () => import("../live-checks/solana-legs-checked.mjs")),
@@ -86,6 +87,9 @@ export const IN_PROCESS = [
   { key: "wallet-restore-id-reader", host: "sign", load: () => import("../live-checks/wallet-restore-id-reader.mjs"), run: async (m, f) => m.judgeBundle(await m.readBundle(f)) },
   // the bundle part only (no state read at an old block's tag, every pool seat named): the providers' answers are past the build
   { key: "evm-deposit-note-stays-incoming", host: "sign", load: () => import("../live-checks/evm-deposit-note-stays-incoming.mjs"), run: async (m, f) => m.judgeBundleOnly(await m.readBundle(f)) },
+  // the bundle part only (the tree sync's wait, the -32004 read again, the withdraw's cause line): mainnet's cadence on
+  // two providers is past the build
+  { key: "pool-tree-read-waits-for-its-second", host: "sign", load: () => import("../live-checks/pool-tree-read-waits-for-its-second.mjs"), run: async (m, f) => m.judgeBundle(await m.readBundle(f)) },
   // the bundle part only (step 5's U_X read and carry): the providers' answers are past the build
   { key: "wallet-restore-reads-ux", host: "sign", load: () => import("../live-checks/wallet-restore-reads-ux.mjs"), run: async (m, f) => m.judgeBundle(await m.readBundle(f)) },
   // the sign part only, against the pin of the build it serves (live: this checkout's): the index pins its /app.js and
@@ -114,6 +118,7 @@ export const CHILD_RUNS = [
   { key: "app-orders-coming-soon", host: "app", args: ["--root", "apps/terminal/dist"] },
   { key: "words-nov8-final", host: "sign", args: ["--local", "--host", "sign"] },
   { key: "words-nov8-final", host: "app", args: ["--local", "--host", "app"] },
+  { key: "signing-views-open-over-the-app", host: "sign", args: ["--local"] },
 ];
 /** The deploys' checks left out, with the reason. */
 export const OUT = {
