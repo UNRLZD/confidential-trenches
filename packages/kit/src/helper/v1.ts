@@ -133,6 +133,9 @@ export const HELPER_V1_PATHS = [
   // W's sell back into its pool (card helper-evm-sender): the sell calldata and W's 7702 authorization (POOL_EVM_SELL_BODY_MAX, 8 KB)
   { method: "POST", path: "/v1/pool/evm/sell", part: "relay", limitBytes: 8192 },
   { method: "POST", path: "/v1/bind", part: "delegate", limitBytes: 4096 },
+  // a restoring device's read of its NEAR trade wallets' carried calls (card near-holdings-restore): at most
+  // HELPER_BIND_RECORD_WALLETS_MAX (64) wallets, about 4.3 KB
+  { method: "POST", path: "/v1/bind/record", part: "delegate", limitBytes: 8192 },
   { method: "POST", path: "/v1/intents", part: "intents", limitBytes: 8192 },
   { method: "POST", path: "/v1/orders", part: "orders", limitBytes: 65536 },
   { method: "POST", path: "/v1/orders/status", part: "orders", limitBytes: 16384 },
@@ -710,6 +713,56 @@ export type HelperBindCode =
   | (typeof HELPER_BIND_CLEANUP_CODES)[number]
   | (typeof HELPER_BIND_ONWARD_CODES)[number]
   | (typeof HELPER_BIND_TRADE_CODES)[number];
+
+// ---------------------------------------------------------------------------------------------------------------
+// POST /v1/bind/record
+// ---------------------------------------------------------------------------------------------------------------
+
+/**
+ * A device restoring from its 12 words asks for its NEAR trade wallets' records (card near-holdings-restore): for each
+ * W, the token W's first carried call named and W's own calls the helper carried, so the device learns what W bought
+ * from W's signed bytes and their transactions, read again on its own providers. The body is exactly these two keys;
+ * `wallets` are 1 to HELPER_BIND_RECORD_WALLETS_MAX distinct 64-lowercase-hex ids. Anything else is bad_shape.
+ */
+export interface HelperBindRecordRequest {
+  network: "mainnet" | "testnet";
+  wallets: string[];
+}
+/** The most wallets one record request names (two requests rebuild 100). */
+export const HELPER_BIND_RECORD_WALLETS_MAX = 64;
+/** A carried transaction's state as the helper last read it final on two providers ("pending": not final yet). */
+export type HelperBindRecordState = "pending" | "landed" | "failed" | "dropped";
+/** One of W's calls the helper carried: its relayer transaction and that transaction's signed bytes, which hold W's
+ *  NEP-366 SignedDelegateAction. `refunded`: a failed swap whose input read back on W in full (absent otherwise). */
+export interface HelperBindRecordCall {
+  tx_hash: HelperTxHash;
+  /** Standard base64 of the relayer's signed transaction, as sent. */
+  signed_tx: HelperBase64;
+  method: string;
+  side: "buy" | "sell";
+  state: HelperBindRecordState;
+  refunded?: true;
+}
+/**
+ * One asked wallet's record, in the asked order. A W the vault never paid (no spends row to W reads paid, or settled
+ * with refund_value 0, on two providers at one final block), or one with no record, is the same empty shape: token
+ * null, calls [], created null, so the answer tells no one which W exist.
+ */
+export interface HelperBindRecord {
+  wallet: string;
+  token: HelperNearAccount | null;
+  calls: HelperBindRecordCall[];
+  /** W's creation Transfer: its hash, the height it was signed at (decimal) and its state; null when none was sent. */
+  created: { tx_hash: HelperTxHash; height: HelperDecimal; state: HelperBindRecordState } | null;
+}
+export interface HelperBindRecordAnswer {
+  records: HelperBindRecord[];
+}
+/** bad_shape: not the body above, or a network this helper does not carry. upstream: a read failed or the two providers
+ *  disagreed; nothing was kept, ask again. */
+export const HELPER_BIND_RECORD_CODES = ["bad_shape", "upstream"] as const;
+deepFreeze(HELPER_BIND_RECORD_CODES);
+export type HelperBindRecordCode = (typeof HELPER_BIND_RECORD_CODES)[number];
 
 // ---------------------------------------------------------------------------------------------------------------
 // POST /v1/intents
