@@ -21,7 +21,10 @@ const SRC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../src")
 const walk = (d: string): string[] => readdirSync(d).flatMap((f) => (statSync(path.join(d, f)).isDirectory() ? walk(path.join(d, f)) : [path.join(d, f)]));
 
 // Code that reads the vault's cash, and why it is not a second total. Comments do not count.
-const NOT_A_TOTAL: Record<string, string> = {};
+const NOT_A_TOTAL: Record<string, string> = {
+  // card withdraw-form-shows-what-you-can-send: whether the vault holds any, to open its withdraw form; never summed
+  "screens/withdraw/target.ts": "which form a Withdraw opens: the vault's when it holds any",
+};
 const code = (f: string) => readFileSync(f, "utf8").split("\n").filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
 
 test("no second sum: only the portfolio model reads the balances the total is made of", () => {

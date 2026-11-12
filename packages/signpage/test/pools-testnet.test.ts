@@ -153,7 +153,11 @@ test("rentOnce: one read at a time, kept once it lands, the state told once; a f
 // one this table names (a pool restored under another scope would read another pool's ids)
 test("the restore's pools are this table's, each under the same scope", async () => {
   const { pagePools } = await import("../src/pool-restore.ts");
-  const restore = pagePools();
+  const { vaultScope } = await import("../src/withdraw/checks.ts");
+  const { PAGE_NETWORK } = await import("../src/withdraw/handoff.ts");
+  const [vault, ...restore] = pagePools();
+  // the NEAR vault of the page's network first, under the scope the withdraw computes (card signpage-restores-near-vault-notes)
+  assert.deepEqual(vault && vault.chain === "near" ? [vault.network, vault.scope] : null, [PAGE_NETWORK, vaultScope(PAGE_NETWORK)]);
   assert.ok(restore.length >= 1);
-  assert.deepEqual(restore.map((p) => [p.chain === "solana" ? "solana" : p.pin.network === "base-sepolia" ? "base" : "robinhood", p.scope]), pools.PAGE_POOLS.map((p) => [p.chain, p.scope]));
+  assert.deepEqual(restore.map((p) => [p.chain === "solana" ? "solana" : p.chain === "near" ? "near" : p.pin.network === "base-sepolia" ? "base" : "robinhood", p.scope]), pools.PAGE_POOLS.map((p) => [p.chain, p.scope]));
 });

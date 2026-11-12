@@ -8,6 +8,8 @@ import { createRoot } from "react-dom/client";
 import { MemoryRouter } from "react-router";
 import { WithdrawProgress } from "../../src/screens/withdraw/WithdrawProgress.tsx";
 import { WithdrawSourceProvider } from "../../src/screens/withdraw/source.tsx";
+import { WithdrawPickSheet } from "../../src/screens/withdraw/WithdrawPick.tsx";
+import { withdrawPlaces } from "../../src/screens/withdraw/target.ts";
 import type { WithdrawDetail, WithdrawSource } from "../../src/screens/withdraw/source.tsx";
 import { applyFit } from "../../src/shell/fit.ts";
 import { fontsReady } from "../../src/shell/fonts.ts";
@@ -53,6 +55,19 @@ window.__calls = [];
 const fx = FIXTURES[new URLSearchParams(location.search).get("f") ?? "sent"]!;
 const snap = (ops: Operation[]): SignpageClientSnapshot => ({ status: "ready", release: "signpage-v1", state: { ...STATE, ops }, stale: false });
 
+// ?f=pick: the Withdraw pick (card withdraw-form-shows-what-you-can-send) over the app, money in the vault and two pools
+const PLACES = withdrawPlaces({ ...STATE, vault_balance: "62.34", pools: [{ chain: "solana", asset: "SOL", balance: "0.0289" }, { chain: "base", asset: "ETH", balance: "0.0041" }] });
+function Pick() {
+  return (
+    <>
+      <div className="shell">
+        <main className="screen" data-route="discover" />
+      </div>
+      <WithdrawPickSheet places={PLACES} locked={null} control="withdraw" onPick={(p) => void window.__calls.push({ pick: p.chain })} onClose={() => void window.__calls.push({ kind: "close" })} />
+    </>
+  );
+}
+
 function Page() {
   const [snapshot, setSnapshot] = useState(() => snap(fx.first ?? []));
   // runs after WithdrawProgress's own effect has seen the first state (a child's effects run before its parent's)
@@ -83,7 +98,7 @@ fontsReady().then(() =>
   createRoot(document.getElementById("root")!).render(
     <StrictMode>
       <MemoryRouter initialEntries={["/discover"]}>
-        <Page />
+        {new URLSearchParams(location.search).get("f") === "pick" ? <Pick /> : <Page />}
       </MemoryRouter>
     </StrictMode>,
   ),

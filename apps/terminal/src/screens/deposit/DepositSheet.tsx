@@ -12,6 +12,7 @@ import { addressHeading, ADDRESS_STATES, chainsOf, countdown, DESTS, destFundabl
 import type { Answer, Asset, Dest, DryQuote, PoolOpen, QuoteRefusal, RecentRow, SheetState } from "./model.ts";
 import { qrOf } from "./qr.ts";
 import { useDepositSource, useNow } from "./source.tsx";
+import { useWithdrawOpen } from "../withdraw/WithdrawPick.tsx";
 import { WORDS } from "./words.ts";
 import type { WordId } from "./words.ts";
 import "./deposit.css";
@@ -40,6 +41,7 @@ function W({ id }: { id: WordId }) {
 
 export function DepositSheet({ onClose }: { onClose(): void }) {
   const src = useDepositSource();
+  const openWithdraw = useWithdrawOpen();
   const { pathname } = useLocation();
   const state = src.snapshot.state;
   const balance = useBalance(src.snapshot) ?? 0n;
@@ -294,7 +296,7 @@ export function DepositSheet({ onClose }: { onClose(): void }) {
         <div className="dbody">
           <div className="dseg">
             <button type="button" className="on" id="dep-seg-on"><W id="deposit" /></button>
-            <button type="button" disabled={!src.moneyOn || src.locked !== null} data-control="deposit-withdraw" onClick={() => void src.hop("withdraw.open", {}, { ...view, control: "deposit-withdraw" })}>
+            <button type="button" disabled={!src.moneyOn || src.locked !== null} data-control="deposit-withdraw" onClick={() => void openWithdraw({ ...view, control: "deposit-withdraw" }, () => src.hop("withdraw.open", {}, { ...view, control: "deposit-withdraw" }))}>
               <W id="withdraw" />
             </button>
           </div>
