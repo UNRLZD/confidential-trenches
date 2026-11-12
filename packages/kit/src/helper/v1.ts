@@ -267,7 +267,8 @@ export type HelperMarketAnswer = unknown;
  * `token` is the token's id in its chain's form: a base58 mint, a lowercase 0x address, a NEAR account id; anything
  * else answers 404. The caller never names a URL. The answer is the image bytes with the type its magic bytes showed,
  * X-Content-Type-Options: nosniff, Content-Security-Policy: default-src 'none'; sandbox, and
- * Cache-Control: public, max-age=86400; 404 when no logo passed the checks (SVG is refused), and the app shows its own.
+ * Cache-Control: public, max-age=86400; 204 with no body when the token has no logo that passed the checks (SVG is
+ * refused), and the app shows its own (a 204 is no failed load in the browser, a 404 is).
  */
 export const HELPER_LOGO_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif"] as const;
 deepFreeze(HELPER_LOGO_TYPES);

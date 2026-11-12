@@ -3,12 +3,15 @@
 // 7936e80d (6c88307b, 02:31Z): the cold TORCH quote ended ok in 19.3 s after 44 getLogs batches on Robinhood's first (20
 // answered 429), 5 of 5 warm quotes ok in 2.3-2.7 s (median 2,370 ms), and TORCH held 101 pools with other currencies; it passes. `bad` is
 // main's kit (74e50795, 02:16Z): the cold quote ended rpc_error at 40.7 s, its reads at a block older than a provider's
-// state, after 146 batches (36 answered 429); it fails.
+// state, after 146 batches (36 answered 429); it fails. `good_2026_11_12` is the check run from this Mac on main
+// 7b73f3f9 (2026-11-12 09:18Z): the cold quote ok in 10.5 s after 19 getLogs batches on Robinhood's first, 5 of 5 warm
+// ok (median 1,318 ms), and TORCH down to 37 pools with other currencies in the depth (its seeded pools age out of the
+// last 10M blocks), which failed the old case mark of 50 (live run 43184860878); it passes on the cold-scan mark.
 //   node --test scripts/live-checks/rh-cold-quote.test.mjs
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { BOUND_MS, TARGET_MS, WARM_MAX_MS, WARM_MS, check } from "./rh-cold-quote.mjs";
+import { BOUND_MS, SCAN_HOST, TARGET_MS, WARM_MAX_MS, WARM_MS, check } from "./rh-cold-quote.mjs";
 
 const A = JSON.parse(readFileSync(new URL("./rh-cold-quote.answers.json", import.meta.url), "utf8"));
 const has = (lines, re) => assert.ok(lines.some((l) => re.test(l)), `a line matches ${re}:\n${lines.join("\n")}`);
@@ -18,7 +21,14 @@ test("the good answer (6c88307b) passes: cold ok in 19.3 s, 5 of 5 warm ok (medi
   assert.equal(r.ok, true, r.lines.join("\n"));
   has(r.lines, /^PASS cold: the quote ends ok in 19339 ms /);
   has(r.lines, /^PASS warm: 5 of 5 end ok$/);
-  has(r.lines, /^PASS case: TORCH has 101 pools with other currencies/);
+  has(r.lines, /^PASS case: the cold quote asked rpc\.mainnet\.chain\.robinhood\.com for logs 44 time\(s\) .*TORCH has 101 pools/);
+});
+
+test("the 12 Nov answer (7b73f3f9) passes: cold ok in 10.5 s, 5 of 5 warm ok, a cold scan of the depth with TORCH at 37 pools", () => {
+  const r = check(A.good_2026_11_12);
+  assert.equal(r.ok, true, r.lines.join("\n"));
+  has(r.lines, /^PASS cold: the quote ends ok in 10533 ms /);
+  has(r.lines, /^PASS case: the cold quote asked rpc\.mainnet\.chain\.robinhood\.com for logs 19 time\(s\) .*TORCH has 37 pools/);
 });
 
 test("the bad answer (main 74e50795) fails: the cold quote ends rpc_error at 40.7 s", () => {
@@ -43,7 +53,7 @@ test("the warm bounds: a median of 3,001 ms fails, a slowest of 5,001 ms fails, 
   has(fine.lines, /^PASS warm: the slowest 4900 ms /);
 });
 
-test("the bounds: a cold quote at BOUND_MS, a refusal, a refused or missing warm quote, or a case with its seeded pools gone fails", () => {
+test("the bounds: a cold quote at BOUND_MS, a refusal, a refused or missing warm quote, or a cold quote that never asked the scan provider for logs fails", () => {
   assert.equal(BOUND_MS, 30_000);
   assert.equal(TARGET_MS, 10_000);
   const g = A.good;
@@ -51,6 +61,13 @@ test("the bounds: a cold quote at BOUND_MS, a refusal, a refused or missing warm
   assert.equal(check({ ...g, cold: { ...g.cold, code: "below_reference" } }).ok, false);
   assert.equal(check({ ...g, warm: [...g.warm.slice(1), { ms: 900, code: "rpc_error" }] }).ok, false);
   assert.equal(check({ ...g, warm: g.warm.slice(1) }).ok, false);
-  assert.equal(check({ ...g, shape: { head: g.shape.head, pools: 3 } }).ok, false);
-  assert.equal(check({ ...g, shape: undefined }).ok, false);
+  // a quote that read no logs on the first scan provider read a scan kept from before: not a cold case
+  assert.equal(SCAN_HOST, "rpc.mainnet.chain.robinhood.com");
+  const noLogs = check({ ...g, cold: { ...g.cold, hosts: g.cold.hosts.filter((h) => !h.at.includes("eth_getLogs")) } });
+  assert.equal(noLogs.ok, false);
+  has(noLogs.lines, /^FAIL case: the cold quote asked rpc\.mainnet\.chain\.robinhood\.com for logs 0 time\(s\)/);
+  const elsewhere = check({ ...g, cold: { ...g.cold, hosts: g.cold.hosts.map((h) => ({ ...h, at: h.at.replace(SCAN_HOST, "robinhood.drpc.org") })) } });
+  assert.equal(elsewhere.ok, false, "logs asked of another host are not the scan's");
+  // TORCH's pool count is printed, never judged: its seeded pools age out of the depth
+  assert.equal(check({ ...g, shape: { head: g.shape.head, pools: 0 } }).ok, true);
 });
