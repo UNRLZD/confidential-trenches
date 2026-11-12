@@ -34,6 +34,7 @@ import type { ListsAnswer } from "../solana/lists.ts";
 import { CACHE_MAX, NOT_FOUND, RISK_FIELDS, UPSTREAM, type DataAnswer, type Field } from "../solana/token.ts";
 import { createWanted, GT_PAGE_WAIT_MS, takeOrWait, throttledUntil, type GeckoBudget, type Later } from "../gecko.ts";
 import { evmAddress, GT_BASE, GT_NETWORK, type EvmChain } from "./lists.ts";
+import { LINKS, linksOf, type Links } from "../links.ts";
 
 /** A token's GeckoTerminal info is read again once this old [design: the holder count moves slowly (GeckoTerminal's own
  *  `last_updated` was 1-3 min behind its read, 2026-11-09 01:50Z) and the keyless budget is 5 calls in 75 s for the
@@ -62,7 +63,17 @@ type Fetch = (url: string, init: RequestInit) => Promise<Response>;
  *  `last_updated`, else our read's time. */
 export type Info = { decimals: number | null; holders: number | null; top10Bps: number | null; asOfMs: number };
 type Read = Info | "none" | "refused" | "failed";
-export type EvmTokenPage = { row: Row; decimals: number | null; pool: string | null; risk: Record<(typeof RISK_FIELDS)[number], Field<unknown>>; route: "unknown"; filling: false };
+export type EvmTokenPage = { row: Row; decimals: number | null; pool: string | null; risk: Record<(typeof RISK_FIELDS)[number], Field<unknown>>; route: "unknown"; filling: false; links: Links };
+
+/** The token's own links in GeckoTerminal's info (card token-page-data-complete-and-fast): its first website, its X
+ *  and Telegram handles as their pages, each checked (../links.ts). */
+export function infoLinks(answer: unknown): Links {
+  const a = obj(obj(obj(answer).data).attributes);
+  const handle = (v: unknown) => (typeof v === "string" && /^[A-Za-z0-9_]{1,64}$/.test(v) ? v : null);
+  const x = handle(a.twitter_handle);
+  const t = handle(a.telegram_handle);
+  return linksOf(Array.isArray(a.websites) ? a.websites[0] : undefined, x === null ? undefined : `https://x.com/${x}`, t === null ? undefined : `https://t.me/${t}`);
+}
 
 const obj = (v: unknown): Record<string, unknown> => (typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : {});
 
@@ -119,6 +130,7 @@ export function toPage(base: Row, info: Info | null, kept: { pool: string; decim
     // whether a token routes is the device's own read at the quote, never the data part's call
     route: "unknown",
     filling: false,
+    links: LINKS.of(String(base.chain), String(base.token)),
   };
 }
 
@@ -202,7 +214,10 @@ export function createEvmToken(
       }
       const body = await r.text();
       if (body.length > ANSWER_MAX) return "failed";
-      return toInfo(token, JSON.parse(body), now()) ?? "failed";
+      const j = JSON.parse(body) as unknown;
+      const info = toInfo(token, j, now());
+      if (info !== null) LINKS.remember(chain, token, infoLinks(j));
+      return info ?? "failed";
     } catch {
       return "failed";
     }

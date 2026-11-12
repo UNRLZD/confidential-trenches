@@ -306,11 +306,21 @@ test("signed out mid-run: the run stops, its seed zeroed, nothing written after"
   assert.equal((await opOf(w.store, k!))?.stage, "reading");
 });
 
-test("pagePools: the mainnet build pins the Solana pool (card sol-pools-mainnet-pin), read on the page's Solana pair; no EVM pool yet", async () => {
+test("pagePools: the mainnet build pins the Solana pool (card sol-pools-mainnet-pin), read on the page's Solana pair, then Base's and Robinhood's (card evm-pools-on-mainnet), each on its pool list", async () => {
   const { SOL_POOLS, solanaPoolOf } = await import("../../wallet/src/pool/solana.ts");
-  const { PAGE_SOL_CACHE, PAGE_SOL_MARK_BATCHES, pageSolanaLister, pageSolanaSettleRpcs } = await import("../src/pool-testnet.ts");
+  const { EVM_POOLS, evmPoolScopeOf } = await import("../../wallet/src/pool/evm.ts");
+  const { PAGE_SOL_CACHE, PAGE_SOL_MARK_BATCHES, pageEvmPoolRpcs, pageSolanaLister, pageSolanaSettleRpcs } = await import("../src/pool-testnet.ts");
   const pin = SOL_POOLS.mainnet!;
-  assert.deepEqual(pagePools(), [{ chain: "solana", program: pin.program, scope: solanaPoolOf(pin.program).scope, rpcs: pageSolanaSettleRpcs, lister: pageSolanaLister, cache: PAGE_SOL_CACHE, markBatches: PAGE_SOL_MARK_BATCHES }]);
+  const [sol, ...evm] = pagePools();
+  assert.deepEqual(sol, { chain: "solana", program: pin.program, scope: solanaPoolOf(pin.program).scope, rpcs: pageSolanaSettleRpcs, lister: pageSolanaLister, cache: PAGE_SOL_CACHE, markBatches: PAGE_SOL_MARK_BATCHES });
+  assert.deepEqual(evm.map((p) => [p.chain, (p as { pin?: unknown }).pin, (p as { scope?: unknown }).scope]), [
+    ["evm", EVM_POOLS.base, evmPoolScopeOf(EVM_POOLS.base!.pool, 8453n)],
+    ["evm", EVM_POOLS.robinhood, evmPoolScopeOf(EVM_POOLS.robinhood!.pool, 4663n)],
+  ]);
+  for (const [i, chain] of (["base", "robinhood"] as const).entries()) {
+    const rpcs = (evm[i] as { rpcs: (() => readonly { url?: string }[]) | null }).rpcs;
+    assert.deepEqual(rpcs?.().map((r) => r.url), pageEvmPoolRpcs(chain)!.map((r) => (r as { url?: string }).url), `${chain}: its pool list`);
+  }
   // the restore reads on the same cache as every settle of the page (review P2-2 of a34c1626): one object, not a copy
   assert.equal((pagePools()[0] as { cache?: unknown }).cache, PAGE_SOL_CACHE);
 });
@@ -810,6 +820,41 @@ test("planted: a U_X under one deposit's floor (the rent a carried U_X keeps) is
   assert.equal(await whole(v), "done");
   assert.deepEqual(v.ends, [{ stage: "done", why: [] }]);
   assert.deepEqual(v.steps, [{ retry: [], held: [], named: [], tries: 1, last: true }]);
+});
+
+test("review of d5699312 P2: a chain this build gives no deposit address on is no stall reason: a Solana-only restore walking an EVM pool too ends as it does with the Solana pool alone, its ids unread", async () => {
+  // the mainnet build: Solana's U_X read, Base's pool pinned and walked but given no deposit address (main.ts
+  // pagePoolScopes), so its ids and U_X hold nothing a restore could miss
+  const solOnly = uxOf(new Map());
+  const alone = await world({ pools: () => SOL_ONLY, solana: emptyWalk, ids: nearOf().ids, ux: () => solOnly.reads });
+  assert.equal(await whole(alone), "done");
+  const ux = uxOf(new Map());
+  const n = nearOf();
+  const both = await world({ solana: emptyWalk, evm: emptyWalk, ids: n.ids, ux: (chain) => (chain === "solana" ? ux.reads : null), addressed: (chain) => chain === "solana" });
+  assert.equal(await whole(both), "done");
+  assert.deepEqual(both.ends, alone.ends);
+  assert.deepEqual(both.steps, alone.steps);
+  assert.deepEqual(both.ends, [{ stage: "done", why: [] }]);
+  assert.equal(n.found.get(EVM_SCOPE), undefined, "no id of the EVM scope read");
+  assert.ok(n.found.get(SOL_SCOPE) !== undefined, "the Solana scope's ids read");
+});
+
+test("review of 56a57ed2 P3: on a build that gives no deposit address on a chain, a failed walk of that chain's pool does not hold back the restore of the chain that does", async () => {
+  const solOnly = uxOf(new Map());
+  const alone = await world({ pools: () => SOL_ONLY, solana: emptyWalk, ids: nearOf().ids, ux: () => solOnly.reads });
+  assert.equal(await whole(alone), "done");
+  const ux = uxOf(new Map());
+  const failed = (async () => {
+    throw new Error("the pool's RPCs refused the walk");
+  }) as never;
+  const w = await world({ solana: emptyWalk, evm: failed, ids: nearOf().ids, ux: (chain) => (chain === "solana" ? ux.reads : null), addressed: (chain) => chain === "solana" });
+  assert.equal(await whole(w), "done");
+  assert.deepEqual(w.ends, alone.ends);
+  assert.deepEqual(w.steps, alone.steps);
+  // the same failed walk on a chain that gives a deposit address still stalls the run by name
+  const v = await world({ solana: emptyWalk, evm: failed, ids: nearOf().ids, ux: (chain) => (chain === "solana" ? ux.reads : null) });
+  assert.equal(await whole(v), "stalled");
+  assert.ok(v.ends.at(-1)!.why.some((x) => x.includes("the pool's RPCs refused the walk")), JSON.stringify(v.ends));
 });
 
 test("planted: the U_X reads are keyed by the pool's chain from its pin: an EVM pool reads U^evm_{s,i}'s address, a chain with none names U_X unread", async () => {

@@ -1,5 +1,5 @@
 // node --test scripts/live-checks/app-a2-e2e.test.mjs: the live check's verdict replays recorded runs
-// (app-a2-e2e.answers.json), each read on 10 Nov 21:29Z from the deployed APP_HOST (main 1cc9d048) and helper by
+// (app-a2-e2e.answers.json), each read on 12 Nov 05:41Z from the deployed APP_HOST (main d97e984e) and helper (main a1e175da) by
 // app-a2-e2e.mjs collect():
 //   good: APP_HOST's token route and its script with every mark the run drives; the helper's reads from the shipped
 //         origins: 200, CORS for APP_HOST and SIGN_HOST, the stub's fields, a blockhash: PASS;

@@ -178,3 +178,24 @@ test("card sol-buy-reads-side-by-side: a throttled read waits the provider's Ret
   assert.equal(await rpc("https://x.test", "getTransaction", [], { pauseMs: 1_500, sleep, fetchFn: seq([{ body: { jsonrpc: "2.0", id: 1, error: { code: 429 } } }, ok]) }), 7);
   assert.deepEqual(waits, [1_500], "a JSON-RPC 429 has no header: the growing pause");
 });
+
+// card restore-rebuilds-buy-records: with --restore-on-b the sell is device B's, made from the position B's restore
+// gave back; no run has been recorded with it yet, so these are planted from run 4 (a run that tapped its sell)
+test("with --restore-on-b the sell is proven only by device B's sign-in with the words and B's Sell side opening; the buy's verdict is the same", () => {
+  const b = (restoreB) => {
+    const rec = structuredClone(answers.run4);
+    Object.assign(rec, { restoreOnB: true, restoreB });
+    return judge(rec);
+  };
+  const shown = b({ signedIn: true, at: 1, positionMs: 41_000 });
+  assert.ok(ok(shown, /device B signed in with the 12 words/), bad(shown));
+  assert.ok(ok(shown, /device B's Sell side opened 41000 ms after its sign-in/), bad(shown));
+  assert.equal(shown.buy.ok, judge(answers.run4).buy.ok, "the buy's verdict does not change");
+  const none = b({ signedIn: true, at: 1, positionMs: null });
+  assert.match(bad(none), /device B's Sell side opened - ms after its sign-in/);
+  assert.ok(none.sell.notProven.some((l) => /device B's Sell side/.test(l)));
+  const out = b({ signedIn: false });
+  assert.match(bad(out), /device B signed in with the 12 words/);
+  // a run without the option is judged as before: no device B line
+  assert.ok(!judge(answers.run4).lines.some((l) => /device B/.test(l)));
+});

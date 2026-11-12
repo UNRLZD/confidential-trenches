@@ -19,7 +19,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { evmPoolFeeAsk, noBlockYet } from "./evm-pool-fee-epoch.mjs";
-import { CHAINS, pinnedBuild, poolFile, runtimeOf } from "./pool-evm-deploy.mjs";
+import { chainOf, pinnedBuild, poolFile, runtimeOf } from "./pool-evm-deploy.mjs";
 import { EXIT, rpcAnswer, verdictOf } from "./provider-answer.mjs";
 
 export const KEY = "evm-pool-pins";
@@ -67,7 +67,8 @@ export function replayer(log) {
 
 const hostOf = (u) => new URL(u).hostname;
 
-/** One pin's lines on its two RPCs and the helper: { bad, quiet, lines }. `epochMs`: the fee answer's epoch. */
+/** One pin's lines on its two RPCs and the helper: { bad, quiet, lines }. `epochMs`: the fee answer's epoch. A testnet's
+ *  RPCs are pool-evm-deploy.mjs CHAINS', a mainnet's its MAINNETS' (chainOf; card evm-pools-on-mainnet reads those). */
 export async function checkPin(fetchFn, net, pin, tx, epochMs) {
   const lines = [];
   let bad = false;
@@ -76,7 +77,7 @@ export async function checkPin(fetchFn, net, pin, tx, epochMs) {
     bad ||= !pass;
     lines.push(`${pass ? "ok  " : "FAIL"} ${net}: ${text}`);
   };
-  const chain = CHAINS[net];
+  const chain = chainOf(net);
   for (const url of chain.rpcs) {
     const on = `on ${hostOf(url)}`;
     // one read; a no-answer is QUIET (undefined), a JSON-RPC error a FAIL (null)

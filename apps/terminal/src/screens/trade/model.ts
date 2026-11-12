@@ -252,7 +252,7 @@ const positive = (s: string): boolean | null => (/^\d+(?:\.\d+)?$/.test(s) ? /[1
  * label its data does not hold.
  */
 export function proofStatus(pools: SignpageState["pools"], chain: Chain): ProofStatus {
-  const p = pools?.find((x) => x.chain === chain);
+  const p = poolOf(pools, chain);
   if (!p || p.ready === undefined) return "none";
   const bal = positive(p.balance);
   const ready = positive(p.ready);
@@ -295,6 +295,10 @@ export function unitsToDecimal(u: bigint, decimals: number): string {
 
 const isPoolChain = (c: Chain): c is PoolChain => (POOL_CHAINS as readonly Chain[]).includes(c);
 const poolOf = (pools: SignpageState["pools"], chain: Chain) => (isPoolChain(chain) ? (pools?.find((x) => x.chain === chain) ?? null) : null);
+
+/** Whether the box takes the pool path on `chain`: a pool chain whose pool the state lists. NEAR never does: the vault's
+ *  own entry in state.pools (its balance) is not a pool, so a NEAR token's box is a chain-with-no-pool box. */
+export const hasPool = (pools: SignpageState["pools"], chain: Chain): boolean => poolOf(pools, chain) !== null;
 
 /** When the page's price for the pool's chain stops being used, unix ms: the kit's poolUsdGoodUntilS (the feed's bound
  *  from the earlier of its own time and the page's read); null with no price or no feed (NEAR). */

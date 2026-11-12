@@ -39,13 +39,15 @@ export const chainsWithData = (rows: readonly MarketRow[]): MarketChain[] => TOK
 const SOLANA = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const EVM = /^0x[0-9a-fA-F]{40}$/;
 const NEAR = /^(?:(?:[a-z\d]+[-_])*[a-z\d]+\.)+near$|^[0-9a-f]{64}$/;
+// NEAR's account id rules also bound the length: 2 to 64 characters
+const NEAR_LENGTH = /^.{2,64}$/;
 
 /** The chains whose address form the query is, or none. */
 export function addressChains(query: string): MarketChain[] {
   const q = query.trim();
   if (SOLANA.test(q)) return ["solana"];
   if (EVM.test(q)) return ["base", "robinhood"];
-  if (NEAR.test(q.toLowerCase())) return ["near"];
+  if (NEAR_LENGTH.test(q) && NEAR.test(q.toLowerCase())) return ["near"];
   return [];
 }
 

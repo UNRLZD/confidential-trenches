@@ -16,6 +16,8 @@
 //   node packages/signpage/scripts/build-app.mjs           writes public/app.js, index.html, public/prover-worker.js and public/prover-thread.js
 //   node packages/signpage/scripts/build-app.mjs --out <dir> [--pkg <dir>]   writes them into <dir> as served: index.html,
 //     app.js, prover-worker.js, prover-thread.js (the deploy's build), from <pkg>'s sources (this package's by default)
+//   node packages/signpage/scripts/build-app.mjs --out <dir> --network testnet   the testnet build into <dir>, with its
+//     _headers (SIGN_HOST's policy and the testnet EVM providers, signHeadersFor)
 //   node packages/signpage/scripts/build-app.mjs --check   exit 1 when the files on disk differ from a fresh build,
 //     or the fresh bundle carries a test path (bundleModuleProblems)
 // No test path marks a wallet as armed (card signpage-pool-kinds, carried from signpage-solana-trade): only a test writes an
@@ -114,6 +116,22 @@ export function outsideTsconfigs(repo = REPO) {
     if (existsSync(join(d, "tsconfig.json"))) found.push(join(d, "tsconfig.json"));
     if (dirname(d) === d) return found;
   }
+}
+
+/** The connect-src sources only the testnet build's page reaches (card evm-pools-on-mainnet): the kit's testnet EVM
+ *  venues' providers (Base Sepolia, Robinhood testnet), which SIGN_HOST's build carries none of. public/_headers is
+ *  SIGN_HOST's (mainnet) policy; signHeadersFor puts these back, in their old place, for a testnet build's server. */
+export const TESTNET_CONNECT = Object.freeze(["https://base-sepolia-rpc.publicnode.com", "https://base-testnet.api.pocket.network", "https://sepolia.base.org", "https://rpc.testnet.chain.robinhood.com", "https://robinhood-sepolia-rpc.publicnode.com", "https://robinhood-testnet.drpc.org"]);
+/** The _headers text a `network` build is served with: SIGN_HOST's own on mainnet; on testnet the same with
+ *  TESTNET_CONNECT added to the page's connect-src after the Robinhood mainnet providers, or an error when the text has
+ *  no such place (one, in the /* rule). */
+export function signHeadersFor(network, text) {
+  if (!NETWORKS.includes(network)) throw new Error("network: mainnet or testnet");
+  if (network === "mainnet") return text;
+  const at = " https://robinhood.daybreak-rpc.network ";
+  const parts = text.split(at);
+  if (parts.length !== 2) throw new Error("_headers: the Robinhood mainnet providers are not in connect-src exactly once");
+  return parts.join(` https://robinhood.daybreak-rpc.network ${TESTNET_CONNECT.join(" ")} `);
 }
 
 /** The networks a build is for (card signpage-pool-flow): SIGN_HOST's, and the testnet build's (Solana devnet, Base
@@ -235,6 +253,9 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
   }
   const { js, html, worker, thread } = await bundle(pkg, { network });
   const files = outputFiles({ js, html, worker, thread }, Boolean(out));
+  // a testnet build's folder is served by its run's own server: it gets its policy beside it (signHeadersFor), since
+  // SIGN_HOST's public/_headers names no testnet EVM provider
+  if (network === "testnet") files._headers = signHeadersFor("testnet", readFileSync(join(pkg, "public/_headers"), "utf8"));
   const dir = out ?? pkg;
   // each file is written beside itself and renamed into place, so a reader in another process (node --test runs test
   // files at once, each building) reads a whole file, never a half-written one; every build of one tree is the same bytes

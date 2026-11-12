@@ -5,6 +5,9 @@
 // worker on one thread), in Chromium and WebKit: FAIL. badLoose: this branch's build with the site's worker-src loosened
 // to 'self' data: blob:, the change the card refuses: the planted data: worker runs: FAIL. The other bad answers are
 // the good one with one fault planted each: FAIL.
+// Card evm-pools-on-mainnet: SIGN_HOST's site policy names the mainnets' EVM providers alone, so the good answers' site
+// CSP is the recorded one with the six testnet EVM providers taken out of its connect-src, as the build's _headers now
+// serves it (the headers come from that file alone); re-recorded at the next sign deploy.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";

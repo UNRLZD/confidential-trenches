@@ -1152,3 +1152,110 @@ test("R4: the end simulation of a send that did not fill is of W's bytes (slot 0
   for (const c of sims) assert.equal(c.p[0], body(w).tx, "W's bytes as received");
   assert.deepEqual(sims[1]!.p[1], { encoding: "base64", sigVerify: false, replaceRecentBlockhash: true, commitment: "processed" });
 });
+
+// delta review P3 (1): the plain copy goes at 0 ms. The bundle's first send is held unanswered (a gated engine stand-in)
+// until the test opens it: both providers hold the plain copy while it is unanswered (event order, no clock read), and
+// the fill read then answers 200
+/** An engine stand-in whose first sendTransaction answers only when `open()` is called; every method it was asked, and
+ *  whether that first send has answered. */
+const gatedEngine = (id: string) => {
+  const seen: string[] = [];
+  let open!: () => void;
+  const gate = new Promise<void>((r) => (open = r));
+  let firsts = 0;
+  const state = { answered: false };
+  const inner = engineWith(id);
+  const fetchFn: JitoFetch = async (url, init) => {
+    const m = JSON.parse(String(init.body)).method;
+    seen.push(m);
+    if (m === "sendTransaction" && firsts++ === 0) {
+      await gate;
+      state.answered = true;
+    }
+    return inner.fetchFn(url, init);
+  };
+  return { seen, fetchFn, open, state };
+};
+test("P3 (1): with the bundle's first send held unanswered, both providers have the plain copy before the engine answers; a fill answers 200", async () => {
+  const e = gatedEngine("e0".repeat(32));
+  const order: string[] = [];
+  const pa: Calls = [];
+  const pb: Calls = [];
+  let fill!: () => void;
+  const s = mainnet({
+    engine: e,
+    providers: [stub(pa), stub(pb)],
+    done: (x) =>
+      new Promise((ok) => {
+        const b64 = Buffer.from(x.wire).toString("base64");
+        // the kit's first round: every plain path at once
+        for (const p of x.paths.filter((p) => p.name !== "jito")) void p.send(b64).then(() => order.push(p.name));
+        fill = () => ok({ txs: [{ signature: x.sig, state: "filled", sends: [] }] });
+      }) as never,
+  });
+  const p = s.carry(body(tipped({ r: { existingNullifierHash: f32(170) } })));
+  for (let k = 0; k < 100 && order.length < 2; k++) await new Promise((r) => setImmediate(r));
+  assert.deepEqual(order.sort(), ["rpc0", "rpc1"], "both providers took the plain copy");
+  assert.ok(pa.includes("sendTransaction") && pb.includes("sendTransaction"));
+  assert.equal(e.state.answered, false, "the engine has not answered the bundle's first send");
+  assert.equal(e.seen.filter((m) => m === "sendTransaction").length, 1, "the bundle's first send is still waiting on the engine");
+  e.open();
+  fill();
+  const a = await p;
+  assert.equal(a.status, 200);
+  assert.match(JSON.stringify(a.body), /"signature":"[1-9A-HJ-NP-Za-km-z]{80,90}"/);
+});
+
+// delta review P3 (3): the 3 s read of the engine's word. The carry is alone at 3 s and its first bundle send is slow;
+// (c) another carry starts before that send answers: no read (it would take a second that carry may need); (a) the carry
+// ends before its first send answers, then another starts alone: no read for the ended one. (b) the read waiting for its
+// region's second is dropped unread when the send ends (the signal passed to jito.status).
+test("P3 (3c, 3a): the engine3 read never runs once another carry is in flight, nor after its own send ended", async () => {
+  for (const phase of ["another carry", "after the end"] as const) {
+    const e = gatedEngine("e1".repeat(32));
+    const fills: (() => void)[] = [];
+    let threes = 0;
+    const s = mainnet({
+      engine: e,
+      // only the first carry's 3 s passes (at once); every other wait ends with its send
+      wait: (ms, signal) => (ms === 3_000 && threes++ === 0 ? Promise.resolve(!signal.aborted) : new Promise((done) => signal.addEventListener("abort", () => done(false), { once: true }))),
+      done: (x) => new Promise((ok) => fills.push(() => ok({ txs: [{ signature: x.sig, state: "filled", sends: [] }] }))) as never,
+    });
+    const p1 = s.carry(body(tipped({ r: { existingNullifierHash: f32(180) } })), "a");
+    for (let k = 0; k < 50 && fills.length < 1; k++) await new Promise((r) => setImmediate(r));
+    for (let k = 0; k < 10; k++) await new Promise((r) => setImmediate(r));
+    if (phase === "after the end") {
+      fills[0]!();
+      await p1;
+    }
+    const p2 = s.carry(body(tipped({ r: { existingNullifierHash: f32(181) } })), "b");
+    for (let k = 0; k < 50 && fills.length < 2; k++) await new Promise((r) => setImmediate(r));
+    e.open(); // the first carry's bundle send answers now
+    for (let k = 0; k < 30; k++) await new Promise((r) => setImmediate(r));
+    assert.equal(e.seen.filter((m) => m === "getInflightBundleStatuses").length, 0, phase);
+    for (const f of fills) f();
+    await Promise.all([p1, p2]);
+  }
+});
+test("P3 (3b): an engine3 read waiting for its region's second is dropped unread when the send ends", async () => {
+  const time = jitoTime();
+  const e = engineWith("e2".repeat(32));
+  let fill!: () => void;
+  const s = mainnet({
+    engine: e,
+    intervalMs: 1_000,
+    jitoClock: time.clock,
+    jitoSleep: time.sleep,
+    wait: (ms, signal) => (ms === 3_000 ? Promise.resolve(!signal.aborted) : new Promise((done) => signal.addEventListener("abort", () => done(false), { once: true }))),
+    done: (x) => new Promise((ok) => (fill = () => ok({ txs: [{ signature: x.sig, state: "filled", sends: [] }] }))) as never,
+  });
+  const p = s.carry(body(tipped({ r: { existingNullifierHash: f32(190) } })));
+  for (let k = 0; k < 30; k++) await new Promise((r) => setImmediate(r));
+  // the read waits for the region's next second (the first send booked this one)
+  assert.equal(e.seen.filter((m) => m === "getInflightBundleStatuses").length, 0);
+  fill();
+  const a = await p;
+  await time.advance(2_000); // the region's second comes: a read still waiting would go now
+  assert.equal(e.seen.filter((m) => m === "getInflightBundleStatuses").length, 0, "dropped with the send");
+  assert.equal(a.note?.engine3, "unread");
+});

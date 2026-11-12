@@ -35,14 +35,18 @@
 // `ref` at the read's slot (the candle builder's native-coin price, its `eth` quote kind). Read 2026-11-03 21:0xZ:
 // owner rec5EKMG..., 134 bytes, verification level 1 (full), exponent -8, 93.42 USD.
 //
-// A token is served when its trades' quote is SOL or USDC; a coin launched against another quote coin (PUMP, read in
-// the recorded curve buy) and every other venue (Raydium LaunchLab and CPMM, Meteora DBC, the lists' other launchpads)
-// are card index-sol-trades-2: their trades are dropped and the token's candles keep GeckoTerminal's bars.
+// A token's trades are priced in their quote: SOL (Pyth, above), USDC (one dollar), or any other quote coin (a coin
+// launched against FRONTIER, DOGE or PUMP: 2 of 3 curve coins and 1 of 3 PumpSwap coins on the lists read 11 Nov
+// 15:10Z) at that coin's own USD price, `quoteUsd` (its Discover or Jupiter row, read every REF_MS while a token quoted
+// in it is open) and its decimals from its mint account. Every other venue (Raydium, Meteora, Orca, the lists' other
+// launchpads) is card index-sol-trades-2: its trades are not read and the token's candles keep GeckoTerminal's bars.
+// Every REPORT_MS the log says how many open tokens have an empty tape and why (a quote with no price, or no trade of
+// a venue we read in the transactions that named the token), never which tokens.
 //
 // Display only: nothing here feeds a signature. Every provider value is hostile: bounded answers, decoders that check
 // every byte they read (decode.ts), PumpSwap pools taken only when the PumpSwap program owns them and their base mint
 // is the token, bounded books, subscriptions and caches.
-import { createBook, TFS, type Book, type Candle, type Event, type Swap, type Tf } from "../candles.ts";
+import { change4h, createBook, TFS, type Book, type Candle, type Event, type Swap, type Tf } from "../candles.ts";
 import { address } from "./lists.ts";
 import { type DataAnswer } from "./token.ts";
 import { fromInner, fromLogs, poolMints, PUMP_AMM, USDC, WSOL, type RawTrade } from "./decode.ts";
@@ -71,6 +75,8 @@ export const REF_MS = 5_000;
 export const REF_STALE_S = 120;
 export const IDLE_MS = 60_000;
 export const OPEN_MAX = 40;
+export const REPORT_MS = 60_000;
+const QUOTES_MAX = 200;
 export const TRADES_MAX = 50;
 export const CANDLES_MAX = 500;
 const POOLS_MAX = 5_000;
@@ -305,6 +311,14 @@ export function pythSolUsd(owner: unknown, data: Buffer, nowS: number): bigint |
   return price * 10n ** BigInt(18 + expo);
 }
 
+/** A USD price as decimal text ("0.8706", at most 18 places) times 10^18, or null when it is not a price > 0. */
+export function usdScaled(v: unknown): bigint | null {
+  if (typeof v !== "string" || v.length > 60 || !/^\d+(\.\d+)?$/.test(v)) return null;
+  const [w, f = ""] = v.split(".");
+  const n = BigInt(w!) * 10n ** 18n + BigInt((f + "0".repeat(18)).slice(0, 18));
+  return n > 0n ? n : null;
+}
+
 type Held = { slot: number; seq: number; t: RawTrade[] };
 type Entry = {
   mint: string;
@@ -326,6 +340,9 @@ type Entry = {
   inflight: Map<string, number>;
   touched: number;
   readAt: number | null;
+  /** Transactions the stream or a walk gave for this token, and how many held a trade of it (the log's why). */
+  seen: number;
+  traded: number;
 };
 
 export function createSolanaTrades(deps: {
@@ -339,6 +356,8 @@ export function createSolanaTrades(deps: {
   source?: (on: SourceEvents) => Source;
   /** Bars before our first, GeckoTerminal's (token.ts candles), or none. */
   history?: (mint: string, tf: string, to: number | null, limit: number, client?: string) => Promise<DataAnswer>;
+  /** A quote coin's USD price per whole coin as decimal text (its Discover or Jupiter row), or null. */
+  quoteUsd?: (mint: string) => Promise<string | null>;
   /** One line per stream drop and return (the host's log), so a deploy's tape can be read back. */
   log?: (line: string) => void;
   tickMs?: number;
@@ -363,6 +382,9 @@ export function createSolanaTrades(deps: {
   let seq = 0;
   let solUsd: { slot: number; v: bigint } | null = null;
   let refAt = 0;
+  let reportAt = now();
+  /** Each other quote coin's decimals and USD price (USD per whole coin times 10^18), read once and every REF_MS. */
+  const quotes = new Map<string, { decimals: number | null; usd: bigint | null; at: number; reading: Promise<void> | null }>();
 
   /** One request, to each provider in turn until one answers a result. */
   const slot = deps.slot !== undefined && deps.slot.state() !== "public" ? deps.slot : undefined;
@@ -410,7 +432,7 @@ export function createSolanaTrades(deps: {
     const v = a === null ? null : pythSolUsd(a.owner, a.data, Math.floor(now() / 1000));
     if (a === null || v === null) return;
     solUsd = { slot: a.slot, v };
-    for (const e of entries.values()) e.refs.set(a.slot, v);
+    for (const e of entries.values()) if (e.quoteMint === null || e.quoteMint === WSOL) e.refs.set(a.slot, v);
   }
 
   /** A PumpSwap pool's mints, read once (a burst of trades on one pool shares the read; a failed read is not kept). */
@@ -424,6 +446,36 @@ export function createSolanaTrades(deps: {
     return read;
   }
 
+  /** Reads a quote coin's decimals (once, from its mint account) and its USD price; never throws. */
+  function readQuote(q: string): Promise<void> {
+    let k = quotes.get(q);
+    if (k === undefined) {
+      if (quotes.size >= QUOTES_MAX) quotes.delete(quotes.keys().next().value!);
+      k = { decimals: null, usd: null, at: 0, reading: null };
+      quotes.set(q, k);
+    }
+    if (k.reading !== null) return k.reading;
+    const kk = k;
+    kk.at = now();
+    kk.reading = (async () => {
+      if (kk.decimals === null) {
+        const a = await account(q);
+        if (a !== null && TOKEN_PROGRAMS.includes(a.owner as string) && a.data.length >= 82 && a.data[45] === 1) kk.decimals = a.data[44]!;
+      }
+      const usd = usdScaled(await deps.quoteUsd!(q));
+      if (usd !== null) {
+        kk.usd = usd;
+        const slot = solUsd?.slot;
+        for (const e of entries.values()) if (e.quoteMint === q) e.refs.set(slot ?? Math.max(e.covered, 0), usd);
+      }
+    })()
+      .catch(() => undefined)
+      .finally(() => (kk.reading = null));
+    return kk.reading;
+  }
+  /** A quote the book can price: SOL, USDC, or another coin with its decimals and a USD price read. */
+  const priced = (q: string | null): boolean => q === WSOL || q === USDC || (q !== null && quotes.get(q)?.decimals != null && quotes.get(q)?.usd != null);
+
   /** The trades of one transaction for `mint`, with the token named and the quote checked; PumpSwap pools read. */
   async function forMint(mint: string, trades: RawTrade[]): Promise<RawTrade[]> {
     const out: RawTrade[] = [];
@@ -435,6 +487,8 @@ export function createSolanaTrades(deps: {
       const p = await poolOf(t.pool!);
       if (p !== null && p.base === mint) out.push({ ...t, mint, quoteMint: p.quote });
     }
+    // another quote coin: its decimals and price read before the trade is held, so the first tape is priced
+    for (const q of new Set(out.map((t) => t.quoteMint))) if (q !== null && q !== WSOL && q !== USDC && deps.quoteUsd !== undefined && !priced(q)) await readQuote(q);
     return out;
   }
 
@@ -456,12 +510,20 @@ export function createSolanaTrades(deps: {
       if (traders.size >= HELD_MAX) traders.delete(traders.keys().next().value!);
       traders.set(sig, trades[0].user);
     }
+    if (trades.length > 0) e.traded++;
     if (e.book === null) {
-      const q = trades.find((t) => t.quoteMint === WSOL || t.quoteMint === USDC)?.quoteMint;
-      if (q !== undefined) {
+      const q = (trades.find((t) => t.quoteMint === WSOL || t.quoteMint === USDC) ?? trades.find((t) => priced(t.quoteMint)))?.quoteMint;
+      if (q !== undefined && q !== null) {
         e.quoteMint = q;
-        e.book = createBook({ decimals: e.decimals, quote: q === WSOL ? { kind: "eth", decimals: 9 } : { kind: "usd", decimals: 6 } });
-      }
+        if (q === WSOL || q === USDC) e.book = createBook({ decimals: e.decimals, quote: q === WSOL ? { kind: "eth", decimals: 9 } : { kind: "usd", decimals: 6 } });
+        else {
+          // another quote coin is the book's native coin: its trades are priced at that coin's USD price in force
+          const k = quotes.get(q)!;
+          e.book = createBook({ decimals: e.decimals, quote: { kind: "eth", decimals: k.decimals! } });
+          e.refs.clear();
+          e.refs.set(0, k.usd!);
+        }
+      } else if (e.quoteMint === null) e.quoteMint = trades.find((t) => t.quoteMint !== null)?.quoteMint ?? null;
     }
   }
 
@@ -509,9 +571,11 @@ export function createSolanaTrades(deps: {
     e.readAt = now();
   }
 
-  /** Walks `mint`'s signatures newer than `until` (all of the newest COLD_SIGS when null), oldest first, and holds each
-   *  transaction's trades. */
-  async function walk(e: Entry, until: string | null): Promise<void> {
+  /** Walks `mint`'s signatures newer than `until` (all of the newest COLD_SIGS when null) and holds each transaction's
+   *  trades, each in its place in the list. The reads go newest first, TX_PARALLEL at a time, and the tape is folded
+   *  after each round (`round`), so a first read serves the newest trades after one round, not after the whole walk
+   *  (card token-page-data-complete-and-fast: 30 reads at 5 a time held a cold tape 3.8 to 7.9 s on public endpoints). */
+  async function walk(e: Entry, until: string | null, round?: () => void): Promise<void> {
     const sigs: { signature: string; slot: number; err: unknown }[] = [];
     let before: string | undefined;
     const max = until === null ? COLD_SIGS : REFILL_MAX;
@@ -527,16 +591,21 @@ export function createSolanaTrades(deps: {
     sigs.reverse();
     // each transaction's place is the list's (oldest first), taken before the reads, which go TX_PARALLEL at a time
     const todo = sigs.filter((s) => (s.err === null || s.err === undefined) && !e.held.has(s.signature)).map((s) => ({ ...s, order: ++seq }));
-    for (let k = 0; k < todo.length; k += TX_PARALLEL) {
+    for (let k = todo.length; k > 0; k -= TX_PARALLEL) {
       await Promise.all(
-        todo.slice(k, k + TX_PARALLEL).map(async (s) => {
+        todo.slice(Math.max(0, k - TX_PARALLEL), k).map(async (s) => {
           const r = (await rpc("getTransaction", [s.signature, { encoding: "json", maxSupportedTransactionVersion: 1, commitment: "confirmed" }])) as Record<string, unknown> | null;
           if (r === null) return;
+          e.seen++;
           const meta = (r.meta ?? {}) as Record<string, unknown>;
           const f = fromLogs(meta.logMessages);
           hold(e, s.signature, s.slot, s.order, await forMint(e.mint, f.truncated ? fromInner(r) : f.trades));
         }),
       );
+      if (round !== undefined) {
+        fold(e);
+        round();
+      }
     }
     for (const s of sigs) e.covered = Math.max(e.covered, s.slot);
     // a walk runs while the stream's trades already arrive: the newest signature held is then the stream's
@@ -565,6 +634,7 @@ export function createSolanaTrades(deps: {
       return;
     }
     const order = ++seq;
+    e.seen++;
     // nothing settles at or after a transaction still being read (a PumpSwap pool, a cut log)
     e.inflight.set(n.sig, n.slot);
     const trades = await txTrades(e.mint, n.sig, n.logs).catch(() => null);
@@ -597,6 +667,17 @@ export function createSolanaTrades(deps: {
   function tick(): void {
     const t = now();
     if (t - refAt >= REF_MS) void readRef().catch(() => undefined);
+    if (deps.quoteUsd !== undefined) {
+      const open = new Set([...entries.values()].map((e) => e.quoteMint).filter((q): q is string => q !== null && q !== WSOL && q !== USDC));
+      for (const q of open) if (t - (quotes.get(q)?.at ?? 0) >= REF_MS) void readQuote(q);
+    }
+    if (t - reportAt >= REPORT_MS) {
+      reportAt = t;
+      const empty = [...entries.values()].filter((e) => e.book === null || e.book.tape(1).length === 0);
+      const unpriced = empty.filter((e) => e.quoteMint !== null && !priced(e.quoteMint)).length;
+      const unread = empty.filter((e) => e.quoteMint === null && e.seen > 0 && e.traded === 0).length;
+      if (empty.length > 0) deps.log?.(`solana tape: ${entries.size} tokens open, ${empty.length} empty: quote with no price ${unpriced}, no trade of a venue read ${unread}, quiet ${empty.length - unpriced - unread}`);
+    }
     for (const e of entries.values()) {
       if (t - e.touched > IDLE_MS) {
         entries.delete(e.mint);
@@ -628,7 +709,7 @@ export function createSolanaTrades(deps: {
     } catch {
       return UPSTREAM;
     }
-    const e: Entry = { mint, decimals, quoteMint: null, book: null, held: new Map(), refs: new Map(), lastSig: null, covered: 0, state: "cold", gapFrom: null, refilling: null, inflight: new Map(), touched: now(), readAt: null };
+    const e: Entry = { mint, decimals, quoteMint: null, book: null, held: new Map(), refs: new Map(), lastSig: null, covered: 0, state: "cold", gapFrom: null, refilling: null, inflight: new Map(), touched: now(), readAt: null, seen: 0, traded: 0 };
     if (solUsd !== null) e.refs.set(0, solUsd.v); // the price in force for the cold read's trades
     entries.set(mint, e);
     try {
@@ -641,10 +722,12 @@ export function createSolanaTrades(deps: {
     }
     // the tape is served from the moment the stream holds the token; the walk's older trades join as they are read
     e.readAt = now();
+    let firstRound: () => void = () => undefined;
+    const rounded = new Promise<void>((ok) => (firstRound = ok));
     const cold = (async () => {
       for (let attempt = 0; ; attempt++) {
         try {
-          await walk(e, null);
+          await walk(e, null, () => firstRound());
           break;
         } catch {
           if (attempt === 2 || !entries.has(mint)) break; // the stream's trades still serve; the cold window stays short
@@ -654,7 +737,8 @@ export function createSolanaTrades(deps: {
       if (e.state === "cold") e.state = "live";
       fold(e);
     })();
-    await Promise.race([cold, new Promise((r) => setTimeout(r, COLD_WAIT_MS).unref?.())]);
+    // the first answer waits for the walk's first round (its newest trades), the whole walk, or COLD_WAIT_MS
+    await Promise.race([cold, rounded, new Promise((r) => setTimeout(r, COLD_WAIT_MS).unref?.())]);
     return e;
   }
 
@@ -692,6 +776,13 @@ export function createSolanaTrades(deps: {
       if (timer !== null) clearInterval(timer);
       timer = null;
       source.close();
+    },
+    /** The 4h change from our own bars of a token whose tape is open (candles.ts change4h); null otherwise, never an
+     *  open of its own. */
+    change4h(token: string): number | null {
+      const mint = address(token);
+      const e = mint === null ? undefined : entries.get(mint);
+      return e === undefined || e.book === null ? null : change4h(e.book, Math.floor(now() / 1000));
     },
     /** 06b Candles for a listed Solana token: our own bars (1s included), and the history source's before our first. */
     async candles(token: string, tf: string, to: number | null, limit: number, client?: string): Promise<DataAnswer> {
@@ -734,7 +825,10 @@ export function createSolanaTrades(deps: {
       const rows = e.book === null ? [] : e.book.tape(limit);
       const at = e.readAt ?? now();
       const trades = rows.map((r) => ({ t_ms: r.t_ms, side: r.side, usd: r.usd, amt: r.amt, trader: traders.get(r.tx) ?? null, tx: r.tx }));
-      return { status: 200, body: JSON.stringify({ trades, src: "chain", as_of_ms: at }), src: "chain", asOfMs: at };
+      // `filling` while the cold walk still reads the token's older trades (first() answered at COLD_WAIT_MS or its first
+      // round): the rows so far, more to come; the Base and Robinhood tapes answer the same at their bound (../evm/swaps.ts)
+      const fill = e.state === "cold" && rows.length < limit ? { filling: true } : {};
+      return { status: 200, body: JSON.stringify({ trades, ...fill, src: "chain", as_of_ms: at }), src: "chain", asOfMs: at };
     },
   };
 
