@@ -278,13 +278,16 @@ const STAGE_RANK: Readonly<Record<WithdrawStage, number>> = { proving: 0, submit
  *  the op names only the note's random id. */
 export function mergeWithdrawOp(
   v: unknown,
-  w: { stage?: WithdrawStage; txs?: readonly TxRef[]; arrived?: Arrivals; owe?: string; clear?: string; feeNeeded?: string },
+  w: { stage?: WithdrawStage; txs?: readonly TxRef[]; arrived?: Arrivals; owe?: string; clear?: string; feeNeeded?: string; cause?: string },
 ): Record<string, unknown> {
   const r = { ...(v as Record<string, unknown>) };
   const was = STAGE_RANK[r.stage as WithdrawStage] ?? -1;
   const ours = w.clear === undefined || r.owed === undefined || r.owed === w.clear;
   if (w.stage !== undefined && STAGE_RANK[w.stage] >= was && ours) r.stage = w.stage;
   if (w.feeNeeded !== undefined) r.fee_needed = w.feeNeeded;
+  if (w.cause !== undefined) r.cause = w.cause;
+  // why an earlier run ended is no longer the op's once it ends sent
+  if (r.stage === "sent") delete r.cause;
   const txs = [...((r.txs as TxRef[] | undefined) ?? [])];
   for (const t of w.txs ?? []) if (!txs.some((x) => x.hash === t.hash)) txs.push(t);
   r.txs = txs;
@@ -324,6 +327,25 @@ export const dropSend = (w: WalletStore, opId: string, noteId: string): Promise<
     const { [noteId]: _gone, ...rest } = r;
     return rest;
   });
+/** meta's record of the notes each running withdraw (any tab's) has planned, by op id, each with the time (the device's
+ *  clock, ms) until which it stands: out of every proof queue's pass and every other plan until the run ends, or, for a
+ *  run that crashed, until that time (card pool-tree-read-waits-for-its-second). Every write tells the other tabs
+ *  (the store's change event), whose state read runs their queue's pass, which lets go of these notes (queue.ts skip). */
+export const WITHDRAW_PLANNED_KEY = "owed/withdraw-sol";
+type WithdrawPlanned = Record<string, { notes: string[]; until_ms: string }>;
+/** The op's planned notes and its deadline written ([] drops its entry); another op's entry kept. */
+export const keepOutNotes = (w: WalletStore, opId: string, noteIds: readonly string[], untilMs: bigint): Promise<unknown> =>
+  w.update("meta", WITHDRAW_PLANNED_KEY, (v) => {
+    const { [opId]: _was, ...r } = (v as WithdrawPlanned | undefined) ?? {};
+    return noteIds.length === 0 ? r : { ...r, [opId]: { notes: [...noteIds], until_ms: untilMs.toString() } };
+  });
+/** The notes a withdraw run still holds out at `nowMs`: every entry whose deadline is still to come. */
+export async function keptOutNotes(w: WalletStore, nowMs: bigint): Promise<Set<string>> {
+  const r = ((await w.get("meta", WITHDRAW_PLANNED_KEY)) as WithdrawPlanned | undefined) ?? {};
+  const out = new Set<string>();
+  for (const e of Object.values(r)) if (/^[0-9]{1,20}$/.test(e?.until_ms ?? "") && BigInt(e.until_ms) > nowMs) for (const id of e.notes ?? []) out.add(id);
+  return out;
+}
 /** The op's owed send for `noteId`, or none. */
 export async function owedSendOf(w: WalletStore, opId: string, noteId: string): Promise<PendingOnward | undefined> {
   const r = (await w.get("meta", owedKey(opId))) as OwedSends | undefined;
@@ -631,6 +653,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       if (typeof rec.owed === "string") out.add(rec.owed);
       if (rec.pending) out.add(rec.pending.noteId);
     }
+    // and the notes a withdraw run (any tab's) has planned, until it ends
+    for (const id of await keptOutNotes(ops, BigInt(Date.now()))) out.add(id);
     return out;
   };
   // the proof queue: opened at the first landing, closed at sign out
@@ -2062,11 +2086,10 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     const rent = await readSolanaRent(r);
     const notes = await openNoteStore(await page.store());
     try {
-      const mine = new Set((await queued())?.ready().map((p) => p.noteId) ?? []);
       const fee = solanaPoolFee(rent);
       const wFee = await solanaOnwardFee(r, pin!);
       const owed = await owedNotes();
-      return { notes: withdrawSources(await notes.list(), scope!, mine).filter((n) => !owed.has(n.id)), fee, wFee, minPart: solanaWithdrawMinPart(rent, fee, wFee) };
+      return { notes: withdrawSources(await notes.list(), scope!).filter((n) => !owed.has(n.id)), fee, wFee, minPart: solanaWithdrawMinPart(rent, fee, wFee) };
     } finally {
       notes.close();
     }
@@ -2115,7 +2138,6 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       const notes = await openNoteStore(await page.store());
       try {
         const q = await queued();
-        const mine = new Set(q?.ready().map((p) => p.noteId) ?? []);
         const ask = { kind: "pool.withdraw", chain: "solana", token: null, amount: 0n, slippageBps: 0, decimals: 9 } as const;
         const end = await runPoolWithdraw(
           {
@@ -2142,6 +2164,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
             ...(over.wait ? { wait: over.wait } : {}),
             keepRelease: async (noteId, attempt, release) => void (await keepRelease(ops, opId, noteId, attempt, release)),
             owedNotes,
+            keepOut: async (ids, spanMs) => void (await keepOutNotes(ops, opId, ids, BigInt(Date.now()) + spanMs)),
             // the release's withdrawn value is on the note's mark: the app reads the state again, as after a buy's
             marked: () => {
               for (const f of watchers) f();
@@ -2151,10 +2174,14 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
           ready.to,
           ready.amount,
           ready.maxFee,
-          mine,
         );
         write(end.stage, end.txs, end.pending, end.arrived);
         if (end.feeNeeded !== undefined) void (writes = writes.then(() => ops.update("ops", opId, (v) => mergeWithdrawOp(v, { feeNeeded: end.feeNeeded! }))).catch(() => {}));
+        // why a run ended on a throw, on the record and the page's console (public words only: legCause)
+        if (end.cause !== undefined) {
+          console.warn(`withdraw ${end.stage}: ${end.cause}`);
+          void (writes = writes.then(() => ops.update("ops", opId, (v) => mergeWithdrawOp(v, { cause: end.cause! }))).catch(() => {}));
+        }
         if (end.pending) owedScan = true;
       } finally {
         notes.close();

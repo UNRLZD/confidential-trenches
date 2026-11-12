@@ -11,8 +11,13 @@ const M = [
   [S, "if (a?.owner !== program)", "if (false)", T, "another owner"],
   [S, "if (!same(d.subarray(0, 8), PAGE_DISC) || d[8] !== tree || !same(d.subarray(9, 13), u32le(pageNo)))", "if (!same(d.subarray(0, 8), PAGE_DISC) || d[8] !== tree)", T, "another owner"],
   [S, "if (l[i]!.t < l[i - 1]!.t) throw", "if (false) throw", T, "has not reached the cut"],
-  [S, "if (ms < beforeMs) throw", "if (false) throw", T, "has not reached the cut"],
-  [S, "if (ms < beforeMs) throw", "if (ms + 1000n < beforeMs) throw", T, "S9"],
+  [S, "if (ms >= beforeMs) return r;", "return r;", T, "has not reached the cut"],
+  [S, "if (ms >= beforeMs) return r;", "if (ms + 1000n >= beforeMs) return r;", T, "S9"],
+  // card pool-tree-read-waits-for-its-second: the read that reached the cut is the one kept (never the first read's
+  // pages after a wait), the reach cap, and the -32004 block time's own cap
+  [S, "        const r = await readPages(rpc, program, from, commitment, min, signal, lagWait);\n        if (beforeMs === null) return r;\n        const { ms } = await blockTime(rpc, r.slot, lagWait, signal);\n        if (ms >= beforeMs) return r;", "        const r = await readPages(rpc, program, from, commitment, min, signal, lagWait);\n        first ??= r;\n        if (beforeMs === null) return r;\n        const { ms } = await blockTime(rpc, r.slot, lagWait, signal);\n        if (ms >= beforeMs) return first;", T, "during the wait", undefined, ["      let min = Math.max(minSlot, lastSlot[k]!);\n", "      let min = Math.max(minSlot, lastSlot[k]!);\n      let first: Awaited<ReturnType<typeof readPages>> | undefined;\n"]],
+  [S, "if (waits >= SOL_REACH_WAITS) throw new SolanaNotReachedError", "if (waits >= 4 * SOL_REACH_WAITS) throw new SolanaNotReachedError", T, "never reaches the cut"],
+  [S, "if (waits >= SOL_REACH_WAITS || !(e instanceof Error) || !NOT_YET.test(e.message)) throw e;", "if (!(e instanceof Error) || !NOT_YET.test(e.message)) throw e;", T, "never available"],
   [S, "if (!same(x[i]!.bytes, y[i]!.bytes)) throw", "if (false) throw", T, "has not reached the cut"],
   [S, "if ((x.length > n && x[n]!.t < beforeMs) || (y.length > n && y[n]!.t < beforeMs)) throw", "if ((x.length > n && x[n]!.t < beforeMs)) throw", T, "RV2"],
   [S, "if (n === 0) throw", "if (false) throw", T, "has not reached the cut"],
@@ -122,12 +127,14 @@ for (const file of new Set(M.map((m) => m[3]))) {
 }
 let ok = 0;
 const hung = [], cancelled = [], equivalent = [];
-for (const [f, find, repl, file, pat, why] of M) {
+for (const [f, find, repl, file, pat, why, pre] of M) {
   // an equivalent mutant (no test can tell it apart: its reason given) is listed, never run or counted
   if (why !== undefined) { equivalent.push(`[${pat}] ${find.slice(0, 70)}: ${why}`); continue; }
   const src = readFileSync(f, "utf8");
-  if (src.split(find).length !== 2) { console.log(`NOT ONCE: ${find}`); process.exitCode = 1; continue; }
-  writeFileSync(f, src.replace(find, repl));
+  if (src.split(find).length !== 2 || (pre !== undefined && src.split(pre[0]).length !== 2)) { console.log(`NOT ONCE: ${find}`); process.exitCode = 1; continue; }
+  // pre: a second edit the mutant needs to type-check (a variable it reads), made beside it
+  const out = src.replace(find, () => repl);
+  writeFileSync(f, pre === undefined ? out : out.replace(pre[0], () => pre[1]));
   const r = runMutant([`--test-name-pattern=${pat}`, file], { cwd: W, timeoutMs: cap.get(file) });
   writeFileSync(f, src);
   // HUNG: past the cap, killed by the runner; CANCELLED: only tests stopped at their own timeout, on two runs; both listed

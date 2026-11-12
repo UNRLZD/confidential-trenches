@@ -17,8 +17,11 @@
 //   so a restore from the 12 words finds both. A note the page's proof queue holds for the next buy is dropped first
 //   (HELD -> UNSPENT), then held by this run with its context (UNSPENT -> HELD), before its proof starts. The bind's
 //   tip cap is 0 (a tag 2 pays no tip).
-// - The roots: the epoch root when the note is in it, else the newest (a note that landed this epoch); their leaf
-//   indexes read on both RPCs (pool-buy.ts rootIndex).
+// - The roots: the epoch root when the note is in it. A note that landed this epoch proves on the newest root only when
+//   it is a deposit's own (queue.ts provesOnNewest, the queue's own rule); any other waits on the pool's time for the
+//   next boundary and proves on that epoch's root (M351: a root right after its own leaf would link the W it pays to
+//   the W whose money made that leaf), its epoch, deadline and binding that epoch's. Their leaf indexes are read on
+//   both RPCs (pool-buy.ts rootIndex).
 // - Built here, checked by the rules (rules/pool.ts checkSolanaWithdraw: the device's own release byte for byte, alone;
 //   checkSolanaOnwardSend: W's one transfer of its balance less its fee to To, To never an account of the release nor
 //   executable), signed by W only through signSolana. W's key and the seed are zeroed at once. To is read on both
@@ -51,13 +54,14 @@ import { freshWallet } from "../../wallet/src/derive/keys.ts";
 import { noteSecrets } from "../../wallet/src/notes/secrets.ts";
 import type { NoteRecord, NoteStore } from "../../wallet/src/notes/store.ts";
 import { checkBinding, type Pool, type ReadyProof } from "../../wallet/src/pool/pool.ts";
-import { jOf } from "../../wallet/src/pool/queue.ts";
+import { jOf, provesOnNewest } from "../../wallet/src/pool/queue.ts";
 import { solanaPoolOf, type SolanaPoolPin, type SolanaReleaseRequest } from "../../wallet/src/pool/solana.ts";
 import { blockhashOf, pastOnBoth, readBack, releaseOf, rootIndex, sendAndSettle, treeSizes, type PoolBuyHost } from "./pool-buy.ts";
 import { checkSolanaOnwardSend, checkSolanaWithdraw, PoolRuleRefused, signSolana, SOLANA_RESERVED_KEYS, solanaWithdrawMinPart, withdrawNoteFloor, type PoolAsk, type WithdrawCosts } from "./rules/pool.ts";
 // moved to rules/pool.ts (card sol-buy-rent-back: the sweep's floor is the withdraw's note floor); named here still
 export { solanaWithdrawMinPart, withdrawNoteFloor, type WithdrawCosts } from "./rules/pool.ts";
 import { spendOwner, type HistoryPlaces } from "./pool-spend.ts";
+import { legCause } from "./pool-sell.ts";
 // moved to pool-spend.ts (card signpage-buy-own-spend: pool-buy.ts reads them too, with no import cycle); named here still
 export { HISTORY_PAGE, HISTORY_PASS, spendOwner, type HistoryPlaces } from "./pool-spend.ts";
 
@@ -192,6 +196,10 @@ export type PoolWithdrawHost = Pick<PoolBuyHost, "send" | "now" | "reads" | "wai
   /** The notes an op still owes an onward send for (any tab's): never planned again until that op is settled, since a
    *  note's W is the same for every spend of it (review #232b MEDIUM 1). */
   owedNotes?(): Promise<ReadonlySet<string>>;
+  /** The run's planned notes kept out of every proof queue (any tab's) and every other plan for `spanMs` from now on
+   *  the device's clock (the longest a part can take to bind), written before any part and again at each; [] clears
+   *  them, at every end. */
+  keepOut?(noteIds: readonly string[], spanMs: bigint): Promise<void>;
   /** The op's stage, its txs so far, the onward send still owed and what reached To, by onward signature. */
   stage?(stage: WithdrawStage, txs: TxRef[], pending: PendingOnward | null, arrived: Arrivals): void;
 };
@@ -206,11 +214,20 @@ export type PendingOnward = { noteId: string; attempt: string; context: string; 
 export type Arrivals = Record<string, string>;
 /** feeNeeded: W's fee the network reads now when it is over the part's ceiling (lamports, a decimal): the send stays
  *  owed until the Max fee is drawn again. */
-export type PoolWithdrawAnswer = { stage: WithdrawStage; txs: TxRef[]; pending: PendingOnward | null; arrived: Arrivals; feeNeeded?: string };
+/** `cause`: why a run ended on a throw, in public words only (pool-sell.ts legCause: the error's name, its code, where
+ *  it was thrown, never its text); for the op's record and the page's console, never a screen. */
+export type PoolWithdrawAnswer = { stage: WithdrawStage; txs: TxRef[]; pending: PendingOnward | null; arrived: Arrivals; feeNeeded?: string; cause?: string };
 /** A finish's verdict: the op's stage and what its send added; feeNeeded set keeps the send owed. */
 export type PoolOnwardFinish = { stage: WithdrawStage; txs: TxRef[]; arrived: Arrivals; feeNeeded?: string };
 
-class Stop extends Error {}
+/** A run's own refusal, its word in `code` (an op's cause names it, legCause). */
+class Stop extends Error {
+  readonly code: string;
+  constructor(why: string) {
+    super(why);
+    this.code = why;
+  }
+}
 const stop = (why: string): never => {
   throw new Stop(why);
 };
@@ -256,9 +273,12 @@ async function feeOf(rpcs: readonly [SolanaRpc, SolanaRpc], message: Uint8Array)
   return agree(a!, b!);
 }
 
-/** The landed notes of the pool's scope a withdraw may spend: UNSPENT, or HELD by this page's proof queue (`mine`). */
-export function withdrawSources(list: readonly NoteRecord[], scope: bigint, mine: ReadonlySet<string>): WithdrawSource[] {
-  return list.filter((n) => n.scope === scope && n.leaf !== undefined && (n.state === "UNSPENT" || (n.state === "HELD" && mine.has(n.id)))).map((n) => ({ id: n.id, value: n.leaf!.value }));
+/** The landed notes of the pool's scope a withdraw may spend: UNSPENT, or HELD. A HELD note has nothing sent (every
+ *  send moves it RESERVED first: queue.ts take, request.ts, onePart below), so it is a proof queue's ready or in-flight
+ *  proof (any tab's), or a withdraw part's, which the caller leaves out with the owed and kept-out notes. Its run frees it
+ *  first (free(): this page's queue drops it, another tab's lets go at its next pass, queue.ts skip). */
+export function withdrawSources(list: readonly NoteRecord[], scope: bigint): WithdrawSource[] {
+  return list.filter((n) => n.scope === scope && n.leaf !== undefined && (n.state === "UNSPENT" || n.state === "HELD")).map((n) => ({ id: n.id, value: n.leaf!.value }));
 }
 
 /** To's account on both RPCs: never executable, never one the pool program owns (its pages, marks, the pool). */
@@ -304,7 +324,7 @@ const toRefused = (to: string, pin: SolanaPoolPin, pool: string, ws: readonly st
 
 /** One withdraw of `amount` (base units arriving at `to`), `to` the address typed on this page and checked there, and
  *  `maxFee` the Max fee the screen drew: a plan that would cost more stops before its first part. */
-export async function runPoolWithdraw(h: PoolWithdrawHost, ask: PoolAsk, to: string, amount: bigint, maxFee: bigint, mine: ReadonlySet<string> = new Set()): Promise<PoolWithdrawAnswer> {
+export async function runPoolWithdraw(h: PoolWithdrawHost, ask: PoolAsk, to: string, amount: bigint, maxFee: bigint): Promise<PoolWithdrawAnswer> {
   const txs: TxRef[] = [];
   const arrived: Arrivals = {};
   let pending: PendingOnward | null = null;
@@ -323,7 +343,7 @@ export async function runPoolWithdraw(h: PoolWithdrawHost, ask: PoolAsk, to: str
     const notes = await h.notes();
     // a note an op still owes a send for stays out of the plan: its W is this spend's W too (review #232b MEDIUM 1)
     const owedNotes = (await h.owedNotes?.()) ?? new Set<string>();
-    const plan = planPoolWithdraw(withdrawSources(await notes.list(), scope, mine).filter((n) => !owedNotes.has(n.id)), amount, costs);
+    const plan = planPoolWithdraw(withdrawSources(await notes.list(), scope).filter((n) => !owedNotes.has(n.id)), amount, costs);
     if (plan === null) stop("plan");
     // review #232 MEDIUM 1: never more than the Max fee the screen showed
     if (BigInt(plan!.length) * (fee + wFee) > maxFee) stop("max_fee");
@@ -343,11 +363,14 @@ export async function runPoolWithdraw(h: PoolWithdrawHost, ask: PoolAsk, to: str
     });
     if (toRefused(to, h.pin, pool, spends.map((x) => x.w))) stop("to");
     await checkTo(h, to);
+    // from here to the run's end no queue in any tab takes a planned note (each part refreshes the record's deadline)
+    if (h.keepOut) await h.keepOut(plan!.map((x) => x.noteId), keepSpan(h.pool));
     for (const [i, p] of plan!.entries()) {
       say("proving");
       // the release's take writes the note RESERVED, then the pending (with the attempt): from then on a crash leaves
       // it owed
-      const got = await onePart(h, ask, notes, p, fee, wFee, pool, { to, last: i === plan!.length - 1, feeCap: wCap.toString() }, (owed) => void (pending = owed));
+      const keep = (): Promise<void> => h.keepOut?.(plan!.map((x) => x.noteId), keepSpan(h.pool)) ?? Promise.resolve();
+      const got = await onePart(h, ask, notes, p, fee, wFee, pool, { to, last: i === plan!.length - 1, feeCap: wCap.toString() }, (owed) => void (pending = owed), keep);
       // the release's signature only as both RPCs read it as this release (card signpage-sent-read-back): a helper's
       // word not read back is never in the op's txs
       if (got.signature !== "") txs.push({ chain: "solana", hash: got.signature });
@@ -378,8 +401,11 @@ export async function runPoolWithdraw(h: PoolWithdrawHost, ask: PoolAsk, to: str
       if (i < plan!.length - 1) say("submitted");
     }
     return end("sent");
-  } catch {
-    return end(pending ? "in_transit" : "stopped");
+  } catch (e) {
+    return { ...end(pending ? "in_transit" : "stopped"), cause: legCause(e) };
+  } finally {
+    // the planned notes back to every queue (a failed write: they come back at the record's own deadline)
+    await h.keepOut?.([], 0n).catch(() => {});
   }
 }
 
@@ -534,32 +560,104 @@ async function sendOnward(
   }
 }
 
+/** How far past one epoch a withdraw waits for the pool's time to reach the next boundary before it stops: the pool's
+ *  time is the lower of two RPCs' finalized block times, which trails the device by about 13 s on mainnet; past this a
+ *  provider is stalled. */
+export const WITHDRAW_BOUNDARY_LAG_MS = 30_000n;
+/** A withdraw's tree read, bounded in wall-clock time: the read counts its waits (solana.ts SOL_REACH_WAITS), and a
+ *  provider that answers each call slowly would stretch them; the read stops at its next wait past this. */
+export const WITHDRAW_TREES_MS = 30_000;
+/** How long a run's kept-out record stands on the device's clock from each write: the longest a part takes from its
+ *  write to its bind (one wait's budget) and that bind's life. */
+const keepSpan = (P: PoolWithdrawHost["pool"]): bigint => P.epochMs + WITHDRAW_BOUNDARY_LAG_MS + P.lifeMs;
+/** How long a part waits for a note this page's queue is still proving to come back UNSPENT once dropped (a proof takes
+ *  6.7 s on a laptop, run 6d; a slow phone several times that): past it the note is another's and the part stops. */
+export const WITHDRAW_FREE_MS = 30_000;
+
+/** Waits until the pool's time (P.now, never the device clock) reaches `boundary`, out of `left.ms` of waits (one
+ *  part's budget: one epoch and WITHDRAW_BOUNDARY_LAG_MS, shared by every boundary it waits for); returns that time. */
+async function poolTimeAt(P: PoolWithdrawHost["pool"], wait: (ms: number) => Promise<void>, boundary: bigint, left: { ms: bigint }): Promise<bigint> {
+  for (;;) {
+    const nowMs = await P.now();
+    if (nowMs >= boundary) return nowMs;
+    if (left.ms <= 0n) stop("boundary");
+    let ms = boundary - nowMs > 1_000n ? boundary - nowMs : 1_000n;
+    if (ms > left.ms) ms = left.ms;
+    await wait(Number(ms));
+    left.ms -= ms;
+  }
+}
+
 /** One part's release to W: hold the note, prove part + fees to W, build, check, sign, RESERVED, then the send and
  *  its settle. The release is alone in its transaction (review #232 HIGH 1). */
-async function onePart(h: PoolWithdrawHost, ask: PoolAsk, notes: NoteStore, p: WithdrawPart, fee: bigint, wFee: bigint, pool: string, base: Pick<PendingOnward, "to" | "last" | "feeCap">, owing: (owed: PendingOnward) => void): Promise<{ stage: string; signature: string; l: bigint; j: number; releaseAccounts: string[] }> {
+async function onePart(h: PoolWithdrawHost, ask: PoolAsk, notes: NoteStore, p: WithdrawPart, fee: bigint, wFee: bigint, pool: string, base: Pick<PendingOnward, "to" | "last" | "feeCap">, owing: (owed: PendingOnward) => void, keep: () => Promise<void> = async () => {}): Promise<{ stage: string; signature: string; l: bigint; j: number; releaseAccounts: string[] }> {
   const P = h.pool;
   let seed: Uint8Array | null = null;
   let key: Uint8Array | null = null;
   let attempt: string | null = null;
   let reserved = false;
   try {
-    let n = await notes.get(p.noteId);
-    if (n?.state === "HELD" && h.drop) {
-      await h.drop(p.noteId);
-      n = await notes.get(p.noteId);
-    }
-    if (n === undefined || n.state !== "UNSPENT" || n.leaf === undefined) stop("note");
-    const leaf = n!.leaf!;
+    const wait = h.wait ?? ((ms: number) => new Promise<void>((res) => setTimeout(res, ms)));
+    // the note, dropped first when this page's proof queue holds it; one it is still proving, or another tab's queue
+    // holds, comes back UNSPENT when that proof ends or at that queue's next pass (the kept-out record's write wakes it:
+    // queue.ts skip), waited for at most WITHDRAW_FREE_MS
+    const free = async (): Promise<NoteRecord> => {
+      let n = await notes.get(p.noteId);
+      if (n?.state === "HELD") {
+        await h.drop?.(p.noteId);
+        for (let waited = 0; (n = await notes.get(p.noteId))?.state === "HELD" && waited < WITHDRAW_FREE_MS; waited += 500) await wait(500);
+      }
+      if (n === undefined || n.state !== "UNSPENT" || n.leaf === undefined) stop("note");
+      return n!;
+    };
+    let n: NoteRecord = await free();
+    const leaf = n.leaf!;
     if (leaf.value < p.chunk) stop("value");
-    const nowMs = await P.now();
-    const epochStartMs = nowMs - (nowMs % P.epochMs);
+    // the epoch root when the note is in it; else the newest for a deposit's own note, and the next epoch's for any other
+    let nowMs = await P.now();
+    // the run's notes stay out of every queue's pass (any tab's) past the latest deadline this part can bind: so no
+    // queue holds this note at the boundary it may wait for
+    await keep();
+    // one budget for every wait of this part on chain time: the boundary's and a tree read's lag
+    const left = { ms: P.epochMs + WITHDRAW_BOUNDARY_LAG_MS };
+    // a provider's read still short of the cut past the sync's own waits (solana.ts, code not_reached) is a lag, as the
+    // EVM sync's anchor lag is: read again a second later out of the budget, and stopped only once it is spent
+    const read = async (cut: bigint, opts?: Parameters<typeof P.trees>[2]): ReturnType<typeof P.trees> => {
+      for (;;) {
+        try {
+          return await P.trees(cut, AbortSignal.timeout(WITHDRAW_TREES_MS), opts);
+        } catch (e) {
+          if ((e as { code?: unknown } | null)?.code !== "not_reached" || left.ms <= 0n) throw e;
+          const ms = left.ms < 1_000n ? left.ms : 1_000n;
+          await wait(Number(ms));
+          left.ms -= ms;
+        }
+      }
+    };
+    let epochStartMs = nowMs - (nowMs % P.epochMs);
+    let trees = await read(epochStartMs);
+    if (leaf.leafIndex >= BigInt(trees.stateTree.size)) {
+      if (provesOnNewest(n.ref)) trees = await read(nowMs + 1n, { newest: true });
+      else {
+        // the next boundary whose epoch root holds the leaf: one more when the first time read was behind the leaf's own;
+        // two at most, and every wait out of one budget
+        for (let boundaries = 0; leaf.leafIndex >= BigInt(trees.stateTree.size); boundaries++) {
+          if (boundaries === 2) stop("boundary");
+          nowMs = await poolTimeAt(P, wait, epochStartMs + P.epochMs, left);
+          epochStartMs = nowMs - (nowMs % P.epochMs);
+          trees = await read(epochStartMs);
+        }
+        // a queue that held it before the record was written: dropped as at the start
+        n = await free();
+      }
+    }
     const deadlineMs = epochStartMs + P.lifeMs;
-    const j = jOf(n!.ref);
+    const j = jOf(n.ref);
     seed = await h.seed64();
     const w = freshWallet(seed, "sol", leaf.label, j);
     w.secretKey.fill(0);
     const refundPrecommitment = noteSecrets(seed, { kind: "refund", l: leaf.label, j }).precommitment;
-    const spent = noteSecrets(seed, n!.ref);
+    const spent = noteSecrets(seed, n.ref);
     const next = noteSecrets(seed, { kind: "change", l: leaf.label, j });
     // shut before the bind asks the helper's fee: a busy helper is waited out (../../wallet/src/busy.ts) with no seed open
     seed.fill(0);
@@ -570,9 +668,6 @@ async function onePart(h: PoolWithdrawHost, ask: PoolAsk, notes: NoteStore, p: W
     // the device's fee, never the helper's word: the binding's fee is the one the plan priced, its tip cap 0
     if (binding.request.relayFee !== fee || binding.feeCap !== fee || binding.request.tipCap !== 0n || p.chunk !== p.part + fee + wFee) stop("fee");
     attempt = (await notes.move(p.noteId, "UNSPENT", "HELD", { deadlineMs, context: binding.context.toString() })).attempt!;
-    // the epoch root when the note is in it, else the newest (it landed this epoch)
-    let trees = await P.trees(epochStartMs);
-    if (leaf.leafIndex >= BigInt(trees.stateTree.size)) trees = await P.trees(nowMs + 1n, undefined, { newest: true });
     const made = await poolProveWithdraw(h.prover, {
       stateTree: trees.stateTree,
       labelTree: trees.labelTree,
@@ -588,7 +683,6 @@ async function onePart(h: PoolWithdrawHost, ask: PoolAsk, notes: NoteStore, p: W
       noteId: p.noteId, attempt, poolId: P.id, wallet: { chain: "sol", l: leaf.label, j, path: w.path, address: w.address }, chunk: p.chunk,
       epochStartMs, deadlineMs, root: "epoch", binding, proof: made.proof, publicSignals: made.publicSignals,
     };
-    const wait = h.wait ?? ((ms: number) => new Promise<void>((res) => setTimeout(res, ms)));
     const sizes = await treeSizes(h, pool, wait);
     const idx = { state: await rootIndex(h, 0, sizes.state, BigInt(r.publicSignals[3])), label: await rootIndex(h, 1, sizes.label, BigInt(r.publicSignals[5])) };
     const release = releaseOf(r, h.pin, w.address, idx);
