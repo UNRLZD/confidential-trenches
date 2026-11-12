@@ -1,5 +1,5 @@
-// Replays of live check evm-money-shows-and-spends-at-once: the recorded good answer (12 Nov 20:49Z: both mainnet pool
-// pairs agreeing on a block 3 to 4 s old, with this branch's signing page build) passes; the recorded bad one (SIGN_HOST
+// Replays of live check evm-money-shows-and-spends-at-once: the recorded good answer (12 Nov 21:19Z: both mainnet pool
+// pairs agreeing on a block 2 to 4 s old, with this branch's signing page build) passes; the recorded bad one (SIGN_HOST
 // as deployed then, before the head rule) fails; and each rule alone on the good answer.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

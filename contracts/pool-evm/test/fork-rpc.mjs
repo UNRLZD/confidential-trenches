@@ -7,6 +7,11 @@
 //   node contracts/pool-evm/test/fork-rpc.mjs --record -- forge test --mp test/BuyFork.t.sol --no-storage-caching
 //                                   (from contracts/pool-evm) add what is not recorded yet from the public RPCs below
 //                                   (with up to 5 tries each), then write the file
+//   node contracts/pool-evm/test/fork-rpc.mjs [--record] --book pools -- <command...>
+//                                   the deployed pools' fork (card evm-money-shows-and-spends-at-once): anvil forks
+//                                   Base and Robinhood mainnet at POOLS_FORK_BLOCKS, served from fixtures/fork-rpc-pools.json,
+//                                   recorded from publicnode (Base) and Pocket (Robinhood), whose eth_getLogs pages are
+//                                   wide (50,000 and 100,000 blocks) so the page's sync reads the pools' logs in few pages
 // foundry.toml's rpc_endpoints point at http://127.0.0.1:47545/<chain>.
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -14,9 +19,19 @@ import { createServer } from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const FILE = path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures/fork-rpc.json");
+const BOOKS = {
+  forge: { file: "fixtures/fork-rpc.json", upstream: { base: "https://mainnet.base.org", robinhood: "https://rpc.mainnet.chain.robinhood.com" } },
+  pools: { file: "fixtures/fork-rpc-pools.json", upstream: { base: "https://base-rpc.publicnode.com", robinhood: "https://robinhood.api.pocket.network" } },
+};
+/** The pools' fork blocks: after each pool's deploy (wallet EVM_POOLS fromBlock 54,325,671 and 108,420,674), read
+ *  12 Nov 20:49Z as both providers' agreed head less a few hundred blocks. */
+export const POOLS_FORK_BLOCKS = Object.freeze({ base: 56_630_000, robinhood: 112_819_000 });
+const bookArg = process.argv.indexOf("--book");
+const BOOK = BOOKS[bookArg > 0 && process.argv.indexOf("--") > bookArg ? process.argv[bookArg + 1] : "forge"];
+if (!BOOK) throw new Error("fork-rpc: --book is forge or pools");
+const FILE = path.join(path.dirname(fileURLToPath(import.meta.url)), BOOK.file);
 const PORT = 47545;
-const UPSTREAM = { base: "https://mainnet.base.org", robinhood: "https://rpc.mainnet.chain.robinhood.com" };
+const UPSTREAM = BOOK.upstream;
 
 // A block named by its hash ({"blockHash": h}, as Foundry 1.8 asks) is the same block as its number (as 1.7 asks):
 // the key names it by number, read from the recorded eth_getBlockByNumber answer
@@ -48,6 +63,8 @@ async function answer(book, chain, req, record) {
     try {
       const res = await fetch(UPSTREAM[chain], { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...req, id: 1 }) });
       if (res.ok) got = await res.json();
+      // a 429 is waited out as the provider names it (Retry-After), never pushed
+      else if (res.status === 429) await new Promise((r) => setTimeout(r, 1000 * Math.min(30, Number(res.headers.get("retry-after")) || 2 ** (i + 1))));
     } catch {}
     if (!got) await new Promise((r) => setTimeout(r, 500 * 2 ** i));
   }
@@ -76,7 +93,7 @@ export function serve(book, record) {
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const args = process.argv.slice(2);
-  const record = args[0] === "--record";
+  const record = args.indexOf("--record") >= 0 && args.indexOf("--record") < args.indexOf("--");
   const cmd = args.slice(args.indexOf("--") + 1);
   if (args.indexOf("--") < 0 || cmd.length === 0) {
     console.error("usage: fork-rpc.mjs [--record] -- <command...>");

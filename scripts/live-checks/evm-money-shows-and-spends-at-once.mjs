@@ -2,7 +2,8 @@
 // Live check of card evm-money-shows-and-spends-at-once: money on Base and Robinhood shows and spends seconds after it
 // lands, on every device. Read now:
 //   - SIGN_HOST's served script is the one its index.html pins, and it carries the head rule's note store
-//     (packages/wallet/src/notes/store.ts): the scope's highest finalized block kept under its own key (evm-final/) and
+//     (packages/wallet/src/notes/store.ts): each landed note's block and the scope's highest finalized block kept under
+//     their own key (owed/evm-landed), apart from the note records so earlier releases read every note, and
 //     the refusal that never backs a finalized fact out ("it never backs out"), as minified, so the page writes a
 //     note at the newest block both RPCs agree on and heals it if a reorg drops it;
 //   - on each mainnet, the page's own pool pair (MAINNET_POOL_RPCS, packages/signpage/src/pool-testnet.ts; the test holds
@@ -37,8 +38,8 @@ export const LAG_TRIES = 6;
 const LAG_WAIT_MS = 1000;
 const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}`;
 const hostOf = (u) => new URL(u).host;
-/** The store's highest finalized block key and its guard's words, as the bundle keeps them. */
-const FINAL_KEY = /["'`]evm-final\/["'`]/;
+/** The store's key for the landed notes' blocks and highest finalized blocks, and its guard's words, as the bundle keeps them. */
+const FINAL_KEY = /["'`]owed\/evm-landed["'`]/;
 const GUARD = /it never backs out/;
 
 /** The script an index.html pins, and its integrity. */
@@ -65,7 +66,7 @@ export function judge(run) {
   };
   const pin = pinned(run?.sign?.index);
   say(pin !== null && pin.integrity === run.sign.sha384, "SIGN_HOST's served script is the one its index.html pins");
-  say(run?.sign?.finalKey === true && run?.sign?.guard === true, "SIGN_HOST's note store writes EVM notes at the newest agreed block and never backs a finalized one out (evm-final/, \"it never backs out\")");
+  say(run?.sign?.finalKey === true && run?.sign?.guard === true, "SIGN_HOST's note store writes EVM notes at the newest agreed block and never backs a finalized one out (owed/evm-landed, \"it never backs out\")");
   const at = Number(run?.at);
   for (const chain of Object.keys(POOL_RPCS)) {
     const c = run?.chains?.[chain];

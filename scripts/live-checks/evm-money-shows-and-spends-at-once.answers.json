@@ -1,13 +1,13 @@
 {
- "note": "recorded 2026-11-12T20:49:47.351Z: bad is SIGN_HOST as deployed then (before this card: no head rule) with the two mainnet pool pairs read live; good is the same chain reads with this branch's signing page build (build-app.mjs --out)",
+ "note": "recorded 2026-11-12T21:19:31.249Z: bad is SIGN_HOST as deployed then (before this card: no head rule) with the two mainnet pool pairs read live; good is the same chain reads with this branch's signing page build (build-app.mjs --out)",
  "good": {
   "sign": {
-   "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-n/mYnTJGVD/fU6peeBKANj2jz8ymsrNmsmQPRccQxkPsnnAQUW9xtZP7yIScFOhh\"></script>\n  </head>\n  <body></body>\n</html>\n",
-   "sha384": "sha384-n/mYnTJGVD/fU6peeBKANj2jz8ymsrNmsmQPRccQxkPsnnAQUW9xtZP7yIScFOhh",
+   "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-O0o6CUSYnqls1dbPBxLnBK7a/cdKWgKIJ2NuizReH1enqQMdAE1QMxR9zowjBPUa\"></script>\n  </head>\n  <body></body>\n</html>\n",
+   "sha384": "sha384-O0o6CUSYnqls1dbPBxLnBK7a/cdKWgKIJ2NuizReH1enqQMdAE1QMxR9zowjBPUa",
    "finalKey": true,
    "guard": true
   },
-  "at": 1794516587351,
+  "at": 1794518371249,
   "chains": {
    "base": {
     "chainId": [
@@ -23,32 +23,32 @@
       "newest": [
        {
         "result": {
-         "number": "0x3601efd",
-         "hash": "0x690325416fabce6e5bac3e29471a4dbcf0d38ceb5ca838c78222ed1a18d41d1e",
-         "timestamp": "0x6af62667"
+         "number": "0x36041d8",
+         "hash": "0x9a24522c915450cef5da33b1f0206f800c71f291314532288af166a6e84f1477",
+         "timestamp": "0x6af62d5f"
         }
        },
        {
         "result": {
-         "number": "0x3601f01",
-         "hash": "0xdf59a5850ef507f420fab1f1af3317b45e3f29f6667e1f4fb2bc44ea422d467a",
-         "timestamp": "0x6af62667"
+         "number": "0x36041db",
+         "hash": "0x0d46b978ecda87a9e40fc8a65940ac40ae046fa5210a390bd2b2e011f174e072",
+         "timestamp": "0x6af62d60"
         }
        }
       ],
       "byNumber": [
        {
         "result": {
-         "number": "0x3601efd",
-         "hash": "0x690325416fabce6e5bac3e29471a4dbcf0d38ceb5ca838c78222ed1a18d41d1e",
-         "timestamp": "0x6af62667"
+         "number": "0x36041d8",
+         "hash": "0x9a24522c915450cef5da33b1f0206f800c71f291314532288af166a6e84f1477",
+         "timestamp": "0x6af62d5f"
         }
        },
        {
         "result": {
-         "number": "0x3601efd",
-         "hash": "0x690325416fabce6e5bac3e29471a4dbcf0d38ceb5ca838c78222ed1a18d41d1e",
-         "timestamp": "0x6af62667"
+         "number": "0x36041d8",
+         "hash": "0x9a24522c915450cef5da33b1f0206f800c71f291314532288af166a6e84f1477",
+         "timestamp": "0x6af62d5f"
         }
        }
       ]
@@ -57,16 +57,16 @@
     "finalized": [
      {
       "result": {
-       "number": "0x3600a58",
-       "hash": "0xf246eb2a0e5125cdac06c0fbc4417f5a1319dc7c8182bd8bfed99193a86d153f",
-       "timestamp": "0x6af62246"
+       "number": "0x36027ee",
+       "hash": "0x71a5f4a0885329f47896d79367c94382ebefe546f5354818cac8fcac7fd95438",
+       "timestamp": "0x6af62830"
       }
      },
      {
       "result": {
-       "number": "0x3600a58",
-       "hash": "0xf246eb2a0e5125cdac06c0fbc4417f5a1319dc7c8182bd8bfed99193a86d153f",
-       "timestamp": "0x6af62246"
+       "number": "0x3602f11",
+       "hash": "0xe8ddc5496382063f0f4b9c2c46555f070dcf9dd849dd69adfbd4af73f1c235ac",
+       "timestamp": "0x6af6299e"
       }
      }
     ]
@@ -85,32 +85,32 @@
       "newest": [
        {
         "result": {
-         "number": "0x6b97eab",
-         "hash": "0xba7a7b31a79fc442b60132ffb4af9af69b077ac5ac6a65da3baa1f963562071f",
-         "timestamp": "0x6af62668"
+         "number": "0x6b9c19d",
+         "hash": "0xc80e170918427f74524798127239933f5976b04cb4a923b1c9ca4f180ea8e27b",
+         "timestamp": "0x6af62d61"
         }
        },
        {
         "result": {
-         "number": "0x6b97eb8",
-         "hash": "0x89e97a17950ae72cc6e7ea70bb768365d565ad854d2fc6f7d01d5ca8ec01741f",
-         "timestamp": "0x6af6266a"
+         "number": "0x6b9c1a3",
+         "hash": "0xe16ffeaa398dcaa54d15e95160a4f7d17460bcbad6618250dfdcfba51a04bc8a",
+         "timestamp": "0x6af62d62"
         }
        }
       ],
       "byNumber": [
        {
         "result": {
-         "number": "0x6b97eab",
-         "hash": "0xba7a7b31a79fc442b60132ffb4af9af69b077ac5ac6a65da3baa1f963562071f",
-         "timestamp": "0x6af62668"
+         "number": "0x6b9c19d",
+         "hash": "0xc80e170918427f74524798127239933f5976b04cb4a923b1c9ca4f180ea8e27b",
+         "timestamp": "0x6af62d61"
         }
        },
        {
         "result": {
-         "number": "0x6b97eab",
-         "hash": "0xba7a7b31a79fc442b60132ffb4af9af69b077ac5ac6a65da3baa1f963562071f",
-         "timestamp": "0x6af62668"
+         "number": "0x6b9c19d",
+         "hash": "0xc80e170918427f74524798127239933f5976b04cb4a923b1c9ca4f180ea8e27b",
+         "timestamp": "0x6af62d61"
         }
        }
       ]
@@ -119,16 +119,16 @@
     "finalized": [
      {
       "result": {
-       "number": "0x6b95651",
-       "hash": "0xecb28ae573b73d36cfe732994925d98a53475d15722a81a7a9c0d5fbf42dab06",
-       "timestamp": "0x6af62233"
+       "number": "0x6b99ee9",
+       "hash": "0x04ffb6b109e294cdb2162d1dbce032afebe59935e654844760cea3160a287d6d",
+       "timestamp": "0x6af629c5"
       }
      },
      {
       "result": {
-       "number": "0x6b95651",
-       "hash": "0xecb28ae573b73d36cfe732994925d98a53475d15722a81a7a9c0d5fbf42dab06",
-       "timestamp": "0x6af62233"
+       "number": "0x6b99ee9",
+       "hash": "0x04ffb6b109e294cdb2162d1dbce032afebe59935e654844760cea3160a287d6d",
+       "timestamp": "0x6af629c5"
       }
      }
     ]
@@ -142,7 +142,7 @@
    "finalKey": false,
    "guard": false
   },
-  "at": 1794516587351,
+  "at": 1794518371249,
   "chains": {
    "base": {
     "chainId": [
@@ -158,32 +158,32 @@
       "newest": [
        {
         "result": {
-         "number": "0x3601efd",
-         "hash": "0x690325416fabce6e5bac3e29471a4dbcf0d38ceb5ca838c78222ed1a18d41d1e",
-         "timestamp": "0x6af62667"
+         "number": "0x36041d8",
+         "hash": "0x9a24522c915450cef5da33b1f0206f800c71f291314532288af166a6e84f1477",
+         "timestamp": "0x6af62d5f"
         }
        },
        {
         "result": {
-         "number": "0x3601f01",
-         "hash": "0xdf59a5850ef507f420fab1f1af3317b45e3f29f6667e1f4fb2bc44ea422d467a",
-         "timestamp": "0x6af62667"
+         "number": "0x36041db",
+         "hash": "0x0d46b978ecda87a9e40fc8a65940ac40ae046fa5210a390bd2b2e011f174e072",
+         "timestamp": "0x6af62d60"
         }
        }
       ],
       "byNumber": [
        {
         "result": {
-         "number": "0x3601efd",
-         "hash": "0x690325416fabce6e5bac3e29471a4dbcf0d38ceb5ca838c78222ed1a18d41d1e",
-         "timestamp": "0x6af62667"
+         "number": "0x36041d8",
+         "hash": "0x9a24522c915450cef5da33b1f0206f800c71f291314532288af166a6e84f1477",
+         "timestamp": "0x6af62d5f"
         }
        },
        {
         "result": {
-         "number": "0x3601efd",
-         "hash": "0x690325416fabce6e5bac3e29471a4dbcf0d38ceb5ca838c78222ed1a18d41d1e",
-         "timestamp": "0x6af62667"
+         "number": "0x36041d8",
+         "hash": "0x9a24522c915450cef5da33b1f0206f800c71f291314532288af166a6e84f1477",
+         "timestamp": "0x6af62d5f"
         }
        }
       ]
@@ -192,16 +192,16 @@
     "finalized": [
      {
       "result": {
-       "number": "0x3600a58",
-       "hash": "0xf246eb2a0e5125cdac06c0fbc4417f5a1319dc7c8182bd8bfed99193a86d153f",
-       "timestamp": "0x6af62246"
+       "number": "0x36027ee",
+       "hash": "0x71a5f4a0885329f47896d79367c94382ebefe546f5354818cac8fcac7fd95438",
+       "timestamp": "0x6af62830"
       }
      },
      {
       "result": {
-       "number": "0x3600a58",
-       "hash": "0xf246eb2a0e5125cdac06c0fbc4417f5a1319dc7c8182bd8bfed99193a86d153f",
-       "timestamp": "0x6af62246"
+       "number": "0x3602f11",
+       "hash": "0xe8ddc5496382063f0f4b9c2c46555f070dcf9dd849dd69adfbd4af73f1c235ac",
+       "timestamp": "0x6af6299e"
       }
      }
     ]
@@ -220,32 +220,32 @@
       "newest": [
        {
         "result": {
-         "number": "0x6b97eab",
-         "hash": "0xba7a7b31a79fc442b60132ffb4af9af69b077ac5ac6a65da3baa1f963562071f",
-         "timestamp": "0x6af62668"
+         "number": "0x6b9c19d",
+         "hash": "0xc80e170918427f74524798127239933f5976b04cb4a923b1c9ca4f180ea8e27b",
+         "timestamp": "0x6af62d61"
         }
        },
        {
         "result": {
-         "number": "0x6b97eb8",
-         "hash": "0x89e97a17950ae72cc6e7ea70bb768365d565ad854d2fc6f7d01d5ca8ec01741f",
-         "timestamp": "0x6af6266a"
+         "number": "0x6b9c1a3",
+         "hash": "0xe16ffeaa398dcaa54d15e95160a4f7d17460bcbad6618250dfdcfba51a04bc8a",
+         "timestamp": "0x6af62d62"
         }
        }
       ],
       "byNumber": [
        {
         "result": {
-         "number": "0x6b97eab",
-         "hash": "0xba7a7b31a79fc442b60132ffb4af9af69b077ac5ac6a65da3baa1f963562071f",
-         "timestamp": "0x6af62668"
+         "number": "0x6b9c19d",
+         "hash": "0xc80e170918427f74524798127239933f5976b04cb4a923b1c9ca4f180ea8e27b",
+         "timestamp": "0x6af62d61"
         }
        },
        {
         "result": {
-         "number": "0x6b97eab",
-         "hash": "0xba7a7b31a79fc442b60132ffb4af9af69b077ac5ac6a65da3baa1f963562071f",
-         "timestamp": "0x6af62668"
+         "number": "0x6b9c19d",
+         "hash": "0xc80e170918427f74524798127239933f5976b04cb4a923b1c9ca4f180ea8e27b",
+         "timestamp": "0x6af62d61"
         }
        }
       ]
@@ -254,16 +254,16 @@
     "finalized": [
      {
       "result": {
-       "number": "0x6b95651",
-       "hash": "0xecb28ae573b73d36cfe732994925d98a53475d15722a81a7a9c0d5fbf42dab06",
-       "timestamp": "0x6af62233"
+       "number": "0x6b99ee9",
+       "hash": "0x04ffb6b109e294cdb2162d1dbce032afebe59935e654844760cea3160a287d6d",
+       "timestamp": "0x6af629c5"
       }
      },
      {
       "result": {
-       "number": "0x6b95651",
-       "hash": "0xecb28ae573b73d36cfe732994925d98a53475d15722a81a7a9c0d5fbf42dab06",
-       "timestamp": "0x6af62233"
+       "number": "0x6b99ee9",
+       "hash": "0x04ffb6b109e294cdb2162d1dbce032afebe59935e654844760cea3160a287d6d",
+       "timestamp": "0x6af629c5"
       }
      }
     ]
