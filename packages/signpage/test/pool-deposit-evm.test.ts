@@ -21,7 +21,7 @@ import { EVM_DEPOSIT_GAS_MAX, evmDepositHeadroom } from "../src/rules/pool.ts";
 import { EVM_READ_TRY_MS } from "../../wallet/src/pool/evm.ts";
 import { EVM_DEPOSIT_PRIORITY_CAP, EVM_DEPOSIT_RESEND_MS } from "../src/pool-deposit-evm.ts";
 import { mock } from "node:test";
-import { followPoolDepositEvm, POOL_DEPOSIT_EVM_LANDING_MS, poolDepositEvmKind, runPoolDepositEvm, type PoolDepositEvmHost } from "../src/pool-deposit-evm.ts";
+import { followPoolDepositEvm, POOL_DEPOSIT_EVM_LANDING_MS, POOL_DEPOSIT_EVM_WAIT_MS, poolDepositEvmKind, runPoolDepositEvm, type PoolDepositEvmHost } from "../src/pool-deposit-evm.ts";
 import { EvmNotFinalError } from "../../wallet/src/pool/evm-restore.ts";
 import { SolanaRpcTransportError } from "../../kit/src/trade/solana/send.ts";
 import type { PoolAsk } from "../src/rules/pool.ts";
@@ -213,6 +213,47 @@ test("a funded U deposits its rung: INCOMING with { hash, nonce, value } before 
   assert.equal(n!.state, "UNSPENT");
   assert.equal(n!.leaf!.value, RUNG);
   assert.ok(h.seeds.every((x) => x.every((b) => b === 0)), "the seed zeroed at run end");
+});
+
+test("evm-money-shows-and-spends-at-once: a send mined only after the run's first read is read again POOL_DEPOSIT_EVM_WAIT_MS later and lands in the run (UNSPENT, filled), not on the next load pass", async () => {
+  const { ch, ns, planned } = await funded(RUNG + FEE);
+  const waits: number[] = [];
+  // the page's own read count (no `reads`): the first read finds no block holding the send, the next one does
+  const h = hostOf(ch, ns, { reads: undefined, wait: async (ms) => void (waits.push(ms), ch.c.sent.length === 1 && !ch.c.events.some((e) => e.kind === "deposit") && ch.land(ch.c.sent[0]!)) });
+  const a = await runPoolDepositEvm(h, ASK);
+  assert.deepEqual(a, { stage: "filled", txs: [{ chain: "base", hash: sentOf(ch.c.sent[0]!).hash }] });
+  assert.equal((await ns.get(planned.id))!.state, "UNSPENT");
+  assert.deepEqual(waits, [POOL_DEPOSIT_EVM_WAIT_MS], "one wait between the run's two reads");
+  assert.equal(ch.c.sent.length, 1, "never sent again");
+});
+
+test("evm-money-shows-and-spends-at-once: a round that fails right after the send (logs behind the pool's state at the newest block) is read again POOL_DEPOSIT_EVM_WAIT_MS later, and the note lands in the run", async () => {
+  const { ch, ns, planned } = await funded(RUNG + FEE);
+  ch.c.onSend = (raw) => ch.land(raw);
+  let failed = 0;
+  // the first round after the send fails as the sync refuses a lagging read (its logs 0 leaves, the pool's state 1)
+  const h = hostOf(ch, ns, { reads: undefined, round: async () => {
+    if (ch.c.sent.length === 1 && failed++ === 0) throw new Error("the state tree from the logs (0 leaves) is not the pool's");
+    return { events: [...ch.c.events], finalBlock: ch.c.fin };
+  } });
+  const a = await runPoolDepositEvm(h, ASK);
+  assert.deepEqual(a, { stage: "filled", txs: [{ chain: "base", hash: sentOf(ch.c.sent[0]!).hash }] });
+  assert.equal((await ns.get(planned.id))!.state, "UNSPENT");
+  assert.equal(ch.c.sent.length, 1, "never sent again");
+  // after a sign out or a stop, that failed read ends the run at once: "sent", never read again, no wait
+  for (const k of ["signal", "stop"] as const) {
+    const t = await funded(RUNG + FEE);
+    t.ch.c.onSend = (raw) => t.ch.land(raw);
+    const ac = new AbortController();
+    let waits = 0;
+    const g = hostOf(t.ch, t.ns, { reads: undefined, [k]: ac.signal, wait: async () => void waits++, round: async () => {
+      if (t.ch.c.sent.length === 1) (ac.abort(), (() => { throw new Error("the state tree from the logs (0 leaves) is not the pool's"); })());
+      return { events: [...t.ch.c.events], finalBlock: t.ch.c.fin };
+    } });
+    const b = await runPoolDepositEvm(g, ASK);
+    assert.equal((b as { stage?: string }).stage, "sent", k);
+    assert.equal(waits, 0, `${k}: no wait for a read again`);
+  }
 });
 
 test("a simulation that fails on one RPC signs nothing; read and simulated once more, then not_funded with nothing written", async () => {

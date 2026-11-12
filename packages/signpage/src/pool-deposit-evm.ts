@@ -120,7 +120,7 @@ export type PoolDepositEvmLeft = { notes: { precommitment: bigint; value: bigint
  *  ~1,000 s after it lands, and each read is a round of the pool's events). */
 export const POOL_DEPOSIT_EVM_FOLLOW_MS = 10_000;
 /** How long a note's send is read every POOL_DEPOSIT_EVM_FOLLOW_MS as one that may land: the slowest Deposited finality
- *  measured (Robinhood testnet, 1,439 s: POOL_DEPOSIT_EVM_READS) and a minute for the send to be mined. Past it, a read
+ *  measured (Robinhood testnet, 1,439 s, read 2026-11-07 06:12Z) and a minute for the send to be mined. Past it, a read
  *  that stays "may land" (a send held in a mempool and never mined, so U's nonce never passes it) backs off as
  *  a quiet one, never stopped (delta review low 1). Counted per note as on Solana (POOL_DEPOSIT_LANDING_MS). */
 export const POOL_DEPOSIT_EVM_LANDING_MS = 1_500_000;
@@ -128,11 +128,12 @@ export const POOL_DEPOSIT_EVM_LANDING_MS = 1_500_000;
 /** The priority fee U offers, wei per gas: 0.01 gwei, above what Base's blocks include at (a tip that never lands
  *  holds U's nonce); Robinhood (Nitro) ignores it. */
 export const EVM_DEPOSIT_PRIORITY_CAP = 10_000_000n;
-/** Verdict reads the ask's own send gets in its run, POOL_DEPOSIT_EVM_WAIT_MS apart. One: a Deposited is final on
- *  both RPCs only after Base 1,061 s, Base Sepolia 1,341 s, Robinhood 1,088 s, Robinhood testnet 1,439 s (measured on
- *  two public RPCs per chain, 2026-11-07 06:12Z), so no wait inside a run sees it, and a run holding the deposit lock
- *  that long would hold every other deposit. The note settles in the load and state-read pass (settle). */
-export const POOL_DEPOSIT_EVM_READS = 1;
+/** Verdict reads the ask's own send gets in its run, POOL_DEPOSIT_EVM_WAIT_MS apart. Two: the note lands once the
+ *  newest block both RPCs agree on holds its Deposited (card evm-money-shows-and-spends-at-once), and the first read
+ *  comes right after the send, before a block holds it (Base's blocks 200 ms apart, Robinhood's 110 ms), so the second,
+ *  2 s on, lands it in the run; finality (Base 1,061 s, Robinhood 1,088 s, 2026-11-07 06:12Z) is never waited on here.
+ *  A send that misses both settles in the load and state-read pass (settle). */
+export const POOL_DEPOSIT_EVM_READS = 2;
 export const POOL_DEPOSIT_EVM_WAIT_MS = 2_000;
 /** A run builds one note's send again at most this many times (each only once the last is dead on both RPCs, or
  *  reached neither). */
@@ -494,7 +495,14 @@ async function follow(r: Run, n: NoteRecord, reads: number, wait: (ms: number) =
   for (let k = 0; k < reads; k++) {
     if (k > 0) await wait(POOL_DEPOSIT_EVM_WAIT_MS);
     // the kept block back as stored, while the note is the one this follow reads (INCOMING, its sends as read)
-    const v = await verdictOf(r, note, (x) => void (x.state === "INCOMING" && x.evmSends?.length === note.evmSends?.length && (note = x)));
+    // a read that fails with a read left (a provider's logs behind the pool's state at the newest block, right after the
+    // send) is read again at the next read, never the run's answer; the last read's failure stands. So the run holds its
+    // send at most one more POOL_DEPOSIT_EVM_WAIT_MS and one read (POOL_DEPOSIT_EVM_READS 2), and a failed read after a
+    // sign out (signal) or a stop is never read again: it ends the run at once
+    const v = await verdictOf(r, note, (x) => void (x.state === "INCOMING" && x.evmSends?.length === note.evmSends?.length && (note = x))).catch((e: unknown) => {
+      if (k + 1 < reads && !r.h.signal?.aborted && !r.h.stop?.aborted) return { kind: "pending" as const };
+      throw e;
+    });
     if (v.kind === "landed") return { kind: "landed", note: v.note, filled: v.filled, hash: note.evmSends?.at(-1)?.hash };
     if (v.kind === "pending") continue;
     // dead on both RPCs: the same note again from fresh reads at U's new nonce; reached neither: at its own nonce
