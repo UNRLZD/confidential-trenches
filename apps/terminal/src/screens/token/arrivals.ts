@@ -45,31 +45,53 @@ export class ArrivalTracker {
 }
 
 let lastScroll = Number.NEGATIVE_INFINITY;
-if (typeof document !== "undefined" && typeof document.addEventListener === "function")
+// a finger on the screen, and when the last one lifted (UNRLZD mobile/discover/steady.ts: the order holds while a finger
+// is down and for 1000 ms after it lifts or the scroll ends)
+let fingers = 0;
+let lastLift = Number.NEGATIVE_INFINITY;
+const FINGER_MS = 1000;
+if (typeof document !== "undefined" && typeof document.addEventListener === "function") {
   document.addEventListener("scroll", () => (lastScroll = performance.now()), { capture: true, passive: true });
-const scrolling = (): boolean => performance.now() - lastScroll < QUIET_MS;
+  document.addEventListener("touchstart", (e) => (fingers = e.touches.length), { capture: true, passive: true });
+  const lift = (e: TouchEvent) => {
+    fingers = e.touches.length;
+    lastLift = performance.now();
+  };
+  document.addEventListener("touchend", lift, { capture: true, passive: true });
+  document.addEventListener("touchcancel", lift, { capture: true, passive: true });
+}
+/** The user is scrolling a list (a scroll in the last 400 ms). */
+export const scrolling = (): boolean => performance.now() - lastScroll < QUIET_MS;
+/** A list should hold still: a scroll in the last 400 ms, a finger down, or one lifted (or a touch scroll ended) under
+ *  1000 ms ago. */
+export const busy = (): boolean => {
+  const t = performance.now();
+  const touch = lastLift > Number.NEGATIVE_INFINITY;
+  return fingers > 0 || t - lastLift < FINGER_MS || t - lastScroll < (touch ? FINGER_MS : QUIET_MS);
+};
 
 const active = new Set<HTMLElement>();
-const owner = new WeakMap<HTMLElement, object>();
-function cueOn(el: HTMLElement, a: Arrival, token: object): void {
+const owner = new WeakMap<HTMLElement, { cls: string }>();
+function cueOn(el: HTMLElement, a: Arrival, token: { cls: string }): void {
   owner.set(el, token);
   active.add(el);
-  el.classList.add("tkr-arrive");
+  el.classList.add(token.cls);
   el.dataset.nudge = String(a.nudge);
   el.style.setProperty("--arrive-delay", `${a.delay}ms`);
 }
-function cueOff(el: HTMLElement, token: object): void {
+function cueOff(el: HTMLElement, token: { cls: string }): void {
   if (owner.get(el) !== token) return;
   owner.delete(el);
   active.delete(el);
-  el.classList.remove("tkr-arrive");
+  el.classList.remove(token.cls);
   delete el.dataset.nudge;
   el.style.removeProperty("--arrive-delay");
 }
 
 /** Plays the cue on rows new to the top of `ids`; `find` gives a row's element, `calm` is true while the pointer is on
- *  the list (glow only), a `resetKey` change re-seeds without a cue. The cue is set on the element, not React state. */
-export function useArrivals(ids: readonly string[], opts: { find: (id: string) => HTMLElement | null; calm: () => boolean; resetKey: string }): void {
+ *  the list (glow only), a `resetKey` change re-seeds without a cue; `cls` is the list's own cue class (the rail's
+ *  .tkr-arrive, Discover's .dsc-arrive). The cue is set on the element, not React state. */
+export function useArrivals(ids: readonly string[], opts: { find: (id: string) => HTMLElement | null; calm: () => boolean; resetKey: string; cls?: string }): void {
   const tracker = useRef(new ArrivalTracker());
   const live = useRef(opts);
   live.current = opts;
@@ -88,7 +110,7 @@ export function useArrivals(ids: readonly string[], opts: { find: (id: string) =
     }
     lit.splice(Math.max(0, MAX_CUES - active.size));
     if (!lit.length) return;
-    const token = {};
+    const token = { cls: live.current.cls ?? "tkr-arrive" };
     for (const [el, a] of lit) cueOn(el, a, token);
     const last = Math.max(...lit.map(([, a]) => a.delay));
     setTimeout(() => {

@@ -124,7 +124,8 @@
 .pt td .s2 { font: 12px var(--font-num); color: var(--text-3); margin-top: 3px; }
 .pt td .s2.ui { font-family: var(--font-ui); }
 .pt td .s2.gain { color: var(--acc); } .pt td .s2.loss { color: var(--sell); }
-.pt .tok { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.pt .tok { display: flex; align-items: center; gap: 12px; min-width: 0; color: inherit; text-decoration: none; }
+.pt a.tok:hover .sy { text-decoration: underline; text-underline-offset: 3px; }
 .pt .tok .sy { font: 600 14px var(--font-ui); display: flex; align-items: center; gap: 6px; }
 .pt .xs { display: inline-flex; gap: 4px; }
 .pf .xt { height: 20px; padding: 0 7px; border-radius: 5px; font-size: 11px; display: inline-flex; align-items: center; }

@@ -14,9 +14,9 @@ import { curve } from "../market/curve.ts";
 import { padOf } from "../market/pads.ts";
 import type { SocialLinks } from "./model.ts";
 import { WORDS } from "./words.ts";
-import { aboutView, holdersSummary, holderViews, tapeViews, useHolders } from "./lower.ts";
+import { aboutView, holdersSummary, holderViews, pausedTape, tapeViews, useHolders } from "./lower.ts";
 import { W } from "./TokenPage.tsx";
-import type { Tape } from "./trades.ts";
+import type { Tape, Trade } from "./trades.ts";
 import { supplyOf } from "./units.ts";
 import "./lower.css";
 
@@ -45,9 +45,9 @@ const Empty = () => <div className="tkl-empty" data-testid="lower-empty"><W id="
 
 const Creator = () => <span className="tkl-tag"><W id="creatorTag" /></span>;
 
-function Trades({ row, tape, phone, nowMs }: { row: MarketRow; tape: Tape; phone: boolean; nowMs: number }) {
+function Trades({ row, tape, phone, nowMs, shown }: { row: MarketRow; tape: Tape; phone: boolean; nowMs: number; shown: readonly Trade[] }) {
   if (tape.status === "loading") return <Skel n={8} />;
-  const rows = tapeViews(tape.trades, { supply: supplyOf(row), creator: row.creator ?? null, nowMs });
+  const rows = tapeViews(shown, { supply: supplyOf(row), creator: row.creator ?? null, nowMs });
   return (
     <div className="tkl-body">
       <div className="tkl-thead tkl-tr" data-testid="trades-heads">
@@ -136,6 +136,12 @@ export function LowerPanel({ row, decimals, tape, phone = false }: { row: Market
   const holders = useHolders(row?.chain ?? null, row?.token ?? null, tab === "holders");
   const nowMs = useNow(tab === "trades" && tape.trades.length > 0);
   const sum = row ? holdersSummary(holders.status === "ready" ? holders.read : null, row) : null;
+  // Pause holds the trades list (UNRLZD's: only this button, never a hover; the pill resumes and counts what arrived);
+  // a new token starts live
+  const [frozen, setFrozen] = useState<{ token: string; trades: readonly Trade[] } | null>(null);
+  const held = frozen && frozen.token === row?.token ? frozen.trades : null;
+  const view = pausedTape(tape.trades, held);
+  const canPause = tab === "trades" && row !== null && tape.trades.length > 0;
   const tabBtn = (k: Tab) => (
     <button key={k} type="button" role="tab" className="tkl-tab" aria-selected={tab === k} data-testid={`lower-tab-${k}`} onClick={() => setTab(k)}>
       {k === "trades" ? (
@@ -156,10 +162,21 @@ export function LowerPanel({ row, decimals, tape, phone = false }: { row: Market
     <section className="tkl" data-testid="lower-panel" data-tab={tab} data-phone={phone || undefined}>
       <div className="tkl-tabs" role="tablist" data-testid="lower-tabs">
         {(phone ? (["trades", "holders", "orders"] as const) : (["holders", "trades", "orders"] as const)).map(tabBtn)}
+        {canPause &&
+          (held ? (
+            <button type="button" className="tkl-pause on" data-testid="trades-paused" onClick={() => setFrozen(null)}>
+              <W id="paused" />
+              {view.fresh > 0 && <span className="tkl-pausen">{WORDS.pausedNew.text.replace("{n}", String(view.fresh))}</span>}
+            </button>
+          ) : (
+            <button type="button" className="tkl-pause" data-testid="trades-pause" onClick={() => setFrozen({ token: row.token, trades: tape.trades })}>
+              <W id="tradesPause" />
+            </button>
+          ))}
       </div>
       {tab === "orders" ? (
         <div className="tkl-empty" role="tabpanel" data-testid="orders-soon" data-place="token-orders"><W id="soon" /></div>
-      ) : row === null ? <Skel n={8} /> : tab === "trades" ? <Trades row={row} tape={tape} phone={phone} nowMs={nowMs} /> : <Holders row={row} decimals={decimals} top={sum!.top} state={holders} />}
+      ) : row === null ? <Skel n={8} /> : tab === "trades" ? <Trades row={row} tape={tape} phone={phone} nowMs={nowMs} shown={view.shown} /> : <Holders row={row} decimals={decimals} top={sum!.top} state={holders} />}
     </section>
   );
 }

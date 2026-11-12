@@ -24,6 +24,9 @@
 // Card app-phone-token-taps-and-rows re-recorded the good answer and the three outage answers by the same commands from
 // its own code, the token page's tape planted (app-shell.mjs plantTape): every token load holds marks, trade rows and
 // trades that arrived while it settled.
+// Owner 12 Nov "Phone home: Trenches list": the phone's "/" draws the Trenches list and the phone's token page is the
+// TOKEN_PAGE load (the first token "/" lists); the good answer and the three outage answers were re-recorded by the same
+// commands from that build. The two bad answers predate it and stay as read (FAIL either way).
 // The other cases plant one fact on these answers. No RPC host is typed here: each is read from VERIFY_RELEASES.
 // Screenshot paths are kept as <shots>/<file>, a build's path as <build>.
 import assert from "node:assert/strict";
@@ -35,7 +38,7 @@ import { consoleLine } from "./console-errors.mjs";
 import { VERIFY_DOM } from "./rpc-outage.mjs";
 import { footerUrl, FOOTER_QUERY } from "../../apps/terminal/src/shell/footer.ts";
 import * as shell from "./app-shell.mjs";
-import { judge, onConsole, outages, plantTape, rpcRows, ROUTES, TAPE, WIDTHS } from "./app-shell.mjs";
+import { drawsToken, judge, onConsole, outages, plantTape, rpcRows, ROUTES, TAPE, TOKEN_PAGE, WIDTHS } from "./app-shell.mjs";
 import { TF_SECONDS as HELPER_TF_SECONDS } from "../../apps/helper/src/data/candles.ts";
 import { VERIFY_RELEASES } from "../../apps/terminal/src/screens/verify/release.ts";
 
@@ -59,7 +62,10 @@ test("recorded bad answer: today's APP_HOST stays top-level, not inside SIGN_HOS
   const r = judge(ANSWERS.bad);
   assert.equal(r.ok, false);
   for (const w of WIDTHS) {
-    for (const [id, p] of ROUTES) assert.ok(bad(r.lines).some((l) => l.startsWith(`BAD ${w.name} ${p} (${id}): not inside SIGN_HOST's shell (top window at https://ct-app.unrealized.trade${p})`)), `${w.name} ${p}`);
+    // read before the TOKEN_PAGE load existed (owner 12 Nov phone home): every route it holds
+    const held = ROUTES.filter(([, p]) => ANSWERS.bad.loads.some((l) => l.width === w.name && l.path === p));
+    assert.ok(held.length >= ROUTES.length - 1, `${w.name}: ${held.length} routes`);
+    for (const [id, p] of held) assert.ok(bad(r.lines).some((l) => l.startsWith(`BAD ${w.name} ${p} (${id}): not inside SIGN_HOST's shell (top window at https://ct-app.unrealized.trade${p})`)), `${w.name} ${p}`);
     assert.ok(bad(r.lines).some((l) => l.startsWith(`BAD ${w.name} inside the shell, `) && l.includes("not inside SIGN_HOST's shell")), w.name);
   }
 });
@@ -100,26 +106,38 @@ test("planted on the good answer: a shift inside the shell names its element and
 // token had no trades passed. The token page is now judged on a planted tape on every run.
 test("recorded good answer: the token page drew marks and trade rows, and trades arrived while it settled, at both widths", () => {
   for (const w of WIDTHS) {
-    const t = ANSWERS.good.loads.find((l) => l.width === w.name && l.expect === "token").tape;
-    assert.ok(t.marks > 0 && t.rows > 0 && t.pushed >= 2, `${w.name}: ${JSON.stringify(t)}`);
+    for (const l of ANSWERS.good.loads.filter((x) => x.width === w.name && drawsToken(x))) {
+      const t = l.tape;
+      assert.ok(t.marks > 0 && t.rows > 0 && t.pushed >= 2, `${w.name} ${l.path}: ${JSON.stringify(t)}`);
+    }
   }
+  // the phone's token page is the first token its Trenches list names, opened by its own address
+  assert.match(ANSWERS.good.loads.find((l) => l.width === "phone" && l.path === TOKEN_PAGE).href, /^\/token\/solana\/\w+$/);
 });
 
-test("planted on the good answer: a 12 px chart mark on the phone's token page and behind Verify: FAIL (run 42773072293)", () => {
+test("recorded good answer: the phone's / drew the Trenches list; no list row: FAIL", () => {
+  const home = (rec) => rec.loads.find((l) => l.width === "phone" && l.path === "/");
+  assert.ok(home(ANSWERS.good).list > 0, JSON.stringify(home(ANSWERS.good).list));
   const rec = structuredClone(ANSWERS.good);
-  for (const p of ["/", "/verify"]) rec.loads.find((l) => l.width === "phone" && l.path === p).smallTaps = ["button.tm:12x12"];
-  assert.deepEqual(bad(judge(rec).lines), ["BAD phone / (token): tap under 44 px: button.tm:12x12", "BAD phone /verify (verify): tap under 44 px: button.tm:12x12"]);
+  home(rec).list = 0;
+  assert.deepEqual(bad(judge(rec).lines), ["BAD phone / (token): no row on the Trenches list"]);
+});
+
+test("planted on the good answer: a 12 px chart mark on the phone's token page: FAIL (run 42773072293)", () => {
+  const rec = structuredClone(ANSWERS.good);
+  rec.loads.find((l) => l.width === "phone" && l.path === TOKEN_PAGE).smallTaps = ["button.tm:12x12"];
+  assert.deepEqual(bad(judge(rec).lines), [`BAD phone ${TOKEN_PAGE} (token): tap under 44 px: button.tm:12x12`]);
 });
 
 test("planted on the good answer: a trades row moved by a trade arriving above it: FAIL (run 42773072293)", () => {
   const rec = structuredClone(ANSWERS.good);
   const shift = { at: 1407, value: 0.0039, input: false, sources: ["div.tkl-trow.tkl-tr 0,781 390x44 -> 0,825 390x19", "div.tkl-trow.tkl-tr 0,825 390x19 -> 0,0 0x0"] };
-  Object.assign(rec.loads.find((l) => l.width === "phone" && l.path === "/"), { cls: 0.0039, shifts: [shift] });
-  assert.deepEqual(bad(judge(rec).lines), ["BAD phone / (token): CLS 0.0039 above 0 [+1407ms 0.0039: div.tkl-trow.tkl-tr 0,781 390x44 -> 0,825 390x19 | div.tkl-trow.tkl-tr 0,825 390x19 -> 0,0 0x0]"]);
+  Object.assign(rec.loads.find((l) => l.width === "phone" && l.path === TOKEN_PAGE), { cls: 0.0039, shifts: [shift] });
+  assert.deepEqual(bad(judge(rec).lines), [`BAD phone ${TOKEN_PAGE} (token): CLS 0.0039 above 0 [+1407ms 0.0039: div.tkl-trow.tkl-tr 0,781 390x44 -> 0,825 390x19 | div.tkl-trow.tkl-tr 0,825 390x19 -> 0,0 0x0]`]);
 });
 
 test("planted on the good answer: a token load with no mark, no trade row, under 2 trades arrived, or no tape read: FAIL", () => {
-  const at = (rec, w) => rec.loads.find((l) => l.width === w && l.expect === "token");
+  const at = (rec, w) => rec.loads.find((l) => l.width === w && l.path === TOKEN_PAGE);
   for (const [tape, want] of [
     [{ marks: 0, rows: 9, pushed: 5 }, "no trade mark on the chart"],
     [{ marks: 6, rows: 0, pushed: 5 }, "no trade row"],
@@ -129,7 +147,7 @@ test("planted on the good answer: a token load with no mark, no trade row, under
     for (const w of ["phone", "desktop"]) {
       const rec = structuredClone(ANSWERS.good);
       at(rec, w).tape = tape;
-      assert.deepEqual(bad(judge(rec).lines), [`BAD ${w} / (token): ${want}`], `${w} ${JSON.stringify(tape)}`);
+      assert.deepEqual(bad(judge(rec).lines), [`BAD ${w} ${TOKEN_PAGE} (token): ${want}`], `${w} ${JSON.stringify(tape)}`);
     }
   }
 });
@@ -243,7 +261,10 @@ test("recorded outage answer: one pool RPC answering 503, its row amber, every o
     const l = verifyLoad(ANSWERS.outage, w);
     // the run made the outage: the page logged the failed loads, and drew only the Solana row amber
     assert.ok(l.consoleErrors.length > 0 && l.consoleErrors.every((e) => e.startsWith("Failed to load resource: ") && e.endsWith(`(${SOLANA}/)`)), `${w}: ${l.consoleErrors}`);
-    assert.deepEqual(l.verify, { state: "read", code: "ok", funds: "ok", pools: { solana: "warn", base: "ok", robinhood: "ok" } });
+    // the read also names each row's hosts (VERIFY_DOM reads data-rpcs): one list per pool row
+    const { poolRpcs, ...v } = l.verify;
+    assert.deepEqual(v, { state: "read", code: "ok", funds: "ok", pools: { solana: "warn", base: "ok", robinhood: "ok" } });
+    assert.deepEqual(Object.keys(poolRpcs ?? {}).sort(), Object.keys(v.pools).sort());
     assert.ok(r.lines.some((x) => x.startsWith(`ok  ${w} /verify (verify): CLS`) && x.endsWith(`RPC down, shown: ${SOLANA.replace("https://", "")}`)), `${w}: ${r.lines.join("\n")}`);
   }
 });
@@ -289,7 +310,9 @@ test("recorded outage-footer answer: the first NEAR RPC fails the footer's reads
     assert.match(l.footer.block, /^\d+$/);
   }
   // Verify's rows stay ok on /verify: only the footer's reads failed
-  assert.deepEqual(verifyLoad(ANSWERS.outageFooter, "desktop").verify, { state: "read", code: "ok", funds: "ok", pools: { solana: "ok", base: "ok", robinhood: "ok" } });
+  const { poolRpcs, ...v } = verifyLoad(ANSWERS.outageFooter, "desktop").verify;
+  assert.deepEqual(v, { state: "read", code: "ok", funds: "ok", pools: { solana: "ok", base: "ok", robinhood: "ok" } });
+  assert.deepEqual(Object.keys(poolRpcs ?? {}).sort(), Object.keys(v.pools).sort());
   assert.ok(r.lines.some((l) => l.startsWith("ok  desktop /discover (discover): CLS") && l.endsWith(`RPC down, shown: ${NEAR.replace("https://", "")}`)), r.lines.join("\n"));
 });
 
@@ -606,7 +629,13 @@ test("TF_SECONDS: each timeframe's length is the helper's own", () => {
 // same token at 05:50Z, before the plant took one bar, read marks 0, rows 0, pushed 0 (run 42970713123).
 test("recorded good answer on a one-bar top token: the tape planted on its one bar, marks, rows and pushed trades at both widths: PASS", () => {
   const r = judge(ANSWERS.goodOneBar);
-  assert.equal(r.ok, true, r.lines.join("\n"));
+  // read live on 11 Nov, before the phone home (owner 12 Nov): its phone "/" drew the top token's page and it holds no
+  // TOKEN_PAGE load, so those two lines are its only BADs; re-record it from APP_HOST once the phone home is live there
+  assert.deepEqual(
+    r.lines.filter((l) => l.startsWith("BAD")),
+    ["BAD 16 loads of 18 (every route at both widths)", "BAD phone / (token): no row on the Trenches list"],
+    r.lines.join("\n"),
+  );
   for (const w of WIDTHS) {
     const t = ANSWERS.goodOneBar.loads.find((l) => l.width === w.name && l.expect === "token").tape;
     assert.ok(t.marks > 0 && t.rows > 0 && t.pushed >= 2, `${w.name}: ${JSON.stringify(t)}`);

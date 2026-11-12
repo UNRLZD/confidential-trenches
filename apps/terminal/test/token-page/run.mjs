@@ -16,6 +16,8 @@
 // The lower panel and About (card app-token-lower-panel): the tabs in R5's order, Trades the tape's rows (or No data),
 // Holders the helper's holder rows with the read's count and top share, or Jupiter's count and top share and No data
 // for the rows; About's window tiles and flow bar in the trade column (the desktop) and the trade sheet (the phone).
+// On the phone / is the Trenches list (owner 12 Nov): the token states open it and tap its first row, as a trader does;
+// the lists states (loading, empty, error) are the list's own, Retry included.
 // --signed-out runs the same states in the shell signed out.
 //   node apps/terminal/test/token-page/run.mjs [--shots <dir>] [--only <id,id>] [--signed-out]     PASS exit 0, FAIL exit 1
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
@@ -145,6 +147,7 @@ function helperAnswer(s, url, calls) {
     return json(200, { chain: "solana", as_of_ms: Date.now(), lists: { new: [], trending: top, trending_5m: [], trending_1h: top, graduating: [] } });
   }
   if (url.pathname === "/v1/market/token") {
+    calls.tokens++;
     if (typeof s.token === "number") return json(s.token, { error: "unavailable" });
     const row = live(s.top);
     if (url.searchParams.get("token") !== row.token) return json(404, { error: "unknown token" });
@@ -233,6 +236,15 @@ const check = (ok, what) => {
   if (!ok) fails.push(what);
 };
 
+/** The phone's list in a lists state (the hanging, empty and failed lists read): on the phone / is the Trenches list
+ *  (PhoneTrenches.tsx), so these states are the list's own; every other state is the token page, a row's tap away. */
+const PHONE_LIST = {
+  loading: '[data-testid="phone-trenches"][data-state="loading"]',
+  empty: '[data-testid="phone-trenches-empty"]',
+  error: '[data-testid="phone-trenches"][data-state="error"]',
+};
+const selOf = (w, s) => (w.isMobile && s.lists ? PHONE_LIST[s.state] : `main[data-route="token"] [data-token-page="${s.state}"]`);
+
 // `page` is the top window (SIGN_HOST's shell, for the shot); `f` is the terminal's frame inside it, where every read is.
 async function openAt(browser, route, w, s, calls) {
   const ctx = await browser.newContext({ viewport: w.viewport, deviceScaleFactor: w.deviceScaleFactor, isMobile: w.isMobile, hasTouch: w.hasTouch, colorScheme: "dark", reducedMotion: "reduce" });
@@ -265,7 +277,13 @@ async function openAt(browser, route, w, s, calls) {
     if (!f) await page.waitForTimeout(100);
   }
   if (!f) throw new Error(`${w.name} ${s.id}: no APP_HOST frame inside the shell (top at ${page.url()})`);
-  await f.waitForSelector(`main[data-route="token"] [data-token-page="${s.state}"]`, { timeout: 10_000 }).catch(() => {});
+  if (w.isMobile && !s.lists) {
+    // the phone's / is the Trenches list (owner 12 Nov, "Phone home: Trenches list"): the token page is a row's tap away
+    const row = f.locator('[data-testid="phone-trenches-row"]').first();
+    await row.waitFor({ timeout: 10_000 }).catch(() => {});
+    await row.tap().catch(() => {});
+  }
+  await f.waitForSelector(selOf(w, s), { timeout: 10_000 }).catch(() => {});
   return { ctx, page, f, errors, consoles };
 }
 
@@ -280,9 +298,9 @@ try {
       if (ONLY && !ONLY.has(s.id)) continue;
       n++;
       const tag = `${s.id} @${w.name}`;
-      const calls = { lists: 0, chains: [], live: 0, plant: null, edged: false };
+      const calls = { lists: 0, chains: [], tokens: 0, live: 0, plant: null, edged: false };
       const { ctx, page, f, errors, consoles } = await openAt(browser, route, w, s, calls);
-      const sel = `main[data-route="token"] [data-token-page="${s.state}"]`;
+      const sel = selOf(w, s);
       const drawn = await f.locator(sel).first().isVisible().catch(() => false);
       check(drawn, `${tag}: ${sel} not drawn at the route`);
       check(errors.length === 0, `${tag}: page errors ${errors.join(" | ")}`);
@@ -553,7 +571,8 @@ try {
             window.scrollTo(0, document.documentElement.scrollHeight);
             const r = (q) => document.querySelector(q)?.getBoundingClientRect();
             const tiles = [...document.querySelectorAll(".tkp-mtile")].map((e) => e.getBoundingClientRect().bottom);
-            return { bar: r(".tkp-bottom"), tab: r(".tabbar"), lastTile: Math.max(...tiles), row: (() => {
+            // nav.tabbar: the shell's tab bar (TabBar.tsx), not the boot frame's hidden <div class="tabbar"> (index.html #boot)
+            return { bar: r(".tkp-bottom"), tab: r("nav.tabbar"), vh: window.innerHeight, lastTile: Math.max(...tiles), row: (() => {
               // R5 .mtiles: the tile row is its own sideways scroller inside the page; every tile is reachable in it
               const row = document.querySelector(".tkp-mtiles");
               const box = row.getBoundingClientRect();
@@ -567,7 +586,9 @@ try {
               return { left: box.left, right: box.right, ox, first, last, scrolled };
             })(), vw: window.innerWidth };
           });
-          check(g.bar && g.tab && g.bar.bottom <= g.tab.top + 0.5, `${tag}: the bottom bar overlaps the tab bar`);
+          // the token page is pushed over the tabs on the phone (TabBar.tsx: no tab bar on /token/...): the bar sits on the
+          // screen's foot, with no tab bar under it
+          check(g.bar && !g.tab && g.bar.bottom <= g.vh + 0.5, `${tag}: the bottom bar ends at ${g.bar?.bottom} of ${g.vh}, tab bar ${JSON.stringify(g.tab)}`);
           check(g.row.left >= 0 && g.row.right <= g.vw + 0.5 && ["auto", "scroll"].includes(g.row.ox), `${tag}: the tile row is not its own scroller (${JSON.stringify(g.row)})`);
           check(g.row.first >= g.row.left - 0.5 && g.row.last <= g.row.right + 0.5, `${tag}: tiles out of reach in the row: ${JSON.stringify(g.row)}`);
           check(g.bar && g.lastTile <= g.bar.top, `${tag}: the last tile ends under the bottom bar (${g.lastTile} > ${g.bar?.top})`);
@@ -595,12 +616,18 @@ try {
           check(tap.w >= 43.5 && tap.h >= 43.5, `${tag}: the Retry tap target is ${Math.round(tap.w)}x${Math.round(tap.h)}, under 44 x 44`);
         }
         const before = calls.lists;
+        const tokensBefore = calls.tokens;
         await f.locator(".tkp-retry").click();
         const back = await f.locator(sel).waitFor({ timeout: 5_000 }).then(() => true, () => false);
         check(back, `${tag}: Retry lost the page`);
-        // one read of the lists: each chain's once
         const read = calls.chains.slice(before).sort().join(",");
-        check(read === [...LIST_CHAINS].sort().join(","), `${tag}: Retry read the lists of [${read}], not each of ${LIST_CHAINS.join(", ")} once`);
+        if (phone && !s.lists) {
+          // the phone's token page is a row's tap away (/token/<chain>/<id>): Retry reads that token again, not the lists
+          check(read === "" && calls.tokens - tokensBefore === 1, `${tag}: Retry read the lists of [${read}] and the token ${calls.tokens - tokensBefore} time(s), not the token once`);
+        } else {
+          // one read of the lists: each chain's once
+          check(read === [...LIST_CHAINS].sort().join(","), `${tag}: Retry read the lists of [${read}], not each of ${LIST_CHAINS.join(", ")} once`);
+        }
       }
       if (drawn && s.lower) {
         const box = phone ? ".tkp-phone" : ".tkp-desk";

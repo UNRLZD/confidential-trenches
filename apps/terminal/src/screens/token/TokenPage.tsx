@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ReactNode } from "react";
+import type { ReactNode, RefObject } from "react";
 import type { KLineData } from "klinecharts";
 import { useParams } from "react-router";
 import { parseTokenRoute } from "../../routes/routes.ts";
@@ -21,7 +21,9 @@ import type { Bar, CandleData, ChartTf } from "./candles.ts";
 import { fitBars, fitPrice, INDICATORS, isAuto, liveBars, mountChart, setDisplay, setIndicators, setScale, unmountChart } from "./chart.ts";
 import type { Drawn, IndicatorId, Scale } from "./chart.ts";
 import { About, LowerPanel } from "./LowerPanel.tsx";
-import { Rail } from "./Rail.tsx";
+import { PhoneTrenches } from "./PhoneTrenches.tsx";
+import { DrawToolbar } from "./draw/DrawToolbar.tsx";
+import { Rail, useMedia } from "./Rail.tsx";
 import { TradeMarks } from "./TradeMarks.tsx";
 import { useTrades } from "./trades.ts";
 import type { Tape, Trade as TapeTrade } from "./trades.ts";
@@ -32,6 +34,7 @@ import type { ChartUnit } from "./units.ts";
 import { copyText, readWatch, shareHref, toggleWatch, tokenLinks, tokenView } from "./model.ts";
 import type { TokenView } from "./model.ts";
 import { useToken, useTopToken } from "./source.ts";
+import { flashNum, useFlash } from "./useFlash.ts";
 import type { TokenData } from "./source.ts";
 import { WORDS } from "./words.ts";
 import type { WordId } from "./words.ts";
@@ -65,11 +68,11 @@ const SkLine = ({ cls, w }: { cls: string; w: number }) => <span className={`${c
 /** The identity line's skeleton: the filled line holds a mono age and address, so its height is the mono face's line. */
 const SkMeta = ({ w }: { w: number }) => <span className="tkp-meta tkp-sk" style={{ width: w }} aria-hidden="true"><span className="tkp-num">{"\u00a0"}</span></span>;
 
-function Tile({ label, value, dir, tone, k }: { label: WordId; value: string | null; dir?: string; tone?: string; k: string }) {
+function Tile({ label, value, dir, tone, k, flash }: { label: WordId; value: string | null; dir?: string; tone?: string; k: string; flash?: RefObject<HTMLSpanElement | null> }) {
   return (
     <div className="tkp-tile" data-k={k}>
       <span className="tkp-lbl"><W id={label} /></span>
-      {value === null ? <SkLine cls="tkp-val" w={64} /> : <span className="tkp-val" data-dir={dir} data-tone={tone}>{value}</span>}
+      {value === null ? <SkLine cls="tkp-val" w={64} /> : <span className="tkp-val" ref={flash} data-dir={dir} data-tone={tone}>{value}</span>}
     </div>
   );
 }
@@ -233,6 +236,8 @@ const RANGES: readonly { id: string; ms: number | null; tf: ChartTf | null }[] =
 interface ChartState {
   sym: string | null;
   chain: MarketChain | null;
+  /** The token's id on its chain (the drawings are kept per token). */
+  token: string | null;
   tf: ChartTf;
   /** A timeframe picked; `range` true when a bottom-bar range picked it (the range stays on). */
   onTf: (t: ChartTf, range?: boolean) => void;
@@ -481,6 +486,9 @@ function Chart({ c, phone }: { c: ChartState; phone?: boolean }) {
   return (
     <section className="tkp-chart" data-slot="chart" data-chart={s} aria-label={WORDS.chart.text}>
       {!phone && <Toolbar c={c} unit={unit} />}
+      <div className="tkp-plotrow">
+      {/* the drawing toolbar (draw/, UNRLZD's): its box from the first paint, so the chart's arrival moves nothing */}
+      <DrawToolbar chart={version > 0 && c.chain && c.token ? (drawn.current?.chart ?? null) : null} tokenId={c.chain && c.token ? `${c.chain}/${c.token}` : ""} scale={f.price} compact={phone === true} />
       <div className="tkp-plot" data-drawn={ready !== null} data-unit={`${unit.mc ? "mc" : "price"}/${unit.quote ? "coin" : "usd"}`} onMouseLeave={() => setAt(null)} onPointerUp={() => drawn.current && setAuto(isAuto(drawn.current))}>
         <div className="tkp-kc" ref={host} data-testid="chart-canvas" />
         {ready && c.ctl.trades && c.sym && <TradeMarks chart={drawn.current?.chart ?? null} bars={ready.bars} tf={ready.tf} factor={f.price} symbol={c.sym} phone={phone === true} version={version} trades={c.trades} />}
@@ -494,6 +502,7 @@ function Chart({ c, phone }: { c: ChartState; phone?: boolean }) {
           </span>
         )}
         {phone && gecko && <span className="tkp-vendor tkp-vendor-ph" data-testid="chart-vendor"><W id="gecko" /></span>}
+      </div>
       </div>
       {!phone && <BottomBar c={c} gecko={gecko} auto={auto} onAuto={onAuto} />}
       {phone && (
@@ -529,6 +538,10 @@ function Ticket({ r, t, toast }: { r: Ready; t: Trade; toast?: boolean }) {
 const taxOf = (r: Ready) => safetyCells(r.data.row, r.data.risk, r.nowMs).find((c) => c.id === "tax")!;
 
 function Desktop({ v, r, c, t, tape }: { v: TokenView | null; r: Ready | null; c: ChartState; t: Trade; tape: Tape }) {
+  // the MC and the Price flash gain / loss when they move, never on a token switch (useFlash, UNRLZD's header)
+  const fkey = v ? `${v.chain}/${v.token}` : "";
+  const mcRef = useFlash<HTMLSpanElement>(flashNum(r?.data.row.mc_usd), fkey);
+  const priceRef = useFlash<HTMLSpanElement>(flashNum(r?.data.row.price_usd), fkey);
   // null draws the tile's skeleton: the page is loading, or its row is still filling (card token-page-fills-after)
   const s = (x: string | null | undefined) => (v === null ? null : (x ?? null));
   const tax = r ? taxOf(r) : null;
@@ -564,9 +577,9 @@ function Desktop({ v, r, c, t, tape }: { v: TokenView | null; r: Ready | null; c
           <div className="tkp-strip">
             <div className="tkp-mc">
               <span className="tkp-lbl"><W id="mcLong" /></span>
-              {v?.mc != null ? <span className="tkp-mcval">{v.mc}</span> : <SkLine cls="tkp-mcval" w={120} />}
+              {v?.mc != null ? <span className="tkp-mcval" ref={mcRef}>{v.mc}</span> : <SkLine cls="tkp-mcval" w={120} />}
             </div>
-            <Tile k="price" label="price" value={s(v?.priceTile)} />
+            <Tile k="price" label="price" value={s(v?.priceTile)} flash={priceRef} />
             <Tile k="change" label="change" value={arrowed(s(v?.chgTile))} dir={v?.chg?.dir} />
             <Tile k="tax" label="tax" value={tax?.text ?? null} tone={tax?.tone} />
             <Tile k="vol" label="vol24" value={s(v?.vol)} />
@@ -615,6 +628,7 @@ function back() {
 
 function Phone({ v, r, c, t, tape }: { v: TokenView | null; r: Ready | null; c: ChartState; t: Trade; tape: Tape }) {
   const sheet = useTradeSheet();
+  const priceRef = useFlash<HTMLSpanElement>(flashNum(r?.data.row.price_usd), v ? `${v.chain}/${v.token}` : "");
   // the price and its change keep the room of the longest each has drawn for this token, so a read again that changes
   // their length moves nothing after them (legend.ts priceRoom, useRoom)
   const priceN = useRoom(v?.token, v?.price ? priceRoom(v.price) : 0);
@@ -635,7 +649,7 @@ function Phone({ v, r, c, t, tape }: { v: TokenView | null; r: Ready | null; c: 
       </div>
       <div className="tkp-hero">
         <div className="tkp-pricerow">
-          {v?.price != null ? <span className="tkp-price" style={{ minWidth: `calc(${priceN} * (1ch - 0.06em))` }}>{v.price}</span> : <SkLine cls="tkp-price" w={160} />}
+          {v?.price != null ? <span className="tkp-price" ref={priceRef} style={{ minWidth: `calc(${priceN} * (1ch - 0.06em))` }}>{v.price}</span> : <SkLine cls="tkp-price" w={160} />}
           {v?.chg && <span className="tkp-chg" data-dir={v.chg.dir} style={{ minWidth: `calc(${chgN}ch + 16px)` }}>{v.chg.text}</span>}
           {v?.chg && <span className="tkp-h24"><W id="h24" /></span>}
         </div>
@@ -728,7 +742,7 @@ export function TokenPage({ data, nowMs, onRetry, pushed = false }: { data: Toke
   const v = data.status === "ready" ? tokenView(data.row, nowMs, data.filling === true, data.links) : null;
   const ready = data.status === "ready" ? { data, nowMs } : null;
   // the coin unit's price: the device's own read the trade box holds (signed in, on a chain with a pool), else none
-  const c: ChartState = { sym: v?.symbol ?? null, chain: row?.chain ?? null, tf, onTf, data: candles, retry, ctl, set, supply: supplyOf(row), coin: coinUsd(trade.price), trades: tape.trades };
+  const c: ChartState = { sym: v?.symbol ?? null, chain: row?.chain ?? null, token: row?.token ?? null, tf, onTf, data: candles, retry, ctl, set, supply: supplyOf(row), coin: coinUsd(trade.price), trades: tape.trades };
   return (
     <section className="tkp" data-token-page={data.status} data-pushed={pushed || undefined} data-token={v?.token} data-filling={v?.filling} aria-busy={v === null || v.filling} aria-label={v === null ? WORDS.loading.text : undefined}>
       <Desktop v={v} r={ready} c={c} t={trade} tape={tape} />
@@ -739,9 +753,13 @@ export function TokenPage({ data, nowMs, onRetry, pushed = false }: { data: Toke
 
 /** The token route. /token/<chain>/<id> draws that token (source.ts); a chain the terminal does not draw is the page's
  *  not-found, with no read. / draws the top Trending token on the shell's chain filter. */
+/** The phone's width (shell.css): under it, / is the Trenches list (owner 12 Nov), not the top token's page. */
+const PHONE_MEDIA = "(max-width: 767.98px)";
+
 export function TokenRoute() {
   const params = useParams();
-  if (params.chain === undefined) return <TopToken />;
+  const phone = useMedia(PHONE_MEDIA);
+  if (params.chain === undefined) return phone ? <PhoneTrenches /> : <TopToken />;
   const t = parseTokenRoute(params);
   if (!t) return <TokenPage data={{ status: "empty" }} nowMs={0} onRetry={() => {}} pushed />;
   return <ReadToken key={`${t.chain}/${t.id}`} chain={t.chain} id={t.id} />;

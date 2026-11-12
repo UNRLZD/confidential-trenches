@@ -170,6 +170,26 @@ export interface TapeView {
 
 /** Trade rows as R5 draws them: the age, the side, the MC the trade filled at (its price times the supply), the amount,
  *  the total in USD and its bar against the biggest trade's, the trader. No supply read: no MC. */
+/**
+ * The trades list held by Pause (UNRLZD center/lower.ts pausedView; owner 12 Nov parity): the trades as they stood at
+ * the pause, with any older ones read since appended below, and how many newer ones arrived meanwhile. Not paused: the
+ * live list.
+ */
+export function pausedTape(trades: readonly Trade[], frozen: readonly Trade[] | null): { shown: readonly Trade[]; fresh: number } {
+  if (frozen === null) return { shown: trades, fresh: 0 };
+  const had = new Set(frozen.map((t) => t.tx));
+  const head = frozen[0]?.t_ms ?? Number.NEGATIVE_INFINITY;
+  const tail = frozen.at(-1)?.t_ms ?? Number.POSITIVE_INFINITY;
+  let fresh = 0;
+  const older: Trade[] = [];
+  for (const t of trades) {
+    if (had.has(t.tx)) continue;
+    if (t.t_ms >= head) fresh++;
+    else if (t.t_ms <= tail) older.push(t);
+  }
+  return { shown: older.length > 0 ? [...frozen, ...older] : frozen, fresh };
+}
+
 export function tapeViews(trades: readonly Trade[], o: { supply: number | null; creator: string | null; nowMs: number }): TapeView[] {
   const max = Math.max(...trades.map((t) => Number(t.usd)), 0.01);
   return trades.map((t) => {

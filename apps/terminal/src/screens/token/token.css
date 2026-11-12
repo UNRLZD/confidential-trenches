@@ -76,7 +76,9 @@
 .tkp-tf[aria-pressed="true"] { background: var(--bg-raised); color: var(--text-1); }
 /* a timeframe the helper does not serve for this chain (1s off Solana): drawn, not usable */
 .tkp-tf:disabled { opacity: 0.35; cursor: default; }
-.tkp-plot { position: relative; flex: 1; min-height: 0; background-image: repeating-linear-gradient(to bottom, transparent 0, transparent 63px, #161616 63px, #161616 64px); }
+/* the chart row: the drawing toolbar's column, then the plot (UNRLZD ChartPanel .row / .chartWrap) */
+.tkp-plotrow { position: relative; flex: 1; min-height: 0; display: flex; }
+.tkp-plot { position: relative; flex: 1; min-width: 0; min-height: 0; background-image: repeating-linear-gradient(to bottom, transparent 0, transparent 63px, #161616 63px, #161616 64px); }
 .tkp-plotsk { position: absolute; inset: 14px 62px 20px 12px; }
 /* the chart (card app-token-chart): the library's canvas fills the plot, which keeps its size in every state; the CSS
    grid stands for the chart only until bars are drawn. Legend after R5 unrlzd.css .cp-legend, .cp-lg* */
@@ -158,8 +160,11 @@
   .tkp-dot { width: 3px; height: 3px; border-radius: 50%; background: var(--text-3); }
   .tkp-meta > .tkp-ca { max-width: none; }
   .tkp-chart { margin-top: 14px; border: 0; border-radius: 0; background: transparent; }
-  .tkp-plot { flex: none; height: 300px; }
-  .tkp-legend { left: 16px; max-width: calc(100% - 96px); }
+  .tkp-plotrow { flex: none; }
+  /* the plot fills its row's width beside the drawing toolbar (a row: flex none would size it to its 0-wide canvas) */
+  .tkp-plot { flex: 1 1 0; height: 300px; }
+  /* clear of the drawing tools' toggle over the plot's top-left (UNRLZD ChartPanel .legend at 699 px: left 52) */
+  .tkp-legend { left: 52px; max-width: calc(100% - 138px); }
   .tkp-tfs-ph { height: auto; justify-content: space-between; padding: 10px 12px 0; border: 0; }
   /* seven timeframes in one row at 360 (7 x 46 + the row's 24 of padding): each still a 44 px tap target */
   .tkp-tfs-ph .tkp-tf { height: 44px; min-width: 46px; border-radius: 12px; font-size: 14px; }
@@ -189,3 +194,6 @@
   .tkp-ssym { font-size: 18px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .tkp-sprice { font: 13px var(--font-num); font-variant-numeric: tabular-nums; color: var(--text-2); }
 }
+/* the flashed figures (useFlash) are their own paint layers, as UNRLZD's header figures (Header.module.css .mcVal,
+   .tileVal): each flash frame repaints the figure, not the screen's layer under it; position moves nothing */
+.tkp-mcval, .tkp-tile[data-k="price"] .tkp-val, .tkp-price { position: relative; }

@@ -5,7 +5,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { MarketRow } from "../src/screens/discover/fields.ts";
-import { aboutView, HOLDERS_URL, holdersSummary, holderViews, readHolders, tapeViews, toHolders } from "../src/screens/token/lower.ts";
+import { aboutView, HOLDERS_URL, holdersSummary, holderViews, pausedTape, readHolders, tapeViews, toHolders } from "../src/screens/token/lower.ts";
 import type { Trade } from "../src/screens/token/trades.ts";
 
 const A = "9DrvZvyWh1HuAoZxvYWMvkf2XCzryCpGgHqrMjyDWpmo";
@@ -145,4 +145,14 @@ test("About: the four windows from the row (4H dashed when not served), the 5m t
   assert.deepEqual(none.flow, { buys: "—", sells: "—", buyPct: null });
   assert.equal(aboutView(row({ net_5m_usd: "27518.8" })).five.net, "+$27.5K");
   assert.equal(aboutView(row({ buys_24h: 0, sells_24h: 0 })).flow.buyPct, null);
+});
+
+test("Pause holds the trades as they stood, counts the newer ones, and appends older ones read since (UNRLZD pausedView)", () => {
+  const tr = (tx: string, t_ms: number) => ({ t_ms, side: "buy" as const, usd: "1", amt: "1", trader: null, tx });
+  const frozen = [tr("c", 300), tr("b", 200)];
+  const live = [tr("e", 500), tr("d", 400), tr("c", 300), tr("b", 200), tr("a", 100)];
+  assert.deepEqual(pausedTape(live, null), { shown: live, fresh: 0 });
+  const p = pausedTape(live, frozen);
+  assert.deepEqual(p.shown.map((t) => t.tx), ["c", "b", "a"]);
+  assert.equal(p.fresh, 2);
 });

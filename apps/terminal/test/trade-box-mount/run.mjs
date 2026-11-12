@@ -157,6 +157,12 @@ async function open(browser, route, w, scheme) {
     if (!f) await page.waitForTimeout(100);
   }
   if (!f) throw new Error(`${w.name}: no APP_HOST frame inside the shell (top at ${page.url()})`);
+  if (w.isMobile) {
+    // the phone's / is the Trenches list (owner 12 Nov, "Phone home: Trenches list"): the token page is a row's tap away
+    const row = f.locator('[data-testid="phone-trenches-row"]').first();
+    await row.waitFor({ timeout: 10_000 }).catch(() => {});
+    await row.tap().catch(() => {});
+  }
   await f.waitForSelector('main[data-route="token"] [data-token-page="ready"]', { timeout: 10_000 }).catch(() => {});
   // the shell's signed-out state has landed when the box's button reads Sign in to trade
   await f.waitForFunction(() => document.querySelector('[data-testid="trade-cta"]')?.textContent?.trim() === "Sign in to trade", null, { timeout: 8_000 }).catch(() => {});

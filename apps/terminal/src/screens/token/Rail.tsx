@@ -29,17 +29,17 @@ import "./rail.css";
 // - the 24h change as UNRLZD draws it (▲ 11.27%), and "Open launch board" to Discover at the foot.
 // Everything reads Discover's lists (rail.ts), narrowed to the shell's chain filter. Display only.
 
-type List = "trending" | "watch" | "new" | "hot" | "graduating";
-const LISTS: readonly { key: List; word: WordId }[] = [
+export type List = "trending" | "watch" | "new" | "hot" | "graduating";
+export const LISTS: readonly { key: List; word: WordId }[] = [
   { key: "trending", word: "railTrending" },
   { key: "watch", word: "railWatch" },
   { key: "new", word: "railNew" },
   { key: "hot", word: "railHot" },
   { key: "graduating", word: "railGrad" },
 ];
-type SortKey = "mc" | "liq" | "vol24" | "age" | "chg" | "prog" | "holders";
-type Sort = { key: SortKey; dir: "asc" | "desc" } | null;
-const SORTS: readonly { key: SortKey; word: WordId }[] = [
+export type SortKey = "mc" | "liq" | "vol24" | "age" | "chg" | "prog" | "holders";
+export type Sort = { key: SortKey; dir: "asc" | "desc" } | null;
+export const SORTS: readonly { key: SortKey; word: WordId }[] = [
   { key: "mc", word: "mc" },
   { key: "liq", word: "sortLiq" },
   { key: "vol24", word: "sortVol" },
@@ -57,7 +57,7 @@ const PREFS = "ct.rail.v1";
 
 const dec = (v: string | null | undefined): number | null => (typeof v === "string" && /^\d+(\.\d+)?$/.test(v) ? Number(v) : null);
 const num = (v: number | null | undefined): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
-const keyOf = (r: MarketRow): string => `${r.chain}:${r.token}`;
+export const keyOf = (r: MarketRow): string => `${r.chain}:${r.token}`;
 
 /** A row's value for a sort key; null sorts last whatever the direction. */
 function sortValue(r: MarketRow, k: SortKey): number | null {
@@ -93,7 +93,7 @@ export function arrowPct(bps: number | null | undefined): string {
   return `${bps >= 0 ? "▲" : "▼"} ${(Math.abs(bps) / 100).toFixed(2)}%`;
 }
 
-function useMedia(q: string): boolean {
+export function useMedia(q: string): boolean {
   const sub = useCallback(
     (f: () => void) => {
       const m = window.matchMedia(q);
@@ -112,8 +112,8 @@ const storage = (): Storage | null => {
     return null;
   }
 };
-type Prefs = { list: List; sort: Sort; collapsed: boolean };
-function readPrefs(): Prefs {
+export type Prefs = { list: List; sort: Sort; collapsed: boolean };
+export function readPrefs(): Prefs {
   const d: Prefs = { list: "trending", sort: null, collapsed: false };
   try {
     const v = JSON.parse(storage()?.getItem(PREFS) ?? "null") as Partial<Prefs> | null;
@@ -126,7 +126,7 @@ function readPrefs(): Prefs {
     return d;
   }
 }
-function writePrefs(p: Prefs): void {
+export function writePrefs(p: Prefs): void {
   try {
     storage()?.setItem(PREFS, JSON.stringify(p));
   } catch {
@@ -134,7 +134,7 @@ function writePrefs(p: Prefs): void {
   }
 }
 
-function useWatch(): string[] {
+export function useWatch(): string[] {
   const [w, setW] = useState(() => readWatch(storage()));
   useEffect(() => {
     const f = () => setW(readWatch(storage()));

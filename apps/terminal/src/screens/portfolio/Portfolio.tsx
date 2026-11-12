@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { ReactNode } from "react";
 import { Link } from "react-router";
+import { TOKEN_CHAINS, tokenHref } from "../../routes/routes.ts";
 import { POOL_ASSET_DECIMALS } from "@blindfill/kit";
 import { useReturnHop } from "../../shell/ReturnHop.tsx";
 import { HopLine } from "../signin/HopLine.tsx";
@@ -567,13 +568,20 @@ function Selling({ r }: { r: Row }) {
   return r.selling.stage === "sending" ? <W id="sending" /> : <><W id="landing" /> <span className="live num">{(r.selling.ms / 1000).toFixed(1)}s</span></>;
 }
 
+/** The row's token: a link to its page where the chain has one (UNRLZD's portfolio row opens the token). */
+function TokCell({ r }: { r: Row }) {
+  const body = <><Avatar symbol={r.symbol} size={34} /><div className="ell"><div className="sy">{r.symbol}<MarkTag r={r} /></div><div className="s2 ui ell">{r.name}</div></div></>;
+  const chain = TOKEN_CHAINS.find((c) => c === r.chain);
+  return chain ? <Link className="tok" to={tokenHref(chain, r.token)} data-control="open-token">{body}</Link> : <div className="tok">{body}</div>;
+}
+
 function PosTr({ r, now, menu, setMenu, act }: { r: Row; now: number; menu: "more" | "export" | null; setMenu(m: "more" | "export" | null): void; act(a: PortfolioAction): void }) {
   const at = { chain: r.chain, token: r.token };
   const one = r.addresses.length === 1 ? r.addresses[0]! : null;
   return (
     <tr className={menu || r.selling ? "hov" : ""} data-pos={r.key}>
       <td className="l">
-        <div className="tok"><Avatar symbol={r.symbol} size={34} /><div className="ell"><div className="sy">{r.symbol}<MarkTag r={r} /></div><div className="s2 ui ell">{r.name}</div></div></div>
+        <TokCell r={r} />
       </td>
       <td>{r.bought === null ? DASH : usd(r.bought)}</td>
       <td>{r.sold ? usd(r.sold) : DASH}</td>

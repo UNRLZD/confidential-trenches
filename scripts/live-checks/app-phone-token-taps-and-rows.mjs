@@ -6,8 +6,9 @@
 // touch) and 1440 x 900 inside SIGN_HOST's shell, the token page's tape planted on every run (plantTape: marks in the
 // chart's own bars, one more trade pushed every 400 ms), so the page is judged with marks and arriving trades whatever
 // the live token's book holds. This check judges the token page's loads:
-//   - phone / and /verify (the token page under Verify's panel): marks drawn, each 12 x 12 px, no tap target under 44 px;
-//   - / at both widths: trade rows drawn, 2 trades or more arrived while it settled;
+//   - the phone's token page (TOKEN_PAGE: the first token its "/" lists; since 12 Nov the phone's "/" and the page under
+//     Verify's panel are the Trenches list): marks drawn, each 12 x 12 px, no tap target under 44 px;
+//   - that page on the phone and / on the desktop: trade rows drawn, 2 trades or more arrived while it settled;
 //   - each of them at CLS 0 (every shift counted, the hadRecentInput exclusion not applied), inside SIGN_HOST's shell.
 // The rest of each load (CSP, integrity, console, text size) is app-shell's to judge.
 // After: app
@@ -18,15 +19,14 @@
 import "../net-window.mjs";
 import { realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { collect, shiftsOf } from "./app-shell.mjs";
+import { collect, shiftsOf, TOKEN_PAGE } from "./app-shell.mjs";
 
 const KEY = "app-phone-token-taps-and-rows";
 /** APP_HOST, the terminal's address, held in each app-* check as its own literal (check-deploy.test.ts). */
 export const APP_HOST = "https://ct-app.unrealized.trade";
 /** The loads judged: [width, path, route drawn]. */
 export const LOADS = [
-  ["phone", "/", "token"],
-  ["phone", "/verify", "verify"],
+  ["phone", TOKEN_PAGE, "token"],
   ["desktop", "/", "token"],
 ];
 const MARK_PX = 12;
@@ -49,12 +49,12 @@ export function judge(rec) {
       else if (t.markPx?.[0] !== MARK_PX || t.markPx?.[1] !== MARK_PX) bad.push(`a mark drawn ${t.markPx ? t.markPx.join("x") : "at no size"} px, want ${MARK_PX}x${MARK_PX}`);
       if (l.smallTaps?.length) bad.push(`tap under 44 px: ${l.smallTaps.join(", ")}`);
     }
-    if (p === "/") {
+    if (id === "token") {
       if (!(t.rows > 0)) bad.push("no trade row");
       if (!(t.pushed >= 2)) bad.push(`${t.pushed ?? 0} trade(s) arrived while it settled, want 2 or more`);
     }
     if (l.cls !== 0) bad.push(`CLS ${Number(l.cls).toFixed(4)} above 0${shiftsOf(l.shifts)}`);
-    say(bad.length === 0, `${w} ${p} (${id}): ${bad.length ? bad.join("; ") : `${t.marks} mark(s)${w === "phone" ? ` at ${t.markPx.join("x")} px, every tap 44 px or more` : ""}${p === "/" ? `, ${t.rows} row(s), ${t.pushed} trade(s) arrived` : ""}, CLS 0`}`);
+    say(bad.length === 0, `${w} ${p} (${id}): ${bad.length ? bad.join("; ") : `${t.marks} mark(s)${w === "phone" ? ` at ${t.markPx.join("x")} px, every tap 44 px or more` : ""}${id === "token" ? `, ${t.rows} row(s), ${t.pushed} trade(s) arrived` : ""}, CLS 0`}`);
   }
   return { ok: lines.length > 0 && lines.every((l) => l.startsWith("ok ")), lines };
 }
