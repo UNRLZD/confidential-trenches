@@ -193,7 +193,12 @@ try {
       const ctx = await browser.newContext({ viewport: w.viewport, deviceScaleFactor: w.deviceScaleFactor, isMobile: w.isMobile, hasTouch: w.hasTouch, colorScheme: "dark", reducedMotion: motion });
       const page = await ctx.newPage();
       await page.goto(`${BASE}/?f=growing&path=%2Fdiscover`);
-      await page.waitForSelector(".rn-arc circle");
+      const swept = await page.waitForSelector(".rn-arc circle", { timeout: 5_000 }).then(() => true, () => false);
+      check(swept, `@${w.name} ${motion}: no sweep (.rn-arc) while the restore runs`);
+      if (!swept) {
+        await ctx.close();
+        continue;
+      }
       const sweep = await page.evaluate(() => [...document.querySelectorAll(".rn-arc circle")].map((c) => c.getAnimations().length));
       const moving = sweep.filter((n) => n > 0).length;
       check(motion === "reduce" ? moving === 0 : moving === sweep.length, `@${w.name} ${motion}: ${moving} of ${sweep.length} arc dots animate`);
