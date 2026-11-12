@@ -1842,13 +1842,18 @@ async function rentBack(h: PoolSellHost, x: RentBack, hold?: Hold): Promise<Ende
     };
     // 1. the teardown
     const teardown = await again("teardown", async () => {
+      // a found W: nothing is signed for it, a close included, before the found W's rule's time part holds on both RPCs
+      // (foundPast: no buy signed before W's latest transaction can still land); `since` is that transaction, the one
+      // the sweep then reads W's history from
+      const since = x.bare === true ? await foundPast(rpcs, w.address).catch(() => null) : undefined;
+      if (since === null) return { young: true as const, keep: [], signed: [], last: 0, unclaimed: undefined, since: undefined };
       const read = await readW();
       // W still holds what it sold: its sell has not filled, so its volume and wrapped-SOL accounts are what that sell
       // (or its next) still uses; nothing is closed
-      if (read.k === "holds") return { holds: read.steady, keep: [], signed: [], last: 0, unclaimed: undefined };
-      if (read.k === "refused") return { refused: read.why, keep: [], signed: [], last: 0, unclaimed: undefined };
+      if (read.k === "holds") return { holds: read.steady, keep: [], signed: [], last: 0, unclaimed: undefined, since };
+      if (read.k === "refused") return { refused: read.why, keep: [], signed: [], last: 0, unclaimed: undefined, since };
       const { held, accounts, plan } = read;
-      if (plan.close.length === 0) return { keep: plan.keep, signed: [], last: 0, unclaimed: undefined };
+      if (plan.close.length === 0) return { keep: plan.keep, signed: [], last: 0, unclaimed: undefined, since };
       const bh = await blockhashOf(rpcs);
       // one frame at a time on each RPC: a public provider throttles a burst; a claim that does not simulate is planned
       // around once, claims off (the kit's solanaTeardownChecked), so the closes still go and the owed account stays
@@ -1860,9 +1865,13 @@ async function rentBack(h: PoolSellHost, x: RentBack, hold?: Hold): Promise<Ende
       const t = await solanaTeardownChecked(w.address, plan, accounts, [held[0][0]?.lamports ?? 0n, held[1][0]?.lamports ?? 0n], { blockhash: bh.blockhash, lastValidBlockHeight: bh.lastHeight }, simulate, read.burn);
       // the copies the kit checked, handed to no one, are the bytes checked again here and signed (card signers-own-bytes)
       checkSolanaTeardownFrames(t.wires, ctx, t.reads);
-      return { keep: t.plan.keep, signed: await signAll(t.wires), last: bh.lastHeight, unclaimed: t.reads.unclaimed };
+      const signed = await signAll(t.wires);
+      // a found W's latest transaction read again on both RPCs: one landed since the rule's read drops the closes
+      if (since !== undefined && (await latestOf(rpcs, w.address).catch(() => null)) !== since) return { young: true as const, keep: [], signed: [], last: 0, unclaimed: undefined, since: undefined };
+      return { keep: t.plan.keep, signed, last: bh.lastHeight, unclaimed: t.reads.unclaimed, since };
     });
     if (teardown === null) return end("gave_up", "the teardown");
+    if (teardown.ok.young !== undefined) return end("holds", "a found W: not yet past its last transaction's blockhash on both RPCs, or a transaction landed on W since", false);
     if (teardown.ok.holds !== undefined) return end("holds", teardown.ok.holds ? "W holds a token it traded: no full sell of it landed" : "W holds a token it traded: its sell not final yet", teardown.ok.holds);
     if (teardown.ok.refused !== undefined) return end("refused", teardown.ok.refused);
     for (const f of teardown.ok.signed) await send(f.signed, f.signature);
@@ -1881,6 +1890,9 @@ async function rentBack(h: PoolSellHost, x: RentBack, hold?: Hold): Promise<Ende
     if (owedOf(teardown.ok.keep) === null) return end(teardown.ok.unclaimed === undefined ? "kept" : "owed", teardown.ok.keep.map((k) => `${k.address}: ${k.why}`).join("; "));
     // 2. the sweep
     const unclaimed = teardown.ok.unclaimed;
+    // a found W: the rule's transaction, and the teardown's own frames, the only transactions W may show after it
+    const since = teardown.ok.since;
+    const own = new Set(teardown.ok.signed.map((f) => f.signature));
     const floor = solanaSweepFloor(rent) > SOLANA_POOL_MIN_DEPOSIT ? solanaSweepFloor(rent) : SOLANA_POOL_MIN_DEPOSIT;
     const sweep = await again("sweep", async () => {
       // W and its accounts read again, after the frames (review M-A: a frame that failed on chain, a token sent to W's
@@ -1898,11 +1910,10 @@ async function rentBack(h: PoolSellHost, x: RentBack, hold?: Hold): Promise<Ende
       const lamports = a!;
       // W at 0 with a claim still owed is owed, never dropped (review 5 of 38e59182, info)
       if (lamports === 0n) return { end: owed > 0 ? ("owed" as const) : ("nothing" as const), detail: owed > 0 ? `W holds nothing, owed ${owed} cashback claim${owed > 1 ? "s" : ""}` : "W holds nothing" };
-      // a found W (no buy recorded, card buy-spends-several-pieces): swept only on the found W's rule, read here, in the
-      // pass that reads the lamports the sweep signs for; short of it W holds, not as its own state, so every later pass
-      // reads it again
-      const quiet = x.bare === true ? await foundQuiet(rpcs, w.address).catch(() => null) : undefined;
-      if (quiet === null) return { end: "holds" as const, steady: false, detail: "a found W: not yet past its last transaction's blockhash, or owning a token account, on both RPCs" };
+      // a found W (no buy recorded, card buy-spends-several-pieces): swept only on the found W's rule, its time part read
+      // before the teardown and the rest here, in the pass that reads the lamports the sweep signs for (foundSince);
+      // short of it W holds, not as its own state, so every later pass reads it again
+      if (since !== undefined && !(await foundSince(rpcs, w.address, since, own).catch(() => false))) return { end: "holds" as const, steady: false, detail: "a found W: owning a token account, or a transaction on W since the rule's read, on either RPC" };
       // the gate; the sizes the sweep is priced on are read again with its pages (depositHeld, review P2-1 of 77055f4e)
       let sizes = await treeSizes(rpcs, x.program, x.pool, wait);
       const s = await seed();
@@ -1934,8 +1945,8 @@ async function rentBack(h: PoolSellHost, x: RentBack, hold?: Hold): Promise<Ende
       // a simulation that fails on either RPC (one a slot behind, a page another deposit just filled): read again
       if (!sims.every((v) => v !== undefined && v !== null && v.err === null)) throw new Error(`the sweep simulates ${JSON.stringify(sims.map((v) => v?.err ?? null))}`);
       const [one] = await signAll([wire]);
-      // a found W's latest transaction read again on both RPCs: one landed since the rule's read drops the sweep
-      if (quiet !== undefined && (await latestOf(rpcs, w.address).catch(() => null)) !== quiet) return { end: "holds" as const, steady: false, detail: "a found W: a transaction landed on W after the rule's read" };
+      // a found W's history since the rule's read again on both RPCs: any transaction but the teardown's drops the sweep
+      if (since !== undefined && !(await onlyOwnSince(rpcs, w.address, since, own).catch(() => false))) return { end: "holds" as const, steady: false, detail: "a found W: a transaction landed on W after the rule's read" };
       return { end: "sent" as const, ref, precommitment, planned, value, one: one!, last: bh.lastHeight };
     });
     if (sweep === null) return end("gave_up", "the sweep");
@@ -2003,7 +2014,7 @@ async function rentBackOwed(h: PoolSellHost, given: RentBack, o: OwedRentBack, h
   const rec = await Promise.resolve(h.bought?.get(given.w.address)).catch(() => undefined);
   const buy = rec && rec.rebuilt !== true ? rec : undefined;
   // a W found holding SOL with no buy recorded (o.found): the pass runs, and its sweep is built only on the found W's
-  // rule (foundQuiet), read in the sweep's own pass
+  // rule (foundPast before its teardown, foundSince in its sweep)
   const x: RentBack = buy ? { ...given, mints: mintsOf(given.mints, [buy]), buy } : { ...given, buy: null, ...(o.found === true ? { bare: true as const } : {}) };
   const seen = await heldSeen(x).catch(() => undefined);
   if (seen !== undefined && seen === o.seen) return;
@@ -2086,10 +2097,13 @@ export async function resumeRentBacks(h: PoolSellHost, locks: Locks | null = glo
  *    each RPC's finalized block height is past that block's height + 151: past the life of any blockhash a transaction
  *    signed before it carries, so no buy that relies on the SOL already on W can still land (its tag 3 was signed
  *    before its pieces landed). A later buy is paid by its own pieces and never relies on what W holds.
- * Either RPC failing, lagging or disagreeing: null, W holds. The chain's own bound, no clock. W's latest signature, or null.
+ * The second is read first, before the teardown signs anything for W (foundPast), and the first in the sweep's pass
+ * (foundSince), with W's history since that latest transaction holding only the teardown's own frames: a close the device
+ * signed after the rule held is no buy's, and any other transaction on W since drops the sweep.
+ * Either RPC failing, lagging or disagreeing: W holds. The chain's own bound, no clock.
  */
-async function foundQuiet(rpcs: Rpcs, owner: string): Promise<string | null> {
-  if (!(await ownsNoTokens(rpcs, owner))) return null;
+/** The found W's rule's time part: W's latest signature when it holds on both RPCs, or null. */
+async function foundPast(rpcs: Rpcs, owner: string): Promise<string | null> {
   const last = await latestAt(rpcs, owner);
   if (last === null) return null;
   const blocks = await both(rpcs, async (r) => (await r("getBlock", [last.slot, HELPER_SOLANA_BLOCK_HEADER])) as { blockHeight?: unknown } | null);
@@ -2110,6 +2124,18 @@ async function latestAt(rpcs: Rpcs, owner: string): Promise<{ signature: string;
   return one[0] && one[1] && one[0].signature === one[1].signature && one[0].slot === one[1].slot ? one[0] : null;
 }
 const latestOf = async (rpcs: Rpcs, owner: string): Promise<string | null> => (await latestAt(rpcs, owner))?.signature ?? null;
+/** The found W's rule's other part, in the sweep's pass: W owns no token account and shows nothing since `since` but
+ *  `own`, on both RPCs. */
+async function foundSince(rpcs: Rpcs, owner: string, since: string, own: ReadonlySet<string>): Promise<boolean> {
+  return (await ownsNoTokens(rpcs, owner)) && (await onlyOwnSince(rpcs, owner, since, own));
+}
+/** Every transaction on `owner` after `since` is one of `own`, on both RPCs (getSignaturesForAddress until `since`, W
+ *  alone, at most one more than `own` asked for): an RPC that does not know `since` lists what came before it, which is
+ *  none of `own`, so W holds. */
+async function onlyOwnSince(rpcs: Rpcs, owner: string, since: string, own: ReadonlySet<string>): Promise<boolean> {
+  const got = await both(rpcs, async (r) => (await r("getSignaturesForAddress", [owner, { until: since, limit: own.size + 1, commitment: "confirmed" }])) as unknown);
+  return got.every((x) => Array.isArray(x) && x.length <= own.size && x.every((e: { signature?: unknown } | null) => typeof e?.signature === "string" && own.has(e.signature)));
+}
 
 /** Both RPCs read `owner` owning no token account of either token program (four calls, each naming W alone). */
 async function ownsNoTokens(rpcs: Rpcs, owner: string): Promise<boolean> {

@@ -313,11 +313,11 @@ function chain(plant: Plant = {}) {
   const log: string[] = [];
   const sentTx = new Map<string, Uint8Array>();
   const calls: { p: 0 | 1; method: string; params: readonly unknown[] }[] = [];
-  // W's latest transaction (getSignaturesForAddress) and each block's height (getBlock): W's history before the test is
-  // one transaction at wLastHeight; one the test lands on W is its latest, in a block at the finalized height
+  // W's history (getSignaturesForAddress, newest first) and each block's height (getBlock): before the test one
+  // transaction at wLastHeight; one the test lands on W is its latest, in a block at the finalized height
   const W_PAST = base58.encode(new Uint8Array(64).fill(7));
-  let wLatest = { signature: W_PAST, slot: VF[v].slot - 300 };
-  const heightAt = new Map<number, number>([[wLatest.slot, plant.wLastHeight ?? 500]]);
+  const wHistory = [{ signature: W_PAST, slot: VF[v].slot - 300 }];
+  const heightAt = new Map<number, number>([[wHistory[0]!.slot, plant.wLastHeight ?? 500]]);
 
   /** The program's deposit of `value` on `pre`: the next nonce's label, both leaves, the mark. */
   const deposit = (pre: bigint, value: bigint): void => {
@@ -720,8 +720,8 @@ function chain(plant: Plant = {}) {
             }
           }
           if (!txs.has(sig) && plant.lands !== false && sm.staticKeys.includes(W.address)) {
-            wLatest = { signature: sig, slot: VF[v].slot + 1 };
-            heightAt.set(wLatest.slot, plant.finalHeight ?? 1_000);
+            wHistory.unshift({ signature: sig, slot: VF[v].slot + 1 });
+            heightAt.set(VF[v].slot + 1, plant.finalHeight ?? 1_000);
           }
           if (!txs.has(sig) && plant.lands !== false) {
             if (plant.dustBeforeSell !== undefined && !frontDone && sm.staticKeys[sm.instructions.at(-1)!.programIndex] === PROGRAM && sm.instructions.some((x) => x.data.length === 24)) {
@@ -778,11 +778,16 @@ function chain(plant: Plant = {}) {
           }
           return t ? { slot: VF[v].slot, transaction: [base64.encode(t.tx), "base64"], meta: { err: t.err, ...(t.post && !plant.noPostBalances ? { postTokenBalances: p === 1 && plant.postDiffers ? t.post.map((e) => ({ ...(e as object), uiTokenAmount: { amount: "9", decimals: 6 } })) : t.post } : {}) } } : null;
         }
-        case "getSignaturesForAddress":
-          // W's own history only, newest first, at most the limit asked
+        case "getSignaturesForAddress": {
+          // W's own history only, newest first, at most the limit asked: its latest one, or each one after `until`
           assert.equal(params[0], W.address);
-          assert.deepEqual(params[1], { limit: 1, commitment: "confirmed" });
-          return [{ signature: wLatest.signature, slot: wLatest.slot, err: null, memo: null, blockTime: null, confirmationStatus: "finalized" }];
+          const o = params[1] as { until?: string; limit: number; commitment: string };
+          if (o.until === undefined) assert.deepEqual(o, { limit: 1, commitment: "confirmed" });
+          else assert.deepEqual(Object.keys(o).sort(), ["commitment", "limit", "until"]);
+          assert.equal(o.commitment, "confirmed");
+          const at = o.until === undefined ? -1 : wHistory.findIndex((e) => e.signature === o.until);
+          return (at < 0 ? wHistory : wHistory.slice(0, at)).slice(0, o.limit).map((e) => ({ signature: e.signature, slot: e.slot, err: null, memo: null, blockTime: null, confirmationStatus: "finalized" }));
+        }
         case "getBlock": {
           // exactly the one config the helper forwards (apps/helper/src/rpc/rpc.ts BLOCK_HEADER, its test pins the same)
           assert.deepEqual({ ...(params[1] as object) }, { commitment: "finalized", encoding: "json", transactionDetails: "none", rewards: false, maxSupportedTransactionVersion: 0 });
@@ -2948,6 +2953,44 @@ test("a found W while another device's tag 3 can still land: the sweep is never 
   assert.equal(v.c.deposits.filter((d) => d.sweep).length, 1, JSON.stringify(v.told));
 });
 
+// The found W's teardown (card buy-spends-several-pieces, review P3-5 of c7b85ba3a): a close W signs spends W's fee
+// and closes an account another device's tag 3 may use, so a found W's teardown waits on the same rule's time part as
+// its sweep; with it past, the closes go and the sweep follows in the same pass, W's history since the rule's read
+// holding only the teardown's own frames.
+test("a found W while another device's tag 3 can still land: no close signed or sent either; once past, the closes go and the sweep follows", async () => {
+  const wsol = solanaAta(W.address, SOLANA_SOL_MINT, SOLANA_TOKEN_PROGRAM);
+  const young = await world({ buy: null, wLastHeight: 900 }, []);
+  young.c.accounts.delete(VF.pump.ata);
+  young.c.accounts.set(wsol, { owner: SOLANA_TOKEN_PROGRAM, lamports: Number(TOKEN_RENT), data: tokenAccount(0n, 1, SOLANA_SOL_MINT) });
+  await young.host.owed!.put({ address: W.address, l: L.toString(), j: J, mints: [], passes: 0, found: true });
+  await resumeRentBacks(young.host, fakeLocks());
+  assert.equal(young.c.calls.filter((c) => c.method === "sendTransaction" || c.method === "simulateTransaction").length, 0, "nothing built");
+  assert.equal(young.seeds.length, 0, "no seed read");
+  assert.ok(young.c.accounts.has(wsol), "the account where it was");
+  assert.deepEqual(young.told.filter((t) => t.step === "rent_back").map((t) => t.state), ["holds"]);
+  assert.equal(young.owed.get(W.address)?.seen, undefined, "not a steady hold");
+  // past the rule: the close, then the sweep in the same pass
+  const past = await world({ buy: null }, []);
+  past.c.accounts.delete(VF.pump.ata);
+  past.c.accounts.set(wsol, { owner: SOLANA_TOKEN_PROGRAM, lamports: Number(TOKEN_RENT), data: tokenAccount(0n, 1, SOLANA_SOL_MINT) });
+  await past.host.owed!.put({ address: W.address, l: L.toString(), j: J, mints: [], passes: 0, found: true });
+  await resumeRentBacks(past.host, fakeLocks());
+  assert.ok(!past.c.accounts.has(wsol), "closed");
+  assert.equal(past.c.deposits.filter((d) => d.sweep).length, 1, JSON.stringify(past.told));
+  // a transaction on W between the rule's read and the closes' send: the signed closes are dropped, nothing sent
+  const raced = await world({ buy: null }, []);
+  raced.c.accounts.delete(VF.pump.ata);
+  raced.c.accounts.set(wsol, { owner: SOLANA_TOKEN_PROGRAM, lamports: Number(TOKEN_RENT), data: tokenAccount(0n, 1, SOLANA_SOL_MINT) });
+  await raced.host.owed!.put({ address: W.address, l: L.toString(), j: J, mints: [], passes: 0, found: true });
+  let reads = 0;
+  for (const p of [0, 1] as const)
+    around(raced, p, (m, params, r) => (m === "getSignaturesForAddress" && ++reads > 2 ? [{ signature: base58.encode(new Uint8Array(64).fill(4)), slot: VF.pump.slot + 9, err: null }] : r(m, params)));
+  await resumeRentBacks(raced.host, fakeLocks());
+  assert.equal(raced.c.calls.filter((c) => c.method === "sendTransaction").length, 0, "nothing sent");
+  assert.ok(raced.c.accounts.has(wsol));
+  assert.deepEqual(raced.told.filter((t) => t.step === "rent_back").map((t) => t.state), ["holds"]);
+});
+
 test("a found W whose latest transaction changes between the rule's read and the send: the signed sweep is dropped, nothing sent", async () => {
   const w = await world({ buy: null }, []);
   w.c.accounts.delete(VF.pump.ata);
@@ -4209,7 +4252,8 @@ test("N21: a plan refusal at the sweep's read ends the pass refused, not given u
 // changed while it simulates, so a run cannot tell the two apart today; this holds the shape that keeps it so.
 test("the rent back checks and signs the kit's checked copies, never the frames' wires", () => {
   const src = readFileSync(new URL("../src/pool-sell.ts", import.meta.url), "utf8");
-  assert.match(src, /\n {6}checkSolanaTeardownFrames\(t\.wires, ctx, t\.reads\);\n {6}return \{ keep: t\.plan\.keep, signed: await signAll\(t\.wires\), /);
+  assert.match(src, /\n {6}checkSolanaTeardownFrames\(t\.wires, ctx, t\.reads\);\n {6}const signed = await signAll\(t\.wires\);\n/);
+  assert.match(src, /\n {6}return \{ keep: t\.plan\.keep, signed, /);
   assert.doesNotMatch(src, /\bt\.frames\b/, "the frames are never read");
 });
 
