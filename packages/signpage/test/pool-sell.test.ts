@@ -6520,6 +6520,45 @@ for (const bare of [false, true]) test(`round-trip-costs-less P3-e: three leftov
   assert.equal(sweeps(), 3, "the third after its own gap");
 });
 
+// the delta review of P3-e: two tabs of the device each run their own load; one whose load read the store before the
+// other tab's send must still not send within the gap. A leftover pass takes the device's slot in the store in one
+// compare-and-set (OwedRentBacks.claim) before its first send, so the second tab's pass is held
+test("round-trip-costs-less P3-e: a second tab whose load read the store before the first tab's send sends nothing within the gap", async () => {
+  const w = await world({ buy: null, held: 0n, ataLamports: TOKEN_RENT, volumes: [], lamports: ENOUGH, others: [{ l: 8n, j: 0, held: 0n }] }, [{ ...wallet(0n), holdings: null } as never, { ...walletX(0n), holdings: null } as never]);
+  for (const x of [W.address, X.address]) w.c.accounts.delete(solanaAta(x, MINT, TOKEN_PROGRAM));
+  w.host.rpcs = withBuy(w.c.rpcs);
+  await w.host.bought!.put(W.address, { mint: MINT, program: TOKEN_PROGRAM, rebuilt: true } as never);
+  for (const [address, l] of [[W.address, "7"], [X.address, "8"]] as const) await w.host.owed!.put({ address, l, j: 0, mints: [{ mint: MINT, program: TOKEN_PROGRAM }], passes: 0 });
+  // the device's store, the one both tabs write: the real owedRentBacks over it
+  const meta = new Map<string, unknown>();
+  const shared = owedRentBacks(async () => ({ get: async (_s: string, k: string) => meta.get(k), update: async (_s: string, k: string, f: (v: unknown) => unknown) => { const n = f(meta.get(k)); if (n !== undefined) meta.set(k, n); return n; } }) as never);
+  const tab = (stale: boolean): PoolSellHost => ({ ...w.host, now: () => 9_000_000n, owed: { ...w.host.owed!, spacing: stale ? async () => undefined : shared.spacing, space: shared.space, claim: shared.claim } });
+  const senders = (from: number) => new Set(w.c.calls.slice(from).filter((c) => c.method === "sendTransaction").map((c) => solanaDecodeMessage(base64.decode(c.params[0] as string).subarray(65)).staticKeys[0])).size;
+  forgetPageLoad();
+  let from = w.c.calls.length;
+  await resumeRentBacks(tab(false), fakeLocks());
+  assert.equal(senders(from), 1, "the first tab's one");
+  // the second tab: its own page memory, its load's read of the store from before that send
+  forgetPageLoad();
+  from = w.c.calls.length;
+  await resumeRentBacks(tab(true), fakeLocks());
+  assert.equal(senders(from), 0, "held by the store's slot");
+  assert.equal(w.c.deposits.filter((d) => d.sweep).length, 1);
+});
+
+test("round-trip-costs-less P3-e: the store's slot: taken when no gap is open, refused while one is, and the last send kept", async () => {
+  const meta = new Map<string, unknown>();
+  const o = owedRentBacks(async () => ({ get: async (_s: string, k: string) => meta.get(k), update: async (_s: string, k: string, f: (v: unknown) => unknown) => { const n = f(meta.get(k)); if (n !== undefined) meta.set(k, n); return n; } }) as never);
+  assert.equal(await o.spacing!(), undefined);
+  assert.equal(await o.claim!({ at: 1_000, gap: 600_000 }), true);
+  assert.equal(await o.claim!({ at: 600_999, gap: 600_000 }), false, "inside the gap");
+  assert.deepEqual(await o.spacing!(), { at: 1_000, gap: 600_000 });
+  assert.equal(await o.claim!({ at: 601_000, gap: 900_000 }), true, "the gap passed");
+  assert.deepEqual(await o.spacing!(), { at: 601_000, gap: 900_000 });
+  meta.set("owed/rentback-sol-space", { at: "x" });
+  assert.equal(await o.claim!({ at: 601_001, gap: 1 }), true, "a record of no shape is none");
+});
+
 test("round-trip-costs-less a: the Ws a load passes go in an order drawn at random, apart by the gap", async () => {
   const keyOf = (k: number) => base58.encode(Uint8Array.from({ length: 32 }, (_, i) => (i === 0 ? 201 : k + 1)));
   const ws = [keyOf(1), keyOf(2), keyOf(3)];

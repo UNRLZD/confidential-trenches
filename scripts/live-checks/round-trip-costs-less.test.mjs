@@ -102,7 +102,7 @@ test("the good build's lines carry every mark; each with its rule changed FAILs 
     ["c=await e.wallets(Vq)}", "c=await e.wallets()}", 3],
     // the order and the gap
     ["[m[e],m[t]]=[m[t],m[e]]", "[m[e],m[t]]=[m[e],m[t]]", 4],
-    ["{n>0&&await s(Fq+Uq(Fq)", "{n>0&&await s(0+Uq(Fq)", 4],
+    ["{n>0&&await s(Fq+Wq(Fq)", "{n>0&&await s(0+Wq(Fq)", 4],
     [",Fq=1e3;", ",Fq=0;", 4],
     ["globalThis.crypto.getRandomValues(n),n[0]<t", "n[0]=Math.random()*t,n[0]<t", 4],
     // the proof
@@ -118,8 +118,8 @@ test("the good build's lines carry every mark; each with its rule changed FAILs 
     ["}finally{C?.()}return S}", "}finally{}return S}", 7],
     ["let r=n===Vq?null:Ye.preempt(),", "let r=Ye.preempt(),", 7],
     // the no-buy mark
-    ["qZ=`owed/buy-sol-none`", "qZ=`owed/buy-sol`", 8],
-    ["buyNone:async t=>Object.hasOwn(tt(await(await e.store()).get(`meta`,qZ)),t)", "buyNone:async t=>!1", 8],
+    ["JZ=`owed/buy-sol-none`", "JZ=`owed/buy-sol`", 8],
+    ["buyNone:async t=>Object.hasOwn(tt(await(await e.store()).get(`meta`,JZ)),t)", "buyNone:async t=>!1", 8],
     // the sell rule: the priority cap, rounded up, a limit's absence 1,400,000; the fee a sale names, full or partial
     ["if(Ak(d.ixs,f)>100000n)return X(`priority`);", "", 9],
     [">100000n)return X(`priority`)", ">1000000n)return X(`priority`)", 9],
@@ -131,17 +131,20 @@ test("the good build's lines carry every mark; each with its rule changed FAILs 
     ["if(v!==void 0&&(typeof v.fee", "if(v!==void 0&&v.full===!0&&(typeof v.fee", 9],
     // the spacing: the gap's draw and floor, its store, the gate, the load's one, the holds, W's last read, the listing
     [" UK=6e5,", " UK=6e4,", 10],
-    ["gap:UK+Uq(3e6+1)", "gap:UK+Uq(1)", 10],
+    ["Uq=()=>UK+Wq(3e6+1)", "Uq=()=>UK+Wq(1)", 10],
     ["=`owed/rentback-sol-space`", "=`owed/rentback-sol-gap`", 10],
     ["let _=()=>pq||!g||h!==void 0", "let _=()=>!g||h!==void 0", 10],
     ["<h.at+h.gap;", "<h.at;", 10],
     ["mq>l&&(pq=!0)", "mq>l&&(pq=!1)", 10],
-    ["if(t.quiet===!0&&h.ok.signed.length>0)throw Gq;", "", 10],
-    ["if(t.quiet===!0)throw Gq;let w=", "let w=", 10],
+    ["if(t.quiet===!0)throw Kq;if(", "if(", 10],
+    ["if(!await e.owed.claim({at:f(),gap:Uq()}).catch(()=>!1))throw Kq;", "", 10],
+    [".catch(()=>!1))throw Kq;", ".catch(()=>!0))throw Kq;", 10],
+    ["&&t.at<n.at+n.gap?void 0:", "?void 0:", 10],
+    ["quiet:_(),leftover:!0,", "quiet:_(),", 10],
     ["if(t.read?.(p),p===0n)", "if(p===0n)", 10],
     ["u=n===`sent`?void 0:", "u=", 10],
     ["size:e,state:`RETURNING`}", "size:e,state:`READY`}", 10],
-    ["TB(e.signed_in&&T1?await T1.returning().catch(()=>[]):[],", "TB([],", 10],
+    ["TB(e.signed_in&&E1?await E1.returning().catch(()=>[]):[],", "TB([],", 10],
   ];
   for (const [from, to, i] of planted) {
     assert.equal(JS.split(from).length, 2, `once: ${from}`);

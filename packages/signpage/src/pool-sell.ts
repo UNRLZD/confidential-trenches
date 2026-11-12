@@ -624,7 +624,7 @@ type SoldBy = { tx: string; last: number };
 /** `empty`/`markEmpty` (card round-trip-costs-less): the account's Ws a pass read empty for good (nothing on W, no
  *  account, or no buy at all), each with the rules it was read under (POOL_RENT_BACK_RULES), so a load lists them and
  *  reads none of them again. */
-export type OwedRentBacks = { list(): Promise<OwedRentBack[]>; put(r: OwedRentBack): Promise<void>; drop(address: string): Promise<void>; empty?(): Promise<ReadonlySet<string>>; markEmpty?(address: string): Promise<void>; spacing?(): Promise<RentBackSpacing | undefined>; space?(v: RentBackSpacing): Promise<void> };
+export type OwedRentBacks = { list(): Promise<OwedRentBack[]>; put(r: OwedRentBack): Promise<void>; drop(address: string): Promise<void>; empty?(): Promise<ReadonlySet<string>>; markEmpty?(address: string): Promise<void>; spacing?(): Promise<RentBackSpacing | undefined>; space?(v: RentBackSpacing): Promise<void>; claim?(v: RentBackSpacing): Promise<boolean> };
 /** When this device last sent a transaction from a W for a rent back (a close or a sweep, in a sale's own run or a
  *  leftover pass), ms, and the gap drawn for it (review 2 P3-e of c0dd55d02): no leftover W's pass runs before at + gap,
  *  so no two of the device's Ws close or sweep within a gap of each other and their timing never groups them as one
@@ -671,6 +671,15 @@ export const owedRentBacks = (store: () => Promise<Pick<TradeStore, "get" | "upd
       return Number.isSafeInteger(v?.at) && Number.isSafeInteger(v?.gap) ? { at: v!.at!, gap: v!.gap! } : undefined;
     },
     space: async (v) => void (await (await store()).update("meta", SPACE, () => ({ at: v.at, gap: v.gap }))),
+    // a leftover pass's slot, taken in one compare-and-set (the store's update) so two tabs of the device never both take
+    // it: true when no gap is open at `v.at` (v then the last send), false when one is
+    claim: async (v) => {
+      const won = await (await store()).update("meta", SPACE, (was) => {
+        const w = was as Partial<RentBackSpacing> | undefined;
+        return Number.isSafeInteger(w?.at) && Number.isSafeInteger(w?.gap) && v.at < w!.at! + w!.gap! ? undefined : { at: v.at, gap: v.gap };
+      });
+      return won !== undefined;
+    },
   };
 };
 const SPACE = "owed/rentback-sol-space";
@@ -1755,7 +1764,7 @@ const wireOf = (message: Uint8Array): Uint8Array => {
 /** `unproven`: no buy of W's proven this time (no record, or the public seat read W's history otherwise than the
  *  rebuild): the pass holds as with no buy, read again on a later state read ("again") until its POOL_RENT_BACK_
  *  UNPROVEN_PASSES-th pass, then as W's own state ("steady"; card round-trip-costs-less, review of 20ba2481b P2-6). */
-type RentBack = { rpcs: Rpcs; program: string; pool: string; scope: bigint; rent: SolanaRent; store: NoteStore; sync: SolanaTreeSync; w: ListedBuyWallet; mints: readonly { mint: string; program: string }[]; wait: (ms: number) => Promise<void>; sell?: Readonly<Record<string, SoldBy>>; buy?: { mint: string; program: string } | null; unproven?: "again" | "steady"; read?: (lamports: bigint) => void; quiet?: boolean };
+type RentBack = { rpcs: Rpcs; program: string; pool: string; scope: bigint; rent: SolanaRent; store: NoteStore; sync: SolanaTreeSync; w: ListedBuyWallet; mints: readonly { mint: string; program: string }[]; wait: (ms: number) => Promise<void>; sell?: Readonly<Record<string, SoldBy>>; buy?: { mint: string; program: string } | null; unproven?: "again" | "steady"; read?: (lamports: bigint) => void; quiet?: boolean; leftover?: boolean };
 
 /**
  * W's rent back (card sol-buy-rent-back), after a full sell filled or at a later load while it is owed: what W's
@@ -1854,8 +1863,18 @@ async function rentBack(h: PoolSellHost, x: RentBack, hold?: Hold): Promise<Ende
     rentBackSends++;
     // the gap every later leftover pass waits out (RentBackSpacing), from this send, drawn afresh; a store that cannot
     // be written leaves the last one
-    await Promise.resolve(h.owed?.space?.({ at: clock(), gap: POOL_RENT_BACK_SPACE_MIN_MS + randomBelow(POOL_RENT_BACK_SPACE_MAX_MS - POOL_RENT_BACK_SPACE_MIN_MS + 1) })).catch(() => {});
+    await Promise.resolve(h.owed?.space?.({ at: clock(), gap: gapDrawn() })).catch(() => {});
     h.back?.(signature);
+  };
+  // a leftover pass, before its first send and before the sweep's note is written: held while the load holds it
+  // (`quiet`), and it takes the device's slot in the store (claim), so another tab whose load read the store before this
+  // send never sends within the gap; a store that cannot answer holds it
+  let claimed = false;
+  const spaced = async (): Promise<void> => {
+    if (x.quiet === true) throw HELD;
+    if (x.leftover !== true || claimed || h.owed?.claim === undefined) return;
+    if (!(await h.owed.claim({ at: clock(), gap: gapDrawn() }).catch(() => false))) throw HELD;
+    claimed = true;
   };
   // a step up to its send, again from its first read on a fault, each fault told; null: it gave up
   const again = async <T>(step: "teardown" | "sweep", f: () => Promise<T>): Promise<{ ok: T } | null> => {
@@ -1966,7 +1985,7 @@ async function rentBack(h: PoolSellHost, x: RentBack, hold?: Hold): Promise<Ende
     if (teardown === null) return end("gave_up", "the teardown");
     if (teardown.ok.holds !== undefined) return end("holds", teardown.ok.holds ? "W holds a token it traded: no full sell of it landed" : "W holds a token it traded: its sell not final yet", teardown.ok.holds);
     if (teardown.ok.refused !== undefined) return end("refused", teardown.ok.refused);
-    if (x.quiet === true && teardown.ok.signed.length > 0) throw HELD;
+    if (teardown.ok.signed.length > 0) await spaced();
     for (const f of teardown.ok.signed) await send(f.signed, f.signature);
     // each frame on both RPCs, failed on both, or past its blockhash on both, within the rent back's one bound
     const open = new Set(teardown.ok.signed);
@@ -2039,7 +2058,7 @@ async function rentBack(h: PoolSellHost, x: RentBack, hold?: Hold): Promise<Ende
     const sw = sweep.ok;
     if (sw.end !== "sent") return "steady" in sw && sw.steady !== undefined ? end(sw.end, sw.detail, (sw.end === "floor" || sw.end === "kept") && sw.steady) : end(sw.end, sw.detail);
     // held (resumeRentBacks' spacing): before the note is written or anything sent
-    if (x.quiet === true) throw HELD;
+    await spaced();
     const id = sw.planned ?? (await x.store.add({ ref: sw.ref, scope: x.scope, precommitment: sw.precommitment, state: "PLANNED" })).id;
     await x.store.move(id, "PLANNED", "INCOMING", { send: { signature: sw.one.signature, value: sw.value, last_valid_block_height: BigInt(sw.last) } });
     await send(sw.one.signed, sw.one.signature);
@@ -2320,7 +2339,7 @@ export async function resumeRentBacks(h: PoolSellHost, locks: Locks | null = glo
         const f = found.find((x) => x.address === address);
         const o = (await h.owed!.list()).find((r) => r.address === address) ?? (f ? { address, l: f.l.toString(), j: f.j, mints: [], passes: 0 } : undefined);
         const w = o && setup.wallets.find((x) => x.chain === "sol" && x.address === o.address && x.l.toString() === o.l && x.j === o.j);
-        if (o && w && (await rentBackOwed(h, { rpcs, program, pool, scope, rent, store, sync, w, mints: o.mints, wait, quiet: quiet(), ...(o.sell ? { sell: o.sell } : {}) }, o, hold, read?.get(address)?.seen))) more = true;
+        if (o && w && (await rentBackOwed(h, { rpcs, program, pool, scope, rent, store, sync, w, mints: o.mints, wait, quiet: quiet(), leftover: true, ...(o.sell ? { sell: o.sell } : {}) }, o, hold, read?.get(address)?.seen))) more = true;
       });
       if (!go) return true;
       // this pass sent from its W: the load's one; the rest send nothing in this load
@@ -2331,6 +2350,9 @@ export async function resumeRentBacks(h: PoolSellHost, locks: Locks | null = glo
   }
   return more;
 }
+
+/** A rent back's gap (RentBackSpacing), drawn from [POOL_RENT_BACK_SPACE_MIN_MS, POOL_RENT_BACK_SPACE_MAX_MS]. */
+const gapDrawn = (): number => POOL_RENT_BACK_SPACE_MIN_MS + randomBelow(POOL_RENT_BACK_SPACE_MAX_MS - POOL_RENT_BACK_SPACE_MIN_MS + 1);
 
 /** A uniform integer in [0, n), from the device's random source. */
 function randomBelow(n: number): number {

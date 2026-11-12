@@ -117,16 +117,21 @@ export const MARKS = Object.freeze({
       R`if\((${I})!==void 0&&\(typeof \1\.fee!=` + "`bigint`" + R`\|\|\1\.fee<0n\|\|\1\.fee>105000n\)\)return (${I})\(` + "`reserve`" + R`\);if\(\1!==void 0&&\1\.full===!0\)`,
     ],
   ),
-  "a leftover W's rent back is spaced: each rent-back send from a W starts a gap drawn from 10 to 60 minutes, kept in the store; a leftover pass sends nothing while it runs, nor after this load's one sending pass (its teardown and its sweep held before their sends and the note's write); a W waiting so is listed on its way, RETURNING at its last read at the pool's price, none once its sweep is sent": tied(
-    re(R`(?<ms>${I})\+\+,await Promise\.resolve\((?<h>${I})\.owed\?\.space\?\.\(\{at:(?<c>${I})\(\),gap:(?<mn>${I})\+(?<rb>${I})\(3e6\+1\)\}\)\)\.catch\(\(\)=>\{\}\)`),
+  "a leftover W's rent back is spaced: each rent-back send from a W starts a gap drawn from 10 to 60 minutes, kept in the store; a leftover pass sends nothing while it runs, nor after this load's one sending pass, and takes the device's slot in the store in one compare-and-set so no other tab sends within it (its teardown and its sweep held before their sends and the note's write); a W waiting so is listed on its way, RETURNING at its last read at the pool's price, none once its sweep is sent": tied(
+    re(R`(?<ms>${I})\+\+,await Promise\.resolve\((?<h>${I})\.owed\?\.space\?\.\(\{at:(?<c>${I})\(\),gap:(?<gd>${I})\(\)\}\)\)\.catch\(\(\)=>\{\}\)`),
     (g) => [
-      R`[,; ]${esc(g.mn)}=6e5[,;]`,
-      R`function ${esc(g.rb)}\((${I})\)\{if\(\1<=1\)return 0;`,
+      // the gap's draw: 10 minutes and up to 50 more, from the device's random source
+      R`[,; ](${I})=6e5,[^]*?[,; ]${esc(g.gd)}=\(\)=>\1\+(${I})\(3e6\+1\);function \2\((${I})\)\{if\(\3<=1\)return 0;`,
       R`=` + "`owed/rentback-sol-space`",
       R`let (${I})=\(\)=>(${I})\|\|!(${I})\|\|(${I})!==void 0&&Number\((${I})\.now\?\.\(\)\?\?BigInt\(Date\.now\(\)\)\)<\4\.at\+\4\.gap;`,
       R`${esc(g.ms)}>(${I})&&\((${I})=!0\)`,
-      R`if\((${I})\.quiet===!0&&(${I})\.ok\.signed\.length>0\)throw (${I});for\(let (${I}) of \2\.ok\.signed\)`,
-      R`if\((${I})\.quiet===!0\)throw (${I});let (${I})=(${I})\.planned\?\?\(await \1\.store\.add\(`,
+      // the hold: the load's (quiet), then the device's slot taken in the store (claim), before the teardown's sends and
+      // before the sweep's note is written
+      R`(${I})=async\(\)=>\{if\((${I})\.quiet===!0\)throw (${I});if\(!\(\2\.leftover!==!0\|\|(${I})\|\|(${I})\.owed\?\.claim===void 0\)\)\{if\(!await \5\.owed\.claim\(\{at:(${I})\(\),gap:(${I})\(\)\}\)\.catch\(\(\)=>!1\)\)throw \3;\4=!0\}\}`,
+      R`(${I})\.ok\.signed\.length>0&&await (${I})\(\);for\(let (${I}) of \1\.ok\.signed\)`,
+      R`;await (${I})\(\);let (${I})=(${I})\.planned\?\?\(await (${I})\.store\.add\(`,
+      R`claim:async (${I})=>await\(await (${I})\(\)\)\.update\(` + "`meta`" + R`,(${I}),(${I})=>\{let (${I})=\4;return Number\.isSafeInteger\(\5\?\.at\)&&Number\.isSafeInteger\(\5\?\.gap\)&&\1\.at<\5\.at\+\5\.gap\?void 0:\{at:\1\.at,gap:\1\.gap\}\}\)!==void 0`,
+      R`quiet:(${I})\(\),leftover:!0,`,
       R`if\(t\.read\?\.\((${I})\),\1===0n\)|(${I})\.read\?\.\((${I})\),\3===0n\)`,
       R`(${I})=(${I})===` + "`sent`" + R`\?void 0:(${I})\.lamports===void 0\?(${I}):\3\.lamports\.toString\(\)`,
       R`if\(typeof (${I})\.lamports!=` + "`string`" + R`\|\|!/\^\[1-9\]\\d\{0,19\}\$/\.test\(\1\.lamports\)\)continue;let (${I})=(${I})\(BigInt\(\1\.lamports\),(${I}),(${I})\);\2!==null&&(${I})\.push\(\{chain:` + "`solana`" + R`,address:\1\.address,role:` + "`fresh`" + R`,size:\2,state:` + "`RETURNING`" + R`\}\)`,
