@@ -626,7 +626,8 @@ test("the pick takes a proof on the epoch root before one on the newest root, an
   const newestP: ReadyProof<SolanaReleaseRequest> = { ...readyProof({ stateRoot: 1004n, attempt: "attempt-n" }), noteId: "note-2", root: "newest" };
   const w = await world({ readies: [[newestP, epochP]] });
   const take = w.host.take.bind(w.host);
-  w.host.take = async (id, _attempt, early, lastHeight) => (await take(id, undefined, early, lastHeight), id === "note-1" ? epochP : newestP);
+  // the world's take holds its one note; the proof it hands back is the one of the id taken
+  w.host.take = async (id, _attempt, early, lastHeight) => (await take(id, newestP.attempt, early, lastHeight), id === "note-1" ? epochP : newestP);
   assert.deepEqual(await runPoolBuy(w.host, ASK), { stage: "filled", txs: [{ chain: "solana", hash: SIG }] });
   assert.ok(w.log.includes("take:note-1") && !w.log.includes("take:note-2"), w.log.filter((x) => x.startsWith("take")).join(","));
   assert.equal(tag3StateRootIndex(w.sentTx()!), 5, "the epoch proof's root index");
