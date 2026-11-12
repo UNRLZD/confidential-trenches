@@ -260,9 +260,9 @@ test("a restored op whose transaction was read, its own, and gives no figure is 
   ops.set("own", { ...unread });
   await fillTradeOps({ store: s, read: async (sig) => TX[sig], price: () => null, now: () => OLD });
   assert.equal(ops.get("own")!.fill_none, undefined);
-  reads.length = 0;
-  await fillTradeOps({ store: s, read: async (sig) => (reads.push(sig), TX[sig]), price: () => null, now: () => OLD });
-  assert.deepEqual(reads, [SIG.buy1], "the own op read again");
+  const again: string[] = [];
+  await fillTradeOps({ store: s, read: async (sig) => (again.push(sig), TX[sig]), price: () => null, now: () => OLD });
+  assert.deepEqual(again, [SIG.buy1], "the own op read again");
 });
 
 // ------------------------------------------------------------------------------------------------ an old sale's USD
