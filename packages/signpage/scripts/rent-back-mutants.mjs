@@ -25,7 +25,7 @@ export const M = [
   ["B4 the accounts' data left out of what W read as", SELL, T, "`${t.owner}:${t.lamports}:${base64.encode(t.data)}`", "`${t.owner}:${t.lamports}`"],
   ["B7 what W read as kept on a pass that gave up", SELL, T, [['steady = e === "holds" || e === "kept" || e === "refused"', 'steady = e === "holds" || e === "kept" || e === "refused" || e === "gave_up"'], ['(e === "floor" || e === "holds" || e === "kept" || e === "refused")' , '(e === "floor" || e === "holds" || e === "kept" || e === "refused" || e === "gave_up")']]],
   ["B8 what W read as kept on a sweep sent", SELL, T, [['steady = e === "holds" || e === "kept" || e === "refused"', 'steady = e === "holds" || e === "kept" || e === "refused" || e === "sent"'], ['(e === "floor" || e === "holds" || e === "kept" || e === "refused")', '(e === "floor" || e === "holds" || e === "kept" || e === "refused" || e === "sent")']]],
-  ["C1 the load's record used, not read again inside the lock", SELL, T, "      const o = (await h.owed!.list()).find((r) => r.address === address);\n      const w = o &&", "      const o = owed.find((r) => r.address === address);\n      const w = o &&"],
+  ["C1 the load's record used, not read again inside the lock", SELL, T, "      const o = (await h.owed!.list()).find((r) => r.address === address) ?? (f ?", "      const o = owed.find((r) => r.address === address) ?? (f ?"],
   ["M1 a System account with no data at W's address planned as an account", KIT, T, "(x !== null && x.owner === SOLANA_SYSTEM_PROGRAM && x.data.length === 0 ? null : x)", "x"],
   ["M1 a plan refusal on alike reads read again as a fault", SELL, T, 'if (held[0].every((t, i) => sameRead(t, held[1][i] ?? null))) return { k: "refused" as const, why: faultOf(e) };', ""],
   ["M1 a plan refusal ends the pass on reads that differ", SELL, T, "if (held[0].every((t, i) => sameRead(t, held[1][i] ?? null)))", "if (true)"],
@@ -53,7 +53,7 @@ export const M = [
   // readW asks soldOne only of a mint with a recorded sell; D8b holds a held mint with none
   ["D8b a held mint with no sell read taken as sold", SELL, T, 'sells.get(t.mint) ?? "no"', 'sells.get(t.mint) ?? "yes"'],
   ["D9 the burn list dropped", SELL, T, "const burn = holding.map((t) => t.ata);", "const burn: string[] = [];"],
-  ["D10 the sell not recorded", SELL, T, "      owedRec.sell = { ...prior?.sell, [token]: { tx: base64.encode(signed), last: bh.lastHeight } };\n", ""],
+  ["D10 the sell not recorded", SELL, T, "      owedRec.sell = { ...prior?.sell, [token]: { tx: base64.encode(signed), last: bhv.lastHeight } };\n", ""],
   ["D11 a load passes no sell on", SELL, T, "mints: o.mints, wait, ...(o.sell ? { sell: o.sell } : {}) }", "mints: o.mints, wait }"],
   // the review of bf467ae7's named ones: X2 (F3), Y2, Y3, Y4, Y7 (F4), its read order and commitment (F5), and the
   // armed path's burn list (F6); and a sell read's fault counted for a mint W no longer holds
@@ -83,7 +83,7 @@ export const M = [
   ["review 6 N16-owedAfter-no-reread", SELL, T, "    const now = (await h.owed?.list())?.find((r) => r.address === o.address) ?? o;", "    const now = o;"],
   ["review 6 N17-owedAfter-mints-not-merged", SELL, T, "mints: mintsOf(now.mints, o.mints), passes", "mints: now.mints, passes"],
   ["review 6 N18-zero-with-claim-dropped", SELL, T, "if (lamports === 0n) return { end: owed > 0 ? (\"owed\" as const) : (\"nothing\" as const)", "if (lamports === 0n) return { end: \"nothing\" as const"],
-  ["review 6 N19-setup-fault-no-stop", SELL, T, "        await owedAfter(h, o, \"gave_up\");\n      });\n      if (!go) return;", "        await owedAfter(h, o, \"gave_up\");\n      });\n      void go;"],
+  ["review 6 N19-setup-fault-no-stop", SELL, T, "        await owedAfter(h, o, \"gave_up\");\n      });\n      if (!go) return true;", "        await owedAfter(h, o, \"gave_up\");\n      });\n      void go;"],
   ["review 6 N20-setup-fault-unlocked", SELL, T, "      const go = await withHolds(locks, address, true, wait, async () => {\n        const o = (await h.owed!.list()).find((r) => r.address === address);\n        if (!o) return;", "      const go = await (async (f: () => Promise<void>) => (await f(), true))(async () => {\n        const o = (await h.owed!.list()).find((r) => r.address === address);\n        if (!o) return;"],
   ["review 6 N21-sweep-refused-gives-up", SELL, T, "      if (now.k === \"refused\") return { end: \"refused\" as const, detail: now.why };", "      if (now.k === \"refused\") return { end: \"gave_up\" as const, detail: now.why };"],
   ["review 6 N22-busy-detail-plain", SELL, T, "e === BUSY ? \"a sell took the sell lock between tries: W waits for the next load\" : faultOf(e)", "faultOf(e)"],
@@ -92,14 +92,14 @@ export const M = [
   ["review 7 P7 a made account read as unmade", KIT, KC, "        if (toRead === null) {", "        if (true) {"],
   ["review 7 P9 the open's lamports bound without the prefund", KIT, KC, "lam - c.prefund > SOLANA_TOKEN_ACCOUNT_RENT_MAX) sim", "lam > SOLANA_TOKEN_ACCOUNT_RENT_MAX) sim"],
   // delta review 7 of 08290868, item 1: W's buy mint (the buy's record) holds the pass while W holds any of it
-  ["review 7 A1 the buy record not read into the pass", SELL, T, "const x: RentBack = buy ? { ...given, mints: mintsOf(given.mints, [buy]), buy } : { ...given, buy: null };", "const x: RentBack = { ...given, buy: buy ? buy : null };"],
-  ["review 7 A2 no buy record: the pass runs", SELL, T, '    if (!x.buy) return end("holds", "no buy of W\'s is recorded");\n', ""],
-  ["review 7 A3 a buy record read as none", SELL, T, "const x: RentBack = buy ? { ...given, mints: mintsOf(given.mints, [buy]), buy } : { ...given, buy: null };", "const x: RentBack = { ...given, buy: null };"],
+  ["review 7 A1 the buy record not read into the pass", SELL, T, "const x: RentBack = buy ? { ...given, mints: mintsOf(given.mints, [buy]), buy } :", "const x: RentBack = buy ? { ...given, buy } :"],
+  ["review 7 A2 no buy record: the pass runs", SELL, T, '    if (!x.buy) return end("holds", "no buy of W\'s is recorded", x.unproven !== true);\n', ""],
+  ["review 7 A3 a buy record read as none", SELL, T, "const x: RentBack = buy ? { ...given, mints: mintsOf(given.mints, [buy]), buy } : { ...given, buy: null,", "const x: RentBack = { ...given, buy: null,"],
   ["review 7 A5 the buy writes no record", BUY, TB, "      await h.bought?.put(w.address, { mint: venue.mint, program: venue.tokenProgram });\n", ""],
   ["review 7 A6 the buy's record written after its send", BUY, TB, [["      await h.bought?.put(w.address, { mint: venue.mint, program: venue.tokenProgram });\n      const decimals = (d: number): void => {", "      const decimals = (d: number): void => {"], ["      return await sendAndSettle(h, r, release, pool, signed, bh.lastHeight, wait, { token, minOut, tell, bound, decimals, early });", "      try { return await sendAndSettle(h, r, release, pool, signed, bh.lastHeight, wait, { token, minOut, tell, bound, decimals, early }); } finally { await h.bought?.put(w.address, { mint: venue.mint, program: venue.tokenProgram }); }"]]],
   // delta review 8 of 5697d7a1: with no buy record the pass holds; the record through the page's store
-  ["review 8 F1 no buy record: the page's holdings decide the pass", SELL, T, '    if (!x.buy) return end("holds", "no buy of W\'s is recorded");', '    if (!x.buy && [...w.holdings.tokens].some(([mint, t]) => !x.mints.some((m) => m.mint === mint) && t.amount > 0n)) return end("holds", "no buy of W\'s is recorded");'],
-  ["review 8 C3 a buy record that cannot be read faults the pass", SELL, T, "const buy = await Promise.resolve(h.bought?.get(given.w.address)).catch(() => undefined);", "const buy = await h.bought?.get(given.w.address);"],
+  ["review 8 F1 no buy record: the page's holdings decide the pass", SELL, T, '    if (!x.buy) return end("holds", "no buy of W\'s is recorded", x.unproven !== true);', '    if (!x.buy && x.mints.length > 0) return end("holds", "no buy of W\'s is recorded", x.unproven !== true);'],
+  ["review 8 C3 a buy record that cannot be read faults the pass", SELL, T, "const rec = await Promise.resolve(h.bought?.get(given.w.address)).catch(() => undefined);", "const rec = await h.bought?.get(given.w.address);"],
   ["review 8 C5 the buy host loses bought", TESTNET, TT, "      // W's buy mint, written before the send: the rent back after a later sell holds while W holds any of it\n      bought: buyMints(page.store),\n", ""],
   ["review 8 C6 the sell host loses bought", TESTNET, TT, "      owed: owedNoted(page.store),\n      bought: buyMints(page.store),\n", "      owed: owedNoted(page.store),\n"],
   ["review 8 C7 buyMints' get returns undefined", SELL, T, "return Object.hasOwn(all, address) ? all[address] : undefined;", "return undefined;"],
@@ -108,7 +108,7 @@ export const M = [
   ["floor F2 no floor taken", SELL, T, '  if (typeof p.noteFloor !== "bigint" || p.noteFloor < SOLANA_POOL_MIN_DEPOSIT) return { refused: "quote_check_failed" };\n', ""],
   ["floor F3 the pool's least deposit for the floor", SELL, T, "const noteFloor = solanaPoolNoteFloor(rent);", "const noteFloor = SOLANA_POOL_MIN_DEPOSIT;"],
   ["floor F4 an eight under the floor kept, never the six", SELL, T, '      if (next && r.value === 0n) return no("quote_check_failed");\n', ""],
-  ["floor F5 a value of 0 built as a deposit", SELL, T, "value === 0n ? steps : [...steps, depositIx(", "false ? steps : [...steps, depositIx("],
+  ["floor F5 a value of 0 built as a deposit", SELL, T, "value === 0n ? [...steps, ...shut] : [...steps, ...shut, depositIx(", "false ? [...steps, ...shut] : [...steps, ...shut, depositIx("],
   ["floor F6 one RPC's read of the sell filled", SELL, T, "if (got[0].got === \"ok\" && got[1].got === \"ok\") return \"filled\";", "if (got[0].got === \"ok\" || got[1].got === \"ok\") return \"filled\";"],
   ["floor F7 one RPC's silence not_landed", SELL, T, "if (got[0].got === \"none\" && got[1].got === \"none\" && (await goneOnBoth(", "if ((got[0].got === \"none\" || got[1].got === \"none\") && (await goneOnBoth("],
   ["floor F10 not_landed before both are past", SELL, T, "const at = await pastAt(rpcs, last);", "const at = [0, 0] as const;"],
@@ -125,7 +125,7 @@ export const M = [
   ["review F4 the record kept after its verdict", SELL, T, "        await h.kept?.drop(signature).catch(() => {});\n", ""],
   // review of fcd67b72: P1 the load settles a kept sell with no note; P2 the kept record before the request's record
   ["review P1 the load settles sells only on a note", TESTNET, TT, " || (await keptSells(page.store).list().catch(() => [])).length > 0) await settleSells();", ") await settleSells();"],
-  ["review P2 the kept record after the request's record", SELL, T, [["    if (kept) await h.kept?.put({ signature, tx: base64.encode(signed), last: bh.lastHeight });\n", ""], ["    await h.signed?.(signature);\n    sent = signature;\n", "    await h.signed?.(signature);\n    if (kept) await h.kept?.put({ signature, tx: base64.encode(signed), last: bh.lastHeight });\n    sent = signature;\n"]]],
+  ["review P2 the kept record after the request's record", SELL, T, [["    if (kept) await h.kept?.put({ signature, tx: base64.encode(signed), last: bhv.lastHeight });\n", ""], ["    await h.signed?.(signature);\n    sent = signature;\n", "    await h.signed?.(signature);\n    if (kept) await h.kept?.put({ signature, tx: base64.encode(signed), last: bhv.lastHeight });\n    sent = signature;\n"]]],
   // card pool-sell-share-across-wallets: each sale of a sell names its signature on the request's record (its leg) before
   // the run's own signed hook and before the send; the leg's write moved after the send would let a sale leave unnamed
   ["a sell leg's record names its signature only after the send", SELL, T, [["        await hooks.signed?.(i, signature);\n        await h.signed?.(signature);\n", "        await h.signed?.(signature);\n"], ["        open();\n        hooks.sent?.(i, signature);\n", "        open();\n        void hooks.signed?.(i, signature);\n        hooks.sent?.(i, signature);\n"]]],
