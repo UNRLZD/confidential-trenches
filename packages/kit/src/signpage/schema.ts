@@ -149,10 +149,10 @@ const txs = arr(obj({ chain, hash: str }));
 const trigger = obj({ kind: orderKind, pool: str, venue: str, direction: oneOf(["lte", "gte"]), price: dec, quote_asset: str });
 /** What any op may carry beside its stage (messages.ts OpDetail; card kit-portfolio-reads, kit 1.9): each optional and
  * checked by type. */
-const OP_DETAIL = { created_ms: uint, chain, token: str, units: dec, amount_usd: dec };
+const OP_DETAIL = { created_ms: uint, chain, token: str, units: dec, amount_usd: dec, pool_amount: dec };
 /** A pool deposit's: no amount_usd, as before kit 1.9 (the pool's balance is state.pools', never a credited amount on
  *  the op), and its chain its own required field. */
-const { amount_usd: _poolNoUsd, chain: _poolOwnChain, ...POOL_OP_DETAIL } = OP_DETAIL;
+const { amount_usd: _poolNoUsd, chain: _poolOwnChain, pool_amount: _poolNoAmount, ...POOL_OP_DETAIL } = OP_DETAIL;
 const op = (kind: SignpageSchema, stages: readonly string[], extra: Record<string, SignpageSchema> = {}) =>
   obj({ id: str, kind, stage: oneOf(stages), txs }, { ...OP_DETAIL, ...extra });
 const errorCode: SignpageSchema = (v) => typeof v === "string" && /^[a-z0-9_.-]{1,64}$/.test(v);

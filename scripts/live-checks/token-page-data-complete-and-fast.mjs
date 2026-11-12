@@ -9,8 +9,9 @@
 //   - the lists answer 200 and at least one row has icon true;
 //   - every logo read of an icon-true row answers either 200 with an image (png, jpeg, webp or gif, its first bytes that
 //     format's, at most 262144 bytes), X-Content-Type-Options nosniff, Content-Security-Policy "default-src 'none';
-//     sandbox" and Cache-Control "public, max-age=86400", or 404 with no body (its source refused); at least one is 200;
-//   - a row with icon false answers 404 with no body;
+//     sandbox" and Cache-Control "public, max-age=86400", or 204 with no body (its source refused; a 404 is a failed
+//     load the browser logs as a console error, card app-live-run-green-after-119); at least one is 200;
+//   - a row with icon false answers no logo: 204 with no body (404 before that card, as the app never asks for it);
 //   - the token page answers 200 with a `links` object whose every value is an http(s) URL;
 //   - each busy pump.fun token's tape holds at least one trade in a read made within FRESH_MS of the first.
 // After: helper
@@ -59,8 +60,8 @@ export function judge(run) {
   let served = 0;
   for (const l of run.logos ?? []) {
     const h = l.headers ?? {};
-    if (l.status === 404) {
-      say(l.length === 0, `logo ${l.mint}: 404 with ${l.length} bytes (its source refused)`);
+    if (l.status === 204) {
+      say(l.length === 0, `logo ${l.mint}: 204 with ${l.length} bytes (its source refused)`);
       continue;
     }
     const type = h["content-type"];
@@ -69,7 +70,7 @@ export function judge(run) {
     say(ok, `logo ${l.mint}: ${l.status} ${show(type)} (bytes show ${show(magic(l.head))}), ${l.length} bytes, nosniff ${show(h["x-content-type-options"])}, CSP ${show(h["content-security-policy"])}, cache ${show(h["cache-control"])}`);
   }
   say(served >= 1, `${served} of ${(run.logos ?? []).length} listed logos served as images`);
-  if (run.plain !== null && run.plain !== undefined) say(run.plain.status === 404 && run.plain.length === 0, `a row with icon false: logo ${run.plain.status}, ${run.plain.length} bytes`);
+  if (run.plain !== null && run.plain !== undefined) say((run.plain.status === 204 || run.plain.status === 404) && run.plain.length === 0, `a row with icon false: logo ${run.plain.status}, ${run.plain.length} bytes`);
   const links = run.page?.links;
   say(run.page?.status === 200 && isObj(links) && Object.values(links).every((v) => typeof v === "string" && /^https?:\/\//.test(v)), `token page ${show(run.page?.mint)}: ${show(run.page?.status)}, links ${show(links)}`);
   say((run.tapes ?? []).length >= 1, `${(run.tapes ?? []).length} busy pump.fun tapes read`);

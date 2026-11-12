@@ -1,0 +1,68 @@
+{
+ "good": {
+  "at": "2026-11-12T07:32:46.393Z",
+  "sign": {
+   "source": "https://confidential.unrealized.trade/",
+   "pageStatus": 200,
+   "js": [
+    {
+     "url": "/app.js",
+     "status": 200,
+     "integrity": "sha384-Tqq2K/e7kKrnBIq84l7dYWc7BbdcnGKzJo21EwiHzckJQZee1o2TRoLpTzl8gNmk",
+     "sha384": "sha384-Tqq2K/e7kKrnBIq84l7dYWc7BbdcnGKzJo21EwiHzckJQZee1o2TRoLpTzl8gNmk",
+     "found": [
+      "the state sends an op's pool_amount",
+      "a filled pool buy's op names its SOL",
+      "the fill writes each trade's SOL from its transaction",
+      "an old sale's USD at its block's price, marked block"
+     ]
+    }
+   ]
+  },
+  "app": {
+   "source": "https://ct-app.unrealized.trade/",
+   "pageStatus": 200,
+   "js": [
+    {
+     "url": "/assets/index-CiCtdh5a.js",
+     "status": 200,
+     "integrity": "sha384-zXjJPOmlwDQn8DJvmEMWtANQm6oAY44qExJ08gDpU4ThSUiXCN/PjQsysOh48UTB",
+     "sha384": "sha384-zXjJPOmlwDQn8DJvmEMWtANQm6oAY44qExJ08gDpU4ThSUiXCN/PjQsysOh48UTB",
+     "found": [
+      "the trade book reads pool_amount",
+      "a closed row draws its realized in the pool asset"
+     ]
+    }
+   ]
+  }
+ },
+ "bad": {
+  "at": "2026-11-12T06:38:44.871Z",
+  "sign": {
+   "source": "https://confidential.unrealized.trade/",
+   "pageStatus": 200,
+   "js": [
+    {
+     "url": "/app.js",
+     "status": 200,
+     "integrity": "sha384-57zpoipdsCEuiBuPD+SDvYqmqsWexZwHClkTasN/kFzKmMhtpzr/f15zADtBC81A",
+     "sha384": "sha384-57zpoipdsCEuiBuPD+SDvYqmqsWexZwHClkTasN/kFzKmMhtpzr/f15zADtBC81A",
+     "found": []
+    }
+   ]
+  },
+  "app": {
+   "source": "https://ct-app.unrealized.trade/",
+   "pageStatus": 200,
+   "js": [
+    {
+     "url": "/assets/index-CuFaRUG9.js",
+     "status": 200,
+     "integrity": "sha384-zCNyJbjLD3i+gyamOr6PpmSBu3RyVG3axtKuIQRw0AbFOQg4P/GSqNBO1ZvJStES",
+     "sha384": "sha384-zCNyJbjLD3i+gyamOr6PpmSBu3RyVG3axtKuIQRw0AbFOQg4P/GSqNBO1ZvJStES",
+     "found": []
+    }
+   ]
+  }
+ }
+}

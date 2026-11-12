@@ -49,6 +49,14 @@ const KIT19_LINE = (v) => `BAD the page reads an app in full from kit-v${v}, not
 const LEVELS19_LINE = (l) => `BAD the page's levels below the current one are ${JSON.stringify(l)}, not ["1.8","1.7","1.6","1.5"]: an older kit's app is sent what it cannot read`;
 const DETAIL_LINE = "BAD the state sent below the current level keeps each op's detail, for which a kit-v1.8 app drops the op";
 const RESULT18_LINE = "BAD kit-v1.8's answers do not go through its own level: its deposit.confirm is sent with no facts";
+// card portfolio-shows-pool-trades: the records cut at kit 1.9 (good19, badNoDetail, badNoResult18) are judged at the
+// version and levels they were cut at (V19); this card's good build and its plants at 1.10 (judgeNow)
+const V19 = { kit: "1.9", levels: ["1.8", "1.7", "1.6", "1.5"] };
+const judge19 = (a) => judgeNow(a, V19);
+const KIT110_LINE = (v) => `BAD the page reads an app in full from kit-v${v}, not kit-v1.10: a kit-v1.10 app's op pool_amount has no level of its own`;
+const LEVELS110_LINE = (l) => `BAD the page's levels below the current one are ${JSON.stringify(l)}, not ["1.9","1.8","1.7","1.6","1.5"]: an older kit's app is sent what it cannot read`;
+const AMOUNT_LINE = "BAD the state sent below the current level keeps each op's pool_amount, for which a kit-v1.9 app drops the op";
+const RESULT19_LINE = "BAD kit-v1.9's answers do not go through its own level: its deposit.confirm is sent with no facts";
 const LEVELS18_LINE = (l) => `BAD the page's levels below the current one are ${JSON.stringify(l)}, not ["1.7","1.6","1.5"]: an older kit's app is sent what it cannot read`;
 const DECIMALS_LINE = "BAD the state sent below the current level keeps each position's decimals, which kit-v1.7 refuses the whole state for";
 const RESULT17_LINE = "BAD kit-v1.7's answers do not go through its own level: its deposit.confirm is sent with no facts";
@@ -207,7 +215,7 @@ test("facts() reads the map, the field list and the hello from a minified bundle
   const f = facts("", js);
   assert.deepEqual(f.maps, [MAP]);
   assert.deepEqual(f.keys, [V1_4_KEYS]);
-  assert.deepEqual(Object.values(f.hello).map((x) => typeof x), ["string", "string", "string", "string", "object", "string", "object", "string", "string", "object", "object", "object", "object"]);
+  assert.deepEqual(Object.values(f.hello).map((x) => typeof x), ["string", "string", "string", "string", "object", "string", "object", "string", "string", "object", "object", "object", "object", "object", "object"]);
   assert.equal(f.hello.decimals, null, "a 1.7-era shaper strips no decimals");
   assert.equal(f.hello.kit, "1.7");
   // review P3 2: the filter and the kit-v1.6 answer branch read only on the functions the shaper calls
@@ -257,7 +265,7 @@ test("facts() reads the hello's path with the kit-v1.5 level (card held-move-for
   ].join(";");
   const js = `var pl=Object.freeze({${pairs}}),b=new Set([${V1_4_KEYS.map((k) => `\`${k}\``).join(",")}]);${path}`;
   const f = facts("", js);
-  assert.deepEqual(Object.values(f.hello).map((x) => typeof x), ["string", "string", "string", "string", "object", "string", "object", "object", "object", "object", "object", "object", "object"]);
+  assert.deepEqual(Object.values(f.hello).map((x) => typeof x), ["string", "string", "string", "string", "object", "string", "object", "object", "object", "object", "object", "object", "object", "object", "object"]);
   assert.deepEqual(f.hello.progressMap, MAP);
   // card pool-deposit-stages: release-94's shape reads kit 1.6, kit-v1.5's level alone, no pool filter: FAIL now
   assert.deepEqual([f.hello.kit, f.hello.levels, f.hello.poolOps], ["1.6", ["1.5"], null]);
@@ -310,26 +318,24 @@ test("review of edc6815f: recorded bad answer badNoResult17: the good build with
 
 // ------------------------------------------------------------------------------------------------ card kit-portfolio-reads
 test("kit-portfolio-reads: the good build reads kit 1.9 in full, kit-v1.8 to kit-v1.5 below it, each op with no detail there, and kit-v1.8's answers through its own level", () => {
-  assert.equal(KIT, "1.9");
-  assert.deepEqual(LEVELS, ["1.8", "1.7", "1.6", "1.5"]);
-  const g = ANSWERS.good;
+  const g = ANSWERS.good19;
   assert.equal(g.hello.kit, "1.9");
   assert.deepEqual(g.hello.levels, ["1.8", "1.7", "1.6", "1.5"]);
   assert.match(g.hello.detail, /let ([\w$]+)=\{\.\.\.([\w$]+),ops:\2\.ops\.map\(([\w$]+)\)\};if\(([\w$]+)===`1\.8`\)return \1;let ([\w$]+)=([\w$]+)\(\1\);if\(\4===`1\.7`\)return \5;/);
   assert.match(g.hello.result18, /if\(([\w$]+)===`1\.8`\|\|\1===`1\.7`\|\|\1===`1\.6`\)return /);
-  assert.deepEqual(judgeNow(g).lines, []);
+  assert.deepEqual(judge19(g).lines, []);
 });
 
-test("kit-portfolio-reads: recorded bad answers: the kit 1.8 build (good18) and its plants at 1.9, and badNoDetail and badNoResult18 cut from this card's build: each FAIL, named", () => {
-  assert.deepEqual(judgeNow(ANSWERS.good18).lines, [KIT19_LINE("1.8"), LEVELS19_LINE(["1.7", "1.6", "1.5"]), DETAIL_LINE, RESULT18_LINE]);
+test("kit-portfolio-reads: recorded bad answers: the kit 1.8 build (good18) and its plants at 1.9, and badNoDetail and badNoResult18 cut from its build (good19): each FAIL, named", () => {
+  assert.deepEqual(judge19(ANSWERS.good18).lines, [KIT19_LINE("1.8"), LEVELS19_LINE(["1.7", "1.6", "1.5"]), DETAIL_LINE, RESULT18_LINE]);
   for (const [k, line] of [["badNoDetail", DETAIL_LINE], ["badNoResult18", RESULT18_LINE]]) {
-    assert.notEqual(ANSWERS[k].sha384, ANSWERS.good.sha384, k);
-    assert.deepEqual(ANSWERS[k].maps, ANSWERS.good.maps, k);
-    assert.deepEqual(judgeNow(ANSWERS[k]).lines, [line], k);
+    assert.notEqual(ANSWERS[k].sha384, ANSWERS.good19.sha384, k);
+    assert.deepEqual(ANSWERS[k].maps, ANSWERS.good19.maps, k);
+    assert.deepEqual(judge19(ANSWERS[k]).lines, [line], k);
   }
-  const g = ANSWERS.good;
-  for (const v of ["1.8", "1.10", null]) assert.deepEqual(judgeNow({ ...g, hello: { ...g.hello, kit: v } }).lines, [KIT19_LINE(v ?? "?")], `kit ${v}`);
-  for (const l of [["1.7", "1.6", "1.5"], ["1.8", "1.6", "1.5"], null]) assert.deepEqual(judgeNow({ ...g, hello: { ...g.hello, levels: l } }).lines, [LEVELS19_LINE(l)], JSON.stringify(l));
+  const g = ANSWERS.good19;
+  for (const v of ["1.8", "1.10", null]) assert.deepEqual(judge19({ ...g, hello: { ...g.hello, kit: v } }).lines, [KIT19_LINE(v ?? "?")], `kit ${v}`);
+  for (const l of [["1.7", "1.6", "1.5"], ["1.8", "1.6", "1.5"], null]) assert.deepEqual(judge19({ ...g, hello: { ...g.hello, levels: l } }).lines, [LEVELS19_LINE(l)], JSON.stringify(l));
 });
 
 test("kit-portfolio-reads: facts() reads no detail strip from a shaper that keeps an op's detail, takes a pool deposit's chain or a deposit's amount_usd, or has no kit-v1.8 level", () => {
@@ -345,4 +351,43 @@ test("kit-portfolio-reads: facts() reads no detail strip from a shaper that keep
   assert.equal(facts("", js(J.replace("e.kind!==`deposit`&&delete a.amount_usd", "delete a.amount_usd"))).hello.detail, null, "a deposit's amount_usd taken");
   assert.equal(facts("", js(J, S.replace("if(e===`1.8`)return n;", ""))).hello.detail, null, "no kit-v1.8 level");
   assert.equal(facts("", js(J, S.replace("ops:t.ops.map(jl)", "ops:t.ops"))).hello.detail, null, "the strip not called");
+});
+
+// ------------------------------------------------------------------------------------------------ card portfolio-shows-pool-trades
+test("portfolio-shows-pool-trades: the good build reads kit 1.10 in full, kit-v1.9 to kit-v1.5 below it, each op with no pool_amount there, and kit-v1.9's state and answers through its own level", () => {
+  assert.equal(KIT, "1.10");
+  assert.deepEqual(LEVELS, ["1.9", "1.8", "1.7", "1.6", "1.5"]);
+  const g = ANSWERS.good;
+  assert.equal(g.hello.kit, "1.10");
+  assert.deepEqual(g.hello.levels, ["1.9", "1.8", "1.7", "1.6", "1.5"]);
+  assert.match(g.hello.amount, /return [\w$]+;if\(([\w$]+)===`1\.9`\)return\{\.\.\.([\w$]+),ops:\2\.ops\.map\(([\w$]+)\)\};let ([\w$]+)=\{\.\.\.\2,ops:\2\.ops\.map\(([\w$]+)\)\};if\(\1===`1\.8`\)return \4;/);
+  assert.match(g.hello.result19, /if\(([\w$]+)===`1\.9`\|\|\1===`1\.8`\|\|\1===`1\.7`\|\|\1===`1\.6`\)return /);
+  assert.deepEqual(judgeNow(g).lines, []);
+  assert.deepEqual(judge19(ANSWERS.good19).lines, [], "the 1.9 build at its own era");
+});
+
+test("portfolio-shows-pool-trades: recorded bad answers: the kit 1.9 build (good19) at 1.10, and badNoV19State, badPoolAmountBelow and badNoResult19 cut from this card's build: each FAIL, named", () => {
+  assert.deepEqual(judgeNow(ANSWERS.good19).lines, [KIT110_LINE("1.9"), LEVELS110_LINE(["1.8", "1.7", "1.6", "1.5"]), AMOUNT_LINE, RESULT19_LINE]);
+  for (const [k, line] of [["badNoV19State", AMOUNT_LINE], ["badPoolAmountBelow", AMOUNT_LINE], ["badNoResult19", RESULT19_LINE]]) {
+    assert.notEqual(ANSWERS[k].sha384, ANSWERS.good.sha384, k);
+    assert.deepEqual(ANSWERS[k].maps, ANSWERS.good.maps, k);
+    assert.deepEqual(judgeNow(ANSWERS[k]).lines, [line], k);
+  }
+  assert.equal(ANSWERS.badNoResult19.hello.result18 !== null, true, "only the 1.9 alternative is cut");
+  const g = ANSWERS.good;
+  assert.deepEqual(judgeNow({ ...g, hello: { ...g.hello, amount: null } }).lines, [AMOUNT_LINE]);
+  assert.deepEqual(judgeNow({ ...g, hello: { ...g.hello, result19: null } }).lines, [RESULT19_LINE]);
+  for (const v of ["1.9", "1.11", null]) assert.deepEqual(judgeNow({ ...g, hello: { ...g.hello, kit: v } }).lines, [KIT110_LINE(v ?? "?")], `kit ${v}`);
+  for (const l of [["1.8", "1.7", "1.6", "1.5"], ["1.9", "1.7", "1.6", "1.5"], null]) assert.deepEqual(judgeNow({ ...g, hello: { ...g.hello, levels: l } }).lines, [LEVELS110_LINE(l)], JSON.stringify(l));
+});
+
+test("portfolio-shows-pool-trades: facts() reads the version from a constant the minifier hoists (`X=C.split`), only when that constant is set once", () => {
+  const js = "var Rs=`1.10`,z=1;Dl=Rs.split(`.`).map(Number);function Al(e){let t=Ol.exec(e);if(!t)return`1.4`;let[n,r]=[Number(t[1]),Number(t[2])],i=(e,t)=>n>e||n===e&&r>=t;return i(Dl[0],Dl[1])?`current`:i(1,9)?`1.9`:i(1,5)?`1.5`:`1.4`}";
+  const HELLO = "function kl(e){return t.length!==3||n.v!==1||n.type!==`hello`||!Object.hasOwn(n,`kit`)||typeof n.kit!=`string`?null:n.kit}";
+  const SH = "function sh(e){let r=`1.4`,i=(e,t)=>{if(`ok`in e)return e;},c=async i=>{let c=kl(i);if(c!==null)return void(r=Al(c));}}";
+  const f = (j) => facts("", `${HELLO}${j}${SH}`).hello;
+  assert.equal(f(js).kit, "1.10");
+  assert.deepEqual(f(js).levels, ["1.9", "1.5"]);
+  assert.equal(f(js.replace("var Rs=`1.10`,", "var Rs=`1.10`,Q=0;Rs=`1.9`;")).kit, null, "set twice");
+  assert.equal(f(js.replace("var Rs=`1.10`,", "var Rs=x,")).kit, null, "not a version");
 });

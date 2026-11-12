@@ -43,13 +43,19 @@ test("a logo that breaks a rule fails: SVG, no nosniff, no CSP, past the cap, by
   const bytes = edit((r) => (r.logos[0].head = Buffer.from("<svg xmlns=").toString("hex")));
   const cache = edit((r) => (r.logos[0].headers["cache-control"] = "no-store"));
   for (const rec of [svg, sniff, csp, big, bytes, cache]) assert.equal(judge(rec).ok, false);
-  // a source that refused is a 404 with no body, and fine while one logo serves
-  assert.equal(judge(edit((r) => (r.logos[1] = { ...r.logos[1], status: 404, headers: {}, length: 0, head: "" }))).ok, true);
-  assert.equal(judge(edit((r) => (r.logos = r.logos.map((l) => ({ ...l, status: 404, headers: {}, length: 0, head: "" }))))).ok, false, "none served");
+  // a source that refused is a 204 with no body, and fine while one logo serves
+  assert.equal(judge(edit((r) => (r.logos[1] = { ...r.logos[1], status: 204, headers: {}, length: 0, head: "" }))).ok, true);
+  assert.equal(judge(edit((r) => (r.logos = r.logos.map((l) => ({ ...l, status: 204, headers: {}, length: 0, head: "" }))))).ok, false, "none served");
+  // card app-live-run-green-after-119: a listed logo answered 404 is a failed load the browser logs as a console error
+  assert.equal(judge(edit((r) => (r.logos[1] = { ...r.logos[1], status: 404, headers: {}, length: 0, head: "" }))).ok, false, "a 404 for an icon-true row");
+  assert.equal(judge(edit((r) => (r.logos[1] = { ...r.logos[1], status: 204, headers: {}, length: 3, head: "" }))).ok, false, "a 204 with a body");
 });
 
 test("a row with icon false that answers a body, a script link and an empty tape each fail", () => {
   assert.equal(judge(edit((r) => (r.plain.length = 21))).ok, false);
+  // the helper's no-logo answer for it: 204 with no body (card app-live-run-green-after-119), or the 404 before it
+  assert.equal(judge(edit((r) => (r.plain = { ...r.plain, status: 204, length: 0 }))).ok, true);
+  assert.equal(judge(edit((r) => (r.plain = { ...r.plain, status: 200, length: 0 }))).ok, false);
   assert.equal(judge(edit((r) => (r.page.links = { site: "javascript:alert(1)" }))).ok, false);
   assert.equal(judge(edit((r) => delete r.page.links)).ok, false, "no links field");
   assert.equal(judge(edit((r) => (r.tapes[0].reads = r.tapes[0].reads.map((x) => ({ ...x, rows: 0 }))))).ok, false);

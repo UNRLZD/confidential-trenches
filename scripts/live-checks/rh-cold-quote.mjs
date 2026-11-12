@@ -8,9 +8,13 @@
 //     3-4 getLogs calls of 10M blocks a second (card rh-cold-quote); TARGET_MS is the card's end state, which card
 //     rpc-keyed-lists tightens BOUND_MS to with a keyed deep provider;
 //   - every warm quote ends ok, their median under WARM_MS and the slowest under WARM_MAX_MS;
-//   - the case still holds: TORCH has MIN_POOLS pools at least with currencies other than the native asset or WETH in
-//     the scan's depth, read after the quotes on the chain's first scan provider (a token whose seeded pools are gone
-//     proves nothing about a cold scan).
+//   - the case is cold: the cold quote asked the chain's first scan provider for logs over the scan's depth (eth_getLogs
+//     in its trace), so it read the chain, never a scan kept from before. TORCH's pools with currencies other than the
+//     native asset or WETH in the scan's depth are read after the quotes and printed, not judged: the depth is the last
+//     10M blocks (about 12 days), so TORCH's seeded pools leave it as the chain moves (101 on 2026-11-06 at block
+//     107232986, 37 on 2026-11-12 at 112416529) and no count of them holds. The 99-currency fan-out it stood for is
+//     held where it cannot age: packages/kit/test/evm-quote-attacks.test.ts, "card rh-cold-quote: a cold Robinhood
+//     quote of a token with 99 seeded currencies ..." (card app-live-run-green-after-119).
 // The cold quote's requests per host are printed (traced, as evm-quote-warm-round has them).
 // After: app
 //   node scripts/live-checks/rh-cold-quote.mjs [--record <file>]
@@ -27,13 +31,14 @@ export const TARGET_MS = 10_000;
 export const WARM = 5;
 export const WARM_MS = 3_000;
 export const WARM_MAX_MS = 5_000;
-// 100 read 2026-11-06 01:4xZ on rpc.mainnet.chain.robinhood.com
-export const MIN_POOLS = 50;
 const INITIALIZE = "0xdd466e674ea557f56295e2d0218a125ea4b4f0f6f3307b95f85e6110838d6438";
 const ZERO = "0x0000000000000000000000000000000000000000";
 const TORCH = "0x000050e18ffa3f8f7ad170eb9cef160eb3ed1111"; // evm-quote-lag-held.mjs
 // TORCH's quote route: its hookless native 0.3% pool (Q 268.7e18 for 0.001 ETH, 2026-11-06 01:5xZ)
 export const REQ = { chain: "robinhood", token: TORCH, amountIn: 10n ** 15n, slippageBps: 300, route: { venue: "uniswap-v4", currencyIn: ZERO, hops: [{ currency: TORCH, fee: 3000, tickSpacing: 60, hooks: ZERO, hookData: "0x" }] } };
+
+/** The chain's first scan provider's host: the one a cold scan asks for logs over the depth. */
+export const SCAN_HOST = new URL(evmPoolVenues().robinhood.scan.url).host;
 
 /** The verdict on a run ({ cold: { ms, code, message?, hosts }, warm: [{ ms, code, message? }], shape?: { pools } }). */
 export function check(run) {
@@ -59,8 +64,9 @@ export function check(run) {
       say(s[s.length - 1] < WARM_MAX_MS, `warm: the slowest ${s[s.length - 1]} ms (under ${WARM_MAX_MS} ms wanted)`);
     }
   }
+  const logs = (c?.hosts ?? []).filter((h) => h.at.startsWith(`${SCAN_HOST} `) && h.at.includes("eth_getLogs")).reduce((a, h) => a + h.n, 0);
   const n = run?.shape?.pools;
-  say(Number.isSafeInteger(n) && n >= MIN_POOLS, `case: TORCH has ${n ?? "an unread number of"} pools with other currencies in the scan's depth (${MIN_POOLS} at least wanted)`);
+  say(logs > 0, `case: the cold quote asked ${SCAN_HOST} for logs ${logs} time(s) (a cold scan of the depth wanted); TORCH has ${n ?? "an unread number of"} pools with other currencies in the depth (printed, not judged: they age out of it)`);
   return { ok, lines };
 }
 
