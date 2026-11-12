@@ -103,7 +103,7 @@ import { releaseTradeDeps, tradeKind } from "./trade.ts";
 import { settleTradeOps, timedStore, TRADE_STORE_MS, tradeSettleDue } from "./trade.ts";
 import { PAGE_TOKEN_DECIMALS, poolKinds } from "./pool-kinds.ts";
 import { liveRuns, poolSellDryKind } from "./pool-sell-dry.ts";
-import { PAGE_CLUSTER, PAGE_SOL_PIN, pageSolanaRpcs, testnetPool, testnetPoolDeps } from "./pool-testnet.ts";
+import { PAGE_CLUSTER, PAGE_SOL_PIN, pageSolanaRpcs, poolWayOut, testnetPool, testnetPoolDeps } from "./pool-testnet.ts";
 import { hostLane } from "../../wallet/src/throttle.ts";
 import { poolRestore, restoreUxOf } from "./pool-restore.ts";
 import { walkWorkerPort } from "./walk-workers.ts";
@@ -894,10 +894,10 @@ function pageScope(): bigint | null {
 function pagePoolScopes(): { chain: PoolChain; scope: bigint }[] {
   return PAGE_POOLS.flatMap((p) => (p.chain === "near" ? [] : [{ chain: p.chain, scope: p.scope }]));
 }
-// the pools pool.address gives a U_X for: on mainnet Solana's alone (card evm-pools-on-mainnet), as a Base or Robinhood
-// pool there has no carry from U_X into the pool nor a way out of it yet, so money is never sent to an address there
+// the pools pool.address gives a U_X for: those whose withdraw this build carries (src/pool-testnet.ts poolWayOut, card
+// evm-deposit-on-mainnet), so money is never sent to an address the page cannot take it out of
 function pageAddressPools(): { chain: PoolChain; scope: bigint }[] {
-  return pagePoolScopes().filter((p) => PAGE_NETWORK !== "mainnet" || p.chain === "solana");
+  return pagePoolScopes().filter((p) => poolWayOut(p.chain));
 }
 const namer = depositNamer({
   top: !framed,
