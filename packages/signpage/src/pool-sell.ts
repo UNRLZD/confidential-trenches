@@ -1778,7 +1778,10 @@ async function rentBack(h: PoolSellHost, x: RentBack, hold?: Hold): Promise<Ende
     // holdings are the helper's word (pool-testnet.ts, solanaHelperHoldings), and a sweep is never signed on it. With
     // the record, W's buy mint is among x.mints (rentBackOwed) and a stranger's mint never holds the pass back
     if (!x.buy && x.bare !== true) return end("holds", "no buy of W's is recorded");
-    const addresses = solanaTeardownAddresses(w.address, x.mints);
+    // the accounts the plan reads: W's of each mint it traded and the teardown's own (solanaTeardownAddresses), and on a
+    // found W each token account both RPCs list it owning (foundTokenAccounts, `extra`), so a zero-balance one, which
+    // anyone can open for W, is closed to W, never a hold for good (review P2 of c7b85ba3a)
+    const addressesOf = (extra: readonly string[]): string[] => [...new Set([...solanaTeardownAddresses(w.address, x.mints), ...extra])];
     // W's accounts and W, in one getMultipleAccounts call on each RPC (one slot each): the plan over them, and whether
     // W still holds a mint it traded (review M-B: an owed record from a sell that never filled, or not yet); planned with
     // claims off and `unclaimed` the reason when the teardown's claim did not simulate (the kit's solanaTeardownChecked)
@@ -1803,7 +1806,8 @@ async function rentBack(h: PoolSellHost, x: RentBack, hold?: Hold): Promise<Ende
       if (a === null || b === null || a !== b) throw new Error("the sell's meta does not say plainly what W's account held after it");
       return "yes";
     };
-    const readW = async (unclaimed?: SolanaTeardownUnclaimed) => {
+    const readW = async (unclaimed: SolanaTeardownUnclaimed | undefined, extra: readonly string[]) => {
+      const addresses = addressesOf(extra);
       // each recorded sell read before W's accounts (review of bf467ae7, F5): a sell final before them left W's account
       // as the sell's meta says, so a balance read after it is a stranger's; a sell landing between the two reads is not
       // final at the first, reads unsure, and W holds to the next load. What a sell read throws counts only for a mint
@@ -1832,7 +1836,7 @@ async function rentBack(h: PoolSellHost, x: RentBack, hold?: Hold): Promise<Ende
       if (sold !== "yes") return { k: "holds" as const, steady: sold === "no" };
       const burn = holding.map((t) => t.ata);
       try {
-        return { k: "plan" as const, held, accounts, burn, plan: solanaTeardownPlan(w.address, accounts, unclaimed, burn) };
+        return { k: "plan" as const, held, accounts, addresses, burn, plan: solanaTeardownPlan(w.address, accounts, unclaimed, burn) };
       } catch (e) {
         // the plan's refusal of reads both RPCs answered alike, byte for byte: the same reads refuse the same way, so it
         // ends the pass (review 5 of 38e59182, M1); reads that differ are a fault, read again
@@ -1846,13 +1850,14 @@ async function rentBack(h: PoolSellHost, x: RentBack, hold?: Hold): Promise<Ende
       // (foundPast: no buy signed before W's latest transaction can still land); `since` is that transaction, the one
       // the sweep then reads W's history from
       const since = x.bare === true ? await foundPast(rpcs, w.address).catch(() => null) : undefined;
-      if (since === null) return { young: true as const, keep: [], signed: [], last: 0, unclaimed: undefined, since: undefined };
-      const read = await readW();
+      const extra = since === undefined ? [] : since === null ? null : await foundTokenAccounts(rpcs, w.address).catch(() => null);
+      if (since === null || extra === null) return { young: true as const, keep: [], signed: [], last: 0, unclaimed: undefined, since: undefined };
+      const read = await readW(undefined, extra);
       // W still holds what it sold: its sell has not filled, so its volume and wrapped-SOL accounts are what that sell
       // (or its next) still uses; nothing is closed
       if (read.k === "holds") return { holds: read.steady, keep: [], signed: [], last: 0, unclaimed: undefined, since };
       if (read.k === "refused") return { refused: read.why, keep: [], signed: [], last: 0, unclaimed: undefined, since };
-      const { held, accounts, plan } = read;
+      const { held, accounts, addresses, plan } = read;
       if (plan.close.length === 0) return { keep: plan.keep, signed: [], last: 0, unclaimed: undefined, since };
       const bh = await blockhashOf(rpcs);
       // one frame at a time on each RPC: a public provider throttles a burst; a claim that does not simulate is planned
@@ -1871,7 +1876,7 @@ async function rentBack(h: PoolSellHost, x: RentBack, hold?: Hold): Promise<Ende
       return { keep: t.plan.keep, signed, last: bh.lastHeight, unclaimed: t.reads.unclaimed, since };
     });
     if (teardown === null) return end("gave_up", "the teardown");
-    if (teardown.ok.young !== undefined) return end("holds", "a found W: not yet past its last transaction's blockhash on both RPCs, or a transaction landed on W since", false);
+    if (teardown.ok.young !== undefined) return end("holds", "a found W: not yet past its last transaction's blockhash on both RPCs, a transaction landed on W since, or its token accounts not read alike", false);
     if (teardown.ok.holds !== undefined) return end("holds", teardown.ok.holds ? "W holds a token it traded: no full sell of it landed" : "W holds a token it traded: its sell not final yet", teardown.ok.holds);
     if (teardown.ok.refused !== undefined) return end("refused", teardown.ok.refused);
     for (const f of teardown.ok.signed) await send(f.signed, f.signature);
@@ -1899,7 +1904,9 @@ async function rentBack(h: PoolSellHost, x: RentBack, hold?: Hold): Promise<Ende
       // account meanwhile, leaves an account open): the sweep only when the plan now closes nothing and keeps nothing,
       // so W keeps the fee for what is still open; a claim the teardown planned around stays planned around (card
       // sol-w-sweep: it is the next pass's to try again, from the claim's cost the sweep leaves on W)
-      const now = await readW(unclaimed);
+      const extra = since === undefined ? [] : await foundTokenAccounts(rpcs, w.address).catch(() => null);
+      if (extra === null) return { end: "holds" as const, steady: false, detail: "a found W: its token accounts not read alike on both RPCs" };
+      const now = await readW(unclaimed, extra);
       if (now.k === "holds") return { end: "kept" as const, steady: now.steady, detail: "W holds a token it traded" };
       if (now.k === "refused") return { end: "refused" as const, detail: now.why };
       const owed = owedOf(now.plan.keep);
@@ -1997,7 +2004,10 @@ export function owedOf(keep: readonly { cashback?: true }[]): number | null {
  *  the rules' version (POOL_RENT_BACK_RULES; review 5 of 38e59182, L3); undefined when the two RPCs differ. Nothing is
  *  decided on it but whether a pass runs. */
 async function heldSeen(x: RentBack): Promise<string | undefined> {
-  const addresses = [x.w.address, ...solanaTeardownAddresses(x.w.address, x.mints)];
+  // a found W's token accounts too (foundTokenAccounts): one kept holding a stranger's tokens and emptied since runs the
+  // pass again
+  const extra = x.bare === true ? await foundTokenAccounts(x.rpcs, x.w.address) : [];
+  const addresses = [x.w.address, ...new Set([...solanaTeardownAddresses(x.w.address, x.mints), ...extra])];
   const [a, b] = (await both(x.rpcs, (r) => accountsOf(r, addresses))).map((reads) => reads.map((t) => (t === null ? "-" : `${t.owner}:${t.lamports}:${base64.encode(t.data)}`)).join("|"));
   if (a !== b) return undefined;
   return base64.encode(keccak_256(new TextEncoder().encode(`${a}#${x.rent.lamportsPerByte}:${x.rent.factor}#${POOL_RENT_BACK_RULES}`)));
@@ -2092,7 +2102,9 @@ export async function resumeRentBacks(h: PoolSellHost, locks: Locks | null = glo
  * The found W's rule (card buy-spends-several-pieces): a W the device found holding SOL with no buy of its recorded (the
  * own W of an UNSPENT note: a buy of several pieces whose pieces paid W and whose buy, maybe still in flight on another
  * device on the same 12 words, has not landed) is swept only when, on both RPCs:
- *  - W owns no token account of either token program, a zero-balance one included (getTokenAccountsByOwner, W alone);
+ *  - W owns no token account of either token program (getTokenAccountsByOwner, W alone): the teardown before it closes
+ *    to W each one both RPCs list holding none, any mint, so a stranger's (anyone can open one for W) never holds the
+ *    sweep for good (review P2 of c7b85ba3a); one holding tokens is kept, and W with it;
  *  - W's latest transaction (getSignaturesForAddress, W alone, the same signature on both) is in a finalized block, and
  *    each RPC's finalized block height is past that block's height + 151: past the life of any blockhash a transaction
  *    signed before it carries, so no buy that relies on the SOL already on W can still land (its tag 3 was signed
@@ -2137,6 +2149,39 @@ async function onlyOwnSince(rpcs: Rpcs, owner: string, since: string, own: Reado
   return got.every((x) => Array.isArray(x) && x.length <= own.size && x.every((e: { signature?: unknown } | null) => typeof e?.signature === "string" && own.has(e.signature)));
 }
 
+/** The most token accounts of a found W one pass reads and closes: the rest are the next pass's (one getMultipleAccounts
+ *  call reads them with W and the teardown's own, under the providers' 100). */
+export const FOUND_CLOSE_MAX = 16;
+/** A Solana address: base58 of 32 bytes. */
+const isAddress = (v: string): boolean => {
+  if (v.length < 32 || v.length > 44) return false;
+  try {
+    return base58.decode(v).length === 32;
+  } catch {
+    return false;
+  }
+};
+/** The token accounts `owner` owns under either token program, the same set on both RPCs (getTokenAccountsByOwner, W
+ *  alone, four calls), sorted, the first FOUND_CLOSE_MAX: a found W's teardown reads them and the kit's plan closes each
+ *  one holding none to W, any mint; one holding tokens is kept and W holds. An answer out of shape, an address that is
+ *  not one, or the two RPCs listing apart: throws. */
+async function foundTokenAccounts(rpcs: Rpcs, owner: string): Promise<string[]> {
+  const lists = await both(rpcs, async (r) => {
+    const out = new Set<string>();
+    for (const programId of [SOLANA_TOKEN_PROGRAM, SOLANA_TOKEN_2022_PROGRAM]) {
+      const got = (await r("getTokenAccountsByOwner", [owner, { programId }, { encoding: "base64", commitment: "confirmed" }])) as { value?: unknown } | null;
+      if (!Array.isArray(got?.value)) throw new Error("getTokenAccountsByOwner answered no list");
+      for (const e of got.value as unknown[]) {
+        const k = (e as { pubkey?: unknown } | null)?.pubkey;
+        if (typeof k !== "string" || !isAddress(k)) throw new Error("getTokenAccountsByOwner answered an entry with no address");
+        out.add(k);
+      }
+    }
+    return [...out].sort();
+  });
+  if (lists[0].join(",") !== lists[1].join(",")) throw new Error("the two RPCs list W's token accounts apart");
+  return lists[0].slice(0, FOUND_CLOSE_MAX);
+}
 /** Both RPCs read `owner` owning no token account of either token program (four calls, each naming W alone). */
 async function ownsNoTokens(rpcs: Rpcs, owner: string): Promise<boolean> {
   const reads = await Promise.all(
