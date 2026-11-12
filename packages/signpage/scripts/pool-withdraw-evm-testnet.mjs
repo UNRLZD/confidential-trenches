@@ -14,6 +14,9 @@
 //   until the run ends with the part owed on W. Then a restore from the words alone finds W and the part on it, and two
 //   page loads on the same store (a reload, and another tab beside it) each run the state reads' finish: W's one send
 //   leaves once, and the op ends sent.
+// - A send ends sent only once its block is at or under the safe block both RPCs read (which trails the newest by
+//   minutes: 94 to 252 s on Base Sepolia, 746 to 835 s on Robinhood testnet, read 2026-11-10): until then the run
+//   ends in_transit and the page's state reads finish it, as they do here, for up to STATE_READS_MS.
 // - It reads To's and W's balances before and after on both RPCs, and every transaction's receipt on both, and writes
 //   them with the op record and the owed record to <out.json>. Nothing here logs a key or the words.
 import { createHash } from "node:crypto";
@@ -27,6 +30,8 @@ globalThis.__SIGN_NETWORK__ = "testnet";
 // FLOW_LOSE_SEND: this process's raw sends dropped while `losing` (the page's only raw send is W's: the release goes
 // through the helper)
 const LOSE = process.env.FLOW_LOSE_SEND === "1";
+/** How long the page's state reads go on for the op to end sent: past the slowest safe block read (835 s). */
+const STATE_READS_MS = 1_200_000;
 let losing = LOSE;
 let lost = 0;
 const realFetch = globalThis.fetch;
@@ -142,12 +147,18 @@ if (LOSE) {
   // a reload and another tab: two page loads on the same store, each one's state read runs the owed send's finish
   const reload = testnetPool(page, { prover: { vault, stop: () => {} }, fetch: helperFetch });
   const tab = testnetPool(page, { prover: { vault, stop: () => {} }, fetch: helperFetch });
-  for (let i = 0; i < 60 && (await w.get("ops", OP))?.stage !== "sent"; i++) {
+  for (const until = Date.now() + STATE_READS_MS; Date.now() < until && (await w.get("ops", OP))?.stage !== "sent"; ) {
     await Promise.all([reload.stateRead(), tab.stateRead()]);
     await new Promise((r) => setTimeout(r, 3_000));
   }
   await reload.signedOut();
   await tab.signedOut();
+} else {
+  // the run's own page reads on until the send's block is safe on both RPCs
+  for (const until = Date.now() + STATE_READS_MS; Date.now() < until && (await w.get("ops", OP))?.stage !== "sent"; ) {
+    await t.stateRead();
+    await new Promise((r) => setTimeout(r, 3_000));
+  }
 }
 const ms = Date.now() - t0;
 const op = await w.get("ops", OP);

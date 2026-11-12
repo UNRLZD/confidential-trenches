@@ -36,9 +36,13 @@
 //   (evmSettleReserved). A restore from the 12 words does not find a part on W today: the page restores the EVM notes
 //   with `wallets: false` (src/pool-restore.ts:678) and keeps only spends with a token (:682), so only this device's
 //   owed record finishes the send; card evm-restore-finds-w-part closes that.
-// - A W send that reverts (a To with code whose call fails, status 0 on both RPCs) used W's one nonce: the op ends
-//   stopped and its record names what W holds and W's index (EvmHeldOnW), for a send at the next nonce (card
-//   evm-withdraw-w-resend).
+// - A W send that reverts (a To with code whose call fails, status 0 on both RPCs at a safe block) used W's nonce while
+//   the part stays on W: the op stays in_transit, its owed send kept, and `held` (what W holds and W's index,
+//   EvmHeldOnW) is written in the same op write as that stage. The state reads' finish then sends what W holds, less
+//   its gas, to the same To at W's next nonce (resendHeld), only once that very send ran on both RPCs, each send kept
+//   before it leaves and signed only when every nonce under W's count is a kept send read back: at most one lands.
+// - A send ends (sent, or reverted) only once its receipt's block is at or under the safe block both RPCs read: an
+//   unsafe block can be rebuilt without it.
 // - Every read names the pool, a block, To or W (W only once its release landed: it is public then); no read carries a
 //   key or which note is whose. Nothing here logs.
 import { keccak_256 } from "@noble/hashes/sha3.js";
@@ -51,7 +55,7 @@ import { noteSecrets } from "../../wallet/src/notes/secrets.ts";
 import type { NoteRecord, NoteStore } from "../../wallet/src/notes/store.ts";
 import { EVM_CHAIN_IDS, EVM_SEND_MARGIN_MS, evmAgreedBlock, evmRetryLag, type EvmPoolPin, type EvmPoolRequest, type EvmRpc } from "../../wallet/src/pool/evm.ts";
 import { checkBinding, type Pool } from "../../wallet/src/pool/pool.ts";
-import { jOf } from "../../wallet/src/pool/queue.ts";
+import { jOf, provesOnNewest } from "../../wallet/src/pool/queue.ts";
 import { EVM_BUY_HEAD_SPREAD, EVM_BUY_LAG_BLOCKS, EVM_BUY_LAG_MS } from "./pool-buy-evm.ts";
 import { EvmSendBusy, EvmSendRefused, evmBuyVerdict, evmHeadNumber, evmReleaseRead, evmWithdrawCalldata, type EvmReleaseRead } from "./evm-send.ts";
 import { planPoolWithdraw, withdrawSources, type Arrivals, type PendingOnward, type WithdrawPart } from "./pool-withdraw.ts";
@@ -84,12 +88,14 @@ export type EvmWithdrawCosts = WithdrawCosts & { gas: bigint; maxFee: bigint; ti
  *  release's nullifier, the block its read-back starts at, its deadline, chunk and fee (decimals); `release` the
  *  release's transaction once both RPCs read it, `onward` W's newest signed send's hash and `onwards` every one signed
  *  for this part (a reload's, another tab's), each written before its bytes leave. */
-export type EvmPendingOnward = PendingOnward & { chain: Chain; part: string; nullifier: string; from: string; deadlineMs: string; chunk: string; fee: string; onward?: string; onwards?: string[] };
+export type EvmPendingOnward = PendingOnward & { chain: Chain; part: string; nullifier: string; from: string; deadlineMs: string; chunk: string; fee: string; onward?: string; onwards?: string[]; resends?: EvmResend[] };
+/** One of W's sends after its nonce-0 send reverted (resendHeld): its nonce (a decimal) and hash, kept before it leaves. */
+export type EvmResend = { nonce: string; hash: string };
 
 /** Every W send kept for an owed part: `onwards` and `onward`, once each. */
 export const evmKeptOnwards = (p: Pick<EvmPendingOnward, "onward" | "onwards">): string[] => [...new Set([...(p.onwards ?? []), ...(p.onward !== undefined ? [p.onward] : [])])];
 
-/** A part held on W after W's one send reverted: W (its index: the note's label `l` and `j`), and what W holds, wei, a
+/** A part held on W after W's send reverted: W (its index: the note's label `l` and `j`), and what W holds, wei, a
  *  decimal, as both RPCs read it. The op's record keeps it, for a send at W's next nonce. */
 export type EvmHeldOnW = { chain: Chain; noteId: string; w: string; l: string; j: number; amount: string };
 
@@ -118,7 +124,8 @@ export type EvmWithdrawHost = {
   /** The owed send's record updated (its release read back, W's send's hash before it leaves), awaited. */
   keep?(p: EvmPendingOnward): Promise<void>;
   owedNotes?(): Promise<ReadonlySet<string>>;
-  stage?(stage: WithdrawStage, txs: TxRef[], pending: EvmPendingOnward | null, arrived: Arrivals): void;
+  /** The op's stage; `held` (a part left on W by a send that reverted) in the same call, so one write holds both. */
+  stage?(stage: WithdrawStage, txs: TxRef[], pending: EvmPendingOnward | null, arrived: Arrivals, held?: EvmHeldOnW): void;
   now?(): bigint;
   wait?(ms: number): Promise<void>;
 };
@@ -252,7 +259,7 @@ export const evmToRefused = (to: string, pin: EvmPoolPin, ws: readonly string[])
  *  (read again). The transaction that carried it is not read: a release sent through any contract (a wrapper that calls
  *  the pool) changes nothing W receives. The event is the pool's own (its log address the pin's; PrivacyPool.sol
  *  _release emits it in the call that pays W the chunk less the fee, W's signed relay data holding the fee cap), only
- *  W's key moves what W then holds, and W's one send moves at most min(part, balance - bound) at nonce 0. */
+ *  W's key moves what W then holds, and each send of W's moves at most min(part, balance - bound), at most one landing. */
 export type EvmReleaseVerdict = { end: "mine"; tx: string; block: bigint } | { end: "other" } | { end: "none" } | null;
 export async function evmReleaseOf(h: Pick<EvmWithdrawHost, "rpcs" | "pin">, p: Pick<EvmPendingOnward, "nullifier" | "from" | "deadlineMs" | "chunk" | "fee">, w: string, stops: [bigint | null, bigint | null]): Promise<EvmReleaseVerdict> {
   const reads = (await Promise.all(h.rpcs.map((rpc, k) => evmReleaseRead(rpc, h.pin.pool, BigInt(p.from), BigInt(p.deadlineMs), stops[k]!)))) as [EvmReleaseRead, EvmReleaseRead];
@@ -295,9 +302,8 @@ const heldOf = async (rpcs: readonly [EvmRpc, EvmRpc], w: string, tag: string): 
  *  built from the device's reads on both RPCs, checked by the rule, signed by W, its hash kept before it leaves, sent to
  *  both RPCs and read back as a receipt of status 1 on both. W's nonce: two RPCs that differ read again ("unknown");
  *  past 0 on both, W's one send was made (this tab's or another's): a kept one read back ("ok", or "reverted" with what
- *  W holds), else "empty" (still owed: read again, never dropped). */
+ *  W holds, for resendHeld), else "empty" (still owed: read again, never dropped). */
 async function sendOnward(h: EvmWithdrawHost, ask: PoolAsk, p: EvmPendingOnward, l: bigint, j: number, keep: (p: EvmPendingOnward) => Promise<void>): Promise<OnwardEnd> {
-  const wait = waitOf(h);
   const w = await wOf(h, l, j);
   const part = BigInt(p.part);
   const feeCap = BigInt(p.feeCap);
@@ -366,9 +372,16 @@ async function sendOnward(h: EvmWithdrawHost, ask: PoolAsk, p: EvmPendingOnward,
   const hash = hexOf(keccak_256(raw));
   // its hash kept with the owed send before the bytes leave: a reload reads this very send back
   await keep({ ...p, onward: hash });
+  return broadcast(h, raw, hash, w, p.to, value);
+}
+
+/** W's signed send to both RPCs, again every fifth round, and its receipt read between them: "ok", "reverted" (with
+ *  what W holds then, both RPCs' word), else "unknown" once the tap's rounds are spent (the state reads go on). */
+async function broadcast(h: EvmWithdrawHost, raw: Uint8Array, hash: string, w: string, to: string, value: bigint): Promise<OnwardEnd> {
+  const wait = waitOf(h);
   for (let round = 0; round < EVM_ONWARD_ROUNDS; round++) {
     if (round % 5 === 0) await Promise.allSettled(h.rpcs.map((rpc) => rpc("eth_sendRawTransaction", [hexOf(raw)])));
-    const got = await onwardReceipt(h.rpcs, hash, w, p.to);
+    const got = await onwardReceipt(h.rpcs, hash, w, to);
     if (got === "ok") return { state: "ok", hash, value };
     if (got === "failed") return { state: "reverted", hash, held: await heldOf(h.rpcs, w, qty((await latest(h.rpcs)).number)) };
     await wait(EVM_WITHDRAW_WAIT_MS);
@@ -376,16 +389,87 @@ async function sendOnward(h: EvmWithdrawHost, ask: PoolAsk, p: EvmPendingOnward,
   return { state: "unknown", hash };
 }
 
-/** W's send's receipt on both RPCs: "ok" (status 1 on both, from W to To, the same block), "failed" (status 0 on
- *  both), else null. */
+/** W's send after its nonce-0 send reverted (`held`): what W holds less its gas bound (never more than the part) to the
+ *  same To, at W's next nonce. A kept resend read back ends it ("ok"); W's nonce 0, or the two RPCs apart on it, reads
+ *  again (never a second nonce-0 send); every nonce under W's count must be a kept send read back (nonce 0 the reverted
+ *  one, each later one a kept resend), so no send of W's is in flight below the one signed and at most one lands. The
+ *  send is estimated and run (eth_call) on both RPCs at the block read, with its value and gas, and signed only when
+ *  both returned; the rule (checkEvmOnwardSend) holds it as W's first send; its hash and nonce kept before it leaves. */
+async function resendHeld(h: EvmWithdrawHost, ask: PoolAsk, p: EvmPendingOnward, l: bigint, j: number, keep: (p: EvmPendingOnward) => Promise<void>): Promise<OnwardEnd> {
+  const w = await wOf(h, l, j);
+  const kept = p.resends ?? [];
+  const read = new Map<string, "ok" | "failed" | null>();
+  for (const r of kept) {
+    const got = await onwardReceipt(h.rpcs, r.hash, w, p.to);
+    if (got === "ok") return { state: "ok", hash: r.hash, value: BigInt(await sentValue(h.rpcs, r.hash)) };
+    read.set(r.hash, got);
+  }
+  const part = BigInt(p.part);
+  const feeCap = BigInt(p.feeCap);
+  const blk = await latest(h.rpcs);
+  const tag = qty(blk.number);
+  const baseFee = blk.baseFeePerGas ?? stop("read");
+  const nonce = await both(h.rpcs, async (rpc) => quantity(await rpc("eth_getTransactionCount", [w, tag])));
+  if (nonce[0] !== nonce[1] || nonce[0] === 0n) return { state: "unknown", hash: "" };
+  for (let k = 1n; k < nonce[0]; k++) if (!kept.some((r) => BigInt(r.nonce) === k && read.get(r.hash) === "failed")) return { state: "unknown", hash: "" };
+  const balance = await both(h.rpcs, async (rpc) => quantity(await rpc("eth_getBalance", [w, tag])));
+  const bal = agree(balance);
+  const toHasCode = await codeOf(h.rpcs, p.to, tag);
+  const code = agree(toHasCode);
+  const tip = nitro(h.chain) ? 0n : EVM_ONWARD_TIP;
+  const maxFee = nitro(h.chain) ? baseFee : 2n * baseFee + tip;
+  // the gas: 21,000 to no code on Base; else the estimate both RPCs agree on (a To with code: and its margin), for the
+  // most W could send (its balance less the largest bound)
+  const most = bal - EVM_ONWARD_GAS_MAX * maxFee - (await l1Of(h, EVM_ONWARD_GAS_MAX, tag))[0];
+  if (most <= 0n) return { state: "failed" };
+  const estimate = await both(h.rpcs, async (rpc) => quantity(await rpc("eth_estimateGas", [{ from: w, to: p.to, value: qty(most < part ? most : part) }, tag])));
+  const gas = code ? evmOnwardCodeGas(agree(estimate)) : nitro(h.chain) ? agree(estimate) : EVM_ONWARD_GAS;
+  const l1 = await l1Of(h, gas, tag);
+  const bound = gas * maxFee + l1[0];
+  if (bound > feeCap) return { state: "fee", need: bound };
+  const value = bal - bound < part ? bal - bound : part;
+  if (value <= 0n) return { state: "failed" };
+  // the very send, run on both RPCs: a To that reverts it is never sent to again until it returns
+  const call = { from: w, to: p.to, value: qty(value), gas: qty(gas) };
+  const simulated = await both(h.rpcs, (rpc) => Promise.resolve().then(() => rpc("eth_call", [call, tag])).then(() => true, () => false));
+  if (!simulated[0] || !simulated[1]) return { state: "unknown", hash: "" };
+  const tx: EvmOnwardSend = { type: 2, chainId: EVM_CHAIN_IDS[h.pin.network], nonce: nonce[0], maxPriorityFeePerGas: tip, maxFeePerGas: maxFee, gasLimit: gas, to: p.to, value, data: "0x", accessList: [] };
+  const ctx = { nowMs: clockOf(h)(), wallet: w, feeCap, evm: { venues: h.venues, feeRecipient: h.pin.feeRecipient } };
+  try {
+    checkEvmOnwardSend(tx, ask, ctx, p.to, { nonce, balance, toHasCode, estimate: code || nitro(h.chain) ? estimate : null, simulated, baseFee: [baseFee, baseFee], l1Fee: l1, priorityCap: tip, part }, h.testnet);
+  } catch (e) {
+    if (e instanceof PoolRuleRefused) return { state: "failed" };
+    throw e;
+  }
+  const raw = await seedUse(h, (seed) => {
+    const signer = freshWallet(seed, "evm", l, j);
+    try {
+      if (signer.address !== w) stop("wallet");
+      return signEvmOnwardSend(signer.secretKey, tx);
+    } finally {
+      signer.secretKey.fill(0);
+    }
+  });
+  const hash = hexOf(keccak_256(raw));
+  await keep({ ...p, resends: [...kept, { nonce: nonce[0].toString(), hash }] });
+  return broadcast(h, raw, hash, w, p.to, value);
+}
+
+/** W's send's receipt on both RPCs: "ok" (status 1 on both, from W to To, the same block hash and number), "failed"
+ *  (status 0 on both), each only once that block is at or under the safe block both RPCs read (an unsafe block can be
+ *  rebuilt without the send, which would put its nonce, and the part, back in play); else null. */
 export async function onwardReceipt(rpcs: readonly [EvmRpc, EvmRpc], hash: string, w: string, to: string): Promise<"ok" | "failed" | null> {
-  const rs = await Promise.all(rpcs.map((rpc) => Promise.resolve().then(() => rpc("eth_getTransactionReceipt", [hash])).catch(() => null))) as ({ status?: unknown; from?: unknown; to?: unknown; blockHash?: unknown } | null)[];
+  type Receipt = { status?: unknown; from?: unknown; to?: unknown; blockHash?: unknown; blockNumber?: unknown };
+  const rs = await Promise.all(rpcs.map((rpc) => Promise.resolve().then(() => rpc("eth_getTransactionReceipt", [hash])).catch(() => null))) as (Receipt | null)[];
   if (rs.some((r) => r === null || typeof r !== "object")) return null;
-  const [a, b] = rs as { status?: unknown; from?: unknown; to?: unknown; blockHash?: unknown }[];
+  const [a, b] = rs as Receipt[];
   if (a!.blockHash !== b!.blockHash || typeof a!.from !== "string" || typeof a!.to !== "string" || lower(a!.from) !== lower(w) || lower(a!.to) !== lower(to) || lower(String(b!.from)) !== lower(w) || lower(String(b!.to)) !== lower(to)) return null;
-  if (a!.status === "0x1" && b!.status === "0x1") return "ok";
-  if (a!.status === "0x0" && b!.status === "0x0") return "failed";
-  return null;
+  if (typeof a!.blockNumber !== "string" || a!.blockNumber !== b!.blockNumber || !/^0x[0-9a-fA-F]{1,16}$/.test(a!.blockNumber)) return null;
+  const end = a!.status === "0x1" && b!.status === "0x1" ? "ok" : a!.status === "0x0" && b!.status === "0x0" ? "failed" : null;
+  if (end === null) return null;
+  const block = BigInt(a!.blockNumber);
+  const safe = await Promise.all(rpcs.map((rpc) => Promise.resolve().then(() => rpc("eth_getBlockByNumber", ["safe", false])).then((x) => (x as { number?: unknown } | null)?.number, () => null)));
+  return safe.every((n) => typeof n === "string" && /^0x[0-9a-fA-F]{1,16}$/.test(n) && BigInt(n) >= block) ? end : null;
 }
 
 /** One withdraw of `amount` (wei arriving at `to`), `maxFee` the Max fee the screen drew. */
@@ -395,7 +479,7 @@ export async function runEvmPoolWithdraw(h: EvmWithdrawHost, ask: PoolAsk, to: s
   let pending: EvmPendingOnward | null = null;
   let feeNeeded: bigint | null = null;
   let held: EvmHeldOnW | null = null;
-  const say = (s: WithdrawStage): void => h.stage?.(s, txs.slice(), pending, { ...arrived });
+  const say = (s: WithdrawStage): void => h.stage?.(s, txs.slice(), pending, { ...arrived }, held ?? undefined);
   const end = (s: WithdrawStage): EvmWithdrawAnswer => (say(s), { stage: s, txs: txs.slice(), pending, arrived: { ...arrived }, ...(feeNeeded !== null ? { feeNeeded: feeNeeded.toString() } : {}), ...(held !== null ? { held } : {}) });
   try {
     if (ask.kind !== "pool.withdraw" || ask.chain !== h.chain) stop("kind");
@@ -443,11 +527,11 @@ export async function runEvmPoolWithdraw(h: EvmWithdrawHost, ask: PoolAsk, to: s
         feeNeeded = on.need;
         return end("in_transit");
       } else if (on.state === "reverted") {
-        // W's one send reverted: the part stays on W, named in the op's record for a send at W's next nonce
+        // W's send reverted: the part stays on W and still owed (in_transit), `held` written with that stage; the state
+        // reads' finish sends it at W's next nonce (resendHeld)
         txs.push({ chain: h.chain, hash: on.hash });
         held = { chain: h.chain, noteId: pending!.noteId, w: await wOf(h, got.l, got.j), l: got.l.toString(), j: got.j, amount: on.held.toString() };
-        pending = null;
-        return end("stopped");
+        return end("in_transit");
       } else return end("in_transit"); // "empty", "unknown", "failed": the part still owed, for the state reads
       pending = null;
       if (i < plan!.length - 1) say("submitted");
@@ -455,6 +539,25 @@ export async function runEvmPoolWithdraw(h: EvmWithdrawHost, ask: PoolAsk, to: s
     return end("sent");
   } catch {
     return end(pending ? "in_transit" : "stopped");
+  }
+}
+
+/** How far past one epoch the run waits for the pool's time to reach the next boundary before it stops (the Solana
+ *  withdraw's WITHDRAW_BOUNDARY_LAG_MS): the pool's time is the newest block both RPCs agree on; past this one lags. */
+export const EVM_WITHDRAW_BOUNDARY_LAG_MS = 30_000n;
+
+/** Waits until the pool's time (P.now, never the device clock) reaches `boundary`, at most one epoch and
+ *  EVM_WITHDRAW_BOUNDARY_LAG_MS of waits; returns that time. */
+async function evmPoolTimeAt(P: Pool<EvmPoolRequest>, wait: (ms: number) => Promise<void>, boundary: bigint): Promise<bigint> {
+  const most = P.epochMs + EVM_WITHDRAW_BOUNDARY_LAG_MS;
+  for (let slept = 0n; ; ) {
+    const nowMs = await P.now();
+    if (nowMs >= boundary) return nowMs;
+    if (slept >= most) stop("boundary");
+    let ms = boundary - nowMs > 1_000n ? boundary - nowMs : 1_000n;
+    if (ms > most - slept) ms = most - slept;
+    await wait(Number(ms));
+    slept += ms;
   }
 }
 
@@ -469,30 +572,48 @@ async function onePart(h: EvmWithdrawHost, ask: PoolAsk, notes: NoteStore, p: Wi
   const clock = clockOf(h);
   const wait = waitOf(h);
   try {
-    let n = await notes.get(p.noteId);
-    if (n?.state === "HELD" && h.drop) {
-      await h.drop(p.noteId);
-      n = await notes.get(p.noteId);
-    }
-    if (n === undefined || n.state !== "UNSPENT" || n.leaf === undefined) stop("note");
-    const leaf = n!.leaf!;
+    // the note, dropped first when the page's proof queue holds it for the next buy
+    const free = async (): Promise<NoteRecord> => {
+      let n = await notes.get(p.noteId);
+      if (n?.state === "HELD" && h.drop) {
+        await h.drop(p.noteId);
+        n = await notes.get(p.noteId);
+      }
+      if (n === undefined || n.state !== "UNSPENT" || n.leaf === undefined) stop("note");
+      return n!;
+    };
+    let n = await free();
+    const leaf = n.leaf!;
     if (leaf.value < p.chunk || p.chunk !== p.part + c.fee + c.wFee) stop("value");
-    const nowMs = await P.now();
-    const epochStartMs = nowMs - (nowMs % P.epochMs);
+    // the epoch root when the note is in it; else the newest for a deposit's own note (queue.ts provesOnNewest), and
+    // for any other (a return, move, change or refund note) the next epoch's, once the pool's time reached it (M351: a
+    // root right after its own leaf would link the W it pays to the W whose money made that leaf)
+    let nowMs = await P.now();
+    let epochStartMs = nowMs - (nowMs % P.epochMs);
+    let trees = await P.trees(epochStartMs);
+    if (leaf.leafIndex >= BigInt(trees.stateTree.size)) {
+      if (provesOnNewest(n.ref)) trees = await P.trees(nowMs + 1n, undefined, { newest: true });
+      else {
+        nowMs = await evmPoolTimeAt(P, wait, epochStartMs + P.epochMs);
+        epochStartMs = nowMs - (nowMs % P.epochMs);
+        trees = await P.trees(epochStartMs);
+        if (leaf.leafIndex >= BigInt(trees.stateTree.size)) stop("root");
+        // the page's proof queue may have held it at the boundary
+        n = await free();
+      }
+    }
     const deadlineMs = epochStartMs + P.lifeMs;
-    const j = jOf(n!.ref);
+    const j = jOf(n.ref);
     const keys = await seedUse(h, (seed) => {
       const w = freshWallet(seed, "evm", leaf.label, j);
       w.secretKey.fill(0);
-      return { w, refund: noteSecrets(seed, { kind: "refund", l: leaf.label, j }).precommitment, spent: noteSecrets(seed, n!.ref), next: noteSecrets(seed, { kind: "change", l: leaf.label, j }) };
+      return { w, refund: noteSecrets(seed, { kind: "refund", l: leaf.label, j }).precommitment, spent: noteSecrets(seed, n.ref), next: noteSecrets(seed, { kind: "change", l: leaf.label, j }) };
     });
     const binding = await P.bind({ chunk: p.chunk, wallet: { address: keys.w.address, publicKey: keys.w.publicKey }, refundPrecommitment: keys.refund, epochStartMs, deadlineMs });
     checkBinding(P as Pool, binding, p.chunk);
     // the plan's fee or no part: a fee that moved since the plan stops before W signs
     if (binding.feeCap !== c.fee || binding.request.relay.feeCap !== c.fee) stop("fee");
     attempt = (await notes.move(p.noteId, "UNSPENT", "HELD", { deadlineMs, context: binding.context.toString() })).attempt!;
-    let trees = await P.trees(epochStartMs);
-    if (leaf.leafIndex >= BigInt(trees.stateTree.size)) trees = await P.trees(nowMs + 1n, undefined, { newest: true });
     const made = await poolProveWithdraw(h.prover, {
       stateTree: trees.stateTree, labelTree: trees.labelTree, newestStateRoot: trees.stateRoot, newestLabelRoot: trees.labelRoot,
       note: { value: leaf.value, label: leaf.label, nullifier: keys.spent.nullifier, secret: keys.spent.secret },
@@ -589,9 +710,11 @@ async function onePart(h: EvmWithdrawHost, ask: PoolAsk, notes: NoteStore, p: Wi
  *  (RESERVED by it, or SPENT with its context), its release read on both RPCs (none past the deadline on two passes
  *  the lag margin apart, as the run's own rule, or another's: stopped, nothing sent), then W's send: every hash kept
  *  read back first, then W's send onward, its hash kept before it leaves. W's nonce past 0 on both RPCs: a kept send
- *  landed or will, read again until both hold its receipt; a kept send that reverted (status 0 on both) ends the op
- *  stopped with what W holds (`held`). null: read again later (the money may be on W). */
-export async function finishEvmOnward(h: EvmWithdrawHost, pending: EvmPendingOnward, state: EvmFinishState = { stops: [null, null], noneAt: null }): Promise<{ stage: WithdrawStage; txs: TxRef[]; arrived: Arrivals; feeNeeded?: string; held?: EvmHeldOnW } | null> {
+ *  landed or will, read again until both hold its receipt; a kept send that reverted (status 0 on both) answers
+ *  in_transit with what W holds (`held`), nothing signed in that pass, so the op's record holds `held` before any
+ *  resend leaves. With `held` (the op's record's, this note's), W's next-nonce send of what it holds to the same To
+ *  (resendHeld), never W's nonce-0 send again. null: read again later (the money may be on W). */
+export async function finishEvmOnward(h: EvmWithdrawHost, pending: EvmPendingOnward, state: EvmFinishState = { stops: [null, null], noneAt: null }, heldWas?: EvmHeldOnW): Promise<{ stage: WithdrawStage; txs: TxRef[]; arrived: Arrivals; feeNeeded?: string; held?: EvmHeldOnW } | null> {
   const done = (stage: WithdrawStage, txs: TxRef[] = [], arrived: Arrivals = {}) => ({ stage, txs, arrived });
   try {
     const ask: PoolAsk = { kind: "pool.withdraw", chain: h.chain, token: null, amount: 0n, slippageBps: 0, decimals: 18 };
@@ -619,12 +742,15 @@ export async function finishEvmOnward(h: EvmWithdrawHost, pending: EvmPendingOnw
     state.noneAt = null;
     h.settle();
     if (v.end !== "mine") return done("stopped");
-    const on = await sendOnward(h, ask, pending, l, j, async (q) => {
+    const keep = async (q: EvmPendingOnward): Promise<void> => {
       await h.keep?.(q);
-    });
+    };
+    // `held` only as this note's own W: any other record is no word of the chain's
+    const held = heldWas !== undefined && heldWas.noteId === pending.noteId && heldWas.chain === h.chain && lower(heldWas.w) === lower(w) && heldWas.l === l.toString() && heldWas.j === j;
+    const on = held ? await resendHeld(h, ask, pending, l, j, keep) : await sendOnward(h, ask, pending, l, j, keep);
     const rel: TxRef = { chain: h.chain, hash: v.tx };
     if (on.state === "ok") return done(pending.last ? "sent" : "stopped", [rel, { chain: h.chain, hash: on.hash }], { [on.hash]: on.value.toString() });
-    if (on.state === "reverted") return { ...done("stopped", [rel, { chain: h.chain, hash: on.hash }]), held: { chain: h.chain, noteId: pending.noteId, w, l: l.toString(), j, amount: on.held.toString() } };
+    if (on.state === "reverted") return { ...done("in_transit", [rel, { chain: h.chain, hash: on.hash }]), held: { chain: h.chain, noteId: pending.noteId, w, l: l.toString(), j, amount: on.held.toString() } };
     if (on.state === "fee") return { stage: "in_transit", txs: [], arrived: {}, feeNeeded: on.need.toString() };
     return null;
   } catch {

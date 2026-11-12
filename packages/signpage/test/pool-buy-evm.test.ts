@@ -14,7 +14,7 @@ import { asRecorded, gasRoundAnswers, withMarker } from "../../kit/test/evm-quot
 import { entropyToWords, freshWallet, wordsToSeed64 } from "../../wallet/src/derive/keys.ts";
 import { EVM_POOL_EVENTS, evmPoolContextOf, evmPoolScopeOf, evmRelayDataBytes, type EvmPoolRequest, type EvmRelayData } from "../../wallet/src/pool/evm.ts";
 import type { ReadyProof } from "../../wallet/src/pool/pool.ts";
-import { EVM_BUY_SETTLE_MS, EVM_OWED_BACK_KEY, EVM_POSITION_COSTS_KEY, runEvmPoolBuy, type EvmHolding, type EvmOwedBack, type EvmPoolBuyAnswer, type EvmPoolBuyHost } from "../src/pool-buy-evm.ts";
+import { EVM_BUY_LAG_BLOCKS, EVM_BUY_SETTLE_MS, EVM_OWED_BACK_KEY, EVM_POSITION_COSTS_KEY, runEvmPoolBuy, type EvmHolding, type EvmOwedBack, type EvmPoolBuyAnswer, type EvmPoolBuyHost } from "../src/pool-buy-evm.ts";
 import { evmBuyCalldata, EvmSendBusy, EvmSendNoAnswer, EvmSendRefused } from "../src/evm-send.ts";
 import type { PoolAsk } from "../src/rules/pool.ts";
 import * as R from "../src/rules/pool.ts";
@@ -234,7 +234,7 @@ test("filled: one Bought for the nullifier, the same on both RPCs, paying W the 
   // deadline, W's signed min out, the chunk, the fee cap and the fee recipient
   const minOut = seen.records[0]![1].buy?.minOut ?? "";
   assert.ok(/^[1-9][0-9]*$/.test(minOut), minOut);
-  const buy = { nullifier: NULLIFIER.toString(), from: (START - 100n).toString(), deadlineMs: DEADLINE.toString(), minOut, value: CHUNK.toString(), feeCap: FEE.toString(), feeRecipient: FEE_TO };
+  const buy = { nullifier: NULLIFIER.toString(), from: (START - EVM_BUY_LAG_BLOCKS).toString(), deadlineMs: DEADLINE.toString(), minOut, value: CHUNK.toString(), feeCap: FEE.toString(), feeRecipient: FEE_TO };
   assert.deepEqual(seen.records, [
     [W, { mint: TOKEN.toLowerCase(), decimals: 6, chain: "base", state: "pending", route, buy }],
     [W, { mint: TOKEN.toLowerCase(), decimals: 6, chain: "base", state: "filled", received: "40", route: { ...route, tx: TX, block: "272" }, buy }],
@@ -250,12 +250,12 @@ test("(ruling 2) the read-back names no W, nullifier or transaction to a public 
   const said = JSON.stringify(seen.calls.map((c) => c.params)).toLowerCase();
   for (const secret of [W.slice(2).toLowerCase(), w32(NULLIFIER), NULLIFIER.toString(16), HELPER_HASH.slice(2), TX.slice(2)]) assert.ok(!said.includes(secret), `no read names ${secret}`);
   const filter = seen.calls.find((c) => c.method === "eth_getLogs")!.params as [Record<string, unknown>];
-  assert.deepEqual(filter, [{ address: POOL, topics: [[topic(EVM_POOL_EVENTS.Bought), topic(EVM_POOL_EVENTS.Withdrawn)]], fromBlock: "0x9c", toBlock: "0x140" }]);
-  // the two RPCs' newest blocks differ: the reads start a lag margin (EVM_BUY_LAG_BLOCKS, 100) under the lower, so neither misses the release
+  assert.deepEqual(filter, [{ address: POOL, topics: [[topic(EVM_POOL_EVENTS.Bought), topic(EVM_POOL_EVENTS.Withdrawn)]], fromBlock: "0x" + (START - EVM_BUY_LAG_BLOCKS).toString(16), toBlock: "0x140" }]);
+  // the two RPCs' newest blocks differ: the reads start a lag margin (EVM_BUY_LAG_BLOCKS) under the lower, so neither misses the release
   const ahead = host({ a: { logs: [release()], start: START + 9n }, b: { logs: [release()] } });
   await runEvmPoolBuy(ahead.h, ASK);
   const froms = ahead.seen.calls.filter((c) => c.method === "eth_getLogs").map((c) => (c.params as [{ fromBlock: string }])[0].fromBlock);
-  assert.ok(froms.length === 2 && froms.every((f) => f === "0x9c"), froms.join(","));
+  assert.ok(froms.length === 2 && froms.every((f) => f === "0x" + (START - EVM_BUY_LAG_BLOCKS).toString(16)), froms.join(","));
 });
 
 test("(ruling 2) a Bought on one RPC only, or the two differing, is not filled; past the tap's bound the answer is sent, and the end goes out late once both agree", async () => {
@@ -957,7 +957,7 @@ test("(pending end, dead tab) a pending record whose tab died before its end is 
     await followPending!(load.h);
     if (landed) assert.deepEqual([kept.get(W)?.state, kept.get(W)?.received, kept.get(W)?.route.tx], ["filled", "40", TX]);
     else assert.equal(kept.has(W), false, "never landed: removed, so the note can buy again");
-    assert.ok(logReads(load.seen).every((r) => BigInt(r.fromBlock) === START - 100n), "from the record's own block");
+    assert.ok(logReads(load.seen).every((r) => BigInt(r.fromBlock) === START - EVM_BUY_LAG_BLOCKS), "from the record's own block");
     assert.equal(load.seen.settles, 1, "the settle pass ends the note");
   }
 });

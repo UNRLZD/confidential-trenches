@@ -112,6 +112,12 @@ export function jOf(ref: NoteRef): number {
   return ref.kind === "change" ? changeIndex({ kind: "change", j: ref.j }) : changeIndex({ kind: "deposit" });
 }
 
+/** A deposit's own note (a deposit note, or a second arrival of a deposit from U): the one kind proved at once on the
+ *  newest root when it landed this epoch (pool.ts "Epochs"); every other waits for the next boundary. */
+export function provesOnNewest(ref: NoteRef): boolean {
+  return ref.kind === "deposit" || (ref.kind === "second" && ref.id.id === "U");
+}
+
 const notHidden = (): boolean => (globalThis as { document?: { visibilityState?: string } }).document?.visibilityState !== "hidden";
 const byChunkThenLeaf = (l: Pool["ladder"]) => (x: NoteRecord, y: NoteRecord): number => {
   const cx = chunkOf(l, x.leaf!.value)!, cy = chunkOf(l, y.leaf!.value)!;
@@ -271,7 +277,7 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
     for (const n of open) {
       if (todo.length === want) break;
       if (n.leaf!.leafIndex < BigInt(epochTrees.stateTree.size)) todo.push({ n, trees: epochTrees, root: "epoch" });
-      else if (n.ref.kind === "deposit" || (n.ref.kind === "second" && n.ref.id.id === "U")) {
+      else if (provesOnNewest(n.ref)) {
         newest ??= await pool.trees(nowMs + 1n, signal, { newest: true }).catch((e: unknown) => (e instanceof Error ? e : new Error(String(e)))); // every leaf up to now
         if (newest instanceof Error) out.failed.push({ noteId: n.id, error: msg(newest) });
         else todo.push({ n, trees: newest, root: "newest" });

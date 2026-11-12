@@ -21,8 +21,11 @@ import { evmPoolChainFee, evmPoolChainFeeReads } from "../../kit/src/trade/evm/p
 import { evmWithdrawCalldata } from "../src/evm-send.ts";
 import { planPoolWithdraw, withdrawSources } from "../src/pool-withdraw.ts";
 import { evmPoolVenues } from "../../kit/src/trade/evm/buy-unpinned.ts";
-import { EVM_BUY_HEAD_SPREAD, EVM_BUY_LAG_MS } from "../src/pool-buy-evm.ts";
-import { evmToRefused, evmWithdrawCosts, evmWithdrawMinPart, finishEvmOnward, onwardReceipt, runEvmPoolWithdraw, EVM_ONWARD_TIP, EVM_ONWARD_L1_BYTES, type EvmPendingOnward, type EvmWithdrawHost } from "../src/pool-withdraw-evm.ts";
+import { EVM_BUY_HEAD_SPREAD, EVM_BUY_LAG_BLOCKS, EVM_BUY_LAG_MS } from "../src/pool-buy-evm.ts";
+import { EVM_SELL_LAG_BLOCKS } from "../src/pool-sell-evm.ts";
+import { EVM_BUY_LOG_SPAN } from "../src/evm-send.ts";
+import { EVM_LIFE_MS } from "../../wallet/src/pool/evm.ts";
+import { evmToRefused, evmWithdrawCosts, evmWithdrawMinPart, finishEvmOnward, onwardReceipt, runEvmPoolWithdraw, EVM_ONWARD_TIP, EVM_ONWARD_L1_BYTES, type EvmHeldOnW, type EvmPendingOnward, type EvmWithdrawHost } from "../src/pool-withdraw-evm.ts";
 import { EVM_ONWARD_GAS, evmOnwardCodeGas, withdrawNoteFloor } from "../src/rules/pool.ts";
 
 const LIB = new URL("../../../contracts/pool-evm/script/testnet-run-lib.mjs", import.meta.url).href;
@@ -51,11 +54,14 @@ type Side = {
   // a finish's release read and W's send: the blocks' time, the pool's logs, transactions and receipts by hash, W's
   // balance, the raw sends made, and a send's receipt (status 1, from W to To) once one is made
   timeMs?: bigint; logs?: unknown[]; txs?: Record<string, unknown>; receipts?: Record<string, unknown>; balance?: bigint; sent?: string[]; landsOnSend?: boolean;
+  // the RPC's safe block (default 0x100); a receipt with no block number is in block 0xf0, under it
+  safe?: bigint;
 };
+const inBlock = (r: unknown): unknown => (r !== null && typeof r === "object" && !("blockNumber" in r) ? { ...r, blockNumber: "0xf0" } : r);
 type Call = { method: string; params: unknown[] };
 const rpcOf = (s: Side, calls: Call[]) => async (method: string, params: unknown[] = []): Promise<unknown> => {
   calls.push({ method, params });
-  if (method === "eth_getBlockByNumber") return { number: "0x100", hash: "0x" + "be".repeat(32), timestamp: q((s.timeMs ?? NOW) / 1000n), baseFeePerGas: q(BASE_FEE) };
+  if (method === "eth_getBlockByNumber") return { number: params[0] === "safe" && s.safe !== undefined ? q(s.safe) : "0x100", hash: "0x" + "be".repeat(32), timestamp: q((s.timeMs ?? NOW) / 1000n), baseFeePerGas: q(BASE_FEE) };
   if (method === "eth_getLogs") return s.logs ?? [];
   if (method === "eth_getBalance") return q(s.balance ?? 0n);
   if (method === "eth_sendRawTransaction") {
@@ -74,9 +80,9 @@ const rpcOf = (s: Side, calls: Call[]) => async (method: string, params: unknown
   if (method === "eth_getTransactionCount") return q(s.nonce ?? 0n);
   if (method === "eth_getTransactionReceipt") {
     const h = String(params[0]);
-    if (s.receipts?.[h] !== undefined) return s.receipts[h];
+    if (s.receipts?.[h] !== undefined) return inBlock(s.receipts[h]);
     const raw = s.landsOnSend ? s.sent?.find((r) => "0x" + hex(keccak_256(Uint8Array.from(Buffer.from(r.slice(2), "hex")))) === h) : undefined;
-    return raw !== undefined ? { status: "0x1", from: W, to: TO, blockHash: "0x" + "ee".repeat(32) } : (s.receipt ?? null);
+    return inBlock(raw !== undefined ? { status: "0x1", from: W, to: TO, blockHash: "0x" + "ee".repeat(32) } : (s.receipt ?? null));
   }
   if (method === "eth_getTransactionByHash") return s.txs?.[String(params[0])] ?? s.tx ?? null;
   throw new Error(`no ${method}`);
@@ -359,15 +365,15 @@ test("(review P1-1, R1) one RPC's nonce past 0 alone: the finish reads again (nu
 });
 
 // P2-2 (review R2): W's one send landed with status 0 on both RPCs (a To with code that reverts)
-test("(review P2-2, R2) a kept send that reverted (status 0 on both): the op stops, its record names what W holds and W's index; nothing signed again", async () => {
+test("(review P2-2, R2; review 2 P2-A) a kept send that reverted (status 0 on both): the op stays in_transit, its answer names what W holds and W's index; nothing signed in the same pass", async () => {
   const H1 = "0x" + "c1".repeat(32);
   const side: Side = { ...releaseSide(), nonce: 1n, receipts: { [H1]: { status: "0x0", from: W, to: TO, blockHash: "0x" + "ee".repeat(32) } } };
   const got = await finishEvmOnward(finishHost(side), pendingOf({ ...BIG_CAP, onward: H1 }));
   assert.deepEqual(got, {
-    stage: "stopped", txs: [{ chain: "base", hash: REL }, { chain: "base", hash: H1 }], arrived: {},
+    stage: "in_transit", txs: [{ chain: "base", hash: REL }, { chain: "base", hash: H1 }], arrived: {},
     held: { chain: "base", noteId: "n1", w: W, l: L.toString(), j: 0, amount: (PART + W_BOUND).toString() },
   });
-  assert.deepEqual(side.sent ?? [], [], "nothing signed at nonce 1 here (card evm-withdraw-w-resend)");
+  assert.deepEqual(side.sent ?? [], [], "nothing signed before `held` is written");
   // status 0 on one RPC only: no end, read again
   const one: Side = { ...side, receipts: { [H1]: { status: "0x0", from: W, to: TO, blockHash: "0x" + "ee".repeat(32) } } };
   const other: Side = { ...side, receipts: { [H1]: { status: "0x1", from: W, to: TO, blockHash: "0x" + "ee".repeat(32) } } };
@@ -472,6 +478,8 @@ type RunPlant = {
   valueOff?: bigint;
   /** the helper's bind for W's part: another fee than the probe's, or another recipient than W */
   bindFee?: bigint; recipient?: string;
+  /** the note a change note (not a deposit's own), and landed this epoch: the epoch's trees lack it */
+  change?: boolean; thisEpoch?: boolean;
 };
 async function runWorld(plant: RunPlant = {}) {
   const ws = await openWalletStore({ indexedDB: new IDBFactory() });
@@ -489,12 +497,17 @@ async function runWorld(plant: RunPlant = {}) {
   const w = freshWallet(SEED, "evm", label, 0).address;
   const nullifier = noteSecrets(SEED, inc.ref).nullifierHash;
   const clock = { ms: NOW };
-  const chain = { logs: [] as unknown[], balance: 0n, sent: [] as string[], sentAt: null as bigint | null, binds: [] as bigint[], sends: 0, keeps: [] as EvmPendingOnward[], owes: [] as EvmPendingOnward[], stages: [] as string[] };
+  const chain = { logs: [] as unknown[], balance: 0n, sent: [] as string[], sentAt: null as bigint | null, binds: [] as bigint[], sends: 0, keeps: [] as EvmPendingOnward[], owes: [] as EvmPendingOnward[], stages: [] as string[], trees: [] as { beforeMs: bigint; newest: boolean }[] };
   const tree = (xs: bigint[]) => new VaultTree(xs);
   const pool = {
     id: `evm:${POOL}`, chain: "evm", scope: RUN_SCOPE, ladder: [], epochMs: 60_000n, lifeMs: 210_000n, sendMarginMs: 30_000n,
     now: async () => clock.ms,
-    trees: async () => ({ stateTree: tree([commitment]), labelTree: tree([label]), stateRoot: tree([commitment]).root!, labelRoot: tree([label]).root! }),
+    trees: async (beforeMs: bigint, _s?: unknown, o?: { newest?: boolean }) => {
+      chain.trees.push({ beforeMs, newest: o?.newest === true });
+      // landed this epoch: the epoch's own trees (up to NOW, an epoch's start) do not hold it
+      if (plant.thisEpoch && o?.newest !== true && beforeMs <= NOW) return { stateTree: { size: 0 }, labelTree: { size: 0 }, stateRoot: 0n, labelRoot: 0n };
+      return { stateTree: tree([commitment]), labelTree: tree([label]), stateRoot: tree([commitment]).root!, labelRoot: tree([label]).root! };
+    },
     bind: async (b: { chunk: bigint; wallet: { address: string }; refundPrecommitment: bigint; deadlineMs: bigint }) => {
       const isW = lower(b.wallet.address) === lower(w);
       const fee = isW ? (plant.bindFee ?? FEE) : FEE;
@@ -532,13 +545,16 @@ async function runWorld(plant: RunPlant = {}) {
       chain.sent.push(String(params[0]));
       return rawHash(String(params[0]));
     }
-    if (method === "eth_getTransactionReceipt") return chain.sent.some((r) => rawHash(r) === params[0]) ? { status: plant.status ?? "0x1", from: w, to: TO, blockHash: "0x" + "ee".repeat(32) } : null;
+    if (method === "eth_getTransactionReceipt") return chain.sent.some((r) => rawHash(r) === params[0]) ? { status: plant.status ?? "0x1", from: w, to: TO, blockHash: "0x" + "ee".repeat(32), blockNumber: q(0x100n) } : null;
     if (method === "eth_getTransactionByHash") return { value: q(PART) };
     throw new Error(`no ${method}`);
   };
+  // a change note: the store's record as read, its ref a change's (a note a return, move or refund made is the same case)
+  const asChange = (n: NoteRecord | undefined) => (n === undefined ? n : ({ ...n, ref: { kind: "change", l: label, j: 1 } } as unknown as NoteRecord));
+  const seen = plant.change ? Object.assign(Object.create(notes) as NoteStore, { get: async (id: string) => asChange(await notes.get(id)), list: async () => (await notes.list()).map((n) => asChange(n)!) }) : notes;
   const h: EvmWithdrawHost = {
     chain: "base", testnet: true, pin: { ...BASE_PIN, feeRecipient: RUN_FEE_TO }, venues: RUN_VENUES as never, rpcs: [rpc(0), rpc(1)], pool, prover: proverOf as never,
-    notes: async () => notes, seed64: async () => SEED.slice(),
+    notes: async () => seen, seed64: async () => SEED.slice(),
     send: async () => {
       chain.sends++;
       if (plant.release === "never") return "0x" + "ab".repeat(32);
@@ -625,16 +641,26 @@ test("(review P2-1, R4) the run: two heads further apart than EVM_BUY_HEAD_SPREA
   assert.equal((await far.notes.get(far.noteId))?.state, "UNSPENT");
   const near = await runWorld({ heads: [0x100n + EVM_BUY_HEAD_SPREAD, 0x100n] });
   assert.equal((await runEvmPoolWithdraw(near.h, RUN_ASK, TO, PART, MAX)).stage, "sent");
-  assert.equal(near.chain.owes[0]?.from, (0x100n - 100n).toString(), "a lag margin under the lower head");
+  assert.equal(near.chain.owes[0]?.from, (0x100n - EVM_BUY_LAG_BLOCKS).toString(), "a lag margin under the lower head");
 });
 
-test("(review P2-2) the run: W's send reverted (status 0 on both): stopped, the answer names what W holds and W's index, the owed send no longer pending", async () => {
+test("(review P2-2; review 2 P2-A, P3-1, X18) the run: W's send reverted (status 0 on both): in_transit, the owed send kept, `held` in the stage's own call, the reverted send in the txs", async () => {
   const { h, chain, w, label, noteId } = await runWorld({ status: "0x0" });
+  const calls: { stage: string; pending: unknown; held: unknown }[] = [];
+  h.stage = (s, _t, p, _a, held?: unknown) => void calls.push({ stage: s, pending: p, held });
   const got = await runEvmPoolWithdraw(h, RUN_ASK, TO, PART, MAX);
-  assert.equal(got.stage, "stopped");
-  assert.equal(got.pending, null);
-  assert.deepEqual(got.held, { chain: "base", noteId, w, l: label.toString(), j: 0, amount: (PART + RUN_WFEE).toString() });
+  const held = { chain: "base", noteId, w, l: label.toString(), j: 0, amount: (PART + RUN_WFEE).toString() };
+  assert.equal(got.stage, "in_transit");
+  assert.equal(got.pending?.noteId, noteId, "the owed send kept: the state reads finish it");
+  assert.equal(got.pending?.release, REL);
+  assert.deepEqual(got.held, held);
   assert.equal(chain.sent.length, 2, "W's one send only, to both RPCs");
+  const hash = "0x" + hex(keccak_256(Uint8Array.from(Buffer.from(chain.sent[0]!.slice(2), "hex"))));
+  assert.deepEqual(got.txs.map((t) => t.hash), [REL, hash], "the reverted send in the op's txs");
+  const last = calls.at(-1)!;
+  assert.equal(last.stage, "in_transit");
+  assert.notEqual(last.pending, null, "the stage write never clears the owed send");
+  assert.deepEqual(last.held, held, "`held` in the same call as the stage");
 });
 
 test("(review M18) the run: a bind for W's part under another fee than the plan's (a lower one the rule lets pass) stops before W signs, the note back UNSPENT", async () => {
@@ -659,4 +685,130 @@ test("(review M9) one RPC's nonce past 0 with a kept send that reads status 0: r
   const host = { ...finishHost(past), rpcs: [rpcOf(past, []), rpcOf(zero, [])] } as unknown as EvmWithdrawHost;
   assert.equal(await finishEvmOnward(host, pendingOf({ ...BIG_CAP, onward: H1 })), null);
   assert.deepEqual([past.sent ?? [], zero.sent ?? []], [[], []]);
+});
+
+// ---------- review 2 of e1f9e87a (verdict FIX): each test red at e1f9e87a unless it says it kills a mutant ----------
+const H1 = "0x" + "c1".repeat(32);
+const R1 = "0x" + "d1".repeat(32);
+const rcpt = (status: string, o: { bh?: string; block?: bigint } = {}) => ({ status, from: W, to: TO, blockHash: o.bh ?? "0x" + "ee".repeat(32), blockNumber: q(o.block ?? 0xf0n) });
+const rawHashOf = (r: string) => "0x" + hex(keccak_256(Uint8Array.from(Buffer.from(r.slice(2), "hex"))));
+// W after its nonce-0 send reverted: the part less what that send burned (21,000 gas at the base fee)
+const HELD_BAL = PART + W_BOUND - 21_000n * BASE_FEE;
+const heldOf = (o: Partial<EvmHeldOnW> = {}): EvmHeldOnW => ({ chain: "base", noteId: "n1", w: W, l: L.toString(), j: 0, amount: HELD_BAL.toString(), ...o });
+// a reload after the revert: the release this part's, W's nonce-0 send H1 reverted on both RPCs, W's nonce `nonce`
+const heldSide = (o: Side = {}): Side => ({ ...releaseSide(), nonce: 1n, balance: HELD_BAL, landsOnSend: true, ...o, receipts: { [H1]: rcpt("0x0"), ...(o.receipts ?? {}) } });
+
+test("(review 2 P2-A) the resend: with `held`, W sends what it holds less its gas, at its next nonce, to the same To, after the send ran on both RPCs; kept before it leaves; sent once it lands", async () => {
+  const side = heldSide();
+  const kept: EvmPendingOnward[] = [];
+  const calls: Call[] = [];
+  const host = { ...finishHost(side, { kept }), rpcs: [rpcOf(side, calls), rpcOf(side, calls)] } as unknown as EvmWithdrawHost;
+  const got = await finishEvmOnward(host, pendingOf({ ...BIG_CAP, onward: H1 }), undefined, heldOf());
+  assert.equal(side.sent?.length, 2, "one send, to both RPCs");
+  const hash = rawHashOf(side.sent![0]!);
+  const value = HELD_BAL - W_BOUND;
+  assert.deepEqual(got, { stage: "sent", txs: [{ chain: "base", hash: REL }, { chain: "base", hash }], arrived: { [hash]: value.toString() } });
+  assert.deepEqual(kept.map((p) => p.resends), [[{ nonce: "1", hash }]], "kept, with its nonce, before it left");
+  const runs = calls.filter((c) => c.method === "eth_call" && lower((c.params[0] as { to: string }).to) === lower(TO));
+  assert.equal(runs.length, 2, "the very send run on both RPCs before it is signed");
+  for (const r of runs) assert.deepEqual([lower((r.params[0] as { from: string }).from), (r.params[0] as { value: string }).value], [lower(W), q(value)]);
+  // W holding more than the part and its bound: exactly the part, never more
+  const rich = heldSide({ balance: PART + 2n * W_BOUND });
+  const got2 = await finishEvmOnward(finishHost(rich), pendingOf({ ...BIG_CAP, onward: H1 }), undefined, heldOf());
+  assert.deepEqual(Object.values(got2?.arrived ?? {}), [PART.toString()]);
+});
+
+test("(review 2 P2-A) the resend waits: its run reverting on either RPC, W's nonce 0 (never a second nonce-0 send while `held` is set), or the two RPCs' nonces apart: read again, nothing signed", async () => {
+  for (const [name, a, b] of [
+    ["run reverts on one RPC", heldSide(), heldSide({ reverts: true })],
+    ["nonce 0 on both", heldSide({ nonce: 0n }), heldSide({ nonce: 0n })],
+    ["nonces apart", heldSide({ nonce: 1n }), heldSide({ nonce: 2n })],
+  ] as const) {
+    const host = { ...finishHost(a), rpcs: [rpcOf(a, []), rpcOf(b, [])] } as unknown as EvmWithdrawHost;
+    assert.equal(await finishEvmOnward(host, pendingOf({ ...BIG_CAP, onward: H1 }), undefined, heldOf()), null, name);
+    assert.deepEqual([a.sent ?? [], b.sent ?? []], [[], []], `${name}: nothing signed`);
+  }
+});
+
+test("(review 2 P2-A) the resend lands at most once: a kept resend that landed ends it; one not read back at a nonce W has passed waits; one that reverted makes way for the next nonce", async () => {
+  const landed = heldSide({ nonce: 2n, receipts: { [R1]: rcpt("0x1") }, txs: { ...releaseSide().txs, [R1]: { value: q(PART - 1n) } } });
+  const got = await finishEvmOnward(finishHost(landed), pendingOf({ ...BIG_CAP, onward: H1, resends: [{ nonce: "1", hash: R1 }] }), undefined, heldOf());
+  assert.deepEqual(got, { stage: "sent", txs: [{ chain: "base", hash: REL }, { chain: "base", hash: R1 }], arrived: { [R1]: (PART - 1n).toString() } });
+  assert.deepEqual(landed.sent ?? [], [], "nothing signed again");
+  const unread = heldSide({ nonce: 2n });
+  assert.equal(await finishEvmOnward(finishHost(unread), pendingOf({ ...BIG_CAP, onward: H1, resends: [{ nonce: "1", hash: R1 }] }), undefined, heldOf()), null);
+  assert.deepEqual(unread.sent ?? [], [], "a nonce W passed with no kept send read back: nothing signed");
+  const gap = heldSide({ nonce: 2n });
+  assert.equal(await finishEvmOnward(finishHost(gap), pendingOf({ ...BIG_CAP, onward: H1 }), undefined, heldOf()), null);
+  assert.deepEqual(gap.sent ?? [], [], "a nonce no kept send accounts for: nothing signed");
+  const again = heldSide({ nonce: 2n, receipts: { [R1]: rcpt("0x0") } });
+  const kept: EvmPendingOnward[] = [];
+  const got3 = await finishEvmOnward(finishHost(again, { kept }), pendingOf({ ...BIG_CAP, onward: H1, resends: [{ nonce: "1", hash: R1 }] }), undefined, heldOf());
+  assert.equal(got3?.stage, "sent");
+  const hash = rawHashOf(again.sent![0]!);
+  assert.deepEqual(kept.at(-1)?.resends, [{ nonce: "1", hash: R1 }, { nonce: "2", hash }], "the next nonce's send kept beside the reverted one");
+  // the resend itself reverts: in_transit, what W holds now in `held`, its hash in the txs
+  const twice = heldSide({ landsOnSend: false, receipt: rcpt("0x0") });
+  const got4 = await finishEvmOnward(finishHost(twice), pendingOf({ ...BIG_CAP, onward: H1 }), undefined, heldOf());
+  const h2 = rawHashOf(twice.sent![0]!);
+  assert.deepEqual(got4, { stage: "in_transit", txs: [{ chain: "base", hash: REL }, { chain: "base", hash: h2 }], arrived: {}, held: heldOf({ amount: HELD_BAL.toString() }) });
+});
+
+test("(review 2 P2-A) a `held` that is not this note's own W (another W, index or note): no resend from it; the chain's own word answers (in_transit with what W holds), nothing signed", async () => {
+  for (const other of [heldOf({ w: SAFE }), heldOf({ j: 1 }), heldOf({ l: "6" }), heldOf({ noteId: "n2" }), heldOf({ chain: "robinhood" })]) {
+    const side = heldSide();
+    const got = await finishEvmOnward(finishHost(side), pendingOf({ ...BIG_CAP, onward: H1 }), undefined, other);
+    assert.deepEqual(got, { stage: "in_transit", txs: [{ chain: "base", hash: REL }, { chain: "base", hash: H1 }], arrived: {}, held: heldOf() });
+    assert.deepEqual(side.sent ?? [], [], "nothing signed");
+  }
+});
+
+test("(review 2 P3-4) W's send's receipt ends only at or under the safe block both RPCs read, one block number on both", async () => {
+  const of = (a: Side, b: Side) => [rpcOf(a, []), rpcOf(b, [])] as unknown as EvmWithdrawHost["rpcs"];
+  const at = (status: string, block: bigint, safe = 0x100n): Side => ({ receipt: rcpt(status, { block }), safe });
+  assert.equal(await onwardReceipt(of(at("0x1", 0x100n), at("0x1", 0x100n)), ONWARD, W, TO), "ok", "at the safe block");
+  assert.equal(await onwardReceipt(of(at("0x1", 0x101n), at("0x1", 0x101n)), ONWARD, W, TO), null, "past it: an unsafe head");
+  assert.equal(await onwardReceipt(of(at("0x0", 0x101n), at("0x0", 0x101n)), ONWARD, W, TO), null, "a revert past it too");
+  assert.equal(await onwardReceipt(of(at("0x0", 0x100n), at("0x0", 0x100n, 0xffn)), ONWARD, W, TO), null, "one RPC's safe block under it");
+  assert.equal(await onwardReceipt(of(at("0x0", 0xf0n), at("0x0", 0xf1n)), ONWARD, W, TO), null, "two block numbers");
+  // the run: a send landed past the safe block is not yet sent: in_transit, owed
+  const { h } = await runWorld();
+  const r1 = h.rpcs[1];
+  (h as { rpcs: unknown }).rpcs = [h.rpcs[0], async (m: string, p: unknown[] = []) => (m === "eth_getBlockByNumber" && p[0] === "safe" ? { number: q(0xffn), hash: "0x" + "be".repeat(32), timestamp: q((NOW + 600_000n) / 1000n), baseFeePerGas: q(BASE_FEE) } : r1(m, p as never))];
+  const got = await runEvmPoolWithdraw(h, RUN_ASK, TO, PART, MAX);
+  assert.equal(got.stage, "in_transit");
+  assert.ok(got.pending, "still owed");
+});
+
+test("(review 2 X4, kills) a reverted send with W's balance read apart on the two RPCs: no `held` from one RPC's word, read again", async () => {
+  const a = heldSide({ balance: PART + W_BOUND });
+  const b = heldSide({ balance: PART + W_BOUND + 1n });
+  const host = { ...finishHost(a), rpcs: [rpcOf(a, []), rpcOf(b, [])] } as unknown as EvmWithdrawHost;
+  assert.equal(await finishEvmOnward(host, pendingOf({ ...BIG_CAP, onward: H1 })), null);
+});
+
+test("(review 2 X15, the review's RR4, kills) status 0x0 on both RPCs in two different blocks: no end (null), never reverted", async () => {
+  const a: Side = { receipt: rcpt("0x0", { bh: "0x" + "e1".repeat(32) }) };
+  const b: Side = { receipt: rcpt("0x0", { bh: "0x" + "e2".repeat(32) }) };
+  assert.equal(await onwardReceipt([rpcOf(a, []), rpcOf(b, [])] as unknown as EvmWithdrawHost["rpcs"], ONWARD, W, TO), null);
+});
+
+test("(review 2, M351) the run's root: a change note that landed this epoch waits for the pool's next boundary and proves on that epoch's root, never the newest; a deposit's own note proves on the newest", async () => {
+  const change = await runWorld({ change: true, thisEpoch: true });
+  await runEvmPoolWithdraw(change.h, RUN_ASK, TO, PART, MAX);
+  assert.ok(!change.chain.trees.some((t) => t.newest), "a change note never proves on the newest root");
+  assert.ok(change.chain.trees.some((t) => t.beforeMs === NOW + 60_000n), "the next epoch's trees, once the pool's time reached it");
+  assert.ok(change.clock.ms >= NOW + 60_000n, "waited on the pool's time");
+  const own = await runWorld({ thisEpoch: true });
+  assert.equal((await runEvmPoolWithdraw(own.h, RUN_ASK, TO, PART, MAX)).stage, "sent");
+  assert.ok(own.chain.trees.some((t) => t.newest), "a deposit's own note: the newest root, at once");
+  assert.equal(own.clock.ms < NOW + 60_000n, true, "no wait for the boundary");
+});
+
+test("(review 2 P3-5) the read-back's range: the head spread, the lag margin and a proof's life of the fastest mainnet's blocks stay under the log span; the margin is twice the lag's blocks, in buy, sell and withdraw", async () => {
+  const { EVM_BLOCKS_PER_S_MAX } = (await import("../src/pool-buy-evm.ts")) as unknown as { EVM_BLOCKS_PER_S_MAX: bigint };
+  assert.equal(typeof EVM_BLOCKS_PER_S_MAX, "bigint", "the fastest mainnet's read rate, named");
+  assert.ok(EVM_BUY_HEAD_SPREAD + EVM_BUY_LAG_BLOCKS + (EVM_BLOCKS_PER_S_MAX * EVM_LIFE_MS) / 1000n < EVM_BUY_LOG_SPAN);
+  assert.ok(EVM_BUY_LAG_BLOCKS >= (2n * EVM_BLOCKS_PER_S_MAX * BigInt(EVM_BUY_LAG_MS)) / 1000n);
+  assert.equal(EVM_SELL_LAG_BLOCKS, EVM_BUY_LAG_BLOCKS);
 });

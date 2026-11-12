@@ -296,8 +296,8 @@ export const keepRelease = (w: WalletStore, opId: string, noteId: string, attemp
     return { ...r, [noteId]: { ...p, release } };
   });
 /** An EVM part's owed send kept (its release read back, W's send's hash before it leaves), only while it is still this
- *  attempt's: every W send hash signed for it stays in `onwards`, so whichever lands (a reload's, another tab's) is
- *  read back. One that is no longer this attempt's throws, so no send leaves unkept. */
+ *  attempt's: every W send hash signed for it stays in `onwards` (and every resend after a revert in `resends`), so
+ *  whichever lands (a reload's, another tab's) is read back. One that is no longer this attempt's throws, so no send leaves unkept. */
 export const keepEvmSend = async (w: WalletStore, opId: string, q: EvmPendingOnward): Promise<void> => {
   const got = await w.update("meta", owedKey(opId), (v) => {
     const r = v as OwedSends | undefined;
@@ -305,7 +305,9 @@ export const keepEvmSend = async (w: WalletStore, opId: string, q: EvmPendingOnw
     if (had === undefined || had.attempt !== q.attempt) return undefined;
     const onwards = evmKeptOnwards({ onwards: [...evmKeptOnwards(had), ...evmKeptOnwards(q)] });
     const onward = q.onward ?? had.onward;
-    return { ...r, [q.noteId]: { ...had, ...q, ...(onward !== undefined ? { onward } : {}), ...(onwards.length > 0 ? { onwards } : {}) } };
+    // every resend after a revert, by hash, each with its nonce (src/pool-withdraw-evm.ts resendHeld)
+    const resends = [...(had.resends ?? []), ...(q.resends ?? [])].filter((x, i, all) => all.findIndex((y) => y.hash === x.hash) === i);
+    return { ...r, [q.noteId]: { ...had, ...q, ...(onward !== undefined ? { onward } : {}), ...(onwards.length > 0 ? { onwards } : {}), ...(resends.length > 0 ? { resends } : {}) } };
   });
   if (got === undefined) throw new Error("owed send: not this attempt's");
 };
@@ -317,6 +319,26 @@ export const dropSend = (w: WalletStore, opId: string, noteId: string): Promise<
     const { [noteId]: _gone, ...rest } = r;
     return rest;
   });
+/** An EVM run's stage written (its stage hook): the stage, its txs and arrivals, and `held` (a part left on W by a send
+ *  that reverted) in one merge, so a page closed after it never loses `held`; with no owed send left (`cleared`, the
+ *  note it owed), that note's owed send cleared and dropped. */
+export async function writeEvmStage(ops: WalletStore, opId: string, w: { stage: WithdrawStage; txs: TxRef[]; arrived: Arrivals; held?: EvmHeldOnW | undefined }, cleared: string | null): Promise<void> {
+  await ops.update("ops", opId, (v) => mergeWithdrawOp(v, { stage: w.stage, txs: w.txs, arrived: w.arrived, ...(w.held ? { held: w.held } : {}), ...(cleared ? { clear: cleared } : {}) }));
+  if (cleared) await dropSend(ops, opId, cleared);
+}
+/** An EVM finish's answer written (src/pool-withdraw-evm.ts finishEvmOnward): in_transit (the fee it needs, or a part
+ *  held on W) merged with `fee_needed` and `held` in one write, the owed send kept for the next pass (true); any other end
+ *  merged and the owed send for `noteId` cleared and dropped (false). */
+export async function writeEvmFinish(ops: WalletStore, opId: string, noteId: string, got: { stage: WithdrawStage; txs: TxRef[]; arrived: Arrivals; feeNeeded?: string; held?: EvmHeldOnW }): Promise<boolean> {
+  const w = { stage: got.stage, txs: got.txs, arrived: got.arrived, ...(got.feeNeeded !== undefined ? { feeNeeded: got.feeNeeded } : {}), ...(got.held ? { held: got.held } : {}) };
+  if (got.stage === "in_transit") {
+    await ops.update("ops", opId, (v) => mergeWithdrawOp(v, w));
+    return true;
+  }
+  await ops.update("ops", opId, (v) => mergeWithdrawOp(v, { ...w, clear: noteId }));
+  await dropSend(ops, opId, noteId);
+  return false;
+}
 /** The op's owed send for `noteId`, or none. */
 export async function owedSendOf(w: WalletStore, opId: string, noteId: string): Promise<PendingOnward | undefined> {
   const r = (await w.get("meta", owedKey(opId))) as OwedSends | undefined;
@@ -1857,23 +1879,24 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     if (!locks || !owedScan) return;
     owedScan = false;
     const ops = await page.store();
-    const owed: [string, PendingOnward][] = [];
+    const owed: [string, PendingOnward, EvmHeldOnW | undefined][] = [];
     for (const k of await ops.keys("ops")) {
       if (withdrawing.has(k)) continue;
-      const rec = (await ops.get("ops", k)) as { kind?: unknown; owed?: unknown; pending?: PendingOnward } | undefined;
+      const rec = (await ops.get("ops", k)) as { kind?: unknown; owed?: unknown; pending?: PendingOnward; held?: Record<string, EvmHeldOnW> } | undefined;
       if (rec?.kind !== "withdraw") continue;
       if (rec.pending) await moveLegacyPending(ops, k, rec.pending);
       const id = rec.pending?.noteId ?? rec.owed;
       // any stage: `owed` names the note whose send the op owes (a tab closed during the release leaves "proving");
       // its send is meta/owed/<op id>'s record (none yet: written but not marked, or the other way: read again later)
       const p = typeof id === "string" ? await owedSendOf(ops, k, id) : undefined;
-      if (p) owed.push([k, p]);
+      // a part held on W (its send reverted): the finish sends it at W's next nonce, never at 0 again
+      if (p) owed.push([k, p, rec.held !== undefined && typeof rec.held === "object" && Object.hasOwn(rec.held, p.noteId) ? rec.held[p.noteId] : undefined]);
       else if (typeof id === "string") owedScan = true;
     }
     if (owed.length === 0) return;
     const notes = await openNoteStore(await page.store());
     try {
-      for (const [k, pending] of owed) {
+      for (const [k, pending, held] of owed) {
         const retry = owedRetry.get(k);
         if (retry && Date.now() < retry.at) {
           owedScan = true;
@@ -1884,13 +1907,10 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         if (POOL_TESTNET && (evmChain === "base" || evmChain === "robinhood")) {
           const eh = evmWithdrawHost(evmChain, notes);
           // the finish's own send kept as the run's is, before it leaves
-          const got = eh === null ? null : await locks.request(WALLET_SEED_LOCK, { mode: "shared" }, () => finishEvmOnward({ ...eh, keep: (q) => keepEvmSend(ops, k, q) }, pending as EvmPendingOnward, evmStopsOf(k)));
-          if (got?.feeNeeded !== undefined) await ops.update("ops", k, (v) => mergeWithdrawOp(v, { feeNeeded: got.feeNeeded! }));
-          if (got && got.feeNeeded === undefined) {
+          const got = eh === null ? null : await locks.request(WALLET_SEED_LOCK, { mode: "shared" }, () => finishEvmOnward({ ...eh, keep: (q) => keepEvmSend(ops, k, q) }, pending as EvmPendingOnward, evmStopsOf(k), held));
+          if (got !== null && !(await writeEvmFinish(ops, k, pending.noteId, got))) {
             owedRetry.delete(k);
             evmStops.delete(k);
-            await ops.update("ops", k, (v) => mergeWithdrawOp(v, { stage: got.stage, txs: got.txs, arrived: got.arrived, clear: pending.noteId, ...(got.held ? { held: got.held } : {}) }));
-            await dropSend(ops, k, pending.noteId);
           } else {
             const waitMs = Math.min(Math.max(2_000, (retry?.waitMs ?? 1_000) * 2), 60_000);
             owedRetry.set(k, { at: Date.now() + waitMs, waitMs });
@@ -2079,14 +2099,9 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     const created_ms = Date.now();
     let writes: Promise<unknown> = ops.put("ops", opId, { kind: "withdraw", stage: "proving", txs: [], created_ms }).catch(() => {});
     let owedNote: string | null = null;
-    const write = (stage: WithdrawStage, txs: TxRef[], pending: PendingOnward | null, arrived: Arrivals) => {
+    const write = (stage: WithdrawStage, txs: TxRef[], pending: PendingOnward | null, arrived: Arrivals, held?: EvmHeldOnW) => {
       const cleared = pending ? null : owedNote;
-      void (writes = writes
-        .then(async () => {
-          await ops.update("ops", opId, (v) => mergeWithdrawOp(v, { stage, txs, arrived, ...(cleared ? { clear: cleared } : {}) }));
-          if (cleared) await dropSend(ops, opId, cleared);
-        })
-        .catch(() => {}));
+      void (writes = writes.then(() => writeEvmStage(ops, opId, { stage, txs, arrived, held }, cleared)).catch(() => {}));
     };
     const owe = async (pending: EvmPendingOnward): Promise<void> => {
       owedNote = pending.noteId;
@@ -2111,9 +2126,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         const mine = new Set(q?.ready().map((p) => p.noteId) ?? []);
         const ask = { kind: "pool.withdraw", chain, token: null, amount: 0n, slippageBps: 0, decimals: 18 } as const;
         const end = await runEvmPoolWithdraw({ ...h, ...(q ? { drop: (id: string) => q.drop(id) } : {}), stage: write, owe, keep }, { ...ask }, ready.to, ready.amount, ready.maxFee, mine);
-        write(end.stage, end.txs, end.pending, end.arrived);
+        write(end.stage, end.txs, end.pending, end.arrived, end.held);
         if (end.feeNeeded !== undefined) void (writes = writes.then(() => ops.update("ops", opId, (v) => mergeWithdrawOp(v, { feeNeeded: end.feeNeeded! }))).catch(() => {}));
-        if (end.held !== undefined) void (writes = writes.then(() => ops.update("ops", opId, (v) => mergeWithdrawOp(v, { held: end.held! }))).catch(() => {}));
         if (end.pending) owedScan = true;
       } finally {
         notes.close();

@@ -28,7 +28,7 @@ const { SOL_POOLS, SOL_POOL_TABLES, solanaPoolOf, SOL_LADDER, SOL_EPOCH_MS, SOL_
 const { POOL_TESTNET } = await import("../../wallet/src/pool/network.ts");
 const { EVM_POOLS } = await import("../../wallet/src/pool/evm.ts");
 const { poolKinds } = await import("../src/pool-kinds.ts");
-const { PAGE_CLUSTER, TESTNET_RPCS, PAGE_SOL_MARK_BATCHES, testnetPoolDeps, testnetPool: makePool, poolRelayFee, helperPoolSend, POOL_SEND_TIMEOUT_MS, PAGE_TABLES, settleFreedOps, oweSend, dropSend, keepRelease, keepEvmSend, mergeWithdrawOp } = await import("../src/pool-testnet.ts");
+const { PAGE_CLUSTER, TESTNET_RPCS, PAGE_SOL_MARK_BATCHES, testnetPoolDeps, testnetPool: makePool, poolRelayFee, helperPoolSend, POOL_SEND_TIMEOUT_MS, PAGE_TABLES, settleFreedOps, oweSend, dropSend, keepRelease, keepEvmSend, mergeWithdrawOp, writeEvmStage, writeEvmFinish } = await import("../src/pool-testnet.ts");
 // Every page a test makes signs out at the test's end, as main.ts's sign out does (signingOut: its turn timer cleared).
 // A state read arms the page's EVM turn (src/pool-testnet.ts armTurn) on whichever clock is in place; a page left signed
 // in on the real clock can fire its turn inside a later test's test clock, which re-arms it there for good ("the test
@@ -1607,4 +1607,58 @@ test("mergeWithdrawOp keeps a part held on W by note (W, its index, the amount),
   assert.deepEqual(r.held, { n1: a });
   assert.deepEqual(mergeWithdrawOp(r, { held: b }).held, { n1: a, n2: b });
   assert.equal(mergeWithdrawOp({ kind: "withdraw" }, { stage: "stopped" }).held, undefined, "nothing held: no field");
+});
+
+// review 2 of e1f9e87a (P2-A, P3-1; the review's X10, X11): a part held on W is written in the stage's own write, and
+// the owed send stays until the op ends
+const HELD = { chain: "base", noteId: "n1", w: "0x1111111111111111111111111111111111111111", l: "5", j: 0, amount: "100" } as const;
+const evmOwed = (to: string) => ({ ...owedPending("n1", to), chain: "base", part: "1", nullifier: "2", from: "3", deadlineMs: "4", chunk: "5", fee: "6" }) as const;
+test("(X11) the EVM run's stage write: in_transit with `held` in one write, the owed send kept; an end with no owed send clears and drops it", async () => {
+  const { w } = await wallet();
+  const p = evmOwed("0x2222222222222222222222222222222222222222");
+  await w.put("ops", "op1", { kind: "withdraw", stage: "submitted", txs: [], owed: "n1" });
+  await oweSend(w, "op1", p);
+  const writes: unknown[] = [];
+  const update = w.update.bind(w);
+  (w as { update: unknown }).update = async (store: string, key: string, f: (v: unknown) => unknown) => update(store as never, key as never, (v: unknown) => {
+    const r = f(v);
+    if (store === "ops") writes.push(r);
+    return r as never;
+  });
+  await writeEvmStage(w, "op1", { stage: "in_transit", txs: [{ chain: "base", hash: "0xr" }, { chain: "base", hash: "0xw" }], arrived: {}, held: HELD }, null);
+  assert.equal(writes.length, 1, "one write");
+  const r = (await w.get("ops", "op1")) as Record<string, unknown>;
+  assert.deepEqual([r.stage, r.owed, r.held], ["in_transit", "n1", { n1: HELD }], "the stage and `held` together, still owed");
+  assert.deepEqual(Object.keys((await w.get("meta", "owed/op1")) as object), ["n1"], "the owed send kept");
+  await writeEvmStage(w, "op1", { stage: "stopped", txs: [], arrived: {} }, "n1");
+  assert.equal(((await w.get("ops", "op1")) as Record<string, unknown>).owed, undefined);
+  assert.deepEqual(await w.get("meta", "owed/op1"), {});
+});
+
+test("(X10) the EVM finish's write: in_transit (a part held on W, or the fee it needs) keeps the owed send with `held` or fee_needed in the same write; an end clears and drops it", async () => {
+  const { w } = await wallet();
+  const p = evmOwed("0x2222222222222222222222222222222222222222");
+  await w.put("ops", "op1", { kind: "withdraw", stage: "in_transit", txs: [], owed: "n1" });
+  await oweSend(w, "op1", p);
+  assert.equal(await writeEvmFinish(w, "op1", "n1", { stage: "in_transit", txs: [{ chain: "base", hash: "0xw" }], arrived: {}, held: HELD }), true);
+  let r = (await w.get("ops", "op1")) as Record<string, unknown>;
+  assert.deepEqual([r.stage, r.owed, r.held, r.txs], ["in_transit", "n1", { n1: HELD }, [{ chain: "base", hash: "0xw" }]]);
+  assert.deepEqual(Object.keys((await w.get("meta", "owed/op1")) as object), ["n1"], "the owed send kept");
+  assert.equal(await writeEvmFinish(w, "op1", "n1", { stage: "in_transit", txs: [], arrived: {}, feeNeeded: "9" }), true);
+  assert.equal(((await w.get("ops", "op1")) as Record<string, unknown>).fee_needed, "9");
+  assert.equal(await writeEvmFinish(w, "op1", "n1", { stage: "sent", txs: [{ chain: "base", hash: "0xs" }], arrived: { "0xs": "1" } }), false);
+  r = (await w.get("ops", "op1")) as Record<string, unknown>;
+  assert.deepEqual([r.stage, r.owed, r.fee_needed], ["sent", undefined, undefined]);
+  assert.deepEqual(r.held, { n1: HELD }, "what W held stays on the record");
+  assert.deepEqual(await w.get("meta", "owed/op1"), {});
+});
+
+test("keepEvmSend keeps every resend signed after a revert (a reload's, another tab's), each with its nonce, never one dropped", async () => {
+  const { w } = await wallet();
+  const p = evmOwed("0x2222222222222222222222222222222222222222");
+  await oweSend(w, "op1", p);
+  await keepEvmSend(w, "op1", { ...p, resends: [{ nonce: "1", hash: "0xa" }] });
+  await keepEvmSend(w, "op1", { ...p, resends: [{ nonce: "1", hash: "0xb" }] });
+  await keepEvmSend(w, "op1", { ...p, feeCap: "7" });
+  assert.deepEqual(((await w.get("meta", "owed/op1")) as Record<string, { resends?: unknown }>).n1!.resends, [{ nonce: "1", hash: "0xa" }, { nonce: "1", hash: "0xb" }]);
 });

@@ -169,12 +169,18 @@ export const EVM_BUY_WAIT_MS = 2_000;
  *  EVM_LAG_WAIT_MS apart, before it fails): not_landed needs "no release, past the deadline" on two rounds at least
  *  this far apart, so one round of log answers trailing their block headers never answers it (review P2-1 a). */
 export const EVM_BUY_LAG_MS = EVM_LAG_TRIES * EVM_LAG_WAIT_MS;
-/** The same margin in blocks, under the lower head where the read-back starts: EVM_BUY_LAG_MS on the faster chain,
- *  Robinhood testnet's about 6 blocks a second (5,005 blocks in 835 s, read 2026-11-10 06:2xZ), is 60. */
-export const EVM_BUY_LAG_BLOCKS = 100n;
+/** The fastest pool chain's blocks a second, rounded up: Robinhood mainnet 9.31 (100,000 blocks to 112,337,125 in
+ *  10,746 s, rpc.mainnet.chain.robinhood.com) and 9.24 (robinhood-rpc.publicnode.com), Base mainnet 5.00 (20,000 blocks
+ *  to 56,380,628 in 4,000 s, mainnet.base.org), read 2026-11-12 06:55Z; 9.38 at the review's read. */
+export const EVM_BLOCKS_PER_S_MAX = 10n;
+/** The same margin in blocks, under the lower head where the read-back starts: twice EVM_BUY_LAG_MS at
+ *  EVM_BLOCKS_PER_S_MAX (10 s of Robinhood mainnet's blocks is 94), in the buy, the sell (EVM_SELL_LAG_BLOCKS) and the
+ *  withdraw alike. */
+export const EVM_BUY_LAG_BLOCKS = 200n;
 /** Two heads further apart than this, read before W signs, refuse the run (nothing signed, the note stays HELD): a low
- *  head is bounded by the other RPC's, so the read-back's range stays under EVM_BUY_LOG_SPAN (review P3-4). About 14
- *  minutes of Robinhood blocks, 2.8 hours of Base's. */
+ *  head is bounded by the other RPC's, so the read-back's range stays under EVM_BUY_LOG_SPAN (review P3-4) with the lag
+ *  margin and a proof's life of EVM_BLOCKS_PER_S_MAX blocks beside it (test/pool-withdraw-evm.test.ts pins the sum).
+ *  About 9 minutes of Robinhood mainnet's blocks and 17 of Base mainnet's, at the rates above. */
 export const EVM_BUY_HEAD_SPREAD = 5_000n;
 /** A busy wait's slices: it ends within one once this tab starts a sign out (\`stopped\`). */
 const STOP_POLL_MS = 250;
