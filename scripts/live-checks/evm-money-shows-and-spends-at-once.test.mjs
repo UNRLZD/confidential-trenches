@@ -3,9 +3,13 @@
 // as deployed then, before the head rule) fails; and each rule alone on the good answer.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { FRESH_S, judge, LAG_TRIES, POOL_RPCS } from "./evm-money-shows-and-spends-at-once.mjs";
 
+// the page's source read as text (never imported: no file outside Blindfill reaches into it), as hosts-main-on-top.test.mjs
+const HERE = path.dirname(fileURLToPath(import.meta.url));
 const A = JSON.parse(readFileSync(new URL("./evm-money-shows-and-spends-at-once.answers.json", import.meta.url), "utf8"));
 const one = (f) => {
   const g = structuredClone(A.good);
@@ -29,7 +33,7 @@ test("the recorded bad answer (SIGN_HOST before the head rule) fails", () => {
 });
 
 test("the check's pool pairs are the page's own (MAINNET_POOL_RPCS), two operators each", () => {
-  const src = readFileSync(new URL("../../packages/signpage/src/pool-testnet.ts", import.meta.url), "utf8");
+  const src = readFileSync(path.join(HERE, "../../packages/signpage/src/pool-testnet.ts"), "utf8");
   const m = /export const MAINNET_POOL_RPCS[^=]*=[^{]*\{([\s\S]*?)\n\}\);/.exec(src);
   assert.ok(m, "MAINNET_POOL_RPCS read");
   for (const chain of Object.keys(POOL_RPCS)) {
