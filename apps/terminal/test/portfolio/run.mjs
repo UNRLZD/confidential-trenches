@@ -73,7 +73,7 @@ const STATES = [
   ["pooltrades-mixed", "S10.10", ["1440"], false],
   ["pooltrades-unknown", "S10.9", ["390", "1440"], false],
   // card portfolio-counts-money-an-open-buy-holds: the open buy's wallet counted, the axis's ticks distinct
-  ["openbuy", "S10.3", ["390", "1440"], false],
+  ["openbuy", "S10.9", ["390", "1440"], false],
   ["axis", "S10.3", ["1440"], false],
 ];
 // one balance (card portfolio-one-balance): each fixture's Cash tile in cents and its parts as drawn on hover (desktop) or
@@ -191,11 +191,11 @@ try {
         const row = await page.$$eval(".pf [data-pos]", (rs) => rs.filter((r) => r.getClientRects().length).map((r) => [...r.querySelectorAll("td")].slice(1, 6).map((c) => c.innerText.replace(/\s+/g, " ").trim()).join("|")));
         check(JSON.stringify(row) === JSON.stringify(["—|—|34.1K Icm|$0.08|—"]), `${tag}: open row ${JSON.stringify(row)}`);
       }
-      // card portfolio-counts-money-an-open-buy-holds: the pool's $2.50 and the open buy's wallet's $0.69 in the Total
-      // ($3.19), the row's Bought $0.01 (never $0.00)
+      // card portfolio-counts-money-an-open-buy-holds: the pool's $2.50, the open buy's wallet's $0.69 and the coin's
+      // $0.01 (4,286.1 x $0.00000233314) in the Total ($3.20), the row's Bought $0.01 (never $0.00)
       if (f === "openbuy") {
         const tot = await page.$$eval(".pf .tot", (ts) => ts.filter((t) => t.getClientRects().length).map((t) => t.textContent.trim()));
-        check(JSON.stringify(tot) === JSON.stringify(["$3.19"]), `${tag}: total ${JSON.stringify(tot)}`);
+        check(JSON.stringify(tot) === JSON.stringify(["$3.20"]), `${tag}: total ${JSON.stringify(tot)}`);
         if (!phone) {
           const row = await page.$$eval(".pf [data-pos]", (rs) => rs.filter((r) => r.getClientRects().length).map((r) => [...r.querySelectorAll("td")].slice(1, 2).map((c) => c.innerText.trim()).join("|")));
           check(JSON.stringify(row) === JSON.stringify(["$0.01"]), `${tag}: Bought ${JSON.stringify(row)}`);
