@@ -2007,7 +2007,9 @@ const evmTwoPages = async (heldFirst: boolean, midPass = false) => {
     onWait = async () => {
       if (slept >= 59_000n) atBoundary++;
       await frame.stateRead();
-      // at the boundary: the frame's pass given the time to bind before the sheet goes on, had it taken the note
+      // at the boundary: the frame's pass given 100 ms before the sheet goes on. It decides only which assertion catches
+      // a missing keep-out (with it the frame's bind lands before the sheet's; without it the sheet may bind first and
+      // the frame take the note after), never whether one does
       if (slept >= 59_000n) await new Promise((r) => setTimeout(r, 100));
     };
   await sheet.withdraw({ chain: "base", to: "0x1111111111111111111111111111111111111111", amount: 5n * 10n ** 14n, maxFee: 10n ** 15n }, "op-w");
