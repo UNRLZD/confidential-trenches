@@ -122,12 +122,9 @@ export const HELPER_V1_PATHS = [
   // longer), never a short timeout
   { method: "GET", path: "/v1/pool/fee", part: "relay", limitBytes: 1024 },
   { method: "POST", path: "/v1/pool/solana/send", part: "relay", limitBytes: 4096 },
-<<<<<<< HEAD
-=======
   // a buy made of several pieces (card buy-spends-several-pieces): every tag 2, then the tag 3, all of one W, carried as
   // one bundle, all landing or none; on mainnet answered, like a tag 3, only once the fill is decided
   // (POOL_SOLANA_PIECES_BODY_MAX, 8 KB)
->>>>>>> card/bsp-helper
   { method: "POST", path: "/v1/pool/solana/pieces", part: "relay", limitBytes: 8192 },
   { method: "POST", path: "/v1/pool/evm/send", part: "relay", limitBytes: 4096 },
   // W's sell back into its pool (card helper-evm-sender): the sell calldata and W's 7702 authorization (POOL_EVM_SELL_BODY_MAX, 8 KB)
