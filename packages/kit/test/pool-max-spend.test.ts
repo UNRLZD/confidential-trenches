@@ -177,14 +177,14 @@ test("Solana pieces: Max counts only pieces that add more than their fee, and at
   const fee = solanaPoolFee(rent);
   const coin = { kind: "pump-curve" as const, tokenAccountSize: 165, cashback: false };
   const tip = 1_000_000n;
-  assert.equal(SOLANA_POOL_BUY_PIECES_MAX, 5);
+  assert.equal(SOLANA_POOL_BUY_PIECES_MAX, 4);
   // a piece of the fee or under it adds nothing: Max is the same with it as without it
   assert.equal(solanaPoolBuyMaxSpend([release(10_000_000n, fee), release(fee, fee), release(1_000_000n, fee)], coin, tip, rent), solanaPoolBuyMaxSpend([release(10_000_000n, fee)], coin, tip, rent));
-  // seven pieces: the five largest
+  // seven pieces: the four largest
   const seven = [5_000_000n, 50_000_000n, 10_000_000n, 5_000_000n, 20_000_000n, 10_000_000n, 5_000_000n].map((w) => release(w, fee));
-  const five = [50_000_000n, 20_000_000n, 10_000_000n, 10_000_000n, 5_000_000n].map((w) => release(w, fee));
-  assert.equal(solanaPoolBuyMaxSpend(seven, coin, tip, rent), solanaPoolBuyMaxSpend(five, coin, tip, rent));
-  assert.equal(solanaPoolBuyMaxSpend(five, coin, tip, rent), 95_000_000n - 5n * fee - tip - perBuy(rent, coin));
+  const four = [50_000_000n, 20_000_000n, 10_000_000n, 10_000_000n].map((w) => release(w, fee));
+  assert.equal(solanaPoolBuyMaxSpend(seven, coin, tip, rent), solanaPoolBuyMaxSpend(four, coin, tip, rent));
+  assert.equal(solanaPoolBuyMaxSpend(four, coin, tip, rent), 90_000_000n - 4n * fee - tip - perBuy(rent, coin));
   // none: 0
   assert.equal(solanaPoolBuyMaxSpend([], coin, tip, rent), 0n);
 });
@@ -194,6 +194,6 @@ test("Solana pieces: the funds rule refuses no piece, more pieces than one tap c
   const fee = solanaPoolFee(rent);
   const v = venue({ kind: "pump-curve", tokenAccountSize: 165, cashback: false });
   assert.equal(solanaPoolBuyFunds([], v, { spend: 1n, tip: 0n }, rent).problem, "no release");
-  assert.match(String(solanaPoolBuyFunds(Array.from({ length: SOLANA_POOL_BUY_PIECES_MAX + 1 }, () => release(SOL, fee)), v, { spend: 1n, tip: 0n }, rent).problem), /over the 5 one tap carries/);
+  assert.match(String(solanaPoolBuyFunds(Array.from({ length: SOLANA_POOL_BUY_PIECES_MAX + 1 }, () => release(SOL, fee)), v, { spend: 1n, tip: 0n }, rent).problem), /over the 4 one tap carries/);
   assert.equal(solanaPoolBuyFunds([release(SOL, fee), release(fee, fee)], v, { spend: 1n, tip: 0n }, rent).problem, "a piece adds nothing past its relay fee");
 });

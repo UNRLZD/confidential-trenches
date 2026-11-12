@@ -664,9 +664,12 @@ export function solanaPoolBuySellNeed(venue: Pick<SolanaPoolBuyVenue, "kind" | "
 /**
  * The most pieces one tap pays its W from (card buy-spends-several-pieces): each piece is one release of one note, all
  * to the same W, the last one the tag 3 that buys; the others tag 2s sent before it in the same bundle, all or none.
- * A Jito bundle holds at most 5 transactions, one release each.
+ * A Jito bundle holds at most 5 transactions: one release each, and the last the helper's own tip transaction (Jito
+ * considers a bundle only when it tips by a transfer instruction; the pool's tip is a lamport write, and W signs every
+ * release, so the tip cannot ride in one of them). Two releases in one transaction fit 1,232 bytes (1,207) only with a
+ * lookup table holding the state and root pages, which move as the tree grows: a table someone would keep extending.
  */
-export const SOLANA_POOL_BUY_PIECES_MAX = 5;
+export const SOLANA_POOL_BUY_PIECES_MAX = 4;
 /** One piece of a buy: a release's withdrawnValue and the relay fee it pays out of it. */
 export type SolanaPoolBuyPiece = Pick<SolanaPoolRelease, "withdrawnValue" | "relayFee">;
 const piecesOf = (r: SolanaPoolBuyPiece | readonly SolanaPoolBuyPiece[]): readonly SolanaPoolBuyPiece[] => (Array.isArray(r) ? r : [r as SolanaPoolBuyPiece]);

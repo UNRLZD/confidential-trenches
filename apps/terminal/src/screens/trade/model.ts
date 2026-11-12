@@ -368,6 +368,25 @@ export function withCoinTap(pools: SignpageState["pools"], chain: Chain, coinTap
 /** When Max for the coin is asked again, ms, after the page's refusal `code`: a trade running (busy) every second, a
  *  provider that failed (down) every 3 s, as the sell box asks its preview again (positions/SellBox.tsx PREVIEW_BUSY_MS,
  *  PREVIEW_AGAIN_MS); null for an answer that is no (that coin, those proofs: state.pools' Max stays). */
+/** The amount a pool.buy.dry asks the Fee of (card buy-spends-several-pieces): the typed USD in the pool asset's whole
+ *  units, as the buy itself would ask it; none for no amount, no price or under one base unit. */
+export function feeAskAmount(amount: Cents | null, price: PoolPrice | null): string | null {
+  if (amount === null || amount <= 0n || price === null) return null;
+  const u = centsToUnits(amount, price);
+  return u > 0n ? unitsToDecimal(u, price.decimals) : null;
+}
+
+/** The Fee row's USD (owner 12 Nov 13:40Z: "Fee", the buy's whole cost: relay fees, the tip and what the buy leaves for
+ *  good): pool.buy.dry's `cost` (whole units of the pool's asset, the page's word) at the device's price, rounded up so
+ *  it never reads under what the buy costs; null (a dash) until it is read, or when it is not a plain decimal. */
+export function feeCents(cost: string | undefined, price: PoolPrice | null): Cents | null {
+  if (cost === undefined || price === null) return null;
+  const u = decimalToUnits(cost, price.decimals);
+  if (u === null) return null;
+  const down = unitsToCents(u, price);
+  return centsToUnits(down, price) < u ? down + 1n : down;
+}
+
 export function coinTapAgainMs(code: string): number | null {
   return code === "busy" ? 1_000 : code === "down" ? 3_000 : null;
 }

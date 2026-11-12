@@ -27,7 +27,7 @@ import { signalsProver } from "../../wallet/test/withdraw-fixture.ts";
 const { SOL_POOLS, SOL_POOL_TABLES, solanaPoolOf, SOL_LADDER, SOL_EPOCH_MS, SOL_LIFE_MS, SOL_SEND_MARGIN_MS } = await import("../../wallet/src/pool/solana.ts");
 const { POOL_TESTNET } = await import("../../wallet/src/pool/network.ts");
 const { poolKinds } = await import("../src/pool-kinds.ts");
-const { PAGE_CLUSTER, TESTNET_RPCS, PAGE_SOL_MARK_BATCHES, testnetPoolDeps, testnetPool: makePool, poolRelayFee, helperPoolSend, POOL_SEND_TIMEOUT_MS, PAGE_TABLES, settleFreedOps, oweSend, dropSend, keepRelease, mergeWithdrawOp } = await import("../src/pool-testnet.ts");
+const { PAGE_CLUSTER, TESTNET_RPCS, PAGE_SOL_MARK_BATCHES, testnetPoolDeps, testnetPool: makePool, poolRelayFee, helperPoolSend, helperPoolSendPieces, POOL_SEND_TIMEOUT_MS, PAGE_TABLES, settleFreedOps, oweSend, dropSend, keepRelease, mergeWithdrawOp } = await import("../src/pool-testnet.ts");
 // Every page a test makes signs out at the test's end, as main.ts's sign out does (signingOut: its turn timer cleared).
 // A state read arms the page's EVM turn (src/pool-testnet.ts armTurn) on whichever clock is in place; a page left signed
 // in on the real clock can fire its turn inside a later test's test clock, which re-arms it there for good ("the test
@@ -734,6 +734,22 @@ test("helperPoolSend posts {pool, tx} to the helper and takes only a 200 within 
   await assert.rejects(helperPoolSend("P", Uint8Array.of(1), refused), /HTTP 422/);
   const big = (async () => new Response(JSON.stringify({ signature: "x".repeat(5000) }), { status: 200 })) as unknown as typeof fetch;
   await assert.rejects(helperPoolSend("P", Uint8Array.of(1), big), /over 4096 B/);
+});
+
+test("card buy-spends-several-pieces: helperPoolSendPieces posts {pool, txs} in order to the pieces route and takes only a 200 within its limit; the page's buy host sends a buy's pieces through it", async () => {
+  const seen: { url: string; body: unknown }[] = [];
+  const ok = (async (url: string, init: RequestInit) => (seen.push({ url, body: JSON.parse(String(init.body)) }), new Response(JSON.stringify({ signatures: ["a", "b"] }), { status: 200 }))) as unknown as typeof fetch;
+  assert.deepEqual(await helperPoolSendPieces("P", [Uint8Array.of(1, 2, 3), Uint8Array.of(4)], ok), { signatures: ["a", "b"] });
+  assert.match(seen[0]!.url, /\/v1\/pool\/solana\/pieces$/);
+  assert.deepEqual(seen[0]!.body, { pool: "P", txs: ["AQID", "BA=="] });
+  const refused = (async () => new Response("{}", { status: 422 })) as unknown as typeof fetch;
+  await assert.rejects(helperPoolSendPieces("P", [Uint8Array.of(1)], refused), /HTTP 422/);
+  const big = (async () => new Response(JSON.stringify({ signatures: ["x".repeat(9000)] }), { status: 200 })) as unknown as typeof fetch;
+  await assert.rejects(helperPoolSendPieces("P", [Uint8Array.of(1)], big), /over 8192 B/);
+  // the buy host offers the pieces send beside takeSet, so a buy may spend several pieces (pool-buy.ts: both or one piece)
+  const src = readFileSync(new URL("../src/pool-testnet.ts", import.meta.url), "utf8");
+  assert.match(src, /sendPieces: \(pool, txs\) => helperPoolSendPieces\(pool, txs, over\.fetch\)/);
+  assert.match(src, /takeSet: async \(items, early, lastHeight\)/);
 });
 
 // ---- card signpage-pool-sell: pool.sell on the devnet pool ----

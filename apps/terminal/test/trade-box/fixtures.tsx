@@ -105,8 +105,12 @@ const kit: TradeKit = {
   request: ((kind: string, params: unknown) => {
     // the box's own read of the coin's Max (pool.buy.dry) is no buy: recorded apart in window.__reads and answered as a
     // read the page could not make, so the box keeps the Max of its state (the fixtures' own)
+    // the Fee's read (pool.buy.dry with an amount, card buy-spends-several-pieces) answers a cost of 0.0014 SOL (one
+    // piece's relay fee and the tip) unless the page is down for it (fee=down): the box draws a dash
     if (kind === "pool.buy.dry") {
       window.__reads.push({ kind, params });
+      const withAmount = (params as { amount?: string }).amount !== undefined;
+      if (withAmount && q.get("fee") !== "down") return { id: `read-${window.__reads.length}`, outcome: Promise.resolve({ ok: true, result: { tap_max: "0.00172", cost: "0.0014" } }) };
       return { id: `read-${window.__reads.length}`, outcome: Promise.resolve({ ok: false, error: { code: "quote_check_failed" } }) };
     }
     const id = `buy-${++n}`;

@@ -120,6 +120,7 @@ export const HELPER_V1_PATHS = [
   // longer), never a short timeout
   { method: "GET", path: "/v1/pool/fee", part: "relay", limitBytes: 1024 },
   { method: "POST", path: "/v1/pool/solana/send", part: "relay", limitBytes: 4096 },
+  { method: "POST", path: "/v1/pool/solana/pieces", part: "relay", limitBytes: 8192 },
   { method: "POST", path: "/v1/pool/evm/send", part: "relay", limitBytes: 4096 },
   // W's sell back into its pool (card helper-evm-sender): the sell calldata and W's 7702 authorization (POOL_EVM_SELL_BODY_MAX, 8 KB)
   { method: "POST", path: "/v1/pool/evm/sell", part: "relay", limitBytes: 8192 },

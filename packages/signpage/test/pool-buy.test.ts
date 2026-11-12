@@ -2375,3 +2375,27 @@ test("pieces: a spend past the own note's Max sends one bundle: the other piece'
   // each note settled before not_landed
   assert.ok(w.log.includes("settle:note-1") && w.log.includes("settle:note-2"), w.log.filter((x) => x.startsWith("settle")).join(","));
 });
+
+test("pieces: the releases land and the buy does not (a helper that sent the tag 2s alone): the answer is not_landed, never filled; each landed piece is settled SPENT and the buy's own note is not", async () => {
+  const own = pieceProof("note-1", BigInt("0x" + Buffer.from(unhex(r.nullifier_hash)).toString("hex")), BigInt(r.withdrawn), true);
+  const other = pieceProof("note-2", 777n, 5_000_000n);
+  const s = await setup("pump", SPEND);
+  const spend = solanaPoolBuyMaxSpend([relOf(own)], s.venue, SOLANA_POOL_JITO_TIP, rent) + 1_000_000n;
+  const w = await world({ readies: [[other, own]] });
+  w.host.takeSet = async (items) => items.map((x) => (x.noteId === own.noteId ? own : other));
+  // the hostile helper: it lands the piece's tag 2 on its own and answers 502 for the bundle
+  w.host.sendPieces = async () => {
+    throw new Error("pool send: HTTP 502");
+  };
+  const settled: string[] = [];
+  w.host.settle = async (id) => {
+    const kind = id === "note-2" ? ("spent" as const) : ("unspent" as const);
+    settled.push(`${id}:${kind}`);
+    return { kind };
+  };
+  const a = await runPoolBuy(w.host, { ...ASK, amount: spend });
+  assert.equal("stage" in a && a.stage, "not_landed", JSON.stringify(a));
+  // the landed piece is SPENT once, and asked no more; the buy's own note is read unspent (freed by the state reads)
+  assert.equal(settled.filter((x) => x === "note-2:spent").length, 1, settled.join(","));
+  assert.ok(settled.includes("note-1:unspent"), settled.join(","));
+});

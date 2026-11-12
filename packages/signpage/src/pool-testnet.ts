@@ -467,16 +467,23 @@ export const PAGE_TABLES: Readonly<Partial<Record<"pump-curve" | "pumpswap", rea
 export const POOL_SEND_TIMEOUT_MS = 120_000;
 
 /** POST /v1/pool/solana/send: the helper's answer as it came (pool-buy.ts reads it back on two RPCs). */
-export async function helperPoolSend(pool: string, tx: Uint8Array, fetchFn: typeof fetch = laneFetch()): Promise<unknown> {
+export const helperPoolSend = (pool: string, tx: Uint8Array, fetchFn: typeof fetch = laneFetch()): Promise<unknown> =>
+  helperPoolPost("/v1/pool/solana/send", { pool, tx: base64.encode(tx) }, fetchFn);
+/** POST /v1/pool/solana/pieces (card buy-spends-several-pieces): a buy's pieces, every release first and the buy last,
+ *  sent by the helper as one bundle, all landing or none; its answer as it came (pool-buy.ts reads each back on two
+ *  RPCs). The same timeout, busy and size rules as one send. */
+export const helperPoolSendPieces = (pool: string, txs: readonly Uint8Array[], fetchFn: typeof fetch = laneFetch()): Promise<unknown> =>
+  helperPoolPost("/v1/pool/solana/pieces", { pool, txs: txs.map((t) => base64.encode(t)) }, fetchFn);
+async function helperPoolPost(path: "/v1/pool/solana/send" | "/v1/pool/solana/pieces", payload: unknown, fetchFn: typeof fetch): Promise<unknown> {
   const window = new AbortController();
   const t = setTimeout(() => window.abort(new DOMException(`pool send: no answer in ${POOL_SEND_TIMEOUT_MS} ms`, "TimeoutError")), POOL_SEND_TIMEOUT_MS);
   try {
-    const res = await fetchFn(`${TRADE_HELPER}/v1/pool/solana/send`, {
+    const res = await fetchFn(`${TRADE_HELPER}${path}`, {
       ...HELPER_FETCH_INIT,
       redirect: "error",
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ pool, tx: base64.encode(tx) }),
+      body: JSON.stringify(payload),
       signal: window.signal,
     });
     if (res.status === 429) {
@@ -496,7 +503,7 @@ export async function helperPoolSend(pool: string, tx: Uint8Array, fetchFn: type
       throw new PoolSendBusy(code, ms);
     }
     if (res.status !== 200) throw new Error(`pool send: HTTP ${res.status}`);
-    const SEND_ANSWER_MAX = HELPER_V1_PATHS.find((p) => p.method === "POST" && p.path === "/v1/pool/solana/send")!.limitBytes!;
+    const SEND_ANSWER_MAX = HELPER_V1_PATHS.find((p) => p.method === "POST" && p.path === path)!.limitBytes!;
     const bytes = new Uint8Array(await res.arrayBuffer());
     if (bytes.length > SEND_ANSWER_MAX) throw new Error(`pool send: an answer over ${SEND_ANSWER_MAX} B`);
     return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
@@ -1327,6 +1334,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       // W's buy mint, written before the send: the rent back after a later sell holds while W holds any of it
       bought: buyMints(page.store),
       send: (pool, tx) => helperPoolSend(pool, tx, over.fetch),
+      sendPieces: (pool, txs) => helperPoolSendPieces(pool, txs, over.fetch),
       // the received token's decimals, for W's buy record (src/positions.ts recordPoolBuy), and kept for the session: read
       // on both RPCs with the amount, so a sell of it asks no decimals read (card sell-first-read-waits-out-a-throttle)
       outDecimals: (wallet, d, mint) => {

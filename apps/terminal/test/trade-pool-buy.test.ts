@@ -6,7 +6,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { SignpageState } from "@blindfill/kit";
-import { amountText, amountWrong, centsToUnits, coinTapAgainMs, coinTapKey, decimalToUnits, parseUsd, poolBuyAsk, poolSellAsk, poolView, presetsOf, PRESETS, unitsToCents, unitsToDecimal, withCoinTap } from "../src/screens/trade/model.ts";
+import { amountText, amountWrong, centsToUnits, coinTapAgainMs, coinTapKey, decimalToUnits, feeAskAmount, feeCents, parseUsd, poolBuyAsk, poolSellAsk, poolView, presetsOf, PRESETS, unitsToCents, unitsToDecimal, withCoinTap } from "../src/screens/trade/model.ts";
 
 type Pool = NonNullable<SignpageState["pools"]>[number];
 // Pyth SOL/USD as read on 4 Nov 07:40Z (packages/kit/src/price/pool-usd.ts): $93.01048308
@@ -152,4 +152,17 @@ test("Max for the coin asked again while the page says not now: busy every secon
   assert.equal(coinTapAgainMs("busy"), 1_000);
   assert.equal(coinTapAgainMs("down"), 3_000);
   for (const code of ["not_allowed", "not_funded", "quote_check_failed", "timeout"]) assert.equal(coinTapAgainMs(code), null, code);
+});
+
+test("card buy-spends-several-pieces: the Fee row asks the cost of the typed amount in SOL and draws it in USD, rounded up; a dash until it is read", () => {
+  // $0.16 at $93.01 is the buy's own amount (poolBuyAsk asks 0.001720236 for it)
+  assert.equal(feeAskAmount(16n, SOL), "0.001720236");
+  assert.equal(feeAskAmount(null, SOL), null);
+  assert.equal(feeAskAmount(0n, SOL), null);
+  assert.equal(feeAskAmount(16n, null), null);
+  // 0.0014 SOL (one piece's 1,300,000 relay fee and the 100,000 tip) is $0.1302: never drawn under what it costs
+  assert.equal(feeCents("0.0014", SOL), 14n);
+  assert.equal(feeCents("0.10751476", SOL), 1_000n); // $10.00, the $9.99 rounded down read up
+  for (const bad of [undefined, "", "-1", "1e3", "0x10", "0.0000000001"]) assert.equal(feeCents(bad, SOL), null, String(bad));
+  assert.equal(feeCents("0.0014", null), null);
 });

@@ -32,11 +32,11 @@ test("a spend past this release's own Max builds and checks once the bundle's ea
   }
 });
 
-test("the bundle's earlier releases: at most four, each a u64 pair, each adding more than its relay fee", async () => {
+test("the bundle's earlier releases: at most three, each a u64 pair, each adding more than its relay fee", async () => {
   const s = await setup("pump");
-  assert.throws(() => buildSolanaPoolBuy(cfg, release, s.venue, { ...s.req, before: [piece, piece, piece, piece, piece] }, s.chain), /at most 4 releases/);
+  assert.throws(() => buildSolanaPoolBuy(cfg, release, s.venue, { ...s.req, before: [piece, piece, piece, piece] }, s.chain), /at most 3 releases/);
   assert.throws(() => buildSolanaPoolBuy(cfg, release, s.venue, { ...s.req, before: [{ withdrawnValue: 5, relayFee: 1n } as never] }, s.chain), /u64/);
   assert.throws(() => buildSolanaPoolBuy(cfg, release, s.venue, { ...s.req, before: [{ withdrawnValue: 1_300_000n, relayFee: 1_300_000n }] }, s.chain), /adds nothing past its relay fee/);
   const built = buildSolanaPoolBuy(cfg, release, s.venue, s.req, s.chain, { pick: () => 1 });
-  assert.deepEqual(failed(checkSolanaPoolBuy(built.wire, cfg, release, s.venue, { ...s.req, before: [piece, piece, piece, piece, piece] }, s.reads)), ["FUNDS"]);
+  assert.deepEqual(failed(checkSolanaPoolBuy(built.wire, cfg, release, s.venue, { ...s.req, before: [piece, piece, piece, piece] }, s.reads)), ["FUNDS"]);
 });
