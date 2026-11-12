@@ -46,15 +46,25 @@
 //   the SOL in and out, the USD at each trade's own block) are src/trade-fill.ts's from the same transactions, as for
 //   any record that lacks them. An op is written only where no op of the store names its signature (this device's own
 //   ops win), so a rerun adds nothing twice.
-// - Which Ws: every W with no buy record of this device's own (none, or a `rebuilt` one) and no "trades read" mark
-//   (TRADES_READ_KEY): a W whose sale in full was read gets the mark and is not read again; a W still holding (an open
-//   buy) is read again at the next load, so a sale it makes from another device shows up there.
-import type { SolanaBuy, SolanaBuyReader } from "../../wallet/src/pool/buy-wallets.ts";
+// - Which Ws: every W with no buy record of this device's own (none, or a `rebuilt` one) and no final "trades read" mark
+//   (TRADES_READ_KEY true): a W whose sale in full was read, and gave its sale op, gets the mark and is not read again
+//   (review of 776d40528, P3-2: never when that sale's answer was not its own, so its op is never lost); a W still
+//   holding (an open buy, a sale in part, a read cut short) gets the mark as a cursor, { after, mint, program }: the
+//   last of its transactions read, and the next load reads W on from there only (buy-wallets.ts `from`: one
+//   getSignaturesForAddress `until` it and up to SOL_TRADE_TXS getTransaction), so a sale it makes from another device
+//   shows up there and no W is read from its first signature twice (review of 776d40528, P2-1).
+// - The sale is W's own: W signs it (buy-wallets.ts solanaSignedBy; review of 776d40528, P3-1).
+// - Known and accepted: the helper is the single route for these reads, so it can make up display rows (a buy or a
+//   sale that never was, in the closed list and the calendar). It cannot overwrite a real op (an op is written only
+//   where none names its signature, and this device's own ops win) and it never reaches a signature: these records are
+//   shown, never signed on, and the rebuilt buy record holds the rent back (above).
+import { solanaOwnTx, solanaSignedBy, type SolanaBuy, type SolanaBuyReader, type SolanaTradesFrom } from "../../wallet/src/pool/buy-wallets.ts";
 import { solanaTradeLeg } from "./trade-fill.ts";
 
 /** The Ws whose history was read for good with no buy, in the wallet store's meta, by W's address. */
 export const BUY_NONE_KEY = "owed/buy-sol-none";
-/** The Ws whose trades were read to W's sale in full, in the wallet store's meta, by W's address. */
+/** The Ws whose trades were read to W's sale in full (true), or up to a signature (a SolanaTradesFrom cursor), in the
+ *  wallet store's meta, by W's address. */
 export const TRADES_READ_KEY = "owed/trades-sol-read";
 
 /** One op a restore writes for W's trade (src/state.ts's op contract; a pool buy has no `sha`, a pool sale pool "sol"). */
@@ -63,21 +73,75 @@ export type RestoredTradeOp = {
   rec: { kind: "buy" | "sell"; stage: "filled"; txs: { chain: "solana"; hash: string }[]; created_ms: number; chain: "solana"; token: string; pool?: "sol"; legs?: { wallet: string }[] };
 };
 
-/** W's trade ops from its buy read (see the top): its buy, then each later transaction in which W sold the mint. A
- *  transaction with no block time gives no op (its time unknown), nor one that is not the signature's own. */
+/** W's trade ops from its buy read (see the top): its buy (not on a read on, `after`), then each later transaction in
+ *  which W, signing, sold the mint. They stop at the first answer that is not its signature's own or has no block time
+ *  (its time unknown), as the reader does. */
 export function restoredTradeOps(w: string, buy: SolanaBuy): RestoredTradeOp[] {
   const out: RestoredTradeOp[] = [];
   for (const [i, { signature, tx }] of (buy.txs ?? []).entries()) {
     // an answer is this signature's own transaction (its first signature), or no op: the route's word is hostile
-    const t = tx as { blockTime?: unknown; transaction?: { signatures?: unknown } } | null;
-    if (!Array.isArray(t?.transaction?.signatures) || t.transaction.signatures[0] !== signature) continue;
-    const bt = t.blockTime;
-    if (!Number.isSafeInteger(bt) || (bt as number) <= 0) continue;
-    const base = { stage: "filled" as const, txs: [{ chain: "solana" as const, hash: signature }], created_ms: (bt as number) * 1000, chain: "solana" as const, token: buy.mint };
-    if (i === 0) out.push({ key: `restored/${signature}`, rec: { kind: "buy", ...base } });
-    else if (solanaTradeLeg(tx, "sell", buy.mint)?.wallet === w) out.push({ key: `restored/${signature}`, rec: { kind: "sell", ...base, pool: "sol", legs: [{ wallet: w }] } });
+    if (!solanaOwnTx(tx, signature)) break;
+    const base = { stage: "filled" as const, txs: [{ chain: "solana" as const, hash: signature }], created_ms: ((tx as { blockTime: number }).blockTime) * 1000, chain: "solana" as const, token: buy.mint };
+    if (i === 0 && buy.after === undefined) out.push({ key: `restored/${signature}`, rec: { kind: "buy", ...base } });
+    else if (solanaSignedBy(tx, w) && solanaTradeLeg(tx, "sell", buy.mint)?.wallet === w) out.push({ key: `restored/${signature}`, rec: { kind: "sell", ...base, pool: "sol", legs: [{ wallet: w }] } });
   }
   return out;
+}
+
+/** The wallet store as these records use it. */
+export type TradesStore = {
+  get(store: "meta" | "ops", key: string): Promise<unknown>;
+  keys(store: "ops"): Promise<readonly string[]>;
+  update(store: "meta" | "ops", key: string, f: (v: unknown) => unknown): Promise<unknown>;
+};
+const recordOf = (v: unknown): Record<string, unknown> => (v !== null && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {});
+const fromOf = (v: unknown): SolanaTradesFrom | null => {
+  const r = recordOf(v);
+  return typeof r.after === "string" && typeof r.mint === "string" && typeof r.program === "string" ? { after: r.after, mint: r.mint, program: r.program } : null;
+};
+
+/** The Ws not to read (SolBuyRecordsDeps.done): those with a buy record of this device's own (`buyKey`'s, not
+ *  `rebuilt`), a "read, no buy" mark or a final "trades read" mark. */
+export async function tradesDone(st: Pick<TradesStore, "get">, buyKey: string): Promise<ReadonlySet<string>> {
+  const own = Object.entries(recordOf(await st.get("meta", buyKey))).flatMap(([a, r]) => (recordOf(r).rebuilt === true ? [] : [a]));
+  const final = Object.entries(recordOf(await st.get("meta", TRADES_READ_KEY))).flatMap(([a, v]) => (v === true ? [a] : []));
+  return new Set([...own, ...Object.keys(recordOf(await st.get("meta", BUY_NONE_KEY))), ...final]);
+}
+
+/** Where each W still holding is read on from (its "trades read" cursor; see the top). */
+export async function tradesFrom(st: Pick<TradesStore, "get">): Promise<ReadonlyMap<string, SolanaTradesFrom>> {
+  return new Map(Object.entries(recordOf(await st.get("meta", TRADES_READ_KEY))).flatMap(([a, v]) => {
+    const f = fromOf(v);
+    return f === null ? [] : [[a, f] as const];
+  }));
+}
+
+/** Writes W's trade ops (restoredTradeOps) where no op of the store names their signatures, then W's "trades read"
+ *  mark: final only when the read reached W's sale in full and that sale is an op (written here, or the device's own);
+ *  else a cursor at the last transaction read whose answer was its own (see the top). Whether it wrote an op. */
+export async function writeTradeOps(st: TradesStore, w: string, buy: SolanaBuy): Promise<boolean> {
+  const ops = restoredTradeOps(w, buy);
+  const named = new Set<string>();
+  for (const k of await st.keys("ops")) {
+    const r = (await st.get("ops", k).catch(() => undefined)) as { txs?: unknown } | undefined;
+    if (Array.isArray(r?.txs)) for (const t of r.txs) if (typeof (t as { hash?: unknown })?.hash === "string") named.add((t as { hash: string }).hash);
+  }
+  let wrote = false;
+  for (const o of ops) {
+    if (named.has(o.rec.txs[0]!.hash)) continue;
+    await st.update("ops", o.key, (v) => (v === undefined ? ((wrote = true), o.rec) : undefined));
+  }
+  const txs = buy.txs ?? [];
+  const taken = txs.findIndex(({ signature, tx }) => !solanaOwnTx(tx, signature));
+  const read = taken < 0 ? txs : txs.slice(0, taken);
+  const last = read.at(-1)?.signature;
+  const sold = buy.soldOut === true && taken < 0 && last !== undefined && (named.has(last) || ops.some((o) => o.rec.kind === "sell" && o.rec.txs[0]!.hash === last));
+  if (sold || last !== undefined) {
+    const mark: true | SolanaTradesFrom = sold ? true : { after: last!, mint: buy.mint, program: buy.program };
+    // a final mark stays final
+    await st.update("meta", TRADES_READ_KEY, (v) => (recordOf(v)[w] === true ? undefined : { ...recordOf(v), [w]: mark }));
+  }
+  return wrote;
 }
 
 export type SolBuyRecordsDeps = {
@@ -88,9 +152,11 @@ export type SolBuyRecordsDeps = {
   done(): Promise<ReadonlySet<string>>;
   /** Writes W's rebuilt buy record only when W has none, or its "read, no buy" mark; whether it wrote a buy record. */
   write(address: string, buy: SolanaBuy | "none"): Promise<boolean>;
-  /** Writes W's trade ops (restoredTradeOps) where no op names their signatures, and the "trades read" mark when
-   *  `buy.soldOut`; whether it wrote an op. None: no trade is written (tests of the records alone). */
+  /** Writes W's trade ops and its "trades read" mark (writeTradeOps); whether it wrote an op. None: no trade is written
+   *  (tests of the records alone). */
   trades?(address: string, buy: SolanaBuy): Promise<boolean>;
+  /** Where each W still holding is read on from (tradesFrom). None: every W from its buy. */
+  from?(): Promise<ReadonlyMap<string, SolanaTradesFrom>>;
   /** W's buy from its own history, each call on the host's pass turn. */
   reader: SolanaBuyReader;
   /** A W's record was written: the positions read again. */
@@ -141,6 +207,7 @@ export function solBuyRecords(d: SolBuyRecordsDeps): SolBuyRecords {
     const ws = await d.wallets(signal);
     if (ws.length === 0) return;
     const had = await d.done();
+    const from = (await d.from?.()) ?? new Map<string, SolanaTradesFrom>();
     const todo = [...new Set(ws)].filter((a) => !had.has(a) && !unanswered.has(a));
     for (let i = todo.length - 1; i > 0; i--) {
       const r = pick(i + 1);
@@ -151,7 +218,7 @@ export function solBuyRecords(d: SolBuyRecordsDeps): SolBuyRecords {
       signal.throwIfAborted();
       let buy: SolanaBuy | "none" | null;
       try {
-        buy = await d.reader.read(w, signal);
+        buy = await d.reader.read(w, signal, from.get(w));
       } catch {
         signal.throwIfAborted();
         // this W's read failed: it keeps none, and the next run reads it again
@@ -163,8 +230,8 @@ export function solBuyRecords(d: SolBuyRecordsDeps): SolBuyRecords {
         const wrote = await d.write(w, buy);
         // W's trades: read again at a later load only while W still holds (see the top)
         if ((buy !== "none" && (await d.trades?.(w, buy))) || wrote) d.wrote();
-        // a W still holding: its trades read once a page load, as a W with no answer
-        if (buy !== "none" && buy.txs !== undefined && !buy.soldOut) unanswered.add(w);
+        // a W whose trades were read: once a page load, as a W with no answer (a sold-out one has its mark)
+        if (buy !== "none" && buy.txs !== undefined) unanswered.add(w);
       }
     }
   };

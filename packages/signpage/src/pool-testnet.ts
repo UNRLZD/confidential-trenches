@@ -87,7 +87,7 @@ import { finishPoolOnward, runPoolWithdraw, solanaOnwardFee, solanaWithdrawMinPa
 import type { PoolFunds, PoolReady, PoolWithdrawFormDeps } from "./withdraw/pool-form.ts";
 import { EVM_POOL_HISTORY } from "../../kit/src/trade/evm/buy-unpinned.ts";
 import { solanaBuysAt, solanaHelperBuys } from "../../wallet/src/pool/buy-wallets.ts";
-import { BUY_NONE_KEY, restoredTradeOps, solBuyRecords, TRADES_READ_KEY } from "./sol-buy-records.ts";
+import { BUY_NONE_KEY, solBuyRecords, tradesDone, tradesFrom, writeTradeOps, type TradesStore } from "./sol-buy-records.ts";
 import { fillTradeOps, type FillStore } from "./trade-fill.ts";
 import { POOL_USD_FEEDS } from "../../kit/src/price/pool-usd.ts";
 
@@ -1675,13 +1675,10 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       if (got.failed.length > 0) throw new Error("the buy wallets could not be derived");
       return got.wallets.map((w) => w.address);
     },
-    done: async () => {
-      const st = await page.store();
-      // a rebuilt record is read again for W's trades until its "trades read" mark (sol-buy-records.ts, card
-      // closed-positions-after-a-restore): a device restored before that card has the records and none of the trades
-      const own = Object.entries(asRecord(await st.get("meta", BUY_MINTS_KEY))).flatMap(([a, r]) => ((r as { rebuilt?: unknown } | null)?.rebuilt === true ? [] : [a]));
-      return new Set([...own, ...Object.keys(asRecord(await st.get("meta", BUY_NONE_KEY))), ...Object.keys(asRecord(await st.get("meta", TRADES_READ_KEY)))]);
-    },
+    // a rebuilt record is read again for W's trades until its final "trades read" mark (sol-buy-records.ts, card
+    // closed-positions-after-a-restore): a device restored before that card has the records and none of the trades
+    done: async () => tradesDone(await page.store(), BUY_MINTS_KEY),
+    from: async () => tradesFrom(await page.store()),
     // through the store only while it is open (page.held): another tab's sign out never lands a write in a store made
     // afresh (review of 42a99f81, d)
     write: async (address, buy) => {
@@ -1706,24 +1703,12 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     // write: each only where no op names its signature, then the figures from their transactions (fillTrades)
     trades: async (address, buy) => {
       if (!page.held) throw new Error("no wallet store is open");
-      const st = await page.held();
-      const ops = restoredTradeOps(address, buy);
-      const named = new Set<string>();
-      for (const k of await st.keys("ops")) {
-        const r = (await st.get("ops", k).catch(() => undefined)) as { txs?: unknown } | undefined;
-        if (Array.isArray(r?.txs)) for (const t of r.txs) if (typeof (t as { hash?: unknown })?.hash === "string") named.add((t as { hash: string }).hash);
-      }
-      let wrote = false;
-      for (const o of ops) {
-        if (named.has(o.rec.txs[0]!.hash)) continue;
-        await st.update("ops", o.key, (v) => (v === undefined ? ((wrote = true), o.rec) : undefined));
-      }
-      if (buy.soldOut) await st.update("meta", TRADES_READ_KEY, (v) => ({ ...asRecord(v), [address]: true }));
+      const wrote = await writeTradeOps((await page.held()) as unknown as TradesStore, address, buy);
       if (wrote) fillTrades();
       return wrote;
     },
     reader: {
-      read: (address, signal) => (POOL_TESTNET ? solanaBuysAt(TESTNET_RPCS.solana[0], pin!.program) : solanaHelperBuys(TRADE_HELPER, pin!.program)).read(address, signal),
+      read: (address, signal, from) => (POOL_TESTNET ? solanaBuysAt(TESTNET_RPCS.solana[0], pin!.program) : solanaHelperBuys(TRADE_HELPER, pin!.program)).read(address, signal, from),
     },
     wrote: () => positions.refresh(),
   });

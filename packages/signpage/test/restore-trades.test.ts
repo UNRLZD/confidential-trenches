@@ -67,16 +67,25 @@ test("a device restored from the words reads back every round trip: two closed a
   const history = new Map<string, { sig: string }[]>([[Ws[0]!, [sell0!, buy0]], [Ws[1]!, [sell1!, buy1!]], [Ws[2]!, [buy2!]]]);
   const feedBefore = new Map([[sell0!.sig, "32CSJ1"], [sell1!.sig, "3aUiLL"], [buy0.sig, "5Qn5Lt"], [buy1!.sig, "3sPawp"], [buy2!.sig, "4HSwog"], [sell2!.sig, "5o9u2h"]]);
   let gets = 0;
+  // each W's history reads, by W, with the list's `until`
+  const lists: { w: string; until?: string }[] = [];
+  // a route that answers a signature with a transaction not its own (review of 776d40528, P3-2)
+  let lie: string | null = null;
   globalThis.fetch = (async (_url: string | URL, init?: RequestInit) => {
     const b = JSON.parse(String(init?.body)) as { id: string; method: string; params: unknown[] };
     const ok = (result: unknown) => new Response(JSON.stringify({ jsonrpc: "2.0", id: b.id, result }), { status: 200, headers: { "content-type": "application/json" } });
     const p0 = b.params[0] as string;
     if (b.method === "getSignaturesForAddress") {
       if (p0 === FEED) return ok(JSON.parse(raw(`feed-before-${feedBefore.get((b.params[1] as { before: string }).before)}`)));
-      return ok((history.get(p0) ?? []).map(({ sig }) => ({ signature: sig, err: null, slot: 5, blockTime: txs.get(sig)!.blockTime })));
+      const until = (b.params[1] as { until?: string }).until;
+      lists.push({ w: p0, ...(until === undefined ? {} : { until }) });
+      const all = history.get(p0) ?? [];
+      const to = until === undefined ? -1 : all.findIndex(({ sig }) => sig === until);
+      return ok((to < 0 ? all : all.slice(0, to)).map(({ sig }) => ({ signature: sig, err: null, slot: 5, blockTime: txs.get(sig)!.blockTime })));
     }
     if (b.method === "getTransaction") {
       gets++;
+      if (p0 === lie) return ok({ ...txs.get(p0), transaction: { ...(txs.get(p0) as unknown as { transaction: object }).transaction, signatures: [buy0.sig] } });
       if (txs.has(p0)) return ok(txs.get(p0));
       // the feed's writes recorded; its other transactions are version 1, which a "json" read at version 0 refuses
       if (existsSync(new URL(`feed-${p0.slice(0, 6)}.json`, DIR))) return ok(JSON.parse(raw(`feed-${p0.slice(0, 6)}`)));
@@ -99,6 +108,9 @@ test("a device restored from the words reads back every round trip: two closed a
   const book = (o: Operation[]) => tradeBook(o, []);
   const rowsOf = (o: Operation[]) => closedRows({ closed: book(o).closed, market: () => null } as unknown as PortfolioData);
 
+  // this device's own op of W0's sale (as the device that sold wrote it): the restore writes none beside it
+  await w.update("ops", "own-sale", () => ({ kind: "sell", stage: "filled", txs: [{ chain: "solana", hash: sell0!.sig }], created_ms: sell0!.tx.blockTime * 1000, chain: "solana", token: MINT, pool: "sol", legs: [{ wallet: Ws[0] }] }));
+
   // 1. the load after the restore: three buys and two sales come back as ops
   let tp = make();
   await tp.positions();
@@ -111,10 +123,27 @@ test("a device restored from the words reads back every round trip: two closed a
   for (const c of b1.closed) assert.ok(c.bought !== null && c.sold !== null, "a USD figure on both sides");
   assert.equal(b1.open.size, 1, "the open buy");
   assert.equal(stats(rowsOf(one)).trades, 2, "How you trade: two closed trades");
-  assert.deepEqual(Object.keys((await w.get("meta", TRADES_READ_KEY)) as object).sort(), [Ws[0], Ws[1]].sort(), "only the sold-out Ws are read for good");
+  assert.ok(!(await w.keys("ops")).includes(`restored/${sell0!.sig}`), "the device's own op of a sale wins: none written beside it");
+  const marks = () => w.get("meta", TRADES_READ_KEY) as Promise<Record<string, unknown>>;
+  assert.deepEqual(Object.entries(await marks()).filter(([, v]) => v === true).map(([a]) => a).sort(), [Ws[0], Ws[1]].sort(), "only the sold-out Ws are read for good");
+  assert.deepEqual((await marks())[Ws[2]!], { after: buy2!.sig, mint: "4CxjZyMNoF1p6eXHXHv1TWpS2X47CuUmLwtGe18spump", program: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb" }, "the open W: read on from its buy");
 
-  // 2. W2 sells: the next load reads W2 again (open), and its round trip closes; nothing is written twice
+  // 2a. W2 sells, but the route answers the sale's signature with another transaction: not taken, so not lost
   history.set(Ws[2]!, [sell2!, buy2!]);
+  lie = sell2!.sig;
+  lists.length = 0;
+  const lieFrom = gets;
+  tp = make();
+  await tp.positions();
+  await tp.settle();
+  for (let i = 0; i < 100 && gets === lieFrom; i++) await new Promise((r) => setTimeout(r, 50));
+  await new Promise((r) => setTimeout(r, 500));
+  assert.deepEqual(lists, [{ w: Ws[2]!, until: buy2!.sig }], "only the open W is read, on from its buy");
+  assert.notEqual((await marks())[Ws[2]!], true, "no mark for good on a sale whose answer was not its own");
+  assert.ok(!(await w.keys("ops")).includes(`restored/${sell2!.sig}`));
+  lie = null;
+
+  // 2b. the next load reads W2 on again, and its round trip closes; nothing is written twice
   const before = gets;
   tp = make();
   await tp.positions();
@@ -125,7 +154,15 @@ test("a device restored from the words reads back every round trip: two closed a
   assert.equal(b2.open.size, 0);
   assert.equal(stats(rowsOf(two)).trades, 3);
   assert.ok(gets > before, "W2 read again");
-  assert.deepEqual(Object.keys((await w.get("meta", TRADES_READ_KEY)) as object).sort(), [...Ws].sort());
+  assert.deepEqual(Object.entries(await marks()).filter(([, v]) => v === true).map(([a]) => a).sort(), [...Ws].sort());
+
+  // 3. every W read for good: a later load reads none of them
+  lists.length = 0;
+  tp = make();
+  await tp.positions();
+  await tp.settle();
+  await new Promise((r) => setTimeout(r, 2_000));
+  assert.deepEqual(lists, [], "no W's history read again");
 }));
 
 test("a restored trade op only from the signature's own transaction, with its block time; a sale only when the wallet sold the mint", async () => {
@@ -140,4 +177,77 @@ test("a restored trade op only from the signature's own transaction, with its bl
   assert.deepEqual(restoredTradeOps(W, { mint: MINT, program: "P", txs: [{ signature: bs, tx: { ...buy, blockTime: null } }] }), []);
   // another wallet's sale of the mint is no sale of W's
   assert.deepEqual(restoredTradeOps("8e8RsnpnL6Toqsa2Q1YPLvopDqPa3HFTdwEikCkqpQ7p", { mint: MINT, program: "P", txs: [{ signature: bs, tx: buy }, { signature: ss, tx: sale }] }).map((o) => o.rec.kind), ["buy"]);
+});
+
+// Review of 776d40528 (P3-1, P3-2, P2-1 and the tests it found missing): W's sale is W's own; the mark is for good only
+// when the sale in full gave its op, else a cursor the next load reads on from; a W read is read once a page load.
+test("a sale W does not sign gives no op; the mark is for good only with the sale's op, else a cursor at the last answer that was its own", async () => {
+  const { restoredTradeOps, writeTradeOps, tradesDone, tradesFrom } = records as unknown as Record<string, (...a: unknown[]) => unknown> & { restoredTradeOps: (w: string, b: unknown) => { rec: { kind: string } }[] };
+  const buy = JSON.parse(raw("5Qn5Lt")) as { transaction: { signatures: string[]; message: { header: { numRequiredSignatures: number } } }; blockTime: number };
+  const sale = JSON.parse(raw("32CSJ1")) as typeof buy;
+  const W = "TcYd32AdSHY5zuqSK2a7PvkDv8FQvafyTs2uS1ztkZX";
+  const [bs, ss] = [buy.transaction.signatures[0]!, sale.transaction.signatures[0]!];
+  const unsigned = structuredClone(sale);
+  unsigned.transaction.message.header.numRequiredSignatures = 0;
+  assert.deepEqual(restoredTradeOps(W, { mint: MINT, program: "P", txs: [{ signature: bs, tx: buy }, { signature: ss, tx: unsigned }] }).map((o) => o.rec.kind), ["buy"], "W does not sign it: no sale");
+  // a store as the wallet store's
+  const storeOf = () => {
+    const m = new Map<string, unknown>();
+    return {
+      m,
+      get: async (s: string, k: string) => m.get(`${s}/${k}`),
+      keys: async (s: string) => [...m.keys()].filter((k) => k.startsWith(`${s}/`)).map((k) => k.slice(s.length + 1)),
+      update: async (s: string, k: string, f: (v: unknown) => unknown) => {
+        const v = f(m.get(`${s}/${k}`));
+        if (v !== undefined) m.set(`${s}/${k}`, v);
+      },
+    };
+  };
+  const mark = (st: ReturnType<typeof storeOf>) => (st.m.get(`meta/${TRADES_READ_KEY}`) as Record<string, unknown>)[W];
+  // the sale in full read, its answer another transaction's: its op not written, so no mark for good
+  let st = storeOf();
+  await writeTradeOps!(st, W, { mint: MINT, program: "P", txs: [{ signature: bs, tx: buy }, { signature: ss, tx: buy }], soldOut: true });
+  assert.deepEqual(mark(st), { after: bs, mint: MINT, program: "P" }, "a cursor before the answer that was not its own");
+  assert.deepEqual([...((await tradesDone!(st, "owed/buy-sol")) as Set<string>)], [], "a cursor is read again");
+  assert.deepEqual([...((await tradesFrom!(st)) as Map<string, unknown>)], [[W, { after: bs, mint: MINT, program: "P" }]]);
+  // sold out by a transaction W does not sign: no sale op, no mark for good
+  st = storeOf();
+  await writeTradeOps!(st, W, { mint: MINT, program: "P", txs: [{ signature: bs, tx: buy }, { signature: ss, tx: unsigned }], soldOut: true });
+  assert.deepEqual(mark(st), { after: ss, mint: MINT, program: "P" });
+  // the sale in full with its op: for good, and a later cursor never takes it back
+  st = storeOf();
+  await writeTradeOps!(st, W, { mint: MINT, program: "P", txs: [{ signature: bs, tx: buy }, { signature: ss, tx: sale }], soldOut: true });
+  assert.equal(mark(st), true);
+  assert.deepEqual([...((await tradesDone!(st, "owed/buy-sol")) as Set<string>)], [W]);
+  await writeTradeOps!(st, W, { mint: MINT, program: "P", after: ss, txs: [], soldOut: false });
+  assert.equal(mark(st), true, "a mark for good stays");
+  // the device's own op of the sale counts as its op: for good, and no op written beside it
+  st = storeOf();
+  await st.update("ops", "own", () => ({ kind: "sell", txs: [{ chain: "solana", hash: ss }] }));
+  assert.equal(await writeTradeOps!(st, W, { mint: MINT, program: "P", after: bs, txs: [{ signature: ss, tx: sale }], soldOut: true }), false);
+  assert.equal(mark(st), true);
+  assert.deepEqual((await st.keys("ops")).sort(), ["own"]);
+});
+
+test("a W whose trades were read is read once a page load; a sign out starts afresh", async () => {
+  const { solBuyRecords } = records;
+  const reads: string[] = [];
+  const open = { mint: MINT, program: "P", txs: [{ signature: "b", tx: {} }], soldOut: false };
+  const r = solBuyRecords({
+    wallets: async () => ["W1"],
+    done: async () => new Set(),
+    write: async () => false,
+    trades: async () => false,
+    reader: { read: async (w: string) => (reads.push(w), open) },
+    wrote: () => {},
+  });
+  r.run();
+  await r.idle();
+  r.run();
+  await r.idle();
+  assert.deepEqual(reads, ["W1"], "once this load");
+  r.stop();
+  r.run();
+  await r.idle();
+  assert.deepEqual(reads, ["W1", "W1"], "again after a sign out");
 });
