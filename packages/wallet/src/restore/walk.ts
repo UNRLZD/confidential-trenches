@@ -86,7 +86,7 @@ export function answerWalk(ask: unknown): WalkAnswer {
 /** A dedicated Worker as the page sees it (a browser Worker is one). */
 export interface WalkPort {
   postMessage(message: unknown): void;
-  addEventListener(type: "message" | "error", listener: (e: { data?: unknown }) => void): void;
+  addEventListener(type: "message" | "error" | "messageerror", listener: (e: { data?: unknown }) => void): void;
   terminate(): void;
 }
 
@@ -116,11 +116,24 @@ export function walkInWorkers(seed64: Uint8Array, spawn: () => WalkPort): NonNul
     });
 }
 
-/** A Worker that could not start, or failed before it answered: its lane walks on the page instead. */
+/** A Worker that could not start, failed, sent what the page cannot read, or gave no answer in time: its lane walks on
+ *  the page instead. */
 class NoWorker extends Error {}
 
-/** One lane in one Worker: its walk, a refusal (thrown), or NoWorker when the Worker cannot start or fails. */
-function inWorker(spawn: () => WalkPort, ask: WalkAsk, signal?: AbortSignal): Promise<LaneWalk> {
+/** The longest a lane's Worker is waited on (review of 9de383865, P3): a lane at RESTORE_GAP takes seconds on a laptop
+ *  and well under a minute on a slow phone; a Worker the browser stops with no error event (memory pressure, a tab
+ *  frozen) would otherwise hold its lane and the walks' turn until a sign out. Past it the lane walks on the page. */
+export const WALK_LANE_MAX_MS = 120_000;
+/** The real timer, cleared when the lane ends (`ended`), so no timer outlives its lane. */
+const after = (ms: number, ended: AbortSignal): Promise<void> =>
+  new Promise((r) => {
+    const t = setTimeout(r, ms);
+    ended.addEventListener("abort", () => clearTimeout(t), { once: true });
+  });
+
+/** One lane in one Worker: its walk, a refusal (thrown), or NoWorker when the Worker cannot start, fails, sends what the
+ *  page cannot read (messageerror), or gives no answer by `bound` (see WALK_LANE_MAX_MS). */
+function inWorker(spawn: () => WalkPort, ask: WalkAsk, signal?: AbortSignal, wait: (ms: number, ended: AbortSignal) => Promise<void> = after): Promise<LaneWalk> {
   return new Promise<LaneWalk>((resolve, reject) => {
     let w: WalkPort;
     try {
@@ -129,9 +142,11 @@ function inWorker(spawn: () => WalkPort, ask: WalkAsk, signal?: AbortSignal): Pr
       return reject(new NoWorker());
     }
     let done = false;
+    const ended = new AbortController();
     const end = (f: () => void): void => {
       if (done) return;
       done = true;
+      ended.abort();
       signal?.removeEventListener("abort", stop);
       // the Worker and the masters it holds end here, whatever the answer
       w.terminate();
@@ -145,6 +160,8 @@ function inWorker(spawn: () => WalkPort, ask: WalkAsk, signal?: AbortSignal): Pr
       end(() => (a?.ok === true ? resolve(a.walk) : reject(new Error(`lane ${ask.lane}: the walk worker refused: ${String((a as { error?: unknown } | undefined)?.error ?? "no answer")}`))));
     });
     w.addEventListener("error", () => end(() => reject(new NoWorker())));
+    w.addEventListener("messageerror", () => end(() => reject(new NoWorker())));
+    void wait(WALK_LANE_MAX_MS, ended.signal).then(() => end(() => reject(new NoWorker())));
     w.postMessage(ask);
   });
 }
@@ -156,10 +173,11 @@ export function walkCores(n: number | undefined = (globalThis as { navigator?: {
 
 /**
  * A pool's 8 lane walks (see the top): with `spawn`, each lane in a Worker, `cores` of them at a time; a lane whose
- * Worker cannot start walks on the page (walkLaneYielding on `slice`); without `spawn`, every lane on the page, as
+ * Worker cannot start, fails or gives no answer within WALK_LANE_MAX_MS (`wait`, the timer, injected in tests) walks on
+ * the page (walkLaneYielding on `slice`); without `spawn`, every lane on the page, as
  * before. The walks in lane order, unchecked: the pool's restore checks each (laneOf) before it takes a note.
  */
-export async function walkLanes(a: { m: { nullifier: bigint; secret: bigint }; scope: bigint; match: WalkMatch; gap: number; signal?: AbortSignal; slice: Slices; spawn?: () => WalkPort; cores?: number }): Promise<LaneWalk[]> {
+export async function walkLanes(a: { m: { nullifier: bigint; secret: bigint }; scope: bigint; match: WalkMatch; gap: number; signal?: AbortSignal; slice: Slices; spawn?: () => WalkPort; cores?: number; wait?: (ms: number, ended: AbortSignal) => Promise<void> }): Promise<LaneWalk[]> {
   a.signal?.throwIfAborted();
   const has = matchOf(a.match);
   if (!a.spawn) {
@@ -178,7 +196,7 @@ export async function walkLanes(a: { m: { nullifier: bigint; secret: bigint }; s
     for (let lane = next++; lane < RESTORE_LANES; lane = next++) {
       const ask = { lane, scope: a.scope, gap: a.gap, reach: null, nullifier: a.m.nullifier, secret: a.m.secret, ...askMatch(a.match) } as WalkAsk;
       try {
-        out[lane] = await inWorker(spawn, ask, stopped);
+        out[lane] = await inWorker(spawn, ask, stopped, a.wait);
       } catch (e) {
         if (!(e instanceof NoWorker)) throw e;
         out[lane] = await onPage(lane);

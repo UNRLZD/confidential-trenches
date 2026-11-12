@@ -362,6 +362,34 @@ test("a floor's throw and another pool's failed walk: the run's end names both (
   assert.ok(why.some((x) => x.includes("write refused")) && why.some((x) => x.includes("evm down")), JSON.stringify(why));
 });
 
+test("a walk that throws at once frees the page's turn: the next pool's walk still runs (review of 9de383865, P3)", async () => {
+  type Turn = <T>(walk: () => Promise<T>) => Promise<T>;
+  let threw = false;
+  let evmWalked = false;
+  const w = await world({
+    // Solana's walk throws before it returns a promise (not an async function's rejection)
+    solana: (async (a: { turn: Turn }) => {
+      await a.turn((() => {
+        threw = true;
+        throw new Error("walk threw at once");
+      }) as never);
+      return { notes: [], spends: [] };
+    }) as never,
+    // the EVM pool asks for the turn only once Solana's walk has thrown in it
+    evm: (async (a: { turn: Turn }) => {
+      for (let i = 0; i < 1000 && !threw; i++) await new Promise((r) => setImmediate(r));
+      await a.turn(async () => void (evmWalked = true));
+      return { notes: notesOf(EVM_SCOPE, LABEL_E, 2000n), spends: [], elsewhere: [], wallets: [], block: 1n };
+    }) as never,
+  });
+  const run = w.r.auto();
+  for (let i = 0; i < 2000 && !evmWalked; i++) await new Promise((r) => setImmediate(r));
+  assert.ok(threw, "Solana's walk threw in its turn");
+  assert.ok(evmWalked, "the EVM pool's walk had its turn after it");
+  assert.equal(await run, "stalled");
+  assert.ok(w.ends.at(-1)?.why.some((x) => x.includes("walk threw at once")), JSON.stringify(w.ends.at(-1)?.why));
+});
+
 test("pagePools: the mainnet build pins the NEAR vault on its release pair (card signpage-restores-near-vault-notes), the Solana pool (card sol-pools-mainnet-pin), read on the page's Solana pair, then Base's and Robinhood's (card evm-pools-on-mainnet), each on its pool list", async () => {
   const { SOL_POOLS, solanaPoolOf } = await import("../../wallet/src/pool/solana.ts");
   const { EVM_POOLS, evmPoolScopeOf } = await import("../../wallet/src/pool/evm.ts");

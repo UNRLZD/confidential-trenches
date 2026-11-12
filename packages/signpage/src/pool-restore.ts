@@ -717,7 +717,10 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
             if (!busy) return void ((busy = true), go());
             const at = first ? waiting.findIndex((w) => !w.first) : -1;
             waiting.splice(at < 0 ? waiting.length : at, 0, { first, go });
-          }).then(() => walk().finally(next));
+          })
+            .then(walk)
+            // a walk that throws at once frees the turn too (review of 9de383865, P3)
+            .finally(next);
         const solanaTurn = <T,>(walk: () => Promise<T>): Promise<T> => turn(walk, true);
         const walkers = h.walkers ? { walkers: h.walkers } : {};
         // the floor, a pool at a time as its walk ends: its scope's deposit counter past the walk's highest note in this

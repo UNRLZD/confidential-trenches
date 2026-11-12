@@ -104,6 +104,7 @@ import { liveRuns, poolSellDryKind } from "./pool-sell-dry.ts";
 import { PAGE_CLUSTER, PAGE_SOL_PIN, pageSolanaRpcs, testnetPool, testnetPoolDeps } from "./pool-testnet.ts";
 import { hostLane } from "../../wallet/src/throttle.ts";
 import { poolRestore, restoreUxOf } from "./pool-restore.ts";
+import { walkWorkerPort } from "./walk-workers.ts";
 import type { PoolChain } from "./rules/pool.ts";
 
 type State =
@@ -169,6 +170,10 @@ const restore = !framed
       // `written`, whose neighbours wallet-restore-reads-ux's bundle check reads
       holdingsWritten: (chain) => testnet?.evmHoldingsRestored(chain),
       written: () => void testnet?.proofs().catch(() => {}),
+      // each pool's walk in Workers (card restore-shows-the-balance-in-seconds): a module Worker per lane from this
+      // origin's /walk-worker.js, through the Trusted Types policy walk-worker (src/walk-workers.ts); a lane whose Worker
+      // cannot start walks on the page
+      walkers: walkWorkerPort,
       // a pool's U_X reads and carry on its chain (card wallet-restore-reads-ux, src/pool-restore.ts restoreUxOf): the
       // follow's own reader on the restore's two public operators (never our helper relay), and the follow's own deposit
       // (poolFollowDeps below), so a restore and a live pool deposit read U_X and carry it the same way; null on a chain

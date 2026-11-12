@@ -13,7 +13,7 @@ import { noteSecrets } from "../src/notes/secrets.ts";
 import { checkedWalk, RESTORE_LANES, slices, walkLaneYielding, type LaneWalk } from "../src/notes/restore.ts";
 import { solanaMarkOf } from "../src/pool/solana-restore.ts";
 import { SOL_MAINNET_DEPLOY } from "../src/pool/solana.ts";
-import { answerWalk, solanaPreMarkOf, walkCores, walkLanes, type WalkPort } from "../src/restore/walk.ts";
+import { answerWalk, solanaPreMarkOf, WALK_LANE_MAX_MS, walkCores, walkLanes, type WalkPort } from "../src/restore/walk.ts";
 
 const SEED = d.wordsToSeed64(d.entropyToWords(new Uint8Array(16))); // the published all-zero entropy vector (a8.json)
 const M = d.masters(SEED, "deposit");
@@ -21,10 +21,13 @@ const SCOPE = 777n;
 const GAP = 40;
 const PROGRAM = SOL_MAINNET_DEPLOY.program;
 const P = (i: number): bigint => noteSecrets(SEED, { kind: "deposit", s: SCOPE, i }).precommitment;
-// notes at indices 2, 3, 17 and 300 (lane 4, past a first gap of misses only when read to its reach: not found)
-const HELD = [2, 3, 17, 90];
-const PRE = [...HELD.map(P), 123n];
-const MARKS = [...HELD.map((i) => solanaMarkOf(PROGRAM, "pre", P(i))), solanaMarkOf(PROGRAM, "pre", 123n)];
+// notes at 2, 50 and 90 on lane 2 (50 a middle one: a walk that drops it differs from the page's), 3, 17, and 316 on lane 4,
+// the gap's edge: a lane with no note before reads indices 4 to 4 + 8 (GAP - 1), so 316 is its last index read and
+// found. 325 on lane 5 is one step past that edge (5 + 8 GAP): on chain, never reached, never found
+const HELD = [2, 3, 17, 50, 90, 4 + RESTORE_LANES * (GAP - 1)];
+const PAST = 5 + RESTORE_LANES * GAP;
+const PRE = [...HELD.map(P), P(PAST), 123n];
+const MARKS = PRE.map((p) => solanaMarkOf(PROGRAM, "pre", p));
 
 const live: Worker[] = [];
 after(() => live.forEach((w) => void w.terminate()));
@@ -60,11 +63,12 @@ test("the Solana mark of a precommitment made in the Worker is the pool's own (s
 test("8 lanes in Workers, cores at a time: lane for lane the page's walk, each checked whole; every Worker ended", async () => {
   const pre = new Set(PRE);
   const page = await onPage((p) => pre.has(p));
-  assert.deepEqual(page.flatMap((w) => w.found).sort((a, b) => a - b), HELD, "the page's walk finds the notes");
-  for (const [match, cores] of [[{ kind: "pre" as const, precommitments: PRE }, 3], [{ kind: "solana" as const, program: PROGRAM, marks: MARKS }, 8]] as const) {
+  assert.deepEqual(page.flatMap((w) => w.found).sort((a, b) => a - b), HELD, "the page's walk finds the notes, the edge's included, never one past it");
+  const cases = [[{ kind: "pre" as const, precommitments: PRE }, 2], [{ kind: "pre" as const, precommitments: PRE }, 3], [{ kind: "solana" as const, program: PROGRAM, marks: MARKS }, 4], [{ kind: "solana" as const, program: PROGRAM, marks: MARKS }, 8]] as const;
+  for (const [match, cores] of cases) {
     started = running = most = ended = 0;
     const got = await walkLanes({ m: M, scope: SCOPE, match, gap: GAP, slice: slices(), spawn: nodeWalker, cores });
-    assert.deepEqual(got, page, `${match.kind}: the Workers' walks are the page's`);
+    assert.deepEqual(got, page, `${match.kind} on ${cores} cores: the Workers' walks are the page's`);
     got.forEach((w, lane) => checkedWalk(w, lane, SEED, SCOPE, GAP, null));
     assert.equal(started, RESTORE_LANES, "one Worker a lane");
     assert.equal(most, cores, `at most ${cores} at once`);
@@ -85,6 +89,36 @@ test("a Worker that cannot start walks its lane on the page; one that fails befo
   let errorOf: (() => void) | undefined;
   assert.deepEqual(await walkLanes({ m: M, scope: SCOPE, match: { kind: "pre", precommitments: PRE }, gap: GAP, slice: slices(), spawn: flaky, cores: 1 }), page);
   assert.deepEqual(await walkLanes({ m: M, scope: SCOPE, match: { kind: "pre", precommitments: PRE }, gap: GAP, slice: slices(), spawn: () => { throw new Error("no Worker"); }, cores: 8 }), page);
+});
+
+// a lane's bound that never comes: only the Worker's own messageerror (or nothing) can end its lane
+const never = (): Promise<void> => new Promise(() => {});
+
+test("a Worker whose answer the page cannot read (messageerror) gives its lane to the page: the same walks, every Worker ended", { timeout: 60_000 }, async () => {
+  const pre = new Set(PRE);
+  const page = await onPage((p) => pre.has(p));
+  started = running = most = ended = 0;
+  const garbled = (): WalkPort => {
+    const p = nodeWalker();
+    let me: ((e: { data?: unknown }) => void) | undefined;
+    return { ...p, addEventListener: (t, f) => (t === "messageerror" ? void (me = f) : t === "message" ? p.addEventListener(t, () => me?.({})) : p.addEventListener(t, f)) };
+  };
+  // the bound never comes, so a page that heard no messageerror would wait on these lanes until the test's own timeout
+  assert.deepEqual(await walkLanes({ m: M, scope: SCOPE, match: { kind: "pre", precommitments: PRE }, gap: GAP, slice: slices(), spawn: garbled, cores: 4, wait: never }), page);
+  assert.equal(ended, RESTORE_LANES, "every Worker ended");
+});
+
+test("a Worker that takes the ask and never answers nor fails: its lane's bound gives the lane to the page; every Worker ended", { timeout: 60_000 }, async () => {
+  const pre = new Set(PRE);
+  const page = await onPage((p) => pre.has(p));
+  started = running = most = ended = 0;
+  let waits = 0;
+  const silent = (): WalkPort => ({ ...nodeWalker(), postMessage: () => {} });
+  // the bound comes at once here (the injected wait, counted); a page with no bound would wait until the test's timeout
+  const wait = async (ms: number): Promise<void> => void (waits++, assert.equal(ms, WALK_LANE_MAX_MS));
+  assert.deepEqual(await walkLanes({ m: M, scope: SCOPE, match: { kind: "pre", precommitments: PRE }, gap: GAP, slice: slices(), spawn: silent, cores: 8, wait }), page);
+  assert.equal(waits, RESTORE_LANES, "each lane's bound asked once");
+  assert.equal(ended, RESTORE_LANES, "every Worker ended");
 });
 
 test("a Worker that refuses stops the walk with its lane named, and the other lanes' Workers end; a stopped run ends them too", async () => {
