@@ -47,7 +47,7 @@ function outcomeOf(status: number, body: unknown, note: PoolSendNote | undefined
 const word = /^[a-z0-9_-]{1,32}$/;
 
 /** The line: `pool send <chain> <net> <route> outcome=<code> status=<n> ms=<n>`, then the note's fields that are set. */
-export function poolSendLine(l: { chain: "solana" | "evm" | "unknown"; net: string; route: "send" | "sell"; status: number; body: unknown; ms: number; note?: PoolSendNote }): string {
+export function poolSendLine(l: { chain: "solana" | "evm" | "unknown"; net: string; route: "send" | "sell" | "pieces"; status: number; body: unknown; ms: number; note?: PoolSendNote }): string {
   const n = l.note ?? {};
   const out = [`pool send ${l.chain} ${word.test(l.net) ? l.net : "?"} ${l.route}`, `outcome=${outcomeOf(l.status, l.body, l.note)}`, `status=${l.status}`, `ms=${Math.max(0, Math.round(l.ms))}`];
   if (n.tag !== undefined) out.push(`tag=${n.tag}`);
