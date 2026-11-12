@@ -2,10 +2,14 @@
 // page's candles, src/data/solana/token.ts, and the EVM lists, src/data/evm/lists.ts) takes its calls from one budget
 // of GT_LIMIT_PER_MIN in any 60 s. The token page goes first: the "lists" lane yields, taking a call only while
 // PAGE_RESERVE calls stay free for a page and REFRESH_SLOT for a held chart's refresh, and none while a page has
-// called in the last YIELD_MS, unless its read is urgent (never read, or about to go stale: src/data/evm/lists.ts LIST_URGENT_MS): the lists always keep LIST_FLOOR
-// calls of the minute for those, so pages opened back to back never leave Discover's lists empty or stale, and pages
-// always keep the other perMin - LIST_FLOOR. A 429 pauses
-// every lane, since GeckoTerminal answers our address, not a lane.
+// called in the last YIELD_MS, unless its read is urgent (never read, or old enough that the floor's queue could carry it past
+// STALE_MS: src/data/evm/lists.ts LIST_URGENT_MS): the lists always keep LIST_FLOOR calls of the minute for those, so
+// pages opened back to back never leave Discover's lists empty or stale, and pages always keep the other perMin -
+// LIST_FLOOR. The floor's calls go to the stalest list of every chain, whichever chain asks first (LIST_TURN_MS), so
+// what holds a list under STALE_MS is the floor's rate (LIST_FLOOR calls per WINDOW_MS for all the lists) and that
+// order, not a chain's luck of the tick (card app-faults-seen-on-122: Base and Robinhood 243 to 316 s old live, the chain
+// whose tick came first taking every freed call). A 429 pauses every lane, since GeckoTerminal answers our address, not
+// a lane.
 //
 // The "refresh" lane is a page's re-read of data it already holds (the newest bars past their 60 s, a top pool past its
 // 10 min): it takes a call only while COLD_RESERVE stay free for a read of something nobody holds, so a held token's
@@ -34,17 +38,22 @@ export const PAGE_RESERVE = 2;
 /** Calls the lists' reads that are not urgent leave free on top of PAGE_RESERVE: a held chart's refresh, so the lists,
  *  which ask for more calls than the budget has, never keep the window at the refresh lane's room (card
  *  helper-chart-fresh: a chart read now and then was served its held bars for good). Each EVM list is then read about
- *  every 225 s instead of 150 s, under LIST_URGENT_MS; a list's first read (`first`, never read) may take the slot, so a
+ *  every 225 s instead of 150 s, under STALE_MS; a list's first read (`first`, never read) may take the slot, so a
  *  helper started fresh still reads a chain's three lists in its first tick, as before. */
 export const REFRESH_SLOT = 1;
 /** A page call this recent makes the lists lane wait (unless its read is urgent). */
 export const YIELD_MS = 60_000;
 /** Calls a refresh leaves free: one cold token page's candles, its top pool and its bars (token.ts). */
 export const COLD_RESERVE = 2;
-/** Calls in the minute the lists may always take for an urgent read (6 lists, each read within LIST_URGENT_MS). */
+/** Calls in the minute the lists may always take for an urgent read: all the EVM lists (6) read once each take
+ *  6 x WINDOW_MS / LIST_FLOOR = 225 s, which src/data/evm/lists.ts LIST_URGENT_MS leaves inside STALE_MS. */
 export const LIST_FLOOR = 2;
-/** The newest data held this old is read in the "pages" lane, as the lists' LIST_URGENT_MS (src/data/evm/lists.ts):
- *  four times the bars' 60 s, so a chart is never served more than this behind its last refresh that could run. */
+/** How long a list's refused call holds the other chains' lists back: the lists ask again every TICK_MS (12 s), so a
+ *  chain that was refused is still waiting at the next tick of another, and a chain that stops asking holds nobody for
+ *  longer than this. */
+export const LIST_TURN_MS = 30_000;
+/** The newest data held this old is read in the "pages" lane: four times the bars' 60 s, so a chart is never served more
+ *  than this behind its last refresh that could run (its own bound; the lists' LIST_URGENT_MS is derived from their floor). */
 export const REFRESH_URGENT_MS = 240_000;
 /** The "ahead" lane (card helper-restart-fresh): the helper's own re-read of a chart callers read lately, before its
  *  bars pass AHEAD_MS (solana/token.ts ahead), so a deploy's swap hands the next helper bars inside GT_SERVE_MS and a
@@ -106,7 +115,7 @@ export function refreshLane(heldAtMs: number | null, nowMs: number): "pages" | "
 export type GeckoBudget = {
   /** One call now in `lane`, or false when the minute, a 429 pause or (for "lists") the yield says no. `what` names the
    *  read for the minute's count line (minute()). */
-  take(lane: string, urgent?: boolean, first?: boolean, what?: string, by?: { ticket?: number; client?: string }): boolean;
+  take(lane: string, urgent?: boolean, first?: boolean, what?: string, by?: { ticket?: number; client?: string; source?: string; since?: number }): boolean;
   /** A place in the queue of cold page reads waiting for a call (takeOrWait): while one waits, no other lane takes a
    *  freed call and a page read takes one only in queue order (`by.ticket` the queue's first that may take), so a cold
    *  read waits its turn (card market-reads-hold-under-load). `client`: the caller's key, for PAGE_PER_CLIENT. */
@@ -214,8 +223,25 @@ export function geckoBudget(now: () => number, perMin = GT_LIMIT_PER_MIN): Gecko
   let throttled = 0;
   let seeded = 0;
   const bump = (m: Map<string, number>, k: string) => m.set(k, (m.get(k) ?? 0) + 1);
-  const allowed = (lane: string, urgent: boolean, first: boolean, t: number, by: { ticket?: number; client?: string }): boolean => {
+  /** The lists that asked for a call and were refused, by source (a chain): when the list it wants was last read (`since`)
+   *  and until when it counts as waiting. A "lists" read goes only while no other source waits with an older read, so the
+   *  floor's calls go to the stalest list of every chain (earliest deadline first), never to the chain that asks first. */
+  const turns = new Map<string, { since: number; until: number }>();
+  const behind = (source: string | undefined, since: number, t: number): boolean => {
+    for (const [s, w] of turns) if (s !== source && w.until > t && (w.since < since || (w.since === since && s < (source ?? "")))) return true;
+    return false;
+  };
+  /** The calls of the window the lists' floor still needs, kept free from every other lane while a list that is urgent
+   *  (or never read) waits for one: LIST_FLOOR less the lists' calls in the window. Without it the pages' calls fill the
+   *  window to perMin and the floor finds no room (card app-faults-seen-on-122: a page every 4 s left the lists one call in
+   *  72 s, not LIST_FLOOR in 75 s), so the pages keep perMin - LIST_FLOOR calls of the window, never all of it. */
+  const reserved = (lane: string, t: number): number => {
+    if (lane === "lists" || ![...turns.values()].some((w) => w.until > t)) return 0;
+    return Math.max(0, LIST_FLOOR - calls.filter((c) => c.lane === "lists").length);
+  };
+  const allowed = (lane: string, urgent: boolean, first: boolean, t: number, by: { ticket?: number; client?: string; source?: string; since?: number }): boolean => {
     if (held || t < pausedUntil || calls.length >= perMin) return false;
+    if (calls.length >= perMin - reserved(lane, t)) return false;
     // card market-reads-hold-under-load: a caller past its share of the window waits; while a cold page read waits for
     // a call, no other lane takes one, and a page read takes one only in its turn
     // a caller past its share leaves the window's last free call for someone else, and while it holds more than its
@@ -223,7 +249,9 @@ export function geckoBudget(now: () => number, perMin = GT_LIMIT_PER_MIN): Gecko
     // takes perMin - 1 at once; with another caller waiting, none past its share
     const past = byClient(by.client) >= PAGE_PER_CLIENT;
     if (lane === "pages" && past && (calls.length >= perMin - 1 || waiting.some((w) => w.client !== by.client))) return false;
-    if (lane !== "pages" && calls.length >= perMin - 1 && heavy()) return false;
+    // an urgent list's read within the floor is the lists' own share of the window, taken even as its last call
+    const floor = lane === "lists" && urgent && calls.filter((c) => c.lane === "lists").length < LIST_FLOOR;
+    if (lane !== "pages" && !floor && calls.length >= perMin - 1 && heavy()) return false;
     if (waiting.length > 0 && (lane !== "pages" || !turnOf(by.ticket, by.client))) return false;
     if (lane === "refresh" && calls.length >= perMin - COLD_RESERVE) return false;
     if (lane === "stale" && calls.length >= perMin - STALE_RESERVE) return false;
@@ -233,8 +261,8 @@ export function geckoBudget(now: () => number, perMin = GT_LIMIT_PER_MIN): Gecko
     if (lane === "ahead" && (backlog() || calls.length >= perMin - COLD_RESERVE || calls.filter((c) => c.lane === "ahead").length >= AHEAD_PER_WINDOW)) return false;
     // a read a page asked for comes before the lists' reads that are not urgent (WANTED_LANE)
     if (lane === "lists" && !urgent && backlog()) return false;
+    if (lane === "lists" && by.source !== undefined && behind(by.source, by.since ?? t, t)) return false;
     if (lane === "lists") {
-      const floor = urgent && calls.filter((c) => c.lane === "lists").length < LIST_FLOOR;
       if (!floor && (calls.length >= perMin - PAGE_RESERVE - (first ? 0 : REFRESH_SLOT) || calls.some((c) => c.lane !== "lists" && c.lane !== "seed" && c.lane !== "ahead" && c.lane !== SEED_LANE && t - c.at < YIELD_MS))) return false;
     }
     return true;
@@ -248,8 +276,10 @@ export function geckoBudget(now: () => number, perMin = GT_LIMIT_PER_MIN): Gecko
       prune(t);
       if (!allowed(lane, urgent, first, t, by)) {
         bump(refused, lane);
+        if (lane === "lists" && by.source !== undefined && (urgent || first)) turns.set(by.source, { since: by.since ?? t, until: t + LIST_TURN_MS });
         return false;
       }
+      if (lane === "lists" && by.source !== undefined) turns.delete(by.source);
       // only a cold page read counts in its caller's share: a held chart's refresh serves what it holds when refused
       calls.push({ at: t, lane, ...(by.client === undefined || lane !== "pages" ? {} : { client: by.client }) });
       bump(took, what === "" ? lane : `${lane} ${what}`);
@@ -269,7 +299,7 @@ export function geckoBudget(now: () => number, perMin = GT_LIMIT_PER_MIN): Gecko
       const ahead = Math.max(at_, 0);
       // a caller past its share is left the window's last call by no one: its next is one more call leaving
       // a queued read's next call is the one that leaves it STALE_RESERVE free
-      const cap = lane === WANTED_LANE ? perMin - STALE_RESERVE : at_ !== -1 && byClient(waiting[at_]!.client) >= PAGE_PER_CLIENT ? perMin - 1 : perMin;
+      const cap = (lane === WANTED_LANE ? perMin - STALE_RESERVE : at_ !== -1 && byClient(waiting[at_]!.client) >= PAGE_PER_CLIENT ? perMin - 1 : perMin) - reserved(lane, t);
       const need = calls.length + ahead - cap;
       if (need >= calls.length) at = Math.max(at, t + WINDOW_MS);
       else if (need >= 0) at = Math.max(at, calls[need]!.at + WINDOW_MS);
