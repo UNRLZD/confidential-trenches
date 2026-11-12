@@ -354,3 +354,20 @@ test("tap_max over pieces: the owner's four notes, each a 5,000,000 piece bound 
   const own = notes.map((x) => bound(x, x, `W-${x.id}`));
   assert.equal(read({ kind: "pump-curve", tokenAccountSize: 165, cashback: false }, own).tap_max, "0");
 });
+
+test("making (card buy-spends-several-pieces): the value of the HELD notes whose first proof is being made, none ready; given beside ready only", () => {
+  const held = note(11n, "HELD", 2_000_000_000n, "a1");
+  const done = note(11n, "HELD", 3_000_000_000n, "a2");
+  const idle = note(11n, "UNSPENT", 5_000_000_000n);
+  const notes = [held, done, idle];
+  const ready = [proof(SOL, done, 3_000_000_000n)];
+  // the queue makes held's proof; done's is ready; idle has no proof being made (too small, or held out by a withdraw)
+  const [e] = poolBalances(notes, [SOL], ready, undefined, undefined, new Set([held.id, done.id, idle.id]));
+  assert.equal(e!.making, "2");
+  assert.equal(e!.ready, "3");
+  // nothing being made: "0", so an app tells no "making a proof" for a balance with no ready proof
+  assert.equal(poolBalances(notes, [SOL], [], undefined, undefined, new Set())[0]!.making, "0");
+  // no making set given, or no queue open: no key
+  assert.equal("making" in poolBalances(notes, [SOL], ready)[0]!, false);
+  assert.equal("making" in poolBalances(notes, [SOL], undefined, undefined, undefined, new Set([held.id]))[0]!, false);
+});

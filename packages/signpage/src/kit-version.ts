@@ -15,16 +15,19 @@
 // any kind), for which its client drops the whole op: it is sent each op with that detail left out, a pool deposit's
 // chain and a deposit's amount_usd fact kept as they are its own (every level below it too). A client at
 // A client that names kit-v1.9 reads everything but an op's pool_amount (card portfolio-shows-pool-trades), for which
-// its client drops the whole op: it is sent each op with pool_amount left out (every level below it too). A client at
-// SIGNPAGE_KIT_VERSION or above gets every message as it is. A change to what the page may send raises the kit's
+// its client drops the whole op: it is sent each op with pool_amount left out (every level below it too). A client that
+// names kit-v1.10 reads everything but a pool entry's making and a pool.buy.dry answer's pieces and cost (card
+// buy-spends-several-pieces), for which its schema refuses the whole state or answer: it is sent each with them left
+// out (every level below it too). A client at SIGNPAGE_KIT_VERSION or above gets every message as it is. A change to what the page may send raises the kit's
 // SIGNPAGE_KIT_VERSION and adds the version before it here.
 import { SIGNPAGE_KIT_VERSION } from "../../kit/src/signpage/messages.ts";
 import type { DepositStage, Operation, SignpageKind, SignpageState, Stage } from "../../kit/src/signpage/messages.ts";
 
 /** The levels this page sends at: kit-v1.4's shape, kit-v1.5's (no moved_out, no pool_deposit op), kit-v1.6's (no
  *  pool_deposit op), kit-v1.7's (no position decimals), kit-v1.8's (no op detail; none at the levels below either),
- *  kit-v1.9's (no op pool_amount), or everything (kit-v1.10 and above). */
-export type KitLevel = "1.4" | "1.5" | "1.6" | "1.7" | "1.8" | "1.9" | "current";
+ *  kit-v1.9's (no op pool_amount), kit-v1.10's (no pool making, no dry buy pieces and cost), or everything (kit-v1.11
+ *  and above). */
+export type KitLevel = "1.4" | "1.5" | "1.6" | "1.7" | "1.8" | "1.9" | "1.10" | "current";
 /** A client that posts no hello. */
 export const KIT_DEFAULT: KitLevel = "1.4";
 /** The first kit version that names itself and reads everything this page sends: the kit's own, as [major, minor]. */
@@ -46,7 +49,7 @@ export function kitLevel(kit: string): KitLevel {
   if (!v) return KIT_DEFAULT;
   const [major, minor] = [Number(v[1]), Number(v[2])];
   const from = (m: number, n: number) => major > m || (major === m && minor >= n);
-  return from(CURRENT_FROM[0], CURRENT_FROM[1]) ? "current" : from(1, 9) ? "1.9" : from(1, 8) ? "1.8" : from(1, 7) ? "1.7" : from(1, 6) ? "1.6" : from(1, 5) ? "1.5" : KIT_DEFAULT;
+  return from(CURRENT_FROM[0], CURRENT_FROM[1]) ? "current" : from(1, 10) ? "1.10" : from(1, 9) ? "1.9" : from(1, 8) ? "1.8" : from(1, 7) ? "1.7" : from(1, 6) ? "1.6" : from(1, 5) ? "1.5" : KIT_DEFAULT;
 }
 
 /** kit-v1.4's deposit stages (kit-v1.4:packages/kit/src/signpage/schema.ts DEPOSIT). */
@@ -139,6 +142,15 @@ const noPoolOps = (ops: readonly Operation[]): Operation[] => ops.filter((o) => 
  *  signpage-state-holdings). */
 const noDecimals = (s: SignpageState): SignpageState => ({ ...s, positions: s.positions.map(({ decimals: _d, ...p }) => p) });
 
+/** The pools with no making (card buy-spends-several-pieces): kit-v1.10 and before refuse a pool entry that has one. */
+const noMaking = (s: SignpageState): SignpageState => (s.pools === undefined ? s : { ...s, pools: s.pools.map(({ making: _m, ...p }) => p) });
+/** pool.buy.dry's answer with no pieces and cost (card buy-spends-several-pieces): kit-v1.10 and before refuse one. */
+const dryFor = (kind: SignpageKind, result: unknown): unknown => {
+  if (kind !== "pool.buy.dry" || typeof result !== "object" || result === null) return result;
+  const { pieces: _p, cost: _c, ...rest } = result as Record<string, unknown>;
+  return rest;
+};
+
 /** An op with no pool_amount (card portfolio-shows-pool-trades): kit-v1.9 and before drop an op that has one. */
 function noPoolAmount(o: Operation): Operation {
   if (!own(o, "pool_amount")) return o;
@@ -160,8 +172,10 @@ function noDetail(o: Operation): Operation {
  *  otherwise; kit-v1.7's with no position decimals either (every level below too); kit-v1.6's with no pool_deposit op;
  *  kit-v1.5's, that and each deposit op with no moved_out; kit-v1.4's fields only, in the state's own order, each op
  *  mapped or left out. */
-export function stateFor(level: KitLevel, given: SignpageState): SignpageState {
-  if (level === "current") return given;
+export function stateFor(level: KitLevel, all: SignpageState): SignpageState {
+  if (level === "current") return all;
+  const given = noMaking(all);
+  if (level === "1.10") return given;
   if (level === "1.9") return { ...given, ops: given.ops.map(noPoolAmount) };
   const plain = { ...given, ops: given.ops.map(noDetail) };
   if (level === "1.8") return plain;
@@ -181,15 +195,19 @@ export function stageFor(level: KitLevel, stage: Stage): Stage | null {
 }
 
 /**
- * An answer's result of `kind` as a client at `level` reads it: for kit-v1.8 the state with no op detail; for kit-v1.7
+ * An answer's result of `kind` as a client at `level` reads it: below the current level, the state with no pool making
+ * and pool.buy.dry's with no pieces and cost; for kit-v1.9 the state with no op pool_amount either; for kit-v1.8 the
+ * state with no op detail; for kit-v1.7
  * that state with no position decimals either; for
  * kit-v1.6 that state with no pool_deposit op; for
  * kit-v1.5 that state and deposit.confirm's facts with
  * no moved_out; for kit-v1.4 the state mapped, deposit.confirm's stage mapped with no facts; every other kind's result
  * as it is (each reads each kind it can ask the same as now).
  */
-export function resultFor(level: KitLevel, kind: SignpageKind, result: unknown): unknown {
-  if (level === "current") return result;
+export function resultFor(level: KitLevel, kind: SignpageKind, given: unknown): unknown {
+  if (level === "current") return given;
+  const result = dryFor(kind, given);
+  if (level === "1.10") return kind === "state" ? stateFor(level, result as SignpageState) : result;
   if (level === "1.9") return kind === "state" ? stateFor(level, result as SignpageState) : result;
   if (level === "1.8") return kind === "state" ? stateFor(level, result as SignpageState) : result;
   if (level === "1.7") return kind === "state" ? stateFor(level, result as SignpageState) : result;

@@ -204,3 +204,28 @@ test("a kept venue is read again once it is COIN_VENUE_KEEP_MS old: a coin's fla
   assert.deepEqual(await ask(kind, { chain: "solana", token: mint }), { result: { tap_max: "0.00334652" } });
   assert.equal(reads.n, 4, "read again at the limit");
 });
+
+test("with an amount (kit 1.11, card buy-spends-several-pieces): the pieces a buy of it spends and what it costs for good, from the same ready set", async () => {
+  // the own note's 0.01 piece and two 0.02 pieces bound to its W (another note's each)
+  const n = (id: string, label: bigint, value: bigint): NoteRecord => ({ ...held, id, attempt: `a-${id}`, leaf: { ...held.leaf!, value, label } });
+  const notes = [n("own", 1n, RUNG), n("p2", 2n, 2n * RUNG), n("p3", 3n, 2n * RUNG)];
+  const proofOf = (x: NoteRecord, own: boolean) => ({ ...ready, noteId: x.id, attempt: x.attempt!, chunk: x.leaf!.value, ...(own ? { own: true as const } : {}) });
+  const list = [proofOf(notes[0]!, true), proofOf(notes[1]!, false), proofOf(notes[2]!, false)];
+  const TIP = 100_000n;
+  const kind = poolBuyDryKind(deps({ tip: TIP, ready: async () => ({ notes, ready: list, open: new Set([SOL.id]) }) }));
+  const at = async (amount?: string) => (await ask(kind, { chain: "solana", token: fx.pump.mint, ...(amount === undefined ? {} : { amount }) })) as { result?: Record<string, unknown>; error?: string };
+  const plain = await at();
+  const tap = plain.result!.tap_max as string;
+  assert.deepEqual(Object.keys(plain.result!), ["tap_max"], "no amount: tap_max alone, as kit 1.10 reads it");
+  const sol = (l: bigint) => (Number(l) / 1e9).toString();
+  // a spend the own piece pays alone: one piece, its relay fee and the tip
+  assert.deepEqual((await at("0.001")).result, { tap_max: tap, pieces: 1, cost: sol(FEE + TIP) });
+  // past it: the own piece and one 0.02 (the least released), two relay fees and one tip
+  assert.deepEqual((await at("0.01")).result, { tap_max: tap, pieces: 2, cost: sol(2n * FEE + TIP) });
+  // tap_max itself: all three
+  assert.deepEqual((await at(tap)).result, { tap_max: tap, pieces: 3, cost: sol(3n * FEE + TIP) });
+  // past tap_max: no pieces, as no buy of it passes
+  assert.deepEqual(Object.keys((await at("1")).result!), ["tap_max"]);
+  for (const bad of ["0.0000000001", "-1", "1e3", "abc", 5]) assert.deepEqual(await at(bad as string), { error: "not_allowed" }, String(bad));
+  for (const r of [(await at("0.01")).result, (await at("0.001")).result]) assert.ok(SIGNPAGE_RESULT_SCHEMAS["pool.buy.dry"](r));
+});

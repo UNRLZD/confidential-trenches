@@ -108,6 +108,10 @@ export type ReadyProof<R = unknown> = {
   poolId: string;
   /** W_{chain, l, j}: the wallet that receives the chunk and signs the tap's one transaction. */
   wallet: { chain: Chain; l: bigint; j: number; path: string; address: string };
+  /** W is this note's own W_{chain, label, j} (card buy-spends-several-pieces): a set of proofs spent to one W holds one
+   *  such proof, so W is found again from that spent note's own label and j (buy-wallets.ts). Set by the queue that
+   *  made it; absent: W is another note's. */
+  own?: true;
   chunk: bigint;
   /** The epoch it was made in (its start, ms), and whether its root is the epoch root or the newest (a fresh note's). */
   epochStartMs: bigint;

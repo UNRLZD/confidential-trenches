@@ -21,7 +21,10 @@
 import type { Chain } from "../../kit/src/orders/record.ts";
 import type { ErrorCode, PoolBuyDry, PoolStatePrice, SignpageState } from "../../kit/src/signpage/messages.ts";
 import { SIGNPAGE_MAX_ANSWER_BYTES, SIGNPAGE_RESULT_SCHEMAS } from "../../kit/src/signpage/schema.ts";
-import { readSolanaPoolBuyVenue, readSolanaRent, type SolanaPoolBuyVenue, type SolanaRent } from "../../kit/src/trade/solana/pool-buy.ts";
+import { readSolanaPoolBuyVenue, readSolanaRent, solanaPoolBuyFunds, type SolanaPoolBuyVenue, type SolanaRent } from "../../kit/src/trade/solana/pool-buy.ts";
+import { SOLANA_POOL_JITO_TIP } from "../../kit/src/checks/solana/checks.ts";
+import type { ReadyProof } from "../../wallet/src/pool/pool.ts";
+import { pickPieces } from "./pool-buy.ts";
 import { SolanaRpcTransportError, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import type { NoteRecord } from "../../wallet/src/notes/store.ts";
 import { evmBalancePool, evmTapSpendOf, poolBalances, solanaBalancePool, solanaTapSpendOf, type BalancePool, type BalanceProof, type LandedRelease } from "../../wallet/src/pool/balances.ts";
@@ -109,9 +112,11 @@ export type PoolBuyDryDeps = {
   rent(): SolanaRent | null;
   /** The notes and the ready proofs in one turn of the queue (pool-testnet.ts readyWith), as state.pools reads them;
    *  null when signed out. */
-  ready(): Promise<{ notes: readonly NoteRecord[]; ready?: readonly BalanceProof[]; open?: ReadonlySet<string>; landed?: ReadonlyMap<string, LandedRelease> } | null>;
+  ready(): Promise<{ notes: readonly NoteRecord[]; ready?: readonly (BalanceProof & Partial<Pick<ReadyProof, "own" | "root">>)[]; open?: ReadonlySet<string>; landed?: ReadonlyMap<string, LandedRelease> } | null>;
   /** True while a trade runs on the page or holds a host of the pair: the preview waits for no trade. */
   trading(): boolean;
+  /** The tip a pool.buy on this page pays (src/pool-buy.ts: SOLANA_POOL_JITO_TIP on mainnet, none on devnet). */
+  tip?: bigint;
   /** The page's clock, ms (performance.now): a kept venue's age. */
   now?(): number;
 };
@@ -119,15 +124,31 @@ export type PoolBuyDryDeps = {
 /**
  * pool.buy.dry (card max-is-priced-for-the-coin): state.pools' Solana tap_max priced on the coin's own venue, the same
  * sum (poolBalances, the same proofs, notes and rent) with solanaTapSpendOf on the venue readCoinVenue reads in place of
- * the costliest one. The buy pays that spend: its pick (src/pool-buy.ts) takes the smallest ready proof the kit's
- * solanaPoolBuyFunds passes on the venue it reads, at a tip no higher than the proof's cap. Display only: nothing is
+ * the costliest one. The buy pays that spend: its pick (src/pool-buy.ts pickPieces) takes the pieces of one W, its own
+ * note's among them, that the kit's solanaPoolBuyFunds passes on the venue it reads, at a tip no higher than the
+ * proofs' cap. Display only: nothing is
  * signed, written or sent. Solana only; a token whose venue is not read answers quote_check_failed (down for a provider
  * that failed), and the app keeps state.pools' tap_max.
+ * With the ask's `amount` (kit 1.11, card buy-spends-several-pieces), at most that tap_max: `pieces`, the count of the
+ * set src/pool-buy.ts's pick (pickPieces) spends for it from the same ready proofs (each still HELD by its attempt, as
+ * poolBalances counts them) on the same venue and rent, and `cost`, that set's relay fees and the page's tip: what the
+ * buy costs for good (W's accounts' rent comes back with the sale). An amount that is not a SOL decimal: not_allowed.
  */
+/** A SOL decimal (at most 9 fraction digits, 30 digits whole) in lamports; undefined when it is not one. */
+const lamportsOf = (x: unknown): bigint | undefined => {
+  const m = typeof x === "string" ? /^(0|[1-9][0-9]{0,29})(?:\.([0-9]{1,9}))?$/.exec(x) : null;
+  return m ? BigInt(m[1]!) * 1_000_000_000n + BigInt((m[2] ?? "").padEnd(9, "0")) : undefined;
+};
+/** Lamports as whole SOL, a decimal with no trailing zeros. */
+const solOf = (l: bigint): string => {
+  const f = (l % 1_000_000_000n).toString().padStart(9, "0").replace(/0+$/, "");
+  return f === "" ? (l / 1_000_000_000n).toString() : `${l / 1_000_000_000n}.${f}`;
+};
 /** Not a HostAnswer, whose `then` would make an async function's answer a thenable. */
 type BuyDryAnswer = { result: PoolBuyDry } | { error: ErrorCode };
 export function poolBuyDryKind(d: PoolBuyDryDeps): (params: Record<string, unknown>) => Running<"pool.buy.dry"> {
   const now = d.now ?? (() => performance.now());
+  const tip = d.tip ?? (POOL_TESTNET ? 0n : SOLANA_POOL_JITO_TIP);
   const venues = new Map<string, { v: CoinVenue; at: number }>();
   const venueOf = async (rpcs: readonly [SolanaRpc, SolanaRpc], token: string): Promise<CoinVenue> => {
     const kept = venues.get(token);
@@ -141,6 +162,8 @@ export function poolBuyDryKind(d: PoolBuyDryDeps): (params: Record<string, unkno
   const run = async (params: Record<string, unknown>): Promise<BuyDryAnswer> => {
     const sol = d.pools.filter((p) => p.chain === "solana");
     if (params.chain !== "solana" || sol.length === 0 || typeof params.token !== "string") return { error: "not_allowed" };
+    const amount = params.amount === undefined ? null : lamportsOf(params.amount);
+    if (amount === undefined) return { error: "not_allowed" };
     const pair = d.rpcs();
     if (pair === null) return { error: "not_allowed" };
     if (d.trading()) return { error: "busy" };
@@ -154,7 +177,16 @@ export function poolBuyDryKind(d: PoolBuyDryDeps): (params: Record<string, unkno
       return { error: e instanceof SolanaRpcTransportError ? "down" : "quote_check_failed" };
     }
     const tap = poolBalances(got.notes, withSolanaRent(sol, rent, venue), got.ready, got.open, got.landed)[0]?.tap_max;
-    return tap === undefined ? { error: "not_funded" } : { result: { tap_max: tap } };
+    if (tap === undefined) return { error: "not_funded" };
+    if (amount === null || amount === 0n || amount > lamportsOf(tap)!) return { result: { tap_max: tap } };
+    const ids = new Set(sol.map((p) => p.id));
+    const byId = new Map(got.notes.map((n) => [n.id, n]));
+    const live = (got.ready ?? []).filter((r) => ids.has(r.poolId) && byId.get(r.noteId)?.state === "HELD" && byId.get(r.noteId)?.attempt === r.attempt);
+    const pays = (set: readonly (typeof live)[number][]): boolean =>
+      solanaPoolBuyFunds(set.map((p) => ({ withdrawnValue: p.chunk, relayFee: p.binding.feeCap })), venue, { spend: amount, tip }, rent).problem === null;
+    const set = pickPieces(live, pays);
+    if (set === null) return { result: { tap_max: tap } };
+    return { result: { tap_max: tap, pieces: set.length, cost: solOf(set.reduce((a, p) => a + p.binding.feeCap, tip)) } };
   };
   return (params) => {
     let out: BuyDryAnswer = { error: "down" };
@@ -203,6 +235,7 @@ const utf8 = (v: unknown): number => new TextEncoder().encode(JSON.stringify(v))
  * (src/pool-price.ts, card signpage-pool-price); an entry gets `price` only when it gives one. `open`: the pool ids
  * whose queue runs (src/pool-testnet.ts readyWith); a chain with none of them has no `ready` (poolBalances). `landed`:
  * the RESERVED notes whose release this page read landed (src/pool-testnet.ts readyWith), each counted as its change.
+ * `making`: the notes whose first proof the queue makes now (src/pool-testnet.ts readyWith), each entry's making.
  */
 export async function withPools(
   state: SignpageState,
@@ -212,11 +245,12 @@ export async function withPools(
   price?: (chain: Chain) => PoolStatePrice | null,
   open?: ReadonlySet<string>,
   landed?: ReadonlyMap<string, LandedRelease>,
+  making?: ReadonlySet<string>,
 ): Promise<SignpageState> {
   if (!state.signed_in) return state;
   try {
     const notes = pools.length === 0 ? [] : await readNotes();
-    const sums = poolBalances(notes, pools, ready, open, landed).map((e) => {
+    const sums = poolBalances(notes, pools, ready, open, landed, making).map((e) => {
       const p = price?.(e.chain) ?? null;
       return p === null ? e : { ...e, price: p };
     });

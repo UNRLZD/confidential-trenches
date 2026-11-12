@@ -9,16 +9,26 @@ import { hasPool, presetsOf, PRESETS, poolBuyAsk, poolView, proofStatus, tradeBa
 import { WORDS } from "../src/screens/trade/words.ts";
 
 type Pools = SignpageState["pools"];
-const sol = (balance: string, ready?: string): NonNullable<Pools>[number] => ({ chain: "solana", asset: "SOL", balance, ...(ready === undefined ? {} : { ready }) });
+const sol = (balance: string, ready?: string, making?: string): NonNullable<Pools>[number] => ({ chain: "solana", asset: "SOL", balance, ...(ready === undefined ? {} : { ready }), ...(making === undefined ? {} : { making }) });
 
 test("ready: a planted note with its proof made reads Proof ready", () => {
   assert.equal(proofStatus([sol("0.2", "0.2")], "solana"), "ready");
   assert.equal(proofStatus([sol("1.25", "0.01")], "solana"), "ready");
 });
 
-test("making: notes landed, the queue running, no proof done yet reads Making proof", () => {
-  assert.equal(proofStatus([sol("0.2", "0")], "solana"), "making");
-  assert.equal(proofStatus([sol("0.2", "0.000")], "solana"), "making");
+test("making: notes landed, no proof done yet, the device making one now (making above 0) reads Making proof", () => {
+  assert.equal(proofStatus([sol("0.2", "0", "0.2")], "solana"), "making");
+  assert.equal(proofStatus([sol("0.2", "0.000", "0.01")], "solana"), "making");
+});
+
+test("card buy-spends-several-pieces: money with no proof ready and none being made never reads Making proof", () => {
+  // the queue makes none: the note too small for any proof, or held by a running withdraw
+  assert.equal(proofStatus([sol("0.2", "0", "0")], "solana"), "none");
+  // a page that sends no making (kit 1.10): no label, never a guess from ready "0" alone
+  assert.equal(proofStatus([sol("0.2", "0")], "solana"), "none");
+  assert.equal(proofStatus([sol("0.2", "0", "x")], "solana"), "none");
+  // a proof ready wins over one being made
+  assert.equal(proofStatus([sol("0.3", "0.1", "0.2")], "solana"), "ready");
 });
 
 test("none: no pools read, no entry for the chain, an empty pool, or no queue running", () => {
@@ -33,7 +43,7 @@ test("none: no pools read, no entry for the chain, an empty pool, or no queue ru
 test("another chain's ready proof is never this chain's", () => {
   const base = { chain: "base" as const, asset: "ETH" as const, balance: "0.01", ready: "0.01" };
   assert.equal(proofStatus([base], "solana"), "none");
-  assert.equal(proofStatus([base, sol("0.2", "0")], "solana"), "making");
+  assert.equal(proofStatus([base, sol("0.2", "0", "0.2")], "solana"), "making");
   assert.equal(proofStatus([sol("0.2", "0.2")], "base"), "none");
 });
 

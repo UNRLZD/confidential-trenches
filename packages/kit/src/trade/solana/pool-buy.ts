@@ -570,6 +570,10 @@ export type SolanaPoolBuyRequest = {
   readonly cuPrice: bigint; // micro-lamports per CU
   // the pool's cluster: on mainnet the helper sends a tag 3 to Jito bundle-only, so it tips at least SOLANA_JITO_TIP_MIN
   readonly cluster: "mainnet" | "devnet";
+  // card buy-spends-several-pieces: the same bundle's releases (tag 2s) to W before this tag 3, all landing or none;
+  // their chunks pay W too (solanaPoolBuyFunds over them and this release). The caller holds each to its own tag 2 to
+  // W (the signing page's rules/pool.ts checkSolanaBuy); none: this release alone
+  readonly before?: readonly SolanaPoolBuyPiece[];
 };
 export type SolanaPoolBuyChain = {
   readonly blockhash: string; // the device's own read
@@ -680,7 +684,7 @@ const piecesOf = (r: SolanaPoolBuyPiece | readonly SolanaPoolBuyPiece[]): readon
  * adds nothing past its fee, and more pieces than SOLANA_POOL_BUY_PIECES_MAX, are refused.
  * `peak` is what W pays out at its lowest point, `left` what W holds after.
  */
-export function solanaPoolBuyFunds(release: SolanaPoolBuyPiece | readonly SolanaPoolBuyPiece[], venue: SolanaPoolBuyVenue, req: Pick<SolanaPoolBuyRequest, "spend" | "tip">, rent: SolanaRent): { chunk: bigint; peak: bigint; left: bigint; problem: string | null } {
+export function solanaPoolBuyFunds(release: SolanaPoolBuyPiece | readonly SolanaPoolBuyPiece[], venue: Pick<SolanaPoolBuyVenue, "kind" | "tokenAccountSize" | "cashback">, req: Pick<SolanaPoolBuyRequest, "spend" | "tip">, rent: SolanaRent): { chunk: bigint; peak: bigint; left: bigint; problem: string | null } {
   const pieces = piecesOf(release);
   const chunk = pieces.reduce((s, p) => s + p.withdrawnValue - p.relayFee, 0n) - req.tip;
   const kept = req.spend + solanaRentMin(rent, venue.tokenAccountSize) + solanaRentMin(rent, perVenue(SOLANA_POOL_VOLUME_ACCOUNT_SIZE, venue.kind)) +
@@ -767,6 +771,14 @@ export function solanaPoolPriorityProblem(release: SolanaPoolRelease, venue: Sol
   return room < 0n || priority > room * 1_000_000n ? `the priority fee (${perVenue(SOLANA_POOL_BUY_CU, venue.kind)} CU at ${req.cuPrice} micro-lamports) is more than the relay fee ${release.relayFee} leaves after the release's cost ${solanaPoolReleaseCost(rent)} and the page reserve ${solanaPoolPageReserve(rent)}` : null;
 }
 
+/** The buy's pieces: the bundle's earlier releases (req.before), each a u64 withdrawnValue and relay fee, then this
+ *  release; refused past SOLANA_POOL_BUY_PIECES_MAX (solanaPoolBuyFunds says so by name). */
+function buyPieces(release: SolanaPoolRelease, req: Pick<SolanaPoolBuyRequest, "before">): SolanaPoolBuyPiece[] {
+  const before = req.before ?? [];
+  if (!Array.isArray(before) || before.length >= SOLANA_POOL_BUY_PIECES_MAX || before.some((p) => !isU64(p?.withdrawnValue) || !isU64(p.relayFee))) throw new Error(`before: at most ${SOLANA_POOL_BUY_PIECES_MAX - 1} releases, each a u64 withdrawnValue and relay fee`);
+  return [...before.map((p) => ({ withdrawnValue: p.withdrawnValue, relayFee: p.relayFee })), release];
+}
+
 function checkRequest(cfg: SolanaPoolConfig, release: SolanaPoolRelease, venue: SolanaPoolBuyVenue, req: SolanaPoolBuyRequest, rent: SolanaRent): void {
   for (const k of [cfg.program, cfg.pool, req.wallet, req.feePayer, req.token]) if (!isKey(k)) throw new Error("program, pool, wallet, fee payer and token must be addresses");
   if (cfg.pool !== solanaPoolAccount(cfg.program)) throw new Error("the pool is not the program's pool account");
@@ -777,7 +789,7 @@ function checkRequest(cfg: SolanaPoolConfig, release: SolanaPoolRelease, venue: 
   // M369 (L2): the helper refuses a mainnet tag 3 under Jito's minimum (tip_low), so the device never builds one
   if (req.cluster === "mainnet" && req.tip < SOLANA_JITO_TIP_MIN) throw new Error(`a mainnet pool buy tips at least ${SOLANA_JITO_TIP_MIN} lamports (Jito's minimum for a bundle)`);
   if (!isU64(req.cuPrice) || req.cuPrice > SOLANA_CU_PRICE_MAX) throw new Error("the CU price is over its cap");
-  const f = solanaPoolBuyFunds(release, venue, req, rent);
+  const f = solanaPoolBuyFunds(buyPieces(release, req), venue, req, rent);
   if (f.problem) throw new Error(f.problem);
   const fee = solanaPoolPriorityProblem(release, venue, req, rent);
   if (fee) throw new Error(fee);
@@ -1247,9 +1259,16 @@ export function checkSolanaPoolBuy(wire: Uint8Array, cfg: SolanaPoolConfig, rele
   if (signers.length !== 2 || signers[0] !== req.feePayer || signers[1] !== req.wallet || m.readonlySigned !== 0) fail("SIGNERS", `signers ${signers.join(",")}`);
   else pass("SIGNERS", "the fee payer and W");
   // FUNDS: the chunk covers the spend and W's new accounts, and W keeps 0 or at least rent(0)
-  const funds = solanaPoolBuyFunds(release, venue, req, reads.rent);
+  let pieces: SolanaPoolBuyPiece[];
+  try {
+    pieces = buyPieces(release, req);
+  } catch (e) {
+    fail("FUNDS", (e as Error).message);
+    return done();
+  }
+  const funds = solanaPoolBuyFunds(pieces, venue, req, reads.rent);
   if (funds.problem) { fail("FUNDS", funds.problem); return done(); }
-  pass("FUNDS", `chunk ${funds.chunk}, W pays out ${funds.peak} at most, keeps ${funds.left}`);
+  pass("FUNDS", `chunk ${funds.chunk} from ${pieces.length} release(s), W pays out ${funds.peak} at most, keeps ${funds.left}`);
   // FEE: the priority fee fits in what the relay fee leaves after the release's cost (the helper's fee_below_cost)
   const fee = solanaPoolPriorityProblem(release, venue, req, reads.rent);
   if (fee) { fail("FEE", fee); return done(); }

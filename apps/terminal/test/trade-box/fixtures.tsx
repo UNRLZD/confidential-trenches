@@ -58,9 +58,9 @@ const poolMode = q.get("pool");
 type Pool = NonNullable<SignpageState["pools"]>[number];
 const POOLS: Record<string, { chain: "solana" | "base"; pools: Pool[] }> = {
   "sol-ready": { chain: "solana", pools: [{ chain: "solana", asset: "SOL", balance: "0.01", ready: "0.01", tap_max: "0.00173608" }] },
-  "sol-making": { chain: "solana", pools: [{ chain: "solana", asset: "SOL", balance: "0.01", ready: "0" }] },
+  "sol-making": { chain: "solana", pools: [{ chain: "solana", asset: "SOL", balance: "0.01", ready: "0", making: "0.01" }] },
   "base-ready": { chain: "base", pools: [{ chain: "base", asset: "ETH", balance: "0.003", ready: "0.003", tap_max: "0.001" }] },
-  "base-making": { chain: "base", pools: [{ chain: "base", asset: "ETH", balance: "0.003", ready: "0" }] },
+  "base-making": { chain: "base", pools: [{ chain: "base", asset: "ETH", balance: "0.003", ready: "0", making: "0.003" }] },
 };
 const POOL = poolMode ? POOLS[poolMode] : undefined;
 if (POOL) STATE.pools = POOL.pools;

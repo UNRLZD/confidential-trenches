@@ -57,7 +57,7 @@ export type TapSpendOf = (pieces: readonly TapPiece[]) => bigint;
 export type BalancePool = { id: string; chain: Chain; scope: bigint; asset: PoolAsset; spendOf?: TapSpendOf };
 /** What poolBalances reads of a ready proof. */
 export type BalanceProof = Pick<ReadyProof, "noteId" | "attempt" | "poolId" | "chunk"> & { wallet: Pick<ReadyProof["wallet"], "l" | "j" | "address">; binding: Pick<ReadyProof["binding"], "feeCap"> & { request?: unknown } };
-export type PoolBalance = { chain: Chain; asset: PoolAsset; balance: string; ready?: string; tap_max?: string };
+export type PoolBalance = { chain: Chain; asset: PoolAsset; balance: string; ready?: string; tap_max?: string; making?: string };
 /** A RESERVED note's release the device read landed, by note id: the attempt that sent it and the value it withdrew. */
 export type LandedRelease = { attempt: string; withdrawn: bigint };
 
@@ -154,11 +154,14 @@ function decimal(units: bigint, d: number): string {
   return frac === "" ? int : `${int}.${frac}`;
 }
 
-export function poolBalances(notes: readonly NoteRecord[], pools: readonly BalancePool[], ready?: readonly BalanceProof[], open?: ReadonlySet<string>, landed?: ReadonlyMap<string, LandedRelease>): PoolBalance[] {
+/** Each chain's pool balance from the device's notes (see PoolBalance and the kit's SignpageState.pools). `making`: the
+ *  notes whose first proof the queue is making now (queue.ts readyWith); each HELD one with no ready proof counts its
+ *  value in the chain's `making`, given beside `ready` (card buy-spends-several-pieces). */
+export function poolBalances(notes: readonly NoteRecord[], pools: readonly BalancePool[], ready?: readonly BalanceProof[], open?: ReadonlySet<string>, landed?: ReadonlyMap<string, LandedRelease>, making?: ReadonlySet<string>): PoolBalance[] {
   const ids = new Set<string>();
   const scopes = new Set<bigint>();
   // per chain, in table order: its asset's decimals, then the sums in base units
-  const chains = new Map<Chain, { asset: PoolAsset; d: number; balance: bigint; ready: bigint; tapMax: bigint; spends: boolean; open: boolean }>();
+  const chains = new Map<Chain, { asset: PoolAsset; d: number; balance: bigint; ready: bigint; tapMax: bigint; making: bigint; spends: boolean; open: boolean }>();
   for (const p of pools) {
     if (typeof p.id !== "string" || p.id.length === 0) throw new Error("pool: no id");
     if (!(CHAINS as readonly unknown[]).includes(p.chain)) throw new Error(`pool ${p.id}: unknown chain ${String(p.chain)}`);
@@ -171,7 +174,7 @@ export function poolBalances(notes: readonly NoteRecord[], pools: readonly Balan
     const c = chains.get(p.chain);
     if (p.spendOf !== undefined && typeof p.spendOf !== "function") throw new Error(`pool ${p.id}: spendOf is not a function`);
     const runs = open === undefined || open.has(p.id);
-    if (c === undefined) chains.set(p.chain, { asset: p.asset, d, balance: 0n, ready: 0n, tapMax: 0n, spends: p.spendOf !== undefined, open: runs });
+    if (c === undefined) chains.set(p.chain, { asset: p.asset, d, balance: 0n, ready: 0n, tapMax: 0n, making: 0n, spends: p.spendOf !== undefined, open: runs });
     else if (c.asset !== p.asset) throw new Error(`pool ${p.id}: chain ${p.chain} holds asset ${c.asset}, not ${p.asset}: one asset per chain`);
     else {
       if (p.spendOf === undefined) c.spends = false;
@@ -191,6 +194,8 @@ export function poolBalances(notes: readonly NoteRecord[], pools: readonly Balan
       const w = out !== undefined && out.attempt === n.attempt ? out.withdrawn : 0n;
       if (typeof w !== "bigint" || w < 0n || w > v) throw new Error(`note ${n.id}: its landed release withdrew more than it holds`);
       c.balance += v - w;
+      // a note the queue is making its first proof for (HELD by that proof, none ready): its value is being made ready
+      if (n.state === "HELD" && making?.has(n.id) === true && !(ready ?? []).some((r) => r.noteId === n.id)) c.making += v;
     }
     for (const r of ready ?? []) {
       if (r.poolId !== p.id || counted.has(r.noteId)) continue;
@@ -227,6 +232,6 @@ export function poolBalances(notes: readonly NoteRecord[], pools: readonly Balan
     chain,
     asset: c.asset,
     balance: decimal(c.balance, c.d),
-    ...(ready === undefined || !c.open ? {} : { ready: decimal(c.ready, c.d), ...(c.spends ? { tap_max: decimal(c.tapMax, c.d) } : {}) }),
+    ...(ready === undefined || !c.open ? {} : { ready: decimal(c.ready, c.d), ...(c.spends ? { tap_max: decimal(c.tapMax, c.d) } : {}), ...(making === undefined ? {} : { making: decimal(c.making, c.d) }) }),
   }));
 }

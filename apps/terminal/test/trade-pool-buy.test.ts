@@ -41,7 +41,9 @@ test("a whole-unit decimal to base units and back: plain decimals only, never mo
 
 test("the pool as the box draws it: balance and the per-tap max in USD, the proof's state; none without a price or an entry", () => {
   assert.deepEqual(poolView([sol("1.25", "0.4", "0.3")], "solana", SOL), { asset: "SOL", balance: 11_626n, tapMax: 2_790n, proof: "ready" });
-  assert.deepEqual(poolView([sol("0.2", "0")], "solana", SOL), { asset: "SOL", balance: 1_860n, tapMax: null, proof: "making" });
+  // Making proof only while a proof is being made (kit 1.11 making); none ready and none being made reads none
+  assert.deepEqual(poolView([{ ...sol("0.2", "0"), making: "0.2" }], "solana", SOL), { asset: "SOL", balance: 1_860n, tapMax: null, proof: "making" });
+  assert.deepEqual(poolView([sol("0.2", "0")], "solana", SOL), { asset: "SOL", balance: 1_860n, tapMax: null, proof: "none" });
   assert.equal(poolView([sol("0.2", "0.2", "0.1")], "solana", null), null);
   assert.equal(poolView([], "solana", SOL), null);
   assert.equal(poolView(undefined, "solana", SOL), null);

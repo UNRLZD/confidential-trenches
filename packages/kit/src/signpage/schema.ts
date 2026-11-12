@@ -12,6 +12,7 @@ import {
 } from "./messages.ts";
 import type { PoolAsset, SignpageKind } from "./messages.ts";
 import { deepFreeze } from "../freeze.ts";
+import { SOLANA_POOL_BUY_PIECES_MAX } from "../trade/solana/pool-buy.ts";
 
 /** A check of one value. */
 export type SignpageSchema = (v: unknown) => boolean;
@@ -192,8 +193,9 @@ const unitsAt = (s: string, d: number): bigint | null => {
 };
 /** The private balance per chain's pool: each entry exact, its asset one of POOL_ASSETS (no decimals key: they come
  * from POOL_ASSET_DECIMALS only) and the one its chain's pool holds, its amounts with no more fraction digits than the
- * asset has decimals, its ready at most its balance, its tap_max only with a ready and at most that ready (one
- * proof's spend, at most its chunk; "0" when the fee and W's new accounts eat every chunk), one entry per chain (a chain twice is refused). */
+ * asset has decimals, its ready at most its balance, its tap_max only with a ready and at most that ready (one tap's
+ * spend, at most its chunks; "0" when the fees and W's new accounts eat every chunk), its making (kit 1.11) only with a
+ * ready and at most its balance, one entry per chain (a chain twice is refused). */
 /** The pool asset's USD price as the page read it (card signpage-pool-price): one asset is price x 10^expo USD, price a
  * positive integer with no leading zero, expo an integer in -18..0 (poolUsdPrice's bounds), published_s the feed's own
  * time and read_ms the device's clock at the read; only on a chain with a feed (POOL_USD_FEEDS: not NEAR). */
@@ -204,18 +206,22 @@ const poolPrice = obj({
   read_ms: uint,
 });
 const PRICED: readonly Chain[] = ["solana", "base", "robinhood"];
-const poolEntry = obj({ chain, asset: oneOf(POOL_ASSETS), balance: dec }, { ready: dec, tap_max: dec, price: poolPrice });
+const poolEntry = obj({ chain, asset: oneOf(POOL_ASSETS), balance: dec }, { ready: dec, tap_max: dec, making: dec, price: poolPrice });
 const poolFits: SignpageSchema = (v) => {
   if (!poolEntry(v)) return false;
-  const p = v as { chain: Chain; asset: PoolAsset; balance: string; ready?: string; tap_max?: string; price?: unknown };
+  const p = v as { chain: Chain; asset: PoolAsset; balance: string; ready?: string; tap_max?: string; making?: string; price?: unknown };
   if (POOL_CHAIN_ASSET[p.chain] !== p.asset) return false;
   if (p.price !== undefined && !PRICED.includes(p.chain)) return false;
   const d = POOL_ASSET_DECIMALS[p.asset];
   const balance = unitsAt(p.balance, d);
   if (balance === null) return false;
-  if (p.ready === undefined) return p.tap_max === undefined;
+  if (p.ready === undefined) return p.tap_max === undefined && p.making === undefined;
   const ready = unitsAt(p.ready, d);
   if (ready === null || ready > balance) return false;
+  if (p.making !== undefined) {
+    const making = unitsAt(p.making, d);
+    if (making === null || making > balance) return false;
+  }
   if (p.tap_max === undefined) return true;
   const tapMax = unitsAt(p.tap_max, d);
   return tapMax !== null && tapMax <= ready;
@@ -369,7 +375,7 @@ export const SIGNPAGE_RESULT_SCHEMAS = {
   "deposit.dry": depositDry,
   "pool.address": poolAddress,
   "pool.sell.dry": poolSellDry,
-  "pool.buy.dry": obj({ tap_max: dec }),
+  "pool.buy.dry": obj({ tap_max: dec }, { pieces: (v) => Number.isInteger(v) && (v as number) >= 1 && (v as number) <= SOLANA_POOL_BUY_PIECES_MAX, cost: dec }),
 } as const satisfies Record<SignpageKind, SignpageSchema>;
 deepFreeze(SIGNPAGE_RESULT_SCHEMAS);
 
@@ -407,7 +413,7 @@ export const SIGNPAGE_PARAM_SCHEMAS = {
   "deposit.dry": obj({ origin_asset: str, amount: dec }),
   "pool.address": poolAddressParams,
   "pool.sell.dry": poolSell,
-  "pool.buy.dry": obj({ chain: poolChain, token: str }),
+  "pool.buy.dry": obj({ chain: poolChain, token: str }, { amount: dec }),
 } as const satisfies Record<SignpageKind, SignpageSchema>;
 deepFreeze(SIGNPAGE_PARAM_SCHEMAS);
 

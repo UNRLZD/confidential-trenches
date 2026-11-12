@@ -141,3 +141,25 @@ test("pieces: the ready set is what the prover makes in half an epoch at its mea
   assert.equal(q2.ready().length, 5);
   assert.deepEqual(q2.ready().map((r) => r.chunk).sort((a, b) => (a < b ? -1 : 1)), [usd(5), usd(10), usd(20), usd(50), usd(100)]);
 });
+
+test("pieces: the owner's proof alone says its W is its note's own; takeSet reserves the whole set or none", async () => {
+  const v = await vaultWith([usd(2), usd(5.5), usd(10), usd(20)]);
+  const q = queue(v, piecesPool(v));
+  await q.refresh();
+  const ready = q.ready();
+  const own = ready.filter((r) => r.own === true);
+  assert.equal(own.length, 1);
+  assert.equal(own[0]!.chunk, usd(5), "the smallest ready chunk's note owns W");
+  const state = async (id: string) => (await v.ns.get(id))!.state;
+  // one attempt that is not the ready one: refused before any write, every note still HELD with its proof ready
+  const items = ready.map((r) => ({ noteId: r.noteId, attempt: r.attempt }));
+  await assert.rejects(q.takeSet([...items.slice(0, -1), { ...items.at(-1)!, attempt: "another" }], undefined, 99n), /another attempt/);
+  for (const r of ready) assert.equal(await state(r.noteId), "HELD");
+  assert.equal(q.ready().length, ready.length);
+  await assert.rejects(q.takeSet([items[0]!, items[0]!]), /each once/);
+  // the set: every note RESERVED, in the order given, each with the one last height on its mark
+  const got = await q.takeSet(items, undefined, 99n);
+  assert.deepEqual(got.map((r) => r.noteId), items.map((x) => x.noteId));
+  for (const r of ready) assert.equal(await state(r.noteId), "RESERVED");
+  assert.equal(q.ready().length, 0);
+});

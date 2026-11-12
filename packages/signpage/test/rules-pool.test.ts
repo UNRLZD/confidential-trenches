@@ -17,6 +17,8 @@ import { SOLANA_COMPUTE_BUDGET_PROGRAM, SOLANA_SYSTEM_PROGRAM, SOLANA_TOKEN_2022
 import { solanaProgramAddress } from "../../kit/src/checks/solana/message.ts";
 import {
   buildSolanaPoolBuy,
+  solanaPoolBuyMaxSpend,
+  solanaPoolTag2Accounts,
   solanaEncodePoolRelease,
   solanaPoolPage,
   solanaPoolReleaseAccounts,
@@ -429,6 +431,50 @@ test("Solana buy: the kit's tag 3 on the pinned pool for W, the request's token 
   const bent = Uint8Array.from(built.wire);
   bent[bent.length - 1] ^= 1;
   assert.throws(() => checkSolanaBuy(bent, ask, ctx, fxRelease, venue, req, reads), (e: unknown) => e instanceof PoolRuleRefused && e.rule.startsWith("buy_"));
+});
+
+test("Solana buy of several pieces: each tag 2 to the same W at its own state index, then the tag 3 funded by all; any other wallet, index, note or sum is refused", async () => {
+  const cfg = { program: FX_PROGRAM, pool: solanaProgramAddress([enc("pool")], FX_PROGRAM) };
+  const base = await setup("pump");
+  const piece = (n: number, over: Partial<SolanaPoolRelease> = {}): SolanaPoolRelease => ({ ...fxRelease, existingNullifierHash: Uint8Array.from({ length: 32 }, (_, i) => (i === 31 ? n : 0)), withdrawnValue: 5_000_000n, ...over });
+  const p1 = piece(1), p2 = piece(2);
+  const spend = solanaPoolBuyMaxSpend([p1, p2, fxRelease], base.venue, base.req.tip, base.reads.rent);
+  const { venue, req: req0, chain, reads: reads0 } = await setup("pump", spend);
+  // the pool's size read is 6: the two tag 2s' change notes go at 6 and 7, the tag 3's at 8
+  const tag2 = (r: SolanaPoolRelease, at: number, w = FX_W, extra: Ixx[] = []) =>
+    wire(FEE_PAYER, [cuLimit, { program: FX_PROGRAM, accounts: solanaPoolTag2Accounts(cfg, w, FEE_PAYER, r, at), data: solanaEncodePoolRelease(r) }, ...extra], [FEE_PAYER, w], reads0.blockhash);
+  const req = { ...req0, before: [p1, p2].map((p) => ({ withdrawnValue: p.withdrawnValue, relayFee: p.relayFee })) };
+  const built = buildSolanaPoolBuy(cfg, fxRelease, venue, req, { ...chain, stateSize: 8 }, { pick: () => 3 });
+  const reads = { ...reads0, stateSize: 8 };
+  const ctx: PoolContext = { nowMs: NOW, wallet: FX_W, feeCap: 3_000_000n, solana: { program: FX_PROGRAM, feePayer: FEE_PAYER } };
+  const ask: PoolAsk = { kind: "pool.buy", chain: "solana", token: req.token, amount: spend, slippageBps: 300, decimals: 9 };
+  const pieces = [{ wire: tag2(p1, 6), release: p1 }, { wire: tag2(p2, 7), release: p2 }];
+  const d = checkSolanaBuy(built.wire, ask, ctx, fxRelease, venue, req, reads, pieces);
+  assert.equal(d.to, FX_W);
+  assert.equal(d.feeCap, 3n * fxRelease.relayFeeCap, "the draw's fee cap is every release's");
+  // the tag 3 alone does not pay this spend: its pieces are what fund it
+  assert.throws(() => checkSolanaBuy(built.wire, ask, ctx, fxRelease, venue, req0, reads), refusedAs("buy_FUNDS"));
+  const W2 = key(64);
+  for (const [list, r, rule] of [
+    // a piece that pays another wallet: its signer is not this W
+    [[{ wire: tag2(p1, 6, W2), release: p1 }, pieces[1]!], req, "signers"],
+    // a piece's change note on another page than the one its index lands on
+    [[{ wire: tag2(p1, 6 + 1024), release: p1 }, pieces[1]!], req, "release_accounts"],
+    // a piece that is not the device's release
+    [[{ wire: tag2(piece(1, { withdrawnValue: 5_000_001n }), 6), release: p1 }, pieces[1]!], req, "release_not_devices"],
+    // anything after a piece's release
+    [[{ wire: tag2(p1, 6, FX_W, [{ program: SOLANA_SYSTEM_PROGRAM, accounts: [acc(FX_W, true, true), acc(W2, false, true)], data: Uint8Array.of(2, 0, 0, 0, ...u64(1n)) }]), release: p1 }, pieces[1]!], req, "instructions"],
+    // one note twice: the tag 3's own note as a piece
+    [[{ wire: tag2(fxRelease, 6), release: fxRelease }, pieces[1]!], { ...req, before: [{ withdrawnValue: fxRelease.withdrawnValue, relayFee: fxRelease.relayFee }, req.before[1]!] }, "pieces"],
+    // the request's pieces not the ones checked: more than they pay, or none sent for them
+    [pieces, { ...req, before: [{ ...req.before[0]!, withdrawnValue: 6_000_000n }, req.before[1]!] }, "pieces"],
+    [[], req, "pieces"],
+    [pieces.slice(0, 1), req, "pieces"],
+    // five pieces before the tag 3: over the five one tap carries
+    [[...pieces, ...pieces, ...pieces], req, "pieces"],
+  ] as const) {
+    assert.throws(() => checkSolanaBuy(built.wire, ask, ctx, fxRelease, venue, r, reads, list), refusedAs(rule), rule);
+  }
 });
 
 // ---------- Solana sell ----------

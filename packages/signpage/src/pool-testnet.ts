@@ -568,8 +568,9 @@ export type TestnetPool = {
   /** state.pools' `ready` (src/pools.ts) with `read`'s notes, in one turn of the queue's view (queue.ts readyWith), so
    * a remake's swap never falls between the two (card pool-ready-no-flicker); `ready` undefined while no queue is open.
    * `open`: the ids of the pools whose queue is open, so a chain with no open queue reads no ready (src/pools.ts
-   * withPools). `read` waits for nothing of the queue's. */
-  readyWith<T>(read: () => Promise<T>): Promise<{ ready: readonly ReadyProof[] | undefined; value: T; open: ReadonlySet<string>; landed?: ReadonlyMap<string, LandedRelease> }>;
+   * withPools). `read` waits for nothing of the queue's. `making`: the notes each open queue makes a first proof for now
+   * (queue.ts readyWith; card buy-spends-several-pieces), for state.pools' making. */
+  readyWith<T>(read: () => Promise<T>): Promise<{ ready: readonly ReadyProof[] | undefined; value: T; open: ReadonlySet<string>; landed?: ReadonlyMap<string, LandedRelease>; making?: ReadonlySet<string> }>;
   /** `fn` runs after each pass that made or remade a proof: a proof made changes no store record (its note was HELD
    * before it began), so the page's state is read again on this. */
   watch(fn: () => void): void;
@@ -1309,6 +1310,12 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         return list;
       },
       take: async (id, attempt, early, lastHeight) => (taken = await (await q()).take(id, attempt, early, lastHeight)),
+      // a buy's pieces, all RESERVED or none (card buy-spends-several-pieces); the run's buy is the last, its tag 3
+      takeSet: async (items, early, lastHeight) => {
+        const got = await (await q()).takeSet(items, early, lastHeight);
+        taken = got[got.length - 1] ?? null;
+        return got;
+      },
       chainNow: () => chainNow(over.pool ?? { now: (signal) => solanaNow(rpcs(), signal) }),
       // the run ended "sent": its note is followed by the state reads' pass until its end is known (followBuys)
       follow: (post) => {
@@ -2359,14 +2366,16 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         return { ready: undefined, value, open: ids, landed: await landed() };
       }
       const ready: ReadyProof[] = [];
+      const making = new Set<string>();
       const turn = async (i: number): Promise<T> => {
         if (i === qs.length) return read();
         const r = await qs[i]!.readyWith(() => turn(i + 1));
         ready.unshift(...r.ready);
+        for (const id of r.making) making.add(id);
         return r.value;
       };
       const value = await turn(0);
-      return { ready, value, open: ids, landed: await landed() };
+      return { ready, value, open: ids, landed: await landed(), making };
     },
     watch: (fn) => void watchers.add(fn),
     signingOut: () => {

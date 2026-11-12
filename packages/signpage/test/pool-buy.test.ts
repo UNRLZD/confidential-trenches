@@ -12,15 +12,15 @@ import { test } from "node:test";
 import { base58, base64 } from "@scure/base";
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { entropyToWords, freshWallet, wordsToSeed64 } from "@blindfill/wallet/derive";
-import { SOLANA_POOL_FEE_STEP, solanaPoolFee, solanaPoolPage } from "../../kit/src/trade/solana/pool-buy.ts";
-import { SOLANA_PUMP_PROGRAM } from "../../kit/src/checks/solana/checks.ts";
+import { SOLANA_POOL_FEE_STEP, solanaDecodePoolRelease, solanaPoolBuyMaxSpend, solanaPoolFee, solanaPoolPage } from "../../kit/src/trade/solana/pool-buy.ts";
+import { SOLANA_POOL_JITO_TIP, SOLANA_PUMP_PROGRAM } from "../../kit/src/checks/solana/checks.ts";
 import { solanaDecodeMessage } from "../../kit/src/checks/solana/message.ts";
 import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import type { VaultSnarkjsProof, VaultWithdrawSignals } from "../../kit/src/vault/shapes.ts";
 import type { ReadyProof } from "../../wallet/src/pool/pool.ts";
 import { solanaContextOf, solanaPoolOf, type SolanaReleaseRequest } from "../../wallet/src/pool/solana.ts";
 import { ALT, BLOCKHASH, FEE_PAYER, POOL, PROGRAM, fx, rent, replay, setup, unhex } from "../../kit/test/solana-pool-buy-fx.ts";
-import { lateBuyEnd, POOL_BLOCKHASH_LIFE_MS, POOL_BUY_READS, POOL_BUY_SETTLE_MS, PoolSendBusy, poolBuyKind, readBack, runPoolBuy, solanaProofBytes, type PoolBuyHost } from "../src/pool-buy.ts";
+import { lateBuyEnd, pickPieces, POOL_BLOCKHASH_LIFE_MS, POOL_BUY_READS, POOL_BUY_SETTLE_MS, PoolSendBusy, poolBuyKind, readBack, runPoolBuy, solanaProofBytes, type PoolBuyHost } from "../src/pool-buy.ts";
 import * as poolBuy from "../src/pool-buy.ts";
 import { SolanaRpcTransportError } from "../../kit/src/trade/solana/send.ts";
 import type { PoolAsk } from "../src/rules/pool.ts";
@@ -67,7 +67,7 @@ function readyProof(over: { stateRoot?: bigint; attempt?: string; fee?: bigint; 
   const context = solanaContextOf(request, SCOPE);
   const signals: VaultWithdrawSignals = [beHex(unhex(r.new_commitment)), beHex(unhex(r.nullifier_hash)), String(r.withdrawn), String(over.stateRoot ?? STATE_ROOT), String(r.state_depth), String(LABEL_ROOT), String(r.label_depth), context.toString()];
   return {
-    noteId: "note-1", attempt: over.attempt ?? "attempt-1", poolId: "sol", wallet: { chain: "sol", l: L, j: over.j ?? J, path: W.path, address: W.address },
+    noteId: "note-1", attempt: over.attempt ?? "attempt-1", poolId: "sol", wallet: { chain: "sol", l: L, j: over.j ?? J, path: W.path, address: W.address }, own: true,
     chunk: BigInt(r.withdrawn), epochStartMs: 0n, deadlineMs: BigInt(fx.deadline_ms), root: "epoch",
     binding: { context, feeCap: fee, request }, proof: PROOF, publicSignals: signals,
   };
@@ -2306,4 +2306,72 @@ test("card sell-right-after-a-buy: a read-back that sees its transaction before 
     }
     assert.ok(held.out - held.t0 <= alone.out - alone.t0 + 100, `${n}: Filled ${(held.out - held.t0).toFixed(0)} ms with the sale, ${(alone.out - alone.t0).toFixed(0)} ms alone`);
   }
+});
+
+// ---------- card buy-spends-several-pieces: one tap, several pieces, one W ----------
+
+/** A second ready proof on the same W: another note (its own nullifier), `chunk` its release; W is not its own. */
+function pieceProof(noteId: string, nullifier: bigint, chunk: bigint, own = false): ReadyProof<SolanaReleaseRequest> {
+  const p = readyProof();
+  const publicSignals = [...p.publicSignals] as VaultWithdrawSignals;
+  publicSignals[1] = nullifier.toString();
+  publicSignals[2] = chunk.toString();
+  const { own: _own, ...rest } = p;
+  return { ...rest, ...(own ? { own: true as const } : {}), noteId, attempt: `${noteId}-a`, chunk, publicSignals };
+}
+const relOf = (p: ReadyProof<SolanaReleaseRequest>) => ({ withdrawnValue: p.chunk, relayFee: p.binding.request.relayFee });
+
+test("pieces: the pick is one W's set that holds its own note, pays, and releases the least, then the fewest pieces", () => {
+  const own = pieceProof("own", 1n, 5_000_000n, true);
+  const a = pieceProof("a", 2n, 20_000_000n), b = pieceProof("b", 3n, 10_000_000n), c = pieceProof("c", 4n, 10_000_000n);
+  const sum = (set: readonly ReadyProof<SolanaReleaseRequest>[]) => set.reduce((x, p) => x + p.chunk, 0n);
+  const atLeast = (n: bigint) => (set: readonly ReadyProof<SolanaReleaseRequest>[]) => sum(set) >= n;
+  // the own note's piece alone pays: nothing more released
+  assert.deepEqual(pickPieces([a, b, own], atLeast(5_000_000n))?.map((p) => p.noteId), ["own"]);
+  // 15 M: own + one 10 M (15 M) before own + 20 M (25 M); the own one last, the buy's tag 3
+  assert.deepEqual(pickPieces([a, b, c, own], atLeast(15_000_000n))?.map((p) => p.noteId), ["b", "own"]);
+  // 25 M: own + 20 M (one piece more) before own + 10 M + 10 M (the same 25 M, two more)
+  assert.deepEqual(pickPieces([a, b, c, own], atLeast(25_000_000n))?.map((p) => p.noteId), ["a", "own"]);
+  // without the own note's proof, or another W's, nothing: W could not be found again from what the buy spends
+  assert.equal(pickPieces([a, b, c], atLeast(1n)), null);
+  assert.equal(pickPieces([a, { ...own, wallet: { ...own.wallet, address: "another" } }], atLeast(25_000_000n)), null);
+  // at most max pieces: 45 M needs all four, refused at three
+  assert.equal(pickPieces([a, b, c, own], atLeast(45_000_000n), 3), null);
+  assert.equal(pickPieces([a, b, c, own], atLeast(45_000_000n))?.length, 4);
+});
+
+test("pieces: a spend past the own note's Max sends one bundle: the other piece's tag 2 to W, then the tag 3 from the own note, each signed by W, every note taken first", async () => {
+  const own = pieceProof("note-1", BigInt("0x" + Buffer.from(unhex(r.nullifier_hash)).toString("hex")), BigInt(r.withdrawn), true);
+  const other = pieceProof("note-2", 777n, 5_000_000n);
+  const s = await setup("pump", SPEND);
+  const spend = solanaPoolBuyMaxSpend([relOf(own)], s.venue, SOLANA_POOL_JITO_TIP, rent) + 1_000_000n;
+  const w = await world({ readies: [[other, own]], helper: "502" });
+  const bundles: Uint8Array[][] = [];
+  const sets: string[][] = [];
+  // without a set take and a bundle send the page buys from one piece: the own note's alone does not pay this spend
+  assert.deepEqual(await runPoolBuy(w.host, { ...ASK, amount: spend }), { error: "not_funded" });
+  w.host.takeSet = async (items) => {
+    sets.push(items.map((x) => x.noteId));
+    assert.equal(bundles.length, 0, "every note taken before anything leaves");
+    return items.map((x) => (x.noteId === own.noteId ? own : other));
+  };
+  w.host.sendPieces = async (_pool, txs) => {
+    bundles.push(txs.map((t) => t.slice()));
+    throw new Error("pool send: HTTP 502");
+  };
+  const a = await runPoolBuy(w.host, { ...ASK, amount: spend });
+  assert.equal("stage" in a && a.stage, "not_landed", JSON.stringify(a));
+  assert.deepEqual(sets, [["note-2", "note-1"]]);
+  assert.equal(bundles.length, 1);
+  const [tag2, tag3] = bundles[0]!;
+  const msgOf = (tx: Uint8Array) => solanaDecodeMessage(tx.subarray(1 + 64 * tx[0]!));
+  for (const tx of [tag2!, tag3!]) assert.ok(ed25519.verify(tx.subarray(65, 129), tx.subarray(129), base58.decode(W.address)), "W signed it");
+  const m2 = msgOf(tag2!);
+  const rel = solanaDecodePoolRelease(m2.instructions.at(-1)!.data);
+  assert.equal(rel.withdrawnValue, 5_000_000n, "the other note's piece");
+  assert.equal(m2.staticKeys[1], W.address, "to the one W");
+  // the tag 3 releases the own note's proof: its nullifier, not the piece's
+  assert.equal(msgOf(tag3!).instructions.at(-1)!.data[0], 3);
+  // each note settled before not_landed
+  assert.ok(w.log.includes("settle:note-1") && w.log.includes("settle:note-2"), w.log.filter((x) => x.startsWith("settle")).join(","));
 });
