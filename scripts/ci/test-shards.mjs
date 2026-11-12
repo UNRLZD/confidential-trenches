@@ -100,14 +100,23 @@ export const MUTANT_SECONDS = {
   // parts of 14 or 15 on the queue's runner (jobs 129687360235 (7), 129687360305 (8), 129687360082 (9)): 304.5, 333.8,
   // 378.8, 375.3, 279.4 and 259.4 s, the slowest 27.06 s a plant (part 3, 14 plants, 378.8 s), and eight parts of 11 or
   // 10 plants plan 11 * 27.06 = 298 s at most (six planned 379 s)
-  "packages/signpage: node scripts/rent-back-mutants.mjs 1/8": 298,
-  "packages/signpage: node scripts/rent-back-mutants.mjs 2/8": 298,
-  "packages/signpage: node scripts/rent-back-mutants.mjs 3/8": 298,
-  "packages/signpage: node scripts/rent-back-mutants.mjs 4/8": 298,
-  "packages/signpage: node scripts/rent-back-mutants.mjs 5/8": 298,
-  "packages/signpage: node scripts/rent-back-mutants.mjs 6/8": 298,
-  "packages/signpage: node scripts/rent-back-mutants.mjs 7/8": 271,
-  "packages/signpage: node scripts/rent-back-mutants.mjs 8/8": 271,
+  // card round-trip-costs-less: 127 plants (the sale's closes and the rent backs' one-W reads added 40), mutant i in
+  // part (i % 14) + 1, so 10 in part 1 and 9 in the rest: 10 * 27.06 = 271 s and 9 * 27.06 = 244 s at the slowest
+  // plant above; parts of 9 share out among the other sweeps where twelve parts of 11 would not (16 parts plan 499 s)
+  "packages/signpage: node scripts/rent-back-mutants.mjs 1/14": 271,
+  "packages/signpage: node scripts/rent-back-mutants.mjs 2/14": 244,
+  "packages/signpage: node scripts/rent-back-mutants.mjs 3/14": 244,
+  "packages/signpage: node scripts/rent-back-mutants.mjs 4/14": 244,
+  "packages/signpage: node scripts/rent-back-mutants.mjs 5/14": 244,
+  "packages/signpage: node scripts/rent-back-mutants.mjs 6/14": 244,
+  "packages/signpage: node scripts/rent-back-mutants.mjs 7/14": 244,
+  "packages/signpage: node scripts/rent-back-mutants.mjs 8/14": 244,
+  "packages/signpage: node scripts/rent-back-mutants.mjs 9/14": 244,
+  "packages/signpage: node scripts/rent-back-mutants.mjs 10/14": 244,
+  "packages/signpage: node scripts/rent-back-mutants.mjs 11/14": 244,
+  "packages/signpage: node scripts/rent-back-mutants.mjs 12/14": 244,
+  "packages/signpage: node scripts/rent-back-mutants.mjs 13/14": 244,
+  "packages/signpage: node scripts/rent-back-mutants.mjs 14/14": 244,
   // the helper's: the sell sweep's 244 mutants ran in three parts of 81 or 82 on the queue's runner, the third 301.9 s
   // (3.73 s a mutant, job 129687360155; 2.60 and 2.84 s in the others), so it runs in four parts of 61: 228 s
   "apps/helper: node test/pool-evm/sell-mutants.mjs 1/4": 228,

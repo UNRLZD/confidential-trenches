@@ -38,8 +38,9 @@ export const TURN = new RegExp(`(${N})=${N}\\?\\.opened;if\\(\\1\\)\\{if\\(await
 // never fed or hinted at its older amount (review P2 of 8da6b97f); the Ws the finder reads with no `read` given: those
 // neither a buy record nor the listing names (review of 55d4c6eb, P2-A: a W from before a sign out; card
 // wallets-found-in-one-read: one list for a sale's first read and its fallback), each other W its listing; the finder
-// list asked with the sale's stop
-const LISTED = new RegExp(`wallets:async ${N}=>\\{let ${N}=(${N})\\.preempt\\(\\),${N}=null;try\\{let (${N})=${N}\\?\\1\\.listed\\(\\)\\?\\?${N}\\(await\\(await ${N}\\.store\\(\\)\\)\\.get\\(\`meta\`,(?:${N}|\`owed/positions-sol\`)\\)\\):null,(${N})=${N};if\\(\\3===void 0\\)\\{let (${N})=await\\(await ${N}\\.store\\(\\)\\)\\.get\\(\`meta\`,\`owed/buy-sol\`\\)\\?\\?\\{\\};\\3=(${N})=>!Object\\.hasOwn\\(\\4,\\5\\)&&\\2\\?\\.has\\(\\5\\)!==!0\\}let ${N}=await (${N})\\(await ${N}\\(\\),${N},\\3,${N}\\),(${N})=(${N})=>\\2\\?\\.has\\(\\8\\)\\?new Map\\(\\2\\.get\\(\\8\\)\\):null;`);
+// list asked with the sale's stop; since card round-trip-costs-less a rent back's list (no W read) holds the passes off not
+// at all
+const LISTED = new RegExp(`wallets:async ${N}=>\\{let ${N}=(?:${N}===${N}\\?null:)?(${N})\\.preempt\\(\\),${N}=null;try\\{let (${N})=${N}\\?\\1\\.listed\\(\\)\\?\\?${N}\\(await\\(await ${N}\\.store\\(\\)\\)\\.get\\(\`meta\`,(?:${N}|\`owed/positions-sol\`)\\)\\):null,(${N})=${N};if\\(\\3===void 0\\)\\{let (${N})=await\\(await ${N}\\.store\\(\\)\\)\\.get\\(\`meta\`,\`owed/buy-sol\`\\)\\?\\?\\{\\};\\3=(${N})=>!Object\\.hasOwn\\(\\4,\\5\\)&&\\2\\?\\.has\\(\\5\\)!==!0\\}let ${N}=await (${N})\\(await ${N}\\(\\),${N},\\3,${N}\\),(${N})=(${N})=>\\2\\?\\.has\\(\\8\\)\\?new Map\\(\\2\\.get\\(\\8\\)\\):null;`);
 // that list: no spent note, no seed read; else the Ws derived from the spent notes, the seed copy zeroed, and the finder
 // asked for only those the list's `read` names, side by side in its steps, under the stop it is given
 const LISTER = (f) => new RegExp(`[,;\\s]${f.replace(/\$/g, "\\$")}=async\\(${N},${N},(${N})=\\(\\)=>!0,(${N})\\)=>\\{let (${N})=await ${N}\\(${N},${N}\\);if\\(\\3\\.length===0\\)return\\[\\];let (${N})=await ${N}\\.seed64\\(\\),(${N});try\\{\\5=${N}\\(\\4,\\[\\{id:${N}\\.program,chain:\`sol\`,spent:\\3,reader:${N}\\(${N}\\)\\}\\]\\)\\}finally\\{\\4\\.fill\\(0\\)\\}[^]{0,120}?let ${N}=await ${N}\\(\\5,\\1,\\{together:!0,\\.\\.\\.\\2\\?\\{signal:\\2\\}:\\{\\}\\}\\)`);
@@ -84,7 +85,9 @@ const freshOf = (js) => {
   // old (its own wait, or the plan's) right before the quote's age rule: priced again, nothing built
   const stale = new RegExp(`if\\(${old}\\|\\|${N}\\?\\.waited\\?\\.\\(\\)\\)return ${N}\\.reprice=!0,\\{error:\`failed\`\\};let ${N}=${N},${N}=\\{amount:`);
   // a simulation refused while an earlier leg is in flight: a wait, then priced again; else the cause names each provider
-  const sim = new RegExp(`\\.inFlight\\?\\.\\(\\)&&\\(${N}\\.simWaited\\?\\?0\\)<${N}\\?\\(${N}\\.simWaited=\\(${N}\\.simWaited\\?\\?0\\)\\+500,await ${wait}\\(500\\),${N}\\.reprice=!0,\\{error:\`failed\`\\}\\):${N}\\(\`failed\`,\`sim\`,${N}\\.flatMap\\(\\(${N},${N}\\)=>[^]{0,80}?\`RPC \\$\\{`);
+  // since card round-trip-costs-less a sale with closes whose simulation refused is tried once more with none before the
+  // cause, so the wait is its own statement
+  const sim = new RegExp(`\\.inFlight\\?\\.\\(\\)&&\\(${N}\\.simWaited\\?\\?0\\)<${N}(?:\\?\\(|\\)return )${N}\\.simWaited=\\(${N}\\.simWaited\\?\\?0\\)\\+500,await ${wait}\\(500\\),${N}\\.reprice=!0,\\{error:\`failed\`\\}(?:\\):|;if\\((${N})\\.length>0\\)\\{\\1=\\[\\];continue\\}return )${N}\\(\`failed\`,\`sim\`,${N}\\.flatMap\\(\\(${N},${N}\\)=>[^]{0,80}?\`RPC \\$\\{`);
   return stale.test(js) && sim.test(js);
 };
 

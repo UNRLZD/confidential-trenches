@@ -860,8 +860,10 @@ test("an owed onward send's finish: a sign out never waits on its slow RPC read,
   let reads = 0;
   let release!: () => void;
   const gate = new Promise<void>((r) => (release = r));
-  const rpc = async () => {
-    reads++;
+  // the finish's reads (its first: each RPC's finalized slot); the load's rent backs read on their own, in the
+  // background (card round-trip-costs-less: the helper's finding read of the W this note paid)
+  const rpc = async (method: string) => {
+    if (method === "getSlot") reads++;
     await gate;
     throw new Error("offline");
   };
@@ -1686,5 +1688,78 @@ test("the kept-out record's write reaches another page as a store change (its st
   } finally {
     channel.close();
     w.close();
+  }
+});
+
+// Card round-trip-costs-less (review of 20ba2481b, P16 and P17): the load's rent backs run on the state reads, never on
+// a timer of their own: the first read runs them; a run that leaves a W to try again books the next past BACKS_FIRST_MS
+// (the wait doubling); one that leaves none books none, however long; a full sell's new owed record (one with no pass
+// yet, written through the sell host's owed list) runs them at the next read.
+test("the rent backs run on the state reads: again after the wait while a W is left, never once none is, again at a full sell's new record", async () => {
+  const { BACKS_FIRST_MS, BACKS_MAX_MS } = await import("../src/pool-testnet.ts");
+  const { SOLANA_RENT_SYSVAR } = await import("../../kit/src/trade/solana/pool-buy.ts");
+  const { poolSellKind } = await import("../src/pool-sell.ts");
+  const { w } = await wallet();
+  // the providers down: the helper's finding read (the Rent sysvar first) counted, every read refused
+  const finds: string[] = [];
+  const down = async (): Promise<never> => {
+    throw new Error("offline");
+  };
+  const helper = async (m: string, p: readonly unknown[]): Promise<never> => {
+    const keys = p[0];
+    if (m === "getMultipleAccounts" && Array.isArray(keys) && keys[0] === SOLANA_RENT_SYSVAR) finds.push(String(keys[1]));
+    throw new Error("offline");
+  };
+  // each run: a request of the seed's lock, shared (nothing else here takes it: no note)
+  const runs: Promise<unknown>[] = [];
+  const locks = {
+    request: ((name: string, opts: LockOptions, cb: LockGrantedCallback<unknown>) => {
+      const r = navigator.locks.request(name, opts, cb);
+      if (name === "ct-wallet/seed" && opts?.mode === "shared") runs.push(r);
+      return r;
+    }) as LockManager["request"],
+    query: () => navigator.locks.query(),
+  };
+  const realNow = Date.now;
+  let now = realNow();
+  Date.now = () => now;
+  try {
+    let mk: (() => Parameters<typeof poolSellKind>[0] extends () => infer H ? H : never) | undefined;
+    const t = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { rpcs: [down, helper], prover: { vault: signalsProver(), stop: () => {} }, locks, tradeKinds: { sell: (f) => ((mk = f as typeof mk), poolSellKind(f)) } });
+    const put = async (address: string, passes: number): Promise<void> => {
+      const h = mk!() as { owed?: { put(r: unknown): Promise<void> }; end?: () => void };
+      try {
+        await h.owed!.put({ address, l: "1", j: 0, mints: [], passes });
+      } finally {
+        h.end?.();
+      }
+    };
+    const read = async (): Promise<void> => {
+      await t.stateRead();
+      await Promise.all(runs);
+    };
+    const X = base58.encode(new Uint8Array(32).fill(7));
+    await put(X, 1);
+    await read();
+    assert.deepEqual([runs.length, finds], [1, [X]], "the load's first read runs them; the providers down, W is left to try");
+    await read();
+    assert.equal(runs.length, 1, "before the wait: no run");
+    now += BACKS_FIRST_MS;
+    await read();
+    assert.deepEqual([runs.length, finds.length], [2, 2], "past the wait: run again (P17)");
+    // W's record gone: the next run leaves none
+    await w.put("meta", "owed/rentback-sol", {});
+    now += 2 * BACKS_FIRST_MS;
+    await read();
+    assert.equal(runs.length, 3);
+    now += 10 * BACKS_MAX_MS;
+    await read();
+    assert.equal(runs.length, 3, "none left: no run, however long (P17)");
+    // a full sell's new record: the next read runs them (P16)
+    await put(X, 0);
+    await read();
+    assert.deepEqual([runs.length, finds.length], [4, 3], "a new owed record: run at the next read (P16)");
+  } finally {
+    Date.now = realNow;
   }
 });

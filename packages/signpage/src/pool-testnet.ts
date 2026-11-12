@@ -64,7 +64,7 @@ import { POOL_TESTNET } from "../../wallet/src/pool/network.ts";
 import { askWhileBusy, type BusyOpts } from "../../wallet/src/busy.ts";
 import { lateBuyEnd, POOL_SEND_BUSY_WAIT_MS, PoolSendBusy, poolBuyKind, type PoolBuyHost } from "./pool-buy.ts";
 import { boughtSincePass, keptHeldOf, type StoreWs } from "./pool-sell-dry.ts";
-import { BUY_MINTS_KEY, buyMints, keptSells, owedRentBacks, poolSellKind, resumeRentBacks, settleDeadSellOps, settlePoolSells, settleSellOps, type PoolSellKindHost } from "./pool-sell.ts";
+import { BUY_MINTS_KEY, buyMints, keptSells, owedRentBacks, poolSellKind, READS_NONE, resumeRentBacks, settleDeadSellOps, settlePoolSells, settleSellOps, type PoolSellKindHost } from "./pool-sell.ts";
 import { derivedBuyWallets, evmHelperKeyedRpc, evmHelperRpc, solanaHelperHoldings, solanaHoldingsAt, spentNotesOf, wantedBuyWallets, type BuyWallet, type HoldingsReader, type ListedBuyWallet } from "../../wallet/src/pool/buy-wallets.ts";
 import { keptListed, keptPositions, POSITION_COSTS_KEY, POSITIONS_KEPT_KEY, POSITIONS_SOLD_KEY, POSITIONS_SOLD_TX_KEY, POSITIONS_UNLANDED_KEY, positionsCache, positionsPass, recordBoughtOut, recordPoolBuy, routeInto, type BuyRecordStore, type FoundWallet, type PoolBuyFacts, type Position, type PositionCosts } from "./positions.ts";
 import { evmStoredHold } from "../../wallet/src/pool/evm-hold-store.ts";
@@ -1910,7 +1910,9 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       // dropped: one finder queue, so it never waits behind the display), then is the next pass's read; a read that
       // fails still ends the hold, and the next pass reads the finder (a rent back at load reads here too)
       wallets: async (read) => {
-        const hold = positions.preempt();
+        // a load's rent backs list the account's Ws with nothing read (READS_NONE): no hold (review of 20ba2481b, P3-8);
+        // they hold the passes off themselves while a W is read (preempt, below)
+        const hold = read === READS_NONE ? null : positions.preempt();
         let found: FoundWallet[] | null = null;
         try {
           // a sale's list (cards wallets-found-in-one-read, pool-sell-legs-side-by-side): every W the pool's spent notes
@@ -1943,13 +1945,20 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         } finally {
           // read, or named by the listing: the next pass's read; failed (the sell refuses, or a rent back at load
           // waits): the next pass reads
-          if (found === null) hold.release();
-          else hold.feed(found);
+          if (found === null) hold?.release();
+          else hold?.feed(found);
         }
       },
       // the rent backs owed (card sol-buy-rent-back), run again at the next load while owed
       owed: owedNoted(page.store),
       bought: buyMints(page.store),
+      // the restore's rebuild's "read, no buy" mark (sol-buy-records.ts), proven by the rent back before it holds W
+      buyNone: async (address) => Object.hasOwn(asRecord(await (await page.store()).get("meta", BUY_NONE_KEY)), address),
+      // a load's rent backs hold the positions' passes off only while a W of theirs is read (review of 20ba2481b, P3-8)
+      preempt: () => {
+        const hold = positions.preempt();
+        return () => hold.release();
+      },
       // each rent-back fault and end, on the page's console: public words only (W's address, a step, a fault's name)
       told: (t) => console.warn(`rent back ${t.address} ${t.step} ${t.state}: ${t.detail}`),
       // the sells with no deposit back (kept on W) sent and not settled yet, settled at the next load

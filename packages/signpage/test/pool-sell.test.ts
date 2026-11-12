@@ -23,7 +23,7 @@ import { entropyToWords, freshWallet, wordsToSeed64 } from "@blindfill/wallet/de
 import { openWalletStore, type WalletStore } from "@blindfill/wallet/store";
 import { SOLANA_ATA_PROGRAM, solanaAta, solanaDecodeMessage, solanaProgramAddress } from "../../kit/src/checks/solana/message.ts";
 import { SOLANA_CLAIM_CASHBACK, SOLANA_CLOSE_VOLUME_ACCUMULATOR, SOLANA_COMPUTE_BUDGET_PROGRAM, SOLANA_PUMP_AMM_PROGRAM, SOLANA_PUMP_PROGRAM, SOLANA_SOL_MINT, SOLANA_TOKEN_2022_PROGRAM as TOKEN_2022, SOLANA_TOKEN_PROGRAM, solanaTeardownAddresses, solanaVolumeAccumulator } from "../../kit/src/checks/solana/checks.ts";
-import { readSolanaPoolBuyVenue, solanaPoolAccount, solanaPoolFee, solanaPoolPage, solanaPoolSellNeed, solanaRentMin, solanaPoolBuySellNeed, solanaPoolNextPage } from "../../kit/src/trade/solana/pool-buy.ts";
+import { readSolanaPoolBuyVenue, SOLANA_RENT_SYSVAR, solanaPoolAccount, solanaPoolFee, solanaPoolPage, solanaPoolSellNeed, solanaRentMin, solanaPoolBuySellNeed, solanaPoolNextPage } from "../../kit/src/trade/solana/pool-buy.ts";
 import { readSolanaReference } from "../../kit/src/trade/solana/pool.ts";
 import { solanaPoolNoteFloor } from "../../kit/src/trade/solana/pool-deposit.ts";
 import { SolanaRpcTransportError, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
@@ -31,12 +31,12 @@ import { pairDown } from "./outage.ts";
 import { vaultLabelOf } from "../../kit/src/vault/shapes.ts";
 import { noteCommitment, noteSecrets, type NoteRef } from "../../wallet/src/notes/secrets.ts";
 import { openNoteStore, type NoteStore } from "../../wallet/src/notes/store.ts";
-import { buyWallets, HOLDINGS_RPC_LIMIT, type BuyWallet, type HoldingsReader } from "../../wallet/src/pool/buy-wallets.ts";
+import { buyWallets, HOLDINGS_RPC_LIMIT, type BuyWallet, type HoldingsReader, type ListedBuyWallet } from "../../wallet/src/pool/buy-wallets.ts";
 import { onTestClock } from "../../kit/test/test-clock.ts";
 import { solanaPoolOf } from "../../wallet/src/pool/solana.ts";
 import { BLOCKHASH, FEE_PAYER, POOL, PROGRAM, fx, providers, rent } from "../../kit/test/solana-pool-buy-fx.ts";
 import { READ_WAIT_TOTAL_MS } from "../src/read-waits.ts";
-import { POOL_RENT_BACK_MS, POOL_RENT_BACK_RULES, POOL_SELL_LOCK, POOL_SELL_READS, POOL_SELL_SHARED_READ_MS, POOL_SELL_SIZE_RETRY_MS, POOL_SELL_AGREE_WAIT_MS, POOL_SELL_WAIT_MS, buyMints, leftAfter, owedRentBacks, planPoolSell, poolSellKind, resumeRentBacks, runPoolSell, settleDeadSellOps, settlePoolSells, settleSellOps, solanaSellAfterFull, solanaSellBudget, solanaSellBudgetFits, solanaSellReserve, SOLANA_POOL_SELL_PRIORITY, keptSells, stageOfLegs, type KeptSell, type OwedRentBack, type PoolSellHost, type PoolSellKindHost, type RentBackTold } from "../src/pool-sell.ts";
+import { POOL_RENT_BACK_GAP_MS, POOL_RENT_BACK_MS, POOL_RENT_BACK_RULES, POOL_SELL_LOCK, POOL_SELL_READS, POOL_SELL_SHARED_READ_MS, POOL_SELL_SIZE_RETRY_MS, POOL_SELL_AGREE_WAIT_MS, POOL_SELL_WAIT_MS, buyMints, leftAfter, owedRentBacks, planPoolSell, poolSellKind, resumeRentBacks, runPoolSell, settleDeadSellOps, settlePoolSells, settleSellOps, solanaSellAfterFull, solanaSellBudget, solanaSellBudgetFits, solanaSellReserve, SOLANA_POOL_SELL_PRIORITY, keptSells, stageOfLegs, type KeptSell, type OwedRentBack, type PoolSellHost, type PoolSellKindHost, type RentBackTold } from "../src/pool-sell.ts";
 import { opOf } from "../src/state.ts";
 import { solanaCompileV0 } from "../../kit/src/trade/solana/build.ts";
 import { checkSolanaSweep, PoolRuleRefused, SOLANA_POOL_MIN_DEPOSIT, SOLANA_POOL_SELL_RESERVE_MAX, solanaDepositRents, solanaSweepFloor, solanaSweepKeep, solanaWithdrawMinPart, withdrawNoteFloor, type PoolAsk } from "../src/rules/pool.ts";
@@ -134,6 +134,8 @@ const pageBytes = (tree: 0 | 1, leaves: bigint[], pageNo = 0): Uint8Array => {
 type Plant = {
   /** card round-trip-costs-less: the closes a full sale carries refused on simulation (the sale's fallback) */
   closesRefused?: true;
+  /** card round-trip-costs-less: the venue pays this over the sale's min out (its quote's expected out less min out) */
+  paysOver?: bigint;
   /** the page's cluster (devnet, no priority fee, when not given); on mainnet the sell pays one (solanaSellBudget) */
   cluster?: "mainnet" | "devnet";
   /** the units each simulation answers it used (none when not given) */
@@ -207,6 +209,8 @@ type Plant = {
   /** The first sell's deposit meets a page another deposit filled first: it fails WrongAccount on chain (review L2),
    *  W paying its fee, nothing else moving */
   wrongAccountOnce?: boolean;
+  /** As wrongAccountOnce, this many times (card round-trip-costs-less: the sale's last build) */
+  wrongAccountTimes?: number;
   /** getTransaction never finds a teardown frame (one provider slow to index; review M2) */
   unreadTeardown?: boolean;
   /** The first teardown frame fails on chain on both RPCs (review M-A): "dust", a third party sends one token unit to
@@ -309,7 +313,7 @@ function chain(plant: Plant = {}) {
   if (plant.ammCashback || plant.ammOnly === "volume") accounts.set(ammVol, { owner: SOLANA_PUMP_AMM_PROGRAM, lamports: 1, data: new Uint8Array(137) });
   if (plant.ammCashback || plant.ammOnly === "ata") accounts.set(ammAta, { owner: SOLANA_TOKEN_PROGRAM, lamports: 1, data: new Uint8Array(165) });
   if (plant.ammVolumeSystem) accounts.set(ammVol, { owner: "11111111111111111111111111111111", lamports: 890_880, data: new Uint8Array(0) });
-  const txs = new Map<string, { tx: Uint8Array; err: unknown; post?: unknown[] }>();
+  const txs = new Map<string, { tx: Uint8Array; err: unknown; pre?: unknown[]; post?: unknown[] }>();
   const log: string[] = [];
   const sentTx = new Map<string, Uint8Array>();
   const calls: { p: 0 | 1; method: string; params: readonly unknown[] }[] = [];
@@ -348,6 +352,7 @@ function chain(plant: Plant = {}) {
   let throttled = 0;
   let claimErred = 0;
   let wrongDone = false;
+  let wrongs = 0;
   let insertDone = false;
   let tearFailed = false;
   let dustDone = false;
@@ -493,7 +498,7 @@ function chain(plant: Plant = {}) {
     const venueSell = m.instructions.find((x) => x.data.length === 24 && (m.staticKeys[x.programIndex] === SOLANA_PUMP_PROGRAM || m.staticKeys[x.programIndex] === SOLANA_PUMP_AMM_PROGRAM));
     if (venueSell && !m.instructions.some((x) => m.staticKeys[x.programIndex] === PROGRAM)) {
       const sold = new DataView(venueSell.data.buffer, venueSell.data.byteOffset + 8, 8).getBigUint64(0, true);
-      let got = new DataView(venueSell.data.buffer, venueSell.data.byteOffset + 16, 8).getBigUint64(0, true);
+      let got = new DataView(venueSell.data.buffer, venueSell.data.byteOffset + 16, 8).getBigUint64(0, true) + (plant.paysOver ?? 0n);
       const made: [string, string, number][] = m.staticKeys[venueSell.programIndex] === SOLANA_PUMP_AMM_PROGRAM && plant.cashback ? ([[ammVol, SOLANA_PUMP_AMM_PROGRAM, 137], [ammAta, SOLANA_TOKEN_PROGRAM, 165]] as [string, string, number][]).filter(([x, owner]) => accounts.get(x)?.owner !== owner) : [];
       for (const [, , size] of made) got -= solanaRentMin(rent, size);
       const shut = closesIn(m, signer, venueSell);
@@ -532,7 +537,7 @@ function chain(plant: Plant = {}) {
     const sellIx = m.instructions.find((x) => x.data.length === 24);
     let gets = 0n;
     if (sellIx) {
-      gets = new DataView(sellIx.data.buffer, sellIx.data.byteOffset + 16, 8).getBigUint64(0, true);
+      gets = new DataView(sellIx.data.buffer, sellIx.data.byteOffset + 16, 8).getBigUint64(0, true) + (plant.paysOver ?? 0n);
       if (m.staticKeys[sellIx.programIndex] === SOLANA_PUMP_AMM_PROGRAM && plant.cashback) {
         for (const [x, owner, size] of [[ammVol, SOLANA_PUMP_AMM_PROGRAM, 137], [ammAta, SOLANA_TOKEN_PROGRAM, 165]] as const) if (accounts.get(x)?.owner !== owner) gets -= solanaRentMin(rent, size);
       }
@@ -552,7 +557,7 @@ function chain(plant: Plant = {}) {
     let got = 0n;
     if (sell) {
       const sold = new DataView(sell.data.buffer, sell.data.byteOffset + 8, 8).getBigUint64(0, true);
-      got = new DataView(sell.data.buffer, sell.data.byteOffset + 16, 8).getBigUint64(0, true);
+      got = new DataView(sell.data.buffer, sell.data.byteOffset + 16, 8).getBigUint64(0, true) + (plant.paysOver ?? 0n);
       const t = accounts.get(ataOf(signer))!;
       const d = t.data.slice();
       const dv = new DataView(d.buffer, 64, 8);
@@ -714,10 +719,11 @@ function chain(plant: Plant = {}) {
             deposit(preOf(RETURN), new DataView(dep.data.buffer, dep.data.byteOffset + 1, 8).getBigUint64(0, true));
           }
           const sm = solanaDecodeMessage(tx.subarray(65));
-          if (plant.wrongAccountOnce && !wrongDone && sm.instructions.length > 1 && sm.staticKeys[sm.instructions.at(-1)!.programIndex] === PROGRAM) {
+          if (((plant.wrongAccountOnce && !wrongDone) || (!txs.has(sig) && wrongs < (plant.wrongAccountTimes ?? 0))) && sm.instructions.length > 1 && sm.staticKeys[sm.instructions.at(-1)!.programIndex] === PROGRAM) {
             wrongDone = true;
+            wrongs++;
             // another's deposit landed first, at the tree size this one was built for
-            deposit(plant.wrongAccountTakes ? preOf(RETURN) : 424_242n, 1_000_000n);
+            deposit(plant.wrongAccountTakes ? preOf(RETURN) : 424_242n + BigInt(wrongs), 1_000_000n);
             txs.set(sig, { tx, err: { InstructionError: [sm.instructions.length - 1, { Custom: 22 }] } });
             const payer = accounts.get(sm.staticKeys[0]!)!;
             accounts.set(sm.staticKeys[0]!, { ...payer, lamports: payer.lamports - FEE });
@@ -762,19 +768,25 @@ function chain(plant: Plant = {}) {
               dv.setBigUint64(0, dv.getBigUint64(0, true) + plant.dustBeforeSell, true);
               accounts.set(ata, { ...t, data: d });
             }
-            try {
-              apply(tx, false);
-              // the meta's post token balances, as an RPC gives them: each token account the transaction names, after it
-              const post = sm.staticKeys.flatMap((k, i) => {
+            // the meta's token balances, as an RPC gives them: each token account the transaction names, before it and
+            // after it (an account it closes: in the pre balances alone)
+            const balances = () =>
+              sm.staticKeys.flatMap((k, i) => {
                 const t = accounts.get(k);
                 if (!t || t.data.length < 72 || (t.owner !== SOLANA_TOKEN_PROGRAM && t.owner !== TOKEN_2022)) return [];
                 return [{ accountIndex: i, mint: base58.encode(t.data.subarray(0, 32)), owner: base58.encode(t.data.subarray(32, 64)), uiTokenAmount: { amount: new DataView(t.data.buffer, t.data.byteOffset + 64, 8).getBigUint64(0, true).toString(), decimals: 6 } }];
               });
-              txs.set(sig, { tx, err: null, post });
+            const pre = balances();
+            try {
+              apply(tx, false);
+              const post = balances();
+              txs.set(sig, { tx, err: null, pre, post });
               // after the sell landed, with its deposit back or without one (kept on W): the venue's sell is in it
               if (plant.dustAfterFill !== undefined && !dustDone && sm.instructions.some((x) => x.data.length === 24 && sm.staticKeys[x.programIndex] !== PROGRAM)) {
                 dustDone = true;
-                const t = accounts.get(ata)!;
+                // a token account the sale closed: the stranger opens it again for W, at its own cost (the ATA program
+                // lets anyone open W's associated account)
+                const t = accounts.get(ata) ?? { owner: mintRead.owner, lamports: Number(solanaRentMin(rent, 165)), data: new Uint8Array(165) };
                 accounts.set(ata, { ...t, data: tokenAccount(plant.dustAfterFill, 1, mint) });
               }
             } catch (e) {
@@ -811,7 +823,7 @@ function chain(plant: Plant = {}) {
             const tm = solanaDecodeMessage(t.tx.subarray(65));
             if (!tm.instructions.some((x) => tm.staticKeys[x.programIndex] === PROGRAM)) return null;
           }
-          return t ? { slot: VF[v].slot, transaction: [base64.encode(t.tx), "base64"], meta: { err: t.err, ...(t.post && !plant.noPostBalances ? { postTokenBalances: p === 1 && plant.postDiffers ? t.post.map((e) => ({ ...(e as object), uiTokenAmount: { amount: "9", decimals: 6 } })) : t.post } : {}) } } : null;
+          return t ? { slot: VF[v].slot, transaction: [base64.encode(t.tx), "base64"], meta: { err: t.err, ...(t.post && !plant.noPostBalances && t.pre ? { preTokenBalances: t.pre } : {}), ...(t.post && !plant.noPostBalances ? { postTokenBalances: p === 1 && plant.postDiffers ? t.post.map((e) => ({ ...(e as object), uiTokenAmount: { amount: "9", decimals: 6 } })) : t.post } : {}) } } : null;
         }
         default:
           throw new Error(`no fixture for ${method}`);
@@ -1852,13 +1864,16 @@ for (const [venue, volume] of [["pump", SOLANA_PUMP_PROGRAM], ["pumpswap", SOLAN
     assert.equal(sweep.instructions.length, 1, "the sweep is the deposit alone");
     assert.ok(w.seeds.every((x) => x.every((b) => b === 0)), "every seed copy zeroed");
     assert.deepEqual(w.told.map((t) => `${t.step}:${t.state}`), ["rent_back:sent"]);
-    // W and its accounts in one getMultipleAccounts per RPC: what W reads as (whether the pass runs), at the teardown and
-    // again at the sweep; never one read per account (one provider's slot each, and one call a throttled provider
-    // answers or refuses whole)
-    const list = JSON.stringify([W.address, ...solanaTeardownAddresses(W.address, [{ mint: VF[venue].mint, program: VF[venue].mintRead.owner }])]);
-    const from = w.c.calls.findIndex((c) => c.method === "getMultipleAccounts" && JSON.stringify(c.params[0]) === list);
+    // W and its accounts in one getMultipleAccounts per RPC, at the teardown and again at the sweep; never one read per
+    // account (one provider's slot each, and one call a throttled provider answers or refuses whole). What W reads as
+    // (kept on a steady end) is the helper's read alone, the Rent sysvar with it (review of 20ba2481b, P1-2)
+    const own = [W.address, ...solanaTeardownAddresses(W.address, [{ mint: VF[venue].mint, program: VF[venue].mintRead.owner }])];
+    const list = JSON.stringify(own);
+    const from = w.c.calls.findIndex((c) => c.method === "getMultipleAccounts" && JSON.stringify(c.params[0]) === JSON.stringify([SOLANA_RENT_SYSVAR, ...own]));
+    assert.equal(w.c.calls[from]?.p, 1, "the helper's seat");
     const rentBackCalls = w.c.calls.slice(from);
-    for (const p of [0, 1] as const) assert.equal(rentBackCalls.filter((c) => c.p === p && c.method === "getMultipleAccounts" && JSON.stringify(c.params[0]) === list).length, 3, `RPC ${p}`);
+    for (const p of [0, 1] as const) assert.equal(rentBackCalls.filter((c) => c.p === p && c.method === "getMultipleAccounts" && JSON.stringify(c.params[0]) === list).length, 2, `RPC ${p}`);
+    assert.equal(rentBackCalls.filter((c) => c.p === 0 && c.method === "getMultipleAccounts" && (c.params[0] as string[]).includes(SOLANA_RENT_SYSVAR)).length, 0, "never on the public seat");
     assert.deepEqual(rentBackCalls.filter((c) => c.method === "getAccountInfo" && (list.includes(c.params[0] as string))).map((c) => c.params[0]), []);
     // the next load's pass finds W at 0 and every account closed: owed no more
     await resumeRentBacks(w.host, fakeLocks());
@@ -1902,7 +1917,7 @@ for (const [venue, volume] of [["pump", SOLANA_PUMP_PROGRAM], ["pumpswap", SOLAN
     assert.deepEqual({ tokenAccount: w.c.accounts.get(ata), volumeAccount: w.c.accounts.get(vol), w: w.c.accounts.get(W.address)?.lamports }, { tokenAccount: undefined, volumeAccount: undefined, w: Number(R0) });
     // the rent back after it sends nothing: W under the floor, what is left on its record
     assert.deepEqual(back, []);
-    assert.equal(w.owed.get(W.address)?.left, String(R0));
+    assert.equal(typeof w.owed.get(W.address)?.seen, "string", "W under the floor: settled, as the helper read it");
   });
 }
 
@@ -1952,11 +1967,15 @@ test("round-trip-costs-less b: a tree near its page's end: no close in the sale,
 // stop a sale.
 test("round-trip-costs-less b: a stranger's unit front-run to W's token account fails the close in the sale: built again with none, it fills, the unit burned, W at 0", async () => {
   const w = await world({ ataLamports: TOKEN_RENT, volumes: [{ program: SOLANA_PUMP_PROGRAM }], dustBeforeSell: 1n });
-  const a = await runPoolSell(w.host, { ...ASK, slippageBps: LOW });
+  const ends: [string, unknown][] = [];
+  const a = await runPoolSell({ ...w.host, settled: (s: string, st: unknown) => void ends.push([s, st]) }, { ...ASK, slippageBps: LOW });
   assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
-  const failed = [...w.c.txs.values()].filter((t) => t.err !== null);
+  const failed = [...w.c.txs.entries()].filter(([, t]) => t.err !== null);
   assert.equal(failed.length, 1, "one sale failed on chain");
-  assert.match(JSON.stringify(failed[0]!.err), /NonNativeHasBalance/);
+  assert.match(JSON.stringify(failed[0]![1].err), /NonNativeHasBalance/);
+  // the failed sale is built again, so the request is never settled on it (review of 20ba2481b, P7: its close's failure
+  // counts as a page filled first does)
+  assert.deepEqual(ends.filter(([s]) => s === failed[0]![0]), [], "the failed sale's request never ended on it");
   const sig = (a as { txs: { hash: string }[] }).txs[0]!.hash;
   const m = solanaDecodeMessage(w.c.txs.get(sig)!.tx.subarray(65));
   assert.ok(!m.instructions.some((x) => (x.data.length === 1 && x.data[0] === 9) || (x.data.length === 8 && x.data.every((b, i) => b === SOLANA_CLOSE_VOLUME_ACCUMULATOR[i]))), "the sale that filled carries no close");
@@ -2001,6 +2020,70 @@ test("round-trip-costs-less b: a cashback claim owed keeps the two-step form; a 
   const m = solanaDecodeMessage(owed.c.txs.get((a as { txs: { hash: string }[] }).txs[0]!.hash)!.tx.subarray(65));
   assert.ok(!m.instructions.some((x) => x.data.length === 8 && x.data.every((b, i) => b === SOLANA_CLOSE_VOLUME_ACCUMULATOR[i])), "the owed volume account is not closed in the sale");
   assert.ok(!m.instructions.some((x) => x.data.length === 1 && x.data[0] === 9 && m.staticKeys[x.accounts[0]!] === VF.pumpswap.ata), "nor the token account");
+});
+
+// Review of 20ba2481b, P1-3: the one deposit is decided on the closes that fit, against what the form before really
+// loses: at every slippage, on each venue and cluster, the notes the sale and its rent back make (the venue paying its
+// quote's expected out) are at least the form before's (the closes refused: the sale as before the card, its teardown and
+// its sweep). PumpSwap's sale names its own volume account, so that account stays open whatever the form: at 0 slippage
+// W would keep rent(0) and its rent less the teardown's fee, 1,991,440, more than the form before's one more deposit,
+// so the sale keeps the form before; past where the rent back sweeps (its quote over min out large), the one deposit.
+test("round-trip-costs-less b: the one deposit never loses more than the form before, on each venue and cluster at every slippage, the volume account PumpSwap's sale names counted", async () => {
+  const closesIn = (w: World, a: Awaited<ReturnType<typeof runPoolSell>>, venue: Venue) => {
+    const m = solanaDecodeMessage(sentWire(w, a).subarray(65));
+    return m.instructions.filter((x) => (x.data.length === 1 && x.data[0] === 9 && m.staticKeys[x.accounts[0]!] === VF[venue].ata) || (x.data.length === 8 && x.data.every((b, i) => b === SOLANA_CLOSE_VOLUME_ACCUMULATOR[i]))).length;
+  };
+  const seen: string[] = [];
+  for (const [venue, cluster, volumes] of [
+    ["pump", "devnet", [SOLANA_PUMP_PROGRAM]],
+    ["pump", "mainnet", [SOLANA_PUMP_PROGRAM, SOLANA_PUMP_AMM_PROGRAM]],
+    ["pumpswap", "mainnet", [SOLANA_PUMP_AMM_PROGRAM]],
+    ["pumpswap", "devnet", [SOLANA_PUMP_PROGRAM, SOLANA_PUMP_AMM_PROGRAM]],
+  ] as const) {
+    for (const bps of [0, 1, 50, 300, 1_000]) {
+      const over = VF[venue].expected - (VF[venue].expected * BigInt(10_000 - bps)) / 10_000n;
+      const run = async (refused: boolean) => {
+        const w = await world({ venue, cluster, units: 90_000, ataLamports: TOKEN_RENT, volumes: volumes.map((program) => ({ program })), paysOver: over, ...(refused ? { closesRefused: true as const } : {}) });
+        const a = await runPoolSell(w.host, { ...ASK, token: VF[venue].mint, slippageBps: bps });
+        assert.equal("stage" in a && a.stage, "filled", `${venue} ${cluster} ${bps}: ${JSON.stringify(a)}`);
+        return { notes: w.c.deposits.reduce((t, d) => t + d.value, 0n), closes: closesIn(w, a, venue) };
+      };
+      const one = await run(false);
+      const before = await run(true);
+      assert.ok(one.notes >= before.notes, `${venue} ${cluster} ${bps}: ${one.notes} < ${before.notes}`);
+      seen.push(`${venue} ${cluster} ${bps} ${one.closes > 0 ? "one" : "before"}`);
+    }
+  }
+  assert.ok(seen.includes("pumpswap mainnet 0 before"), seen.join("; "));
+  assert.ok(seen.includes("pumpswap mainnet 50 one"), seen.join("; "));
+  assert.ok(seen.includes("pump devnet 50 one"), seen.join("; "));
+  assert.ok(seen.includes("pump devnet 300 before"), seen.join("; "));
+});
+
+// Review of 20ba2481b, P3-12: a sale's last build (two deposits met a page another filled first) carries no close, so
+// a close a stranger fails on chain never ends the sale with no try left.
+test("round-trip-costs-less b: the sale's last build carries no close", async () => {
+  const w = await world({ wrongAccountTimes: 2, ataLamports: TOKEN_RENT, volumes: [{ program: SOLANA_PUMP_PROGRAM }] });
+  const a = await runPoolSell(w.host, { ...ASK, slippageBps: LOW });
+  assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
+  const sales = [...w.c.txs.values()].filter((t) => solanaDecodeMessage(t.tx.subarray(65)).instructions.some((x) => x.data.length === 24));
+  const closes = sales.map((t) => solanaDecodeMessage(t.tx.subarray(65)).instructions.filter((x) => x.data.length === 1 && x.data[0] === 9).length);
+  assert.deepEqual(closes, [1, 1, 0]);
+});
+
+// Review of 20ba2481b, P3-9: a stranger opens W's token account again after the sale closed it inside, with a unit in
+// it: the sale's meta names W's account in its pre balances and in no post one, so it held none after the sale, and
+// the unit is a stranger's, burned and closed by the rent back (before, the meta said nothing and the pass faulted for
+// good).
+test("round-trip-costs-less b: a stranger opens W's token account again after the sale closed it: the rent back burns the unit and closes it", async () => {
+  const w = await world({ ataLamports: TOKEN_RENT, volumes: [{ program: SOLANA_PUMP_PROGRAM }], dustAfterFill: 1n });
+  const a = await runPoolSell(w.host, { ...ASK, slippageBps: LOW });
+  assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
+  const sig = (a as { txs: { hash: string }[] }).txs[0]!.hash;
+  assert.ok(solanaDecodeMessage(w.c.txs.get(sig)!.tx.subarray(65)).instructions.some((x) => x.data.length === 1 && x.data[0] === 9), "the sale closed it");
+  assert.deepEqual(w.c.burned, [{ at: ATA, amount: 1n }]);
+  assert.equal(w.c.accounts.get(ATA), undefined, "closed again");
+  assert.equal(w.owed.get(W.address)?.passes, 1);
 });
 
 // Card solana-teardown-cashback: W's PumpSwap volume account owed cashback (12,742,862, the mainnet GATRKVEP…'s) after
@@ -2281,16 +2364,18 @@ test("a W left under the floor keeps its record through any run of faulted loads
   await resumeRentBacks(loaded, fakeLocks());
   const seen = w.owed.get(W.address)?.seen;
   assert.equal(typeof seen, "string");
-  // and the loads after read W the same: one read of W on each RPC, no pass (nothing told, nothing more read)
+  // and the loads after read W the same: one read naming W a load, the helper's alone, no pass (nothing told, nothing
+  // more read; review of 20ba2481b, P1-2: the public seat reads a settled W never)
   const told = w.told.length;
   const calls = w.c.calls.length;
   const passes = w.owed.get(W.address)!.passes;
   for (let i = 0; i < 3; i++) await resumeRentBacks(loaded, fakeLocks());
   assert.equal(w.told.length, told, "no pass ran");
   assert.equal(w.owed.get(W.address)?.passes, passes);
-  assert.deepEqual([...new Set(w.c.calls.slice(calls).filter((c) => c.method === "getMultipleAccounts" && (c.params[0] as string[]).includes(W.address)).map((c) => c.p))].sort(), [0, 1]);
+  assert.deepEqual(w.c.calls.slice(calls).filter((c) => JSON.stringify(c.params).includes(W.address)).map((c) => `${c.p} ${c.method}`), ["1 getMultipleAccounts", "1 getMultipleAccounts", "1 getMultipleAccounts"]);
   assert.equal(sends(w).length - s0, 0, "a floor pass signs nothing");
-  // what W reads as is both RPCs' word: RPC B reading W otherwise (a lamport more) is no match, and the pass runs
+  // what W reads as is the helper's word: the helper reading W otherwise (a lamport more) is no match, and the pass runs
+  // on both seats (a helper that lies can run a pass for nothing, or hide W, never move it)
   plant.mapOn = (p, address, acc) => (p === 1 && address === W.address ? { ...acc, lamports: acc.lamports + 1 } : acc);
   await resumeRentBacks(loaded, fakeLocks());
   assert.ok(w.told.length > told, "a pass ran");
@@ -2790,6 +2875,7 @@ test("a sell tapped while owed Ws run their rent backs waits for the one W in fl
   const started = new Set<string>();
   let release!: () => void;
   const gate = new Promise<void>((r) => (release = r));
+  // a W's pass, its public-seat reads naming it alone (the helper's finding read, before the passes, names all three)
   const gated = (r: SolanaRpc): SolanaRpc => (async (method: string, params: readonly unknown[]) => {
     const hit = method === "getMultipleAccounts" ? others.find((a) => (params[0] as string[]).includes(a)) : undefined;
     if (hit !== undefined) {
@@ -2798,18 +2884,23 @@ test("a sell tapped while owed Ws run their rent backs waits for the one W in fl
     }
     return r(method, params);
   }) as SolanaRpc;
-  const host: PoolSellHost = { ...w.host, rpcs: [gated(w.host.rpcs[0]), gated(w.host.rpcs[1])], wallets: async () => others.map((address, k) => ({ ...wallet(0n), address, l: 9n, j: k, holdings: { native: 0n, tokens: new Map(), unreadable: [] } })) };
+  const host: PoolSellHost = { ...w.host, rpcs: [gated(w.host.rpcs[0]), w.host.rpcs[1]], wallets: async () => others.map((address, k) => ({ ...wallet(0n), address, l: 9n, j: k, holdings: { native: 0n, tokens: new Map(), unreadable: [] } })) };
   const locks = fifoLocks();
   const run = resumeRentBacks(host, locks);
   for (let i = 0; i < 200 && started.size === 0; i++) await new Promise((r) => setTimeout(r, 1));
   assert.equal(started.size, 1, "one W's pass in flight");
   let atTap = -1;
-  const tap = locks.request(POOL_SELL_LOCK, { mode: "exclusive" }, async () => void (atTap = started.size));
+  // the tap's sell holds the sell lock while it runs, past the list's end
+  const tap = locks.request(POOL_SELL_LOCK, { mode: "exclusive" }, async () => {
+    atTap = started.size;
+    await run;
+  });
   release();
   await Promise.all([run, tap]);
   assert.equal(atTap, 1, "the tap's sell starts after the one W in flight");
-  // that W read empty on both RPCs: dropped; the two after it wait for the next load, still owed
-  assert.deepEqual(others.map((a) => w.owed.has(a)), [false, true, true]);
+  // that W read empty on both RPCs: dropped; the two others wait for the next load, still owed
+  assert.deepEqual(others.filter((a) => w.owed.has(a)).length, 2);
+  assert.equal(w.owed.has([...started][0]!), false);
   await resumeRentBacks(host, locks);
   assert.equal(w.owed.size, 0);
 });
@@ -3333,6 +3424,13 @@ test("leftAfter: W's own accounts of the mint alone, summed; a list with none of
   assert.equal(leftAfter(meta(null), W2, MINT), null);
   assert.equal(leftAfter(meta(e(W2, MINT, "01")), W2, MINT), null);
   assert.equal(leftAfter(meta(e(W2, MINT, "-1")), W2, MINT), null);
+  // review of 20ba2481b, P3-9: W's account of the mint in the pre balances and in no post one was closed in it: 0; one
+  // of another owner's, or of another mint, says nothing still; a malformed pre entry says nothing
+  const both = (pre: unknown[], ...post: unknown[]) => ({ err: null, preTokenBalances: pre, postTokenBalances: post });
+  assert.equal(leftAfter(both([e(W2, MINT, "100")], e(POOL_SIDE, MINT, "900")), W2, MINT), 0n);
+  assert.equal(leftAfter(both([e(POOL_SIDE, MINT, "100"), e(W2, OTHER_MINT, "1")]), W2, MINT), null);
+  assert.equal(leftAfter(both([null, e(W2, MINT, "100")]), W2, MINT), null);
+  assert.equal(leftAfter({ err: null, postTokenBalances: [] }, W2, MINT), null);
 });
 
 // Review of bf467ae7, F4 (its mutant Y7): each held mint is judged by its own sell. A W whose record names two sold
@@ -3871,7 +3969,8 @@ test("M1: a sell tapped during a rent back gets the sell lock at the rent back's
   assert.ok(w.owed.has(W.address));
 });
 
-test("L2: a W whose pass never progresses, first in the list, with a tap during it each load: the W after it is tried on the next load", async () => {
+// Since the review of 20ba2481b (P1-2) the list's order is drawn at random each load, so no W is first on every load.
+test("L2: a W whose pass never progresses, with a tap during it each load: the other W is tried on a later load", async () => {
   const w = await world({ ataLamports: TOKEN_RENT });
   await runPoolSell(w.host, ASK);
   const mem = new Map<string, unknown>();
@@ -3885,9 +3984,10 @@ test("L2: a W whose pass never progresses, first in the list, with a tap during 
     if (k === 1 && m === "getMultipleAccounts" && (p[0] as string[]).includes(W.address)) throw new Error("HTTP 429");
     return r(m, p);
   }) as SolanaRpc) as unknown as readonly [SolanaRpc, SolanaRpc];
-  const otherReads = () => w.c.calls.filter((c) => c.method === "getMultipleAccounts" && (c.params[0] as string[]).includes(other)).length;
+  // the other W's pass: its own read of W and its accounts on the public seat (the helper's finding read names both)
+  const otherReads = () => w.c.calls.filter((c) => c.p === 0 && c.method === "getMultipleAccounts" && (c.params[0] as string[])[0] === other).length;
   const wallets = async () => [{ ...wallet(AMOUNT), holdings: { native: 1n, tokens: new Map([[MINT, { amount: 0n, frozen: false }]]), unreadable: [] } }, { ...wallet(0n), address: other, l: 9n, j: 1, holdings: { native: 0n, tokens: new Map(), unreadable: [] } }];
-  for (let load = 0; load < 2; load++) {
+  for (let load = 0; load < 40 && otherReads() === 0; load++) {
     const locks = fifoLocks();
     let tap: Promise<unknown> | null = null;
     let leave = (): void => {};
@@ -3896,7 +3996,7 @@ test("L2: a W whose pass never progresses, first in the list, with a tap during 
     leave();
     await tap;
   }
-  assert.ok(otherReads() > 0, "the second W never had a pass in 2 loads");
+  assert.ok(otherReads() > 0, "the other W never had a pass in 40 loads");
   assert.equal((await owed.list()).some((r) => r.address === other), false, "read empty on both RPCs: dropped");
 });
 
@@ -3934,6 +4034,9 @@ test("L4 B2: the page's holdings changing alone runs no pass after a floor end; 
 
 test("L4 A10: RPC A alone reads W at 0 at the sweep: a fault, the record kept", async () => {
   const { w, plant, loaded } = await floorWorld();
+  // W changes (a lamport sent to it), so the helper's read runs a pass; RPC A alone reads it at 0
+  const acc = w.c.accounts.get(W.address)!;
+  w.c.accounts.set(W.address, { ...acc, lamports: acc.lamports + 1 });
   plant.mapOn = (p, address, acc) => (p === 0 && address === W.address ? { ...acc, lamports: 0 } : acc);
   await resumeRentBacks(loaded, fakeLocks());
   assert.equal(w.told.at(-1)?.state, "gave_up", JSON.stringify(w.told.slice(-2)));
@@ -4110,19 +4213,21 @@ test("N10b: a W whose rent back another pass holds is skipped and the next W sti
   await resumeRentBacks({ ...w.host, owed, wallets }, locks);
   leave();
   await other1;
-  assert.ok(w.c.calls.some((c) => c.method === "getMultipleAccounts" && (c.params[0] as string[]).includes(other)), "the list stopped at the W another pass holds");
+  assert.ok(w.told.some((t) => t.address === other && t.step === "rent_back"), "the list stopped at the W another pass holds");
   assert.equal(w.c.calls.filter((c) => c.method === "getMultipleAccounts" && (c.params[0] as string[]).includes(W.address)).length > 0, true);
 });
 
-// N12: what W reads as hashes the rules' version, so a release that changes the rules runs every skipped W again.
-test("N12: what a floor end keeps as W's state is the hash of both RPCs' alike reads of W, the rent and the rules' version", async () => {
+// N12: what W reads as hashes the rules' version, so a release that changes the rules runs every skipped W again; since
+// the review of 20ba2481b (P1-2) it is the helper's read alone (W, its accounts and the Rent sysvar in one batch) and
+// W's buy evidence on this device, so a buy record the restore writes later runs a W that held for want of it.
+test("N12: what a floor end keeps as W's state is the hash of the helper's read of W, the rent, the rules' version and W's buy evidence", async () => {
   const { w } = await floorWorld();
-  const addresses = [W.address, ...solanaTeardownAddresses(W.address, [{ mint: MINT, program: TOKEN_PROGRAM }])];
-  const a = addresses.map((x) => {
+  const text = (x: string) => {
     const t = w.c.accounts.get(x);
     return t === undefined ? "-" : `${t.owner}:${t.lamports}:${base64.encode(t.data)}`;
-  }).join("|");
-  const seen = base64.encode(keccak_256(new TextEncoder().encode(`${a}#${rent.lamportsPerByte}:${rent.factor}#${POOL_RENT_BACK_RULES}`)));
+  };
+  const addresses = [W.address, ...solanaTeardownAddresses(W.address, [{ mint: MINT, program: TOKEN_PROGRAM }])];
+  const seen = base64.encode(keccak_256(new TextEncoder().encode(`${addresses.map(text).join("|")}#${text(SOLANA_RENT_SYSVAR)}#${POOL_RENT_BACK_RULES}#${MINT}:${TOKEN_PROGRAM}:own`)));
   assert.equal(w.owed.get(W.address)?.seen, seen);
 });
 
@@ -4151,7 +4256,8 @@ test("N19, N20: a load whose own reads fail, a sell holding the sell lock: the l
   await sell;
   assert.equal(w.told.length, told, JSON.stringify(w.told.slice(told)));
   assert.deepEqual(await owed.list(), before);
-  assert.deepEqual(asked, [`ct-pool/back/${(before[0] as OwedRentBack).address}`, POOL_SELL_LOCK], "the list went past the sell lock");
+  assert.equal(asked.length, 2, "the list went past the sell lock");
+  assert.ok(asked[0]!.startsWith("ct-pool/back/") && asked[1] === POOL_SELL_LOCK, JSON.stringify(asked));
 });
 
 // N21: the sweep's own read refused by the plan alike on both RPCs (an account at one of W's addresses turned
@@ -6178,9 +6284,9 @@ test("a simulation refused names the provider and the program's error in the leg
 // signed in with the same 12 words. The browser that sold had no owed record of W's sell, and its buy record (rebuilt
 // from W's history by one provider) counted as none, so no rent back ever ran and 3,521,615 lamports stayed on W in its
 // own lamports, its empty token account and its volume account. Any browser of the account finishes any of its Ws: the
-// list is the account's own Ws (derived from the pool's spent notes), W's coin is proven by W's own buy read on both
-// RPCs at finalized, and the closes run even when what is left cannot make a note worth releasing, the amount kept on
-// W's record for the portfolio.
+// list is the account's own Ws (derived from the pool's spent notes), W's coin is the restore's rebuilt record once the
+// public seat reads W's own buy the same (review of 20ba2481b, P1-2: the rebuild's read kept, one public read more), and
+// the closes run even when what is left cannot make a note worth releasing.
 const BUY_SIG = base58.encode(new Uint8Array(64).fill(7));
 /** W's buy as getTransaction (json, finalized) gives it: the pool's tag 3 naming W, a signer, and `mint` rising in W's
  *  account (wallet/src/pool/buy-wallets.ts solanaBuyIn). */
@@ -6189,59 +6295,181 @@ const buyTxJson = (mint: string) => ({
   meta: { err: null, preTokenBalances: [], postTokenBalances: [{ accountIndex: 2, mint, owner: W.address, programId: TOKEN_PROGRAM, uiTokenAmount: { amount: "100" } }] },
   transaction: { message: { accountKeys: [FEE_PAYER, W.address, ATA, PROGRAM], header: { numRequiredSignatures: 2 }, instructions: [{ programIdIndex: 3, accounts: [0, 1], data: base58.encode(Uint8Array.of(3)) }] } },
 });
-/** Both RPCs with W's buy in W's history, RPC p naming `mints[p]` as what rose. */
-const withBuy = (rpcs: readonly [SolanaRpc, SolanaRpc], mints: readonly [string, string] = [MINT, MINT]) =>
+type Call = { p: 0 | 1; method: string; params: readonly unknown[] };
+/** Both RPCs with W's buy in W's history, RPC p naming `mints[p]` as what rose; every call each seat answers logged. */
+const withBuy = (rpcs: readonly [SolanaRpc, SolanaRpc], mints: readonly [string, string] = [MINT, MINT], log: Call[] = []) =>
   rpcs.map((r, p) => (async (method: string, params: readonly unknown[]) => {
+    log.push({ p: p as 0 | 1, method, params });
     if (method === "getSignaturesForAddress" && params[0] === W.address) return [{ signature: BUY_SIG, err: null }];
     if (method === "getTransaction" && params[0] === BUY_SIG) return buyTxJson(mints[p]!);
     return r(method, params);
   }) as SolanaRpc) as unknown as readonly [SolanaRpc, SolanaRpc];
-/** A W this browser never bought or sold from: no buy record, no owed record; its coin sold whole elsewhere (its token
- *  account empty), its pump volume account open, `lamports` on W. */
-async function soldElsewhere(lamports: number, mints?: readonly [string, string]) {
-  const w = await world({ buy: null, held: 0n, ataLamports: TOKEN_RENT, volumes: [{ program: SOLANA_PUMP_PROGRAM }], lamports }, [{ ...wallet(0n), holdings: null } as never]);
-  w.host.rpcs = withBuy(w.c.rpcs, mints);
-  return w;
+/** A W this browser never bought or sold from: no owed record, the restore's rebuilt record naming `rebuilt` (none:
+ *  null); its coin sold whole elsewhere (its token account empty), its pump volume account open, `lamports` on W. */
+async function soldElsewhere(lamports: number, rebuilt: string | null = MINT, others: readonly ListedBuyWallet[] = []) {
+  const w = await world({ buy: null, held: 0n, ataLamports: TOKEN_RENT, volumes: [{ program: SOLANA_PUMP_PROGRAM }], lamports }, [{ ...wallet(0n), holdings: null } as never, ...(others as never[])]);
+  const log: Call[] = [];
+  w.host.rpcs = withBuy(w.c.rpcs, [MINT, MINT], log);
+  if (rebuilt !== null) await w.host.bought!.put(W.address, { mint: rebuilt, program: TOKEN_PROGRAM, rebuilt: true } as never);
+  return { w, log };
 }
 
-test("round-trip-costs-less a: a W sold in another browser, under the floor: the load finds it from the account's Ws, proves its coin on both RPCs, closes its accounts to W, and keeps what is left on W's record", async () => {
-  const w = await soldElsewhere(661_575);
+test("round-trip-costs-less a: a W sold in another browser, under the floor: the load finds it from the account's Ws, proves the rebuilt record's coin on the public seat, closes its accounts to W, and settles", async () => {
+  // under the floor even at the cheapest deposit (both pages open), so the floor end is W's own state (review 5 of
+  // 38e59182, L3)
+  const { w, log } = await soldElsewhere(500_000);
   const more = await resumeRentBacks(w.host, fakeLocks());
   const vol = solanaVolumeAccumulator(W.address, SOLANA_PUMP_PROGRAM);
   assert.deepEqual({ tokenAccount: w.c.accounts.has(ATA), volumeAccount: w.c.accounts.has(vol) }, { tokenAccount: false, volumeAccount: false }, "both closed to W");
   assert.equal(w.c.deposits.filter((d) => d.sweep).length, 0, "under the floor: no note");
   const onW = w.c.accounts.get(W.address)!.lamports;
-  assert.equal(onW, 661_575 + TOKEN_RENT + Number(VOLUME_RENT) - 2 * FEE, "every lamport on W, less the two frames' fees");
+  assert.equal(onW, 500_000 + TOKEN_RENT + Number(VOLUME_RENT) - 2 * FEE, "every lamport on W, less the two frames' fees");
   assert.deepEqual(w.told.filter((t) => t.step === "rent_back").map((t) => t.state), ["floor"]);
   const rec = w.owed.get(W.address)!;
-  assert.equal(rec.left, String(onW), "the amount kept on W, for the portfolio");
-  assert.deepEqual(rec.buy, { mint: MINT, program: TOKEN_PROGRAM }, "W's coin as both RPCs read W's buy");
+  assert.deepEqual(rec.buy, { mint: MINT, program: TOKEN_PROGRAM }, "W's coin, the rebuilt record's, as the public seat reads W's buy");
+  assert.deepEqual([...new Set(log.filter((c) => (c.method === "getSignaturesForAddress" && c.params[0] === W.address) || (c.method === "getTransaction" && c.params[0] === BUY_SIG)).map((c) => c.p))], [0], "W's history read on the public seat alone");
   assert.equal(more, false, "W at its own state: nothing to try again in this tab");
-  // the next run: W's buy is not read again (kept on its record), nothing is signed, nothing to try again in this tab
-  const calls = w.c.calls.length;
+  // the next runs: W's buy is not read again (kept on its record), nothing is signed, nothing to try again in this tab;
+  // the first reads W as its pass left it (its teardown ran) and settles it, the second reads it on the helper alone
   const sent = sends(w).length;
   assert.equal(await resumeRentBacks(w.host, fakeLocks()), false);
-  assert.equal(w.c.calls.slice(calls).filter((c) => c.method === "getSignaturesForAddress" || c.method === "getTransaction").length, 0, "W's buy read once");
+  const calls = log.length;
+  assert.equal(await resumeRentBacks(w.host, fakeLocks()), false);
+  assert.deepEqual(log.slice(calls).map((c) => `${c.p} ${c.method}`), ["1 getMultipleAccounts"], "a settled W: the helper's one read");
+  assert.equal(log.filter((c) => c.method === "getSignaturesForAddress").length, 1, "W's buy read once");
   assert.equal(sends(w).length, sent);
 });
 
 test("round-trip-costs-less a: a W sold in another browser with enough on it: closed and swept into the pool, W at 0, and no W read again once it is empty", async () => {
-  const w = await soldElsewhere(ENOUGH);
+  const { w, log } = await soldElsewhere(ENOUGH);
   assert.equal(await resumeRentBacks(w.host, fakeLocks()), true, "a sweep sent: its verdict is a later run's");
   assert.equal(w.c.deposits.filter((d) => d.sweep).length, 1);
   assert.equal(w.c.accounts.get(W.address)?.lamports ?? 0, 0);
   await settle(w);
   assert.equal(await resumeRentBacks(w.host, fakeLocks()), false, "W read empty: nothing more");
-  const calls = w.c.calls.length;
+  const calls = log.length;
   await resumeRentBacks(w.host, fakeLocks());
-  assert.equal(w.c.calls.length, calls, "an empty W is never read again");
+  assert.equal(log.length, calls, "an empty W is never read again");
 });
 
-test("round-trip-costs-less a: W's buy read differently on the two RPCs, or a rebuilt record alone: no proof, the pass holds and nothing is closed, tried again later", async () => {
-  const w = await soldElsewhere(ENOUGH, [MINT, VF.pumpswap.mint]);
-  const more = await resumeRentBacks(w.host, fakeLocks());
-  assert.equal(w.c.accounts.has(ATA), true);
-  assert.equal(w.c.deposits.length, 0);
-  assert.deepEqual(w.told.filter((t) => t.step === "rent_back").map((t) => [t.state, t.detail]), [["holds", "no buy of W's is recorded"]]);
-  assert.equal(more, true, "unproven: tried again on a later state read");
+// Review of 20ba2481b ("the rebuilt record alone"): a rebuilt record is the helper's word. The public seat reading W's
+// buy as another coin is no proof; nor is no record at all, which reads nothing. Either holds, nothing closed, read again
+// on each load to its third pass (P2-6), then W's own state: no read but the helper's, until the helper reads W
+// otherwise or W's buy evidence changes (the rebuild writes its record), when the pass runs again and proves it.
+test("round-trip-costs-less a: a rebuilt record the public seat reads otherwise, or none: no proof, the pass holds and nothing is closed, steady after three passes, run again when the record comes", async () => {
+  for (const rebuilt of [VF.pumpswap.mint, null]) {
+    const { w, log } = await soldElsewhere(ENOUGH, rebuilt);
+    const ends: boolean[] = [];
+    for (let i = 0; i < 3; i++) ends.push(await resumeRentBacks(w.host, fakeLocks()));
+    assert.deepEqual(ends, [true, true, false], `${rebuilt}: tried again to its third pass, then W's own state`);
+    assert.equal(w.c.accounts.has(ATA), true);
+    assert.equal(w.c.deposits.length, 0);
+    assert.deepEqual(w.told.filter((t) => t.step === "rent_back").map((t) => [t.state, t.detail]), Array(3).fill(["holds", "no buy of W's is recorded"]));
+    assert.equal(typeof w.owed.get(W.address)?.seen, "string");
+    const history = log.filter((c) => c.method === "getSignaturesForAddress");
+    assert.deepEqual(history.map((c) => c.p), rebuilt === null ? [] : [0, 0, 0], `${rebuilt}: no record reads no history; a rebuilt one the public seat alone`);
+    // settled: the fourth load reads nothing of W but the helper's batch, and runs no pass
+    const calls = log.length;
+    assert.equal(await resumeRentBacks(w.host, fakeLocks()), false);
+    assert.deepEqual(log.slice(calls).map((c) => `${c.p} ${c.method}`), ["1 getMultipleAccounts"]);
+    assert.equal(w.told.length, 3);
+    // the rebuild writes W's record (or writes it again, right): W's buy evidence changed, so the pass runs and proves it
+    await w.host.bought!.put(W.address, { mint: MINT, program: TOKEN_PROGRAM, rebuilt: true } as never);
+    await resumeRentBacks(w.host, fakeLocks());
+    assert.deepEqual(w.owed.get(W.address)?.buy, { mint: MINT, program: TOKEN_PROGRAM });
+    assert.equal(w.c.deposits.filter((d) => d.sweep).length, 1, "proven: closed and swept");
+  }
+});
+
+// Review of 20ba2481b, P2-6, the money rule's exception: a W the rebuild read with no buy, the public seat agreeing (its
+// note paid a plain release), holding more than its rent: held as W's own state at once, its record kept, never listed
+// empty or dropped (a buy in several pieces can leave released SOL on a W whose buy never landed; that card's own record
+// sweeps it).
+test("round-trip-costs-less a: a W whose note paid a plain release, holding more than its rent, is held and kept listed, never marked empty or dropped", async () => {
+  const { w } = await soldElsewhere(ENOUGH, null);
+  // W's history: the pool's plain release naming W (tag 2), no buy
+  const release = buyTxJson(MINT);
+  release.transaction.message.instructions[0]!.data = base58.encode(Uint8Array.of(2));
+  release.meta.postTokenBalances = [];
+  const none = { ...w.host, buyNone: async (a: string) => a === W.address, rpcs: w.host.rpcs.map((r) => (async (m: string, q: readonly unknown[]) => (m === "getTransaction" && q[0] === BUY_SIG ? release : r(m, q))) as SolanaRpc) as unknown as readonly [SolanaRpc, SolanaRpc] };
+  assert.equal(await resumeRentBacks(none, fakeLocks()), false, "W's own state at once");
+  assert.deepEqual(w.told.map((t) => t.state), ["holds"]);
+  assert.equal(w.owed.get(W.address)?.buy, null, "proven: no buy");
+  assert.equal(typeof w.owed.get(W.address)?.seen, "string");
+  assert.equal(w.c.accounts.get(W.address)?.lamports, ENOUGH, "nothing moved");
+  assert.deepEqual(await w.host.owed!.empty!(), new Set(), "never listed empty");
+  await resumeRentBacks(none, fakeLocks());
+  assert.ok(w.owed.has(W.address), "never dropped");
+});
+
+// Review of 20ba2481b, P1-2 and P2-4: a load with 20 of the account's Ws, one holding SOL (W, sold elsewhere, its
+// rebuilt record proven), nine with nothing and no record, ten settled at their last pass. The helper's seat alone reads
+// several Ws in one request; on the public seat no request names more than one W, and none names a settled W or one the
+// helper reads empty. The next load, W settled too: no request on the public seat at all, the helper's batch alone.
+test("round-trip-costs-less a: 20 Ws, one holding SOL: the helper finds them in batches, the public seat reads one W a request and never a settled one; settled, a load reads none", async () => {
+  const keyOf = (k: number) => base58.encode(Uint8Array.from({ length: 32 }, (_, i) => (i === 0 ? 200 : k + 1)));
+  const empties = Array.from({ length: 9 }, (_, k) => keyOf(k));
+  const settled = Array.from({ length: 10 }, (_, k) => keyOf(50 + k));
+  const { w, log } = await soldElsewhere(500_000, MINT, empties.map((address, k) => ({ ...wallet(0n), address, l: 7n, j: k, holdings: null }) as never));
+  // each settled W: an owed record at its last floor end with what the helper reads it as now (no account, its own buy)
+  const text = (x: string) => {
+    const t = w.c.accounts.get(x);
+    return t === undefined ? "-" : `${t.owner}:${t.lamports}:${base64.encode(t.data)}`;
+  };
+  for (const [k, address] of settled.entries()) {
+    await w.host.bought!.put(address, { mint: MINT, program: TOKEN_PROGRAM });
+    const reads = [address, ...solanaTeardownAddresses(address, [{ mint: MINT, program: TOKEN_PROGRAM }])].map(text).join("|");
+    const seen = base64.encode(keccak_256(new TextEncoder().encode(`${reads}#${text(SOLANA_RENT_SYSVAR)}#${POOL_RENT_BACK_RULES}#${MINT}:${TOKEN_PROGRAM}:own`)));
+    await w.host.owed!.put({ address, l: "8", j: k, mints: [{ mint: MINT, program: TOKEN_PROGRAM }], passes: 1, seen });
+  }
+  const all = [W.address, ...empties, ...settled];
+  const named = (c: Call) => all.filter((a) => JSON.stringify(c.params).includes(a));
+  // the positions' passes held only while a W is to be read (P3-8)
+  let holds = 0;
+  w.host.preempt = () => (holds++, () => {});
+  await resumeRentBacks(w.host, fakeLocks());
+  assert.equal(holds, 1, "W to be read: the positions held once");
+  assert.deepEqual(w.told.filter((t) => t.step === "rent_back").map((t) => [t.address, t.state]), [[W.address, "floor"]], "W's pass alone");
+  const pub = log.filter((c) => c.p === 0);
+  assert.ok(pub.length > 0);
+  assert.deepEqual(pub.filter((c) => named(c).length > 1).map((c) => c.method), [], "a public request naming two Ws");
+  assert.deepEqual([...new Set(pub.flatMap(named))], [W.address], "the public seat names W alone");
+  const found = log.filter((c) => c.p === 1 && named(c).length > 1);
+  assert.ok(found.length >= 2 && found.every((c) => c.method === "getMultipleAccounts" && (c.params[0] as string[]).length <= 100), "the helper's batches");
+  assert.deepEqual(new Set(found.flatMap(named)), new Set(all), "every W found in the helper's batches");
+  assert.deepEqual(await w.host.owed!.empty!(), new Set(empties), "the Ws the helper reads empty listed empty");
+  assert.deepEqual(settled.map((a) => w.owed.get(a)?.passes), Array(10).fill(1), "no settled W passed");
+  // W's pass changed W (its teardown): the next load reads it again and settles it; the one after reads none on the
+  // public seat, and only the helper's batches on the other
+  await resumeRentBacks(w.host, fakeLocks());
+  const calls = log.length;
+  const told = w.told.length;
+  assert.equal(await resumeRentBacks(w.host, fakeLocks()), false);
+  assert.deepEqual(log.slice(calls).filter((c) => c.p === 0), [], "settled: no public request");
+  assert.ok(log.slice(calls).every((c) => c.method === "getMultipleAccounts" && (c.params[0] as string[]).length <= 100));
+  assert.equal(log.slice(calls).length, Math.ceil((1 + 11 * 9) / 100), "the helper's batches alone: 11 Ws of 9 addresses and the Rent sysvar");
+  assert.equal(w.told.length, told, "no pass");
+  assert.equal(holds, 2, "settled: the positions never held");
+});
+
+// Review of 20ba2481b, P1-2: the Ws a load passes go in an order drawn from the device's random source each load, apart
+// by POOL_RENT_BACK_GAP_MS and up to as much again at random, so no fixed order or pace ties the account's Ws together.
+// With the random source at 0: the draw's own order, and the gap alone.
+test("round-trip-costs-less a: the Ws a load passes go in an order drawn at random, apart by the gap", async () => {
+  const keyOf = (k: number) => base58.encode(Uint8Array.from({ length: 32 }, (_, i) => (i === 0 ? 201 : k + 1)));
+  const ws = [keyOf(1), keyOf(2), keyOf(3)];
+  const w = await world({}, []);
+  for (const [k, address] of ws.entries()) await w.host.owed!.put({ address, l: "9", j: k, mints: [], passes: 1 });
+  const modes: string[] = [];
+  const waits: number[] = [];
+  const real = globalThis.crypto.getRandomValues.bind(globalThis.crypto);
+  globalThis.crypto.getRandomValues = (<T extends ArrayBufferView | null>(a: T): T => ((a as unknown as Uint32Array).fill(0), a)) as typeof globalThis.crypto.getRandomValues;
+  try {
+    await resumeRentBacks({ ...w.host, wait: async (ms: number) => void waits.push(ms) }, fakeLocks(modes));
+  } finally {
+    globalThis.crypto.getRandomValues = real;
+  }
+  // Fisher-Yates with every draw 0: [a, b, c] -> [c, b, a] -> [b, c, a]
+  assert.deepEqual(modes.filter((m) => m.startsWith("ct-pool/back/")).map((m) => m.slice("ct-pool/back/".length).split(":")[0]), [ws[1], ws[2], ws[0]]);
+  assert.deepEqual(waits, [POOL_RENT_BACK_GAP_MS, POOL_RENT_BACK_GAP_MS]);
 });
