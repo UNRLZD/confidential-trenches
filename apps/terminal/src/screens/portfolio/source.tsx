@@ -10,9 +10,9 @@ import type { PortfolioData, Row } from "./model.ts";
 // What Portfolio and Activity read and do. The kit gives the signing page's state (cash, wallets, open positions and
 // every operation's stage, txs and, kit 1.9, its time, chain, token, units and USD size where the device holds them).
 // The held tokens' symbol, name and price and the value line come from the kit's held read (held.ts, card
-// market-token-reads); whether a token sells now is not read yet (route null). It has no call yet for the rest of
-// PortfolioData (model.ts: the position extras, the closed positions and the fees), so the live source answers none of
-// them and the screen draws dashes for them; the card's report names each missing call. The screen tests pass fixtures through PortfolioSourceProvider, so the same component draws every
+// market-token-reads); whether a token sells now is not read yet (route null). The closed positions and each open
+// one's bought, sold, realized and opened time come from the device's own trade ops (model.ts tradeBook, card
+// portfolio-shows-pool-trades); the fees have no call yet, so the screen draws a dash for them. The screen tests pass fixtures through PortfolioSourceProvider, so the same component draws every
 // state with no signing page.
 
 /** What a tap asks of the mount: the trade box's sell, the exit plan, the share sheet, SIGN_HOST's key export and the

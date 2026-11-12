@@ -27,7 +27,7 @@ test("the page's state after a Base pool buy: Portfolio draws the position, the 
   assert.equal(heldOf(rows, "robinhood", CHECKSUM), null, "never another chain's row of the same address");
   assert.equal(row.units, p.amount);
   assert.equal(row.decimals, p.decimals);
-  assert.equal(row.cost, 0n, "no cost recorded for an EVM buy: unknown");
+  assert.equal(row.cost, null, "no cost recorded for an EVM buy: unknown");
   assert.equal(sellAmount(row.units, 10_000, row.decimals), p.amount, "100% sells what W holds");
   assert.equal(sellAmount(row.units, 5_000, row.decimals), "6.172839", "50% at the token's own decimals");
   // the tap's request (positions/source.tsx useSell): pool.sell on the row's chain, a share of the whole holding
