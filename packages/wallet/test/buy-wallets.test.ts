@@ -1023,7 +1023,7 @@ test("item 6: a sale's wallet list on the mainnet pace: one finder round per pas
 }));
 
 // ---------- a W's buy from its own history (card restore-rebuilds-buy-records) ----------
-import { SOL_BUY_PAGE, SOL_BUY_PAGES, SOL_BUY_TXS, solanaBuyIn, solanaBuyReader, solanaHelperBuys, solanaReleaseIn } from "../src/pool/buy-wallets.ts";
+import { SOL_BUY_PAGE, SOL_BUY_PAGES, SOL_BUY_TXS, SOL_TRADE_TXS, solanaBuyIn, solanaBuyReader, solanaHelperBuys, solanaReleaseIn, solanaSoldOutIn } from "../src/pool/buy-wallets.ts";
 
 const BUY_POOL = key32(40), FEE_PAYER = key32(41), STRANGER_KEY = key32(42), VENUE = key32(43);
 const WSOL = "So11111111111111111111111111111111111111112";
@@ -1068,6 +1068,30 @@ test("a W's buy is read from its own transaction: W signs it, the pinned pool's 
   assert.equal(solanaReleaseIn(txOf({ signers: [FEE_PAYER, W], ix: [{ program: VENUE, to: W, tag: 2 }], post: [] }), W, BUY_POOL), false, "another program");
 });
 
+// Card closed-positions-after-a-restore: after the buy, W's later transactions are read to the sale that leaves W none
+// of the bought mint, and no further (its teardown and sweep are no trade), SOL_TRADE_TXS at most.
+test("a W's trades: read after its buy to its sale in full and no further; a sale that leaves some keeps reading", async () => {
+  const sale = (left: bigint) => txOf({ signers: [W], pre: [tb(4, MINT_A, W, 5_000_000n)], post: [tb(4, MINT_A, W, left)] });
+  assert.equal(solanaSoldOutIn(sale(0n), W, MINT_A), true);
+  assert.equal(solanaSoldOutIn(sale(1n), W, MINT_A), false, "some left");
+  assert.equal(solanaSoldOutIn(sale(0n), W2, MINT_A), false, "another wallet's");
+  assert.equal(solanaSoldOutIn({ ...sale(0n), meta: { ...sale(0n).meta, err: { x: 1 } } }, W, MINT_A), false, "failed");
+  const sigs = ["sweep", "teardown", "sell2", "sell1", "buy"].map((signature) => ({ signature, err: null }));
+  const { rpc, log } = historyRpc(new Map([[W, { sigs, txs: new Map<string, unknown>([["buy", buyTx()], ["sell1", sale(2_000_000n)], ["sell2", sale(0n)], ["teardown", txOf({ signers: [W] })], ["sweep", txOf({ signers: [W] })]]) }]]));
+  const got = await solanaBuyReader(rpc, BUY_POOL).read(W);
+  assert.ok(got !== null && got !== "none");
+  assert.deepEqual(got.txs?.map((t) => t.signature), ["buy", "sell1", "sell2"]);
+  assert.equal(got.soldOut, true);
+  assert.deepEqual(log.map((l) => String(l.params[0])).slice(1), ["buy", "sell1", "sell2"], "the teardown and the sweep are never read");
+  // a W flooded after its buy: SOL_TRADE_TXS read, not sold out
+  const many = Array.from({ length: SOL_TRADE_TXS + 3 }, (_, i) => ({ signature: `x${i}`, err: null })).reverse();
+  const flood = historyRpc(new Map([[W, { sigs: [...many, { signature: "buy", err: null }], txs: new Map<string, unknown>([["buy", buyTx()], ...many.map((m) => [m.signature, txOf({ signers: [STRANGER_KEY], keys: [W] })] as [string, unknown])]) }]]));
+  const f = await solanaBuyReader(flood.rpc, BUY_POOL).read(W);
+  assert.ok(f !== null && f !== "none");
+  assert.equal(f.txs?.length, 1 + SOL_TRADE_TXS);
+  assert.equal(f.soldOut, false);
+});
+
 /** A fake route of W's history: its signatures newest first, each with its transaction; every request logged. */
 function historyRpc(hist: Map<string, { sigs: { signature: string; err: unknown }[]; txs: Map<string, unknown> }>) {
   const log: { method: string; params: unknown[] }[] = [];
@@ -1097,8 +1121,14 @@ test("a W's buy from its history: its oldest successful transactions, past a fai
   ]);
   const { rpc, log } = historyRpc(hist);
   const r = solanaBuyReader(rpc, BUY_POOL);
-  assert.deepEqual(await r.read(W), { mint: MINT_A, program: SOLANA_TOKEN_PROGRAM });
-  assert.deepEqual(log.map((l) => `${l.method} ${String(l.params[0]).slice(0, 5)}`), [`getSignaturesForAddress ${W.slice(0, 5)}`, "getTransaction drop1", "getTransaction buy"], "the failed try is not read; the oldest successful first");
+  const got = await r.read(W);
+  assert.ok(got !== null && got !== "none");
+  assert.deepEqual({ mint: got.mint, program: got.program }, { mint: MINT_A, program: SOLANA_TOKEN_PROGRAM });
+  // card closed-positions-after-a-restore: W's later transactions come back with the buy, read until one the route no
+  // longer returns (here the sale), so not sold out
+  assert.deepEqual(got.txs?.map((t) => t.signature), ["buy", "drop2"]);
+  assert.equal(got.soldOut, false);
+  assert.deepEqual(log.map((l) => `${l.method} ${String(l.params[0]).slice(0, 5)}`), [`getSignaturesForAddress ${W.slice(0, 5)}`, "getTransaction drop1", "getTransaction buy", "getTransaction drop2", "getTransaction sell"], "the failed try is not read; the oldest successful first; then W's later ones");
   // a W whose history holds only a stranger's send: no buy
   assert.equal(await r.read(W2), null, "a stranger's token is no buy");
   for (const l of log) {
@@ -1135,7 +1165,7 @@ test("a W's history the reader cannot tell is no buy: none at all, a listed tran
   };
   // a failed buy, then four sends, then the retry's buy: its record back
   const failedFirst = after({ sigs: [...sends(4).sigs, { signature: "failed", err: { x: 1 } }], txs: sends(4).txs }, "buy", buyTx());
-  assert.deepEqual(await readOf(failedFirst), { got: { mint: MINT_A, program: SOLANA_TOKEN_PROGRAM }, calls: 1 + 5 }, "four sends then the buy");
+  assert.deepEqual(await readOf(failedFirst), { got: { mint: MINT_A, program: SOLANA_TOKEN_PROGRAM, txs: [{ signature: "buy", tx: buyTx() }], soldOut: false }, calls: 1 + 5 }, "four sends then the buy");
   // no pool release among those read: null, never "none" (SOL_BUY_TXS sends; a provider's list cut short of the release)
   assert.deepEqual(await readOf(sends(SOL_BUY_TXS)), { got: null, calls: 1 + SOL_BUY_TXS }, "SOL_BUY_TXS sends, no release");
   assert.deepEqual(await readOf(sends(2)), { got: null, calls: 3 }, "a shortened list");
@@ -1164,8 +1194,10 @@ test("a W's history the reader cannot tell is no buy: none at all, a listed tran
   // within the pages: the buy past a full first page is found
   const long = new Map([[W, { sigs: [...Array.from({ length: SOL_BUY_PAGE + 2 }, (_, i) => drop(i)).map((x, i) => (i === SOL_BUY_PAGE + 1 ? { signature: "buy", err: null } : x))], txs: new Map<string, unknown>([["buy", buyTx()]]) }]]);
   const l2 = historyRpc(long);
-  assert.deepEqual(await solanaBuyReader(l2.rpc, BUY_POOL).read(W), { mint: MINT_A, program: SOLANA_TOKEN_PROGRAM }, "a second page read");
-  assert.deepEqual(l2.log.map((l) => l.method), ["getSignaturesForAddress", "getSignaturesForAddress", "getTransaction"]);
+  const g2 = await solanaBuyReader(l2.rpc, BUY_POOL).read(W);
+  assert.deepEqual(g2 !== null && g2 !== "none" ? { mint: g2.mint, program: g2.program, soldOut: g2.soldOut } : g2, { mint: MINT_A, program: SOLANA_TOKEN_PROGRAM, soldOut: false }, "a second page read");
+  // then W's next transaction, which the route no longer returns: W's trades read so far, not sold out
+  assert.deepEqual(l2.log.map((l) => l.method), ["getSignaturesForAddress", "getSignaturesForAddress", "getTransaction", "getTransaction"]);
 });
 
 // Review of 42a99f81 (c): each buy read's call is a round of its gate, and its answer clears the gate's doubt, as the
