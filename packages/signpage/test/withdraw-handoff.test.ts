@@ -397,7 +397,7 @@ test("page death after RESERVED or in the relay's wait: the settle pass sends th
     assert.ok(deps.signal instanceof AbortSignal);
     await tick();
     assert.ok(zeroed(seed), "the seed is zeroed while the pass waits");
-    return { kind: "landed", own: true, change: (await v.ns.get(r.noteId))!, spend: {} as never };
+    return { kind: "landed", own: true, change: (await v.ns.get(r.noteId))!, spend: {} as never, tx: null };
   }, p);
   assert.deepEqual(pass.outcomes, { [req.noteId]: "landed" });
   assert.equal(got.length, 1);
@@ -537,6 +537,21 @@ test("hand-off with the real relayWithdraw: the seed zeroed after the call, its 
   const change = (await v.ns.list()).find((n) => n.ref.kind === "change");
   assert.ok(change, "the change note is written");
   assert.equal(change!.state, "UNSPENT");
+});
+
+test("hand-off for the NEAR buy: the note the caller picked is the one spent, and a landing the relayer named a tx for carries that tx", async () => {
+  const v = await world([2_000_000n, 5_000_000n, 10_000_000n]);
+  const big = (await v.ns.list()).find((n) => n.leaf?.value === 10_000_000n)!;
+  let spent = "";
+  const TX = "4".repeat(44);
+  const h = await handoffOf(v, page(v), {
+    relay: async (_seed, req) => {
+      spent = req.noteId;
+      return { kind: "landed", own: false, change: (await v.ns.get(req.noteId))!, spend: { recipient: req.recipient, status: "paid", refundValue: 0n } as never, tx: TX };
+    },
+  });
+  assert.deepEqual(await h({ recipient: "ab".repeat(32), amount: 3_000_000n }, RELAY_FEE, big.id), { kind: "arrived", tx: TX });
+  assert.equal(spent, big.id);
 });
 
 test("settle pass with the real relayWithdraw: a stored request whose own spend landed is settled landed, its change written", async () => {
@@ -693,7 +708,7 @@ test("a landing that is not own, paid to another account, ends elsewhere (never 
   const v = await world([5_000_000n]);
   const c = paidTo("eve.testnet");
   const h = await handoffOf(v, page(v), {
-    relay: async (_seed, r) => ({ kind: "landed", own: false, change: (await v.ns.get(r.noteId))!, spend: { nullifierHash: BigInt(r.body.public_signals[1]), recipient: "eve.testnet", status: "paid", refundValue: 0n } as never }),
+    relay: async (_seed, r) => ({ kind: "landed", own: false, change: (await v.ns.get(r.noteId))!, spend: { nullifierHash: BigInt(r.body.public_signals[1]), recipient: "eve.testnet", status: "paid", refundValue: 0n } as never, tx: null }),
     arrivalRpcs: c.rpcs(),
     arrival: async () => Promise.reject(new Error("a landing that is not own reads no arrival")),
   });

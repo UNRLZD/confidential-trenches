@@ -134,8 +134,8 @@ test("the sell box keeps Sell and its presets off after an Unavailable sale", as
   const { readFileSync } = await import("node:fs");
   const box = readFileSync(new URL("../src/screens/positions/SellBox.tsx", import.meta.url), "utf8");
   assert.match(box, /const off = unavailable\(s\.phase\);/);
-  assert.match(box, /const canSell = s\.ready && !running && !off && !noRoute && amount !== null;/);
-  assert.match(box, /const canSellAt = \(b: number\) => s\.ready && !running && !off && !noRoute && sellAmount\(row\.units, b, decimals\) !== null;/);
+  assert.match(box, /const canSell = s\.ready && !running && !off && !noRoute && amount !== null && bps !== null && s\.takes\(bps\);/);
+  assert.match(box, /const canSellAt = \(b: number\) => s\.ready && !running && !off && !noRoute && s\.takes\(b\) && sellAmount\(row\.units, b, decimals\) !== null;/);
   const p = outcome(tap(READY, "s1", NOW), "s1", { ok: false, error: { code: "venue_not_built" } }, NOW + 300);
   assert.equal(unavailable(p), true);
   assert.equal(showsRetry(p), false);

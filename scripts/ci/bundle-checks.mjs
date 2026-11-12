@@ -38,7 +38,8 @@ export const IN_PROCESS = [
   viaRead("pool-buy-filled-2s", () => import("../live-checks/pool-buy-filled-2s.mjs")),
   viaRead("sol-buy-reads-side-by-side", () => import("../live-checks/sol-buy-reads-side-by-side.mjs")),
   viaRead("signpage-error-after-timeout", () => import("../live-checks/signpage-error-after-timeout.mjs")),
-  viaRead("withdraw-form-shows-what-you-can-send", () => import("../live-checks/withdraw-form-shows-what-you-can-send.mjs")),
+  // reads both builds (SIGN_HOST's withdraw screen, APP_HOST's Withdraw pick): run with the app's checks, which have both
+  { key: "withdraw-form-shows-what-you-can-send", host: "app", load: () => import("../live-checks/withdraw-form-shows-what-you-can-send.mjs"), run: async (m, f) => m.judge(await m.read(f)) },
   viaRead("sol-buy-rent-back", () => import("../live-checks/sol-buy-rent-back.mjs")),
   viaRead("pool-read-down", () => import("../live-checks/pool-read-down.mjs")),
   viaRead("sell-first-read-waits-out-a-throttle", () => import("../live-checks/sell-first-read-waits-out-a-throttle.mjs")),
@@ -72,6 +73,7 @@ export const IN_PROCESS = [
   { key: "sol-settle-failed-is-not-unspent", host: "sign", load: () => import("../live-checks/sol-settle-failed-is-not-unspent.mjs"), run: async (m, f) => m.judge(await m.read(f), { ledger: false }) },
   { key: "signpage-throttled-read-is-not-asked-again-at-once", host: "sign", load: () => import("../live-checks/signpage-throttled-read-is-not-asked-again-at-once.mjs"), run: async (m, f) => m.judge(await m.read(f), { ledger: false }) },
   viaRead("solana-teardown-cashback", () => import("../live-checks/solana-teardown-cashback.mjs")),
+  { key: "near-private-trading", host: "sign", load: () => import("../live-checks/near-private-trading.mjs"), run: async (m, f) => m.judge(await m.read(f), { ledger: false }) },
   viaRead("sol-w-sweep", () => import("../live-checks/sol-w-sweep.mjs")),
   viaRead("intents-u-registered-first", () => import("../live-checks/intents-u-registered-first.mjs")),
   viaRead("sol-rent-back-dust-burn", () => import("../live-checks/sol-rent-back-dust-burn.mjs")),
@@ -157,6 +159,7 @@ export const OUT = {
   "pool-usd-price-never-stale": "three minutes of mainnet Pyth reads on the page's own pair (its test holds its bundle marks on this tree's own build, planted)",
   "signpage-pool-mainnet": "a browser",
   "pool-restore-wired": "a browser",
+  "signpage-restores-near-vault-notes": "a browser (it runs pool-restore-wired)",
   "kit-deposit-assets-dry": "a browser",
   "deposit-quote-no-liquidity": "a browser, and the helper's real answer to the last ask",
   "app-shell": "a browser",
@@ -165,6 +168,7 @@ export const OUT = {
   "app-in-shell": "a browser (its --harness run is in test-browser)",
   "app-discover-live": "a browser and the helper",
   "app-no-test-token": "a browser and the helper",
+  "app-near-trading": "a browser and the helper (its test holds its bundle marks to the build's own writing)",
   "app-launchpad-badges": "a browser and the helper",
   "app-token-lower-panel": "the helper's holders answer",
   "app-token-rail": "the helper's lists answer",
@@ -207,6 +211,7 @@ export const OUT = {
   "app-deposit-mount": "a browser (its --harness run is in test-browser)",
   "deposit-to-pool": "a browser (its --harness run is in test-browser)",
   "terminal-harness-sign-spa": "Pages' answer to a path with no file (the index), which no build file holds",
+  "near-view-rhea": "mainnet NEAR RPC reads of the Rhea pool and get_return on the two providers, never the build",
 };
 
 /** A fetch that answers from the build folders: SIGN_HOST's / and index.html, every other path public/<path>; APP_HOST's dist/<path>. */

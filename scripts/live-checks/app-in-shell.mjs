@@ -409,15 +409,18 @@ export async function collect({ launchers, shots, source, expect, routes }) {
 // as the real shell answers an open it drew ({ pending: true }); every request the app sent is kept whole in
 // window.__ctShellAsked for a check to read (card app-pool-withdraw). A check may name read kinds in `answers` (kind ->
 // result), which it answers as the real page answers them (card app-deposit-mount: deposit.assets, deposit.dry and
-// deposit.quote, the quote's deadline 72 h from the answer); the last deposit.quote's id is the deposit's op id, and
+// deposit.quote, the quote's deadline 72 h from the answer); an `answers` entry { error: <code> } is answered as the page
+// refuses with that code, and a kind named in `holds` is never answered, as a run still going (card app-near-trading:
+// the NEAR buy's Sending and its refusals); the last deposit.quote's id is the deposit's op id, and
 // window.__ctShellPush(facts) posts a state event with that one deposit op ({ stage, ...facts }), as the real page posts
 // a deposit's stages. The update run's shell names message API 2 in its ready. The late and silent shells post their ready 7 s after the load
 // and tell the check through window.__ctShellReady. Its headers
 // are SIGN_HOST's _headers with section 4's frame rules: frame-ancestors 'none' and frame-src APP_HOST.
 const SIGNED_IN = { release: "harness-shell", api: 1, signed_in: true, way: "passkey", code_saved: true, vault_balance: "1250.00", wallets: [], positions: [], orders: [], held: [], ops: [] };
 const SIGNED_OUT = { release: "harness-shell", api: 1, signed_in: false, code_saved: false, vault_balance: "0", wallets: [], positions: [], orders: [], held: [], ops: [] };
-const shellJs = (kind, state = null, opens = [], answers = {}) => `const APP = ${JSON.stringify(APP_HOST)};
+const shellJs = (kind, state = null, opens = [], answers = {}, holds = []) => `const APP = ${JSON.stringify(APP_HOST)};
 const OPENS = ${JSON.stringify(opens)};
+const HOLDS = ${JSON.stringify(holds)};
 const ANSWERS = ${JSON.stringify(answers)};
 let DEPOSIT = null;
 window.__ctShellPush = (facts) => {
@@ -448,12 +451,14 @@ addEventListener("message", (e) => {
   // nav and reload as the real shell's (packages/signpage/src/shell.ts): the app's path and query in the top window's
   // address with history.replaceState, never a navigation; reload answers, then reloads the top window
   const nav = e.data.type === "nav" && typeof p === "string" && p.startsWith("/") && p[1] !== "/" && p[1] !== "\\\\";
+  if (HOLDS.includes(e.data.type)) return;
   const read = Object.hasOwn(ANSWERS, e.data.type) ? { ...ANSWERS[e.data.type] } : null;
   if (e.data.type === "deposit.quote" && read) {
     DEPOSIT = e.data.id;
     read.deadline = new Date(Date.now() + 72 * 3600000).toISOString();
   }
-  const answer = e.data.type === "state" ? ok(STATE) : nav || e.data.type === "reload" ? ok({}) : read ? ok(read) : OPENS.includes(e.data.type) ? ok({ pending: true }) : no;
+  const refused = read && typeof read.error === "string" ? { v: 1, id: e.data.id, ok: false, error: { code: read.error } } : null;
+  const answer = e.data.type === "state" ? ok(STATE) : nav || e.data.type === "reload" ? ok({}) : refused ? refused : read ? ok(read) : OPENS.includes(e.data.type) ? ok({ pending: true }) : no;
   if (nav) history.replaceState(null, "", location.origin + new URL(APP + p).pathname + new URL(APP + p).search);
   f.contentWindow.postMessage(answer, APP);
   if (e.data.type === "reload") location.reload();
@@ -595,7 +600,7 @@ export async function kitRefuses(state) {
   }
 }
 
-export async function harnessRoute(appBuild, kind = "signed", { state = null, opens = [], answers = {}, near = nearChain() } = {}) {
+export async function harnessRoute(appBuild, kind = "signed", { state = null, opens = [], answers = {}, holds = [], near = nearChain() } = {}) {
   // the state the shell sends, as the kit's client reads it: a fixture the real app would drop fails here, by name
   const why = await kitRefuses(state ?? (kind === "tap" ? SIGNED_OUT : SIGNED_IN));
   if (why) throw new Error(`${KEY}: the planted state: ${why}`);
@@ -608,7 +613,7 @@ export async function harnessRoute(appBuild, kind = "signed", { state = null, op
   };
   const appRules = rulesOf(readFileSync(path.join(appBuild, "_headers"), "utf8"));
   const signRules = rulesOf(shellHeaders(readFileSync(path.join(REPO, "packages/signpage/public/_headers"), "utf8")));
-  const js = shellJs(kind, state, opens, answers);
+  const js = shellJs(kind, state, opens, answers, holds);
   const pools = await poolAnswers();
   const shellFiles = { "/shell.js": js, "/shell.css": SHELL_CSS };
   const headers = (rules, p, type) => ({ ...Object.fromEntries(headersFor(rules, p)), "content-type": type });

@@ -12,6 +12,7 @@ import { headerModel, usd } from "./model.ts";
 import type { HeaderModel } from "./model.ts";
 import { useDepositSheet } from "../deposit/source.tsx";
 import { useSigninSheet, useSigninSource } from "./source.tsx";
+import { useWithdrawOpen } from "../withdraw/WithdrawPick.tsx";
 import type { SigninSource } from "./source.tsx";
 import { text, W } from "./Word.tsx";
 import "./signin.css";
@@ -118,6 +119,7 @@ export function AccountMenu({ src, m, onDone, phone = false }: { src: SigninSour
     if ((await run())?.ok) onDone?.();
   };
   const view = (control: string) => ({ route, sheet: null, control, fields: {} });
+  const openWithdraw = useWithdrawOpen();
   const row = (control: string, children: ReactNode, onClick: () => void, extra?: ReactNode) => (
     <>
       <button type="button" className="mrow" data-control={control} disabled={off || src.locked === control} onClick={onClick}>
@@ -136,7 +138,7 @@ export function AccountMenu({ src, m, onDone, phone = false }: { src: SigninSour
         </div>
       )}
       {row("acct-backup", <W id="backup" />, go(() => src.hop("backup.open", {}, view("acct-backup"))), m.backupDot ? <span className="mdot" data-backup-dot /> : null)}
-      {row("acct-withdraw", <W id="withdraw" />, go(() => src.hop("withdraw.open", {}, view("acct-withdraw"))))}
+      {row("acct-withdraw", <W id="withdraw" />, go(() => openWithdraw(view("acct-withdraw"), () => src.hop("withdraw.open", {}, view("acct-withdraw")))))}
       {row("acct-sync", <W id="sync" />, () => {
         src.restore();
         onDone?.();

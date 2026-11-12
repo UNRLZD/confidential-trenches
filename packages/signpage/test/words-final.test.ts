@@ -82,6 +82,15 @@ const NOV8_ROWS: readonly (readonly [string, Record<string, string>, string, str
   ["pw.feeRose", pool.POOL_WITHDRAW_WORDS, "fee-rose", "Network fee rose. New max fee: "],
   ["pw.feeRoseSend", pool.POOL_WITHDRAW_WORDS, "fee-redraw", "Send at new fee"],
 ];
+// card withdraw-form-shows-what-you-can-send: the label of the pool form's tappable sendable amount, picked by the owner
+// (12 Nov 13:03Z, "Add Max, the same word the trade box uses"): final, its pick on its line, never a draft key
+const NOV12 = "owner 12 Nov 13:03Z";
+test("the 12 Nov pick: Max reads its text, names its pick on its line, and is no draft key", () => {
+  assert.equal((pool.POOL_WITHDRAW_WORDS as Record<string, string>).max, "Max");
+  const src = readFileSync(new URL("../src/withdraw/pool-form.ts", import.meta.url), "utf8").split("\n");
+  assert.ok(src.some((l) => new RegExp(`^  max: "Max", // ${esc(NOV12)}, "Add Max, the same word the trade box uses"`).test(l)), "no line for max naming its pick");
+  assert.ok(!pool.POOL_DRAFT.has("max"));
+});
 
 test("words-nov8-final: each kept word reads its text, and its source line names the pick", () => {
   const srcOf = (t: Record<string, string>) => readFileSync(new URL(t === held.HELD_WORDS ? "../src/withdraw/held.ts" : t === form.WITHDRAW_WORDS ? "../src/withdraw/form.ts" : "../src/withdraw/pool-form.ts", import.meta.url), "utf8").split("\n");

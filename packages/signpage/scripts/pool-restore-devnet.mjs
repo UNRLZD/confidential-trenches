@@ -36,7 +36,7 @@ await w.insertSeed({ v: 1, entropy: Uint8Array.from(entropy), source: "code", co
 const seed64Of = () => wordsToSeed64(entropyToWords(Uint8Array.from(entropy)));
 
 const pools = pagePools();
-log(`the page's pools: ${JSON.stringify(pools.map((p) => (p.chain === "solana" ? `solana ${p.program}` : `evm ${p.pin.network}`)))}`);
+log(`the page's pools: ${JSON.stringify(pools.map((p) => (p.chain === "near" ? `near vault ${p.network}` : p.chain === "solana" ? `solana ${p.program}` : `evm ${p.pin.network}`)))}`);
 const ns0 = await openNoteStore(w);
 const before = (await ns0.list()).length;
 ns0.close();
@@ -75,9 +75,10 @@ for (const n of spent) {
 seed64.fill(0);
 entropy.fill(0);
 ns.close();
-writeFileSync(OUT, `${JSON.stringify({ at: new Date().toISOString(), cluster: "devnet", pools: pools.map((p) => (p.chain === "solana" ? { chain: "solana", program: p.program } : { chain: "evm", network: p.pin.network })), before, stage, ms, ops, notes, wallets: ws }, null, 1)}\n`);
+writeFileSync(OUT, `${JSON.stringify({ at: new Date().toISOString(), cluster: "devnet", pools: pools.map((p) => (p.chain === "near" ? { chain: "near", network: p.network } : p.chain === "solana" ? { chain: "solana", program: p.program } : { chain: "evm", network: p.pin.network })), before, stage, ms, ops, notes, wallets: ws }, null, 1)}\n`);
 log(`written ${OUT}`);
-const want = pools.map((p) => `${p.chain === "solana" ? "solana" : p.pin.network}: ${POOL_UX_UNREAD_TESTNET}`);
+// the vault's walk names nothing when it reads (src/pool-restore.ts: only a failed vault read is named, "near vault: ...")
+const want = pools.filter((p) => p.chain !== "near").map((p) => `${p.chain === "solana" ? "solana" : p.pin.network}: ${POOL_UX_UNREAD_TESTNET}`);
 const named = stage === "stalled" && why !== null && why.length === want.length && why.every((y, k) => y === want[k]);
 log(named ? "the restore stalled by the testnet build's one name, as it must" : `the restore did not end as the testnet build's must: ${stage}, ${JSON.stringify(why)}`);
 process.exit(named ? 0 : 1);

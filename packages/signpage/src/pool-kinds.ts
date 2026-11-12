@@ -38,9 +38,16 @@
 //   block not final yet stands before the note to sign) is answered busy, a "not now" (api.ts RETRY_CODES: the same
 //   request runs again), however it fails with it: thrown at once, or its run's wait rejecting (card
 //   pool-restore-wired). Any other error is answered as before.
+// - A trade on NEAR (pool.buy or pool.sell with chain "near", the kit's TRADE_CHAINS) has no pool: the vault pays a fresh
+//   NEAR wallet that trades on Rhea. It goes to the page's NEAR flow (deps.near) after its own rule
+//   (rules/near-trade.ts), never to the pool rule or a pool pin; with no NEAR flow it is refused not_allowed, no read
+//   made. tradeRoute is the one switch over a trade's chain, exhaustive: a chain added to TRADE_CHAINS fails the
+//   typecheck here until it is routed.
 import { EvmNotFinalError } from "../../wallet/src/pool/evm-restore.ts";
 import type { KindContext, Deferred, HostAnswer, HostRefusal, Running } from "./api.ts";
 import { afterOf, readWaits, ReadStopped, tapDone, tapWaits, waitsOn, waitUnless, type ReadWaits } from "./read-waits.ts";
+import { TRADE_CHAINS, type TradeChain } from "../../kit/src/signpage/messages.ts";
+import { checkNearBuyRequest, checkNearSellRequest, NearTradeRefused, type NearBuyAsk, type NearSellAsk } from "./rules/near-trade.ts";
 import { PoolRuleRefused, checkPoolRequest, poolTokenAddress, tokenDecimalsKeptOf, tokenDecimalsOf, type PoolAsk, type PoolChain, type PoolRequest } from "./rules/pool.ts";
 
 /** One provider's JSON-RPC call: the method's result, or a throw. */
@@ -149,6 +156,8 @@ export type PoolKindsDeps = {
   stop?: () => AbortSignal;
   /** The device's clock, ms (tests replace it): a request's one bound counts on it from its arrival. */
   now?: () => number;
+  /** The NEAR buy's flow (src/near-trade.ts nearBuyFlow), given a request its rule passed; none: refused not_allowed. */
+  near?: { buy?: (ask: NearBuyAsk, ctx: KindContext) => HostRefusal | Running<"pool.buy">; sell?: (ask: NearSellAsk, ctx: KindContext) => HostRefusal | Running<"pool.sell"> };
 };
 type Answer<K extends PoolKind> = HostRefusal | Deferred<K> | HostAnswer<K>;
 type Handler<K extends PoolKind> = (params: Record<string, unknown>, ctx: KindContext) => Answer<K>;
@@ -196,6 +205,38 @@ const checked = (p: PoolRequest, decimals?: number): PoolAsk | null => {
   }
 };
 
+/** Where a trade's chain goes: a pool's flow, or the NEAR vault flow. Exhaustive, no default arm. */
+export function tradeRoute(chain: TradeChain): "pool" | "near" {
+  switch (chain) {
+    case "solana":
+    case "base":
+    case "robinhood":
+      return "pool";
+    case "near":
+      return "near";
+    default: {
+      const none: never = chain;
+      return none;
+    }
+  }
+}
+const isTradeChain = (c: unknown): c is TradeChain => (TRADE_CHAINS as readonly unknown[]).includes(c);
+
+/** A NEAR trade: its rule, then its flow (the buy's or the sell's); a kind with no flow on this page: not_allowed, no read made. */
+function nearKind<K extends "pool.buy" | "pool.sell">(deps: PoolKindsDeps, kind: K, params: Record<string, unknown>, ctx: KindContext): HostRefusal | Running<K> {
+  const buy = deps.near?.buy;
+  const sell = deps.near?.sell;
+  if (kind === "pool.buy" ? !buy : !sell) return NO;
+  let ask: NearBuyAsk | NearSellAsk;
+  try {
+    ask = kind === "pool.buy" ? checkNearBuyRequest({ ...params, kind }) : checkNearSellRequest({ ...params, kind });
+  } catch (e) {
+    if (e instanceof NearTradeRefused) return NO;
+    throw e;
+  }
+  return (kind === "pool.buy" ? buy!(ask as NearBuyAsk, ctx) : sell!(ask as NearSellAsk, ctx)) as HostRefusal | Running<K>;
+}
+
 /** The four kinds' handlers for the page's api host. */
 export function poolKinds(deps: PoolKindsDeps): { [K in PoolKind]: Handler<K> } {
   const kept = deps.decimals ?? tokenDecimalsKept();
@@ -203,6 +244,7 @@ export function poolKinds(deps: PoolKindsDeps): { [K in PoolKind]: Handler<K> } 
     <K extends PoolKind>(kind: K): Handler<K> =>
     (params, ctx) => {
       const p = { ...params, kind } as PoolRequest;
+      if ((kind === "pool.buy" || kind === "pool.sell") && isTradeChain(p.chain) && tradeRoute(p.chain) === "near") return nearKind(deps, kind as "pool.buy" | "pool.sell", params, ctx) as Answer<K>;
       const chain = p.chain as PoolChain;
       if (kind !== "pool.sell") {
         const ask = checked(p);
