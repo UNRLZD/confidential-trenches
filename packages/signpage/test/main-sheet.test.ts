@@ -172,10 +172,14 @@ const clip: string[] = [];
 let clipFails = false;
 Object.defineProperty(globalThis.navigator, "clipboard", {
   configurable: true,
-  value: { writeText: async (t: string) => (clip.push(t), clipFails ? Promise.reject(new Error("NotAllowedError")) : undefined) },
+  // the 12 words' write lands 50 ms after the tap (a tap that leaves inside that gap must still clear them); the clear's
+  // write is refused while clipFails is set
+  value: {
+    writeText: (t: string) => (clip.push(t), t !== "" ? new Promise<void>((ok) => setTimeout(ok, 50)) : clipFails ? Promise.reject(new Error("NotAllowedError")) : Promise.resolve()),
+  },
 });
 const esc = () => {
-  for (const fn of keydowns) fn({ key: "Escape", isTrusted: true, repeat: false, timeStamp: performance.now() + PROTECT_MS + 1 });
+  for (const fn of keydowns) fn({ type: "keydown", key: "Escape", isTrusted: true, repeat: false, timeStamp: performance.now() + PROTECT_MS + 1 });
 };
 async function until(what: string, ok: () => boolean, ms = 3000): Promise<void> {
   for (const end = Date.now() + ms; Date.now() < end; ) {
@@ -269,15 +273,44 @@ test("main.ts's sheet: a kind under a shown sheet refused, the frame out under a
   assert.equal(shown(), true, "Esc on a screen with no Cancel leaves the sheet shown");
   assert.equal(root().dataset.signin, "backup");
 
-  // the clipboard: Copy puts the 12 words there; Saved writes it empty in its own tap, and a refused write is let go
+  // the clipboard: Copy puts the 12 words there; Saved, tapped before that write has landed, writes it empty in its own
+  // tap, and a refused clear is let go
   const words = find(root(), (x) => x.dataset.words === "12")!.children.map((li) => li.textContent).join(" ");
   assert.equal(words.split(" ").length, 12);
   press("copy");
-  await until("the words copied", () => clip.length === 1);
   assert.deepEqual(clip, [words]);
   clipFails = true;
   press("saved");
-  assert.deepEqual(clip, [words, ""], "Saved writes the clipboard empty in its own tap");
+  assert.deepEqual(clip, [words, ""], "Saved writes the clipboard empty in its own tap, the copy's write not yet landed");
   await until("the words saved though the clear was refused", () => root().dataset.signin === "signed-in");
-  assert.ok(fieldDrawn.length >= 3 && fieldDrawn.every((f) => !f.frame), `no field in the page with the frame: ${JSON.stringify(fieldDrawn)}`);
+  clipFails = false;
+
+  // Esc on a backup whose words are copied leaves it shown and writes nothing (a key gives no activation for the clear on
+  // Firefox and Safari); the x, a tap, clears in its own tap and goes back to the app
+  await until("a new frame after Saved", frameIn);
+  await settle();
+  const bo = await answer(send({ type: "backup.open", return_key: "portfolio" }));
+  assert.equal(bo?.ok, true, `backup.open: ${JSON.stringify(bo)} on ${root().dataset.signin}, layer ${shown() ? "shown" : "hidden"}`);
+  await until("the backup again, with Cancel", () => shown() && root().dataset.signin === "backup" && !!find(root(), (x) => x.dataset.action === "cancel"));
+  await until("the frame out under the 12 words", () => !frameIn(), 1000);
+  press("copy");
+  assert.deepEqual(clip.slice(2), [words]);
+  esc();
+  await settle();
+  assert.ok(shown() && root().dataset.signin === "backup", "Esc with the words copied leaves the backup shown");
+  assert.deepEqual(clip.slice(2), [words], "Esc writes nothing");
+  const x = find(doc.body, (e) => e.dataset.sheet === "close")!;
+  tapAt += 2 * PROTECT_MS;
+  for (const fn of x.ls.click ?? []) fn({ type: "click", isTrusted: true, timeStamp: tapAt });
+  assert.deepEqual(clip.slice(2), [words, ""], "the x clears in its own tap");
+  await until("back to the app", () => !shown());
+  await until("a new frame", frameIn);
+
+  // a withdraw form opened straight: its fields enter the page with the frame out
+  const before = fieldDrawn.length;
+  assert.equal((await answer(send({ type: "withdraw.open", return_key: "portfolio" })))?.ok, true);
+  await until("the withdraw form", () => shown() && root().dataset.signin === "withdraw");
+  await until("its fields drawn", () => fieldDrawn.length > before, 1000);
+  assert.deepEqual(fieldDrawn[before], { state: "withdraw", frame: false }, "the withdraw form's fields entered the page with the frame out");
+  assert.ok(fieldDrawn.every((f) => !f.frame), `no field in the page with the frame: ${JSON.stringify(fieldDrawn)}`);
 });

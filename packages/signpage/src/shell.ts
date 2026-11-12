@@ -151,8 +151,11 @@ export interface Shell {
   whenOut(draw: () => void): void;
   /** Hides the sheet: a kept frame is live again as it was; a frame taken out comes back new at the top window's address. */
   close(): void;
-  /** Called on the user's own Esc, close tap or scrim tap (trusted events only); set by the screens. */
-  onDismiss: (() => void) | null;
+  /**
+   * Called on the user's own Esc ("key"), close tap or scrim tap ("tap"), trusted events only; set by the screens. A key
+   * gives no user activation on some engines, so a step that needs one (a clipboard write) acts only on a tap.
+   */
+  onDismiss: ((by: "key" | "tap") => void) | null;
   /** Whether the screen on the sheet may be left: the close control shows, and Esc and the scrim act, only then. */
   dismissible(may: boolean): void;
 }
@@ -330,7 +333,7 @@ export function mountShell(doc: Document, host: Omit<ApiHost, "parent" | "listen
     // user's close: the activation guard's window (src/guard.ts), on the event's own clock
     const at = typeof e.timeStamp === "number" && e.timeStamp > 0 ? e.timeStamp : (view.performance?.now?.() ?? Date.now());
     if (at - openedAt < PROTECT_MS) return;
-    shell.onDismiss?.();
+    shell.onDismiss?.(e.type === "keydown" ? "key" : "tap");
   };
   sheet.close.addEventListener("click", dismiss);
   sheet.scrim.addEventListener("click", dismiss);

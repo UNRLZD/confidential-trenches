@@ -384,8 +384,13 @@ else {
     }),
   });
   shell.body.append(root);
-  // the user's own Esc, close tap or scrim tap: Cancel's step, on a screen Cancel is drawn on (show() below)
-  shell.onDismiss = () => void run(cancel);
+  // the user's own Esc, close tap or scrim tap: Cancel's step, on a screen Cancel is drawn on (show() below). Esc leaves
+  // the backup alone while its 12 words are on the clipboard: a key gives no activation for the write that clears them on
+  // Firefox and Safari, so the x, the scrim, Cancel and Saved (taps) leave it then
+  shell.onDismiss = (by) => {
+    if (by === "key" && copied) return;
+    void run(cancel);
+  };
 }
 
 // The account's open kinds (src/pages/open.ts): refused unless the page's state takes them; else the answer goes first,
@@ -515,7 +520,6 @@ function show(state: State, seed?: { account: string; code_saved: boolean; signo
   if (SEALED.has(state)) shell?.seal();
   root.dataset.signin = state;
   if (state !== "backup" && drawn) {
-    uncopy();
     drawn.fill(0);
     drawn = null;
   }
@@ -588,7 +592,10 @@ function show(state: State, seed?: { account: string; code_saved: boolean; signo
           list.append(li);
         }
         parts.push(list);
-        parts.push(button("copy", WORDS.copy, () => void navigator.clipboard?.writeText(words).then(() => void (copied = true), () => {})));
+        parts.push(button("copy", WORDS.copy, () => {
+        copied = true;
+        void navigator.clipboard?.writeText(words).catch(() => {});
+      }));
         parts.push(button("saved", WORDS.saved, () => void run(saved)));
       }
     } else if (!framed && (state === "words" || state === "invalid-code")) {
@@ -940,9 +947,11 @@ async function signInWords(typed: string): Promise<void> {
 // The backup screen (S3.1): the stored seed's 12 words, top-level only; the entropy is zeroed once they are made.
 // `drawn` keeps the entropy of the words on screen until the page leaves the backup, so Saved marks that seed alone.
 let drawn: Uint8Array | null = null;
-// Copy put the 12 words on the clipboard: they are written over with nothing once, when the words leave the screen, in
-// the tap that leaves (Saved, Cancel, Esc, the x, the scrim: an engine may refuse a write outside a tap), or on any other
-// way off the backup. A refused write is let go; with no Copy the clipboard is left alone, and after that one write too.
+// Copy put the 12 words on the clipboard (marked at its tap, before the write lands): they are written over with nothing
+// once, in the tap that leaves the backup (Saved, Cancel, the x, the scrim: saved() and cancel() run in it; Esc does not
+// leave it while they are copied, as a key gives no activation for the write on Firefox and Safari). Every way off the
+// backup is one of those taps. A refused write is let go; with no Copy the clipboard is left alone. Known limit: closing
+// or reloading the tab clears nothing, on any engine (no write is let through as a page goes).
 let copied = false;
 function uncopy(): void {
   if (!copied) return;

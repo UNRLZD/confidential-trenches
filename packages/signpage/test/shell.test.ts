@@ -151,7 +151,7 @@ function fakeDom(href = `${SIGN_ORIGIN}/token/solana/So111?tab=trades`) {
     for (const fn of listeners) fn({ origin: APP_ORIGIN, source, data });
   };
   const key = (k: string, isTrusted = true, more: Record<string, unknown> = {}) => {
-    for (const fn of keys) fn({ key: k, isTrusted, ...more });
+    for (const fn of keys) fn({ type: "keydown", key: k, isTrusted, ...more });
   };
   const blur = () => {
     for (const fn of blurs) fn();
@@ -263,7 +263,7 @@ test("whenOut: a sealed screen's draw runs in the task that takes the frame out,
     const drawn: number[] = [];
     sh.open(true);
     sh.whenOut(() => drawn.push(d.frames().length));
-    assert.deepEqual(drawn, [], "no draw while the frame waits for the open's answer");
+    assert.equal(drawn.length, 0, "no draw while the frame waits for the open's answer");
     mock.timers.tick(FRAME_LEAVE_MS);
     assert.deepEqual(drawn, [0], "drawn once, with no frame in the page");
     sh.whenOut(() => drawn.push(-1));
@@ -348,7 +348,8 @@ test("dismiss: the user's own Esc acts only on a sheet whose screen may be left,
   (d.doc.defaultView as unknown as { performance: { now(): number } }).performance = { now: () => now };
   const sh = mountShell(d.doc, { state: () => signedOutState() });
   let n = 0;
-  sh.onDismiss = () => void n++;
+  const bys: string[] = [];
+  sh.onDismiss = (by) => void (n++, bys.push(by));
   d.key("Escape");
   assert.equal(n, 0, "no sheet shown");
   sh.open();
@@ -370,6 +371,7 @@ test("dismiss: the user's own Esc acts only on a sheet whose screen may be left,
   now += 1;
   d.key("Escape");
   assert.equal(n, 2);
+  assert.deepEqual(bys, ["key", "key"], "Esc is told as a key: it gives no activation on some engines");
 });
 
 test("a typed screen's close keeps the sheet's dim over the new frame until that frame's document reports its first content paint, then fades it", () => {
@@ -602,7 +604,8 @@ for (const part of ["scrim", "close"] as const) {
     const c = clocked(d);
     const sh = mountShell(d.doc, { state: () => signedOutState() });
     let n = 0;
-    sh.onDismiss = () => void n++;
+    let by = "";
+    sh.onDismiss = (b) => void (n++, (by = b));
     const click = (more: Record<string, unknown>) => d.part(part).fire("click", { isTrusted: true, timeStamp: c.now, ...more });
     sh.dismissible(true);
     click({});
@@ -617,8 +620,9 @@ for (const part of ["scrim", "close"] as const) {
     assert.equal(n, 0, "untrusted");
     click({ timeStamp: c.now - 1 });
     assert.equal(n, 0, "the event's own time within PROTECT_MS of the open, though the clock now is past it");
-    click({});
+    click({ type: "click" });
     assert.equal(n, 1);
+    assert.equal(by, "tap", "a click is told as a tap");
   });
 }
 
