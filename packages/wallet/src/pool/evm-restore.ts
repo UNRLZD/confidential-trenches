@@ -357,6 +357,9 @@ export type EvmRestoreNotesArgs = {
   /** Where else the pool's events may be read (evm.ts EvmSyncArgs history), before the providers of `rpcs`: never one
    * operator's word, two operators' same logs making the pool's trees at the head. */
   history?: readonly EvmRpc[];
+  /** The page's one turn for a walk (card closed-positions-after-a-restore; solanaRestoreNotes's `turn`): the walk and
+   *  the notes after it run inside it; at once when not given. */
+  turn?: <T>(walk: () => Promise<T>) => Promise<T>;
   /** tests only: RESTORE_GAP, the wait between lag retries, and the Ws' order (a random index below n) */
   gap?: number;
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
@@ -409,26 +412,28 @@ export async function evmRestoreNotes(a: EvmRestoreNotesArgs): Promise<{ notes: 
   const final = r.events.filter((e) => e.block <= r.fin.number);
   // the walk off the seed, yielding as it goes (walkLaneYielding: never one stretch on the page's thread, ended by the
   // signal), from the deposit masters of one short use of the seed; then the restore on those lanes
-  const byPre = indexEvents(final).byPre;
-  const m = await withSeed(a.seed64, (seed64) => masters(seed64, "deposit"));
-  const lanes: LaneWalk[] = [];
-  const slice = slices(a.signal, a.now);
-  for (let lane = 0; lane < RESTORE_LANES; lane++) lanes.push(await walkLaneYielding(m, scope, lane, (P) => byPre.has(P), a.gap ?? RESTORE_GAP, null, a.signal, slice));
-  // then the notes a slice at a time: one short use of the seed a slice (WALK_SLICE_MS of work), the event loop a turn
-  // and the signal checked between slices
-  const steps = evmRestoreSteps({ scope, events: final, lanes, ...(a.gap === undefined ? {} : { gap: a.gap }) });
-  let step = steps.next();
-  while (!step.done) {
-    const at = step;
-    step = await withSeed(a.seed64, (seed64) => {
-      let r: IteratorResult<void, EvmRestored> = at;
-      do r = steps.next(seed64);
-      while (!r.done && !slice.due());
-      return r;
-    });
-    if (!step.done) await slice.pass();
-  }
-  const { notes, spends, elsewhere } = step.value;
+  const { notes, spends, elsewhere } = await (a.turn ?? ((walk) => walk()))(async () => {
+    const byPre = indexEvents(final).byPre;
+    const m = await withSeed(a.seed64, (seed64) => masters(seed64, "deposit"));
+    const lanes: LaneWalk[] = [];
+    const slice = slices(a.signal, a.now);
+    for (let lane = 0; lane < RESTORE_LANES; lane++) lanes.push(await walkLaneYielding(m, scope, lane, (P) => byPre.has(P), a.gap ?? RESTORE_GAP, null, a.signal, slice));
+    // then the notes a slice at a time: one short use of the seed a slice (WALK_SLICE_MS of work), the event loop a turn
+    // and the signal checked between slices
+    const steps = evmRestoreSteps({ scope, events: final, lanes, ...(a.gap === undefined ? {} : { gap: a.gap }) });
+    let step = steps.next();
+    while (!step.done) {
+      const at = step;
+      step = await withSeed(a.seed64, (seed64) => {
+        let r: IteratorResult<void, EvmRestored> = at;
+        do r = steps.next(seed64);
+        while (!r.done && !slice.due());
+        return r;
+      });
+      if (!step.done) await slice.pass();
+    }
+    return step.value;
+  });
   if (a.wallets === false) return { notes, spends, elsewhere, wallets: [], block: r.anchor.number };
   const order = spends.map((_, k) => k);
   for (let i = order.length - 1; i > 0; i--) {

@@ -294,7 +294,12 @@ test("auto: a sign-in on an empty note store runs once under an op of its own; o
 test("signed out mid-run: the run stops, its seed zeroed, nothing written after", async () => {
   let release: () => void = () => {};
   const slow = new Promise<void>((r) => (release = r));
-  const w = await world({ solana: (async (a: { signal: AbortSignal }) => (await slow, a.signal.throwIfAborted(), { notes: notesOf(SOL_SCOPE, LABEL_S, 1000n), spends: [] })) as never });
+  // both pools held until the sign out: each pool's notes are written as its walk ends (card
+  // closed-positions-after-a-restore), so a pool that ended before the sign out has its notes written before it
+  const w = await world({
+    solana: (async (a: { signal: AbortSignal }) => (await slow, a.signal.throwIfAborted(), { notes: notesOf(SOL_SCOPE, LABEL_S, 1000n), spends: [] })) as never,
+    evm: (async (a: { signal: AbortSignal }) => (await slow, a.signal.throwIfAborted(), { notes: notesOf(EVM_SCOPE, LABEL_E, 2000n), spends: [], elsewhere: [], wallets: [], block: 1n })) as never,
+  });
   const run = w.r.auto();
   await until("reading", async () => (await w.store.keys("ops")).length === 1);
   w.r.signedOut();

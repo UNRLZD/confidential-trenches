@@ -204,26 +204,28 @@ async function listed(lister: SolanaRpc, rpcs: readonly [SolanaRpc, SolanaRpc], 
     b[16] = SOL_MARK_TAG;
     return b;
   };
-  // both RPCs' bytes of `keys`, each at or past `min` and its own last slot
+  // both RPCs' bytes of `keys`, each at or past `min` and its own last slot. Each RPC's batches go side by side (card
+  // closed-positions-after-a-restore): its paced queue (the kit's solanaPacedRpc) holds them to the provider's limit, and
+  // every answer is held to the same slot rule and the same per-account checks as one read after another was
   const read = async (keys: readonly string[], min: number): Promise<string[]> => {
     const got = await Promise.all(([0, 1] as const).map(async (k) => {
-      const datas: string[] = [];
-      for (let i = 0; i < keys.length; i += batches[k]) {
+      const parts: string[][] = [];
+      for (let i = 0; i < keys.length; i += batches[k]) parts.push(keys.slice(i, i + batches[k]));
+      const at = Math.max(min, slots[k]!);
+      const datas = await Promise.all(parts.map(async (part) => {
         signal.throwIfAborted();
-        const part = keys.slice(i, i + batches[k]);
-        const at = Math.max(min, slots[k]!);
         const a = (await solanaLagRetry(() => rpcs[k]("getMultipleAccounts", [part, { commitment: "finalized", encoding: "base64", ...(at > 0 ? { minContextSlot: at } : {}) }]), lagWait, signal)) as { context?: { slot?: unknown }; value?: unknown };
         const slot = a?.context?.slot;
         if (!Number.isSafeInteger(slot) || (slot as number) < at || !Array.isArray(a.value) || a.value.length !== part.length) throw new Error(`rpc ${k}: getMultipleAccounts: not one account per listed mark at or past slot ${at}`);
         slots[k] = Math.max(slots[k]!, slot as number);
-        (a.value as ({ owner?: unknown; data?: unknown } | null)[]).forEach((x, j) => {
+        return (a.value as ({ owner?: unknown; data?: unknown } | null)[]).map((x, j) => {
           if (x === null) throw new Error(`rpc ${k}: listed mark ${part[j]} is not on it`);
           const d = x?.data;
           if (x?.owner !== program || !Array.isArray(d) || d[1] !== "base64" || typeof d[0] !== "string") throw new Error(`rpc ${k}: listed mark ${part[j]}: not the program's account`);
-          datas.push(d[0]);
+          return d[0];
         });
-      }
-      return datas;
+      }));
+      return datas.flat();
     }));
     keys.forEach((key, j) => {
       if (got[0][j] !== got[1][j]) throw new Error(`listed mark ${key}: the two RPCs' bytes differ`);
@@ -530,6 +532,10 @@ export async function solanaRestoreNotes(a: {
   cache?: SolanaPoolCache;
   /** marks per getMultipleAccounts on each RPC (solanaMarksListed's batches) */
   markBatches?: readonly [number, number];
+  /** The page's one turn for a walk (card closed-positions-after-a-restore): the walk and the notes after it run inside
+   *  it, so pools walked on one thread go one after another and the first one's notes are written one walk in, never
+   *  after every pool's walk; at once when not given. */
+  turn?: <T>(walk: () => Promise<T>) => Promise<T>;
   /** tests only */ lagWait?: SolanaLagWait;
 }) {
   const cache = a.cache ?? {};
@@ -548,27 +554,31 @@ export async function solanaRestoreNotes(a: {
         // each RPC's own pages hold exactly the marks' leaves, and the counters run with no hole (header; review P1-1): a
         // mark the lister hides, plus one RPC's page a leaf short, is refused on every device alike
         solanaMarkCounts(marks, leaves.counts);
-        // the walk off the seed, yielding as it goes (walkLaneYielding: never one stretch on the page's thread, ended by
-        // the signal), from the deposit masters of one short use of the seed; then the restore on those lanes
-        const m = await withSeed(a.seed64, (seed64) => masters(seed64, "deposit"));
-        const lanes: LaneWalk[] = [];
-        const slice = slices(a.signal, a.now);
-        for (let lane = 0; lane < RESTORE_LANES; lane++) lanes.push(await walkLaneYielding(m, scope, lane, (P) => marks.pre.has(solanaMarkOf(a.program, "pre", P)), a.gap ?? RESTORE_GAP, null, a.signal, slice));
-        // then the notes a slice at a time: one short use of the seed a slice (WALK_SLICE_MS of work), the event loop a
-        // turn and the signal checked between slices
-        const steps = solanaRestoreSteps({ program: a.program, scope, stateLeaves: leaves.state, labelLeaves: leaves.label, marks, lanes, ...(a.gap === undefined ? {} : { gap: a.gap }) });
-        let step = steps.next();
-        while (!step.done) {
-          const at = step;
-          step = await withSeed(a.seed64, (seed64) => {
-            let r: IteratorResult<void, SolanaRestored> = at;
-            do r = steps.next(seed64);
-            while (!r.done && !slice.due());
-            return r;
-          });
-          if (!step.done) await slice.pass();
-        }
-        return step.value;
+        // the walk and the notes after it in the page's turn (`turn`): one pool's walk at a time on the page's thread
+        const walked = marks;
+        return await (a.turn ?? ((walk) => walk()))(async () => {
+          // the walk off the seed, yielding as it goes (walkLaneYielding: never one stretch on the page's thread, ended by
+          // the signal), from the deposit masters of one short use of the seed; then the restore on those lanes
+          const m = await withSeed(a.seed64, (seed64) => masters(seed64, "deposit"));
+          const lanes: LaneWalk[] = [];
+          const slice = slices(a.signal, a.now);
+          for (let lane = 0; lane < RESTORE_LANES; lane++) lanes.push(await walkLaneYielding(m, scope, lane, (P) => walked.pre.has(solanaMarkOf(a.program, "pre", P)), a.gap ?? RESTORE_GAP, null, a.signal, slice));
+          // then the notes a slice at a time: one short use of the seed a slice (WALK_SLICE_MS of work), the event loop a
+          // turn and the signal checked between slices
+          const steps = solanaRestoreSteps({ program: a.program, scope, stateLeaves: leaves.state, labelLeaves: leaves.label, marks: walked, lanes, ...(a.gap === undefined ? {} : { gap: a.gap }) });
+          let step = steps.next();
+          while (!step.done) {
+            const at = step;
+            step = await withSeed(a.seed64, (seed64) => {
+              let r: IteratorResult<void, SolanaRestored> = at;
+              do r = steps.next(seed64);
+              while (!r.done && !slice.due());
+              return r;
+            });
+            if (!step.done) await slice.pass();
+          }
+          return step.value;
+        });
       }
       marks = again;
     }

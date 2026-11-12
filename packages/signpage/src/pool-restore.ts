@@ -20,8 +20,10 @@
 //   the run ends stalled, so "done" always
 //   means every pinned pool was read.
 // - What they find goes to the note store through the wallet's writeRestored (parents first; a note the store holds in
-//   flight is left as it is; an index this page planned that the walk finds landed is landed, E5), the pools' notes
-//   together. A pool that fails leaves the others' notes written. Before the write each walked scope's deposit counter
+//   flight is left as it is; an index this page planned that the walk finds landed is landed, E5), each pool's notes as
+//   soon as its walk ends, the walks one at a time on the page's thread (card closed-positions-after-a-restore: three
+//   pools' walks sharing the thread held every pool's balance until the last one ended). A pool that fails leaves the
+//   others' notes written. Before the write each walked scope's deposit counter
 //   goes past the walk's highest note in this store's lane plus two of the lane (step 7's, wallet.md l.319-322, on the
 //   notes alone), so the naming the write sets off (src/main.ts notesMoved) names past them.
 // - Then restore step 5 (card wallet-restore-id-reader-wired; docs/plan1/wallet.md §2.3 "Restore" step 5): each pool
@@ -671,19 +673,58 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
       try {
         // a load's resume that another tab's run finished first: nothing is owed
         if (owed && (await (await h.store()).get("meta", RESTORE_IDS_KEY)) === undefined) return end("done");
-        const found: RestoredNote[] = [];
         // each pool on its own: one that fails leaves the others' notes found
         const label = (p: RestorePool): string => (p.chain === "solana" ? "solana" : p.pin.network);
         const evmHoldingsOwed: { chain: "base" | "robinhood"; pin: EvmPoolPin; list: readonly EvmRpc[]; buys: EvmBuySpend[] }[] = [];
+        // card closed-positions-after-a-restore: every pool's reads go side by side, but each walk (RESTORE_LANES lanes
+        // of RESTORE_GAP indices on the page's one thread, the run's whole cost) takes the page's turn, one pool after
+        // another in the order their reads end, so the first pool's notes are written one walk in, never after every
+        // pool's walk shared the thread
+        let walking: Promise<unknown> = Promise.resolve();
+        const turn = <T,>(walk: () => Promise<T>): Promise<T> => {
+          const r = walking.then(walk);
+          walking = r.catch(() => {});
+          return r;
+        };
+        // the floor, a pool at a time as its walk ends: its scope's deposit counter past the walk's highest note in this
+        // store's lane (step 7's, on the notes alone; step 5 raises it again once the lane's ids are read, and a counter
+        // only goes up), so the naming the notes' write sets off names past them, then its notes, each pool's write after
+        // the one before, so the balance (src/pools.ts, read on each change of the store) shows a pool's notes as soon as
+        // they are found. A floor that throws (a sign out, other words signed in, a write refused) stops the run as one
+        // write of every pool's notes did: no floor after it writes, and the run ends on its error once the walks settle
+        let floors: Promise<unknown> = Promise.resolve();
+        let floorFailed: { e: unknown } | null = null;
+        const floor = (scope: bigint, notes: readonly RestoredNote[]): Promise<void> => {
+          const r = floors.then(async () => {
+            if (floorFailed !== null) return;
+            await seedHeld(async () => {
+              const st = await h.store();
+              await st.raiseDepositIndex(scope, coverTo({ lane: st.lane, highest: lanesOf(notes, scope).laneHighest[st.lane]! }));
+              if (notes.length === 0) return;
+              const ns = await openNoteStore(st);
+              try {
+                await writeRestored(ns, { notes: [...notes] });
+              } finally {
+                ns.close();
+              }
+            });
+            if (notes.length > 0) h.written?.();
+          }).catch((e: unknown) => void (floorFailed ??= { e }));
+          floors = r;
+          return r;
+        };
         const reads = pools.map(async (p): Promise<RestoredNote[]> => {
           if (p.rpcs === null) throw new Error("no reads on this page");
           if (p.chain === "solana") {
             const lister = p.lister?.();
-            return (await letGo(solana({ seed64: seed, program: p.program, rpcs: p.rpcs(), ...(lister ? { lister } : {}), ...(p.cache ? { cache: p.cache } : {}), ...(p.markBatches ? { markBatches: p.markBatches } : {}), signal }), signal)).notes;
+            const notes = (await letGo(solana({ seed64: seed, program: p.program, rpcs: p.rpcs(), ...(lister ? { lister } : {}), ...(p.cache ? { cache: p.cache } : {}), ...(p.markBatches ? { markBatches: p.markBatches } : {}), signal, turn }), signal)).notes;
+            await floor(p.scope, notes);
+            return notes;
           }
           // the notes only: no W's Transfer logs are read (wallets: false)
           // the page's hold (the deposit's sync's too) and its history sources (card evm-pool-leaves-any-source)
-          const r = await letGo(evm({ seed64: seed, pin: p.pin, rpcs: p.rpcs(), signal, wallets: false, held: pageEvmHold(p.pin, () => h.held ? h.held() : h.store()), history: pageEvmHistory(p.pin) }), signal);
+          const r = await letGo(evm({ seed64: seed, pin: p.pin, rpcs: p.rpcs(), signal, wallets: false, held: pageEvmHold(p.pin, () => h.held ? h.held() : h.store()), history: pageEvmHistory(p.pin), turn }), signal);
+          await floor(p.scope, r.notes);
           // each buy's record again from its own transaction, so a restored W sells on its buy's route (card
           // signpage-evm-pool-sell, pool-sell-evm.ts restoreEvmHoldings: no read names W or a transaction); the testnet
           // build only: it asks the pool's public RPCs for the Bought logs and the whole block at each of one device's
@@ -695,9 +736,10 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
           return r.notes;
         });
         const walked: Walked[] = [];
-        (await Promise.allSettled(reads)).forEach((r, k) => {
+        const settled = await Promise.allSettled(reads);
+        if (floorFailed !== null) throw (floorFailed as { e: unknown }).e;
+        settled.forEach((r, k) => {
           if (r.status === "fulfilled") {
-            found.push(...r.value);
             const chain = chainOf(pools[k]!);
             walked.push({ label: label(pools[k]!), chain, scope: pools[k]!.scope, notes: r.value, ux: h.ux?.(chain) ?? null, addressed: h.addressed?.(chain) ?? true });
             // a failed walk stalls the run, but not on a chain this build gives no deposit address on (nor a deposit: the
@@ -717,23 +759,7 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
             if (POOL_TESTNET) why.push(`${w.label}: ${POOL_UX_UNREAD_TESTNET}`);
           } else if (w.ux === null && w.addressed) why.push(`${w.label}: ${POOL_CHAIN_UNREAD}`);
         }
-        // the floor: the walk's notes are written before any id is read. First each walked scope's deposit counter goes
-        // past the walk's highest note in this store's lane (step 7's, on the notes alone; step 5 raises it again once
-        // the lane's ids are read, and a counter only goes up), so the naming the notes' write sets off names past them
-        if (walked.length > 0) {
-          await seedHeld(async () => {
-            const st = await h.store();
-            for (const w of walked) await st.raiseDepositIndex(w.scope, coverTo({ lane: st.lane, highest: lanesOf(w.notes, w.scope).laneHighest[st.lane]! }));
-            if (found.length === 0) return;
-            const notes = await openNoteStore(st);
-            try {
-              await writeRestored(notes, { notes: found });
-            } finally {
-              notes.close();
-            }
-          });
-          if (found.length > 0) h.written?.();
-        }
+        // the floor: every walked pool's notes were written as its walk ended (`floor` above), before any id is read
         // the buy records, once the notes are written: a W whose read fails keeps none, and is not sold until a later
         // restore reads it
         if (POOL_TESTNET) for (const o of evmHoldingsOwed) {
