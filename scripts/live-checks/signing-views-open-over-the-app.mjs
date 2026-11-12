@@ -7,11 +7,13 @@
 //   - the close control: the app's x icon path and its accessible name "Close";
 //   - the user's own Esc ("Escape");
 //   - the screens the frame must not sit under, as one set ("words", "invalid-code", "withdraw", "pool-withdraw", "held",
-//     "backup"): the frame leaves the document before them (src/main.ts TYPED);
+//     "backup"): the frame leaves the document before them (src/frame-cover.ts SEALED);
 // and SIGN_HOST's Permissions-Policy denies picture-in-picture and fullscreen (packages/signpage/public/_headers).
-// What the sheet does in a browser (the frame kept in the page under the sheet, its messages dropped, close to the same
-// app document, a typed screen with the frame out) is proven by packages/signpage/test/shell.test.ts and the two-host
-// run apps/terminal/test/e2e/signing-sheet/run.mjs.
+// The script's text holds what the build is; what it does is proven in browsers, not here: the frame kept in the page
+// under the sheet, its messages dropped, close to the same app document, and a typed screen with the frame out, by
+// packages/signpage/test/shell.test.ts and the two-host run apps/terminal/test/e2e/signing-sheet/run.mjs (both withdraw
+// forms under an app that takes the focus: it reads nothing); that no key and no paste reaches an app under a typed
+// screen on Chromium, Firefox and WebKit, by packages/signpage/scripts/focus-steal.e2e.mjs.
 // After: sign
 //   node scripts/live-checks/signing-views-open-over-the-app.mjs [--record <file>]           the deployed SIGN_HOST
 //   node scripts/live-checks/signing-views-open-over-the-app.mjs --local [--record <file>]   this checkout's build

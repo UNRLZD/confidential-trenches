@@ -10,7 +10,10 @@
 // yet): PASS. Card evm-pools-on-mainnet: SIGN_HOST's policy names the mainnets' EVM providers alone, so good is that
 // recorded answer with the six testnet EVM providers taken out of its connect-src, as the build's _headers now sets it
 // (no served answer of it until the next sign deploy), and the answer before is kept as beforeMainnetOnly: FAIL. The bad answers are that same answer with frame-ancestors taken out of the CSP, and with
-// frame-ancestors *: FAIL. predeploy: SIGN_HOST's real 522 before any deploy: FAIL. framed: the live SIGN_HOST before
+// frame-ancestors *: FAIL. Card restore-shows-the-balance-in-seconds: the page's trusted-types names its second policy,
+// walk-worker, beside prover-worker, so good is that answer with walk-worker added to trusted-types, as the build's
+// _headers now sets it (no served answer of it until the next sign deploy: SIGN_HOST fails this line until then, as it
+// did each card above until its deploy), and the answer before is kept as beforeWalk: FAIL on trusted-types alone. predeploy: SIGN_HOST's real 522 before any deploy: FAIL. framed: the live SIGN_HOST before
 // card signpage-shell (APP_HOST framed it; no frame-src, no Origin-Agent-Cluster): FAIL.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -27,6 +30,8 @@ const ANSWERS = JSON.parse(readFileSync(path.join(HERE, "signpage-skeleton.answe
 // and fullscreen denied): it fails that line too, and on nothing else that card changed
 const PRE_PP = (rec) => `BAD permissions-policy: "${rec.headers["permissions-policy"]}", want "${HEADERS["permissions-policy"]}"`;
 const GOOD = ANSWERS.good;
+// every answer recorded before card restore-shows-the-balance-in-seconds names prover-worker alone in trusted-types
+const PRE_TT = 'BAD CSP trusted-types: "prover-worker", want "prover-worker walk-worker"';
 const APP = "https://ct-app.unrealized.trade";
 
 const withCsp = (from, to) => {
@@ -51,7 +56,20 @@ test("recorded good answer: every header equals the policy: PASS", async () => {
 
 test("recorded bad answer: the good build before card signing-views-open-over-the-app (picture-in-picture and fullscreen not denied): FAIL on the Permissions-Policy alone", () => {
   const r = judge(ANSWERS.beforePip);
-  assert.deepEqual(r.lines.filter((l) => l.startsWith("BAD")), [PRE_PP(ANSWERS.beforePip)]);
+  assert.deepEqual(r.lines.filter((l) => l.startsWith("BAD")), [PRE_TT, PRE_PP(ANSWERS.beforePip)]);
+});
+
+test("recorded bad answer: the good build before card restore-shows-the-balance-in-seconds (no walk-worker policy): FAIL on trusted-types alone", () => {
+  const r = judge(ANSWERS.beforeWalk);
+  assert.deepEqual(r.lines.filter((l) => l.startsWith("BAD")), [PRE_TT]);
+});
+
+test("a trusted-types with a third policy, or 'allow-duplicates', is refused: FAIL", async () => {
+  for (const to of ["trusted-types prover-worker walk-worker other", "trusted-types prover-worker walk-worker 'allow-duplicates'", "trusted-types walk-worker"]) {
+    const r = judge(await read(undefined, replay(withCsp("trusted-types prover-worker walk-worker", to))));
+    assert.equal(r.ok, false, to);
+    assert.ok(r.lines.some((l) => l.startsWith("BAD CSP trusted-types:")), to);
+  }
 });
 
 test("recorded bad answer: a CSP with no frame-ancestors: FAIL", async () => {
@@ -77,6 +95,7 @@ test("recorded bad answer: the live SIGN_HOST before the shell (APP_HOST framed 
     `BAD CSP connect-src: "${site.slice("connect-src ".length)}", want "${want}"`,
     `BAD CSP frame-src: none, want "${APP}"`,
     `BAD CSP frame-ancestors: "${APP}", want "'none'"`,
+    PRE_TT,
     `BAD framed from ${APP}: allowed`,
     'BAD origin-agent-cluster: none, want "?1"',
     PRE_PP(ANSWERS.framed),
@@ -88,7 +107,7 @@ test("recorded bad answer: the good build before card page-evm-rpc-csp (no kit E
   assert.equal(r.ok, false);
   const site = ANSWERS.beforeEvm.headers["content-security-policy"].split(";").map((d) => d.trim()).find((d) => d.startsWith("connect-src "));
   const want = CSP.find(([k]) => k === "connect-src")[1];
-  assert.deepEqual(r.lines.filter((l) => l.startsWith("BAD")), [`BAD CSP connect-src: "${site.slice("connect-src ".length)}", want "${want}"`, PRE_PP(ANSWERS.beforeEvm)]);
+  assert.deepEqual(r.lines.filter((l) => l.startsWith("BAD")), [`BAD CSP connect-src: "${site.slice("connect-src ".length)}", want "${want}"`, PRE_TT, PRE_PP(ANSWERS.beforeEvm)]);
 });
 
 test("recorded bad answer: the good build before card held-move-forgotten-tx (no archival RPC in connect-src): FAIL on connect-src alone", () => {
@@ -96,7 +115,7 @@ test("recorded bad answer: the good build before card held-move-forgotten-tx (no
   assert.equal(r.ok, false);
   const site = ANSWERS.beforeArchival.headers["content-security-policy"].split(";").map((d) => d.trim()).find((d) => d.startsWith("connect-src "));
   const want = CSP.find(([k]) => k === "connect-src")[1];
-  assert.deepEqual(r.lines.filter((l) => l.startsWith("BAD")), [`BAD CSP connect-src: "${site.slice("connect-src ".length)}", want "${want}"`, PRE_PP(ANSWERS.beforeArchival)]);
+  assert.deepEqual(r.lines.filter((l) => l.startsWith("BAD")), [`BAD CSP connect-src: "${site.slice("connect-src ".length)}", want "${want}"`, PRE_TT, PRE_PP(ANSWERS.beforeArchival)]);
 });
 
 test("recorded bad answer: the good build before card evm-pools-on-mainnet (the six testnet EVM providers in connect-src): FAIL on connect-src alone", () => {
@@ -105,7 +124,7 @@ test("recorded bad answer: the good build before card evm-pools-on-mainnet (the 
   const site = ANSWERS.beforeMainnetOnly.headers["content-security-policy"].split(";").map((d) => d.trim()).find((d) => d.startsWith("connect-src "));
   const want = CSP.find(([k]) => k === "connect-src")[1];
   for (const h of ["https://base-sepolia-rpc.publicnode.com", "https://robinhood-testnet.drpc.org"]) assert.ok(site.includes(h) && !want.includes(h), h);
-  assert.deepEqual(r.lines.filter((l) => l.startsWith("BAD")), [`BAD CSP connect-src: "${site.slice("connect-src ".length)}", want "${want}"`, PRE_PP(ANSWERS.beforeMainnetOnly)]);
+  assert.deepEqual(r.lines.filter((l) => l.startsWith("BAD")), [`BAD CSP connect-src: "${site.slice("connect-src ".length)}", want "${want}"`, PRE_TT, PRE_PP(ANSWERS.beforeMainnetOnly)]);
 });
 
 test("recorded bad answer: the good build before card evm-pool-sync-holds (no Base bloXroute in connect-src): FAIL on connect-src alone", () => {
@@ -113,7 +132,7 @@ test("recorded bad answer: the good build before card evm-pool-sync-holds (no Ba
   assert.equal(r.ok, false);
   const site = ANSWERS.beforeHistory.headers["content-security-policy"].split(";").map((d) => d.trim()).find((d) => d.startsWith("connect-src "));
   const want = CSP.find(([k]) => k === "connect-src")[1];
-  assert.deepEqual(r.lines.filter((l) => l.startsWith("BAD")), [`BAD CSP connect-src: "${site.slice("connect-src ".length)}", want "${want}"`, PRE_PP(ANSWERS.beforeHistory)]);
+  assert.deepEqual(r.lines.filter((l) => l.startsWith("BAD")), [`BAD CSP connect-src: "${site.slice("connect-src ".length)}", want "${want}"`, PRE_TT, PRE_PP(ANSWERS.beforeHistory)]);
 });
 
 test("card evm-pool-sync-holds: every origin of the kit's EVM_POOL_HISTORY is in the pinned connect-src, and POOL_HISTORY is exactly those the kit's venue origins leave out", async () => {
@@ -132,7 +151,7 @@ test("recorded bad answer: the good build before card wallet-restore-reads-ux (n
   const site = ANSWERS.beforePocket.headers["content-security-policy"].split(";").map((d) => d.trim()).find((d) => d.startsWith("connect-src "));
   const want = CSP.find(([k]) => k === "connect-src")[1];
   assert.ok(want.includes(" https://solana.api.pocket.network "), "the policy names the restore's second U_X operator");
-  assert.deepEqual(r.lines.filter((l) => l.startsWith("BAD")), [`BAD CSP connect-src: "${site.slice("connect-src ".length)}", want "${want}"`, PRE_PP(ANSWERS.beforePocket)]);
+  assert.deepEqual(r.lines.filter((l) => l.startsWith("BAD")), [`BAD CSP connect-src: "${site.slice("connect-src ".length)}", want "${want}"`, PRE_TT, PRE_PP(ANSWERS.beforePocket)]);
 });
 
 test("an origin not on the list beside Pocket's Solana gateway, or in its place, is still refused: FAIL", () => {

@@ -11,10 +11,31 @@
 // The sell's button runs the buy side's own state machine (trade/model.ts tap, progress, outcome: Sending, Landing,
 // Filled, one request for a double tap); nothing is forked here.
 
-import type { SignpageClient, SignpageClientSnapshot, SignpageState } from "@blindfill/kit";
+import type { Chain, SignpageClient, SignpageClientSnapshot, SignpageState } from "@blindfill/kit";
 import { centsToDecimal, decimalToUnits, poolSellAsk, unitsToCents } from "../trade/model.ts";
 import type { Phase, PoolPrice } from "../trade/model.ts";
-import type { SellPreviewAnswer, SellPreviewRequest } from "./source.tsx";
+
+// The sell preview's shapes live here, in a plain module: the signing page's restore test reads the portfolio's
+// model through this file, and its type check takes no .tsx.
+
+/** What the sell preview is asked for: `amount` the share's token units (decimal string), `share_bps` the share. */
+export interface SellPreviewRequest {
+  chain: Chain;
+  token: string;
+  amount: string;
+  share_bps: number;
+  slippage_bps: number;
+}
+
+/** The sell preview for one share. USD values are decimal strings, as every kit amount. */
+export interface SellPreview {
+  /** The expected USD out, the venue's fees taken, before slippage. */
+  out_usd: string;
+  fee_bps: number;
+  network_usd: string;
+}
+
+export type SellPreviewAnswer = { ok: true; preview: SellPreview } | { ok: false; code: string };
 
 /** 100% in basis points. */
 export const WHOLE = 10_000;
