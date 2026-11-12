@@ -1662,3 +1662,76 @@ test("keepEvmSend keeps every resend signed after a revert (a reload's, another 
   await keepEvmSend(w, "op1", { ...p, feeCap: "7" });
   assert.deepEqual(((await w.get("meta", "owed/op1")) as Record<string, { resends?: unknown }>).n1!.resends, [{ nonce: "1", hash: "0xa" }, { nonce: "1", hash: "0xb" }]);
 });
+
+// review 3 of 972be65f (X10b): the state reads' owed pass hands the op's `held` to the EVM finish, so a part left on W
+// by a send that reverted gets its one resend at W's next nonce; without it the finish reads only the reverted send and
+// the op stays in_transit for good
+test("(X10b) the owed pass hands the op's `held` to the EVM finish: W's resend at nonce 1 is signed, kept before it leaves, and the op ends sent", async () => {
+  const { w, ns } = await wallet();
+  const { freshWallet } = await import("../../wallet/src/derive/keys.ts");
+  const { evmPoolScopeOf } = await import("../../wallet/src/pool/evm.ts");
+  const pin = EVM_POOLS["base-sepolia"]!;
+  const scope = evmPoolScopeOf(pin.pool, 84532n);
+  const ref: NoteRef = { kind: "deposit", s: scope, i: 0 };
+  const label = vaultLabelOf(keccak_256, scope, 1n);
+  const value = 10n ** 15n;
+  const pre = noteSecrets(SEED64, ref).precommitment;
+  let n = await ns.add({ ref, scope, precommitment: pre, state: "UNSPENT", leaf: { value, label, commitment: noteCommitment(value, label, pre), leafIndex: 0n } });
+  n = await ns.move(n.id, "UNSPENT", "HELD", { deadlineMs: 1_800_000_210_000n, context: "18" });
+  const attempt = n.attempt!;
+  n = await ns.move(n.id, "HELD", "RESERVED", { attempt });
+  const W = freshWallet(SEED64, "evm", label, 0).address;
+  const TO = "0x1111111111111111111111111111111111111111";
+  const H1 = "0x" + "c1".repeat(32);
+  const REL = "0x" + "ab".repeat(32);
+  const [part, fee, wFee] = [10n ** 14n, 2n * 10n ** 13n, 210_000_000_000n];
+  const chunk = part + fee + wFee;
+  const nullifier = noteSecrets(SEED64, ref).nullifierHash;
+  const held = { chain: "base", noteId: n.id, w: W, l: label.toString(), j: 0, amount: (part + wFee / 2n).toString() } as const;
+  await w.put("ops", "op1", { kind: "withdraw", stage: "in_transit", txs: [{ chain: "base", hash: REL }, { chain: "base", hash: H1 }], created_ms: 1, owed: n.id, held: { [n.id]: held } });
+  await oweSend(w, "op1", { noteId: n.id, attempt, context: "18", to: TO, last: true, feeCap: (10n ** 15n).toString(), chain: "base", part: part.toString(), nullifier: nullifier.toString(), from: "1", deadlineMs: "1800000210000", chunk: chunk.toString(), fee: fee.toString(), onward: H1, release: REL } as never);
+  // the chain: the pinned pool's Withdrawn of the nullifier paying W the chunk; W's nonce-0 send H1 reverted (status 0
+  // on both, at the safe block); W holds `held`; a send of W's lands once made
+  const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
+  const q = (v: bigint) => "0x" + v.toString(16);
+  const word = (v: bigint) => "0x" + v.toString(16).padStart(64, "0");
+  const hashOf = (raw: string) => "0x" + hex(keccak_256(Uint8Array.from(Buffer.from(raw.slice(2), "hex"))));
+  const topic = "0x" + hex(keccak_256(new TextEncoder().encode("Withdrawn(address,address,uint256,uint256,uint256,uint256)")));
+  const log = { address: pin.pool, topics: [topic, word(BigInt(W))], data: "0x" + [BigInt(pin.feeRecipient), chunk, fee, nullifier, 1n].map((v) => v.toString(16).padStart(64, "0")).join(""), blockNumber: "0xf0", logIndex: "0x0", transactionHash: REL, blockHash: "0x" + "bb".repeat(32) };
+  const sent: string[] = [];
+  const rpc = (k: string) => Object.assign(async (method: string, params: readonly unknown[] = []): Promise<unknown> => {
+    if (method === "eth_blockNumber") return "0x100";
+    if (method === "eth_getBlockByNumber") return { number: "0x100", hash: "0x" + "be".repeat(32), timestamp: q((1_800_000_000_000n + 600_000n) / 1000n), baseFeePerGas: q(10_000_000n) };
+    if (method === "eth_getLogs") return [log];
+    if (method === "eth_getTransactionCount") return q(sent.length > 0 ? 2n : 1n);
+    if (method === "eth_getBalance") return q(BigInt(held.amount));
+    if (method === "eth_getCode") return "0x";
+    if (method === "eth_estimateGas") return q(21_000n);
+    if (method === "eth_call") return (params[0] as { to: string }).to.toLowerCase() === "0x420000000000000000000000000000000000000f" ? word(900n) : "0x";
+    if (method === "eth_sendRawTransaction") return (sent.push(String(params[0])), hashOf(String(params[0])));
+    if (method === "eth_getTransactionReceipt") {
+      const h = String(params[0]);
+      const mine = sent.some((r) => hashOf(r) === h);
+      return h === H1 || mine ? { status: mine ? "0x1" : "0x0", from: W, to: TO, blockHash: "0x" + "ee".repeat(32), blockNumber: "0xf0" } : null;
+    }
+    if (method === "eth_getTransactionByHash") return { value: q(part) };
+    throw new Error(`${k}: no ${method}`);
+  }, { url: `https://${k}.invalid` });
+  const offline = Object.assign(async () => Promise.reject(new Error("offline")), { url: "https://sol.invalid" });
+  const t = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, {
+    rpcs: [offline, offline], prover: { vault: signalsProver(), stop: () => {} },
+    evmPin: (c) => (c === "base" ? pin : undefined), evmRpcs: (c) => (c === "base" ? [rpc("a"), rpc("b")] : null),
+    evmSync: () => ({ events: async () => Promise.reject(new Error("offline")) }),
+    evmQueuePool: () => ({ ...({} as Pool<unknown>), id: "evm:x", scope, now: async () => Promise.reject(new Error("offline")), trees: async () => Promise.reject(new Error("offline")) }) as unknown as Pool<unknown>,
+    wait: async () => {},
+  });
+  for (let i = 0; i < 5 && sent.length === 0; i++) await t.stateRead();
+  assert.ok(sent.length > 0, "W's resend signed and sent");
+  const tx = sent.map(hashOf);
+  const owed = (await w.get("meta", "owed/op1")) as Record<string, { resends?: { nonce: string; hash: string }[] }> | undefined;
+  const r = (await w.get("ops", "op1")) as { stage: string; arrived?: Record<string, string> };
+  assert.equal(r.stage, "sent", "the resend landed: the op ends sent");
+  assert.deepEqual(Object.keys(r.arrived ?? {}), [tx[0]]);
+  assert.deepEqual(owed ?? {}, {}, "the owed send dropped once sent");
+  await t.signedOut();
+});

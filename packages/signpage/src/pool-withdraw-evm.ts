@@ -39,8 +39,9 @@
 // - A W send that reverts (a To with code whose call fails, status 0 on both RPCs at a safe block) used W's nonce while
 //   the part stays on W: the op stays in_transit, its owed send kept, and `held` (what W holds and W's index,
 //   EvmHeldOnW) is written in the same op write as that stage. The state reads' finish then sends what W holds, less
-//   its gas, to the same To at W's next nonce (resendHeld), only once that very send ran on both RPCs, each send kept
-//   before it leaves and signed only when every nonce under W's count is a kept send read back: at most one lands.
+//   its gas, to the same To at W's nonce 1 (resendHeld), only once that very send ran on both RPCs with its fee fields,
+//   kept before it leaves: one resend at most. When it reverts too, the op stays in_transit with `held` and nothing
+//   more is signed, so W's fees stop at two sends' bounds.
 // - A send ends (sent, or reverted) only once its receipt's block is at or under the safe block both RPCs read: an
 //   unsafe block can be rebuilt without it.
 // - Every read names the pool, a block, To or W (W only once its release landed: it is public then); no read carries a
@@ -76,6 +77,9 @@ export const EVM_WITHDRAW_SETTLE_MS = 120_000;
 export const EVM_WITHDRAW_WAIT_MS = 2_000;
 /** W's onward send: resends of the same bytes, and the rounds of receipts read between them. */
 export const EVM_ONWARD_ROUNDS = 30;
+/** The one nonce a send after a revert takes (resendHeld): W's nonce-0 send and one resend at most, so a To that runs
+ *  in eth_call but reverts on chain costs W two sends' gas bounds, never a resend each pass. */
+export const EVM_RESEND_NONCE = 1n;
 
 /** A public key no note is bound to (secp256k1's generator, the key of scalar 1): the epoch fee is read by a bind for
  *  it, which names it to no one (the helper's GET /v1/pool/fee names the pool and the epoch only). */
@@ -124,6 +128,9 @@ export type EvmWithdrawHost = {
   /** The owed send's record updated (its release read back, W's send's hash before it leaves), awaited. */
   keep?(p: EvmPendingOnward): Promise<void>;
   owedNotes?(): Promise<ReadonlySet<string>>;
+  /** The run's planned notes kept out of every proof queue (any tab's) and every other plan until `untilMs` (pool ms,
+   *  the latest deadline the run can bind), written before a part's wait for its boundary; [] clears them, at every end. */
+  keepOut?(noteIds: readonly string[], untilMs: bigint): Promise<void>;
   /** The op's stage; `held` (a part left on W by a send that reverted) in the same call, so one write holds both. */
   stage?(stage: WithdrawStage, txs: TxRef[], pending: EvmPendingOnward | null, arrived: Arrivals, held?: EvmHeldOnW): void;
   now?(): bigint;
@@ -189,14 +196,16 @@ async function codeOf(rpcs: readonly [EvmRpc, EvmRpc], to: string, tag: string):
   });
 }
 
-/** W's send to `to` with `value` and `gas`, estimated and run (eth_call) on both RPCs at `tag`; `balance`: W's set by a
- *  state override (before the release, W holds nothing). The estimate (both must agree) and whether each run returned. */
-async function simulate(rpcs: readonly [EvmRpc, EvmRpc], from: string, to: string, value: bigint, tag: string, balance?: bigint): Promise<{ estimate: [bigint, bigint]; ran: [boolean, boolean] }> {
+/** W's send to `to` with `value` and `gas`, estimated and run (eth_call) on both RPCs at `tag`, the run with the send's
+ *  fee fields (`fees`: its max fee and tip); `balance`: W's set by a state override (before the release, W holds
+ *  nothing). The estimate (both must agree) and whether each run returned. */
+async function simulate(rpcs: readonly [EvmRpc, EvmRpc], from: string, to: string, value: bigint, tag: string, fees: { maxFee: bigint; tip: bigint }, balance?: bigint): Promise<{ estimate: [bigint, bigint]; ran: [boolean, boolean] }> {
   const over = balance === undefined ? [] : [{ [from]: { balance: qty(balance) } }];
   const call = { from, to, value: qty(value) };
   const estimate = await both(rpcs, async (rpc) => quantity(await rpc("eth_estimateGas", [call, tag, ...over])));
   const gas = evmOnwardCodeGas(agree(estimate));
-  const ran = await both(rpcs, (rpc) => Promise.resolve().then(() => rpc("eth_call", [{ ...call, gas: qty(gas) }, tag, ...over])).then(() => true, () => false));
+  const run = { ...call, gas: qty(gas), maxFeePerGas: qty(fees.maxFee), maxPriorityFeePerGas: qty(fees.tip) };
+  const ran = await both(rpcs, (rpc) => Promise.resolve().then(() => rpc("eth_call", [run, tag, ...over])).then(() => true, () => false));
   return { estimate, ran };
 }
 
@@ -211,10 +220,12 @@ export async function evmWithdrawCosts(h: Pick<EvmWithdrawHost, "chain" | "pin" 
   const baseFee = blk.baseFeePerGas ?? stop("read");
   let toHasCode = false;
   let gas = EVM_ONWARD_GAS;
+  const tip = nitro(h.chain) ? 0n : EVM_ONWARD_TIP;
+  const maxFee = nitro(h.chain) ? baseFee : 2n * baseFee + tip;
   if (to !== undefined) {
     toHasCode = agree(await codeOf(h.rpcs, to.to, tag));
     if (toHasCode) {
-      const sim = await simulate(h.rpcs, to.from, to.to, to.value, tag, 2n * to.value + 10n ** 18n);
+      const sim = await simulate(h.rpcs, to.from, to.to, to.value, tag, { maxFee, tip }, 2n * to.value + 10n ** 18n);
       if (!sim.ran[0] || !sim.ran[1]) stop("to");
       gas = evmOnwardCodeGas(sim.estimate[0]);
       if (gas > EVM_ONWARD_GAS_MAX) stop("to");
@@ -226,8 +237,6 @@ export async function evmWithdrawCosts(h: Pick<EvmWithdrawHost, "chain" | "pin" 
     if (est > EVM_ONWARD_GAS_MAX) stop("gas");
     gas = est;
   }
-  const tip = nitro(h.chain) ? 0n : EVM_ONWARD_TIP;
-  const maxFee = nitro(h.chain) ? baseFee : 2n * baseFee + tip;
   const l1 = (await l1Of(h, gas, tag))[0];
   const wFee = gas * maxFee + l1;
   return { fee, wFee, minPart: evmWithdrawMinPart(fee, wFee), gas, maxFee, tip, l1, toHasCode };
@@ -332,10 +341,6 @@ async function sendOnward(h: EvmWithdrawHost, ask: PoolAsk, p: EvmPendingOnward,
   if (code || nitro(h.chain)) {
     estimate = await both(h.rpcs, async (rpc) => quantity(await rpc("eth_estimateGas", [{ from: w, to: p.to, value: qty(part < bal ? part : bal) }, tag])));
     gas = code ? evmOnwardCodeGas(agree(estimate)) : agree(estimate);
-    if (code) {
-      const call = { from: w, to: p.to, value: qty(part < bal ? part : bal), gas: qty(gas) };
-      simulated = await both(h.rpcs, (rpc) => Promise.resolve().then(() => rpc("eth_call", [call, tag])).then(() => true, () => false));
-    }
   }
   const l1 = await l1Of(h, gas, tag);
   // the max fee: the chain's own bound; lower, down to the base fee, when W holds the part and a lower bound only
@@ -352,6 +357,11 @@ async function sendOnward(h: EvmWithdrawHost, ask: PoolAsk, p: EvmPendingOnward,
   if (bound > feeCap) return { state: "fee", need: bound };
   const value = bal - bound < part ? bal - bound : part;
   if (value <= 0n) return { state: "failed" };
+  if (code) {
+    // the very send run on both RPCs, its value, gas and fee fields (a run with none prices the gas at 0)
+    const call = { from: w, to: p.to, value: qty(value), gas: qty(gas), maxFeePerGas: qty(maxFee), maxPriorityFeePerGas: qty(prio) };
+    simulated = await both(h.rpcs, (rpc) => Promise.resolve().then(() => rpc("eth_call", [call, tag])).then(() => true, () => false));
+  }
   const tx: EvmOnwardSend = { type: 2, chainId: EVM_CHAIN_IDS[h.pin.network], nonce: nonce[0], maxPriorityFeePerGas: prio, maxFeePerGas: maxFee, gasLimit: gas, to: p.to, value, data: "0x", accessList: [] };
   const ctx = { nowMs: clockOf(h)(), wallet: w, feeCap, evm: { venues: h.venues, feeRecipient: h.pin.feeRecipient } };
   try {
@@ -390,11 +400,12 @@ async function broadcast(h: EvmWithdrawHost, raw: Uint8Array, hash: string, w: s
 }
 
 /** W's send after its nonce-0 send reverted (`held`): what W holds less its gas bound (never more than the part) to the
- *  same To, at W's next nonce. A kept resend read back ends it ("ok"); W's nonce 0, or the two RPCs apart on it, reads
- *  again (never a second nonce-0 send); every nonce under W's count must be a kept send read back (nonce 0 the reverted
- *  one, each later one a kept resend), so no send of W's is in flight below the one signed and at most one lands. The
- *  send is estimated and run (eth_call) on both RPCs at the block read, with its value and gas, and signed only when
- *  both returned; the rule (checkEvmOnwardSend) holds it as W's first send; its hash and nonce kept before it leaves. */
+ *  same To, at W's nonce 1 only (EVM_RESEND_NONCE). A kept resend read back ends it ("ok"); W's nonce 0, or the two
+ *  RPCs apart on it, reads again (never a second nonce-0 send); W's nonce 2 with the kept nonce-1 resend reverted
+ *  answers "reverted" with what W holds and signs nothing (the part stays on W, in_transit); any other nonce reads
+ *  again. The send is estimated and run (eth_call) on both RPCs at the block read, with its value, gas and fee fields,
+ *  and signed only when both returned; the rule (checkEvmOnwardSend) holds it as W's first send; its hash and nonce
+ *  kept before it leaves. */
 async function resendHeld(h: EvmWithdrawHost, ask: PoolAsk, p: EvmPendingOnward, l: bigint, j: number, keep: (p: EvmPendingOnward) => Promise<void>): Promise<OnwardEnd> {
   const w = await wOf(h, l, j);
   const kept = p.resends ?? [];
@@ -411,7 +422,12 @@ async function resendHeld(h: EvmWithdrawHost, ask: PoolAsk, p: EvmPendingOnward,
   const baseFee = blk.baseFeePerGas ?? stop("read");
   const nonce = await both(h.rpcs, async (rpc) => quantity(await rpc("eth_getTransactionCount", [w, tag])));
   if (nonce[0] !== nonce[1] || nonce[0] === 0n) return { state: "unknown", hash: "" };
-  for (let k = 1n; k < nonce[0]; k++) if (!kept.some((r) => BigInt(r.nonce) === k && read.get(r.hash) === "failed")) return { state: "unknown", hash: "" };
+  if (nonce[0] > EVM_RESEND_NONCE) {
+    // the one resend's nonce used: a kept resend there that reverted leaves the part on W (in_transit, `held` what W
+    // holds now), and nothing more is signed, so W's fees stop at its two sends' bounds; any other: read again
+    const r = kept.find((x) => BigInt(x.nonce) === EVM_RESEND_NONCE && read.get(x.hash) === "failed");
+    return r !== undefined && nonce[0] === EVM_RESEND_NONCE + 1n ? { state: "reverted", hash: r.hash, held: await heldOf(h.rpcs, w, tag) } : { state: "unknown", hash: "" };
+  }
   const balance = await both(h.rpcs, async (rpc) => quantity(await rpc("eth_getBalance", [w, tag])));
   const bal = agree(balance);
   const toHasCode = await codeOf(h.rpcs, p.to, tag);
@@ -429,8 +445,9 @@ async function resendHeld(h: EvmWithdrawHost, ask: PoolAsk, p: EvmPendingOnward,
   if (bound > feeCap) return { state: "fee", need: bound };
   const value = bal - bound < part ? bal - bound : part;
   if (value <= 0n) return { state: "failed" };
-  // the very send, run on both RPCs: a To that reverts it is never sent to again until it returns
-  const call = { from: w, to: p.to, value: qty(value), gas: qty(gas) };
+  // the very send, run on both RPCs with its gas and fee fields (a run with none prices the gas at 0): a To that
+  // reverts it is never sent to until it returns
+  const call = { from: w, to: p.to, value: qty(value), gas: qty(gas), maxFeePerGas: qty(maxFee), maxPriorityFeePerGas: qty(tip) };
   const simulated = await both(h.rpcs, (rpc) => Promise.resolve().then(() => rpc("eth_call", [call, tag])).then(() => true, () => false));
   if (!simulated[0] || !simulated[1]) return { state: "unknown", hash: "" };
   const tx: EvmOnwardSend = { type: 2, chainId: EVM_CHAIN_IDS[h.pin.network], nonce: nonce[0], maxPriorityFeePerGas: tip, maxFeePerGas: maxFee, gasLimit: gas, to: p.to, value, data: "0x", accessList: [] };
@@ -506,9 +523,12 @@ export async function runEvmPoolWithdraw(h: EvmWithdrawHost, ask: PoolAsk, to: s
     if (plan === null) stop("plan");
     if (BigInt(plan!.length) * (costs.fee + costs.wFee) > maxFee) stop("max_fee");
     const wCap = maxFee / BigInt(plan!.length) - costs.fee;
+    // from here to the run's end no proof queue (any tab's) takes a planned note; each part moves the deadline on
+    const keepOut = async (untilMs: bigint): Promise<void> => h.keepOut?.(plan!.map((x) => x.noteId), untilMs);
+    await keepOut(evmKeptUntil(h.pool, await h.pool.now()));
     for (const [i, p] of plan!.entries()) {
       say("proving");
-      const got = await onePart(h, ask, notes, p, costs, { to, last: i === plan!.length - 1, feeCap: wCap.toString() }, (o) => void (pending = o));
+      const got = await onePart(h, ask, notes, p, costs, { to, last: i === plan!.length - 1, feeCap: wCap.toString() }, (o) => void (pending = o), keepOut);
       if (got.tx !== "") txs.push({ chain: h.chain, hash: got.tx });
       if (got.end === "stopped") {
         pending = null;
@@ -539,32 +559,42 @@ export async function runEvmPoolWithdraw(h: EvmWithdrawHost, ask: PoolAsk, to: s
     return end("sent");
   } catch {
     return end(pending ? "in_transit" : "stopped");
+  } finally {
+    // the planned notes back to every queue; a failed write lets them back at the record's own deadline
+    await h.keepOut?.([], 0n).catch(() => {});
   }
 }
 
 /** How far past one epoch the run waits for the pool's time to reach the next boundary before it stops (the Solana
  *  withdraw's WITHDRAW_BOUNDARY_LAG_MS): the pool's time is the newest block both RPCs agree on; past this one lags. */
 export const EVM_WITHDRAW_BOUNDARY_LAG_MS = 30_000n;
+/** How long a part waits for a note the page's proof queue is still proving to come back UNSPENT once dropped (the
+ *  queue frees it when that proof ends, queue.ts drop); past it the part stops. */
+export const EVM_WITHDRAW_FREE_MS = 30_000;
+/** A part's tree read, bounded in wall-clock time (the pool's trees() takes the signal). */
+export const EVM_WITHDRAW_TREES_MS = 30_000;
 
-/** Waits until the pool's time (P.now, never the device clock) reaches `boundary`, at most one epoch and
- *  EVM_WITHDRAW_BOUNDARY_LAG_MS of waits; returns that time. */
-async function evmPoolTimeAt(P: Pool<EvmPoolRequest>, wait: (ms: number) => Promise<void>, boundary: bigint): Promise<bigint> {
-  const most = P.epochMs + EVM_WITHDRAW_BOUNDARY_LAG_MS;
-  for (let slept = 0n; ; ) {
+/** The latest deadline a part bound from pool time `nowMs` can carry: its wait for the next boundary and a proof's life. */
+const evmKeptUntil = (P: Pick<Pool<EvmPoolRequest>, "epochMs" | "lifeMs">, nowMs: bigint): bigint => nowMs + P.epochMs + EVM_WITHDRAW_BOUNDARY_LAG_MS + P.lifeMs;
+
+/** Waits until the pool's time (P.now, never the device clock) reaches `boundary`, out of `left.ms` of waits (one
+ *  part's budget, one epoch and EVM_WITHDRAW_BOUNDARY_LAG_MS, shared by every boundary it waits for); returns that time. */
+async function evmPoolTimeAt(P: Pool<EvmPoolRequest>, wait: (ms: number) => Promise<void>, boundary: bigint, left: { ms: bigint }): Promise<bigint> {
+  for (;;) {
     const nowMs = await P.now();
     if (nowMs >= boundary) return nowMs;
-    if (slept >= most) stop("boundary");
+    if (left.ms <= 0n) stop("boundary");
     let ms = boundary - nowMs > 1_000n ? boundary - nowMs : 1_000n;
-    if (ms > most - slept) ms = most - slept;
+    if (ms > left.ms) ms = left.ms;
     await wait(Number(ms));
-    slept += ms;
+    left.ms -= ms;
   }
 }
 
 /** One part's release to W: hold the note, bind and prove part + fee + W's fee to W, check, sign as W, RESERVED, the
  *  owed send written, then the helper's send and the read-back on both RPCs. "stopped": nothing left the device, or
  *  the chain says it never lands; "sent": no end in the tap's bound (owed, for the state reads). */
-async function onePart(h: EvmWithdrawHost, ask: PoolAsk, notes: NoteStore, p: WithdrawPart, c: EvmWithdrawCosts, base: Pick<PendingOnward, "to" | "last" | "feeCap">, owing: (o: EvmPendingOnward) => void): Promise<{ end: "mine" | "stopped" | "sent"; tx: string; l: bigint; j: number }> {
+async function onePart(h: EvmWithdrawHost, ask: PoolAsk, notes: NoteStore, p: WithdrawPart, c: EvmWithdrawCosts, base: Pick<PendingOnward, "to" | "last" | "feeCap">, owing: (o: EvmPendingOnward) => void, keepOut: (untilMs: bigint) => Promise<void>): Promise<{ end: "mine" | "stopped" | "sent"; tx: string; l: bigint; j: number }> {
   const P = h.pool;
   let attempt: string | null = null;
   let reserved = false;
@@ -572,12 +602,13 @@ async function onePart(h: EvmWithdrawHost, ask: PoolAsk, notes: NoteStore, p: Wi
   const clock = clockOf(h);
   const wait = waitOf(h);
   try {
-    // the note, dropped first when the page's proof queue holds it for the next buy
+    // the note, dropped first when the page's proof queue holds it for the next buy; one whose proof is still being
+    // made comes back UNSPENT when that proof ends (queue.ts drop), waited for at most EVM_WITHDRAW_FREE_MS
     const free = async (): Promise<NoteRecord> => {
       let n = await notes.get(p.noteId);
       if (n?.state === "HELD" && h.drop) {
         await h.drop(p.noteId);
-        n = await notes.get(p.noteId);
+        for (let waited = 0; (n = await notes.get(p.noteId))?.state === "HELD" && waited < EVM_WITHDRAW_FREE_MS; waited += 500) await wait(500);
       }
       if (n === undefined || n.state !== "UNSPENT" || n.leaf === undefined) stop("note");
       return n!;
@@ -589,16 +620,23 @@ async function onePart(h: EvmWithdrawHost, ask: PoolAsk, notes: NoteStore, p: Wi
     // for any other (a return, move, change or refund note) the next epoch's, once the pool's time reached it (M351: a
     // root right after its own leaf would link the W it pays to the W whose money made that leaf)
     let nowMs = await P.now();
+    // the run's notes out of every queue's pass (any tab's) past the latest deadline this part can bind, so no queue
+    // takes this note at the boundary it may wait for
+    await keepOut(evmKeptUntil(P, nowMs));
     let epochStartMs = nowMs - (nowMs % P.epochMs);
-    let trees = await P.trees(epochStartMs);
+    let trees = await P.trees(epochStartMs, AbortSignal.timeout(EVM_WITHDRAW_TREES_MS));
     if (leaf.leafIndex >= BigInt(trees.stateTree.size)) {
-      if (provesOnNewest(n.ref)) trees = await P.trees(nowMs + 1n, undefined, { newest: true });
+      if (provesOnNewest(n.ref)) trees = await P.trees(nowMs + 1n, AbortSignal.timeout(EVM_WITHDRAW_TREES_MS), { newest: true });
       else {
-        nowMs = await evmPoolTimeAt(P, wait, epochStartMs + P.epochMs);
-        epochStartMs = nowMs - (nowMs % P.epochMs);
-        trees = await P.trees(epochStartMs);
-        if (leaf.leafIndex >= BigInt(trees.stateTree.size)) stop("root");
-        // the page's proof queue may have held it at the boundary
+        const left = { ms: P.epochMs + EVM_WITHDRAW_BOUNDARY_LAG_MS };
+        // the next boundary whose epoch root holds the leaf: one more, in the same budget, when the first time read was
+        // behind the leaf's own block
+        do {
+          nowMs = await evmPoolTimeAt(P, wait, epochStartMs + P.epochMs, left);
+          epochStartMs = nowMs - (nowMs % P.epochMs);
+          trees = await P.trees(epochStartMs, AbortSignal.timeout(EVM_WITHDRAW_TREES_MS));
+        } while (leaf.leafIndex >= BigInt(trees.stateTree.size));
+        // a queue that took it before the keep-out was written: dropped and waited for, as at the start
         n = await free();
       }
     }

@@ -86,7 +86,8 @@ const w32 = (v: bigint) => v.toString(16).padStart(64, "0");
 const HELPER_HASH = "0x" + "ab".repeat(32);
 const TX = "0x" + "cd".repeat(32);
 const DEADLINE = NOW + 170_000n;
-const START = 0x100n;
+// above the lag margin (EVM_BUY_LAG_BLOCKS, 400), so a read-back starts that margin under it
+const START = 0x200n;
 const OTHER = "0x00000000000000000000000000000000000000aa";
 type Rel = { kind?: "bought" | "withdrawn"; w?: string; feeTo?: string; value?: bigint; fee?: bigint; nullifier?: bigint; token?: string; out?: bigint; block?: bigint; tx?: string; address?: string; blockHash?: string };
 /** A release log of the pool, as eth_getLogs gives it. */
@@ -250,7 +251,7 @@ test("(ruling 2) the read-back names no W, nullifier or transaction to a public 
   const said = JSON.stringify(seen.calls.map((c) => c.params)).toLowerCase();
   for (const secret of [W.slice(2).toLowerCase(), w32(NULLIFIER), NULLIFIER.toString(16), HELPER_HASH.slice(2), TX.slice(2)]) assert.ok(!said.includes(secret), `no read names ${secret}`);
   const filter = seen.calls.find((c) => c.method === "eth_getLogs")!.params as [Record<string, unknown>];
-  assert.deepEqual(filter, [{ address: POOL, topics: [[topic(EVM_POOL_EVENTS.Bought), topic(EVM_POOL_EVENTS.Withdrawn)]], fromBlock: "0x" + (START - EVM_BUY_LAG_BLOCKS).toString(16), toBlock: "0x140" }]);
+  assert.deepEqual(filter, [{ address: POOL, topics: [[topic(EVM_POOL_EVENTS.Bought), topic(EVM_POOL_EVENTS.Withdrawn)]], fromBlock: "0x" + (START - EVM_BUY_LAG_BLOCKS).toString(16), toBlock: "0x" + (START + 0x40n).toString(16) }]);
   // the two RPCs' newest blocks differ: the reads start a lag margin (EVM_BUY_LAG_BLOCKS) under the lower, so neither misses the release
   const ahead = host({ a: { logs: [release()], start: START + 9n }, b: { logs: [release()] } });
   await runEvmPoolBuy(ahead.h, ASK);

@@ -9,6 +9,7 @@ import { openNoteStore } from "../../wallet/src/notes/store.ts";
 import { noteCommitment, noteSecrets } from "../../wallet/src/notes/secrets.ts";
 import { evmPoolContextOf, evmPoolScopeOf } from "../../wallet/src/pool/evm.ts";
 import { VaultTree } from "../../kit/src/vault/inputs.ts";
+import { jOf } from "../../wallet/src/pool/queue.ts";
 import { vaultLabelOf } from "../../kit/src/vault/shapes.ts";
 import { signalsProver } from "../../wallet/test/withdraw-fixture.ts";
 import { keccak_256 } from "@noble/hashes/sha3.js";
@@ -492,11 +493,15 @@ async function runWorld(plant: RunPlant = {}) {
   const planned = await notes.planDeposit(RUN_SCOPE, (r) => noteSecrets(SEED, r).precommitment);
   const inc = await notes.move(planned.id, "PLANNED", "INCOMING", { send: { signature: "5".repeat(87), value, last_valid_block_height: 1_000n } });
   const label = vaultLabelOf(keccak_256, RUN_SCOPE, 1n);
+  // a change note's own secrets make its leaf, its nullifier and its W (a return, move or refund note is the same case)
+  const ref = plant.change ? ({ kind: "change", l: label, j: 1 } as const) : inc.ref;
   const commitment = noteCommitment(value, label, inc.precommitment);
+  // the pool's tree holds the leaf the note's own secrets make (the store's record keeps its deposit's)
+  const leafOf = noteCommitment(value, label, noteSecrets(SEED, ref).precommitment);
   await notes.move(inc.id, "INCOMING", "UNSPENT", { leaf: { value, label, commitment, leafIndex: 0n } });
   const noteId = inc.id;
-  const w = freshWallet(SEED, "evm", label, 0).address;
-  const nullifier = noteSecrets(SEED, inc.ref).nullifierHash;
+  const w = freshWallet(SEED, "evm", label, jOf(ref)).address;
+  const nullifier = noteSecrets(SEED, ref).nullifierHash;
   const clock = { ms: NOW };
   const chain = { logs: [] as unknown[], balance: 0n, sent: [] as string[], sentAt: null as bigint | null, binds: [] as bigint[], sends: 0, keeps: [] as EvmPendingOnward[], owes: [] as EvmPendingOnward[], stages: [] as string[], trees: [] as { beforeMs: bigint; newest: boolean }[] };
   const tree = (xs: bigint[]) => new VaultTree(xs);
@@ -507,7 +512,7 @@ async function runWorld(plant: RunPlant = {}) {
       chain.trees.push({ beforeMs, newest: o?.newest === true });
       // landed this epoch: the epoch's own trees (up to NOW, an epoch's start) do not hold it
       if (plant.thisEpoch && o?.newest !== true && beforeMs <= NOW) return { stateTree: { size: 0 }, labelTree: { size: 0 }, stateRoot: 0n, labelRoot: 0n };
-      return { stateTree: tree([commitment]), labelTree: tree([label]), stateRoot: tree([commitment]).root!, labelRoot: tree([label]).root! };
+      return { stateTree: tree([leafOf]), labelTree: tree([label]), stateRoot: tree([leafOf]).root!, labelRoot: tree([label]).root! };
     },
     bind: async (b: { chunk: bigint; wallet: { address: string }; refundPrecommitment: bigint; deadlineMs: bigint }) => {
       const isW = lower(b.wallet.address) === lower(w);
@@ -551,7 +556,7 @@ async function runWorld(plant: RunPlant = {}) {
     throw new Error(`no ${method}`);
   };
   // a change note: the store's record as read, its ref a change's (a note a return, move or refund made is the same case)
-  const asChange = (n: NoteRecord | undefined) => (n === undefined ? n : ({ ...n, ref: { kind: "change", l: label, j: 1 } } as unknown as NoteRecord));
+  const asChange = (n: NoteRecord | undefined) => (n === undefined ? n : ({ ...n, ref } as unknown as NoteRecord));
   const seen = plant.change ? Object.assign(Object.create(notes) as NoteStore, { get: async (id: string) => asChange(await notes.get(id)), list: async () => (await notes.list()).map((n) => asChange(n)!) }) : notes;
   const h: EvmWithdrawHost = {
     chain: "base", testnet: true, pin: { ...BASE_PIN, feeRecipient: RUN_FEE_TO }, venues: RUN_VENUES as never, rpcs: [rpc(0), rpc(1)], pool, prover: proverOf as never,
@@ -640,9 +645,10 @@ test("(review P2-1, R4) the run: two heads further apart than EVM_BUY_HEAD_SPREA
   assert.equal((await runEvmPoolWithdraw(far.h, RUN_ASK, TO, PART, MAX)).stage, "stopped");
   assert.deepEqual([far.chain.sends, far.chain.owes.length], [0, 0]);
   assert.equal((await far.notes.get(far.noteId))?.state, "UNSPENT");
-  const near = await runWorld({ heads: [0x100n + EVM_BUY_HEAD_SPREAD, 0x100n] });
+  // the lower head above the lag margin (EVM_BUY_LAG_BLOCKS), the release's block (0x100) inside the range
+  const near = await runWorld({ heads: [0x200n + EVM_BUY_HEAD_SPREAD, 0x200n] });
   assert.equal((await runEvmPoolWithdraw(near.h, RUN_ASK, TO, PART, MAX)).stage, "sent");
-  assert.equal(near.chain.owes[0]?.from, (0x100n - EVM_BUY_LAG_BLOCKS).toString(), "a lag margin under the lower head");
+  assert.equal(near.chain.owes[0]?.from, (0x200n - EVM_BUY_LAG_BLOCKS).toString(), "a lag margin under the lower head");
 });
 
 test("(review P2-2; review 2 P2-A, P3-1, X18) the run: W's send reverted (status 0 on both): in_transit, the owed send kept, `held` in the stage's own call, the reverted send in the txs", async () => {
@@ -738,7 +744,7 @@ test("(review 2 P2-A) the resend waits: its run reverting on either RPC, W's non
   }
 });
 
-test("(review 2 P2-A) the resend lands at most once: a kept resend that landed ends it; one not read back at a nonce W has passed waits; one that reverted makes way for the next nonce", async () => {
+test("(review 2 P2-A; review 3 P2-B) the resend lands at most once: a kept resend that landed ends it; one not read back at a nonce W has passed waits; one that reverted ends the resends (in_transit with what W holds, nothing signed)", async () => {
   const landed = heldSide({ nonce: 2n, receipts: { [R1]: rcpt("0x1") }, txs: { ...releaseSide().txs, [R1]: { value: q(PART - 1n) } } });
   const got = await finishEvmOnward(finishHost(landed), pendingOf({ ...BIG_CAP, onward: H1, resends: [{ nonce: "1", hash: R1 }] }), undefined, heldOf());
   assert.deepEqual(got, { stage: "sent", txs: [{ chain: "base", hash: REL }, { chain: "base", hash: R1 }], arrived: { [R1]: (PART - 1n).toString() } });
@@ -752,9 +758,8 @@ test("(review 2 P2-A) the resend lands at most once: a kept resend that landed e
   const again = heldSide({ nonce: 2n, receipts: { [R1]: rcpt("0x0") } });
   const kept: EvmPendingOnward[] = [];
   const got3 = await finishEvmOnward(finishHost(again, { kept }), pendingOf({ ...BIG_CAP, onward: H1, resends: [{ nonce: "1", hash: R1 }] }), undefined, heldOf());
-  assert.equal(got3?.stage, "sent");
-  const hash = rawHashOf(again.sent![0]!);
-  assert.deepEqual(kept.at(-1)?.resends, [{ nonce: "1", hash: R1 }, { nonce: "2", hash }], "the next nonce's send kept beside the reverted one");
+  assert.deepEqual(got3, { stage: "in_transit", txs: [{ chain: "base", hash: REL }, { chain: "base", hash: R1 }], arrived: {}, held: heldOf() }, "the one resend reverted: the part stays on W");
+  assert.deepEqual([again.sent ?? [], kept], [[], []], "no send at nonce 2, nothing kept");
   // the resend itself reverts: in_transit, what W holds now in `held`, its hash in the txs
   const twice = heldSide({ landsOnSend: false, receipt: rcpt("0x0") });
   const got4 = await finishEvmOnward(finishHost(twice), pendingOf({ ...BIG_CAP, onward: H1 }), undefined, heldOf());
@@ -803,7 +808,7 @@ test("(review 2 X15, the review's RR4, kills) status 0x0 on both RPCs in two dif
 
 test("(review 2, M351) the run's root: a change note that landed this epoch waits for the pool's next boundary and proves on that epoch's root, never the newest; a deposit's own note proves on the newest", async () => {
   const change = await runWorld({ change: true, thisEpoch: true });
-  await runEvmPoolWithdraw(change.h, RUN_ASK, TO, PART, MAX);
+  assert.equal((await runEvmPoolWithdraw(change.h, RUN_ASK, TO, PART, MAX)).stage, "sent", "proved on the next epoch's root and sent");
   assert.ok(!change.chain.trees.some((t) => t.newest), "a change note never proves on the newest root");
   assert.ok(change.chain.trees.some((t) => t.beforeMs === NOW + 60_000n), "the next epoch's trees, once the pool's time reached it");
   assert.ok(change.clock.ms >= NOW + 60_000n, "waited on the pool's time");
@@ -813,10 +818,131 @@ test("(review 2, M351) the run's root: a change note that landed this epoch wait
   assert.equal(own.clock.ms < NOW + 60_000n, true, "no wait for the boundary");
 });
 
-test("(review 2 P3-5) the read-back's range: the head spread, the lag margin and a proof's life of the fastest mainnet's blocks stay under the log span; the margin is twice the lag's blocks, in buy, sell and withdraw", async () => {
+test("(review 2 P3-5; review 3) the read-back's range: the head spread, the lag margin and a proof's life of the fastest mainnet's blocks stay under the log span; the margin is twice the lag's blocks, in buy, sell and withdraw", async () => {
   const { EVM_BLOCKS_PER_S_MAX } = (await import("../src/pool-buy-evm.ts")) as unknown as { EVM_BLOCKS_PER_S_MAX: bigint };
   assert.equal(typeof EVM_BLOCKS_PER_S_MAX, "bigint", "the fastest mainnet's read rate, named");
+  // twice Robinhood mainnet's 9.3 blocks a second, so a faster chain still fits; the numbers pinned
+  assert.deepEqual([EVM_BLOCKS_PER_S_MAX, EVM_BUY_LAG_BLOCKS, EVM_BUY_HEAD_SPREAD, EVM_LIFE_MS, EVM_BUY_LOG_SPAN], [20n, 400n, 5_000n, 210_000n, 20_000n]);
+  assert.equal(EVM_BUY_HEAD_SPREAD + EVM_BUY_LAG_BLOCKS + (EVM_BLOCKS_PER_S_MAX * EVM_LIFE_MS) / 1000n, 9_600n);
   assert.ok(EVM_BUY_HEAD_SPREAD + EVM_BUY_LAG_BLOCKS + (EVM_BLOCKS_PER_S_MAX * EVM_LIFE_MS) / 1000n < EVM_BUY_LOG_SPAN);
   assert.ok(EVM_BUY_LAG_BLOCKS >= (2n * EVM_BLOCKS_PER_S_MAX * BigInt(EVM_BUY_LAG_MS)) / 1000n);
   assert.equal(EVM_SELL_LAG_BLOCKS, EVM_BUY_LAG_BLOCKS);
+});
+
+// ---------- review 3 of 972be65f (verdict FIX): each test red at 972be65f ----------
+
+test("(review 3 P2-B, RR6) one resend per part: a To that runs in eth_call but reverts on chain gets W's nonce-1 resend once; every later pass signs nothing and answers in_transit with what W holds", async () => {
+  const side = heldSide({ landsOnSend: false, receipt: rcpt("0x0") });
+  const kept: EvmPendingOnward[] = [];
+  let pending = pendingOf({ ...BIG_CAP, onward: H1 });
+  const raws = new Set<string>();
+  const answers: unknown[] = [];
+  for (let pass = 0; pass < 4; pass++) {
+    // W's nonce: 1 after its nonce-0 send, one more for each send of W's that landed (reverted)
+    side.nonce = 1n + BigInt(raws.size);
+    const got = await finishEvmOnward({ ...finishHost(side), keep: async (p: EvmPendingOnward) => void kept.push(p) } as unknown as EvmWithdrawHost, pending, undefined, heldOf());
+    answers.push(got);
+    for (const r of side.sent ?? []) raws.add(r);
+    pending = kept.at(-1) ?? pending;
+  }
+  assert.equal(raws.size, 1, "one resend signed in four passes");
+  assert.deepEqual(pending.resends?.map((r) => r.nonce), ["1"]);
+  const r1 = rawHashOf([...raws][0]!);
+  for (const got of answers) assert.deepEqual(got, { stage: "in_transit", txs: [{ chain: "base", hash: REL }, { chain: "base", hash: r1 }], arrived: {}, held: heldOf() });
+});
+
+test("(review 3 P2-B) after the one resend reverted, no later pass signs anything: not at nonce 2 nor past it, nor again at a lower one", async () => {
+  for (const nonce of [2n, 3n, 9n]) {
+    const side = heldSide({ nonce, receipts: { [R1]: rcpt("0x0") } });
+    const kept: EvmPendingOnward[] = [];
+    for (let pass = 0; pass < 3; pass++) {
+      const got = await finishEvmOnward(finishHost(side, { kept }), pendingOf({ ...BIG_CAP, onward: H1, resends: [{ nonce: "1", hash: R1 }] }), undefined, heldOf());
+      if (nonce === 2n) assert.equal(got?.stage, "in_transit", `nonce ${nonce}`);
+      else assert.equal(got, null, `nonce ${nonce}: a send no record names, read again`);
+    }
+    assert.deepEqual([side.sent ?? [], kept], [[], []], `nonce ${nonce}: nothing signed or kept`);
+  }
+});
+
+test("(review 3 P2-B) every run of W's send carries its fee fields: the resend's, a first send to a To with code, and the To check before any note moves", async () => {
+  const feeFields = (calls: Call[]) => calls.filter((c) => c.method === "eth_call" && lower((c.params[0] as { to: string }).to) === lower(TO)).map((c) => c.params[0] as { maxFeePerGas?: string; maxPriorityFeePerGas?: string });
+  const MAX_FEE = 2n * BASE_FEE + EVM_ONWARD_TIP;
+  // the resend (no code at To on Base: its run is the one a To that reverts on chain passed at a zero gas price)
+  const calls: Call[] = [];
+  const side = heldSide();
+  await finishEvmOnward({ ...finishHost(side), rpcs: [rpcOf(side, calls), rpcOf(side, calls)] } as unknown as EvmWithdrawHost, pendingOf({ ...BIG_CAP, onward: H1 }), undefined, heldOf());
+  const resend = feeFields(calls);
+  assert.equal(resend.length, 2, "run on both RPCs");
+  for (const c of resend) assert.deepEqual([c.maxFeePerGas, c.maxPriorityFeePerGas], [q(MAX_FEE), q(EVM_ONWARD_TIP)]);
+  // W's first send to a To with code
+  const code = { [TO.toLowerCase()]: "0x6080" };
+  const calls2: Call[] = [];
+  const first = { ...releaseSide(), landsOnSend: true, code, estimate: () => 30_000n };
+  await finishEvmOnward({ ...finishHost(first), rpcs: [rpcOf(first, calls2), rpcOf(first, calls2)] } as unknown as EvmWithdrawHost, pendingOf({ feeCap: (10n ** 15n).toString() }));
+  const sends = feeFields(calls2);
+  assert.equal(sends.length, 2);
+  for (const c of sends) assert.ok(c.maxFeePerGas !== undefined && BigInt(c.maxFeePerGas) >= BASE_FEE && c.maxPriorityFeePerGas !== undefined, "W's first send's run priced");
+  // the To check before any note moves
+  const calls3: Call[] = [];
+  const s3: Side = { code, estimate: () => 30_000n };
+  await evmWithdrawCosts(hostOf("base", s3, s3, calls3), { to: TO, from: W, value: 10n ** 14n });
+  const checks = feeFields(calls3);
+  assert.equal(checks.length, 2);
+  for (const c of checks) assert.deepEqual([c.maxFeePerGas, c.maxPriorityFeePerGas], [q(MAX_FEE), q(EVM_ONWARD_TIP)]);
+});
+
+// RR7: a proof queue's pass at the boundary the run waits for, as the page's queue runs it: it takes an UNSPENT note
+// (HELD, its proof in flight) unless a withdraw's keep-out names it; a drop of an in-flight proof only marks it, and the
+// note comes back UNSPENT when that proof ends (queue.ts drop)
+const queueAtBoundary = (world: Awaited<ReturnType<typeof runWorld>>, o: { proofEndsMs?: bigint } = {}) => {
+  const kept = { ids: new Set<string>(), until: 0n, calls: [] as [string[], bigint][] };
+  world.h.keepOut = async (ids, untilMs) => {
+    kept.calls.push([[...ids], untilMs]);
+    kept.ids = new Set(ids);
+    kept.until = untilMs;
+  };
+  const took = { at: null as bigint | null, dropped: false };
+  const wait0 = world.h.wait!;
+  world.h.wait = async (ms) => {
+    await wait0(ms);
+    const at = world.clock.ms;
+    if (took.at === null && at >= NOW + 60_000n && !(kept.ids.has(world.noteId) && kept.until > at)) {
+      took.at = at;
+      await world.notes.move(world.noteId, "UNSPENT", "HELD", { deadlineMs: NOW + 400_000n, context: "1" });
+    }
+    const n = await world.notes.get(world.noteId);
+    if (took.at !== null && took.dropped && n?.state === "HELD" && o.proofEndsMs !== undefined && at >= took.at + o.proofEndsMs) await world.notes.move(world.noteId, "HELD", "UNSPENT", { attempt: n.attempt! });
+  };
+  world.h.drop = async () => void (took.dropped = true);
+  return { kept, took };
+};
+
+test("(review 3 P2-C, RR7) the root wait on EVM: the run keeps its planned notes out of every proof queue before it waits, past the latest deadline it can bind; the queue's pass at the boundary skips the note and the part goes on; the keep-out cleared at the end", async () => {
+  const world = await runWorld({ change: true, thisEpoch: true });
+  const { kept, took } = queueAtBoundary(world);
+  const got = await runEvmPoolWithdraw(world.h, RUN_ASK, TO, PART, MAX);
+  assert.equal(took.at, null, "no queue took the note at the boundary");
+  assert.equal(got.stage, "sent");
+  assert.equal(world.chain.sends, 1);
+  assert.ok(kept.calls.length >= 2, "kept out before the wait, cleared at the end");
+  assert.deepEqual(kept.calls[0]![0], [world.noteId], "the plan's notes");
+  assert.ok(kept.calls[0]![1] >= NOW + 60_000n + 210_000n, "past the latest deadline the part can bind (the next boundary's epoch and a proof's life)");
+  assert.deepEqual(kept.calls.at(-1), [[], 0n], "cleared at the run's end");
+});
+
+test("(review 3 P2-C) a note the page's queue is still proving when the part needs it: dropped, then waited for until that proof ends and frees it; the part goes on. A proof that never ends stops the part, nothing signed", async () => {
+  // the keep-out written after the queue took it (another tab's queue, or a pass right before the write)
+  const world = await runWorld({ change: true, thisEpoch: true });
+  const { took } = queueAtBoundary(world, { proofEndsMs: 5_000n });
+  world.h.keepOut = async () => {};
+  const got = await runEvmPoolWithdraw(world.h, RUN_ASK, TO, PART, MAX);
+  assert.ok(took.at !== null && took.dropped, "the queue took it and the part dropped it");
+  assert.equal(got.stage, "sent", "waited for the proof to end");
+  const stuck = await runWorld({ change: true, thisEpoch: true });
+  queueAtBoundary(stuck);
+  stuck.h.keepOut = async () => {};
+  const t0 = stuck.clock.ms;
+  assert.equal((await runEvmPoolWithdraw(stuck.h, RUN_ASK, TO, PART, MAX)).stage, "stopped");
+  assert.ok(stuck.clock.ms - t0 >= 60_000n, "waited out the free budget past the boundary");
+  assert.deepEqual([stuck.chain.sends, stuck.chain.sent.length], [0, 0]);
 });
