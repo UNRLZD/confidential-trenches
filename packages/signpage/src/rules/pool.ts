@@ -58,6 +58,7 @@ import { base58 } from "@scure/base";
 import {
   SOLANA_ALT_PROGRAM,
   SOLANA_MAX_TX_BYTES,
+  solanaAta,
   solanaDecodeLookupTable,
   solanaDecodeMessage,
   solanaProgramAddress,
@@ -65,7 +66,7 @@ import {
   solanaTableIsActive,
   type SolanaLookupTable,
 } from "../../../kit/src/checks/solana/message.ts";
-import { SOLANA_COMPUTE_BUDGET_PROGRAM, SOLANA_CU_PRICE_MAX, SOLANA_LAMPORTS_PER_SIGNATURE, SOLANA_SYSTEM_PROGRAM, SOLANA_TOKEN_2022_PROGRAM, SOLANA_TOKEN_PROGRAM, checkSolanaTeardown, type SolanaTeardownReads } from "../../../kit/src/checks/solana/checks.ts";
+import { SOLANA_CLOSE_VOLUME_ACCUMULATOR, SOLANA_COMPUTE_BUDGET_PROGRAM, SOLANA_CU_PRICE_MAX, SOLANA_LAMPORTS_PER_SIGNATURE, SOLANA_SYSTEM_PROGRAM, SOLANA_TOKEN_2022_PROGRAM, SOLANA_TOKEN_PROGRAM, SOLANA_VOLUME_PROGRAMS, checkSolanaTeardown, solanaEventAuthority, solanaVolumeAccumulator, type SolanaTeardownReads } from "../../../kit/src/checks/solana/checks.ts";
 import {
   SOLANA_POOL_TAG_RELEASE,
   checkSolanaPoolBuy,
@@ -572,7 +573,38 @@ export function checkSolanaBuy(
  *  sell empties W's holding, W's lamports (the lower of both RPCs), the fee both RPCs price the message at, what the
  *  sell makes at W's cost, the rent rate, the deposit's three accounts' lamports and its form (`next`: the eight), and
  *  the volume accounts owed a claim after the sell. */
-export type SolanaSellSurplus = { full: boolean; lamports: bigint; fee: bigint; made: bigint; rent: SolanaRent; held: SolanaDepositHeld; next: boolean; owed: number };
+/** `closes` (card round-trip-costs-less): the accounts a full sell closes to W after the venue's sell and before its one
+ *  deposit, so their rent goes into the same note, with no teardown frame and no second deposit (solanaSellCloses). */
+export type SolanaSellSurplus = { full: boolean; lamports: bigint; fee: bigint; made: bigint; rent: SolanaRent; held: SolanaDepositHeld; next: boolean; owed: number; closes?: readonly SolanaSellClose[] };
+
+/**
+ * One account a full sell closes to W inside its own transaction (card round-trip-costs-less), with the lamports it holds
+ * (the lower of both RPCs' reads; what it holds over that stays on W): W's token account of the sold mint, empty once the
+ * sale sold all of it (`harvest`: Token-2022's withheld fees moved to the mint first, as the teardown does), or W's
+ * volume account under a pump program that owes nothing (no incentive, no volume to settle, no cashback) and that the
+ * sale does not name. Each pays only W: CloseAccount's destination is W; close_user_volume_accumulator pays its user.
+ */
+export type SolanaSellClose = { kind: "token"; address: string; program: string; mint: string; harvest: boolean; lamports: bigint } | { kind: "volume"; address: string; program: string; lamports: bigint };
+/** The instructions that close `closes` to `wallet`, in order, as the kit's teardown frames build them (build.ts
+ *  buildSolanaTeardown: S-4's harvest and CloseAccount, S-5's close_user_volume_accumulator); refused for an account that
+ *  is not W's own of its kind. */
+export function solanaSellCloses(wallet: string, closes: readonly SolanaSellClose[]): Ix[] {
+  const acc = (key: string, signer: boolean, writable: boolean) => ({ key, signer, writable });
+  const seen = new Set<string>();
+  return closes.flatMap((c): Ix[] => {
+    if (seen.has(c.address)) return refuse("closes");
+    seen.add(c.address);
+    if (c.kind === "volume") {
+      if (!SOLANA_VOLUME_PROGRAMS.includes(c.program) || c.address !== solanaVolumeAccumulator(wallet, c.program)) return refuse("closes");
+      return [{ program: c.program, accounts: [acc(wallet, true, true), acc(c.address, false, true), acc(solanaEventAuthority(c.program), false, false), acc(c.program, false, false)], data: Uint8Array.from(SOLANA_CLOSE_VOLUME_ACCUMULATOR) }];
+    }
+    if ((c.program !== SOLANA_TOKEN_PROGRAM && c.program !== SOLANA_TOKEN_2022_PROGRAM) || c.address !== solanaAta(wallet, c.mint, c.program) || (c.harvest && c.program !== SOLANA_TOKEN_2022_PROGRAM)) return refuse("closes");
+    return [
+      ...(c.harvest ? [{ program: SOLANA_TOKEN_2022_PROGRAM, accounts: [acc(c.mint, false, true), acc(c.address, false, true)], data: Uint8Array.of(26, 4) }] : []),
+      { program: c.program, accounts: [acc(c.address, false, true), acc(wallet, false, true), acc(wallet, true, false)], data: Uint8Array.of(9) },
+    ];
+  });
+}
 
 /** A Solana pool sell: the kit's venue sell of the request's amount from W at a min out no lower than the device's
  *  floor, then, last, by W, the deposit into the pinned pool of exactly that min out less `reserve`, the lamports the
@@ -633,14 +665,28 @@ export function checkSolanaSell(
     if (typeof p.rent?.lamportsPerByte !== "bigint" || typeof p.rent.factor !== "bigint" || p.rent.lamportsPerByte < 0n || p.rent.factor < 0n || p.rent.lamportsPerByte * p.rent.factor > SOLANA_RENT_PER_BYTE_MAX) return refuse("reserve");
     if (!Number.isSafeInteger(p.owed) || p.owed < 0 || p.owed > SOLANA_SWEEP_OWED_MAX) return refuse("reserve");
     const short = p.fee + p.made + solanaDepositRents(p.rent, reads, p.held, p.next) - p.lamports;
-    const full = solanaSellAfterFull(p.rent, p.owed);
     const r0 = solanaRentMin(p.rent, 0);
-    const floor = solanaSweepFloor(p.rent) > SOLANA_POOL_MIN_DEPOSIT ? solanaSweepFloor(p.rent) : SOLANA_POOL_MIN_DEPOSIT;
-    const keep = short + full;
-    const keeps = keep - (full - r0) <= SOLANA_POOL_SELL_RESERVE_MAX && keep < minOut && minOut - keep >= floor;
-    if (reserve !== (keeps ? keep : short + r0)) return refuse("reserve");
-    if (keeps) swept = full - r0;
-  } else if (reserve < 0n) return refuse("reserve");
+    if (p.closes !== undefined && p.closes.length > 0) {
+      // card round-trip-costs-less: the closes' lamports reach W before the deposit, in the same transaction, so the one
+      // note takes them; W keeps rent(0) alone (and what the venue pays over min out), nothing for a later sweep, so
+      // nothing may be owed a later claim
+      if (p.owed !== 0) return refuse("closes");
+      let closed = 0n;
+      for (const c of p.closes) {
+        // a token account closed in the sale is W's of the mint it sells, never another coin W holds
+        if (typeof c.lamports !== "bigint" || c.lamports < 0n || (c.kind === "token" && c.mint !== ask.token)) return refuse("closes");
+        closed += c.lamports;
+      }
+      if (reserve !== short + r0 - closed) return refuse("reserve");
+    } else {
+      const full = solanaSellAfterFull(p.rent, p.owed);
+      const floor = solanaSweepFloor(p.rent) > SOLANA_POOL_MIN_DEPOSIT ? solanaSweepFloor(p.rent) : SOLANA_POOL_MIN_DEPOSIT;
+      const keep = short + full;
+      const keeps = keep - (full - r0) <= SOLANA_POOL_SELL_RESERVE_MAX && keep < minOut && minOut - keep >= floor;
+      if (reserve !== (keeps ? keep : short + r0)) return refuse("reserve");
+      if (keeps) swept = full - r0;
+    }
+  } else if (reserve < 0n || (p?.closes !== undefined && p.closes.length > 0)) return refuse("reserve");
   if (reserve - swept > SOLANA_POOL_SELL_RESERVE_MAX) return refuse("reserve");
   // the note is one a release can take whole, on every path (card sol-sell-deposit-back-floor; it is never under the
   // pool's least deposit, so review 3 L-a of 446d830f's 999,999 note is refused here too), at the rent both RPCs read
@@ -650,7 +696,17 @@ export function checkSolanaSell(
   // under the floor: the venue's sell alone, nothing after it; a deposit there is refused by name
   const last = body.at(-1)!;
   if (kept && last.program === pin.program) return refuse("deposit_floor");
-  const sell = kept ? body : body.slice(0, -1);
+  const withCloses = kept ? body : body.slice(0, -1);
+  // the closes, after the venue's sell and before the deposit, exactly as solanaSellCloses builds them for W
+  const closeIxs = solanaSellCloses(ctx.wallet, p?.closes ?? []);
+  if (withCloses.length < closeIxs.length) return refuse("closes");
+  const sell = withCloses.slice(0, withCloses.length - closeIxs.length);
+  const closing = withCloses.slice(withCloses.length - closeIxs.length);
+  for (let i = 0; i < closeIxs.length; i++) {
+    const w = closeIxs[i]!;
+    const g = closing[i]!;
+    if (g.program !== w.program || g.data.length !== w.data.length || g.data.some((b, j) => b !== w.data[j]) || !sameList(g.accounts, w.accounts)) return refuse("closes");
+  }
   if (sell.length !== want.length) return refuse("sell");
   for (let i = 0; i < want.length; i++) {
     const w = want[i]!;

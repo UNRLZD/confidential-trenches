@@ -13,8 +13,8 @@ import { sha512 } from "@noble/hashes/sha2.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { base58 } from "@scure/base";
 import { solanaCompileV0 } from "../../kit/src/trade/solana/build.ts";
-import { SOLANA_COMPUTE_BUDGET_PROGRAM, SOLANA_SYSTEM_PROGRAM, SOLANA_TOKEN_2022_PROGRAM, SOLANA_TOKEN_PROGRAM } from "../../kit/src/checks/solana/checks.ts";
-import { solanaProgramAddress } from "../../kit/src/checks/solana/message.ts";
+import { SOLANA_COMPUTE_BUDGET_PROGRAM, SOLANA_PUMP_PROGRAM, SOLANA_SYSTEM_PROGRAM, SOLANA_TOKEN_2022_PROGRAM, SOLANA_TOKEN_PROGRAM, solanaVolumeAccumulator } from "../../kit/src/checks/solana/checks.ts";
+import { solanaAta, solanaProgramAddress } from "../../kit/src/checks/solana/message.ts";
 import {
   buildSolanaPoolBuy,
   solanaEncodePoolRelease,
@@ -58,6 +58,8 @@ import {
   solanaSellAfterFull,
   type SolanaDepositHeld,
   type SolanaSellSurplus,
+  type SolanaSellClose,
+  solanaSellCloses,
   evmWithdrawDigest,
   signEvmAuthorization,
   signEvmBuy,
@@ -563,6 +565,45 @@ test("Solana sell: the kit's venue sell from W at or above the device's floor, t
   assert.throws(() => sell(past, { ...P2, lamports: 5_000n + rents + keep2 - past }), refusedAs("reserve"));
   // priced with rent(0) alone, nothing is swept later: the cap holds as it is
   assert.throws(() => sell(over, { ...P, lamports: 5_000n + rents + r0 - over }), refusedAs("reserve"));
+
+  // card round-trip-costs-less: a full sell closes W's token account of the sold mint and its pump volume account after
+  // the venue's sell and before the one deposit, their lamports in the note, W left at rent(0): exactly as
+  // solanaSellCloses builds them for W; anything else is refused
+  const ata = solanaAta(SOL_W, venue.mint, venue.tokenProgram);
+  const tokenClose: SolanaSellClose = { kind: "token", address: ata, program: venue.tokenProgram, mint: venue.mint, harvest: false, lamports: 2_039_280n };
+  const volClose: SolanaSellClose = { kind: "volume", address: solanaVolumeAccumulator(SOL_W, SOLANA_PUMP_PROGRAM), program: SOLANA_PUMP_PROGRAM, lamports: 1_844_400n };
+  const closes = [tokenClose, volClose];
+  const closed = tokenClose.lamports + volClose.lamports;
+  const C: SolanaSellSurplus = { ...P, lamports: 5_000n + rents + r0 + surplus - closed, closes };
+  const closing = (reserve: bigint, p: SolanaSellSurplus, extra: Ixx[] = solanaSellCloses(SOL_W, closes)) => checkSolanaSell(sellWire({ dep: { value: floor - reserve }, extra }), ask, solCtx(), venue, reference, slot, SOL_READS, reserve, p);
+  assert.equal(closing(-surplus, C).back, floor + surplus);
+  // the reserve a lamport off, or priced as the sweep's keep (the form before the card)
+  assert.throws(() => closing(-surplus + 1n, C), refusedAs("reserve"));
+  assert.throws(() => closing(-surplus, { ...C, lamports: C.lamports + keep - r0 }), refusedAs("reserve"));
+  // a claim owed: the volume account is never closed in the sale (its cashback would go with it)
+  assert.throws(() => closing(-surplus, { ...C, owed: 1 }), refusedAs("closes"));
+  // closes on a partial sell
+  assert.throws(() => closing(-surplus, { ...C, full: false }), refusedAs("reserve"));
+  // the wire's closes not the ones priced: one missing, one extra, in another order, or none
+  assert.throws(() => closing(-surplus, C, solanaSellCloses(SOL_W, [tokenClose])), refusedAs("closes"));
+  assert.throws(() => closing(-surplus, C, solanaSellCloses(SOL_W, [volClose, tokenClose])), (e: unknown) => e instanceof PoolRuleRefused);
+  assert.throws(() => closing(-surplus, C, []), (e: unknown) => e instanceof PoolRuleRefused);
+  assert.throws(() => closing(-surplus, C, [...solanaSellCloses(SOL_W, closes), send(key(79), 1n)]), (e: unknown) => e instanceof PoolRuleRefused);
+  // the token account's lamports paid elsewhere than W
+  const away = solanaSellCloses(SOL_W, closes).map((x, i) => (i === 0 ? { ...x, accounts: x.accounts.map((a, j) => (j === 1 ? { ...a, key: key(82) } : a)) } : x));
+  assert.throws(() => closing(-surplus, C, away), refusedAs("closes"));
+  // a close of another wallet's account, another coin's account of W's, a volume account under another program, twice
+  for (const bad of [
+    [{ ...tokenClose, address: solanaAta(key(83), venue.mint, venue.tokenProgram) }],
+    [{ ...tokenClose, mint: key(84), address: solanaAta(SOL_W, key(84), venue.tokenProgram) }],
+    [{ ...volClose, program: key(85), address: solanaVolumeAccumulator(SOL_W, key(85)) }],
+    [tokenClose, tokenClose],
+    [{ ...tokenClose, lamports: -1n }],
+  ] as SolanaSellClose[][]) {
+    // priced with the same lamports, so only the closes are wrong
+    const sum = bad.reduce((t, c) => t + c.lamports, 0n);
+    assert.throws(() => closing(-surplus, { ...C, closes: bad, lamports: 5_000n + rents + r0 + surplus - sum }, []), refusedAs("closes"), JSON.stringify(bad, (_, v) => (typeof v === "bigint" ? String(v) : v)));
+  }
 });
 
 // ---------- EVM ----------
