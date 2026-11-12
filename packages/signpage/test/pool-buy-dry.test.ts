@@ -65,7 +65,7 @@ test("the coin's own venue: the 0.01 SOL piece's Max on a curve coin and a PumpS
 
 test("each branch of the venue moves Max: Token or Token-2022, cashback or not, curve or PumpSwap", () => {
   const max = (v: { kind: "pump-curve" | "pumpswap"; tokenAccountSize: number; cashback: boolean }) => poolBalances([held], withSolanaRent([SOL], RENT, v), [ready])[0]!.tap_max;
-  // a Token mint's coin with no cashback: 3,371,920 on either venue (the CO's 0.00337)
+  // a Token mint's coin with no cashback: 3,371,920 on either venue (0.00337 SOL)
   assert.equal(max({ kind: "pump-curve", tokenAccountSize: 165, cashback: false }), "0.00337192");
   assert.equal(max({ kind: "pumpswap", tokenAccountSize: 165, cashback: false }), "0.00337192");
   // Token-2022's larger account costs its rent
