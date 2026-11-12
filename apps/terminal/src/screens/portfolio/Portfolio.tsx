@@ -582,16 +582,33 @@ function PosTr({ r, now, menu, setMenu, act }: { r: Row; now: number; menu: "mor
   );
 }
 
+/** A signed exact decimal's sign as cents for sgn(): -1n, 0n or 1n. */
+const assetSign = (s: string): bigint => (s.startsWith("-") ? -1n : /[1-9]/.test(s) ? 1n : 0n);
+/** A realized pool asset amount, signed, three significant digits under 1, four decimals above, cut toward zero ("−0.000631", "+1.2345"); data. */
+function assetAmount(s: string): string {
+  const neg = s.startsWith("-");
+  const [w, f = ""] = (neg ? s.slice(1) : s).split(".");
+  const lead = f.search(/[1-9]/);
+  const keep = w !== "0" ? 4 : lead < 0 ? 0 : lead + 3;
+  const frac = f.slice(0, keep).replace(/0+$/, "");
+  const body = `${w}${frac ? `.${frac}` : ""}`;
+  return body === "0" ? "0" : `${neg ? "−" : "+"}${body}`;
+}
+
 function ClosedTr({ c }: { c: ClosedRow }) {
   return (
     <tr data-closed={c.key}>
       <td className="l"><div className="tok"><Avatar symbol={c.symbol} size={34} /><div className="ell"><div className="sy">{c.symbol}</div><div className="s2 ui ell">{c.name}</div></div></div></td>
       <td>{usd(c.bought)}</td>
-      <td>{usd(c.sold)}</td>
+      <td>{c.sold === null ? DASH : usd(c.sold)}</td>
       <td>0</td>
       <td>{DASH}</td>
       <td>{DASH}</td>
-      <td className={sgn(c.realized)}>{usd(c.realized, true)}<div className={`s2 ${sgn(c.realized)}`}>{pct(c.realizedBps)}</div></td>
+      <td className={c.realized === null ? "" : sgn(c.realized)}>
+        {c.realized === null ? DASH : usd(c.realized, true)}
+        {c.realized !== null && <div className={`s2 ${sgn(c.realized)}`}>{pct(c.realizedBps)}</div>}
+        {c.realizedAsset !== null && <div className={`s2 num ${sgn(assetSign(c.realizedAsset))}`} data-realized-asset={c.asset}>{assetAmount(c.realizedAsset)} {c.asset}</div>}
+      </td>
       <td className="l">{DASH}</td>
       <td className="t2">{held(c.heldMs)}</td>
       <td />

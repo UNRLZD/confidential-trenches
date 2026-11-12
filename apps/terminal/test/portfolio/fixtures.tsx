@@ -6,6 +6,7 @@ import type { Operation, SignpageClientSnapshot, SignpageState } from "@blindfil
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { MemoryRouter } from "react-router";
+import { heldData } from "../../src/screens/portfolio/held.ts";
 import { NO_FILTER } from "../../src/screens/portfolio/model.ts";
 import type { PortfolioData, PositionExtra, TokenMarket } from "../../src/screens/portfolio/model.ts";
 import { Portfolio, START } from "../../src/screens/portfolio/Portfolio.tsx";
@@ -69,6 +70,8 @@ interface Fx {
   state?: Partial<SignpageState>;
   data?: Partial<PortfolioData>;
   ui?: Partial<Ui>;
+  /** The live source's own data (held.ts heldData over the state's ops and positions) with POOL_MARKETS, not R5's. */
+  live?: boolean;
 }
 const PX = (usd: number) => ({ price: String(usd * 1e8), expo: -8, published_s: Math.floor(NOW / 1000) - 5, read_ms: NOW - 1000 });
 const FOUR: NonNullable<SignpageState["pools"]> = [
@@ -79,7 +82,32 @@ const FOUR: NonNullable<SignpageState["pools"]> = [
 const mark = (token: string, m: PositionExtra["mark"]): Partial<PortfolioData> => ({ extra: (c, t) => (t === token ? { ...EXTRA.get(`${c}:${t}`), mark: m } : EXTRA.get(`${c}:${t}`) ?? null) });
 const act = (ui: Partial<Ui["act"]> = {}): Partial<Ui> => ({ pane: "activity", act: { filter: NO_FILTER, open: null, ...ui } });
 
+// The owner's two private round trips on Solana mainnet, 12 Nov 05:36-05:40Z (card portfolio-shows-pool-trades), as the
+// signing page records them once filled (src/trade-fill.ts: each trade's units and SOL from its own transaction), the
+// times moved to end 5 min before NOW; USD at $160 a SOL. Its four signatures are the real ones.
+const ICM = "78GaXFTJzkCWpdxkNHMSP3TXEKbhQTpb3EqMt7Uupump";
+const at = (min: number) => NOW - min * 60_000;
+const sol = (hash: string) => [{ chain: "solana" as const, hash }];
+const POOL_OPS: Operation[] = [
+  { id: "pd", kind: "pool_deposit", chain: "solana", stage: "in_pool", txs: [], created_ms: at(15) } as Operation,
+  { id: "pb1", kind: "buy", stage: "filled", txs: sol("5Qn5LtHiu7xb7irPaPTSpcwPoreem1toPSYT3XvVBPDfH42CU3hMWmKP3AMXg3ag3qdoQb3Rnxrfo6dXVGXtvB8Q"), created_ms: at(9), chain: "solana", token: ICM, amount_usd: "0.19294192", units: "16041.923776", pool_amount: "0.001205887" },
+  { id: "ps1", kind: "sell", stage: "filled", txs: sol("32CSJ1GSPrJScgPxyF41zuszLjosxgiDbeFWFRM5p7G6DzbxHjeFWihPjqhQqCLobXhkn3aqBD6WxmenAXLu7Kwn"), created_ms: at(7.4), chain: "solana", token: ICM, units: "16041.923776", amount_usd: "0.0919416", pool_amount: "0.000574635" },
+  { id: "pb2", kind: "buy", stage: "filled", txs: sol("3sPawpfvAdoYLHa9i5MRKZVv6xEGLCmRXjJTKxEMHpNYqPMSX22QZ6eyLbdyJDNA7T6TTpWWaKamEA1LiAMaDoQr"), created_ms: at(6.3), chain: "solana", token: ICM, amount_usd: "0.19272832", units: "34154.038071", pool_amount: "0.001204552" },
+  { id: "ps2", kind: "sell", stage: "filled", txs: sol("3aUiLLSmj1oHFot7bPLp1VewwqHZ1eNsJnTyZvLnDFKyubfqmwK6iCq7AsSXmt497Vjx8o6AxwEbRzxeEjQr52bd"), created_ms: at(5), chain: "solana", token: ICM, units: "34154.038071", amount_usd: "0.18794656", pool_amount: "0.001174666" },
+];
+const POOL_STATE: Partial<SignpageState> = { vault_balance: "0", positions: [], ops: POOL_OPS, pools: [{ chain: "solana", asset: "SOL", balance: "0.019392", ready: "0.019392", price: PX(160) }] };
+const POOL_MARKETS = [{ chain: "solana" as const, token: ICM, symbol: "Icm", name: "Internet cat money", price_usd: "0.00000233314178549" }];
+
 export const FIXTURES: Record<string, Fx> = {
+  // the owner's sequence, done: both round trips on Closed (desktop), in the stats (phone) and in Activity
+  pooltrades: { state: POOL_STATE, live: true, ui: { closed: true } },
+  "pooltrades-stats": { state: POOL_STATE, live: true, ui: { pane: "stats" } },
+  "pooltrades-activity": { state: POOL_STATE, live: true, ui: act() },
+  // between the second buy and its sale: its open row, the first round trip closed
+  "pooltrades-open": {
+    state: { ...POOL_STATE, ops: POOL_OPS.slice(0, 4), positions: [{ chain: "solana", token: ICM, amount: "34154.038071", cost: "0.19272832", wallets: ["8e8RsnpnL6Toqsa2Q1YPLvopDqPa3HFTdwEikCkqpQ7p"], decimals: 6 }] },
+    live: true,
+  },
   rows: {},
   loading: { snap: { status: "connecting", state: null } },
   empty: { state: { positions: [], ops: [] }, data: { closed: [], series: [], fees: null } },
@@ -149,7 +177,7 @@ const fx = FIXTURES[f]!;
 document.documentElement.dataset.fixture = f;
 const state: SignpageState | null = fx.snap && "state" in fx.snap ? (fx.snap.state ?? null) : { ...STATE, ...fx.state };
 const snapshot: SignpageClientSnapshot = { status: "ready", release: "signpage-v1", stale: false, ...fx.snap, state };
-const src: PortfolioSource = { snapshot, data: { ...base, ...fx.data }, now: () => NOW, tzMin: 0, act: (a) => void window.__calls.push(a) };
+const src: PortfolioSource = { snapshot, data: fx.live ? heldData(snapshot, POOL_MARKETS, new Map(), NOW) : { ...base, ...fx.data }, now: () => NOW, tzMin: 0, act: (a) => void window.__calls.push(a) };
 const signin: SigninSource = { snapshot, moneyOn: true, locked: null, hop: async () => null, restore: () => {} };
 
 function App() {

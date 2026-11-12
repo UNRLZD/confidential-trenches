@@ -1,0 +1,99 @@
+// Portfolio from the device's own trade records (card portfolio-shows-pool-trades): the owner's private round trips on
+// Solana mainnet, 12 Nov 05:36-05:40Z, replayed as the signing page records them (a deposit into the pool, a buy, a sell
+// to zero, a second buy and sell to zero), and the rows the screen reads: the open position with its size, cost and
+// value; each sold-out position on the closed list with its realized profit or loss in the pool's asset and in USD;
+// every trade in Activity with its transaction; and the totals. The same rows from Base, Robinhood and NEAR records.
+//   node --test apps/terminal/test/portfolio-pool-trades.test.ts
+//
+// The amounts are the chain's own (getTransaction at finalized on a public RPC, 12 Nov): each buy's SOL into the venue
+// (pump's BuyExactSolIn spendable_sol_in) and the token amount W received; each sale's SOL out of the venue to W (W's
+// lamports after less before, plus the fee and every lamport W paid out in the transaction). USD at $160 a SOL.
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import type { HeldMarket, Operation, SignpageClientSnapshot, SignpageState } from "@blindfill/kit";
+import { heldData } from "../src/screens/portfolio/held.ts";
+import { activity, closedRows, portfolio, stats } from "../src/screens/portfolio/model.ts";
+
+const MINT = "78GaXFTJzkCWpdxkNHMSP3TXEKbhQTpb3EqMt7Uupump";
+const T = (s: string) => Date.parse(`2026-11-12T${s}Z`);
+const NOW = T("05:45:00");
+const TX = {
+  buy1: "5Qn5LtHiu7xb7irPaPTSpcwPoreem1toPSYT3XvVBPDfH42CU3hMWmKP3AMXg3ag3qdoQb3Rnxrfo6dXVGXtvB8Q",
+  sell1: "32CSJ1GSPrJScgPxyF41zuszLjosxgiDbeFWFRM5p7G6DzbxHjeFWihPjqhQqCLobXhkn3aqBD6WxmenAXLu7Kwn",
+  buy2: "3sPawpfvAdoYLHa9i5MRKZVv6xEGLCmRXjJTKxEMHpNYqPMSX22QZ6eyLbdyJDNA7T6TTpWWaKamEA1LiAMaDoQr",
+  sell2: "3aUiLLSmj1oHFot7bPLp1VewwqHZ1eNsJnTyZvLnDFKyubfqmwK6iCq7AsSXmt497Vjx8o6AxwEbRzxeEjQr52bd",
+};
+const sol = (hash: string) => [{ chain: "solana" as const, hash }];
+
+const deposit: Operation = { id: "d1", kind: "pool_deposit", stage: "in_pool", txs: [], created_ms: T("05:30:00"), chain: "solana" } as Operation;
+const buy1: Operation = { id: "b1", kind: "buy", stage: "filled", txs: sol(TX.buy1), created_ms: T("05:36:50"), chain: "solana", token: MINT, amount_usd: "0.19294192", units: "16041.923776", pool_amount: "0.001205887" };
+const sell1: Operation = { id: "s1", kind: "sell", stage: "filled", txs: sol(TX.sell1), created_ms: T("05:38:28"), chain: "solana", token: MINT, units: "16041.923776", amount_usd: "0.0919416", pool_amount: "0.000574635" };
+const buy2: Operation = { id: "b2", kind: "buy", stage: "filled", txs: sol(TX.buy2), created_ms: T("05:39:30"), chain: "solana", token: MINT, amount_usd: "0.19272832", units: "34154.038071", pool_amount: "0.001204552" };
+const sell2: Operation = { id: "s2", kind: "sell", stage: "filled", txs: sol(TX.sell2), created_ms: T("05:39:56"), chain: "solana", token: MINT, units: "34154.038071", amount_usd: "0.18794656", pool_amount: "0.001174666" };
+
+const base = (ops: Operation[], positions: SignpageState["positions"]): SignpageClientSnapshot => ({
+  status: "ready",
+  release: "signpage-v1",
+  stale: false,
+  state: { release: "signpage-v1", api: 1, signed_in: true, way: "passkey", code_saved: true, vault_balance: "0", wallets: [], positions, orders: [], held: [], ops, pools: [{ chain: "solana", asset: "SOL", balance: "0.019392" }] } as SignpageState,
+});
+const markets: HeldMarket[] = [{ chain: "solana", token: MINT, symbol: "Icm", name: "Internet cat money", price_usd: "0.00000233314178549" }];
+
+test("the whole sequence: nothing open, both round trips closed with their realized SOL and USD, every trade in Activity", () => {
+  const snap = base([deposit, buy1, sell1, buy2, sell2], []);
+  const d = heldData(snap, markets, new Map(), NOW);
+  const pf = portfolio(snap, d, NOW);
+  assert.equal(pf.rows.length, 0);
+  const closed = closedRows(d);
+  assert.equal(closed.length, 2);
+  const [second, first] = closed;
+  // newest close first; bought and sold in cents, rounded down; realized is sold less bought
+  assert.deepEqual([first!.bought, first!.sold, first!.realized], [19n, 9n, -10n]);
+  assert.deepEqual([second!.bought, second!.sold, second!.realized], [19n, 18n, -1n]);
+  // the pool asset's own figures, exact
+  assert.deepEqual([first!.asset, first!.realizedAsset], ["SOL", "-0.000631252"]);
+  assert.deepEqual([second!.asset, second!.realizedAsset], ["SOL", "-0.000029886"]);
+  assert.equal(first!.closedAt, sell1.created_ms);
+  assert.equal(first!.heldMs, sell1.created_ms! - buy1.created_ms!);
+  assert.equal(first!.symbol, "Icm");
+  // the header's figures follow the closed list
+  assert.equal(stats(closed).trades, 2);
+  assert.equal(pf.totals!.realized30, -11n);
+  // Activity: each trade with its own transaction and size
+  const acts = activity(snap.state!.ops, d).filter((r) => r.kind === "buy" || r.kind === "sell");
+  assert.deepEqual(acts.map((r) => [r.kind, r.txs[0]!.hash, r.usd]), [["sell", TX.sell2, 18n], ["buy", TX.buy2, 19n], ["sell", TX.sell1, 9n], ["buy", TX.buy1, 19n]]);
+});
+
+test("between the second buy and its sale: one open row with size, cost and value, the first round trip closed", () => {
+  const snap = base([deposit, buy1, sell1, buy2], [{ chain: "solana", token: MINT, amount: "34154.038071", cost: "0.19272832", wallets: ["8e8RsnpnL6Toqsa2Q1YPLvopDqPa3HFTdwEikCkqpQ7p"], decimals: 6 }]);
+  const d = heldData(snap, markets, new Map(), NOW);
+  const pf = portfolio(snap, d, NOW);
+  assert.equal(pf.rows.length, 1);
+  const r = pf.rows[0]!;
+  assert.deepEqual([r.units, r.cost, r.value, r.bought, r.sold, r.realized, r.openedAt], ["34154.038071", 19n, 7n, 19n, 0n, 0n, buy2.created_ms]);
+  assert.equal(closedRows(d).length, 1);
+});
+
+test("a record with no size of its own (a sale written before its proceeds were recorded) closes with a dash, never a made-up figure", () => {
+  const { amount_usd: _u, pool_amount: _p, ...bare } = sell1 as Operation & { pool_amount?: string };
+  const snap = base([buy1, bare as Operation], []);
+  const [c] = closedRows(heldData(snap, markets, new Map(), NOW));
+  assert.equal(c!.bought, 19n);
+  assert.equal(c!.sold, null);
+  assert.equal(c!.realized, null);
+  assert.equal(c!.realizedAsset, null);
+});
+
+test("the same rows from Base, Robinhood and NEAR records: ETH on the EVM pools, USD only on NEAR", () => {
+  for (const [chain, asset] of [["base", "ETH"], ["robinhood", "ETH"], ["near", null]] as const) {
+    const t = chain === "near" ? "token.near" : "0xAbC0000000000000000000000000000000000001";
+    const ops: Operation[] = [
+      { id: `${chain}b`, kind: "buy", stage: "filled", txs: [{ chain, hash: "0x01" }], created_ms: T("05:00:00"), chain, token: t, amount_usd: "10", units: "5", ...(asset ? { pool_amount: "0.004" } : {}) },
+      { id: `${chain}s`, kind: "sell", stage: "filled", txs: [{ chain, hash: "0x02" }], created_ms: T("05:10:00"), chain, token: t, amount_usd: "12.5", units: "5", ...(asset ? { pool_amount: "0.005" } : {}) },
+    ];
+    const [c] = closedRows(heldData(base(ops, []), [], new Map(), NOW));
+    assert.equal(c!.realized, 250n, chain);
+    assert.equal(c!.asset, asset, chain);
+    assert.equal(c!.realizedAsset, asset ? "0.001" : null, chain);
+  }
+});

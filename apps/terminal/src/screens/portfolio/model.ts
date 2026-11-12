@@ -108,15 +108,20 @@ export interface PositionExtra {
   exit?: { tp_bps: number; sl_bps: number };
 }
 
-/** A position sold to zero. Not in the kit. */
+/** A position sold to zero (tradeBook, from the device's own trade ops). */
 export interface ClosedTrade {
   chain: Chain;
   token: string;
-  /** USD decimal strings. */
+  /** USD decimal strings; sold null when a sale's record names no USD (a dash, never a made-up figure). */
   bought: string;
-  sold: string;
+  sold: string | null;
   opened_at: number;
   closed_at: number;
+  /** The chain pool's asset and what the trade paid into the venue and got out of it, whole units of it (the ops'
+   *  pool_amount); null on NEAR (USDC: the USD is it) or when a record names none. */
+  asset?: PoolAsset | null;
+  bought_asset?: string | null;
+  sold_asset?: string | null;
 }
 
 /** A one-time wallet whose key was exported on SIGN_HOST (S14.4). Not in the kit. */
@@ -263,11 +268,124 @@ export function sortRows(rows: readonly Row[]): Row[] {
   });
 }
 
-/** Realized PnL of the trades closed in the 30 days to now, plus the open positions' realized part. */
+/** Realized PnL of the trades closed in the 30 days to now, plus the open positions' realized part. A close whose sale
+ *  names no USD adds nothing. */
 export function realized30(rows: readonly Row[], closed: readonly ClosedTrade[], now: number): bigint {
   let r = rows.reduce((a, x) => a + x.realized, 0n);
-  for (const c of closed) if (c.closed_at > now - 30 * DAY && c.closed_at <= now) r += (cents(c.sold) ?? 0n) - (cents(c.bought) ?? 0n);
+  for (const c of closed) {
+    const sold = cents(c.sold);
+    if (sold !== null && c.closed_at > now - 30 * DAY && c.closed_at <= now) r += sold - (cents(c.bought) ?? 0n);
+  }
   return r;
+}
+
+// ------------------------------------------------------------------------------------------ the trade book (ops)
+
+/** Each chain's pool asset, for a trade op's pool_amount (kit OpDetail): NEAR's money is the vault's USDC, whose USD
+ *  is amount_usd itself. */
+const TRADE_ASSET: Readonly<Record<Chain, PoolAsset | null>> = { solana: "SOL", base: "ETH", robinhood: "ETH", near: null };
+/** Fixed scale for summing decimal strings exactly (a token's or asset's whole units, USD). */
+const SCALE = 40;
+const fx = (s: string | undefined): bigint | null => {
+  const m = s === undefined ? null : /^(\d{1,78})(?:\.(\d{1,40}))?$/.exec(s);
+  return m ? BigInt(m[1]! + (m[2] ?? "").padEnd(SCALE, "0")) : null;
+};
+const unfx = (n: bigint): string => {
+  const neg = n < 0n;
+  const s = (neg ? -n : n).toString().padStart(SCALE + 1, "0");
+  const frac = s.slice(-SCALE).replace(/0+$/, "");
+  return `${neg ? "-" : ""}${s.slice(0, -SCALE)}${frac ? `.${frac}` : ""}`;
+};
+/** A sum that stays null once any part is unknown. */
+const add = (a: bigint | null, b: bigint | null): bigint | null => (a === null || b === null ? null : a + b);
+
+interface Cycle {
+  chain: Chain;
+  token: string;
+  opened: number;
+  last: number;
+  usdIn: bigint | null;
+  usdOut: bigint | null;
+  assetIn: bigint | null;
+  assetOut: bigint | null;
+  /** Token units bought and sold; null once a record names none. */
+  unitsIn: bigint | null;
+  unitsOut: bigint | null;
+  sells: number;
+}
+
+/**
+ * The device's trades by token (card portfolio-shows-pool-trades), from the signing page's ops alone: every filled or
+ * part-filled buy and every filled sale, oldest first, as round trips. A round trip opens at a buy and closes once its
+ * sales have sold every unit its buys got (each record's units: a buy's what W received, a sale's what it sold). A
+ * record from before units were kept closes its round trip at the next buy after a sale, or at its last sale once
+ * nothing of the token is held. Each trade's USD is its amount_usd and its pool asset its pool_amount: one record with
+ * none makes that side unknown (a dash), never a guess. What is still open gives its row's bought, sold, realized and
+ * opened time; realized there is the sales less the buys' cost of the units sold.
+ */
+export function tradeBook(ops: readonly Operation[], positions: readonly { chain: Chain; token: string; amount: string }[]): { closed: ClosedTrade[]; open: Map<string, PositionExtra> } {
+  const trades = ops
+    .filter((o) => o.chain !== undefined && o.token !== undefined && o.created_ms !== undefined && ((o.kind === "buy" && (o.stage === "filled" || o.stage === "part_filled")) || (o.kind === "sell" && o.stage === "filled")))
+    .sort((a, b) => a.created_ms! - b.created_ms!);
+  const closed: ClosedTrade[] = [];
+  const cur = new Map<string, Cycle>();
+  const close = (k: string, c: Cycle) => {
+    const asset = TRADE_ASSET[c.chain];
+    closed.push({
+      chain: c.chain,
+      token: c.token,
+      bought: unfx(c.usdIn ?? 0n),
+      sold: c.usdOut === null ? null : unfx(c.usdOut),
+      opened_at: c.opened,
+      closed_at: c.last,
+      asset,
+      bought_asset: asset && c.assetIn !== null ? unfx(c.assetIn) : null,
+      sold_asset: asset && c.assetOut !== null ? unfx(c.assetOut) : null,
+    });
+    cur.delete(k);
+  };
+  for (const o of trades) {
+    const k = key(o.chain!, o.token!);
+    const t = o.created_ms!;
+    let c = cur.get(k);
+    const units = fx(o.units);
+    const usdv = fx(o.amount_usd);
+    const assetv = fx(o.pool_amount);
+    if (o.kind === "buy") {
+      // a record with no units: a buy after a sale opens the next round trip
+      if (c && c.sells > 0 && (c.unitsIn === null || c.unitsOut === null)) {
+        close(k, c);
+        c = undefined;
+      }
+      if (!c) cur.set(k, (c = { chain: o.chain!, token: o.token!, opened: t, last: t, usdIn: 0n, usdOut: 0n, assetIn: 0n, assetOut: 0n, unitsIn: 0n, unitsOut: 0n, sells: 0 }));
+      c.usdIn = add(c.usdIn, usdv);
+      c.assetIn = add(c.assetIn, assetv);
+      c.unitsIn = add(c.unitsIn, units);
+      c.last = t;
+      continue;
+    }
+    if (!c) continue; // a sale of nothing this device bought
+    c.usdOut = add(c.usdOut, usdv);
+    c.assetOut = add(c.assetOut, assetv);
+    c.unitsOut = add(c.unitsOut, units);
+    c.sells++;
+    c.last = t;
+    if (c.unitsIn !== null && c.unitsOut !== null && c.unitsOut >= c.unitsIn) close(k, c);
+  }
+  const open = new Map<string, PositionExtra>();
+  const holds = new Set(positions.filter((p) => /[1-9]/.test(p.amount)).map((p) => key(p.chain, p.token)));
+  for (const [k, c] of [...cur]) {
+    if (c.sells > 0 && !holds.has(k) && (c.unitsIn === null || c.unitsOut === null)) {
+      close(k, c);
+      continue;
+    }
+    const x: PositionExtra = { opened_at: c.opened };
+    if (c.usdIn !== null) x.bought = unfx(c.usdIn);
+    if (c.usdOut !== null) x.sold = unfx(c.usdOut);
+    if (c.usdIn !== null && c.usdOut !== null && c.unitsIn && c.unitsOut !== null) x.realized = unfx(c.usdOut - (c.usdIn * c.unitsOut) / c.unitsIn);
+    open.set(k, x);
+  }
+  return { closed, open };
 }
 
 /**
@@ -502,9 +620,13 @@ export interface ClosedRow {
   symbol: string;
   name: string;
   bought: bigint;
-  sold: bigint;
-  realized: bigint;
+  /** Null: the sale's record names no USD (a dash). */
+  sold: bigint | null;
+  realized: bigint | null;
   realizedBps: number | null;
+  /** The pool asset (SOL, ETH) and the realized in it, exact ("-0.000631252"); null on NEAR or when unknown. */
+  asset: PoolAsset | null;
+  realizedAsset: string | null;
   heldMs: number;
   closedAt: number;
 }
@@ -515,8 +637,12 @@ export function closedRows(d: PortfolioData): ClosedRow[] {
     .map((c) => {
       const m = d.market(c.chain, c.token);
       const bought = cents(c.bought) ?? 0n;
-      const sold = cents(c.sold) ?? 0n;
-      return { key: `${key(c.chain, c.token)}:${c.closed_at}`, chain: c.chain, token: c.token, symbol: m?.symbol ?? c.token.slice(0, 6), name: m?.name ?? "", bought, sold, realized: sold - bought, realizedBps: bps(sold - bought, bought), heldMs: c.closed_at - c.opened_at, closedAt: c.closed_at };
+      const sold = cents(c.sold);
+      const realized = sold === null ? null : sold - bought;
+      const ai = fx(c.bought_asset ?? undefined);
+      const ao = fx(c.sold_asset ?? undefined);
+      const asset = c.asset ?? null;
+      return { key: `${key(c.chain, c.token)}:${c.closed_at}`, chain: c.chain, token: c.token, symbol: m?.symbol ?? c.token.slice(0, 6), name: m?.name ?? "", bought, sold, realized, realizedBps: realized === null ? null : bps(realized, bought), asset, realizedAsset: asset && ai !== null && ao !== null ? unfx(ao - ai) : null, heldMs: c.closed_at - c.opened_at, closedAt: c.closed_at };
     })
     .sort((a, b) => b.closedAt - a.closedAt);
 }
@@ -540,13 +666,14 @@ export const EDGES = [-10000, -5000, -2000, 0, 2000, 5000, 10000, 30000];
 const avg = (xs: number[]) => (xs.length ? Math.trunc(xs.reduce((a, b) => a + b, 0) / xs.length) : null);
 
 export function stats(closed: readonly ClosedRow[]): Stats {
-  const r = closed.map((c) => c.realizedBps ?? 0);
+  // a close with no known result counts as a trade, never as a win, a loss or a return
+  const r = closed.flatMap((c) => (c.realizedBps === null ? [] : [c.realizedBps]));
   const buckets = EDGES.map((lo, i) => r.filter((b) => b >= lo && (i === EDGES.length - 1 || b < EDGES[i + 1]!)).length);
   const wins = r.filter((b) => b > 0);
   const losses = r.filter((b) => b <= 0);
   return {
     trades: closed.length,
-    winBps: closed.length ? Math.trunc((wins.length * 10000) / closed.length) : null,
+    winBps: r.length ? Math.trunc((wins.length * 10000) / r.length) : null,
     avgWinBps: avg(wins),
     avgLossBps: avg(losses),
     avgRetBps: avg(r),
@@ -573,7 +700,7 @@ export function calendar(closed: readonly ClosedRow[], now: number): { year: num
   const per = new Map<number, bigint>();
   for (const c of closed) {
     const d = new Date(c.closedAt);
-    if (d.getUTCFullYear() === year && d.getUTCMonth() === month) per.set(d.getUTCDate(), (per.get(d.getUTCDate()) ?? 0n) + c.realized);
+    if (c.realized !== null && d.getUTCFullYear() === year && d.getUTCMonth() === month) per.set(d.getUTCDate(), (per.get(d.getUTCDate()) ?? 0n) + c.realized);
   }
   const days: Day[] = Array.from({ length: len }, (_, i) => ({ day: i + 1, pnl: per.get(i + 1) ?? null, future: i + 1 > n.getUTCDate(), today: i + 1 === n.getUTCDate() }));
   let sum = 0n;
