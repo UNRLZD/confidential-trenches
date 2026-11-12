@@ -19,6 +19,10 @@
 //   with no reads on this page (an EVM pin on mainnet, which has no EVM pool list yet) is a failed pool, never skipped:
 //   the run ends stalled, so "done" always
 //   means every pinned pool was read.
+// - The NEAR vault of the page's network is walked with them (card signpage-restores-near-vault-notes: pagePools' vault
+//   entry, nearVaultRestoreNotes at the end of this file, the exit tool's walk with the seed opened per use): its notes
+//   are written and its deposit counter raised with the pools', a failed or lying read names the run stalled and writes
+//   none of its notes. Step 5 reads no vault deposit id.
 // - What they find goes to the note store through the wallet's writeRestored (parents first; a note the store holds in
 //   flight is left as it is; an index this page planned that the walk finds landed is landed, E5), the pools' notes
 //   together. A pool that fails leaves the others' notes written. Before the write each walked scope's deposit counter
