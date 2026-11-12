@@ -76,3 +76,41 @@ test("evm-money-shows-and-spends-at-once: a state read backs out a tail note who
   assert.ok(syncs > 0, "the state read reads a round for the tail note");
   assert.equal((await ns.get(n.id))!.state, "INCOMING", "backed out: out of the balance");
 });
+
+test("evm-money-shows-and-spends-at-once: a sale's return note, landed at the head and taken by a buy at once: a state read on a lagging provider leaves it RESERVED, a reorg that drops it backs it out, and the chain alone lands it again at its new leaf", async () => {
+  const { w, ns } = await wallet();
+  const R: NoteRef = { kind: "return", c: "evm", l: vaultLabelOf(keccak_256, SCOPE, 9n), j: 0 };
+  const Lr = vaultLabelOf(keccak_256, SCOPE, 2n);
+  const cr = noteCommitment(RUNG, Lr, P(R));
+  // the sale's return note landed at leaf 1 in block 20 (finalized 5), then the buy took it at once: RESERVED
+  const n = await ns.add({ ref: R, scope: SCOPE, precommitment: P(R), state: "UNSPENT", leaf: { value: RUNG, label: Lr, commitment: cr, leafIndex: 1n }, landed: { block: 20n, fin: 5n } });
+  const held = await ns.move(n.id, "UNSPENT", "HELD", { deadlineMs: NOW + 3_600_000n, context: "5" });
+  await ns.move(n.id, "HELD", "RESERVED", { attempt: held.attempt! });
+  const ev = (block: number, state: bigint, label: bigint, pre: bigint) => ({ block: BigInt(block), blockHash: `0x${block.toString(16).padStart(64, "0")}`, logIndex: 0n, bytes: "", kind: "deposit" as const, state, label, value: RUNG, precommitment: pre, nullifier: null, recipient: null, token: null });
+  const stranger = ev(10, 5n, vaultLabelOf(keccak_256, SCOPE, 1n), 9n);
+  let round = { anchor: 19n, events: [stranger] as unknown[] };
+  const t = testnetPool(page(w), {
+    prover: { vault: signalsProver(), stop: () => {} },
+    hardwareConcurrency: 2,
+    evmPin: (c) => (c === "base" ? PIN : undefined),
+    evmRpcs: unread,
+    evmSync: () => ({ events: async () => ({ fin: { number: 5n, hash: "", timestamp: 1_800_000_000n, baseFeePerGas: null }, anchor: { number: round.anchor, hash: "", timestamp: 1_800_000_001n, baseFeePerGas: null }, events: round.events as never }) }),
+    evmQueuePool: () => reorgedPool(),
+  });
+  const settled = async () => {
+    await t.stateRead();
+    await new Promise((r) => setTimeout(r, 50));
+    return (await ns.get(n.id))!;
+  };
+  // one provider lags: the newest block both agree on is 19, short of the note's block 20: it says nothing of it
+  assert.equal((await settled()).state, "RESERVED", "a round short of the note's block backs nothing out");
+  // the reorg: head 41, block 20 gone with the return note's leaf
+  round = { anchor: 41n, events: [stranger] };
+  assert.equal((await settled()).state, "INCOMING", "backed out: out of the balance");
+  // the sale's send lands again in block 30 at leaf 1: the chain alone lands the note again, no sale record read
+  round = { anchor: 41n, events: [stranger, ev(30, cr, Lr, P(R))] };
+  const again = await settled();
+  assert.equal(again.state, "UNSPENT", "landed again from the chain");
+  assert.equal(again.leaf?.leafIndex, 1n);
+  assert.equal((await ns.landings()).get(n.id), 30n, "kept at its new block until final");
+});
