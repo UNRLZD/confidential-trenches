@@ -82,7 +82,7 @@
 // route's cfg (its own fee, deadline, inner programs, lookup tables, tip_low); bad_shape (400) for a count out of
 // bounds, a tag 3 not last or a tag 2 last, or a nullifier twice; wallets_differ (422) for two Ws; failed_this_epoch
 // per nullifier as above; in_flight (429) for a nullifier another carry holds (a repeat of the same bundle gets its
-// first answer); and on mainnet fee_below_cost for a tip floor over the relay fees (./solana-pieces.ts).
+// first answer); and on mainnet fee_below_cost when the relay fees pay no tip Jito takes (./solana-pieces.ts).
 // Each tag 2 is simulated alone, as above. The tag 3 is never simulated: it spends money only the bundle's tag 2s bring
 // to W, so alone it fails.
 // The send on mainnet (a cluster with a block engine) is bundle-only and all-or-nothing: every W-signed transaction in
@@ -915,8 +915,12 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
       // the pieces and the tip in one bundle, within Jito's limit
       if (txs.length + 1 > JITO_BUNDLE_MAX) return no(400, "bad_shape", `a bundle holds at most ${JITO_BUNDLE_MAX} transactions, the tip one of them`);
       engines = jito as JitoSender & JitoBundleSender;
-      tip = bundleTip(await tipFloor());
-      if (tip > piecesTipCap(txs.map((t, i) => ({ budget: budgets[i]!, priority: t.priority })))) return no(422, "fee_below_cost", "tip floor over the relay fees");
+      // Jito's recent floor, at most the cap: the fee payer never tips more than the bundle's relay fees bring it; a cap
+      // under Jito's least tips nothing a block engine takes, so that alone is refused, before anything is sent
+      const cap = piecesTipCap(txs.map((t, i) => ({ budget: budgets[i]!, priority: t.priority })));
+      if (cap < SOLANA_JITO_TIP_MIN) return no(422, "fee_below_cost", "the relay fees pay no tip Jito takes");
+      const floor = bundleTip(await tipFloor());
+      tip = floor < cap ? floor : cap;
     }
     for (const nf of nfs) {
       const failed = failedIn.get(nf);
@@ -971,25 +975,41 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
     const last = txs.length - 1;
     const nf3 = txs[last]!.nullifier;
     const entry3 = once.get(nf3); // set before the first await above
-    // each tag 2 simulated alone, as W signed it (slot 0 empty), on its own blockhash; the tag 3 never (the header);
-    // and the newest blockhash's last valid height, which bounds the send (no piece's blockhash is newer)
+    // each tag 2 simulated as the bundle runs it, as W signed it (slot 0 empty), on its own blockhash; the tag 3 never
+    // (the header). A tag 2 runs on the chain's state as it is now when its change note goes on the first piece's state
+    // page (the first piece always): simulated here, before anything is sent. One on a later page runs only on the
+    // state the pieces before it leave (alone it names a page the pool does not write yet, and fails): on devnet it is
+    // simulated right before its own send, once those landed; on mainnet never alone, since it runs only inside the
+    // all-or-nothing bundle, which costs nothing when a part fails. And the newest blockhash's last valid height, which
+    // bounds the send (no piece's blockhash is newer).
+    const pageOf = (t: SolanaPoolChecked): string | null => {
+      const ix = t.message.instructions[t.message.instructions.length - 1];
+      const k = ix?.accounts[6];
+      return k !== undefined && k < t.message.staticKeys.length ? t.message.staticKeys[k]! : null;
+    };
+    const first = pageOf(txs[0]!);
+    const now_ = Array.from({ length: last }, (_, i) => i === 0 || (first !== null && pageOf(txs[i]!) === first));
+    const simulate = (raw: string) => a("simulateTransaction", [raw, { encoding: "base64", sigVerify: false, replaceRecentBlockhash: false, commitment: "processed" }]);
+    /** A simulation's refusal, or null when it passed. */
+    const refusalOf = (sim: unknown): PoolPiecesAnswer | null => {
+      const v = (sim as { value?: { err?: unknown } } | null)?.value;
+      if (typeof v !== "object" || v === null || !("err" in v)) return no(503, "upstream");
+      if (v.err === "BlockhashNotFound") return { ...no(422, "blockhash_not_found"), note: { err: simErrText(v.err) } };
+      if (v.err !== null) return { ...no(422, "simulation_failed", JSON.stringify(v.err).slice(0, 200)), note: { err: simErrText(v.err) } };
+      return null;
+    };
     let sims: unknown[];
     let height: number;
     try {
-      const [s, h] = await Promise.all([
-        Promise.all(raws.slice(0, last).map((raw) => a("simulateTransaction", [raw, { encoding: "base64", sigVerify: false, replaceRecentBlockhash: false, commitment: "processed" }]))),
-        a("getLatestBlockhash", [{ commitment: "processed" }]),
-      ]);
+      const [s, h] = await Promise.all([Promise.all(raws.slice(0, last).filter((_, i) => now_[i]).map(simulate)), a("getLatestBlockhash", [{ commitment: "processed" }])]);
       sims = s;
       height = (h as { value?: { lastValidBlockHeight?: unknown } })?.value?.lastValidBlockHeight as number;
     } catch (e) {
       return unread(e);
     }
     for (const sim of sims) {
-      const v = (sim as { value?: { err?: unknown } } | null)?.value;
-      if (typeof v !== "object" || v === null || !("err" in v)) return no(503, "upstream");
-      if (v.err === "BlockhashNotFound") return { ...no(422, "blockhash_not_found"), note: { err: simErrText(v.err) } };
-      if (v.err !== null) return { ...no(422, "simulation_failed", JSON.stringify(v.err).slice(0, 200)), note: { err: simErrText(v.err) } };
+      const r = refusalOf(sim);
+      if (r !== null) return r;
     }
     if (!Number.isSafeInteger(height) || height <= 0) return no(503, "upstream");
     // every piece's bytes as they will be sent, both signatures verified here; the signed bytes leave only in a send
@@ -1002,6 +1022,17 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
       // no block engine (devnet): plain, in order, each tag 2 filled on both providers before the next; not
       // all-or-nothing (the header)
       for (let i = 0; i < last; i++) {
+        // a tag 2 on a later state page, simulated now that the pieces before it landed; refused, the buy stops here
+        // with pieces already on chain, so its answer says not_landed (the device reads every part back)
+        if (!now_[i]) {
+          let r: PoolPiecesAnswer | null;
+          try {
+            r = refusalOf(await simulate(raws[i]!));
+          } catch {
+            r = no(503, "upstream");
+          }
+          if (r !== null) return { ...no(503, "not_landed", `piece ${i}: ${"error" in r.body ? r.body.error.code : "refused"}`), note: { via: "plain", end: "unknown" } };
+        }
         let state: string | undefined;
         try {
           state = (await one(i).done).txs[0]?.state;

@@ -19,8 +19,9 @@
 // release to (./solana.ts fee_below_cost). Each W-signed transaction brings its relay fee less its cost as that check
 // prices it: the release's cost, the page reserve and the priority fee W set; relay fee less cost less reserve is the
 // kit's priority budget (solanaPoolPriorityBudget), so each brings its budget less W's priority fee. The tip
-// transaction's own signature fee (5,000 lamports) comes off the sum. A floor over the cap is refused before anything is
-// sent (422 fee_below_cost, "tip floor over the relay fees").
+// transaction's own signature fee (5,000 lamports) comes off the sum. The tip is the floor or the cap, the smaller: a
+// floor over the cap tips the cap (a bundle that tips less may wait a few slots longer, never a refusal). A cap under
+// SOLANA_JITO_TIP_MIN is refused before anything is sent (422 fee_below_cost, "the relay fees pay no tip Jito takes").
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { SOLANA_JITO_TIP_MIN, SOLANA_POOL_JITO_TIP, SOLANA_SYSTEM_PROGRAM, solanaCompileV0 } from "@blindfill/kit";
 

@@ -11,6 +11,7 @@ import {
   SOLANA_JITO_TIP_ACCOUNTS,
   SOLANA_JITO_TIP_MIN,
   SOLANA_POOL_BUY_PIECES_MAX,
+  SOLANA_POOL_PAGE_ENTRIES,
   SOLANA_POOL_JITO_TIP,
   SOLANA_SYSTEM_PROGRAM,
   solanaCompileV0,
@@ -70,17 +71,17 @@ const cuLimit = (n: number): SolanaApiInstruction => ({ program: SOLANA_COMPUTE_
 const cuPrice = (n: bigint): SolanaApiInstruction => ({ program: SOLANA_COMPUTE_BUDGET_PROGRAM, accounts: [], data: Uint8Array.from([3, ...u64(n)]) });
 
 /** A piece W signed, the fee payer's slot empty: a tag 2, or the tag 3 that buys (its tip to a Jito tip account). */
-function piece(o: { tag: 2 | 3; nullifier: number; w?: typeof W; tipTo?: string }): Uint8Array {
+function piece(o: { tag: 2 | 3; nullifier: number; w?: typeof W; tipTo?: string; cuPrice?: bigint; stateSize?: number }): Uint8Array {
   const w = o.w ?? W;
   const r = release(o.nullifier);
-  const accounts = solanaPoolReleaseAccounts({ program: PROGRAM, pool: POOL }, w.address, FP.address, r, 6);
+  const accounts = solanaPoolReleaseAccounts({ program: PROGRAM, pool: POOL }, w.address, FP.address, r, o.stateSize ?? 6);
   let data: Uint8Array;
   if (o.tag === 2) data = solanaEncodePoolRelease(r);
   else {
     accounts.push({ key: o.tipTo ?? SOLANA_JITO_TIP_ACCOUNTS[0]!, signer: false, writable: true }, { key: TO, signer: false, writable: true });
     data = solanaEncodePoolTag3(r, false, 10_000n, [{ program: 7, accounts: [1, 9], data: Uint8Array.from([2, 0, 0, 0, ...u64(1_000_000n)]) }]);
   }
-  const { message } = solanaCompileV0(FP.address, [cuLimit(400_000), cuPrice(1_000n), { program: PROGRAM, accounts, data }], BLOCKHASH, [], [FP.address, w.address]);
+  const { message } = solanaCompileV0(FP.address, [cuLimit(400_000), cuPrice(o.cuPrice ?? 1_000n), { program: PROGRAM, accounts, data }], BLOCKHASH, [], [FP.address, w.address]);
   return Uint8Array.from([2, ...new Uint8Array(64), ...ed25519.sign(message, w.seed), ...message]);
 }
 const b64 = (w: Uint8Array) => Buffer.from(w).toString("base64");
@@ -90,7 +91,7 @@ function rpcStub(calls: Calls = [], simErr: unknown = null): SolanaRpc {
   return Object.assign(
     async (method: string, params: readonly unknown[]) => {
       calls.push({ method, params });
-      if (method === "simulateTransaction") return { context: { slot: 1 }, value: { err: simErr, logs: [] } };
+      if (method === "simulateTransaction") return { context: { slot: 1 }, value: { err: typeof simErr === "function" ? (simErr as (raw: unknown) => unknown)(params[0]) : simErr, logs: [] } };
       if (method === "getLatestBlockhash") return { context: { slot: 1 }, value: { blockhash: BLOCKHASH, lastValidBlockHeight: 1000 } };
       throw new Error(`unexpected ${method}`);
     },
@@ -263,15 +264,25 @@ test("the tip: the helper's own transaction last, one transfer to a static Jito 
   }
 });
 
-test("the tip's cap: the relay fees less each piece's cost and W's priority fee, less the tip's own fee; a floor over it is refused fee_below_cost, nothing sent", async () => {
+test("the tip's cap: the relay fees less each piece's cost and W's priority fee, less the tip's own fee; a floor over it tips the cap, never a refusal; a cap under Jito's least is refused fee_below_cost, nothing sent", async () => {
   const cap = 2n * (BUDGET - PRIORITY) - SOLANA_TIP_TX_FEE;
   assert.equal(piecesTipCap([{ budget: BUDGET, priority: PRIORITY }, { budget: BUDGET, priority: PRIORITY }]), cap);
+  const tipOf = (r: ReturnType<typeof rig>): bigint => {
+    const d = solanaDecodeTransaction(new Uint8Array(Buffer.from((r.engine[0]!.params[0] as string[])[2]!, "base64")));
+    return Buffer.from(d.message.instructions[0]!.data.slice(4)).readBigUInt64LE();
+  };
   const at = rig("mainnet", { floor: cap });
   assert.equal((await at.s.carryPieces(bodyOf(two()))).status, 200, "a floor at the cap is carried");
-  const over = rig("mainnet", { floor: cap + 1n });
-  const a = await over.s.carryPieces(bodyOf(two()));
-  assert.deepEqual([a.status, a.body], [422, { error: { code: "fee_below_cost", detail: "tip floor over the relay fees" } }]);
-  assert.deepEqual([over.calls.length, over.sets.length, over.engine.length], [0, 0, 0], "nothing read or sent");
+  assert.equal(tipOf(at), cap);
+  const over = rig("mainnet", { floor: cap + 1_000_000n });
+  assert.equal((await over.s.carryPieces(bodyOf(two()))).status, 200, "a floor over the cap is carried");
+  assert.equal(tipOf(over), cap, "at the cap: the fee payer never tips more than the relay fees bring");
+  // a cap under Jito's least (W's priority fees eat the budgets): no bundle could land, refused before anything is sent
+  const near = ((BUDGET - 1_000n) * 1_000_000n) / 400_000n; // a priority fee 1,000 lamports under each budget
+  const poor = rig("mainnet", { floor: 1n });
+  const a = await poor.s.carryPieces(bodyOf([piece({ tag: 2, nullifier: 2, cuPrice: near }), piece({ tag: 3, nullifier: 3, cuPrice: near })]));
+  assert.deepEqual([a.status, a.body], [422, { error: { code: "fee_below_cost", detail: "the relay fees pay no tip Jito takes" } }]);
+  assert.deepEqual([poor.calls.length, poor.sets.length, poor.engine.length], [0, 0, 0], "nothing read or sent");
   // the worked number at mainnet rent (the kit's fee 1,300,000, budget 207,245): four pieces with no priority fee
   const mainnetBudget = solanaPoolPriorityBudget({ lamportsPerByte: 5_080n, factor: 1n }, 1_300_000n);
   assert.equal(mainnetBudget, 207_245n);
@@ -404,6 +415,41 @@ test("devnet: plain, in order, each tag 2 filled before the next, then the tag 3
   assert.equal(stop.sets.length, 1);
 });
 
+test("a page boundary: a tag 2 whose change note goes on the next state page is never simulated alone before the pieces before it run (devnet: right before its own send, once they landed; mainnet: not alone, inside the bundle)", async () => {
+  // the first piece's change note is the page's last entry, the second's the next page's first
+  const E = SOLANA_POOL_PAGE_ENTRIES;
+  const ws = [piece({ tag: 2, nullifier: 2, stateSize: E - 1 }), piece({ tag: 2, nullifier: 4, stateSize: E }), piece({ tag: 3, nullifier: 3, stateSize: E + 1 })];
+  const sims = (c: Calls) => c.filter((x) => x.method === "simulateTransaction").map((x) => x.params[0]);
+  const ends = [deferred<string>(), deferred<string>(), deferred<string>()];
+  const dev = rig("devnet", { end: (n) => ends[n]!.p });
+  const p = dev.s.carryPieces(bodyOf(ws));
+  for (let i = 0; i < 10; i++) await tick();
+  assert.deepEqual(sims(dev.calls), [b64(ws[0]!)], "only the first piece before anything is sent");
+  assert.equal(dev.sets.length, 1);
+  ends[0]!.done("filled");
+  for (let i = 0; i < 10; i++) await tick();
+  assert.deepEqual(sims(dev.calls), [b64(ws[0]!), b64(ws[1]!)], "the second, once the first landed");
+  assert.equal(dev.sets.length, 2);
+  ends[1]!.done("filled");
+  assert.equal((await p).status, 200);
+  ends[2]!.done("filled");
+  // mainnet: the bundle carried with the first piece simulated alone, the second not
+  const fill = deferred<string>();
+  const main = rig("mainnet", { end: () => fill.p });
+  const q = main.s.carryPieces(bodyOf(ws));
+  for (let i = 0; i < 20; i++) await tick();
+  assert.deepEqual(sims(main.calls), [b64(ws[0]!)]);
+  assert.equal(main.engine[0]?.method, "sendBundle");
+  fill.done("filled");
+  assert.equal((await q).status, 200);
+  // devnet: the later page's piece refused once the first landed: not_landed (a piece is on chain), the tag 3 never sent
+  const later = [piece({ tag: 2, nullifier: 5, stateSize: E - 1 }), piece({ tag: 2, nullifier: 6, stateSize: E }), piece({ tag: 3, nullifier: 7, stateSize: E + 1 })];
+  const stop = rig("devnet", { simErr: (raw: unknown) => (raw === b64(later[1]!) ? { InstructionError: [2, { Custom: 16 }] } : null) });
+  const r = await stop.s.carryPieces(bodyOf(later));
+  assert.deepEqual([r.status, code(r)], [503, "not_landed"]);
+  assert.equal(stop.sets.length, 1, "the first piece only: the refused one and the tag 3 never sent");
+});
+
 test("POST /v1/pool/solana/pieces: carried through the server, 404 for a pool it does not carry; 413 over 8 KB; 422 wallets_differ", async () => {
   const { createServer } = await import("node:http");
   const { handler } = await import("../server.ts");
@@ -423,6 +469,14 @@ test("POST /v1/pool/solana/pieces: carried through the server, 404 for a pool it
     const bad = await post(bodyOf([piece({ tag: 2, nullifier: 7 }), piece({ tag: 3, nullifier: 8, w: W2 })]));
     assert.deepEqual([bad.status, await bad.json()], [422, { error: { code: "wallets_differ" } }]);
     assert.equal((await fetch(`${base}/v1/pool/solana/pieces`)).status, 405);
+    // one client's pool window is shared with the one-piece route: past POOL_RATE_MAX on /send, /pieces answers 429
+    const { POOL_RATE_MAX } = await import("../server.ts");
+    const h = { "x-forwarded-for": "198.51.100.7" };
+    for (let i = 0; i < POOL_RATE_MAX; i++) await fetch(`${base}/v1/pool/solana/send`, { method: "POST", headers: h, body: "{}" });
+    const over = await fetch(`${base}/v1/pool/solana/pieces`, { method: "POST", headers: h, body: JSON.stringify(bodyOf(two())) });
+    assert.equal(over.status, 429);
+    assert.ok(Number(over.headers.get("retry-after")) > 0, "with its wait");
+    assert.equal(sets.length, 2, "nothing more carried");
   } finally {
     srv.close();
   }
