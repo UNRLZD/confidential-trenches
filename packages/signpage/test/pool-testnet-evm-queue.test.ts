@@ -841,10 +841,14 @@ test("a sign out right after a turn fires or a state read begins stops it, and o
   assert.deepEqual([holds, trees], before, "the turn stopped before its reads");
   // a pass running (begun before the turn), the turn waiting on it, a sign out meanwhile: no pass after it ends
   await t.stateRead();
+  // that read's own pass ends first (the read now waits on its settle as well, so the pass may be in by its end)
+  await new Promise((r) => setTimeout(r, 30));
+  const base = trees;
   gate = new Promise<void>((r) => (free = r));
   o.now = 1_800_000_183_500;
   const running = t.stateRead();
-  for (let i = 0; i < 50 && trees === before[1]; i++) await new Promise((r) => setTimeout(r, 10));
+  for (let i = 0; i < 50 && trees === base; i++) await new Promise((r) => setTimeout(r, 10));
+  assert.equal(trees, base + 1, "the running pass is in");
   const busy = trees;
   const turn2 = tt.set.at(-1)!.f() as Promise<void>;
   await new Promise((r) => setTimeout(r, 30));

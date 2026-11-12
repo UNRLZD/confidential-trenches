@@ -22,10 +22,13 @@
 //   2. device B, a fresh profile: the restore from the seed alone (the wallet's evmRestoreNotes, then writeRestored,
 //      as src/pool-restore.ts writes it) shows the note UNSPENT;
 //   3. the heal: the fork goes back to before the deposit (evm_revert) and mines another block at its height; each
-//      device's settle pass (the wallet's evmSettleReserved, as the page's state read runs it) backs the note out
-//      (INCOMING, out of the balance); the same signed deposit is sent again and lands in a later block; each device's
-//      load pass (runPoolDepositEvm with no ask, what the page's settleEvm runs on load and on each state read while an
-//      INCOMING note is open, src/pool-testnet.ts) lands it again at its new block.
+//      device's page state read (src/pool-testnet.ts testnetPool stateRead, the mainnet build, nothing RESERVED: the
+//      note is UNSPENT and kept in the store's tail) runs its settle pass and backs the note out (INCOMING, out of the
+//      balance); the same signed deposit is sent again and lands in a later block; each device's next state read (its
+//      load pass, runPoolDepositEvm with no ask, then the settle) lands it again at its new block. The page's queue pass
+//      in that read finds no fee (the helper is not reached from here) and proves nothing.
+//   Each state read's requests to the pair are counted, and a state read on a device with no note is counted beside
+//   one with the note in the tail: the reads the tail costs.
 // It writes each step's reads and times to <out.json>. Nothing here logs a key or the words.
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
@@ -37,8 +40,7 @@ import { openNoteStore, readNotes, refKey } from "../../wallet/src/notes/store.t
 import { writeRestored } from "../../wallet/src/notes/restore.ts";
 import { EVM_CHAIN_IDS, EVM_LADDER, EVM_POOLS, evmPoolScopeOf, evmTreeSync } from "../../wallet/src/pool/evm.ts";
 import { evmRestoreNotes } from "../../wallet/src/pool/evm-restore.ts";
-import { evmSettleReserved } from "../../wallet/src/pool/evm-settle.ts";
-import { MAINNET_POOL_RPCS } from "../src/pool-testnet.ts";
+import { MAINNET_POOL_RPCS, testnetPool } from "../src/pool-testnet.ts";
 import { POOL_DEPOSIT_EVM_FOLLOW_MS, runPoolDepositEvm } from "../src/pool-deposit-evm.ts";
 
 const [CHAIN, ANVIL, OUT] = process.argv.slice(2);
@@ -62,7 +64,7 @@ const realFetch = globalThis.fetch;
 globalThis.fetch = async (input, init) => {
   const u = new URL(String(input instanceof Request ? input.url : input));
   if (u.origin === ANVIL) return realFetch(input, init);
-  if (HOSTS.has(u.host)) return realFetch(ANVIL, init);
+  if (HOSTS.has(u.host)) return (pageRequests++, realFetch(ANVIL, init));
   throw new Error(`pool-fork-evm: no request past the fork (${u.host})`);
 };
 let id = 0;
@@ -72,6 +74,8 @@ const anvil = async (method, params) => {
   return j.result;
 };
 const raws = [];
+// requests to the pair made through fetch: the page's own reads (the harness's own go through rpcOf on the anvil URL)
+let pageRequests = 0;
 // each step's calls on the pair: by method, their count, their ms and the errors' messages (methods and messages only,
 // never a parameter), printed with the step and cleared
 let calls = {};
@@ -177,7 +181,17 @@ const device = async () => {
   const shorts = [];
   // the page's deposit host (src/pool-testnet.ts evmKind) on this device's store, pair and sync
   const host = () => ({ pin: PIN, testnet: false, rpcs, round: async (s) => { const r = await sync.events(s); return { events: r.events, finalBlock: r.fin.number }; }, notes: async () => ns, records: async () => readNotes(w), seed64: async () => seed64.slice(), short: (u, wei) => shorts.push([u, wei]), progress: (s) => log(`stage ${s}`), wait: sleep });
-  return { w, ns, rpcs, sync, shorts, host };
+  // the page's own pool on this device's store (src/pool-testnet.ts, the mainnet build): its state read runs the
+  // load pass, the queue pass and the settle as the page does; no proof is made here (the queue finds no fee)
+  const page = { store: async () => w, held: async () => w, seed64: async () => seed64.slice() };
+  const t = testnetPool(page, { prover: { vault: { load: async () => {}, prove: async () => { throw new Error("pool-fork-evm: no proof on this run"); } }, stop: () => {} } });
+  // one state read, its requests to the pair counted
+  const stateRead = async () => {
+    const was = pageRequests;
+    await t.stateRead();
+    return pageRequests - was;
+  };
+  return { w, ns, rpcs, sync, shorts, host, t, stateRead };
 };
 const mine = async (ns) => (await ns.list()).filter((n) => n.scope === scope);
 const balanceOf = async (ns) => (await mine(ns)).filter((n) => n.state === "UNSPENT" || n.state === "HELD" || n.state === "RESERVED").reduce((s, n) => s + n.leaf.value, 0n);
@@ -238,22 +252,32 @@ await anvil("anvil_mine", ["0x1", "0x0"]);
 for (let b = await block("latest"); b.number < landedIn; b = await block("latest")) await anvil("anvil_mine", ["0x1", "0x0"]);
 const other = await block(hex(landedIn));
 if (other.hash === dropped.hash) throw new Error("the same block at the deposit's height");
-const settle = (d) => evmSettleReserved({ seed64: seed64.slice(), notes: d.ns, scope, round: (s) => d.sync.events(s) });
-const healA = await settle(A);
-const healB = await settle(B);
-step("reorg", { height: landedIn, dropped: dropped.hash, now: other.hash, a: { pass: healA, notes: await states(A.ns), balance: await balanceOf(A.ns) }, b: { pass: healB, notes: await states(B.ns), balance: await balanceOf(B.ns) } });
+const reserved = async (d) => (await mine(d.ns)).filter((n) => n.state === "RESERVED").length;
+if ((await reserved(A)) + (await reserved(B)) !== 0) throw new Error("a RESERVED note: the heal must run with none");
+const healA = await A.stateRead();
+const healB = await B.stateRead();
+step("reorg", { height: landedIn, dropped: dropped.hash, now: other.hash, by: "the page's state read", a: { requests: healA, notes: await states(A.ns), balance: await balanceOf(A.ns), kept: [...(await A.ns.landings())] }, b: { requests: healB, notes: await states(B.ns), balance: await balanceOf(B.ns) } });
 if ((await balanceOf(A.ns)) !== 0n || (await balanceOf(B.ns)) !== 0n) throw new Error("a dropped deposit still in a balance");
 // the same signed deposit again, in a later block
 const resentAt = at();
 const again = await anvil("eth_sendRawTransaction", [raws.at(-1)]);
 const rc2 = await minedReceipt(again);
-const loadA = await runPoolDepositEvm(A.host(), null);
-const loadB = await runPoolDepositEvm(B.host(), null);
-step("landed again", { tx: again, block: BigInt(rc2.blockNumber), ms: at() - resentAt, a: { load: loadA, notes: await states(A.ns), balance: await balanceOf(A.ns) }, b: { load: loadB, notes: await states(B.ns), balance: await balanceOf(B.ns) } });
+const loadA = await A.stateRead();
+const loadB = await B.stateRead();
+step("landed again", { tx: again, block: BigInt(rc2.blockNumber), ms: at() - resentAt, by: "the page's state read", a: { requests: loadA, notes: await states(A.ns), balance: await balanceOf(A.ns) }, b: { requests: loadB, notes: await states(B.ns), balance: await balanceOf(B.ns) } });
 if ((await balanceOf(A.ns)) < RUNG || (await balanceOf(B.ns)) < RUNG) throw new Error("the deposit landed again is not shown");
+// the reads the tail costs: a state read on a device with no note beside one on device A, its note in the tail
+const C = await device();
+const quiet = await C.stateRead();
+const tailed = await A.stateRead();
+step("reads per state read", { noTail: quiet, tail: tailed, kept: [...(await A.ns.landings())].length });
 
 mkdirSync(dirname(OUT), { recursive: true });
 writeFileSync(OUT, JSON.stringify(record, (_, v) => (typeof v === "bigint" ? v.toString() : v), 2) + "\n");
 log(`wrote ${OUT}`);
-for (const d of [A, B]) (d.ns.close(), d.w.close());
+for (const d of [A, B, C]) {
+  await d.t.signedOut().catch(() => {});
+  d.ns.close();
+  d.w.close();
+}
 process.exit(0);
