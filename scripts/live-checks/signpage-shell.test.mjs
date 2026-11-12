@@ -348,6 +348,10 @@ test("release 111 planted: a pinned host asked signed out, at no time, or not in
   badLine(at(st.passkeyOut.t + 1), out); // after the passkey's sign out
   badLine(at(st.words.t - 1), out); // before the words' Continue
   badLine(at(st.wordsOut.t + 1), out); // after the words' sign out
+  // card sign-out-stops-the-pages-reads: the sign out's time is the post's acknowledgement; a request from that time on
+  // is signed out, one just before it signed in
+  badLine(at(st.wordsOut.t), out);
+  assert.equal(at(st.wordsOut.t - 1).ok, true, at(st.wordsOut.t - 1).lines.join("\n"));
   badLine(at(st.stranger.t + 1, { host: "rpc.mainnet.fastnear.com", path: "/", rpc: [{ method: "query", params: { request_type: "view_account", account_id: "a".repeat(64), finality: "final" } }] }), out); // an account id, signed out
   badLine(at(undefined), out); // at no known time
   const noCsp = clone(g);

@@ -383,16 +383,45 @@ function stoppable(p: Promise<void>, signal?: AbortSignal): Promise<void> {
   });
 }
 
-// every lane's waits end at a sign out: this controller aborted, a new one made for the next sign-in
+// The page's one gate for every request past its own origin (card sign-out-stops-the-pages-reads): a sign out closes it,
+// a sign-in's landing opens it again. Closed, this controller stays aborted, so every wait for a turn ends, every turn
+// and laned ask is refused (a paced queue's slot and a seat's failover that come after the sign out included: each takes
+// laneSignal when it runs), laneFetch refuses, and the page's own fetch (gatedFetch, installed by src/main.ts) refuses
+// any request past the page's origin, whatever reader made it.
 let laneStop = new AbortController();
-/** Ends every wait for a turn or a pause on every lane now (a sign out), with `reason`. */
+/** Closes the gate now (a sign out), with `reason`: every wait for a turn or a pause on every lane ends, and nothing
+ *  more is sent past the page's origin until openHostLanes. A second close keeps the first reason. */
 export function stopHostLaneWaits(reason: unknown = new Error("signed out")): void {
-  laneStop.abort(reason);
-  laneStop = new AbortController();
+  if (!laneStop.signal.aborted) laneStop.abort(reason);
 }
-/** `given` with the lanes' sign-out stop: a wait on it ends at either. */
+/** Opens the gate again (a sign-in landed, or a sign out the store refused). */
+export function openHostLanes(): void {
+  if (laneStop.signal.aborted) laneStop = new AbortController();
+}
+/** Whether the gate is closed (signed out). */
+export function hostLanesClosed(): boolean {
+  return laneStop.signal.aborted;
+}
+/** `given` with the lanes' sign-out stop: a wait on it ends at either, and while the gate is closed it is aborted. */
 export function laneSignal(given?: AbortSignal): AbortSignal {
   return given === undefined ? laneStop.signal : AbortSignal.any([given, laneStop.signal]);
+}
+/** `raw` held by the gate: while it is closed, a request to any origin but `own` (the page's) is refused, never sent,
+ *  with the sign out's reason; the page's own files (the prover's setup files) still load. */
+export function gatedFetch(raw: typeof fetch, own: string): typeof fetch {
+  return ((url: string | URL | Request, init?: RequestInit) => {
+    if (laneStop.signal.aborted) {
+      const href = url instanceof Request ? url.url : String(url);
+      let origin: string | null = null;
+      try {
+        origin = new URL(href, own).origin;
+      } catch {
+        // no URL: refused as any other while closed
+      }
+      if (origin !== own) return Promise.reject(laneStop.signal.reason);
+    }
+    return raw(url, init);
+  }) as typeof fetch;
 }
 
 const LANES = new Map<string, HostLane>();
@@ -428,11 +457,14 @@ export function holdHosts(urls: Iterable<string | undefined>): () => void {
  *  budget as the rest, as the host counts them. */
 export function laneFetch(f?: (url: string, init?: RequestInit) => Promise<Response>): typeof fetch {
   return ((url: string | URL | Request, init?: RequestInit) => {
+    // the gate closed (a sign out): never sent, never counted
+    if (laneStop.signal.aborted) return Promise.reject(laneStop.signal.reason);
     hostLane(url instanceof Request ? url.url : String(url)).count();
     return (f ?? globalThis.fetch)(url as string, init);
   }) as typeof fetch;
 }
-/** Forgets every host's lane (tests: each test's clock starts at its own zero). */
+/** Forgets every host's lane and opens the gate (tests: each test's clock starts at its own zero). */
 export function resetHostLanes(): void {
   LANES.clear();
+  openHostLanes();
 }

@@ -738,6 +738,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     evmHolds.clear();
     evmShownGen.clear();
     evmRearmed.clear();
+    // the decimals this account's buys read: never the next account's
+    boughtDecimals.clear();
     awaited.clear();
     follows.abort();
     follows = new AbortController();

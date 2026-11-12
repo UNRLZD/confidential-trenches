@@ -9,7 +9,7 @@ import { solanaJsonRpc, solanaPacedRpc } from "@blindfill/kit";
 import { SOLANA_KEYLESS_RPC_LIMIT } from "../../kit/src/trade/solana/send.ts";
 import { onTestClock } from "../../kit/test/test-clock.ts";
 import * as d from "../src/derive/index.ts";
-import { HOST_WINDOW_MS, HostLane, HostPaused, PROBE_HELD_MAX_MS, THROTTLE_QUIET_MS, holdHosts, hostLane, PASS_BUDGET, PASS_BUDGET_TRADING, PASS_FLOOR_MS, resetHostLanes, stopHostLaneWaits, THROTTLE_BOUNDS, THROTTLE_PAUSE_FIRST_MS, THROTTLE_PAUSE_MAX_MS, THROTTLE_RETRY_AFTER_MAX_MS, ThrottleGate, throttleWaitMs, TRADE_HOLD_MAX_MS, TRADE_TURN_MAX_MS } from "../src/throttle.ts";
+import { HOST_WINDOW_MS, HostLane, HostPaused, PROBE_HELD_MAX_MS, THROTTLE_QUIET_MS, holdHosts, hostLane, PASS_BUDGET, PASS_BUDGET_TRADING, PASS_FLOOR_MS, gatedFetch, hostLanesClosed, laneFetch, openHostLanes, resetHostLanes, stopHostLaneWaits, THROTTLE_BOUNDS, THROTTLE_PAUSE_FIRST_MS, THROTTLE_PAUSE_MAX_MS, THROTTLE_RETRY_AFTER_MAX_MS, ThrottleGate, throttleWaitMs, TRADE_HOLD_MAX_MS, TRADE_TURN_MAX_MS } from "../src/throttle.ts";
 import { buyWallets, evmHoldingsReader, HOLDINGS_THROTTLE_MAX_MS, HOLDINGS_THROTTLED_ROUNDS_60S, solanaHelperHoldings, solanaHoldingsAt, solanaHoldingsReader, type HoldingsReader } from "../src/pool/buy-wallets.ts";
 
 const SEED = d.wordsToSeed64(d.entropyToWords(new Uint8Array(16)));
@@ -617,18 +617,47 @@ test("HostLane: a hold is counted, given back once, ends at its bound; holdHosts
   resetHostLanes();
 });
 
-test("HostLane: a sign out ends a waiting turn at once with its reason, and a turn after it waits as before", async () => {
+test("HostLane: a sign out ends a waiting turn at once with its reason, refuses every turn until a sign-in opens the gate, and a turn after that waits as before", async () => {
   resetHostLanes();
-  const l = hostLane("https://api.devnet.solana.com");
-  for (let i = 0; i < PASS_BUDGET; i++) l.sent("trade");
-  const waiting = l.turn("pass");
-  stopHostLaneWaits(new Error("signed out"));
-  await assert.rejects(waiting, /signed out/);
-  const a = new AbortController();
-  const next = l.turn("pass", a.signal);
-  a.abort(new Error("stopped"));
-  await assert.rejects(next, /stopped/, "the next sign-in's waits are not ended by the last sign out");
+  try {
+    const l = hostLane("https://api.devnet.solana.com");
+    for (let i = 0; i < PASS_BUDGET; i++) l.sent("trade");
+    const waiting = l.turn("pass");
+    stopHostLaneWaits(new Error("signed out"));
+    await assert.rejects(waiting, /signed out/);
+    assert.equal(hostLanesClosed(), true);
+    // card sign-out-stops-the-pages-reads: a turn asked after the sign out (a paced slot's, a failover's) is refused
+    await assert.rejects(l.turn("trade"), /signed out/, "a turn after the sign out is refused");
+    await assert.rejects(laneFetch(async () => new Response("{}"))("https://api.devnet.solana.com"), /signed out/, "laneFetch refuses while closed");
+    openHostLanes();
+    assert.equal(hostLanesClosed(), false);
+    const a = new AbortController();
+    const next = l.turn("pass", a.signal);
+    a.abort(new Error("stopped"));
+    await assert.rejects(next, /stopped/, "the next sign-in's waits are not ended by the last sign out");
+  } finally {
+    resetHostLanes();
+  }
+});
+
+test("gatedFetch: closed, a request past the page's origin is refused, never sent; the page's own files still load; opened, all go", async () => {
   resetHostLanes();
+  const sent: string[] = [];
+  const own = "https://sign.example";
+  const f = gatedFetch(async (u) => (sent.push(String(u)), new Response("{}")), own);
+  try {
+    await f("https://rpc.example/");
+    stopHostLaneWaits(new Error("signed out"));
+    await assert.rejects(f("https://rpc.example/"), /signed out/);
+    await assert.rejects(f(new Request("https://helper.example/v1/x")), /signed out/);
+    await f("/assets/zk/a.wasm");
+    await f(`${own}/assets/zk/b.zkey`);
+    openHostLanes();
+    await f("https://rpc.example/again");
+    assert.deepEqual(sent, ["https://rpc.example/", "/assets/zk/a.wasm", `${own}/assets/zk/b.zkey`, "https://rpc.example/again"]);
+  } finally {
+    resetHostLanes();
+  }
 });
 
 // The delta review of ed85d367 (P2-A): a pass asleep for room when a trade starts slept on to its room's end (10 s

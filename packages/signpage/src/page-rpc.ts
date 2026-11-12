@@ -9,7 +9,8 @@
 // - A throttle (HTTP 429, a 5xx, -32029 or -32429 in a 200) pauses the host for every reader by the one rule (from 1 s,
 //   doubling to 10 s, a Retry-After when longer; api.devnet.solana.com exposes none to a page), and the read that met it
 //   is asked again once, after that pause; an answer that is not JSON, a stall or a dropped connection is asked again
-//   once after the retry's backoff. A sign out ends every wait on every host at once (stopHostLaneWaits). Never a third ask, and never a wait that would end past the call's bound: the call
+//   once after the retry's backoff. A sign out closes the page's gate (stopHostLaneWaits): every wait on every host ends
+//   at once and no call is asked or asked again until a sign-in opens it. Never a third ask, and never a wait that would end past the call's bound: the call
 //   then rejects naming its fault (SolanaRpcTransportError). So a trade's read waits for its turn at most
 //   TRADE_TURN_MAX_MS + PROBE_HELD_MAX_MS (15 s) from the turn's start, the host's pause (at most 10 s) and the probes
 //   after it (each read parked ahead may be one) together, then its bound (3.5 s; 12 s for a settle's
@@ -92,6 +93,9 @@ export function lanedRpc(url: string, o: { kind?: ReadKind; retry?: SolanaRpcRet
   const rpc = (method: string, params: readonly unknown[]): Promise<unknown> => {
     // the caller's signal and the lanes' sign-out stop of this moment: every wait and ask of this call ends at either
     const stop = laneSignal(o.signal);
+    // the gate closed (a sign out; throttle.ts): a call made after it, a paced slot's or a seat's failover included, is
+    // refused here, never sent or counted
+    if (stop.aborted) return Promise.reject(stop.reason);
     if (!lane.open(kind))
       return lane.turn(kind, stop, true, { reports: true }).then(
         () => go(stop, method, params),

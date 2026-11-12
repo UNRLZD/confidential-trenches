@@ -451,3 +451,18 @@ test("card sign-out-stops-the-pages-reads: both ways another tab's sign out reac
   for (const s of ["restore?.signedOut();", "follows?.signedOut();", "poolFollow?.stop();", "withdrawsSignedOut();", "void testnet?.signedOut();"]) assert.ok(at(s) >= 0, `signedOutElsewhere: ${s}`);
   assert.ok(at("restore?.signedOut();") < at("void testnet?.signedOut();"), "the restore stops before the lanes' waits end");
 });
+
+// The page's one gate (../../wallet/src/throttle.ts; its behaviour in test/sign-out-gate.test.ts and, in a browser, the
+// live check signpage-shell's count of requests after another tab's sign out): main.ts makes the page's fetch the gate,
+// closes it first at either sign out, opens it at every landing, and again when the store refuses this tab's sign out.
+test("card sign-out-stops-the-pages-reads: main.ts puts every request behind the gate, closes it first at each sign out and opens it at each landing", () => {
+  const src = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
+  assert.match(src, /^globalThis\.fetch = gatedFetch\(globalThis\.fetch\.bind\(globalThis\), location\.origin\);$/m, "the page's fetch is the gate");
+  const body = (name: string, sig = "(): void") => new RegExp(`function ${name}${sig.replace(/[()[\]]/g, "\\$&")} \\{\\n([\\s\\S]*?)\\n\\}`).exec(src)?.[1] ?? "";
+  const firstCall = (b: string) => b.split("\n").map((l) => l.trim()).find((l) => l !== "" && !l.startsWith("//"));
+  assert.equal(firstCall(body("signedOutElsewhere")), "stopHostLaneWaits();", "another tab's sign out closes the gate first");
+  const own = body("signOut", "(): Promise<void>");
+  assert.ok(own.indexOf("stopHostLaneWaits();") >= 0 && own.indexOf("stopHostLaneWaits();") < own.indexOf("restore?.signedOut();"), "this tab's sign out closes the gate first");
+  assert.match(own, /await s\.signOut\(\)\.catch\(\(e: unknown\) => \{\n\s+openHostLanes\(\);\n\s+throw e;/, "a refused sign out opens the gate again");
+  assert.equal(firstCall(body("landed", "(l: Landing): Promise<void>")), "openHostLanes();", "a landing opens the gate");
+});

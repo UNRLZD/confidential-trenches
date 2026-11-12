@@ -479,10 +479,12 @@ export async function collect({ engine, site, live, width = "desktop" }) {
     return { openId, layer };
   };
   // another tab signs out (the store's own sign out: "signout" on its channel, then the database deleted)
+  // its time is taken once the post is acknowledged (the evaluate that posts it has returned), never before it: a
+  // request the page started before it heard the sign out is a signed-in one (card sign-out-stops-the-pages-reads, P3)
   const signOutElsewhere = async () => {
+    await d.evaluate(`const c = new BroadcastChannel("ct-wallet"); c.postMessage({ kind: "signout" }); c.close();`);
     const t = Date.now();
-    await d.evaluate(`const c = new BroadcastChannel("ct-wallet"); c.postMessage({ kind: "signout" }); c.close();
-      await Promise.race([new Promise((ok, no) => { const r = indexedDB.deleteDatabase("ct-wallet"); r.onsuccess = () => ok(); r.onerror = () => no(r.error); }), new Promise((ok) => setTimeout(ok, 3000))]);`);
+    await d.evaluate(`await Promise.race([new Promise((ok, no) => { const r = indexedDB.deleteDatabase("ct-wallet"); r.onsuccess = () => ok(); r.onerror = () => no(r.error); }), new Promise((ok) => setTimeout(ok, 3000))]);`);
     const s = { t, top: await top("signed-in") };
     await sleep(EVENT_MS);
     return s;
