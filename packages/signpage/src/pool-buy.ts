@@ -168,8 +168,9 @@ export type PoolBuyHost = {
   cluster: "mainnet" | "devnet";
   /** Two RPCs of different operators. */
   rpcs: readonly [SolanaRpc, SolanaRpc];
-  /** The queue's ready proofs (never taken by reading them); the queue is opened first when it is not. */
-  ready(): Promise<readonly ReadyProof<SolanaReleaseRequest>[]>;
+  /** The queue's ready proofs a take hands out (never taken by reading them); the queue is opened first when it is not.
+   *  With `early`, on the take's own clock (queue.ts readyAt), so the pick never picks a proof its take refuses late. */
+  ready(early?: Promise<ChainNow>): Promise<readonly ReadyProof<SolanaReleaseRequest>[]>;
   /** The queue's take of this attempt: HELD -> RESERVED, written before it returns, with the signed transaction's last
    *  block height (blockhashOf's lastHeight); refused, the note HELD, when the note's ready proof is another attempt. */
   take(noteId: string, attempt: string, early?: Promise<ChainNow>, lastHeight?: bigint): Promise<ReadyProof<SolanaReleaseRequest>>;
@@ -822,7 +823,10 @@ async function buyRun(h: PoolBuyHost, ask: PoolAsk, at: { fault?: unknown }): Pr
       const pays = (set: readonly Ready[]): boolean =>
         solanaPoolBuyFunds(set.map((p) => ({ withdrawnValue: p.chunk, relayFee: p.binding.request.relayFee })), venue, { spend: ask.amount, tip: tipOf(set.length) }, rent).problem === null;
       const max = h.takeSet && h.sendPieces ? SOLANA_POOL_BUY_PIECES_MAX : 1;
-      const now = mine(await h.ready());
+      // the takeable ones at the take's own time (the early read it takes on): a proof its take would refuse late (a
+      // newest-root one past its grace while its remake runs) is never picked, so a set that pays only with it is
+      // not_funded here, before any claim, never a take that fails
+      const now = mine(await h.ready(early));
       const picked = pickPieces(now, pays, max);
       if (picked === null) return no("not_funded");
       let set = picked;

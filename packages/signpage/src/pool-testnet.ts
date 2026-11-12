@@ -1423,8 +1423,9 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       // a sign out ends the buy's waits before its signature (read-waits.ts waitUnless): this session's stop
       signal: solanaStop.signal,
       // none ready (a page that has landed no deposit since it loaded has run no pass): a pass starts for the next tap
-      ready: async () => {
-        const list = (await q()).ready();
+      ready: async (early) => {
+        const queue = await q();
+        const list = early === undefined ? queue.ready() : await queue.readyAt(early);
         if (list.length === 0) void proofs();
         return list;
       },

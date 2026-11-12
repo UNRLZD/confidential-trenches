@@ -88,6 +88,8 @@ export type ProofQueueArgs<R> = {
   inFront?: () => boolean;
   /** Notes the queue leaves alone, read each pass: a note a withdraw still owes a send for (its W is the spend's W). */
   skip?: () => Promise<ReadonlySet<string>>;
+  /** The device's monotonic clock in ms; by default performance.now (a test moves it). */
+  monotonic?: () => number;
 };
 
 /** What one pass did: the notes it proved, the notes whose proof was made again, and each failure. */
@@ -99,11 +101,17 @@ export interface ProofQueue<R> {
    * its new one replaces it), then proves notes that have no tier 1 proof; with piecesMax above 1 and nothing of that
    * left, makes tier 2 for the primary ("Pieces" above). Passes run one after another. */
   refresh(signal?: AbortSignal): Promise<QueuePass>;
-  /** The proofs ready now, both tiers, in leaf order (a note's tier 1 proof before its tier 2 one). */
+  /** The proofs ready now that take() would hand out (proofLate: none late at the pool's time as this queue last read it,
+   * plus the device's time since), both tiers, in leaf order (a note's tier 1 proof before its tier 2 one). A late one
+   * stays out until its remake replaces it, so no screen offers, and no pick takes, a proof the tap is refused. */
   ready(): ReadyProof<R>[];
-  /** The proofs ready now with `read`'s answer (the caller's read of the notes), both in one turn that no swap's write
-   * and ready list update falls inside: the list and the notes agree on each note's attempts. `making`: the notes a
-   * proof is being made for now (card buy-spends-several-pieces: state.pools' making counts those with none ready). */
+  /** ready() at the time the take reads (takeNow: `early`'s ms plus the time since while it stands, else the pool's time
+   * read here): the list a pick that goes on to take() picks from, on the take's own clock. */
+  readyAt(early?: Promise<ChainNow>): Promise<ReadyProof<R>[]>;
+  /** ready() with `read`'s answer (the caller's read of the notes), both in one turn that no swap's write and ready list
+   * update falls inside: the list and the notes agree on each note's attempts. `making`: the notes a proof is being made
+   * for now (card buy-spends-several-pieces: state.pools' making counts those with none ready), and each note whose
+   * every ready proof is late, made again at the next pass. */
   readyWith<T>(read: () => Promise<T>): Promise<{ ready: ReadyProof<R>[]; value: T; making: string[] }>;
   /** At the tap: refused (and its attempt let go) for a proof made before the previous epoch, a newest-root proof past
    * the next boundary + NEWEST_GRACE_MS, or one with less than sendMarginMs + TAKE_SLACK_MS left; else HELD -> RESERVED,
@@ -146,6 +154,19 @@ const byChunkThenLeaf = (l: Pool["ladder"]) => (x: NoteRecord, y: NoteRecord): n
   return x.leaf!.leafIndex < y.leaf!.leafIndex ? -1 : 1;
 };
 
+/** Why a ready proof is too late to take at the pool's time `nowMs` (it is made again first), or undefined: one made
+ *  before the previous epoch, a newest-root proof NEWEST_GRACE_MS past its epoch's end, or one with less than the send
+ *  margin + TAKE_SLACK_MS left. take() refuses on it, and ready() leaves out what it names. */
+export function proofLate(r: Pick<ReadyProof<unknown>, "epochStartMs" | "root" | "deadlineMs">, nowMs: bigint, pool: Pick<Pool<unknown>, "epochMs" | "sendMarginMs">): string | undefined {
+  return nowMs - (nowMs % pool.epochMs) > r.epochStartMs + pool.epochMs
+    ? "is from before the previous epoch"
+    : r.root === "newest" && nowMs >= r.epochStartMs + pool.epochMs + NEWEST_GRACE_MS
+      ? `is on the newest root and its epoch ended over ${NEWEST_GRACE_MS} ms ago`
+      : r.deadlineMs - nowMs < pool.sendMarginMs + TAKE_SLACK_MS
+        ? `has less than the send margin + ${TAKE_SLACK_MS} ms left`
+        : undefined;
+}
+
 export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
   if (!(a.seed64 instanceof Uint8Array) || a.seed64.length !== 64) throw new Error("seed64: not 64 bytes");
   checkPool(a.pool as Pool);
@@ -154,6 +175,19 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
   const seed = Uint8Array.from(a.seed64);
   const { notes, pool } = a;
   const inFront = a.inFront ?? notHidden;
+  const mono = a.monotonic ?? (() => performance.now());
+  // the pool's latest time this queue read (a pass's start, a take's own read), on both device clocks at the read's start
+  let seen: { ms: bigint; at: number; wall: number } | undefined;
+  const readNow = async (signal?: AbortSignal): Promise<bigint> => {
+    const at = mono();
+    const wall = Date.now();
+    const ms = await pool.now(signal);
+    if (typeof ms === "bigint" && (seen === undefined || ms >= seen.ms)) seen = { ms, at, wall };
+    return ms;
+  };
+  // the pool's time now as ready() takes it: the last read plus the larger of the two clocks' time since (a sleep stops
+  // the monotonic one; counting from the read's start only makes it later, so a proof leaves the list early, never late)
+  const nowSeen = (): bigint | undefined => (seen === undefined ? undefined : seen.ms + BigInt(Math.max(0, Math.ceil(Math.max(mono() - seen.at, Date.now() - seen.wall)))));
   const provers = a.provers.slice(0, proofPoolSize(a.hardwareConcurrency));
   const readySize = readySetSize(a.hardwareConcurrency);
   const altRoom = Math.max(0, (pool.piecesMax ?? 1) - 1); // tier 2's notes at most
@@ -317,7 +351,7 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
       if (ready.has(id) || alt.has(id)) await onNote(id, () => letGo(id));
     }
     if (!inFront()) return out;
-    const nowMs = await pool.now(signal);
+    const nowMs = await readNow(signal);
     if (typeof nowMs !== "bigint" || nowMs < 0n) throw new Error(`pool ${pool.id}: now is not a bigint`);
     const start = epochOf(nowMs);
     for (const [attempt, id] of [...unfreed]) await free(id, attempt);
@@ -427,17 +461,9 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
       const wall = Date.now() - e.wall;
       if (mono >= 0 && mono <= NOW_REUSE_MS && wall <= NOW_REUSE_MS) return e.ms + BigInt(Math.ceil(Math.max(mono, wall)));
     }
-    return pool.now();
+    return readNow();
   };
-  /** Why a ready proof is too late to take at `nowMs` (it is made again first), or undefined. */
-  const lateOf = (r: ReadyProof<R>, nowMs: bigint): string | undefined =>
-    epochOf(nowMs) > r.epochStartMs + pool.epochMs
-      ? "is from before the previous epoch"
-      : r.root === "newest" && nowMs >= r.epochStartMs + pool.epochMs + NEWEST_GRACE_MS
-        ? `is on the newest root and its epoch ended over ${NEWEST_GRACE_MS} ms ago`
-        : r.deadlineMs - nowMs < pool.sendMarginMs + TAKE_SLACK_MS
-          ? `has less than the send margin + ${TAKE_SLACK_MS} ms left`
-          : undefined;
+  const lateOf = (r: ReadyProof<R>, nowMs: bigint): string | undefined => proofLate(r, nowMs, pool);
   /** Each note HELD -> RESERVED in the order given; a write that fails lets its own attempt go and throws. The store
    *  drops the note's other attempt in that write, so its other proof leaves the ready list (and one being made is
    *  never kept). */
@@ -462,14 +488,27 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
       const a = order.get(x.noteId)!, b = order.get(y.noteId)!;
       return a !== b ? (a < b ? -1 : 1) : x.own === true ? -1 : y.own === true ? 1 : 0;
     });
+  /** The ready proofs takeable at `nowMs` (none late), and the notes whose every ready proof is late. */
+  const takeableAt = (nowMs: bigint | undefined): { ready: ReadyProof<R>[]; late: string[] } => {
+    const all = sorted();
+    if (nowMs === undefined) return { ready: all, late: [] };
+    const ok = all.filter((r) => lateOf(r, nowMs) === undefined);
+    const kept = new Set(ok.map((r) => r.noteId));
+    return { ready: ok, late: [...new Set(all.filter((r) => !kept.has(r.noteId)).map((r) => r.noteId))] };
+  };
   return {
     refresh(signal) {
       const run = passes.then(() => pass(signal));
       passes = run.catch(() => undefined);
       return run;
     },
-    ready: () => sorted(),
-    readyWith: (read) => inView(async () => ({ ready: sorted(), value: await read(), making: [...inFlight.keys()] })),
+    ready: () => takeableAt(nowSeen()).ready,
+    readyAt: async (early) => takeableAt(await takeNow(early)).ready,
+    readyWith: (read) =>
+      inView(async () => {
+        const t = takeableAt(nowSeen());
+        return { ready: t.ready, value: await read(), making: [...new Set([...inFlight.keys(), ...t.late])] };
+      }),
     take(noteId, attempt, early, lastHeight, nullifier) {
       live();
       return onNote(noteId, async () => {

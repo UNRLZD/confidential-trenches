@@ -2391,6 +2391,36 @@ test("pieces: a spend past the own note's Max sends one bundle: the other piece'
   assert.ok(w.log.includes("settle:note-1") && w.log.includes("settle:note-2"), w.log.filter((x) => x.startsWith("settle")).join(","));
 });
 
+// Card buy-spends-several-pieces (the mainnet copy's Max of 4 pieces, "failed" in 2 of 3 runs): the pick reads the
+// ready proofs on the take's own clock (the host's ready(early), queue.ts readyAt), so a piece its take refuses late (a
+// newest-root proof past its grace while its remake runs) is never picked. A set that pays only with it is not_funded
+// before any claim, with nothing taken, signed or sent; never a take that fails.
+test("pieces: a piece its take would refuse late is never picked: the pick reads on the early read, and a set that needs it is not_funded before the take", async () => {
+  const own = pieceProof("note-1", BigInt("0x" + Buffer.from(unhex(r.nullifier_hash)).toString("hex")), BigInt(r.withdrawn), true);
+  const late = pieceProof("note-2", 777n, 5_000_000n);
+  const s = await setup("pump", SPEND);
+  const spend = solanaPoolBuyMaxSpend([relOf(own)], s.venue, SOLANA_POOL_JITO_TIP, rent) + 1_000_000n;
+  const w = await world({ readies: [[late, own]] });
+  const read = Promise.resolve({ ms: 1n, at: 0, wall: 0 });
+  const takes: string[][] = [];
+  const asked: unknown[] = [];
+  const list = w.host.ready;
+  w.host.chainNow = () => read;
+  // on the take's clock note-2's proof is late: the take refuses it, so readyAt leaves it out
+  w.host.ready = async (early) => (asked.push(early), early === read ? (await list()).filter((p) => p.noteId !== late.noteId) : list());
+  w.host.takeSet = async (items, early) => {
+    takes.push(items.map((x) => x.noteId));
+    if (early === read && items.some((x) => x.noteId === late.noteId)) throw new Error(`the proof for note ${late.noteId} is on the newest root and its epoch ended over 15000 ms ago: it is made again first`);
+    return items.map((x) => (x.noteId === own.noteId ? own : late));
+  };
+  w.host.sendPieces = async () => assert.fail("nothing is sent");
+  w.host.piecesOwed = owedMem();
+  assert.deepEqual(await runPoolBuy(w.host, { ...ASK, amount: spend }), { error: "not_funded" });
+  assert.deepEqual(takes, [], "nothing taken");
+  assert.ok(asked.includes(read), "the pick reads the ready proofs on the early read");
+  assert.equal((await w.host.piecesOwed.list()).length, 0, "no owed record written");
+});
+
 test("pieces: the releases land and the buy does not (a helper that sent the tag 2s alone): the answer is not_landed, never filled; each landed piece is settled SPENT and the buy's own note is not", async () => {
   const own = pieceProof("note-1", BigInt("0x" + Buffer.from(unhex(r.nullifier_hash)).toString("hex")), BigInt(r.withdrawn), true);
   const other = pieceProof("note-2", 777n, 5_000_000n);
