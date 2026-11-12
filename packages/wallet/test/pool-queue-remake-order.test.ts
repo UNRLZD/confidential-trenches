@@ -97,3 +97,48 @@ test("a fresh note's newest-root proof is remade before the rested ones at a bou
     await q.close();
   }
 });
+
+// A take while the boundary pass reads the epoch trees drops a ready proof: the pass leaves that note out and still
+// remakes the others.
+test("a take during a boundary pass's epoch-tree read never fails the pass: the other remakes are still made", async () => {
+  const v = await vaultWith([usd(100), usd(100)]);
+  const pool = fakePool(v);
+  const q = openProofQueue({ seed64: SEED, notes: v.ns, pool, provers: [signalsProver()], hardwareConcurrency: 4 });
+  pool.t.now += 10_000n;
+  const ref: NoteRef = { kind: "return", c: "sol", l: 7n, j: 1 };
+  const pre = noteSecrets(SEED, ref).precommitment;
+  let back = await v.ns.add({ ref, scope: SCOPE, precommitment: pre, state: "PLANNED" });
+  back = await v.ns.move(back.id, "PLANNED", "INCOMING");
+  const label = vaultLabelOf(keccak_256, SCOPE, 2000n);
+  const commitment = noteCommitment(usd(20), label, pre);
+  pool.land(commitment, label);
+  back = await v.ns.move(back.id, "INCOMING", "UNSPENT", { leaf: { value: usd(20), label, commitment, leafIndex: BigInt(v.stateLeaves.length - 1) } });
+  await q.refresh();
+  assert.equal(q.ready().length, 3);
+  const rested = q.ready().filter((r) => r.root === "epoch").map((r) => r.noteId);
+  // the boundary: the pass's epoch-tree read is slow; a tap takes a rested proof while it runs (still takeable: epoch e)
+  const trees = pool.trees;
+  let open_ = (): void => {};
+  const gate = new Promise<void>((ok) => (open_ = ok));
+  let reading = false;
+  pool.trees = async (before, signal, opts) => {
+    reading = true;
+    await gate;
+    return trees(before, signal, opts);
+  };
+  pool.t.now = START + E + 1_000n;
+  const pass = q.refresh();
+  for (let k = 0; k < 2_000 && !reading; k++) await new Promise((ok) => setTimeout(ok, 1));
+  assert.ok(reading, "the pass is in its epoch-tree read");
+  const taken = await q.take(rested[0]!);
+  assert.equal(taken.noteId, rested[0]);
+  open_();
+  const p = await pass.catch((e: Error) => e);
+  try {
+    assert.ok(!(p instanceof Error), `the pass failed: ${(p as Error).message}`);
+    assert.deepEqual([...(p as { remade: string[] }).remade].sort(), [rested[1]!, back.id].sort(), "the other two remade");
+  } finally {
+    pool.trees = trees;
+    await q.close();
+  }
+});

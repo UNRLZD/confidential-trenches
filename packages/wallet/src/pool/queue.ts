@@ -288,7 +288,8 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
       const a = ready.get(x.id)!.root === "newest", b = ready.get(y.id)!.root === "newest";
       return a !== b ? (a ? -1 : 1) : byChunk(x, y);
     };
-    for (const n of again.sort(newestFirst)) todo.push({ n, trees: epochTrees, root: "epoch", prev: ready.get(n.id)! });
+    // a take or a drop during the epoch-tree read above removes a ready proof: that note is left out of the remakes
+    for (const n of again.filter((x) => ready.has(x.id)).sort(newestFirst)) todo.push({ n, trees: epochTrees, root: "epoch", prev: ready.get(n.id)! });
     for (const n of open) {
       if (todo.length === want) break;
       if (n.leaf!.leafIndex < BigInt(epochTrees.stateTree.size)) todo.push({ n, trees: epochTrees, root: "epoch" });
