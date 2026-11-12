@@ -278,28 +278,24 @@ test("a history of 100 withdrawals (150 notes): the seed is opened a slice at a 
     const c1: NoteRef = { kind: "change", l: l.label, j: 1 };
     v.withdraw(noteSecrets(SEED, c0).nullifierHash, 1_000_000n, { P: noteSecrets(SEED, c1).precommitment, value: 7_000_000n, label: l.label });
   }
-  // each use of the seed timed from its open to its end
+  // each use of the seed, with how many turns the page's other task had taken when it opened
   const uses: number[] = [];
+  let turns = 0;
   const seed64 = (async (use: (s: Uint8Array) => unknown) => {
     const s = Uint8Array.from(SEED);
-    const t = performance.now();
+    uses.push(turns);
     try {
       return use(s);
     } finally {
-      uses.push(performance.now() - t);
       s.fill(0);
     }
   }) as never;
-  // the page's thread: the longest wait of another task that asks for every turn, as the page's own messages do
-  let longest = 0;
+  // the page's thread: another task that asks for every turn, as the page's own messages do
   let on = true;
-  let at = performance.now();
   void (async () => {
     while (on) {
       await turn();
-      const t = performance.now();
-      longest = Math.max(longest, t - at);
-      at = t;
+      turns++;
     }
   })();
   // each answer on a turn of its own, as a provider's answer comes over the network
@@ -311,10 +307,10 @@ test("a history of 100 withdrawals (150 notes): the seed is opened a slice at a 
   });
   assert.equal(r.notes.length, 150);
   assert.equal(r.notes.filter((n) => n.state === "UNSPENT").length, 50);
-  // a slice is WALK_SLICE_MS (8 ms) of work and the step it ends on, about 10 ms here; the bound leaves a loaded machine
-  // its room (before the notes were sliced, one use held the seed and the thread for the whole history, seconds)
-  const SLICE_BOUND_MS = 50;
+  // counted, never timed (scripts/ci/no-wall-clock-asserts.mjs): the seed is opened once a slice, and the page's other
+  // task takes a turn between any two uses (before the notes were sliced, one use held the seed and the thread for the
+  // whole history)
   assert.ok(uses.length > 20, `the seed was opened ${uses.length} times`);
-  assert.ok(Math.max(...uses) <= SLICE_BOUND_MS, `the longest use of the seed: ${Math.max(...uses).toFixed(1)} ms`);
-  assert.ok(longest <= SLICE_BOUND_MS, `the longest the thread was held: ${longest.toFixed(1)} ms`);
+  const held = uses.filter((t, i) => i > 0 && t === uses[i - 1]).length;
+  assert.equal(held, 0, `${held} of ${uses.length} uses of the seed followed another with no turn of the page between`);
 });
