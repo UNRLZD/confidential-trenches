@@ -1,5 +1,6 @@
-// The page scripts/focus-steal.e2e.mjs drives: SIGN_HOST's real shell (src/shell.ts) with one field on its sheet, as the
-// withdraw forms' To. The e2e opens and closes it by window.__shell. Never part of the signing page's build.
+// The page scripts/focus-steal.e2e.mjs drives: SIGN_HOST's real shell (src/shell.ts) with one field on its sheet, as a
+// typed screen's (the 12 words, a withdraw form's To). The e2e opens and closes it by window.__shell. Never part of the
+// signing page's build.
 import { signedOutState } from "../src/api.ts";
 import { mountShell } from "../src/shell.ts";
 

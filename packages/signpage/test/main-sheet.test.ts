@@ -4,10 +4,13 @@
 // - decide's sheetShown: a signin.open the frame sent before the choose sheet opened, decided once it shows (its request
 //   hash held until then; the shell's listen and busy both let it by), is refused, and the sheet is not redrawn (takes()
 //   alone would take it there: choose is not signed in);
-// - show()'s seal: a typed screen drawn on a sheet already shown (I already have one, Recovery code) takes the frame out;
+// - show()'s seal: a typed screen drawn on a sheet already shown (I already have one, Recovery code) takes the frame out,
+//   and it is out when the screen's field enters the page (the seal dropped from show(), or moved after the draw, fails);
 // - openLayer's open(typed): a sheet opened straight on a typed screen (signin.open {way: words}) takes the frame out;
 // - onDismiss: the user's Esc on a screen Cancel is drawn on goes back to the app;
-// - dismissible(cancellable): Esc on the backup a new account lands on (no Cancel drawn) does nothing.
+// - dismissible(cancellable): Esc on the backup a new account lands on (no Cancel drawn) does nothing;
+// - the clipboard: Copy on the backup puts the 12 words there, and Saved, in its own tap, writes it empty (a write that
+//   fails is let go, and the words are saved).
 // The seal and open(typed) steps fail together when both seals go. openPoolWithdraw's sheetShown has no step: no shown
 // sheet holds the signed-in state takes("withdraw.open") needs (show("signed-in") closes the layer in the same call,
 // src/main.ts show), so that mutant is the same program on every reachable state.
@@ -72,6 +75,12 @@ class El extends EventTarget {
   }
   setAttribute(k: string, v: string) {
     this.attrs[k] = v;
+  }
+  /** Each listener by type, so a test can call a button's click listener with a trusted event. */
+  ls: Record<string, ((e: unknown) => void)[]> = {};
+  override addEventListener(type: string, fn: EventListenerOrEventListenerObject | null, opt?: boolean | AddEventListenerOptions) {
+    if (typeof fn === "function") (this.ls[type] ??= []).push(fn as (e: unknown) => void);
+    super.addEventListener(type, fn, opt);
   }
 }
 const posted: { v: number; id?: string; ok?: boolean; error?: { code: string } }[] = [];
@@ -144,6 +153,24 @@ const tap = (action: string) => {
   assert.ok(b, `no ${action} button on ${root().dataset.signin}`);
   b.dispatchEvent(new Event("click"));
 };
+// the user's own tap on a button: its click listener with a trusted click, later than any key or tap before it
+let tapAt = performance.now() + 10 * PROTECT_MS;
+const press = (action: string) => {
+  const b = find(root(), (x) => x.dataset.action === action);
+  assert.ok(b, `no ${action} button on ${root().dataset.signin}`);
+  tapAt += 2 * PROTECT_MS;
+  for (const fn of b.ls.click ?? []) fn({ isTrusted: true, timeStamp: tapAt });
+};
+// each time a field enters the sign-in screen: the screen, and whether the frame was in the page then
+const fieldDrawn: { state: string; frame: boolean }[] = [];
+const hasField = (el: El): boolean => el.tagName === "textarea" || el.tagName === "input" || el.children.some(hasField);
+// the clipboard: every write, in order
+const clip: string[] = [];
+let clipFails = false;
+Object.defineProperty(globalThis.navigator, "clipboard", {
+  configurable: true,
+  value: { writeText: async (t: string) => (clip.push(t), clipFails ? Promise.reject(new Error("NotAllowedError")) : undefined) },
+});
 const esc = () => {
   for (const fn of keydowns) fn({ key: "Escape", isTrusted: true, repeat: false, timeStamp: performance.now() + PROTECT_MS + 1 });
 };
@@ -173,6 +200,12 @@ async function answer(id: string): Promise<{ ok?: boolean; error?: { code: strin
 
 test("main.ts's sheet: a kind under a shown sheet refused, the frame out under a typed screen drawn or opened, Esc back to the app only where Cancel is drawn", async () => {
   await import("../src/main.ts");
+  const r = root();
+  const draw = r.replaceChildren.bind(r);
+  r.replaceChildren = (...c: El[]) => {
+    if (c.some(hasField)) fieldDrawn.push({ state: r.dataset.signin ?? "", frame: frameIn() });
+    draw(...c);
+  };
   doc.body.children.find((c) => c.tagName === "iframe")!.dispatchEvent(new Event("load"));
   send({ type: "hello", kit: SIGNPAGE_KIT_VERSION });
   await until("the page signed out", () => root()?.dataset.signin === "signed-out");
@@ -204,6 +237,7 @@ test("main.ts's sheet: a kind under a shown sheet refused, the frame out under a
   tap("recovery");
   await until("the words field", () => root().dataset.signin === "words");
   await until("the frame out under the words field drawn on a shown sheet", () => !frameIn(), 1000);
+  assert.deepEqual(fieldDrawn, [{ state: "words", frame: false }], "the frame was out when the field entered the page");
 
   // onDismiss: Esc on a screen with Cancel goes back to the app, a new frame under it
   esc();
@@ -229,4 +263,15 @@ test("main.ts's sheet: a kind under a shown sheet refused, the frame out under a
   await settle();
   assert.equal(shown(), true, "Esc on a screen with no Cancel leaves the sheet shown");
   assert.equal(root().dataset.signin, "backup");
+
+  // the clipboard: Copy puts the 12 words there; Saved writes it empty in its own tap, and a refused write is let go
+  const words = find(root(), (x) => x.dataset.words === "12")!.children.map((li) => li.textContent).join(" ");
+  assert.equal(words.split(" ").length, 12);
+  press("copy");
+  await until("the words copied", () => clip.length === 1);
+  assert.deepEqual(clip, [words]);
+  clipFails = true;
+  press("saved");
+  assert.deepEqual(clip, [words, ""], "Saved writes the clipboard empty in its own tap");
+  await until("the words saved though the clear was refused", () => root().dataset.signin === "signed-in");
 });

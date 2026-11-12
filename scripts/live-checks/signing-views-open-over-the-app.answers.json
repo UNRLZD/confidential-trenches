@@ -1,6 +1,6 @@
 {
  "good": {
-  "at": "2026-11-12T13:57:51.303Z",
+  "at": "2026-11-11T17:04:03.036Z",
   "source": "this checkout, packages/signpage",
   "pageStatus": 200,
   "permissions": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), fullscreen=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), picture-in-picture=(), publickey-credentials-create=(self), publickey-credentials-get=(self), serial=(), usb=(), xr-spatial-tracking=()",
@@ -17,8 +17,7 @@
      "x icon",
      "Close name",
      "Escape",
-     "typed screens set",
-     "withdraw forms set"
+     "typed screens set"
     ]
    }
   ]
@@ -33,28 +32,6 @@
     "url": "/app.js",
     "status": 200,
     "found": []
-   }
-  ]
- },
- "beforeWatch": {
-  "at": "2026-11-12T13:57:52.394Z",
-  "source": "https://confidential.unrealized.trade/",
-  "pageStatus": 200,
-  "permissions": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), fullscreen=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), picture-in-picture=(), publickey-credentials-create=(self), publickey-credentials-get=(self), serial=(), usb=(), xr-spatial-tracking=()",
-  "js": [
-   {
-    "url": "/app.js",
-    "status": 200,
-    "found": [
-     "sheet scrim",
-     "sheet box",
-     "sheet close",
-     "sheet body",
-     "aria-modal dialog",
-     "x icon",
-     "Close name",
-     "Escape"
-    ]
    }
   ]
  }

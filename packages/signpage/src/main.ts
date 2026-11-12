@@ -85,7 +85,7 @@ import { withVaultBalance } from "./vault-balance.ts";
 import { withPositions } from "./positions.ts";
 import { mountShell, type Shell } from "./shell.ts";
 import { drawBackdrop } from "./backdrop.ts";
-import { coverOf } from "./frame-cover.ts";
+import { SEALED } from "./frame-cover.ts";
 import { afterSaved, pageFor, takes, takesParams, type AccountKind } from "./pages/open.ts";
 import { vaultScope } from "./withdraw/checks.ts";
 import { drawWithdrawForm } from "./withdraw/form.ts";
@@ -453,7 +453,7 @@ function openPoolWithdraw(chain: PoolChain, opId: string): { result: { pending: 
 const sheetShown = (): boolean => shell !== null && !shell.layer.hidden;
 // The layer opens, and the activation guard restarts its 500 ms: a click lined up before cannot act on what it shows.
 function openLayer(): void {
-  shell?.open(coverOf(root.dataset.signin ?? ""));
+  shell?.open(SEALED.has(root.dataset.signin ?? ""));
   reshown();
 }
 // Back to the app: the layer closes on the page's signed-in or signed-out state.
@@ -477,10 +477,6 @@ const input = (e: Event): void => {
 addEventListener("pointerdown", input, true);
 addEventListener("keydown", input, true);
 
-// The APP_HOST frame under each screen (src/frame-cover.ts): out of the document before the 12 words typed or shown and
-// the held deposit's way out (sealed: no key typed or pasted there can reach it, and a frame under the 12 words shown
-// keeps the opening tap's activation and could write the clipboard over the user's Copy); in the page, dimmed and inert,
-// under the withdraw forms, and out the first time it holds the keyboard's focus (watched).
 const GUARDED = new Set(["signout", "saved", "backup", "copy", "withdraw", "move-out"]);
 function button(action: string, label: string, onClick: () => void): HTMLButtonElement {
   const b = document.createElement("button");
@@ -512,12 +508,12 @@ function button(action: string, label: string, onClick: () => void): HTMLButtonE
 }
 
 function show(state: State, seed?: { account: string; code_saved: boolean; signout: boolean }, words?: string): void {
-  // on an open sheet, the frame's cover for this screen before any of its fields exists (a sealed screen: out now)
-  const cover = coverOf(state);
-  if (cover === "sealed") shell?.seal();
-  else if (cover === "watched") shell?.watch();
+  // a screen with a field typed into, or the 12 words shown, drawn on an open sheet: the frame out of the document before
+  // any of its fields is (src/frame-cover.ts)
+  if (SEALED.has(state)) shell?.seal();
   root.dataset.signin = state;
   if (state !== "backup" && drawn) {
+    uncopy();
     drawn.fill(0);
     drawn = null;
   }
@@ -583,7 +579,7 @@ function show(state: State, seed?: { account: string; code_saved: boolean; signo
         list.append(li);
       }
       parts.push(list);
-      parts.push(button("copy", WORDS.copy, () => void navigator.clipboard?.writeText(words).catch(() => {})));
+      parts.push(button("copy", WORDS.copy, () => void navigator.clipboard?.writeText(words).then(() => void (copied = true), () => {})));
       parts.push(button("saved", WORDS.saved, () => void run(saved)));
     }
   } else if (!framed && (state === "words" || state === "invalid-code")) {
@@ -931,6 +927,15 @@ async function signInWords(typed: string): Promise<void> {
 // The backup screen (S3.1): the stored seed's 12 words, top-level only; the entropy is zeroed once they are made.
 // `drawn` keeps the entropy of the words on screen until the page leaves the backup, so Saved marks that seed alone.
 let drawn: Uint8Array | null = null;
+// Copy put the 12 words on the clipboard: they are written over with nothing once, when the words leave the screen, in
+// the tap that leaves (Saved, Cancel, Esc, the x, the scrim: an engine may refuse a write outside a tap), or on any other
+// way off the backup. A refused write is let go; with no Copy the clipboard is left alone, and after that one write too.
+let copied = false;
+function uncopy(): void {
+  if (!copied) return;
+  copied = false;
+  void navigator.clipboard?.writeText("").catch(() => {});
+}
 function showBackup(s: Seed): void {
   topLevelOnly();
   const seen = shown({ ...s, entropy: s.entropy.slice() });
@@ -950,6 +955,7 @@ async function openBackup(): Promise<void> {
 // Saved (ses.5): code_saved becomes true; the Backup dot clears and Sign out is drawn. Opened by signout, it goes on to
 // the sign-out page (W:913), else back to the app signed in.
 async function saved(): Promise<void> {
+  uncopy();
   topLevelOnly();
   if (!drawn) throw new Error("no 12 words are on screen");
   try {
@@ -969,6 +975,7 @@ async function saved(): Promise<void> {
 // included, so the state the open kinds read is the store's; a store that cannot be read (a broken seed record, a
 // failed decrypt) still lets Cancel go back to the app
 async function cancel(): Promise<void> {
+  uncopy();
   const s = shell ? await readSeed().catch(() => undefined) : undefined;
   if (s) return show("signed-in", shown(s));
   if (root.dataset.signin === "error") show(typeof PublicKeyCredential === "undefined" ? "unsupported" : "signed-out");
