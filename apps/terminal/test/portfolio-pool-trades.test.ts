@@ -99,6 +99,23 @@ test("R3: a closed round trip whose buy names no USD draws a dash for bought, re
   assert.equal(portfolio(snap, d, NOW).totals!.realized30, 0n);
 });
 
+// R4 (review P2-4): an open position whose buy names no USD: the signing page's cost "0" means unknown (positions.ts),
+// never $0.00 bought and its whole value profit
+test("R4: an open row whose buy names no USD has no cost, bought or PnL, and adds its value to the total but nothing to the unrealized", () => {
+  const { amount_usd: _u, ...noUsd } = buy2 as Operation & { amount_usd?: string };
+  const unknown = { chain: "solana" as const, token: MINT, amount: "34154.038071", cost: "0", wallets: ["8e8RsnpnL6Toqsa2Q1YPLvopDqPa3HFTdwEikCkqpQ7p"], decimals: 6 };
+  const snap = base([noUsd as Operation], [unknown]);
+  const pf = portfolio(snap, heldData(snap, markets, new Map(), NOW), NOW);
+  const r = pf.rows[0]!;
+  assert.deepEqual([r.cost, r.bought, r.value, r.pnl, r.pnlBps], [null, null, 7n, null, null]);
+  assert.deepEqual([pf.totals!.inPos, pf.totals!.unreal], [7n, 0n]);
+  // beside a row with a known cost: only that row's PnL counts
+  const known = { ...unknown, token: "So11111111111111111111111111111111111111112", cost: "0.05" };
+  const two = base([noUsd as Operation], [unknown, known]);
+  const pf2 = portfolio(two, heldData(two, [...markets, { ...markets[0]!, token: known.token, symbol: "K", price_usd: "0.000003" }], new Map(), NOW), NOW);
+  assert.deepEqual([pf2.totals!.inPos, pf2.totals!.unreal], [17n, 5n]);
+});
+
 test("the same rows from Base, Robinhood and NEAR records: ETH on the EVM pools, USD only on NEAR", () => {
   for (const [chain, asset] of [["base", "ETH"], ["robinhood", "ETH"], ["near", null]] as const) {
     const t = chain === "near" ? "token.near" : "0xAbC0000000000000000000000000000000000001";

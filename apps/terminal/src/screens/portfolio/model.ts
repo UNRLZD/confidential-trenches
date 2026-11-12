@@ -161,12 +161,14 @@ export interface Row {
   /** The token's own decimals as the signing page's state names them (positions[].decimals, kit 1.8; card
    *  signpage-state-holdings); null from a page that names none. Never the helper's: a sell is sized from it. */
   decimals: number | null;
-  cost: bigint;
+  /** Null: unknown (the signing page's cost "0": a wallet's buy with no price read, src/positions.ts). */
+  cost: bigint | null;
   /** Null: no price (S10.4). */
   value: bigint | null;
   pnl: bigint | null;
   pnlBps: number | null;
-  bought: bigint;
+  /** Null: no USD for the buys (and no cost). */
+  bought: bigint | null;
   sold: bigint;
   realized: bigint;
   mark: Mark;
@@ -224,10 +226,11 @@ const DAY = 86_400_000;
 function rowOf(p: SignpageState["positions"][number], d: PortfolioData, ops: readonly Operation[], now: number): Row {
   const m = d.market(p.chain, p.token);
   const x = d.extra(p.chain, p.token) ?? {};
-  const cost = cents(p.cost) ?? 0n;
+  // the signing page's cost "0" is unknown (src/positions.ts): no cost, so no bought and no PnL, never its value as profit
+  const cost = /[1-9]/.test(p.cost) ? cents(p.cost) : null;
   // a zero price is no read (no route quoted it): the value is the dash, never $0.00 (owner 10 Nov 18:12Z)
   const value = m?.price != null && /[1-9]/.test(m.price) ? mulCents(p.amount, m.price) : null;
-  const pnl = value === null ? null : value - cost;
+  const pnl = value === null || cost === null ? null : value - cost;
   let selling: Row["selling"] = null;
   for (const o of ops) {
     if (o.kind !== "sell" || (o.stage !== "signed" && o.stage !== "sent")) continue;
@@ -244,7 +247,7 @@ function rowOf(p: SignpageState["positions"][number], d: PortfolioData, ops: rea
     cost,
     value,
     pnl,
-    pnlBps: pnl === null ? null : bps(pnl, cost),
+    pnlBps: pnl === null || cost === null ? null : bps(pnl, cost),
     bought: cents(x.bought) ?? cost,
     sold: cents(x.sold) ?? 0n,
     realized: cents(x.realized) ?? 0n,
@@ -261,8 +264,8 @@ function rowOf(p: SignpageState["positions"][number], d: PortfolioData, ops: rea
 export function sortRows(rows: readonly Row[]): Row[] {
   return [...rows].sort((a, b) => {
     if ((a.value === null) !== (b.value === null)) return a.value === null ? 1 : -1;
-    const av = a.value ?? a.cost;
-    const bv = b.value ?? b.cost;
+    const av = a.value ?? a.cost ?? 0n;
+    const bv = b.value ?? b.cost ?? 0n;
     if (av !== bv) return av > bv ? -1 : 1;
     return a.symbol.localeCompare(b.symbol);
   });
@@ -476,10 +479,11 @@ export function totals(s: SignpageState, rows: readonly Row[], closed: readonly 
   for (const r of rows) {
     if (r.value === null) {
       partial = true;
-      inPos += r.cost;
+      inPos += r.cost ?? 0n;
     } else {
       inPos += r.value;
-      unreal += r.pnl!;
+      // a row of unknown cost has no PnL: its value is in the positions, none of it in the unrealized
+      if (r.pnl !== null) unreal += r.pnl;
     }
   }
   return { cash, parts, offPool, onWay, inPos, total: cash + onWay + inPos, unreal, realized30: realized30(rows, closed, now), partial };

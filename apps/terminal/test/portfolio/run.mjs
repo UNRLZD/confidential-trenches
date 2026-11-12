@@ -71,6 +71,7 @@ const STATES = [
   ["pooltrades-activity", "S14.2", ["390", "1440"], true],
   ["pooltrades-open", "S10.9", ["390", "1440"], false],
   ["pooltrades-mixed", "S10.10", ["1440"], false],
+  ["pooltrades-unknown", "S10.9", ["390", "1440"], false],
 ];
 // one balance (card portfolio-one-balance): each fixture's Cash tile in cents and its parts as drawn on hover (desktop) or
 // a tap (phone): [chain, the drawn row's text, data-cents, moving]. Vault $73.18; SOL at $150, ETH at $3,000.
@@ -181,6 +182,11 @@ try {
       if (f === "pooltrades-open" && !phone) {
         const row = await page.$$eval(".pf [data-pos]", (rs) => rs.filter((r) => r.getClientRects().length).map((r) => r.getAttribute("data-pos")));
         check(JSON.stringify(row) === JSON.stringify(["solana:78GaXFTJzkCWpdxkNHMSP3TXEKbhQTpb3EqMt7Uupump"]), `${tag}: open rows ${JSON.stringify(row)}`);
+      }
+      // an open row of unknown cost (review P2-4): bought and PnL the dash, its value drawn, and no unrealized from it
+      if (f === "pooltrades-unknown" && !phone) {
+        const row = await page.$$eval(".pf [data-pos]", (rs) => rs.filter((r) => r.getClientRects().length).map((r) => [...r.querySelectorAll("td")].slice(1, 6).map((c) => c.innerText.replace(/\s+/g, " ").trim()).join("|")));
+        check(JSON.stringify(row) === JSON.stringify(["—|—|34,154.04 Icm|$0.07|—"]), `${tag}: open row ${JSON.stringify(row)}`);
       }
       // a price that reads zero: KINU's value is the dash, on the desktop table and the phone card, never $0.00
       if (f === "zeroprice") {

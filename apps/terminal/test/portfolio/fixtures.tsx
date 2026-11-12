@@ -124,6 +124,16 @@ export const FIXTURES: Record<string, Fx> = {
     state: { ...POOL_STATE, ops: POOL_OPS.slice(0, 4), positions: [{ chain: "solana", token: ICM, amount: "34154.038071", cost: "0.0999999427770536", wallets: ["8e8RsnpnL6Toqsa2Q1YPLvopDqPa3HFTdwEikCkqpQ7p"], decimals: 6 }] },
     live: true,
   },
+  // review P2-4: the same open row when its buy had no SOL price at the request (no amount_usd; the page's cost "0",
+  // unknown): its value, and a dash for bought and PnL, never $0.00 bought and the whole value as profit
+  "pooltrades-unknown": {
+    state: {
+      ...POOL_STATE,
+      ops: POOL_OPS.slice(0, 4).map((o) => (o.id === "pb2" ? ({ ...o, amount_usd: undefined } as Operation) : o)),
+      positions: [{ chain: "solana", token: ICM, amount: "34154.038071", cost: "0", wallets: ["8e8RsnpnL6Toqsa2Q1YPLvopDqPa3HFTdwEikCkqpQ7p"], decimals: 6 }],
+    },
+    live: true,
+  },
   rows: {},
   loading: { snap: { status: "connecting", state: null } },
   empty: { state: { positions: [], ops: [] }, data: { closed: [], series: [], fees: null } },

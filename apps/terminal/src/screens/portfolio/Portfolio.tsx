@@ -534,7 +534,7 @@ function PosTr({ r, now, menu, setMenu, act }: { r: Row; now: number; menu: "mor
       <td className="l">
         <div className="tok"><Avatar symbol={r.symbol} size={34} /><div className="ell"><div className="sy">{r.symbol}<MarkTag r={r} /></div><div className="s2 ui ell">{r.name}</div></div></div>
       </td>
-      <td>{usd(r.bought)}</td>
+      <td>{r.bought === null ? DASH : usd(r.bought)}</td>
       <td>{r.sold ? usd(r.sold) : DASH}</td>
       <td>{units(r.units)}<div className="s2">{r.symbol}</div></td>
       <td data-value data-unread={r.value === null || undefined}>{r.value === null ? DASH : usd(r.value)}</td>
