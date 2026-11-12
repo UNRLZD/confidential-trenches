@@ -24,7 +24,9 @@
 // it before the first view) and its open sheet after the close. The verdict: every view draws in the sheet, the top
 // path stays the app's, and a close (Esc, the x, the scrim, Cancel) comes back to the same app document with its state; a
 // view with a field typed into (words, withdraw) or the 12 words shown (backup) has the frame out of the page while it
-// shows (src/shell.ts seal), every other view keeps it in the page, visible under the scrim. A close by a tap (the x, the
+// shows (src/shell.ts seal) and the page's own ground under it (the dot logo, every layer loaded under SIGN_HOST's
+// policy; packages/signpage/src/backdrop.ts drawSealedGround), every other view keeps it in the page, visible under the
+// scrim, with no ground. A close by a tap (the x, the
 // scrim, Saved, Cancel) is a double tap: its second tap, where the first was, lands on no app control (the frame stays
 // inert for 500 ms after a close; src/shell.ts close), counted by the app document's own trusted pointerdowns.
 // Then, under the choose sheet (the frame kept, its opening tap's activation fresh), the frame tries what a frame that
@@ -78,7 +80,11 @@ export function judge(rec) {
       if (v.topPath !== v.appPath) bad.push(`top path ${v.topPath}, the app's ${v.appPath}`);
       if (TYPED.has(name)) {
         if (v.frame !== "out") bad.push(`frame ${v.frame} under a typed view`);
-      } else if (v.frame !== "visible") bad.push(`frame ${v.frame}, not visible under the sheet`);
+        if (v.ground !== "logo") bad.push(`ground ${v.ground} under a typed view`);
+      } else {
+        if (v.frame !== "visible") bad.push(`frame ${v.frame}, not visible under the sheet`);
+        if (v.ground !== "none") bad.push(`ground ${v.ground} under a kept frame`);
+      }
       if (v.closed) {
         if (!v.closed.hidden) bad.push("the sheet did not close");
         if (!TYPED.has(name) && !v.closed.sameDoc) bad.push("a new app document after close: state lost");
@@ -89,7 +95,7 @@ export function judge(rec) {
         if (v.closed.topPath !== v.topPath) bad.push(`after close the top path is ${v.closed.topPath}`);
         if (TAPPED.has(v.closed.by) && v.closed.appTaps !== 0) bad.push(`the double tap's second tap landed in the app (${v.closed.appTaps ?? "not counted"})`);
       }
-      lines.push(`${bad.length ? "FAIL" : "ok  "} ${tag}: frame ${v.frame}, top ${v.topPath}${v.closed ? `, closed by ${TAPPED.has(v.closed.by) ? "a double tap on " : ""}${v.closed.by}${v.closed.sameDoc ? " to the same app document" : " to a new app document"}${TAPPED.has(v.closed.by) ? `, ${v.closed.appTaps} tap(s) in the app` : ""}` : ""}${v.closed?.paint ? `, app painted ${v.closed.paint.firstPaintMs} ms (content ${v.closed.paint.contentPaintMs} ms) after the close, dim faded at ${v.closed.paint.fadeMs} ms` : ""}${bad.length ? ` (${bad.join("; ")})` : ""}`);
+      lines.push(`${bad.length ? "FAIL" : "ok  "} ${tag}: frame ${v.frame}, ground ${v.ground}, top ${v.topPath}${v.closed ? `, closed by ${TAPPED.has(v.closed.by) ? "a double tap on " : ""}${v.closed.by}${v.closed.sameDoc ? " to the same app document" : " to a new app document"}${TAPPED.has(v.closed.by) ? `, ${v.closed.appTaps} tap(s) in the app` : ""}` : ""}${v.closed?.paint ? `, app painted ${v.closed.paint.firstPaintMs} ms (content ${v.closed.paint.contentPaintMs} ms) after the close, dim faded at ${v.closed.paint.fadeMs} ms` : ""}${bad.length ? ` (${bad.join("; ")})` : ""}`);
     }
     for (const name of THIEF) {
       const t = w.thief?.[name];
@@ -248,6 +254,13 @@ async function oneWidth(h, w, shotDir, { cpu = 1, holdPaint = 0 } = {}) {
         sheet: Boolean(b && b.width > 0 && b.height > 0 && !document.querySelector("#screen").hidden),
         frame: !f ? "out" : fb.width >= innerWidth && fb.height >= innerHeight && fs.visibility === "visible" && fs.display !== "none" && Number(fs.opacity) > 0 ? "visible" : "hidden",
         topPath: location.pathname,
+        // the sealed screens' ground: "none" (hidden or absent), or shown with its logo's layers loaded or not
+        ground: (() => {
+          const g = document.querySelector("#ground");
+          if (!g || g.hidden || getComputedStyle(g).display === "none") return "none";
+          const imgs = [...g.querySelectorAll("img")];
+          return imgs.length > 0 && imgs.every((i) => i.complete && i.naturalWidth > 0) ? "logo" : "no logo";
+        })(),
       };
     });
     const d = v.frame === "out" ? null : await appDoc();

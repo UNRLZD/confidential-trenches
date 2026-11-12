@@ -393,6 +393,54 @@ test("a typed screen's close keeps the sheet's dim over the new frame until that
   }
 });
 
+test("the page's own ground shows from the task the frame leaves (a sealed open, a seal on a shown sheet) until the frame made at the close paints; a kept sheet never shows it", () => {
+  enableTimers(mock.timers, { apis: ["setTimeout"] });
+  try {
+    const d = fakeDom();
+    const ground = { hidden: true } as HTMLElement;
+    const sh = mountShell(d.doc, { state: () => signedOutState(), ground });
+    // a kept sheet: the frame stays, no ground
+    sh.open();
+    assert.equal(d.frames().length, 1);
+    assert.equal(ground.hidden, true, "no ground under a sheet that keeps the frame");
+    sh.close();
+    assert.equal(ground.hidden, true);
+    mock.timers.tick(1000);
+    // a sealed open: the ground in the open's own task, with the frame out
+    sh.open(true);
+    assert.equal(d.frames().length, 0);
+    assert.equal(ground.hidden, false, "the ground in the task the frame left");
+    // the close: kept under the dim over the new frame until that frame paints, then gone with the dim
+    sh.close();
+    const f = d.frames()[0]!;
+    f.fire("load");
+    mock.timers.tick(300);
+    assert.equal(ground.hidden, false, "kept until the new frame paints");
+    d.send(PAINTED, f.contentWindow);
+    assert.equal(ground.hidden, true, "gone in the task the new frame's painted came");
+    mock.timers.tick(1000);
+    // a seal on a sheet opened kept (Recovery code on I already have one): the ground in the seal's task
+    sh.open();
+    assert.equal(ground.hidden, true);
+    sh.seal();
+    assert.equal(ground.hidden, false, "the ground in the task a seal takes the frame out");
+    // a frame that never says it painted: the ground goes with the dim at its cap
+    sh.close();
+    mock.timers.tick(VEIL_CAP_MS);
+    assert.equal(ground.hidden, true, "gone at the dim's cap");
+    // a painted that comes after the next sealed open took that frame out again changes nothing
+    mock.timers.tick(1000);
+    sh.open(true);
+    sh.close();
+    const g = d.frames()[0]!;
+    sh.open(true);
+    d.send(PAINTED, g.contentWindow);
+    assert.equal(ground.hidden, false, "still shown: the frame that painted is out again");
+  } finally {
+    resetTimers(mock.timers);
+  }
+});
+
 test("focus the frame takes while a sheet shows over it comes back to the sheet; none is taken from the frame otherwise", () => {
   enableTimers(mock.timers, { apis: ["setTimeout"] });
   try {

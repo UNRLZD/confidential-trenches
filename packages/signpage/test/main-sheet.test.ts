@@ -11,6 +11,8 @@
 //   frame in, it fails);
 // - onDismiss: the user's Esc on a screen Cancel is drawn on goes back to the app;
 // - dismissible(cancellable): Esc on the backup a new account lands on (no Cancel drawn) does nothing;
+// - the ground: main.ts hands the shell its sealed screens' ground (src/backdrop.ts), shown under the 12 words' field
+//   (the frame out) and never under the choose sheet (the frame kept);
 // - cancel()'s redraw: Esc, Cancel, the x or the scrim on the 12 words' field or Invalid code, with no account stored,
 //   leaves no field in the hidden screen (the typed words with it);
 // - the clipboard: Copy on the backup puts the 12 words there, and Saved, in its own tap, writes it empty (a write that
@@ -187,6 +189,8 @@ const tapSheet = (part: "close" | "scrim") => {
   for (const fn of el.ls.click ?? []) fn({ type: "click", isTrusted: true, timeStamp: tapAt });
 };
 // the 12 words' field, anywhere in the page
+// the sealed screens' ground: shown (not hidden) or not
+const groundShown = () => find(doc.body, (e) => e.id === "ground")?.hidden === false;
 const wordsBox = () => find(doc.body, (e) => e.dataset.input === "words");
 const esc = () => {
   for (const fn of keydowns) fn({ type: "keydown", key: "Escape", isTrusted: true, repeat: false, timeStamp: performance.now() + PROTECT_MS + 1 });
@@ -240,6 +244,8 @@ test("main.ts's sheet: a kind under a shown sheet refused, the frame out under a
   await until("the choose sheet", () => shown() && root().dataset.signin === "choose");
   await settle();
   assert.equal(frameIn(), true, "the frame stays under the choose sheet");
+  assert.ok(find(doc.body, (e) => e.id === "ground"), "the ground is in the page");
+  assert.equal(groundShown(), false, "no ground under the choose sheet: the frame stays");
   release();
   const again = await answer(secondId);
   assert.deepEqual(again?.error, { code: "not_allowed" }, `a signin.open decided while the sheet shows is refused: ${JSON.stringify(again)}`);
@@ -255,6 +261,7 @@ test("main.ts's sheet: a kind under a shown sheet refused, the frame out under a
   await until("the words field", () => root().dataset.signin === "words");
   await until("the frame out under the words field drawn on a shown sheet", () => !frameIn(), 1000);
   assert.deepEqual(fieldDrawn, [{ state: "words", frame: false }], "the frame was out when the field entered the page");
+  assert.equal(groundShown(), true, "the page's own ground under the words field");
 
   // onDismiss: Esc on a screen with Cancel goes back to the app, a new frame under it, and the field leaves the screen
   esc();

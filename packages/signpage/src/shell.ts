@@ -158,8 +158,13 @@ export interface Shell {
  * Draws the shell into `doc`: the APP_HOST frame filling the window at the top window's path and query, and the layer
  * over it, hidden until open() (an open kind asks for it), then starts the API to the frame. The shell answers nav and
  * reload itself (once `host.settle` does); `host.kinds` adds the screens' own (src/main.ts: signin.open, signout, backup.open).
+ * `host.ground`, the page's own ground (src/backdrop.ts drawSealedGround), shows from the task the frame leaves the page
+ * until the frame made at the close has painted over it.
  */
-export function mountShell(doc: Document, host: Omit<ApiHost, "parent" | "listen" | "readyOnLoad"> & { settle?: () => Promise<void> }): Shell {
+export function mountShell(
+  doc: Document,
+  host: Omit<ApiHost, "parent" | "listen" | "readyOnLoad"> & { settle?: () => Promise<void>; ground?: HTMLElement },
+): Shell {
   const view = doc.defaultView!;
   const sheet = drawSheet(doc);
   const layer = sheet.layer;
@@ -188,6 +193,8 @@ export function mountShell(doc: Document, host: Omit<ApiHost, "parent" | "listen
     veiled = null;
     if (veilCap !== null) clearTimeout(veilCap);
     veilCap = null;
+    // the new frame has painted over the ground (or never will): it goes with the dim, and stays where the frame left again
+    if (frame === f && host.ground) host.ground.hidden = true;
     if (frame !== f || !layer.hidden) return;
     veil.style.opacity = "0";
     setTimeout(() => layer.hidden && (veil.hidden = true), 200);
@@ -249,6 +256,8 @@ export function mountShell(doc: Document, host: Omit<ApiHost, "parent" | "listen
     frame.remove();
     frame = null;
     peer = NO_FRAME;
+    // the page's own ground under the sealed screen, in the same task (src/backdrop.ts drawSealedGround)
+    if (host.ground) host.ground.hidden = false;
     const draw = pending;
     pending = null;
     draw?.();

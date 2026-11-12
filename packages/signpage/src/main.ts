@@ -84,7 +84,8 @@ import { frameState } from "./state.ts";
 import { withVaultBalance } from "./vault-balance.ts";
 import { withPositions } from "./positions.ts";
 import { mountShell, type Shell } from "./shell.ts";
-import { drawBackdrop } from "./backdrop.ts";
+import { drawBackdrop, drawSealedGround, groundLogo } from "./backdrop.ts";
+import { GROUND_LOGO_SVG } from "./ground-logo.ts";
 import { SEALED } from "./frame-cover.ts";
 import { afterSaved, pageFor, takes, takesParams, type AccountKind } from "./pages/open.ts";
 import { vaultScope } from "./withdraw/checks.ts";
@@ -216,6 +217,9 @@ else {
   channel.addEventListener("message", (m) => notesMoved(m.data as WalletEvent));
   // under the APP_HOST frame: the app's boot frame as shapes, for the moment before a new frame paints (src/backdrop.ts)
   document.body.append(drawBackdrop(document));
+  // over it, the sealed screens' ground, shown by the shell while the frame is out of the page (src/backdrop.ts)
+  const ground = drawSealedGround(document, groundLogo(GROUND_LOGO_SVG));
+  document.body.append(ground);
   // the pool kinds' deps: the network's pins and each chain's two RPCs, which the price reads use too (src/pool-price.ts)
   const poolDeps = testnetPoolDeps(testnet?.flow, testnet ? () => testnet.outSignal() : undefined);
   const prices = poolPrices({ rpcs: (chain) => poolDeps.rpcs(chain) as readonly [SolanaRpc, SolanaRpc] | null });
@@ -337,6 +341,7 @@ else {
   shell = mountShell(document, {
     // reload waits for a running trade; sign out does too, in every tab (the trade holds the seed lock shared)
     settle: () => trades.idle(),
+    ground,
     // the private balance per chain's pool, from this page's own notes (src/pools.ts); the frame's state has none
     // a state read while a deposit note is still landing settles it again (src/pool-testnet.ts)
     // each pool's USD price, read by this page on the pool kinds' own RPC pair (src/pool-price.ts); each state read
