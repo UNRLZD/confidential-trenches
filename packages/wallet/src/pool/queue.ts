@@ -405,51 +405,26 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
     }
     return pool.now();
   };
-  /** take() and takeSet(): the notes' turns held together (taken in id order, so two sets never wait on each other),
-   *  every refusal before any write, then each HELD -> RESERVED in the order given. */
-  const takeIn = (items: readonly { noteId: string; attempt?: string }[], early: Promise<ChainNow> | undefined, lastHeight: bigint | undefined, nullifier?: bigint): Promise<ReadyProof<R>[]> => {
-    live();
-    const ids = items.map((x) => x.noteId).sort();
-    const inTurns = (k: number, f: () => Promise<ReadyProof<R>[]>): Promise<ReadyProof<R>[]> => (k === ids.length ? f() : onNote(ids[k]!, () => inTurns(k + 1, f)));
-    return inTurns(0, async () => {
-      live();
-      const rs = items.map(({ noteId, attempt }) => {
-        const r = ready.get(noteId);
-        if (r === undefined) throw new Error(`no ready proof for note ${noteId}`);
-        if (attempt !== undefined && r.attempt !== attempt) throw new Error(`note ${noteId}'s ready proof is another attempt: it was made again, so it is not taken`);
-        return r;
-      });
-      const nowMs = await takeNow(early);
-      const late = rs.map((r) =>
-        epochOf(nowMs) > r.epochStartMs + pool.epochMs
-          ? "is from before the previous epoch"
-          : r.root === "newest" && nowMs >= r.epochStartMs + pool.epochMs + NEWEST_GRACE_MS
-            ? `is on the newest root and its epoch ended over ${NEWEST_GRACE_MS} ms ago`
-            : r.deadlineMs - nowMs < pool.sendMarginMs + TAKE_SLACK_MS
-              ? `has less than the send margin + ${TAKE_SLACK_MS} ms left`
-              : undefined,
-      );
-      const at = late.findIndex((why) => why !== undefined);
-      if (at >= 0) {
-        // every late proof's note freed, to be made again; a set's others stay HELD with their proofs ready
-        for (const [k, why] of late.entries()) {
-          if (why === undefined) continue;
-          ready.delete(rs[k]!.noteId);
-          await free(rs[k]!.noteId, rs[k]!.attempt);
-        }
-        throw new Error(`the proof for note ${rs[at]!.noteId} ${late[at]}: it is made again first`);
+  /** Why a ready proof is too late to take at `nowMs` (it is made again first), or undefined. */
+  const lateOf = (r: ReadyProof<R>, nowMs: bigint): string | undefined =>
+    epochOf(nowMs) > r.epochStartMs + pool.epochMs
+      ? "is from before the previous epoch"
+      : r.root === "newest" && nowMs >= r.epochStartMs + pool.epochMs + NEWEST_GRACE_MS
+        ? `is on the newest root and its epoch ended over ${NEWEST_GRACE_MS} ms ago`
+        : r.deadlineMs - nowMs < pool.sendMarginMs + TAKE_SLACK_MS
+          ? `has less than the send margin + ${TAKE_SLACK_MS} ms left`
+          : undefined;
+  /** Each note HELD -> RESERVED in the order given; a write that fails frees its own note and throws. */
+  const reserve = async (rs: readonly ReadyProof<R>[], lastHeight: bigint | undefined, nullifier?: bigint): Promise<void> => {
+    for (const r of rs) {
+      ready.delete(r.noteId);
+      try {
+        await notes.move(r.noteId, "HELD", "RESERVED", { attempt: r.attempt, ...(lastHeight === undefined ? {} : { lastHeight }), ...(nullifier === undefined ? {} : { nullifier }) });
+      } catch (e) {
+        await free(r.noteId, r.attempt);
+        throw e;
       }
-      for (const r of rs) {
-        ready.delete(r.noteId);
-        try {
-          await notes.move(r.noteId, "HELD", "RESERVED", { attempt: r.attempt, ...(lastHeight === undefined ? {} : { lastHeight }), ...(nullifier === undefined ? {} : { nullifier }) });
-        } catch (e) {
-          await free(r.noteId, r.attempt);
-          throw e;
-        }
-      }
-      return rs;
-    });
+    }
   };
   const sorted = (): ReadyProof<R>[] => [...ready.values()].sort((x, y) => (order.get(x.noteId)! < order.get(y.noteId)! ? -1 : 1));
   return {
@@ -461,13 +436,55 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
     ready: () => sorted(),
     readyWith: (read) => inView(async () => ({ ready: sorted(), value: await read(), making: [...inFlight.keys()].filter((id) => !ready.has(id)) })),
     take(noteId, attempt, early, lastHeight, nullifier) {
-      return takeIn([{ noteId, attempt }], early, lastHeight, nullifier).then((x) => x[0]!);
+      live();
+      return onNote(noteId, async () => {
+        live();
+        const r = ready.get(noteId);
+        if (r === undefined) throw new Error(`no ready proof for note ${noteId}`);
+        if (attempt !== undefined && r.attempt !== attempt) throw new Error(`note ${noteId}'s ready proof is another attempt: it was made again, so it is not taken`);
+        const nowMs = await takeNow(early);
+        const why = lateOf(r, nowMs);
+        if (why !== undefined) {
+          ready.delete(noteId);
+          await free(noteId, r.attempt);
+          throw new Error(`the proof for note ${noteId} ${why}: it is made again first`);
+        }
+        await reserve([r], lastHeight, nullifier);
+        return r;
+      });
     },
+    // take() of several notes: their turns held together (taken in id order, so two sets never wait on each other),
+    // every refusal before any write, then each HELD -> RESERVED in the order given
     takeSet(items, early, lastHeight) {
       if (!Array.isArray(items) || items.length === 0 || new Set(items.map((x) => x.noteId)).size !== items.length || items.some((x) => typeof x.attempt !== "string")) {
         return Promise.reject(new Error("takeSet: one or more notes, each once, each with its attempt"));
       }
-      return takeIn(items, early, lastHeight);
+      live();
+      const ids = items.map((x) => x.noteId).sort();
+      const inTurns = (k: number, f: () => Promise<ReadyProof<R>[]>): Promise<ReadyProof<R>[]> => (k === ids.length ? f() : onNote(ids[k]!, () => inTurns(k + 1, f)));
+      return inTurns(0, async () => {
+        live();
+        const rs = items.map(({ noteId, attempt }) => {
+          const r = ready.get(noteId);
+          if (r === undefined) throw new Error(`no ready proof for note ${noteId}`);
+          if (r.attempt !== attempt) throw new Error(`note ${noteId}'s ready proof is another attempt: it was made again, so it is not taken`);
+          return r;
+        });
+        const nowMs = await takeNow(early);
+        const late = rs.map((r) => lateOf(r, nowMs));
+        const at = late.findIndex((why) => why !== undefined);
+        if (at >= 0) {
+          // every late proof's note freed, to be made again; the set's others stay HELD with their proofs ready
+          for (const [k, why] of late.entries()) {
+            if (why === undefined) continue;
+            ready.delete(rs[k]!.noteId);
+            await free(rs[k]!.noteId, rs[k]!.attempt);
+          }
+          throw new Error(`the proof for note ${rs[at]!.noteId} ${late[at]}: it is made again first`);
+        }
+        await reserve(rs, lastHeight);
+        return rs;
+      });
     },
     async drop(noteId) {
       const f = inFlight.get(noteId);

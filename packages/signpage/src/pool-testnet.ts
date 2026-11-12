@@ -1317,13 +1317,13 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         return list;
       },
       take: async (id, attempt, early, lastHeight) => (taken = await (await q()).take(id, attempt, early, lastHeight)),
+      chainNow: () => chainNow(over.pool ?? { now: (signal) => solanaNow(rpcs(), signal) }),
       // a buy's pieces, all RESERVED or none (card buy-spends-several-pieces); the run's buy is the last, its tag 3
       takeSet: async (items, early, lastHeight) => {
         const got = await (await q()).takeSet(items, early, lastHeight);
         taken = got[got.length - 1] ?? null;
         return got;
       },
-      chainNow: () => chainNow(over.pool ?? { now: (signal) => solanaNow(rpcs(), signal) }),
       // the run ended "sent": its note is followed by the state reads' pass until its end is known (followBuys)
       follow: (post) => {
         if (taken === null) return;

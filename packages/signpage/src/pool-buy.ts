@@ -585,7 +585,10 @@ export const POOL_RELEASE_CU = 400_000;
 export type PickPiece = { readonly wallet: { readonly address: string }; readonly own?: true; readonly chunk: bigint; readonly root?: string };
 export function pickPieces<P extends PickPiece>(list: readonly P[], pays: (set: readonly P[]) => boolean, max: number = SOLANA_POOL_BUY_PIECES_MAX): P[] | null {
   const byW = new Map<string, P[]>();
-  for (const p of list) byW.set(p.wallet.address, [...(byW.get(p.wallet.address) ?? []), p]);
+  // the smallest chunk first and, of one chunk, a proof on the epoch root before one on the newest root: of two sets
+  // alike in every weight the first found wins, and the cut below keeps the epoch root's of one chunk
+  const sorted = [...list].sort((x, y) => (x.chunk < y.chunk ? -1 : x.chunk > y.chunk ? 1 : x.root === y.root ? 0 : x.root === "epoch" ? -1 : 1));
+  for (const p of sorted) byW.set(p.wallet.address, [...(byW.get(p.wallet.address) ?? []), p]);
   let best: { set: P[]; sum: bigint; newest: number } | null = null;
   const weigh = (set: P[]): void => {
     const sum = set.reduce((a, p) => a + p.chunk, 0n);
@@ -634,7 +637,7 @@ export async function runPoolBuy(host: PoolBuyHost, ask: PoolAsk, waits: ReadWai
 async function buyRun(h: PoolBuyHost, ask: PoolAsk, at: { fault?: unknown }): Promise<PoolBuyAnswer> {
   let seed: Uint8Array | null = null;
   let key: Uint8Array | null = null;
-  let claim: string[] = [];
+  let claim: string[] | null = null;
   // from here on W signs: a provider that fails past this is never "down" (the transaction may land)
   let signing = false;
   const wait = h.wait ?? ((ms: number) => new Promise<void>((res) => setTimeout(res, ms)));
@@ -816,7 +819,7 @@ async function buyRun(h: PoolBuyHost, ask: PoolAsk, at: { fault?: unknown }): Pr
   } finally {
     seed?.fill(0);
     key?.fill(0);
-    for (const id of claim) h.claimed?.delete(id);
+    for (const id of claim ?? []) h.claimed?.delete(id);
   }
 }
 
@@ -864,6 +867,26 @@ export async function sendAndSettle(
   // slot's pace, 300 times in 120 s); back to the pace only once a round goes through whole (`faults` unchanged in it),
   // since a provider that refuses one method still answers the others
   const backoff = (cur: number, e: unknown): number => throttleWaitMs(cur, e instanceof SolanaRpcTransportError ? e.afterMs : null, POOL_BUY_THROTTLE);
+  // the notes this run settles (card buy-spends-several-pieces): one part's, the host's settle; several parts', each
+  // part's note in send order (`left`, the ones not found spent yet: each asked until it is, then never again), spent
+  // once every one is, a throw when one threw (not known yet), else unspent
+  const left = parts.map((p) => p.r.noteId);
+  const noteSet = {
+    settle: async (id: string, minSlots?: readonly [number, number]): Promise<{ kind: "spent" | "unspent" }> => {
+      if (parts.length === 1) return h.settle(id, minSlots);
+      let thrown: { e: unknown } | null = null;
+      for (const n of [...left]) {
+        try {
+          if ((await h.settle(n, minSlots)).kind === "spent") left.splice(left.indexOf(n), 1);
+        } catch (e) {
+          thrown ??= { e };
+        }
+      }
+      if (left.length === 0) return { kind: "spent" };
+      if (thrown !== null) throw thrown.e;
+      return { kind: "unspent" };
+    },
+  };
   let pace = POOL_BUY_POLL_MS;
   let faults = 0;
   const slow = (e: unknown): void => void (faults++, (pace = backoff(pace, e)));
@@ -873,22 +896,12 @@ export async function sendAndSettle(
   // the settle's own wait (card pool-buy-filled-2s): it lists every mark of the pool, so after one that threw (still no
   // answer) or, past the finality gate, found no spend, the next waits twice as long, from the slot's time to the cap
   let hold = POOL_BUY_POLL_MS;
-  const settler = { settle: (id: string, minSlots?: readonly [number, number]) => h.settle(id, minSlots).catch((e: unknown) => ((hold = backoff(hold, e)), Promise.reject(e))) };
-  // every part's note: spent once each one's settle found it spent (each asked until it does, then never again);
-  // false when one says unspent and none threw, null when one threw
-  const done = new Set<string>();
+  const settler = { settle: (id: string, minSlots?: readonly [number, number]) => noteSet.settle(id, minSlots).catch((e: unknown) => ((hold = backoff(hold, e)), Promise.reject(e))) };
   const spent = async (minSlots?: readonly [number, number]): Promise<boolean | null> => {
     if (settled) return true;
-    let out: boolean | null = true;
-    for (const p of parts) {
-      if (done.has(p.r.noteId)) continue;
-      const s = await settler.settle(p.r.noteId, minSlots).then((x) => x.kind === "spent", () => null);
-      if (s === true) done.add(p.r.noteId);
-      else if (s === null) out = null;
-      else if (out === true) out = false;
-    }
-    settled = out === true;
-    return out;
+    const s = await settler.settle(r.noteId, minSlots).then((x) => x.kind === "spent", () => null);
+    settled = s === true;
+    return s;
   };
   // whose spend it is, on both RPCs at finalized (spendOwner), read at or past both RPCs' finalized slot read after
   // the settle found it; W's history read on across the reads of this run from where each RPC stopped. The pin is the
@@ -965,15 +978,19 @@ export async function sendAndSettle(
   // else nothing it said is read
   const named = parts.length === 1 ? [(answer as { signature?: unknown } | null)?.signature] : (answer as { signatures?: unknown } | null)?.signatures;
   const isSig = (x: unknown): x is string => typeof x === "string" && /^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(x) && base58.decode(x).length === 64;
-  if (!Array.isArray(named) || named.length !== parts.length || !named.every(isSig) || new Set(named).size !== named.length) return unlanded([]);
-  const sigs = named as string[];
-  const signature = sigs[sigs.length - 1]!;
+  const sigs = Array.isArray(named) && named.length === parts.length && named.every(isSig) && new Set(named).size === named.length ? (named as string[]) : null;
+  // the buy's own (the last part's): the one the hook below names, checked as the one-piece answer always was
+  const signature = sigs?.[sigs.length - 1];
+  if (sigs === null || typeof signature !== "string" || base58.decode(signature).length !== 64) return unlanded([]);
   // the helper's word: a name to read back, kept by a withdraw's owed send, never told or answered before it reads back
   await h.named?.(signature);
   // the answers that name them: only once each RPC read every part's very bytes under its name (`seen`), then told
   // as sent once, by the buy's own; one read as another transaction, or on one RPC only, is never named
   const txs: TxRef[] = [signature, ...sigs.slice(0, -1)].map((hash) => ({ chain: "solana", hash }));
-  const seen = parts.map(() => [false, false]);
+  // each part's slot per RPC (read as that part's very bytes under its name), and `seen`, each RPC's once it has read
+  // every part so: the one pair the sent guard reads
+  const seenPart = parts.map(() => [false, false]);
+  const seen = [false, false];
   let ours = false;
   let landed = false;
   // each RPC's slot of the buy's transaction at confirmed, as it said it: the settle waits for its finalized slot. An
@@ -987,29 +1004,32 @@ export async function sendAndSettle(
   };
   for (let i = 0; i < reads && !landed && (i === 0 || inTime()); i++) {
     if (i > 0) await waitIn(lifeLeft(pace));
-    type Read = Awaited<ReturnType<typeof readBackMeta>>;
+    // each RPC's read of every part (its `each`, in send order), the buy's own read its own fields; a read that fails,
+    // any part's, fails the round: each part read none
+    type Read = Awaited<ReturnType<typeof readBackMeta>> & { each?: readonly Awaited<ReturnType<typeof readBackMeta>>[] };
     let fault = false;
-    const all: readonly (readonly Read[])[] = await Promise.all(parts.map((p, k) => both(h, (rpc) => readBackMeta(rpc, sigs[k]!, p.signed)))).catch((e: unknown): Read[][] => {
+    const metas: readonly Read[] = await both(h, (rpc) => Promise.all(parts.map((p, k) => readBackMeta(rpc, sigs[k]!, p.signed))).then((each): Read => ({ ...each[each.length - 1]!, each }))).catch((e: unknown): Read[] => {
       fault = true;
       slow(e);
-      return parts.map(() => [{ got: "none" }, { got: "none" }]);
+      return [{ got: "none" }, { got: "none" }];
     });
     if (!fault) pace = POOL_BUY_POLL_MS;
-    const metas = all[all.length - 1]!;
     txSlots = metas.map((m, k) => m.slot ?? metas[1 - k]?.slot);
-    const got: readonly (readonly Got[])[] = all.map((x) => x.map((m) => m.got));
-    all.forEach((x, k) => x.forEach((m, q) => void (seen[k]![q] ||= m.mine === true)));
+    const got: readonly (readonly Got[])[] = parts.map((_, k) => metas.map((m) => m.each?.[k]?.got ?? "none"));
+    parts.forEach((_, k) => metas.forEach((m, q) => void (seenPart[k]![q] ||= m.each?.[k]?.mine === true)));
+    const perRpc = [0, 1].map((q) => ({ mine: seenPart.every((x) => x[q]) }));
+    perRpc.forEach((m, p) => void (seen[p] ||= m.mine === true));
     // another transaction under a name on both RPCs: the helper's signature is not that part's
     if (got.some((g) => g[0] === "other" && g[1] === "other")) return unlanded([], sigs);
     // a part failed on chain, on both RPCs: it spent nothing and can never land again, and the bundle with it (a part
     // the helper sent alone may have landed: its note is settled, but no buy is filled); a spend the settle finds then
     // is not this buy's, so not_landed at once
-    if (got.some((g) => g[0] === "failed" && g[1] === "failed")) return (await spent()) || done.size > 0 ? { stage: "not_landed", txs } : { stage: "refused", txs };
+    if (got.some((g) => g[0] === "failed" && g[1] === "failed")) return (await spent()) || left.length < parts.length ? { stage: "not_landed", txs } : { stage: "refused", txs };
     landed = got.every((g) => g[0] === "ok" && g[1] === "ok");
     // read back on both RPCs as these very transactions: only now is the buy told as sent, by its signature; a buy
     // tells it as a route fact too (card pool-buy-send-fast), which reaches the app however late it comes: an answer
     // past the kit client's 10 s is dropped (a mainnet bundle the helper holds until it lands)
-    if (!ours && seen.every((x) => x[0] && x[1])) {
+    if (!ours && seen[0] && seen[1]) {
       ours = true;
       tellTx(signature);
       await h.sent?.(signature);
@@ -1028,7 +1048,8 @@ export async function sendAndSettle(
     }
   }
   if (!landed) return unlanded(ours ? txs : [], sigs);
-  for (const p of parts) h.landed?.(p.r.noteId, p.r.attempt, p.release.withdrawnValue);
+  h.landed?.(r.noteId, r.attempt, release.withdrawnValue);
+  for (const p of before) h.landed?.(p.r.noteId, p.r.attempt, p.release.withdrawnValue);
   // only now: the note SPENT, its change written (solanaSettleSpent reads the spent mark at finalized), then filled
   // only once both RPCs read the spend as this attempt's. The settle lists every mark of the pool, so it is asked only
   // once each RPC's finalized slot reaches the slot it read this transaction at (card pool-buy-filled-2s: run 3 asked

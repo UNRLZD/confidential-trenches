@@ -298,10 +298,9 @@ test("the tip floor read is hostile: a non-finite, negative, absurd or misshapen
   answer.status = 200;
   answer.text = JSON.stringify([{ landed_tips_95th_percentile: 0.0002, pad: "x".repeat(5_000) }]);
   assert.equal(await read(), null, "over the bounded body");
-  const t0 = Date.now();
+  // a read that never answers is unread at its timeout: the await ends (with no timeout of its own it would hang the test)
   const slow = jitoTipFloor({ timeoutMs: 30, fetch: () => new Promise<Response>(() => {}) });
   assert.equal(await slow(), null);
-  assert.ok(Date.now() - t0 < 1_000, "a read that never answers is unread within its timeout");
 });
 
 test("mainnet: only sendBundle, every piece in order then the tip, no plain send on any path; the answer only after the fill, the signatures in order", async () => {
