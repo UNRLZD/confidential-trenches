@@ -325,7 +325,10 @@
 /* desktop: the header row is fixed (the positions bar needs its 9 rows), so Where it is gives its dot strips' height
    to the pool rows; the phone keeps them (placement on the owner's picks page) */
 .pfd .eqbrk .pvtstrip { display: none; }
-.pfd .eqbrk { gap: 6px; }
+.pfd .eqbrk { gap: 4px; }
+/* four pools (NEAR's vault row first, card app-faults-seen-on-122) fit the fixed panel at 1440 x 900 with no scroll: the
+   rows 4px apart and the block 2px under the tiles (the signed-in walk of release 124, 12 Nov: Robinhood, the 4th, was cut off the bottom) */
+.pfd .pools:not(.wls) { row-gap: 4px; margin-top: 2px; }
 
 /* Wallets (card app-export-every-wallet): each wallet with money and no position, in the pools' grid, its Export key icon */
 .pools.wls { margin-top: 10px; }
