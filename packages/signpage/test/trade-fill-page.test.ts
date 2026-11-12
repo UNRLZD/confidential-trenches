@@ -199,3 +199,29 @@ test("T5: a sign out mid-fill: the read in flight is aborted, and no other trade
     globalThis.fetch = real;
   }
 });
+
+// Review of 2681c1edf, P3-3: the stop holds on every reader, the testnet build's and a test's pair included (they carry
+// no stop of their own). A sale of two legs on the pair: the first leg's answer comes after the sign out; the second
+// leg's read is never asked. Red before: only the mainnet reader carried the stop, so the second leg's read went out.
+test("T6: a sign out mid-fill on the pair: no read is asked after it, the next leg's included", async () => {
+  const w = await store();
+  await w.put("ops", "s2", { kind: "sell", pool: "sol", stage: "filled", chain: "solana", token: ICM, txs: [{ chain: "solana", hash: SELL1 }, { chain: "solana", hash: "Sig-leg2" }], created_ms: 2, legs: [{ wallet: "TcYd32AdSHY5zuqSK2a7PvkDv8FQvafyTs2uS1ztkZX" }] });
+  const asked: string[] = [];
+  const waiting: (() => void)[] = [];
+  const answer = (sig: string) => (sig === SELL1 ? fx("32CSJ1") : null);
+  const pairOf = [0, 1].map(() => (async (method: string, params: readonly unknown[]) => {
+    if (method !== "getTransaction") return [];
+    const sig = params[0] as string;
+    asked.push(sig);
+    // the answer waits for the test
+    return await new Promise((r) => waiting.push(() => r(answer(sig))));
+  }) as SolanaRpc) as unknown as readonly [SolanaRpc, SolanaRpc];
+  const tp = testnetPool({ store: async () => w, seed64: async () => SEED64.slice(), price: () => PRICE }, { pin: PIN, rpcs: pairOf, table: "Table111111111111111111111111111111111111111", holdings: () => ({ chain: "sol", read: async () => ({ native: 0n, tokens: new Map(), unreadable: [] }) }), positions: { setTimer: () => {}, clearTimer: () => {} } } as never);
+  void tp.settle().catch(() => {});
+  await until(() => asked.length === 1, "the first leg's read went out");
+  await tp.signedOut();
+  for (const f of waiting.splice(0)) f();
+  await tick(150);
+  assert.deepEqual(asked, [SELL1], "no read asked after the sign out");
+  assert.equal((await w.get("ops", "s2") as { pool_amount?: string }).pool_amount, undefined, "nothing written");
+});

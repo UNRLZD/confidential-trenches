@@ -1736,7 +1736,9 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     if (filling) return void (fillAgain = true);
     const signal = fillStop.signal;
     // one reader, the helper's route (the positions finder's): no read names a W or a signature to a public provider
-    const one = POOL_TESTNET ? rpcs("pass")[0] : over.rpcs ? over.rpcs[1] : solanaPacedRpc(pageHelperRpcStopped(TRADE_HELPER, signal, "pass"));
+    const reader = POOL_TESTNET ? rpcs("pass")[0] : over.rpcs ? over.rpcs[1] : solanaPacedRpc(pageHelperRpcStopped(TRADE_HELPER, signal, "pass"));
+    // every reader asks only before the stop (the testnet build's and a test's carry none of their own)
+    const one: SolanaRpc = (method, params) => (signal.throwIfAborted(), reader(method, params));
     const read = (sig: string): Promise<unknown> => one("getTransaction", [sig, { encoding: "json", commitment: "finalized", maxSupportedTransactionVersion: 0 }]);
     filling = (async () => {
       const store = (await page.store()) as unknown as FillStore;
