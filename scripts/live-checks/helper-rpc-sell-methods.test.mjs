@@ -5,6 +5,11 @@
 // getSignaturesForAddress, getFeeForMessage, getBlockTime and getEpochInfo refused 400 method_not_allowed, and
 // getTokenLargestAccounts 429 from the public endpoint, which answers that method 429 to that Mac: FAIL. Made from the
 // good run: a refusal, another id, a * origin, a missing read, a 429 left after its wait: each FAIL.
+// getRecentPrioritizationFees (card round-trip-costs-less, the sale's fee read) came onto the list after that run, so
+// the good run takes its one read from fees_good: the check's own read() over the kit's list at 4f921797, that method
+// sent to a helper at 4f921797 run on a Mac with no key (the public endpoint; 12 Nov 21:24Z), the others answered from
+// the good run. fees_bad_deployed: the same read sent to the deployed helper at a74c37a6, which refuses it 400
+// method_not_allowed: FAIL. The deploy of the helper with the method is what the check then reads live.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -30,14 +35,27 @@ const replay = (rec, sent = []) => async (url, init) => {
 };
 const run = async (rec, opts = {}) => judge(await read(BASE, replay(rec), { methods: rec.methods, program: rec.program, wait: async () => {}, ...opts }));
 const bad = (r) => r.lines.filter((l) => l.startsWith("BAD")).map((l) => l.slice(0, l.indexOf("]") + 1));
-const edit = (method, f) => ({ ...A.good, reads: A.good.reads.map((x) => (x.method === method ? f(structuredClone(x)) : x)) });
+// the good run with the fee read's recorded answer, over the kit's list as it is now
+const withFees = (fee) => ({ ...A.good, methods: [...HELPER_RPC_METHODS.solana], reads: [...A.good.reads, fee.read] });
+const GOOD = withFees(A.fees_good);
+const edit = (method, f) => ({ ...GOOD, reads: GOOD.reads.map((x) => (x.method === method ? f(structuredClone(x)) : x)) });
 
 test("recorded good run: the deployed helper answers every method on the kit's Solana list: PASS", async () => {
-  const r = await run(A.good);
+  const r = await run(GOOD);
   assert.equal(r.ok, true, r.lines.join("\n"));
-  assert.deepEqual(A.good.methods, [...HELPER_RPC_METHODS.solana]);
-  assert.equal(r.lines.length, 1 + 18 * 3 + 1);
+  assert.deepEqual(A.good.methods, [...HELPER_RPC_METHODS.solana].filter((m) => m !== "getRecentPrioritizationFees"));
+  assert.equal(r.lines.length, 1 + 19 * 3 + 1);
   assert.ok(r.lines.some((l) => l.startsWith('ok  [getFeeForMessage] answered: 200 {"jsonrpc":"2.0","id":16,"result":"object"}')));
+  assert.ok(r.lines.includes('ok  [getRecentPrioritizationFees] answered: 200 {"jsonrpc":"2.0","id":19,"result":"array"}'));
+  // the recorded good run alone, before the fee read was listed, now fails on it: no read
+  assert.ok(judge({ ...A.good, methods: [...HELPER_RPC_METHODS.solana] }).lines.includes("BAD [getRecentPrioritizationFees] no read"));
+});
+
+test("recorded bad run: the deployed helper before the sale's fee read was listed refuses getRecentPrioritizationFees: FAIL", async () => {
+  const r = await run(withFees(A.fees_bad_deployed));
+  assert.equal(r.ok, false);
+  assert.deepEqual(bad(r), ["BAD [getRecentPrioritizationFees]"]);
+  assert.ok(r.lines.includes('BAD [getRecentPrioritizationFees] answered: 400 {"error":{"code":"method_not_allowed"}}'));
 });
 
 test("recorded bad run: the helper before the pool path's reads were listed refuses getFeeForMessage, getSlot and getEpochInfo: FAIL", async () => {
@@ -54,10 +72,10 @@ test("made from the good run: a refusal, an answer for another id, a * origin, a
   assert.deepEqual(bad(await run(id)), ["BAD [getSlot]"]);
   const star = edit("sendTransaction", (x) => ((x.headers["access-control-allow-origin"] = "*"), x));
   assert.deepEqual(bad(await run(star)), ["BAD [sendTransaction]"]);
-  const missing = judge({ ...A.good, reads: A.good.reads.filter((x) => x.method !== "getFeeForMessage") });
+  const missing = judge({ ...GOOD, reads: GOOD.reads.filter((x) => x.method !== "getFeeForMessage") });
   assert.ok(missing.lines.includes("BAD [getFeeForMessage] no read"));
   // a mainnet pool on record: getProgramAccounts is then read, and a run without it fails
-  assert.ok(judge({ ...A.good, program: "11111111111111111111111111111111" }).lines.includes("BAD [getProgramAccounts] no read"));
+  assert.ok(judge({ ...GOOD, program: "11111111111111111111111111111111" }).lines.includes("BAD [getProgramAccounts] no read"));
 });
 
 test("a 429 is waited out once for its Retry-After and sent again; a second 429 is recorded and fails", async () => {
@@ -67,16 +85,16 @@ test("a 429 is waited out once for its Retry-After and sent again; a second 429 
     const f = async (url, init) => {
       const body = JSON.parse(init.body);
       if (body.method === "getSlot" && left-- > 0) return new Response('{"error":{"code":"rate_limited"}}', { status: 429, headers: { ...A.good.reads[0].headers, "retry-after": "3" } });
-      return replay(A.good)(url, init);
+      return replay(GOOD)(url, init);
     };
     return { f, waits, wait: async (ms) => void waits.push(ms) };
   };
   const a = once(1);
-  const r1 = judge(await read(BASE, a.f, { methods: A.good.methods, program: null, wait: a.wait }));
+  const r1 = judge(await read(BASE, a.f, { methods: GOOD.methods, program: null, wait: a.wait }));
   assert.equal(r1.ok, true, r1.lines.join("\n"));
   assert.deepEqual(a.waits, [3100]);
   const b = once(2);
-  const r2 = judge(await read(BASE, b.f, { methods: A.good.methods, program: null, wait: b.wait }));
+  const r2 = judge(await read(BASE, b.f, { methods: GOOD.methods, program: null, wait: b.wait }));
   assert.deepEqual(bad(r2), ["BAD [getSlot]"]);
   assert.deepEqual(b.waits, [3100]);
 });
@@ -84,9 +102,10 @@ test("a 429 is waited out once for its Retry-After and sent again; a second 429 
 test("every method on the kit's Solana list has its request, and getProgramAccounts is the restore's shape on the record's program", async () => {
   for (const m of HELPER_RPC_METHODS.solana) assert.ok(PARAMS[m] !== undefined, `no params for ${m}`);
   const sent = [];
-  const rec = { ...A.good, program: "11111111111111111111111111111111", reads: [...A.good.reads, { method: "getProgramAccounts", id: 19, status: 200, headers: A.good.reads[0].headers, body: '{"jsonrpc":"2.0","id":19,"result":"object"}' }] };
+  const rec = { ...GOOD, program: "11111111111111111111111111111111", reads: [...GOOD.reads, { method: "getProgramAccounts", id: 20, status: 200, headers: A.good.reads[0].headers, body: '{"jsonrpc":"2.0","id":20,"result":"object"}' }] };
   const r = judge(await read(BASE, replay(rec, sent), { methods: rec.methods, program: rec.program, wait: async () => {} }));
   assert.equal(r.ok, true, r.lines.join("\n"));
   // apps/helper/src/rpc/rpc.test.ts SPENT less minContextSlot, which the helper forwards with or without it
+  assert.deepEqual(sent.find((b) => b.method === "getRecentPrioritizationFees").params, [["SysvarC1ock11111111111111111111111111111111"]]);
   assert.deepEqual(sent.find((b) => b.method === "getProgramAccounts").params, [rec.program, { commitment: "finalized", encoding: "base64", withContext: true, filters: [{ dataSize: 13 }, { memcmp: { offset: 9, bytes: "1112" } }] }]);
 });

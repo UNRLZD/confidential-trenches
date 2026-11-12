@@ -451,5 +451,37 @@
     "body": "{\"error\":{\"code\":\"method_not_allowed\"}}"
    }
   ]
+ },
+ "fees_good": {
+  "base": "http://127.0.0.1:18081",
+  "at": "2026-11-12T21:24:47.336Z",
+  "commit": "4f921797249e586dae7ca78d1b4f604ef21eb7e7",
+  "read": {
+   "method": "getRecentPrioritizationFees",
+   "id": 19,
+   "ms": 150,
+   "status": 200,
+   "headers": {
+    "x-helper-commit": "4f921797249e586dae7ca78d1b4f604ef21eb7e7",
+    "access-control-allow-origin": "https://confidential.unrealized.trade"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":19,\"result\":\"array\"}"
+  }
+ },
+ "fees_bad_deployed": {
+  "base": "https://ct-api.unrealized.trade",
+  "at": "2026-11-12T21:24:48.388Z",
+  "commit": "a74c37a64cc77d32b609575af69c6795d86d7a2c",
+  "read": {
+   "method": "getRecentPrioritizationFees",
+   "id": 19,
+   "ms": 883,
+   "status": 400,
+   "headers": {
+    "x-helper-commit": "a74c37a64cc77d32b609575af69c6795d86d7a2c",
+    "access-control-allow-origin": "https://confidential.unrealized.trade"
+   },
+   "body": "{\"error\":{\"code\":\"method_not_allowed\"}}"
+  }
  }
 }
