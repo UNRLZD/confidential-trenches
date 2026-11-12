@@ -6,7 +6,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { SignpageState } from "@blindfill/kit";
-import { amountText, amountWrong, centsToUnits, coinTapAgainMs, coinTapKey, decimalToUnits, feeAskAmount, feeCents, parseUsd, poolBuyAsk, poolSellAsk, poolView, presetsOf, PRESETS, unitsToCents, unitsToDecimal, withCoinTap } from "../src/screens/trade/model.ts";
+import { amountText, amountWrong, centsToUnits, coinTapAgainMs, coinTapKey, decimalToUnits, feeAskAmount, feeCents, feeShown, parseUsd, poolBuyAsk, poolSellAsk, poolView, presetsOf, PRESETS, unitsToCents, unitsToDecimal, withCoinTap } from "../src/screens/trade/model.ts";
 
 type Pool = NonNullable<SignpageState["pools"]>[number];
 // Pyth SOL/USD as read on 4 Nov 07:40Z (packages/kit/src/price/pool-usd.ts): $93.01048308
@@ -165,4 +165,12 @@ test("card buy-spends-several-pieces: the Fee row asks the cost of the typed amo
   assert.equal(feeCents("0.10751476", SOL), 1_000n); // $10.00, the $9.99 rounded down read up
   for (const bad of [undefined, "", "-1", "1e3", "0x10", "0.0000000001"]) assert.equal(feeCents(bad, SOL), null, String(bad));
   assert.equal(feeCents("0.0014", null), null);
+  // the row keeps the coin's last answer while a newer amount is asked and as the price ticks; another coin's, none
+  const read = { key: "solana:MINT", cost: "0.0014" };
+  assert.equal(feeShown(read, "solana:MINT", 16n, SOL), 14n);
+  assert.equal(feeShown(read, "solana:MINT", 99n, SOL), 14n, "a newer amount typed: the last cost until its own answer");
+  assert.equal(feeShown(read, "solana:MINT", 16n, { ...SOL, price: SOL.price * 2n }), 27n, "a price tick reprices the same cost (0.0014 SOL at $186.02, rounded up)");
+  assert.equal(feeShown(read, "solana:OTHER", 16n, SOL), null, "another coin's answer is never shown");
+  assert.equal(feeShown(null, "solana:MINT", 16n, SOL), null);
+  assert.equal(feeShown(read, "solana:MINT", null, SOL), null, "no amount typed");
 });

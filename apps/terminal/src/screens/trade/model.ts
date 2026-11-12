@@ -376,6 +376,17 @@ export function feeAskAmount(amount: Cents | null, price: PoolPrice | null): str
   return u > 0n ? unitsToDecimal(u, price.decimals) : null;
 }
 
+/** The page's last Fee answer for a coin: its `cost`, kept until the next answer replaces it. */
+export type FeeRead = { key: string; cost: string };
+
+/** The Fee row's cents now: the last answer for this coin at today's price, kept while a newer amount is asked (it is
+ *  replaced, never blanked, so the row does not flicker as the user types or the price ticks); null (a dash) for
+ *  another coin's answer, no answer yet, or no amount typed. */
+export function feeShown(read: FeeRead | null, coinKey: string | null, amount: Cents | null, price: PoolPrice | null): Cents | null {
+  if (read === null || coinKey === null || read.key !== coinKey || amount === null || amount <= 0n) return null;
+  return feeCents(read.cost, price);
+}
+
 /** The Fee row's USD (owner 12 Nov 13:40Z: "Fee", the buy's whole cost: relay fees, the tip and what the buy leaves for
  *  good): pool.buy.dry's `cost` (whole units of the pool's asset, the page's word) at the device's price, rounded up so
  *  it never reads under what the buy costs; null (a dash) until it is read, or when it is not a plain decimal. */

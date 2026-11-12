@@ -18,7 +18,8 @@ import {
   coinTapAgainMs,
   coinTapKey,
   feeAskAmount,
-  feeCents,
+  feeShown,
+  type FeeRead,
   filledOut,
   fmtUsd,
   hasPool,
@@ -216,10 +217,13 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
   const pool = onPool ? poolView(pools, chain, price) : null;
   // Fee (card buy-spends-several-pieces; owner 12 Nov 13:40Z): the page's pool.buy.dry for the typed amount, its `cost`
   // in USD; a dash until it answers for this coin, these proofs and this amount, never a guess
-  const feeAmount = coinKey !== null ? feeAskAmount(amount, price) : null;
-  const [feeRead, setFeeRead] = useState<{ key: string; amount: string; cost: string } | null>(null);
+  // asked once per amount the box rests on, keyed on the typed USD (never on a price tick); the price is read at the ask
+  const priceNow = useRef(price);
+  priceNow.current = price;
+  const [feeRead, setFeeRead] = useState<FeeRead | null>(null);
   useEffect(() => {
     const ask = request.current;
+    const feeAmount = coinKey !== null ? feeAskAmount(amount, priceNow.current) : null;
     if (coinKey === null || feeAmount === null || !ask) return;
     let live = true;
     let t: ReturnType<typeof setTimeout> | undefined;
@@ -229,7 +233,7 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
         ask("pool.buy.dry", { chain: "solana", token, amount: feeAmount }).outcome.then(
           (o) => {
             if (!live) return;
-            if (o.ok) return void (o.result.cost !== undefined && setFeeRead({ key: coinKey, amount: feeAmount, cost: o.result.cost }));
+            if (o.ok) return void (o.result.cost !== undefined && setFeeRead({ key: coinKey, cost: o.result.cost }));
             const again = coinTapAgainMs(o.error.code);
             if (again !== null && (o.error.code !== "down" || downs++ < 3)) t = setTimeout(once, again);
           },
@@ -245,8 +249,8 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
       live = false;
       clearTimeout(t);
     };
-  }, [coinKey, feeAmount, kit.request !== null]);
-  const fee = onPool && feeRead !== null && feeRead.key === coinKey && feeRead.amount === feeAmount ? feeCents(feeRead.cost, price) : null;
+  }, [coinKey, amount, kit.request !== null]);
+  const fee = onPool ? feeShown(feeRead, coinKey, amount, price) : null;
   // the proof's state reads state.pools alone: it draws with no price
   const proof = onPool ? proofStatus(pools, chain) : "none";
   // Bal: the vault path's money (Cash less the SOL and ETH pools, useOffPool) on a chain with no pool, the pool's on a
