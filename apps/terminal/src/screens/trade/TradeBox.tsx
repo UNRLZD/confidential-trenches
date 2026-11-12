@@ -483,7 +483,7 @@ export function TradeView({ t, symbol, footer, toast = true }: { t: Trade; symbo
         <span data-pending={pending || undefined} data-testid="trade-receive">{est}</span>
       </div>
       {feeShown && (
-        <div className="trb-receive" data-testid="trade-fee">
+        <div className="trb-receive" data-testid="trade-cost">
           <span><W id="buyFee" /></span>
           <span>{fee === null ? "—" : fmtUsd(fee)}</span>
         </div>

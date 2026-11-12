@@ -196,7 +196,7 @@ try {
         // the Fee row (owner 12 Nov 13:40Z, card buy-spends-several-pieces): on a Solana pool buy only, the cost of the typed
         // amount in USD, rounded up (0.0014 SOL at $93.01 is $0.1302: $0.14); a dash while it is not read
         await page.clock.runFor(300);
-        const feeEl = page.locator('[data-testid="trade-fee"]');
+        const feeEl = page.locator('[data-testid="trade-cost"]');
         const gotFee = (await feeEl.count()) ? await settle(async () => norm(await feeEl.innerText()), FEE[name]) : null;
         check(gotFee === FEE[name], `${tag}: the Fee row "${gotFee}", want "${FEE[name]}"`);
         // the box's own reads (pool.buy.dry): this coin's Max, one a state at most, and the Fee of the typed amount, one an
