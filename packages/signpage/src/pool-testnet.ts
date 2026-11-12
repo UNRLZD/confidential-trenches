@@ -1132,8 +1132,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       .finally(() => evmHoldingsRunning.delete(chain));
   };
   // pool.sell on an EVM chain (card signpage-evm-pool-sell, src/pool-sell-evm.ts): the Ws the chain's spent notes pay,
-  // their buy records, the kit's sell quote and build, the helper's sell sender, the pool's pair and round; testnet build
-  // only until the mainnet pins' card. One note store per run, closed at its end
+  // their buy records, the kit's sell quote and build, the helper's sell sender, the pool's pair and round. One note
+  // store per run, closed at its end
   const evmSellFollowing = new Set<string>();
   const evmSellSending = new Set<string>();
   const evmSellOf = (chain: "base" | "robinhood", e: NonNullable<ReturnType<typeof evmPool>>) => {
@@ -1211,11 +1211,9 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     };
   };
   const evmSell = (chain: "base" | "robinhood") => {
-    // first, alone: the testnet build only, folded at build time, so SIGN_HOST's bundle carries none of the sale (a
-    // restored device holds no buy record to sell from on mainnet yet). The sale's finding reads,
-    // on the pool's two RPCs at one agreed block, only the Ws whose own buy record names the token sold (planEvmSell)
-    if (!POOL_TESTNET) return null;
-    // and only where the build carries the chain's withdraw (poolWayOut)
+    // first, alone: only where the build carries the chain's withdraw (poolWayOut), as the buy; a device that never
+    // made the buy sells from the record evmHoldings rebuilds. The sale's finding reads, on the pool's two RPCs at one
+    // agreed block, only the Ws whose own buy record names the token sold (planEvmSell)
     if (!wayOut(chain)) return null;
     const e = evmPool(chain);
     if (e === null) return null;
@@ -1223,9 +1221,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   };
   // a sale whose tab ended before its end: followed from its open record at each state read (followEvmSells)
   const evmSellFollow = (chain: "base" | "robinhood"): void => {
-    // the testnet build only, as the sale (folded at build time)
-    if (!POOL_TESTNET) return;
-    // and only where the build carries the chain's withdraw (poolWayOut)
+    // only where the build carries the chain's withdraw (poolWayOut), as the sale
     if (!wayOut(chain)) return;
     const e = evmPool(chain);
     if (e === null) return;

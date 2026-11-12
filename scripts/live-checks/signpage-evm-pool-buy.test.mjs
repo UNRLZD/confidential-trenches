@@ -8,7 +8,7 @@
 // not the pinned one: each FAIL.
 // Card evm-pools-on-mainnet: the good and bad_testnet_page answers' page parts are re-made from a local mainnet build (and the testnet
 // build for a testnet page) of that card, which pins both EVM pools and keeps the kind closed there; re-recorded from
-// SIGN_HOST at the next sign deploy. Card evm-buy-and-sell-on-mainnet re-made both page parts from its builds (the buy
+// SIGN_HOST at the next sign deploy. Change evm-buy-and-sell-on-mainnet re-made both page parts from its builds (the buy
 // opens on mainnet beside its carry), and plants the bundle before it (no buy) and a buy with no carry: each FAIL.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

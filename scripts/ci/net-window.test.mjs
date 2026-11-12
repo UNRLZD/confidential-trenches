@@ -56,6 +56,7 @@ export const CHANGED = [
   "scripts/live-checks/chart-drags-and-tracks-the-pointer.mjs",
   "scripts/live-checks/delete-refund-readback.mjs",
   "scripts/live-checks/delete-refund-readback.sweep.mjs",
+  "scripts/live-checks/evm-buy-and-sell-on-mainnet.mjs",
   "scripts/live-checks/evm-buy-gas-depth.mjs",
   "scripts/live-checks/evm-buy-gas-floor.mjs",
   "scripts/live-checks/evm-buy-quote-ends-on-node.mjs",

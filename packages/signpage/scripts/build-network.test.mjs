@@ -35,10 +35,6 @@ const TESTNET_ONLY = [
   // build (card evm-pools-on-mainnet): each testnet pool
   "0xeb967dfc1b4ffb22942f833c76866ea85fc42266", // the Base Sepolia pool
   "0xed9fac860e6bc5e932455232eedca8b71c44da4d", // the Robinhood testnet pool
-  // the EVM pool sale, testnet only while a restored device holds no buy record to sell from on mainnet (src/pool-testnet.ts)
-  "nonce()", // the sale's read of W's SellDelegate nonce (src/pool-sell-evm.ts)
-  // the Sell typed data W signs, whole (packages/kit/src/trade/evm/sell-unpinned.ts)
-  "Sell(address token,uint256 amount,address target,bytes data,uint256 minOut,address pool,uint256 precommitment,uint256 feeCap,address feeRecipient,uint256 deadline,uint256 nonce)",
 ];
 /** What both builds carry (card evm-deposit-on-mainnet): a Base and Robinhood pool deposit is open on a build only where
  *  its withdraw is in it (src/pool-testnet.ts poolWayOut), so SIGN_HOST's bundle carries the EVM withdraw's release and
@@ -47,10 +43,10 @@ const BOTH = [
   "withdraw((address,bytes),(uint256[2],", // the EVM pool withdraw's release (src/evm-send.ts EVM_WITHDRAW_SIGNATURE)
   "0xe2bbb158", // the EVM pool deposit's selector, deposit(uint256,uint256), held by its rule (src/rules/pool.ts checkEvmDeposit)
 ];
-/** The EVM pool buy in SIGN_HOST's build (src/pool-testnet.ts: open wherever the chain's withdraw is built,
- *  poolWayOut), with its way back into the pool: a buy's signature only beside the carry of a refused buy's ETH on W
- *  (src/pool-carry-evm.ts EVM_CARRY_OPEN_KEY); and the Sell typed data, in a build that carries it, only beside the
- *  sale's open record, followed until its return lands (src/pool-sell-evm.ts EVM_OPEN_SELLS_KEY). */
+/** The EVM pool buy and sale in SIGN_HOST's build (src/pool-testnet.ts: open wherever the chain's withdraw is built,
+ *  poolWayOut), each with its way back into the pool: a buy's signature only beside the carry of a refused buy's ETH
+ *  on W (src/pool-carry-evm.ts EVM_CARRY_OPEN_KEY), the Sell typed data only beside the sale's open record, followed
+ *  until its return lands (src/pool-sell-evm.ts EVM_OPEN_SELLS_KEY). */
 const EVM_BUY = "buy((address,bytes),"; // the EVM pool buy's signature (src/evm-send.ts)
 const EVM_SELL = "Sell(address token,uint256 amount,address target,bytes data,uint256 minOut,address pool,uint256 precommitment,uint256 feeCap,address feeRecipient,uint256 deadline,uint256 nonce)"; // the Sell typed data W signs, whole (packages/kit/src/trade/evm/sell-unpinned.ts)
 const EVM_TRADE = [
@@ -58,6 +54,9 @@ const EVM_TRADE = [
   "owed/carry-evm-open", // the carry's open record (src/pool-carry-evm.ts EVM_CARRY_OPEN_KEY)
   "owed/carry-evm", // the carry's done Ws (EVM_CARRY_DONE_KEY)
   "uniswap-v4", // the EVM buy's route search
+  "nonce()", // the sale's read of W's SellDelegate nonce (src/pool-sell-evm.ts)
+  EVM_SELL,
+  "owed/sell-evm", // the sale's open record (src/pool-sell-evm.ts EVM_OPEN_SELLS_KEY)
 ];
 /** What a bundle lacks of the EVM trade's ways back: [] when it carries neither the buy nor the sale, or each with its
  *  own. A buy with no carry, or a sale with no open record, is named. */

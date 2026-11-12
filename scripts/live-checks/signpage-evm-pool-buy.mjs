@@ -11,7 +11,7 @@
 //   3. SIGN_HOST's served /app.js is the one its index.html pins, and it is the mainnet build with the EVM buy in it
 //      beside its way back ("uniswap-v4", its route search; "owed/carry-evm-open", the carry of a refused buy's ETH on W
 //      back into the pool, src/pool-carry-evm.ts) and no testnet pool: the buy opens on Base and Robinhood where the
-//      build carries the chain's withdraw (card evm-buy-and-sell-on-mainnet, packages/signpage/test/
+//      build carries the chain's withdraw (change evm-buy-and-sell-on-mainnet, packages/signpage/test/
 //      pool-mainnet-evm.test.ts). The buy records' key, "owed/cost-evm", is no mark: the positions pass reads it too.
 // RPCS, CHAIN_IDS, BOUGHT and BUY_SELECTOR are this file's own (it reaches no package code: check:imports holds it);
 // packages/signpage/test/pool-buy-evm.test.ts holds each equal to the page's own (TESTNET_RPCS, EVM_CHAIN_IDS,

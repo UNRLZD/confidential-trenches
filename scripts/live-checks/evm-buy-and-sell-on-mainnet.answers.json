@@ -1,0 +1,51 @@
+{
+ "key": "evm-buy-and-sell-on-mainnet",
+ "recorded": "good 2026-11-12T22:51:10.956Z (the Mac, --local: this change's SIGN_HOST build, the sources of the commit that carries this file: the EVM buy, the carry and the sale open on mainnet); bad_live_before 2026-11-12T22:51:11.724Z (the Mac, the live SIGN_HOST as served then: no EVM buy, no carry, no Sell typed data)",
+ "good": {
+  "readAt": "2026-11-12T22:51:10.956Z",
+  "from": "local build",
+  "page": {
+   "pin": "sha384-DJ+etk0TpAzobagn3XIEh9Byldd0n8U0RF7ipFJzFGyJUqUDm1eXjahL0zrCbHs9",
+   "sha384": "sha384-DJ+etk0TpAzobagn3XIEh9Byldd0n8U0RF7ipFJzFGyJUqUDm1eXjahL0zrCbHs9",
+   "rule": true,
+   "withdraw": 2,
+   "buy": [
+    "buy((address,bytes),",
+    "uniswap-v4"
+   ],
+   "carry": [
+    "owed/carry-evm-open",
+    "owed/carry-evm"
+   ],
+   "sell": [
+    "Sell(address token,uint256 amount,address target,bytes data,uint256 minOut,address pool,uint256 precommitment,uint256 feeCap,address feeRecipient,uint256 deadline,uint256 nonce)",
+    "owed/sell-evm"
+   ],
+   "pools": [
+    "0xaa080e74ec99cf5c684548c77ca145edfcf899cf",
+    "0x9306359433127c4f3be426f6faeb00a3c41f66db"
+   ],
+   "testnet": []
+  }
+ },
+ "bad_live_before": {
+  "readAt": "2026-11-12T22:51:11.724Z",
+  "from": "https://confidential.unrealized.trade",
+  "page": {
+   "pin": "sha384-mCFGgq3HxkgmrlxPkFpbD5PWbynJZcBZ2PU6q29ju1l4n3P/krnrBlauWSFhojHA",
+   "sha384": "sha384-mCFGgq3HxkgmrlxPkFpbD5PWbynJZcBZ2PU6q29ju1l4n3P/krnrBlauWSFhojHA",
+   "rule": false,
+   "withdraw": 1,
+   "buy": [],
+   "carry": [],
+   "sell": [
+    "owed/sell-evm"
+   ],
+   "pools": [
+    "0xaa080e74ec99cf5c684548c77ca145edfcf899cf",
+    "0x9306359433127c4f3be426f6faeb00a3c41f66db"
+   ],
+   "testnet": []
+  }
+ }
+}

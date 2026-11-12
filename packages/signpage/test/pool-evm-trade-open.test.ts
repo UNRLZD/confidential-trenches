@@ -1,6 +1,6 @@
-// SIGN_HOST's build (this test sets no network: POOL_TESTNET is false) opens the EVM pool buy on each chain whose
-// withdraw is in the same build (src/pool-testnet.ts poolWayOut), with no other gate: a refused buy's ETH on W goes back
-// into the pool by the chain's carry (src/pool-carry-evm.ts), so nothing a buy leaves needs a testnet build.
+// SIGN_HOST's build (this test sets no network: POOL_TESTNET is false) opens the EVM pool buy and sale on each chain
+// whose withdraw is in the same build (src/pool-testnet.ts poolWayOut), with no other gate: a refused buy's ETH on W
+// goes back into the pool by the chain's carry (src/pool-carry-evm.ts), so nothing a buy leaves needs a testnet build.
 //   node --test test/pool-evm-trade-open.test.ts      (from packages/signpage)
 import assert from "node:assert/strict";
 import { after, test } from "node:test";
@@ -51,16 +51,16 @@ function world(withdrawBuilt: Readonly<Partial<Record<"solana" | "base" | "robin
   return { t, ran };
 }
 
-test("SIGN_HOST's build: the EVM buy reaches its runner on a chain whose withdraw is built, and nowhere else", async () => {
+test("SIGN_HOST's build: the EVM buy and sale reach their runners on a chain whose withdraw is built, and nowhere else", async () => {
   assert.equal(POOL_TESTNET, false, "this test runs SIGN_HOST's build");
   for (const chain of ["base", "robinhood"] as const) {
     const open = world({ [chain]: true });
-    open.t.flow(trades(chain)[0]!, ctx);
-    assert.deepEqual(open.ran, ["buy evm"], `${chain}: the buy runs`);
+    for (const ask of trades(chain)) open.t.flow(ask, ctx);
+    assert.deepEqual(open.ran, ["buy evm", "sell evm"], `${chain}: the buy and the sale run`);
     await open.t.signedOut();
     const shut = world({ [chain]: false });
-    assert.deepEqual(shut.t.flow(trades(chain)[0]!, ctx), { error: "not_allowed" });
-    assert.deepEqual(shut.ran, [], `${chain}: no withdraw built, no buy`);
+    for (const ask of trades(chain)) assert.deepEqual(shut.t.flow(ask, ctx), { error: "not_allowed" });
+    assert.deepEqual(shut.ran, [], `${chain}: no withdraw built, no trade`);
     await shut.t.signedOut();
   }
 });
