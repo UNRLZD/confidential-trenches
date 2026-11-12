@@ -13,8 +13,8 @@
 # thread code as one pinned same-origin file, never from a data: or blob: URL, which worker-src 'self' refuses. The
 # thread file gets its own policy too, joined to the /* rule's: it runs wasm and loads, fetches and starts nothing.
 # The restore walks its deposit indices in Workers started from /walk-worker.js (card restore-shows-the-balance-in-seconds),
-# one pinned same-origin module made a TrustedScriptURL by the page's policy walk-worker; its own policy, joined to the /*
-# rule's, lets it fetch and start nothing: it computes only.
+# one pinned same-origin module made a TrustedScriptURL by the page's policy walk-worker; its own policy, joined to the
+# site's, lets it fetch and start nothing: it computes only.
 # Permissions-Policy denies the APP_HOST frame (and this page) every feature it does not need; the frame has no `allow`
 # attribute, so clipboard-write=(self) already keeps the clipboard API from it and the default 'self' kept fullscreen
 # from it. fullscreen=() and picture-in-picture=() (whose default is every origin) say it outright (card

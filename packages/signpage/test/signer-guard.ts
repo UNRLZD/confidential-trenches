@@ -150,23 +150,31 @@ const OPTIONS: ts.CompilerOptions = {
   types: [],
 };
 
-/** The signing page's build entry, read from the build itself (scripts/build-app.mjs, its `input:`), so the guard reads
- *  what the page bundles, never a hand list. */
+/** The signing page's build entry, read from the build itself (scripts/build-app.mjs: the `input` of the bundleOne
+ *  call that writes app.js), so the guard reads what the page bundles, never a hand list. build-app.mjs's one other
+ *  bundle is the restore's walk Worker (card restore-shows-the-balance-in-seconds), named only as join(pkg, WALK_ENTRY)
+ *  into WALK_FILE: a Worker whose own policy lets it fetch nothing, so a signer in it could send nothing; any other
+ *  entry, or an `input:` written anywhere else, is unread and refused. */
 export function buildEntry(script = join(ROOT, "packages/signpage/scripts/build-app.mjs")): string {
   const sf = ts.createSourceFile(script, readFileSync(script, "utf8"), ts.ScriptTarget.ES2023, true, ts.ScriptKind.JS);
   const found: string[] = [];
+  const isJoinPkg = (v: ts.Node): v is ts.CallExpression => ts.isCallExpression(v) && v.expression.getText(sf) === "join" && v.arguments.length === 2 && v.arguments[0]!.getText(sf) === "pkg";
   const visit = (n: ts.Node): void => {
-    // input: join(pkg, "src/main.ts"), pkg the package folder
-    if (ts.isPropertyAssignment(n) && n.name.getText(sf) === "input") {
-      const v = n.initializer;
-      if (ts.isCallExpression(v) && v.expression.getText(sf) === "join" && v.arguments.length === 2 && v.arguments[0]!.getText(sf) === "pkg" && ts.isStringLiteral(v.arguments[1]!)) {
-        found.push(join(dirname(dirname(script)), v.arguments[1].text));
-      } else found.push(`unread: ${v.getText(sf)}`);
+    // input: join(pkg, "src/main.ts") written as a property: refused, the page's entry is a bundleOne call's
+    if (ts.isPropertyAssignment(n) && n.name.getText(sf) === "input") found.push(`unread: ${n.initializer.getText(sf)}`);
+    // bundleOne(pkg, network, join(pkg, "src/main.ts"), "app.js"), pkg the package folder
+    if (ts.isCallExpression(n) && n.expression.getText(sf) === "bundleOne") {
+      const [, , input, name] = n.arguments;
+      if (input && name && isJoinPkg(input) && ts.isStringLiteral(input.arguments[1]!) && ts.isStringLiteral(name) && name.text === "app.js") {
+        found.push(join(dirname(dirname(script)), input.arguments[1].text));
+      } else if (!(input && name && isJoinPkg(input) && input.arguments[1]!.getText(sf) === "WALK_ENTRY" && name.getText(sf) === "WALK_FILE")) {
+        found.push(`unread: ${n.getText(sf)}`);
+      }
     }
     ts.forEachChild(n, visit);
   };
   visit(sf);
-  if (found.length !== 1 || found[0]!.startsWith("unread")) throw new Error(`build-app.mjs: expected one input: join(pkg, "<entry>"), read ${JSON.stringify(found)}`);
+  if (found.length !== 1 || found[0]!.startsWith("unread")) throw new Error(`build-app.mjs: expected one page input: bundleOne(pkg, network, join(pkg, "<entry>"), "app.js"), read ${JSON.stringify(found)}`);
   return found[0]!;
 }
 

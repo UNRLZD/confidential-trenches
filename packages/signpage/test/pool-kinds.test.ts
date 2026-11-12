@@ -3,7 +3,8 @@
 // never from the app; a request that passed is handed to its flow, and with no flow it is refused.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readdirSync, statSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { throughApi } from "./api-ends.ts";
 import { ERC20_DECIMALS, keptTokenDecimals, poolKinds, tokenDecimalsKept, type PoolKindsDeps, type PoolRpc } from "../src/pool-kinds.ts";
@@ -315,6 +316,26 @@ const GUARD_BUILT_MS = Date.now() - GUARD_MS;
 const names = (files: readonly string[]) => files.map((f) => f.slice(ROOT.length));
 /** The npm packages the page bundles, by name and version: a new one (a signing library) is read here first. */
 const BUNDLED_PACKAGES = ["@noble+curves@2.4.0", "@noble+hashes@2.4.0", "@scure+base@2.4.0", "@scure+bip32@2.4.0", "@scure+bip39@2.4.0", "@zk-kit+lean-imt@2.2.4", "@zk-kit+utils@1.4.1", "base64-js@1.5.1", "buffer@6.0.3", "ieee754@1.2.1", "poseidon-lite@0.3.0"];
+
+test("signer-guard-parser: build-app.mjs's page entry is its one app.js bundle; a third bundle or an input: written elsewhere is refused", () => {
+  const real = readFileSync(join(ROOT, "packages/signpage/scripts/build-app.mjs"), "utf8");
+  const d = mkdtempSync(join(tmpdir(), "ct-build-entry-"));
+  try {
+    mkdirSync(join(d, "scripts"));
+    const plant = (text: string) => {
+      writeFileSync(join(d, "scripts", "build-app.mjs"), text);
+      return () => buildEntry(join(d, "scripts", "build-app.mjs"));
+    };
+    assert.equal(plant(real)(), join(d, "src/main.ts"));
+    const call = 'await bundleOne(pkg, network, join(pkg, WALK_ENTRY), WALK_FILE);';
+    assert.ok(real.includes(call), "build-app.mjs bundles the walk Worker by WALK_ENTRY into WALK_FILE");
+    assert.throws(plant(real.replace(call, `${call}\n  await bundleOne(pkg, network, join(pkg, "src/other.ts"), "other.js");`)), /expected one page input/);
+    assert.throws(plant(real.replace(call, 'await bundleOne(pkg, network, join(pkg, "src/signer.ts"), WALK_FILE);')), /expected one page input/);
+    assert.throws(plant(`${real}\nconst x = { input: join(pkg, "src/main.ts") };\n`), /expected one page input/);
+  } finally {
+    rmSync(d, { recursive: true, force: true });
+  }
+});
 
 test("signer-guard-parser: the guard reads every module the page bundles, from the build's own entry", async () => {
   assert.equal(ENTRY, join(ROOT, "packages/signpage/src/main.ts"), "build-app.mjs input: join(pkg, \"src/main.ts\")");
