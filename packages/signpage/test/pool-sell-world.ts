@@ -131,6 +131,8 @@ export type Plant = {
   statusLagOn1?: boolean;
   /** RPC p's finalized block height (1,000 when not given: past the blockhash's last height, 151) */
   finalHeight?: number;
+  /** the block height of W's latest transaction, before the test's own sends (500 when not given: 1,000 is past it + 151) */
+  wLastHeight?: number;
   /** another deposit takes the return note's precommitment just before the sell lands */
   frontRun?: boolean;
   /** RPC 1 never shows this account */
@@ -288,6 +290,11 @@ export function chain(plant: Plant = {}) {
   const log: string[] = [];
   const sentTx = new Map<string, Uint8Array>();
   const calls: { p: 0 | 1; method: string; params: readonly unknown[] }[] = [];
+  // W's history (getSignaturesForAddress, newest first) and each block's height (getBlock): before the test one
+  // transaction at wLastHeight; one the test lands on W is its latest, in a block at the finalized height
+  const W_PAST = base58.encode(new Uint8Array(64).fill(7));
+  const wHistory = [{ signature: W_PAST, slot: VF[v].slot - 300 }];
+  const heightAt = new Map<number, number>([[wHistory[0]!.slot, plant.wLastHeight ?? 500]]);
 
   /** The program's deposit of `value` on `pre`: the next nonce's label, both leaves, the mark. */
   const deposit = (pre: bigint, value: bigint): void => {
@@ -689,6 +696,10 @@ export function chain(plant: Plant = {}) {
               pv.setBigUint64(49, BigInt(size + 1), true);
             }
           }
+          if (!txs.has(sig) && plant.lands !== false && sm.staticKeys.includes(W.address)) {
+            wHistory.unshift({ signature: sig, slot: VF[v].slot + 1 });
+            heightAt.set(VF[v].slot + 1, plant.finalHeight ?? 1_000);
+          }
           if (!txs.has(sig) && plant.lands !== false) {
             if (plant.dustBeforeSell !== undefined && !frontDone && sm.staticKeys[sm.instructions.at(-1)!.programIndex] === PROGRAM && sm.instructions.some((x) => x.data.length === 24)) {
               frontDone = true;
@@ -743,6 +754,29 @@ export function chain(plant: Plant = {}) {
             if (!tm.instructions.some((x) => tm.staticKeys[x.programIndex] === PROGRAM)) return null;
           }
           return t ? { slot: VF[v].slot, transaction: [base64.encode(t.tx), "base64"], meta: { err: t.err, ...(t.post && !plant.noPostBalances ? { postTokenBalances: p === 1 && plant.postDiffers ? t.post.map((e) => ({ ...(e as object), uiTokenAmount: { amount: "9", decimals: 6 } })) : t.post } : {}) } } : null;
+        }
+        case "getSignaturesForAddress": {
+          // W's own history only, newest first, at most the limit asked: its latest one, or each one after `until`
+          assert.equal(params[0], W.address);
+          const o = params[1] as { until?: string; limit: number; commitment: string };
+          if (o.until === undefined) assert.deepEqual(o, { limit: 1, commitment: "confirmed" });
+          else assert.deepEqual(Object.keys(o).sort(), ["commitment", "limit", "until"]);
+          assert.equal(o.commitment, "confirmed");
+          const at = o.until === undefined ? -1 : wHistory.findIndex((e) => e.signature === o.until);
+          return (at < 0 ? wHistory : wHistory.slice(0, at)).slice(0, o.limit).map((e) => ({ signature: e.signature, slot: e.slot, err: null, memo: null, blockTime: null, confirmationStatus: "finalized" }));
+        }
+        case "getBlock": {
+          // exactly the one config the helper forwards (apps/helper/src/rpc/rpc.ts BLOCK_HEADER, its test pins the same)
+          assert.deepEqual({ ...(params[1] as object) }, { commitment: "finalized", encoding: "json", transactionDetails: "none", rewards: false, maxSupportedTransactionVersion: 0 });
+          assert.equal(params.length, 2);
+          const h = heightAt.get(params[0] as number);
+          return h === undefined ? null : { blockHeight: h, blockhash: BLOCKHASH, parentSlot: (params[0] as number) - 1, blockTime: null };
+        }
+        case "getTokenAccountsByOwner": {
+          // every token account of the program asked whose owner field (bytes 32..64) is the owner asked
+          const { programId } = params[1] as { programId: string };
+          const value = [...accounts.entries()].filter(([, x]) => x.owner === programId && x.data.length >= 64 && base58.encode(x.data.subarray(32, 64)) === params[0]).map(([pubkey, x]) => ({ pubkey, account: { owner: x.owner, lamports: x.lamports, data: [base64.encode(x.data), "base64"] } }));
+          return { ...ctx, value };
         }
         default:
           throw new Error(`no fixture for ${method}`);
