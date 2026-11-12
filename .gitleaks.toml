@@ -52,3 +52,14 @@ description = "a devnet pool page address frozen in a lookup table, a public val
 targetRules = ["square-access-token"]
 regexTarget = "secret"
 regexes = ['''^EAAAWNtz9NocNuxbT6PsZE7E3jRveSuVFDFuLDULZVGk$''']
+
+# The pool's PumpSwap lookup table on Solana mainnet (contracts/pool-solana/deployments/mainnet.json, card
+# pumpswap-table-mainnet-pin): a public address. A recorded getTransaction answer of a PumpSwap trade names it in its
+# addressTableLookups under the field name accountKey, which the default generic-api-key rule reads as a key. Only that
+# exact value passes, and only for that rule; another address under that name, or this one with a character more, is
+# still found (scripts/ci/gitleaks-config.test.mjs).
+[[allowlists]]
+description = "the pool's PumpSwap lookup table on Solana mainnet, a public value"
+targetRules = ["generic-api-key"]
+regexTarget = "secret"
+regexes = ['''^4PyMCJPKZQvrLsj8DKCG2Yddh3vDmTf1EWnjCL1Bk3Pc$''']

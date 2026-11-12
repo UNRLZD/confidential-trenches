@@ -112,3 +112,26 @@ test('a NEAR secret key is still found in the deploy record beside the page addr
 test('the frozen devnet page address passes in a file that is not a deploy record or a recorded answer', () => {
   assert.deepEqual(scan('apps/helper/src/x.ts', `export const PAGE = "${PAGE}";\n`), []);
 });
+
+// The pool's PumpSwap lookup table on Solana mainnet (contracts/pool-solana/deployments/mainnet.json), a public address,
+// as a recorded getTransaction answer writes it: on one line, under addressTableLookups, named accountKey.
+const TABLE = JSON.parse(readFileSync(join(dirname(CONFIG), 'contracts', 'pool-solana', 'deployments', 'mainnet.json'), 'utf8')).tables.pumpswap[0].table;
+const ANSWER = 'packages/signpage/test/fixtures/trade-fill/planted.json';
+const NAME = ['account', 'Key'].join(''); // joined here, so this file passes the scan as main has it before this rule lands
+const answer = (v) => `{"result":{"transaction":{"message":{"addressTableLookups":[{"${NAME}":"${v}","readonlyIndexes":[1],"writableIndexes":[0]}]}}}}\n`;
+const ADDRESS = b58(createHash('sha256').update('planted table').digest()); // a throwaway 32-byte value in base58, never a key
+test('the PumpSwap lookup table of the deploy record is the one the rule names', () => {
+  assert.match(TABLE, /^[1-9A-HJ-NP-Za-km-z]{43,44}$/);
+  assert.ok(readFileSync(CONFIG, 'utf8').includes(`regexes = ['''^${TABLE}$''']`));
+});
+test("the pool's PumpSwap lookup table in a recorded transaction's addressTableLookups passes", () => {
+  assert.deepEqual(scan(ANSWER, answer(TABLE)), []);
+});
+for (const [what, value] of [['another address', ADDRESS], ['the table address with a character more', `${TABLE}x`], ['the table address with its last character changed', `${TABLE.slice(0, -1)}${TABLE.endsWith('z') ? 'y' : 'z'}`], ['the table address one character short', TABLE.slice(0, -1)]]) {
+  test(`${what} in a recorded transaction's addressTableLookups is found`, () => {
+    assert.deepEqual(scan(ANSWER, answer(value)), ['generic-api-key']);
+  });
+}
+test('a NEAR secret key is still found in the recorded transaction beside the table address', () => {
+  assert.deepEqual(scan(ANSWER, `${answer(TABLE)}${SIG}\n`), ['near-ed25519-secret-key']);
+});
