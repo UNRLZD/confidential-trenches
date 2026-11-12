@@ -48,37 +48,42 @@ export function WithdrawPickProvider({ children }: { children: ReactNode }) {
   return (
     <Ctx.Provider value={open}>
       {children}
-      {pick && (
-        <div className="dep wpk" data-sheet="withdraw-pick">
-          <div className="dep-scrim" onClick={close} />
-          <aside className="dep-box" aria-label={WORDS.withdraw.text}>
-            <div className="grab"><i /></div>
-            <div className="dhd">
-              <span />
-              <button type="button" className="dep-x" aria-label={WORDS.close.text} onClick={close}>
-                <Icon name="x" size={14} stroke={1.4} />
-              </button>
-            </div>
-            <div className="dbody">
-              {pick.places.map((p) => {
-                const m = chainOf(p.chain);
-                return (
-                  <button type="button" key={p.chain} className="wpk-row" data-place={p.chain} data-kind={p.kind} disabled={locked !== null} onClick={() => (void opener(hop, p, pick.view), close())}>
-                    {m && (
-                      <span className="srch-cm" style={{ width: 24, height: 24, padding: Math.round(24 * m.inset) }}>
-                        <img src={m.logo} alt="" />
-                      </span>
-                    )}
-                    <span className="ell">{m?.name ?? p.chain}</span>
-                    <span className="num">{p.balance} <span className="t3">{p.symbol}</span></span>
-                  </button>
-                );
-              })}
-              <HopLine control={pick.view.control} />
-            </div>
-          </aside>
-        </div>
-      )}
+      {pick && <WithdrawPickSheet places={pick.places} locked={locked} control={pick.view.control} onPick={(p) => (void opener(hop, p, pick.view), close())} onClose={close} />}
     </Ctx.Provider>
+  );
+}
+
+/** The pick over the app: one row per place, its chain's mark, name and balance with its symbol; the x and the scrim close it. */
+export function WithdrawPickSheet({ places, locked, control, onPick, onClose }: { places: readonly WithdrawPlace[]; locked: string | null; control: string; onPick(p: WithdrawPlace): void; onClose(): void }) {
+  return (
+    <div className="dep wpk" data-sheet="withdraw-pick">
+      <div className="dep-scrim" onClick={onClose} />
+      <aside className="dep-box" aria-label={WORDS.withdraw.text}>
+        <div className="grab"><i /></div>
+        <div className="dhd">
+          <span />
+          <button type="button" className="dep-x" aria-label={WORDS.close.text} onClick={onClose}>
+            <Icon name="x" size={14} stroke={1.4} />
+          </button>
+        </div>
+        <div className="dbody">
+          {places.map((p) => {
+            const m = chainOf(p.chain);
+            return (
+              <button type="button" key={p.chain} className="wpk-row" data-place={p.chain} data-kind={p.kind} disabled={locked !== null} onClick={() => onPick(p)}>
+                {m && (
+                  <span className="srch-cm" style={{ width: 24, height: 24, padding: Math.round(24 * m.inset) }}>
+                    <img src={m.logo} alt="" />
+                  </span>
+                )}
+                <span className="ell">{m?.name ?? p.chain}</span>
+                <span className="num">{p.balance} <span className="t3">{p.symbol}</span></span>
+              </button>
+            );
+          })}
+          <HopLine control={control} />
+        </div>
+      </aside>
+    </div>
   );
 }
