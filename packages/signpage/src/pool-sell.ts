@@ -35,7 +35,8 @@
 //   less what W holds. On devnet no compute budget instruction: no priority fee; on mainnet a limit and a price
 //   (solanaSellBudget: SOLANA_POOL_SELL_PRIORITY in all, or what W holds beyond the sell's need under it, none at 0;
 //   only on a form with room for it under 1,232 bytes, solanaSellBudgetFits; the limit sized from the simulation; the
-//   price the lower of what recent fees ask on both RPCs, solanaSellPrice, when that is under what the cap buys), in
+//   price the higher of what recent fees ask on both RPCs, solanaSellPrice, when answered by the first simulation and
+//   under what the cap buys; the rule refuses a priority over SOLANA_POOL_SELL_PRIORITY), in
 //   the fee both RPCs price, so the reserve, the funds check and the rule count it; a partial sell keeps it on W too. A reserve over SOLANA_POOL_SELL_RESERVE_MAX or
 //   at least min out is refused.
 // - Built here (the kit's solanaPoolSellSteps, then the tag 1 deposit of min out less the reserve with the return note's
@@ -64,7 +65,7 @@ import { simulateSolanaTeardown, solanaCompileV0, solanaTeardownChecked } from "
 import { readSolanaPoolBuyVenue, readSolanaRent, SOLANA_RENT_SYSVAR, SolanaPoolBuyError, SOLANA_POOL_PAGE_ENTRIES, SOLANA_POOL_QUOTE_MAX_AGE_SLOTS, SOLANA_POOL_SELL_FEE, solanaPoolNextPage, solanaPoolPage, solanaPoolSellMinOut, solanaPoolBuySellNeed, solanaPoolSellNeed, solanaPoolSellSteps, solanaRentMin, type SolanaPoolBuyVenue, type SolanaRent } from "../../kit/src/trade/solana/pool-buy.ts";
 import { SOLANA_POOL_NEXT_PAGE_WINDOW, solanaPoolNoteFloor, solanaPoolPreMarkOf, type SolanaPoolPreMark } from "../../kit/src/trade/solana/pool-deposit.ts";
 import { solanaDecodeTokenAccount, type SolanaReference } from "../../kit/src/trade/solana/pool.ts";
-import { pageReference } from "./page-rpc.ts";
+import { optionalRead, pageReference } from "./page-rpc.ts";
 import { SOLANA_MAX_TX_BYTES, solanaAta, solanaDecodeMessage, solanaProgramAddress } from "../../kit/src/checks/solana/message.ts";
 import { SOLANA_COMPUTE_BUDGET_PROGRAM, SOLANA_CU_PRICE_MAX, SOLANA_PUMP_AMM_PROGRAM, SOLANA_PUMP_PROGRAM, SOLANA_SOL_MINT, SOLANA_SYSTEM_PROGRAM, SOLANA_TOKEN_2022_PROGRAM, SOLANA_TOKEN_PROGRAM, solanaTeardownAddresses, solanaTeardownPlan, solanaVolumeAccumulator, solanaVolumeClaimable, type SolanaHeldRead, type SolanaTeardownSimulation, type SolanaTeardownUnclaimed } from "../../kit/src/checks/solana/checks.ts";
 import { SolanaRpcTransportError, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
@@ -80,7 +81,7 @@ import { blockhashOf, blockhashRead, blockhashValid, pastOnBoth, readBack, readB
 import { afterOf, clockOf, keptReads, READ_WAIT, readWaits, forgetYoung, solanaSaleReads, solanaStableReads, tapDone, tapWaits, waitsOn, waitUnless, youngReads, type ReadWaits } from "./read-waits.ts";
 import { throttleWaitMs } from "../../wallet/src/throttle.ts";
 import { fromRecord, timedStore, TRADE_STORE_MS, tradeLock, type TradeStore } from "./trade.ts";
-import { checkSolanaSell, checkSolanaSweep, checkSolanaTeardownFrames, PoolRuleRefused, poolUnits, signSolana, SOLANA_POOL_CU_LIMIT_MAX, SOLANA_POOL_MIN_DEPOSIT, SOLANA_POOL_SELL_RESERVE_MAX, SOLANA_SWEEP_OWED_MAX, solanaDepositRents, solanaSellAfterFull, solanaSweepFloor, solanaSweepKeep, type PoolAsk, type SolanaDepositHeld } from "./rules/pool.ts";
+import { checkSolanaSell, checkSolanaSweep, SOLANA_POOL_SELL_PRIORITY, checkSolanaTeardownFrames, PoolRuleRefused, poolUnits, signSolana, SOLANA_POOL_CU_LIMIT_MAX, SOLANA_POOL_MIN_DEPOSIT, SOLANA_POOL_SELL_RESERVE_MAX, SOLANA_SWEEP_OWED_MAX, solanaDepositRents, solanaSellAfterFull, solanaSweepFloor, solanaSweepKeep, type PoolAsk, type SolanaDepositHeld } from "./rules/pool.ts";
 // the full sell's keep is priced by the sell's rule too (rules/pool.ts checkSolanaSell, review L1 of 38faee89)
 export { solanaSellAfterFull };
 import type { HostAnswer, HostRefusal, KindContext, Running } from "./api.ts";
@@ -693,6 +694,9 @@ async function sellRuns(h: PoolSellHost, ask: PoolAsk, later: Later, w: ListedBu
     // the sell's earlier reads are the first attempt's alone: every attempt after it reads from its first read
     const a = await sellRun(h, ask, later, w, waits, early, turn);
     early = undefined;
+    // review P3-1 of 4f9217972: a sale that did not land makes W's next one pay the cap; one that landed ends that
+    if ("stage" in a && a.stage === "not_landed") capNext.add(w.address);
+    else if ("stage" in a && (a.stage === "filled" || a.stage === "refused")) capNext.delete(w.address);
     // its price may be old (a wait after its quote was asked; its simulation refused while an earlier leg of the sale was
     // in flight): read and priced again from its first read, nothing signed; each such attempt followed a wait the tap's
     // bound counted (sellRun's wait), so the bound ends them
@@ -1296,7 +1300,12 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later, w: ListedBuy
     const cap = budget === null ? 0n : solanaSellPriority(room);
     // the price the market asks on the sale's own accounts (solanaSellPrice, card round-trip-costs-less), read beside the
     // first simulation and taken where the limit is sized from it, so it adds no round trip
-    const priced = budget === null ? null : quiet(solanaSellPrice(rpcs, writableOf(steps)));
+    // (review P2-1 of 4f9217972) on the RPCs' optional reads, and taken only if answered by the time the first
+    // simulation is: never waited for, so the send goes when it would with no read; a W whose last sale did not land
+    // pays the cap with no read (capNext)
+    const stopRead = new AbortController();
+    let price: bigint | null | undefined;
+    if (budget !== null && !capNext.has(w.address)) void solanaSellPrice(rpcs, writableOf(steps), stopRead.signal).then((v) => (price = v));
     // the largest form decides (above); this sell's own six, compiled, never over the size with it either
     if (budget !== null && wireOf(solanaCompileV0(w.address, [...budgetIxs(budget), ...steps, depositIx(program, pool, w.address, sizes, pre, minOut, false)], bh.blockhash, []).message).length > SOLANA_MAX_TX_BYTES) budget = null;
     // the deposit's form: the eight names each tree's next page, so it lands when inserts that land first carry an entry
@@ -1386,7 +1395,8 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later, w: ListedBuy
       if (!sized) {
         sized = true;
         const units = sims.map((v) => (v as { unitsConsumed?: unknown }).unitsConsumed);
-        const want = (await priced) ?? undefined;
+        const want = price ?? undefined;
+        stopRead.abort();
         const again = solanaSellBudget(units.every((u) => Number.isSafeInteger(u)) ? Math.max(...(units as number[])) : null, cap, want);
         if (again?.limit !== budget?.limit || again?.price !== budget?.price) {
           budget = again;
@@ -1513,8 +1523,9 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later, w: ListedBuy
  *  a busy leader while the blockhash dies. W pays it up front from what it holds beyond the sell's need: a mainnet buy
  *  leaves W the sell's need on every venue (solanaPoolBuySellNeed) and what the proof's tip cap held beyond the tip it
  *  paid (1,000,000 less 100,000), and a partial sell keeps it on W for the next. Never a reason to refuse: a W with less
- *  pays that, one with none sends without it, as before (solanaSellPriority); the reserve takes it back out of the sale. */
-export const SOLANA_POOL_SELL_PRIORITY = 100_000n;
+ *  pays that, one with none sends without it, as before (solanaSellPriority); the reserve takes it back out of the sale.
+ *  The sell's rule holds it too (rules/pool.ts, where it is defined). */
+export { SOLANA_POOL_SELL_PRIORITY };
 /** A mainnet sell's compute budget for a priority of at most `cap` lamports: the limit 1.2x the units its simulation used
  *  (the larger of both RPCs'; unread, the runtime's most, SOLANA_POOL_CU_LIMIT_MAX), never under SOLANA_POOL_SELL_CU_MIN,
  *  and the price that makes limit x price `cap` at most (never over SOLANA_CU_PRICE_MAX), with the priority fee the
@@ -1536,29 +1547,38 @@ export function solanaSellBudget(units: number | null, cap: bigint = SOLANA_POOL
 export const SOLANA_POOL_SELL_PRICE_FLOOR = 1n;
 /** The price a mainnet sale asks per compute unit (card round-trip-costs-less), micro-lamports: what landed lately on the
  *  accounts it writes, each RPC's getRecentPrioritizationFees over them (its last 150 slots) at the 75th percentile (the
- *  industry's "high" level), the lower of the two so one RPC's word never raises it, at least
- *  SOLANA_POOL_SELL_PRICE_FLOOR. null when either read fails or is not a list of prices: the sale prices at its cap, the
- *  form before. The cap (SOLANA_POOL_SELL_PRIORITY in all) bounds what any answer can make the sale pay. */
-export async function solanaSellPrice(rpcs: Rpcs, accounts: readonly string[]): Promise<bigint | null> {
+ *  industry's "high" level), the higher of the two (review P3-1 of 4f9217972: one provider's empty list or zeros never
+ *  lowers it to where the sale sits unlanded; honest seats read alike), at least SOLANA_POOL_SELL_PRICE_FLOOR. Each read
+ *  is the RPC's optional read (page-rpc.ts OptionalRead: never retried, its throttle reported to no lane, aborted by
+ *  `signal`). null when either read fails, is not a list of prices or is an empty list (no read): the sale prices at its
+ *  cap, the form before. The cap (SOLANA_POOL_SELL_PRIORITY in all) bounds what any answer can make the sale pay. */
+export async function solanaSellPrice(rpcs: Rpcs, accounts: readonly string[], signal: AbortSignal = new AbortController().signal): Promise<bigint | null> {
   const p75 = async (r: SolanaRpc): Promise<bigint> => {
-    const got = await r("getRecentPrioritizationFees", [[...accounts]]);
-    if (!Array.isArray(got)) throw new Error("not a list");
+    const read = optionalRead(r);
+    if (read === undefined) throw new Error("no optional read");
+    const got = await read("getRecentPrioritizationFees", [[...accounts]], signal);
+    if (!Array.isArray(got) || got.length === 0) throw new Error("not a list");
     const fees = got.map((x) => {
       const f = (x as { prioritizationFee?: unknown } | null)?.prioritizationFee;
       if (typeof f !== "number" || !Number.isSafeInteger(f) || f < 0) throw new Error("not a price");
       return BigInt(f);
     });
     fees.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
-    return fees.length === 0 ? 0n : fees[Math.ceil((fees.length * 3) / 4) - 1]!;
+    return fees[Math.ceil((fees.length * 3) / 4) - 1]!;
   };
   try {
     const [a, b] = await both(rpcs, p75);
-    const low = a < b ? a : b;
-    return low > SOLANA_POOL_SELL_PRICE_FLOOR ? low : SOLANA_POOL_SELL_PRICE_FLOOR;
+    const high = a > b ? a : b;
+    return high > SOLANA_POOL_SELL_PRICE_FLOOR ? high : SOLANA_POOL_SELL_PRICE_FLOOR;
   } catch {
     return null;
   }
 }
+/** The Ws whose last sale did not land (review P3-1 of 4f9217972): the next sale of each pays its cap, with no fee read,
+ *  until one lands. Kept for the page's session. */
+const capNext = new Set<string>();
+/** The page's sales forget capNext (a test's fresh page). */
+export const forgetSellCaps = (): void => capNext.clear();
 /** The accounts a sale's venue steps write that no one signs: what its price is read on (solanaSellPrice). */
 const writableOf = (steps: readonly { accounts: readonly { key: string; signer: boolean; writable: boolean }[] }[]): string[] => [...new Set(steps.flatMap((x) => x.accounts.filter((a) => a.writable && !a.signer).map((a) => a.key)))];
 /** The priority a mainnet sell from a W holding `room` lamports beyond the sell's need pays, on a form with room for the

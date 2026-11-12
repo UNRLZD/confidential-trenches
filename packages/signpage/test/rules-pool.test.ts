@@ -52,6 +52,7 @@ import {
   type SolanaOnwardReads,
   drawPool,
   SOLANA_POOL_SELL_RESERVE_MAX,
+  SOLANA_POOL_SELL_PRIORITY,
   SOLANA_POOL_MIN_DEPOSIT,
   solanaSweepFloor,
   solanaDepositRents,
@@ -1014,7 +1015,8 @@ test("Solana full sell: the rule passes exactly the device's reserve, a note und
     const next = rnd() < 0.5;
     const pair = () => { const v = rnd() < 0.5 ? null : ri(0n, 3_000_000n); return [v, v] as const; };
     const held: SolanaDepositHeld = { mark: pair(), state: pair(), label: pair() };
-    const fee = rnd() < 0.5 ? 5_000n : ri(0n, 1_405_000n);
+    // the most a sale's fee can be: one signature and SOLANA_POOL_SELL_PRIORITY (the rule refuses more, P2-2)
+    const fee = rnd() < 0.5 ? 5_000n : ri(0n, 5_000n + SOLANA_POOL_SELL_PRIORITY);
     let made = rnd() < 0.5 ? 0n : ri(0n, 3_000_000n);
     const rents = solanaDepositRents(rent, SOL_READS, held, next);
     const full = solanaSellAfterFull(rent, owed);
@@ -1040,4 +1042,51 @@ test("Solana full sell: the rule passes exactly the device's reserve, a note und
   }
   assert.ok(n > 200, String(n));
   assert.deepEqual(bad.slice(0, 10), []);
+});
+
+// card round-trip-costs-less, review P2-2 of 4f9217972: the sale's priority is bounded by the rule itself, not only by
+// the builder (src/pool-sell.ts solanaSellBudget): a sale whose compute budget pays over SOLANA_POOL_SELL_PRIORITY is
+// refused at any price the head's own caps pass (its 1,400,000 limit and 1,000,000 price paid 1,400,000 before), and a
+// full sell's keep is priced at no fee over one signature and that priority (105,000)
+test("round-trip-costs-less P2-2: a Solana sale paying more priority than SOLANA_POOL_SELL_PRIORITY is refused, the cap itself passes, and a full sell's fee is held to 5,000 plus that priority", async () => {
+  const { venue, ref, reads } = await setup("pump");
+  const amount = 5_000_000n;
+  const reference = { amount, ref, slippageBps: 300 };
+  const floor = (ref.pools.find((p) => p.venue === "pump-curve")!.expectedOut * 9_700n) / 10_000n;
+  const ask: PoolAsk = { kind: "pool.sell", chain: "solana", token: venue.mint, amount, slippageBps: 300, decimals: 6 };
+  const RESERVE = 5_000n;
+  const PART: SolanaSellSurplus = { full: false, lamports: 0n, fee: 5_000n, made: 0n, rent: { lamportsPerByte: 5_080n, factor: 1n }, held: { mark: [null, null], state: [null, null], label: [null, null] }, next: false, owed: 0 };
+  const limitIx = (l: number) => ({ program: SOLANA_COMPUTE_BUDGET_PROGRAM, accounts: [], data: Uint8Array.of(2, ...u64(BigInt(l)).slice(0, 4)) });
+  const priceIx = (p: bigint) => ({ program: SOLANA_COMPUTE_BUDGET_PROGRAM, accounts: [], data: Uint8Array.of(3, ...u64(p)) });
+  const steps = () => solanaPoolSellSteps(venue, SOL_W, amount, floor).map((x) => ({ ...x, accounts: x.accounts.map((a) => ({ ...a })) }));
+  const sale = (budget: Ixx[], reserve = RESERVE, p: SolanaSellSurplus = PART) => checkSolanaSell(wire(SOL_W, [...budget, ...steps(), depositIx({ value: floor - reserve })]), ask, solCtx(), venue, reference, reads.slot, SOL_READS, reserve, p);
+  assert.equal(SOLANA_POOL_SELL_PRIORITY, 100_000n);
+  // the pump sale's limit (87,102 units x 1.2) at the price the cap buys: 100,000 lamports exactly, passes; one more
+  // micro-lamport a unit is 100,001, refused
+  assert.equal(sale([limitIx(104_523), priceIx(956_727n)]).back, floor - RESERVE);
+  assert.throws(() => sale([limitIx(104_523), priceIx(956_728n)]), refusedAs("priority"));
+  // the head's own caps (1,400,000 units, 1,000,000 a unit) pass the head and are refused here: 1,400,000 lamports
+  assert.throws(() => sale([limitIx(1_400_000), priceIx(1_000_000n)]), refusedAs("priority"));
+  // a price with no limit is priced at the runtime's most, 1,400,000 units: 71,428 a unit is 99,999.2, 100,000 rounded
+  // up, passes; 71,429 is 100,000.6, 100,001, refused
+  assert.equal(sale([priceIx(71_428n)]).back, floor - RESERVE);
+  assert.throws(() => sale([priceIx(71_429n)]), refusedAs("priority"));
+  // a limit alone, or no budget, pays no priority
+  assert.equal(sale([limitIx(1_400_000)]).back, floor - RESERVE);
+  assert.equal(sale([]).back, floor - RESERVE);
+  // a full sell: its keep priced at a fee of 5,000 plus SOLANA_POOL_SELL_PRIORITY passes; a lamport of fee over it, W
+  // holding a lamport more so the keep is the same, is refused, with a budget or none
+  const rent = { lamportsPerByte: 5_080n, factor: 1n } as SolanaSellSurplus["rent"];
+  const none = [null, null] as const;
+  const held: SolanaDepositHeld = { mark: none, state: none, label: none };
+  const rents = solanaDepositRents(rent, SOL_READS, held, false);
+  const keep = solanaSellAfterFull(rent, 0);
+  const surplus = 3_000_000n;
+  const budget = [limitIx(104_523), priceIx(956_727n)];
+  const fee = 5_000n + 100_000n;
+  const FULL: SolanaSellSurplus = { full: true, lamports: fee + rents + keep + surplus, fee, made: 0n, rent, held, next: false, owed: 0 };
+  assert.equal(sale(budget, -surplus, FULL).back, floor + surplus);
+  assert.throws(() => sale(budget, -surplus, { ...FULL, fee: fee + 1n, lamports: FULL.lamports + 1n }), refusedAs("reserve"));
+  assert.equal(sale([], -surplus, FULL).back, floor + surplus);
+  assert.throws(() => sale([], -surplus, { ...FULL, fee: fee + 1n, lamports: FULL.lamports + 1n }), refusedAs("reserve"));
 });

@@ -108,6 +108,11 @@ export const SOLANA_POOL_CU_LIMIT_MAX = 1_400_000;
 /** The most one transaction W signs alone can cost W: one signature and the priority fee at the compute and price caps
  *  above (5,000 + 1,400,000 lamports). */
 export const SOLANA_POOL_TX_FEE_MAX = SOLANA_LAMPORTS_PER_SIGNATURE + (BigInt(SOLANA_POOL_CU_LIMIT_MAX) * SOLANA_CU_PRICE_MAX) / 1_000_000n;
+/** The most priority fee a mainnet pool sale may pay, lamports (src/pool-sell.ts solanaSellBudget prices it at most this,
+ *  and the preview counts it, pool-sell-dry.ts): its limit times its price, rounded up as the runtime charges it. The rule
+ *  holds it on its own (checkSolanaSell, card round-trip-costs-less review P2-2), so no price an RPC answers, and no
+ *  builder bug, signs a sale that pays more than the preview showed. */
+export const SOLANA_POOL_SELL_PRIORITY = 100_000n;
 /** The most rent per byte the sell's reserve cap allows (the rule refuses a rate over it): 3,480 lamports a byte-year
  *  exempt at 2 years, 6,960 a byte. The Rent sysvar read 5,080 a byte on mainnet and devnet alike (review 3 of
  *  446d830f, 8 Nov), 27% under it. */
@@ -381,6 +386,19 @@ function head(ixs: Ix[]): number {
   return n;
 }
 
+/** The priority fee the compute budget head (its first `n` instructions, head()) makes the payer pay, lamports: the
+ *  limit (none named: SOLANA_POOL_CU_LIMIT_MAX, never under the runtime's own default) times the price in micro-lamports
+ *  a unit, rounded up as the runtime rounds it. */
+function priorityOf(ixs: Ix[], n: number): bigint {
+  let limit = BigInt(SOLANA_POOL_CU_LIMIT_MAX);
+  let price = 0n;
+  for (const x of ixs.slice(0, n)) {
+    if (x.data[0] === 2) limit = BigInt(new DataView(x.data.buffer, x.data.byteOffset + 1, 4).getUint32(0, true));
+    else price = u64le(x.data, 1);
+  }
+  return (limit * price + 999_999n) / 1_000_000n;
+}
+
 const u64le = (d: Uint8Array, at: number): bigint => new DataView(d.buffer, d.byteOffset, d.byteLength).getBigUint64(at, true);
 const be32 = (d: Uint8Array): bigint => d.reduce((a, b) => (a << 8n) | BigInt(b), 0n);
 const same = (a: { key: string; signer: boolean; writable: boolean } | undefined, key: string, signer: boolean, writable: boolean): boolean =>
@@ -606,6 +624,9 @@ export function checkSolanaSell(
   const d = decode(wire, reads);
   if (d.signers.length !== 1 || d.signers[0] !== ctx.wallet) return refuse("signers");
   const n = head(d.ixs);
+  // the sale's priority fee, never over the most a sale may pay (the preview's bound), whatever price was read
+  const priority = priorityOf(d.ixs, n);
+  if (priority > SOLANA_POOL_SELL_PRIORITY) return refuse("priority");
   const body = d.ixs.slice(n);
   if (body.length === 0) return refuse("instructions");
   // the min out the bytes carry: the venue sell's last 8 data bytes (pump's and PumpSwap's sell(amount, min_out)); the
@@ -630,6 +651,8 @@ export function checkSolanaSell(
   const p = surplus;
   if (p !== undefined && p.full === true) {
     if (typeof p.lamports !== "bigint" || typeof p.fee !== "bigint" || typeof p.made !== "bigint" || p.fee < 0n || p.made < 0n || typeof p.next !== "boolean") return refuse("reserve");
+    // the fee the keep is priced at: never over one signature and the most priority a sale may pay
+    if (p.fee > SOLANA_LAMPORTS_PER_SIGNATURE + SOLANA_POOL_SELL_PRIORITY) return refuse("reserve");
     if (typeof p.rent?.lamportsPerByte !== "bigint" || typeof p.rent.factor !== "bigint" || p.rent.lamportsPerByte < 0n || p.rent.factor < 0n || p.rent.lamportsPerByte * p.rent.factor > SOLANA_RENT_PER_BYTE_MAX) return refuse("reserve");
     if (!Number.isSafeInteger(p.owed) || p.owed < 0 || p.owed > SOLANA_SWEEP_OWED_MAX) return refuse("reserve");
     const short = p.fee + p.made + solanaDepositRents(p.rent, reads, p.held, p.next) - p.lamports;

@@ -18,6 +18,8 @@ const KC = "../kit/test/solana-teardown-cashback.test.ts";
 const TB = "test/pool-buy.test.ts";
 const TESTNET = `${W}/src/pool-testnet.ts`;
 const TT = "test/pool-testnet.test.ts";
+const PAGE_RPC = `${W}/src/page-rpc.ts`;
+const RULES = `${W}/src/rules/pool.ts`;
 // [name, file, the test that kills it, from, to]; from an array of [from, to] pairs plants each one (a rule held twice,
 // as what W read as is: the pass's end names it W's own state, and the record keeps it only on those ends)
 export const M = [
@@ -161,15 +163,27 @@ export const M = [
   ["a21 a plain release's W read again on every load", SELL, T, "const x: RentBack = buy ? { ...given, mints: mintsOf(given.mints, [buy]), buy } : { ...given, buy: null, ...(unproven ? { unproven } : {}) };", "const x: RentBack = buy ? { ...given, mints: mintsOf(given.mints, [buy]), buy } : { ...given, buy: null, unproven: \"again\" };"],
   // card round-trip-costs-less c: the sale's price per compute unit from recent fees (solanaSellPrice), its use in the budget
   ["c1 the price at the median, not the 75th percentile", SELL, T, "Math.ceil((fees.length * 3) / 4) - 1", "Math.ceil(fees.length / 2) - 1"],
-  ["c2 the higher RPC's price", SELL, T, "    const low = a < b ? a : b;\n", "    const low = a < b ? b : a;\n"],
-  ["c3 no floor under the price", SELL, T, "return low > SOLANA_POOL_SELL_PRICE_FLOOR ? low : SOLANA_POOL_SELL_PRICE_FLOOR;", "return low;"],
+  ["c2 the lower RPC's price", SELL, T, "    const high = a > b ? a : b;\n", "    const high = a > b ? b : a;\n"],
+  ["c3 no floor under the price", SELL, T, "return high > SOLANA_POOL_SELL_PRICE_FLOOR ? high : SOLANA_POOL_SELL_PRICE_FLOOR;", "return high;"],
   ["c4 a negative price taken", SELL, T, "!Number.isSafeInteger(f) || f < 0) throw new Error(\"not a price\");", "!Number.isSafeInteger(f)) throw new Error(\"not a price\");"],
-  ["c5 a failed read priced at the floor", SELL, T, "return low > SOLANA_POOL_SELL_PRICE_FLOOR ? low : SOLANA_POOL_SELL_PRICE_FLOOR;\n  } catch {\n    return null;", "return low > SOLANA_POOL_SELL_PRICE_FLOOR ? low : SOLANA_POOL_SELL_PRICE_FLOOR;\n  } catch {\n    return SOLANA_POOL_SELL_PRICE_FLOOR;"],
+  ["c5 a failed read priced at the floor", SELL, T, "return high > SOLANA_POOL_SELL_PRICE_FLOOR ? high : SOLANA_POOL_SELL_PRICE_FLOOR;\n  } catch {\n    return null;", "return high > SOLANA_POOL_SELL_PRICE_FLOOR ? high : SOLANA_POOL_SELL_PRICE_FLOOR;\n  } catch {\n    return SOLANA_POOL_SELL_PRICE_FLOOR;"],
   ["c6 the budget ignores the price asked", SELL, T, "const price = want !== undefined && want < capped ? want : capped;", "const price = capped;"],
   ["c7 a price over what the cap buys taken", SELL, T, "const price = want !== undefined && want < capped ? want : capped;", "const price = want ?? capped;"],
-  ["c8 the sale never takes the price read", SELL, T, "        const want = (await priced) ?? undefined;\n", "        const want = undefined;\n"],
+  ["c8 the sale never takes the price read", SELL, T, "        const want = price ?? undefined;\n", "        const want = undefined;\n"],
   ["c9 the signer named to the read", SELL, T, "a.writable && !a.signer", "a.writable"],
   ["c10 one RPC's word for both", SELL, T, "const [a, b] = await both(rpcs, p75);", "const [a, b] = await both([rpcs[1], rpcs[1]], p75);"],
+  // the review of 4f9217972: P3-1 an empty list is no read, and a W whose sale did not land pays the cap next; P2-1 the
+  // read is the RPCs' optional read (never retried, its throttle reported to no lane, never sent to a host not open);
+  // P2-2 the sell's rule bounds the priority and a full sell's fee on its own
+  ["c11 an empty list priced", SELL, T, "if (!Array.isArray(got) || got.length === 0) throw", "if (!Array.isArray(got)) throw"],
+  ["c12 a W whose sale did not land priced again at once", SELL, T, '    if ("stage" in a && a.stage === "not_landed") capNext.add(w.address);\n', ""],
+  ["c13 the cap held after a sale landed", SELL, T, '    else if ("stage" in a && (a.stage === "filled" || a.stage === "refused")) capNext.delete(w.address);\n', ""],
+  ["c14 the fee read on the laned client", SELL, "test/page-rpc.test.ts", "    const read = optionalRead(r);\n", "    const read = (m: string, q: readonly unknown[]) => r(m, q);\n"],
+  ["c15 the optional read retried and reported", PAGE_RPC, "test/page-rpc.test.ts", "    return solanaJsonRpc(url, { ...(o.init ? { init: o.init } : {}), fetch, retry: { deadlineMs: retry.deadlineMs, backoffMs: retry.deadlineMs } })(method, params);", "    return go(method, params);"],
+  ["c16 the optional read sent to a paused host", PAGE_RPC, "test/page-rpc.test.ts", "    if (signal.aborted || !lane.open(kind)) return Promise.reject(", "    if (signal.aborted) return Promise.reject("],
+  ["c17 the sale's priority unbounded by the rule", RULES, "test/rules-pool.test.ts", '  if (priority > SOLANA_POOL_SELL_PRIORITY) return refuse("priority");\n', ""],
+  ["c18 a full sell's fee unbounded by the rule", RULES, "test/rules-pool.test.ts", '    if (p.fee > SOLANA_LAMPORTS_PER_SIGNATURE + SOLANA_POOL_SELL_PRIORITY) return refuse("reserve");\n', ""],
+  ["c19 a price with no limit priced at no units", RULES, "test/rules-pool.test.ts", "  let limit = BigInt(SOLANA_POOL_CU_LIMIT_MAX);\n", "  let limit = 0n;\n"],
 ];
 // every mutant's name, in the order the parts take them
 export const NAMES = M.map(([name]) => name);
