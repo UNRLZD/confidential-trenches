@@ -21,6 +21,7 @@ import { ed25519 } from "@noble/curves/ed25519.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { entropyToWords, freshWallet, wordsToSeed64 } from "@blindfill/wallet/derive";
 import { openWalletStore, type WalletStore } from "@blindfill/wallet/store";
+import { DEVICE_DB, deviceSpacing } from "../src/device-spacing.ts";
 import { SOLANA_ATA_PROGRAM, solanaAta, solanaDecodeMessage, solanaProgramAddress } from "../../kit/src/checks/solana/message.ts";
 import { SOLANA_CLAIM_CASHBACK, SOLANA_CLOSE_VOLUME_ACCUMULATOR, SOLANA_COMPUTE_BUDGET_PROGRAM, SOLANA_PUMP_AMM_PROGRAM, SOLANA_PUMP_PROGRAM, SOLANA_SOL_MINT, SOLANA_TOKEN_2022_PROGRAM as TOKEN_2022, SOLANA_TOKEN_PROGRAM, solanaTeardownAddresses, solanaVolumeAccumulator } from "../../kit/src/checks/solana/checks.ts";
 import { readSolanaPoolBuyVenue, SOLANA_RENT_SYSVAR, solanaPoolAccount, solanaPoolFee, solanaPoolPage, solanaPoolSellNeed, solanaRentMin, solanaPoolBuySellNeed, solanaPoolNextPage } from "../../kit/src/trade/solana/pool-buy.ts";
@@ -36,7 +37,7 @@ import { onTestClock } from "../../kit/test/test-clock.ts";
 import { solanaPoolOf } from "../../wallet/src/pool/solana.ts";
 import { BLOCKHASH, FEE_PAYER, POOL, PROGRAM, fx, providers, rent } from "../../kit/test/solana-pool-buy-fx.ts";
 import { READ_WAIT_TOTAL_MS } from "../src/read-waits.ts";
-import { POOL_RENT_BACK_GAP_MS, POOL_RENT_BACK_MS, POOL_RENT_BACK_SPACE_MAX_MS, POOL_RENT_BACK_SPACE_MIN_MS, type RentBackSpacing, POOL_RENT_BACK_RULES, POOL_SELL_LOCK, POOL_SELL_READS, POOL_SELL_SHARED_READ_MS, POOL_SELL_SIZE_RETRY_MS, POOL_SELL_AGREE_WAIT_MS, POOL_SELL_WAIT_MS, buyMints, leftAfter, owedRentBacks, planPoolSell, poolSellKind, resumeRentBacks, runPoolSell, settleDeadSellOps, settlePoolSells, settleSellOps, forgetPageLoad, solanaSellAfterFull, solanaSellBudget, solanaSellBudgetFits, solanaSellPrice, solanaSellReserve, SOLANA_POOL_SELL_PRICE_FLOOR, SOLANA_POOL_SELL_PRIORITY, keptSells, stageOfLegs, type KeptSell, type OwedRentBack, type PoolSellHost, type PoolSellKindHost, type RentBackTold } from "../src/pool-sell.ts";
+import { POOL_RENT_BACK_GAP_MS, POOL_RENT_BACK_MS, POOL_RENT_BACK_SPACE_MAX_MS, POOL_RENT_BACK_SPACE_MIN_MS, spaceOpen, type RentBackSpacing, POOL_RENT_BACK_RULES, POOL_SELL_LOCK, POOL_SELL_READS, POOL_SELL_SHARED_READ_MS, POOL_SELL_SIZE_RETRY_MS, POOL_SELL_AGREE_WAIT_MS, POOL_SELL_WAIT_MS, buyMints, leftAfter, owedRentBacks, planPoolSell, poolSellKind, resumeRentBacks, runPoolSell, settleDeadSellOps, settlePoolSells, settleSellOps, forgetPageLoad, solanaSellAfterFull, solanaSellBudget, solanaSellBudgetFits, solanaSellPrice, solanaSellReserve, SOLANA_POOL_SELL_PRICE_FLOOR, SOLANA_POOL_SELL_PRIORITY, keptSells, stageOfLegs, type KeptSell, type OwedRentBack, type OwedRentBacks, type PoolSellHost, type PoolSellKindHost, type RentBackTold } from "../src/pool-sell.ts";
 import { opOf } from "../src/state.ts";
 import { lanedRpc } from "../src/page-rpc.ts";
 import { resetHostLanes } from "../../wallet/src/throttle.ts";
@@ -6458,8 +6459,9 @@ test("round-trip-costs-less a: 20 Ws, one holding SOL: the helper finds them in 
 // With the random source at 0: the draw's own order, and the gap alone.
 // review 2 P3-e of c0dd55d02: a leftover W waits out the gap with its money on it, so its record keeps what its last pass
 // read on W, alike on both RPCs and its buy proven (src/positions.ts returningWallets lists it on its way); once its sweep
-// is sent the record keeps none (its note is the pool's then, never counted twice); a W whose buy is not proven reads none
-test("round-trip-costs-less P3-e: a W's owed record keeps the lamports its pass read, none once its sweep is sent or while its buy is unproven", async () => {
+// is sent the record keeps that read with the sweep's signature (the page lists W until the sweep's note is counted, never
+// twice; the delta review's item 6); a W whose buy is not proven reads none
+test("round-trip-costs-less P3-e: a W's owed record keeps the lamports its pass read, with the sweep's signature once it is sent, none while its buy is unproven", async () => {
   const floor = await soldElsewhere(500_000);
   await resumeRentBacks(floor.w.host, fakeLocks());
   const onW = floor.w.c.accounts.get(W.address)!.lamports;
@@ -6467,7 +6469,11 @@ test("round-trip-costs-less P3-e: a W's owed record keeps the lamports its pass 
   const swept = await soldElsewhere(ENOUGH);
   await resumeRentBacks(swept.w.host, fakeLocks());
   assert.equal(swept.w.c.deposits.filter((d) => d.sweep).length, 1);
-  assert.equal(swept.w.owed.get(W.address)?.lamports, undefined, "its sweep sent: none");
+  const rec = swept.w.owed.get(W.address)!;
+  assert.ok(rec.lamports !== undefined && BigInt(rec.lamports) > 0n, "its sweep sent: the read kept");
+  const note = (await swept.w.ns.list()).find((n) => n.sends?.some((d) => d.signature === rec.sweep));
+  assert.equal(note?.state, "INCOMING", "the sweep's signature names its note, not counted yet");
+  assert.equal(floor.w.owed.get(W.address)?.sweep, undefined, "no sweep: none");
   const unproven = await soldElsewhere(ENOUGH, null);
   await resumeRentBacks(unproven.w.host, fakeLocks());
   assert.equal(unproven.w.c.deposits.filter((d) => d.sweep).length, 0);
@@ -6529,9 +6535,9 @@ test("round-trip-costs-less P3-e: a second tab whose load read the store before 
   w.host.rpcs = withBuy(w.c.rpcs);
   await w.host.bought!.put(W.address, { mint: MINT, program: TOKEN_PROGRAM, rebuilt: true } as never);
   for (const [address, l] of [[W.address, "7"], [X.address, "8"]] as const) await w.host.owed!.put({ address, l, j: 0, mints: [{ mint: MINT, program: TOKEN_PROGRAM }], passes: 0 });
-  // the device's store, the one both tabs write: the real owedRentBacks over it
+  // the device's spacing, the one both tabs write: the real owedRentBacks over it
   const meta = new Map<string, unknown>();
-  const shared = owedRentBacks(async () => ({ get: async (_s: string, k: string) => meta.get(k), update: async (_s: string, k: string, f: (v: unknown) => unknown) => { const n = f(meta.get(k)); if (n !== undefined) meta.set(k, n); return n; } }) as never);
+  const shared = owedRentBacks(async () => ({ get: async (_s: string, k: string) => meta.get(k), update: async (_s: string, k: string, f: (v: unknown) => unknown) => { const n = f(meta.get(k)); if (n !== undefined) meta.set(k, n); return n; } }) as never, deviceSpacing(new IDBFactory()));
   const tab = (stale: boolean): PoolSellHost => ({ ...w.host, now: () => 9_000_000n, owed: { ...w.host.owed!, spacing: stale ? async () => undefined : shared.spacing, space: shared.space, claim: shared.claim } });
   const senders = (from: number) => new Set(w.c.calls.slice(from).filter((c) => c.method === "sendTransaction").map((c) => solanaDecodeMessage(base64.decode(c.params[0] as string).subarray(65)).staticKeys[0])).size;
   forgetPageLoad();
@@ -6546,17 +6552,173 @@ test("round-trip-costs-less P3-e: a second tab whose load read the store before 
   assert.equal(w.c.deposits.filter((d) => d.sweep).length, 1);
 });
 
-test("round-trip-costs-less P3-e: the store's slot: taken when no gap is open, refused while one is, and the last send kept", async () => {
+test("round-trip-costs-less P3-e: the device's slot: taken when no gap is open, refused while one is, and the last send kept", async () => {
+  const idb = new IDBFactory();
   const meta = new Map<string, unknown>();
-  const o = owedRentBacks(async () => ({ get: async (_s: string, k: string) => meta.get(k), update: async (_s: string, k: string, f: (v: unknown) => unknown) => { const n = f(meta.get(k)); if (n !== undefined) meta.set(k, n); return n; } }) as never);
+  const o = owedRentBacks(async () => ({ get: async (_s: string, k: string) => meta.get(k), update: async (_s: string, k: string, f: (v: unknown) => unknown) => { const n = f(meta.get(k)); if (n !== undefined) meta.set(k, n); return n; } }) as never, deviceSpacing(idb));
   assert.equal(await o.spacing!(), undefined);
   assert.equal(await o.claim!({ at: 1_000, gap: 600_000 }), true);
   assert.equal(await o.claim!({ at: 600_999, gap: 600_000 }), false, "inside the gap");
   assert.deepEqual(await o.spacing!(), { at: 1_000, gap: 600_000 });
   assert.equal(await o.claim!({ at: 601_000, gap: 900_000 }), true, "the gap passed");
   assert.deepEqual(await o.spacing!(), { at: 601_000, gap: 900_000 });
-  meta.set("owed/rentback-sol-space", { at: "x" });
+  await new Promise<void>((ok) => { const r = idb.open(DEVICE_DB); r.onsuccess = () => { const tx = r.result.transaction("space", "readwrite"); tx.objectStore("space").put({ at: "x" }, "rentback-sol"); tx.oncomplete = () => (r.result.close(), ok()); }; });
+  assert.equal(await o.spacing!(), undefined, "a record of no shape is none");
   assert.equal(await o.claim!({ at: 601_001, gap: 1 }), true, "a record of no shape is none");
+  assert.deepEqual([...meta.keys()], [], "nothing of it in the wallet's store");
+  // two tabs' claims at once, each its own connection: one takes the slot
+  const [a, b] = await Promise.all([deviceSpacing(idb).claim({ at: 700_000, gap: 600_000 }), deviceSpacing(idb).claim({ at: 700_000, gap: 600_000 })]);
+  assert.deepEqual([a, b].sort(), [false, true]);
+});
+
+// the delta review of P3-e, sign out and in: sign out deletes the wallet's database, and the spacing with it, so a
+// leftover sweep could go seconds after the last send; the network sees the device's one address whoever signs in. The
+// spacing is the device's own database (src/device-spacing.ts), which sign out leaves
+test("round-trip-costs-less P3-e: a sign out and in within the gap sends no leftover sweep", async () => {
+  const w = await world({ buy: null, held: 0n, ataLamports: TOKEN_RENT, volumes: [], lamports: ENOUGH, others: [{ l: 8n, j: 0, held: 0n }] }, [{ ...wallet(0n), holdings: null } as never, { ...walletX(0n), holdings: null } as never]);
+  for (const x of [W.address, X.address]) w.c.accounts.delete(solanaAta(x, MINT, TOKEN_PROGRAM));
+  w.host.rpcs = withBuy(w.c.rpcs);
+  await w.host.bought!.put(W.address, { mint: MINT, program: TOKEN_PROGRAM, rebuilt: true } as never);
+  for (const [address, l] of [[W.address, "7"], [X.address, "8"]] as const) await w.host.owed!.put({ address, l, j: 0, mints: [{ mint: MINT, program: TOKEN_PROGRAM }], passes: 0 });
+  const idb = new IDBFactory();
+  const ACCOUNT = "rtcl-account";
+  // each sign-in's wallet store: the real one, deleted by its sign out (its own name, so its sign out's broadcast does
+  // not close the world's note store, which stands for the next sign-in's)
+  const account = async () => {
+    const s = await openWalletStore({ indexedDB: idb, name: ACCOUNT });
+    const o = owedRentBacks(async () => s, deviceSpacing(idb));
+    return { s, o };
+  };
+  let now = 9_000_000n;
+  let again: Awaited<ReturnType<typeof account>> | undefined;
+  try {
+  const tab = (o: OwedRentBacks): PoolSellHost => ({ ...w.host, now: () => now, owed: { ...w.host.owed!, spacing: o.spacing, space: o.space, claim: o.claim } });
+  const senders = (from: number) => new Set(w.c.calls.slice(from).filter((c) => c.method === "sendTransaction").map((c) => solanaDecodeMessage(base64.decode(c.params[0] as string).subarray(65)).staticKeys[0])).size;
+  const first = await account();
+  forgetPageLoad();
+  let from = w.c.calls.length;
+  await resumeRentBacks(tab(first.o), fakeLocks());
+  assert.equal(senders(from), 1, "the first sign-in's one");
+  await first.s.signOut();
+  assert.equal((await idb.databases()).some((d) => d.name === ACCOUNT), false, "signed out: the wallet's database deleted");
+  // signed in again a minute later: a new wallet store, the device's spacing kept
+  now += 60_000n;
+  again = await account();
+  forgetPageLoad();
+  from = w.c.calls.length;
+  await resumeRentBacks(tab(again.o), fakeLocks());
+  assert.equal(senders(from), 0, "within the gap after a sign out and in: none");
+  assert.equal(w.c.deposits.filter((d) => d.sweep).length, 1);
+  // the gap passed: the next W goes
+  const kept = await deviceSpacing(idb).spacing();
+  now = BigInt(kept!.at + kept!.gap);
+  forgetPageLoad();
+  from = w.c.calls.length;
+  await resumeRentBacks(tab(again.o), fakeLocks());
+  assert.equal(senders(from), 1, "once the gap passed");
+  assert.equal(w.c.deposits.filter((d) => d.sweep).length, 2);
+  } finally {
+    again?.s.close();
+  }
+});
+
+// the delta review of P3-e, items 1 to 5, on three leftover Ws, with accounts to close on each (a pass held at its
+// teardown) and with none (held at its sweep)
+const leftovers = async (bare: boolean) => {
+  const w = await world({ buy: null, held: 0n, ataLamports: TOKEN_RENT, volumes: bare ? [] : [{ program: SOLANA_PUMP_PROGRAM }], lamports: ENOUGH, others: [{ l: 8n, j: 0, held: 0n }, { l: 9n, j: 0, held: 0n }] }, [{ ...wallet(0n), holdings: null } as never, { ...walletX(0n), holdings: null } as never, { ...walletY(0n), holdings: null } as never]);
+  if (bare) for (const x of [W.address, X.address, Y.address]) w.c.accounts.delete(solanaAta(x, MINT, TOKEN_PROGRAM));
+  w.host.rpcs = withBuy(w.c.rpcs);
+  await w.host.bought!.put(W.address, { mint: MINT, program: TOKEN_PROGRAM, rebuilt: true } as never);
+  for (const [address, l] of [[W.address, "7"], [X.address, "8"], [Y.address, "9"]] as const) await w.host.owed!.put({ address, l, j: 0, mints: [{ mint: MINT, program: TOKEN_PROGRAM }], passes: 0 });
+  const sends = () => w.c.calls.filter((c) => c.method === "sendTransaction");
+  const senders = (from: number) => new Set(w.c.calls.slice(from).filter((c) => c.method === "sendTransaction").map((c) => solanaDecodeMessage(base64.decode(c.params[0] as string).subarray(65)).staticKeys[0]));
+  return { w, sends, senders };
+};
+
+// item 1: a leftover W held by the spacing waits 10 to 60 minutes with its money on it; its record carries what W holds,
+// so the page lists it RETURNING, held at its teardown (accounts still to close) as at its sweep
+for (const bare of [false, true]) test(`round-trip-costs-less P3-e: leftover Ws held by the spacing${bare ? " (SOL alone)" : " (accounts to close)"} each carry W's lamports for the RETURNING row`, async () => {
+  const { w } = await leftovers(bare);
+  let space: RentBackSpacing | undefined;
+  const host: PoolSellHost = { ...w.host, now: () => 5_000_000n, owed: { ...w.host.owed!, spacing: async () => space, space: async (v) => void (space = v) } };
+  forgetPageLoad();
+  await resumeRentBacks(host, fakeLocks());
+  assert.equal(w.c.deposits.filter((d) => d.sweep).length, 1, "one sweep in the load");
+  const recs = [...w.owed.values()].map((r) => ({ address: r.address.slice(0, 6), lamports: r.lamports, sweep: r.sweep !== undefined }));
+  assert.equal(recs.length, 3);
+  assert.ok(recs.every((r) => r.lamports !== undefined && BigInt(r.lamports) > 0n), `records: ${JSON.stringify(recs)}`);
+  assert.equal(recs.filter((r) => r.sweep).length, 1, "the swept one names its sweep");
+});
+
+// item 5: a held pass reads W and stops: no seed, nothing built, simulated or signed for bytes it would throw away
+for (const bare of [false, true]) test(`round-trip-costs-less P3-e: a held pass${bare ? " (SOL alone)" : " (accounts to close)"} signs and simulates nothing`, async () => {
+  const { w, sends } = await leftovers(bare);
+  let seeds = 0;
+  const host: PoolSellHost = { ...w.host, now: () => 5_000_000n, seed64: async () => (seeds++, w.host.seed64()), owed: { ...w.host.owed!, spacing: async () => ({ at: 4_000_000, gap: 1_200_000 }), space: async () => {} } };
+  forgetPageLoad();
+  const from = w.c.calls.length;
+  await resumeRentBacks(host, fakeLocks());
+  assert.equal(sends().length, 0);
+  assert.equal(seeds, 0, "no seed taken");
+  assert.deepEqual(w.c.calls.slice(from).filter((c) => c.method === "simulateTransaction" || c.method === "getLatestBlockhash" || c.method === "getFeeForMessage").map((c) => c.method), [], "nothing built");
+  assert.ok([...w.owed.values()].every((r) => r.lamports !== undefined), "each read all the same");
+  assert.deepEqual(w.told.filter((t) => t.state === "fault"), [], "a hold is no fault, never tried again");
+});
+
+// item 5: W is never spaced against its own send: the gap W's own last send opened (its record's `spaced`) holds every
+// other W and never W, and W's record keeps the time of its own last send
+test("round-trip-costs-less P3-e: a W's own last send never holds W; it holds the others", async () => {
+  const { w, senders } = await leftovers(false);
+  let space: RentBackSpacing | undefined = { at: 4_900_000, gap: 1_200_000 };
+  await w.host.owed!.put({ ...w.owed.get(X.address)!, spaced: 4_900_000 });
+  const host: PoolSellHost = { ...w.host, now: () => 5_000_000n, owed: { ...w.host.owed!, spacing: async () => space, space: async (v) => void (space = v), claim: async (v, own) => (spaceOpen(space, v.at, own) ? false : ((space = v), true)) } };
+  forgetPageLoad();
+  const from = w.c.calls.length;
+  await resumeRentBacks(host, fakeLocks());
+  assert.deepEqual([...senders(from)], [X.address], "only the W whose gap it is");
+  assert.equal(w.owed.get(X.address)?.spaced, space!.at, "its own last send kept on its record");
+  assert.equal(w.owed.get(W.address)?.spaced, undefined);
+});
+
+// item 2: the stamp is written before the transaction is sent, so a claim meanwhile never goes seconds after it
+test("round-trip-costs-less P3-e: each rent-back send is stamped before it is sent", async () => {
+  const { w, sends } = await leftovers(false);
+  const at: number[] = [];
+  const host: PoolSellHost = { ...w.host, now: () => 5_000_000n, owed: { ...w.host.owed!, spacing: async () => undefined, space: async () => void at.push(sends().length) } };
+  forgetPageLoad();
+  await resumeRentBacks(host, fakeLocks());
+  // each send goes to both RPCs: the k-th stamp is written before the k-th send's two calls
+  assert.ok(at.length >= 2, "a close and a sweep");
+  assert.deepEqual(at, at.map((_, i) => 2 * i), "stamp k before send k");
+  assert.equal(at.length * 2, sends().length);
+});
+
+// item 3: a store that cannot answer holds the pass: its spacing read, or its claim, throwing sends nothing
+for (const broken of ["spacing", "claim"] as const) test(`round-trip-costs-less P3-e: a ${broken} that throws holds every leftover pass, nothing sent`, async () => {
+  const { w, sends } = await leftovers(false);
+  const host: PoolSellHost = { ...w.host, now: () => 5_000_000n, owed: { ...w.host.owed!, spacing: broken === "spacing" ? async () => Promise.reject(new Error("store down")) : async () => undefined, space: async () => {}, claim: broken === "claim" ? async () => Promise.reject(new Error("store down")) : async () => true } };
+  forgetPageLoad();
+  await resumeRentBacks(host, fakeLocks());
+  assert.equal(sends().length, 0);
+  assert.equal(w.owed.size, 3, "every record kept");
+});
+
+// item 4: a stamp whose gap ends past now + the largest gap (a clock set ahead) is none, in the load's read and the claim
+test("round-trip-costs-less P3-e: a stamp from the future reads as none", async () => {
+  const { w, senders } = await leftovers(true);
+  const idb = new IDBFactory();
+  const d = deviceSpacing(idb);
+  const now = 5_000_000;
+  await d.space({ at: now + 2 * POOL_RENT_BACK_SPACE_MAX_MS, gap: POOL_RENT_BACK_SPACE_MIN_MS });
+  assert.equal(spaceOpen(await d.spacing(), now), false);
+  assert.equal(spaceOpen({ at: now, gap: POOL_RENT_BACK_SPACE_MAX_MS }, now), true, "the largest gap from now is open");
+  assert.equal(spaceOpen({ at: now + 1, gap: POOL_RENT_BACK_SPACE_MAX_MS }, now), false, "one ms past it is not");
+  const host: PoolSellHost = { ...w.host, now: () => BigInt(now), owed: { ...w.host.owed!, ...d } };
+  forgetPageLoad();
+  const from = w.c.calls.length;
+  await resumeRentBacks(host, fakeLocks());
+  assert.equal(senders(from).size, 1, "the claim takes the slot over it");
+  assert.equal((await d.spacing())!.at, now);
 });
 
 test("round-trip-costs-less a: the Ws a load passes go in an order drawn at random, apart by the gap", async () => {

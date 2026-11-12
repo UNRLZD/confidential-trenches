@@ -81,6 +81,7 @@ import { blockhashOf, blockhashRead, blockhashValid, pastOnBoth, readBack, readB
 import { afterOf, clockOf, keptReads, READ_WAIT, readWaits, forgetYoung, solanaSaleReads, solanaStableReads, tapDone, tapWaits, waitsOn, waitUnless, youngReads, type ReadWaits } from "./read-waits.ts";
 import { throttleWaitMs } from "../../wallet/src/throttle.ts";
 import { fromRecord, timedStore, TRADE_STORE_MS, tradeLock, type TradeStore } from "./trade.ts";
+import { deviceSpacing, POOL_RENT_BACK_SPACE_MAX_MS, POOL_RENT_BACK_SPACE_MIN_MS, spaceOpen, type DeviceSpacing, type RentBackSpacing } from "./device-spacing.ts";
 import { checkSolanaSell, checkSolanaSweep, SOLANA_POOL_SELL_PRIORITY, checkSolanaTeardownFrames, PoolRuleRefused, poolUnits, signSolana, SOLANA_POOL_CU_LIMIT_MAX, SOLANA_POOL_MIN_DEPOSIT, SOLANA_POOL_SELL_RESERVE_MAX, SOLANA_SWEEP_OWED_MAX, solanaDepositRents, solanaSellAfterFull, solanaSweepFloor, solanaSweepKeep, type PoolAsk, type SolanaDepositHeld } from "./rules/pool.ts";
 // the full sell's keep is priced by the sell's rule too (rules/pool.ts checkSolanaSell, review L1 of 38faee89)
 export { solanaSellAfterFull };
@@ -616,7 +617,11 @@ type Later = { back?: (locks: Locks | null) => Promise<unknown>; rebuild?: true;
  *  holding, an account kept), so a load whose read of W is the same skips W with no other read. Card
  *  round-trip-costs-less: `buy`, W's coin as the restore's rebuild read it and the public seat read it the same
  *  (provenBuy; null: W's note paid a plain release, no buy), so it is read once. */
-export type OwedRentBack = { address: string; l: string; j: number; mints: { mint: string; program: string }[]; passes: number; seen?: string; sell?: Readonly<Record<string, SoldBy>>; buy?: SolanaBuy | null; lamports?: string };
+/** `lamports`: what W's last pass read on W, alike on both RPCs, its buy proven (src/positions.ts returningWallets lists
+ *  W on its way at it); `sweep`: its last sweep's signature, so W stays listed until the note that sweep wrote is counted
+ *  (never twice: the list reads the same notes the balance does); `spaced`: when W's own last rent-back send was, so W is
+ *  never spaced against itself (RentBackSpacing). */
+export type OwedRentBack = { address: string; l: string; j: number; mints: { mint: string; program: string }[]; passes: number; seen?: string; sell?: Readonly<Record<string, SoldBy>>; buy?: SolanaBuy | null; lamports?: string; sweep?: string; spaced?: number };
 /** A full sell of one mint, as W's owed record keeps it (card sol-rent-back-dust-burn): its signed bytes (base64) and its
  *  blockhash's last valid height, so a balance W's account of that mint holds after this very transaction landed
  *  leaving it none is a stranger's, burned by the rent back. */
@@ -624,15 +629,8 @@ type SoldBy = { tx: string; last: number };
 /** `empty`/`markEmpty` (card round-trip-costs-less): the account's Ws a pass read empty for good (nothing on W, no
  *  account, or no buy at all), each with the rules it was read under (POOL_RENT_BACK_RULES), so a load lists them and
  *  reads none of them again. */
-export type OwedRentBacks = { list(): Promise<OwedRentBack[]>; put(r: OwedRentBack): Promise<void>; drop(address: string): Promise<void>; empty?(): Promise<ReadonlySet<string>>; markEmpty?(address: string): Promise<void>; spacing?(): Promise<RentBackSpacing | undefined>; space?(v: RentBackSpacing): Promise<void>; claim?(v: RentBackSpacing): Promise<boolean> };
-/** When this device last sent a transaction from a W for a rent back (a close or a sweep, in a sale's own run or a
- *  leftover pass), ms, and the gap drawn for it (review 2 P3-e of c0dd55d02): no leftover W's pass runs before at + gap,
- *  so no two of the device's Ws close or sweep within a gap of each other and their timing never groups them as one
- *  user. In the wallet store, so it ends with a sign out as the rest does. */
-export type RentBackSpacing = { at: number; gap: number };
-/** The gap after a rent back's transaction before a leftover W's pass: drawn at random from [MIN, MAX] each send. */
-export const POOL_RENT_BACK_SPACE_MIN_MS = 10 * 60_000;
-export const POOL_RENT_BACK_SPACE_MAX_MS = 60 * 60_000;
+export type OwedRentBacks = { list(): Promise<OwedRentBack[]>; put(r: OwedRentBack): Promise<void>; drop(address: string): Promise<void>; empty?(): Promise<ReadonlySet<string>>; markEmpty?(address: string): Promise<void>; spacing?(): Promise<RentBackSpacing | undefined>; space?(v: RentBackSpacing): Promise<void>; claim?(v: RentBackSpacing, own?: number): Promise<boolean> };
+export { POOL_RENT_BACK_SPACE_MAX_MS, POOL_RENT_BACK_SPACE_MIN_MS, spaceOpen, type RentBackSpacing } from "./device-spacing.ts";
 /** How a rent back ended: its sweep sent; nothing left on W; W under the smallest note (solanaSweepFloor), its lamports
  *  kept on W; an account the plan keeps (so W keeps the fee to close it later); W holding a token; or it gave up. */
 // "owed": W keeps what a later claim of its owed cashback needs: an account whose claim did not simulate on either RPC
@@ -643,8 +641,9 @@ export const POOL_RENT_BACK_SPACE_MAX_MS = 60 * 60_000;
 export type RentBackEnd = "sent" | "nothing" | "floor" | "owed" | "kept" | "holds" | "refused" | "gave_up";
 export type RentBackTold = { address: string; step: "teardown" | "sweep" | "rent_back"; state: "fault" | "gave_up" | RentBackEnd; detail: string };
 
-/** The rent backs owed, in the wallet store's meta/owed/rentback-sol (meta/owed/ is never read or listed by the frame). */
-export const owedRentBacks = (store: () => Promise<Pick<TradeStore, "get" | "update">>): OwedRentBacks => {
+/** The rent backs owed, in the wallet store's meta/owed/rentback-sol (meta/owed/ is never read or listed by the frame);
+ *  the spacing in the device's own database (src/device-spacing.ts), which sign out leaves. */
+export const owedRentBacks = (store: () => Promise<Pick<TradeStore, "get" | "update">>, device: DeviceSpacing = deviceSpacing()): OwedRentBacks => {
   const KEY = "owed/rentback-sol";
   type All = Record<string, OwedRentBack>;
   return {
@@ -664,25 +663,13 @@ export const owedRentBacks = (store: () => Promise<Pick<TradeStore, "get" | "upd
       return new Set(Object.keys(all).filter((a) => all[a] === POOL_RENT_BACK_RULES));
     },
     markEmpty: async (address) => void (await (await store()).update("meta", EMPTY, (v) => ({ ...((v as Record<string, number> | undefined) ?? {}), [address]: POOL_RENT_BACK_RULES }))),
-    // the device's last rent-back send and its gap (RentBackSpacing), meta/owed/rentback-sol-space; one not of that
-    // shape is none
-    spacing: async () => {
-      const v = (await (await store()).get("meta", SPACE)) as Partial<RentBackSpacing> | undefined;
-      return Number.isSafeInteger(v?.at) && Number.isSafeInteger(v?.gap) ? { at: v!.at!, gap: v!.gap! } : undefined;
-    },
-    space: async (v) => void (await (await store()).update("meta", SPACE, () => ({ at: v.at, gap: v.gap }))),
-    // a leftover pass's slot, taken in one compare-and-set (the store's update) so two tabs of the device never both take
-    // it: true when no gap is open at `v.at` (v then the last send), false when one is
-    claim: async (v) => {
-      const won = await (await store()).update("meta", SPACE, (was) => {
-        const w = was as Partial<RentBackSpacing> | undefined;
-        return Number.isSafeInteger(w?.at) && Number.isSafeInteger(w?.gap) && v.at < w!.at! + w!.gap! ? undefined : { at: v.at, gap: v.gap };
-      });
-      return won !== undefined;
-    },
+    // the device's last rent-back send and its gap (RentBackSpacing), and a leftover pass's slot taken in one
+    // compare-and-set so two tabs never both take it: the device's, not the account's, so a sign out and in keeps it
+    spacing: () => device.spacing(),
+    space: (v) => device.space(v),
+    claim: (v, own) => device.claim(v, own),
   };
 };
-const SPACE = "owed/rentback-sol-space";
 const EMPTY = "owed/rentback-sol-empty";
 
 /** Where W's buy mints are: the wallet store's meta, by W's address; the key buyMints writes (its own literal there is
@@ -1602,13 +1589,13 @@ export async function solanaSellPrice(rpcs: Rpcs, accounts: readonly string[], s
 /** The Ws whose last sale did not land (review P3-1 of 4f9217972): the next sale of each pays its cap, with no fee read,
  *  until one lands. Kept for the page's session. */
 const capNext = new Set<string>();
-/** A leftover pass of this load sent a transaction from its W (resumeRentBacks): no other leftover W's pass sends in
- *  this load (review 2 P3-e of c0dd55d02). Kept for the page's session, as capNext. */
-let leftoverSent = false;
+/** The W whose leftover pass of this load sent a transaction (resumeRentBacks): no other leftover W's pass sends in this
+ *  load (review 2 P3-e of c0dd55d02). Kept for the page's session, as capNext. */
+let leftoverSent: string | null = null;
 /** A fresh page load: capNext and the load's leftover pass forgotten (a test's reload). */
 export const forgetPageLoad = (): void => {
   capNext.clear();
-  leftoverSent = false;
+  leftoverSent = null;
 };
 /** The rent-back transactions this page sent from a W (rentBack's send), so a pass knows whether it sent one. */
 let rentBackSends = 0;
@@ -1764,7 +1751,7 @@ const wireOf = (message: Uint8Array): Uint8Array => {
 /** `unproven`: no buy of W's proven this time (no record, or the public seat read W's history otherwise than the
  *  rebuild): the pass holds as with no buy, read again on a later state read ("again") until its POOL_RENT_BACK_
  *  UNPROVEN_PASSES-th pass, then as W's own state ("steady"; card round-trip-costs-less, review of 20ba2481b P2-6). */
-type RentBack = { rpcs: Rpcs; program: string; pool: string; scope: bigint; rent: SolanaRent; store: NoteStore; sync: SolanaTreeSync; w: ListedBuyWallet; mints: readonly { mint: string; program: string }[]; wait: (ms: number) => Promise<void>; sell?: Readonly<Record<string, SoldBy>>; buy?: { mint: string; program: string } | null; unproven?: "again" | "steady"; read?: (lamports: bigint) => void; quiet?: boolean; leftover?: boolean };
+type RentBack = { rpcs: Rpcs; program: string; pool: string; scope: bigint; rent: SolanaRent; store: NoteStore; sync: SolanaTreeSync; w: ListedBuyWallet; mints: readonly { mint: string; program: string }[]; wait: (ms: number) => Promise<void>; sell?: Readonly<Record<string, SoldBy>>; buy?: { mint: string; program: string } | null; unproven?: "again" | "steady"; read?: (lamports: bigint) => void; quiet?: boolean; leftover?: boolean; own?: number; stamped?: (at: number) => void; swept?: (signature: string) => void };
 
 /**
  * W's rent back (card sol-buy-rent-back), after a full sell filled or at a later load while it is owed: what W's
@@ -1858,12 +1845,22 @@ async function rentBack(h: PoolSellHost, x: RentBack, hold?: Hold): Promise<Ende
   // how the pass ended, and whether it ended on W's own state (W kept as it reads: under the floor at the cheapest
   // deposit, holding, an account kept, refused alike by both RPCs' reads), the ends whose `seen` a load skips on
   const end = (e: RentBackEnd, detail: string, steady = e === "holds" || e === "kept" || e === "refused"): Ended => (tell("rent_back", e, detail), { end: e, steady });
+  // the gap every later leftover pass waits out (RentBackSpacing), drawn afresh, and W's own record of it (`own`); a
+  // store that cannot be written leaves the last one
+  const stamp = async (v: RentBackSpacing): Promise<void> => {
+    try {
+      if (!h.owed?.space) return;
+      await h.owed.space(v);
+      x.stamped?.(v.at);
+    } catch {
+      // the last stamp stands
+    }
+  };
   const send = async (signed: Uint8Array, signature: string): Promise<void> => {
+    // stamped before the send, so a leftover pass's claim meanwhile never goes seconds after it
+    await stamp({ at: clock(), gap: gapDrawn() });
     await Promise.allSettled(rpcs.map((r) => r("sendTransaction", [base64.encode(signed), { encoding: "base64", preflightCommitment: "confirmed" }])));
     rentBackSends++;
-    // the gap every later leftover pass waits out (RentBackSpacing), from this send, drawn afresh; a store that cannot
-    // be written leaves the last one
-    await Promise.resolve(h.owed?.space?.({ at: clock(), gap: gapDrawn() })).catch(() => {});
     h.back?.(signature);
   };
   // a leftover pass, before its first send and before the sweep's note is written: held while the load holds it
@@ -1873,7 +1870,9 @@ async function rentBack(h: PoolSellHost, x: RentBack, hold?: Hold): Promise<Ende
   const spaced = async (): Promise<void> => {
     if (x.quiet === true) throw HELD;
     if (x.leftover !== true || claimed || h.owed?.claim === undefined) return;
-    if (!(await h.owed.claim({ at: clock(), gap: gapDrawn() }).catch(() => false))) throw HELD;
+    const v = { at: clock(), gap: gapDrawn() };
+    if (!(await h.owed.claim(v, x.own).catch(() => false))) throw HELD;
+    x.stamped?.(v.at);
     claimed = true;
   };
   // a step up to its send, again from its first read on a fault, each fault told; null: it gave up
@@ -1884,7 +1883,7 @@ async function rentBack(h: PoolSellHost, x: RentBack, hold?: Hold): Promise<Ende
       try {
         return { ok: await f() };
       } catch (e) {
-        if (e === BUSY) throw e;
+        if (e === BUSY || e === HELD) throw e;
         last = e;
         tell(step, "fault", faultOf(e));
       }
@@ -1968,7 +1967,13 @@ async function rentBack(h: PoolSellHost, x: RentBack, hold?: Hold): Promise<Ende
       if (read.k === "holds") return { holds: read.steady, keep: [], signed: [], last: 0, unclaimed: undefined };
       if (read.k === "refused") return { refused: read.why, keep: [], signed: [], last: 0, unclaimed: undefined };
       const { held, accounts, plan } = read;
+      // what W holds as both RPCs read it, its buy proven: the size the page shows it returning (returningWallets), also
+      // while a held pass waits with accounts still to close (the sweep's read below follows the closes)
+      const [la, lb] = held.map((v) => v[0]?.lamports ?? 0n);
+      if (la === lb) x.read?.(la!);
       if (plan.close.length === 0) return { keep: plan.keep, signed: [], last: 0, unclaimed: undefined };
+      // held: nothing more read, built or signed for frames that would not be sent
+      if (x.quiet === true) throw HELD;
       const bh = await blockhashOf(rpcs);
       // one frame at a time on each RPC: a public provider throttles a burst; a claim that does not simulate is planned
       // around once, claims off (the kit's solanaTeardownChecked), so the closes still go and the owed account stays
@@ -2021,6 +2026,8 @@ async function rentBack(h: PoolSellHost, x: RentBack, hold?: Hold): Promise<Ende
       x.read?.(lamports);
       // W at 0 with a claim still owed is owed, never dropped (review 5 of 38e59182, info)
       if (lamports === 0n) return { end: owed > 0 ? ("owed" as const) : ("nothing" as const), detail: owed > 0 ? `W holds nothing, owed ${owed} cashback claim${owed > 1 ? "s" : ""}` : "W holds nothing" };
+      // held: nothing more read, built or signed for a sweep that would not be sent
+      if (x.quiet === true) throw HELD;
       // the gate; the sizes the sweep is priced on are read again with its pages (depositHeld, review P2-1 of 77055f4e)
       let sizes = await treeSizes(rpcs, x.program, x.pool, wait);
       const s = await seed();
@@ -2061,6 +2068,7 @@ async function rentBack(h: PoolSellHost, x: RentBack, hold?: Hold): Promise<Ende
     await spaced();
     const id = sw.planned ?? (await x.store.add({ ref: sw.ref, scope: x.scope, precommitment: sw.precommitment, state: "PLANNED" })).id;
     await x.store.move(id, "PLANNED", "INCOMING", { send: { signature: sw.one.signature, value: sw.value, last_valid_block_height: BigInt(sw.last) } });
+    x.swept?.(sw.one.signature);
     await send(sw.one.signed, sw.one.signature);
     return end("sent", sw.one.signature);
   } catch (e) {
@@ -2190,8 +2198,10 @@ async function rentBackOwed(h: PoolSellHost, given: RentBack, o: OwedRentBack, h
   const unproven = buy === undefined && proven === undefined ? (o.passes + 1 >= POOL_RENT_BACK_UNPROVEN_PASSES ? ("steady" as const) : ("again" as const)) : undefined;
   const x: RentBack = buy ? { ...given, mints: mintsOf(given.mints, [buy]), buy } : { ...given, buy: null, ...(unproven ? { unproven } : {}) };
   let lamports: bigint | undefined;
-  const r = await rentBack(h, { ...x, read: (v) => (lamports = v) }, hold);
-  await owedAfter(h, o, r.end, r.steady ? seen : undefined, { ...(proven === undefined ? {} : { buy: proven }), ...(lamports === undefined ? {} : { lamports }) });
+  let spaced: number | undefined;
+  let sweep: string | undefined;
+  const r = await rentBack(h, { ...x, ...(o.spaced === undefined ? {} : { own: o.spaced }), read: (v) => (lamports = v), stamped: (at) => (spaced = at), swept: (s) => (sweep = s) }, hold);
+  await owedAfter(h, o, r.end, r.steady ? seen : undefined, { ...(proven === undefined ? {} : { buy: proven }), ...(lamports === undefined ? {} : { lamports }), ...(spaced === undefined ? {} : { spaced }), ...(sweep === undefined ? {} : { sweep }) });
   return r.end === "gave_up" || r.end === "sent" || r.end === "owed" || unproven === "again";
 }
 
@@ -2207,7 +2217,7 @@ async function seenOf(h: PoolSellHost, address: string, mints: readonly { mint: 
  *  one pass more (a pass bound dropped Ws whose passes faulted, both RPCs down, and one reader's word that W holds a
  *  token dropped it too), with what the helper read W as when the pass ended on W's own state (under the floor, holding,
  *  an account kept), so a load whose read of W is the same skips it, and W's proven buy. */
-async function owedAfter(h: PoolSellHost, o: OwedRentBack, e: RentBackEnd, seen?: string, kept: { buy?: SolanaBuy | null; lamports?: bigint } = {}): Promise<void> {
+async function owedAfter(h: PoolSellHost, o: OwedRentBack, e: RentBackEnd, seen?: string, kept: { buy?: SolanaBuy | null; lamports?: bigint; spaced?: number; sweep?: string } = {}): Promise<void> {
   try {
     if (e === "nothing") {
       await Promise.resolve(h.owed?.markEmpty?.(o.address)).catch(() => {});
@@ -2216,11 +2226,13 @@ async function owedAfter(h: PoolSellHost, o: OwedRentBack, e: RentBackEnd, seen?
     // the record as it is now (a sell meanwhile may have written W's again, with another mint), its mints kept; a
     // record written before review of 20ba2481b may carry `left`, no longer kept
     const now = (await h.owed?.list())?.find((r) => r.address === o.address) ?? o;
-    const { seen: _last, left: _left, lamports: last, ...rest } = now as OwedRentBack & { left?: string };
-    // what W holds (returningWallets): this pass's read, else the last; none once its sweep is sent (its note then the
-    // pool's, never counted twice)
-    const lamports = e === "sent" ? undefined : kept.lamports !== undefined ? kept.lamports.toString() : last;
-    await h.owed?.put({ ...rest, mints: mintsOf(now.mints, o.mints), passes: now.passes + 1, ...(seen !== undefined && (e === "floor" || e === "holds" || e === "kept" || e === "refused") ? { seen } : {}), ...(kept.buy === undefined ? {} : { buy: kept.buy }), ...(lamports === undefined ? {} : { lamports }) });
+    const { seen: _last, left: _left, lamports: last, sweep: lastSweep, spaced: lastSpaced, ...rest } = now as OwedRentBack & { left?: string };
+    // what W holds (returningWallets): this pass's read, else the last, kept once its sweep is sent with the sweep's
+    // signature: listed until the note it wrote is counted (never twice); a later read of W stands on its own
+    const lamports = kept.lamports !== undefined ? kept.lamports.toString() : last;
+    const sweep = e === "sent" ? kept.sweep : kept.lamports !== undefined ? undefined : lastSweep;
+    const spaced = kept.spaced ?? lastSpaced;
+    await h.owed?.put({ ...rest, mints: mintsOf(now.mints, o.mints), passes: now.passes + 1, ...(seen !== undefined && (e === "floor" || e === "holds" || e === "kept" || e === "refused") ? { seen } : {}), ...(kept.buy === undefined ? {} : { buy: kept.buy }), ...(lamports === undefined ? {} : { lamports }), ...(sweep === undefined ? {} : { sweep }), ...(spaced === undefined ? {} : { spaced }) });
   } catch {
     // an owed record that cannot be written: the rent back runs again only while one is stored
   }
@@ -2298,7 +2310,8 @@ export async function resumeRentBacks(h: PoolSellHost, locks: Locks | null = glo
   } catch {
     spaceRead = false;
   }
-  const quiet = (): boolean => leftoverSent || !spaceRead || (space !== undefined && Number(h.now?.() ?? BigInt(Date.now())) < space.at + space.gap);
+  // per W: another W's send this load, a store that could not be read, or an open gap that is not W's own
+  const quiet = (o: OwedRentBack): boolean => (leftoverSent !== null && leftoverSent !== o.address) || !spaceRead || spaceOpen(space, Number(h.now?.() ?? BigInt(Date.now())), o.spaced);
   // the order drawn at random each load (review of 20ba2481b, P1-2), so a W whose pass never progresses never holds the
   // rest behind it (review 5 of 38e59182, L2) and no fixed order ties the account's Ws together
   for (let i = todo.length - 1; i > 0; i--) {
@@ -2339,11 +2352,11 @@ export async function resumeRentBacks(h: PoolSellHost, locks: Locks | null = glo
         const f = found.find((x) => x.address === address);
         const o = (await h.owed!.list()).find((r) => r.address === address) ?? (f ? { address, l: f.l.toString(), j: f.j, mints: [], passes: 0 } : undefined);
         const w = o && setup.wallets.find((x) => x.chain === "sol" && x.address === o.address && x.l.toString() === o.l && x.j === o.j);
-        if (o && w && (await rentBackOwed(h, { rpcs, program, pool, scope, rent, store, sync, w, mints: o.mints, wait, quiet: quiet(), leftover: true, ...(o.sell ? { sell: o.sell } : {}) }, o, hold, read?.get(address)?.seen))) more = true;
+        if (o && w && (await rentBackOwed(h, { rpcs, program, pool, scope, rent, store, sync, w, mints: o.mints, wait, quiet: quiet(o), leftover: true, ...(o.sell ? { sell: o.sell } : {}) }, o, hold, read?.get(address)?.seen))) more = true;
       });
       if (!go) return true;
       // this pass sent from its W: the load's one; the rest send nothing in this load
-      if (rentBackSends > sends) leftoverSent = true;
+      if (rentBackSends > sends) leftoverSent = address;
     }
   } finally {
     release?.();

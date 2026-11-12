@@ -382,7 +382,9 @@ else {
         const positioned = withPositions(pooled, sol === null && near.length === 0 ? null : [...(sol ?? []), ...near]);
         // the Ws whose money waits for its rent back, on their way (src/positions.ts returningWallets): a store read
         const owed = s.signed_in && testnet ? await testnet.returning().catch(() => []) : [];
-        return withReturning(positioned, returningWallets(owed, prices.get("solana")));
+        // the notes the balance counted, so a W whose sweep's note is counted is not listed too
+        const counted = owed.some((o) => o.sweep !== undefined) ? await shared().catch(() => null) : [];
+        return withReturning(positioned, returningWallets(owed, prices.get("solana"), counted));
       }),
     // a store change, a new price read (or its next one due), the Rent read landing and a proof made
     watch: (fn) => {

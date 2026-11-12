@@ -2243,10 +2243,10 @@ test("round-trip-costs-less P3-e: returningWallets lists each owed W with a read
     { address: W2 },
     { address: "CTsw3333333333333333333333333333333333333333", lamports: "0" },
   ];
-  const ws = returningWallets(owed, PRICE);
+  const ws = returningWallets(owed, PRICE, []);
   assert.deepEqual(ws, [{ chain: "solana", address: W1, role: "fresh", size: "0.305892", state: "RETURNING" }]);
-  assert.deepEqual(returningWallets(owed, null), [], "no price: nothing guessed");
-  assert.deepEqual(returningWallets([{ address: W1, lamports: "x" }], PRICE), [], "a record that is no number");
+  assert.deepEqual(returningWallets(owed, null, []), [], "no price: nothing guessed");
+  assert.deepEqual(returningWallets([{ address: W1, lamports: "x" }], PRICE, []), [], "a record that is no number");
   const s = withReturning(SIGNED_IN, ws);
   assert.deepEqual(s.wallets, ws);
   assert.equal(SIGNPAGE_RESULT_SCHEMAS.state(s), true, "kit 1.9");
@@ -2254,4 +2254,21 @@ test("round-trip-costs-less P3-e: returningWallets lists each owed W with a read
   assert.equal(withReturning(SIGNED_IN, []), SIGNED_IN);
   const out = { ...SIGNED_IN, signed_in: false } as unknown as SignpageState;
   assert.equal(withReturning(out, ws), out, "signed out: never");
+});
+
+// the delta review of P3-e, item 6: a sweep sent and not landed yet (its note INCOMING, counted by no balance until
+// UNSPENT, wallet/src/pool/balances.ts) left W listed nowhere. W's record keeps its read and the sweep's signature; the
+// page lists W while that note is PLANNED or INCOMING (or no note carries it) and never once it is counted, read from
+// the notes the balance counted
+test("round-trip-costs-less P3-e: a W whose sweep is sent stays RETURNING until the sweep's note is counted, never in both totals", () => {
+  const sig = "5".repeat(88);
+  const owed = [{ address: W1, lamports: "2039280", sweep: sig }];
+  const note = (state: string) => [{ id: "n1", state, sends: [{ signature: sig, value: 1n, last_valid_block_height: 1n }] }] as never;
+  const listed = [{ chain: "solana", address: W1, role: "fresh", size: "0.305892", state: "RETURNING" }];
+  assert.deepEqual(returningWallets(owed, PRICE, note("INCOMING")), listed, "sent, not landed");
+  assert.deepEqual(returningWallets(owed, PRICE, note("PLANNED")), listed, "dropped: back on W");
+  assert.deepEqual(returningWallets(owed, PRICE, []), listed, "no note carries it");
+  for (const st of ["UNSPENT", "HELD", "RESERVED", "SPENT", "TAKEN"]) assert.deepEqual(returningWallets(owed, PRICE, note(st)), [], `${st}: the pool's`);
+  assert.deepEqual(returningWallets(owed, PRICE, null), [], "no notes read: none, never twice");
+  assert.deepEqual(returningWallets([{ address: W1, lamports: "2039280" }], PRICE, null), listed, "no sweep sent: no notes needed");
 });
