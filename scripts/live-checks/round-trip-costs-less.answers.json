@@ -1,0 +1,64 @@
+{
+  "_note": {
+    "good": "card/round-trip-costs-less build (mainnet) with the fold of the review of 20ba2481b: packages/signpage/index.html and public/app.js as build-app.mjs wrote them on that branch: PASS",
+    "bad": "main b9361e809 build (mainnet), before this card: packages/signpage/index.html and public/app.js as build-app.mjs wrote them there: FAIL, every mark named",
+    "beforeReview": "card/round-trip-costs-less 20ba2481b build (mainnet), before the review of 20ba2481b was folded: FAIL on the rules that review moved"
+  },
+  "good": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-zaK3/UZqe4xRcamg/wM+Vxg0M5v7LryrhdtkOwPbOTIYsqffNl6U7vga6F2W/RRM\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-zaK3/UZqe4xRcamg/wM+Vxg0M5v7LryrhdtkOwPbOTIYsqffNl6U7vga6F2W/RRM",
+    "carries": {
+      "a full sell with no claim owed closes W's accounts in the sale, never on its last build, a bare one or a tree near its page's end; all, else the token account alone, else none, as fits the size": true,
+      "the closes only where they lose no more than the form before: one more deposit's cost under the sweep's floor, a teardown frame's fee for each account left open, the volume account the sale names priced with the rest": true,
+      "the sale's deposit takes the closes' rent, W kept at rent(0)": true,
+      "a simulation that refuses the closes sells with none; a close failed on chain builds the sale again bare, never ending the request on it": true,
+      "the signing rule takes each close as the sale's own, exactly, before the deposit": true,
+      "what the sale left on W's token account is 0 when the sale closed it: an entry before it, none after": true,
+      "the sale's owed record keeps W's proven buy": true,
+      "every W of the account's found on the helper's seat alone, in batches; one with no record the helper reads empty listed empty; a W read as at its last end on its own state read on neither seat; the load's own reads only with a W to pass": true,
+      "the Ws passed in an order drawn from the device's random source, a second and up to a second more apart": true,
+      "W's buy proven on the public seat alone, once, against the restore's rebuilt record or its no-buy mark": true,
+      "an unproven W tried again on each load to its third pass, then held as its own state": true,
+      "the positions' passes held only while a W is read": true,
+      "the page reads the restore's no-buy mark": true
+    }
+  },
+  "bad": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-Dag0rSWPXOaLdRbi52nSQr0qxs9MDQCh5OuDtrcycwLRFkiKvf0gi6s9qDRyLM5A\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-Dag0rSWPXOaLdRbi52nSQr0qxs9MDQCh5OuDtrcycwLRFkiKvf0gi6s9qDRyLM5A",
+    "carries": {
+      "a full sell with no claim owed closes W's accounts in the sale, never on its last build, a bare one or a tree near its page's end; all, else the token account alone, else none, as fits the size": false,
+      "the closes only where they lose no more than the form before: one more deposit's cost under the sweep's floor, a teardown frame's fee for each account left open, the volume account the sale names priced with the rest": false,
+      "the sale's deposit takes the closes' rent, W kept at rent(0)": false,
+      "a simulation that refuses the closes sells with none; a close failed on chain builds the sale again bare, never ending the request on it": false,
+      "the signing rule takes each close as the sale's own, exactly, before the deposit": false,
+      "what the sale left on W's token account is 0 when the sale closed it: an entry before it, none after": false,
+      "the sale's owed record keeps W's proven buy": false,
+      "every W of the account's found on the helper's seat alone, in batches; one with no record the helper reads empty listed empty; a W read as at its last end on its own state read on neither seat; the load's own reads only with a W to pass": false,
+      "the Ws passed in an order drawn from the device's random source, a second and up to a second more apart": false,
+      "W's buy proven on the public seat alone, once, against the restore's rebuilt record or its no-buy mark": false,
+      "an unproven W tried again on each load to its third pass, then held as its own state": false,
+      "the positions' passes held only while a W is read": false,
+      "the page reads the restore's no-buy mark": false
+    }
+  },
+  "beforeReview": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-Nkyl1yXuJqCdm7Pd7tifE0xi9Y6a26LmY4ECIOE1sBrzu+CCorl8Wt9G9ORmKXtT\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-Nkyl1yXuJqCdm7Pd7tifE0xi9Y6a26LmY4ECIOE1sBrzu+CCorl8Wt9G9ORmKXtT",
+    "carries": {
+      "a full sell with no claim owed closes W's accounts in the sale, never on its last build, a bare one or a tree near its page's end; all, else the token account alone, else none, as fits the size": false,
+      "the closes only where they lose no more than the form before: one more deposit's cost under the sweep's floor, a teardown frame's fee for each account left open, the volume account the sale names priced with the rest": false,
+      "the sale's deposit takes the closes' rent, W kept at rent(0)": true,
+      "a simulation that refuses the closes sells with none; a close failed on chain builds the sale again bare, never ending the request on it": true,
+      "the signing rule takes each close as the sale's own, exactly, before the deposit": true,
+      "what the sale left on W's token account is 0 when the sale closed it: an entry before it, none after": false,
+      "the sale's owed record keeps W's proven buy": false,
+      "every W of the account's found on the helper's seat alone, in batches; one with no record the helper reads empty listed empty; a W read as at its last end on its own state read on neither seat; the load's own reads only with a W to pass": false,
+      "the Ws passed in an order drawn from the device's random source, a second and up to a second more apart": false,
+      "W's buy proven on the public seat alone, once, against the restore's rebuilt record or its no-buy mark": false,
+      "an unproven W tried again on each load to its third pass, then held as its own state": false,
+      "the positions' passes held only while a W is read": false,
+      "the page reads the restore's no-buy mark": false
+    }
+  }
+}
