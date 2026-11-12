@@ -62,9 +62,10 @@ const teardown = (js, reg) => {
   return c !== null && TEARDOWN_SIGNED(c[1], reg).test(js);
 };
 // the signing page's rent back (pool-sell.ts): it checks again, and signs, the copies the kit's checked teardown
-// returned (t.wires), never the frames' own arrays (main 53921971's t.frames.map((f) => f.wire), review 5 F5)
+// returned (t.wires), never the frames' own arrays (main 53921971's t.frames.map((f) => f.wire), review 5 F5); since
+// card buy-spends-several-pieces the signed copies are named first and returned after a found W's latest is read again
 const RENT_BACK = (checked) =>
-  new RegExp(`(${I})=await ${esc(checked)}\\([^]{0,500}?\\);return ${I}\\(\\1\\.wires,${I},\\1\\.reads\\),\\{keep:\\1\\.plan\\.keep,signed:await ${I}\\(\\1\\.wires\\),`);
+  new RegExp(`(${I})=await ${esc(checked)}\\([^]{0,500}?\\);(?:return ${I}\\(\\1\\.wires,${I},\\1\\.reads\\),\\{keep:\\1\\.plan\\.keep,signed:await ${I}\\(\\1\\.wires\\),|${I}\\(\\1\\.wires,${I},\\1\\.reads\\);let (${I})=await ${I}\\(\\1\\.wires\\);return [^;]{0,300}?:\\{keep:\\1\\.plan\\.keep,signed:\\2,)`);
 const rentBack = (js) => {
   const c = TEARDOWN_CHECKED.exec(js);
   return c !== null && RENT_BACK(c[1]).test(js);

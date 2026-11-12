@@ -1,0 +1,286 @@
+{
+ "good": {
+  "base": "http://127.0.0.1:18931",
+  "at": "2026-11-12T18:11:59.818Z",
+  "reads": [
+   {
+    "route": "solana",
+    "read": "slot",
+    "ms": 69,
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade",
+    "commit": "dab793230dd57d4d79d521f582568a2c81a4a9a4",
+    "answer": {
+     "result": 468621092
+    }
+   },
+   {
+    "route": "solana",
+    "read": "header",
+    "ms": 61,
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade",
+    "commit": "dab793230dd57d4d79d521f582568a2c81a4a9a4",
+    "answer": {
+     "result": {
+      "keys": [
+       "blockHeight",
+       "blockTime",
+       "blockhash",
+       "parentSlot",
+       "previousBlockhash"
+      ],
+      "blockHeight": 446636718
+     }
+    }
+   },
+   {
+    "route": "solana",
+    "read": "full",
+    "ms": 2,
+    "status": 400,
+    "acao": "https://confidential.unrealized.trade",
+    "commit": "dab793230dd57d4d79d521f582568a2c81a4a9a4",
+    "answer": {
+     "error": {
+      "code": "method_not_allowed",
+      "message": ""
+     }
+    }
+   },
+   {
+    "route": "solana-devnet",
+    "read": "slot",
+    "ms": 288,
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade",
+    "commit": "dab793230dd57d4d79d521f582568a2c81a4a9a4",
+    "answer": {
+     "result": 521549147
+    }
+   },
+   {
+    "route": "solana-devnet",
+    "read": "header",
+    "ms": 61,
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade",
+    "commit": "dab793230dd57d4d79d521f582568a2c81a4a9a4",
+    "answer": {
+     "result": {
+      "keys": [
+       "blockHeight",
+       "blockTime",
+       "blockhash",
+       "parentSlot",
+       "previousBlockhash"
+      ],
+      "blockHeight": 508679905
+     }
+    }
+   },
+   {
+    "route": "solana-devnet",
+    "read": "full",
+    "ms": 1,
+    "status": 400,
+    "acao": "https://confidential.unrealized.trade",
+    "commit": "dab793230dd57d4d79d521f582568a2c81a4a9a4",
+    "answer": {
+     "error": {
+      "code": "method_not_allowed",
+      "message": ""
+     }
+    }
+   }
+  ]
+ },
+ "bad_before": {
+  "base": "https://ct-api.unrealized.trade",
+  "at": "2026-11-12T18:11:55.135Z",
+  "reads": [
+   {
+    "route": "solana",
+    "read": "slot",
+    "ms": 929,
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade",
+    "commit": "4f673c93bf9afcc8e7c66ed4582e39c0af8dfe6c",
+    "answer": {
+     "result": 468621060
+    }
+   },
+   {
+    "route": "solana",
+    "read": "header",
+    "ms": 727,
+    "status": 400,
+    "acao": "https://confidential.unrealized.trade",
+    "commit": "4f673c93bf9afcc8e7c66ed4582e39c0af8dfe6c",
+    "answer": {
+     "error": {
+      "code": "method_not_allowed",
+      "message": ""
+     }
+    }
+   },
+   {
+    "route": "solana",
+    "read": "full",
+    "ms": 261,
+    "status": 400,
+    "acao": "https://confidential.unrealized.trade",
+    "commit": "4f673c93bf9afcc8e7c66ed4582e39c0af8dfe6c",
+    "answer": {
+     "error": {
+      "code": "method_not_allowed",
+      "message": ""
+     }
+    }
+   },
+   {
+    "route": "solana-devnet",
+    "read": "slot",
+    "ms": 504,
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade",
+    "commit": "4f673c93bf9afcc8e7c66ed4582e39c0af8dfe6c",
+    "answer": {
+     "result": 521549123
+    }
+   },
+   {
+    "route": "solana-devnet",
+    "read": "header",
+    "ms": 263,
+    "status": 400,
+    "acao": "https://confidential.unrealized.trade",
+    "commit": "4f673c93bf9afcc8e7c66ed4582e39c0af8dfe6c",
+    "answer": {
+     "error": {
+      "code": "method_not_allowed",
+      "message": ""
+     }
+    }
+   },
+   {
+    "route": "solana-devnet",
+    "read": "full",
+    "ms": 868,
+    "status": 400,
+    "acao": "https://confidential.unrealized.trade",
+    "commit": "4f673c93bf9afcc8e7c66ed4582e39c0af8dfe6c",
+    "answer": {
+     "error": {
+      "code": "method_not_allowed",
+      "message": ""
+     }
+    }
+   }
+  ]
+ },
+ "bad_full_forwarded": {
+  "base": "http://127.0.0.1:18931",
+  "at": "2026-11-12T18:11:59.818Z",
+  "reads": [
+   {
+    "route": "solana",
+    "read": "slot",
+    "ms": 69,
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade",
+    "commit": "dab793230dd57d4d79d521f582568a2c81a4a9a4",
+    "answer": {
+     "result": 468621092
+    }
+   },
+   {
+    "route": "solana",
+    "read": "header",
+    "ms": 61,
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade",
+    "commit": "dab793230dd57d4d79d521f582568a2c81a4a9a4",
+    "answer": {
+     "result": {
+      "keys": [
+       "blockHeight",
+       "blockTime",
+       "blockhash",
+       "parentSlot",
+       "previousBlockhash"
+      ],
+      "blockHeight": 446636718
+     }
+    }
+   },
+   {
+    "route": "solana",
+    "read": "full",
+    "ms": 2,
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade",
+    "commit": "dab793230dd57d4d79d521f582568a2c81a4a9a4",
+    "answer": {
+     "result": {
+      "keys": [
+       "blockHeight",
+       "blockTime",
+       "blockhash",
+       "parentSlot",
+       "previousBlockhash",
+       "rewards",
+       "transactions"
+      ],
+      "blockHeight": 446636718
+     }
+    }
+   },
+   {
+    "route": "solana-devnet",
+    "read": "slot",
+    "ms": 288,
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade",
+    "commit": "dab793230dd57d4d79d521f582568a2c81a4a9a4",
+    "answer": {
+     "result": 521549147
+    }
+   },
+   {
+    "route": "solana-devnet",
+    "read": "header",
+    "ms": 61,
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade",
+    "commit": "dab793230dd57d4d79d521f582568a2c81a4a9a4",
+    "answer": {
+     "result": {
+      "keys": [
+       "blockHeight",
+       "blockTime",
+       "blockhash",
+       "parentSlot",
+       "previousBlockhash"
+      ],
+      "blockHeight": 508679905
+     }
+    }
+   },
+   {
+    "route": "solana-devnet",
+    "read": "full",
+    "ms": 1,
+    "status": 400,
+    "acao": "https://confidential.unrealized.trade",
+    "commit": "dab793230dd57d4d79d521f582568a2c81a4a9a4",
+    "answer": {
+     "error": {
+      "code": "method_not_allowed",
+      "message": ""
+     }
+    }
+   }
+  ]
+ }
+}

@@ -70,6 +70,25 @@
 //   context is in the list is this device's own (the check itself is the sync and arming cards'). The list stays
 //   small, as each new attempt needs the note freed or expired first. Nothing in it is secret: the context goes on
 //   chain with the proof, and the ops records, which the frame reads, never hold it.
+// - Second attempts (card buy-spends-several-pieces): a HELD note may hold a second unsent proof beside its first (the
+//   proof queue's tier 2, ../pool/queue.ts "Pieces"), of the same tab, with its own attempt, context and deadline.
+//   holdSecond writes it, its context in the note's contexts before the first attempt's entry (which stays last, at the
+//   note's deadlineMs), before its proof starts. The note's own fields stay the first attempt's, so the row holds only
+//   keys every earlier release's reader accepts (checkRecord's list); the second's attempt, tab, deadline and context
+//   sit beside it in one meta record (HELD_SECONDS_KEY), as the RESERVED marks do. A second is live only while its note
+//   is HELD by its tab under another attempt and holds its context before the last entry; any other is dropped at the
+//   next read, and every UNSPENT -> HELD clears the note's first, so a context an earlier release's free left behind
+//   never makes an old second live again. get, list and readNotes give a live one as NoteRecord.second (never stored).
+//   The moves, each one compare-and-set:
+//   - HELD -> RESERVED by either attempt: that attempt holds the note RESERVED, its context last; the other attempt and
+//     its context go in the same note write (it was never sent: RESERVED is written first).
+//   - HELD -> HELD by either attempt replaces that attempt only; the other stays as it was.
+//   - HELD -> UNSPENT (the holder's, by either attempt, or another tab's past the later deadline less the margin) and a
+//     dead tab's free release both, both contexts gone.
+//   - release(id, attempt): that attempt alone is let go, its context gone; the other holds the note on as its attempt
+//     (its context last, its deadline the note's), or with none left the note goes UNSPENT.
+//   The meta write goes first and the note second; a crash between them leaves a second that is not live (its context
+//   not on the note, or the note's own attempt), so nothing the device does not record can be sent.
 import { VAULT_FIELD_P, vaultSyncStart, type VaultSyncCursor } from "@blindfill/kit";
 import { CHAINS } from "../derive/index.ts";
 import { WALLET_SYNC_PREFIX, type WalletStore } from "../store/index.ts";
@@ -130,7 +149,20 @@ export type NoteRecord = {
   evmSpent?: EvmSpent; // INCOMING with evmSends only: the block U's last send's nonce was read used at (card evm-deposit-note-stays-incoming)
   contexts?: AttemptContext[]; // from its first HELD on: every attempt's context and deadline_ms, in the order written
   request?: string; // RESERVED: the vault withdrawal's request body as sent (JSON), written with HELD -> RESERVED, so a later page sends the same bytes again
+  second?: SecondAttempt; // HELD, read only: its live second attempt (card buy-spends-several-pieces), from meta, never stored in the note
 };
+
+/** A HELD note's second attempt (card buy-spends-several-pieces): its attempt, deadline_ms and context. */
+export type SecondAttempt = { attempt: string; deadlineMs: bigint; context: string };
+/** meta/owed/held-seconds: each HELD note's second attempt, by note id, with its tab (an owed/ key, which no reader of
+ *  any release lists). */
+export const HELD_SECONDS_KEY = "owed/held-seconds";
+type SecondRow = SecondAttempt & { tab: string };
+
+/** Whether `attempt` holds the note now: its first or its live second, the note HELD. */
+export function heldBy(n: Pick<NoteRecord, "state" | "attempt" | "second">, attempt: string): boolean {
+  return n.state === "HELD" && (n.attempt === attempt || n.second?.attempt === attempt);
+}
 
 /**
  * What a RESERVED note's spend left beside the note, never in it (card pool-buy-record-never-stays-sent): the record's
@@ -170,6 +202,36 @@ function marksOf(v: unknown): Map<string, ReservedMark> {
 /** The RESERVED notes' marks as stored, read with no lock and nothing written (as readNotes reads the notes). */
 export async function readReservedMarks(store: Pick<WalletStore, "get">): Promise<Map<string, ReservedMark>> {
   return marksOf(await store.get("meta", RESERVED_MARKS_KEY));
+}
+
+// The stored second attempts; a row this device never writes is no row (its note keeps its first attempt only).
+function secondsOf(v: unknown): Map<string, SecondRow> {
+  const out = new Map<string, SecondRow>();
+  if (v === null || typeof v !== "object") return out;
+  for (const [id, s] of Object.entries(v as Record<string, unknown>)) {
+    const r = s as Partial<SecondRow> | null;
+    if (r === null || typeof r !== "object" || typeof r.attempt !== "string" || !HEX32.test(r.attempt) || typeof r.tab !== "string" || !HEX32.test(r.tab)) continue;
+    if (typeof r.deadlineMs !== "bigint" || r.deadlineMs <= 0n || r.deadlineMs >= 1n << 64n || typeof r.context !== "string" || !CONTEXT.test(r.context)) continue;
+    out.set(id, { attempt: r.attempt, tab: r.tab, deadlineMs: r.deadlineMs, context: r.context });
+  }
+  return out;
+}
+// A stored second while it is live: its note HELD by its tab under another attempt, its context on the note before the
+// last entry (the first attempt's), at its deadline.
+function liveSecond(n: NoteRecord, s: SecondRow | undefined): SecondAttempt | undefined {
+  if (s === undefined || n.state !== "HELD" || s.tab !== n.tab || s.attempt === n.attempt) return undefined;
+  const cs = n.contexts ?? [];
+  const k = cs.findIndex((c) => c.context === s.context);
+  if (k < 0 || k === cs.length - 1 || cs[k]!.deadlineMs !== s.deadlineMs) return undefined;
+  return { attempt: s.attempt, deadlineMs: s.deadlineMs, context: s.context };
+}
+// Each note with its live second, if any (`second` set only then).
+function withSeconds(all: NoteRecord[], rows: Map<string, SecondRow>): NoteRecord[] {
+  return all.map((n) => {
+    const { second: _s, ...rest } = n;
+    const s = liveSecond(rest, rows.get(n.id));
+    return s === undefined ? rest : { ...rest, second: s };
+  });
 }
 
 /** A withdrawal attempt's context (a canonical decimal below p) and its deadline_ms, written with the move to HELD. */
@@ -213,7 +275,8 @@ export type NewNote = {
 };
 
 // leaf: INCOMING -> UNSPENT. deadlineMs and context: UNSPENT -> HELD, and the holder's HELD -> HELD (with its attempt).
-// attempt: the holder's HELD -> RESERVED, HELD -> HELD or HELD -> UNSPENT. blockTimeMs: RESERVED -> UNSPENT (past deadline_ms), or another tab's HELD -> UNSPENT (past
+// attempt: the holder's HELD -> RESERVED, HELD -> HELD or HELD -> UNSPENT, by the note's attempt or its live second.
+// blockTimeMs: RESERVED -> UNSPENT (past deadline_ms), or another tab's HELD -> UNSPENT (past the later of its attempts'
 // deadline_ms - margin).
 // request: the holder's HELD -> RESERVED only (the vault withdrawal's body, card signpage-withdraw-handoff).
 // lastHeight, nullifier: the holder's HELD -> RESERVED only, written to the note's mark (ReservedMark), never the note.
@@ -229,6 +292,13 @@ export interface NoteStore {
   planDeposit(scope: bigint, precommitmentOf: (ref: NoteRef) => bigint): Promise<NoteRecord>;
   add(note: NewNote): Promise<NoteRecord>;
   move(id: string, from: NoteState, to: NoteState, fields?: MoveFields): Promise<NoteRecord>;
+  /** A second attempt on a note this tab holds by `attempt` (its first or, once let go, its other), with the second's
+   *  deadline and context, written before its proof starts; refused when the note holds one already. Returns the note
+   *  with its `second` (card buy-spends-several-pieces, the header's "Second attempts"). */
+  holdSecond(id: string, attempt: string, fields: { deadlineMs: bigint; context: string }): Promise<NoteRecord>;
+  /** The holder lets one attempt of a HELD note go, its unsent context with it: the other attempt holds the note on,
+   *  or with none left the note goes UNSPENT. */
+  release(id: string, attempt: string): Promise<NoteRecord>;
   /** The marks of the notes HELD or RESERVED by their attempt (ReservedMark); any other is dropped. */
   marks(): Promise<ReadonlyMap<string, ReservedMark>>;
   /** Writes what the attempt's release took out of the pool, read back on both RPCs, on the note's mark, only while the
@@ -377,8 +447,9 @@ function checkCursor(c: unknown, vault: string): VaultSyncCursor {
 }
 
 // A context as the vault and the relayer read it: one canonical decimal below p.
+const CONTEXT = /^(0|[1-9][0-9]{0,77})$/;
 function context(c: unknown, what: string): string {
-  if (typeof c !== "string" || !/^(0|[1-9][0-9]{0,77})$/.test(c) || BigInt(c) >= VAULT_FIELD_P) throw new Error(`${what}: a context is a canonical decimal below p`);
+  if (typeof c !== "string" || !CONTEXT.test(c) || BigInt(c) >= VAULT_FIELD_P) throw new Error(`${what}: a context is a canonical decimal below p`);
   return c;
 }
 // The attempt contexts of a note: at least one, each its own context with a deadline, none written twice.
@@ -595,6 +666,7 @@ function parentOf(child: NoteRef, scope: bigint, all: NoteRecord[]): NoteRecord 
  * and move (settle above) is left to it. It reads the same truth: a parent whose change or refund note is stored reads
  * SPENT, in memory only, as settle would write it, so a page killed between the two writes never counts the money
  * twice. A dead tab's HELD note is read as it is: HELD and UNSPENT both count in a balance, and only the note store frees.
+ * A HELD note's live second attempt is read with it (NoteRecord.second).
  */
 export async function readNotes(store: Pick<WalletStore, "get" | "keys">): Promise<NoteRecord[]> {
   const all: NoteRecord[] = [];
@@ -603,12 +675,16 @@ export async function readNotes(store: Pick<WalletStore, "get" | "keys">): Promi
     if (r !== undefined) all.push(checkRecord(k, r)); // a key gone since keys(): a sign out mid-read
   }
   const parents = new Set(all.flatMap((n) => (n.parent === undefined ? [] : [n.parent])));
-  return all.map((n) => {
-    if (!parents.has(n.id) || n.state === "SPENT") return n;
-    // settle's put(p, "SPENT"): no tab, no deadline, no attempt
-    const { tab: _tab, deadlineMs: _deadline, attempt: _attempt, request: _request, ...spent } = n;
-    return { ...spent, state: "SPENT" };
-  });
+  const rows = secondsOf(await store.get("meta", HELD_SECONDS_KEY));
+  return withSeconds(
+    all.map((n) => {
+      if (!parents.has(n.id) || n.state === "SPENT") return n;
+      // settle's put(p, "SPENT"): no tab, no deadline, no attempt
+      const { tab: _tab, deadlineMs: _deadline, attempt: _attempt, request: _request, ...spent } = n;
+      return { ...spent, state: "SPENT" };
+    }),
+    rows,
+  );
 }
 
 // ---------- the store ----------
@@ -648,6 +724,11 @@ export async function openNoteStore(store: WalletStore, opts: NoteStoreOptions =
   // The one write of a state change: shape and fields checked, then one put. The callers check edge and ownership.
   async function put(cur: NoteRecord, to: NoteState, fields: Pick<MoveFields, "leaf" | "deadlineMs" | "context" | "request"> = {}): Promise<NoteRecord> {
     const next: NoteRecord = { ...cur, state: to };
+    // a HELD note's live second: kept by the first attempt's HELD -> HELD; on any other move out of HELD its unsent
+    // context goes with it (HELD -> SPENT keeps the list as it is)
+    const sec = cur.state === "HELD" ? cur.second : undefined;
+    delete next.second;
+    if (sec !== undefined && (to === "UNSPENT" || to === "RESERVED")) next.contexts = (cur.contexts ?? []).filter((c) => c.context !== sec.context);
     if (to !== "INCOMING") delete next.evmSpent;
     if (cur.state === "INCOMING" && to === "UNSPENT") next.leaf = checkLeaf(fields.leaf, cur.precommitment);
     else if (fields.leaf !== undefined) throw new Error("a leaf is set once, when the note lands");
@@ -659,13 +740,14 @@ export async function openNoteStore(store: WalletStore, opts: NoteStoreOptions =
       next.contexts = checkContexts([...kept, { context: c, deadlineMs: next.deadlineMs }], cur.id);
       next.attempt = newId();
       next.tab = tab;
+      if (sec !== undefined && cur.state === "HELD") next.second = sec;
     } else {
       if (fields.deadlineMs !== undefined) throw new Error("deadlineMs is set when the proof starts (HELD)");
       if (fields.context !== undefined) throw new Error("a context is written when the proof starts (HELD)");
       delete next.tab;
       // the freed attempt was never sent: its context goes (it is the last entry, checkRecord)
       if (cur.state === "HELD" && to === "UNSPENT") {
-        const kept = (cur.contexts ?? []).slice(0, -1);
+        const kept = (next.contexts ?? []).slice(0, -1);
         if (kept.length > 0) next.contexts = kept;
         else delete next.contexts;
       }
@@ -686,8 +768,11 @@ export async function openNoteStore(store: WalletStore, opts: NoteStoreOptions =
   }
 
   // Finish what a killed page or tab left: parents of stored children go to SPENT, dead tabs' HELD notes to UNSPENT.
+  // Each note with its live second attempt (card buy-spends-several-pieces); a stored second that is not live any more is
+  // dropped from meta (one compare-and-set, only when there is one).
   async function settle(): Promise<NoteRecord[]> {
-    const all = await readAll();
+    const rows = secondsOf(await store.get("meta", HELD_SECONDS_KEY));
+    const all = withSeconds(await readAll(), rows);
     const byId = new Map(all.map((n) => [n.id, n]));
     for (const n of all) {
       const p = n.parent === undefined ? undefined : byId.get(n.parent);
@@ -697,7 +782,20 @@ export async function openNoteStore(store: WalletStore, opts: NoteStoreOptions =
       const live = new Set(((await locks!.query()).held ?? []).map((l) => l.name));
       for (const n of byId.values()) if (n.state === "HELD" && !live.has(TAB_LOCK + n.tab)) byId.set(n.id, await put(n, "UNSPENT"));
     }
+    const dead = (id: string): boolean => byId.get(id)?.second === undefined;
+    if ([...rows.keys()].some(dead)) await dropSeconds((m) => [...m.keys()].filter((id) => dead(id) && m.get(id)!.attempt === rows.get(id)?.attempt));
     return [...byId.values()];
+  }
+  // drops the second attempts `which` names in one compare-and-set; nothing written when it names none
+  async function dropSeconds(which: (m: Map<string, SecondRow>) => string[]): Promise<void> {
+    if (closed) return;
+    await store.update("meta", HELD_SECONDS_KEY, (v) => {
+      const m = secondsOf(v);
+      const gone = which(m).filter((id) => m.has(id));
+      if (gone.length === 0) return undefined;
+      for (const id of gone) m.delete(id);
+      return Object.fromEntries(m);
+    });
   }
 
   async function moveLocked(id: string, from: NoteState, to: NoteState, fields: MoveFields = {}): Promise<NoteRecord> {
@@ -720,10 +818,15 @@ export async function openNoteStore(store: WalletStore, opts: NoteStoreOptions =
     if ((fields.lastHeight !== undefined || fields.nullifier !== undefined) && !(from === "HELD" && to === "RESERVED")) throw new Error("a last height or nullifier is written with the move HELD -> RESERVED only");
     const time = fields.blockTimeMs === undefined ? undefined : u64(fields.blockTimeMs, "blockTimeMs");
     const height = fields.finalHeight === undefined ? undefined : u64(fields.finalHeight, "finalHeight");
-    const own = fields.attempt !== undefined && fields.attempt === cur.attempt && cur.tab === tab;
+    // the holder: the note's attempt, or its live second (card buy-spends-several-pieces), in this tab
+    const sec = cur.second;
+    const second = sec !== undefined && fields.attempt === sec.attempt && cur.tab === tab;
+    const own = (fields.attempt !== undefined && fields.attempt === cur.attempt && cur.tab === tab) || second;
+    // another tab frees it only once no attempt of it can be sent: past the later deadline less the margin
+    const lastDeadline = sec !== undefined && sec.deadlineMs > cur.deadlineMs! ? sec.deadlineMs : cur.deadlineMs;
     if (from === "HELD" && to === "HELD" && !own) throw new Error(`note ${id} is held by another attempt: only the attempt that holds it replaces its proof`);
     if (from === "HELD" && to === "RESERVED" && !own) throw new Error(`note ${id} is held by another attempt: only the attempt that holds it sends it`);
-    if (from === "HELD" && to === "UNSPENT" && !own && !(time !== undefined && time > cur.deadlineMs! - SEND_MARGIN_MS))
+    if (from === "HELD" && to === "UNSPENT" && !own && !(time !== undefined && time > lastDeadline! - SEND_MARGIN_MS))
       throw new Error(`note ${id} is held by another attempt: freed only by that attempt, or once block time is past deadline_ms - ${SEND_MARGIN_MS} ms`);
     // the last height is the mark of the note's own attempt: none (a take on an earlier release, a lost write) leaves the
     // deadline only
@@ -733,16 +836,89 @@ export async function openNoteStore(store: WalletStore, opts: NoteStoreOptions =
       throw new Error(`note ${id} is RESERVED until block time is past its deadline_ms, or the finalized height past its last height: its proof can still land`);
     if (fields.send !== undefined) return put({ ...cur, sends: checkSends([checkSend(fields.send, "a send")], id) }, to, {});
     if (fields.evmSend !== undefined) return put({ ...cur, evmSends: checkEvmSends([checkEvmSend(fields.evmSend, "a send")], id) }, to, {});
+    // the second's HELD -> HELD: its own attempt and context replaced, the first's untouched
+    if (from === "HELD" && to === "HELD" && second) return replaceSecond(cur, sec!, fields);
+    // a new hold: a second left from an earlier hold of the note (its context kept by an earlier release's free) goes
+    // first, so it never comes back live
+    if (from === "UNSPENT" && to === "HELD") await dropSeconds((m) => (m.has(id) ? [id] : []));
     // the mark first, then the note: a crash between leaves the note HELD and a mark no rule reads
     if (from === "HELD" && to === "RESERVED" && (fields.lastHeight !== undefined || fields.nullifier !== undefined)) {
       if (fields.nullifier !== undefined && (typeof fields.nullifier !== "bigint" || fields.nullifier < 0n || fields.nullifier >= 1n << 256n)) throw new Error("nullifier is a bigint below 2^256");
       const mark: ReservedMark = { attempt: fields.attempt!, ...(fields.lastHeight === undefined ? {} : { lastHeight: u64(fields.lastHeight, "lastHeight") }), ...(fields.nullifier === undefined ? {} : { nullifier: fields.nullifier }) };
       await store.update("meta", RESERVED_MARKS_KEY, (v) => ({ ...Object.fromEntries(marksOf(v)), [id]: mark }));
     }
-    const out = await put(cur, to, { leaf: fields.leaf, deadlineMs: fields.deadlineMs, context: fields.context, request: fields.request });
+    // RESERVED by the second: it takes the first's place (the first never sent, its context gone), in the one write
+    const base = from === "HELD" && to === "RESERVED" && second ? promoted(cur, sec!) : cur;
+    const out = await put(base, to, { leaf: fields.leaf, deadlineMs: fields.deadlineMs, context: fields.context, request: fields.request });
     // out of RESERVED: its mark goes (one left by a failed write is dropped at the next read of the marks)
     if (from === "RESERVED" && to !== "RESERVED") await dropMarks((m) => m.has(id) ? [id] : []).catch(() => {});
+    // out of HELD: its second's row goes (one left by a failed write is not live, and dropped at the next read)
+    if (sec !== undefined && to !== "HELD") await dropSeconds((m) => (m.has(id) ? [id] : [])).catch(() => {});
     return out;
+  }
+
+  // The second attempt's row, written before the note (a crash between leaves a row that is not live).
+  async function setSecond(id: string, s: SecondRow): Promise<void> {
+    if (closed) throw new Error("the note store is closed");
+    await store.update("meta", HELD_SECONDS_KEY, (v) => ({ ...Object.fromEntries(secondsOf(v)), [id]: s }));
+  }
+  // The note as its second attempt alone holds it: the first's attempt and context gone, the second's context last at
+  // its deadline (the note's), so it is the note's attempt from here on.
+  function promoted(cur: NoteRecord, sec: SecondAttempt): NoteRecord {
+    const { second: _s, ...rest } = cur;
+    const kept = (cur.contexts ?? []).slice(0, -1).filter((c) => c.context !== sec.context);
+    return { ...rest, attempt: sec.attempt, deadlineMs: sec.deadlineMs, contexts: checkContexts([...kept, { context: sec.context, deadlineMs: sec.deadlineMs }], cur.id) };
+  }
+  // A second attempt's context placed before the note's last entry (the first attempt's), with `drop` taken out.
+  function withSecondContext(cur: NoteRecord, c: AttemptContext, drop?: string): AttemptContext[] {
+    const cs = (cur.contexts ?? []).filter((x) => x.context !== drop);
+    return checkContexts([...cs.slice(0, -1), c, cs[cs.length - 1]!], cur.id);
+  }
+  async function replaceSecond(cur: NoteRecord, sec: SecondAttempt, fields: MoveFields): Promise<NoteRecord> {
+    if (fields.leaf !== undefined) throw new Error("a leaf is set once, when the note lands");
+    const deadlineMs = u64(fields.deadlineMs, "deadlineMs");
+    const c = context(fields.context, "context");
+    const contexts = withSecondContext(cur, { context: c, deadlineMs }, sec.context);
+    const s: SecondRow = { attempt: newId(), tab, deadlineMs, context: c };
+    await setSecond(cur.id, s);
+    const { second: _s, ...rest } = cur;
+    const next: NoteRecord = { ...rest, contexts };
+    await write(next);
+    return { ...next, second: { attempt: s.attempt, deadlineMs, context: c } };
+  }
+  async function holdSecondLocked(id: string, attempt: string, fields: { deadlineMs: bigint; context: string }): Promise<NoteRecord> {
+    if (fields === null || typeof fields !== "object") throw new Error("fields is an object");
+    onlyKeys(fields, ["deadlineMs", "context"], "a second attempt");
+    const deadlineMs = u64(fields.deadlineMs, "deadlineMs");
+    const c = context(fields.context, "context");
+    const cur = (await settle()).find((n) => n.id === id);
+    if (cur === undefined) throw new Error(`no note ${id}`);
+    if (cur.state !== "HELD") throw new Error(`note ${id} is ${cur.state}, not HELD`);
+    if (cur.tab !== tab || typeof attempt !== "string" || (attempt !== cur.attempt && attempt !== cur.second?.attempt)) throw new Error(`note ${id} is held by another attempt: only the attempt that holds it adds a second`);
+    if (cur.second !== undefined) throw new Error(`note ${id} already holds a second attempt`);
+    const contexts = withSecondContext(cur, { context: c, deadlineMs });
+    const s: SecondRow = { attempt: newId(), tab, deadlineMs, context: c };
+    await setSecond(id, s);
+    const next: NoteRecord = { ...cur, contexts };
+    await write(next);
+    return { ...next, second: { attempt: s.attempt, deadlineMs, context: c } };
+  }
+  async function releaseLocked(id: string, attempt: string): Promise<NoteRecord> {
+    const cur = (await settle()).find((n) => n.id === id);
+    if (cur === undefined) throw new Error(`no note ${id}`);
+    if (cur.state !== "HELD") throw new Error(`note ${id} is ${cur.state}, not HELD`);
+    const sec = cur.second;
+    const second = sec !== undefined && attempt === sec.attempt;
+    if (cur.tab !== tab || typeof attempt !== "string" || (attempt !== cur.attempt && !second)) throw new Error(`note ${id} is held by another attempt: only that attempt lets it go`);
+    if (sec === undefined) return put(cur, "UNSPENT"); // its one attempt: the holder's free
+    let next: NoteRecord;
+    if (second) {
+      const { second: _s, ...rest } = cur;
+      next = { ...rest, contexts: checkContexts((cur.contexts ?? []).filter((c) => c.context !== sec.context), id) };
+    } else next = promoted(cur, sec);
+    await write(next);
+    await dropSeconds((m) => (m.has(id) ? [id] : [])).catch(() => {});
+    return next;
   }
 
   // drops the marks `which` names in one compare-and-set; nothing written when it names none
@@ -948,6 +1124,8 @@ export async function openNoteStore(store: WalletStore, opts: NoteStoreOptions =
     list: () => locked(settle),
     add: (note) => locked(() => addLocked(note)),
     move: (id, from, to, fields) => locked(() => moveLocked(id, from, to, fields)),
+    holdSecond: (id, attempt, fields) => locked(() => holdSecondLocked(id, attempt, fields)),
+    release: (id, attempt) => locked(() => releaseLocked(id, attempt)),
     marks: () => locked(marksLocked),
     landed: (id, attempt, withdrawn, block) => locked(() => landedLocked(id, attempt, withdrawn, block)),
     unlanded: (id, attempt) => locked(() => unlandedLocked(id, attempt)),
