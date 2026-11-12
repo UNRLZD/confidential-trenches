@@ -658,6 +658,16 @@ export function solanaPoolBuySellNeed(venue: Pick<SolanaPoolBuyVenue, "kind" | "
 }
 
 /**
+ * The most pieces one tap pays its W from (card buy-spends-several-pieces): each piece is one release of one note, all
+ * to the same W, the last one the tag 3 that buys; the others tag 2s sent before it in the same bundle, all or none.
+ * A Jito bundle holds at most 5 transactions, one release each.
+ */
+export const SOLANA_POOL_BUY_PIECES_MAX = 5;
+/** One piece of a buy: a release's withdrawnValue and the relay fee it pays out of it. */
+export type SolanaPoolBuyPiece = Pick<SolanaPoolRelease, "withdrawnValue" | "relayFee">;
+const piecesOf = (r: SolanaPoolBuyPiece | readonly SolanaPoolBuyPiece[]): readonly SolanaPoolBuyPiece[] => (Array.isArray(r) ? r : [r as SolanaPoolBuyPiece]);
+
+/**
  * What W's chunk must cover, in lamports, on today's rent (every account counted as made new, which only raises W's
  * balance when one already exists):
  * - the spend, W's token account (its size from the mint: Token-2022 adds its extensions), the venue's volume account;
@@ -665,17 +675,24 @@ export function solanaPoolBuySellNeed(venue: Pick<SolanaPoolBuyVenue, "kind" | "
  * - W after the buy holds what its sell needs up front on every venue the coin can be sold on (solanaPoolBuySellNeed:
  *   on PumpSwap for a curve coin, which may graduate), above rent(0), the runtime's floor for a system account, so a
  *   bought W can always sell.
+ * `release`: the buy's one release, or its pieces (card buy-spends-several-pieces): every piece pays W its
+ * withdrawnValue less its relay fee, and the tip comes out once, so the chunk is their sum less the tip. A piece that
+ * adds nothing past its fee, and more pieces than SOLANA_POOL_BUY_PIECES_MAX, are refused.
  * `peak` is what W pays out at its lowest point, `left` what W holds after.
  */
-export function solanaPoolBuyFunds(release: SolanaPoolRelease, venue: SolanaPoolBuyVenue, req: Pick<SolanaPoolBuyRequest, "spend" | "tip">, rent: SolanaRent): { chunk: bigint; peak: bigint; left: bigint; problem: string | null } {
-  const chunk = release.withdrawnValue - release.relayFee - req.tip;
+export function solanaPoolBuyFunds(release: SolanaPoolBuyPiece | readonly SolanaPoolBuyPiece[], venue: SolanaPoolBuyVenue, req: Pick<SolanaPoolBuyRequest, "spend" | "tip">, rent: SolanaRent): { chunk: bigint; peak: bigint; left: bigint; problem: string | null } {
+  const pieces = piecesOf(release);
+  const chunk = pieces.reduce((s, p) => s + p.withdrawnValue - p.relayFee, 0n) - req.tip;
   const kept = req.spend + solanaRentMin(rent, venue.tokenAccountSize) + solanaRentMin(rent, perVenue(SOLANA_POOL_VOLUME_ACCOUNT_SIZE, venue.kind)) +
     (venue.kind === "pumpswap" && venue.cashback ? solanaRentMin(rent, TOKEN_ACCOUNT_SIZE) : 0n);
   const peak = kept + (venue.kind === "pumpswap" ? solanaRentMin(rent, TOKEN_ACCOUNT_SIZE) : 0n);
   const left = chunk - kept;
   const need = solanaPoolBuySellNeed(venue, rent);
   const problem =
-    chunk < 0n ? "the relay fee and the tip are more than the release"
+    pieces.length === 0 ? "no release"
+    : pieces.length > SOLANA_POOL_BUY_PIECES_MAX ? `${pieces.length} pieces, over the ${SOLANA_POOL_BUY_PIECES_MAX} one tap carries`
+    : pieces.length > 1 && pieces.some((p) => p.withdrawnValue <= p.relayFee) ? "a piece adds nothing past its relay fee"
+    : chunk < 0n ? "the relay fee and the tip are more than the release"
     : chunk < peak ? `the chunk ${chunk} does not cover the spend and W's new accounts (${peak})`
     : left < need ? `W would keep ${left} lamports, under the ${need} its sell needs up front on any venue the coin sells on`
     : null;
@@ -688,10 +705,16 @@ export function solanaPoolBuyFunds(release: SolanaPoolRelease, venue: SolanaPool
  * that spend W keeps exactly that need, which also covers the peak (PumpSwap's wrapped-SOL rent is part of it). The tap
  * and the signing page's state.pools tap_max share this one rule; it is checked against solanaPoolBuyFunds itself
  * before it is given.
+ * Given pieces (card buy-spends-several-pieces), it is the most one tap spends from them: the pieces that add more than
+ * their relay fee, the SOLANA_POOL_BUY_PIECES_MAX that add the most, with the per-buy costs (the tip, W's accounts, the
+ * sell's need) taken once.
  */
-export function solanaPoolBuyMaxSpend(release: Pick<SolanaPoolRelease, "withdrawnValue" | "relayFee">, venue: Pick<SolanaPoolBuyVenue, "kind" | "tokenAccountSize" | "cashback">, tip: bigint, rent: SolanaRent): bigint {
-  if (typeof release?.withdrawnValue !== "bigint" || typeof release.relayFee !== "bigint" || typeof tip !== "bigint" || tip < 0n) throw new Error("withdrawnValue, relayFee and tip are bigints, the tip at least 0");
-  const r = release as SolanaPoolRelease;
+export function solanaPoolBuyMaxSpend(release: SolanaPoolBuyPiece | readonly SolanaPoolBuyPiece[], venue: Pick<SolanaPoolBuyVenue, "kind" | "tokenAccountSize" | "cashback">, tip: bigint, rent: SolanaRent): bigint {
+  const all = piecesOf(release);
+  if (all.some((p) => typeof p?.withdrawnValue !== "bigint" || typeof p.relayFee !== "bigint") || typeof tip !== "bigint" || tip < 0n) throw new Error("withdrawnValue, relayFee and tip are bigints, the tip at least 0");
+  const adds = (p: SolanaPoolBuyPiece): bigint => p.withdrawnValue - p.relayFee;
+  const r = Array.isArray(release) ? all.filter((p) => adds(p) > 0n).sort((x, y) => (adds(x) > adds(y) ? -1 : adds(x) < adds(y) ? 1 : 0)).slice(0, SOLANA_POOL_BUY_PIECES_MAX) : all[0]!;
+  if (Array.isArray(r) && r.length === 0) return 0n;
   const v = venue as SolanaPoolBuyVenue;
   const at0 = solanaPoolBuyFunds(r, v, { spend: 0n, tip }, rent);
   const max = at0.left - solanaPoolBuySellNeed(v, rent);
