@@ -649,10 +649,11 @@ export function checkSolanaSell(
   // rent(0) far over the floor; L2: the rent rate is the cap's at most, so what is held back stays bounded.
   let swept = 0n;
   const p = surplus;
+  // the fee a sale's reserve is priced at, full or partial: never over one signature and the most priority a sale may
+  // pay (review 2 P3-b of c0dd55d02: a partial sale's was never read, so one priced at 1,405,000 passed)
+  if (p !== undefined && (typeof p.fee !== "bigint" || p.fee < 0n || p.fee > SOLANA_LAMPORTS_PER_SIGNATURE + SOLANA_POOL_SELL_PRIORITY)) return refuse("reserve");
   if (p !== undefined && p.full === true) {
-    if (typeof p.lamports !== "bigint" || typeof p.fee !== "bigint" || typeof p.made !== "bigint" || p.fee < 0n || p.made < 0n || typeof p.next !== "boolean") return refuse("reserve");
-    // the fee the keep is priced at: never over one signature and the most priority a sale may pay
-    if (p.fee > SOLANA_LAMPORTS_PER_SIGNATURE + SOLANA_POOL_SELL_PRIORITY) return refuse("reserve");
+    if (typeof p.lamports !== "bigint" || typeof p.made !== "bigint" || p.made < 0n || typeof p.next !== "boolean") return refuse("reserve");
     if (typeof p.rent?.lamportsPerByte !== "bigint" || typeof p.rent.factor !== "bigint" || p.rent.lamportsPerByte < 0n || p.rent.factor < 0n || p.rent.lamportsPerByte * p.rent.factor > SOLANA_RENT_PER_BYTE_MAX) return refuse("reserve");
     if (!Number.isSafeInteger(p.owed) || p.owed < 0 || p.owed > SOLANA_SWEEP_OWED_MAX) return refuse("reserve");
     const short = p.fee + p.made + solanaDepositRents(p.rent, reads, p.held, p.next) - p.lamports;

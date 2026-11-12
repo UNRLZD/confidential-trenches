@@ -29,6 +29,7 @@ const WDOK = "Solana withdraw: the device's release";
 const DEP = "Solana deposit: another program";
 const NEXT = "Solana deposit: each tree's next page";
 const P22 = "round-trip-costs-less P2-2: a Solana sale paying more priority";
+const P3B = "round-trip-costs-less P3-b: a partial Solana sale's fee is held";
 const SWEEP = "the sweep's rule: W the only signer";
 const WD = "Solana withdraw: another pool program";
 const BUY = "Solana buy: the kit's tag 3";
@@ -222,7 +223,8 @@ export const MUTANTS = [
   ['if (u64le(ixs[n]!.data, 1) > SOLANA_CU_PRICE_MAX) refuse("cu_price");', "", DEP],
   // card round-trip-costs-less, review P2-2 of 4f9217972: a sale's priority and a full sell's fee, bounded by the rule
   ['  if (priority > SOLANA_POOL_SELL_PRIORITY) return refuse("priority");\n', "", P22],
-  ['    if (p.fee > SOLANA_LAMPORTS_PER_SIGNATURE + SOLANA_POOL_SELL_PRIORITY) return refuse("reserve");\n', "", P22],
+  [" || p.fee > SOLANA_LAMPORTS_PER_SIGNATURE + SOLANA_POOL_SELL_PRIORITY)) return refuse(\"reserve\");", ")) return refuse(\"reserve\");", P22],
+  ["  if (p !== undefined && (typeof p.fee !== \"bigint\"", "  if (p !== undefined && p.full === true && (typeof p.fee !== \"bigint\"", P3B],
   ["  let limit = BigInt(SOLANA_POOL_CU_LIMIT_MAX);\n", "  let limit = 0n;\n", P22],
   // only a build from the device's own quote (card evm-buy-hookdata-fee, review fold 1 M1)
   ['  if (!evmIsQuotedBuy(built)) return refuse("not_quoted");\n', "", EBUY],

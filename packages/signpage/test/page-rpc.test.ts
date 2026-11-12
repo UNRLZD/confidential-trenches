@@ -517,6 +517,18 @@ test("round-trip-costs-less P2-1: an optional read is not sent to a host another
   }
 });
 
+// review 2 P3-d of c0dd55d02: an optional read is counted in its host's budget (HostLane count), as every request
+test("round-trip-costs-less P3-d: an optional read counts once in its host's window", async () => {
+  resetHostLanes();
+  const ok = async (_u: string, init?: RequestInit): Promise<Response> => new Response(JSON.stringify({ jsonrpc: "2.0", id: (JSON.parse(String(init?.body)) as { id: string }).id, result: [] }), { status: 200 });
+  const rpc = lanedRpc("https://counted-optional.example/rpc", { fetch: ok });
+  const lane = hostLane(rpc.url!);
+  const before = lane.inWindow();
+  assert.deepEqual(await optionalRead(rpc)!("getRecentPrioritizationFees", [["x"]], new AbortController().signal), []);
+  assert.equal(lane.inWindow(), before + 1);
+  resetHostLanes();
+});
+
 // round-trip-costs-less: only a trade's page RPC gives its url an optional read; a pass's RPC and a pass's seat give none
 // (the sale's fee read never goes out on a pass's lane), while a trade's seat does
 test("round-trip-costs-less P2-1: only a trade's RPC or seat registers an optional read: a pass's RPC and a pass's seat register none", () => {

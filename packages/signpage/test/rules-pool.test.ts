@@ -1127,3 +1127,24 @@ test("round-trip-costs-less P2-2: a Solana sale paying more priority than SOLANA
   assert.equal(sale([], -surplus, FULL).back, floor + surplus);
   assert.throws(() => sale([], -surplus, { ...FULL, fee: fee + 1n, lamports: FULL.lamports + 1n }), refusedAs("reserve"));
 });
+
+// review 2 P3-b of c0dd55d02: a partial sale's reserve is priced at a fee too, and the rule held only a full sell's; a
+// partial sale priced at a 1,405,000 fee (its priority 100,000) passed and held up to SOLANA_POOL_SELL_RESERVE_MAX back
+// on W. The fee a sale names is held to one signature and SOLANA_POOL_SELL_PRIORITY on every sale that names one.
+test("round-trip-costs-less P3-b: a partial Solana sale's fee is held to 5,000 plus SOLANA_POOL_SELL_PRIORITY as a full one's: 105,000 passes, 105,001 and 1,405,000 are refused", async () => {
+  const { venue, ref, reads } = await setup("pump");
+  const amount = 5_000_000n;
+  const reference = { amount, ref, slippageBps: 300 };
+  const floor = (ref.pools.find((p) => p.venue === "pump-curve")!.expectedOut * 9_700n) / 10_000n;
+  const ask: PoolAsk = { kind: "pool.sell", chain: "solana", token: venue.mint, amount, slippageBps: 300, decimals: 6 };
+  const limit = { program: SOLANA_COMPUTE_BUDGET_PROGRAM, accounts: [], data: Uint8Array.of(2, ...u64(104_523n).slice(0, 4)) };
+  const price = { program: SOLANA_COMPUTE_BUDGET_PROGRAM, accounts: [], data: Uint8Array.of(3, ...u64(956_727n)) };
+  const steps = () => solanaPoolSellSteps(venue, SOL_W, amount, floor).map((x) => ({ ...x, accounts: x.accounts.map((a) => ({ ...a })) }));
+  const part = (fee: bigint): SolanaSellSurplus => ({ full: false, lamports: 0n, fee, made: 0n, rent: { lamportsPerByte: 5_080n, factor: 1n }, held: { mark: [null, null], state: [null, null], label: [null, null] }, next: false, owed: 0 });
+  const sale = (fee: bigint) => checkSolanaSell(wire(SOL_W, [limit, price, ...steps(), depositIx({ value: floor - fee })]), ask, solCtx(), venue, reference, reads.slot, SOL_READS, fee, part(fee));
+  assert.equal(sale(5_000n + SOLANA_POOL_SELL_PRIORITY).back, floor - 5_000n - SOLANA_POOL_SELL_PRIORITY);
+  assert.throws(() => sale(5_001n + SOLANA_POOL_SELL_PRIORITY), refusedAs("reserve"));
+  assert.throws(() => sale(1_405_000n), refusedAs("reserve"));
+  // a fee that is no number, or under 0, is refused on a partial sale as on a full one
+  assert.throws(() => checkSolanaSell(wire(SOL_W, [limit, price, ...steps(), depositIx({ value: floor - 5_000n })]), ask, solCtx(), venue, reference, reads.slot, SOL_READS, 5_000n, { ...part(5_000n), fee: -1n }), refusedAs("reserve"));
+});
