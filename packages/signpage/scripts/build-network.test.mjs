@@ -38,6 +38,7 @@ const TESTNET_ONLY = [
   // the EVM pool buy and sale, testnet only while mainnet keeps them closed (card evm-pools-on-mainnet, src/pool-testnet.ts)
   "buy((address,bytes),", // the EVM pool buy's signature (src/evm-send.ts)
   "owed/back-evm", // the EVM buy's owed-back record (src/pool-buy-evm.ts EVM_OWED_BACK_KEY)
+  "withdraw((address,bytes),(uint256[2],", // the EVM pool withdraw's release (src/evm-send.ts EVM_WITHDRAW_SIGNATURE), folded as the buy
   "uniswap-v4", // the EVM buy's route search
   "nonce()", // the sale's read of W's SellDelegate nonce (src/pool-sell-evm.ts)
   // the Sell typed data W signs, whole (packages/kit/src/trade/evm/sell-unpinned.ts)

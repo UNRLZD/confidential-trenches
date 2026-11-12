@@ -63,6 +63,7 @@ export const IN_PROCESS = [
   viaRead("pool-deposit-follow", () => import("../live-checks/pool-deposit-follow.mjs")),
   viaRead("evm-deposit-route-mainnet", () => import("../live-checks/evm-deposit-route-mainnet.mjs")),
   viaRead("solana-release-reads-paced", () => import("../live-checks/solana-release-reads-paced.mjs")),
+  { key: "restore-shows-the-balance-in-seconds", host: "sign", load: () => import("../live-checks/restore-shows-the-balance-in-seconds.mjs"), run: async (m, f) => m.judge(await m.collect({ fetchFn: f })) },
   viaRead("pool-buy-record-never-stays-sent", () => import("../live-checks/pool-buy-record-never-stays-sent.mjs")),
   viaRead("solana-legs-checked", () => import("../live-checks/solana-legs-checked.mjs")),
   viaRead("signers-own-bytes", () => import("../live-checks/signers-own-bytes.mjs")),
@@ -107,6 +108,7 @@ export const IN_PROCESS = [
   { key: "app-harness-signin-e2e", host: "app", load: () => import("../live-checks/app-harness-signin-e2e.mjs"), run: async (m, f) => m.judge(await m.probe(SIGN, APP, ["app"], f)) },
   { key: "portfolio-shows-pool-trades", host: "sign", load: () => import("../live-checks/portfolio-shows-pool-trades.mjs"), run: async (m, f) => m.judge(await m.collect({ hosts: ["sign"], fetchFn: f })) },
   { key: "portfolio-shows-pool-trades", host: "app", load: () => import("../live-checks/portfolio-shows-pool-trades.mjs"), run: async (m, f) => m.judge(await m.collect({ hosts: ["app"], fetchFn: f })) },
+  { key: "closed-positions-after-a-restore", host: "sign", load: () => import("../live-checks/closed-positions-after-a-restore.mjs"), run: async (m, f) => m.judge(await m.collect({ fetchFn: f })) },
   { key: "portfolio-counts-money-an-open-buy-holds", host: "sign", load: () => import("../live-checks/portfolio-counts-money-an-open-buy-holds.mjs"), run: async (m, f) => m.judge(await m.collect({ hosts: ["sign"], fetchFn: f })) },
   { key: "portfolio-counts-money-an-open-buy-holds", host: "app", load: () => import("../live-checks/portfolio-counts-money-an-open-buy-holds.mjs"), run: async (m, f) => m.judge(await m.collect({ hosts: ["app"], fetchFn: f })) },
 ];
@@ -138,6 +140,7 @@ export const OUT = {
   "evm-pool-lists-mainnet": "mainnet Base and Robinhood RPC reads of the pool's logs on each chain's two seats, and SIGN_HOST's response headers (connect-src), never the build",
   "signpage-solana-trade": "the page's CSP header, and a run record's transactions on two RPCs",
   "signpage-evm-pool-buy": "a run record's buys on two testnet RPCs each and the helper's send route; on the build, the mainnet refusal its bundle part reads is held by packages/signpage/test/pool-network.test.ts (pool.buy on Base and Robinhood not_allowed)",
+  "evm-withdraw-mainnet": "a run record's withdraws (each a release and W's onward send) on two testnet RPCs each; on the build, its bundle part is held by packages/signpage/scripts/build-network.test.mjs (the EVM withdraw's release in the testnet build, none of it in the mainnet one)",
   "signpage-evm-pool-sell": "a run record's sales on two testnet RPCs each and the helper's sell route; on the build, the mainnet refusal its bundle part reads is held by packages/signpage/test/pool-network.test.ts (pool.sell on Base and Robinhood not_allowed)",
   "signpage-positions-evm": "a run record's Base Sepolia buy and sell, and W's balance, on two testnet RPCs; the testnet build's positions pass is held by packages/signpage/test/positions-evm.test.ts (the mainnet build pins no EVM pool)",
   "signpage-withdraw-handoff": "the page's CSP header, and the testnet fee read on the release helper and RPCs",
@@ -213,6 +216,7 @@ export const OUT = {
   "token-page-fills-after": "a browser and the helper",
   "app-deposit-mount": "a browser (its --harness run is in test-browser)",
   "deposit-to-pool": "a browser (its --harness run is in test-browser)",
+  "app-faults-seen-on-122": "a browser (its --harness run is in test-browser)",
   "terminal-harness-sign-spa": "Pages' answer to a path with no file (the index), which no build file holds",
   "near-view-rhea": "mainnet NEAR RPC reads of the Rhea pool and get_return on the two providers, never the build",
 };

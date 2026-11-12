@@ -225,3 +225,25 @@ test("an amount above what can be sent: the line names what can be sent (Try 0.0
   assert.equal(none.form.find((e) => e.dataset.for === "amount")!.textContent, POOL_WITHDRAW_WORDS.insufficient);
 });
 
+
+// review of cb287f4f5 P3-3 (card evm-withdraw-mainnet): on Base and Robinhood the funds are read again for each checked
+// To (W's send to it is priced); a read for a To no longer typed that answers last never replaces the current To's
+test("Base: two funds reads for two Tos answered out of order: the figure is the current To's, never the older read's", async () => {
+  const TO_A = "0x2222222222222222222222222222222222222222";
+  const TO_B = "0x3333333333333333333333333333333333333333";
+  const at = (n: bigint): PoolFunds => ({ ...ONE, notes: [{ id: "a", value: n * 10n ** 9n }] });
+  const open: Record<string, (f: PoolFunds) => void> = {};
+  const f = drawn("base", (to?: string) => (to === undefined ? Promise.resolve(at(50_000_000n)) : new Promise((r) => (open[to] = r))));
+  await tick();
+  f.type("to", TO_A);
+  await settle();
+  f.type("to", TO_B);
+  await settle();
+  assert.deepEqual(Object.keys(open).sort(), [TO_A, TO_B], "one read for each To");
+  open[TO_B]!(at(30_000_000n));
+  await tick();
+  open[TO_A]!(at(40_000_000n));
+  await tick();
+  await settle();
+  assert.equal(f.can.textContent, `Max ${formatUnits(poolSendable(at(30_000_000n)), 18)} ETH`, "TO_B's read");
+});

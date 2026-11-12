@@ -102,6 +102,7 @@ class El {
   autocomplete = "";
   spellcheck = true;
   inputMode = "";
+  style: Record<string, string> = {};
   on: Record<string, Array<() => void>> = {};
   tag: string;
   constructor(tag: string) { this.tag = tag; }

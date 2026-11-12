@@ -3,7 +3,7 @@
 //   node packages/signpage/scripts/deploy.mjs [--dry-run | --build]     exit 0 ok, 1 refused or failed, 2 usage
 // The build is the package's tracked public/ files (git ls-files: what the commit holds, never a file an ignore rule
 // hides, such as public/.env.local or a local build) copied into a fresh temp folder, so nothing else in the package is
-// served, then index.html, app.js, prover-worker.js and prover-thread.js built there from HEAD's sources by
+// served, then index.html, app.js, prover-worker.js, prover-thread.js and walk-worker.js built there from HEAD's sources by
 // scripts/build-app.mjs --out (never committed, card signpage-generated-merge-free; the release list below pins their
 // bytes), plus the prover's setup files at assets/zk/<sha256>.<ext> and their licences (scripts/build-app.mjs
 // copyServed, card signpage-prover-host). The gate then reads the build's own _headers and runs the card's live check
@@ -52,13 +52,13 @@ import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { readBack } from "../../../scripts/pages-readback.mjs";
-import { HEADERS, judge } from "../../../scripts/live-checks/signpage-skeleton.mjs";
+import { HEADERS, judge, WALK_CSP, WALK_PATH } from "../../../scripts/live-checks/signpage-skeleton.mjs";
 import { ORIGINS } from "../../../scripts/live-checks/signpage-release.mjs";
 import { WORKER_CSP, WORKER_PATH, ZK_CACHE } from "../../../scripts/live-checks/signpage-prover-host.mjs";
 import { THREAD_CSP, THREAD_PATH } from "../../../scripts/live-checks/signpage-prover-threads.mjs";
 import { facts as pinFacts, judge as judgePins } from "../../../scripts/live-checks/kit-oneclick-pins-frozen.mjs";
 import { proverThreadSource, proverWorkerSource } from "../../kit/src/prover/build.mjs";
-import { SERVED, copyServed, pinProblems } from "./build-app.mjs";
+import { SERVED, WALK_FILE, copyServed, pinProblems, walkSourceProblems } from "./build-app.mjs";
 import { hostList } from "../../../scripts/ci/live-after.mjs";
 import { REPO_SLUG as CI_SLUG, ciProblems, runsArgs } from "../../../scripts/ci/ci-runs-once.mjs";
 
@@ -83,13 +83,15 @@ export const WRANGLER = "wrangler@4.151.1"; // published 2026-10-16
 const PKG = dirname(dirname(fileURLToPath(import.meta.url)));
 const REPO = dirname(dirname(PKG));
 
-// The whole _headers file, as an allow-list: these four rules, each exactly once, each setting exactly its own
+// The whole _headers file, as an allow-list: these five rules, each exactly once, each setting exactly its own
 // headers and removing none; any other rule, header or removal is refused. /* holds the site's policy (judged below by
-// signpage-skeleton's check); the worker's rule its own CSP (W:880) and the thread file's its own (card
-// signpage-prover-threads), each joined by Pages to /*'s; the setup files' rule their one Cache-Control (vault.md 2.14).
+// signpage-skeleton's check); the worker's rule its own CSP (W:880), the thread file's its own (card
+// signpage-prover-threads) and the walk Worker's its own (card restore-shows-the-balance-in-seconds), each joined by Pages
+// to /*'s; the setup files' rule their one Cache-Control (vault.md 2.14).
 const EXACT = {
   [WORKER_PATH]: { "content-security-policy": WORKER_CSP },
   [THREAD_PATH]: { "content-security-policy": THREAD_CSP },
+  [WALK_PATH]: { "content-security-policy": WALK_CSP },
   "/assets/zk/*": { "cache-control": ZK_CACHE },
 };
 export const RULES = {
@@ -143,7 +145,7 @@ export function untrackedSources(pkg = PKG) {
 const BUILD_APP = join(dirname(fileURLToPath(import.meta.url)), "build-app.mjs");
 
 /** Copies the package's served sources (servedSources: index.html at the root, public/'s files at their paths under it)
- *  into a fresh temp folder, builds the page's four output files there from the package's sources when it has them
+ *  into a fresh temp folder, builds the page's five output files there from the package's sources when it has them
  *  (src/main.ts: the real package; a test's copy of the served files is served as it is), and copies the prover's setup
  *  files and licences (SERVED); returns the folder's path. A failed build removes the folder and throws. */
 export function build(pkg = PKG) {
@@ -245,6 +247,7 @@ export function checkDir(dir) {
   // gate (delta review 2). A checkout with no node_modules at all fails before this, on this file's own imports
   p.push(...gated("the prover check", () => checkProver(dir)));
   p.push(...gated("the 1Click pin check", () => checkPins(dir)));
+  p.push(...checkWalk(dir));
   if (!existsSync(join(dir, "_headers"))) return [...p, `${dir} has no _headers file`];
   return [...p, ...checkHeadersFile(readFileSync(join(dir, "_headers"), "utf8"))];
 }
@@ -255,6 +258,15 @@ export function checkDir(dir) {
 export function checkPins(dir) {
   if (!existsSync(join(dir, "index.html")) || !existsSync(join(dir, "app.js"))) return [`${dir} has no app.js for the 1Click pin check`];
   return judgePins(pinFacts(readFileSync(join(dir, "index.html"), "utf8"), readFileSync(join(dir, "app.js"), "utf8"))).lines.map((l) => `app.js: ${l.slice(4)}`);
+}
+
+/** Problems with a build folder's walk Worker (card restore-shows-the-balance-in-seconds; empty = fine): the file the
+ *  page starts at /walk-worker.js is there and is one self-contained module (build-app.mjs walkSourceProblems); its
+ *  bytes are pinned by the release list like every served file. */
+export function checkWalk(dir) {
+  const f = join(dir, WALK_FILE);
+  if (!existsSync(f)) return [`${WALK_FILE}: missing (the restore's walk Worker)`];
+  return walkSourceProblems(readFileSync(f));
 }
 
 /** Problems with a build folder's prover files (empty = fine): the worker and the thread file are the kit's build, the setup files are exactly the pinned six. */

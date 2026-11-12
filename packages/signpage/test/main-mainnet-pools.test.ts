@@ -372,8 +372,8 @@ test("with a mainnet pin, pool.deposit, pool.buy, pool.sell and pool.withdraw re
   const holdings = calls.slice(from).filter((c) => c.method === "getBalance" || c.method === "getTokenAccountsByOwner");
   assert.ok(holdings.length >= 3, `the sell's W holdings were read: ${holdings.length} call(s)`);
   assert.deepEqual([...new Set(holdings.map((c) => c.url))], ["https://ct-api.unrealized.trade/v1/rpc/solana"], "the W's holdings on the helper's route only");
-  // pool.withdraw last: its flow opens the page's screen, which takes the app's frame away (shell.ts open, after
-  // FRAME_LEAVE_MS), so an answer after it reaches no frame; its flow opens the screen only as withdraw.open does, on the
+  // pool.withdraw last: its flow opens the page's screen, which takes the app's frame away (shell.ts open, in the open's
+  // own task), so an answer after it reaches no frame; its flow opens the screen only as withdraw.open does, on the
   // signed-in page (main.ts openPoolWithdraw): the page is set to it here, since this DOM draws no page
   const find = (el: El): El | undefined => (el.id === "signin" ? el : el.children.map(find).find((x) => x !== undefined));
   const root = find(doc.body);

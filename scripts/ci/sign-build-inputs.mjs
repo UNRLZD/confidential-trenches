@@ -1,5 +1,5 @@
 // What SIGN_HOST's build reads, repository paths: packages/signpage/scripts/deploy.mjs build() copies public/'s tracked
-// files (the _headers file), build-app.mjs builds index.html, app.js and the prover's worker and thread file from the
+// files (the _headers file), build-app.mjs builds index.html, app.js, the restore's walk worker and the prover's worker and thread file from the
 // page's, the wallet's and the kit's sources and the packages the lockfile pins (card signpage-generated-merge-free: the
 // bundle is no longer committed, so its sources are the inputs), and build-app.mjs SERVED copies the prover's setup files
 // and licences (packages/kit/zk) and the Apache licence (LICENSE). build-app.mjs refuses a SERVED file outside these, and
@@ -46,6 +46,9 @@ export const SIGN_BUILD_OUTPUTS = Object.freeze([
   // packages/signpage/scripts/release.test.mjs (delta review P3-2)
   "packages/signpage/public/prover-worker.js",
   "packages/signpage/public/prover-thread.js",
+  // the restore's walk Worker (card restore-shows-the-balance-in-seconds): packages/wallet/src/restore/walk-worker.ts and
+  // what it imports, bundled by build-app.mjs into one module file the page starts at /walk-worker.js
+  "packages/signpage/public/walk-worker.js",
 ]);
 
 /** The files packages/signpage/public/ holds in git: its sources, served as they are. Any other file there is build output

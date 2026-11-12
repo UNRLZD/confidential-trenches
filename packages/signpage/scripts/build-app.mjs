@@ -4,7 +4,10 @@
 // integrity metadata (public/_headers). It also writes public/prover-worker.js, the kit's prover worker as the kit's
 // build.mjs makes it (snarkjs 0.7.5's pinned browser build, then worker.js with the setup files' pins), unchanged: the
 // prover runs on SIGN_HOST only (card signpage-prover-host; vault.md 2.14, M304 D-8), and public/prover-thread.js, the
-// one file that worker starts its threads from (the kit's build.mjs, card signpage-prover-threads). The four files are build
+// one file that worker starts its threads from (the kit's build.mjs, card signpage-prover-threads), and public/walk-worker.js,
+// the restore's walk Worker (packages/wallet/src/restore/walk-worker.ts and what it imports, bundled by the same Vite setup
+// into one module file with no chunk, no import at runtime and no eval; card restore-shows-the-balance-in-seconds), which
+// the page starts at /walk-worker.js (src/walk-workers.ts). The five files are build
 // output, never committed (card signpage-generated-merge-free: a committed bundle conflicted on every pair of signing
 // page branches; scripts/ci/sign-build-inputs.mjs SIGN_BUILD_OUTPUTS, held by scripts/ci/no-tracked-build-output.mjs).
 // Every reader in this repository builds them first (scripts/signpage-built.mjs signBuilt, once per process), the deploy builds
@@ -13,9 +16,11 @@
 // The six setup files (24 MB) are not copied into public/: the deploy's build copies them from packages/kit/zk/ to
 // /assets/zk/<sha256>.<ext> (vault.md V2's end state) with copyServed below, which refuses any whose size or sha256
 // is not its pin, and the licence texts beside them to /licenses/ (the worker's header names /licenses/GPL-3.0.txt).
-//   node packages/signpage/scripts/build-app.mjs           writes public/app.js, index.html, public/prover-worker.js and public/prover-thread.js
+//   node packages/signpage/scripts/build-app.mjs           writes public/app.js, index.html, public/prover-worker.js,
+//     public/prover-thread.js and public/walk-worker.js
 //   node packages/signpage/scripts/build-app.mjs --out <dir> [--pkg <dir>]   writes them into <dir> as served: index.html,
-//     app.js, prover-worker.js, prover-thread.js (the deploy's build), from <pkg>'s sources (this package's by default)
+//     app.js, prover-worker.js, prover-thread.js, walk-worker.js (the deploy's build), from <pkg>'s sources (this package's
+//     by default)
 //   node packages/signpage/scripts/build-app.mjs --out <dir> --network testnet   the testnet build into <dir>, with its
 //     _headers (SIGN_HOST's policy and the testnet EVM providers, signHeadersFor)
 //   node packages/signpage/scripts/build-app.mjs --check   exit 1 when the files on disk differ from a fresh build,
@@ -43,6 +48,11 @@ const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 
 export const WORKER = `public/${PROVER_WORKER_FILE}`;
 export const THREAD = `public/${PROVER_THREAD_FILE}`;
+/** The restore's walk Worker, served at /walk-worker.js (src/walk-workers.ts starts it there). */
+export const WALK_FILE = "walk-worker.js";
+export const WALK = `public/${WALK_FILE}`;
+/** Its entry, relative to the signing page's package: the wallet's Worker side of the walk. */
+export const WALK_ENTRY = "../wallet/src/restore/walk-worker.ts";
 
 /**
  * What the deploy's build copies besides index.html and public/: { from, to, bytes?, sha256? }, `to` relative to the
@@ -104,10 +114,10 @@ export const page = (integrity) => `<!doctype html>
 /** The files a build writes, path -> bytes: in the package (public/...) or, `served`, in the served layout (--out).
  *  build-app.test.mjs holds the package's set to SIGN_BUILD_OUTPUTS, the files CI's bundle scan copies, ignores and
  *  scans, so a fifth output is never written unscanned (review of 31f81cbd, P3). */
-export function outputFiles({ js, html, worker, thread }, served) {
+export function outputFiles({ js, html, worker, thread, walk }, served) {
   return served
-    ? { "index.html": html, "app.js": js, [PROVER_WORKER_FILE]: worker, [PROVER_THREAD_FILE]: thread }
-    : { "index.html": html, "public/app.js": js, [WORKER]: worker, [THREAD]: thread };
+    ? { "index.html": html, "app.js": js, [PROVER_WORKER_FILE]: worker, [PROVER_THREAD_FILE]: thread, [WALK_FILE]: walk }
+    : { "index.html": html, "public/app.js": js, [WORKER]: worker, [THREAD]: thread, [WALK]: walk };
 }
 
 export function outsideTsconfigs(repo = REPO) {
@@ -138,12 +148,9 @@ export function signHeadersFor(network, text) {
  *  Sepolia, Robinhood testnet). The wallet's pool/network.ts reads it as __SIGN_NETWORK__, folded at build time. */
 export const NETWORKS = Object.freeze(["mainnet", "testnet"]);
 
-/** A fresh bundle for `network` (SIGN_HOST's, mainnet, unless named): { js, html, worker, thread } as bytes, text,
- *  bytes and bytes, the chunk's module ids, and the number of chunks. */
-export async function bundle(pkg = PKG, { network = "mainnet", repo = REPO } = {}) {
-  if (!NETWORKS.includes(network)) throw new Error("network: mainnet or testnet");
-  const above = outsideTsconfigs(repo);
-  if (above.length) throw new Error(`a tsconfig.json above the repository root would change the build, which reads only the repository's: ${above.join(", ")}: move it away`);
+/** One entry bundled by the page's Vite (rolldown) setup into one ES module file named `name`: { bytes, modules,
+ *  chunks, imports } (imports: the static and dynamic imports the chunk still makes at runtime, none when self-contained). */
+async function bundleOne(pkg, network, input, name) {
   const { build } = await import("vite");
   const out = mkdtempSync(join(tmpdir(), "ct-signpage-app-"));
   try {
@@ -161,19 +168,50 @@ export async function bundle(pkg = PKG, { network = "mainnet", repo = REPO } = {
         modulePreload: false,
         copyPublicDir: false,
         rolldownOptions: {
-          input: join(pkg, "src/main.ts"),
-          output: { format: "es", entryFileNames: "app.js", codeSplitting: false },
+          input,
+          output: { format: "es", entryFileNames: name, codeSplitting: false },
         },
       },
     });
-    const js = readFileSync(join(out, "app.js"));
+    const bytes = readFileSync(join(out, name));
     const chunks = [res].flat().flatMap((r) => r.output).filter((o) => o.type === "chunk");
     const modules = chunks[0] ? [...chunks[0].moduleIds] : [];
-    // chunks: how many the build made (one, codeSplitting off), so a reader of `modules` knows it read them all
-    return { js, html: page(sha384(js)), worker: proverWorkerSource(), thread: proverThreadSource(), modules, chunks: chunks.length };
+    const imports = chunks.flatMap((c) => [...(c.imports ?? []), ...(c.dynamicImports ?? [])]);
+    return { bytes, modules, chunks: chunks.length, imports };
   } finally {
     rmSync(out, { recursive: true, force: true });
   }
+}
+
+/** A fresh bundle for `network` (SIGN_HOST's, mainnet, unless named): { js, html, worker, thread, walk } as bytes, text,
+ *  bytes, bytes and bytes, app.js's module ids and number of chunks, and the walk Worker's (walkModules, walkChunks,
+ *  walkImports: what it would import at runtime, none). */
+export async function bundle(pkg = PKG, { network = "mainnet", repo = REPO } = {}) {
+  if (!NETWORKS.includes(network)) throw new Error("network: mainnet or testnet");
+  const above = outsideTsconfigs(repo);
+  if (above.length) throw new Error(`a tsconfig.json above the repository root would change the build, which reads only the repository's: ${above.join(", ")}: move it away`);
+  const app = await bundleOne(pkg, network, join(pkg, "src/main.ts"), "app.js");
+  const walk = await bundleOne(pkg, network, join(pkg, WALK_ENTRY), WALK_FILE);
+  // chunks: how many the build made (one, codeSplitting off), so a reader of `modules` knows it read them all
+  return {
+    js: app.bytes, html: page(sha384(app.bytes)), worker: proverWorkerSource(), thread: proverThreadSource(), walk: walk.bytes,
+    modules: app.modules, chunks: app.chunks, walkModules: walk.modules, walkChunks: walk.chunks, walkImports: walk.imports,
+  };
+}
+
+/** Problems with the walk Worker's bytes (empty = fine): it must run as one file under its own policy (script-src 'self',
+ *  no 'unsafe-eval'), so it may import, export, eval, make a Function or importScripts nothing. Read on the minified text,
+ *  beside the bundler's own import list (bundle().walkImports). */
+export function walkSourceProblems(bytes) {
+  const t = bytes.toString("utf8");
+  const p = [];
+  if (/(?:^|[;}\n])\s*import\s*(?:[\w$*{]|["'`])/.test(t)) p.push("walk-worker.js has a static import");
+  if (/\bimport\s*\(/.test(t)) p.push("walk-worker.js has a dynamic import");
+  if (/(?:^|[;}\n])\s*export\s*(?:[{*]|default\b|const\b|let\b|var\b|function\b|class\b)/.test(t)) p.push("walk-worker.js exports");
+  if (/\beval\s*\(/.test(t)) p.push("walk-worker.js calls eval");
+  if (/\bFunction\s*\(/.test(t)) p.push("walk-worker.js makes a Function");
+  if (/\bimportScripts\s*\(/.test(t)) p.push("walk-worker.js calls importScripts");
+  return p;
 }
 
 /** A test file, a test helper, or Node's own test runner, by module id. */
@@ -201,6 +239,17 @@ export function bundleModuleProblems(modules, read = (id) => readFileSync(id.spl
   return p;
 }
 
+/** Problems with a fresh bundle's walk Worker (empty = fine): one chunk, no import left at runtime, no test path, none
+ *  of the bundled-text refusals of walkSourceProblems. */
+export function walkBundleProblems({ walk, walkModules, walkChunks, walkImports }) {
+  const p = [];
+  if (walkChunks !== 1) p.push(`walk-worker.js is ${walkChunks} chunks, not one file`);
+  if (walkImports.length) p.push(`walk-worker.js imports at runtime: ${walkImports.join(", ")}`);
+  p.push(...bundleModuleProblems(walkModules).map((l) => `walk-worker.js: ${l}`));
+  p.push(...walkSourceProblems(walk));
+  return p;
+}
+
 /** Problems with the committed files (in `committed`, the package by default) against a fresh build (empty = they match). */
 export async function check(pkg = PKG, committed = pkg) {
   const fresh = await bundle(pkg);
@@ -221,7 +270,13 @@ export async function check(pkg = PKG, committed = pkg) {
     thread = readFileSync(join(committed, THREAD));
   } catch {}
   if (!thread || !thread.equals(fresh.thread)) p.push(`${THREAD} is not the kit's prover thread build: run node packages/signpage/scripts/build-app.mjs`);
+  let walk = null;
+  try {
+    walk = readFileSync(join(committed, WALK));
+  } catch {}
+  if (!walk || !walk.equals(fresh.walk)) p.push(`${WALK} is not the build of packages/wallet/src/restore/walk-worker.ts: run node packages/signpage/scripts/build-app.mjs`);
   p.push(...bundleModuleProblems(fresh.modules));
+  p.push(...walkBundleProblems(fresh));
   return p;
 }
 
@@ -229,7 +284,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
   if (process.argv.includes("--check")) {
     const p = await check();
     for (const l of p) console.error(`build-app: ${l}`);
-    if (!p.length) console.log(`build-app: public/app.js, index.html, ${WORKER} and ${THREAD} match a fresh build`);
+    if (!p.length) console.log(`build-app: public/app.js, index.html, ${WORKER}, ${THREAD} and ${WALK} match a fresh build`);
     process.exit(p.length ? 1 : 0);
   }
   const arg = (name) => {
@@ -251,8 +306,15 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     console.error("build-app: --network testnet needs --out");
     process.exit(2);
   }
-  const { js, html, worker, thread } = await bundle(pkg, { network });
-  const files = outputFiles({ js, html, worker, thread }, Boolean(out));
+  const b = await bundle(pkg, { network });
+  const { js, html, worker, thread, walk } = b;
+  // the release build refuses a walk Worker that is not one self-contained file, before anything is written
+  const wp = walkBundleProblems(b);
+  if (wp.length) {
+    for (const l of wp) console.error(`build-app: ${l}`);
+    process.exit(1);
+  }
+  const files = outputFiles({ js, html, worker, thread, walk }, Boolean(out));
   // a testnet build's folder is served by its run's own server: it gets its policy beside it (signHeadersFor), since
   // SIGN_HOST's public/_headers names no testnet EVM provider
   if (network === "testnet") files._headers = signHeadersFor("testnet", readFileSync(join(pkg, "public/_headers"), "utf8"));
@@ -269,4 +331,5 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
   console.log(`build-app: ${out ? "app.js" : "public/app.js"} ${js.length} bytes, ${sha384(js)}${out ? ` (in ${out})` : ""}`);
   console.log(`build-app: ${WORKER} ${worker.length} bytes, sha256 ${sha256(worker)}`);
   console.log(`build-app: ${THREAD} ${thread.length} bytes, sha256 ${sha256(thread)}`);
+  console.log(`build-app: ${out ? WALK_FILE : WALK} ${walk.length} bytes, sha256 ${sha256(walk)}`);
 }

@@ -6,7 +6,9 @@ import type { Phase } from "../trade/model.ts";
 import { useTradeSource } from "../trade/source.tsx";
 import type { PartCount } from "../trade/States.tsx";
 import { askSellPreview, baseUnits, sellLocked } from "./model.ts";
-import type { Tapped } from "./model.ts";
+import type { SellPreviewAnswer, SellPreviewRequest, Tapped } from "./model.ts";
+
+export type { SellPreview, SellPreviewAnswer, SellPreviewRequest } from "./model.ts";
 
 // What the sell side reads and does. The sell is the kit's own `buy` request with `side: "sell"` (messages.ts
 // SignpageParams.buy) through the trade box's source (src/screens/trade/source.tsx: the same TradeKit stub, `request`
@@ -14,25 +16,6 @@ import type { Tapped } from "./model.ts";
 // signing page's pool.sell.dry (card app-sell-shows-what-you-receive: the sale's own quote on the device's pool reads),
 // asked through the same client for exactly what the tap would ask, in USD at the page's own pool price (model.ts
 // askSellPreview). The live source gives it with no provider; a fixture passes its own stub through SellKitProvider.
-
-/** What the sell preview is asked for: `amount` the share's token units (decimal string), `share_bps` the share. */
-export interface SellPreviewRequest {
-  chain: Chain;
-  token: string;
-  amount: string;
-  share_bps: number;
-  slippage_bps: number;
-}
-
-/** The sell preview for one share. USD values are decimal strings, as every kit amount. */
-export interface SellPreview {
-  /** The expected USD out, the venue's fees taken, before slippage. */
-  out_usd: string;
-  fee_bps: number;
-  network_usd: string;
-}
-
-export type SellPreviewAnswer = { ok: true; preview: SellPreview } | { ok: false; code: string };
 
 export interface SellKit {
   /** The sell preview for a share. Null while the signing page has no client yet. */
