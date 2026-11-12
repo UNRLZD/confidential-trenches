@@ -5,7 +5,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { SignpageClientSnapshot, SignpageState } from "@blindfill/kit";
 import { balanceOf, NO_DATA } from "../src/screens/portfolio/model.ts";
-import { headerModel, restoreModel, showRestore, signinWays, toCents, usd } from "../src/screens/signin/model.ts";
+import { DOTS, glow, TICK, tickDist } from "../src/screens/signin/dots.ts";
+import { headerModel, restoreModel, restoreView, showRestore, signinWays, toCents, usd } from "../src/screens/signin/model.ts";
 import { DRAFTS, WORDS } from "../src/screens/signin/words.ts";
 
 const base: SignpageState = {
@@ -111,6 +112,31 @@ test("S19 shows while running or stalled; a finished one only if this page saw i
   assert.equal(showRestore(done, new Set(["r1"]), none), true);
   assert.equal(showRestore(done, new Set(["r1"]), new Set(["r1"])), false);
   assert.equal(showRestore(rm(st({ ops: [op("r1", "stalled")] })), none, none), true);
+});
+
+// card restore-notice-redraw (direction A, owner pick 12 Nov 18:55Z): each state's mark and its one word; done is the
+// tick and the amount, no word; Offline's word comes with its Retry, not here
+test("S19 draws a mark per state and one picked word, none when done", () => {
+  const view = (stage: "reading" | "done" | "stalled", bal = "0") => restoreView(rm(st({ vault_balance: bal, ops: [op("r1", stage)] }))!);
+  assert.deepEqual(view("reading"), { mark: "run", word: "restoring" });
+  assert.deepEqual(view("reading", "41.06"), { mark: "run", word: "restoring" });
+  assert.deepEqual(view("done", "73.18"), { mark: "done", word: null });
+  assert.deepEqual(view("done"), { mark: "nothing", word: "nothingFound" });
+  assert.deepEqual(view("stalled", "12.5"), { mark: "off", word: null });
+  for (const w of ["restoring", "nothingFound"] as const) assert.equal(WORDS[w].draft, false, w);
+});
+
+test("S19's mark: a disc of dots whose tick runs along both strokes, and a sweep from a bright head to a dark tail", () => {
+  const tick = DOTS.filter((d) => d.tick > 0);
+  assert.ok(DOTS.length > 150 && tick.length > 20 && tick.length < DOTS.length / 3, `${DOTS.length} dots, ${tick.length} in the tick`);
+  for (const d of tick) assert.ok(tickDist(d.x, d.y) < 5.8);
+  // every stroke's ends are covered: the tick reads as a tick, not a blob
+  for (const [x, y] of TICK) assert.ok(tick.some((d) => Math.hypot(d.x - x, d.y - y) < 3), `the tick reaches ${x},${y}`);
+  // the biggest dots sit on the strokes, the disc's own stay smaller
+  assert.ok(Math.max(...DOTS.map((d) => d.r)) < Math.max(...tick.map((d) => d.tick)));
+  for (const d of DOTS) assert.ok(d.phase >= 0 && d.phase < 1, `${d.x},${d.y} phase ${d.phase}`);
+  assert.equal(glow(0), 1);
+  assert.ok(glow(0.3) > glow(0.6) && glow(0.6) > glow(0.95) && glow(0.999) >= 0);
 });
 
 test("WORDS: every picked word carries its source; no draft is left (owner 1 Nov 16:45Z, keep)", () => {

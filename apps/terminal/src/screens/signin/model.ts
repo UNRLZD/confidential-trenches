@@ -75,6 +75,21 @@ export function restoreModel(s: SignpageState | null, balance: bigint | null = n
   return { id: op.id, kind: found ? "done" : "nothing", cents };
 }
 
+/** The restore notice's mark (DotMark): the sweep, the dotted tick, the grey disc at rest, the amber disc stopped. */
+export type RestoreMark = "run" | "done" | "nothing" | "off";
+
+/**
+ * What S19 draws beside the amount (card restore-notice-redraw, direction A): its mark, and the one word under the
+ * amount, or none. Done is the tick and the amount alone (owner 12 Nov 12:17Z: a tick and the amount, no sentence);
+ * Offline's word is drawn with its Retry, so it is not this word.
+ */
+export function restoreView(r: RestoreModel): { mark: RestoreMark; word: "restoring" | "nothingFound" | null } {
+  if (r.kind === "done") return { mark: "done", word: null };
+  if (r.kind === "nothing") return { mark: "nothing", word: "nothingFound" };
+  if (r.kind === "offline") return { mark: "off", word: null };
+  return { mark: "run", word: "restoring" };
+}
+
 /**
  * Whether the sheet shows S19: a running or stalled restore always; a finished one only when this page saw it running
  * (a reload after the end does not bring it back); never once the user closed it.

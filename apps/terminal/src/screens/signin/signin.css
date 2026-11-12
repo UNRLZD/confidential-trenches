@@ -63,17 +63,29 @@
 .sgn-opt:hover:not(:disabled) { filter: brightness(1.08); }
 .sgn-opt:disabled { opacity: .45; }
 .sgn-opt[aria-busy="true"] { opacity: .7; }
-.sgn-restore { display: flex; flex-direction: column; gap: 14px; padding: 6px 0 4px; }
-.rbal { font: 400 24px var(--font-num); color: var(--paper); letter-spacing: -0.02em; }
+/* S19 (card restore-notice-redraw, direction A): the dot mark, the amount under it, one word or Offline with Retry. The
+   header keeps only the close; the mark rises level with it. Colours are the tokens above (--acc done, --warn offline).
+   With reduced motion the arc rests where it starts (each dot's own opacity, DotMark). */
+.sgn-hd.bare { justify-content: flex-end; }
+.sgn-restore { display: flex; flex-direction: column; align-items: center; margin-top: -54px; padding: 0 0 12px; }
+.rn-mark { position: relative; display: block; width: 152px; height: 152px; flex: none; }
+.rn-mark svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.rn-base circle { fill: var(--m-line-strong); }
+.rn-mark.done .rn-base circle { fill: var(--acc); fill-opacity: .16; }
+.rn-tick circle { fill: var(--acc); }
+.rn-arc circle { fill: var(--text-1); animation: rn-comet 1.2s linear infinite; }
+.rn-mark.off .rn-base circle { fill: var(--warn); fill-opacity: .28; }
+.rn-mark.off .rn-arc circle { fill: var(--warn); animation: none; }
+@keyframes rn-comet { 0% { opacity: 1; } 55% { opacity: .12; } 100% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .rn-arc circle, .sk { animation: none; } }
+.rbal { margin-top: 18px; font: 400 52px/1 var(--font-num); color: var(--paper); letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
 .rbal.dim { color: var(--text-3); }
-.rbar { height: 3px; border-radius: 2px; background: var(--bg-raised); overflow: hidden; }
-.rbar i { display: block; width: 30%; height: 100%; border-radius: 2px; background: var(--blue); animation: sgn-bar 1.4s ease-in-out infinite; }
-@keyframes sgn-bar { 0% { transform: translateX(-100%); } 100% { transform: translateX(340%); } }
-@media (prefers-reduced-motion: reduce) { .rbar i, .sk { animation: none; } }
-.rline { display: flex; align-items: center; gap: 12px; font: 500 14px var(--font-ui); color: var(--text-2); }
-.rline.row { justify-content: space-between; }
-.rline .warn { color: var(--warn); font-weight: 600; }
-.rline .retry { height: 34px; padding: 0 14px; border-radius: 9px; background: var(--m-ink-pill); box-shadow: inset 0 0 0 1px var(--m-line-strong); color: var(--text-1); font: 600 14px var(--font-ui); }
+.rword { margin-top: 14px; height: 20px; font: 500 16px var(--font-ui); color: var(--text-2); }
+.rline { margin-top: 14px; display: flex; align-items: center; gap: 14px; font: 600 16px var(--font-ui); }
+.rline .warn { color: var(--warn); }
+.rline .retry { height: 38px; padding: 0 16px; border-radius: 10px; background: var(--m-ink-pill); box-shadow: inset 0 0 0 1px var(--m-line-strong); color: var(--text-1); font: 600 16px var(--font-ui); }
+.rline .retry:disabled { color: var(--text-3); }
+.sgn-restore[data-restore="done"] { padding-bottom: 22px; }
 
 /* a tap that did not open (HopLine): one line under the tapped control, with Retry where a retry can work */
 .hopline { min-height: 34px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 4px; font: 600 14px var(--font-ui); }
@@ -92,7 +104,9 @@
   .sgn-x { width: 44px; height: 44px; border-radius: 14px; }
   .sgn-opt { height: 64px; border-radius: 16px; }
   .sgn-opt.primary { height: 56px; }
-  .rbal { font-size: 34px; }
+  .sgn-restore { margin-top: -58px; padding-bottom: 14px; }
+  .rn-mark { width: 100px; height: 100px; }
+  .rbal { font-size: 48px; }
   .rline .retry { height: 44px; border-radius: 14px; }
   .hopline { min-height: 44px; }
   .hopline .retry { height: 44px; border-radius: 14px; }
