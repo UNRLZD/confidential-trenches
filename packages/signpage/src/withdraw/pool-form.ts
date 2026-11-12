@@ -324,7 +324,11 @@ export function drawPoolWithdrawForm(doc: Document, deps: PoolWithdrawFormDeps, 
     if (can === null) delete sendable.dataset.value;
     else sendable.dataset.value = String(can);
   };
-  const load = (): Promise<void> => deps.funds(fundsTo).then((f) => void (funds = f), () => void (funds = null)).then(drawSendable);
+  // a read for a To no longer the checked one (an older read answering last) never replaces the current To's funds
+  const load = (): Promise<void> => {
+    const asked = fundsTo;
+    return deps.funds(asked).then((f) => void (asked === fundsTo && (funds = f)), () => void (asked === fundsTo && (funds = null))).then(drawSendable);
+  };
   let loaded = load();
   let seq = 0;
   let timer: ReturnType<typeof setTimeout> | undefined;
