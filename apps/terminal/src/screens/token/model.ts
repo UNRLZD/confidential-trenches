@@ -146,6 +146,11 @@ export type TokenLink =
   | { id: "xSearch"; href: string }
   | { id: "site" | "x" | "telegram" | "pad"; href: string; label: string };
 
+/** The mark each link kind draws, as on UNRLZD's link row (the globe, X's and Telegram's own marks, the magnifier, the
+ *  pad's logo, the explorer): one per kind, so no two icons on a row look alike (owner 13 Nov: the site, X and the
+ *  explorer all drew one chain-link icon, three of the same in a row). */
+export const LINK_MARK = { site: "web", x: "x", xSearch: "search", telegram: "telegram", pad: "pad", explorer: "explorer" } as const satisfies Record<TokenLink["id"], string>;
+
 /** The links a token's identity draws, in R5's order (socials, then the explorer): never one without data behind it.
  *  The token's own X account takes Search on X's place (R5: the search is the link when no X account is listed). */
 export function tokenLinks(chain: string, token: string, social: SocialLinks = {}, launchpad: string | null = null): TokenLink[] {

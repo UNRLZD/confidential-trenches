@@ -24,6 +24,8 @@
 .tkp-ib::after { content: ""; position: absolute; inset: -9px -1px; }
 .tkp-ib:hover { color: var(--text-1); }
 .tkp-ib[data-on="true"] { color: var(--paper, #f4f4f2); }
+/* a pad's link is its logo (TokenPage LinkMark), round as the avatar's badge draws it (the file is an opaque square) */
+.tkp-padmark { display: block; width: 16px; height: 16px; border-radius: 50%; }
 .tkp-copy { position: relative; display: flex; flex: none; padding: 0; border: 0; background: transparent; color: var(--text-3); cursor: pointer; }
 .tkp-copy::after { content: ""; position: absolute; inset: -12px -8px -12px -12px; }
 .tkp-copy:hover, .tkp-mca:hover { color: var(--text-2); }
@@ -143,6 +145,9 @@
   .tkp-mca::before { content: ""; position: absolute; left: 50%; top: 50%; width: max(100%, 44px); height: max(100%, 44px); transform: translate(-50%, -50%); }
   .tkp-mca .tkp-ca { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .tkp-hero .tkp-meta > .tkp-mca { flex: 0 1 auto; }
+  /* the name keeps its width up to 40% of the line and the address gives way (UNRLZD mobile/token .name): shrinking with
+     the address left a 390 px phone "Ju…" of Jupiter (owner 13 Nov) */
+  .tkp-hero .tkp-meta > .tkp-name { flex: none; max-width: 40%; }
   /* the link row (R5 mt-links): the identity's link icons, under the address */
   /* one row of a fixed height, empty or full, drawn before the token answers (R5 .mlinks: one row) */
   .tkp-links { display: flex; align-items: center; gap: 6px; flex-wrap: nowrap; height: 28px; }

@@ -6,6 +6,7 @@ import { parseTokenRoute } from "../../routes/routes.ts";
 import type { MarketChain } from "../discover/fields.ts";
 import { DASH } from "../discover/format.ts";
 import { Avatar } from "../market/Avatar.tsx";
+import { padOf } from "../market/pads.ts";
 import { text as signinWord } from "../signin/Word.tsx";
 import { SafetyGrid } from "../trade/SafetyGrid.tsx";
 import { safetyCells } from "../trade/safety.ts";
@@ -31,8 +32,8 @@ import { keepRoom, legendRoom, legendText, priceRoom, useRoom } from "./legend.t
 import type { LegendRoom } from "./legend.ts";
 import { coinUsd, factors, QUOTE, scaleBars, supplyOf, unitDrawn, volumeIn } from "./units.ts";
 import type { ChartUnit } from "./units.ts";
-import { copyText, readWatch, shareHref, toggleWatch, tokenLinks, tokenView } from "./model.ts";
-import type { TokenView } from "./model.ts";
+import { copyText, LINK_MARK, readWatch, shareHref, toggleWatch, tokenLinks, tokenView } from "./model.ts";
+import type { TokenLink, TokenView } from "./model.ts";
 import { useToken, useTopToken } from "./source.ts";
 import { flashNum, useFlash } from "./useFlash.ts";
 import type { TokenData } from "./source.ts";
@@ -79,7 +80,9 @@ function Tile({ label, value, dir, tone, k, flash }: { label: WordId; value: str
 
 // R5's line icons (assets/app.js I, drawn by P.ic in a 12 box): the identity's links, star, copy, share and back
 const ICONS: Record<string, readonly (string | readonly [string, Record<string, number>])[]> = {
-  link: ["M5 7l2-2", "M4.2 5.2L3 6.4a2 2 0 002.8 2.8L7 8", "M7.8 6.8L9 5.6a2 2 0 00-2.8-2.8L5 4"],
+  // the token's website (UNRLZD components/icons.tsx web) and its chain's explorer (a block)
+  web: [["circle", { cx: 6, cy: 6, r: 4.5 }], "M1.5 6h9", "M6 1.5c1.4 1.3 2 2.8 2 4.5s-.6 3.2-2 4.5c-1.4-1.3-2-2.8-2-4.5s.6-3.2 2-4.5z"],
+  explorer: ["M6 1.3l4.2 2.3v4.8L6 10.7 1.8 8.4V3.6z", "M1.8 3.6L6 5.9l4.2-2.3", "M6 5.9v4.8"],
   search: [["circle", { cx: 5.2, cy: 5.2, r: 3.7 }], "M8 8l2.8 2.8"],
   star: ["M6 1.2l1.5 3 3.3.5-2.4 2.3.6 3.3L6 8.8l-3 1.5.6-3.3-2.4-2.3 3.3-.5z"],
   copy: [["rect", { x: 4, y: 4, width: 6.5, height: 6.5, rx: 1.2 }], "M8 4V2.7c0-.7-.5-1.2-1.2-1.2H2.7c-.7 0-1.2.5-1.2 1.2v4.1c0 .7.5 1.2 1.2 1.2H4"],
@@ -150,6 +153,37 @@ function Star({ v, cls, size }: { v: TokenView; cls: string; size: number }) {
   );
 }
 
+/** X's and Telegram's official marks in the text colour, verbatim from UNRLZD's components/social/BrandMark.tsx (X:
+ *  about.x.com brand toolkit, x-logo.zip › logo.svg; Telegram: telegram.org/img/t_logo.svg, the plane knocked out of its
+ *  circle), each in a square box inset 10% a side so a solid mark sits at the line icons' weight. */
+const BRAND = {
+  x: {
+    vb: "-136.2 -122.7 1472.4 1472.4",
+    d: "M714.163 519.284L1160.89 0H1055.03L667.137 450.887L357.328 0H0L468.492 681.821L0 1226.37H105.866L515.491 750.218L842.672 1226.37H1200L714.137 519.284H714.163ZM569.165 687.828L521.697 619.934L144.011 79.6944H306.615L611.412 515.685L658.88 583.579L1055.08 1150.3H892.476L569.165 687.854V687.828Z",
+  },
+  telegram: {
+    vb: "-12.8 -12.8 153.6 153.6",
+    d: "M64 0a64 64 0 1 1 0 128a64 64 0 1 1 0-128Z M28.9700376,63.3244248 C47.6273373,55.1957357 60.0684594,49.8368063 66.2934036,47.2476366 C84.0668845,39.855031 87.7600616,38.5708563 90.1672227,38.528 C90.6966555,38.5191258 91.8804274,38.6503351 92.6472251,39.2725385 C93.294694,39.7979149 93.4728387,40.5076237 93.5580865,41.0057381 C93.6433345,41.5038525 93.7494885,42.63857 93.6651041,43.5252052 C92.7019529,53.6451182 88.5344133,78.2034783 86.4142057,89.5379542 C85.5170662,94.3339958 83.750571,95.9420841 82.0403991,96.0994568 C78.3237996,96.4414641 75.5015827,93.6432685 71.9018743,91.2836143 C66.2690414,87.5912212 63.0868492,85.2926952 57.6192095,81.6896017 C51.3004058,77.5256038 55.3966232,75.2369981 58.9976911,71.4967761 C59.9401076,70.5179421 76.3155302,55.6232293 76.6324771,54.2720454 C76.6721165,54.1030573 76.7089039,53.4731496 76.3346867,53.1405352 C75.9604695,52.8079208 75.4081573,52.921662 75.0095933,53.0121213 C74.444641,53.1403447 65.4461175,59.0880351 48.0140228,70.8551922 C45.4598218,72.6091037 43.1463059,73.4636682 41.0734751,73.4188859 C38.7883453,73.3695169 34.3926725,72.1268388 31.1249416,71.0646282 C27.1169366,69.7617838 23.931454,69.0729605 24.208838,66.8603276 C24.3533167,65.7078514 25.9403832,64.5292172 28.9700376,63.3244248 Z",
+  },
+} as const;
+function Brand({ b, size }: { b: keyof typeof BRAND; size: number }) {
+  return (
+    <svg className="tkp-ic" width={size} height={size} viewBox={BRAND[b].vb} fill="currentColor" aria-hidden="true">
+      <path d={BRAND[b].d} fillRule={b === "telegram" ? "evenodd" : undefined} />
+    </svg>
+  );
+}
+
+/** A link's own mark (model.ts LINK_MARK): the pad's page is its logo (market/pads.ts), as the avatar's badge draws it. */
+function LinkMark({ l, launchpad }: { l: TokenLink; launchpad: string | null }) {
+  const m = LINK_MARK[l.id];
+  if (m === "x") return <Brand b="x" size={12} />;
+  if (m === "telegram") return <Brand b="telegram" size={14} />;
+  const pad = m === "pad" ? padOf(launchpad) : null;
+  if (pad) return <img className="tkp-padmark" src={pad.logo} width={16} height={16} alt="" />;
+  return <Ic n={m === "search" ? "search" : m === "web" ? "web" : "explorer"} size={m === "search" ? 12 : 13} />;
+}
+
 /** The link icons (R5 socials and explorers): only those with data behind them (model.ts tokenLinks). */
 function Links({ v }: { v: TokenView }) {
   return (
@@ -158,8 +192,8 @@ function Links({ v }: { v: TokenView }) {
         // the token's own links are named by their address (data); the search and the explorer by their words
         const name = l.id === "xSearch" ? WORDS.searchX.text : l.id === "explorer" ? WORDS[l.name].text : l.label;
         return (
-          <a key={l.id} className="tkp-ib" href={l.href} target="_blank" rel="noopener noreferrer" aria-label={name} title={name} data-link={l.id}>
-            <Ic n={l.id === "xSearch" ? "search" : "link"} size={l.id === "xSearch" ? 12 : 13} />
+          <a key={l.id} className="tkp-ib" href={l.href} target="_blank" rel="noopener noreferrer" aria-label={name} title={name} data-link={l.id} data-mark={LINK_MARK[l.id]}>
+            <LinkMark l={l} launchpad={v.launchpad} />
           </a>
         );
       })}

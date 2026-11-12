@@ -584,7 +584,11 @@ try {
               const scrolled = row.scrollLeft;
               row.scrollLeft = 0;
               return { left: box.left, right: box.right, ox, first, last, scrolled };
-            })(), vw: window.innerWidth };
+            })(), vw: window.innerWidth, name: (() => {
+              // owner 13 Nov: the name shrank with the address to "Ju…"; it keeps its width up to 40% of its line
+              const n = document.querySelector(".tkp-hero .tkp-name");
+              return n ? { text: n.textContent, cut: n.scrollWidth > n.clientWidth + 0.5, w: n.scrollWidth, line: n.parentElement.getBoundingClientRect().width } : null;
+            })(), marks: [...document.querySelectorAll('.tkp-phone [data-testid="token-links"] a')].map((a) => a.dataset.mark ?? "none") };
           });
           // the token page is pushed over the tabs on the phone (TabBar.tsx: no tab bar on /token/...): the bar sits on the
           // screen's foot, with no tab bar under it
@@ -592,6 +596,8 @@ try {
           check(g.row.left >= 0 && g.row.right <= g.vw + 0.5 && ["auto", "scroll"].includes(g.row.ox), `${tag}: the tile row is not its own scroller (${JSON.stringify(g.row)})`);
           check(g.row.first >= g.row.left - 0.5 && g.row.last <= g.row.right + 0.5, `${tag}: tiles out of reach in the row: ${JSON.stringify(g.row)}`);
           check(g.bar && g.lastTile <= g.bar.top, `${tag}: the last tile ends under the bottom bar (${g.lastTile} > ${g.bar?.top})`);
+          check(!g.name || !g.name.cut || g.name.w > 0.4 * g.name.line, `${tag}: the name "${g.name?.text}" is cut though it fits 40% of its line (${JSON.stringify(g.name)})`);
+          check(g.marks.length > 0 && !g.marks.includes("none") && new Set(g.marks).size === g.marks.length, `${tag}: the links draw ${JSON.stringify(g.marks)}, not one mark each`);
           await f.evaluate(() => window.scrollTo(0, 0));
         }
       } else {
