@@ -758,8 +758,16 @@ export function evmHelperKeyedRpc(origin: string, chain: "base" | "robinhood"): 
 //   own (buyGateOf): a throttle met here pauses these reads only, never the finder's next read or a trade's. Each call
 //   is one round of that gate and takes the host's pass turn (inTurn's lane), so the lane's pause and budget hold it.
 //   Every request names one W, or a signature of W's: no batch, no request carries two Ws.
-/** W's buy as its own transaction shows it: the mint it bought and the token program of W's account of it. */
-export type SolanaBuy = { mint: string; program: string };
+// - W's trades too (card closed-positions-after-a-restore): with a buy, the read hands back W's buy transaction and
+//   W's successful transactions after it, oldest first, as the route answered them ("json", finalized), read until the
+//   one that leaves W none of the bought mint (W's sale in full: what follows is W's teardown and sweep, never a trade)
+//   and SOL_TRADE_TXS of them at most. `soldOut` says that sale was read; without it (W still holds, the list cut
+//   short, a transaction the route no longer returns) the trades read so far are all that is known, and a later load
+//   reads W again. The device's ops are rebuilt from them (packages/signpage/src/sol-buy-records.ts restoredTradeOps):
+//   no extra page of W's signatures is asked, and every request still names one W or a signature of W's.
+/** W's buy as its own transaction shows it: the mint it bought and the token program of W's account of it; from the
+ *  reader, also W's buy and later transactions (see above). */
+export type SolanaBuy = { mint: string; program: string; txs?: readonly { signature: string; tx: unknown }[]; soldOut?: boolean };
 /** One W's buy read: "none" when W's whole history shows for good that it holds none, null when this reader cannot tell
  *  (see above). */
 export interface SolanaBuyReader {
@@ -771,6 +779,8 @@ export const SOL_BUY_PAGE = 1_000;
 /** The most of W's oldest successful transactions read for its buy: its release, after the sends a failed buy of W's
  *  can draw before its retry lands. */
 export const SOL_BUY_TXS = 8;
+/** The most of W's transactions after its buy read for its trades (see above): its sales up to the one in full. */
+export const SOL_TRADE_TXS = 8;
 /** The pool's release and its release-and-buy (the kit's SOLANA_POOL_TAG_RELEASE, SOLANA_POOL_TAG_RELEASE_AND_BUY). */
 const TAG_RELEASE = 2;
 const TAG_RELEASE_AND_BUY = 3;
@@ -834,6 +844,27 @@ export function solanaBuyIn(tx: unknown, w: string, pool: string): SolanaBuy | n
   return { mint: mint!, program: program! };
 }
 
+/** Whether a landed transaction left W none of `mint` where W held some before it (W's sale in full); false for any
+ *  other, or a balance list it cannot read. */
+export function solanaSoldOutIn(tx: unknown, w: string, mint: string): boolean {
+  const t = tx as Tx;
+  if (!t?.meta || t.meta.err !== null) return false;
+  const sum = (list: unknown): bigint | null => {
+    if (!Array.isArray(list)) return null;
+    let n = 0n;
+    for (const b of list as TokenBalance[]) {
+      if (b?.owner !== w || b.mint !== mint) continue;
+      const u = units(b);
+      if (u === null) return null;
+      n += u;
+    }
+    return n;
+  };
+  const pre = sum(t.meta.preTokenBalances);
+  const post = sum(t.meta.postTokenBalances);
+  return pre !== null && post !== null && pre > 0n && post === 0n;
+}
+
 /** W's buy on one Solana route (production: solanaHelperBuys, solanaBuysAt), each call a round of the route's gate. */
 export function solanaBuyReader(rpc: SolanaRpc, pool: string, o: ReaderOpts = {}): SolanaBuyReader {
   const sleep = o.sleep ?? sleepFor;
@@ -857,13 +888,26 @@ export function solanaBuyReader(rpc: SolanaRpc, pool: string, o: ReaderOpts = {}
         sigs.push(...(got as { signature: string; err: unknown }[]));
         if (got.length < SOL_BUY_PAGE) break;
       }
-      const oldest = sigs.filter((x) => x.err === null).reverse().slice(0, SOL_BUY_TXS);
-      for (const { signature } of oldest) {
-        const tx = await ask("getTransaction", [signature, { encoding: "json", commitment: "finalized", maxSupportedTransactionVersion: 0 }]);
+      const landed = sigs.filter((x) => x.err === null).reverse();
+      const oldest = landed.slice(0, SOL_BUY_TXS);
+      const txOf = (signature: string) => ask("getTransaction", [signature, { encoding: "json", commitment: "finalized", maxSupportedTransactionVersion: 0 }]);
+      for (const [at, { signature }] of oldest.entries()) {
+        const tx = await txOf(signature);
         // a signature listed whose transaction the route no longer returns: W's history is past it
         if (tx === null) return done(null);
         const buy = solanaBuyIn(tx, w, pool);
-        if (buy !== null) return done(buy);
+        if (buy !== null) {
+          // W's trades: its later transactions, oldest first, to its sale in full (see above)
+          const txs = [{ signature, tx }];
+          let soldOut = false;
+          for (const later of landed.slice(at + 1, at + 1 + SOL_TRADE_TXS)) {
+            const t = await txOf(later.signature);
+            if (t === null) break;
+            txs.push({ signature: later.signature, tx: t });
+            if ((soldOut = solanaSoldOutIn(t, w, buy.mint))) break;
+          }
+          return done({ ...buy, txs, soldOut });
+        }
         // the pool's plain release naming W: W's note is spent with no buy, it has none for good; a tag 3 whose buy was
         // not read: no answer
         if (releaseIn(tx, w, pool)) return done(solanaReleaseIn(tx, w, pool) ? "none" : null);

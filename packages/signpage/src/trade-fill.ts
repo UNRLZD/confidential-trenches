@@ -39,6 +39,8 @@
 //   only when its publish time is within BLOCK_PRICE_S at or before the sale's block time and its confidence within the
 //   feed's maxConfBps; else no USD, never a guess. On 32CSJ1...Kwn: $82.98770947 published 7 s before its block. usd_from stays on the device's record (the
 //   state sends only src/state.ts's detail keys), so the two sources are never confused.
+// - amount_usd on a buy whose record has none (a buy a restore rebuilt from W's history, src/sol-buy-records.ts): its
+//   SOL in at its own block's price, by the same feed rule as an older sale's (usd_from "block").
 // - Pool ops only: a buy with no `sha` (positions.ts recordPoolBuy; a trade-box buy carries its quote's sha, trade.ts)
 //   and a sale with pool "sol". At most FILL_OPS_MAX ops a run, newest first, so a backlog cannot fan out at every trade
 //   end. A sale younger than SALE_USD_MS with neither a fresh price nor its block's is left for the next run.
@@ -240,7 +242,7 @@ export type FillDeps = {
   now(): number;
 };
 
-type OpRecord = { kind?: unknown; stage?: unknown; chain?: unknown; token?: unknown; txs?: unknown; created_ms?: unknown; pool_amount?: unknown; sha?: unknown; pool?: unknown; legs?: unknown };
+type OpRecord = { kind?: unknown; stage?: unknown; chain?: unknown; token?: unknown; txs?: unknown; created_ms?: unknown; pool_amount?: unknown; sha?: unknown; pool?: unknown; legs?: unknown; amount_usd?: unknown };
 
 /** A pool buy or sale on Solana that filled, with its signatures, and no pool_amount yet (see the top). */
 function wants(r: OpRecord | undefined): r is OpRecord & { kind: "buy" | "sell"; token: string; txs: { hash: string }[] } {
@@ -291,6 +293,13 @@ export async function fillTradeOps(d: FillDeps): Promise<boolean> {
     }
     if (!whole || decimals === null) continue;
     const fill: Record<string, string> = { units: poolUnits(units, decimals), pool_amount: poolUnits(lamports, 9) };
+    // a buy with no USD (a device restored from the words rebuilt it from W's history, src/sol-buy-records.ts; or its
+    // request had no price): its SOL in at its own block's price, as an old sale's; none, no USD
+    if (rec.kind === "buy" && rec.amount_usd === undefined) {
+      const l = legs[0]!;
+      const bp = l.blockS === null ? null : await blockPrice(d, l.sig, l.blockS);
+      if (bp !== null && l.lamports > 0n) [fill.amount_usd, fill.usd_from] = [poolUnits(l.lamports * bp.price * 10n ** BigInt(18 + bp.expo), 9 + 18), "block"];
+    }
     if (rec.kind === "sell") {
       const p = d.price();
       const now = d.now();
