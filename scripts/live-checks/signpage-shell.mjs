@@ -12,8 +12,10 @@
 //     opens (as a sheet over the app, the frame kept in the page under it since card signing-views-open-over-the-app,
 //     whose own checks pin that; before it, the frame left the document); Create passkey lands on the backup screen;
 //     Saved signs in, the layer closes and the frame answers signed in, way passkey, code_saved true (the kept frame, or
-//     before that card a new one); a sign out in another tab (the store's "signout"
-//     on its channel, then the database deleted) gives the frame exactly signed out;
+//     before that card a new one); this tab's own Sign out (the app's signout, answered pending, and the sign-out
+//     page's button) reloads the top window, whose new frame posts ready and answers exactly signed out within RELOAD_MS
+//     (card sign-out-stops-the-pages-reads; a run recorded before that card signed out in another tab instead, the old
+//     frame getting exactly signed out);
 //   - signin.open {way: words} the same; then the test words (the a8 vector's entropy, all zero: BIP-39's first
 //     published vector) are typed with trusted keys while the APP_HOST page calls focus() on its own input every 20 ms:
 //     the field is clicked and typed into as soon as it shows (trusted keys on Chromium and Firefox; on WebKit each
@@ -28,7 +30,12 @@
 //   - a database from before the status record (the status deleted raw): the frame answers signed in with no way and
 //     code_saved false; the shell loads again, and its backfill (main.ts, syncStatus) brings way words and code_saved
 //     true to the new frame, in its first answer or a state event within EVENT_MS of it; a sign out in another tab
-//     then gives exactly signed out, and a state asked again answers signed out;
+//     (the store's "signout" on its channel and the database's delete, in one task) then reloads the top window the
+//     same way (a run recorded before that card: the old frame gets exactly signed out); Chromium only, a second
+//     passkey account lands after it and signs out by this tab's button, and from the words' sign out's new document on
+//     no request names an address or id the words' account's requests to the pinned hosts carried (none that the first
+//     account's requests or the page's own code carry; a live run must find at least one); a state asked again
+//     answers signed out;
 //   - every message the frame gets is ready, an answer or a state event, each state exact;
 //   - the frame cannot be sent to another origin: set to https://example.com, no request for it is made (CSP frame-src);
 //   - no request goes to any host but SIGN_HOST and APP_HOST, but a pinned pool's host while signed in (below).
@@ -55,7 +62,7 @@
 // to the network and are recorded with what each asks; signed out none may leave the two hosts, signed in none may go
 // to a host that is not pinned or that the page's served connect-src does not name. On the harness they are refused.
 import "../net-window.mjs";
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -91,6 +98,8 @@ export const START = "/token/solana/So11111111111111111111111111111111111111112?
 export const ENGINES = ["webkit", "chromium", "firefox"];
 export const WIDTHS = { phone: { width: 390, height: 844, dpr: 2 }, desktop: { width: 1440, height: 900, dpr: 1 } };
 export const EVENT_MS = 3_000;
+/** From a sign out's tap or post to the new frame's ready after the top window's reload. */
+export const RELOAD_MS = 10_000;
 /** The frame's sandbox, exactly (packages/signpage/src/shell.ts FRAME_SANDBOX). */
 const SANDBOX = "allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox";
 /** Where the app says it is (nav), and a nav that names another host. */
@@ -117,6 +126,27 @@ const show = (s) =>
 const isEvent = (d) => isObj(d) && d.v === 1 && d.type === "state" && !Object.hasOwn(d, "id") && sameKeys(d, ["v", "type", "state"]);
 const isAnswer = (d) => isObj(d) && d.v === 1 && typeof d.id === "string" && d.ok === true && sameKeys(d, ["v", "id", "ok", "result"]);
 const isRefusal = (d) => isObj(d) && d.v === 1 && typeof d.id === "string" && d.ok === false && sameKeys(d, ["v", "id", "ok", "error"]);
+
+/** The addresses and ids a recorded request carries in its path, query or calls: hex of 40 digits or more (an EVM
+ *  address, a 32-byte id, a call's data), lowercased, and base58 of 32 to 44 (a Solana address). */
+export function namesIn(x) {
+  const text = JSON.stringify([x?.path ?? "", x?.query ?? "", x?.rpc ?? null]);
+  return (text.match(/0x[0-9a-fA-F]{40,}|[0-9a-fA-F]{64,}|[1-9A-HJ-NP-Za-km-z]{32,44}/g) ?? []).map((n) => (/^(0x)?[0-9a-fA-F]+$/.test(n) ? n.toLowerCase().replace(/^0x/, "") : n));
+}
+
+/** Every name the page's own code holds (the pools' addresses, the mints, the feeds): public, never an account's. */
+const CODE_NAMES = (() => {
+  const out = new Set();
+  const walk = (dir) => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) walk(p);
+      else if (/\.(ts|json)$/.test(e.name)) for (const n of namesIn({ path: readFileSync(p, "utf8") })) out.add(n);
+    }
+  };
+  for (const pkg of ["kit", "wallet", "signpage"]) walk(path.join(REPO, "packages", pkg, "src"));
+  return out;
+})();
 
 /** The first state event the frame got at or after `t` (within the run's clock) that `want` accepts, with its delay. */
 function eventAfter(rec, t, want) {
@@ -169,7 +199,15 @@ export function judge(rec) {
   // one ready per load of the frame: the open, each close of the layer that made a new frame (Saved's close keeps the
   // frame under the sheet since card signing-views-open-over-the-app: no load there), the reload and the backfill.
   // The stranger step comes after: WebKit fires a load on the frame for the navigation its CSP refuses.
-  const loads = [-Infinity, ...(rec.engine === "chromium" && st.saved?.kept !== true ? [st.saved?.t] : []), st.words?.t, st.reload?.t, st.backfill?.t, st.stranger?.t ?? Infinity].map((t) => t ?? Infinity);
+  // A run recorded since card sign-out-stops-the-pages-reads names how its words' sign out was made (`by`): there every
+  // landed sign out reloads the top window, so each is a frame load too, and a second passkey account follows on
+  // Chromium. An older record is read as it was recorded.
+  const reloads = isObj(st.wordsOut) && Object.hasOwn(st.wordsOut, "by");
+  const chrome = rec.engine === "chromium";
+  const loads = (reloads
+    ? [-Infinity, ...(chrome ? [...(st.saved?.kept !== true ? [st.saved?.t] : []), st.passkeyOut?.t] : []), st.words?.t, st.reload?.t, st.backfill?.t, st.wordsOut?.t,
+      ...(chrome ? [...(st.saved2?.kept !== true ? [st.saved2?.t] : []), st.passkeyOut2?.t] : []), st.stranger?.t ?? Infinity]
+    : [-Infinity, ...(chrome && st.saved?.kept !== true ? [st.saved?.t] : []), st.words?.t, st.reload?.t, st.backfill?.t, st.stranger?.t ?? Infinity]).map((t) => t ?? Infinity);
   const perLoad = loads.slice(0, -1).map((t, i) => msgs.filter((m) => isObj(m.data) && m.data.type === "ready" && m.t >= t && m.t < loads[i + 1]).length);
   say(perLoad.every((n) => n === 1), `the frame gets one ready per frame load before the stranger step (${perLoad.join(", ")})`);
   say(signedOut(result(st.first?.id)), `the first state answer is exactly the signed-out state (${show(result(st.first?.id))})`);
@@ -179,7 +217,16 @@ export function judge(rec) {
   const opened = (s, label, frames) =>
     say(pending(s?.openId) && s?.layer?.layerHidden === false && frames.includes(s?.layer?.frames),
       `signin.open ${label}: answered pending, the layer opens${frames.includes(1) ? "" : " and the frame leaves the document"} (${answer(s?.openId) ? JSON.stringify(answer(s.openId).data.ok ? result(s.openId) : answer(s.openId).data.error) : "no answer"}, layer ${s?.layer?.layerHidden === false ? "open" : "closed"}, ${s?.layer?.frames ?? "?"} frames)`);
-  const signedOutEvent = (s, label) => {
+  const signedOutEvent = (s, label, want) => {
+    if (reloads) {
+      // the top window is a new document begun after the sign out, and its new frame posts ready and answers exactly
+      // signed out: the app comes back signed out, with no frame left that does not answer
+      const r = typeof s?.doc === "number" ? msgs.find((m) => m.t >= s.doc && isObj(m.data) && m.data.type === "ready") : null;
+      const by = s?.by === want && (want === "channel" || pending(s?.openId));
+      say(by && s?.top?.state === "signed-out" && !!r && r.t - s.t <= RELOAD_MS && signedOut(result(s?.id)),
+        `${label}: the top window reloads and its new frame answers exactly signed out (${s?.by === "button" ? `signout ${pending(s?.openId) ? "answered pending" : "not answered pending"}, ` : ""}${s?.top?.state ?? "none"}, ${typeof s?.doc === "number" ? `a new document ${s.doc - s.t} ms after it` : "no new document"}, ${r ? `the new frame's ready ${r.t - s.t} ms after it` : "no new frame's ready"}, ${show(result(s?.id))})`);
+      return;
+    }
     const e = eventAfter(rec, s?.t, (x) => x.signed_in === false);
     say(s?.top?.state === "signed-out" && !!e && e.ms <= EVENT_MS && signedOut(e.state),
       `${label}: the frame gets exactly the signed-out state (${s?.top?.state ?? "none"}, ${show(e?.state)}${e ? `, ${e.ms} ms` : ""})`);
@@ -190,7 +237,8 @@ export function judge(rec) {
     const s = st.saved;
     say(s?.top?.state === "signed-in" && s?.top?.layerHidden === true && full("passkey")(result(s?.id)),
       `Saved: the layer closes and the ${s?.kept === true ? "kept" : "new"} frame answers signed in, way passkey, code_saved true (${s?.top?.state ?? "none"}, layer ${s?.top?.layerHidden ? "closed" : "open"}, ${show(result(s?.id))})`);
-    signedOutEvent(st.passkeyOut, "Sign out in another tab");
+    if (reloads) signedOutEvent(st.passkeyOut, "Sign out in this tab, by its own Sign out button", "button");
+    else signedOutEvent(st.passkeyOut, "Sign out in another tab");
   }
   const w = st.words;
   opened(st.wordsIn, "words", [0]);
@@ -214,7 +262,16 @@ export function judge(rec) {
   const be = b && !bOk ? eventAfter(rec, b.t, full("words")) : null;
   say(st.backfill?.top?.state === "signed-in" && !!b && (bOk || (!!be && be.ms <= EVENT_MS)),
     `the shell's reload backfills the status: the new frame gets signed in, way words, code_saved true (${st.backfill?.top?.state ?? "none"}, ${b ? (bOk ? `its first answer ${show(b.data.result)}` : `answer ${show(b.data.result)}, then ${be ? `${show(be.state)} ${be.ms} ms later` : "no event"}`) : "no answer"})`);
-  signedOutEvent(st.wordsOut, "Sign out in another tab");
+  signedOutEvent(st.wordsOut, "Sign out in another tab", "channel");
+  if (reloads) {
+    if (chrome) {
+      opened(st.passkeyIn2, "passkey, a second account", [0, 1]);
+      const s2 = st.saved2;
+      say(st.created2?.top?.state === "backup" && s2?.top?.state === "signed-in" && full("passkey")(result(s2?.id)),
+        `a second passkey account lands after it: Create passkey, then Saved, and the frame answers signed in, way passkey, code_saved true (${st.created2?.top?.state ?? "none"}, ${s2?.top?.state ?? "none"}, ${show(result(s2?.id))})`);
+      signedOutEvent(st.passkeyOut2, "the second passkey account's Sign out in this tab", "button");
+    }
+  }
   say(signedOut(result(st.last?.id)), `a state asked again answers signed out (${show(result(st.last?.id))})`);
 
   // a state is an event's, or an answer's whose result says signed_in (nav, reload and signin.open answer others)
@@ -229,7 +286,11 @@ export function judge(rec) {
   // Rent and the pool's reads, the restore's): from Create passkey to its sign out (Chromium), and from the words'
   // Continue to their sign out; a request at no time of the run counts as signed out
   const reqs = rec.requests ?? [];
-  const held = [...(rec.engine === "chromium" ? [[st.created?.t, st.passkeyOut?.t]] : []), [st.words?.t, st.wordsOut?.t]];
+  // this tab's own sign out holds the seed until the store's lock is taken (a run holding it finishes first), so its
+  // window ends where the top window's new document begins
+  const held = reloads
+    ? [...(chrome ? [[st.created?.t, st.passkeyOut?.doc ?? st.passkeyOut?.t]] : []), [st.words?.t, st.wordsOut?.t], ...(chrome ? [[st.created2?.t, st.passkeyOut2?.doc ?? st.passkeyOut2?.t]] : [])]
+    : [...(chrome ? [[st.created?.t, st.passkeyOut?.t]] : []), [st.words?.t, st.wordsOut?.t]];
   const signedIn = (x) => typeof x.t === "number" && held.some(([a, b]) => typeof a === "number" && typeof b === "number" && x.t >= a && x.t < b);
   const pinned = (x) => PINNED_HOSTS.includes(x.host);
   const stray = reqs.filter((x) => x.host !== SIGN_HOST && x.host !== APP_HOST && !pinned(x));
@@ -240,6 +301,22 @@ export function judge(rec) {
   const ins = reqs.filter((x) => pinned(x) && signedIn(x));
   say(out.length === 0 && unlisted.length === 0,
     `signed out, no request goes past SIGN_HOST and APP_HOST; signed in, only to a pinned pool's host the page's own connect-src names (${out.length} signed out${out.length ? `: ${out.slice(0, 4).map((x) => `${x.host}${x.path}`).join(", ")}` : ""}; ${ins.length} signed in${ins.length ? ` to ${[...new Set(ins.map((x) => x.host))].join(", ")}` : ""}${unlisted.length ? `; not in its connect-src: ${unlisted.join(", ")}` : ""})`);
+  if (reloads && chrome) {
+    // the words' account's names: each address or id its signed-in requests to the pinned hosts carry that no request
+    // before it carried (the first passkey account's, the page's constants). From its sign out's new document on, no
+    // request of any host may carry one: no read of that account outlives its sign out into the next one's.
+    const words0 = st.words?.t;
+    const words1 = st.wordsOut?.doc;
+    const before = new Set(reqs.filter((x) => pinned(x) && x.t < words0).flatMap(namesIn));
+    const own = new Set(reqs.filter((x) => pinned(x) && x.t >= words0 && x.t < words1).flatMap(namesIn).filter((n) => !before.has(n) && !CODE_NAMES.has(n)));
+    const later = typeof words1 === "number" ? reqs.filter((x) => typeof x.t === "number" && x.t >= words1) : [];
+    const named = later.filter((x) => namesIn(x).some((n) => own.has(n)));
+    // a live run must find some (the restore's reads name the account's ids); on the harness those reads are refused
+    // before the walk derives any, so a harness run may find none
+    const live = String(rec.source ?? "").startsWith("live ");
+    say(typeof words1 === "number" && (own.size > 0 || !live) && named.length === 0,
+      `after the words' account signs out and a second account lands, no request names the words' account (${own.size} of its addresses and ids; ${later.length} requests after its sign out, ${named.length} naming one${named.length ? `: ${named.slice(0, 3).map((x) => `${x.host} ${x.rpc?.map((c) => c.method).join("+") ?? x.path}`).join(", ")}` : ""})`);
+  }
   return { ok: lines.length > 0 && lines.every((l) => l.startsWith("ok ")), lines };
 }
 
@@ -358,7 +435,8 @@ async function playwrightDriver(engine, serve, live, size) {
       serve(u.host, u.pathname + u.search, r.request().method(), r.request().postData());
       return r.continue();
     }
-    const a = serve(u.host, u.pathname + u.search, r.request().method());
+    // what each asks is recorded on the harness too, though only SIGN_HOST and APP_HOST are answered there
+    const a = serve(u.host, u.pathname + u.search, r.request().method(), r.request().postData());
     if (!a) return r.abort("blockedbyclient");
     return r.fulfill({ status: a.status, headers: a.headers, body: a.body });
   });
@@ -480,13 +558,33 @@ export async function collect({ engine, site, live, width = "desktop" }) {
   // another tab signs out (the store's own sign out: "signout" on its channel, then the database deleted)
   // its time is taken once the post is acknowledged (the evaluate that posts it has returned), never before it: a
   // request the page started before it heard the sign out is a signed-in one (card sign-out-stops-the-pages-reads, P3)
-  const signOutElsewhere = async () => {
-    await d.evaluate(`const c = new BroadcastChannel("ct-wallet"); c.postMessage({ kind: "signout" }); c.close();`);
-    const t = Date.now();
-    await d.evaluate(`await Promise.race([new Promise((ok, no) => { const r = indexedDB.deleteDatabase("ct-wallet"); r.onsuccess = () => ok(); r.onerror = () => no(r.error); }), new Promise((ok) => setTimeout(ok, 3000))]);`);
-    const s = { t, top: await top("signed-in") };
+  // a landed sign out reloads the top window (card sign-out-stops-the-pages-reads): the new document's start, once the
+  // top window holds one begun after `t` (null if none comes), then the new frame's ready and its first answer
+  const reloadedAfter = async (s, t0) => {
+    s.doc = await until(async () => { const o = await d.evaluate("return performance.timeOrigin;"); return o > t0 ? Math.round(o) : null; }, RELOAD_MS);
+    if (s.doc) await readyAfter(s.doc);
+    s.top = await top("signed-in");
+    s.id = (await ask()).id;
     await sleep(EVENT_MS);
     return s;
+  };
+  const signOutElsewhere = async () => {
+    // the post and the delete in one task, as the store's own sign out has them (packages/wallet/src/store/index.ts),
+    // so the delete is asked before the page can hear the post and reload; the page's reload ends the second evaluate
+    const t0 = Date.now();
+    await d.evaluate(`const c = new BroadcastChannel("ct-wallet"); c.postMessage({ kind: "signout" }); c.close(); window.__deleted = new Promise((ok, no) => { const r = indexedDB.deleteDatabase("ct-wallet"); r.onsuccess = () => ok(); r.onerror = () => no(r.error); });`);
+    const t = Date.now();
+    await d.evaluate(`await Promise.race([window.__deleted, new Promise((ok) => setTimeout(ok, 3000))]);`).catch((e) => {
+      if (!/destroyed|navigat|context|detached/i.test(String(e?.message ?? e))) throw e;
+    });
+    return reloadedAfter({ t, by: "channel" }, t0);
+  };
+  // this tab's own Sign out: the app asks for it, the shell draws the sign-out page, and its button is tapped
+  const signOutHere = async () => {
+    const openId = await send("signout", { return_key: "settings" });
+    await until(() => d.evaluate(`return !!document.querySelector('[data-action="signout"]');`), 3_000);
+    const t = await press("signout");
+    return reloadedAfter({ t, by: "button", openId }, t);
   };
   try {
     await d.goto(`${SIGN}${START}`);
@@ -526,7 +624,9 @@ export async function collect({ engine, site, live, width = "desktop" }) {
       rec.steps.passkeyIn = await signinOpen("passkey");
       rec.steps.created = await step("create", "signed-out");
       rec.steps.saved = await closedFrameAsks(await step("saved", "backup"));
-      rec.steps.passkeyOut = await signOutElsewhere();
+      // the passkey account signs out by this tab's own Sign out button (card sign-out-stops-the-pages-reads, P3); the
+      // words' account cannot here: its restore's sheet stays open on the harness, whose pinned hosts answer nothing
+      rec.steps.passkeyOut = await signOutHere();
     }
     // the words, typed by trusted keys while the app takes the focus back every 20 ms
     await d.evaluateFrame(APP_HOST, "window.__steal(); return true;");
@@ -570,6 +670,13 @@ export async function collect({ engine, site, live, width = "desktop" }) {
     rec.steps.backfill = await newFrameAsks({ t: bt });
     await sleep(EVENT_MS);
     rec.steps.wordsOut = await signOutElsewhere();
+    if (engine === "chromium" && d.page) {
+      // a second passkey account lands after the words' sign out: none of its requests may name the words' account
+      rec.steps.passkeyIn2 = await signinOpen("passkey");
+      rec.steps.created2 = await step("create", "signed-out");
+      rec.steps.saved2 = await closedFrameAsks(await step("saved", "backup"));
+      rec.steps.passkeyOut2 = await signOutHere();
+    }
     rec.steps.last = await ask();
     // the frame sent elsewhere: frame-src must refuse it before any request
     const t = Date.now();
