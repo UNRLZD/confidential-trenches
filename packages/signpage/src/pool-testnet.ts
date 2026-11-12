@@ -64,7 +64,7 @@ import { POOL_TESTNET } from "../../wallet/src/pool/network.ts";
 import { askWhileBusy, type BusyOpts } from "../../wallet/src/busy.ts";
 import { lateBuyEnd, POOL_SEND_BUSY_WAIT_MS, PoolSendBusy, poolBuyKind, type PoolBuyHost } from "./pool-buy.ts";
 import { boughtSincePass, keptHeldOf, type StoreWs } from "./pool-sell-dry.ts";
-import { BUY_MINTS_KEY, buyMints, keptSells, owedRentBacks, poolSellKind, READS_NONE, resumeRentBacks, settleDeadSellOps, settlePoolSells, settleSellOps, type PoolSellKindHost } from "./pool-sell.ts";
+import { BUY_MINTS_KEY, buyMints, keptSells, owedRentBacks, poolSellKind, READS_NONE, resumeRentBacks, settleDeadSellOps, settlePoolSells, settleSellOps, type OwedRentBack, type PoolSellKindHost } from "./pool-sell.ts";
 import { derivedBuyWallets, evmHelperKeyedRpc, evmHelperRpc, solanaHelperHoldings, solanaHoldingsAt, spentNotesOf, wantedBuyWallets, type BuyWallet, type HoldingsReader, type ListedBuyWallet } from "../../wallet/src/pool/buy-wallets.ts";
 import { keptListed, keptPositions, POSITION_COSTS_KEY, POSITIONS_KEPT_KEY, POSITIONS_SOLD_KEY, POSITIONS_SOLD_TX_KEY, POSITIONS_UNLANDED_KEY, positionsCache, positionsPass, recordBoughtOut, solanaAssetHeld, recordPoolBuy, routeInto, type BuyRecordStore, type FoundWallet, type PoolBuyFacts, type Position, type PositionCosts } from "./positions.ts";
 import { evmStoredHold } from "../../wallet/src/pool/evm-hold-store.ts";
@@ -652,6 +652,8 @@ export type TestnetPool = {
   /** The positions as held (positions.ts get()): the last pass, or the kept one read before it; null before either or
    *  signed out. Starts nothing: no pass, no seed read, no store write (the sell box's preview, src/pool-sell-dry.ts). */
   positionsNow(): readonly Position[] | null;
+  /** The Ws whose rent back is owed, as their records stand (src/positions.ts returningWallets). */
+  returning(): Promise<OwedRentBack[]>;
   /** The Ws bought since the last whole pass that name `token` (pool-sell-dry.ts boughtSincePass: W's buy mint, the kept
    *  pass, W's buy record, the full sells noted) and each W's amount as the kept pass holds it (keptHeldOf: the order a
    *  sale takes them in), from the store alone: no read, no seed; the store as held (page.held),
@@ -2632,6 +2634,9 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       });
       return sol === null && rows.length === 0 ? null : [...(sol ?? []), ...rows];
     },
+    // the Ws whose rent back is owed, as their records stand (src/positions.ts returningWallets: those a pass read listed
+    // returning); a store read, never a chain read
+    returning: () => owedRentBacks(page.store).list(),
     // a restore wrote buy records of `chain` (src/pool-restore.ts, restoreEvmHoldings): its positions read again
     evmHoldingsRestored: (chain: "base" | "robinhood") => void evmPositions(chain)?.refresh(),
     positionsNow: () => positions.get(),

@@ -82,7 +82,7 @@ import { readSolanaRent } from "../../kit/src/trade/solana/pool-buy.ts";
 import { openNoteStore, readNotes, type NoteRecord, type NoteStore } from "../../wallet/src/notes/store.ts";
 import { frameState } from "./state.ts";
 import { withVaultBalance } from "./vault-balance.ts";
-import { withPositions } from "./positions.ts";
+import { returningWallets, withPositions, withReturning } from "./positions.ts";
 import { mountShell, type Shell } from "./shell.ts";
 import { drawBackdrop, drawSealedGround, groundLogo } from "./backdrop.ts";
 import { GROUND_LOGO_SVG } from "./ground-logo.ts";
@@ -379,7 +379,10 @@ else {
         // and NEAR's, from the buys' own records (src/near-buy.ts nearPositions): a record read, never a chain read
         const nearPage = s.signed_in ? nearBuyPage() : null;
         const near = nearPage ? await nearPositions(nearPage).catch(() => []) : [];
-        return withPositions(pooled, sol === null && near.length === 0 ? null : [...(sol ?? []), ...near]);
+        const positioned = withPositions(pooled, sol === null && near.length === 0 ? null : [...(sol ?? []), ...near]);
+        // the Ws whose money waits for its rent back, on their way (src/positions.ts returningWallets): a store read
+        const owed = s.signed_in && testnet ? await testnet.returning().catch(() => []) : [];
+        return withReturning(positioned, returningWallets(owed, prices.get("solana")));
       }),
     // a store change, a new price read (or its next one due), the Rent read landing and a proof made
     watch: (fn) => {

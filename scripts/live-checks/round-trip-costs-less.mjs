@@ -18,7 +18,10 @@
 //     proven on the public seat alone, once, against the restore's rebuilt record or its no-buy mark; an unproven W tried
 //     again on each load to its third pass, then held as its own state; the positions' passes held only while a W is
 //     read; the page reads the restore's no-buy mark;
-//   - the sell's rule: a sale paying over 100,000 lamports of priority refused, and a full sell's fee over 105,000.
+//   - the sell's rule: a sale paying over 100,000 lamports of priority refused, and a sale's fee over 105,000, full or
+//     partial;
+//   - a leftover W's rent back spaced: a gap of 10 to 60 minutes from each rent-back send, one sending pass a load, a W
+//     waiting so listed on its way (state.wallets RETURNING) at its last read.
 // It does not prove those lines run: that is the signing page's tests at the released commit (test/pool-sell.test.ts,
 // test/pool-testnet.test.ts, test/rules-pool.test.ts), and that the served files are that commit's build is
 // signpage-release's. The money it saves is the card's run record (round-trip-costs-less.md), written with the real run.
@@ -85,7 +88,7 @@ export const MARKS = Object.freeze({
   ),
   "the Ws passed in an order drawn from the device's random source, a second and up to a second more apart": tied(
     // the list's own order drawn, then each W after the first a gap and a draw of up to as much again apart
-    re(R`for\(let (?<i>${I})=(?<m>${I})\.length-1;\k<i>>0;\k<i>--\)\{let (?<k>${I})=(?<rb>${I})\(\k<i>\+1\);\[\k<m>\[\k<i>\],\k<m>\[\k<k>\]\]=\[\k<m>\[\k<k>\],\k<m>\[\k<i>\]\]\}[^]{0,800}?for\(let\[(?<n>${I}),${I}\]of \k<m>\.entries\(\)\)if\(\k<n>>0&&await ${I}\((?<gap>${I})\+\k<rb>\(\k<gap>\)\)`),
+    re(R`for\(let (?<i>${I})=(?<m>${I})\.length-1;\k<i>>0;\k<i>--\)\{let (?<k>${I})=(?<rb>${I})\(\k<i>\+1\);\[\k<m>\[\k<i>\],\k<m>\[\k<k>\]\]=\[\k<m>\[\k<k>\],\k<m>\[\k<i>\]\]\}[^]{0,800}?for\(let\[(?<n>${I}),${I}\]of \k<m>\.entries\(\)\)(?:if\(|\{)\k<n>>0&&await ${I}\((?<gap>${I})\+\k<rb>\(\k<gap>\)\)`),
     (g) => [
       R`function ${esc(g.rb)}\((${I})\)\{if\(\1<=1\)return 0;let (${I})=Math\.floor\(4294967296/\1\)\*\1,(${I})=new Uint32Array\(1\);for\(;;\)if\(globalThis\.crypto\.getRandomValues\(\3\),\3\[0\]<\2\)return \3\[0\]%\1\}`,
       R`[,; ]${esc(g.gap)}=1e3[,;]`,
@@ -107,11 +110,27 @@ export const MARKS = Object.freeze({
     re(R`buyNone:async (?<a>${I})=>Object\.hasOwn\(${I}\(await\(await ${I}\.store\(\)\)\.get\(` + "`meta`" + R`,(?<k>${I})\)\),\k<a>\)`),
     (g) => [R`[,; ]${esc(g.k)}=` + "`owed/buy-sol-none`" + R`[,;]`],
   ),
-  "the sell's rule refuses a sale that pays more than 100,000 lamports of priority (a price with no limit at 1,400,000 units, rounded up as the runtime charges it) and a full sell's fee over 105,000": tied(
+  "the sell's rule refuses a sale that pays more than 100,000 lamports of priority (a price with no limit at 1,400,000 units, rounded up as the runtime charges it) and a sale's fee over 105,000, full or partial": tied(
     re(R`let (?<n>${I})=(?<hd>${I})\((?<d>${I})\.ixs\);if\((?<po>${I})\(\k<d>\.ixs,\k<n>\)>100000n\)return (?<x>${I})\(` + "`priority`" + R`\);`),
     (g) => [
       R`function ${esc(g.po)}\((${I}),(${I})\)\{let (${I})=BigInt\((${I})\),(${I})=0n;for\(let (${I}) of \1\.slice\(0,\2\)\)\6\.data\[0\]===2\?\3=BigInt\(new DataView\(\6\.data\.buffer,\6\.data\.byteOffset\+1,4\)\.getUint32\(0,!0\)\):\5=${I}\(\6\.data,1\);return\(\3\*\5\+999999n\)/1000000n\}`,
-      R`typeof (${I})\.next!=` + "`boolean`" + R`\|\|\1\.fee>105000n\|\|`,
+      R`if\((${I})!==void 0&&\(typeof \1\.fee!=` + "`bigint`" + R`\|\|\1\.fee<0n\|\|\1\.fee>105000n\)\)return (${I})\(` + "`reserve`" + R`\);if\(\1!==void 0&&\1\.full===!0\)`,
+    ],
+  ),
+  "a leftover W's rent back is spaced: each rent-back send from a W starts a gap drawn from 10 to 60 minutes, kept in the store; a leftover pass sends nothing while it runs, nor after this load's one sending pass (its teardown and its sweep held before their sends and the note's write); a W waiting so is listed on its way, RETURNING at its last read at the pool's price, none once its sweep is sent": tied(
+    re(R`(?<ms>${I})\+\+,await Promise\.resolve\((?<h>${I})\.owed\?\.space\?\.\(\{at:(?<c>${I})\(\),gap:(?<mn>${I})\+(?<rb>${I})\(3e6\+1\)\}\)\)\.catch\(\(\)=>\{\}\)`),
+    (g) => [
+      R`[,; ]${esc(g.mn)}=6e5[,;]`,
+      R`function ${esc(g.rb)}\((${I})\)\{if\(\1<=1\)return 0;`,
+      R`=` + "`owed/rentback-sol-space`",
+      R`let (${I})=\(\)=>(${I})\|\|!(${I})\|\|(${I})!==void 0&&Number\((${I})\.now\?\.\(\)\?\?BigInt\(Date\.now\(\)\)\)<\4\.at\+\4\.gap;`,
+      R`${esc(g.ms)}>(${I})&&\((${I})=!0\)`,
+      R`if\((${I})\.quiet===!0&&(${I})\.ok\.signed\.length>0\)throw (${I});for\(let (${I}) of \2\.ok\.signed\)`,
+      R`if\((${I})\.quiet===!0\)throw (${I});let (${I})=(${I})\.planned\?\?\(await \1\.store\.add\(`,
+      R`if\(t\.read\?\.\((${I})\),\1===0n\)|(${I})\.read\?\.\((${I})\),\3===0n\)`,
+      R`(${I})=(${I})===` + "`sent`" + R`\?void 0:(${I})\.lamports===void 0\?(${I}):\3\.lamports\.toString\(\)`,
+      R`if\(typeof (${I})\.lamports!=` + "`string`" + R`\|\|!/\^\[1-9\]\\d\{0,19\}\$/\.test\(\1\.lamports\)\)continue;let (${I})=(${I})\(BigInt\(\1\.lamports\),(${I}),(${I})\);\2!==null&&(${I})\.push\(\{chain:` + "`solana`" + R`,address:\1\.address,role:` + "`fresh`" + R`,size:\2,state:` + "`RETURNING`" + R`\}\)`,
+      R`(${I})\((${I})\.signed_in&&(${I})\?await \3\.returning\(\)\.catch\(\(\)=>\[\]\):\[\],(${I})\.get\(` + "`solana`" + R`\)\)`,
     ],
   ),
 });

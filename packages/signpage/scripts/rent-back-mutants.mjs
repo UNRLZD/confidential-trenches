@@ -54,7 +54,7 @@ export const M = [
   ["D8b a held mint with no sell read taken as sold", SELL, T, 'sells.get(t.mint) ?? "no"', 'sells.get(t.mint) ?? "yes"'],
   ["D9 the burn list dropped", SELL, T, "const burn = holding.map((t) => t.ata);", "const burn: string[] = [];"],
   ["D10 the sell not recorded", SELL, T, "      owedRec.sell = { ...prior?.sell, [token]: { tx: base64.encode(signed), last: bhv.lastHeight } };\n", ""],
-  ["D11 a load passes no sell on", SELL, T, "mints: o.mints, wait, ...(o.sell ? { sell: o.sell } : {}) }", "mints: o.mints, wait }"],
+  ["D11 a load passes no sell on", SELL, T, "mints: o.mints, wait, quiet: quiet(), ...(o.sell ? { sell: o.sell } : {}) }", "mints: o.mints, wait, quiet: quiet() }"],
   // the review of bf467ae7's named ones: X2 (F3), Y2, Y3, Y4, Y7 (F4), its read order and commitment (F5), and the
   // armed path's burn list (F6); and a sell read's fault counted for a mint W no longer holds
   ["review X2 a burn's next close of another account", KIT, K, " && next.data[0] === 9 && next.accounts[0]?.key === h?.address;\n          if (!h || h.kind !== \"token\" || h.burn", " && next.data[0] === 9;\n          if (!h || h.kind !== \"token\" || h.burn"],
@@ -86,7 +86,7 @@ export const M = [
   ["review 6 N19-setup-fault-no-stop", SELL, T, "        await owedAfter(h, o, \"gave_up\");\n      });\n      if (!go) return true;", "        await owedAfter(h, o, \"gave_up\");\n      });\n      void go;"],
   ["review 6 N20-setup-fault-unlocked", SELL, T, "      const go = await withHolds(locks, address, true, wait, async () => {\n        const o = (await h.owed!.list()).find((r) => r.address === address);\n        if (!o) return;", "      const go = await (async (f: () => Promise<void>) => (await f(), true))(async () => {\n        const o = (await h.owed!.list()).find((r) => r.address === address);\n        if (!o) return;"],
   ["review 6 N21-sweep-refused-gives-up", SELL, T, "      if (now.k === \"refused\") return { end: \"refused\" as const, detail: now.why };", "      if (now.k === \"refused\") return { end: \"gave_up\" as const, detail: now.why };"],
-  ["review 6 N22-busy-detail-plain", SELL, T, "e === BUSY ? \"a sell took the sell lock between tries: W waits for the next load\" : faultOf(e)", "faultOf(e)"],
+  ["review 6 N22-busy-detail-plain", SELL, T, "e === BUSY ? \"a sell took the sell lock between tries: W waits for the next load\" : e === HELD", "e === HELD"],
   ["review 6 N24-sell-back-ifAvailable", SELL, T, "const back: NonNullable<typeof later.back> = (locks) => withHolds(locks, w.address, false, wait,", "const back: NonNullable<typeof later.back> = (locks) => withHolds(locks, w.address, true, wait,"],
   // delta review 7 of 08290868's plants on the claim's prefund (F1)
   ["review 7 P7 a made account read as unmade", KIT, KC, "        if (toRead === null) {", "        if (true) {"],
@@ -156,7 +156,7 @@ export const M = [
   ["a15 an unproven W never steady", SELL, T, "o.passes + 1 >= POOL_RENT_BACK_UNPROVEN_PASSES ?", "false ?"],
   ["a16 an unproven W steady at once", SELL, T, "o.passes + 1 >= POOL_RENT_BACK_UNPROVEN_PASSES ?", "true ?"],
   ["a17 an unproven W's pass not tried again", SELL, T, " || r.end === \"owed\" || unproven === \"again\";", " || r.end === \"owed\";"],
-  ["a18 the proven buy not kept on the record", SELL, T, ", ...(kept.buy === undefined ? {} : { buy: kept.buy }) });", " });"],
+  ["a18 the proven buy not kept on the record", SELL, T, ", ...(kept.buy === undefined ? {} : { buy: kept.buy }), ...(lamports", ", ...(lamports"],
   ["a19 the record's proven buy proven again", SELL, T, "  let proven = o.buy;\n", "  let proven: SolanaBuy | null | undefined = undefined;\n"],
   ["a20 a sale's rent back keeps no seen", SELL, T, "owedRec, hold, await seenOf(h, w.address, owedRec.mints))));", "owedRec, hold, undefined)));"],
   ["a21 a plain release's W read again on every load", SELL, T, "const x: RentBack = buy ? { ...given, mints: mintsOf(given.mints, [buy]), buy } : { ...given, buy: null, ...(unproven ? { unproven } : {}) };", "const x: RentBack = buy ? { ...given, mints: mintsOf(given.mints, [buy]), buy } : { ...given, buy: null, unproven: \"again\" };"],

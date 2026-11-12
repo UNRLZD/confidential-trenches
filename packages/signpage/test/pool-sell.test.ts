@@ -36,7 +36,7 @@ import { onTestClock } from "../../kit/test/test-clock.ts";
 import { solanaPoolOf } from "../../wallet/src/pool/solana.ts";
 import { BLOCKHASH, FEE_PAYER, POOL, PROGRAM, fx, providers, rent } from "../../kit/test/solana-pool-buy-fx.ts";
 import { READ_WAIT_TOTAL_MS } from "../src/read-waits.ts";
-import { POOL_RENT_BACK_GAP_MS, POOL_RENT_BACK_MS, POOL_RENT_BACK_RULES, POOL_SELL_LOCK, POOL_SELL_READS, POOL_SELL_SHARED_READ_MS, POOL_SELL_SIZE_RETRY_MS, POOL_SELL_AGREE_WAIT_MS, POOL_SELL_WAIT_MS, buyMints, leftAfter, owedRentBacks, planPoolSell, poolSellKind, resumeRentBacks, runPoolSell, settleDeadSellOps, settlePoolSells, settleSellOps, forgetSellCaps, solanaSellAfterFull, solanaSellBudget, solanaSellBudgetFits, solanaSellPrice, solanaSellReserve, SOLANA_POOL_SELL_PRICE_FLOOR, SOLANA_POOL_SELL_PRIORITY, keptSells, stageOfLegs, type KeptSell, type OwedRentBack, type PoolSellHost, type PoolSellKindHost, type RentBackTold } from "../src/pool-sell.ts";
+import { POOL_RENT_BACK_GAP_MS, POOL_RENT_BACK_MS, POOL_RENT_BACK_SPACE_MAX_MS, POOL_RENT_BACK_SPACE_MIN_MS, type RentBackSpacing, POOL_RENT_BACK_RULES, POOL_SELL_LOCK, POOL_SELL_READS, POOL_SELL_SHARED_READ_MS, POOL_SELL_SIZE_RETRY_MS, POOL_SELL_AGREE_WAIT_MS, POOL_SELL_WAIT_MS, buyMints, leftAfter, owedRentBacks, planPoolSell, poolSellKind, resumeRentBacks, runPoolSell, settleDeadSellOps, settlePoolSells, settleSellOps, forgetPageLoad, solanaSellAfterFull, solanaSellBudget, solanaSellBudgetFits, solanaSellPrice, solanaSellReserve, SOLANA_POOL_SELL_PRICE_FLOOR, SOLANA_POOL_SELL_PRIORITY, keptSells, stageOfLegs, type KeptSell, type OwedRentBack, type PoolSellHost, type PoolSellKindHost, type RentBackTold } from "../src/pool-sell.ts";
 import { opOf } from "../src/state.ts";
 import { lanedRpc } from "../src/page-rpc.ts";
 import { resetHostLanes } from "../../wallet/src/throttle.ts";
@@ -804,7 +804,7 @@ const wallet = (amount: bigint, frozen = false, mint = MINT): BuyWallet => ({
 type World = { c: ReturnType<typeof chain>; ns: NoteStore; store: WalletStore; host: PoolSellHost; seeds: Uint8Array[]; sent: string[]; owed: Map<string, OwedRentBack>; kept: Map<string, KeptSell>; told: RentBackTold[] };
 async function world(plant: Plant = {}, wallets: BuyWallet[] = [wallet(AMOUNT, false, VF[plant.venue ?? "pump"].mint)]): Promise<World> {
   // a fresh page: no W's next sale held to the cap by an earlier test's not_landed
-  forgetSellCaps();
+  forgetPageLoad();
   const c = chain(plant);
   const { store, ns } = await notes();
   const seeds: Uint8Array[] = [];
@@ -6456,6 +6456,70 @@ test("round-trip-costs-less a: 20 Ws, one holding SOL: the helper finds them in 
 // Review of 20ba2481b, P1-2: the Ws a load passes go in an order drawn from the device's random source each load, apart
 // by POOL_RENT_BACK_GAP_MS and up to as much again at random, so no fixed order or pace ties the account's Ws together.
 // With the random source at 0: the draw's own order, and the gap alone.
+// review 2 P3-e of c0dd55d02: a leftover W waits out the gap with its money on it, so its record keeps what its last pass
+// read on W, alike on both RPCs and its buy proven (src/positions.ts returningWallets lists it on its way); once its sweep
+// is sent the record keeps none (its note is the pool's then, never counted twice); a W whose buy is not proven reads none
+test("round-trip-costs-less P3-e: a W's owed record keeps the lamports its pass read, none once its sweep is sent or while its buy is unproven", async () => {
+  const floor = await soldElsewhere(500_000);
+  await resumeRentBacks(floor.w.host, fakeLocks());
+  const onW = floor.w.c.accounts.get(W.address)!.lamports;
+  assert.equal(floor.w.owed.get(W.address)?.lamports, String(onW), "under the floor: what stays on W");
+  const swept = await soldElsewhere(ENOUGH);
+  await resumeRentBacks(swept.w.host, fakeLocks());
+  assert.equal(swept.w.c.deposits.filter((d) => d.sweep).length, 1);
+  assert.equal(swept.w.owed.get(W.address)?.lamports, undefined, "its sweep sent: none");
+  const unproven = await soldElsewhere(ENOUGH, null);
+  await resumeRentBacks(unproven.w.host, fakeLocks());
+  assert.equal(unproven.w.c.deposits.filter((d) => d.sweep).length, 0);
+  assert.equal(unproven.w.owed.get(W.address)?.lamports, undefined, "no proven buy: none");
+});
+
+// review 2 P3-e of c0dd55d02: leftover Ws swept at a later load went 1 to 2 s apart, so Ws whose sales were hours apart
+// landed in the pool seconds apart and their timing grouped them as one user. One leftover pass that sends from its W
+// a load; none before the gap after the device's last rent-back send (10 to 60 minutes, drawn each send, kept in the
+// store); a pass that sends nothing (W read empty, under the floor, held) takes no slot. Run with accounts to close on
+// each W (a pass held at its teardown) and with none (held at its sweep)
+for (const bare of [false, true]) test(`round-trip-costs-less P3-e: three leftover Ws${bare ? " holding SOL alone" : ""}: one sweep in a load, none on a reload a minute later, the next only once the drawn gap has passed`, async () => {
+  const w = await world({ buy: null, held: 0n, ataLamports: TOKEN_RENT, volumes: bare ? [] : [{ program: SOLANA_PUMP_PROGRAM }], lamports: ENOUGH, others: [{ l: 8n, j: 0, held: 0n }, { l: 9n, j: 0, held: 0n }] }, [{ ...wallet(0n), holdings: null } as never, { ...walletX(0n), holdings: null } as never, { ...walletY(0n), holdings: null } as never]);
+  if (bare) for (const x of [W.address, X.address, Y.address]) w.c.accounts.delete(solanaAta(x, MINT, TOKEN_PROGRAM));
+  w.host.rpcs = withBuy(w.c.rpcs);
+  await w.host.bought!.put(W.address, { mint: MINT, program: TOKEN_PROGRAM, rebuilt: true } as never);
+  for (const [address, l] of [[W.address, "7"], [X.address, "8"], [Y.address, "9"]] as const) await w.host.owed!.put({ address, l, j: 0, mints: [{ mint: MINT, program: TOKEN_PROGRAM }], passes: 0 });
+  let now = 5_000_000n;
+  let space: RentBackSpacing | undefined;
+  const host: PoolSellHost = { ...w.host, now: () => now, owed: { ...w.host.owed!, spacing: async () => space, space: async (v) => void (space = v) } };
+  const sweeps = () => w.c.deposits.filter((d) => d.sweep).length;
+  // the Ws a load sent anything from (a close or a sweep): each sent transaction's fee payer, W itself
+  const senders = (from: number) => new Set(w.c.calls.slice(from).filter((c) => c.method === "sendTransaction").map((c) => solanaDecodeMessage(base64.decode(c.params[0] as string).subarray(65)).staticKeys[0]));
+  const load = async (): Promise<number> => {
+    forgetPageLoad();
+    const from = w.c.calls.length;
+    await resumeRentBacks(host, fakeLocks());
+    return senders(from).size;
+  };
+  assert.equal(await load(), 1, "one W sends in the first load");
+  assert.equal(sweeps(), 1, "one sweep in the first load");
+  assert.ok(space !== undefined && space.gap >= POOL_RENT_BACK_SPACE_MIN_MS && space.gap <= POOL_RENT_BACK_SPACE_MAX_MS, JSON.stringify(space));
+  const first = space!;
+  // the same load run again (the caller's backoff): no second sweep
+  await resumeRentBacks(host, fakeLocks());
+  assert.equal(sweeps(), 1, "the load's one");
+  // a reload a minute later, and one a millisecond before the gap ends: none
+  now += 60_000n;
+  assert.equal(await load(), 0, "a reload within the gap sends nothing");
+  assert.equal(sweeps(), 1, "a reload within the gap");
+  now = BigInt(first.at + first.gap - 1);
+  assert.equal(await load(), 0, "a millisecond short of the gap");
+  // the gap passed: the next W, and a fresh gap from its send
+  now = BigInt(first.at + first.gap);
+  assert.equal(await load(), 1, "the next W once the gap passed");
+  assert.equal(sweeps(), 2, "the next once the gap passed");
+  assert.equal(space!.at, first.at + first.gap);
+  now = BigInt(space!.at + space!.gap);
+  assert.equal(await load(), 1, "the third W after its own gap");
+  assert.equal(sweeps(), 3, "the third after its own gap");
+});
+
 test("round-trip-costs-less a: the Ws a load passes go in an order drawn at random, apart by the gap", async () => {
   const keyOf = (k: number) => base58.encode(Uint8Array.from({ length: 32 }, (_, i) => (i === 0 ? 201 : k + 1)));
   const ws = [keyOf(1), keyOf(2), keyOf(3)];
