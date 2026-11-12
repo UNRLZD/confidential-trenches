@@ -212,6 +212,7 @@ export const OUT = {
   "token-page-fills-after": "a browser and the helper",
   "app-deposit-mount": "a browser (its --harness run is in test-browser)",
   "deposit-to-pool": "a browser (its --harness run is in test-browser)",
+  "app-faults-seen-on-122": "a browser (its --harness run is in test-browser)",
   "terminal-harness-sign-spa": "Pages' answer to a path with no file (the index), which no build file holds",
   "near-view-rhea": "mainnet NEAR RPC reads of the Rhea pool and get_return on the two providers, never the build",
 };

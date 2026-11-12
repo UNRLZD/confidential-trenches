@@ -125,19 +125,32 @@ async function terminalFrame(page) {
   }
 }
 
-// runs in the frame: every drawn row of the visible layout, only what the verdict reads (no name or symbol is recorded)
+// runs in the frame: every drawn row of the visible layout, only what the verdict reads (no name or symbol is recorded).
+// A row is in view when some of it shows inside the window and inside every box that clips it: Discover's lists scroll in
+// their own box (discover.css .dsc-rows), and a row below that box's edge is hidden though inside the window, so its
+// lazy logo is rightly never asked for (card app-faults-seen-on-122: app run 43251085191 at 1024 read two rows at
+// 746-814 px, under the list's edge at 738 px, as in view with no logo)
 const ROWS = (scope) => {
   const vis = (e) => e.getClientRects().length > 0;
+  const inView = (e) => {
+    const b = e.getBoundingClientRect();
+    let [top, bottom] = [0, innerHeight];
+    for (let p = e.parentElement; p; p = p.parentElement) {
+      if (getComputedStyle(p).overflowY === "visible") continue;
+      const q = p.getBoundingClientRect();
+      [top, bottom] = [Math.max(top, q.top), Math.min(bottom, q.bottom)];
+    }
+    return b.bottom > top && b.top < bottom;
+  };
   return [...document.querySelectorAll(`${scope} [role="listitem"][data-token]`)].filter(vis).map((r) => {
     const av = r.querySelector(".tok-av");
     const img = av?.querySelector("img.tok-logo");
-    const b = r.getBoundingClientRect();
     return {
       id: r.getAttribute("data-token"),
       chain: r.querySelector(".tok-cb")?.getAttribute("data-chain") ?? null,
       pad: r.querySelector(".tok-pb")?.getAttribute("data-pad") ?? null,
       ring: r.querySelector("svg[data-ring]")?.getAttribute("data-ring") ?? null,
-      inView: b.bottom > 0 && b.top < innerHeight,
+      inView: inView(r),
       initials: av?.firstChild?.nodeType === 3 && av.firstChild.textContent !== "",
       drawn: img ? img.getAttribute("data-loaded") === "true" && img.naturalWidth > 0 : null,
       broken: [...r.querySelectorAll("img")].some((i) => i.complete && i.naturalWidth === 0 && getComputedStyle(i).opacity !== "0"),
@@ -163,8 +176,18 @@ async function readWidth(browser, w, harness, shots) {
     const scope = w.name === "390" ? ".dsc-phone" : ".dsc-grid";
     const until = Date.now() + READY_MS;
     while (Date.now() < until && !(await f.evaluate(ROWS, scope).catch(() => [])).length) await page.waitForTimeout(250);
-    // the logos in view answer (loaded or failed)
-    await f.waitForFunction((s) => [...document.querySelectorAll(`${s} img.tok-logo`)].every((i) => i.complete || i.getBoundingClientRect().top > innerHeight), scope, { timeout: 30_000 }).catch(() => {});
+    // the logos in view answer (loaded or failed): in view as ROWS reads it, inside the window and every box that clips it
+    await f.waitForFunction((s) => [...document.querySelectorAll(`${s} img.tok-logo`)].every((i) => {
+      if (i.complete) return true;
+      const b = i.getBoundingClientRect();
+      let [top, bottom] = [0, innerHeight];
+      for (let p = i.parentElement; p; p = p.parentElement) {
+        if (getComputedStyle(p).overflowY === "visible") continue;
+        const q = p.getBoundingClientRect();
+        [top, bottom] = [Math.max(top, q.top), Math.min(bottom, q.bottom)];
+      }
+      return !(b.bottom > top && b.top < bottom);
+    }), scope, { timeout: 30_000 }).catch(() => {});
     await page.waitForTimeout(300);
     const rows = (await f.evaluate(ROWS, scope)).map(({ drawn, ...r }) => ({ ...r, logo: drawn === null && !answers.has(r.id) ? null : { ...(answers.get(r.id) ?? { status: null, type: null }), drawn: drawn === true } }));
     const cols = w.name === "1024" ? await f.evaluate(() => [...document.querySelectorAll(".dsc-grid .dsc-col")].map((c) => c.getBoundingClientRect()).map((b) => ({ x: Math.round(b.x), y: Math.round(b.y) }))) : undefined;
