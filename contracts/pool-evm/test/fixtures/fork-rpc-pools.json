@@ -159,6 +159,13 @@
     "nonce": "0x1"
    }
   },
+  "eth_getAccountInfo [\"0xeb4b3a2f176d804a7f73ed6433e026ff6b468ec7\",\"0x3601af0\"]": {
+   "result": {
+    "balance": "0x0",
+    "nonce": "0x0",
+    "code": "0x"
+   }
+  },
   "eth_getAccountInfo [\"0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266\",\"0x3601af0\"]": {
    "result": {
     "balance": "0x0",
