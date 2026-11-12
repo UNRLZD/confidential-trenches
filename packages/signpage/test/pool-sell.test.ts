@@ -38,6 +38,8 @@ import { BLOCKHASH, FEE_PAYER, POOL, PROGRAM, fx, providers, rent } from "../../
 import { READ_WAIT_TOTAL_MS } from "../src/read-waits.ts";
 import { POOL_RENT_BACK_GAP_MS, POOL_RENT_BACK_MS, POOL_RENT_BACK_RULES, POOL_SELL_LOCK, POOL_SELL_READS, POOL_SELL_SHARED_READ_MS, POOL_SELL_SIZE_RETRY_MS, POOL_SELL_AGREE_WAIT_MS, POOL_SELL_WAIT_MS, buyMints, leftAfter, owedRentBacks, planPoolSell, poolSellKind, resumeRentBacks, runPoolSell, settleDeadSellOps, settlePoolSells, settleSellOps, forgetSellCaps, solanaSellAfterFull, solanaSellBudget, solanaSellBudgetFits, solanaSellPrice, solanaSellReserve, SOLANA_POOL_SELL_PRICE_FLOOR, SOLANA_POOL_SELL_PRIORITY, keptSells, stageOfLegs, type KeptSell, type OwedRentBack, type PoolSellHost, type PoolSellKindHost, type RentBackTold } from "../src/pool-sell.ts";
 import { opOf } from "../src/state.ts";
+import { lanedRpc } from "../src/page-rpc.ts";
+import { resetHostLanes } from "../../wallet/src/throttle.ts";
 import { solanaCompileV0 } from "../../kit/src/trade/solana/build.ts";
 import { checkSolanaSweep, PoolRuleRefused, SOLANA_POOL_MIN_DEPOSIT, SOLANA_POOL_SELL_RESERVE_MAX, solanaDepositRents, solanaSweepFloor, solanaSweepKeep, solanaWithdrawMinPart, withdrawNoteFloor, type PoolAsk } from "../src/rules/pool.ts";
 import { tradeLock, type TradeStore } from "../src/trade.ts";
@@ -1140,6 +1142,52 @@ test("round-trip-costs-less P3-1: after a not_landed sale the next sale of that 
   assert.equal("stage" in c && c.stage, "filled", JSON.stringify(c));
   assert.equal(budgetOf(after, c)?.priority, 1n);
   assert.equal(reads(after), 2);
+});
+
+// the cap after a sale not landed is held until W's sale ends: a refused one ends it as a filled one does
+test("round-trip-costs-less P3-1: a refused sale after a not_landed one clears the cap by itself: W's next sale reads the price again", async () => {
+  const quiet = [0, 0, 0, 0, 0, 0, 0, 12];
+  const lost = await world({ cluster: "mainnet", units: 90_000, fees: [quiet, quiet], lands: false });
+  const refused = await world({ cluster: "mainnet", units: 90_000, fees: [quiet, quiet], frontRun: true });
+  const after = await world({ cluster: "mainnet", units: 90_000, fees: [quiet, quiet] });
+  const reads = (w: World) => w.c.calls.filter((c) => c.method === "getRecentPrioritizationFees").length;
+  const a = await runPoolSell(lost.host, ASK);
+  assert.equal("stage" in a && a.stage, "not_landed", JSON.stringify(a));
+  const b = await runPoolSell(refused.host, ASK);
+  assert.equal("stage" in b && b.stage, "refused", JSON.stringify(b));
+  assert.equal(reads(refused), 0, "the refused sale was held to the cap");
+  const c = await runPoolSell(after.host, ASK);
+  assert.equal("stage" in c && c.stage, "filled", JSON.stringify(c));
+  assert.equal(reads(after), 2, "the price read again");
+  assert.equal(budgetOf(after, c)?.priority, 1n);
+});
+
+// review P2-1 of 4f9217972: the fee read is aborted once the sale is sized; nothing of it is left running past then (on
+// a page RPC its request's signal fires before the send, and no fee request goes out after it)
+test("round-trip-costs-less P2-1: the sale's fee read still open at sizing is aborted there, before the send, and none goes out after", async () => {
+  resetHostLanes();
+  const w = await world({ cluster: "mainnet", units: 90_000 });
+  const order: string[] = [];
+  const hang = (i: number) => (_u: string, init?: RequestInit): Promise<Response> =>
+    new Promise((_, reject) => {
+      order.push(`fee ${i} asked`);
+      init?.signal?.addEventListener("abort", () => {
+        order.push(`fee ${i} aborted`);
+        reject(init.signal!.reason);
+      });
+    });
+  const rpcs = w.c.rpcs.map((rpc, i) => {
+    const page = lanedRpc(`https://fee-abort-${i}.example/rpc`, { fetch: hang(i), retry: { deadlineMs: 2_000, backoffMs: 2_000 } });
+    return Object.assign((m: string, p: readonly unknown[]) => (m === "sendTransaction" && order.push("send"), rpc(m, p)), { url: page.url });
+  }) as unknown as typeof w.c.rpcs;
+  const a = await runPoolSell({ ...w.host, rpcs }, ASK);
+  assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
+  assert.equal(budgetOf(w, a)?.priority, SOLANA_POOL_SELL_PRIORITY, "no price in by sizing: the cap");
+  const send = order.indexOf("send");
+  assert.ok(send > 0, order.join(", "));
+  assert.deepEqual(order.slice(0, send).sort(), ["fee 0 aborted", "fee 0 asked", "fee 1 aborted", "fee 1 asked"], order.join(", "));
+  assert.equal(order.slice(send).filter((x) => x.startsWith("fee")).length, 0, order.join(", "));
+  resetHostLanes();
 });
 
 // the review of 6d76212d: the priority is never a reason to refuse. A sell that could be sent without it is sent: W pays
@@ -6209,12 +6257,14 @@ test("a simulation refused names the provider and the program's error in the leg
 // public seat reads W's own buy the same (review of 20ba2481b, P1-2: the rebuild's read kept, one public read more), and
 // the closes run even when what is left cannot make a note worth releasing.
 const BUY_SIG = base58.encode(new Uint8Array(64).fill(7));
-/** W's buy as getTransaction (json, finalized) gives it: the pool's tag 3 naming W, a signer, and `mint` rising in W's
- *  account (wallet/src/pool/buy-wallets.ts solanaBuyIn). */
+/** W's buy as getTransaction (json, finalized) gives it: its own signature first and its block's time (an answer
+ *  otherwise is not that signature's, wallet/src/pool/buy-wallets.ts), the pool's tag 3 naming W, a signer, and `mint`
+ *  rising in W's account (solanaBuyIn). */
 const buyTxJson = (mint: string) => ({
   slot: 1,
+  blockTime: 1_762_950_000,
   meta: { err: null, preTokenBalances: [], postTokenBalances: [{ accountIndex: 2, mint, owner: W.address, programId: TOKEN_PROGRAM, uiTokenAmount: { amount: "100" } }] },
-  transaction: { message: { accountKeys: [FEE_PAYER, W.address, ATA, PROGRAM], header: { numRequiredSignatures: 2 }, instructions: [{ programIdIndex: 3, accounts: [0, 1], data: base58.encode(Uint8Array.of(3)) }] } },
+  transaction: { signatures: [BUY_SIG], message: { accountKeys: [FEE_PAYER, W.address, ATA, PROGRAM], header: { numRequiredSignatures: 2 }, instructions: [{ programIdIndex: 3, accounts: [0, 1], data: base58.encode(Uint8Array.of(3)) }] } },
 });
 type Call = { p: 0 | 1; method: string; params: readonly unknown[] };
 /** Both RPCs with W's buy in W's history, RPC p naming `mints[p]` as what rose; every call each seat answers logged. */

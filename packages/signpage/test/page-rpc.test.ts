@@ -516,3 +516,19 @@ test("round-trip-costs-less P2-1: an optional read is not sent to a host another
     resetHostLanes();
   }
 });
+
+// round-trip-costs-less: only a trade's page RPC gives its url an optional read; a pass's RPC and a pass's seat give none
+// (the sale's fee read never goes out on a pass's lane), while a trade's seat does
+test("round-trip-costs-less P2-1: only a trade's RPC or seat registers an optional read: a pass's RPC and a pass's seat register none", () => {
+  resetHostLanes();
+  const none = async (): Promise<Response> => new Response("{}", { status: 500 });
+  const pass = lanedRpc("https://pass-optional.example/rpc", { kind: "pass", fetch: none });
+  assert.equal(optionalRead(pass), undefined, "a pass's RPC");
+  const passSeat = seatRpc(["https://pass-seat-a-optional.example/", "https://pass-seat-b-optional.example/"], "pass");
+  assert.equal(optionalRead(passSeat), undefined, "a pass's seat");
+  const trade = lanedRpc("https://trade-optional.example/rpc", { fetch: none });
+  assert.equal(typeof optionalRead(trade), "function", "a trade's RPC");
+  const tradeSeat = seatRpc(["https://trade-seat-a-optional.example/", "https://trade-seat-b-optional.example/"]);
+  assert.equal(typeof optionalRead(tradeSeat), "function", "a trade's seat");
+  resetHostLanes();
+});
