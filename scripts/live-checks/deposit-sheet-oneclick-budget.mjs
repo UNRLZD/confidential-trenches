@@ -26,6 +26,7 @@ import "../net-window.mjs";
 import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { DEPOSIT_DRY_PLACEHOLDER, ONECLICK_USDC_ASSETS } from "../../packages/kit/src/index.ts";
+import { saidOf, saidPart } from "./vendor-said.mjs";
 
 const KEY = "deposit-sheet-oneclick-budget";
 export const BASE = "https://ct-api.unrealized.trade";
@@ -59,14 +60,11 @@ const causeOf = (timing) => /cause;desc="([a-z0-9]+)"/.exec(timing ?? "")?.[1] ?
 const NO_LIQUIDITY = /^No liquidity available\b/;
 /** The most of a 400's message a run keeps. */
 export const NO_LIQUIDITY_MESSAGE_MAX = 120;
-/** A 400's message from its body text, bounded; null when there is none. */
+/** A 400's message from its body text, bounded; null when there is none (card helper-says-why-a-vendor-refused: also a
+ *  list of messages or an error string, every control character a space, vendor-said.mjs saidOf). */
 export function messageOf(text) {
-  try {
-    const m = JSON.parse(text)?.message;
-    return typeof m === "string" ? m.slice(0, NO_LIQUIDITY_MESSAGE_MAX) : null;
-  } catch {
-    return null;
-  }
+  const m = saidOf(text);
+  return m === null ? null : [...m].slice(0, NO_LIQUIDITY_MESSAGE_MAX).join("");
 }
 /** True when a call is a quote 1Click answered 400 No liquidity available: its solvers, not the helper. */
 const noLiquidity = (c) => c.status === 400 && typeof c.what === "string" && c.what.startsWith("quote") && typeof c.message === "string" && NO_LIQUIDITY.test(c.message);
@@ -78,7 +76,8 @@ export function judge(a) {
   const vendor = [];
   const bad = (m) => lines.push(`BAD ${m}`);
   const ours = (c) => !(c.status === 503 && VENDOR_CAUSES.includes(c.cause)) && !noLiquidity(c);
-  const named = (c) => `${c.what} answered ${c.status}${noLiquidity(c) ? " No liquidity available" : ""}${c.cause ? ` (cause ${c.cause})` : ""}${c.retryAfter ? `, Retry-After ${c.retryAfter}` : ""}`;
+  // card helper-says-why-a-vendor-refused: any other 400 names its message too
+  const named = (c) => `${c.what} answered ${c.status}${noLiquidity(c) ? " No liquidity available" : c.status === 400 ? saidPart(c.message) : ""}${c.cause ? ` (cause ${c.cause})` : ""}${c.retryAfter ? `, Retry-After ${c.retryAfter}` : ""}`;
   const sheet = Array.isArray(a?.sheet) ? a.sheet : [];
   const share = Array.isArray(a?.share) ? a.share : [];
   if (sheet.length !== SHEET_CALLS) bad(`sheet: ${sheet.length} calls recorded, want ${SHEET_CALLS}`);

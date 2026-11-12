@@ -176,12 +176,13 @@ export const NO_LIQUIDITY_ASK_MIN_MS = 2_000;
  * 1Click's 400s about the request itself (card helper-says-why-a-vendor-refused): its amount ("Amount is too low for
  * bridge, try at least N", "Amount is too low for the destination chain", "Temporary swap limits: minimum swap amount is
  * $N"), its pair ("Quoting for this pair is not available"), a field it refuses ("recipient is not valid", "<asset> is not
- * supported as origin asset", "<asset> supports only ORIGIN_CHAIN refundType", "Invalid token") or its deadline: 1Click's
- * own words as the deposit runs and research proofs/p3-coverage read them. The same request gets the same answer, so it
+ * supported as origin asset", "<asset> supports only ORIGIN_CHAIN refundType") or its deadline: 1Click's own words as the
+ * deposit runs and research proofs/p3-coverage read them. "Invalid token" is not one: 1Click answers it for a key it does
+ * not honour (401, scripts/live-checks/oneclick-partner-fee-live.answers.json bad_key_refused). The same request gets the same answer, so it
  * is shown at once. A list of messages is a list of what is wrong with the request (a validation answer).
  */
 const ABOUT_THE_REQUEST: readonly RegExp[] = [/^Amount is too low\b/, /^Temporary swap limits\b/, /^Quoting for this pair is not available\b/,
-  /\bis not valid\b/, /\bis not supported\b/, /\bsupports only\b/, /^Invalid\b/, /\bdeadline\b/i];
+  /\bis not valid\b/, /\bis not supported\b/, /\bsupports only\b/, /\bdeadline\b/i];
 
 /**
  * True when a reply is a refusal worth asking again (card helper-says-why-a-vendor-refused): a 400 in 1Click's shape (a

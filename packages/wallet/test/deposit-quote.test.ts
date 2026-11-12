@@ -239,9 +239,10 @@ const ABOUT_THE_REQUEST = [
   "Amount is too low for bridge, try at least 1000000", "Amount is too low for the destination chain",
   "Temporary swap limits: minimum swap amount is $1,000", "Quoting for this pair is not available", "recipient is not valid",
   "nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near is not supported as origin asset",
-  "1cs_v1:hypercore:hip1:0x6d1e supports only ORIGIN_CHAIN refundType", "Invalid token", "deadline must be in the future",
+  "1cs_v1:hypercore:hip1:0x6d1e supports only ORIGIN_CHAIN refundType", "deadline must be in the future",
 ].map((message) => ({ status: 400, body: { message } })).concat([{ status: 400, body: { message: ["amount must be a string"] } } as never]);
-const NOT_ABOUT_IT = [{ message: "Failed to get quote" }, { message: "Something else went wrong" }, { statusCode: 400 }, { message: "Not: No liquidity available" }]
+const NOT_ABOUT_IT = [{ message: "Failed to get quote" }, { message: "Something else went wrong" }, { statusCode: 400 }, { message: "Not: No liquidity available" },
+  { message: "Invalid token" }]
   .map((body) => ({ status: 400, body }));
 
 test("a 400 that is not about the request is asked again, the same request, twice at most, and the quote that follows comes back", async () => {

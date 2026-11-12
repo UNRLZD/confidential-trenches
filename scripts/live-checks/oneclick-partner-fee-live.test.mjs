@@ -107,7 +107,8 @@ test("the helper's answers read by this check on main (where it FAILed on the ol
 test("recorded bad answer: 1Click's 401 to a key it does not honour: FAIL on the three quotes", () => {
   const r = judge(A.bad_key_refused);
   assert.equal(r.ok, false);
-  assert.deepEqual(bads(r), ["live", "usdc", "pair"].map((k) => `BAD ${k}: HTTP 401, want 1Click's 200 or 201`));
+  // card helper-says-why-a-vendor-refused: each BAD line says what 1Click answered
+  assert.deepEqual(bads(r), ["live", "usdc", "pair"].map((k) => `BAD ${k}: HTTP 401 "Invalid token", want 1Click's 200 or 201`));
 });
 
 test("the live quote relabelled to the old pin's fee 20 is refused on app-fees alone, and one with no deposit address on the live rules: FAIL", () => {
@@ -186,10 +187,10 @@ test("planted: a no-liquidity quote never hides a BAD one, and a 400 of another 
   assert.match(bads(hidden)[0], /^BAD pair: .*\(app-fees\)/);
   const other = judge(A.other_400);
   assert.equal(other.verdict, "FAIL");
-  assert.deepEqual(bads(other), ["BAD usdc: HTTP 400, want 1Click's 200 or 201"]);
+  assert.deepEqual(bads(other), ["BAD usdc: HTTP 400 \"Amount is too low for bridge, try at least 1000000\", want 1Click's 200 or 201"]);
   // the no-liquidity body under a status that is not 400, or not JSON, is judged as any answer
   const s503 = structuredClone(A.no_liquidity); s503.answers.live.status = 503;
-  assert.deepEqual(bads(judge(s503)), ["BAD live: HTTP 503, want 1Click's 200 or 201"]);
+  assert.deepEqual(bads(judge(s503)), ["BAD live: HTTP 503 \"No liquidity available\", want 1Click's 200 or 201"]);
   const text = structuredClone(A.no_liquidity); text.answers.live.body = "No liquidity available";
   assert.deepEqual(bads(judge(text)), ["BAD live: HTTP 400, want 1Click's 200 or 201"]);
   assert.equal(EXIT[hidden.verdict], 1);
