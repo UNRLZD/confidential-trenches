@@ -141,3 +141,17 @@ export function simFailure(value) {
   if (!value || value.err === null || value.err === undefined) return null;
   return { err: value.err, cu: value.unitsConsumed ?? null, logsTail: (value.logs ?? []).slice(-12) };
 }
+
+/** The copy's RPC list is this machine alone: every URL plain http on 127.0.0.1 or localhost. A run file naming any
+ *  other host would send the run's transactions to a real cluster, so the copy refuses it before it installs its fetch. */
+export function copyRpcsLocal(rpcs) {
+  if (!Array.isArray(rpcs) || rpcs.length !== 2) return false;
+  return rpcs.every((u) => {
+    try {
+      const x = new URL(String(u));
+      return x.protocol === "http:" && (x.hostname === "127.0.0.1" || x.hostname === "localhost") && x.username === "" && x.password === "";
+    } catch {
+      return false;
+    }
+  });
+}

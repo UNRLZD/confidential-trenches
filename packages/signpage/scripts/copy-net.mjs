@@ -17,12 +17,14 @@
 // - every failed simulation's last log lines are kept (simFails), so a refusal carries the program's own log.
 import { readFileSync } from "node:fs";
 import { base58 } from "@scure/base";
+import { copyRpcsLocal } from "./sol-mainnet-copy-parse.mjs";
 
 export const COPY = process.env.FLOW_COPY ? JSON.parse(readFileSync(process.env.FLOW_COPY, "utf8")) : null;
 
 /** Installs the copy's fetch and returns what the driver wires: its rpcs, pin, helper fetch and holdings reader. */
 export async function copyNet({ log, phase = () => "" }) {
   if (!COPY) throw new Error("FLOW_COPY is not set");
+  if (!copyRpcsLocal(COPY.rpcs)) throw new Error("copy: the run file names an RPC that is not this machine (127.0.0.1 and localhost only)");
   const { testnetRpc } = await import("../src/pool-testnet.ts");
   const { TRADE_HELPER } = await import("../src/trade.ts");
   const { SOL_POOLS } = await import("../../wallet/src/pool/solana.ts");

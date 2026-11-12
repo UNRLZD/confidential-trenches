@@ -2,7 +2,7 @@
 // helper's lists, and each transaction's record.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ALT_PROGRAM, COMPUTE_BUDGET, RENT_FEATURES, UPGRADEABLE_LOADER, clonePlan, copyAccountFile, cuLimitOf, listCandidates, pendingFeature, simFailure, txRecord } from "./sol-mainnet-copy-parse.mjs";
+import { ALT_PROGRAM, COMPUTE_BUDGET, RENT_FEATURES, UPGRADEABLE_LOADER, clonePlan, copyAccountFile, copyRpcsLocal, cuLimitOf, listCandidates, pendingFeature, simFailure, txRecord } from "./sol-mainnet-copy-parse.mjs";
 
 const b64 = (b) => Buffer.from(b).toString("base64");
 /** A frozen lookup table's bytes: tag 1, deactivation u64::MAX, last extended `slot` at start index 24, no authority. */
@@ -93,4 +93,18 @@ test("a transaction's record: result, compute units against its limit, fee, logs
 test("a failed simulation keeps its error, units and last log lines; a good one is none", () => {
   assert.equal(simFailure({ err: null, logs: ["a"] }), null);
   assert.deepEqual(simFailure({ err: "X", unitsConsumed: 5, logs: ["a", "b"] }), { err: "X", cu: 5, logsTail: ["a", "b"] });
+});
+
+test("the copy's RPC list is this machine alone: any other host, scheme, count or a login in the URL is refused", () => {
+  assert.equal(copyRpcsLocal(["http://127.0.0.1:8899", "http://localhost:8899"]), true);
+  for (const bad of [
+    ["http://127.0.0.1:8899", "https://api.mainnet-beta.solana.com"],
+    ["http://127.0.0.1:8899", "http://localhost.example.com:8899"],
+    ["https://127.0.0.1:8899", "http://localhost:8899"],
+    ["http://127.0.0.1:8899"],
+    ["http://127.0.0.1:8899", "http://localhost:8899", "http://localhost:8900"],
+    ["http://a:b@127.0.0.1:8899", "http://localhost:8899"],
+    ["http://127.0.0.1:8899", "not a url"],
+    null,
+  ]) assert.equal(copyRpcsLocal(bad), false, JSON.stringify(bad));
 });
