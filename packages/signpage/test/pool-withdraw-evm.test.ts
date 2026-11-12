@@ -932,11 +932,11 @@ test("(review 3 P2-C, RR7) the root wait on EVM: the run keeps its planned notes
   assert.deepEqual(kept.calls[0]![0], [world.noteId], "the plan's notes");
   assert.equal(kept.calls[0]![1], 60_000n + 30_000n + 210_000n, "for the longest a part can take to bind: the next boundary's epoch, its lag and a proof's life");
   assert.deepEqual(kept.calls.at(-1), [[], 0n], "cleared at the run's end");
-  // written before any part, again by the part before its first tree read and its wait (each part moves the record on),
-  // then cleared: three writes
+  // written before any part, again by the part before it frees its note (a part before it may have outrun the span)
+  // and before its first tree read and its wait (each part moves the record on), then cleared: four writes
   const SPAN = 60_000n + 30_000n + 210_000n;
-  assert.deepEqual(kept.calls, [[[world.noteId], SPAN], [[world.noteId], SPAN], [[], 0n]]);
-  assert.deepEqual(kept.at.slice(0, 2), [{ ms: NOW, trees: 0 }, { ms: NOW, trees: 0 }], "both before the part's tree read and its wait");
+  assert.deepEqual(kept.calls, [[[world.noteId], SPAN], [[world.noteId], SPAN], [[world.noteId], SPAN], [[], 0n]]);
+  assert.deepEqual(kept.at.slice(0, 3), [{ ms: NOW, trees: 0 }, { ms: NOW, trees: 0 }, { ms: NOW, trees: 0 }], "all before the part's tree read and its wait");
 });
 
 test("(review 3 P2-C) a note the page's queue is still proving when the part needs it: dropped, then waited for until that proof ends and frees it; the part goes on. A proof that never ends stops the part, nothing signed", async () => {
@@ -954,6 +954,37 @@ test("(review 3 P2-C) a note the page's queue is still proving when the part nee
   assert.equal((await runEvmPoolWithdraw(stuck.h, RUN_ASK, TO, PART, MAX)).stage, "stopped");
   assert.ok(stuck.clock.ms - t0 >= 60_000n, "waited out the free budget past the boundary");
   assert.deepEqual([stuck.chain.sends, stuck.chain.sent.length], [0, 0]);
+});
+
+test("(review 4 P3) each part writes its keep-out before it frees its note: a note another tab's queue holds is let go at that queue's next pass, which reads the part's own write", async () => {
+  const world = await runWorld({ change: true, thisEpoch: true });
+  const states: (string | undefined)[] = [];
+  let kept = new Set<string>();
+  world.h.keepOut = async (ids) => {
+    states.push((await world.notes.get(world.noteId))?.state);
+    kept = new Set(ids);
+  };
+  // another tab's queue holds the note; its pass at each wait lets go of a note the record names
+  await world.notes.move(world.noteId, "UNSPENT", "HELD", { deadlineMs: NOW + 400_000n, context: "1" });
+  const wait0 = world.h.wait!;
+  world.h.wait = async (ms) => {
+    await wait0(ms);
+    const n = await world.notes.get(world.noteId);
+    if (n?.state === "HELD" && n.attempt !== undefined && kept.has(world.noteId)) await world.notes.move(world.noteId, "HELD", "UNSPENT", { attempt: n.attempt });
+  };
+  delete world.h.drop;
+  assert.equal((await runEvmPoolWithdraw(world.h, RUN_ASK, TO, PART, MAX)).stage, "sent");
+  assert.deepEqual(states.slice(0, 3), ["HELD", "HELD", "UNSPENT"], "the run's write and the part's own, both before its note is freed; the third before the tree read");
+});
+
+test("(review 4 P3) a part that stops on a throw (its note never freed) carries its cause out: the run's answer names it in public words", async () => {
+  const world = await runWorld({ change: true, thisEpoch: true });
+  // another tab's queue holds the note and never lets go
+  await world.notes.move(world.noteId, "UNSPENT", "HELD", { deadlineMs: NOW + 400_000n, context: "1" });
+  delete world.h.drop;
+  const got = await runEvmPoolWithdraw(world.h, RUN_ASK, TO, PART, MAX);
+  assert.equal(got.stage, "stopped");
+  assert.match(got.cause ?? "", /^Error note\b/, `the part's stop and its word: ${got.cause}`);
 });
 
 test("(review 3 P2-C) a pool time read behind the leaf's own block: the epoch root at the next boundary lacks it, so the part waits on to the boundary after, in the same budget, then proves there; every tree read is bounded in time", async () => {

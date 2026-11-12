@@ -59,6 +59,7 @@ import { checkBinding, type Pool } from "../../wallet/src/pool/pool.ts";
 import { jOf, provesOnNewest } from "../../wallet/src/pool/queue.ts";
 import { EVM_BUY_HEAD_SPREAD, EVM_BUY_LAG_BLOCKS, EVM_BUY_LAG_MS } from "./pool-buy-evm.ts";
 import { EvmSendBusy, EvmSendRefused, evmBuyVerdict, evmHeadNumber, evmReleaseRead, evmWithdrawCalldata, type EvmReleaseRead } from "./evm-send.ts";
+import { legCause } from "./pool-sell.ts";
 import { planPoolWithdraw, withdrawSources, type Arrivals, type PendingOnward, type WithdrawPart } from "./pool-withdraw.ts";
 import {
   checkEvmOnwardSend, checkEvmWithdraw, EVM_ONWARD_GAS, EVM_ONWARD_GAS_MAX, EVM_PRECOMPILE_TOP, evmOnwardCodeGas, PoolRuleRefused, signEvmOnwardSend, signEvmWithdraw,
@@ -138,9 +139,18 @@ export type EvmWithdrawHost = {
   wait?(ms: number): Promise<void>;
 };
 
-export type EvmWithdrawAnswer = { stage: WithdrawStage; txs: TxRef[]; pending: EvmPendingOnward | null; arrived: Arrivals; feeNeeded?: string; held?: EvmHeldOnW };
+/** `cause`: why a run or one of its parts ended on a throw, in public words only (pool-sell.ts legCause), for the op's
+ *  record and the page's console, never a screen (the Solana run's PoolWithdrawAnswer cause). */
+export type EvmWithdrawAnswer = { stage: WithdrawStage; txs: TxRef[]; pending: EvmPendingOnward | null; arrived: Arrivals; feeNeeded?: string; held?: EvmHeldOnW; cause?: string };
 
-class Stop extends Error {}
+/** A run's own refusal, its word in `code` (an op's cause names it, legCause). */
+class Stop extends Error {
+  readonly code: string;
+  constructor(why: string) {
+    super(why);
+    this.code = why;
+  }
+}
 const stop = (why: string): never => {
   throw new Stop(why);
 };
@@ -534,7 +544,7 @@ export async function runEvmPoolWithdraw(h: EvmWithdrawHost, ask: PoolAsk, to: s
       if (got.tx !== "") txs.push({ chain: h.chain, hash: got.tx });
       if (got.end === "stopped") {
         pending = null;
-        return end("stopped");
+        return { ...end("stopped"), ...(got.cause !== undefined ? { cause: got.cause } : {}) };
       }
       if (got.end !== "mine") return end(pending ? "in_transit" : "stopped");
       say("in_transit");
@@ -559,8 +569,8 @@ export async function runEvmPoolWithdraw(h: EvmWithdrawHost, ask: PoolAsk, to: s
       if (i < plan!.length - 1) say("submitted");
     }
     return end("sent");
-  } catch {
-    return end(pending ? "in_transit" : "stopped");
+  } catch (e) {
+    return { ...end(pending ? "in_transit" : "stopped"), cause: legCause(e) };
   } finally {
     // the planned notes back to every queue; a failed write lets them back at the record's own deadline
     await h.keepOut?.([], 0n).catch(() => {});
@@ -596,7 +606,7 @@ async function evmPoolTimeAt(P: Pool<EvmPoolRequest>, wait: (ms: number) => Prom
 /** One part's release to W: hold the note, bind and prove part + fee + W's fee to W, check, sign as W, RESERVED, the
  *  owed send written, then the helper's send and the read-back on both RPCs. "stopped": nothing left the device, or
  *  the chain says it never lands; "sent": no end in the tap's bound (owed, for the state reads). */
-async function onePart(h: EvmWithdrawHost, ask: PoolAsk, notes: NoteStore, p: WithdrawPart, c: EvmWithdrawCosts, base: Pick<PendingOnward, "to" | "last" | "feeCap">, owing: (o: EvmPendingOnward) => void, keepOut: () => Promise<void>): Promise<{ end: "mine" | "stopped" | "sent"; tx: string; l: bigint; j: number }> {
+async function onePart(h: EvmWithdrawHost, ask: PoolAsk, notes: NoteStore, p: WithdrawPart, c: EvmWithdrawCosts, base: Pick<PendingOnward, "to" | "last" | "feeCap">, owing: (o: EvmPendingOnward) => void, keepOut: () => Promise<void>): Promise<{ end: "mine" | "stopped" | "sent"; tx: string; l: bigint; j: number; cause?: string }> {
   const P = h.pool;
   let attempt: string | null = null;
   let reserved = false;
@@ -616,6 +626,9 @@ async function onePart(h: EvmWithdrawHost, ask: PoolAsk, notes: NoteStore, p: Wi
       if (n === undefined || n.state !== "UNSPENT" || n.leaf === undefined) stop("note");
       return n!;
     };
+    // the run's notes out of every queue's pass (any tab's) for this part's whole span, before its note is freed (a
+    // part before it may have outrun the last write's span), and again below before its tree read and boundary wait
+    await keepOut();
     let n = await free();
     const leaf = n.leaf!;
     if (leaf.value < p.chunk || p.chunk !== p.part + c.fee + c.wFee) stop("value");
@@ -623,8 +636,8 @@ async function onePart(h: EvmWithdrawHost, ask: PoolAsk, notes: NoteStore, p: Wi
     // for any other (a return, move, change or refund note) the next epoch's, once the pool's time reached it (M351: a
     // root right after its own leaf would link the W it pays to the W whose money made that leaf)
     let nowMs = await P.now();
-    // the run's notes out of every queue's pass (any tab's) past the latest deadline this part can bind, so no queue
-    // takes this note at the boundary it may wait for
+    // again from here: past the latest deadline this part can bind, so no queue takes this note at the boundary it may
+    // wait for
     await keepOut();
     let epochStartMs = nowMs - (nowMs % P.epochMs);
     let trees = await P.trees(epochStartMs, AbortSignal.timeout(EVM_WITHDRAW_TREES_MS));
@@ -740,7 +753,7 @@ async function onePart(h: EvmWithdrawHost, ask: PoolAsk, notes: NoteStore, p: Wi
     return { end: "sent", tx: "", l: leaf.label, j };
   } catch (e) {
     if (reserved) throw e;
-    return { end: "stopped", tx: "", l: 0n, j: 0 };
+    return { end: "stopped", tx: "", l: 0n, j: 0, cause: legCause(e) };
   } finally {
     (key as Uint8Array | null)?.fill(0);
     if (attempt !== null && !reserved) await notes.move(p.noteId, "HELD", "UNSPENT", { attempt }).catch(() => {});

@@ -58,7 +58,7 @@ import { openProofQueue, type ProofQueue, type QueuePass } from "../../wallet/sr
 import { poolDepositKind, type PoolDepositFrom, type PoolDepositHost } from "./pool-deposit.ts";
 import { proverHost } from "./prover-host.ts";
 import { SOLANA_PUBLIC_SEAT, TRADE_HELPER } from "./trade.ts";
-import { SOL_POOL_TABLES, SOL_POOLS, solanaNow, solanaPool, solanaPoolOf, type SolanaFeeAnswer, type SolanaPoolPin, type SolanaReleaseRequest } from "../../wallet/src/pool/solana.ts";
+import { SOL_EPOCH_MS, SOL_LIFE_MS, SOL_POOL_TABLES, SOL_POOLS, solanaNow, solanaPool, solanaPoolOf, type SolanaFeeAnswer, type SolanaPoolPin, type SolanaReleaseRequest } from "../../wallet/src/pool/solana.ts";
 import { SOL_MARK_READ_BATCH, SOL_MARK_READ_BATCH_MAX, solanaSettleReserved, solanaSettleSpent, type SolanaPoolCache } from "../../wallet/src/pool/solana-restore.ts";
 import { POOL_TESTNET } from "../../wallet/src/pool/network.ts";
 import { askWhileBusy, type BusyOpts } from "../../wallet/src/busy.ts";
@@ -68,7 +68,7 @@ import { BUY_MINTS_KEY, buyMints, keptSells, owedRentBacks, poolSellKind, resume
 import { derivedBuyWallets, evmHelperKeyedRpc, evmHelperRpc, solanaHelperHoldings, solanaHoldingsAt, spentNotesOf, wantedBuyWallets, type BuyWallet, type HoldingsReader, type ListedBuyWallet } from "../../wallet/src/pool/buy-wallets.ts";
 import { keptListed, keptPositions, POSITION_COSTS_KEY, POSITIONS_KEPT_KEY, POSITIONS_SOLD_KEY, POSITIONS_SOLD_TX_KEY, POSITIONS_UNLANDED_KEY, positionsCache, positionsPass, recordBoughtOut, recordPoolBuy, routeInto, type BuyRecordStore, type FoundWallet, type PoolBuyFacts, type Position, type PositionCosts } from "./positions.ts";
 import { evmStoredHold } from "../../wallet/src/pool/evm-hold-store.ts";
-import { EVM_CHAIN_IDS, EVM_EPOCH_MS, EVM_POOLS, evmNow, evmPair, evmRetryLag, evmPool as walletEvmPool, evmPoolScopeOf, evmTreeSync, type EvmFeeAnswer, type EvmPoolOf, type EvmPoolPin, type EvmPoolRequest, type EvmRpc, type EvmSyncHold, type EvmTreeSync } from "../../wallet/src/pool/evm.ts";
+import { EVM_CHAIN_IDS, EVM_EPOCH_MS, EVM_LIFE_MS, EVM_POOLS, evmNow, evmPair, evmRetryLag, evmPool as walletEvmPool, evmPoolScopeOf, evmTreeSync, type EvmFeeAnswer, type EvmPoolOf, type EvmPoolPin, type EvmPoolRequest, type EvmRpc, type EvmSyncHold, type EvmTreeSync } from "../../wallet/src/pool/evm.ts";
 import { evmSettleReserved } from "../../wallet/src/pool/evm-settle.ts";
 import type { LandedRelease } from "../../wallet/src/pool/balances.ts";
 import { spendOwner } from "./pool-spend.ts";
@@ -83,8 +83,8 @@ import { checkPoolRequest, tokenDecimalsShown, type PoolAsk, type PoolChain, typ
 import type { HostAnswer, HostRefusal, KindContext, Running } from "./api.ts";
 import { readSolanaRent, solanaPoolFee } from "../../kit/src/trade/solana/pool-buy.ts";
 import type { PoolStatePrice, TxRef, WithdrawStage } from "../../kit/src/signpage/messages.ts";
-import { finishPoolOnward, runPoolWithdraw, solanaOnwardFee, solanaWithdrawMinPart, withdrawSources, type Arrivals, type HistoryPlaces, type PendingOnward } from "./pool-withdraw.ts";
-import { evmKeptOnwards, evmWithdrawFunds, finishEvmOnward, runEvmPoolWithdraw, type EvmFinishState, type EvmHeldOnW, type EvmPendingOnward, type EvmWithdrawHost } from "./pool-withdraw-evm.ts";
+import { WITHDRAW_BOUNDARY_LAG_MS, finishPoolOnward, runPoolWithdraw, solanaOnwardFee, solanaWithdrawMinPart, withdrawSources, type Arrivals, type HistoryPlaces, type PendingOnward } from "./pool-withdraw.ts";
+import { EVM_WITHDRAW_BOUNDARY_LAG_MS, evmKeptOnwards, evmWithdrawFunds, finishEvmOnward, runEvmPoolWithdraw, type EvmFinishState, type EvmHeldOnW, type EvmPendingOnward, type EvmWithdrawHost } from "./pool-withdraw-evm.ts";
 import { evmPoolSend } from "./evm-send.ts";
 import { evmPoolVenues } from "../../kit/src/trade/evm/buy-unpinned.ts";
 import type { PoolFunds, PoolReady, PoolWithdrawFormDeps } from "./withdraw/pool-form.ts";
@@ -354,17 +354,25 @@ export const dropSend = (w: WalletStore, opId: string, noteId: string): Promise<
  *  (the store's change event), whose state read runs their queue's pass, which lets go of these notes (queue.ts skip). */
 export const WITHDRAW_PLANNED_KEY = "owed/withdraw-sol";
 type WithdrawPlanned = Record<string, { notes: string[]; until_ms: string }>;
-/** The op's planned notes and its deadline written ([] drops its entry); another op's entry kept. */
-export const keepOutNotes = (w: WalletStore, opId: string, noteIds: readonly string[], untilMs: bigint): Promise<unknown> =>
+/** The longest span any withdraw run writes (the Solana run's keepSpan, the EVM run's evmKeepSpan, on their pools'
+ *  epochs and lives): an entry whose deadline is further from now than this was written on a clock since set back. */
+export const WITHDRAW_KEEP_MAX_MS = [SOL_EPOCH_MS + WITHDRAW_BOUNDARY_LAG_MS + SOL_LIFE_MS, EVM_EPOCH_MS + EVM_WITHDRAW_BOUNDARY_LAG_MS + EVM_LIFE_MS].reduce((a, b) => (a > b ? a : b));
+/** An entry that stands at `nowMs`: its deadline still to come, and no further than the longest span. */
+const standing = (e: { until_ms?: unknown } | undefined, nowMs: bigint): boolean =>
+  typeof e?.until_ms === "string" && /^[0-9]{1,20}$/.test(e.until_ms) && BigInt(e.until_ms) > nowMs && BigInt(e.until_ms) <= nowMs + WITHDRAW_KEEP_MAX_MS;
+/** The op's planned notes written to stand for `spanMs` from `nowMs` ([] drops its entry); another op's entry kept
+ *  while it stands (a dead run's past its deadline, or one from a clock set back, dropped). */
+export const keepOutNotes = (w: WalletStore, opId: string, noteIds: readonly string[], nowMs: bigint, spanMs: bigint): Promise<unknown> =>
   w.update("meta", WITHDRAW_PLANNED_KEY, (v) => {
-    const { [opId]: _was, ...r } = (v as WithdrawPlanned | undefined) ?? {};
-    return noteIds.length === 0 ? r : { ...r, [opId]: { notes: [...noteIds], until_ms: untilMs.toString() } };
+    const { [opId]: _was, ...was } = (v as WithdrawPlanned | undefined) ?? {};
+    const r = Object.fromEntries(Object.entries(was).filter(([, e]) => standing(e, nowMs)));
+    return noteIds.length === 0 ? r : { ...r, [opId]: { notes: [...noteIds], until_ms: (nowMs + spanMs).toString() } };
   });
-/** The notes a withdraw run still holds out at `nowMs`: every entry whose deadline is still to come. */
+/** The notes a withdraw run still holds out at `nowMs`: every entry that stands. */
 export async function keptOutNotes(w: WalletStore, nowMs: bigint): Promise<Set<string>> {
   const r = ((await w.get("meta", WITHDRAW_PLANNED_KEY)) as WithdrawPlanned | undefined) ?? {};
   const out = new Set<string>();
-  for (const e of Object.values(r)) if (/^[0-9]{1,20}$/.test(e?.until_ms ?? "") && BigInt(e.until_ms) > nowMs) for (const id of e.notes ?? []) out.add(id);
+  for (const e of Object.values(r)) if (standing(e, nowMs)) for (const id of e.notes ?? []) out.add(id);
   return out;
 }
 /** An EVM run's stage written (its stage hook): the stage, its txs and arrivals, and `held` (a part left on W by a send
@@ -1188,6 +1196,20 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   // a state read's EVM part: its INCOMING notes, then per pinned chain, each beside the other, its queue's pass (one at
   // a time per chain) while the queue is open or the chain's notes are landed, and its RESERVED notes' settle
   const evmPassing = new Map<"base" | "robinhood", Promise<unknown>>();
+  // a read that finds the chain's pass running asks for one more after it (one, never a queue): that pass began before
+  // what woke the read (a withdraw's kept-out record, any tab's) and read the queue's skip before it, so only a pass
+  // after it lets those notes go (queue.ts skip)
+  const evmPassAgain = new Set<"base" | "robinhood">();
+  const evmPass = (chain: "base" | "robinhood", stop: AbortSignal): void => {
+    if (evmPassing.has(chain)) return void evmPassAgain.add(chain);
+    evmPassing.set(
+      chain,
+      evmProofs(chain).finally(() => {
+        evmPassing.delete(chain);
+        if (evmPassAgain.delete(chain) && !stop.aborted) evmPass(chain, stop);
+      }),
+    );
+  };
   const evmRead = async (): Promise<void> => {
     const stop = evmStop.signal;
     await settleEvmOpen().catch(() => {});
@@ -1202,8 +1224,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       chains.map(async (chain) => {
         const mine = all.filter((n) => n.scope === evmPool(chain)!.scope);
         // a sign out since the read began: no pass, and the settle stops on its signal
-        if (!stop.aborted && !evmPassing.has(chain) && (evmQueues.has(chain) || mine.some((n) => n.state === "UNSPENT" || n.state === "HELD")))
-          evmPassing.set(chain, evmProofs(chain).finally(() => evmPassing.delete(chain)));
+        if (!stop.aborted && (evmQueues.has(chain) || mine.some((n) => n.state === "UNSPENT" || n.state === "HELD"))) evmPass(chain, stop);
         if (mine.some((n) => n.state === "RESERVED")) await reserveEvm(chain, stop).catch(() => {});
       }),
     );
@@ -1268,7 +1289,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         // unless this tab signed out meanwhile
         await evmPassing.get(chain)?.catch(() => {});
         if (signal.aborted) return;
-        if (!evmPassing.has(chain)) evmPassing.set(chain, evmProofs(chain).finally(() => evmPassing.delete(chain)));
+        if (!evmPassing.has(chain)) evmPass(chain, signal);
         await evmPassing.get(chain);
       }),
     );
@@ -1938,11 +1959,26 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     });
   };
   // one state read's pass at a time: set before its first await, so a read that comes while it runs (its note read
-  // included) gets the same promise and never starts a second pass. No follow-up pass: a note turns INCOMING only in an
-  // ask's run, which holds POOL_DEPOSIT_LOCK and finishes that note itself; a later state read settles what it leaves.
+  // included) gets the same promise and never starts a second read (its proof pass part: statePass). No follow-up read:
+  // a note turns INCOMING only in an ask's run, which holds POOL_DEPOSIT_LOCK and finishes that note itself; a later
+  // state read settles what it leaves.
   let reading: Promise<void> | null = null;
   // a state read's proof pass, while it runs (a landing's or a tap's pass runs on its own)
   let passing: Promise<unknown> | null = null;
+  // a read that finds that pass running (or comes while another read runs, the queue open) asks for one more after it
+  // (one, never a queue): the running pass read the queue's skip before what woke the read (a withdraw's kept-out
+  // record, any tab's), so only a pass after it lets those notes go (queue.ts skip)
+  let passAgain = false;
+  const statePass = (): void => {
+    if (passing !== null) return void (passAgain = true);
+    const stop = solanaStop.signal;
+    passing = proofs().finally(() => {
+      passing = null;
+      const again = passAgain;
+      passAgain = false;
+      if (again && !stop.aborted) statePass();
+    });
+  };
   // the dead pending sell records are settled once per page load, not on every state read (a re-ask settles its own)
   let deadSettled = false;
   let backsResumed = false;
@@ -2097,10 +2133,17 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     return Promise.all([evm, solanaRead()]).then(() => {});
   };
   const solanaRead = (): Promise<void> => {
-    if (reading) return reading;
+    if (reading) {
+      // this read's own pass part, though the read itself is the running one's
+      if (open !== null) statePass();
+      return reading;
+    }
     const p = (async () => {
       try {
-        if (settling) return await settling;
+        if (settling) {
+          if (open !== null) statePass();
+          return await settling;
+        }
         const mine = (await readNotes(await page.store())).filter((n) => n.scope === scope);
         if (mine.some((n) => n.state === "INCOMING")) await settleSolana();
         // a failed reserved pass never holds back a send owed (the money on W): the finish below still runs
@@ -2109,7 +2152,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         if (mine.some((n) => n.state === "INCOMING" && (n.ref.kind === "return" || (n.ref.kind === "second" && n.ref.id.id === "R"))) || (await keptSells(page.store).list().catch(() => [])).length > 0) await settleSells();
         // the next buy's proofs (card signpage-pool-pins): a page that loads with the pool's notes landed opens the
         // queue, and each read while it is open makes the epoch's proofs again, one pass at a time
-        if (open !== null || mine.some((n) => n.state === "UNSPENT" || n.state === "HELD")) passing ??= proofs().finally(() => (passing = null));
+        if (open !== null || mine.some((n) => n.state === "UNSPENT" || n.state === "HELD")) statePass();
         await finishOnward();
         // a sell request whose page closed before it signed: refused "failed", so its id is never id_reused for good
         if (locks && !deadSettled) {
@@ -2255,10 +2298,16 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         const q = await evmQueueOf(chain);
         const ask = { kind: "pool.withdraw", chain, token: null, amount: 0n, slippageBps: 0, decimals: 18 } as const;
         // the run's planned notes out of every tab's proof queue and every other plan until it ends (as the Solana run's)
-        const keepOut = async (ids: readonly string[], spanMs: bigint): Promise<void> => void (await keepOutNotes(ops, opId, ids, BigInt(Date.now()) + spanMs));
+        const keepOut = async (ids: readonly string[], spanMs: bigint): Promise<void> => void (await keepOutNotes(ops, opId, ids, BigInt(Date.now()), spanMs));
         const end = await runEvmPoolWithdraw({ ...h, ...(q ? { drop: (id: string) => q.drop(id) } : {}), stage: write, owe, keep, keepOut }, { ...ask }, ready.to, ready.amount, ready.maxFee);
         write(end.stage, end.txs, end.pending, end.arrived, end.held);
         if (end.feeNeeded !== undefined) void (writes = writes.then(() => ops.update("ops", opId, (v) => mergeWithdrawOp(v, { feeNeeded: end.feeNeeded! }))).catch(() => {}));
+        // why a run or a part ended on a throw, on the record and the page's console (public words only: legCause), as
+        // the Solana run's
+        if (end.cause !== undefined) {
+          console.warn(`withdraw ${end.stage}: ${end.cause}`);
+          void (writes = writes.then(() => ops.update("ops", opId, (v) => mergeWithdrawOp(v, { cause: end.cause! }))).catch(() => {}));
+        }
         if (end.pending) owedScan = true;
       } finally {
         notes.close();
@@ -2337,7 +2386,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
             ...(over.wait ? { wait: over.wait } : {}),
             keepRelease: async (noteId, attempt, release) => void (await keepRelease(ops, opId, noteId, attempt, release)),
             owedNotes,
-            keepOut: async (ids, spanMs) => void (await keepOutNotes(ops, opId, ids, BigInt(Date.now()) + spanMs)),
+            keepOut: async (ids, spanMs) => void (await keepOutNotes(ops, opId, ids, BigInt(Date.now()), spanMs)),
             // the release's withdrawn value is on the note's mark: the app reads the state again, as after a buy's
             marked: () => {
               for (const f of watchers) f();

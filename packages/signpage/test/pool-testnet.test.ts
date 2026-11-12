@@ -550,7 +550,9 @@ test("review P2-1 and P2-2 of a34c1626, P2-1 and P3-3 of e3489b3b: every Solana 
   assert.equal([...src.matchAll(/outSignal: \(\) => solanaStop\.signal,/g)].length, 1);
   // the Solana deposit host's stop: its waits between attempts end at a sign out's tap (review of f0e7bd38, P2-1)
   assert.equal([...src.matchAll(/ stop: solanaStop\.signal,/g)].length, 1);
-  assert.equal([...src.matchAll(/solanaStop\.signal/g)].length, 8);
+  // the state read's pass: its one more pass after it never runs past a sign out
+  assert.equal([...src.matchAll(/const stop = solanaStop\.signal;\n {4}passing = proofs\(\)/g)].length, 1);
+  assert.equal([...src.matchAll(/solanaStop\.signal/g)].length, 9);
   // the settle pair: the page's two seats, the helper's with the window-long retry
   assert.match(src, /solanaPacedRpc\(pageHelperRpc\(TRADE_HELPER, SOLANA_RPC_WINDOW_RETRY, kind\)\)\]/);
   assert.match(src, /solanaPacedRpc\(testnetRpc\(TESTNET_RPCS\.solana\[1\], SOLANA_RPC_WINDOW_RETRY, kind\)\)\]/);
@@ -1774,13 +1776,30 @@ const twoDocs = async (values: bigint[], refs: (NoteRef | undefined)[], times: b
       await onWait?.();
     },
   });
-  const qPool = { ...wd.host.pool, bind: (b: Parameters<typeof wd.host.pool.bind>[0], s?: AbortSignal) => wd.host.pool.bind({ ...b, tipCap: b.tipCap ?? 1n }, s) };
+  // hold.on(): the frame's pass waits at its time read (past its skip read) until hold.off()
+  let gate: Promise<void> | null = null;
+  let open = (): void => {};
+  const hold = {
+    on: () => void (gate = new Promise<void>((r) => (open = r))),
+    off: () => {
+      gate = null;
+      open();
+    },
+  };
+  const qPool = {
+    ...wd.host.pool,
+    now: async (...a: Parameters<typeof wd.host.pool.now>) => {
+      if (gate !== null) await gate;
+      return wd.host.pool.now(...a);
+    },
+    bind: (b: Parameters<typeof wd.host.pool.bind>[0], s?: AbortSignal) => wd.host.pool.bind({ ...b, tipCap: b.tipCap ?? 1n }, s),
+  };
   const fetchFn = (async (_url: string, init: { body: string }) => {
     const { pool, tx } = JSON.parse(init.body) as { pool: string; tx: string };
     return new Response(JSON.stringify(await wd.host.send(pool, base64.decode(tx))), { status: 200 });
   }) as unknown as typeof fetch;
   const mk = (pool: unknown) => testnetPool({ store: async () => wd.w, seed64: async () => SEED64.slice() }, { pin: wd.host.pin, rpcs: wd.host.rpcs, pool: pool as never, prover: { vault: signalsProver(), stop: () => {} }, fetch: fetchFn, hardwareConcurrency: 4, now: () => NOW + slept, wait: wd.host.wait } as never);
-  return { wd, B, frame: mk(qPool), top: mk(wd.host.pool), onWait: (f: () => Promise<unknown>) => void (onWait = f) };
+  return { wd, B, hold, frame: mk(qPool), top: mk(wd.host.pool), onWait: (f: () => Promise<unknown>) => void (onWait = f) };
 };
 const RET: NoteRef = { kind: "return", c: "sol", l: 7n, j: 0 };
 
@@ -1793,6 +1812,33 @@ test("two pages, TOPO 1: the frame holds the user's note ready; the sheet's fund
   onWait(() => frame.proofs());
   await top.withdraw({ chain: "solana", to: WORLD.TO, amount: 5_000_000n, maxFee: WORLD.COST }, "op-w");
   assert.equal(wd.releases.length, 1, JSON.stringify(await wd.w.get("ops", "op-w")));
+});
+
+test("(review 4 P2) two pages, TOPO 1 with the frame's pass running when the keep-out is written: the one state read that write wakes asks one more pass after it, which lets the note go, and the run sends", async () => {
+  const { wd, hold, frame, top, onWait } = await twoDocs([30_000_000n], [undefined], [WORLD.NOW - 30_000n]);
+  await frame.proofs();
+  assert.equal((await wd.ns.get(wd.ids[0]!))?.state, "HELD", "the frame's ready proof");
+  // the frame's state read's pass, past its skip read, held at its time read
+  hold.on();
+  void frame.stateRead();
+  await new Promise((r) => setTimeout(r, 50));
+  let waits = 0;
+  onWait(async () => {
+    waits++;
+    // the keep-out write's one state read (its store change), while the pass still runs
+    if (waits === 1) await Promise.race([frame.stateRead(), new Promise((r) => setTimeout(r, 50))]);
+    // the running pass ends a few waits on, its own work done; no state read with it
+    if (waits === 3) {
+      hold.off();
+      await new Promise((r) => setTimeout(r, 50));
+    }
+  });
+  try {
+    await top.withdraw({ chain: "solana", to: WORLD.TO, amount: 5_000_000n, maxFee: WORLD.COST }, "op-w");
+    assert.equal(wd.releases.length, 1, JSON.stringify(await wd.w.get("ops", "op-w")));
+  } finally {
+    hold.off();
+  }
 });
 
 test("two pages, TOPO 2: a sell's return note, the frame's pass at the boundary: the record keeps the return note out and the sheet's run sends", async () => {
@@ -1843,7 +1889,7 @@ test("the kept-out record's write reaches another page as a store change (its st
   const fs = frameState(async () => null, (fn) => channel.addEventListener("message", (m) => (seen.push((m as MessageEvent).data), fn((m as MessageEvent).data))));
   fs.watch(() => void woke++);
   try {
-    await keepOutNotes(w, "op-w", ["n1"], BigInt(Date.now()) + 1_000n);
+    await keepOutNotes(w, "op-w", ["n1"], BigInt(Date.now()), 1_000n);
     for (let i = 0; i < 200 && woke === 0; i++) await new Promise((r) => setTimeout(r, 5));
     const e = seen.find((x) => (x as { key?: string }).key === WITHDRAW_PLANNED_KEY) as { kind: string; stores: string[] } | undefined;
     assert.deepEqual(e && { kind: e.kind, stores: e.stores }, { kind: "changed", stores: ["meta"] });
@@ -1859,7 +1905,12 @@ test("the kept-out record's write reaches another page as a store change (its st
 // this epoch waits for the next boundary; the app's hidden frame (a second page on the same store) runs its Base proof
 // queue's pass at that boundary. The run's keep-out record (meta owed/withdraw-sol, written through evmWithdrawRun's
 // keepOut) keeps the frame's queue off the note, so the part binds; the record is gone once the run ends.
-const evmTwoPages = async (heldFirst: boolean) => {
+const evmTwoPages = async (heldFirst: boolean, midPass = false) => {
+  // midPass: the frame's pass is running when the run writes its keep-out (held at its time read, past its skip read),
+  // and the frame gets only the one state read that write wakes, at the run's first wait; the pass ends a few waits on
+  let hang = false;
+  let release: () => void = () => {};
+  const gate = new Promise<void>((r) => (release = r));
   const { w, ns } = await wallet();
   const { evmPoolScopeOf, EVM_EPOCH_MS, EVM_LIFE_MS, EVM_SEND_MARGIN_MS, EVM_LADDER } = await import("../../wallet/src/pool/evm.ts");
   const { WITHDRAW_PLANNED_KEY } = await import("../src/pool-testnet.ts");
@@ -1880,7 +1931,10 @@ const evmTwoPages = async (heldFirst: boolean) => {
   const PROBE = (1n << 127n) - 1n;
   const poolOf = (page: string) => ({
     id: `evm:base-sepolia:${pin.pool.toLowerCase()}`, chain: "evm", scope, ladder: EVM_LADDER, epochMs: EVM_EPOCH_MS, lifeMs: EVM_LIFE_MS, sendMarginMs: EVM_SEND_MARGIN_MS,
-    now: async () => E0 + 1_000n + slept,
+    now: async () => {
+      if (page === "frame" && hang) await gate;
+      return E0 + 1_000n + slept;
+    },
     trees: async (beforeMs: bigint) => {
       const s = new VaultTree(beforeMs > E0 + 500n ? [leaf] : []), l = new VaultTree(beforeMs > E0 + 500n ? [label] : []);
       return { stateTree: s, labelTree: l, stateRoot: s.root ?? 0n, labelRoot: l.root ?? 0n };
@@ -1929,17 +1983,37 @@ const evmTwoPages = async (heldFirst: boolean) => {
     binds.length = 0;
   }
   let atBoundary = 0;
-  // every wait of the sheet's run stands for one of the frame's state reads (which every store write wakes)
-  onWait = async () => {
-    if (slept >= 59_000n) atBoundary++;
-    await frame.stateRead();
-  };
+  if (midPass) {
+    hang = true;
+    void frame.stateRead();
+    await new Promise((r) => setTimeout(r, 50));
+    let waits = 0;
+    onWait = async () => {
+      waits++;
+      // the keep-out write's one state read (its store change), while the pass still runs
+      if (waits === 1) await Promise.race([frame.stateRead(), new Promise((r) => setTimeout(r, 50))]);
+      // the running pass ends 1.5 s in, its own work done; no state read with it
+      if (waits === 3) {
+        hang = false;
+        release();
+        await new Promise((r) => setTimeout(r, 50));
+      }
+    };
+  } else
+    // every wait of the sheet's run stands for one of the frame's state reads (which every store write wakes)
+    onWait = async () => {
+      if (slept >= 59_000n) atBoundary++;
+      await frame.stateRead();
+    };
   await sheet.withdraw({ chain: "base", to: "0x1111111111111111111111111111111111111111", amount: 5n * 10n ** 14n, maxFee: 10n ** 15n }, "op-w");
   const planned = (await w.get("meta", WITHDRAW_PLANNED_KEY)) as Record<string, unknown> | undefined;
   const state = (await ns.get(n.id))?.state;
+  const op = (await w.get("ops", "op-w")) as { stage?: string; cause?: string } | undefined;
+  hang = false;
+  release();
   await frame.signedOut();
   await sheet.signedOut();
-  return { atBoundary, binds, planned, state };
+  return { atBoundary, binds, planned, state, op };
 };
 test("(RR7, the page's host) an EVM withdraw keeps its change note out of another page's proof queue while it waits for the boundary; the part binds and the keep-out is cleared at the run's end", async () => {
   const { atBoundary, binds, planned, state } = await evmTwoPages(false);
@@ -1954,4 +2028,11 @@ test("(the page's host) an EVM withdraw of a note another page's queue already h
   assert.equal(binds.filter((b) => b.page === "sheet").length, 1, "the part waited for the frame to let go and reached its bind");
   assert.equal(planned?.["op-w"], undefined, "the keep-out cleared at the run's end");
   assert.equal(state, "UNSPENT");
+});
+test("(review 4 P2, the page's host) an EVM withdraw of a note another page's queue holds, that page's pass running when the keep-out is written: the state read it wakes asks one more pass after it, which lets the note go, and the part binds", async () => {
+  const { binds, planned, state, op } = await evmTwoPages(true, true);
+  assert.equal(binds.filter((b) => b.page === "sheet").length, 1, `the part got its note and reached its bind: ${JSON.stringify(op)}`);
+  assert.equal(planned?.["op-w"], undefined, "the keep-out cleared at the run's end");
+  assert.equal(state, "UNSPENT");
+  assert.match(op?.cause ?? "", /^Error\b/, "the part's stop at its bind on the op's record");
 });
