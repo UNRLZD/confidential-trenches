@@ -59,13 +59,13 @@ test("planted: a script the host did not answer, a page naming none, no host rea
 });
 
 test("the marks on the builds' minified shapes, any quote; a near miss is no mark", () => {
-  const sign = ["const ug=[`created_ms`,`chain`,`token`,`units`,`amount_usd`,`pool_amount`];", "{units:n.out,pool_amount:fk(n.spend,n.spendDecimals)}", "let l={units:fk(a,s),pool_amount:fk(o,9)}"].join(";");
+  const sign = ["const ug=[`created_ms`,`chain`,`token`,`units`,`amount_usd`,`pool_amount`];", "{units:n.out,pool_amount:fk(n.spend,n.spendDecimals)}", "let l={units:fk(a,s),pool_amount:fk(o,9)}", "t>0n&&([u.amount_usd,u.usd_from]=[fk(t,27),`block`])"].join(";");
   assert.deepEqual(marksIn("sign", sign), NAMES.sign);
   assert.deepEqual(marksIn("sign", sign.replaceAll("`", '"')), NAMES.sign);
   const app = ["c=th(e.pool_amount);e.kind===", '{"data-realized-asset":e.asset}'].join(";");
   assert.deepEqual(marksIn("app", app), NAMES.app);
   // the keys before this card, a buy with no SOL, a fill at another scale, the field never read, another attribute
-  const near = ["[`created_ms`,`chain`,`token`,`units`,`amount_usd`]", "{units:n.out}", "pool_amount:fk(o,6)", "e.pool_amount", '{"data-realized":e.asset}'].join(";");
+  const near = ["[`created_ms`,`chain`,`token`,`units`,`amount_usd`]", "{units:n.out}", "pool_amount:fk(o,6)", "e.pool_amount", '{"data-realized":e.asset}', "[u.amount_usd,u.usd_from]=[e,`live`]"].join(";");
   assert.deepEqual(marksIn("sign", near), []);
   assert.deepEqual(marksIn("app", near), []);
 });

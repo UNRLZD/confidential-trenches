@@ -3,8 +3,9 @@
 // trade records, and the deployed signing page writes the records it draws them from. It reads what APP_HOST and
 // SIGN_HOST serve: each page, then every script the page names, and checks the bundles hold:
 //   - SIGN_HOST: the state sends an op's pool_amount (src/state.ts's op detail keys, kit 1.10), a filled pool buy's op
-//     is written with the SOL it spent (src/positions.ts recordPoolBuy: pool_amount from its spend at its decimals), and
-//     the fill reads each filled trade's own transaction and writes its SOL at 9 decimals (src/trade-fill.ts);
+//     is written with the SOL it spent (src/positions.ts recordPoolBuy: pool_amount from its spend at its decimals),
+//     the fill reads each filled trade's own transaction and writes its SOL at 9 decimals, and an old sale's USD at the
+//     SOL/USD feed write of its own block, marked usd_from "block" (src/trade-fill.ts);
 //   - APP_HOST: Portfolio's trade book reads pool_amount from the ops (model.ts tradeBook) and a closed row draws its
 //     realized in the pool's asset (data-realized-asset).
 // The behaviour (the rule on the owner's four mainnet transactions of 12 Nov, the fill of release 118's records, the
@@ -34,6 +35,8 @@ export const MARKS = {
     ["the state sends an op's pool_amount", new RegExp(`${Q}units${Q},${Q}amount_usd${Q},${Q}pool_amount${Q}\\]`)],
     ["a filled pool buy's op names its SOL", new RegExp(`units:${ID}\\.out,pool_amount:${ID}\\(${ID}\\.spend,${ID}\\.spendDecimals\\)`)],
     ["the fill writes each trade's SOL from its transaction", new RegExp(`pool_amount:${ID}\\(${ID},9\\)`)],
+    // the CO's 07:07Z piece: an old sale's USD at its own block's SOL/USD feed write, marked as such
+    ["an old sale's USD at its block's price, marked block", new RegExp(`\\[${ID}\\.amount_usd,${ID}\\.usd_from\\]=\\[${ID}\\(${ID},27\\),${Q}block${Q}\\]`)],
   ],
   app: [
     ["the trade book reads pool_amount", new RegExp(`${ID}\\(${ID}\\.pool_amount\\)`)],
