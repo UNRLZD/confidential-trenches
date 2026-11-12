@@ -51,9 +51,10 @@ test("the whole sequence: nothing open, both round trips closed with their reali
   assert.equal(closed.length, 2);
   const [second, first] = closed;
   // newest close first; bought and sold in cents to the nearest (a $0.0999999 buy is $0.10, card
-  // portfolio-counts-money-an-open-buy-holds); realized from the exact figures, rounded down
-  assert.deepEqual([first!.bought, first!.sold, first!.realized, first!.realizedBps], [10n, 5n, -6n, -5232]);
-  assert.deepEqual([second!.bought, second!.sold, second!.realized, second!.realizedBps], [10n, 10n, -1n, -250]);
+  // portfolio-counts-money-an-open-buy-holds), the realized the Sold less the Bought the row shows (so the row adds up),
+  // its percent from the exact figures
+  assert.deepEqual([first!.bought, first!.sold, first!.realized, first!.realizedBps], [10n, 5n, -5n, -5232]);
+  assert.deepEqual([second!.bought, second!.sold, second!.realized, second!.realizedBps], [10n, 10n, 0n, -250]);
   // the pool asset's own figures, exact
   assert.deepEqual([first!.asset, first!.realizedAsset], ["SOL", "-0.000631252"]);
   assert.deepEqual([second!.asset, second!.realizedAsset], ["SOL", "-0.000029886"]);
@@ -63,7 +64,7 @@ test("the whole sequence: nothing open, both round trips closed with their reali
   // the header's figures follow the closed list
   assert.equal(stats(closed).trades, 2);
   // the rows' own figures added, as the calendar adds them
-  assert.equal(pf.totals!.realized30, -7n);
+  assert.equal(pf.totals!.realized30, -5n);
   // Activity: each trade with its own transaction and size
   const acts = activity(snap.state!.ops, d).filter((r) => r.kind === "buy" || r.kind === "sell");
   assert.deepEqual(acts.map((r) => [r.kind, r.txs[0]!.hash, r.usd]), [["sell", TX.sell2, 9n], ["buy", TX.buy2, 9n], ["sell", TX.sell1, 4n], ["buy", TX.buy1, 10n]]);
@@ -111,12 +112,13 @@ test("R4: an open row whose buy names no USD has no cost, bought or PnL, and add
   const pf = portfolio(snap, heldData(snap, markets, new Map(), NOW), NOW);
   const r = pf.rows[0]!;
   assert.deepEqual([r.cost, r.bought, r.value, r.pnl, r.pnlBps], [null, null, 8n, null, null]);
-  assert.deepEqual([pf.totals!.inPos, pf.totals!.unreal], [7n, 0n]);
+  // the row's own $0.08 in the Positions tile (review P3-1: the tiles are the sums of the rows' figures)
+  assert.deepEqual([pf.totals!.inPos, pf.totals!.unreal], [8n, 0n]);
   // beside a row with a known cost: only that row's PnL counts
   const known = { ...unknown, token: "So11111111111111111111111111111111111111112", cost: "0.05" };
   const two = base([noUsd as Operation], [unknown, known]);
   const pf2 = portfolio(two, heldData(two, [...markets, { ...markets[0]!, token: known.token, symbol: "K", price_usd: "0.000003" }], new Map(), NOW), NOW);
-  assert.deepEqual([pf2.totals!.inPos, pf2.totals!.unreal], [17n, 5n]);
+  assert.deepEqual([pf2.totals!.inPos, pf2.totals!.unreal], [18n, 5n]);
 });
 
 test("the same rows from Base, Robinhood and NEAR records: ETH on the EVM pools, USD only on NEAR", () => {

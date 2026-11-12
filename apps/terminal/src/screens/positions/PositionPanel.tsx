@@ -72,8 +72,7 @@ export function PositionPanel({ row, s, now, onShare }: { row: Row; s: Sell; now
       </div>
       <div className="tk-quick" data-testid="position-quick">
         {QUICK.map((q) => {
-          // the exact (floored) cost and value, never the cents drawn to the nearest: a dust row is never "up"
-          const b = q === "initials" ? (row.costDown === null ? null : initialsBps(row.costDown, row.worth)) : q;
+          const b = q === "initials" ? (row.cost === null ? null : initialsBps(row.cost, row.value)) : q;
           const amount = b === null ? null : sellAmount(row.units, b, decimals);
           const live = running && b !== null && s.bps === b;
           const off = !s.ready || running || noRoute || amount === null;

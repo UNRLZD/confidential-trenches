@@ -136,9 +136,11 @@ test("totals: cash is the vault plus ready wallets, on the way is arming and ret
   const t = portfolio(snap(STATE), data(), NOW).totals!;
   assert.equal(t.cash, 7318n + 1000n);
   assert.equal(t.onWay, 750n);
-  assert.equal(t.inPos, 5455n + 1012n + 50n + 4000n);
+  // the sums of the rows' own figures, each to the nearest cent (WTH $54.56, BOAR $10.13: card
+  // portfolio-counts-money-an-open-buy-holds, review P3-1)
+  assert.equal(t.inPos, 5456n + 1013n + 50n + 4000n);
   assert.equal(t.total, t.cash + t.onWay + t.inPos);
-  assert.equal(t.unreal, 2955n - 198n + (50n - 90n));
+  assert.equal(t.unreal, 2956n - 197n + (50n - 90n));
   assert.equal(t.partial, true);
   const priced = portfolio(snap({ ...STATE, positions: STATE.positions.filter((x) => x.token !== "NEAIR") }), data(), NOW).totals!;
   assert.equal(priced.partial, false);

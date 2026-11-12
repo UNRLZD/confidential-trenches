@@ -135,7 +135,7 @@ export function SellBox({ row, s, slippageBps = 1000, initialPercent = "50", onB
   const last = preview?.p ?? null;
   const pending = last !== null && (shown === null || running);
   const outC = (shown ?? last) ? cents((shown ?? last)!.out_usd) : null;
-  const share = bps === null ? null : shareCents(row.worth, bps);
+  const share = bps === null ? null : shareCents(row.value, bps);
   const now = s.now();
   const state = stateId(s.phase, now, "sell") ?? (noRoute ? "S8.33" : "S8.29");
 

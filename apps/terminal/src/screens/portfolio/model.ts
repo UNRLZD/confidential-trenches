@@ -182,14 +182,11 @@ export interface Row {
   /** The token's own decimals as the signing page's state names them (positions[].decimals, kit 1.8; card
    *  signpage-state-holdings); null from a page that names none. Never the helper's: a sell is sized from it. */
   decimals: number | null;
-  /** Null: unknown (the signing page's cost "0": a wallet's buy with no price read, src/positions.ts). */
+  /** Null: unknown (the signing page's cost "0": a wallet's buy with no price read, src/positions.ts). To the nearest
+   *  cent, as every row figure: the totals are the sums of the figures the rows show. */
   cost: bigint | null;
-  /** The cost rounded down, for the totals; `cost` is the row's own figure, to the nearest cent. */
-  costDown: bigint | null;
-  /** Null: no price (S10.4). The row's own figure, to the nearest cent. */
+  /** Null: no price (S10.4). To the nearest cent. */
   value: bigint | null;
-  /** The value rounded down, for the totals (a total never shows more than is there); null with no price. */
-  worth: bigint | null;
   pnl: bigint | null;
   pnlBps: number | null;
   /** Null: no USD for the buys (and no cost). */
@@ -256,12 +253,10 @@ function rowOf(p: SignpageState["positions"][number], d: PortfolioData, ops: rea
   const x = d.extra(p.chain, p.token) ?? {};
   // the signing page's cost "0" is unknown (src/positions.ts): no cost, so no bought and no PnL, never its value as profit
   const cost = /[1-9]/.test(p.cost) ? centsNear(p.cost) : null;
-  const costDown = /[1-9]/.test(p.cost) ? cents(p.cost) : null;
-  // a zero price is no read (no route quoted it): the value is the dash, never $0.00 (owner 10 Nov 18:12Z); the row's
-  // figures to the nearest cent, the totals' rounded down
+  // a zero price is no read (no route quoted it): the value is the dash, never $0.00 (owner 10 Nov 18:12Z); every row
+  // figure to the nearest cent (a $0.0099999 buy is $0.01), its PnL the difference of the two it shows
   const priced = m?.price != null && /[1-9]/.test(m.price) ? m.price : null;
   const value = priced === null ? null : mulCentsNear(p.amount, priced);
-  const worth = priced === null ? null : mulCents(p.amount, priced);
   const pnl = value === null || cost === null ? null : value - cost;
   let selling: Row["selling"] = null;
   for (const o of ops) {
@@ -277,14 +272,12 @@ function rowOf(p: SignpageState["positions"][number], d: PortfolioData, ops: rea
     units: p.amount,
     decimals: p.decimals ?? null,
     cost,
-    costDown,
     value,
-    worth,
     pnl,
     pnlBps: pnl === null || cost === null ? null : bps(pnl, cost),
     bought: centsNear(x.bought) ?? cost,
-    sold: cents(x.sold) ?? 0n,
-    realized: cents(x.realized) ?? 0n,
+    sold: centsNear(x.sold) ?? 0n,
+    realized: centsNear(x.realized) ?? 0n,
     mark: x.mark ?? (m && m.route === false ? "noRoute" : null),
     exit: x.exit ?? null,
     wallets: p.wallets.length,
@@ -309,16 +302,14 @@ export function sortRows(rows: readonly Row[]): Row[] {
  *  names no USD adds nothing. */
 export function realized30(rows: readonly Row[], closed: readonly ClosedTrade[], now: number): bigint {
   let r = rows.reduce((a, x) => a + x.realized, 0n);
-  // each closed trade's realized as its row draws it (closedRows: from the exact figures, to cents), so the total, the
-  // calendar and the rows add up
+  // each closed trade's realized as its row draws it (closedRows: its Sold less its Bought, each to the nearest cent),
+  // so the total, the calendar and the rows add up
   for (const c of closed) {
-    const sold = cents(c.sold);
-    const bought = cents(c.bought);
+    const sold = centsNear(c.sold);
+    const bought = centsNear(c.bought);
     // a side with no USD: the realized is unknown, not counted
     if (sold === null || bought === null || c.closed_at <= now - 30 * DAY || c.closed_at > now) continue;
-    const sx = fx(c.sold ?? undefined);
-    const bx = fx(c.bought ?? undefined);
-    r += sx !== null && bx !== null ? (cents(unfx(sx - bx)) ?? 0n) : sold - bought;
+    r += sold - bought;
   }
   return r;
 }
@@ -511,14 +502,15 @@ export function totals(s: SignpageState, rows: readonly Row[], closed: readonly 
   let inPos = held.cents;
   let unreal = 0n;
   let partial = held.partial;
+  // the sums of the rows' own figures (each to the nearest cent), so the tiles and the rows add up
   for (const r of rows) {
-    if (r.worth === null) {
+    if (r.value === null) {
       partial = true;
-      inPos += r.costDown ?? 0n;
+      inPos += r.cost ?? 0n;
     } else {
-      inPos += r.worth;
+      inPos += r.value;
       // a row of unknown cost has no PnL: its value is in the positions, none of it in the unrealized
-      if (r.pnl !== null && r.costDown !== null) unreal += r.worth - r.costDown;
+      if (r.pnl !== null) unreal += r.pnl;
     }
   }
   return { cash, parts, offPool, onWay, held: held.cents, inPos, total: cash + onWay + inPos, unreal, realized30: realized30(rows, closed, now), partial };
@@ -713,16 +705,15 @@ export function closedRows(d: PortfolioData): ClosedRow[] {
   return d.closed
     .map((c) => {
       const m = d.market(c.chain, c.token);
-      // drawn to the nearest cent, as an open row's (a $0.0999999 buy is $0.10); the realized from the exact figures
+      // drawn to the nearest cent, as an open row's (a $0.0999999 buy is $0.10), the realized the Sold less the Bought it
+      // shows, so the row adds up; its percent from the exact figures (a $0.0523 loss on $0.1000 is −52.3%)
       const bought = centsNear(c.bought);
       const sold = centsNear(c.sold);
-      // realized from the exact figures, then to cents: two floors first would put a cent and its percent off (a
-      // $0.0523 loss on $0.1000 drawn as −$0.06 and −60%)
       const bx = fx(c.bought ?? undefined);
       const sx = fx(c.sold ?? undefined);
       const exact = bx !== null && sx !== null ? sx - bx : null;
       // a side with no USD: realized and its percent unknown (a dash), as for a sale with none
-      const realized = sold === null || bought === null ? null : exact !== null ? cents(unfx(exact)) : sold - bought;
+      const realized = sold === null || bought === null ? null : sold - bought;
       const realizedBps = realized === null || bought === null ? null : exact !== null && bx !== null ? (bx === 0n ? null : Number((exact * 10000n) / bx)) : bps(realized, bought);
       const ai = fx(c.bought_asset ?? undefined);
       const ao = fx(c.sold_asset ?? undefined);
