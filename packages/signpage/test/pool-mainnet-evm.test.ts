@@ -1,8 +1,9 @@
 // SIGN_HOST's build on Base and Robinhood (card evm-pools-on-mainnet): the wallet's mainnet EVM pins (EVM_POOLS.base,
 // EVM_POOLS.robinhood), the page's USD price pair (the pool list's two seats) and the chains' positions, which read
 // each W on the helper's route alone (pageEvmPassReads), so a public provider is never named one device's Ws. pool.deposit
-// and pool.withdraw run there (card evm-deposit-on-mainnet); pool.buy, pool.sell and the buy's and sale's follows stay
-// refused, each read nothing.
+// and pool.withdraw run there (card evm-deposit-on-mainnet), and pool.buy and its follow, as the build carries the
+// chain's withdraw and a refused buy's ETH on W goes back into the pool (src/pool-carry-evm.ts); pool.sell and its
+// follow stay refused, each read nothing, until a restored device holds the buy records to sell from.
 //   node --test test/pool-mainnet-evm.test.ts      (from packages/signpage)
 import assert from "node:assert/strict";
 import { after, test } from "node:test";
@@ -86,11 +87,11 @@ test("a Base and a Robinhood pool.sell read the token's decimals on the chain's 
   assert.ok(calls.length > 0 && calls.every((c) => String(c.to ?? TOKEN).toLowerCase() === TOKEN.toLowerCase()), "only the token is read, never a W");
 });
 
-// On SIGN_HOST's build (card evm-deposit-on-mainnet) a Base and a Robinhood pool.deposit, a deposit from U and
-// pool.withdraw reach their runners, as the build carries the chain's withdraw (src/pool-testnet.ts poolWayOut). The buy
-// and the sale stay closed until a refused swap's ETH on W has its way back (card evm-buy-and-sell-on-mainnet): each is
-// refused and reads nothing.
-test("on SIGN_HOST's build a Base and a Robinhood pool.deposit, a deposit from U and pool.withdraw reach their runners; pool.buy and pool.sell are refused not_allowed and read nothing", async () => {
+// On SIGN_HOST's build a Base and a Robinhood pool.deposit, a deposit from U, pool.withdraw and pool.buy reach their
+// runners, as the build carries the chain's withdraw (src/pool-testnet.ts poolWayOut) and a refused buy's ETH on W has
+// its way back (src/pool-carry-evm.ts). The sale stays closed until a restored device holds the buy records to sell
+// from: refused, reading nothing.
+test("on SIGN_HOST's build a Base and a Robinhood pool.deposit, a deposit from U, pool.withdraw and pool.buy reach their runners; pool.sell is refused not_allowed and reads nothing", async () => {
   const WITHDRAW: Ask = { kind: "pool.withdraw", chain: "base", token: null, amount: 10n ** 15n, slippageBps: 0, decimals: 18 };
   for (const chain of ["base", "robinhood"] as const) {
     const r = rpcs();
@@ -106,24 +107,27 @@ test("on SIGN_HOST's build a Base and a Robinhood pool.deposit, a deposit from U
         evmSell: () => () => (ran.push("sell"), { error: "not_allowed" }),
       },
     });
-    for (const ask of [BUY, SELL, { ...SELL, amount: 0n, shareBps: 2_500 }] as Ask[]) {
+    for (const ask of [SELL, { ...SELL, amount: 0n, shareBps: 2_500 }] as Ask[]) {
       assert.deepEqual(t.flow({ ...ask, chain }, ctx), { error: "not_allowed" }, `${chain}: ${ask.kind} refused`);
     }
-    assert.deepEqual(ran, [], `${chain}: no buy or sale runner reached`);
-    assert.deepEqual(r.calls, [], `${chain}: the refused buy and sale read nothing`);
+    assert.deepEqual(ran, [], `${chain}: no sale runner reached`);
+    assert.deepEqual(r.calls, [], `${chain}: the refused sale reads nothing`);
+    t.flow({ ...BUY, chain }, ctx);
+    assert.deepEqual(ran, ["buy"], `${chain}: the buy reaches its runner`);
     t.flow({ ...DEPOSIT, chain }, ctx);
     t.depositFrom({ chain, token: null, amount: "0.001", slippage_bps: 0 }, { s: "1", i: 0, u: "x" } as never, ctx);
-    assert.deepEqual(ran, [`deposit ${chain}`, `deposit ${chain}`], `${chain}: the deposit and the deposit from U reach the deposit runner`);
+    assert.deepEqual(ran.slice(1), [`deposit ${chain}`, `deposit ${chain}`], `${chain}: the deposit and the deposit from U reach the deposit runner`);
     t.flow({ ...WITHDRAW, chain }, ctx);
     assert.deepEqual(withdrawn, [chain], `${chain}: the withdraw form is opened`);
     await t.signedOut();
   }
 });
 
-test("on SIGN_HOST's build a state read follows no Base or Robinhood buy left pending, nor a sale left open: neither follow reads the chain", async () => {
+test("on SIGN_HOST's build a state read follows a Base and a Robinhood buy left pending, and no sale left open", async () => {
   const { EVM_POSITION_COSTS_KEY } = await import("../src/pool-buy-evm.ts");
   const { EVM_OPEN_SELLS_KEY } = await import("../src/pool-sell-evm.ts");
-  for (const chain of ["base", "robinhood"] as const) {
+  for (const chain of ["base", "robinhood"] as const)
+  for (const left of ["buy", "sale"] as const) {
     const pin = EVM_POOLS[chain]!;
     const from = pin.fromBlock.toString();
     const w = await openWalletStore({ indexedDB: new IDBFactory() });
@@ -131,8 +135,8 @@ test("on SIGN_HOST's build a state read follows no Base or Robinhood buy left pe
     await w.insertSeed({ v: 1, entropy: new Uint8Array(16), source: "code", code_saved: true, created_ms: 1 });
     const W = "0x" + "4b".repeat(20);
     const buy = { nullifier: "123", from, deadlineMs: String(Date.now() + 60_000), minOut: "1", value: "1000", feeCap: "1", feeRecipient: pin.feeRecipient.toLowerCase() };
-    await w.update("meta", EVM_POSITION_COSTS_KEY, () => ({ [W]: { mint: TOKEN.toLowerCase(), decimals: 6, chain, state: "pending", route: { venue: "uniswap-v3", adapter: "0x" + "22".repeat(20), path: { venue: "uniswap-v3", tokens: [], fees: [] } }, buy } }));
-    await w.update("meta", EVM_OPEN_SELLS_KEY, () => ({ n1: { note: "n1", chain, w: W, token: TOKEN.toLowerCase(), amount: "1", precommitment: "7", nonce: "0", deadline: String(Math.floor(Date.now() / 1000) + 300), from, least: "1" } }));
+    if (left === "buy") await w.update("meta", EVM_POSITION_COSTS_KEY, () => ({ [W]: { mint: TOKEN.toLowerCase(), decimals: 6, chain, state: "pending", route: { venue: "uniswap-v3", adapter: "0x" + "22".repeat(20), path: { venue: "uniswap-v3", tokens: [], fees: [] } }, buy } }));
+    if (left === "sale") await w.update("meta", EVM_OPEN_SELLS_KEY, () => ({ n1: { note: "n1", chain, w: W, token: TOKEN.toLowerCase(), amount: "1", precommitment: "7", nonce: "0", deadline: String(Math.floor(Date.now() / 1000) + 300), from, least: "1" } }));
     const asked: string[] = [];
     const head = (url: string): EvmRpc => Object.assign(async (method: string) => {
       asked.push(method);
@@ -145,7 +149,9 @@ test("on SIGN_HOST's build a state read follows no Base or Robinhood buy left pe
     });
     await t.stateRead();
     await new Promise((ok) => setTimeout(ok, 50));
-    assert.deepEqual(asked.filter((m) => m === "eth_blockNumber"), [], `${chain}: no follow read either RPC's head`);
+    const heads = asked.filter((m) => m === "eth_blockNumber").length;
+    if (left === "buy") assert.ok(heads >= 2, `${chain}: the buy's follow reads both RPCs' heads (${heads})`);
+    else assert.equal(heads, 0, `${chain}: no sale follow reads either RPC's head`);
     await t.signedOut();
   }
 });

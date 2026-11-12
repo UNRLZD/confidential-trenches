@@ -998,10 +998,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     marks: async () => readReservedMarks(await page.store()),
   });
   const evmBuy = (chain: "base" | "robinhood") => {
-    // first, alone: the testnet build only, folded at build time, so SIGN_HOST's bundle carries none of the buy. On
-    // mainnet a swap that misses its floor leaves the chunk on W with no way back yet, so the buy stays closed there
-    if (!POOL_TESTNET) return null;
-    // and only where the build carries the chain's withdraw (poolWayOut)
+    // first, alone: only where the build carries the chain's withdraw (poolWayOut); a swap that misses its floor leaves
+    // the chunk on W, which the chain's carry puts back into the pool (evmCarry)
     if (!wayOut(chain)) return null;
     const e = evmPool(chain);
     if (e === null) return null;
@@ -1047,9 +1045,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   // a buy whose tab ended before its end (the pending record's own follow died with it): followed from its record at
   // each state read, until filled, withdrawn or not_landed (src/pool-buy-evm.ts followPendingEvmBuys); as the buy is
   const evmBuyFollow = (chain: "base" | "robinhood"): void => {
-    // the testnet build only, as the buy (folded at build time)
-    if (!POOL_TESTNET) return;
-    // and only where the build carries the chain's withdraw (poolWayOut)
+    // only where the build carries the chain's withdraw (poolWayOut), as the buy
     if (!wayOut(chain)) return;
     const e = evmPool(chain);
     if (e === null) return;
@@ -1061,9 +1057,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   // under the seed's shared lock; a sign out ends it (evmStop) with nothing signed or written after it
   const evmCarrying = new Set<"base" | "robinhood">();
   const evmCarry = (chain: "base" | "robinhood"): void => {
-    // the testnet build only, as the buy (folded at build time)
-    if (!POOL_TESTNET) return;
-    // and only where the build carries the chain's withdraw (poolWayOut)
+    // only where the build carries the chain's withdraw (poolWayOut), as the buy
     if (!wayOut(chain)) return;
     const e = evmPool(chain);
     if (e === null || !locks || evmCarrying.has(chain)) return;
@@ -1176,8 +1170,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     };
   };
   const evmSell = (chain: "base" | "robinhood") => {
-    // first, alone: the testnet build only, folded at build time, so SIGN_HOST's bundle carries none of the sale (on
-    // mainnet nothing can be bought, and a restored device holds no buy record to sell from). The sale's finding reads,
+    // first, alone: the testnet build only, folded at build time, so SIGN_HOST's bundle carries none of the sale (a
+    // restored device holds no buy record to sell from on mainnet yet). The sale's finding reads,
     // on the pool's two RPCs at one agreed block, only the Ws whose own buy record names the token sold (planEvmSell)
     if (!POOL_TESTNET) return null;
     // and only where the build carries the chain's withdraw (poolWayOut)
