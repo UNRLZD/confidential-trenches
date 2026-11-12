@@ -34,14 +34,16 @@ const REF_CALL = `${BASE_VENUES.poolManager} ${EXTSLOAD}${stateSlot(REF_POOL_ID)
 type Filter = { address?: string; topics?: (string | string[] | null)[]; fromBlock: string; toBlock: string };
 /** The recorded Base fake with planted answers in front: `calls` by "to data" (a function may answer "error" for a
  *  failed read), `logs` for the filters it knows (undefined: the fake's own). Any other eth_call answers "0x", as an
- *  account with no code does. GeckoTerminal is counted and refused (the budget is spent before it). */
-function rig(o: { calls: Map<string, string | (() => string)>; logs: (q: Filter) => unknown[] | undefined }) {
+ *  account with no code does. GeckoTerminal is counted and refused (the budget is spent before it). `hold`: a post with
+ *  a Transfer read of COIN is held (and counted) only once it settles. */
+function rig(o: { calls: Map<string, string | (() => string)>; logs: (q: Filter) => unknown[] | undefined; hold?: Promise<void> }) {
   const chain = B.fakeChain();
   const gt: string[] = [];
   const st = { transfers: 0 };
   const fetch = async (url: string, init: RequestInit): Promise<Response> => {
     if (url.includes("geckoterminal")) return gt.push(url), new Response("{}", { status: 500 });
     const reqs = JSON.parse(String(init.body)) as { id: number; method: string; params: unknown[] }[];
+    if (o.hold !== undefined && reqs.some((r) => r.method === "eth_getLogs" && (r.params[0] as Filter).address === COIN && (r.params[0] as Filter).topics?.[0] === TOPIC.transfer)) await o.hold;
     const mine = reqs.map((r): object | undefined => {
       if (r.method === "eth_call") {
         const c = r.params[0] as { to: string; data: string };
@@ -114,13 +116,18 @@ test("a quiet listed token whose list names its pool (fromHint confirms it): the
   const POOL = `0x${"f0".repeat(20)}`;
   const calls = base();
   v3Pool(calls, POOL, 2_000_000n << 96n);
-  const r = rig({ calls, logs: (q) => (q.address === COIN ? [] : q.address === POOL ? [] : undefined) });
+  // the helper's own background discovery the confirmed hint leaves (card helper-live-run-green-after-122, swaps.ts
+  // verify) is held until the chart has answered, so only the open's own reads are counted
+  let release = () => {};
+  const r = rig({ calls, logs: (q) => (q.address === COIN ? [] : q.address === POOL ? [] : undefined), hold: new Promise<void>((go) => (release = go)) });
   const s = B.open(r.chain, r.clock, { fetch: r.fetch as never, pools: new Map(), gecko: r.budget, sleep: async () => undefined, hint: async () => POOL });
   const a = await s.candles(COIN, "15m", null, 500);
+  const transfers = r.st.transfers;
+  release();
   s.stop();
   assert.equal(a.status, 200, a.body);
   assert.deepEqual(JSON.parse(a.body).candles, [[bucket(900), "0.25", "0.25", "0.25", "0.25", "0"]]);
-  assert.equal(r.st.transfers, 0, "the list's pool needs no discovery");
+  assert.equal(transfers, 0, "the list's pool needs no discovery");
 });
 
 test("several confirmed pools and no swap in the window: the top transfer counterparty is the book, not the lower id (red at 4589273f: no pool)", async () => {
