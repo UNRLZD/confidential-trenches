@@ -14,15 +14,17 @@
 // kit-v1.8 reads everything but an op's detail (card kit-portfolio-reads: created_ms, chain, token, units, amount_usd on
 // any kind), for which its client drops the whole op: it is sent each op with that detail left out, a pool deposit's
 // chain and a deposit's amount_usd fact kept as they are its own (every level below it too). A client at
+// A client that names kit-v1.9 reads everything but an op's pool_amount (card portfolio-shows-pool-trades), for which
+// its client drops the whole op: it is sent each op with pool_amount left out (every level below it too). A client at
 // SIGNPAGE_KIT_VERSION or above gets every message as it is. A change to what the page may send raises the kit's
 // SIGNPAGE_KIT_VERSION and adds the version before it here.
 import { SIGNPAGE_KIT_VERSION } from "../../kit/src/signpage/messages.ts";
 import type { DepositStage, Operation, SignpageKind, SignpageState, Stage } from "../../kit/src/signpage/messages.ts";
 
 /** The levels this page sends at: kit-v1.4's shape, kit-v1.5's (no moved_out, no pool_deposit op), kit-v1.6's (no
- *  pool_deposit op), kit-v1.7's (no position decimals), kit-v1.8's (no op detail; none at the levels below either), or
- *  everything (kit-v1.9 and above). */
-export type KitLevel = "1.4" | "1.5" | "1.6" | "1.7" | "1.8" | "current";
+ *  pool_deposit op), kit-v1.7's (no position decimals), kit-v1.8's (no op detail; none at the levels below either),
+ *  kit-v1.9's (no op pool_amount), or everything (kit-v1.10 and above). */
+export type KitLevel = "1.4" | "1.5" | "1.6" | "1.7" | "1.8" | "1.9" | "current";
 /** A client that posts no hello. */
 export const KIT_DEFAULT: KitLevel = "1.4";
 /** The first kit version that names itself and reads everything this page sends: the kit's own, as [major, minor]. */
@@ -44,7 +46,7 @@ export function kitLevel(kit: string): KitLevel {
   if (!v) return KIT_DEFAULT;
   const [major, minor] = [Number(v[1]), Number(v[2])];
   const from = (m: number, n: number) => major > m || (major === m && minor >= n);
-  return from(CURRENT_FROM[0], CURRENT_FROM[1]) ? "current" : from(1, 8) ? "1.8" : from(1, 7) ? "1.7" : from(1, 6) ? "1.6" : from(1, 5) ? "1.5" : KIT_DEFAULT;
+  return from(CURRENT_FROM[0], CURRENT_FROM[1]) ? "current" : from(1, 9) ? "1.9" : from(1, 8) ? "1.8" : from(1, 7) ? "1.7" : from(1, 6) ? "1.6" : from(1, 5) ? "1.5" : KIT_DEFAULT;
 }
 
 /** kit-v1.4's deposit stages (kit-v1.4:packages/kit/src/signpage/schema.ts DEPOSIT). */
@@ -137,10 +139,17 @@ const noPoolOps = (ops: readonly Operation[]): Operation[] => ops.filter((o) => 
  *  signpage-state-holdings). */
 const noDecimals = (s: SignpageState): SignpageState => ({ ...s, positions: s.positions.map(({ decimals: _d, ...p }) => p) });
 
+/** An op with no pool_amount (card portfolio-shows-pool-trades): kit-v1.9 and before drop an op that has one. */
+function noPoolAmount(o: Operation): Operation {
+  if (!own(o, "pool_amount")) return o;
+  const { pool_amount: _p, ...rest } = o as Operation & { pool_amount?: string };
+  return rest as Operation;
+}
+
 /** An op with no detail (card kit-portfolio-reads): kit-v1.8 and before have no such keys on an op and drop an op that
  *  has one. A pool deposit's chain and a deposit's amount_usd are their own fields at every level that reads them. */
 function noDetail(o: Operation): Operation {
-  const { created_ms: _t, token: _k, units: _u, ...rest } = o;
+  const { created_ms: _t, token: _k, units: _u, ...rest } = noPoolAmount(o);
   const r = rest as Record<string, unknown>;
   if (o.kind !== "pool_deposit") delete r.chain;
   if (o.kind !== "deposit") delete r.amount_usd;
@@ -153,6 +162,7 @@ function noDetail(o: Operation): Operation {
  *  mapped or left out. */
 export function stateFor(level: KitLevel, given: SignpageState): SignpageState {
   if (level === "current") return given;
+  if (level === "1.9") return { ...given, ops: given.ops.map(noPoolAmount) };
   const plain = { ...given, ops: given.ops.map(noDetail) };
   if (level === "1.8") return plain;
   const s = noDecimals(plain);
@@ -180,6 +190,7 @@ export function stageFor(level: KitLevel, stage: Stage): Stage | null {
  */
 export function resultFor(level: KitLevel, kind: SignpageKind, result: unknown): unknown {
   if (level === "current") return result;
+  if (level === "1.9") return kind === "state" ? stateFor(level, result as SignpageState) : result;
   if (level === "1.8") return kind === "state" ? stateFor(level, result as SignpageState) : result;
   if (level === "1.7") return kind === "state" ? stateFor(level, result as SignpageState) : result;
   if (level === "1.6") return kind === "state" ? stateFor(level, result as SignpageState) : result;

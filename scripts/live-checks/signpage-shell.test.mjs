@@ -15,6 +15,8 @@
 // the typed words' screen still takes the frame out, the app's focus() thief getting none of the words.
 // release111.chromium.<width>: the live page on release 111, the mainnet Solana pool pinned (card
 // sign-live-checks-read-a-pinned-page): PASS, with the pinned hosts' cases planted from it at the end.
+// release119.<engine>.<width>: the live page on release 119, the Base and Robinhood pools pinned too (card
+// sign-live-checks-name-evm-pool-hosts): PASS, with the EVM hosts' cases planted from it at the end.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -275,8 +277,10 @@ for (const engine of ["webkit", "chromium", "firefox"]) {
 }
 
 // Card sign-live-checks-read-a-pinned-page: PINNED_HOSTS is the mainnet page's own pinned-pool hosts, read from their
-// sources, so a host the page adds or drops fails here before it fails a live run.
-test("PINNED_HOSTS is exactly the hosts the page's sources name for the mainnet Solana pool's reads", async () => {
+// sources, so a host the page adds or drops fails here before it fails a live run. Card
+// sign-live-checks-name-evm-pool-hosts: the Base and Robinhood pools' list too (pool-testnet.ts MAINNET_POOL_RPCS, two
+// per chain), the hosts a signed-in mainnet page reads each EVM pool on since both are pinned (release 119).
+test("PINNED_HOSTS is exactly the hosts the page's sources name for the mainnet Solana, Base and Robinhood pools' reads", async () => {
   const src = (f) => readFileSync(path.join(HERE, "../..", f), "utf8");
   const one = (f, re) => {
     const m = re.exec(src(f));
@@ -295,8 +299,12 @@ test("PINNED_HOSTS is exactly the hosts the page's sources name for the mainnet 
     ...one("packages/signpage/src/pool-restore.ts", /export const RESTORE_UX_SOLANA = Object\.freeze\(\["([^"]+)", "([^"]+)"\]/),
     new URL(near[0]).host,
     new URL(near[2]).host,
+    // each EVM pool's list on mainnet: exactly two per chain, so a third host the page adds fails here
+    ...one("packages/signpage/src/pool-testnet.ts", /export const MAINNET_POOL_RPCS: [^=]+= \/\* @__PURE__ \*\/ Object\.freeze\(\{\n {2}base: \/\* @__PURE__ \*\/ Object\.freeze\(\["([^"]+)", "([^"]+)"\]\),\n {2}robinhood: \/\* @__PURE__ \*\/ Object\.freeze\(\["([^"]+)", "([^"]+)"\]\),\n\}\);/),
   ];
   assert.deepEqual([...PINNED_HOSTS].sort(), [...new Set(want)].sort());
+  // the mainnet page reads each EVM pool on that list (the testnet build on its testnet pair)
+  assert.match(src("packages/signpage/src/pool-testnet.ts"), /export const pageEvmPoolUrls = \(chain: "base" \| "robinhood"\): readonly string\[\] => \(POOL_TESTNET \? TESTNET_RPCS\[chain\] : MAINNET_POOL_RPCS\[chain\]\);/);
   // the mainnet pair: the public seat (provider A, then its spare) and the helper's route, both paced, nothing else; each
   // with its read's kind (and the helper's its retry: the page's, or a settle's window)
   assert.match(src("packages/signpage/src/pool-testnet.ts"), /: \[solanaPacedRpc\(seatRpc\(SOLANA_PUBLIC_SEAT, kind\)\), solanaPacedRpc\(pageHelperRpc\(TRADE_HELPER, SOLANA_RPC(?:_WINDOW)?_RETRY, kind\)\)\];/);
@@ -349,4 +357,50 @@ test("release 111 planted: a pinned host asked signed out, at no time, or not in
   none.connect = null;
   assert.equal(judge(none).ok, false);
   for (const host of ["api.mainnet-beta.solana.com", "sender.helius-rpc.com", "evil.example"]) badLine(at(st.words.t + 1, { host }), new RegExp(`^BAD no request leaves SIGN_HOST and APP_HOST but for the pinned pool's hosts \\(1: ${host.replaceAll(".", "\\.")}`));
+});
+
+// Card sign-live-checks-name-evm-pool-hosts: release119.<engine>.<width>, the live page on release 119 (main f9cffd25,
+// the Base and Robinhood pools pinned on mainnet too), recorded by this check with their lists' four hosts pinned, 12
+// Nov: signed in it reads each EVM pool on them, each named by its served connect-src, and signed out none: PASS.
+// Before this card the same reads were the 98 stray requests of live run 43184299402. Planted from them: an EVM host
+// the connect-src names that no pin reads on, a pinned EVM host asked signed out or not in the connect-src: FAIL.
+const EVM_HOSTS = ["base-rpc.publicnode.com", "base.api.pocket.network", "rpc.mainnet.chain.robinhood.com", "robinhood.api.pocket.network"];
+const RELEASE119 = Object.entries(ANSWERS.release119).flatMap(([engine, ws]) => Object.entries(ws).map(([width, rec]) => ({ engine, width, rec })));
+for (const { engine, width, rec } of RELEASE119) {
+  test(`recorded live run on release 119 (${engine}, ${width}): PASS, with signed-in reads on the EVM pools' hosts and none signed out`, () => {
+    assert.match(rec.source, /^live https:\/\/confidential\.unrealized\.trade/);
+    const r = judge(rec);
+    assert.equal(r.ok, true, r.lines.join("\n"));
+    for (const h of EVM_HOSTS) assert.ok(rec.requests.some((x) => x.host === h), `the page read an EVM pool on ${h}`);
+    assert.ok(r.lines.some((l) => /^ok  signed out, no request goes past SIGN_HOST and APP_HOST; signed in, only to a pinned pool's host the page's own connect-src names \(0 signed out; [1-9]\d* signed in to /.test(l)), r.lines.join("\n"));
+  });
+}
+
+test("release 119 planted: an EVM host no pin names, a pinned EVM host signed out or not in the connect-src: FAIL", () => {
+  const { rec: g } = RELEASE119.find((x) => x.engine === "chromium");
+  const st = g.steps;
+  const badLine = (j, re) => {
+    assert.equal(j.ok, false, j.lines.join("\n"));
+    assert.ok(j.lines.some((l) => l.startsWith("BAD") && re.test(l)), j.lines.join("\n"));
+  };
+  for (const h of EVM_HOSTS) {
+    const read = g.requests.find((x) => x.host === h);
+    // signed out: before the words' Continue, and after their sign out
+    for (const t of [st.words.t - 1, st.wordsOut.t + 1]) {
+      const r = clone(g);
+      r.requests.push({ ...clone(read), t });
+      badLine(judge(r), /^BAD signed out, no request goes past SIGN_HOST and APP_HOST; signed in, only to a pinned pool's host the page's own connect-src names \(1 signed out/);
+    }
+    const noCsp = clone(g);
+    noCsp.connect = noCsp.connect.filter((x) => x !== h);
+    badLine(judge(noCsp), new RegExp(`not in its connect-src: ${h.replaceAll(".", "\\.")}\\)$`));
+  }
+  // the fee list's and the quote list's hosts, in the connect-src but no pin's: stray even signed in
+  const read = g.requests.find((x) => x.host === EVM_HOSTS[0]);
+  for (const host of ["mainnet.base.org", "robinhood.drpc.org", "base-mainnet.public.blastapi.io"]) {
+    assert.ok(g.connect.includes(host), `${host} is in the served connect-src`);
+    const r = clone(g);
+    r.requests.push({ ...clone(read), t: st.words.t + 1, host });
+    badLine(judge(r), new RegExp(`^BAD no request leaves SIGN_HOST and APP_HOST but for the pinned pool's hosts \\(1: ${host.replaceAll(".", "\\.")}\\)$`));
+  }
 });

@@ -54,7 +54,8 @@
 //   cost made of part of its Ws.
 // - The pool buy's ops record (recordPoolBuy, review P3-1 of card kit-portfolio-reads): written once its run ends, as
 //   state.ts's op contract reads it: kind "buy", its end stage, its txs, the error code of a refusal, its time, chain and
-//   token, and amount_usd its asked spend at that price. Nothing secret. A run a closed tab ended writes none, nor one
+//   token, and amount_usd its asked spend at that price; filled, the token W received (units) and the SOL it spent
+//   (pool_amount, kit 1.10). Nothing secret. A run a closed tab ended writes none, nor one
 //   that answered "sent" (no end yet).
 // - When: a pass at the sign-in's first state read, and again each time a pool buy or sell run ends; never inside a
 //   state read, which only takes the last pass. One pass at a time: a refresh asked while one runs runs once more after
@@ -456,7 +457,11 @@ export async function recordPoolBuy(store: BuyRecordStore, id: string, f: PoolBu
   // record with no tx as a trade-box one
   if (!FINAL.has(stage)) return;
   const txs = "error" in answer ? [] : answer.result.txs.map((t) => ({ chain: t.chain, hash: t.hash }));
-  await store.put("ops", id, { kind: "buy", stage, txs, ...("error" in answer ? { code: answer.error } : {}), created_ms: f.createdMs, chain: "solana", token: f.token, ...(usd === null ? {} : { amount_usd: usd }) });
+  // a filled buy's own figures (kit 1.10 OpDetail, card portfolio-shows-pool-trades): the token W received, read back on
+  // both RPCs, and the SOL its request spent at the venue; with no `out` told, src/trade-fill.ts reads both from the
+  // buy's transaction
+  const moved = stage === "filled" && f.out !== undefined && DEC.test(f.out) ? { units: f.out, pool_amount: poolUnits(f.spend, f.spendDecimals) } : {};
+  await store.put("ops", id, { kind: "buy", stage, txs, ...("error" in answer ? { code: answer.error } : {}), created_ms: f.createdMs, chain: "solana", token: f.token, ...(usd === null ? {} : { amount_usd: usd }), ...moved });
   const rec = buyRecordOf(f);
   if (rec === null) return;
   if (stage === "filled") return void (await store.update("meta", POSITION_COSTS_KEY, (v) => ({ ...(typeof v === "object" && v !== null ? v : {}), [f.wallet!]: rec })));

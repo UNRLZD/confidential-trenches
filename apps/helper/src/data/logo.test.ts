@@ -3,7 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createServer, request } from "node:http";
 import { HELPER_LOGO_MAX_BYTES } from "@blindfill/kit";
-import { blockedAddress, createLogos, fetchLogo, fetchMetaImage, logoUrl, META_MAX_BYTES, Refused, REDIRECTS_MAX, sniff, type Get, type Got, type Resolve } from "./logo.ts";
+import { blockedAddress, createLogos, fetchLogo, fetchMetaImage, LOGO_NONE_MS, logoUrl, META_MAX_BYTES, Refused, REDIRECTS_MAX, sniff, type Get, type Got, type Resolve } from "./logo.ts";
 import { handler } from "../server.ts";
 import { toRow } from "./solana/lists.ts";
 import { readFileSync } from "node:fs";
@@ -155,7 +155,7 @@ function call(port: number, path: string, method = "GET"): Promise<{ status: num
   });
 }
 
-test("GET /v1/logo/{chain}/{token} serves a listed token's logo with the kit's headers, and 404 with no body otherwise", async () => {
+test("GET /v1/logo/{chain}/{token} serves a listed token's logo with the kit's headers, 204 with no body for a token with none (no failed load in the browser), and 404 for a path that names no token", async () => {
   const MINT = "6p6xgHyF7AeE6TZkSmFsko444wqoP15icUSqi2jfGiPN";
   const EVM = "0x" + "ab".repeat(20);
   const seen: { url: string; address: string }[] = [];
@@ -174,7 +174,15 @@ test("GET /v1/logo/{chain}/{token} serves a listed token's logo with the kit's h
     assert.equal(r.headers["content-security-policy"], "default-src 'none'; sandbox");
     assert.equal(r.headers["cache-control"], "public, max-age=86400");
     assert.deepEqual(r.body, PNG);
-    for (const p of [`/v1/logo/base/${EVM}`, "/v1/logo/solana/So11111111111111111111111111111111111111112", `/v1/logo/near/${MINT}`, `/v1/logo/solana/${MINT}/x`, `/v1/logo/base/${EVM.toUpperCase().replace("0X", "0x")}`, "/v1/logo/solana/https%3A%2F%2Fevil.example", "/v1/logo/"]) {
+    // a token the lists name whose logo the checks refused (SVG), and one with no logo URL at all: 204, no body, cached
+    // as long as a refusal is (card app-live-run-green-after-119: a 404 here was a console error on every screen)
+    for (const p of [`/v1/logo/base/${EVM}`, "/v1/logo/solana/So11111111111111111111111111111111111111112"]) {
+      const n = await call(port, p);
+      assert.equal(n.status, 204, p);
+      assert.equal(n.body.length, 0, `${p}: no body`);
+      assert.equal(n.headers["cache-control"], `public, max-age=${LOGO_NONE_MS / 1000}`, `${p}: cached as a refusal`);
+    }
+    for (const p of [`/v1/logo/near/${MINT}`, `/v1/logo/solana/${MINT}/x`, `/v1/logo/base/${EVM.toUpperCase().replace("0X", "0x")}`, "/v1/logo/solana/https%3A%2F%2Fevil.example", "/v1/logo/"]) {
       const n = await call(port, p);
       assert.equal(n.status, 404, p);
       assert.equal(n.body.length, 0, `${p}: no body`);
@@ -285,7 +293,7 @@ test("blockedAddress refuses the IPv4-compatible, IPv4-translated and NAT64 form
   for (const ip of ["2606:4700::6810:84e5", "93.184.216.34", "::ffff:93.184.216.34"]) assert.equal(blockedAddress(ip), false, ip);
 });
 
-test("a full fetch queue answers 503 with no-store, never a cached 404; a refusal is logged by rule with no URL", async () => {
+test("a full fetch queue answers 503 with no-store, never a cached no-logo answer; a refusal is logged by rule with no URL", async () => {
   const lines: string[] = [];
   const logos = createLogos({ resolve: async () => [{ address: "10.0.0.1", family: 4 }], log: (l) => lines.push(l) });
   logos.remember("solana", "MintA", "https://evil.example/a.png");

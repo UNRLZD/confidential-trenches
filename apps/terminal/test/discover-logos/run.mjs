@@ -3,14 +3,15 @@
 // helper's lists as served on 11 Nov 15:20Z (lists-2026-11-11.json: Solana, Base and Robinhood, the rows that pass the
 // release word scan, ten pads and rows with no launchpad; page.tsx adds a New row for each ring-table pad New lacks),
 // built with vite and served on 127.0.0.1.
-// The helper's logo route is answered here: an image for every token, a 404 with no body for one (the helper's "no
-// logo"). Checks, at 1440 x 900, 1024 x 768 and 390 x 844 (dpr 2, touch):
+// The helper's logo route is answered here: an image for every token, a 204 with no body for one (the helper's "no
+// logo", card app-live-run-green-after-119: its 404 was a console error, "Failed to load resource", on every screen that
+// drew the token). Checks, at 1440 x 900, 1024 x 768 and 390 x 844 (dpr 2, touch):
 //   rings: every drawn row's ring is its launchpad's colour (pads.ts padRing), a row with no known pad keeps a stage
 //     colour, the rows draw at least three pad colours, and every pad of the ring table is drawn in its own;
 //   logos as served (icon false on every row): no logo request is made and every avatar draws its initials;
 //   ?logos=1 (icon true on every row but one): every row in view draws its own loaded logo (naturalWidth > 0, shown),
-//     the icon-false row asks for none and draws initials, the 404 row draws initials and no broken image, and no
-//     avatar changes size when its logo arrives; a scrolled column loads the rows it brings into view; on the phone,
+//     the icon-false row asks for none and draws initials, the no-logo row draws initials and no broken image, no
+//     console error is logged, and no avatar changes size when its logo arrives; a scrolled column loads the rows it brings into view; on the phone,
 //     mid-scroll, no row shows from the Quick buy dock's top edge down to the tab bar;
 //   1024: the four columns sit side by side in one row, as the main app's do from 1024 px.
 //   node apps/terminal/test/discover-logos/run.mjs [--shots <dir>]     PASS exit 0, FAIL exit 1
@@ -37,8 +38,9 @@ const WIDTHS = [
 const LOGO = /^https:\/\/ct-api\.unrealized\.trade\/v1\/logo\/([a-z]+)\/([^/?#]+)$/;
 // any real PNG stands in for a token's logo; the helper's answer is an image, which is all the screen reads
 const PNG = readFileSync(path.join(HERE, "../../src/screens/market/logos/robinhood.png"));
-// the token whose logo the stand-in helper has not (404, no body): the second row the page draws
+// the token whose logo the stand-in helper has not (the helper's answer: 204, no body): the second row the page draws
 const MISSING_AT = 1;
+const NO_LOGO = 204;
 const STAGE = new Set(["var(--blue)", "var(--border-strong)", "var(--text-1)", "#bcbcbc", "#808080"]);
 
 async function build() {
@@ -100,11 +102,13 @@ async function open(browser, w, query, missing) {
     const m = LOGO.exec(route.request().url());
     const token = decodeURIComponent(m[2]);
     asked.push(token);
-    return token === missing.token ? route.fulfill({ status: 404, body: "" }) : route.fulfill({ status: 200, contentType: "image/png", body: PNG, headers: { "cache-control": "public, max-age=86400" } });
+    return token === missing.token ? route.fulfill({ status: NO_LOGO, body: "" }) : route.fulfill({ status: 200, contentType: "image/png", body: PNG, headers: { "cache-control": "public, max-age=86400" } });
   });
   const page = await ctx.newPage();
   const errors = [];
   page.on("pageerror", (e) => errors.push(String(e)));
+  // a failed load of any resource (a logo answered 404, say) is a console error the live checks refuse
+  page.on("console", (m) => m.type() === "error" && errors.push(`console: ${m.text()}`));
   await page.goto(`${BASE}/${query}`);
   await page.waitForSelector(`${scopeOf(w.name)} [role="listitem"][data-token]`);
   return { ctx, page, asked, errors };
@@ -154,10 +158,10 @@ try {
         check(cols.length === 4 && new Set(cols.map((c) => c.y)).size === 1 && new Set(cols.map((c) => c.x)).size === 4, `1024: the columns are not four in one row: ${JSON.stringify(cols)}`);
       }
       if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `served-${w.name}.png`) });
-      check(errors.length === 0, `${w.name} as served: page errors ${errors.join(" | ")}`);
+      check(errors.length === 0, `${w.name} as served: page or console errors ${errors.join(" | ")}`);
       await ctx.close();
     }
-    // ?logos=1: icon true on every row but the first; the second's logo answers 404
+    // ?logos=1: icon true on every row but the first; the second's logo answers the helper's no-logo
     {
       const first = await (async () => {
         const { ctx, page } = await open(browser, w, "?logos=1", missing);
@@ -176,10 +180,10 @@ try {
         const was = before.find((b) => b.token === r.token);
         if (was) check(was.av === r.av, `${w.name} ${r.symbol}: the avatar went ${was.av} -> ${r.av} when its logo arrived`);
         if (r.token === first.none) check(r.img === null && r.initials.length > 0, `${w.name} ${r.symbol} (icon false): ${JSON.stringify(r.img)}, initials "${r.initials}"`);
-        else if (r.token === missing.token) check(r.img === null && r.initials.length > 0, `${w.name} ${r.symbol} (404): ${JSON.stringify(r.img)}, initials "${r.initials}"`);
+        else if (r.token === missing.token) check(r.img === null && r.initials.length > 0, `${w.name} ${r.symbol} (no logo, ${NO_LOGO}): ${JSON.stringify(r.img)}, initials "${r.initials}"`);
         else check(r.img?.loaded === true && r.img?.shown === true, `${w.name} ${r.symbol}: logo ${JSON.stringify(r.img)}`);
       }
-      check(rows.some((r) => r.token === missing.token), `${w.name}: the 404 row is not in view`);
+      check(rows.some((r) => r.token === missing.token), `${w.name}: the no-logo row is not in view`);
       // phone, mid-scroll: no row shows from the Quick buy dock's top edge down to the tab bar's (the dock sits on a band)
       if (w.name === "390") {
         await page.evaluate(() => window.scrollTo(0, 700));
@@ -212,7 +216,7 @@ try {
         await settle(page, scope);
         await page.screenshot({ path: path.join(SHOTS, `logos-${w.name}.png`) });
       }
-      check(errors.length === 0, `${w.name} logos: page errors ${errors.join(" | ")}`);
+      check(errors.length === 0, `${w.name} logos: page or console errors ${errors.join(" | ")}`);
       console.log(`${w.name}: ${rows.length} rows in view, ${asked.length} logo requests`);
       await ctx.close();
     }

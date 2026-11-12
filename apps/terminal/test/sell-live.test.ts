@@ -21,7 +21,7 @@ test("the page's state after a pool buy: Portfolio draws the position and the Se
   assert.ok(row, "Sell turns on");
   assert.equal(row.units, p.amount);
   assert.equal(row.decimals, p.decimals);
-  assert.equal(row.cost, 0n, "no buy record: cost unknown");
+  assert.equal(row.cost, null, "no buy record: cost unknown");
   assert.equal(sellAmount(row.units, 10_000, row.decimals), p.amount, "100% sells what W holds");
   assert.equal(sellAmount(row.units, 5_000, row.decimals), "540795.106782", "50% at the token's own decimals");
 });

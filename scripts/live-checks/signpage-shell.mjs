@@ -51,7 +51,8 @@
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the test can replay it.
 // No money; the account is the published test vector's, thrown away with the profile. Since card
 // sign-live-checks-read-a-pinned-page the page pins the mainnet Solana pool, so live, signed in, it reads that pool, its
-// price and the restore's first reads on PINNED_HOSTS (the helper, the Solana pair, the NEAR pair): those requests go
+// price and the restore's first reads on PINNED_HOSTS (the helper, the Solana pair, the NEAR pair, and since release
+// 119 the Base and Robinhood pools' lists): those requests go
 // to the network and are recorded with what each asks; signed out none may leave the two hosts, signed in none may go
 // to a host that is not pinned or that the page's served connect-src does not name. On the harness they are refused.
 import "../net-window.mjs";
@@ -73,9 +74,13 @@ const APP = `https://${APP_HOST}`;
 /** The hosts the mainnet page's pinned Solana pool reads on (card sign-live-checks-read-a-pinned-page): the helper
  *  (packages/signpage/src/trade.ts TRADE_HELPER: its keyed Solana seat and the marks route), Solana provider A and the
  *  U_X pair's second operator (trade.ts SOLANA_PROVIDER_A, pool-restore.ts RESTORE_UX_SOLANA), and the NEAR pair step 5
- *  reads deposit ids on (the kit's NEAR_NETWORKS.mainnet: fastnear[0] and drpc). signpage-shell.test.mjs holds the list
- *  to those sources. */
-export const PINNED_HOSTS = Object.freeze(["ct-api.unrealized.trade", "solana-rpc.publicnode.com", "solana.api.pocket.network", "rpc.mainnet.fastnear.com", "near.drpc.org"]);
+ *  reads deposit ids on (the kit's NEAR_NETWORKS.mainnet: fastnear[0] and drpc); since the Base and Robinhood pools are
+ *  pinned on mainnet too (card evm-pools-on-mainnet, release 119), each EVM pool's list the page reads it on
+ *  (packages/signpage/src/pool-testnet.ts MAINNET_POOL_RPCS). signpage-shell.test.mjs holds the list to those sources. */
+export const PINNED_HOSTS = Object.freeze([
+  "ct-api.unrealized.trade", "solana-rpc.publicnode.com", "solana.api.pocket.network", "rpc.mainnet.fastnear.com", "near.drpc.org",
+  "base-rpc.publicnode.com", "base.api.pocket.network", "rpc.mainnet.chain.robinhood.com", "robinhood.api.pocket.network",
+]);
 /** The hosts a CSP's connect-src names (https sources only). */
 export const connectHosts = (csp) => {
   const d = String(csp).split(";").map((x) => x.trim().split(/\s+/)).find((x) => x[0] === "connect-src") ?? [];
