@@ -61,8 +61,8 @@ test("the whole sequence: nothing open, both round trips closed with their reali
   assert.equal(first!.symbol, "Icm");
   // the header's figures follow the closed list
   assert.equal(stats(closed).trades, 2);
-  // the exact −$0.0548 to cents once (each row's own floor would add to −$0.07)
-  assert.equal(pf.totals!.realized30, -6n);
+  // the rows' own figures added, as the calendar adds them
+  assert.equal(pf.totals!.realized30, -7n);
   // Activity: each trade with its own transaction and size
   const acts = activity(snap.state!.ops, d).filter((r) => r.kind === "buy" || r.kind === "sell");
   assert.deepEqual(acts.map((r) => [r.kind, r.txs[0]!.hash, r.usd]), [["sell", TX.sell2, 9n], ["buy", TX.buy2, 9n], ["sell", TX.sell1, 4n], ["buy", TX.buy1, 10n]]);

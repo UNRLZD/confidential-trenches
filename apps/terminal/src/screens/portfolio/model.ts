@@ -272,17 +272,16 @@ export function sortRows(rows: readonly Row[]): Row[] {
  *  names no USD adds nothing. */
 export function realized30(rows: readonly Row[], closed: readonly ClosedTrade[], now: number): bigint {
   let r = rows.reduce((a, x) => a + x.realized, 0n);
-  // the closed trades' exact sum, to cents once (closedRows: a floor per trade puts the total off its rows)
-  let exact = 0n;
+  // each closed trade's realized as its row draws it (closedRows: from the exact figures, to cents), so the total, the
+  // calendar and the rows add up
   for (const c of closed) {
     const sold = cents(c.sold);
     if (sold === null || c.closed_at <= now - 30 * DAY || c.closed_at > now) continue;
     const sx = fx(c.sold ?? undefined);
     const bx = fx(c.bought);
-    if (sx !== null && bx !== null) exact += sx - bx;
-    else r += sold - (cents(c.bought) ?? 0n);
+    r += sx !== null && bx !== null ? (cents(unfx(sx - bx)) ?? 0n) : sold - (cents(c.bought) ?? 0n);
   }
-  return r + (cents(unfx(exact)) ?? 0n);
+  return r;
 }
 
 // ------------------------------------------------------------------------------------------ the trade book (ops)
