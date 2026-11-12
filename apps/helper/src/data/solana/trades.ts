@@ -724,10 +724,16 @@ export function createSolanaTrades(deps: {
     e.readAt = now();
     let firstRound: () => void = () => undefined;
     const rounded = new Promise<void>((ok) => (firstRound = ok));
+    // the first answer is the first round that holds a trade: a busy token's newest transactions may hold none of a venue
+    // read (failed bot buys, other venues), and its first round answered an empty tape (card
+    // helper-live-run-green-after-122: ni hao cat's first reads, 0 rows at +0 and +2.4 s, 18 rows a second later)
+    const traded = (): void => {
+      if (e.book !== null && e.book.tape(1).length > 0) firstRound();
+    };
     const cold = (async () => {
       for (let attempt = 0; ; attempt++) {
         try {
-          await walk(e, null, () => firstRound());
+          await walk(e, null, traded);
           break;
         } catch {
           if (attempt === 2 || !entries.has(mint)) break; // the stream's trades still serve; the cold window stays short
@@ -737,7 +743,8 @@ export function createSolanaTrades(deps: {
       if (e.state === "cold") e.state = "live";
       fold(e);
     })();
-    // the first answer waits for the walk's first round (its newest trades), the whole walk, or COLD_WAIT_MS
+    // the first answer waits for the walk's first round that holds a trade (its newest trades), the whole walk, or
+    // COLD_WAIT_MS
     await Promise.race([cold, rounded, new Promise((r) => setTimeout(r, COLD_WAIT_MS).unref?.())]);
     return e;
   }
