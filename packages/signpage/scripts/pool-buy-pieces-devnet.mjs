@@ -338,14 +338,18 @@ const stageName = (s) => (typeof s === "string" ? s : s?.stage ?? null);
 
 /** Each signature read on both RPCs at finalized: its error, or "missing" once 30 s passed with an RPC not holding it
  *  (the copy's engine stand-in lands a bundle one transaction at a time, each after the one before it confirmed, so
- *  the helper's tip, last, can land after the page saw the tag 3 filled; a real engine lands the bundle at once). */
-const readBack = async (sigs) => {
+ *  the helper's tip, last, can land after the page saw the tag 3 filled; a real engine lands the bundle at once).
+ *  `waited` gets, per signature, the seconds from the read-back's start until both RPCs held it, or null at 30 s. */
+const readBack = async (sigs, waited = {}) => {
   const out = {};
+  const t0 = performance.now();
   for (const s of sigs) {
     const read = async () => (await both(async (r) => (await r("getSignatureStatuses", [[s], { searchTransactionHistory: true }])).value[0])).map((x) => (x === null ? "missing" : x.err === null ? x.confirmationStatus : `err ${JSON.stringify(x.err)}`));
     let st = await read();
-    for (let i = 0; i < 60 && st.includes("missing"); i++) await new Promise((r) => setTimeout(r, 500)), (st = await read());
+    while (st.includes("missing") && performance.now() - t0 < 30_000) await new Promise((r) => setTimeout(r, 500)), (st = await read());
     out[s] = st;
+    waited[s] = st.includes("missing") ? null : Math.round(performance.now() - t0) / 1000;
+    log(`read-back ${s}: ${st.join(", ")}, ${waited[s] === null ? "not held by both RPCs at 30 s" : `held by both RPCs ${waited[s]} s after the read-back began`}`);
   }
   return out;
 };
@@ -572,7 +576,8 @@ if (SCENARIO === "copy-part1") {
   phase = "buy-2";
   const two = await buyOf(2, 300, false, maxOf(1) + 1_000_000n);
   two.bundle = bundles().at(-1) ?? null;
-  two.readBack = await readBack(two.bundle?.signatures ?? []);
+  two.waitedS = {};
+  two.readBack = await readBack(two.bundle?.signatures ?? [], two.waitedS);
   two.holds = two.W ? await wHolds(two.W) : null;
   out.two = two;
   // 3. Max: pool.buy.dry's tap_max with no amount, once the set of the 4 notes left is ready at it
@@ -580,13 +585,14 @@ if (SCENARIO === "copy-part1") {
   const { tapMax } = await maxReady(4);
   const max = await buyOf(4, 300, false, lamportsOf(tapMax));
   max.bundle = bundles().at(-1) ?? null;
-  max.readBack = await readBack(max.bundle?.signatures ?? []);
+  max.waitedS = {};
+  max.readBack = await readBack(max.bundle?.signatures ?? [], max.waitedS);
   max.holds = max.W ? await wHolds(max.W) : null;
   out.max = { tapMax, ...max };
   const notes = (await A.notesOf()).filter((n) => n.scope === scope).map((n) => ({ ref: n.ref.kind, state: n.state, value: n.leaf ? String(n.leaf.value) : null }));
   out.notes = notes;
   const allSpent = notes.filter((n) => n.ref === "deposit").length === 6 && notes.filter((n) => n.ref === "deposit").every((n) => n.state === "SPENT");
-  finish(okFive && okBuy(two, 2) && okBuy(max, 4) && allSpent && two.W !== max.W, `5 pieces asked (${out.five.amount} SOL, 4 pieces' most ${out.five.fourMost}): ${JSON.stringify(ask5.answer)}, dry ${JSON.stringify(dry5)}, ${out.five.sent} sent, ${out.five.engineCalls} engine calls, ${out.five.helperLines} helper sends, ${out.five.reserved} notes taken; 2 pieces: ${two.end}, ${two.spent} spent, bundle of ${two.bundle?.txs}, W ${two.W} holds ${JSON.stringify(two.holds)}, tap to filled ${filledMs(two) ?? "-"} ms; Max ${tapMax} SOL: ${max.end}, ${max.spent} spent, bundle of ${max.bundle?.txs}, W ${max.W} holds ${JSON.stringify(max.holds)}, tap to filled ${filledMs(max) ?? "-"} ms; every deposit note spent: ${allSpent}`);
+  finish(okFive && okBuy(two, 2) && okBuy(max, 4) && allSpent && two.W !== max.W, `5 pieces asked (${out.five.amount} SOL, 4 pieces' most ${out.five.fourMost}): ${JSON.stringify(ask5.answer)}, dry ${JSON.stringify(dry5)}, ${out.five.sent} sent, ${out.five.engineCalls} engine calls, ${out.five.helperLines} helper sends, ${out.five.reserved} notes taken; 2 pieces: ${two.end}, ${two.spent} spent, bundle of ${two.bundle?.txs}, W ${two.W} holds ${JSON.stringify(two.holds)}, tap to filled ${filledMs(two) ?? "-"} ms, read-back s ${JSON.stringify(Object.values(two.waitedS ?? {}))}; Max ${tapMax} SOL: ${max.end}, ${max.spent} spent, bundle of ${max.bundle?.txs}, W ${max.W} holds ${JSON.stringify(max.holds)}, tap to filled ${filledMs(max) ?? "-"} ms, read-back s ${JSON.stringify(Object.values(max.waitedS ?? {}))}; every deposit note spent: ${allSpent}`);
 }
 
 if (SCENARIO === "copy-takeable") {
