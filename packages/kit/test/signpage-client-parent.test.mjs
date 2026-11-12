@@ -391,3 +391,72 @@ test("kit-frame-version, parent mode: a hello to the shell before each state ask
   assert.deepEqual(h.shell.log.slice(4).map((s) => s.msg.type), ["hello", "state"], "the shell's ready: hello, then state");
   assert.equal(h.self.log.length, 0, "nothing to the app's own window");
 });
+
+// ------------------------------------------------------------------------------------------------ card signing-views-open-over-the-app
+/** A PerformanceObserver on the app's window whose paint entries the test gives (`paint(name)`), as the browser queues them. */
+function fakePaintTiming(win, supported = ["paint"]) {
+  const seen = [];
+  const observers = new Set();
+  class PO {
+    static supportedEntryTypes = supported;
+    constructor(cb) {
+      this.cb = cb;
+    }
+    observe(o) {
+      assert.deepEqual(o, { type: "paint", buffered: true });
+      observers.add(this);
+      // buffered: the entries already there come at once
+      if (seen.length) this.cb({ getEntriesByName: (n) => seen.filter((e) => e.name === n) });
+    }
+    disconnect() {
+      observers.delete(this);
+    }
+  }
+  win.PerformanceObserver = PO;
+  return {
+    paint(name) {
+      const e = { name, entryType: "paint" };
+      seen.push(e);
+      for (const o of [...observers]) o.cb({ getEntriesByName: (n) => (n === name ? [e] : []) });
+    },
+    observing: () => observers.size,
+  };
+}
+
+test("parent mode: painted to the shell at SIGN_HOST's origin once, on this document's first-contentful-paint only", () => {
+  const PAINTED = { v: 1, type: "painted" };
+  const painted = (h) => h.shell.log.filter((s) => s.msg.type === "painted");
+  const h = makeHost();
+  const p = fakePaintTiming(h.self);
+  C.createSignpageClient({ url: URL_, host: h.host, mode: "parent", retryMs: 0 });
+  assert.equal(painted(h).length, 0, "none before a paint");
+  p.paint("first-paint");
+  assert.equal(painted(h).length, 0, "a first paint with no content is not it");
+  p.paint("first-contentful-paint");
+  assert.deepEqual(painted(h).map((s) => [s.msg, s.origin]), [[PAINTED, ORIGIN]]);
+  assert.equal(p.observing(), 0, "the observer is let go");
+  p.paint("first-contentful-paint");
+  assert.equal(painted(h).length, 1, "once");
+  assert.equal(h.self.log.length, 0, "nothing to the app's own window");
+  // a client started after the paint: the buffered entry, at once
+  const late = makeHost();
+  const lp = fakePaintTiming(late.self);
+  lp.paint("first-contentful-paint");
+  C.createSignpageClient({ url: URL_, host: late.host, mode: "parent", retryMs: 0 });
+  assert.equal(painted(late).length, 1, "a paint before the client: told at its start");
+  // the iframe mode, a destroyed client and a browser with no paint timing tell nothing
+  const fi = makeHost("iframe");
+  const fp = fakePaintTiming(fi.self);
+  C.createSignpageClient({ url: URL_, host: fi.host, retryMs: 0 });
+  fp.paint("first-contentful-paint");
+  assert.equal(fi.frames.flatMap((f) => f.contentWindow.log).filter((s) => s.msg.type === "painted").length, 0, "iframe mode: none");
+  const gone = makeHost();
+  const gp = fakePaintTiming(gone.self);
+  C.createSignpageClient({ url: URL_, host: gone.host, mode: "parent", retryMs: 0 }).destroy();
+  gp.paint("first-contentful-paint");
+  assert.equal(painted(gone).length, 0, "destroyed: none");
+  const none = makeHost();
+  fakePaintTiming(none.self, ["mark"]);
+  C.createSignpageClient({ url: URL_, host: none.host, mode: "parent", retryMs: 0 });
+  assert.equal(painted(none).length, 0, "no paint timing: none");
+});

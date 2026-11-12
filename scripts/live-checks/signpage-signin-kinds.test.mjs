@@ -5,6 +5,14 @@
 // (pools included), which passes; liveGood: the deployed SIGN_HOST at release-9 framing the deployed terminal, whose
 // own kit client is ready on that state, which passes, and edited from it, the step's bads (the client down or never
 // settled, a state the kit refuses, no pools, no state). Each bad fails on its own lines only:
+// - good was recorded, unedited, with card signing-views-open-over-the-app on the harness, which maps every outside
+//   name to not found: its console lines for those names are not counted on a harness run (HARNESS_UNRESOLVED), and
+//   badMainNoSheet (main 8253c0a3, the same harness, unedited) fails the sheet's line only; good was recorded again
+//   (12 Nov) once the 12 words shown took the frame out (the review of 7a21ffcd, P2-2), the answer before it kept as
+//   goodKeptUnderWords, which fails the sheet's line only;
+// - badPageOfItsOwn: the good of this tree before card signing-views-open-over-the-app, each screen a page of its own
+//   with the frame taken out of the document: fails on the sheet's line only. Every record but good was recorded before
+//   that card, so the sheet's line is read on good and on badPageOfItsOwn alone (the others are read on their own lines);
 // - bad: the card's page at efacb58, before the recheck's Lows (an open sent during a resync refused; Cancel stuck on
 //   the error page when the stored seed cannot be read);
 // - badDcad6c9: the card's page at dcad6c9, before the review fixes (Create passkey offered after I already have one,
@@ -21,7 +29,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { judge, watch } from "./signpage-signin-kinds.mjs";
+import { HARNESS_UNRESOLVED, judge, watch } from "./signpage-signin-kinds.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const answers = JSON.parse(readFileSync(path.join(HERE, "signpage-signin-kinds.answers.json"), "utf8"));
@@ -29,7 +37,9 @@ const BAD_ALL = (rec) => judge(rec).lines.filter((l) => l.startsWith("BAD")).map
 // The terminal-takes-the-state step came after most bads were recorded: a record with no prf.app step was recorded
 // before it, and is read on its other lines (the step's own bads are below, and a good with the step deleted is BAD).
 const APP = "prf: the terminal in the frame takes the signed-in state with pools";
-const BAD = (rec) => BAD_ALL(rec).filter((l) => l !== APP || Object.hasOwn(rec.prf ?? {}, "app"));
+// The sheet's line (card signing-views-open-over-the-app) came after every record but good: read on good alone.
+const SHEET = "the sheet keeps the app's frame in the page under every screen it draws but the 12 words, and takes it out under those and after them";
+const BAD = (rec) => BAD_ALL(rec).filter((l) => (l !== APP || Object.hasOwn(rec.prf ?? {}, "app")) && (l !== SHEET || rec === answers.good));
 
 const FRAMED = "prf: a signout sent to SIGN_HOST in a frame is refused, the frame never loads a sign-out";
 const AGAIN = "prf: signin.open sent signed in is refused, the seed kept";
@@ -50,9 +60,54 @@ test("the recorded good answer passes", () => {
   assert.ok(Array.isArray(answers.good.prf.app.state.pools));
 });
 
-test("the recorded live answer on release-9 passes: the deployed terminal's client is ready on a state with pools", () => {
+test("the card's page at 7a21ffcd, the frame kept under the 12 words (the review's P2-2), unedited: fails on the sheet's line only", () => {
+  const r = judge(answers.goodKeptUnderWords);
+  assert.equal(r.pass, false);
+  assert.deepEqual(BAD_ALL(answers.goodKeptUnderWords), [SHEET], r.lines.join("\n"));
+  assert.ok(r.lines.includes(`BAD ${SHEET} (7 of 7 kept, 0 of 4 out)`), r.lines.join("\n"));
+});
+
+test("a page of its own over no frame (this tree before card signing-views-open-over-the-app) fails on the sheet's line only", () => {
+  assert.deepEqual(BAD_ALL(answers.badPageOfItsOwn), [SHEET]);
+  assert.equal(answers.badPageOfItsOwn.prf.signin.page.frame, false);
+  assert.equal(answers.good.prf.signin.page.frame, true);
+});
+
+test("main 8253c0a3 on the same harness as good (11 Nov), unedited: fails on the sheet's line only", () => {
+  const r = judge(answers.badMainNoSheet);
+  assert.deepEqual(BAD_ALL(answers.badMainNoSheet), [SHEET], r.lines.join("\n"));
+  assert.ok(answers.badMainNoSheet.errors.length > 0 && answers.badMainNoSheet.errors.every((e) => HARNESS_UNRESOLVED.test(e)));
+});
+
+test("the harness's unresolved outside names are not the page's errors on a harness run only: any other line, or the same on the live host, fails", () => {
+  const good = answers.good;
+  assert.equal(good.mode, "harness");
+  assert.ok(!("edited" in good), "good is the run as recorded");
+  assert.ok(good.errors.length > 0 && good.errors.every((e) => HARNESS_UNRESOLVED.test(e)), "good's console holds only the harness's unresolved names");
+  const r = judge(good);
+  assert.ok(r.lines.includes(`ok  no page error or CSP violation (0)`), r.lines.join("\n"));
+  assert.ok(r.lines.includes(`ok  harness: ${good.errors.length} console line(s) for outside names it leaves unresolved, not counted`));
+  // planted: the same lines on the live host
+  const live = structuredClone(good);
+  live.mode = "live";
+  assert.ok(judge(live).lines.some((l) => l.startsWith(`BAD no page error or CSP violation (${good.errors.length}):`)));
+  // planted: another failure to load on the harness, a resolved name's 404 and an unresolved line with more after it
+  for (const line of ["console: Failed to load resource: the server responded with a status of 404 () (https://confidential.unrealized.trade/x)", "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://x.example/) and more", "console: Failed to load resource: net::ERR_CONNECTION_REFUSED (https://x.example/)",
+    // the skip is pinned to SIGN_HOST's connect-src (as its skeleton check pins it): a name outside it, a name that only
+    // starts like one in it, plain http, or no address at all is the page's error
+    "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://x.example/)",
+    "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana-rpc.publicnode.com.x.example/)",
+    "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (http://solana-rpc.publicnode.com/)",
+    "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED"]) {
+    const rec = structuredClone(good);
+    rec.errors.push(line);
+    assert.ok(judge(rec).lines.includes(`BAD no page error or CSP violation (1): ${line}`), `${line}: ${judge(rec).lines.join("\n")}`);
+  }
+});
+
+test("the recorded live answer on release-9, before the sheet: the deployed terminal's client is ready on a state with pools", () => {
   const r = judge(answers.liveGood);
-  assert.equal(r.pass, true, r.lines.join("\n"));
+  assert.deepEqual(BAD_ALL(answers.liveGood), [SHEET], r.lines.join("\n"));
   assert.equal(answers.liveGood.mode, "live");
   assert.equal(answers.liveGood.prf.app.signpage, "ready");
   assert.ok(r.lines.includes(`ok  ${APP} (APP_HOST's client ready, signed_in true, pools ${answers.liveGood.prf.app.state.pools.length}, the kit takes it)`));
@@ -78,7 +133,8 @@ test("the terminal's step fails on a client down, a state the kit refuses, no po
   const h = structuredClone(answers.good);
   h.mode = "live";
   delete h.prf.app.signpage;
-  assert.deepEqual(BAD(h), [APP]);
+  // (and the harness's unresolved outside names, named live, count as the page's errors)
+  assert.deepEqual(BAD(h), [APP, "no page error or CSP violation"]);
 });
 
 test("the card's page before the recheck's Lows fails: an open refused during a resync, Cancel stuck on a broken store", () => {
@@ -142,7 +198,7 @@ test("a step that never ran is BAD, never ok, and a missing error list is BAD", 
   delete rec.twoTabs;
   delete rec.broken;
   delete rec.prf.app;
-  assert.deepEqual(BAD_ALL(rec), [APP, AGAIN, FRAMED, EARLY, NO_CREATE, TWO_TABS, BROKEN]);
+  assert.deepEqual(BAD_ALL(rec), [APP, AGAIN, FRAMED, EARLY, NO_CREATE, TWO_TABS, BROKEN, SHEET]);
   const none = structuredClone(answers.good);
   delete none.errors;
   assert.deepEqual(BAD(none), ["no page error or CSP violation"]);

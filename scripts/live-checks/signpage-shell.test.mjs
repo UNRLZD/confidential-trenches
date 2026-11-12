@@ -10,6 +10,9 @@
 // every engine the app takes the typed words. fstar and prefix run at phone width. bad.* were recorded before the check
 // named its width, so their first line is the width's BAD and the tests read the lines after it. The rest are a good run with one thing changed each, among them the lines that
 // signpage-frame-state judged (retired with this card): a reload while signed in, the status deleted raw, its backfill.
+// good.chromium.<width> were recorded again with card signing-views-open-over-the-app (11 Nov, Chrome 156 on the harness):
+// the passkey screen opens as a sheet with the frame kept under it, Saved closes to that same frame (no new load), and
+// the typed words' screen still takes the frame out, the app's focus() thief getting none of the words.
 // release111.chromium.<width>: the live page on release 111, the mainnet Solana pool pinned (card
 // sign-live-checks-read-a-pinned-page): PASS, with the pinned hosts' cases planted from it at the end.
 import assert from "node:assert/strict";

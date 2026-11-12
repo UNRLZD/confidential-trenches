@@ -340,6 +340,17 @@ export interface HelloMessage {
   kit: string;
 }
 
+/**
+ * Parent mode's report, app to shell (card signing-views-open-over-the-app): this document has had its first content
+ * paint. The shell keeps the closed sheet's dim over a new app document until it comes (or for its upper bound), so a
+ * close shows no unpainted frame. Posted once per document, only where the browser reports paint timing. It has no id:
+ * the page answers nothing to it, and a page of an earlier release drops it unread.
+ */
+export interface PaintedMessage {
+  v: 1;
+  type: "painted";
+}
+
 /** Posted on every change of the state. */
 export interface StateEvent {
   v: 1;

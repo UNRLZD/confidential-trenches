@@ -128,6 +128,7 @@ export const CHANGED = [
   "scripts/live-checks/page-evm-rpc-csp.mjs",
   "scripts/live-checks/wallet-deposit-follow.mjs",
   "scripts/live-checks/words-nov8-final.mjs",
+  "scripts/live-checks/signing-views-open-over-the-app.mjs",
   "scripts/live-checks/wallet-refund-move.mjs",
   "scripts/live-checks/kit-renewal-read-bounded.mjs",
   "scripts/live-checks/market-data-evm.mjs",
