@@ -33,8 +33,9 @@
 //       the min out W signed, of the chunk at a fee up to the proof's (the sender picks the fee, at most the relay
 //       data's cap); W's holding is completed with what W received, and filled names that transaction;
 //     refused, with the release's transaction: both show a Withdrawn (the swap failed in the pool's own call and W got
-//       the chunk less the fee charged, in ETH): that ETH is written owed back to the user (EVM_OWED_BACK_KEY) for the sell and
-//       withdraw cards to return, and the holding marked withdrawn; the buy did not fill;
+//       the chunk less the fee charged, in ETH): the holding is marked withdrawn and the page's carry pass starts
+//       (src/pool-carry-evm.ts: W deposits that ETH back into the pool as a note of the user's, found from the chain
+//       alone, again on every load until it lands); the buy did not fill;
 //     not_landed: both show another release of the nullifier (the note spent elsewhere), or both RPCs' newest block is
 //       past the proof's deadline with no release of it on either (the pool refuses it from then on: PrivacyPool.sol
 //       reverts a release once block.timestamp is past the relay data's deadline). Never on a revert: the pool has no
@@ -77,7 +78,7 @@ export const EVM_POSITION_COSTS_KEY = "owed/cost-evm";
 /** One W's buy: positions.ts PositionCost's fields (mint, received once known, decimals; no cost_usd, the page reads no
  *  EVM price yet, which positions.ts reads as cost unknown), its state, and the route W signed (with its transaction and
  *  block once read back). pending: written before the send; filled: read back with what W received; withdrawn: the
- *  swap failed, W holds the ETH owed back (EVM_OWED_BACK_KEY). */
+ *  swap failed, W holds the ETH, which the carry puts back into the pool (src/pool-carry-evm.ts). */
 export type EvmHolding = {
   mint: string;
   decimals: number;
@@ -92,10 +93,6 @@ export type EvmHolding = {
   buy?: EvmPendingBuy;
 };
 export type EvmPendingBuy = { nullifier: string; from: string; deadlineMs: string; minOut: string; value: string; feeCap: string; feeRecipient: string };
-/** ETH a release paid W with no swap (a Withdrawn), owed back to the user, by W's address: the chunk less the fee, in
- *  wei, and the release that paid it. The pool sell and withdraw cards read it to return it. */
-export const EVM_OWED_BACK_KEY = "owed/back-evm";
-export type EvmOwedBack = { address: string; chain: Chain; wei: string; tx: string; block: string };
 
 export type EvmPoolBuyHost = {
   chain: Chain;
@@ -134,8 +131,9 @@ export type EvmPoolBuyHost = {
   holdings(): Promise<Record<string, unknown>>;
   /** The Ws whose buy this page is following now: the load's follow skips them. */
   following?: Set<string>;
-  /** Writes W's ETH owed back (EVM_OWED_BACK_KEY). */
-  owe(o: EvmOwedBack): Promise<void>;
+  /** Starts the chain's carry pass (src/pool-carry-evm.ts carryEvmOwed): a release paid W with no swap. Never awaited;
+   *  the pass reads the chain alone, so a pass that never starts here runs at the next state read. */
+  carry?(): void;
   /** Runs the part up to the send under the seed's lock (the kind's); the read-back runs outside it. */
   hold?<T>(f: () => Promise<T>): Promise<T>;
   /** The bytes have left the device: told once. */
@@ -444,9 +442,14 @@ async function watch(h: EvmPoolBuyHost, x: Watch, more: () => boolean, wait: (ms
       await h.record(x.w, { ...x.holding, state: "filled", received: poolUnits(v.release.out, x.holding.decimals), route: at }).catch(() => {});
       return { stage: "filled", txs };
     }
-    // withdrawn: W holds the chunk less the fee in ETH, owed back to the user; the buy did not fill
-    await h.owe({ address: x.w, chain: h.chain, wei: (v.release.value - v.release.fee).toString(), tx: v.release.tx, block: v.release.block.toString() }).catch(() => {});
+    // withdrawn: W holds the chunk less the fee in ETH; the buy did not fill. The carry puts it back into the pool, from
+    // the chain's own release (no record of this run is its source: a write that fails here loses nothing)
     await h.record(x.w, { ...x.holding, state: "withdrawn", route: at }).catch(() => {});
+    try {
+      h.carry?.();
+    } catch {
+      /* the next state read runs it */
+    }
     return { stage: "refused", txs };
   }
   return null;
@@ -523,6 +526,8 @@ export type EvmBuyPage = {
   marks(): Promise<ReadonlyMap<string, ReservedMark>>;
   /** EvmPoolBuyHost.landed: the page's balance counts the note's change from here. */
   landed?(noteId: string, attempt: string, withdrawn: bigint, block: bigint): void;
+  /** EvmPoolBuyHost.carry: the chain's carry pass. */
+  carry?(chain: Chain): void;
 };
 
 /** A W that already has a holding: the pending write is refused, so nothing is sent (review P3-7). */
@@ -534,7 +539,7 @@ export class EvmHoldingTaken extends Error {
 }
 
 /** The page's host for one EVM buy run: the kit's quote, build and venue list, the helper's send, the pool's pair for
- *  the token's decimals and the read-back, W's holding and owed ETH in the wallet store's meta. */
+ *  the token's decimals and the read-back, W's holding in the wallet store's meta, the page's carry. */
 export function evmBuyHost(chain: Chain, pin: EvmPoolPin, rpcs: readonly [EvmRpc, EvmRpc], claimed: Set<string>, page: EvmBuyPage): EvmPoolBuyHost {
   return {
     chain,
@@ -587,10 +592,7 @@ export function evmBuyHost(chain: Chain, pin: EvmPoolPin, rpcs: readonly [EvmRpc
       return typeof v === "object" && v !== null ? (v as Record<string, unknown>) : {};
     },
     following: page.following,
-    owe: async (o) => {
-      const store = await page.held();
-      await store.update("meta", EVM_OWED_BACK_KEY, (v) => ({ ...(typeof v === "object" && v !== null ? v : {}), [o.address]: o }));
-    },
+    ...(page.carry ? { carry: () => page.carry!(chain) } : {}),
     claimed,
     signal: page.signal,
     stopped: page.stopped,

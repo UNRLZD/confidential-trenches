@@ -16,7 +16,7 @@ import { EVM_POOL_EVENTS, evmPoolContextOf, evmPoolScopeOf, type EvmPoolPin, typ
 import type { ReadyProof } from "../../wallet/src/pool/pool.ts";
 import type { ProofQueue } from "../../wallet/src/pool/queue.ts";
 import { WALLET_SEED_LOCK, type WalletStore } from "@blindfill/wallet/store";
-import { EVM_OWED_BACK_KEY, EVM_POSITION_COSTS_KEY, evmBuyHost, poolBuyEvmKind, type EvmBuyPage, type EvmHolding, type EvmOwedBack, type EvmPoolBuyHost } from "../src/pool-buy-evm.ts";
+import { EVM_POSITION_COSTS_KEY, evmBuyHost, poolBuyEvmKind, type EvmBuyPage, type EvmHolding, type EvmPoolBuyHost } from "../src/pool-buy-evm.ts";
 import type { KindContext } from "../src/api.ts";
 import type { PoolAsk } from "../src/rules/pool.ts";
 import { TRADE_HELPER } from "../src/trade.ts";
@@ -129,7 +129,6 @@ function unfunded(): EvmPoolBuyHost & { end(): void; ends: number } {
     send: async () => assert.fail("no send"),
     settle: () => {},
     record: async () => {},
-    owe: async () => {},
     unrecord: async () => {},
     holdings: async () => ({}),
     claimed: new Set<string>(),
@@ -174,7 +173,6 @@ function sending(o: { logs?: (round: number) => unknown[]; gate?: Promise<void>;
     send: async () => (seen.sends++, HASH),
     settle: () => {},
     record: async () => {},
-    owe: async () => {},
     unrecord: async () => {},
     holdings: async () => ({}),
     claimed: o.claimed ?? new Set(),
@@ -321,7 +319,7 @@ test("host (P3-7): the pending write refuses a W that already has a holding (ano
   assert.deepEqual(s.data.get(`meta/${EVM_POSITION_COSTS_KEY}`), { [W]: filled });
 });
 
-test("host (P2-2): record and owe write the store only while it is open (the page's held), never opening it; the page's sign-out signal and sign-out count reach the run (m53)", async () => {
+test("host (P2-2): record writes the store only while it is open (the page's held), never opening it; the page's sign-out signal and sign-out count reach the run (m53)", async () => {
   let opens = 0;
   const s = store();
   const signal = new AbortController().signal;
@@ -330,7 +328,6 @@ test("host (P2-2): record and owe write the store only while it is open (the pag
   (p as unknown as { store: () => Promise<WalletStore> }).store = async () => (opens++, s.store);
   const h = evmBuyHost("base", PIN, NO_RPCS, new Set(), p);
   await assert.rejects(h.record(W, HOLDING), /no wallet store is open/);
-  await assert.rejects(h.owe({ address: W, chain: "base", wei: "1", tx: HASH, block: "1" }), /no wallet store is open/);
   assert.deepEqual([opens, s.data.size], [0, 0]);
   assert.equal(h.signal, signal);
   assert.equal(h.stopped, stopped);
@@ -356,14 +353,14 @@ test("host (pending end): unrecord removes only W's own pending record (the null
   assert.deepEqual(s.data.get(`meta/${EVM_POSITION_COSTS_KEY}`), { [OTHER_W]: other });
 });
 
-test("host: owe writes W's ETH owed back under EVM_OWED_BACK_KEY, keeping another W's", async () => {
-  const other: EvmOwedBack = { address: OTHER_W, chain: "base", wei: "1", tx: HASH, block: "1" };
-  const s = store({ [`meta/${EVM_OWED_BACK_KEY}`]: { [OTHER_W]: other } });
-  const h = evmBuyHost("base", PIN, NO_RPCS, new Set(), page({ store: s.store }).p);
-  const mine: EvmOwedBack = { address: W, chain: "base", wei: (CHUNK - FEE).toString(), tx: HASH, block: "16" };
-  await h.owe(mine);
-  assert.deepEqual(s.data.get(`meta/${EVM_OWED_BACK_KEY}`), { [OTHER_W]: other, [W]: mine });
-  assert.deepEqual([...s.data.keys()], [`meta/${EVM_OWED_BACK_KEY}`]);
+test("host: carry starts the page's carry pass for the host's own chain and writes nothing; a page with none gives no carry", async () => {
+  const s = store();
+  const asked: string[] = [];
+  const h = evmBuyHost("robinhood", PIN, NO_RPCS, new Set(), { ...page({ store: s.store }).p, carry: (c) => void asked.push(c) });
+  h.carry!();
+  assert.deepEqual(asked, ["robinhood"]);
+  assert.equal(s.data.size, 0);
+  assert.equal(evmBuyHost("base", PIN, NO_RPCS, new Set(), page({ store: s.store }).p).carry, undefined);
 });
 
 test("host: send posts to the trade helper's /v1/pool/evm/send through the page's fetch", async () => {

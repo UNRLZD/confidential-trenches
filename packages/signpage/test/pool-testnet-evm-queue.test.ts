@@ -1117,3 +1117,69 @@ test("a page open across the turn keeps the period before's proof takeable while
   await t.signedOut();
 });
 
+// the page's carry pass at a state read (src/pool-carry-evm.ts)
+test("a state read carries a refused buy's ETH on W back into the pool from the chain alone (src/pool-carry-evm.ts): W's own deposit to the pinned pool on its return note, with no buy record and no tap", { timeout: 60_000 }, async () => {
+  const { freshWallet } = await import("../../wallet/src/derive/keys.ts");
+  const { w, ns } = await wallet();
+  // deposit 0 spent by a refused buy: its change landed, its release a Withdrawn to W of a Buy call to the pool
+  const n = await landed(ns);
+  const CHUNK = 4n * 10n ** 14n;
+  await ns.add({ ref: C0, scope: SCOPE, precommitment: P(C0), state: "UNSPENT", leaf: { value: RUNG - CHUNK, label: L0, commitment: noteCommitment(RUNG - CHUNK, L0, P(C0)), leafIndex: 1n } });
+  assert.equal((await ns.get(n.id))!.state, "SPENT");
+  const W = freshWallet(SEED64, "evm", L0, 0).address.toLowerCase();
+  const word = (v: bigint) => v.toString(16).padStart(64, "0");
+  const sel = (s: string) => "0x" + Buffer.from(keccak_256(new TextEncoder().encode(s))).toString("hex").slice(0, 8);
+  const BUY = sel(EVM_BUY_SIGNATURE) + Array.from({ length: 20 }, (_, k) => word(k === 18 ? 640n : 0n)).join("") + word(0xa0n) + word(0x80n) + word(1n) + word(0xbbn) + word(0n);
+  const HASH20 = `0x${"20".repeat(32)}`;
+  const release = { ...ev(20n, { kind: "withdraw", state: 9n, value: CHUNK, nullifier: noteSecrets(SEED64, D0).nullifierHash, recipient: W }), blockHash: HASH20, logIndex: 2n };
+  const round = { fin: { number: 30n, timestamp: 1_800_000_300n, hash: "", baseFeePerGas: null }, anchor: { number: 40n, hash: "", timestamp: 0n, baseFeePerGas: null }, events: [DEPOSIT, release] };
+  const sent: string[] = [];
+  const topic = "0x" + Buffer.from(keccak_256(new TextEncoder().encode(EVM_POOL_EVENTS.Withdrawn))).toString("hex");
+  const rpcs = (): readonly EvmRpc[] =>
+    ["https://a.example", "https://b.example"].map((url, k) =>
+      Object.assign(
+        async (method: string, params: readonly unknown[]) => {
+          const p = params as unknown[];
+          switch (method) {
+            case "eth_getBlockByNumber":
+              if (p[0] === "0x14" && p[1] === true) return { number: "0x14", hash: HASH20, transactions: [{ hash: `0x${"77".repeat(32)}`, to: PIN.pool.toLowerCase(), input: BUY }] };
+              return { number: "0x28", hash: `0x${"28".repeat(32)}`, timestamp: "0x" + (BigInt(Date.now()) / 1000n).toString(16), baseFeePerGas: "0xf4240" };
+            case "eth_getLogs":
+              return [{ logIndex: "0x2", blockHash: HASH20, topics: [topic, "0x" + word(BigInt(W))], transactionIndex: "0x0", transactionHash: `0x${"77".repeat(32)}` }];
+            case "eth_getTransactionCount":
+              return "0x0";
+            case "eth_getBalance":
+              return "0x" + (String(p[0]).toLowerCase() === W ? CHUNK - 10n ** 13n : 0n).toString(16);
+            case "eth_estimateGas":
+              return "0x3d090";
+            case "eth_call":
+              return "0x" + word(0n);
+            case "eth_sendRawTransaction":
+              if (k === 0) sent.push(p[0] as string);
+              return "0x" + "ab".repeat(32);
+            case "eth_blockNumber":
+              return "0x28";
+          }
+          throw new Error(`no ${method}`);
+        },
+        { url },
+      ),
+    );
+  const t = testnetPool({ ...page(w), held: async () => w }, {
+    prover: { vault: signalsProver(), stop: () => {} },
+    evmPin: (c) => (c === "base" ? PIN : undefined),
+    evmRpcs: (c) => (c === "base" ? rpcs() : null),
+    evmSync: () => ({ events: async () => round }),
+    evmQueuePool: () => fakeEvmPool() as Pool<unknown>,
+  });
+  await t.stateRead();
+  await until(() => sent.length > 0);
+  const raw = Buffer.from(sent[0]!.slice(4), "hex");
+  const ret: NoteRef = { kind: "return", c: "evm", l: L0, j: 0 };
+  const hexRaw = raw.toString("hex");
+  assert.ok(hexRaw.includes(PIN.pool.slice(2).toLowerCase()), "to the pinned pool");
+  assert.ok(hexRaw.includes(sel("deposit(uint256,uint256)").slice(2) ) && hexRaw.includes(word(P(ret))), "deposit() on W's return note");
+  const open = (await ns.list()).find((x) => refKey(x.ref) === refKey(ret));
+  assert.equal(open?.state, "INCOMING");
+  await t.signedOut();
+});

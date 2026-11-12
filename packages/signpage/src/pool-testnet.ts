@@ -76,6 +76,7 @@ import { spendOwner } from "./pool-spend.ts";
 import { evmPoolFee, evmPoolGas } from "../../kit/src/trade/evm/pool-fee.ts";
 import { poolDepositEvmKind, type EvmDepositRound } from "./pool-deposit-evm.ts";
 import { EVM_POSITION_COSTS_KEY, evmBuyHost, followPendingEvmBuys, poolBuyEvmKind, type EvmBuyPage } from "./pool-buy-evm.ts";
+import { carryEvmOwed } from "./pool-carry-evm.ts";
 import { EVM_POSITIONS_REARM_MS, EVM_POSITIONS_STAGGER_MS, evmPositionsPass, evmPositionsRetryMs, evmSaleHolds, staggered, type EvmSaleHolds } from "./positions-evm.ts";
 import { EVM_OPEN_SELLS_KEY, evmSellHost, followEvmSells, poolSellEvmKind } from "./pool-sell-evm.ts";
 import { EvmSendBusy } from "./evm-send.ts";
@@ -989,6 +990,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     testnet: POOL_TESTNET,
     signal: follows.signal,
     stopped: ((at) => () => signOuts !== at)(signOuts),
+    // a refusal's ETH on W: the chain's carry pass (evmCarry, defined below; called only once a buy ends)
+    carry: (c) => evmCarry(c),
     // as the Solana buy's: the balance counts the note's change from its release's read-back (card
     // pool-buy-record-never-stays-sent)
     landed: (noteId, attempt, withdrawn, block) => void markLanded(noteId, attempt, withdrawn, block).catch(() => {}),
@@ -1051,6 +1054,47 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     const e = evmPool(chain);
     if (e === null) return;
     void followPendingEvmBuys(evmBuyHost(chain, e.pin, e.rpcs, evmBuyClaims, evmBuyPage(chain))).catch(() => {});
+  };
+  // a refused buy's ETH on W put back into the pool as a note of the user's (src/pool-carry-evm.ts carryEvmOwed: the Ws
+  // from the chain alone, so a closed tab and a restored device are the same pass), with no tap: at a refusal (the
+  // buy's carry) and at each state read; one pass per chain in this tab and across tabs (a Web Lock taken if free),
+  // under the seed's shared lock; a sign out ends it (evmStop) with nothing signed or written after it
+  const evmCarrying = new Set<"base" | "robinhood">();
+  const evmCarry = (chain: "base" | "robinhood"): void => {
+    // the testnet build only, as the buy (folded at build time)
+    if (!POOL_TESTNET) return;
+    // and only where the build carries the chain's withdraw (poolWayOut)
+    if (!wayOut(chain)) return;
+    const e = evmPool(chain);
+    if (e === null || !locks || evmCarrying.has(chain)) return;
+    evmCarrying.add(chain);
+    const signal = evmStop.signal;
+    void locks
+      .request(`ct-evm-carry/${chain}`, { ifAvailable: true }, async (held) => {
+        if (held === null) return;
+        await locks.request(WALLET_SEED_LOCK, { mode: "shared", signal }, async () => {
+          const notes = await openNoteStore(await page.store());
+          try {
+            await carryEvmOwed({
+              chain,
+              testnet: POOL_TESTNET,
+              pin: e.pin,
+              scope: e.scope,
+              rpcs: e.rpcs,
+              round: () => e.sync.events(signal),
+              notes: async () => notes,
+              seed64: page.seed64,
+              held: () => (page.held ? page.held() : Promise.reject(new Error("no wallet store is open"))),
+              landed: () => void evmProofs(chain),
+              signal,
+            });
+          } finally {
+            notes.close();
+          }
+        });
+      })
+      .catch(() => {})
+      .finally(() => evmCarrying.delete(chain));
   };
   // pool.sell on an EVM chain (card signpage-evm-pool-sell, src/pool-sell-evm.ts): the Ws the chain's spent notes pay,
   // their buy records, the kit's sell quote and build, the helper's sell sender, the pool's pair and round; testnet build
@@ -1256,6 +1300,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     for (const chain of chains) evmBuyFollow(chain);
     // and each chain's sales whose tab ended before their end, from their open records (never awaited)
     for (const chain of chains) evmSellFollow(chain);
+    // and each chain's refused buys' ETH on W, carried back into the pool (never awaited)
+    for (const chain of chains) evmCarry(chain);
     const all = await readNotes(await page.store());
     await Promise.all(
       chains.map(async (chain) => {

@@ -14,7 +14,7 @@ import { asRecorded, gasRoundAnswers, withMarker } from "../../kit/test/evm-quot
 import { entropyToWords, freshWallet, wordsToSeed64 } from "../../wallet/src/derive/keys.ts";
 import { EVM_POOL_EVENTS, evmPoolContextOf, evmPoolScopeOf, evmRelayDataBytes, type EvmPoolRequest, type EvmRelayData } from "../../wallet/src/pool/evm.ts";
 import type { ReadyProof } from "../../wallet/src/pool/pool.ts";
-import { EVM_BUY_LAG_BLOCKS, EVM_BUY_SETTLE_MS, EVM_OWED_BACK_KEY, EVM_POSITION_COSTS_KEY, runEvmPoolBuy, type EvmHolding, type EvmOwedBack, type EvmPoolBuyAnswer, type EvmPoolBuyHost } from "../src/pool-buy-evm.ts";
+import { EVM_BUY_LAG_BLOCKS, EVM_BUY_SETTLE_MS, EVM_POSITION_COSTS_KEY, runEvmPoolBuy, type EvmHolding, type EvmPoolBuyAnswer, type EvmPoolBuyHost } from "../src/pool-buy-evm.ts";
 import { evmBuyCalldata, EvmSendBusy, EvmSendNoAnswer, EvmSendRefused } from "../src/evm-send.ts";
 import type { PoolAsk } from "../src/rules/pool.ts";
 import * as R from "../src/rules/pool.ts";
@@ -122,7 +122,7 @@ const rpcOf = (side: Side, clock: { t: bigint }, calls: Call[]): EvmPoolBuyHost[
   throw new Error(`no ${method}`);
 };
 
-type Seen = { seeds: Uint8Array[]; takes: string[]; sends: { pool: string; data: Uint8Array; epoch: bigint }[]; settles: number; records: [string, EvmHolding][]; owed: EvmOwedBack[]; sent: number; late: EvmPoolBuyAnswer[]; quotes: EvmPoolBuyQuote["route"][]; calls: Call[]; order: string[]; clock: { t: bigint } };
+type Seen = { seeds: Uint8Array[]; takes: string[]; sends: { pool: string; data: Uint8Array; epoch: bigint }[]; settles: number; records: [string, EvmHolding][]; carries: number; sent: number; late: EvmPoolBuyAnswer[]; quotes: EvmPoolBuyQuote["route"][]; calls: Call[]; order: string[]; clock: { t: bigint } };
 type HostOpts = { ready?: ReadyProof<EvmPoolRequest>[]; a?: Side; b?: Side; send?: () => Promise<string>; quote?: () => Promise<EvmPoolBuyQuote>; claimed?: Set<string>; record?: () => Promise<void>; holdings?: Map<string, EvmHolding>; unrecord?: () => Promise<void>; following?: Set<string>; take?: () => Promise<void> };
 /** Every host's sign out, aborted after each test: the reads a test leaves following end with it. */
 const stops: AbortController[] = [];
@@ -130,7 +130,7 @@ afterEach(() => void stops.splice(0).forEach((c) => c.abort()));
 function host(o: HostOpts = {}): { h: EvmPoolBuyHost; seen: Seen } {
   stops.push(new AbortController());
   const clock = { t: NOW };
-  const seen: Seen = { seeds: [], takes: [], sends: [], settles: 0, records: [], owed: [], sent: 0, late: [], quotes: [], calls: [], order: [], clock };
+  const seen: Seen = { seeds: [], takes: [], sends: [], settles: 0, records: [], carries: 0, sent: 0, late: [], quotes: [], calls: [], order: [], clock };
   const ready = o.ready ?? [readyOf()];
   const kept = o.holdings ?? new Map<string, EvmHolding>();
   const h: EvmPoolBuyHost = {
@@ -187,7 +187,7 @@ function host(o: HostOpts = {}): { h: EvmPoolBuyHost; seen: Seen } {
     },
     holdings: async () => Object.fromEntries(kept),
     following: o.following ?? new Set(),
-    owe: async (x) => void seen.owed.push(x),
+    carry: () => void seen.carries++,
     sent: () => void seen.sent++,
     late: (x) => void seen.late.push(x),
     claimed: o.claimed ?? new Set(),
@@ -326,13 +326,13 @@ test("(ruling 2) never not_landed before the deadline on both RPCs: a send with 
   assert.deepEqual(await lateOf(stuck.seen), { stage: "not_landed", txs: [] });
 });
 
-test("the fee is the sender's pick up to the proof's cap (PrivacyPool.sol _release: FeeOverCap only): a release charging less is still this buy's, filled or owed back by its own fee", async () => {
+test("the fee is the sender's pick up to the proof's cap (PrivacyPool.sol _release: FeeOverCap only): a release charging less is still this buy's, filled or carried back by its own release", async () => {
   const { h, seen } = host(both([release({ fee: FEE / 2n, out: 41_000_000n })]));
   assert.deepEqual(await runEvmPoolBuy(h, ASK), { stage: "filled", txs: [{ chain: "base", hash: TX }] });
   assert.equal(seen.records.at(-1)![1].received, "41");
   const free = host(both([release({ kind: "withdrawn", fee: 0n })]));
   assert.deepEqual(await runEvmPoolBuy(free.h, ASK), { stage: "refused", txs: [{ chain: "base", hash: TX }] });
-  assert.equal(free.seen.owed[0]!.wei, CHUNK.toString(), "the chunk less the fee charged");
+  assert.equal(free.seen.carries, 1, "the carry pass started at the refusal");
 });
 
 test("a sign out ends the reads past the tap: no late end, no more reads", async () => {
@@ -348,12 +348,11 @@ test("a sign out ends the reads past the tap: no late end, no more reads", async
   assert.deepEqual(seen.late, []);
 });
 
-test("(ruling 4) a Withdrawn for the nullifier: the buy did not fill, W's ETH (the chunk less the fee) is written owed back, and the answer names the release", async () => {
+test("(ruling 4) a Withdrawn for the nullifier: the buy did not fill, the carry pass starts (W's ETH back into the pool, read from the chain), and the answer names the release", async () => {
   const { h, seen } = host(both([release({ kind: "withdrawn" })]));
   assert.deepEqual(await runEvmPoolBuy(h, ASK), { stage: "refused", txs: [{ chain: "base", hash: TX }] });
-  assert.deepEqual(seen.owed, [{ address: W, chain: "base", wei: (CHUNK - FEE).toString(), tx: TX, block: "272" }]);
+  assert.equal(seen.carries, 1);
   assert.equal(seen.records.at(-1)![1].state, "withdrawn");
-  assert.equal(EVM_OWED_BACK_KEY, "owed/back-evm");
 });
 
 test("(ruling 3) W's holding is written pending before the take and the send; a write that fails sends nothing and leaves the note HELD", async () => {
@@ -915,7 +914,7 @@ test("(pending end, review P3-G) the load's follow: the fee recipient is the pin
   l1.seen.clock.t = NOW + 200_000n;
   await followPending!(l1.h);
   assert.notEqual(edited.get(W)?.state, "filled", "not filled by another fee recipient's release");
-  assert.equal(l1.seen.owed.length, 0);
+  assert.equal(l1.seen.carries, 0);
   for (const [why, bad] of [
     ["decimals -1", { ...rec, decimals: -1 }],
     ["decimals 1.5", { ...rec, decimals: 1.5 }],

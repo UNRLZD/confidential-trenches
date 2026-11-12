@@ -1314,6 +1314,32 @@ export function checkEvmDeposit(tx: EvmOnwardSend, ask: PoolAsk, ctx: EvmDeposit
   return { chain: ask.chain, op: "pool.deposit", token: null, amount: rung, feeCap: bound, pool: pin.pool, to: pin.pool, decimals: ask.decimals, back: null };
 }
 
+/** The device's side of a carry (src/pool-carry-evm.ts): W's address (derived from the seed at the spent note's (l, j)),
+ *  the return note's precommitment, the deposit call for it (frozen), the pin, and the chain the pin is of. */
+export type EvmCarryContext = EvmDepositContext & { readonly chain: "base" | "robinhood" };
+
+/**
+ * W's carry: the ETH a release paid the fresh wallet W with no swap (a refused buy) goes back into the pinned pool as
+ * one note of the user's, by a deposit W signs and pays the gas of. Every field is held as U's deposit is
+ * (checkEvmDeposit: the pinned pool and chain, deposit(value, precommitment) and nothing else, W's agreed nonce, the
+ * two-RPC estimate with the tree's headroom, the fee caps), and the value is W's whole lower balance reading less the
+ * send's fee bound exactly: W keeps nothing past the gas it may not use, and no value is any server's word. Signed by
+ * signEvmDeposit with W's key alone (the signer holds the key to `wallet`).
+ */
+export function checkEvmCarry(tx: EvmOnwardSend, ctx: EvmCarryContext, reads: EvmDepositReads, testnet = false): PoolDraw {
+  if (ctx?.chain !== "base" && ctx?.chain !== "robinhood") return refuse("chain");
+  const value = ctx.call?.value;
+  if (typeof value !== "bigint") return refuse("call");
+  const ask: PoolAsk = { kind: "pool.deposit", chain: ctx.chain, token: null, amount: value, slippageBps: 0, decimals: 18 };
+  const draw = checkEvmDeposit(tx, ask, ctx, reads, testnet);
+  const low = reads.balance[0]! < reads.balance[1]! ? reads.balance[0]! : reads.balance[1]!;
+  if (draw.amount + draw.feeCap !== low) {
+    DEPOSIT_CHECKED.delete(tx);
+    return refuse("carry_whole");
+  }
+  return draw;
+}
+
 /** U's signed deposit, the raw transaction 0x02 ‖ rlp([...the nine fields, yParity, r, s]), s low: only the very send
  *  checkEvmDeposit passed, while it reads as the check read it, and only with U's own key. */
 export function signEvmDeposit(secretKey: Uint8Array, tx: EvmOnwardSend): Uint8Array {
