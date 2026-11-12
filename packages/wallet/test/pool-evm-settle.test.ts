@@ -407,7 +407,7 @@ test("head: a reorg drops a deposit's leaf: the note leaves the balance and the 
   const after1 = (await ns.get(n!.id))!;
   assert.equal(after1.state, "INCOMING");
   assert.equal(after1.leaf, undefined);
-  assert.equal((await ns.landings()).get(n!.id), undefined);
+  assert.equal((await ns.landings()).get(n!.id), 10n, "its old block kept: the mark of a note backed out there");
   assert.equal(await balanceOf(ns), 0n);
   // the sequencer includes it again later, at another place (block 36, after the stranger's at 35): taken at its new leaf
   const again: World = { pool: [...dropped.pool, { ...chain(false).find((e) => e.block === 10)!, block: 36 }], head: 42, finalized: 5 };
@@ -419,6 +419,7 @@ test("head: a reorg drops a deposit's leaf: the note leaves the balance and the 
   assert.equal(n2!.id, n!.id);
   assert.equal(n2!.state, "UNSPENT");
   assert.equal(n2!.leaf!.leafIndex, 3n);
+  assert.equal((await ns.landings()).get(n!.id), 36n, "its new landing's block");
   assert.equal(await balanceOf(ns), VALUE);
 });
 
@@ -429,8 +430,9 @@ test("head: a reorg drops a release: its change goes and the note is RESERVED ag
     assert.deepEqual(await pass(ns, tail, tail), { spent: [id], freed: [], held: [], backedOut: [] });
     const change = (await ns.list()).find((n) => n.parent === id)!;
     assert.equal(await balanceOf(ns), VALUE - WITHDRAWN);
-    // a reorg drops block 20 (the release), the head back at 19, before the deadline: the change goes, the note RESERVED
-    const dropped: World = { pool: chain(false), head: 19, finalized: 15 };
+    // a reorg drops the release: block 20 again, now without it (the head at 20, not past the deadline): the change
+    // goes, the note RESERVED
+    const dropped: World = { pool: chain(false), head: 20, finalized: 15 };
     assert.deepEqual(await pass(ns, dropped, dropped), { spent: [], freed: [], held: [id], backedOut: [change.id] });
     const note = (await ns.get(id))!;
     assert.equal(note.state, "RESERVED");
@@ -471,7 +473,7 @@ test("head: a note backed out under a proof in flight ends that send with a clea
   assert.equal((await ns2.marks()).get(m!.id), undefined);
 });
 
-test("head: a finalized fact never backs out: at or under the highest finalized block the store was told, whatever block a caller names", async () => {
+test("head: a finalized fact never backs out: once a round with its block final held it, whatever block a caller names", async () => {
   const ns = await emptyStore();
   const leafOf = (ref: NoteRef, i: bigint) => {
     const label = vaultLabelOf(keccak_256, SCOPE, i + 1n);
@@ -481,25 +483,30 @@ test("head: a finalized fact never backs out: at or under the highest finalized 
   // landed in block 50 above the finalized 40: kept with its block
   const a = await ns.add({ ref: D1, scope: SCOPE, precommitment: P(D1), state: "UNSPENT", leaf: leafOf(D1, 0n), landed: { block: 50n, fin: 40n } });
   assert.equal((await ns.landings()).get(a.id), 50n);
-  // the finalized block past it (60): refused, never backed out
-  await assert.rejects(ns.backOut(a.id, 60n), /at or below the finalized block 60: it never backs out/);
+  // a round with block 50 final held it (finalized names it): refused from then on, whatever finalized block is named
+  await ns.finalized(SCOPE, 60n, [a.id]);
+  assert.equal((await ns.landings()).get(a.id), undefined);
+  await assert.rejects(ns.backOut(a.id, 60n), /it never backs out/);
+  await assert.rejects(ns.backOut(a.id, 30n), /it never backs out/);
   assert.equal(await stateOf(ns, a.id), "UNSPENT");
-  // a stale (backwards) finalized block named afterwards cannot lower the store's: still refused
-  await assert.rejects(ns.backOut(a.id, 30n), /at or below the finalized block 60/);
-  // another note landed in block 55 while the finalized block was told as 40: the store's highest is 60, so refused too
+  // a finalized block past a note's that no round held it at (finalized not told of it): its block stays, a number alone
+  // makes nothing final
   const b = await ns.add({ ref: D2, scope: SCOPE, precommitment: P(D2), state: "UNSPENT", leaf: leafOf(D2, 1n), landed: { block: 55n, fin: 40n } });
-  assert.equal((await ns.landings()).get(b.id), undefined, "at or under the store's highest finalized block when written: kept as final");
-  await assert.rejects(ns.backOut(b.id, 30n), /never backs out/);
-  // one above it backs out, once
-  const c = await ns.add({ ref: D3, scope: SCOPE, precommitment: P(D3), state: "UNSPENT", leaf: leafOf(D3, 2n), landed: { block: 70n, fin: 30n } });
-  assert.equal((await ns.landings()).get(c.id), 70n);
-  await ns.backOut(c.id, 30n);
-  assert.equal(await stateOf(ns, c.id), "INCOMING");
+  await ns.finalized(SCOPE, 80n, []);
+  assert.equal((await ns.landings()).get(b.id), 55n);
+  await ns.backOut(b.id, 80n);
+  assert.equal(await stateOf(ns, b.id), "INCOMING");
+  // backed out once: an INCOMING note never backs out again
+  await assert.rejects(ns.backOut(b.id, 80n), /never backs out/);
+  // one landed at or under its own round's finalized block keeps no block: final, never backs out
+  const c = await ns.add({ ref: D3, scope: SCOPE, precommitment: P(D3), state: "UNSPENT", leaf: leafOf(D3, 2n), landed: { block: 70n, fin: 70n } });
+  assert.equal((await ns.landings()).get(c.id), undefined);
   await assert.rejects(ns.backOut(c.id, 30n), /never backs out/);
-  // finalized() drops the block of every landing at or under it
-  const d = await ns.add({ ref: D0, scope: SCOPE, precommitment: P(D0), state: "UNSPENT", leaf: leafOf(D0, 3n), landed: { block: 80n, fin: 60n } });
-  assert.equal((await ns.landings()).get(d.id), 80n);
-  await ns.finalized(SCOPE, 80n);
+  // finalized() drops a held note's block only at or under its own fin
+  const d = await ns.add({ ref: D0, scope: SCOPE, precommitment: P(D0), state: "UNSPENT", leaf: leafOf(D0, 3n), landed: { block: 90n, fin: 80n } });
+  await ns.finalized(SCOPE, 85n, [d.id]);
+  assert.equal((await ns.landings()).get(d.id), 90n);
+  await ns.finalized(SCOPE, 90n, [d.id]);
   assert.equal((await ns.landings()).get(d.id), undefined);
   await assert.rejects(ns.backOut(d.id, 100n), /never backs out/);
 });

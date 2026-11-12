@@ -283,3 +283,72 @@ test(`P-01 (store part): kills at random steps, several per run, ${RUNS} runs`, 
     endState(goals, await run(goals, kills));
   }
 });
+
+// The EVM pool's back out (card evm-money-shows-and-spends-at-once, store.ts backOut): a reorg drops a release whose
+// change landed in the tail, and the page is killed at each durable write of the pass in turn. After the reload the
+// next passes heal it: the change gone, its parent the user's again, the balance the whole note, nothing counted twice.
+test("backOut: a kill at every write of a reorg's pass, the reload heals it", async () => {
+  const { keccak_256 } = await import("@noble/hashes/sha3.js");
+  const { vaultLabelOf } = await import("@blindfill/kit");
+  const { evmSettleReserved } = await import("../src/pool/evm-settle.ts");
+  const S = 0x1234n;
+  const D: NoteRef = { kind: "deposit", s: S, i: 0 };
+  const L = vaultLabelOf(keccak_256, S, 2n);
+  const C: NoteRef = { kind: "change", l: L, j: 0 };
+  const V = 10n ** 16n, X = 4n * 10n ** 15n;
+  const w64 = (x: bigint) => x.toString(16).padStart(64, "0");
+  const row = (b: number) => ({ block: BigInt(b), blockHash: `0x${w64(BigInt(b))}`, logIndex: 0n, bytes: "0x" });
+  const dep = (b: number, state: bigint, pre: bigint) => ({ ...row(b), kind: "deposit", state, label: L, value: V, precommitment: pre, nullifier: null, recipient: null, token: null });
+  const commit = noteCommitment(V, L, pc(D));
+  const change = noteCommitment(V - X, L, pc(C));
+  const rel = { ...row(20), kind: "buy", state: change, label: null, value: X, precommitment: null, nullifier: noteSecrets(SEED, D).nullifierHash, recipient: "0x00000000000000000000000000000000000000aa", token: "0x00000000000000000000000000000000000000bb" };
+  const T = (n: number) => 1_800_000_000n + 2n * BigInt(n);
+  const pass = (ns: NoteStore, anchor: number, events: unknown[]) => evmSettleReserved({ seed64: SEED, notes: ns, scope: S, round: async () => ({ fin: { number: 15n, timestamp: T(15) }, anchor: { number: BigInt(anchor), timestamp: T(anchor) }, events: events as never }) });
+  const dropped = [dep(5, 11n, 101n), dep(10, commit, pc(D))];
+  let survived = false;
+  const kills: boolean[] = [];
+  const opened: { close(): void }[] = []; // closed even when an assertion fails, so the file ends
+  try {
+  for (let k = 1; !survived; k++) {
+    const idb = new IDBFactory();
+    const w = await openWalletStore({ indexedDB: idb });
+    let ns = await openNoteStore(w);
+    opened.push(w, ns);
+    const n = await ns.add({ ref: D, scope: S, precommitment: pc(D), state: "UNSPENT", leaf: { value: V, label: L, commitment: commit, leafIndex: 1n } });
+    const held = await ns.move(n.id, "UNSPENT", "HELD", { deadlineMs: T(100) * 1000n, context: "5" });
+    await ns.move(n.id, "HELD", "RESERVED", { attempt: held.attempt! });
+    assert.deepEqual((await pass(ns, 20, [...dropped, rel])).spent, [n.id]);
+    // the kill: the k-th durable write of the reorg's pass throws, and the page's store is closed
+    let writes = 0;
+    const real = { put: w.put.bind(w), update: w.update.bind(w), delete: w.delete.bind(w) };
+    const cut = <F extends (...a: never[]) => Promise<unknown>>(f: F) => (async (...a: Parameters<F>) => {
+      // the k-th write and every one after it: the page is gone (a settle that catches one note's failure writes no more)
+      if (++writes >= k) throw new Kill(`killed at write ${k}`);
+      return f(...a);
+    }) as unknown as F;
+    Object.assign(w, { put: cut(real.put), update: cut(real.update), delete: cut(real.delete) });
+    try {
+      await pass(ns, 21, dropped);
+    } catch (e) {
+      if (!(e instanceof Kill)) throw e;
+    } finally {
+      survived = writes < k; // every write of the pass ran before the k-th: the last case
+      kills.push(writes >= k);
+    }
+    Object.assign(w, real);
+    ns.close();
+    ns = await openNoteStore(w);
+    opened.push(ns);
+    for (let i = 0; i < 2; i++) await pass(ns, 21, dropped);
+    const all = await ns.list();
+    assert.deepEqual(all.map((x) => refKey(x.ref)), [refKey(D)], `kill at write ${k}: no change note left`);
+    assert.equal(all[0]!.state, "RESERVED", `kill at write ${k}: the note the user's again, its release dropped`);
+    assert.equal((await ns.landings()).size, 0, `kill at write ${k}: no landing of a note gone`);
+    ns.close();
+    w.close();
+  }
+  } finally {
+    for (const x of opened) x.close();
+  }
+  assert.ok(kills.filter(Boolean).length >= 4, `a kill at each of the pass's writes (${kills.filter(Boolean).length})`);
+});

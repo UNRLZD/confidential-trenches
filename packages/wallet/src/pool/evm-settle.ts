@@ -18,13 +18,18 @@
 //   two operators agreeing on one hash removes the only short disagreement. What covers it is the heal below and the pool
 //   itself, which refuses a proof on a root a reorg dropped (UnknownStateRoot) or a nullifier spent twice: a reorg costs
 //   at most a refused transaction, never money.
-// - The heal, first: each landed note of the scope whose block the store keeps (landed above the finalized block when
-//   written: ../notes/store.ts EvmLandings), not SPENT, no note's parent, whose leaf the round does not hold at its index, is backed out (the store's
-//   backOut, refused for a note at or under the store's highest finalized block): its own deposit back to INCOMING (the
-//   deposit's follow reads its sends again, and a deposit landed again is taken at its new leaf), a change note gone with
-//   its parent back to RESERVED (its release dropped: the settle below reads it again or frees it past its deadline).
-//   Children first, so a chain of them unwinds in one pass. Then the store drops the kept block of every note at or
-//   under `fin` (finalized): those never back out.
+// - The heal, first: each landed note of the scope whose block the store keeps (../notes/store.ts EvmLandings: landed
+//   above its round's finalized block, and no round since has held it with that block final), that block at or under
+//   the round's anchor (a round short of it says nothing of it), not SPENT, no note's parent, whose leaf the round does
+//   not hold at its index, is backed out (the store's backOut, refused for a note whose block it no longer keeps): its
+//   own deposit back to INCOMING, its old block kept as the mark of a note backed out there, a change note gone with its
+//   parent back to RESERVED (its release dropped: the settle below reads it again or frees it past its deadline).
+//   Children first, so a chain of them unwinds in one pass.
+// - The landing again: each backed-out note of the scope (INCOMING with its block kept), of any kind (deposit, return,
+//   second arrival, move), whose precommitment a Deposited of the round names is taken at that leaf as a restore from
+//   the words takes it (./evm-restore.ts evmDepositLeaf, evmClaimTaken), marked landed when above `fin`; a change note
+//   lands again with its parent's release below. Then the store drops the kept block, at or under `fin`, of each note
+//   this round held at its index and each backed-out one no Deposited of the round names (finalized): a fact final.
 // - Spent: a Withdrawn or Bought whose _spentNullifier is the note's nullifier hash (IPrivacyPool.sol:78-85, 253-262), in
 //   the round. The release must come after the note's leaf and withdraw above 0 and at most its value, as the pool
 //   makes every release (./evm-restore.ts evmRestore); any other holds the note. Its change note is value - withdrawn
@@ -32,7 +37,8 @@
 //   UNSPENT through the store's add(child, parent), which moves the note to SPENT in the same write (../notes/store.ts),
 //   marked landed when the release's block is above `fin`. A release whose _newCommitment is not that change (the
 //   note's secrets used elsewhere) is the chain's truth all the same: the note goes to SPENT with no change note, as a
-//   restore lists it (`elsewhere`), never freed. The same holds an UNSPENT note to the round: one whose release the round
+//   restore lists it (`elsewhere`), never freed, once the release's block is at or under `fin`; above it the note is
+//   held (SPENT is terminal, and no change's landing would undo it if a reorg dropped the release). The same holds an UNSPENT note to the round: one whose release the round
 //   shows (a release a reorg brought back after the note was freed or backed out, or another device's) is settled spent.
 // - Freed: the pool refuses a release once block.timestamp * 1000 is past its deadlineMs (src/PrivacyPool.sol:241), and
 //   a block's timestamp is never below its parent's, and may equal it: on Robinhood (Arbitrum Nitro) the sequencer sets
@@ -44,7 +50,9 @@
 //   that the note is held: its send may still land. The anchor is the lower of the two RPCs' newest blocks, so a
 //   deadline past on one RPC's head only frees nothing. A reorg that brings the release back after that is read as a
 //   spend of the UNSPENT note (above); a proof of it sent meanwhile is refused by the pool (its nullifier is spent).
-// - Each state read runs it while a RESERVED or tail note of the scope is open; it is idempotent: a note it settled is
+// - Each state read runs it while evmSettleOpen holds: a RESERVED note of the scope, or one whose block the store keeps
+//   (in the tail, or backed out and not landed again): one round read a state read while a note is unfinal, none once
+//   every note is final. It is idempotent: a note it settled is
 //   no longer RESERVED, so a second pass reads nothing for it, and a change another tab wrote first with this leaf is
 //   taken. A reload mid-way leaves either the note RESERVED (nothing written) or the change written, whose parent the
 //   store moves to SPENT at its next open.
@@ -53,6 +61,7 @@
 import { noteCommitment, noteSecrets } from "../notes/secrets.ts";
 import { refKey, type NoteRecord, type NoteStore } from "../notes/store.ts";
 import { EVM_LIFE_MS, type EvmBlock, type EvmPoolEvent } from "./evm.ts";
+import { evmClaimTaken, evmDepositLeaf } from "./evm-restore.ts";
 import { jOf } from "./queue.ts";
 
 /** One round of the pool's sync, as evmTreeSync events() gives it: its finalized anchor, its newest agreed anchor and
@@ -68,7 +77,7 @@ export type EvmSettleArgs = {
   notes: NoteStore;
   /** The pool's scope (evmPoolScopeOf): only its notes are settled. */
   scope: bigint;
-  /** One round of the pool's sync (evmTreeSync events()), read only when a RESERVED or tail note of the scope is open. */
+  /** One round of the pool's sync (evmTreeSync events()), read only while evmSettleOpen holds for the scope. */
   round: (signal?: AbortSignal) => Promise<EvmSettleRound>;
   signal?: AbortSignal;
 };
@@ -108,7 +117,8 @@ export async function evmSettleReserved(a: EvmSettleArgs): Promise<EvmReservedPa
     a.signal?.throwIfAborted();
     const all = await mine();
     const kept = k === 0 ? tail : await a.notes.landings();
-    const gone = all.filter((n) => kept.has(n.id) && n.leaf !== undefined && n.state !== "SPENT" && !failed.has(n.id) && r.events[Number(n.leaf.leafIndex)]?.state !== n.leaf.commitment && !all.some((c) => c.parent === n.id));
+    // only a note whose kept block the round reached (at or under its anchor): a round short of it says nothing of it
+    const gone = all.filter((n) => kept.has(n.id) && kept.get(n.id)! <= r.anchor.number && n.leaf !== undefined && n.state !== "SPENT" && !failed.has(n.id) && r.events[Number(n.leaf.leafIndex)]?.state !== n.leaf.commitment && !all.some((c) => c.parent === n.id));
     if (gone.length === 0) break;
     for (const n of gone) {
       a.signal?.throwIfAborted();
@@ -122,9 +132,34 @@ export async function evmSettleReserved(a: EvmSettleArgs): Promise<EvmReservedPa
       }
     }
   }
-  await a.notes.finalized(a.scope, r.fin.number);
+  // the landing again: each backed-out note (INCOMING, its old block kept) whose precommitment a Deposited of the round
+  // names is taken at that leaf, as a restore from the words takes it (evmDepositLeaf, evmClaimTaken)
+  const final: string[] = [];
+  let changed = out.backedOut.length > 0;
+  const marks = await a.notes.landings();
+  for (const n of await mine()) {
+    const b = marks.get(n.id);
+    if (b === undefined || failed.has(n.id)) continue;
+    if (n.state === "INCOMING") {
+      a.signal?.throwIfAborted();
+      try {
+        const leaf = evmDepositLeaf(a.scope, r.events, n.precommitment);
+        if (leaf === null) {
+          if (b <= r.fin.number) final.push(n.id); // its old block final, no deposit of it: the mark goes
+          continue;
+        }
+        const block = r.events[Number(leaf.leafIndex)]!.block;
+        await evmClaimTaken(a.notes, [{ ref: n.ref, scope: n.scope, precommitment: n.precommitment, leaf, state: "UNSPENT", ...(block > r.fin.number ? { landed: { block, fin: r.fin.number } } : {}) }]);
+        changed = true;
+      } catch {
+        out.held.push(n.id);
+      }
+    } else if (n.leaf !== undefined && r.events[Number(n.leaf.leafIndex)]?.state === n.leaf.commitment) final.push(n.id);
+  }
+  // a kept block at or under fin goes only for a note this round held (or, backed out, names no deposit of)
+  await a.notes.finalized(a.scope, r.fin.number, final);
   // the notes as first read unless the heal changed some (a note another tab settled meanwhile is caught by its write)
-  for (const n of out.backedOut.length === 0 ? first : await mine()) {
+  for (const n of changed ? await mine() : first) {
     if (n.state !== "RESERVED" && n.state !== "UNSPENT") continue;
     if (n.state === "UNSPENT" && (n.leaf === undefined || !releases.has(noteSecrets(a.seed64, n.ref).nullifierHash))) continue;
     a.signal?.throwIfAborted(); // a sign out (its round read or a note's write in hand) stops the pass before its next write
@@ -166,7 +201,9 @@ async function settleOne(a: EvmSettleArgs, n: NoteRecord, r: EvmSettleRound, rel
   const cValue = leaf.value - e.value;
   const commitment = noteCommitment(cValue, l, cP);
   if (commitment !== e.state) {
-    // not the device's release (its change is not the note's): spent all the same, with no change note of ours
+    // not the device's release (its change is not the note's): spent all the same, with no change note of ours, once
+    // its block is final; above `fin` held, since SPENT is terminal and no change's landing would undo it after a reorg
+    if (e.block > r.fin.number) return "held";
     await a.notes.move(n.id, from, "SPENT");
     return "spent";
   }

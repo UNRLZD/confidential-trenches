@@ -5,7 +5,7 @@ import { runSync } from "../../../scripts/group-run.mjs";
 const W = fileURLToPath(new URL("..", import.meta.url)).replace(/\/$/, "");
 const S = `${W}/src/pool/evm.ts`, R = `${W}/src/pool/evm-restore.ts`, H = `${W}/src/pool/evm-hold-store.ts`;
 const ST = `${W}/src/pool/evm-settle.ts`, N = `${W}/src/notes/store.ts`;
-const T = "test/pool-evm-restore.test.ts", TE = "test/pool-evm.test.ts", TS = "test/pool-evm-settle.test.ts";
+const T = "test/pool-evm-restore.test.ts", TE = "test/pool-evm.test.ts", TS = "test/pool-evm-settle.test.ts", TH = "test/pool-evm-heal.test.ts";
 // [file, find, replace, test file, test name pattern]
 const M = [
   // the restore's checks on the pool's events
@@ -17,8 +17,24 @@ const M = [
   // a release not final. Now held by the tail mark, the heal and the store's refusal to back out a finalized fact
   [R, "const landed = a.fin !== undefined && block > a.fin ? { landed: { block, fin: a.fin } } : {};", "const landed = {};", T, "^head: a deposit 4 s old"],
   [ST, "        await a.notes.backOut(n.id, r.fin.number, anchorMs + EVM_LIFE_MS);\n        out.backedOut.push(n.id);\n", "", TS, "^head: a reorg drops"],
-  [ST, "  await a.notes.finalized(a.scope, r.fin.number);\n", "", TS, "^head: a finalized fact never backs out"],
-  [N, "if (block === undefined || block <= final) throw", "if (block === undefined) throw", TS, "^head: a finalized fact never backs out"],
+  [ST, "  await a.notes.finalized(a.scope, r.fin.number, final);\n", "", TS, "^head: a finalized fact never backs out"],
+  [N, "if (l.block.get(id) === undefined || !LANDED.includes(cur.state)) throw", "if (!LANDED.includes(cur.state)) throw", TS, "^head: a finalized fact never backs out"],
+  // the review of the card's heal (probes A-F, pool-evm-heal.test.ts): (1) a round short of the note's block backs
+  // nothing out; (3) a fact final only once a round held it, never by a number; (4) the child deleted before its
+  // marks; (5) a release elsewhere held until final, in the settle and the restore; (2) a backed-out note of any kind
+  // landed again from the chain, its mark kept and read until it lands or is final with no deposit
+  [ST, " && kept.get(n.id)! <= r.anchor.number", "", TH, "^heal A"],
+  [N, "b <= fin && done.has(id)", "b <= fin", TH, "^heal: a back out that fails|^store: finalized"],
+  [ST, "    } else if (n.leaf !== undefined && r.events[Number(n.leaf.leafIndex)]?.state === n.leaf.commitment) final.push(n.id);\n", "    } else final.push(n.id);\n", TH, "^heal: a back out that fails under a chain"],
+  [N, "if (l.block.get(id) === undefined || !LANDED.includes(cur.state)) throw", "if (l.block.get(id) === undefined || l.block.get(id)! <= l.final.get(cur.scope.toString())! || !LANDED.includes(cur.state)) throw", TH, "^heal C"],
+  [N, "    await store.delete(\"notes\", id);\n    await dropReserved();\n    await landingsUpdate((x) => x.block.delete(id)).catch(() => {});\n", "    await dropReserved();\n    await landingsUpdate((x) => x.block.delete(id)).catch(() => {});\n    await store.delete(\"notes\", id);\n", "test/note-store-crash.test.ts", "^backOut: a kill"],
+  [ST, "    if (e.block > r.fin.number) return \"held\";\n", "", TH, "^heal D:"],
+  [R, "    else if (a.fin !== undefined && e.block > a.fin) {", "    else if (false) {", TH, "^heal D \\(restore\\)"],
+  [ST, "        await evmClaimTaken(a.notes,", "        if (false) await evmClaimTaken(a.notes,", TH, "^heal re-land \\(deposit"],
+  [N, "      await write({ ...rest, state: \"INCOMING\" });\n      await dropReserved();\n", "      await write({ ...rest, state: \"INCOMING\" });\n      await dropReserved();\n      await landingsUpdate((x) => x.block.delete(id));\n", TH, "^heal re-land \\(return"],
+  [N, "if (b !== undefined && keeps(n)) out.set", "if (b !== undefined && n.state !== \"INCOMING\" && keeps(n)) out.set", TH, "^heal re-land \\(R second"],
+  [ST, "n.state === \"RESERVED\" || landings.has(n.id)", "n.state === \"RESERVED\"", TH, "^heal re-land \\(U second"],
+  [ST, "          if (b <= r.fin.number) final.push(n.id);", "", TH, "^heal: a backed-out note no Deposited"],
   [R, "if (leaves.has(e.state)) throw", "if (false) throw", T, "evmRestore refuses"],
   [R, "if (byPre.has(e.precommitment!)) throw", "if (false) throw", T, "evmRestore refuses"],
   [R, "if (byNull.has(e.nullifier!)) throw", "if (false) throw", T, "evmRestore refuses"],

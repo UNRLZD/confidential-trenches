@@ -221,6 +221,13 @@ function* evmRestoreSteps(a: Omit<EvmRestoreArgs, "seed64">): Generator<void, Ev
     if (ours) spends.push({ l, j, note: key, w: e.recipient!, withdrawn: e.value, block: e.block, token: e.token, blockHash: e.blockHash, logIndex: e.logIndex });
     if (!ours || !changeOurs) elsewhere.push({ note: key, to: e.recipient!, withdrawn: e.value, block: e.block, changeOurs });
     if (changeOurs) put(cref, cP, { value: cValue, label: l, commitment: cCommitment, leafIndex: BigInt(at) }, key);
+    // a release with no change of ours above the round's finalized block: the note is held UNSPENT with that block
+    // kept, so a reorg that drops the release leaves it the user's, and the settle (./evm-settle.ts) writes it SPENT
+    // once the block is final; a release with our change is undone by the change's own landing
+    else if (a.fin !== undefined && e.block > a.fin) {
+      note.state = "UNSPENT";
+      note.landed = { block: e.block, fin: a.fin };
+    }
     yield* asDeposit({ kind: "move", l, j });
     yield* seconds({ id: "V", l, j });
     yield* seconds({ id: "A", l, j });
@@ -331,6 +338,12 @@ export async function evmClaimTaken(store: NoteStore, taken: readonly EvmRestore
     } else if (h.leaf !== undefined && (h.leaf.commitment !== t.leaf.commitment || h.leaf.leafIndex !== t.leaf.leafIndex)) throw new Error(`${refKey(t.ref)}: the store holds this note at another leaf`);
   }
   return out;
+}
+
+/** The leaf of the Deposited naming `precommitment` among a round's events, its label and commitment checked as the
+ *  restore checks each deposit (depositLeaf); null when none names it. The settle's landing of a backed-out note. */
+export function evmDepositLeaf(scope: bigint, events: readonly EvmPoolEvent[], precommitment: bigint): Leaf | null {
+  return depositLeaf(scope, events, indexEvents(events), precommitment, "a backed-out note");
 }
 
 /** An unread W's error: a provider's words cut to their JSON-RPC code or HTTP status; the device's own words kept. */
