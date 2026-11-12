@@ -8,7 +8,7 @@
 // Planted from the good run: a run that stalls, one that never ends, a second run with no tap, an answer that is not
 // started, a restore answered while signed out. Card sign-live-checks-read-a-pinned-page: live111 (below), and the
 // pinned hosts' cases planted at the end. Card restore-first-sign-in-under-two-minutes: step 5 after done, planted on
-// live111 at the end.
+// live111 at the end. Card sign-live-checks-name-evm-pool-hosts: live119, with the EVM pools' hosts' cases planted on it.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -67,6 +67,32 @@ test("planted: a stray host, a pinned host the page's connect-src does not name,
   fails(mut((rec) => rec.requests.push({ host: "evil.example", path: "/" })), /stray: evil\.example/);
   fails(mut((rec) => (rec.console = ["warning: restore stalled: lane 3: 1 id unread (both providers refused)"])), /the page logged no stalled restore \(warning: restore stalled: lane 3/);
   fails(mut((rec) => ((rec.requests = []), (rec.hosts = {}))), /every request goes to .*\(none\)/);
+});
+
+// Card sign-live-checks-name-evm-pool-hosts: release 119 pins the Base and Robinhood pools on mainnet, so a signed-in
+// page reads each on its list (pool-testnet.ts MAINNET_POOL_RPCS). live119: the live page on release 119 (main
+// f9cffd25), this check with those four hosts pinned, 12 Nov: PASS. Planted from it: an EVM host its connect-src names
+// that no pin reads on (the fee list's, the quote list's), any third host, and a pinned EVM host its connect-src does
+// not name: FAIL. Live run 43184299402's hosts line (the four as stray before this card) passes now.
+test("recorded live run on release 119: PASS with the EVM pools' hosts; an EVM host no pin names, a third host, or one not in the connect-src: FAIL", () => {
+  assert.match(ANSWERS.live119.source, /^live https:\/\/confidential\.unrealized\.trade/);
+  const r = judge(ANSWERS.live119);
+  assert.equal(r.ok, true, r.lines.join("\n"));
+  const evm = ["base-rpc.publicnode.com", "base.api.pocket.network", "rpc.mainnet.chain.robinhood.com", "robinhood.api.pocket.network"];
+  assert.ok(evm.every((h) => ANSWERS.live119.hosts[h] > 0), JSON.stringify(ANSWERS.live119.hosts));
+  const x = (f) => {
+    const rec = structuredClone(ANSWERS.live119);
+    f(rec);
+    return judge(rec);
+  };
+  for (const h of ["mainnet.base.org", "robinhood.drpc.org", "base-mainnet.public.blastapi.io", "evil.example", "api.mainnet-beta.solana.com"]) {
+    if (h !== "evil.example") assert.ok(ANSWERS.live119.connect.includes(h), `${h} is in the served connect-src`);
+    fails(x((rec) => (rec.hosts[h] = 1)), new RegExp(`^BAD every request goes to .*stray: ${h.replaceAll(".", "\\.")}\\)$`));
+  }
+  for (const h of evm) fails(x((rec) => (rec.connect = rec.connect.filter((c) => c !== h))), new RegExp(`not in its connect-src: ${h.replaceAll(".", "\\.")}\\)$`));
+  // run 43184299402's hosts line, read from its log: stray before this card, every host pinned now
+  const ran = x((rec) => (rec.hosts = { "confidential.unrealized.trade": 2, "ct-app.unrealized.trade": 2, "ct-api.unrealized.trade": 12, "base-rpc.publicnode.com": 32, "base.api.pocket.network": 32, "rpc.mainnet.chain.robinhood.com": 20, "robinhood.api.pocket.network": 20, "solana-rpc.publicnode.com": 9, "rpc.mainnet.fastnear.com": 6, "near.drpc.org": 6, "solana.api.pocket.network": 1 }));
+  assert.equal(ran.ok, true, ran.lines.join("\n"));
 });
 
 // live111: the live page on release 111 (the mainnet Solana pool pinned), this card's check, 10 Nov 20:03Z: every
