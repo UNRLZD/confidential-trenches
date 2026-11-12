@@ -77,6 +77,8 @@ import { evmPoolFee, evmPoolGas } from "../../kit/src/trade/evm/pool-fee.ts";
 import { poolDepositEvmKind, type EvmDepositRound } from "./pool-deposit-evm.ts";
 import { EVM_POSITION_COSTS_KEY, evmBuyHost, followPendingEvmBuys, poolBuyEvmKind, type EvmBuyPage } from "./pool-buy-evm.ts";
 import { carryEvmOwed } from "./pool-carry-evm.ts";
+import { rebuildEvmHoldings } from "./pool-holdings-evm.ts";
+import type { EvmPoolChain } from "../../kit/src/trade/evm/buy-unpinned.ts";
 import { EVM_POSITIONS_REARM_MS, EVM_POSITIONS_STAGGER_MS, evmPositionsPass, evmPositionsRetryMs, evmSaleHolds, staggered, type EvmSaleHolds } from "./positions-evm.ts";
 import { EVM_OPEN_SELLS_KEY, evmSellHost, followEvmSells, poolSellEvmKind } from "./pool-sell-evm.ts";
 import { EvmSendBusy } from "./evm-send.ts";
@@ -525,6 +527,9 @@ export type TestnetOver = {
   positionsNow?: () => number;
   /** The chains whose withdraw the build carries (POOL_WITHDRAW_BUILT otherwise; tests plant a build with none). */
   withdrawBuilt?: Readonly<Partial<Record<PoolChain, boolean>>>;
+  /** The helper's /v1/rpc/{chain} the buy records' rebuild reads a buy's transaction on (pageEvmWalletRpc otherwise,
+   *  none in the testnet build; tests). */
+  evmHelper?: (chain: "base" | "robinhood") => EvmRpc | undefined;
 };
 
 /** The page network's lookup tables by venue (the wallet's SOL_POOL_TABLES of PAGE_CLUSTER): a pool buy loads one of
@@ -1090,6 +1095,42 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       .catch(() => {})
       .finally(() => evmCarrying.delete(chain));
   };
+  // a W's buy record rebuilt from the chain on a device that never made the buy (src/pool-holdings-evm.ts: the round's
+  // Bought, the buy's transaction from the helper alone, bound to the hash both RPCs agree on), at each state read until
+  // written; one pass per chain in this tab and across tabs, under the seed's shared lock; a sign out ends it. A chain
+  // whose records it wrote reads its positions again. None in the testnet build (no helper route there: its restore
+  // reads the records, src/pool-restore.ts)
+  const evmHoldingsRunning = new Set<"base" | "robinhood">();
+  const evmHoldings = (chain: "base" | "robinhood"): void => {
+    if (!wayOut(chain)) return;
+    const e = evmPool(chain);
+    const helper = over.evmHelper ? over.evmHelper(chain) : pageEvmWalletRpc(chain);
+    if (e === null || helper === undefined || !locks || evmHoldingsRunning.has(chain)) return;
+    evmHoldingsRunning.add(chain);
+    const signal = evmStop.signal;
+    void locks
+      .request(`ct-evm-holdings/${chain}`, { ifAvailable: true }, async (free) => {
+        if (free === null) return;
+        const wrote = await locks.request(WALLET_SEED_LOCK, { mode: "shared", signal }, async () =>
+          rebuildEvmHoldings({
+            chain,
+            network: e.pin.network as EvmPoolChain,
+            pin: e.pin,
+            scope: e.scope,
+            rpcs: e.rpcs,
+            helper,
+            round: () => e.sync.events(signal),
+            notes: async () => readNotes(await page.store()),
+            seed64: page.seed64,
+            held: () => (page.held ? page.held() : Promise.reject(new Error("no wallet store is open"))),
+            signal,
+          }),
+        );
+        if (wrote.length > 0 && !signal.aborted) evmPositions(chain)?.refresh();
+      })
+      .catch(() => {})
+      .finally(() => evmHoldingsRunning.delete(chain));
+  };
   // pool.sell on an EVM chain (card signpage-evm-pool-sell, src/pool-sell-evm.ts): the Ws the chain's spent notes pay,
   // their buy records, the kit's sell quote and build, the helper's sell sender, the pool's pair and round; testnet build
   // only until the mainnet pins' card. One note store per run, closed at its end
@@ -1296,6 +1337,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     for (const chain of chains) evmSellFollow(chain);
     // and each chain's refused buys' ETH on W, carried back into the pool (never awaited)
     for (const chain of chains) evmCarry(chain);
+    // and each chain's buy records a device that never made the buy lacks, from the chain (never awaited)
+    for (const chain of chains) evmHoldings(chain);
     const all = await readNotes(await page.store());
     await Promise.all(
       chains.map(async (chain) => {
