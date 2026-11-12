@@ -84,18 +84,20 @@ const act = (ui: Partial<Ui["act"]> = {}): Partial<Ui> => ({ pane: "activity", a
 
 // The owner's two private round trips on Solana mainnet, 12 Nov 05:36-05:40Z (card portfolio-shows-pool-trades), as the
 // signing page records them once filled (src/trade-fill.ts: each trade's units and SOL from its own transaction), the
-// times moved to end 5 min before NOW; USD at $160 a SOL. Its four signatures are the real ones.
+// times moved to end 5 min before NOW; USD at the SOL price of each trade's own block (Pyth's SOL/USD feed write before
+// it, trade-fill.ts blockPrice: a sale's as the fill writes it, a buy's standing in for its live one). Its four
+// signatures are the real ones.
 const ICM = "78GaXFTJzkCWpdxkNHMSP3TXEKbhQTpb3EqMt7Uupump";
 const at = (min: number) => NOW - min * 60_000;
 const sol = (hash: string) => [{ chain: "solana" as const, hash }];
 const POOL_OPS: Operation[] = [
   { id: "pd", kind: "pool_deposit", chain: "solana", stage: "in_pool", txs: [], created_ms: at(15) } as Operation,
-  { id: "pb1", kind: "buy", stage: "filled", txs: sol("5Qn5LtHiu7xb7irPaPTSpcwPoreem1toPSYT3XvVBPDfH42CU3hMWmKP3AMXg3ag3qdoQb3Rnxrfo6dXVGXtvB8Q"), created_ms: at(9), chain: "solana", token: ICM, amount_usd: "0.19294192", units: "16041.923776", pool_amount: "0.001205887" },
-  { id: "ps1", kind: "sell", stage: "filled", txs: sol("32CSJ1GSPrJScgPxyF41zuszLjosxgiDbeFWFRM5p7G6DzbxHjeFWihPjqhQqCLobXhkn3aqBD6WxmenAXLu7Kwn"), created_ms: at(7.4), chain: "solana", token: ICM, units: "16041.923776", amount_usd: "0.0919416", pool_amount: "0.000574635" },
-  { id: "pb2", kind: "buy", stage: "filled", txs: sol("3sPawpfvAdoYLHa9i5MRKZVv6xEGLCmRXjJTKxEMHpNYqPMSX22QZ6eyLbdyJDNA7T6TTpWWaKamEA1LiAMaDoQr"), created_ms: at(6.3), chain: "solana", token: ICM, amount_usd: "0.19272832", units: "34154.038071", pool_amount: "0.001204552" },
-  { id: "ps2", kind: "sell", stage: "filled", txs: sol("3aUiLLSmj1oHFot7bPLp1VewwqHZ1eNsJnTyZvLnDFKyubfqmwK6iCq7AsSXmt497Vjx8o6AxwEbRzxeEjQr52bd"), created_ms: at(5), chain: "solana", token: ICM, units: "34154.038071", amount_usd: "0.18794656", pool_amount: "0.001174666" },
+  { id: "pb1", kind: "buy", stage: "filled", txs: sol("5Qn5LtHiu7xb7irPaPTSpcwPoreem1toPSYT3XvVBPDfH42CU3hMWmKP3AMXg3ag3qdoQb3Rnxrfo6dXVGXtvB8Q"), created_ms: at(9), chain: "solana", token: ICM, amount_usd: "0.10002700069283141", units: "16041.923776", pool_amount: "0.001205887" },
+  { id: "ps1", kind: "sell", stage: "filled", txs: sol("32CSJ1GSPrJScgPxyF41zuszLjosxgiDbeFWFRM5p7G6DzbxHjeFWihPjqhQqCLobXhkn3aqBD6WxmenAXLu7Kwn"), created_ms: at(7.4), chain: "solana", token: ICM, units: "16041.923776", amount_usd: "0.04768764243129345", pool_amount: "0.000574635" },
+  { id: "pb2", kind: "buy", stage: "filled", txs: sol("3sPawpfvAdoYLHa9i5MRKZVv6xEGLCmRXjJTKxEMHpNYqPMSX22QZ6eyLbdyJDNA7T6TTpWWaKamEA1LiAMaDoQr"), created_ms: at(6.3), chain: "solana", token: ICM, amount_usd: "0.0999999427770536", units: "34154.038071", pool_amount: "0.001204552" },
+  { id: "ps2", kind: "sell", stage: "filled", txs: sol("3aUiLLSmj1oHFot7bPLp1VewwqHZ1eNsJnTyZvLnDFKyubfqmwK6iCq7AsSXmt497Vjx8o6AxwEbRzxeEjQr52bd"), created_ms: at(5), chain: "solana", token: ICM, units: "34154.038071", amount_usd: "0.09749603193780052", pool_amount: "0.001174666" },
 ];
-const POOL_STATE: Partial<SignpageState> = { vault_balance: "0", positions: [], ops: POOL_OPS, pools: [{ chain: "solana", asset: "SOL", balance: "0.019392", ready: "0.019392", price: PX(160) }] };
+const POOL_STATE: Partial<SignpageState> = { vault_balance: "0", positions: [], ops: POOL_OPS, pools: [{ chain: "solana", asset: "SOL", balance: "0.019392", ready: "0.019392", price: PX(83) }] };
 const POOL_MARKETS = [{ chain: "solana" as const, token: ICM, symbol: "Icm", name: "Internet cat money", price_usd: "0.00000233314178549" }];
 
 export const FIXTURES: Record<string, Fx> = {
@@ -105,7 +107,7 @@ export const FIXTURES: Record<string, Fx> = {
   "pooltrades-activity": { state: POOL_STATE, live: true, ui: act() },
   // between the second buy and its sale: its open row, the first round trip closed
   "pooltrades-open": {
-    state: { ...POOL_STATE, ops: POOL_OPS.slice(0, 4), positions: [{ chain: "solana", token: ICM, amount: "34154.038071", cost: "0.19272832", wallets: ["8e8RsnpnL6Toqsa2Q1YPLvopDqPa3HFTdwEikCkqpQ7p"], decimals: 6 }] },
+    state: { ...POOL_STATE, ops: POOL_OPS.slice(0, 4), positions: [{ chain: "solana", token: ICM, amount: "34154.038071", cost: "0.0999999427770536", wallets: ["8e8RsnpnL6Toqsa2Q1YPLvopDqPa3HFTdwEikCkqpQ7p"], decimals: 6 }] },
     live: true,
   },
   rows: {},

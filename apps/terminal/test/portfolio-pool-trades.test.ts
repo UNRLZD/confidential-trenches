@@ -7,7 +7,10 @@
 //
 // The amounts are the chain's own (getTransaction at finalized on a public RPC, 12 Nov): each buy's SOL into the venue
 // (pump's BuyExactSolIn spendable_sol_in) and the token amount W received; each sale's SOL out of the venue to W (W's
-// lamports after less before, plus the fee and every lamport W paid out in the transaction). USD at $160 a SOL.
+// lamports after less before, plus the fee and every lamport W paid out in the transaction). USD at the SOL price of each
+// trade's own block, Pyth's SOL/USD feed write before it (the page's own feed; packages/signpage/src/trade-fill.ts
+// blockPrice): $82.94890043, $82.98770947, $83.0183693 and $82.99893922. A sale's is what the fill writes on release
+// 118's records (usd_from "block"); a buy's stands in for the live price its record was written with.
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { HeldMarket, Operation, SignpageClientSnapshot, SignpageState } from "@blindfill/kit";
@@ -26,10 +29,10 @@ const TX = {
 const sol = (hash: string) => [{ chain: "solana" as const, hash }];
 
 const deposit: Operation = { id: "d1", kind: "pool_deposit", stage: "in_pool", txs: [], created_ms: T("05:30:00"), chain: "solana" } as Operation;
-const buy1: Operation = { id: "b1", kind: "buy", stage: "filled", txs: sol(TX.buy1), created_ms: T("05:36:50"), chain: "solana", token: MINT, amount_usd: "0.19294192", units: "16041.923776", pool_amount: "0.001205887" };
-const sell1: Operation = { id: "s1", kind: "sell", stage: "filled", txs: sol(TX.sell1), created_ms: T("05:38:28"), chain: "solana", token: MINT, units: "16041.923776", amount_usd: "0.0919416", pool_amount: "0.000574635" };
-const buy2: Operation = { id: "b2", kind: "buy", stage: "filled", txs: sol(TX.buy2), created_ms: T("05:39:30"), chain: "solana", token: MINT, amount_usd: "0.19272832", units: "34154.038071", pool_amount: "0.001204552" };
-const sell2: Operation = { id: "s2", kind: "sell", stage: "filled", txs: sol(TX.sell2), created_ms: T("05:39:56"), chain: "solana", token: MINT, units: "34154.038071", amount_usd: "0.18794656", pool_amount: "0.001174666" };
+const buy1: Operation = { id: "b1", kind: "buy", stage: "filled", txs: sol(TX.buy1), created_ms: T("05:36:50"), chain: "solana", token: MINT, amount_usd: "0.10002700069283141", units: "16041.923776", pool_amount: "0.001205887" };
+const sell1: Operation = { id: "s1", kind: "sell", stage: "filled", txs: sol(TX.sell1), created_ms: T("05:38:28"), chain: "solana", token: MINT, units: "16041.923776", amount_usd: "0.04768764243129345", pool_amount: "0.000574635" };
+const buy2: Operation = { id: "b2", kind: "buy", stage: "filled", txs: sol(TX.buy2), created_ms: T("05:39:30"), chain: "solana", token: MINT, amount_usd: "0.0999999427770536", units: "34154.038071", pool_amount: "0.001204552" };
+const sell2: Operation = { id: "s2", kind: "sell", stage: "filled", txs: sol(TX.sell2), created_ms: T("05:39:56"), chain: "solana", token: MINT, units: "34154.038071", amount_usd: "0.09749603193780052", pool_amount: "0.001174666" };
 
 const base = (ops: Operation[], positions: SignpageState["positions"]): SignpageClientSnapshot => ({
   status: "ready",
@@ -48,8 +51,8 @@ test("the whole sequence: nothing open, both round trips closed with their reali
   assert.equal(closed.length, 2);
   const [second, first] = closed;
   // newest close first; bought and sold in cents, rounded down; realized is sold less bought
-  assert.deepEqual([first!.bought, first!.sold, first!.realized], [19n, 9n, -10n]);
-  assert.deepEqual([second!.bought, second!.sold, second!.realized], [19n, 18n, -1n]);
+  assert.deepEqual([first!.bought, first!.sold, first!.realized, first!.realizedBps], [10n, 4n, -6n, -5232]);
+  assert.deepEqual([second!.bought, second!.sold, second!.realized, second!.realizedBps], [9n, 9n, -1n, -250]);
   // the pool asset's own figures, exact
   assert.deepEqual([first!.asset, first!.realizedAsset], ["SOL", "-0.000631252"]);
   assert.deepEqual([second!.asset, second!.realizedAsset], ["SOL", "-0.000029886"]);
@@ -58,19 +61,20 @@ test("the whole sequence: nothing open, both round trips closed with their reali
   assert.equal(first!.symbol, "Icm");
   // the header's figures follow the closed list
   assert.equal(stats(closed).trades, 2);
-  assert.equal(pf.totals!.realized30, -11n);
+  // the exact −$0.0548 to cents once (each row's own floor would add to −$0.07)
+  assert.equal(pf.totals!.realized30, -6n);
   // Activity: each trade with its own transaction and size
   const acts = activity(snap.state!.ops, d).filter((r) => r.kind === "buy" || r.kind === "sell");
-  assert.deepEqual(acts.map((r) => [r.kind, r.txs[0]!.hash, r.usd]), [["sell", TX.sell2, 18n], ["buy", TX.buy2, 19n], ["sell", TX.sell1, 9n], ["buy", TX.buy1, 19n]]);
+  assert.deepEqual(acts.map((r) => [r.kind, r.txs[0]!.hash, r.usd]), [["sell", TX.sell2, 9n], ["buy", TX.buy2, 9n], ["sell", TX.sell1, 4n], ["buy", TX.buy1, 10n]]);
 });
 
 test("between the second buy and its sale: one open row with size, cost and value, the first round trip closed", () => {
-  const snap = base([deposit, buy1, sell1, buy2], [{ chain: "solana", token: MINT, amount: "34154.038071", cost: "0.19272832", wallets: ["8e8RsnpnL6Toqsa2Q1YPLvopDqPa3HFTdwEikCkqpQ7p"], decimals: 6 }]);
+  const snap = base([deposit, buy1, sell1, buy2], [{ chain: "solana", token: MINT, amount: "34154.038071", cost: "0.0999999427770536", wallets: ["8e8RsnpnL6Toqsa2Q1YPLvopDqPa3HFTdwEikCkqpQ7p"], decimals: 6 }]);
   const d = heldData(snap, markets, new Map(), NOW);
   const pf = portfolio(snap, d, NOW);
   assert.equal(pf.rows.length, 1);
   const r = pf.rows[0]!;
-  assert.deepEqual([r.units, r.cost, r.value, r.bought, r.sold, r.realized, r.openedAt], ["34154.038071", 19n, 7n, 19n, 0n, 0n, buy2.created_ms]);
+  assert.deepEqual([r.units, r.cost, r.value, r.bought, r.sold, r.realized, r.openedAt], ["34154.038071", 9n, 7n, 9n, 0n, 0n, buy2.created_ms]);
   assert.equal(closedRows(d).length, 1);
 });
 
@@ -78,7 +82,7 @@ test("a record with no size of its own (a sale written before its proceeds were 
   const { amount_usd: _u, pool_amount: _p, ...bare } = sell1 as Operation & { pool_amount?: string };
   const snap = base([buy1, bare as Operation], []);
   const [c] = closedRows(heldData(snap, markets, new Map(), NOW));
-  assert.equal(c!.bought, 19n);
+  assert.equal(c!.bought, 10n);
   assert.equal(c!.sold, null);
   assert.equal(c!.realized, null);
   assert.equal(c!.realizedAsset, null);

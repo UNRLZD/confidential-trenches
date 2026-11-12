@@ -272,11 +272,17 @@ export function sortRows(rows: readonly Row[]): Row[] {
  *  names no USD adds nothing. */
 export function realized30(rows: readonly Row[], closed: readonly ClosedTrade[], now: number): bigint {
   let r = rows.reduce((a, x) => a + x.realized, 0n);
+  // the closed trades' exact sum, to cents once (closedRows: a floor per trade puts the total off its rows)
+  let exact = 0n;
   for (const c of closed) {
     const sold = cents(c.sold);
-    if (sold !== null && c.closed_at > now - 30 * DAY && c.closed_at <= now) r += sold - (cents(c.bought) ?? 0n);
+    if (sold === null || c.closed_at <= now - 30 * DAY || c.closed_at > now) continue;
+    const sx = fx(c.sold ?? undefined);
+    const bx = fx(c.bought);
+    if (sx !== null && bx !== null) exact += sx - bx;
+    else r += sold - (cents(c.bought) ?? 0n);
   }
-  return r;
+  return r + (cents(unfx(exact)) ?? 0n);
 }
 
 // ------------------------------------------------------------------------------------------ the trade book (ops)
@@ -638,11 +644,17 @@ export function closedRows(d: PortfolioData): ClosedRow[] {
       const m = d.market(c.chain, c.token);
       const bought = cents(c.bought) ?? 0n;
       const sold = cents(c.sold);
-      const realized = sold === null ? null : sold - bought;
+      // realized from the exact figures, then to cents: two floors first would put a cent and its percent off (a
+      // $0.0523 loss on $0.1000 drawn as −$0.06 and −60%)
+      const bx = fx(c.bought ?? undefined);
+      const sx = fx(c.sold ?? undefined);
+      const exact = bx !== null && sx !== null ? sx - bx : null;
+      const realized = sold === null ? null : exact !== null ? cents(unfx(exact)) : sold - bought;
+      const realizedBps = realized === null ? null : exact !== null && bx !== null ? (bx === 0n ? null : Number((exact * 10000n) / bx)) : bps(realized, bought);
       const ai = fx(c.bought_asset ?? undefined);
       const ao = fx(c.sold_asset ?? undefined);
       const asset = c.asset ?? null;
-      return { key: `${key(c.chain, c.token)}:${c.closed_at}`, chain: c.chain, token: c.token, symbol: m?.symbol ?? c.token.slice(0, 6), name: m?.name ?? "", bought, sold, realized, realizedBps: realized === null ? null : bps(realized, bought), asset, realizedAsset: asset && ai !== null && ao !== null ? unfx(ao - ai) : null, heldMs: c.closed_at - c.opened_at, closedAt: c.closed_at };
+      return { key: `${key(c.chain, c.token)}:${c.closed_at}`, chain: c.chain, token: c.token, symbol: m?.symbol ?? c.token.slice(0, 6), name: m?.name ?? "", bought, sold, realized, realizedBps, asset, realizedAsset: asset && ai !== null && ao !== null ? unfx(ao - ai) : null, heldMs: c.closed_at - c.opened_at, closedAt: c.closed_at };
     })
     .sort((a, b) => b.closedAt - a.closedAt);
 }
