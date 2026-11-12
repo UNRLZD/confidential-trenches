@@ -135,7 +135,7 @@ jobs:
             git show refs/remotes/origin/main:.gitleaksignore > "$rules/.gitleaksignore"
           fi
           scan="$(mktemp -d)"
-          for f in packages/signpage/index.html packages/signpage/public/app.js packages/signpage/public/prover-worker.js packages/signpage/public/prover-thread.js; do
+          for f in packages/signpage/index.html packages/signpage/public/app.js packages/signpage/public/prover-worker.js packages/signpage/public/prover-thread.js packages/signpage/public/walk-worker.js; do
             mkdir -p "$scan/$(dirname "$f")"
             cp -- "$f" "$scan/$f"
           done

@@ -8,7 +8,7 @@ import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writ
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { bundle, bundleModuleProblems, check, copyServed, outputFiles, outsideTsconfigs, SERVED, sha384 } from "./build-app.mjs";
+import { bundle, bundleModuleProblems, check, copyServed, outputFiles, outsideTsconfigs, SERVED, sha384, walkSourceProblems } from "./build-app.mjs";
 import { SIGN_BUILD_OUTPUTS } from "../../../scripts/ci/sign-build-inputs.mjs";
 import { proverThreadSource, proverWorkerSource } from "../../kit/src/prover/build.mjs";
 import { ZK_SETUP_FILES } from "../../kit/src/zk/setup-files.ts";
@@ -39,6 +39,7 @@ test("a hand-edited bundle or a stale integrity is caught", async () => {
   cpSync(join(PKG, "index.html"), join(d, "index.html"));
   cpSync(join(PKG, "public/prover-worker.js"), join(d, "public/prover-worker.js"));
   cpSync(join(PKG, "public/prover-thread.js"), join(d, "public/prover-thread.js"));
+  cpSync(join(PKG, "public/walk-worker.js"), join(d, "public/walk-worker.js"));
   assert.match((await check(PKG, d)).join("\n"), /public\/app\.js is not the build/);
   writeFileSync(join(d, "public/app.js"), js);
   writeFileSync(join(d, "index.html"), readFileSync(join(PKG, "index.html"), "utf8").replace(/sha384-[^"]+/, sha384(Buffer.from("x"))));
@@ -80,6 +81,47 @@ test("a stale or hand-edited prover thread file is caught", async () => {
     const want = ["public/prover-thread.js is not the kit's prover thread build: run node packages/signpage/scripts/build-app.mjs"];
     assert.deepEqual(await check(PKG, d), want);
     rmSync(join(d, "public/prover-thread.js"));
+    assert.deepEqual(await check(PKG, d), want);
+  } finally {
+    rmSync(d, { recursive: true, force: true });
+  }
+});
+
+// card restore-shows-the-balance-in-seconds: the restore's walk Worker is one module file, the bundle of
+// packages/wallet/src/restore/walk-worker.ts: no chunk, no import at runtime, no eval, no test path
+test("public/walk-worker.js is the walk Worker's bundle: one self-contained module that answers walks, with no import and no eval", async () => {
+  const b = await bundle();
+  assert.ok(readFileSync(join(PKG, "public/walk-worker.js")).equals(b.walk));
+  assert.equal(b.walkChunks, 1);
+  assert.deepEqual(b.walkImports, []);
+  assert.ok(b.walkModules.some((m) => m.endsWith("wallet/src/restore/walk-worker.ts")), "the entry is the wallet's walk-worker.ts");
+  assert.ok(b.walkModules.some((m) => m.endsWith("wallet/src/restore/walk.ts")), "it carries answerWalk");
+  assert.ok(!b.walkModules.some((m) => m.endsWith("signpage/src/main.ts")), "it carries none of the page");
+  assert.deepEqual(bundleModuleProblems(b.walkModules), []);
+  assert.deepEqual(walkSourceProblems(b.walk), []);
+});
+
+test("planted: a walk bundle that imports, evals or makes a Function is refused", () => {
+  for (const [what, text] of [
+    ["a static import", 'import{a as b}from"./x.js";b()'],
+    ["a dynamic import", 'const m=await import("./x.js")'],
+    ["an export", "export{a}"],
+    ["eval", 'eval("1")'],
+    ["a Function", 'new Function("return 1")'],
+    ["importScripts", 'importScripts("/x.js")'],
+  ]) assert.notDeepEqual(walkSourceProblems(Buffer.from(`self.addEventListener("message",()=>{});${text}`)), [], what);
+  assert.deepEqual(walkSourceProblems(Buffer.from('self.addEventListener("message",e=>self.postMessage(e.data))')), []);
+});
+
+test("a stale or hand-edited walk worker is caught", async () => {
+  const d = mkdtempSync(join(tmpdir(), "ct-signpage-build-test-"));
+  try {
+    cpSync(join(PKG, "public"), join(d, "public"), { recursive: true });
+    cpSync(join(PKG, "index.html"), join(d, "index.html"));
+    const want = ["public/walk-worker.js is not the build of packages/wallet/src/restore/walk-worker.ts: run node packages/signpage/scripts/build-app.mjs"];
+    writeFileSync(join(d, "public/walk-worker.js"), `${readFileSync(join(PKG, "public/walk-worker.js"), "utf8")};postMessage(1)`);
+    assert.deepEqual(await check(PKG, d), want);
+    rmSync(join(d, "public/walk-worker.js"));
     assert.deepEqual(await check(PKG, d), want);
   } finally {
     rmSync(d, { recursive: true, force: true });
@@ -151,8 +193,8 @@ test("planted: a test file, a fixture, a test-only package, Node's test runner, 
   assert.deepEqual(bundleModuleProblems([clean, "/r/node_modules/.pnpm/@noble+curves@2.4.0/node_modules/@noble/curves/esm/ed25519.js"], src("")), []);
 });
 
-// card signpage-generated-merge-free: the four files are build output, made by every reader from the sources first
-test("signBuilt leaves the four output files in the package as a fresh build; a failed build names the command that makes it", async () => {
+// card signpage-generated-merge-free: the five files are build output, made by every reader from the sources first
+test("signBuilt leaves the five output files in the package as a fresh build; a failed build names the command that makes it", async () => {
   assert.equal(signBuilt(), PKG);
   assert.deepEqual(await check(), []);
   const d = mkdtempSync(join(tmpdir(), "ct-signpage-built-"));
@@ -186,7 +228,7 @@ test("planted: a tsconfig.json above the repository root refuses the build befor
 // scans and .gitignore ignores, in the package and, by the same names, in the served layout the deploy uploads: a fifth
 // output would be uploaded unscanned
 test("build-app writes exactly SIGN_BUILD_OUTPUTS: in the package, and by the same names in the served layout", () => {
-  const b = { js: "", html: "", worker: "", thread: "" };
+  const b = { js: "", html: "", worker: "", thread: "", walk: "" };
   assert.deepEqual(Object.keys(outputFiles(b, false)).map((f) => `packages/signpage/${f}`).sort(), [...SIGN_BUILD_OUTPUTS].sort());
   const served = SIGN_BUILD_OUTPUTS.map((f) => f.replace(/^packages\/signpage\/(public\/)?/, "")).sort();
   assert.deepEqual(Object.keys(outputFiles(b, true)).sort(), served);

@@ -30,4 +30,5 @@ packages/.kit-mutants-*/
 /packages/signpage/public/app.js
 /packages/signpage/public/prover-worker.js
 /packages/signpage/public/prover-thread.js
+/packages/signpage/public/walk-worker.js
 /packages/signpage/**/*.tmp
