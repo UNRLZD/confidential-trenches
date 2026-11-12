@@ -582,8 +582,9 @@ test("Solana sell: the kit's venue sell from W at or above the device's floor, t
   assert.throws(() => closing(-surplus, { ...C, lamports: C.lamports + keep - r0 }), refusedAs("reserve"));
   // a claim owed: the volume account is never closed in the sale (its cashback would go with it)
   assert.throws(() => closing(-surplus, { ...C, owed: 1 }), refusedAs("closes"));
-  // closes on a partial sell
+  // closes on a partial sell, at a reserve a partial sell may have
   assert.throws(() => closing(-surplus, { ...C, full: false }), refusedAs("reserve"));
+  assert.throws(() => closing(RESERVE, { ...C, full: false }), refusedAs("reserve"));
   // the wire's closes not the ones priced: one missing, one extra, in another order, or none
   assert.throws(() => closing(-surplus, C, solanaSellCloses(SOL_W, [tokenClose])), refusedAs("closes"));
   assert.throws(() => closing(-surplus, C, solanaSellCloses(SOL_W, [volClose, tokenClose])), (e: unknown) => e instanceof PoolRuleRefused);
@@ -597,12 +598,20 @@ test("Solana sell: the kit's venue sell from W at or above the device's floor, t
     [{ ...tokenClose, address: solanaAta(key(83), venue.mint, venue.tokenProgram) }],
     [{ ...tokenClose, mint: key(84), address: solanaAta(SOL_W, key(84), venue.tokenProgram) }],
     [{ ...volClose, program: key(85), address: solanaVolumeAccumulator(SOL_W, key(85)) }],
+    [{ ...volClose, address: solanaVolumeAccumulator(key(83), SOLANA_PUMP_PROGRAM) }],
     [tokenClose, tokenClose],
     [{ ...tokenClose, lamports: -1n }],
   ] as SolanaSellClose[][]) {
     // priced with the same lamports, so only the closes are wrong
     const sum = bad.reduce((t, c) => t + c.lamports, 0n);
-    assert.throws(() => closing(-surplus, { ...C, closes: bad, lamports: 5_000n + rents + r0 + surplus - sum }, []), refusedAs("closes"), JSON.stringify(bad, (_, v) => (typeof v === "bigint" ? String(v) : v)));
+    // the wire carries exactly those closes where they can be built at all (another coin's account of W's can)
+    let extra: Ixx[] = [];
+    try {
+      extra = solanaSellCloses(SOL_W, bad);
+    } catch {
+      // refused as it is built: the wire carries none
+    }
+    assert.throws(() => closing(-surplus, { ...C, closes: bad, lamports: 5_000n + rents + r0 + surplus - sum }, extra), refusedAs("closes"), JSON.stringify(bad, (_, v) => (typeof v === "bigint" ? String(v) : v)));
   }
 });
 
