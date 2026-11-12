@@ -713,8 +713,9 @@ export function closedRows(d: PortfolioData): ClosedRow[] {
   return d.closed
     .map((c) => {
       const m = d.market(c.chain, c.token);
-      const bought = cents(c.bought);
-      const sold = cents(c.sold);
+      // drawn to the nearest cent, as an open row's (a $0.0999999 buy is $0.10); the realized from the exact figures
+      const bought = centsNear(c.bought);
+      const sold = centsNear(c.sold);
       // realized from the exact figures, then to cents: two floors first would put a cent and its percent off (a
       // $0.0523 loss on $0.1000 drawn as −$0.06 and −60%)
       const bx = fx(c.bought ?? undefined);

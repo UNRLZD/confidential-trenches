@@ -72,6 +72,9 @@ const STATES = [
   ["pooltrades-open", "S10.9", ["390", "1440"], false],
   ["pooltrades-mixed", "S10.10", ["1440"], false],
   ["pooltrades-unknown", "S10.9", ["390", "1440"], false],
+  // card portfolio-counts-money-an-open-buy-holds: the open buy's wallet counted, the axis's ticks distinct
+  ["openbuy", "S10.3", ["390", "1440"], false],
+  ["axis", "S10.3", ["1440"], false],
 ];
 // one balance (card portfolio-one-balance): each fixture's Cash tile in cents and its parts as drawn on hover (desktop) or
 // a tap (phone): [chain, the drawn row's text, data-cents, moving]. Vault $73.18; SOL at $150, ETH at $3,000.
@@ -186,7 +189,21 @@ try {
       // an open row of unknown cost (review P2-4): bought and PnL the dash, its value drawn, and no unrealized from it
       if (f === "pooltrades-unknown" && !phone) {
         const row = await page.$$eval(".pf [data-pos]", (rs) => rs.filter((r) => r.getClientRects().length).map((r) => [...r.querySelectorAll("td")].slice(1, 6).map((c) => c.innerText.replace(/\s+/g, " ").trim()).join("|")));
-        check(JSON.stringify(row) === JSON.stringify(["—|—|34.1K Icm|$0.07|—"]), `${tag}: open row ${JSON.stringify(row)}`);
+        check(JSON.stringify(row) === JSON.stringify(["—|—|34.1K Icm|$0.08|—"]), `${tag}: open row ${JSON.stringify(row)}`);
+      }
+      // card portfolio-counts-money-an-open-buy-holds: the pool's $2.50 and the open buy's wallet's $0.69 in the Total
+      // ($3.19), the row's Bought $0.01 (never $0.00)
+      if (f === "openbuy") {
+        const tot = await page.$$eval(".pf .tot", (ts) => ts.filter((t) => t.getClientRects().length).map((t) => t.textContent.trim()));
+        check(JSON.stringify(tot) === JSON.stringify(["$3.19"]), `${tag}: total ${JSON.stringify(tot)}`);
+        if (!phone) {
+          const row = await page.$$eval(".pf [data-pos]", (rs) => rs.filter((r) => r.getClientRects().length).map((r) => [...r.querySelectorAll("td")].slice(1, 2).map((c) => c.innerText.trim()).join("|")));
+          check(JSON.stringify(row) === JSON.stringify(["$0.01"]), `${tag}: Bought ${JSON.stringify(row)}`);
+        }
+      }
+      if (f === "axis") {
+        const ticks = await page.$$eval(".pf [data-tick]", (ts) => ts.filter((t) => t.getClientRects().length).map((t) => t.getAttribute("data-tick")));
+        check(ticks.length === 4 && new Set(ticks).size === 4, `${tag}: axis ticks ${JSON.stringify(ticks)}`);
       }
       // a price that reads zero: KINU's value is the dash, on the desktop table and the phone card, never $0.00
       if (f === "zeroprice") {
