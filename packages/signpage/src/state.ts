@@ -71,7 +71,7 @@ export function stateOf(signedIn: boolean, status: Status | undefined, ops: Oper
 }
 
 const DEPOSIT_FACT_KEYS = ["refunded", "hold", "held_id", "since_ms", "amount_usd"] as const satisfies readonly (keyof DepositFacts)[];
-const OP_DETAIL_KEYS = ["created_ms", "chain", "token", "units", "amount_usd"] as const satisfies readonly (keyof OpDetail)[];
+const OP_DETAIL_KEYS = ["created_ms", "chain", "token", "units", "amount_usd", "pool_amount"] as const satisfies readonly (keyof OpDetail)[];
 
 /** The op the API may send for the ops record under `id`, or null when the record is not one. */
 export function opOf(id: string, rec: unknown): Operation | null {

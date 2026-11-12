@@ -338,8 +338,9 @@ export function handler(
         const wait = logoRate.take(clientOf(req));
         if (wait > 0) return reply(throttled(wait, undefined, CLIENT_WINDOW));
         if (req.method !== "GET" && req.method !== "HEAD") return send(405, undefined, { ...cors(req), Allow: "GET, HEAD, OPTIONS" });
-        // the kit's contract (packages/kit/src/helper/v1.ts): chain and token only, never a URL; 404 with no body for
-        // a token with no logo or one the checks refused, so the app draws its own
+        // the kit's contract (packages/kit/src/helper/v1.ts): chain and token only, never a URL; a token with no logo,
+        // or one the checks refused, answers 204 with no body, so the app draws its own and the browser logs no failed
+        // load (a 404 is one); a path that names no chain's token answers 404
         const [chain, token, ...rest] = path.slice(LOGO_PREFIX.length).split("/");
         const id = chain === "solana" ? solanaAddress(token) : chain === "base" || chain === "robinhood" ? (token !== undefined && /^0x[0-9a-f]{40}$/.test(token) ? token : null) : null;
         const none = { ...cors(req), "Cache-Control": `public, max-age=${LOGO_NONE_MS / 1000}` };
@@ -348,7 +349,7 @@ export function handler(
           .read(chain as LogoChain, id)
           .then((logo) => {
             if (logo === "busy") return send(503, undefined, { ...cors(req), "Cache-Control": "no-store" }); // never cached: one caller filling the queue must not blank logos for everyone
-            if (logo === null) return send(404, undefined, none);
+            if (logo === null) return send(204, undefined, none);
             res.writeHead(200, { ...base, ...cors(req), "Content-Type": logo.type, "Content-Length": String(logo.bytes.length), "Cache-Control": "public, max-age=86400", "Content-Security-Policy": "default-src 'none'; sandbox" });
             res.end(req.method === "HEAD" ? undefined : logo.bytes);
           })

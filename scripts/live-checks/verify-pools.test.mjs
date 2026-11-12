@@ -50,6 +50,11 @@ test("a row amber or red, another RPC named, an explorer link off, the rows neve
   assert.match(bad(link).join("\n"), /phone \/verify robinhood: explorer links/);
   const never = mutate((r) => (r.runs[1].pools = { state: "loading", rows: {} }));
   assert.match(bad(never).join("\n"), /desktop \/verify: the pool rows stayed loading/);
+  // card app-live-run-green-after-119: a run with no terminal frame fails and names what loaded instead
+  const noFrame = mutate((r) => Object.assign(r.runs[1], { frame: null, pools: null, top: "https://confidential.unrealized.trade/verify?x=1", frames: [], docs: [{ url: "https://ct-app.unrealized.trade/verify", status: 200 }, { url: "https://confidential.unrealized.trade/verify", status: 200 }, { url: "https://ct-app.unrealized.trade/verify", status: null, failure: "net::ERR_TIMED_OUT" }] }));
+  assert.deepEqual(bad(noFrame), ["BAD desktop /verify: the pool rows were not drawn (no frame; top https://confidential.unrealized.trade/verify, frames [], page loads [https://ct-app.unrealized.trade/verify 200, https://confidential.unrealized.trade/verify 200, https://ct-app.unrealized.trade/verify net::ERR_TIMED_OUT])"]);
+  const oldRecord = mutate((r) => Object.assign(r.runs[1], { frame: null, pools: null }));
+  assert.deepEqual(bad(oldRecord), ["BAD desktop /verify: the pool rows were not drawn (no frame)"]);
 });
 
 // card device-evm-fee-read-walks-operators: the 10 Nov 20:30Z run (42895457692) failed on robinhood.drpc.org's 400

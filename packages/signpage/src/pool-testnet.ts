@@ -88,6 +88,8 @@ import type { PoolFunds, PoolReady, PoolWithdrawFormDeps } from "./withdraw/pool
 import { EVM_POOL_HISTORY } from "../../kit/src/trade/evm/buy-unpinned.ts";
 import { solanaBuysAt, solanaHelperBuys } from "../../wallet/src/pool/buy-wallets.ts";
 import { BUY_NONE_KEY, solBuyRecords } from "./sol-buy-records.ts";
+import { fillTradeOps, type FillStore } from "./trade-fill.ts";
+import { POOL_USD_FEEDS } from "../../kit/src/price/pool-usd.ts";
 
 // The freezes are marked pure, so SIGN_HOST's build, which never reads these, drops them whole (scripts/build-network.test.mjs).
 /** Each chain's two testnet RPCs, as the app names the chain. Solana's are mainnet's shape (main.ts: a public provider
@@ -1379,7 +1381,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   const buy = (over.tradeKinds?.buy ?? poolBuyKind)(() => buyHost());
   let settling: Promise<void> | null = null;
   // a signed-in load also gets back the buy records a restore left owed, in the background (src/sol-buy-records.ts)
-  const settle = (): Promise<void> => (buyRecords.run(), Promise.all([settleSolana(), settleEvmOpen().catch(() => {})]).then(() => {}));
+  const settle = (): Promise<void> => (buyRecords.run(), fillTrades(), Promise.all([settleSolana(), settleEvmOpen().catch(() => {})]).then(() => {}));
   const settleSolana = (): Promise<void> => {
     if (pin === undefined) return Promise.resolve();
     if (settling) return settling;
@@ -1705,6 +1707,35 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   positions.watch(() => {
     for (const f of watchers) f();
   });
+  // each filled Solana trade's units and SOL from its own transaction (src/trade-fill.ts, card portfolio-shows-pool-trades):
+  // after each pool trade's end and at each signed-in load, so a record from before them is filled too; one run at a
+  // time, one asked meanwhile runs once more after it; a write tells the app's state watchers
+  let filling: Promise<void> | null = null;
+  let fillAgain = false;
+  const fillTrades = (): void => {
+    if (pin === undefined) return;
+    if (filling) return void (fillAgain = true);
+    // one reader, the helper's route (the positions finder's): no read names a W or a signature to a public provider
+    const one = POOL_TESTNET ? rpcs("pass")[0] : over.rpcs ? over.rpcs[1] : solanaPacedRpc(pageHelperRpc(TRADE_HELPER, SOLANA_RPC_RETRY, "pass"));
+    const read = (sig: string): Promise<unknown> => one("getTransaction", [sig, { encoding: "json", commitment: "finalized", maxSupportedTransactionVersion: 0 }]);
+    filling = (async () => {
+      const store = (await page.store()) as unknown as FillStore;
+      // an old sale's USD at its own block: the page's SOL/USD feed account's writes before it (trade-fill.ts blockPrice)
+      const feedBefore = async (sig: string): Promise<readonly string[]> => {
+        const l = await one("getSignaturesForAddress", [POOL_USD_FEEDS.solana.account, { before: sig, limit: 100, commitment: "finalized" }]);
+        return Array.isArray(l) ? l.flatMap((e) => (e !== null && typeof e === "object" && (e as { err?: unknown }).err === null && typeof (e as { signature?: unknown }).signature === "string" ? [(e as { signature: string }).signature] : [])) : [];
+      };
+      if (await fillTradeOps({ store, read, feedBefore, price: () => page.price?.("solana") ?? null, now: Date.now })) for (const f of watchers) f();
+    })()
+      .catch(() => {})
+      .finally(() => {
+        filling = null;
+        if (fillAgain) {
+          fillAgain = false;
+          fillTrades();
+        }
+      });
+  };
   const TRADE_ENDS: ReadonlySet<string> = new Set(["filled", "part_filled", "not_landed"]);
   // a pool buy, its records written once its run ends (src/positions.ts recordPoolBuy: its ops record, and W's buy record
   // for the cost), the positions read again after them; its W and the amount W received come from the run's own route
@@ -1738,7 +1769,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       void early
         .then(async () => recordPoolBuy((await page.store()) as unknown as BuyRecordStore, ctx.id, facts, end))
         .catch(() => {})
-        .finally(() => positions.refresh());
+        .finally(() => (positions.refresh(), fillTrades()));
     };
     const txsOf = (): TxRef[] => {
       const a = r && "answer" in r ? (r.answer() as { result?: { txs?: TxRef[] } }) : null;
@@ -1772,6 +1803,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   const recordedSell = (ask: PoolAsk, ctx: KindContext): ReturnType<typeof sell> => {
     // not landed: its marks taken back first (the signature from its ops record, written before the send)
     const ended = (stage: string | undefined): void => {
+      if (stage === "filled") fillTrades();
       if (stage !== "not_landed") return positions.refresh();
       void (async () => {
         const hash = ((await (await page.store()).get("ops", ctx.id)) as { txs?: { hash?: unknown }[] } | undefined)?.txs?.[0]?.hash;
