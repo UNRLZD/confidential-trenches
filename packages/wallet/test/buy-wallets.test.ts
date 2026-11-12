@@ -442,9 +442,14 @@ test("no second key derivation: only derive/keys.ts holds BIP-32, SLIP-10 or a w
   // an EVM pool sell signs at the tap (signpage src/pool-sell-evm.ts signPicked: W_{evm,l,j} of the buy record it sells,
   // refused unless it is that record's W, after its return note's evmNextNote pick, signs only the sim checkEvmSellSim,
   // the Sell checkEvmSell and the authorization checkEvmAuthorization passed, its key zeroed once it has signed and again
-  // in signLeg's finally; card signpage-evm-pool-sell).
+  // in signLeg's finally; card signpage-evm-pool-sell). And where an EVM pool withdraw signs (signpage
+  // src/pool-withdraw-evm.ts: onePart's release, W_{evm,l,j} of the note it proves, refused unless it is the binding's W
+  // and the relay data's recipient, signs only what checkEvmWithdraw passed; sendOnward's and resendHeld's send to To,
+  // refused unless the derived W is the W read, signs only the send checkEvmOnwardSend passed; each key zeroed in a
+  // finally, and every other call (spendOf, wOf, the plan's Ws) zeroes it at once for the address; card
+  // evm-withdraw-mainnet).
   const calls = files.filter((f) => /\bfreshWallet\s*\(/.test(readFileSync(f, "utf8"))).map((f) => f.slice(root.length)).sort();
-  assert.deepEqual(calls, ["packages/signpage/src/pool-buy-evm.ts", "packages/signpage/src/pool-buy.ts", "packages/signpage/src/pool-sell-evm.ts", "packages/signpage/src/pool-sell.ts", "packages/signpage/src/pool-withdraw.ts", "packages/wallet/src/arming/records.ts", "packages/wallet/src/derive/keys.ts", "packages/wallet/src/pool/buy-wallets.ts", "packages/wallet/src/pool/evm-restore.ts", "packages/wallet/src/pool/queue.ts", "packages/wallet/src/pool/solana-restore.ts", "packages/wallet/src/restore/arms.ts", "packages/wallet/src/restore/wallets.ts"]);
+  assert.deepEqual(calls, ["packages/signpage/src/pool-buy-evm.ts", "packages/signpage/src/pool-buy.ts", "packages/signpage/src/pool-sell-evm.ts", "packages/signpage/src/pool-sell.ts", "packages/signpage/src/pool-withdraw-evm.ts", "packages/signpage/src/pool-withdraw.ts", "packages/wallet/src/arming/records.ts", "packages/wallet/src/derive/keys.ts", "packages/wallet/src/pool/buy-wallets.ts", "packages/wallet/src/pool/evm-restore.ts", "packages/wallet/src/pool/queue.ts", "packages/wallet/src/pool/solana-restore.ts", "packages/wallet/src/restore/arms.ts", "packages/wallet/src/restore/wallets.ts"]);
 });
 
 // ---------- fold 2 ----------
