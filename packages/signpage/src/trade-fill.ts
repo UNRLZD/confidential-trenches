@@ -49,8 +49,10 @@
 // - Written once per op, in one store update that keeps every other field and re-checks the op still wants it; an op
 //   that has pool_amount is not read again. An op whose transactions were read, each its signature's own, and whose
 //   figures are still unknown by these rules (no trade of its token, another wallet, a move these rules do not read)
-//   gets `fill_none` instead, since a landed transaction never changes, and is not read again either (review of
-//   776d40528, P2-2: it took one of FILL_OPS_MAX each run for good); a read that failed or was refused writes nothing.
+//   gets `fill_none` instead when a restore rebuilt it (its key `restored/<signature>`), since a landed transaction
+//   never changes, and is not read again either (review of 776d40528, P2-2: it took one of FILL_OPS_MAX each run for
+//   good); this device's own op is never marked, so one answer it cannot read (a malformed or hostile one) never blanks
+//   a real trade's figure for good (review of f73ee1c82, P3-a). A read that failed or was refused writes nothing.
 //   Display only: nothing here feeds a signature.
 import { base58 } from "@scure/base";
 import type { PoolStatePrice } from "../../kit/src/signpage/messages.ts";
@@ -345,7 +347,10 @@ export async function fillTradeOps(d: FillDeps): Promise<boolean> {
       const bt = (a as { blockTime?: unknown }).blockTime;
       legs.push({ sig, lamports: leg.lamports, blockS: Number.isSafeInteger(bt) ? (bt as number) : null });
     }
-    if (never) {
+    // only an op a restore rebuilt (src/sol-buy-records.ts, `restored/<signature>`) is marked: this device's own op
+    // holds a real trade, so an answer it cannot read is the answer's fault and the op is read again (review of
+    // f73ee1c82, P3-a)
+    if (never && k.startsWith("restored/")) {
       await d.store
         .update("ops", k, (v) => (wants(v as OpRecord) ? { ...(v as object), fill_none: true } : v))
         .then(() => (wrote = true))

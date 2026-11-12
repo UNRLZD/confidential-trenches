@@ -236,21 +236,33 @@ test("a PumpSwap buy's SOL is the wrapped SOL W's own account paid out, never wh
   assert.equal(solanaTradeLeg(odd, "buy", MINT3), null);
 });
 
-test("an op whose transaction was read, its own, and gives no figure is marked and not read again; a read that failed is read again", async () => {
-  const ops = new Map<string, Record<string, unknown>>([["x", { kind: "buy", stage: "filled", txs: [{ chain: "solana", hash: SIG.buy1 }], created_ms: 1, chain: "solana", token: "So11111111111111111111111111111111111111112" }]]);
+test("a restored op whose transaction was read, its own, and gives no figure is marked and not read again; a read that failed is read again; this device's own op is never marked", async () => {
+  const unread = { kind: "buy", stage: "filled", txs: [{ chain: "solana", hash: SIG.buy1 }], created_ms: 1, chain: "solana", token: "So11111111111111111111111111111111111111112" };
+  const ops = new Map<string, Record<string, unknown>>([["x", unread]]);
   const s: FillStore = { keys: async () => [...ops.keys()], get: async (_s, k) => ops.get(k), update: async (_s, k, f) => void ops.set(k, f(ops.get(k)) as Record<string, unknown>) };
   const reads: string[] = [];
+  // the op a restore rebuilt
+  const K = `restored/${SIG.buy1}`;
+  ops.set(K, ops.get("x")!);
+  ops.delete("x");
   // a read that fails, then one refused (another transaction's answer): nothing written, read again
   await fillTradeOps({ store: s, read: async () => { throw new Error("429"); }, price: () => null, now: () => OLD });
   await fillTradeOps({ store: s, read: async () => TX[SIG.sell1], price: () => null, now: () => OLD });
-  assert.equal(ops.get("x")!.fill_none, undefined);
+  assert.equal(ops.get(K)!.fill_none, undefined);
   // read, its own, no trade of that token: marked, and the next run reads nothing
   assert.equal(await fillTradeOps({ store: s, read: async (sig) => (reads.push(sig), TX[sig]), price: () => null, now: () => OLD }), true);
-  assert.equal(ops.get("x")!.fill_none, true);
-  assert.equal(ops.get("x")!.pool_amount, undefined);
+  assert.equal(ops.get(K)!.fill_none, true);
+  assert.equal(ops.get(K)!.pool_amount, undefined);
   reads.length = 0;
   assert.equal(await fillTradeOps({ store: s, read: async (sig) => (reads.push(sig), TX[sig]), price: () => null, now: () => OLD }), false);
   assert.deepEqual(reads, []);
+  // this device's own op, the same answer: not marked, read again at the next run (review of f73ee1c82, P3-a)
+  ops.set("own", { ...unread });
+  await fillTradeOps({ store: s, read: async (sig) => TX[sig], price: () => null, now: () => OLD });
+  assert.equal(ops.get("own")!.fill_none, undefined);
+  reads.length = 0;
+  await fillTradeOps({ store: s, read: async (sig) => (reads.push(sig), TX[sig]), price: () => null, now: () => OLD });
+  assert.deepEqual(reads, [SIG.buy1], "the own op read again");
 });
 
 // ------------------------------------------------------------------------------------------------ an old sale's USD
