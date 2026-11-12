@@ -23,7 +23,12 @@
 //   fee (a bind's own fee cap for the epoch: the device's reads, the helper's answer held to them), W's fee bound, and
 //   the smallest part max(1 wei, fee - W's fee) (the pool's backstop: the fee at most half the chunk, PrivacyPool.sol:186).
 //   Each note's change is 0 or at least the note floor. A part whose bind gives another fee than the plan's stops before
-//   W signs (the note goes back UNSPENT).
+//   W signs (the note goes back UNSPENT). The notes under the epoch root are planned first, but never in more parts than
+//   the plan over every note (the Solana withdraw's rested preference: the screen drew its Max fee on that one).
+// - The roots (the Solana withdraw's, card fresh-money-spendable-at-once): the epoch root when the note is in it; a note
+//   that landed this epoch, of any kind, proves at once on the newest root both RPCs agree on, its epoch, deadline and
+//   binding the current epoch's; only a newest cut that does not hold its leaf yet is read again on the pool's time, a
+//   second apart, out of one budget (one epoch and EVM_WITHDRAW_BOUNDARY_LAG_MS).
 // - To, before any note moves: never under 0x10000 (the zero address and every precompile), the pool, the fee recipient
 //   or a W of the plan; its code read on both RPCs. With no code a plain send takes 21,000 gas and cannot revert (the
 //   estimate on Robinhood, both RPCs); with code (a smart wallet, a forwarder, an EIP-7702 delegation) W's exact send is
@@ -56,7 +61,7 @@ import { noteSecrets } from "../../wallet/src/notes/secrets.ts";
 import type { NoteRecord, NoteStore } from "../../wallet/src/notes/store.ts";
 import { EVM_CHAIN_IDS, EVM_SEND_MARGIN_MS, evmAgreedBlock, evmRetryLag, type EvmPoolPin, type EvmPoolRequest, type EvmRpc } from "../../wallet/src/pool/evm.ts";
 import { checkBinding, type Pool } from "../../wallet/src/pool/pool.ts";
-import { jOf, provesOnNewest } from "../../wallet/src/pool/queue.ts";
+import { jOf } from "../../wallet/src/pool/queue.ts";
 import { EVM_BUY_HEAD_SPREAD, EVM_BUY_LAG_BLOCKS, EVM_BUY_LAG_MS } from "./pool-buy-evm.ts";
 import { EvmSendBusy, EvmSendRefused, evmBuyVerdict, evmHeadNumber, evmReleaseRead, evmWithdrawCalldata, type EvmReleaseRead } from "./evm-send.ts";
 import { legCause } from "./pool-sell.ts";
@@ -518,10 +523,19 @@ export async function runEvmPoolWithdraw(h: EvmWithdrawHost, ask: PoolAsk, to: s
     const notes = await h.notes();
     const owed = (await h.owedNotes?.()) ?? new Set<string>();
     // UNSPENT and HELD notes (a HELD one any tab's proof queue holds lets go: free()), less the owed and kept-out ones
-    const sources = withdrawSources(await notes.list(), h.pool.scope).filter((n) => !owed.has(n.id));
+    const list = await notes.list();
+    const sources = withdrawSources(list, h.pool.scope).filter((n) => !owed.has(n.id));
+    // the notes under the epoch root first, but never in more parts than the plan over every note: the screen drew its
+    // Max fee on that one (withdraw/pool-form.ts over withdrawSources), so the rested preference never costs more
+    const rested = await evmRestedNotes(h.pool, list);
+    const planOf = (c: WithdrawCosts): WithdrawPart[] | null => {
+      const all = planPoolWithdraw(sources, amount, c);
+      const quiet = rested === null ? null : planPoolWithdraw(sources.filter((n) => rested.has(n.id)), amount, c);
+      return quiet !== null && all !== null && quiet.length <= all.length ? quiet : all;
+    };
     // the first plan at a plain send's cost names the notes, and so the first W the To check runs from
     const first = await evmWithdrawCosts(h);
-    const plan0 = planPoolWithdraw(sources, amount, first);
+    const plan0 = planOf(first);
     if (plan0 === null) stop("plan");
     const ws = await seedUse(h, async (seed) => {
       const out: string[] = [];
@@ -531,7 +545,7 @@ export async function runEvmPoolWithdraw(h: EvmWithdrawHost, ask: PoolAsk, to: s
     if (evmToRefused(to, h.pin, ws)) stop("to");
     // To read on both RPCs before any note moves: a To with code is run from the first part's W, or refused
     const costs = await evmWithdrawCosts(h, { to, from: ws[0]!, value: plan0![0]!.part }, first.fee);
-    const plan = costs.wFee === first.wFee && costs.fee === first.fee ? plan0! : planPoolWithdraw(sources, amount, costs);
+    const plan = costs.wFee === first.wFee && costs.fee === first.fee ? plan0! : planOf(costs);
     if (plan === null) stop("plan");
     if (BigInt(plan!.length) * (costs.fee + costs.wFee) > maxFee) stop("max_fee");
     const wCap = maxFee / BigInt(plan!.length) - costs.fee;
@@ -577,8 +591,9 @@ export async function runEvmPoolWithdraw(h: EvmWithdrawHost, ask: PoolAsk, to: s
   }
 }
 
-/** How far past one epoch the run waits for the pool's time to reach the next boundary before it stops (the Solana
- *  withdraw's WITHDRAW_BOUNDARY_LAG_MS): the pool's time is the newest block both RPCs agree on; past this one lags. */
+/** A part's one budget for its waits on chain time is one epoch and this (the Solana withdraw's
+ *  WITHDRAW_BOUNDARY_LAG_MS): the pool's time is the newest block both RPCs agree on; past it one lags. A part waits
+ *  only while the newest cut does not hold its note's leaf yet. */
 export const EVM_WITHDRAW_BOUNDARY_LAG_MS = 30_000n;
 /** How long a part waits for a note the page's proof queue is still proving to come back UNSPENT once dropped (the
  *  queue frees it when that proof ends, queue.ts drop); past it the part stops. */
@@ -586,20 +601,18 @@ export const EVM_WITHDRAW_FREE_MS = 30_000;
 /** A part's tree read, bounded in wall-clock time (the pool's trees() takes the signal). */
 export const EVM_WITHDRAW_TREES_MS = 30_000;
 
-/** The longest a part can take to bind from its start: its wait for the next boundary and a proof's life. */
+/** The longest a part can take to bind from its start: its waits on chain time (they may cross a boundary) and a proof's life. */
 const evmKeepSpan = (P: Pick<Pool<EvmPoolRequest>, "epochMs" | "lifeMs">): bigint => P.epochMs + EVM_WITHDRAW_BOUNDARY_LAG_MS + P.lifeMs;
 
-/** Waits until the pool's time (P.now, never the device clock) reaches `boundary`, out of `left.ms` of waits (one
- *  part's budget, one epoch and EVM_WITHDRAW_BOUNDARY_LAG_MS, shared by every boundary it waits for); returns that time. */
-async function evmPoolTimeAt(P: Pool<EvmPoolRequest>, wait: (ms: number) => Promise<void>, boundary: bigint, left: { ms: bigint }): Promise<bigint> {
-  for (;;) {
+/** The landed notes under the pool's epoch root now (leaf index below the epoch tree's size); null when the read fails,
+ *  so the plan draws on every note and each part reads its own roots (the Solana withdraw's restedNotes). */
+async function evmRestedNotes(P: Pool<EvmPoolRequest>, list: readonly NoteRecord[]): Promise<ReadonlySet<string> | null> {
+  try {
     const nowMs = await P.now();
-    if (nowMs >= boundary) return nowMs;
-    if (left.ms <= 0n) stop("boundary");
-    let ms = boundary - nowMs > 1_000n ? boundary - nowMs : 1_000n;
-    if (ms > left.ms) ms = left.ms;
-    await wait(Number(ms));
-    left.ms -= ms;
+    const size = BigInt((await P.trees(nowMs - (nowMs % P.epochMs), AbortSignal.timeout(EVM_WITHDRAW_TREES_MS))).stateTree.size);
+    return new Set(list.filter((n) => n.leaf !== undefined && n.leaf.leafIndex < size).map((n) => n.id));
+  } catch {
+    return null;
   }
 }
 
@@ -627,33 +640,44 @@ async function onePart(h: EvmWithdrawHost, ask: PoolAsk, notes: NoteStore, p: Wi
       return n!;
     };
     // the run's notes out of every queue's pass (any tab's) for this part's whole span, before its note is freed (a
-    // part before it may have outrun the last write's span), and again below before its tree read and boundary wait
+    // part before it may have outrun the last write's span), and again below before its tree read and any wait
     await keepOut();
     let n = await free();
     const leaf = n.leaf!;
     if (leaf.value < p.chunk || p.chunk !== p.part + c.fee + c.wFee) stop("value");
-    // the epoch root when the note is in it; else the newest for a deposit's own note (queue.ts provesOnNewest), and
-    // for any other (a return, move, change or refund note) the next epoch's, once the pool's time reached it (M351: a
-    // root right after its own leaf would link the W it pays to the W whose money made that leaf)
+    // the epoch root when the note is in it; else the newest both RPCs agree on, which holds every leaf up to now (card
+    // fresh-money-spendable-at-once: no part waits for a boundary)
     let nowMs = await P.now();
-    // again from here: past the latest deadline this part can bind, so no queue takes this note at the boundary it may
-    // wait for
+    // again from here: past the latest deadline this part can bind, so no queue takes this note during a wait
     await keepOut();
+    // one budget for every wait of this part on chain time
+    const left = { ms: P.epochMs + EVM_WITHDRAW_BOUNDARY_LAG_MS };
+    const read = (cut: bigint, opts?: { newest?: boolean }) => P.trees(cut, AbortSignal.timeout(EVM_WITHDRAW_TREES_MS), opts);
+    const holds = (t: Awaited<ReturnType<typeof P.trees>>): boolean => leaf.leafIndex < BigInt(t.stateTree.size);
     let epochStartMs = nowMs - (nowMs % P.epochMs);
-    let trees = await P.trees(epochStartMs, AbortSignal.timeout(EVM_WITHDRAW_TREES_MS));
-    if (leaf.leafIndex >= BigInt(trees.stateTree.size)) {
-      if (provesOnNewest(n.ref)) trees = await P.trees(nowMs + 1n, AbortSignal.timeout(EVM_WITHDRAW_TREES_MS), { newest: true });
-      else {
-        const left = { ms: P.epochMs + EVM_WITHDRAW_BOUNDARY_LAG_MS };
-        // the next boundary whose epoch root holds the leaf: one more, in the same budget, when the first time read was
-        // behind the leaf's own block
-        do {
-          nowMs = await evmPoolTimeAt(P, wait, epochStartMs + P.epochMs, left);
-          epochStartMs = nowMs - (nowMs % P.epochMs);
-          trees = await P.trees(epochStartMs, AbortSignal.timeout(EVM_WITHDRAW_TREES_MS));
-        } while (leaf.leafIndex >= BigInt(trees.stateTree.size));
-        // a queue that took it before the keep-out was written: dropped and waited for, as at the start
-        n = await free();
+    let trees = await read(epochStartMs);
+    for (let waited = false; !holds(trees); ) {
+      // a note that landed this epoch: the newest root, at once
+      const newest = await read(nowMs + 1n, { newest: true });
+      if (holds(newest)) {
+        trees = newest;
+        // a queue that took it before the keep-out was written, during a wait: dropped and waited for, as at the start
+        if (waited) n = await free();
+        break;
+      }
+      // its leaf past the pool's time (its landing read ahead of both RPCs' agreed block): the pool's time read again a
+      // second later, out of the one budget; a new epoch's root may hold it by then
+      if (left.ms <= 0n) stop("leaf");
+      const ms = left.ms < 1_000n ? left.ms : 1_000n;
+      await wait(Number(ms));
+      left.ms -= ms;
+      waited = true;
+      const at = await P.now();
+      if (at > nowMs) nowMs = at;
+      if (nowMs - (nowMs % P.epochMs) !== epochStartMs) {
+        epochStartMs = nowMs - (nowMs % P.epochMs);
+        trees = await read(epochStartMs);
+        if (holds(trees)) n = await free();
       }
     }
     const deadlineMs = epochStartMs + P.lifeMs;

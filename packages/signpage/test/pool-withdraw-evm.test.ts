@@ -484,6 +484,10 @@ type RunPlant = {
   change?: boolean; thisEpoch?: boolean;
   /** the epoch trees hold the note only from this time on (default: past NOW when `thisEpoch`) */
   inFromMs?: bigint;
+  /** the newest trees hold the note only from this time on (its landing read ahead of both RPCs' agreed block) */
+  newestFromMs?: bigint;
+  /** a second note of this value, a deposit's, that landed this epoch (leaf 1): only the newest trees hold it */
+  fresh?: bigint;
 };
 async function runWorld(plant: RunPlant = {}) {
   const ws = await openWalletStore({ indexedDB: new IDBFactory() });
@@ -502,6 +506,17 @@ async function runWorld(plant: RunPlant = {}) {
   const leafOf = noteCommitment(value, label, noteSecrets(SEED, ref).precommitment);
   await notes.move(inc.id, "INCOMING", "UNSPENT", { leaf: { value, label, commitment, leafIndex: 0n } });
   const noteId = inc.id;
+  // a second note that landed this epoch, larger, so a plan over every note picks it first
+  const label2 = vaultLabelOf(keccak_256, RUN_SCOPE, 2n);
+  let freshLeaf = 0n;
+  let freshId: string | undefined;
+  if (plant.fresh !== undefined) {
+    const p2 = await notes.planDeposit(RUN_SCOPE, (r) => noteSecrets(SEED, r).precommitment);
+    const i2 = await notes.move(p2.id, "PLANNED", "INCOMING", { send: { signature: "6".repeat(87), value: plant.fresh, last_valid_block_height: 1_000n } });
+    freshLeaf = noteCommitment(plant.fresh, label2, noteSecrets(SEED, i2.ref).precommitment);
+    await notes.move(i2.id, "INCOMING", "UNSPENT", { leaf: { value: plant.fresh, label: label2, commitment: noteCommitment(plant.fresh, label2, i2.precommitment), leafIndex: 1n } });
+    freshId = i2.id;
+  }
   const w = freshWallet(SEED, "evm", label, jOf(ref)).address;
   const nullifier = noteSecrets(SEED, ref).nullifierHash;
   const clock = { ms: NOW };
@@ -514,7 +529,11 @@ async function runWorld(plant: RunPlant = {}) {
       chain.trees.push({ beforeMs, newest: o?.newest === true, signal: _s instanceof AbortSignal });
       // landed this epoch: the epoch's own trees (up to NOW, an epoch's start) do not hold it
       if (plant.thisEpoch && o?.newest !== true && (plant.inFromMs !== undefined ? beforeMs < plant.inFromMs : beforeMs <= NOW)) return { stateTree: { size: 0 }, labelTree: { size: 0 }, stateRoot: 0n, labelRoot: 0n };
-      return { stateTree: tree([leafOf]), labelTree: tree([label]), stateRoot: tree([leafOf]).root!, labelRoot: tree([label]).root! };
+      if (o?.newest === true && plant.newestFromMs !== undefined && beforeMs < plant.newestFromMs) return { stateTree: { size: 0 }, labelTree: { size: 0 }, stateRoot: 0n, labelRoot: 0n };
+      // a fresh second note: in the newest trees only (leaf 1)
+      const both = plant.fresh !== undefined && o?.newest === true;
+      const leaves = both ? [leafOf, freshLeaf] : [leafOf], labels = both ? [label, label2] : [label];
+      return { stateTree: tree(leaves), labelTree: tree(labels), stateRoot: tree(leaves).root!, labelRoot: tree(labels).root! };
     },
     bind: async (b: { chunk: bigint; wallet: { address: string }; refundPrecommitment: bigint; deadlineMs: bigint }) => {
       const isW = lower(b.wallet.address) === lower(w);
@@ -581,7 +600,7 @@ async function runWorld(plant: RunPlant = {}) {
     wait: async (ms) => void (clock.ms += BigInt(ms)),
   };
   if (plant.release === "never") h.send = async () => ((chain.sentAt = clock.ms), chain.sends++, "0x" + "ab".repeat(32));
-  return { h, notes, noteId, chain, clock, w, label };
+  return { h, notes, noteId, chain, clock, w, label, freshId };
 }
 const MAX = FEE + RUN_WFEE;
 
@@ -808,16 +827,24 @@ test("(review 2 X15, the review's RR4, kills) status 0x0 on both RPCs in two dif
   assert.equal(await onwardReceipt([rpcOf(a, []), rpcOf(b, [])] as unknown as EvmWithdrawHost["rpcs"], ONWARD, W, TO), null);
 });
 
-test("(review 2, M351) the run's root: a change note that landed this epoch waits for the pool's next boundary and proves on that epoch's root, never the newest; a deposit's own note proves on the newest", async () => {
-  const change = await runWorld({ change: true, thisEpoch: true });
-  assert.equal((await runEvmPoolWithdraw(change.h, RUN_ASK, TO, PART, MAX)).stage, "sent", "proved on the next epoch's root and sent");
-  assert.ok(!change.chain.trees.some((t) => t.newest), "a change note never proves on the newest root");
-  assert.ok(change.chain.trees.some((t) => t.beforeMs === NOW + 60_000n), "the next epoch's trees, once the pool's time reached it");
-  assert.ok(change.clock.ms >= NOW + 60_000n, "waited on the pool's time");
-  const own = await runWorld({ thisEpoch: true });
-  assert.equal((await runEvmPoolWithdraw(own.h, RUN_ASK, TO, PART, MAX)).stage, "sent");
-  assert.ok(own.chain.trees.some((t) => t.newest), "a deposit's own note: the newest root, at once");
-  assert.equal(own.clock.ms < NOW + 60_000n, true, "no wait for the boundary");
+test("(card fresh-money-spendable-at-once, on EVM) the run's root: a note of any kind that landed this epoch proves at once on the newest root both RPCs agree on, with no wait for a boundary", async () => {
+  for (const change of [true, false]) {
+    const world = await runWorld({ change, thisEpoch: true });
+    const got = await runEvmPoolWithdraw(world.h, RUN_ASK, TO, PART, MAX);
+    assert.equal(got.stage, "sent", `${change ? "a change note" : "a deposit's own note"}: ${got.cause}`);
+    assert.ok(world.chain.trees.some((t) => t.newest && t.beforeMs === NOW + 1n), "the newest root, at the pool's time");
+    assert.ok(world.chain.trees.filter((t) => !t.newest).every((t) => t.beforeMs === NOW), "no later epoch's trees: no boundary wait");
+    assert.equal(world.clock.ms < NOW + 60_000n, true, "no wait for the boundary");
+  }
+});
+
+test("(card fresh-money-spendable-at-once, on EVM) the plan draws on a rested note first: a note under the epoch root that can send the amount proves on that root, and a larger one that landed this epoch stays UNSPENT", async () => {
+  const world = await runWorld({ fresh: 2n * 10n ** 15n });
+  const got = await runEvmPoolWithdraw(world.h, RUN_ASK, TO, PART, MAX);
+  assert.equal(got.stage, "sent", got.cause);
+  assert.deepEqual(world.chain.binds, [PART + FEE + RUN_WFEE], "the rested note's W bound, once");
+  assert.equal((await world.notes.get(world.freshId!))?.state, "UNSPENT", "the fresh note is left for a tap that needs it");
+  assert.equal((await world.notes.get(world.noteId))?.state, "RESERVED");
 });
 
 test("(review 2 P3-5; review 3) the read-back's range: the head spread, the lag margin and a proof's life of the fastest mainnet's blocks stay under the log span; the margin is twice the lag's blocks, in buy, sell and withdraw", async () => {
@@ -921,8 +948,13 @@ const queueAtBoundary = (world: Awaited<ReturnType<typeof runWorld>>, o: { proof
   return { kept, took };
 };
 
+// a note whose leaf the newest cut never holds and the next epoch's root does: the part waits on the pool's time across
+// the boundary, where a proof queue's pass runs
+const NEVER = NOW + 10n ** 9n;
+const LAGGING = { change: true, thisEpoch: true, inFromMs: NOW + 60_000n, newestFromMs: NEVER } as const;
+
 test("(review 3 P2-C, RR7) the root wait on EVM: the run keeps its planned notes out of every proof queue before it waits, past the latest deadline it can bind; the queue's pass at the boundary skips the note and the part goes on; the keep-out cleared at the end", async () => {
-  const world = await runWorld({ change: true, thisEpoch: true });
+  const world = await runWorld(LAGGING);
   const { kept, took } = queueAtBoundary(world);
   const got = await runEvmPoolWithdraw(world.h, RUN_ASK, TO, PART, MAX);
   assert.equal(took.at, null, "no queue took the note at the boundary");
@@ -936,18 +968,20 @@ test("(review 3 P2-C, RR7) the root wait on EVM: the run keeps its planned notes
   // and before its first tree read and its wait (each part moves the record on), then cleared: four writes
   const SPAN = 60_000n + 30_000n + 210_000n;
   assert.deepEqual(kept.calls, [[[world.noteId], SPAN], [[world.noteId], SPAN], [[world.noteId], SPAN], [[], 0n]]);
-  assert.deepEqual(kept.at.slice(0, 3), [{ ms: NOW, trees: 0 }, { ms: NOW, trees: 0 }, { ms: NOW, trees: 0 }], "all before the part's tree read and its wait");
+  // after the plan's one read of the epoch root (its rested notes), before the part's own tree reads and its wait
+  assert.deepEqual(kept.at.slice(0, 3), [{ ms: NOW, trees: 1 }, { ms: NOW, trees: 1 }, { ms: NOW, trees: 1 }], "all before the part's tree read and its wait");
+  assert.ok(world.clock.ms >= NOW + 60_000n, "the part waited across the boundary");
 });
 
 test("(review 3 P2-C) a note the page's queue is still proving when the part needs it: dropped, then waited for until that proof ends and frees it; the part goes on. A proof that never ends stops the part, nothing signed", async () => {
   // the keep-out written after the queue took it (another tab's queue, or a pass right before the write)
-  const world = await runWorld({ change: true, thisEpoch: true });
+  const world = await runWorld(LAGGING);
   const { took } = queueAtBoundary(world, { proofEndsMs: 5_000n });
   world.h.keepOut = async () => {};
   const got = await runEvmPoolWithdraw(world.h, RUN_ASK, TO, PART, MAX);
   assert.ok(took.at !== null && took.dropped, "the queue took it and the part dropped it");
   assert.equal(got.stage, "sent", "waited for the proof to end");
-  const stuck = await runWorld({ change: true, thisEpoch: true });
+  const stuck = await runWorld(LAGGING);
   queueAtBoundary(stuck);
   stuck.h.keepOut = async () => {};
   const t0 = stuck.clock.ms;
@@ -987,18 +1021,27 @@ test("(review 4 P3) a part that stops on a throw (its note never freed) carries 
   assert.match(got.cause ?? "", /^Error note\b/, `the part's stop and its word: ${got.cause}`);
 });
 
-test("(review 3 P2-C) a pool time read behind the leaf's own block: the epoch root at the next boundary lacks it, so the part waits on to the boundary after, in the same budget, then proves there; every tree read is bounded in time", async () => {
-  // the pool's time 50 s into the epoch, the leaf only in the roots from NOW + 120 s: 10 s and 60 s of waits, under one
-  // epoch and the boundary lag (90 s)
-  const late = await runWorld({ change: true, thisEpoch: true, inFromMs: NOW + 120_000n });
+test("(card fresh-money-spendable-at-once, on EVM) the pool's time read behind the note's own leaf: read again a second apart until the newest cut holds it, then proved on the newest root; every tree read is bounded in time", async () => {
+  const world = await runWorld({ change: true, thisEpoch: true, newestFromMs: NOW + 3_001n });
+  const got = await runEvmPoolWithdraw(world.h, RUN_ASK, TO, PART, MAX);
+  assert.equal(got.stage, "sent", got.cause);
+  assert.deepEqual(world.chain.trees.filter((t) => t.newest).map((t) => t.beforeMs), [NOW + 1n, NOW + 1_001n, NOW + 2_001n, NOW + 3_001n], "one read a second, the fourth holds it");
+  assert.ok(world.chain.trees.filter((t) => !t.newest).every((t) => t.beforeMs === NOW), "the epoch's grid: no later epoch's trees");
+  assert.ok(world.chain.trees.every((t) => t.signal), "each tree read carries its time limit");
+});
+
+test("(card fresh-money-spendable-at-once, on EVM) a wait that crosses a boundary proves on the new epoch's root once it holds the leaf; a leaf neither cut ever holds stops once the one budget is spent, nothing bound or sent, the note UNSPENT", async () => {
+  const late = await runWorld({ ...LAGGING });
   late.clock.ms = NOW + 50_000n;
   assert.equal((await runEvmPoolWithdraw(late.h, RUN_ASK, TO, PART, MAX)).stage, "sent");
-  assert.deepEqual(late.chain.trees.filter((t) => !t.newest).map((t) => t.beforeMs), [NOW, NOW + 60_000n, NOW + 120_000n]);
-  assert.ok(late.chain.trees.every((t) => t.signal), "each tree read carries its time limit");
-  // past the budget (the leaf only from NOW + 180 s): stopped, nothing bound or sent
-  const never = await runWorld({ change: true, thisEpoch: true, inFromMs: NOW + 180_000n });
+  assert.deepEqual(late.chain.trees.filter((t) => !t.newest).map((t) => t.beforeMs), [NOW, NOW, NOW + 60_000n], "the plan's read, the part's, then the new epoch's");
+  // past the budget (one epoch and the lag, 90 s): stopped, nothing bound or sent
+  const never = await runWorld({ change: true, thisEpoch: true, inFromMs: NEVER, newestFromMs: NEVER });
   never.clock.ms = NOW + 50_000n;
-  assert.equal((await runEvmPoolWithdraw(never.h, RUN_ASK, TO, PART, MAX)).stage, "stopped");
+  const got = await runEvmPoolWithdraw(never.h, RUN_ASK, TO, PART, MAX);
+  assert.equal(got.stage, "stopped");
+  assert.match(got.cause ?? "", /\bleaf\b/, `the part's stop: ${got.cause}`);
+  assert.equal(never.clock.ms - (NOW + 50_000n) <= 90_000n + 30_000n, true, "within the one budget (and the free wait)");
   assert.deepEqual([never.chain.binds.length, never.chain.sends], [0, 0]);
   assert.equal((await never.notes.get(never.noteId))?.state, "UNSPENT");
 });
