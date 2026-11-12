@@ -466,3 +466,20 @@ test("typedRegisterDepositOf is armingRegisterDepositOf: the token's minimum reg
   }
   await assert.rejects(typedRegisterDepositOf("testnet", registration(false, "testnet"))(TYPED, TOKEN), /token/);
 });
+
+test("a note the caller picked (the NEAR buy's W is derived from it first) is the one spent; one RESERVED, SPENT, too small or unknown is refused and no other note is picked", async () => {
+  const v = await vaultWith();
+  const reg = { registerDepositOf: typedRegisterDepositOf("mainnet", registration(false, "mainnet")) };
+  // the 10 USDC note, though the 5 USDC one is the smallest that covers 3 USDC plus the fee
+  const big = v.notes[2]!;
+  const r = await withdrawRequest(argsFor(v, signalsProver(), { to: TYPED, note: big.id, ...reg }));
+  assert.equal(r.noteId, big.id);
+  assert.equal(r.change.l, big.leaf!.label);
+  // it is RESERVED now: asked again it is refused, never another note in its place
+  const before = (await v.ns.list()).map((n) => [n.id, n.state]);
+  await assert.rejects(withdrawRequest(argsFor(v, signalsProver(), { to: TYPED, note: big.id, ...reg })), /no unspent note/);
+  // too small for 3 USDC and its fee
+  await assert.rejects(withdrawRequest(argsFor(v, signalsProver(), { to: TYPED, note: v.notes[0]!.id, ...reg })), /covers/);
+  await assert.rejects(withdrawRequest(argsFor(v, signalsProver(), { to: TYPED, note: "no-such-note", ...reg })), /not in the store/);
+  assert.deepEqual((await v.ns.list()).map((n) => [n.id, n.state]), before);
+});

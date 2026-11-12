@@ -79,7 +79,7 @@ export function PositionPanel({ row, s, now, onShare }: { row: Row; s: Sell; now
           const b = q === "initials" ? row.initials : q;
           const amount = b === null ? null : sellAmount(row.units, b, decimals);
           const live = running && b !== null && s.bps === b;
-          const off = !s.ready || running || noRoute || amount === null;
+          const off = !s.ready || running || noRoute || amount === null || !s.takes(b!);
           return (
             <button
               key={String(q)}

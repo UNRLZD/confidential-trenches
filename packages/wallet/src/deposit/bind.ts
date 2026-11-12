@@ -49,6 +49,9 @@
 // hashes from our P, so the note goes UNSPENT with that leaf and the outcome says front_run; the caller signs the amount
 // again on U's next second-arrival note. Another deposit is told by value as well as depositor (ownRow): the vault takes
 // the depositor from the message, so the stranger may name U.
+// A NEAR sell's W (card near-private-trading) binds its return note the same way: W_{near,l,j} is the mover in U's place
+// (args.w), its call the same ft_transfer_call with W the depositor, signed by W's own key (delegate.ts
+// moverDepositDelegate), every rule above unchanged; the note is W's return note on NEAR, and R2 has no earlier P for it.
 // Nothing here logs. No request carries a key, the words or a note's secret: the relayer gets the signed delegate
 // alone (sendDepositDelegate), and each read names U or the vault.
 import { HELPER_RPC_METHODS, type VaultDepositRow, vaultSync, type VaultSyncCursor, vaultSyncStart, VaultSyncStopped } from "@blindfill/kit";
@@ -57,8 +60,9 @@ import type { BindCall, NoteRecord, NoteStore } from "../notes/store.ts";
 import { noteCommitment, type NoteRef, noteSecrets } from "../notes/secrets.ts";
 import { deadlineOf, pacedFetch, pacedRpc, requestSignal } from "../pace.ts";
 import { DepositAccountRefused, depositAccount, NEAR_NETWORKS, type NearNetwork, nearPairNetwork, nearPairRule, type NearRpc, nearRpc, RPC_TIMEOUT_MS, heightSpreadOver } from "./account.ts";
-import { type BindAnswer, depositDelegate, sendDepositDelegate, type SignedDepositDelegate } from "./delegate.ts";
+import { type BindAnswer, type DepositMover, moverAccount, moverDepositDelegate, sendDepositDelegate, type SignedDepositDelegate } from "./delegate.ts";
 import { sleepFor } from "../busy.ts";
+import { counter, field } from "../derive/keys.ts";
 
 /** The margin past max_block_height, in blocks, before a call counts as dead (W:448; V:741-743 covers both readings). */
 export const LAPSE_MARGIN = 5n;
@@ -74,17 +78,19 @@ export class DepositBindRefused extends Error {
   }
 }
 
-export interface BindDepositArgs {
+/**
+ * The call's mover: U = U_{s,i} (s and i), or W = W_{near,l,j} (w), a NEAR sell's fresh wallet moving its USDC back into
+ * the vault on its return note (card near-private-trading; wallet.md WM-11's same shape, the depositor the mover). W's
+ * bind is U's in every step: the note in the store first, its calls written before they leave, the pages alone confirm.
+ */
+export type BindDepositArgs = {
   network: NearNetwork;
-  /** U = U_{s,i}. */
-  s: bigint;
-  i: number;
-  /** The store's id of the note this call makes: U's deposit note or one of U's second-arrival notes. */
+  /** The store's id of the note this call makes: U's deposit note or one of U's second-arrival notes; W's return note. */
   noteId: string;
-  /** In the token's base units: this call's note in the split (W:422-434). */
+  /** In the token's base units: this call's note in the split (W:422-434); W's whole USDC on its return. */
   amount: bigint;
   window?: number;
-}
+} & ({ s: bigint; i: number; w?: undefined } | { w: { l: bigint; j: number }; s?: undefined; i?: undefined });
 
 /** A NEAR provider that also reads a transaction's status (the kit's HELPER_RPC_METHODS.near names `tx`). */
 export interface BindRpc extends NearRpc {
@@ -309,6 +315,14 @@ export async function resignDeposit(
   seed64: Uint8Array, s: bigint, i: number, args: { network: NearNetwork; amount: bigint; precommitment: bigint; window?: number },
   earlier: EarlierCall, why: "lapse" | "resign_needed", rpcs: readonly [NearRpc, NearRpc], at?: number,
 ): Promise<SignedDepositDelegate> {
+  return resignAs(seed64, { kind: "U", s, i }, args, earlier, why, rpcs, at);
+}
+
+/** resignDeposit for the mover (U, or a sell's W): the same rules. */
+async function resignAs(
+  seed64: Uint8Array, mover: DepositMover, args: { network: NearNetwork; amount: bigint; precommitment: bigint; window?: number },
+  earlier: EarlierCall, why: "lapse" | "resign_needed", rpcs: readonly [NearRpc, NearRpc], at?: number,
+): Promise<SignedDepositDelegate> {
   const nonce = earlier.nonce;
   const mbh = earlier.max_block_height;
   const sender = earlier.sender_id;
@@ -320,7 +334,7 @@ export async function resignDeposit(
     if (low <= mbh + LAPSE_MARGIN) throw new DepositBindRefused("early", `final height ${low} is not past max_block_height ${mbh} + ${LAPSE_MARGIN}`);
     if (u.nonce + 1n !== nonce) throw new DepositBindRefused("nonce", `U's key nonce is ${u.nonce}: the earlier call at ${nonce} is not free to sign again`);
   } else if (why !== "resign_needed") throw new DepositBindRefused("input", "a re-sign is for a lapse or resign_needed");
-  const call = await depositDelegate(seed64, s, i, args, rpcs);
+  const call = await moverDepositDelegate(seed64, mover, args, rpcs);
   if (call.sender_id !== sender || call.nonce !== nonce)
     throw new DepositBindRefused("nonce", `the re-signed call is at ${call.nonce}, not the earlier nonce ${nonce}: dropped`);
   return call;
@@ -472,14 +486,21 @@ export async function findDeadCall(calls: readonly BindCall[], nonce: bigint, rp
 
 // ---------- the bind ----------
 
-// The note before this one under U (R2 waits until the pages hold it): U's deposit note before second arrival 0.
+// The note before this one under its mover (R2 waits until the pages hold it): U's deposit note before second arrival
+// 0, W's return note on NEAR before its R second arrival 0 (a sell's proceeds over the deposit's cap, one note each).
 function previousRef(ref: NoteRef): NoteRef | null {
   if (ref.kind !== "second") return null;
-  if (ref.id.id !== "U") return null;
-  return ref.n === 0 ? { kind: "deposit", s: ref.id.s, i: ref.id.i } : { kind: "second", id: ref.id, n: ref.n - 1 };
+  const id = ref.id;
+  if (id.id === "U") return ref.n === 0 ? { kind: "deposit", s: id.s, i: id.i } : { kind: "second", id, n: ref.n - 1 };
+  if (id.id === "R" && id.c === "near") return ref.n === 0 ? { kind: "return", c: "near", l: id.l, j: id.j } : { kind: "second", id, n: ref.n - 1 };
+  return null;
 }
 const isUs = (ref: NoteRef, s: bigint, i: number) =>
   (ref.kind === "deposit" && ref.s === s && ref.i === i) || (ref.kind === "second" && ref.id.id === "U" && ref.id.s === s && ref.id.i === i);
+const isWs = (ref: NoteRef, l: bigint, j: number) =>
+  (ref.kind === "return" && ref.c === "near" && ref.l === l && ref.j === j) || (ref.kind === "second" && ref.id.id === "R" && ref.id.c === "near" && ref.id.l === l && ref.id.j === j);
+/** The note is the mover's: U's deposit or second-arrival note, or W's return note or R second arrival on NEAR (W_{near,l,j}'s, l and j its own). */
+const isMovers = (ref: NoteRef, m: DepositMover) => (m.kind === "U" ? isUs(ref, m.s, m.i) : isWs(ref, m.l, m.j));
 
 // Codes that say the call may still be (or have been) carried: the pages and U's nonce settle it. amount_above_balance
 // too: the device signed only after reading U's USDC at or above the amount on both RPCs, so a relayer's read short of
@@ -499,7 +520,21 @@ const WAIT_READ = new Set(["rpc", "disagree", "height", "halted", "balance", "no
  * bind on the same note picks up where the pages and U's nonce say).
  */
 export async function bindDeposit(seed64: Uint8Array, args: BindDepositArgs, deps: BindDeps): Promise<BindOutcome> {
-  const own: BindDepositArgs = { network: args.network, s: args.s, i: args.i, noteId: args.noteId, amount: args.amount, window: args.window };
+  const own = { network: args.network, noteId: args.noteId, amount: args.amount, window: args.window };
+  // the mover, copied before the first await: U_{s,i}, or a sell's W_{near,l,j}; exactly one of the two
+  const w = args.w;
+  const mover: DepositMover | null =
+    w === undefined
+      ? typeof args.s === "bigint" && typeof args.i === "number" ? { kind: "U", s: args.s, i: args.i } : null
+      : args.s === undefined && args.i === undefined && typeof w === "object" && w !== null && typeof w.l === "bigint" && typeof w.j === "number" ? { kind: "W", l: w.l, j: w.j } : null;
+  if (mover === null) throw new DepositBindRefused("input", "the mover is U (s, i) or W (w), one of the two");
+  // the mover's numbers in their ranges before the seed is copied: s and l field elements, i and j counters
+  try {
+    if (mover.kind === "U") (field("s", mover.s), counter("i", mover.i));
+    else (field("l", mover.l), counter("j", mover.j));
+  } catch (e) {
+    throw new DepositBindRefused("input", (e as Error).message);
+  }
   if (!(seed64 instanceof Uint8Array) || seed64.length !== 64) throw new DepositBindRefused("input", "seed64 must be 64 bytes");
   if (typeof own.network !== "string" || !Object.hasOwn(NEAR_NETWORKS, own.network)) throw new DepositBindRefused("input", `unknown network ${String(own.network)}`);
   const vault = NEAR_NETWORKS[own.network].vault;
@@ -507,16 +542,23 @@ export async function bindDeposit(seed64: Uint8Array, args: BindDepositArgs, dep
   const rpcs = deps.rpcs;
   checkPair(own.network, rpcs, true);
   const relayer = deps.relayerAccount === undefined ? RELEASE_RELAYER[own.network] : deps.relayerAccount;
-  const seed = Uint8Array.from(seed64);
   const store = deps.store;
   const fetchFn = deps.fetchFn ?? fetch;
   const pollMs = deps.pollMs ?? POLL_MS;
   // the default wait ends at once on deps.signal (a stop during a busy relayer's Retry-After never waits it out)
   const sleep = deps.sleep ?? ((ms: number) => sleepFor(ms, deps.signal));
   const signal = deps.signal;
-  const U = depositAccount(seed, own.s, own.i).account;
   const token = NEAR_NETWORKS[own.network].usdc;
-  if (struck.has(U)) throw new DepositBindRefused("struck", "the relayer struck U: its USDC leaves by withdraw.open");
+  // the seed's copy: every throw from here on zeroes it (below, until the run's own try takes it over)
+  const seed = Uint8Array.from(seed64);
+  let U: string;
+  try {
+    U = mover.kind === "U" ? depositAccount(seed, mover.s, mover.i).account : moverAccount(seed, mover);
+    if (struck.has(U)) throw new DepositBindRefused("struck", "the relayer struck U: its USDC leaves by withdraw.open");
+  } catch (e) {
+    seed.fill(0);
+    throw e;
+  }
   running.set(U, (running.get(U) ?? 0) + 1);
   try {
     // The vault's cursor: its height, so no read is at an older block than the last one this device read.
@@ -524,7 +566,7 @@ export async function bindDeposit(seed64: Uint8Array, args: BindDepositArgs, dep
     // The note: in the store before P leaves, of U, and its P the one the seed gives its ref.
     let note = await store.get(own.noteId);
     if (note === undefined) throw new DepositBindRefused("note", "the note is not in the store: await planDeposit first");
-    if (!isUs(note.ref, own.s, own.i)) throw new DepositBindRefused("note", "the note is not U's deposit or second-arrival note");
+    if (!isMovers(note.ref, mover)) throw new DepositBindRefused("note", "the note is not the mover's: U's deposit or second-arrival note, or W's return or R note on NEAR");
     const P = note.precommitment;
     if (noteSecrets(seed, note.ref).precommitment !== P) throw new DepositBindRefused("note", "the note's precommitment is not its ref's");
     const prevRef = previousRef(note.ref);
@@ -665,7 +707,7 @@ export async function bindDeposit(seed64: Uint8Array, args: BindDepositArgs, dep
         if (balance === null || balance < used.balance) return null;
       }
       const c = await signing(async () => {
-        const c = await depositDelegate(seed, own.s, own.i, call, rpcs);
+        const c = await moverDepositDelegate(seed, mover, call, rpcs);
         if (c.nonce <= out.nonce) throw new DepositBindRefused("nonce", "a new call must be past the dead one's nonce");
         return c;
       });
@@ -685,7 +727,7 @@ export async function bindDeposit(seed64: Uint8Array, args: BindDepositArgs, dep
           const u = await readU(U, rpcs, at);
           let next: Step | null = null;
           if (u !== null && u.nonce + 1n === out.nonce) {
-            const c = await signing(() => resignDeposit(seed, own.s, own.i, call, out, "lapse", rpcs, at)); // nothing landed: the same nonce
+            const c = await signing(() => resignAs(seed, mover, call, out, "lapse", rpcs, at)); // nothing landed: the same nonce
             if (c !== null) next = await commit(c);
           } else if (u !== null && u.nonce >= out.nonce) next = await afterRefusal(out);
           if (next !== null) return next;
@@ -762,7 +804,7 @@ export async function bindDeposit(seed64: Uint8Array, args: BindDepositArgs, dep
     } else {
       let c: SignedDepositDelegate | null = null;
       while (c === null) {
-        c = await signing(() => depositDelegate(seed, own.s, own.i, call, rpcs));
+        c = await signing(() => moverDepositDelegate(seed, mover, call, rpcs));
         if (c === null) await pause("sign");
       }
       step = await commit(c);
@@ -784,7 +826,7 @@ export async function bindDeposit(seed64: Uint8Array, args: BindDepositArgs, dep
       else if (answer.code === "sender_struck") return strike();
       else if (answer.code === "resign_needed") {
         await pause("resign_needed");
-        const again: SignedDepositDelegate | null = await signing(() => resignDeposit(seed, own.s, own.i, call, out, "resign_needed", rpcs));
+        const again: SignedDepositDelegate | null = await signing(() => resignAs(seed, mover, call, out, "resign_needed", rpcs));
         step = again === null ? await settle(out) : await commit(again);
       } else if (answer.code === "prepay_open" || RETRY.has(answer.code)) {
         // R2: U's first note has no earlier P the relayer could wait for: refused, before any wait

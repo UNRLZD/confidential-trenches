@@ -8,7 +8,9 @@
 //     the loading state and not an empty page;
 //   - the visible header's balance equals Portfolio's visible Cash tile, to the cent, and both equal ACCOUNT's cash
 //     (CASH; design-lock-r5 S10.3 shows Cash in the header);
-//   - in dark: Withdraw asks the shell for withdraw.open; Export (the row's Export key icon on desktop, the position's
+//   - in dark: Withdraw, with money in the vault and the Solana pool, opens the pick of the two (card
+//     withdraw-form-shows-what-you-can-send: the vault's row, then Solana's), and Solana's row asks the shell for
+//     pool.withdraw; Export (the row's Export key icon on desktop, the position's
 //     sheet on the phone) asks for export.open; Deposit (phone) opens the deposit sheet; Sell asks the shell for nothing and opens
 //     no sheet (its screen is another card's).
 // A screenshot of each width and scheme is kept.
@@ -82,7 +84,8 @@ export function judge(rec) {
     say(cash !== null && cash === r.header && cash === CASH, `${n}: the header's balance ${r.header ?? "none"}, Portfolio's Cash ${cash ?? "none"}, the account's cash ${CASH}`);
     if (r.scheme !== "dark") continue;
     const t = r.taps ?? {};
-    say(t.withdraw === "withdraw.open", `${n}: Withdraw asks the shell for ${t.withdraw ?? "nothing"}`);
+    say(t.withdraw === "pick near solana", `${n}: Withdraw ${t.withdraw?.startsWith("pick") ? `opens the ${t.withdraw}` : `asks the shell for ${t.withdraw ?? "nothing"}`}`);
+    say(t.pick === "pool.withdraw", `${n}: the pick's Solana row asks the shell for ${t.pick ?? "nothing"}`);
     say(t.export === "export.open", `${n}: Export asks the shell for ${t.export ?? "nothing"}`);
     if (r.width === "phone") say(t.deposit === "deposit", `${n}: Deposit opens ${t.deposit ?? "nothing"}`);
     say(t.sell === "nothing", `${n}: Sell ${t.sell === "nothing" ? "does nothing visible (its screen is another card's)" : `opens ${t.sell ?? "unread"}`}`);
@@ -154,6 +157,15 @@ async function runOne(browser, w, scheme, shots, route) {
     if (scheme !== "dark" || run.screen !== "portfolio") return run;
     const taps = {};
     taps.withdraw = (await tap(page, f, "[data-screen='portfolio'] [data-control='withdraw']"))[0] ?? null;
+    // money in two places: the pick, by its rows; its Solana row opens that pool's form
+    const rows = await f.locator("[data-sheet='withdraw-pick'] .wpk-row").evaluateAll((rs) => rs.map((r) => r.dataset.place));
+    if (taps.withdraw === null && rows.length) {
+      taps.withdraw = `pick ${rows.join(" ")}`;
+      taps.pick = (await tap(page, f, "[data-sheet='withdraw-pick'] .wpk-row[data-place='solana']"))[0] ?? null;
+      // this stand-in shell refuses pool.withdraw, and a refused open leaves the pick up with its line: its x closes it
+      await f.locator("[data-sheet='withdraw-pick'] .dep-x").filter({ visible: true }).first().click({ timeout: 2_000 }).catch(() => {});
+      await page.waitForTimeout(300);
+    }
     if (w.name === "desktop") {
       // the row's Export key icon (card app-export-every-wallet), in the row's icon row
       taps.export = (await tap(page, f, "[data-screen='portfolio'] tr[data-pos] [data-control='export']"))[0] ?? null;

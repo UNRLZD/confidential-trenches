@@ -40,6 +40,13 @@ test("recorded good answer: Portfolio at both widths and schemes, header = Cash,
   for (const x of ANSWERS.good.runs) assert.deepEqual([x.header, x.cash], [CASH, CASH], `${x.width} ${x.scheme}`);
 });
 
+test("recorded bad answer beforePick: the harness run before card withdraw-form-shows-what-you-can-send, Withdraw straight to the vault's form with money in two places: FAIL on the Withdraw alone", () => {
+  const r = judge(ANSWERS.beforePick);
+  assert.equal(r.ok, false);
+  assert.deepEqual(bad(r).map((l) => l.replace(/:.*/, "")), ["BAD phone dark", "BAD phone dark", "BAD desktop dark", "BAD desktop dark"]);
+  assert.ok(bad(r).every((l) => /Withdraw asks the shell for withdraw\.open|the pick's Solana row asks the shell for nothing/.test(l)), r.lines.join("\n"));
+});
+
 test("recorded bad answer: the deployed app before this card draws nothing at /portfolio signed in: FAIL", () => {
   const r = judge(ANSWERS.bad);
   assert.equal(r.ok, false);
@@ -55,6 +62,10 @@ test("planted: a header that differs from Portfolio's Cash fails (the Total, as 
 
 test("planted: a tap that asks for the wrong kind, or a Sell that opens something, fails", () => {
   fails(mut((rec) => (run(rec, "desktop", "dark").taps.withdraw = "signout")), /^BAD desktop dark: Withdraw asks the shell for signout/);
+  // card withdraw-form-shows-what-you-can-send: money in two places opens the pick, never the vault's form straight away
+  fails(mut((rec) => (run(rec, "desktop", "dark").taps.withdraw = "withdraw.open")), /^BAD desktop dark: Withdraw asks the shell for withdraw\.open/);
+  fails(mut((rec) => (run(rec, "phone", "dark").taps.withdraw = "pick solana")), /^BAD phone dark: Withdraw opens the pick solana/);
+  fails(mut((rec) => (run(rec, "phone", "dark").taps.pick = "withdraw.open")), /^BAD phone dark: the pick's Solana row asks the shell for withdraw\.open/);
   fails(mut((rec) => (run(rec, "phone", "dark").taps.export = "backup.open")), /^BAD phone dark: Export asks the shell for backup\.open/);
   fails(mut((rec) => (run(rec, "phone", "dark").taps.deposit = null)), /^BAD phone dark: Deposit opens nothing/);
   fails(mut((rec) => (run(rec, "desktop", "dark").taps.sell = "a sheet")), /^BAD desktop dark: Sell opens a sheet/);

@@ -10,18 +10,20 @@ import type { PortfolioAction } from "../screens/portfolio/source.tsx";
 import { useSignpage } from "../shell/signpage-frame.tsx";
 import { useReturnHop } from "../shell/ReturnHop.tsx";
 import { tapOf } from "./portfolio-taps.ts";
+import { useWithdrawOpen } from "../screens/withdraw/WithdrawPick.tsx";
 
 /** Portfolio and Activity at /portfolio, signed in, with each tap mounted. */
 export function PortfolioMount() {
   const { snapshot } = useSignpage();
   const { hop } = useReturnHop();
   const deposit = useDepositSheet();
+  const openWithdraw = useWithdrawOpen();
   const onAction = (a: PortfolioAction) => {
     const held = snapshot.state ? moneyWallets(snapshot.state) : [];
     const m = tapOf(a, (chain, address) => held.some((w) => w.chain === chain && w.address === address));
     const view = (control: string) => ({ route: "portfolio" as const, sheet: null, control, fields: {} });
     if (m.to === "deposit") deposit.setOpen(true);
-    else if (m.to === "withdraw") void hop("withdraw.open", {}, view("withdraw"));
+    else if (m.to === "withdraw") void openWithdraw(view("withdraw"), () => hop("withdraw.open", {}, view("withdraw")));
     else if (m.to === "pool.withdraw") void hop("pool.withdraw", m.params, view(`pool-withdraw-${m.params.chain}`));
     else if (m.to === "export") void hop("export.open", { chain: m.chain, address: m.address }, view(`export-${m.chain}-${m.address}`));
   };

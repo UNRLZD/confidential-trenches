@@ -11,9 +11,10 @@
 // both providers); a network
 // with no watch is held, and its paused-error sends stay pending, never counted (send.ts sendState).
 import { join } from "node:path";
-import { HELPER_CODE_STATUS, HELPER_INTENTS_CODES } from "@blindfill/kit";
+import { HELPER_CODE_STATUS, HELPER_INTENTS_CODES, NEAR_RHEA } from "@blindfill/kit";
 import { decodeSignedDelegate } from "./checks.ts";
 import { type CreateDeps, deliveryReads, onStatusAnswer } from "./create.ts";
+import { carryTrade, createTradeReads, createTradeStore, isTradeBody, type TradeAnswer, type TradeDeps } from "./trade.ts";
 import { carryDeposit, createFileStore, createSendReads, nearRpc, relayerKey, RPC_TIMEOUT_MS, startLockRounds, startRelayer, type Answer, type Rpc, type SendDeps } from "./send.ts";
 import { readUrls, tokenHeld, tokenWatchesFromEnv, WATCHED, type TokenNetwork, type TokenWatch } from "../token-status/status.ts";
 import { isAccountId } from "../withdraw/checks.ts";
@@ -90,7 +91,7 @@ export function createLine(a: { code: string; tx_hash?: string } | null): string
 }
 export const CREATE_START_FAILED = "helper: create start_failed";
 /** The route's own answers, before the carry: check 1's and check 5's codes, and upstream (a start that failed). */
-export type BindRouteAnswer = { status: number; body: Answer["body"] | { error: { code: "bad_shape" | "token_not_accepted" | "upstream" } } };
+export type BindRouteAnswer = { status: number; body: Answer["body"] | TradeAnswer["body"] | { error: { code: "bad_shape" | "token_not_accepted" | "upstream" } } };
 const no = (code: "bad_shape" | "token_not_accepted" | "upstream"): BindRouteAnswer => ({ status: STATUS[code] ?? 400, body: { error: { code } } });
 const isObj = (x: unknown): x is Record<string, unknown> => typeof x === "object" && x !== null && !Array.isArray(x);
 
@@ -172,6 +173,8 @@ export function bindSenderFromEnv(
   const ready = new Map<TokenNetwork, Promise<SendDeps>>();
   /** Each started network's creation (create.ts): the carry's store and relayer, the gate's reads on its providers. */
   const creates = new Map<TokenNetwork, CreateDeps>();
+  /** Each started network's trade carry (trade.ts, card relayer-near-trade): the same relayer, its own store. */
+  const trades = new Map<TokenNetwork, TradeDeps>();
   const stops: (() => void)[] = [];
   const init = async (net: Net): Promise<SendDeps> => {
     const token = WATCHED[net.network].token;
@@ -180,6 +183,7 @@ export function bindSenderFromEnv(
     const c = await viewAt(rpcs, block, net.vault, "config", {});
     if (!isObj(c) || c.asset !== token) throw new Error("the vault's config() names another token");
     const store = createFileStore(join(storeDir, `bind-${net.network}`));
+    let tradeStore: ReturnType<typeof createTradeStore> | null = null;
     // a start that fails after the store opens closes it, so the next try can take its lock again
     try {
       // no archival provider of a third operator (the kit's archival hosts are one operator): none stands in for a
@@ -196,8 +200,17 @@ export function bindSenderFromEnv(
       };
       stops.push(startLockRounds(deps));
       creates.set(net.network, { token, delivery: deliveryReads(rpcs, token), store, relayer });
+      tradeStore = createTradeStore(join(storeDir, `trade-${net.network}`));
+      trades.set(net.network, {
+        cfg: { network: net.network, marginK: BigInt(k) },
+        reads: createTradeReads(rpcs, net.vault, token, Date.now, NEAR_RHEA[net.network].exchange),
+        store: tradeStore,
+        relayer,
+        held: async () => tokenHeld(await deps.tokenStatus("higher")),
+      });
       return deps;
     } catch (e) {
+      tradeStore?.close();
       store.close();
       throw e;
     }
@@ -247,6 +260,18 @@ export function bindSenderFromEnv(
     });
   return {
     async carry(body) {
+      // the trade kind (trade.ts): its network named in its trade, carried by that network's relayer
+      if (isTradeBody(body)) {
+        const network = isObj(body) && isObj(body.trade) ? body.trade.network : undefined;
+        const net = [...carried.values()].find((n) => n.network === network);
+        if (net === undefined) return no("bad_shape");
+        try {
+          await started(net);
+        } catch {
+          return no("upstream");
+        }
+        return carryTrade(body, trades.get(net.network)!);
+      }
       const receiver = receiverOf(body);
       if (receiver === null) return no("bad_shape");
       const net = carried.get(receiver);
