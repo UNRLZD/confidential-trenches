@@ -20,9 +20,11 @@
 //   screen may be left (card signing-views-open-over-the-app). While it shows, the frame stays in the page under the
 //   scrim, inert, with its state, and every message from it is dropped: it cannot open, redraw, move, close or reload
 //   the sheet, nor change the address, until the sheet closes; the shell's own posts to it go on (the state it shows).
-//   A screen with a field typed into (the 12 words, the withdraw forms) takes the frame out of the document first: a
-//   frame left in the page takes the keyboard's focus back and reads what is typed or pasted (open(typed), seal()).
-//   At close a kept frame is live again as it was; a frame taken out comes back new, at the top window's address.
+//   A screen with the 12 words typed or shown takes the frame out of the document first: a frame left in the page takes
+//   the keyboard's focus back and reads what is typed or pasted (open("sealed"), seal()). Under the withdraw forms the
+//   frame stays, dimmed, inert, out of the tab order and the pointer's reach, and is taken out the first time it holds
+//   the keyboard's focus (open("watched"), src/frame-cover.ts). At close a kept frame is live again as it was; a frame
+//   taken out comes back new, at the top window's address.
 // - nav: the app says where it is, and the shell puts that path and query in the top window's address with
 //   history.replaceState (never a navigation), so the address bar, a reload, a new frame and a shared link follow the
 //   app. reload: the shell reloads the top window (a reload of the frame alone would keep the old shell).
@@ -30,6 +32,7 @@
 import { SIGNPAGE_MAX_NAV_BYTES } from "../../kit/src/signpage/schema.ts";
 import { APP_ORIGIN, startApi, type ApiHost, type PostTarget } from "./api.ts";
 import { PROTECT_MS } from "./guard.ts";
+import type { Cover } from "./frame-cover.ts";
 import { drawSheet } from "./sheet.ts";
 
 export const FRAME_SANDBOX = "allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox";
@@ -134,15 +137,24 @@ export interface Shell {
   body: HTMLElement;
   /**
    * Shows the sheet over the frame, which stays in the page, inert, under the scrim, its messages dropped until close.
-   * With `typed` (a screen with a field typed into), FRAME_LEAVE_MS later the frame is taken out of the document, as
-   * seal(): the removal is what keeps typed keys from it. A frame left under the sheet takes the keyboard's focus back
-   * (an APP_HOST page that calls focus() every few ms gets every key typed after the first, the 12 words included, on
-   * every engine; inert, visibility and display each let it through on some engine, the reviews measured), so none is
-   * left under a typed screen.
+   * "sealed": FRAME_LEAVE_MS later the frame is taken out of the document, as seal(): the removal is what keeps typed
+   * keys from it. A frame left under the sheet can take the keyboard's focus back (an APP_HOST page that calls focus()
+   * every few ms gets the keys typed after it, on every engine; inert, visibility and display each let it through on some
+   * engine, the reviews measured). "watched": the frame stays, also out of the tab order and the pointer's reach, as
+   * watch().
    */
-  open(typed?: boolean): void;
-  /** A screen with a typed field is drawn on the open sheet: the frame leaves, FRAME_LEAVE_MS after the open at most. */
+  open(cover?: Cover): void;
+  /**
+   * A sealed screen is drawn on the open sheet: the frame leaves, FRAME_LEAVE_MS after the open at most; at once on a
+   * watched sheet, whose open's answer was delivered while the frame stayed.
+   */
   seal(): void;
+  /**
+   * A watched screen is drawn on the open sheet: the frame stays, and the first time it holds the keyboard's focus (this
+   * window's blur with the frame active, or a field's focusout followed by the frame active) it is taken out in that task
+   * and the focus goes back to the sheet's field that had it. No frame comes back until close.
+   */
+  watch(): void;
   /** Hides the sheet: a kept frame is live again as it was; a frame taken out comes back new at the top window's address. */
   close(): void;
   /** Called on the user's own Esc, close tap or scrim tap (trusted events only); set by the screens. */
@@ -240,6 +252,9 @@ export function mountShell(doc: Document, host: Omit<ApiHost, "parent" | "listen
   let leaving: ReturnType<typeof setTimeout> | null = null;
   let waking: ReturnType<typeof setTimeout> | null = null;
   let openedAt = 0;
+  // the watched frame (open("watched")), and the sheet's element that last held the focus, the one it goes back to
+  let watched: HTMLIFrameElement | null = null;
+  let field: HTMLElement | null = null;
   const leave = (): void => {
     if (layer.hidden || !frame) return;
     frame.remove();
@@ -250,20 +265,24 @@ export function mountShell(doc: Document, host: Omit<ApiHost, "parent" | "listen
     layer,
     body: sheet.body,
     onDismiss: null,
-    open(typed = false) {
+    open(cover = "kept") {
       layer.hidden = false;
       veil.hidden = true;
       if (waking !== null) clearTimeout(waking);
       waking = null;
       openedAt = view.performance?.now?.() ?? Date.now();
+      field = null;
       sheet.box.focus?.();
       if (!frame) return;
       // inert in the same task the sheet shows: the frame takes no tap, no focus by the user, and leaves the a11y tree
       frame.inert = true;
-      if (typed) shell.seal();
+      if (cover === "sealed") shell.seal();
+      else if (cover === "watched") shell.watch();
     },
     seal() {
-      if (layer.hidden || !frame || leaving !== null) return;
+      if (layer.hidden || !frame) return;
+      if (watched === frame) return leave();
+      if (leaving !== null) return;
       // the answer to the kind that opened the sheet is delivered to the frame as a task of its own: the frame stays
       // until FRAME_LEAVE_MS after the open, never longer
       const wait = FRAME_LEAVE_MS - ((view.performance?.now?.() ?? Date.now()) - openedAt);
@@ -274,10 +293,22 @@ export function mountShell(doc: Document, host: Omit<ApiHost, "parent" | "listen
         leave();
       }, wait);
     },
+    watch() {
+      if (layer.hidden || !frame || leaving !== null) return;
+      watched = frame;
+      frame.setAttribute("tabindex", "-1");
+      frame.style.pointerEvents = "none";
+    },
     close() {
       layer.hidden = true;
       if (leaving !== null) clearTimeout(leaving);
       leaving = null;
+      if (watched !== null && watched === frame) {
+        watched.removeAttribute("tabindex");
+        watched.style.pointerEvents = "";
+      }
+      watched = null;
+      field = null;
       // a kept frame stays inert for PROTECT_MS after the close (the second tap of a double tap on Cancel, Saved, the x or
       // the scrim lands on no app control there), then is live again and takes the keyboard's focus back; a frame taken
       // out comes back new, as inert for the same time, under the sheet's dim until it has painted
@@ -319,9 +350,33 @@ export function mountShell(doc: Document, host: Omit<ApiHost, "parent" | "listen
   sheet.scrim.addEventListener("click", dismiss);
   // a key held down repeats: only a press of its own is the user's Esc
   view.addEventListener("keydown", (e: Event) => (e as KeyboardEvent).key === "Escape" && !(e as KeyboardEvent).repeat && dismiss(e));
+  // a watched frame holding the keyboard's focus: out of the document in this task, and the focus back on the sheet's
+  // field. The steal shows in this window as (measured by scripts/focus-steal.e2e.mjs): Chromium and WebKit, the window's
+  // blur with the frame active; Firefox, no blur, the field's focusout with the frame already active. WebKit, the frame
+  // taken out inside the blur, leaves this window with no focus and the next keys go nowhere until the window is focused
+  // again, so the next task focuses it and the field (none of the keys reaches the app either way).
+  const stolen = (): void => {
+    if (layer.hidden || !frame || watched !== frame || doc.activeElement !== frame) return;
+    leave();
+    const back = field && field.isConnected !== false ? field : sheet.box;
+    back.focus?.();
+    setTimeout(() => {
+      if (layer.hidden || (doc.hasFocus?.() !== false && doc.activeElement === back)) return;
+      view.focus?.();
+      back.focus?.();
+    }, 0);
+  };
+  layer.addEventListener("focusin", (e: Event) => void (field = e.target as HTMLElement | null));
+  // the field's focusout: the frame already active (Firefox), or active by the next task (a steal while this window has
+  // no focus, the user in another app: no blur here, and no key can reach the frame before that task)
+  layer.addEventListener("focusout", () => {
+    stolen();
+    setTimeout(stolen, 0);
+  });
   // while a sheet shows over a kept frame, the frame does not keep the keyboard's focus: focus that went into it (a
   // frame calling focus() under an inert attribute some engine lets through) comes back to the sheet in the next task
   view.addEventListener("blur", () => {
+    stolen();
     if (layer.hidden || !frame) return;
     setTimeout(() => {
       if (!layer.hidden && frame && doc.activeElement === frame) sheet.box.focus?.();

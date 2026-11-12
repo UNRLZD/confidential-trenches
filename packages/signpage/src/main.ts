@@ -85,6 +85,7 @@ import { withVaultBalance } from "./vault-balance.ts";
 import { withPositions } from "./positions.ts";
 import { mountShell, type Shell } from "./shell.ts";
 import { drawBackdrop } from "./backdrop.ts";
+import { coverOf } from "./frame-cover.ts";
 import { afterSaved, pageFor, takes, takesParams, type AccountKind } from "./pages/open.ts";
 import { vaultScope } from "./withdraw/checks.ts";
 import { drawWithdrawForm } from "./withdraw/form.ts";
@@ -452,7 +453,7 @@ function openPoolWithdraw(chain: PoolChain, opId: string): { result: { pending: 
 const sheetShown = (): boolean => shell !== null && !shell.layer.hidden;
 // The layer opens, and the activation guard restarts its 500 ms: a click lined up before cannot act on what it shows.
 function openLayer(): void {
-  shell?.open(TYPED.has(root.dataset.signin ?? ""));
+  shell?.open(coverOf(root.dataset.signin ?? ""));
   reshown();
 }
 // Back to the app: the layer closes on the page's signed-in or signed-out state.
@@ -476,11 +477,10 @@ const input = (e: Event): void => {
 addEventListener("pointerdown", input, true);
 addEventListener("keydown", input, true);
 
-// The screens the APP_HOST frame must not sit under (src/shell.ts seal: it leaves the document before they show): those
-// with a field typed into (the 12 words, the withdraw forms' address and amount), so no key typed or pasted there can
-// reach it; and the 12 words shown (backup), since a frame under them keeps the opening tap's activation for seconds and
-// could put its own words on the clipboard over the user's Copy, or float a Picture-in-Picture window over them.
-const TYPED = new Set<string>(["words", "invalid-code", "withdraw", "pool-withdraw", "held", "backup"]);
+// The APP_HOST frame under each screen (src/frame-cover.ts): out of the document before the 12 words typed or shown and
+// the held deposit's way out (sealed: no key typed or pasted there can reach it, and a frame under the 12 words shown
+// keeps the opening tap's activation and could write the clipboard over the user's Copy); in the page, dimmed and inert,
+// under the withdraw forms, and out the first time it holds the keyboard's focus (watched).
 const GUARDED = new Set(["signout", "saved", "backup", "copy", "withdraw", "move-out"]);
 function button(action: string, label: string, onClick: () => void): HTMLButtonElement {
   const b = document.createElement("button");
@@ -512,6 +512,10 @@ function button(action: string, label: string, onClick: () => void): HTMLButtonE
 }
 
 function show(state: State, seed?: { account: string; code_saved: boolean; signout: boolean }, words?: string): void {
+  // on an open sheet, the frame's cover for this screen before any of its fields exists (a sealed screen: out now)
+  const cover = coverOf(state);
+  if (cover === "sealed") shell?.seal();
+  else if (cover === "watched") shell?.watch();
   root.dataset.signin = state;
   if (state !== "backup" && drawn) {
     drawn.fill(0);
@@ -608,7 +612,6 @@ function show(state: State, seed?: { account: string; code_saved: boolean; signo
   const cancellable = state !== "loading" && state !== "signed-in" && (state !== "backup" || openedBy === "backup.open" || openedBy === "signout");
   if (shell && cancellable) parts.push(button("cancel", WORDS.cancel, () => void run(cancel)));
   shell?.dismissible(cancellable);
-  if (TYPED.has(state)) shell?.seal();
   root.replaceChildren(...parts);
 }
 

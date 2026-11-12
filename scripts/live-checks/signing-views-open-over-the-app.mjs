@@ -6,12 +6,15 @@
 //   - the sheet's parts: data-sheet "scrim", "box", "close", "body", a dialog with aria-modal;
 //   - the close control: the app's x icon path and its accessible name "Close";
 //   - the user's own Esc ("Escape");
-//   - the screens the frame must not sit under, as one set ("words", "invalid-code", "withdraw", "pool-withdraw", "held",
-//     "backup"): the frame leaves the document before them (src/main.ts TYPED);
+//   - the screens the frame must not sit under, as one set ("words", "invalid-code", "held", "backup"): the frame leaves
+//     the document before them (src/frame-cover.ts SEALED);
+//   - the withdraw forms, as one set of exactly "withdraw" and "pool-withdraw": the app stays in the page under them,
+//     and the frame leaves the first time it holds the keyboard's focus (src/frame-cover.ts WATCHED, src/shell.ts watch);
 // and SIGN_HOST's Permissions-Policy denies picture-in-picture and fullscreen (packages/signpage/public/_headers).
 // What the sheet does in a browser (the frame kept in the page under the sheet, its messages dropped, close to the same
-// app document, a typed screen with the frame out) is proven by packages/signpage/test/shell.test.ts and the two-host
-// run apps/terminal/test/e2e/signing-sheet/run.mjs.
+// app document, a typed screen with the frame out, a withdraw form's frame out when it takes the focus) is proven by
+// packages/signpage/test/shell.test.ts, packages/signpage/scripts/focus-steal.e2e.mjs (Chromium, Firefox, WebKit) and the
+// two-host run apps/terminal/test/e2e/signing-sheet/run.mjs.
 // After: sign
 //   node scripts/live-checks/signing-views-open-over-the-app.mjs [--record <file>]           the deployed SIGN_HOST
 //   node scripts/live-checks/signing-views-open-over-the-app.mjs --local [--record <file>]   this checkout's build
@@ -30,7 +33,16 @@ export const SIGN_URL = "https://confidential.unrealized.trade/";
 const Q = "[\"'`]";
 const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const lit = (s) => new RegExp(`${Q}${esc(s)}${Q}`);
-export const TYPED = ["words", "invalid-code", "withdraw", "pool-withdraw", "held", "backup"];
+export const TYPED = ["words", "invalid-code", "held", "backup"];
+export const WATCHED = ["withdraw", "pool-withdraw"];
+/** True when the script holds `new Set([...])` of exactly the names in `want`. */
+const setOf = (js, want) => {
+  for (const m of js.matchAll(/new Set\(\[([^\]]*)\]\)/g)) {
+    const got = [...m[1].matchAll(/["'`]([^"'`]*)["'`]/g)].map((x) => x[1]);
+    if (got.length === want.length && want.every((k) => got.includes(k))) return true;
+  }
+  return false;
+};
 /** Each marker by name, and its test on the script's text. */
 export const MARKS = {
   "sheet scrim": (js) => /sheet=["'`]scrim["'`]/.test(js),
@@ -41,13 +53,8 @@ export const MARKS = {
   "x icon": (js) => lit("M2 2l8 8M10 2L2 10").test(js),
   "Close name": (js) => lit("Close").test(js),
   Escape: (js) => lit("Escape").test(js),
-  "typed screens set": (js) => {
-    for (const m of js.matchAll(/new Set\(\[([^\]]*)\]\)/g)) {
-      const got = [...m[1].matchAll(/["'`]([^"'`]*)["'`]/g)].map((x) => x[1]);
-      if (got.length === TYPED.length && TYPED.every((k) => got.includes(k))) return true;
-    }
-    return false;
-  },
+  "typed screens set": (js) => setOf(js, TYPED),
+  "withdraw forms set": (js) => setOf(js, WATCHED),
 };
 export const MARKERS = Object.keys(MARKS);
 export const found = (js) => MARKERS.filter((k) => MARKS[k](js));

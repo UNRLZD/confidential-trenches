@@ -92,7 +92,7 @@ const SIGN_ORIGIN = "https://confidential.unrealized.trade";
 type FakeEl = {
   tagName: string; id: string; hidden: boolean; style: Record<string, string>; src: string;
   contentWindow: { postMessage(m: unknown, o: string): void } | null;
-  setAttribute(k: string, v: string): void; getAttribute(k: string): string | null; attributes(): string[];
+  setAttribute(k: string, v: string): void; getAttribute(k: string): string | null; removeAttribute(k: string): void; attributes(): string[];
   addEventListener(t: string, fn: (e?: unknown) => void): void; fire(t: string, e?: unknown): void; remove(): void;
   dataset: Record<string, string>; append(...xs: unknown[]): void; inert?: boolean; focus(): void;
 };
@@ -113,6 +113,7 @@ function fakeDom(href = `${SIGN_ORIGIN}/token/solana/So111?tab=trades`) {
       tagName: tag, id: "", hidden: false, style: {}, src: "", contentWindow: null,
       setAttribute: (k, v) => void attrs.set(k, String(v)),
       getAttribute: (k) => attrs.get(k) ?? null,
+      removeAttribute: (k) => void attrs.delete(k),
       attributes: () => [...attrs.keys()].sort(),
       addEventListener: (t, fn) => void on.set(t, fn),
       fire: (t, ev) => on.get(t)?.(ev),
@@ -198,7 +199,7 @@ test("open(typed) takes the frame out of the document and nothing reaches the ol
   const sh = mountShell(d.doc, { state: () => signedOutState() });
   const old = d.frames()[0]!;
   old.fire("load");
-  sh.open(true);
+  sh.open("sealed");
   assert.equal(sh.layer.hidden, false);
   assert.equal(d.frames().length, 1, "the frame stays FRAME_LEAVE_MS, for the answer that opened the layer");
   assert.equal((old as unknown as { inert?: boolean }).inert, true, "inert in the same task as the layer shows");
@@ -226,7 +227,7 @@ test("open(typed) takes the frame out of the document and nothing reaches the ol
   // close twice: one frame; open then close at once: the frame stays, and stays the only one
   sh.close();
   assert.equal(d.frames().length, 1);
-  sh.open(true);
+  sh.open("sealed");
   sh.close();
   // a check that nothing came: this timer is due after the shell's FRAME_LEAVE_MS timer, so that one has run
   await new Promise((ok) => setTimeout(ok, PROTECT_MS + 20));
@@ -261,7 +262,7 @@ test("open(typed): the frame is out of the document within 100 ms, whatever FRAM
   try {
     const d = fakeDom();
     const sh = mountShell(d.doc, { state: () => signedOutState() });
-    sh.open(true);
+    sh.open("sealed");
     assert.equal(d.frames().length, 1);
     mock.timers.tick(100);
     assert.equal(d.frames().length, 0, "the frame is gone 100 ms after open");
@@ -278,6 +279,109 @@ test("open(typed): the frame is out of the document within 100 ms, whatever FRAM
     now += FRAME_LEAVE_MS + 1;
     sh.seal();
     assert.equal(d.frames().length, 0, "seal on a sheet open longer than FRAME_LEAVE_MS takes it out in the same task");
+  } finally {
+    resetTimers(mock.timers);
+  }
+});
+
+// The withdraw forms (src/frame-cover.ts WATCHED): the app stays in the page under the sheet, and the first time its frame
+// holds the keyboard's focus it is taken out in that task, the focus goes back to the field that had it, and no frame
+// comes back until the sheet closes.
+function watchedSheet() {
+  const d = fakeDom();
+  const sh = mountShell(d.doc, { state: () => signedOutState() });
+  const f = d.frames()[0]!;
+  const doc = d.doc as unknown as { activeElement: unknown };
+  const layer = sh.layer as unknown as FakeEl;
+  const field = d.doc.createElement("input") as unknown as FakeEl;
+  sh.open("watched");
+  // the user is in the To field
+  layer.fire("focusin", { target: field });
+  doc.activeElement = field;
+  return { d, sh, f, doc, layer, field };
+}
+
+test("open(watched): the frame stays in the page past FRAME_LEAVE_MS, inert, out of the tab order and the pointer's reach", () => {
+  enableTimers(mock.timers, { apis: ["setTimeout"] });
+  try {
+    const { d, sh, f } = watchedSheet();
+    mock.timers.tick(FRAME_LEAVE_MS * 10);
+    assert.deepEqual(d.frames(), [f], "the same frame, in the page");
+    assert.equal(f.inert, true);
+    assert.equal(f.getAttribute("tabindex"), "-1");
+    assert.equal(f.style.pointerEvents, "none");
+    // an honest app: the close keeps the same frame (no new app document), live again as it was
+    sh.close();
+    assert.deepEqual(d.frames(), [f], "no new frame at close: the app is not reloaded");
+    assert.equal(f.getAttribute("tabindex"), null);
+    assert.equal(f.style.pointerEvents, "");
+    mock.timers.tick(PROTECT_MS);
+    assert.equal(f.inert, false);
+  } finally {
+    resetTimers(mock.timers);
+  }
+});
+
+test("open(watched): the frame that takes the focus (the window's blur) is out in that task, the field has the focus back, and no frame returns before close", () => {
+  enableTimers(mock.timers, { apis: ["setTimeout"] });
+  try {
+    const { d, sh, f, doc, field } = watchedSheet();
+    const before = d.focused.length;
+    doc.activeElement = f;
+    d.blur();
+    assert.equal(d.frames().length, 0, "out in the blur's own task");
+    assert.equal(d.focused[before], field, "the focus back on the field that had it");
+    const posted = d.posted.length;
+    d.send(ask(), f.contentWindow);
+    mock.timers.tick(PROTECT_MS * 4);
+    assert.equal(d.frames().length, 0, "no frame while the sheet shows");
+    assert.equal(d.posted.length, posted, "nothing to the removed window");
+    sh.close();
+    const [g] = d.frames();
+    assert.ok(g && g !== f, "a new frame at close");
+  } finally {
+    resetTimers(mock.timers);
+  }
+});
+
+test("open(watched): a steal with no blur in the top window: the field's focusout with the frame active takes it out in that task (Firefox); the frame active only after it, by the next task", () => {
+  enableTimers(mock.timers, { apis: ["setTimeout"] });
+  try {
+    const { d, f, doc, layer, field } = watchedSheet();
+    const before = d.focused.length;
+    doc.activeElement = f;
+    layer.fire("focusout", { target: field });
+    assert.equal(d.frames().length, 0, "out in the focusout's own task");
+    assert.equal(d.focused[before], field);
+  } finally {
+    resetTimers(mock.timers);
+  }
+  enableTimers(mock.timers, { apis: ["setTimeout"] });
+  try {
+    const { d, f, doc, layer, field } = watchedSheet();
+    const before = d.focused.length;
+    layer.fire("focusout", { target: field });
+    assert.equal(d.frames().length, 1);
+    doc.activeElement = f;
+    mock.timers.tick(0);
+    assert.equal(d.frames().length, 0, "out by the next task");
+    assert.equal(d.focused[before], field);
+  } finally {
+    resetTimers(mock.timers);
+  }
+});
+
+test("open(watched): a blur to another app (the frame not active) leaves the frame; a change to a sealed screen takes it out at once", () => {
+  enableTimers(mock.timers, { apis: ["setTimeout"] });
+  try {
+    const { d, sh, f, doc } = watchedSheet();
+    doc.activeElement = null;
+    d.blur();
+    mock.timers.tick(1);
+    assert.deepEqual(d.frames(), [f]);
+    // the sheet has been open a moment (no wait for the open's answer): seal takes it out in the same task
+    sh.seal();
+    assert.equal(d.frames().length, 0, "out before the sealed screen draws its first field");
   } finally {
     resetTimers(mock.timers);
   }
@@ -349,7 +453,7 @@ test("a typed screen's close keeps the sheet's dim over the new frame until that
     const sh = mountShell(d.doc, { state: () => signedOutState() });
     const veil = d.children.find((c) => c.dataset.sheet === "veil")!;
     assert.ok(veil && veil.hidden, "no veil before a close");
-    sh.open(true);
+    sh.open("sealed");
     mock.timers.tick(FRAME_LEAVE_MS);
     assert.equal(d.frames().length, 0);
     sh.close();
@@ -482,7 +586,7 @@ test("a kind the host answers (signin.open): its answer goes to the frame before
   const order: string[] = [];
   sh = mountShell(d.doc, {
     state: () => signedOutState(),
-    kinds: { "signin.open": (p) => (p.way === "wallet" ? null : { result: { pending: true }, then: () => (order.push(`open after ${d.posted.length} posts`), sh!.open(true)) }) },
+    kinds: { "signin.open": (p) => (p.way === "wallet" ? null : { result: { pending: true }, then: () => (order.push(`open after ${d.posted.length} posts`), sh!.open("sealed")) }) },
   });
   const win = d.frames()[0]!.contentWindow;
   const m = { v: 1, id: crypto.randomUUID(), type: "signin.open", return_key: "deposit", way: "words" };
@@ -635,7 +739,7 @@ test("after a close the frame takes no tap for PROTECT_MS: a kept frame, and a n
     mock.timers.tick(PROTECT_MS * 2);
     assert.equal(kept.inert, true, "a sheet open again keeps it inert");
     sh.close();
-    sh.open(true);
+    sh.open("sealed");
     mock.timers.tick(FRAME_LEAVE_MS);
     sh.close();
     const fresh = d.frames()[0]!;
@@ -654,7 +758,7 @@ test("the dim over a new frame that never loads fades at VEIL_CAP_MS", () => {
     const d = fakeDom();
     const sh = mountShell(d.doc, { state: () => signedOutState() });
     const veil = d.part("veil");
-    sh.open(true);
+    sh.open("sealed");
     mock.timers.tick(FRAME_LEAVE_MS);
     sh.close();
     mock.timers.tick(VEIL_CAP_MS - 1);
