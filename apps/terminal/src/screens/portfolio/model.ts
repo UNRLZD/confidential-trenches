@@ -42,6 +42,27 @@ export function mulCents(amount: string, price: string): bigint | null {
   return n / 10n ** BigInt(af.length + pf.length);
 }
 
+/** A decimal string to the nearest cent, half up (a row's own figure: a $0.0099999 buy, the device's own floors of a
+ *  $0.01 ask, reads $0.01, never $0.00). Garbage reads as null. Totals keep `cents`, rounded down. */
+export function centsNear(s: string | null | undefined): bigint | null {
+  const m = s == null ? null : /^(-)?(\d+)(?:\.(\d+))?$/.exec(s.trim());
+  if (!m) return null;
+  const frac = m[3] ?? "";
+  const c = BigInt(m[2]! + (frac + "00").slice(0, 2)) + (Number(frac[2] ?? "0") >= 5 ? 1n : 0n);
+  return m[1] === "-" ? -c : c;
+}
+
+/** amount x price in cents to the nearest, half up: a row's Value. Null when either is not a number. */
+export function mulCentsNear(amount: string, price: string): bigint | null {
+  const a = /^(\d+)(?:\.(\d+))?$/.exec(amount.trim());
+  const p = /^(\d+)(?:\.(\d+))?$/.exec(price.trim());
+  if (!a || !p) return null;
+  const af = a[2] ?? "";
+  const pf = p[2] ?? "";
+  const den = 10n ** BigInt(af.length + pf.length);
+  return (2n * BigInt(a[1]! + af) * BigInt(p[1]! + pf) * 100n + den) / (2n * den);
+}
+
 /** "$1,234.56", "-$4.08" or "+$29.63" from cents. */
 export function usd(c: bigint, plus = false): string {
   const neg = c < 0n;
@@ -163,8 +184,12 @@ export interface Row {
   decimals: number | null;
   /** Null: unknown (the signing page's cost "0": a wallet's buy with no price read, src/positions.ts). */
   cost: bigint | null;
-  /** Null: no price (S10.4). */
+  /** The cost rounded down, for the totals; `cost` is the row's own figure, to the nearest cent. */
+  costDown: bigint | null;
+  /** Null: no price (S10.4). The row's own figure, to the nearest cent. */
   value: bigint | null;
+  /** The value rounded down, for the totals (a total never shows more than is there); null with no price. */
+  worth: bigint | null;
   pnl: bigint | null;
   pnlBps: number | null;
   /** Null: no USD for the buys (and no cost). */
@@ -202,6 +227,9 @@ export interface Totals {
   /** Cash less the SOL and ETH pools: what a chain the trade box buys on with no pool spends (the vault path). */
   offPool: bigint;
   onWay: bigint;
+  /** What the open buys' one-time wallets hold beside their tokens and get back at the sell (the signing page's
+   *  positions[].asset_held: the wallet's own coin and its accounts' rent), at the pool's price; part of `inPos`. */
+  held: bigint;
   inPos: bigint;
   total: bigint;
   unreal: bigint;
@@ -227,9 +255,13 @@ function rowOf(p: SignpageState["positions"][number], d: PortfolioData, ops: rea
   const m = d.market(p.chain, p.token);
   const x = d.extra(p.chain, p.token) ?? {};
   // the signing page's cost "0" is unknown (src/positions.ts): no cost, so no bought and no PnL, never its value as profit
-  const cost = /[1-9]/.test(p.cost) ? cents(p.cost) : null;
-  // a zero price is no read (no route quoted it): the value is the dash, never $0.00 (owner 10 Nov 18:12Z)
-  const value = m?.price != null && /[1-9]/.test(m.price) ? mulCents(p.amount, m.price) : null;
+  const cost = /[1-9]/.test(p.cost) ? centsNear(p.cost) : null;
+  const costDown = /[1-9]/.test(p.cost) ? cents(p.cost) : null;
+  // a zero price is no read (no route quoted it): the value is the dash, never $0.00 (owner 10 Nov 18:12Z); the row's
+  // figures to the nearest cent, the totals' rounded down
+  const priced = m?.price != null && /[1-9]/.test(m.price) ? m.price : null;
+  const value = priced === null ? null : mulCentsNear(p.amount, priced);
+  const worth = priced === null ? null : mulCents(p.amount, priced);
   const pnl = value === null || cost === null ? null : value - cost;
   let selling: Row["selling"] = null;
   for (const o of ops) {
@@ -245,10 +277,12 @@ function rowOf(p: SignpageState["positions"][number], d: PortfolioData, ops: rea
     units: p.amount,
     decimals: p.decimals ?? null,
     cost,
+    costDown,
     value,
+    worth,
     pnl,
     pnlBps: pnl === null || cost === null ? null : bps(pnl, cost),
-    bought: cents(x.bought) ?? cost,
+    bought: centsNear(x.bought) ?? cost,
     sold: cents(x.sold) ?? 0n,
     realized: cents(x.realized) ?? 0n,
     mark: x.mark ?? (m && m.route === false ? "noRoute" : null),
@@ -473,20 +507,52 @@ export function totals(s: SignpageState, rows: readonly Row[], closed: readonly 
   const { cash, parts, offPool } = cashParts(s, now);
   let onWay = 0n;
   for (const w of s.wallets) if (w.state === "ARMING" || w.state === "RETURNING") onWay += cents(w.size) ?? 0n;
-  let inPos = 0n;
+  const held = openBuysHold(s, now);
+  let inPos = held.cents;
   let unreal = 0n;
-  let partial = false;
+  let partial = held.partial;
   for (const r of rows) {
-    if (r.value === null) {
+    if (r.worth === null) {
       partial = true;
-      inPos += r.cost ?? 0n;
+      inPos += r.costDown ?? 0n;
     } else {
-      inPos += r.value;
+      inPos += r.worth;
       // a row of unknown cost has no PnL: its value is in the positions, none of it in the unrealized
-      if (r.pnl !== null) unreal += r.pnl;
+      if (r.pnl !== null && r.costDown !== null) unreal += r.worth - r.costDown;
     }
   }
-  return { cash, parts, offPool, onWay, inPos, total: cash + onWay + inPos, unreal, realized30: realized30(rows, closed, now), partial };
+  return { cash, parts, offPool, onWay, held: held.cents, inPos, total: cash + onWay + inPos, unreal, realized30: realized30(rows, closed, now), partial };
+}
+
+/**
+ * What the open buys hold beside their tokens (card portfolio-counts-money-an-open-buy-holds): each position's
+ * asset_held (the signing page's read of its one-time wallets: their own coin and the rent of the accounts a full sell
+ * closes back to them; never the fees paid), summed per chain in its pool's asset and priced once at the page's own
+ * fresh price, rounded down. A position whose wallet the state already counts (an arm record in `wallets`) adds none,
+ * so no money counts twice; a chain with no fresh price adds none and marks the total partial, never a made-up figure.
+ */
+function openBuysHold(s: SignpageState, now: number): { cents: bigint; partial: boolean } {
+  const counted = new Set(s.wallets.map((w) => `${w.chain}:${w.address}`));
+  const by = new Map<Chain, bigint>();
+  let partial = false;
+  for (const p of s.positions) {
+    if (p.asset_held === undefined || p.wallets.some((w) => counted.has(`${p.chain}:${w}`))) continue;
+    const pool = s.pools?.find((x) => x.chain === p.chain);
+    const units = pool ? baseUnits(p.asset_held, POOL_ASSET_DECIMALS[pool.asset]) : null;
+    if (units === null) {
+      partial = true;
+      continue;
+    }
+    by.set(p.chain, (by.get(p.chain) ?? 0n) + units);
+  }
+  let c = 0n;
+  for (const [chain, units] of by) {
+    if (units === 0n) continue;
+    const price = statePoolPrice(s.pools, chain, now);
+    if (price) c += unitsToCents(units, price);
+    else partial = true;
+  }
+  return { cents: c, partial };
 }
 
 /** The screen's state from the signing page's snapshot and the local data. */
@@ -734,6 +800,16 @@ export function calendar(closed: readonly ClosedRow[], now: number): { year: num
 
 export type Range = "1D" | "1W" | "1M" | "All";
 const SPAN: Record<Range, number> = { "1D": DAY, "1W": 7 * DAY, "1M": 30 * DAY, All: Infinity };
+
+/** The value chart's `n` axis ticks between lo and hi (USD), at the grid's places, each with a label: whole dollars
+ *  while they differ, else cents, else as many decimals as it takes, so no two ticks read alike at any range. */
+export function axisLabels(lo: number, hi: number, n: number): { v: number; label: string }[] {
+  const vs = Array.from({ length: n }, (_, i) => lo + ((hi - lo) * (i + 0.5)) / n);
+  const at = (dp: number) => vs.map((v) => `$${v.toLocaleString("en-US", { minimumFractionDigits: dp, maximumFractionDigits: dp })}`);
+  let labels = at(0);
+  for (let dp = 2; new Set(labels).size < n && dp <= 8; dp++) labels = at(dp);
+  return vs.map((v, i) => ({ v, label: labels[i]! }));
+}
 
 /** The value line for a range: the points in it, in cents, oldest first. */
 export function line(series: PortfolioData["series"], range: Range, now: number): [number, bigint][] {

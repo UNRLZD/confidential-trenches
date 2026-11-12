@@ -116,12 +116,14 @@ test("S10.3 rows by value, the priceless one last; S10.4 a row with no price has
   const p = portfolio(snap(STATE), data(), NOW);
   assert.deepEqual(p.rows.map((r) => r.symbol), ["WTH", "boar", "swordcat", "NEAIR"]);
   const [wth, boar, swc, neair] = p.rows;
-  assert.equal(wth!.value, 5455n);
-  assert.equal(wth!.pnl, 2955n);
-  assert.equal(wth!.pnlBps, 11820);
-  assert.equal(boar!.value, 1012n);
-  assert.equal(boar!.pnl, -198n);
-  assert.equal(boar!.pnlBps, -1636);
+  // 891,500 x 0.0000612 = $54.5598: the row's figure to the nearest cent (the totals' rounded down, $54.55)
+  assert.equal(wth!.value, 5456n);
+  assert.equal(wth!.pnl, 2956n);
+  assert.equal(wth!.pnlBps, 11824);
+  // 20.25 x 0.5 = $10.125: $10.13 on the row
+  assert.equal(boar!.value, 1013n);
+  assert.equal(boar!.pnl, -197n);
+  assert.equal(boar!.pnlBps, -1628);
   assert.equal(boar!.wallets, 2);
   assert.equal(neair!.value, null);
   assert.equal(neair!.pnl, null);

@@ -8,7 +8,7 @@ import { Avatar } from "../market/Avatar.tsx";
 import { ActivityList } from "./Activity.tsx";
 import type { ActUi } from "./Activity.tsx";
 import { ExitIc, Ic } from "./icons.tsx";
-import { activity, amount, calendar, cents, closedRows, EDGES, filterActivity, filterRows, held, line, NO_FILTER, pct, portfolio, restored, shortAddress, stats, units, usd, walletRows } from "./model.ts";
+import { activity, amount, axisLabels, calendar, cents, closedRows, EDGES, filterActivity, filterRows, held, line, NO_FILTER, pct, portfolio, restored, shortAddress, stats, units, usd, walletRows } from "./model.ts";
 import type { CashPart, ClosedRow, PoolRow, Pools, Range, Row, Stats, Totals, WalletRow } from "./model.ts";
 import { chainOf } from "../market/pads.ts";
 import { usePortfolioSource } from "./source.tsx";
@@ -424,7 +424,7 @@ function LineChart({ pts }: { pts: [number, bigint][] }) {
   const x = (t: number) => ((t - t0) / Math.max(1, t1 - t0)) * (pw - 10) + 4;
   const y = (v: number) => H - 24 - ((v - lo) / Math.max(1e-9, hi - lo)) * (H - 40);
   const d = pts.map((p, i) => `${i ? "L" : "M"}${x(p[0]).toFixed(1)} ${y(vals[i]!).toFixed(1)}`).join("");
-  const grid = Array.from({ length: 4 }, (_, i) => lo + ((hi - lo) * (i + 0.5)) / 4);
+  const grid = axisLabels(lo, hi, 4);
   const lx = x(t1);
   const ly = y(vals.at(-1)!);
   return (
@@ -433,9 +433,9 @@ function LineChart({ pts }: { pts: [number, bigint][] }) {
         <linearGradient id="pf-eqg" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stopColor="#50e397" stopOpacity=".22" /><stop offset="1" stopColor="#50e397" stopOpacity="0" /></linearGradient>
       </defs>
       {grid.map((g) => (
-        <g key={g}>
-          <line x1="0" x2={pw} y1={y(g)} y2={y(g)} stroke="#171717" />
-          <text x={pw + 8} y={y(g) + 4} fontFamily="Chivo Mono" fontSize="11" fill="#6e6e6e">${Math.round(g)}</text>
+        <g key={g.v} data-tick={g.label}>
+          <line x1="0" x2={pw} y1={y(g.v)} y2={y(g.v)} stroke="#171717" />
+          <text x={pw + 8} y={y(g.v) + 4} fontFamily="Chivo Mono" fontSize="11" fill="#6e6e6e">{g.label}</text>
         </g>
       ))}
       <path d={`${d}L${lx.toFixed(1)} ${H - 22}L${x(t0).toFixed(1)} ${H - 22}z`} fill="url(#pf-eqg)" />

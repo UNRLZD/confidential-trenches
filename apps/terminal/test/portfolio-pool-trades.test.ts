@@ -74,7 +74,9 @@ test("between the second buy and its sale: one open row with size, cost and valu
   const pf = portfolio(snap, d, NOW);
   assert.equal(pf.rows.length, 1);
   const r = pf.rows[0]!;
-  assert.deepEqual([r.units, r.cost, r.value, r.bought, r.sold, r.realized, r.openedAt], ["34154.038071", 9n, 7n, 9n, 0n, 0n, buy2.created_ms]);
+  // the row's figures to the nearest cent: a $0.0999999 buy is Bought $0.10, never $0.09; 34,154.038071 x
+  // 0.00000233314178549 = $0.0797 is Value $0.08
+  assert.deepEqual([r.units, r.cost, r.value, r.bought, r.sold, r.realized, r.openedAt], ["34154.038071", 10n, 8n, 10n, 0n, 0n, buy2.created_ms]);
   assert.equal(closedRows(d).length, 1);
 });
 
@@ -107,7 +109,7 @@ test("R4: an open row whose buy names no USD has no cost, bought or PnL, and add
   const snap = base([noUsd as Operation], [unknown]);
   const pf = portfolio(snap, heldData(snap, markets, new Map(), NOW), NOW);
   const r = pf.rows[0]!;
-  assert.deepEqual([r.cost, r.bought, r.value, r.pnl, r.pnlBps], [null, null, 7n, null, null]);
+  assert.deepEqual([r.cost, r.bought, r.value, r.pnl, r.pnlBps], [null, null, 8n, null, null]);
   assert.deepEqual([pf.totals!.inPos, pf.totals!.unreal], [7n, 0n]);
   // beside a row with a known cost: only that row's PnL counts
   const known = { ...unknown, token: "So11111111111111111111111111111111111111112", cost: "0.05" };
