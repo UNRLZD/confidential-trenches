@@ -209,7 +209,7 @@ test("the mainnet build's state with a pinned pool: the queue's ready proof as r
   await ns.move(p.id, "INCOMING", "UNSPENT", { leaf: { value: CHUNK, label: 1n, commitment: noteCommitment(CHUNK, 1n, p.precommitment), leafIndex: 0n } });
   // the holding tab's note store stays open, as the queue's does: a closed one is a dead tab, whose HELD notes are freed
   const held = await ns.move(p.id, "UNSPENT", "HELD", { deadlineMs: BigInt(Date.now() + 600_000), context: "1" });
-  g.__ctReady = [{ noteId: held.id, attempt: held.attempt, poolId: `sol:${PROGRAM}`, chunk: CHUNK, binding: { feeCap: FEE_CAP, request: { tipCap: SOL_TIP_CAP } } }];
+  g.__ctReady = [{ noteId: held.id, attempt: held.attempt, poolId: `sol:${PROGRAM}`, chunk: CHUNK, wallet: { l: 1n, j: 0, address: "W" }, binding: { feeCap: FEE_CAP, request: { tipCap: SOL_TIP_CAP } } }];
 
   // review P3-3 (card sol-pools-mainnet-pin): the landing's settle pass (src/pool-testnet.ts settle, a pool.deposit run)
   // holds the seed lock shared across its Solana reads, and a deposit.quote waits for the landing's naming, whose write
@@ -231,7 +231,7 @@ test("the mainnet build's state with a pinned pool: the queue's ready proof as r
   assert.ok(quoted, `deposit.quote at boot never answered while the settle pass's Solana reads were held (${heldSeen} held): it waits behind them`);
   assert.ok(heldSeen > 0, "the settle pass's Solana reads never met the hold, so this test held nothing");
 
-  const want = `0.${solanaTapSpendOf(RENT)(CHUNK, FEE_CAP, SOL_TIP_CAP).toString().padStart(9, "0")}`.replace(/0+$/, "");
+  const want = `0.${solanaTapSpendOf(RENT)([{ chunk: CHUNK, feeCap: FEE_CAP, tipCap: SOL_TIP_CAP }]).toString().padStart(9, "0")}`.replace(/0+$/, "");
   let pool: NonNullable<Awaited<ReturnType<typeof askState>>["pools"]>[number] | undefined;
   // the first state starts the price and Rent reads; each landing is heard, so a later state carries them
   for (let t = 0; t < 300; t++) {

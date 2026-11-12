@@ -247,9 +247,11 @@ const positive = (s: string): boolean | null => (/^\d+(?:\.\d+)?$/.test(s) ? /[1
 
 /**
  * Read only from the signing page's `state.pools` (messages.ts): `ready` is the chunks with a proof ready, absent while
- * no proof queue runs and never "0" in its place. Ready when it is above zero; making when the pool holds money and the
- * queue runs with none done yet; none otherwise, a total that is not a plain decimal included, so the box never draws a
- * label its data does not hold.
+ * no proof queue runs and never "0" in its place. Ready when it is above zero; making only while `making` (kit 1.12,
+ * card buy-spends-several-pieces) is above zero: the device is making a proof now. A balance with no proof ready and
+ * none being made (too small for any proof, held by a running withdraw, a page that sends no making) is none, so the
+ * box never says a proof is coming when none is; none too for a total that is not a plain decimal, so the box never
+ * draws a label its data does not hold.
  */
 export function proofStatus(pools: SignpageState["pools"], chain: Chain): ProofStatus {
   const p = poolOf(pools, chain);
@@ -258,7 +260,7 @@ export function proofStatus(pools: SignpageState["pools"], chain: Chain): ProofS
   const ready = positive(p.ready);
   if (bal === null || ready === null) return "none";
   if (ready) return "ready";
-  return bal ? "making" : "none";
+  return bal && p.making !== undefined && positive(p.making) === true ? "making" : "none";
 }
 
 // ------------------------------------------------------------------------------------------------ the pool path
@@ -421,6 +423,36 @@ export function withCoinTap(pools: SignpageState["pools"], chain: Chain, coinTap
 /** When Max for the coin is asked again, ms, after the page's refusal `code`: a trade running (busy) every second, a
  *  provider that failed (down) every 3 s, as the sell box asks its preview again (positions/SellBox.tsx PREVIEW_BUSY_MS,
  *  PREVIEW_AGAIN_MS); null for an answer that is no (that coin, those proofs: state.pools' Max stays). */
+/** The amount a pool.buy.dry asks the Fee of (card buy-spends-several-pieces): the typed USD in the pool asset's whole
+ *  units, as the buy itself would ask it; none for no amount, no price or under one base unit. */
+export function feeAskAmount(amount: Cents | null, price: PoolPrice | null): string | null {
+  if (amount === null || amount <= 0n || price === null) return null;
+  const u = centsToUnits(amount, price);
+  return u > 0n ? unitsToDecimal(u, price.decimals) : null;
+}
+
+/** The page's last Fee answer for a coin: its `cost`, kept until the next answer replaces it. */
+export type FeeRead = { key: string; cost: string };
+
+/** The Fee row's cents now: the last answer for this coin at today's price, kept while a newer amount is asked (it is
+ *  replaced, never blanked, so the row does not flicker as the user types or the price ticks); null (a dash) for
+ *  another coin's answer, no answer yet, or no amount typed. */
+export function feeShown(read: FeeRead | null, coinKey: string | null, amount: Cents | null, price: PoolPrice | null): Cents | null {
+  if (read === null || coinKey === null || read.key !== coinKey || amount === null || amount <= 0n) return null;
+  return feeCents(read.cost, price);
+}
+
+/** The Fee row's USD (owner 12 Nov 13:40Z: "Fee", the buy's whole cost: relay fees, the tip and what the buy leaves for
+ *  good): pool.buy.dry's `cost` (whole units of the pool's asset, the page's word) at the device's price, rounded up so
+ *  it never reads under what the buy costs; null (a dash) until it is read, or when it is not a plain decimal. */
+export function feeCents(cost: string | undefined, price: PoolPrice | null): Cents | null {
+  if (cost === undefined || price === null) return null;
+  const u = decimalToUnits(cost, price.decimals);
+  if (u === null) return null;
+  const down = unitsToCents(u, price);
+  return centsToUnits(down, price) < u ? down + 1n : down;
+}
+
 export function coinTapAgainMs(code: string): number | null {
   return code === "busy" ? 1_000 : code === "down" ? 3_000 : null;
 }

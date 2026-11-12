@@ -105,6 +105,8 @@ export const HELPER_CODE_STATUS = {
   token_halted: 503,
   index_behind: 503,
   relayer_low: 503,
+  // POST /v1/pool/solana/pieces: a buy's pieces signed by two wallets (card buy-spends-several-pieces)
+  wallets_differ: 422,
 } as const;
 deepFreeze(HELPER_CODE_STATUS);
 
@@ -129,6 +131,10 @@ export const HELPER_V1_PATHS = [
   // longer), never a short timeout
   { method: "GET", path: "/v1/pool/fee", part: "relay", limitBytes: 1024 },
   { method: "POST", path: "/v1/pool/solana/send", part: "relay", limitBytes: 4096 },
+  // a buy made of several pieces (card buy-spends-several-pieces): every tag 2, then the tag 3, all of one W, carried as
+  // one bundle, all landing or none; on mainnet answered, like a tag 3, only once the fill is decided
+  // (POOL_SOLANA_PIECES_BODY_MAX, 8 KB)
+  { method: "POST", path: "/v1/pool/solana/pieces", part: "relay", limitBytes: 8192 },
   { method: "POST", path: "/v1/pool/evm/send", part: "relay", limitBytes: 4096 },
   // W's sell back into its pool (card helper-evm-sender): the sell calldata and W's 7702 authorization (POOL_EVM_SELL_BODY_MAX, 8 KB)
   { method: "POST", path: "/v1/pool/evm/sell", part: "relay", limitBytes: 8192 },
@@ -181,6 +187,12 @@ export type HelperProxyCode = "path_not_allowed";
 // POST /v1/rpc/{chain}
 // ---------------------------------------------------------------------------------------------------------------
 
+/** The one getBlock config the Solana routes forward (card buy-spends-several-pieces): a block's header at finalized,
+ *  no transactions, signatures or rewards. The signing page's found W rule reads it (pool-sell.ts foundQuiet) and the
+ *  helper forwards getBlock only with exactly this (apps/helper/src/rpc/rpc.ts blockHeaderAllowed), from this one
+ *  object, so the two never drift apart. */
+export const HELPER_SOLANA_BLOCK_HEADER = Object.freeze({ commitment: "finalized", encoding: "json", transactionDetails: "none", rewards: false, maxSupportedTransactionVersion: 0 } as const);
+
 /** The method allowlist per chain (H7 with 7.1's second-provider reads). Base and Robinhood are EVM. */
 export const HELPER_RPC_METHODS = {
   solana: [
@@ -208,6 +220,10 @@ export const HELPER_RPC_METHODS = {
     "getFeeForMessage",
     "getBlockTime",
     "getEpochInfo",
+    // a found W's sweep (signpage pool-sell.ts foundQuiet, card buy-spends-several-pieces): the finalized height of the
+    // block W's latest transaction is in. The helper forwards it only as a header read (apps/helper/src/rpc/rpc.ts
+    // blockHeaderAllowed: transactionDetails none, no rewards, finalized), never a block's transactions
+    "getBlock",
     // a note restore's scan of the pool program (wallet pool/solana-restore.ts, memcmp-filtered). The heaviest read on
     // the list: the helper forwards it only on its own pinned pool program with a dataSize and a memcmp filter (review
     // L-2, apps/helper/src/rpc/rpc.ts scanAllowed), within the caller's share (16 per 10 s), the per-method budget, the

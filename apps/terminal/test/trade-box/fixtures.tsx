@@ -58,9 +58,9 @@ const poolMode = q.get("pool");
 type Pool = NonNullable<SignpageState["pools"]>[number];
 const POOLS: Record<string, { chain: "solana" | "base"; pools: Pool[] }> = {
   "sol-ready": { chain: "solana", pools: [{ chain: "solana", asset: "SOL", balance: "0.01", ready: "0.01", tap_max: "0.00173608" }] },
-  "sol-making": { chain: "solana", pools: [{ chain: "solana", asset: "SOL", balance: "0.01", ready: "0" }] },
+  "sol-making": { chain: "solana", pools: [{ chain: "solana", asset: "SOL", balance: "0.01", ready: "0", making: "0.01" }] },
   "base-ready": { chain: "base", pools: [{ chain: "base", asset: "ETH", balance: "0.003", ready: "0.003", tap_max: "0.001" }] },
-  "base-making": { chain: "base", pools: [{ chain: "base", asset: "ETH", balance: "0.003", ready: "0" }] },
+  "base-making": { chain: "base", pools: [{ chain: "base", asset: "ETH", balance: "0.003", ready: "0", making: "0.003" }] },
 };
 const POOL = poolMode ? POOLS[poolMode] : undefined;
 if (POOL) STATE.pools = POOL.pools;
@@ -105,8 +105,12 @@ const kit: TradeKit = {
   request: ((kind: string, params: unknown) => {
     // the box's own read of the coin's Max (pool.buy.dry) is no buy: recorded apart in window.__reads and answered as a
     // read the page could not make, so the box keeps the Max of its state (the fixtures' own)
+    // the Fee's read (pool.buy.dry with an amount, card buy-spends-several-pieces) answers a cost of 0.0014 SOL (one
+    // piece's relay fee and the tip) unless the page is down for it (fee=down): the box draws a dash
     if (kind === "pool.buy.dry") {
       window.__reads.push({ kind, params });
+      const withAmount = (params as { amount?: string }).amount !== undefined;
+      if (withAmount && q.get("fee") !== "down") return { id: `read-${window.__reads.length}`, outcome: Promise.resolve({ ok: true, result: { tap_max: "0.00172", cost: "0.0014" } }) };
       return { id: `read-${window.__reads.length}`, outcome: Promise.resolve({ ok: false, error: { code: "quote_check_failed" } }) };
     }
     const id = `buy-${++n}`;

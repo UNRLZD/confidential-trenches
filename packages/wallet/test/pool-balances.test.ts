@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import type { NoteRecord, NoteState } from "../src/notes/store.ts";
 import { SOLANA_JITO_TIP_MIN, SOLANA_POOL_VOLUME_ACCOUNT_SIZE, SOLANA_POOL_WORST_BUY_VENUE, solanaPoolBuyFunds, solanaPoolBuyMaxSpend, solanaPoolBuySellNeed, solanaPoolFee, solanaRentMin, type SolanaPoolRelease, type SolanaRent } from "@blindfill/kit";
-import { evmBalancePool, evmTapSpendOf, poolBalances, solanaBalancePool, solanaTapSpendOf, type BalancePool, type BalanceProof } from "../src/pool/balances.ts";
+import { evmBalancePool, evmTapSpendOf, poolBalances, solanaBalancePool, solanaTapSpendOf, type BalancePool, type BalanceProof, type TapSpendOf } from "../src/pool/balances.ts";
 import { EVM_LADDER } from "../src/pool/evm.ts";
 import { SOL_LADDER, SOL_TIP_CAP } from "../src/pool/solana.ts";
 
@@ -32,7 +32,13 @@ function note(scope: bigint, state: NoteState, value: bigint, attempt?: string):
     ...(state === "HELD" || state === "RESERVED" ? { attempt: attempt ?? `a-${id}`, deadlineMs: 1n } : {}),
   };
 }
-const proof = (pool: BalancePool, x: NoteRecord, chunk: bigint, attempt = x.attempt!, feeCap = 0n): BalanceProof => ({ noteId: x.id, attempt, poolId: pool.id, chunk, binding: { feeCap } });
+// each planted proof pays its own note's W (label, jOf of a deposit note: 0), as every pool with no pieces does
+const proof = (pool: BalancePool, x: NoteRecord, chunk: bigint, attempt = x.attempt!, feeCap = 0n): BalanceProof => ({ noteId: x.id, attempt, poolId: pool.id, chunk, wallet: { l: x.leaf?.label ?? -1n, j: 0, address: `w-${x.id}` }, binding: { feeCap } });
+/** A one-proof spendOf from a rule of its chunk, fee cap and tip cap: every set these tests plant holds one proof. */
+const one = (f: (chunk: bigint, feeCap: bigint, tipCap: bigint | undefined) => bigint): TapSpendOf => (ps) => {
+  assert.equal(ps.length, 1);
+  return f(ps[0]!.chunk, ps[0]!.feeCap, ps[0]!.tipCap);
+};
 
 test("balance: UNSPENT, HELD and RESERVED notes count; PLANNED, INCOMING, SPENT and TAKEN do not", () => {
   const notes = [
@@ -123,9 +129,9 @@ test("ready per open queue: a chain none of whose pools has its queue open has n
 test("tap_max: the most one ready proof can spend at the tap, the largest of the pool's spendOf over the chain's counted ready proofs", () => {
   // one tap spends one ready proof: spendOf(chunk, feeCap), from its pool (the kit's one rule, given by the caller)
   const spend = (chunk: bigint, feeCap: bigint): bigint => chunk - feeCap - 1_000n;
-  const S1: BalancePool = { ...SOL, spendOf: spend };
-  const S2: BalancePool = { id: "sol-pool-2", chain: "solana", scope: 44n, asset: "SOL", spendOf: spend };
-  const B: BalancePool = { ...BASE, spendOf: (chunk, feeCap) => chunk - feeCap };
+  const S1: BalancePool = { ...SOL, spendOf: one(spend) };
+  const S2: BalancePool = { id: "sol-pool-2", chain: "solana", scope: 44n, asset: "SOL", spendOf: one(spend) };
+  const B: BalancePool = { ...BASE, spendOf: one((chunk, feeCap) => chunk - feeCap) };
   const a = note(S1.scope, "HELD", 25n * LAMPORTS);
   const b = note(S1.scope, "HELD", 3n * LAMPORTS);
   const c = note(S2.scope, "HELD", 12n * LAMPORTS);
@@ -155,7 +161,7 @@ test("tap_max: the most one ready proof can spend at the tap, the largest of the
   // absent on a chain one of whose pools gives no spendOf: the device cannot say what that pool's proofs spend
   assert.deepEqual(poolBalances([a, c], [S1, { ...S2, spendOf: undefined } as BalancePool], [proof(S1, a, 20n * LAMPORTS)]), [{ chain: "solana", asset: "SOL", balance: "37", ready: "20" }]);
   // a spendOf that gives more than the chunk, or no bigint, is refused
-  assert.throws(() => poolBalances([a], [{ ...SOL, spendOf: (x) => x + 1n }], [proof(SOL, a, LAMPORTS)]), /spend/);
+  assert.throws(() => poolBalances([a], [{ ...SOL, spendOf: one((x) => x + 1n) }], [proof(SOL, a, LAMPORTS)]), /spend/);
   assert.throws(() => poolBalances([a], [{ ...SOL, spendOf: () => 1 as never }], [proof(SOL, a, LAMPORTS)]), /spend/);
   assert.throws(() => poolBalances([a], [S1], [{ ...proof(S1, a, LAMPORTS), binding: { feeCap: -1n } }]), /fee cap/);
 });
@@ -209,7 +215,7 @@ test("the ladder's least rung at mainnet rent: every cost of src/pool/balances.t
     tokenAccount: solanaRentMin(rent, v.tokenAccountSize),
     volumeAccount: solanaRentMin(rent, SOLANA_POOL_VOLUME_ACCOUNT_SIZE["pump-curve"]),
     sellReserve: solanaPoolBuySellNeed(v, rent),
-    spend: solanaTapSpendOf(rent)(chunk, fee, SOL_TIP_CAP),
+    spend: solanaTapSpendOf(rent)([{ chunk, feeCap: fee, tipCap: SOL_TIP_CAP }]),
   };
   assert.deepEqual(items, { fee: 1_300_000n, tip: 1_000_000n, tokenAccount: 1_640_840n, volumeAccount: 1_346_200n, sellReserve: 4_328_080n, spend: 384_880n });
   assert.equal(Object.values(items).reduce((a, b) => a + b, 0n), chunk, "nothing of the chunk is left out of the table");
@@ -241,13 +247,13 @@ test("the coin's own venue (card max-is-priced-for-the-coin): the least rung's t
   ] as const;
   for (const [venue, spend] of cases) {
     const at = JSON.stringify(venue);
-    assert.equal(solanaTapSpendOf(rent, venue)(chunk, fee, SOL_TIP_CAP), spend, at);
+    assert.equal(solanaTapSpendOf(rent, venue)([{ chunk: chunk, feeCap: fee, tipCap: SOL_TIP_CAP }]), spend, at);
     const funds = (s: bigint) => solanaPoolBuyFunds({ withdrawnValue: chunk, relayFee: fee } as SolanaPoolRelease, venue as never, { spend: s, tip: SOL_TIP_CAP }, rent).problem;
     assert.equal(funds(spend), null, at);
     assert.notEqual(funds(spend + 1n), null, at);
   }
   // with no venue: the costliest, as before
-  assert.equal(solanaTapSpendOf(rent)(chunk, fee, SOL_TIP_CAP), 384_880n);
+  assert.equal(solanaTapSpendOf(rent)([{ chunk: chunk, feeCap: fee, tipCap: SOL_TIP_CAP }]), 384_880n);
   const s = note(11n, "HELD", chunk);
   const S = solanaBalancePool("s", 11n, solanaTapSpendOf(rent, { kind: "pump-curve", tokenAccountSize: 165, cashback: false }));
   const sp = { ...proof(S, s, chunk, undefined, fee), binding: { feeCap: fee, request: { tipCap: SOL_TIP_CAP } } };
@@ -317,4 +323,83 @@ test("refused: an unknown asset, two assets on one chain, a pool table naming on
   assert.throws(() => poolBalances([], [{ ...SOL, chain: "sol" as never }]), /chain/);
   const broken = { ...note(SOL.scope, "UNSPENT", 1n), leaf: undefined };
   assert.throws(() => poolBalances([broken], [SOL]), /leaf/);
+});
+
+// Card buy-spends-several-pieces: the owner's account read 12 Nov 12:22Z holds four notes, 9,425,404, 9,966,767,
+// 5,487,104 and 5,547,107 lamports (30,426,382), none of 0.01 SOL or more. Their pieces on the ladder from 0.005 SOL are
+// 5,000,000 each; with every proof bound to the owner note's W, tap_max is the four as one set: 20,000,000 less four relay
+// fees, less the tip cap and the venue's per-buy costs once. A set whose owner note is gone counts nothing.
+test("tap_max over pieces: the owner's four notes, each a 5,000,000 piece bound to one W, read as one set", () => {
+  const rent: SolanaRent = { lamportsPerByte: 5_080n, factor: 1n };
+  const fee = solanaPoolFee(rent);
+  const values = [9_425_404n, 9_966_767n, 5_487_104n, 5_547_107n];
+  const notes = values.map((v) => note(11n, "HELD", v));
+  const owner = notes[3]!; // the smallest chunk, the later leaf on the tie
+  const bound = (x: NoteRecord, to: NoteRecord, address = "W-owner"): BalanceProof => ({
+    ...proof(solanaBalancePool("s", 11n), x, 5_000_000n, undefined, fee),
+    wallet: { l: to.leaf!.label, j: 0, address },
+    binding: { feeCap: fee, request: { tipCap: SOL_TIP_CAP } },
+  });
+  const ready = notes.map((x) => bound(x, owner));
+  const read = (venue?: Parameters<typeof solanaTapSpendOf>[1], r = ready) => poolBalances(notes, [solanaBalancePool("s", 11n, solanaTapSpendOf(rent, venue))], r)[0]!;
+  // a Token coin with no cashback: 20,000,000 - 5,200,000 - 1,000,000 - (1,488,440 + 1,346,200 + 5,000 + 1,488,440)
+  assert.deepEqual(read({ kind: "pump-curve", tokenAccountSize: 165, cashback: false }), { chain: "solana", asset: "SOL", balance: "0.030426382", ready: "0.02", tap_max: "0.00947192" });
+  // the owner's coin of 12:19:52Z, a Token-2022 account of 170 bytes (rent 1,513,840)
+  assert.equal(read({ kind: "pump-curve", tokenAccountSize: 170, cashback: false }).tap_max, "0.00944652");
+  // before the coin is known: the worst venue
+  assert.equal(read().tap_max, "0.00648488");
+  // the same proofs with no owner note among them (its note taken): nothing
+  assert.equal(read(undefined, ready.slice(0, 3)).tap_max, "0");
+  // each bound to its own W, as before pieces: one piece of 5,000,000 buys nothing at any venue
+  const own = notes.map((x) => bound(x, x, `W-${x.id}`));
+  assert.equal(read({ kind: "pump-curve", tokenAccountSize: 165, cashback: false }, own).tap_max, "0");
+});
+
+test("making (card buy-spends-several-pieces): the value of the HELD notes whose first proof is being made, none ready; given beside ready only", () => {
+  const held = note(11n, "HELD", 2_000_000_000n, "a1");
+  const done = note(11n, "HELD", 3_000_000_000n, "a2");
+  const idle = note(11n, "UNSPENT", 5_000_000_000n);
+  const notes = [held, done, idle];
+  const ready = [proof(SOL, done, 3_000_000_000n)];
+  // the queue makes held's proof; done's is ready; idle has no proof being made (too small, or held out by a withdraw)
+  const [e] = poolBalances(notes, [SOL], ready, undefined, undefined, new Set([held.id, done.id, idle.id]));
+  assert.equal(e!.making, "2");
+  assert.equal(e!.ready, "3");
+  // nothing being made: "0", so an app tells no "making a proof" for a balance with no ready proof
+  assert.equal(poolBalances(notes, [SOL], [], undefined, undefined, new Set())[0]!.making, "0");
+  // no making set given, or no queue open: no key
+  assert.equal("making" in poolBalances(notes, [SOL], ready)[0]!, false);
+  assert.equal("making" in poolBalances(notes, [SOL], undefined, undefined, undefined, new Set([held.id]))[0]!, false);
+});
+
+test("tiers (card buy-spends-several-pieces): tap_max is the most of the largest single piece and the primary with its ready tier 2 pieces; a note held twice is ready once; making only above ready; ready right after a buy", () => {
+  const L = LAMPORTS;
+  const S: BalancePool = { ...SOL, spendOf: (ps) => ps.reduce((a, p) => a + p.chunk - p.feeCap, 0n) - 1_000n };
+  // a note held by its tier 1 proof (its attempt) and its tier 2 proof (its second attempt, notes/store.ts)
+  const twice = (x: NoteRecord, a2: string): NoteRecord => ({ ...x, second: { attempt: a2, deadlineMs: 2n, context: "2" } });
+  const P = note(S.scope, "HELD", 20n * L);
+  const X = twice(note(S.scope, "HELD", 10n * L), "x2");
+  const Y = twice(note(S.scope, "HELD", 5n * L), "y2");
+  const own = (x: NoteRecord, chunk: bigint, feeCap = 0n): BalanceProof => proof(S, x, chunk, x.attempt!, feeCap);
+  // a proof of x paying by's own W
+  const to = (x: NoteRecord, by: NoteRecord, attempt: string, chunk: bigint, feeCap = 0n): BalanceProof => ({ ...proof(S, x, chunk, attempt, feeCap), wallet: { l: by.leaf!.label, j: 0, address: `w-${by.id}` } });
+  const ready = [own(P, 20n * L), own(X, 10n * L), own(Y, 5n * L), to(X, P, "x2", 10n * L), to(Y, P, "y2", 5n * L)];
+  const read = (r: readonly BalanceProof[] = ready, notes: readonly NoteRecord[] = [P, X, Y], making?: ReadonlySet<string>) => poolBalances(notes, [S], r, undefined, undefined, making)[0]!;
+  // each note once: 35; Max: the primary and its two pieces, 35 less the 1,000, over the 20 alone
+  assert.equal(read().ready, "35");
+  assert.equal(read().tap_max, "34.999999");
+  // a piece that adds less than nothing (its fee over its chunk): the primary alone is more
+  assert.equal(read([own(P, 20n * L), own(X, 10n * L), to(X, P, "x2", L, 3n * L)]).tap_max, "19.999999");
+  // making: Q's first proof and R's own proof are being made (R's one ready proof pays a W whose note is gone, so it is
+  // not ready); X's piece is being made again, but X is ready already
+  const Q = note(S.scope, "HELD", 7n * L);
+  const R = note(S.scope, "HELD", 3n * L);
+  const gone = { ...P, id: "gone" };
+  const m = read([...ready, to(R, gone, R.attempt!, 3n * L)], [P, X, Y, Q, R], new Set([X.id, Q.id, R.id]));
+  assert.equal(m.ready, "35", "R's piece to a W whose note is gone is not ready");
+  assert.equal(m.making, "10", "Q's and R's values only: making is what is not ready yet");
+  // right after a buy took P: X and Y are ready by their own proofs; their pieces to P's W are not, and Max is X's
+  const after = read(ready, [{ ...P, state: "RESERVED" }, X, Y]);
+  assert.equal(after.ready, "15");
+  assert.equal(after.tap_max, "9.999999");
 });
