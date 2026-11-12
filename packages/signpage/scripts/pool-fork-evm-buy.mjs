@@ -3,7 +3,7 @@
 // route and EVM sender run in this process, with nothing signed or sent on any real chain:
 //   node contracts/pool-evm/test/fork-rpc.mjs --book pools -- sh packages/signpage/scripts/pool-fork-evm.sh <base|robinhood> <S> <lag> <fork.json> \
 //     packages/signpage/scripts/pool-fork-evm-buy.mjs <base|robinhood> http://127.0.0.1:<port> <out.json> <token>
-// (anvil is a heavy job: scripts/heavy.sh). The mainnet build: __SIGN_NETWORK__ is not set, so the pins and lists are
+// (a long run: start it where a 30-minute job may run). The mainnet build: __SIGN_NETWORK__ is not set, so the pins and lists are
 // SIGN_HOST's (the wallet's EVM_POOLS, src/pool-testnet.ts MAINNET_POOL_RPCS and MAINNET_EVM_FEE_RPCS).
 // - Every request is answered on this machine: the chain's hosts the page and the kit name (the pool list, the fee
 //   list, the history list, every URL in the kit's venue entry for the chain) by the fork's anvil, each URL kept so a

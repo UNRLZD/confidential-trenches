@@ -3,7 +3,7 @@
 //   node contracts/pool-evm/test/fork-rpc.mjs [--record] --book pools -- sh packages/signpage/scripts/pool-fork-evm.sh <base|robinhood> <S> <out.json>
 // (pool-fork-evm.sh starts anvil at POOLS_FORK_BLOCKS with --slots-in-an-epoch <S>, then runs
 //   node packages/signpage/scripts/pool-fork-evm.mjs <chain> http://127.0.0.1:<port> <out.json> --slots <S> --lag <L>;
-// anvil is a heavy job: scripts/heavy.sh).
+// anvil runs for minutes: start it where a long job may run).
 // - Every request the page makes to the chain's pool pair (src/pool-testnet.ts MAINNET_POOL_RPCS, two operators) is
 //   answered by the fork's anvil, the URL kept on each RPC so the pair stays two providers; a request to any other
 //   host throws: nothing reaches a real chain or the helper.

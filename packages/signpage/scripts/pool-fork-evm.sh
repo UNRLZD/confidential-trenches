@@ -2,7 +2,7 @@
 # One chain's fork run of the signing page's EVM pool code (pool-fork-evm.mjs), anvil forking the chain's mainnet at
 # contracts/pool-evm/test/fork-rpc.mjs POOLS_FORK_BLOCKS through that file's replay of fixtures/fork-rpc-pools.json:
 #   node contracts/pool-evm/test/fork-rpc.mjs [--record] --book pools -- sh packages/signpage/scripts/pool-fork-evm.sh <base|robinhood> <slots> <lag> <out.json> [<script> [args...]]
-# (from the repository root, through scripts/heavy.sh: anvil is a heavy job). <slots> is anvil's --slots-in-an-epoch
+# (from the repository root; a long run: start it where a 30-minute job may run). <slots> is anvil's --slots-in-an-epoch
 # (finalized is the head less 2 x slots blocks), <lag> the head-to-finalized lag read on mainnet, in seconds. <script> runs after pool-fork-evm.mjs against the same
 # fork, given the anvil URL and its args (a later card's steps on the note this run left: ANVIL=<url> in its env).
 # Ports from the environment, so two runs on one machine do not collide: FORK_RPC_PORT is fork-rpc.mjs's (default 47545,
