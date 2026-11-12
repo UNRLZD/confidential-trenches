@@ -113,6 +113,42 @@ export const TESTNET_RPCS: Readonly<Record<PoolChain, readonly [string, string]>
  *  settle's and restore's, pageSolanaSettleRpcs). */
 export const testnetRpc = (url: string, helperRetry: SolanaRpcRetry = SOLANA_RPC_RETRY, kind: ReadKind = "trade"): SolanaRpc =>
   url.startsWith(`${TRADE_HELPER}/`) ? lanedRpc(url, { kind, retry: helperRetry, init: HELPER_FETCH_INIT }) : pageRpc(url, kind);
+/** The rent backs' retry while a W is left to try (card round-trip-costs-less): the first wait and the most, doubling. */
+export const BACKS_FIRST_MS = 30_000;
+export const BACKS_MAX_MS = 600_000;
+/** When the rent backs run (card round-trip-costs-less): one run at a time, on a state read once due; a run that leaves
+ *  a W to try again books the next at a wait doubling from BACKS_FIRST_MS to BACKS_MAX_MS, one that leaves none (or the
+ *  run's own failure: the next load's) books none, until `again` (a full sell wrote a new owed record). No timer: a run
+ *  only ever starts on a state read the page makes anyway. */
+export function backsSchedule(now: () => number = Date.now) {
+  let running = false;
+  let at = 0;
+  let wait = BACKS_FIRST_MS;
+  return {
+    /** Whether a run starts now; if so, it is marked running. */
+    take(): boolean {
+      if (running || now() < at) return false;
+      running = true;
+      return true;
+    },
+    /** The run ended: `more`, a W left to try again. */
+    ended(more: boolean): void {
+      running = false;
+      if (more) {
+        at = now() + wait;
+        wait = Math.min(wait * 2, BACKS_MAX_MS);
+      } else {
+        at = Number.POSITIVE_INFINITY;
+        wait = BACKS_FIRST_MS;
+      }
+    },
+    /** A full sell wrote a new owed record: the next state read runs. */
+    again(): void {
+      at = 0;
+      wait = BACKS_FIRST_MS;
+    },
+  };
+}
 const EVM_TESTNET = /* @__PURE__ */ Object.freeze({ base: "base-sepolia", robinhood: "robinhood-testnet" } as const);
 /** Each EVM pool's synced tree on this device (card evm-pool-leaves-any-source; card evm-pool-sync-holds: in the wallet
  *  store, ../../wallet/src/pool/evm-hold-store.ts): one hold per pool, which the deposit's sync and the restore's both
@@ -1627,6 +1663,9 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       ...owed,
       put: async (rec) => {
         await owed.put(rec);
+        // a full sell's new record (written before its send, no pass yet): the rent backs run again at the next state
+        // read, whatever the last run booked (card round-trip-costs-less)
+        if (rec.passes === 0) backs.again();
         if (Object.keys(rec.sell ?? {}).length === 0) return;
         try {
           const st = await page.store();
@@ -1934,7 +1973,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   let passing: Promise<unknown> | null = null;
   // the dead pending sell records are settled once per page load, not on every state read (a re-ask settles its own)
   let deadSettled = false;
-  let backsResumed = false;
+  // the rent backs (card round-trip-costs-less): backsSchedule
+  const backs = backsSchedule();
   // the RESERVED notes a buy left (filled, refused, never answered, or its page closed mid-send): settled spent, freed
   // once both RPCs' finalized height is past the signed transaction's last height, or their block time past the
   // deadline, with no spent mark, or held (../../wallet/src/pool/solana-restore.ts solanaSettleReserved); a freed note is
@@ -2085,20 +2125,24 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
           await settleDeadSellOps(await page.store(), locks);
           deadSettled = true;
         }
-        // the rent backs a closed page or a provider's fault left owed (card sol-buy-rent-back): once per load, after
-        // the sells settle, in the background (it reads, checks and sends), under the seed's shared lock and the sell lock
-        if (locks && !backsResumed) {
-          backsResumed = true;
+        // the rent backs a closed page or a provider's fault left owed (card sol-buy-rent-back), and every W of the
+        // account's another browser left (card round-trip-costs-less): at the load's first state read, then on a state
+        // read past the run's backoff while one is left to try, after the sells settle, in the background (it reads,
+        // checks and sends), under the seed's shared lock and the sell lock
+        if (locks && backs.take()) {
           void locks
             .request(WALLET_SEED_LOCK, { mode: "shared" }, async () => {
               const h = sellHost();
               try {
-                await resumeRentBacks(h, locks);
+                return await resumeRentBacks(h, locks);
               } finally {
                 h.end();
               }
             })
-            .catch(() => {});
+            .then(
+              (more) => backs.ended(more === true),
+              () => backs.ended(false),
+            );
         }
       } catch {
         // a state read never fails for this; the next read tries again

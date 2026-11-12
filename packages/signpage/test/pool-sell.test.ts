@@ -796,6 +796,7 @@ async function world(plant: Plant = {}, wallets: BuyWallet[] = [wallet(AMOUNT, f
   const seeds: Uint8Array[] = [];
   const sent: string[] = [];
   const owed = new Map<string, OwedRentBack>();
+  const empties = new Set<string>();
   const kept = new Map<string, KeptSell>();
   const told: RentBackTold[] = [];
   const bought = new Map<string, { mint: string; program: string }>();
@@ -815,7 +816,7 @@ async function world(plant: Plant = {}, wallets: BuyWallet[] = [wallet(AMOUNT, f
     },
     wallets: async () => wallets,
     sent: (s) => void sent.push(s),
-    owed: { list: async () => [...owed.values()].map((o) => structuredClone(o)), put: async (r) => void (c.log.push(`owed ${r.address}`), owed.set(r.address, structuredClone(r))), drop: async (a) => void owed.delete(a) },
+    owed: { list: async () => [...owed.values()].map((o) => structuredClone(o)), put: async (r) => void (c.log.push(`owed ${r.address}`), owed.set(r.address, structuredClone(r))), drop: async (a) => void owed.delete(a), empty: async () => new Set(empties), markEmpty: async (a) => void empties.add(a) },
     kept: { list: async () => [...kept.values()].map((o) => structuredClone(o)), put: async (r) => void kept.set(r.signature, structuredClone(r)), drop: async (s) => void kept.delete(s) },
     told: (t) => void told.push(t),
     now: () => 1_000n,
@@ -2760,14 +2761,15 @@ test("no buy record and a token W's record does not name: the rent back holds, W
   assert.equal(w.c.deposits.filter((d) => d.sweep).length, 0, "no sweep");
   assert.ok((w.c.accounts.get(W.address)?.lamports ?? 0) > 0);
   assert.deepEqual(w.told.filter((t) => t.step === "rent_back").map((t) => [t.state, t.detail]), [["holds", "no buy of W's is recorded"]]);
-  // a hold is W's own state: the same next load runs no pass, and the page's holdings changing decide nothing
-  const told = w.told.length;
+  // card round-trip-costs-less: W's buy not proven on both RPCs (here neither answers W's history) is no proof, tried
+  // again on the next load; the page's holdings changing decide nothing: each pass holds, nothing closed or swept
   const same: PoolSellHost = { ...w.host, wallets: async () => [holding] };
-  await resumeRentBacks(same, fakeLocks());
-  assert.equal(w.told.length, told, JSON.stringify(w.told.slice(told)));
+  assert.equal(await resumeRentBacks(same, fakeLocks()), true, "tried again later");
   const gone: PoolSellHost = { ...w.host, wallets: async () => [{ ...holding, holdings: { native: 0n, tokens: new Map([[MINT, { amount: 0n, frozen: false }]]), unreadable: [] } }] };
   await resumeRentBacks(gone, fakeLocks());
-  assert.equal(w.told.length, told, "the holdings changed alone: no pass");
+  assert.deepEqual(w.told.filter((t) => t.step === "rent_back").map((t) => [t.state, t.detail]), Array(3).fill(["holds", "no buy of W's is recorded"]));
+  assert.deepEqual(w.c.accounts.get(at), before);
+  assert.equal(w.c.deposits.filter((d) => d.sweep).length, 0, "no sweep");
 });
 
 // Delta review 8 of 5697d7a1, F1 (the reviewer's probe): no buy record, the helper's holdings leaving out W's own coin,
@@ -5983,4 +5985,76 @@ test("a simulation refused names the provider and the program's error in the leg
   const y = await saleCause(w, { rpcs: [gate(0), gate(1)] as never, wait: markedWait(w) }, share(10_000), "sf");
   assert.deepEqual(y.rec.legs.map((l) => l.stage), ["filled", "filled"], JSON.stringify(y.rec.legs));
   assert.deepEqual(afterLastWait(w, y.rec.legs[1]!.tx!), { waited: true, market: [true, true], blockhash: true });
+});
+
+// Card round-trip-costs-less (a): the mainnet run of 12 Nov 12:19Z bought in one browser and sold in another, both
+// signed in with the same 12 words. The browser that sold had no owed record of W's sell, and its buy record (rebuilt
+// from W's history by one provider) counted as none, so no rent back ever ran and 3,521,615 lamports stayed on W in its
+// own lamports, its empty token account and its volume account. Any browser of the account finishes any of its Ws: the
+// list is the account's own Ws (derived from the pool's spent notes), W's coin is proven by W's own buy read on both
+// RPCs at finalized, and the closes run even when what is left cannot make a note worth releasing, the amount kept on
+// W's record for the portfolio.
+const BUY_SIG = base58.encode(new Uint8Array(64).fill(7));
+/** W's buy as getTransaction (json, finalized) gives it: the pool's tag 3 naming W, a signer, and `mint` rising in W's
+ *  account (wallet/src/pool/buy-wallets.ts solanaBuyIn). */
+const buyTxJson = (mint: string) => ({
+  slot: 1,
+  meta: { err: null, preTokenBalances: [], postTokenBalances: [{ accountIndex: 2, mint, owner: W.address, programId: TOKEN_PROGRAM, uiTokenAmount: { amount: "100" } }] },
+  transaction: { message: { accountKeys: [FEE_PAYER, W.address, ATA, PROGRAM], header: { numRequiredSignatures: 2 }, instructions: [{ programIdIndex: 3, accounts: [0, 1], data: base58.encode(Uint8Array.of(3)) }] } },
+});
+/** Both RPCs with W's buy in W's history, RPC p naming `mints[p]` as what rose. */
+const withBuy = (rpcs: readonly [SolanaRpc, SolanaRpc], mints: readonly [string, string] = [MINT, MINT]) =>
+  rpcs.map((r, p) => (async (method: string, params: readonly unknown[]) => {
+    if (method === "getSignaturesForAddress" && params[0] === W.address) return [{ signature: BUY_SIG, err: null }];
+    if (method === "getTransaction" && params[0] === BUY_SIG) return buyTxJson(mints[p]!);
+    return r(method, params);
+  }) as SolanaRpc) as unknown as readonly [SolanaRpc, SolanaRpc];
+/** A W this browser never bought or sold from: no buy record, no owed record; its coin sold whole elsewhere (its token
+ *  account empty), its pump volume account open, `lamports` on W. */
+async function soldElsewhere(lamports: number, mints?: readonly [string, string]) {
+  const w = await world({ buy: null, held: 0n, ataLamports: TOKEN_RENT, volumes: [{ program: SOLANA_PUMP_PROGRAM }], lamports }, [{ ...wallet(0n), holdings: null } as never]);
+  w.host.rpcs = withBuy(w.c.rpcs, mints);
+  return w;
+}
+
+test("round-trip-costs-less a: a W sold in another browser, under the floor: the load finds it from the account's Ws, proves its coin on both RPCs, closes its accounts to W, and keeps what is left on W's record", async () => {
+  const w = await soldElsewhere(661_575);
+  const more = await resumeRentBacks(w.host, fakeLocks());
+  const vol = solanaVolumeAccumulator(W.address, SOLANA_PUMP_PROGRAM);
+  assert.deepEqual({ tokenAccount: w.c.accounts.has(ATA), volumeAccount: w.c.accounts.has(vol) }, { tokenAccount: false, volumeAccount: false }, "both closed to W");
+  assert.equal(w.c.deposits.filter((d) => d.sweep).length, 0, "under the floor: no note");
+  const onW = w.c.accounts.get(W.address)!.lamports;
+  assert.equal(onW, 661_575 + TOKEN_RENT + Number(VOLUME_RENT) - 2 * FEE, "every lamport on W, less the two frames' fees");
+  assert.deepEqual(w.told.filter((t) => t.step === "rent_back").map((t) => t.state), ["floor"]);
+  const rec = w.owed.get(W.address)!;
+  assert.equal(rec.left, String(onW), "the amount kept on W, for the portfolio");
+  assert.deepEqual(rec.buy, { mint: MINT, program: TOKEN_PROGRAM }, "W's coin as both RPCs read W's buy");
+  assert.equal(more, false, "W at its own state: nothing to try again in this tab");
+  // the next run: W's buy is not read again (kept on its record), nothing is signed, nothing to try again in this tab
+  const calls = w.c.calls.length;
+  const sent = sends(w).length;
+  assert.equal(await resumeRentBacks(w.host, fakeLocks()), false);
+  assert.equal(w.c.calls.slice(calls).filter((c) => c.method === "getSignaturesForAddress" || c.method === "getTransaction").length, 0, "W's buy read once");
+  assert.equal(sends(w).length, sent);
+});
+
+test("round-trip-costs-less a: a W sold in another browser with enough on it: closed and swept into the pool, W at 0, and no W read again once it is empty", async () => {
+  const w = await soldElsewhere(ENOUGH);
+  assert.equal(await resumeRentBacks(w.host, fakeLocks()), true, "a sweep sent: its verdict is a later run's");
+  assert.equal(w.c.deposits.filter((d) => d.sweep).length, 1);
+  assert.equal(w.c.accounts.get(W.address)?.lamports ?? 0, 0);
+  await settle(w);
+  assert.equal(await resumeRentBacks(w.host, fakeLocks()), false, "W read empty: nothing more");
+  const calls = w.c.calls.length;
+  await resumeRentBacks(w.host, fakeLocks());
+  assert.equal(w.c.calls.length, calls, "an empty W is never read again");
+});
+
+test("round-trip-costs-less a: W's buy read differently on the two RPCs, or a rebuilt record alone: no proof, the pass holds and nothing is closed, tried again later", async () => {
+  const w = await soldElsewhere(ENOUGH, [MINT, VF.pumpswap.mint]);
+  const more = await resumeRentBacks(w.host, fakeLocks());
+  assert.equal(w.c.accounts.has(ATA), true);
+  assert.equal(w.c.deposits.length, 0);
+  assert.deepEqual(w.told.filter((t) => t.step === "rent_back").map((t) => [t.state, t.detail]), [["holds", "no buy of W's is recorded"]]);
+  assert.equal(more, true, "unproven: tried again on a later state read");
 });
