@@ -6,6 +6,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { SIGNPAGE_RESULT_SCHEMAS } from "../../kit/src/signpage/schema.ts";
+import { SOLANA_JITO_TIP_MIN, SOLANA_POOL_JITO_TIP } from "../../kit/src/checks/solana/checks.ts";
 import { SOLANA_POOL_WORST_BUY_VENUE, solanaPoolBuyFunds, solanaPoolFee, type SolanaPoolRelease, type SolanaRent } from "../../kit/src/trade/solana/pool-buy.ts";
 import { SolanaRpcTransportError, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import { fx, replay } from "../../kit/test/solana-pool-buy-fx.ts";
@@ -228,4 +229,15 @@ test("with an amount (kit 1.11, card buy-spends-several-pieces): the pieces a bu
   assert.deepEqual(Object.keys((await at("1")).result!), ["tap_max"]);
   for (const bad of ["0.0000000001", "-1", "1e3", "abc", 5]) assert.deepEqual(await at(bad as string), { error: "not_allowed" }, String(bad));
   for (const r of [(await at("0.01")).result, (await at("0.001")).result]) assert.ok(SIGNPAGE_RESULT_SCHEMAS["pool.buy.dry"](r));
+});
+
+test("with an amount, the page's own tip (card buy-spends-several-pieces): one piece's cost carries the auction's tip, several pieces' the least (the kit's solanaPoolBuyTip), as the buy tips them", async () => {
+  const n = (id: string, label: bigint, value: bigint): NoteRecord => ({ ...held, id, attempt: `a-${id}`, leaf: { ...held.leaf!, value, label } });
+  const notes = [n("own", 1n, RUNG), n("p2", 2n, 2n * RUNG)];
+  const proofOf = (x: NoteRecord, own: boolean) => ({ ...ready, noteId: x.id, attempt: x.attempt!, chunk: x.leaf!.value, ...(own ? { own: true as const } : {}) });
+  const kind = poolBuyDryKind(deps({ ready: async () => ({ notes, ready: [proofOf(notes[0]!, true), proofOf(notes[1]!, false)], open: new Set([SOL.id]) }) }));
+  const at = async (amount: string) => (await ask(kind, { chain: "solana", token: fx.pump.mint, amount })) as { result?: Record<string, unknown> };
+  const sol = (l: bigint) => (Number(l) / 1e9).toString();
+  assert.deepEqual([(await at("0.001")).result?.pieces, (await at("0.001")).result?.cost], [1, sol(FEE + SOLANA_POOL_JITO_TIP)]);
+  assert.deepEqual([(await at("0.01")).result?.pieces, (await at("0.01")).result?.cost], [2, sol(2n * FEE + SOLANA_JITO_TIP_MIN)]);
 });

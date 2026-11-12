@@ -21,8 +21,7 @@
 import type { Chain } from "../../kit/src/orders/record.ts";
 import type { ErrorCode, PoolBuyDry, PoolStatePrice, SignpageState } from "../../kit/src/signpage/messages.ts";
 import { SIGNPAGE_MAX_ANSWER_BYTES, SIGNPAGE_RESULT_SCHEMAS } from "../../kit/src/signpage/schema.ts";
-import { readSolanaPoolBuyVenue, readSolanaRent, solanaPoolBuyFunds, type SolanaPoolBuyVenue, type SolanaRent } from "../../kit/src/trade/solana/pool-buy.ts";
-import { SOLANA_POOL_JITO_TIP } from "../../kit/src/checks/solana/checks.ts";
+import { readSolanaPoolBuyVenue, readSolanaRent, solanaPoolBuyFunds, solanaPoolBuyTip, type SolanaPoolBuyVenue, type SolanaRent } from "../../kit/src/trade/solana/pool-buy.ts";
 import type { ReadyProof } from "../../wallet/src/pool/pool.ts";
 import { pickPieces } from "./pool-buy.ts";
 import { SolanaRpcTransportError, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
@@ -115,7 +114,9 @@ export type PoolBuyDryDeps = {
   ready(): Promise<{ notes: readonly NoteRecord[]; ready?: readonly (BalanceProof & Partial<Pick<ReadyProof, "own" | "root">>)[]; open?: ReadonlySet<string>; landed?: ReadonlyMap<string, LandedRelease> } | null>;
   /** True while a trade runs on the page or holds a host of the pair: the preview waits for no trade. */
   trading(): boolean;
-  /** The tip a pool.buy on this page pays (src/pool-buy.ts: SOLANA_POOL_JITO_TIP on mainnet, none on devnet). */
+  /** Tests only: one tip for every set; else the tip a pool.buy on this page pays for a set of k pieces (src/pool-buy.ts,
+   *  the kit's solanaPoolBuyTip: SOLANA_POOL_JITO_TIP for one piece on mainnet, SOLANA_JITO_TIP_MIN for several, none on
+   *  devnet). */
   tip?: bigint;
   /** The page's clock, ms (performance.now): a kept venue's age. */
   now?(): number;
@@ -148,7 +149,7 @@ const solOf = (l: bigint): string => {
 type BuyDryAnswer = { result: PoolBuyDry } | { error: ErrorCode };
 export function poolBuyDryKind(d: PoolBuyDryDeps): (params: Record<string, unknown>) => Running<"pool.buy.dry"> {
   const now = d.now ?? (() => performance.now());
-  const tip = d.tip ?? (POOL_TESTNET ? 0n : SOLANA_POOL_JITO_TIP);
+  const tipOf = (k: number): bigint => d.tip ?? solanaPoolBuyTip(POOL_TESTNET ? "devnet" : "mainnet", k);
   const venues = new Map<string, { v: CoinVenue; at: number }>();
   const venueOf = async (rpcs: readonly [SolanaRpc, SolanaRpc], token: string): Promise<CoinVenue> => {
     const kept = venues.get(token);
@@ -186,10 +187,10 @@ export function poolBuyDryKind(d: PoolBuyDryDeps): (params: Record<string, unkno
       return ids.has(r.poolId) && n !== undefined && heldBy(n, r.attempt);
     });
     const pays = (set: readonly (typeof live)[number][]): boolean =>
-      solanaPoolBuyFunds(set.map((p) => ({ withdrawnValue: p.chunk, relayFee: p.binding.feeCap })), venue, { spend: amount, tip }, rent).problem === null;
+      solanaPoolBuyFunds(set.map((p) => ({ withdrawnValue: p.chunk, relayFee: p.binding.feeCap })), venue, { spend: amount, tip: tipOf(set.length) }, rent).problem === null;
     const set = pickPieces(live, pays);
     if (set === null) return { result: { tap_max: tap } };
-    return { result: { tap_max: tap, pieces: set.length, cost: solOf(set.reduce((a, p) => a + p.binding.feeCap, tip)) } };
+    return { result: { tap_max: tap, pieces: set.length, cost: solOf(set.reduce((a, p) => a + p.binding.feeCap, tipOf(set.length))) } };
   };
   return (params) => {
     let out: BuyDryAnswer = { error: "down" };

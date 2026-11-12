@@ -7,7 +7,8 @@
 // how much SOL each holds: on mainnet in one getMultipleAccounts on the helper's seat per 100 Ws (never on a public
 // provider: one public request that names several Ws links them for that provider), in the testnet build, which has no
 // helper seat, one W a request. A W that holds SOL gets a rent back owed (pool-sell.ts OwedRentBack `found`), which
-// reads W alone on both RPCs, sweeps only a W both read owning no token account, and keeps the rest on W.
+// reads W alone on both RPCs, sweeps only a W both read owning no token account and past its latest transaction's
+// blockhash life (foundQuiet: no buy signed before it can still land), and keeps the rest on W.
 import { freshWallet } from "../../wallet/src/derive/keys.ts";
 import type { NoteRecord } from "../../wallet/src/notes/store.ts";
 import { jOf } from "../../wallet/src/pool/queue.ts";

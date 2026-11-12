@@ -13,7 +13,7 @@ import { base58, base64 } from "@scure/base";
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { entropyToWords, freshWallet, wordsToSeed64 } from "@blindfill/wallet/derive";
 import { SOLANA_POOL_FEE_STEP, solanaDecodePoolRelease, solanaPoolBuyMaxSpend, solanaPoolFee, solanaPoolPage } from "../../kit/src/trade/solana/pool-buy.ts";
-import { SOLANA_POOL_JITO_TIP, SOLANA_PUMP_PROGRAM } from "../../kit/src/checks/solana/checks.ts";
+import { SOLANA_JITO_TIP_MIN, SOLANA_POOL_JITO_TIP, SOLANA_PUMP_PROGRAM } from "../../kit/src/checks/solana/checks.ts";
 import { solanaDecodeMessage } from "../../kit/src/checks/solana/message.ts";
 import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import type { VaultSnarkjsProof, VaultWithdrawSignals } from "../../kit/src/vault/shapes.ts";
@@ -2383,6 +2383,10 @@ test("pieces: a spend past the own note's Max sends one bundle: the other piece'
   assert.equal(m2.staticKeys[1], W.address, "to the one W");
   // the tag 3 releases the own note's proof: its nullifier, not the piece's
   assert.equal(msgOf(tag3!).instructions.at(-1)!.data[0], 3);
+  // a mainnet bundle of several pieces ends with the helper's tip, so its tag 3 tips the least (the kit's
+  // solanaPoolBuyTip), not one piece's auction tip; the pick and the build priced at that tip
+  const d3 = msgOf(tag3!).instructions.at(-1)!.data;
+  assert.equal(new DataView(d3.buffer, d3.byteOffset, d3.byteLength).getBigUint64(2 + (d3[1]! & 1 ? 128 : 256) + 130, true), SOLANA_JITO_TIP_MIN);
   // each note settled before not_landed
   assert.ok(w.log.includes("settle:note-1") && w.log.includes("settle:note-2"), w.log.filter((x) => x.startsWith("settle")).join(","));
 });

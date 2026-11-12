@@ -99,6 +99,7 @@ import {
   solanaEncodePoolRelease,
   solanaPoolAccount,
   solanaPoolBuyFunds,
+  solanaPoolBuyTip,
   solanaPoolFee,
   solanaPoolPage,
   solanaPoolPriorityBudget,
@@ -113,7 +114,7 @@ import {
 } from "../../kit/src/trade/solana/pool-buy.ts";
 import { pageReference } from "./page-rpc.ts";
 import { solanaDecodeLookupTable, type SolanaLookupTable } from "../../kit/src/checks/solana/message.ts";
-import { SOLANA_COMPUTE_BUDGET_PROGRAM, SOLANA_CU_PRICE_MAX, SOLANA_POOL_JITO_TIP } from "../../kit/src/checks/solana/checks.ts";
+import { SOLANA_COMPUTE_BUDGET_PROGRAM, SOLANA_CU_PRICE_MAX } from "../../kit/src/checks/solana/checks.ts";
 import { solanaCompileV0 } from "../../kit/src/trade/solana/build.ts";
 import { SolanaRpcTransportError, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import type { VaultSnarkjsProof } from "../../kit/src/vault/shapes.ts";
@@ -756,9 +757,11 @@ async function buyRun(h: PoolBuyHost, ask: PoolAsk, at: { fault?: unknown }): Pr
     // not awaited here: the buy waits on its own venue's reads only (below, once the reference names the venue), so a
     // slow or hung read of another venue's table never holds it; a rejection no buy awaits is marked handled
     for (const r of tableReads.values()) r.catch(() => {});
-    // on mainnet the helper sends the tag 3 to Jito bundle-only, so it tips enough to win the auction (the kit's
-    // SOLANA_POOL_JITO_TIP); devnet has no block engine, so no tip
-    const tip = h.cluster === "mainnet" ? SOLANA_POOL_JITO_TIP : 0n;
+    // the tag 3's tip for a set of k pieces (the kit's solanaPoolBuyTip): on mainnet the helper sends one piece's tag 3
+    // to Jito bundle-only, so it tips enough to win the auction (SOLANA_POOL_JITO_TIP); a bundle of several pieces ends
+    // with the helper's own tip out of the pieces' relay fees, so its tag 3 carries the least (SOLANA_JITO_TIP_MIN);
+    // devnet has no block engine, so no tip
+    const tipOf = (k: number): bigint => solanaPoolBuyTip(h.cluster, k);
     // each root's leaf index, found once: absent when it is on no page or not on both RPCs at one index
     const roots = new Map<string, number | null>();
     const rootKey = (tree: 0 | 1, root: string): string => `${tree}:${root}`;
@@ -806,7 +809,7 @@ async function buyRun(h: PoolBuyHost, ask: PoolAsk, at: { fault?: unknown }): Pr
       // one piece when the host takes one only; filtered and claimed in one turn, so two runs of this page never
       // claim one note
       const pays = (set: readonly Ready[]): boolean =>
-        solanaPoolBuyFunds(set.map((p) => ({ withdrawnValue: p.chunk, relayFee: p.binding.request.relayFee })), venue, { spend: ask.amount, tip }, rent).problem === null;
+        solanaPoolBuyFunds(set.map((p) => ({ withdrawnValue: p.chunk, relayFee: p.binding.request.relayFee })), venue, { spend: ask.amount, tip: tipOf(set.length) }, rent).problem === null;
       const max = h.takeSet && h.sendPieces ? SOLANA_POOL_BUY_PIECES_MAX : 1;
       const now = mine(await h.ready());
       const picked = pickPieces(now, pays, max);
@@ -830,7 +833,7 @@ async function buyRun(h: PoolBuyHost, ask: PoolAsk, at: { fault?: unknown }): Pr
       const budget = (solanaPoolPriorityBudget(rent, release.relayFee) * 1_000_000n) / BigInt(SOLANA_POOL_BUY_CU[venue.kind]);
       const cuPrice = budget < SOLANA_CU_PRICE_MAX ? budget : SOLANA_CU_PRICE_MAX;
       const req: SolanaPoolBuyRequest = {
-        wallet: r.wallet.address, feePayer: h.pin.feePayer, token, spend: ask.amount, minOut, tip, cuPrice, cluster: h.cluster,
+        wallet: r.wallet.address, feePayer: h.pin.feePayer, token, spend: ask.amount, minOut, tip: tipOf(k), cuPrice, cluster: h.cluster,
         ...(k > 1 ? { before: releases.slice(0, -1).map((x) => ({ withdrawnValue: x.withdrawnValue, relayFee: x.relayFee })) } : {}),
       };
       const cfg = { program: h.pin.program, pool };
