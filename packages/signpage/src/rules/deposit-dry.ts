@@ -22,7 +22,7 @@ import { DEPOSIT_DRY_PLACEHOLDER, type DepositAsset, type DepositDry, type Depos
 import type { Chain } from "../../../kit/src/orders/record.ts";
 import {
   DEPOSIT_QUOTE_DEADLINE_MS, DEPOSIT_QUOTE_DESTINATION, DEPOSIT_QUOTE_SLIPPAGE_BPS, DEPOSIT_QUOTE_TIMEOUT_MS, DepositAnswerTooLarge,
-  askDepositQuote, readCapped,
+  askDepositQuoteAgain, readCapped,
 } from "../../../wallet/src/deposit/quote.ts";
 
 /** USDC's decimals on every chain the release lists it. */
@@ -48,6 +48,8 @@ export const DEPOSIT_ASSET_CHAINS: readonly { id: string; chain: Chain; blockcha
 export interface DepositReadContext {
   fetch?: typeof fetch;
   now?: () => number;
+  /** The pause before a re-ask (askDepositQuoteAgain); a test's ends at once. */
+  sleep?: (ms: number) => Promise<void>;
 }
 
 /**
@@ -173,7 +175,9 @@ async function dryQuote(origin: string, amount: bigint, ctx: DepositReadContext)
   const request = depositDryRequest(origin, amount, now());
   let reply;
   try {
-    reply = await askDepositQuote(request, ctx.fetch);
+    // card helper-says-why-a-vendor-refused: a 1Click 400 not about the request is asked again inside the one ask's
+    // window, as the committed asks do (the sheet asks its assets once while open, and showed Not available for minutes)
+    reply = await askDepositQuoteAgain(request, ctx.fetch, ctx.sleep);
   } catch {
     return no("down");
   }

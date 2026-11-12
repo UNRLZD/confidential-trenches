@@ -216,10 +216,10 @@ test("a clock set back mid-ask never gives a re-ask more than the one ask's own 
   }
 });
 
-test("any other answer is the one ask's: a 400 of another message, 429, 503, a quote", async () => {
-  for (const a of [{ status: 400, body: { message: "amount is too low" } }, { status: 400, body: { error: { code: "upstream" } } },
+test("any other answer is the one ask's: a 400 about the request, the helper's own 400, 429, 503, a quote", async () => {
+  for (const a of [...ABOUT_THE_REQUEST, { status: 400, body: { error: { code: "upstream" } } },
     { status: 400, body: "No liquidity available" }, { status: 200, body: { message: "No liquidity available" } },
-    { status: 503, body: { message: "No liquidity available" } }, { status: 400, body: { message: "Not: No liquidity available" } },
+    { status: 503, body: { message: "No liquidity available" } },
     { status: 429, body: {} }, { status: 503, body: {} }, QUOTED]) {
     const r = replay([a, QUOTED]);
     assert.deepEqual(await askDepositQuoteAgain(req(), r.fetchFn, r.sleep, r.clock), a, JSON.stringify(a));
@@ -227,4 +227,48 @@ test("any other answer is the one ask's: a 400 of another message, 429, 503, a q
     assert.deepEqual(r.waits, []);
   }
   assert.equal(noLiquidity(NO_LIQ), true);
+});
+
+// Card helper-says-why-a-vendor-refused: live runs 43276439006 and 43289730843 (12 Nov 18:07Z and 19:25Z) had every 1Click
+// quote answered 400 for a few minutes, a message other than no liquidity, and green again within the half hour. A 400 that
+// is not about the request (1Click's "Failed to get quote", a message the page does not know, none at all) is asked again
+// as no liquidity is, twice inside the one ask's window; one about the request (its amount, its pair, a field 1Click
+// refuses, a list of what is wrong with it: 1Click's own words, research proofs/p3-coverage and the deposit runs) is the
+// one ask's, shown at once.
+const ABOUT_THE_REQUEST = [
+  "Amount is too low for bridge, try at least 1000000", "Amount is too low for the destination chain",
+  "Temporary swap limits: minimum swap amount is $1,000", "Quoting for this pair is not available", "recipient is not valid",
+  "nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near is not supported as origin asset",
+  "1cs_v1:hypercore:hip1:0x6d1e supports only ORIGIN_CHAIN refundType", "Invalid token", "deadline must be in the future",
+].map((message) => ({ status: 400, body: { message } })).concat([{ status: 400, body: { message: ["amount must be a string"] } } as never]);
+const NOT_ABOUT_IT = [{ message: "Failed to get quote" }, { message: "Something else went wrong" }, { statusCode: 400 }, { message: "Not: No liquidity available" }]
+  .map((body) => ({ status: 400, body }));
+
+test("a 400 that is not about the request is asked again, the same request, twice at most, and the quote that follows comes back", async () => {
+  for (const refusal of NOT_ABOUT_IT) {
+    const r = replay([refusal, refusal, QUOTED]);
+    assert.deepEqual(await askDepositQuoteAgain(req(), r.fetchFn, r.sleep, r.clock), QUOTED, JSON.stringify(refusal));
+    assert.deepEqual(r.bodies, Array(3).fill(JSON.stringify(req())));
+    assert.deepEqual(r.waits, [...NO_LIQUIDITY_PAUSES_MS]);
+    const still = replay([refusal]);
+    assert.deepEqual(await askDepositQuoteAgain(req(), still.fetchFn, still.sleep, still.clock), refusal);
+    assert.equal(still.bodies.length, 3, "three asks in all, then the refusal stands");
+  }
+});
+
+test("a 400 about the request is shown at once: one ask, no wait", async () => {
+  for (const a of ABOUT_THE_REQUEST) {
+    const r = replay([a, QUOTED]);
+    assert.deepEqual(await askDepositQuoteAgain(req(), r.fetchFn, r.sleep, r.clock), a, JSON.stringify(a));
+    assert.equal(r.bodies.length, 1, JSON.stringify(a));
+    assert.deepEqual(r.waits, []);
+  }
+});
+
+test("a re-ask answered about the request leaves that answer, the request's own, and asks no more", async () => {
+  const fails = NOT_ABOUT_IT[0]!;
+  const low = ABOUT_THE_REQUEST[0]!;
+  const r = replay([fails, low, QUOTED]);
+  assert.deepEqual(await askDepositQuoteAgain(req(), r.fetchFn, r.sleep, r.clock), low);
+  assert.equal(r.bodies.length, 2);
 });
