@@ -11,6 +11,9 @@
 //         and pool as above: PASS;
 //   wrongChain: the same check opening / (its old path) at 03:28Z, when the live Trending column's top was "Anthropic"
 //         (0xecc4...1627) on Robinhood: the verdict names the token and chain: FAIL.
+// Recorded again on 12 Nov (UNRLZD parity, owner 12 Nov: the box's balance line reads `<USD> available`, was `Bal <USD>`):
+//   good: this tree's build (--harness --build apps/terminal/dist, entry /assets/index-DD8B9y2i.js), at 2026-11-12T22:35Z: cash
+//         `$67.87 available`, the header's $67.87; pool `— available` on the pool path: PASS.
 // Planted from the good run: a Bal that differs from the header, a header that is not the account's Cash, a pool run
 // whose Bal is the Cash or that is off the pool path, a cash run on the pool path, a missing run, no entry script.
 import assert from "node:assert/strict";
@@ -46,7 +49,7 @@ test("recorded good answer: the box's Bal is the header's Cash with no pool, the
   const r = judge(ANSWERS.good);
   assert.equal(r.ok, true, r.lines.join("\n"));
   assert.equal(ANSWERS.good.runs.length, 4);
-  for (const x of ANSWERS.good.runs.filter((x) => x.kind === "cash")) assert.equal(x.box.bal, `Bal ${CASH}`, x.width);
+  for (const x of ANSWERS.good.runs.filter((x) => x.kind === "cash")) assert.equal(x.box.bal, `${CASH} available`, x.width);
 });
 
 test("recorded bad answer: the deployed app before this card draws the vault's $40.50 against the header's $67.87: FAIL", () => {
@@ -57,13 +60,13 @@ test("recorded bad answer: the deployed app before this card draws the vault's $
 });
 
 test("planted: a Bal that differs from the header, or a header that is not the account's Cash, fails", () => {
-  fails(mut((rec) => (run(rec, "desktop", "cash").box.bal = "Bal $40.50")), /^BAD desktop cash: the box's Bal is "Bal \$40\.50", the header's \$67\.87/);
-  fails(mut((rec) => Object.assign(run(rec, "phone", "cash"), { header: "$40.50", box: { ...run(rec, "phone", "cash").box, bal: "Bal $40.50" } })), /^BAD phone cash: the header's balance is \$40\.50, not the account's Cash \$67\.87/);
+  fails(mut((rec) => (run(rec, "desktop", "cash").box.bal = "$40.50 available")), /^BAD desktop cash: the box's Bal is "\$40\.50 available", the header's \$67\.87/);
+  fails(mut((rec) => Object.assign(run(rec, "phone", "cash"), { header: "$40.50", box: { ...run(rec, "phone", "cash").box, bal: "$40.50 available" } })), /^BAD phone cash: the header's balance is \$40\.50, not the account's Cash \$67\.87/);
   fails(mut((rec) => (run(rec, "desktop", "cash").box.path = "pool")), /^BAD desktop cash: the box is on the pool path with no pool/);
 });
 
 test("planted: a pool run whose Bal is the Cash, that draws none, or that is off the pool path fails", () => {
-  fails(mut((rec) => (run(rec, "desktop", "pool").box.bal = `Bal ${CASH}`)), /^BAD desktop pool: the box's Bal is the header's Cash/);
+  fails(mut((rec) => (run(rec, "desktop", "pool").box.bal = `${CASH} available`)), /^BAD desktop pool: the box's Bal is the header's Cash/);
   fails(mut((rec) => (run(rec, "phone", "pool").box.bal = null)), /^BAD phone pool: the box draws no Bal/);
   fails(mut((rec) => (run(rec, "phone", "pool").box.path = "vault")), /^BAD phone pool: the box is on the vault path/);
 });

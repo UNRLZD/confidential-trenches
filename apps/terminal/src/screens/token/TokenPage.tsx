@@ -49,7 +49,7 @@ import "./token.css";
 // the trade box (S8) and what the bar's buttons open.
 //
 // Card app-trade-box-mount puts the trade box and the safety grid under it (the token read's row and risk) in the
-// desktop's right column, signed out as designed (S8.1: `Bal —`, the exit plan off, `Sign in to trade`), and opens the
+// desktop's right column, signed out as designed (S8.1: `— available`, the exit plan off, `Sign in to trade`), and opens the
 // same box in a bottom sheet from the phone bar's Buy, Sell and quick buys. The signed-in money path is trade-box-pool's.
 // Card app-phone-trade-sheet moves the sheet to trade/TradeSheet.tsx: its box stays mounted when it closes, so a running
 // buy is drawn where it is on the next open; a pushed page (/token/<chain>/<id>) has no tab bar, its bar at the bottom.

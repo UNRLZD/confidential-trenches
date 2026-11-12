@@ -64,7 +64,7 @@ const FEE_ASK_SETTLE_MS = 250;
 // landed, each with Retry, and part filled, with the ready label back. Orders are out of the plan for now (card
 // app-orders-coming-soon): Limit and TP/SL draw `Coming soon` in the box's place (OrderTabs.tsx) and the exit plan block
 // `Coming soon` where its switch was, with no order control; Route & fees opens on its own card. Signed out (S8.1,
-// card app-trade-box-mount): `Bal —`, the main button `Sign in to trade` (and a preset) opens the sign-in sheet. No
+// card app-trade-box-mount): `— available`, the main button `Sign in to trade` (and a preset) opens the sign-in sheet. No
 // dialog, no confirm, ever.
 // The Sell side (card app-sell-mount): the switch's Sell is on while the signing page's state holds a position of this
 // token on this chain (Portfolio's own Row, heldOf) and draws the sell side (positions/SellBox.tsx) from the same trade

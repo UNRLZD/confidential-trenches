@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 // Live check of card app-trade-box-mount: the token page has its trade box and safety grid, signed out as designed.
-// Headless Chrome opens APP_HOST at 1440 x 900 (desktop) and 390 x 844 (phone, dpr 2, touch), a fresh browser, so signed
-// out, finds the frame that draws the token route (APP_HOST runs inside SIGN_HOST's shell) and reads:
-//   - 1440: the box is in the right column, to the right of the chart and inside the window; it reads `Bal —`, the exit
+// Headless Chrome opens a Solana token's own page on APP_HOST, app-sell-mount's PATH (/token/solana/<DJT>; the phone's /
+// draws the Trenches list since UNRLZD parity, owner 12 Nov, so / is no token page there), at 1440 x 900 (desktop) and
+// 390 x 844 (phone, dpr 2, touch), a fresh browser, so signed out, finds the frame that draws the token route (APP_HOST
+// runs inside SIGN_HOST's shell) and reads:
+//   - 1440: the box is in the right column, to the right of the chart and inside the window; it reads `— available`, the exit
 //     plan block off with its line, the main button `Sign in to trade` (enabled), its state S8.1; the safety grid sits
 //     under the Route & fees line with twelve cells, each label and value what the page's own token read (GET
 //     /v1/market/token, 200, the row and `risk` of the token the page draws) holds, worked out here from the answer's
@@ -20,6 +22,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { launchBrowser } from "../browsers.mjs";
+import { PATH } from "./app-sell-mount.mjs";
 import { count, usd } from "../../apps/terminal/src/screens/discover/format.ts";
 import { named } from "./record-names.mjs";
 
@@ -31,9 +34,10 @@ export const LOADS = [
   { name: "phone", viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true },
 ];
 const READ_MS = 25_000;
-/** The twelve cells, in the design's order (R5 token.js U.riskGrid at design-lock-r5), with their labels. */
+/** The twelve cells, in the design's order (R5 token.js U.riskGrid at design-lock-r5), with their labels (the first three
+ *  UNRLZD's, owner 12 Nov parity: Top 10, Dev, Snipers; were Top 10 %, Dev %, Snipers %). */
 export const CELLS = [
-  ["top10", "Top 10 %"], ["dev", "Dev %"], ["snipers", "Snipers %"], ["holders", "Holders"], ["liq", "Liq"], ["age", "Age"],
+  ["top10", "Top 10"], ["dev", "Dev"], ["snipers", "Snipers"], ["holders", "Holders"], ["liq", "Liq"], ["age", "Age"],
   ["insiders", "Insiders"], ["tax", "Tax"], ["mintAuth", "Mint auth"], ["freezeAuth", "Freeze auth"], ["lp", "LP"], ["honeypot", "Honeypot"],
 ];
 
@@ -89,8 +93,9 @@ export function boxFaults(m, read) {
   if (!m?.box) return ["no trade box on the page"];
   const b = m.box;
   if (b.state !== "S8.1") bad.push(`the box's state is ${b.state ?? "none"}, not S8.1`);
-  if (b.balance !== "Bal —") bad.push(`the balance reads ${JSON.stringify(b.balance)}, not "Bal —"`);
-  if (/available/i.test(b.text ?? "")) bad.push('the box says "available"');
+  // signed out the balance line is "— available" (UNRLZD's ticket line `— N available`, owner 12 Nov parity; it was
+  // `Bal —`, and this check refused the word "available" anywhere in the box, a rule that line replaces)
+  if (b.balance !== "— available") bad.push(`the balance reads ${JSON.stringify(b.balance)}, not "— available"`);
   // the block drawn off with its switch, or (card app-orders-coming-soon: orders are out of the plan for now) with
   // `Coming soon` where the switch was and no switch at all
   const soon = b.exit?.text === `${EXIT_TEXT} Coming soon`;
@@ -235,9 +240,9 @@ export async function collect({ build = null, shots = path.join(tmpdir(), `${KEY
       page.on("response", (r) => {
         if (r.url().startsWith(`${HELPER_HOST}/v1/market/token?`) && !token) token = r;
       });
-      await page.goto(`${APP_HOST}/`, { waitUntil: "load" });
+      await page.goto(`${APP_HOST}${PATH}`, { waitUntil: "load" });
       const f = await appFrame(page);
-      const load = { width: w.name, opened: `${APP_HOST}/`, frame: f ? f.url() : null, route: null, state: null, shown: null, symbol: null, page: null, token: null, shot: null };
+      const load = { width: w.name, opened: `${APP_HOST}${PATH}`, frame: f ? f.url() : null, route: null, state: null, shown: null, symbol: null, page: null, token: null, shot: null };
       if (f) {
         // the shell's signed-out state has landed when the box's button reads Sign in to trade
         await f.waitForFunction(() => document.querySelector('[data-testid="trade-cta"]')?.textContent?.trim() === "Sign in to trade", null, { timeout: 8_000 }).catch(() => {});
