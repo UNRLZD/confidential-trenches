@@ -61,9 +61,11 @@ import { h2Fetch } from "./h2-fetch.mjs";
 import { IDBFactory } from "fake-indexeddb";
 import { base58, base64 } from "@scure/base";
 import { ed25519 } from "@noble/curves/ed25519.js";
+import { COPY, copyAirdrop, copyNet } from "./copy-net.mjs";
 
-// the testnet build's network, set before any module that reads it loads (as test/pool-testnet.test.ts does)
-globalThis.__SIGN_NETWORK__ = "testnet";
+// the testnet build's network, set before any module that reads it loads (as test/pool-testnet.test.ts does); FLOW_COPY
+// (./copy-net.mjs): the mainnet build, on a local copy of mainnet
+globalThis.__SIGN_NETWORK__ = COPY ? "mainnet" : "testnet";
 const { entropyToWords, wordsToSeed64, depositId } = await import("../../wallet/src/derive/index.ts");
 const { openWalletStore } = await import("../../wallet/src/store/index.ts");
 const { openNoteStore } = await import("../../wallet/src/notes/store.ts");
@@ -73,10 +75,11 @@ const { solanaRestoreNotes } = await import("../../wallet/src/pool/solana-restor
 const { refKey } = await import("../../wallet/src/notes/store.ts");
 const { readSolanaRent, solanaRentMin, readSolanaPoolBuyVenue, solanaPoolBuyMaxSpend, solanaPoolBuySellNeed } = await import("../../kit/src/trade/solana/pool-buy.ts");
 const { ZK_SETUP_FILES } = await import("../../kit/src/zk/setup-files.ts");
+const { SOLANA_POOL_JITO_TIP, SOLANA_JITO_TIP_ACCOUNTS } = await import("../../kit/src/checks/solana/checks.ts");
 const { poolKinds } = await import("../src/pool-kinds.ts");
 const { TESTNET_RPCS, testnetPool, testnetPoolDeps, testnetRpc, PAGE_TABLES } = await import("../src/pool-testnet.ts");
 const { POOL_TESTNET } = await import("../../wallet/src/pool/network.ts");
-if (POOL_TESTNET !== true || SOL_POOLS.devnet === undefined) throw new Error("not the testnet build's pins");
+if (!COPY && (POOL_TESTNET !== true || SOL_POOLS.devnet === undefined)) throw new Error("not the testnet build's pins");
 
 const [TABLE, MINT, SPEND, OUT] = process.argv.slice(2);
 if (!OUT) throw new Error("usage: pool-flow-devnet.mjs <pinned | venue=table[+table...],...> <mint> <spend SOL> <out.json>");
@@ -94,6 +97,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const BURST = process.env.FLOW_BURST === "1";
 const REFUSE = process.env.FLOW_REFUSE === "1";
 const RPC_HOSTS = new Set(Object.values(TESTNET_RPCS).flat().map((u) => new URL(u).host));
+// FLOW_COPY: the step under way, for the copy's record of each send and failed simulation
+let phase = "start";
+const copy = COPY ? await copyNet({ log, phase: () => phase }) : null;
 const injected = { rpc: 0, send: 0 };
 const asked = new Map();
 // every transaction the page sends on a devnet RPC, by its first signature, in order (card sol-buy-rent-back: the sell,
@@ -115,8 +121,8 @@ let dust = null;
 // every devnet RPC answer of 429 or 5xx is logged (the page retries it); FLOW_BURST injects the bursts above. The reads
 // go as a browser sends them, side by side on one HTTP/2 connection per origin (h2-fetch.mjs, card
 // sol-buy-reads-side-by-side), never Node's HTTP/1.1 socket a read
-const realFetch = h2Fetch();
-globalThis.fetch = async (u, init) => {
+const realFetch = COPY ? null : h2Fetch();
+if (!COPY) globalThis.fetch = async (u, init) => {
   const host = new URL(String(u)).host;
   if (!RPC_HOSTS.has(host)) return realFetch(u, init);
   const n = (asked.get(host) ?? 0) + 1;
@@ -180,7 +186,7 @@ const logged = (rpc) => {
   p.url = rpc.url; // the kit tells two providers apart by their URL
   return p;
 };
-const rpcs = [logged(testnetRpc(TESTNET_RPCS.solana[0])), logged(testnetRpc(TESTNET_RPCS.solana[1]))];
+const rpcs = COPY ? copy.rpcs.map(logged) : [logged(testnetRpc(TESTNET_RPCS.solana[0])), logged(testnetRpc(TESTNET_RPCS.solana[1]))];
 // the script's own reads (never the page's): a throttled one waits out the provider's Retry-After and is asked again, up
 // to 4 tries, so a devnet 429 after a filled buy never ends the run before its checks (run 1 of card
 // sol-buy-reads-side-by-side: Retry-After 10 s on getTokenAccountsByOwner, past the transport's deadline)
@@ -220,12 +226,14 @@ const RESUME = process.env.FLOW_RESUME;
 const entropy = RESUME ? Buffer.from(readFileSync(RESUME, "utf8").trim(), "hex") : randomBytes(16);
 if (entropy.length !== 16) throw new Error("the seed file holds no 16-byte seed");
 // kept before anything can move: a run that stops past its deposit can be run again from this file (FLOW_RESUME)
+let seedFile = RESUME ?? null;
 if (!RESUME) {
-  const dir = join(homedir(), ".ct-devnet-runs");
+  const dir = COPY ? COPY.dir : join(homedir(), ".ct-devnet-runs");
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   chmodSync(dir, 0o700);
   const at = join(dir, `run-${new Date().toISOString().replace(/[:.]/g, "-")}.seed`);
   writeFileSync(at, entropy.toString("hex") + "\n", { mode: 0o600, flag: "wx" });
+  seedFile = at;
   log(`the run's seed is kept at ${at} (FLOW_RESUME=${at} runs again from it)`);
 }
 await w.insertSeed({ v: 1, entropy: Uint8Array.from(entropy), source: "code", code_saved: true, created_ms: Date.now() });
@@ -252,7 +260,7 @@ const helperFetch = async (url, init) => {
   if (new URL(url).pathname === "/v1/pool/fee" && r.status === 200) relayFee = BigInt(JSON.parse(await r.clone().text()).fee);
   return r;
 };
-const t = testnetPool(page, { rpcs, prover: { vault, stop: () => {} }, tables: TABLES, fetch: helperFetch });
+const t = testnetPool(page, { rpcs, prover: { vault, stop: () => {} }, tables: TABLES, fetch: helperFetch, ...(COPY ? { pin: copy.pin, holdings: copy.holdings } : {}) });
 const kinds = poolKinds({ ...testnetPoolDeps(t.flow), rpcs: (c) => (c === "solana" ? rpcs : testnetPoolDeps().rpcs(c)) });
 const ctx = (id) => ({ id, sha: "00", progress: (s) => log(`${id} progress ${JSON.stringify(s)}`) });
 // a kind answers at its send and its run goes on (the app learns the end from its state reads): each run holds the seed's
@@ -279,7 +287,8 @@ const run = (kind, params) => once(kind, params);
 const noteList = async () => (await ns.list()).map((n) => ({ ref: n.ref.kind, state: n.state, value: n.leaf ? String(n.leaf.value) : null, leafIndex: n.leaf ? String(n.leaf.leafIndex) : null, sends: (n.sends ?? []).map((s) => s.signature) }));
 
 // U: the index the note store plans (the flow's planDeposit names the same one until money reaches it)
-const { scope, pool } = solanaPoolOf(SOL_POOLS.devnet.program);
+const PIN = COPY ? copy.pin : SOL_POOLS.devnet;
+const { scope, pool } = solanaPoolOf(PIN.program);
 const ns = await openNoteStore(w);
 let U = null;
 if (!RESUME) {
@@ -381,7 +390,7 @@ async function dustBack() {
 let deposit;
 if (RESUME) {
   // the notes from the seed alone, as a restore reads them: each into the store, a change note under its parent
-  const r = await solanaRestoreNotes({ seed64, program: SOL_POOLS.devnet.program, rpcs });
+  const r = await solanaRestoreNotes({ seed64, program: PIN.program, rpcs });
   const ids = new Map();
   for (const n of r.notes) {
     const rec = await ns.add({ ref: n.ref, scope: n.scope, precommitment: n.precommitment, state: "UNSPENT", leaf: n.leaf, ...(n.parent === undefined ? {} : { parent: ids.get(n.parent) }) });
@@ -390,12 +399,14 @@ if (RESUME) {
   deposit = { resumed: RESUME, notes: await noteList() };
   log(`resumed from the seed file: ${JSON.stringify(deposit.notes)}`);
 } else {
-  log(`pool ${pool}; tables ${JSON.stringify(TABLES)}; fund U ${U} with exactly ${NEED} lamports (or at least ${NEED + EMPTY}) on devnet`);
+  log(`pool ${pool}; tables ${JSON.stringify(TABLES)}; fund U ${U} with exactly ${NEED} lamports (or at least ${NEED + EMPTY}) on ${COPY ? "the copy" : "devnet"}`);
+  if (COPY) log(`U funded by the copy's airdrop: ${await copyAirdrop(rpcs[0], U, NEED)}`);
   for (let b = await balance(); !(b === NEED || b >= NEED + EMPTY); b = await balance()) {
     if (b > 0n) log(`U holds ${b}: waiting for exactly ${NEED} or at least ${NEED + EMPTY}`);
     await sleep(10_000);
   }
   log("U funded; pool.deposit of 0.01 SOL");
+  phase = "deposit";
   deposit = await run("pool.deposit", { chain: "solana", amount: "0.01" });
   log(`deposit ${JSON.stringify(deposit)}`);
   if (process.env.FLOW_CRASH_AFTER === "deposit") {
@@ -434,6 +445,7 @@ if (RESUME && process.env.FLOW_SWEEP_W) {
 }
 const landed = deposit.notes?.some((n) => n.ref === "deposit" && n.state === "UNSPENT");
 let buy = null;
+let proofWait = null;
 // FLOW_REFUSE: the Solana pool balance from the notes, as state.pools counts it, before the tap and after the run's end
 let refused = null;
 const { poolBalances, solanaBalancePool } = await import("../../wallet/src/pool/balances.ts");
@@ -442,16 +454,32 @@ const poolBalance = async () => poolBalances(await ns.list(), [solanaBalancePool
 if (RESUME && process.env.FLOW_BUY_SIG) buy = { answer: { result: { txs: [{ hash: process.env.FLOW_BUY_SIG }] } }, notes: await noteList(), resumedAfterBuy: true };
 else if (landed) {
   log("the proof queue's pass");
-  const pass = await t.proofs();
+  const passFrom = Date.now();
+  let pass = await t.proofs();
+  // FLOW_COPY: the page runs its pass again on its next state read, so a failed pass is run again here once a second, up
+  // to 3 minutes, and the count and the wait are recorded (proofWait): a note that landed this epoch proves on the newest
+  // root, read at confirmed, which must be past the finalized now (wallet pool/solana.ts), and with confirmed equal to
+  // finalized a pass passes only when a block-second turns between its two reads
+  let passes = 1;
+  for (; COPY && passes < 180 && pass.made.length === 0 && pass.failed.length > 0; passes++) {
+    log(`pass ${JSON.stringify(pass.failed)}: the pass again in 1 s`);
+    await sleep(1_000);
+    pass = await t.proofs();
+  }
+  proofWait = { passes, ms: Date.now() - passFrom, made: pass.made.length > 0 };
+  // a pass that made nothing and failed nothing found the proof already made (the page's own pass, run on a state read,
+  // got there first): only a pass that still fails is the fault
+  if (COPY && pass.made.length === 0 && pass.failed.length > 0) throw new Error(`the buy's proof was not made in ${passes} passes over ${proofWait.ms} ms: ${JSON.stringify(pass.failed)}`);
   log(`pass ${JSON.stringify(pass, (k, v) => (typeof v === "bigint" ? String(v) : v))}`);
   let spend = SPEND;
   if (SPEND === "max") {
-    const max = solanaPoolBuyMaxSpend({ withdrawnValue: RUNG, relayFee }, VENUE, 0n, rent);
+    const max = solanaPoolBuyMaxSpend({ withdrawnValue: RUNG, relayFee }, VENUE, COPY ? SOLANA_POOL_JITO_TIP : 0n, rent);
     spend = `0.${String(max).padStart(9, "0")}`;
     log(`max spend on ${VENUE.kind}: ${max} lamports at relay fee ${relayFee}; W keeps ${KEEPS}, its sell's need on any venue`);
   }
   log(`pool.buy of ${spend} SOL of ${MINT}`);
   const before = REFUSE ? await poolBalance() : null;
+  phase = "buy";
   buy = await run("pool.buy", { chain: "solana", token: MINT, amount: spend, slippage_bps: 300 });
   log(`buy ${JSON.stringify(buy)}`);
   if (REFUSE) {
@@ -466,7 +494,7 @@ else if (landed) {
 let sell = null;
 let rentBack = null;
 const bought = buy?.notes?.some((n) => n.state === "SPENT");
-if (bought) {
+if (bought && process.env.FLOW_COPY_STOP !== "buy") {
   const sig = buy.answer.result.txs[0].hash;
   let t = null;
   for (let i = 0; i < 60 && !t; i++) {
@@ -511,6 +539,7 @@ if (bought) {
   log(`W ${W} holds ${(await own("getBalance", [W, { commitment: "finalized" }])).value} lamports after the buy`);
   log(`pool.sell of ${amount} of ${MINT} from W ${W}`);
   if (DUST) dust.armed = sentTxs.length;
+  phase = "sell";
   sell = await run("pool.sell", { chain: "solana", token: MINT, amount, slippage_bps: 300 });
   log(`sell ${JSON.stringify(sell)}`);
   // the rent back (card sol-buy-rent-back): after the full sell, W's token account and volume accounts at finalized,
@@ -525,6 +554,7 @@ if (bought) {
   const program = (await info(MINT)).owner;
   const { solanaVolumeAccumulator, SOLANA_PUMP_PROGRAM, SOLANA_PUMP_AMM_PROGRAM } = await import("../../kit/src/checks/solana/checks.ts");
   const left = async (a) => (await info(a))?.lamports ?? null;
+  phase = "after the sell";
   rentBack = { W, tokenAccount: await left(solanaAta(W, MINT, program)), pumpVolume: await left(solanaVolumeAccumulator(W, SOLANA_PUMP_PROGRAM)), ammVolume: await left(solanaVolumeAccumulator(W, SOLANA_PUMP_AMM_PROGRAM)), w: await left(W) };
   log(`after the rent back ${JSON.stringify(rentBack)}`);
   // FLOW_DUST: the teardown frame that burned S's unit (a token program's Burn, tag 8, of W's token account)
@@ -546,9 +576,11 @@ log(`notes ${JSON.stringify(notes)}`);
 const told = (kind) => !stages.some((x) => x.kind === kind && x.stage !== "sent" && x.stage !== "filled");
 const dusted = !DUST || (dust.sent && dust.burned?.amount === "1" && rentBack !== null && Object.entries(rentBack).every(([k, v]) => k === "W" || v === null));
 const back = REFUSE && refused !== null && stages.some((x) => x.kind === "pool.buy" && x.stage === "not_landed") && refused.noteBack && refused.before !== null && refused.after === refused.before;
-const filled = REFUSE ? back : dusted && landed && bought && told("pool.buy") && sell?.answer?.result !== undefined && notes.some((n) => n.ref === "return" && n.state === "UNSPENT" && n.leafIndex !== null) && told("pool.sell");
+const filled = REFUSE ? back : COPY && process.env.FLOW_COPY_STOP === "buy" ? landed && bought && told("pool.buy") : dusted && landed && bought && told("pool.buy") && sell?.answer?.result !== undefined && notes.some((n) => n.ref === "return" && n.state === "UNSPENT" && n.leafIndex !== null) && told("pool.sell");
 seed64.fill(0);
-writeFileSync(OUT, JSON.stringify({ at: new Date().toISOString(), cluster: "devnet", program: SOL_POOLS.devnet.program, pool, tables: TABLES, mint: MINT, spend: SPEND, resumed: Boolean(RESUME), burst: BURST, injected, dust: DUST ? { S: dust.S, sent: dust.sent, burned: dust.burned ?? null, txs: dustTxs } : null, U, need: String(NEED), deposit, buy, buyTimeline: timeline, refused, sell, rentBack, sentTxs, stages, notes, filled }, null, 2) + "\n");
+// FLOW_COPY: each send by its step (the copy's record reads each back), the W of the buy and the tip accounts watched
+const steps = COPY ? copy.sent.map((s) => ({ step: s.phase, signature: s.signature, watch: { W: rentBack?.W ?? null, feePayer: PIN.feePayer, ...Object.fromEntries(SOLANA_JITO_TIP_ACCOUNTS.map((a, i) => [`tip${i}`, a])) } })) : undefined;
+writeFileSync(OUT, JSON.stringify({ at: new Date().toISOString(), cluster: COPY ? "mainnet copy" : "devnet", program: PIN.program, seedFile, steps, simFails: copy?.simFails, planted: copy?.planted, fee: copy ? String(copy.fee) : undefined, sendLines: copy?.sendLines, proofWait, engine: copy?.engine, engineCalls: copy?.engineCalls, pool, tables: TABLES, mint: MINT, spend: SPEND, resumed: Boolean(RESUME), burst: BURST, injected, dust: DUST ? { S: dust.S, sent: dust.sent, burned: dust.burned ?? null, txs: dustTxs } : null, U, need: String(NEED), deposit, buy, buyTimeline: timeline, refused, sell, rentBack, sentTxs, stages, notes, filled }, null, 2) + "\n");
 await t.signedOut();
 ns.close();
 w.close();
