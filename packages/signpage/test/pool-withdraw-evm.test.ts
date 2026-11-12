@@ -276,8 +276,9 @@ const finishHost = (side: Side, o: { note?: NoteRecord; clock?: { ms: bigint }; 
     wait: async () => {},
     settle: () => void o.settled?.push(1),
     keep: async (p: EvmPendingOnward) => {
-      // kept before its bytes leave: no raw send yet of this hash
-      assert.ok(!(side.sent ?? []).some((r) => "0x" + hex(keccak_256(Uint8Array.from(Buffer.from(r.slice(2), "hex")))) === p.onward), "kept before it leaves");
+      // kept before its bytes leave: no raw send yet of this hash, nor of any resend kept (review 2 N5)
+      const keptNow = [p.onward, ...(p.resends ?? []).map((r) => r.hash)];
+      assert.ok(!(side.sent ?? []).some((r) => keptNow.includes("0x" + hex(keccak_256(Uint8Array.from(Buffer.from(r.slice(2), "hex")))))), "kept before it leaves");
       o.kept?.push(p);
     },
   }) as unknown as EvmWithdrawHost;
@@ -716,6 +717,13 @@ test("(review 2 P2-A) the resend: with `held`, W sends what it holds less its ga
   const rich = heldSide({ balance: PART + 2n * W_BOUND });
   const got2 = await finishEvmOnward(finishHost(rich), pendingOf({ ...BIG_CAP, onward: H1 }), undefined, heldOf());
   assert.deepEqual(Object.values(got2?.arrived ?? {}), [PART.toString()]);
+});
+
+test("(review 2 N7) the resend's bound over the part's fee cap: in_transit with the fee it needs, nothing signed", async () => {
+  const side = heldSide();
+  const got = await finishEvmOnward(finishHost(side), pendingOf({ feeCap: (W_BOUND - 1n).toString(), onward: H1 }), undefined, heldOf());
+  assert.deepEqual(got, { stage: "in_transit", txs: [], arrived: {}, feeNeeded: W_BOUND.toString() });
+  assert.deepEqual(side.sent ?? [], []);
 });
 
 test("(review 2 P2-A) the resend waits: its run reverting on either RPC, W's nonce 0 (never a second nonce-0 send while `held` is set), or the two RPCs' nonces apart: read again, nothing signed", async () => {
