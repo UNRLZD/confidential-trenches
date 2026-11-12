@@ -1,0 +1,39 @@
+{
+ "good": {
+  "at": "2026-11-12T12:50:35.088Z",
+  "sign": {
+   "source": "https://confidential.unrealized.trade/",
+   "pageStatus": 200,
+   "js": [
+    {
+     "url": "/app.js",
+     "status": 200,
+     "integrity": "sha384-xcJF+fssmpJlFppufNZxGrTdvK1YNREZgRzJu9XC9qlPwmCpd/lugkuWWT9PeZXz",
+     "sha384": "sha384-xcJF+fssmpJlFppufNZxGrTdvK1YNREZgRzJu9XC9qlPwmCpd/lugkuWWT9PeZXz",
+     "found": [
+      "the restore's read hands back a wallet's trades",
+      "each trade becomes an op keyed by its signature",
+      "a wallet sold in full is read for good",
+      "a buy with no USD is priced at its block"
+     ]
+    }
+   ]
+  }
+ },
+ "bad": {
+  "at": "2026-11-12T12:50:35.125Z",
+  "sign": {
+   "source": "https://confidential.unrealized.trade/",
+   "pageStatus": 200,
+   "js": [
+    {
+     "url": "/app.js",
+     "status": 200,
+     "integrity": "sha384-1Cs+kXi4vC0MgG0eYnb/MVEEldR/qC5u+ZnVLhj+AfbJhb588o8ePhq8U2gSFgqv",
+     "sha384": "sha384-1Cs+kXi4vC0MgG0eYnb/MVEEldR/qC5u+ZnVLhj+AfbJhb588o8ePhq8U2gSFgqv",
+     "found": []
+    }
+   ]
+  }
+ }
+}
