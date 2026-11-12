@@ -1,7 +1,8 @@
 // node packages/signpage/test/pool-withdraw-screens/run.mjs [--shots <dir>]: the pool withdraw screen's states at 390 and
 // 1440 wide, on Solana and on Base, in the sheet it opens in over the app (src/sheet.ts), in headless Chrome under SIGN_HOST's own content security policy (public/_headers,
 // the /* rule), card withdraw-form-shows-what-you-can-send: empty, typing (a half address, before the idle check),
-// refused To (Invalid address), refused amount (Insufficient: 0.1 SOL against a 0.05 SOL deposit), both refused, and
+// refused To (Invalid address), refused amount (0.1 SOL against a 0.05 SOL deposit: the line names what can be sent,
+// Try 0.048695 SOL), both refused, and
 // ready by a tap on what can be sent, then the press. The page is test/pool-withdraw-screens/entry.ts, bundled by Vite as
 // the page's own build bundles src/main.ts, served with no network; the page's clock is the test's, so each state is the
 // one named. For each state it checks the form's data-state and lines, Withdraw offered and drawn as the paper button
@@ -49,8 +50,8 @@ const states = (c) => [
   ["empty", "", "", false, { state: "empty" }],
   ["typing", c.to.slice(0, 22), "", false, { state: "typing", now: true }],
   ["refused-to", c.to.slice(0, 22), "", false, { state: "refused", to: ["address", "Invalid address"] }],
-  ["refused-amount", c.to, c.over, false, { state: "refused", amount: ["insufficient", "Insufficient"] }],
-  ["refused-both", c.to.slice(0, 22), c.over, false, { state: "refused", to: ["address", "Invalid address"], amount: ["insufficient", "Insufficient"] }],
+  ["refused-amount", c.to, c.over, false, { state: "refused", amount: ["insufficient", `Try ${c.can}`] }],
+  ["refused-both", c.to.slice(0, 22), c.over, false, { state: "refused", to: ["address", "Invalid address"], amount: ["insufficient", `Try ${c.can}`] }],
   ["ready", ` ${c.to}\u200b`, "", true, { state: "ready", lines: { to: c.to } }],
 ];
 

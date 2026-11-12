@@ -10,6 +10,7 @@ import { usd as usdCents } from "../signin/model.ts";
 import { close, current, EMPTY, observe, txLink } from "./model.ts";
 import type { Watch, WithdrawView } from "./model.ts";
 import { useNow, useWithdrawSource } from "./source.tsx";
+import { useWithdrawOpen } from "./WithdrawPick.tsx";
 import { WORDS } from "./words.ts";
 import type { WordId } from "./words.ts";
 import "../deposit/deposit.css";
@@ -40,6 +41,7 @@ const TONE: Record<WithdrawView, { col: string; frac: number; check: boolean }> 
 
 export function WithdrawProgress({ onDeposit }: { onDeposit(): void }) {
   const src = useWithdrawSource();
+  const openWithdraw = useWithdrawOpen();
   const { pathname } = useLocation();
   const state = src.snapshot.state;
   const balance = useBalance(src.snapshot) ?? 0n;
@@ -88,7 +90,7 @@ export function WithdrawProgress({ onDeposit }: { onDeposit(): void }) {
   else if (view === "stopped") {
     const on = src.moneyOn && src.locked === null;
     foot = (
-      <button type="button" className={`dbtn ${on ? "paper" : "off"}`} disabled={!on} data-control="withdraw-again" onClick={() => void src.hop("withdraw.open", {}, { route, sheet: SHEET_ID, control: "withdraw-again", fields: {} })}>
+      <button type="button" className={`dbtn ${on ? "paper" : "off"}`} disabled={!on} data-control="withdraw-again" onClick={() => void openWithdraw({ route, sheet: SHEET_ID, control: "withdraw-again", fields: {} }, () => src.hop("withdraw.open", {}, { route, sheet: SHEET_ID, control: "withdraw-again", fields: {} }))}>
         <W id="withdraw" />
       </button>
     );

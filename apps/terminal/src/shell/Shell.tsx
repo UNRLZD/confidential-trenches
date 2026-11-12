@@ -9,6 +9,7 @@ import { SigninSheet } from "../screens/signin/SigninSheet.tsx";
 import { SigninSheetProvider } from "../screens/signin/source.tsx";
 import { DepositSheetProvider } from "../screens/deposit/source.tsx";
 import { DepositMount } from "./DepositMount.tsx";
+import { WithdrawPickProvider } from "../screens/withdraw/WithdrawPick.tsx";
 import { Footer } from "./Footer.tsx";
 import { Header, PhoneHeader } from "./Header.tsx";
 import { tellShell } from "./in-shell.ts";
@@ -30,6 +31,7 @@ export function Shell({ client, screen: S = Screen }: { client: SignpageClient; 
       <ReturnHopProvider>
         <SigninSheetProvider>
           <DepositSheetProvider>
+            <WithdrawPickProvider>
             <ShellAddress />
             <div className="shell">
               <Header />
@@ -45,6 +47,7 @@ export function Shell({ client, screen: S = Screen }: { client: SignpageClient; 
             </div>
             <SigninSheet />
             <DepositMount />
+            </WithdrawPickProvider>
           </DepositSheetProvider>
         </SigninSheetProvider>
       </ReturnHopProvider>

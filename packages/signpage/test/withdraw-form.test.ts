@@ -208,7 +208,8 @@ test("no draft mark on the kept words: Withdraw and each refusal; To, Amount and
   assert.deepEqual(marks(), [["min", "min"]], "Min $X is this form's own word, still a draft");
   f.type("amount", "50");
   await settle();
-  assert.deepEqual(marks(), [["insufficient", undefined]]);
+  // above what can be sent the line is "Try $X", this form's own draft (card withdraw-form-shows-what-you-can-send)
+  assert.deepEqual(marks(), [["insufficient", "try"]]);
   assert.equal(f.go.dataset.draftCopy, undefined);
 });
 
@@ -357,4 +358,16 @@ test("the settle pass's unmatched withdrawals are shown on the form; none, nothi
   assert.equal(notice()!.hidden, true, "read again at the tap: none now");
   const none = drawn();
   assert.equal(none.form.find((e) => e.dataset.notice === "unmatched")?.hidden ?? true, true);
+});
+
+// card withdraw-form-shows-what-you-can-send: above what the note can send, the line names what can be sent, as the
+// pool's form does (its nearest-amounts words, Try), in the vault form's own unit ($, its Min $X); Insufficient only when
+// nothing can be sent.
+test("an amount above what can be sent names what can be sent: Try $9.88; Insufficient when nothing can", async () => {
+  const r = await evaluate("alice.near", "50", ctx);
+  assert.deepEqual(r.amount, { ok: false, code: "insufficient", below: 9_880_000n });
+  assert.equal(refusalWords("insufficient", undefined, 9_880_000n), "Try $9.88");
+  const none = await evaluate("alice.near", "50", { ...ctx, available: 0n });
+  assert.deepEqual(none.amount, { ok: false, code: "insufficient" });
+  assert.equal(refusalWords("insufficient"), "Insufficient");
 });

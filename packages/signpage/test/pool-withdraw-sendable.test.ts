@@ -204,3 +204,32 @@ test("no new word: every text the screen draws is a kept word, a chain name, a s
     assert.ok(words.has(e.textContent) || value.test(e.textContent) || e.textContent === TO, JSON.stringify(e.textContent));
   }
 });
+
+// ---------- above what can be sent (the owner's run, release 120: 0.5 typed against ~0.03 SOL drew a bare refusal) ----------
+
+test("an amount above what can be sent: the line names what can be sent (Try 0.048695 SOL), the nearest-amounts words; Insufficient only when nothing can be sent", async () => {
+  assert.deepEqual(checkPoolAmount("solana", "0.5", ONE), { ok: false, code: "insufficient", below: poolSendable(ONE) });
+  const f = drawn("solana", async () => ONE);
+  f.type("to", TO);
+  f.type("amount", "0.5");
+  await settle();
+  const line = f.form.find((e) => e.dataset.for === "amount")!;
+  assert.equal(f.form.dataset.state, "refused");
+  assert.equal(line.dataset.refusal, "insufficient");
+  assert.equal(line.textContent, `${POOL_WITHDRAW_WORDS.try}0.048695 SOL`);
+  assert.equal(line.dataset.draftCopy, undefined, "Try was kept (owner 8 Nov 07:55Z)");
+  // nothing sendable: no amount to name
+  const none = drawn("base", async () => ({ ...ONE, notes: [] }));
+  none.type("amount", "0.5");
+  await settle();
+  assert.equal(none.form.find((e) => e.dataset.for === "amount")!.textContent, POOL_WITHDRAW_WORDS.insufficient);
+});
+
+test("what can be sent carries the trade box's Max beside its figure, once the funds are read", async () => {
+  const f = drawn("solana", async () => ONE);
+  await tick();
+  const max = f.row.children.find((e) => e.dataset.word === "max");
+  assert.ok(max, "a Max beside the figure");
+  assert.equal(max!.textContent, "Max");
+  assert.equal(f.row.children.indexOf(max!), f.row.children.indexOf(f.can) - 1, "Max, then the figure");
+});

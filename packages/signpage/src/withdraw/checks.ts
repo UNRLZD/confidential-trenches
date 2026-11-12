@@ -39,7 +39,7 @@ export const TOKEN_DECIMALS = 6;
 export type AddressCode = "not-account" | "vault" | "intents" | "token" | "no-account" | "unread";
 export type AmountCode = "amount" | "min" | "insufficient" | "unread";
 export type RecipientCheck = { ok: true; recipient: string } | { ok: false; code: AddressCode };
-export type AmountCheck = { ok: true; amount: bigint } | { ok: false; code: "min"; min: bigint } | { ok: false; code: Exclude<AmountCode, "min"> };
+export type AmountCheck = { ok: true; amount: bigint } | { ok: false; code: "min"; min: bigint } | { ok: false; code: "insufficient"; below?: bigint } | { ok: false; code: Exclude<AmountCode, "min" | "insufficient"> };
 
 const ACCOUNT = /^(([a-z\d]+[-_])*[a-z\d]+\.)*([a-z\d]+[-_])*[a-z\d]+$/;
 const IMPLICIT = /^([0-9a-f]{64}|0x[0-9a-f]{40})$/;
@@ -108,7 +108,8 @@ export function checkAmount(typed: unknown, { available, fee }: { available: big
   if (amount === null) return { ok: false, code: "amount" };
   if (fee !== null && amount <= fee) return { ok: false, code: "min", min: fee + 1n };
   if (available === null) return { ok: false, code: "unread" };
-  if (amount > available || (fee !== null && amount + fee > available)) return { ok: false, code: "insufficient" };
+  // above what the note can send: `below` is what can be (the note less the fee), when the fee is read and some can
+  if (amount > available || (fee !== null && amount + fee > available)) return fee !== null && available - fee > fee ? { ok: false, code: "insufficient", below: available - fee } : { ok: false, code: "insufficient" };
   if (fee === null) return { ok: false, code: "unread" };
   return { ok: true, amount };
 }

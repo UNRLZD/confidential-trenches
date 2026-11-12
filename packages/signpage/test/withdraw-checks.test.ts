@@ -158,9 +158,10 @@ test("the amount is refused above what one note can pay with its fee, and at or 
   assert.deepEqual(checkAmount("0.120001", { available, fee }), { ok: true, amount: 120_001n });
   // amount + fee must fit in the note: 9.88 fits exactly, one base unit more does not
   assert.deepEqual(checkAmount("9.88", { available, fee }), { ok: true, amount: 9_880_000n });
-  assert.deepEqual(checkAmount("9.880001", { available, fee }), { ok: false, code: "insufficient" });
-  assert.deepEqual(checkAmount("10", { available, fee }), { ok: false, code: "insufficient" });
-  assert.deepEqual(checkAmount("1000000", { available, fee }), { ok: false, code: "insufficient" });
+  // above it: what can be sent, the note less the fee (card withdraw-form-shows-what-you-can-send)
+  assert.deepEqual(checkAmount("9.880001", { available, fee }), { ok: false, code: "insufficient", below: 9_880_000n });
+  assert.deepEqual(checkAmount("10", { available, fee }), { ok: false, code: "insufficient", below: 9_880_000n });
+  assert.deepEqual(checkAmount("1000000", { available, fee }), { ok: false, code: "insufficient", below: 9_880_000n });
   // no note at all: every amount is insufficient, with or without a fee read
   assert.deepEqual(checkAmount("5", { available: 0n, fee: null }), { ok: false, code: "insufficient" });
   // the fee not read yet: an amount the notes could hold waits for it, never passes
