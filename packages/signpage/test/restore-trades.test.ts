@@ -127,3 +127,17 @@ test("a device restored from the words reads back every round trip: two closed a
   assert.ok(gets > before, "W2 read again");
   assert.deepEqual(Object.keys((await w.get("meta", TRADES_READ_KEY)) as object).sort(), [...Ws].sort());
 }));
+
+test("a restored trade op only from the signature's own transaction, with its block time; a sale only when the wallet sold the mint", async () => {
+  const { restoredTradeOps } = records as unknown as { restoredTradeOps: (w: string, b: unknown) => { key: string; rec: { kind: string } }[] };
+  const buy = JSON.parse(raw("5Qn5Lt")) as { transaction: { signatures: string[] }; blockTime: number };
+  const sale = JSON.parse(raw("32CSJ1")) as { transaction: { signatures: string[] }; blockTime: number };
+  const W = "TcYd32AdSHY5zuqSK2a7PvkDv8FQvafyTs2uS1ztkZX";
+  const [bs, ss] = [buy.transaction.signatures[0]!, sale.transaction.signatures[0]!];
+  assert.deepEqual(restoredTradeOps(W, { mint: MINT, program: "P", txs: [{ signature: bs, tx: buy }, { signature: ss, tx: sale }] }).map((o) => [o.key, o.rec.kind]), [[`restored/${bs}`, "buy"], [`restored/${ss}`, "sell"]]);
+  // the route answered another transaction for the sale's signature, or one with no block time: no op for it
+  assert.deepEqual(restoredTradeOps(W, { mint: MINT, program: "P", txs: [{ signature: bs, tx: buy }, { signature: ss, tx: buy }] }).length, 1);
+  assert.deepEqual(restoredTradeOps(W, { mint: MINT, program: "P", txs: [{ signature: bs, tx: { ...buy, blockTime: null } }] }), []);
+  // another wallet's sale of the mint is no sale of W's
+  assert.deepEqual(restoredTradeOps("8e8RsnpnL6Toqsa2Q1YPLvopDqPa3HFTdwEikCkqpQ7p", { mint: MINT, program: "P", txs: [{ signature: bs, tx: buy }, { signature: ss, tx: sale }] }).map((o) => o.rec.kind), ["buy"]);
+});

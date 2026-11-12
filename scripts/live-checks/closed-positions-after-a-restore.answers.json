@@ -1,6 +1,6 @@
 {
  "good": {
-  "at": "2026-11-12T12:50:35.088Z",
+  "at": "2026-11-12T12:52:12.411Z",
   "sign": {
    "source": "https://confidential.unrealized.trade/",
    "pageStatus": 200,
@@ -8,8 +8,8 @@
     {
      "url": "/app.js",
      "status": 200,
-     "integrity": "sha384-xcJF+fssmpJlFppufNZxGrTdvK1YNREZgRzJu9XC9qlPwmCpd/lugkuWWT9PeZXz",
-     "sha384": "sha384-xcJF+fssmpJlFppufNZxGrTdvK1YNREZgRzJu9XC9qlPwmCpd/lugkuWWT9PeZXz",
+     "integrity": "sha384-+UPPZ5MQCO016Ez8qzTexRKgmXUUQXSePGp0Dse2vrwC3eSXOZx4bR8Jv091LeBo",
+     "sha384": "sha384-+UPPZ5MQCO016Ez8qzTexRKgmXUUQXSePGp0Dse2vrwC3eSXOZx4bR8Jv091LeBo",
      "found": [
       "the restore's read hands back a wallet's trades",
       "each trade becomes an op keyed by its signature",
@@ -21,7 +21,7 @@
   }
  },
  "bad": {
-  "at": "2026-11-12T12:50:35.125Z",
+  "at": "2026-11-12T12:52:12.445Z",
   "sign": {
    "source": "https://confidential.unrealized.trade/",
    "pageStatus": 200,

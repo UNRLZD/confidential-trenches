@@ -64,11 +64,14 @@ export type RestoredTradeOp = {
 };
 
 /** W's trade ops from its buy read (see the top): its buy, then each later transaction in which W sold the mint. A
- *  transaction with no block time gives no op (its time unknown). */
+ *  transaction with no block time gives no op (its time unknown), nor one that is not the signature's own. */
 export function restoredTradeOps(w: string, buy: SolanaBuy): RestoredTradeOp[] {
   const out: RestoredTradeOp[] = [];
   for (const [i, { signature, tx }] of (buy.txs ?? []).entries()) {
-    const bt = (tx as { blockTime?: unknown } | null)?.blockTime;
+    // an answer is this signature's own transaction (its first signature), or no op: the route's word is hostile
+    const t = tx as { blockTime?: unknown; transaction?: { signatures?: unknown } } | null;
+    if (!Array.isArray(t?.transaction?.signatures) || t.transaction.signatures[0] !== signature) continue;
+    const bt = t.blockTime;
     if (!Number.isSafeInteger(bt) || (bt as number) <= 0) continue;
     const base = { stage: "filled" as const, txs: [{ chain: "solana" as const, hash: signature }], created_ms: (bt as number) * 1000, chain: "solana" as const, token: buy.mint };
     if (i === 0) out.push({ key: `restored/${signature}`, rec: { kind: "buy", ...base } });
