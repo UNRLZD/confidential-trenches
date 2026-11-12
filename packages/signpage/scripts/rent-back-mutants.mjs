@@ -142,12 +142,11 @@ export const M = [
   ["b3 the closes on a sale built bare", SELL, T, "owed === 0 && later.bare !== true && !later.last", "owed === 0 && !later.last"],
   ["b4 the closes with a tree near its page's end", SELL, T, " && !near(sizes.stateSize) && !near(sizes.labelSize);\n    let closes", ";\n    let closes"],
   ["b5 the closes with a claim owed", SELL, T, "const may = !keeps && owed === 0 && ", "const may = !keeps && "],
-  ["b6 no size fallback to the token account alone", SELL, T, "    if (closes.length > 0 && !sixFits(closes)) closes = closes.filter((c) => c.kind === \"token\");\n", ""],
-  // (every account's rent counted with the sale's named accounts left out is no plant: a sale names a volume account only
-  // on a cashback coin, whose cashback is then owed, and no close is weighed with a claim owed)
+  // (every account's rent counted with the sale's named accounts left out is no plant, nor that rent left out of what
+  // the one deposit loses: a sale names a volume account only on a cashback coin, whose cashback is then owed, and no
+  // close is weighed with a claim owed, so no account is left open where the closes are weighed)
   ["b9 the form before always makes a deposit back", SELL, T, "\"refused\" in keep || keep.value === 0n ? frame : ", ""],
   ["b10 the quote's surplus left out", SELL, T, "const surplus = expected > minOut ? expected - minOut : 0n;", "const surplus = 0n;"],
-  ["b11 the rent of an account left open left out of the one deposit", SELL, T, "if (r0 + open + surplus > least)", "if (r0 + surplus > least)"],
   ["b8 the form before's least its frame's fee and the sweep's cost even where it makes no deposit back", SELL, T, "base: r0, floor: sweepFloor });", "});"],
   // (no plant for the least the form before keeps where it makes no note: rent(0) and the token account's rent, less a
   // frame's fee, pass the sweep's cost at any rate the Rent sysvar gives, so that term never decides a sale)

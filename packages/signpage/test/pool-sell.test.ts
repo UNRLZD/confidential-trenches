@@ -1924,10 +1924,10 @@ for (const [venue, volume, bps] of [["pump", SOLANA_PUMP_PROGRAM, LOW], ["pumpsw
 }
 
 // What fits 1,232 bytes, the largest form of each venue, W holding both volume accounts: pump's curve carries all three
-// closes with mainnet's compute budget and the eight. PumpSwap's sale has no room for all three, so the token account's
-// close alone would go and a volume account stay open, its rent kept on W under the floor after its teardown frame
-// (1,991,440 with rent(0)), more than the form before loses: no close, the budget in the six on mainnet and the eight on
-// devnet. A PumpSwap
+// closes with mainnet's compute budget and the eight. PumpSwap's sale has no room for all three, so none goes (the token
+// account's close alone would leave a volume account open, its rent kept on W under the floor after its teardown frame,
+// 1,991,440 with rent(0), more than the form before loses): the budget in the six on mainnet and the eight on devnet. A
+// PumpSwap
 // cashback coin's sale makes cashback owed, so its form stays the two-step one (the claim before the close).
 test("round-trip-costs-less b: what each venue's sale carries inside 1,232 bytes", async () => {
   const closesOf = (w: World, a: Awaited<ReturnType<typeof runPoolSell>>, venue: Venue) => {
@@ -2022,10 +2022,21 @@ test("round-trip-costs-less b: the closes refused on a provider: the sale goes a
 });
 
 test("round-trip-costs-less b: a cashback claim owed keeps the two-step form; a token account a stranger's unit fills after the sell stays out of it", async () => {
-  // owed: no close in the sale, the teardown claims then closes
+  // owed: no close in the sale, the teardown claims then closes. At no slippage, where the same sale with nothing owed
+  // closes in the sale (the control), so only the claim owed keeps the form before: the owed volume account is the
+  // teardown's claim, never a close the sale weighs, and the token account alone would cost less
+  const shuts = (w: World, a: Awaited<ReturnType<typeof runPoolSell>>) => {
+    const sm = solanaDecodeMessage(sentWire(w, a).subarray(65));
+    return sm.instructions.some((x) => x.data.length === 1 && x.data[0] === 9 && sm.staticKeys[x.accounts[0]!] === VF.pumpswap.ata);
+  };
+  const free = await world({ venue: "pumpswap", ataLamports: TOKEN_RENT, volumes: [{ program: SOLANA_PUMP_AMM_PROGRAM }] });
+  const control = await runPoolSell(free.host, { ...ASK, token: VF.pumpswap.mint, slippageBps: 0 });
+  assert.equal("stage" in control && control.stage, "filled", JSON.stringify(control));
+  assert.ok(shuts(free, control), "the control closes in the sale");
   const owed = await world({ venue: "pumpswap", ataLamports: TOKEN_RENT, volumes: [{ program: SOLANA_PUMP_AMM_PROGRAM, cashback: 12_742_862n }] });
-  const a = await runPoolSell(owed.host, { ...ASK, token: VF.pumpswap.mint, slippageBps: LOW });
+  const a = await runPoolSell(owed.host, { ...ASK, token: VF.pumpswap.mint, slippageBps: 0 });
   assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
+  assert.ok(!shuts(owed, a), "a claim owed: no close");
   const m = solanaDecodeMessage(owed.c.txs.get((a as { txs: { hash: string }[] }).txs[0]!.hash)!.tx.subarray(65));
   assert.ok(!m.instructions.some((x) => x.data.length === 8 && x.data.every((b, i) => b === SOLANA_CLOSE_VOLUME_ACCUMULATOR[i])), "the owed volume account is not closed in the sale");
   assert.ok(!m.instructions.some((x) => x.data.length === 1 && x.data[0] === 9 && m.staticKeys[x.accounts[0]!] === VF.pumpswap.ata), "nor the token account");

@@ -1,15 +1,15 @@
 {
   "_note": {
-    "good": "card/round-trip-costs-less build (mainnet) with the fold of the reviews of 20ba2481b and 2c4682ec9: packages/signpage/index.html and public/app.js as build-app.mjs wrote them on that branch: PASS",
+    "good": "card/round-trip-costs-less build (mainnet) with the fold of the reviews of 20ba2481b and 2c4682ec9 and the size fallback to the token account alone taken out: packages/signpage/index.html and public/app.js as build-app.mjs wrote them on that branch: PASS",
     "bad": "main b9361e809 build (mainnet), before this card: packages/signpage/index.html and public/app.js as build-app.mjs wrote them there: FAIL, every mark named",
     "beforeReview": "card/round-trip-costs-less 20ba2481b build (mainnet), before the review of 20ba2481b was folded: FAIL on the rules that review moved",
-    "beforeFill": "card/round-trip-costs-less 8c08894bd build (mainnet), before the closes were set at every fill against the least the form before can lose: FAIL on the cost rule alone"
+    "beforeFill": "card/round-trip-costs-less 8c08894bd build (mainnet), before the closes were set at every fill against the least the form before can lose: FAIL on the cost rule and on the size fallback to the token account alone it still had"
   },
   "good": {
-    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-xlY6DXKpeY/NTPN2PyIxHou9aD22dKM8yy1CO/fOiavyxZgW69Q2/cM2lLazzwtO\"></script>\n  </head>\n  <body></body>\n</html>\n",
-    "sha384": "sha384-xlY6DXKpeY/NTPN2PyIxHou9aD22dKM8yy1CO/fOiavyxZgW69Q2/cM2lLazzwtO",
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-Dkme6ORs8IZVtlLYrrlSF5r2158uAzCu/w0cwRWZ9EIN92NNlvLaWWshAcw20Keg\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-Dkme6ORs8IZVtlLYrrlSF5r2158uAzCu/w0cwRWZ9EIN92NNlvLaWWshAcw20Keg",
     "carries": {
-      "a full sell with no claim owed closes W's accounts in the sale, never on its last build, a bare one or a tree near its page's end; all, else the token account alone, else none, as fits the size": true,
+      "a full sell with no claim owed closes W's accounts in the sale, never on its last build, a bare one or a tree near its page's end; all of them where they fit the size, else none": true,
       "the closes only where, at every fill from min out to the expected out, they lose no more than the least the form before can: one more deposit's cost under the sweep's floor, a teardown frame's fee for each account left open, a frame's fee alone where that form makes no deposit back": true,
       "the sale's deposit takes the closes' rent, W kept at rent(0)": true,
       "a simulation that refuses the closes sells with none; a close failed on chain builds the sale again bare, never ending the request on it": true,
@@ -28,7 +28,7 @@
     "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-Dag0rSWPXOaLdRbi52nSQr0qxs9MDQCh5OuDtrcycwLRFkiKvf0gi6s9qDRyLM5A\"></script>\n  </head>\n  <body></body>\n</html>\n",
     "sha384": "sha384-Dag0rSWPXOaLdRbi52nSQr0qxs9MDQCh5OuDtrcycwLRFkiKvf0gi6s9qDRyLM5A",
     "carries": {
-      "a full sell with no claim owed closes W's accounts in the sale, never on its last build, a bare one or a tree near its page's end; all, else the token account alone, else none, as fits the size": false,
+      "a full sell with no claim owed closes W's accounts in the sale, never on its last build, a bare one or a tree near its page's end; all of them where they fit the size, else none": false,
       "the closes only where, at every fill from min out to the expected out, they lose no more than the least the form before can: one more deposit's cost under the sweep's floor, a teardown frame's fee for each account left open, a frame's fee alone where that form makes no deposit back": false,
       "the sale's deposit takes the closes' rent, W kept at rent(0)": false,
       "a simulation that refuses the closes sells with none; a close failed on chain builds the sale again bare, never ending the request on it": false,
@@ -47,7 +47,7 @@
     "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-Nkyl1yXuJqCdm7Pd7tifE0xi9Y6a26LmY4ECIOE1sBrzu+CCorl8Wt9G9ORmKXtT\"></script>\n  </head>\n  <body></body>\n</html>\n",
     "sha384": "sha384-Nkyl1yXuJqCdm7Pd7tifE0xi9Y6a26LmY4ECIOE1sBrzu+CCorl8Wt9G9ORmKXtT",
     "carries": {
-      "a full sell with no claim owed closes W's accounts in the sale, never on its last build, a bare one or a tree near its page's end; all, else the token account alone, else none, as fits the size": false,
+      "a full sell with no claim owed closes W's accounts in the sale, never on its last build, a bare one or a tree near its page's end; all of them where they fit the size, else none": false,
       "the closes only where, at every fill from min out to the expected out, they lose no more than the least the form before can: one more deposit's cost under the sweep's floor, a teardown frame's fee for each account left open, a frame's fee alone where that form makes no deposit back": false,
       "the sale's deposit takes the closes' rent, W kept at rent(0)": true,
       "a simulation that refuses the closes sells with none; a close failed on chain builds the sale again bare, never ending the request on it": true,
@@ -66,7 +66,7 @@
     "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-zaK3/UZqe4xRcamg/wM+Vxg0M5v7LryrhdtkOwPbOTIYsqffNl6U7vga6F2W/RRM\"></script>\n  </head>\n  <body></body>\n</html>\n",
     "sha384": "sha384-zaK3/UZqe4xRcamg/wM+Vxg0M5v7LryrhdtkOwPbOTIYsqffNl6U7vga6F2W/RRM",
     "carries": {
-      "a full sell with no claim owed closes W's accounts in the sale, never on its last build, a bare one or a tree near its page's end; all, else the token account alone, else none, as fits the size": true,
+      "a full sell with no claim owed closes W's accounts in the sale, never on its last build, a bare one or a tree near its page's end; all of them where they fit the size, else none": false,
       "the closes only where, at every fill from min out to the expected out, they lose no more than the least the form before can: one more deposit's cost under the sweep's floor, a teardown frame's fee for each account left open, a frame's fee alone where that form makes no deposit back": false,
       "the sale's deposit takes the closes' rent, W kept at rent(0)": true,
       "a simulation that refuses the closes sells with none; a close failed on chain builds the sale again bare, never ending the request on it": true,

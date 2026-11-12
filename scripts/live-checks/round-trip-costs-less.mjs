@@ -8,7 +8,7 @@
 // minifier renames, never restructures them):
 //   - step b, the sale: a full sell with no claim owed closes W's token account and its volume accounts after the
 //     venue's sell and before the deposit, never on its last build, a bare one, or a tree near its page's end; all of
-//     them, else the token account alone, else none, as fits 1,232 bytes; only where, at every fill from min out to the
+//     them where they fit 1,232 bytes, else none; only where, at every fill from min out to the
 //     quote's expected out, that loses no more than the least the form before can (what W keeps under one more
 //     deposit's cost or past the rent back's sweep floor, each account left open a teardown frame's fee; a frame's fee
 //     alone where that form's sale makes no deposit back); the deposit takes the closes'
@@ -54,8 +54,8 @@ const R = String.raw;
 
 /** Each rule's mark in the bundle, by what it holds. */
 export const MARKS = Object.freeze({
-  "a full sell with no claim owed closes W's accounts in the sale, never on its last build, a bare one or a tree near its page's end; all, else the token account alone, else none, as fits the size": tied(
-    re(R`(?<may>${I})=!(?<k>${I})&&(?<o>${I})===0&&(?<l>${I})\.bare!==!0&&!\k<l>\.last&&!(?<nr>${I})\((?<sz>${I})\.stateSize\)&&!\k<nr>\(\k<sz>\.labelSize\)\?(?<co>${I})\(${I}\.address,${I},${I}\.program,${I}\.accounts,${I}\):\[\],(?<fit>${I})=(?<c>${I})=>${I}\(${I}\(${I}\.address,\[\.\.\.${I}\(${I}\),\.\.\.${I},\.\.\.(?<sh>${I})\(${I}\.address,\k<c>\),${I}\(${I},${I},${I}\.address,${I},${I},${I},!1\)\],${I}\.blockhash,\[\]\)\.message\)\.length<=(?<max>${I});if\(\k<may>\.length>0&&!\k<fit>\(\k<may>\)&&\(\k<may>=\k<may>\.filter\((?<e>${I})=>\k<e>\.kind===` + "`token`" + R`\)\),\k<may>\.length>0&&!\k<fit>\(\k<may>\)&&\(\k<may>=\[\]\),\k<may>\.length>0\)\{`),
+  "a full sell with no claim owed closes W's accounts in the sale, never on its last build, a bare one or a tree near its page's end; all of them where they fit the size, else none": tied(
+    re(R`(?<may>${I})=!(?<k>${I})&&(?<o>${I})===0&&(?<l>${I})\.bare!==!0&&!\k<l>\.last&&!(?<nr>${I})\((?<sz>${I})\.stateSize\)&&!\k<nr>\(\k<sz>\.labelSize\)\?(?<co>${I})\(${I}\.address,${I},${I}\.program,${I}\.accounts,${I}\):\[\];if\(\k<may>\.length>0&&!\((?<c>${I})=>${I}\(${I}\(${I}\.address,\[\.\.\.${I}\(${I}\),\.\.\.${I},\.\.\.(?<sh>${I})\(${I}\.address,\k<c>\),${I}\(${I},${I},${I}\.address,${I},${I},${I},!1\)\],${I}\.blockhash,\[\]\)\.message\)\.length<=(?<max>${I})\)\(\k<may>\)&&\(\k<may>=\[\]\),\k<may>\.length>0\)\{`),
     (g) => [R`[,; ]${esc(g.max)}=1232[,;]`, R`[,; ]${esc(g.nr)}=(${I})=>${I}-\1%${I}<=64[,;]`],
   ),
   "the closes only where, at every fill from min out to the expected out, they lose no more than the least the form before can: one more deposit's cost under the sweep's floor, a teardown frame's fee for each account left open, a frame's fee alone where that form makes no deposit back": tied(

@@ -4,7 +4,8 @@
 // named. beforeReview: this card's 20ba2481b build, before the review of it was folded: FAIL on the rules that review
 // moved (the cost rule decided after the size fallback, no close on the last build, what the sale left read from the
 // balances before it, the proven buy kept, and the rent backs' reads). beforeFill: its 8c08894bd build, the cost rule
-// decided at the quote's expected out against a model of the form before: FAIL on that rule. Planted on the good one: another /app.js, no pin,
+// decided at the quote's expected out against a model of the form before, with the size fallback to the token account
+// alone: FAIL on those two rules. Planted on the good one: another /app.js, no pin,
 // each mark taken away: each FAIL; and the good build's lines (round-trip-costs-less.excerpt.txt, cut from its
 // public/app.js) with one rule changed: each FAIL on that rule's mark alone.
 import assert from "node:assert/strict";
@@ -33,10 +34,10 @@ test("recorded answer beforeReview (20ba2481b's build): FAIL on the rules the re
   assert.deepEqual(v.lines, [0, 1, 5, 6, 7, 8, 9, 10, 11, 12].map((i) => ALL[i]));
 });
 
-test("recorded answer beforeFill (8c08894bd's build): FAIL on the cost rule alone, decided there at the expected out against a model of the form before", () => {
+test("recorded answer beforeFill (8c08894bd's build): FAIL on the size fallback to the token account alone and the cost rule, decided there at the expected out against a model of the form before", () => {
   const v = judge(ANSWERS.beforeFill);
   assert.equal(v.ok, false);
-  assert.deepEqual(v.lines, [ALL[1]]);
+  assert.deepEqual(v.lines, [ALL[0], ALL[1]]);
 });
 
 test("planted on the good answer: each fact taken away FAILs", () => {
@@ -55,7 +56,8 @@ test("the good build's lines carry every mark; each with its rule changed FAILs 
     ["&&!n.last&&!Oe(L.stateSize)", "&&!Oe(L.stateSize)", 0],
     ["xe===0&&n.bare!==!0", "n.bare!==!0", 0],
     ["&&!Oe(L.stateSize)&&!Oe(L.labelSize)?", "?", 0],
-    ["(Ae=Ae.filter(e=>e.kind===`token`))", "(Ae=[])", 0],
+    ["(Ae)&&(Ae=[]),Ae.length>0){", "(Ae)&&(Ae=Ae.filter(e=>e.kind===`token`)),Ae.length>0){", 0],
+    ["(Ae)&&(Ae=[]),Ae.length>0){", "(Ae)&&!1,Ae.length>0){", 0],
     [",td=1232,", ",td=1300,", 0],
     ["Oe=e=>Qv-e%Qv<=64,", "Oe=e=>Qv-e%Qv<=128,", 0],
     // the cost rule
@@ -74,7 +76,7 @@ test("the good build's lines carry every mark; each with its rule changed FAILs 
     // a refusal or failure of the closes
     ["if(Ae.length>0){Ae=[];continue}", "", 3],
     [",o&&(n.bare=!0)", "", 3],
-    ["r.every(e=>_G(e.err,a)||gG(e.err,qe)),{end:c}", "r.every(e=>_G(e.err,a)),{end:c}", 3],
+    ["r.every(e=>_G(e.err,a)||gG(e.err,Ke)),{end:c}", "r.every(e=>_G(e.err,a)),{end:c}", 3],
     ["s=i&&!n.last&&r.every", "s=i&&r.every", 3],
     // the rule's closes
     ["if(S.length<C.length)return X(`closes`);", "", 4],
@@ -84,7 +86,7 @@ test("the good build's lines carry every mark; each with its rule changed FAILs 
     ["if(r.mint===n&&r.owner===t)return 0n", "if(r.mint===n)return 0n", 5],
     ["if(r.mint===n&&r.owner===t)return 0n", "if(r.mint===n&&r.owner===t)return null", 5],
     // the record's buy
-    ["t?.buy!==void 0&&(tt.buy=t.buy),", "", 6],
+    ["t?.buy!==void 0&&(et.buy=t.buy),", "", 6],
     // the finding read, the settled skip, the empty list, the setup only with a W
     ["let p=await AG(o[1],f)", "let p=await AG(o[0],f)", 7],
     ["r.seen===void 0:r.seen!==i.seen)&&m.push(t)", "!0:!0)&&m.push(t)", 7],

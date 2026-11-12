@@ -1351,8 +1351,9 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later, w: ListedBuy
     // card round-trip-costs-less: a sell that empties W's holding, with nothing owed a later claim, closes W's token
     // account and the volume accounts that owe nothing to W after the venue's sell and before its deposit, so their rent
     // goes into the same one note: no teardown frame, no second deposit, W left at rent(0) and what the venue pays over
-    // min out. Only what fits 1,232 bytes with the six: all of them, else the token account alone, else none (the
-    // teardown after the fill closes the rest, as before). Never with a tree within SOLANA_POOL_NEXT_PAGE_WINDOW of its
+    // min out. Only when all of them fit 1,232 bytes with the six, else none (the teardown after the fill closes them, as
+    // before): the token account alone would leave a volume account open, rent(0) and its rent kept on W, more than the
+    // most the form before loses (below), so it never goes. Never with a tree within SOLANA_POOL_NEXT_PAGE_WINDOW of its
     // page's end: the eight is priced there at a next page's opening that an insert landing first may not need, and what
     // it does not spend would stay on W under the sweep's floor; the form before the card sweeps it into the note
     // A sale's last build (later.last) carries none from the start, so a close failed on chain never spends its last try.
@@ -1360,14 +1361,15 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later, w: ListedBuy
     const may = !keeps && owed === 0 && later.bare !== true && !later.last && !near(sizes.stateSize) && !near(sizes.labelSize);
     let closes: SolanaSellClose[] = may ? solanaSellClosesOf(w.address, token, tokens.program, tokens.accounts, named) : [];
     const sixFits = (cs: readonly SolanaSellClose[]): boolean => wireOf(solanaCompileV0(w.address, [...budgetIxs(budget), ...steps, ...solanaSellCloses(w.address, cs), depositIx(program, pool, w.address, sizes, pre, minOut, false)], bh.blockhash, []).message).length <= SOLANA_MAX_TX_BYTES;
-    if (closes.length > 0 && !sixFits(closes)) closes = closes.filter((c) => c.kind === "token");
     if (closes.length > 0 && !sixFits(closes)) closes = [];
-    // Only where it costs less, decided on the closes that fit, at every fill the sale can get, from min out up to the
-    // quote's expected out (review of 2c4682ec9: a fill at min out can leave W under the floor where the expected one
-    // would not). Beside the sale's own deposit, which both forms pay, the one deposit loses what W keeps after it: rent(0),
-    // what the venue pays over min out and the rent of every account whose close did not fit, whose teardown frame then
-    // costs its fee; that goes into a note only once the rent back's sweep makes one at the floor, at one more deposit's
-    // cost (solanaSweepCost), and under that it stays on W. It is set against the least the form before can lose, never a
+    // Only where it costs less, at every fill the sale can get, from min out up to the quote's expected out (review of
+    // 2c4682ec9: a fill at min out can leave W under the floor where the expected one would not). Beside the sale's own
+    // deposit, which both forms pay, the one deposit loses what W keeps after it: rent(0), what the venue pays over min
+    // out and the rent of every account the sale names and so cannot close, whose teardown frame then costs its fee (none
+    // today: a sale names a volume account only on a cashback coin, whose claim owed keeps the form before; the guard
+    // holds if a venue names it on every coin); that goes into a note only once the rent back's sweep makes one at the
+    // floor, at one more deposit's cost (solanaSweepCost), and under that it stays on W. It is set against the least the
+    // form before can lose, never a
     // model of it: a sale with no deposit back (its reserve refused, or its note under the floor) leaves its lamports on W
     // and the sweep is that form's one deposit, so a teardown frame's fee; any other, a frame's fee and the sweep's cost,
     // or, where W keeps too little to sweep, all it keeps: at least rent(0) and every account the teardown closes after
