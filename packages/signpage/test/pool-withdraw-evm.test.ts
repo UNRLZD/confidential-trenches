@@ -494,6 +494,8 @@ type RunPlant = {
   rested?: bigint[];
   /** an address with code (eth_getCode answers 0x6080 and a send to it is estimated at 30,000 gas) */
   codeAt?: string;
+  /** that send's estimate by its sender (default 30,000) */
+  codeGas?: (from: string) => bigint;
 };
 async function runWorld(plant: RunPlant = {}) {
   const ws = await openWalletStore({ indexedDB: new IDBFactory() });
@@ -588,7 +590,10 @@ async function runWorld(plant: RunPlant = {}) {
     }
     const coded = (a: unknown) => plant.codeAt !== undefined && lower(String(a)) === lower(plant.codeAt);
     if (method === "eth_getCode") return coded(params[0]) ? "0x6080" : "0x";
-    if (method === "eth_estimateGas") return q(coded((params[0] as { to?: string }).to) ? 30_000n : EVM_ONWARD_GAS);
+    if (method === "eth_estimateGas") {
+      const c = params[0] as { from: string; to?: string };
+      return q(coded(c.to) ? (plant.codeGas?.(lower(c.from)) ?? 30_000n) : EVM_ONWARD_GAS);
+    }
     if (method === "eth_call") {
       const c = params[0] as { to: string; data?: string };
       if (c.to.toLowerCase() === "0x420000000000000000000000000000000000000f") return word(c.data!.startsWith("0xf1c7a58b") ? 900n : 0n);
@@ -1124,4 +1129,42 @@ test("(review of cb287f4f5 P3-1) a queue that takes the note during the part's w
   assert.equal(took.dropped, 1, "dropped once, after the wait");
   assert.equal(got.stage, "sent", got.cause);
   assert.ok(world.chain.trees.some((t) => t.newest && t.beforeMs === NOW + 3_001n), "proved on the newest cut that holds it");
+});
+
+// ---------- review of cb287f4f5 P3-2: a To with code makes the run plan again; the plan that runs is the one checked ----------
+// a rested note whose whole value sends PART at a plain send's cost (the first plan), and a fresh one; a To with code
+// prices W's send higher, so the rested note no longer sends PART and the run plans again on the fresh note
+const REPLAN = { thisEpoch: true, rested: [PART + FEE + RUN_WFEE] } as const;
+const CODE_TO = "0x2222222222222222222222222222222222222222";
+
+test("(review of cb287f4f5 P3-2) a re-plan's Ws are checked against To: a To with code that is the fresh note's W, which only the re-plan spends, is refused before any note moves", async () => {
+  const probe = await runWorld(REPLAN);
+  const world = await runWorld({ ...REPLAN, codeAt: probe.w });
+  assert.equal(lower(world.w), lower(probe.w), "the same seed and notes: the same fresh W");
+  const got = await runEvmPoolWithdraw(world.h, RUN_ASK, world.w, PART, 10n ** 15n);
+  assert.equal(got.stage, "stopped");
+  assert.match(got.cause ?? "", /\bto\b/, `refused on To: ${got.cause}`);
+  assert.deepEqual(world.chain.bound.filter((x) => x === lower(world.w) || lower(world.extras[0]!.w) === x), [], "no note bound");
+  assert.equal((await world.notes.get(world.noteId))?.state, "UNSPENT");
+});
+
+test("(review of cb287f4f5 P3-2) a To with code is run from the first W and part of the plan that runs (the re-plan's), before any note is bound", async () => {
+  const world = await runWorld({ ...REPLAN, codeAt: CODE_TO });
+  const got = await runEvmPoolWithdraw(world.h, RUN_ASK, CODE_TO, PART, 10n ** 15n);
+  const firstBind = world.chain.bound.indexOf(lower(world.w));
+  assert.ok(firstBind >= 0, `the fresh note's W bound: ${got.stage} ${got.cause}`);
+  const runs = (from: string) => world.chain.calls.filter((c) => c.to === lower(CODE_TO) && c.from === lower(from) && c.binds <= firstBind);
+  assert.ok(runs(world.extras[0]!.w).some((c) => c.method === "eth_estimateGas"), "the first plan's W, first");
+  assert.deepEqual([...new Set(runs(world.w).map((c) => c.method))].sort(), ["eth_call", "eth_estimateGas"], "then the re-plan's W: estimated and run, before its bind");
+  // the run went on past the check to the release (this world's receipts name TO, so W's send to CODE_TO stays owed)
+  assert.equal(got.stage, "in_transit", got.cause);
+});
+
+test("(review of cb287f4f5 P3-2) a To with code that needs more gas from the re-plan's W than the plan was priced at: stopped before any note moves", async () => {
+  const probe = await runWorld(REPLAN);
+  const world = await runWorld({ ...REPLAN, codeAt: CODE_TO, codeGas: (from) => (from === lower(probe.w) ? 40_000n : 30_000n) });
+  const got = await runEvmPoolWithdraw(world.h, RUN_ASK, CODE_TO, PART, 10n ** 15n);
+  assert.equal(got.stage, "stopped");
+  assert.match(got.cause ?? "", /\bgas\b/, `stopped on gas: ${got.cause}`);
+  assert.deepEqual(world.chain.bound.filter((x) => x === lower(world.w) || lower(world.extras[0]!.w) === x), [], "no note bound");
 });

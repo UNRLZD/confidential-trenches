@@ -537,16 +537,25 @@ export async function runEvmPoolWithdraw(h: EvmWithdrawHost, ask: PoolAsk, to: s
     const first = await evmWithdrawCosts(h);
     const plan0 = planOf(first);
     if (plan0 === null) stop("plan");
-    const ws = await seedUse(h, async (seed) => {
+    const wsOf = (ps: readonly WithdrawPart[]): Promise<string[]> => seedUse(h, async (seed) => {
       const out: string[] = [];
-      for (const p of plan0!) out.push(spendOf(seed, (await notes.get(p.noteId))!).w);
+      for (const p of ps) out.push(spendOf(seed, (await notes.get(p.noteId))!).w);
       return out;
     });
+    const ws = await wsOf(plan0!);
     if (evmToRefused(to, h.pin, ws)) stop("to");
     // To read on both RPCs before any note moves: a To with code is run from the first part's W, or refused
     const costs = await evmWithdrawCosts(h, { to, from: ws[0]!, value: plan0![0]!.part }, first.fee);
     const plan = costs.wFee === first.wFee && costs.fee === first.fee ? plan0! : planOf(costs);
     if (plan === null) stop("plan");
+    // a re-plan (W's send priced higher to a To with code) spends other notes: their Ws are checked against To, and a To
+    // with code is run again from the first W and part of the plan that runs; a send that needs more gas from there than
+    // the plan was priced at stops before any note moves (review of cb287f4f5 P3-2)
+    if (plan !== plan0) {
+      const ws1 = await wsOf(plan!);
+      if (evmToRefused(to, h.pin, ws1)) stop("to");
+      if (costs.toHasCode && (await evmWithdrawCosts(h, { to, from: ws1[0]!, value: plan![0]!.part }, first.fee)).gas > costs.gas) stop("gas");
+    }
     if (BigInt(plan!.length) * (costs.fee + costs.wFee) > maxFee) stop("max_fee");
     const wCap = maxFee / BigInt(plan!.length) - costs.fee;
     // from here to the run's end no proof queue (any tab's) takes a planned note; each part moves the deadline on
