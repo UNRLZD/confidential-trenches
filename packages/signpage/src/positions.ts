@@ -12,8 +12,9 @@
 //   position, at the finder's amount. A token the finder lists in W that W's buy mint does not name (one
 //   sent to W by anyone) is no position: not listed, no Sell, and nothing is read for it. A W takes one buy only (a W is
 //   its note's, and a note spends once: wallet/src/pool/queue.ts jOf and derive/keys.ts walletPath), so its buy mint
-//   names W's one holding. A device restored from the words has no buy mints (src/pool-restore.ts writes notes only), so
-//   it shows no position until it buys.
+//   names W's one holding. A device restored from the words gets each W's buy mint back from W's own buy transaction
+//   (src/sol-buy-records.ts, after the restore and at each load, in the background), so its rows come in as their Ws
+//   are read; a W whose buy it cannot read shows nothing.
 // - Display only, from one reader: a position's amount is what the finder's one read of its W says, never a read a
 //   sell signs on; a sell reads its W again on two providers before it signs (pool-sell.ts tokenHeld).
 // - The finder: the Ws the pool's spent notes paid (../../wallet/src/pool/buy-wallets.ts derivedBuyWallets, the one
@@ -511,7 +512,7 @@ export type PassHold = { feed(found: readonly FoundWallet[]): void; release(): v
 export type PassRun = { signal: AbortSignal; found?: readonly FoundWallet[]; shown?: (positions: Position[]) => void };
 
 /** The positions of `pass`, one pass at a time, kept between passes. */
-export function positionsCache(pass: (memo: PassMemo, run: PassRun) => Promise<PassResult>, o: { kept?: () => Promise<readonly Position[] | null>; retryMs?: number | ((tries: number) => number); retries?: number; setTimer?: (f: () => void, ms: number) => unknown; clearTimer?: (t: unknown) => void } = {}): PositionsCache {
+export function positionsCache(pass: (memo: PassMemo, run: PassRun) => Promise<PassResult>, o: { kept?: () => Promise<readonly Position[] | null>; retryMs?: number | ((tries: number) => number); retries?: number; setTimer?: (f: () => void, ms: number) => unknown; clearTimer?: (t: unknown) => void; preempted?: () => () => void } = {}): PositionsCache {
   // a fixed wait, or the wait before the try after `tries` tries (a back off)
   const retryMs = (tries: number): number => (typeof o.retryMs === "function" ? o.retryMs(tries) : (o.retryMs ?? POSITIONS_RETRY_MS));
   const retries = o.retries ?? POSITIONS_RETRIES;
@@ -625,10 +626,15 @@ export function positionsCache(pass: (memo: PassMemo, run: PassRun) => Promise<P
       holds++;
       current?.abort();
       if (timer !== null) clearTimer(timer), (timer = null);
+      // another background read the sell's read stops too (`preempted`: the buy records' rebuild), its end given back
+      // once, a sign out between included
+      const also = o.preempted?.();
       let ended = false;
       const end = (found: readonly FoundWallet[] | null): void => {
-        if (ended || g !== gen) return;
+        if (ended) return;
         ended = true;
+        also?.();
+        if (g !== gen) return;
         holds--;
         if (!started) return;
         if (found !== null) fed = found;

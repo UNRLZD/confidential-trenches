@@ -29,6 +29,9 @@ registerHooks({
     const r = next(url, context);
     if (url.endsWith("/signpage/src/pool-testnet.ts"))
       return { ...r, source: wrap(String(r.source), "testnetPool", "export function testnetPool(page, over) { return { ...testnetPool__real(page, over), readyWith: async (read) => ({ ready: globalThis.__ctReady, value: await read() }) }; }") };
+    // the restore host main.ts builds, kept for the wiring test below
+    if (url.endsWith("/signpage/src/pool-restore.ts"))
+      return { ...r, source: wrap(String(r.source), "poolRestore", "export function poolRestore(h) { globalThis.__ctRestoreHost = h; return poolRestore__real(h); }") };
     if (url.endsWith("/signpage/src/pool-price.ts"))
       return { ...r, source: wrap(String(r.source), "poolPrices", "export function poolPrices(deps) { return poolPrices__real({ ...deps, read: globalThis.__ctPriceRead, after: (ms, fn) => void setTimeout(fn, ms).unref() }); }") };
     return r;
@@ -288,6 +291,34 @@ test("pool.address's quote reads the price for the origin asked (main.ts pricedF
   const other = await ask({ chain: "solana", origin_asset: "nep141:wrap.near", amount: "25" });
   assert.equal(other.error?.code, "not_allowed", JSON.stringify(other));
   assert.deepEqual(calls.slice(from).filter((c) => c.url.includes("/oneclick/")), [], "no quote asked for an unpriced origin");
+});
+
+test("review of d5699312: on the mainnet build pool.address gives no Base or Robinhood U_X (the pools are pinned, but a deposit there has no carry into the pool nor a way out yet): refused not_allowed, as Solana's is answered", async () => {
+  const ask = async (data: Record<string, unknown>): Promise<{ ok?: boolean; result?: unknown; error?: { code: string } }> => {
+    const id = crypto.randomUUID();
+    const e = new Event("message");
+    Object.defineProperties(e, { origin: { value: APP_ORIGIN }, source: { value: frameWindow }, data: { value: { v: 1, id, type: "pool.address", ...data } } });
+    win.dispatchEvent(e);
+    for (let t = 0; t < 1500; t++) {
+      const a = posted.find((m) => m.id === id);
+      if (a) return a;
+      await new Promise((ok) => setTimeout(ok, 10));
+    }
+    throw new Error("no answer to pool.address");
+  };
+  let named: { ok?: boolean } = {};
+  for (let t = 0; t < 50 && !named.ok; t++) named = await ask({ chain: "solana" });
+  assert.equal(named.ok, true, JSON.stringify(named));
+  for (const chain of ["base", "robinhood"]) {
+    const got = await ask({ chain });
+    assert.equal(got.error?.code, "not_allowed", `${chain}: ${JSON.stringify(got)}`);
+  }
+});
+
+test("review of 56a57ed2: main.ts's restore host says this mainnet build gives a deposit address on Solana alone, as pool.address does, so a Solana-only restore still reads Solana's U_X and no Base or Robinhood pool stalls it", () => {
+  const h = (globalThis as { __ctRestoreHost?: { addressed?: (chain: string) => boolean } }).__ctRestoreHost;
+  assert.ok(h?.addressed, "the page's restore host has its addressed wiring");
+  assert.deepEqual(["solana", "base", "robinhood"].map((c) => [c, h.addressed!(c)]), [["solana", true], ["base", false], ["robinhood", false]]);
 });
 
 // last in this file: pool.withdraw opens the page's screen, and while a sheet shows the shell reads no message from the

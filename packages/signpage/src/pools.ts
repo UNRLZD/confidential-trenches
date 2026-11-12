@@ -61,8 +61,8 @@ export function pagePoolsOf(network: "mainnet" | "testnet", solPins = SOL_POOLS,
 
 /**
  * The page's pool table on its network (../../wallet/src/pool/network.ts POOL_TESTNET): mainnet's pins in SIGN_HOST's
- * build (the Solana pool SOL_POOLS.mainnet pins, card sol-pools-mainnet-pin), devnet's in the testnet build. EVM_POOLS
- * pins no EVM pool yet, mainnet or testnet, so neither table has an EVM entry.
+ * build (the Solana pool SOL_POOLS.mainnet pins, card sol-pools-mainnet-pin, and Base's and Robinhood's EVM_POOLS pins,
+ * card evm-pools-on-mainnet), devnet's and the two EVM testnets' in the testnet build.
  */
 export const PAGE_POOLS: readonly BalancePool[] = pagePoolsOf(POOL_TESTNET ? "testnet" : "mainnet");
 

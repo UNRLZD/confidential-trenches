@@ -71,6 +71,21 @@ test("TOKEN_URL: the chain and the id are the query, both encoded; the chain def
   assert.equal(source.TOKEN_URL("0xab", "robinhood"), "https://ct-api.unrealized.trade/v1/market/token?chain=robinhood&token=0xab");
 });
 
+test("loadToken on NEAR: GET /v1/market/token?chain=near&token=<account id>, ready with that token's row; a row of another id or chain is the error state", async () => {
+  for (const id of ["token.rhealab.near", "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1"]) {
+    const near = { ...answer, row: { ...row, chain: "near", token: id } };
+    const { fetchFn, calls } = helper({ body: near });
+    const d = await source.loadToken!("near", id, fetchFn);
+    assert.equal(d.status === "ready" && d.row.token, id);
+    assert.equal(d.status === "ready" && d.row.chain, "near");
+    assert.deepEqual(calls.map((c) => c.url), [`https://ct-api.unrealized.trade/v1/market/token?chain=near&token=${id}`]);
+    assert.deepEqual(parseTokenRoute({ chain: "near", id }), { chain: "near", id });
+    assert.deepEqual(await source.loadToken!("near", id, helper({ body: { ...near, row: { ...near.row, token: "wrap.near" } } }).fetchFn), { status: "error" });
+    assert.deepEqual(await source.loadToken!("near", id, helper({ body: { ...near, row: { ...near.row, chain: "base" } } }).fetchFn), { status: "error" });
+    assert.deepEqual(await source.loadToken!("near", id, helper({ status: 404, body: { error: { code: "not_found" } } }).fetchFn), { status: "empty" });
+  }
+});
+
 test("loadToken: an unknown id (the helper answers 404) is the not-found state, not the error state", async () => {
   assert.deepEqual(await source.loadToken!("solana", "nope", helper({ status: 404, body: { error: { code: "not_found" } } }).fetchFn), { status: "empty" });
 });
