@@ -21,7 +21,7 @@
 
 /* The pick of where to withdraw from (WithdrawPick.tsx, card withdraw-form-shows-what-you-can-send): one row per place
    that holds money, its chain's mark (search.css .srch-cm), its name and its balance, as the portfolio's pool rows. */
-.wpk-row { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 48px; padding: 0 12px; border: 1px solid var(--line, #1f1f1f); border-radius: 10px; background: transparent; color: var(--text-1); font: 400 14px var(--font-ui); cursor: pointer; }
+.wpk-row { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 48px; padding: 0 12px; border: 1px solid var(--border-panel); border-radius: 10px; background: transparent; color: var(--text-1); font: 400 14px var(--font-ui); cursor: pointer; }
 .wpk-row + .wpk-row { margin-top: 8px; }
 .wpk-row:hover:not(:disabled) { background: rgba(255,255,255,.04); }
 .wpk-row:disabled { opacity: .5; cursor: default; }

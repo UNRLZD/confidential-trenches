@@ -61,7 +61,7 @@ export function WithdrawPickSheet({ places, locked, control, onPick, onClose }: 
       <aside className="dep-box" aria-label={WORDS.withdraw.text}>
         <div className="grab"><i /></div>
         <div className="dhd">
-          <span />
+          <span className="bal" />
           <button type="button" className="dep-x" aria-label={WORDS.close.text} onClick={onClose}>
             <Icon name="x" size={14} stroke={1.4} />
           </button>
