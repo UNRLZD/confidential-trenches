@@ -33,6 +33,7 @@ const BC = globalThis.BroadcastChannel;
 };
 const { evmBuyCalldata } = await import("../src/evm-send.ts");
 const { EVM_POSITION_COSTS_KEY } = await import("../src/pool-buy-evm.ts");
+const { EVM_CARRY_DONE_KEY } = await import("../src/pool-carry-evm.ts");
 const { evmType2Hash, rebuildEvmHoldings } = await import("../src/pool-holdings-evm.ts");
 type Host = import("../src/pool-holdings-evm.ts").EvmHoldingsHost;
 const { evmPositionsPass } = await import("../src/positions-evm.ts");
@@ -118,7 +119,7 @@ function world(o: { notes: NoteRecord[]; events: EvmPoolEvent[]; txs: Record<str
     throw new Error(`unmocked ${method}`);
   };
   const seeds: Uint8Array[] = [];
-  const round = { fail: false };
+  const round = { fail: false, reads: 0 };
   const host: Host = {
     chain: "base",
     network: "base",
@@ -127,6 +128,7 @@ function world(o: { notes: NoteRecord[]; events: EvmPoolEvent[]; txs: Record<str
     rpcs: [pub(0), pub(1)],
     helper: help,
     round: async () => {
+      round.reads++;
       if (round.fail) throw new Error("the RPCs' logs differ: refused");
       return { events: o.events };
     },
@@ -196,6 +198,7 @@ test("a reload: a second pass writes nothing and asks the helper nothing (the re
   assert.deepEqual(await rebuildEvmHoldings(x.host), []);
   assert.deepEqual(await recordsOf(ws), once, "one record");
   assert.equal(x.helperAsked.length, asked, "no second read");
+  assert.equal(x.round.reads, 1, "every spent note's W has a record: the second pass reads no round");
 });
 
 test("a W already sold shows no position; a W partly sold shows what it still holds; a W this device bought keeps its own record", async () => {
@@ -221,6 +224,11 @@ test("a refused buy (the release a Withdrawn) writes no record and asks the help
   assert.deepEqual(await rebuildEvmHoldings(x.host), []);
   assert.equal(await ws.get("meta", EVM_POSITION_COSTS_KEY), undefined);
   assert.deepEqual(x.helperAsked, []);
+  // once the carry has ended W (pool-carry-evm.ts EVM_CARRY_DONE_KEY), a pass reads no round for it
+  const reads = x.round.reads;
+  await ws.update("meta", EVM_CARRY_DONE_KEY, () => ({ [a.w]: { chain: "base", end: "carried" } }));
+  assert.deepEqual(await rebuildEvmHoldings(x.host), []);
+  assert.equal(x.round.reads, reads, "a W the carry ended: no round read");
 });
 
 test("a round the two RPCs read apart (the sync refuses it, wallet test/pool-evm.test.ts \"the same differing logs with no reorg are refused at once\") writes nothing; a Bought to another W, or of another note, writes nothing; decimals the two RPCs read apart write nothing", async () => {

@@ -29,6 +29,7 @@ import { jOf } from "../../wallet/src/pool/queue.ts";
 import type { WalletStore } from "@blindfill/wallet/store";
 import { evmBuyCalldataRead } from "./evm-send.ts";
 import { EVM_POSITION_COSTS_KEY, type EvmHolding } from "./pool-buy-evm.ts";
+import { EVM_CARRY_DONE_KEY } from "./pool-carry-evm.ts";
 import { keptTokenDecimals, type PoolRpc } from "./pool-kinds.ts";
 
 const lower = (s: string): string => s.toLowerCase();
@@ -138,26 +139,31 @@ export async function rebuildEvmHoldings(h: EvmHoldingsHost): Promise<string[]> 
   const spent = (await h.notes()).filter((n) => n.scope === h.scope && (n.state === "SPENT" || n.state === "RESERVED") && n.leaf !== undefined);
   if (spent.length === 0) return [];
   const store = await h.held();
-  const had = (await store.get("meta", EVM_POSITION_COSTS_KEY)) as Record<string, unknown> | undefined;
-  const known = new Set(Object.keys(typeof had === "object" && had !== null ? had : {}).map(lower));
+  const keysOf = (v: unknown): string[] => Object.keys(typeof v === "object" && v !== null ? v : {}).map(lower);
+  // a W with a buy record, or one the carry ended (a Withdrawn release: a refused buy or a withdraw), is never looked
+  // for: a device whose spent notes all have one reads no round (a state read then costs the pool's RPCs nothing here)
+  const known = new Set([...keysOf(await store.get("meta", EVM_POSITION_COSTS_KEY)), ...keysOf(await store.get("meta", EVM_CARRY_DONE_KEY))]);
+  const lacking: { w: string; nullifier: bigint }[] = [];
+  const seed = await h.seed64();
+  try {
+    for (const n of spent) {
+      const k = freshWallet(seed, "evm", n.leaf!.label, jOf(n.ref));
+      k.secretKey.fill(0);
+      const w = lower(k.address);
+      if (!known.has(w)) lacking.push({ w, nullifier: noteSecrets(seed, n.ref).nullifierHash });
+    }
+  } finally {
+    seed.fill(0);
+  }
+  if (lacking.length === 0) return [];
   const { events } = await h.round();
   const buys = new Map<bigint, EvmPoolEvent>();
   for (const e of events) if (e.kind === "buy" && e.nullifier !== null) buys.set(e.nullifier, e);
   const owed: { w: string; token: string; block: bigint; tx: string }[] = [];
-  const seed = await h.seed64();
-  try {
-    for (const n of spent) {
-      const e = buys.get(noteSecrets(seed, n.ref).nullifierHash);
-      const b = e === undefined ? null : evmBoughtOf(e);
-      if (b === null) continue;
-      const k = freshWallet(seed, "evm", n.leaf!.label, jOf(n.ref));
-      k.secretKey.fill(0);
-      const w = lower(k.address);
-      if (b.w !== w || known.has(w)) continue;
-      owed.push({ ...b, w });
-    }
-  } finally {
-    seed.fill(0);
+  for (const { w, nullifier } of lacking) {
+    const e = buys.get(nullifier);
+    const b = e === undefined ? null : evmBoughtOf(e);
+    if (b !== null && b.w === w) owed.push({ ...b, w });
   }
   const out: string[] = [];
   for (const b of owed) {
