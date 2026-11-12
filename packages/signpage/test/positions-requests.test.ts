@@ -102,6 +102,11 @@ test("the positions on the mainnet build: no request names a W to any host but t
       return ok({ context: { slot: 100 }, value });
     }
     if (b.method === "getAccountInfo") return ok({ context: { slot: 100 }, value: { owner: SOLANA_TOKEN_PROGRAM, lamports: 1, data: [base64.encode(mintData), "base64"] } });
+    // each W's asset_held read (card portfolio-counts-money-an-open-buy-holds): W and its bought token account
+    if (b.method === "getMultipleAccounts") {
+      const keys = b.params[0] as string[];
+      return ok({ context: { slot: 100 }, value: keys.map((k) => (Ws.includes(k) ? { lamports: 5000, owner: "11111111111111111111111111111111", data: ["", "base64"] } : keys.indexOf(k) === 1 && names.get(k)?.startsWith("ATA") ? { lamports: 2_039_280, owner: SOLANA_TOKEN_PROGRAM, data: ["", "base64"] } : null)) });
+    }
     return ok(null);
   }) as typeof fetch;
 
@@ -120,6 +125,9 @@ test("the positions on the mainnet build: no request names a W to any host but t
   let tp = make();
   await tp.positions();
   await settled(tp, both);
+  // each W's SOL beside its token, read on the helper's keyed route (the log's checks below): W's 5,000 and its token
+  // account's 2,039,280
+  assert.deepEqual((await tp.positions())?.map((p) => p.asset_held), ["0.00204428", "0.00204428"]);
   phase = "2 W1's read fails, and its retry";
   mode.failW = Ws[1]!;
   timers.length = 0;

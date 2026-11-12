@@ -63,10 +63,20 @@
 //   retry dropped) until it ends: read, it is the next pass's read; failed, the next pass reads the finder. So a sell
 //   never shares the finder's paced queue with the display. A pass with any read failed is tried again
 //   POSITIONS_RETRY_MS later, up to POSITIONS_RETRIES times. Sign out stops the running pass and drops it all.
-// - What crosses to APP_HOST: per token its chain, mint, amount, decimals and the Ws' addresses: amounts, addresses and
-//   tokens only, never a note, a key or a path.
+// - The SOL a position holds beside its token (asset_held, card portfolio-counts-money-an-open-buy-holds): per W the
+//   finder read whole this pass, one getMultipleAccounts on the finder's own route (`assetHeld`) naming that W alone:
+//   W's lamports and those of the accounts a full sell closes back to W (its token account of the mint, under either
+//   token program, and its pump and PumpSwap volume accounts), all at one slot, so nothing is counted twice. Fees
+//   already paid are gone from every one of them. A position's figure is the sum over its Ws, absent when any of its Ws
+//   was not read this pass (never a part sum, never "0" in its place); a read that fails is that W's alone, and the pass
+//   runs again. Rows shown while the finder reads carry none; the pass's end does.
+// - What crosses to APP_HOST: per token its chain, mint, amount, decimals, the Ws' addresses and the SOL they hold:
+//   amounts, addresses and tokens only, never a note, a key or a path.
+import { SOLANA_PUMP_AMM_PROGRAM, SOLANA_PUMP_PROGRAM, SOLANA_TOKEN_2022_PROGRAM, SOLANA_TOKEN_PROGRAM, solanaVolumeAccumulator } from "../../kit/src/checks/solana/checks.ts";
+import { solanaAta } from "../../kit/src/checks/solana/message.ts";
 import type { BuyRoute, PoolStatePrice, SignpageState, TxRef } from "../../kit/src/signpage/messages.ts";
 import { SIGNPAGE_MAX_ANSWER_BYTES, SIGNPAGE_RESULT_SCHEMAS } from "../../kit/src/signpage/schema.ts";
+import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import { ANSWER_ROOM, pickOps } from "./state.ts";
 import { poolUnits } from "./rules/pool.ts";
 
@@ -93,6 +103,9 @@ export type PositionsReads = {
   /** The mint's decimals, one read on the finder's own route; throws when it does not read. Asked only for a mint W
    *  holds whose record and kept pass name none. */
   decimals(mint: string): Promise<number>;
+  /** The lamports W holds and gets back at a full sell of `mint` (solanaAssetHeld on the finder's own route); throws when
+   *  it does not read. None: no position carries asset_held. */
+  assetHeld?(address: string, mint: string, signal?: AbortSignal): Promise<bigint>;
   /** Each W's buy mint (owed/buy-sol: `{ mint, program }` by W's address); none: nothing bought. */
   bought?(): Promise<Readonly<Record<string, unknown>>>;
   /** Each W's buy record (POSITION_COSTS_KEY); none: nothing recorded. */
@@ -152,6 +165,40 @@ export function positionCost(mint: string, decimals: number, held: readonly { ad
     sum += w.amount >= received ? spent : (spent * w.amount) / received;
   }
   return poolUnits(sum, COST_SCALE);
+}
+
+/** SOL's decimals: asset_held is in whole SOL, as pools[].balance is. */
+const SOL_DECIMALS = 9;
+/**
+ * The lamports W holds beside its `mint` and gets back at a full sell (card portfolio-counts-money-an-open-buy-holds):
+ * one getMultipleAccounts at finalized naming W alone, as the finder reads, of W, its token account of the mint under
+ * each token program and its pump and PumpSwap volume accounts, all at one slot. An account that is not there counts 0;
+ * a closable account owned by any program but its own, a count that is not the keys', or lamports that are not a whole
+ * number in range is refused (a throw), so a hostile answer never makes a figure.
+ */
+export async function solanaAssetHeld(rpc: SolanaRpc, address: string, mint: string, signal?: AbortSignal): Promise<bigint> {
+  const keys: [string, string | null][] = [
+    [address, null],
+    [solanaAta(address, mint, SOLANA_TOKEN_PROGRAM), SOLANA_TOKEN_PROGRAM],
+    [solanaAta(address, mint, SOLANA_TOKEN_2022_PROGRAM), SOLANA_TOKEN_2022_PROGRAM],
+    [solanaVolumeAccumulator(address, SOLANA_PUMP_PROGRAM), SOLANA_PUMP_PROGRAM],
+    [solanaVolumeAccumulator(address, SOLANA_PUMP_AMM_PROGRAM), SOLANA_PUMP_AMM_PROGRAM],
+  ];
+  signal?.throwIfAborted();
+  const answer = await rpc("getMultipleAccounts", [keys.map(([k]) => k), { encoding: "base64", commitment: "finalized", dataSlice: { offset: 0, length: 0 } }]);
+  signal?.throwIfAborted();
+  const value = (answer as { value?: unknown } | null)?.value;
+  if (!Array.isArray(value) || value.length !== keys.length) throw new Error("getMultipleAccounts: not an answer for these accounts");
+  let sum = 0n;
+  value.forEach((a: unknown, i) => {
+    if (a === null) return;
+    const { lamports, owner } = (a ?? {}) as { lamports?: unknown; owner?: unknown };
+    if (!Number.isSafeInteger(lamports) || (lamports as number) < 0) throw new Error("getMultipleAccounts: lamports not a whole number");
+    const program = keys[i]![1];
+    if (program !== null && owner !== program) throw new Error(`getMultipleAccounts: ${keys[i]![0]} is not ${program}'s`);
+    sum += BigInt(lamports as number);
+  });
+  return sum;
 }
 
 /** A pass as kept: its positions, each "W mint" amount (base units, a decimal string) and each "W mint" the finder
@@ -309,7 +356,8 @@ export async function positionsPass(r: PositionsReads, memo: PassMemo = passMemo
     return { held, listed, whole, waits };
   };
   // one position per mint, at its known decimals; an amount whose decimals are not known yet left for the end
-  const positionsOf = (held: ReadonlyMap<string, { address: string; mint: string; amount: bigint | string }>): Position[] => {
+  // `lamports`: each W's asset_held read this pass (solanaAssetHeld); a position any of whose Ws is not in it has none
+  const positionsOf = (held: ReadonlyMap<string, { address: string; mint: string; amount: bigint | string }>, lamports?: ReadonlyMap<string, bigint>): Position[] => {
     const by = new Map<string, { amount: bigint; wallets: string[]; held: { address: string; amount: bigint }[] }>();
     for (const h of held.values()) {
       const d = memo.decimals.get(h.mint);
@@ -324,7 +372,8 @@ export async function positionsPass(r: PositionsReads, memo: PassMemo = passMemo
     }
     return [...by].map(([mint, p]) => {
       const decimals = memo.decimals.get(mint)!;
-      return { chain: "solana" as const, token: mint, amount: poolUnits(p.amount, decimals), cost: positionCost(mint, decimals, p.held, costs), wallets: p.wallets, decimals };
+      const sol = lamports !== undefined && p.wallets.every((w) => lamports.has(w)) ? p.wallets.reduce((s, w) => s + lamports.get(w)!, 0n) : null;
+      return { chain: "solana" as const, token: mint, amount: poolUnits(p.amount, decimals), cost: positionCost(mint, decimals, p.held, costs), wallets: p.wallets, decimals, ...(sol === null ? {} : { asset_held: poolUnits(sol, SOL_DECIMALS) }) };
     });
   };
   stop();
@@ -380,6 +429,19 @@ export async function positionsPass(r: PositionsReads, memo: PassMemo = passMemo
     }
   }
   stop();
+  // the SOL each W holds beside its token: one read per W the finder read whole this pass, in turn; a failed read is that
+  // W's alone (its position goes without asset_held) and the pass runs again
+  const lamports = new Map<string, bigint>();
+  if (r.assetHeld) for (const h of held.values()) {
+    if (!read.get(h.address) || lamports.has(h.address)) continue;
+    try {
+      lamports.set(h.address, await r.assetHeld(h.address, h.mint, r.signal));
+    } catch {
+      stop();
+      whole = false;
+    }
+  }
+  stop();
   const nextHeld = new Map<string, bigint>();
   for (const [k, h] of held) {
     const d = memo.decimals.get(h.mint);
@@ -392,7 +454,7 @@ export async function positionsPass(r: PositionsReads, memo: PassMemo = passMemo
     const amount = typeof h.amount === "bigint" ? h.amount : base(h.amount, d);
     if (amount !== null && amount > 0n) nextHeld.set(k, amount);
   }
-  const out = positionsOf(held);
+  const out = positionsOf(held, r.assetHeld ? lamports : undefined);
   memo.held = nextHeld;
   memo.listed = listed;
   // only a whole pass is kept, never one a sign out overtook (its store is gone)
