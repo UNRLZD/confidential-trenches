@@ -829,6 +829,7 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
    * One proxied call (answer), and card helper-says-why-a-vendor-refused: an answer that is not 2xx is logged in one line,
    * "proxy <vendor> <path> answered <status>, <ours|the vendor's>: <what>", folded with the same line in SAID_FOLD_MS.
    * The vendor's: its status (and the 503's cause), and its message made safe (safeMessage); ours: the refusal's name.
+   * The answer's Server-Timing gains refusal;desc="vendor" or refusal;desc="ours".
    * A vendor or path not on the list is never written as the caller wrote it; no query, body field, key or client.
    */
   async function handle(vendor: string, path: string, rawQuery: string, body: string, client?: string, reserved = false, waitMs?: number, caller = client !== undefined): Promise<ProxyAnswer> {
@@ -854,7 +855,8 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
       what = a.why ?? (typeof code === "string" ? code : "unnamed");
     }
     sayOnce(`proxy ${where} answered ${a.status}, ${theirs ? "the vendor's" : "ours"}: ${what}`);
-    return out;
+    // and on the answer, in its Server-Timing, so a device or a live check tells a vendor's refusal from ours
+    return { ...out, timing: [...(out.timing ?? []), `refusal;desc="${theirs ? "vendor" : "ours"}"`] };
   }
 
   return {

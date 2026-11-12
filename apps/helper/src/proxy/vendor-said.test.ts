@@ -134,3 +134,20 @@ test("the same line in one window is written once at once, then once with its co
   await p.handle("oneclick", "/v0/quote", "", QUOTE, "203.0.113.7");
   assert.equal(said().length, 3, "a new window writes the line again at once");
 });
+
+// The answer says it too: a refusal's Server-Timing names whose it is, refusal;desc="vendor" or refusal;desc="ours", so a
+// device and a live check tell 1Click's 400 from the helper's own without a log (the live check of this card reads it).
+test("every answer that is not 2xx names whose refusal it is in its Server-Timing; a 2xx names none", async () => {
+  const theirs = proxy(() => json(400, { message: "Failed to get quote" }));
+  const a = await theirs.p.handle("oneclick", "/v0/quote", "", QUOTE, "203.0.113.7");
+  assert.ok(a.timing?.includes('refusal;desc="vendor"'), String(a.timing));
+  const down = proxy(() => json(502, {}));
+  assert.ok((await down.p.handle("oneclick", "/v0/quote", "", QUOTE, "203.0.113.7")).timing?.includes('refusal;desc="vendor"'));
+  const ours = proxy(() => json(200, {}));
+  for (const [v, path, body] of [["oneclick", "/v0/nope", "{}"], ["nobody", "/x", "{}"], ["oneclick", "/v0/quote", "x".repeat(70_000)]] as const) {
+    const r = await ours.p.handle(v, path, "", body, "203.0.113.7");
+    assert.deepEqual(r.timing, ['refusal;desc="ours"'], `${v} ${path}`);
+  }
+  const ok = proxy(() => json(201, {}));
+  assert.ok(!(await ok.p.handle("oneclick", "/v0/quote", "", QUOTE, "203.0.113.7")).timing?.some((t) => t.startsWith("refusal;")));
+});
