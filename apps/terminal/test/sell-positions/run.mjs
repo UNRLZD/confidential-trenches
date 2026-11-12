@@ -237,8 +237,10 @@ try {
         check(norm(await page.locator('[data-testid="position-pnl"]').innerText()) === "+$119.00", `${tag}: the PnL hero`);
         check(norm(await page.locator('[data-testid="pos-holding"]').innerText()) === "Holding $219.00 1.23M TORCH", `${tag}: the Holding row`);
         check(norm(await page.locator('[data-testid="pos-bought"]').innerText()) === "Bought $100.00", `${tag}: the Bought row`);
-        // its percent from the exact figures, cut toward zero like every percent here ($118.9999962 on $100 is +118.9%)
-        check(norm(await page.locator('[data-testid="pos-total"]').innerText()) === "Total PnL +$119.00 +118.9%", `${tag}: the Total PnL row`);
+        // its percent from the exact figures to the nearest tenth, as the amount to the nearest cent ($118.9999962 on $100
+        // is +119.0%, never +118.9% beside +$119.00)
+        check(norm(await page.locator('[data-testid="pos-total"]').innerText()) === "Total PnL +$119.00 +119.0%", `${tag}: the Total PnL row`);
+        check(norm(await page.locator(".tk-posHeroPct").innerText()) === "+119.0%", `${tag}: the PnL hero's percent`);
         check(norm(await page.locator('[data-testid="pos-held"]').innerText()) === "Held for 6d 6h", `${tag}: Held for`);
       }
       const m = await measure(page, w);

@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { SignpageClientSnapshot, SignpageState } from "@blindfill/kit";
-import { NO_DATA, pct, portfolio, shareOf, soldOutRow, usd } from "../src/screens/portfolio/model.ts";
+import { bps, calendar, closedRows, NO_DATA, pct, portfolio, shareOf, signOf, soldOutRow, usd } from "../src/screens/portfolio/model.ts";
 import type { PortfolioData } from "../src/screens/portfolio/model.ts";
 
 const NOW = Date.parse("2026-11-12T12:22:00Z");
@@ -52,4 +52,39 @@ test("a zero draws $0.00 with no sign beside its exact percent; the $219.00 posi
   // a sale that sold it all: no share left and no Initials
   const gone = soldOutRow(up);
   assert.deepEqual([gone.value, shareOf(gone, 5000), gone.initials], [0n, 0n, null]);
+});
+
+// Percents and tones (round 3): a percent to the nearest tenth from the exact figures, as an amount to the nearest cent
+// (red at c833d1310: cut, so $118.9999962 on $100 drew "+118.9%" beside "+$119.00"); a tone from the exact sign, never
+// the rounded figure (red at c833d1310: an exact loss drawn "$0.00" took the up tone beside its "−2.5%").
+test("a percent to the nearest tenth from the exact figures; one that rounds to 0.0 has no sign", () => {
+  const up = row("100", "1234567.891234", "0.00017739");
+  // the Total PnL's figures: $118.9999962 on $100
+  assert.equal(pct(bps(up.valueX! - up.costX! + up.realizedX, up.costX!)), "+119.0%");
+  assert.equal(pct(up.pnlBps), "+119.0%");
+  assert.equal(pct(-245), "−2.5%");
+  assert.equal(pct(-244), "−2.4%");
+  assert.equal(pct(4), "0.0%");
+  assert.equal(pct(-4), "0.0%");
+  assert.equal(pct(5), "+0.1%");
+});
+
+test("a tone from the exact sign: a loss drawn $0.00 is a loss, only an exact zero is neutral", () => {
+  // the open row: $0.0975 on $0.10 draws "$0.00", a loss
+  const down = row("0.1", "1", "0.0975");
+  assert.deepEqual([down.pnl, down.pnlSign, pct(down.pnlBps)], [0n, -1n, "−2.5%"]);
+  const flat = row("0.1", "1", "0.1");
+  assert.deepEqual([flat.pnl, flat.pnlSign, pct(flat.pnlBps)], [0n, 0n, "0.0%"]);
+  // the closed row: bought $0.1, sold $0.0975, as the pool-trades fixture's
+  const NOW2 = Date.parse("2026-11-12T12:00:00Z");
+  const d: PortfolioData = { ...NO_DATA, closed: [{ chain: "solana", token: "T", bought: "0.1", sold: "0.0975", opened_at: NOW2 - 60_000, closed_at: NOW2 - 1_000 }] as PortfolioData["closed"] };
+  const [c] = closedRows(d);
+  assert.deepEqual([c!.realized, signOf(c!.realizedX!), pct(c!.realizedBps)], [0n, -1n, "−2.5%"]);
+  // its calendar day and month: $0.00, red by the exact sign, counted a red day
+  const cal = calendar([c!], NOW2);
+  const day = cal.days.find((x) => x.pnl !== null)!;
+  assert.deepEqual([day.pnl, day.sign, cal.sum, cal.sumSign, cal.green, cal.red], [0n, -1n, 0n, -1n, 0, 1]);
+  // the totals: Unrealized $0.00, its tone down
+  const pf = portfolio(snap(state([{ chain: "solana", token: "T", amount: "1", cost: "0.1", wallets: ["W"] }])), priced({ T: "0.0975" }), NOW);
+  assert.deepEqual([pf.totals!.unreal, pf.totals!.unrealSign], [0n, -1n]);
 });

@@ -66,12 +66,18 @@ export function bps(part: bigint, whole: bigint): number | null {
   return whole === 0n ? null : Number((part * 10000n) / whole);
 }
 
-/** "+119.0%", "−8.2%" from basis points. */
+/** "+119.0%", "−8.2%" from basis points, to the nearest tenth (half away from zero), as a figure to the nearest cent;
+ *  one that rounds to 0.0 draws "0.0%" with no sign. From bps(), cut toward zero: the cut never moves the tenth. */
 export function pct(b: number | null): string {
   if (b === null) return "—";
   const a = Math.abs(b);
-  return `${b < 0 ? "−" : b > 0 ? "+" : ""}${Math.trunc(a / 100)}.${Math.trunc((a % 100) / 10)}%`;
+  const t = Math.trunc(a / 10) + (a % 10 >= 5 ? 1 : 0);
+  return `${t === 0 ? "" : b < 0 ? "−" : "+"}${Math.trunc(t / 10)}.${t % 10}%`;
 }
+
+/** An exact figure's sign (-1n, 0n or 1n), for its tone: a figure's tone follows its exact sign, never the rounded one
+ *  (a loss that draws "$0.00" is a loss); only an exact zero is neutral. */
+export const signOf = (x: bigint): bigint => (x > 0n ? 1n : x < 0n ? -1n : 0n);
 
 /** Token units, short: 891.5K, 3.77B, 96.2. Under 0.01 the price's small-number form (0.004, 0.0₅123), cut and never
  *  rounded up, so a holding is never drawn as 0. Display only; never summed. */
@@ -183,6 +189,8 @@ export interface Row {
   /** The exact PnL to the nearest cent, its percent from the exact figures. */
   pnl: bigint | null;
   pnlBps: number | null;
+  /** The exact PnL's sign, for the tone of the PnL and its percent; null with no PnL. */
+  pnlSign: bigint | null;
   /** The share of the position whose value returns its cost, in basis points rounded up, from the exact figures: what
    *  Initials sells (the share_bps the device signs). Null when the position is not up or a figure is unknown. */
   initials: number | null;
@@ -230,6 +238,9 @@ export interface Totals {
   total: bigint;
   unreal: bigint;
   realized30: bigint;
+  /** The exact sums' signs, for the tones of `unreal` and `realized30`. */
+  unrealSign: bigint;
+  realized30Sign: bigint;
   /** A position with no price: counted at its cost in `inPos` and `total`, left out of `unreal`. */
   partial: boolean;
 }
@@ -280,6 +291,7 @@ function rowOf(p: SignpageState["positions"][number], d: PortfolioData, ops: rea
     valueX,
     pnl: pnlX === null ? null : nearCents(pnlX),
     pnlBps: pnlX === null || costX === null ? null : bps(pnlX, costX),
+    pnlSign: pnlX === null ? null : signOf(pnlX),
     initials: costX === null ? null : initialsBps(costX, valueX),
     bought: centsNear(x.bought) ?? cost,
     sold: centsNear(x.sold) ?? 0n,
@@ -317,6 +329,10 @@ export function sortRows(rows: readonly Row[]): Row[] {
  *  names no USD adds nothing. */
 export function realized30(rows: readonly Row[], closed: readonly ClosedTrade[], now: number): bigint {
   // the exact sum rounded once toward zero, as every total (a total never shows more than there is)
+  return downCents(realized30X(rows, closed, now));
+}
+/** realized30, exact (fx). */
+function realized30X(rows: readonly Row[], closed: readonly ClosedTrade[], now: number): bigint {
   let r = rows.reduce((a, x) => a + x.realizedX, 0n);
   for (const c of closed) {
     const sx = fx(c.sold ?? undefined);
@@ -325,7 +341,7 @@ export function realized30(rows: readonly Row[], closed: readonly ClosedTrade[],
     if (sx === null || bx === null || c.closed_at <= now - 30 * DAY || c.closed_at > now) continue;
     r += sx - bx;
   }
-  return downCents(r);
+  return r;
 }
 
 // ------------------------------------------------------------------------------------------ the trade book (ops)
@@ -545,7 +561,7 @@ export function totals(s: SignpageState, rows: readonly Row[], closed: readonly 
     }
   }
   const inPos = held.cents + downCents(posX);
-  return { cash, parts, offPool, onWay, held: held.cents, inPos, total: cash + onWay + inPos, unreal: downCents(unrealX), realized30: realized30(rows, closed, now), partial };
+  return { cash, parts, offPool, onWay, held: held.cents, inPos, total: cash + onWay + inPos, unreal: downCents(unrealX), realized30: realized30(rows, closed, now), unrealSign: signOf(unrealX), realized30Sign: signOf(realized30X(rows, closed, now)), partial };
 }
 
 /**
@@ -796,12 +812,14 @@ export interface Day {
   day: number;
   /** The day's realized PnL in cents; null: no trade closed that day. */
   pnl: bigint | null;
+  /** Its exact sign, for its tone; null as pnl. */
+  sign: bigint | null;
   future: boolean;
   today: boolean;
 }
 
 /** The PnL calendar: the month of `now` (UTC days), each day's realized PnL from the trades closed that day. */
-export function calendar(closed: readonly ClosedRow[], now: number): { year: number; month: number; lead: number; days: Day[]; sum: bigint; green: number; red: number } {
+export function calendar(closed: readonly ClosedRow[], now: number): { year: number; month: number; lead: number; days: Day[]; sum: bigint; sumSign: bigint; green: number; red: number } {
   const n = new Date(now);
   const year = n.getUTCFullYear();
   const month = n.getUTCMonth();
@@ -814,17 +832,17 @@ export function calendar(closed: readonly ClosedRow[], now: number): { year: num
     const x = c.realizedX ?? (c.realized === null ? null : (c.realized * ONE) / 100n);
     if (x !== null && d.getUTCFullYear() === year && d.getUTCMonth() === month) per.set(d.getUTCDate(), (per.get(d.getUTCDate()) ?? 0n) + x);
   }
-  const days: Day[] = Array.from({ length: len }, (_, i) => ({ day: i + 1, pnl: per.has(i + 1) ? downCents(per.get(i + 1)!) : null, future: i + 1 > n.getUTCDate(), today: i + 1 === n.getUTCDate() }));
+  const days: Day[] = Array.from({ length: len }, (_, i) => ({ day: i + 1, pnl: per.has(i + 1) ? downCents(per.get(i + 1)!) : null, sign: per.has(i + 1) ? signOf(per.get(i + 1)!) : null, future: i + 1 > n.getUTCDate(), today: i + 1 === n.getUTCDate() }));
   let sumX = 0n;
   let green = 0;
   let red = 0;
+  // a day is green or red by its exact sign, as its tone
   for (const x of per.values()) {
     sumX += x;
-    const v = downCents(x);
-    if (v > 0n) green++;
-    if (v < 0n) red++;
+    if (x > 0n) green++;
+    if (x < 0n) red++;
   }
-  return { year, month, lead, days, sum: downCents(sumX), green, red };
+  return { year, month, lead, days, sum: downCents(sumX), sumSign: signOf(sumX), green, red };
 }
 
 export type Range = "1D" | "1W" | "1M" | "All";

@@ -8,7 +8,7 @@ import { Avatar } from "../market/Avatar.tsx";
 import { ActivityList } from "./Activity.tsx";
 import type { ActUi } from "./Activity.tsx";
 import { ExitIc, Ic } from "./icons.tsx";
-import { activity, amount, axisLabels, calendar, cents, closedRows, EDGES, filterActivity, filterRows, held, line, NO_FILTER, pct, portfolio, restored, shortAddress, stats, units, usd, walletRows } from "./model.ts";
+import { activity, amount, axisLabels, calendar, cents, closedRows, EDGES, filterActivity, filterRows, held, line, NO_FILTER, pct, portfolio, restored, shortAddress, signOf, stats, units, usd, walletRows } from "./model.ts";
 import type { CashPart, ClosedRow, PoolRow, Pools, Range, Row, Stats, Totals, WalletRow } from "./model.ts";
 import { chainOf } from "../market/pads.ts";
 import { usePortfolioSource } from "./source.tsx";
@@ -46,7 +46,8 @@ export interface Ui {
 
 export const START: Ui = { range: "1W", closed: false, q: "", hideSmall: false, pane: "positions", act: { filter: NO_FILTER, open: null }, sheet: null, menu: null };
 
-const sgn = (c: bigint | null) => (c === null ? "" : c >= 0n ? "gain" : "loss");
+/** A tone from an exact figure's sign (signOf), never the rounded one: only an exact zero is neutral. */
+const sgn = (c: bigint | null) => (c === null ? "" : c > 0n ? "gain" : c < 0n ? "loss" : "");
 const RANGES: Range[] = ["1D", "1W", "1M", "All"];
 const RANGE_WORD = { "1D": "r1D", "1W": "r1W", "1M": "r1M", All: "rAll" } as const;
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
@@ -171,7 +172,7 @@ export function Portfolio({ onAction = () => {}, initial = START }: { onAction?:
         {ui.pane === "activity" ? (
           actList
         ) : ui.pane === "stats" ? (
-          <PhoneStats st={st} closed={closed} now={now} realized={pf.totals?.realized30 ?? null} />
+          <PhoneStats st={st} closed={closed} now={now} realized={pf.totals?.realized30 ?? null} realizedSign={pf.totals?.realized30Sign ?? null} />
         ) : loading ? (
           Array.from({ length: 6 }, (_, i) => <div className="mpr" key={i}><Sk w={44} h={44} r={22} /><div><Sk w={80} h={14} /><div style={{ height: 6 }} /><Sk w={50} h={11} /></div><div><Sk w={70} h={14} /></div><span /></div>)
         ) : pf.rows.length === 0 ? (
@@ -202,7 +203,7 @@ interface HeadProps {
 function Equity({ src, t, pools, loading, offline, rows, ui, setUi, now }: HeadProps) {
   const pts = line(src.data.series, ui.range, now);
   const change = t && pts.length ? t.total - pts[0]![1] : null;
-  const v = (c: bigint | null, plus = true): ReactNode => (loading ? <Sk w={80} h={16} /> : c === null || !t ? DASH : <span className={sgn(c)}>{usd(c, plus)}</span>);
+  const v = (c: bigint | null, sign: bigint | null, plus = true): ReactNode => (loading ? <Sk w={80} h={16} /> : c === null || !t ? DASH : <span className={sgn(sign)}>{usd(c, plus)}</span>);
   return (
     <section className="panel eq" data-panel="equity">
       <div className="eqtop">
@@ -215,8 +216,8 @@ function Equity({ src, t, pools, loading, offline, rows, ui, setUi, now }: HeadP
         </div>
         <span className="grow" />
         <div className="brk">
-          <div><div className="k"><W id="unrealized" /></div><div className="v num">{v(t && rows.length ? t.unreal : null)}</div></div>
-          <div><div className="k"><W id="realized30" /></div><div className="v num">{v(t && (src.data.closed.length || t.realized30) ? t.realized30 : null)}</div></div>
+          <div><div className="k"><W id="unrealized" /></div><div className="v num">{v(t && rows.length ? t.unreal : null, t?.unrealSign ?? null)}</div></div>
+          <div><div className="k"><W id="realized30" /></div><div className="v num">{v(t && (src.data.closed.length || t.realized30) ? t.realized30 : null, t?.realized30Sign ?? null)}</div></div>
         </div>
       </div>
       <div className="eqsplit">
@@ -451,12 +452,12 @@ function Calendar({ closed, now, loading }: { closed: ClosedRow[]; now: number; 
   const none = closed.length === 0;
   return (
     <section className="panel cal" data-panel="calendar">
-      <div className="hd"><span className="num-ui">{MONTHS[c.month]}</span><span className={`s num ${none ? "" : sgn(c.sum)}`}>{none || loading ? "—" : usd(c.sum, true)}</span></div>
+      <div className="hd"><span className="num-ui">{MONTHS[c.month]}</span><span className={`s num ${none ? "" : sgn(c.sumSign)}`}>{none || loading ? "—" : usd(c.sum, true)}</span></div>
       <div className="calg">
         {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((d) => <span className="dw" key={d}>{d}</span>)}
         {Array.from({ length: c.lead }, (_, i) => <span key={`l${i}`} />)}
         {c.days.map((d) => (
-          <span key={d.day} className={`c ${d.future ? "fut" : d.pnl === null ? "pre" : d.pnl > 0n ? "g" : d.pnl < 0n ? "r" : "z"} ${d.today ? "today" : ""}`} data-day={d.day}>
+          <span key={d.day} className={`c ${d.future ? "fut" : d.sign === null ? "pre" : d.sign > 0n ? "g" : d.sign < 0n ? "r" : "z"} ${d.today ? "today" : ""}`} data-day={d.day}>
             <span className="d num">{d.day}</span>
             <span className="p num">{loading ? "" : d.pnl !== null && d.pnl !== 0n ? usd(d.pnl, true) : d.pnl === null && !d.future ? "—" : ""}</span>
           </span>
@@ -538,8 +539,8 @@ function PosTr({ r, now, menu, setMenu, act }: { r: Row; now: number; menu: "mor
       <td>{r.sold ? usd(r.sold) : DASH}</td>
       <td>{units(r.units)}<div className="s2">{r.symbol}</div></td>
       <td data-value data-unread={r.value === null || undefined}>{r.value === null ? DASH : usd(r.value)}</td>
-      <td className={sgn(r.pnl)} data-pnl>{r.pnl === null ? DASH : <>{usd(r.pnl, true)}<div className={`s2 ${sgn(r.pnl)}`}>{pct(r.pnlBps)}</div></>}</td>
-      <td className={r.realized ? sgn(r.realized) : ""}>{r.realized ? usd(r.realized, true) : DASH}</td>
+      <td className={sgn(r.pnlSign)} data-pnl>{r.pnl === null ? DASH : <>{usd(r.pnl, true)}<div className={`s2 ${sgn(r.pnlSign)}`}>{pct(r.pnlBps)}</div></>}</td>
+      <td className={r.realized ? sgn(signOf(r.realizedX)) : ""}>{r.realized ? usd(r.realized, true) : DASH}</td>
       <td className="l">
         {r.exit ? (
           <span className="xs"><span className="xt tp num">TP {pct(r.exit.tp_bps).replace(".0", "")}</span><span className="xt sl num">SL {pct(-r.exit.sl_bps).replace(".0", "")}</span></span>
@@ -604,9 +605,9 @@ function ClosedTr({ c }: { c: ClosedRow }) {
       <td>0</td>
       <td>{DASH}</td>
       <td>{DASH}</td>
-      <td className={c.realized === null ? "" : sgn(c.realized)}>
+      <td className={c.realizedX === null ? "" : sgn(signOf(c.realizedX))}>
         {c.realized === null ? DASH : usd(c.realized, true)}
-        {c.realized !== null && <div className={`s2 ${sgn(c.realized)}`}>{pct(c.realizedBps)}</div>}
+        {c.realized !== null && <div className={`s2 ${c.realizedX === null ? "" : sgn(signOf(c.realizedX))}`}>{pct(c.realizedBps)}</div>}
         {c.realizedAsset !== null && <div className={`s2 num ${sgn(assetSign(c.realizedAsset))}`} data-realized-asset={c.asset}>{assetAmount(c.realizedAsset)} {c.asset}</div>}
       </td>
       <td className="l">{DASH}</td>
@@ -646,12 +647,13 @@ function Allocation({ rows, loading }: { rows: Row[]; loading: boolean }) {
     <div className="amap">
       {rects.map(({ r, x, y, w, h }) => {
         const a = Math.min(1, Math.abs((r.pnlBps ?? 0) / 6000));
-        const bg = (r.pnl ?? 0n) >= 0n ? `rgba(80,227,151,${(0.08 + 0.3 * a).toFixed(2)})` : `rgba(255,93,77,${(0.08 + 0.3 * a).toFixed(2)})`;
+        // its tone from the exact PnL's sign; an exact zero neutral
+        const bg = r.pnlSign === 0n ? "rgba(244,244,242,0.08)" : (r.pnlSign ?? 0n) > 0n || r.pnlSign === null ? `rgba(80,227,151,${(0.08 + 0.3 * a).toFixed(2)})` : `rgba(255,93,77,${(0.08 + 0.3 * a).toFixed(2)})`;
         const big = w > 19 && h > 15;
         return (
           <div className="at" key={r.key} style={{ left: `${x}%`, top: `${y}%`, width: `calc(${w}% - 4px)`, height: `calc(${h}% - 4px)`, background: bg }}>
             <div className="row-flex">{big && <Avatar symbol={r.symbol} size={32} />}{w > 13 && <span className="as ell">{r.symbol}</span>}</div>
-            {big && <div className="av3 num">{usd(r.value!)}<div className={sgn(r.pnl)}>{pct(r.pnlBps)}</div></div>}
+            {big && <div className="av3 num">{usd(r.value!)}<div className={sgn(r.pnlSign)}>{pct(r.pnlBps)}</div></div>}
           </div>
         );
       })}
@@ -675,7 +677,7 @@ export function Plate() {
 
 function PhoneTop({ src, t, pools, loading, offline, rows, ui, setUi, now }: HeadProps) {
   const pts = line(src.data.series, ui.range, now);
-  const v = (c: bigint | null): ReactNode => (loading ? <Sk w={70} h={18} /> : c === null || !t ? "—" : <span className={sgn(c)}>{usd(c, true)}</span>);
+  const v = (c: bigint | null, sign: bigint | null): ReactNode => (loading ? <Sk w={70} h={18} /> : c === null || !t ? "—" : <span className={sgn(sign)}>{usd(c, true)}</span>);
   return (
     <div className="mpf">
       <div className="lbl"><W id="total" />{offline && <span className="tag warn" data-offline-tag><W id="offline" /></span>}</div>
@@ -693,8 +695,8 @@ function PhoneTop({ src, t, pools, loading, offline, rows, ui, setUi, now }: Hea
         </div>
       </div>
       <div className="brk two">
-        <div><div className="k"><W id="unrealized" /></div><div className="v num">{v(t && rows.length ? t.unreal : null)}</div></div>
-        <div><div className="k"><W id="realized30" /></div><div className="v num">{v(t && (src.data.closed.length || t.realized30) ? t.realized30 : null)}</div></div>
+        <div><div className="k"><W id="unrealized" /></div><div className="v num">{v(t && rows.length ? t.unreal : null, t?.unrealSign ?? null)}</div></div>
+        <div><div className="k"><W id="realized30" /></div><div className="v num">{v(t && (src.data.closed.length || t.realized30) ? t.realized30 : null, t?.realized30Sign ?? null)}</div></div>
       </div>
       <div className="mwhere">
         <div className="lbl2"><W id="whereItIs" /></div>
@@ -751,7 +753,7 @@ function PhoneRow({ r, onOpen, act }: { r: Row; onOpen(): void; act(a: Portfolio
         ) : (
           <>
             <div className="v num" data-value data-unread={r.value === null || undefined}>{r.value === null ? "—" : usd(r.value)}</div>
-            <span className={`pl num ${r.pnl === null ? "" : r.pnl >= 0n ? "g" : "r"}`}>{pct(r.pnlBps)}</span>
+            <span className={`pl num ${r.pnlSign === null || r.pnlSign === 0n ? "" : r.pnlSign > 0n ? "g" : "r"}`}>{pct(r.pnlBps)}</span>
           </>
         )}
       </div>
@@ -769,7 +771,7 @@ function Sheet({ r, close, act }: { r: Row; close(): void; act(a: PortfolioActio
       <div className="msheet" role="dialog" aria-label={r.symbol} data-sheet="position">
         <div className="grab"><i /></div>
         <div className="shb">
-          <div className="shh"><Avatar symbol={r.symbol} size={44} /><div className="grow"><div className="sy">{r.symbol}</div><div className="h num">{units(r.units)} · {r.value === null ? "—" : usd(r.value)}</div></div><span className={`cpill num ${r.pnl === null ? "" : r.pnl >= 0n ? "g" : "r"}`}>{pct(r.pnlBps)}</span></div>
+          <div className="shh"><Avatar symbol={r.symbol} size={44} /><div className="grow"><div className="sy">{r.symbol}</div><div className="h num">{units(r.units)} · {r.value === null ? "—" : usd(r.value)}</div></div><span className={`cpill num ${r.pnlSign === null || r.pnlSign === 0n ? "" : r.pnlSign > 0n ? "g" : "r"}`}>{pct(r.pnlBps)}</span></div>
           <div className="sheetgrid">
             {(["25", "50", "100"] as const).map((p) => <button type="button" key={p} className="num" data-control={`sheet-sell-${p}`} onClick={() => go({ kind: "sell", ...at, part: p })}>{p}%</button>)}
             <button type="button" className="n" data-control="sheet-initials" onClick={() => go({ kind: "sell", ...at, part: "initials" })}><W id="initials" /></button>
@@ -788,18 +790,18 @@ function Sheet({ r, close, act }: { r: Row; close(): void; act(a: PortfolioActio
   );
 }
 
-function PhoneStats({ st, closed, now, realized }: { st: Stats; closed: ClosedRow[]; now: number; realized: bigint | null }) {
+function PhoneStats({ st, closed, now, realized, realizedSign }: { st: Stats; closed: ClosedRow[]; now: number; realized: bigint | null; realizedSign: bigint | null }) {
   const c = calendar(closed, now);
   const none = st.trades === 0;
   const mx = Math.max(1, ...st.buckets);
   const weeks = Math.ceil((c.lead + c.days.length) / 7);
   return (
     <div className="mstats" data-pane="stats">
-      <div className="mrow"><span>{MONTHS[c.month]}</span><span className={`num ${none ? "t3" : sgn(c.sum)}`}>{none ? "—" : usd(realized ?? c.sum, true)}</span></div>
+      <div className="mrow"><span>{MONTHS[c.month]}</span><span className={`num ${none ? "t3" : sgn(realized === null ? c.sumSign : realizedSign)}`}>{none ? "—" : usd(realized ?? c.sum, true)}</span></div>
       <svg className="mcal" width="100%" viewBox={`0 0 342 ${weeks * 30}`} aria-hidden="true">
         {c.days.map((d) => {
           const i = c.lead + d.day - 1;
-          const fill = d.future ? "#f4f4f2" : d.pnl === null ? "#f4f4f2" : d.pnl > 0n ? "#50e397" : d.pnl < 0n ? "#ff5d4d" : "#f4f4f2";
+          const fill = d.future ? "#f4f4f2" : d.sign === null ? "#f4f4f2" : d.sign > 0n ? "#50e397" : d.sign < 0n ? "#ff5d4d" : "#f4f4f2";
           const op = d.future ? 0.05 : d.pnl === null ? 0.14 : d.pnl === 0n ? 0.5 : 1;
           return <circle key={d.day} cx={(i % 7) * (342 / 7) + 342 / 14} cy={Math.floor(i / 7) * 30 + 15} r={d.today ? 7 : 6} fill={fill} fillOpacity={op} />;
         })}

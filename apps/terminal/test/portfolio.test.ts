@@ -74,7 +74,8 @@ test("money and percent text", () => {
   // a zero has no sign (review of 98d75c8cb: "$0.00 −2.5%", never "+$0.00")
   assert.equal(usd(0n, true), "$0.00");
   assert.equal(pct(11900), "+119.0%");
-  assert.equal(pct(-816), "−8.1%");
+  // to the nearest tenth, as a figure to the nearest cent (round 3 of card portfolio-counts-money-an-open-buy-holds)
+  assert.equal(pct(-816), "−8.2%");
   assert.equal(pct(0), "0.0%");
   assert.equal(pct(null), "—");
   assert.equal(bps(2963n, 2500n), 11852);

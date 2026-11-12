@@ -26,7 +26,8 @@ function price(costCents: bigint, amount: string): string {
   return `$${p.toLocaleString("en-US", { maximumSignificantDigits: 4, maximumFractionDigits: 20 })}`;
 }
 
-const tone = (c: bigint | null) => (c === null ? undefined : String(c >= 0n));
+/** A tone from an exact figure (its sign, never the rounded cents): an exact zero neutral (no tone). */
+const tone = (x: bigint | null) => (x === null || x === 0n ? undefined : String(x > 0n));
 
 export function PositionPanel({ row, s, now, onShare }: { row: Row; s: Sell; now: number; onShare?: () => void }) {
   // the row's decimals, the signing page's, never the helper's (card app-sell-mount re-check 2)
@@ -37,7 +38,7 @@ export function PositionPanel({ row, s, now, onShare }: { row: Row; s: Sell; now
   const totalX = row.valueX === null || row.costX === null ? null : row.valueX - row.costX + row.realizedX;
   const total = totalX === null ? null : nearCents(totalX);
   const totalBps = totalX === null || row.costX === null ? null : bpsOf(totalX, row.costX);
-  const up = row.pnl === null ? undefined : String(row.pnl >= 0n);
+  const up = tone(row.pnlSign);
 
   return (
     <div className="tk-panel tk-position" data-testid="position-panel" data-state={s.phase.k}>
@@ -64,9 +65,9 @@ export function PositionPanel({ row, s, now, onShare }: { row: Row; s: Sell; now
         <div className="tk-posRow" data-testid="pos-bought"><span className="tk-posLabel"><W id="bought" /></span><span className="tk-posVal">{row.bought === null ? "—" : usd(row.bought)}</span><span className="tk-posUsd" /></div>
         <div className="tk-posRow" data-testid="pos-sold"><span className="tk-posLabel"><W id="sold" /></span><span className="tk-posVal">{usd(row.sold)}</span><span className="tk-posUsd" /></div>
         <div className="tk-posRow" data-testid="pos-holding"><span className="tk-posLabel"><W id="holding" /></span><span className="tk-posVal" data-unread={row.value === null || undefined}>{row.value === null ? "—" : usd(row.value)}</span><span className="tk-posUsd">{units(row.units)} {row.symbol}</span></div>
-        <div className="tk-posRow" data-testid="pos-realized"><span className="tk-posLabel"><W id="realized" /></span><span className="tk-posVal" data-tone={tone(row.realized)}>{usd(row.realized, true)}</span><span className="tk-posUsd" /></div>
+        <div className="tk-posRow" data-testid="pos-realized"><span className="tk-posLabel"><W id="realized" /></span><span className="tk-posVal" data-tone={tone(row.realizedX)}>{usd(row.realized, true)}</span><span className="tk-posUsd" /></div>
         <div className="tk-posRule" />
-        <div className="tk-posRow" data-testid="pos-total"><span className="tk-posLabel"><W id="totalPnl" /></span><span className="tk-posVal" data-tone={tone(total)}>{total === null ? "—" : usd(total, true)}</span><span className="tk-posUsd">{pct(totalBps)}</span></div>
+        <div className="tk-posRow" data-testid="pos-total"><span className="tk-posLabel"><W id="totalPnl" /></span><span className="tk-posVal" data-tone={tone(totalX)}>{total === null ? "—" : usd(total, true)}</span><span className="tk-posUsd">{pct(totalBps)}</span></div>
       </div>
       <div className="tk-posMeta">
         <div data-testid="pos-entry"><span className="tk-posLabel"><W id="avgEntry" /></span><span className="tk-posMetaVal">{row.cost === null ? "—" : price(row.cost, row.units)}</span></div>
