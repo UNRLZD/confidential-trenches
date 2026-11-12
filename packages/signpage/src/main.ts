@@ -68,8 +68,9 @@ import { depositQuoteHost, depositReadHosts } from "./deposit-wire.ts";
 import { depositNamer } from "./deposit-name.ts";
 import { poolAddressHost } from "./pool-deposit-address.ts";
 import { depositFollows, FOLLOW_LOCK } from "./deposit-follow.ts";
-import { depositToEnd, poolFollows, poolRefundMover, solanaPoolFollowDeps, type PoolFollowHost } from "./pool-deposit-follow.ts";
+import { depositToEnd, evmQuoteRoute, poolFollows, poolRefundMover, solanaPoolFollowDeps, uxNoteLanded, uxNoteOpen, type PoolFollowHost, type PoolFollowRecord } from "./pool-deposit-follow.ts";
 import { POOL_ADDRESS_ASSET, poolQuotePricing, readSolanaPoolFloor, type PoolQuotePricing } from "./pool-deposit-address.ts";
+import type { EvmRpc } from "../../wallet/src/pool/evm.ts";
 import { followRpc, readMoveAt } from "../../wallet/src/deposit/follow.ts";
 import { NEAR_NETWORKS } from "../../wallet/src/deposit/account.ts";
 import { ONECLICK_USDC_ASSETS } from "../../kit/src/checks/oneclick.ts";
@@ -266,34 +267,50 @@ else {
   // own Pyth read on its two RPCs (src/pool-price.ts); any other origin has none yet, so it gets no quote
   const pricedFor = (chain: PoolChain, origin: string): PoolQuotePricing | null => poolQuotePricing(prices.get(chain), origin);
   const solPair = (): readonly [SolanaRpc, SolanaRpc] | null => (PAGE_SOL_PIN === undefined ? null : (poolDeps.rpcs("solana") as unknown as readonly [SolanaRpc, SolanaRpc] | null));
-  // the quote's floor on X's pool, read now on its two RPCs (pool-deposit-address.ts readSolanaPoolFloor); none on a
-  // chain whose reads are not built here yet (Base and Robinhood: no mainnet pool is pinned)
+  // Base's and Robinhood's pool for a quote into U_X (card evm-deposit-route-mainnet): the pool the page's network pins
+  // there (the wallet's EVM_POOLS, src/pool-testnet.ts evmPoolOf: its pin and the deposit's own pair) and the one reader
+  // U_X's balance is polled on: on a testnet page the pool's pair (no reader: no quote is asked there, 1Click pays out on
+  // mainnet only); on mainnet the helper's POST /v1/rpc/{chain} alone (decision M359: a one-time account's holdings
+  // never reach a public provider from the device), evmWalletRpc. With no pool, or on mainnet with no reader: no floor,
+  // so no quote, and no follow
+  const evmWalletRpc = (_chain: "base" | "robinhood"): EvmRpc | undefined => undefined;
+  const evmRoute = evmQuoteRoute({ network: PAGE_NETWORK, pool: (chain) => testnet?.evmPoolOf(chain) ?? null, wallet: evmWalletRpc, notes: () => pageNotes() });
+  // the quote's floor on X's pool, read now on its two RPCs (pool-deposit-address.ts readSolanaPoolFloor on Solana,
+  // readEvmPoolFloor on Base and Robinhood); none on a chain the page pins no pool on
   const floorFor = async (chain: PoolChain, wallet: string): Promise<bigint | null> => {
+    if (chain !== "solana") return evmRoute.floor(chain);
     const pair = solPair();
-    return chain === "solana" && pair !== null && PAGE_SOL_PIN !== undefined ? readSolanaPoolFloor(pair, PAGE_SOL_PIN.program, wallet) : null;
+    return pair !== null && PAGE_SOL_PIN !== undefined ? readSolanaPoolFloor(pair, PAGE_SOL_PIN.program, wallet) : null;
   };
   const nearPair = () => [followRpc(NEAR_NETWORKS.mainnet.fastnear[0]), followRpc(NEAR_NETWORKS.mainnet.drpc)] as const;
-  poolFollowDeps = (f, op) => {
-    const pair = solPair();
-    if (f.chain !== "solana" || pair === null || PAGE_SOL_PIN === undefined) return null;
-    const program = PAGE_SOL_PIN.program;
-    return solanaPoolFollowDeps({
-      rpcs: pair,
-      program,
-      // from U_X alone (review H1): pool.deposit run with the op's own U_{s,i} as its fixed source, never the newest U
-      deposit: (g, amount, signal) =>
-        depositToEnd((p, ctx) => (testnet === null ? null : testnet.depositFrom(p, { s: BigInt(g.s), i: g.i, u: g.u }, ctx as KindContext)), "solana", POOL_ASSET_DECIMALS.SOL, amount, signal),
-      refund: poolRefundMover({
-        read: (g, nonce) => readMoveAt("intents.near", g.refund_id, nonce, g.origin, nearPair(), NEAR_NETWORKS.mainnet.usdc),
-        floor: async (g) => readSolanaPoolFloor(pair, program, g.u),
-        priced: (g) => pricedFor(g.chain, g.origin),
-        decimals: (c) => POOL_ASSET_DECIMALS[POOL_ADDRESS_ASSET[c]],
-        seed64: () => openSeed64(),
-        seedLock: (fn) => navigator.locks.request(WALLET_SEED_LOCK, { mode: "shared" }, fn),
-        move: op.move,
-        record: op.record,
-      }),
+  // from U_X alone (review H1): pool.deposit run with the op's own U_{s,i} as its fixed source, never the newest U
+  const depositFromUx = (g: PoolFollowRecord, amount: bigint, signal: AbortSignal) =>
+    depositToEnd((p, ctx) => (testnet === null ? null : testnet.depositFrom(p, { s: BigInt(g.s), i: g.i, u: g.u }, ctx as KindContext)), g.chain, POOL_ASSET_DECIMALS[POOL_ADDRESS_ASSET[g.chain]], amount, signal);
+  // a landed note of U_X's own in this page's store (review P2a): a follow resumed while a rung was landing ends
+  const uxNoted = async (g: PoolFollowRecord) => uxNoteLanded(await pageNotes(), g);
+  // a note of U_X's still landing holds in_pool and the end on every chain (card evm-deposit-route-mainnet review)
+  const uxOpen = async (g: PoolFollowRecord) => uxNoteOpen(await pageNotes(), g);
+  // the refund carry, at X's pool's floor read now
+  const refundAt = (floor: (g: PoolFollowRecord) => Promise<bigint>, op: Parameters<PoolFollowHost["deps"]>[1]) =>
+    poolRefundMover({
+      read: (g, nonce) => readMoveAt("intents.near", g.refund_id, nonce, g.origin, nearPair(), NEAR_NETWORKS.mainnet.usdc),
+      floor,
+      priced: (g) => pricedFor(g.chain, g.origin),
+      decimals: (c) => POOL_ASSET_DECIMALS[POOL_ADDRESS_ASSET[c]],
+      seed64: () => openSeed64(),
+      seedLock: (fn) => navigator.locks.request(WALLET_SEED_LOCK, { mode: "shared" }, fn),
+      move: op.move,
+      record: op.record,
     });
+  poolFollowDeps = (f, op) => {
+    if (f.chain !== "solana") {
+      const d = evmRoute.deps(f.chain, depositFromUx, (floor) => refundAt(floor, op));
+      return d === null ? null : { ...d, noted: uxNoted, open: uxOpen };
+    }
+    const pair = solPair();
+    if (pair === null || PAGE_SOL_PIN === undefined) return null;
+    const program = PAGE_SOL_PIN.program;
+    return { ...solanaPoolFollowDeps({ rpcs: pair, program, deposit: depositFromUx, refund: refundAt(async (g) => readSolanaPoolFloor(pair, program, g.u), op) }), noted: uxNoted, open: uxOpen };
   };
   // a buy or a sell from the trade box (src/trade.ts): legs from this device's own arm records only, signed here
   const trades = tradeKind({ store: () => open(), seed64: () => openSeed64(), deps: releaseTradeDeps() });

@@ -14,6 +14,17 @@
 //   reads back succeeded on both RPCs with the pool's Deposited naming the note's precommitment. With --settle it then
 //   runs, every 60 s, the page load's pass (runPoolDepositEvm with no ask, what settle runs on each load and state read)
 //   until it settles the note UNSPENT with its leaf (a Deposited is final only after ~22 min), 40 min at most.
+// - --fixed (card evm-deposit-route-mainnet): the follow's own deposit. The floor a quote into U is held to is read
+//   (src/pool-deposit-address.ts readEvmPoolFloor) and must cover what the first answer says U is short; U is funded to
+//   that floor, never more, and the ask again names U as its fixed source ({s, i, u}), as depositFrom does from U_X.
+// - --follow <wei> (card evm-deposit-route-mainnet review): the page's own follow end to end. The driver is this
+//   script: src/pool-deposit-follow.ts followPoolQuote over main.ts's own route (re-read: evmQuoteRoute, the function
+//   main.ts builds its EVM follow from, on a testnet page's pin and pair with no wallet reader: U's balance on each of
+//   the pool's two RPCs, the notes for the landed txs), with main.ts's noted and open (uxNoteLanded, uxNoteOpen on the
+//   store's notes), and the deposit the fixed-source run from U ({s, i, u}, as depositFrom runs it). The run of
+//   e45d5949 drove evmPoolFollowDeps directly, before the route took the notes. NEAR Intents has no testnet, so 1Click's status is SUCCESS with nothing named delivered and U is funded from
+//   wallet E instead: <wei> of rungs plus each rung's cost at the floor read. Once the first deposit is sent and before
+//   it lands, the follow is stopped and a new one started from the stage it showed, on the same store (a reload).
 // - It writes U, the deposit's tx, the answers and the note to <out.json>. Nothing here logs a key or the words.
 import { randomBytes } from "node:crypto";
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -33,10 +44,15 @@ globalThis.__SIGN_NETWORK__ = "testnet";
 const { EVM_CHAIN_IDS, EVM_LADDER, EVM_POOL_EVENTS, EVM_POOLS, evmPoolScopeOf, evmTreeSync } = await import("../../wallet/src/pool/evm.ts");
 const { TESTNET_RPCS } = await import("../src/pool-testnet.ts");
 const { runPoolDepositEvm } = await import("../src/pool-deposit-evm.ts");
+const { readEvmPoolFloor } = await import("../src/pool-deposit-address.ts");
+const { evmQuoteRoute, followPoolQuote, uxNoteLanded, uxNoteOpen } = await import("../src/pool-deposit-follow.ts");
+const { ladderSplit } = await import("../../wallet/src/pool/ladder.ts");
 
 const [CHAIN, OUT] = process.argv.slice(2);
 const SETTLE = process.argv.includes("--settle");
 const KEEP = process.argv.includes("--keep-seed");
+const FIXED = process.argv.includes("--fixed") || process.argv.includes("--follow");
+const FOLLOW = process.argv.includes("--follow") ? BigInt(process.argv[process.argv.indexOf("--follow") + 1]) : null;
 if ((CHAIN !== "base" && CHAIN !== "robinhood") || !OUT) throw new Error("usage: pool-deposit-evm-testnet.mjs <base|robinhood> <out.json> [--settle]");
 const NETWORK = CHAIN === "base" ? "base-sepolia" : "robinhood-testnet";
 // the page's own pin and pair
@@ -110,18 +126,63 @@ const [U, need] = shorts.at(-1) ?? [];
 if (!U) throw new Error("no top-up named");
 const planned = (await ns.list()).find((n) => n.scope === scope && n.state === "PLANNED");
 if (depositIdEvm(seed64, scope, planned.ref.i).address !== U) throw new Error("the top-up names another U");
-log(`fund U ${U} with ${need} wei on ${NETWORK}`);
+const floor = FIXED ? await readEvmPoolFloor(rpcs, PIN) : null;
+if (floor !== null) {
+  log(`the floor of a quote into U: ${floor} wei, U short ${need} wei`);
+  if (floor < need) throw new Error("the floor does not cover the deposit");
+}
+const rungs = FOLLOW === null ? [] : ladderSplit(EVM_LADDER, FOLLOW).notes;
+if (FOLLOW !== null && (rungs.length === 0 || ladderSplit(EVM_LADDER, FOLLOW).left !== 0n)) throw new Error("--follow: a sum of rungs");
+const target = FOLLOW === null ? (floor ?? need) : FOLLOW + BigInt(rungs.length) * (floor - EVM_LADDER.min);
+log(`fund U ${U} with ${target} wei on ${NETWORK}`);
 const balance = async () => {
   const got = await Promise.all(rpcs.map(async (r) => BigInt(await r("eth_getBalance", [U, "latest"]))));
   return got[0] < got[1] ? got[0] : got[1];
 };
-for (let b = await balance(); b < need; b = await balance()) await sleep(5_000);
+for (let b = await balance(); b < target; b = await balance()) await sleep(5_000);
 const funded = await balance();
 log(`U holds ${funded}: depositing ${RUNG} wei`);
 
-const answer = await runPoolDepositEvm(host(), ASK);
+const fixed = FIXED ? { s: scope, i: planned.ref.i, u: U } : undefined;
+const follows = [];
+let answer;
+if (FOLLOW === null) answer = await runPoolDepositEvm(host(), ASK, undefined, fixed);
+else {
+  const f = { chain: CHAIN, s: String(scope), i: planned.ref.i, u: U, refund_id: "00".repeat(32), address: "none (NEAR Intents has no testnet)", deadline_ms: Date.now(), origin: "none", min_out: String(target) };
+  let reloaded = false;
+  let ac = new AbortController();
+  const shown = [];
+  const deposit = async (_g, amount) => {
+    const a = await runPoolDepositEvm(host(), { ...ASK, amount }, undefined, fixed);
+    follows.push({ at: new Date().toISOString(), amount: String(amount), answer: a });
+    log(`follow's deposit of ${amount}: ${JSON.stringify(a)}`);
+    if (!reloaded && "stage" in a && a.stage === "sent") (reloaded = true), ac.abort();
+    return { end: "stage" in a ? a.stage : a.error, txs: a.txs ?? [] };
+  };
+  // main.ts: evmQuoteRoute({ network, pool, wallet, notes }).deps(chain, depositFromUx, refundAt), then { noted, open }
+  const route = evmQuoteRoute({ network: "testnet", pool: () => ({ pin: PIN, rpcs }), wallet: () => undefined, notes: () => ns.list() });
+  const deps = () => ({
+    ...route.deps(CHAIN, deposit, () => undefined), // no refund carry: NEAR Intents has no testnet
+    noted: async (g) => uxNoteLanded(await ns.list(), g),
+    open: async (g) => uxNoteOpen(await ns.list(), g),
+    sleep: (ms, signal) => new Promise((r) => { const t = setTimeout(r, Math.min(ms, 30_000)); signal?.addEventListener("abort", () => (clearTimeout(t), r())); }),
+    status: async () => ({ status: "SUCCESS", delivered: null }),
+    stage: async (st) => (shown.push(st), log(`follow stage ${st}`)),
+    signal: ac.signal,
+  });
+  let end = await followPoolQuote(f, deps());
+  log(`the first follow returned ${end}${reloaded ? " (stopped while the first deposit lands: a reload)" : ""}`);
+  if (reloaded) {
+    ac = new AbortController();
+    setTimeout(() => ac.abort(), 90 * 60_000);
+    end = await followPoolQuote(f, deps(), shown.at(-1) ?? "quote_checked");
+    log(`the reloaded follow returned ${end}${ac.signal.aborted ? " (stopped at 90 min)" : ""}`);
+  }
+  answer = { follow: end, stages: shown, reloaded };
+}
 log(`answer ${JSON.stringify(answer)}`);
 let note = (await ns.list()).find((n) => n.scope === scope && n.ref.kind === "deposit" && n.state !== "PLANNED");
+const notes = (await ns.list()).filter((n) => n.scope === scope && n.state !== "PLANNED").map((n) => ({ ref: JSON.parse(JSON.stringify(n.ref, (_k, v) => (typeof v === "bigint" ? String(v) : v))), state: n.state, sends: (n.evmSends ?? []).map((x) => ({ hash: x.hash, nonce: String(x.nonce), value: String(x.value) })), leaf: n.leaf && { value: String(n.leaf.value), leafIndex: String(n.leaf.leafIndex) } }));
 // the send read back: its receipt succeeded on both RPCs, with the pool's Deposited (topic 0, EVM_POOL_EVENTS) naming
 // the note's precommitment (the event's last word), 10 min at most
 const sendHash = note?.evmSends?.at(-1)?.hash;
@@ -156,6 +217,7 @@ const out = {
   rpcs: RPCS,
   u: U,
   need: String(need),
+  ...(floor === null ? {} : { fixed: true, floor: String(floor) }),
   funded: String(funded),
   left: String(left),
   first,
@@ -163,6 +225,7 @@ const out = {
   send: sendHash ?? null,
   receipts,
   settles,
+  ...(FOLLOW === null ? {} : { follow: String(FOLLOW), rungs: rungs.map(String), follows, notes }),
   note: note && { state: note.state, precommitment: note.precommitment.toString(16).padStart(64, "0"), sends: (note.evmSends ?? []).map((s) => ({ hash: s.hash, nonce: String(s.nonce), value: String(s.value) })), leaf: note.leaf && { value: String(note.leaf.value), label: note.leaf.label.toString(16).padStart(64, "0"), commitment: note.leaf.commitment.toString(16).padStart(64, "0"), leafIndex: String(note.leaf.leafIndex) } },
 };
 writeFileSync(OUT, JSON.stringify(out, null, 2) + "\n");

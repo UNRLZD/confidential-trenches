@@ -36,6 +36,7 @@
 // key, the words, or which note is whose.
 import type { PoolChain, PoolDepositStage, TxRef } from "../../kit/src/signpage/messages.ts";
 import { ladderSplit, type Ladder } from "../../wallet/src/pool/ladder.ts";
+import type { NoteRecord, NoteState } from "../../wallet/src/notes/store.ts";
 import { followRpc, type MoveRead, type OneClickStatus, readDepositStatus, type StatusRead } from "../../wallet/src/deposit/follow.ts";
 import { NEAR_NETWORKS } from "../../wallet/src/deposit/account.ts";
 import { type BindRpc, RELEASE_RELAYER } from "../../wallet/src/deposit/bind.ts";
@@ -43,7 +44,8 @@ import { solanaRentMin } from "../../kit/src/trade/solana/pool-buy.ts";
 import { SOLANA_POOL_TAG_DEPOSIT } from "../../kit/src/trade/solana/pool-deposit.ts";
 import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import { SOL_LADDER } from "../../wallet/src/pool/solana.ts";
-import { readSolanaPoolCosts } from "./pool-deposit-address.ts";
+import { readEvmPoolFloor, readSolanaPoolCosts } from "./pool-deposit-address.ts";
+import { EVM_LADDER, type EvmPoolPin, type EvmRpc } from "../../wallet/src/pool/evm.ts";
 import { solanaPoolDepositFloor } from "./pool-deposit-quote.ts";
 import { base58, base64, hex } from "@scure/base";
 import type { OneClickPricing } from "../../kit/src/checks/oneclick.ts";
@@ -129,8 +131,12 @@ export type PoolUx = Pick<PoolFollowRecord, "chain" | "s" | "i" | "u" | "refund_
  * U_X and carry it the same way.
  */
 export interface PoolUxReads {
-  /** U_X's balance at finalized on X's two RPCs (each its own read, one U_X per request). Throws when a read fails. */
+  /** U_X's balance at finalized on X's two RPCs (each its own read, one U_X per request), or one reader's reading as
+   *  both (`chainBalances` then given). Throws when a read fails. */
   balances(f: Pick<PoolUx, "u">): Promise<readonly [bigint, bigint]>;
+  /** U_X's balance on X's two pool RPCs, each alone in its request, when `balances` is one reader's word (card
+   *  evm-deposit-route-mainnet review P1): only these end a follow. Throws when a read fails. */
+  chainBalances?(f: Pick<PoolUx, "u">): Promise<readonly [bigint, bigint]>;
   /** The least U_X must hold for one deposit, and what one deposit costs on top of its rung (worst case), and the
    *  rent U_X keeps after it (0 on EVM), read on two RPCs at the round's time. */
   costs(f: PoolUx): Promise<{ floor: bigint; perRung: bigint; keep: bigint }>;
@@ -151,6 +157,16 @@ export interface PoolFollowDeps extends PoolUxReads {
   /** The txs of U_X's deposits into X's pool that both RPCs read landed: `heard` (a run's answer) and U_X's own, less
    *  `known` (already shown). Throws when a read fails (card pool-deposit-op-txs). */
   landed?(f: PoolFollowRecord, heard: readonly TxRef[], known?: ReadonlySet<string>): Promise<TxRef[]>;
+  /** Whether the store holds a landed note of U_X's own (uxNoteLanded: its deposit note at (s, i) or one of its second
+   *  arrivals), read each round until one is (card evm-deposit-route-mainnet review P2a): a follow resumed while its
+   *  only rung, or a later one, was landing reaches its end once that note settles. Read only once this quote's own
+   *  status read SUCCESS, or its stage is in_pool (re-read P2-1): the note is U_X's, not the quote's. */
+  noted?(f: PoolFollowRecord): Promise<boolean>;
+  /** Whether the store holds a note of U_X's own still landing (uxNoteOpen: INCOMING, sent and not yet final; card
+   *  evm-deposit-route-mainnet review): while one is, nothing shows in_pool and the follow never ends, so a later rung
+   *  that fails to land is never shown deposited, and what it leaves in U_X is carried again. The page's own pass of the
+   *  pool's INCOMING notes lands or retires it. */
+  open?(f: PoolFollowRecord): Promise<boolean>;
   /** The op's stage written (and posted to the app in state.ops). */
   stage(s: PoolFollowStage): Promise<void>;
   /** Txs read landed, added to the op's txs (each once). */
@@ -159,6 +175,21 @@ export interface PoolFollowDeps extends PoolUxReads {
   now?: () => number;
   sleep(ms: number, signal: AbortSignal): Promise<void>;
   signal: AbortSignal;
+}
+
+// a note read landed on chain (the store's LANDED, wallet notes/store.ts)
+const NOTE_LANDED: readonly NoteState[] = ["UNSPENT", "HELD", "RESERVED", "SPENT"];
+const ofUx = (n: Pick<NoteRecord, "ref" | "scope">, f: Pick<PoolFollowRecord, "s" | "i">): boolean => {
+  const s = BigInt(f.s);
+  return n.scope === s && ((n.ref.kind === "deposit" && n.ref.s === s && n.ref.i === f.i) || (n.ref.kind === "second" && n.ref.id.id === "U" && n.ref.id.s === s && n.ref.id.i === f.i));
+};
+/** Whether `notes` hold a landed note of U_X's own: its deposit note at (s, i) or one of that id's second arrivals. */
+export function uxNoteLanded(notes: readonly Pick<NoteRecord, "ref" | "scope" | "state">[], f: Pick<PoolFollowRecord, "s" | "i">): boolean {
+  return notes.some((n) => NOTE_LANDED.includes(n.state) && ofUx(n, f));
+}
+/** Whether `notes` hold a note of U_X's own still landing: sent (INCOMING) and not final yet. */
+export function uxNoteOpen(notes: readonly Pick<NoteRecord, "ref" | "scope" | "state">[], f: Pick<PoolFollowRecord, "s" | "i">): boolean {
+  return notes.some((n) => n.state === "INCOMING" && ofUx(n, f));
 }
 
 export const POOL_FOLLOW_FAST_MS = 2_000;
@@ -189,6 +220,11 @@ export async function followPoolQuote(f: PoolFollowRecord, deps: PoolFollowDeps,
     await deps.stage(s);
   };
   let landed = shown === "in_pool";
+  // this quote's own payment read (card evm-deposit-route-mainnet re-read P2-1): 1Click's SUCCESS for its own address, or
+  // its stage already in_pool. Only then does a landed note of U_X's count as this quote's: U_X is per (s, i), not per
+  // quote, so a neighbour's note never shows an unpaid or expired quote in the pool, nor ends a paid one before its own
+  // delivery is carried
+  let paid = shown === "in_pool";
   let slow = POOL_FOLLOW_SLOW_MS;
   // the device's clock at this follow's first end attempt (re-check P2): a page opened long past the quote's deadline
   // still reads a failing tx read again for the whole margin
@@ -202,42 +238,89 @@ export async function followPoolQuote(f: PoolFollowRecord, deps: PoolFollowDeps,
     await deps.txs(t);
     for (const x of t) written.add(x.hash);
   };
+  // the quote's own floor (card evm-deposit-route-mainnet review P2b): the device held min_out at or above the floor
+  // when it checked the quote, so what U_X holds up to it is carried in even after fees rose since (the deposit prices
+  // itself at its own gas and tells short if it cannot pay); over it, the floor read now
+  const quoted = ((): bigint | null => {
+    try {
+      const m = BigInt(f.min_out);
+      return m >= deps.ladder.min ? m : null;
+    } catch {
+      return null;
+    }
+  })();
+  const gated = (c: { floor: bigint; perRung: bigint; keep: bigint }) => {
+    if (quoted === null || quoted >= c.floor || quoted - deps.ladder.min - c.keep < 0n) return c;
+    const per = quoted - deps.ladder.min - c.keep;
+    return { floor: quoted, perRung: per < c.perRung ? per : c.perRung, keep: c.keep };
+  };
+  // one deposit from U_X for the largest ask `low` pays; true when it landed (the next round reads what is left at once;
+  // anything else, not landed, refused or down, is read again at the slow pace, so a deposit that cannot go is never
+  // asked in a tight loop)
+  const isOpen = async (): Promise<boolean> => deps.open !== undefined && (await deps.open(f));
+  const carry = async (low: bigint, c: { perRung: bigint; keep: bigint }): Promise<boolean> => {
+    const amount = askOf(deps.ladder, low, c.perRung, c.keep);
+    if (amount === 0n) return false;
+    const { end, txs } = await deps.deposit(f, amount, deps.signal);
+    // landed only with nothing of U_X's still landing: a rung sent after the one that landed is followed first
+    const went = (end === "filled" || end === "part_filled") && !(await isOpen());
+    if (went) {
+      landed = true;
+      await show("in_pool");
+    }
+    // U_X holds over the quote's own floor but cannot pay a rung and its fee now (fees rose since the quote): the
+    // existing short stage, so the screen tells it (re-read P3-2), until a top-up to U_X or lower fees let it go; never
+    // once a rung of this follow is in the pool
+    if (end === "not_funded" && !landed) await show("short");
+    // its txs as both RPCs read them; a read that fails leaves them to the read before the end
+    await carryTxs(txs).catch(() => {});
+    return went;
+  };
+  // the end's own read (card evm-deposit-route-mainnet review P1): U_X on the pool's two RPCs, each alone in its request
+  // (`chainBalances`, or `balances` where those are already the two), ends a follow only when BOTH read it under one
+  // deposit's floor. One reader's low word (the helper's) never ends one: what the two hold over the floor is carried
+  // (the deposit reads U_X again itself), and two that read apart are read again
+  const emptyOnChain = async (): Promise<{ empty: boolean; went: boolean }> => {
+    const [x, y] = await (deps.chainBalances ?? deps.balances)(f);
+    const high = x > y ? x : y;
+    if (high < deps.ladder.min) return { empty: true, went: false };
+    const c = gated(await deps.costs(f));
+    if (high < c.floor) return { empty: true, went: false };
+    const low = x < y ? x : y;
+    return { empty: false, went: low >= c.floor ? await carry(low, c) : false };
+  };
   for (;;) {
     if (deps.signal.aborted) return shown;
     let fast = false;
     try {
+      const opened = await isOpen();
+      if (!landed && !opened && paid && deps.noted !== undefined && (await deps.noted(f))) landed = true;
       // the chain first: U_X's money, the lower of two RPCs at finalized, carried into the pool while it covers a deposit
+      // (with one reader, its one reading: it only starts a deposit, which reads U_X on the pool's two RPCs itself)
       const [a, b] = await deps.balances(f);
       const low = a < b ? a : b;
       // the costs' reads only once U_X holds at least the least rung (review L2): none while it holds nothing
-      const c = low >= deps.ladder.min ? await deps.costs(f) : null;
+      const c = low >= deps.ladder.min ? gated(await deps.costs(f)) : null;
       if (c !== null && low >= c.floor) {
-        const amount = askOf(deps.ladder, low, c.perRung, c.keep);
-        if (amount > 0n) {
-          const { end, txs } = await deps.deposit(f, amount, deps.signal);
-          // landed: the next round reads what is left at once; anything else (not landed, refused, down) is read again
-          // at the slow pace, so a deposit that cannot go is never asked in a tight loop
-          if (end === "filled" || end === "part_filled") {
-            landed = true;
-            fast = true;
-            await show("in_pool");
-          }
-          // its txs as both RPCs read them; a read that fails leaves them to the read before the end
-          await carryTxs(txs).catch(() => {});
-        }
+        if (await carry(low, c)) fast = true;
       } else if (landed) {
-        // nothing left under U_X to carry: read on to the quote's deadline, so a late send is carried too
-        if (shown !== "in_pool") await show("in_pool");
-        if (await deps.past(f)) {
-          // the end only once every landed tx is read (a failed read: read again next round, until the margin past the
-          // later of the quote's deadline and this follow's first end is past on the device's clock, then the end with
-          // the txs read so far; review P2-b, re-check P2), and no refund move's heard tx holds it (poolRefundMover's
-          // settle, bounded the same way)
-          const read = await carryTxs([]).then(() => true, () => false);
-          const t = (deps.now ?? Date.now)();
-          endSince ??= t;
-          if (!read && t <= Math.max(f.deadline_ms, endSince) + POOL_TX_READ_MARGIN_MS) throw new Error("read the txs again");
-          if (!deps.refund?.settle || (await deps.refund.settle(f))) return shown;
+        // nothing left under U_X to carry: read on to the quote's deadline, so a late send is carried too; while a note of
+        // U_X's is still landing, nothing more (no in_pool, no end): its landing, or what it leaves in U_X, comes first
+        if (!opened && shown !== "in_pool") await show("in_pool");
+        if (!opened && (await deps.past(f))) {
+          const e = await emptyOnChain();
+          if (e.went) fast = true;
+          else if (e.empty) {
+            // the end only once every landed tx is read (a failed read: read again next round, until the margin past the
+            // later of the quote's deadline and this follow's first end is past on the device's clock, then the end with
+            // the txs read so far; review P2-b, re-check P2), and no refund move's heard tx holds it (poolRefundMover's
+            // settle, bounded the same way)
+            const read = await carryTxs([]).then(() => true, () => false);
+            const t = (deps.now ?? Date.now)();
+            endSince ??= t;
+            if (!read && t <= Math.max(f.deadline_ms, endSince) + POOL_TX_READ_MARGIN_MS) throw new Error("read the txs again");
+            if (!deps.refund?.settle || (await deps.refund.settle(f))) return shown;
+          }
         }
       } else {
         const st = await deps.status(f, deps.signal);
@@ -246,6 +329,7 @@ export async function followPoolQuote(f: PoolFollowRecord, deps: PoolFollowDeps,
           // REFUNDED shows nothing the chain has not read: refunded only once the carry's read finds the money under
           // U_{s,i} on both of NEAR's RPCs (a refund being moved stays shown as moved: RANK)
           if (st.status !== "REFUNDED") await show(POOL_STATUS_STAGE[st.status]);
+          if (st.status === "SUCCESS") paid = true;
           if (st.status === "KNOWN_DEPOSIT_TX" || st.status === "PROCESSING" || st.status === "SUCCESS") fast = true;
           if (st.status === "REFUNDED" && deps.refund) {
             refund = await deps.refund(f, deps.signal);
@@ -788,14 +872,137 @@ export function solanaPoolFollowDeps(o: { rpcs: readonly [SolanaRpc, SolanaRpc];
       return out;
     },
     ...(o.refund ? { refund: o.refund } : {}),
-    sleep: o.sleep ?? ((ms, signal) => new Promise<void>((ok) => {
-      const t = setTimeout(done, ms);
-      function done() {
-        clearTimeout(t);
-        signal.removeEventListener("abort", done);
-        ok();
-      }
-      signal.addEventListener("abort", done, { once: true });
-    })),
+    sleep: o.sleep ?? followSleep,
+  };
+}
+
+/** The follow's wait between rounds: `ms`, or until the signal (a sign out). */
+const followSleep: PoolFollowDeps["sleep"] = (ms, signal) => new Promise<void>((ok) => {
+  const t = setTimeout(done, ms);
+  function done() {
+    clearTimeout(t);
+    signal.removeEventListener("abort", done);
+    ok();
+  }
+  signal.addEventListener("abort", done, { once: true });
+});
+
+// -------------------------------------------------------------------------------------------- Base's and Robinhood's
+
+/** A JSON-RPC quantity from a provider: hostile until read. */
+const evmQuantity = (x: unknown, what: string): bigint => {
+  if (typeof x !== "string" || !/^0x[0-9a-fA-F]{1,64}$/.test(x)) throw new Error(`${what}: not a quantity`);
+  return BigInt(x);
+};
+
+/**
+ * The follow's reads on Base and Robinhood (card evm-deposit-route-mainnet), as solanaPoolFollowDeps on Solana:
+ * 1Click's status through the helper for U_X and U_{s,i}; U_X's balance at the latest block (Robinhood serves no
+ * finalized state), polled on `wallet` alone when given (its one reading as both: the helper's POST /v1/rpc/{chain} on
+ * mainnet, decision M359: a one-time account's holdings never reach a public provider from the device), else on each
+ * of the pool's two RPCs (a testnet page). The poll only starts a deposit: pool.deposit (`deposit`, from U_X alone)
+ * reads U_X again on the pool's two RPCs before U_X signs. One deposit's costs: the quote's floor read now on the
+ * pool's two RPCs (readEvmPoolFloor: the rung, the capped gas with the tree's headroom at 2 x base fee + tip, the L1
+ * fee; names no account), its per-rung cost the floor less the rung, nothing kept (an EVM account has no rent). The
+ * quote's deadline past on both RPCs' latest block time. With the page's notes (`notes`), `landed` as Solana's (card
+ * evm-deposit-route-mainnet review): the txs of U_X's deposits into the pinned pool that both of the pool's RPCs read
+ * succeeded, from U_X, at or under each one's finalized block, the two alike: each landed note of U_X's own its one send
+ * that did, and the run's heard txs. One hash a request; a read that fails, or a heard tx not read yet, throws (read
+ * again); a send no RPC holds (one it replaced landed) is passed.
+ */
+export function evmPoolFollowDeps(o: { rpcs: readonly [EvmRpc, EvmRpc]; pin: EvmPoolPin; wallet?: EvmRpc; deposit: PoolFollowDeps["deposit"]; refund?: PoolFollowDeps["refund"]; notes?: () => Promise<readonly NoteRecord[]>; fetch?: typeof fetch; sleep?: PoolFollowDeps["sleep"] }): Omit<PoolFollowDeps, "stage" | "signal" | "txs"> {
+  const both = <T,>(f: (r: EvmRpc, k: number) => Promise<T>): Promise<[T, T]> => Promise.all([f(o.rpcs[0], 0), f(o.rpcs[1], 1)]);
+  const balanceOn = async (r: EvmRpc, u: string, what: string) => evmQuantity(await r("eth_getBalance", [u, "latest"]), what);
+  return {
+    status: (f, signal) => readDepositStatus(f.address, f.u, o.fetch ?? fetch, signal, Date.now(), f.refund_id),
+    balances: async (f) => {
+      if (o.wallet === undefined) return both((r, k) => balanceOn(r, f.u, `rpc ${k} U_X balance`));
+      const b = await balanceOn(o.wallet, f.u, "U_X balance");
+      return [b, b] as const;
+    },
+    // the end's read (review P1): the pool's two RPCs, U_X alone in each request; never the wallet reader
+    ...(o.wallet === undefined ? {} : { chainBalances: (f: Pick<PoolUx, "u">) => both((r, k) => balanceOn(r, f.u, `rpc ${k} U_X balance`)) }),
+    costs: async () => {
+      const floor = await readEvmPoolFloor(o.rpcs, o.pin);
+      return { floor, perRung: floor - EVM_LADDER.min, keep: 0n };
+    },
+    ladder: EVM_LADDER,
+    deposit: o.deposit,
+    past: async (f) => {
+      const times = await both(async (r, k) => evmQuantity(((await r("eth_getBlockByNumber", ["latest", false])) as { timestamp?: unknown } | null)?.timestamp, `rpc ${k} block time`) * 1000n);
+      return times.every((t) => t > BigInt(f.deadline_ms));
+    },
+    ...(o.refund ? { refund: o.refund } : {}),
+    ...(o.notes === undefined ? {} : { landed: (f: PoolFollowRecord, heard: readonly TxRef[], known?: ReadonlySet<string>) => evmLanded(o.rpcs, o.pin, o.notes!, f, heard, known) }),
+    sleep: o.sleep ?? followSleep,
+  };
+}
+
+const EVM_HASH = /^0x[0-9a-f]{64}$/;
+/** One tx's read on one RPC: a deposit landed (succeeded from U_X to the pool, at or under its finalized block), not one
+ *  (failed, or another sender or target), or not held (null). */
+async function evmTxRead(r: EvmRpc, hash: string, u: string, pool: string): Promise<"landed" | "not" | null> {
+  const [rc, fin] = await Promise.all([r("eth_getTransactionReceipt", [hash]), r("eth_getBlockByNumber", ["finalized", false])]);
+  if (rc === null) return null;
+  const x = rc as { status?: unknown; from?: unknown; to?: unknown; blockNumber?: unknown };
+  const at = evmQuantity(x.blockNumber, "receipt block");
+  const final = evmQuantity((fin as { number?: unknown } | null)?.number, "finalized block");
+  if (at > final) return null;
+  return x.status === "0x1" && typeof x.from === "string" && x.from.toLowerCase() === u.toLowerCase() && typeof x.to === "string" && x.to.toLowerCase() === pool.toLowerCase() ? "landed" : "not";
+}
+async function evmLanded(rpcs: readonly [EvmRpc, EvmRpc], pin: EvmPoolPin, notes: () => Promise<readonly NoteRecord[]>, f: PoolFollowRecord, heard: readonly TxRef[], known?: ReadonlySet<string>): Promise<TxRef[]> {
+  const skip = known ?? new Set<string>();
+  const both = async (h: string) => {
+    const [a, b] = await Promise.all([evmTxRead(rpcs[0], h, f.u, pin.pool), evmTxRead(rpcs[1], h, f.u, pin.pool)]);
+    if (a !== b) throw new Error("the RPCs read a deposit tx apart");
+    return a;
+  };
+  const out: TxRef[] = [];
+  const add = (h: string) => void (!skip.has(h) && !out.some((t) => t.hash === h) && out.push({ chain: f.chain, hash: h }));
+  for (const t of heard) {
+    if (t.chain !== f.chain || !EVM_HASH.test(t.hash) || skip.has(t.hash)) continue;
+    const r = await both(t.hash);
+    if (r === null) throw new Error("a heard deposit tx not read final yet");
+    if (r === "landed") add(t.hash);
+  }
+  for (const n of await notes()) {
+    if (!NOTE_LANDED.includes(n.state) || !ofUx(n, f)) continue;
+    const sends = (n.evmSends ?? []).map((x) => x.hash).filter((h) => EVM_HASH.test(h));
+    if (sends.some((h) => skip.has(h) || out.some((t) => t.hash === h))) continue;
+    let found = false;
+    for (const h of sends) if ((await both(h)) === "landed") ((found = true), add(h));
+    if (!found && sends.length > 0) throw new Error("a landed note's send not read yet");
+  }
+  return out;
+}
+
+/**
+ * Base's and Robinhood's route for a pool quote into U_X on this page (card evm-deposit-route-mainnet; src/main.ts):
+ * the pool the page pins on the chain (`pool`: its pin and the deposit's own pair) and the one reader U_X's balance is
+ * polled on (`wallet`: on mainnet the helper's POST /v1/rpc/{chain}, decision M359: a one-time account's holdings never
+ * reach a public provider from the device). A testnet page polls the pool's pair (1Click pays out on mainnet only, so no
+ * quote is asked there). With no pool, or on any page not testnet with no reader: no floor (so pool.address shows no
+ * address, pool-deposit-address.ts) and no follow.
+ */
+export function evmQuoteRoute(o: { network: string; pool(chain: "base" | "robinhood"): { pin: EvmPoolPin; rpcs: readonly [EvmRpc, EvmRpc] } | null; wallet(chain: "base" | "robinhood"): EvmRpc | undefined; notes?: () => Promise<readonly NoteRecord[]> }) {
+  const poolOf = (chain: PoolChain) => {
+    if (chain === "solana") return null;
+    const e = o.pool(chain);
+    if (e === null) return null;
+    const wallet = o.wallet(chain);
+    if (o.network !== "testnet" && wallet === undefined) return null;
+    return { ...e, ...(wallet === undefined ? {} : { wallet }) };
+  };
+  return {
+    /** The quote's floor on X's pool, read now on its two RPCs; null with no route. */
+    floor: async (chain: PoolChain): Promise<bigint | null> => {
+      const e = poolOf(chain);
+      return e === null ? null : readEvmPoolFloor(e.rpcs, e.pin);
+    },
+    /** The follow's reads on X, with the deposit from U_X and the refund carry at that floor; null with no route. */
+    deps: (chain: PoolChain, deposit: PoolFollowDeps["deposit"], refundAt: (floor: () => Promise<bigint>) => NonNullable<PoolFollowDeps["refund"]>) => {
+      const e = poolOf(chain);
+      return e === null ? null : evmPoolFollowDeps({ ...e, deposit, refund: refundAt(() => readEvmPoolFloor(e.rpcs, e.pin)), ...(o.notes === undefined ? {} : { notes: o.notes }) });
+    },
   };
 }

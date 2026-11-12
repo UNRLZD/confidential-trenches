@@ -97,6 +97,8 @@ function chain() {
     onSend: (_raw: string) => {},
     // one RPC's word off the other's: added to RPC 1's answer
     off: { nonce: 0n, estimate: 0n, l1: 0n, baseFee: 0n },
+    /** each RPC's estimate of a call by its value, when not the mock's 250,000 (re-read P3-4: the rung-down estimate) */
+    estimateOf: null as ((k: number, value: bigint) => bigint) | null,
     /** a method that fails on RPC 1 past the page's retry (the kit client's transport error) */
     down: null as string | null,
     /** tx hashes each RPC knows; U's pending nonce on each, when it is past "latest" */
@@ -140,6 +142,7 @@ function chain() {
         case "eth_getBalance":
           return q((c.at.get(String(p[0]).toLowerCase()) ?? c.balance)[k]!);
         case "eth_estimateGas":
+          if (c.estimateOf !== null) return q(c.estimateOf(k, BigInt((p[0] as { value: string }).value)));
           return q(off(250_000n, c.off.estimate));
         case "eth_call": {
           const call = p[0] as { from?: string; data: string };
@@ -786,6 +789,9 @@ test("a send again of the very bytes restarts the wait: within one run it is not
 
 // The slice 3 review's scenarios (R1, R2), on the mock above.
 const capBound = (c: { baseFee: bigint; depth: bigint[] }) => (EVM_DEPOSIT_GAS_MAX + evmDepositHeadroom(c.depth[0]!, c.depth[1]!)) * (2n * c.baseFee + EVM_DEPOSIT_PRIORITY_CAP) + 7_000n;
+/** One deposit's fee at the run's own need (card evm-deposit-route-mainnet review P2b): the mock's estimate (250,000)
+ *  and the tree's headroom, at 2 x base fee + tip, and the mock's L1 fee. */
+const estBound = (c: { baseFee: bigint; depth: bigint[] }) => (250_000n + evmDepositHeadroom(c.depth[0]!, c.depth[1]!)) * (2n * c.baseFee + EVM_DEPOSIT_PRIORITY_CAP) + 7_000n;
 
 test("R1: an earlier ask's note that lands later is settled by the next run, never credited to it: the later ask sends its own deposit and answers with its own tx", async () => {
   const { ch, ns, planned } = await funded(0n);
@@ -828,19 +834,18 @@ test("R2: a deposit that reverts and cannot be paid again names its top-up (`sho
   const [named, top] = shorts[0]!;
   assert.equal(named, u);
   ch.c.at.set(u.toLowerCase(), [top, top]); // the user tops up exactly what was asked; any other U holds nothing
-  // the deposit is mined and reverts: U's nonce used, its gas burnt
+  // the deposit is mined and reverts: U's nonce used, its gas burnt, and U left 1 wei short of paying it again
   ch.c.onSend = (raw) => {
     const s = sentOf(raw);
     ch.c.nonce = s.nonce + 1n;
-    const left = ch.c.at.get(u.toLowerCase())!.map((b) => b - s.gas * (ch.c.baseFee + EVM_DEPOSIT_PRIORITY_CAP));
-    ch.c.at.set(u.toLowerCase(), left);
+    ch.c.at.set(u.toLowerCase(), [RUNG + estBound(ch.c) - 1n, RUNG + estBound(ch.c) - 1n]);
   };
   const a = await runPoolDepositEvm(h(), ASK);
   assert.equal("stage" in a && a.stage, "sent", "the ask's send: sent, never failed");
   assert.equal(ch.c.sent.length, 1, "the send again not signed: U cannot pay it");
   assert.equal((await ns.get(planned.id))!.state, "INCOMING");
   const low = ch.c.at.get(u.toLowerCase())![0]!;
-  const want: [string, bigint] = [u, RUNG + capBound(ch.c) - low];
+  const want: [string, bigint] = [u, RUNG + estBound(ch.c) - low];
   assert.deepEqual(shorts.at(-1), want, "the top-up the send again needs, named");
   // the load's pass: the same top-up named again, and the answer is not_funded
   assert.deepEqual(await runPoolDepositEvm(h(), null), { error: "not_funded" });
@@ -852,10 +857,11 @@ test("R2: a deposit that reverts and cannot be paid again names its top-up (`sho
   assert.equal(ch.c.sent.length, 1);
 });
 
-test("the gas limit is the two-RPC estimate plus the tree's headroom from the pool's two depths, and U's balance covers that padded limit", async () => {
+test("the gas limit is the two-RPC estimate plus the tree's headroom from the pool's two depths, and U's balance covers that padded limit (review P2b: the run's need is that limit's fee, never the cap's)", async () => {
   const { ch, ns } = await funded(0n);
   ch.c.depth = [7n, 5n];
-  const need = RUNG + capBound(ch.c);
+  const need = RUNG + estBound(ch.c);
+  assert.ok(need < RUNG + capBound(ch.c), "under what the cap would need");
   ch.c.balance = [need - 1n, need - 1n];
   const shorts: bigint[] = [];
   assert.deepEqual(await runPoolDepositEvm(hostOf(ch, ns, { short: (_u, w) => void shorts.push(w) }), ASK), { error: "not_funded" });
@@ -872,6 +878,34 @@ test("the gas limit is the two-RPC estimate plus the tree's headroom from the po
   const rpcs = [f.ch.rpcs[0], async (m: string, p: readonly unknown[]) => ((p[0] as { data?: string })?.data === SEL_STATE_DEPTH ? "0x" + word(8n) : orig(m, p))] as const;
   assert.deepEqual(await runPoolDepositEvm(hostOf(f.ch, f.ns, { rpcs }), ASK), { error: "failed" });
   assert.equal(f.ch.c.sent.length, 0);
+});
+
+// card evm-deposit-route-mainnet re-read P3-4: U holds two rungs, under two rungs and the fee: the run steps down to
+// the one rung that fits with its fee and estimates that call again on both RPCs. That second estimate is held as the
+// first: the two RPCs alike, at most the cap, and the one the tx's gas limit is built from
+test("re-read P3-4: the rung-down call's own estimate, alike on both RPCs and capped, is the gas limit; apart, over the cap, or not read, nothing signed at it", async () => {
+  const two = 2n * RUNG;
+  const setup = async (est: (k: number, value: bigint) => bigint) => {
+    const f = await funded(two + estBound(f0.ch.c) - 1n);
+    f.ch.c.estimateOf = est;
+    f.ch.c.onSend = (raw) => f.ch.land(raw);
+    return f;
+  };
+  const f0 = await funded(0n);
+  // the lower rung's call estimated at 300,000 on both: the gas limit is that and the headroom, never the first 250,000
+  const a = await setup((_k, v) => (v === two ? 250_000n : 300_000n));
+  const ra = await runPoolDepositEvm(hostOf(a.ch, a.ns), { ...ASK, amount: two });
+  assert.equal(a.ch.c.sent.length, 1, JSON.stringify(ra));
+  assert.equal(sentOf(a.ch.c.sent[0]!).value, RUNG, "one rung, the one that fits with its fee");
+  assert.equal(sentOf(a.ch.c.sent[0]!).gas, 300_000n + evmDepositHeadroom(0n, 0n), "the rung-down call's own estimate");
+  // the lower rung's call read apart (the first RPC as the first estimate, the second not): nothing signed
+  const b = await setup((k, v) => (v === two ? 250_000n : k === 0 ? 250_000n : 260_000n));
+  assert.deepEqual(await runPoolDepositEvm(hostOf(b.ch, b.ns), { ...ASK, amount: two }), { error: "failed" });
+  assert.equal(b.ch.c.sent.length, 0);
+  // the lower rung's call over the cap on both: refused, nothing signed
+  const c = await setup((_k, v) => (v === two ? 250_000n : EVM_DEPOSIT_GAS_MAX + 1n));
+  assert.deepEqual(await runPoolDepositEvm(hostOf(c.ch, c.ns), { ...ASK, amount: two }), { error: "not_allowed" });
+  assert.equal(c.ch.c.sent.length, 0);
 });
 
 test("an ask below the ladder's smallest rung is refused with nothing planned, and a top-up is always named at a rung the ladder deposits (found by the Base Sepolia run: an ask of MIN_DEPOSIT was told to top up 0.0001 ETH, then kept it)", async () => {
@@ -1419,4 +1453,125 @@ test("card start-reads-wait-out-a-throttle: a provider down past the page's retr
     assert.deepEqual(a, { error: "failed" });
     assert.equal(ch.c.sent.length, 0);
   }
+});
+
+// ---- card evm-deposit-route-mainnet (pool-deposit-follow review H1, on EVM): the follow of a pool quote pays from U_X
+// alone, the one U^evm_{s,i} the quote named, never the newest landed U or the planned index ----
+/** The run's U: each eth_estimateGas names its `from`. */
+function fromsOf(ch: ReturnType<typeof chain>) {
+  const froms: string[] = [];
+  const w = (r: (typeof ch.rpcs)[0]) => async (m: string, p: readonly unknown[]) => {
+    if (m === "eth_estimateGas") froms.push(String((p[0] as { from: string }).from));
+    return r(m, p);
+  };
+  return { froms, rpcs: [w(ch.rpcs[0]), w(ch.rpcs[1])] as const };
+}
+/** U_0 landed a note (the newest used U, funded again) and U_1 is the planned index, funded too. */
+async function twoUs() {
+  const { ch, ns, planned } = await funded(RUNG + FEE);
+  ch.c.onSend = (raw) => ch.land(raw);
+  assert.equal("stage" in (await runPoolDepositEvm(hostOf(ch, ns), ASK)) && (await ns.get(planned.id))!.state, "UNSPENT");
+  const next = await ns.planDeposit(SCOPE, (ref) => noteSecrets(SEED, ref).precommitment);
+  const i1 = (next.ref as { i: number }).i;
+  assert.notEqual(i1, (planned.ref as { i: number }).i, "a new planned index");
+  const u0 = depositIdEvm(SEED, SCOPE, (planned.ref as { i: number }).i).address, u1 = depositIdEvm(SEED, SCOPE, i1).address;
+  ch.c.at.set(u0.toLowerCase(), [RUNG + FEE, RUNG + FEE]);
+  ch.c.at.set(u1.toLowerCase(), [RUNG + FEE, RUNG + FEE]);
+  return { ch, ns, next, i1, u0, u1 };
+}
+
+test("evm-deposit-route-mainnet: a fixed U_{s,i} pays the ask from U_X alone, its planned deposit note; with none given the run pays from the newest landed U", async () => {
+  {
+    const { ch, ns, u0 } = await twoUs();
+    const f = fromsOf(ch);
+    const a = await runPoolDepositEvm(hostOf(ch, ns, { rpcs: f.rpcs }), ASK);
+    assert.ok("stage" in a && a.stage === "filled", JSON.stringify(a));
+    assert.deepEqual([...new Set(f.froms)], [u0], "no source given: the newest landed U");
+  }
+  const { ch, ns, next, i1, u1 } = await twoUs();
+  const f = fromsOf(ch);
+  const a = await runPoolDepositEvm(hostOf(ch, ns, { rpcs: f.rpcs }), ASK, undefined, { s: SCOPE, i: i1, u: u1 });
+  assert.ok("stage" in a && a.stage === "filled", JSON.stringify(a));
+  assert.deepEqual([...new Set(f.froms)], [u1], "the fixed U_X alone");
+  assert.equal(sentOf(ch.c.sent.at(-1)!).pre, next.precommitment, "its planned deposit note");
+  assert.equal((await ns.get(next.id))!.state, "UNSPENT");
+});
+
+test("evm-deposit-route-mainnet: a fixed U_X of another scope, an address that is not U^evm_{s,i}'s, or an index the store never planned signs nothing (not_allowed)", async () => {
+  const { ch, ns, i1, u0, u1 } = await twoUs();
+  const sent = ch.c.sent.length;
+  assert.deepEqual(await runPoolDepositEvm(hostOf(ch, ns), ASK, undefined, { s: SCOPE + 1n, i: i1, u: u1 }), { error: "not_allowed" }, "another scope");
+  assert.deepEqual(await runPoolDepositEvm(hostOf(ch, ns), ASK, undefined, { s: SCOPE, i: i1, u: u0 }), { error: "not_allowed" }, "another U's address");
+  assert.deepEqual(await runPoolDepositEvm(hostOf(ch, ns), ASK, undefined, { s: SCOPE, i: i1 + 5, u: depositIdEvm(SEED, SCOPE, i1 + 5).address }), { error: "not_allowed" }, "never planned");
+  assert.equal(ch.c.sent.length, sent, "nothing sent");
+});
+
+test("evm-deposit-route-mainnet: a fixed U_X that cannot pay the rung and its fee is not_funded with its own top-up named, never paid from the newest landed U", async () => {
+  const { ch, ns, i1, u0, u1 } = await twoUs();
+  ch.c.at.set(u1.toLowerCase(), [RUNG / 2n, RUNG / 2n]);
+  const f = fromsOf(ch);
+  const shorts: string[] = [];
+  const sent = ch.c.sent.length;
+  const a = await runPoolDepositEvm(hostOf(ch, ns, { rpcs: f.rpcs, short: (u) => void shorts.push(u) }), ASK, undefined, { s: SCOPE, i: i1, u: u1 });
+  assert.deepEqual(a, { error: "not_funded" });
+  assert.equal(ch.c.sent.length, sent, "nothing sent");
+  assert.ok(!f.froms.includes(u0), "U_0 never priced");
+  assert.deepEqual(shorts, [u1], "the top-up names U_X");
+});
+
+test("evm-deposit-route-mainnet: the kind takes the fixed source as the Solana kind does (poolDepositEvmKind(host)(ask, ctx, from))", async () => {
+  const { ch, ns, i1, u1 } = await twoUs();
+  const f = fromsOf(ch);
+  const run = poolDepositEvmKind(() => hostOf(ch, ns, { rpcs: f.rpcs }))(ASK, null, { s: SCOPE, i: i1, u: u1 }) as { after: Promise<void>; answer(): unknown };
+  await run.after;
+  assert.deepEqual([...new Set(f.froms)], [u1]);
+});
+
+// card evm-deposit-route-mainnet review: each fixed-source rule held by a test of its own (each fails with its rule taken
+// out of runPoolDepositEvm)
+test("evm-deposit-route-mainnet review: a fixed U of another scope, its own address and an index this scope planned, signs nothing (the scope rule alone refuses it)", async () => {
+  const { ch, ns, i1 } = await twoUs();
+  const other = depositIdEvm(SEED, SCOPE + 1n, i1).address;
+  ch.c.at.set(other.toLowerCase(), [RUNG + FEE, RUNG + FEE]);
+  const f = fromsOf(ch);
+  const sent = ch.c.sent.length;
+  assert.deepEqual(await runPoolDepositEvm(hostOf(ch, ns, { rpcs: f.rpcs }), ASK, undefined, { s: SCOPE + 1n, i: i1, u: other }), { error: "not_allowed" });
+  assert.equal(ch.c.sent.length, sent, "nothing sent");
+  assert.deepEqual(f.froms, [], "no U priced");
+});
+
+test("evm-deposit-route-mainnet review: a fixed U with a note still landing is read again (not_landed), never sent a second deposit beside it", async () => {
+  const { ch, ns, i1, u1 } = await twoUs();
+  // U_1's deposit sent, never landing
+  ch.c.onSend = () => {};
+  const first = await runPoolDepositEvm(hostOf(ch, ns), ASK, undefined, { s: SCOPE, i: i1, u: u1 });
+  assert.ok("stage" in first, JSON.stringify(first));
+  const sent = ch.c.sent.length;
+  assert.ok((await ns.list()).some((n) => n.state === "INCOMING" && n.ref.kind === "deposit" && n.ref.i === i1), "U_1's note landing");
+  ch.c.at.set(u1.toLowerCase(), [3n * (RUNG + FEE), 3n * (RUNG + FEE)]);
+  const methods: string[] = [];
+  const log = (r: (typeof ch.rpcs)[0]) => async (m: string, p: readonly unknown[]) => (methods.push(m), r(m, p));
+  assert.deepEqual(await runPoolDepositEvm(hostOf(ch, ns, { rpcs: [log(ch.rpcs[0]), log(ch.rpcs[1])] }), ASK, undefined, { s: SCOPE, i: i1, u: u1 }), { stage: "not_landed", txs: [] });
+  assert.equal(ch.c.sent.length, sent, "no second deposit from U_1");
+  assert.ok(!methods.includes("eth_getBalance"), "answered from its landing note: U_1's balance never read");
+});
+
+test("evm-deposit-route-mainnet review: a short fixed U is not_funded with its own top-up named while another U's deposit is landing (no wait on another U)", async () => {
+  const { ch, ns, i1, u0, u1 } = await twoUs();
+  // U_0's next deposit sent, never landing: the default path would wait on it
+  ch.c.onSend = () => {};
+  await runPoolDepositEvm(hostOf(ch, ns), ASK);
+  assert.ok((await ns.list()).some((n) => n.state === "INCOMING" && !(n.ref.kind === "deposit" && n.ref.i === i1)), "U_0's note landing");
+  // U_0 holds enough that its landing would cover the ask: the default path waits for it (not_landed)
+  ch.c.at.set(u0.toLowerCase(), [3n * (RUNG + FEE), 3n * (RUNG + FEE)]);
+  ch.c.at.set(u1.toLowerCase(), [RUNG / 2n, RUNG / 2n]);
+  const shorts: string[] = [];
+  const sent = ch.c.sent.length;
+  // every read of the fixed run, to hold it to U_1 alone (one U per request, and no other U at all)
+  const named: string[] = [];
+  const log = (r: (typeof ch.rpcs)[0]) => async (m: string, p: readonly unknown[]) => (named.push(JSON.stringify(p).toLowerCase()), r(m, p));
+  assert.deepEqual(await runPoolDepositEvm(hostOf(ch, ns, { rpcs: [log(ch.rpcs[0]), log(ch.rpcs[1])], short: (u) => void shorts.push(u) }), ASK, undefined, { s: SCOPE, i: i1, u: u1 }), { error: "not_funded" });
+  assert.deepEqual(shorts, [u1]);
+  assert.equal(ch.c.sent.length, sent);
+  assert.ok(!named.some((x) => x.includes(u0.slice(2).toLowerCase())), "no read names U_0");
 });

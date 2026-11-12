@@ -59,6 +59,7 @@ export const IN_PROCESS = [
   viaRead("pool-deposit-sent-end", () => import("../live-checks/pool-deposit-sent-end.mjs")),
   viaRead("pool-deposit-address", () => import("../live-checks/pool-deposit-address.mjs")),
   viaRead("pool-deposit-follow", () => import("../live-checks/pool-deposit-follow.mjs")),
+  viaRead("evm-deposit-route-mainnet", () => import("../live-checks/evm-deposit-route-mainnet.mjs")),
   viaRead("solana-release-reads-paced", () => import("../live-checks/solana-release-reads-paced.mjs")),
   viaRead("pool-buy-record-never-stays-sent", () => import("../live-checks/pool-buy-record-never-stays-sent.mjs")),
   viaRead("solana-legs-checked", () => import("../live-checks/solana-legs-checked.mjs")),
