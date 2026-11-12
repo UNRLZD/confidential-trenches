@@ -13,7 +13,8 @@
 //                                   recorded from publicnode (Base: eth_getLogs pages of 50,000 blocks) and Robinhood's own
 //                                   RPC (Pocket's Robinhood node keeps no state that old: "historical state ... is not
 //                                   available", 12 Nov 21:41Z)
-// foundry.toml's rpc_endpoints point at http://127.0.0.1:47545/<chain>.
+// It listens on FORK_RPC_PORT (default 47545, where foundry.toml's rpc_endpoints point: http://127.0.0.1:47545/<chain>),
+// so two fork jobs on one machine each take their own port; the command it runs inherits FORK_RPC_PORT.
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
@@ -32,7 +33,8 @@ const bookArg = process.argv.indexOf("--book");
 const BOOK = BOOKS[bookArg > 0 && process.argv.indexOf("--") > bookArg ? process.argv[bookArg + 1] : "forge"];
 if (!BOOK) throw new Error("fork-rpc: --book is forge or pools");
 const FILE = path.join(path.dirname(fileURLToPath(import.meta.url)), BOOK.file);
-const PORT = 47545;
+const PORT = Number(process.env.FORK_RPC_PORT ?? 47545);
+if (!Number.isInteger(PORT) || PORT < 1 || PORT > 65535) throw new Error(`fork-rpc: FORK_RPC_PORT ${process.env.FORK_RPC_PORT} is no port`);
 const UPSTREAM = BOOK.upstream;
 
 // A block named by its hash ({"blockHash": h}, as Foundry 1.8 asks) is the same block as its number (as 1.7 asks):
