@@ -7,7 +7,7 @@ import { SOLANA_RPC_RETRY, SolanaRpcTransportError, solanaPacedRpc, solanaSamePr
 import { lanedRpc, pageHelperRpc, pageHelperRpcStopped, pageRpc, seatHosts } from "../src/page-rpc.ts";
 import { pageEvmPoolRpcs, pageSolanaLister, pageSolanaRpcs, pageSolanaSettleRpcs, testnetPool, testnetPoolDeps } from "../src/pool-testnet.ts";
 import { SOLANA_PROVIDER_A, SOLANA_PUBLIC_SEAT, TRADE_HELPER, releaseTradeDeps } from "../src/trade.ts";
-import { hostLane, PROBE_HELD_MAX_MS, resetHostLanes, stopHostLaneWaits, TRADE_TURN_MAX_MS } from "../../wallet/src/throttle.ts";
+import { closeHostLanes, hostLane, PROBE_HELD_MAX_MS, resetHostLanes, TRADE_TURN_MAX_MS } from "../../wallet/src/throttle.ts";
 import { onTestClock } from "../../kit/test/test-clock.ts";
 import { readdirSync, readFileSync } from "node:fs";
 import { HELPER_RPC_METHODS } from "../../kit/src/helper/v1.ts";
@@ -407,8 +407,8 @@ test("pageHelperRpcStopped: a call the stop came before is never sent, whether i
   }
 });
 
-// card sign-out-stops-the-pages-reads: a page RPC's call in flight at a sign out (this tab's or another's, both
-// stopHostLaneWaits) is never asked again after it. The answer that comes after the sign out, a 503 (the host's pause,
+// card sign-out-stops-the-pages-reads: a page RPC's call in flight at a sign out (this tab's once its store holds the seed
+// lock, or another's: both closeHostLanes) is never asked again after it. The answer that comes after the sign out, a 503 (the host's pause,
 // then the re-ask) or one that is no JSON (the backoff, then the re-ask), ends the call with no second request; the
 // call's own stop is the lanes' stop as it stood when the call began. Calls counted only, no clock read.
 test("card sign-out-stops-the-pages-reads: a page RPC's call in flight at a sign out is never asked again after it, on a 503 or an answer that is no JSON", { timeout: 20_000 }, async () => {
@@ -428,7 +428,7 @@ test("card sign-out-stops-the-pages-reads: a page RPC's call in flight at a sign
     };
     const call = lanedRpc(`https://signout-${fail}.example`, { retry: { deadlineMs: 10_000, backoffMs: 1 }, fetch })("eth_blockNumber", []);
     while (sent === 0) await new Promise((r) => setTimeout(r, 1));
-    stopHostLaneWaits(new Error("signed out"));
+    closeHostLanes(new Error("signed out"));
     const atSignOut = sent;
     free();
     await call.catch(() => {});

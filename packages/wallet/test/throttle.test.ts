@@ -9,7 +9,7 @@ import { solanaJsonRpc, solanaPacedRpc } from "@blindfill/kit";
 import { SOLANA_KEYLESS_RPC_LIMIT } from "../../kit/src/trade/solana/send.ts";
 import { onTestClock } from "../../kit/test/test-clock.ts";
 import * as d from "../src/derive/index.ts";
-import { HOST_WINDOW_MS, HostLane, HostPaused, PROBE_HELD_MAX_MS, THROTTLE_QUIET_MS, holdHosts, hostLane, PASS_BUDGET, PASS_BUDGET_TRADING, PASS_FLOOR_MS, gatedFetch, hostLanesClosed, laneFetch, openHostLanes, resetHostLanes, stopHostLaneWaits, THROTTLE_BOUNDS, THROTTLE_PAUSE_FIRST_MS, THROTTLE_PAUSE_MAX_MS, THROTTLE_RETRY_AFTER_MAX_MS, ThrottleGate, throttleWaitMs, TRADE_HOLD_MAX_MS, TRADE_TURN_MAX_MS } from "../src/throttle.ts";
+import { HOST_WINDOW_MS, HostLane, HostPaused, PROBE_HELD_MAX_MS, THROTTLE_QUIET_MS, holdHosts, hostLane, PASS_BUDGET, PASS_BUDGET_TRADING, PASS_FLOOR_MS, closeHostLanes, gatedFetch, hostLanesClosed, laneFetch, resetHostLanes, stopHostLaneWaits, THROTTLE_BOUNDS, THROTTLE_PAUSE_FIRST_MS, THROTTLE_PAUSE_MAX_MS, THROTTLE_RETRY_AFTER_MAX_MS, ThrottleGate, throttleWaitMs, TRADE_HOLD_MAX_MS, TRADE_TURN_MAX_MS } from "../src/throttle.ts";
 import { buyWallets, evmHoldingsReader, HOLDINGS_THROTTLE_MAX_MS, HOLDINGS_THROTTLED_ROUNDS_60S, solanaHelperHoldings, solanaHoldingsAt, solanaHoldingsReader, type HoldingsReader } from "../src/pool/buy-wallets.ts";
 
 const SEED = d.wordsToSeed64(d.entropyToWords(new Uint8Array(16)));
@@ -617,7 +617,7 @@ test("HostLane: a hold is counted, given back once, ends at its bound; holdHosts
   resetHostLanes();
 });
 
-test("HostLane: a sign out ends a waiting turn at once with its reason, refuses every turn until a sign-in opens the gate, and a turn after that waits as before", async () => {
+test("HostLane: a sign out's tap ends a waiting turn at once with its reason and leaves the gate open, so a turn after it waits as before", async () => {
   resetHostLanes();
   try {
     const l = hostLane("https://api.devnet.solana.com");
@@ -625,36 +625,64 @@ test("HostLane: a sign out ends a waiting turn at once with its reason, refuses 
     const waiting = l.turn("pass");
     stopHostLaneWaits(new Error("signed out"));
     await assert.rejects(waiting, /signed out/);
-    assert.equal(hostLanesClosed(), true);
-    // card sign-out-stops-the-pages-reads: a turn asked after the sign out (a paced slot's, a failover's) is refused
-    await assert.rejects(l.turn("trade"), /signed out/, "a turn after the sign out is refused");
-    await assert.rejects(laneFetch(async () => new Response("{}"))("https://api.devnet.solana.com"), /signed out/, "laneFetch refuses while closed");
-    openHostLanes();
+    // card sign-out-stops-the-pages-reads: the tap closes nothing, so a money run holding the seed lock reads on
     assert.equal(hostLanesClosed(), false);
     const a = new AbortController();
     const next = l.turn("pass", a.signal);
     a.abort(new Error("stopped"));
-    await assert.rejects(next, /stopped/, "the next sign-in's waits are not ended by the last sign out");
+    await assert.rejects(next, /stopped/, "the turn after the tap waits as before: only its own signal ends it");
   } finally {
     resetHostLanes();
   }
 });
 
-test("gatedFetch: closed, a request past the page's origin is refused, never sent; the page's own files still load; opened, all go", async () => {
+// card sign-out-stops-the-pages-reads: the gate closes once the store's sign out holds the seed lock (src/main.ts) and
+// nothing opens it in the page's life: the page reloads (the review of 03d5b772, P1: an old account's held move-out loop
+// sent its U once the next sign-in's landing opened the gate)
+test("closeHostLanes: every wait ends, every turn and laneFetch is refused, and no later stop or export opens it again (a page load does)", async () => {
+  resetHostLanes();
+  try {
+    const l = hostLane("https://api.devnet.solana.com");
+    for (let i = 0; i < PASS_BUDGET; i++) l.sent("trade");
+    const waiting = l.turn("pass");
+    closeHostLanes(new Error("signed out"));
+    await assert.rejects(waiting, /signed out/);
+    assert.equal(hostLanesClosed(), true);
+    await assert.rejects(l.turn("trade"), /signed out/, "a turn after the close is refused");
+    await assert.rejects(laneFetch(async () => new Response("{}"))("https://api.devnet.solana.com"), /signed out/, "laneFetch refuses while closed");
+    // a later tap's stop, or a second close, opens nothing
+    stopHostLaneWaits(new Error("again"));
+    closeHostLanes(new Error("again"));
+    assert.equal(hostLanesClosed(), true);
+    await assert.rejects(l.turn("trade"), /signed out/, "still closed, with the first reason");
+    const lanes = await import("../src/throttle.ts");
+    assert.equal("openHostLanes" in lanes, false, "no export opens the gate");
+  } finally {
+    resetHostLanes();
+  }
+});
+
+test("gatedFetch: closed, a request past the page's origin is refused, never sent; the page's own files still load", async () => {
   resetHostLanes();
   const sent: string[] = [];
   const own = "https://sign.example";
   const f = gatedFetch(async (u) => (sent.push(String(u)), new Response("{}")), own);
   try {
     await f("https://rpc.example/");
-    stopHostLaneWaits(new Error("signed out"));
+    stopHostLaneWaits(new Error("tapped"));
+    await f("https://rpc.example/tap");
+    closeHostLanes(new Error("signed out"));
     await assert.rejects(f("https://rpc.example/"), /signed out/);
     await assert.rejects(f(new Request("https://helper.example/v1/x")), /signed out/);
+    // card sign-out-stops-the-pages-reads (the review of 03d5b772, P3-7): the page's origin as a URL's origin, never a
+    // string's prefix: a look-alike host, a protocol-relative URL, an http downgrade and a userinfo are all past it
+    for (const u of [`${own}.evil.example/x`, "//evil.example/x", "http://sign.example/x", `https://sign.example@evil.example/x`, `${own}:8443/x`, "https://SIGN.example.evil.example/"]) {
+      await assert.rejects(f(u), /signed out/, u);
+    }
     await f("/assets/zk/a.wasm");
     await f(`${own}/assets/zk/b.zkey`);
-    openHostLanes();
-    await f("https://rpc.example/again");
-    assert.deepEqual(sent, ["https://rpc.example/", "/assets/zk/a.wasm", `${own}/assets/zk/b.zkey`, "https://rpc.example/again"]);
+    await f("https://SIGN.EXAMPLE/assets/zk/c.wasm");
+    assert.deepEqual(sent, ["https://rpc.example/", "https://rpc.example/tap", "/assets/zk/a.wasm", `${own}/assets/zk/b.zkey`, "https://SIGN.EXAMPLE/assets/zk/c.wasm"]);
   } finally {
     resetHostLanes();
   }

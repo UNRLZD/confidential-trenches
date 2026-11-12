@@ -1,8 +1,8 @@
 // Card sign-out-stops-the-pages-reads: once signed out, no request leaves the page for any host past its own origin, by
-// one gate every outbound request passes (../../wallet/src/throttle.ts: stopHostLaneWaits closes it, openHostLanes opens
-// it, gatedFetch is the page's fetch as src/main.ts installs it). Each case starts a read, signs out while it is in
-// flight or queued, and counts what is sent after; the last signs in again and reads. No network: fetch is stubbed and
-// every host is .example.
+// one gate every outbound request passes (../../wallet/src/throttle.ts: closeHostLanes closes it once the store's sign
+// out holds the seed lock, nothing opens it but a page load, gatedFetch is the page's fetch as src/main.ts installs it).
+// Each case starts a read, signs out while it is in flight or queued, and counts what is sent after; the last two hold
+// that a sign out's tap leaves a money run's reads open. No network: fetch is stubbed and every host is .example.
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { lanedRpc, seatRpc } from "../src/page-rpc.ts";
@@ -17,8 +17,11 @@ const OWN = "https://sign.example";
 // without the gate, where each case fails on what it counts
 const gate = (lanes as Record<string, unknown>).gatedFetch as ((raw: typeof fetch, own: string) => typeof fetch) | undefined;
 const pageFetch = (raw: typeof fetch): typeof fetch => (gate ? gate(raw, OWN) : raw);
-const signIn = (): void => ((lanes as Record<string, unknown>).openHostLanes as (() => void) | undefined)?.();
-const signOut = (): void => lanes.stopHostLaneWaits(new Error("signed out"));
+// the sign out as main.ts makes it: the tap's stop, then the gate's close once the store holds the seed lock (a tree
+// before that close has the tap's stop alone)
+const tap = (): void => lanes.stopHostLaneWaits(new Error("signed out"));
+const close = (lanes as Record<string, unknown>).closeHostLanes as ((reason: unknown) => void) | undefined;
+const signOut = (): void => (tap(), close?.(new Error("signed out")));
 
 const answer = (init: RequestInit | undefined, result: unknown): Response => {
   const id = (JSON.parse(String(init?.body)) as { id: unknown }).id;
@@ -127,18 +130,45 @@ test("a NEAR settle's call paced behind another at the sign out is never sent (t
   );
 });
 
-test("a sign-in after the sign out reads again on every way: a laned call, a seat, a paced call and the page's fetch", async () => {
+// the review of 03d5b772, P2: a sign out during a trade cut it between its reads (the gate closed at the tap); the tap
+// ends waits only, and a money run holding the seed lock finishes, its reads open
+test("a laned call in flight at a sign out's tap that meets a 503 is asked again: the tap leaves a run's reads open", async () => {
+  const sent: string[] = [];
+  let free!: () => void;
+  const held = new Promise<void>((r) => (free = r));
+  await withPageFetch(
+    (async (u: string | URL | Request, init?: RequestInit) => {
+      sent.push(new URL(String(u)).host);
+      if (sent.length === 1) return held.then(() => new Response("busy", { status: 503 }));
+      return answer(init, 5);
+    }) as typeof fetch,
+    async () => {
+      const rpc = lanedRpc("https://trade-read.example", { retry: { deadlineMs: 10_000, backoffMs: 1 } });
+      const call = rpc("getSlot", []);
+      await until(() => sent.length === 1);
+      tap();
+      free();
+      assert.equal(await call, 5, "the read's own answer, asked again after the tap");
+      assert.equal(await lanedRpc("https://trade-read-2.example")("getSlot", []), 5, "and a new read of the run goes");
+      assert.equal(sent.length, 3);
+    },
+  );
+});
+
+test("once closed, the gate stays closed: no later tap, close or export opens it, so an old account's loop never reads again in this page", async () => {
   let sent = 0;
   await withPageFetch(
-    (async (_u: string | URL | Request, init?: RequestInit) => (sent++, answer(init, 7))) as typeof fetch,
+    (async (_u: string | URL | Request, init?: RequestInit) => (sent++, answer(init, 1))) as typeof fetch,
     async () => {
       signOut();
-      signIn();
-      assert.equal(await lanedRpc("https://again-a.example")("getSlot", []), 7);
-      assert.equal(await seatRpc(["https://again-b.example", "https://again-c.example"])("getSlot", []), 7);
-      assert.equal(await solanaPacedRpc(lanedRpc("https://again-d.example", { kind: "pass" }), { windowMs: 300, total: 1, perMethod: 1 })("getSlot", []), 7);
-      assert.equal((await globalThis.fetch("https://again-e.example/", { method: "POST", body: JSON.stringify({ id: 1 }) })).status, 200);
-      assert.equal(sent, 4);
+      assert.equal("openHostLanes" in lanes, false, "no export opens the gate (a page load does)");
+      tap();
+      close?.(new Error("again"));
+      // the loop's next turns, on every way
+      await assert.rejects(lanedRpc("https://loop-a.example")("getSlot", []));
+      await assert.rejects(globalThis.fetch("https://loop-b.example/", { method: "POST", body: JSON.stringify({ id: 1 }) }));
+      await assert.rejects(lanes.laneFetch()("https://loop-c.example/"));
+      assert.equal(sent, 0);
     },
   );
 });

@@ -649,8 +649,8 @@ test("main.ts's sign out stops the pool settles (testnet?.signingOut()) before t
   const body = /async function signOut\(\): Promise<void> \{([\s\S]*?)\n\}/.exec(src)?.[1] ?? "";
   const at = (x: string) => body.indexOf(x);
   assert.ok(at("testnet?.signingOut();") > 0, "signingOut is called");
-  assert.ok(at("testnet?.signingOut();") < at("await s.signOut()"), "before the store's sign out");
-  assert.ok(at("await s.signOut()") < at("await testnet?.signedOut();"), "signedOut after it");
+  assert.ok(at("testnet?.signingOut();") < at("await s.signOut("), "before the store's sign out");
+  assert.ok(at("await s.signOut(") < at("await testnet?.signedOut();"), "signedOut after it");
 });
 
 test("the page's queue runs on solanaPool with the devnet pin and the page's two devnet RPCs: a landing reads the pool's time on both", async () => {

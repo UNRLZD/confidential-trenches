@@ -452,17 +452,31 @@ test("card sign-out-stops-the-pages-reads: both ways another tab's sign out reac
   assert.ok(at("restore?.signedOut();") < at("void testnet?.signedOut();"), "the restore stops before the lanes' waits end");
 });
 
-// The page's one gate (../../wallet/src/throttle.ts; its behaviour in test/sign-out-gate.test.ts and, in a browser, the
-// live check signpage-shell's count of requests after another tab's sign out): main.ts makes the page's fetch the gate,
-// closes it first at either sign out, opens it at every landing, and again when the store refuses this tab's sign out.
-test("card sign-out-stops-the-pages-reads: main.ts puts every request behind the gate, closes it first at each sign out and opens it at each landing", () => {
+// The page's one gate (../../wallet/src/throttle.ts; its behaviour in test/sign-out-gate.test.ts and the store's `locked`
+// in ../../wallet/test/store.test.ts; in a browser, the live check signpage-shell's count of requests after each sign
+// out and after the next landing): main.ts makes the page's fetch the gate and never opens it. This tab's sign out
+// refuses every kind from its tap, closes the gate in the store's `locked` and reloads once the database is gone;
+// another tab's closes it first and reloads; a refusal stays signed in only while the seed is still stored; a landing on
+// a closed gate reloads (the review of 03d5b772: P1, an old account's loop read again once a landing opened the gate;
+// P2, a refusal opened it on a signed-out page and the gate closed at the tap cut a running trade; P3-5, a sign-in seen
+// from another tab while the sheet was busy).
+test("card sign-out-stops-the-pages-reads: the page's fetch is the gate; it closes in the store's lock or at another tab's sign out, never opens, and every landed sign out reloads", () => {
   const src = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
   assert.match(src, /^globalThis\.fetch = gatedFetch\(globalThis\.fetch\.bind\(globalThis\), location\.origin\);$/m, "the page's fetch is the gate");
-  const body = (name: string, sig = "(): void") => new RegExp(`function ${name}${sig.replace(/[()[\]]/g, "\\$&")} \\{\\n([\\s\\S]*?)\\n\\}`).exec(src)?.[1] ?? "";
-  const firstCall = (b: string) => b.split("\n").map((l) => l.trim()).find((l) => l !== "" && !l.startsWith("//"));
-  assert.equal(firstCall(body("signedOutElsewhere")), "stopHostLaneWaits();", "another tab's sign out closes the gate first");
+  assert.doesNotMatch(src, /openHostLanes|stopHostLaneWaits/, "main.ts never opens the gate, nor stops lanes beside it");
+  const body = (name: string, sig: string) => new RegExp(`function ${name}${sig.replace(/[()[\]<>]/g, "\\$&")} \\{\\n([\\s\\S]*?)\\n\\}`).exec(src)?.[1] ?? "";
+  const lines = (b: string) => b.split("\n").map((l) => l.trim()).filter((l) => l !== "" && !l.startsWith("//"));
+  const reload = body("reloadSignedOut", "(): void");
+  assert.deepEqual(lines(reload), ["closeHostLanes();", "location.reload();"], "a landed sign out: the gate closed, then the page reloads");
+  const elsewhere = lines(body("signedOutElsewhere", "(): void"));
+  assert.deepEqual([elsewhere[0], elsewhere[1], elsewhere.at(-1)], ["if (leaving) return;", "closeHostLanes();", "reloadSignedOut();"], "another tab's: closed first, then reloaded (this tab's own post left to its own path)");
   const own = body("signOut", "(): Promise<void>");
-  assert.ok(own.indexOf("stopHostLaneWaits();") >= 0 && own.indexOf("stopHostLaneWaits();") < own.indexOf("restore?.signedOut();"), "this tab's sign out closes the gate first");
-  assert.match(own, /await s\.signOut\(\)\.catch\(\(e: unknown\) => \{\n\s+openHostLanes\(\);\n\s+throw e;/, "a refused sign out opens the gate again");
-  assert.equal(firstCall(body("landed", "(l: Landing): Promise<void>")), "openHostLanes();", "a landing opens the gate");
+  const at = (x: string) => own.indexOf(x);
+  assert.ok(at("leaving = true;") >= 0 && at("leaving = true;") < at("restore?.signedOut();"), "from the tap, no new kind runs");
+  assert.ok(at("closeHostLanes") === at("s.signOut({ locked: () => closeHostLanes() })") + "s.signOut({ locked: () => ".length, "the gate closes only in the store's lock");
+  assert.match(own, /const still = hostLanesClosed\(\) \? undefined : await readSeed\(\)\.catch\(\(\) => undefined\);\n\s+if \(still !== undefined\) \{\n\s+still\.entropy\.fill\(0\);\n\s+leaving = false;\n\s+throw refused\.e;\n\s+\}\n\s+return reloadSignedOut\(\);/, "a refusal stays signed in only with the seed still stored, else reloads");
+  assert.equal(lines(own).at(-1), "reloadSignedOut();", "a sign out that landed reloads");
+  assert.equal(lines(body("landed", "(l: Landing): Promise<void>"))[0], "if (hostLanesClosed()) return void (l.seed.entropy.fill(0), location.reload());", "a landing on a closed gate reloads");
+  assert.match(src, /kinds: whileSignedIn\(follows!\.withFollow\(\{/, "every shell kind is refused while leaving");
+  assert.match(src, /\(\.\.\.a: never\[\]\) => \(leaving \? null : f\(\.\.\.a\)\)/, "refused not_allowed (null) while leaving");
 });
