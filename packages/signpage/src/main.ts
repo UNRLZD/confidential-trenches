@@ -982,9 +982,10 @@ async function landed(l: Landing): Promise<void> {
     .catch(() => {})
     .then(() => {
       const page = nearBuyPage();
-      // then a NEAR sell a reload cut short, from the same records; first, a W the store holds no record of (a sign out,
-      // another device's buy) gets its record back from the chain (src/near-buy.ts nearHoldingsPass)
-      return page ? nearHoldings(page).then(() => resumeNearBuys(page)).then(() => resumeNearSells(page)) : undefined;
+      // then a NEAR sell a reload cut short, from the same records; after both, a W the store holds no record of (a sign
+      // out, another device's buy) gets its record back (src/near-buy.ts nearHoldingsPass), behind the trades' own reads,
+      // and a USDC-only W it rebuilt goes home
+      return page ? resumeNearBuys(page).then(() => resumeNearSells(page)).then(() => nearHoldings(page)).then(() => resumeNearSells(page)) : undefined;
     })
     .catch(() => {});
   // a held deposit's move out a reload cut short (src/withdraw/held.ts)

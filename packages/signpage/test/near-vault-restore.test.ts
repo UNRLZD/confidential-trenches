@@ -361,3 +361,24 @@ test("the NEAR vault's notes written, the page's NEAR buy records are rebuilt fr
   assert.deepEqual(sorted(await notesIn(st2)), want(own));
   assert.deepEqual(ends2.at(-1)?.why, []);
 });
+
+test("the rebuild's hook is called only once the notes are written and some note is SPENT: a vault life with no spend, or a write that fails, calls it never", async () => {
+  // deposits only: no SPENT note, so no W to rebuild
+  const v = new Vault();
+  v.deposit(noteSecrets(SEED, { kind: "deposit", s: SCOPE, i: 0 }).precommitment, 9_000_000n);
+  const st = await device();
+  let called = 0;
+  await restoreKind.poolRestore({ ...hostOf(st, () => pair(v), []), nearWalked: () => void called++ }).auto();
+  assert.equal((await notesIn(st)).length, 1);
+  assert.equal(called, 0, "no SPENT note: never called");
+  // a floor that fails (the store refuses the write): the run ends on it, the hook is never called
+  const { v: lv } = lived();
+  const st2 = await device();
+  const refusing = new Proxy(st2, { get: (t, k) => (k === "raiseDepositIndex" ? async () => Promise.reject(new Error("refused")) : Reflect.get(t, k, t)) });
+  let called2 = 0;
+  await restoreKind
+    .poolRestore({ ...hostOf(st2, () => pair(lv), []), store: async () => refusing as WalletStore, nearWalked: () => void called2++ })
+    .auto()
+    .catch(() => {});
+  assert.equal(called2, 0, "a failed write: never called");
+});

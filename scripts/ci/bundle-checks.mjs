@@ -145,7 +145,7 @@ export const OUT = {
   "signpage-positions-evm": "a run record's Base Sepolia buy and sell, and W's balance, on two testnet RPCs; the testnet build's positions pass is held by packages/signpage/test/positions-evm.test.ts (the mainnet build pins no EVM pool)",
   "signpage-withdraw-handoff": "the page's CSP header, and the testnet fee read on the release helper and RPCs",
   "held-move-forgotten-tx": "the page's CSP header (signpage-skeleton pins it in the build's _headers), and a mainnet archival RPC read",
-  "near-holdings-restore": "the page's CSP header (signpage-skeleton pins it in the build's _headers), and the NEAR FT list's live answer",
+  "near-holdings-restore": "the page's CSP header (signpage-skeleton pins it in the build's _headers), and the helper's record route's live answer",
   "signpage-release": "the release list against what the host serves",
   "signpage-release-at-deploy": "the newest committed release list against what the host serves (the sign deploy refuses a build that list does not name)",
   "wallet-deposit-follow": "the helper's deposit status answer",
