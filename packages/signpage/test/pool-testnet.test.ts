@@ -1902,7 +1902,8 @@ test("the kept-out record's write reaches another page as a store change (its st
 });
 
 // review 3 of 972be65f (P2-C, RR7) through the page's own host: the sheet's EVM withdraw of a change note that landed
-// this epoch waits for the next boundary; the app's hidden frame (a second page on the same store) runs its Base proof
+// this epoch, whose leaf the newest cut both RPCs agree on lags (card fresh-money-spendable-at-once: then the part waits
+// on the pool's time, here across the next boundary, whose root holds it); the app's hidden frame (a second page on the same store) runs its Base proof
 // queue's pass at that boundary. The run's keep-out record (meta owed/withdraw-sol, written through evmWithdrawRun's
 // keepOut) keeps the frame's queue off the note, so the part binds; the record is gone once the run ends.
 const evmTwoPages = async (heldFirst: boolean, midPass = false) => {
@@ -1922,7 +1923,8 @@ const evmTwoPages = async (heldFirst: boolean, midPass = false) => {
   const pre = noteSecrets(SEED64, ref).precommitment;
   const leaf = noteCommitment(value, label, pre);
   const n = await ns.add({ ref, scope, precommitment: pre, state: "UNSPENT", leaf: { value, label, commitment: leaf, leafIndex: 0n } });
-  // the pool's time: an epoch's start and 1 s; the leaf landed this epoch, so only the next boundary's root holds it
+  // the pool's time: an epoch's start and 1 s; the leaf landed this epoch and the newest cut lags it, so only the next
+  // boundary's root holds it
   const E0 = 1_800_000_000_000n;
   let slept = 0n;
   let onWait: (() => Promise<unknown>) | null = null;
@@ -1935,8 +1937,9 @@ const evmTwoPages = async (heldFirst: boolean, midPass = false) => {
       if (page === "frame" && hang) await gate;
       return E0 + 1_000n + slept;
     },
-    trees: async (beforeMs: bigint) => {
-      const s = new VaultTree(beforeMs > E0 + 500n ? [leaf] : []), l = new VaultTree(beforeMs > E0 + 500n ? [label] : []);
+    trees: async (beforeMs: bigint, _s?: unknown, o?: { newest?: boolean }) => {
+      const has = o?.newest !== true && beforeMs > E0 + 500n;
+      const s = new VaultTree(has ? [leaf] : []), l = new VaultTree(has ? [label] : []);
       return { stateTree: s, labelTree: l, stateRoot: s.root ?? 0n, labelRoot: l.root ?? 0n };
     },
     bind: async (b: { chunk: bigint; wallet: { address: string }; deadlineMs: bigint }) => {
@@ -2004,6 +2007,8 @@ const evmTwoPages = async (heldFirst: boolean, midPass = false) => {
     onWait = async () => {
       if (slept >= 59_000n) atBoundary++;
       await frame.stateRead();
+      // at the boundary: the frame's pass given the time to bind before the sheet goes on, had it taken the note
+      if (slept >= 59_000n) await new Promise((r) => setTimeout(r, 100));
     };
   await sheet.withdraw({ chain: "base", to: "0x1111111111111111111111111111111111111111", amount: 5n * 10n ** 14n, maxFee: 10n ** 15n }, "op-w");
   const planned = (await w.get("meta", WITHDRAW_PLANNED_KEY)) as Record<string, unknown> | undefined;
@@ -2018,10 +2023,14 @@ const evmTwoPages = async (heldFirst: boolean, midPass = false) => {
 test("(RR7, the page's host) an EVM withdraw keeps its change note out of another page's proof queue while it waits for the boundary; the part binds and the keep-out is cleared at the run's end", async () => {
   const { atBoundary, binds, planned, state } = await evmTwoPages(false);
   assert.ok(atBoundary > 0, "the frame's pass ran at the boundary");
-  assert.deepEqual(binds.filter((b) => b.page === "frame"), [], "the frame's queue never took the note");
-  assert.equal(binds.filter((b) => b.page === "sheet").length, 1, "the part got its note back and reached its bind");
+  // the sheet's bind ends its run (a part that threw there): the keep-out is cleared then, and the frame's queue may take
+  // the free note after it, as it should; never before
+  const sheetAt = binds.findIndex((b) => b.page === "sheet");
+  assert.ok(sheetAt >= 0, "the part got its note back and reached its bind");
+  assert.deepEqual(binds.slice(0, sheetAt).filter((b) => b.page === "frame"), [], "the frame's queue never took the note while the run kept it out");
+  assert.equal(binds.filter((b) => b.page === "sheet").length, 1, "one bind of the sheet's");
   assert.equal(planned?.["op-w"], undefined, "the keep-out cleared at the run's end (a part that threw)");
-  assert.equal(state, "UNSPENT", "nothing moved");
+  assert.ok(state === "UNSPENT" || (state === "HELD" && binds.at(-1)?.page === "frame"), `nothing the run moved: ${state}`);
 });
 test("(the page's host) an EVM withdraw of a note another page's queue already holds: the sheet counts it, the frame lets it go at its next pass once the keep-out is written, and the part binds", async () => {
   const { binds, planned, state } = await evmTwoPages(true);
