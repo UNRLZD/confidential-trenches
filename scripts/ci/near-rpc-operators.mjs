@@ -42,6 +42,27 @@ export const NEAR_RPC_OPERATORS = Object.freeze({
   "near-testnet.drpc.org": { operator: "drpc", network: "testnet" },
 });
 
+/**
+ * "<host><path>?<query>" -> { operator, network }: a NEAR RPC served at one path and query of a host that serves other
+ * routes too, so its host alone names no operator. The release helper's POST /v1/rpc/near?keyed=only sends to
+ * FastNEAR's key alone (apps/helper/src/rpc/rpc.ts NEAR_SEAT: any other company's URL set there, dRPC's included, is
+ * its 503, held by apps/helper/src/rpc/near-seat.test.ts), so it is FastNEAR's (card near-quote-under-the-pace). Its
+ * plain /v1/rpc/near walks every keyed NEAR URL and then the public fallback, so it is no one operator and stays out.
+ */
+export const NEAR_RPC_SEATS = Object.freeze({
+  "ct-api.unrealized.trade/v1/rpc/near?keyed=only": { operator: "fastnear", network: "mainnet" },
+});
+const seatOf = (url) => {
+  try {
+    const u = new URL(url);
+    return (u.host + u.pathname + u.search).toLowerCase();
+  } catch {
+    return null;
+  }
+};
+/** The map's entry of a host, or a seat's "<host><path>?<query>". */
+const entryOf = (key) => (Object.hasOwn(NEAR_RPC_OPERATORS, key) ? NEAR_RPC_OPERATORS[key] : Object.hasOwn(NEAR_RPC_SEATS, key) ? NEAR_RPC_SEATS[key] : undefined);
+
 const hostOf = (url) => {
   try {
     return new URL(url).host.toLowerCase();
@@ -51,9 +72,9 @@ const hostOf = (url) => {
 };
 
 /** The operator of a NEAR RPC URL, or null when the map does not hold it. */
-export const operatorOf = (url) => NEAR_RPC_OPERATORS[hostOf(url)]?.operator ?? null;
+export const operatorOf = (url) => (NEAR_RPC_OPERATORS[hostOf(url)] ?? NEAR_RPC_SEATS[seatOf(url)])?.operator ?? null;
 /** The network of a NEAR RPC URL, or null. */
-export const networkOf = (url) => NEAR_RPC_OPERATORS[hostOf(url)]?.network ?? null;
+export const networkOf = (url) => (NEAR_RPC_OPERATORS[hostOf(url)] ?? NEAR_RPC_SEATS[seatOf(url)])?.network ?? null;
 
 // A URL is a NEAR RPC when the map holds its host, its host and path say both "near" and "rpc" (rpc.ankr.com/near,
 // 1rpc.io/near), or a label of its host is "near" or starts or ends with "near-"/"-near" (near.lava.build,
@@ -140,7 +161,9 @@ function hostsIn(text) {
     } catch {
       continue;
     }
-    if (!Object.hasOwn(NEAR_RPC_OPERATORS, host)) found.set(at, { at, host: url, op: null, why: "is a NEAR RPC the operator map does not hold" });
+    const seat = seatOf(url);
+    if (Object.hasOwn(NEAR_RPC_SEATS, seat)) found.set(at, { at, host: seat, op: NEAR_RPC_SEATS[seat].operator });
+    else if (!Object.hasOwn(NEAR_RPC_OPERATORS, host)) found.set(at, { at, host: url, op: null, why: "is a NEAR RPC the operator map does not hold" });
   }
   for (const m of templateMatches(text)) found.set(m.index, { at: m.index, host: m[0], op: null, why: "is a NEAR RPC host built from a template, which the scan cannot read" });
   return [...found.values()].sort((a, b) => a.at - b.at);
@@ -212,7 +235,7 @@ export function lineProblems(raw, file) {
   for (const [a, b] of [...lineSpans, ...units(text, CODE.test(file))]) {
     // per network: a mainnet host and a testnet host never read the same tx, so they are no pair
     for (const network of ["mainnet", "testnet"]) {
-      const inside = known.filter((h) => h.at >= a && h.at < b && NEAR_RPC_OPERATORS[h.host].network === network);
+      const inside = known.filter((h) => h.at >= a && h.at < b && entryOf(h.host).network === network);
       const names = [...new Set(inside.map((h) => h.host))];
       const ops = new Set(inside.map((h) => h.op));
       if (names.length < 2 || ops.size !== 1) continue;
@@ -233,6 +256,7 @@ export const SKIP = {
   "scripts/ci/near-rpc-operators.mjs": "the map itself: its notes name one operator's hosts side by side",
   "scripts/ci/near-rpc-operators.test.mjs": "the planted cases",
   "contracts/vault/deployments/testnet-usdc.json": "a run's record: its notes say which host answered 429 and which one was read, no list",
+  "apps/helper/src/rpc/near-seat.test.ts": "the helper's planted cases: dRPC's keyed host and another company's URL set on the helper's NEAR seat, each of which it must refuse; no device reads them",
 };
 // Built files whose pairs the scan judges in the sources they are built from: minifying drops comments, so the allow
 // marker a source line carries is gone from the bundle. Every host in them must still be in the map.

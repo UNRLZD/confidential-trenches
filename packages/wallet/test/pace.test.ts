@@ -250,3 +250,137 @@ test("a busy hold stands when an ended wait gives a slot back, even a hold the q
     assert.ok(last >= end, `the new request went at ${last} ms, inside the hold that ends at ${end} ms`);
   });
 });
+
+// card near-quote-under-the-pace: the page's NEAR trade pair (pacedNearRpc) on the real fetch, stubbed here
+const withFetch = async (stub: typeof fetch, run: () => Promise<void>): Promise<void> => {
+  const real = globalThis.fetch;
+  globalThis.fetch = stub;
+  try {
+    await run();
+  } finally {
+    globalThis.fetch = real;
+  }
+};
+const busy = (retryAfter?: string) => new Response("busy", { status: 429, headers: retryAfter === undefined ? {} : { "retry-after": retryAfter } });
+
+test("a busy answer from dRPC holds its pace and the read is asked again, not failed; past NEAR_BUSY_TRIES it fails", async () => {
+  let n = 0;
+  await withFetch(async () => (++n <= 2 ? busy("0") : answer()), async () => {
+    const rpc = P.pacedNearRpc(DRPC);
+    const t = performance.now();
+    assert.deepEqual(await rpc.query({ request_type: "view_account", finality: "final", account_id: "intents.near" }), { jsonrpc: "2.0", id: "blindfill", result: { ok: true } });
+    assert.equal(n, 3);
+    // each busy answer held dRPC for at least its pace's gap before the next try
+    assert.ok(performance.now() - t >= 2 * P.paceOf(DRPC).every - 5, `${performance.now() - t} ms`);
+  });
+  P.resetPaces();
+  let m = 0;
+  await withFetch(async () => (m++, busy("0")), async () => {
+    await assert.rejects(P.pacedNearRpc(DRPC).query({ request_type: "view_account", finality: "final", account_id: "intents.near" }), /HTTP 429/);
+    assert.equal(m, P.NEAR_BUSY_TRIES);
+  });
+});
+
+test("reserve takes the provider's turn once: its first query goes at once with no second turn, the next ones take turns", async () => {
+  await withFetch(async () => answer(), async () => {
+    const rpc = P.pacedNearRpc(FAST);
+    const p = P.paceOf(FAST);
+    const q = { request_type: "view_account", finality: "final", account_id: "intents.near" };
+    for (let k = 0; k < 8; k++) await rpc.query(q); // FastNEAR's burst spent
+    const t0 = performance.now();
+    const now = await rpc.reserve!();
+    const waited = performance.now() - t0;
+    assert.ok(waited >= p.every - 50, `the turn waited ${waited} ms`);
+    const tat = p.tat;
+    const t1 = performance.now();
+    await now.query(q);
+    assert.ok(performance.now() - t1 < 200, "the reserved turn's query went at once");
+    assert.equal(p.tat, tat, "no second turn taken");
+    // the same sender's next query takes a turn of its own
+    const t2 = performance.now();
+    await now.query(q);
+    assert.ok(performance.now() - t2 >= p.every - 50);
+  });
+});
+
+// card near-quote-under-the-pace: the helper's FastNEAR seat (nearSeatRpc) at the key's pace, its keyless spare
+const SEAT = NEAR_NETWORKS.mainnet.seat;
+/** A key's pace as the helper holds it (5 a second, 5 at once, GCRA on the real clock): past it, 429 with Retry-After 1. */
+const keyPace = (perSec = 5, burst = 5) => {
+  let tat = 0;
+  const every = 1000 / perSec;
+  return () => {
+    const now = performance.now();
+    const t = Math.max(tat, now);
+    if (t - now > (burst - 1) * every + 2) return false;
+    tat = t + every;
+    return true;
+  };
+};
+const VIEW = { request_type: "view_account", finality: "final", account_id: "intents.near" };
+
+test("the seat: 11 reads asked at once go out 5 at once, then one every 200 ms; the key never answers 429 and none goes to the keyless seat", async () => {
+  const take = keyPace();
+  const sent: number[] = [];
+  let keyless = 0;
+  let refused = 0;
+  await withFetch((async (u: string) => {
+    if (u === SEAT) {
+      sent.push(performance.now());
+      return take() ? answer() : (refused++, busy("1"));
+    }
+    keyless++;
+    return answer();
+  }) as typeof fetch, async () => {
+    const rpc = P.nearSeatRpc("mainnet");
+    assert.equal(rpc.name, SEAT);
+    const t = performance.now();
+    const all = await Promise.all(Array.from({ length: 11 }, () => rpc.query(VIEW)));
+    assert.equal(all.length, 11);
+    assert.equal(refused, 0, "the device's pace keeps under the key's");
+    assert.equal(keyless, 0);
+    assert.equal(sent.length, 11);
+    assert.ok(sent.slice(0, 5).every((x) => x - t < 50), "the first 5 at once");
+    for (let k = 5; k < 11; k++) assert.ok(sent[k]! - t >= (k - 4) * 200 - 5, `read ${k} at ${sent[k]! - t} ms`);
+  });
+});
+
+test("the seat falls to FastNEAR's keyless URL when the helper is busy past its tries, down (5xx), slow or unreachable; never on a 4xx or the caller's own abort", async () => {
+  const cases: [string, () => Response | Promise<Response>, boolean][] = [
+    ["429 past NEAR_BUSY_TRIES", () => busy("0"), true],
+    ["503 upstream", () => new Response(JSON.stringify({ error: { code: "upstream" } }), { status: 503 }), true],
+    ["502", () => new Response("bad gateway", { status: 502 }), true],
+    ["no answer in time", () => Promise.reject(new DOMException("timed out", "TimeoutError")), true],
+    ["unreachable", () => Promise.reject(new TypeError("fetch failed")), true],
+    ["400 method_not_allowed", () => new Response(JSON.stringify({ error: { code: "method_not_allowed" } }), { status: 400 }), false],
+    ["403", () => new Response("no", { status: 403 }), false],
+  ];
+  for (const [what, seatAnswer, falls] of cases) {
+    P.resetPaces();
+    let keyless = 0;
+    let seat = 0;
+    await withFetch((async (u: string) => (u === SEAT ? (seat++, seatAnswer()) : (keyless++, assert.equal(u, NEAR_NETWORKS.mainnet.fastnear[0]), answer()))) as typeof fetch, async () => {
+      const rpc = P.nearSeatRpc("mainnet");
+      if (falls) assert.deepEqual(await rpc.query(VIEW), { jsonrpc: "2.0", id: "blindfill", result: { ok: true } }, what);
+      else await assert.rejects(rpc.query(VIEW), /HTTP 4/, what);
+      assert.equal(keyless, falls ? 1 : 0, what);
+      assert.equal(seat, what.startsWith("429") ? P.NEAR_BUSY_TRIES : 1, what);
+      // the reserved turn falls the same way
+      if (falls) assert.deepEqual(await (await rpc.reserve!()).query(VIEW), { jsonrpc: "2.0", id: "blindfill", result: { ok: true } }, `${what} (reserve)`);
+    });
+  }
+  // the caller's own abort: thrown, the keyless seat never asked
+  P.resetPaces();
+  let keyless = 0;
+  const stop = new AbortController();
+  await withFetch((async (u: string, init?: RequestInit) => {
+    if (u !== SEAT) return keyless++, answer();
+    stop.abort(new Error("signed out"));
+    throw init?.signal?.reason ?? new Error("aborted");
+  }) as typeof fetch, async () => {
+    await assert.rejects(P.nearSeatRpc("mainnet").query(VIEW, stop.signal), /signed out/);
+    assert.equal(keyless, 0);
+  });
+  // testnet has no seat: FastNEAR's keyless URL itself
+  assert.equal(P.nearSeatRpc("testnet").name, NEAR_NETWORKS.testnet.fastnear[0]);
+});

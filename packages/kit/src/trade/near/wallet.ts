@@ -11,7 +11,7 @@
 // A W the relayer has not created yet has no key list: refused "rpc", nothing to sign. Every answer is hostile: each
 // field in its form, the key list W's alone, the bounds' min at most NEAR_SWAP_STORAGE_MAX.
 import { NEAR_NETWORKS, nearPairNetwork, nearPairRule, type NearNetwork, type NearRpc } from "../../near/networks.ts";
-import { answer, equalBytes, json, NEAR_RHEA, RHEA_QUOTE_LAG_MAX, RheaQuoteRefused, view, type Answer } from "../../near/rhea.ts";
+import { answer, equalBytes, finalOf, json, NEAR_RHEA, nearFinal, rheaQuote, RheaQuoteRefused, view, type Answer, type NearFinal, type RheaQuote, type RheaQuoteArgs } from "../../near/rhea.ts";
 import { deepFreeze } from "../../freeze.ts";
 import { NEAR_SWAP_STORAGE_MAX } from "./swap.ts";
 
@@ -36,7 +36,16 @@ function implicitKey(id: string): string {
   return `ed25519:${s}`;
 }
 
-export type NearSwapWalletArgs = { network: NearNetwork; rpcs: readonly [NearRpc, NearRpc]; wallet: string; side: "buy" | "sell"; token: string; signal?: AbortSignal };
+export type NearSwapWalletArgs = {
+  network: NearNetwork;
+  rpcs: readonly [NearRpc, NearRpc];
+  wallet: string;
+  side: "buy" | "sell";
+  token: string;
+  /** The two providers' final height already read (nearFinal, on these providers): W is read at it. */
+  final?: NearFinal;
+  signal?: AbortSignal;
+};
 
 /** W at one block on both providers. */
 export type NearSwapWalletState = {
@@ -66,11 +75,8 @@ export async function readNearSwapWallet(a: NearSwapWalletArgs): Promise<NearSwa
   const exchange = NEAR_RHEA[network].exchange;
   const [sent, received] = side === "buy" ? [usdc, token] : [token, usdc];
 
-  signal?.throwIfAborted();
-  const finals = (await Promise.all(rpcs.map((r) => answer(r, view(exchange, "metadata", {}, { finality: "final" }), signal)))) as [Answer, Answer];
-  if (Math.abs(finals[0].height - finals[1].height) > RHEA_QUOTE_LAG_MAX)
-    throw new RheaQuoteRefused("lag", `the providers' final heights ${finals[0].height} and ${finals[1].height} are over ${RHEA_QUOTE_LAG_MAX} blocks apart`);
-  const height = Math.min(finals[0].height, finals[1].height);
+  // the two final heights of one moment (nearFinal), every read after them at the lower
+  const { height } = await finalOf(network, rpcs, a.final, signal);
   const at = { block_id: height };
   let blockHash = "";
   const same = (what: string, x: { height: number; hash: string }, y: { height: number; hash: string }) => {
@@ -124,4 +130,63 @@ export async function readNearSwapWallet(a: NearSwapWalletArgs): Promise<NearSwa
   const lostfound = u128(lost);
   if (lostfound === null) throw new RheaQuoteRefused("rpc", "get_lostfound_token: not a u128");
   return deepFreeze({ account: wallet, height, blockHash, nonce, held, registered: reg !== null, storageMin, lostfound });
+}
+
+/** W and the quote at one block: what W signs from and what it signs against. */
+export type NearSwapPair = { state: NearSwapWalletState; quote: RheaQuote; /** with `baseline`: what W holds of it at the block */ baseline?: bigint };
+
+/**
+ * W read and the quote of `amountIn` at ONE block (card near-quote-under-the-pace): the two providers' final heights read
+ * once (nearFinal), then W's views and the quote's views at the lower, both on both providers, every rule of each as
+ * when read alone, and the block hash one. So the quote is never older than the read W signs from and never later than
+ * it, at any request pace (before, a read and a quote read one after the other on a paced provider were 26 or more blocks
+ * apart, past the signer's NEAR_SWAP_READ_AGE_MAX, and the buy never got a pair). `baseline`: a token whose balance of
+ * W's is read at the same block (a buy's floor is measured from it).
+ */
+export async function readNearSwapPair(a: NearSwapWalletArgs & Pick<RheaQuoteArgs, "amountIn" | "pools"> & { baseline?: string }): Promise<NearSwapPair> {
+  const { network, rpcs, wallet, side, token, amountIn, pools, signal } = a;
+  const final = await nearFinal(network, rpcs, signal);
+  const [state, quote, baseline] = await Promise.all([
+    readNearSwapWallet({ network, rpcs, wallet, side, token, final, ...(signal ? { signal } : {}) }),
+    rheaQuote({ network, rpcs, side, token, amountIn, pools, final, ...(signal ? { signal } : {}) }),
+    a.baseline === undefined ? Promise.resolve(undefined) : readNearHeld({ network, rpcs, wallet, token: a.baseline, final, ...(signal ? { signal } : {}) }),
+  ]);
+  if (state.height !== quote.height || state.blockHash !== quote.blockHash || (baseline !== undefined && (baseline.height !== state.height || baseline.blockHash !== state.blockHash)))
+    throw new RheaQuoteRefused("disagree", "W's read and the quote are not of one block");
+  return deepFreeze({ state, quote, ...(baseline === undefined ? {} : { baseline: baseline.held }) });
+}
+
+/** What W holds of one token and whether it is registered on another, at one block on both providers. */
+export type NearHeld = { account: string; height: number; blockHash: string; held: bigint; /** with `on` only */ registered?: boolean };
+
+/**
+ * W's balance of `token` (and, with `on`, whether W is registered on `on`) at one block on both providers, the bytes and
+ * the block hash equal: the waits that only ask "has it arrived" (a registration read back, what a swap paid), two or
+ * three reads a provider where W's whole read is six. Nothing W signs is taken from it.
+ */
+export async function readNearHeld(a: { network: NearNetwork; rpcs: readonly [NearRpc, NearRpc]; wallet: string; token: string; on?: string; final?: NearFinal; signal?: AbortSignal }): Promise<NearHeld> {
+  const { network, rpcs, wallet, token, signal } = a;
+  if (!(network in NEAR_RHEA)) throw new RheaQuoteRefused("input", `unknown network ${String(network)}`);
+  if (nearPairNetwork(rpcs) !== network) throw new RheaQuoteRefused("input", nearPairRule(network));
+  if (typeof wallet !== "string" || !IMPLICIT.test(wallet)) throw new RheaQuoteRefused("input", "W is a 64-hex NEAR-implicit id");
+  if (typeof token !== "string" || token === "" || (a.on !== undefined && (typeof a.on !== "string" || a.on === ""))) throw new RheaQuoteRefused("input", "a token account id");
+  const { height } = await finalOf(network, rpcs, a.final, signal);
+  const at = { block_id: height };
+  let blockHash = "";
+  const both = async (what: string, params: Obj): Promise<unknown> => {
+    const [x, y] = (await Promise.all(rpcs.map((r) => answer(r, params, signal)))) as [Answer, Answer];
+    if (x.height !== height || y.height !== height) throw new RheaQuoteRefused("rpc", `${what}: an answer not at block ${height}`);
+    if (x.hash !== y.hash || (blockHash !== "" && x.hash !== blockHash)) throw new RheaQuoteRefused("disagree", `${what}: two blocks at height ${height}`);
+    blockHash = x.hash;
+    if (x.failed !== y.failed || !equalBytes(x.bytes, y.bytes)) throw new RheaQuoteRefused("disagree", `${what}: the providers' answers differ`);
+    return json(x, what);
+  };
+  const [bal, reg] = await Promise.all([
+    both("ft_balance_of", view(token, "ft_balance_of", { account_id: wallet }, at)),
+    a.on === undefined ? Promise.resolve(null) : both("storage_balance_of", view(a.on, "storage_balance_of", { account_id: wallet }, at)),
+  ]);
+  const held = u128(bal);
+  if (held === null) throw new RheaQuoteRefused("rpc", "ft_balance_of: not a u128");
+  if (reg !== null && !(isObj(reg) && u128(reg.total) !== null)) throw new RheaQuoteRefused("rpc", "storage_balance_of: not a storage balance");
+  return deepFreeze({ account: wallet, height, blockHash, held, ...(a.on === undefined ? {} : { registered: reg !== null }) });
 }

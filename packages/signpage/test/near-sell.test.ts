@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { IDBFactory } from "fake-indexeddb";
 import { openWalletStore } from "@blindfill/wallet/store";
 import { NEAR_NETWORKS } from "../../kit/src/near/networks.ts";
-import { NEAR_RHEA, type RheaQuote } from "../../kit/src/near/rhea.ts";
+import { NEAR_RHEA, RheaQuoteRefused, type RheaQuote } from "../../kit/src/near/rhea.ts";
 import { NEAR_TOKEN_NO_FEE, type NearTokenFee } from "../../kit/src/near/token-fee.ts";
 import { nearSwapFloor, type NearSwapCall } from "../../kit/src/trade/near/swap.ts";
 import type { NearSwapWalletState } from "../../kit/src/trade/near/wallet.ts";
@@ -21,6 +21,7 @@ import type { KindContext } from "../src/api.ts";
 import { NEAR_SELL_SWAPS_MAX, nearReturnMove, nearSellFlow, nearSellNote, noteAmount, type NearMoveEnd, type NearReturnNote, type NearSellAnswer, type NearSellDeps, type NearTradeSigned } from "../src/near-sell.ts";
 import { HELPER_BIND_DEPOSIT_CAP } from "../../kit/src/helper/v1.ts";
 import { VAULT_CONSTANTS } from "../../kit/src/vault/shapes.ts";
+import { fakePair, type WithQuote } from "./near-pair-fake.ts";
 
 const USDC = NEAR_NETWORKS.mainnet.usdc;
 const EXCHANGE = NEAR_RHEA.mainnet.exchange;
@@ -106,7 +107,7 @@ function world(o: World = {}) {
   // the last landing's block, and W's USDC a read below it still shows
   let landedAt = 0;
   let usdcBefore = 0n;
-  const deps: NearSellDeps = {
+  const deps: NearSellDeps & WithQuote = {
     network: "mainnet",
     wallet: (token) => (ev.push(["wallet", token]), o.wallet === null ? null : { id: W, l: L, j: J, token: o.bound ?? token }),
     helper: async (body: HelperBindTradeRequest) => {
@@ -145,6 +146,7 @@ function world(o: World = {}) {
       ev.push(["quote", { ...a }]);
       return quoteOf(o.quoteAmountOff ? a.amountIn! + 1n : a.amountIn!, o.venueOut ?? 3_000_000n, q++, o.fee);
     },
+    pair: fakePair(() => deps),
     sign: (l, j, given, request, quote, state, bound) => {
       const read = { account: state.account, nonce: state.nonce, height: state.height };
       ev.push(["sign", l, j, structuredClone([...given]), { ...request }, { storageMin: state.storageMin, registered: state.registered, venueOut: quote.venueOut }, read, bound]);
@@ -217,10 +219,12 @@ const signs = (ev: Ev[]) => ev.filter((e) => e[0] === "sign");
 test("the happy path: all W holds sold on the device's quote, signed by W bound to the token, the USDC received against the floor, the note written before the move, the move of what W received, W read empty", async () => {
   const { deps, ev, log, chain } = world();
   const answer = await run(deps);
-  assert.deepEqual(names(ev), ["wallet", "read", "quote", "read", "quote", "sign", "traded", "helper", "read", "read", "note", "move", "read", "note", "read", "read"]);
+  // each round's pair: W and the quote at one block (deps.pair; this world's fake reads them in turn), the swap's with
+  // the baseline of USDC at the same block
+  assert.deepEqual(names(ev), ["wallet", "read", "read", "quote", "read", "quote", "read", "sign", "traded", "helper", "read", "read", "note", "move", "read", "note", "read", "read"]);
   assert.deepEqual(ev[0], ["wallet", TOKEN]);
   // the swap's delegate kept on the sell's record before it is sent
-  assert.deepEqual(ev[6], ["traded", { nonce: 41n, mbh: 1_102n }]);
+  assert.deepEqual(ev[8], ["traded", { nonce: 41n, mbh: 1_105n }]);
   assert.deepEqual(ev[1]![1], { wallet: W, side: "sell", token: TOKEN });
   for (const e of ev.filter((x) => x[0] === "quote")) assert.deepEqual(e[1], { side: "sell", token: TOKEN, amountIn: HELD });
   const [sign] = signs(ev);
@@ -241,10 +245,10 @@ test("the happy path: all W holds sold on the device's quote, signed by W bound 
   const [swap] = helperBodies(ev);
   assert.deepEqual(swap!.trade, { network: "mainnet", side: "sell", token: TOKEN, wallet: W, amount_in: HELD.toString(), slippage_bps: SLIPPAGE, venue_out: "3000000", hops: [{ pool: 7, token_in: TOKEN, token_out: USDC }] });
   // the note before the move; the move is what W received, on that note
-  assert.deepEqual(ev[10], ["note", { id: W, l: L, j: J, token: TOKEN }, 0, true]);
-  assert.deepEqual(ev[11]!.slice(0, 4), ["move", { id: W, l: L, j: J, token: TOKEN }, "note-0", 3_000_000n]);
+  assert.deepEqual(ev[12], ["note", { id: W, l: L, j: J, token: TOKEN }, 0, true]);
+  assert.deepEqual(ev[13]!.slice(0, 4), ["move", { id: W, l: L, j: J, token: TOKEN }, "note-0", 3_000_000n]);
   // W read empty after the landing: no second note is written
-  assert.deepEqual(ev[13], ["note", { id: W, l: L, j: J, token: TOKEN }, 1, false]);
+  assert.deepEqual(ev[15], ["note", { id: W, l: L, j: J, token: TOKEN }, 1, false]);
   assert.equal(chain.token, 0n);
   assert.equal(chain.usdc, 0n);
   assert.deepEqual(log, [
@@ -259,6 +263,39 @@ test("the happy path: all W holds sold on the device's quote, signed by W bound 
     ["done", "wallet empty"],
   ]);
   assert.deepEqual(answer, { result: { stage: "filled", txs: [tx(30), tx(90)].map((hash) => ({ chain: "near", hash })) } });
+});
+
+test("a quote refused for a lag between the two providers is read again, bounded, never the end of the sale", async () => {
+  const { deps, log } = world();
+  const quote = deps.quote;
+  let n = 0;
+  deps.quote = async (x) => {
+    if (n++ === 0) throw new RheaQuoteRefused("lag", "the two providers' final heights are more than 3 blocks apart");
+    return quote(x);
+  };
+  const a = await run(deps);
+  assert.ok(a !== null && "result" in a && a.result.stage === "filled", `${JSON.stringify(a)} ${JSON.stringify(log)}`);
+  // past the bound it ends before anything is signed or sent
+  const b = world();
+  b.deps.quote = async () => {
+    throw new RheaQuoteRefused("lag", "the two providers' final heights are more than 3 blocks apart");
+  };
+  const ba = await run(b.deps);
+  assert.ok(ba !== null && "error" in ba, JSON.stringify(ba));
+  assert.equal(signs(b.ev).length, 0);
+  assert.equal(helperBodies(b.ev).length, 0);
+});
+
+test("the swap is signed from W's read of the swap's own pair (the read right before its quote), never from an earlier read", async () => {
+  const { deps, ev } = world({ registered: false });
+  const answer = await run(deps);
+  assert.ok(answer !== null && "result" in answer && answer.result.stage === "filled", JSON.stringify(answer, (_, v) => (typeof v === "bigint" ? String(v) : v)));
+  for (const at of ev.flatMap((e, i) => (e[0] === "sign" ? [i] : []))) {
+    const q = ev.slice(0, at).map((e) => e[0]).lastIndexOf("quote");
+    const r = ev.slice(0, q).map((e) => e[0]).lastIndexOf("read");
+    // a read's height in this world is 1,000 + the length of ev once it is pushed
+    assert.equal((ev[at]![6] as { height: number }).height, 1_000 + r + 1, `the sign at ${at} is from the read at ${r}`);
+  }
 });
 
 test("P3-4 the signer's bound is the token W's buy record names, never the ask's own token", async () => {
@@ -445,8 +482,9 @@ test("a throw that is no stop (a part out of its contract) after the swap: sent,
   let n = 0;
   deps.readWallet = async (a) => {
     const s = await read(a);
-    // the receive read (the third) answers a state with no held amount: the floor's arithmetic throws a TypeError
-    if (++n === 3) return { ...s, held: undefined as unknown as bigint };
+    // the receive read (the fifth: the first, the quote's pair, the swap's pair and its baseline before it) answers a
+    // state with no held amount: the floor's arithmetic throws a TypeError
+    if (++n === 5) return { ...s, held: undefined as unknown as bigint };
     return s;
   };
   const a = await run(deps);

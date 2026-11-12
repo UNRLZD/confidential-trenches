@@ -1,0 +1,322 @@
+{
+ "good": {
+  "at": "2026-11-12T22:44:48.762Z",
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-gP2RXvru0V7kfzZuwjkm19yxGbeqKiAieSbC5yrFSI704EJaRI1EVA5WshXLlAjD\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "app": {
+   "sha384": "sha384-gP2RXvru0V7kfzZuwjkm19yxGbeqKiAieSbC5yrFSI704EJaRI1EVA5WshXLlAjD",
+   "names": [
+    "https://ct-api.unrealized.trade/v1/rpc/near?keyed=only"
+   ]
+  },
+  "preflight": {
+   "status": 204,
+   "acao": "https://confidential.unrealized.trade",
+   "allowHeaders": "content-type"
+  },
+  "final": {
+   "status": 200,
+   "acao": "https://confidential.unrealized.trade",
+   "height": 224277195,
+   "hash": "DyDgLd22Lqc41e2JK1kgwsMcTyHSCbYkLeqkrZw5EXov",
+   "sha256": "1f1b0a28ffc86061d07a5fb8a52ec28e67e0bf7bddd03b126dc9cd3f461ccb06"
+  },
+  "pair": {
+   "seat": {
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade",
+    "height": 224277190,
+    "hash": "GuzmayKbgW4HP4TvbUcvLL3eSscoK5ZmomKSYwgQDh9s",
+    "sha256": "1f1b0a28ffc86061d07a5fb8a52ec28e67e0bf7bddd03b126dc9cd3f461ccb06"
+   },
+   "drpc": {
+    "status": 200,
+    "acao": "*",
+    "height": 224277190,
+    "hash": "GuzmayKbgW4HP4TvbUcvLL3eSscoK5ZmomKSYwgQDh9s",
+    "sha256": "1f1b0a28ffc86061d07a5fb8a52ec28e67e0bf7bddd03b126dc9cd3f461ccb06"
+   }
+  },
+  "window": {
+   "reads": [
+    {
+     "i": 0,
+     "status": 200,
+     "ok": true
+    },
+    {
+     "i": 1,
+     "status": 200,
+     "ok": true
+    },
+    {
+     "i": 2,
+     "status": 200,
+     "ok": true
+    },
+    {
+     "i": 3,
+     "status": 200,
+     "ok": true
+    },
+    {
+     "i": 4,
+     "status": 200,
+     "ok": true
+    },
+    {
+     "i": 5,
+     "status": 200,
+     "ok": true
+    },
+    {
+     "i": 6,
+     "status": 200,
+     "ok": true
+    },
+    {
+     "i": 7,
+     "status": 200,
+     "ok": true
+    },
+    {
+     "i": 8,
+     "status": 200,
+     "ok": true
+    },
+    {
+     "i": 9,
+     "status": 200,
+     "ok": true
+    },
+    {
+     "i": 10,
+     "status": 200,
+     "ok": true
+    },
+    {
+     "i": 11,
+     "status": 200,
+     "ok": true
+    },
+    {
+     "i": 12,
+     "status": 200,
+     "ok": true
+    },
+    {
+     "i": 13,
+     "status": 200,
+     "ok": true
+    },
+    {
+     "i": 14,
+     "status": 200,
+     "ok": true
+    },
+    {
+     "i": 15,
+     "status": 200,
+     "ok": true
+    },
+    {
+     "i": 16,
+     "status": 200,
+     "ok": true
+    },
+    {
+     "i": 17,
+     "status": 200,
+     "ok": true
+    },
+    {
+     "i": 18,
+     "status": 200,
+     "ok": true
+    },
+    {
+     "i": 19,
+     "status": 200,
+     "ok": true
+    },
+    {
+     "i": 20,
+     "status": 200,
+     "ok": true
+    },
+    {
+     "i": 21,
+     "status": 200,
+     "ok": true
+    },
+    {
+     "i": 22,
+     "status": 200,
+     "ok": true
+    },
+    {
+     "i": 23,
+     "status": 200,
+     "ok": true
+    },
+    {
+     "i": 24,
+     "status": 200,
+     "ok": true
+    },
+    {
+     "i": 25,
+     "status": 200,
+     "ok": true
+    },
+    {
+     "i": 26,
+     "status": 200,
+     "ok": true
+    },
+    {
+     "i": 27,
+     "status": 200,
+     "ok": true
+    },
+    {
+     "i": 28,
+     "status": 200,
+     "ok": true
+    },
+    {
+     "i": 29,
+     "status": 200,
+     "ok": true
+    }
+   ]
+  },
+  "helper": "this checkout's apps/helper (server.ts handler and rpc.ts, FastNEAR's key planted: Rhea's metadata forwarded to FastNEAR's keyless URL, view_account answered locally) on 127.0.0.1, from a Mac; SIGN_HOST: this checkout's index.html and built app.js; dRPC: near.drpc.org"
+ },
+ "bad": {
+  "at": "2026-11-12T22:42:32.572Z",
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-mCFGgq3HxkgmrlxPkFpbD5PWbynJZcBZ2PU6q29ju1l4n3P/krnrBlauWSFhojHA\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "app": {
+   "sha384": "sha384-mCFGgq3HxkgmrlxPkFpbD5PWbynJZcBZ2PU6q29ju1l4n3P/krnrBlauWSFhojHA",
+   "names": []
+  },
+  "preflight": {
+   "status": 204,
+   "acao": "https://confidential.unrealized.trade",
+   "allowHeaders": "content-type"
+  },
+  "final": {
+   "status": 200,
+   "acao": "https://confidential.unrealized.trade",
+   "height": 224276959,
+   "hash": "GKX5JG7MBoC2DgYLcjDNs3fMGHPPm8rjwdqdRZ2FXZsU",
+   "sha256": "1f1b0a28ffc86061d07a5fb8a52ec28e67e0bf7bddd03b126dc9cd3f461ccb06"
+  },
+  "pair": {
+   "seat": {
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade",
+    "height": 224276954,
+    "hash": "84ipZXhJadBTtCS6UVKYAk25JCvwb548ZW2zsMWQNkwT",
+    "sha256": "1f1b0a28ffc86061d07a5fb8a52ec28e67e0bf7bddd03b126dc9cd3f461ccb06"
+   },
+   "drpc": {
+    "status": 200,
+    "acao": "*",
+    "height": 224276954,
+    "hash": "84ipZXhJadBTtCS6UVKYAk25JCvwb548ZW2zsMWQNkwT",
+    "sha256": "1f1b0a28ffc86061d07a5fb8a52ec28e67e0bf7bddd03b126dc9cd3f461ccb06"
+   }
+  },
+  "window": {
+   "reads": [
+    {
+     "i": 0,
+     "status": 200,
+     "ok": true
+    },
+    {
+     "i": 1,
+     "status": 200,
+     "ok": true
+    },
+    {
+     "i": 2,
+     "status": 200,
+     "ok": true
+    },
+    {
+     "i": 3,
+     "status": 200,
+     "ok": true
+    },
+    {
+     "i": 4,
+     "status": 200,
+     "ok": true
+    },
+    {
+     "i": 5,
+     "status": 200,
+     "ok": true
+    },
+    {
+     "i": 6,
+     "status": 200,
+     "ok": true
+    },
+    {
+     "i": 7,
+     "status": 200,
+     "ok": true
+    },
+    {
+     "i": 8,
+     "status": 200,
+     "ok": true
+    },
+    {
+     "i": 9,
+     "status": 200,
+     "ok": true
+    },
+    {
+     "i": 10,
+     "status": 200,
+     "ok": true
+    },
+    {
+     "i": 11,
+     "status": 200,
+     "ok": true
+    },
+    {
+     "i": 12,
+     "status": 200,
+     "ok": true
+    },
+    {
+     "i": 13,
+     "status": 200,
+     "ok": true
+    },
+    {
+     "i": 14,
+     "status": 200,
+     "ok": true
+    },
+    {
+     "i": 15,
+     "status": 200,
+     "ok": true
+    },
+    {
+     "i": 16,
+     "status": 429,
+     "ok": false,
+     "why": "ct-api.unrealized.trade HTTP 429: 429 Too Many Requests"
+    }
+   ]
+  },
+  "helper": "https://ct-api.unrealized.trade and https://confidential.unrealized.trade as deployed before this card (the page on FastNEAR's keyless URL, the helper's near share 16), one run from a Mac"
+ }
+}

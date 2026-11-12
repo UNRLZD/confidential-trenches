@@ -19,6 +19,7 @@ import type { Relayer, TxOutcome, TxRef } from "../../../apps/helper/src/bind/se
 import type { KindContext } from "../src/api.ts";
 import { sendNearTrade } from "../src/near-buy.ts";
 import { NEAR_BUY_SWAP_ROUNDS, nearBuyFlow, type NearBuyAnswer, type NearBuyBegun, type NearBuyDeps, type NearBuyProgress } from "../src/near-trade.ts";
+import { fakePair } from "./near-pair-fake.ts";
 
 const SEED = wordsToSeed64(entropyToWords(new Uint8Array(16))); // the published all-zero vector (a8.json)
 const USDC = NEAR_NETWORKS.mainnet.usdc;
@@ -129,7 +130,9 @@ function world(o: Opts = {}) {
     if (o.lose?.includes(m)) throw new Error("timed out");
     return new Response(JSON.stringify(a.body), { status: a.status, headers: { "content-type": "application/json" } });
   }) as typeof fetch;
-  const deps = (begun: Partial<NearBuyBegun> = {}): NearBuyDeps => ({
+  const deps = (begun: Partial<NearBuyBegun> = {}): NearBuyDeps => {
+    const d: NearBuyDeps = {
+    pair: fakePair(() => d),
     network: "mainnet",
     begin: async (ask) => ({ ask, w: { id: W, l: L, j: J }, txs: [], ...begun }),
     progress: async (p) => void records.push(structuredClone(p)),
@@ -183,7 +186,9 @@ function world(o: Opts = {}) {
     },
     wait: async () => {},
     log: () => {},
-  });
+    };
+    return d;
+  };
   const run = async (begun?: Partial<NearBuyBegun>): Promise<NearBuyAnswer | null> => {
     const r = nearBuyFlow(deps(begun))(ASK, ctx);
     assert.ok("running" in r);
