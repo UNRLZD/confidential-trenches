@@ -114,7 +114,13 @@ import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import { NEAR_NETWORKS, type NearRpc } from "../../wallet/src/deposit/account.ts";
 import { depositIdEvm } from "../../wallet/src/derive/keys.ts";
 import { POOL_DEPOSIT_NETWORK } from "../../wallet/src/deposit/quote.ts";
-import { RESTORE_GAP, RESTORE_LANES, walkEnd, writeRestored, type RestoredNote, type SeedUse } from "../../wallet/src/notes/restore.ts";
+import { readConfig, RESTORE_GAP, RESTORE_LANES, restorePages, walkEnd, walkLaneYielding, withSeed, writeRestored, type LaneWalk, type RestoredNote, type SeedUse } from "../../wallet/src/notes/restore.ts";
+import { masters } from "../../wallet/src/derive/notes.ts";
+import { vaultSync, vaultSyncStart, type VaultSyncRpc } from "../../kit/src/vault/sync.ts";
+import { nearPairNetwork, nearPairRule, type NearNetwork } from "../../kit/src/near/networks.ts";
+import { pacedNearRpc } from "../../wallet/src/pace.ts";
+import { PAGE_NETWORK } from "./withdraw/handoff.ts";
+import { vaultScope } from "./withdraw/checks.ts";
 import { openNoteStore } from "../../wallet/src/notes/store.ts";
 import { evmRestoreNotes } from "../../wallet/src/pool/evm-restore.ts";
 import { EVM_CHAIN_IDS, EVM_POOLS, evmPair, evmPoolScopeOf, type EvmNetwork, type EvmPoolPin, type EvmRpc } from "../../wallet/src/pool/evm.ts";
@@ -145,6 +151,7 @@ export const RESTORE_BEAT_MS = 5_000;
  *  run ends stalled); a Solana pool's `lister` names its marks for the pair to read (the pair's first RPC when none), and
  *  its `cache` holds the marks and pages the page's settles already read on that pair (pool-testnet.ts PAGE_SOL_CACHE). */
 export type RestorePool =
+  | { chain: "near"; network: NearNetwork; scope: bigint; rpcs: (() => readonly [VaultSyncRpc, VaultSyncRpc]) | null }
   | { chain: "solana"; program: string; scope: bigint; rpcs: (() => readonly [SolanaRpc, SolanaRpc]) | null; lister?: () => SolanaRpc | undefined; cache?: SolanaPoolCache; markBatches?: readonly [number, number] }
   | { chain: "evm"; pin: EvmPoolPin; scope: bigint; rpcs: (() => readonly EvmRpc[]) | null };
 
@@ -442,7 +449,7 @@ export function restoreUxOf(chain: PoolChain, follow: PoolUxReads | null, progra
 type Walked = { label: string; chain: PoolChain; scope: bigint; notes: readonly RestoredNote[]; ux: PoolUxReads | null; addressed: boolean };
 
 /** A pinned pool's chain: Solana, or the app chain of its EVM network (Base Sepolia is Base's, as src/pools.ts names it). */
-const chainOf = (p: RestorePool): PoolChain => (p.chain === "solana" ? "solana" : p.pin.network === "base" || p.pin.network === "base-sepolia" ? "base" : "robinhood");
+const chainOf = (p: Exclude<RestorePool, { chain: "near" }>): PoolChain => (p.chain === "solana" ? "solana" : p.pin.network === "base" || p.pin.network === "base-sepolia" ? "base" : "robinhood");
 
 const EVM_PAGE: Readonly<Record<"base" | "robinhood", EvmNetwork>> = POOL_TESTNET ? { base: "base-sepolia", robinhood: "robinhood-testnet" } : { base: "base", robinhood: "robinhood" };
 
@@ -450,6 +457,10 @@ const EVM_PAGE: Readonly<Record<"base" | "robinhood", EvmNetwork>> = POOL_TESTNE
  *  `evmPins` is EVM_POOLS unless a test plants pins (as pools.ts's pagePoolsOf). */
 export function pagePools(evmPins: Readonly<Partial<Record<EvmNetwork, EvmPoolPin>>> = EVM_POOLS): RestorePool[] {
   const out: RestorePool[] = [];
+  // the NEAR vault of the page's network (NEAR_NETWORKS' vault and USDC, the scope withdraw/checks.ts computes), on the
+  // release pair the withdraw reads it on (withdraw/handoff.ts: one FastNEAR URL and dRPC, at the provider's pace)
+  const vault = vaultScope(PAGE_NETWORK);
+  if (vault !== null) out.push({ chain: "near", network: PAGE_NETWORK, scope: vault, rpcs: () => [pacedNearRpc(NEAR_NETWORKS[PAGE_NETWORK].fastnear[0]), pacedNearRpc(NEAR_NETWORKS[PAGE_NETWORK].drpc)] });
   if (PAGE_SOL_PIN !== undefined) out.push({ chain: "solana", program: PAGE_SOL_PIN.program, scope: solanaPoolOf(PAGE_SOL_PIN.program).scope, rpcs: pageSolanaSettleRpcs, lister: pageSolanaLister, cache: PAGE_SOL_CACHE, markBatches: PAGE_SOL_MARK_BATCHES });
   for (const chain of ["base", "robinhood"] as const) {
     const pin = evmPins[EVM_PAGE[chain]];
@@ -562,6 +573,8 @@ export type PoolRestoreHost = {
   pausesMs?: readonly number[];
   solana?: typeof solanaRestoreNotes;
   evm?: typeof evmRestoreNotes;
+  /** The NEAR vault's walk (nearVaultRestoreNotes unless given: a test's own gap). */
+  vault?: typeof nearVaultRestoreNotes;
 };
 
 /** A run: its first end (the walk's notes written: what every follower is told), its whole end (step 5 included). */
@@ -622,6 +635,7 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
     const pools = (h.pools ?? pagePools)();
     const solana = h.solana ?? solanaRestoreNotes;
     const evm = h.evm ?? evmRestoreNotes;
+    const vaultWalk = h.vault ?? nearVaultRestoreNotes;
     const ids = h.ids === undefined ? pageIdReads() : h.ids;
     // each reason the walk is not done, as found; the walk's end is told once with them (`ended`), a throw or an abort
     // included (review of e31892ef, P3-5)
@@ -673,10 +687,11 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
         if (owed && (await (await h.store()).get("meta", RESTORE_IDS_KEY)) === undefined) return end("done");
         const found: RestoredNote[] = [];
         // each pool on its own: one that fails leaves the others' notes found
-        const label = (p: RestorePool): string => (p.chain === "solana" ? "solana" : p.pin.network);
+        const label = (p: RestorePool): string => (p.chain === "near" ? "near vault" : p.chain === "solana" ? "solana" : p.pin.network);
         const evmHoldingsOwed: { chain: "base" | "robinhood"; pin: EvmPoolPin; list: readonly EvmRpc[]; buys: EvmBuySpend[] }[] = [];
         const reads = pools.map(async (p): Promise<RestoredNote[]> => {
           if (p.rpcs === null) throw new Error("no reads on this page");
+          if (p.chain === "near") return (await letGo(vaultWalk({ network: p.network, rpcs: p.rpcs(), seed64: seed, signal }), signal)).notes;
           if (p.chain === "solana") {
             const lister = p.lister?.();
             return (await letGo(solana({ seed64: seed, program: p.program, rpcs: p.rpcs(), ...(lister ? { lister } : {}), ...(p.cache ? { cache: p.cache } : {}), ...(p.markBatches ? { markBatches: p.markBatches } : {}), signal }), signal)).notes;
@@ -695,14 +710,23 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
           return r.notes;
         });
         const walked: Walked[] = [];
+        // the NEAR vault's notes, walked: written and their counter raised with the pools', never read by step 5 (its
+        // deposit ids are the vault deposit's own follow's, src/deposit-follow.ts)
+        const vaults: { scope: bigint; notes: readonly RestoredNote[] }[] = [];
         (await Promise.allSettled(reads)).forEach((r, k) => {
+          const p = pools[k]!;
+          if (p.chain === "near") {
+            if (r.status === "fulfilled") (found.push(...r.value), vaults.push({ scope: p.scope, notes: r.value }));
+            else why.push(`${label(p)}: ${r.reason instanceof Error ? r.reason.message : "the walk failed"}`);
+            return;
+          }
           if (r.status === "fulfilled") {
             found.push(...r.value);
-            const chain = chainOf(pools[k]!);
-            walked.push({ label: label(pools[k]!), chain, scope: pools[k]!.scope, notes: r.value, ux: h.ux?.(chain) ?? null, addressed: h.addressed?.(chain) ?? true });
+            const chain = chainOf(p);
+            walked.push({ label: label(p), chain, scope: p.scope, notes: r.value, ux: h.ux?.(chain) ?? null, addressed: h.addressed?.(chain) ?? true });
             // a failed walk stalls the run, but not on a chain this build gives no deposit address on (nor a deposit: the
             // two open together), which holds no note of this device: it holds back no other chain's restore
-          } else if (h.addressed?.(chainOf(pools[k]!)) ?? true) why.push(`${label(pools[k]!)}: ${r.reason instanceof Error ? r.reason.message : "the walk failed"}`);
+          } else if (h.addressed?.(chainOf(p)) ?? true) why.push(`${label(p)}: ${r.reason instanceof Error ? r.reason.message : "the walk failed"}`);
         });
         signal.throwIfAborted();
         // a walk that failed: the next load walks that pool again, so step 5 stays owed after it (the marker)
@@ -720,10 +744,10 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
         // the floor: the walk's notes are written before any id is read. First each walked scope's deposit counter goes
         // past the walk's highest note in this store's lane (step 7's, on the notes alone; step 5 raises it again once
         // the lane's ids are read, and a counter only goes up), so the naming the notes' write sets off names past them
-        if (walked.length > 0) {
+        if (walked.length > 0 || vaults.length > 0) {
           await seedHeld(async () => {
             const st = await h.store();
-            for (const w of walked) await st.raiseDepositIndex(w.scope, coverTo({ lane: st.lane, highest: lanesOf(w.notes, w.scope).laneHighest[st.lane]! }));
+            for (const w of [...walked, ...vaults]) await st.raiseDepositIndex(w.scope, coverTo({ lane: st.lane, highest: lanesOf(w.notes, w.scope).laneHighest[st.lane]! }));
             if (found.length === 0) return;
             const notes = await openNoteStore(st);
             try {
@@ -744,11 +768,12 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
           if (wrote.length > 0) h.holdingsWritten?.(o.chain);
         }
         // step 5 is owed from here until a try reads every id (the marker, the pools' scopes alone)
-        const owes = ids !== null && pools.length > 0;
+        const idPools = pools.filter((p) => p.chain !== "near");
+        const owes = ids !== null && idPools.length > 0;
         // (a resume, a load's or a landing's, keeps the lanes a marker for the same scopes holds read whole, so it reads
         // only the others; a run the user asks for, a Sync or a Retry, writes it fresh and reads every lane whole: delta
         // review P2-A)
-        const scopes = pools.map((p) => p.scope.toString());
+        const scopes = idPools.map((p) => p.scope.toString());
         if (owes)
           await seedHeld(async () =>
             (await h.store()).update("meta", RESTORE_IDS_KEY, (v) => {
@@ -982,4 +1007,34 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
     },
     idle: () => run?.done ?? Promise.resolve(),
   };
+}
+
+/**
+ * The NEAR vault's notes of these words (card signpage-restores-near-vault-notes), as the exit tool restores them
+ * (packages/exit scan.ts: the wallet's restoreNotes), with the seed opened only for each use, as the pools' walks:
+ * - the vault's deposits, spends and leaves read whole on the page's release pair at one block, each answer's bytes
+ *   equal on both (the kit's vaultSync: a provider that differs by one byte, or a page past the list's length, stops
+ *   the read, and nothing is returned), and the vault's config read on both: its scope the one computed from the
+ *   page's pinned vault and USDC, its asset that USDC (the wallet's readConfig);
+ * - each lane walked off the deposit masters of one short use of the seed (walkLaneYielding: never one stretch on the
+ *   page's thread), then the notes from the pages in one more short use (restorePages): every note of the scope with
+ *   its state, UNSPENT or SPENT, parents first.
+ * A read that fails throws: the run names the vault stalled and writes none of its notes; the next run reads it again.
+ */
+export async function nearVaultRestoreNotes(a: { network: NearNetwork; rpcs: readonly [VaultSyncRpc, VaultSyncRpc]; seed64: SeedUse; signal?: AbortSignal; gap?: number }): Promise<{ scope: bigint; notes: RestoredNote[] }> {
+  const net = NEAR_NETWORKS[a.network];
+  const scope = vaultScope(a.network);
+  if (net.vault === null || scope === null) throw new Error(`no vault on ${a.network}`);
+  if (nearPairNetwork(a.rpcs) !== a.network) throw new Error(nearPairRule(a.network));
+  const s = await vaultSync({ vault: net.vault, rpcs: a.rpcs, cursor: vaultSyncStart(net.vault), lists: ["deposits", "spends", "leaves"], ...(a.signal ? { signal: a.signal } : {}) });
+  if (s.leaves.length !== s.stateTree.size) throw new Error("the leaves read are not the whole state tree");
+  await readConfig(a.rpcs, net.vault, net.usdc, scope, s.height, a.signal);
+  const gap = a.gap ?? RESTORE_GAP;
+  const ps: ReadonlySet<bigint> = new Set(s.deposits.map((r) => r.precommitment));
+  const m = await withSeed(a.seed64, (seed64) => masters(seed64, "deposit"));
+  const lanes: LaneWalk[] = [];
+  for (let lane = 0; lane < RESTORE_LANES; lane++) lanes.push(await walkLaneYielding(m, scope, lane, (P) => ps.has(P), gap, null, a.signal));
+  a.signal?.throwIfAborted();
+  const r = await withSeed(a.seed64, (seed64) => restorePages(seed64, scope, s, { gap, lanes }));
+  return { scope, notes: r.notes };
 }

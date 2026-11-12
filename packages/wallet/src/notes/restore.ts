@@ -154,8 +154,10 @@ export async function restoreNotes(a: RestoreArgs): Promise<NoteRestore> {
 }
 
 // config() at each RPC's final block: the same bytes on both, its scope the one computed from (vault, token) and its
-// asset the token; returns the two final heights, each at or above the height the pages were read at
-async function readConfig(rpcs: readonly [VaultSyncRpc, VaultSyncRpc], vault: string, token: string, scope: bigint, height: number, signal?: AbortSignal): Promise<[number, number]> {
+// asset the token; returns the two final heights, each at or above the height the pages were read at. Exported for the
+// signing page's restore (its vault walk opens the seed only for each use, so it calls vaultSync, this and restorePages
+// itself: ../../../signpage/src/pool-restore.ts nearVaultRestoreNotes)
+export async function readConfig(rpcs: readonly [VaultSyncRpc, VaultSyncRpc], vault: string, token: string, scope: bigint, height: number, signal?: AbortSignal): Promise<[number, number]> {
   const params = { request_type: "call_function", account_id: vault, method_name: "config", args_base64: btoa("{}"), finality: "final" };
   const one = async (rpc: VaultSyncRpc): Promise<{ bytes: string; height: number }> => {
     const a = (await rpc.query(params, signal)) as { error?: unknown; result?: { error?: unknown; result?: unknown; block_height?: unknown } } | null;
