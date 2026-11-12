@@ -1,5 +1,5 @@
 // trade.ts, POST /v1/bind's trade kind (card relayer-near-trade): W's creation, then the carry of W's signed calls,
-// every refusal the CO's ruling names held by its own test with nothing sent. The quotes are real: the kit's rheaQuote
+// every refusal the rule names held by its own test with nothing sent. The quotes are real: the kit's rheaQuote
 // replayed on recorded mainnet answers of both providers (fixtures/near-rhea-quotes.json, copied from the kit's); the calls
 // are the kit's nearSwapCalls, each signed here as a NEP-366 delegate with real ed25519 by a key made in the test.
 //   node --test apps/helper/src/bind/trade.test.ts

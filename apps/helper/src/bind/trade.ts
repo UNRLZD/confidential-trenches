@@ -1,7 +1,7 @@
 // POST /v1/bind's trade kind (card relayer-near-trade): a fresh NEAR wallet W buys or sells a token on Rhea classic,
 // and the helper's gas account pays every NEAR it needs. W is a 64-hex implicit id whose key exists only on the device;
 // the helper never builds or alters a call: it creates W with one plain Transfer, then carries W's signed bytes, or
-// refuses. The CO's ruling (card near-private-trading, 11 Nov), in order:
+// refuses. The rule (card near-private-trading, 11 Nov), in order:
 //
 //   1. Creation: a body with no delegates names W. Once a vault payout to W reads as landed (the vault's spends list,
 //      both providers at one final block: a row whose recipient is W, paid, or settled with refund_value 0, as
