@@ -62,11 +62,11 @@ test("planted: a script that is not the one its page pins, or has no pin, fails 
 });
 
 test("the marks on the build's minified shapes, any quote; a near miss is no mark", () => {
-  const sign = ["return c({...a,txs:t,soldOut:o})", "n.push({key:`restored/${i}`,rec:{kind:`buy`,...s}})", "iJ=`owed/trades-sol-read`", "if(i.kind===`buy`&&i.amount_usd===void 0){"].join(";");
+  const sign = ["...a===void 0?{}:{until:a.after}}]", "{...e,fill_none:!0}", "n.push({key:`restored/${i}`,rec:{kind:`buy`,...s}})", "iJ=`owed/trades-sol-read`", "if(i.kind===`buy`&&i.amount_usd===void 0){"].join(";");
   assert.deepEqual(marksIn("sign", sign), NAMES.sign);
-  const dq = ["return c({...a,txs:t,soldOut:o})", 'n.push({key:"restored/"+i,rec:{kind:"buy",...s}})', 'iJ="owed/trades-sol-read"', 'if(i.kind==="buy"&&i.amount_usd===void 0){'].join(";");
+  const dq = ["...a===void 0?{}:{until:a.after}}]", "{...e,fill_none:!0}", 'n.push({key:"restored/"+i,rec:{kind:"buy",...s}})', 'iJ="owed/trades-sol-read"', 'if(i.kind==="buy"&&i.amount_usd===void 0){'].join(";");
   assert.deepEqual(marksIn("sign", dq), NAMES.sign);
-  // the reader before this card, an op keyed by another name, the buy records' own key, a sale priced, a buy with USD
-  const near = ["return c({...a})", "{key:`trade/${i}`,rec:{kind:`buy`}}", "`owed/buy-sol-none`", "i.kind===`sell`&&i.amount_usd===void 0", "i.kind===`buy`&&i.amount_usd!==void 0"].join(";");
+  // the reader's list from the newest (no cursor), a cursor of another field, an op not marked, an op keyed by another name, the buy records' own key, a sale priced, a buy with USD
+  const near = ["{before:n}", "{until:a.before}", "{...e,fill_none:!1}", "{key:`trade/${i}`,rec:{kind:`buy`}}", "`owed/buy-sol-none`", "i.kind===`sell`&&i.amount_usd===void 0", "i.kind===`buy`&&i.amount_usd!==void 0"].join(";");
   assert.deepEqual(marksIn("sign", near), []);
 });
