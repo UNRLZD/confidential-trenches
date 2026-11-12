@@ -156,3 +156,46 @@ test("T4: on the mainnet wiring the fill reads only on the helper's route, and n
   assert.deepEqual(fill.filter((x) => !x.startsWith(`${route} `)), [], "every fill read on the helper's route");
   assert.ok(!fill.some((x) => x.endsWith(FAILED)), "the failed feed transaction never read");
 });
+
+// Card portfolio-counts-money-an-open-buy-holds, review of 98d75c8cb: a sign out ends the fill as it ends the held read.
+// The mainnet wiring, three filled sales to fill: the first's getTransaction waits; the sign out aborts it, and the fill
+// reads no other sale of the signed-out account's. Red before: the fill read on an unstopped reader and signedOut never
+// stopped it, so the first read answered after the sign out and the next sale's went out.
+test("T5: a sign out mid-fill: the read in flight is aborted, and no other trade of the account's is read after it", async () => {
+  const w = await store();
+  for (const [k, ms] of [["s1", 3], ["s2", 2], ["s3", 1]] as const) await w.put("ops", k, { ...saleOp(`Sig-${k}`), created_ms: ms });
+  const sent: string[] = [];
+  const waiting: (() => void)[] = [];
+  let aborted = 0;
+  const real = globalThis.fetch;
+  globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body ?? "{}")) as { id?: unknown; method?: string; params?: unknown[] };
+    const p0 = body.params?.[0];
+    if (body.method === "getTransaction" && typeof p0 === "string" && p0.startsWith("Sig-")) {
+      sent.push(p0);
+      // the answer (none: the op left as it is) waits for the test; the stop, when it comes, aborts it first
+      return await new Promise<Response>((resolve, reject) => {
+        const s = init?.signal;
+        const stop = () => (aborted++, reject(s?.reason ?? new Error("aborted")));
+        if (s?.aborted) return stop();
+        s?.addEventListener("abort", stop, { once: true });
+        waiting.push(() => resolve(new Response(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: null }), { headers: { "content-type": "application/json" } })));
+      });
+    }
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id: body.id, error: { code: -32601, message: "not here" } }), { headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+  try {
+    const tp = testnetPool({ store: async () => w, seed64: async () => SEED64.slice(), price: () => PRICE }, { pin: PIN, table: "Table111111111111111111111111111111111111111", holdings: () => ({ chain: "sol", read: async () => ({ native: 0n, tokens: new Map(), unreadable: [] }) }), positions: { setTimer: () => {}, clearTimer: () => {} } } as never);
+    void tp.settle().catch(() => {});
+    await until(() => sent.length === 1, "the newest sale's read went out");
+    assert.equal(sent[0], "Sig-s1");
+    await tp.signedOut();
+    // any answer still waiting comes now: after the sign out
+    for (const f of waiting.splice(0)) f();
+    await tick(150);
+    assert.deepEqual(sent, ["Sig-s1"], "no other trade of the signed-out account's is read after the sign out");
+    assert.equal(aborted, 1, "the read in flight is aborted by the sign out");
+  } finally {
+    globalThis.fetch = real;
+  }
+});

@@ -730,6 +730,10 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     awaited.clear();
     follows.abort();
     follows = new AbortController();
+    // the fill's reads of this account's trades end with it: none in flight answered, none sent after (fillTrades)
+    fillStop.abort();
+    fillStop = new AbortController();
+    fillAgain = false;
     stopSolana();
     // every queue, Solana's and each EVM pool's: its notes freed, its seed copy zeroed, its note store closed
     const all = [open, ...evmQueues.values()];
@@ -1725,11 +1729,14 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   // time, one asked meanwhile runs once more after it; a write tells the app's state watchers
   let filling: Promise<void> | null = null;
   let fillAgain = false;
+  // the sign out's stop (signedOut): in the reader's every fetch and in the fill's loop over the ops
+  let fillStop = new AbortController();
   const fillTrades = (): void => {
     if (pin === undefined) return;
     if (filling) return void (fillAgain = true);
+    const signal = fillStop.signal;
     // one reader, the helper's route (the positions finder's): no read names a W or a signature to a public provider
-    const one = POOL_TESTNET ? rpcs("pass")[0] : over.rpcs ? over.rpcs[1] : solanaPacedRpc(pageHelperRpc(TRADE_HELPER, SOLANA_RPC_RETRY, "pass"));
+    const one = POOL_TESTNET ? rpcs("pass")[0] : over.rpcs ? over.rpcs[1] : solanaPacedRpc(pageHelperRpcStopped(TRADE_HELPER, signal, "pass"));
     const read = (sig: string): Promise<unknown> => one("getTransaction", [sig, { encoding: "json", commitment: "finalized", maxSupportedTransactionVersion: 0 }]);
     filling = (async () => {
       const store = (await page.store()) as unknown as FillStore;
@@ -1738,7 +1745,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         const l = await one("getSignaturesForAddress", [POOL_USD_FEEDS.solana.account, { before: sig, limit: 100, commitment: "finalized" }]);
         return Array.isArray(l) ? l.flatMap((e) => (e !== null && typeof e === "object" && (e as { err?: unknown }).err === null && typeof (e as { signature?: unknown }).signature === "string" ? [(e as { signature: string }).signature] : [])) : [];
       };
-      if (await fillTradeOps({ store, read, feedBefore, price: () => page.price?.("solana") ?? null, now: Date.now })) for (const f of watchers) f();
+      if (await fillTradeOps({ store, read, feedBefore, price: () => page.price?.("solana") ?? null, now: Date.now, signal })) for (const f of watchers) f();
     })()
       .catch(() => {})
       .finally(() => {
