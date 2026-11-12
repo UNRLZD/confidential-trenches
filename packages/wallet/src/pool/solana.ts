@@ -254,7 +254,7 @@ const int = (x: unknown, what: string): number => {
 };
 
 /** One slot's block time, ms. A node that names a slot can answer its block time -32004 ("Block not available for
- * slot", api.mainnet-beta on a slot it had just named finalized, 12 Nov 19:20Z): a moment behind its own slot, so read
+ * slot", api.mainnet-beta on a slot it had just named finalized, 11 Nov 19:20Z): a moment behind its own slot, so read
  * again a slot apart, at most SOL_REACH_WAITS times. Any other error is thrown as it came. */
 async function blockTime(rpc: SolanaRpc, slot: number, wait: SolanaLagWait = slotWait, signal?: AbortSignal): Promise<{ slot: number; ms: bigint }> {
   for (let waits = 0; ; waits++) {
@@ -307,7 +307,7 @@ export const SOL_LAG_WAIT_MS = 400;
 /** A tree read whose block has not reached its cut is read again, a slot apart, at most this many times: 4 s. The
  * cut a caller can ask beyond its chain's time is now + 1 (a note that landed in now's block-second), at most one
  * block-second past a block both RPCs read finalized; mainnet's confirmed slot read equal to its finalized slot on two
- * providers (12 Nov 19:00Z), so that second is about one second of chain time away, and a provider a few slots behind
+ * providers (11 Nov 19:00Z), so that second is about one second of chain time away, and a provider a few slots behind
  * the other (up to 4 on 3 Nov, 1.6 s) adds that. 4 s covers both with room; past it a provider is stalled, and the read
  * is refused as before rather than eat the send's margin (SOL_SEND_MARGIN_MS, 90 s). */
 export const SOL_REACH_WAITS = 10;
