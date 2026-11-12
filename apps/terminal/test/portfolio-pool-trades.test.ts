@@ -50,9 +50,10 @@ test("the whole sequence: nothing open, both round trips closed with their reali
   const closed = closedRows(d);
   assert.equal(closed.length, 2);
   const [second, first] = closed;
-  // newest close first; bought and sold in cents, rounded down; realized is sold less bought
-  assert.deepEqual([first!.bought, first!.sold, first!.realized, first!.realizedBps], [10n, 4n, -6n, -5232]);
-  assert.deepEqual([second!.bought, second!.sold, second!.realized, second!.realizedBps], [9n, 9n, -1n, -250]);
+  // newest close first; bought and sold in cents to the nearest (a $0.0999999 buy is $0.10, card
+  // portfolio-counts-money-an-open-buy-holds); realized from the exact figures, rounded down
+  assert.deepEqual([first!.bought, first!.sold, first!.realized, first!.realizedBps], [10n, 5n, -6n, -5232]);
+  assert.deepEqual([second!.bought, second!.sold, second!.realized, second!.realizedBps], [10n, 10n, -1n, -250]);
   // the pool asset's own figures, exact
   assert.deepEqual([first!.asset, first!.realizedAsset], ["SOL", "-0.000631252"]);
   assert.deepEqual([second!.asset, second!.realizedAsset], ["SOL", "-0.000029886"]);
@@ -96,7 +97,7 @@ test("R3: a closed round trip whose buy names no USD draws a dash for bought, re
   const snap = base([noUsd as Operation, sell1], []);
   const d = heldData(snap, markets, new Map(), NOW);
   const [c] = closedRows(d);
-  assert.deepEqual([c!.bought, c!.sold, c!.realized, c!.realizedBps], [null, 4n, null, null]);
+  assert.deepEqual([c!.bought, c!.sold, c!.realized, c!.realizedBps], [null, 5n, null, null]);
   assert.equal(c!.realizedAsset, "-0.000631252", "the SOL figures stand on their own");
   assert.equal(portfolio(snap, d, NOW).totals!.realized30, 0n);
 });
