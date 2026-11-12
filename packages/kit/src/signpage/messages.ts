@@ -11,10 +11,11 @@ import type { Chain, OrderTrigger } from "../orders/record.ts";
 import { deepFreeze } from "../freeze.ts";
 
 /**
- * The twenty-five request kinds, app to page. nav and reload are to SIGN_HOST's shell (card signpage-shell); the four
+ * The twenty-six request kinds, app to page. nav and reload are to SIGN_HOST's shell (card signpage-shell); the four
  * pool kinds (card signpage-pool-kinds), the two deposit sheet reads, deposit.assets and deposit.dry (card
- * kit-deposit-assets-dry), pool.address (card pool-deposit-address) and pool.sell.dry (card
- * app-sell-shows-what-you-receive) were added after kit-v1 without changing any other kind. A page of an earlier release refuses a kind it does not have "not_allowed".
+ * kit-deposit-assets-dry), pool.address (card pool-deposit-address), pool.sell.dry (card
+ * app-sell-shows-what-you-receive) and pool.buy.dry (card max-is-priced-for-the-coin) were added after kit-v1 without
+ * changing any other kind. A page of an earlier release refuses a kind it does not have "not_allowed".
  */
 export const SIGNPAGE_KINDS = [
   "deposit.quote",
@@ -42,6 +43,7 @@ export const SIGNPAGE_KINDS = [
   "deposit.dry",
   "pool.address",
   "pool.sell.dry",
+  "pool.buy.dry",
 ] as const;
 deepFreeze(SIGNPAGE_KINDS);
 
@@ -171,6 +173,15 @@ export interface SignpageParams {
    * and busy (a trade runs, the page's preview budget is spent, or a newer ask came first); busy and down are "not now".
    */
   "pool.sell.dry": SignpageParams["pool.sell"];
+  /**
+   * The most one pool.buy of `token` can spend now (card max-is-priced-for-the-coin): state.pools' tap_max priced on the
+   * coin's own venue and mint kind (pump's curve or PumpSwap, Token or Token-2022, cashback or not), which the page reads
+   * on two providers, where tap_max is priced on the costliest venue of any coin. Signs nothing, writes nothing and
+   * sends nothing. Display only: a pool.buy at this amount or under passes the page's own funds rule on the same reads.
+   * Solana only (an EVM tap spends a whole chunk); not_allowed elsewhere. Its refusals: not_allowed, not_funded (signed
+   * out or no proof ready), quote_check_failed (no venue the two providers agree on) and busy (a trade runs).
+   */
+  "pool.buy.dry": { chain: PoolChain; token: string };
 }
 
 export interface TxRef {
@@ -219,6 +230,13 @@ export interface SignpageResults {
   "deposit.dry": DepositDry;
   "pool.address": PoolAddress;
   "pool.sell.dry": PoolSellDry;
+  "pool.buy.dry": PoolBuyDry;
+}
+
+/** pool.buy.dry's answer: `tap_max`, in whole units of the chain pool's asset as state.pools' is, at most that entry's
+ *  `ready`, "0" when no ready proof can pay the coin's venue. */
+export interface PoolBuyDry {
+  tap_max: string;
 }
 
 /**

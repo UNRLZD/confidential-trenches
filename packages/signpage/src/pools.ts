@@ -19,14 +19,16 @@
 //   pickOps with `pools` in that rest, so pools take the room as any other field of the state does. When no ops are left
 //   to give and the rest of the state still leaves pools no room, the state goes without pools, as it was.
 import type { Chain } from "../../kit/src/orders/record.ts";
-import type { PoolStatePrice, SignpageState } from "../../kit/src/signpage/messages.ts";
+import type { ErrorCode, PoolBuyDry, PoolStatePrice, SignpageState } from "../../kit/src/signpage/messages.ts";
 import { SIGNPAGE_MAX_ANSWER_BYTES, SIGNPAGE_RESULT_SCHEMAS } from "../../kit/src/signpage/schema.ts";
-import type { SolanaRent } from "../../kit/src/trade/solana/pool-buy.ts";
+import { readSolanaPoolBuyVenue, readSolanaRent, type SolanaPoolBuyVenue, type SolanaRent } from "../../kit/src/trade/solana/pool-buy.ts";
+import { SolanaRpcTransportError, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import type { NoteRecord } from "../../wallet/src/notes/store.ts";
 import { evmBalancePool, evmTapSpendOf, poolBalances, solanaBalancePool, solanaTapSpendOf, type BalancePool, type BalanceProof, type LandedRelease } from "../../wallet/src/pool/balances.ts";
 import { EVM_CHAIN_IDS, EVM_POOLS, evmPoolScopeOf, type EvmNetwork } from "../../wallet/src/pool/evm.ts";
 import { POOL_TESTNET } from "../../wallet/src/pool/network.ts";
 import { SOL_POOLS, solanaPoolOf } from "../../wallet/src/pool/solana.ts";
+import type { Running } from "./api.ts";
 import { ANSWER_ROOM, pickOps } from "./state.ts";
 
 /** Each app chain's EVM network on the page's network. */
@@ -66,9 +68,103 @@ export function pagePoolsOf(network: "mainnet" | "testnet", solPins = SOL_POOLS,
  */
 export const PAGE_POOLS: readonly BalancePool[] = pagePoolsOf(POOL_TESTNET ? "testnet" : "mainnet");
 
-/** `pools` with each Solana entry's tap spend at `rent` (the kit's Rent sysvar, read on two RPCs): its tap_max. */
-export function withSolanaRent(pools: readonly BalancePool[], rent: SolanaRent): readonly BalancePool[] {
-  return Object.freeze(pools.map((p) => (p.chain === "solana" ? solanaBalancePool(p.id, p.scope, solanaTapSpendOf(rent)) : p)));
+/** `pools` with each Solana entry's tap spend at `rent` (the kit's Rent sysvar, read on two RPCs): its tap_max, on
+ *  `venue` (a coin's own, pool.buy.dry) or, with none, on the costliest venue of any coin (state.pools). */
+export function withSolanaRent(pools: readonly BalancePool[], rent: SolanaRent, venue?: CoinVenue): readonly BalancePool[] {
+  return Object.freeze(pools.map((p) => (p.chain === "solana" ? solanaBalancePool(p.id, p.scope, solanaTapSpendOf(rent, venue)) : p)));
+}
+
+/** What a coin's tap spend reads of its venue (the kit's solanaPoolBuyMaxSpend): pump's curve or PumpSwap, its token
+ *  account's size (Token or Token-2022 with its extensions) and whether it is a cashback coin. */
+export type CoinVenue = Pick<SolanaPoolBuyVenue, "kind" | "tokenAccountSize" | "cashback">;
+
+/**
+ * The coin's venue as the buy reads it (the kit's readSolanaPoolBuyVenue: both providers' accounts the same): pump's
+ * curve while it is open, else the coin's canonical PumpSwap pool (a complete curve, or no curve, is no buy venue). A
+ * coin with neither, or a read the two providers do not agree on, throws. A curve coin read before it graduates prices
+ * no higher than its PumpSwap pool does (the curve's buy keeps PumpSwap's sell need with both cashback accounts the sell
+ * makes), so a venue kept from an earlier read (at most COIN_VENUE_KEEP_MS) never prices a Max the buy cannot pay on a
+ * graduation.
+ */
+export async function readCoinVenue(rpcs: readonly [SolanaRpc, SolanaRpc], token: string): Promise<CoinVenue> {
+  const of = (v: SolanaPoolBuyVenue): CoinVenue => ({ kind: v.kind, tokenAccountSize: v.tokenAccountSize, cashback: v.cashback });
+  try {
+    return of(await readSolanaPoolBuyVenue(rpcs, "pump-curve", token));
+  } catch {
+    return of(await readSolanaPoolBuyVenue(rpcs, "pumpswap", token));
+  }
+}
+
+/** How many coins' venues pool.buy.dry keeps, and for how long: an ask of a venue COIN_VENUE_KEEP_MS old reads it
+ *  again, so a flag the coin's accounts change (its cashback) reaches the next ask after a minute, never only a reload. */
+export const COIN_VENUES_KEPT = 256;
+export const COIN_VENUE_KEEP_MS = 60_000;
+
+export type PoolBuyDryDeps = {
+  /** The page's pool table (PAGE_POOLS). */
+  pools: readonly BalancePool[];
+  /** The page's paced Solana pair as background reads (pool-testnet.ts pageSolanaRpcs("pass")); null with none. */
+  rpcs(): readonly [SolanaRpc, SolanaRpc] | null;
+  /** The Rent sysvar state.pools' tap_max already read (rentOnce); null: read here on both. */
+  rent(): SolanaRent | null;
+  /** The notes and the ready proofs in one turn of the queue (pool-testnet.ts readyWith), as state.pools reads them;
+   *  null when signed out. */
+  ready(): Promise<{ notes: readonly NoteRecord[]; ready?: readonly BalanceProof[]; open?: ReadonlySet<string>; landed?: ReadonlyMap<string, LandedRelease> } | null>;
+  /** True while a trade runs on the page or holds a host of the pair: the preview waits for no trade. */
+  trading(): boolean;
+  /** The page's clock, ms (performance.now): a kept venue's age. */
+  now?(): number;
+};
+
+/**
+ * pool.buy.dry (card max-is-priced-for-the-coin): state.pools' Solana tap_max priced on the coin's own venue, the same
+ * sum (poolBalances, the same proofs, notes and rent) with solanaTapSpendOf on the venue readCoinVenue reads in place of
+ * the costliest one. The buy pays that spend: its pick (src/pool-buy.ts) takes the smallest ready proof the kit's
+ * solanaPoolBuyFunds passes on the venue it reads, at a tip no higher than the proof's cap. Display only: nothing is
+ * signed, written or sent. Solana only; a token whose venue is not read answers quote_check_failed (down for a provider
+ * that failed), and the app keeps state.pools' tap_max.
+ */
+/** Not a HostAnswer, whose `then` would make an async function's answer a thenable. */
+type BuyDryAnswer = { result: PoolBuyDry } | { error: ErrorCode };
+export function poolBuyDryKind(d: PoolBuyDryDeps): (params: Record<string, unknown>) => Running<"pool.buy.dry"> {
+  const now = d.now ?? (() => performance.now());
+  const venues = new Map<string, { v: CoinVenue; at: number }>();
+  const venueOf = async (rpcs: readonly [SolanaRpc, SolanaRpc], token: string): Promise<CoinVenue> => {
+    const kept = venues.get(token);
+    if (kept !== undefined && now() - kept.at < COIN_VENUE_KEEP_MS) return kept.v;
+    const v = await readCoinVenue(rpcs, token);
+    venues.delete(token);
+    if (venues.size >= COIN_VENUES_KEPT) venues.clear();
+    venues.set(token, { v, at: now() });
+    return v;
+  };
+  const run = async (params: Record<string, unknown>): Promise<BuyDryAnswer> => {
+    const sol = d.pools.filter((p) => p.chain === "solana");
+    if (params.chain !== "solana" || sol.length === 0 || typeof params.token !== "string") return { error: "not_allowed" };
+    const pair = d.rpcs();
+    if (pair === null) return { error: "not_allowed" };
+    if (d.trading()) return { error: "busy" };
+    const got = await d.ready();
+    if (got === null) return { error: "not_funded" };
+    let venue: CoinVenue;
+    let rent: SolanaRent;
+    try {
+      [venue, rent] = await Promise.all([venueOf(pair, params.token), d.rent() ?? readSolanaRent(pair)]);
+    } catch (e) {
+      return { error: e instanceof SolanaRpcTransportError ? "down" : "quote_check_failed" };
+    }
+    const tap = poolBalances(got.notes, withSolanaRent(sol, rent, venue), got.ready, got.open, got.landed)[0]?.tap_max;
+    return tap === undefined ? { error: "not_funded" } : { result: { tap_max: tap } };
+  };
+  return (params) => {
+    let out: BuyDryAnswer = { error: "down" };
+    const after = run(params).then(
+      (a) => void (out = a),
+      () => void (out = { error: "down" }),
+    );
+    // a read that runs (Running), as pool.sell.dry: the page's message queue never waits for a coin's venue read
+    return { after, answer: () => out, running: true };
+  };
 }
 
 /**

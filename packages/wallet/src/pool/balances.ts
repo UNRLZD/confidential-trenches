@@ -17,10 +17,10 @@
 //   header, ./ladder.ts chunkOf), less what comes out of it before the spend: so it is the largest spendOf(chunk, the
 //   proof's fee cap, its tip cap) among the proofs `ready` counts, across the chain's pools, never their sum and never
 //   below 0. spendOf is the pool's, from its caller: solanaTapSpendOf (the kit's solanaPoolBuyMaxSpend on the worst
-//   venue at the proof's own tip cap, the most tip its release lets the tap pay, and the rent the caller read on two
-//   RPCs) or evmTapSpendOf (the chunk itself: an EVM tap asks for a whole chunk, the
-//   signing page's checkEvmBuy refusing any other amount, and the relay fee comes out on chain). Present only with ready,
-//   and only when every pool on the chain gives a spendOf; "0" when no proof is counted.
+//   venue, or on the coin's own for pool.buy.dry, at the proof's own tip cap, the most tip its release lets the tap
+//   pay, and the rent the caller read on two RPCs) or evmTapSpendOf (the chunk itself: an EVM tap asks for a whole
+//   chunk, the signing page's checkEvmBuy refusing any other amount, and the relay fee comes out on chain). Present only
+//   with ready, and only when every pool on the chain gives a spendOf; "0" when no proof is counted.
 // - One entry per chain, in the order the chain first appears in the pool table, carrying the chain's pool asset; pools
 //   on one chain sum into it. Two assets on one chain are refused: the kit's state keeps one entry per chain.
 // - Amounts: exact decimals of base units / the asset's 1.0, 10^POOL_ASSET_DECIMALS[asset] from the kit's one table
@@ -36,6 +36,7 @@ import {
   solanaPoolBuyMaxSpend,
   type Chain,
   type PoolAsset,
+  type SolanaPoolBuyVenue,
   type SolanaRent,
 } from "@blindfill/kit";
 import type { NoteRecord } from "../notes/store.ts";
@@ -108,15 +109,18 @@ export function evmBalancePool(id: string, chain: "base" | "robinhood", scope: b
 // sell come back to W, and into the user's pool balance when the sweep runs, less the teardown's and its own costs above.
 // On this rung after a full curve sell W holds about 3.6M after its teardown, a note of about 2.15M: under the floor,
 // so those lamports stay on W (devnet run of 5 Nov 21:12Z, W HFGAyAxq…, before the floor: its sweep made 2,154,336).
-/** A Solana proof's spend at the tap, as the tap computes it before it knows its venue: the kit's solanaPoolBuyMaxSpend
- * on SOLANA_POOL_WORST_BUY_VENUE, the relay fee at the proof's fee cap, the tip at the proof's tip cap (./solana.ts
- * SOL_TIP_CAP, 0.001 SOL: the most the release lets the tap tip, so a tap at any tip it may pay fills) and `rent`, the
- * Rent sysvar the caller read on two RPCs (./solana.ts solanaCostReads, the kit's readSolanaRent). A proof whose
- * request names no tip cap is refused. */
-export function solanaTapSpendOf(rent: SolanaRent): TapSpendOf {
+/** A Solana proof's spend at the tap: the kit's solanaPoolBuyMaxSpend on `venue`, the relay fee at the proof's fee cap,
+ * the tip at the proof's tip cap (./solana.ts SOL_TIP_CAP, 0.001 SOL: the most the release lets the tap tip, so a tap at
+ * any tip it may pay fills) and `rent`, the Rent sysvar the caller read on two RPCs (./solana.ts solanaCostReads, the
+ * kit's readSolanaRent). `venue`: the coin's own (its kind, token account size and cashback, as the kit's
+ * readSolanaPoolBuyVenue reads them on two providers: card max-is-priced-for-the-coin, the 0.01 SOL rung spends
+ * 3,371,920 on a Token mint's coin with no cashback, on the curve or on PumpSwap), or, before the tap knows its coin,
+ * SOLANA_POOL_WORST_BUY_VENUE (384,880 on that rung), which any coin's venue funds. A proof whose request names no tip
+ * cap is refused. */
+export function solanaTapSpendOf(rent: SolanaRent, venue: Pick<SolanaPoolBuyVenue, "kind" | "tokenAccountSize" | "cashback"> = SOLANA_POOL_WORST_BUY_VENUE): TapSpendOf {
   return (chunk, feeCap, tipCap) => {
     if (typeof tipCap !== "bigint" || tipCap < 0n) throw new Error("a Solana proof's request names no tip cap");
-    return solanaPoolBuyMaxSpend({ withdrawnValue: chunk, relayFee: feeCap }, SOLANA_POOL_WORST_BUY_VENUE, tipCap, rent);
+    return solanaPoolBuyMaxSpend({ withdrawnValue: chunk, relayFee: feeCap }, venue, tipCap, rent);
   };
 }
 /** An EVM proof's ask at the tap: the whole chunk. The signing page's checkEvmBuy (signpage src/rules/pool.ts) refuses
