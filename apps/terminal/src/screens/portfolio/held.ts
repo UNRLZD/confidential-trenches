@@ -31,7 +31,8 @@ export function heldData(snap: SignpageClientSnapshot, markets: readonly HeldMar
   const own: PortfolioData = { ...NO_DATA, market, extra, closed: book?.closed ?? [] };
   const t = portfolio(snap, own, now).totals;
   if (!s || !t) return own;
-  const base = t.cash + t.onWay;
+  // the open buys' wallets' coin is no token's value: it joins the base, so the line ends at the total
+  const base = t.cash + t.onWay + t.held;
   const baseUsd = `${base < 0n ? "0" : base / 100n}.${(base < 0n ? 0n : base % 100n).toString().padStart(2, "0")}`;
   const series = heldValueSeries({ positions: s.positions, markets, history, ops: s.ops, base_usd: baseUsd, now });
   return { ...own, series };

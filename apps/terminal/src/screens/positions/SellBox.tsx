@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { cents, units, usd } from "../portfolio/model.ts";
+import { cents, shareOf, units, usd } from "../portfolio/model.ts";
 import type { Row } from "../portfolio/model.ts";
 import { busy, unavailable } from "../trade/model.ts";
 import { EndLine, hasRunLabel, RunLabel, stateId } from "../trade/States.tsx";
-import { BOX_PERCENTS, parsePercent, pctLabel, sellAmount, shareCents } from "./model.ts";
+import { BOX_PERCENTS, parsePercent, pctLabel, sellAmount } from "./model.ts";
 import { useSellKit } from "./source.tsx";
 import type { Sell, SellPreview } from "./source.tsx";
 import { OrderTabs, OrdersSoon } from "../trade/OrderTabs.tsx";
@@ -137,7 +137,7 @@ export function SellBox({ row, s, slippageBps = 1000, initialPercent = "50", onB
   const last = preview?.p ?? null;
   const pending = last !== null && (shown === null || running);
   const outC = (shown ?? last) ? cents((shown ?? last)!.out_usd) : null;
-  const share = bps === null ? null : shareCents(row.value, bps);
+  const share = bps === null ? null : shareOf(row, bps);
   const now = s.now();
   const state = stateId(s.phase, now, "sell") ?? (noRoute ? "S8.33" : "S8.29");
 

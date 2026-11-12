@@ -293,6 +293,8 @@ export type FillDeps = {
   /** The page's own SOL price now, if any. */
   price(): PoolStatePrice | null;
   now(): number;
+  /** The sign out's stop: once aborted, no op is read or written more. */
+  signal?: AbortSignal;
 };
 
 type OpRecord = { kind?: unknown; stage?: unknown; chain?: unknown; token?: unknown; txs?: unknown; created_ms?: unknown; pool_amount?: unknown; sha?: unknown; pool?: unknown; legs?: unknown; amount_usd?: unknown; fill_none?: unknown };
@@ -324,6 +326,7 @@ export async function fillTradeOps(d: FillDeps): Promise<boolean> {
   const at = (r: OpRecord): number => (typeof r.created_ms === "number" ? r.created_ms : 0);
   found.sort((a, b) => at(b.rec) - at(a.rec));
   for (const { k, rec } of found.slice(0, FILL_OPS_MAX)) {
+    if (d.signal?.aborted) break;
     const sigs = rec.kind === "buy" ? [rec.txs[0]!.hash] : rec.txs.map((t) => t.hash);
     const walletsOk = rec.kind === "sell" ? legWallets(rec) : null;
     let units = 0n;
@@ -390,6 +393,7 @@ export async function fillTradeOps(d: FillDeps): Promise<boolean> {
         else if (young) continue;
       }
     }
+    if (d.signal?.aborted) break;
     await d.store
       .update("ops", k, (v) => (wants(v as OpRecord) ? { ...(v as object), ...fill } : v))
       .then(() => (wrote = true))

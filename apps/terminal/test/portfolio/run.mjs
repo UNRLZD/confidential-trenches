@@ -72,6 +72,9 @@ const STATES = [
   ["pooltrades-open", "S10.9", ["390", "1440"], false],
   ["pooltrades-mixed", "S10.10", ["1440"], false],
   ["pooltrades-unknown", "S10.9", ["390", "1440"], false],
+  // card portfolio-counts-money-an-open-buy-holds: the open buy's wallet counted, the axis's ticks distinct
+  ["openbuy", "S10.3", ["390", "1440"], false],
+  ["axis", "S10.3", ["1440"], false],
 ];
 // one balance (card portfolio-one-balance): each fixture's Cash tile in cents and its parts as drawn on hover (desktop) or
 // a tap (phone): [chain, the drawn row's text, data-cents, moving]. Vault $73.18; SOL at $150, ETH at $3,000.
@@ -176,8 +179,11 @@ try {
       // sold and realized in USD and SOL from the device's records; the open row between them with its holding and cost
       if (f === "pooltrades") {
         const rows = await page.$$eval(".pf [data-closed]", (rs) => rs.filter((r) => r.getClientRects().length).map((r) => [...r.querySelectorAll("td")].map((c) => c.innerText.replace(/\s+/g, " ").trim()).join("|")));
-        const want = ["Ic Icm Internet cat money|$0.09|$0.09|0|—|—|−$0.01 −2.5% −0.0000298 SOL|—|1m|", "Ic Icm Internet cat money|$0.10|$0.04|0|—|—|−$0.06 −52.3% −0.000631 SOL|—|1m|"];
+        const want = ["Ic Icm Internet cat money|$0.10|$0.10|0|—|—|$0.00 −2.5% −0.0000298 SOL|—|1m|", "Ic Icm Internet cat money|$0.10|$0.05|0|—|—|−$0.05 −52.3% −0.000631 SOL|—|1m|"];
         check(JSON.stringify(rows) === JSON.stringify(want), `${tag}: closed rows ${JSON.stringify(rows)}`);
+        // each realized cell and its percent take the exact figure's tone: the $0.0025 loss drawn "$0.00" is a loss
+        const tones = await page.$$eval(".pf [data-closed]", (rs) => rs.filter((r) => r.getClientRects().length).map((r) => { const c = r.querySelectorAll("td")[6]; return `${c?.className}|${c?.querySelector(".s2")?.className}`; }));
+        check(JSON.stringify(tones) === JSON.stringify(["loss|s2 loss", "loss|s2 loss"]), `${tag}: closed rows' tones ${JSON.stringify(tones)}`);
       }
       if (f === "pooltrades-open" && !phone) {
         const row = await page.$$eval(".pf [data-pos]", (rs) => rs.filter((r) => r.getClientRects().length).map((r) => r.getAttribute("data-pos")));
@@ -186,7 +192,21 @@ try {
       // an open row of unknown cost (review P2-4): bought and PnL the dash, its value drawn, and no unrealized from it
       if (f === "pooltrades-unknown" && !phone) {
         const row = await page.$$eval(".pf [data-pos]", (rs) => rs.filter((r) => r.getClientRects().length).map((r) => [...r.querySelectorAll("td")].slice(1, 6).map((c) => c.innerText.replace(/\s+/g, " ").trim()).join("|")));
-        check(JSON.stringify(row) === JSON.stringify(["—|—|34.1K Icm|$0.07|—"]), `${tag}: open row ${JSON.stringify(row)}`);
+        check(JSON.stringify(row) === JSON.stringify(["—|—|34.1K Icm|$0.08|—"]), `${tag}: open row ${JSON.stringify(row)}`);
+      }
+      // card portfolio-counts-money-an-open-buy-holds: the pool's $2.50, the open buy's wallet's $0.69 and the coin's
+      // $0.01 (4,286.1 x $0.00000233314) in the Total ($3.20), the row's Bought $0.01 (never $0.00)
+      if (f === "openbuy") {
+        const tot = await page.$$eval(".pf .tot", (ts) => ts.filter((t) => t.getClientRects().length).map((t) => t.textContent.trim()));
+        check(JSON.stringify(tot) === JSON.stringify(["$3.20"]), `${tag}: total ${JSON.stringify(tot)}`);
+        if (!phone) {
+          const row = await page.$$eval(".pf [data-pos]", (rs) => rs.filter((r) => r.getClientRects().length).map((r) => [...r.querySelectorAll("td")].slice(1, 2).map((c) => c.innerText.trim()).join("|")));
+          check(JSON.stringify(row) === JSON.stringify(["$0.01"]), `${tag}: Bought ${JSON.stringify(row)}`);
+        }
+      }
+      if (f === "axis") {
+        const ticks = await page.$$eval(".pf [data-tick]", (ts) => ts.filter((t) => t.getClientRects().length).map((t) => t.getAttribute("data-tick")));
+        check(ticks.length === 4 && new Set(ticks).size === 4, `${tag}: axis ticks ${JSON.stringify(ticks)}`);
       }
       // a price that reads zero: KINU's value is the dash, on the desktop table and the phone card, never $0.00
       if (f === "zeroprice") {
@@ -209,7 +229,8 @@ try {
         if (rows) check(JSON.stringify(r.rows) === JSON.stringify(rows), `${tag}: pool rows ${JSON.stringify(r?.rows)}`);
         check(r?.inside && r.clipped.length === 0, `${tag}: pool block outside its panel or clipped ${JSON.stringify(r)}`);
       }
-      if (want === "S10.3" && !phone) {
+      // the S10 row bars need a full list: the open buy's fixture holds one row
+      if (want === "S10.3" && !phone && f !== "openbuy") {
         // the brief's S10 bar at 1440: rows 72 layout px (54 CSS px), at least 9 visible, at least 9 fields a row
         const r = await page.evaluate(() => {
           const box = document.querySelector(".ptw").getBoundingClientRect();
@@ -219,7 +240,7 @@ try {
         check(Math.abs(r.h - 54) < 1 && r.visible >= 9 && r.fields >= 9, `${tag}: S10 bar rows ${r.h}px, ${r.visible} visible, ${r.fields} fields`);
         console.log(`@1440 positions: row ${r.h.toFixed(1)} css px, ${r.visible} visible, ${r.fields} fields`);
       }
-      if (want === "S10.3" && phone) {
+      if (want === "S10.3" && phone && f !== "openbuy") {
         await toSegments(page);
         const r = await page.evaluate(() => {
           const tb = document.querySelector(".tabbar").getBoundingClientRect().top;
