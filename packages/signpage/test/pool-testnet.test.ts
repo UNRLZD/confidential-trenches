@@ -1125,9 +1125,25 @@ test("a withdraw on the page, the helper's 502 after the release landed, every s
   const op = (await wd.w.get("ops", "op-w")) as { stage: string; owed?: unknown };
   assert.equal(op.stage, "in_transit");
   assert.equal(op.owed, id, "the op still owes the part's send");
+
   assert.ok(Object.keys(((await wd.w.get("meta", "owed/op-w")) as Record<string, unknown> | undefined) ?? {}).includes(id), "its send kept");
   assert.equal((await wd.ns.get(id))!.state, "RESERVED");
   assert.ok(asked.length > 0 && asked.every((s) => s === undefined || s === FINAL_SLOT) && asked.includes(FINAL_SLOT), `asked at ${asked.join(",")}`);
+});
+
+// card pool-tree-read-waits-for-its-second: a run that ends on a throw writes why on the op's record, in public words
+// only (the error's name and code, never its text), and the op that later ends sent no longer names it
+test("a withdraw on the page whose tree read throws ends stopped, its cause on the op in public words only", async () => {
+  const { world, TO, COST } = WORLD;
+  const wd = await world([30_000_000n], { trees: () => async () => { throw new Error("HTTP 503 from https://rpc.example/?api-key=K1"); } });
+  const fetchFn = (async () => { throw new Error("no send"); }) as unknown as typeof fetch;
+  const over = { pin: wd.host.pin, rpcs: wd.host.rpcs, pool: wd.host.pool as never, prover: { vault: signalsProver(), stop: () => {} }, fetch: fetchFn, ...quickClock() };
+  await testnetPool({ store: async () => wd.w, seed64: async () => SEED64.slice() }, over).withdraw({ chain: "solana", to: TO, amount: 5_000_000n, maxFee: COST }, "op-w");
+  assert.equal(wd.releases.length, 0);
+  const op = (await wd.w.get("ops", "op-w")) as { stage: string; cause?: string };
+  assert.equal(op.stage, "stopped");
+  assert.match(op.cause ?? "", /^Error\b/, "the cause is written, the error's name first");
+  assert.ok(!/rpc\.example|api-key|K1|HTTP/.test(op.cause!), `never the error's text: ${op.cause}`);
 });
 
 // card pool-buy-record-never-stays-sent: a withdraw's release read landed writes its withdrawn value on the note's mark

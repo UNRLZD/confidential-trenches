@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { RETRY } from "./provider-answer.mjs";
+import { EXIT, RETRY } from "./provider-answer.mjs";
 import { MARKS, PROVIDERS, REACH_WAITS, WAIT, judge, readChain } from "./pool-tree-read-waits-for-its-second.mjs";
 
 RETRY.ms = 0;
@@ -73,4 +73,28 @@ test("reads through rpcAnswer: the next second reached: PASS; a provider that ne
   const q = judge({ ...A.good, chain: deaf });
   assert.equal(q.verdict, "INCONCLUSIVE", q.lines.join("\n"));
   assert.match(deaf[1].noAnswer, /429/);
+});
+
+test("a chain read that fails in transport or answers an error is INCONCLUSIVE (exit 3), never ERROR", async () => {
+  const time = () => 1_800_000_000;
+  const ok = chainFetch(time);
+  // a fetch that throws (a dropped connection) on one provider
+  const dropped = await readChain(async (url, init) => {
+    if (url === PROVIDERS[0]) throw new TypeError("fetch failed", { cause: { code: "ECONNRESET" } });
+    return ok(url, init);
+  });
+  assert.equal(judge({ ...A.good, chain: dropped }).verdict, "INCONCLUSIVE");
+  assert.match(dropped[0].noAnswer, /ECONNRESET/);
+  // a 503 whose body is a JSON-RPC error, and a 200 with an error answer that is not -32004
+  for (const [status, code] of [[503, -32603], [200, -32603], [200, -32004]]) {
+    const erring = await readChain(async (url, init) => {
+      if (url !== PROVIDERS[1]) return ok(url, init);
+      return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, error: { code, message: "Internal error" } }), { status });
+    });
+    const v = judge({ ...A.good, chain: erring });
+    assert.equal(v.verdict, "INCONCLUSIVE", `${status} ${code}: ${v.lines.join("\n")}`);
+    assert.match(erring[1].noAnswer, new RegExp(String(code)));
+  }
+  // the command's own exit for that verdict
+  assert.equal(EXIT[judge({ ...A.good, chain: dropped }).verdict], 3);
 });

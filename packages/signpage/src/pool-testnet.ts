@@ -286,6 +286,8 @@ export function mergeWithdrawOp(
   if (w.stage !== undefined && STAGE_RANK[w.stage] >= was && ours) r.stage = w.stage;
   if (w.feeNeeded !== undefined) r.fee_needed = w.feeNeeded;
   if (w.cause !== undefined) r.cause = w.cause;
+  // why an earlier run ended is no longer the op's once it ends sent
+  if (r.stage === "sent") delete r.cause;
   const txs = [...((r.txs as TxRef[] | undefined) ?? [])];
   for (const t of w.txs ?? []) if (!txs.some((x) => x.hash === t.hash)) txs.push(t);
   r.txs = txs;

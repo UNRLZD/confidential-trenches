@@ -330,7 +330,7 @@ test("a deposit's own note is proved at once on the newest root, and on the epoc
 });
 
 // card pool-tree-read-waits-for-its-second: the wallet's real Solana tree sync on two providers whose confirmed block is
-// the finalized one (mainnet, 12 Nov 19:00Z): a pass reads now, then the newest trees at now + 1 a few ms later, in the
+// the finalized one (mainnet, 11 Nov 19:00Z): a pass reads now, then the newest trees at now + 1 a few ms later, in the
 // same block-second; on mainnet copy runs the buy's first proof failed 15 and 30 passes in a row
 test("a deposit's own note landed in now's block-second is proved in one pass: the newest read waits for the chain's next second", async () => {
   const v = await vaultWith([usd(2)]);

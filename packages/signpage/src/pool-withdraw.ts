@@ -17,8 +17,11 @@
 //   so a restore from the 12 words finds both. A note the page's proof queue holds for the next buy is dropped first
 //   (HELD -> UNSPENT), then held by this run with its context (UNSPENT -> HELD), before its proof starts. The bind's
 //   tip cap is 0 (a tag 2 pays no tip).
-// - The roots: the epoch root when the note is in it, else the newest (a note that landed this epoch); their leaf
-//   indexes read on both RPCs (pool-buy.ts rootIndex).
+// - The roots: the epoch root when the note is in it. A note that landed this epoch proves on the newest root only when
+//   it is a deposit's own (queue.ts provesOnNewest, the queue's own rule); any other waits on the pool's time for the
+//   next boundary and proves on that epoch's root (M351: a root right after its own leaf would link the W it pays to
+//   the W whose money made that leaf), its epoch, deadline and binding that epoch's. Their leaf indexes are read on
+//   both RPCs (pool-buy.ts rootIndex).
 // - Built here, checked by the rules (rules/pool.ts checkSolanaWithdraw: the device's own release byte for byte, alone;
 //   checkSolanaOnwardSend: W's one transfer of its balance less its fee to To, To never an account of the release nor
 //   executable), signed by W only through signSolana. W's key and the seed are zeroed at once. To is read on both
@@ -51,7 +54,7 @@ import { freshWallet } from "../../wallet/src/derive/keys.ts";
 import { noteSecrets } from "../../wallet/src/notes/secrets.ts";
 import type { NoteRecord, NoteStore } from "../../wallet/src/notes/store.ts";
 import { checkBinding, type Pool, type ReadyProof } from "../../wallet/src/pool/pool.ts";
-import { jOf } from "../../wallet/src/pool/queue.ts";
+import { jOf, provesOnNewest } from "../../wallet/src/pool/queue.ts";
 import { solanaPoolOf, type SolanaPoolPin, type SolanaReleaseRequest } from "../../wallet/src/pool/solana.ts";
 import { blockhashOf, pastOnBoth, readBack, releaseOf, rootIndex, sendAndSettle, treeSizes, type PoolBuyHost } from "./pool-buy.ts";
 import { checkSolanaOnwardSend, checkSolanaWithdraw, PoolRuleRefused, signSolana, SOLANA_RESERVED_KEYS, solanaWithdrawMinPart, withdrawNoteFloor, type PoolAsk, type WithdrawCosts } from "./rules/pool.ts";
@@ -544,6 +547,29 @@ async function sendOnward(
   }
 }
 
+/** How far past one epoch a withdraw waits for the pool's time to reach the next boundary before it stops: the pool's
+ *  time is the lower of two RPCs' finalized block times, which trails the device by about 13 s on mainnet; past this a
+ *  provider is stalled. */
+export const WITHDRAW_BOUNDARY_LAG_MS = 30_000n;
+/** A withdraw's tree read, bounded in wall-clock time: the read counts its waits (solana.ts SOL_REACH_WAITS), and a
+ *  provider that answers each call slowly would stretch them; the read stops at its next wait past this. */
+export const WITHDRAW_TREES_MS = 30_000;
+
+/** Waits until the pool's time (P.now, never the device clock) reaches `boundary`, at most one epoch and
+ *  WITHDRAW_BOUNDARY_LAG_MS of waits; returns that time. */
+async function poolTimeAt(P: PoolWithdrawHost["pool"], wait: (ms: number) => Promise<void>, boundary: bigint): Promise<bigint> {
+  const most = P.epochMs + WITHDRAW_BOUNDARY_LAG_MS;
+  for (let slept = 0n; ; ) {
+    const nowMs = await P.now();
+    if (nowMs >= boundary) return nowMs;
+    if (slept >= most) stop("boundary");
+    let ms = boundary - nowMs > 1_000n ? boundary - nowMs : 1_000n;
+    if (ms > most - slept) ms = most - slept;
+    await wait(Number(ms));
+    slept += ms;
+  }
+}
+
 /** One part's release to W: hold the note, prove part + fees to W, build, check, sign, RESERVED, then the send and
  *  its settle. The release is alone in its transaction (review #232 HIGH 1). */
 async function onePart(h: PoolWithdrawHost, ask: PoolAsk, notes: NoteStore, p: WithdrawPart, fee: bigint, wFee: bigint, pool: string, base: Pick<PendingOnward, "to" | "last" | "feeCap">, owing: (owed: PendingOnward) => void): Promise<{ stage: string; signature: string; l: bigint; j: number; releaseAccounts: string[] }> {
@@ -553,23 +579,42 @@ async function onePart(h: PoolWithdrawHost, ask: PoolAsk, notes: NoteStore, p: W
   let attempt: string | null = null;
   let reserved = false;
   try {
-    let n = await notes.get(p.noteId);
-    if (n?.state === "HELD" && h.drop) {
-      await h.drop(p.noteId);
-      n = await notes.get(p.noteId);
-    }
-    if (n === undefined || n.state !== "UNSPENT" || n.leaf === undefined) stop("note");
-    const leaf = n!.leaf!;
+    // the note, dropped first when the page's proof queue holds it for the next buy
+    const free = async (): Promise<NoteRecord> => {
+      let n = await notes.get(p.noteId);
+      if (n?.state === "HELD" && h.drop) {
+        await h.drop(p.noteId);
+        n = await notes.get(p.noteId);
+      }
+      if (n === undefined || n.state !== "UNSPENT" || n.leaf === undefined) stop("note");
+      return n!;
+    };
+    let n: NoteRecord = await free();
+    const leaf = n.leaf!;
     if (leaf.value < p.chunk) stop("value");
-    const nowMs = await P.now();
-    const epochStartMs = nowMs - (nowMs % P.epochMs);
+    const wait = h.wait ?? ((ms: number) => new Promise<void>((res) => setTimeout(res, ms)));
+    // the epoch root when the note is in it; else the newest for a deposit's own note, and the next epoch's for any other
+    let nowMs = await P.now();
+    let epochStartMs = nowMs - (nowMs % P.epochMs);
+    let trees = await P.trees(epochStartMs, AbortSignal.timeout(WITHDRAW_TREES_MS));
+    if (leaf.leafIndex >= BigInt(trees.stateTree.size)) {
+      if (provesOnNewest(n.ref)) trees = await P.trees(nowMs + 1n, AbortSignal.timeout(WITHDRAW_TREES_MS), { newest: true });
+      else {
+        nowMs = await poolTimeAt(P, wait, epochStartMs + P.epochMs);
+        epochStartMs = nowMs - (nowMs % P.epochMs);
+        trees = await P.trees(epochStartMs, AbortSignal.timeout(WITHDRAW_TREES_MS));
+        if (leaf.leafIndex >= BigInt(trees.stateTree.size)) stop("root");
+        // the page's proof queue may have held it at the boundary
+        n = await free();
+      }
+    }
     const deadlineMs = epochStartMs + P.lifeMs;
-    const j = jOf(n!.ref);
+    const j = jOf(n.ref);
     seed = await h.seed64();
     const w = freshWallet(seed, "sol", leaf.label, j);
     w.secretKey.fill(0);
     const refundPrecommitment = noteSecrets(seed, { kind: "refund", l: leaf.label, j }).precommitment;
-    const spent = noteSecrets(seed, n!.ref);
+    const spent = noteSecrets(seed, n.ref);
     const next = noteSecrets(seed, { kind: "change", l: leaf.label, j });
     // shut before the bind asks the helper's fee: a busy helper is waited out (../../wallet/src/busy.ts) with no seed open
     seed.fill(0);
@@ -580,9 +625,6 @@ async function onePart(h: PoolWithdrawHost, ask: PoolAsk, notes: NoteStore, p: W
     // the device's fee, never the helper's word: the binding's fee is the one the plan priced, its tip cap 0
     if (binding.request.relayFee !== fee || binding.feeCap !== fee || binding.request.tipCap !== 0n || p.chunk !== p.part + fee + wFee) stop("fee");
     attempt = (await notes.move(p.noteId, "UNSPENT", "HELD", { deadlineMs, context: binding.context.toString() })).attempt!;
-    // the epoch root when the note is in it, else the newest (it landed this epoch)
-    let trees = await P.trees(epochStartMs);
-    if (leaf.leafIndex >= BigInt(trees.stateTree.size)) trees = await P.trees(nowMs + 1n, undefined, { newest: true });
     const made = await poolProveWithdraw(h.prover, {
       stateTree: trees.stateTree,
       labelTree: trees.labelTree,
@@ -598,7 +640,6 @@ async function onePart(h: PoolWithdrawHost, ask: PoolAsk, notes: NoteStore, p: W
       noteId: p.noteId, attempt, poolId: P.id, wallet: { chain: "sol", l: leaf.label, j, path: w.path, address: w.address }, chunk: p.chunk,
       epochStartMs, deadlineMs, root: "epoch", binding, proof: made.proof, publicSignals: made.publicSignals,
     };
-    const wait = h.wait ?? ((ms: number) => new Promise<void>((res) => setTimeout(res, ms)));
     const sizes = await treeSizes(h, pool, wait);
     const idx = { state: await rootIndex(h, 0, sizes.state, BigInt(r.publicSignals[3])), label: await rootIndex(h, 1, sizes.label, BigInt(r.publicSignals[5])) };
     const release = releaseOf(r, h.pin, w.address, idx);

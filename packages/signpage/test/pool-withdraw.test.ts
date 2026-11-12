@@ -19,7 +19,7 @@ import { solanaDecodeMessage } from "../../kit/src/checks/solana/message.ts";
 import { mergeWithdrawOp } from "../src/pool-testnet.ts";
 import { SOLANA_SYSTEM_PROGRAM } from "../../kit/src/checks/solana/checks.ts";
 import { SolanaRpcTransportError, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
-import { noteCommitment, noteSecrets } from "../../wallet/src/notes/secrets.ts";
+import { noteCommitment, noteSecrets, type NoteRef } from "../../wallet/src/notes/secrets.ts";
 import { openNoteStore, type NoteStore } from "../../wallet/src/notes/store.ts";
 import type { Pool } from "../../wallet/src/pool/pool.ts";
 import { SOL_EPOCH_MS, SOL_LADDER, SOL_LAG_WAIT_MS, SOL_LIFE_MS, SOL_REACH_WAITS, SOL_SEND_MARGIN_MS, solanaContextOf, solanaPageOf, solanaPoolOf, solanaTreeSync, type SolanaReleaseRequest } from "../../wallet/src/pool/solana.ts";
@@ -28,7 +28,7 @@ import { BLOCKHASH, FEE_PAYER, POOL, PROGRAM, fx, rent } from "../../kit/test/so
 import { buildSolanaPoolBuy, type SolanaPoolRelease } from "../../kit/src/trade/solana/pool-buy.ts";
 import { cfg as BUY_CFG, release as BUY_RELEASE, setup as buySetup, W as BUY_W } from "../../kit/test/solana-pool-buy-fx.ts";
 import { keysOf } from "../src/pool-spend.ts";
-import { finishPoolOnward, HISTORY_PAGE, spendOwner, HISTORY_PASS, type HistoryPlaces, nearestPlannable, type PendingOnward, planPoolWithdraw, poolWithdrawable, runPoolWithdraw, solanaWithdrawMinPart, withdrawNoteFloor, type PoolWithdrawHost, type WithdrawCosts } from "../src/pool-withdraw.ts";
+import { finishPoolOnward, HISTORY_PAGE, spendOwner, HISTORY_PASS, type HistoryPlaces, nearestPlannable, type PendingOnward, planPoolWithdraw, poolWithdrawable, runPoolWithdraw, WITHDRAW_BOUNDARY_LAG_MS, solanaWithdrawMinPart, withdrawNoteFloor, type PoolWithdrawHost, type WithdrawCosts } from "../src/pool-withdraw.ts";
 import type { PoolAsk } from "../src/rules/pool.ts";
 import { POOL_BUY_READS, POOL_BUY_SETTLE_MS } from "../src/pool-buy.ts";
 import { ASK, C, COST, FEE, FINAL_SLOT, FLOOR, MIN, NOW, SCOPE, SEED64, SIG, TO, W_FEE, closers, lamportsOf, read, world } from "./pool-withdraw-world.ts";
@@ -103,7 +103,7 @@ test("the plan finds an exact plan the largest-first walk misses, and names the 
 // ---------- the run ----------
 
 // card pool-tree-read-waits-for-its-second: the wallet's real tree sync on two providers whose confirmed block is the
-// finalized one (mainnet, 12 Nov 19:00Z): leaf 0 landed before the epoch, leaf 1 (the note withdrawn) in now's own
+// finalized one (mainnet, 11 Nov 19:00Z): leaf 0 landed before the epoch, leaf 1 (the note withdrawn) in now's own
 // block-second, so the epoch cut lacks it and the newest read at now + 1 must wait for the chain's next second
 function syncedTrees(advance: () => boolean, waits: number[]) {
   return (state: readonly bigint[], labels: readonly bigint[]) => {
@@ -157,6 +157,66 @@ test("a withdraw whose providers never reach now + 1 ends stopped after the cap,
   assert.equal((await wd.ns.get(wd.ids[1]!))?.state, "UNSPENT");
   // the op's record keeps it
   assert.equal(mergeWithdrawOp({ stage: "proving" }, { stage: "stopped", cause: a.cause! }).cause, a.cause);
+  // public words only: the error's name and code, never its text (its RPC's slot and times)
+  assert.ok(!/rpc [01]|has not reached|slot|\d{6,}/.test(a.cause!), a.cause);
+  // an op that later ends sent (its owed send finished) no longer names a cause
+  assert.equal("cause" in mergeWithdrawOp({ stage: "stopped", cause: a.cause! }, { stage: "sent" }), false);
+});
+
+// M351: the newest root right after a note's own leaf is a deposit's own note's only. Leaf 0 landed before the epoch,
+// leaf 1 (the note withdrawn) 1 s into it, leaf 2 (another note) 30 s into it; trees(cut) keeps the leaves whose time
+// is below the cut, as the wallet's tree sync does.
+const BOUNDARY = NOW - (NOW % SOL_EPOCH_MS) + SOL_EPOCH_MS;
+function cutTrees(state: readonly bigint[], labels: readonly bigint[]): Pool<SolanaReleaseRequest>["trees"] {
+  const times = [NOW - 30_000n, NOW - 1n, NOW + 29_000n];
+  return async (beforeMs) => {
+    const n = times.filter((t) => t < beforeMs).length;
+    const s = new VaultTree(state.slice(0, n)), l = new VaultTree(labels.slice(0, n));
+    return { stateTree: s, labelTree: l, stateRoot: s.root!, labelRoot: l.root! };
+  };
+}
+/** The pool's time: NOW until the run has waited `toBoundary` ms or more in all, then the boundary (pool time, never the device's). */
+function poolClock(toBoundary: bigint) {
+  const waits: number[] = [];
+  const slept = () => waits.reduce((a, b) => a + BigInt(b), 0n);
+  return { waits, now: () => (slept() >= toBoundary ? BOUNDARY : NOW), wait: async (ms: number) => void waits.push(ms) };
+}
+const RETURN: NoteRef = { kind: "return", c: "sol", l: 7n, j: 0 };
+
+test("a return note that landed this epoch waits for the next boundary, on pool time, and proves on that epoch's root, never the root of its own leaf", async () => {
+  const clock = poolClock(BOUNDARY - NOW);
+  const wd = await world([1_000n, 30_000_000n, 1_000n], { trees: cutTrees, refs: [undefined, RETURN], now: clock.now, wait: clock.wait });
+  const amount = 2_000_000n + MIN;
+  const a = await runPoolWithdraw(wd.host, ASK, TO, amount, COST);
+  assert.equal(a.stage, "sent", a.cause);
+  assert.equal(wd.balance.get(TO), amount);
+  assert.ok(clock.waits.length >= 1, "it waited");
+  const r = solanaDecodePoolRelease(read(wd.releases[0]!).ixs.at(-1)!.data);
+  assert.equal(r.stateRootIndex, 2, "the next epoch's root (leaves 0..2), not the root right after leaf 1");
+  // the epoch, the deadline and the binding are the next epoch's
+  assert.equal(wd.binds[0]!.deadlineMs, BOUNDARY + SOL_LIFE_MS);
+});
+
+test("a deposit's own note that landed this epoch proves on the newest root at once, with no wait", async () => {
+  const clock = poolClock(BOUNDARY - NOW);
+  const wd = await world([1_000n, 30_000_000n, 1_000n], { trees: cutTrees, now: clock.now, wait: clock.wait });
+  const a = await runPoolWithdraw(wd.host, ASK, TO, 2_000_000n + MIN, COST);
+  assert.equal(a.stage, "sent", a.cause);
+  assert.equal(solanaDecodePoolRelease(read(wd.releases[0]!).ixs.at(-1)!.data).stateRootIndex, 1, "the newest root, its own leaf 1 last");
+  assert.equal(wd.binds[0]!.deadlineMs, BOUNDARY - SOL_EPOCH_MS + SOL_LIFE_MS);
+  assert.ok(clock.waits.every((ms) => ms < 1_000), `no boundary wait: ${clock.waits}`);
+});
+
+test("a return note's wait is bounded: pool time that never reaches the boundary ends stopped, nothing sent, the note UNSPENT", async () => {
+  const clock = poolClock(1n << 62n);
+  const wd = await world([1_000n, 30_000_000n, 1_000n], { trees: cutTrees, refs: [undefined, RETURN], now: clock.now, wait: clock.wait });
+  const a = await runPoolWithdraw(wd.host, ASK, TO, 2_000_000n + MIN, COST);
+  assert.equal(a.stage, "stopped");
+  assert.equal(wd.releases.length, 0, "nothing sent");
+  assert.equal(wd.binds.length, 0, "nothing bound");
+  const slept = clock.waits.reduce((x, y) => x + BigInt(y), 0n);
+  assert.ok(slept >= BOUNDARY - NOW && slept <= SOL_EPOCH_MS + WITHDRAW_BOUNDARY_LAG_MS + 1_000n, `slept ${slept} ms`);
+  assert.equal((await wd.ns.get(wd.ids[1]!))?.state, "UNSPENT");
 });
 
 test("a withdraw sends exactly the typed amount to To from one note: the release alone to W, then W's own send of all it holds, W at 0", async () => {

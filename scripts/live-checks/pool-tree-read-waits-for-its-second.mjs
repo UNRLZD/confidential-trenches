@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Live check of card pool-tree-read-waits-for-its-second on SIGN_HOST (https://confidential.unrealized.trade) and on
 // Solana mainnet's own cadence. Reads only: nothing is signed or sent.
-// The fault (12 Nov): mainnet's confirmed slot read equal to its finalized slot, so a newest tree read at now + 1 (a
+// The fault (11 Nov): mainnet's confirmed slot read equal to its finalized slot, so a newest tree read at now + 1 (a
 // note that landed in now's block-second: a sell's return note, a deposit's first proof) was refused at once, and the
 // withdraw ended "stopped" with no cause. What this proves, and only that:
 //   - the served /app.js is the one index.html pins (its sha384), and it carries, each found by a mark of the bundle's
@@ -97,19 +97,21 @@ async function result(url, method, params, fetchFn) {
   return a;
 }
 const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
-/** A slot's block time, -32004 (not available yet) read again a slot apart, as the sync does; another error is an
- *  answer the provider gave: thrown. */
+/** A read that is not an answer about the chain's cadence (an error answer, a result not a whole number): this
+ *  provider's reads stop, a no-answer (INCONCLUSIVE, which live.yml runs again), never ERROR. */
+const notRead = (url, what, a) => new NoAnswer(`${new URL(url).host}: ${what} answered ${JSON.stringify(a.error ?? a.result).slice(0, 120)}`);
+/** A slot's block time, -32004 (not available yet) read again a slot apart, as the sync does. */
 async function blockTime(url, slot, fetchFn) {
   for (let i = 0; ; i++) {
     const a = await result(url, "getBlockTime", [slot], fetchFn);
     if (a.error === undefined && Number.isSafeInteger(a.result)) return a.result;
-    if (a.error?.code !== -32004 || i >= REACH_WAITS) throw new Error(`${new URL(url).host}: getBlockTime(${slot}) answered ${JSON.stringify(a.error ?? a.result).slice(0, 120)}`);
+    if (a.error?.code !== -32004 || i >= REACH_WAITS) throw notRead(url, `getBlockTime(${slot})`, a);
     await sleep(WAIT.ms);
   }
 }
 async function slotOf(url, commitment, fetchFn) {
   const a = await result(url, "getSlot", [{ commitment }], fetchFn);
-  if (a.error !== undefined || !Number.isSafeInteger(a.result)) throw new Error(`${new URL(url).host}: getSlot ${commitment} answered ${JSON.stringify(a.error ?? a.result).slice(0, 120)}`);
+  if (a.error !== undefined || !Number.isSafeInteger(a.result)) throw notRead(url, `getSlot ${commitment}`, a);
   return a.result;
 }
 

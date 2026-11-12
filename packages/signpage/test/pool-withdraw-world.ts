@@ -15,7 +15,7 @@ import { solanaDecodeMessage } from "../../kit/src/checks/solana/message.ts";
 import { SOLANA_SYSTEM_PROGRAM } from "../../kit/src/checks/solana/checks.ts";
 import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import type { TxRef } from "../../kit/src/signpage/messages.ts";
-import { noteCommitment, noteSecrets } from "../../wallet/src/notes/secrets.ts";
+import { noteCommitment, noteSecrets, type NoteRef } from "../../wallet/src/notes/secrets.ts";
 import { openNoteStore, type NoteStore } from "../../wallet/src/notes/store.ts";
 import type { Pool } from "../../wallet/src/pool/pool.ts";
 import { SOL_EPOCH_MS, SOL_LADDER, SOL_LIFE_MS, SOL_SEND_MARGIN_MS, solanaContextOf, solanaPoolOf, type SolanaReleaseRequest } from "../../wallet/src/pool/solana.ts";
@@ -87,6 +87,12 @@ export type Plant = {
   finalHeight?: number;
   /** the pool's trees from the world's leaves (the wallet's real tree sync, say); the world's whole trees when not given */
   trees?: (state: readonly bigint[], labels: readonly bigint[]) => Pool<SolanaReleaseRequest>["trees"];
+  /** note i's kind (a deposit's own note when not given): a return of a sell, say */
+  refs?: readonly (NoteRef | undefined)[];
+  /** the pool's time, read on each call (NOW when not given) */
+  now?: () => bigint;
+  /** the run's waits (none when not given) */
+  wait?: (ms: number) => Promise<void>;
 };
 /** Both RPCs' finalized slot in the world. */
 export const FINAL_SLOT = 20;
@@ -103,6 +109,16 @@ export async function world(values: readonly bigint[], plant: Plant = {}) {
   const ids: string[] = [];
   const slotReads = [0, 0];
   for (const value of values) {
+    const ref = plant.refs?.[ids.length];
+    if (ref !== undefined) {
+      const label = vaultLabelOf(keccak_256, SCOPE, BigInt(labels.length + 1));
+      const pre = noteSecrets(SEED64, ref).precommitment;
+      const commitment = noteCommitment(value, label, pre);
+      state.push(commitment);
+      labels.push(label);
+      ids.push((await ns.add({ ref, scope: SCOPE, precommitment: pre, state: "UNSPENT", leaf: { value, label, commitment, leafIndex: BigInt(state.length - 1) } })).id);
+      continue;
+    }
     const planned = await ns.planDeposit(SCOPE, (r) => noteSecrets(SEED64, r).precommitment);
     const inc = await ns.move(planned.id, "PLANNED", "INCOMING", { send: { signature: base58.encode(new Uint8Array(64).fill(9 + ids.length)), value, last_valid_block_height: 1_000n } });
     const label = vaultLabelOf(keccak_256, SCOPE, BigInt(labels.length + 1));
@@ -117,7 +133,7 @@ export async function world(values: readonly bigint[], plant: Plant = {}) {
   const binds: (SolanaReleaseRequest & { chunk: bigint })[] = [];
   const pool: Pool<SolanaReleaseRequest> = {
     id: `sol:${PROGRAM}`, chain: "sol", scope: SCOPE, ladder: SOL_LADDER, epochMs: SOL_EPOCH_MS, lifeMs: SOL_LIFE_MS, sendMarginMs: SOL_SEND_MARGIN_MS,
-    now: async () => NOW,
+    now: async () => plant.now?.() ?? NOW,
     trees: plant.trees?.(state, labels) ?? (async () => ({ stateTree: tree(state), labelTree: tree(labels), stateRoot: tree(state).root!, labelRoot: tree(labels).root! })),
     // the wallet's solanaPool bind, with the helper's fee as planted (the real one refuses a fee not the device's)
     bind: async (b) => {
@@ -264,7 +280,7 @@ export async function world(values: readonly bigint[], plant: Plant = {}) {
     },
     now: () => NOW,
     reads: 2,
-    wait: async () => {},
+    wait: plant.wait ?? (async () => {}),
     stage: (s, txs, pending) => void (stages.push(s), stageTxs.push(txs), pendings.push(pending)),
     owe: async (p) => void (owed.push(p), order.push(`owe:${(await ns.get(p.noteId))?.state}`)),
     keepRelease: async (noteId, attempt, release) => {
