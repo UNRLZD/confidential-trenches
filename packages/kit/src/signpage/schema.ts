@@ -238,10 +238,13 @@ const depositWallets: SignpageSchema = (v) =>
 
 /** A position (card signpage-state-holdings): exact, its optional decimals the token's own (a u8, as an SPL mint's and an
  * ERC-20's are), and its amount with no more fraction digits than those decimals when named. */
-const positionEntry = obj({ chain, token: str, amount: dec, cost: dec, wallets: arr(str) }, { decimals: (v) => uint(v) && (v as number) <= 255 });
+const positionEntry = obj({ chain, token: str, amount: dec, cost: dec, wallets: arr(str) }, { decimals: (v) => uint(v) && (v as number) <= 255, asset_held: dec });
+/** asset_held (card portfolio-counts-money-an-open-buy-holds): the pool asset of its chain, so Solana's SOL at its
+ * decimals only; an EVM position carries none. */
 const positionFits: SignpageSchema = (v) => {
   if (!positionEntry(v)) return false;
-  const p = v as { amount: string; decimals?: number };
+  const p = v as { chain: Chain; amount: string; decimals?: number; asset_held?: string };
+  if (p.asset_held !== undefined && (p.chain !== "solana" || unitsAt(p.asset_held, POOL_ASSET_DECIMALS[POOL_CHAIN_ASSET.solana]) === null)) return false;
   return p.decimals === undefined || unitsAt(p.amount, p.decimals) !== null;
 };
 

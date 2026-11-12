@@ -66,7 +66,7 @@ import { lateBuyEnd, POOL_SEND_BUSY_WAIT_MS, PoolSendBusy, poolBuyKind, type Poo
 import { boughtSincePass, keptHeldOf, type StoreWs } from "./pool-sell-dry.ts";
 import { BUY_MINTS_KEY, buyMints, keptSells, owedRentBacks, poolSellKind, resumeRentBacks, settleDeadSellOps, settlePoolSells, settleSellOps, type PoolSellKindHost } from "./pool-sell.ts";
 import { derivedBuyWallets, evmHelperKeyedRpc, evmHelperRpc, solanaHelperHoldings, solanaHoldingsAt, spentNotesOf, wantedBuyWallets, type BuyWallet, type HoldingsReader, type ListedBuyWallet } from "../../wallet/src/pool/buy-wallets.ts";
-import { keptListed, keptPositions, POSITION_COSTS_KEY, POSITIONS_KEPT_KEY, POSITIONS_SOLD_KEY, POSITIONS_SOLD_TX_KEY, POSITIONS_UNLANDED_KEY, positionsCache, positionsPass, recordBoughtOut, recordPoolBuy, routeInto, type BuyRecordStore, type FoundWallet, type PoolBuyFacts, type Position, type PositionCosts } from "./positions.ts";
+import { keptListed, keptPositions, POSITION_COSTS_KEY, POSITIONS_KEPT_KEY, POSITIONS_SOLD_KEY, POSITIONS_SOLD_TX_KEY, POSITIONS_UNLANDED_KEY, positionsCache, positionsPass, recordBoughtOut, solanaAssetHeld, recordPoolBuy, routeInto, type BuyRecordStore, type FoundWallet, type PoolBuyFacts, type Position, type PositionCosts } from "./positions.ts";
 import { evmStoredHold } from "../../wallet/src/pool/evm-hold-store.ts";
 import { EVM_CHAIN_IDS, EVM_EPOCH_MS, EVM_POOLS, evmNow, evmPair, evmRetryLag, evmPool as walletEvmPool, evmPoolScopeOf, evmTreeSync, type EvmFeeAnswer, type EvmPoolOf, type EvmPoolPin, type EvmPoolRequest, type EvmRpc, type EvmSyncHold, type EvmTreeSync } from "../../wallet/src/pool/evm.ts";
 import { evmSettleReserved } from "../../wallet/src/pool/evm-settle.ts";
@@ -451,6 +451,9 @@ export type TestnetOver = {
   tradeKinds?: { buy?: typeof poolBuyKind; sell?: typeof poolSellKind; evmBuy?: typeof poolBuyEvmKind; evmSell?: typeof poolSellEvmKind };
   /** The buy wallets' finder reader for the page's RPCs (the helper's or a devnet RPC's otherwise; tests). */
   holdings?: (rpcs: readonly [SolanaRpc, SolanaRpc]) => HoldingsReader;
+  /** The route of each W's asset_held read (src/positions.ts solanaAssetHeld): the finder's own otherwise. A test that
+   *  plants `holdings` and not this gets no asset_held read, so no test reaches a real provider. */
+  assetHeldRpc?: SolanaRpc;
   /** The positions cache's retry and timers (src/positions.ts; tests). */
   positions?: Parameters<typeof positionsCache>[1];
   /** The clock of a state read's ask of a spent EVM chain's pass (Date.now otherwise; tests). */
@@ -1434,6 +1437,9 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     async (memo, run) => {
       if (scope === null) return { positions: [], whole: true };
       const r = rpcs("pass");
+      const heldRpc = over.holdings !== undefined
+        ? over.assetHeldRpc
+        : solanaPacedRpc(POOL_TESTNET ? testnetRpc(TESTNET_RPCS.solana[0], SOLANA_RPC_RETRY, "pass") : pageHelperRpc(TRADE_HELPER, SOLANA_RPC_RETRY, "pass"));
       const st = await page.store();
       const meta = async (k: string): Promise<Record<string, unknown>> => {
         const v = await st.get("meta", k);
@@ -1450,6 +1456,9 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
           return [...fed, ...(rest.size === 0 ? [] : await recordedWallets(st, r, rest, run.signal, o))];
         },
         ...(run.shown ? { shown: run.shown } : {}),
+        // each W's SOL beside its token (asset_held), one call per W on the finder's own route: the helper's keyed route
+        // on mainnet, never a public provider; the devnet RPC the finder reads in the testnet build
+        ...(heldRpc === undefined ? {} : { assetHeld: (address: string, mint: string, signal?: AbortSignal) => solanaAssetHeld(heldRpc, address, mint, signal) }),
         bought: async () => meta(BUY_MINTS_KEY),
         costs: async () => (await meta(POSITION_COSTS_KEY)) as PositionCosts,
         awaited: () => awaited,
