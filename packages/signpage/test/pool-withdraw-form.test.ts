@@ -66,6 +66,7 @@ test("Amount: refused above what the notes can send, under the smallest part, or
 
 class El {
   dataset: Record<string, string> = {};
+  style: Record<string, string> = {};
   children: El[] = [];
   textContent = "";
   hidden = false;

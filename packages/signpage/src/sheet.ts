@@ -95,24 +95,27 @@ export function drawSheet(doc: Document): Sheet {
   lay();
   phone?.addEventListener("change", lay);
   fit?.addEventListener("change", lay);
-  // the screens draw and redraw their own parts (src/main.ts show(), src/withdraw/): each element that comes is dressed
+  // the screens draw and redraw their own parts (src/main.ts show(), src/withdraw/): each element that comes is dressed,
+  // and a button again when its disabled changes, so Withdraw is drawn offered once the form is ready
   const MO = (view as unknown as { MutationObserver?: typeof MutationObserver }).MutationObserver;
   if (MO) {
     new MO((records) => {
       const p = phone?.matches ?? false;
-      for (const r of records)
+      for (const r of records) {
+        if (r.type === "attributes") dress(r.target as HTMLElement, p);
         for (const n of Array.from(r.addedNodes)) {
           if (n.nodeType !== 1) continue;
           dress(n as HTMLElement, p);
           for (const e of Array.from((n as HTMLElement).querySelectorAll("*"))) dress(e as HTMLElement, p);
         }
-    }).observe(body, { childList: true, subtree: true });
+      }
+    }).observe(body, { childList: true, subtree: true, attributes: true, attributeFilter: ["disabled"] });
   }
   return { layer, body, close, scrim, box };
 }
 
 /** One element of a screen in the deposit sheet's look: its buttons, fields, lines and the 12 words' list. */
-function dress(e: HTMLElement, phone: boolean): void {
+export function dress(e: HTMLElement, phone: boolean): void {
   const s = e.style;
   switch (e.tagName) {
     case "MAIN":
@@ -120,6 +123,14 @@ function dress(e: HTMLElement, phone: boolean): void {
       break;
     case "BUTTON": {
       if (e.dataset.sheet === "close") return;
+      if (e.dataset.action === "sendable") {
+        // what can be sent (src/withdraw/pool-form.ts): a value the user taps to fill the amount, never a main button
+        Object.assign(s, {
+          display: "inline-flex", alignItems: "center", width: "auto", height: "auto", minHeight: phone ? "44px" : "36px", padding: "0 12px",
+          borderRadius: "10px", border: `1px solid ${T.border}`, background: T.panel, color: T.text1, font: `500 14px ${T.num}`, cursor: "pointer", flex: "none",
+        });
+        return;
+      }
       const quiet = e.dataset.action === "cancel" || (e as HTMLButtonElement).disabled;
       // .dbtn and .dbtn.paper; Cancel and a control not offered as .dbtn.off
       Object.assign(s, {

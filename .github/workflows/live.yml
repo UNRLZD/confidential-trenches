@@ -338,3 +338,5 @@ jobs:
         run: pnpm --filter signpage run test:e2e
       - name: the signing page's withdraw form at 390 and 1440 wide
         run: node packages/signpage/test/withdraw-screens/run.mjs
+      - name: the signing page's pool withdraw screen at 390 and 1440 wide, on Solana and Base
+        run: node packages/signpage/test/pool-withdraw-screens/run.mjs
