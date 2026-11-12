@@ -76,6 +76,23 @@ test("each branch of the venue moves Max: Token or Token-2022, cashback or not, 
   assert.equal(max(SOLANA_POOL_WORST_BUY_VENUE), "0.00038488");
 });
 
+test("a cashback coin, as both providers' venue bytes say it (the curve's byte 82, the PumpSwap pool's 244): its own Max on each venue", async () => {
+  const cashback = (coin: "pump" | "pumpswap", p: 0 | 1): SolanaRpc =>
+    replay(fx[coin], p, (_list, ans) => {
+      const d = Buffer.from(ans.value[1].data[0], "base64");
+      d[coin === "pump" ? 82 : 244] = 1;
+      ans.value[1].data[0] = d.toString("base64");
+      return ans;
+    });
+  // Token-2022 at 170 bytes: the curve keeps both of the sell's PumpSwap cashback accounts (511,880); PumpSwap's buy
+  // makes W's wrapped-SOL cashback account (1,858,080)
+  for (const [coin, kind, tap] of [["pump", "pump-curve", "0.00051188"], ["pumpswap", "pumpswap", "0.00185808"]] as const) {
+    const rpcs = [cashback(coin, 0), cashback(coin, 1)] as const;
+    assert.deepEqual(await readCoinVenue(rpcs, fx[coin].mint), { kind, tokenAccountSize: 170, cashback: true });
+    assert.deepEqual(await ask(poolBuyDryKind(deps({ rpcsOf: () => rpcs })), { chain: "solana", token: fx[coin].mint }), { result: { tap_max: tap } }, coin);
+  }
+});
+
 test("a coin whose venue is not read keeps state.pools' Max: refused, never a number", async () => {
   // neither venue's accounts recorded: the replay throws on both reads
   assert.deepEqual(await ask(poolBuyDryKind(deps()), { chain: "solana", token: fx.pumpswap.mint.replace("9", "8") }), { error: "quote_check_failed" });
