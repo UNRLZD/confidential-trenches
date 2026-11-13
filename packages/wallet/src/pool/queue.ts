@@ -62,7 +62,7 @@ import { changeIndex, freshWallet } from "../derive/index.ts";
 import { noteSecrets, type NoteRef } from "../notes/secrets.ts";
 import { heldBy, type NoteRecord, type NoteStore } from "../notes/store.ts";
 import { checkLadder, chunkOf } from "./ladder.ts";
-import { checkBinding, checkPool, NEWEST_GRACE_MS, NOW_REUSE_MS, TAKE_SLACK_MS, type ChainNow, type Pool, type PoolTrees, type ReadyProof } from "./pool.ts";
+import { checkBinding, checkPool, failAs, NEWEST_GRACE_MS, PassFail, NOW_REUSE_MS, TAKE_SLACK_MS, type ChainNow, type PassReason, type Pool, type PoolTrees, type ReadyProof } from "./pool.ts";
 
 /** Proofs kept ready: min(hardwareConcurrency - 1, 3), at least 1, all made by the one prover in turn. */
 export function readySetSize(hardwareConcurrency: number | undefined): number {
@@ -93,22 +93,7 @@ export type ProofQueueArgs<R> = {
 };
 
 /** What one pass did: the notes it proved, the notes whose proof was made again, and each failure. */
-/** Which step a proof failed at (a console line names these codes only, never the error's text): a pool read (the
- *  pool's time or its trees) "network"; the fee binding (the helper's fee answer, or the device's own reads it is checked
- *  against) "fee_refused"; the note's hold (another tab or pass holds it) "held_elsewhere"; the prover "prover_failed". */
-export type PassReason = "network" | "fee_refused" | "held_elsewhere" | "prover_failed";
-/** An error tagged with the step it came from; its message is the cause's. */
-export class PassFail extends Error {
-  readonly reason: PassReason;
-  constructor(reason: PassReason, cause: unknown) {
-    super(cause instanceof Error ? cause.message : String(cause));
-    this.reason = reason;
-  }
-}
-// an abort (a sign out, a trade's stop) is no failure of a step: it goes on as it was
-const failAs = (reason: PassReason) => (e: unknown): never => {
-  throw e instanceof PassFail || (e as { name?: unknown } | null)?.name === "AbortError" ? e : new PassFail(reason, e);
-};
+export { PassFail, type PassReason } from "./pool.ts";
 /** `small`: the pool's UNSPENT landed notes below its smallest rung, never proved (none: absent). */
 export type QueuePass = { made: string[]; remade: string[]; failed: { noteId: string; error: string; reason?: PassReason }[]; small?: number };
 const NOTHING = (): QueuePass => ({ made: [], remade: [], failed: [] });
@@ -291,7 +276,11 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
     const deadlineMs = epochStartMs + pool.lifeMs;
     const refundPrecommitment = noteSecrets(seed, { kind: "refund", l: leaf.label, j }).precommitment;
     const binding = await pool.bind({ chunk, wallet: { address: w.address, publicKey: w.publicKey }, refundPrecommitment, epochStartMs, deadlineMs }, signal).catch(failAs("fee_refused"));
-    checkBinding(pool as Pool, binding, chunk);
+    try {
+      checkBinding(pool as Pool, binding, chunk);
+    } catch (e) {
+      failAs("fee_refused")(e);
+    }
     live();
     const context = binding.context.toString();
     // a fresh proof: the note is HELD by this attempt, with its context, before the proof starts; a failed write stops
@@ -345,7 +334,7 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
         if (closed || flight.dropped || tier.get(n.id) !== prev) throw new Error("taken or dropped while it was made again: this proof is never sent");
         // the new attempt's write and the ready list's update in one turn of the view: no readyWith read between them
         await inView(async () => {
-          const held = await notes.move(n.id, "HELD", "HELD", { attempt: prev!.attempt, deadlineMs, context });
+          const held = await notes.move(n.id, "HELD", "HELD", { attempt: prev!.attempt, deadlineMs, context }).catch(failAs("held_elsewhere"));
           tier.set(n.id, made(held.second?.context === context ? held.second.attempt : held.attempt!));
         });
       });
@@ -361,6 +350,8 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
     live();
     const out = NOTHING();
     // a note in skip (a withdraw planned it, any tab's) is let go, in front or not: its ready proofs freed, one in flight never kept
+    // a.skip and notes.list below are the device's own store: no pool step a walk tells apart (a closed or broken store
+    // fails every read the same), so their throw stays untagged and prints no line
     const skipped = (await a.skip?.()) ?? new Set<string>();
     for (const id of skipped) {
       const f = inFlight.get(id);
@@ -369,7 +360,7 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
     }
     if (!inFront()) return out;
     const nowMs = await readNow(signal).catch(failAs("network"));
-    if (typeof nowMs !== "bigint" || nowMs < 0n) throw new Error(`pool ${pool.id}: now is not a bigint`);
+    if (typeof nowMs !== "bigint" || nowMs < 0n) throw new PassFail("network", new Error(`pool ${pool.id}: now is not a bigint`));
     const start = epochOf(nowMs);
     for (const [attempt, id] of [...unfreed]) await free(id, attempt);
     // let go of proofs whose attempt no longer holds its note; those of an earlier epoch stay ready (and HELD) until remade
@@ -436,7 +427,7 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
       for (const n of kept) {
         const r = alt.get(n.id);
         if (r !== undefined && r.epochStartMs === start && r.wallet.address === to!.address) continue;
-        epochTrees ??= await pool.trees(start, signal);
+        epochTrees ??= await pool.trees(start, signal).catch(failAs("network"));
         let trees: PoolTrees = epochTrees;
         let root: "epoch" | "newest" = "epoch";
         if (n.leaf!.leafIndex >= BigInt(epochTrees.stateTree.size)) {

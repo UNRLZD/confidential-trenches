@@ -1089,6 +1089,14 @@ test("NEAR vault: each proof's context is the one the vault recomputes, paying W
   }
 });
 
+// card buy-spends-several-pieces: a bind whose read of the vault's time got no answer is "network" on the pass's line
+test("NEAR vault: a bind whose block time read fails names network, never fee_refused", async () => {
+  const v = await vaultWith([usd(2)]);
+  const pool = { ...nearPool(v), bind: nearVaultPool({ vaultId: VAULT, token: TOKEN, network: "mainnet", rpcs: feeReplay("mainnet"), priceRpcs: feeReplay("mainnet"), feeRecipient: FEE_RECIPIENT, relayFee: async () => 300_000n, registerDepositOf: async () => REGISTER_DEPOSIT, blockTimestampNanosec: async () => Promise.reject(new Error("rpc: HTTP 429")), trees: async () => ({ stateTree: v.stateTree, labelTree: v.labelTree, stateRoot: v.stateTree.root!, labelRoot: v.labelTree.root! }) }).bind };
+  const q = queue(v, pool);
+  assert.deepEqual((await q.refresh()).failed.map((f) => f.reason), ["network"]);
+});
+
 test("NEAR vault: a change note with j >= 1 binds refund note (l, j + 1) and pays W_{near, l, j + 1}", async () => {
   const v = await vaultWith([usd(25)]);
   const pool = nearPool(v);

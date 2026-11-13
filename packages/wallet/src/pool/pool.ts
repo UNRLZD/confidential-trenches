@@ -46,6 +46,27 @@ import type { Ladder } from "./ladder.ts";
 export type PoolTrees = { stateTree: VaultTree; labelTree: VaultTree; stateRoot: bigint; labelRoot: bigint };
 
 /** What the queue hands the context function for one chunk. */
+/** Which step a proof failed at (a console line names these codes only, never the error's text): a pool read (the
+ *  pool's time or its trees), or a read the fee binding makes that did not answer (a throttle, a 5xx, no connection,
+ *  no answer in time) "network"; the fee binding refused (the helper's fee answer, or the device's own reads it is
+ *  checked against, disagreeing) "fee_refused"; the note's hold (another tab or pass holds it) "held_elsewhere"; the
+ *  prover "prover_failed". */
+export type PassReason = "network" | "fee_refused" | "held_elsewhere" | "prover_failed";
+/** An error tagged with the step it came from; its message is the cause's. A pool's bind throws one for its own reads
+ *  that did not answer, so the queue's fee_refused never names a throttle. */
+export class PassFail extends Error {
+  readonly reason: PassReason;
+  constructor(reason: PassReason, cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause));
+    this.reason = reason;
+  }
+}
+/** A catch that tags what it is given with `reason`; a PassFail keeps its own, and an abort (a sign out, a trade's
+ *  stop) is no failure of a step: it goes on as it was. */
+export const failAs = (reason: PassReason) => (e: unknown): never => {
+  throw e instanceof PassFail || (e as { name?: unknown } | null)?.name === "AbortError" ? e : new PassFail(reason, e);
+};
+
 export type PoolBindArgs = {
   /** withdrawnValue: one rung of the pool's ladder, in the asset's base units. */
   chunk: bigint;

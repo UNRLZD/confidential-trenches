@@ -21,7 +21,7 @@ import { NEAR_NETWORKS, type NearNetwork } from "../deposit/account.ts";
 import { type FeeRpc, readWithdrawFeeMax } from "../withdraw/feemax.ts";
 import { blockTimeMsOf, WITHDRAW_DEADLINE_MAX_MS, WITHDRAW_SEND_MARGIN_MS } from "../withdraw/request.ts";
 import type { Ladder } from "./ladder.ts";
-import { TAKE_SLACK_MS, type Pool, type PoolTrees } from "./pool.ts";
+import { failAs, TAKE_SLACK_MS, type Pool, type PoolTrees } from "./pool.ts";
 
 /** USDC's ladder: $1 = 10^6 base units, from $2 (owner pick ladder, OD:268). */
 export const USDC_LADDER: Ladder = Object.freeze({ one: 1_000_000n, min: 2_000_000n });
@@ -71,7 +71,8 @@ export function nearVaultPool(a: NearVaultPoolArgs): Pool<VaultWithdrawal> {
     async bind({ chunk, wallet, refundPrecommitment, epochStartMs, deadlineMs }, signal) {
       if (!(wallet.publicKey instanceof Uint8Array) || wallet.publicKey.length !== 32 || wallet.address !== hex(wallet.publicKey))
         throw new Error("wallet: a NEAR W is the 64-hex id of its ed25519 public key");
-      const ns = await a.blockTimestampNanosec(signal);
+      // the pool's time, as the queue's own read of it: a failure is "network", never fee_refused
+      const ns = await a.blockTimestampNanosec(signal).catch(failAs("network"));
       const nowMs = blockTimeMsOf(ns);
       if (typeof deadlineMs !== "bigint" || deadlineMs !== epochStartMs + NEAR_LIFE_MS || deadlineMs <= BigInt(nowMs) + BigInt(WITHDRAW_SEND_MARGIN_MS))
         throw new Error("deadlineMs: not on the epoch grid, or too close to send");

@@ -53,7 +53,7 @@ import { HELPER_FETCH_INIT, HELPER_V1_PATHS } from "../../kit/src/helper/v1.ts";
 import type { VaultProver } from "../../kit/src/prover/prove.ts";
 import { WALLET_SEED_LOCK, type WalletStore } from "@blindfill/wallet/store";
 import { openNoteStore, readNotes, readReservedMarks, type NoteRecord, type NoteStore } from "../../wallet/src/notes/store.ts";
-import { chainNow, type Pool, type ReadyProof } from "../../wallet/src/pool/pool.ts";
+import { chainNow, failAs, type Pool, type ReadyProof } from "../../wallet/src/pool/pool.ts";
 import { openProofQueue, PassFail, type ProofQueue, type QueuePass } from "../../wallet/src/pool/queue.ts";
 import { poolDepositKind, type PoolDepositFrom, type PoolDepositHost } from "./pool-deposit.ts";
 import { proverHost } from "./prover-host.ts";
@@ -643,7 +643,10 @@ async function helperFee(url: string, signal: AbortSignal | undefined, fetchFn: 
   const res = await askWhileBusy(() => {
     const timeout = AbortSignal.timeout(FEE_TIMEOUT_MS);
     return fetchFn(url, { ...HELPER_FETCH_INIT, redirect: "error", method: "GET", signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
-  }, { signal, sleep });
+  }, { signal, sleep }).catch(failAs("network"));
+  // a fee read that got no answer (no connection, no answer in time, still busy: a 429 or a 5xx) is "network" on the
+  // pass's line; the helper's refusal (any other status) and an answer the bind refuses are fee_refused
+  if (res.status === 429 || res.status >= 500) throw new PassFail("network", new Error(`pool fee: HTTP ${res.status}`));
   if (res.status !== 200) throw new Error(`pool fee: HTTP ${res.status}`);
   // the helper's fee answer is this small (its v1 table's limit for GET /v1/pool/fee)
   const FEE_ANSWER_MAX = HELPER_V1_PATHS.find((p) => p.method === "GET" && p.path === "/v1/pool/fee")!.limitBytes!;
