@@ -16,7 +16,7 @@ export const POOL_RULE_WORDS: ReadonlySet<string> = new Set([
   "deposit_accounts", "deposit_amount", "deposit_data", "deposit_floor", "deposit_reads", "depositor", "depth",
   "evm_not_pinned", "fee_cap", "fee_cap_over_device_cap", "fee_over_cap", "fee_payer", "fee_recipient", "floor",
   "gas_estimate", "gas_limit", "gas_over_cap", "instructions", "kind", "l1_fee", "label_page", "max_fee", "min_out",
-  "nonce", "not_quoted", "pieces", "pool", "precommitment", "precommitment_mark", "priority_fee", "program", "reads",
+  "nonce", "not_quoted", "pieces", "pool", "precommitment", "precommitment_mark", "priority", "priority_fee", "program", "reads",
   "recipient", "relay", "release_accounts", "release_data", "release_not_devices", "reserve", "sell", "sell_accounts",
   "signature_slots", "signers", "sim_block_after_clock", "sim_deadline", "sim_pool", "simulation", "slippage",
   "solana_not_pinned", "state_page", "sweep_amount", "sweep_reads", "system", "table", "tag", "teardown", "to", "token",
