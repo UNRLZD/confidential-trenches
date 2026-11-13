@@ -82,6 +82,11 @@ test("amountIn is the payout", () => {
 });
 
 test("minAmountOut within the slippage of amountOut, and over the device's floor", () => {
+  // 1Click rounds the least down (a live answer, 13 Nov 20:47Z: amountOut 7,994,156, minAmountOut 7,914,214): exactly
+  // ⌊amountOut × 0.99⌋ passes, one under it does not
+  const c = checkOneClickExitQuote(ASK, REQ, answer(REQ, { amountOut: "4990000000000001", minAmountOut: "4940100000000000" }), OPTS);
+  assert.equal(c.minAmountOut, 4_940_100_000_000_000n);
+  quoteRefused("floor", () => checkOneClickExitQuote(ASK, REQ, answer(REQ, { amountOut: "4990000000000001", minAmountOut: "4940099999999999" }), OPTS));
   // over the floor (4,932,675e12) but 3.8% under a padded amountOut: refused
   quoteRefused("floor", () => checkOneClickExitQuote(ASK, REQ, answer(REQ, { amountOut: "5200000000000000", amountOutFormatted: "0.0052", minAmountOut: "5000000000000000" }), OPTS));
   // under the device's floor at its own prices

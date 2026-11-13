@@ -100,8 +100,9 @@ export function checkOneClickExitQuote(ask: ExitAsk, request: OneClickRequest, a
     intoVault: false,
   });
   if (checked.amountIn !== ask.payout) throw new OneClickQuoteError("amount", `amountIn ${checked.amountIn} is not the payout ${ask.payout}`);
-  // within the slippage asked: minAmountOut ≥ amountOut × (10,000 − slippage) / 10,000, rounded up
-  const least = (checked.amountOut * BigInt(10_000 - EXIT_SLIPPAGE_BPS) + 9_999n) / 10_000n;
+  // within the slippage asked: minAmountOut ≥ ⌊amountOut × (10,000 − slippage) / 10,000⌋, 1Click's own rounding (live
+  // answers read 2026-11-13T20:47Z: amountOut 7,994,156 with minAmountOut 7,914,214 = ⌊7,914,214.44⌋)
+  const least = (checked.amountOut * BigInt(10_000 - EXIT_SLIPPAGE_BPS)) / 10_000n;
   if (checked.minAmountOut < least) throw new OneClickQuoteError("floor", `minAmountOut ${checked.minAmountOut} is more than ${EXIT_SLIPPAGE_BPS} bps under amountOut ${checked.amountOut}`);
   if (checked.depositAddress === undefined) throw new OneClickQuoteError("live", "an exit takes a live answer only");
   return checked as OneClickChecked & { depositAddress: string };
