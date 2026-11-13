@@ -19,12 +19,24 @@ const PORT = 47545;
 const UPSTREAM = { base: "https://mainnet.base.org", robinhood: "https://rpc.mainnet.chain.robinhood.com" };
 
 // A block named by its hash ({"blockHash": h}, as Foundry 1.8 asks) is the same block as its number (as 1.7 asks):
-// the key names it by number, read from the recorded eth_getBlockByNumber answer
-function keyOf(book, chain, r) {
-  const byHash = {};
-  for (const [k, v] of Object.entries(book[chain] ?? {})) {
-    if (k.startsWith("eth_getBlockByNumber ") && v.result?.hash) byHash[v.result.hash.toLowerCase()] = v.result.number;
+// the key names it by number, read from the recorded eth_getBlockByNumber answer. Each chain's hash map is read from
+// its book once and then kept up as answer() adds to that book (a book only grows: a recorded key is never asked
+// again), so a request costs no walk over every recorded answer (1.5 ms a request at 10,600 answers, 13 Nov)
+const HASHES = new WeakMap();
+const addHash = (byHash, k, v) => {
+  if (k.startsWith("eth_getBlockByNumber ") && typeof v?.result?.hash === "string") byHash[v.result.hash.toLowerCase()] = v.result.number;
+};
+function hashesOf(b) {
+  let byHash = HASHES.get(b);
+  if (byHash === undefined) {
+    byHash = {};
+    for (const [k, v] of Object.entries(b)) addHash(byHash, k, v);
+    HASHES.set(b, byHash);
   }
+  return byHash;
+}
+export function keyOf(book, chain, r) {
+  const byHash = book[chain] === undefined ? {} : hashesOf(book[chain]);
   const params = (r.params ?? []).map((p) =>
     p && typeof p === "object" && !Array.isArray(p) && typeof p.blockHash === "string" && byHash[p.blockHash.toLowerCase()]
       ? byHash[p.blockHash.toLowerCase()]
@@ -34,7 +46,7 @@ function keyOf(book, chain, r) {
 }
 
 /** Answers one JSON-RPC request (or a batch) for `chain` from `book`, or from upstream when recording. */
-async function answer(book, chain, req, record) {
+export async function answer(book, chain, req, record) {
   if (Array.isArray(req)) return Promise.all(req.map((r) => answer(book, chain, r, record)));
   const key = keyOf(book, chain, req);
   const have = book[chain]?.[key];
@@ -53,7 +65,9 @@ async function answer(book, chain, req, record) {
   }
   if (!got) throw new Error(`fork-rpc: ${UPSTREAM[chain]} did not answer ${key}`);
   const kept = "error" in got ? { error: got.error } : { result: got.result };
-  (book[chain] ??= {})[key] = kept;
+  const b = (book[chain] ??= {});
+  b[key] = kept;
+  if (HASHES.has(b)) addHash(HASHES.get(b), key, kept);
   return { jsonrpc: "2.0", id: req.id, ...kept };
 }
 
