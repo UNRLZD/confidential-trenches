@@ -67,6 +67,8 @@ import { startApi, type KindContext } from "./api.ts";
 import { depositQuoteHost, depositReadHosts } from "./deposit-wire.ts";
 import { depositNamer } from "./deposit-name.ts";
 import { poolAddressHost } from "./pool-deposit-address.ts";
+import { cashUsdcFor, type CashToPoolDeps } from "./cash-to-pool.ts";
+import { formatUnits as formatPoolUnits, parseUnits as parsePoolUnits } from "./withdraw/pool-form.ts";
 import { quotesStop } from "./quotes-stop.ts";
 import { depositFollows, FOLLOW_LOCK } from "./deposit-follow.ts";
 import { depositToEnd, depositWalletsOf, evmQuoteRoute, poolAgainWait, poolFollows, poolRefundMover, solanaPoolFollowDeps, uxHeldOf, uxNoteLanded, uxNoteOpen, type PoolFollowHost, type PoolFollowRecord } from "./pool-deposit-follow.ts";
@@ -289,7 +291,47 @@ else {
   // a NEAR buy and sell (src/near-buy.ts, card near-private-trading): the vault pays a fresh NEAR wallet from a picked
   // note, which buys on Rhea; its sell sells all of it back and moves the USDC into the vault; top-level only, as the
   // pool flow
-  const poolKindMap = poolKinds(prover ? { ...poolDeps, near: { buy: (ask, ctx) => nearBuyKind(nearBuyPage()!)(ask, ctx), sell: (ask, ctx) => nearSellKind(nearBuyPage()!)(ask, ctx) } } : poolDeps);
+  // one balance on every chain (src/cash-to-pool.ts, card one-balance-buys-on-every-chain): a Solana buy above one tap's
+  // spend moves its shortfall from Cash first, through the deposit sheet's own quote into U_X (poolAddress, below) and
+  // the vault's hand-off to its deposit address, then buys once one tap spends the ask (tapDry, below: the dry read
+  // with no trade gate, since the tap's own run holds it)
+  const cashDeps = (): CashToPoolDeps => {
+    const vault = { store: () => open(), notes: async () => openNoteStore(await open()), seed64: () => openSeed64(), prover: prover!.vault, signal: withdrawWait.signal };
+    const form = withdrawFormDeps(vault);
+    const handoff = withdrawHandoff(vault);
+    return {
+      tapMax: async (token) => {
+        const r = tapDry({ chain: "solana", token });
+        await r.after;
+        const a = r.answer();
+        return a !== null && "result" in a ? (parsePoolUnits(a.result.tap_max, 9) ?? 0n) : 0n;
+      },
+      cash: () => form.available(),
+      fee: () => form.fee(),
+      handoff: handoff === null ? null : (w, fee) => handoff(w, fee),
+      // Relay lists no NEAR chain (api.relay.link/chains, 13 Nov 19:22Z): a move from Cash goes on 1Click alone
+      rails: ["1click"],
+      quote: async (short, id) => {
+        const p = prices.get("solana");
+        const usdc = p === null ? null : cashUsdcFor(short, p);
+        if (usdc === null) return { error: "not_allowed" };
+        const r = poolAddress({ chain: "solana", origin_asset: `nep141:${NEAR_NETWORKS.mainnet.usdc}`, amount: formatPoolUnits(usdc, 6) }, { id });
+        await r.after;
+        const a = r.answer();
+        if (a === null || "error" in a) return { error: a === null ? "failed" : a.error };
+        const q = a.result.quote;
+        const amountIn = q === undefined ? null : parsePoolUnits(q.amount_in, 6);
+        const minOut = q === undefined ? null : parsePoolUnits(q.min_amount_out, 9);
+        const deadlineMs = q === undefined ? NaN : Date.parse(q.deadline);
+        if (q === undefined || amountIn === null || minOut === null || !Number.isSafeInteger(deadlineMs)) return { error: "quote_check_failed" };
+        return { address: q.deposit_address, amountIn, minOut, deadlineMs };
+      },
+      wait: (ms) => new Promise((res) => setTimeout(res, ms)),
+      now: () => Date.now(),
+      signal: withdrawWait.signal,
+    };
+  };
+  const poolKindMap = poolKinds(prover ? { ...poolDeps, near: { buy: (ask, ctx) => nearBuyKind(nearBuyPage()!)(ask, ctx), sell: (ask, ctx) => nearSellKind(nearBuyPage()!)(ask, ctx) }, ...(withdrawHandoff({ store: () => open(), notes: async () => openNoteStore(await open()), seed64: () => openSeed64(), prover: prover.vault }) === null ? {} : { cash: cashDeps }) } : poolDeps);
   // the sell box's preview (src/pool-sell-dry.ts): the positions pass's holding as held, the sale's own quote on the
   // trades' paced pair as background reads, never while a trade runs: a pool buy from its tap to its first answer (its
   // early "sent", the app's Filled; its read-backs to Final hold no host), a pool sell from its tap to its run's end
@@ -333,6 +375,18 @@ else {
     },
     trading: () => buys.live() + sells.live() > 0 || (dryPair() ?? []).some((r) => r.url !== undefined && hostLane(r.url).trading()),
   });
+  // the same read for a moving tap (cashDeps.tapMax): never refused busy, since the tap that asks is the trade
+  const tapDry = poolBuyDryKind({
+    pools: PAGE_POOLS,
+    rpcs: dryPair,
+    rent: () => (hasSolana ? rent.get() : null),
+    ready: async () => {
+      if (!testnet || !(await fs.state()).signed_in) return null;
+      const both = await testnet.readyWith(pageNotes);
+      return { notes: both.value, ready: both.ready, open: both.open, landed: both.landed };
+    },
+    trading: () => false,
+  });
   // a pool quote's price reads (pool-deposit-address.ts priced): USDC in at 1 USD on both reads, X's coin at the page's
   // own Pyth read on its two RPCs (src/pool-price.ts), X's own coin on X (a plain send) at that read; any other origin
   // has none yet, so it gets no quote
@@ -354,6 +408,8 @@ else {
     const pair = solPair();
     return pair !== null && PAGE_SOL_PIN !== undefined ? readSolanaPoolFloor(pair, PAGE_SOL_PIN.program, wallet, signal) : null;
   };
+  // where money for a pool goes (src/pool-deposit-address.ts), the deposit sheet's and a moving tap's (cashDeps) alike
+  const poolAddress = poolAddressHost({ pools: pageAddressPools, network: PAGE_NETWORK, read: fs.depositRead, named: () => namer.named(), priced: pricedFor, floor: floorFor, checked: (id, chain, quote, u) => poolFollow!.quoted(id, chain, quote, u), stop: quotesStopped });
   const nearPair = () => [followRpc(NEAR_NETWORKS.mainnet.fastnear[0]), followRpc(NEAR_NETWORKS.mainnet.drpc)] as const;
   // from U_X alone (review H1): pool.deposit run with the op's own U_{s,i} as its fixed source, never the newest U
   const depositFromUx = (g: PoolFollowRecord, amount: bigint, signal: AbortSignal) =>
@@ -457,7 +513,7 @@ else {
       // where money for a pool goes (src/pool-deposit-address.ts): U_X from its scope's public record, named ahead by this
       // page; a quote from another chain at the device's own price reads and floor, its address only once the follow
       // took it (src/pool-deposit-follow.ts), on mainnet only
-      "pool.address": poolAddressHost({ pools: pageAddressPools, network: PAGE_NETWORK, read: fs.depositRead, named: () => namer.named(), priced: pricedFor, floor: floorFor, checked: (id, chain, quote, u) => poolFollow!.quoted(id, chain, quote, u), stop: quotesStopped }),
+      "pool.address": poolAddress,
       buy: trades,
       // the pool kinds (src/pool-kinds.ts): each checked by src/rules/pool.ts, answered only on a pool this page's
       // network pins (src/pool-testnet.ts, whose flow runs deposit, buy, sell and withdraw on every build; a network with
