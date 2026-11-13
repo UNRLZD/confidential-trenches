@@ -5,6 +5,7 @@ import { PhoneAccountMenu } from "../screens/signin/Account.tsx";
 import { headerModel } from "../screens/signin/model.ts";
 import { useSigninSheet, useSigninSource } from "../screens/signin/source.tsx";
 import { W } from "../screens/signin/Word.tsx";
+import type { WordId } from "../screens/signin/words.ts";
 import { TokenRoute } from "../screens/token/TokenPage.tsx";
 import { VerifyRoute } from "../screens/verify/VerifyRoute.tsx";
 import { PortfolioMount } from "./PortfolioMount.tsx";
@@ -15,11 +16,15 @@ import type { RouteId } from "./routes.ts";
 // footer's pill. Orders draws `Coming soon` (card app-orders-coming-soon). A route its card has not filled yet and no
 // link reaches (the legal pages' cards) draws an empty main.
 
-/** Signed out, the header's Sign in (S1.1, the same word and the same sheet) in place of a page that needs an account. */
-function SignedOut() {
+/** Signed out, in place of a page that needs an account: one centred line saying what appears here, and under it the
+ *  header's Sign in (S1.1, the same word and the same sheet), as the live UNRLZD terminal draws its signed-out pages. */
+function SignedOut({ line }: { line: WordId }) {
   const { setOpen } = useSigninSheet();
   return (
     <div className="signed-out" data-signed-out>
+      <span className="so-line" data-signed-out-line>
+        <W id={line} />
+      </span>
       <button type="button" className="btn-signin" onClick={() => setOpen(true)}>
         <W id="signIn" />
       </button>
@@ -27,11 +32,12 @@ function SignedOut() {
   );
 }
 
-/** A page that needs an account: Sign in while signed out, the page once signed in (nothing while the state loads). */
-const needsAccount = (In: ComponentType | null): ComponentType =>
+/** A page that needs an account: its line and Sign in while signed out, the page once signed in (nothing while the
+ *  state loads). */
+const needsAccount = (In: ComponentType | null, line: WordId): ComponentType =>
   function Gate() {
     const kind = headerModel(useSigninSource().snapshot).kind;
-    if (kind === "out") return <SignedOut />;
+    if (kind === "out") return <SignedOut line={line} />;
     return In && kind !== "loading" ? <In /> : null;
   };
 
@@ -50,9 +56,9 @@ const SCREENS: Partial<Record<RouteId, ComponentType>> = {
   discover: DiscoverRoute,
   verify: VerifyOverTrenches,
   // the account rows (S1.16 at 390) for the phone's Account tab
-  profile: needsAccount(PhoneAccountMenu),
+  profile: needsAccount(PhoneAccountMenu, "accountSignedOut"),
   // Portfolio and Activity, each tap mounted (PortfolioMount.tsx)
-  portfolio: needsAccount(PortfolioMount),
+  portfolio: needsAccount(PortfolioMount, "portfolioSignedOut"),
   // orders are out of the plan for now: Coming soon, signed in or out (card app-orders-coming-soon)
   orders: OrdersRoute,
 };

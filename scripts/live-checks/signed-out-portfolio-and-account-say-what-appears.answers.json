@@ -1,0 +1,134 @@
+{
+ "good": {
+  "check": "signed-out-portfolio-and-account-say-what-appears",
+  "at": "2026-11-13T06:57:39.590Z",
+  "source": "harness, terminal build apps/terminal/dist, signed out",
+  "browser": "156.0.8078.79",
+  "runs": [
+   {
+    "width": "phone",
+    "framed": true,
+    "top": "https://confidential.unrealized.trade/profile",
+    "pages": [
+     {
+      "path": "/portfolio",
+      "route": "portfolio",
+      "header": "S1.1",
+      "block": true,
+      "line": "Your equity, positions and trades appear here after you sign in.",
+      "lineVisible": true,
+      "lineAbove": true,
+      "button": "Sign in",
+      "text": "Your equity, positions and trades appear here after you sign in.Sign in"
+     },
+     {
+      "path": "/profile",
+      "route": "profile",
+      "header": "S1.1",
+      "block": true,
+      "line": "Your account appears here after you sign in.",
+      "lineVisible": true,
+      "lineAbove": true,
+      "button": "Sign in",
+      "text": "Your account appears here after you sign in.Sign in"
+     }
+    ]
+   },
+   {
+    "width": "desktop",
+    "framed": true,
+    "top": "https://confidential.unrealized.trade/profile",
+    "pages": [
+     {
+      "path": "/portfolio",
+      "route": "portfolio",
+      "header": "S1.1",
+      "block": true,
+      "line": "Your equity, positions and trades appear here after you sign in.",
+      "lineVisible": true,
+      "lineAbove": true,
+      "button": "Sign in",
+      "text": "Your equity, positions and trades appear here after you sign in.Sign in"
+     },
+     {
+      "path": "/profile",
+      "route": "profile",
+      "header": "S1.1",
+      "block": true,
+      "line": "Your account appears here after you sign in.",
+      "lineVisible": true,
+      "lineAbove": true,
+      "button": "Sign in",
+      "text": "Your account appears here after you sign in.Sign in"
+     }
+    ]
+   }
+  ]
+ },
+ "bad": {
+  "check": "signed-out-portfolio-and-account-say-what-appears",
+  "at": "2026-11-13T06:58:14.588Z",
+  "source": "live https://ct-app.unrealized.trade",
+  "browser": "156.0.8078.79",
+  "runs": [
+   {
+    "width": "phone",
+    "framed": true,
+    "top": "https://confidential.unrealized.trade/profile",
+    "pages": [
+     {
+      "path": "/portfolio",
+      "route": "portfolio",
+      "header": "S1.1",
+      "block": true,
+      "line": null,
+      "lineVisible": false,
+      "lineAbove": null,
+      "button": "Sign in",
+      "text": "Sign in"
+     },
+     {
+      "path": "/profile",
+      "route": "profile",
+      "header": "S1.1",
+      "block": true,
+      "line": null,
+      "lineVisible": false,
+      "lineAbove": null,
+      "button": "Sign in",
+      "text": "Sign in"
+     }
+    ]
+   },
+   {
+    "width": "desktop",
+    "framed": true,
+    "top": "https://confidential.unrealized.trade/profile",
+    "pages": [
+     {
+      "path": "/portfolio",
+      "route": "portfolio",
+      "header": "S1.1",
+      "block": true,
+      "line": null,
+      "lineVisible": false,
+      "lineAbove": null,
+      "button": "Sign in",
+      "text": "Sign in"
+     },
+     {
+      "path": "/profile",
+      "route": "profile",
+      "header": "S1.1",
+      "block": true,
+      "line": null,
+      "lineVisible": false,
+      "lineAbove": null,
+      "button": "Sign in",
+      "text": "Sign in"
+     }
+    ]
+   }
+  ]
+ }
+}
