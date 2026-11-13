@@ -740,7 +740,12 @@ const shownAtStop = ended === null ? await followRun : ended;
 const uxNotes = (await mine(A.w)).filter((n) => n.ref.kind === "deposit" && n.ref.i === ux.index);
 for (const n of uxNotes) for (const s of n.evmSends ?? []) txHashes.set(s.hash, "carry: U_X deposit");
 for (const x of carried) txHashes.set(x.hash, "carry: U_X deposit");
-step("carry", { shownMs, finalizedAt, inPoolMs, followEnd: ended, shownAtStop, statusCalls, stages: [...stages], txs: carried, sent: sends() - beforeUnder, balance: await balanceOf(A.w), notes: await statesOf(A.w), uxLeft: BigInt(await anvil("eth_getBalance", [ux.evm, "latest"])) }, shownMs !== null && (PLAIN ? shownAtStop === "in_pool" && stages.includes("in_transit") && statusCalls === 0 && plainSends.length === 2 && plainSends.every((x) => x.status === "0x1") : ended === "in_pool") && carried.length === 1);
+// --plain: the follow writes its carry's txs once both of the pool's RPCs read the deposit final; a deposit that filled
+// before its block was final (Robinhood, run of 09:41Z) leaves that write to the follow's end, at the quote's deadline,
+// past this run. Then the carry's one tx is the U_X note's own send (its receipt 0x1 is read in finish)
+const noteSends = uxNotes.flatMap((n) => (n.evmSends ?? []).map((x) => x.hash));
+const carryOne = carried.length === 1 || (PLAIN && carried.length === 0 && noteSends.length === 1);
+step("carry", { carriedBy: carried.length > 0 ? "follow" : "note", noteSends, shownMs, finalizedAt, inPoolMs, followEnd: ended, shownAtStop, statusCalls, stages: [...stages], txs: carried, sent: sends() - beforeUnder, balance: await balanceOf(A.w), notes: await statesOf(A.w), uxLeft: BigInt(await anvil("eth_getBalance", [ux.evm, "latest"])) }, shownMs !== null && (PLAIN ? shownAtStop === "in_pool" && stages.includes("in_transit") && statusCalls === 0 && plainSends.length === 2 && plainSends.every((x) => x.status === "0x1") : ended === "in_pool") && carryOne);
 
 // 5. the restore's U_X read: the pool's own pair, never the helper
 await guard("restore reads U_X", async () => {
