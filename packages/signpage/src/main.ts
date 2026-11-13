@@ -328,8 +328,10 @@ else {
       fee: () => form.fee(),
       cash: () => form.available(),
       handoff,
-      // an EVM pool's quote floor (its least rung plus one deposit's gas), the same read pool.address checks against
-      floor: (chain) => (chain === "solana" ? Promise.resolve(null) : evmRoute.floor(chain)),
+      // a pool's quote floor, the same read pool.address checks against: an EVM pool's least rung plus one deposit's gas;
+      // Solana's rung, one deposit's cost and the rent U_X keeps, its fee read for a message by the pool's pinned fee
+      // payer (a deposit's fee is the same for any one signer, and the read names no account of the user's)
+      floor: (chain) => (chain === "solana" ? (PAGE_SOL_PIN === undefined ? Promise.resolve(null) : floorFor(chain, PAGE_SOL_PIN.feePayer)) : evmRoute.floor(chain)),
       // the quote's follow op ended: its money is in the pool (or refunded), no longer on its way
       landed: async (id) => {
         const op = await (await open()).get("ops", id).catch(() => undefined);

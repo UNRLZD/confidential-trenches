@@ -19,7 +19,9 @@ import "../trade/trade.css";
 // From (the row's chain) and To, each a chain tile with its balance; Amount with Max; You get, about, the fee and
 // Arrives from pool.move.dry; the route's flow as the buy's route strip draws it (trade/RouteStrip.tsx classes: a node
 // glows while it runs, checks when passed, the dotted link fills); one Move, then the op's stages from state.ops until
-// it lands. The sheet asks the signing page (move-source.tsx) and never builds a path of its own.
+// it lands. The sheet asks the signing page (move-source.tsx) and never builds a path of its own. Max is what the page
+// says the move can send (card move-sends-what-it-shows: a dry of the whole balance answers it), and an amount it cannot
+// send names the amounts it can: Min, the least that clears every floor on the route, or Try, the nearest it sends.
 
 export interface MoveUi {
   from: MoveChain;
@@ -43,6 +45,10 @@ export function MoveSheet({ ui, set, rows, state, src, on, now, withdraw, close 
   const check = from ? checkAmount(ui.amount, from) : ({ kind: "none" } as const);
   const [dry, setDry] = useState<DryAnswer | "loading" | null>(null);
   const [tries, setTries] = useState(0);
+  // the most this move can send, as the page answers it for this pair (its own dry of the whole balance, or any dry
+  // since): null until it has answered, so Max never offers an amount the move would refuse
+  const [top, setTop] = useState<{ pair: string; max: string } | null>(null);
+  const pair = `${ui.from}>${ui.to}`;
   const started = useRef<number | null>(null);
   const [reached, setReached] = useState(-1);
   const [tick, setTick] = useState(0);
@@ -59,6 +65,26 @@ export function MoveSheet({ ui, set, rows, state, src, on, now, withdraw, close 
       clearTimeout(t);
     };
   }, [src, ui.from, ui.to, ask, ui.id, tries]);
+
+  // Max: a dry of the whole balance, asked once per pair and balance; its max (a page before kit 1.16 sends none and
+  // prices the whole balance when it can send it)
+  const whole = from && from.pooled > 0n ? exact(from.pooled, from.decimals) : null;
+  useEffect(() => {
+    if (ui.id !== null || whole === null || ui.from === ui.to) return;
+    let live = true;
+    void src.dry({ from: ui.from, to: ui.to, amount: whole }).then((a) => {
+      const max = a.kind === "limits" ? a.value.max : a.kind === "ok" ? a.value.max ?? whole : null;
+      if (live && max !== null) setTop({ pair: `${ui.from}>${ui.to}`, max });
+    });
+    return () => {
+      live = false;
+    };
+  }, [src, ui.from, ui.to, whole, ui.id, tries]);
+  // every dry since names it too
+  useEffect(() => {
+    if (dry && dry !== "loading" && dry.kind !== "refused" && dry.value.max !== undefined) setTop({ pair, max: dry.value.max });
+  }, [dry, pair]);
+  const maxText = top?.pair === pair && from && (baseUnits(top.max, from.decimals) ?? 0n) > 0n ? top.max : null;
 
   const steps = (dry && dry !== "loading" && dry.kind === "ok" ? dry.value.steps : null) ?? routeSteps(ui.from, ui.to) ?? [];
   const nodes = nodesOf(steps);
@@ -101,7 +127,30 @@ export function MoveSheet({ ui, set, rows, state, src, on, now, withdraw, close 
   const elapsed = started.current === null ? 0 : Math.max(0, Math.floor((now + tick * 1000 - started.current) / 1000));
 
   let quote: ReactNode;
-  if (dry && dry !== "loading" && dry.kind === "refused" && ui.id === null) {
+  if (dry && dry !== "loading" && dry.kind === "limits" && ui.id === null) {
+    // what it can send instead, each amount a tap that types it: Min (the least that clears every floor; drawn with no
+    // tap when even Max is under it), else Try the nearest amounts it sends, else Max itself
+    const l = dry.value;
+    const tap = (a: string) => (
+      <button type="button" key={a} className="retry num" data-control="move-try" data-amount={a} onClick={() => set({ amount: a })}>
+        {coin(from, a)}
+      </button>
+    );
+    const fits = (a: string) => from !== null && (baseUnits(a, from.decimals) ?? 0n) <= (baseUnits(l.max, from.decimals) ?? 0n);
+    const near = [l.below, l.above].filter((a): a is string => a !== undefined);
+    quote =
+      l.min !== undefined ? (
+        <div className="dstat warn row" data-move-dry="min" data-move-min={l.min}>
+          <span><W id="min" /></span>
+          {fits(l.min) ? tap(l.min) : <span className="num">{coin(from, l.min)}</span>}
+        </div>
+      ) : (
+        <div className="dstat warn row" data-move-dry="try">
+          <span><W id="try" /></span>
+          <span className="mvtry">{(near.length > 0 ? near : [l.max]).flatMap((a, i) => (i > 0 ? [<span key={`or${i}`}><W id="or" /></span>, tap(a)] : [tap(a)]))}</span>
+        </div>
+      );
+  } else if (dry && dry !== "loading" && dry.kind === "refused" && ui.id === null) {
     quote =
       dry.code === "busy" || dry.code === "down" ? (
         <div className="dstat warn row" data-move-dry={dry.code}><span><W id="busy" /></span><button type="button" className="retry" onClick={() => setTries((t) => t + 1)}><W id="retry" /></button></div>
@@ -149,7 +198,7 @@ export function MoveSheet({ ui, set, rows, state, src, on, now, withdraw, close 
           </div>
           <Side label="from" rows={rows} value={ui.from} locked={ui.id !== null} pick={(c) => pick("from", c)} />
           <Side label="to" rows={rows} value={ui.to} locked={ui.id !== null} pick={(c) => pick("to", c)} />
-          <label className={check.kind === "over" || check.kind === "bad" ? "damt bad" : "damt"}>
+          <label className={check.kind === "over" || check.kind === "bad" || (dry && dry !== "loading" && dry.kind === "limits" && ui.id === null) ? "damt bad" : "damt"}>
             <span className="lb"><W id="amount" /></span>
             <span className="row">
               <input className="v num" inputMode="decimal" autoComplete="off" placeholder="0" value={ui.amount} disabled={ui.id !== null} onChange={(e) => set({ amount: e.target.value.replace(",", ".") })} data-field="move-amount" />
@@ -158,7 +207,7 @@ export function MoveSheet({ ui, set, rows, state, src, on, now, withdraw, close 
           </label>
           <div className="lim">
             <span className={check.kind === "over" ? "loss" : ""}><W id="balance" /> <span className="num">{from ? amount(from.pooled, from.decimals) : "—"}</span> {from?.asset}</span>
-            <button type="button" className="mvmax" data-control="move-max" disabled={!from || from.pooled === 0n || ui.id !== null} onClick={() => from && set({ amount: exact(from.pooled, from.decimals) })}><W id="max" /></button>
+            <button type="button" className="mvmax" data-control="move-max" data-max={maxText ?? undefined} disabled={maxText === null || ui.id !== null} onClick={() => maxText !== null && set({ amount: maxText })}><W id="max" /></button>
           </div>
           {ui.id === null || ui.refused !== null ? quote : null}
           <Flow nodes={nodes} states={states} sent={ui.id !== null ? coin(from, ui.amount.trim()) : null} got={op?.stage === "done" ? coin(to, op.out) : null} />
