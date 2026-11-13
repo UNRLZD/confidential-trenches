@@ -12,6 +12,8 @@
 //   - /v1/rpc/solana-devnet, asked from SIGN_HOST's origin: getLatestBlockhash answers 200 with CORS for SIGN_HOST and a
 //     blockhash (the signing page's devnet reads and the run's second RPC).
 // After: app helper
+// Bundle: out the helper's market and devnet RPC answers, and the response headers APP_HOST adds
+// Serial: jupiter-budget 90
 //   node scripts/live-checks/app-a2-e2e.mjs [--as <origin>] [--record <file>]
 //     --as asks the helper's reads from another origin (the recorded bad answer: an origin the helper does not serve)
 //     PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3 (the helper's devnet RPC gave no answer: a 429, a

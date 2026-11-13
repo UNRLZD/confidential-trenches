@@ -16,6 +16,7 @@
 //   - no CSP violation and no console error in the terminal's frame.
 // A screenshot of each width with every pool row open is kept.
 // After: app --network {network}
+// Bundle: out a browser and chain RPCs
 //   node scripts/live-checks/verify-pools.mjs [--network mainnet|testnet] [--shots <dir>] [--record <file>]
 //     the deployed hosts: APP_HOST/verify as it is served (--network: the network its build names; mainnet when not given)
 //   node scripts/live-checks/verify-pools.mjs --harness [--build <dir>] [--network mainnet|testnet] [--plant authority] ...

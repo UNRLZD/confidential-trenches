@@ -10,6 +10,7 @@
 // landing right with the hint corrected and their next load at CLS 0) is the terminal's own browser run,
 // apps/terminal/test/header-search/run.mjs, and the hint's rules apps/terminal/test/signin-hint.test.ts.
 // After: app
+// Bundle: child app --root apps/terminal/dist
 //   node scripts/live-checks/app-header-first-paint-auth.mjs [--url <url>] [--record <file>]
 //   node scripts/live-checks/app-header-first-paint-auth.mjs --root <dir> [...]   the page read from a local build
 //     (apps/terminal/dist, built first) on disk; nothing is read over the network

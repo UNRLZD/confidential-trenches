@@ -14,6 +14,7 @@
 //     ("the relay fees pay no tip Jito takes"): FAIL. Nothing is sent and the fee payer signs nothing.
 // It does not prove a buy lands: only a mainnet buy of several pieces does, read back on two RPCs.
 // After: sign helper
+// Bundle: out the helper's pieces route (a planted 2-piece buy) and mainnet's rent on two public RPCs; its bundle part, the kit's one tip for every set, is held on the sources by packages/kit/test/solana-pool-buy-pieces.test.ts and on a build by its own replay (owners-solana-buy-lands.test.mjs)
 //   node scripts/live-checks/owners-solana-buy-lands.mjs [--record <file>] [--answer <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";

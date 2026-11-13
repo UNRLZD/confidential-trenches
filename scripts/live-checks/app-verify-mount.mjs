@@ -22,6 +22,7 @@
 //     reads both RPCs afresh (none with no vault named) and draws the same end state, and its close returns home.
 // A screenshot of each width is kept.
 // After: app --network {network}
+// Bundle: out a browser and NEAR RPCs
 //   node scripts/live-checks/app-verify-mount.mjs [--network mainnet|testnet] [--shots <dir>] [--record <file>]
 //     the deployed hosts: APP_HOST/verify as it is served; --network is the network its build names (the deploy passes
 //     it, read from the build's _headers; mainnet when not given)

@@ -8,6 +8,7 @@
 //   - the block holds no other word: its text is the line and "Sign in", nothing more.
 // A screenshot of each page at each width is kept.
 // After: app
+// Bundle: out a browser (its --harness run is in test-browser)
 //   node scripts/live-checks/signed-out-portfolio-and-account-say-what-appears.mjs [--shots <dir>] [--record <file>]
 //     the deployed hosts: APP_HOST as it is served, signed out
 //   node scripts/live-checks/signed-out-portfolio-and-account-say-what-appears.mjs --harness [--build <dir>] [--shots <dir>] [--record <file>]

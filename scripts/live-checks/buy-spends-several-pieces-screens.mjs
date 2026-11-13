@@ -24,6 +24,7 @@
 // public/app.js, the build the deploy makes). The check runs on a pull request's own build too
 // (scripts/ci/bundle-checks.mjs).
 // After: app sign
+// Bundle: read app
 //   node scripts/live-checks/buy-spends-several-pieces-screens.mjs [--record <file>] [--answer <file>]
 // PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";

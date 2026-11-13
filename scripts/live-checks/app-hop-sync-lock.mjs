@@ -8,6 +8,7 @@
 // 1440 x 900 (desktop, dpr 1): Sign in, then the passkey way; once the shell has answered, the same way again. Want one
 // signin.open, the way still locked, and no line under it.
 // After: app
+// Bundle: out a browser
 //   node scripts/live-checks/app-hop-sync-lock.mjs [--shots <dir>] [--record <file>]
 //     the deployed APP_HOST (its bytes and headers as served, the helper live), framed by the stand-in shell
 //   node scripts/live-checks/app-hop-sync-lock.mjs --harness [--build <dir>] [--shots <dir>] [--record <file>]

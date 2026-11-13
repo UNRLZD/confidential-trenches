@@ -15,6 +15,7 @@
 // The withdraw run's own-spend reads (src/pool-withdraw.ts spendOwner) are in the testnet build only, which no host
 // serves; the pool-withdraw and pool-testnet tests and the round-3 probes cover them.
 // After: sign
+// Bundle: read sign
 //   node scripts/live-checks/signpage-withdraw-own-spend.mjs [--record <file>] [--answer <file>]
 // PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";

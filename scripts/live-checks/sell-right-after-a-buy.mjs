@@ -18,6 +18,7 @@
 // positions.test.ts, passes-yield.test.ts and pool-buy.test.ts). The recorded answers are facts() over the signing
 // page's build (build-app.mjs, the build the deploy makes): good at this card's head, before at its base.
 // After: sign
+// Bundle: read sign
 //   node scripts/live-checks/sell-right-after-a-buy.mjs [--record <file>] [--answer <file>]
 // PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";

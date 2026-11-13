@@ -29,6 +29,7 @@
 // pool-sell.test.ts, packages/signpage/test/rules-pool.test.ts). The served files being that
 // commit's build is signpage-release's.
 // After: sign
+// Bundle: read sign
 //   node scripts/live-checks/every-lamport-can-move.mjs [--record <file>] [--answer <file>]
 // PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";

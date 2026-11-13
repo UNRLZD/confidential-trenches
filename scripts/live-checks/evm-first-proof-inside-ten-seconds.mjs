@@ -21,6 +21,7 @@
 // What each part does is held by the signing page's tests (test/evm-landing-pass-trade.test.ts,
 // test/pool-deposit-evm.test.ts) and the wallet's (test/pool-evm-reads-once.test.ts).
 // After: sign
+// Bundle: read sign
 //   node scripts/live-checks/evm-first-proof-inside-ten-seconds.mjs [--local] [--record <file>]
 //   PASS exit 0, FAIL 1, error 2. --local judges this tree's SIGN_HOST build (signBuilt) in SIGN_HOST's place; --record
 //   writes what the run read, which evm-first-proof-inside-ten-seconds.test.mjs replays. Reads only.

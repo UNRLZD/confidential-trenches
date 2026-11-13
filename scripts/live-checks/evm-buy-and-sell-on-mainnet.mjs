@@ -22,6 +22,7 @@
 // test/pool-mainnet-evm.test.ts, scripts/build-network.test.mjs). scripts/ci/bundle-checks.mjs runs read and judge on
 // a pull request's own build.
 // After: sign
+// Bundle: read sign
 //   node scripts/live-checks/evm-buy-and-sell-on-mainnet.mjs [--local] [--record <file>]
 //   PASS exit 0, FAIL 1, error 2. --local judges this tree's SIGN_HOST build (signBuilt) in SIGN_HOST's place;
 //   --record writes what the run read, which evm-buy-and-sell-on-mainnet.test.mjs replays.

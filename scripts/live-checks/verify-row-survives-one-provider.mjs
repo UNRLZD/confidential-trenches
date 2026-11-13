@@ -11,6 +11,7 @@
 //   - the page asked the refused host and got the planted 400;
 //   - the Solana row is ok, read on two hosts of its list, neither the refused one.
 // After: app --network {network}
+// Bundle: out a browser and chain RPCs
 //   node scripts/live-checks/verify-row-survives-one-provider.mjs [--network mainnet] [--shots <dir>] [--record <file>]
 //     the deployed hosts: APP_HOST/verify as it is served, two loads (one per width)
 //   node scripts/live-checks/verify-row-survives-one-provider.mjs --harness [--build <dir>] ...

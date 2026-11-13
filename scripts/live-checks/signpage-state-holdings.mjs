@@ -20,6 +20,7 @@
 // build (--local). The PR's own build runs judge(read, { ledger: false }) in scripts/ci/bundle-checks.mjs, since it is
 // cut as a release only after its merge.
 // After: sign
+// Bundle: read sign
 //   node scripts/live-checks/signpage-state-holdings.mjs [--url <origin>] [--record <file>]
 //   node scripts/live-checks/signpage-state-holdings.mjs --local [--record <file>]   this tree's build (no ledger)
 //   PASS exit 0, FAIL exit 1, error exit 2. The record holds the script's path, integrity, size, sha384 and each
@@ -176,4 +177,10 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     console.error(`${KEY}: error: ${e?.message ?? e}`);
     process.exit(2);
   }
+}
+
+/** How scripts/ci/bundle-checks.mjs runs this check on a build (its `// Bundle: read` line): `f` answers from the build
+ *  folders as the host would; `dirs` names them (card ci-stops-costing-reruns, moved from bundle-checks.mjs). */
+export async function bundle(f) {
+  return judge(await read(f), { ledger: false });
 }

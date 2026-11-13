@@ -13,6 +13,7 @@
 // filter, the phone's search, CLS 0, no horizontal scroll, signed in and out) is the terminal's own browser run,
 // apps/terminal/test/header-search/run.mjs, and the model apps/terminal/test/header-search.test.ts.
 // After: app
+// Bundle: out the helper's lists and token answers (its behaviour run is in test:e2e)
 //   node scripts/live-checks/app-header-search-chain.mjs [--url <url>] [--helper <url>] [--record <file>]
 //   node scripts/live-checks/app-header-search-chain.mjs --root <dir> [...]   the page read from a local build
 //     (apps/terminal/dist, built first) on disk; the helper is still read live

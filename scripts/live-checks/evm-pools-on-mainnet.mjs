@@ -16,6 +16,7 @@
 // pull request's own build.
 // After: sign
 // After: helper --part helper
+// Bundle: read sign
 //   node scripts/live-checks/evm-pools-on-mainnet.mjs [--part helper] [--record <file>]
 //     PASS exit 0, FAIL 1, error 2, INCONCLUSIVE 3. --part helper reads the chain and the helper only, the run after a
 //     helper deploy, which changes nothing SIGN_HOST serves (so a helper deploy is never undone over SIGN_HOST's part).

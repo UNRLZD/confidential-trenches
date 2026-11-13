@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { readerFilter } from "../live-checks/signpage-withdraw-own-spend.mjs";
-import { buildFetch, CHILD_RUNS, IN_PROCESS, OUT, ROOT, run, SIGN, SIGN_DIR } from "./bundle-checks.mjs";
+import { buildFetch, bundlePlan, CHILD_RUNS, IN_PROCESS, OUT, ROOT, run, SIGN, SIGN_DIR } from "./bundle-checks.mjs";
 import { listOf } from "./live-plan.mjs";
 import { signBuilt } from "../signpage-built.mjs";
 
@@ -30,6 +30,30 @@ function signCopy(edit = (js) => js, repin = true) {
   writeFileSync(path.join(dir, "index.html"), repin ? index.replace(/integrity="sha384-[^"]+"/, `integrity="${sha384(js)}"`) : index);
   return dir;
 }
+
+test("each check's own Bundle lines read clean; a line that cannot be read is a named problem, never a skipped check", () => {
+  assert.deepEqual(bundlePlan().problems, []);
+  // card ci-stops-costing-reruns: no shared list is left to append to
+  assert.doesNotMatch(readFileSync(path.join(ROOT, "scripts/ci/bundle-checks.mjs"), "utf8"), /live-checks\/[a-z0-9-]+\.mjs/);
+  const dir = mkdtempSync(path.join(tmpdir(), "bundle-plan-"));
+  mkdirSync(path.join(dir, "scripts/live-checks"), { recursive: true });
+  const plant = { both: "read sign\n// Bundle: out a reason", host: "read web", reason: "out", mode: "fetch sign", args: "read sign --x", twice: "read app\n// Bundle: read app", good: "child app --root apps/terminal/dist" };
+  for (const [k, v] of Object.entries(plant)) writeFileSync(path.join(dir, "scripts/live-checks", `${k}.mjs`), `#!/usr/bin/env node\n// ${k}\n// Bundle: ${v}\nexport {};\n`);
+  // a Bundle line past the leading comment block is no header line
+  writeFileSync(path.join(dir, "scripts/live-checks/late.mjs"), "// late\nexport {};\n// Bundle: read sign\n");
+  const p = bundlePlan(dir);
+  rmSync(dir, { recursive: true, force: true });
+  const named = (k) => p.problems.filter((x) => x.startsWith(`${k}: `));
+  assert.match(named("both").join(), /run here and left out/);
+  assert.match(named("host").join(), /the host is sign or app/);
+  assert.match(named("reason").join(), /no reason/);
+  assert.match(named("mode").join(), /the mode is read, child or out/);
+  assert.match(named("args").join(), /a read takes no arguments/);
+  assert.match(named("twice").join(), /twice/);
+  assert.equal(p.problems.length, 6, p.problems.join("\n"));
+  assert.deepEqual(p.childRuns, [{ key: "good", host: "app", args: ["--root", "apps/terminal/dist"] }]);
+  assert.equal(p.inProcess.some((c) => c.key === "late"), false);
+});
 
 test("every check the SIGN_HOST and APP_HOST deploys run is run here or left out with its reason, never both", () => {
   const listed = new Set(["sign", "app"].flatMap((h) => listOf(h, ROOT, { commit: "0".repeat(40), network: "mainnet" }).checks));

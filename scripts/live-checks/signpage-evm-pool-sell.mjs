@@ -17,6 +17,7 @@
 // RPCS, CHAIN_IDS, DEPOSITED, SELL_SELECTOR and SELL_PINS are this file's own (it reaches no package code:
 // check:imports holds it); packages/signpage/test/pool-sell-evm.test.ts holds each equal to the page's own.
 // After: sign
+// Bundle: out a run record's sales on two testnet RPCs each and the helper's sell route; on the build, the mainnet refusal its bundle part reads is held by packages/signpage/test/pool-network.test.ts (pool.sell on Base and Robinhood not_allowed)
 //   node scripts/live-checks/signpage-evm-pool-sell.mjs [--record <file>] [--txs <md>]
 //   PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3 (a pool RPC gave no answer, provider-answer.mjs: never a
 //   pass). --record writes what the run read, so the check's test can replay it.

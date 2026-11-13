@@ -9,6 +9,7 @@
 //   - with --record-file <run.md>: every "Tx: solana <signature>" line of the run record is a landed transaction with no
 //     error on two public RPCs (api.mainnet-beta.solana.com and solana-rpc.publicnode.com).
 // After: sign
+// Bundle: out the page's CSP header, and a run record's transactions on two RPCs
 //   node scripts/live-checks/signpage-solana-trade.mjs [--record-file <run.md>] [--record <file>] [--answer <file>]
 // PASS exit 0, FAIL exit 1, error exit 2. --record writes the answer read; --answer replays one (the test's).
 import "../net-window.mjs";

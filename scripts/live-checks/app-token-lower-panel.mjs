@@ -13,6 +13,7 @@
 // and out) is the terminal's own browser run, apps/terminal/test/token-page/run.mjs (states lower-*), and the reads and
 // formats apps/terminal/test/token-lower-panel.test.ts.
 // After: app
+// Bundle: out the helper's holders answer
 //   node scripts/live-checks/app-token-lower-panel.mjs [--url <url>] [--helper <url>] [--mint <id>] [--record <file>]
 //   node scripts/live-checks/app-token-lower-panel.mjs --root <dir> [...]   the page read from a local build
 //     (apps/terminal/dist, built first) on disk; the helper is still read live

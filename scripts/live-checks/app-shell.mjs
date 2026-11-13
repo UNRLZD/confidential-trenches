@@ -25,6 +25,7 @@
 //     the load settles; a token load with no mark, no trade row or under 2 trades arrived fails.
 // A screenshot of every load is kept at both widths.
 // After: app
+// Bundle: out a browser
 //   node scripts/live-checks/app-shell.mjs [--url <origin>] [--shots <dir>] [--record <file>]
 //   node scripts/live-checks/app-shell.mjs --harness [--build <dir>] [--outage footer|footer-pair|solana|base|robinhood] ...   the hosts' real names answered from local
 //     files by Playwright's route, as app-in-shell.mjs --harness does: APP_HOST the terminal's build (apps/terminal/dist
