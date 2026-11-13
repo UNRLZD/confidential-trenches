@@ -158,11 +158,19 @@ test("ci.yml runs money-gate, verify-gate, vault-sandbox's rule, pr-paths' rule 
   assert.deepEqual(steps.map((s) => s.gate).sort(), ["money-gate", "pr-paths", "quote-speed", "vault-sandbox", "verify-gate"], JSON.stringify(steps, null, 2));
 });
 
+// card ci-runs-once-per-change: the vault sandbox's plan runs on the queue's group alone (its rule judges the group as a
+// pull request from main), so a pull request replays every other base gate; scripts/ci/ci-runs-once.mjs holds the fast
+// gates on pull requests
+const QUEUE_ONLY = ["vault-sandbox-plan"];
 for (const [event, clone] of [["pull_request", prClone], ["merge_group", groupClone]])
   test(`each base gate runs on ${event}, loads with every file it imports and judges the head's checkout, never the head's own copy`, (t) => {
     const pr = clone();
     t.after(() => rmSync(pr.dir, { recursive: true, force: true }));
     for (const step of baseGateSteps(readFileSync(CI, "utf8"))) {
+      if (event === "pull_request" && QUEUE_ONLY.includes(step.job)) {
+        assert.equal(jobRuns(step.jobIf, event), false, `${step.job} runs on pull_request (if: ${step.jobIf})`);
+        continue;
+      }
       assert.ok(jobRuns(step.jobIf, event), `${step.job} does not run on ${event} (if: ${step.jobIf}): a skipped required check passes`);
       const { status, out } = replay(pr, step.run, step.env, event);
       const what = `${event} ${step.job}: ${step.run.join(" / ")}\n${out}`;
