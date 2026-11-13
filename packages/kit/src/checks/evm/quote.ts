@@ -156,7 +156,7 @@ export type EvmQuoteErrorCode =
   | "over_gas_floor"; // a buy's route needs more gas than the pool guarantees its swap, with the margin (card evm-buy-gas-floor); `reference` names the best route that fits, or none fits
 export class EvmQuoteError extends Error {
   readonly code: EvmQuoteErrorCode;
-  /** On below_reference, native_first and over_gas_floor, and on a buy's no_quote of a route that quotes nothing: the
+  /** On below_reference, native_first and over_gas_floor, and on a buy's no_quote or partial_fill of the asked route: the
    *  device's own best route, which the caller may quote instead (null on over_gas_floor and no_quote where no route
    *  fits). */
   readonly reference: { readonly amountOut: bigint; readonly route: EvmRoute } | null;
@@ -2101,6 +2101,8 @@ export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: r
   // the first round's no_quote of the route itself (a revert, 0 or nothing out, its read out of gas): the quote goes on
   // to find R as for a route below it, and refuses no_quote naming R (card evm-buy-and-sell-on-mainnet)
   let noMain = null as string | null;
+  let noMainCode: "no_quote" | "partial_fill" = "no_quote";
+  const missed = (code: "no_quote" | "partial_fill", why: string): void => void ((noMain = why), (noMainCode = code));
   const set = await routeSet({
     chain,
     v,
@@ -2142,23 +2144,23 @@ export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: r
     floor: (out) => lows.reduce((m, i) => {
       const x = out(i);
       return x !== null && x > 0n && x < m ? x : m;
-    }, out(main) ?? 1n),
+    }, noMain !== null ? 1n : out(main)!),
     // The route: a quote, and one that grows with its input
     firstRound: (out, answer) => {
       const q = out(main);
       const m = answer(main);
-      if (m.kind === "revert" && m.partial) return refuse("partial_fill", "a hookless hop runs out of liquidity (NotEnoughLiquidity)");
-      if (m.kind === "revert" && m.gas === true) return void (noMain = `the route's quote runs out of its gas read alone (${EVM_READ_CALL_GAS} gas a call)`);
-      if (q === null || q === 0n) return void (noMain = "the route reverts or quotes nothing");
+      if (m.kind === "revert" && m.partial) return missed("partial_fill", "a hookless hop runs out of liquidity (NotEnoughLiquidity)");
+      if (m.kind === "revert" && m.gas === true) return missed("no_quote", `the route's quote runs out of its gas read alone (${EVM_READ_CALL_GAS} gas a call)`);
+      if (q === null || q === 0n) return missed("no_quote", "the route reverts or quotes nothing");
       const q2 = out(twice);
-      if (q2 !== null && q2 <= q) return refuse("partial_fill", `twice the amount quotes ${q2}, not more than ${q}: a pool runs out`);
+      if (q2 !== null && q2 <= q) return missed("partial_fill", `twice the amount quotes ${q2}, not more than ${q}: a pool runs out`);
       // a v3 route has no hook: its quote at twice the amount reverts only when a pool cannot fill it. One whose read at
       // twice runs out of its gas alone (`gas`) is no revert (review of fe9f5ec3, finding 1): through one pool the 1x
       // read that answered within its gas filled whole, since a swap stopped at its price limit takes the 1x path at
       // twice and would answer within the same gas; through several, a hop's spam can hide another's partial fill
       const gas2 = (answer(twice) as { gas?: true }).gas === true;
       if (q2 === null && route.venue === "uniswap-v3" && gas2 && route.tokens.length > 2) return refuse("out_of_gas", "twice the amount runs out of a read's gas alone on a v3 route of more than one hop: its quote may be a partial fill");
-      if (q2 === null && route.venue === "uniswap-v3" && !gas2) return refuse("partial_fill", "twice the amount reverts on a v3 route");
+      if (q2 === null && route.venue === "uniswap-v3" && !gas2) return missed("partial_fill", "twice the amount reverts on a v3 route");
     },
   });
   const { block, out, fills, filled } = set;
@@ -2232,7 +2234,7 @@ export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: r
   if (noMain !== null) {
     const r = (await bestFits([{ l: priced, band: all }]))[0] ?? null;
     if (r !== null) ranOut(r, "the best route that fits");
-    return refuse("no_quote", noMain, r);
+    return refuse(noMainCode, noMain, r);
   }
   const fitted = await bestFits([
     { l: [{ route, amountOut: value }], band: all },

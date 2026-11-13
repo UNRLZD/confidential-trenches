@@ -834,6 +834,19 @@ test("card evm-buy-and-sell-on-mainnet: an asked route with no pool refuses no_q
   assert.equal(r4.reference?.amountOut, AMOUNT / 10n);
 });
 
+test("card evm-buy-and-sell-on-mainnet: an asked route that runs out (a thin pool anyone seeds at a standard shape) refuses partial_fill naming R, the real pool, never the thin one", async () => {
+  // HOOKR on Robinhood, 2026-11-13: the first indexed shape, a hookless spam-fee pool, and the 0.3% v3 pool both ran out
+  // (partial_fill, no reference), and the tap ended quote_check_failed with its real 1% v3 pool never asked
+  const token = "0x00000000000000000000000000000000000e06e6";
+  const thin: ModelPool = { key: keyOf(token, NATIVE, 10000, 200, NATIVE), give: (a) => (a / 10n > AMOUNT / 20n ? AMOUNT / 20n : a / 10n) };
+  const got = await noQuoteOf([thin, real(token)], token, seededRoute(token), scanner(5_000_000, [{ key: real(token).key, at: 4_500_000 }]));
+  assert.deepEqual(got, { code: "partial_fill", reference: { amountOut: AMOUNT, route: realRoute(token) } });
+  // the thin pool alone: it fills nothing whole, so it is no R
+  const t2 = "0x00000000000000000000000000000000000e07e7";
+  const thin2: ModelPool = { ...thin, key: keyOf(t2, NATIVE, 10000, 200, NATIVE) };
+  assert.deepEqual(await noQuoteOf([thin2], t2, seededRoute(t2), scanner(5_000_000, [])), { code: "partial_fill", reference: null });
+});
+
 test("card evm-buy-and-sell-on-mainnet: a token with no pool at all, or none that fills, still refuses no_quote with no reference", async () => {
   const token = "0x00000000000000000000000000000000000e05e5";
   assert.deepEqual(await noQuoteOf([], token, seededRoute(token), scanner(5_000_000, [])), { code: "no_quote", reference: null });
