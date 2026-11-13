@@ -54,7 +54,7 @@ export const M = [
   ["D8b a held mint with no sell read taken as sold", SELL, T, 'sells.get(t.mint) ?? "no"', 'sells.get(t.mint) ?? "yes"'],
   ["D9 the burn list dropped", SELL, T, "const burn = holding.map((t) => t.ata);", "const burn: string[] = [];"],
   ["D10 the sell not recorded", SELL, T, "      owedRec.sell = { ...prior?.sell, [token]: { tx: base64.encode(signed), last: bhv.lastHeight } };\n", ""],
-  ["D11 a load passes no sell on", SELL, T, "mints: o.mints, wait, quiet: quiet(), leftover: true, ...(o.sell ? { sell: o.sell } : {}) }", "mints: o.mints, wait, quiet: quiet(), leftover: true }"],
+  ["D11 a load passes no sell on", SELL, T, "mints: o.mints, wait, quiet: quiet(o), leftover: true, ...(o.sell ? { sell: o.sell } : {}) }", "mints: o.mints, wait, quiet: quiet(o), leftover: true }"],
   // the review of bf467ae7's named ones: X2 (F3), Y2, Y3, Y4, Y7 (F4), its read order and commitment (F5), and the
   // armed path's burn list (F6); and a sell read's fault counted for a mint W no longer holds
   ["review X2 a burn's next close of another account", KIT, K, " && next.data[0] === 9 && next.accounts[0]?.key === h?.address;\n          if (!h || h.kind !== \"token\" || h.burn", " && next.data[0] === 9;\n          if (!h || h.kind !== \"token\" || h.burn"],
@@ -93,12 +93,12 @@ export const M = [
   ["review 7 P9 the open's lamports bound without the prefund", KIT, KC, "lam - c.prefund > SOLANA_TOKEN_ACCOUNT_RENT_MAX) sim", "lam > SOLANA_TOKEN_ACCOUNT_RENT_MAX) sim"],
   // delta review 7 of 08290868, item 1: W's buy mint (the buy's record) holds the pass while W holds any of it
   ["review 7 A1 the buy record not read into the pass", SELL, T, "const x: RentBack = buy ? { ...given, mints: mintsOf(given.mints, [buy]), buy } :", "const x: RentBack = buy ? { ...given, buy } :"],
-  ["review 7 A2 no buy record: the pass runs", SELL, T, '    if (!x.buy) return end("holds", "no buy of W\'s is recorded", x.unproven !== "again");\n', ""],
+  ["review 7 A2 no buy record: the pass runs", SELL, T, '    if (!x.buy && x.bare !== true) return end("holds", "no buy of W\'s is recorded", x.unproven !== "again");\n', ""],
   ["review 7 A3 a buy record read as none", SELL, T, "const x: RentBack = buy ? { ...given, mints: mintsOf(given.mints, [buy]), buy } : { ...given, buy: null,", "const x: RentBack = { ...given, buy: null,"],
   ["review 7 A5 the buy writes no record", BUY, TB, "      await h.bought?.put(w.address, { mint: venue.mint, program: venue.tokenProgram });\n", ""],
-  ["review 7 A6 the buy's record written after its send", BUY, TB, [["      await h.bought?.put(w.address, { mint: venue.mint, program: venue.tokenProgram });\n      const decimals = (d: number): void => {", "      const decimals = (d: number): void => {"], ["      return await sendAndSettle(h, r, release, pool, signed, bh.lastHeight, wait, { token, minOut, tell, bound, decimals, early });", "      try { return await sendAndSettle(h, r, release, pool, signed, bh.lastHeight, wait, { token, minOut, tell, bound, decimals, early }); } finally { await h.bought?.put(w.address, { mint: venue.mint, program: venue.tokenProgram }); }"]]],
+  ["review 7 A6 the buy's record written after its send", BUY, TB, "      await h.bought?.put(w.address, { mint: venue.mint, program: venue.tokenProgram });\n      return await sendAndSettle(h, r, release, pool, signed, bh.lastHeight, wait, { token, minOut, tell, bound, decimals, early }, before);", "      try { return await sendAndSettle(h, r, release, pool, signed, bh.lastHeight, wait, { token, minOut, tell, bound, decimals, early }, before); } finally { await h.bought?.put(w.address, { mint: venue.mint, program: venue.tokenProgram }); }"],
   // delta review 8 of 5697d7a1: with no buy record the pass holds; the record through the page's store
-  ["review 8 F1 no buy record: the page's holdings decide the pass", SELL, T, '    if (!x.buy) return end("holds", "no buy of W\'s is recorded", x.unproven !== "again");', '    if (!x.buy && x.mints.length > 0) return end("holds", "no buy of W\'s is recorded", x.unproven !== "again");'],
+  ["review 8 F1 no buy record: the page's holdings decide the pass", SELL, T, '    if (!x.buy && x.bare !== true) return end("holds", "no buy of W\'s is recorded", x.unproven !== "again");', '    if (!x.buy && x.bare !== true && x.mints.length > 0) return end("holds", "no buy of W\'s is recorded", x.unproven !== "again");'],
   ["review 8 C3 a buy record that cannot be read faults the pass", SELL, T, "const rec = (await Promise.resolve(h.bought?.get(address)).catch(() => undefined)) as Evidence[\"rec\"];", "const rec = (await h.bought?.get(address)) as Evidence[\"rec\"];"],
   ["review 8 C5 the buy host loses bought", TESTNET, TT, "      // W's buy mint, written before the send: the rent back after a later sell holds while W holds any of it\n      bought: buyMints(page.store),\n", ""],
   ["review 8 C6 the sell host loses bought", TESTNET, TT, "      owed: owedNoted(page.store),\n      bought: buyMints(page.store),\n", "      owed: owedNoted(page.store),\n"],
@@ -159,7 +159,7 @@ export const M = [
   ["a18 the proven buy not kept on the record", SELL, T, ", ...(kept.buy === undefined ? {} : { buy: kept.buy }), ...(lamports", ", ...(lamports"],
   ["a19 the record's proven buy proven again", SELL, T, "  let proven = o.buy;\n", "  let proven: SolanaBuy | null | undefined = undefined;\n"],
   ["a20 a sale's rent back keeps no seen", SELL, T, "owedRec, hold, await seenOf(h, w.address, owedRec.mints))));", "owedRec, hold, undefined)));"],
-  ["a21 a plain release's W read again on every load", SELL, T, "const x: RentBack = buy ? { ...given, mints: mintsOf(given.mints, [buy]), buy } : { ...given, buy: null, ...(unproven ? { unproven } : {}) };", "const x: RentBack = buy ? { ...given, mints: mintsOf(given.mints, [buy]), buy } : { ...given, buy: null, unproven: \"again\" };"],
+  ["a21 a plain release's W read again on every load", SELL, T, "const x: RentBack = buy ? { ...given, mints: mintsOf(given.mints, [buy]), buy } : { ...given, buy: null, ...(o.found === true ? { bare: true as const } : unproven ? { unproven } : {}) };", "const x: RentBack = buy ? { ...given, mints: mintsOf(given.mints, [buy]), buy } : { ...given, buy: null, ...(o.found === true ? { bare: true as const } : { unproven: \"again\" as const }) };"],
   // card round-trip-costs-less c: the sale's price per compute unit from recent fees (solanaSellPrice), its use in the budget
   ["c1 the price at the median, not the 75th percentile", SELL, T, "Math.ceil((fees.length * 3) / 4) - 1", "Math.ceil(fees.length / 2) - 1"],
   ["c2 the lower RPC's price", SELL, T, "    const high = a > b ? a : b;\n", "    const high = a > b ? b : a;\n"],

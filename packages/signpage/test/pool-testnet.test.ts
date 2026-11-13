@@ -774,7 +774,7 @@ test("card buy-spends-several-pieces: helperPoolSendPieces posts {pool, txs} in 
   assert.match(src, /owner: async \(r\) => \{\s*const rs = settleRpcs\("pass"\);[\s\S]{0,400}?spendOwner\(rs, \{ program: r\.spend\.program, feePayer: r\.spend\.feePayer \}, r\.address, BigInt\(r\.spend\.nullifier\), r\.spend\.context, /);
   // a restore's scan: the batch on the helper's seat on mainnet, never a public provider; the testnet build one W a request
   assert.match(src, /const batch = POOL_TESTNET \? null : over\.rpcs \? over\.rpcs\[1\] : solanaPacedRpc\(pageHelperRpc\(TRADE_HELPER,/);
-  assert.match(src, /if \(scan\) await findHeldWs\(mine\)\.catch\(\(\) => \{\}\);\s*await resumeRentBacks\(h, locks\);/);
+  assert.match(src, /if \(scan\) await findHeldWs\(mine\)\.catch\(\(\) => \{\}\);\s*return await resumeRentBacks\(h, locks\);/);
 });
 
 test("card buy-spends-several-pieces: piecesOwedOf keeps one record a W in the store's meta/owed/pieces-sol, put over and dropped by W", async () => {
