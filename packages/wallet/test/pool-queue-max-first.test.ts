@@ -334,3 +334,24 @@ test("a bind's older read of the pool's time never moves the queue's read back: 
   assert.equal(seen[0], START + 1_000n, "the pass's read");
   assert.ok(seen[1] !== undefined && seen[1] >= START + 1_000n, `the second bind keeps the newer read: ${seen[1]}`);
 });
+
+test("a tier 2 proof made again to a new primary's W raises Max, so it comes before the epoch's remakes, the new primary's own among them", async () => {
+  const v = await vaultWith([usd(2), usd(5.5), usd(10), usd(20)]);
+  const pool = piecesPool(v);
+  let now = START + 1_000n;
+  pool.now = async () => now;
+  const q = openProofQueue({ seed64: SEED, notes: v.ns, pool: pool as Pool<unknown>, provers: [signalsProver()], hardwareConcurrency: 16 });
+  open.push(q);
+  await q.refresh();
+  const P = await noteOf(v, usd(20));
+  const ten = await noteOf(v, usd(10));
+  const own = q.ready().find((r) => r.noteId === P.id && r.own === true)!;
+  await q.takeSet([{ noteId: P.id, attempt: own.attempt }], undefined, 99n);
+  // the next epoch: the 10 is the primary; the 5.5 and the 2 have pieces to the 20's W, made again to the 10's
+  now = START + E + 1_000n;
+  pool.binds.length = 0;
+  await q.refresh();
+  const order = pool.binds.map((b) => `${b.wallet.address === W(ten) ? "W10" : "other"} ${b.chunk}`);
+  assert.deepEqual(order.slice(0, 2), [`W10 ${usd(5)}`, `W10 ${usd(2)}`], `the pieces to the new W first: ${order.join(", ")}`);
+  assert.equal(order[2], `W10 ${usd(10)}`, "then the remakes, the primary's own first");
+});
