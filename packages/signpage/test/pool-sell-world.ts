@@ -115,6 +115,9 @@ export type Plant = {
   units?: number;
   /** the recorded venue the sell goes to (pump's curve when not given) */
   venue?: Venue;
+  /** a landed sell pays W this many lamports above its min out (card partial-sell-pays-all-into-cash: the venue paid
+   *  above the floor; 0 when not given) */
+  paysOver?: bigint;
   /** W's lamports (ENOUGH when not given) */
   lamports?: number;
   /** RPC 1's read of W's token account: this amount */
@@ -450,7 +453,7 @@ export function chain(plant: Plant = {}) {
     const venueSell = m.instructions.find((x) => x.data.length === 24 && (m.staticKeys[x.programIndex] === SOLANA_PUMP_PROGRAM || m.staticKeys[x.programIndex] === SOLANA_PUMP_AMM_PROGRAM));
     if (venueSell && !m.instructions.some((x) => m.staticKeys[x.programIndex] === PROGRAM)) {
       const sold = new DataView(venueSell.data.buffer, venueSell.data.byteOffset + 8, 8).getBigUint64(0, true);
-      let got = new DataView(venueSell.data.buffer, venueSell.data.byteOffset + 16, 8).getBigUint64(0, true);
+      let got = new DataView(venueSell.data.buffer, venueSell.data.byteOffset + 16, 8).getBigUint64(0, true) + (plant.paysOver ?? 0n);
       const made: [string, string, number][] = m.staticKeys[venueSell.programIndex] === SOLANA_PUMP_AMM_PROGRAM && plant.cashback ? ([[ammVol, SOLANA_PUMP_AMM_PROGRAM, 137], [ammAta, SOLANA_TOKEN_PROGRAM, 165]] as [string, string, number][]).filter(([x, owner]) => accounts.get(x)?.owner !== owner) : [];
       for (const [, , size] of made) got -= solanaRentMin(rent, size);
       const ends = BigInt(accounts.get(signer)?.lamports ?? 0) + got - feeOf(m);
@@ -495,7 +498,7 @@ export function chain(plant: Plant = {}) {
     const sellIx = m.instructions.find((x) => x.data.length === 24);
     let gets = 0n;
     if (sellIx) {
-      gets = new DataView(sellIx.data.buffer, sellIx.data.byteOffset + 16, 8).getBigUint64(0, true);
+      gets = new DataView(sellIx.data.buffer, sellIx.data.byteOffset + 16, 8).getBigUint64(0, true) + (plant.paysOver ?? 0n);
       if (m.staticKeys[sellIx.programIndex] === SOLANA_PUMP_AMM_PROGRAM && plant.cashback) {
         for (const [x, owner, size] of [[ammVol, SOLANA_PUMP_AMM_PROGRAM, 137], [ammAta, SOLANA_TOKEN_PROGRAM, 165]] as const) if (accounts.get(x)?.owner !== owner) gets -= solanaRentMin(rent, size);
       }
@@ -513,7 +516,7 @@ export function chain(plant: Plant = {}) {
     if (sell) {
       sellLanded = true;
       const sold = new DataView(sell.data.buffer, sell.data.byteOffset + 8, 8).getBigUint64(0, true);
-      got = new DataView(sell.data.buffer, sell.data.byteOffset + 16, 8).getBigUint64(0, true);
+      got = new DataView(sell.data.buffer, sell.data.byteOffset + 16, 8).getBigUint64(0, true) + (plant.paysOver ?? 0n);
       const t = accounts.get(ataOf(signer))!;
       const d = t.data.slice();
       const dv = new DataView(d.buffer, 64, 8);

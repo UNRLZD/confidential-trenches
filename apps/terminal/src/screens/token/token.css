@@ -58,6 +58,9 @@
 @container tkp-mid (max-width: 964.98px) { .tkp-strip > [data-k="liq"] { display: none; } }
 @container tkp-mid (max-width: 859.98px) { .tkp-strip > [data-k="vol"] { display: none; } }
 @container tkp-mid (max-width: 754.98px) { .tkp-strip > [data-k="tax"] { display: none; } }
+/* a symbol longer than that budget: the same tiles give way in the same order until it is whole (strip-fit.ts, card
+   rail-open-keeps-the-symbol-whole) */
+.tkp-strip > [data-fit="drop"] { display: none; }
 .tkp-head { flex: none; display: flex; align-items: center; gap: 14px; padding: 6px 4px 2px; flex-wrap: nowrap; }
 /* one row (the locked design): the identity takes what the strip leaves and its text truncates, so the strip's width
    comes only from its own tiles and it starts at the same x before and after the read (CLS 0) */

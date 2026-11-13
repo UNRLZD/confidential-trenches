@@ -95,6 +95,12 @@ const TABLES = TABLE === "pinned" ? PAGE_TABLES : Object.freeze(Object.fromEntri
 // (1, 2 or 5 x 10^k x 0.001 SOL); 0.01 SOL by default. A larger one leaves W enough after a full sell for its sweep, so
 // a run times the sale, the teardown and the sweep.
 const RUNG = process.env.FLOW_RUNG === undefined ? 10_000_000n : BigInt(process.env.FLOW_RUNG);
+// FLOW_SELL_BPS=<bps> (card partial-sell-pays-all-into-cash): the sell is that share of W's holding, a partial sale, at
+// FLOW_SELL_SLIPPAGE (300 bp by default); the record's `partial` holds Cash (the UNSPENT notes) before and after, what
+// the sale paid W (its own transaction's balances: W's change, its fee and what its deposit took) and W after it
+const SELL_BPS = process.env.FLOW_SELL_BPS === undefined ? null : Number(process.env.FLOW_SELL_BPS);
+if (SELL_BPS !== null && !(Number.isInteger(SELL_BPS) && SELL_BPS > 0 && SELL_BPS < 10_000)) throw new Error(`FLOW_SELL_BPS: 1 to 9999, not ${process.env.FLOW_SELL_BPS}`);
+const SELL_SLIPPAGE = Number(process.env.FLOW_SELL_SLIPPAGE ?? 300);
 {
   let q = RUNG / 1_000_000n;
   while (q > 0n && q % 10n === 0n) q /= 10n;
@@ -534,6 +540,7 @@ else if (landed) {
   }
 }
 let sell = null;
+let partial = null;
 let rentBack = null;
 const bought = buy?.notes?.some((n) => n.state === "SPENT");
 if (bought && process.env.FLOW_COPY_STOP !== "buy") {
@@ -582,7 +589,9 @@ if (bought && process.env.FLOW_COPY_STOP !== "buy") {
   log(`pool.sell of ${amount} of ${MINT} from W ${W}`);
   if (DUST) dust.armed = sentTxs.length;
   phase = "sell";
-  sell = await run("pool.sell", { chain: "solana", token: MINT, amount, slippage_bps: 300 });
+  const cash = async () => (await noteList()).filter((n) => n.state === "UNSPENT" && n.value !== null).reduce((t, n) => t + BigInt(n.value), 0n);
+  const cashBefore = SELL_BPS === null ? null : await cash();
+  sell = await run("pool.sell", SELL_BPS === null ? { chain: "solana", token: MINT, amount, slippage_bps: 300 } : { chain: "solana", token: MINT, share_bps: SELL_BPS, slippage_bps: SELL_SLIPPAGE });
   log(`sell ${JSON.stringify(sell)}`);
   // the rent back (card sol-buy-rent-back): after the full sell, W's token account and volume accounts at finalized,
   // and W's own lamports: each closed (null) and W at 0 when it all came back; read once every transaction the page
@@ -605,6 +614,24 @@ if (bought && process.env.FLOW_COPY_STOP !== "buy") {
   const { solanaVolumeAccumulator, SOLANA_PUMP_PROGRAM, SOLANA_PUMP_AMM_PROGRAM } = await import("../../kit/src/checks/solana/checks.ts");
   const left = async (a) => (await info(a))?.lamports ?? null;
   phase = "after the sell";
+  if (SELL_BPS !== null) {
+    // what the sale paid W: W's change in the sale's own transaction, plus its fee, plus every lamport the accounts its
+    // deposit names (the pool's, its pages, the mark) gained there
+    const sig = sell?.answer?.result?.txs?.[0]?.hash;
+    const tx = sig ? await own("getTransaction", [sig, { encoding: "jsonParsed", commitment: "finalized", maxSupportedTransactionVersion: 0 }]) : null;
+    const keys = tx?.transaction?.message?.accountKeys?.map((k) => (typeof k === "string" ? k : k.pubkey)) ?? [];
+    const dep = tx?.transaction?.message?.instructions?.find((x) => x.programId === PIN.program);
+    const delta = (a) => {
+      const i = keys.indexOf(a);
+      return i < 0 ? 0n : BigInt(tx.meta.postBalances[i]) - BigInt(tx.meta.preBalances[i]);
+    };
+    const into = (dep?.accounts ?? []).filter((a) => a !== W && a !== "11111111111111111111111111111111").reduce((t, a) => t + (delta(a) > 0n ? delta(a) : 0n), 0n);
+    const paid = tx ? delta(W) + BigInt(tx.meta.fee) + into : null;
+    if (copy && (await noteList()).some((n) => n.state === "INCOMING")) await pageHost.stateRead();
+    const cashAfter = await cash();
+    partial = { bps: SELL_BPS, slippageBps: SELL_SLIPPAGE, sale: sig ?? null, cashBefore: String(cashBefore), cashAfter: String(cashAfter), gained: String(cashAfter - cashBefore), paid: paid === null ? null : String(paid), saleFee: tx ? String(tx.meta.fee) : null, depositTook: String(into), wAfter: String((await own("getBalance", [W, { commitment: "finalized" }])).value) };
+    log(`partial ${JSON.stringify(partial)}`);
+  }
   rentBack = { W, tokenAccount: await left(solanaAta(W, MINT, program)), pumpVolume: await left(solanaVolumeAccumulator(W, SOLANA_PUMP_PROGRAM)), ammVolume: await left(solanaVolumeAccumulator(W, SOLANA_PUMP_AMM_PROGRAM)), w: await left(W) };
   log(`after the rent back ${JSON.stringify(rentBack)}`);
   log(`the device's stamps ${JSON.stringify(stamps)}; sent ${JSON.stringify(copy?.sent ?? sentTxs)}`);
@@ -631,7 +658,7 @@ const filled = REFUSE ? back : COPY && process.env.FLOW_COPY_STOP === "buy" ? la
 seed64.fill(0);
 // FLOW_COPY: each send by its step (the copy's record reads each back), the W of the buy and the tip accounts watched
 const steps = COPY ? copy.sent.map((s) => ({ step: s.phase, signature: s.signature, watch: { W: rentBack?.W ?? null, feePayer: PIN.feePayer, ...Object.fromEntries(SOLANA_JITO_TIP_ACCOUNTS.map((a, i) => [`tip${i}`, a])) } })) : undefined;
-writeFileSync(OUT, JSON.stringify({ at: new Date().toISOString(), cluster: COPY ? "mainnet copy" : "devnet", program: PIN.program, seedFile, steps, simFails: copy?.simFails, planted: copy?.planted, fee: copy ? String(copy.fee) : undefined, sendLines: copy?.sendLines, proofWait, engine: copy?.engine, engineCalls: copy?.engineCalls, pool, tables: TABLES, mint: MINT, spend: SPEND, maxSpend, resumed: Boolean(RESUME), burst: BURST, injected, dust: DUST ? { S: dust.S, sent: dust.sent, burned: dust.burned ?? null, txs: dustTxs } : null, U, need: String(NEED), deposit, buy, buyTimeline: timeline, refused, sell, rentBack, sentTxs, stamps, stages, notes, filled }, null, 2) + "\n");
+writeFileSync(OUT, JSON.stringify({ at: new Date().toISOString(), cluster: COPY ? "mainnet copy" : "devnet", program: PIN.program, seedFile, steps, simFails: copy?.simFails, planted: copy?.planted, fee: copy ? String(copy.fee) : undefined, sendLines: copy?.sendLines, proofWait, engine: copy?.engine, engineCalls: copy?.engineCalls, pool, tables: TABLES, mint: MINT, spend: SPEND, partial, maxSpend, resumed: Boolean(RESUME), burst: BURST, injected, dust: DUST ? { S: dust.S, sent: dust.sent, burned: dust.burned ?? null, txs: dustTxs } : null, U, need: String(NEED), deposit, buy, buyTimeline: timeline, refused, sell, rentBack, sentTxs, stamps, stages, notes, filled }, null, 2) + "\n");
 await t.signedOut();
 ns.close();
 w.close();

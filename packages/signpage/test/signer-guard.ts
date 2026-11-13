@@ -66,7 +66,7 @@ export const NON_SIGNERS: Readonly<Record<string, readonly string[]>> = {
   "packages/kit/src/trade/evm/quoted.ts": ["evmQuotedBuy", "evmIsQuotedBuy", "evmIsQuotedSell"],
   "packages/signpage/src/rules/pool.ts": [
     "poolTokenAddress", "tokenDecimalsOf", "tokenDecimalsKeptOf", "tokenDecimalsShown", "checkPoolRequest", "checkSolanaDeposit", "checkSolanaWithdraw", "checkSolanaOnwardSend", "checkSolanaBuy", "checkSolanaSell",
-    "solanaDepositRents", "checkSolanaSweep", "checkSolanaTeardownFrames", "signSolana", "checkEvmBuy", "checkEvmWithdraw", "checkEvmSell", "checkEvmSellSim", "checkEvmAuthorization",
+    "solanaDepositRents", "checkSolanaSweep", "checkSolanaKeepSweep", "checkSolanaTeardownFrames", "signSolana", "checkEvmBuy", "checkEvmWithdraw", "checkEvmSell", "checkEvmSellSim", "checkEvmAuthorization",
     "signEvmBuy", "evmWithdrawDigest", "signEvmWithdraw", "checkEvmOnwardSend", "evmOnwardSendDigest", "signEvmOnwardSend", "poolUnits", "drawPool", "POOL_KINDS", "POOL_CHAINS",
     "SOLANA_POOL_TAG_DEPOSIT", "SOLANA_POOL_DEPOSIT_LEN", "POOL_MAX_SLIPPAGE_BPS", "SOLANA_POOL_CU_LIMIT_MAX", "SOLANA_POOL_TX_FEE_MAX", "SOLANA_RENT_PER_BYTE_MAX", "SOLANA_POOL_SELL_RESERVE_MAX",
     "PoolRuleRefused", "SOL_KEY", "EVM_ADDRESS", "POOL_ASSET_DECIMALS_OF", "SOLANA_RESERVED_KEYS", "SOLANA_POOL_MIN_DEPOSIT", "solanaWithdrawMinPart", "withdrawNoteFloor", "solanaSweepFloor", "solanaSweepKeep", "SOLANA_SWEEP_OWED_MAX",
