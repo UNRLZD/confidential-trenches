@@ -35,8 +35,8 @@ import type { HandoffOver, HandoffPage } from "../src/withdraw/handoff.ts";
 (globalThis as { __SIGN_NETWORK__?: string }).__SIGN_NETWORK__ = "testnet";
 const { RELEASE_WITHDRAW_RELAYER } = await import("../../wallet/src/withdraw/relay.ts");
 const { readTokenStorageMin } = await import("../../wallet/src/arming/accounts.ts");
-const { vaultScope } = await import("../src/withdraw/checks.ts");
-const { lowerFinalTime, treesOf, withdrawFormDeps, withdrawHandoff, withdrawSettle } = await import("../src/withdraw/handoff.ts");
+const { cashNotes, planCashWithdraw, vaultScope } = await import("../src/withdraw/checks.ts");
+const { cashWithdrawRun, lowerFinalTime, treesOf, withdrawFormDeps, withdrawHandoff, withdrawSettle } = await import("../src/withdraw/handoff.ts");
 
 const T = NEAR_NETWORKS.testnet;
 const SCOPE = vaultScope("testnet")!;
@@ -769,4 +769,61 @@ test("the settle pass: a note held to the bound never ends a later note's arriva
   assert.deepEqual(pass.outcomes, { [a.noteId]: "failed", [b.noteId]: "arrived" });
   assert.equal(arrivalSignals.length, 1);
   assert.equal(arrivalSignals[0], relaySignals.get(b.noteId), "B's arrival waits under B's own deadline, never a fresh one");
+});
+
+// ---------- the cash run (card cash-withdraws-everything-to-any-chain): one withdrawal per note, in order ----------
+async function runOf(v: World, p: Page, over: HandoffOver = {}) {
+  const blockNs = await lowerFinalTime(pair("testnet"));
+  const r = cashWithdrawRun(p, {
+    network: "testnet",
+    rpcs: pair("testnet"),
+    priceRpcs: pair("mainnet"),
+    fetchFn: helper(),
+    sync: async () => ({ stateTree: v.stateTree, labelTree: v.labelTree, newestStateRoot: v.stateTree.root!, newestLabelRoot: v.labelTree.root! }),
+    blockNs: async () => blockNs,
+    arrival: async () => Promise.reject(new Error("no arrival read in this test")),
+    ...over,
+  });
+  assert.ok(r);
+  return r;
+}
+
+test("the cash run sends Cash whole: one withdrawal per note, largest first, each whole note less the fee quoted at its own tap", async () => {
+  const v = await world([2_000_000n, 3_000_000n]);
+  // the form drew a fee 1,000 above the relayer's quote now: each whole note still goes out whole, no change left
+  const drawn = RELAY_FEE + 1_000n;
+  const cash = cashNotes(await v.ns.list(), SCOPE);
+  const max = cash.reduce((t, n) => t + n.value - drawn, 0n);
+  const parts = planCashWithdraw(cash, max, drawn)!;
+  assert.equal(parts.length, 2);
+  const sent: WithdrawRequest[] = [];
+  const steps: [number, string][] = [];
+  const run = await runOf(v, page(v), {
+    relay: async (_seed, req) => {
+      sent.push(req);
+      return { kind: "landed", own: false, change: (await v.ns.get(req.noteId))!, spend: { recipient: req.recipient, status: "paid", refundValue: 0n } as never, tx: null };
+    },
+  });
+  assert.deepEqual(await run({ recipient: "alice.testnet", amount: max, parts }, drawn, (i, k) => steps.push([i, k])), { kind: "arrived" });
+  assert.deepEqual(steps, [[0, "sending"], [0, "arrived"], [1, "sending"], [1, "arrived"]]);
+  assert.deepEqual(sent.map((r) => [(cash.find((n) => n.id === r.noteId)!).value, r.changeValue, r.body.withdrawal.recipient]), [
+    [3_000_000n, 0n, "alice.testnet"],
+    [2_000_000n, 0n, "alice.testnet"],
+  ]);
+});
+
+test("the cash run stops at the first withdrawal that does not leave the vault: the notes after it stay in Cash", async () => {
+  const v = await world([2_000_000n, 3_000_000n]);
+  const cash = cashNotes(await v.ns.list(), SCOPE);
+  const max = cash.reduce((t, n) => t + n.value - RELAY_FEE, 0n);
+  const parts = planCashWithdraw(cash, max, RELAY_FEE)!;
+  let relayed = 0;
+  const steps: [number, string][] = [];
+  const run = await runOf(v, page(v), { relay: async (_s, req) => (relayed++, expired(v, req)) });
+  assert.deepEqual(await run({ recipient: "alice.testnet", amount: max, parts }, RELAY_FEE, (i, k) => steps.push([i, k])), { kind: "expired" });
+  assert.equal(relayed, 1);
+  assert.deepEqual(steps, [[0, "sending"], [0, "expired"]]);
+  assert.equal((await v.ns.get(parts[1]!.noteId))?.state, "UNSPENT", "the second note never left Cash");
+  // a plan whose parts are not the amount is refused before anything is asked
+  await assert.rejects(run({ recipient: "alice.testnet", amount: max + 1n, parts }, RELAY_FEE), /parts: not the amount/);
 });

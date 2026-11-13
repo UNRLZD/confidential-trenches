@@ -21,7 +21,9 @@ const rpc = (name: string): NearRpc => ({
     return p.account_id === "alice.near" ? VIEW : UNKNOWN;
   },
 });
-const ctx: Parameters<typeof evaluate>[2] = { network: "mainnet", rpcs: [rpc(MAIN.fastnear[0]), rpc(MAIN.drpc)], available: 10_000_000n, fee: 120_000n };
+const ctx: Parameters<typeof evaluate>[2] = { network: "mainnet", rpcs: [rpc(MAIN.fastnear[0]), rpc(MAIN.drpc)], notes: [{ id: "a", value: 10_000_000n }], fee: 120_000n };
+/** The plan of `amount` from the one 10 USDC note "a" at the 0.12 USDC fee: one withdrawal. */
+const oneNote = (amount: bigint) => [{ noteId: "a", part: amount, chunk: amount + 120_000n }];
 
 test("empty, typing, each refusal and ready", async () => {
   const v = (to: string, amount: string, c = ctx) => evaluate(to, amount, c);
@@ -49,10 +51,10 @@ test("empty, typing, each refusal and ready", async () => {
   await refused("intents.near", "1", "address", "intents");
   const ok = await v("alice.near", "9.88");
   assert.equal(ok.state, "ready");
-  assert.deepEqual(ok.ready, { recipient: "alice.near", amount: 9_880_000n });
+  assert.deepEqual(ok.ready, { recipient: "alice.near", amount: 9_880_000n, parts: oneNote(9_880_000n) });
   assert.ok(Object.isFrozen(ok.ready));
   const implicit = await v(" " + "ab".repeat(32) + " ", "1");
-  assert.deepEqual(implicit.ready, { recipient: "ab".repeat(32), amount: 1_000_000n });
+  assert.deepEqual(implicit.ready, { recipient: "ab".repeat(32), amount: 1_000_000n, parts: oneNote(1_000_000n) });
 });
 
 test("the testnet vault is refused on its network", async () => {
@@ -120,7 +122,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const settle = () => sleep(CHECK_IDLE_MS + 60);
 
 /** A drawn form whose RPCs answer from `exists` (an account's name -> it exists) and may be held by `gate`. */
-function drawn(over: { available?: () => Promise<bigint>; fee?: () => Promise<bigint>; handoff?: boolean; end?: () => { kind: string; fee?: bigint } | void; unmatched?: () => number } = {}) {
+function drawn(over: { cash?: () => Promise<{ id: string; value: bigint }[]>; fee?: () => Promise<bigint>; handoff?: boolean; end?: (step: (i: number, kind: string) => void) => { kind: string; fee?: bigint } | void; unmatched?: () => number } = {}) {
   const exists = new Set(["alice.near", "bob.near"]);
   let gate: Promise<void> | null = null;
   const view = (name: string): NearRpc => ({
@@ -145,9 +147,10 @@ function drawn(over: { available?: () => Promise<bigint>; fee?: () => Promise<bi
   const deps = {
     network: "mainnet" as const,
     rpcs: [view(MAIN.fastnear[0]), view(MAIN.drpc)] as const,
-    available: over.available ?? (async () => 10_000_000n),
+    cash: over.cash ?? (async () => [{ id: "a", value: 10_000_000n }]),
+    available: async () => 10_000_000n,
     fee: over.fee ?? (async () => 120_000n),
-    ...(over.handoff === false ? {} : { handoff: async (w: unknown, fee: bigint) => (handed.push(w), fees.push(fee), over.end?.()) }),
+    ...(over.handoff === false ? {} : { handoff: async (w: unknown, fee: bigint, step: (i: number, kind: string) => void) => (handed.push(w), fees.push(fee), over.end?.(step)) }),
     ...(over.unmatched ? { unmatched: over.unmatched } : {}),
   };
   const form = drawWithdrawForm(doc, deps, button, (step) => void steps.push(step())) as unknown as El;
@@ -182,7 +185,7 @@ test("Withdraw is disabled until both fields pass, and with no hand-off it stays
   assert.equal(f.form.dataset.state, "ready");
   assert.equal(f.go.disabled, false);
   await f.tap();
-  assert.deepEqual(f.handed, [{ recipient: "alice.near", amount: 5_000_000n }]);
+  assert.deepEqual(f.handed, [{ recipient: "alice.near", amount: 5_000_000n, parts: oneNote(5_000_000n) }]);
   const none = drawn({ handoff: false });
   none.type("to", "alice.near");
   none.type("amount", "5");
@@ -272,7 +275,7 @@ test("the tap reads the account again: gone on both RPCs since it was drawn, not
 
 test("the tap reads the note value and the fee bound again: a smaller note or a larger fee since, nothing is handed over", async () => {
   let note = 10_000_000n;
-  const f = drawn({ available: async () => note });
+  const f = drawn({ cash: async () => [{ id: "a", value: note }] });
   f.type("to", "alice.near");
   f.type("amount", "5");
   await settle();
@@ -370,7 +373,67 @@ test("an amount above what can be sent names what can be sent: Try 9.88 USDC; In
   const r = await evaluate("alice.near", "50", ctx);
   assert.deepEqual(r.amount, { ok: false, code: "insufficient", below: 9_880_000n });
   assert.equal(refusalWords("insufficient", undefined, 9_880_000n), "Try 9.88 USDC");
-  const none = await evaluate("alice.near", "50", { ...ctx, available: 0n });
+  const none = await evaluate("alice.near", "50", { ...ctx, notes: [] });
   assert.deepEqual(none.amount, { ok: false, code: "insufficient" });
   assert.equal(refusalWords("insufficient"), "Insufficient");
+});
+
+// card cash-withdraws-everything-to-any-chain: Cash goes out whole. Max names the whole of Cash less a fee per note and
+// fills the amount; the tap hands over one withdrawal per note, and each is a step drawn with its amount and its state.
+test("Max is the whole of Cash: a tap fills it, Withdraw hands over one withdrawal per note, each drawn as a step", async () => {
+  const f = drawn({
+    cash: async () => [{ id: "a", value: 10_000_000n }, { id: "b", value: 5_000_000n }],
+    end: (step) => {
+      step(0, "sending");
+      step(0, "arrived");
+      step(1, "sending");
+      step(1, "expired");
+      return { kind: "expired" };
+    },
+  });
+  await settle();
+  const max = f.form.find((e) => e.dataset.action === "sendable")!;
+  assert.equal(max.textContent, "Max 14.76 USDC", "9.88 + 4.88");
+  assert.equal(max.dataset.value, "14760000");
+  f.type("to", "alice.near");
+  max.fire("click");
+  await settle();
+  assert.equal(f.form.find((e) => e.dataset.input === "amount")!.value, "14.76");
+  assert.equal(f.form.dataset.state, "ready");
+  await f.tap();
+  assert.deepEqual(f.handed, [
+    { recipient: "alice.near", amount: 14_760_000n, parts: [{ noteId: "a", part: 9_880_000n, chunk: 10_000_000n }, { noteId: "b", part: 4_880_000n, chunk: 5_000_000n }] },
+  ]);
+  const steps = f.form.find((e) => e.dataset.steps === "cash-withdraw")!;
+  assert.equal(steps.hidden, false);
+  assert.deepEqual(steps.children.map((li) => [li.children[0]!.textContent, li.dataset.stepState, li.children[1]!.textContent, li.children[1]!.dataset.draftCopy]), [
+    ["9.88 USDC", "arrived", "Sent", "step-sent"],
+    ["4.88 USDC", "expired", "Back in Cash", "step-back"],
+  ]);
+  assert.equal(f.form.dataset.outcome, "expired");
+});
+
+test("an amount no plan sends names the nearest that can be: Try 9.639999 or 9.88 USDC", async () => {
+  const f = drawn();
+  f.type("to", "alice.near");
+  f.type("amount", "9.8");
+  await settle();
+  const line = f.form.find((e) => e.tag === "p" && e.dataset.for === "amount")!;
+  assert.equal(line.dataset.refusal, "unplannable");
+  assert.equal(line.textContent, "Try 9.639999 or 9.88 USDC");
+  assert.equal(line.dataset.draftCopy, undefined, "Try and or were kept (pw.tryTwo)");
+  assert.equal(f.go.disabled, true);
+});
+
+test("the tap hands over nothing when the notes changed since the plan was drawn", async () => {
+  let cash = [{ id: "a", value: 10_000_000n }, { id: "b", value: 5_000_000n }];
+  const f = drawn({ cash: async () => cash });
+  f.type("to", "alice.near");
+  f.type("amount", "12");
+  await settle();
+  assert.equal(f.form.dataset.state, "ready");
+  cash = [{ id: "c", value: 10_000_000n }, { id: "b", value: 5_000_000n }];
+  await f.tap();
+  assert.deepEqual(f.handed, [], "a new plan is drawn for the next tap");
+  assert.equal(f.form.dataset.state, "ready");
 });

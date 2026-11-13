@@ -8,7 +8,12 @@
 //   ready, a check waiting or reading), refused (a field refused: data-refusal on that field's line names the code),
 //   ready (both pass). A check runs CHECK_IDLE_MS after the last keystroke, so a half-typed name is not refused and
 //   the two RPCs are not read on every key; a check's answer is drawn only while it is the newest.
-// - The note value and the fee bound are read when the form opens and again at every Withdraw tap. A read that cannot
+// - Cash goes out whole (card cash-withdraws-everything-to-any-chain): the amount is sent from every UNSPENT note, one
+//   withdrawal per note in order (./checks.ts planCashWithdraw). Max, drawn once the notes and the fee are read, is the
+//   whole of Cash less a fee per note (cashSendable); a tap puts it in the amount. At the tap each withdrawal is a step
+//   drawn under the form (data-steps, one line each with its amount and its state), and the run stops at the first
+//   that does not leave the vault, the rest still in Cash.
+// - The notes and the fee bound are read when the form opens and again at every Withdraw tap. A read that cannot
 //   answer is "unread": the field shows S12.10's Busy · Retry, a tap reads what is unread and checks again, and nothing
 //   goes on meanwhile.
 // - Withdraw is drawn in every state and acts only when ready: it reads the note value and the fee bound again, checks
@@ -23,7 +28,8 @@
 //   lists them); the rest were kept as drafted (owner 8 Nov 07:55Z) and carry no mark.
 // - DOM by createElement and textContent only: the page's CSP requires Trusted Types for every script sink.
 import type { NearNetwork, NearRpc } from "../../../kit/src/near/networks.ts";
-import { type AddressCode, type AmountCheck, type AmountCode, checkAmount, checkRecipient, type RecipientCheck, TOKEN_DECIMALS } from "./checks.ts";
+import type { WithdrawPart, WithdrawSource } from "../pool-withdraw.ts";
+import { type AddressCode, type AmountCheck, type AmountCode, cashSendable, checkAmount, checkRecipient, type RecipientCheck, TOKEN_DECIMALS } from "./checks.ts";
 
 // Withdraw, Invalid address, Invalid amount, Insufficient and Busy · Retry were kept as drafted (owner 8 Nov 07:55Z, the 8 Nov
 // words page: pw.withdraw, pw.invalidAddress, pw.invalidAmount, pw.insufficient, pw.busy), so their elements carry no
@@ -40,10 +46,17 @@ export const WITHDRAW_WORDS = {
   busy: "Busy · Retry", // S12.10 (09-design-brief.md:1405), for a check the RPCs could not answer; owner 8 Nov 07:55Z, kept
   unmatched: "Withdrawal unmatched", // new, card wallet-withdraw-move-out: a settle pass's drift note left RESERVED; the owner picks
   try: "Try ", // above what the note sends, "Try 9.88 USDC" (card withdraw-form-shows-what-you-can-send): pw.tryOne, owner 8 Nov 07:55Z, kept
+  or: " or ", // no plan sends the amount: "Try 4.5 or 5 USDC", the pool form's pw.tryTwo; owner 8 Nov 07:55Z, kept
+  max: "Max", // what Cash can send, "Max 19.76 USDC": the pool form's and the trade box's word, owner 12 Nov 13:03Z, kept
+  "step-waiting": "Waiting", // new, card cash-withdraws-everything-to-any-chain: a withdrawal not started; the owner picks
+  "step-sending": "Sending", // new, the same: a withdrawal on its way out of the vault; the owner picks
+  "step-sent": "Sent", // new, the same: a withdrawal that left the vault for the typed account; the owner picks
+  "step-back": "Back in Cash", // new, the same: a withdrawal that did not leave (expired, refunded, a fee that rose); the owner picks
+  "step-stopped": "Stopped", // new, the same: a withdrawal that ended any other way; the owner picks
 } as const;
 
 /** The keys of WITHDRAW_WORDS the owner has not picked: their elements keep data-draft-copy. */
-export const WITHDRAW_DRAFT: ReadonlySet<string> = new Set(["to", "amount", "min", "unmatched"]);
+export const WITHDRAW_DRAFT: ReadonlySet<string> = new Set(["to", "amount", "min", "unmatched", "step-waiting", "step-sending", "step-sent", "step-back", "step-stopped"]);
 
 /** Sets data-draft-copy on an element drawing `key` when `key` is in `drafts`, and takes it off otherwise. */
 export function markDraft(el: HTMLElement, key: string, drafts: ReadonlySet<string>): void {
@@ -54,21 +67,30 @@ export function markDraft(el: HTMLElement, key: string, drafts: ReadonlySet<stri
 /** The quiet time after the last keystroke before a check runs. */
 export const CHECK_IDLE_MS = 300;
 
-/** What the form hands to the wallet's withdraw path: both checked, the amount in the token's base units. */
+/** One withdrawal: both checked, the amount in the token's base units (the wallet's withdraw path, one note). */
 export type CheckedWithdraw = Readonly<{ recipient: string; amount: bigint }>;
+/** What the form hands over: the account, the whole amount and its plan, one withdrawal per note in order. */
+export type CheckedCashWithdraw = Readonly<{ recipient: string; amount: bigint; parts: readonly WithdrawPart[] }>;
+/** A step's state as the run reports it: "sending" when it starts, then its end (../handoff.ts HandoffEnd's kind), or
+ *  "failed" when it threw. */
+export type StepReport = (i: number, kind: string) => void;
 
 export interface WithdrawFormDeps {
   network: NearNetwork;
   /** The network's release pair (the wallet's nearPairNetwork). */
   rpcs: readonly [NearRpc, NearRpc];
-  /** The largest UNSPENT note of the vault's scope (./checks.ts withdrawable), in base units. */
+  /** The UNSPENT notes of the vault's scope (./checks.ts cashNotes), each id and value in base units. */
+  cash: () => Promise<readonly WithdrawSource[]>;
+  /** The largest UNSPENT note of the vault's scope (./checks.ts withdrawable): what one withdrawal carries. The form
+   *  reads `cash`; this is the one-note read a single hand-off's caller sizes by. */
   available: () => Promise<bigint>;
   /** The device's own bound on the relay fee, in base units; a rejection leaves it unread. */
   fee: () => Promise<bigint>;
-  /** The wallet's withdraw path, given the fee the form drew; absent where the release names no vault or relayer
-   *  (./handoff.ts). Its answer, when it gives one, is drawn as data-outcome, except { kind: "fee", fee }: the relayer's
-   *  fee is now above the drawn one, so the form draws that fee and goes no further. */
-  handoff?: (w: CheckedWithdraw, fee: bigint) => void | Promise<void | { kind: string; fee?: bigint }>;
+  /** The wallet's withdraw path, one withdrawal per part in order (./handoff.ts cashWithdrawRun), given the fee the
+   *  form drew and the step report; absent where the release names no vault or relayer. Its answer, when it gives one,
+   *  is drawn as data-outcome, except { kind: "fee", fee }: the relayer's fee is now above the drawn one, so the form
+   *  draws that fee and goes no further. */
+  handoff?: (w: CheckedCashWithdraw, fee: bigint, step: StepReport) => void | Promise<void | { kind: string; fee?: bigint }>;
   /** How many vault withdrawals the page's last settle pass left "unmatched" (./handoff.ts withdrawSettle: a spend of
    *  the note whose change is not this device's, the note kept RESERVED); read at open and at every tap's reads. */
   unmatched?: () => number;
@@ -80,18 +102,18 @@ export interface FormView {
   /** null while the field is blank. */
   address: RecipientCheck | null;
   amount: AmountCheck | null;
-  ready: CheckedWithdraw | null;
+  ready: CheckedCashWithdraw | null;
 }
 
 /** The form's view of both fields, read and checked now. */
 export async function evaluate(
-  to: string, amount: string, ctx: { network: NearNetwork; rpcs: readonly [NearRpc, NearRpc]; available: bigint | null; fee: bigint | null },
+  to: string, amount: string, ctx: { network: NearNetwork; rpcs: readonly [NearRpc, NearRpc]; notes: readonly WithdrawSource[] | null; fee: bigint | null },
 ): Promise<FormView> {
   const blankTo = to.trim() === "";
   const blankAmount = amount.trim() === "";
   const a = blankTo ? null : await checkRecipient(to, ctx.network, ctx.rpcs);
-  const m = blankAmount ? null : checkAmount(amount, { available: ctx.available, fee: ctx.fee });
-  const ready = a?.ok && m?.ok ? Object.freeze({ recipient: a.recipient, amount: m.amount }) : null;
+  const m = blankAmount ? null : checkAmount(amount, { notes: ctx.notes, fee: ctx.fee });
+  const ready = a?.ok && m?.ok ? Object.freeze({ recipient: a.recipient, amount: m.amount, parts: Object.freeze(m.parts.map((p) => Object.freeze({ ...p }))) }) : null;
   const state: FormState = blankTo && blankAmount ? "empty" : (a && !a.ok) || (m && !m.ok) ? "refused" : ready ? "ready" : "typing";
   return { state, address: a, amount: m, ready };
 }
@@ -103,9 +125,13 @@ export function formatUnits(units: bigint): string {
   return frac ? `${s.slice(0, -TOKEN_DECIMALS)}.${frac}` : s.slice(0, -TOKEN_DECIMALS);
 }
 
-/** The words a refusal draws, by its code. */
-export function refusalWords(code: AddressCode | AmountCode, min?: bigint, below?: bigint): string {
+/** The words a refusal draws, by its code; `above` is the nearest plannable amount above (unplannable only). */
+export function refusalWords(code: AddressCode | AmountCode, min?: bigint, below?: bigint, above?: bigint): string {
   if (code === "unread") return WITHDRAW_WORDS.busy;
+  if (code === "unplannable") {
+    const sides = [...new Set([below, above].filter((x): x is bigint => x !== undefined))];
+    return sides.length === 0 ? WITHDRAW_WORDS["invalid-amount"] : `${WITHDRAW_WORDS.try}${sides.map(formatUnits).join(WITHDRAW_WORDS.or)} USDC`;
+  }
   if (code === "amount") return WITHDRAW_WORDS["invalid-amount"];
   // above what the note can send: what can be, in the pool form's nearest-amounts words with the asset's symbol
   if (code === "insufficient") return below ? `${WITHDRAW_WORDS.try}${formatUnits(below)} USDC` : WITHDRAW_WORDS.insufficient;
@@ -157,13 +183,38 @@ export function drawWithdrawForm(doc: Document, deps: WithdrawFormDeps, button: 
   notice.textContent = WITHDRAW_WORDS.unmatched;
   const drift = (): void => void (notice.hidden = !((deps.unmatched?.() ?? 0) > 0));
   drift();
-  form.append(notice, to.label, to.line, amount.label, amount.line, go);
+  // what Cash can send now (Max), drawn once the notes and the fee are read; a tap puts it in the amount. Its row carries
+  // `hidden`, as the pool form's does, so no style on the button can show it before the reads.
+  const canRow = doc.createElement("div");
+  canRow.dataset.row = "sendable";
+  canRow.hidden = true;
+  const sendable = doc.createElement("button");
+  sendable.type = "button";
+  sendable.dataset.action = "sendable";
+  Object.assign(sendable.style, { minHeight: "44px", minWidth: "44px", padding: "0 12px", fontVariantNumeric: "tabular-nums" });
+  canRow.append(sendable);
+  // the run's steps, one line per withdrawal, drawn at the tap
+  const steps = doc.createElement("ol");
+  steps.dataset.steps = "cash-withdraw";
+  steps.hidden = true;
+  Object.assign(steps.style, { margin: "0", paddingLeft: "20px", fontVariantNumeric: "tabular-nums" });
+  form.append(notice, to.label, to.line, amount.label, canRow, amount.line, go, steps);
 
   // read at open, and again on Retry while either is unread; one that cannot be read stays null (unread)
-  let ctx: { available: bigint | null; fee: bigint | null } = { available: null, fee: null };
+  let ctx: { notes: readonly WithdrawSource[] | null; fee: bigint | null } = { notes: null, fee: null };
+  const drawSendable = (): void => {
+    const can = ctx.notes === null || ctx.fee === null ? null : cashSendable(ctx.notes, ctx.fee);
+    canRow.hidden = can === null;
+    sendable.disabled = !can;
+    Object.assign(sendable.style, { opacity: can ? "" : "0.5", cursor: can ? "pointer" : "default" }); // 0: shown, not offered
+    sendable.textContent = can === null ? "" : `${WITHDRAW_WORDS.max} ${formatUnits(can)} USDC`;
+    if (can === null) delete sendable.dataset.value;
+    else sendable.dataset.value = String(can);
+  };
   const load = (): Promise<void> =>
-    (drift(), Promise.all([deps.available().catch(() => null), deps.fee().catch(() => null)]).then(([available, fee]) => {
-      ctx = { available: typeof available === "bigint" ? available : null, fee: typeof fee === "bigint" ? fee : null };
+    (drift(), Promise.all([deps.cash().catch(() => null), deps.fee().catch(() => null)]).then(([notes, fee]) => {
+      ctx = { notes: Array.isArray(notes) ? notes : null, fee: typeof fee === "bigint" ? fee : null };
+      drawSendable();
     }));
   let loaded = load();
 
@@ -174,10 +225,11 @@ export function drawWithdrawForm(doc: Document, deps: WithdrawFormDeps, button: 
     view = v;
     form.dataset.state = v.state;
     line(to.line, v.address && !v.address.ok ? v.address.code : null);
-    line(amount.line, v.amount && !v.amount.ok ? v.amount.code : null, v.amount && !v.amount.ok && v.amount.code === "min" ? v.amount.min : undefined, v.amount && !v.amount.ok && v.amount.code === "insufficient" ? v.amount.below : undefined);
+    const m = v.amount && !v.amount.ok ? v.amount : null;
+    line(amount.line, m ? m.code : null, m?.code === "min" ? m.min : undefined, m?.code === "insufficient" || m?.code === "unplannable" ? m.below : undefined, m?.code === "unplannable" ? m.above : undefined);
     go.disabled = v.state !== "ready" || !deps.handoff;
   };
-  const line = (p: HTMLParagraphElement, code: AddressCode | AmountCode | null, min?: bigint, below?: bigint): void => {
+  const line = (p: HTMLParagraphElement, code: AddressCode | AmountCode | null, min?: bigint, below?: bigint, above?: bigint): void => {
     p.hidden = code === null;
     if (code === null) {
       delete p.dataset.refusal;
@@ -185,15 +237,15 @@ export function drawWithdrawForm(doc: Document, deps: WithdrawFormDeps, button: 
       return void p.replaceChildren();
     }
     p.dataset.refusal = code;
-    markDraft(p, code === "unread" ? "busy" : code === "amount" ? "invalid-amount" : code === "insufficient" && below ? "try" : code === "insufficient" || code === "min" ? code : "invalid-address", WITHDRAW_DRAFT);
-    if (code !== "unread") return void (p.textContent = refusalWords(code, min, below));
+    markDraft(p, code === "unread" ? "busy" : code === "amount" ? "invalid-amount" : (code === "insufficient" || code === "unplannable") && (below ?? above) !== undefined ? "try" : code === "unplannable" ? "invalid-amount" : code === "insufficient" || code === "min" ? code : "invalid-address", WITHDRAW_DRAFT);
+    if (code !== "unread") return void (p.textContent = refusalWords(code, min, below, above));
     // Busy · Retry: a tap checks again now
     const again = doc.createElement("button");
     again.type = "button";
     again.dataset.action = "retry";
     again.textContent = refusalWords(code);
     again.addEventListener("click", () => {
-      if (ctx.available === null || ctx.fee === null) loaded = load();
+      if (ctx.notes === null || ctx.fee === null) loaded = load();
       void check();
     });
     p.replaceChildren(again);
@@ -215,6 +267,45 @@ export function drawWithdrawForm(doc: Document, deps: WithdrawFormDeps, button: 
   };
   to.input.addEventListener("input", typed);
   amount.input.addEventListener("input", typed);
+  // the tap on Max: that amount in the field, checked now against the same reads
+  sendable.addEventListener("click", () => {
+    if (ctx.notes === null || ctx.fee === null || sendable.disabled) return;
+    amount.input.value = formatUnits(cashSendable(ctx.notes, ctx.fee));
+    clearTimeout(timer);
+    void check();
+  });
+
+  // one line per withdrawal: its amount and its state, every word marked while the owner has not picked it
+  const stepWord = (kind: string): keyof typeof WITHDRAW_WORDS =>
+    kind === "waiting" ? "step-waiting" : kind === "sending" ? "step-sending" : kind === "arrived" || kind === "landed" ? "step-sent" : kind === "expired" || kind === "refunded" || kind === "fee" ? "step-back" : "step-stopped";
+  let stepLines: HTMLElement[] = [];
+  const drawSteps = (parts: readonly WithdrawPart[]): void => {
+    const lines = parts.map((p, i) => {
+      const li = doc.createElement("li");
+      li.dataset.step = String(i);
+      const value = doc.createElement("span");
+      value.textContent = `${formatUnits(p.part)} USDC`;
+      const state = doc.createElement("span");
+      state.dataset.stepWord = "";
+      Object.assign(state.style, { marginLeft: "8px" });
+      li.append(value, state);
+      return li;
+    });
+    steps.replaceChildren(...lines);
+    steps.hidden = lines.length === 0;
+    stepLines = lines;
+    lines.forEach((_, i) => mark(i, "waiting"));
+  };
+  const mark = (i: number, kind: string): void => {
+    const li = stepLines[i];
+    if (!li) return;
+    li.dataset.stepState = kind;
+    const word = li.children[1] as HTMLElement | undefined;
+    if (!word) return;
+    const key = stepWord(kind);
+    word.textContent = WITHDRAW_WORDS[key];
+    markDraft(word, key, WITHDRAW_DRAFT);
+  };
 
   // the tap: the note value and the fee bound read again, both fields checked again; only the same answer goes on
   async function withdraw(): Promise<void> {
@@ -223,10 +314,23 @@ export function drawWithdrawForm(doc: Document, deps: WithdrawFormDeps, button: 
     clearTimeout(timer);
     loaded = load();
     const v = await check();
-    if (!v?.ready || v.ready.recipient !== before.recipient || v.ready.amount !== before.amount || ctx.fee === null) return;
-    const end = await deps.handoff(v.ready, ctx.fee);
+    // the same account, amount and plan as drawn: a note spent or added since is a new plan, drawn for the next tap
+    const plan = (r: CheckedCashWithdraw): string => r.parts.map((p) => `${p.noteId}:${p.part}`).join(",");
+    if (!v?.ready || v.ready.recipient !== before.recipient || v.ready.amount !== before.amount || plan(v.ready) !== plan(before) || ctx.fee === null) return;
+    drawSteps(v.ready.parts);
+    let end: void | { kind: string; fee?: bigint } = undefined;
+    try {
+      end = await deps.handoff(v.ready, ctx.fee, mark);
+    } finally {
+      // what is left in Cash, read again for Max and the next tap's check; a fee that rose is drawn over the fee read
+      const rose = end?.kind === "fee" && typeof end.fee === "bigint" ? end.fee : null;
+      loaded = load().then(() => {
+        if (rose === null) return;
+        ctx = { ...ctx, fee: rose };
+        drawSendable();
+      });
+    }
     if (end?.kind === "fee" && typeof end.fee === "bigint") {
-      ctx = { ...ctx, fee: end.fee };
       await check();
       return;
     }
