@@ -1974,3 +1974,132 @@ test("a sign out while the walk's read is in flight ends the run at once though 
   assert.ok(w.seeds.every((s) => s.every((b) => b === 0)), "every seed it took is zeroed");
   assert.equal(n.log.length, 0, "no id read after it");
 });
+
+// card a-load-proves-first-and-walks-the-restore-once (a): a load's resume reads nothing before the load's first proof
+// passes settle, and never waits past its bound for them
+test("L1: a load's resume starts no read before the first proof passes settle; with none settled it starts at its bound", async () => {
+  const walks: number[] = [];
+  const solana = (async () => (walks.push(Date.now()), { notes: [], spends: [] })) as never;
+  // the first pass settles 150 ms after the resume is asked
+  let settle!: () => void;
+  const first = new Promise<void>((r) => (settle = r));
+  const w = await world({ pools: () => SOL_ONLY, solana, firstPass: () => first, firstPassMaxMs: 60_000 } as Partial<PoolRestoreHost>);
+  await w.store.put("meta", IDS_KEY(), { scopes: [SOL_SCOPE.toString()] });
+  const asked = Date.now();
+  const run = w.r.resume();
+  await new Promise((ok) => setTimeout(ok, 150));
+  assert.deepEqual(walks, [], "no walk before the first pass settled");
+  settle();
+  assert.notEqual(await run, null);
+  await w.r.idle();
+  assert.equal(walks.length, 1);
+  assert.ok(walks[0]! - asked >= 150);
+  // a first pass that never settles: the resume reads at its bound, not before it, not never
+  const v = await world({ pools: () => SOL_ONLY, solana, firstPass: () => new Promise(() => {}), firstPassMaxMs: 200 } as Partial<PoolRestoreHost>);
+  await v.store.put("meta", IDS_KEY(), { scopes: [SOL_SCOPE.toString()] });
+  walks.length = 0;
+  const at = Date.now();
+  assert.notEqual(await v.r.resume(), null);
+  await v.r.idle();
+  assert.equal(walks.length, 1);
+  assert.ok(walks[0]! - at >= 190, `walked ${walks[0]! - at} ms after the resume, before its bound`);
+  assert.equal(restoreKind.RESUME_FIRST_PASS_MAX_MS, 20_000);
+});
+
+test("L2: a resume that waited for the first pass reads nothing when the user signed out meanwhile", async () => {
+  const walks: number[] = [];
+  let signed = true;
+  let settle!: () => void;
+  const first = new Promise<void>((r) => (settle = r));
+  const w = await world({ pools: () => SOL_ONLY, solana: (async () => (walks.push(1), { notes: [], spends: [] })) as never, signedIn: async () => signed, firstPass: () => first, firstPassMaxMs: 60_000 } as Partial<PoolRestoreHost>);
+  await w.store.put("meta", IDS_KEY(), { scopes: [SOL_SCOPE.toString()] });
+  const run = w.r.resume();
+  await new Promise((ok) => setTimeout(ok, 50));
+  signed = false;
+  settle();
+  assert.equal(await run, null);
+  assert.deepEqual(walks, []);
+});
+
+// card a-load-proves-first-and-walks-the-restore-once (b): a load that finds step 5 owed reads its ids on the notes the
+// store holds and walks no pool again; a pool whose walk failed is the only one a later load walks, once due
+test("L3: a reload mid step 5 walks no pool again: its ids are read on the stored notes, the same ids as the walk's run; the marker holds progress only and a sign out drops it", async () => {
+  const n = nearOf();
+  const g = gated(n);
+  const factory = new IDBFactory();
+  const name = `restore-reload-${db++}`;
+  const store = await openWalletStore({ name, indexedDB: factory });
+  closers.push(() => store.close());
+  const walks: string[] = [];
+  const solana = (async () => (walks.push("solana"), { notes: notesOf(SOL_SCOPE, LABEL_S, 1000n), spends: [] })) as never;
+  const w = await world({ store: async () => store, pools: () => SOL_ONLY, solana, ids: g.ids, ux: () => uxOf(new Map()).reads });
+  assert.equal(await w.r.auto(), "done");
+  const m = (await store.get("meta", IDS_KEY())) as Record<string, unknown>;
+  // progress only: the scopes, the run, the walks owed (none); no id, no address
+  assert.deepEqual(Object.keys(m).sort(), ["run", "scopes", "walks"]);
+  assert.deepEqual(m.walks, {});
+  // the page reloads mid step 5
+  w.r.signedOut();
+  g.open();
+  await w.r.idle();
+  // the next load: no walk, step 5 read whole on the stored notes, the marker removed
+  const n2 = nearOf();
+  const steps: Step5End[] = [];
+  const next = poolRestore({ ...w.host, ids: n2.ids, step5: (e) => void steps.push(e) });
+  assert.equal(await next.resume(), "done");
+  await next.idle();
+  assert.deepEqual(walks, ["solana"], "the reload walked no pool");
+  assert.deepEqual(steps, [{ retry: [], held: [], named: [], tries: 1, last: true }]);
+  assert.equal(await store.get("meta", IDS_KEY()), undefined);
+  // the ids it read are the ones a walk's run reads: the same lanes, from the same notes
+  const once = await world({ pools: () => SOL_ONLY, solana, ids: nearOf().ids, ux: () => uxOf(new Map()).reads });
+  const n3 = nearOf();
+  const fresh = poolRestore({ ...once.host, ids: n3.ids });
+  assert.equal(await fresh.auto(), "done");
+  await fresh.idle();
+  assert.deepEqual([...new Set(n2.log)].sort(), [...new Set(n3.log)].sort());
+  // a sign out drops a marker with walks owed and a next ask
+  await store.put("meta", IDS_KEY(), { scopes: [SOL_SCOPE.toString()], walks: { [EVM_SCOPE.toString()]: { tries: 2, next: Date.now() + 30_000 } }, next: Date.now() + 30_000 });
+  await store.signOut();
+  const again = await openWalletStore({ name, indexedDB: factory });
+  closers.push(() => again.close());
+  assert.equal(await again.get("meta", IDS_KEY()), undefined);
+});
+
+test("L4: one chain's failed walk is the only walk a later load makes, asked again on a growing pause; the others' ids are read on their stored notes", async () => {
+  const seen: string[] = [];
+  let evmUp = false;
+  const solana = (async () => (seen.push("solana"), { notes: notesOf(SOL_SCOPE, LABEL_S, 1000n), spends: [] })) as never;
+  const evm = (async () => {
+    seen.push("evm");
+    if (!evmUp) throw new Error("HTTP 403");
+    return { notes: notesOf(EVM_SCOPE, LABEL_E, 2000n), spends: [], elsewhere: [], wallets: [], block: 1n };
+  }) as never;
+  const w = await world({ pools: () => POOLS, solana, evm, ids: nearOf().ids, ux: () => uxOf(new Map()).reads, addressed: (c) => c === "solana" } as Partial<PoolRestoreHost>);
+  assert.equal(await w.r.auto(), "done");
+  await w.r.idle();
+  const m1 = (await w.store.get("meta", IDS_KEY())) as { walks: Record<string, { tries: number; next: number }>; answered?: boolean };
+  assert.deepEqual(Object.keys(m1.walks), [EVM_SCOPE.toString()], "the failed walk is owed, and only it");
+  assert.equal(m1.walks[EVM_SCOPE.toString()]!.tries, 1);
+  assert.equal(m1.answered, true, "the walked pools' ids are answered");
+  // the next load: only the failed pool is walked; it fails again, its next ask K.WALK_PAUSES_MS[1] later
+  seen.length = 0;
+  const r2 = poolRestore(w.host);
+  assert.equal(await r2.resume(), "done");
+  await r2.idle();
+  assert.deepEqual(seen, ["evm"]);
+  const m2 = (await w.store.get("meta", IDS_KEY())) as { walks: Record<string, { tries: number; next: number }> };
+  assert.equal(m2.walks[EVM_SCOPE.toString()]!.tries, 2);
+  assert.ok(m2.walks[EVM_SCOPE.toString()]!.next - Date.now() > (K.WALK_PAUSES_MS as number[])[1]! - 5_000);
+  // before its next ask a load reads nothing: resumeAt names that time
+  assert.equal((K.resumeAt as (o: unknown) => number | null)(m2), m2.walks[EVM_SCOPE.toString()]!.next);
+  // once it is due and the provider answers, its walk lands, its ids are read, and the marker is gone
+  await w.store.put("meta", IDS_KEY(), { ...m2, walks: { [EVM_SCOPE.toString()]: { tries: 2, next: 0 } } });
+  evmUp = true;
+  seen.length = 0;
+  const r3 = poolRestore(w.host);
+  assert.equal(await r3.resume(), "done");
+  await r3.idle();
+  assert.deepEqual(seen, ["evm"]);
+  assert.equal(await w.store.get("meta", IDS_KEY()), undefined);
+});

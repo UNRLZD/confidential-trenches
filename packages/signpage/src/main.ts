@@ -186,6 +186,8 @@ const restore = !framed
       // `written`, whose neighbours wallet-restore-reads-ux's bundle check reads
       holdingsWritten: (chain) => testnet?.evmHoldingsRestored(chain),
       written: () => void testnet?.proofs().catch(() => {}),
+      // a load's first proof passes go ahead of the resume's reads (card a-load-proves-first-and-walks-the-restore-once)
+      firstPass: () => testnet?.firstPass() ?? Promise.resolve(),
       // a pool's U_X reads and carry on its chain (card wallet-restore-reads-ux, src/pool-restore.ts restoreUxOf): the
       // follow's own reader on the restore's two public operators (never our helper relay), and the follow's own deposit
       // (poolFollowDeps below), so a restore and a live pool deposit read U_X and carry it the same way; null on a chain

@@ -740,6 +740,10 @@ export type TestnetPool = {
   /** The proof queue's pass, the queue opened first when none is: what each landed note runs. Called by the restore once
    *  it wrote its notes (src/main.ts `written`), so it also starts the buy records' rebuild (src/sol-buy-records.ts). */
   proofs(): Promise<QueuePass | null>;
+  /** This page life's first proof pass of each chain, settled: Solana's (once it starts, with a pool pinned) and every
+   *  other chain's that started before it ended. The restore's resume waits on it, bounded (src/pool-restore.ts
+   *  RESUME_FIRST_PASS_MAX_MS). */
+  firstPass(): Promise<void>;
   /** state.pools' `ready` (src/pools.ts) with `read`'s notes, in one turn of the queue's view (queue.ts readyWith), so
    * a remake's swap never falls between the two (card pool-ready-no-flicker); `ready` undefined while no queue is open.
    * `open`: the ids of the pools whose queue is open, so a chain with no open queue reads no ready (src/pools.ts
@@ -876,7 +880,20 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     }
     for (const f of watchers) f();
   };
-  const proofs = async (): Promise<QueuePass | null> => {
+  // each chain's first proof pass of this page life, settled (card a-load-proves-first-and-walks-the-restore-once): the
+  // restore's resume reads nothing before them (TestnetPage.firstPass); Solana's is waited for until it starts
+  const firstPasses = new Map<string, Promise<void>>();
+  let solanaStarted!: () => void;
+  const solanaFirst = new Promise<void>((r) => (solanaStarted = r));
+  const firstOf = <T,>(chain: string, run: Promise<T>): Promise<T> => {
+    if (!firstPasses.has(chain)) {
+      firstPasses.set(chain, run.then(() => {}, () => {}));
+      if (chain === "solana") solanaStarted();
+    }
+    return run;
+  };
+  const proofs = (): Promise<QueuePass | null> => firstOf("solana", solanaProofs());
+  const solanaProofs = async (): Promise<QueuePass | null> => {
     const p = (open ??= openQueue());
     try {
       const pass = await (await p).queue.refresh();
@@ -1038,7 +1055,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     }
   };
   /** The EVM chain's queue pass, the queue opened first when none is; null with no pool or no queue. */
-  const evmProofs = async (chain: "base" | "robinhood"): Promise<QueuePass | null> => {
+  const evmProofs = (chain: "base" | "robinhood"): Promise<QueuePass | null> => firstOf(chain, evmQueuePass(chain));
+  const evmQueuePass = async (chain: "base" | "robinhood"): Promise<QueuePass | null> => {
     if (evmPool(chain) === null) return null;
     let p = evmQueues.get(chain);
     if (p === undefined) evmQueues.set(chain, (p = openEvmQueue(chain)));
@@ -2844,6 +2862,10 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     },
     // the restore's notes written: each Solana W with no buy record gets it back from its own buy, in the background
     proofs: () => (buyRecords.run(), proofs()),
+    firstPass: async () => {
+      if (pin !== undefined) await solanaFirst;
+      await Promise.all(firstPasses.values());
+    },
     // every open queue's ready list (Solana's, then each EVM pool's; each proof names its pool) with `read`, in one turn
     // of every queue's view: each queue's readyWith holds its view while the next one's and then `read` run, always in
     // the same order, so no swap of any queue falls between its list and the notes

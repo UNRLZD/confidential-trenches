@@ -505,8 +505,24 @@ export const RESTORE_IDS_KEY = "owed/restore-ids";
 /**
  * The marker: the pools' scopes; by scope each lane read whole, with the index it read to and its highest note when it
  * was kept (null: none); and the run that wrote it, so a run keeps lanes on and removes only its own marker.
+ * Card a-load-proves-first-and-walks-the-restore-once, progress only (scopes, tries, times, flags; no id, no address):
+ * - `walks`: by scope, each pool (the NEAR vault's included) whose walk failed, with its tries and the time (ms) its walk
+ *   is asked again (WALK_PAUSES_MS): a load walks only those, once due, and reads every other pool's ids on the notes
+ *   the store holds, so one chain's refused provider never walks the others again;
+ * - `next`: when step 5 is asked again (ms) after a try that left a read to try again (STEP5_PAUSES_MS's pause): a load
+ *   before it starts no id read, so a reload never asks sooner than one page left open would;
+ * - `answered`: a try read every id with nothing to tell; only `walks` keep the marker, and a load reads no id until a
+ *   walk lands new notes.
+ * A marker with no `walks` (one written before this card) owes every pool's walk, as before it.
  */
-type IdsOwed = { scopes: string[]; read?: Record<string, [number, number, number | null][]>; run?: string };
+type WalkOwed = { tries: number; next: number };
+type IdsOwed = { scopes: string[]; read?: Record<string, [number, number, number | null][]>; run?: string; walks?: Record<string, WalkOwed>; next?: number; answered?: true };
+/** The pauses before a failed walk is asked again on a later load, by its tries: the step 5 pauses' growth, the last
+ *  repeated (a provider that refuses the page for good is asked once every 10 minutes, never on every load). */
+export const WALK_PAUSES_MS: readonly number[] = Object.freeze([0, 30_000, 120_000, 300_000, 600_000]);
+const walkOwedOf = (tries: number, now: number): WalkOwed => ({ tries, next: now + WALK_PAUSES_MS[Math.min(tries - 1, WALK_PAUSES_MS.length - 1)]! });
+const walksOk = (w: unknown): w is Record<string, WalkOwed> =>
+  typeof w === "object" && w !== null && !Array.isArray(w) && Object.values(w).every((x) => typeof x === "object" && x !== null && Number.isInteger((x as WalkOwed).tries) && (x as WalkOwed).tries >= 1 && Number.isFinite((x as WalkOwed).next));
 // a kept lane as the marker holds it: its lane, an index of the lane it read to within u32, its highest note at or below
 // that (or null); any other entry drops the marker's `read` whole, so a broken marker reads more, never less (delta
 // review P3-A)
@@ -526,8 +542,24 @@ const owedOf = (v: unknown): IdsOwed | null => {
   if (typeof v !== "object" || v === null || !Array.isArray(o.scopes) || !o.scopes.every((x) => typeof x === "string")) return null;
   const r = o.read as unknown;
   const read = typeof r === "object" && r !== null && !Array.isArray(r) && Object.values(r).every((xs) => Array.isArray(xs) && xs.every(keptEntry));
-  return { scopes: o.scopes, ...(read ? { read: o.read } : {}), ...(typeof o.run === "string" ? { run: o.run } : {}) };
+  return {
+    scopes: o.scopes,
+    ...(read ? { read: o.read } : {}),
+    ...(typeof o.run === "string" ? { run: o.run } : {}),
+    // a `walks` of another shape is dropped, so the marker owes every walk (more read, never less)
+    ...(walksOk(o.walks) ? { walks: o.walks } : {}),
+    ...(typeof o.next === "number" && Number.isFinite(o.next) && walksOk(o.walks) ? { next: o.next } : {}),
+    ...(o.answered === true && walksOk(o.walks) ? { answered: true as const } : {}),
+  };
 };
+/** When a load's resume may read (ms): at once with any walk owed by an older marker; else the soonest of a due walk and
+ *  step 5's next ask (none while its ids are answered). null: nothing to read until a walk is due. */
+export function resumeAt(o: IdsOwed): number | null {
+  if (o.walks === undefined) return 0;
+  const times = Object.values(o.walks).map((w) => w.next);
+  if (o.answered !== true) times.push(o.next ?? 0);
+  return times.length === 0 ? null : Math.min(...times);
+}
 
 /**
  * One try of step 5's end: its reasons, the try's number, and whether no try follows it in this page life. On the last
@@ -542,6 +574,14 @@ export class SeedGone extends Error {
     this.name = "SeedGone";
   }
 }
+
+/**
+ * The longest a load's resume waits for the page's first proof passes (PoolRestoreHost.firstPass) before it reads
+ * anyway: the walk of release 127 on 13 Nov 06:13Z showed its first proof ready 18 s after the load while the resume's
+ * walks drew on the same hosts beside it, so 20 s covers a first pass that has to read and prove, and a pass that never
+ * settles (a provider that hangs) holds the resume no longer than this.
+ */
+export const RESUME_FIRST_PASS_MAX_MS = 20_000;
 
 /** What the restore reads on, each called when a run starts. */
 export type PoolRestoreHost = {
@@ -558,6 +598,11 @@ export type PoolRestoreHost = {
   locks?: Pick<LockManager, "request" | "query">;
   /** After the notes are written: the page's proof queue's pass, so a restored note can pay the next buy. */
   written?: () => void;
+  /** A load's first proof passes, settled (each open queue's first pass, or nothing to make): a resume reads nothing
+   *  before it, or before RESUME_FIRST_PASS_MAX_MS, whichever comes first (card a-load-proves-first-and-walks-the-restore-
+   *  once: on release 127 the resume's walks drew on the first pass's hosts and our helper's per-device window beside
+   *  it). None given: the resume reads at once. */
+  firstPass?: () => Promise<unknown>;
   /** After a chain's buy records are written (any W): that chain's positions read again, so they show with no reload. */
   holdingsWritten?: (chain: "base" | "robinhood") => void;
   /** Step 5's reads (pageIdReads unless given; null: no deposit id is read). */
@@ -574,8 +619,10 @@ export type PoolRestoreHost = {
   ended?: (stage: RestoreStage, why: readonly string[]) => void;
   /** Each try of step 5's end, with its reasons (both empty: every id read and nothing named). */
   step5?: (end: Step5End) => void;
-  /** Tests only: the beat, the clock, step 5's pauses and the two restores (the wallet's otherwise). */
+  /** Tests only: the beat, the clock, step 5's pauses, the resume's wait for the first pass and the two restores (the
+   *  wallet's otherwise). */
   beatMs?: number;
+  firstPassMaxMs?: number;
   now?: () => number;
   pausesMs?: readonly number[];
   solana?: typeof solanaRestoreNotes;
@@ -694,7 +741,28 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
     return locks().request(RESTORE_LOCK, { mode: "exclusive", signal }, async (): Promise<void> => {
       try {
         // a load's resume that another tab's run finished first: nothing is owed
-        if (owed && (await (await h.store()).get("meta", RESTORE_IDS_KEY)) === undefined) return end("done");
+        const was = owed ? await (await h.store()).get("meta", RESTORE_IDS_KEY) : undefined;
+        if (owed && was === undefined) return end("done");
+        // a resume walks only the pools the marker owes a walk, once due (card a-load-proves-first-and-walks-the-restore-
+        // once); every other pool's ids are read on the notes the store holds, which its walk wrote. A run the user asks
+        // for, a sign-in's, or a marker of an older or broken shape walks every pool, as before
+        const marker = owed ? owedOf(was) : null;
+        const t0 = now();
+        const walkOf = (p: RestorePool): "walk" | "store" | "later" => {
+          if (marker?.walks === undefined) return "walk";
+          const w = marker.walks[p.scope.toString()];
+          return w === undefined ? "store" : w.next <= t0 ? "walk" : "later";
+        };
+        // a pool not walked: its deposit notes of its scope as the store holds them, the ones the chain gave (a PLANNED
+        // index this page named ahead is not one: the walk never gives it)
+        const stored = async (scope: bigint): Promise<RestoredNote[]> => {
+          const ns = await openNoteStore(await h.store());
+          try {
+            return (await ns.list()).filter((n) => n.state !== "PLANNED" && n.ref.kind === "deposit" && n.ref.s === scope) as unknown as RestoredNote[];
+          } finally {
+            ns.close();
+          }
+        };
         // each pool on its own: one that fails leaves the others' notes found
         const label = (p: RestorePool): string => (p.chain === "near" ? "near vault" : p.chain === "solana" ? "solana" : p.pin.network);
         const evmHoldingsOwed: { chain: "base" | "robinhood"; pin: EvmPoolPin; list: readonly EvmRpc[]; buys: EvmBuySpend[] }[] = [];
@@ -754,7 +822,10 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
           floors = r;
           return r;
         };
-        const reads = pools.map(async (p): Promise<RestoredNote[]> => {
+        const reads = pools.map(async (p): Promise<RestoredNote[] | "later"> => {
+          const how = walkOf(p);
+          if (how === "later") return "later";
+          if (how === "store") return p.chain === "near" ? [] : stored(p.scope);
           if (p.rpcs === null) throw new Error("no reads on this page");
           if (p.chain === "near") {
             const notes = (await letGo(vaultWalk({ network: p.network, rpcs: p.rpcs(), seed64: seed, signal, turn, ...walkers }), signal)).notes;
@@ -786,15 +857,20 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
         // read. On a restored device nothing on the page reads a vault deposit id the lost device left money on; that
         // was so before this walk too
         const settled = await Promise.allSettled(reads);
+        // the walks that failed now, and those still owed but not due, by scope: the marker's `walks` below
+        const failedNow: string[] = [];
+        const later: string[] = [];
         settled.forEach((r, k) => {
           const p = pools[k]!;
+          if (r.status === "rejected") failedNow.push(p.scope.toString());
+          if (r.status === "fulfilled" && r.value === "later") return void later.push(p.scope.toString());
           if (p.chain === "near") {
             if (r.status !== "fulfilled") why.push(`${label(p)}: ${r.reason instanceof Error ? r.reason.message : "the walk failed"}`);
             return;
           }
           if (r.status === "fulfilled") {
             const chain = chainOf(p);
-            walked.push({ label: label(p), chain, scope: p.scope, notes: r.value, ux: h.ux?.(chain) ?? null, addressed: h.addressed?.(chain) ?? true });
+            walked.push({ label: label(p), chain, scope: p.scope, notes: r.value as RestoredNote[], ux: h.ux?.(chain) ?? null, addressed: h.addressed?.(chain) ?? true });
             // a failed walk stalls the run, but not on a chain this build gives no deposit address on (nor a deposit: the
             // two open together), which holds no note of this device: it holds back no other chain's restore
           } else if (h.addressed?.(chainOf(p)) ?? true) why.push(`${label(p)}: ${r.reason instanceof Error ? r.reason.message : "the walk failed"}`);
@@ -837,7 +913,16 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
           await seedHeld(async () =>
             (await h.store()).update("meta", RESTORE_IDS_KEY, (v) => {
               const o = owedOf(v);
-              return owed && o !== null && JSON.stringify(o.scopes) === JSON.stringify(scopes) ? { ...o, run: runId } : { scopes, run: runId };
+              const keep = owed && o !== null && JSON.stringify(o.scopes) === JSON.stringify(scopes);
+              // each walk that failed now, its tries counted on; each owed one not yet due, as it was
+              const walks: Record<string, WalkOwed> = {};
+              for (const k of later) if (o?.walks?.[k] !== undefined) walks[k] = o.walks[k];
+              for (const k of failedNow) walks[k] = walkOwedOf((keep ? (o?.walks?.[k]?.tries ?? 0) : 0) + 1, now());
+              // a walk that landed this run may have found notes whose ids no try has read: step 5 is owed again
+              const landed = pools.some((p, k) => walkOf(p) === "walk" && settled[k]!.status === "fulfilled");
+              if (!keep) return { scopes, run: runId, walks };
+              const { answered: _, next, ...rest } = o!;
+              return { ...rest, run: runId, walks, ...(next !== undefined ? { next } : {}), ...(o!.answered && !landed ? { answered: true as const } : {}) };
             }),
           );
         signal.throwIfAborted();
@@ -919,13 +1004,28 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
           if (answered) {
             // every id read and nothing found: nothing is owed, unless a pool's walk failed (the next load walks it and
             // reads its ids); a finding keeps the marker, so the next load reads again (review P2-1)
-            if (!walkFailed && out.named.length === 0)
-              await seedHeld(async () => {
-                const st = await h.store();
-                if (owedOf(await st.get("meta", RESTORE_IDS_KEY))?.run === runId) await st.delete("meta", RESTORE_IDS_KEY);
-              });
+            // with a walk still owed the marker stays, its ids answered: a load walks only that pool, once due
+            await seedHeld(async () => {
+              const st = await h.store();
+              const o = owedOf(await st.get("meta", RESTORE_IDS_KEY));
+              if (o?.run !== runId) return;
+              const walksOwed = o.walks === undefined ? walkFailed : Object.keys(o.walks).length > 0;
+              if (!walksOwed && !walkFailed && out.named.length === 0) return void (await st.delete("meta", RESTORE_IDS_KEY));
+              const { next: _, ...rest } = o;
+              await st.put("meta", RESTORE_IDS_KEY, out.named.length === 0 ? { ...rest, answered: true } : (({ answered: __, ...x }) => x)(rest));
+            });
             return;
           }
+          // a read to try again: a later load asks no sooner than this page would have (the pause's end), and past this
+          // page's last try the next load asks again at once
+          await seedHeld(async () =>
+            void (await (await h.store()).update("meta", RESTORE_IDS_KEY, (v) => {
+              const o = owedOf(v);
+              if (o === null || o.run !== runId) return undefined;
+              const { answered: _, next: __, ...rest } = o;
+              return last ? rest : { ...rest, next: now() + pauses[t - 1]! };
+            })),
+          );
           if (last) return;
           await pause(pauses[t - 1]!, signal);
         }
@@ -1044,8 +1144,29 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
     },
     resume: async () => {
       if (run || !(await h.signedIn())) return null;
-      const owed = (await (await h.store()).get("meta", RESTORE_IDS_KEY)) !== undefined;
-      if (!owed || run) return null;
+      const marker = async (): Promise<unknown> => (await h.store()).get("meta", RESTORE_IDS_KEY);
+      if ((await marker()) === undefined || run) return null;
+      // a wait of `ms` at most, ended early by `first` (its timer cleared either way, so a page or a test never holds it)
+      const sleep = (ms: number, first?: Promise<unknown>): Promise<void> => {
+        let t: ReturnType<typeof setTimeout> | undefined;
+        const timer = new Promise<void>((r) => (t = setTimeout(r, ms)));
+        return Promise.race([timer, ...(first ? [first.then(() => {}, () => {})] : [])]).finally(() => clearTimeout(t));
+      };
+      // the load's first proofs go first: no read of the resume starts before they settle, or before the bound
+      if (h.firstPass) await sleep(h.firstPassMaxMs ?? RESUME_FIRST_PASS_MAX_MS, h.firstPass());
+      // then no sooner than the marker asks (a failed walk's next, step 5's next after a read to try again: never a gap
+      // shorter than one page left open keeps), this page open; signed out, a run asked meanwhile (a Retry, a Sync), or
+      // another tab finished step 5 during a wait: nothing
+      for (;;) {
+        if (run || !(await h.signedIn())) return null;
+        const v = await marker();
+        if (v === undefined || run) return null;
+        const o = owedOf(v);
+        const at = o === null ? 0 : resumeAt(o);
+        if (at === null) return null;
+        if (at <= now()) break;
+        await sleep(at - now());
+      }
       return start(true).first;
     },
     signedOut: () => {
