@@ -16,8 +16,8 @@ const { OneClickQuoteError } = await import("../../kit/src/checks/oneclick.ts");
 const TYPED = "0x52908400098527886E0F7030069857D2E4169EE7"; // the address the user typed on Base (EIP-55)
 const REFUND = "4Nd1mBQtrMJVYVfKf2PJy9NZUZdTAsp7D4xWLs4gDB4T"; // the user's own U_X on Solana
 const ASK = { from: "solana", to: "base", recipient: TYPED, payout: 100_000_000n, refundTo: REFUND } as const;
-// SOL at 150 and ETH at 3,000 on both reads: 0.1 SOL is 0.005 ETH; the floor on the partner path (F 20, S 15) is
-// ⌈0.005 × 0.9965⌉ ETH out and that × 0.99 as the least, 4,932,675,000,000,000 wei
+// SOL at 150 and ETH at 3,000 on both reads: 0.1 SOL is 0.005 ETH; the floor on a priced pair (F 20, S 50) is
+// ⌈0.005 × 0.993⌉ ETH out and that × 0.99 as the least, 4,915,350,000,000,000 wei
 const OPTS = { path: "keyless" as const, pricing: { in: ["150", "150"] as const, out: ["3000", "3000"] as const }, now: NOW };
 
 function answer(req: OneClickRequest, q: Partial<Record<string, string>> = {}, after?: (a: Answer) => void): Answer {
@@ -87,7 +87,7 @@ test("minAmountOut within the slippage of amountOut, and over the device's floor
   const c = checkOneClickExitQuote(ASK, REQ, answer(REQ, { amountOut: "4990000000000001", minAmountOut: "4940100000000000" }), OPTS);
   assert.equal(c.minAmountOut, 4_940_100_000_000_000n);
   quoteRefused("floor", () => checkOneClickExitQuote(ASK, REQ, answer(REQ, { amountOut: "4990000000000001", minAmountOut: "4940099999999999" }), OPTS));
-  // over the floor (4,932,675e12) but 3.8% under a padded amountOut: refused
+  // over the floor (4,915,350e12) but 3.8% under a padded amountOut: refused
   quoteRefused("floor", () => checkOneClickExitQuote(ASK, REQ, answer(REQ, { amountOut: "5200000000000000", amountOutFormatted: "0.0052", minAmountOut: "5000000000000000" }), OPTS));
   // under the device's floor at its own prices
   quoteRefused("floor", () => checkOneClickExitQuote(ASK, REQ, answer(REQ, { amountOut: "4900000000000000", amountOutFormatted: "0.0049", minAmountOut: "4851000000000000" }), OPTS));
