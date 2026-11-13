@@ -507,7 +507,8 @@ test("words: every word has a source; the drafts left are the overflow button's 
   // 13 Nov 07:53Z: removed, the app names no proof: one Balance per chain, no Ready or Pending, no word of proof
   for (const k of ["ready", "pending"]) assert.equal(k in WORDS, false, k);
   for (const [k, w] of Object.entries(WORDS)) assert.doesNotMatch(w.text, /proo?f|prov(e|ed|ing)|\bready\b|pending/i, k);
-  assert.deepEqual([...DRAFTS], ["more"], "Export key and Wallets were kept (owner 8 Nov 07:55Z)");
+  // card portfolio-moves-money-between-chains: From, the move sheet's one new label, waits for the owner's words
+  assert.deepEqual([...DRAFTS], ["more", "intents", "from"], "Export key and Wallets were kept (owner 8 Nov 07:55Z)");
 });
 
 test("export (card app-export-every-wallet): each row names the wallets that hold it; Wallets lists every money wallet with no position, a deposit wallet with money left among them", () => {
