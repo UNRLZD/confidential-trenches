@@ -27,6 +27,7 @@ export const WORDS = {
   tpsl: draft("TP/SL", "09-design-brief S8 Order tabs [draft copy: TP/SL]"),
   receive: draft("You receive", "09-design-brief S8 Estimate label [draft copy: You receive]"),
   max: draft("Max", "09-design-brief S8 Max [draft copy: Max $100] (the number is the chain's max buy)"),
+  buyFee: ok("Fee", "owner 12 Nov 13:40Z (asked on the mock You receive / Fee $0.11 / Max $0.77): the pool buy's whole cost beside Max, in USD"),
   route: draft("Route & fees", "09-design-brief S8 Route & fees [draft copy: Route & fees]"),
   slippage: ok("Slippage", "09-design-brief S8 Slippage (CN-15, signed); the settings cell's accessible name only"),
   network: draft("Network", "09-design-brief S8 Network fee [draft copy: Network $0.02]; the settings cell's accessible name only"),

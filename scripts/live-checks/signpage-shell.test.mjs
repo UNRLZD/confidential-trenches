@@ -287,10 +287,12 @@ test("PINNED_HOSTS is exactly the hosts the page's sources name for the mainnet 
     assert.ok(m, `${f}: ${re}`);
     return m.slice(1).map((u) => new URL(u).host);
   };
-  // the NEAR pair through the kit's public entry: its rule names the mainnet list in order, fastnear's first and drpc's last
+  // the NEAR pair through the kit's public entry: its rule names the mainnet list in order, fastnear's first, the
+  // helper's FastNEAR seat (card near-quote-under-the-pace, on TRADE_HELPER's host) third and drpc's last
   const { nearPairRule } = await import("../../packages/kit/src/index.ts");
   const near = nearPairRule("mainnet").match(/https:\/\/[^\s,]+/g);
-  assert.equal(near.length, 3, nearPairRule("mainnet"));
+  assert.equal(near.length, 4, nearPairRule("mainnet"));
+  assert.equal(new URL(near[2]).host, new URL(one("packages/signpage/src/trade.ts", /export const TRADE_HELPER = "([^"]+)"/).map((h) => `https://${h}`)[0]).host);
   const want = [
     ...one("packages/signpage/src/trade.ts", /export const TRADE_HELPER = "([^"]+)"/),
     ...one("packages/signpage/src/trade.ts", /export const SOLANA_PROVIDER_A = "([^"]+)"/),
@@ -298,7 +300,7 @@ test("PINNED_HOSTS is exactly the hosts the page's sources name for the mainnet 
     ...one("packages/signpage/src/trade.ts", /export const SOLANA_PUBLIC_SEAT: readonly string\[\] = Object\.freeze\(\[SOLANA_PROVIDER_A, "([^"]+)"\]\);/),
     ...one("packages/signpage/src/pool-restore.ts", /export const RESTORE_UX_SOLANA = Object\.freeze\(\["([^"]+)", "([^"]+)"\]/),
     new URL(near[0]).host,
-    new URL(near[2]).host,
+    new URL(near[3]).host,
     // each EVM pool's list on mainnet: exactly two per chain, so a third host the page adds fails here
     ...one("packages/signpage/src/pool-testnet.ts", /export const MAINNET_POOL_RPCS: [^=]+= \/\* @__PURE__ \*\/ Object\.freeze\(\{\n {2}base: \/\* @__PURE__ \*\/ Object\.freeze\(\["([^"]+)", "([^"]+)"\]\),\n {2}robinhood: \/\* @__PURE__ \*\/ Object\.freeze\(\["([^"]+)", "([^"]+)"\]\),\n\}\);/),
   ];
