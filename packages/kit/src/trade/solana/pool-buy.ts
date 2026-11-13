@@ -950,8 +950,11 @@ const READ_TIMEOUT_MS = 5_000;
 const late = (ms: number): Error => new SolanaRpcTransportError("timeout", `no answer in ${ms} ms`, 1, "the read's bound");
 
 /** pump Global and PumpSwap GlobalConfig sizes, read on mainnet-beta and publicnode 2026-11-02 21:00Z; the offsets above
- * hold only on these layouts, so any other size is refused. */
-export const SOLANA_PUMP_GLOBAL_SIZE = 1_088;
+ * hold only on these layouts, so any other size is refused. pump's upgrade of 2026-11-13 20:12:28Z (programdata slot
+ * 469055660) grew Global to 1,096 bytes: one u64 appended at 1,088 (30 on both providers, slot 469057462), every byte
+ * the offsets above read unchanged; both layouts are read. */
+export const SOLANA_PUMP_GLOBAL_SIZE = 1_096;
+const PUMP_GLOBAL_SIZES: readonly number[] = [1_088, SOLANA_PUMP_GLOBAL_SIZE];
 export const SOLANA_PUMP_AMM_CONFIG_SIZE = 949;
 
 /** The venue that costs W the most of its chunk (solanaPoolBuyFunds): pump's curve on a cashback coin with the largest
@@ -966,7 +969,7 @@ export const SOLANA_POOL_WORST_BUY_VENUE = Object.freeze({ kind: "pump-curve", t
  *  Mayhem coin its reserved fee recipient. */
 function pumpGlobalFeeRecipient(global: SolanaPoolAccount, mayhem = false): string {
   solanaDecodePumpGlobal(global); // owner and discriminator
-  if (global.data.length !== SOLANA_PUMP_GLOBAL_SIZE) throw new Error(`pump Global is ${global.data.length} bytes, not ${SOLANA_PUMP_GLOBAL_SIZE}`);
+  if (!PUMP_GLOBAL_SIZES.includes(global.data.length)) throw new Error(`pump Global is ${global.data.length} bytes, not ${PUMP_GLOBAL_SIZES.join(" or ")}`);
   const at = mayhem ? PUMP_GLOBAL_RESERVED_FEE_RECIPIENT : PUMP_GLOBAL_FEE_RECIPIENT;
   const feeRecipient = base58.encode(global.data.subarray(at, at + 32));
   if (feeRecipient === DEFAULT_KEY) throw new Error(mayhem ? "pump Global has no reserved fee recipient" : "pump Global has no fee recipient");
