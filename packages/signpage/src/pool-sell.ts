@@ -130,6 +130,9 @@ export type PoolSellHost = {
   signed?(signature: string): Promise<void> | void;
   /** The transaction was sent: W's signature. */
   sent?(signature: string): void;
+  /** The sale read back on both RPCs as this very transaction, succeeded (card trades-and-balance-fast): the sale and its
+   *  deposit back are one transaction, so the sale filled; its note's settle (the mark at finalized) follows. */
+  landed?(signature: string): void;
   /** After a full sell filled (card sol-buy-rent-back): each rent-back transaction W sent, in order (the teardown's
    *  frames, then the sweep into the pool): W's signature. */
   back?(signature: string): void;
@@ -1015,6 +1018,8 @@ export type LegHooks = {
   signed?(i: number, signature: string): Promise<void> | void;
   /** Leg `i` was sent. */
   sent?(i: number, signature: string): void;
+  /** Leg `i` read back on both RPCs as its very transaction, succeeded (PoolSellHost.landed). */
+  landed?(i: number, signature: string): void;
   /** Leg `i` ended (its stage, or its refusal before it signed). */
   ended?(i: number, leg: PoolSellLeg): void;
 };
@@ -1143,6 +1148,10 @@ async function sellAll(host: PoolSellHost, ask: PoolAsk, laters: Later[], hooks:
         open();
         hooks.sent?.(i, signature);
         h.sent?.(signature);
+      },
+      landed: (signature: string) => {
+        hooks.landed?.(i, signature);
+        h.landed?.(signature);
       },
     });
     return Promise.resolve()
@@ -1569,6 +1578,7 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later, w: ListedBuy
     const sentAt = clock();
     // the note's settle asked once its mark can be final (settleGate), the wait to the next read the gate's
     const gate = settleGate(rpcs, signature, signed);
+    let landed = false;
     for (let i = 0, next = 0; i < reads && (i === 0 || clock() - sentAt < POOL_SELL_READS * POOL_SELL_WAIT_MS); i++) {
       if (i > 0) await wait(next || POOL_SELL_POLL_MS);
       next = 0;
@@ -1588,7 +1598,12 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later, w: ListedBuy
       const got = read === null ? [{ got: "none" as const }, { got: "none" as const }] : read.map((g) => (g.got === "failed" ? { got: g.got, err: g.meta?.err } : { got: g.got }));
       // this very transaction failed on chain, on both RPCs: the sale and the deposit are one, nothing moved
       const dead = got[0]!.got === "failed" && got[1]!.got === "failed";
-      // landed on both: its note's settle waits for its mark to be final (card trades-and-balance-fast)
+      // landed on both: the sale filled, told at once; its note's settle waits for its mark to be final (card
+      // trades-and-balance-fast: told at the settle, a sale with a deposit back waited for finality to show Filled)
+      if (!landed && read !== null && read[0].got === "ok" && read[1].got === "ok") {
+        landed = true;
+        h.landed?.(signature);
+      }
       if (!dead && read !== null) {
         next = await gate(read);
         if (next > 0) continue;
@@ -3033,6 +3048,10 @@ export function poolSellKind(host: () => PoolSellKindHost, locks: Locks | null =
               const v = snap();
               writes = writes.then(() => ops.put("ops", ctx.id, v)).catch(() => {});
             };
+            // the legs read back landed on both RPCs (card trades-and-balance-fast): once every leg of the plan has, the
+            // sale is told filled then, not at its notes' settle; `told` keeps the end from being told twice
+            const landed = new Set<number>();
+            let told: TradeStage | null = null;
             // every leg's signature so far, in leg order (card pool-sell-share-across-wallets)
             const legTxs = (): TxRef[] => (op.legs ?? []).flatMap((l) => (l.tx === null ? [] : [{ chain: "solana" as const, hash: l.tx }]));
             const setLeg = (i: number, patch: Partial<SellOpLeg>): void => {
@@ -3069,6 +3088,14 @@ export function poolSellKind(host: () => PoolSellKindHost, locks: Locks | null =
                   if (!answer || sentAnswer(answer)) answer = { result: { stage: "sent", txs: legTxs() } };
                   give();
                 },
+                landed: (i) => {
+                  landed.add(i);
+                  // a share the plan could not sell whole (a frozen W left out) ends part_filled: told at its end, as before
+                  if (told === null && op.short !== true && op.legs !== undefined && op.legs.length > 0 && landed.size === op.legs.length) {
+                    told = "filled";
+                    ctx.progress("filled");
+                  }
+                },
                 ended: (i, leg) => {
                   // a refusal's cause, on the record and the page's console (public words only: legCause)
                   if (leg.error !== undefined) console.warn(`sell leg ${i + 1} refused ${leg.error}${leg.cause === undefined ? "" : `: ${leg.cause}`}`);
@@ -3085,7 +3112,7 @@ export function poolSellKind(host: () => PoolSellKindHost, locks: Locks | null =
                 // after its timeout it asks for state, client.ts REASK_STATE); answer() from here on, like the record
                 // state.ops reads, names the end and every signature sent
                 if (result !== null && sentAnswer(answer)) answer = { result };
-                if (result !== null) ctx.progress(result.stage);
+                if (result !== null && result.stage !== told) ctx.progress(result.stage);
               }
             });
           }).finally(() => stamped(laters, ran?.storeMs ?? TRADE_STORE_MS));

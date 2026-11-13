@@ -1551,11 +1551,12 @@ test("a full sale, its teardown and its sweep are each read back at a slot's pac
 // change the page's state follows; its settle (the mark at finalized) is asked only once both RPCs' finalized slot
 // reaches the sweep's, the wait between those reads the gap at a slot's time each.
 /** RPCs whose finalized slot trails the last transaction each read back by `lag` slots, one fewer at each finalized slot
- *  read (card trades-and-balance-fast); `early` counts the marks read at finalized (a settle's) while it still trails. */
-const finalityTrails = (w: World, lag: number) => {
+ *  read (card trades-and-balance-fast); `early` counts the marks read at finalized (a settle's) while it still trails;
+ *  `hide`: an account read at finalized answers none while it trails (a mark not final yet). */
+const finalityTrails = (w: World, lag: number, hide = false) => {
   const behind = [lag, lag];
   const read = [0, 0];
-  const t = { early: 0, gating: false };
+  const t = { early: 0, gating: false, behind };
   const gated = (k: number, rpc: SolanaRpc): SolanaRpc => async (method, params) => {
     if (method === "getSlot") {
       assert.deepEqual(params, [{ commitment: "finalized" }]);
@@ -1564,7 +1565,9 @@ const finalityTrails = (w: World, lag: number) => {
       behind[k] = Math.max(0, behind[k]! - 1);
       return at;
     }
-    if (method === "getAccountInfo" && (params?.[1] as { commitment?: string } | undefined)?.commitment === "finalized" && t.gating && behind[k]! > 0) t.early++;
+    const final = method === "getAccountInfo" && (params?.[1] as { commitment?: string } | undefined)?.commitment === "finalized";
+    if (final && t.gating && behind[k]! > 0) t.early++;
+    if (final && hide && behind[k]! > 0 && read[k]! > 0) return { context: { slot: read[k]! - behind[k]! }, value: null };
     const r = await rpc(method, params);
     if (method === "getTransaction" && r !== null) read[k] = (r as { slot: number }).slot;
     return r;
@@ -1600,6 +1603,26 @@ test("a sale with a deposit back reads its note's mark only once both finalized 
   assert.equal(w.c.deposits.filter((d) => !d.sweep).length, 1, "the sale's own deposit");
   assert.equal(f.t.early, 0, "no mark read before the finalized slot reached the sale's");
   assert.deepEqual(waits.slice(0, 4), [4 * POOL_BUY_POLL_MS, 3 * POOL_BUY_POLL_MS, 2 * POOL_BUY_POLL_MS, POOL_BUY_POLL_MS], `waits ${JSON.stringify(waits)}`);
+});
+
+// a sale with a deposit back is filled once it reads back on both RPCs as its very transaction, succeeded: the sale and
+// the deposit are one transaction. Told then, as the buy tells its fill at confirmed; its note's settle (the mark at
+// finalized) follows in the run, and the end is never told twice. At f7f20cdaf the sale was told filled only at the
+// settle: with the mark not final, never within the run's reads
+test("a sale with a deposit back is told filled once it reads back on both RPCs, before its note's mark is final, and once", async () => {
+  const w = await world({ ...HALF, ataLamports: TOKEN_RENT }, halfW());
+  const f = finalityTrails(w, 4, true);
+  const stages: string[] = [];
+  const at: number[][] = [];
+  const ctx = { id: "f1", sha: "00", progress: (s: string) => void (stages.push(s), at.push([...f.t.behind])) } as never;
+  const ended = { n: 0 };
+  const r = poolSellKind(() => ({ ...w.host, reads: 10, rpcs: f.rpcs, wait: async () => {}, ops: async () => w.store, end: () => void ended.n++ }), fakeLocks())(ASK, ctx) as KindAnswer;
+  await r.after;
+  await until(async () => ended.n > 0);
+  assert.equal(stages[0], "filled", JSON.stringify(stages));
+  assert.ok(at[0]!.some((x) => x > 0), `told while the finalized slot still trailed the sale's: ${JSON.stringify(at)}`);
+  assert.deepEqual(stages, ["filled"], "told once");
+  assert.equal(((await w.store.get("ops", "f1")) as { stage?: string }).stage, "filled", "the record's stage, at its note's settle");
 });
 
 // Review of T1+T2 (card every-lamport-can-move) P3-4: a full sale writes W's owed record before it leaves the device; a
