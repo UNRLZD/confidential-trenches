@@ -19,7 +19,8 @@ import { SOLANA_RPC_WINDOW_RETRY, solanaHelperRpc, solanaPacedRpc } from "../../
 import { RESERVED_MARKS_KEY, openNoteStore, readReservedMarks, type NoteStore } from "../src/notes/store.ts";
 import { openWalletStore, type WalletStore } from "../src/store/index.ts";
 import { refKey } from "../src/notes/store.ts";
-import { checkPool } from "../src/pool/pool.ts";
+import { checkPool, PassFail } from "../src/pool/pool.ts";
+import { SolanaRpcTransportError } from "../../kit/src/trade/solana/send.ts";
 import { RESTORE_LANES, WALK_SLICE_MS } from "../src/notes/restore.ts";
 import {
   SOL_LAG_SLOTS, SOL_LAG_WAIT_MS, SOL_REACH_WAITS, SOL_PAGES_A_CALL, SOL_LIFE_MS, type SolanaLagWait, solanaLagRetry, SOL_TIP_CAP, solanaContextOf, solanaEpochFee, solanaNow, solanaPageOf, solanaPool, solanaPoolOf, solanaTreeSync, type SolanaFeeAnswer,
@@ -259,6 +260,26 @@ const CHUNK = 10_000_000n;
 const nowChain = (o: Partial<Chain> = {}): Chain => ({ ...relChain(), time: () => 1_800_000_130n, ...o });
 const EPOCH = 1_800_000_120_000n;
 const args = (over: { deadlineMs?: bigint } = {}) => ({ chunk: CHUNK, wallet: { address: W, publicKey: unhex(R.w) }, refundPrecommitment: 1n, epochStartMs: EPOCH, deadlineMs: EPOCH + SOL_LIFE_MS, ...over });
+
+// card buy-spends-several-pieces: a proof pass's line names a throttle "network" and a refusal "fee_refused", so a walk
+// tells them apart; the bind's reads that got no answer keep the kit's SolanaRpcTransportError, which the queue reads
+test("bind: a read of its own that got no answer throws the kit's SolanaRpcTransportError; the fee answer's refusal another error", async () => {
+  const failing = (method: string): [SolanaRpc, SolanaRpc] =>
+    pair(nowChain(), nowChain()).map((r) => (async (m: string, q: readonly unknown[]) => {
+      if (m === method) throw new SolanaRpcTransportError("http_429", "HTTP 429", 3, "a.example");
+      return r(m, q);
+    })) as [SolanaRpc, SolanaRpc];
+  const nameOf = async (run: Promise<unknown>) => run.then(() => assert.fail("bound"), (x: unknown) => (x as Error).name);
+  // the pool's time (solanaNow's block time read), then the cost reads' fee price
+  assert.equal(await nameOf(poolWith(failing("getBlockTime")).bind(args())), "SolanaRpcTransportError");
+  assert.equal(await nameOf(poolWith(failing("getFeeForMessage")).bind(args())), "SolanaRpcTransportError");
+  // the helper's fee read tagged by its caller passes through as it is
+  const tagged = solanaPool({ pin: PIN, rpcs: pair(nowChain(), nowChain()), relayFee: async () => Promise.reject(new PassFail("network", new Error("pool fee: HTTP 429"))), lagWait: async () => {} });
+  const e = await tagged.bind(args()).catch((x: unknown) => x);
+  assert.ok(e instanceof PassFail && e.reason === "network");
+  // a fee answer that is not the epoch's is a refusal
+  await assert.rejects(poolWith(pair(nowChain(), nowChain()), (e) => feeAnswer(e, "1400000")).bind(args()), (x: unknown) => (x as Error).name === "Error" && /not the epoch's fee/.test((x as Error).message));
+});
 
 test("bind: the program's context over W, the pinned fee payer, the epoch fee as the cap, the tip cap and the grid deadline", async () => {
   const b = await poolWith(pair(nowChain(), nowChain())).bind(args());

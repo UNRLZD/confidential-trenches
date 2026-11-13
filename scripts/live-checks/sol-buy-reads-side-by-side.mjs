@@ -8,7 +8,9 @@
 //   - the queue's take (packages/wallet/src/pool/queue.ts takeNow) uses that read only while the monotonic time since is
 //     0 to 5 s and the wall clock's at most 5 s, as its ms plus the larger of the two, else reads the pool's time:
 //     `let e=performance.now()-t.at,n=Date.now()-t.wall;if(e>=0&&e<=5e3&&n<=5e3)return t.ms+BigInt(Math.ceil(Math.max(
-//     e,n)))}return r.now()`, and take() awaits it with its third argument;
+//     e,n)))}return r.now()`, or `return s()` where s is the queue's reader of the pool's time (queue.ts readNow:
+//     `s=async e=>{let t=a(),n=Date.now(),i=await r.now(e);return ...,i}`, which answers that read and keeps it for
+//     ready()), and take() awaits it with its third argument;
 //   - the buy (packages/signpage/src/pool-buy.ts) starts that read right after its not_funded check, beside its first
 //     round, and hands it to the take: `let p=e.chainNow?.();p?.catch(()=>{});` ... `early:p}` ... `e.take(t.noteId,
 //     t.attempt,s?.early)`;
@@ -38,8 +40,12 @@ const esc = (s) => s.replace(/\$/g, "\\$");
 
 /** The read for the take: its name (group 1). */
 const CLOCK = new RegExp(String.raw`async function (${N})\((${N}),(${N})\)\{let (${N})=performance\.now\(\),(${N})=Date\.now\(\);return\{ms:await \2\.now\(\3\),at:\4,wall:\5\}\}`);
-/** The take's time: its name (group 1). */
-const NOW = new RegExp(String.raw`let (${N})=async (${N})=>\{let (${N})=await \2\?\.catch\(\(\)=>void 0\);if\(\3!==void 0\)\{let (${N})=performance\.now\(\)-\3\.at,(${N})=Date\.now\(\)-\3\.wall;if\(\4>=0&&\4<=5e3&&\5<=5e3\)return \3\.ms\+BigInt\(Math\.ceil\(Math\.max\(\4,\5\)\)\)\}return ${N}\.now\(\)\}`);
+/** The take's time: its name (group 1); past the early read, the pool's time read itself, or (group 6) through the
+ *  queue's reader of it (card buy-spends-several-pieces: queue.ts readNow, which also keeps that read for ready()). */
+const NOW = new RegExp(String.raw`let (${N})=async (${N})=>\{let (${N})=await \2\?\.catch\(\(\)=>void 0\);if\(\3!==void 0\)\{let (${N})=performance\.now\(\)-\3\.at,(${N})=Date\.now\(\)-\3\.wall;if\(\4>=0&&\4<=5e3&&\5<=5e3\)return \3\.ms\+BigInt\(Math\.ceil\(Math\.max\(\4,\5\)\)\)\}return (?:${N}\.now\(\)|(${N})\(\))\}`);
+/** The queue's reader of the pool's time (queue.ts readNow): its name (group 1); it answers the pool's own now, read with
+ *  its signal, whatever it keeps of it: `s=async e=>{let t=a(),n=Date.now(),i=await r.now(e);return typeof i==...,i}`. */
+const READ = new RegExp(String.raw`(${N})=async (${N})=>\{let ${N}=${N}\(\),${N}=Date\.now\(\),(${N})=await ${N}\.now\(\2\);return [^;]*?,\3\}`, "g");
 /** The queue's take, its head to its time: the time's function (group 4) called with the third argument. Its fourth and
  *  fifth arguments (a Solana last height, an EVM nullifier: card pool-buy-record-never-stays-sent) are not read here. */
 const TAKE = new RegExp(String.raw`take\((${N}),(${N}),(${N})(?:,${N}){0,2}\)\{return ${N}\(\),${N}\(\1,async\(\)=>\{[^{}]*?\{[^{}]*\}[^{}]*?\{[^{}]*\}[^{}]*?let ${N}=await (${N})\(\3\),`);
@@ -62,6 +68,14 @@ export function facts(index, js) {
     poolSend: js.includes("/v1/pool/solana/send"),
     clock: at(CLOCK),
     now: at(NOW),
+    // the reader the take's time falls back to: the last of its shape before the take's time, in the queue's scope
+    read: (() => {
+      const m = NOW.exec(js);
+      if (!m?.[6]) return null;
+      const before = js.slice(Math.max(0, m.index - 20_000), m.index);
+      const all = [...before.matchAll(READ)].filter((r) => r[1] === m[6]);
+      return all.at(-1)?.[0] ?? null;
+    })(),
     take: at(TAKE),
     buy: start && fillAt > 0 ? js.slice(start.index, js.indexOf("}", fillAt) + 1) : null,
     send: at(SEND),
@@ -73,7 +87,10 @@ function problems(a) {
   const out = [];
   const clock = typeof a.clock === "string" ? CLOCK.exec(a.clock)?.[1] : undefined;
   if (clock === undefined) out.push("the bundle's read of the pool's time for the take does not stamp the monotonic and the wall clock before it asks the pool");
-  const now = typeof a.now === "string" ? NOW.exec(a.now)?.[1] : undefined;
+  const nowM = typeof a.now === "string" ? NOW.exec(a.now) : null;
+  // through a reader: only one that answers the pool's own time (READ), by that name
+  const readOk = nowM?.[6] === undefined || (typeof a.read === "string" && [...a.read.matchAll(READ)].some((r) => r[0] === a.read && r[1] === nowM[6]));
+  const now = nowM !== null && readOk ? nowM[1] : undefined;
   if (now === undefined) out.push("the bundle's take does not use an early read as its ms plus the larger of the two clocks' time since, only within 5 s on both, else a read of its own");
   const take = typeof a.take === "string" ? TAKE.exec(a.take)?.[4] : undefined;
   if (now !== undefined && take !== now) out.push("the bundle's take does not time itself with the early read it is handed");

@@ -473,9 +473,12 @@ const PLANTS = [
     const m = sites[k];
     return APP.slice(0, m.index) + "signal:AbortSignal.timeout(1e4)" + APP.slice(m.index + m[0].length);
   }]),
-  ["busy_wait", "pacedNearRpc hands nearRpc its own 10 s deadline", () => plant(String.raw`=§\(§,§,null\),§=async\(`, (s) => s.replace(",null)", ",1e4)"))],
+  ["busy_wait", "pacedNearRpc hands nearRpc its own 10 s deadline", () => plant(String.raw`=§\(§,§,null\),§=Object\.values\(`, (s) => s.replace(",null)", ",1e4)"))],
   ["busy_wait", "pacedNearRpc's reserve hands nearRpc a fetch with no deadline", () => plant(String.raw`=§\(§,§\(§,§\),null\),§=!1;`, (s) => s.replace(/,[\w$]+\(([\w$]+),[\w$]+\),null\)/, ",$1,null)"))],
-  ["busy_wait", "pacedNearRpc asks a 429 once (tries 4 -> 1)", () => swap(String.raw`\)\|\|§\+1>=4\|\|§\?\.aborted\)throw`, ">=4", ">=1")],
+  ["busy_wait", "pacedNearRpc asks a 429 once (tries 4 -> 1)", () => swap(String.raw`\)\|\|§\+1>=4\|\|§\?\.aborted\|\|`, ">=4", ">=1")],
+  ["busy_wait", "pacedNearRpc waits out a 429 naming any wait (the day cap's 75 s too)", () => swap(String.raw`\|\|§&&\(§\.retryAfterMs\?\?0\)>1e4\)throw`, ">1e4", ">1e9")],
+  ["busy_wait", "pacedNearRpc skips a long 429 on every URL, not the seat's alone (dRPC's 30 s ends a buy)", () => plant(String.raw`\|\|§&&\(§\.retryAfterMs\?\?0\)>1e4\)throw`, (s) => s.replace(/^\|\|[\w$]+&&/, "||"))],
+  ["busy_wait", "pacedNearRpc's seat flag true for every URL", () => plant(String.raw`=Object\.values\(§\)\.some\(§=>§\.seat===§\),§=async\(`, (s) => s.replace(/^=Object\.values\([\w$]+\)\.some\([\w$]+=>[\w$]+\.seat===[\w$]+\)/, "=!0"))],
   ["busy_wait", "pacedNearRpc's busy wait at most 10 s -> 1e9 ms", () => swap(String.raw`var §=1e4,§=§=>§ instanceof Error&&§\.status===429;`, "1e4", "1e9")],
   ["busy_wait", "pacedNearRpc's busy wait not held on the pace", () => plant(String.raw`;§\(§,performance\.now\(\),§\)\}\},`, () => ";}},")],
   ["busy_wait", "RPC_TIMEOUT_MS 10 s -> 1e9 ms", () => { const to = /function [\w$]+\([\w$]+,[\w$]+=\(\.\.\.[\w$]+\)=>fetch\(\.\.\.[\w$]+\),[\w$]+=([\w$]+)\)\{/.exec(APP)[1]; return swap(String.raw`(?<![\w$.])${to.replace(/[$]/g, "\\$&")}=1e4[,;]`, "1e4", "1e9"); }],

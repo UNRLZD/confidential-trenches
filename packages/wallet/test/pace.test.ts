@@ -274,8 +274,9 @@ test("a busy answer from dRPC holds its pace and the read is asked again, not fa
     assert.ok(performance.now() - t >= 2 * P.paceOf(DRPC).every - 5, `${performance.now() - t} ms`);
   });
   P.resetPaces();
+  // a hard cap on turns: past twice the bound the stub answers, so a loop with no bound fails here, never hangs
   let m = 0;
-  await withFetch(async () => (m++, busy("0")), async () => {
+  await withFetch(async () => (++m > 2 * P.NEAR_BUSY_TRIES ? answer() : busy("0")), async () => {
     await assert.rejects(P.pacedNearRpc(DRPC).query({ request_type: "view_account", finality: "final", account_id: "intents.near" }), /HTTP 429/);
     assert.equal(m, P.NEAR_BUSY_TRIES);
   });
@@ -347,7 +348,8 @@ test("the seat: 11 reads asked at once go out 5 at once, then one every 200 ms; 
 
 test("the seat falls to FastNEAR's keyless URL when the helper is busy past its tries, down (5xx), slow or unreachable; never on a 4xx or the caller's own abort", async () => {
   const cases: [string, () => Response | Promise<Response>, boolean][] = [
-    ["429 past NEAR_BUSY_TRIES", () => busy("0"), true],
+    // a hard cap on turns: past twice the bound the seat answers, so a loop with no bound fails here, never hangs
+    ["429 past NEAR_BUSY_TRIES", (() => { let k = 0; return () => (++k > 2 * P.NEAR_BUSY_TRIES ? answer() : busy("0")); })(), true],
     ["503 upstream", () => new Response(JSON.stringify({ error: { code: "upstream" } }), { status: 503 }), true],
     ["502", () => new Response("bad gateway", { status: 502 }), true],
     ["no answer in time", () => Promise.reject(new DOMException("timed out", "TimeoutError")), true],

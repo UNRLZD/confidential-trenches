@@ -11,6 +11,8 @@
 //     rounded down (0.001720236), never the vault's buy; it fills on the kit's stage in under 2 s (Filled 1.1s);
 //   - over one tap ($0.17) and a proof still making: the button is off and a tap sends nothing; the amount field is
 //     marked wrong over one tap, never while the proof is making;
+//   - a balance with no proof ready and none being made (ready "0", no making): no proof label at all, no Max, the button
+//     off and a tap sends nothing (the box never says a proof is coming when none is);
 //   - Base: a whole chunk's USD ($3.50) sends pool.buy for 0.001 ETH; any other amount ($3.00) sends nothing;
 //   - the presets row: Solana and the vault keep the four; on Base it is one button, the row's width, holding the chunk's
 //     USD ($3.50), whose tap fills 3.50 and sends that pool.buy; with no proof ready yet its value is unknown: "—", off;
@@ -53,16 +55,17 @@ const BUYS = [
   ["sol-feedown", "pool=sol-ready&amt=0.16&fee=down", "pool", "ready", "$0.93 available", "Proof ready Max $0.16", true, { kind: "pool.buy", params: { chain: "solana", token: MINT, amount: "0.001720236", slippage_bps: 1000 } }],
   ["sol-over", "pool=sol-ready&amt=0.17", "pool", "ready", "$0.93 available", "Proof ready Max $0.16", false, null],
   ["sol-making", "pool=sol-making&amt=0.16", "pool", "making", "$0.93 available", "Making proof", false, null],
+  ["sol-none", "pool=sol-none&amt=0.16", "pool", null, "$0.93 available", "", false, null],
   ["base-chunk", "pool=base-ready&amt=3.50", "pool", "ready", "$10.50 available", "Proof ready Max $3.50", true, { kind: "pool.buy", params: { chain: "base", token: EVM, amount: "0.001", slippage_bps: 1000 } }],
   ["base-other", "pool=base-ready&amt=3", "pool", "ready", "$10.50 available", "Proof ready Max $3.50", false, null],
   ["base-making", "pool=base-making&amt=3.50", "pool", "making", "$10.50 available", "Making proof", false, null],
   ["vault", "amt=25", "vault", null, "$73.18 available", "Max $100", true, { kind: "buy", params: { chain: "solana", token: MINT, side: "buy", amount: "25.00", slippage_bps: 1000 } }],
 ];
 // the Fee row: on a Solana pool buy whose Max the box reads for the coin (coinTapKey), the typed amount's cost; none else
-const FEE = { "sol-ready": "Fee $0.14", "sol-feedown": "Fee —", "sol-over": "Fee $0.14", "sol-making": null, "base-chunk": null, "base-other": null, "base-making": null, vault: null };
+const FEE = { "sol-ready": "Fee $0.14", "sol-feedown": "Fee —", "sol-over": "Fee $0.14", "sol-making": null, "sol-none": null, "base-chunk": null, "base-other": null, "base-making": null, vault: null };
 // the amount field marked wrong: over one tap, or not a whole chunk on Base; never while a proof is still making (the
 // amount is not what is wrong) or on an amount the pool can take
-const BAD = { "sol-ready": "false", "sol-feedown": "false", "sol-over": "true", "sol-making": "false", "base-chunk": "false", "base-other": "true", "base-making": "false", vault: "false" };
+const BAD = { "sol-ready": "false", "sol-feedown": "false", "sol-over": "true", "sol-making": "false", "sol-none": "false", "base-chunk": "false", "base-other": "true", "base-making": "false", vault: "false" };
 // the presets row as data-preset:disabled:text per button: the four on Solana (all over one tap's most on the pool, $100
 // over the vault's max); on Base the chunk's one button, "—" and off while no proof is ready
 const FOUR_OFF = "10.00:true:$10 25.00:true:$25 50.00:true:$50 100.00:true:$100";
@@ -71,6 +74,7 @@ const PRESET_ROW = {
   "sol-feedown": FOUR_OFF,
   "sol-over": FOUR_OFF,
   "sol-making": FOUR_OFF,
+  "sol-none": FOUR_OFF,
   "base-chunk": "3.50:false:$3.50",
   "base-other": "3.50:false:$3.50",
   "base-making": ":true:—",

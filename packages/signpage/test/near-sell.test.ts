@@ -724,3 +724,58 @@ test("a second registration refused already_registered while W still reads unreg
   assert.deepEqual(stops.map((x) => [x[0], x[1]]), [["register", "not_registered"]]);
   assert.equal(helperBodies(ev).length, 1, "no swap sent");
 });
+
+// review P3-5 of e6c66cce3: each guard on the pair a sell signs from, planted through the pair (fakePair)
+/** The world's pair with `edit` applied to its reads from the first one `when` names, `times` of them. */
+const plantPair = (deps: NearSellDeps, when: (a: Parameters<NearSellDeps["pair"]>[0]) => boolean, edit: (p: Awaited<ReturnType<NearSellDeps["pair"]>>) => Awaited<ReturnType<NearSellDeps["pair"]>>, times = Infinity) => {
+  const pair = deps.pair;
+  let left = times;
+  deps.pair = async (a) => {
+    const p = await pair(a);
+    return when(a) && left-- > 0 ? edit(p) : p;
+  };
+};
+
+test("P3-5 the swap's pair read a block before the registration landed (not registered, its nonce before it): read again, the swap signed at the nonce after the registration", async () => {
+  const { deps, ev, chain } = world({ registered: false });
+  plantPair(deps, () => chain.registered, (p) => ({ ...p, state: { ...p.state, registered: false, nonce: p.state.nonce - 1n } }), 1);
+  const answer = await run(deps);
+  assert.ok(answer !== null && "result" in answer, JSON.stringify(answer));
+  const [, swap] = signs(ev);
+  assert.equal((swap![6] as { nonce: bigint }).nonce, 41n, "never at the registration's own nonce");
+});
+
+test("P3-5 the swap's pair reading less of the token than the amount sold: not_funded, nothing signed for the swap", async () => {
+  const { deps, ev, stops } = world();
+  plantPair(deps, (a) => a.baseline !== undefined, (p) => ({ ...p, state: { ...p.state, held: p.state.held - 1n } }));
+  await run(deps);
+  assert.equal(signs(ev).length, 0);
+  assert.deepEqual(stops.at(-1)?.slice(0, 2), ["swap", "not_funded"]);
+});
+
+for (const [what, edit, code] of [
+  ["a read of another account", (p: Awaited<ReturnType<NearSellDeps["pair"]>>) => ({ ...p, state: { ...p.state, account: "cd".repeat(32) } }), "read_failed"],
+  ["a quote on another network", (p: Awaited<ReturnType<NearSellDeps["pair"]>>) => ({ ...p, quote: { ...p.quote, network: "testnet" as const } }), "quote_check_failed"],
+  ["a quote of the other side", (p: Awaited<ReturnType<NearSellDeps["pair"]>>) => ({ ...p, quote: { ...p.quote, side: "buy" as const } }), "quote_check_failed"],
+  ["a quote of another token", (p: Awaited<ReturnType<NearSellDeps["pair"]>>) => ({ ...p, quote: { ...p.quote, token: "other.near" } }), "quote_check_failed"],
+] as const) {
+  test(`P3-5 the sell's pair with ${what}: ${code}, nothing signed or sent`, async () => {
+    const { deps, ev, log } = world();
+    plantPair(deps, () => true, edit);
+    assert.deepEqual(await run(deps), { error: code });
+    assert.ok(!names(ev).includes("sign") && !names(ev).includes("helper"));
+    // refused on the pair as read, at the quote, never later by the calls' own check (nearSwapCalls)
+    assert.equal(log.at(-1)?.[0], "quote", JSON.stringify(log));
+  });
+}
+
+test("P3-5 the swap's pair asked for its baseline and answered without one: read_failed, nothing signed for the swap", async () => {
+  const { deps, ev, stops } = world();
+  plantPair(deps, (a) => a.baseline !== undefined, (p) => {
+    const { baseline: _gone, ...rest } = p;
+    return rest;
+  });
+  await run(deps);
+  assert.equal(signs(ev).length, 0);
+  assert.deepEqual(stops.at(-1)?.slice(0, 2), ["swap", "read_failed"]);
+});
