@@ -445,3 +445,154 @@ test("step 5: a read that throws once the run's signal ended stops the lanes wit
   await assert.rejects(restoreDepositIds(SEED, SCOPE, LANES, holds, { signal: ac.signal }), /^Error: the read stopped$/);
   assert.equal(n, 3, "no read after the signal ended");
 });
+
+// ---------- card a-load-proves-first-and-walks-the-restore-once ----------
+// a lane read part way by an earlier load goes on from where it stopped (`from`), and `progress` hears each clean id
+// read, so a page reloaded every 30 s never reads the same ids again. The reader answers by index and logs each index
+// read, and each id it was handed beside it (the ids must stay depositAccount's per index).
+function byIndex(money: Iterable<number>, fail: Iterable<number> = [], used: Iterable<number> = []) {
+  const m = new Set(money), f = new Set(fail), u = new Set(used);
+  const read: number[] = [];
+  const ids: string[] = [];
+  const holds = async (x: string, i?: number): Promise<IdState> => {
+    read.push(i!);
+    ids.push(x);
+    return f.has(i!) ? Promise.reject(new Error("rpc down")) : m.has(i!) ? "money" : u.has(i!) ? "used" : "unused";
+  };
+  return { read, ids, holds };
+}
+const inLane = (xs: readonly number[], lane: number) => xs.filter((i) => i % RESTORE_LANES === lane);
+const sameIds = (r: { read: number[]; ids: string[] }) => assert.deepEqual(r.ids, r.read.map(id), "each id is depositAccount's for its index");
+const unused = ({ used: _, ...x }: LaneIds) => x;
+
+test("step 5 (from): a lane an earlier read left part way reads only the indices past it, to the same end as a whole read", async () => {
+  const answers = () => byIndex([], [], [at(5, 3), at(5, 10), at(3, 4)]);
+  const whole = answers();
+  const all = await restoreDepositIds(SEED, SCOPE, LANES, whole.holds);
+  assert.deepEqual([all[5]!.highest, all[5]!.readTo, all[5]!.reach], [at(5, 10), at(5, 10 + DEPOSIT_ID_MARGIN), null]);
+  assert.deepEqual([all[3]!.highest, all[3]!.readTo], [at(3, 4), at(3, 4 + DEPOSIT_ID_MARGIN)]);
+  // lane 5 read to its 7th index (its highest then its 3rd); lane 3 to its 6th, its only history (its 4th) behind it, so
+  // `highest` alone carries its bound; lane 0 to its 1st, with no highest given: its notes' highest (16) sets its bound
+  const X = at(5, 7);
+  const r = answers();
+  const from = new Map([[5, { readTo: X, highest: at(5, 3) }], [3, { readTo: at(3, 6), highest: at(3, 4) }], [0, { readTo: at(0, 1), highest: null }]]);
+  const got = await restoreDepositIds(SEED, SCOPE, LANES, r.holds, { from });
+  sameIds(r);
+  assert.deepEqual(inLane(r.read, 5), inLane(whole.read, 5).filter((i) => i > X), "lane 5: exactly the indices past X");
+  assert.deepEqual(inLane(r.read, 3), inLane(whole.read, 3).filter((i) => i > at(3, 6)), "lane 3: exactly the indices past its 6th");
+  assert.deepEqual(inLane(r.read, 0), inLane(whole.read, 0).filter((i) => i > at(0, 1)), "lane 0: exactly the indices past its 1st");
+  for (const l of [1, 2, 4, 6, 7]) assert.deepEqual(inLane(r.read, l), inLane(whole.read, l), `lane ${l} read whole`);
+  assert.deepEqual(got.map(unused), all.map(unused), "notes, money, unread, highest, readTo and reach as the whole read's");
+  assert.deepEqual([got[5]!.used, got[3]!.used], [[at(5, 10)], []], "used: only the indices read in this call");
+  // the reach past the walk's end comes as a whole read's: lane 4 walked to 12, used at 4, 12 and 20; resumed past 12
+  const short = { ...LANES, laneWalked: walkedTo(HIGH, 2) };
+  const reachAnswers = () => byIndex([], [], [at(4, 0), at(4, 1), at(4, 2)]);
+  const w4 = (await restoreDepositIds(SEED, SCOPE, short, reachAnswers().holds))[4]!;
+  const r4 = reachAnswers();
+  const g4 = (await restoreDepositIds(SEED, SCOPE, short, r4.holds, { from: new Map([[4, { readTo: at(4, 1), highest: at(4, 1) }]]) }))[4]!;
+  assert.deepEqual(inLane(r4.read, 4), [at(4, 2)]);
+  assert.deepEqual([g4.highest, g4.readTo, g4.reach], [w4.highest, w4.readTo, w4.reach]);
+  assert.deepEqual([g4.reach, g4.used], [at(4, 2), [at(4, 2)]]);
+  // a highest past the lane's walk end now (an earlier walk reached further): the lane is read from its start, as whole
+  const r4b = reachAnswers();
+  const g4b = (await restoreDepositIds(SEED, SCOPE, short, r4b.holds, { from: new Map([[4, { readTo: at(4, 3), highest: at(4, 3) }]]) }))[4]!;
+  assert.deepEqual(inLane(r4b.read, 4), [at(4, 0), at(4, 1), at(4, 2)]);
+  assert.deepEqual(g4b, w4);
+  // a lane in both `from` and `done` follows `done`: not read at its bound, read whole from its start short of it
+  const to2 = all[2]!.readTo;
+  const d1 = answers();
+  const g1 = await restoreDepositIds(SEED, SCOPE, LANES, d1.holds, { done: new Map([[2, to2]]), from: new Map([[2, { readTo: at(2, 4), highest: null }]]) });
+  assert.deepEqual([inLane(d1.read, 2), g1.some((x) => x.lane === 2)], [[], false]);
+  const d2 = answers();
+  await restoreDepositIds(SEED, SCOPE, LANES, d2.holds, { done: new Map([[2, to2 - 8]]), from: new Map([[2, { readTo: at(2, 4), highest: null }]]) });
+  assert.deepEqual(inLane(d2.read, 2), inLane(whole.read, 2));
+});
+
+test("step 5 (progress): heard after each clean id with the index just read, awaited; never after an unread or money id, nor after one", async () => {
+  // lane 1: money at its 5th index; lane 2: its 3rd index fails; lane 5: used at its 4th
+  const r = byIndex([at(1, 4)], [at(2, 2)], [at(5, 3)]);
+  const heard: { lane: number; readTo: number; highest: number | null; reads: number; after: number }[] = [];
+  const got = await restoreDepositIds(SEED, SCOPE, LANES, r.holds, {
+    progress: async (lane, readTo, highest) => {
+      const reads = r.read.length;
+      await new Promise((res) => setImmediate(res));
+      heard.push({ lane, readTo, highest, reads, after: r.read.length });
+    },
+  });
+  for (const h of heard) {
+    assert.equal(h.after, h.reads, `lane ${h.lane} at ${h.readTo}: no read before progress resolved`);
+    assert.equal(r.read[h.reads - 1], h.readTo, "readTo is the index just read");
+  }
+  const of = (l: number) => heard.filter((h) => h.lane === l).map((h) => [h.readTo, h.highest]);
+  const each = (l: number, n: number, high: (k: number) => number | null) => Array.from({ length: n }, (_, k) => [at(l, k), high(k)]);
+  assert.deepEqual(of(1), each(1, 4, () => null), "lane 1: its first 4, none at the money nor past it");
+  assert.ok(got[1]!.readTo > at(1, 4));
+  assert.deepEqual(of(2), each(2, 2, () => null), "lane 2: its first 2, none at the failed read nor past it");
+  assert.ok(got[2]!.readTo > at(2, 2));
+  const n = (x: LaneIds) => (x.readTo - x.lane) / RESTORE_LANES + 1;
+  assert.deepEqual(of(5), each(5, n(got[5]!), (k) => (k < 3 ? null : at(5, 3))), "lane 5: every id, a used one included");
+  assert.deepEqual(of(0), each(0, n(got[0]!), () => 16), "lane 0: every id, its highest its notes'");
+  // a used id past the walk's end (a reach) is no clean id: lane 4 walked to 12, used at 4, 12 and 20
+  const s = byIndex([], [], [at(4, 0), at(4, 1), at(4, 2)]);
+  const h4: [number, number | null][] = [];
+  await restoreDepositIds(SEED, SCOPE, { ...LANES, laneWalked: walkedTo(HIGH, 2) }, s.holds, { progress: async (lane, readTo, highest) => void (lane === 4 && h4.push([readTo, highest])) });
+  assert.deepEqual(h4, [[at(4, 0), at(4, 0)], [at(4, 1), at(4, 1)]]);
+});
+
+test("step 5 (from + progress): two loads split at a progress point read each index once between them; the second ends as a whole read", async () => {
+  const answers = () => byIndex([at(0, 12)], [], [at(0, 5), at(0, 9)]);
+  const whole = answers();
+  const all = await restoreDepositIds(SEED, SCOPE, LANES, whole.holds);
+  // the first load is gone (a reload) right after lane 0's 7th id, its last progress kept
+  const one = answers();
+  const kept = { lane: -1, readTo: -1, highest: null as number | null };
+  await assert.rejects(
+    restoreDepositIds(SEED, SCOPE, LANES, one.holds, {
+      progress: async (lane, readTo, highest) => {
+        Object.assign(kept, { lane, readTo, highest });
+        if (lane === 0 && readTo === at(0, 7)) throw new Error("reload");
+      },
+    }),
+    /^Error: reload$/,
+  );
+  assert.deepEqual(kept, { lane: 0, readTo: at(0, 7), highest: at(0, 5) });
+  const two = answers();
+  const got = await restoreDepositIds(SEED, SCOPE, LANES, two.holds, { from: new Map([[0, { readTo: kept.readTo, highest: kept.highest }]]) });
+  sameIds(one);
+  sameIds(two);
+  const both = [...one.read, ...two.read];
+  assert.equal(new Set(both).size, both.length, "no index read twice");
+  assert.deepEqual([...both].sort((x, y) => x - y), [...whole.read].sort((x, y) => x - y), "every index a whole read reads");
+  assert.deepEqual(got.map(unused), all.map(unused));
+  assert.deepEqual([got[0]!.money, got[0]!.used, all[0]!.used], [[at(0, 12)], [at(0, 9)], [at(0, 5), at(0, 9)]]);
+});
+
+test("step 5 (from): an entry that is not a clean point of its lane is refused before any read", async () => {
+  const bad: [number, unknown][] = [
+    [2, { readTo: 3, highest: null }], // not an index of lane 2
+    [2, { readTo: -6, highest: null }],
+    [2, { readTo: 2.5, highest: null }],
+    [2, { readTo: Number.NaN, highest: null }],
+    [2, { readTo: "10", highest: null }],
+    [0, { readTo: 2 ** 32, highest: null }], // an index of lane 0 past 2^32 - 1
+    [2, { readTo: 18, highest: 3 }], // its highest not an index of the lane
+    [2, { readTo: 18, highest: -6 }],
+    [2, { readTo: 18, highest: 2.5 }],
+    [2, { readTo: 18, highest: "2" }],
+    [2, { readTo: 18, highest: 26 }], // above readTo
+    [8, { readTo: 8, highest: null }], // no such lane
+    [2, null],
+  ];
+  for (const [lane, e] of bad) {
+    const r = byIndex([]);
+    await assert.rejects(
+      restoreDepositIds(SEED, SCOPE, LANES, r.holds, { from: new Map([[lane, e]]) as ReadonlyMap<number, { readTo: number; highest: number | null }> }),
+      /^Error: from: lane \d+: /,
+      JSON.stringify([lane, e]),
+    );
+    assert.deepEqual(r.read, [], "nothing read");
+  }
+  // the edges a lane allows: 2^32 - 1 itself (lane 7's last index), a highest at readTo
+  const got = await restoreDepositIds(SEED, SCOPE, LANES, byIndex([]).holds, { from: new Map([[7, { readTo: 0xffffffff, highest: null }], [2, { readTo: 18, highest: 18 }]]) });
+  assert.deepEqual([got[7]!.readTo, got[2]!.highest], [0xffffffff, 18]);
+});

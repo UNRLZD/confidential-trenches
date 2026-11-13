@@ -46,6 +46,10 @@ const LANDED = new RegExp(`landed:\\(\\)=>\\{(${N})\\.has\\((${N})\\)\\|\\|\\(\\
 const LANDED_ANY = new RegExp(`landed:\\(\\)=>void ${N}\\(${N}\\)`);
 /** evmProofs: `F=async(e,t=!1)=>{...let r=await n,i=await r.queue.refresh(t?r.landing?.():void 0);`. */
 const PROOFS = (f) => new RegExp(`[,;{ ]${esc(f)}=async\\((${N}),(${N})=!1\\)=>\\{if\\(${N}\\(\\1\\)===null\\)return null;let (${N})=${N}\\.get\\(\\1\\);\\3===void 0&&${N}\\.set\\(\\1,\\3=${N}\\(\\1\\)\\);try\\{let (${N})=await \\3,${N}=await \\4\\.queue\\.refresh\\(\\2\\?\\4\\.landing\\?\\.\\(\\):void 0\\);`);
+/** evmProofs as card a-load-proves-first-and-walks-the-restore-once wraps it: `F=(e,t=!1)=>X(e,G(e,t))` (firstOf, which
+ *  only notes the chain's first pass, around evmQueuePass), the landing flag passed through unchanged; G is then PROOFS. */
+const WRAPPED = (f) => new RegExp(`[,;{ ]${esc(f)}=\\((${N}),(${N})=!1\\)=>${N}\\(\\1,(${N})\\(\\1,\\2\\)\\)`);
+const proofsOf = (f, js) => once(PROOFS(f), js) || (once(WRAPPED(f), js) && once(PROOFS(WRAPPED(f).exec(js)[3]), js));
 /** Every call of a passed queue's refresh with an argument (the landing's alone may pass one). */
 const REFRESH_ARG = new RegExp(`\\.queue\\.refresh\\([^)]`, "g");
 /** openEvmQueue's two pools, the landing set and the routed pool:
@@ -91,7 +95,7 @@ const POOL_OF = (warm, pool) => new RegExp(`evmPoolOf:(${N})=>\\((${N})=>\\2===n
 /** What the check keeps of SIGN_HOST's build: its pin and sha384, and each part found exactly once and bound. */
 export function pageFacts(index, js) {
   const landed = once(LANDED, js) ? LANDED.exec(js) : null;
-  const proofs = landed !== null && once(PROOFS(landed[3]), js);
+  const proofs = landed !== null && proofsOf(landed[3], js);
   const pass = once(PASS_POOL, js) ? PASS_POOL.exec(js) : null;
   const trade = pass !== null && once(TRADE_POOL(pass[3], pass[4], pass[2], pass[5]), js) ? TRADE_POOL(pass[3], pass[4], pass[2], pass[5]).exec(js) : null;
   const routed = trade !== null && once(ROUTED(trade[1]), js) ? ROUTED(trade[1]).exec(js) : null;

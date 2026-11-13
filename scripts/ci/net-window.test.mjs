@@ -100,6 +100,7 @@ export const CHANGED = [
   "scripts/live-checks/helper-launchpad-origin.mjs",
   "scripts/live-checks/helper-live-bars-no-503.mjs",
   "scripts/live-checks/chart-candles-never-429.mjs",
+  "scripts/live-checks/helper-candles-keyed-gt.mjs",
   "scripts/live-checks/helper-page-jup-429.mjs",
   "scripts/live-checks/helper-pool-senders.mjs",
   "scripts/live-checks/helper-proxy.mjs",
@@ -154,6 +155,7 @@ export const CHANGED = [
   "scripts/live-checks/oneclick-fee-path-own-key.mjs",
   "scripts/live-checks/oneclick-partner-fee-live.mjs",
   "scripts/live-checks/pool-answer-unknown.mjs",
+  "scripts/live-checks/a-load-proves-first-and-walks-the-restore-once.mjs",
   "scripts/live-checks/pool-buy-filled-2s.mjs",
   "scripts/live-checks/sol-buy-reads-side-by-side.mjs",
   "scripts/live-checks/pool-buy-send-fast.mjs",
@@ -283,6 +285,7 @@ export const CHANGED = [
   "scripts/live-checks/helper-says-why-a-vendor-refused.mjs",
   "scripts/live-checks/evm-first-proof-inside-ten-seconds.mjs",
   "scripts/live-checks/screens-never-say-proof.mjs",
+  "scripts/live-checks/pool-balance-counts-the-remainder.mjs",
 ];
 
 // Scripts in the searched folders that open no connection from Node, and why.

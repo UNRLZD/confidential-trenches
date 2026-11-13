@@ -67,6 +67,8 @@ interface Fx {
   hold?: true;
   /** The pool_deposit op under that request's id, on Solana. */
   poolStatus?: PoolDepositStatus | null;
+  /** pool.address with the asset and amount answers the chain asked, in its own coin, the asset and amount echoed. */
+  echo?: true;
 }
 const refused = (code: QuoteRefusal) => ({ ok: false as const, code });
 const since = (s: number) => NOW - s * 1000;
@@ -120,6 +122,10 @@ export const FIXTURES: Record<string, Fx> = {
   // review P1: the quote held until __release(), NEAR and SOL to pick from
   hold: { hold: true, assets: [NEAR, SOL_A] },
   "own-coins": { assets: OWN_COINS, pools: { solana: true, base: true, robinhood: true } },
+  // card pool-balance-counts-the-remainder: each pool's address for its own coin (the send rule under it), and the done
+  // screen's Balance with a remainder still at U_X (state.deposit_wallets)
+  "own-coin-address": { assets: OWN_COINS, pools: { solana: true, base: true, robinhood: true }, echo: true },
+  "pool-in-remainder": { poolStatus: { pool: "solana", stage: "in_pool", since_ms: since(40) }, state: { ...SOL_IN_POOL("0.4"), deposit_wallets: [{ chain: "solana", address: U_SOL, asset: "SOL", amount: "0.0125" }] } },
   "pool-other-chain": { poolQuote: { ok: true, value: { ...POOL_ANSWER, chain: "base", asset: "ETH" } } },
 };
 
@@ -154,6 +160,7 @@ const src: DepositSource = {
     window.__calls.push({ kind: "pool.address", params: q ? { chain, origin_asset: q.asset.id, amount: q.amount } : { chain } });
     if (q && fx.hold) await new Promise<void>((r) => (window.__release = r));
     if (q && fx.hold) return { id: "p1", reply: { ok: true, value: { ...POOL_ANSWER, quote: { ...POOL_ANSWER.quote!, origin_asset: q.asset.id, amount_in: q.amount } } } };
+    if (q && fx.echo) return { id: "p1", reply: { ok: true, value: { ...POOL_ANSWER, chain, asset: chain === "solana" ? "SOL" : "ETH", quote: { ...POOL_ANSWER.quote!, origin_asset: q.asset.id, amount_in: q.amount } } } };
     if (q) return { id: "p1", reply: fx.poolQuote ?? { ok: true, value: POOL_ANSWER } };
     const next = fx.flaky?.[chain]?.shift();
     if (next) return { id: `a-${chain}`, reply: refused(next) };

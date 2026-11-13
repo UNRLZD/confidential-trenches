@@ -4,6 +4,7 @@
 // signed deadline reached); no timer ever produces a failure. APP_HOST never makes an address: the only address the
 // sheet draws is the one inside the quote SIGN_HOST checked (W:667, CH-028, CH-033).
 import { POOL_ASSET_DECIMALS, POOL_CHAINS } from "@blindfill/kit";
+import { waitingAt } from "../portfolio/model.ts";
 import type { Chain, DepositAsset, DepositFacts, DepositStage, Operation, PoolAsset, PoolChain, PoolDepositFacts, PoolDepositStage, SignpageResults, SignpageState } from "@blindfill/kit";
 
 /**
@@ -132,13 +133,14 @@ function poolDecimal(v: bigint, d: number): string {
   return f ? `${s.slice(0, s.length - d)}.${f}` : s.slice(0, s.length - d);
 }
 
-/** What `chain`'s pool holds, in its own asset, as Portfolio's row for the chain reads it (portfolio/model.ts pools);
- *  null when the page reports no such pool. */
-export function poolBalance(pools: SignpageState["pools"], chain: PoolChain): { asset: PoolAsset; balance: string } | null {
+/** What `chain`'s pool holds, in its own asset, as Portfolio's row for the chain reads it (portfolio/model.ts pools):
+ *  its notes and the money still at its deposit wallets (`wallets`, state.deposit_wallets; waitingAt); null when the
+ *  page reports no such pool. */
+export function poolBalance(pools: SignpageState["pools"], chain: PoolChain, wallets?: SignpageState["deposit_wallets"]): { asset: PoolAsset; balance: string } | null {
   const p = pools?.find((x) => x.chain === chain);
   if (!p) return null;
   const d = POOL_ASSET_DECIMALS[p.asset];
-  return { asset: p.asset, balance: poolDecimal(poolUnits(p.balance, d) ?? 0n, d) };
+  return { asset: p.asset, balance: poolDecimal((poolUnits(p.balance, d) ?? 0n) + waitingAt(wallets, chain, p.asset), d) };
 }
 
 /** A dry quote: the quote lines of S4.3, no address (the kit's deposit.dry answer, DepositDry). */
@@ -383,6 +385,13 @@ export function destAsset(assets: readonly Asset[] | null, dest: Dest): { symbol
   const chain = CHAIN_NAME[dest];
   const a = assets.find((x) => x.chain === chain && x.symbol === DEST_COIN[dest]) ?? assets.find((x) => x.chain === chain) ?? assets[0]!;
   return { symbol: a.symbol, chain: a.chain };
+}
+
+/** Whether the address asked for `dest` takes its pool's own coin on its own chain (SOL on Solana, ETH on Base and
+ *  Robinhood; DEST_COIN): the address the sheet draws that coin's one-line send rule under. False for the vault and for
+ *  any other asset, whose address heading names its own coin and chain. */
+export function ownCoin(dest: Dest, a: Pick<Asset, "symbol" | "chain">): dest is PoolChain {
+  return dest !== "near" && a.symbol === DEST_COIN[dest] && a.chain === CHAIN_NAME[dest];
 }
 
 /** A row of the sheet's Recent block: a deposit of this account, its stage's word, and what it credited once done. */

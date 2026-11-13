@@ -58,6 +58,7 @@ export const IN_PROCESS = [
   viaRead("kit-portfolio-reads", () => import("../live-checks/kit-portfolio-reads.mjs")),
   viaRead("kit-oneclick-pins-frozen", () => import("../live-checks/kit-oneclick-pins-frozen.mjs")),
   viaRead("pool-answer-unknown", () => import("../live-checks/pool-answer-unknown.mjs")),
+  viaRead("a-load-proves-first-and-walks-the-restore-once", () => import("../live-checks/a-load-proves-first-and-walks-the-restore-once.mjs")),
   viaRead("oneclick-fee-path-own-key", () => import("../live-checks/oneclick-fee-path-own-key.mjs")),
   viaRead("pool-deposit-sent-end", () => import("../live-checks/pool-deposit-sent-end.mjs")),
   viaRead("pool-deposit-address", () => import("../live-checks/pool-deposit-address.mjs")),
@@ -235,6 +236,7 @@ export const OUT = {
   "app-faults-seen-on-124": "a browser and SIGN_HOST's 1Click reads through the helper (its --harness run is in test-browser)",
   "app-faults-seen-on-126": "a browser and the helper's chart bars (its --harness run is in test-browser)",
   "screens-never-say-proof": "a browser (its --harness run is in test-browser)",
+  "pool-balance-counts-the-remainder": "a browser, and SIGN_HOST's deployed scripts beside the app's build",
   "terminal-harness-sign-spa": "Pages' answer to a path with no file (the index), which no build file holds",
   "near-view-rhea": "mainnet NEAR RPC reads of the Rhea pool and get_return on the two providers, never the build",
 };

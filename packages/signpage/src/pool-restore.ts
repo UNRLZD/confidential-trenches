@@ -64,9 +64,10 @@
 //     stalled at the end of each try that has one (a new stalled op when the newest is not), so the app's sheet shows
 //     it with Retry (S19.5), and every request that joins the run after it is told stalled (review P2-1). Both go to
 //     the host's `step5`.
-//   - Step 5 is owed by a marker (RESTORE_IDS_KEY: the pinned pools' scopes) from the walk's end until a try reads
-//     every id and finds nothing; a signed-in load that finds it runs the restore again in the background, no op
-//     written (resume).
+//   - Step 5 is owed by a marker (RESTORE_IDS_KEY: the pinned pools' scopes and step 5's progress) from the walk's end
+//     until a try reads every id and finds nothing. A signed-in load walks every pool once in the background, as a pass,
+//     after its first proof pass, no op written (resume), and reads step 5 again when the marker owes it; a later call
+//     of resume in the same page life (a landing, a resync) runs only while the marker owes step 5.
 //   - The testnet build reads no deposit id: it makes no 1Click quote (src/pool-deposit-address.ts), so no id of its
 //     pools can hold a trace on NEAR.
 //   - A pool deposit's money can also wait at its one-time account U_X on the pool's own chain (1Click's delivery there,
@@ -142,7 +143,7 @@ import { relayRpc } from "../../wallet/src/withdraw/relay.ts";
 import { base58, hex } from "@scure/base";
 import type { Deferred, KindContext } from "./api.ts";
 import { askOf, evmPoolFollowDeps, solanaPoolFollowDeps, type PoolUx, type PoolUxReads } from "./pool-deposit-follow.ts";
-import { pageRpc } from "./page-rpc.ts";
+import { pageRpc, type ReadKind } from "./page-rpc.ts";
 import { solanaPacedRpc } from "../../kit/src/trade/solana/send.ts";
 import { PAGE_SOL_CACHE, PAGE_SOL_MARK_BATCHES, PAGE_SOL_PIN, pageEvmHistory, pageEvmHold, pageEvmPoolRpcs, pageSolanaLister, pageSolanaSettleRpcs } from "./pool-testnet.ts";
 
@@ -264,7 +265,14 @@ async function readDepositIds(
   out: Step5Reasons,
   noted: (scope: bigint) => Promise<ReadonlySet<number>>,
   own: { lane: number; raise(scope: bigint, min: number): Promise<void> },
-  kept: { of(scope: bigint, laneHighest: readonly (number | null)[]): Promise<ReadonlyMap<number, number>>; add(scope: bigint, lane: number, readTo: number, highest: number | null): Promise<void> },
+  kept: {
+    of(scope: bigint, laneHighest: readonly (number | null)[]): Promise<ReadonlyMap<number, number>>;
+    add(scope: bigint, lane: number, readTo: number, highest: number | null): Promise<void>;
+    /** the lanes this run's marker holds part read, as restoreDepositIds' `from`, while their notes are as they were */
+    parts(scope: bigint, laneHighest: readonly (number | null)[]): Promise<ReadonlyMap<number, { readTo: number; highest: number | null }>>;
+    /** a lane read clean to `readTo`: kept on this run's marker, so a reload goes on past it */
+    part(scope: bigint, lane: number, readTo: number, highest: number | null, noteHighest: number | null): Promise<void>;
+  },
 ): Promise<void> {
   const { rpcs, pass, reader } = await letGo(keptIdReader(POOL_DEPOSIT_NETWORK, ids.rpcs, keep, { ...ids.opts, signal }), signal);
   // what an id read as money holds, by asset on both providers at the same pass, opened now beside the id reader on the
@@ -290,6 +298,10 @@ async function readDepositIds(
       first: own.lane,
       signal,
       done: await kept.of(scope, laneHighest),
+      // card a-load-proves-first-and-walks-the-restore-once: a lane an earlier page read part way goes on past its last
+      // clean id, and each clean id read is kept, so a reload never asks an id it already read
+      from: await kept.parts(scope, laneHighest),
+      progress: (lane: number, readTo: number, highest: number | null) => kept.part(scope, lane, readTo, highest, laneHighest[lane] ?? null),
       laneRead: async (x: LaneIds) => {
         if (x.lane === own.lane && x.reach === null) await own.raise(scope, coverTo(x));
         if (x.reach === null && x.unread.length === 0 && x.money.length === 0) await kept.add(scope, x.lane, x.readTo, laneHighest[x.lane] ?? null);
@@ -435,7 +447,8 @@ async function carryUx(ux: PoolUxReads, f: PoolUx, noted: boolean, signal: Abort
 export const RESTORE_UX_SOLANA = Object.freeze(["https://solana-rpc.publicnode.com", "https://solana.api.pocket.network"] as const);
 export function restoreUxSolanaRpcs(): readonly [SolanaRpc, SolanaRpc] | null {
   if (POOL_TESTNET) return null;
-  return [solanaPacedRpc(pageRpc(RESTORE_UX_SOLANA[0])), solanaPacedRpc(pageRpc(RESTORE_UX_SOLANA[1]))];
+  // step 5 runs behind the walk's end, in the background: its reads go as the page's passes do, behind every trade's
+  return [solanaPacedRpc(pageRpc(RESTORE_UX_SOLANA[0], "pass")), solanaPacedRpc(pageRpc(RESTORE_UX_SOLANA[1], "pass"))];
 }
 
 /**
@@ -473,13 +486,15 @@ const EVM_PAGE: Readonly<Record<"base" | "robinhood", EvmNetwork>> = POOL_TESTNE
 
 /** Every pool the page's network pins (PAGE_SOL_PIN, EVM_POOLS on the page's networks), each with the page's reads.
  *  `evmPins` is EVM_POOLS unless a test plants pins (as pools.ts's pagePoolsOf). */
-export function pagePools(evmPins: Readonly<Partial<Record<EvmNetwork, EvmPoolPin>>> = EVM_POOLS): RestorePool[] {
+export function pagePools(evmPins: Readonly<Partial<Record<EvmNetwork, EvmPoolPin>>> = EVM_POOLS, kind: ReadKind = "trade"): RestorePool[] {
   const out: RestorePool[] = [];
   // the NEAR vault of the page's network (NEAR_NETWORKS' vault and USDC, the scope withdraw/checks.ts computes), on the
   // release pair the withdraw reads it on (withdraw/handoff.ts: one FastNEAR URL and dRPC, at the provider's pace)
   const vault = vaultScope(PAGE_NETWORK);
   if (vault !== null) out.push({ chain: "near", network: PAGE_NETWORK, scope: vault, rpcs: () => [pacedNearRpc(NEAR_NETWORKS[PAGE_NETWORK].fastnear[0]), pacedNearRpc(NEAR_NETWORKS[PAGE_NETWORK].drpc)] });
-  if (PAGE_SOL_PIN !== undefined) out.push({ chain: "solana", program: PAGE_SOL_PIN.program, scope: solanaPoolOf(PAGE_SOL_PIN.program).scope, rpcs: pageSolanaSettleRpcs, lister: pageSolanaLister, cache: PAGE_SOL_CACHE, markBatches: PAGE_SOL_MARK_BATCHES });
+  // `kind`: a load's resume reads as the page's passes do ("pass": behind every trade's read, on the host's budget),
+  // a restore the user waits for (a sign-in's, a Retry's) as a trade
+  if (PAGE_SOL_PIN !== undefined) out.push({ chain: "solana", program: PAGE_SOL_PIN.program, scope: solanaPoolOf(PAGE_SOL_PIN.program).scope, rpcs: () => pageSolanaSettleRpcs(kind), lister: () => pageSolanaLister(kind), cache: PAGE_SOL_CACHE, markBatches: PAGE_SOL_MARK_BATCHES });
   for (const chain of ["base", "robinhood"] as const) {
     const pin = evmPins[EVM_PAGE[chain]];
     if (pin === undefined) continue;
@@ -489,7 +504,7 @@ export function pagePools(evmPins: Readonly<Partial<Record<EvmNetwork, EvmPoolPi
     // the page's pool list (pageEvmPoolRpcs, the deposit's too): the testnet pair on the testnet build, folded at build
     // time, so SIGN_HOST's bundle carries none of it; on mainnet the kit's pool list (card evm-pool-lists-mainnet). A
     // chain with no list is read by no one, and the run says so (stalled), never done
-    out.push({ chain: "evm", pin, scope, rpcs: pageEvmPoolRpcs(chain) === null ? null : () => pageEvmPoolRpcs(chain)! });
+    out.push({ chain: "evm", pin, scope, rpcs: pageEvmPoolRpcs(chain) === null ? null : () => pageEvmPoolRpcs(chain, kind)! });
   }
   return out;
 }
@@ -502,22 +517,34 @@ export const STEP5_PAUSES_MS: readonly number[] = Object.freeze([30_000, 120_000
 
 /**
  * The marker that step 5 is owed (meta, under owed/, which the frame never reads or lists: ../../wallet/src/store): the
- * pinned pools' scopes, public and nothing else (no id, no index, no secret). Written once the walk's notes are written,
+ * pinned pools' scopes and step 5's progress, public and nothing else (no id, no address, no secret: the lanes and
+ * indices below are this device's own lane numbers, never an account). Written once the walk's notes are written,
  * removed once a try of step 5 has read every id and found nothing, by the run that wrote it only (`run`: a tab never
  * removes the marker another tab's later walk wrote); a sign out deletes it with the store. It keeps each lane a try
  * read whole with nothing to tell (no reach, no id unread, none holding money), with the index it read to and its
  * highest note then, by scope (`read`), and a resume (a load, a landing) reads only the others while their notes are
  * unchanged (review P2-3 of 53f5e92f; delta review P2-A: a lane whose notes moved is read whole again). A run the user
  * asks for (a Sync, a Retry) writes it fresh and reads every lane; a `read` of any other shape is dropped whole. A signed-in
- * load that finds it runs the restore again in the background (resume), so a page closed during step 5 never leaves it
- * unread for good.
+ * load that finds it reads step 5 again in the background after its walk (resume), so a page closed during step 5 never
+ * leaves it unread for good.
  */
 export const RESTORE_IDS_KEY = "owed/restore-ids";
 /**
  * The marker: the pools' scopes; by scope each lane read whole, with the index it read to and its highest note when it
  * was kept (null: none); and the run that wrote it, so a run keeps lanes on and removes only its own marker.
+ * Card a-load-proves-first-and-walks-the-restore-once, progress only (lane numbers, indices, a time; no id, no address):
+ * - `part`: by scope, each lane a try left part way, at the last window it read clean, so a reload goes on from there;
+ * - `next`: when step 5 is asked again (ms) after a try that left a read to try again (STEP5_PAUSES_MS's pause): a load's
+ *   step 5 starts no id read before it, so a reload never asks sooner than one page left open would. A `next` further
+ *   ahead than the longest pause (a clock moved back) counts as due.
  */
-type IdsOwed = { scopes: string[]; read?: Record<string, [number, number, number | null][]>; run?: string };
+type IdsOwed = { scopes: string[]; read?: Record<string, [number, number, number | null][]>; part?: Record<string, PartEntry[]>; run?: string; next?: number };
+/** A lane step 5 left part way (`part`, by scope): its lane, the index it read to with nothing to tell, the lane's highest
+ *  with history then, and its highest note when kept (a lane whose notes moved is read from its start again). */
+type PartEntry = [number, number, number | null, number | null];
+const laneIndex = (x: unknown, lane: number, max = 0xffff_ffff): boolean => Number.isInteger(x) && (x as number) >= 0 && (x as number) <= max && (x as number) % RESTORE_LANES === lane;
+const partEntry = (x: unknown): boolean =>
+  Array.isArray(x) && x.length === 4 && Number.isInteger(x[0]) && x[0] >= 0 && x[0] < RESTORE_LANES && laneIndex(x[1], x[0]) && (x[2] === null || laneIndex(x[2], x[0], x[1])) && (x[3] === null || laneIndex(x[3], x[0]));
 // a kept lane as the marker holds it: its lane, an index of the lane it read to within u32, its highest note at or below
 // that (or null); any other entry drops the marker's `read` whole, so a broken marker reads more, never less (delta
 // review P3-A)
@@ -537,8 +564,21 @@ const owedOf = (v: unknown): IdsOwed | null => {
   if (typeof v !== "object" || v === null || !Array.isArray(o.scopes) || !o.scopes.every((x) => typeof x === "string")) return null;
   const r = o.read as unknown;
   const read = typeof r === "object" && r !== null && !Array.isArray(r) && Object.values(r).every((xs) => Array.isArray(xs) && xs.every(keptEntry));
-  return { scopes: o.scopes, ...(read ? { read: o.read } : {}), ...(typeof o.run === "string" ? { run: o.run } : {}) };
+  return {
+    scopes: o.scopes,
+    ...(read ? { read: o.read } : {}),
+    // a `part` of any other shape is dropped whole: those lanes are read from their start (more, never less)
+    ...(typeof o.part === "object" && o.part !== null && !Array.isArray(o.part) && Object.values(o.part as unknown as Record<string, unknown>).every((xs) => Array.isArray(xs) && xs.every(partEntry)) ? { part: o.part } : {}),
+    ...(typeof o.run === "string" ? { run: o.run } : {}),
+    ...(typeof o.next === "number" && Number.isFinite(o.next) ? { next: o.next } : {}),
+  };
 };
+/** How long a load's step 5 waits for the marker's `next` (ms): none past it, a `next` further ahead than the longest
+ *  pause (a clock moved back, a marker from another clock) counts as due, so no wait overflows a timer or stalls. */
+export function step5Wait(o: IdsOwed | null, at: number): number {
+  const d = (o?.next ?? 0) - at;
+  return d > 0 && d <= Math.max(...STEP5_PAUSES_MS) ? d : 0;
+}
 
 /**
  * One try of step 5's end: its reasons, the try's number, and whether no try follows it in this page life. On the last
@@ -554,6 +594,15 @@ export class SeedGone extends Error {
   }
 }
 
+/**
+ * The longest a load's resume waits for the page's first proof pass to start (PoolRestoreHost.firstPass): one that
+ * starts inside it is waited for to its end, however long, so the resume's walk never draws on its hosts beside it and
+ * Max is never later for the walk. The walk of release 127 on 13 Nov 06:13Z showed its first proof ready 18 s after the
+ * load; a pass starts in the load's first seconds, so 20 s bounds a load whose pass never starts (no pool note), never
+ * one that runs.
+ */
+export const RESUME_FIRST_PASS_MAX_MS = 20_000;
+
 /** What the restore reads on, each called when a run starts. */
 export type PoolRestoreHost = {
   store(): Promise<WalletStore>;
@@ -563,12 +612,18 @@ export type PoolRestoreHost = {
   seed64(): Promise<Uint8Array>;
   /** Whether a seed is stored: a restore asked with none is refused not_allowed, and nothing is read. */
   signedIn(): Promise<boolean>;
-  /** The pools to read (pagePools unless given). */
-  pools?: () => readonly RestorePool[];
+  /** The pools to read at a read kind (pagePools unless given): a load's resume reads as "pass", behind every trade's
+   *  read, a run the user asks for (a Sync, a Retry, a sign-in's) as "trade". */
+  pools?: (kind: ReadKind) => readonly RestorePool[];
   /** Web Locks (navigator.locks otherwise). */
   locks?: Pick<LockManager, "request" | "query">;
   /** After the notes are written: the page's proof queue's pass, so a restored note can pay the next buy. */
   written?: () => void;
+  /** A load's first proof passes, settled: each one that starts within `startMs` waited for to its end (or nothing to
+   *  make). A load's resume walks nothing before it (card a-load-proves-first-and-walks-the-restore-once: on release 127
+   *  the resume's walks drew on the first pass's hosts and our helper's per-device window beside it, so Max came later).
+   *  None given: the resume reads at once. */
+  firstPass?: (startMs: number) => Promise<unknown>;
   /** After a chain's buy records are written (any W): that chain's positions read again, so they show with no reload. */
   holdingsWritten?: (chain: "base" | "robinhood") => void;
   /** After the NEAR vault's notes are written: the page's NEAR buy records rebuilt from them (card near-holdings-restore,
@@ -588,8 +643,10 @@ export type PoolRestoreHost = {
   ended?: (stage: RestoreStage, why: readonly string[]) => void;
   /** Each try of step 5's end, with its reasons (both empty: every id read and nothing named). */
   step5?: (end: Step5End) => void;
-  /** Tests only: the beat, the clock, step 5's pauses and the two restores (the wallet's otherwise). */
+  /** Tests only: the beat, the clock, step 5's pauses, the resume's wait for the first pass and the two restores (the
+   *  wallet's otherwise). */
   beatMs?: number;
+  firstPassMaxMs?: number;
   now?: () => number;
   pausesMs?: readonly number[];
   solana?: typeof solanaRestoreNotes;
@@ -602,14 +659,16 @@ export type PoolRestoreHost = {
 };
 
 /** A run: its first end (the walk's notes written: what every follower is told), its whole end (step 5 included). */
-type Run = { first: Promise<RestoreStage>; done: Promise<void>; follow(id: string, progress?: (s: RestoreStage) => void): void };
+type Run = { owed: boolean; first: Promise<RestoreStage>; done: Promise<void>; follow(id: string, progress?: (s: RestoreStage) => void): void };
 
 export type PoolRestore = {
   /** The `restore` kind's handler: "started" once the seed is read as stored (else not_allowed), the run's stages after. */
   kind(params: Record<string, unknown>, ctx: KindContext): Deferred<"restore">;
   /** After a sign-in: a run under its own op id when the note store holds no note; resolves to its walk's end (or null). */
   auto(): Promise<RestoreStage | null>;
-  /** A signed-in load: a run with no op when step 5 is owed (RESTORE_IDS_KEY); resolves to its walk's end (or null). */
+  /** A signed-in load: a run with no op that walks every pool once as a pass, after the first proof pass, and reads step
+   *  5 when the marker owes it (RESTORE_IDS_KEY); a later call in this page life (any run started since) runs only while
+   *  the marker owes step 5. Resolves to its walk's end (or null). */
   resume(): Promise<RestoreStage | null>;
   /** This tab signed out: the run in flight stops. */
   signedOut(): void;
@@ -652,11 +711,17 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
   let abort: AbortController | null = null;
   // step 5's pass and answers, kept across this page's runs (a Retry reads on) and dropped at a sign out
   let keep = idReadKeep();
+  // this tab's sign outs, counted: a resume or a Sync that waited across one reads nothing after it
+  let epoch = 0;
+  // a run started in this page life: a later resume (a landing's, a resync's) walks again only while step 5 is owed
+  let started = false;
 
   // one run: the walk, its notes written (the floor), `first` told; then step 5, tried again by itself on a read that did
   // not answer. `owed`: a load's resume, which reads nothing when another tab removed the marker meanwhile
   const read = async (signal: AbortSignal, owed: boolean, first: (stage: RestoreStage) => void, run: { finding: boolean }): Promise<void> => {
-    const pools = (h.pools ?? pagePools)();
+    // a load's resume reads as the page's passes do (behind every trade's read), a run the user waits for as a trade
+    const kind: ReadKind = owed ? "pass" : "trade";
+    const pools = h.pools ? h.pools(kind) : pagePools(EVM_POOLS, kind);
     const solana = h.solana ?? solanaRestoreNotes;
     const evm = h.evm ?? evmRestoreNotes;
     const vaultWalk = h.vault ?? nearVaultRestoreNotes;
@@ -707,8 +772,11 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
     // 53f5e92f: a second tab's restore or Sync waited out the whole of step 5); the seed's lock only for each use of it
     return locks().request(RESTORE_LOCK, { mode: "exclusive", signal }, async (): Promise<void> => {
       try {
-        // a load's resume that another tab's run finished first: nothing is owed
-        if (owed && (await (await h.store()).get("meta", RESTORE_IDS_KEY)) === undefined) return end("done");
+        // a load's resume walks every pool once (card a-load-proves-first-and-walks-the-restore-once: a deposit another
+        // device made shows on this one at its next load); step 5 only while the marker owes it (another tab's run may
+        // have finished it meanwhile)
+        const was = owed ? await (await h.store()).get("meta", RESTORE_IDS_KEY) : undefined;
+        const idsOwed = !owed || was !== undefined;
         // each pool on its own: one that fails leaves the others' notes found
         const label = (p: RestorePool): string => (p.chain === "near" ? "near vault" : p.chain === "solana" ? "solana" : p.pin.network);
         const evmHoldingsOwed: { chain: "base" | "robinhood"; pin: EvmPoolPin; list: readonly EvmRpc[]; buys: EvmBuySpend[] }[] = [];
@@ -791,7 +859,7 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
           }
           // the notes only: no W's Transfer logs are read (wallets: false)
           // the page's hold (the deposit's sync's too) and its history sources (card evm-pool-leaves-any-source)
-          const r = await letGo(evm({ seed64: seed, pin: p.pin, rpcs: p.rpcs(), signal, wallets: false, held: pageEvmHold(p.pin, () => h.held ? h.held() : h.store()), history: pageEvmHistory(p.pin), turn, ...walkers }), signal);
+          const r = await letGo(evm({ seed64: seed, pin: p.pin, rpcs: p.rpcs(), signal, wallets: false, held: pageEvmHold(p.pin, () => h.held ? h.held() : h.store()), history: pageEvmHistory(p.pin, kind), turn, ...walkers }), signal);
           await floor(chainOf(p), p.scope, r.notes);
           // each buy's record again from its own transaction, so a restored W sells on its buy's route (card
           // signpage-evm-pool-sell, pool-sell-evm.ts restoreEvmHoldings: no read names W or a transaction); the testnet
@@ -855,11 +923,15 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
         // only the others; a run the user asks for, a Sync or a Retry, writes it fresh and reads every lane whole: delta
         // review P2-A)
         const scopes = idPools.map((p) => p.scope.toString());
-        if (owes)
+        // the marker a resume found is taken on (its kept lanes, its part points, its next), the run's own from here
+        let marker: IdsOwed | null = null;
+        if (owes && idsOwed)
           await seedHeld(async () =>
             (await h.store()).update("meta", RESTORE_IDS_KEY, (v) => {
               const o = owedOf(v);
-              return owed && o !== null && JSON.stringify(o.scopes) === JSON.stringify(scopes) ? { ...o, run: runId } : { scopes, run: runId };
+              const keep = owed && o !== null && JSON.stringify(o.scopes) === JSON.stringify(scopes);
+              marker = keep ? { ...o!, run: runId } : { scopes, run: runId };
+              return marker;
             }),
           );
         signal.throwIfAborted();
@@ -894,7 +966,7 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
         };
         // the testnet build: named at the walk's end above, nothing for step 5 to read
         if (ids === null) return;
-        if (walked.length === 0) return;
+        if (walked.length === 0 || !idsOwed) return;
         // the scope's deposit indices the note store holds now (the floor's notes among them), for the U_X carry
         const noted = async (scope: bigint): Promise<ReadonlySet<number>> => {
           const notes = await openNoteStore(await h.store());
@@ -921,11 +993,31 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
                 const o = owedOf(v);
                 if (o === null || o.run !== runId) return undefined;
                 const k = scope.toString();
-                return { ...o, read: { ...o.read, [k]: [...(o.read?.[k] ?? []).filter(([l]) => l !== lane), [lane, readTo, highest]] } };
+                // a lane read whole leaves its part point
+                const part = { ...o.part, [k]: (o.part?.[k] ?? []).filter(([l]) => l !== lane) };
+                return { ...o, part, read: { ...o.read, [k]: [...(o.read?.[k] ?? []).filter(([l]) => l !== lane), [lane, readTo, highest]] } };
+              })),
+            ),
+          parts: async (scope: bigint, laneHighest: readonly (number | null)[]) => {
+            const o = owedOf(await seedHeld(async () => (await h.store()).get("meta", RESTORE_IDS_KEY)));
+            if (o?.run !== runId) return new Map();
+            return new Map((o.part?.[scope.toString()] ?? []).filter(([l, , , nh]) => nh === (laneHighest[l] ?? null)).map(([l, readTo, highest]) => [l, { readTo, highest }]));
+          },
+          part: (scope: bigint, lane: number, readTo: number, highest: number | null, noteHighest: number | null): Promise<void> =>
+            seedHeld(async () =>
+              void (await (await h.store()).update("meta", RESTORE_IDS_KEY, (v) => {
+                const o = owedOf(v);
+                if (o === null || o.run !== runId) return undefined;
+                const k = scope.toString();
+                return { ...o, part: { ...o.part, [k]: [...(o.part?.[k] ?? []).filter(([l]) => l !== lane), [lane, readTo, highest, noteHighest] as PartEntry] } };
               })),
             ),
         };
         const pauses = h.pausesMs ?? STEP5_PAUSES_MS;
+        // a load's step 5 asks no id before the marker's next (an earlier page's pause): never sooner than one page left
+        // open would ask
+        const wait = step5Wait(marker, now());
+        if (wait > 0) await pause(wait, signal);
         for (let t = 1; ; t++) {
           const out: Step5Reasons = { retry: [], held: [], named: [] };
           await readDepositIds(seed, walked, ids, keep, signal, out, noted, own, lanesKept).catch((e: unknown) => {
@@ -940,14 +1032,27 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
           await tell(last ? { retry: [], held: [], named: [...out.named, ...out.held, ...out.retry], tries: t, last } : { ...out, tries: t, last });
           if (answered) {
             // every id read and nothing found: nothing is owed, unless a pool's walk failed (the next load walks it and
-            // reads its ids); a finding keeps the marker, so the next load reads again (review P2-1)
-            if (!walkFailed && out.named.length === 0)
-              await seedHeld(async () => {
-                const st = await h.store();
-                if (owedOf(await st.get("meta", RESTORE_IDS_KEY))?.run === runId) await st.delete("meta", RESTORE_IDS_KEY);
-              });
+            // reads its ids, its kept lanes skipped); a finding keeps the marker, so the next load reads again (review P2-1)
+            await seedHeld(async () => {
+              const st = await h.store();
+              const o = owedOf(await st.get("meta", RESTORE_IDS_KEY));
+              if (o?.run !== runId) return;
+              if (!walkFailed && out.named.length === 0) return void (await st.delete("meta", RESTORE_IDS_KEY));
+              const { next: _, ...rest } = o;
+              await st.put("meta", RESTORE_IDS_KEY, rest);
+            });
             return;
           }
+          // a read to try again: a later load asks no sooner than this page would have (the pause's end), and past this
+          // page's last try the next load asks again at once
+          await seedHeld(async () =>
+            void (await (await h.store()).update("meta", RESTORE_IDS_KEY, (v) => {
+              const o = owedOf(v);
+              if (o === null || o.run !== runId) return undefined;
+              const { next: _, ...rest } = o;
+              return last ? rest : { ...rest, next: now() + pauses[t - 1]! };
+            })),
+          );
           if (last) return;
           await pause(pauses[t - 1]!, signal);
         }
@@ -977,6 +1082,7 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
   };
 
   const start = (owed: boolean): Run => {
+    started = true;
     if (run) return run;
     // each follower's op record, its writes in order (a stage never lands before the one it follows)
     type Follower = { id: string; created: number; writes: Promise<void>; progress?: (s: RestoreStage) => void; told: () => void; fin: Promise<void> };
@@ -1020,6 +1126,7 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
         await first;
       });
     const r: Run = {
+      owed,
       first,
       done,
       follow: (id, progress) => {
@@ -1041,17 +1148,33 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
     return r;
   };
 
+  // a run the user asks for (a Sync, a Retry, a sign-in's) while a load's resume runs: that run stops (its own reads,
+  // as passes, and its step 5 on the marker it took on) and the asked run starts on its own, walking every pool and
+  // reading every lane whole, so a Sync is never told the resume's end (review P2-1 of 6e2d24a7d)
+  // null: this tab signed out meanwhile (no run after a sign out, review P3-1 of 44ba573da)
+  const fresh = async (): Promise<Run | null> => {
+    const e = epoch;
+    while (run?.owed) {
+      const r = run;
+      abort?.abort();
+      await r.done;
+    }
+    return epoch === e ? start(false) : null;
+  };
+
   return {
     kind: (_params, ctx) => {
       let yes = false;
-      const after = h.signedIn().then((s) => {
+      const after = h.signedIn().then(async (s) => {
         if (!(yes = s)) return;
-        start(false).follow(ctx.id, (stage) => ctx.progress(stage));
+        const r = await fresh();
+        if (r === null) return void (yes = false);
+        r.follow(ctx.id, (stage) => ctx.progress(stage));
       });
       return { after, answer: () => (yes ? { result: { stage: "started" } } : { error: "not_allowed" }) };
     },
     auto: async () => {
-      if (run) return null;
+      if (run && !run.owed) return null;
       const notes = await openNoteStore(await h.store());
       let empty: boolean;
       try {
@@ -1059,18 +1182,29 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
       } finally {
         notes.close();
       }
-      if (!empty || run) return null;
-      const r = start(false);
+      if (!empty || (run && !run.owed)) return null;
+      const r = await fresh();
+      if (r === null) return null;
       r.follow(crypto.randomUUID());
       return r.first;
     },
     resume: async () => {
-      if (run || !(await h.signedIn())) return null;
-      const owed = (await (await h.store()).get("meta", RESTORE_IDS_KEY)) !== undefined;
-      if (!owed || run) return null;
+      // signed out, or a run asked meanwhile (a Retry, a Sync, a sign-in's), during any wait: nothing
+      const e = epoch;
+      const live = async (): Promise<boolean> => epoch === e && !run && (await h.signedIn()) && epoch === e && !run;
+      if (!(await live())) return null;
+      // a later call in this page life (a landing, a resync, a sign-in screen while signed in): only while step 5 is owed
+      const owes = async (): Promise<boolean> => !started || (await (await h.store()).get("meta", RESTORE_IDS_KEY)) !== undefined;
+      if (!(await owes())) return null;
+      // the load's first proofs go first: no read of the resume starts before they settle (one that has not started by
+      // the bound is not waited for), so Max is never later for the resume
+      if (h.firstPass) await h.firstPass(h.firstPassMaxMs ?? RESUME_FIRST_PASS_MAX_MS);
+      if (!(await live()) || !(await owes())) return null;
+      // every pool walked once as a pass; step 5 after it while the marker owes it, no sooner than the marker's next
       return start(true).first;
     },
     signedOut: () => {
+      epoch++;
       abort?.abort();
       keep = idReadKeep();
     },
