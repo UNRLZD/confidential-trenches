@@ -571,7 +571,8 @@ export type SolanaPoolBuyRequest = {
   readonly cuPrice: bigint; // micro-lamports per CU
   // the pool's cluster: on mainnet the helper sends a tag 3 to Jito bundle-only, so it tips at least SOLANA_JITO_TIP_MIN
   readonly cluster: "mainnet" | "devnet";
-  // card buy-spends-several-pieces: the same bundle's releases (tag 2s) to W before this tag 3, all landing or none;
+  // card buy-spends-several-pieces: the same buy's releases (tag 2s) to W, landed before this tag 3 is sent (each may
+  // land without it, its money then waiting in W);
   // their chunks pay W too (solanaPoolBuyFunds over them and this release). The caller holds each to its own tag 2 to
   // W (the signing page's rules/pool.ts checkSolanaBuy); none: this release alone
   readonly before?: readonly SolanaPoolBuyPiece[];

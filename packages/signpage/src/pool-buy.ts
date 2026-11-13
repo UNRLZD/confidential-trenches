@@ -8,7 +8,8 @@
 //   proofs of one W that hold that W's own note, never two of one note, that pay the spend and W's new accounts (the
 //   kit's solanaPoolBuyFunds over every piece): the fewest pieces, then the least released (pickPieces), at most four:
 //   the other pieces' releases (tag 2) to W, each its own transaction, then the own note's tag 3 that buys, sent
-//   as one bundle that lands whole or not at all. Every note is taken (RESERVED) before anything leaves, each read back,
+//   in order by the helper: the tag 2s first, then the tag 3 once they landed (a tag 2 may land without the buy, its
+//   money then waiting in W until the rent back sweeps it). Every note is taken (RESERVED) before anything leaves, each read back,
 //   settled and owned on its own (sendAndSettle). One piece is the plain buy below.
 // - The proof: one the wallet's proof queue made ahead (../../wallet/src/pool/queue.ts). Its release is read off the proof itself:
 //   the 256 bytes of A, B (imaginary part first) and C, the hashes, the chunk and the depths from its public signals,
@@ -186,8 +187,8 @@ export type PoolBuyHost = {
   seed64(): Promise<Uint8Array>;
   /** POST /v1/pool/solana/send: the helper's answer as it came (hostile). */
   send(pool: string, tx: Uint8Array): Promise<unknown>;
-  /** A buy's pieces (card buy-spends-several-pieces): the helper's send of these transactions as one bundle, in order,
-   *  all landing or none; its answer as it came (hostile), each one's signature in order. Absent: a buy spends one
+  /** A buy's pieces (card buy-spends-several-pieces): the helper's send of these transactions in order, the tag 2s
+   *  before the tag 3 (a tag 2 may land without the buy); its answer as it came (hostile), each one's signature in order. Absent: a buy spends one
    *  piece. */
   sendPieces?(pool: string, txs: readonly Uint8Array[]): Promise<unknown>;
   /** The wallet's solanaSettleSpent for this note: "spent" once its change is written and the note is SPENT. minSlots:

@@ -225,10 +225,10 @@ export function solanaReadPoolIx(d: Uint8Array): SolanaPoolIx {
   return { tag: 3, relayFee, deadlineMs: v.getBigUint64(fieldsAt + DEADLINE_AT, true), nullifier: Buffer.from(d.subarray(fieldsAt + 32, fieldsAt + 64)).toString("hex"), tip: v.getBigUint64(tipAt, true), innerAccounts, innerPrograms, nextPage: (flags & 2) !== 0 };
 }
 
-/** The pool instruction a transaction's last instruction reads as, or null when the bytes are not one
- *  (checkSolanaPoolTx then names why). */
 /** The log line's tip (./send-log.ts): a tag 3's, in lamports, as W signed it; none for a tag 2. */
 const tipNote = (ix: SolanaPoolIx): Pick<PoolSendNote, "tip"> => (ix.tag === 3 ? { tip: ix.tip.toString() } : {});
+/** The pool instruction a transaction's last instruction reads as, or null when the bytes are not one
+ *  (checkSolanaPoolTx then names why). */
 function poolIxOf(wire: Uint8Array): SolanaPoolIx | null {
   try {
     const m = solanaDecodeTransaction(wire).message;
@@ -431,9 +431,16 @@ export type SolanaPoolSenderDeps = {
   /** The sender's timer for the log line's reads (engine3, hash_ms): true after `ms`, false at once when `signal`
    *  aborts; replaced in tests. */
   wait?: (ms: number, signal: AbortSignal) => Promise<boolean>;
+  /** The pause between two asks of a read after a buy's tag 2s landed (landedRead); default a timer; replaced in tests. */
+  pause?: (ms: number) => Promise<void>;
   /** Where a failed start read is told (POOL_START_LOG_MS apart at most once); default stderr. */
   log?: (line: string) => void;
 };
+
+/** A read after a buy's tag 2s landed (card owners-solana-buy-lands): asked again for at most this long, the life of a
+ *  blockhash (150 blocks at about 400 ms), at this pace (about two slots). */
+export const POOL_LANDED_READ_MS = 60_000;
+export const LANDED_READ_PACE_MS = 800;
 
 /** A failed start rent read is logged the first time, then at most once per this long while the reads keep failing. */
 export const POOL_START_LOG_MS = 60_000;
@@ -572,6 +579,20 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
   // a buy's pieces (carryPieces): each piece's entry in once names its carry's run and nullifiers, so a repeat of the
   // same set is told from a piece another carry holds
   const bundleOf = new WeakMap<Promise<PoolSendAnswer>, { run: Promise<PoolPiecesAnswer>; key: string }>();
+  // a read after a buy's tag 2s landed (sendPieces): asked again while their blockhash lives and before the release's
+  // deadline, about two slots apart
+  const pause = deps.pause ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms).unref?.()));
+  async function landedRead<T>(retry: boolean, deadlineMs: number, read: () => Promise<T>): Promise<T> {
+    const until = Math.min(now() + POOL_LANDED_READ_MS, deadlineMs);
+    for (let n = 1; ; n++) {
+      try {
+        return await read();
+      } catch (e) {
+        if (!retry || n >= POOL_LANDED_READ_MS / LANDED_READ_PACE_MS || now() + LANDED_READ_PACE_MS > until) throw e;
+        await pause(LANDED_READ_PACE_MS);
+      }
+    }
+  }
   const bounded = <V>(m: Map<string, V>, k: string, v: V) => {
     m.delete(k);
     m.set(k, v);
@@ -677,7 +698,10 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
     const k = checkSolanaPoolKeys(tx, { pool }, tables);
     return k.ok ? null : no(422, k.code, k.detail);
   }
-  async function simulateSignSend(raw: string, tx: SolanaPoolChecked, queueMaxMs?: number): Promise<PoolSendAnswer> {
+  /** `after`: the tag 3 of a buy of several pieces, sent once its tag 2s landed at `minSlot` at the latest (sendPieces):
+   *  its reads ask a provider at or past that slot, and one that fails (a throttle, a provider down, one behind it) is
+   *  asked again at LANDED_READ_PACE_MS while the blockhash lives, since the tag 2s' money is already in W. */
+  async function simulateSignSend(raw: string, tx: SolanaPoolChecked, queueMaxMs?: number, after?: { minSlot: number }): Promise<PoolSendAnswer> {
       const arrived = now();
       // the simulation of W's bytes as received (slot 0 empty, so no signature check), on its own blockhash; and the
       // newest blockhash's last valid height, which bounds how long the sender rebroadcasts (W's is no newer)
@@ -686,11 +710,14 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
       if (t !== null) return t;
       let sim: unknown;
       let height: number;
+      const at = after === undefined ? {} : { minContextSlot: after.minSlot };
       try {
-        const [s, h] = await Promise.all([
-          a("simulateTransaction", [raw, { encoding: "base64", sigVerify: false, replaceRecentBlockhash: false, commitment: "processed" }]),
-          a("getLatestBlockhash", [{ commitment: "processed" }]),
-        ]);
+        const [s, h] = await landedRead(after !== undefined, Number(tx.deadlineMs), () =>
+          Promise.all([
+            a("simulateTransaction", [raw, { encoding: "base64", sigVerify: false, replaceRecentBlockhash: false, commitment: "processed", ...at }]),
+            a("getLatestBlockhash", [{ commitment: "processed", ...at }]),
+          ]),
+        );
         sim = s;
         height = (h as { value?: { lastValidBlockHeight?: unknown } })?.value?.lastValidBlockHeight as number;
       } catch (e) {
@@ -890,13 +917,11 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
       return unread(e);
     }
     const txs: SolanaPoolChecked[] = [];
-    const budgets: bigint[] = [];
     for (const [i, wire] of wires.entries()) {
       const f = epochFeeOf(wire, at, current);
       const c = checkSolanaPoolTx(wire, { program: cfg.program, pool, feePayer, fee: f.fee, budget: f.budget, nowMs: at, jito: jito !== null });
       if (!c.ok) return no(c.status, c.code, `tx ${i}${c.detail ? `: ${c.detail}` : ""}`);
       txs.push(c.tx);
-      budgets.push(f.budget);
     }
     const last = txs.length - 1;
     if (txs.some((t, i) => t.tag !== (i === last ? 3 : 2))) return no(400, "bad_shape", "every transaction a tag 2 but the last, a tag 3");
@@ -997,19 +1022,37 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
     const sigs = signed.map((w) => base58(w.subarray(1, 65)));
     /** A tag 2 sent plain and read on both providers: null when it filled, else its answer: 422 only for a failure on
      *  chain while no other piece landed. */
+    // the newest slot a tag 2 landed at, as provider a read it: every read after them asks for that slot at least
+    let landedSlot = 0;
     const one = async (i: number): Promise<PoolPiecesAnswer | null> => {
       let state: string | undefined;
+      let slot: number | undefined;
       try {
-        state = (await send([{ wire: signed[i]!, lastValidBlockHeight: height }], { paths, providers: [a, b] }).done).txs[0]?.state;
+        const t0 = (await send([{ wire: signed[i]!, lastValidBlockHeight: height }], { paths, providers: [a, b] }).done).txs[0];
+        state = t0?.state;
+        slot = t0?.slot;
       } catch {
         state = undefined;
       }
-      if (state === "filled") return null;
+      if (state === "filled") {
+        if (Number.isSafeInteger(slot) && slot! > landedSlot) landedSlot = slot!;
+        return null;
+      }
+      const nf = txs[i]!.nullifier;
       if (state === "failed") {
-        bounded(failedIn, txs[i]!.nullifier, epochStartOf(now()));
+        bounded(failedIn, nf, epochStartOf(now()));
         return { ...no(422, "not_landed", "failed"), note: { tag: 2, via: "plain", end: "failed" } };
       }
-      return { ...no(503, "not_landed"), note: { tag: 2, via: "plain", end: state === "expired" ? "expired" : "unknown" } };
+      if (state === "expired") {
+        bounded(expired, nf, true); // as the one-piece route: its next send only into a free second
+        return { ...no(503, "not_landed"), note: { tag: 2, via: "plain", end: "expired" } };
+      }
+      // an end the providers did not agree on, held as the one-piece route holds one: its answer kept to the release's
+      // deadline, and a landed failure either provider reads refuses the nullifier this epoch
+      if (await solanaLandedFailedOnOne([a, b], sigs[i]!)) bounded(failedIn, nf, epochStartOf(now()));
+      const unknown = { ...no(503, "not_landed"), note: { tag: 2 as const, via: "plain" as const, end: "unknown" as const } };
+      bounded(heldUntil, nf, { entry: undefined, answer: unknown, deadline: Number(txs[i]!.deadlineMs) });
+      return unknown;
     };
     // once a piece is on chain the answer is 503 not_landed, whatever stopped the buy: a 4xx tells the device nothing
     // was sent (packages/signpage src/pool-testnet.ts PoolSendRefused), and here something was, so it reads the spends
@@ -1021,14 +1064,15 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
     const firstPage = Array.from({ length: last }, (_, i) => i).filter((i) => now_[i]);
     const ends = await Promise.all(firstPage.map(one));
     const stop = ends.find((r) => r !== null);
-    if (stop != null) return ends.some((r) => r === null) ? afterLanded(stop) : stop;
+    // a 4xx only when no piece landed or may have: every end a failure or an expiry, none filled or unknown
+    if (stop != null) return ends.some((r) => r === null || r.note?.end === "unknown") ? afterLanded(stop) : stop;
     for (let i = 0; i < last; i++) {
       if (now_[i]) continue;
       // a tag 2 on a later state page, simulated now that the pieces before it landed; refused, the buy stops here with
       // pieces already on chain
       let r: PoolPiecesAnswer | null;
       try {
-        r = refusalOf(await simulate(raws[i]!));
+        r = refusalOf(await landedRead(true, Number(txs[i]!.deadlineMs), () => a("simulateTransaction", [raws[i]!, { encoding: "base64", sigVerify: false, replaceRecentBlockhash: false, commitment: "processed", minContextSlot: landedSlot }])));
       } catch {
         r = no(503, "upstream");
       }
@@ -1037,9 +1081,10 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
       if (s !== null) return afterLanded(s);
     }
     // the tag 3, now that every tag 2 brought W its money: the one-piece route's own send (simulated on the state they
-    // left, the tip it carries, on mainnet the bundle beside the plain copy, its end read), under this carry's entry
+    // left, at their slot or later, the tip it carries, on mainnet the bundle beside the plain copy, its end read),
+    // under this carry's entry
     if (entry3 === undefined || once.get(nf3) !== entry3) return afterLanded({ ...no(503, "not_landed"), note: { tag: 3, end: "unknown" } });
-    const r3 = await simulateSignSend(raws[last]!, txs[last]!, queueMaxMs);
+    const r3 = await simulateSignSend(raws[last]!, txs[last]!, queueMaxMs, { minSlot: landedSlot });
     const ix3 = poolIxOf(txs[last]!.wire);
     const note: PoolSendNote = { tag: 3, ...(ix3 === null ? {} : tipNote(ix3)), ...r3.note };
     if ("signature" in r3.body) return { status: r3.status, body: { signatures: [...sigs, r3.body.signature] }, note };

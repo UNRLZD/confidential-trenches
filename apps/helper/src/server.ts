@@ -417,7 +417,7 @@ export function handler(
       if (path === POOL_SOLANA_SEND || path === POOL_SOLANA_PIECES) {
         if (req.method !== "POST") return send(405, { error: { code: "method_not_allowed" } }, { ...cors(req), Allow: "POST, OPTIONS" });
         const began = performance.now();
-        // card buy-spends-several-pieces: a buy's pieces as one bundle (pool/solana.ts carryPieces), mounted as the one
+        // card buy-spends-several-pieces: a buy's pieces in order (pool/solana.ts carryPieces), mounted as the one
         // send is: the same rate take, 404 for a pool this helper does not carry, and one log line
         const pieces = path === POOL_SOLANA_PIECES;
         // the send's one log line (pool/send-log.ts): the chain and net once the body names a pool this helper carries

@@ -629,7 +629,8 @@ export const POOL_SEND_TIMEOUT_MS = 120_000;
 export const helperPoolSend = (pool: string, tx: Uint8Array, fetchFn: typeof fetch = laneFetch()): Promise<unknown> =>
   helperPoolPost("/v1/pool/solana/send", { pool, tx: base64.encode(tx) }, fetchFn);
 /** POST /v1/pool/solana/pieces (card buy-spends-several-pieces): a buy's pieces, every release first and the buy last,
- *  sent by the helper as one bundle, all landing or none; its answer as it came (pool-buy.ts reads each back on two
+ *  sent by the helper in order, the tag 2s plain and then the tag 3 as one send is (card owners-solana-buy-lands): a tag 2
+ *  may land without the buy; its answer as it came (pool-buy.ts reads each back on two
  *  RPCs). The same timeout, busy and size rules as one send. */
 export const helperPoolSendPieces = (pool: string, txs: readonly Uint8Array[], fetchFn: typeof fetch = laneFetch()): Promise<unknown> =>
   helperPoolPost("/v1/pool/solana/pieces", { pool, txs: txs.map((t) => base64.encode(t)) }, fetchFn);
