@@ -87,13 +87,15 @@ async function nearBalance(m: readonly [MoveOutRpc, MoveOutRpc], account: string
 }
 
 /** A's tx, sent once through the first RPC, then read on both: FINAL with every receipt a success, or failed, or unread. */
-async function sendOnce(m: readonly [MoveOutRpc, MoveOutRpc], signer: string, s: ExitSigned, sleep: (ms: number) => Promise<void>): Promise<ExitSent> {
+async function sendOnce(m: readonly [MoveOutRpc, MoveOutRpc], signer: string, s: ExitSigned, sleep: (ms: number) => Promise<void>, say: (line: string) => void): Promise<ExitSent> {
   await m[0].call("send_tx", { signed_tx_base64: s.signed, wait_until: "NONE" }).catch(() => null);
   for (let k = 0; k < TX_POLLS; k++) {
     const sides = await Promise.all(m.map((r) => r.call("tx", { tx_hash: s.hash, sender_account_id: signer, wait_until: "NONE" }).then((a) => (isObj(a) && isObj(a.result) ? a.result : null), () => null)));
     if (sides.every((r) => r !== null && r.final_execution_status === "FINAL")) {
-      const failed = sides.some((r) => [r!.status, ...((r!.receipts_outcome as Obj[] | undefined) ?? []).map((o) => (isObj(o.outcome) ? o.outcome.status : undefined))].some((st) => isObj(st) && "Failure" in st));
-      return failed ? "failed" : "ok";
+      const failures = sides.flatMap((r) => [r!.status, ...((r!.receipts_outcome as Obj[] | undefined) ?? []).map((o) => (isObj(o.outcome) ? o.outcome.status : undefined))].filter((st): st is Obj => isObj(st) && "Failure" in st));
+      // the failure as the chain wrote it, so the stop says why
+      if (failures.length) say(`tx ${s.hash} failed: ${JSON.stringify(failures[0]!.Failure).slice(0, 400)}`);
+      return failures.length ? "failed" : "ok";
     }
     await sleep(TX_POLL_MS);
   }
@@ -126,7 +128,7 @@ export function nearExitWith(over: NearExitOver = {}): ExitChain {
     ctx.say(`${notes.length} note(s) to withdraw, ${units(left, 6)} USDC; ${scan.spends.length} spend(s) of ours read`);
     const txs: string[] = [];
     const steps = (signer: string): Omit<ExitWithdrawSteps, "withdraw"> => ({
-      send: (s) => sendOnce(mrpcs, signer, s, sleep),
+      send: (s) => sendOnce(mrpcs, signer, s, sleep, ctx.say),
       record: async (r) => ctx.say(`${r.step} tx ${r.hash}`),
       spend: async (nh) => (await exitReadPages({ network, rpcs: vrpcs, lists: ["spends"] })).spends.find((x) => x.nullifierHash === nh) ?? null,
       account: async (aId) => {
