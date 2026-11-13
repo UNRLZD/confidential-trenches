@@ -284,3 +284,29 @@ test("the side-by-side sell's owed claims hold, and each break of them in place 
   }
 });
 
+// card round-trip-costs-less (the review of 024e8a89d): five marks read the rent back as that card now spells it (the
+// batched read gives W's lamports beside what W read as; the read lists a found W; the passes are counted and each
+// W's record is read again inside its locks; an owed end under the floor lists the note's value; the full sell's record
+// stamps W's own send), as lines of that card's build of public/app.js (sol-w-sweep.rtcl.excerpt.txt): each holds, and
+// each rule broken in place FAILs its own mark alone
+test("the rent back as card round-trip-costs-less spells it: each mark holds, each break of it FAILs that mark alone", () => {
+  const ex = readFileSync(new URL("./sol-w-sweep.rtcl.excerpt.txt", import.meta.url), "utf8");
+  const pick = (p) => Object.keys(MARKS).find((k) => k.startsWith(p));
+  const keys = ["a load that reads W", "the only empty end", "a load whose own reads fail", "a floor end is steady", "a full sell's record"].map(pick);
+  assert.deepEqual(keys.map((k) => facts("", ex).carries[k]), keys.map(() => true));
+  const planted = [
+    ["#${o}#1#${mJ(e.evidence)}", "#${o}#1#", 0],
+    ["for(let t=0;t<r.length;t+=hJ)", "for(let t=0;t<r.length;t+=1e3)", 0],
+    ["if((t.buy||S!==void 0)&&t.read?.(h),h===0n)", "if((t.buy||S!==void 0)&&t.read?.(h),h===1n)", 1],
+    ["if(f!==p)throw Error", "if(!1)throw Error", 1],
+    ["m=async()=>(await e.owed.list()).find(e=>e.address===l)", "m=async()=>n.find(e=>e.address===l)", 2],
+    ["let n=await m()", "let n=h", 2],
+    ["k<w)return{end:d>0?`owed`:`floor`,steady:A<w,", "k<w)return{end:d>0?`owed`:`floor`,steady:!0,", 3],
+    ["Xe.mints=UJ(t?.mints,Xe.mints)", "Xe.mints=Xe.mints", 4],
+  ];
+  for (const [from, to, i] of planted) {
+    assert.equal(ex.split(from).length, 2, `once: ${from}`);
+    const c = facts("", ex.replace(from, to)).carries;
+    assert.deepEqual(keys.filter((k) => !c[k]), [keys[i]], `${from} -> ${to}`);
+  }
+});
