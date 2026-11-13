@@ -1372,3 +1372,76 @@ test("take writes the last height and nullifier it is handed on the RESERVED not
   assert.equal(rb.state, "RESERVED");
   assert.equal((await v.ns.marks()).has(b!.noteId), false);
 });
+
+// card evm-deposit-on-mainnet: an empty pool's first deposit is buyable in its first minute. The pool's trees refuse a
+// cut that holds no leaf (the wallet's PoolNoLeafError, a plain Error before it was typed); the queue's epoch read takes
+// that as an epoch tree of no leaf, so the note is proved on the newest root in the same pass.
+const NoLeaf = (((await import("../src/pool/pool.ts")) as { PoolNoLeafError?: new (m: string) => Error }).PoolNoLeafError ?? Error);
+
+test("(card evm-deposit-on-mainnet) the EVM pool's shape: an empty pool whose first leaf lands this epoch: the queue's pass makes its proof on the newest root, one the pool holds (before: the pass failed)", async () => {
+  const v = await vaultWith([]);
+  v.stateLeaves.length = 0;
+  v.labelLeaves.length = 0;
+  v.stateTree = new VaultTree();
+  v.labelTree = new VaultTree();
+  const pool = fakePool(v);
+  const cutTrees = pool.trees;
+  // as wallet pool/evm.ts trees: no state leaf or no label under the cut is refused
+  pool.trees = async (before, signal, opts) => {
+    const t = await cutTrees(before, signal, opts);
+    if (t.stateTree.size === 0 || t.labelTree.size === 0) throw new NoLeaf(`no leaf before ${before}`);
+    return t;
+  };
+  (pool as { chain: string }).chain = "evm";
+  pool.t.now += 10_000n;
+  const dep = await landDeposit(v, pool, usd(50), 1000n);
+  const q = queue(v, pool);
+  const out = await q.refresh();
+  assert.deepEqual(out.failed, [], "no note failed its pass");
+  const fresh = q.ready().find((r) => r.noteId === dep.id);
+  assert.equal(fresh?.root, "newest", "ready in the first pass, the pool's first minute");
+  assert.equal(fresh!.publicSignals[3], new VaultTree([dep.leaf!.commitment]).root!.toString(), "the pool's tree of its one leaf");
+  assert.equal(fresh!.wallet.address, W("evm", dep.ref, dep.leaf!.label));
+});
+
+test("(card evm-deposit-on-mainnet) the Solana pool's shape, the wallet's real tree sync: an empty pool whose first leaf lands this epoch: the queue's pass makes its proof on the newest root (before: the pass failed)", async () => {
+  const v = await vaultWith([]);
+  v.stateLeaves.length = 0;
+  v.labelLeaves.length = 0;
+  v.stateTree = new VaultTree();
+  v.labelTree = new VaultTree();
+  const pool = fakePool(v);
+  pool.t.now += 10_000n;
+  const dep = await landDeposit(v, pool, usd(50), 1000n);
+  const program = base58.encode(new Uint8Array(32).fill(4));
+  const sec = (ms: bigint) => ms / 1000n;
+  // the pool's one leaf, landed in now's second
+  const pageOf = (tree: number, leaves: readonly bigint[]): Uint8Array => {
+    const d = new Uint8Array(16 + 72 * leaves.length);
+    d.set(new TextEncoder().encode("bfpage01"));
+    d[8] = tree;
+    const b = (x: bigint) => Buffer.from(x.toString(16).padStart(64, "0"), "hex");
+    leaves.forEach((leaf, i) => {
+      d.set(b(leaf), 16 + 72 * i);
+      d.set(b(new VaultTree(leaves.slice(0, i + 1)).root!), 16 + 72 * i + 32);
+      new DataView(d.buffer).setBigInt64(16 + 72 * i + 64, sec(pool.t.now), true);
+    });
+    return d;
+  };
+  const pages = new Map([[solanaPageOf(program, 0, 0), pageOf(0, v.stateLeaves)], [solanaPageOf(program, 1, 0), pageOf(1, v.labelLeaves)]]);
+  let reads = 0;
+  const at = (url: string) => Object.assign(async (m: string, p: readonly unknown[]): Promise<unknown> => {
+    if (m === "getBlockTime") return Number(sec(pool.t.now) + (reads++ > 0 ? 1n : 0n));
+    if (m !== "getMultipleAccounts") throw new Error(`no ${m}`);
+    return { context: { slot: 500 }, value: (p[0] as string[]).map((k) => (pages.has(k) ? { owner: program, lamports: 1, executable: false, rentEpoch: 0, data: [base64.encode(pages.get(k)!), "base64"] } : null)) };
+  }, { url });
+  const sync = solanaTreeSync([at("https://a.example"), at("https://b.example")], program, async () => {});
+  await assert.rejects(sync.trees(START), /no leaf before/, "the real sync refuses the empty epoch cut");
+  pool.trees = sync.trees;
+  const q = queue(v, pool);
+  const out = await q.refresh();
+  assert.deepEqual(out.failed, [], "no note failed its pass");
+  const fresh = q.ready().find((r) => r.noteId === dep.id);
+  assert.equal(fresh?.root, "newest", "ready in the first pass, the pool's first minute");
+  assert.equal(fresh!.publicSignals[3], v.stateTree.root!.toString(), "on the pool's tree of its one leaf");
+});

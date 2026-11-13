@@ -496,7 +496,11 @@ type RunPlant = {
   codeAt?: string;
   /** that send's estimate by its sender (default 30,000) */
   codeGas?: (from: string) => bigint;
+  /** the pool's trees refuse a cut that holds no leaf, as the wallet's do (wallet pool/evm.ts trees: "no leaf before") */
+  noLeaf?: boolean;
 };
+// the wallet's refusal of a cut with no leaf: its typed PoolNoLeafError (card evm-deposit-on-mainnet), a plain Error before
+const NoLeaf = (((await import("../../wallet/src/pool/pool.ts")) as { PoolNoLeafError?: new (m: string) => Error }).PoolNoLeafError ?? Error);
 async function runWorld(plant: RunPlant = {}) {
   const ws = await openWalletStore({ indexedDB: new IDBFactory() });
   closers.push(() => ws.close());
@@ -555,6 +559,7 @@ async function runWorld(plant: RunPlant = {}) {
         // a fresh second note: in the newest trees only (the leaf after the run's)
         if (plant.fresh !== undefined && o?.newest === true) leaves.push(freshLeaf), labels.push(label2);
       }
+      if (plant.noLeaf && (leaves.length === 0 || labels.length === 0)) throw new NoLeaf(`no leaf before ${beforeMs}`);
       const st = tree(leaves), lt = tree(labels);
       return { stateTree: st, labelTree: lt, stateRoot: st.root ?? 0n, labelRoot: lt.root ?? 0n };
     },
@@ -1167,4 +1172,51 @@ test("(review of cb287f4f5 P3-2) a To with code that needs more gas from the re-
   assert.equal(got.stage, "stopped");
   assert.match(got.cause ?? "", /\bgas\b/, `stopped on gas: ${got.cause}`);
   assert.deepEqual(world.chain.bound.filter((x) => x === lower(world.w) || lower(world.extras[0]!.w) === x), [], "no note bound");
+});
+
+// the proof's state root, as the release's calldata carries it (public signal 3)
+const rootsOf = (world: Awaited<ReturnType<typeof runWorld>>): bigint[] => {
+  const roots: bigint[] = [];
+  const p = world.h.prover as unknown as { prove: (c: string, i: unknown) => Promise<{ publicSignals: string[] }> };
+  const prove = p.prove.bind(p);
+  (world.h as { prover: unknown }).prover = { ...p, prove: async (c: string, i: unknown) => {
+    const r = await prove(c, i);
+    roots.push(BigInt(r.publicSignals[3]!));
+    return r;
+  } };
+  return roots;
+};
+
+test("(card evm-deposit-on-mainnet) an empty pool's first leaf, landed this epoch: the epoch cut holds no leaf (the wallet's PoolNoLeafError), so the part proves at once on the newest root, one the pool holds, and sends (before: stopped)", async () => {
+  for (const change of [false, true]) {
+    const world = await runWorld({ change, thisEpoch: true, noLeaf: true });
+    const roots = rootsOf(world);
+    const got = await runEvmPoolWithdraw(world.h, RUN_ASK, TO, PART, MAX);
+    assert.equal(got.stage, "sent", `${change ? "a change note" : "a deposit's own note"}: ${got.cause}`);
+    assert.ok(world.chain.trees.some((t) => !t.newest && t.beforeMs === NOW), "the epoch cut was read first");
+    assert.ok(world.chain.trees.some((t) => t.newest && t.beforeMs === NOW + 1n), "then the newest root, at the pool's time");
+    const n = (await world.notes.get(world.noteId))!;
+    const ref = change ? ({ kind: "change", l: world.label, j: 1 } as const) : n.ref;
+    const leaf = noteCommitment(n.leaf!.value, world.label, noteSecrets(SEED, ref).precommitment);
+    assert.deepEqual(roots, [new VaultTree([leaf]).root], "the bound root is the pool's tree of its one leaf");
+    assert.equal(world.clock.ms < NOW + 60_000n, true, "no wait for the boundary");
+    assert.equal(n.state, "RESERVED");
+  }
+});
+
+test("(card evm-deposit-on-mainnet) beside it, a pool with older leaves and the note landed this epoch: the epoch cut holds the older leaf, so the plan and the run are the ones the pool gave before (the same binds, the newest root, sent)", async () => {
+  const runs = [];
+  for (const noLeaf of [false, true]) {
+    const world = await runWorld({ thisEpoch: true, rested: [10n ** 14n], noLeaf });
+    const roots = rootsOf(world);
+    const got = await runEvmPoolWithdraw(world.h, RUN_ASK, TO, PART, MAX);
+    assert.equal(got.stage, "sent", got.cause);
+    assert.ok(world.chain.trees.some((t) => t.newest), "the fresh note's newest root");
+    assert.equal((await world.notes.get(world.extras[0]!.id))?.state, "UNSPENT", "the older note stays");
+    const n = (await world.notes.get(world.noteId))!;
+    const leaf = noteCommitment(n.leaf!.value, world.label, noteSecrets(SEED, n.ref).precommitment);
+    assert.deepEqual(roots, [new VaultTree([world.extras[0]!.leaf, leaf]).root], "the bound root is the pool's newest tree: the older leaf, then the note's");
+    runs.push({ bound: world.chain.bound.filter((x) => x === lower(world.w) || lower(world.extras[0]!.w) === x).length, binds: world.chain.binds });
+  }
+  assert.deepEqual(runs[1], runs[0], "a pool that refuses an empty cut plans as one that answers it: one bind, the fresh note's W, the same chunk");
 });

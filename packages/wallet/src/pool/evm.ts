@@ -81,7 +81,7 @@ import { EVM_POOL_TX_BYTES, EvmOperatorsUnanswered, evmPoolChainFee, evmPoolChai
 import { evmAddress } from "../derive/index.ts";
 import type { Ladder } from "./ladder.ts";
 import { POOL_TESTNET } from "./network.ts";
-import { TAKE_SLACK_MS, type Pool, type PoolTrees } from "./pool.ts";
+import { PoolNoLeafError, TAKE_SLACK_MS, type Pool, type PoolTrees } from "./pool.ts";
 
 /** One JSON-RPC call on one EVM provider (the kit's JSON-RPC client shape, solanaJsonRpc, which speaks any JSON-RPC). */
 export type EvmRpc = SolanaRpc;
@@ -1738,7 +1738,7 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
         const n = await cutOf(r.events, prefix, beforeMs, h, signal);
         const cut = r.events.slice(0, n);
         const labels = cut.flatMap((e) => (e.label === null ? [] : [e]));
-        if (n === 0 || labels.length === 0) throw new Error(`no leaf before ${beforeMs}`);
+        if (n === 0 || labels.length === 0) throw new PoolNoLeafError(`no leaf before ${beforeMs}`);
         const stateTree = n === r.events.length ? r.stateTree : new VaultTree(cut.map((e) => e.state));
         const labelTree = labels.length === r.labelTree.size ? r.labelTree : new VaultTree(labels.map((e) => e.label!));
         // the pool's own record of each epoch root: the time of the block that made it (State.sol:63-65, 172, 188); the

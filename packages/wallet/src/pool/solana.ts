@@ -46,7 +46,7 @@ import { base58, base64 } from "@scure/base";
 import { readSolanaRent, SOLANA_ANSWER_MAX_BYTES, SOLANA_POOL_BUY_PIECES_MAX, SOLANA_POOL_FEE_STEP, SOLANA_POOL_SEND_MARGIN_MS, solanaPoolFee, solanaPoolReleaseCost, solanaRentMin, solanaSameProvider, VAULT_FIELD_P, VaultTree, type SolanaRent, type SolanaRpc } from "@blindfill/kit";
 import { POOL_TESTNET } from "./network.ts";
 import type { Ladder } from "./ladder.ts";
-import { TAKE_SLACK_MS, type Pool, type PoolTrees } from "./pool.ts";
+import { PoolNoLeafError, TAKE_SLACK_MS, type Pool, type PoolTrees } from "./pool.ts";
 
 /** SOL's ladder: one = 0.001 SOL (the program's MIN_DEPOSIT), from 0.01 SOL [design: the owner's $2 floor, OD:268, in kind]. */
 export const SOL_LADDER: Ladder = Object.freeze({ one: 1_000_000n, min: 10_000_000n });
@@ -459,7 +459,7 @@ export function solanaTreeSync(rpcs: readonly [SolanaRpc, SolanaRpc], program: s
       let n = 0;
       while (n < agreed.length && agreed[n]!.t < beforeMs) n++;
       if ((x.length > n && x[n]!.t < beforeMs) || (y.length > n && y[n]!.t < beforeMs)) throw new Error(`tree ${tree}: the two RPCs differ below the cut`);
-      if (n === 0) throw new Error(`tree ${tree}: no leaf before ${beforeMs}`);
+      if (n === 0) throw new PoolNoLeafError(`tree ${tree}: no leaf before ${beforeMs}`);
       cuts.push(agreed.slice(0, n));
     }
     if (commitment === "finalized") {

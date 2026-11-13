@@ -62,7 +62,7 @@ import { changeIndex, freshWallet } from "../derive/index.ts";
 import { noteSecrets, type NoteRef } from "../notes/secrets.ts";
 import { heldBy, type NoteRecord, type NoteStore } from "../notes/store.ts";
 import { checkLadder, chunkOf } from "./ladder.ts";
-import { checkBinding, checkPool, NEWEST_GRACE_MS, NOW_REUSE_MS, TAKE_SLACK_MS, type ChainNow, type Pool, type PoolTrees, type ReadyProof } from "./pool.ts";
+import { checkBinding, checkPool, cutOrEmpty, NEWEST_GRACE_MS, NOW_REUSE_MS, TAKE_SLACK_MS, type ChainNow, type Pool, type PoolTrees, type ReadyProof } from "./pool.ts";
 
 /** Proofs kept ready: min(hardwareConcurrency - 1, 3), at least 1, all made by the one prover in turn. */
 export function readySetSize(hardwareConcurrency: number | undefined): number {
@@ -342,7 +342,7 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
     let newest: PoolTrees | Error | undefined;
     const todo: Todo[] = [];
     if (want > 0 && (open.length > 0 || again.length > 0)) {
-      epochTrees = await pool.trees(start, signal);
+      epochTrees = await cutOrEmpty(pool.trees(start, signal));
       // the ready set's own notes first (each landed before the epoch began), then the open notes; among the remakes a
       // newest-root proof first (take refuses it NEWEST_GRACE_MS past the boundary, an epoch-root one stays takeable
       // all epoch), then by chunk and leaf
@@ -383,7 +383,7 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
       for (const n of kept) {
         const r = alt.get(n.id);
         if (r !== undefined && r.epochStartMs === start && r.wallet.address === to!.address) continue;
-        epochTrees ??= await pool.trees(start, signal);
+        epochTrees ??= await cutOrEmpty(pool.trees(start, signal));
         let trees: PoolTrees = epochTrees;
         let root: "epoch" | "newest" = "epoch";
         if (n.leaf!.leafIndex >= BigInt(epochTrees.stateTree.size)) {

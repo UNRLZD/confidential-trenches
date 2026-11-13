@@ -38,12 +38,32 @@
 //   fields the pool recomputes that context from at the tap, so a context the pool would not recompute exactly is
 //   refused there.
 // Nothing here holds a secret: W's secret key never reaches a pool, only its address and public key.
-import { VAULT_FIELD_P, type VaultSnarkjsProof, type VaultTree, type VaultWithdrawSignals } from "@blindfill/kit";
+import { VAULT_FIELD_P, VaultTree, type VaultSnarkjsProof, type VaultWithdrawSignals } from "@blindfill/kit";
 import { CHAINS, type Chain } from "../derive/index.ts";
 import type { Ladder } from "./ladder.ts";
 
 /** A pool's two trees, holding every leaf it has, and its newest roots, read on two RPCs. */
 export type PoolTrees = { stateTree: VaultTree; labelTree: VaultTree; stateRoot: bigint; labelRoot: bigint };
+
+/** trees(beforeMs)'s answer for a cut that holds no leaf (an empty pool's first leaf landing this epoch, card
+ *  evm-deposit-on-mainnet): not a fault, the cut holds no note, so a caller takes the newest root at once. `code`: the
+ *  cause a stop names (pool-sell.ts legCause), never the message. */
+export class PoolNoLeafError extends Error {
+  readonly code = "no_leaf";
+  constructor(message: string) {
+    super(message);
+    this.name = "PoolNoLeafError";
+  }
+}
+
+/** An epoch cut's trees with a cut that holds no leaf read as trees of no leaf (the proof queue's epoch read): every
+ *  note is then past the cut and waits on the newest root, so an empty pool's first leaf is proved in its first epoch. */
+export function cutOrEmpty(read: Promise<PoolTrees>): Promise<PoolTrees> {
+  return read.catch((e: unknown) => {
+    if (!(e instanceof PoolNoLeafError)) throw e;
+    return { stateTree: new VaultTree(), labelTree: new VaultTree(), stateRoot: 0n, labelRoot: 0n };
+  });
+}
 
 /** What the queue hands the context function for one chunk. */
 export type PoolBindArgs = {
@@ -95,7 +115,8 @@ export interface Pool<R = unknown> {
   now(signal?: AbortSignal): Promise<bigint>;
   /** The tree source: both trees holding only the leaves that landed before `beforeMs`, and their roots. `newest`: the
    * read for a note that landed this epoch (beforeMs = now + 1), which a pool may make at a lower commitment than its epoch
-   * roots (Solana: confirmed, M355 (5)); its failure fails only the notes that wait on it. */
+   * roots (Solana: confirmed, M355 (5)); its failure fails only the notes that wait on it. A cut that holds no leaf
+   * rejects with PoolNoLeafError. */
   trees(beforeMs: bigint, signal?: AbortSignal, opts?: { newest?: boolean }): Promise<PoolTrees>;
   /** The context function. */
   bind(a: PoolBindArgs, signal?: AbortSignal): Promise<PoolBinding<R>>;
