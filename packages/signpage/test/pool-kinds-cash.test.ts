@@ -24,11 +24,8 @@ function page() {
   let pool = 100_000_000n; // one tap spends 0.1 SOL until the move lands
   const cash: CashToPoolDeps = {
     tapMax: async () => pool,
-    cash: async () => 100_000_000n,
-    rails: ["1click"],
-    quote: async () => ({ address: "c".repeat(64), amountIn: 25_000_000n, minOut: 310_000_000n, deadlineMs: 1e12 }),
-    fee: async () => 10_000n,
-    handoff: async (w) => (paid.push(w.recipient), (pool = 410_000_000n), { kind: "arrived" }),
+    // the mover's need: a move on its way, which lands at once here
+    need: async () => (paid.push("c".repeat(64)), (pool = 410_000_000n), true),
     wait: async () => {},
     now: () => 0,
   };
@@ -38,7 +35,7 @@ function page() {
   return { flows, paid, deps, cash };
 }
 
-test("pool.buy on Solana above one tap's spend: Cash pays the quote's deposit address, then the flow buys the whole ask", async () => {
+test("pool.buy on Solana above one tap's spend: the tap asks the mover for the shortfall, waits for it, then the flow buys the whole ask", async () => {
   const p = page();
   const k = poolKinds({ ...p.deps, cash: () => p.cash } as PoolKindsDeps);
   assert.deepEqual(await settle(k["pool.buy"](BUY, ctx)), { result: { stage: "filled", txs: [] } });

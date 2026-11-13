@@ -1,37 +1,33 @@
-// One balance buys on every chain (card one-balance-buys-on-every-chain, part 1: Cash to a Solana buy). A pool.buy on
-// Solana above what one tap of the pool's ready proofs spends now moves the shortfall from Cash into the Solana pool
-// inside the same tap, then buys the whole ask from the pool. The user takes no separate step.
+// One balance buys on every chain (card one-balance-buys-on-every-chain, part 1: Cash to a Solana buy; the design: the
+// Blindfill v2 lite paper §3-4, every move between chains stops in the NEAR vault, never at a tap's hop that ties two
+// chains together).
 //
-// The route, by measurement (the card's plan): the vault pays a 1Click deposit address straight (the withdraw form's
-// hand-off, ./withdraw/handoff.ts withdrawHandoff, a proof made on this device), 1Click swaps Cash's USDC on NEAR to SOL
-// at the pool's U_X (the deposit sheet's own quote, ./pool-deposit-address.ts poolAddressHost, checked against the
-// device's price reads and floor and followed under its request id before its address is used), the follow carries
-// what lands at U_X into the pool in the ladder's standard sizes (./pool-deposit-follow.ts), the queue proves the new
-// notes, and the pool buy (./pool-buy.ts) spends them. Never W straight from 1Click: an odd size beside the pool's
-// pieces in one W would tie the user's vault spend to their pool spend.
+// cashMover.need(chain, short): money for a buy on `chain` whose pool one tap cannot pay. It joins the moves already on
+// their way into that pool when they cover the shortfall, else starts one more for what is left: the deposit sheet's
+// own quote of Cash's USDC on NEAR into the pool's U_X (./pool-deposit-address.ts poolAddressHost: checked against the
+// device's price reads and floor, its op written for the follow before its address is used), sized to the shortfall
+// plus the ladder's least rung and CASH_MARGIN_BPS at the device's price (cashUsdcFor), then the vault pays that
+// quote's deposit address straight with a proof made on this device (./withdraw/handoff.ts withdrawHandoff: the
+// smallest note that covers it and the relay fee). The follow carries what lands at U_X into the pool in the ladder's
+// standard sizes (./pool-deposit-follow.ts) and the queue proves the new notes. A move counts as on its way from its
+// quote until its follow op ends (`landed`), so the same shortfall is never moved twice. Called when the user types an
+// amount (the move starts then) and again at the tap.
+// - The rails, in order: NEAR Intents' 1Click only (no Relay: a hop between pools would tie two chains' money together,
+//   lite paper v2 §4; Relay lists no NEAR chain either, api.relay.link/chains read 13 Nov 19:22Z).
+// - Every quote is hostile: its deposit address must be a NEAR implicit account (1Click's NEAR deposit addresses are,
+//   read on a live quote 13 Nov 19:2xZ), its amount in exactly the USDC asked and its min out at least the shortfall,
+//   else nothing is withdrawn.
+// - Into the pool, never straight to a buy's W: an odd size beside the pool's pieces in one W would tie the user's
+//   vault spend to their pool spend.
+// - A page that dies mid-move loses nothing: the follow resumes the quote's op on the next load, and withdrawSettle the
+//   RESERVED note; the money is in the pool for the next tap.
 //
-// - The shortfall is the ask less what one tap spends now (`tapMax`: pool.buy.dry's tap_max on this coin's venue, in
-//   lamports). None: the pool buy alone, nothing asked.
-// - The quote is the deposit sheet's, for that shortfall (`quote`): its min out must cover the shortfall, the user's own
-//   request, or it is refused quote_check_failed before anything is withdrawn. Its refusal is the tap's answer.
-// - Cash pays it only when one note covers the amount and the relayer's fee (`cash`: the largest note, ./withdraw/
-//   checks.ts withdrawable); else not_funded, nothing withdrawn. A withdrawal that did not pay the deposit address
-//   (expired, refunded, paid elsewhere, unmatched, a fee above the one read) ends the tap "failed", with no buy: what
-//   the vault paid is the follow's and the refund's (1Click refunds into the user's refund id inside intents.near,
-//   which the follow moves back), never lost.
-// - The quote's deposit address must be a NEAR implicit account (64 hex: 1Click's NEAR deposit addresses, read on a
-//   live quote 13 Nov 19:2xZ), never the vault, intents.near or the token, else quote_check_failed, nothing withdrawn.
-// - Then the tap waits, a read each CASH_MOVE_POLL_MS, until one tap spends the whole ask, and buys it once. Past
-//   CASH_MOVE_WAIT_MS from the withdrawal's arrival (or the quote's deadline, if sooner) with no such tap: not_funded,
-//   never a smaller buy than the one asked. What landed stays in the pool, the user's.
-// - The app is told the move runs (route { move: "cash" }) before the pool buy's own route, so its flow shows the move
-//   as its own step.
-// - A page that dies mid-move loses nothing: the quote's op is written before its address is used (the follow resumes
-//   it on the next load), and the withdrawal's note is RESERVED with its request (withdrawSettle resumes it). Only the
-//   buy is not made; the money is in the pool for the next tap.
-// Every input here is hostile until checked: the quote's numbers are checked against the shortfall, the withdrawal's end
-// read on two RPCs by the hand-off. Nothing here logs.
-import type { ErrorCode, PoolStatePrice } from "../../kit/src/signpage/messages.ts";
+// cashFirst, at a tap: a Solana pool.buy above what one tap spends now (pool.buy.dry's tap_max) asks `need` for the
+// shortfall and, while money is on its way, waits for it (a read each CASH_MOVE_POLL_MS, CASH_MOVE_WAIT_MS at most) and
+// buys the whole ask once one tap spends it. The app is told the tap waits on the move (route { move: "cash" }), so its
+// flow shows the move as its own step. With nothing on its way: the pool buy's own answer.
+// Nothing here logs.
+import type { ErrorCode, PoolChain, PoolStatePrice } from "../../kit/src/signpage/messages.ts";
 import { SOL_LADDER } from "../../wallet/src/pool/solana.ts";
 import type { HostAnswer, HostRefusal, KindContext, Running } from "./api.ts";
 import type { PoolAsk } from "./rules/pool.ts";
@@ -40,17 +36,18 @@ import type { HandoffEnd } from "./withdraw/handoff.ts";
 
 /** How often a moved tap reads whether one tap now spends the ask. */
 export const CASH_MOVE_POLL_MS = 2_000;
-/** How long, from the withdrawal's arrival at 1Click, the tap waits for one tap to spend the ask: 1Click's NEAR to
+/** How long a tap waits for one tap to spend the ask: 1Click's NEAR to
  *  Solana leg measured at 38.9 s (perf/runs/solana-intents-out-2026-10-26.json), the follow's deposit from U_X and the
  *  queue's proofs of the new notes, about four times over. */
 export const CASH_MOVE_WAIT_MS = 180_000;
 const IMPLICIT = /^[0-9a-f]{64}$/;
 
-/** The margin a move's USDC carries over the shortfall at the device's price: 1Click's slippage (the deposit quote's
- *  100 bps), its fee and withdraw fee, and the follow's per-rung deposit cost, with room. */
+/** The margin Cash is counted at in a tap's most (with_cash) under the device's price: 1Click's slippage (the deposit
+ *  quote's 100 bps), its fee and withdraw fee, and the follow's per-rung deposit cost, with room. */
 export const CASH_MARGIN_BPS = 300n;
-/** USDC (6 decimals) a move asks 1Click to swap for `short` lamports at the device's SOL price: the shortfall plus the
- *  ladder's least rung (what a 1-2-5 split may leave at U_X under it), plus CASH_MARGIN_BPS, rounded up. */
+/** USDC (6 decimals) a move asks for `short` base units of the pool's coin (lamports on Solana) at the device's price:
+ *  the shortfall plus the ladder's least rung (what a 1-2-5 split may leave at U_X under it), plus CASH_MARGIN_BPS,
+ *  rounded up; null with no price or no shortfall. */
 export function cashUsdcFor(short: bigint, p: Pick<PoolStatePrice, "price" | "expo">): bigint | null {
   const px = priceOf(p);
   if (px === null || short <= 0n) return null;
@@ -58,7 +55,8 @@ export function cashUsdcFor(short: bigint, p: Pick<PoolStatePrice, "price" | "ex
   const den = px.d * 10n ** 9n * 10_000n;
   return (num + den - 1n) / den;
 }
-/** The lamports a move of `usdc` buys a tap at most (cashUsdcFor's inverse, rounded down); 0n when it buys none. */
+/** The lamports a move of `usdc` gives a tap at most, at the device's SOL price: less CASH_MARGIN_BPS and the ladder's
+ *  least rung (what a 1-2-5 split may leave at U_X under it), rounded down; 0n when it gives none. */
 export function cashLamportsFor(usdc: bigint, p: Pick<PoolStatePrice, "price" | "expo">): bigint {
   const px = priceOf(p);
   if (px === null || usdc <= 0n) return 0n;
@@ -70,30 +68,84 @@ const priceOf = (p: Pick<PoolStatePrice, "price" | "expo">): { n: bigint; d: big
   return { n: BigInt(p.price), d: 10n ** BigInt(-p.expo) };
 };
 
-/** The hop's rail (card one-balance-buys-on-every-chain, CO 13 Nov): Relay first wherever it quotes the pair, NEAR
- *  Intents' 1Click as the fallback and wherever Relay does not. Relay lists no NEAR chain (api.relay.link/chains, read
- *  13 Nov 19:22Z: 58 chains, Solana, Base and Robinhood among them), so a move from Cash goes on 1Click alone. */
-export type CashRail = "relay" | "1click";
-
-/** The rail's quote of Cash's USDC on NEAR into the pool's U_X, checked and followed under its request id: the rail's
- *  deposit address (a NEAR implicit account), the USDC it takes (6 decimals), the least SOL it delivers (lamports), its
- *  deadline (ms). */
-export type CashQuote = { address: string; amountIn: bigint; minOut: bigint; deadlineMs: number };
+/** The hop's rail: NEAR Intents' 1Click (no Relay, lite paper v2 §4). */
+export type CashRail = "1click";
+/** A rail's quote of USDC on NEAR into a pool's U_X, checked and followed under its id: its deposit address, the USDC it
+ *  takes (6 decimals), the least of the pool's coin it delivers (base units). */
+export type CashQuote = { address: string; amountIn: bigint; minOut: bigint };
 type Refusal = { error: ErrorCode };
+
+export type CashMoverDeps = {
+  /** The device's price of `chain`'s pool coin (src/pool-price.ts), null past its bound. */
+  price(chain: PoolChain): Pick<PoolStatePrice, "price" | "expo"> | null;
+  rails: readonly CashRail[];
+  /** `rail`'s quote of `usdc` into `chain`'s pool, its op written for the follow under `id`; or its refusal. */
+  quote(chain: PoolChain, usdc: bigint, id: string, rail: CashRail): Promise<CashQuote | Refusal>;
+  /** The relayer's fee for a withdrawal, bounded by the device's fee_max (withdrawFormDeps.fee). */
+  fee(): Promise<bigint>;
+  /** The most one withdrawal of Cash carries (USDC base units): the largest UNSPENT note of the vault's scope. */
+  cash(): Promise<bigint>;
+  /** The vault's hand-off (withdrawHandoff); null where the network names no vault or relayer. */
+  handoff: ((w: CheckedWithdraw, drawnFee: bigint) => Promise<HandoffEnd>) | null;
+  /** Whether the follow op under `id` has ended (its money in the pool, or refunded): no longer on its way. */
+  landed(id: string): Promise<boolean>;
+  now(): number;
+};
+
+type Way = { chain: PoolChain; id: string; lamports: bigint; going: Promise<boolean>; since: number };
+
+/** The mover: `need` starts or joins a move for a shortfall, true while money for it is on its way. */
+export function cashMover(d: CashMoverDeps): { need(chain: PoolChain, short: bigint): Promise<boolean>; ways(): number } {
+  let ways: Way[] = [];
+  let turn: Promise<unknown> = Promise.resolve();
+  const start = async (chain: PoolChain, short: bigint): Promise<boolean> => {
+    // what is on its way already: a move that failed, landed, or outlived CASH_MOVE_WAIT_MS no longer counts
+    const kept: Way[] = [];
+    for (const w of ways) {
+      const settled = await Promise.race([w.going, Promise.resolve(null)]);
+      if (settled === false || d.now() - w.since > CASH_MOVE_WAIT_MS || (settled === true && (await d.landed(w.id)))) continue;
+      kept.push(w);
+    }
+    ways = kept;
+    const coming = ways.filter((w) => w.chain === chain).reduce((a, w) => a + w.lamports, 0n);
+    if (coming >= short) return coming > 0n;
+    const left = short - coming;
+    const p = d.price(chain);
+    const usdc = p === null ? null : cashUsdcFor(left, p);
+    if (usdc === null || d.handoff === null || d.rails.length === 0) return coming > 0n;
+    const fee = await d.fee();
+    if (usdc + fee > (await d.cash())) return coming > 0n;
+    const id = `cash/${chain}/${d.now()}`;
+    let q: CashQuote | Refusal = { error: "not_allowed" };
+    let used = `${id}/${d.rails[0]}`;
+    for (const rail of d.rails) {
+      used = `${id}/${rail}`;
+      q = await d.quote(chain, usdc, used, rail);
+      if (!("error" in q)) break;
+    }
+    if ("error" in q || !IMPLICIT.test(q.address) || q.amountIn !== usdc || q.minOut < left) return coming > 0n;
+    const handoff = d.handoff;
+    const to = q.address;
+    const going = handoff({ recipient: to, amount: usdc }, fee).then((e) => e.kind === "arrived" || e.kind === "landed", () => false);
+    ways.push({ chain, id: used, lamports: q.minOut, going, since: d.now() });
+    return true;
+  };
+  return {
+    // one at a time: a second need (the tap after the typing) reads the first's move as on its way
+    need: (chain, short) => {
+      const r = turn.then(() => start(chain, short));
+      turn = r.catch(() => {});
+      return r.catch(() => false);
+    },
+    ways: () => ways.length,
+  };
+}
 
 export type CashToPoolDeps = {
   /** Lamports one pool.buy of `token` spends now (pool.buy.dry's tap_max on the coin's venue); 0n when none. */
   tapMax(token: string): Promise<bigint>;
-  /** The most one withdrawal of Cash carries (USDC base units): the largest UNSPENT note of the vault's scope. */
-  cash(): Promise<bigint>;
-  /** The rails to ask, in order: the first that quotes carries the move; each refusal asks the next. */
-  rails: readonly CashRail[];
-  /** `rail`'s quote for `short` lamports into the pool, or its refusal. */
-  quote(short: bigint, id: string, rail: CashRail): Promise<CashQuote | Refusal>;
-  /** The relayer's fee, bounded by the device's fee_max (withdrawFormDeps.fee). */
-  fee(): Promise<bigint>;
-  /** The vault's hand-off (withdrawHandoff); null where the network names no vault or relayer. */
-  handoff: ((w: CheckedWithdraw, drawnFee: bigint) => Promise<HandoffEnd>) | null;
+  /** cashMover's need on Solana. */
+  need(short: bigint): Promise<boolean>;
   wait(ms: number): Promise<void>;
   now(): number;
   signal?: AbortSignal;
@@ -102,8 +154,8 @@ export type CashToPoolDeps = {
 type Inner = (ask: PoolAsk, ctx: KindContext | null) => HostRefusal | Running<"pool.buy">;
 type Answer = HostAnswer<"pool.buy"> | HostRefusal;
 
-/** The pool.buy kind with Cash first: `inner` (the pool buy) once one tap spends the ask, after a move when it did not.
- *  No async function here returns an answer: a HostAnswer's `then` would make it a thenable (pools.ts). */
+/** The pool.buy kind that waits for Cash on its way: `inner` (the pool buy) once one tap spends the ask, or at once when
+ *  nothing is on its way. No async function here returns an answer: a HostAnswer's `then` would make it a thenable. */
 export function cashFirst(inner: Inner, deps: () => CashToPoolDeps): Inner {
   return (ask, ctx) => {
     if (ask.kind !== "pool.buy" || ask.chain !== "solana" || ask.token === null) return inner(ask, ctx);
@@ -112,9 +164,14 @@ export function cashFirst(inner: Inner, deps: () => CashToPoolDeps): Inner {
     const after = (async () => {
       const d = deps();
       const now = await d.tapMax(token);
-      if (now < ask.amount) {
-        const refused = await move(d, token, ask.amount, ask.amount - now, ctx);
-        if (refused !== null) return void (answer = refused);
+      if (now < ask.amount && (await d.need(ask.amount - now))) {
+        try {
+          ctx?.route?.({ move: "cash" });
+        } catch {
+          /* the app's display never stops a buy */
+        }
+        const until = d.now() + CASH_MOVE_WAIT_MS;
+        while (!d.signal?.aborted && d.now() < until && (await d.tapMax(token)) < ask.amount) await d.wait(CASH_MOVE_POLL_MS);
       }
       const r = inner(ask, ctx);
       if (!("after" in r)) return void (answer = r);
@@ -123,34 +180,4 @@ export function cashFirst(inner: Inner, deps: () => CashToPoolDeps): Inner {
     })().catch(() => void (answer = { error: "failed" }));
     return { running: true, after, answer: () => answer };
   };
-}
-
-// The move and its wait: null once one tap spends `amount`, else the tap's refusal.
-async function move(d: CashToPoolDeps, token: string, amount: bigint, short: bigint, ctx: KindContext | null): Promise<Refusal | null> {
-  if (d.handoff === null || d.rails.length === 0) return { error: "not_funded" };
-  const id = ctx === null ? "cash" : `${ctx.id}/cash`;
-  let q: CashQuote | Refusal = { error: "not_allowed" };
-  for (const rail of d.rails) {
-    q = await d.quote(short, rail === d.rails[0] ? id : `${id}/${rail}`, rail);
-    if (!("error" in q)) break;
-  }
-  if ("error" in q) return { error: q.error };
-  // the quote against the user's own request: it must deliver at least the shortfall, from a NEAR implicit account
-  if (q.minOut < short || q.amountIn <= 0n || !IMPLICIT.test(q.address)) return { error: "quote_check_failed" };
-  const fee = await d.fee();
-  if (q.amountIn + fee > (await d.cash())) return { error: "not_funded" };
-  try {
-    ctx?.route?.({ move: "cash" });
-  } catch {
-    /* the app's display never stops a buy */
-  }
-  const end = await d.handoff({ recipient: q.address, amount: q.amountIn }, fee);
-  if (end.kind !== "arrived" && end.kind !== "landed") return { error: "failed" };
-  const until = Math.min(q.deadlineMs, d.now() + CASH_MOVE_WAIT_MS);
-  for (;;) {
-    if (d.signal?.aborted) return { error: "failed" };
-    if ((await d.tapMax(token)) >= amount) return null;
-    if (d.now() >= until) return { error: "not_funded" };
-    await d.wait(CASH_MOVE_POLL_MS);
-  }
 }
