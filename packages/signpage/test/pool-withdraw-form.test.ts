@@ -1,6 +1,7 @@
 // Card signpage-pool-withdraw-form: the pool withdraw screen (src/withdraw/pool-form.ts). To is checked per chain
 // (Solana base58 keys, never the pool's own; EVM 0x addresses, EIP-55 when mixed case, never zero or the pool), the
 // amount is refused above what the pool's notes can send, and To and Max fee are drawn before the press.
+import { isReleaseSize } from "../../wallet/src/pool/pieces.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { CHECK_IDLE_MS } from "../src/withdraw/form.ts";
@@ -153,10 +154,15 @@ test("the drawn screen: To and Max fee shown before the press, the press hands o
 test("Amount on a piece rule: the plan's sum is the one number shown and handed over, and it plans exactly itself", async () => {
   const pieces: PoolFunds = { ...FUNDS, pieces: SOL_PIECES };
   const typed = 7_123_456n;
-  const sum = planPoolWithdraw(pieces.notes, typed, pieces)!.reduce((t, p) => t + p.part, 0n);
+  const plan = planPoolWithdraw(pieces.notes, typed, pieces)!;
+  const sum = plan.reduce((t, p) => t + p.part, 0n);
   assert.ok(sum > typed && sum - typed < SOL_GRID, `${sum}: a test whose typed amount the plan rounds up`);
-  assert.deepEqual(checkPoolAmount("solana", formatUnits(typed, 9), pieces), { ok: true, amount: sum, parts: 1, maxFee: FEE + W_FEE });
-  assert.deepEqual(checkPoolAmount("solana", formatUnits(sum, 9), pieces), { ok: true, amount: sum, parts: 1, maxFee: FEE + W_FEE });
+  // card pool-amounts-are-standard-sizes: each part a rung's, so the plan may take more than one part; the screen counts
+  // each part's fee
+  const parts = plan.length;
+  assert.ok(plan.every((p) => isReleaseSize(SOL_PIECES, p.chunk)), JSON.stringify(plan, (_, v) => (typeof v === "bigint" ? String(v) : v)));
+  assert.deepEqual(checkPoolAmount("solana", formatUnits(typed, 9), pieces), { ok: true, amount: sum, parts, maxFee: BigInt(parts) * (FEE + W_FEE) });
+  assert.deepEqual(checkPoolAmount("solana", formatUnits(sum, 9), pieces), { ok: true, amount: sum, parts, maxFee: BigInt(parts) * (FEE + W_FEE) });
   const f = drawn(async () => pieces);
   f.type("to", TO);
   f.type("amount", formatUnits(typed, 9));
@@ -165,7 +171,7 @@ test("Amount on a piece rule: the plan's sum is the one number shown and handed 
   const shown = Object.fromEntries(f.lines.children.filter((e) => e.tag === "dd").map((e) => [e.dataset.line, e.textContent]));
   assert.equal(shown.amount, `${formatUnits(sum, 9)} SOL`);
   await f.tap();
-  assert.deepEqual(f.handed, [{ chain: "solana", to: TO, amount: sum, maxFee: FEE + W_FEE }]);
+  assert.deepEqual(f.handed, [{ chain: "solana", to: TO, amount: sum, maxFee: BigInt(parts) * (FEE + W_FEE) }]);
 });
 
 // review #232 HIGH 2: an amount no plan sends without a change no withdraw could ever send is refused, naming the

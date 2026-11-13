@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { after, test } from "node:test";
 import { nearestPlannable, planPoolWithdraw, poolWithdrawable, runPoolWithdraw, type WithdrawCosts, type WithdrawSource } from "../src/pool-withdraw.ts";
 import { ASK, closers, COST, TO, world } from "./pool-withdraw-world.ts";
-import { changeMoves, isReleaseSize, SOL_GRID } from "../../wallet/src/pool/pieces.ts";
+import { changeMoves, isReleaseSize, pieceChunk, SOL_GRID } from "../../wallet/src/pool/pieces.ts";
 import { SOL_PIECES } from "../../wallet/src/pool/solana.ts";
 
 const fee = 1_300_000n;
@@ -48,8 +48,9 @@ test("every lamport: each withdraw part is its whole note or on the grid, and ev
         const n = notes.find((x) => x.id === p.noteId)!;
         assert.equal(p.chunk, p.part + fee + wFee);
         const whole = p.chunk === n.value;
-        // every release a size of the closed list, but a note made before the rule (off the grid) finishing whole
-        assert.ok(isReleaseSize(SOL_PIECES, p.chunk) || (whole && (n.value % SOL_GRID !== 0n || n.value < SOL_PIECES.floor)), `${amount}: ${p.chunk} from ${n.value} is not on the list`);
+        // every release a rung, but a note made before the rule finishing whole where the piece rule takes it whole (no
+        // rung of it leaves a change that moves; card pool-amounts-are-standard-sizes), or under the floor
+        assert.ok(isReleaseSize(SOL_PIECES, p.chunk) || (whole && (pieceChunk(SOL_PIECES, n.value) === n.value || n.value < SOL_PIECES.floor)), `${amount}: ${p.chunk} from ${n.value} is not on the list`);
         assert.ok(whole || changeMoves(SOL_PIECES, n.value - p.chunk) || n.value % SOL_GRID !== 0n, `${amount}: change ${n.value - p.chunk}`);
         assert.ok(whole || n.value - p.chunk >= SOL_PIECES.floor, `${amount}: change ${n.value - p.chunk} under the floor`);
       }
@@ -59,16 +60,23 @@ test("every lamport: each withdraw part is its whole note or on the grid, and ev
   }
 });
 
-test("every lamport: the run plans with the pool's piece rule: a typed amount's chunk rounds up to the grid, To gets all of it, W at 0", async () => {
+test("every lamport: the run plans with the pool's piece rule: a plannable amount's chunk is a rung, To gets all of it, W at 0", async () => {
+  // card pool-amounts-are-standard-sizes: 5,000,000 plans no part (its chunk would be 6,305,000, no rung); the nearest
+  // amount above it that plans is the 10,000,000 rung's part
+  const notes = [{ id: "a", value: 30_000_000n }];
+  assert.equal(planPoolWithdraw(notes, 5_000_000n, C), null);
+  const above = nearestPlannable(notes, 5_000_000n, C).above!;
+  assert.equal(above, 10_000_000n - fee - wFee);
   const wd = await world([30_000_000n]);
   const host = { ...wd.host, pool: { ...wd.host.pool, pieces: SOL_PIECES } };
-  const a = await runPoolWithdraw(host, ASK, TO, 5_000_000n, COST);
+  const a = await runPoolWithdraw(host, ASK, TO, above, COST);
   assert.equal(a.stage, "sent", `stopped: ${a.cause}`);
   assert.equal(wd.binds.length, 1);
-  assert.equal(wd.binds[0]!.chunk, 7_000_000n, "a size of the list (0.007 SOL), not 6,305,000");
-  assert.equal(wd.balance.get(TO), 7_000_000n - COST, "W sends all it holds: 5,695,000 of the user's own arrives");
-  // the change, 23,000,000, is on the grid and at least the floor
+  assert.equal(wd.binds[0]!.chunk, 10_000_000n, "a rung (0.01 SOL)");
+  assert.equal(wd.balance.get(TO), 10_000_000n - COST, "W sends all it holds");
+  // the change, 20,000,000, is a rung and at least the floor
   assert.ok(changeMoves(SOL_PIECES, 30_000_000n - wd.binds[0]!.chunk));
+  assert.ok(isReleaseSize(SOL_PIECES, 30_000_000n - wd.binds[0]!.chunk));
 });
 
 test("every lamport: a note made before the rule on the grid but under the floor withdraws whole (review P3-2 of 00d6bef00)", () => {
