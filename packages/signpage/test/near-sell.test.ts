@@ -535,6 +535,33 @@ test("2(a) the way home (home): W's USDC moved, nothing sold whatever W holds; a
   }
 });
 
+test("2(a) the way home whose W holds USDC of the least deposit again after its move (a stranger's sent in at once): the coin is not kept yet and the run is not over, that USDC is moved first", async () => {
+  const { deps, chain, stops } = world({ usdc: 2_500_000n });
+  deps.home = true;
+  const kept: bigint[] = [];
+  deps.kept = (h) => void kept.push(h);
+  // the USDC lands once the move is in the vault, after the run's last USDC read of its moves: the done step's own read of
+  // W's coin, then of its USDC, sees it
+  let moved = false;
+  let landed = false;
+  const log = deps.log;
+  deps.log = (step, line) => ((moved ||= step === "move" && line === "in the vault"), log(step, line));
+  for (const k of ["held", "readWallet"] as const) {
+    const read = deps[k] as ((x: { side: string }) => Promise<{ held: bigint }>) | undefined;
+    if (read === undefined) continue;
+    (deps as Record<string, unknown>)[k] = async (x: { side: string }) => {
+      if (moved && !landed && x.side === "sell") (landed = true), (chain.usdc += 2_000_000n);
+      return read(x);
+    };
+  }
+  const a = await run(deps);
+  assert.ok(landed, "the USDC landed before the done read");
+  assert.notDeepEqual(a, { error: "coin_kept" });
+  assert.deepEqual(kept, [], "never kept while 1 USDC or more is on W");
+  assert.ok(stops.every((x) => x[1] !== "coin_kept"), JSON.stringify(stops));
+  assert.deepEqual(stops.at(-1)?.slice(0, 2), ["done", "not_empty"], "not over: the next run moves that USDC first");
+});
+
 test("USDC under the least deposit left in W after a sale whose notes landed (a fee's dust): filled; with none landed and the token gone: part_filled, never an answer read as nothing sold", async () => {
   {
     const { deps } = world({ token: 0n, usdc: 999_999n, note: { state: "UNSPENT", amount: 2_000_000n } });
