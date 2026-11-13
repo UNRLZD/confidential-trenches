@@ -579,6 +579,25 @@ export function checkSolanaOnwardSend(wire: Uint8Array, ask: PoolAsk, ctx: PoolC
  *  transaction, and the device's release in it. */
 export type SolanaBuyPiece = { readonly wire: Uint8Array; readonly release: SolanaPoolRelease };
 
+/** A buy's first round (card buy-spends-its-change-in-the-same-tap): tag 2s alone, each its own transaction, each the
+ *  device's own release to this W (ctx.wallet) and nothing else, its change note at the state index it lands at (the
+ *  pool's size read, then one more for each release before it), no two the same note, at most
+ *  SOLANA_POOL_BUY_PIECES_MAX - 1 (the buy's round keeps room for its tag 3). Returns the releases, which the buy's
+ *  round names as `landed` once both RPCs read them back. */
+export function checkSolanaCarry(ask: PoolAsk, ctx: PoolContext, pieces: readonly SolanaBuyPiece[], reads: { readonly blockhash: string; readonly stateSize: number }): SolanaPoolRelease[] {
+  if (ask.kind !== "pool.buy" || ask.chain !== "solana") return refuse("kind");
+  if (!Array.isArray(pieces) || pieces.length === 0 || pieces.length >= SOLANA_POOL_BUY_PIECES_MAX) return refuse("pieces");
+  const spent = new Set<string>();
+  const out = pieces.map((p, i) => {
+    const got = releaseTx(p.wire, ctx, p.release, { blockhash: reads.blockhash, tables: {}, stateSize: reads.stateSize + i, labelSize: 0 });
+    if (spent.has(hexOf(got.existingNullifierHash))) refuse("pieces");
+    spent.add(hexOf(got.existingNullifierHash));
+    return got;
+  });
+  for (const p of pieces) passedWire(p.wire);
+  return out;
+}
+
 /**
  * A Solana pool buy (tag 3): the kit's checks on every byte against the pinned pool, the request bound to them here.
  * `pieces` (card buy-spends-several-pieces): the bundle's tag 2s sent before it, each its own transaction: each must
@@ -586,7 +605,9 @@ export type SolanaBuyPiece = { readonly wire: Uint8Array; readonly release: Sola
  * at (the pool's size read, then one more for each release before it; the tag 3's is the next), no two the same note;
  * the request's `before` must be exactly their withdrawn values and fees, so the tag 3 spends no more than these
  * releases and its own pay W. A bundle that pays any other wallet is refused (wallet, signers); the draw's fee cap is
- * every release's.
+ * every release's. `landed` (card buy-spends-its-change-in-the-same-tap): the first round's releases to this W, each
+ * checked by checkSolanaCarry before it was signed and read back on both RPCs as landed; `before` names them first, then
+ * the pieces, so the funds rule counts what W holds, every release of the tap at most SOLANA_POOL_BUY_PIECES_MAX.
  */
 export function checkSolanaBuy(
   wire: Uint8Array,
@@ -597,6 +618,7 @@ export function checkSolanaBuy(
   req: SolanaPoolBuyRequest,
   reads: SolanaPoolBuyReads,
   pieces: readonly SolanaBuyPiece[] = [],
+  landed: readonly SolanaPoolRelease[] = [],
 ): PoolDraw {
   if (ask.kind !== "pool.buy" || ask.chain !== "solana") return refuse("kind");
   const pin = pinOf(ctx);
@@ -606,13 +628,20 @@ export function checkSolanaBuy(
   if (req.spend !== ask.amount) return refuse("amount");
   if (reads.reference.slippageBps !== ask.slippageBps) return refuse("slippage");
   checkFeeAndDeadline(release.relayFee, release.relayFeeCap, release.deadlineMs, ctx);
-  if (!Array.isArray(pieces) || pieces.length >= SOLANA_POOL_BUY_PIECES_MAX) return refuse("pieces");
+  if (!Array.isArray(pieces) || !Array.isArray(landed) || landed.length + pieces.length >= SOLANA_POOL_BUY_PIECES_MAX) return refuse("pieces");
   const before = req.before ?? [];
-  if (before.length !== pieces.length) return refuse("pieces");
+  if (before.length !== landed.length + pieces.length) return refuse("pieces");
   const spent = new Set([hexOf(release.existingNullifierHash)]);
   let feeCap = release.relayFeeCap;
-  pieces.forEach((p, i) => {
-    const got = releaseTx(p.wire, ctx, p.release, { blockhash: reads.blockhash, tables: {}, stateSize: reads.stateSize - pieces.length + i, labelSize: 0 });
+  landed.forEach((x, i) => {
+    if (spent.has(hexOf(x.existingNullifierHash))) refuse("pieces");
+    spent.add(hexOf(x.existingNullifierHash));
+    if (before[i]!.withdrawnValue !== x.withdrawnValue || before[i]!.relayFee !== x.relayFee) refuse("pieces");
+    feeCap += x.relayFeeCap;
+  });
+  pieces.forEach((p, k) => {
+    const i = landed.length + k;
+    const got = releaseTx(p.wire, ctx, p.release, { blockhash: reads.blockhash, tables: {}, stateSize: reads.stateSize - pieces.length + k, labelSize: 0 });
     if (spent.has(hexOf(got.existingNullifierHash))) refuse("pieces");
     spent.add(hexOf(got.existingNullifierHash));
     if (before[i]!.withdrawnValue !== got.withdrawnValue || before[i]!.relayFee !== got.relayFee) refuse("pieces");

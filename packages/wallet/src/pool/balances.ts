@@ -50,6 +50,8 @@ import {
 import { heldBy, type NoteRecord } from "../notes/store.ts";
 import type { ReadyProof } from "./pool.ts";
 import { jOf } from "./queue.ts";
+import { pieceChunk, type PieceRule } from "./pieces.ts";
+import { SOL_PIECES } from "./solana.ts";
 
 /** One ready proof as a piece of a tap: its chunk, its fee cap and its tip cap (its binding's request.tipCap; undefined
  * when the request names none). */
@@ -59,16 +61,46 @@ export type TapSpendOf = (pieces: readonly TapPiece[]) => bigint;
 /** A pool on the device's pool table: its id (ReadyProof.poolId), the app chain, its scope and its asset, and what one
  * of its ready proofs can spend (none: its chain's entry has no tap_max). Built with solanaBalancePool or
  * evmBalancePool, so the asset follows the pool's kind. */
-export type BalancePool = { id: string; chain: Chain; scope: bigint; asset: PoolAsset; spendOf?: TapSpendOf };
+export type BalancePool = { id: string; chain: Chain; scope: bigint; asset: PoolAsset; spendOf?: TapSpendOf; carry?: PieceRule };
 /** What poolBalances reads of a ready proof. */
 export type BalanceProof = Pick<ReadyProof, "noteId" | "attempt" | "poolId" | "chunk"> & { wallet: Pick<ReadyProof["wallet"], "l" | "j" | "address">; binding: Pick<ReadyProof["binding"], "feeCap"> & { request?: unknown } };
 export type PoolBalance = { chain: Chain; asset: PoolAsset; balance: string; ready?: string; tap_max?: string; making?: string };
 /** A RESERVED note's release the device read landed, by note id: the attempt that sent it and the value it withdrew. */
 export type LandedRelease = { attempt: string; withdrawn: bigint };
 
-/** The Solana pool's table entry: it holds SOL (the wrapped-SOL mint its scope hashes, ./solana.ts SOL_NATIVE_MINT). */
-export function solanaBalancePool(id: string, scope: bigint, spendOf?: TapSpendOf): BalancePool {
-  return Object.freeze({ id, chain: "solana", scope, asset: "SOL", ...(spendOf === undefined ? {} : { spendOf }) });
+/** The Solana pool's table entry: it holds SOL (the wrapped-SOL mint its scope hashes, ./solana.ts SOL_NATIVE_MINT).
+ *  `carry` (card buy-spends-its-change-in-the-same-tap): the piece rule a tap carries a piece's change by (SOL_PIECES):
+ *  a buy releases a note's piece, waits for it to land, proves its change to the same W and spends it in the same tap. */
+export function solanaBalancePool(id: string, scope: bigint, spendOf?: TapSpendOf, carry: PieceRule = SOL_PIECES): BalancePool {
+  return Object.freeze({ id, chain: "solana", scope, asset: "SOL", carry, ...(spendOf === undefined ? {} : { spendOf }) });
+}
+
+/** The piece a tap carries for a note it releases a piece of (card buy-spends-its-change-in-the-same-tap): the change's
+ *  own piece by the pool's rule (pieces.ts pieceChunk), or null when the piece is the whole note or the change has none. */
+export function carriedChunk(rule: PieceRule | undefined, value: bigint, chunk: bigint): bigint | null {
+  if (rule === undefined || chunk >= value) return null;
+  return pieceChunk(rule, value - chunk);
+}
+
+/** The most one tap spends from the set of one W (card buy-spends-its-change-in-the-same-tap): the own piece always,
+ *  any of the others, and a carried change only beside its own note's piece, at most SOLANA_POOL_BUY_PIECES_MAX
+ *  releases in all (the round of tag 2s before and the buy's own round count alike). */
+export function bestTapSpend(own: TapPiece, others: readonly { piece: TapPiece; carried?: TapPiece }[], spendOf: (ps: readonly TapPiece[]) => bigint, max = SOLANA_POOL_BUY_PIECES_MAX): bigint {
+  const opts: { piece: TapPiece; of: number; carry: boolean }[] = [];
+  others.forEach((o, i) => {
+    opts.push({ piece: o.piece, of: i, carry: false });
+    if (o.carried !== undefined) opts.push({ piece: o.carried, of: i, carry: true });
+  });
+  let best = spendOf([own]);
+  for (let mask = 1; mask < 1 << opts.length; mask++) {
+    const set = opts.filter((_, i) => (mask >> i) & 1);
+    if (set.length + 1 > max) continue;
+    const released = new Set(set.filter((x) => !x.carry).map((x) => x.of));
+    if (set.some((x) => x.carry && !released.has(x.of))) continue;
+    const s = spendOf([...set.map((x) => x.piece), own]);
+    if (s > best) best = s;
+  }
+  return best;
 }
 /** An EVM pool's table entry: PrivacyPoolSimple holds native ETH (./evm.ts EVM_NATIVE_ASSET), on Base or Robinhood. */
 export function evmBalancePool(id: string, chain: "base" | "robinhood", scope: bigint, spendOf?: TapSpendOf): BalancePool {
@@ -212,7 +244,7 @@ export function poolBalances(notes: readonly NoteRecord[], pools: readonly Balan
     }
     // the pool's live proofs (each one's attempt still holds its note: its first or its second, notes/store.ts heldBy)
     // by their W, each note once in a set; `own`: the piece of the note whose own W it is
-    const sets = new Map<string, { own?: TapPiece; pieces: Map<string, TapPiece> }>();
+    const sets = new Map<string, { own?: TapPiece; ownId?: string; pieces: Map<string, TapPiece> }>();
     for (const r of ready ?? []) {
       if (r.poolId !== p.id) continue;
       const n = byId.get(r.noteId);
@@ -232,7 +264,10 @@ export function poolBalances(notes: readonly NoteRecord[], pools: readonly Balan
       sets.set(address, set);
       if (set.pieces.has(r.noteId)) continue;
       set.pieces.set(r.noteId, piece);
-      if (r.wallet.l === n.leaf?.label && r.wallet.j === jOf(n.ref)) set.own = piece;
+      if (r.wallet.l === n.leaf?.label && r.wallet.j === jOf(n.ref)) {
+        set.own = piece;
+        set.ownId = r.noteId;
+      }
     }
     // only a set that holds its owner's note can be spent (the tap's pick); every note in one counts in ready once
     const owned = [...sets.values()].filter((s) => s.own !== undefined);
@@ -252,9 +287,15 @@ export function poolBalances(notes: readonly NoteRecord[], pools: readonly Balan
       if (typeof spend !== "bigint" || spend > sum) throw new Error(`pool ${p.id}: the spend of ${sum} in chunks is not a bigint at most them`);
       return spend < 0n ? 0n : spend;
     };
+    // per set: the own piece and the best of the others and the changes the tap carries (card
+    // buy-spends-its-change-in-the-same-tap), at most the cap in all
     for (const s of owned) {
-      const single = spendOf([s.own!]);
-      const spend = s.pieces.size === 1 ? single : [single, spendOf([...s.pieces.values()])].reduce((m, x) => (x > m ? x : m));
+      const others = [...s.pieces].filter(([id]) => id !== s.ownId).map(([id, piece]) => {
+        const v = byId.get(id)!.leaf!.value;
+        const k = carriedChunk(p.carry, v, piece.chunk);
+        return k === null ? { piece } : { piece, carried: { ...piece, chunk: k } };
+      });
+      const spend = bestTapSpend(s.own!, others, spendOf);
       if (spend > c.tapMax) c.tapMax = spend;
     }
   }

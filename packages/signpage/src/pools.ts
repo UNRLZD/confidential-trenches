@@ -24,6 +24,7 @@ import { SIGNPAGE_MAX_ANSWER_BYTES, SIGNPAGE_RESULT_SCHEMAS } from "../../kit/sr
 import { readSolanaPoolBuyVenue, readSolanaRent, solanaPoolBuyFunds, solanaPoolBuyTip, type SolanaPoolBuyVenue, type SolanaRent } from "../../kit/src/trade/solana/pool-buy.ts";
 import type { ReadyProof } from "../../wallet/src/pool/pool.ts";
 import { pickPieces, unitsOf } from "./pool-buy.ts";
+import { carriesOf, carryOk } from "./pool-carry.ts";
 import { pageReference } from "./page-rpc.ts";
 import { SolanaRpcTransportError, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import { heldBy, type NoteRecord } from "../../wallet/src/notes/store.ts";
@@ -199,9 +200,12 @@ export function poolBuyDryKind(d: PoolBuyDryDeps): (params: Record<string, unkno
       const n = byId.get(r.noteId);
       return ids.has(r.poolId) && n !== undefined && heldBy(n, r.attempt);
     });
-    const pays = (set: readonly (typeof live)[number][]): boolean =>
+    // with the changes a tap carries (card buy-spends-its-change-in-the-same-tap), as the buy's own pick weighs them
+    const weighed = carriesOf(live, (id) => byId.get(id)?.leaf?.value);
+    const pays = (set: readonly (typeof weighed)[number][]): boolean =>
+      carryOk(set) &&
       solanaPoolBuyFunds(set.map((p) => ({ withdrawnValue: p.chunk, relayFee: p.binding.feeCap })), venue, { spend: amount, tip: tipOf(set.length) }, rent).problem === null;
-    const set = pickPieces(live, pays);
+    const set = pickPieces(weighed, pays);
     if (set === null) return { result: { tap_max: tap } };
     const best = (await quote)?.pools.filter((p) => p.venue === "pump-curve" || p.venue === "pumpswap").sort((x, y) => (x.expectedOut > y.expectedOut ? -1 : 1))[0];
     const out = best !== undefined && venue.decimals !== undefined && best.expectedOut > 0n ? unitsOf(best.expectedOut, venue.decimals) : undefined;

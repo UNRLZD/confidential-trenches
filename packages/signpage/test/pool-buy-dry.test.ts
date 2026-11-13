@@ -290,13 +290,14 @@ test("with an amount, You receive (card solana-buy-preview-complete): out is the
 test("Max is the most the buy pays at the tip it tips (card max-is-what-you-hold-after-a-trade): the account of 13 Nov 18:23Z, three pieces on one W, state.pools and the coin's own Max alike", async () => {
   // the owner's Solana notes after two round trips, as the QA browser read them (13 Nov 18:23Z): a 0.005547107 note
   // (its own W's), a 0.003502518 note and a 0.012 sale's return, whose piece is 0.005 (the piece rule leaves 0.007 for
-  // the next tap); every proof binds SOL_TIP_CAP, and the buy tips the page's SOLANA_POOL_JITO_TIP
+  // the next tap, which the tap now carries as a fourth piece: card buy-spends-its-change-in-the-same-tap); every proof
+  // binds SOL_TIP_CAP, and the buy tips the page's SOLANA_POOL_JITO_TIP
   const n = (id: string, label: bigint, value: bigint): NoteRecord => ({ ...held, id, attempt: `a-${id}`, leaf: { ...held.leaf!, value, label } });
   const notes = [n("own", 1n, 5_547_107n), n("ret", 2n, 3_502_518n), n("big", 3n, 12_000_000n)];
   const chunks = [5_547_107n, 3_502_518n, 5_000_000n];
   const list = notes.map((x, i) => ({ ...ready, noteId: x.id, attempt: x.attempt!, chunk: chunks[i]!, ...(i === 0 ? { own: true as const } : {}) }));
   const lamports = (s: string): bigint => BigInt(s.replace(".", "").replace(/^0+/, "") || "0") * 10n ** BigInt(9 - (s.split(".")[1]?.length ?? 0));
-  const pieces = chunks.map((c) => ({ withdrawnValue: c, relayFee: FEE }) as SolanaPoolRelease);
+  const pieces = [...chunks, 7_000_000n].map((c) => ({ withdrawnValue: c, relayFee: FEE }) as SolanaPoolRelease);
   const funds = (venue: Parameters<typeof solanaPoolBuyFunds>[1], spend: bigint) => solanaPoolBuyFunds(pieces, venue, { spend, tip: SOLANA_POOL_JITO_TIP }, RENT).problem;
   // state.pools: the costliest venue of any coin
   const state = lamports(poolBalances(notes, withSolanaRent([SOL], RENT), list, new Set([SOL.id]))[0]!.tap_max!);
@@ -309,5 +310,5 @@ test("Max is the most the buy pays at the tip it tips (card max-is-what-you-hold
   assert.equal(funds(venue as never, lamports(tap)), null, "the buy pays the coin's Max");
   assert.notEqual(funds(venue as never, lamports(tap) + 1n), null, "and not one lamport more");
   const at = (await ask(kind, { chain: "solana", token: fx.pump.mint, amount: tap })) as { result: Record<string, unknown> };
-  assert.equal(at.result.pieces, 3);
+  assert.equal(at.result.pieces, 4);
 });

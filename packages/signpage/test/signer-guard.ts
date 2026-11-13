@@ -75,6 +75,7 @@ export const NON_SIGNERS: Readonly<Record<string, readonly string[]>> = {
     "EVM_ONWARD_GAS", "EVM_ONWARD_GAS_MAX", "EVM_PRECOMPILE_TOP", "evmOnwardCodeGas", "checkEvmDeposit", "checkEvmCarry", "EVM_DEPOSIT_GAS_MAX", "EVM_DEPOSIT_FIELD_P", "EVM_DEPOSIT_GAS_PER_LEVEL", "evmDepositHeadroom",
     "TOKEN_DECIMALS_MAX", // a number: the decimals bound the rule and the EVM buy's load follow read (card signpage-evm-pool-buy)
     "SOLANA_POOL_SELL_PRIORITY", // a number: the most priority a Solana sell pays (card round-trip-costs-less)
+    "checkSolanaCarry", // a buy's first round of tag 2s, checked (card buy-spends-its-change-in-the-same-tap): signs nothing
   ],
 };
 /** What each file may do, and only that: `define` (a signer file: it calls its own signers with no pick), `calls`

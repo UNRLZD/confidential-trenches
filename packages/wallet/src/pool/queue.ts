@@ -150,6 +150,12 @@ export interface ProofQueue<R> {
    *  device, and the state reads free them once both RPCs' finalized height is past `lastHeight`
    *  (solana-restore.ts solanaSettleReserved). */
   takeSet(items: readonly { noteId: string; attempt: string }[], early?: Promise<ChainNow>, lastHeight?: bigint): Promise<ReadyProof<R>[]>;
+  /** A tier 2 proof of one landed UNSPENT note to `to` (a W this seed derives: l, j and its address), on the newest
+   *  root, made at once after any pass running now (card buy-spends-its-change-in-the-same-tap: a release's change,
+   *  proved to the W its release just paid, for the same tap's next round). The note stays carried until it is taken,
+   *  dropped or the queue closes: no pass lets its proof go or makes it again to another W. Refused for a note not
+   *  UNSPENT, not of this pool, with no listed piece, or past the newest trees the pool reads now. */
+  proveFor(noteId: string, to: { l: bigint; j: number; address: string }, signal?: AbortSignal): Promise<ReadyProof<R>>;
   /** The note's proofs are dropped and it goes back to UNSPENT. */
   drop(noteId: string): Promise<void>;
   /** Frees every ready proof's note (HELD -> UNSPENT), then zeroes the seed's copy; the queue does nothing more. */
@@ -214,6 +220,7 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
   // a note whose proof is being made; `attempt`: a fresh proof's, once its note is held
   const inFlight = new Map<string, { dropped: boolean; attempt?: string }>();
   const order = new Map<string, bigint>(); // a note's leaf index, for ready()'s leaf order
+  const carried = new Set<string>(); // notes proveFor proved to a W the caller names: no pass lets go of or remakes their tier 2
   const unfreed = new Map<string, string>(); // an attempt whose free failed -> its note, tried again each pass
   const noteTurns = new Map<string, Promise<unknown>>(); // take, drop, close and a remake's swap: one at a time per note
   let closed = false;
@@ -393,6 +400,8 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
     if (typeof nowMs !== "bigint" || nowMs < 0n) throw new PassFail("network", new Error(`pool ${pool.id}: now is not a bigint`));
     const start = epochOf(nowMs);
     for (const [attempt, id] of [...unfreed]) await free(id, attempt);
+    // a carried proof is the tap's for its own epoch only (its round 2 follows in seconds): past it, a pass's as any other
+    for (const id of [...carried]) if (alt.get(id)?.epochStartMs !== start) carried.delete(id);
     // let go of proofs whose attempt no longer holds its note; those of an earlier epoch stay ready (and HELD) until remade
     const all = await notes.list();
     const byId = new Map(all.map((n) => [n.id, n]));
@@ -455,10 +464,10 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
         const w = freshWallet(seed, pool.chain, p.leaf!.label, j);
         w.secretKey.fill(0);
         to = { l: p.leaf!.label, j, address: w.address };
-        kept = all.filter((n) => usable(n) && n.id !== p.id && (n.state === "UNSPENT" || (n.state === "HELD" && (ready.has(n.id) || alt.has(n.id))))).sort(byChunk).slice(0, altRoom);
+        kept = all.filter((n) => usable(n) && n.id !== p.id && !carried.has(n.id) && (n.state === "UNSPENT" || (n.state === "HELD" && (ready.has(n.id) || alt.has(n.id))))).sort(byChunk).slice(0, altRoom);
       }
       const room = new Set(kept.map((n) => n.id));
-      for (const id of [...alt.keys()]) if (!room.has(id)) await onNote(id, () => letGoOf(alt, id));
+      for (const id of [...alt.keys()]) if (!room.has(id) && !carried.has(id)) await onNote(id, () => letGoOf(alt, id));
       for (const n of kept) {
         const r = alt.get(n.id);
         if (r !== undefined && r.epochStartMs === start && r.wallet.address === to!.address) continue;
@@ -540,6 +549,7 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
       }
       ready.delete(r.noteId);
       alt.delete(r.noteId);
+      carried.delete(r.noteId);
       const f = inFlight.get(r.noteId);
       if (f?.attempt !== undefined) f.dropped = true;
     }
@@ -633,7 +643,33 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
         return rs;
       });
     },
+    proveFor(noteId, to, signal) {
+      const run = passes.then(async () => {
+        live();
+        const n = await notes.get(noteId);
+        if (n === undefined || n.state !== "UNSPENT" || n.scope !== pool.scope || n.leaf === undefined || poolChunkOf(pool, n.leaf.value) === null) {
+          throw new Error(`proveFor: note ${noteId} is not an UNSPENT landed note of this pool with a listed piece`);
+        }
+        const nowMs = await readNow(signal).catch(failAs("network"));
+        const trees = await pool.trees(nowMs + 1n, signal, { newest: true }).catch(failAs("network"));
+        if (n.leaf.leafIndex >= BigInt(trees.stateTree.size)) throw new Error(`proveFor: note ${noteId}'s leaf is past the newest trees`);
+        carried.add(noteId);
+        inFlight.set(noteId, { dropped: false });
+        try {
+          await prove(n, provers[0]!, trees, "newest", epochOf(nowMs), undefined, to, signal);
+        } catch (e) {
+          carried.delete(noteId);
+          throw e;
+        } finally {
+          inFlight.delete(noteId);
+        }
+        return alt.get(noteId)!;
+      });
+      passes = run.catch(() => undefined);
+      return run;
+    },
     async drop(noteId) {
+      carried.delete(noteId);
       const f = inFlight.get(noteId);
       if (f !== undefined) f.dropped = true;
       await onNote(noteId, () => letGo(noteId)); // a failed write is tried again at the next pass
@@ -641,6 +677,7 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
     async close() {
       if (closed) return;
       closed = true;
+      carried.clear();
       for (const f of inFlight.values()) f.dropped = true;
       // each in its note's turn, so a swap already writing finishes first and its new attempt is the one freed
       for (const id of new Set([...ready.keys(), ...alt.keys()])) await onNote(id, () => letGo(id));

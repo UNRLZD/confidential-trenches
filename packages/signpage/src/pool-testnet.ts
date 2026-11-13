@@ -2046,6 +2046,21 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       sendPieces: (pool, txs) => helperPoolSendPieces(pool, txs, over.fetch),
       // a buy of several pieces' owed record, before its take (resumePieces, on the state reads)
       piecesOwed: piecesOwedOf(page.store),
+      // a buy that spends its change in the same tap (card buy-spends-its-change-in-the-same-tap): the notes' values, and a
+      // first round's change (the note its settle wrote, parent the released note) proved to that round's W
+      carry: {
+        values: async (ids) => {
+          notes ??= await openNoteStore(await page.store());
+          const want = new Set(ids);
+          return new Map((await notes.list()).flatMap((n) => (want.has(n.id) && n.leaf !== undefined ? [[n.id, n.leaf.value] as const] : [])));
+        },
+        prove: async (parentId, to) => {
+          notes ??= await openNoteStore(await page.store());
+          const c = (await notes.list()).find((n) => n.parent === parentId);
+          if (c === undefined) throw new Error(`no change written for note ${parentId}`);
+          return (await q()).proveFor(c.id, to, solanaStop.signal);
+        },
+      },
       // the received token's decimals, for W's buy record (src/positions.ts recordPoolBuy), and kept for the session: read
       // on both RPCs with the amount, so a sell of it asks no decimals read (card sell-first-read-waits-out-a-throttle)
       outDecimals: (wallet, d, mint) => {
@@ -2778,6 +2793,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     const stranded = await resumePieces({
       owed: piecesOwed,
       state,
+      // a note a tap of this page holds (pool.buy's claim): that tap decides its W
+      busy: (id) => claimed.has(id),
       // whose spend the buy's own note is, on both RPCs at finalized (pool-spend.ts spendOwner, as followBuys reads a
       // buy's): this buy's tag 3, another's, or not known yet; W's history read on across the state reads from piecesPlaces
       owner: async (r) => {
