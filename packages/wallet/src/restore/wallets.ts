@@ -219,6 +219,26 @@ export async function restoreDepositIds(
      * again)
      */
     done?: ReadonlyMap<number, number>;
+    /**
+     * lanes an earlier read of this scope left part way, each at a point `progress` gave (card
+     * a-load-proves-first-and-walks-the-restore-once): every id of the lane up to `readTo` answered unused or used, none
+     * unread, none money, and no reach; `highest` is the lane's highest index with a note or history as of readTo. The
+     * lane goes on at readTo + RESTORE_LANES, its highest the larger of `highest` and its notes' own, and its bound,
+     * failed reads, reach and margin run on as for a lane read from its start, so a page reloaded mid-lane never reads
+     * the same ids again. The lane's LaneIds is a whole read's of the same answers (notes, money, unread, highest,
+     * readTo, reach) but for `used`, which holds only the indices read in this call: a caller that needs the earlier
+     * used ones keeps the highest, not the list. An entry that is no such point is refused before any read; a `highest`
+     * past the lane's walk end now (an earlier, longer walk) cannot say where a whole read would stop, so that lane is
+     * read from its start. A lane `done` also names follows `done`.
+     */
+    from?: ReadonlyMap<number, { readTo: number; highest: number | null }>;
+    /**
+     * heard after each id read while its lane has stayed clean (no unread, no money, no reach) since its start or its
+     * `from`, with the index just read and the lane's highest then, and awaited before the next read: a point to hand
+     * back as `from`. Once a lane reads an unread id or money it is never heard again for that lane in this call, so
+     * the next run reads the lane from its start (or its last clean point) and finds it again.
+     */
+    progress?: (lane: number, readTo: number, highest: number | null) => Promise<void>;
     /** the run's signal: a read that throws after it ended stops the lanes (never an id unread) */
     signal?: AbortSignal;
   } = {},
@@ -227,6 +247,13 @@ export async function restoreDepositIds(
   if (!Number.isSafeInteger(margin) || margin < 1) throw new Error("margin is a count above 0");
   const first = opts.first ?? 0;
   if (!Number.isInteger(first) || first < 0 || first >= RESTORE_LANES) throw new Error("first is a lane, 0-7");
+  const ofLane = (i: unknown, lane: number): i is number => Number.isSafeInteger(i) && (i as number) >= lane && (i as number) <= U32 && (i as number) % RESTORE_LANES === lane;
+  for (const [lane, e] of opts.from ?? []) {
+    if (!Number.isInteger(lane) || lane < 0 || lane >= RESTORE_LANES) throw new Error(`from: lane ${String(lane)}: not a lane, 0-7`);
+    if (typeof e !== "object" || e === null) throw new Error(`from: lane ${lane}: not a read point`);
+    if (!ofLane(e.readTo, lane)) throw new Error(`from: lane ${lane}: readTo ${String(e.readTo)} is not an index of the lane at or under 2^32 - 1`);
+    if (e.highest !== null && (!ofLane(e.highest, lane) || e.highest > e.readTo)) throw new Error(`from: lane ${lane}: highest ${String(e.highest)} is not null nor an index of the lane at or under readTo ${e.readTo}`);
+  }
   if (!Array.isArray(r.laneHighest) || r.laneHighest.length !== RESTORE_LANES) throw new Error("laneHighest: one per lane");
   // where the note walk (step 3) ended in each lane, from the restore itself (its gap and reach included, review F4):
   // ids with history past it may hold notes it never matched
@@ -261,7 +288,18 @@ export async function restoreDepositIds(
     const bound = (): number => Math.min(U32, (highest ?? lane - RESTORE_LANES) + RESTORE_LANES * margin);
     const was = opts.done?.get(lane);
     if (was !== undefined && was >= bound()) continue;
-    for (let i = lane; i <= U32 && i <= bound(); i += RESTORE_LANES) {
+    // a lane an earlier read left part way goes on past its point (a lane `done` names is read whole, as `done` says);
+    // a highest past the walk's end now cannot say where a whole read stops (its first id past the end), so read whole
+    const part = was === undefined ? opts.from?.get(lane) : undefined;
+    let start = lane;
+    if (part !== undefined && (part.highest === null || part.highest <= walked)) {
+      if (part.highest !== null) highest = Math.max(highest ?? part.highest, part.highest);
+      readTo = part.readTo;
+      start = part.readTo + RESTORE_LANES;
+    }
+    // no unread id, no money and no reach since the lane's start or its `from`: each id read is a point `progress` hears
+    let clean = true;
+    for (let i = start; i <= U32 && i <= bound(); i += RESTORE_LANES) {
       readTo = i;
       if (!win.has(i)) {
         const from = i, to = Math.min(bound(), i + RESTORE_LANES * (margin - 1));
@@ -281,6 +319,7 @@ export async function restoreDepositIds(
         // the pair disagrees at one block: one of them is wrong, so nothing either says is taken: the id is unread, named
         // with both answers, and the lane reads on past it on both providers (card restore-first-sign-in-under-two-
         // minutes, review P2-2: one provider's answer on one id never stops the ids after it from being read)
+        clean = false;
         unread.push({ i, id, error: e instanceof PairDisagrees ? `${e.message}, read again` : why(e) });
         highest = Math.max(highest ?? i, i);
         if (++failed >= margin) throw new Error(`lane ${lane}: ${failed} id reads failed with none showing history between them (the last at index ${i}: ${why(e)}); the restore stops, to be retried`);
@@ -290,9 +329,14 @@ export async function restoreDepositIds(
         }
         continue;
       }
+      // an unused id leaves the lane as it was: while clean, a point `progress` hears
+      if (state === "unused" && clean) await opts.progress?.(lane, i, highest);
       if (state === "unused") continue;
       (state === "money" ? money : used).push(i);
       highest = Math.max(highest ?? i, i);
+      // money ends the lane's clean run; a used id is a clean point while inside the walk's end (past it, the reach below)
+      if (state === "money") clean = false;
+      if (clean && highest <= walked) await opts.progress?.(lane, i, highest);
       failed = 0;
       if (highest > walked) {
         reach = highest;
