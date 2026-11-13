@@ -5,18 +5,41 @@
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { test } from "node:test";
+import * as deposit from "../src/screens/deposit/words.ts";
+import * as discover from "../src/screens/discover/words.ts";
+import * as portfolio from "../src/screens/portfolio/words.ts";
+import * as positions from "../src/screens/positions/words.ts";
+import * as signin from "../src/screens/signin/words.ts";
+import * as token from "../src/screens/token/words.ts";
+import * as trade from "../src/screens/trade/words.ts";
+import * as verify from "../src/screens/verify/words.ts";
+import * as withdraw from "../src/screens/withdraw/words.ts";
+import * as search from "../src/shell/search-words.ts";
+
+/** Every words file under src, by its path: a new one fails the first test until it is read here too. */
+const WORDS_FILES: Record<string, Record<string, unknown>> = {
+  "screens/deposit/words.ts": deposit,
+  "screens/discover/words.ts": discover,
+  "screens/portfolio/words.ts": portfolio,
+  "screens/positions/words.ts": positions,
+  "screens/signin/words.ts": signin,
+  "screens/token/words.ts": token,
+  "screens/trade/words.ts": trade,
+  "screens/verify/words.ts": verify,
+  "screens/withdraw/words.ts": withdraw,
+  "shell/search-words.ts": search,
+};
 
 const SRC = new URL("../src/", import.meta.url);
 const FILES = readdirSync(SRC, { recursive: true, encoding: "utf8" }).filter((p) => /\.tsx?$/.test(p));
 /** The words the app never shows about money. */
 export const NAMED = /proo?f|prov(e|ed|es|ing)|\bready\b|pending/i;
 
-test("every words file: no word says proof, proving, ready or pending", async () => {
-  const files = FILES.filter((p) => /(^|\/)[\w-]*words\.ts$/.test(p));
-  assert.ok(files.length >= 10, files.join(", "));
+test("every words file: no word says proof, proving, ready or pending", () => {
+  const files = FILES.filter((p) => /(^|\/)[\w-]*words\.ts$/.test(p)).sort();
+  assert.deepEqual(files, Object.keys(WORDS_FILES).sort());
   const bad: string[] = [];
-  for (const f of files) {
-    const m = (await import(new URL(f, SRC).href)) as Record<string, unknown>;
+  for (const [f, m] of Object.entries(WORDS_FILES)) {
     for (const [name, v] of Object.entries(m)) {
       if (!v || typeof v !== "object") continue;
       for (const [k, w] of Object.entries(v as Record<string, unknown>)) {
