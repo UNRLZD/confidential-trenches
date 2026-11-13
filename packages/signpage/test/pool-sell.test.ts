@@ -323,8 +323,10 @@ test("on mainnet a partial sell keeps the next sell's need plus its priority on 
   const a = await runPoolSell(w.host, ASK);
   assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
   const left = BigInt(w.c.accounts.get(W.address)?.lamports ?? 0);
-  // and what its note leaves under the grid (card every-lamport-can-move: a partial sell's rest stays on W)
-  assert.ok(left - (need + SOLANA_POOL_SELL_PRIORITY) >= 0n && left - (need + SOLANA_POOL_SELL_PRIORITY) < SOL_GRID, `W keeps the next sell's need and its priority: ${left}`);
+  // and what its last note leaves past its rung (card every-lamport-can-move: a partial sell's rest stays on W; card
+  // pool-amounts-are-standard-sizes: each note a rung)
+  assert.ok(left >= need + SOLANA_POOL_SELL_PRIORITY, `W keeps the next sell's need and its priority: ${left}`);
+  pastRung(left - (need + SOLANA_POOL_SELL_PRIORITY), w.c.deposits.at(-1)!.value, "W keeps the next sell's need and its priority");
   const b = await runPoolSell(w.host, ASK);
   assert.equal("stage" in b && b.stage, "filled", JSON.stringify(b));
   assert.equal(budgetOf(w, b)?.priority, SOLANA_POOL_SELL_PRIORITY);
@@ -752,7 +754,11 @@ test("a graduated cashback coin bought on the curve sells on PumpSwap from a W a
   // the cashback accounts' rent is kept on W, out of the deposit, with the mark's rent, the pages' growth and the next
   // sell's need (PumpSwap's with both cashback accounts made: the fee and the wrapped-SOL account); the note on the grid
   const reserve = BigInt(FEE) + cashbackRent + rentMin(17) + 2n * 72n * rent.lamportsPerByte * rent.factor + BigInt(FEE) + rentMin(165) - need;
-  assert.deepEqual(await ours(ok.ns), [{ ref: RETURN, state: "UNSPENT", value: solanaNoteOf(VF.pumpswap.minOut - reserve), leafIndex: BigInt(N) }]);
+  // card pool-amounts-are-standard-sizes: the sale's note the largest rung of that; what it leaves past the rung goes in
+  // by W's keep sweep (card partial-sell-pays-all-into-cash), its largest rung over the next sell's need, the second note
+  const back = solanaNoteOf(VF.pumpswap.minOut - reserve);
+  const second = solanaNoteOf(VF.pumpswap.minOut - reserve - back - BigInt(FEE) - rentMin(17) - 2n * 72n * rent.lamportsPerByte * rent.factor);
+  assert.deepEqual((await ours(ok.ns)).sort((x, y) => (x.leafIndex! < y.leafIndex! ? -1 : 1)), [{ ref: RETURN, state: "UNSPENT", value: back, leafIndex: BigInt(N) }, { ref: SECOND(0), state: "UNSPENT", value: second, leafIndex: BigInt(N) + 1n }]);
   // 3bdca74's PumpSwap need (the fee and the wrapped-SOL account) without the cashback accounts: refused, unbuilt
   for (const lamports of [BigInt(FEE) + rentMin(165), need - 1n]) {
     const short = await world({ ...HALF, venue: "pumpswap", cashback: true, lamports: Number(lamports) }, halfW("pumpswap"));
@@ -3368,10 +3374,17 @@ const sellDeposits = (w: World) =>
   [...new Set(w.c.calls.filter((c) => c.method === "sendTransaction").map((c) => c.params[0] as string))]
     .map((b) => base64.decode(b))
     .map((tx) => ({ sig: base58.encode(tx.subarray(1, 65)), m: solanaDecodeMessage(tx.subarray(65)) }))
-    // the pool's instruction: last in a sell's, first in a sweep's (its rest's transfer to the pool after it, review P3-1)
+    // the pool's instruction, last in a sell's (a sweep is the deposit alone, card pool-amounts-are-standard-sizes: see
+    // sweepDeposits)
     .map(({ sig, m }) => ({ sig, m, dep: m.instructions.find((x) => m.staticKeys[x.programIndex] === PROGRAM) }))
     .filter(({ m, dep }) => m.instructions.length > 1 && dep !== undefined)
     .map(({ sig, dep }) => ({ keys: dep!.accounts.length, err: w.c.txs.has(sig) ? w.c.txs.get(sig)!.err : "unsent" }));
+/** The sweeps' deposits a world sent: each a transaction of the pool's deposit alone. */
+const sweepDeposits = (w: World) =>
+  [...new Set(w.c.calls.filter((c) => c.method === "sendTransaction").map((c) => c.params[0] as string))]
+    .map((b) => solanaDecodeMessage(base64.decode(b).subarray(65)))
+    .filter((m) => m.instructions.length === 1 && m.staticKeys[m.instructions[0]!.programIndex] === PROGRAM)
+    .map((m) => ({ keys: m.instructions[0]!.accounts.length }));
 const partialAtNeed = async (plant: Plant) => {
   const probe = await world({});
   const need = solanaPoolBuySellNeed(await readSolanaPoolBuyVenue(probe.host.rpcs, "pump-curve", MINT), rent);
@@ -3426,7 +3439,8 @@ test("a partial sell with one tree inside the window and the other out sends the
     const full = await world({ leaves, labelLeaves, ataLamports: TOKEN_RENT, volumes: [{ program: SOLANA_PUMP_PROGRAM }] });
     const f = await runPoolSell(full.host, ASK);
     assert.equal("stage" in f && f.stage, "filled", JSON.stringify(f));
-    assert.equal(sellDeposits(full)[0]!.keys, 8, `${leaves}/${labelLeaves} full`);
+    assert.deepEqual(sellDeposits(full), [], `${leaves}/${labelLeaves} full: the sell carries no deposit`);
+    assert.equal(sweepDeposits(full)[0]?.keys, 8, `${leaves}/${labelLeaves} full: its sweep the eight`);
   }
 });
 
@@ -3438,8 +3452,8 @@ test("a partial sell with one tree inside the window and the other out sends the
 test("LOW 3: the reserve's band edges at 5,080 a byte: the eight from 7,936,160 min out, the six from 6,473,120, kept on W under", () => {
   assert.equal(rent.lamportsPerByte * rent.factor, 5_080n, "the fixture's rent");
   const after = 1_493_440n;
-  // card every-lamport-can-move: the note floor is SOL_NOTE_FLOOR at this rent, and a note is min out less the reserve
-  // down to the grid
+  // card every-lamport-can-move: the note floor is SOL_NOTE_FLOOR at this rent; card pool-amounts-are-standard-sizes:
+  // a note is the largest rung at or under min out less the reserve
   const noteFloor = solanaSellNoteFloor(rent);
   assert.equal(noteFloor, SOL_NOTE_FLOOR);
   const at = (n: number) => ({ mark: [null, null] as const, state: [solanaRentMin(rent, 16 + (n % 1024) * 72), solanaRentMin(rent, 16 + (n % 1024) * 72)] as const, label: [solanaRentMin(rent, 16 + (n % 1024) * 72), solanaRentMin(rent, 16 + (n % 1024) * 72)] as const });
@@ -3447,7 +3461,9 @@ test("LOW 3: the reserve's band edges at 5,080 a byte: the eight from 7,936,160 
   for (const size of [960, 1023]) {
     assert.deepEqual(price(size, true, 7_936_160n), { reserve: 2_936_160n, value: noteFloor }, `${size} eight at its edge`);
     assert.deepEqual(price(size, true, 7_936_159n), { reserve: 2_936_160n, value: 0n }, `${size} eight under its edge`);
-    assert.deepEqual(price(size, false, 7_936_159n), { reserve: 1_473_120n, value: 6_000_000n }, `${size} six in the band, down to the grid`);
+    assert.deepEqual(price(size, false, 7_936_159n), { reserve: 1_473_120n, value: 5_000_000n }, `${size} six in the band, its largest rung`);
+    assert.deepEqual(price(size, false, 11_473_119n), { reserve: 1_473_120n, value: 5_000_000n }, `${size} six under the next rung`);
+    assert.deepEqual(price(size, false, 11_473_120n), { reserve: 1_473_120n, value: 10_000_000n }, `${size} six at the next rung`);
     assert.deepEqual(price(size, false, 6_473_120n), { reserve: 1_473_120n, value: noteFloor }, `${size} six at its edge`);
     assert.deepEqual(price(size, false, 6_473_119n), { reserve: 1_473_120n, value: 0n }, `${size} six under its edge`);
     // at or under the reserve, refused as before
