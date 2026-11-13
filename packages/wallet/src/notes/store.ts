@@ -907,11 +907,16 @@ export async function openNoteStore(store: WalletStore, opts: NoteStoreOptions =
       await store.update("meta", RESERVED_MARKS_KEY, (v) => ({ ...Object.fromEntries(marksOf(v)), [id]: mark }));
     }
     if (fields.landed !== undefined && !(from === "INCOMING" && to === "UNSPENT")) throw new Error("a landing is written with the move INCOMING -> UNSPENT only");
-    // the landing first, then the note (one with no landing clears any block kept for it)
-    if (from === "INCOMING" && to === "UNSPENT") await keepLanding(id, cur.scope, fields.landed);
+    // a landing above its round's fin: its block kept first, then the note (a crash between leaves the note INCOMING
+    // with its block kept, which the settle reads again). One at or under fin, or none: the note first, then the block
+    // kept for it cleared (a crash between leaves the note UNSPENT with a block the next finalized round drops; the
+    // other order left it INCOMING with no block, which nothing reads again)
+    const landing = from === "INCOMING" && to === "UNSPENT" ? landingOf(fields.landed) : null;
+    if (landing !== null && landing.kept) await keepLanding(id, cur.scope, landing);
     // RESERVED by the second: it takes the first's place (the first never sent, its context gone), in the one write
     const base = from === "HELD" && to === "RESERVED" && second ? promoted(cur, sec!) : cur;
     const out = await put(base, to, { leaf: fields.leaf, deadlineMs: fields.deadlineMs, context: fields.context, request: fields.request });
+    if (landing !== null && !landing.kept) await keepLanding(id, cur.scope, landing);
     // out of RESERVED: its mark goes (one left by a failed write is dropped at the next read of the marks)
     if (from === "RESERVED" && to !== "RESERVED") await dropMarks((m) => m.has(id) ? [id] : []).catch(() => {});
     // out of HELD: its second's row goes (one left by a failed write is not live, and dropped at the next read)
@@ -1082,7 +1087,7 @@ export async function openNoteStore(store: WalletStore, opts: NoteStoreOptions =
     if (all.some((x) => refKey(x.ref) === key)) throw new Error(`note ${key} is already in the store`);
     if (all.some((x) => x.precommitment === precommitment)) throw new Error("that precommitment is already in the store");
     if (note.landed !== undefined && note.state !== "UNSPENT") throw new Error("a landing is written with an UNSPENT note only");
-    if (note.landed !== undefined) await keepLanding(n.id, scope, note.landed); // the landing before the note it names
+    if (note.landed !== undefined) await keepLanding(n.id, scope, landingOf(note.landed)); // the landing before the note it names
     await write(n); // the child first ...
     if (parent !== undefined && parent.state !== "SPENT") await put(parent, "SPENT"); // ... then its parent
     return n;
@@ -1109,19 +1114,21 @@ export async function openNoteStore(store: WalletStore, opts: NoteStoreOptions =
     if (typeof fin !== "bigint" || fin < 0n) throw new Error("fin is a block number");
     return fin;
   };
-  // a note's landing: its block kept when above its own round's `fin` (the scope's highest finalized block raised to it),
-  // else none, and any block kept for the note before cleared (a landing at or under its round's fin is final). Only a
-  // round that holds the note with its block final drops the block (finalized): a number alone never does
-  async function keepLanding(id: string, scope: bigint, landed: unknown): Promise<void> {
-    let block: bigint | undefined;
-    let fin: bigint | undefined;
-    if (landed !== undefined) {
-      if (landed === null || typeof landed !== "object") throw new Error("landed is { block, fin }");
-      onlyKeys(landed, ["block", "fin"], "a landing");
-      ({ block, fin } = landed as Landed);
-      if (typeof block !== "bigint" || block < 0n) throw new Error("landed.block is a block number");
-      checkFin(fin);
-    }
+  // a landing checked: its block and fin (none: no landing), and whether its block is kept (above its fin)
+  function landingOf(landed: unknown): { block?: bigint; fin?: bigint; kept: boolean } {
+    if (landed === undefined) return { kept: false };
+    if (landed === null || typeof landed !== "object") throw new Error("landed is { block, fin }");
+    onlyKeys(landed, ["block", "fin"], "a landing");
+    const { block, fin } = landed as Landed;
+    if (typeof block !== "bigint" || block < 0n) throw new Error("landed.block is a block number");
+    checkFin(fin);
+    return { block, fin, kept: block > fin };
+  }
+  // a note's landing (checked by landingOf): its block kept when above its own round's `fin` (the scope's highest
+  // finalized block raised to it), else none, and any block kept for the note before cleared (a landing at or under its
+  // round's fin is final). Only a round that holds the note with its block final drops the block (finalized): a number
+  // alone never does
+  async function keepLanding(id: string, scope: bigint, { block, fin }: { block?: bigint; fin?: bigint }): Promise<void> {
     await landingsUpdate((l) => {
       let changed = fin !== undefined && raise(l, scope, fin);
       if (block !== undefined && block > fin!) {
