@@ -413,19 +413,24 @@ async function uxOf(seed: SeedUse, chain: PoolChain, scope: bigint, i: number, i
  * (`noted` false: the store holds no deposit note for its index, which pool.deposit's fixed source pays from), a read to
  * try again (`retry`) only when its two RPCs read it apart before any deposit from it.
  */
-async function carryUx(ux: PoolUxReads, f: PoolUx, noted: boolean, signal: AbortSignal): Promise<{ why: string; retry: boolean } | null> {
+export async function carryUx(ux: PoolUxReads, f: PoolUx, noted: boolean, signal: AbortSignal): Promise<{ why: string; retry: boolean } | null> {
   let before: bigint | null = null;
+  // what is left, read on both alike, is U_X's op's `left` (review r3 P2-1: state.deposit_wallets lists what U_X holds,
+  // never what a carry here took into the pool); a write that fails leaves it to the next landing's read
+  const left = async (a: bigint): Promise<null> => (await ux.leftAt?.(f, a).catch(() => {}), null);
   for (;;) {
     const [a, b] = await ux.balances(f);
     if (a !== b) return { why: `reads ${String(a)} and ${String(b)} on the pool chain's two RPCs: read again`, retry: before === null };
     if (before !== null && a >= before) return { why: `holds ${String(a)} after a deposit from it filled: read again`, retry: false };
-    if (a < ux.ladder.min) return null;
+    if (a < ux.ladder.min) return left(a);
     const c = await ux.costs(f);
-    if (a < c.floor) return null;
+    if (a < c.floor) return left(a);
     const amount = askOf(ux.ladder, a, c.perRung, c.keep);
-    if (amount === 0n) return null;
+    if (amount === 0n) return left(a);
     if (!noted) return { why: `holds ${String(a)}, with no deposit note on this device for its index to carry it into the pool`, retry: false };
     signal.throwIfAborted();
+    // listed nowhere while the carry lands (the pools count it once its note lands): `left` 0 first
+    await left(0n);
     const { end } = await ux.deposit(f, amount, signal);
     if (end !== "filled" && end !== "part_filled") return { why: `holds ${String(a)}; its carry into the pool ended ${end}: restore again to carry it`, retry: false };
     before = a;
