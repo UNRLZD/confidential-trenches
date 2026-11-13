@@ -808,8 +808,10 @@ test("review P2-1 and P2-2 of a34c1626, P2-1 and P3-3 of e3489b3b: every Solana 
   assert.equal([...src.matchAll(/ stop: solanaStop\.signal,/g)].length, 1);
   // the state read's pass: its one more pass after it never runs past a sign out
   assert.equal([...src.matchAll(/const stop = solanaStop\.signal;\n {4}passing = proofs\(\)/g)].length, 1);
-  // every read of the stop: the six takes, the buy host's, outSignal, the deposit host's stop and the state pass's
-  assert.equal([...src.matchAll(/solanaStop\.signal/g)].length, 10);
+  // the exit's quote ask (card pool-withdraws-to-any-chain, src/pool-exit.ts): the stop as the ask leaves, read then
+  assert.equal([...src.matchAll(/ stop: \(\) => solanaStop\.signal,\n {2}\};/g)].length, 1);
+  // every read of the stop: the six takes, the buy host's, outSignal, the deposit host's stop, the state pass's and the exit's
+  assert.equal([...src.matchAll(/solanaStop\.signal/g)].length, 11);
   // the settle pair: the page's two seats, the helper's with the window-long retry
   assert.match(src, /solanaPacedRpc\(pageHelperRpc\(TRADE_HELPER, SOLANA_RPC_WINDOW_RETRY, kind\)\)\]/);
   assert.match(src, /solanaPacedRpc\(testnetRpc\(TESTNET_RPCS\.solana\[1\], SOLANA_RPC_WINDOW_RETRY, kind\)\)\]/);

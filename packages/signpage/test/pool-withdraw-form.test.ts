@@ -297,7 +297,7 @@ test("To on another chain: Solana keys, EVM addresses with their checksum, NEAR 
 test("the Chain picker: none with no exits; the pool's chain first and chosen, an unserved chain Not available; another chain hands over the typed address on it", async () => {
   const plain = drawn();
   const rowOf = (g: ReturnType<typeof drawn>) => g.form.find((e) => e.children.some((c) => c.dataset.input === "dest"))!;
-  assert.equal(rowOf(plain).hidden, true, "no exits: no picker, the screen as built");
+  assert.equal(plain.form.find((e) => e.dataset.input === "dest"), undefined, "no exits: no picker, the screen as built");
   const f = drawn(async () => FUNDS, { exits: ["base", "near"] });
   const pick = f.input("dest");
   assert.equal(rowOf(f).hidden, false);

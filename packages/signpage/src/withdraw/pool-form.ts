@@ -318,7 +318,8 @@ export function drawPoolWithdrawForm(doc: Document, deps: PoolWithdrawFormDeps, 
   const destPick = doc.createElement("select");
   destPick.dataset.input = "dest";
   Object.assign(destPick.style, { flex: "1 1 0", minWidth: "0", minHeight: "44px" });
-  for (const d of [chain, ...EXIT_CHAINS.filter((c) => c !== chain)]) {
+  // no exits: no picker at all, the screen's words as built
+  for (const d of deps.exits === undefined ? [] : [chain, ...EXIT_CHAINS.filter((c) => c !== chain)]) {
     const o = doc.createElement("option");
     o.value = d;
     const served = d === chain || (deps.exits ?? []).includes(d);
@@ -328,7 +329,7 @@ export function drawPoolWithdrawForm(doc: Document, deps: PoolWithdrawFormDeps, 
     destPick.append(o);
   }
   destPick.value = chain;
-  destRow.append(destName, destPick);
+  if (deps.exits !== undefined) destRow.append(destName, destPick);
   destRow.hidden = deps.exits === undefined;
   const destOf = (): ExitChain => (EXIT_CHAINS as readonly string[]).includes(destPick.value) && (destPick.value === chain || (deps.exits ?? []).includes(destPick.value as ExitChain)) ? (destPick.value as ExitChain) : chain;
   const to = field("to");
