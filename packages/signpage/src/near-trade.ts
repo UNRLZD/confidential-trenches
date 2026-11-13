@@ -447,7 +447,13 @@ export async function runNearBuy(deps: NearBuyDeps, asked: NearBuyAsk): Promise<
         // the floor of the pair the round signs and the baseline, in the record before the swap leaves: a stop after the
         // send finds them, and a resume reads what W received against them
         swap = { floor: nearFeeBuyerReceives(r.q.fee, r.q.exchange, nearSwapFloor(r.q.venueOut, ask.slippageBps)), before };
-        await progress({ stage: "sent", swap: { floor: swap.floor.toString(), before: swap.before.toString() } });
+        // the one write a send waits on: a swap whose floor is not on the record is never sent (a stop before the next
+        // write would leave a coin no floor counts), so nothing leaves and W's USDC goes home by the load's way home
+        try {
+          await deps.progress({ step, txs: txs.map((t) => ({ ...t })), stage: "sent", swap: { floor: swap.floor.toString(), before: swap.before.toString() } });
+        } catch (e) {
+          return fail("record_not_written", e);
+        }
         const sent = await send(r.body, [r.count], new Set(["replayed", "carry_failed"]));
         if (sent !== "carry_failed") {
           deps.log("swap", sent ?? "swapped");
