@@ -5747,7 +5747,9 @@ test("the trees grow under a sale's deposit reads four times (four earlier legs'
   const x = await saleCause(w, { rpcs, wait: async (ms: number) => void waits.push(ms) });
   assert.equal(x.rec.stage, "filled", `${x.cause} ${JSON.stringify(x.answer)}`);
   const [s, l] = sizesNow(w);
-  assert.deepEqual([s, l], [1_027, 1_027], "four deposits and the sale's own");
+  // card pool-amounts-are-standard-sizes: the sale's deposit back is a rung, and W's keep sweep deposits the rung of
+  // what it leaves on W after it fills
+  assert.deepEqual([s, l], [1_028, 1_028], "four deposits, the sale's own and its keep sweep's");
   assert.deepEqual(pagesNamed(w), [solanaPoolPage(PROGRAM, 0, 1_026), solanaPoolPage(PROGRAM, 1, 1_026)], "the pages at the sizes of the last read, after the fourth deposit");
   assert.ok(waits.filter((ms) => ms === POOL_SELL_SIZE_RETRY_MS).length <= 3, `the waits: ${waits.join(", ")}`);
 });
@@ -6449,13 +6451,17 @@ test("T3, pick (c): W at 3,766,880 and W at 3,773,120 are each listed at their r
   assert.equal(one.w.owed.get(W.address)?.lamports, "2300000");
 });
 
+// card pool-amounts-are-standard-sizes: each leftover W at 0.009 SOL, so its first sweep (a 0.005 SOL rung) leaves a
+// rest under the floor and no W sweeps twice: the spacing between Ws is read alone (a W's own rung sweeps never space
+// against each other)
+const ONE_RUNG = 9_000_000;
 // review 2 P3-e of c0dd55d02: leftover Ws swept at a later load went 1 to 2 s apart, so Ws whose sales were hours apart
 // landed in the pool seconds apart and their timing grouped them as one user. One leftover pass that sends from its W
 // a load; none before the gap after the device's last rent-back send (10 to 60 minutes, drawn each send, kept in the
 // store); a pass that sends nothing (W read empty, under the floor, held) takes no slot. Run with accounts to close on
 // each W (a pass held at its teardown) and with none (held at its sweep)
 for (const bare of [false, true]) test(`round-trip-costs-less P3-e: three leftover Ws${bare ? " holding SOL alone" : ""}: one sweep in a load, none on a reload a minute later, the next only once the drawn gap has passed`, async () => {
-  const w = await world({ buy: null, held: 0n, ataLamports: TOKEN_RENT, volumes: bare ? [] : [{ program: SOLANA_PUMP_PROGRAM }], lamports: ENOUGH, others: [{ l: 8n, j: 0, held: 0n }, { l: 9n, j: 0, held: 0n }] }, [{ ...wallet(0n), holdings: null } as never, { ...walletX(0n), holdings: null } as never, { ...walletY(0n), holdings: null } as never]);
+  const w = await world({ buy: null, held: 0n, ataLamports: TOKEN_RENT, volumes: bare ? [] : [{ program: SOLANA_PUMP_PROGRAM }], lamports: ONE_RUNG, others: [{ l: 8n, j: 0, held: 0n, lamports: ONE_RUNG }, { l: 9n, j: 0, held: 0n, lamports: ONE_RUNG }] }, [{ ...wallet(0n), holdings: null } as never, { ...walletX(0n), holdings: null } as never, { ...walletY(0n), holdings: null } as never]);
   if (bare) for (const x of [W.address, X.address, Y.address]) w.c.accounts.delete(solanaAta(x, MINT, TOKEN_PROGRAM));
   w.host.rpcs = withBuy(w.c.rpcs);
   await w.host.bought!.put(W.address, { mint: MINT, program: TOKEN_PROGRAM, rebuilt: true } as never);
@@ -6499,7 +6505,7 @@ for (const bare of [false, true]) test(`round-trip-costs-less P3-e: three leftov
 // other tab's send must still not send within the gap. A leftover pass takes the device's slot in the store in one
 // compare-and-set (OwedRentBacks.claim) before its first send, so the second tab's pass is held
 test("round-trip-costs-less P3-e: a second tab whose load read the store before the first tab's send sends nothing within the gap", async () => {
-  const w = await world({ buy: null, held: 0n, ataLamports: TOKEN_RENT, volumes: [], lamports: ENOUGH, others: [{ l: 8n, j: 0, held: 0n }] }, [{ ...wallet(0n), holdings: null } as never, { ...walletX(0n), holdings: null } as never]);
+  const w = await world({ buy: null, held: 0n, ataLamports: TOKEN_RENT, volumes: [], lamports: ONE_RUNG, others: [{ l: 8n, j: 0, held: 0n, lamports: ONE_RUNG }] }, [{ ...wallet(0n), holdings: null } as never, { ...walletX(0n), holdings: null } as never]);
   for (const x of [W.address, X.address]) w.c.accounts.delete(solanaAta(x, MINT, TOKEN_PROGRAM));
   w.host.rpcs = withBuy(w.c.rpcs);
   await w.host.bought!.put(W.address, { mint: MINT, program: TOKEN_PROGRAM, rebuilt: true } as never);
@@ -6544,7 +6550,7 @@ test("round-trip-costs-less P3-e: the device's slot: taken when no gap is open, 
 // leftover sweep could go seconds after the last send; the network sees the device's one address whoever signs in. The
 // spacing is the device's own database (src/device-spacing.ts), which sign out leaves
 test("round-trip-costs-less P3-e: a sign out and in within the gap sends no leftover sweep", async () => {
-  const w = await world({ buy: null, held: 0n, ataLamports: TOKEN_RENT, volumes: [], lamports: ENOUGH, others: [{ l: 8n, j: 0, held: 0n }] }, [{ ...wallet(0n), holdings: null } as never, { ...walletX(0n), holdings: null } as never]);
+  const w = await world({ buy: null, held: 0n, ataLamports: TOKEN_RENT, volumes: [], lamports: ONE_RUNG, others: [{ l: 8n, j: 0, held: 0n, lamports: ONE_RUNG }] }, [{ ...wallet(0n), holdings: null } as never, { ...walletX(0n), holdings: null } as never]);
   for (const x of [W.address, X.address]) w.c.accounts.delete(solanaAta(x, MINT, TOKEN_PROGRAM));
   w.host.rpcs = withBuy(w.c.rpcs);
   await w.host.bought!.put(W.address, { mint: MINT, program: TOKEN_PROGRAM, rebuilt: true } as never);
@@ -6971,7 +6977,7 @@ test("round-trip-costs-less a: the Ws a load passes go in an order drawn at rand
 // the gap sweeps the next leftover W at its next run, with no reload; the device's spacing, read again each run, and the
 // claim hold the gap the first send opened
 for (const bare of [false, true]) test(`round-trip-costs-less P3-7${bare ? " (SOL alone)" : ""}: a page that stays open sweeps the second leftover W at its first run past the gap, never inside it`, async () => {
-  const w = await world({ buy: null, held: 0n, ataLamports: TOKEN_RENT, volumes: bare ? [] : [{ program: SOLANA_PUMP_PROGRAM }], lamports: ENOUGH, others: [{ l: 8n, j: 0, held: 0n }, { l: 9n, j: 0, held: 0n }] }, [{ ...wallet(0n), holdings: null } as never, { ...walletX(0n), holdings: null } as never, { ...walletY(0n), holdings: null } as never]);
+  const w = await world({ buy: null, held: 0n, ataLamports: TOKEN_RENT, volumes: bare ? [] : [{ program: SOLANA_PUMP_PROGRAM }], lamports: ONE_RUNG, others: [{ l: 8n, j: 0, held: 0n, lamports: ONE_RUNG }, { l: 9n, j: 0, held: 0n, lamports: ONE_RUNG }] }, [{ ...wallet(0n), holdings: null } as never, { ...walletX(0n), holdings: null } as never, { ...walletY(0n), holdings: null } as never]);
   if (bare) for (const x of [W.address, X.address, Y.address]) w.c.accounts.delete(solanaAta(x, MINT, TOKEN_PROGRAM));
   w.host.rpcs = withBuy(w.c.rpcs);
   await w.host.bought!.put(W.address, { mint: MINT, program: TOKEN_PROGRAM, rebuilt: true } as never);
