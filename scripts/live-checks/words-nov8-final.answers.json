@@ -1,6 +1,6 @@
 {
  "good": {
-  "at": "2026-11-08T19:58:34.836Z",
+  "at": "2026-11-13T08:10:10.276Z",
   "hosts": {
    "sign": {
     "source": "this checkout, packages/signpage",
@@ -40,7 +40,7 @@
     "pageStatus": 200,
     "js": [
      {
-      "url": "/assets/index-BraXbNAK.js",
+      "url": "/assets/index-BI-eXmgg.js",
       "status": 200,
       "found": [
        "final token.gridLines",
@@ -50,8 +50,6 @@
        "final token.indBOLL",
        "final token.indRSI",
        "final token.indMACD",
-       "final trade.proofReady",
-       "final trade.proofMaking",
        "final trade.poolBare",
        "final trade.poolSuffix",
        "final positions.toPool",
@@ -61,18 +59,18 @@
        "final portfolio.wallets",
        "final discover.padMenuTitle",
        "final search.placeholder"
-      ]
+      ],
+      "removed": []
      }
     ]
    }
-  },
-  "note": "this card: packages/signpage rebuilt (build-app.mjs) and apps/terminal built fresh (vite build, 8 Nov 2026), both read from disk (--local): every kept word a final entry in the terminal script, the signing page script writing data-draft-copy only through its key helper"
+  }
  },
  "bad": {
-  "at": "2026-11-08T19:58:42.656Z",
+  "at": "2026-11-13T08:10:10.809Z",
   "hosts": {
    "sign": {
-    "source": "https://confidential.unrealized.trade/",
+    "source": "this checkout, packages/signpage",
     "pageStatus": 200,
     "js": [
      {
@@ -96,25 +94,47 @@
        "text pw.tryTwo",
        "text pw.tryTwo-or",
        "text pw.feeRose",
-       "text pw.feeRoseSend"
+       "text pw.feeRoseSend",
+       "no draft mark for a fixed word",
+       "the vault form's draft keys",
+       "the pool form's draft keys"
       ]
      }
     ]
    },
    "app": {
-    "source": "https://ct-app.unrealized.trade/",
+    "source": "main 4c1826a75, apps/terminal/dist (built)",
     "pageStatus": 200,
     "js": [
      {
-      "url": "/assets/index-pB_D_o6v.js",
+      "url": "/assets/index-JGC1LmlZ.js",
       "status": 200,
       "found": [
-       "final positions.toPool"
+       "final token.gridLines",
+       "final token.lastLine",
+       "final token.indMA",
+       "final token.indEMA",
+       "final token.indBOLL",
+       "final token.indRSI",
+       "final token.indMACD",
+       "final trade.poolBare",
+       "final trade.poolSuffix",
+       "final positions.toPool",
+       "final discover.updated",
+       "final deposit.to",
+       "final portfolio.exportKey",
+       "final portfolio.wallets",
+       "final discover.padMenuTitle",
+       "final search.placeholder"
+      ],
+      "removed": [
+       "Proof ready",
+       "Making proof"
       ]
      }
     ]
    }
-  },
-  "note": "SIGN_HOST and APP_HOST as deployed before this card, read over https on 8 Nov 2026: the terminal script holds the kept words as drafts (their sources name no pick) and the signing page writes data-draft-copy for fixed words; positions.toPool is in no script (the sell box is mounted nowhere), so it passes vacuously"
- }
+  }
+ },
+ "note": "good: this checkout (--local) on 13 Nov 2026, after the app named no proof: the 16 kept words final, none of the removed texts in the app's script. bad: a terminal build of main 4c1826a75 (--local --build), which still draws 'Proof ready' and 'Making proof'; the signing page's read is the same as the good one."
 }

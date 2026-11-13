@@ -287,10 +287,9 @@ test("a round that read on its own sync past the bound: the next round reads at 
   s.t.evmPoolOf("base");
   await until(() => s.calls.includes("pass:events"));
   await s.round();
-  const t0 = Date.now();
-  await s.round();
-  const second = Date.now() - t0;
-  assert.ok(second < 100, `the second round waited ${second} ms though its own sync already read`);
+  // the second round against a timer short of the 400 ms bound: a round that waits the bound again loses the race
+  const second = await Promise.race([s.round().then(() => "read"), new Promise((r) => setTimeout(() => r("waited"), 300))]);
+  assert.equal(second, "read", "the second round waited the bound again though its own sync already read");
   assert.deepEqual(s.calls, ["pass:events", "deposit:events", "deposit:events"]);
 });
 

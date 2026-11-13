@@ -4,6 +4,7 @@
 // ?f=<fixture> picks the state; every tap the screen hands its mount is recorded in window.__calls. Test only.
 import type { Operation, SignpageClientSnapshot, SignpageState } from "@blindfill/kit";
 import { StrictMode } from "react";
+import type { ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { MemoryRouter } from "react-router";
 import { heldData } from "../../src/screens/portfolio/held.ts";
@@ -11,7 +12,7 @@ import { NO_FILTER } from "../../src/screens/portfolio/model.ts";
 import type { PortfolioData, PositionExtra, TokenMarket } from "../../src/screens/portfolio/model.ts";
 import { Portfolio, START } from "../../src/screens/portfolio/Portfolio.tsx";
 import type { Ui } from "../../src/screens/portfolio/Portfolio.tsx";
-import { PortfolioSourceProvider } from "../../src/screens/portfolio/source.tsx";
+import { PortfolioSourceProvider, useHeldReads } from "../../src/screens/portfolio/source.tsx";
 import type { PortfolioSource } from "../../src/screens/portfolio/source.tsx";
 import { SigninSheet } from "../../src/screens/signin/SigninSheet.tsx";
 import { SigninSheetProvider, SigninSourceProvider } from "../../src/screens/signin/source.tsx";
@@ -72,6 +73,10 @@ interface Fx {
   ui?: Partial<Ui>;
   /** The live source's own data (held.ts heldData over the state's ops and positions) with POOL_MARKETS, not R5's. */
   live?: boolean;
+  /** The live source's own data from its own held reads (source.tsx useHeldReads, the kit's GET /v1/market/held and
+   *  /v1/market/candles), which run.mjs answers as the helper does for exactly the tokens asked: a coin is named only
+   *  when the screen asked for it. */
+  reads?: boolean;
 }
 const PX = (usd: number) => ({ price: String(usd * 1e8), expo: -8, published_s: Math.floor(NOW / 1000) - 5, read_ms: NOW - 1000 });
 const FOUR: NonNullable<SignpageState["pools"]> = [
@@ -126,6 +131,9 @@ export const FIXTURES: Record<string, Fx> = {
   axis: { data: { series: [[NOW - 6 * 86_400_000, "3.33"], [NOW - 3 * 86_400_000, "3.31"], [NOW - 86_400_000, "3.33"], [NOW - 3_600_000, "2.51"], [NOW, "2.52"]] } },
   // the owner's sequence, done: both round trips on Closed (desktop), in the stats (phone) and in Activity
   pooltrades: { state: POOL_STATE, live: true, ui: { closed: true } },
+  // card app-faults-seen-on-126 (the signed-in walk of release 126, 13 Nov 00:41Z: Closed drew "78GaXF", no symbol and
+  // no logo): the same two round trips, nothing open, named by the screen's own held read
+  "closed-reads": { state: POOL_STATE, reads: true, ui: { closed: true } },
   "pooltrades-stats": { state: POOL_STATE, live: true, ui: { pane: "stats" } },
   "pooltrades-activity": { state: POOL_STATE, live: true, ui: act() },
   // review round: the first round trip as release 118 wrote it and no fill could complete (a buy with its USD only, a
@@ -229,11 +237,18 @@ const snapshot: SignpageClientSnapshot = { status: "ready", release: "signpage-v
 const src: PortfolioSource = { snapshot, data: fx.live ? heldData(snapshot, POOL_MARKETS, new Map(), NOW) : { ...base, ...fx.data }, now: () => NOW, tzMin: 0, act: (a) => void window.__calls.push(a) };
 const signin: SigninSource = { snapshot, moneyOn: true, locked: null, hop: async () => null, restore: () => {} };
 
+/** The source with the screen's own held reads (Fx.reads). */
+function Reads({ children }: { children: ReactNode }) {
+  const { markets, history } = useHeldReads(snapshot.state);
+  return <PortfolioSourceProvider value={{ ...src, data: heldData(snapshot, markets, history, NOW) }}>{children}</PortfolioSourceProvider>;
+}
+const Source = ({ children }: { children: ReactNode }) => (fx.reads ? <Reads>{children}</Reads> : <PortfolioSourceProvider value={src}>{children}</PortfolioSourceProvider>);
+
 function App() {
   return (
     <SigninSourceProvider value={signin}>
       <SigninSheetProvider>
-        <PortfolioSourceProvider value={src}>
+        <Source>
           <div className="shell">
             <Header />
             <PhoneHeader />
@@ -243,7 +258,7 @@ function App() {
             <Footer read={FOOTER_READ} />
             <TabBar />
           </div>
-        </PortfolioSourceProvider>
+        </Source>
         <SigninSheet />
       </SigninSheetProvider>
     </SigninSourceProvider>

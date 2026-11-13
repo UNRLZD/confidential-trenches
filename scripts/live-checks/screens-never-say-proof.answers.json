@@ -1,0 +1,131 @@
+{
+ "good": {
+  "check": "screens-never-say-proof",
+  "at": "2026-11-13T09:02:00.858Z",
+  "source": "harness, terminal build apps/terminal/dist, the stand-in shell signed in",
+  "browser": "156.0.8078.79",
+  "scripts": {
+   "read": 1,
+   "found": []
+  },
+  "runs": [
+   {
+    "width": "phone",
+    "framed": true,
+    "box": {
+     "path": "pool",
+     "marks": 0,
+     "text": "Buy Sell Market Limit TP/SL $46.50 available USD — $10 $25 $50 $100 Exit plan Sells automatically once this buy fills Coming soon You receive — Buy DJT Private balance New one-time wallet Pool D DJT Route & fees ≤10% — — Top 10 23% Dev — Snipers — Holders 71.3K Liq $561.9K Age 64d Insiders — Tax 0% Mint auth Freeze auth LP — Honeypot —",
+     "balance": "$46.50 available",
+     "max": "",
+     "cta": {
+      "kind": "live",
+      "busy": "true",
+      "label": "Buy DJT",
+      "pulse": "trb-skp"
+     }
+    },
+    "pools": {
+     "heads": [
+      "Balance"
+     ],
+     "text": "Private balance Balance NEAR 40.5 USDC Solana 0.5 SOL"
+    },
+    "deposit": "$87.00 Deposit Withdraw To NEAR Solana Base Robinhood Asset Chain Amount Min — Not available Recent No activity Get address"
+   },
+   {
+    "width": "desktop",
+    "framed": true,
+    "box": {
+     "path": "pool",
+     "marks": 0,
+     "text": "Buy Sell Market Limit TP/SL $46.50 available USD — $10 $25 $50 $100 Exit plan Sells automatically once this buy fills Coming soon You receive — Buy DJT Private balance New one-time wallet Pool D DJT Route & fees ≤10% — — Top 10 23% Dev — Snipers — Holders 71.3K Liq $561.9K Age 64d Insiders — Tax 0% Mint auth Freeze auth LP — Honeypot —",
+     "balance": "$46.50 available",
+     "max": "",
+     "cta": {
+      "kind": "live",
+      "busy": "true",
+      "label": "Buy DJT",
+      "pulse": "trb-skp"
+     }
+    },
+    "pools": {
+     "heads": [
+      "Balance"
+     ],
+     "text": "Private balance Balance NEAR 40.5 USDC Solana 0.5 SOL"
+    },
+    "deposit": "$87.00 Deposit Withdraw To NEAR Solana Base Robinhood Asset Chain Amount Min — Not available Recent No activity Get address"
+   }
+  ]
+ },
+ "bad": {
+  "check": "screens-never-say-proof",
+  "at": "2026-11-13T09:02:20.776Z",
+  "source": "harness, terminal build <build of main 4c1826a75>, the stand-in shell signed in",
+  "browser": "156.0.8078.79",
+  "scripts": {
+   "read": 1,
+   "found": [
+    "\"Proof ready\" in /assets/index-JGC1LmlZ.js",
+    "\"Making proof\" in /assets/index-JGC1LmlZ.js",
+    "\"Ready\" in /assets/index-JGC1LmlZ.js",
+    "\"Pending\" in /assets/index-JGC1LmlZ.js"
+   ]
+  },
+  "runs": [
+   {
+    "width": "phone",
+    "framed": true,
+    "box": {
+     "path": "pool",
+     "marks": 1,
+     "text": "Buy Sell Market Limit TP/SL $46.50 available USD — $10 $25 $50 $100 Exit plan Sells automatically once this buy fills Coming soon You receive — Making proof Buy DJT Private balance New one-time wallet Pool D DJT Route & fees ≤10% — — Top 10 23% Dev — Snipers — Holders 71.3K Liq $561.9K Age 64d Insiders — Tax 0% Mint auth Freeze auth LP — Honeypot —",
+     "balance": "$46.50 available",
+     "max": "Making proof",
+     "cta": {
+      "kind": "trade",
+      "busy": null,
+      "label": "Buy DJT",
+      "pulse": "none"
+     }
+    },
+    "pools": {
+     "heads": [
+      "Balance",
+      "Ready",
+      "Pending"
+     ],
+     "text": "Private balance Balance Ready Pending NEAR 40.5 USDC — — Solana 0.5 SOL 0 0.5"
+    },
+    "deposit": "$87.00 Deposit Withdraw To NEAR Solana Base Robinhood Asset Chain Amount Min — Not available Recent No activity Get address"
+   },
+   {
+    "width": "desktop",
+    "framed": true,
+    "box": {
+     "path": "pool",
+     "marks": 1,
+     "text": "Buy Sell Market Limit TP/SL $46.50 available USD — $10 $25 $50 $100 Exit plan Sells automatically once this buy fills Coming soon You receive — Making proof Buy DJT Private balance New one-time wallet Pool D DJT Route & fees ≤10% — — Top 10 23% Dev — Snipers — Holders 71.3K Liq $561.9K Age 64d Insiders — Tax 0% Mint auth Freeze auth LP — Honeypot —",
+     "balance": "$46.50 available",
+     "max": "Making proof",
+     "cta": {
+      "kind": "trade",
+      "busy": null,
+      "label": "Buy DJT",
+      "pulse": "none"
+     }
+    },
+    "pools": {
+     "heads": [
+      "Balance",
+      "Ready",
+      "Pending"
+     ],
+     "text": "Private balance Balance Ready Pending NEAR 40.5 USDC — — Solana 0.5 SOL 0 0.5"
+    },
+    "deposit": "$87.00 Deposit Withdraw To NEAR Solana Base Robinhood Asset Chain Amount Min — Not available Recent No activity Get address"
+   }
+  ]
+ }
+}

@@ -120,7 +120,8 @@ const NEAR_NETS = new RegExp(`[,; ](${N})=\\{mainnet:\\{usdc:${Q}17208628f84f5d6
 const ID_HELD_TOKEN = (t, nets) => new RegExp(`[,; ]${esc(t)}=${esc(nets)}\\[(${N})\\]\\.usdc;`);
 // `T` given a value once in the whole bundle, so a dead `T=NEAR_NETWORKS[mainnet].usdc` beside a real one reading
 // another network is not the one the rule compares with
-const ASSIGNED = (v) => new RegExp(`[^\\w$.]${esc(v)}=(?!=)`);
+// (a `/` or a `+` before it is a base64 string's, a pinned hash's: no write follows either)
+const ASSIGNED = (v) => new RegExp(`[^\\w$./+]${esc(v)}=(?!=)`);
 // a field in a class's leading field list (`class extends X{h0=…;h1=…;`, as the hashes' state classes are built) is a
 // property of the class, never a write to the binding: the minifier may give `T` that same name (`h1` in the build of
 // card evm-money-shows-and-spends-at-once). Only that run is left out; a write anywhere else, a method's body included,

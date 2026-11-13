@@ -132,17 +132,13 @@ function poolDecimal(v: bigint, d: number): string {
   return f ? `${s.slice(0, s.length - d)}.${f}` : s.slice(0, s.length - d);
 }
 
-/** What `chain`'s pool holds ready to buy (state.pools' ready: chunks with a proof made) and what is still being proved,
- *  in its own asset, as Portfolio reads them (portfolio/model.ts pools); null when the page reports no such pool. */
-export function poolReady(pools: SignpageState["pools"], chain: PoolChain): { asset: PoolAsset; ready: string | null; pending: string | null } | null {
+/** What `chain`'s pool holds, in its own asset, as Portfolio's row for the chain reads it (portfolio/model.ts pools);
+ *  null when the page reports no such pool. */
+export function poolBalance(pools: SignpageState["pools"], chain: PoolChain): { asset: PoolAsset; balance: string } | null {
   const p = pools?.find((x) => x.chain === chain);
   if (!p) return null;
   const d = POOL_ASSET_DECIMALS[p.asset];
-  const balance = poolUnits(p.balance, d) ?? 0n;
-  const r = p.ready === undefined ? null : poolUnits(p.ready, d);
-  const ready = r === null ? null : r > balance ? balance : r;
-  const pending = balance - (ready ?? 0n);
-  return { asset: p.asset, ready: ready === null || ready === 0n ? null : poolDecimal(ready, d), pending: pending === 0n ? null : poolDecimal(pending, d) };
+  return { asset: p.asset, balance: poolDecimal(poolUnits(p.balance, d) ?? 0n, d) };
 }
 
 /** A dry quote: the quote lines of S4.3, no address (the kit's deposit.dry answer, DepositDry). */
@@ -371,6 +367,22 @@ export function pickAsset(assets: readonly Asset[] | null, picked: { symbol: str
   if (!assets?.length) return null;
   if (!picked) return assets[0]!;
   return assets.find((a) => a.symbol === picked.symbol && a.chain === picked.chain) ?? assets.find((a) => a.symbol === picked.symbol) ?? assets[0]!;
+}
+
+/** Each place's own coin (card deposit-pool-picks-its-own-coin): what the vault holds and what each chain's pool
+ *  holds (POOL_ASSET_DECIMALS; the kit's chain pool asset). */
+export const DEST_COIN: Readonly<Record<Dest, PoolAsset>> = Object.freeze({ near: "USDC", solana: "SOL", base: "ETH", robinhood: "ETH" });
+
+/**
+ * The asset a place starts on when it is picked (card deposit-pool-picks-its-own-coin; the UNRLZD terminal's deposit
+ * starts on its home's own coin): the place's own coin on its own chain, else the first asset on that chain, else the
+ * list's first; null with no list. The pickers still offer every asset.
+ */
+export function destAsset(assets: readonly Asset[] | null, dest: Dest): { symbol: string; chain: string } | null {
+  if (!assets?.length) return null;
+  const chain = CHAIN_NAME[dest];
+  const a = assets.find((x) => x.chain === chain && x.symbol === DEST_COIN[dest]) ?? assets.find((x) => x.chain === chain) ?? assets[0]!;
+  return { symbol: a.symbol, chain: a.chain };
 }
 
 /** A row of the sheet's Recent block: a deposit of this account, its stage's word, and what it credited once done. */

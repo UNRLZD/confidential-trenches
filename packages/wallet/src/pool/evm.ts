@@ -81,7 +81,7 @@ import { EVM_POOL_TX_BYTES, EvmOperatorsUnanswered, evmPoolChainFee, evmPoolChai
 import { evmAddress } from "../derive/index.ts";
 import type { Ladder } from "./ladder.ts";
 import { POOL_TESTNET } from "./network.ts";
-import { PoolNoLeafError, PoolReadError, TAKE_SLACK_MS, type Pool, type PoolTrees } from "./pool.ts";
+import { perEpoch, PoolNoLeafError, PoolReadError, TAKE_SLACK_MS, type Pool, type PoolTrees } from "./pool.ts";
 
 /** One JSON-RPC call on one EVM provider (the kit's JSON-RPC client shape, solanaJsonRpc, which speaks any JSON-RPC). */
 export type EvmRpc = SolanaRpc;
@@ -2182,6 +2182,9 @@ export function evmPool(a: EvmPoolArgs): EvmPoolOf {
       // period too, the two-operator limit of every read here (evmTwoOperators), where before it lasted one bind
       return { block, depth: logs, chainFee };
     }, sleep, signal);
+  // the helper's fee answer, asked once an epoch (each bind still checks it whole); one a bind refuses is asked again.
+  // The bind's own time stays its own read: the higher of the two RPCs' latest, stricter than now()'s
+  const relayFees = perEpoch((e: bigint, s?: AbortSignal) => a.relayFee(e, s));
   return {
     async holdFee(epochStartMs, signal) {
       if (typeof epochStartMs !== "bigint" || epochStartMs <= 0n || epochStartMs % EVM_EPOCH_MS !== 0n) throw new Error("epochStartMs: not on the epoch grid");
@@ -2215,11 +2218,17 @@ export function evmPool(a: EvmPoolArgs): EvmPoolOf {
       const { block, depth, chainFee } = await feeAt(epochStartMs, signal);
       const fee = a.epochFee({ block: block.number, baseFeePerGas: block.baseFeePerGas!, depth, chainFee });
       if (typeof fee !== "bigint" || fee < 0n) throw new Error("epochFee: not a fee");
-      const f = await a.relayFee(epochStartMs, signal);
-      if (f?.chain !== "evm" || f.network !== a.pin.network || typeof f.pool !== "string" || lower(f.pool) !== pool || typeof f.fee_recipient !== "string" || lower(f.fee_recipient) !== feeRecipient)
-        throw new Error("relayFee: not this pool's or this fee recipient's answer");
-      if (f.epoch_ms !== Number(EVM_EPOCH_MS) || f.epoch_start_ms !== Number(epochStartMs) || evmRpcHex(f.block) !== tag(block.number)) throw new Error("relayFee: not this epoch's or not its first block");
-      if (typeof f.fee !== "string" || f.fee !== fee.toString()) throw new Error(`relayFee: the helper's ${String(f.fee)} is not the epoch's fee ${fee}`);
+      const asked = relayFees.get(epochStartMs, signal);
+      const f = await asked;
+      try {
+        if (f?.chain !== "evm" || f.network !== a.pin.network || typeof f.pool !== "string" || lower(f.pool) !== pool || typeof f.fee_recipient !== "string" || lower(f.fee_recipient) !== feeRecipient)
+          throw new Error("relayFee: not this pool's or this fee recipient's answer");
+        if (f.epoch_ms !== Number(EVM_EPOCH_MS) || f.epoch_start_ms !== Number(epochStartMs) || evmRpcHex(f.block) !== tag(block.number)) throw new Error("relayFee: not this epoch's or not its first block");
+        if (typeof f.fee !== "string" || f.fee !== fee.toString()) throw new Error(`relayFee: the helper's ${String(f.fee)} is not the epoch's fee ${fee}`);
+      } catch (e) {
+        relayFees.drop(epochStartMs, asked);
+        throw e;
+      }
       if (fee * 10_000n > chunk * MAX_RELAY_FEE_BPS) throw new Error("chunk: under the pool's backstop at this fee");
       const salt = (a.salt ?? (() => crypto.getRandomValues(new Uint8Array(16))))();
       if (!(salt instanceof Uint8Array) || salt.length !== 16) throw new Error("salt: not 16 bytes");

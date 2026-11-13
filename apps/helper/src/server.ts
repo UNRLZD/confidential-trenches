@@ -44,6 +44,7 @@ import { dayFiles } from "./limits/day-spend.ts";
 import { RPC_BODY_MAX } from "./rpc/methods.ts";
 import { createRpc, KEYED_RETRY_MS, keyedPaces, keyedSpares } from "./rpc/rpc.ts";
 import { BIND_MAX_BYTES } from "./bind/checks.ts";
+import { RECORD_BODY_MAX } from "./bind/record.ts";
 import { bindSenderFromEnv, type BindSender } from "./bind/env.ts";
 import { INTENTS_BODY_MAX } from "./intents/carry.ts";
 import { statusesOf, tokenWatchesFromEnv, type TokenWatch, type TokenWatches } from "./token-status/status.ts";
@@ -82,10 +83,10 @@ type Fee = ReturnType<typeof feeQuoterFromEnv>;
 const ONECLICK_STATUS = "oneclick/v0/status";
 /** The proxy path whose live answers are POST /v1/intents's quote records (card helper-id-intents, intents/records.ts). */
 const ONECLICK_QUOTE = "oneclick/v0/quote";
-const MOUNTED = { proxy: ["/v1/proxy/", "/v1/rpc/", "/v1/market/lists", "/v1/market/token", "/v1/market/holders", "/v1/market/candles", "/v1/market/trades", PUSH_PATH, "/v1/market/held", "/v1/logo/"], relay: ["/v1/token-status", "/v1/withdraw/fee", "/v1/withdraw", "/v1/pool/fee", "/v1/pool/solana/send", "/v1/pool/evm/send", "/v1/pool/evm/sell", "/v1/pool/solana/pieces"], delegate: ["/v1/bind"], intents: ["/v1/intents"] } as const satisfies Partial<Record<Part, readonly string[]>>;
+const MOUNTED = { proxy: ["/v1/proxy/", "/v1/rpc/", "/v1/market/lists", "/v1/market/token", "/v1/market/holders", "/v1/market/candles", "/v1/market/trades", PUSH_PATH, "/v1/market/held", "/v1/logo/"], relay: ["/v1/token-status", "/v1/withdraw/fee", "/v1/withdraw", "/v1/pool/fee", "/v1/pool/solana/send", "/v1/pool/evm/send", "/v1/pool/evm/sell", "/v1/pool/solana/pieces"], delegate: ["/v1/bind", "/v1/bind/record"], intents: ["/v1/intents"] } as const satisfies Partial<Record<Part, readonly string[]>>;
 const [PROXY_PREFIX, RPC_PREFIX, MARKET_LISTS, MARKET_TOKEN, MARKET_HOLDERS, MARKET_CANDLES, MARKET_TRADES, MARKET_PUSH, MARKET_HELD, LOGO_PREFIX] = MOUNTED.proxy;
 const [TOKEN_STATUS, WITHDRAW_FEE, WITHDRAW, POOL_FEE, POOL_SOLANA_SEND, POOL_EVM_SEND, POOL_EVM_SELL, POOL_SOLANA_PIECES] = MOUNTED.relay;
-const [BIND] = MOUNTED.delegate;
+const [BIND, BIND_RECORD] = MOUNTED.delegate;
 const [INTENTS] = MOUNTED.intents;
 /** POST /v1/withdraw's body limit (the kit's HELPER_V1_PATHS row: 8 KB). */
 export const WITHDRAW_BODY_MAX = 8_192;
@@ -161,6 +162,22 @@ export const UPSTREAM_ROUTE_MAX = 120;
 /** Requests one client makes per limit window to GET /v1/logo (its own window: a Discover screen asks for every
  *  row's logo at once, and the browser keeps each a day); a miss fetches at most once per token (src/data/logo.ts). */
 export const LOGO_RATE_MAX = 600;
+/** Requests one client makes per limit window to POST /v1/bind/record, its own window apart from every other route's,
+ *  so a restore never spends a device's /v1/bind share nor the reverse (card near-holdings-restore) [design: a restore
+ *  of 100 wallets is two requests of at most 64; 4 per 10 s leaves one retry each]. */
+export const RECORD_RATE_MAX = 4;
+/** Requests every client together makes to POST /v1/bind/record per limit window: each reads the vault's spends list
+ *  once on the network's two NEAR providers, the reads the trade carry makes too [design: 20 per 10 s, ten devices'
+ *  100-wallet restores in one window, at most about 2 requests a second on the providers the carry shares]. */
+export const RECORD_TOTAL_MAX = 20;
+/** The reason RECORD_TOTAL_MAX names in the refusal log: every client's requests together past the route's total. */
+const ROUTE_TOTAL = "route total";
+/** The longest a chart's read is held before it is answered `filling` (card chart-candles-never-429). The page's read
+ *  gives up at 10 s and draws its error (apps/terminal/src/screens/token/candles.ts TIMEOUT_MS); a cold Solana chart's
+ *  read waits up to 8 s for GeckoTerminal's next free call and then its answer (data/solana/token.ts GT_CHART_WAIT_MS),
+ *  so a page read held that long was cut at 10 s: the card's local run read one 11.5 s answer (13 Nov 09:17Z).
+ *  [design: half the page's 10 s, room for the answer's way back; a read past it goes on and its next read is served] */
+export const CANDLES_ANSWER_MS = 5_000;
 const METHODS: readonly string[] = HELPER_CORS.allowMethods;
 const SHA = /^[0-9a-f]{40}$/;
 
@@ -281,6 +298,33 @@ export function handler(
   const rpcRate = clientWindow(UPSTREAM_ROUTE_MAX, now);
   const proxyRate = clientWindow(UPSTREAM_ROUTE_MAX, now);
   const logoRate = clientWindow(LOGO_RATE_MAX, now);
+  const recordRate = clientWindow(RECORD_RATE_MAX, now);
+  // the route's total: one window every client draws from, keyed by one name for all
+  const recordTotal = clientWindow(RECORD_TOTAL_MAX, now);
+  /** A chart's read not settled within CANDLES_ANSWER_MS is answered `filling` (as a 429 is, fillingOf) while it goes on:
+   *  its result is held by the data layer (a cold Solana chart's bars, data/solana/token.ts cached; a book opening), so the
+   *  page's next read FILL_WAIT_MS on is served it. */
+  const withinBound = (read: Promise<DataAnswer>): Promise<DataAnswer> => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise<DataAnswer>((ok) => {
+      timer = setTimeout(() => ok({ status: 429, body: '{"error":{"code":"rate_limited"}}', why: "candles bound" }), CANDLES_ANSWER_MS);
+      timer.unref?.();
+    });
+    return Promise.race([read, late]).finally(() => clearTimeout(timer));
+  };
+  /** Card chart-candles-never-429: a chart's read the data layer answers 429 (nothing of ours held and GeckoTerminal's
+   *  budget, its own 429 or a full set of open books refused it now; every chain's read is queued or tried again on the
+   *  next read) is answered 200 with no bars and `filling` true, the form a cold Base or Robinhood book past its bound
+   *  already answers (data/evm/swaps.ts candles): the page stays loading and reads again FILL_WAIT_MS on, within its 75 s
+   *  span (apps/terminal/src/screens/token/candles.ts loadCandles), and the browser logs no failed load. Live run
+   *  43396216450 (13 Nov 08:54-08:56Z): three "refused /v1/market/candles geckoterminal budget" while GeckoTerminal's own
+   *  429 count was 0 and 1. The refusal is still counted, as "<why> filling", in the refusal log. */
+  const fillingOf = (tf: string, route: string) => (a: DataAnswer): DataAnswer => {
+    if (a.status !== 429) return a;
+    refusals.count(route, `${a.why ?? "unnamed"} filling`);
+    const at = now();
+    return { status: 200, body: JSON.stringify({ tf, candles: [], filling: true, src: "chain", as_of_ms: at }), src: "chain", asOfMs: at, ...(a.timing === undefined ? {} : { timing: a.timing }) };
+  };
   return (req: IncomingMessage, res: ServerResponse): void => {
     const base: Headers = {
       [HELPER_COMMIT_HEADER]: commit,
@@ -334,7 +378,7 @@ export function handler(
         return send(400, { error: "bad_request" }, cors(req));
       }
       route = routeOf(path);
-      // every route but the pool, RPC and proxy routes (which have their own windows below) counts in the client's window
+      // every route but the pool, RPC, proxy and record routes (which have their own windows below) counts in the client's window
       if (path.startsWith(LOGO_PREFIX)) {
         const wait = logoRate.take(clientOf(req));
         if (wait > 0) return reply(throttled(wait, undefined, CLIENT_WINDOW));
@@ -357,7 +401,7 @@ export function handler(
           .catch(() => (res.headersSent ? res.destroy() : send(500, undefined, cors(req))));
         return;
       }
-      if (!path.startsWith(PROXY_PREFIX) && !path.startsWith(RPC_PREFIX) && path !== POOL_FEE && path !== POOL_SOLANA_SEND && path !== POOL_SOLANA_PIECES && path !== POOL_EVM_SEND && path !== POOL_EVM_SELL) {
+      if (!path.startsWith(PROXY_PREFIX) && !path.startsWith(RPC_PREFIX) && path !== POOL_FEE && path !== POOL_SOLANA_SEND && path !== POOL_SOLANA_PIECES && path !== POOL_EVM_SEND && path !== POOL_EVM_SELL && path !== BIND_RECORD) {
         const wait = apiRate.take(clientOf(req));
         if (wait > 0) return reply(throttled(wait, undefined, CLIENT_WINDOW));
       }
@@ -543,6 +587,33 @@ export function handler(
           .catch(() => (res.headersSent ? res.destroy() : send(500, { error: "internal" }, cors(req))));
         return;
       }
+      if (path === BIND_RECORD) {
+        // card near-holdings-restore (bind/record.ts): its own window per client, then the route's total; the body
+        // names the wallets, never the path, so W reaches no log or header of the request
+        if (req.method !== "POST") return send(405, { error: { code: "method_not_allowed" } }, { ...cors(req), Allow: "POST, OPTIONS" });
+        const mine = recordRate.take(clientOf(req));
+        if (mine > 0) return reply(throttled(mine, undefined, CLIENT_WINDOW));
+        const all = recordTotal.take("all");
+        if (all > 0) return reply(throttled(all, undefined, ROUTE_TOTAL));
+        void readBody(req, RECORD_BODY_MAX)
+          .then(async (text) => {
+            if (text === undefined) return { status: 413, body: JSON.stringify({ error: { code: "too_large" } }) };
+            let body: unknown;
+            try {
+              body = JSON.parse(text);
+            } catch {
+              return { status: 400, body: JSON.stringify({ error: { code: "bad_shape" } }) };
+            }
+            if (bind.record === undefined) return { status: 400, body: JSON.stringify({ error: { code: "bad_shape" } }) };
+            // the trade store is the senders' holder's, as /v1/bind's is: waited for within the bind's bound
+            if (!(await heldWithin(senders, HELPER_BIND_ANSWER_MS))) return SENDERS_LATE;
+            const a = await bind.record(body);
+            return { status: a.status, headers: upstreamWait(a), body: JSON.stringify(a.body) };
+          })
+          .then(reply)
+          .catch(() => (res.headersSent ? res.destroy() : send(500, { error: "internal" }, cors(req))));
+        return;
+      }
       if (path === INTENTS) {
         if (req.method !== "POST") return send(405, { error: { code: "method_not_allowed" } }, { ...cors(req), Allow: "POST, OPTIONS" });
         // card helper-id-intents: an id's signed intent (bind/env.ts intents, intents/carry.ts), within the bind's
@@ -632,7 +703,7 @@ export function handler(
             if (tf === null || to === null || limit === null || !/^(|[1-9]\d{0,10})$/.test(to) || !/^(|[1-9]\d{0,2})$/.test(limit) || Number(limit) > CANDLES_MAX) {
               return send(404, { error: { code: "not_found" } }, cors(req));
             }
-            settle(near.trades.candles(mint, tf, to === "" ? null : Number(to), limit === "" ? CANDLES_MAX : Number(limit)), began);
+            settle(withinBound(near.trades.candles(mint, tf, to === "" ? null : Number(to), limit === "" ? CANDLES_MAX : Number(limit))).then(fillingOf(tf, route)), began);
           } else settle(path === MARKET_TOKEN ? near.token.page(mint) : near.token.holders(mint), began);
           return;
         }
@@ -650,7 +721,7 @@ export function handler(
           if (tf === null || to === null || limit === null || !/^(|[1-9]\d{0,10})$/.test(to) || !/^(|[1-9]\d{0,2})$/.test(limit) || Number(limit) > CANDLES_MAX) {
             return send(404, { error: { code: "not_found" } }, cors(req));
           }
-          read = swaps !== undefined ? swaps.candles(mint, tf, to === "" ? null : Number(to), limit === "" ? CANDLES_MAX : Number(limit), clientOf(req)) : token.candles(mint, tf, to === "" ? null : Number(to), limit === "" ? CANDLES_MAX : Number(limit), clientOf(req));
+          read = withinBound(swaps !== undefined ? swaps.candles(mint, tf, to === "" ? null : Number(to), limit === "" ? CANDLES_MAX : Number(limit), clientOf(req)) : token.candles(mint, tf, to === "" ? null : Number(to), limit === "" ? CANDLES_MAX : Number(limit), clientOf(req))).then(fillingOf(tf, route));
         } else if (evmToken !== undefined) read = path === MARKET_TOKEN ? evmToken.page(mint, clientOf(req)) : evmToken.holders(mint, clientOf(req));
         else read = path === MARKET_TOKEN ? token.page(mint, clientOf(req)) : token.holders(mint, clientOf(req));
         // the 4h change from our own bars where the page's source has none (card token-page-data-complete-and-fast:

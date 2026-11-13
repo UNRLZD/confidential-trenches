@@ -116,6 +116,13 @@ export type PoolBindArgs = {
   deadlineMs: bigint;
   /** A pool that binds a tip cap (Solana): 0 for a withdraw, which pays no tip; the pool's own cap when absent (a buy). */
   tipCap?: bigint;
+  /** The pool's time a read made a moment before (the proof queue's pass, card max-ready-seconds-after-a-load): a pool
+   *  whose bind reads the same time as its now() takes it for its send-margin guard (bindNow) in place of a read of its
+   *  own; absent, or too old, or past the epoch of epochStartMs, the bind reads it. */
+  now?: ChainNow;
+  /** Called with the bind's own read of the pool's time, when it made one (its start on both device clocks), so the
+   *  caller hands it to the binds after it. */
+  readNow?: (now: ChainNow) => void;
 };
 
 /** One chunk's binding: what the proof's last public signal must be, and what the tap sends for the pool to check it. */
@@ -211,6 +218,82 @@ export async function chainNow(pool: Pick<Pool<unknown>, "now">, signal?: AbortS
   const at = performance.now();
   const wall = Date.now();
   return { ms: await pool.now(signal), at, wall };
+}
+
+/** The pool's time for a bind's send-margin guard from `now` (ChainNow): its ms plus the time since its start on the
+ *  larger of the device's two clocks, while the monotonic one is 0 to NOW_REUSE_MS and the wall clock's at most
+ *  NOW_REUSE_MS, and while that time is still inside the epoch of `epochStartMs` (an epoch that may have turned is read
+ *  again); else undefined, and the bind reads the pool's time itself. Counting from the read's start only makes the time
+ *  later, so the guard can only refuse sooner than a fresh read would. */
+export function bindNow(now: ChainNow | undefined, epochStartMs: bigint, epochMs: bigint): bigint | undefined {
+  if (now === undefined || typeof now.ms !== "bigint" || typeof now.at !== "number" || typeof now.wall !== "number") return undefined;
+  const mono = performance.now() - now.at;
+  const wall = Date.now() - now.wall;
+  if (!(mono >= 0 && mono <= NOW_REUSE_MS && wall <= NOW_REUSE_MS)) return undefined;
+  const ms = now.ms + BigInt(Math.ceil(Math.max(mono, wall, 0)));
+  return ms >= epochStartMs && ms < epochStartMs + epochMs ? ms : undefined;
+}
+
+/** One answer per epoch (card max-ready-seconds-after-a-load: the relayer's fee is the same for every proof of an epoch):
+ *  `get` asks once per epoch and hands the same answer to every bind of it; an ask that fails, or an answer a bind
+ *  refuses (`drop`), is asked again by the next bind. Only the newest `keep` epochs are kept. The ask runs on its own
+ *  stop, as evm.ts joinFee's read does: a caller's signal ends that caller's wait only, the ask is stopped (and asked
+ *  again by the next caller) when every caller waiting on it has stopped, and an answer in hand is handed to any caller. */
+export function perEpoch<T>(ask: (epochStartMs: bigint, signal?: AbortSignal) => Promise<T>, keep = 4): { get(epochStartMs: bigint, signal?: AbortSignal): Promise<T>; drop(epochStartMs: bigint, got: Promise<T>): void } {
+  type Held = { read: Promise<T>; done: boolean; waiting: number; stop: AbortController };
+  const m = new Map<bigint, Held>();
+  const of = new WeakMap<Promise<T>, Held>(); // each promise handed out, to the ask it waits on
+  const forget = (e: bigint, h: Held): void => {
+    if (m.get(e) === h) m.delete(e);
+  };
+  const join = (e: bigint, h: Held, signal?: AbortSignal): Promise<T> => {
+    if (h.done) return h.read;
+    h.waiting++;
+    return new Promise<T>((res, rej) => {
+      let out = false;
+      const end = (): boolean => {
+        if (out) return false;
+        out = true;
+        h.waiting--;
+        signal?.removeEventListener("abort", leave);
+        return true;
+      };
+      const leave = (): void => {
+        if (!end()) return;
+        if (h.waiting === 0 && !h.done) {
+          h.stop.abort(signal!.reason);
+          forget(e, h);
+        }
+        rej(signal!.reason);
+      };
+      if (signal?.aborted) return leave();
+      signal?.addEventListener("abort", leave, { once: true });
+      h.read.then((v) => void (end() && res(v)), (x: unknown) => void (end() && rej(x)));
+    });
+  };
+  return {
+    get(e, signal) {
+      let h = m.get(e);
+      if (h === undefined) {
+        if (signal?.aborted) return Promise.reject(signal.reason);
+        const stop = new AbortController();
+        const mine: Held = { read: ask(e, stop.signal), done: false, waiting: 0, stop };
+        mine.read.then(
+          () => void (mine.done = true),
+          () => forget(e, mine),
+        );
+        m.set(e, (h = mine));
+        for (const k of [...m.keys()].sort((x, y) => (x < y ? 1 : -1)).slice(keep)) m.delete(k);
+      }
+      const p = join(e, h, signal);
+      of.set(p, h);
+      return p;
+    },
+    drop(e, got) {
+      const h = of.get(got);
+      if (h !== undefined) forget(e, h);
+    },
+  };
 }
 
 const field = (x: unknown): boolean => typeof x === "bigint" && x >= 0n && x < VAULT_FIELD_P;

@@ -20,6 +20,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { ASSETS, BASE_USDC, DEVICE_ASKS, DEVICE_ASKS_MAX, EXIT, NEAR_USDC, PLACEHOLDER, SOL_USDC, dec, judge } from "./kit-deposit-assets-dry.mjs";
+import { QUOTE_RULE } from "./deposit-quote-no-liquidity.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ANSWERS = JSON.parse(readFileSync(path.join(HERE, "kit-deposit-assets-dry.answers.json"), "utf8"));
@@ -303,7 +304,7 @@ test("planted: a display read asked again, another status or message, another co
 // stretch over each of those asks is 1Click's, as one ask was. And a refused read's BAD line names what the helper answered
 // its quotes (live run 43289722533 printed "deposit.assets answered refused not_available" and nothing of why).
 test("planted: a display quote asked again on no liquidity, up to the page's three asks, is 1Click's: INCONCLUSIVE", () => {
-  assert.equal(DEVICE_ASKS_MAX, 3);
+  assert.equal(DEVICE_ASKS_MAX, QUOTE_RULE.maxAsks);
   for (const n of [1, 2, 3]) {
     const v = judge(plant((a) => dryRefused(a, Array(n).fill(NL))));
     assert.equal(v.verdict, "INCONCLUSIVE", `${n}: ${v.lines.join(" | ")}`);

@@ -93,7 +93,7 @@ const { SOLANA_POOL_JITO_TIP } = await import("../../kit/src/checks/solana/check
 // then, on a note landed this epoch (its proof on the newest root), Max tapped 16 to 40 s past the next boundary of the
 // pool's time, while that proof's remake may run past its 15 s grace: it fills (or is not_funded), never fails. A
 // timeline each second (the pool's time, Max and its pieces, the ready proofs by root and epoch) and every pass and
-// proof's ms go in the record.
+// proof's ms go in the record. FLOW_TAKEABLE_ROUNDS=0 stops after the load's Max; FLOW_PROVER_THREADS=1 proves on threads.
 const SCENARIOS = { "copy-part1": 6, "copy-takeable": 5, "pieces-2": 2, "pieces-3": 3, "pieces-4": 4, "back-to-back": 4, "landed-reload": 2, "tag3-fail": 2, found: 0 };
 const [SCENARIO, TABLE, MINT, OUT] = process.argv.slice(2);
 if (!OUT || !Object.hasOwn(SCENARIOS, SCENARIO)) throw new Error(`usage: pool-buy-pieces-devnet.mjs <${Object.keys(SCENARIOS).join("|")}> <table> <mint> <out.json>`);
@@ -161,6 +161,12 @@ const again = async (f) => {
 };
 const both = (f) => Promise.all(rpcs.map((r) => again(() => f(r))));
 
+// FLOW_PROVER_THREADS=1: snarkjs proves on its own threads in this process (worker_threads), as the page's prover does on
+// its workers; else one thread
+const THREADED = process.env.FLOW_PROVER_THREADS === "1";
+// FLOW_TAKEABLE_ROUNDS: copy-takeable's taps past a boundary (default 3; 0 stops after the load's Max)
+const ROUNDS = Number(process.env.FLOW_TAKEABLE_ROUNDS ?? 3);
+if (!Number.isInteger(ROUNDS) || ROUNDS < 0 || ROUNDS > 3) throw new Error("FLOW_TAKEABLE_ROUNDS is 0 to 3");
 const KIT_ZK = new URL("../../kit/zk/", import.meta.url);
 const file = (name) => {
   const b = readFileSync(new URL(name, KIT_ZK));
@@ -176,7 +182,7 @@ const vault = {
   prove: async (circuit, input) => {
     if (circuit !== "withdraw") throw new Error(`no ${circuit} prover here`);
     const t0 = performance.now();
-    const { proof, publicSignals } = await snarkjs.groth16.fullProve(input, WASM, ZKEY, undefined, undefined, { singleThread: true });
+    const { proof, publicSignals } = await snarkjs.groth16.fullProve(input, WASM, ZKEY, undefined, undefined, { singleThread: !THREADED });
     const proveMs = Math.round(performance.now() - t0);
     proveLog.push({ at: Date.now(), ms: proveMs });
     return { proof, publicSignals, proveMs };
@@ -656,7 +662,7 @@ if (SCENARIO === "copy-takeable") {
   // 16 to 40 s past it, while that proof's remake may run past its grace: it fills with takeable pieces or is not_funded
   const lns = await openNoteStore(L.w);
   out.boundaries = [];
-  for (let round = 0; round < 3; round++) {
+  for (let round = 0; round < ROUNDS; round++) {
     phase = `fresh-${round}`;
     const planned = await lns.planDeposit(scope, (ref) => noteSecrets(seed64, ref).precommitment);
     const id = depositId(seed64, scope, planned.ref.i);
@@ -690,7 +696,7 @@ if (SCENARIO === "copy-takeable") {
   // what was offered, not takeable: a sample past the boundary + 15 s that names a newest-root proof of the epoch before
   const offeredLate = timeline.filter((x) => x.intoEpoch !== null && x.intoEpoch >= 15_000 && x.proofs.some((r) => r.root === "newest" && r.epoch < x.pool - x.intoEpoch));
   out.offeredLate = offeredLate.length;
-  const ok = out.ready.ms !== null && out.load.ms !== null && out.boundaries.length === 3 && out.boundaries.every((x) => x.ok) && offeredLate.length === 0;
+  const ok = out.ready.ms !== null && out.load.ms !== null && out.boundaries.length === ROUNDS && out.boundaries.every((x) => x.ok) && offeredLate.length === 0;
   finish(ok, `Max at 4 pieces ${out.ready.ms} ms after the deposits, ${out.load.ms} ms after a load; Max tapped 16 s past a boundary: ${out.boundaries.map((x) => `${x.end} (${x.pieces} pieces, ${x.spent} spent, ${x.intoEpoch} ms in, ${x.newestReady.length} newest-root ready before)`).join("; ")}; samples offering a late proof: ${offeredLate.length}; proofs ${proveLog.length}, p50 ${out.proveMs.p50} ms, max ${out.proveMs.max} ms`);
 }
 

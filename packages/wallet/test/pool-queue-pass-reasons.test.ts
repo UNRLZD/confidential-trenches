@@ -130,10 +130,13 @@ test("the epoch trees read fails: the pass throws network", async () => {
 });
 
 test("tier 2's epoch trees read fails (tier 1 has nothing to make): the pass throws network", async () => {
-  const { pool, q } = await open({ values: [usd(100), usd(50)], piecesMax: 4 });
+  const { v, pool, q } = await open({ values: [usd(100), usd(50), usd(20), usd(10)], piecesMax: 4 });
   try {
     const p = await q.refresh();
-    assert.equal(p.made.length, 2, "tier 1 made");
+    assert.equal(p.made.length, 6, "both tiers made: the ready set of 3, and 3 pieces to the 100's W");
+    // the 10 note's only proof (its tier 2) dropped: the ready set is full, so only tier 2 has something to make
+    const ten = (await v.ns.list()).find((n) => n.leaf?.value === usd(10))!;
+    await q.drop(ten.id);
     pool.trees = async () => {
       throw new Error("rpc: no answer in time");
     };

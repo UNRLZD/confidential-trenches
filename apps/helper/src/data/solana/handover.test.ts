@@ -120,11 +120,13 @@ test(`a crowd of ${CROWD} first loads right after a swap (GeckoTerminal's window
   assert.equal(page.row.token, PUMP);
 });
 
-test("without the handover (as before this card) the same crowd meets the cold helper's limits, and the refusal log names each route and reason once with its count", async () => {
+test("without the handover (as before this card) the same crowd meets the cold helper's limits, and the refusal log names each route and reason once with its count; the candles are a chart filling, never a 429 (card chart-candles-never-429)", async () => {
   const r = await swapThenCrowd(false);
-  assert.ok(r.answers.every((a) => a.status === 429), JSON.stringify(r.answers.map((a) => a.status)));
+  const candles = r.answers.filter((a) => a.route.endsWith("candles"));
+  assert.ok(r.answers.filter((a) => !a.route.endsWith("candles")).every((a) => a.status === 429), JSON.stringify(r.answers.map((a) => a.status)));
+  assert.ok(candles.length === CROWD && candles.every((a) => a.status === 200 && JSON.parse(a.body).filling === true && JSON.parse(a.body).candles.length === 0), JSON.stringify(candles.map((a) => a.status)));
   assert.deepEqual(r.lines.sort(), [
-    `refused /v1/market/candles geckoterminal budget ${CROWD} in 10 s`,
+    `refused /v1/market/candles geckoterminal budget filling ${CROWD} in 10 s`,
     `refused /v1/market/holders solana held ${CROWD} in 10 s`,
     `refused /v1/market/token solana held ${CROWD} in 10 s`,
   ]);

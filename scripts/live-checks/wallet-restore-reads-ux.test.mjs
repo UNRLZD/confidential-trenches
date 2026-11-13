@@ -172,6 +172,9 @@ test("the bundle facts hold this build's lines, never a carry, a read or a held 
   const tok = / ([\w$]+)=([\w$]+)\[([\w$]+)\]\.usdc;async function/;
   assert.equal(f(`${js.replace(tok, " $1=__nets[$3].usdc;async function")};var __nets=0;`).id_held, false, "the token read from another table");
   assert.equal(f(`${js};var __dead=0,${tok.exec(js)[1]}=0;`).id_held, false, "the token given a second value");
+  // a base64 string that holds `/T=` or `+T=` (a pinned hash, as the build of card max-ready-seconds-after-a-load names
+  // the token V4 beside "…/V4=.Ac34…") is no write: no write can follow a `/` or a `+`
+  for (const c of ["/", "+"]) assert.equal(f(`${js};var __s="AAAA${c}${tok.exec(js)[1]}=.BBBB";`).id_held, true, `a base64 string holding ${c}T=`);
   // a class field of the token's name is a property, not a second value; a write in a class's method still is one
   assert.equal(f(`${js};var __c=class extends Object{h0=1;${tok.exec(js)[1]}=-2;}`).id_held, true, "a class field of the token's name");
   assert.equal(f(`${js};var __c=class{m(){${tok.exec(js)[1]}=0}}`).id_held, false, "the token given a second value in a class's method");

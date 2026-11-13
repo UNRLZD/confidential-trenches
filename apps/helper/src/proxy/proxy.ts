@@ -844,15 +844,14 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
     if (Buffer.byteLength(body) > PROXY_BODY_MAX) return source(error(413, "too_large"));
     if (rawQuery.length > QUERY_MAX) return source(error(413, "too_large"));
     // a draw on the vendor's budget for every call that may reach it, the helper's own too; a cache hit or a call joining
-    // one in flight reaches nothing, so it counts in the caller's share alone
-    const take = (shareOnly = false): number => (shareOnly ? budget.take(name, client, 1, true, reserved) : drawUp(name, client, reserved));
+    // one in flight reaches nothing and draws nothing (card chart-candles-never-429)
+    const take = (): number => drawUp(name, client, reserved);
     // card helper-crowd-429: a draw the share or the total refuses waits for its room, until `by` at most, and a draw the
     // vendor's hold refuses waits for the hold's end when it comes by then; a draw that goes is taken at once, with no
-    // await, so a call right behind it still finds it in flight. A cache hit (its share only, which turns with its
-    // window) answers at once, as before.
-    const draw = (shareOnly = false): number | Promise<number> => {
-      const w = take(shareOnly);
-      if (w === 0 || shareOnly) return w;
+    // await, so a call right behind it still finds it in flight.
+    const draw = (): number | Promise<number> => {
+      const w = take();
+      if (w === 0) return w;
       return (async () => {
         let last = w;
         // bounded by rounds as well as by the clock, so a clock that does not move still ends it
@@ -861,7 +860,7 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
           const at = held ? budget.heldUntil(name) : now() + QUEUE_POLL_MS;
           if (at > by || now() >= by) return last;
           await sleep(Math.max(at - now(), 1));
-          last = take(shareOnly);
+          last = take();
         }
         return last;
       })();
@@ -895,18 +894,22 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
       key.sort();
       const id = `${name} ${path}${key.size ? `?${key}` : ""}`;
       const hit = up.cacheMs ? cache.get(id) : undefined;
+      // card chart-candles-never-429: a cache hit, or a call joining one in flight, reaches no vendor and draws nothing,
+      // not even the caller's share: several viewers behind one address (a judge room, a live run's runners) read one
+      // shared answer and are never refused it; what one address can make the helper do is the route's own window
+      // (server.ts UPSTREAM_ROUTE_MAX)
       if (hit && hit.expires > now()) {
-        const wait = draw(true) as number;
-        if (wait > 0) return source(throttled(wait, undefined, budget.refusedBy()));
         out = hit;
       } else {
         let p = inflight.get(id);
         const late = p === undefined ? lateTurn() : null;
         if (late !== null) return source(late);
-        const first = draw(p !== undefined);
-        const wait = typeof first === "number" ? first : await first;
-        budgetMs = mono() - b0;
-        if (wait > 0) return source(refused(wait));
+        if (p === undefined) {
+          const first = draw();
+          const wait = typeof first === "number" ? first : await first;
+          budgetMs = mono() - b0;
+          if (wait > 0) return source(refused(wait));
+        }
         // a read another call began while this one waited is joined, not sent twice
         p ??= inflight.get(id);
         if (!p) {

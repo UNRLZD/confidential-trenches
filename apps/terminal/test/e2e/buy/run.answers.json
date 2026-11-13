@@ -94,10 +94,9 @@
     },
     "box": {
       "path": "pool",
-      "proofReady": true,
-      "proofMs": 10401,
-      "line": "Proof ready Max $0.03",
-      "priceMs": 208002
+      "maxShown": true,
+      "line": "Max $0.03",
+      "maxMs": 208002
     },
     "buy": {
       "taps": 1,
@@ -225,10 +224,9 @@
     },
     "box": {
       "path": "pool",
-      "proofReady": true,
-      "proofMs": 10829,
-      "line": "Proof ready Max $0.03",
-      "priceMs": 10832
+      "maxShown": true,
+      "line": "Max $0.03",
+      "maxMs": 10832
     },
     "buy": {
       "taps": 1,
@@ -349,10 +347,9 @@
     },
     "box": {
       "path": "pool",
-      "proofReady": true,
-      "proofMs": 10694,
-      "line": "Proof ready Max $0.03",
-      "priceMs": 19257
+      "maxShown": true,
+      "line": "Max $0.03",
+      "maxMs": 19257
     },
     "buy": {
       "taps": 1,
