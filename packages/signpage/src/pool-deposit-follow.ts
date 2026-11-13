@@ -298,10 +298,13 @@ export async function followPoolQuote(f: PoolFollowRecord, deps: PoolFollowDeps,
   // anything else, not landed, refused or down, is read again at the slow pace, so a deposit that cannot go is never
   // asked in a tight loop)
   const isOpen = async (): Promise<boolean> => deps.open !== undefined && (await deps.open(f));
+  // a deposit of this round's carry filled (its note may still be landing)
+  let filledNow = false;
   const carry = async (low: bigint, c: { perRung: bigint; keep: bigint }): Promise<boolean> => {
     const amount = askOf(deps.ladder, low, c.perRung, c.keep);
     if (amount === 0n) return false;
     const { end, txs } = await deps.deposit(f, amount, deps.signal);
+    if (end === "filled" || end === "part_filled") filledNow = true;
     // landed only with nothing of U_X's still landing: a rung sent after the one that landed is followed first
     const went = (end === "filled" || end === "part_filled") && !(await isOpen());
     // a plain send's carry of money that is not its own (nothing over its base seen yet) never shows it in the pool
@@ -333,8 +336,13 @@ export async function followPoolQuote(f: PoolFollowRecord, deps: PoolFollowDeps,
   for (;;) {
     if (deps.signal.aborted) return shown;
     let fast = false;
+    filledNow = false;
     try {
       const opened = await isOpen();
+      // a note of U_X's landing, or a deposit that just filled, is read at the fast pace (card
+      // deposit-takes-each-pools-own-coin: a plain send has no status to speed the rounds, and its EVM copy run read in_pool
+      // 64 s after in_transit, the rounds backing off to a minute while its note landed)
+      if (opened) fast = true;
       if (!landed && !opened && paid && deps.noted !== undefined && (await deps.noted(f))) landed = true;
       // the chain first: U_X's money, the lower of two RPCs at finalized, carried into the pool while it covers a deposit
       // (with one reader, its one reading: it only starts a deposit, which reads U_X on the pool's two RPCs itself)
@@ -349,6 +357,7 @@ export async function followPoolQuote(f: PoolFollowRecord, deps: PoolFollowDeps,
           paid = true;
         }
         if (await carry(low, c)) fast = true;
+        if (filledNow) fast = true;
       } else if (landed) {
         // nothing left under U_X to carry: read on to the quote's deadline, so a late send is carried too; while a note of
         // U_X's is still landing, nothing more (no in_pool, no end): its landing, or what it leaves in U_X, comes first

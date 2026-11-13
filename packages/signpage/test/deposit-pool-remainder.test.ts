@@ -265,3 +265,41 @@ test("P2-b: an ended op whose U_X another op still follows is not followed again
   await host.idle();
   assert.ok(poolFollowEnded(rows.get("old") as never), "the ended op stays ended");
 });
+
+test("a plain send's carry read at the fast pace while its note lands (the EVM copy run read in_pool 64 s after in_transit)", async () => {
+  // the carry's deposit fills, its note is still landing for three rounds, then lands: every wait in between is the fast
+  // pace, as a 1Click delivery's is while its status reads SUCCESS
+  const { POOL_FOLLOW_FAST_MS } = await import("../src/pool-deposit-follow.ts");
+  const plan = [
+    { bal: [FLOOR, FLOOR], open: false, noted: false },
+    { bal: [KEEP, KEEP], open: true, noted: false },
+    { bal: [KEEP, KEEP], open: true, noted: false },
+    { bal: [KEEP, KEEP], open: true, noted: false },
+    { bal: [KEEP, KEEP], open: false, noted: true },
+  ] as const;
+  let k = 0, deposited = false;
+  const sleeps: number[] = [], stages: string[] = [];
+  const ac = new AbortController();
+  const now = () => plan[Math.min(k, plan.length - 1)]!;
+  await followPoolQuote(PLAIN(3, "U_X"), {
+    status: async () => {
+      throw new Error("1Click asked");
+    },
+    balances: async () => now().bal,
+    costs: async () => ({ floor: FLOOR, perRung: PER, keep: KEEP }),
+    ladder: SOL_LADDER,
+    deposit: async () => ((deposited = true), { end: "filled", txs: [] }),
+    // the note sent by the carry is open until the round that reads it landed
+    open: async () => deposited && now().open,
+    noted: async () => now().noted,
+    past: async () => false,
+    stage: async (s) => void stages.push(s),
+    sleep: async (ms) => {
+      sleeps.push(ms);
+      if (++k >= plan.length) ac.abort();
+    },
+    signal: ac.signal,
+  });
+  assert.deepEqual(stages, ["in_transit", "in_pool"]);
+  assert.deepEqual(sleeps.slice(0, 4), [POOL_FOLLOW_FAST_MS, POOL_FOLLOW_FAST_MS, POOL_FOLLOW_FAST_MS, POOL_FOLLOW_FAST_MS]);
+});
