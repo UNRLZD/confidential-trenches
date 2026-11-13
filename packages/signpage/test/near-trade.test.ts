@@ -553,6 +553,18 @@ test("W holding less USDC than the buy's amount is not swapped: not_funded, noth
   assert.deepEqual(log.at(-1), ["swap", "not_funded"]);
 });
 
+test("the swap's floor not written (the store failed) stops the buy before the swap is sent: nothing signed for it reaches the helper, the USDC stays on W", async () => {
+  const w = world({ begun: { txs: near(tx(1)) }, start: { exists: true, registered: true, usdc: AMOUNT } });
+  const progress = w.deps.progress;
+  w.deps.progress = async (p) => {
+    if (p.swap !== undefined) throw new Error("store down");
+    return progress(p);
+  };
+  sent(await run(w.deps));
+  assert.equal(w.ev.filter((e) => e[0] === "helper" && methodOf(e[1] as HelperBindTradeRequest) === "ft_transfer_call").length, 0, "no swap sent");
+  assert.deepEqual(w.log.at(-1), ["swap", "record_not_written"]);
+});
+
 test("a read that names another account ends the run read_failed at once, never read again", async () => {
   const { deps, ev, log } = world({ start: { exists: true } });
   deps.readWallet = async (a) => (ev.push(["read", { ...a }]), { account: "cd".repeat(32), height: 1, blockHash: "b", nonce: 1n, held: 0n, registered: false, storageMin: STORAGE_MIN, lostfound: 0n });
@@ -596,6 +608,27 @@ test("F4 a buy that ends below the floor with the token on W writes what W recei
   none.deps.decimals = async () => 18;
   sent(await run(none.deps));
   assert.ok(none.records.every((r) => r.fill === undefined));
+});
+
+test("P3-I a buy below its floor writes no fill while W holds USDC of the least deposit: a stranger's 1 unit after a swap that failed is no position, the USDC goes home", async () => {
+  // W held 1.98 USDC before its payout of 1: 2.98 USDC on W, the swap fails on chain, a stranger sends 1 unit of the coin
+  const { deps, records } = world({ swapFails: true, start: { usdc: 1_980_000n } });
+  deps.decimals = async () => 18;
+  let swapped = false;
+  const helper = deps.helper;
+  deps.helper = async (b) => {
+    const a = await helper(b);
+    if (b.signed_delegates.length > 0 && (JSON.parse(atob(b.signed_delegates[0]!)) as { method: string }).method === "ft_transfer_call") swapped = true;
+    return a;
+  };
+  const read = deps.readWallet;
+  deps.readWallet = async (a) => {
+    const s = await read(a);
+    return a.side === "sell" && swapped ? { ...s, held: s.held + 1n } : s;
+  };
+  sent(await run(deps));
+  assert.ok(records.every((r) => r.fill === undefined), `no fill: ${JSON.stringify(records.map((r) => r.fill ?? null))}`);
+  assert.equal(records.at(-1)!.code, "received_below_floor");
 });
 
 test("F6 carry_failed for a round whose swap landed (its claim failed): never signed again, W read once a side, what W received decides", async () => {

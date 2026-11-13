@@ -30,6 +30,8 @@ export const WORDS = {
   nothingSent: ok("Nothing was sent.", "UNRLZD auth/copy.ts nothingSent: the same screen's line"),
   noPasskeyHere: ok("Passkeys aren't supported here", "UNRLZD auth/copy.ts noPasskey: the sign-in modal's no-passkey screen (auth/view.ts:575-581)"),
   account: ok("Account", "R5 app.js:400 (phone tab)"),
+  portfolioSignedOut: ok("Your equity, positions and trades appear here after you sign in.", "owner 13 Nov 06:44Z; the live UNRLZD terminal's signed-out Portfolio line"),
+  accountSignedOut: ok("Your account appears here after you sign in.", "decided 13 Nov 06:45Z, on the signed-out Portfolio line's pattern"),
   recoveryCode: ok("Recovery code", "owner 1 Nov 16:45Z, keep; drafted from 09-design-brief S2 (S2.1 option) [draft copy]"),
   backup: ok("Backup", "owner 1 Nov 16:45Z, keep; drafted from 09-design-brief S1 account menu [draft copy]"),
   sync: ok("Sync", "owner 1 Nov 16:45Z, keep; drafted from 09-design-brief S19.6 and S1 account menu [draft copy]"),
