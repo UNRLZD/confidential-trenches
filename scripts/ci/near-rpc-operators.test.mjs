@@ -7,7 +7,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { ALLOW, BUNDLES, NEAR_RPC_OPERATORS, NEAR_RPC_SEATS, SKIP, fileProblems, isNearRpc, lineProblems, networkOf, operatorOf, scanFiles, scanTree } from "./near-rpc-operators.mjs";
+import { ALLOW, BUNDLES, NEAR_RPC_KEYED, NEAR_RPC_OPERATORS, NEAR_RPC_SEATS, SKIP, fileProblems, isNearRpc, lineProblems, networkOf, operatorOf, scanFiles, scanTree } from "./near-rpc-operators.mjs";
 import { signBuilt } from "../signpage-built.mjs";
 import { RPCS, operatorOf as gateOperatorOf } from "./money-gate.mjs";
 import { RPC_OPERATORS } from "./rpc-operators.mjs";
@@ -186,6 +186,25 @@ test("the helper's ?keyed=only NEAR seat is FastNEAR's on mainnet: with dRPC two
   // a mainnet seat and a testnet FastNEAR host are no pair
   assert.deepEqual(lineProblems(`const x = ["${SEAT}", "https://test.rpc.fastnear.com"];`, "a.ts"), []);
   for (const other of ["https://ct-api.unrealized.trade/v1/rpc/near", "https://ct-api.unrealized.trade/v1/rpc/near?keyed=only&x=1", "https://ct-api.unrealized.trade/v1/rpc/near?keyed=1"]) {
+    const p = lineProblems(`const u = "${other}";`, "a.ts");
+    assert.equal(p.length, 1, other);
+    assert.match(p[0], /is a NEAR RPC the operator map does not hold/, other);
+  }
+});
+
+// card near-pair-on-keyed-providers: dRPC's keyed NEAR endpoint, lb.drpc.live/near/<key>, the helper pair's second
+test("dRPC's keyed NEAR endpoint is dRPC's on mainnet: with FastNEAR two operators; planted: with near.drpc.org one operator, refused; another path or a query is not it", () => {
+  const K = "https://lb.drpc.live/near/" + "k".repeat(32);
+  const LIT = "https://lb.drpc.live/near/kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk";
+  assert.deepEqual(Object.keys(NEAR_RPC_KEYED), ["lb.drpc.live/near/"]);
+  assert.equal(operatorOf(K), "drpc");
+  assert.equal(networkOf(K), "mainnet");
+  assert.deepEqual(lineProblems(`const pair = ["https://rpc.mainnet.fastnear.com", "${LIT}"];`, "a.ts"), []);
+  const one = lineProblems(`const pair = ["https://near.drpc.org",\n  "${LIT}"];`, "a.ts");
+  assert.equal(one.length, 1);
+  assert.match(one[0], /are one operator \(drpc\)/);
+  for (const other of ["https://lb.drpc.live/near/short", `${LIT}/x`, `${LIT}?x=1`, "https://lb.drpc.live/near-testnet/kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk"]) {
+    assert.equal(operatorOf(other), null, other);
     const p = lineProblems(`const u = "${other}";`, "a.ts");
     assert.equal(p.length, 1, other);
     assert.match(p[0], /is a NEAR RPC the operator map does not hold/, other);

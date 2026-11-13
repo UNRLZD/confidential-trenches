@@ -26,6 +26,11 @@
 //   plain, then the tag 3, card owners-solana-buy-lands). SOL_COPY_SCENARIO=copy-takeable runs that scenario instead;
 //   SOL_COPY_SCENARIO=tag3-fail runs the driver's tag3-fail (FLOW_AFTER=stay): a buy of 2 pieces at 1 bp whose tag 3 pump
 //   refuses (F buys the coin first), its tag 2s landed; it passes when the page's rent back sweeps W's SOL into the pool.
+// - SOL_COPY_FLOW=plain (card deposit-takes-each-pools-own-coin): the curve coin's accounts only (no buy or sell), through
+//   pool-plain-send-copy.mjs in place of the flow: the page's pool.address for SOL on Solana (a plain send to U_X, no
+//   1Click), an outside wallet's two SystemProgram transfers to U_X (one lamport under the floor, then the top-up), the
+//   follow carrying it into the pool with no status read, then pool-withdraw-devnet.mjs's withdraw of that note to a
+//   plain address. SOL/USD for the quote's cap is read here first on the public mainnet RPCs (the kit's poolUsdPrice).
 // - FLOW_RUNG=<lamports> (card round-trip-costs-less, pool-flow-devnet.mjs): the run's one note, 0.01 SOL by default; a
 //   larger rung leaves W enough after its full sell for the sweep, so the record times the sale, teardown and sweep.
 // - Keys are made fresh for the copy and live only in the run's temp folder, removed at the end.
@@ -46,8 +51,10 @@ const PLANT = process.env.SOL_COPY_PLANT ?? "";
 const STEPS = process.env.SOL_COPY_STEPS ?? "all"; // "buy": deposit and buy only
 // the helper's block engine stand-in (./copy-net.mjs): swallow (takes the bundle, never lands it), busy, refused, lands
 const FLOW = process.env.SOL_COPY_FLOW ?? "pool";
-if (!["pool", "pieces"].includes(FLOW)) throw new Error(`SOL_COPY_FLOW: pool or pieces, not ${FLOW}`);
+if (!["pool", "pieces", "plain"].includes(FLOW)) throw new Error(`SOL_COPY_FLOW: pool, pieces or plain, not ${FLOW}`);
 const PIECES = FLOW === "pieces";
+const PLAIN = FLOW === "plain";
+if (PLAIN && (PLANT || (ONLY.length && ONLY.join() !== "curve") || STEPS !== "all")) throw new Error("SOL_COPY_FLOW=plain runs the curve coin alone, with no plant and every step");
 // the pieces driver's scenario: copy-part1 (the default), copy-takeable (the Max past an epoch boundary, the load), or
 // tag3-fail (the tag 3 refused by pump once its tag 2s landed: W swept back into the pool)
 const SCENARIO = process.env.SOL_COPY_SCENARIO ?? "copy-part1";
@@ -96,7 +103,7 @@ const many = async (keys) => {
 
 // 1. the coins
 const coins = Object.fromEntries(given.map((g) => g.split("=")).map(([k, v]) => [k, { mint: v, list: "given" }]));
-const KINDS = PIECES ? ["curve"] : ["curve", "mayhem", "graduated"].filter((k) => ONLY.length === 0 || ONLY.includes(k));
+const KINDS = PIECES || PLAIN ? ["curve"] : ["curve", "mayhem", "graduated"].filter((k) => ONLY.length === 0 || ONLY.includes(k));
 let candidates = [];
 if (KINDS.some((k) => !coins[k])) {
   const lists = await (await fetch("https://ct-api.unrealized.trade/v1/market/lists?chain=solana", { headers: { origin: "https://ct.unrealized.trade" } })).json();
@@ -137,6 +144,17 @@ for (const k of KINDS) {
 }
 log(`skipped ${JSON.stringify(skipped)}`);
 log(`coins ${JSON.stringify(coins)}`);
+
+// the plain send's quote cap: SOL/USD read now on the two public mainnet RPCs (the kit's poolUsdPrice), as the page's
+// PoolStatePrice (src/pool-price.ts)
+let plainPrice = null;
+if (PLAIN) {
+  const { poolUsdPrice } = await import("../../kit/src/price/pool-usd.ts");
+  mainnetReads++;
+  const p = await poolUsdPrice({ chain: "solana", rpcs: main });
+  plainPrice = { price: p.price.toString(), expo: p.expo, published_s: p.publishedS, read_ms: Date.now() };
+  log(`SOL/USD ${JSON.stringify(plainPrice)}`);
+}
 
 // 2. what to clone: the pool's own accounts and table, the tip accounts, and each coin's buy and sell accounts
 const DUMMY = [0, 1].map(() => base58.encode(ed25519.getPublicKey(randomBytes(32))));
@@ -359,6 +377,31 @@ for (const kind of KINDS) {
     records.push({ coin: kind, step: "pieces", ok: r.code === 0 && f?.ok === true, exit: r.code, why: f?.why ?? null });
     continue;
   }
+  if (PLAIN) {
+    log("plain send: pool-plain-send-copy.mjs");
+    const r = await runNode(["packages/signpage/scripts/pool-plain-send-copy.mjs", flowOut], { FLOW_COPY: cfg, PLAIN_PRICE: JSON.stringify(plainPrice) });
+    const f = existsSync(flowOut) ? JSON.parse(readFileSync(flowOut, "utf8")) : null;
+    let withdraw = null;
+    if (r.code === 0 && f?.seedFile) {
+      const to = base58.encode(ed25519.getPublicKey(randomBytes(32)));
+      const wOut = join(dir, "withdraw.json");
+      log(`plain: withdraw of the carried note to the plain address ${to}`);
+      const wr = await runNode(["packages/signpage/scripts/pool-withdraw-devnet.mjs", to, "max", wOut], { FLOW_COPY: cfg, FLOW_RESUME: f.seedFile });
+      withdraw = { exit: wr.code, to, out: existsSync(wOut) ? JSON.parse(readFileSync(wOut, "utf8")) : null, tail: wr.out.split("\n").slice(-30) };
+    }
+    runs.plain = { exit: r.code, plain: f, withdraw, tail: r.out.split("\n").slice(-30) };
+    const seen = new Set();
+    for (const s of [...(f?.steps ?? []), ...(withdraw?.out?.steps ?? [])]) {
+      if (seen.has(s.signature)) continue;
+      seen.add(s.signature);
+      const tx = await local("getTransaction", [s.signature, { encoding: "json", commitment: "confirmed", maxSupportedTransactionVersion: 0 }]);
+      records.push(txRecord("plain", s.step, s.signature, tx, { UX: f?.ux ?? null }, (x) => base58.decode(x)));
+    }
+    for (const s of [...(f?.simFails ?? []), ...(withdraw?.out?.simFails ?? [])]) records.push({ coin: "plain", step: s.phase, ok: false, simulation: s });
+    records.push({ coin: "plain", step: "plain send", ok: r.code === 0 && (f?.failures ?? ["none"]).length === 0 && f?.statusCalls === 0, exit: r.code, failures: f?.failures ?? null, statusCalls: f?.statusCalls ?? null, uxAfter: f?.uxAfter ?? null, note: f?.note ?? null });
+    records.push({ coin: "plain", step: "withdraw", ok: withdraw?.exit === 0 && withdraw?.out?.sent === true, exit: withdraw?.exit ?? null, stage: withdraw?.out?.op?.stage ?? null, sent: withdraw?.out?.sent ?? null, to: withdraw?.to ?? null });
+    continue;
+  }
   log(`${kind} ${c.mint}: deposit, buy${STEPS === "buy" ? "" : ", sell"}`);
   // a graduated coin runs on the copy's own PumpSwap table, with the pump curve's pinned one
   let tables = "pinned";
@@ -415,9 +458,12 @@ const record = {
     "the 151-block clock on real slot times on the real RPC pair: the copy's slots run on this machine's clock",
   ] } : {}),
   at: new Date().toISOString(),
-  what: PIECES
-    ? `a buy of several pieces of the Solana pool balance on a local copy of mainnet (solana-test-validator, mainnet's feature set, mainnet accounts cloned): ${SCENARIO === "tag3-fail" ? "2 notes of 0.01 SOL, a buy of 2 pieces at 1 bp whose tag 3 pump refuses after a front-run, its tag 2s landed, W swept back into the pool" : SCENARIO === "copy-takeable" ? "5 notes of 0.01 SOL, Max ready after a load and past an epoch boundary" : "6 notes of 0.01 SOL, a buy only 5 pay, a buy of 2 pieces and Max"}`
-    : "deposit, buy, sell and withdraw of the Solana pool on a local copy of mainnet (solana-test-validator, mainnet's feature set, mainnet accounts cloned)",
+  plainPrice,
+  what: PLAIN
+    ? "the Solana pool's own coin sent straight to U_X on a local copy of mainnet (solana-test-validator, mainnet's feature set, mainnet accounts cloned): the page's pool.address plain-send answer, an outside wallet's two transfers, the follow's carry with no 1Click read, and a withdraw of the note"
+    : PIECES
+      ? `a buy of several pieces of the Solana pool balance on a local copy of mainnet (solana-test-validator, mainnet's feature set, mainnet accounts cloned): ${SCENARIO === "tag3-fail" ? "2 notes of 0.01 SOL, a buy of 2 pieces at 1 bp whose tag 3 pump refuses after a front-run, its tag 2s landed, W swept back into the pool" : SCENARIO === "copy-takeable" ? "5 notes of 0.01 SOL, Max ready after a load and past an epoch boundary" : "6 notes of 0.01 SOL, a buy only 5 pay, a buy of 2 pieces and Max"}`
+      : "deposit, buy, sell and withdraw of the Solana pool on a local copy of mainnet (solana-test-validator, mainnet's feature set, mainnet accounts cloned)",
   validator: version,
   mainnetSlot: read.slot,
   rent: { mainnet: mainRent, copy: copyRent },

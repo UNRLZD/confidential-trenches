@@ -43,7 +43,7 @@ test("every file the sandbox suite reads is one the rule runs the suite for", ()
 
 test("planted: a file the suite reads but the rule misses fails", () => {
   const reads = suiteReads();
-  for (const gone of ["apps/helper/src/token-status/", "packages/kit/zk/", "scripts/net-window.mjs", "packages/kit/test/vectors/", "apps/helper/src/withdraw/", "apps/helper/test/withdraw-send/", "packages/kit/test/vault-settle-cli.mjs", "packages/exit/test/out-cli.ts", "packages/exit/src/", "packages/wallet/src/"]) {
+  for (const gone of ["apps/helper/src/token-status/", "apps/helper/src/rpc/operator.ts", "packages/kit/zk/", "scripts/net-window.mjs", "packages/kit/test/vectors/", "apps/helper/src/withdraw/", "apps/helper/test/withdraw-send/", "packages/kit/test/vault-settle-cli.mjs", "packages/exit/test/out-cli.ts", "packages/exit/src/", "packages/wallet/src/"]) {
     const missed = uncovered(reads, PATHS.filter((p) => p !== gone));
     assert.ok(missed.length > 0 && missed.every((f) => f.startsWith(gone)), `without ${gone} the rule still covers ${missed}`);
   }
