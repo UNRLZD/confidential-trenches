@@ -3,11 +3,13 @@
 // drafted) and the night's two (8 Nov 19:40Z, kept as drawn) is final in what the hosts serve: drawn with no
 // data-draft-copy, its text unchanged. It reads each host's served page and the script it names and checks the deployed
 // bundle:
-//   - app: APP_HOST's script holds each of the 18 terminal words as a final entry: the word's text, then a source that
+//   - app: APP_HOST's script holds each of the 16 terminal words as a final entry: the word's text, then a source that
 //     starts with its pick ("owner 8 Nov 07:55Z, kept; ..." or "8 Nov 19:40Z, kept as drawn; ..."), made by the words
 //     table's final helper (draft:!1) or written as a literal entry with draft:!1. The terminal draws data-draft-copy
 //     only for an entry whose draft flag is set (apps/terminal/test/words-final.test.ts holds each helper to that line),
-//     so a final entry draws no mark;
+//     so a final entry draws no mark. 13 Nov 07:53Z: removed, the app names no proof: the two proof words of the trade box
+//     (trade.proofReady "Proof ready", trade.proofMaking "Making proof") are no longer wanted, and REMOVED_TEXTS must be
+//     absent from every script of the app (apps/terminal/test/words-final.test.ts holds the same set on the unit side);
 //   - sign: SIGN_HOST's script holds each of the 18 held and withdraw texts (held.*, pw.*), writes data-draft-copy only
 //     through the one helper that reads a key set (never for a fixed word), and the two sets name only the words the page
 //     does not hold: the vault form's To, Amount, Min $ and the unmatched notice, the pool form's To and Amount.
@@ -19,8 +21,9 @@
 //   node scripts/live-checks/words-nov8-final.mjs [--host sign|app] [--record <file>]
 //     the deployed hosts (both unless --host names one): SIGN_HOST https://confidential.unrealized.trade/ and
 //     APP_HOST https://ct-app.unrealized.trade/
-//   node scripts/live-checks/words-nov8-final.mjs --local [--host sign|app] [--record <file>]
-//     the same read on this checkout: packages/signpage (index.html, public/app.js) and apps/terminal/dist (built first)
+//   node scripts/live-checks/words-nov8-final.mjs --local [--host sign|app] [--build <dir>] [--record <file>]
+//     the same read on this checkout: packages/signpage (index.html, public/app.js) and apps/terminal/dist (built first;
+//     --build names another terminal build to read in its place)
 //     PASS exit 0, FAIL exit 1, error exit 2
 // --record writes what the run read (which markers each file holds, not the files), so the check's test can replay it.
 import "../net-window.mjs";
@@ -42,11 +45,13 @@ export const AS_DRAWN = "8 Nov 19:40Z, kept as drawn";
 export const APP_WORDS = [
   ["token.gridLines", "Grid lines", KEPT], ["token.lastLine", "Last price line", KEPT], ["token.indMA", "MA", KEPT],
   ["token.indEMA", "EMA", KEPT], ["token.indBOLL", "BOLL", KEPT], ["token.indRSI", "RSI", KEPT], ["token.indMACD", "MACD", KEPT],
-  ["trade.proofReady", "Proof ready", KEPT], ["trade.proofMaking", "Making proof", KEPT], ["trade.poolBare", "Pool", KEPT],
-  ["trade.poolSuffix", "pool", KEPT], ["positions.toPool", "Back to Cash", KEPT], ["discover.updated", "Updated {age} ago", KEPT],
+  ["trade.poolBare", "Pool", KEPT], ["trade.poolSuffix", "pool", KEPT], ["positions.toPool", "Back to Cash", KEPT], ["discover.updated", "Updated {age} ago", KEPT],
   ["deposit.to", "To", KEPT], ["portfolio.exportKey", "Export key", KEPT], ["portfolio.wallets", "Wallets", KEPT],
   ["discover.padMenuTitle", "Launchpads by tokens now", AS_DRAWN], ["search.placeholder", "Name, symbol or address", AS_DRAWN],
 ];
+/** 13 Nov 07:53Z: removed, the app names no proof. Two of the 8 Nov words are gone from the screen; their texts must be in
+ *  none of the app's scripts. */
+export const REMOVED_TEXTS = ["Proof ready", "Making proof"];
 /** The signing page's words kept as drafted (the 8 Nov page's held.* and pw.*), by key on the page and the text drawn. */
 export const SIGN_WORDS = [
   ["held.moveOut", "Move out"], ["held.links", "This links your deposit to this account."], ["held.moved", "Moved"],
@@ -93,6 +98,9 @@ const setOf = (js, keys) => {
   return false;
 };
 
+/** Which of the removed texts a script holds, anywhere in its text. */
+export const removedIn = (js) => REMOVED_TEXTS.filter((t) => js.includes(t));
+
 /** The markers one host's script holds, by name. */
 export function found(host, js) {
   if (host === "app") return APP_WORDS.filter(([id, text, pick]) => appFinal(text, pick, js, id)).map(([id]) => `final ${id}`);
@@ -124,6 +132,11 @@ export function judge(rec) {
     const js = r.js ?? [];
     say(js.length > 0 && js.every((f) => f.status === 200), `${h}: ${js.length} script(s) named by the page, each answering 200`);
     const held = new Set(js.flatMap((f) => f.found ?? []));
+    if (h === "app") {
+      const read = js.every((f) => Array.isArray(f.removed));
+      const present = [...new Set(js.flatMap((f) => f.removed ?? []))];
+      say(js.length > 0 && read && present.length === 0, read ? (present.length ? `app: the scripts still hold the removed text${present.length > 1 ? "s" : ""}: ${present.join(", ")}` : `app: the scripts hold none of the removed texts (${REMOVED_TEXTS.join(", ")})`) : "app: the answer does not say which removed texts each script holds");
+    }
     const miss = MARKERS[h].filter((m) => !held.has(m));
     say(miss.length === 0, miss.length ? `${h}: the scripts lack ${miss.length} of ${MARKERS[h].length}: ${miss.join(", ")}` : `${h}: the scripts hold all ${MARKERS[h].length}: ${h === "app" ? "each kept word a final entry" : "each kept text, no draft mark for a fixed word, only the unpicked keys in the draft sets"}`);
   }
@@ -136,8 +149,8 @@ async function http(url) {
   return { status: r.status, text: await r.text() };
 }
 
-async function readHost(host, local) {
-  const h = HOSTS[host];
+async function readHost(host, local, build) {
+  const h = host === "app" && build ? { ...HOSTS.app, local: build } : HOSTS[host];
   const file = (rel) => {
     try {
       return { status: 200, text: readFileSync(path.join(h.local, rel), "utf8") };
@@ -149,14 +162,14 @@ async function readHost(host, local) {
   const rec = { source: local ? `this checkout, ${path.relative(ROOT, h.local)}` : h.url, pageStatus: page.status, js: [] };
   for (const ref of scriptsOf(page.text)) {
     const f = local ? file(h.localJs(ref)) : await http(new URL(ref, h.url).href);
-    rec.js.push({ url: ref, status: f.status, found: found(host, f.text) });
+    rec.js.push({ url: ref, status: f.status, found: found(host, f.text), ...(host === "app" ? { removed: removedIn(f.text) } : {}) });
   }
   return rec;
 }
 
-export async function collect({ hosts = ["sign", "app"], local = false } = {}) {
+export async function collect({ hosts = ["sign", "app"], local = false, build = null } = {}) {
   const rec = { at: new Date().toISOString(), hosts: {} };
-  for (const h of hosts) rec.hosts[h] = await readHost(h, local);
+  for (const h of hosts) rec.hosts[h] = await readHost(h, local, build);
   return rec;
 }
 
@@ -166,7 +179,8 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
   try {
     const host = opt("--host", null);
     if (host !== null && !Object.hasOwn(HOSTS, host)) throw new Error("--host: sign or app");
-    const rec = await collect({ hosts: host ? [host] : ["sign", "app"], local: a.includes("--local") });
+    if (a.includes("--build") && !a.includes("--local")) throw new Error("--build reads a local build: add --local");
+    const rec = await collect({ hosts: host ? [host] : ["sign", "app"], local: a.includes("--local"), build: a.includes("--build") ? path.resolve(opt("--build", "")) : null });
     const file = opt("--record", null);
     if (file) writeFileSync(file, `${JSON.stringify(rec, null, 1)}\n`);
     const { ok, lines } = judge(rec);

@@ -281,6 +281,7 @@ export const CHANGED = [
   "scripts/live-checks/withdraw-form-shows-what-you-can-send.mjs",
   "scripts/live-checks/restore-shows-the-balance-in-seconds.mjs",
   "scripts/live-checks/helper-says-why-a-vendor-refused.mjs",
+  "scripts/live-checks/screens-never-say-proof.mjs",
 ];
 
 // Scripts in the searched folders that open no connection from Node, and why.

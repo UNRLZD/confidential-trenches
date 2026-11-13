@@ -7,8 +7,9 @@
 // (S10) and 9 Activity rows' worth of height; phone rows 68 with at least 6 under the sticky segments; and the taps:
 // Closed, search and hide small, the Activity tab, a type chip, a row opened to its receipt, the phone action sheet and
 // its sell, each tx link on its explorer with target _blank.
-// The pool rows (card balances-per-chain): each pool view's data-pools, Ready a dash (never $0.00) when the page sends
-// no ready, and the block inside its panel with no clipped text; the four pool rows also at 1280 x 720 (card
+// The pool rows (card balances-per-chain): each pool view's data-pools, one Balance column (13 Nov 07:53Z: Ready and
+// Pending removed, the app names no proof) whose numbers end under its header, and the block inside its panel with no
+// clipped text; the four pool rows also at 1280 x 720 (card
 // app-faults-seen-on-126). --scheme light|dark emulates the viewer's scheme.
 //   node apps/terminal/test/portfolio/run.mjs [--shots <dir>] [--scheme light|dark]     PASS exit 0, FAIL exit 1
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
@@ -93,14 +94,14 @@ const CASH = {
 // item 7 (card app-faults-seen-on-122): each fixture's Positions tile and its parts as drawn, [tile, Coins, Reserve];
 // null: nothing held, no parts
 const HELD = { openbuy: ["$0.70", "$0.01", "$0.69"], "openbuy-noheld": null };
-// each fixture's pool view, and per row [chain, Balance, Ready, Pending] as drawn
+// each fixture's pool view, and per row [chain, Balance, Withdraw] as drawn
 const POOLS = {
   loading: ["loading"],
   offline: ["offline"],
   rows: ["unread"],
-  // card app-faults-seen-on-122: NEAR's vault USDC first, Ready and Pending dashes (the vault sends no proof queue)
-  pools: ["rows", [["NEAR", "73.18 USDC", "—", "—", ""], ["Solana", "1.25M SOL", "999.99K", "250K", ""], ["Base", "0.25 ETH", "0.2", "0.05", ""], ["Robinhood", "0 ETH", "0", "0", ""]]],
-  "pools-noready": ["rows", [["NEAR", "73.18 USDC", "—", "—", ""], ["Solana", "12.5 SOL", "—", "—", ""], ["Base", "0.001 ETH", "—", "—", ""]]],
+  // card app-faults-seen-on-122: NEAR's vault USDC first; one balance a chain, whatever is ready
+  pools: ["rows", [["NEAR", "73.18 USDC", ""], ["Solana", "1.25M SOL", ""], ["Base", "0.25 ETH", ""], ["Robinhood", "0 ETH", ""]]],
+  "pools-noready": ["rows", [["NEAR", "73.18 USDC", ""], ["Solana", "12.5 SOL", ""], ["Base", "0.001 ETH", ""]]],
   "pools-empty": ["empty"],
 };
 
@@ -281,11 +282,18 @@ try {
           // the row's words and numbers (not Withdraw's tap box or its HopLine, padded past the line on purpose)
           const cells = (x) => [...x.children].filter((c) => !c.matches(".plw, .hopline"));
           const hidden = [...b.querySelectorAll("[data-pool]")].filter((x) => cells(x).some((c) => c.getBoundingClientRect().bottom > edge + 0.5)).map((x) => x.getAttribute("data-pool"));
-          return { view: b.getAttribute("data-pools"), rows, inside: box.bottom <= panel.bottom + 0.5 && box.right <= panel.right + 0.5, clipped, hidden, scroll: sc ? [sc.scrollHeight, sc.clientHeight] : null };
+          // one column header, Balance, and every row's balance ending where it ends: no empty column, no shifted number
+          const heads = [...b.querySelectorAll(".plc")].map((h) => h.textContent);
+          const headRight = b.querySelector(".plc")?.getBoundingClientRect().right ?? null;
+          const shifted = [...b.querySelectorAll("[data-pool]")].filter((x) => x.getAttribute("data-pool") !== "unread").map((x) => x.children[1]?.getBoundingClientRect().right).filter((rt) => headRight === null || rt === undefined || Math.abs(rt - headRight) > 0.5);
+          const named = /proo?f|\bready\b|pending/i.test(b.innerText);
+          return { heads, shifted, named, view: b.getAttribute("data-pools"), rows, inside: box.bottom <= panel.bottom + 0.5 && box.right <= panel.right + 0.5, clipped, hidden, scroll: sc ? [sc.scrollHeight, sc.clientHeight] : null };
         }, phone ? ".pfm .pools" : ".pfd .pools");
         const [view, rows] = POOLS[f];
         check(r?.view === view, `${tag}: pools view ${r?.view}, want ${view}`);
         if (rows) check(JSON.stringify(r.rows) === JSON.stringify(rows), `${tag}: pool rows ${JSON.stringify(r?.rows)}`);
+        if (view === "rows" || view === "unread" || view === "loading") check(JSON.stringify(r?.heads) === '["Balance"]' && r.shifted.length === 0, `${tag}: pool columns ${JSON.stringify(r?.heads)}, balances off their header ${JSON.stringify(r?.shifted)}`);
+        check(r?.named === false, `${tag}: the pool block names a proof, Ready or Pending`);
         check(r?.inside && r.clipped.length === 0, `${tag}: pool block outside its panel or clipped ${JSON.stringify(r)}`);
         check(r?.hidden.length === 0, `${tag}: pool rows past the bottom of what shows them ${JSON.stringify(r?.hidden)} (scroll ${JSON.stringify(r?.scroll)})`);
       }

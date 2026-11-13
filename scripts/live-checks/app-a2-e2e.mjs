@@ -3,7 +3,7 @@
 // (apps/terminal/test/e2e/buy/run.mjs, AE-11) relies on, read only (it signs nothing, sends nothing, uses no account):
 //   - APP_HOST's token route, /token/solana/<mint> (the run's first page): 200 text/html, framed only by SIGN_HOST
 //     (frame-ancestors), its connect-src naming the helper; and the scripts the page names hold every mark the run
-//     drives (the trade box, its proof and Max line, its amount, its Buy, the Sell side, the sell box and its Sell): a
+//     drives (the trade box, its Max line, its amount, its Buy, the Sell side, the sell box and its Sell): a
 //     mark renamed or dropped on the deployed build fails here, before a run drives a box no user sees;
 //   - /v1/market/token for a Solana mint, asked from APP_HOST's origin: 200, CORS for APP_HOST, and the same fields as the
 //     run's one stub (apps/terminal/test/e2e/buy/market-token.json): its top level, its row and its risk keys. The run
@@ -29,8 +29,8 @@ export const APP_ORIGIN = "https://ct-app.unrealized.trade";
 export const SIGN_ORIGIN = "https://confidential.unrealized.trade";
 /** A Solana mint the helper's market data always holds (BONK, a public mint). */
 export const LIVE_MINT = "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263"; // gitleaks:allow (a public Solana mint)
-/** The marks the run drives, each a data-testid or a class as the source or the minified build writes it. */
-export const MARKS = ["trade-box", "trade-proof", "trade-max", "trade-cta", "trade-side-sell", "sell-box", "sell-cta", "trb-amount", "trb-input"];
+/** The marks the run drives, each a data-testid or a class as the source or the minified build writes it. 13 Nov 07:53Z: removed, the app names no proof: the run no longer waits on a proof mark. */
+export const MARKS = ["trade-box", "trade-max", "trade-cta", "trade-side-sell", "sell-box", "sell-cta", "trb-amount", "trb-input"];
 const Q = "[`\"']";
 const markRe = (m) => new RegExp(`${Q}${m}${Q}`, "g");
 /** Each mark's count in one script. */

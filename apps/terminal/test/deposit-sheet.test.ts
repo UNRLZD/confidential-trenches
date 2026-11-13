@@ -8,7 +8,7 @@ import { createHash } from "node:crypto";
 import { test } from "node:test";
 import { POOL_DEPOSIT_STAGES } from "@blindfill/kit";
 import type { DepositAsset, Operation, SignpageResults } from "@blindfill/kit";
-import { formHeld, POOL_ASK_TRIES, poolAskAgainIn, quoteFits, addressHeading, ADDRESS_STATES, assetOf, chainsOf, countdown, DESTS, destFundable, elapsed, getAddressOn, HELD_STATES, lessThan, parseAmount, pickAsset, poolQuote, poolReady, poolStatusFor, poolStatusOf, recentRows, sheetState, statusOf, statusState, symbolsOf, usd } from "../src/screens/deposit/model.ts";
+import { formHeld, POOL_ASK_TRIES, poolAskAgainIn, quoteFits, addressHeading, ADDRESS_STATES, assetOf, chainsOf, countdown, DESTS, destFundable, elapsed, getAddressOn, HELD_STATES, lessThan, parseAmount, pickAsset, poolQuote, poolBalance, poolStatusFor, poolStatusOf, recentRows, sheetState, statusOf, statusState, symbolsOf, usd } from "../src/screens/deposit/model.ts";
 import { qrOf } from "../src/screens/deposit/qr.ts";
 import type { Asset, DepositStatus, PoolDepositStatus, SheetInput } from "../src/screens/deposit/model.ts";
 import { DRAFTS, WORDS } from "../src/screens/deposit/words.ts";
@@ -306,17 +306,17 @@ test("pool.address's answer: the quote only when it names the chain asked; anoth
   assert.equal(poolQuote("solana", ans("solana")), null, "an address with no checked quote: nothing follows it, never drawn");
 });
 
-test("ready to buy: the chain's pool from state.pools, Ready and Pending in its own asset", () => {
+test("in the pool: the chain's one Balance from state.pools, in its own asset, whatever is ready", () => {
   const pools = [
     { chain: "solana" as const, asset: "SOL" as const, balance: "0.25", ready: "0.2" },
     { chain: "base" as const, asset: "ETH" as const, balance: "0.01" },
   ];
-  assert.deepEqual(poolReady(pools, "solana"), { asset: "SOL", ready: "0.2", pending: "0.05" });
-  assert.deepEqual(poolReady(pools, "base"), { asset: "ETH", ready: null, pending: "0.01" }, "no proof yet: all pending");
-  assert.deepEqual(poolReady([{ chain: "solana", asset: "SOL", balance: "0.2", ready: "0.2" }], "solana"), { asset: "SOL", ready: "0.2", pending: null });
-  assert.equal(poolReady(pools, "robinhood"), null);
-  assert.equal(poolReady(undefined, "solana"), null);
-  assert.deepEqual(poolReady([{ chain: "solana", asset: "SOL", balance: "1", ready: "1.000000000" }], "solana"), { asset: "SOL", ready: "1", pending: null });
+  assert.deepEqual(poolBalance(pools, "solana"), { asset: "SOL", balance: "0.25" });
+  assert.deepEqual(poolBalance(pools, "base"), { asset: "ETH", balance: "0.01" });
+  assert.deepEqual(poolBalance([{ chain: "solana", asset: "SOL", balance: "0.2", ready: "0", making: "0.2" }], "solana"), { asset: "SOL", balance: "0.2" });
+  assert.equal(poolBalance(pools, "robinhood"), null);
+  assert.equal(poolBalance(undefined, "solana"), null);
+  assert.deepEqual(poolBalance([{ chain: "solana", asset: "SOL", balance: "1.000000000", ready: "1" }], "solana"), { asset: "SOL", balance: "1" });
 });
 
 test("Recent: a pool deposit is a deposit, by its stage's word", () => {
@@ -334,9 +334,12 @@ test("a deposit already asked follows its own stages: the destination cannot tur
   for (const [status, want] of TABLE) assert.equal(sheetState({ ...base, dest: "solana", poolOpen: true, checked: { kind: "ok", value: checked }, status }), want, JSON.stringify(status));
 });
 
-test("the pool words are the ones the owner kept on Portfolio (owner 3 Nov 09:17Z): Ready and Pending", () => {
-  assert.deepEqual([WORDS.ready.text, WORDS.pending.text], ["Ready", "Pending"]);
-  for (const k of ["ready", "pending"] as const) assert.ok(!WORDS[k].draft && WORDS[k].source.startsWith("owner 3 Nov 09:17Z"), k);
+test("13 Nov 07:53Z: the sheet names no proof: Balance, the word Portfolio's pool rows draw, and no Ready or Pending", () => {
+  assert.equal(WORDS.balance.text, "Balance");
+  assert.ok(!WORDS.balance.draft && WORDS.balance.source.startsWith("owner 3 Nov 09:17Z"));
+  assert.equal("ready" in WORDS, false);
+  assert.equal("pending" in WORDS, false);
+  for (const [k, w] of Object.entries(WORDS)) assert.doesNotMatch(w.text, /proo?f|prov(e|ed|ing)|\bready\b|pending/i, k);
 });
 
 test("held-move-forgotten-tx: a moved-out deposit draws no Held mark and no withdraw.open", () => {

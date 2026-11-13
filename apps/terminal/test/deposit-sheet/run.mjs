@@ -14,10 +14,12 @@
 // picked back draws the quote again and Get address sends deposit.quote; Recent's header is whole or not drawn. Card
 // deposit-to-pool-pools: the Solana pool, which pool.address answers (Base and Robinhood refuse), draws the form with no
 // dry quote and Get address on; its Get address sends pool.address with the chain, asset and amount only (never a vault
-// quote), and every pool_deposit stage draws its own state, the done screen (pool-in) only at in_pool with Ready and
-// Pending from state.pools; another chain's answer draws no address. Card deposit-pool-picks-its-own-coin: each place
-// picked starts on its own coin, whatever was picked before: the NEAR vault USDC on NEAR, the Solana pool SOL on Solana,
-// the Base pool ETH on Base, the Robinhood pool ETH on Robinhood, every other asset still offered.
+// quote), and every pool_deposit stage draws its own state, the done screen (pool-in) only at in_pool with the chain's
+// Balance from state.pools and no Ready or Pending (13 Nov 07:53Z: removed, the app names no proof); another chain's
+// answer draws no address.
+// Card deposit-pool-picks-its-own-coin: each place picked starts on its own coin, whatever was picked before: the NEAR
+// vault USDC on NEAR, the Solana pool SOL on Solana, the Base pool ETH on Base, the Robinhood pool ETH on Robinhood,
+// every other asset still offered.
 //   node apps/terminal/test/deposit-sheet/run.mjs [--shots <dir>]     PASS exit 0, FAIL exit 1
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
@@ -127,6 +129,7 @@ function serve(dir) {
 const fails = [];
 const drafts = new Map();
 const check = (ok, what) => ok || fails.push(what);
+const norm = (s) => s.replace(/\s+/g, " ").trim();
 const rect = (page, sel) => page.locator(sel).first().evaluate((e) => { const r = e.getBoundingClientRect(); return [r.x, r.y, r.width, r.height]; });
 const near = (a, b, tol) => a.every((v, i) => Math.abs(v - b[i]) <= tol);
 
@@ -189,14 +192,18 @@ try {
       // BAR-12: the done screen only at the kit's done
       // a pool's done screen (pool-in) only at the kit's in_pool, with what its pool holds ready to buy
       check(["S4.16", "pool-in"].includes(want) === ((await page.locator(".ddone").count()) === 1), `${tag}: done screen ${want}`);
+      if (want === "pool-in") {
+        const done = norm(await page.locator(".ddone").innerText());
+        check(!/proo?f|\bready\b|pending/i.test(done) && (await page.locator(".ddone [data-ready], .ddone [data-pending]").count()) === 0, `${tag}: the done screen says ${JSON.stringify(done)}`);
+      }
       if (want === "pool-in" && f === "pool-in-noentry") {
-        const n = await page.locator("[data-ready], [data-pending]").count();
-        check(n === 0 && !(await page.locator(".ddone").innerText()).includes("Ready"), `${tag}: no state.pools entry, yet a Ready or Pending line`);
+        check((await page.locator(".ddone [data-balance]").count()) === 0, `${tag}: no state.pools entry, yet a Balance`);
       } else if (want === "pool-in") {
-        const ready = await page.locator("[data-ready]").first().getAttribute("data-ready");
-        check(ready === (f === "pool-in" ? "0.4" : "none"), `${tag}: Ready ${ready}`);
-        const pend = await page.locator("[data-pending]").first().getAttribute("data-pending").catch(() => null);
-        check(pend === (f === "pool-in" ? "0.01" : "0.41"), `${tag}: Pending ${pend}`);
+        // the chain's one Balance, whatever of it is ready
+        const bal = await page.locator(".ddone [data-balance]").first().getAttribute("data-balance");
+        check(bal === "0.41", `${tag}: Balance ${bal}, want 0.41`);
+        const done = norm(await page.locator(".ddone").innerText());
+        check(done.includes("Balance 0.41 SOL"), `${tag}: the done screen ${JSON.stringify(done)}, want "Balance 0.41 SOL"`);
         // Recent's row for the pool deposit: its word and its pool, as a done vault row its word and USD
         const row = await page.$$eval(".drecent .it", (els) => els.map((e) => e.innerText.replace(/\s+/g, " ").trim()));
         check(JSON.stringify(row) === '["Deposited Solana"]', `${tag}: Recent ${JSON.stringify(row)}`);
