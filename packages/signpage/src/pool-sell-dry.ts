@@ -67,7 +67,7 @@ import type { KindContext, Running } from "./api.ts";
 import { keptTokenDecimals, type PoolRpc, type TokenDecimalsKept } from "./pool-kinds.ts";
 import { poolSellReference, poolSellUnits, sizesOf as poolTreeSizes, SOLANA_POOL_SELL_PRIORITY, solanaSellBudgetFits, wHeldNow, type WHeld } from "./pool-sell.ts";
 import { keptListed, type Position } from "./positions.ts";
-import { checkPoolRequest, POOL_ASSET_DECIMALS_OF, poolTokenAddress, poolUnits, solanaDepositRents, SOLANA_SWEEP_OWED_MAX, solanaSweepKeep, type PoolAsk, type PoolChain } from "./rules/pool.ts";
+import { checkPoolRequest, POOL_ASSET_DECIMALS_OF, poolTokenAddress, poolUnits, solanaDepositRents, SOLANA_POOL_MIN_DEPOSIT, SOLANA_SWEEP_OWED_MAX, solanaNoteOf, solanaSellNoteFloor, solanaSweepFloor, solanaSweepKeep, type PoolAsk, type PoolChain } from "./rules/pool.ts";
 
 /** The longest a trade counts as running with no end seen: the lanes' own hold (throttle.ts TRADE_HOLD_MAX_MS). */
 export const TRADE_LIVE_MAX_MS = TRADE_HOLD_MAX_MS;
@@ -256,9 +256,10 @@ async function readOne(rpcs: readonly [SolanaRpc, SolanaRpc], keys: readonly str
  *   frame's fee, the sweep's fee and deposit rents, what W keeps for its owed claims and the rest the sweep pays away
  *   under the grid at its bound (SOL_GRID - 1); under SOL_NOTE_FLOOR, none. W's claims unread: the lowest over each
  *   count. Its Fee (`network`) counts those fees, rents and that rest.
- * - A partial sale: the expected out less the reserve (never under 0), W's keep for its next sale held back. On a
- *   partial sale the note gets min_out now and the rest when W's last sale sweeps it (card partial-sell-pays-all-into-cash
- *   pays it all into Cash at the sale), so `out` is the expected amount, not today's first note.
+ * - A partial sale of one W (card partial-sell-pays-all-into-cash): what both its notes hold at that out, the sale's
+ *   deposit back (min out less the reserve on the grid, none under the note floor) and W's keep sweep right after the
+ *   fill (all W holds above its keep for the next sale, on the grid, none under the sweep's floor); its Fee counts the
+ *   sweep's signature and rents when the sweep goes. What both notes leave under the grid stays on W with its keep.
  * - More than one W: the plan's legs are not known here, so each W's reserve at the larger of a partial sale's keep and
  *   a full sale's costs, at 0 at least, is summed.
  */
@@ -320,6 +321,26 @@ export function poolSellPays(rent: SolanaRent, venue: "pump-curve" | "pumpswap",
     const r = feeOf(w) + made + rents + keep - w.lamports;
     return r > 0n ? r : 0n;
   };
+  // one W's partial sale (card partial-sell-pays-all-into-cash): its deposit back, signed before the sale lands, is the
+  // note min out less the reserve makes on the grid (none under the note floor: pool-sell.ts solanaSellReserve), and
+  // right after the fill W's keep sweep takes all W then holds above its keep (the next sell's need, keepPart) into a
+  // second note on the grid, under the sweep's floor none; so what reaches the notes at a sale of `x` is both notes,
+  // the sweep's fee and rents in the Fee. A W priced at fewer lamports than it holds is priced at that or less
+  if (wallets.length === 1) {
+    const w = wallets[0]!;
+    const reserve = one(w, keepPart);
+    if (reserve < minOut) {
+      const v = solanaNoteOf(minOut - reserve);
+      const back = v < solanaSellNoteFloor(rent) ? 0n : v;
+      const sweepFloor = solanaSweepFloor(rent) > SOLANA_POOL_MIN_DEPOSIT ? solanaSweepFloor(rent) : SOLANA_POOL_MIN_DEPOSIT;
+      const swept = (x: bigint): bigint => {
+        const left = w.lamports - feeOf(w) - made - (back > 0n ? rents : 0n) + x - back;
+        const note = solanaNoteOf(left - SOLANA_POOL_SELL_FEE - rents - keepPart);
+        return note < sweepFloor ? 0n : note;
+      };
+      return { out: back + swept(e), minOut: back + swept(minOut), priority, network: feeOf(w) + (swept(e) > 0n ? SOLANA_POOL_SELL_FEE + rents : 0n) };
+    }
+  }
   // more than one W: each W's reserve at the larger of a partial sale's keep and a full sale's costs, at 0 at least
   const reserve = wallets.length === 1 ? one(wallets[0]!, keepPart) : wallets.reduce((t, w) => {
     const k = fullCost(w, owed(w)) - w.lamports;
