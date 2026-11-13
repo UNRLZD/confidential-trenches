@@ -13,6 +13,9 @@
 //   whole of Cash less a fee per note (cashSendable); a tap puts it in the amount. At the tap each withdrawal is a step
 //   drawn under the form (data-steps, one line each with its amount and its state), and the run stops at the first
 //   that does not leave the vault, the rest still in Cash.
+// - Where it goes (Part B, ./onward.ts): a row of chains above To, NEAR first and picked; on SIGN_HOST's build (mainnet,
+//   where 1Click pays out) also Solana and Base, each by its name. On NEAR To is a NEAR account (./checks.ts); on
+//   another chain an address there (onwardTo), and each withdrawal goes through its own checked 1Click quote.
 // - The notes and the fee bound are read when the form opens and again at every Withdraw tap. A read that cannot
 //   answer is "unread": the field shows S12.10's Busy · Retry, a tap reads what is unread and checks again, and nothing
 //   goes on meanwhile.
@@ -29,6 +32,8 @@
 // - DOM by createElement and textContent only: the page's CSP requires Trusted Types for every script sink.
 import type { NearNetwork, NearRpc } from "../../../kit/src/near/networks.ts";
 import type { WithdrawPart, WithdrawSource } from "../pool-withdraw.ts";
+import { POOL_CHAIN_MARK } from "./chain-mark.ts";
+import { isOnward, onwardTo, WITHDRAW_CHAINS, type WithdrawChain } from "./onward.ts";
 import { type AddressCode, type AmountCheck, type AmountCode, cashSendable, checkAmount, checkRecipient, type RecipientCheck, TOKEN_DECIMALS } from "./checks.ts";
 
 // Withdraw, Invalid address, Invalid amount, Insufficient and Busy · Retry were kept as drafted (owner 8 Nov 07:55Z, the 8 Nov
@@ -73,7 +78,7 @@ export const CHECK_IDLE_MS = 300;
 /** One withdrawal: both checked, the amount in the token's base units (the wallet's withdraw path, one note). */
 export type CheckedWithdraw = Readonly<{ recipient: string; amount: bigint }>;
 /** What the form hands over: the account, the whole amount and its plan, one withdrawal per note in order. */
-export type CheckedCashWithdraw = Readonly<{ recipient: string; amount: bigint; parts: readonly WithdrawPart[] }>;
+export type CheckedCashWithdraw = Readonly<{ recipient: string; amount: bigint; parts: readonly WithdrawPart[]; chain?: WithdrawChain }>;
 /** A step's state as the run reports it: "sending" when it starts, then its end (../handoff.ts HandoffEnd's kind), or
  *  "failed" when it threw. */
 export type StepReport = (i: number, kind: string) => void;
@@ -110,13 +115,15 @@ export interface FormView {
 
 /** The form's view of both fields, read and checked now. */
 export async function evaluate(
-  to: string, amount: string, ctx: { network: NearNetwork; rpcs: readonly [NearRpc, NearRpc]; notes: readonly WithdrawSource[] | null; fee: bigint | null },
+  to: string, amount: string, ctx: { network: NearNetwork; rpcs: readonly [NearRpc, NearRpc]; notes: readonly WithdrawSource[] | null; fee: bigint | null; chain?: WithdrawChain },
 ): Promise<FormView> {
+  const chain = ctx.chain ?? "near";
   const blankTo = to.trim() === "";
   const blankAmount = amount.trim() === "";
-  const a = blankTo ? null : await checkRecipient(to, ctx.network, ctx.rpcs);
+  const onward = isOnward(chain) ? onwardTo(chain, to) : null;
+  const a: RecipientCheck | null = blankTo ? null : isOnward(chain) ? (onward === null ? { ok: false, code: "not-account" } : { ok: true, recipient: onward }) : await checkRecipient(to, ctx.network, ctx.rpcs);
   const m = blankAmount ? null : checkAmount(amount, { notes: ctx.notes, fee: ctx.fee });
-  const ready = a?.ok && m?.ok ? Object.freeze({ recipient: a.recipient, amount: m.amount, parts: Object.freeze(m.parts.map((p) => Object.freeze({ ...p }))) }) : null;
+  const ready = a?.ok && m?.ok ? Object.freeze({ recipient: a.recipient, amount: m.amount, parts: Object.freeze(m.parts.map((p) => Object.freeze({ ...p }))), ...(chain === "near" ? {} : { chain }) }) : null;
   const state: FormState = blankTo && blankAmount ? "empty" : (a && !a.ok) || (m && !m.ok) ? "refused" : ready ? "ready" : "typing";
   return { state, address: a, amount: m, ready };
 }
@@ -201,7 +208,33 @@ export function drawWithdrawForm(doc: Document, deps: WithdrawFormDeps, button: 
   steps.dataset.steps = "cash-withdraw";
   steps.hidden = true;
   Object.assign(steps.style, { margin: "0", paddingLeft: "20px", fontVariantNumeric: "tabular-nums" });
-  form.append(notice, to.label, to.line, amount.label, canRow, amount.line, go, steps);
+  // where it goes: NEAR, and on the build 1Click pays out on, each onward chain
+  let chain: WithdrawChain = "near";
+  const chains = doc.createElement("div");
+  chains.dataset.row = "chains";
+  Object.assign(chains.style, { display: "flex", flexWrap: "wrap", gap: "8px" });
+  const picks = (deps.network === "mainnet" ? WITHDRAW_CHAINS : (["near"] as const)).map((c) => {
+    const b = doc.createElement("button");
+    b.type = "button";
+    b.dataset.action = "chain";
+    b.dataset.chain = c;
+    b.textContent = c === "near" ? "NEAR" : POOL_CHAIN_MARK[c].name;
+    Object.assign(b.style, { minHeight: "44px", padding: "0 12px" });
+    b.addEventListener("click", () => {
+      if (chain === c) return;
+      chain = c;
+      drawChains();
+      typed();
+    });
+    return b;
+  });
+  const drawChains = (): void => {
+    for (const b of picks) b.setAttribute("aria-pressed", String(b.dataset.chain === chain));
+    form.dataset.chain = chain;
+  };
+  chains.append(...picks);
+  drawChains();
+  form.append(notice, chains, to.label, to.line, amount.label, canRow, amount.line, go, steps);
 
   // read at open, and again on Retry while either is unread; one that cannot be read stays null (unread)
   let ctx: { notes: readonly WithdrawSource[] | null; fee: bigint | null } = { notes: null, fee: null };
@@ -256,7 +289,7 @@ export function drawWithdrawForm(doc: Document, deps: WithdrawFormDeps, button: 
   const check = async (): Promise<FormView | null> => {
     const at = ++seq;
     await loaded;
-    const v = await evaluate(to.input.value, amount.input.value, { network: deps.network, rpcs: deps.rpcs, ...ctx });
+    const v = await evaluate(to.input.value, amount.input.value, { network: deps.network, rpcs: deps.rpcs, ...ctx, chain });
     if (at !== seq) return null; // a newer keystroke or check: this answer is stale
     draw(v);
     return v;
@@ -319,7 +352,7 @@ export function drawWithdrawForm(doc: Document, deps: WithdrawFormDeps, button: 
     const v = await check();
     // the same account, amount and plan as drawn: a note spent or added since is a new plan, drawn for the next tap
     const plan = (r: CheckedCashWithdraw): string => r.parts.map((p) => `${p.noteId}:${p.part}`).join(",");
-    if (!v?.ready || v.ready.recipient !== before.recipient || v.ready.amount !== before.amount || plan(v.ready) !== plan(before) || ctx.fee === null) return;
+    if (!v?.ready || v.ready.recipient !== before.recipient || v.ready.chain !== before.chain || v.ready.amount !== before.amount || plan(v.ready) !== plan(before) || ctx.fee === null) return;
     drawSteps(v.ready.parts);
     let end: void | { kind: string; fee?: bigint } = undefined;
     try {

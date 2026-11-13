@@ -110,12 +110,17 @@ class El {
   constructor(tag: string) { this.tag = tag; }
   append(...c: El[]): void { this.children.push(...c); }
   replaceChildren(...c: El[]): void { this.children = c; this.textContent = ""; }
-  setAttribute(): void {}
+  attrs: Record<string, string> = {};
+  setAttribute(k: string, v: string): void { this.attrs[k] = v; }
+  getAttribute(k: string): string | null { return this.attrs[k] ?? null; }
   addEventListener(type: string, f: () => void): void { (this.on[type] ??= []).push(f); }
   fire(type: string): void { for (const f of this.on[type] ?? []) f(); }
   find(p: (e: El) => boolean): El | undefined {
     for (const c of this.children) { if (p(c)) return c; const d = c.find(p); if (d) return d; }
     return undefined;
+  }
+  findAll(p: (e: El) => boolean): El[] {
+    return this.children.flatMap((c) => [...(p(c) ? [c] : []), ...c.findAll(p)]);
   }
 }
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -436,4 +441,41 @@ test("the tap hands over nothing when the notes changed since the plan was drawn
   await f.tap();
   assert.deepEqual(f.handed, [], "a new plan is drawn for the next tap");
   assert.equal(f.form.dataset.state, "ready");
+});
+
+// Part B (card cash-withdraws-everything-to-any-chain): where Cash goes, NEAR first; on SIGN_HOST's build also Solana and
+// Base, each with an address there, the plan the same
+test("a chain pick above To: NEAR picked first; on Solana a Solana address passes and a NEAR account is refused; the hand-off names the chain", async () => {
+  const f = drawn();
+  const picks = f.form.findAll((e) => e.dataset.action === "chain");
+  assert.deepEqual(picks.map((b) => [b.dataset.chain, b.textContent, b.getAttribute("aria-pressed")]), [
+    ["near", "NEAR", "true"],
+    ["solana", "Solana", "false"],
+    ["base", "Base", "false"],
+  ]);
+  assert.equal(f.form.dataset.chain, "near");
+  picks[1]!.fire("click");
+  assert.equal(f.form.dataset.chain, "solana");
+  assert.deepEqual(picks.map((b) => b.getAttribute("aria-pressed")), ["false", "true", "false"]);
+  f.type("to", "alice.near");
+  f.type("amount", "5");
+  await settle();
+  assert.equal(f.form.dataset.state, "refused");
+  assert.equal(f.form.find((e) => e.tag === "p" && e.dataset.for === "to")!.dataset.refusal, "not-account");
+  f.type("to", "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU");
+  await settle();
+  assert.equal(f.form.dataset.state, "ready");
+  await f.tap();
+  assert.deepEqual(f.handed, [{ recipient: "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU", amount: 5_000_000n, parts: oneNote(5_000_000n), chain: "solana" }]);
+  // back to NEAR: the Solana address is not a NEAR account
+  picks[0]!.fire("click");
+  await settle();
+  assert.equal(f.form.dataset.state, "refused");
+});
+
+test("the chain is checked again at the tap: a pick changed since the check hands over nothing", async () => {
+  const ev = await evaluate("0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", "5", { ...ctx, chain: "base" });
+  assert.deepEqual(ev.ready, { recipient: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", amount: 5_000_000n, parts: oneNote(5_000_000n), chain: "base" });
+  assert.equal((await evaluate("0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", "5", ctx)).ready, null, "on NEAR an EVM address is no account");
+  assert.equal((await evaluate("7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU", "5", { ...ctx, chain: "base" })).ready, null);
 });
