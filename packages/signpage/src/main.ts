@@ -67,7 +67,7 @@ import { startApi, type KindContext } from "./api.ts";
 import { depositQuoteHost, depositReadHosts } from "./deposit-wire.ts";
 import { depositNamer } from "./deposit-name.ts";
 import { poolAddressHost } from "./pool-deposit-address.ts";
-import { cashMover, type CashToPoolDeps } from "./cash-to-pool.ts";
+import { cashMover, withCash, type CashToPoolDeps } from "./cash-to-pool.ts";
 import { formatUnits as formatPoolUnits, parseUnits as parsePoolUnits } from "./withdraw/pool-form.ts";
 import { quotesStop } from "./quotes-stop.ts";
 import { depositFollows, FOLLOW_LOCK } from "./deposit-follow.ts";
@@ -331,6 +331,29 @@ else {
     cashMoverOf = { signal, m };
     return m;
   };
+  // pool.buy.dry with with_cash on Solana (src/cash-to-pool.ts withCash): the dry answer as it is, plus Cash's largest
+  // note less the relayer's fee at the device's price and what moves on their way bring; a read that fails leaves it out
+  const dryWithCash = (params: Record<string, unknown>) => {
+    const r = poolBuyDry(params);
+    if (!prover || params.chain !== "solana" || withdrawHandoff({ store: () => open(), notes: async () => openNoteStore(await open()), seed64: () => openSeed64(), prover: prover.vault }) === null) return r;
+    let extra: string | null = null;
+    const after = r.after.then(async () => {
+      const a = r.answer();
+      if (a === null || !("result" in a)) return;
+      const vault = { store: () => open(), notes: async () => openNoteStore(await open()), seed64: () => openSeed64(), prover: prover.vault, signal: withdrawWait.signal };
+      const form = withdrawFormDeps(vault);
+      const [cash, fee] = await Promise.all([form.available(), form.fee()]);
+      extra = withCash(a.result.tap_max, cashMoverNow().coming("solana"), cash, fee, prices.get("solana"));
+    }).catch(() => {});
+    return {
+      running: true as const,
+      after,
+      answer: () => {
+        const a = r.answer();
+        return a !== null && "result" in a && extra !== null ? { ...a, result: { ...a.result, with_cash: extra } } : a;
+      },
+    };
+  };
   const cashDeps = (): CashToPoolDeps => ({
     tapMax: async (token) => {
       const r = tapDry({ chain: "solana", token });
@@ -533,7 +556,8 @@ else {
       // on two providers
       ...poolKindMap,
       "pool.sell.dry": (params) => poolSellDry(params),
-      "pool.buy.dry": (params) => poolBuyDry(params),
+      // with_cash (card one-balance-buys-on-every-chain): a tap's most with Cash moved first, on Solana
+      "pool.buy.dry": (params) => dryWithCash(params),
       // the rebuild from the chain (src/pool-restore.ts): answered started, its stages in state.ops and as progress
       ...(restore ? { restore: restore.kind } : {}),
     })),

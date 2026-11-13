@@ -5,7 +5,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { PoolAsk } from "../src/rules/pool.ts";
 import type { HostRefusal, KindContext, Running } from "../src/api.ts";
-import { cashFirst, cashLamportsFor, cashMover, CASH_MOVE_POLL_MS, CASH_MOVE_WAIT_MS, type CashMoverDeps, type CashQuote, type CashRail, type CashToPoolDeps } from "../src/cash-to-pool.ts";
+import { withCash, cashFirst, cashLamportsFor, cashMover, CASH_MOVE_POLL_MS, CASH_MOVE_WAIT_MS, type CashMoverDeps, type CashQuote, type CashRail, type CashToPoolDeps } from "../src/cash-to-pool.ts";
 
 const TOKEN = "So11111111111111111111111111111111111111112";
 const ADDRESS = "a".repeat(64);
@@ -150,4 +150,13 @@ test("cashLamportsFor: Cash counted in SOL at the device's price, less 3% and th
   assert.equal(cashLamportsFor(25_544_000n, p), 300_000_000n);
   assert.equal(cashLamportsFor(100n, p), 0n, "dust gives nothing past the rung");
   assert.equal(cashLamportsFor(25_544_000n, { price: "-1", expo: -8 }), 0n);
+});
+
+test("withCash: tap_max plus the moves on their way plus what the largest Cash note less its fee gives, in whole SOL", () => {
+  const p = { price: "8000000000", expo: -8 };
+  // 0.1 SOL a tap now, 0.05 on its way, 25.594 USDC of Cash less a 0.05 fee = 25.544 USDC = 0.3 SOL
+  assert.equal(withCash("0.1", 50_000_000n, 25_594_000n, 50_000n, p), "0.45");
+  assert.equal(withCash("0", 0n, 50_000n, 50_000n, p), "0", "Cash under its fee gives nothing");
+  assert.equal(withCash("0.1", 0n, 25_594_000n, 50_000n, null), "0.1", "no price: Cash is not counted");
+  assert.equal(withCash("x", 0n, 0n, 0n, p), null);
 });

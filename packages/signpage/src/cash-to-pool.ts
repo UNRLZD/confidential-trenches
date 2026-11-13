@@ -45,6 +45,18 @@ const IMPLICIT = /^[0-9a-f]{64}$/;
 /** The margin Cash is counted at in a tap's most (with_cash) under the device's price: 1Click's slippage (the deposit
  *  quote's 100 bps), its fee and withdraw fee, and the follow's per-rung deposit cost, with room. */
 export const CASH_MARGIN_BPS = 300n;
+/** pool.buy.dry's with_cash (kit 1.15), in whole SOL as tap_max is: tap_max, plus what the moves on their way bring,
+ *  plus what the largest Cash note less the relay fee gives a tap (cashLamportsFor); null when tap_max is not an amount. */
+export function withCash(tapMax: string, coming: bigint, cash: bigint, fee: bigint, p: Pick<PoolStatePrice, "price" | "expo"> | null): string | null {
+  const m = /^(\d{1,30})(?:\.(\d{1,9}))?$/.exec(tapMax);
+  if (m === null) return null;
+  const tap = BigInt(m[1]!) * 10n ** 9n + BigInt((m[2] ?? "").padEnd(9, "0"));
+  const all = tap + coming + (p === null || cash <= fee ? 0n : cashLamportsFor(cash - fee, p));
+  const t = all.toString().padStart(10, "0");
+  const f = t.slice(-9).replace(/0+$/, "");
+  return f ? `${t.slice(0, -9)}.${f}` : t.slice(0, -9);
+}
+
 /** USDC (6 decimals) a move asks for `short` base units of the pool's coin (lamports on Solana) at the device's price:
  *  the shortfall plus the ladder's least rung (what a 1-2-5 split may leave at U_X under it), plus CASH_MARGIN_BPS,
  *  rounded up; null with no price or no shortfall. */
@@ -95,7 +107,7 @@ export type CashMoverDeps = {
 type Way = { chain: PoolChain; id: string; lamports: bigint; going: Promise<boolean>; since: number };
 
 /** The mover: `need` starts or joins a move for a shortfall, true while money for it is on its way. */
-export function cashMover(d: CashMoverDeps): { need(chain: PoolChain, short: bigint): Promise<boolean>; ways(): number } {
+export function cashMover(d: CashMoverDeps): { need(chain: PoolChain, short: bigint): Promise<boolean>; ways(): number; coming(chain: PoolChain): bigint } {
   let ways: Way[] = [];
   let turn: Promise<unknown> = Promise.resolve();
   const start = async (chain: PoolChain, short: bigint): Promise<boolean> => {
@@ -138,6 +150,8 @@ export function cashMover(d: CashMoverDeps): { need(chain: PoolChain, short: big
       return r.catch(() => false);
     },
     ways: () => ways.length,
+    // the least of the pool's coin the moves on their way still bring (display only: a tap's most counts it)
+    coming: (chain) => ways.filter((w) => w.chain === chain && d.now() - w.since <= CASH_MOVE_WAIT_MS).reduce((a, w) => a + w.lamports, 0n),
   };
 }
 
