@@ -40,10 +40,13 @@ test("the good build's lines carry every mark; each with its rule changed FAILs 
     // the keep sweep keeps nothing for W's next sale, or sweeps under the floor, or is checked with no hold
     ["-pj(i,f,y.held)-t.keep,", "-pj(i,f,y.held),", 1],
     ["if(x<S)return a(`floor`", "if(x<0n)return a(`floor`", 1],
-    ["y.held,0,0,t.keep);", "y.held,0,0);", 1],
-    // the rule's hold: a transfer beside the deposit, or W left a whole grid step over the hold
-    ["if(u.ixs.length!==1)return X(`instructions`);let e=", "let e=", 2],
-    ["e>=c+1000000n", "e>=c+1000000000n", 2],
+    ["y.held,t.keep);", "y.held,0n);", 1],
+    // the keep sweep's rule: a transfer beside the deposit, W left under its hold or a whole grid step over it, a note
+    // off the grid or under the floor
+    ["if(c.ixs.length!==1)return X(`instructions`);let l=", "let l=", 2],
+    ["return u<o||u>=o+1000000n?", "return u>=o+1000000n?", 2],
+    ["u>=o+1000000n?X(`keep_amount`)", "u>=o+1000000000n?X(`keep_amount`)", 2],
+    ["X(`keep_amount`):l%1000000n!=0n||l<5000000n||", "X(`keep_amount`):l%1000000n!=0n||l<1000000n||", 2],
     // the preview counts the deposit back alone, the sweep's note left out
     ["return{out:o+c(i),minOut:o+c(a)", "return{out:o,minOut:o", 3],
   ];

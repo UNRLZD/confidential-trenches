@@ -828,11 +828,8 @@ export function solanaSweepOf(rest: bigint): { value: bigint; under: bigint } {
  * read on both RPCs) + the keep (solanaSweepKeep) is exactly `lamports` (W's balance, the same on both RPCs): the value
  * is the note noteOf makes, the rest under the grid goes to the relayer, and W ends at the keep (0 when nothing is kept).
  * Under the floor, refused: those lamports stay on W.
- * `hold` (card partial-sell-pays-all-into-cash): the sweep after a partial sell, W still holding tokens: W keeps `hold`
- * (the next sell's need, the device's own number) and the rest under the grid, so the deposit alone, no transfer, and
- * what W keeps after it is at least `hold` and under `hold` + SOL_GRID.
  */
-export function checkSolanaSweep(wire: Uint8Array, ctx: PoolContext & { precommitment: bigint }, reads: SolanaPoolReads, lamports: bigint, rent: SolanaRent, held: SolanaDepositHeld, owed = 0, kept = 0, hold = 0n): bigint {
+export function checkSolanaSweep(wire: Uint8Array, ctx: PoolContext & { precommitment: bigint }, reads: SolanaPoolReads, lamports: bigint, rent: SolanaRent, held: SolanaDepositHeld, owed = 0, kept = 0): bigint {
   const pin = pinOf(ctx);
   const d = decode(wire, reads);
   if (d.signers.length !== 1 || d.signers[0] !== ctx.wallet) return refuse("signers");
@@ -850,13 +847,30 @@ export function checkSolanaSweep(wire: Uint8Array, ctx: PoolContext & { precommi
   if (typeof lamports !== "bigint" || typeof rent?.lamportsPerByte !== "bigint" || typeof rent.factor !== "bigint" || rent.lamportsPerByte < 0n || rent.factor < 0n) return refuse("sweep_reads");
   if (!Number.isSafeInteger(owed) || owed < 0 || owed > SOLANA_SWEEP_OWED_MAX) return refuse("sweep_reads");
   if (!Number.isSafeInteger(kept) || kept < 0) return refuse("sweep_reads");
-  if (typeof hold !== "bigint" || hold < 0n) return refuse("sweep_reads");
-  if (hold > 0n) {
-    // a partial sell's sweep: the deposit alone, W left at its keep and the rest under the grid
-    if (d.ixs.length !== 1) return refuse("instructions");
-    const left = lamports - value - SOLANA_LAMPORTS_PER_SIGNATURE - solanaDepositRents(rent, reads, held) - solanaSweepKeep(rent, owed, kept);
-    if (left < hold || left >= hold + SOL_GRID) return refuse("sweep_amount");
-  } else if (value + SOLANA_LAMPORTS_PER_SIGNATURE + under + solanaDepositRents(rent, reads, held) + solanaSweepKeep(rent, owed, kept) !== lamports) return refuse("sweep_amount");
+  if (value + SOLANA_LAMPORTS_PER_SIGNATURE + under + solanaDepositRents(rent, reads, held) + solanaSweepKeep(rent, owed, kept) !== lamports) return refuse("sweep_amount");
+  if (value % SOL_GRID !== 0n || value < SOL_NOTE_FLOOR || value < SOLANA_POOL_MIN_DEPOSIT || value < solanaSweepFloor(rent)) return refuse("amount");
+  passedWire(wire);
+  return value;
+}
+
+/**
+ * W's keep sweep after a partial sell (card partial-sell-pays-all-into-cash): W still holds tokens, so it keeps `hold`
+ * (the next sell's need, the device's own number, never a server's) and the rest under the grid; all W holds above
+ * that goes into the pinned pool, W the depositor and the only signer, on the device's precommitment. The deposit alone,
+ * no transfer and no compute budget; the value a whole multiple of SOL_GRID, at least SOL_NOTE_FLOOR, the pool's least
+ * deposit and solanaSweepFloor at the rent read; and W's lamports (the same on both RPCs) less the value, the
+ * signature's fee and the rents the deposit takes (solanaDepositRents) at least `hold` and under `hold` + SOL_GRID.
+ */
+export function checkSolanaKeepSweep(wire: Uint8Array, ctx: PoolContext & { precommitment: bigint }, reads: SolanaPoolReads, lamports: bigint, rent: SolanaRent, held: SolanaDepositHeld, hold: bigint): bigint {
+  const pin = pinOf(ctx);
+  const d = decode(wire, reads);
+  if (d.signers.length !== 1 || d.signers[0] !== ctx.wallet) return refuse("signers");
+  if (d.ixs.length !== 1) return refuse("instructions");
+  const value = depositOf(d.ixs[0]!, pin, ctx.wallet, ctx.precommitment, reads);
+  if (typeof lamports !== "bigint" || typeof rent?.lamportsPerByte !== "bigint" || typeof rent.factor !== "bigint" || rent.lamportsPerByte < 0n || rent.factor < 0n) return refuse("sweep_reads");
+  if (typeof hold !== "bigint" || hold <= 0n) return refuse("sweep_reads");
+  const left = lamports - value - SOLANA_LAMPORTS_PER_SIGNATURE - solanaDepositRents(rent, reads, held);
+  if (left < hold || left >= hold + SOL_GRID) return refuse("keep_amount");
   if (value % SOL_GRID !== 0n || value < SOL_NOTE_FLOOR || value < SOLANA_POOL_MIN_DEPOSIT || value < solanaSweepFloor(rent)) return refuse("amount");
   passedWire(wire);
   return value;

@@ -41,7 +41,7 @@ import { READ_WAIT_TOTAL_MS } from "../src/read-waits.ts";
 import { POOL_RENT_BACK_GAP_MS, POOL_RENT_BACK_UNPROVEN_PASSES, restAdds, POOL_RENT_BACK_MS, POOL_RENT_BACK_SPACE_MAX_MS, POOL_RENT_BACK_SPACE_MIN_MS, spaceOpen, type RentBackSpacing, POOL_RENT_BACK_RULES, POOL_SELL_LOCK, POOL_SELL_READS, POOL_SELL_SHARED_READ_MS, POOL_SELL_SIZE_RETRY_MS, POOL_SELL_AGREE_WAIT_MS, POOL_SELL_WAIT_MS, buyMints, FOUND_CLOSE_MAX, leftAfter, owedRentBacks, planPoolSell, poolSellKind, resumeRentBacks, runPoolSell, settleDeadSellOps, settlePoolSells, settleSellOps, forgetPageLoad, solanaSellBudget, solanaSellBudgetFits, solanaSellReserve, SOLANA_POOL_SELL_PRIORITY, keptSells, stageOfLegs, type KeptSell, type OwedRentBack, type OwedRentBacks, type PoolSellHost, type PoolSellKindHost, type RentBackTold } from "../src/pool-sell.ts";
 import { opOf } from "../src/state.ts";
 import { solanaCompileV0 } from "../../kit/src/trade/solana/build.ts";
-import { checkSolanaSweep, PoolRuleRefused, solanaNoteOf, solanaSellNoteFloor, solanaSweepOf, SOLANA_POOL_MIN_DEPOSIT, SOLANA_POOL_SELL_RESERVE_MAX, solanaDepositRents, solanaSweepFloor, solanaSweepKeep, solanaWithdrawMinPart, withdrawNoteFloor, type PoolAsk } from "../src/rules/pool.ts";
+import { checkSolanaKeepSweep, checkSolanaSweep, PoolRuleRefused, solanaNoteOf, solanaSellNoteFloor, solanaSweepOf, SOLANA_POOL_MIN_DEPOSIT, SOLANA_POOL_SELL_RESERVE_MAX, solanaDepositRents, solanaSweepFloor, solanaSweepKeep, solanaWithdrawMinPart, withdrawNoteFloor, type PoolAsk } from "../src/rules/pool.ts";
 import { POOL_TRADE_LOCK, tradeLock, type TradeStore } from "../src/trade.ts";
 import { SOL_GRID, SOL_NOTE_FLOOR, changeMoves, isReleaseSize } from "../../wallet/src/pool/pieces.ts";
 import { SOL_PIECES } from "../../wallet/src/pool/solana.ts";
@@ -2739,11 +2739,13 @@ test("the sweep's rule: W the only signer, the deposit alone, its value exactly 
   // W, the deposit alone: W left at the hold, or up to a lamport under the grid more; never under the hold, never a whole
   // grid step over it, never a transfer
   const hold = BigInt(FEE) + rentMin(165);
-  for (const tail of [0n, SOL_GRID - 1n]) assert.equal(checkSolanaSweep(wire([dep(lamports - costs)]), ctx, reads, lamports + hold + tail, rent, held, 0, 0, hold), lamports - costs);
-  refused(() => checkSolanaSweep(wire([dep(lamports - costs)]), ctx, reads, lamports + hold - 1n, rent, held, 0, 0, hold), "sweep_amount");
-  refused(() => checkSolanaSweep(wire([dep(lamports - costs)]), ctx, reads, lamports + hold + SOL_GRID, rent, held, 0, 0, hold), "sweep_amount");
-  refused(() => checkSolanaSweep(wire([dep(lamports - costs), { program: SOLANA_SYSTEM_PROGRAM, accounts: [{ key: W.address, signer: true, writable: true }, { key: PIN.feePayer, signer: false, writable: true }], data: Uint8Array.of(2, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0) }] as never), ctx, reads, lamports + hold + 1n, rent, held, 0, 0, hold), "instructions");
-  refused(() => checkSolanaSweep(wire([dep(lamports - costs)]), ctx, reads, lamports, rent, held, 0, 0, -1n), "sweep_reads");
+  for (const tail of [0n, SOL_GRID - 1n]) assert.equal(checkSolanaKeepSweep(wire([dep(lamports - costs)]), ctx, reads, lamports + hold + tail, rent, held, hold), lamports - costs);
+  refused(() => checkSolanaKeepSweep(wire([dep(lamports - costs)]), ctx, reads, lamports + hold - 1n, rent, held, hold), "keep_amount");
+  refused(() => checkSolanaKeepSweep(wire([dep(lamports - costs)]), ctx, reads, lamports + hold + SOL_GRID, rent, held, hold), "keep_amount");
+  refused(() => checkSolanaKeepSweep(wire([dep(lamports - costs), { program: SOLANA_SYSTEM_PROGRAM, accounts: [{ key: W.address, signer: true, writable: true }, { key: PIN.feePayer, signer: false, writable: true }], data: Uint8Array.of(2, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0) }] as never), ctx, reads, lamports + hold + 1n, rent, held, hold), "instructions");
+  refused(() => checkSolanaKeepSweep(wire([dep(lamports - costs)]), ctx, reads, lamports, rent, held, 0n), "sweep_reads");
+  refused(() => checkSolanaKeepSweep(wire([dep(lamports - costs, FEE_PAYER)], FEE_PAYER), ctx, reads, lamports + hold, rent, held, hold), "signers");
+  refused(() => checkSolanaKeepSweep(wire([dep(small - costs)]), ctx, reads, small + hold, rent, held, hold), "amount");
   // card sol-w-sweep: per volume account still owed cashback, W keeps exactly what its later claim costs (rent(0), the
   // claim frame's fee, the claim account's rent), and nothing more or less; no more owed accounts than the two programs
   const keep = (n: bigint) => (n === 0n ? 0n : rentMin(0) + n * (BigInt(FEE) + rentMin(165)));

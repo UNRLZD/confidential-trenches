@@ -88,7 +88,7 @@ import { afterOf, clockOf, keptReads, READ_WAIT, readWaits, forgetYoung, solanaS
 import { throttleWaitMs } from "../../wallet/src/throttle.ts";
 import { duringTrade, fromRecord, timedStore, TRADE_STORE_MS, tradeLock, tradeRunning, within, type TradeStore } from "./trade.ts";
 import { deviceSpacing, POOL_RENT_BACK_SPACE_MAX_MS, POOL_RENT_BACK_SPACE_MIN_MS, spaceOpen, type DeviceSpacing, type RentBackSpacing } from "./device-spacing.ts";
-import { checkSolanaSell, checkSolanaSweep, SOLANA_POOL_SELL_PRIORITY, checkSolanaTeardownFrames, PoolRuleRefused, poolUnits, signSolana, SOLANA_POOL_CU_LIMIT_MAX, SOLANA_POOL_MIN_DEPOSIT, SOLANA_POOL_SELL_RESERVE_MAX, SOLANA_SWEEP_OWED_MAX, solanaDepositRents, solanaNoteOf, solanaSellNoteFloor, solanaSweepFloor, solanaSweepKeep, solanaSweepOf, type PoolAsk, type SolanaDepositHeld } from "./rules/pool.ts";
+import { checkSolanaKeepSweep, checkSolanaSell, checkSolanaSweep, SOLANA_POOL_SELL_PRIORITY, checkSolanaTeardownFrames, PoolRuleRefused, poolUnits, signSolana, SOLANA_POOL_CU_LIMIT_MAX, SOLANA_POOL_MIN_DEPOSIT, SOLANA_POOL_SELL_RESERVE_MAX, SOLANA_SWEEP_OWED_MAX, solanaDepositRents, solanaNoteOf, solanaSellNoteFloor, solanaSweepFloor, solanaSweepKeep, solanaSweepOf, type PoolAsk, type SolanaDepositHeld } from "./rules/pool.ts";
 import type { HostAnswer, HostRefusal, KindContext, Running } from "./api.ts";
 
 /** What a sell run needs from the page. */
@@ -1758,7 +1758,7 @@ export function restAdds(rest: bigint, fee: bigint, floor: bigint): bigint {
  * goes into the pool as W's next return note (returnNote's walk: the sale's note is UNSPENT, so its R second arrival),
  * on the grid, the rest under the grid left on W with the keep (W still holds tokens and sells again; the full sell's
  * sweep takes it then). Under the floor nothing is sent. W's lamports alike on both RPCs, the deposit priced as the
- * program prices it (solanaDepositRents), checked by the rule (checkSolanaSweep with the keep as its hold), simulated
+ * program prices it (solanaDepositRents), checked by the rule (checkSolanaKeepSweep, the keep its hold), simulated
  * unsigned on both, signed by W, its note INCOMING before the send, then read to its verdict under the sell lock (the
  * caller holds it throughout), so the next sell of W never meets it landing. Every fault is told and ends the sweep:
  * what it did not move stays on W, W's own, and goes with W's next sell's sweep or its full sell's.
@@ -1804,7 +1804,7 @@ async function keepSweep(h: PoolSellHost, x: KeepSweep): Promise<void> {
     const fees = await both(rpcs, async (r) => BigInt(int(((await r("getFeeForMessage", [base64.encode(message), { commitment: "confirmed" }])) as { value?: unknown })?.value)));
     if (fees[0] !== SOLANA_POOL_SELL_FEE || fees[1] !== SOLANA_POOL_SELL_FEE) return tell("gave_up", `the sweep's fee reads ${fees[0]} and ${fees[1]}`);
     const ctx = { nowMs: h.now?.() ?? BigInt(Date.now()), wallet: w.address, feeCap: 0n, solana: h.pin, precommitment };
-    checkSolanaSweep(wire, ctx, { blockhash: bh.blockhash, tables: {}, stateSize: sizes.stateSize, labelSize: sizes.labelSize }, lamports, rent, deposit.held, 0, 0, x.keep);
+    checkSolanaKeepSweep(wire, ctx, { blockhash: bh.blockhash, tables: {}, stateSize: sizes.stateSize, labelSize: sizes.labelSize }, lamports, rent, deposit.held, x.keep);
     const sims = await both(rpcs, async (r) => ((await r("simulateTransaction", [base64.encode(wire), { encoding: "base64", sigVerify: false, replaceRecentBlockhash: false, commitment: "confirmed" }])) as { value?: { err?: unknown } } | null)?.value);
     if (!sims.every((v) => v !== undefined && v !== null && v.err === null)) return tell("gave_up", `the sweep simulates ${safeDetail(JSON.stringify(sims.map((v) => v?.err ?? null)))}`);
     if (h.stopped?.()) return;

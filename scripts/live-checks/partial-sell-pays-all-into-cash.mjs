@@ -8,13 +8,15 @@
 //   - a sell that filled runs, after its answer, the keep sweep when W still holds tokens and the rent back when it
 //     holds none, on both of the sale's verdict paths (its note's mark, and a sale with no deposit back);
 //   - the keep sweep: W's lamports less the sweep's fee, the deposit's rents and W's keep, on the grid, none under the
-//     sweep's floor, checked by the sweep's rule with the keep as its hold;
-//   - the sweep's rule with a hold: the deposit alone, W left at the hold and under one grid step more;
+//     sweep's floor, checked by the keep sweep's rule with the keep as its hold;
+//   - the keep sweep's rule (its own, so the full sell's sweep rule is as before): the deposit alone, W left at the hold
+//     and under one grid step more, the note on the grid and at least 0.005 SOL;
 //   - the preview: one W's partial sale pays in both notes, at the expected out and at min out.
 // It does not prove those lines run: that is the tests at the released commit (packages/signpage/test/pool-sell.test.ts
 // "card partial-sell-pays-all-into-cash", packages/signpage/test/pool-sell-dry.test.ts). Base and Robinhood need no
 // change: their SellDelegate deposits all the sale gained less the fee (contracts/pool-evm/src/SellDelegate.sol sell).
 // After: sign
+// Bundle: read sign
 //   node scripts/live-checks/partial-sell-pays-all-into-cash.mjs [--record <file>] [--answer <file>]
 // PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";
@@ -46,12 +48,12 @@ export const MARKS = Object.freeze({
     R`filled${BT}&&\((${I})\.back=(${I})\?(${I}):(${I})\)`,
     2,
   ),
-  "the keep sweep: W's lamports less the sweep's fee, the deposit's rents and W's keep, on the grid, none under the floor, checked with the keep as the rule's hold": tied(
+  "the keep sweep: W's lamports less the sweep's fee, the deposit's rents and W's keep, on the grid, none under the floor, checked with the keep as its rule's hold": tied(
     new RegExp(R`let (?<rest>${I})=(?<lam>${I})-(?<fee>${I})-(?<rents>${I})\((?<rent>${I}),(?<sz>${I}),(?<dep>${I})\.held\)-(?<x>${I})\.keep,(?<v>${I})=(?<note>${I})\(\k<rest>\),(?<fl>${I})=[^;]{0,60};if\(\k<v><\k<fl>\)return ${I}\(${BT}floor${BT}`),
-    (g) => [R`${I}\(${I},\{[^;]{0,200}?\},${esc(g.lam)},${esc(g.rent)},${esc(g.dep)}\.held,0,0,${esc(g.x)}\.keep\)`],
+    (g) => [R`${I}\(${I},\{[^;]{0,200}?\},${esc(g.lam)},${esc(g.rent)},${esc(g.dep)}\.held,${esc(g.x)}\.keep\)`],
   ),
-  "the sweep's rule with a hold: the deposit alone, W left at the hold and under one grid step more": new RegExp(
-    R`if\((${I})>0n\)\{if\((${I})\.ixs\.length!==1\)return ${I}\(${BT}instructions${BT}\);let (${I})=[^;]*?;if\(\3<\1\|\|\3>=\1\+1000000n\)return ${I}\(${BT}sweep_amount${BT}\)\}`,
+  "the keep sweep's rule: the deposit alone, W left at the hold and under one grid step more, the note on the grid and at least 0.005 SOL": new RegExp(
+    R`if\((${I})\.ixs\.length!==1\)return ${I}\(${BT}instructions${BT}\);let (${I})=${I}\(\1\.ixs\[0\],[^;]*;if\([^;]*\|\|typeof (${I})!=${BT}bigint${BT}\|\|\3<=0n\)return ${I}\(${BT}sweep_reads${BT}\);let (${I})=${I}-\2-${I}-${I}\([^)]*\);return \4<\3\|\|\4>=\3\+1000000n\?${I}\(${BT}keep_amount${BT}\):\2%1000000n!=0n\|\|\2<5000000n\|\|`,
   ),
   "the preview: one W's partial sale pays in both notes, at the expected out and at min out": new RegExp(
     R`return\{out:(${I})\+(${I})\((${I})\),minOut:\1\+\2\((${I})\),priority:${I},network:[^}]*?\2\(\3\)>0n\?`,
