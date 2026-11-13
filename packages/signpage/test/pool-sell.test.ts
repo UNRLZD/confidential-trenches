@@ -1200,21 +1200,27 @@ test("round-trip-costs-less P3-1: a refused sale after a not_landed one clears t
 
 // review 2 P3-a of c0dd55d02: the fee read is never waited for, so one that never answers adds no time to the sale (the
 // "never" cases above hold the cap and the fill only, which a sale waiting a bounded time for the read also passes):
-// timed against the same sale whose read answers
-test("round-trip-costs-less P3-a: a fee read that never answers adds no wait to the sale: it goes as fast as one whose read answers", async () => {
+// the never-answered sale runs with setTimeout frozen (mock timers), so a sale that waited a timer for the read would
+// never end and the test's own timeout fails it, and it asks the host for the same waits as the sale whose read answers
+test("round-trip-costs-less P3-a: a fee read that never answers adds no wait to the sale: it waits no timer and asks the waits of one whose read answers", { timeout: 30_000 }, async (t) => {
   const quiet = [0, 0, 0, 0, 0, 0, 0, 12];
+  const waitsOf = (w: World, waits: number[]): PoolSellHost => ({ ...w.host, wait: async (ms: number) => void waits.push(ms) });
   const answered = await world({ cluster: "mainnet", units: 90_000, fees: [quiet, quiet] });
-  const t0 = performance.now();
-  const a = await runPoolSell(answered.host, ASK);
-  const t1 = performance.now();
+  const asked: number[] = [];
+  const a = await runPoolSell(waitsOf(answered, asked), ASK);
   const never = await world({ cluster: "mainnet", units: 90_000, fees: ["never", "never"] });
-  const t2 = performance.now();
-  const b = await runPoolSell(never.host, ASK);
-  const t3 = performance.now();
+  const neverAsked: number[] = [];
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let b: Awaited<ReturnType<typeof runPoolSell>>;
+  try {
+    b = await runPoolSell(waitsOf(never, neverAsked), ASK);
+  } finally {
+    t.mock.timers.reset();
+  }
   assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
   assert.equal("stage" in b && b.stage, "filled", JSON.stringify(b));
   assert.equal(budgetOf(never, b)?.priority, SOLANA_POOL_SELL_PRIORITY, "no price: the cap");
-  assert.ok(t3 - t2 < t1 - t0 + 500, `the answered read's sale took ${Math.round(t1 - t0)} ms, the never-answered one's ${Math.round(t3 - t2)} ms`);
+  assert.deepEqual(neverAsked, asked, "the same waits asked of the host");
 });
 
 // review P2-1 of 4f9217972: the fee read is aborted once the sale is sized; nothing of it is left running past then (on

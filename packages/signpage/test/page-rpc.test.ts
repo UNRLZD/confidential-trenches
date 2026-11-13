@@ -447,8 +447,10 @@ test("the mainnet build's Solana reads: the lister is the helper's marks route; 
 // card round-trip-costs-less, review P2-1 of 4f9217972: the sale's fee read is an optional read (OptionalRead): asked
 // once, its throttle reported to no lane, so a 429 on it (Retry-After 3, or the helper's longest, 10) never holds the
 // sale's next helper call; a host not open now is not asked at all. On the review's head the send after a 429'd fee read
-// waited 6.0 s (Retry-After 3) and 10.0 s (Retry-After 10).
-test("round-trip-costs-less P2-1: a 429 on the sale's optional fee read leaves the helper's lane open, so the send goes at once, the read asked once", async () => {
+// waited 6.0 s (Retry-After 3) and 10.0 s (Retry-After 10). The read and the send run with setTimeout frozen (mock
+// timers): a send that waits on the lane's pause, or a read that waits to ask again, never ends, and the test's own
+// timeout fails it.
+test("round-trip-costs-less P2-1: a 429 on the sale's optional fee read leaves the helper's lane open, so the send goes at once, the read asked once", { timeout: 20_000 }, async (t) => {
   for (const after of ["3", "10"]) {
     resetHostLanes();
     const sent: string[] = [];
@@ -460,18 +462,19 @@ test("round-trip-costs-less P2-1: a 429 on the sale's optional fee read leaves t
     };
     const helper = solanaPacedRpc(lanedRpc(`https://helper-optional-${after}.example/v1/rpc/solana`, { fetch: fakeFetch }));
     const pub = (async () => [{ slot: 1, prioritizationFee: 0 }]) as unknown as Parameters<typeof solanaSellPrice>[0][0];
-    const t0 = performance.now();
-    assert.equal(await solanaSellPrice([pub, helper], ["x"]), null, "the read refused: the cap");
-    const t1 = performance.now();
-    assert.equal(await helper("sendTransaction", ["AQ=="]), "sig");
-    const t2 = performance.now();
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    try {
+      assert.equal(await solanaSellPrice([pub, helper], ["x"]), null, "the read refused: the cap");
+      assert.equal(await helper("sendTransaction", ["AQ=="]), "sig");
+    } finally {
+      t.mock.timers.reset();
+    }
     resetHostLanes();
     assert.deepEqual(sent, ["getRecentPrioritizationFees", "sendTransaction"], `Retry-After ${after}: the read asked once, the send once`);
-    assert.ok(t1 - t0 < 500 && t2 - t1 < 500, `Retry-After ${after}: the fee read took ${Math.round(t1 - t0)} ms, then the send ${Math.round(t2 - t1)} ms`);
   }
 });
 
-test("round-trip-costs-less P2-1: an optional read is not sent to a host another reader's 429 paused, and on a seat goes to one member only; a paced or wrapped provider keeps it", async () => {
+test("round-trip-costs-less P2-1: an optional read is not sent to a host another reader's 429 paused, and on a seat goes to one member only; a paced or wrapped provider keeps it", { timeout: 20_000 }, async (t) => {
   resetHostLanes();
   const asked: string[] = [];
   const fetchOf = (host: string, status: number) => async (_url: string, init?: RequestInit): Promise<Response> => {
@@ -483,9 +486,13 @@ test("round-trip-costs-less P2-1: an optional read is not sent to a host another
   const paused = lanedRpc("https://paused-optional.example/rpc", { fetch: fetchOf("paused", 429), retry: { deadlineMs: 50, backoffMs: 50 } });
   await assert.rejects(paused("getSlot", []));
   asked.length = 0;
-  const t0 = performance.now();
-  await assert.rejects(optionalRead(solanaPacedRpc(paused))!("getRecentPrioritizationFees", [["x"]], new AbortController().signal), (e: unknown) => e instanceof SolanaRpcTransportError);
-  assert.ok(performance.now() - t0 < 100);
+  // refused at once: with setTimeout frozen, a read that waited out the pause would never end
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    await assert.rejects(optionalRead(solanaPacedRpc(paused))!("getRecentPrioritizationFees", [["x"]], new AbortController().signal), (e: unknown) => e instanceof SolanaRpcTransportError);
+  } finally {
+    t.mock.timers.reset();
+  }
   assert.deepEqual(asked, []);
   // an aborted signal: nothing sent
   const open = lanedRpc("https://open-optional.example/rpc", { fetch: fetchOf("open", 200) });
