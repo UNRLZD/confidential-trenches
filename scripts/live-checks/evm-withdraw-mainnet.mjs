@@ -2,9 +2,13 @@
 // Live check of card evm-withdraw-mainnet: money leaves a Base or Robinhood pool to the address typed, read without a
 // seed. It passes only when:
 //   1. each withdraw of the card's run record (evm-withdraw-mainnet.md, its Withdraw lines: the network, the release,
-//      W's onward send, To and the part in wei) reads back on both of its chain's pool RPCs (RPCS):
-//      - the release: PrivacyPool.withdraw (selector WITHDRAW_SELECTOR) to the chain's pinned pool (evm-pool-pins.mjs
-//        PINS), on the chain's own id, succeeded, with the pool's Withdrawn naming W;
+//      W's onward send, To and the part in wei) reads back on both of its chain's pool RPCs (RPCS_OF: a testnet's
+//      signpage-evm-pool-buy.mjs RPCS, Base's and Robinhood's mainnet pool-evm-deploy.mjs MAINNETS), and the record
+//      names a withdraw on Base and on Robinhood, each from its testnet or its mainnet, and once it names a mainnet one,
+//      one on Base mainnet and one on Robinhood mainnet;
+//      - the release: PrivacyPool.withdraw (selector WITHDRAW_SELECTOR) to the network's pinned pool (PIN_OF: a testnet's
+//        evm-pool-pins.mjs PINS, a mainnet's evm-pools-on-mainnet.mjs PINS), on the network's own id, succeeded, with
+//        the pool's Withdrawn naming W;
 //      - the onward send: from that W, to To (never the pool, never W), exactly the part, no calldata, on the chain's id,
 //        succeeded;
 //      - each in one block on both RPCs;
@@ -21,7 +25,16 @@ import "../net-window.mjs";
 import { readFileSync, writeFileSync } from "node:fs";
 import { PINS } from "./evm-pool-pins.mjs";
 import { EXIT, rpcAnswer, verdictOf } from "./provider-answer.mjs";
+import { PINS as MAINNET_PINS } from "./evm-pools-on-mainnet.mjs";
+import { MAINNETS } from "./pool-evm-deploy.mjs";
 import { CHAIN_IDS, EVM_BUY_MARKS, RPCS, pageFacts as buyFacts } from "./signpage-evm-pool-buy.mjs";
+
+/** Each network a Withdraw line may name: the testnets, and Base's and Robinhood's mainnet. */
+export const PIN_OF = Object.freeze({ ...PINS, base: MAINNET_PINS.base, robinhood: MAINNET_PINS.robinhood });
+export const RPCS_OF = Object.freeze({ ...RPCS, base: MAINNETS.base.rpcs, robinhood: MAINNETS.robinhood.rpcs });
+export const CHAIN_ID_OF = Object.freeze({ ...CHAIN_IDS, base: BigInt(MAINNETS.base.chainId), robinhood: BigInt(MAINNETS.robinhood.chainId) });
+/** The chain each network is: Base Sepolia is Base's testnet, Robinhood's testnet Robinhood's. */
+const CHAIN_OF = Object.freeze({ "base-sepolia": "base", base: "base", "robinhood-testnet": "robinhood", robinhood: "robinhood" });
 
 const KEY = "evm-withdraw-mainnet";
 export const SIGN = "https://confidential.unrealized.trade";
@@ -37,7 +50,7 @@ const lower = (s) => (typeof s === "string" ? s.toLowerCase() : s);
 
 /** The withdraws of a run record: its `Withdraw: <network> <release> <onward> <to> <part wei>` lines. */
 export const withdrawsOf = (md) =>
-  [...md.matchAll(/^Withdraw: (base-sepolia|robinhood-testnet) (0x[0-9a-f]{64}) (0x[0-9a-f]{64}) (0x[0-9a-fA-F]{40}) ([0-9]+)$/gm)].map((m) => ({ network: m[1], release: m[2], onward: m[3], to: m[4].toLowerCase(), part: m[5] }));
+  [...md.matchAll(/^Withdraw: (base-sepolia|robinhood-testnet|base|robinhood) (0x[0-9a-f]{64}) (0x[0-9a-f]{64}) (0x[0-9a-fA-F]{40}) ([0-9]+)$/gm)].map((m) => ({ network: m[1], release: m[2], onward: m[3], to: m[4].toLowerCase(), part: m[5] }));
 
 /** What the check keeps of SIGN_HOST: the buy check's facts (the pin, the bundle's sha384, the EVM buy marks) and the
  *  EVM withdraw marks the bundle holds. */
@@ -50,9 +63,14 @@ export function judge(run) {
   const lines = [];
   const say = (ok, text) => lines.push(`${ok ? "ok " : "BAD"} ${text}`);
   let quiet = false;
-  say(run.withdraws.length >= 2 && new Set(run.withdraws.map((t) => t.network)).size === 2, `the record names a withdraw on each testnet: ${run.withdraws.map((t) => t.network).join(", ") || "none"}`);
+  const chains = new Set(run.withdraws.map((t) => CHAIN_OF[t.network]));
+  say(chains.has("base") && chains.has("robinhood"), `the record names a withdraw on Base and on Robinhood: ${run.withdraws.map((t) => t.network).join(", ") || "none"}`);
+  // once the record names one mainnet withdraw, it names one on each mainnet: a testnet line never stands in for a
+  // mainnet one (the mainnet lines are the owner's withdraw taps after the deploy, evm-withdraw-mainnet.md)
+  const mainnet = run.withdraws.filter((t) => t.network === "base" || t.network === "robinhood").map((t) => t.network);
+  if (mainnet.length > 0) say(mainnet.includes("base") && mainnet.includes("robinhood"), `the record names a mainnet withdraw on Base and on Robinhood once it names one: ${mainnet.join(", ")}`);
   for (const wd of run.withdraws) {
-    const pin = PINS[wd.network];
+    const pin = PIN_OF[wd.network];
     const tag = `[${wd.network} ${wd.release.slice(0, 10)}]`;
     if (!pin) {
       say(false, `${tag} no pinned pool`);
@@ -60,7 +78,7 @@ export function judge(run) {
     }
     const blocks = { release: [], onward: [] };
     let silentHere = false;
-    for (const rpc of RPCS[wd.network]) {
+    for (const rpc of RPCS_OF[wd.network]) {
       const host = new URL(rpc).host;
       const got = (hash, m) => run.reads.find((r) => r.hash === hash && r.rpc === rpc && r.method === m)?.answer;
       const answers = [got(wd.release, "eth_getTransactionByHash"), got(wd.release, "eth_getTransactionReceipt"), got(wd.onward, "eth_getTransactionByHash"), got(wd.onward, "eth_getTransactionReceipt")];
@@ -71,11 +89,11 @@ export function judge(run) {
         continue;
       }
       const [rt, rr, ot, or] = answers.map((a) => a?.result);
-      say(lower(rt?.hash) === wd.release && lower(rt?.to) === pin.pool && typeof rt?.input === "string" && rt.input.startsWith(WITHDRAW_SELECTOR) && BigInt(rt?.chainId ?? -1) === CHAIN_IDS[wd.network], `${tag} ${host}: the release is withdraw() to the pinned pool ${pin.pool} on chain ${CHAIN_IDS[wd.network]}: to ${rt?.to ?? "none"}, input ${String(rt?.input ?? "none").slice(0, 10)}`);
+      say(lower(rt?.hash) === wd.release && lower(rt?.to) === pin.pool && typeof rt?.input === "string" && rt.input.startsWith(WITHDRAW_SELECTOR) && BigInt(rt?.chainId ?? -1) === CHAIN_ID_OF[wd.network], `${tag} ${host}: the release is withdraw() to the pinned pool ${pin.pool} on chain ${CHAIN_ID_OF[wd.network]}: to ${rt?.to ?? "none"}, input ${String(rt?.input ?? "none").slice(0, 10)}`);
       const withdrawn = Array.isArray(rr?.logs) ? rr.logs.find((l) => lower(l?.address) === pin.pool && l?.topics?.[0] === WITHDRAWN) : undefined;
       const w = typeof withdrawn?.topics?.[1] === "string" ? `0x${withdrawn.topics[1].slice(26)}`.toLowerCase() : null;
       say(rr?.status === "0x1" && w !== null, `${tag} ${host}: the release succeeded with the pool's Withdrawn: status ${rr?.status ?? "none"}, W ${w ?? "none"}`);
-      say(w !== null && lower(ot?.hash) === wd.onward && lower(ot?.from) === w && lower(ot?.to) === wd.to && wd.to !== pin.pool && wd.to !== w && BigInt(ot?.value ?? -1) === BigInt(wd.part) && (ot?.input === "0x" || ot?.input === "") && BigInt(ot?.chainId ?? -1) === CHAIN_IDS[wd.network], `${tag} ${host}: W's onward send is exactly the part ${wd.part} wei from W to ${wd.to}: from ${ot?.from ?? "none"}, to ${ot?.to ?? "none"}, value ${ot?.value === undefined ? "none" : BigInt(ot.value)}, input ${String(ot?.input ?? "none").slice(0, 10)}`);
+      say(w !== null && lower(ot?.hash) === wd.onward && lower(ot?.from) === w && lower(ot?.to) === wd.to && wd.to !== pin.pool && wd.to !== w && BigInt(ot?.value ?? -1) === BigInt(wd.part) && (ot?.input === "0x" || ot?.input === "") && BigInt(ot?.chainId ?? -1) === CHAIN_ID_OF[wd.network], `${tag} ${host}: W's onward send is exactly the part ${wd.part} wei from W to ${wd.to}: from ${ot?.from ?? "none"}, to ${ot?.to ?? "none"}, value ${ot?.value === undefined ? "none" : BigInt(ot.value)}, input ${String(ot?.input ?? "none").slice(0, 10)}`);
       say(or?.status === "0x1" && lower(or?.from) === w && lower(or?.to) === wd.to, `${tag} ${host}: W's onward send succeeded: status ${or?.status ?? "none"}`);
       blocks.release.push(rr?.blockNumber ?? null);
       blocks.onward.push(or?.blockNumber ?? null);
@@ -97,7 +115,7 @@ export async function read(md = readFileSync(RECORD, "utf8"), fetchFn = fetch) {
   const withdraws = withdrawsOf(md);
   const reads = [];
   for (const wd of withdraws)
-    for (const rpc of RPCS[wd.network] ?? [])
+    for (const rpc of RPCS_OF[wd.network] ?? [])
       for (const hash of [wd.release, wd.onward])
         for (const method of ["eth_getTransactionByHash", "eth_getTransactionReceipt"]) reads.push({ network: wd.network, hash, rpc, method, answer: await rpcAnswer(rpc, method, [hash], { fetchFn, nullNoAnswer: true }) });
   const get = async (path) => {

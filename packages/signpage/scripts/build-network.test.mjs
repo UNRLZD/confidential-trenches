@@ -38,11 +38,17 @@ const TESTNET_ONLY = [
   // the EVM pool buy and sale, testnet only while mainnet keeps them closed (card evm-pools-on-mainnet, src/pool-testnet.ts)
   "buy((address,bytes),", // the EVM pool buy's signature (src/evm-send.ts)
   "owed/back-evm", // the EVM buy's owed-back record (src/pool-buy-evm.ts EVM_OWED_BACK_KEY)
-  "withdraw((address,bytes),(uint256[2],", // the EVM pool withdraw's release (src/evm-send.ts EVM_WITHDRAW_SIGNATURE), folded as the buy
   "uniswap-v4", // the EVM buy's route search
   "nonce()", // the sale's read of W's SellDelegate nonce (src/pool-sell-evm.ts)
   // the Sell typed data W signs, whole (packages/kit/src/trade/evm/sell-unpinned.ts)
   "Sell(address token,uint256 amount,address target,bytes data,uint256 minOut,address pool,uint256 precommitment,uint256 feeCap,address feeRecipient,uint256 deadline,uint256 nonce)",
+];
+/** What both builds carry (card evm-deposit-on-mainnet): a Base and Robinhood pool deposit is open on a build only where
+ *  its withdraw is in it (src/pool-testnet.ts poolWayOut), so SIGN_HOST's bundle carries the EVM withdraw's release and
+ *  the EVM deposit's own words. */
+const BOTH = [
+  "withdraw((address,bytes),(uint256[2],", // the EVM pool withdraw's release (src/evm-send.ts EVM_WITHDRAW_SIGNATURE)
+  "0xe2bbb158", // the EVM pool deposit's selector, deposit(uint256,uint256), held by its rule (src/rules/pool.ts checkEvmDeposit)
 ];
 /** The mainnet pins (packages/wallet/src/pool/solana.ts SOL_POOLS.mainnet and SOL_MAINNET_DEPLOY, card
  *  sol-pools-mainnet-pin; packages/wallet/src/pool/evm.ts EVM_POOLS.base and .robinhood, card evm-pools-on-mainnet):
@@ -62,6 +68,7 @@ test("SIGN_HOST's build is the committed public/app.js, byte for byte, with no t
   assert.ok(js.equals(readFileSync(join(PKG, "public/app.js"))), "the mainnet bundle is the one built in the package");
   const text = js.toString("utf8");
   for (const s of TESTNET_ONLY) assert.ok(!text.includes(s), `the mainnet bundle carries ${s}`);
+  for (const s of BOTH) assert.ok(text.includes(s), `the mainnet bundle lacks ${s}`);
   assert.ok(!text.includes("__SIGN_NETWORK__"), "the network is folded at build time");
 });
 
@@ -90,6 +97,7 @@ test("the testnet build carries the devnet pool's pins and the testnet providers
   const text = (await bundle(undefined, { network: "testnet" })).js.toString("utf8");
   for (const s of TESTNET_ONLY) assert.ok(text.includes(s), `the testnet bundle lacks ${s}`);
   for (const s of MAINNET_ONLY) assert.ok(!text.includes(s), `the testnet bundle carries the mainnet pin's ${s}`);
+  for (const s of BOTH) assert.ok(text.includes(s), `the testnet bundle lacks ${s}`);
   assert.ok(!text.includes("__SIGN_NETWORK__"));
 });
 

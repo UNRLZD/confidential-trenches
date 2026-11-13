@@ -38,12 +38,46 @@
 //   fields the pool recomputes that context from at the tap, so a context the pool would not recompute exactly is
 //   refused there.
 // Nothing here holds a secret: W's secret key never reaches a pool, only its address and public key.
-import { VAULT_FIELD_P, type VaultSnarkjsProof, type VaultTree, type VaultWithdrawSignals } from "@blindfill/kit";
+import { VAULT_FIELD_P, VaultTree, type VaultSnarkjsProof, type VaultWithdrawSignals } from "@blindfill/kit";
 import { CHAINS, type Chain } from "../derive/index.ts";
 import type { Ladder } from "./ladder.ts";
 
 /** A pool's two trees, holding every leaf it has, and its newest roots, read on two RPCs. */
 export type PoolTrees = { stateTree: VaultTree; labelTree: VaultTree; stateRoot: bigint; labelRoot: bigint };
+
+/** trees(beforeMs)'s answer for a cut that holds no leaf (an empty pool's first leaf landing this epoch): not a fault,
+ *  the cut holds no note, so a caller takes the newest root at once. `code`: the
+ *  cause a stop names (pool-sell.ts legCause), never the message. */
+export class PoolNoLeafError extends Error {
+  readonly code = "no_leaf";
+  constructor(message: string) {
+    super(message);
+    this.name = "PoolNoLeafError";
+  }
+}
+
+/** A tree read refused for what its RPCs answered, its cause in `code` (pool-sell.ts legCause), never the message:
+ *  rpc_disagree (the two RPCs, or the sources, differ), root_mismatch (a root built from the leaves is not the pool's),
+ *  page_changed (a page read before holds other bytes now), time_back (a leaf's time below the one before it),
+ *  no_agreed_logs (no two sources of two operators gave the same logs making the pool's trees). */
+export type PoolReadCode = "rpc_disagree" | "root_mismatch" | "page_changed" | "time_back" | "no_agreed_logs";
+export class PoolReadError extends Error {
+  readonly code: PoolReadCode;
+  constructor(code: PoolReadCode, message: string) {
+    super(message);
+    this.name = "PoolReadError";
+    this.code = code;
+  }
+}
+
+/** An epoch cut's trees with a cut that holds no leaf read as trees of no leaf (the proof queue's epoch read): every
+ *  note is then past the cut and waits on the newest root, so an empty pool's first leaf is proved in its first epoch. */
+export function cutOrEmpty(read: Promise<PoolTrees>): Promise<PoolTrees> {
+  return read.catch((e: unknown) => {
+    if (!(e instanceof PoolNoLeafError)) throw e;
+    return { stateTree: new VaultTree(), labelTree: new VaultTree(), stateRoot: 0n, labelRoot: 0n };
+  });
+}
 
 /** What the queue hands the context function for one chunk. */
 /** Which step a proof failed at (a console line names these codes only, never the error's text): a pool read (the
@@ -118,7 +152,8 @@ export interface Pool<R = unknown> {
   now(signal?: AbortSignal): Promise<bigint>;
   /** The tree source: both trees holding only the leaves that landed before `beforeMs`, and their roots. `newest`: the
    * read for a note that landed this epoch (beforeMs = now + 1), which a pool may make at a lower commitment than its epoch
-   * roots (Solana: confirmed, M355 (5)); its failure fails only the notes that wait on it. */
+   * roots (Solana: confirmed, M355 (5)); its failure fails only the notes that wait on it. A cut that holds no leaf
+   * rejects with PoolNoLeafError. */
   trees(beforeMs: bigint, signal?: AbortSignal, opts?: { newest?: boolean }): Promise<PoolTrees>;
   /** The context function. */
   bind(a: PoolBindArgs, signal?: AbortSignal): Promise<PoolBinding<R>>;

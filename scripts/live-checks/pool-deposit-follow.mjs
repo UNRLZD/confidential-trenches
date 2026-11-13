@@ -115,7 +115,7 @@ const KIND = new RegExp(`return\\((${N}),(${N}),(${N})\\)=>\\{if\\(\\1!==null&&\
 // (card evm-deposit-route-mainnet: Base and Robinhood to the chain's EVM kind with the same fixed source)
 const FROM_ENTRY = new RegExp(
   `depositFrom:\\((${N}),(${N}),(${N})\\)=>\\{let (${N});try\\{\\4=${N}\\(\\{\\.\\.\\.\\1,kind:${Q}pool\\.deposit${Q}\\}\\)\\}catch\\{return\\{error:${Q}not_allowed${Q}\\}\\}` +
-    `return \\4\\.chain===${Q}solana${Q}\\?${N}===void 0\\?\\{error:${Q}not_allowed${Q}\\}:${N}\\(\\4,\\3,\\2\\):${N}\\(\\4\\.chain\\)\\?\\.\\(\\4,\\3,\\2\\)\\?\\?\\{error:${Q}not_allowed${Q}\\}\\}`,
+    `return \\4\\.chain===${Q}solana${Q}\\?${N}===void 0(?:\\|\\|!${N}\\(${Q}solana${Q}\\))?\\?\\{error:${Q}not_allowed${Q}\\}:${N}\\(\\4,\\3,\\2\\):${N}\\(\\4\\.chain\\)\\?\\.\\(\\4,\\3,\\2\\)\\?\\?\\{error:${Q}not_allowed${Q}\\}\\}`,
 );
 // rules/refund.ts checkPoolRefundQuote, and the mover's key open (poolRefundMover).
 const REFUND_RULE = new RegExp(
