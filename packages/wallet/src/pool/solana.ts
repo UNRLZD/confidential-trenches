@@ -566,13 +566,12 @@ export function solanaPool(a: SolanaPoolArgs): Pool<SolanaReleaseRequest> {
     scope,
     ladder: SOL_PIECE_LADDER,
     piecesMax: SOLANA_POOL_BUY_PIECES_MAX,
-    bindTakesNow: true,
     epochMs: SOL_EPOCH_MS,
     lifeMs: SOL_LIFE_MS,
     sendMarginMs: SOL_SEND_MARGIN_MS,
     now: (signal) => solanaNow(a.rpcs, signal),
     trees: (beforeMs, signal, opts) => sync.trees(beforeMs, signal, opts),
-    async bind({ chunk, wallet, epochStartMs, deadlineMs, tipCap = SOL_TIP_CAP, now }, signal) {
+    async bind({ chunk, wallet, epochStartMs, deadlineMs, tipCap = SOL_TIP_CAP, now, readNow }, signal) {
       if (!(wallet.publicKey instanceof Uint8Array) || wallet.publicKey.length !== 32 || wallet.address !== base58.encode(wallet.publicKey))
         throw new Error("wallet: a Solana W is base58 of its ed25519 public key");
       if (wallet.address === pool || wallet.address === feePayer) throw new Error("wallet: W is the pool or the fee payer");
@@ -582,7 +581,12 @@ export function solanaPool(a: SolanaPoolArgs): Pool<SolanaReleaseRequest> {
       if (tipCap !== SOL_TIP_CAP && tipCap !== 0n) throw new Error("tipCap: SOL_TIP_CAP for a buy or 0 for a withdraw");
       if (typeof epochStartMs !== "bigint" || epochStartMs % SOL_EPOCH_MS !== 0n) throw new Error("epochStartMs: not on the epoch grid");
       // the pool's time as now() reads it (solanaNow): the caller's read of a moment before while it stands, else read here
-      const nowMs = bindNow(now, epochStartMs, SOL_EPOCH_MS) ?? (await solanaNow(a.rpcs, signal));
+      let nowMs = bindNow(now, epochStartMs, SOL_EPOCH_MS);
+      if (nowMs === undefined) {
+        const at = performance.now(), wall = Date.now();
+        nowMs = await solanaNow(a.rpcs, signal);
+        readNow?.({ ms: nowMs, at, wall });
+      }
       if (typeof deadlineMs !== "bigint" || deadlineMs !== epochStartMs + SOL_LIFE_MS || deadlineMs <= nowMs + SOL_SEND_MARGIN_MS)
         throw new Error("deadlineMs: not on the epoch grid, or too close to send");
       const asked = relayFees.get(epochStartMs, signal);

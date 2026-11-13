@@ -86,6 +86,9 @@ export type PoolBindArgs = {
    *  whose bind reads the same time as its now() takes it for its send-margin guard (bindNow) in place of a read of its
    *  own; absent, or too old, or past the epoch of epochStartMs, the bind reads it. */
   now?: ChainNow;
+  /** Called with the bind's own read of the pool's time, when it made one (its start on both device clocks), so the
+   *  caller hands it to the binds after it. */
+  readNow?: (now: ChainNow) => void;
 };
 
 /** One chunk's binding: what the proof's last public signal must be, and what the tap sends for the pool to check it. */
@@ -111,9 +114,6 @@ export interface Pool<R = unknown> {
   /** The most notes one buy pays one W from (card buy-spends-several-pieces); absent or 1: each proof pays its own
    *  note's W. */
   readonly piecesMax?: number;
-  /** Whether bind takes PoolBindArgs.now for its send-margin guard (its own read the same as now()'s): the queue then
-   *  hands its binds one read of the pool's time between them (card max-ready-seconds-after-a-load). */
-  readonly bindTakesNow?: boolean;
   /** E: the length of an epoch of the pool's time, ms. */
   readonly epochMs: bigint;
   /** L: every proof of an epoch has the deadline epoch start + L. At least 2E + sendMarginMs; 2E + sendMarginMs +

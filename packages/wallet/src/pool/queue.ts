@@ -103,15 +103,13 @@ const UNANSWERED = new Set(["SolanaRpcTransportError", "EvmUnansweredError", "Ev
 const bindFail = (e: unknown): never => failAs(UNANSWERED.has(String((e as { name?: unknown } | null)?.name)) ? "network" : "fee_refused")(e);
 /** `small`: the pool's UNSPENT landed notes below its smallest rung, never proved (none: absent). */
 export type QueuePass = { made: string[]; remade: string[]; failed: { noteId: string; error: string; reason?: PassReason }[]; small?: number };
-/** How long before NOW_REUSE_MS a pass reads the pool's time again for its next binds, ms. */
-const NOW_REFRESH_EARLY_MS = 1_000;
 const NOTHING = (): QueuePass => ({ made: [], remade: [], failed: [] });
 
 export interface ProofQueue<R> {
   /** One pass: lets go of proofs whose note moved, makes again proofs of an earlier epoch (each stays ready until its new
    * one replaces it), proves notes that have no tier 1 proof, and with piecesMax above 1 makes tier 2 for the primary,
    * in the order "Pieces" above names. Passes run one after another. Each bind takes the pass's read of the pool's time
-   * while it stands (pool.ts bindNow, on a pool whose bindTakesNow), read again near NOW_REUSE_MS. */
+   * while it stands (pool.ts bindNow), and a bind that reads its own hands its read to the binds after it. */
   refresh(signal?: AbortSignal): Promise<QueuePass>;
   /** The proofs ready now that take() would hand out (proofLate: none late at the pool's time as this queue last read it,
    * plus the device's time since), both tiers, in leaf order (a note's tier 1 proof before its tier 2 one). A late one
@@ -285,10 +283,14 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
     w.secretKey.fill(0);
     const deadlineMs = epochStartMs + pool.lifeMs;
     const refundPrecommitment = noteSecrets(seed, { kind: "refund", l: leaf.label, j }).precommitment;
-    // the pool's time this queue last read (the pass's own read, or a take's), for the bind's send-margin guard: the
-    // bind takes it while it stands (pool.ts bindNow) and reads its own once it is too old or the epoch may have turned
+    // the pool's time this queue last read (the pass's own read, a take's or a bind's), for the bind's send-margin guard:
+    // the bind takes it while it stands (pool.ts bindNow) and reads its own once it is too old or the epoch may have
+    // turned, which the binds after it then take
     const now = seen === undefined ? undefined : { ms: seen.ms, at: performance.now() - (mono() - seen.at), wall: seen.wall };
-    const binding = await pool.bind({ chunk, wallet: { address: w.address, publicKey: w.publicKey }, refundPrecommitment, epochStartMs, deadlineMs, ...(now === undefined ? {} : { now }) }, signal).catch(bindFail);
+    const readNowOf = (c: ChainNow): void => {
+      if (seen === undefined || c.ms >= seen.ms) seen = { ms: c.ms, at: mono() - (performance.now() - c.at), wall: c.wall };
+    };
+    const binding = await pool.bind({ chunk, wallet: { address: w.address, publicKey: w.publicKey }, refundPrecommitment, epochStartMs, deadlineMs, ...(now === undefined ? {} : { now }), readNow: readNowOf }, signal).catch(bindFail);
     try {
       checkBinding(pool as Pool, binding, chunk);
     } catch (e) {
@@ -480,9 +482,6 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
         if (closed || signal?.aborted) return;
         // a tier 2 proof pays the primary's W: none while the primary has no ready proof of its own (it failed)
         if (t.to !== undefined && (pid === undefined || !ready.has(pid))) continue;
-        // the pool's time again once the last read is near NOW_REUSE_MS old, so the binds that follow take one read
-        // between them in place of one each; a read that fails leaves the bind to read its own
-        if (pool.bindTakesNow === true && (seen === undefined || mono() - seen.at > NOW_REUSE_MS - NOW_REFRESH_EARLY_MS || Date.now() - seen.wall > NOW_REUSE_MS - NOW_REFRESH_EARLY_MS)) await readNow(signal).catch(() => undefined);
         inFlight.set(t.n.id, { dropped: false });
         try {
           await prove(t.n, prover, t.trees, t.root, start, t.prev, t.to ?? null, signal);

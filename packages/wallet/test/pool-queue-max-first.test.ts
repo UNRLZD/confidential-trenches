@@ -136,7 +136,7 @@ test("one note: one proof and Max stands (no tier 2 to make)", async () => {
 
 /** The pool above, its bind taking the queue's read of the pool's time as solanaPool's does (pool.ts bindNow): each
  *  bind that cannot take it counts one read of its own, as the real pool reads then. */
-function nowPool(v: Vault, t: { now: bigint }) {
+function nowPool(v: Vault, t: { now: bigint; tick?: () => void }) {
   const p = piecesPool(v);
   const reads = { now: 0, own: 0 };
   const bound: { epochStartMs: bigint; deadlineMs: bigint }[] = [];
@@ -144,10 +144,12 @@ function nowPool(v: Vault, t: { now: bigint }) {
   return Object.assign(p, {
     reads,
     bound,
-    bindTakesNow: true as const,
-    now: async () => (reads.now++, t.now),
+    now: async () => (reads.now++, t.tick?.(), t.now),
     async bind(b: PoolBindArgs, s?: AbortSignal) {
-      if (bindNow(b.now, b.epochStartMs, p.epochMs) === undefined) reads.own++;
+      if (bindNow(b.now, b.epochStartMs, p.epochMs) === undefined) {
+        reads.own++;
+        b.readNow?.({ ms: t.now, at: performance.now(), wall: Date.now() });
+      }
       bound.push({ epochStartMs: b.epochStartMs, deadlineMs: b.deadlineMs });
       return bind(b, s);
     },
@@ -178,4 +180,17 @@ test("a pass whose clock says the epoch may have turned: each bind reads the poo
   assert.equal(r.made.length, 6);
   assert.equal(pool.reads.own, 6, "every bind read its own");
   for (const b of pool.bound) assert.deepEqual(b, { epochStartMs: START, deadlineMs: START + 270_000n });
+});
+
+test("a pass's read gone stale (the device's clock on past NOW_REUSE_MS): the first bind reads its own and the binds after it take that read", async () => {
+  const v = await vaultWith([usd(2), usd(5.5), usd(10), usd(20)]);
+  let clock = 0;
+  // the pass's read ends 6 s after it starts on the monotonic clock: too old for its binds
+  const pool = nowPool(v, { now: START + 1_000n, tick: () => void (clock += 6_000) });
+  const q = openProofQueue({ seed64: SEED, notes: v.ns, pool: pool as Pool<unknown>, provers: [signalsProver() as VaultProver], hardwareConcurrency: 16, monotonic: () => clock });
+  open.push(q);
+  const r = await q.refresh();
+  assert.equal(r.made.length, 6);
+  assert.equal(pool.reads.now, 1);
+  assert.equal(pool.reads.own, 1, "one read of its own, then the next binds take it");
 });

@@ -3262,14 +3262,17 @@ test("bind: the caller's read of the pool's time stands in for its own while it 
   assert.ok(first > 0, "with no read given, the bind reads the pool's time");
   const at = performance.now(), wall = Date.now();
   log.length = 0;
-  const reused = await p.bind({ ...args(), now: { ms: 1_800_000_130_000n, at, wall } });
+  const handed: bigint[] = [];
+  const reused = await p.bind({ ...args(), now: { ms: 1_800_000_130_000n, at, wall }, readNow: (c) => void handed.push(c.ms) });
   assert.equal(times(), 0, "a fresh read inside the epoch: no time read");
+  assert.equal(handed.length, 0, "and none handed back");
   assert.deepEqual(reused.request, own.request);
   assert.equal(reused.context, own.context);
   // too old (the monotonic clock past NOW_REUSE_MS), or past the epoch: read again
   log.length = 0;
-  await p.bind({ ...args(), now: { ms: 1_800_000_130_000n, at: performance.now() - 6_000, wall } });
+  await p.bind({ ...args(), now: { ms: 1_800_000_130_000n, at: performance.now() - 6_000, wall }, readNow: (c) => void handed.push(c.ms) });
   assert.equal(times(), first);
+  assert.deepEqual(handed, [1_800_000_130_000n], "its own read handed back, for the binds after it");
   log.length = 0;
   await p.bind({ ...args(), now: { ms: EPOCH + 60_000n, at: performance.now(), wall: Date.now() } });
   assert.equal(times(), first);

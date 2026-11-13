@@ -567,11 +567,10 @@ test("bind: the pool's context of W's request, its fee the device's own from the
 });
 
 // card max-ready-seconds-after-a-load: the helper's fee answer is the same for every proof of an epoch
-test("bind: the helper's fee is asked once an epoch; an answer a bind refuses is asked again; the bind keeps its own time read", async () => {
+test("bind: the helper's fee is asked once an epoch; an answer a bind refuses is asked again; the bind keeps its own time read (the higher of the two latest)", async () => {
   let asks = 0;
   let fee = "30000000000000";
   const p = poolOf(CB(), () => (asks++, answer({ fee })));
-  assert.equal(p.bindTakesNow, undefined, "an EVM bind reads its own time, the higher of the two latest");
   for (let i = 0; i < 3; i++) await p.bind(bindArgs());
   assert.equal(asks, 1);
   const q = poolOf(CB(), () => (asks++, answer({ fee })));
