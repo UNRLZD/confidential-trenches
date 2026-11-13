@@ -147,14 +147,13 @@ function judgeRow(say, n, c, row, release, run, shown = new Set(), network = "ma
   const unverified = (k) => checks[k]?.status === "warn" && checks[k]?.word === "Unverified";
   const downOk = isDown && keys && row.status === "warn" && want.every((k) => unverified(k) || (checks[k]?.status === "ok" && !checks[k]?.word)) && want.some(unverified) && (!want.every(unverified) || named.rpcs.some((u) => all.has(originOf(u))));
   say(isDown ? downOk : row.status === "ok" && allOk, `${n} ${c}: row ${row.status}; ${want.map((k) => `${k} ${checks[k]?.status ?? "none"}${checks[k]?.word ? ` (${checks[k].word})` : ""}`).join(", ")}`);
-  // Solana's row names its pair; an EVM row two operators of its list, whichever two answered (the kit's read list,
-  // card device-evm-fee-read-walks-operators), each of which this open read with every read 200
+  // a row names two operators of its list, whichever two answered (an EVM chain's the kit's read list, card
+  // device-evm-fee-read-walks-operators; Solana's three, card verify-row-survives-one-provider), each of which this
+  // open read with every read 200
   const pair = named.rpcs.map(host);
-  const evm = c !== "solana";
   const ops = row.rpcs.map((h) => evmRpcOperator(`https://${h}`));
-  if (evm) say(row.rpcs.length === 2 && row.rpcs.every((r) => pair.includes(r)) && ops[0] !== null && ops[0] !== ops[1], `${n} ${c}: the row names ${row.rpcs.join(" and ") || "no RPC"}, want two operators of ${pair.join(", ")}`);
-  else say(row.rpcs.length === 2 && row.rpcs.every((r, i) => r === pair[i]), `${n} ${c}: the row names ${row.rpcs.join(" and ") || "no RPC"}, want ${pair.join(" and ")}`);
-  if (evm && !isDown) {
+  say(row.rpcs.length === 2 && row.rpcs.every((r) => pair.includes(r)) && ops[0] !== null && ops[0] !== ops[1], `${n} ${c}: the row names ${row.rpcs.join(" and ") || "no RPC"}, want two operators of ${pair.join(", ")}`);
+  if (!isDown) {
     const read = named.rpcs.filter((u) => row.rpcs.includes(host(u))).map((u) => {
       const q = poolPosts.filter((x) => host(x.url) === host(u));
       return { u, n: q.length, ok: q.length > 0 && q.every((x) => readAnswered(x)) };
@@ -162,12 +161,12 @@ function judgeRow(say, n, c, row, release, run, shown = new Set(), network = "ma
     const past = named.rpcs.filter((u) => !row.rpcs.includes(host(u))).map((u) => `${host(u)} ${poolPosts.filter((x) => host(x.url) === host(u)).length} time(s)`);
     say(read.length === 2 && read.every((a) => a.ok), `${n} ${c}: this page read ${read.map((a) => `${host(a.u)} ${a.n} time(s)${a.ok ? ", all 200" : ", not all 200"}`).join(" and ") || "neither named RPC"}${past.length ? `; walked past or not asked: ${past.join(", ")}` : ""}`);
   }
-  const asked = (evm && !isDown ? [] : named.rpcs).map((u) => {
+  const asked = (isDown ? named.rpcs : []).map((u) => {
     const q = poolPosts.filter((x) => host(x.url) === host(u));
     // a read of an RPC the page shows down answers 5xx, 429 or nothing; a 4xx is no outage and fails
     return { u, n: q.length, ok: q.length > 0 && q.every((x) => readAnswered(x) || conf.isDown(x)) };
   });
-  if (!evm || isDown) say(asked.every((a) => a.ok), `${n} ${c}: this page read ${asked.map((a) => `${host(a.u)} ${a.n} time(s)${a.ok ? ", all 200" : ", not all 200"}`).join(" and ")}`);
+  if (isDown) say(asked.every((a) => a.ok), `${n} ${c}: this page read ${asked.map((a) => `${host(a.u)} ${a.n} time(s)${a.ok ? ", all 200" : ", not all 200"}`).join(" and ")}`);
   const links = EXPLORERS[c](addressOf(c, named.pin));
   say(JSON.stringify(row.links) === JSON.stringify(links), `${n} ${c}: explorer links ${JSON.stringify(row.links ?? [])}${JSON.stringify(row.links) === JSON.stringify(links) ? "" : `, want ${JSON.stringify(links)}`}`);
 }
