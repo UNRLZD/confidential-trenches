@@ -16,6 +16,7 @@ import { after, test } from "node:test";
 import { readFileSync } from "node:fs";
 import { createHook } from "node:async_hooks";
 import { IDBFactory } from "fake-indexeddb";
+import { returningWallets } from "../src/positions.ts";
 import { base58, base64 } from "@scure/base";
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
@@ -6803,7 +6804,9 @@ test("round-trip-costs-less P3-e: a W's owed record keeps the lamports its pass 
   const floor = await soldElsewhere(500_000);
   await resumeRentBacks(floor.w.host, fakeLocks());
   const onW = floor.w.c.accounts.get(W.address)!.lamports;
-  assert.equal(floor.w.owed.get(W.address)?.lamports, String(onW), "under the floor: what stays on W");
+  assert.ok(onW > 0n, "under the floor: W keeps its SOL");
+  assert.ok(floor.w.owed.has(W.address), "under the floor: the record kept, a later top-up may make W sweepable");
+  assert.equal(floor.w.owed.get(W.address)?.lamports, undefined, "under the floor: no amount carried, none shown");
   const swept = await soldElsewhere(ENOUGH);
   await resumeRentBacks(swept.w.host, fakeLocks());
   assert.equal(swept.w.c.deposits.filter((d) => d.sweep).length, 1);
@@ -6816,6 +6819,23 @@ test("round-trip-costs-less P3-e: a W's owed record keeps the lamports its pass 
   await resumeRentBacks(unproven.w.host, fakeLocks());
   assert.equal(unproven.w.c.deposits.filter((d) => d.sweep).length, 0);
   assert.equal(unproven.w.owed.get(W.address)?.lamports, undefined, "no proven buy: none");
+});
+
+// a W whose pass ended at the floor holds SOL no pass moves while W stays as it is: shown as RETURNING it would sit in
+// On the way and in Total for good, a number that never moves. Its record stays (a top-up may make it sweepable) with no
+// amount, so it draws no row and adds nothing; a W that held under the floor before its top-up and is swept after it
+// is listed again once a pass reads it
+test("round-trip-costs-less P3-e: a W that ended at the floor draws no RETURNING row and adds nothing to On the way or Total", async () => {
+  const floor = await soldElsewhere(500_000);
+  await resumeRentBacks(floor.w.host, fakeLocks());
+  assert.equal(floor.w.c.deposits.filter((d) => d.sweep).length, 0, "under the floor: no sweep");
+  assert.ok(floor.w.c.accounts.get(W.address)!.lamports > 0n, "W keeps its SOL");
+  const price = { price: "8100000000", expo: -8, published_s: 1, read_ms: 1 }; // 81 USD a SOL
+  const rows = returningWallets([...floor.w.owed.values()], price, await floor.w.ns.list());
+  assert.deepEqual(rows, [], "no row for a W at the floor");
+  const swept = await soldElsewhere(ENOUGH);
+  await resumeRentBacks(swept.w.host, fakeLocks());
+  assert.equal(returningWallets([...swept.w.owed.values()], price, await swept.w.ns.list()).length, 1, "a W whose sweep is on its way: listed");
 });
 
 // review 2 P3-e of c0dd55d02: leftover Ws swept at a later load went 1 to 2 s apart, so Ws whose sales were hours apart

@@ -180,6 +180,7 @@ export const M = [
   ["c13 the cap held after a sale landed", SELL, T, '    else if ("stage" in a && (a.stage === "filled" || a.stage === "refused")) capNext.delete(w.address);\n', ""],
   ["c14 the fee read on the laned client", SELL, "test/page-rpc.test.ts", "    const read = optionalRead(r);\n", "    const read = (m: string, q: readonly unknown[]) => r(m, q);\n"],
   ["c15 the optional read retried and reported", PAGE_RPC, "test/page-rpc.test.ts", "    return solanaJsonRpc(url, { ...(o.init ? { init: o.init } : {}), fetch, retry: { deadlineMs: retry.deadlineMs, backoffMs: retry.deadlineMs } })(method, params);", "    return go(method, params);"],
+  ["c16 a W that ended at the floor still carries its amount", SELL, T, 'const lamports = e === "floor" ? undefined : kept.lamports !== undefined ? kept.lamports.toString() : last;', "const lamports = kept.lamports !== undefined ? kept.lamports.toString() : last;"],
 ];
 // every mutant's name, in the order the parts take them
 export const NAMES = M.map(([name]) => name);

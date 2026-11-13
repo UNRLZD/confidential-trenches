@@ -2261,7 +2261,9 @@ async function owedAfter(h: PoolSellHost, o: OwedRentBack, e: RentBackEnd, seen?
     const { seen: _last, left: _left, lamports: last, sweep: lastSweep, spaced: lastSpaced, ...rest } = now as OwedRentBack & { left?: string };
     // what W holds (returningWallets): this pass's read, else the last, kept once its sweep is sent with the sweep's
     // signature: listed until the note it wrote is counted (never twice); a later read of W stands on its own
-    const lamports = kept.lamports !== undefined ? kept.lamports.toString() : last;
+    // a pass that ended at the floor carries none: what W holds under it no pass moves while W stays as it is, so it is
+    // never shown as on its way (the record stays, a top-up may make W sweepable, and a later pass's read lists it)
+    const lamports = e === "floor" ? undefined : kept.lamports !== undefined ? kept.lamports.toString() : last;
     const sweep = e === "sent" ? kept.sweep : kept.lamports !== undefined ? undefined : lastSweep;
     const spaced = kept.spaced ?? lastSpaced;
     await h.owed?.put({ ...rest, mints: mintsOf(now.mints, o.mints), passes: now.passes + 1, ...(seen !== undefined && (e === "floor" || e === "holds" || e === "kept" || e === "refused") ? { seen } : {}), ...(kept.buy === undefined ? {} : { buy: kept.buy }), ...(lamports === undefined ? {} : { lamports }), ...(sweep === undefined ? {} : { sweep }), ...(spaced === undefined ? {} : { spaced }) });

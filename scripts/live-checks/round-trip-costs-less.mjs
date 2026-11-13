@@ -145,13 +145,14 @@ export const MARKS = Object.freeze({
       R`(${I})=(${I})\.spaced\?\?(${I});await (${I})\.owed\?\.put\(`,
     ],
   ),
-  "a leftover W waiting so is listed on its way: its record keeps what its pass read on W, its buy proven, at its teardown as at its sweep, and a held pass reads and signs nothing more; once its sweep is sent W stays RETURNING with that sweep's signature until the note it wrote is counted in the same notes the balance reads, never in both totals": tied(
+  "a leftover W waiting so is listed on its way: its record keeps what its pass read on W, its buy proven, at its teardown as at its sweep, and a held pass reads and signs nothing more; once its sweep is sent W stays RETURNING with that sweep's signature until the note it wrote is counted in the same notes the balance reads, never in both totals; a W whose pass ended at the floor keeps no amount, so it is never listed": tied(
     re(R`\[(?<la>${I}),(?<lb>${I})\]=(?<hd>${I})\.map\((?<e>${I})=>\k<e>\[0\]\?\.lamports\?\?0n\);if\((?<x>${I})\.buy&&\k<la>===\k<lb>&&\k<x>\.read\?\.\(\k<la>\),(?<pl>${I})\.close\.length===0\)return\{keep:\k<pl>\.keep,signed:\[\],last:0,unclaimed:void 0,since:${I}\};if\(\k<x>\.quiet===!0\)throw (?<held>${I});`),
     (g) => [
       R`if\((${I})\.buy&&\1\.read\?\.\((${I})\),\2===0n\)return\{end:`,
       "`W holds nothing`" + R`\};if\((${I})\.quiet===!0\)throw ${esc(g.held)};`,
       R`(${I})\.swept\?\.\((${I})\.one\.signature\),await (${I})\(\2\.one\.signed,\2\.one\.signature\)`,
-      R`(${I})=(${I})\.lamports===void 0\?(${I}):\2\.lamports\.toString\(\),(${I})=(${I})===` + "`sent`" + R`\?\2\.sweep:\2\.lamports===void 0\?(${I}):void 0,`,
+      // a pass that ended at the floor carries no amount: never listed, never in On the way or Total
+      R`(${I})=(${I})===` + "`floor`" + R`\?void 0:(${I})\.lamports===void 0\?(${I}):\3\.lamports\.toString\(\),(${I})=\2===` + "`sent`" + R`\?\3\.sweep:\3\.lamports===void 0\?(${I}):void 0,`,
       R`if\(typeof (${I})\.lamports!=` + "`string`" + R`\|\|!/\^\[1-9\]\\d\{0,19\}\$/\.test\(\1\.lamports\)\)continue;if\(\1\.sweep!==void 0\)\{if\((${I})===null\)continue;let (${I})=\2\.find\((${I})=>\4\.sends\?\.some\((${I})=>\5\.signature===\1\.sweep\)\);if\(\3!==void 0&&\3\.state!==` + "`PLANNED`" + R`&&\3\.state!==` + "`INCOMING`" + R`\)continue\}let (${I})=(${I})\(BigInt\(\1\.lamports\),(${I}),(${I})\);\6!==null&&(${I})\.push\(\{chain:` + "`solana`" + R`,address:\1\.address,role:` + "`fresh`" + R`,size:\6,state:` + "`RETURNING`" + R`\}\)`,
       // the page: the same shared notes read the balance counted
       R`(${I})=null,(${I})=\(\)=>\1\?\?=(${I})\(\),(${I})=await (${I})\(await (${I})\((${I}),\2,[^]{0,1600}?(${I})=\7\.signed_in&&(${I})\?await \9\.returning\(\)\.catch\(\(\)=>\[\]\):\[\],(${I})=\8\.some\((${I})=>\11\.sweep!==void 0\)\?await \2\(\)\.catch\(\(\)=>null\):\[\];return (${I})\((${I}),(${I})\(\8,(${I})\.get\(` + "`solana`" + R`\),\10\)\)`,

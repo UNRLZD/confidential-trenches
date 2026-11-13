@@ -6,8 +6,8 @@
     "beforePrice": "card/round-trip-costs-less 591044f67 build (mainnet), the sale's closes taken out, before its price was read from recent fees: FAIL on the price rules alone"
   },
   "good": {
-    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-Xha5HyYf2jFgHc+lyLGFdA+RUyPu02WmYXAO5yhNXGKjwGqvyguv0aDGAugORSW9\"></script>\n  </head>\n  <body></body>\n</html>\n",
-    "sha384": "sha384-Xha5HyYf2jFgHc+lyLGFdA+RUyPu02WmYXAO5yhNXGKjwGqvyguv0aDGAugORSW9",
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-EQ0AXrQnNrEN+eN17T5e5ZLdZP9V3yUEpIis0r9VWMv63ql8L+6zCb1PJjsrAxJ+\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-EQ0AXrQnNrEN+eN17T5e5ZLdZP9V3yUEpIis0r9VWMv63ql8L+6zCb1PJjsrAxJ+",
     "carries": {
       "the sale's price per compute unit is the higher of both RPCs' 75th percentile of recent fees on the accounts it writes, at least 1, each read the RPC's optional read (once, its throttle reported to no lane, never to a host not open); a read that fails, is not a list of prices or is empty: none": true,
       "the sale is priced at that only if it is answered by its first simulation, never waited for: the budget at the lower of that price and what the priority's cap buys, the cap where none was read; a W whose sale did not land pays the cap next, with no read, until one lands": true,
@@ -20,7 +20,7 @@
       "the page reads the restore's no-buy mark": true,
       "the sell's rule refuses a sale that pays more than 100,000 lamports of priority (a price with no limit at 1,400,000 units, rounded up as the runtime charges it) and a sale's fee over 105,000, full or partial": true,
       "a leftover W's rent back is spaced: each rent-back send from a W is stamped before it is sent with a gap drawn from 10 to 60 minutes, in the device's own database that a sign out leaves; a leftover pass sends nothing while another W's gap runs (one past now and the largest gap is none), nor after this load's one sending pass, and takes the device's slot in one readwrite transaction so no other tab sends within it, before the teardown's sends and the sweep's note; a hold is no fault, never tried again": true,
-      "a leftover W waiting so is listed on its way: its record keeps what its pass read on W, its buy proven, at its teardown as at its sweep, and a held pass reads and signs nothing more; once its sweep is sent W stays RETURNING with that sweep's signature until the note it wrote is counted in the same notes the balance reads, never in both totals": true
+      "a leftover W waiting so is listed on its way: its record keeps what its pass read on W, its buy proven, at its teardown as at its sweep, and a held pass reads and signs nothing more; once its sweep is sent W stays RETURNING with that sweep's signature until the note it wrote is counted in the same notes the balance reads, never in both totals; a W whose pass ended at the floor keeps no amount, so it is never listed": true
     }
   },
   "bad": {
@@ -38,7 +38,7 @@
       "the page reads the restore's no-buy mark": false,
       "the sell's rule refuses a sale that pays more than 100,000 lamports of priority (a price with no limit at 1,400,000 units, rounded up as the runtime charges it) and a sale's fee over 105,000, full or partial": false,
       "a leftover W's rent back is spaced: each rent-back send from a W is stamped before it is sent with a gap drawn from 10 to 60 minutes, in the device's own database that a sign out leaves; a leftover pass sends nothing while another W's gap runs (one past now and the largest gap is none), nor after this load's one sending pass, and takes the device's slot in one readwrite transaction so no other tab sends within it, before the teardown's sends and the sweep's note; a hold is no fault, never tried again": false,
-      "a leftover W waiting so is listed on its way: its record keeps what its pass read on W, its buy proven, at its teardown as at its sweep, and a held pass reads and signs nothing more; once its sweep is sent W stays RETURNING with that sweep's signature until the note it wrote is counted in the same notes the balance reads, never in both totals": false
+      "a leftover W waiting so is listed on its way: its record keeps what its pass read on W, its buy proven, at its teardown as at its sweep, and a held pass reads and signs nothing more; once its sweep is sent W stays RETURNING with that sweep's signature until the note it wrote is counted in the same notes the balance reads, never in both totals; a W whose pass ended at the floor keeps no amount, so it is never listed": false
     }
   },
   "beforeReview": {
@@ -56,7 +56,7 @@
       "the page reads the restore's no-buy mark": false,
       "the sell's rule refuses a sale that pays more than 100,000 lamports of priority (a price with no limit at 1,400,000 units, rounded up as the runtime charges it) and a sale's fee over 105,000, full or partial": false,
       "a leftover W's rent back is spaced: each rent-back send from a W is stamped before it is sent with a gap drawn from 10 to 60 minutes, in the device's own database that a sign out leaves; a leftover pass sends nothing while another W's gap runs (one past now and the largest gap is none), nor after this load's one sending pass, and takes the device's slot in one readwrite transaction so no other tab sends within it, before the teardown's sends and the sweep's note; a hold is no fault, never tried again": false,
-      "a leftover W waiting so is listed on its way: its record keeps what its pass read on W, its buy proven, at its teardown as at its sweep, and a held pass reads and signs nothing more; once its sweep is sent W stays RETURNING with that sweep's signature until the note it wrote is counted in the same notes the balance reads, never in both totals": false
+      "a leftover W waiting so is listed on its way: its record keeps what its pass read on W, its buy proven, at its teardown as at its sweep, and a held pass reads and signs nothing more; once its sweep is sent W stays RETURNING with that sweep's signature until the note it wrote is counted in the same notes the balance reads, never in both totals; a W whose pass ended at the floor keeps no amount, so it is never listed": false
     }
   },
   "beforePrice": {
@@ -74,7 +74,7 @@
       "the page reads the restore's no-buy mark": true,
       "the sell's rule refuses a sale that pays more than 100,000 lamports of priority (a price with no limit at 1,400,000 units, rounded up as the runtime charges it) and a sale's fee over 105,000, full or partial": false,
       "a leftover W's rent back is spaced: each rent-back send from a W is stamped before it is sent with a gap drawn from 10 to 60 minutes, in the device's own database that a sign out leaves; a leftover pass sends nothing while another W's gap runs (one past now and the largest gap is none), nor after this load's one sending pass, and takes the device's slot in one readwrite transaction so no other tab sends within it, before the teardown's sends and the sweep's note; a hold is no fault, never tried again": false,
-      "a leftover W waiting so is listed on its way: its record keeps what its pass read on W, its buy proven, at its teardown as at its sweep, and a held pass reads and signs nothing more; once its sweep is sent W stays RETURNING with that sweep's signature until the note it wrote is counted in the same notes the balance reads, never in both totals": false
+      "a leftover W waiting so is listed on its way: its record keeps what its pass read on W, its buy proven, at its teardown as at its sweep, and a held pass reads and signs nothing more; once its sweep is sent W stays RETURNING with that sweep's signature until the note it wrote is counted in the same notes the balance reads, never in both totals; a W whose pass ended at the floor keeps no amount, so it is never listed": false
     }
   },
   "beforeFix": {
@@ -92,7 +92,7 @@
       "the page reads the restore's no-buy mark": true,
       "the sell's rule refuses a sale that pays more than 100,000 lamports of priority (a price with no limit at 1,400,000 units, rounded up as the runtime charges it) and a sale's fee over 105,000, full or partial": false,
       "a leftover W's rent back is spaced: each rent-back send from a W is stamped before it is sent with a gap drawn from 10 to 60 minutes, in the device's own database that a sign out leaves; a leftover pass sends nothing while another W's gap runs (one past now and the largest gap is none), nor after this load's one sending pass, and takes the device's slot in one readwrite transaction so no other tab sends within it, before the teardown's sends and the sweep's note; a hold is no fault, never tried again": false,
-      "a leftover W waiting so is listed on its way: its record keeps what its pass read on W, its buy proven, at its teardown as at its sweep, and a held pass reads and signs nothing more; once its sweep is sent W stays RETURNING with that sweep's signature until the note it wrote is counted in the same notes the balance reads, never in both totals": false
+      "a leftover W waiting so is listed on its way: its record keeps what its pass read on W, its buy proven, at its teardown as at its sweep, and a held pass reads and signs nothing more; once its sweep is sent W stays RETURNING with that sweep's signature until the note it wrote is counted in the same notes the balance reads, never in both totals; a W whose pass ended at the floor keeps no amount, so it is never listed": false
     }
   },
   "beforeP3": {
@@ -110,7 +110,7 @@
       "the page reads the restore's no-buy mark": true,
       "the sell's rule refuses a sale that pays more than 100,000 lamports of priority (a price with no limit at 1,400,000 units, rounded up as the runtime charges it) and a sale's fee over 105,000, full or partial": false,
       "a leftover W's rent back is spaced: each rent-back send from a W is stamped before it is sent with a gap drawn from 10 to 60 minutes, in the device's own database that a sign out leaves; a leftover pass sends nothing while another W's gap runs (one past now and the largest gap is none), nor after this load's one sending pass, and takes the device's slot in one readwrite transaction so no other tab sends within it, before the teardown's sends and the sweep's note; a hold is no fault, never tried again": false,
-      "a leftover W waiting so is listed on its way: its record keeps what its pass read on W, its buy proven, at its teardown as at its sweep, and a held pass reads and signs nothing more; once its sweep is sent W stays RETURNING with that sweep's signature until the note it wrote is counted in the same notes the balance reads, never in both totals": false
+      "a leftover W waiting so is listed on its way: its record keeps what its pass read on W, its buy proven, at its teardown as at its sweep, and a held pass reads and signs nothing more; once its sweep is sent W stays RETURNING with that sweep's signature until the note it wrote is counted in the same notes the balance reads, never in both totals; a W whose pass ended at the floor keeps no amount, so it is never listed": false
     }
   }
 }
