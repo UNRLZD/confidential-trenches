@@ -21,7 +21,7 @@ const pairNames = (env: Record<string, string | undefined>): string[] => (status
 
 // keyed URLs in each company's documented form, with made-up keys (no real key is ever in a test)
 const FASTNEAR = `https://rpc.mainnet.fastnear.com?apiKey=${"f".repeat(32)}`;
-const DRPC = `https://lb.drpc.live/near/${"d".repeat(32)}`;
+const DRPC = "https://lb.drpc.live/near/dddddddddddddddddddddddddddddddd";
 const KEYED = { NEAR_RPC_URL_FASTNEAR: FASTNEAR, NEAR_RPC_URL_B: DRPC };
 const FREE = WATCH_RPCS.map((r) => r.fallback);
 
@@ -70,7 +70,7 @@ test("readUrls: the keyed FastNear name first and dRPC's key second; NEAR_RPC_UR
 test("readUrls: two slots of one company are refused at start, naming the variables, never a value", () => {
   for (const env of [
     { NEAR_RPC_URL_FASTNEAR: FASTNEAR, NEAR_RPC_URL_B: "https://free.rpc.fastnear.com" },
-    { NEAR_RPC_URL_FASTNEAR: `https://lb.drpc.live/near/${"e".repeat(32)}`, NEAR_RPC_URL_B: DRPC },
+    { NEAR_RPC_URL_FASTNEAR: "https://lb.drpc.live/near/eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", NEAR_RPC_URL_B: DRPC },
     { NEAR_RPC_URL: "https://near.drpc.org", NEAR_RPC_URL_B: DRPC },
   ]) {
     assert.throws(

@@ -73,7 +73,7 @@ test("GET /v1/health: 200, proxy up (/v1/proxy/ and /v1/rpc/ are mounted), relay
 test("GET /v1/health names mainnet NEAR's agreement pair in X-Helper-Near-Pair, never a URL or a key", async (t) => {
   const free = await call("GET", "/v1/health", { origin: APP });
   assert.equal(free.headers[NEAR_PAIR_HEADER.toLowerCase()], "fastnear.com keyless, drpc.org keyless", "this test's environment sets no NEAR key");
-  const env = { NEAR_RPC_URL_FASTNEAR: `https://rpc.mainnet.fastnear.com?apiKey=${"f".repeat(32)}`, NEAR_RPC_URL_B: `https://lb.drpc.live/near/${"d".repeat(32)}` };
+  const env = { NEAR_RPC_URL_FASTNEAR: `https://rpc.mainnet.fastnear.com?apiKey=${"f".repeat(32)}`, NEAR_RPC_URL_B: "https://lb.drpc.live/near/dddddddddddddddddddddddddddddddd" };
   const helper = createServer(handler(COMMIT, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, pairNames(env)));
   t.after(() => closeServer(helper));
   await new Promise<void>((ok) => helper.listen(0, "127.0.0.1", () => ok()));

@@ -73,7 +73,7 @@
 import { VAULT_CONSTANTS, VAULT_TOKEN_CODE_HASH, type HelperTokenStatusAnswer } from "@blindfill/kit";
 import * as nodeFs from "node:fs";
 import { join } from "node:path";
-import { operatorOf, providerName } from "../rpc/rpc.ts";
+import { operatorOf, providerName } from "../rpc/operator.ts";
 import { openDurableDir, type DurableDir } from "../store/durable.ts";
 
 /** The vault's one token (the kit's VAULT_CONSTANTS.TOKEN, packages/kit/src/vault/shapes.ts). */

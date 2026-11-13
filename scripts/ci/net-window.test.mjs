@@ -187,6 +187,7 @@ export const CHANGED = [
   "scripts/live-checks/sol-settle-failed-is-not-unspent.mjs",
   "scripts/live-checks/signpage-throttled-read-is-not-asked-again-at-once.mjs",
   "scripts/live-checks/signpage-throttled-provider-has-a-spare.mjs",
+  "scripts/live-checks/near-pair-on-keyed-providers.mjs",
   "scripts/live-checks/near-quote-under-the-pace.mjs",
   "scripts/live-checks/sell-first-read-waits-out-a-throttle.mjs",
   "scripts/live-checks/sell-right-after-a-buy.mjs",
