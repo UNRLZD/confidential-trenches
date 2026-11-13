@@ -3249,3 +3249,50 @@ test("the walk ends at its signal: aborted mid-walk, the restore rejects with th
   assert.ok(c.reads() - 500 <= WALK_SLICE_MS + 2, `at most a slice after the abort (${c.reads() - 500} steps)`);
   assert.equal(log.length, reads, "no read after it");
 });
+
+// card max-ready-seconds-after-a-load: every bind of an epoch binds the same fee and checks the same send margin, so the
+// queue's one read of the pool's time serves its pass's binds while it stands, and the helper's fee is asked once an epoch
+test("bind: the caller's read of the pool's time stands in for its own while it is fresh and inside the epoch; else it reads; the binding is the same", async () => {
+  const log: string[] = [];
+  const logged = (): [SolanaRpc, SolanaRpc] => [rpc(nowChain(), { ...MAINNET, url: "https://a.example" }, log), rpc(nowChain(), { ...MAINNET, url: "https://b.example" }, log)];
+  const times = () => log.filter((m) => m === "getSlot" || m === "getBlockTime").length;
+  const p = poolWith(logged());
+  const own = await p.bind(args());
+  const first = times();
+  assert.ok(first > 0, "with no read given, the bind reads the pool's time");
+  const at = performance.now(), wall = Date.now();
+  log.length = 0;
+  const reused = await p.bind({ ...args(), now: { ms: 1_800_000_130_000n, at, wall } });
+  assert.equal(times(), 0, "a fresh read inside the epoch: no time read");
+  assert.deepEqual(reused.request, own.request);
+  assert.equal(reused.context, own.context);
+  // too old (the monotonic clock past NOW_REUSE_MS), or past the epoch: read again
+  log.length = 0;
+  await p.bind({ ...args(), now: { ms: 1_800_000_130_000n, at: performance.now() - 6_000, wall } });
+  assert.equal(times(), first);
+  log.length = 0;
+  await p.bind({ ...args(), now: { ms: EPOCH + 60_000n, at: performance.now(), wall: Date.now() } });
+  assert.equal(times(), first);
+});
+
+test("bind: the helper's fee is asked once an epoch; an answer a bind refuses, or an ask that fails, is asked again", async () => {
+  let asks = 0;
+  let answer = "1300000";
+  const p = solanaPool({ pin: PIN, rpcs: pair(nowChain(), nowChain()), relayFee: async (e) => (asks++, feeAnswer(e, answer)), salt: () => unhex(R.spends[0]!.salt), lagWait: async () => {} });
+  for (let i = 0; i < 3; i++) await p.bind(args());
+  assert.equal(asks, 1, "three binds of one epoch, one ask");
+  const q = solanaPool({ pin: PIN, rpcs: pair(nowChain(), nowChain()), relayFee: async (e) => (asks++, feeAnswer(e, answer)), salt: () => unhex(R.spends[0]!.salt), lagWait: async () => {} });
+  asks = 0;
+  answer = "1400000";
+  await assert.rejects(q.bind(args()), /not the epoch's fee/);
+  answer = "1300000";
+  await q.bind(args());
+  assert.equal(asks, 2, "the refused answer was asked again");
+  let fail = true;
+  const r = solanaPool({ pin: PIN, rpcs: pair(nowChain(), nowChain()), relayFee: async (e) => (asks++, fail ? Promise.reject(new Error("HTTP 503")) : feeAnswer(e)), salt: () => unhex(R.spends[0]!.salt), lagWait: async () => {} });
+  asks = 0;
+  await assert.rejects(r.bind(args()), /503/);
+  fail = false;
+  await r.bind(args());
+  assert.equal(asks, 2, "the failed ask was asked again");
+});

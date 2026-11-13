@@ -2296,3 +2296,19 @@ test("(review 4 P2, the page's host) an EVM withdraw of a note another page's qu
   assert.equal(state, "UNSPENT");
   assert.match(op?.cause ?? "", /^Error\b/, "the part's stop at its bind on the op's record");
 });
+
+test("a proof queue's opening loads the prover's withdraw circuit before the pass reads the pool's trees (card max-ready-seconds-after-a-load)", async () => {
+  const { w, ns } = await wallet();
+  const { pool, land } = fakePool();
+  const order: string[] = [];
+  const inner = signalsProver();
+  const prover = { ...inner, load: async (c: string) => void order.push(`load ${c}`), prove: async (c: string, i: unknown) => (order.push("prove"), inner.prove(c as never, i as never)) } as typeof inner;
+  const trees = pool.trees.bind(pool);
+  const planted = { ...pool, trees: async (...a: Parameters<typeof pool.trees>) => (order.push("trees"), trees(...a)) };
+  const t = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { pool: planted, prover: { vault: prover, stop: () => {} }, hardwareConcurrency: 4, locks: null });
+  await land(ns, await incoming(ns, null, 1));
+  await t.proofs();
+  assert.deepEqual(order.slice(0, 2), ["load withdraw", "trees"], order.join(", "));
+  assert.ok(order.includes("prove"));
+  await t.signedOut();
+});

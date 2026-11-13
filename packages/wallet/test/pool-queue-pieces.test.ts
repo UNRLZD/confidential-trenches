@@ -79,26 +79,24 @@ const tiers = (q: ProofQueue<unknown>, id: string): { own?: ReadyProof<unknown>;
 };
 const bal = async (v: Vault, q: ProofQueue<unknown>) => poolBalances(await v.ns.list(), [BAL], q.ready())[0]!;
 
-test("tiers: each ready note's proof pays its own W (tier 1); once tier 1 has nothing left to make, the largest other notes get a second proof to the primary's W (tier 2), and the restore finds that W", async () => {
+test("tiers: each ready note's proof pays its own W (tier 1); in the same pass the largest other notes get a second proof to the primary's W (tier 2), and the restore finds that W", async () => {
   const v = await vaultWith(VALUES);
   const pool = piecesPool(v);
   const q = queue(v, pool as Pool<unknown>);
   const first = await q.refresh();
+  const P = await noteOf(v, usd(20));
+  // one pass makes both tiers: the primary (the 20 note) and its three pieces, then the other own proofs
+  assert.deepEqual(first.remade, []);
+  assert.equal(first.made.length, 6);
+  assert.equal(first.made.filter((id) => id === P.id).length, 1, "the primary needs no second proof: its own is the set's own");
   // tier 1 as a pool of one piece: readySetSize(16) = 3, the largest chunks (20, 10 and the 5.5 note's 5), each its own W
-  assert.equal(first.made.length, 3);
-  const one = q.ready();
+  const one = q.ready().filter((r) => r.own === true);
   assert.deepEqual(one.map((r) => r.chunk).sort((a, b) => (a < b ? -1 : 1)), [usd(5), usd(10), usd(20)]);
   for (const r of one) {
     const n = (await v.ns.get(r.noteId))!;
-    assert.equal(r.own, true);
     assert.equal(r.wallet.address, W(n), `the ${r.chunk} proof pays its own note's W`);
   }
-  // tier 2 in the next pass: the primary is the 20 note; up to piecesMax - 1 = 3 others, the largest: 10, 5.5 and 2
-  const second = await q.refresh();
-  const P = await noteOf(v, usd(20));
-  assert.deepEqual(second.remade, []);
-  assert.equal(second.made.length, 3);
-  assert.ok(!second.made.includes(P.id), "the primary needs no second proof: its own is the set's own");
+  // tier 2: up to piecesMax - 1 = 3 others, the largest: 10, 5.5 and 2
   const pieces = q.ready().filter((r) => r.own !== true);
   assert.equal(pieces.length, 3);
   for (const r of pieces) assert.equal(r.wallet.address, W(P), "a tier 2 proof pays the primary's W");
@@ -106,8 +104,9 @@ test("tiers: each ready note's proof pays its own W (tier 1); once tier 1 has no
     const n = await noteOf(v, x);
     const t = tiers(q as ProofQueue<unknown>, n.id);
     assert.equal(n.state, "HELD");
-    assert.equal(n.attempt, t.own!.attempt, "its tier 1 proof holds it");
-    assert.equal(n.second?.attempt, t.piece!.attempt, "and its tier 2 proof is its second attempt");
+    // its tier 2 proof, made first, holds it; its tier 1 proof is its second attempt (the store takes either alike)
+    assert.equal(n.attempt, t.piece!.attempt, "its tier 2 proof holds it");
+    assert.equal(n.second?.attempt, t.own!.attempt, "and its tier 1 proof is its second attempt");
   }
   const two = await noteOf(v, usd(2));
   assert.equal(two.attempt, tiers(q as ProofQueue<unknown>, two.id).piece!.attempt, "a note out of tier 1 is held by its tier 2 proof alone");
@@ -128,7 +127,6 @@ test("tiers: after a buy takes one note's tier 1 proof, every other tier 1 proof
   const pool = piecesPool(v);
   const q = queue(v, pool as Pool<unknown>);
   await q.refresh();
-  await q.refresh();
   const [P, X, Y, Z] = await Promise.all([usd(20), usd(10), usd(5.5), usd(2)].map((x) => noteOf(v, x)));
   const before = new Map(q.ready().filter((r) => r.own === true).map((r) => [r.noteId, r.attempt]));
   // a buy the primary's note pays alone: one piece
@@ -144,14 +142,12 @@ test("tiers: after a buy takes one note's tier 1 proof, every other tier 1 proof
   assert.equal(b.tap_max, "0.009899");
   // and takeable at once, with no pass: the 5.5 note's
   assert.equal((await q.take(Y!.id, before.get(Y!.id))).noteId, Y!.id);
-  // the next pass fills tier 1 (the 2 note joins, beside its tier 2 proof); the one after makes tier 2 for the new
-  // primary, the 10 note: its own old piece goes, the 2 note's piece is made again for the 10's W
+  // the next pass makes tier 2 for the new primary, the 10 note, first (its own old piece goes, the 2 note's piece is
+  // made again for the 10's W), then fills tier 1 (the 2 note joins, beside its tier 2 proof)
   const fill = await q.refresh();
+  assert.deepEqual(fill.remade, [Z!.id]);
   assert.deepEqual(fill.made, [Z!.id]);
-  assert.deepEqual(fill.remade, []);
-  const again = await q.refresh();
-  assert.deepEqual(again.remade, [Z!.id]);
-  assert.deepEqual(again.made, []);
+  assert.deepEqual(await q.refresh(), { made: [], remade: [], failed: [] });
   assert.equal(tiers(q as ProofQueue<unknown>, X!.id).piece, undefined, "the primary keeps its own proof only");
   assert.equal((await v.ns.get(X!.id))!.second, undefined);
   assert.equal((await v.ns.get(X!.id))!.attempt, before.get(X!.id), "and that proof was never made again");
@@ -161,11 +157,9 @@ test("tiers: after a buy takes one note's tier 1 proof, every other tier 1 proof
   assert.equal(after.tap_max, "0.011799", "the 10 and the 2 to the 10's W: 12 less two fees and the 1,000");
 });
 
-test("tiers: tier 2 waits until tier 1 has nothing left to make, holds at most piecesMax - 1 notes, and a pool of one piece makes none", async () => {
+test("tiers: tier 2 holds at most piecesMax - 1 notes, and a pool of one piece makes none", async () => {
   const v = await vaultWith([usd(2), usd(5), usd(10), usd(20), usd(50), usd(100)]);
   const q = queue(v, piecesPool(v, 4) as Pool<unknown>);
-  await q.refresh();
-  assert.ok(q.ready().every((r) => r.own === true), "the first pass is tier 1 only");
   await q.refresh();
   const P = await noteOf(v, usd(100));
   const pieces = q.ready().filter((r) => r.own !== true);
@@ -233,14 +227,30 @@ test("takeSet, two at once on one note (its tier 1 and its tier 2 proof): one wi
 test("takeSet's late proof: its attempt let go and made again, the set's others HELD with their proofs ready, nothing RESERVED; the note keeps its tier 1 proof", async () => {
   const v = await vaultWith(VALUES);
   const pool = piecesPool(v);
-  const q = queue(v, pool as Pool<unknown>);
-  await q.refresh();
+  // the prover refuses the remake of the 10 note's tier 2 proof (planted below), so that proof stays from before the
+  // previous epoch while the rest is made again
+  const inner = signalsProver();
+  const refuse = new Set<string>();
+  const prover: VaultProver = { load: inner.load, prove: async (c, i) => {
+    if (refuse.has(String((i as { context?: unknown }).context))) throw new Error("planted: this proof fails");
+    return inner.prove(c, i);
+  } };
+  const q = openProofQueue({ seed64: SEED, notes: v.ns, pool: pool as Pool<unknown>, provers: [prover], hardwareConcurrency: 16 });
+  open.push(q as ProofQueue<unknown>);
   await q.refresh();
   const [P, X] = await Promise.all([usd(20), usd(10)].map((x) => noteOf(v, x)));
   const old = tiers(q as ProofQueue<unknown>, X!.id).piece!;
-  // two epochs on: tier 1 is made again first (tier 2 waits), so the tier 2 proofs are from before the previous epoch
+  // two epochs on: every proof is made again but the 10 note's tier 2 one, which is from before the previous epoch
   pool.t.now = START + 2n * E + 1_000n;
-  assert.equal((await q.refresh()).remade.length, 3);
+  const bind = pool.bind.bind(pool);
+  pool.bind = async (b, sg) => {
+    const r = await bind(b, sg);
+    if (b.wallet.address === W(P!) && b.chunk === usd(10)) refuse.add(r.context.toString());
+    return r;
+  };
+  const turn = await q.refresh();
+  assert.equal(turn.remade.length, 5);
+  assert.deepEqual(turn.failed.map((f) => f.noteId), [X!.id]);
   const p = tiers(q as ProofQueue<unknown>, P!.id).own!;
   const own = tiers(q as ProofQueue<unknown>, X!.id).own!;
   assert.equal(p.epochStartMs, START + 2n * E);
@@ -253,7 +263,8 @@ test("takeSet's late proof: its attempt let go and made again, the set's others 
   assert.equal((await v.ns.get(P!.id))!.state, "HELD");
   assert.equal(tiers(q as ProofQueue<unknown>, P!.id).own, p);
   for (const m of await v.ns.list()) assert.notEqual(m.state, "RESERVED");
-  // the next pass makes tier 2 again on this epoch
+  // the next pass, the prover no longer refusing, makes tier 2 again on this epoch
+  pool.bind = bind;
   const next = await q.refresh();
   assert.ok(next.made.includes(X!.id), JSON.stringify(next));
   assert.equal(tiers(q as ProofQueue<unknown>, X!.id).piece!.epochStartMs, START + 2n * E);

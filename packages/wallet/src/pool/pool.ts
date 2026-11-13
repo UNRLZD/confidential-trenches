@@ -82,6 +82,10 @@ export type PoolBindArgs = {
   deadlineMs: bigint;
   /** A pool that binds a tip cap (Solana): 0 for a withdraw, which pays no tip; the pool's own cap when absent (a buy). */
   tipCap?: bigint;
+  /** The pool's time a read made a moment before (the proof queue's pass, card max-ready-seconds-after-a-load): a pool
+   *  whose bind reads the same time as its now() takes it for its send-margin guard (bindNow) in place of a read of its
+   *  own; absent, or too old, or past the epoch of epochStartMs, the bind reads it. */
+  now?: ChainNow;
 };
 
 /** One chunk's binding: what the proof's last public signal must be, and what the tap sends for the pool to check it. */
@@ -107,6 +111,9 @@ export interface Pool<R = unknown> {
   /** The most notes one buy pays one W from (card buy-spends-several-pieces); absent or 1: each proof pays its own
    *  note's W. */
   readonly piecesMax?: number;
+  /** Whether bind takes PoolBindArgs.now for its send-margin guard (its own read the same as now()'s): the queue then
+   *  hands its binds one read of the pool's time between them (card max-ready-seconds-after-a-load). */
+  readonly bindTakesNow?: boolean;
   /** E: the length of an epoch of the pool's time, ms. */
   readonly epochMs: bigint;
   /** L: every proof of an epoch has the deadline epoch start + L. At least 2E + sendMarginMs; 2E + sendMarginMs +
@@ -176,6 +183,44 @@ export async function chainNow(pool: Pick<Pool<unknown>, "now">, signal?: AbortS
   const at = performance.now();
   const wall = Date.now();
   return { ms: await pool.now(signal), at, wall };
+}
+
+/** The pool's time for a bind's send-margin guard from `now` (ChainNow): its ms plus the time since its start on the
+ *  larger of the device's two clocks, while the monotonic one is 0 to NOW_REUSE_MS and the wall clock's at most
+ *  NOW_REUSE_MS, and while that time is still inside the epoch of `epochStartMs` (an epoch that may have turned is read
+ *  again); else undefined, and the bind reads the pool's time itself. Counting from the read's start only makes the time
+ *  later, so the guard can only refuse sooner than a fresh read would. */
+export function bindNow(now: ChainNow | undefined, epochStartMs: bigint, epochMs: bigint): bigint | undefined {
+  if (now === undefined || typeof now.ms !== "bigint" || typeof now.at !== "number" || typeof now.wall !== "number") return undefined;
+  const mono = performance.now() - now.at;
+  const wall = Date.now() - now.wall;
+  if (!(mono >= 0 && mono <= NOW_REUSE_MS && wall <= NOW_REUSE_MS)) return undefined;
+  const ms = now.ms + BigInt(Math.ceil(Math.max(mono, wall, 0)));
+  return ms >= epochStartMs && ms < epochStartMs + epochMs ? ms : undefined;
+}
+
+/** One answer per epoch (card max-ready-seconds-after-a-load: the relayer's fee is the same for every proof of an epoch):
+ *  `get` asks once per epoch and hands the same answer to every bind of it; an ask that fails, or an answer a bind
+ *  refuses (`drop`), is asked again by the next bind. Only the newest few epochs are kept. */
+export function perEpoch<T>(ask: (epochStartMs: bigint, signal?: AbortSignal) => Promise<T>, keep = 4): { get(epochStartMs: bigint, signal?: AbortSignal): Promise<T>; drop(epochStartMs: bigint, got: Promise<T>): void } {
+  const m = new Map<bigint, Promise<T>>();
+  const drop = (e: bigint, got: Promise<T>): void => {
+    if (m.get(e) === got) m.delete(e);
+  };
+  return {
+    get(e, signal) {
+      let f = m.get(e);
+      if (f === undefined) {
+        f = ask(e, signal);
+        m.set(e, f);
+        const mine = f;
+        f.catch(() => drop(e, mine));
+        for (const k of [...m.keys()].sort((x, y) => (x < y ? 1 : -1)).slice(keep)) m.delete(k);
+      }
+      return f;
+    },
+    drop,
+  };
 }
 
 const field = (x: unknown): boolean => typeof x === "bigint" && x >= 0n && x < VAULT_FIELD_P;

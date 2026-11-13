@@ -23,14 +23,17 @@
 //   key.
 // - Pieces (card buy-spends-several-pieces): a pool with piecesMax above 1 (Solana) lets one buy pay one W from several
 //   notes, in two tiers. Tier 1 is the ready set above, each note's proof bound to its own W (ReadyProof.own), so a buy
-//   one note pays is one piece and back-to-back buys each take a ready proof. Tier 2 is made only in a pass where tier
-//   1 has nothing to make: the primary is the tier 1 note with the largest chunk (ties: the earlier leaf), and each of
-//   the piecesMax - 1 largest other landed notes of the pool (UNSPENT, or HELD by this queue) gets a second proof bound
-//   to the primary's W. A buy past every single note spends the primary's own proof and some of these (the signing
+//   one note pays is one piece and back-to-back buys each take a ready proof. Tier 2 is made in the same pass: the
+//   primary is the note with the largest chunk (ties: the earlier leaf) of the ready set as the pass leaves it, and each
+//   of the piecesMax - 1 largest other landed notes of the pool (UNSPENT, or HELD by this queue) gets a second proof
+//   bound to the primary's W. The order (card max-ready-seconds-after-a-load): first what raises Max, the primary's own
+//   proof and then its tier 2 proofs, so Max stands after min(usable notes, piecesMax) proofs; then the remakes (a
+//   newest-root one first, then Max's set); then the other notes' own proofs. A tier 2 proof waits for the primary's own:
+//   none is made while the primary has no ready proof. A buy past every single note spends the primary's own proof and some of these (the signing
 //   page's pick), so every W a buy pays is still the own W of a note it spent: the restore finds it as before
 //   (./buy-wallets.ts). A note can so hold two unsent proofs at once, its tier 1 and its tier 2 (the store's second
 //   attempt, notes/store.ts); taking either drops the other in the same store write, and the queue lets it go. After a
-//   take, the other notes' tier 1 proofs stay ready as they are; at the next tier 2 pass a tier 2 proof bound to
+//   take, the other notes' tier 1 proofs stay ready as they are; at the next pass a tier 2 proof bound to
 //   another W than the new primary's (or of an earlier epoch) is made again, kept meanwhile as a remake's, and one whose
 //   note left the room (the primary's own among them) is let go, its note still HELD by its tier 1 proof.
 // - One proof per note per tier: only an UNSPENT note, or one this queue holds by its other tier's proof, is proved,
@@ -100,12 +103,15 @@ const UNANSWERED = new Set(["SolanaRpcTransportError", "EvmUnansweredError", "Ev
 const bindFail = (e: unknown): never => failAs(UNANSWERED.has(String((e as { name?: unknown } | null)?.name)) ? "network" : "fee_refused")(e);
 /** `small`: the pool's UNSPENT landed notes below its smallest rung, never proved (none: absent). */
 export type QueuePass = { made: string[]; remade: string[]; failed: { noteId: string; error: string; reason?: PassReason }[]; small?: number };
+/** How long before NOW_REUSE_MS a pass reads the pool's time again for its next binds, ms. */
+const NOW_REFRESH_EARLY_MS = 1_000;
 const NOTHING = (): QueuePass => ({ made: [], remade: [], failed: [] });
 
 export interface ProofQueue<R> {
-  /** One pass: lets go of proofs whose note moved, makes again tier 1 proofs of an earlier epoch (each stays ready until
-   * its new one replaces it), then proves notes that have no tier 1 proof; with piecesMax above 1 and nothing of that
-   * left, makes tier 2 for the primary ("Pieces" above). Passes run one after another. */
+  /** One pass: lets go of proofs whose note moved, makes again proofs of an earlier epoch (each stays ready until its new
+   * one replaces it), proves notes that have no tier 1 proof, and with piecesMax above 1 makes tier 2 for the primary,
+   * in the order "Pieces" above names. Passes run one after another. Each bind takes the pass's read of the pool's time
+   * while it stands (pool.ts bindNow, on a pool whose bindTakesNow), read again near NOW_REUSE_MS. */
   refresh(signal?: AbortSignal): Promise<QueuePass>;
   /** The proofs ready now that take() would hand out (proofLate: none late at the pool's time as this queue last read it,
    * plus the device's time since), both tiers, in leaf order (a note's tier 1 proof before its tier 2 one). A late one
@@ -279,7 +285,10 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
     w.secretKey.fill(0);
     const deadlineMs = epochStartMs + pool.lifeMs;
     const refundPrecommitment = noteSecrets(seed, { kind: "refund", l: leaf.label, j }).precommitment;
-    const binding = await pool.bind({ chunk, wallet: { address: w.address, publicKey: w.publicKey }, refundPrecommitment, epochStartMs, deadlineMs }, signal).catch(bindFail);
+    // the pool's time this queue last read (the pass's own read, or a take's), for the bind's send-margin guard: the
+    // bind takes it while it stands (pool.ts bindNow) and reads its own once it is too old or the epoch may have turned
+    const now = seen === undefined ? undefined : { ms: seen.ms, at: performance.now() - (mono() - seen.at), wall: seen.wall };
+    const binding = await pool.bind({ chunk, wallet: { address: w.address, publicKey: w.publicKey }, refundPrecommitment, epochStartMs, deadlineMs, ...(now === undefined ? {} : { now }) }, signal).catch(bindFail);
     try {
       checkBinding(pool as Pool, binding, chunk);
     } catch (e) {
@@ -388,35 +397,39 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
     // the newest trees, read once for every note of this pass that landed this epoch; a failed read fails those notes
     // only, and the epoch's remakes and the epoch's notes still run
     let newest: PoolTrees | Error | undefined;
-    const todo: Todo[] = [];
+    const t1: Todo[] = [];
     if (want > 0 && (open.length > 0 || again.length > 0)) {
       epochTrees = await pool.trees(start, signal).catch(failAs("network"));
-      // the ready set's own notes first (each landed before the epoch began), then the open notes; among the remakes a
-      // newest-root proof first (take refuses it NEWEST_GRACE_MS past the boundary, an epoch-root one stays takeable
-      // all epoch), then by chunk and leaf
-      const newestFirst = (x: NoteRecord, y: NoteRecord): number => {
-        const a = ready.get(x.id)!.root === "newest", b = ready.get(y.id)!.root === "newest";
-        return a !== b ? (a ? -1 : 1) : byChunk(x, y);
-      };
+      // the ready set's own notes first (each landed before the epoch began), then the open notes, up to the ready set
       // a take or a drop during the epoch-tree read above removes a ready proof: that note is left out of the remakes
-      for (const n of again.filter((x) => ready.has(x.id)).sort(newestFirst)) todo.push({ n, trees: epochTrees, root: "epoch", prev: ready.get(n.id)! });
+      for (const n of again.filter((x) => ready.has(x.id))) t1.push({ n, trees: epochTrees, root: "epoch", prev: ready.get(n.id)! });
       for (const n of open) {
-        if (todo.length === want) break;
-        if (n.leaf!.leafIndex < BigInt(epochTrees.stateTree.size)) todo.push({ n, trees: epochTrees, root: "epoch" });
+        if (t1.length === want) break;
+        if (n.leaf!.leafIndex < BigInt(epochTrees.stateTree.size)) t1.push({ n, trees: epochTrees, root: "epoch" });
         else {
           newest ??= await pool.trees(nowMs + 1n, signal, { newest: true }).catch((e: unknown) => (e instanceof Error ? e : new Error(String(e)))); // every leaf up to now
           if (newest instanceof Error) out.failed.push({ noteId: n.id, error: msg(newest), reason: "network" });
           // a leaf past the pool's time (its landing read before both RPCs' final block reached it) waits for the next pass
-          else if (n.leaf!.leafIndex < BigInt(newest.stateTree.size)) todo.push({ n, trees: newest, root: "newest" });
+          else if (n.leaf!.leafIndex < BigInt(newest.stateTree.size)) t1.push({ n, trees: newest, root: "newest" });
         }
       }
     }
-    // tier 2, only once tier 1 has nothing left to make: the primary is the tier 1 note with the largest chunk (ties:
-    // the earlier leaf); the altRoom largest other notes (UNSPENT, or held by this queue) each get a proof to its W.
-    // A tier 2 proof of a note out of that room (the primary's own among them) is let go, its note still HELD by its
-    // tier 1 proof if it has one; one to another W or of an earlier epoch is made again, kept ready meanwhile.
-    if (altRoom > 0 && todo.length === 0 && out.failed.length === 0) {
-      const p = [...ready.values()].map((r) => byId.get(r.noteId)!).sort(byChunk)[0];
+    // tier 2, in the same pass (card max-ready-seconds-after-a-load): the primary is the note with the largest chunk
+    // (ties: the earlier leaf) of the ready set as this pass leaves it (its ready proofs and the ones it makes); the
+    // altRoom largest other notes (UNSPENT, or held by this queue) each get a proof to its W. A tier 2 proof of a note out
+    // of that room (the primary's own among them) is let go, its note still HELD by its tier 1 proof if it has one; one
+    // to another W or of an earlier epoch is made again, kept ready meanwhile.
+    const t2: Todo[] = [];
+    let pid: string | undefined;
+    if (altRoom > 0) {
+      const set = new Map<string, NoteRecord>();
+      for (const r of ready.values()) {
+        const n = byId.get(r.noteId);
+        if (n !== undefined) set.set(n.id, n);
+      }
+      for (const t of t1) set.set(t.n.id, t.n);
+      const p = [...set.values()].sort(byChunk)[0];
+      pid = p?.id;
       let to: To | undefined;
       let kept: NoteRecord[] = [];
       if (p !== undefined) {
@@ -437,20 +450,39 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
         if (n.leaf!.leafIndex >= BigInt(epochTrees.stateTree.size)) {
           newest ??= await pool.trees(nowMs + 1n, signal, { newest: true }).catch((e: unknown) => (e instanceof Error ? e : new Error(String(e))));
           if (newest instanceof Error) {
-            out.failed.push({ noteId: n.id, error: msg(newest), reason: "network" });
+            if (!out.failed.some((f) => f.noteId === n.id)) out.failed.push({ noteId: n.id, error: msg(newest), reason: "network" });
             continue;
           }
           if (n.leaf!.leafIndex >= BigInt(newest.stateTree.size)) continue; // waits for the next pass
           trees = newest;
           root = "newest";
         }
-        todo.push({ n, trees, root, ...(r === undefined ? {} : { prev: r }), to: to! });
+        t2.push({ n, trees, root, ...(r === undefined ? {} : { prev: r }), to: to! });
       }
     }
+    // the order (card max-ready-seconds-after-a-load): first what raises Max, the primary's own proof when it has none,
+    // then its tier 2 proofs that have none to its W; then the remakes, a newest-root proof first (take refuses it
+    // NEWEST_GRACE_MS past the boundary, an epoch-root one stays takeable all epoch), then Max's set, then by chunk and
+    // leaf; then the other notes' own proofs. So Max stands after min(usable notes, piecesMax) proofs, and a remake
+    // never leaves Max's set late behind the rest.
+    const raises = (t: Todo): boolean => t.prev === undefined || (t.to !== undefined && t.prev.wallet.address !== t.to.address);
+    const inSet = (t: Todo): boolean => t.to !== undefined || t.n.id === pid;
+    const remakes = [...t1, ...t2].filter((t) => !raises(t)).sort((x, y) => {
+      const a = x.prev!.root === "newest", b = y.prev!.root === "newest";
+      if (a !== b) return a ? -1 : 1;
+      if (inSet(x) !== inSet(y)) return inSet(x) ? -1 : 1;
+      return byChunk(x.n, y.n);
+    });
+    const todo: Todo[] = [...t1.filter((t) => raises(t) && t.n.id === pid), ...t2.filter(raises), ...remakes, ...t1.filter((t) => raises(t) && t.n.id !== pid)];
     let k = 0;
     const lane = async (prover: VaultProver): Promise<void> => {
       for (let t = todo[k++]; t !== undefined; t = todo[k++]) {
         if (closed || signal?.aborted) return;
+        // a tier 2 proof pays the primary's W: none while the primary has no ready proof of its own (it failed)
+        if (t.to !== undefined && (pid === undefined || !ready.has(pid))) continue;
+        // the pool's time again once the last read is near NOW_REUSE_MS old, so the binds that follow take one read
+        // between them in place of one each; a read that fails leaves the bind to read its own
+        if (pool.bindTakesNow === true && (seen === undefined || mono() - seen.at > NOW_REUSE_MS - NOW_REFRESH_EARLY_MS || Date.now() - seen.wall > NOW_REUSE_MS - NOW_REFRESH_EARLY_MS)) await readNow(signal).catch(() => undefined);
         inFlight.set(t.n.id, { dropped: false });
         try {
           await prove(t.n, prover, t.trees, t.root, start, t.prev, t.to ?? null, signal);

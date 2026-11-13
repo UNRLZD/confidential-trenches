@@ -3,7 +3,8 @@
 // Types policy prover-worker (public/_headers), and APP_HOST's never has the first. Its worker, /prover-worker.js (the
 // kit's build.mjs, written into public/ by scripts/build-app.mjs), and the six setup files at
 // /assets/zk/<sha256>.<ext> (copied by the deploy build) are served from SIGN_HOST's own origin, never another.
-// - The worker starts at the first proof whose input the kit accepts, never at page load, so the Trusted Types policy
+// - The worker starts at the first proof whose input the kit accepts, or when a proof queue opens and loads the withdraw
+//   circuit ahead of its first proof (src/pool-testnet.ts warmProver), never at page load, so the Trusted Types policy
 //   prover-worker is made only then, once per page (the kit's client.ts; the CSP allows no duplicate).
 // - One worker serves every proof on the page and loads the withdraw setup files once (the kit's prove.ts), each
 //   checked by size and sha256 in the worker before snarkjs sees it.
