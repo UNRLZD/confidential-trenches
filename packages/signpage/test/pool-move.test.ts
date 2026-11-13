@@ -13,16 +13,18 @@ const PRICE = { price: "8000000000", expo: -8 }; // SOL at 80 USD
 const ctx = { id: "req-1", sha: "00", progress: () => {} };
 
 type Follow = { stage: string; final?: true; txs?: { chain: "solana"; hash: string }[] } | undefined;
+const ETH = { price: "300000000000", expo: -8 }; // ETH at 3,000 USD
 function page(o: { cash?: bigint; quote?: (usdc: bigint) => CashQuote | { error: string }; end?: HandoffEnd; follows?: Follow[]; price?: null } = {}) {
+  const chains: string[] = [];
   const paid: { recipient: string; amount: bigint; fee: bigint }[] = [];
   const quoted: { usdc: bigint; id: string }[] = [];
   const puts: { id: string; rec: MoveOpRecord }[] = [];
   const follows = [...(o.follows ?? [])];
   let f = 0;
   const d: CashMoverDeps = {
-    price: () => (o.price === null ? null : PRICE),
+    price: (c) => (o.price === null ? null : c === "solana" ? PRICE : ETH),
     rails: ["1click"],
-    quote: async (_chain, usdc, id) => (quoted.push({ usdc, id }), o.quote?.(usdc) ?? { address: ADDRESS, amountIn: usdc, minOut: (usdc * 10n ** 9n) / 80_000_000n }),
+    quote: async (chain, usdc, id) => (chains.push(chain), quoted.push({ usdc, id }), o.quote?.(usdc) ?? { address: ADDRESS, amountIn: usdc, minOut: (usdc * 10n ** 9n) / 80_000_000n }),
     fee: async () => 50_000n,
     cash: async () => o.cash ?? 1_000_000_000n,
     handoff: async (w, fee) => (paid.push({ recipient: w.recipient, amount: w.amount, fee }), o.end ?? { kind: "landed", tx: "NearTx1" }),
@@ -33,7 +35,7 @@ function page(o: { cash?: bigint; quote?: (usdc: bigint) => CashQuote | { error:
     wait: async () => {},
   };
   const m = cashMover(d);
-  return { m, k: poolMoveKinds(() => m), paid, quoted, puts };
+  return { m, k: poolMoveKinds(() => m), paid, quoted, puts, chains };
 }
 
 async function settle(a: unknown): Promise<unknown> {
@@ -107,11 +109,11 @@ test("pool.move: from === to, an unknown chain, a zero or malformed amount: not_
   }
 });
 
-test("every pair but near -> solana: not_allowed, its dry too (parts 2 and 3 build them)", async () => {
+test("every pair but Cash to a pool: not_allowed, its dry too (pool to Cash and pool to pool build next)", async () => {
   const chains = ["near", "solana", "base", "robinhood"];
   for (const from of chains)
     for (const to of chains) {
-      if (from === to || (from === "near" && to === "solana")) continue;
+      if (from === to || from === "near") continue;
       for (const kind of ["pool.move", "pool.move.dry"] as const) {
         const p = page();
         assert.deepEqual(await settle(p.k[kind]({ from, to, amount: "1" }, ctx)), { error: "not_allowed" }, `${kind} ${from} -> ${to}`);
@@ -128,4 +130,24 @@ test("pool.move.dry near -> solana: out (the least the move takes, in SOL), fee 
   assert.deepEqual([p.paid, p.quoted, p.puts], [[], [], []]);
   const none = page({ price: null });
   assert.deepEqual(await settle(none.k["pool.move.dry"]({ from: "near", to: "solana", amount: "25.544" }, ctx)), { error: "not_allowed" }, "no price: no promise");
+});
+
+test("pool.move near -> base and near -> robinhood: the quote asked for that chain's pool, its least in wei at the device's ETH price less 3% and the EVM rung (0.001 ETH), the op's out in ETH", async () => {
+  for (const to of ["base", "robinhood"] as const) {
+    // a quote that delivers the least exactly: taken; one wei under it: refused, nothing withdrawn
+    const least = 7_252_427_184_466_019n;
+    const p = page({ quote: (usdc) => ({ address: ADDRESS, amountIn: usdc, minOut: least }), follows: [{ stage: "in_pool", final: true }] });
+    assert.deepEqual(await settle(p.k["pool.move"]({ from: "near", to, amount: "25.5" }, ctx)), { result: { stage: "leaving", txs: [] } }, to);
+    await p.m.idle();
+    assert.deepEqual(p.chains, [to]);
+    assert.deepEqual(p.paid, [{ recipient: ADDRESS, amount: 25_500_000n, fee: 50_000n }]);
+    assert.deepEqual(p.puts.map((x) => [x.rec.to, x.rec.stage, x.rec.out]), [[to, "leaving", "0.007252427184466019"], [to, "in_transit", "0.007252427184466019"], [to, "done", "0.007252427184466019"]]);
+    const short = page({ quote: (usdc) => ({ address: ADDRESS, amountIn: usdc, minOut: least - 1n }) });
+    assert.ok("error" in ((await settle(short.k["pool.move"]({ from: "near", to, amount: "25.5" }, ctx))) as object), to);
+    assert.deepEqual(short.paid, []);
+    const dry = page();
+    assert.deepEqual(await settle(dry.k["pool.move.dry"]({ from: "near", to, amount: "25.5" }, ctx)), {
+      result: { out: "0.007252427184466019", fee: "0.05", steps: [{ step: "vault_out", chain: "near" }, { step: "intents", chain: to }, { step: "pool_in", chain: to }] },
+    });
+  }
 });

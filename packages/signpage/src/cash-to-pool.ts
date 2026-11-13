@@ -35,6 +35,7 @@
 // Nothing here logs.
 import { TRADE_CHAINS, type ErrorCode, type MoveStage, type PoolChain, type PoolMoveDry, type PoolStatePrice, type TradeChain, type TxRef } from "../../kit/src/signpage/messages.ts";
 import { SOL_LADDER } from "../../wallet/src/pool/solana.ts";
+import { EVM_LADDER } from "../../wallet/src/pool/evm.ts";
 import type { HostAnswer, HostRefusal, KindContext, Running } from "./api.ts";
 import type { PoolAsk } from "./rules/pool.ts";
 import type { CheckedWithdraw } from "./withdraw/form.ts";
@@ -63,23 +64,28 @@ export function withCash(tapMax: string, coming: bigint, cash: bigint, fee: bigi
   return f ? `${t.slice(0, -9)}.${f}` : t.slice(0, -9);
 }
 
-/** USDC (6 decimals) a move asks for `short` base units of the pool's coin (lamports on Solana) at the device's price:
- *  the shortfall plus the ladder's least rung (what a 1-2-5 split may leave at U_X under it), plus CASH_MARGIN_BPS,
- *  rounded up; null with no price or no shortfall. */
-export function cashUsdcFor(short: bigint, p: Pick<PoolStatePrice, "price" | "expo">): bigint | null {
+/** Each pool's coin: its decimals and the least rung its deposit ladder splits into (what a 1-2-5 split may leave at
+ *  U_X under it): SOL on Solana, ETH on Base and Robinhood. */
+const POOL_DECIMALS: Readonly<Record<PoolChain, number>> = { solana: 9, base: 18, robinhood: 18 };
+const RUNG: Readonly<Record<PoolChain, bigint>> = { solana: SOL_LADDER.min, base: EVM_LADDER.min, robinhood: EVM_LADDER.min };
+
+/** USDC (6 decimals) a move asks for `short` base units of `chain`'s pool coin (lamports on Solana, wei on Base and
+ *  Robinhood) at the device's price: the shortfall plus the ladder's least rung, plus CASH_MARGIN_BPS, rounded up; null
+ *  with no price or no shortfall. */
+export function cashUsdcFor(short: bigint, p: Pick<PoolStatePrice, "price" | "expo">, chain: PoolChain = "solana"): bigint | null {
   const px = priceOf(p);
   if (px === null || short <= 0n) return null;
-  const num = (short + SOL_LADDER.min) * px.n * 10n ** 6n * (10_000n + CASH_MARGIN_BPS);
-  const den = px.d * 10n ** 9n * 10_000n;
+  const num = (short + RUNG[chain]) * px.n * 10n ** 6n * (10_000n + CASH_MARGIN_BPS);
+  const den = px.d * 10n ** BigInt(POOL_DECIMALS[chain]) * 10_000n;
   return (num + den - 1n) / den;
 }
-/** The lamports a move of `usdc` gives a tap at most, at the device's SOL price: less CASH_MARGIN_BPS and the ladder's
- *  least rung (what a 1-2-5 split may leave at U_X under it), rounded down; 0n when it gives none. */
-export function cashLamportsFor(usdc: bigint, p: Pick<PoolStatePrice, "price" | "expo">): bigint {
+/** The base units of `chain`'s pool coin a move of `usdc` gives at most, at the device's price: less CASH_MARGIN_BPS
+ *  and the ladder's least rung, rounded down; 0n when it gives none. */
+export function cashLamportsFor(usdc: bigint, p: Pick<PoolStatePrice, "price" | "expo">, chain: PoolChain = "solana"): bigint {
   const px = priceOf(p);
   if (px === null || usdc <= 0n) return 0n;
-  const gross = (usdc * px.d * 10n ** 9n * 10_000n) / (px.n * 10n ** 6n * (10_000n + CASH_MARGIN_BPS));
-  return gross > SOL_LADDER.min ? gross - SOL_LADDER.min : 0n;
+  const gross = (usdc * px.d * 10n ** BigInt(POOL_DECIMALS[chain]) * 10_000n) / (px.n * 10n ** 6n * (10_000n + CASH_MARGIN_BPS));
+  return gross > RUNG[chain] ? gross - RUNG[chain] : 0n;
 }
 const priceOf = (p: Pick<PoolStatePrice, "price" | "expo">): { n: bigint; d: bigint } | null => {
   if (typeof p.price !== "string" || !/^[1-9][0-9]{0,30}$/.test(p.price) || !Number.isInteger(p.expo) || p.expo > 0 || p.expo < -30) return null;
@@ -143,7 +149,6 @@ export function unitsText(x: bigint, d: number): string {
   return f ? `${t.slice(0, t.length - d)}.${f}` : t.slice(0, t.length - d);
 }
 const USDC_DECIMALS = 6;
-const POOL_DECIMALS: Readonly<Record<PoolChain, number>> = { solana: 9, base: 18, robinhood: 18 };
 
 /** A move out of Cash: refused, or on its way under its op id with the least it delivers. */
 export type MoveSent = Refusal | { op: string; minOut: bigint };
@@ -236,7 +241,7 @@ export function cashMover(d: CashMoverDeps): CashMover {
     if (coming >= short) return joined;
     const left = short - coming;
     const p = d.price(chain);
-    const usdc = p === null ? null : cashUsdcFor(left, p);
+    const usdc = p === null ? null : cashUsdcFor(left, p, chain);
     if (usdc === null || d.handoff === null || d.rails.length === 0) return joined;
     const fee = await d.fee();
     if (usdc + fee > (await d.cash())) return joined;
@@ -246,7 +251,7 @@ export function cashMover(d: CashMoverDeps): CashMover {
   // the checks every exact move shares, its own and its dry's: a price, a hand-off, a rail, Cash for it and its fee
   const ready = async (chain: PoolChain, usdc: bigint): Promise<Refusal | { least: bigint; fee: bigint }> => {
     const p = d.price(chain);
-    const least = p === null ? 0n : cashLamportsFor(usdc, p);
+    const least = p === null ? 0n : cashLamportsFor(usdc, p, chain);
     if (usdc <= 0n || least <= 0n || d.handoff === null || d.rails.length === 0) return { error: "not_allowed" };
     const fee = await d.fee();
     if (usdc + fee > (await d.cash())) return { error: "not_funded" };
@@ -287,12 +292,13 @@ const CASH_TO_POOL_STEPS = (x: PoolChain): PoolMoveDry["steps"] => [{ step: "vau
 const MOVE_AMOUNT = /^(0|[1-9]\d{0,29})(?:\.(\d{1,6}))?$/;
 const isTrade = (c: unknown): c is TradeChain => (TRADE_CHAINS as readonly unknown[]).includes(c);
 
-/** The pair and the USDC of a pool.move or pool.move.dry the page runs, or its refusal: near -> solana only for now
- *  (parts 2 and 3 of the card build the others), an amount in USDC above 0 at no more than its 6 decimals. */
+/** The pair and the USDC of a pool.move or pool.move.dry the page runs, or its refusal: Cash (near) to a pool for now
+ *  (pool to Cash and pool to pool build next), an amount in USDC above 0 at no more than its 6 decimals. */
 function moveAsk(params: Record<string, unknown>): Refusal | { to: PoolChain; usdc: bigint } {
   const { from, to, amount } = params;
   if (!isTrade(from) || !isTrade(to) || from === to || typeof amount !== "string") return { error: "not_allowed" };
-  if (from !== "near" || to !== "solana") return { error: "not_allowed" };
+  // Cash to any pool (to is a pool chain once from is near); pool to Cash and pool to pool build next
+  if (from !== "near" || to === "near") return { error: "not_allowed" };
   const m = MOVE_AMOUNT.exec(amount);
   if (m === null) return { error: "not_allowed" };
   const usdc = BigInt(m[1]!) * 10n ** 6n + BigInt((m[2] ?? "").padEnd(6, "0"));
