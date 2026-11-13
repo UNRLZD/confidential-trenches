@@ -13,7 +13,7 @@ import { mock, test } from "node:test";
 import { HELPER_BIND_RECORD_WALLETS_MAX, HELPER_V1_PATHS, type HelperBindRecordAnswer } from "@blindfill/kit";
 import type { BindSender } from "./env.ts";
 import { parseRecordBody, readRecords, RECORD_BODY_MAX, type RecordDeps } from "./record.ts";
-import { accountSlots, type Rpc } from "./send.ts";
+import { accountSlots, encodeAction, encodeTransaction, type Rpc } from "./send.ts";
 import { createTradeReads, createTradeStore, type TradeRecord } from "./trade.ts";
 import { API_RATE_MAX, handler, RECORD_RATE_MAX, RECORD_TOTAL_MAX } from "../server.ts";
 
@@ -153,15 +153,54 @@ test("a paid W with a record answers its token, its creation (hash, height, stat
         wallet: W1,
         token: "wrap.testnet",
         created: { tx_hash: stored.creation!.tx_hash, height: "5001", state: "landed" },
-        calls: stored.carried.map((x) => ({ tx_hash: x.tx_hash, signed_tx: x.signed_tx, method: x.method, side: x.side, state: x.state, ...(x.refunded === true && { refunded: true }) })),
+        // the pending call's bytes are not a relayer transaction here: no signed bytes and no last block
+        calls: stored.carried.map((x) => ({ tx_hash: x.tx_hash, ...(x.state === "pending" ? {} : { signed_tx: x.signed_tx }), method: x.method, side: x.side, state: x.state, ...(x.refunded === true && { refunded: true }) })),
       },
     ],
   });
-  assert.deepEqual(body.records[0]!.calls.map((x) => Buffer.from(x.signed_tx, "base64")), stored.carried.map((x) => Buffer.from(x.signed_tx, "base64")));
+  const final = stored.carried.filter((x) => x.state !== "pending");
+  assert.deepEqual(body.records[0]!.calls.filter((x) => x.state !== "pending").map((x) => Buffer.from(x.signed_tx!, "base64")), final.map((x) => Buffer.from(x.signed_tx, "base64")));
   assert.equal(body.records[0]!.calls[1]!.refunded, true);
   assert.ok(!("refunded" in body.records[0]!.calls[3]!), "refunded false is left out");
   // nothing in the answer the wire does not name (no nonce, block hash, cost, sha256, trade id)
   assert.deepEqual(Object.keys(body.records[0]!.calls[0]!), ["tx_hash", "signed_tx", "method", "side", "state"]);
+  s.close();
+});
+
+/** A relayer transaction as send.ts builds it: one Action::Delegate of W's signed delegate with this last block. */
+function relayedTx(mbh: bigint): string {
+  const le = (v: bigint, n: number) => Buffer.from(Array.from({ length: n }, (_, k) => Number((v >> BigInt(8 * k)) & 0xffn)));
+  const bs = (x: string) => Buffer.concat([le(BigInt(Buffer.byteLength(x)), 4), Buffer.from(x)]);
+  const call = Buffer.concat([Buffer.from([2]), bs("ft_transfer_call"), bs("{}"), le(30_000_000_000_000n, 8), le(1n, 16)]);
+  const signed = Buffer.concat([bs(W1), bs(USDC), le(1n, 4), call, le(41n, 8), le(mbh, 8), Buffer.from([0]), Buffer.alloc(32, 5), Buffer.from([0]), Buffer.alloc(64, 6)]);
+  const body = encodeTransaction({ signer: "relayer.testnet", publicKey: new Uint8Array(32).fill(7), nonce: 9n, receiver: W1, blockHash: new Uint8Array(32).fill(3), action: encodeAction({ kind: "delegate", signed, receiver: W1 }) });
+  return Buffer.concat([body, Buffer.from([0]), Buffer.alloc(64, 1)]).toString("base64");
+}
+
+test("a pending call and a dropped one answer their state and their delegate's max_block_height, never their signed bytes; a landed and a failed one answer their bytes and no last block", async () => {
+  const base = { trade: "t", cost: "1", deposit: "0", token_in: USDC, amount_in: "1000000" };
+  const at = (n: number, mbh: bigint) => ({ ...tx(n), signed_tx: relayedTx(mbh) });
+  const rec: TradeRecord = {
+    w: W1, creation: { ...tx(1), amount: "1", state: "landed" }, adopted: false, token: "wrap.testnet",
+    carried: [
+      { ...at(2, 7002n), ...base, sha256: "s2", side: "buy", method: "storage_deposit", state: "landed" },
+      { ...at(3, 7003n), ...base, sha256: "s3", side: "buy", method: "ft_transfer_call", state: "failed" },
+      { ...at(4, 7004n), ...base, sha256: "s4", side: "buy", method: "ft_transfer_call", state: "pending" },
+      { ...at(5, 7005n), ...base, sha256: "s5", side: "sell", method: "ft_transfer_call", state: "dropped" },
+    ],
+  };
+  const { s } = storeWith(rec);
+  const a = await readRecords([W1], { reads: readsOn(chain([row(0, W1, "paid")]).rpcs), store: s });
+  const calls = (a.body as HelperBindRecordAnswer).records[0]!.calls;
+  assert.deepEqual(calls.map((c) => [c.state, c.signed_tx === undefined ? null : Buffer.from(c.signed_tx, "base64").length > 0, c.max_block_height ?? null]), [
+    ["landed", true, null],
+    ["failed", true, null],
+    ["pending", null, "7004"],
+    ["dropped", null, "7005"],
+  ]);
+  // no byte of a pending or dropped delegate anywhere in the answer
+  const wire = JSON.stringify(a.body);
+  for (const c of rec.carried.slice(2)) assert.ok(!wire.includes(c.signed_tx), `${c.state}: no signed bytes`);
   s.close();
 });
 

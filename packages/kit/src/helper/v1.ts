@@ -748,12 +748,16 @@ export interface HelperBindRecordRequest {
 export const HELPER_BIND_RECORD_WALLETS_MAX = 64;
 /** A carried transaction's state as the helper last read it final on two providers ("pending": not final yet). */
 export type HelperBindRecordState = "pending" | "landed" | "failed" | "dropped";
-/** One of W's calls the helper carried: its relayer transaction and that transaction's signed bytes, which hold W's
- *  NEP-366 SignedDelegateAction. `refunded`: a failed swap whose input read back on W in full (absent otherwise). */
+/** One of W's calls the helper carried: its relayer transaction and, once its outcome is final (landed or failed), that
+ *  transaction's signed bytes, which hold W's NEP-366 SignedDelegateAction. A call still pending, or dropped, carries
+ *  no signed bytes (a delegate not yet on chain is never handed out): only its delegate's max_block_height, decimal,
+ *  when the helper could read it. `refunded`: a failed swap whose input read back on W in full (absent otherwise). */
 export interface HelperBindRecordCall {
   tx_hash: HelperTxHash;
-  /** Standard base64 of the relayer's signed transaction, as sent. */
-  signed_tx: HelperBase64;
+  /** Standard base64 of the relayer's signed transaction, as sent: landed and failed calls only. */
+  signed_tx?: HelperBase64;
+  /** The delegate's last block: pending and dropped calls only. */
+  max_block_height?: HelperDecimal;
   method: string;
   side: "buy" | "sell";
   state: HelperBindRecordState;
