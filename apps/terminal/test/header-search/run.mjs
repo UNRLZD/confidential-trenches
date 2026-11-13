@@ -151,6 +151,10 @@ async function open(browser, route, v, reads) {
 }
 
 const ready = (f, token) => f.waitForSelector(`main[data-route="token"] [data-token-page="ready"]${token ? `[data-token="${token}"]` : ""}`, { timeout: 10_000 }).then(() => true, () => false);
+// the phone's / is the Trenches list (owner 12 Nov, "Phone home: Trenches list"): / drawing the top Trending token is the
+// list's first row there (PhoneTrenches.tsx: Trending in its served order, source.ts loadTopToken's own rule)
+const listTop = (f, token) => f.waitForSelector(`[data-testid="phone-trenches-list"] > [data-testid="phone-trenches-row"]:first-child${token ? `[data-key$=":${token}"]` : ""}`, { timeout: 10_000 }).then(() => true, () => false);
+const home = (f, v, token) => (v.mode === "phone" ? listTop(f, token) : ready(f, token));
 
 /** The search as drawn now: its results' state, rows and head, the chip, the sheet, the page. */
 const read = (f) =>
@@ -206,7 +210,7 @@ try {
     const route = await harnessRoute(dir, v.kind);
     const { ctx, page, f, errors } = await open(browser, route, v, reads);
     v.page = page;
-    check(await ready(f, TRENDING[0].token), `${tag}: / did not draw the top Trending token`);
+    check(await home(f, v, TRENDING[0].token), `${tag}: / did not draw the top Trending token`);
     await f.waitForSelector('.tb [data-header="S1.1"], .tb [data-header="S1.3"], .tb [data-header="S1.4"], .phh [data-header="S1.1"], .phh [data-header="S1.3"], .phh [data-header="S1.4"]', { state: "attached", timeout: 10_000 }).catch(() => {});
     await page.waitForTimeout(300);
     const p0 = await read(f);
@@ -232,7 +236,7 @@ try {
         g = page.frames().find((x) => x !== page.mainFrame() && x.url().startsWith(`${APP_HOST}/`)) ?? null;
         if (!g) await page.waitForTimeout(100);
       }
-      check(g && (await ready(g, null)), `${tag}: the next load drew no token page`);
+      check(g && (await home(g, v, null)), `${tag}: the next load drew no ${v.mode === "phone" ? "Trenches list" : "token page"}`);
       if (g) {
         await g.waitForSelector('.tb [data-header="S1.1"], .tb [data-header="S1.3"], .tb [data-header="S1.4"], .phh [data-header="S1.1"], .phh [data-header="S1.3"], .phh [data-header="S1.4"]', { state: "attached", timeout: 10_000 }).catch(() => {});
         await page.waitForTimeout(300);

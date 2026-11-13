@@ -92,6 +92,7 @@ export function judge(rec) {
       say(false, `${tag}: ${faulty.length} of ${rows.length} rows wrong, first ${first}`);
     } else say(true, `${tag}: ${rows.length} rows, ${padded} with a launchpad badge (${ids.join(", ")}), every row its chain mark, no raw id, nothing clipped`);
     if (!l.shot) say(false, `${tag}: no screenshot`);
+    for (const src of l.pending ?? []) say(false, `${tag}: image never settled in ${SETTLE_MS / 1000} s: ${src}`);
   }
   return { ok: lines.every((x) => x.startsWith("ok ")), lines };
 }
@@ -171,6 +172,49 @@ export const READ = ({ scope, column }) => {
   return out;
 };
 
+/** How long the check waits for the page's images to load or fail before it reads the rows. */
+export const SETTLE_MS = 8_000;
+/** Runs in the page: waits at most `ms` for each image the browser loads now to load or fail, and returns the address
+ *  (host and path, no query) of each still pending. A lazy image off the viewport or not drawn (a Discover avatar's logo
+ *  in a row below the fold, or in a phone tab not shown; Avatar.tsx loading="lazy") is not asked for until it comes
+ *  near, so it is not waited on: it would never settle. Card app-faults-seen-on-124: the unbounded wait this replaces
+ *  hung release 125's app live run (43328445607) for 20 minutes with no output. */
+export const SETTLE = ({ ms }) => {
+  const due = [...document.images].filter((i) => {
+    if (i.complete) return false;
+    if (i.loading !== "lazy") return true;
+    const r = i.getBoundingClientRect();
+    return i.getClientRects().length > 0 && r.bottom > 0 && r.right > 0 && r.top < innerHeight && r.left < innerWidth;
+  });
+  const bare = (s) => {
+    try {
+      const u = new URL(s, location.href);
+      return `${u.host}${u.pathname}`;
+    } catch {
+      return String(s).split(/[?#]/)[0];
+    }
+  };
+  return new Promise((resolve) => {
+    const left = new Set(due);
+    const end = () => resolve([...left].filter((i) => !i.complete).map((i) => bare(i.currentSrc || i.src)));
+    if (left.size === 0) return end();
+    const timer = setTimeout(end, ms);
+    for (const i of due) {
+      const done = () => {
+        left.delete(i);
+        if (left.size === 0) {
+          clearTimeout(timer);
+          end();
+        }
+      };
+      i.addEventListener("load", done, { once: true });
+      i.addEventListener("error", done, { once: true });
+    }
+  });
+};
+/** The frame's images given SETTLE_MS: the addresses still pending. */
+export const settle = (frame) => frame.evaluate(SETTLE, { ms: SETTLE_MS });
+
 export async function collect({ url = `${APP_HOST}/discover`, shots = path.join(tmpdir(), `${KEY}-${Date.now()}`), prepare = null, build = null } = {}) {
   if (build && !prepare) {
     // --build: that terminal build at APP_HOST's name inside the stand-in shell, the helper live
@@ -209,15 +253,15 @@ export async function collect({ url = `${APP_HOST}/discover`, shots = path.join(
         if (app && state !== "loading") break;
       }
       const target = app ?? page.mainFrame();
-      // every logo has had its chance to load
-      await target.evaluate(() => Promise.all([...document.images].map((i) => (i.complete ? null : new Promise((r) => { i.onload = i.onerror = r; }))))).catch(() => {});
+      // every logo the page asks for now has had its chance to load, at most SETTLE_MS; each still pending is named
+      const pending = new Set(await settle(target).catch(() => []));
       await page.waitForTimeout(300);
       const rows = [];
       if (state === "ready") {
         if (w.isMobile) {
           for (const key of COLUMNS) {
             await target.click(`.dsc-tab[data-tab="${key}"]`);
-            await target.evaluate(() => Promise.all([...document.images].map((i) => (i.complete ? null : new Promise((r) => { i.onload = i.onerror = r; })))));
+            for (const src of await settle(target)) pending.add(src);
             rows.push(...(await target.evaluate(READ, { scope: ".dsc-phone", column: key })));
           }
           await target.click('.dsc-tab[data-tab="new"]');
@@ -230,7 +274,7 @@ export async function collect({ url = `${APP_HOST}/discover`, shots = path.join(
       for (const a of answers) read.push({ url: a.url(), status: a.status(), body: a.status() === 200 ? await a.json().catch(() => null) : null });
       const served = servedMap(read);
       for (const r of rows) r.served = servedRow(served, r);
-      rec.loads.push({ width: w.name, path: new URL(target.url()).pathname, state, lists: lists ? { url: lists.url(), status: lists.status() } : null, rows, shot });
+      rec.loads.push({ width: w.name, path: new URL(target.url()).pathname, state, lists: lists ? { url: lists.url(), status: lists.status() } : null, rows, shot, pending: [...pending] });
       await ctx.close();
     }
   } finally {

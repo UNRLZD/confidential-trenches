@@ -1,42 +1,90 @@
 /* The token page's left rail (Rail.tsx). Values are R5's (research repo design/proto/assets/proto.css .rail, .rc2,
-   .rchip, .rrows, .rr and token.css's width modes at design-lock-r5). Desktop sizes are layout px on the 1920 design,
-   drawn at --fit-zoom (shell/fit.ts). The rail's column is token.css .tkp-desk's. */
-.tkr { --blue: #5b8cff; --border-row: #171717; --bg-row-hover: #141414; display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; background: var(--bg-panel); border: 1px solid var(--border-panel); border-radius: 10px; }
-.tkr-exp { display: none; }
-.tkr-chips { height: 48px; flex: none; display: flex; align-items: center; gap: 6px; padding: 0 10px 0 12px; border-bottom: 1px solid var(--border-row); }
-.tkr-chip { position: relative; height: 30px; padding: 0 11px; border: 0; border-radius: 8px; display: inline-flex; align-items: center; font: 600 12px var(--font-ui); color: var(--text-2); background: transparent; box-shadow: inset 0 0 0 1px var(--border-panel); white-space: nowrap; cursor: pointer; }
-.tkr-chip::after { content: ""; position: absolute; inset: -7px 0; }
+   .rchip, .rrows, .rr and token.css's width modes at design-lock-r5), brought to the live UNRLZD trenches rail's
+   (apps/terminal/src/screens/trenches/rail/Rail.module.css there: the head, the chip bar with Pause and the sort
+   button, the rows, the MC flash, the arrival cue, the launch board link; owner 12 Nov parity). Desktop sizes are layout
+   px on the 1920 design, drawn at --fit-zoom (shell/fit.ts). The rail's column is token.css .tkp-desk's. */
+.tkr { --blue: #5b8cff; --blue-rgb: 91, 140, 255; --warn: #f2b543; --warn-rgb: 242, 181, 67; --border-row: #171717; --bg-row-hover: #141414; --ease-out: cubic-bezier(0.22, 1, 0.36, 1); position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; background: var(--bg-panel); border: 1px solid var(--border-panel); border-radius: 10px; }
+
+/* the head: the Tokens tab and « (UNRLZD .head / .tab / .chev) */
+.tkr-head { height: 52px; flex: none; display: flex; align-items: center; gap: 18px; padding: 0 16px; }
+.tkr-tab { font: 600 15px var(--font-ui); color: var(--text-3); }
+.tkr-tab[data-on="true"] { color: var(--text-1); }
+.tkr-chev { margin-left: auto; display: flex; flex: none; padding: 4px; border: 0; background: transparent; color: var(--text-3); cursor: pointer; border-radius: 6px; }
+.tkr-chev:hover { color: var(--text-1); }
+
+/* the chip bar: the chips scroll in their own box, Pause and the sort button beside it (UNRLZD .chipsBar / .chips / .hold) */
+.tkr-bar { position: relative; z-index: 4; flex: none; display: flex; gap: 6px; padding: 0 12px 10px; }
+.tkr-chips { flex: 1; min-width: 0; display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 18px), transparent); mask-image: linear-gradient(90deg, #000 calc(100% - 18px), transparent); }
+.tkr-chips::-webkit-scrollbar { display: none; }
+.tkr-chip { position: relative; height: 30px; flex: none; padding: 0 11px; border: 0; border-radius: 8px; display: inline-flex; align-items: center; font: 600 12px var(--font-ui); color: var(--text-2); background: transparent; box-shadow: inset 0 0 0 1px var(--border-panel); white-space: nowrap; cursor: pointer; transition: color 150ms ease, background-color 150ms ease; }
+.tkr-chip:hover { color: var(--text-1); }
 .tkr-chip[aria-pressed="true"] { background: var(--border-strong); color: var(--text-1); box-shadow: none; }
-.tkr-rows { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; padding: 6px; }
+.tkr-hold, .tkr-iconbtn { flex: none; height: 30px; display: flex; align-items: center; justify-content: center; gap: 5px; border: 0; border-radius: 8px; background: var(--bg-panel); box-shadow: inset 0 0 0 1px var(--border-panel); color: var(--text-2); font: 600 12px var(--font-ui); cursor: pointer; transition: color 150ms ease; }
+.tkr-hold { padding: 0 11px; }
+.tkr-iconbtn { width: 30px; padding: 0; }
+.tkr-hold:hover, .tkr-iconbtn:hover { color: var(--text-1); }
+.tkr-hold[aria-pressed="true"] { background: linear-gradient(rgba(var(--warn-rgb), 0.13), rgba(var(--warn-rgb), 0.13)), var(--bg-panel); box-shadow: inset 0 0 0 1px rgba(var(--warn-rgb), 0.35); color: var(--warn); }
+.tkr-iconbtn[data-on="true"] { color: var(--text-1); box-shadow: inset 0 0 0 1px var(--border-active, #3a3a3a); }
+/* the sort menu, hung from the bar's right edge */
+.tkr-menu { position: absolute; top: 36px; right: 12px; z-index: 20; min-width: 172px; padding: 6px; display: flex; flex-direction: column; gap: 2px; background: #141414; border: 1px solid var(--border-strong); border-radius: 10px; box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55); animation: tkrPop 140ms var(--ease-out) both; }
+@keyframes tkrPop { from { opacity: 0; transform: translateY(-4px); } }
+.tkr-mi { height: 32px; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 0 10px; border: 0; border-radius: 7px; background: transparent; color: var(--text-2); font: 500 13px var(--font-ui); text-align: left; cursor: pointer; }
+.tkr-mi:hover { background: var(--bg-row-hover); color: var(--text-1); }
+.tkr-mi[data-on="true"] { color: var(--text-1); }
+
+/* the list (UNRLZD .list / button.row) */
+.tkr-rows { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; padding: 0 8px 8px; background: var(--bg-panel) local; }
 .tkr-rows::-webkit-scrollbar { display: none; }
-.tkr-row { height: 66px; flex: none; display: flex; align-items: center; gap: 12px; padding: 10px; border-radius: 11px; color: inherit; text-decoration: none; transition: background-color 150ms ease; }
+.tkr-row { position: relative; height: 66px; flex: none; display: flex; align-items: center; gap: 12px; padding: 10px; border-radius: 11px; color: inherit; text-decoration: none; transition: background-color 150ms ease; }
 a.tkr-row:hover { background: var(--bg-row-hover); }
 .tkr-row[aria-current="page"] { background: var(--bg-raised); }
 .tkr-row:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; }
 .tkr-skc { width: 46px; height: 46px; }
-.tkr-a { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 3px; }
+.tkr-a { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 4px; }
 .tkr-s { font: 600 15px var(--font-ui); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tkr-p { font: 12px var(--font-num); font-variant-numeric: tabular-nums; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-/* the right column has one width whatever its values (the widest: $999.9M MC over +12.3K% · 24h), its lines filling it
-   right-aligned, so a refresh that changes a slot's values moves no box (a column as wide as its text moved its left edge) */
-.tkr-b { flex: none; width: 100px; display: flex; flex-direction: column; gap: 3px; white-space: nowrap; }
+/* the right column has one width whatever its values (the widest: $999.9M MC over ▲ 12345.67%), its lines filling it
+   right-aligned, so a refresh that changes a row's values moves no box */
+.tkr-b { flex: none; width: 108px; display: flex; flex-direction: column; gap: 4px; white-space: nowrap; }
 .tkr-mc, .tkr-c { text-align: right; overflow: hidden; text-overflow: ellipsis; }
-.tkr-mc { font: 500 14px var(--font-num); font-variant-numeric: tabular-nums; }
-.tkr-mc u { text-decoration: none; font-size: 11px; color: var(--text-3); margin-left: 4px; }
+.tkr-mc { font: 500 14px var(--font-num); font-variant-numeric: tabular-nums; color: var(--text-1); transition: color 240ms ease; }
+.tkr-mc u { text-decoration: none; font: 400 11px var(--font-ui); color: var(--text-3); margin-left: 4px; }
+/* the MC flash: green up, coral down, for 800 ms (UNRLZD RailRow `flash`) */
+.tkr-mc[data-flash="1"] { color: var(--acc); transition: none; }
+.tkr-mc[data-flash="-1"] { color: var(--sell); transition: none; }
 .tkr-c { font: 12px var(--font-num); font-variant-numeric: tabular-nums; color: var(--text-3); }
 .tkr-c[data-dir="up"] { color: var(--acc); }
 .tkr-c[data-dir="down"] { color: var(--sell); }
 .tkr-msg { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; color: var(--text-2); font-size: 13px; }
+.tkr-empty { justify-content: flex-start; padding-top: 40px; color: var(--text-2); font-size: 12px; text-align: center; }
+.tkr-empty svg { color: var(--text-3); }
 
-/* slim (R5 token.css, under 1500): the expand button and the rings; expanded, the full rail drawn over the chart, its
-   column still 78, so the page under it never moves */
+/* the arrival cue (arrivals.ts; UNRLZD styles/arrive.module.css): a live-blue wash under the row's content, up in
+   110 ms and gone by 900 ms, and one damped 2 px nudge over 300 ms; transform and opacity only */
+.tkr-arrive { isolation: isolate; }
+.tkr-arrive::before { content: ""; position: absolute; inset: 0; z-index: -1; border-radius: inherit; pointer-events: none; background: linear-gradient(90deg, rgba(var(--blue-rgb), 0.11), rgba(var(--blue-rgb), 0.025) 72%); opacity: 0; animation: tkrGlow 900ms ease var(--arrive-delay, 0ms) both; }
+@keyframes tkrGlow { 0% { opacity: 0; animation-timing-function: var(--ease-out); } 12% { opacity: 1; animation-timing-function: ease; } 100% { opacity: 0; } }
+.tkr-arrive[data-nudge="true"] { animation: tkrNudge 300ms var(--ease-out) var(--arrive-delay, 0ms) both; }
+@keyframes tkrNudge { 0% { transform: translateX(0); } 30% { transform: translateX(2px); } 65% { transform: translateX(-1px); } 100% { transform: translateX(0); } }
+@media (prefers-reduced-motion: reduce) {
+  .tkr-arrive::before { animation-duration: 600ms; background: linear-gradient(90deg, rgba(var(--blue-rgb), 0.08), transparent 72%); }
+  .tkr-arrive[data-nudge="true"] { animation: none; }
+  .tkr-mc { transition: none; }
+}
+
+/* the launch board link at the foot (UNRLZD .board) */
+.tkr-board { flex: none; margin: 0 12px 12px; height: 38px; display: flex; align-items: center; justify-content: center; gap: 8px; border-radius: 10px; background: var(--bg-raised); color: var(--text-2); font: 500 13px var(--font-ui); transition: color 150ms ease, background-color 150ms ease; }
+.tkr-board:hover { color: var(--text-1); background: #1e1e1e; }
+
+/* slim: the expand button and the rings (under 1500, or folded by «); opened under 1500, the full rail is drawn over
+   the chart, its column still 78, so the page under it never moves */
+.tkr-exp { position: relative; display: flex; height: 52px; flex: none; align-items: center; justify-content: center; padding: 0; border: 0; background: transparent; color: var(--text-2); cursor: pointer; }
+.tkr-exp:hover { color: var(--text-1); }
+.tkr[data-slim="true"] .tkr-a, .tkr[data-slim="true"] .tkr-b { display: none; }
+.tkr[data-slim="true"] .tkr-rows { padding: 0 4px 6px; }
+.tkr[data-slim="true"] .tkr-row { justify-content: center; padding: 10px 0; }
+.tkr[data-slim="true"] .tkr-msg { font-size: 11px; text-align: center; }
 @media (max-width: 1499.98px) {
-  .tkr-exp { position: relative; display: flex; height: 48px; flex: none; align-items: center; justify-content: center; padding: 0; border: 0; background: transparent; color: var(--text-2); cursor: pointer; }
-  .tkr-exp:hover { color: var(--text-1); }
-  .tkr:not([data-open="true"]) .tkr-chips, .tkr:not([data-open="true"]) .tkr-a, .tkr:not([data-open="true"]) .tkr-b { display: none; }
-  .tkr:not([data-open="true"]) .tkr-rows { padding: 0 4px 6px; }
-  .tkr:not([data-open="true"]) .tkr-row { justify-content: center; padding: 10px 0; }
-  .tkr:not([data-open="true"]) .tkr-msg { font-size: 11px; text-align: center; }
-  .tkr[data-open="true"] { position: relative; z-index: 8; width: 340px; box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5); }
-  .tkr[data-open="true"] .tkr-exp { justify-content: flex-start; padding-left: 26px; }
+  .tkr[data-open="true"] { z-index: 8; width: 340px; box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5); animation: tkrIn 220ms var(--ease-out) both; }
+  @keyframes tkrIn { from { opacity: 0.6; transform: translateX(-12px); } }
 }

@@ -11,7 +11,7 @@
 import assert from "node:assert/strict";
 import { after, test } from "node:test";
 import { IDBFactory, IDBObjectStore } from "fake-indexeddb";
-import { backupFirst, openWalletStore as openStore, openWalletStoreReader, WALLET_LANES, WALLET_LOCK, WALLET_SYNC_PREFIX, walletSeedMoved, type WalletEvent, type WalletStore, type WalletStoreOptions } from "../src/store/index.ts";
+import { backupFirst, openWalletStore as openStore, openWalletStoreReader, WALLET_LANES, WALLET_LOCK, WALLET_SYNC_PREFIX, walletSeedMoved, WALLET_SEED_LOCK, type WalletEvent, type WalletStore, type WalletStoreOptions } from "../src/store/index.ts";
 
 // every store a test opens is closed at the end, so a failing assertion fails the run instead of leaving it hanging on
 // an open BroadcastChannel
@@ -161,6 +161,54 @@ test("sign out broadcasts, closes the other tab and deletes the database", async
   const c = await openWalletStore({ indexedDB: idb });
   assert.equal(await c.get("notes", "n1"), undefined);
   c.close();
+});
+
+// card sign-out-stops-the-pages-reads: the page's gate closes in `locked` (src/main.ts), so a money run holding the seed
+// lock shared finishes with its reads open, and a refused sign out never closes it (the review of 03d5b772, P2)
+test("sign out's `locked` runs once holding the seed lock exclusive, before the signout post and the delete; a refused sign out never runs it", async () => {
+  const idb = new IDBFactory();
+  const seen: WalletEvent[] = [];
+  const a = await openWalletStore({ indexedDB: idb, name: "locked-1" });
+  const b = await openWalletStore({ indexedDB: idb, name: "locked-1", onEvent: (e) => seen.push(e) });
+  await a.insertSeed({ entropy: new Uint8Array(16).fill(1), source: "prf", code_saved: true });
+  // a trade's shared hold: the sign out (and so `locked`) waits for it
+  const order: string[] = [];
+  let release!: () => void;
+  const held = new Promise<void>((r) => (release = r));
+  const trade = navigator.locks.request(`${WALLET_SEED_LOCK}/locked-1`, { mode: "shared" }, async () => (order.push("trade holds"), await held, order.push("trade ends")));
+  await new Promise((r) => setTimeout(r, 5));
+  let calls = 0;
+  const out = a.signOut({
+    locked: () => {
+      calls++;
+      order.push("locked");
+      void navigator.locks.query().then((q) => order.push(`exclusive ${q.held?.some((l) => l.name === `${WALLET_SEED_LOCK}/locked-1` && l.mode === "exclusive")}`));
+      order.push(`signout heard ${seen.some((e) => e.kind === "signout")}`);
+    },
+  });
+  await new Promise((r) => setTimeout(r, 5));
+  assert.equal(calls, 0, "not while the trade holds the lock shared");
+  release();
+  await trade;
+  await out;
+  await new Promise((r) => setTimeout(r, 5));
+  assert.equal(calls, 1);
+  assert.deepEqual(order, ["trade holds", "trade ends", "locked", "signout heard false", "exclusive true"]);
+  assert.ok(!(await idb.databases()).some((d) => d.name === "locked-1"), "deleted after it");
+  // refused for the backup: never run
+  const c = await openWalletStore({ indexedDB: idb, name: "locked-2" });
+  await c.insertSeed({ entropy: new Uint8Array(16).fill(2), source: "random", code_saved: false });
+  let refusedCalls = 0;
+  await assert.rejects(c.signOut({ locked: () => void refusedCalls++ }), /back up the 12 words/);
+  // refused because another tab signed out first (this store closed): never run, and no seed is left
+  const d1 = await openWalletStore({ indexedDB: idb, name: "locked-3" });
+  const d2 = await openWalletStore({ indexedDB: idb, name: "locked-3" });
+  await d1.insertSeed({ entropy: new Uint8Array(16).fill(3), source: "prf", code_saved: true });
+  await d1.signOut();
+  await assert.rejects(d2.signOut({ locked: () => void refusedCalls++ }));
+  assert.equal(refusedCalls, 0, "a refused sign out never runs `locked`");
+  const again = await openWalletStore({ indexedDB: idb, name: "locked-3" });
+  assert.equal(await again.get("meta", "seed"), undefined, "the account is gone: the page treats it as signed out");
 });
 
 // WU-06's property: random tabs, random closes (during and after a reservation, before any use), random concurrency,

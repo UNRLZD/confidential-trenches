@@ -6,6 +6,9 @@
 //   bad:  the deployed APP_HOST on 4 Nov, before this card: the dated lists, days old, draw no age: FAIL.
 // Planted from the good run: an age that is not the read's, an age on a fresh read, a missing run, a Discover not ready,
 // no lists read, a dated read that is not days old, no entry script.
+// Planted for card app-faults-seen-on-124 (release 124's live run 43309913191 read a 215 s old chain beside a fresh one,
+// and the check, dating by the oldest, wanted "Updated 3m ago" where Discover rightly drew none): chains read at
+// different times are dated by the newest, as Discover dates them under All (data.ts mergeLists).
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -61,4 +64,26 @@ test("planted: a missing run, Discover not ready, no lists read, a dated read no
   fails(mut((rec) => (run(rec, "desktop", "served").lists = null)), /^BAD desktop served: the page read no dated lists answer/);
   fails(mut((rec) => Object.assign(run(rec, "desktop", "dated"), { lists: { status: 200, asOfMs: run(rec, "desktop", "dated").readAtMs - 2 * 3_600_000 }, age: "Updated 2h ago" })), /^BAD desktop dated: the dated read is not days old/);
   fails(mut((rec) => (rec.entry = null)), /^BAD the served \/ names its entry script none/);
+});
+
+test("planted: chains read at different times are dated by the newest, as Discover dates them under All", () => {
+  const mixed = (age) =>
+    mut((rec) => {
+      const r = run(rec, "desktop", "served");
+      r.lists = { status: 200, asOfMs: r.readAtMs - 215_000, dates: { solana: r.readAtMs - 4_000, base: r.readAtMs - 215_000, robinhood: r.readAtMs - 30_000 } };
+      r.age = age;
+    });
+  const pass = mixed(null);
+  assert.equal(pass.ok, true, pass.lines.join("\n"));
+  assert.ok(pass.lines.includes("ok  desktop served: a read 4 s old draws null"), pass.lines.join("\n"));
+  fails(mixed("Updated 3m ago"), /^BAD desktop served: draws "Updated 3m ago" for a read 4 s old, want null/);
+  // every chain old: the newest of them is the age drawn
+  fails(
+    mut((rec) => {
+      const r = run(rec, "phone", "served");
+      r.lists = { status: 200, asOfMs: 0, dates: { solana: r.readAtMs - 130_000, base: r.readAtMs - 215_000 } };
+      r.age = null;
+    }),
+    /^BAD phone served: draws null for a read 130 s old, want "Updated 2m ago"/,
+  );
 });

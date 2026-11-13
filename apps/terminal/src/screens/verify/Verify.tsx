@@ -2,7 +2,7 @@
 // and Funds, each a status dot (blue ok, amber warn, coral danger) and a chevron; a tap opens its checks in place, each
 // with its dot and the values read, hashes and blocks in Chivo 12 shortened in the middle. Under them the one block
 // and the two RPCs read. It draws a VerifyView (model.ts) and nothing else: no claim, only what was read.
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Icon } from "../signin/Icon.tsx";
 import type { VerifyCheck, VerifyCheckId, VerifyRow, VerifyStatus, VerifyView } from "./model.ts";
 // the pools (card verify-pools): a row per chain under the vault's, opened the same way: its checks, the block and the
@@ -105,6 +105,12 @@ export function Verify({ view, pools, onClose, opened = [] }: { view: VerifyView
   const [open, setOpen] = useState<Set<string>>(() => new Set(opened));
   const toggle = (id: string) => setOpen((o) => { const n = new Set(o); if (!n.delete(id)) n.add(id); return n; });
   const read = view.state === "loading" ? null : view;
+  // Escape closes it, as the sign-in sheet does (UNRLZD's sheets and drawers close on Escape)
+  useEffect(() => {
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", esc);
+    return () => window.removeEventListener("keydown", esc);
+  }, [onClose]);
   return (
     <div className="vfy" data-panel="verify" data-state={view.state} data-code={read?.code.status ?? "loading"} data-funds={read?.funds.status ?? "loading"}>
       <div className="vfy-scrim" onClick={onClose} />

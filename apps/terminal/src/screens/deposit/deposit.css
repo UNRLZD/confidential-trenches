@@ -118,3 +118,14 @@
   .dfoot { height: 76px; padding: 8px 16px 12px; border-top: 0; }
   .dbtn { height: 56px; border-radius: 16px; font-size: 17px; }
 }
+
+/* Motion, UNRLZD's (styles/base.css --ease-out, --ease-drawer, --dur-drawer; AccountPanel.module.css's drawer,
+   AuthModal.module.css's scrim and phone sheet): the scrim fades in 150 ms, the drawer slides in from the right 260 ms,
+   the phone sheet rises 220 ms. Transform and opacity only, so nothing shifts. */
+.dep-scrim { animation: dep-fade 150ms cubic-bezier(0.23, 1, 0.32, 1) both; }
+.dep-box { animation: dep-in 260ms cubic-bezier(0.32, 0.72, 0, 1) both; }
+@keyframes dep-fade { from { opacity: 0; } }
+@keyframes dep-in { from { transform: translateX(100%); } }
+@keyframes dep-up { from { transform: translateY(100%); } }
+@media (max-width: 767.98px) { .dep-box { animation: dep-up 220ms cubic-bezier(0.32, 0.72, 0, 1) both; } }
+@media (prefers-reduced-motion: reduce) { .dep-scrim, .dep-box { animation: none; } }

@@ -19,9 +19,14 @@ function block(start: string, end: string): string {
 }
 
 test("every way the page learns it is signed out ends the quotes' asks", () => {
-  assert.match(block("async function signOut(): Promise<void> {", "\n}\n"), /\n {2}quotesSignedOut\(\);/);
-  assert.match(block('if (e.kind !== "signout") return;', 'show("signed-out");'), /\n {6}quotesSignedOut\(\);/);
-  assert.match(block("function storeMoved(e: WalletEvent): void {", "\n}\n"), /if \(e\.kind === "signout"\) \{[^}]*quotesSignedOut\(\);/);
+  // its own Sign out, at the tap, with no new run (card sign-out-stops-the-pages-reads' `leaving`)
+  assert.match(block("async function signOut(): Promise<void> {", "\n}\n"), /\n {2}leaving = true;\n(?: {2}\/\/[^\n]*\n)* {2}quotesSignedOut\(\);\n/);
+  // another tab's, heard on the store's channel or the shell's: both reach signedOutElsewhere, which stops the quotes
+  // right after it closes the page's gate
+  assert.match(block('if (e.kind !== "signout") return;', 'show("signed-out");'), /\n {6}signedOutElsewhere\(\);\n/);
+  assert.match(block("function storeMoved(e: WalletEvent): void {", "\n}\n"), /if \(e\.kind === "signout"\) signedOutElsewhere\(\);/);
+  assert.match(block("function signedOutElsewhere(): void {", "\n}\n"), /\n {2}closeHostLanes\(\);\n {2}quotesSignedOut\(\);\n/);
+  assert.equal(MAIN.split("quotesSignedOut()").length - 1, 2);
 });
 
 test("every quote host gets the page's stop: deposit.quote, pool.address and the sheet's reads on both pages", () => {
@@ -39,8 +44,10 @@ test("every quote host gets the page's stop: deposit.quote, pool.address and the
 // a request queued behind the tap must find the stop pulled, not a fresh one.
 test("a signed-in page renews the stop: on every landing, and when its sign out is refused", () => {
   assert.match(MAIN, /const quotesSignedIn = quotes\.signedIn;/);
-  assert.match(block("async function landed(l: Landing): Promise<void> {", "\n}\n"), /^async function landed\(l: Landing\): Promise<void> \{\n(?: {2}\/\/[^\n]*\n)* {2}quotesSignedIn\(\);/);
-  assert.match(block("async function signOut(): Promise<void> {", "\n}\n"), /try \{\n {4}await s\.signOut\(\);\n {2}\} catch \(e\) \{\n(?: {4}\/\/[^\n]*\n)* {4}quotesSignedIn\(\);\n {4}throw e;\n {2}\}/);
+  // a landing renews it, unless the page's gate is closed (a sign out landed: the page reloads instead)
+  assert.match(block("async function landed(l: Landing): Promise<void> {", "\n}\n"), /^async function landed\(l: Landing\): Promise<void> \{\n(?: {2}\/\/[^\n]*\n)* {2}if \(hostLanesClosed\(\)\) return void \([^\n]*location\.reload\(\)\);\n(?: {2}\/\/[^\n]*\n)* {2}quotesSignedIn\(\);\n/);
+  // a sign out refused with this account's seed still stored: still signed in
+  assert.match(block("async function signOut(): Promise<void> {", "\n}\n"), /if \(still !== undefined\) \{\n {6}still\.entropy\.fill\(0\);\n {6}leaving = false;\n(?: {6}\/\/[^\n]*\n)* {6}quotesSignedIn\(\);\n {6}throw refused\.e;\n {4}\}/);
   // nowhere else: a sign out never renews it
   assert.equal(MAIN.split("quotesSignedIn()").length - 1, 2);
 });

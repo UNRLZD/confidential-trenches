@@ -27,6 +27,7 @@ export const WORDS = {
   quoting: ok("Quoting", "R5 app.js:637 (S4.2)"),
   getAddress: ok("Get address", "R5 app.js:665"),
   copy: ok("Copy", "R5 app.js:661"),
+  copied: ok("Copied", "UNRLZD auth/copy.ts copied: the deposit address's Copy once tapped (auth/AuthModal.tsx:342; owner 12 Nov parity)"),
   waiting: ok("Waiting", "R5 app.js:652 (S4.13, S4.14)"),
   processing: ok("Processing", "R5 app.js:653 (S4.15)"),
   paused: ok("Deposits paused", "R5 app.js:640 (S4.8)"),

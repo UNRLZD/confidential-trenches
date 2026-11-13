@@ -53,6 +53,17 @@ export function signinWays(state: SignpageState | null): SigninWay[] {
   return noPrf ? ["wallet", "words"] : ["passkey", "wallet", "words"];
 }
 
+/**
+ * The line under a way in that failed (UNRLZD's rejected and no-passkey screens, auth/view.ts:515-581; owner 12 Nov
+ * parity): only for the way tapped in this sheet, while the signing page reports that way failed and no one is signed
+ * in. A passkey this device cannot use (no_prf) has no row left (signinWays), so its line stands above the ways.
+ */
+export function failLine(state: SignpageState | null, tapped: SigninWay | null): { way: SigninWay; kind: "cancelled" | "nopasskey" } | null {
+  const f = state?.signin_failed;
+  if (!tapped || !f || state?.signed_in || f.way !== tapped) return null;
+  return { way: f.way, kind: f.way === "passkey" && f.reason === "no_prf" ? "nopasskey" : "cancelled" };
+}
+
 export type RestoreKind = "scanning" | "done" | "nothing" | "offline";
 
 export interface RestoreModel {

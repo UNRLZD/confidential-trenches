@@ -123,6 +123,15 @@ export function holdersSummary(read: HoldersRead | null, row: Pick<MarketRow, "h
 /** A non-negative number as the decimal string the formats read (never an exponent form). */
 const dec = (n: number): string | null => (Number.isFinite(n) && n >= 0 ? n.toFixed(18).replace(/\.?0+$/, "") : null);
 
+/** A token amount as a row draws it: below 1 its own digits, up to 6 decimals (Portfolio's amount rule, model.ts), and
+ *  "<0.000001" for a nonzero amount under that, never "0.00" (the signed-in walk of release 124, 12 Nov: a NEAR trade of a
+ *  little ZEC read Amount 0.00); from 1 up, compact as before. */
+export function tokenAmount(n: number): string {
+  if (!(n > 0) || n >= 1) return compact(n);
+  const s = n.toFixed(6).replace(/0+$/, "").replace(/\.$/, "");
+  return s === "0" ? "<0.000001" : s;
+}
+
 export interface HolderView {
   addr: string;
   usd: string;
@@ -146,7 +155,7 @@ export function holderViews(rows: readonly Holder[], o: { decimals: number | nul
     return {
       addr: h.addr,
       usd: value === null ? DASH : usd(value),
-      amount: amount === null ? DASH : compact(Number(amount)),
+      amount: amount === null ? DASH : tokenAmount(Number(amount)),
       share: h.bps === null ? DASH : `${(h.bps / 100).toFixed(1)}%`,
       width: h.bps === null ? 0 : Math.min(100, Number(((h.bps / max) * 100).toFixed(1))),
       burn: h.kind === "burn",
@@ -170,6 +179,26 @@ export interface TapeView {
 
 /** Trade rows as R5 draws them: the age, the side, the MC the trade filled at (its price times the supply), the amount,
  *  the total in USD and its bar against the biggest trade's, the trader. No supply read: no MC. */
+/**
+ * The trades list held by Pause (UNRLZD center/lower.ts pausedView; owner 12 Nov parity): the trades as they stood at
+ * the pause, with any older ones read since appended below, and how many newer ones arrived meanwhile. Not paused: the
+ * live list.
+ */
+export function pausedTape(trades: readonly Trade[], frozen: readonly Trade[] | null): { shown: readonly Trade[]; fresh: number } {
+  if (frozen === null) return { shown: trades, fresh: 0 };
+  const had = new Set(frozen.map((t) => t.tx));
+  const head = frozen[0]?.t_ms ?? Number.NEGATIVE_INFINITY;
+  const tail = frozen.at(-1)?.t_ms ?? Number.POSITIVE_INFINITY;
+  let fresh = 0;
+  const older: Trade[] = [];
+  for (const t of trades) {
+    if (had.has(t.tx)) continue;
+    if (t.t_ms >= head) fresh++;
+    else if (t.t_ms <= tail) older.push(t);
+  }
+  return { shown: older.length > 0 ? [...frozen, ...older] : frozen, fresh };
+}
+
 export function tapeViews(trades: readonly Trade[], o: { supply: number | null; creator: string | null; nowMs: number }): TapeView[] {
   const max = Math.max(...trades.map((t) => Number(t.usd)), 0.01);
   return trades.map((t) => {
@@ -180,7 +209,7 @@ export function tapeViews(trades: readonly Trade[], o: { supply: number | null; 
       age: age(Math.floor(t.t_ms / 1000), o.nowMs),
       side: t.side,
       mc: mc === null ? DASH : usd(mc),
-      amount: compact(Number(t.amt)),
+      amount: tokenAmount(Number(t.amt)),
       total: price(t.usd),
       width: Math.min(100, Number(((u / max) * 100).toFixed(1))),
       trader: t.trader,
@@ -195,6 +224,8 @@ export interface AboutView {
   five: { vol: string; buys: string; sells: string; net: string; netTone: Tone };
   /** The 24h buys and sells; `buyPct` is the buys' share of the bar, null when neither is known. */
   flow: { buys: string; sells: string; buyPct: number | null };
+  /** The same for each window the row serves (UNRLZD About draws three flow bars): 24h, 1h, 5m. */
+  flows: { win: "24h" | "1h" | "5m"; buys: string; sells: string; buyPct: number | null }[];
 }
 
 const MINUS = "−";
@@ -219,5 +250,10 @@ export function aboutView(row: MarketRow): AboutView {
     windows: [win("5M", row.chg_5m_bps), win("1H", row.chg_1h_bps), win("4H", row.chg_4h_bps), win("1D", row.chg_24h_bps)],
     five: { vol: usd(row.vol_5m_usd), buys: count(row.buys_5m), sells: count(row.sells_5m), net: net.text, netTone: net.tone },
     flow: { buys: count(b), sells: count(s), buyPct: b !== null && s !== null && b + s > 0 ? Number(((b / (b + s)) * 100).toFixed(1)) : null },
+    flows: ([["24h", row.buys_24h, row.sells_24h], ["1h", row.buys_1h, row.sells_1h], ["5m", row.buys_5m, row.sells_5m]] as const).map(([win, bv, sv]) => {
+      const x = countOf(bv) ? bv! : null;
+      const y = countOf(sv) ? sv! : null;
+      return { win, buys: count(x), sells: count(y), buyPct: x !== null && y !== null && x + y > 0 ? Number(((x / (x + y)) * 100).toFixed(1)) : null };
+    }),
   };
 }
