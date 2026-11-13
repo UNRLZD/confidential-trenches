@@ -136,6 +136,22 @@ const fin = await anvil("eth_getBlockByNumber", ["finalized", false]);
 const firstHead = BigInt(head.number);
 log("fork", { chain: CHAIN, chainId: Number(await anvil("eth_chainId", [])), pool: PIN.pool, head: firstHead, headAgeS: Math.round(Date.now() / 1000 - Number(BigInt(head.timestamp))), finalized: BigInt(fin.number), forkHosts: [...route.fork], helper: TRADE_HELPER });
 
+// Robinhood's chain fee is ArbGasInfo.getL1BaseFeeEstimate() at the precompile 0x...6c (kit trade/evm/pool-fee.ts), which
+// a fork node cannot run: its code there is 0xfe, so every fee read answered "InvalidFEOpcode" and no bind passed (run 33,
+// 13 Nov 11:46Z). On a Robinhood copy that address answers the live value instead, read once on the chain's own public
+// RPC and kept in the record: code that returns that one word to any call
+let arbGasInfo = null;
+if (CHAIN === "robinhood") {
+  const ARB_GAS_INFO = "0x000000000000000000000000000000000000006c";
+  const live = await (await realFetch("https://rpc.mainnet.chain.robinhood.com", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_call", params: [{ to: ARB_GAS_INFO, data: "0xf5d6ded7" }, "latest"] }), signal: AbortSignal.timeout(10_000) })).json();
+  const word = typeof live?.result === "string" && /^0x[0-9a-f]{64}$/i.test(live.result) ? live.result.slice(2).toLowerCase() : null;
+  if (word === null) throw new Error(`ArbGasInfo's live answer is no word: ${JSON.stringify(live).slice(0, 200)}`);
+  // PUSH32 word, PUSH1 0, MSTORE, PUSH1 32, PUSH1 0, RETURN
+  await anvil("anvil_setCode", [ARB_GAS_INFO, "0x7f" + word + "60005260206000f3"]);
+  arbGasInfo = { at: ARB_GAS_INFO, getL1BaseFeeEstimate: BigInt("0x" + word), readOn: "rpc.mainnet.chain.robinhood.com", readAt: new Date().toISOString() };
+  log("ArbGasInfo planted", arbGasInfo);
+}
+
 // the helper in this process: its own handler, its EVM pool sender on the fork with the published test key
 const KEY = new Uint8Array(createHash("sha256").update("helper-pool-senders/test-key/EVM_SENDER").digest());
 // FORK_FORCE_REFUSE=1: the buy's own send (the helper's sender, the first raw transaction it sends) lands while the
@@ -313,7 +329,7 @@ for (let i = 0; i < 300 && ready.length === 0; i++) {
 }
 const readyMs = Date.now() - proveAt;
 const notesNow = async () => (await ns.list()).map((n) => ({ id: n.id, ref: n.ref.kind, state: n.state, value: n.leaf ? n.leaf.value : null }));
-const record = { by: "packages/signpage/scripts/pool-fork-evm-trade.mjs", chain: CHAIN, pool: PIN.pool, token: TOKEN, anvil: ANVIL, sender: sender.sender, times: { restoreMs, proveMs: proves.at(-1) ?? null, readyMs, tapToAnswerMs: null, tapToEndMs: null }, end: null, refusal: null, tx: null, copy: { note: "a copy of mainnet: anvil forks the chain and reads each slot it lacks from the public upstreams below through fork-rpc, so readyMs and every read through anvil include those upstreams' latency and throttles, never the product's alone", upstreams: (() => { try { return JSON.parse(process.env.FORK_RPC_UPSTREAMS ?? "null"); } catch { return null; } })() }, block: null, status: null, notesAfter: null, helperCalls, helperLines, requests: [], refusedHosts: {} };
+const record = { by: "packages/signpage/scripts/pool-fork-evm-trade.mjs", chain: CHAIN, pool: PIN.pool, token: TOKEN, anvil: ANVIL, arbGasInfo, sender: sender.sender, times: { restoreMs, proveMs: proves.at(-1) ?? null, readyMs, tapToAnswerMs: null, tapToEndMs: null }, end: null, refusal: null, tx: null, copy: { note: "a copy of mainnet: anvil forks the chain and reads each slot it lacks from the public upstreams below through fork-rpc, so readyMs and every read through anvil include those upstreams' latency and throttles, never the product's alone", upstreams: (() => { try { return JSON.parse(process.env.FORK_RPC_UPSTREAMS ?? "null"); } catch { return null; } })() }, block: null, status: null, notesAfter: null, helperCalls, helperLines, requests: [], refusedHosts: {} };
 const finish = async (code) => {
   record.notesAfter = await notesNow();
   record.refusedHosts = Object.fromEntries(refused);
