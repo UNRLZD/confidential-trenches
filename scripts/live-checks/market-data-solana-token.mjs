@@ -22,6 +22,7 @@
 // The candles read is read as the token page reads it (candles-read.mjs): a 429 again at its Retry-After, for at most
 // one 75 s span; a 429 still standing after it, or a 200 with no bars, is BAD as any other answer.
 // After: helper
+// Serial: jupiter-budget 30
 //   node scripts/live-checks/market-data-solana-token.mjs [--base <url>] [--token <mint>] [--record <file>] [--speed <n>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read; --speed times n more page reads.
 import "../net-window.mjs";
