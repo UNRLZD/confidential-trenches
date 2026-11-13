@@ -284,7 +284,10 @@ test("an EVM pool withdraw with a sign out tapped after its release, before W's 
 const sw = await import("./pool-sell-world.ts");
 const { BUY_MINTS_KEY, poolSellKind } = await import("../src/pool-sell.ts");
 const { solanaDecodeMessage } = await import("../../kit/src/checks/solana/message.ts");
-const { PROGRAM } = await import("../../kit/test/solana-pool-buy-fx.ts");
+const { PROGRAM, rent } = await import("../../kit/test/solana-pool-buy-fx.ts");
+const { solanaSweepOf, solanaSweepStay } = await import("../src/rules/pool.ts");
+const { SOL_GRID, SOL_NOTE_FLOOR } = await import("../../wallet/src/pool/pieces.ts");
+const { isRung } = await import("../../wallet/src/pool/ladder.ts");
 
 /** What a Solana transaction is: the sale (the venue's 24-byte sell, with a partial sale's deposit back; since card
  *  every-lamport-can-move a full sale carries none), the sweep (the deposit alone) or a teardown frame (the rest). */
@@ -376,7 +379,12 @@ test("a full Solana pool sell with a sign out tapped once the sale left: its ren
     await signedOut;
     assert.deepEqual(world.sends, ["sale", "teardown", "sweep"], `every transaction of the run sent: ${log.join(", ")}`);
     assert.deepEqual([...world.c.txs.values()].map((t) => t.err), [null, null, null], "each landed");
-    assert.equal(world.c.accounts.get(sw.W.address), undefined, "W swept to 0: nothing left on W");
+    // card pool-amounts-are-standard-sizes: the sweep is the largest rung of W's rest; what is past it stays on W
+    const swept = world.c.deposits.filter((d) => d.sweep);
+    assert.equal(swept.length, 1, "one sweep");
+    const left = BigInt(world.c.accounts.get(sw.W.address)?.lamports ?? 0);
+    assert.ok(isRung({ one: SOL_GRID, min: SOL_NOTE_FLOOR }, swept[0]!.value), `the sweep ${swept[0]!.value} is a rung`);
+    assert.deepEqual(solanaSweepOf(left + swept[0]!.value, solanaSweepStay(rent, 0n)), { value: swept[0]!.value, under: left }, "W holds exactly the rest past the sweep's rung");
     assert.deepEqual(owedAt, { sale: true, teardown: true, sweep: true }, "W's rent back owed at every send, so none leaves unkept");
     assert.deepEqual(stages, ["filled"], "the sale filled");
     assert.ok(before(log, "sale sent", "tap") && before(log, "tap", "teardown sent") && before(log, "teardown sent", "sweep sent"), `the order: ${log.join(", ")}`);

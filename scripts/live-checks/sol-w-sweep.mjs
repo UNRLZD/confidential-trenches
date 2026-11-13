@@ -6,16 +6,17 @@
 // minifier renames, never restructures them):
 //   - since card every-lamport-can-move: a full sell carries no deposit back and no reserve (its rent back's one sweep
 //     makes the sale's note), the sell's rule refusing either by name, a partial sell's reserve at most the cap
-//     SOLANA_POOL_SELL_RESERVE_MAX's own value; a partial sell's deposit back is its min out less the reserve as a note
-//     on the pool's grid (whole 0.001 SOL, 0 under 0.005 SOL), refused by name otherwise; a deposit back under the
-//     sell's floor (the pool's note floor rounded up to the grid, never under 0.005 SOL) refused by name, so a kept sell
-//     is the venue's steps alone;
-//   - the sweep's note the grid note of what W holds past its costs, the rest under the grid paid as its priority (a
-//     limit of 1,000,000 units at the rest a unit, no compute budget at 0), so W ends at what it owes; the sweep's rule
-//     takes one deposit or it after that limit and a price under the grid, its note on the grid and at least 0.005 SOL,
-//     each refused by name;
+//     SOLANA_POOL_SELL_RESERVE_MAX's own value; a deposit back under the sell's floor (the pool's note floor rounded up
+//     to the grid, never under 0.005 SOL) refused by name, so a kept sell is the venue's steps alone;
+//   - since card pool-amounts-are-standard-sizes every note a step makes is a rung (the rules' note: the largest rung of
+//     the 1-2-5 ladder from 0.005 SOL at or under what the step holds, 0 under it): a partial sell's deposit back is its
+//     min out less the reserve as that note, refused by name otherwise; the sweep's note is the largest rung of what W
+//     holds past its costs whose remainder is 0 or at least what W must keep, its deposit alone (no transfer, no compute
+//     budget), the sweep's rule refusing any other value, a value off the ladder or under 0.005 SOL by name; what stays
+//     on W is the user's own, recorded as W's tail (meta w-tail/sol/<W>) at the floor end, deleted once W reads empty or
+//     its sweep is sent;
 //   - a sweep that leaves W exactly what each owed cashback claim costs later (rent(0), a frame's fee, the claim
-//     account's rent), at most two, checked by the sweep's rule with its priority;
+//     account's rent), at most two, checked by the sweep's rule;
 //   - the sweep goes on when every account kept is a volume account owed cashback only (the kit's plan marks them),
 //     W ending "owed" (its record kept) when the rest is under the floor;
 //   - an owed W's record dropped only when both RPCs read W empty (the plan closing nothing, W's lamports alike and 0),
@@ -122,46 +123,83 @@ const found = {
     return tokens && addressesOf && simulated && address && keeps && header && latest && again && since && both && Boolean(t) && is(q.life, "151") && is(t.a, "`TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA`") && is(t.b, "`TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb`");
   },
 };
+const isOf = (js, name, v) => new RegExp(`[,; ]${esc(name)}=${v}[,;]`).test(js);
+/** Whether `no` is the rules' note (rules/pool.ts solanaNoteOf, card pool-amounts-are-standard-sizes): the largest rung
+ *  at or under what it is cut from (the wallet's noteOf on the Solana rule), 0 under the floor; the rule's ladder 1-2-5
+ *  from 0.005 SOL in steps of 0.001 SOL, each rung the one before times 2, or times 5/2 after a 2. */
+function rungNote(js, no) {
+  const f = new RegExp(`function ${esc(no)}\\((${I})\\)\\{return typeof \\1!=\`bigint\`\\|\\|\\1<=0n\\?0n:(?<pd>${I})\\((?<r>${I}),\\1\\)\\.note\\}`).exec(js)?.groups;
+  if (!f) return false;
+  const rule = new RegExp(`[,; ]${esc(f.r)}=Object\\.freeze\\(\\{grid:(?<g>${I}),floor:(?<fl>${I}),ladder:Object\\.freeze\\(\\{one:\\k<g>,min:\\k<fl>\\}\\),least:${I}\\}\\)`).exec(js)?.groups;
+  const pd = new RegExp(`function ${esc(f.pd)}\\((${I}),(${I})\\)\\{if\\(typeof \\2!=\`bigint\`\\|\\|\\2<0n\\)throw Error\\(\`[^\`]*\`\\);let (${I})=\\2<\\1\\.floor\\?0n:(?<up>${I})\\(\\1\\.ladder,\\2\\)\\[0\\]\\?\\?0n;return\\{note:\\3,kept:\\2-\\3\\}\\}`).exec(js)?.groups;
+  if (!rule || !pd) return false;
+  const up = new RegExp(`function ${esc(pd.up)}\\((${I}),(${I})\\)\\{${I}\\(\\1\\);let (${I})=\\[\\];for\\(let (${I})=\\1\\.min;\\4<=\\2;\\4=(?<nx>${I})\\(\\1,\\4\\)\\)\\3\\.push\\(\\4\\);return \\3\\.reverse\\(\\)\\}`).exec(js)?.groups;
+  const next = up && new RegExp(`[,; ]${esc(up.nx)}=\\((${I}),(${I})\\)=>${I}\\(\\1,\\2\\)===2n\\?\\2\\*5n/2n:\\2\\*2n[,;]`).test(js);
+  return Boolean(next) && isOf(js, rule.g, "1000000n") && isOf(js, rule.fl, "5000000n");
+}
+/** Whether `so` is the sweep's note (rules/pool.ts solanaSweepOf): the largest rung at or under what W holds past its
+ *  costs whose remainder is 0 or at least what W must keep (`stay`), the rules' note's rungs down; 0 with none. */
+function sweepNote(js, so) {
+  const g = new RegExp(`function ${esc(so)}\\((${I}),(${I})=0n\\)\\{if\\(typeof \\1!=\`bigint\`\\|\\|\\1<=0n\\)return\\{value:0n,under:0n\\};for\\(let (${I})=\\1;;\\)\\{let (${I})=(?<no>${I})\\(\\3\\);if\\(\\4===0n\\)return\\{value:0n,under:0n\\};let (${I})=\\1-\\4;if\\(\\6===0n\\|\\|\\6>=\\2\\)return\\{value:\\4,under:\\6\\};\\3=\\4-1n\\}\\}`).exec(js)?.groups;
+  return Boolean(g) && rungNote(js, g.no);
+}
 /** Each rule's mark in the bundle, by what it holds. */
-/** A mark held by either shape: `one`, or every one of `all`. */
-const either = (one, all) => ({ test: (js) => one.test(js) || all.every((re) => re.test(js)) });
 export const MARKS = Object.freeze({
   // card every-lamport-can-move: a full sell makes no note (its rent back's one sweep does), a partial sell's deposit
   // back and the sweep's note on the pool's grid (rules/pool.ts solanaNoteOf, SOL_GRID 0.001 SOL, SOL_NOTE_FLOOR 0.005
   // SOL), the sweep's rest under the grid paid as its own priority
   "a full sell carries no deposit back and no reserve, each refused by name, a partial sell's reserve at most the cap of its own constants": capOf(new RegExp(`if\\((?<b>${I})===void 0\\|\\|typeof \\k<b>\\.full!=\`boolean\`\\|\\|typeof \\k<b>\\.fee!=\`bigint\`\\|\\|\\k<b>\\.fee<0n\\|\\|\\k<b>\\.fee>105000n\\|\\|(?<s>${I})>\\(\\k<b>\\.full\\?0n:(?<cap>${I})\\)\\)return (?<x>${I})\\(\`reserve\`\\);[^]{0,400}?if\\(\\k<b>\\.full&&(?<l>${I})\\.program===${I}\\.program\\)return \\k<x>\\(\`deposit_full\`\\);let (?<k>${I})=${I}\\|\\|\\k<b>\\.full,${I}=\\k<k>\\?(?<p>${I}):\\k<p>\\.slice\\(0,-1\\);`)),
-  "a partial sell's deposit back is its min out less the reserve as the pool's grid note, refused by name otherwise": tied(new RegExp(`,(?<l>${I})=(?<p>${I})\\.at\\(-1\\);[^]{0,1200}?let (?<c>${I})=${I}\\(\\k<l>,${I},${I}\\.wallet,${I}\\.precommitment,${I},!0\\);return \\k<c>===(?<no>${I})\\((?<mo>${I})-(?<s>${I})\\)\\?[^]{0,300}?back:\\k<c>\\}\\):(?<x>${I})\\(\`deposit_amount\`\\)\\}`), (g) => [
-    `function ${esc(g.no)}\\((${I})\\)\\{if\\(typeof \\1!=\`bigint\`\\|\\|\\1<=0n\\)return 0n;`,
-  ]),
-  "the pool's grid note: whole 0.001 SOL of what it is cut from, 0 under 0.005 SOL": tied(new RegExp(`function ${I}\\((?<e>${I})\\)\\{if\\(typeof \\k<e>!=\`bigint\`\\|\\|\\k<e><=0n\\)return 0n;let (?<t>${I})=\\k<e>-\\k<e>%(?<g>${I});return \\k<t><5000000n\\?0n:\\k<t>\\}`), (g) => [`[,; ]${esc(g.g)}=1000000n[,;]`]),
-  "a deposit back under the sell's floor is refused by name: the pool's note floor rounded up to the grid, never under 0.005 SOL": {
+  // card pool-amounts-are-standard-sizes: every note a step makes is a rung (the rules' note), what is under it kept on W
+  "a partial sell's deposit back is its min out less the reserve as the rules' note of it, a rung, refused by name otherwise": {
+    test(js) {
+      const g = new RegExp(`,(?<l>${I})=(?<p>${I})\\.at\\(-1\\);[^]{0,1200}?let (?<c>${I})=${I}\\(\\k<l>,${I},${I}\\.wallet,${I}\\.precommitment,${I},!0\\);return \\k<c>===(?<no>${I})\\((?<mo>${I})-(?<s>${I})\\)\\?[^]{0,300}?back:\\k<c>\\}\\):(?<x>${I})\\(\`deposit_amount\`\\)\\}`).exec(js)?.groups;
+      return Boolean(g) && rungNote(js, g.no);
+    },
+  },
+  "the rules' note: the largest rung of the 1-2-5 ladder from 0.005 SOL in 0.001 SOL steps at or under what it is cut from, 0 under 0.005 SOL": {
+    test(js) {
+      const re = new RegExp(`function (${I})\\((${I})\\)\\{return typeof \\2!=\`bigint\`\\|\\|\\2<=0n\\?0n:${I}\\(${I},\\2\\)\\.note\\}`, "g");
+      return [...js.matchAll(re)].some((m) => rungNote(js, m[1]));
+    },
+  },
+  // card pool-amounts-are-standard-sizes: the floor a rung, so the rule's raw value and the device's rung note agree
+  "a deposit back under the sell's floor is refused by name: the pool's note floor rounded up to a rung, never under 0.005 SOL": {
     test(js) {
       const g = new RegExp(`let (?<k>${I})=${I}-${I}<(?<fl>${I})\\(${I}\\),(?<l>${I})=${I}\\.at\\(-1\\);if\\(\\k<k>&&\\k<l>\\.program===${I}\\.program\\)return ${I}\\(\`deposit_floor\`\\)`).exec(js)?.groups;
-      const f = g && new RegExp(`function ${esc(g.fl)}\\((${I})\\)\\{let (${I})=\\(${I}\\(\\1\\)\\+(?<g>${I})-1n\\)/\\k<g>\\*\\k<g>;return \\2>5000000n\\?\\2:(?<f>${I})\\}`).exec(js)?.groups;
-      const is = (name, v) => new RegExp(`[,; ]${esc(name)}=${v}[,;]`).test(js);
-      return Boolean(f) && is(f.g, "1000000n") && is(f.f, "5000000n");
+      const f = g && new RegExp(`function ${esc(g.fl)}\\((${I})\\)\\{let (${I})=${I}\\(\\1\\);if\\(\\2<=5000000n\\)return (?<m>${I});let (${I})=\\k<m>;for\\(;\\4<\\2;\\)\\4=(?<up>${I})\\((?<r>${I}),\\4\\*3n\\)\\[0\\];return \\4\\}`).exec(js)?.groups;
+      const up = f && new RegExp(`function ${esc(f.up)}\\((${I}),(${I})\\)\\{return (${I})\\(\\1\\.ladder,\\2\\)\\}`).exec(js);
+      const rule = f && new RegExp(`[,; ]${esc(f.r)}=Object\\.freeze\\(\\{grid:(${I}),floor:(${I}),ladder:Object\\.freeze\\(\\{one:\\1,min:\\2\\}\\),least:${I}\\}\\)`).exec(js);
+      return Boolean(up && rule) && rule[2] === f.m && isOf(js, f.m, "5000000n") && isOf(js, rule[1], "1000000n");
     },
   },
-  // card every-lamport-can-move, review P3-1 of T1+T2: the rest under the grid goes to the pool's own account in
-  // one System transfer after the deposit, never as a priority fee
-  "the sweep's note is the grid note of what W holds past its costs, the rest under the grid its own part, both 0 under the floor": tied(new RegExp(`function (?<so>${I})\\((?<e>${I})\\)\\{let (?<t>${I})=(?<no>${I})\\(\\k<e>\\);return \\k<t>===0n\\?\\{value:0n,under:0n\\}:\\{value:\\k<t>,under:\\k<e>-\\k<t>\\}\\}`), (g) => [
-    `function ${esc(g.no)}\\((${I})\\)\\{if\\(typeof \\1!=\`bigint\`\\|\\|\\1<=0n\\)return 0n;let (${I})=\\1-\\1%(${I});return \\2<5000000n\\?0n:\\2\\}`,
-    `\\{value:${I},under:${I}\\}=${esc(g.so)}\\(${I}\\),${I}=${esc(g.so)}\\(${I}\\)\\.value[,;]`,
-  ]),
-  // review P1-1 of 1d3b96d9c: the rest under the grid goes to the pin's fee payer (the relayer's account), not the pool's
-  "the sweep pays that rest to the pin's fee payer in one System transfer after its deposit, none at 0, no compute budget, its fee read as the signature's alone on both RPCs": {
+  // card pool-amounts-are-standard-sizes: the sweep's note is a rung, the rest stays on W (listed, the user's own), no
+  // transfer of it to anyone
+  "the sweep's note is the largest rung of what W holds past its costs whose remainder is 0 or at least what W must keep (rent(0) less what its claims keep), 0 under the floor": {
     test(js) {
-      const g = new RegExp(`\\{value:(?<v>${I}),under:(?<un>${I})\\}=${I}\\(${I}\\),[^]{0,1600}?(?<F>${I})=\\k<un>===0n\\?\\[\\]:\\[(?<tf>${I})\\((?<wa>${I})\\.address,${I}\\.solana\\.feePayer,\\k<un>\\)\\],\\{message:${I}\\}=${I}\\(\\k<wa>\\.address,\\[${I}\\((?<x>${I})\\.program,\\k<x>\\.pool,\\k<wa>\\.address,${I},${I},\\k<v>\\),\\.\\.\\.\\k<F>\\],${I}\\.blockhash,\\[\\]\\)[^]{0,300}?if\\((?<fe>${I})\\[0\\]!==(?<sf>${I})\\|\\|\\k<fe>\\[1\\]!==\\k<sf>\\)throw Error\\(\`the sweep's fee reads`).exec(js)?.groups;
-      if (!g) return false;
-      const t = new RegExp(`[,; ]${esc(g.tf)}=\\((${I}),(${I}),(${I})\\)=>\\{let (${I})=new Uint8Array\\(12\\),(${I})=new DataView\\(\\4\\.buffer\\);return \\5\\.setUint32\\(0,2,!0\\),\\5\\.setBigUint64\\(4,\\3,!0\\),\\{program:(?<pg>${I}),accounts:\\[\\{key:\\1,signer:!0,writable:!0\\},\\{key:\\2,signer:!1,writable:!0\\}\\],data:\\4\\}\\}`).exec(js)?.groups;
-      const is = (name, v) => new RegExp(`[,; ]${esc(name)}=${v}[,;]`).test(js);
-      return Boolean(t) && is(t.pg, "`11111111111111111111111111111111`") && (is(g.sf, "5000n") || new RegExp(`[,; ]${esc(g.sf)}=(${I})(?=[,;])[^]*[,; ]\\1=5000n[,;]|[,; ](${I})=5000n(?=[,;])[^]*[,; ]${esc(g.sf)}=\\2[,;]`).test(js));
+      const g = new RegExp(`(?<L>${I})=(?<st>${I})\\(${I},${I}\\(${I},${I},${I}\\)\\),\\{value:${I}\\}=(?<so>${I})\\(${I},\\k<L>\\),${I}=\\k<so>\\(${I},\\k<L>\\)\\.value[,;]`).exec(js)?.groups;
+      const stay = g && new RegExp(`[,; ]${esc(g.st)}=\\((${I}),(${I})\\)=>\\{let (${I})=${I}\\(\\1,0\\)-\\2;return \\3>0n\\?\\3:0n\\}[,;]`).test(js);
+      return Boolean(stay) && sweepNote(js, g.so);
     },
   },
-  "the sweep's rule takes one deposit, or it then one System transfer from W to the pin's fee payer of 1 to 999,999 lamports, no compute budget, its note on the grid and at least 0.005 SOL, each refused by name": new RegExp(`if\\((?<c>${I})\\.ixs\\.length!==1&&\\k<c>\\.ixs\\.length!==2\\)return (?<x>${I})\\(\`instructions\`\\);let (?<d>${I})=${I}\\(\\k<c>\\.ixs\\[0\\],(?<pn>${I}),(?<ct>${I})\\.wallet,\\k<ct>\\.precommitment,${I}\\),(?<u>${I})=0n;if\\(\\k<c>\\.ixs\\.length===2\\)\\{let (?<e>${I})=\\k<c>\\.ixs\\[1\\];if\\(\\k<e>\\.program!==\`11111111111111111111111111111111\`\\|\\|\\k<e>\\.data\\.length!==12\\|\\|new DataView\\(\\k<e>\\.data\\.buffer,\\k<e>\\.data\\.byteOffset,4\\)\\.getUint32\\(0,!0\\)!==2\\)return \\k<x>\\(\`transfer\`\\);if\\(\\k<e>\\.accounts\\.length!==2\\|\\|!(?<sm>${I})\\(\\k<e>\\.accounts\\[0\\],\\k<ct>\\.wallet,!0,!0\\)\\|\\|!\\k<sm>\\(\\k<e>\\.accounts\\[1\\],\\k<pn>\\.feePayer,!1,!0\\)\\)return \\k<x>\\(\`transfer_to\`\\);if\\(\\k<u>=${I}\\(\\k<e>\\.data,4\\),\\k<u>===0n\\|\\|\\k<u>>=1000000n\\)return \\k<x>\\(\`transfer_amount\`\\)\\}[^]{0,400}?\\k<d>\\+5000n\\+\\k<u>\\+[^]{0,80}?===${I}\\?\\k<d>%1000000n!=0n\\|\\|\\k<d><5000000n\\|\\|[^?]*\\?\\k<x>\\(\`amount\`\\)`),
+  "the sweep is its deposit alone, no transfer, no compute budget, its fee read as the signature's alone on both RPCs": {
+    test(js) {
+      const g = new RegExp(`\\{value:(?<v>${I})\\}=(?<so>${I})\\(${I},${I}\\),[^]{0,1600}?\\{message:${I}\\}=${I}\\((?<wa>${I})\\.address,\\[${I}\\((?<x>${I})\\.program,\\k<x>\\.pool,\\k<wa>\\.address,${I},${I},\\k<v>\\)\\],${I}\\.blockhash,\\[\\]\\)[^]{0,300}?if\\((?<fe>${I})\\[0\\]!==(?<sf>${I})\\|\\|\\k<fe>\\[1\\]!==\\k<sf>\\)throw Error\\(\`the sweep's fee reads`).exec(js)?.groups;
+      if (!g || !sweepNote(js, g.so)) return false;
+      return isOf(js, g.sf, "5000n") || new RegExp(`[,; ]${esc(g.sf)}=(${I})(?=[,;])[^]*[,; ]\\1=5000n[,;]|[,; ](${I})=5000n(?=[,;])[^]*[,; ]${esc(g.sf)}=\\2[,;]`).test(js);
+    },
+  },
+  "the sweep's rule takes its deposit alone, its value the sweep's note of what W holds past its costs and what W must keep, a rung and at least 0.005 SOL, each refused by name": {
+    test(js) {
+      const g = new RegExp(`if\\((?<c>${I})\\.ixs\\.length!==1\\)return (?<x>${I})\\(\`instructions\`\\);let (?<u>${I})=${I}\\(\\k<c>\\.ixs\\[0\\],${I},(?<ct>${I})\\.wallet,\\k<ct>\\.precommitment,${I}\\);if\\([^;]*?\\)return \\k<x>\\(\`sweep_reads\`\\);let (?<d>${I})=${I}\\(${I},${I},${I}\\);return \\k<u>===(?<so>${I})\\(${I}-5000n-${I}\\(${I},${I},${I}\\)-\\k<d>,${I}\\(${I},\\k<d>\\)\\)\\.value\\?!(?<rg>${I})\\((?<ru>${I}),\\k<u>\\)\\|\\|\\k<u><1000000n\\|\\|\\k<u><${I}\\(${I}\\)\\?\\k<x>\\(\`amount\`\\):\\(${I}\\(${I}\\),\\k<u>\\):\\k<x>\\(\`sweep_amount\`\\)`).exec(js)?.groups;
+      if (!g || !sweepNote(js, g.so)) return false;
+      const rung = new RegExp(`function ${esc(g.rg)}\\((${I}),(${I})\\)\\{return typeof \\2==\`bigint\`&&${I}\\(\\1\\.ladder,\\2\\)\\}`).test(js);
+      const rule = new RegExp(`[,; ]${esc(g.ru)}=Object\\.freeze\\(\\{grid:(${I}),floor:(${I}),ladder:Object\\.freeze\\(\\{one:\\1,min:\\2\\}\\),least:${I}\\}\\)`).exec(js);
+      return rung && Boolean(rule) && isOf(js, rule[1], "1000000n") && isOf(js, rule[2], "5000000n");
+    },
+  },
   // review P2-1 of T1+T2: and one frame's fee per account kept for any other reason
   "an owed claim's cost: rent(0), a frame's fee and the claim account's rent": new RegExp(`(${I})=\\((${I}),(${I}),(${I})=0\\)=>\\3\\+\\4===0\\?0n:${I}\\(\\2,0\\)\\+BigInt\\(\\3\\)\\*\\((${I})\\+${I}\\(\\2,165\\)\\)\\+BigInt\\(\\4\\)\\*\\5[,;]`),
-  "the sweep's rule leaves exactly that, for at most two": new RegExp(`\\|\\|(${I})<0\\|\\|\\1>2\\|\\|!Number\\.isSafeInteger\\((${I})\\)\\|\\|\\2<0\\?${I}\\(\`sweep_reads\`\\):${I}\\+5000n\\+(?:${I}\\+)?${I}\\(${I},${I},${I}\\)\\+${I}\\(${I},\\1,\\2\\)===`),
+  "the sweep's rule leaves W exactly what each owed claim costs, for at most two": new RegExp(`\\|\\|!Number\\.isSafeInteger\\((${I})\\)\\|\\|\\1<0\\|\\|\\1>2\\|\\|!Number\\.isSafeInteger\\((${I})\\)\\|\\|\\2<0\\)return ${I}\\(\`sweep_reads\`\\);let (${I})=${I}\\(${I},\\1,\\2\\);return ${I}===${I}\\(${I}-5000n-${I}\\(${I},${I},${I}\\)-\\3,${I}\\(${I},\\3\\)\\)\\.value\\?`),
   // review P2-1 of T1+T2: a kept account counts as an owed claim; only tokens W could still sell keep W whole
   // review P1-2 of 1d3b96d9c: only tokens on W's own coins' accounts (a found W's every account) keep W whole; a
   // stranger's token account W holds is counted as any kept account
@@ -195,20 +233,12 @@ export const MARKS = Object.freeze({
   ]),
   "a pass's refused end is steady, as its holds and kept ends are": new RegExp(`(${I})=\\((${I}),(${I}),(${I})=\\2===\`holds\`\\|\\|\\2===\`kept\`\\|\\|\\2===\`refused\`\\)=>\\((${I})\\(\`rent_back\`,\\2,\\3\\),\\{end:\\2,steady:\\4\\}\\)`),
   // since card every-lamport-can-move the floor is the sweep's grid note's, the rest's at its cheapest deposit cut the same
-  "a floor end is steady only under the floor at the cheapest deposit, and only as the sweep found it": either(
-    // card every-lamport-can-move (pick (a), P2-1, P3-1): the keep counts kept accounts, W is listed at what it adds once
-    // moved, and the ride runs before the floor end
-    tied(new RegExp(`(?<T>${I})=(?<p>${I})-(?<my>${I})-(?<ue>${I})\\((?<l>${I}),(?<h>${I}),(?<w>${I})\\)-(?<we>${I})\\(\\k<l>,(?<a>${I}),(?<kp>${I})\\),(?<E>${I})=\\k<p>-\\k<my>-\\k<ue>\\(\\k<l>,\\k<h>,\\{\\.\\.\\.\\k<w>,state:\\[(?<z>${I}),\\k<z>\\],label:\\[\\k<z>,\\k<z>\\]\\}\\)-\\k<we>\\(\\k<l>,\\k<a>,\\k<kp>\\),\\{value:(?<V>${I}),under:${I}\\}=(?<so>${I})\\(\\k<T>\\),(?<N>${I})=\\k<so>\\(\\k<E>\\)\\.value,(?<A>${I})=${I}\\(\\k<T>,${I}\\(\\k<l>\\),(?<b>${I})\\);if\\([^;]{0,400}\\)return\\{end:\`ride\`,rest:\\k<T>,lamports:\\k<p>,steady:\\k<N><\\k<b>\\};if\\(\\k<V><\\k<b>\\)return\\{end:\\k<a>>0\\?\`owed\`:\`floor\`,steady:\\k<N><\\k<b>,`), () => [
+  "a floor end is steady only under the floor at the cheapest deposit, only as the sweep found it, its note the sweep's rung with what W must keep":
+    // card pool-amounts-are-standard-sizes: the sweep's rung note with what W must keep, W listed at what it adds once
+    // moved, no ride
+    tied(new RegExp(`(?<T>${I})=(?<p>${I})-(?<my>${I})-(?<ue>${I})\\((?<l>${I}),(?<h>${I}),(?<w>${I})\\)-(?<we>${I})\\(\\k<l>,(?<a>${I}),(?<kp>${I})\\),(?<E>${I})=\\k<p>-\\k<my>-\\k<ue>\\(\\k<l>,\\k<h>,\\{\\.\\.\\.\\k<w>,state:\\[(?<z>${I}),\\k<z>\\],label:\\[\\k<z>,\\k<z>\\]\\}\\)-\\k<we>\\(\\k<l>,\\k<a>,\\k<kp>\\),(?<L>${I})=${I}\\(\\k<l>,\\k<we>\\(\\k<l>,\\k<a>,\\k<kp>\\)\\),\\{value:(?<V>${I})\\}=(?<so>${I})\\(\\k<T>,\\k<L>\\),(?<N>${I})=\\k<so>\\(\\k<E>,\\k<L>\\)\\.value,(?<A>${I})=${I}\\(\\k<T>,(?<b>${I}),\\k<L>\\);if\\([^;]{0,300}\\)return\\{end:\\k<a>>0\\?\`owed\`:\`floor\`,steady:\\k<N><\\k<b>,`), () => [
       `if\\((${I})\\.end!==\`sent\`\\)return\`steady\`in \\1(?:&&\\1\\.steady!==void 0)?\\?(${I})\\(\\1\\.end,\\1\\.detail,(?:\\1\\.end===\`floor\`|\\(\\1\\.end===\`floor\`\\|\\|\\1\\.end===\`kept\`\\))&&\\1\\.steady\\):\\2\\(\\1\\.end,\\1\\.detail\\)`,
     ]),
-    [either(tied(new RegExp(`(?<T>${I})=(?<p>${I})-(?<my>${I})-(?<ue>${I})\\((?<l>${I}),(?<h>${I}),(?<w>${I})\\)-(?<we>${I})\\(\\k<l>,(?<a>${I})\\),(?<E>${I})=\\k<p>-\\k<my>-\\k<ue>\\(\\k<l>,\\k<h>,\\{\\.\\.\\.\\k<w>,state:\\[(?<z>${I}),\\k<z>\\],label:\\[\\k<z>,\\k<z>\\]\\}\\)-\\k<we>\\(\\k<l>,\\k<a>\\);if\\((?:\\k<T><(?<b>${I})|\\k<T><(?<b2>${I})&&\\k<a>>0&&\\(${I}\\.buy\\|\\|${I}!==void 0\\)&&${I}\\.read\\?\\.\\(\\k<T>>0n\\?\\k<T>:0n\\),\\k<T><\\k<b2>)\\)return\\{end:\\k<a>>0\\?\`owed\`:\`floor\`,steady:\\k<E><(?:\\k<b>|\\k<b2>),`), () => [
-      `if\\((${I})\\.end!==\`sent\`\\)return\`steady\`in \\1(?:&&\\1\\.steady!==void 0)?\\?(${I})\\(\\1\\.end,\\1\\.detail,(?:\\1\\.end===\`floor\`|\\(\\1\\.end===\`floor\`\\|\\|\\1\\.end===\`kept\`\\))&&\\1\\.steady\\):\\2\\(\\1\\.end,\\1\\.detail\\)`,
-    ]),
-    [
-      new RegExp(`(?<T>${I})=(?<p>${I})-(?<my>${I})-(?<ue>${I})\\((?<l>${I}),(?<h>${I}),(?<w>${I})\\)-(?<we>${I})\\(\\k<l>,(?<a>${I})\\),(?<E>${I})=\\k<p>-\\k<my>-\\k<ue>\\(\\k<l>,\\k<h>,\\{\\.\\.\\.\\k<w>,state:\\[(?<z>${I}),\\k<z>\\],label:\\[\\k<z>,\\k<z>\\]\\}\\)-\\k<we>\\(\\k<l>,\\k<a>\\),\\{value:(?<V>${I}),priority:${I}\\}=(?<so>${I})\\(\\k<T>\\),(?<N>${I})=\\k<so>\\(\\k<E>\\)\\.value;if\\(\\k<V><(?<b>${I})&&\\k<a>>0&&\\(${I}\\.buy\\|\\|${I}!==void 0\\)&&${I}\\.read\\?\\.\\(\\k<T>>0n\\?\\k<T>:0n\\),\\k<V><\\k<b>\\)return\\{end:\\k<a>>0\\?\`owed\`:\`floor\`,steady:\\k<N><\\k<b>,`),
-      new RegExp(`if\\((${I})\\.end!==\`sent\`\\)return\`steady\`in \\1(?:&&\\1\\.steady!==void 0)?\\?(${I})\\(\\1\\.end,\\1\\.detail,(?:\\1\\.end===\`floor\`|\\(\\1\\.end===\`floor\`\\|\\|\\1\\.end===\`kept\`\\))&&\\1\\.steady\\):\\2\\(\\1\\.end,\\1\\.detail\\)`),
-    ])],
-  ),
   "a full sell's record keeps the mints W's record already names": new RegExp(`(?:(${I})\\|\\|\\((${I})\\.mints=(${I})\\(\\(await Promise\\.resolve\\((${I})\\.owed\\?\\.list\\(\\)\\)\\.then\\((${I})=>\\5\\?\\.find\\(\\5=>\\5\\.address===(${I})\\.address\\),\\(\\)=>void 0\\)\\)\\?\\.mints,\\2\\.mints\\),await \\4\\.owed\\?\\.put\\(\\2\\)|if\\(!${I}\\)\\{(?:${I}\\.spaced=${I};)?let (${I})=await Promise\\.resolve\\((${I})\\.owed\\?\\.list\\(\\)\\)\\.then\\((${I})=>\\9\\?\\.find\\(\\9=>\\9\\.address===${I}\\.address\\),\\(\\)=>void 0\\);(${I})\\.mints=${I}\\(\\7\\?\\.mints,\\10\\.mints\\),\\10\\.sell=\\{\\.\\.\\.\\7\\?\\.sell,[^;]*?await \\8\\.owed\\?\\.put\\(\\10\\))`),
   "the sweep's plan refusal ends the pass refused, not given up": new RegExp(`if\\((${I})\\.k===\`refused\`\\)return\\{end:\`refused\`,detail:\\1\\.why\\};let (${I})=(${I})\\(\\1\\.plan\\.keep(?:,${I})?\\)`),
   "every sleep of the pass, its tries' and its read-backs', lets the sell lock go": tied(new RegExp(`(?<u>${I})=async (?<e>${I})=>\\{if\\(!(?<n>${I})\\)return (?<t>${I})\\.wait\\(\\k<e>\\);if\\(!await \\k<n>\\.nap\\(\\k<e>\\)\\)throw ${I}\\}`), (g) => [
@@ -222,6 +252,11 @@ export const MARKS = Object.freeze({
     `(?<bm>${I})=(?<s>${I})=>\\{let (?<k>${I})=\`owed/buy-sol\`;return\\{get:async (?<a>${I})=>\\{let (?<v>${I})=await\\(await \\k<s>\\(\\)\\)\\.get\\(\`meta\`,\\k<k>\\)\\?\\?\\{\\};return Object\\.hasOwn\\(\\k<v>,\\k<a>\\)\\?\\k<v>\\[\\k<a>\\]:void 0\\},put:async\\((?<pa>${I}),(?<pm>${I})\\)=>void await\\(await \\k<s>\\(\\)\\)\\.update\\(\`meta\`,\\k<k>,(?<u>${I})=>\\(\\{\\.\\.\\.\\k<u>\\?\\?\\{\\},\\[\\k<pa>\\]:\\{mint:\\k<pm>\\.mint,program:\\k<pm>\\.program\\}\\}\\)\\)\\}\\}[^]*?seed64:${I}\\.seed64,bought:\\k<bm>\\(${I}\\.store\\),send:[^]*?owed:${I}\\(${I}\\.store\\),bought:\\k<bm>\\(${I}\\.store\\),buyNone:[^]*?,preempt:[^]*?,told:`,
   ]),
   [FOUND]: found,
+  // card pool-amounts-are-standard-sizes (pick (c)): W's rest under the least rung is the user's own, kept on W
+  // and recorded where wallet's pool-to-Cash reads it
+  "a floor end records W's tail, the user's own, as meta w-tail/sol/<W> {chain, address, l, j, amount}, deleted once W reads empty or its sweep is sent": tied(new RegExp(`async function ${I}\\((?<h>${I}),(?<o>${I}),(?<e>${I}),${I},(?<kb>${I})=\\{\\}\\)\\{try\\{if\\(\\k<e>===\`floor\`&&\\k<kb>\\.unlisted!==!0&&\\k<kb>\\.lamports!==void 0&&\\k<kb>\\.lamports>0n\\?await Promise\\.resolve\\(\\k<h>\\.owed\\?\\.tail\\?\\.\\(\\{chain:\`sol\`,address:\\k<o>\\.address,l:\\k<o>\\.l,j:\\k<o>\\.j,amount:\\k<kb>\\.lamports\\.toString\\(\\)\\}\\)\\)\\.catch\\(\\(\\)=>\\{\\}\\):\\(\\k<e>===\`nothing\`\\|\\|\\k<e>===\`sent\`\\|\\|\\k<e>===\`floor\`&&\\k<kb>\\.unlisted===!0\\)&&await Promise\\.resolve\\(\\k<h>\\.owed\\?\\.untail\\?\\.\\(\\k<o>\\.address\\)\\)\\.catch\\(\\(\\)=>\\{\\}\\),\\k<e>===\`nothing\`\\)`), () => [
+    `[,; ](${I})=(${I})=>\`w-tail/sol/\\$\\{\\2\\}\`[,;][^]{0,1600}?tail:async (${I})=>void await\\(await (${I})\\(\\)\\)\\.update\\(\`meta\`,\\1\\(\\3\\.address\\),\\(\\)=>\\(\\{chain:\\3\\.chain,address:\\3\\.address,l:\\3\\.l,j:\\3\\.j,amount:\\3\\.amount\\}\\)\\),untail:async (${I})=>\\{let (${I})=await \\4\\(\\);await \\6\\.get\\(\`meta\`,\\1\\(\\5\\)\\)!==void 0&&await \\6\\.delete\\?\\.\\(\`meta\`,\\1\\(\\5\\)\\)\\}`,
+  ]),
 });
 
 /** What the check keeps of the reads: the index, the served bundle's sha384, and which marks the bundle carries. */

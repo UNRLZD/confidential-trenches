@@ -1,15 +1,16 @@
 {
  "_note": {
-  "good": "this card's build of packages/signpage (card/partial-sell-pays-all-into-cash on main bd3fb3097), its index.html and public/app.js",
-  "bad": "SIGN_HOST as served at 13 Nov 15:30Z, before this card"
+  "good": "card pool-amounts-are-standard-sizes's build of packages/signpage (54df53ba9 and its live-check commit), its index.html and public/app.js",
+  "bad": "SIGN_HOST as served at 13 Nov 15:30Z, before this card",
+  "liveBefore": "SIGN_HOST as served at 2026-11-13T21:02Z, before card pool-amounts-are-standard-sizes"
  },
  "good": {
-  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-E6wF80/UIHbzOsW9GEWB65wo8ggP2I06pPUH5juwm0aAfcOzGPNsjcrjbARAwEFq\"></script>\n  </head>\n  <body></body>\n</html>\n",
-  "sha384": "sha384-E6wF80/UIHbzOsW9GEWB65wo8ggP2I06pPUH5juwm0aAfcOzGPNsjcrjbARAwEFq",
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-nQHDW8b1DdyX+zKflBgWSnqm4qcA7XCKh7v5NVFIIxYqg4VsJDIWPjE7KCE0W7rI\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-nQHDW8b1DdyX+zKflBgWSnqm4qcA7XCKh7v5NVFIIxYqg4VsJDIWPjE7KCE0W7rI",
   "carries": {
    "a filled sell runs the keep sweep while W holds tokens, the rent back when it holds none, on both verdict paths": true,
-   "the keep sweep: W's lamports less the sweep's fee, the deposit's rents and W's keep, on the grid, none under the floor, checked with the keep as its rule's hold": true,
-   "the keep sweep's rule: the deposit alone, W left at the hold and under one grid step more, the note on the grid and at least 0.005 SOL": true,
+   "the keep sweep: W's lamports less the sweep's fee, the deposit's rents and W's keep, the rules' note of it (a rung), none under the floor, checked with the keep as its rule's hold": true,
+   "the keep sweep's rule: the deposit alone, its value the rung the rules' note gives for W's lamports less the fee, the rents and the hold, a standard size and at least the pool's least deposit": true,
    "the preview: one W's partial sale pays in both notes, at the expected out and at min out": true
   }
  },
@@ -21,6 +22,16 @@
    "the keep sweep: W's lamports less the sweep's fee, the deposit's rents and W's keep, on the grid, none under the floor, checked with the keep as its rule's hold": false,
    "the keep sweep's rule: the deposit alone, W left at the hold and under one grid step more, the note on the grid and at least 0.005 SOL": false,
    "the preview: one W's partial sale pays in both notes, at the expected out and at min out": false
+  }
+ },
+ "liveBefore": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-ZFe+Tuco9V0gMoeAq3pGbTr9OVAWP4zGQiqqJUeWF8FZUKFxRmGZF5p33bD9KVtx\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-ZFe+Tuco9V0gMoeAq3pGbTr9OVAWP4zGQiqqJUeWF8FZUKFxRmGZF5p33bD9KVtx",
+  "carries": {
+   "a filled sell runs the keep sweep while W holds tokens, the rent back when it holds none, on both verdict paths": true,
+   "the keep sweep: W's lamports less the sweep's fee, the deposit's rents and W's keep, the rules' note of it (a rung), none under the floor, checked with the keep as its rule's hold": true,
+   "the keep sweep's rule: the deposit alone, its value the rung the rules' note gives for W's lamports less the fee, the rents and the hold, a standard size and at least the pool's least deposit": false,
+   "the preview: one W's partial sale pays in both notes, at the expected out and at min out": true
   }
  }
 }

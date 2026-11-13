@@ -48,12 +48,25 @@ export const MARKS = Object.freeze({
     R`filled${BT}&&\((${I})\.back=(${I})\?(${I}):(${I})\)`,
     2,
   ),
-  "the keep sweep: W's lamports less the sweep's fee, the deposit's rents and W's keep, on the grid, none under the floor, checked with the keep as its rule's hold": tied(
+  "the keep sweep: W's lamports less the sweep's fee, the deposit's rents and W's keep, the rules' note of it (a rung), none under the floor, checked with the keep as its rule's hold": tied(
     new RegExp(R`let (?<rest>${I})=(?<lam>${I})-(?<fee>${I})-(?<rents>${I})\((?<rent>${I}),(?<sz>${I}),(?<dep>${I})\.held\)-(?<x>${I})\.keep,(?<v>${I})=(?<note>${I})\(\k<rest>\),(?<fl>${I})=[^;]{0,60};if\(\k<v><\k<fl>\)return ${I}\(${BT}floor${BT}`),
     (g) => [R`${I}\(${I},\{[^;]{0,200}?\},${esc(g.lam)},${esc(g.rent)},${esc(g.dep)}\.held,${esc(g.x)}\.keep\)`],
   ),
-  "the keep sweep's rule: the deposit alone, W left at the hold and under one grid step more, the note on the grid and at least 0.005 SOL": new RegExp(
-    R`if\((${I})\.ixs\.length!==1\)return ${I}\(${BT}instructions${BT}\);let (${I})=${I}\(\1\.ixs\[0\],[^;]*;if\([^;]*\|\|typeof (${I})!=${BT}bigint${BT}\|\|\3<=0n\)return ${I}\(${BT}sweep_reads${BT}\);let (${I})=${I}-\2-${I}-${I}\([^)]*\);return \4<\3\|\|\4>=\3\+1000000n\?${I}\(${BT}keep_amount${BT}\):\2%1000000n!=0n\|\|\2<5000000n\|\|`,
+  // card pool-amounts-are-standard-sizes: the keep sweep's note is the largest rung of what W holds past its hold, the
+  // rest left on W (never a grid note off the ladder)
+  "the keep sweep's rule: the deposit alone, its value the rung the rules' note gives for W's lamports less the fee, the rents and the hold, a standard size and at least the pool's least deposit": tied(
+    new RegExp(
+      R`if\((?<d>${I})\.ixs\.length!==1\)return ${I}\(${BT}instructions${BT}\);let (?<v>${I})=${I}\(\k<d>\.ixs\[0\],[^;]*;return [^;]*?\|\|typeof (?<h>${I})!=${BT}bigint${BT}\|\|\k<h><=0n\?${I}\(${BT}sweep_reads${BT}\):\k<v>===(?<no>${I})\((?<l>${I})-5000n-${I}\([^)]*\)-\k<h>\)\?!(?<rg>${I})\((?<rl>${I}),\k<v>\)\|\|\k<v><1000000n\|\|\k<v><${I}\(${I}\)\?${I}\(${BT}amount${BT}\):\(${I}\(${I}\),\k<v>\):${I}\(${BT}keep_amount${BT}\)`,
+    ),
+    (g) => [
+      // the rules' note: the wallet's noteOf at the rule of the 1-2-5 ladder of 0.001 SOL from 0.005 SOL
+      R`function ${esc(g.no)}\((${I})\)\{return typeof \1!=${BT}bigint${BT}\|\|\1<=0n\?0n:(${I})\(${esc(g.rl)},\1\)\.note\}`,
+      R`[,; ]${esc(g.rl)}=Object\.freeze\(\{grid:(${I}),floor:(${I}),ladder:Object\.freeze\(\{one:\1,min:\2\}\),least:\2\}\)`,
+      // the note: the largest rung at or under the amount, none under the floor, the rest kept
+      R`let (${I})=(${I})<(${I})\.floor\?0n:(${I})\(\3\.ladder,\2\)\[0\]\?\?0n;return\{note:\1,kept:\2-\1\}`,
+      // a standard size: a rung of the rule's ladder
+      R`function ${esc(g.rg)}\((${I}),(${I})\)\{return typeof \2==${BT}bigint${BT}&&${I}\(\1\.ladder,\2\)\}`,
+    ],
   ),
   "the preview: one W's partial sale pays in both notes, at the expected out and at min out": new RegExp(
     R`return\{out:(${I})\+(${I})\((${I})\),minOut:\1\+\2\((${I})\),priority:${I},network:[^}]*?\2\(\3\)>0n\?`,

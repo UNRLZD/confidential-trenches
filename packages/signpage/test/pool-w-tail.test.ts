@@ -7,7 +7,8 @@ import assert from "node:assert/strict";
 import { after, test } from "node:test";
 import { IDBFactory } from "fake-indexeddb";
 import { openWalletStore, openWalletStoreReader, WALLET_W_TAIL_PREFIX, walletSeedMoved, type WalletEvent, type WalletStore } from "@blindfill/wallet/store";
-import { owedAfter, owedRentBacks, wTailKey, type OwedRentBack, type PoolSellHost } from "../src/pool-sell.ts";
+import { owedAfter, owedRentBacks, restAdds, wTailKey, type OwedRentBack, type PoolSellHost } from "../src/pool-sell.ts";
+import { solanaSellNoteFloor } from "../src/rules/pool.ts";
 
 const opened: WalletStore[] = [];
 after(() => opened.forEach((s) => s.close()));
@@ -50,4 +51,19 @@ test("the wallet store takes w-tail/<chain>/<address> only; its write moves no s
   const reader = (await openWalletStoreReader({ indexedDB: idb }))!;
   assert.ok(!(await reader.keys("meta")).some((k) => k.startsWith(WALLET_W_TAIL_PREFIX)), "the reader lists no tail");
   reader.close();
+});
+
+// The worker's review of this card, its source bugs 2 and 1. A rest whose own rung would leave W under what it must keep
+// (rent(0), 650,240 at mainnet rent) ends at the floor, so it is listed, and its tail carried, at the whole rest, not at
+// the rung no sweep takes. The sale's note floor is a rung, so the rule's raw min out less the reserve and the device's
+// rung note of it fall on the same side of it.
+test("a rest no sweep takes is listed whole; the sell's note floor is a rung at any rent", () => {
+  assert.equal(restAdds(5_216_729n, 5_000_000n, 650_240n), 5_216_729n, "5M would leave 216,729, under rent(0)");
+  assert.equal(restAdds(5_700_000n, 5_000_000n, 650_240n), 5_000_000n, "5M leaves 700,000: the sweep takes it");
+  for (const lamportsPerByte of [5_080n, 6_960n, 20_000n, 60_000n, 200_000n]) {
+    const f = solanaSellNoteFloor({ lamportsPerByte, factor: 1n });
+    let q = f / 1_000_000n;
+    while (q % 10n === 0n) q /= 10n;
+    assert.ok(f >= 5_000_000n && f % 1_000_000n === 0n && (q === 1n || q === 2n || q === 5n), `${lamportsPerByte}: ${f}`);
+  }
 });

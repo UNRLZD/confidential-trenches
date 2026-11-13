@@ -27,12 +27,12 @@
 //   reads), with W, the token and the release bound to the request here.
 // - Solana sell: the kit's venue sell of the request's amount from W, a min out at least the device's floor; on a
 //   partial sell then the deposit back into the pinned pool (tag 1, W the depositor, the device's precommitment) as the
-//   last instruction, of the note min out less the device's reserve makes on the pool's grid; a full sell carries none.
-//   Its teardown frames (card solana-sell-teardown) go through the kit's checkSolanaTeardown for W; after a full sell,
-//   W's sweep (card sol-buy-rent-back) is the sale's one note: a tag 1 deposit on the grid of what W holds less its fee,
-//   the deposit's rents and any owed-claim keep, its rest under the grid one System transfer to the pinned pool's
-//   account after it (review P3-1), on the device's precommitment, so W ends at 0 (checkSolanaSweep; card
-//   every-lamport-can-move).
+//   last instruction, of the note min out less the device's reserve makes: the largest rung at or under it (card
+//   pool-amounts-are-standard-sizes); a full sell carries none. Its teardown frames (card solana-sell-teardown) go
+//   through the kit's checkSolanaTeardown for W; after a full sell, W's sweep (card sol-buy-rent-back) is a tag 1
+//   deposit of the largest rung of what W holds less its fee, the deposit's rents and any owed-claim keep, on the
+//   device's precommitment, and nothing else: the rest stays on W for W's next sweep, the last of it under the least
+//   rung W's own, listed in the balance (checkSolanaSweep).
 // - EVM buy and withdraw: the proof binds a context; the device recomputes it from the relay data and the pinned pool
 //   and holds W the recipient, the pinned fee recipient, the fee cap and the deadline. The buy is one the kit built from
 //   the device's own quote (kit trade/evm/quoted.ts evmQuotedBuy: its route, min out and empty hook data the device's,
@@ -91,7 +91,7 @@ import { SOLANA_POOL_NEXT_PAGE_WINDOW, solanaPoolNoteFloor } from "../../../kit/
 import { pinnedSignBuy, venuePins, type EvmPoolBuy, type EvmPoolChain, type EvmPoolProofBinding, type EvmPoolVenueList } from "../../../kit/src/trade/evm/buy-unpinned.ts";
 import { EVM_SELL_SIM, pinnedSignSell, pinnedSignSellAuthorization, pinnedSignSimSell, type EvmPoolSell, type EvmPoolSellAuthorization, type EvmSellSim } from "../../../kit/src/trade/evm/sell-unpinned.ts";
 import { evmIsQuotedBuy, evmIsQuotedSell } from "../../../kit/src/trade/evm/quoted.ts";
-import { SOL_GRID, SOL_NOTE_FLOOR, type PieceRule } from "../../../wallet/src/pool/pieces.ts";
+import { isReleaseSize, noteOf, releaseSizesUpTo, SOL_GRID, SOL_NOTE_FLOOR, type PieceRule } from "../../../wallet/src/pool/pieces.ts";
 import { evmPoolContextOf, evmPoolScopeOf, EVM_CHAIN_IDS, EVM_LADDER, type EvmPoolPin, type EvmRelayData } from "../../../wallet/src/pool/evm.ts";
 
 /** The four pool kinds the page signs for (the kit's messages.ts). */
@@ -659,34 +659,41 @@ const hexOf = (b: Uint8Array): string => Array.from(b, (x) => x.toString(16).pad
  *  it), the fee both RPCs price the message at, and the rent rate both RPCs read. */
 export type SolanaSellSurplus = { full: boolean; fee: bigint; rent: SolanaRent };
 
-/** The note a Solana step that holds `amount` for the pool makes (card every-lamport-can-move): the wallet's noteOf at
- *  SOL_PIECES (wallet/src/pool/pieces.ts), from its two constants by name, so the rules import nothing but the pure
- *  piece module: `amount` down to SOL_GRID, or 0 under SOL_NOTE_FLOOR (test/rules-pool.test.ts holds the two equal). */
+/** The Solana pool's piece rule from its two constants by name (SOL_PIECES in wallet/src/pool/solana.ts; the rules
+ *  import nothing but the pure piece module): the 1-2-5 ladder of SOL_GRID from SOL_NOTE_FLOOR. */
+const SOL_RULE: PieceRule = Object.freeze({ grid: SOL_GRID, floor: SOL_NOTE_FLOOR, ladder: Object.freeze({ one: SOL_GRID, min: SOL_NOTE_FLOOR }), least: SOL_NOTE_FLOOR });
+
+/** The note a Solana step that holds `amount` for the pool makes (card pool-amounts-are-standard-sizes): the wallet's
+ *  noteOf at SOL_PIECES (wallet/src/pool/pieces.ts), the largest rung at or under `amount`, or 0 under SOL_NOTE_FLOOR
+ *  (test/rules-pool.test.ts holds the two equal). Every deposit is a rung; the rest stays on W. */
 export function solanaNoteOf(amount: bigint): bigint {
   if (typeof amount !== "bigint" || amount <= 0n) return 0n;
-  const note = amount - (amount % SOL_GRID);
-  return note < SOL_NOTE_FLOOR ? 0n : note;
+  return noteOf(SOL_RULE, amount).note;
 }
 
 /** The least note a sale's deposit back makes (card every-lamport-can-move): the pool's piece floor (SOL_NOTE_FLOOR), or
- *  the kit's release floor at the rent read (solanaPoolNoteFloor) rounded up to the grid (SOL_GRID) when that is more,
- *  so a rent rise never makes a note no release can take whole. On the grid, so a value at or over it makes the note
- *  noteOf gives it, and one under it makes none. */
+ *  the kit's release floor at the rent read (solanaPoolNoteFloor) rounded up to a rung when that is more, so a rent rise
+ *  never makes a note no release can take whole. A rung (card pool-amounts-are-standard-sizes), so the rule's raw
+ *  `minOut - reserve` and the device's solanaNoteOf of it fall on the same side of it: a value at or over it makes a
+ *  note of at least it, one under it makes none (at 60,000 a byte the grid's 26,000,000 let the device send a bare sell
+ *  the rule refused). */
 export function solanaSellNoteFloor(rent: SolanaRent): bigint {
   const f = solanaPoolNoteFloor(rent);
-  const up = ((f + SOL_GRID - 1n) / SOL_GRID) * SOL_GRID;
-  return up > SOL_NOTE_FLOOR ? up : SOL_NOTE_FLOOR;
+  if (f <= SOL_NOTE_FLOOR) return SOL_NOTE_FLOOR;
+  let r = SOL_NOTE_FLOOR;
+  while (r < f) r = releaseSizesUpTo(SOL_RULE, r * 3n)[0]!;
+  return r;
 }
 
 /** A Solana pool sell: the kit's venue sell of the request's amount from W at a min out no lower than the device's
  *  floor. A sell that leaves W some of the token (a partial sell) ends, last, by W, with the deposit into the pinned
- *  pool of the note min out less `reserve` makes on the pool's grid (noteOf at SOL_PIECES: whole multiples of SOL_GRID;
- *  the rest under it stays on W, which still holds tokens and sells again), `reserve` the lamports the device keeps on W
+ *  pool of the note min out less `reserve` makes (noteOf at SOL_PIECES: the largest rung at or under it; the rest stays
+ *  on W, which still holds tokens and sells again), `reserve` the lamports the device keeps on W
  *  for the sell's own fees and the next sell (its own number, never a server's); the draw shows that deposit. Under the
  *  floor (solanaSellNoteFloor at `surplus.rent`, the Rent sysvar both RPCs read) a deposit is refused by name,
  *  deposit_floor: there the sell is the venue's alone, its whole min out left on W. A sell that empties W's holding
  *  (`surplus.full`) carries no deposit at all (deposit_full) and a reserve of 0: its one note is W's sweep after the
- *  teardown (checkSolanaSweep), so a sale returns in one deposit, on the grid. No rent read: refused. */
+ *  teardown (checkSolanaSweep), each a rung. No rent read: refused. */
 export function checkSolanaSell(
   wire: Uint8Array,
   ask: PoolAsk,
@@ -756,8 +763,8 @@ export function checkSolanaSell(
     passedWire(wire);
     return { chain: "solana", op: ask.kind, token: ask.token, amount: ask.amount, feeCap: 0n, pool: pin.pool, to: ctx.wallet, decimals: ask.decimals, back: null };
   }
-  // the note on the grid: what min out less the reserve makes (noteOf), never an exact lamport amount, whose rest would
-  // reappear in a later release and tie it to this sale
+  // the note a rung: what min out less the reserve makes (noteOf), never an exact lamport amount, whose rest would
+  // reappear in a later release and tie it to this sale; the rest stays on W, which still holds tokens and sells again
   const back = depositOf(last, pin, ctx.wallet, ctx.precommitment, reads, true);
   if (back !== solanaNoteOf(minOut - reserve)) return refuse("deposit_amount");
   passedWire(wire);
@@ -834,61 +841,64 @@ export const SOLANA_SWEEP_OWED_MAX = 2;
 export const solanaSweepKeep = (rent: SolanaRent, owed: number, kept = 0): bigint =>
   owed + kept === 0 ? 0n : solanaRentMin(rent, 0) + BigInt(owed) * (SOLANA_LAMPORTS_PER_SIGNATURE + solanaRentMin(rent, 165)) + BigInt(kept) * SOLANA_LAMPORTS_PER_SIGNATURE;
 
-/** What W's sweep makes of `rest` (W's lamports less the sweep's signature fee, the deposit's rents and the keep): the
- *  note on the pool's grid (solanaNoteOf; 0 under the floor, or at a rest of 0 or less) and `under`, the rest under the
- *  grid, which the sweep pays to the pinned relayer's account in one System transfer (review P3-1 of T1+T2;
- *  P1-1 of 1d3b96d9c: never the pool's account, which would hold it past its books for good), so W
- *  still ends at the keep. */
-export function solanaSweepOf(rest: bigint): { value: bigint; under: bigint } {
-  const note = solanaNoteOf(rest);
-  return note === 0n ? { value: 0n, under: 0n } : { value: note, under: rest - note };
+/** What W's sweep makes of `rest` (W's lamports less the sweep's signature fee, the deposit's rents and the keep), card
+ *  pool-amounts-are-standard-sizes: the largest rung at or under it (solanaNoteOf; 0 under the floor, or at a rest of 0
+ *  or less) whose `under`, what stays on W past the keep, is 0 or at least `stay` (rent(0) less the keep: W left
+ *  holding lamports must stay rent-exempt, or the sweep fails on chain); `under` never leaves W in this sweep: it is
+ *  W's next sweep's, the last of it under the least rung W's own (never paid away, never deposited off the ladder). */
+export function solanaSweepOf(rest: bigint, stay = 0n): { value: bigint; under: bigint } {
+  if (typeof rest !== "bigint" || rest <= 0n) return { value: 0n, under: 0n };
+  for (let top = rest; ; ) {
+    const note = solanaNoteOf(top);
+    if (note === 0n) return { value: 0n, under: 0n };
+    const under = rest - note;
+    if (under === 0n || under >= stay) return { value: note, under };
+    top = note - 1n;
+  }
 }
+/** What W must hold past `keep` when it holds anything: rent(0) less the keep (0 when the keep already covers it). */
+export const solanaSweepStay = (rent: SolanaRent, keep: bigint): bigint => {
+  const r = solanaRentMin(rent, 0) - keep;
+  return r > 0n ? r : 0n;
+};
 
 /**
- * W's sweep after a full sell and its teardown (card sol-buy-rent-back; card every-lamport-can-move): every lamport W
- * holds back into the pinned pool, W the depositor and the only signer, the device's precommitment (W's next return
- * note): the one tag 1 deposit, then at most one System transfer from W to the pinned relayer's account (the pin's
- * feePayer, the relay fee's own payee every release names) of the rest under the grid (0 < t < SOL_GRID; review P3-1 of
- * T1+T2: never a priority fee, so a sweep that fails on chain costs W its one signature; review P1-1 of
- * 1d3b96d9c: never the pool's account, which holds no lamport past its books, so a tail paid there is locked for good),
- * no compute budget, nothing else. The value is a whole multiple of SOL_GRID and at least
- * SOL_NOTE_FLOOR (and the pool's least deposit and solanaSweepFloor at the rent read), and value + the signature's fee +
- * t + the rents the deposit takes as the program prices them (solanaDepositRents, from the three accounts' lamports
- * read on both RPCs) + the keep (solanaSweepKeep) is exactly `lamports` (W's balance, the same on both RPCs): the value
- * is the note noteOf makes, the rest under the grid goes to the relayer, and W ends at the keep (0 when nothing is kept).
- * Under the floor, refused: those lamports stay on W.
+ * W's sweep after a full sell and its teardown (card sol-buy-rent-back; card pool-amounts-are-standard-sizes): the
+ * largest rung of what W holds back into the pinned pool, W the depositor and the only signer, the device's
+ * precommitment (W's next return note): the one tag 1 deposit, no transfer (never a priority fee, so a sweep that fails
+ * on chain costs W its one signature), no compute budget, nothing else. The value is the rung solanaSweepOf gives for
+ * W's rest: `lamports` (W's balance, the same on both RPCs) less the signature's fee, the rents the deposit takes as the
+ * program prices them (solanaDepositRents, from the three accounts' lamports read on both RPCs) and the keep
+ * (solanaSweepKeep), so a rung, at least SOL_NOTE_FLOOR, the pool's least deposit and solanaSweepFloor at the rent read;
+ * what it leaves on W past the keep is 0 or keeps W rent-exempt, and goes with W's next sweep. Under the floor,
+ * refused: those lamports stay on W.
  */
 export function checkSolanaSweep(wire: Uint8Array, ctx: PoolContext & { precommitment: bigint }, reads: SolanaPoolReads, lamports: bigint, rent: SolanaRent, held: SolanaDepositHeld, owed = 0, kept = 0): bigint {
   const pin = pinOf(ctx);
   const d = decode(wire, reads);
   if (d.signers.length !== 1 || d.signers[0] !== ctx.wallet) return refuse("signers");
-  // the deposit alone, or then exactly one System transfer of the rest under the grid to the pinned relayer's account
-  if (d.ixs.length !== 1 && d.ixs.length !== 2) return refuse("instructions");
+  // the deposit alone: the rest stays on W (card pool-amounts-are-standard-sizes: never paid away)
+  if (d.ixs.length !== 1) return refuse("instructions");
   const value = depositOf(d.ixs[0]!, pin, ctx.wallet, ctx.precommitment, reads);
-  let under = 0n;
-  if (d.ixs.length === 2) {
-    const t = d.ixs[1]!;
-    if (t.program !== SOLANA_SYSTEM_PROGRAM || t.data.length !== 12 || new DataView(t.data.buffer, t.data.byteOffset, 4).getUint32(0, true) !== 2) return refuse("transfer");
-    if (t.accounts.length !== 2 || !same(t.accounts[0], ctx.wallet, true, true) || !same(t.accounts[1], pin.feePayer, false, true)) return refuse("transfer_to");
-    under = u64le(t.data, 4);
-    if (under === 0n || under >= SOL_GRID) return refuse("transfer_amount");
-  }
   if (typeof lamports !== "bigint" || typeof rent?.lamportsPerByte !== "bigint" || typeof rent.factor !== "bigint" || rent.lamportsPerByte < 0n || rent.factor < 0n) return refuse("sweep_reads");
   if (!Number.isSafeInteger(owed) || owed < 0 || owed > SOLANA_SWEEP_OWED_MAX) return refuse("sweep_reads");
   if (!Number.isSafeInteger(kept) || kept < 0) return refuse("sweep_reads");
-  if (value + SOLANA_LAMPORTS_PER_SIGNATURE + under + solanaDepositRents(rent, reads, held) + solanaSweepKeep(rent, owed, kept) !== lamports) return refuse("sweep_amount");
-  if (value % SOL_GRID !== 0n || value < SOL_NOTE_FLOOR || value < SOLANA_POOL_MIN_DEPOSIT || value < solanaSweepFloor(rent)) return refuse("amount");
+  const keep = solanaSweepKeep(rent, owed, kept);
+  const rest = lamports - SOLANA_LAMPORTS_PER_SIGNATURE - solanaDepositRents(rent, reads, held) - keep;
+  if (value !== solanaSweepOf(rest, solanaSweepStay(rent, keep)).value) return refuse("sweep_amount");
+  if (!isReleaseSize(SOL_RULE, value) || value < SOLANA_POOL_MIN_DEPOSIT || value < solanaSweepFloor(rent)) return refuse("amount");
   passedWire(wire);
   return value;
 }
 
 /**
- * W's keep sweep after a partial sell (card partial-sell-pays-all-into-cash): W still holds tokens, so it keeps `hold`
- * (the next sell's need, the device's own number, never a server's) and the rest under the grid; all W holds above
- * that goes into the pinned pool, W the depositor and the only signer, on the device's precommitment. The deposit alone,
- * no transfer and no compute budget; the value a whole multiple of SOL_GRID, at least SOL_NOTE_FLOOR, the pool's least
- * deposit and solanaSweepFloor at the rent read; and W's lamports (the same on both RPCs) less the value, the
- * signature's fee and the rents the deposit takes (solanaDepositRents) at least `hold` and under `hold` + SOL_GRID.
+ * W's keep sweep after a partial sell (card partial-sell-pays-all-into-cash; card pool-amounts-are-standard-sizes): W
+ * still holds tokens, so it keeps `hold` (the next sell's need, the device's own number, never a server's); the largest
+ * rung of what W holds above that goes into the pinned pool, W the depositor and the only signer, on the device's
+ * precommitment, the rest staying on W for its next sale. The deposit alone, no transfer and no compute budget; the
+ * value the rung solanaNoteOf gives for W's lamports (the same on both RPCs) less the signature's fee, the rents the
+ * deposit takes (solanaDepositRents) and `hold`, at least SOL_NOTE_FLOOR, the pool's least deposit and
+ * solanaSweepFloor at the rent read.
  */
 export function checkSolanaKeepSweep(wire: Uint8Array, ctx: PoolContext & { precommitment: bigint }, reads: SolanaPoolReads, lamports: bigint, rent: SolanaRent, held: SolanaDepositHeld, hold: bigint): bigint {
   const pin = pinOf(ctx);
@@ -898,9 +908,8 @@ export function checkSolanaKeepSweep(wire: Uint8Array, ctx: PoolContext & { prec
   const value = depositOf(d.ixs[0]!, pin, ctx.wallet, ctx.precommitment, reads);
   if (typeof lamports !== "bigint" || typeof rent?.lamportsPerByte !== "bigint" || typeof rent.factor !== "bigint" || rent.lamportsPerByte < 0n || rent.factor < 0n) return refuse("sweep_reads");
   if (typeof hold !== "bigint" || hold <= 0n) return refuse("sweep_reads");
-  const left = lamports - value - SOLANA_LAMPORTS_PER_SIGNATURE - solanaDepositRents(rent, reads, held);
-  if (left < hold || left >= hold + SOL_GRID) return refuse("keep_amount");
-  if (value % SOL_GRID !== 0n || value < SOL_NOTE_FLOOR || value < SOLANA_POOL_MIN_DEPOSIT || value < solanaSweepFloor(rent)) return refuse("amount");
+  if (value !== solanaNoteOf(lamports - SOLANA_LAMPORTS_PER_SIGNATURE - solanaDepositRents(rent, reads, held) - hold)) return refuse("keep_amount");
+  if (!isReleaseSize(SOL_RULE, value) || value < SOLANA_POOL_MIN_DEPOSIT || value < solanaSweepFloor(rent)) return refuse("amount");
   passedWire(wire);
   return value;
 }

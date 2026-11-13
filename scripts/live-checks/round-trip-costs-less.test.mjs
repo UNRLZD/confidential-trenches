@@ -41,6 +41,12 @@ test("planted on the good answer: each fact taken away FAILs", () => {
   assert.equal(judge(null).ok, false);
 });
 
+test("recorded answer liveBefore (SIGN_HOST before card pool-amounts-are-standard-sizes, its leftover listed at what a ride adds): FAIL on the leftover listing alone", () => {
+  const v = judge(ANSWERS.liveBefore);
+  assert.equal(v.ok, false);
+  assert.deepEqual(v.lines, [`BAD the served bundle has no ${Object.keys(MARKS)[9]}`]);
+});
+
 const JS = readFileSync(new URL("./round-trip-costs-less.excerpt.txt", import.meta.url), "utf8");
 test("the good build's lines carry every mark; each with its rule changed FAILs on that mark alone", () => {
   assert.deepEqual(Object.values(facts("", JS).carries), Object.keys(MARKS).map(() => true));
@@ -111,7 +117,7 @@ test("the good build's lines carry every mark; each with its rule changed FAILs 
     ["if((t.buy||e!==void 0)&&f===p&&t.read?.(f),", "if(", 9],
     ["if((t.buy||e!==void 0)&&f===p", "if(t.buy&&f===p", 9],
     ["if((t.buy||S!==void 0)&&t.read?.(v),", "if(", 9],
-    ["P<w&&L>0n&&(t.buy||S!==void 0)&&t.read?.(L),", "", 9],
+    ["R<D&&B>0n&&(t.buy||T!==void 0)&&t.read?.(B),", "", 9],
     ["await t.swept?.(D.one.signature,D.value),", "", 9],
     ["m=n===`sent`?i.sweep:i.lamports!==void 0&&n!==`gave_up`?void 0:l", "m=n===`sent`?i.sweep:i.lamports!==void 0?void 0:l", 9],
     ["m=n===`sent`?i.sweep:", "m=n===`sent`?void 0:", 9],
@@ -158,20 +164,25 @@ test("the good build's lines carry every mark; each with its rule changed FAILs 
 
 // Card every-lamport-can-move: its build spells the sell rule's fee bound in the one check of the sale's own reads (with
 // the full flag and a full sell's reserve of 0), and a W whose pass ended under the floor is listed at what it adds once
-// moved (restAdds, pick (a)), unlisted when that is 0. The excerpt is that build's: each rule changed FAILs on
-// its mark alone.
+// moved (restAdds, pick (a)), unlisted when that is 0. The excerpt is that build's, with card
+// pool-amounts-are-standard-sizes's build's two lines appended (the leftover listed at its rest, restAdds): each rule
+// changed FAILs on its mark alone.
 test("every-lamport-can-move's spellings carry the fee bound and the owed listing; each changed FAILs on its mark", () => {
   const LAMPORT = JS;
   for (const [from, to, i] of [
     ["||_.fee>105000n||", "||", 7],
     ["_.fee>105000n||", "_.fee>1005000n||", 7],
     ["typeof _.fee!=`bigint`||", "", 7],
-    ["P<w&&L===0n&&t.unlisted?.(),", "", 9],
-    ["t.read?.(L)", "t.read?.(M)", 9],
-    ["t.read?.(L)", "t.read?.(v)", 9],
-    ["L=NY(M,Nm(l),w)", "L=M", 9],
-    ["if(r>=n)return r;", "", 9],
-    ["return i>=1000000n?i-i%BC:0n}", "return i>0n?i:0n}", 9],
+    // card pool-amounts-are-standard-sizes: the leftover listed at its rest, the sweep's rung kept rent-exempt
+    ["R<D&&B===0n&&t.unlisted?.(),", "", 9],
+    ["t.read?.(B)", "t.read?.(F)", 9],
+    ["t.read?.(B)", "t.read?.(b)", 9],
+    ["B=vQ(F,D,L)", "B=F", 9],
+    ["B=vQ(F,D,L)", "B=vQ(F,D)", 9],
+    ["let r=sF(e,n).value;", "let r=sF(e).value;", 9],
+    ["return r>=t?r:e>0n?e:0n}", "return e>0n?e:0n}", 9],
+    ["e>0n?e:0n}", "0n}", 9],
+    ["{value:R}=sF(F,L)", "{value:R}=sF(F,0n)", 9],
     ["p=i.unlisted===!0?void 0:", "p=", 9],
     ["n===`floor`?i.lamports?.toString():", "n===`floor`?void 0:", 9],
   ]) {

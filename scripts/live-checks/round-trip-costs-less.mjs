@@ -135,15 +135,15 @@ export const MARKS = Object.freeze({
       R`(${I})=(${I})\.spaced\?\?(${I});await (${I})\.owed\?\.put\(`,
     ],
   ),
-  "a leftover W waiting so is listed on its way: its record keeps what its pass read on W, its buy proven, at its teardown as at its sweep, and a held pass reads and signs nothing more; once its sweep is sent W stays RETURNING with that sweep's signature until the note it wrote is counted in the same notes the balance reads, never in both totals; a W whose pass ended under the floor is listed at what it adds once moved, never W's lamports nor its rest, and not at all when that is nothing": tied(
+  "a leftover W waiting so is listed on its way: its record keeps what its pass read on W, its buy proven, at its teardown as at its sweep, and a held pass reads and signs nothing more; once its sweep is sent W stays RETURNING with that sweep's signature until the note it wrote is counted in the same notes the balance reads, never in both totals; a W whose pass ended under the floor is listed at its rest, the user's own on W (card pool-amounts-are-standard-sizes), and not at all at 0": tied(
     re(R`\[(?<la>${I}),(?<lb>${I})\]=(?<hd>${I})\.map\((?<e>${I})=>\k<e>\[0\]\?\.lamports\?\?0n\);if\(\((?<x>${I})\.buy\|\|(?<sn>${I})!==void 0\)&&\k<la>===\k<lb>&&\k<x>\.read\?\.\(\k<la>\),(?<pl>${I})\.close\.length===0\)return\{keep:\k<pl>\.keep,signed:\[\],last:0,unclaimed:void 0,since:\k<sn>\};`),
     (g) => [
       R`if\(\((${I})\.buy\|\|(${I})!==void 0\)&&\1\.read\?\.\((${I})\),\3===0n\)return\{end:`,
-      // under the floor, owed or not: W is listed at what it adds once moved (restAdds, pick (a), card
-      // every-lamport-can-move), unlisted when that is 0, before the ride and the floor end
-      R`\{value:(${I}),under:${I}\}=(${I})\((${I})\),${I}=\2\(${I}\)\.value,(${I})=(${I})\(\3,${I}\(${I}\),(${I})\);if\(\1<\6&&\4===0n&&(${I})\.unlisted\?\.\(\),\1<\6&&\4>0n&&\(\7\.buy\|\|(${I})!==void 0\)&&\7\.read\?\.\(\4\),`,
-      // restAdds: the own note at the floor or over, else the rest less the relay fee down to the grid, else 0
-      R`function (${I})\((${I}),(${I}),(${I})\)\{let (${I})=(${I})\(\2\)\.value;if\(\5>=\4\)return \5;let (${I})=\2-\3;return \7>=1000000n\?\7-\7%(${I}):0n\}`,
+      // under the floor, owed or not: W is listed at its rest (restAdds, card pool-amounts-are-standard-sizes: the
+      // sweep's rung, its rest kept rent-exempt on W), unlisted when that is 0, before the floor end
+      R`(${I})=(${I})\(${I},${I}\(${I},${I},${I}\)\),\{value:(${I})\}=(${I})\((${I}),\1\),${I}=\4\(${I},\1\)\.value,(${I})=(${I})\(\5,(${I}),\1\);if\(\3<\8&&\6===0n&&(${I})\.unlisted\?\.\(\),\3<\8&&\6>0n&&\(\9\.buy\|\|(${I})!==void 0\)&&\9\.read\?\.\(\6\),`,
+      // restAdds: the own rung (past what W must keep) at the floor or over, else the rest itself above 0, else 0
+      R`function (${I})\((${I}),(${I}),(${I})=0n\)\{let (${I})=(${I})\(\2,\4\)\.value;return \5>=\3\?\5:\2>0n\?\2:0n\}`,
       // the sweep's record (signature and the note's value) written before its send
       R`await (${I})\.swept\?\.\((${I})\.one\.signature,\2\.value\),await (${I})\(\2\.one\.signed,\2\.one\.signature\)`,
       // a pass whose rest adds nothing carries no amount; a floor end only this pass's (what W adds), never the last
