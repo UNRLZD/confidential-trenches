@@ -1,0 +1,1441 @@
+{
+ "what": "pass A on a Base mainnet copy (anvil fork of block 56,825,073 through contracts/pool-evm/test/fork-rpc.mjs, 13 Nov 07:39-08:00Z), the page code at 4b9e06095: a deposit and a buy of TIBBIR filled, a restore from the 12 words on a second device holds the same position, and its sell was refused quote_check_failed (that code named no rule; 586284afc names it); nothing signed or sent on any real chain. Ready took 178 s and every read through anvil includes the copy upstreams (trade.copy.upstreams), never the product alone",
+ "deposit": {
+  "by": "packages/signpage/scripts/pool-fork-evm.mjs",
+  "chain": "base",
+  "pool": "0xaa080e74ec99cf5c684548c77ca145edfcf899cf",
+  "pair": [
+   "https://base-rpc.publicnode.com",
+   "https://base.api.pocket.network"
+  ],
+  "set": {
+   "slots": "5",
+   "trailBlocks": "10",
+   "lagS": "1328",
+   "seed": "the all-zero test vector (packages/wallet/test/vectors/a8.json)",
+   "lane": "the device's lane, FORK_LANES (the page draws it at random), so a replay asks only what was recorded",
+   "funded": "U's balance set to the wei the first ask names short (anvil_setBalance), on the fork only",
+   "reorg": "evm_revert to before the deposit, then empty blocks to its height",
+   "why": "lagS is the head-to-finalized lag read on the chain's mainnet pair (live check evm-money-shows-and-spends-at-once); the trail's 2 x slots blocks span it, so finalized trails the head by about that many seconds",
+   "read": "every number in steps: blocks, hashes, times, notes, balances, the fork's own answers",
+   "trailS": "300",
+   "trailSpacingS": "30"
+  },
+  "steps": [
+   {
+    "name": "trail",
+    "atMs": 191,
+    "forkBlock": "56825073",
+    "head": "56825084",
+    "finalized": "56825074",
+    "trailBlocks": "10",
+    "headTime": "1794555699",
+    "finalizedTime": "1794555399",
+    "rpc": {}
+   },
+   {
+    "name": "funded",
+    "atMs": 6682,
+    "first": {
+     "error": "not_funded"
+    },
+    "u": "0xeb4B3a2F176D804a7f73eD6433E026FF6b468ec7",
+    "wei": "1020609749816518",
+    "rpc": {
+     "eth_chainId": {
+      "n": 2,
+      "ms": 4,
+      "errors": []
+     },
+     "eth_getBlockByNumber": {
+      "n": 14,
+      "ms": 19,
+      "errors": []
+     },
+     "eth_call": {
+      "n": 18,
+      "ms": 11092,
+      "errors": []
+     },
+     "eth_getLogs": {
+      "n": 736,
+      "ms": 1122,
+      "errors": [
+       "RPC error -32701: exceed maximum block range: 50000",
+       "RPC error -32701: exceed maximum block range: 50000",
+       "RPC error -32701: exceed maximum block range: 50000"
+      ]
+     },
+     "eth_getTransactionCount": {
+      "n": 2,
+      "ms": 528,
+      "errors": []
+     },
+     "eth_getBalance": {
+      "n": 2,
+      "ms": 2,
+      "errors": []
+     }
+    }
+   },
+   {
+    "name": "deposit",
+    "atMs": 10286,
+    "answer": {
+     "stage": "filled",
+     "txs": [
+      {
+       "chain": "base",
+       "hash": "0x016caf3d7c8f6afbe82d723966af88ba7c16230239d097c35ee70a0951a3b22c"
+      }
+     ]
+    },
+    "answeredMs": 3597,
+    "shownBy": "the deposit's own run",
+    "tx": "0x016caf3d7c8f6afbe82d723966af88ba7c16230239d097c35ee70a0951a3b22c",
+    "block": "56825085",
+    "finalizedThen": "56825075",
+    "aboveFinalizedBy": "10",
+    "shownMs": 3600,
+    "balance": "1000000000000000",
+    "notes": [
+     "deposit/8850962040242894488979448219670668064520438718650639788042110382392744870136/4 UNSPENT leaf 0"
+    ],
+    "kept": [
+     [
+      "4f54556e90b0d2f371d2dddbd2f4c180",
+      "56825085"
+     ]
+    ],
+    "rpc": {
+     "eth_getBlockByNumber": {
+      "n": 42,
+      "ms": 25,
+      "errors": []
+     },
+     "eth_call": {
+      "n": 34,
+      "ms": 40,
+      "errors": []
+     },
+     "eth_getLogs": {
+      "n": 8,
+      "ms": 4,
+      "errors": []
+     },
+     "eth_getTransactionCount": {
+      "n": 6,
+      "ms": 4,
+      "errors": []
+     },
+     "eth_getBalance": {
+      "n": 2,
+      "ms": 0,
+      "errors": []
+     },
+     "eth_estimateGas": {
+      "n": 2,
+      "ms": 3034,
+      "errors": []
+     },
+     "eth_sendRawTransaction": {
+      "n": 2,
+      "ms": 6,
+      "errors": [
+       "RPC error -32003: transaction already imported"
+      ]
+     }
+    }
+   },
+   {
+    "name": "events read",
+    "atMs": 10509,
+    "ms": 220,
+    "events": 1,
+    "anchor": "56825085",
+    "finalized": "56825075",
+    "rpc": {
+     "eth_chainId": {
+      "n": 2,
+      "ms": 2,
+      "errors": []
+     },
+     "eth_getBlockByNumber": {
+      "n": 8,
+      "ms": 1,
+      "errors": []
+     },
+     "eth_call": {
+      "n": 10,
+      "ms": 10,
+      "errors": []
+     },
+     "eth_getLogs": {
+      "n": 736,
+      "ms": 326,
+      "errors": [
+       "RPC error -32701: exceed maximum block range: 50000",
+       "RPC error -32701: exceed maximum block range: 50000",
+       "RPC error -32701: exceed maximum block range: 50000"
+      ]
+     }
+    }
+   },
+   {
+    "name": "restore",
+    "atMs": 50359,
+    "restoredMs": 39849,
+    "sinceSendMs": 43675,
+    "atBlock": "56825085",
+    "notes": [
+     "deposit/8850962040242894488979448219670668064520438718650639788042110382392744870136/4 UNSPENT leaf 0"
+    ],
+    "balance": "1000000000000000",
+    "landed": [
+     {
+      "block": "56825085",
+      "fin": "56825075"
+     }
+    ],
+    "rpc": {
+     "eth_chainId": {
+      "n": 2,
+      "ms": 0,
+      "errors": []
+     },
+     "eth_getBlockByNumber": {
+      "n": 10,
+      "ms": 0,
+      "errors": []
+     },
+     "eth_call": {
+      "n": 10,
+      "ms": 10,
+      "errors": []
+     },
+     "eth_getLogs": {
+      "n": 736,
+      "ms": 331,
+      "errors": [
+       "RPC error -32701: exceed maximum block range: 50000",
+       "RPC error -32701: exceed maximum block range: 50000",
+       "RPC error -32701: exceed maximum block range: 50000"
+      ]
+     }
+    }
+   },
+   {
+    "name": "reorg",
+    "atMs": 60667,
+    "height": "56825085",
+    "dropped": "0x08f3cdcd4f222bed9a17642049db708af10069385bc187a1091e64eea3f8ce19",
+    "now": "0x9c437768ed424e7b8f2e96b9cbb3a4efed74360ead8f60b12f3622d0e42e0b0e",
+    "by": "the page's state read",
+    "a": {
+     "requests": 790,
+     "notes": [
+      "deposit/8850962040242894488979448219670668064520438718650639788042110382392744870136/4 INCOMING"
+     ],
+     "balance": "0",
+     "kept": [
+      [
+       "4f54556e90b0d2f371d2dddbd2f4c180",
+       "56825085"
+      ]
+     ]
+    },
+    "b": {
+     "requests": 67,
+     "notes": [
+      "deposit/8850962040242894488979448219670668064520438718650639788042110382392744870136/4 INCOMING"
+     ],
+     "balance": "0"
+    },
+    "rpc": {}
+   },
+   {
+    "name": "landed again",
+    "atMs": 80674,
+    "tx": "0x016caf3d7c8f6afbe82d723966af88ba7c16230239d097c35ee70a0951a3b22c",
+    "block": "56825086",
+    "ms": 20004,
+    "by": "the page's state read",
+    "a": {
+     "requests": 64,
+     "notes": [
+      "deposit/8850962040242894488979448219670668064520438718650639788042110382392744870136/4 UNSPENT leaf 0"
+     ],
+     "balance": "1000000000000000"
+    },
+    "b": {
+     "requests": 56,
+     "notes": [
+      "deposit/8850962040242894488979448219670668064520438718650639788042110382392744870136/4 UNSPENT leaf 0"
+     ],
+     "balance": "1000000000000000"
+    },
+    "rpc": {}
+   },
+   {
+    "name": "reads per state read",
+    "atMs": 90687,
+    "noTail": 0,
+    "tail": 44,
+    "kept": 1,
+    "rpc": {}
+   }
+  ]
+ },
+ "trade": {
+  "by": "packages/signpage/scripts/pool-fork-evm-trade.mjs",
+  "chain": "base",
+  "pool": "0xaa080e74ec99cf5c684548c77ca145edfcf899cf",
+  "coin": "0xa4a2e2ca3fbfe21aed83471d28b6f65a233c6e00",
+  "anvil": "http://127.0.0.1:48707",
+  "sender": "0x7f844da934a8dac0d1594152c452cbc5c8e5a26e",
+  "times": {
+   "restoreMs": 53892,
+   "proveMs": 7195,
+   "readyMs": 178194,
+   "tapToAnswerMs": 4509,
+   "tapToEndMs": 7511,
+   "proofLeftMs": 117520,
+   "proofEpochAgeMs": 92480,
+   "rebuildMs": 10411
+  },
+  "end": "filled",
+  "refusal": null,
+  "tx": "0x3a723f471abbf4fe801498f199305e581b3917c5c44e10105fe461c9e676b373",
+  "copy": {
+   "note": "a copy of mainnet: anvil forks the chain and reads each slot it lacks from the public upstreams below through fork-rpc, so readyMs and every read through anvil include those upstreams' latency and throttles, never the product's alone",
+   "upstreams": {
+    "base": [
+     "base-rpc.publicnode.com",
+     "mainnet.base.org",
+     "base.drpc.org"
+    ],
+    "robinhood": [
+     "rpc.mainnet.chain.robinhood.com",
+     "robinhood-rpc.publicnode.com",
+     "robinhood.drpc.org"
+    ]
+   }
+  },
+  "block": "56825095",
+  "status": "0x1",
+  "notesAfter": [
+   {
+    "id": "0ccd1e2246e6cf49da247f6ea9738111",
+    "ref": "change",
+    "state": "UNSPENT",
+    "value": "0"
+   },
+   {
+    "id": "81d9867d9bfb125d75d1933d0c762591",
+    "ref": "deposit",
+    "state": "SPENT",
+    "value": "1000000000000000"
+   }
+  ],
+  "helperCalls": [
+   {
+    "atMs": 225710,
+    "verb": "GET",
+    "path": "/v1/pool/fee",
+    "query": "?pool=0xaa080e74ec99cf5c684548c77ca145edfcf899cf&epoch=1794556020000",
+    "status": 200,
+    "ms": 345,
+    "body": "{\"chain\":\"evm\",\"network\":\"base\",\"pool\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"fee_recipient\":\"0x4611338bf66389a2d2d3e67301dbb7ac9fb1fb9d\",\"sell_sender\":null,\"fee_collector\":null,\"epoch_ms\":60000,\"epoch_start_ms\":1794556020000,\"block\":\"0x36314ff\",\"fee\":\"20000000000000\",\"step\":\"10000000000000\"}",
+    "retryAfter": null
+   },
+   {
+    "atMs": 245804,
+    "verb": "GET",
+    "path": "/v1/pool/fee",
+    "query": "?pool=0xaa080e74ec99cf5c684548c77ca145edfcf899cf&epoch=1794556200000",
+    "status": 200,
+    "ms": 234,
+    "body": "{\"chain\":\"evm\",\"network\":\"base\",\"pool\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"fee_recipient\":\"0x4611338bf66389a2d2d3e67301dbb7ac9fb1fb9d\",\"sell_sender\":null,\"fee_collector\":null,\"epoch_ms\":60000,\"epoch_start_ms\":1794556200000,\"block\":\"0x3631500\",\"fee\":\"20000000000000\",\"step\":\"10000000000000\"}",
+    "retryAfter": null
+   },
+   {
+    "atMs": 302708,
+    "verb": "POST",
+    "path": "/v1/pool/evm/send",
+    "query": "",
+    "status": 200,
+    "ms": 3838,
+    "body": "{\"hash\":\"0x3a723f471abbf4fe801498f199305e581b3917c5c44e10105fe461c9e676b373\"}",
+    "retryAfter": null
+   }
+  ],
+  "helperLines": [
+   "pool send evm base send outcome=sent status=200 ms=3832"
+  ],
+  "requests": [
+   {
+    "atMs": 6,
+    "host": "base-rpc.publicnode.com",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_blockNumber",
+    "to": "fork",
+    "body": "[{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"eth_blockNumber\",\"params\":[]}]",
+    "ms": 1,
+    "status": 200
+   },
+   {
+    "atMs": 8,
+    "host": "base-rpc.publicnode.com",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_getLogs,eth_getLogs,eth_getBlockByNumber",
+    "to": "fork",
+    "body": "[{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"eth_getLogs\",\"params\":[{\"address\":\"0x498581ff718922c3f8e6a244956af099b2652b2b\",\"fromBlock\":\"0x3631505\",\"toBlock\":\"0x3631506\",\"topics\":[\"0xdd466e674ea557f56295e2d0218a125ea4b4f0f6f3307b9",
+    "ms": 0,
+    "status": 200
+   },
+   {
+    "atMs": 10,
+    "host": "base-mainnet.public.blastapi.io",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_call,eth_call,eth_call",
+    "to": "fork",
+    "body": "[{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"eth_call\",\"params\":[{\"to\":\"0xcA11bde05977b3631167028862bE2a173976CA11\",\"data\":\"0x82ad56cb000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000",
+    "ms": 15,
+    "status": 200
+   },
+   {
+    "atMs": 11,
+    "host": "base-rpc.publicnode.com",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_call,eth_call,eth_call",
+    "to": "fork",
+    "body": "[{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"eth_call\",\"params\":[{\"to\":\"0xcA11bde05977b3631167028862bE2a173976CA11\",\"data\":\"0x82ad56cb000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000",
+    "ms": 14,
+    "status": 200
+   },
+   {
+    "atMs": 11,
+    "host": "base-mainnet.public.blastapi.io",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_call,eth_call,eth_call",
+    "to": "fork",
+    "body": "[{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"eth_call\",\"params\":[{\"to\":\"0xcA11bde05977b3631167028862bE2a173976CA11\",\"data\":\"0x82ad56cb000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000",
+    "ms": 10,
+    "status": 200
+   },
+   {
+    "atMs": 11,
+    "host": "base-rpc.publicnode.com",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_call,eth_call,eth_call",
+    "to": "fork",
+    "body": "[{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"eth_call\",\"params\":[{\"to\":\"0xcA11bde05977b3631167028862bE2a173976CA11\",\"data\":\"0x82ad56cb000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000",
+    "ms": 573,
+    "status": 200
+   },
+   {
+    "atMs": 11,
+    "host": "base-mainnet.public.blastapi.io",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_call,eth_call,eth_call",
+    "to": "fork",
+    "body": "[{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"eth_call\",\"params\":[{\"to\":\"0xcA11bde05977b3631167028862bE2a173976CA11\",\"data\":\"0x82ad56cb000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000",
+    "ms": 576,
+    "status": 200
+   },
+   {
+    "atMs": 11,
+    "host": "base-rpc.publicnode.com",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_call,eth_call,eth_call",
+    "to": "fork",
+    "body": "[{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"eth_call\",\"params\":[{\"to\":\"0xcA11bde05977b3631167028862bE2a173976CA11\",\"data\":\"0x82ad56cb000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000",
+    "ms": 16,
+    "status": 200
+   },
+   {
+    "atMs": 11,
+    "host": "base-mainnet.public.blastapi.io",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_call,eth_call",
+    "to": "fork",
+    "body": "[{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"eth_call\",\"params\":[{\"to\":\"0xcA11bde05977b3631167028862bE2a173976CA11\",\"data\":\"0x82ad56cb000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000",
+    "ms": 564,
+    "status": 200
+   },
+   {
+    "atMs": 11,
+    "host": "base-rpc.publicnode.com",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_call,eth_call",
+    "to": "fork",
+    "body": "[{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"eth_call\",\"params\":[{\"to\":\"0xcA11bde05977b3631167028862bE2a173976CA11\",\"data\":\"0x82ad56cb000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000",
+    "ms": 575,
+    "status": 200
+   },
+   {
+    "atMs": 11,
+    "host": "base-mainnet.public.blastapi.io",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_call,eth_call",
+    "to": "fork",
+    "body": "[{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"eth_call\",\"params\":[{\"to\":\"0xcA11bde05977b3631167028862bE2a173976CA11\",\"data\":\"0x82ad56cb000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000",
+    "ms": 578,
+    "status": 200
+   },
+   {
+    "atMs": 12,
+    "host": "base-rpc.publicnode.com",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_call,eth_call",
+    "to": "fork",
+    "body": "[{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"eth_call\",\"params\":[{\"to\":\"0xcA11bde05977b3631167028862bE2a173976CA11\",\"data\":\"0x82ad56cb000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000",
+    "ms": 567,
+    "status": 200
+   },
+   {
+    "atMs": 12,
+    "host": "base-mainnet.public.blastapi.io",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_call,eth_call,eth_call",
+    "to": "fork",
+    "body": "[{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"eth_call\",\"params\":[{\"to\":\"0xcA11bde05977b3631167028862bE2a173976CA11\",\"data\":\"0x82ad56cb000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000",
+    "ms": 575,
+    "status": 200
+   },
+   {
+    "atMs": 12,
+    "host": "base-rpc.publicnode.com",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_call,eth_call,eth_call",
+    "to": "fork",
+    "body": "[{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"eth_call\",\"params\":[{\"to\":\"0xcA11bde05977b3631167028862bE2a173976CA11\",\"data\":\"0x82ad56cb000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000",
+    "ms": 559,
+    "status": 200
+   },
+   {
+    "atMs": 422,
+    "host": "base.api.pocket.network",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_call,eth_call,eth_call",
+    "to": "fork",
+    "body": "[{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"eth_call\",\"params\":[{\"to\":\"0xcA11bde05977b3631167028862bE2a173976CA11\",\"data\":\"0x82ad56cb000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000",
+    "ms": 170,
+    "status": 200
+   },
+   {
+    "atMs": 427,
+    "host": "base.api.pocket.network",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_call,eth_call,eth_call",
+    "to": "fork",
+    "body": "[{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"eth_call\",\"params\":[{\"to\":\"0xcA11bde05977b3631167028862bE2a173976CA11\",\"data\":\"0x82ad56cb000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000",
+    "ms": 168,
+    "status": 200
+   },
+   {
+    "atMs": 590,
+    "host": "base-rpc.publicnode.com",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_call,eth_call,eth_call",
+    "to": "fork",
+    "body": "[{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"eth_call\",\"params\":[{\"to\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"data\":\"0x25faf2a300000000000000000000000000000000000000000000000000000000000000600000000000000000000000008d267dda",
+    "ms": 7,
+    "status": 200
+   },
+   {
+    "atMs": 590,
+    "host": "base-mainnet.public.blastapi.io",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_call,eth_call,eth_call",
+    "to": "fork",
+    "body": "[{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"eth_call\",\"params\":[{\"to\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"data\":\"0x25faf2a300000000000000000000000000000000000000000000000000000000000000600000000000000000000000008d267dda",
+    "ms": 8,
+    "status": 200
+   },
+   {
+    "atMs": 603,
+    "host": "base-rpc.publicnode.com",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_blockNumber",
+    "to": "fork",
+    "body": "[{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"eth_blockNumber\",\"params\":[]}]",
+    "ms": 2,
+    "status": 200
+   },
+   {
+    "atMs": 607,
+    "host": "base-rpc.publicnode.com",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_call,eth_call,eth_call",
+    "to": "fork",
+    "body": "[{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"eth_call\",\"params\":[{\"to\":\"0xcA11bde05977b3631167028862bE2a173976CA11\",\"data\":\"0x82ad56cb000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000",
+    "ms": 13,
+    "status": 200
+   },
+   {
+    "atMs": 608,
+    "host": "base-mainnet.public.blastapi.io",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_call,eth_call,eth_call",
+    "to": "fork",
+    "body": "[{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"eth_call\",\"params\":[{\"to\":\"0xcA11bde05977b3631167028862bE2a173976CA11\",\"data\":\"0x82ad56cb000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000",
+    "ms": 36,
+    "status": 200
+   },
+   {
+    "atMs": 608,
+    "host": "base-rpc.publicnode.com",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_call,eth_call,eth_call",
+    "to": "fork",
+    "body": "[{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"eth_call\",\"params\":[{\"to\":\"0xcA11bde05977b3631167028862bE2a173976CA11\",\"data\":\"0x82ad56cb000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000",
+    "ms": 22,
+    "status": 200
+   },
+   {
+    "atMs": 608,
+    "host": "base-mainnet.public.blastapi.io",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_call,eth_call,eth_call",
+    "to": "fork",
+    "body": "[{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"eth_call\",\"params\":[{\"to\":\"0xcA11bde05977b3631167028862bE2a173976CA11\",\"data\":\"0x82ad56cb000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000",
+    "ms": 21,
+    "status": 200
+   },
+   {
+    "atMs": 609,
+    "host": "base-rpc.publicnode.com",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_call,eth_call,eth_call",
+    "to": "fork",
+    "body": "[{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"eth_call\",\"params\":[{\"to\":\"0xcA11bde05977b3631167028862bE2a173976CA11\",\"data\":\"0x82ad56cb000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000",
+    "ms": 16,
+    "status": 200
+   },
+   {
+    "atMs": 609,
+    "host": "base-mainnet.public.blastapi.io",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_call,eth_call,eth_call",
+    "to": "fork",
+    "body": "[{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"eth_call\",\"params\":[{\"to\":\"0xcA11bde05977b3631167028862bE2a173976CA11\",\"data\":\"0x82ad56cb000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000",
+    "ms": 34,
+    "status": 200
+   },
+   {
+    "atMs": 609,
+    "host": "base-rpc.publicnode.com",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_call,eth_call",
+    "to": "fork",
+    "body": "[{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"eth_call\",\"params\":[{\"to\":\"0xcA11bde05977b3631167028862bE2a173976CA11\",\"data\":\"0x82ad56cb000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000",
+    "ms": 13,
+    "status": 200
+   },
+   {
+    "atMs": 609,
+    "host": "base-mainnet.public.blastapi.io",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_call,eth_call",
+    "to": "fork",
+    "body": "[{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"eth_call\",\"params\":[{\"to\":\"0xcA11bde05977b3631167028862bE2a173976CA11\",\"data\":\"0x82ad56cb000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000",
+    "ms": 36,
+    "status": 200
+   },
+   {
+    "atMs": 609,
+    "host": "base-rpc.publicnode.com",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_call,eth_call",
+    "to": "fork",
+    "body": "[{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"eth_call\",\"params\":[{\"to\":\"0xcA11bde05977b3631167028862bE2a173976CA11\",\"data\":\"0x82ad56cb000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000",
+    "ms": 35,
+    "status": 200
+   },
+   {
+    "atMs": 609,
+    "host": "base-mainnet.public.blastapi.io",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_call,eth_call",
+    "to": "fork",
+    "body": "[{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"eth_call\",\"params\":[{\"to\":\"0xcA11bde05977b3631167028862bE2a173976CA11\",\"data\":\"0x82ad56cb000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000",
+    "ms": 27,
+    "status": 200
+   },
+   {
+    "atMs": 609,
+    "host": "base-rpc.publicnode.com",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_call,eth_call,eth_call",
+    "to": "fork",
+    "body": "[{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"eth_call\",\"params\":[{\"to\":\"0xcA11bde05977b3631167028862bE2a173976CA11\",\"data\":\"0x82ad56cb000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000",
+    "ms": 34,
+    "status": 200
+   },
+   {
+    "atMs": 609,
+    "host": "base-mainnet.public.blastapi.io",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_call,eth_call,eth_call",
+    "to": "fork",
+    "body": "[{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"eth_call\",\"params\":[{\"to\":\"0xcA11bde05977b3631167028862bE2a173976CA11\",\"data\":\"0x82ad56cb000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000",
+    "ms": 33,
+    "status": 200
+   },
+   {
+    "atMs": 647,
+    "host": "base-rpc.publicnode.com",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_call",
+    "to": "fork",
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":\"2722\",\"method\":\"eth_call\",\"params\":[{\"to\":\"0xa4a2e2ca3fbfe21aed83471d28b6f65a233c6e00\",\"data\":\"0x313ce567\"},\"latest\"]}",
+    "ms": 3,
+    "status": 200
+   },
+   {
+    "atMs": 648,
+    "host": "base.api.pocket.network",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_call",
+    "to": "fork",
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":\"2723\",\"method\":\"eth_call\",\"params\":[{\"to\":\"0xa4a2e2ca3fbfe21aed83471d28b6f65a233c6e00\",\"data\":\"0x313ce567\"},\"latest\"]}",
+    "ms": 2,
+    "status": 200
+   },
+   {
+    "atMs": 651,
+    "host": "base-rpc.publicnode.com",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_blockNumber",
+    "to": "fork",
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":\"2724\",\"method\":\"eth_blockNumber\",\"params\":[]}",
+    "ms": 0,
+    "status": 200
+   },
+   {
+    "atMs": 651,
+    "host": "base.api.pocket.network",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_blockNumber",
+    "to": "fork",
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":\"2725\",\"method\":\"eth_blockNumber\",\"params\":[]}",
+    "ms": 1,
+    "status": 200
+   },
+   {
+    "atMs": 665,
+    "host": "base-rpc.publicnode.com",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_getBlockByNumber",
+    "to": "fork",
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":\"2726\",\"method\":\"eth_getBlockByNumber\",\"params\":[\"latest\",false]}",
+    "ms": 1,
+    "status": 200
+   },
+   {
+    "atMs": 665,
+    "host": "base.api.pocket.network",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_getBlockByNumber",
+    "to": "fork",
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":\"2727\",\"method\":\"eth_getBlockByNumber\",\"params\":[\"latest\",false]}",
+    "ms": 2,
+    "status": 200
+   },
+   {
+    "atMs": 667,
+    "host": "base-rpc.publicnode.com",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_getBlockByNumber",
+    "to": "fork",
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":\"2728\",\"method\":\"eth_getBlockByNumber\",\"params\":[\"0x3631506\",false]}",
+    "ms": 1,
+    "status": 200
+   },
+   {
+    "atMs": 667,
+    "host": "base.api.pocket.network",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_getBlockByNumber",
+    "to": "fork",
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":\"2729\",\"method\":\"eth_getBlockByNumber\",\"params\":[\"0x3631506\",false]}",
+    "ms": 1,
+    "status": 200
+   },
+   {
+    "atMs": 671,
+    "host": "ct-api.unrealized.trade",
+    "path": "/v1/pool/evm/send",
+    "verb": "POST",
+    "method": null,
+    "to": "helper",
+    "body": "{\"pool\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"data\":\"0x3edadd7900000000000000000000000000000000000000000000000000000000000002801b8a9cbf8ab069ccd13ba7fce4f324051f0eff17b97b72613b9273f0f7f3790d250ad2dbca46f67badf2c"
+   },
+   {
+    "atMs": 1304,
+    "host": "base-rpc.publicnode.com",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_getBlockByNumber",
+    "to": "fork",
+    "body": "[{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"eth_getBlockByNumber\",\"params\":[\"latest\",false]}]",
+    "ms": 2,
+    "status": 200
+   },
+   {
+    "atMs": 1305,
+    "host": "base-mainnet.public.blastapi.io",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_getBlockByNumber",
+    "to": "fork",
+    "body": "[{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"eth_getBlockByNumber\",\"params\":[\"latest\",false]}]",
+    "ms": 1,
+    "status": 200
+   },
+   {
+    "atMs": 1306,
+    "host": "base-mainnet.public.blastapi.io",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_getBlockByNumber",
+    "to": "fork",
+    "body": "[{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"eth_getBlockByNumber\",\"params\":[\"0x3631506\",false]}]",
+    "ms": 1,
+    "status": 200
+   },
+   {
+    "atMs": 1837,
+    "host": "base-rpc.publicnode.com",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_call",
+    "to": "fork",
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":\"2730\",\"method\":\"eth_call\",\"params\":[{\"to\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"data\":\"0x4b278d9c1e601ad8eaf07cec6707cc7f8b849a021f0cb1a6a6fa946b1bce6a181d7e5148\"},{\"blockHash\":\"0xfb244bcb5",
+    "ms": 1,
+    "status": 200
+   },
+   {
+    "atMs": 1839,
+    "host": "base.api.pocket.network",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_call",
+    "to": "fork",
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":\"2731\",\"method\":\"eth_call\",\"params\":[{\"to\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"data\":\"0xbbfaea223011717641d363be87195faeaacc16fddaa2a817564a570f78f67507c3bc1bec\"},{\"blockHash\":\"0xfb244bcb5",
+    "ms": 1,
+    "status": 200
+   },
+   {
+    "atMs": 2808,
+    "host": "base-mainnet.public.blastapi.io",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_getBlockByNumber",
+    "to": "fork",
+    "body": "[{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"eth_getBlockByNumber\",\"params\":[\"latest\",false]}]",
+    "ms": 2,
+    "status": 200
+   },
+   {
+    "atMs": 2809,
+    "host": "base-rpc.publicnode.com",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_getBlockByNumber",
+    "to": "fork",
+    "body": "[{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"eth_getBlockByNumber\",\"params\":[\"latest\",false]}]",
+    "ms": 1,
+    "status": 200
+   },
+   {
+    "atMs": 2810,
+    "host": "base-rpc.publicnode.com",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_getBlockByNumber",
+    "to": "fork",
+    "body": "[{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"eth_getBlockByNumber\",\"params\":[\"0x3631506\",false]}]",
+    "ms": 1,
+    "status": 200
+   },
+   {
+    "atMs": 4310,
+    "host": "base-rpc.publicnode.com",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_getBlockByNumber",
+    "to": "fork",
+    "body": "[{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"eth_getBlockByNumber\",\"params\":[\"latest\",false]}]",
+    "ms": 2,
+    "status": 200
+   },
+   {
+    "atMs": 4311,
+    "host": "base-mainnet.public.blastapi.io",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_getBlockByNumber",
+    "to": "fork",
+    "body": "[{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"eth_getBlockByNumber\",\"params\":[\"latest\",false]}]",
+    "ms": 1,
+    "status": 200
+   },
+   {
+    "atMs": 4313,
+    "host": "base-rpc.publicnode.com",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_getBlockByNumber",
+    "to": "fork",
+    "body": "[{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"eth_getBlockByNumber\",\"params\":[\"0x3631506\",false]}]",
+    "ms": 1,
+    "status": 200
+   },
+   {
+    "atMs": 4510,
+    "host": "base-rpc.publicnode.com",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_getBlockByNumber",
+    "to": "fork",
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":\"2732\",\"method\":\"eth_getBlockByNumber\",\"params\":[\"latest\",false]}",
+    "ms": 2,
+    "status": 200
+   },
+   {
+    "atMs": 4511,
+    "host": "base.api.pocket.network",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_getBlockByNumber",
+    "to": "fork",
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":\"2733\",\"method\":\"eth_getBlockByNumber\",\"params\":[\"latest\",false]}",
+    "ms": 2,
+    "status": 200
+   },
+   {
+    "atMs": 4513,
+    "host": "base-rpc.publicnode.com",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_getBlockByNumber",
+    "to": "fork",
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":\"2734\",\"method\":\"eth_getBlockByNumber\",\"params\":[\"finalized\",false]}",
+    "ms": 2,
+    "status": 200
+   },
+   {
+    "atMs": 4514,
+    "host": "base.api.pocket.network",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_getBlockByNumber",
+    "to": "fork",
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":\"2735\",\"method\":\"eth_getBlockByNumber\",\"params\":[\"finalized\",false]}",
+    "ms": 2,
+    "status": 200
+   },
+   {
+    "atMs": 4515,
+    "host": "base-rpc.publicnode.com",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_getLogs",
+    "to": "fork",
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":\"2736\",\"method\":\"eth_getLogs\",\"params\":[{\"address\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"topics\":[[\"0xb8a1e6c10d45357f60b093ab761ca4af74bf300c039aa105fb946f7e5105727d\",\"0xfabb9e7afa4ef595f60",
+    "ms": 104,
+    "status": 200
+   },
+   {
+    "atMs": 4517,
+    "host": "base.api.pocket.network",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_getLogs",
+    "to": "fork",
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":\"2737\",\"method\":\"eth_getLogs\",\"params\":[{\"address\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"topics\":[[\"0xb8a1e6c10d45357f60b093ab761ca4af74bf300c039aa105fb946f7e5105727d\",\"0xfabb9e7afa4ef595f60",
+    "ms": 267,
+    "status": 200
+   },
+   {
+    "atMs": 5815,
+    "host": "base-rpc.publicnode.com",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_getBlockByNumber",
+    "to": "fork",
+    "body": "[{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"eth_getBlockByNumber\",\"params\":[\"latest\",false]}]",
+    "ms": 2,
+    "status": 200
+   },
+   {
+    "atMs": 5815,
+    "host": "base-mainnet.public.blastapi.io",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_getBlockByNumber",
+    "to": "fork",
+    "body": "[{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"eth_getBlockByNumber\",\"params\":[\"latest\",false]}]",
+    "ms": 2,
+    "status": 200
+   },
+   {
+    "atMs": 5817,
+    "host": "base-mainnet.public.blastapi.io",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_getBlockByNumber",
+    "to": "fork",
+    "body": "[{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"eth_getBlockByNumber\",\"params\":[\"0x3631507\",false]}]",
+    "ms": 1,
+    "status": 200
+   },
+   {
+    "atMs": 6785,
+    "host": "base-rpc.publicnode.com",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_getBlockByNumber",
+    "to": "fork",
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":\"2738\",\"method\":\"eth_getBlockByNumber\",\"params\":[\"latest\",false]}",
+    "ms": 1,
+    "status": 200
+   },
+   {
+    "atMs": 6785,
+    "host": "base.api.pocket.network",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_getBlockByNumber",
+    "to": "fork",
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":\"2739\",\"method\":\"eth_getBlockByNumber\",\"params\":[\"latest\",false]}",
+    "ms": 2,
+    "status": 200
+   },
+   {
+    "atMs": 6787,
+    "host": "base-rpc.publicnode.com",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_getBlockByNumber",
+    "to": "fork",
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":\"2740\",\"method\":\"eth_getBlockByNumber\",\"params\":[\"finalized\",false]}",
+    "ms": 1,
+    "status": 200
+   },
+   {
+    "atMs": 6788,
+    "host": "base.api.pocket.network",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_getBlockByNumber",
+    "to": "fork",
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":\"2741\",\"method\":\"eth_getBlockByNumber\",\"params\":[\"finalized\",false]}",
+    "ms": 1,
+    "status": 200
+   },
+   {
+    "atMs": 6788,
+    "host": "base-rpc.publicnode.com",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_getLogs",
+    "to": "fork",
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":\"2742\",\"method\":\"eth_getLogs\",\"params\":[{\"address\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"topics\":[[\"0xb8a1e6c10d45357f60b093ab761ca4af74bf300c039aa105fb946f7e5105727d\",\"0xfabb9e7afa4ef595f60",
+    "ms": 1,
+    "status": 200
+   },
+   {
+    "atMs": 6789,
+    "host": "base.api.pocket.network",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_getLogs",
+    "to": "fork",
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":\"2743\",\"method\":\"eth_getLogs\",\"params\":[{\"address\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"topics\":[[\"0xb8a1e6c10d45357f60b093ab761ca4af74bf300c039aa105fb946f7e5105727d\",\"0xfabb9e7afa4ef595f60",
+    "ms": 1,
+    "status": 200
+   },
+   {
+    "atMs": 6792,
+    "host": "base-rpc.publicnode.com",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_call",
+    "to": "fork",
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":\"2744\",\"method\":\"eth_call\",\"params\":[{\"to\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"data\":\"0xbbfaea223011717641d363be87195faeaacc16fddaa2a817564a570f78f67507c3bc1bec\"},{\"blockHash\":\"0xfb244bcb5",
+    "ms": 2,
+    "status": 200
+   },
+   {
+    "atMs": 6800,
+    "host": "base-rpc.publicnode.com",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_getBlockByNumber",
+    "to": "fork",
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":\"2745\",\"method\":\"eth_getBlockByNumber\",\"params\":[\"finalized\",false]}",
+    "ms": 12,
+    "status": 200
+   },
+   {
+    "atMs": 6801,
+    "host": "base.api.pocket.network",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_getBlockByNumber",
+    "to": "fork",
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":\"2746\",\"method\":\"eth_getBlockByNumber\",\"params\":[\"finalized\",false]}",
+    "ms": 12,
+    "status": 200
+   },
+   {
+    "atMs": 6814,
+    "host": "base-rpc.publicnode.com",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_getBlockByNumber",
+    "to": "fork",
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":\"2747\",\"method\":\"eth_getBlockByNumber\",\"params\":[\"0x36314fd\",false]}",
+    "ms": 13,
+    "status": 200
+   },
+   {
+    "atMs": 6815,
+    "host": "base.api.pocket.network",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_getBlockByNumber",
+    "to": "fork",
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":\"2748\",\"method\":\"eth_getBlockByNumber\",\"params\":[\"0x36314fd\",false]}",
+    "ms": 14,
+    "status": 200
+   },
+   {
+    "atMs": 6829,
+    "host": "base-rpc.publicnode.com",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_getBlockByNumber",
+    "to": "fork",
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":\"2749\",\"method\":\"eth_getBlockByNumber\",\"params\":[\"latest\",false]}",
+    "ms": 2,
+    "status": 200
+   },
+   {
+    "atMs": 6830,
+    "host": "base.api.pocket.network",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_getBlockByNumber",
+    "to": "fork",
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":\"2750\",\"method\":\"eth_getBlockByNumber\",\"params\":[\"latest\",false]}",
+    "ms": 3,
+    "status": 200
+   },
+   {
+    "atMs": 6833,
+    "host": "base-rpc.publicnode.com",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_getBlockByNumber",
+    "to": "fork",
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":\"2751\",\"method\":\"eth_getBlockByNumber\",\"params\":[\"0x3631507\",false]}",
+    "ms": 2,
+    "status": 200
+   },
+   {
+    "atMs": 6833,
+    "host": "base.api.pocket.network",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_getBlockByNumber",
+    "to": "fork",
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":\"2752\",\"method\":\"eth_getBlockByNumber\",\"params\":[\"0x3631507\",false]}",
+    "ms": 2,
+    "status": 200
+   },
+   {
+    "atMs": 6836,
+    "host": "base-rpc.publicnode.com",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_call",
+    "to": "fork",
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":\"2753\",\"method\":\"eth_call\",\"params\":[{\"to\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"data\":\"0xfdab463d\"},{\"blockHash\":\"0x4b9ca88f248280d237ee547ce536261ed455d744fb308b291c756496f57a151f\"}]}",
+    "ms": 8,
+    "status": 200
+   },
+   {
+    "atMs": 6836,
+    "host": "base.api.pocket.network",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_call",
+    "to": "fork",
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":\"2754\",\"method\":\"eth_call\",\"params\":[{\"to\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"data\":\"0xfdab463d\"},{\"blockHash\":\"0x4b9ca88f248280d237ee547ce536261ed455d744fb308b291c756496f57a151f\"}]}",
+    "ms": 9,
+    "status": 200
+   },
+   {
+    "atMs": 6846,
+    "host": "base-rpc.publicnode.com",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_call",
+    "to": "fork",
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":\"2755\",\"method\":\"eth_call\",\"params\":[{\"to\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"data\":\"0xa8f0f95a\"},{\"blockHash\":\"0x4b9ca88f248280d237ee547ce536261ed455d744fb308b291c756496f57a151f\"}]}",
+    "ms": 4,
+    "status": 200
+   },
+   {
+    "atMs": 6846,
+    "host": "base.api.pocket.network",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_call",
+    "to": "fork",
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":\"2756\",\"method\":\"eth_call\",\"params\":[{\"to\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"data\":\"0xa8f0f95a\"},{\"blockHash\":\"0x4b9ca88f248280d237ee547ce536261ed455d744fb308b291c756496f57a151f\"}]}",
+    "ms": 6,
+    "status": 200
+   },
+   {
+    "atMs": 6853,
+    "host": "base-rpc.publicnode.com",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_call",
+    "to": "fork",
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":\"2757\",\"method\":\"eth_call\",\"params\":[{\"to\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"data\":\"0x50f3e219\"},{\"blockHash\":\"0x4b9ca88f248280d237ee547ce536261ed455d744fb308b291c756496f57a151f\"}]}",
+    "ms": 4,
+    "status": 200
+   },
+   {
+    "atMs": 6853,
+    "host": "base.api.pocket.network",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_call",
+    "to": "fork",
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":\"2758\",\"method\":\"eth_call\",\"params\":[{\"to\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"data\":\"0x50f3e219\"},{\"blockHash\":\"0x4b9ca88f248280d237ee547ce536261ed455d744fb308b291c756496f57a151f\"}]}",
+    "ms": 4,
+    "status": 200
+   },
+   {
+    "atMs": 6858,
+    "host": "base-rpc.publicnode.com",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_call",
+    "to": "fork",
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":\"2759\",\"method\":\"eth_call\",\"params\":[{\"to\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"data\":\"0x4181445b\"},{\"blockHash\":\"0x4b9ca88f248280d237ee547ce536261ed455d744fb308b291c756496f57a151f\"}]}",
+    "ms": 2,
+    "status": 200
+   },
+   {
+    "atMs": 6858,
+    "host": "base.api.pocket.network",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_call",
+    "to": "fork",
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":\"2760\",\"method\":\"eth_call\",\"params\":[{\"to\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"data\":\"0x4181445b\"},{\"blockHash\":\"0x4b9ca88f248280d237ee547ce536261ed455d744fb308b291c756496f57a151f\"}]}",
+    "ms": 3,
+    "status": 200
+   },
+   {
+    "atMs": 6861,
+    "host": "base-rpc.publicnode.com",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_getLogs",
+    "to": "fork",
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":\"2761\",\"method\":\"eth_getLogs\",\"params\":[{\"address\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"topics\":[[\"0xe3b53cd1a44fbf11535e145d80b8ef1ed6d57a73bf5daa7e939b6b01657d6549\",\"0xfabb9e7afa4ef595f60",
+    "ms": 2,
+    "status": 200
+   },
+   {
+    "atMs": 6862,
+    "host": "base.api.pocket.network",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_getLogs",
+    "to": "fork",
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":\"2762\",\"method\":\"eth_getLogs\",\"params\":[{\"address\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"topics\":[[\"0xe3b53cd1a44fbf11535e145d80b8ef1ed6d57a73bf5daa7e939b6b01657d6549\",\"0xfabb9e7afa4ef595f60",
+    "ms": 1,
+    "status": 200
+   },
+   {
+    "atMs": 6885,
+    "host": "base-rpc.publicnode.com",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_getBlockByNumber",
+    "to": "fork",
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":\"2763\",\"method\":\"eth_getBlockByNumber\",\"params\":[\"latest\",false]}",
+    "ms": 1,
+    "status": 200
+   },
+   {
+    "atMs": 6885,
+    "host": "base.api.pocket.network",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_getBlockByNumber",
+    "to": "fork",
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":\"2764\",\"method\":\"eth_getBlockByNumber\",\"params\":[\"latest\",false]}",
+    "ms": 2,
+    "status": 200
+   },
+   {
+    "atMs": 6887,
+    "host": "base-rpc.publicnode.com",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_getBlockByNumber",
+    "to": "fork",
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":\"2765\",\"method\":\"eth_getBlockByNumber\",\"params\":[\"0x3631507\",false]}",
+    "ms": 1,
+    "status": 200
+   },
+   {
+    "atMs": 6887,
+    "host": "base.api.pocket.network",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_getBlockByNumber",
+    "to": "fork",
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":\"2766\",\"method\":\"eth_getBlockByNumber\",\"params\":[\"0x3631507\",false]}",
+    "ms": 2,
+    "status": 200
+   },
+   {
+    "atMs": 7318,
+    "host": "base-rpc.publicnode.com",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_getBlockByNumber",
+    "to": "fork",
+    "body": "[{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"eth_getBlockByNumber\",\"params\":[\"latest\",false]}]",
+    "ms": 2,
+    "status": 200
+   },
+   {
+    "atMs": 7319,
+    "host": "base-mainnet.public.blastapi.io",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_getBlockByNumber",
+    "to": "fork",
+    "body": "[{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"eth_getBlockByNumber\",\"params\":[\"latest\",false]}]",
+    "ms": 2,
+    "status": 200
+   },
+   {
+    "atMs": 7321,
+    "host": "base-mainnet.public.blastapi.io",
+    "path": "/",
+    "verb": "POST",
+    "method": "eth_getBlockByNumber",
+    "to": "fork",
+    "body": "[{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"eth_getBlockByNumber\",\"params\":[\"0x3631507\",false]}]",
+    "ms": 1,
+    "status": 200
+   }
+  ],
+  "refusedHosts": {
+   "rpc.mainnet.chain.robinhood.com": 21,
+   "robinhood.api.pocket.network": 21
+  },
+  "ab": {
+   "aPosition": {
+    "chain": "base",
+    "coin": "0xa4a2e2ca3fbfe21aed83471d28b6f65a233c6e00",
+    "amount": "12.733110175075948584",
+    "cost": "0",
+    "wallets": [
+     "0xa60f03c30a9e81fc197879e418dd259195a43886"
+    ],
+    "decimals": 18
+   },
+   "bPosition": {
+    "chain": "base",
+    "coin": "0xa4a2e2ca3fbfe21aed83471d28b6f65a233c6e00",
+    "amount": "12.733110175075948584",
+    "cost": "0",
+    "wallets": [
+     "0xa60f03c30a9e81fc197879e418dd259195a43886"
+    ],
+    "decimals": 18
+   },
+   "aBalance": "0",
+   "bBalance": "0",
+   "equal": true
+  },
+  "sell": {
+   "end": null,
+   "stages": [],
+   "tapToEndMs": 360387
+  },
+  "after": {
+   "bBalance": "0",
+   "cBalance": "0",
+   "equal": true,
+   "bPositions": [
+    {
+     "chain": "base",
+     "coin": "0xa4a2e2ca3fbfe21aed83471d28b6f65a233c6e00",
+     "amount": "12.733110175075948584",
+     "cost": "0",
+     "wallets": [
+      "0xa60f03c30a9e81fc197879e418dd259195a43886"
+     ],
+     "decimals": 18
+    }
+   ],
+   "grew": false
+  },
+  "minedBlocks": "9"
+ }
+}
