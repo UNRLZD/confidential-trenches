@@ -141,6 +141,9 @@ export type NearSellMark = {
   /** The last trade delegate signed for this W's sell (decimal nonce and max_block_height), kept before it is sent: every
    *  later run waits for W's nonce to reach it or its window to pass before a move is signed (near-sell.ts). */
   trade?: { nonce: string; mbh: string };
+  /** The way home (a load's run: W's USDC moved, nothing sold), stored so a run that stops partway is taken up as the
+   *  way home again, never as a sale; absent: a sale the user asked. A tap on it makes it a sale. */
+  home?: true;
 };
 
 /** What the page gives the binding, each opened when a step needs it; the parts that reach a network can be replaced. */
@@ -696,7 +699,10 @@ export async function resumeNearSells(page: NearBuyPage): Promise<void> {
         // two questions, apart: W's USDC of the least deposit goes home whatever W holds of the token (the way home moves
         // it and sells nothing); W's token at its coinMin is its coin, a position, never sold unasked
         if (u.held >= VAULT_CONSTANTS.MIN_DEPOSIT) return true;
-        if (coinCounts(r, t.held) && (r.sell === undefined || r.sell.stage === "refused")) await filledFromRead(page, k, r, t.held);
+        // a buy that ended below its floor with no fill written (its USDC read failed then): what W holds over its baseline
+        // is what it received, now that W's USDC is under the least deposit
+        const below = r.code === "received_below_floor" && t.held > baselineOf(r);
+        if ((coinCounts(r, t.held) || below) && (r.sell === undefined || r.sell.stage === "refused")) await filledFromRead(page, k, r, t.held);
         return false;
       };
       try {
@@ -721,7 +727,9 @@ export async function resumeNearSells(page: NearBuyPage): Promise<void> {
     const slippage = r.sell?.slippage_bps ?? r.slippage_bps;
     // a sale the user asked (its sell open) goes on as one; anything else a load takes up is the way home: W's USDC moved,
     // nothing sold, a coin still on W after it a position
-    const deps = sellDepsOf(page, r.id, id, slippage, !sellOpen(r.sell));
+    // which it is, read from the mark the run stored (never inferred from its stage): a run that stopped partway goes on
+    // as what it was
+    const deps = sellDepsOf(page, r.id, id, slippage, !sellOpen(r.sell) || r.sell.home === true);
     const run = nearSellFlow(deps)({ token: r.token, slippageBps: slippage }, { id } as KindContext);
     if (!("running" in run)) {
       deps.release();
@@ -870,7 +878,10 @@ export function sellDepsOf(page: NearBuyPage, only: string | null, id: string, s
       // trade_used with nothing of this sell sent (a swap of W's still on its way, or the helper's bound on what W costs
       // it): never a dead end, the sell stays open (its stage as it was) and is taken up again on load and on the next tap
       const open = result === null && code === "trade_used" && was !== "sent";
-      const stage: NearSellMark["stage"] = result !== null && (result.stage === "filled" || result.stage === "part_filled" || result.stage === "sent") ? result.stage : was === "sent" ? "sent" : open ? was : "refused";
+      // a run that ended with nothing sold and W's coin kept (coin_kept, or amount_too_low: a sale the vault would refuse)
+      // is over whatever came before it: refused, so no load takes it up again as an open sell
+      const over = result === null && (code === "coin_kept" || code === "amount_too_low");
+      const stage: NearSellMark["stage"] = result !== null && (result.stage === "filled" || result.stage === "part_filled" || result.stage === "sent") ? result.stage : over ? "refused" : was === "sent" ? "sent" : open ? was : "refused";
       const hashes = result !== null && Array.isArray(result.txs) ? result.txs.flatMap((t) => (isObj(t) && typeof t.hash === "string" ? [t.hash] : [])) : [];
       await addTxs(hashes);
       await write((m) => {
@@ -950,6 +961,9 @@ export function sellDepsOf(page: NearBuyPage, only: string | null, id: string, s
       // a new sell on a W sold before keeps the last trade delegate that sell signed (it may still be held)
       const kept = (r.sell as NearSellMark | undefined)?.trade;
       const m: NearSellMark = sellOpen(r.sell) ? { ...r.sell, resumes: r.sell.resumes + 1 } : { id, slippage_bps: slippageBps, created_ms: now(), resumes: 0, stage: "pending", step: "read", txs: [], ...(kept === undefined ? {} : { trade: kept }) };
+      // which run this is, stored on the mark: the way home, or a sale (a tap, or a sale the user asked taken up)
+      if (home) m.home = true;
+      else delete m.home;
       rec = { ...r, sell: m };
       await write((x) => x);
       log(sellOpen(r.sell) ? `near sell resumed at ${r.sell.step}` : "near sell recorded");

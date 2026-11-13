@@ -1052,3 +1052,103 @@ test("a record whose W held 500 of the coin before its swap (its baseline) and h
   assert.deepEqual((await records(v.w))[0]!.fill?.out, "1200");
   assert.deepEqual(home.st.moved, []);
 });
+
+// ---- round 8: whether a run is the way home or a sale is stored on its sell mark, never inferred ----
+
+/** A live record stopped at its swap (floor 1000), W read as `st` holds it; the move given, counted. */
+async function liveAtSwap(coin: bigint, usdc: bigint, o: { sell?: Record<string, unknown>; code?: string; step?: string; fill?: boolean } = {}) {
+  const v = await world([5_000_000n], [true]);
+  const { w: W, note } = v.ws[0]!;
+  const rec = { v: 1, id: "req-8", network: NETWORK, token: TOKEN, amount: "2980000", slippage_bps: 100, w: W, l: note.leaf!.label.toString(), j: jOf(note.ref), note: note.id, fee: "20000", created_ms: 1, resumes: NEAR_BUY_RESUMES, stage: "sent", step: o.step ?? "swap", code: o.code ?? "carry_failed", txs: [], payout: "landed", swap: { floor: "1000", before: "0" }, ...(o.sell ? { sell: o.sell } : {}) };
+  await v.w.put("quotes", `${NEAR_BUY_KEY}req-8`, rec);
+  const st = { coin, usdc, moved: [] as bigint[], pools: 0 };
+  const readWallet = async (x: { wallet: string; side: string }) => ({ account: x.wallet, height: 1, blockHash: "h", nonce: 1n, held: x.side === "sell" ? st.coin : st.usdc, registered: true, storageMin: 0n, lostfound: 0n, exists: true }) as never;
+  const move = async (_w: unknown, _n: string, amount: bigint) => (st.moved.push(amount), (st.usdc -= amount), { kind: "deposited" as const, txs: ["11111111111111111111111111111111"], height: 1 });
+  const page = (log: string[], m: NearBuyPage["move"] = move) => pageOf(v, log, { readWallet, move: m, pools: async () => (st.pools++, []) });
+  const rec8 = async () => (await records(v.w))[0]!;
+  return { v, W, st, page, move, rec8 };
+}
+/** A sale's lines: a quote read, a swap signed or sent. */
+const saleLines = (log: string[]) => log.filter((l) => /^near sell (quote|swap|stopped at (quote|swap))/.test(l));
+
+test("P2-L a way home whose move throws once is taken up on the next load as the way home: no quote, no swap, nothing of a sale signed; the coin kept, the USDC home, the sell refused", async () => {
+  const x = await liveAtSwap(5000n, 2_500_000n);
+  let once = true;
+  const throwsOnce: NearBuyPage["move"] = async (w, n, a) => {
+    if (once) throw ((once = false), new Error("timed out"));
+    return x.move(w, n, a);
+  };
+  const first: string[] = [];
+  await resumeNearSells(x.page(first, throwsOnce)).catch(() => {});
+  const stored = (await x.rec8()).sell?.home;
+  const next: string[] = [];
+  await resumeNearSells(x.page(next, throwsOnce)).catch(() => {});
+  assert.deepEqual(saleLines([...first, ...next]), [], `no sale: ${next.join(" | ")}`);
+  assert.equal(stored, true, `the way home stored on its mark: ${first.join(" | ")}`);
+  assert.equal(x.st.pools, 0, "no pool read for a quote");
+  assert.deepEqual(x.st.moved, [2_500_000n], "W's USDC in the vault");
+  const r = await x.rec8();
+  assert.deepEqual([r.stage, r.fill?.out, r.sell?.stage, r.sell?.code], ["filled", "5000", "refused", "coin_kept"]);
+  // a later load: nothing more
+  const later: string[] = [];
+  await resumeNearSells(x.page(later)).catch(() => {});
+  // (the mock move leaves W's return note PLANNED, so a later load takes the note up again: never as a sale)
+  assert.deepEqual([saleLines(later), x.st.pools], [[], 0]);
+});
+
+test("P2-L a way home whose page closes during the move's wait is taken up on the next load as the way home: no quote, no swap, nothing of a sale signed", async () => {
+  const x = await liveAtSwap(5000n, 2_500_000n);
+  const first: string[] = [];
+  // the first page closes while its move waits: its run never returns, and its locks go with it (a closed page holds
+  // none), so that page takes its locks from a manager of its own
+  const own = { request: (_n: string, _o: unknown, fn: () => unknown) => Promise.resolve(fn()) } as unknown as LockManager;
+  void resumeNearSells({ ...x.page(first, () => new Promise(() => {})), locks: own });
+  for (let k = 0; k < 50 && !first.some((l) => l.startsWith("near sell move")) && (await x.rec8()).sell?.step !== "move"; k++) await new Promise((r) => setTimeout(r, 5));
+  const next: string[] = [];
+  await resumeNearSells(x.page(next)).catch(() => {});
+  assert.deepEqual(saleLines([...first, ...next]), [], `no sale: ${next.join(" | ")}`);
+  assert.equal(x.st.pools, 0);
+  assert.deepEqual(x.st.moved, [2_500_000n]);
+  assert.deepEqual((await x.rec8()).fill?.out, "5000");
+});
+
+test("P2-L the other side: a tap's sale that stopped partway resumes on the next load as a sale (its quote read); a tap on a way home that stopped makes it a sale", async () => {
+  const sale = { id: "tap-1", slippage_bps: 100, created_ms: 1, resumes: 0, stage: "sent", step: "quote", txs: [] };
+  const a = await liveAtSwap(5000n, 0n, { sell: sale });
+  const la: string[] = [];
+  await resumeNearSells(a.page(la)).catch(() => {});
+  assert.ok(la.some((l) => l.startsWith("near sell quote")), `the sale goes on: ${la.join(" | ")}`);
+  // the same mark stored as the way home: no quote on a load
+  const b = await liveAtSwap(5000n, 0n, { sell: { ...sale, id: "home-1", home: true } });
+  const lb: string[] = [];
+  await resumeNearSells(b.page(lb)).catch(() => {});
+  assert.deepEqual(saleLines(lb), [], `the way home goes on: ${lb.join(" | ")}`);
+  // a tap on a W whose way home stopped: the user's sale, its quote read
+  const c = await liveAtSwap(5000n, 0n, { sell: { ...sale, id: "home-2", home: true } });
+  const lc: string[] = [];
+  const r = nearSellKind(c.page(lc))({ token: TOKEN, slippageBps: 100 }, { id: "tap-2", sha: "00", progress: () => {} });
+  if ("running" in r) await r.after.catch(() => {});
+  assert.ok(lc.some((l) => l.startsWith("near sell quote")), `the tap sells: ${lc.join(" | ")}`);
+  assert.equal((await c.rec8()).sell?.home, undefined);
+});
+
+test("P3-K a buy that ended below its floor with no fill (its USDC read failed): the way home writes the fill once W's USDC is under the least deposit and W holds more than its baseline", async () => {
+  const x = await liveAtSwap(900n, 0n, { code: "received_below_floor", step: "receive" });
+  await resumeNearSells(x.page([])).catch(() => {});
+  assert.deepEqual((await x.rec8()).fill?.out, "900");
+  assert.deepEqual(x.st.moved, []);
+  // nothing over its baseline: no fill
+  const y = await liveAtSwap(0n, 0n, { code: "received_below_floor", step: "receive" });
+  await resumeNearSells(y.page([])).catch(() => {});
+  assert.equal((await y.rec8()).fill, undefined);
+  // another code (a swap that never left): a coin under the floor is dust, no fill
+  const z = await liveAtSwap(900n, 0n);
+  await resumeNearSells(z.page([])).catch(() => {});
+  assert.equal((await z.rec8()).fill, undefined);
+});
+
+test("a record whose tap sale was refused with nothing sent (its quote not read), W holding its coin and under 1 USDC: the load shows the coin, a position", async () => {
+  const x = await liveAtSwap(5000n, 0n, { sell: { id: "tap-1", slippage_bps: 100, created_ms: 1, resumes: 0, stage: "refused", step: "quote", code: "quote_check_failed", txs: [] } });
+  await resumeNearSells(x.page([])).catch(() => {});
+  assert.deepEqual((await x.rec8()).fill?.out, "5000");
+});
