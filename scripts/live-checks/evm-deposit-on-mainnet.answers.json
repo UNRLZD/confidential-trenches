@@ -1,16 +1,23 @@
 {
  "key": "evm-deposit-on-mainnet",
- "recorded": "2026-11-12T23:45:11.109Z",
+ "recorded": "2026-11-13T00:41:12.703Z",
  "good": {
-  "readAt": "2026-11-12T23:45:11.109Z",
+  "readAt": "2026-11-13T00:40:40.394Z",
   "from": "local build",
   "page": {
-   "pin": "sha384-58h7F7JtivVw+rUF78orbyq+gslRCWRmkyhW+yODJghin1PT1qYq175BgFhANdhx",
-   "sha384": "sha384-58h7F7JtivVw+rUF78orbyq+gslRCWRmkyhW+yODJghin1PT1qYq175BgFhANdhx",
+   "pin": "sha384-MnIHxB8uTXRZCQ5Zml9Wkz+DJxsxd31BZuG/2Nr0FDVeIs8sI/MD26y7JFYqiTRl",
+   "sha384": "sha384-MnIHxB8uTXRZCQ5Zml9Wkz+DJxsxd31BZuG/2Nr0FDVeIs8sI/MD26y7JFYqiTRl",
    "rule": true,
    "addressed": true,
    "reader": true,
-   "withdraw": 2
+   "withdraw": 2,
+   "withdrawSites": {
+    "host": true,
+    "flow": true,
+    "deps": true,
+    "run": true,
+    "owed": true
+   }
   },
   "reads": [
    {
@@ -154,8 +161,8 @@
      "sell_sender": "0x2139756ab61ad861b4e25a009f092683e7454ee9",
      "fee_collector": "0xad33ac6fb59b0b06ca6bbf9d56d51990dc06a047",
      "epoch_ms": 60000,
-     "epoch_start_ms": 1794527040000,
-     "block": "0x360eb3a",
+     "epoch_start_ms": 1794530400000,
+     "block": "0x3612cda",
      "fee": "20000000000000",
      "step": "10000000000000"
     }
@@ -171,8 +178,8 @@
      "sell_sender": "0x92874bbc2638f644872d911d8b72d734978e24ae",
      "fee_collector": "0xdc41efe2174d6ba6db3f6f96672672bafc1b88e7",
      "epoch_ms": 60000,
-     "epoch_start_ms": 1794527040000,
-     "block": "0x6baf9c9",
+     "epoch_start_ms": 1794530400000,
+     "block": "0x6bb74b6",
      "fee": "60000000000000",
      "step": "10000000000000"
     }
@@ -181,11 +188,11 @@
   "fee": {
    "base": {
     "bind": {
-     "start": "2026-11-12T23:44:00.000Z",
+     "start": "2026-11-13T00:40:00.000Z",
      "ok": true,
-     "block": "56683322",
+     "block": "56700122",
      "depth": 0,
-     "chainFee": "9707324829",
+     "chainFee": "12184272544",
      "baseFeePerGas": "5000000",
      "hosts": [
       "mainnet.base.org",
@@ -207,8 +214,8 @@
       "sell_sender": "0x2139756ab61ad861b4e25a009f092683e7454ee9",
       "fee_collector": "0xad33ac6fb59b0b06ca6bbf9d56d51990dc06a047",
       "epoch_ms": 60000,
-      "epoch_start_ms": 1794527040000,
-      "block": "0x360eb3a",
+      "epoch_start_ms": 1794530400000,
+      "block": "0x3612cda",
       "fee": "20000000000000",
       "step": "10000000000000"
      }
@@ -224,8 +231,8 @@
       "sell_sender": "0x2139756ab61ad861b4e25a009f092683e7454ee9",
       "fee_collector": "0xad33ac6fb59b0b06ca6bbf9d56d51990dc06a047",
       "epoch_ms": 60000,
-      "epoch_start_ms": 1794526980000,
-      "block": "0x360ea0e",
+      "epoch_start_ms": 1794530340000,
+      "block": "0x3612bae",
       "fee": "20000000000000",
       "step": "10000000000000"
      }
@@ -233,12 +240,12 @@
    },
    "robinhood": {
     "bind": {
-     "start": "2026-11-12T23:44:00.000Z",
+     "start": "2026-11-13T00:40:00.000Z",
      "ok": true,
-     "block": "112916937",
+     "block": "112948406",
      "depth": 0,
-     "chainFee": "12800361600",
-     "baseFeePerGas": "20040000",
+     "chainFee": "0",
+     "baseFeePerGas": "20150000",
      "hosts": [
       "rpc.mainnet.chain.robinhood.com",
       "robinhood.drpc.org"
@@ -259,8 +266,8 @@
       "sell_sender": "0x92874bbc2638f644872d911d8b72d734978e24ae",
       "fee_collector": "0xdc41efe2174d6ba6db3f6f96672672bafc1b88e7",
       "epoch_ms": 60000,
-      "epoch_start_ms": 1794527040000,
-      "block": "0x6baf9c9",
+      "epoch_start_ms": 1794530400000,
+      "block": "0x6bb74b6",
       "fee": "60000000000000",
       "step": "10000000000000"
      }
@@ -276,8 +283,8 @@
       "sell_sender": "0x92874bbc2638f644872d911d8b72d734978e24ae",
       "fee_collector": "0xdc41efe2174d6ba6db3f6f96672672bafc1b88e7",
       "epoch_ms": 60000,
-      "epoch_start_ms": 1794526980000,
-      "block": "0x6baf786",
+      "epoch_start_ms": 1794530340000,
+      "block": "0x6bb7272",
       "fee": "60000000000000",
       "step": "10000000000000"
      }
@@ -286,7 +293,7 @@
   }
  },
  "bad_live_before": {
-  "readAt": "2026-11-12T23:45:44.870Z",
+  "readAt": "2026-11-13T00:41:12.703Z",
   "from": "https://confidential.unrealized.trade",
   "page": {
    "pin": "sha384-xhGWqj+mSNnlpkeN0Pg91FQK+TxnUDTHnC0QkCDmOH2oHLgei9kQNFAYFLqwMC7s",
@@ -294,7 +301,14 @@
    "rule": false,
    "addressed": false,
    "reader": false,
-   "withdraw": 1
+   "withdraw": 1,
+   "withdrawSites": {
+    "host": false,
+    "flow": false,
+    "deps": false,
+    "run": false,
+    "owed": false
+   }
   },
   "reads": [
    {
@@ -438,8 +452,8 @@
      "sell_sender": "0x2139756ab61ad861b4e25a009f092683e7454ee9",
      "fee_collector": "0xad33ac6fb59b0b06ca6bbf9d56d51990dc06a047",
      "epoch_ms": 60000,
-     "epoch_start_ms": 1794527100000,
-     "block": "0x360ec66",
+     "epoch_start_ms": 1794530400000,
+     "block": "0x3612cda",
      "fee": "20000000000000",
      "step": "10000000000000"
     }
@@ -455,8 +469,8 @@
      "sell_sender": "0x92874bbc2638f644872d911d8b72d734978e24ae",
      "fee_collector": "0xdc41efe2174d6ba6db3f6f96672672bafc1b88e7",
      "epoch_ms": 60000,
-     "epoch_start_ms": 1794527100000,
-     "block": "0x6bafc0a",
+     "epoch_start_ms": 1794530400000,
+     "block": "0x6bb74b6",
      "fee": "60000000000000",
      "step": "10000000000000"
     }
@@ -465,11 +479,11 @@
   "fee": {
    "base": {
     "bind": {
-     "start": "2026-11-12T23:45:00.000Z",
+     "start": "2026-11-13T00:40:00.000Z",
      "ok": true,
-     "block": "56683622",
+     "block": "56700122",
      "depth": 0,
-     "chainFee": "9368426925",
+     "chainFee": "12184272544",
      "baseFeePerGas": "5000000",
      "hosts": [
       "mainnet.base.org",
@@ -491,8 +505,8 @@
       "sell_sender": "0x2139756ab61ad861b4e25a009f092683e7454ee9",
       "fee_collector": "0xad33ac6fb59b0b06ca6bbf9d56d51990dc06a047",
       "epoch_ms": 60000,
-      "epoch_start_ms": 1794527100000,
-      "block": "0x360ec66",
+      "epoch_start_ms": 1794530400000,
+      "block": "0x3612cda",
       "fee": "20000000000000",
       "step": "10000000000000"
      }
@@ -508,8 +522,8 @@
       "sell_sender": "0x2139756ab61ad861b4e25a009f092683e7454ee9",
       "fee_collector": "0xad33ac6fb59b0b06ca6bbf9d56d51990dc06a047",
       "epoch_ms": 60000,
-      "epoch_start_ms": 1794527040000,
-      "block": "0x360eb3a",
+      "epoch_start_ms": 1794530340000,
+      "block": "0x3612bae",
       "fee": "20000000000000",
       "step": "10000000000000"
      }
@@ -517,19 +531,19 @@
    },
    "robinhood": {
     "bind": {
-     "start": "2026-11-12T23:45:00.000Z",
+     "start": "2026-11-13T00:40:00.000Z",
      "ok": true,
-     "block": "112917514",
+     "block": "112948406",
      "depth": 0,
-     "chainFee": "22712518400",
-     "baseFeePerGas": "20048000",
+     "chainFee": "0",
+     "baseFeePerGas": "20150000",
      "hosts": [
       "rpc.mainnet.chain.robinhood.com",
-      "robinhood-rpc.publicnode.com"
+      "robinhood.drpc.org"
      ],
      "operators": [
       "robinhood.com",
-      "publicnode.com"
+      "drpc.org"
      ]
     },
     "helper": {
@@ -543,8 +557,8 @@
       "sell_sender": "0x92874bbc2638f644872d911d8b72d734978e24ae",
       "fee_collector": "0xdc41efe2174d6ba6db3f6f96672672bafc1b88e7",
       "epoch_ms": 60000,
-      "epoch_start_ms": 1794527100000,
-      "block": "0x6bafc0a",
+      "epoch_start_ms": 1794530400000,
+      "block": "0x6bb74b6",
       "fee": "60000000000000",
       "step": "10000000000000"
      }
@@ -560,8 +574,8 @@
       "sell_sender": "0x92874bbc2638f644872d911d8b72d734978e24ae",
       "fee_collector": "0xdc41efe2174d6ba6db3f6f96672672bafc1b88e7",
       "epoch_ms": 60000,
-      "epoch_start_ms": 1794527040000,
-      "block": "0x6baf9c9",
+      "epoch_start_ms": 1794530340000,
+      "block": "0x6bb7272",
       "fee": "60000000000000",
       "step": "10000000000000"
      }

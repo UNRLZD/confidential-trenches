@@ -11,6 +11,9 @@
 //      - reader (src/main.ts evmWalletRpc, pool-testnet.ts pageEvmWalletRpc): the follow's Base and Robinhood U_X reader
 //        is the helper's POST /v1/rpc/{chain} at https://ct-api.unrealized.trade (decision M359), on the mainnet build;
 //      - withdraw: the EVM withdraw's marks (evm-withdraw-mainnet.mjs WITHDRAW_MARKS), so money that goes in can come out;
+//      - withdrawSites (withdrawSites): the EVM withdraw's host, flow branch, screen deps, run guard and owed finish each
+//        on that rule and bound to one another, the host's first statement the rule call alone, so none of them is
+//        dropped on SIGN_HOST behind a constant the minifier folds away;
 //   2. the chain part (readChain, checkChain), on both of each chain's RPCs (pool-evm-deploy.mjs MAINNETS):
 //      - eth_chainId is the chain's (Base 8453, Robinhood 4663);
 //      - each mainnet pool (evm-pools-on-mainnet.mjs PINS) has code, the same on both, and its SCOPE() is the same
@@ -71,6 +74,25 @@ const ADDRESSED = (f) => new RegExp(`function (${N})\\(\\)\\{return (${N})\\(\\)
 const ADDRESS_HOST = (a) => new RegExp(`"pool\\.address":${N}\\(\\{pools:${esc(a)},`);
 /** The follow's quote route: its wallet reader the page's helper reader. */
 const ROUTE = new RegExp(`\\(\\{network:${N},pool:(${N})=>${N}\\?\\.evmPoolOf\\(\\1\\)\\?\\?null,wallet:(${N})=>(${N})\\(\\2\\),notes:`);
+/** The EVM withdraw's path in src/pool-testnet.ts, each site bound to the rule (wayOut: `r=e=>F(e,t.withdrawBuilt)`)
+ *  and to one another, so a build that drops the withdraw on SIGN_HOST behind a constant (POOL_TESTNET, folded away)
+ *  reads false: the host (evmWithdrawHost), whose first statement is the rule call alone; the flow's pool.withdraw
+ *  branch; the screen's deps (withdrawDeps); the run's guard (withdraw); the owed finish of a reload (settle). */
+const WAY_OUT = (f) => new RegExp(`[,;{ ](${N})=(${N})=>${esc(f)}\\(\\2,${N}\\.withdrawBuilt\\)[,;]`);
+const WITHDRAW_HOST = (w) => new RegExp(`[,;{ ](${N})=\\((${N}),${N}\\)=>\\{if\\(!${esc(w)}\\(\\2\\)\\)return null;let (${N})=(${N})\\(\\2\\);if\\(\\3===null\\)return null;let ${N}=${N}\\.evmQueuePool\\?\\.\\(\\2\\)`);
+const WITHDRAW_SITES = (w, host, pool) => ({
+  flow: new RegExp(`(${N})\\.kind===${Q}pool\\.withdraw${Q}&&${esc(w)}\\(\\1\\.chain\\)&&(${N})\\.openWithdraw&&${esc(pool)}\\(\\1\\.chain\\)!==null\\?\\2\\.openWithdraw\\(\\1\\.chain,${N}\\)`),
+  deps: new RegExp(`[,;{ ]${N}=\\((${N}),${N}\\)=>\\{let (${N})=${esc(w)}\\(\\1\\)\\?${esc(pool)}\\(\\1\\):null;return\\{chain:\\1,keys:\\{pool:\\2\\?\\.pin\\.pool`),
+  run: new RegExp(`if\\(!\\(!${N}\\|\\|!${esc(w)}\\((${N})\\.chain\\)\\|\\|\\(\\1\\.chain===${Q}solana${Q}\\?${N}===void 0:${esc(pool)}\\(\\1\\.chain\\)===null\\)\\)\\)`),
+  owed: new RegExp(`if\\((${N})===${Q}base${Q}\\|\\|\\1===${Q}robinhood${Q}\\)\\{let ${N}=${esc(host)}\\(\\1,${N}\\)`),
+});
+/** The EVM withdraw's sites, each found once and bound: { host, flow, deps, run, owed }, every one false without the rule. */
+export function withdrawSites(js, f) {
+  const way = f && once(WAY_OUT(f), js) ? WAY_OUT(f).exec(js) : null;
+  const host = way && once(WITHDRAW_HOST(way[1]), js) ? WITHDRAW_HOST(way[1]).exec(js) : null;
+  const sites = host ? WITHDRAW_SITES(way[1], host[1], host[4]) : {};
+  return { host: !!host, ...Object.fromEntries(["flow", "deps", "run", "owed"].map((k) => [k, !!host && once(sites[k], js)])) };
+}
 const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}`;
 
 /** What the check keeps of SIGN_HOST's build: its pin and sha384, and each marker found exactly once and bound. */
@@ -86,6 +108,7 @@ export function pageFacts(index, js) {
     addressed: !!addressed && once(ADDRESS_HOST(addressed[1]), js),
     reader: !!reader && once(HELPER_AT(reader[6]), js),
     withdraw: WITHDRAW_MARKS.filter((m) => js.includes(m)).length,
+    withdrawSites: withdrawSites(js, rule?.[2]),
   };
 }
 
@@ -109,6 +132,8 @@ export function judgeBundle(run) {
   say(p?.addressed === true, "[SIGN_HOST] pool.address gives a deposit address on each pool chain the rule opens, Base and Robinhood with Solana");
   say(p?.reader === true, "[SIGN_HOST] the follow reads a Base or Robinhood U_X on the helper's /v1/rpc/{chain} alone");
   say(p?.withdraw === WITHDRAW_MARKS.length, `[SIGN_HOST] the build carries the EVM withdraw: ${p?.withdraw ?? "not read"}/${WITHDRAW_MARKS.length} marks`);
+  const SITES = { host: "its host opens on the rule alone", flow: "pool.withdraw opens its screen", deps: "the screen's funds and run", run: "a tap's run", owed: "a reload finishes an owed withdraw" };
+  for (const [k, what] of Object.entries(SITES)) say(p?.withdrawSites?.[k] === true, `[SIGN_HOST] the EVM withdraw on the rule: ${what} (${k})`);
   const verdict = verdictOf(lines.some((l) => l.startsWith("BAD")), false);
   return { ok: verdict === "PASS", verdict, lines };
 }
