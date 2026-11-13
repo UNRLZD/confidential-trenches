@@ -196,9 +196,15 @@ export interface TxRef {
   readonly hash: string;
 }
 
-/** A top-level flow is set up: the page wrote its one-use pending-flow record. Its outcome comes back in `state`. */
+/**
+ * A top-level flow is set up: the page wrote its one-use pending-flow record. Its outcome comes back in `state`.
+ * `closes` (kit 1.13, card signing-layer-says-when-it-closes): this page tells the app, by a ClosedEvent for the
+ * request's id, when the layer this open shows has closed. Sent only to a client at kit 1.13 or above; absent from a
+ * page of an earlier release, which sends no such notice.
+ */
 export interface OpenResult {
   pending: true;
+  closes?: true;
 }
 
 /** The result of each kind. */
@@ -357,7 +363,7 @@ export interface ReadyEvent {
  * The page sends a client only the states, stages and facts its version reads. A change to what the page may send
  * (a state field, an op kind, a stage, a fact) raises it, and the page maps the version before it down.
  */
-export const SIGNPAGE_KIT_VERSION = "1.12";
+export const SIGNPAGE_KIT_VERSION = "1.13";
 
 /**
  * The client's half of the handshake, app to page (card kit-frame-version): its kit version, posted before every
@@ -422,7 +428,21 @@ export interface ProgressEvent {
  */
 export type ProgressRouteEvent = { v: 1; type: "progress"; id: string } & BuyRoute;
 
-export type SignpageEvent = ReadyEvent | StateEvent | ProgressEvent | ProgressRouteEvent;
+/**
+ * The layer an open kind showed has closed (card signing-layer-says-when-it-closes, kit 1.13): `id` is that open's
+ * request id. Posted once per id, to the app's frame the open was shown over, in the task its inert flag is cleared
+ * PROTECT_MS after the layer closed, so a tap can reach the app again from then on. Only for an open whose ok answer
+ * carried `closes` (OpenResult); none for an open that showed no layer, none when the page reloads (the app's document
+ * goes with it), and none when the app's frame was taken out under a typed screen (its document went then). The type
+ * and the id only. Not one of SIGNPAGE_EVENTS (the handshake's events): a client of an earlier kit drops it.
+ */
+export interface ClosedEvent {
+  v: 1;
+  type: "closed";
+  id: string;
+}
+
+export type SignpageEvent = ReadyEvent | StateEvent | ProgressEvent | ProgressRouteEvent | ClosedEvent;
 
 /** Anything the page posts to the app. */
 export type SignpageMessage = SignpageAnswer | SignpageEvent;

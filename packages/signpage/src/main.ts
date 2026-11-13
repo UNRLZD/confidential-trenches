@@ -83,7 +83,7 @@ import { readSolanaRent } from "../../kit/src/trade/solana/pool-buy.ts";
 import { openNoteStore, readNotes, type NoteRecord, type NoteStore } from "../../wallet/src/notes/store.ts";
 import { frameState } from "./state.ts";
 import { withVaultBalance } from "./vault-balance.ts";
-import { withPositions } from "./positions.ts";
+import { returningWallets, withPositions, withReturning } from "./positions.ts";
 import { mountShell, type Shell } from "./shell.ts";
 import { drawBackdrop, drawSealedGround, groundLogo } from "./backdrop.ts";
 import { GROUND_LOGO_SVG } from "./ground-logo.ts";
@@ -402,7 +402,12 @@ else {
         // and NEAR's, from the buys' own records (src/near-buy.ts nearPositions): a record read, never a chain read
         const nearPage = s.signed_in ? nearBuyPage() : null;
         const near = nearPage ? await nearPositions(nearPage).catch(() => []) : [];
-        return withPositions(pooled, sol === null && near.length === 0 ? null : [...(sol ?? []), ...near]);
+        const positioned = withPositions(pooled, sol === null && near.length === 0 ? null : [...(sol ?? []), ...near]);
+        // the Ws whose money waits for its rent back, on their way (src/positions.ts returningWallets): a store read
+        const owed = s.signed_in && testnet ? await testnet.returning().catch(() => []) : [];
+        // the notes the balance counted, so a W whose sweep's note is counted is not listed too
+        const counted = owed.some((o) => o.sweep !== undefined) ? await shared().catch(() => null) : [];
+        return withReturning(positioned, returningWallets(owed, prices.get("solana"), counted));
       }),
     // a store change, a new price read (or its next one due), the Rent read landing and a proof made
     watch: (fn) => {
@@ -415,11 +420,12 @@ else {
     kinds: whileSignedIn(follows!.withFollow({
       // src/pages/open.ts decides what each draws, from the page's own state and store. The answer goes first, then the
       // layer opens (and the frame leaves).
-      "signin.open": (p) => openKind("signin.open", p.way),
-      signout: () => openKind("signout"),
-      "backup.open": () => openKind("backup.open"),
+      // each with its request's id: the layer it opens tells the app when it has closed (src/shell.ts)
+      "signin.open": (p, ctx) => openKind(ctx.id, "signin.open", p.way),
+      signout: (_p, ctx) => openKind(ctx.id, "signout"),
+      "backup.open": (_p, ctx) => openKind(ctx.id, "backup.open"),
       // the form withdraws from the vault's notes; with a one-time id (from_id) the held deposit's way out
-      "withdraw.open": (p) => (takesParams("withdraw.open", p) ? openKind("withdraw.open", undefined, typeof p.from_id === "string" ? p.from_id : undefined) : null),
+      "withdraw.open": (p, ctx) => (takesParams("withdraw.open", p) ? openKind(ctx.id, "withdraw.open", undefined, typeof p.from_id === "string" ? p.from_id : undefined) : null),
       // from public records only (src/deposit-wire.ts): U named ahead by this page (src/deposit-name.ts), never the seed
       "deposit.quote": depositQuoteHost({ scope: pageScope, read: fs.depositRead, named: () => namer.named(), checked: (id, r, u) => follows!.quoted(id, r, u), stop: quotesStopped }),
       // the deposit sheet's reads before any address (src/deposit-wire.ts depositReadHosts): public data only
@@ -465,21 +471,23 @@ let openedBy: AccountKind | null = null;
 let restoreOnly = false;
 // A kind that comes while a resync reads the store waits for it and is decided on what it read: refused only by the
 // store's own state, never for coming at that moment (the app takes not_allowed as a refusal no retry changes).
-function openKind(kind: AccountKind, way?: unknown, fromId?: string): OpenAnswer | { after: Promise<void>; answer: () => OpenAnswer } | null {
-  if (resyncing) return { after: resynced(), answer: () => decide(kind, way, fromId) };
-  return decide(kind, way, fromId);
+function openKind(id: string, kind: AccountKind, way?: unknown, fromId?: string): OpenAnswer | { after: Promise<void>; answer: () => OpenAnswer } | null {
+  if (resyncing) return { after: resynced(), answer: () => decide(id, kind, way, fromId) };
+  return decide(id, kind, way, fromId);
 }
 async function resynced(): Promise<void> {
   while (resyncing) await resyncing;
 }
-type OpenAnswer = { result: { pending: true }; then: () => void } | null;
-function decide(kind: AccountKind, way: unknown, fromId?: string): OpenAnswer {
+// `closes`: the layer the open shows tells the app when it has closed (src/shell.ts); src/kit-version.ts takes it from an
+// app below the kit's own version, which reads no such notice
+type OpenAnswer = { result: { pending: true; closes: true }; then: () => void } | null;
+function decide(id: string, kind: AccountKind, way: unknown, fromId?: string): OpenAnswer {
   // a sheet shown already is never redrawn by the app: a kind the frame sent before it opened is refused
   if (sheetShown() || !takes(kind, root.dataset.signin, busy)) return null;
   return {
-    result: { pending: true },
+    result: { pending: true, closes: true },
     then: () =>
-      void run(async () => {
+      runOpen(id, async (layer) => {
         const seed = await readSeedSettled();
         const page = pageFor(kind, way, seed, typeof PublicKeyCredential !== "undefined", fromId);
         openedBy = kind;
@@ -499,29 +507,46 @@ function decide(kind: AccountKind, way: unknown, fromId?: string): OpenAnswer {
           if (heldOp === null) return show("signed-in", shown(seed!));
           show("held");
         } else show(page === "passkey" ? "signed-out" : page);
-        openLayer();
+        layer();
       }),
   };
 }
 // pool.withdraw (card signpage-pool-withdraw-form), top-level only and only with a seed stored, as withdraw.open: the
 // answer goes first, then the screen where the user types To and the amount, never passed in by the app; the run's
 // stages go to the op under the request's id.
-function openPoolWithdraw(chain: PoolChain, opId: string): { result: { pending: true }; then: () => void } | null {
+function openPoolWithdraw(chain: PoolChain, opId: string): { result: { pending: true; closes: true }; then: () => void } | null {
   if (framed || !testnet || sheetShown() || !takes("withdraw.open", root.dataset.signin, busy)) return null;
   return {
-    result: { pending: true },
+    result: { pending: true, closes: true },
     then: () =>
-      void run(async () => {
+      runOpen(opId, async (layer) => {
         poolWithdraw = { chain, opId };
         show("pool-withdraw");
-        openLayer();
+        layer();
       }),
   };
 }
+// An open answered closes: true (card signing-layer-says-when-it-closes, review P2-1) is told exactly once on every
+// ending: by its layer's close when `layer()` opened one for it, else, once its run has ended (a page it does not show:
+// signed in or out already, no held op; a read that failed; a run that never started, the page busy), by the shell as a
+// close would tell it, PROTECT_MS after, never sooner. The app's document going (a reload) is the one ending that tells
+// nothing.
+function runOpen(id: string, step: (layer: () => void) => Promise<void>): void {
+  let layered = false;
+  void run(() =>
+    step(() => {
+      openLayer(id);
+      layered = true;
+    }),
+  ).finally(() => {
+    if (!layered) shell?.told(id);
+  });
+}
 const sheetShown = (): boolean => shell !== null && !shell.layer.hidden;
-// The layer opens, and the activation guard restarts its 500 ms: a click lined up before cannot act on what it shows.
-function openLayer(): void {
-  shell?.open(SEALED.has(root.dataset.signin ?? ""));
+// The layer opens for the open kind of request `id`, and the activation guard restarts its 500 ms: a click lined up
+// before cannot act on what it shows.
+function openLayer(id: string): void {
+  shell?.open(SEALED.has(root.dataset.signin ?? ""), id);
   reshown();
 }
 // Back to the app: the layer closes on the page's signed-in or signed-out state.

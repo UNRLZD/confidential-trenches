@@ -1,0 +1,79 @@
+{
+ "_note": "Recorded 13 Nov by app-lock-holds-until-the-layer-closes.mjs --harness --build <dir> --record: good = this card's terminal build, bad = the terminal build before this card (the signing page's closed notice at kit 1.13, the app's lock still lifting at the blur); both framed by the stand-in shell signed out, answering signin.open { pending: true, closes: true }.",
+ "good": {
+  "check": "app-lock-holds-until-the-layer-closes",
+  "at": "2026-11-13T05:04:36.067Z",
+  "source": "harness, terminal build dist-alh, the stand-in shell signed out, its open answered with closes",
+  "browser": "157.0.8103.51",
+  "runs": [
+   {
+    "width": "phone",
+    "framed": true,
+    "sheet": true,
+    "answered": true,
+    "closes": true,
+    "blurred": true,
+    "opens": 1,
+    "locked": true,
+    "line": null,
+    "otherHeld": true,
+    "unlocked": true,
+    "unlockMs": 8,
+    "lineAfter": null
+   },
+   {
+    "width": "desktop",
+    "framed": true,
+    "sheet": true,
+    "answered": true,
+    "closes": true,
+    "blurred": true,
+    "opens": 1,
+    "locked": true,
+    "line": null,
+    "otherHeld": true,
+    "unlocked": true,
+    "unlockMs": 7,
+    "lineAfter": null
+   }
+  ]
+ },
+ "bad": {
+  "check": "app-lock-holds-until-the-layer-closes",
+  "at": "2026-11-13T05:04:44.382Z",
+  "source": "harness, terminal build dist-696, the stand-in shell signed out, its open answered with closes",
+  "browser": "157.0.8103.51",
+  "runs": [
+   {
+    "width": "phone",
+    "framed": true,
+    "sheet": true,
+    "answered": true,
+    "closes": true,
+    "blurred": true,
+    "opens": 2,
+    "locked": true,
+    "line": null,
+    "otherHeld": true,
+    "unlocked": false,
+    "unlockMs": null,
+    "lineAfter": null
+   },
+   {
+    "width": "desktop",
+    "framed": true,
+    "sheet": true,
+    "answered": true,
+    "closes": true,
+    "blurred": true,
+    "opens": 2,
+    "locked": true,
+    "line": null,
+    "otherHeld": true,
+    "unlocked": false,
+    "unlockMs": null,
+    "lineAfter": null
+   }
+  ]
+ }
+}

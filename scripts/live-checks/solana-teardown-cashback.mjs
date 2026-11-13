@@ -46,7 +46,8 @@ export const MARKS = Object.freeze({
   "W left owed when the teardown keeps an unclaimed account": new RegExp(`return ${I}\\((${I})\\.ok\\.unclaimed===void 0\\?\`kept\`:\`owed\`,\\1\\.ok\\.keep\\.map`),
   // card sol-w-sweep, the review of c1fd2d20 (2a): the record is dropped only when both RPCs read W empty, so an owed
   // end (and every other) keeps it
-  "an owed rent back keeps its record": /\{try\{if\(([\w$]+)===`nothing`\)return await [\w$]+\.owed\?\.drop\(/,
+  // since card round-trip-costs-less an empty W is listed empty as its record goes
+  "an owed rent back keeps its record": /\{try\{if\(([\w$]+)===`nothing`\)return await (?:Promise\.resolve\([\w$]+\.owed\?\.markEmpty\?\.\([\w$]+\.address\)\)\.catch\(\(\)=>\{\}\),await )?[\w$]+\.owed\?\.drop\(/,
   "the claim paid in full in the simulation": new RegExp(`if\\((${I})!==(${I})\\.fromAmount-\\2\\.amount&&${I}\\.push\\(\`\\$\\{${I}\\}: \\$\\{\\2\\.from\\} holds \\$\\{\\1\\?\\?\`nothing read\`\\} after the claim \\(want \\$\\{\\2\\.fromAmount-\\2\\.amount\\}\\)\`\\)`),
 });
 

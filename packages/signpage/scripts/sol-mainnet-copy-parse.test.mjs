@@ -2,7 +2,7 @@
 // helper's lists, and each transaction's record.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ALT_PROGRAM, COMPUTE_BUDGET, RENT_FEATURES, UPGRADEABLE_LOADER, clonePlan, copyAccountFile, copyRpcsLocal, cuLimitOf, listCandidates, pendingFeature, simFailure, txRecord } from "./sol-mainnet-copy-parse.mjs";
+import { ALT_PROGRAM, COMPUTE_BUDGET, RENT_FEATURES, UPGRADEABLE_LOADER, clonePlan, copyAccountFile, copyRpcsLocal, cuLimitOf, cuPriceOf, listCandidates, pendingFeature, simFailure, txRecord } from "./sol-mainnet-copy-parse.mjs";
 
 const b64 = (b) => Buffer.from(b).toString("base64");
 /** A frozen lookup table's bytes: tag 1, deactivation u64::MAX, last extended `slot` at start index 24, no authority. */
@@ -87,7 +87,30 @@ test("a transaction's record: result, compute units against its limit, fee, logs
   assert.deepEqual(bad.err, { InstructionError: [3, { Custom: 6000 }] });
   assert.deepEqual(bad.logsTail, Array.from({ length: 12 }, (_, i) => `line ${i + 8}`));
   assert.deepEqual(txRecord("x", "sell", "S3", null), { coin: "x", step: "sell", signature: "S3", found: false });
+  // the block time each transaction landed at (s, the copy's clock): the seconds from a sale to its teardown and its sweep
+  assert.equal(txRecord("curve", "sell", "S4", { ...tx(null), blockTime: 1_794_466_487 }).blockTime, 1_794_466_487);
+  assert.equal(txRecord("curve", "sell", "S5", tx(null)).blockTime, null);
   assert.equal(cuLimitOf(["A"], [{ programIdIndex: 0, data: b64(limit) }], (x) => Buffer.from(x, "base64")), null);
+});
+
+// card round-trip-costs-less: the sale's price and priority read back from the copy's transaction
+test("round-trip-costs-less: a transaction's price and priority read back", () => {
+  const limit = Buffer.alloc(5);
+  limit[0] = 2;
+  limit.writeUInt32LE(104_523, 1);
+  const price = (p) => {
+    const d = Buffer.alloc(9);
+    d[0] = 3;
+    d.writeBigUInt64LE(p, 1);
+    return d;
+  };
+  const PUMP = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P";
+  const sale = (p, err = null) => ({ slot: 9, transaction: { message: { accountKeys: ["W", COMPUTE_BUDGET, PUMP], instructions: [{ programIdIndex: 1, data: b64(limit) }, ...(p === null ? [] : [{ programIdIndex: 1, data: b64(price(p)) }]), { programIdIndex: 2, data: "" }] } }, meta: { err, fee: 5_001, computeUnitsConsumed: 87_102, logMessages: [], preBalances: [1], postBalances: [1] } });
+  const r = (p, err) => txRecord("curve", "sell", "S", sale(p, err));
+  assert.deepEqual([r(1n).cuPrice, r(1n).priority, r(1n).cuLimit], ["1", "1", 104_523]);
+  assert.deepEqual([r(956_727n).priority], ["100000"]);
+  assert.equal(r(null).cuPrice, undefined);
+  assert.equal(cuPriceOf(["A"], [{ programIdIndex: 0, data: b64(price(7n)) }], (x) => Buffer.from(x, "base64")), null);
 });
 
 test("a failed simulation keeps its error, units and last log lines; a good one is none", () => {

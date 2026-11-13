@@ -794,7 +794,8 @@ test("the kind answers sent with its signature once it read back on both RPCs as
   await new Promise((res) => setTimeout(res, 50));
   assert.deepEqual(stages, ["filled"]);
   assert.equal(ended, 1);
-  assert.deepEqual(modes, ["ct-wallet/seed:shared"]);
+  // the run under POOL_TRADE_LOCK, shared: no leftover rent back starts beside a buy (review P2-1 of 024e8a89d)
+  assert.deepEqual(modes, ["ct-pool/trade:shared", "ct-wallet/seed:shared"]);
   assert.equal(w.state(), "SPENT");
 });
 
