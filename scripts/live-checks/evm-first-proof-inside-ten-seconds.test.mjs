@@ -65,19 +65,29 @@ test("planted on this tree's build: each part back to its shape before this card
   // the routed pool's trees on the deposit's pool for every signal
   assert.deepEqual(off(planted(/trees:\(([\w$]+),([\w$]+),([\w$]+)\)=>\(([\w$]+)\(\2\)\?([\w$]+):([\w$]+)\)\.trees/, (_m, a, b, c, _f, l) => `trees:(${a},${b},${c})=>(${l}).trees`)), ["lanes"]);
   // the history read on the deposit's own sync (its trade pair), not the pass sync
-  assert.deepEqual(off(planted(/([\w$]+)\.passSync\.events\(([\w$]+)\.signal\)\.then\(/, (_m, t, s) => `${t}.sync.events(${s}.signal).then(`)), ["warm", "wait"]);
+  assert.deepEqual(off(planted(/([\w$]+)\.passSync\.events\(([\w$]+)\)\.then\(/, (_m, t, s) => `${t}.sync.events(${s}).then(`)), ["warm", "wait"]);
   // evmPoolOf that never starts it
   assert.deepEqual(off(planted(/evmPoolOf:([\w$]+)=>\(([\w$]+)=>\2===null\?null:\(([\w$]+)\(\1\),/, (_m, e, t) => `evmPoolOf:${e}=>(${t}=>${t}===null?null:(void 0,`)), ["warm"]);
   // the deposit's round not behind the wait
-  assert.deepEqual(off(planted(/:\(([\w$]+)=>async ([\w$]+)=>\{let ([\w$]+)=\2\?\?([\w$]+)\.signal;return await ([\w$]+)\(([\w$]+),\3\),\3\.throwIfAborted\(\),\1\(\2\)\}\)\(/, (_m, t, n) => `:(${t}=>async ${n}=>${t}(${n}))(`)), ["wait"]);
+  assert.deepEqual(off(planted(/:\(([\w$]+)=>async ([\w$]+)=>\{let ([\w$]+)=([\w$]+)\.signal,\{stop:([\w$]+),off:([\w$]+)\}=([\w$]+)\(\2,\3\);try\{await ([\w$]+)\(([\w$]+),\5\),\5\.throwIfAborted\(\);let ([\w$]+)=await \1\(\5\);return \3\.aborted\|\|([\w$]+)\.add\(([\w$]+)\),\10\}finally\{\6\(\)\}\}\)\(/, (_m, t, n) => `:(${t}=>async ${n}=>${t}(${n}))(`)), ["wait"]);
   // a round that reads after its stop fired (as before the review: the wait returned and the round read on)
-  assert.deepEqual(off(planted(/,([\w$]+)\.throwIfAborted\(\),([\w$]+)\(([\w$]+)\)\}\)\(/, (_m, r, t, n) => `,${t}(${n})})(`)), ["wait"]);
+  assert.deepEqual(off(planted(/\),([\w$]+)\.throwIfAborted\(\);let ([\w$]+)=await /, (_m, i, n) => `);let ${n}=await `)), ["wait"]);
+  // review of 584af1495, P3-1: the round's stop its own signal alone when given (the end follow's read on past the tap)
+  assert.deepEqual(off(planted(/\{stop:([\w$]+),off:([\w$]+)\}=([\w$]+)\(([\w$]+),([\w$]+)\);try\{await /, (_m, i, a, _f, n, r) => `{stop:${i},off:${a}}={stop:${n}??${r},off:()=>{}};try{await `)), ["wait"]);
+  // review of 584af1495, P3-1: the round read on its own signal, not the stop
+  assert.deepEqual(off(planted(/;let ([\w$]+)=await ([\w$]+)\(([\w$]+)\);return ([\w$]+)\.aborted\|\|/, (_m, n, t, _i, r) => `;let ${n}=await ${t}(void 0);return ${r}.aborted||`)), ["wait"]);
+  // review of 584af1495, P2-1: a round that read leaves the pool unmarked, so every later round waits again
+  assert.deepEqual(off(planted(/return ([\w$]+)\.aborted\|\|([\w$]+)\.add\(([\w$]+)\),([\w$]+)\}finally/, (_m, _r, _w, _e, n) => `return ${n}}finally`)), ["wait"]);
+  // eitherStop that never stops at the session
+  assert.deepEqual(off(planted(/,([\w$]+)\.addEventListener\(`abort`,([\w$]+),\{once:!0\}\),\{stop:/, (_m, _t, r) => `,{stop:`)), ["wait"]);
   // the wait not ended at the stop (its loop asks again after it fired)
   assert.deepEqual(off(planted(/;([\w$]+)<3&&!([\w$]+)\.aborted;/, (_m, k) => `;${k}<3;`)), ["wait"]);
   // a wait asked again once the read held
   assert.deepEqual(off(planted(/\|\|([\w$]+)\.passSync===\1\.sync\|\|([\w$]+)\.has\(([\w$]+)\)\)return;/, (_m, n) => `||${n}.passSync===${n}.sync)return;`)), ["wait"]);
   // an answer after a sign out kept (the warm's read held for the next session)
-  assert.deepEqual(off(planted(/\.then\(\(\)=>\(([\w$]+)\.get\(([\w$]+)\)===([\w$]+)&&\(([\w$]+)\.delete\(\2\),([\w$]+)\.add\(\2\)\),!0\)/, (_m, _m2, e, _r, f, w) => `.then(()=>(${f}.delete(${e}),${w}.add(${e}),!0)`)), ["warm", "wait"]);
+  assert.deepEqual(off(planted(/\.then\(\(\)=>\(!([\w$]+)\.aborted&&([\w$]+)\.get\(([\w$]+)\)===([\w$]+)&&\(([\w$]+)\.delete\(\3\),([\w$]+)\.add\(\3\)\),!0\)/, (_m, _s, _m2, e, _r, f, w) => `.then(()=>(${f}.delete(${e}),${w}.add(${e}),!0)`)), ["warm", "wait"]);
+  // delta review of 679ec10f7, P2: a failure after its session's stop left in the map (the read never asked again)
+  assert.deepEqual(off(planted(/\(\)=>\(([\w$]+)\.get\(([\w$]+)\)===([\w$]+)&&\(\1\.delete\(\2\),([\w$]+)\.aborted\|\|/, (_m, m, e, i, r) => `()=>(!${r}.aborted&&${m}.get(${e})===${i}&&(${m}.delete(${e}),`)), ["warm", "wait"]);
   // the bound gone
   assert.deepEqual(off(planted(/\.evmWarmWaitMs\?\?2e4/, ".evmWarmWaitMs??1/0")), ["wait"]);
 });
