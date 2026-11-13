@@ -156,8 +156,16 @@ const sideRpc = async (method, params) => {
 };
 // the sender holds the key it is given (apps/helper/src/pool/evm.ts cfg.senderKey, as the helper's own fresh unhex):
 // its own copy, so the zeroing below leaves the sender's (run 6, 13 Nov 07:34Z: "invalid private key" at the buy's send)
-const sender = evmPoolSender({ network: CHAIN, pool: PIN.pool, senderKey: KEY.slice(), feeRecipient: PIN.feeRecipient, log: (line) => log("helper sender", { line }) }, [sideRpc, (m, p) => sideRpc(m, p)]);
+// the sale's sender: its own published test key sha256("helper-pool-senders/test-key/EVM_SELL_SENDER"), never the
+// withdraw sender's, and the chain's pinned FeeCollector (the kit's venue entry), as the helper's env sets both (run 9,
+// 13 Nov 08:19Z: the sell answered 503 not_configured, no sell key set). The kit pins the mainnet sell sender, whose key
+// is not ours: the device sims each sale from that pin, and on the copy this test key sends it (funded on the fork only)
+const SELL_KEY = new Uint8Array(createHash("sha256").update("helper-pool-senders/test-key/EVM_SELL_SENDER").digest());
+const COLLECTOR = evmPoolVenues()[CHAIN]?.feeCollector;
+if (COLLECTOR === undefined) throw new Error(`the mainnet build pins no ${CHAIN} fee collector`);
+const sender = evmPoolSender({ network: CHAIN, pool: PIN.pool, senderKey: KEY.slice(), sellKey: SELL_KEY.slice(), feeRecipient: PIN.feeRecipient, feeCollector: COLLECTOR, log: (line) => log("helper sender", { line }) }, [sideRpc, (m, p) => sideRpc(m, p)]);
 KEY.fill(0);
+SELL_KEY.fill(0);
 // the sender's own throw, which the handler answers as a bare 500 "internal"
 const senderSeen = Object.create(sender, {
   carry: { value: async (body, client) => {
@@ -172,6 +180,7 @@ const senderSeen = Object.create(sender, {
   } },
 });
 await anvil("anvil_setBalance", [sender.sender, "0xde0b6b3a7640000"]);
+await anvil("anvil_setBalance", [sender.sellSender, "0xde0b6b3a7640000"]);
 const rpcRoute = createRpc({ [CHAIN === "base" ? "BASE_RPC_URL" : "ROBINHOOD_RPC_URL"]: ANVIL }, { log: (line) => log("helper rpc", { line }) });
 const helperLines = [];
 const serve = handler(
@@ -461,12 +470,16 @@ log("end", { end: record.end, ms: record.times.tapToEndMs, stages, holding: hold
 const sent = helperCalls.filter((c) => c.path === "/v1/pool/evm/send" && c.status === 200).map((c) => /"hash":"(0x[0-9a-f]{64})"/.exec(c.body)?.[1]).filter(Boolean).at(-1);
 const hash = holdings?.[proof.wallet.address]?.route?.tx ?? sent ?? null;
 // read only once a block of this fork holds it: anvil sends a hash it does not know to the forked chain's provider
-let rc = null;
-for (let i = 0; hash && rc === null && i < 20; i++) {
-  const top = BigInt(await anvil("eth_blockNumber", []));
-  for (let n = top; rc === null && n > firstHead; n--) if ((await anvil("eth_getBlockByNumber", [`0x${n.toString(16)}`, false])).transactions.includes(hash)) rc = await anvil("eth_getTransactionReceipt", [hash]);
-  if (rc === null) await sleep(500);
-}
+const receiptOnFork = async (hash) => {
+  let rc = null;
+  for (let i = 0; hash && rc === null && i < 20; i++) {
+    const top = BigInt(await anvil("eth_blockNumber", []));
+    for (let n = top; rc === null && n > firstHead; n--) if ((await anvil("eth_getBlockByNumber", [`0x${n.toString(16)}`, false])).transactions.includes(hash)) rc = await anvil("eth_getTransactionReceipt", [hash]);
+    if (rc === null) await sleep(500);
+  }
+  return rc;
+};
+const rc = await receiptOnFork(hash);
 record.tx = hash;
 record.block = rc?.blockNumber ? BigInt(rc.blockNumber) : null;
 record.status = rc?.status ?? null;
@@ -547,7 +560,9 @@ record.ab = { aPosition: aPos, bPosition: bPos, aBalance: aBal, bBalance: bBal, 
 log("B after restore", record.ab);
 if (rec === null || bPos === null || !record.ab.equal) await finish(1);
 
-// 6. B sells the whole holding (share 10,000 bps) at 300 bps
+// 6. B sells the whole holding (share 10,000 bps) at 300 bps, on a fresh head: the fork mines only on a send, and the
+// kit refuses a block more than 30 s behind the device's clock (run 8, 13 Nov 08:16Z: the sell refused stale_quote, 58 s after the buy's fill)
+await anvil("evm_mine", []);
 const sellStages = [];
 const SELL_ENDS = ["filled", "part_filled", "refused", "not_landed", "failed"];
 tapped = true;
@@ -564,6 +579,11 @@ await navigator.locks.request(WALLET_SEED_LOCK, { mode: "exclusive" }, () => {})
 for (let i = 0; i < 360 && !SELL_ENDS.includes(sellStages.at(-1)); i++) await sleep(1_000);
 tapped = false;
 record.sell = { end: sellStages.at(-1) ?? null, stages: sellStages, tapToEndMs: Date.now() - sellAt };
+// the sale's transaction, the hash the helper's sell route answered, read back on the fork (run 10 kept it only in its
+// helper calls)
+const sold = helperCalls.filter((c) => c.path === "/v1/pool/evm/sell" && c.status === 200).map((c) => /"hash":"(0x[0-9a-f]{64})"/.exec(c.body)?.[1]).filter(Boolean).at(-1) ?? null;
+const sellRc = await receiptOnFork(sold);
+Object.assign(record.sell, { tx: sold, block: sellRc?.blockNumber ? BigInt(sellRc.blockNumber) : null, status: sellRc?.status ?? null });
 log("sell end", record.sell);
 
 // 7. the balances after the sale: B's, and a third fresh profile's from the same words
@@ -580,4 +600,4 @@ const bPosAfter = ((await B.t.positions()) ?? []).filter((p) => p.chain === CHAI
 record.after = { bBalance: bAfter, cBalance: cAfter, equal: bAfter === cAfter, bPositions: bPosAfter, grew: bAfter !== null && bBal !== null && Number(bAfter) > Number(bBal) };
 log("after sale", record.after);
 for (const d of [B, C]) await d.t.signedOut().catch(() => {});
-await finish(record.sell.end === "filled" && record.after.equal && record.after.grew ? 0 : 1);
+await finish(record.sell.end === "filled" && record.sell.status === "0x1" && record.after.equal && record.after.grew ? 0 : 1);
