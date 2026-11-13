@@ -379,7 +379,7 @@ export const SIGNPAGE_RESULT_SCHEMAS = {
   "deposit.dry": depositDry,
   "pool.address": poolAddress,
   "pool.sell.dry": poolSellDry,
-  "pool.buy.dry": obj({ tap_max: dec }, { pieces: (v) => Number.isInteger(v) && (v as number) >= 1 && (v as number) <= SOLANA_POOL_BUY_PIECES_MAX, cost: dec, out: dec }),
+  "pool.buy.dry": obj({ tap_max: dec }, { with_cash: dec, pieces: (v) => Number.isInteger(v) && (v as number) >= 1 && (v as number) <= SOLANA_POOL_BUY_PIECES_MAX, cost: dec, out: dec }),
 } as const satisfies Record<SignpageKind, SignpageSchema>;
 deepFreeze(SIGNPAGE_RESULT_SCHEMAS);
 
@@ -462,7 +462,7 @@ const solSignature: SignpageSchema = (v) => {
 const nearImplicit: SignpageSchema = (v) => typeof v === "string" && /^[0-9a-f]{64}$/.test(v);
 /** A Rhea pool's index on its exchange: a u32 in decimal, no leading zero. */
 const rheaPool: SignpageSchema = (v) => typeof v === "string" && /^(0|[1-9]\d{0,9})$/.test(v) && Number(v) <= 0xffffffff;
-/** A route event (messages.ts BuyRoute): a progress event with no stage and exactly one of its four shapes. W and the
+/** A route event (messages.ts BuyRoute): a progress event with no stage and exactly one of its five shapes. W and the
  *  pool are addresses (on NEAR, W's implicit account and the Rhea pool's index); the venue is the page's name for it,
  *  a free string; tx a Solana signature. */
 const routeHead = { v: lit(1), type: lit("progress"), id: str };
@@ -470,7 +470,8 @@ const routeWallet = obj({ ...routeHead, wallet: (v) => solAddress(v) || nearImpl
 const routeVenue = obj({ ...routeHead, venue: str, pool: (v) => solAddress(v) || rheaPool(v) });
 const routeOut = obj({ ...routeHead, out: routeOutAmount });
 const routeTx = obj({ ...routeHead, tx: solSignature });
-export const signpageProgressRouteSchema: SignpageSchema = (v) => routeWallet(v) || routeVenue(v) || routeOut(v) || routeTx(v);
+const routeMove = obj({ ...routeHead, move: lit("cash") });
+export const signpageProgressRouteSchema: SignpageSchema = (v) => routeWallet(v) || routeVenue(v) || routeOut(v) || routeTx(v) || routeMove(v);
 
 /** An answer's envelope; the result inside is checked against its kind's schema by the client. */
 export const signpageAnswerOkSchema = obj({ v: lit(1), id: str, ok: lit(true), result: (v) => isPlainObject(v) });
