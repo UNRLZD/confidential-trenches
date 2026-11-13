@@ -27,8 +27,9 @@
 // key its schema refuses the whole answer for: it is sent each with out left out (every level below it too), and every
 // closed notice. A client that names kit-v1.14 reads everything but a pool.buy.dry answer's with_cash and the route event
 // { move: "cash" } (card one-balance-buys-on-every-chain), which its schema refuses the whole answer, or the event, for:
-// it is sent each answer with with_cash left out and no move event (every level below it too), and the state with every
-// move op (kind "move", pool.move's) left out, a kind no kit before 1.15 has (every level below it too). A client at
+// it is sent each answer with with_cash left out and no move event (every level below it too). A move op (kind "move",
+// pool.move's), a kind no kit before 1.15 has, is sent as it is: kit-v1.5 and later drop an op they cannot read and keep
+// the rest of the state (kit schema.ts signpageReadableOps), and kit-v1.4's path leaves it out (opV1_4). A client at
 // SIGNPAGE_KIT_VERSION or above gets every message as it is. A change
 // to what the page may send raises the kit's
 // SIGNPAGE_KIT_VERSION and adds the version before it here.
@@ -157,9 +158,6 @@ const noPoolOps = (ops: readonly Operation[]): Operation[] => ops.filter((o) => 
  *  signpage-state-holdings). */
 const noDecimals = (s: SignpageState): SignpageState => ({ ...s, positions: s.positions.map(({ decimals: _d, ...p }) => p) });
 
-/** The state with no move op (card one-balance-buys-on-every-chain): kit-v1.14 and before have no kind "move". */
-const noMoves = (s: SignpageState): SignpageState => (s.ops.some((o) => o.kind === "move") ? { ...s, ops: s.ops.filter((o) => o.kind !== "move") } : s);
-
 /** The pools with no making (card buy-spends-several-pieces): kit-v1.11 and before refuse a pool entry that has one. */
 const noMaking = (s: SignpageState): SignpageState => (s.pools === undefined ? s : { ...s, pools: s.pools.map(({ making: _m, ...p }) => p) });
 /** pool.buy.dry's answer with no with_cash (card one-balance-buys-on-every-chain): kit-v1.14 and before refuse one. */
@@ -212,9 +210,7 @@ function noDetail(o: Operation): Operation {
  *  otherwise; kit-v1.7's with no position decimals either (every level below too); kit-v1.6's with no pool_deposit op;
  *  kit-v1.5's, that and each deposit op with no moved_out; kit-v1.4's fields only, in the state's own order, each op
  *  mapped or left out. */
-export function stateFor(level: KitLevel, sent: SignpageState): SignpageState {
-  // every level below the current one: no move op (kit 1.15's kind)
-  const all = level === "current" ? sent : noMoves(sent);
+export function stateFor(level: KitLevel, all: SignpageState): SignpageState {
   if (level === "current" || level === "1.14" || level === "1.13" || level === "1.12") return all;
   const given = noMaking(all);
   if (level === "1.11") return given;
@@ -258,9 +254,7 @@ export function stageFor(level: KitLevel, stage: Stage): Stage | null {
  * no moved_out; for kit-v1.4 the state mapped, deposit.confirm's stage mapped with no facts; every other kind's result
  * as it is (each reads each kind it can ask the same as now).
  */
-export function resultFor(level: KitLevel, kind: SignpageKind, all: unknown): unknown {
-  // the state below the current level: no move op (kit 1.15's kind), at every level
-  const given = level !== "current" && kind === "state" ? noMoves(all as SignpageState) : all;
+export function resultFor(level: KitLevel, kind: SignpageKind, given: unknown): unknown {
   if (level === "current") return given;
   const cashless = dryCashFor(kind, given);
   if (level === "1.14") return cashless;

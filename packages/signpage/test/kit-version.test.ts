@@ -1113,32 +1113,19 @@ test("hello kit 1.14: the state answer and every state event as they are, the cl
 });
 
 // kit 1.15 (card one-balance-buys-on-every-chain, pool.move): state.ops may carry a move op (kind "move"), which no kit
-// before 1.15 has a kind for: every level below the current one is sent the state with each move op left out (kit-v1.5
-// to kit-v1.14 would drop it themselves, kit-v1.4 refuses the whole state for it; none is ever sent one). The buy's
-// route event { move: "cash", op } goes to the current level only, as { move: "cash" } did. Red at 8b620897f: the move
-// op went to kit-v1.14 and every level down to kit-v1.5 as it is.
+// before 1.15 has a kind for. kit-v1.5 and later drop an op they cannot read and keep the rest of the state (kit
+// schema.ts signpageReadableOps), so each level from kit-v1.5 to kit-v1.14 is sent the state as it has it, the move op
+// in it, and its own reader leaves the op out and reads the rest; kit-v1.4's path leaves the op out itself (opV1_4).
 const MOVE_OP = { id: "mv1", kind: "move" as const, from: "near" as const, to: "solana" as const, stage: "in_transit" as const, txs: tx, amount: "25.5", out: "0.31", created_ms: 5 };
-test("a move op: sent to the kit's own version, whose schema reads it; left out for kit-v1.14 and every level below, the rest of the state as each level has it", async () => {
+test("a move op: sent to the kit's own version, whose schema reads it; kit-v1.14's reader drops it and reads the rest; kit-v1.4's path leaves it out", async () => {
   const WITH = { ...FULL, ops: [...FULL.ops, MOVE_OP] } as SignpageState;
   assert.ok(NOW.SIGNPAGE_RESULT_SCHEMAS.state(WITH), "the kit's own schema reads the move op");
   assert.deepEqual(resultFor(kitLevel(SIGNPAGE_KIT_VERSION), "state", WITH), WITH);
-  for (const kit of ["1.14", "1.13", "1.12", "1.11", "1.10", "1.9", "1.8", "1.7", "1.6", "1.5", "1.4"]) {
-    assert.deepEqual(resultFor(kitLevel(kit), "state", WITH), resultFor(kitLevel(kit), "state", FULL), kit);
-  }
-  // the planted case: kit-v1.14's own reader drops the op it has no kind for
-  assert.equal(V114.signpageReadableOps(WITH) === WITH, false);
-  for (const [kit, want] of [["1.14", FULL], [SIGNPAGE_KIT_VERSION, WITH]] as const) {
-    const p = page();
-    p.set(WITH);
-    p.send(hello(kit));
-    const id = await p.ask();
-    assert.deepEqual(p.answer(id).result, want, kit);
-    // and every state event after it
-    p.set({ ...WITH, vault_balance: "81" });
-    await p.api.idle();
-    const ev = p.posted.filter((m) => (m as { type?: string }).type === "state");
-    assert.deepEqual(ev, [{ v: 1, type: "state", state: { ...want, vault_balance: "81" } }], `${kit}: the state event`);
-  }
+  const sent114 = resultFor(kitLevel("1.14"), "state", WITH);
+  const read114 = V114.signpageReadableOps(sent114);
+  assert.deepEqual(read114, resultFor(kitLevel("1.14"), "state", FULL), "kit-v1.14 drops the move op and keeps the rest");
+  assert.ok(V114.SIGNPAGE_RESULT_SCHEMAS.state(read114), "kit-v1.14's schema reads what is left");
+  assert.deepEqual(resultFor(kitLevel("1.4"), "state", WITH), resultFor(kitLevel("1.4"), "state", FULL), "kit-v1.4: no move op");
 });
 
 test("the route event { move: \"cash\", op }: told with its op to a kit 1.15 app, whose schema reads it; never to kit-v1.14 or below", async () => {
