@@ -267,7 +267,7 @@ function addressWord(w: string): boolean {
   return t.split(/[_.\-…]+/).some((p) => /^0x[0-9a-f]{6,}$/i.test(p) || /^[0-9a-f]{32,}$/i.test(p) || /^[1-9A-HJ-NP-Za-km-z]{32,}$/.test(p));
 }
 const ALNUM = /[0-9A-Za-z]/;
-const alnumAt = (s: string, i: number): boolean => i >= 0 && i < s.length && ALNUM.test(s[i]!);
+const alnumAt = (s: string, i: number): boolean => ALNUM.test(s.charAt(i)); // "" past either end
 /** `s` with `v` replaced where it stands alone, not inside a longer run of letters or digits (re-review P2: the 100 of
  *  a slippage inside "1000000" is the vendor's number, not the request's). A value longer than VALUE_HEAD is found by its
  *  first VALUE_HEAD characters, and the message ends there. */

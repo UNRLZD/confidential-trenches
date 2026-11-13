@@ -153,6 +153,8 @@ test("a request value is replaced: whole, by its start when long, and where the 
   const m = `refund to ${spaced} refused`;
   assert.ok(m.length > VENDOR_MESSAGE_READ);
   assert.equal(safeMessage(m, [spaced]), "refund to <request field>");
+  // where the cut message ends inside a word, the word's tail is not a value's start
+  assert.ok(!safeMessage(`refund order ${"W".repeat(VENDOR_MESSAGE_READ)}`, ["der WWWW"]).includes("<request field>"));
 });
 
 // Review P1: a long message is cut before any pass over it, so no vendor answer (ANSWER_MAX) and no request
@@ -315,9 +317,15 @@ test("1Click's refusals keep their field names and their numbers; no address, am
     ],
   );
   // a value stands alone or is not the request's: the slippage's 100 inside 1000000, the amount inside a longer number
-  assert.equal(safe("try 100 or 1000000, not 250000000"), "try <request field> or 1000000, not 250000000");
+  assert.equal(safe("try 100 or 1000000, not 1100 or 250000000"), "try <request field> or 1000000, not 1100 or 250000000");
+  // every place it stands alone, the first found inside a number or not
+  assert.equal(safe("1000000 vs 100, and 25000000 is not 25000000"), "1000000 vs <request field>, and <request field> is not <request field>");
+  // a value's next place inside the one replaced is no second place
+  assert.equal(safeMessage("id a-a-a done", requestValues(JSON.stringify({ x: "a-a" }), "")), "id <request field>-a done");
   // the keys and the all-caps enums are the request's schema, never the user's: out of the values
   assert.deepEqual(requestValues(WALLET_QUOTE, "")?.filter((v) => /^[A-Z_]+$|^(recipient|refundTo|amount|deadline)$/.test(v)), []);
+  // an enum is all capitals and "_", whole: a value with capitals in it stays a value
+  assert.deepEqual(requestValues(JSON.stringify({ a: "EXACT_INPUT", b: "myREF123", c: "Ab_CD" }), ""), ["myREF123", "Ab_CD"]);
 });
 
 // Re-review P3: marks a vendor's echo may carry inside an id, and an id spelt percent-encoded, hide nothing.
