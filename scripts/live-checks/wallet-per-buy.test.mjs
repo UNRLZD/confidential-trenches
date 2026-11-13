@@ -3,7 +3,7 @@
 // Each bad is that run with one change: one Solana round's slots split, one RPC's holdings changed, one answer a 429:
 // each FAIL. Made here from the good run: a W missing, a pool failed, a W not the A.8 vector's, a Base W's reads at two
 // blocks: each FAIL. Card solana-holdings-reads-inside-the-public-limit: goodPublicPace, a live run with the Solana
-// public route at HOLDINGS_PUBLIC_RPC_LIMIT and the hosts' named limits: PASS; badLive429, the CO's recorded run of
+// public route at HOLDINGS_PUBLIC_RPC_LIMIT and the hosts' named limits: PASS; badLive429, the recorded run of
 // 2026-11-13 17:02Z (12 getTokenAccountsByOwner in 10 s on api.mainnet-beta, which names 10; 6 429s): FAIL; made from
 // goodPublicPace, its public route's getTokenAccountsByOwner sent at the helper's pace with no 429: FAIL.
 import assert from "node:assert/strict";

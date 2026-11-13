@@ -610,7 +610,7 @@ function mainnetBetaModel(origin: string, slots: (owner: string, k: number) => r
   }) as typeof fetch;
   return { got, restore: () => void (globalThis.fetch = real) };
 }
-/** The recorded public route's rounds (the CO's wallet-per-buy record of 2026-11-13 17:02Z, api.mainnet-beta): per W,
+/** The recorded public route's rounds (the wallet-per-buy record of 2026-11-13 17:02Z, api.mainnet-beta): per W,
  *  each answered round's [getBalance, getTokenAccountsByOwner] slots; j=3 met at one slot only in its fourth answered
  *  round. */
 const RECORDED_ROUNDS: Record<number, readonly (readonly [number, number])[]> = {
