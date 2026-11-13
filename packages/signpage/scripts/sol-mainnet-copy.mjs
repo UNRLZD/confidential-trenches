@@ -398,7 +398,7 @@ for (const kind of KINDS) {
 }
 const record = {
   ...(PIECES ? { onlyTheOwnersRealTap: [
-    "the real Jito block engine landing the bundle of the pieces and the tip in one slot, at the real tip floor: the copy's stand-in sends each to the copy on its own, in order",
+    "the real Jito block engine and mainnet's leaders taking the tag 3 at its tip, and the plain tag 2s and plain copy landing under real load: the copy has no engine (its stand-in never lands a bundle) and one leader, itself",
     "the real tap to filled time: the copy has one local RPC, no network and no engine round trip",
     "the real fee payer and relay fees on the deployed helper: the copy's helper sender runs in this process with a fresh fee payer, the fee the kit's for the copy's rent",
     "the 151-block clock on real slot times on the real RPC pair: the copy's slots run on this machine's clock",
