@@ -73,6 +73,19 @@ const LADDER: Readonly<Record<PoolChain, Ladder>> = { solana: SOL_LADDER, base: 
 const isPoolChain = (c: unknown): c is PoolChain => typeof c === "string" && Object.hasOwn(LADDER, c);
 /** Whether `x` is a rung of `chain`'s ladder: an EVM tap spends one whole note, so only a rung can be made for it. */
 const isRung = (chain: PoolChain, x: bigint): boolean => x > 0n && x < 1n << 128n && chunkOf(LADDER[chain], x) === x;
+/** pool.buy.dry's with_cash on Base and Robinhood (kit 1.15), in whole ETH as tap_max is: an EVM tap spends one whole
+ *  note, so the larger of the ready note (tap_max) and the largest rung the largest Cash note less `fee` makes at the
+ *  device's price, CASH_MARGIN_BPS and one deposit's `gas` under it; null when tap_max is not an amount. */
+export function withCashNote(tapMax: string, cash: bigint, fee: bigint, p: Pick<PoolStatePrice, "price" | "expo"> | null, chain: "base" | "robinhood", gas: bigint): string | null {
+  const d = POOL_DECIMALS[chain];
+  const m = new RegExp(`^(\\d{1,30})(?:\\.(\\d{1,${d}}))?$`).exec(tapMax);
+  if (m === null) return null;
+  const tap = BigInt(m[1]!) * 10n ** BigInt(d) + BigInt((m[2] ?? "").padEnd(d, "0"));
+  const px = p === null ? null : priceOf(p);
+  const gross = px === null || cash <= fee ? 0n : ((cash - fee) * px.d * 10n ** BigInt(d) * 10_000n) / (px.n * 10n ** 6n * (10_000n + CASH_MARGIN_BPS));
+  const note = gross > gas ? (chunkOf(LADDER[chain], gross - gas) ?? 0n) : 0n;
+  return unitsText(note > tap ? note : tap, d);
+}
 /** USDC (6 decimals) that buys `units` of `chain`'s pool coin at the device's price, CASH_MARGIN_BPS over, rounded up. */
 function cashUsdcExact(units: bigint, p: Pick<PoolStatePrice, "price" | "expo">, chain: PoolChain): bigint | null {
   const px = priceOf(p);

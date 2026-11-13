@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import type { Chain } from "@blindfill/kit";
+import type { Chain, PoolChain } from "@blindfill/kit";
 import { fillOf, fillStore } from "../portfolio/fills.ts";
 import { heldOf, soldOutRow } from "../portfolio/model.ts";
 import type { Row } from "../portfolio/model.ts";
@@ -184,8 +184,9 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
   // Max for the coin on screen (card max-is-priced-for-the-coin): the page's pool.buy.dry, the tap's spend on this
   // coin's own venue; state.pools' own (the costliest venue's) until it answers for this coin and these proofs
   const coinKey = on ? coinTapKey(statePools, chain, token) : null;
-  // Cash's NEAR part (the vault's USDC, as Cash's hover draws it): a NEAR buy spends it, and a Solana buy above one tap's
-  // spend moves its shortfall from it first (card one-balance-buys-on-every-chain), so the same answer's with_cash counts
+  // Cash's NEAR part (the vault's USDC, as Cash's hover draws it): a NEAR buy spends it, a Solana buy above one tap's
+  // spend moves its shortfall from it first and a Base or Robinhood buy the bigger whole chunk it names (card
+  // one-balance-buys-on-every-chain), so the same answer's with_cash counts
   // only for the Cash it was asked with: a change of Cash asks again
   const nearCash = useCashPart(snapshot, "near");
   const cashAt = nearCash === null ? "" : String(nearCash);
@@ -202,7 +203,7 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
     // keeps failing is not asked on), until the coin or its proofs change or the box goes
     const once = (): void => {
       try {
-        ask("pool.buy.dry", { chain: "solana", token }).outcome.then(
+        ask("pool.buy.dry", { chain: chain as PoolChain, token }).outcome.then(
           (o) => {
             if (!live) return;
             if (o.ok) return void setCoinTap({ key: coinKey, tap_max: o.result.tap_max, with_cash: o.result.with_cash ?? null, cash: cashAt });
@@ -220,7 +221,7 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
       live = false;
       clearTimeout(t);
     };
-  }, [coinKey, cashAt, kit.request !== null]);
+  }, [coinKey, chain, cashAt, kit.request !== null]);
   const pools = withCoinTap(statePools, chain, coinTap !== null && coinTap.key === coinKey ? coinTap.tap_max : null);
   // NEAR (card app-near-trading): the vault's Cash pays a fresh NEAR wallet that trades on Rhea, through the kit's
   // pool.buy with chain near; Bal is that Cash, and one tap spends at most it (no per-tap most on NEAR, no Max line)
@@ -228,7 +229,7 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
   const onPool = path === "pool";
   const price = onPool ? kit.poolPrice(chain) : null;
   const pool = onPool ? poolView(pools, chain, price) : null;
-  // the most one Solana tap spends with its shortfall moved from Cash (pool.buy.dry's with_cash, kit 1.15): Max, the
+  // the most one tap spends with Cash moved first (pool.buy.dry's with_cash, kit 1.15): Max, the
   // amount gate, the presets and the ask read it; null (one tap's own) until it answers for this coin, these proofs and this Cash
   const withCash = onPool && coinTap !== null && coinTap.key === coinKey && coinTap.cash === cashAt ? coinTap.with_cash : null;
   // Fee (card buy-spends-several-pieces; owner 12 Nov 13:40Z): the page's pool.buy.dry for the typed amount, its `cost`
@@ -236,11 +237,13 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
   // asked once per amount the box rests on, keyed on the typed USD (never on a price tick); the price is read at the ask
   const priceNow = useRef(price);
   priceNow.current = price;
+  // Solana's only: a Base or Robinhood tap spends one whole chunk, whose cost the page reads at the tap
+  const feeKey = chain === "solana" ? coinKey : null;
   const [feeRead, setFeeRead] = useState<FeeRead | null>(null);
   useEffect(() => {
     const ask = request.current;
-    const feeAmount = coinKey !== null ? feeAskAmount(amount, priceNow.current) : null;
-    if (coinKey === null || feeAmount === null || !ask) return;
+    const feeAmount = feeKey !== null ? feeAskAmount(amount, priceNow.current) : null;
+    if (feeKey === null || feeAmount === null || !ask) return;
     let live = true;
     let t: ReturnType<typeof setTimeout> | undefined;
     let downs = 0;
@@ -249,7 +252,7 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
         ask("pool.buy.dry", { chain: "solana", token, amount: feeAmount }).outcome.then(
           (o) => {
             if (!live) return;
-            if (o.ok) return void (o.result.cost !== undefined && setFeeRead({ key: coinKey, cost: o.result.cost, ...(o.result.out === undefined ? {} : { out: o.result.out }), ...(amount === null ? {} : { amount }) }));
+            if (o.ok) return void (o.result.cost !== undefined && setFeeRead({ key: feeKey, cost: o.result.cost, ...(o.result.out === undefined ? {} : { out: o.result.out }), ...(amount === null ? {} : { amount }) }));
             const again = coinTapAgainMs(o.error.code);
             if (again !== null && (o.error.code !== "down" || downs++ < 3)) t = setTimeout(once, again);
           },
@@ -265,11 +268,11 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
       live = false;
       clearTimeout(t);
     };
-  }, [coinKey, amount, kit.request !== null]);
-  const fee = onPool ? feeShown(feeRead, coinKey, amount, price) : null;
+  }, [feeKey, amount, kit.request !== null]);
+  const fee = onPool ? feeShown(feeRead, feeKey, amount, price) : null;
   // You receive on the pool path: the same answer's out (the live source has no set preview, card
   // solana-buy-preview-complete)
-  const receive = onPool ? receiveShown(feeRead, coinKey, amount) : null;
+  const receive = onPool ? receiveShown(feeRead, feeKey, amount) : null;
   // Bal: the vault path's money (Cash less the SOL and ETH pools, useOffPool) on a chain with no pool, the pool's on a
   // chain with one, with Cash's NEAR part where a buy moves from it (Solana, card one-balance-buys-on-every-chain); on
   // NEAR, Cash's NEAR part, the money a NEAR buy spends. One number for the amount gate. Signed out there is none to
@@ -380,7 +383,7 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
   // a preset, in the box or the phone bar's chip (card app-quick-buy-one-tap): one tap is one buy of its size, through
   // buy() and its checks; signed out it opens the sign-in sheet. On Base and Robinhood the row is the chunk's one button
   // (presetsOf), off while its value is unknown (null).
-  const presets = presetsOf(chain, pool);
+  const presets = presetsOf(chain, pool, onPool ? cashMax(pools, chain, withCash, price) : null);
   const presetOff = (p: Cents | null) => !signedOut && (p === null || !ready || off || !presetOn(p, max, balance, running) || !askable(p));
   function tapPreset(p: Cents | null) {
     if (signedOut) return openSignin(true);
@@ -389,7 +392,7 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
     buy(p);
   }
 
-  return { chain, token, slippageBps, src, account, signedOut, text, setText, phase, route, dismissed, setDismissed, amount, pools, withCash, path, onPool, price, balance, max, coming, fee, feeShown: coinKey !== null, askable, running, ready, buy, presets, presetOff, tapPreset, preview, receive, sell, side, setSide: pickSide, held, heldNow, onSell };
+  return { chain, token, slippageBps, src, account, signedOut, text, setText, phase, route, dismissed, setDismissed, amount, pools, withCash, path, onPool, price, balance, max, coming, fee, feeShown: feeKey !== null, askable, running, ready, buy, presets, presetOff, tapPreset, preview, receive, sell, side, setSide: pickSide, held, heldNow, onSell };
 }
 
 /** A trade state as useTrade gives it. */

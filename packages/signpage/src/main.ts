@@ -63,11 +63,12 @@ import { createPasskey, getPasskey, type PasskeyOutcome } from "@blindfill/walle
 import { backupFirst, openWalletStore, openWalletStoreReader, SeedChanged, WALLET_CHANNEL, WALLET_SEED_LOCK, walletSeedMoved, type WalletEvent, type WalletStore } from "@blindfill/wallet/store";
 import { backupWords, checkSeed, saveWords, signInNoPrf, signInPrf, signInTyped, WordsRefused, type Landing, type Seed } from "@blindfill/wallet/signin/words";
 import { activationGuard, type Press } from "./guard.ts";
-import { startApi, type KindContext } from "./api.ts";
+import { startApi, type HostAnswer, type HostRefusal, type KindContext, type Running } from "./api.ts";
+import { EVM_LADDER } from "../../wallet/src/pool/evm.ts";
 import { depositQuoteHost, depositReadHosts } from "./deposit-wire.ts";
 import { depositNamer } from "./deposit-name.ts";
 import { poolAddressHost } from "./pool-deposit-address.ts";
-import { cashMover, poolMoveKinds, withCash, type CashToPoolDeps, type MoveFollow, type MoveOpRecord } from "./cash-to-pool.ts";
+import { cashMover, poolMoveKinds, withCash, withCashNote, type CashToPoolDeps, type MoveFollow, type MoveOpRecord } from "./cash-to-pool.ts";
 import { formatUnits as formatPoolUnits, parseUnits as parsePoolUnits } from "./withdraw/pool-form.ts";
 import { quotesStop } from "./quotes-stop.ts";
 import { depositFollows, FOLLOW_LOCK } from "./deposit-follow.ts";
@@ -353,7 +354,26 @@ else {
     };
   // pool.buy.dry with with_cash on Solana (src/cash-to-pool.ts withCash): the dry answer as it is, plus Cash's largest
   // note less the relayer's fee at the device's price and what moves on their way bring; a read that fails leaves it out
+  // the tap's most on Base and Robinhood (kit 1.15): an EVM tap spends one whole note, so state.pools' tap_max (the
+  // largest ready note) and with_cash, the larger of it and the largest rung Cash makes (src/cash-to-pool.ts
+  // withCashNote); before the card, and with no Cash to move, a pool.buy.dry on an EVM chain is refused not_allowed
+  const evmDryWithCash = (chain: "base" | "robinhood"): Running<"pool.buy.dry"> => {
+    let answer: HostAnswer<"pool.buy.dry"> | HostRefusal = { error: "failed" };
+    const after = (async () => {
+      if (!testnet || !(await fs.state()).signed_in) return void (answer = { error: "not_funded" });
+      const both = await testnet.readyWith(pageNotes);
+      const tap = poolBalances(both.value, PAGE_POOLS.filter((p) => p.chain === chain), both.ready, both.open, both.landed).find((e) => e.chain === chain)?.tap_max;
+      if (tap === undefined) return void (answer = { error: "not_funded" });
+      const vault = { store: () => open(), notes: async () => openNoteStore(await open()), seed64: () => openSeed64(), prover: prover!.vault, signal: withdrawWait.signal };
+      const form = withdrawFormDeps(vault);
+      const [cash, fee, floor] = await Promise.all([form.available(), form.fee(), evmRoute.floor(chain)]);
+      const most = floor === null ? null : withCashNote(tap, cash, fee, prices.get(chain), chain, floor > EVM_LADDER.min ? floor - EVM_LADDER.min : 0n);
+      answer = { result: { tap_max: tap, ...(most === null ? {} : { with_cash: most }) } };
+    })().catch(() => void (answer = { error: "failed" }));
+    return { running: true, after, answer: () => answer };
+  };
   const dryWithCash = (params: Record<string, unknown>) => {
+    if ((params.chain === "base" || params.chain === "robinhood") && prover && typeof params.token === "string" && withdrawHandoff({ store: () => open(), notes: async () => openNoteStore(await open()), seed64: () => openSeed64(), prover: prover.vault }) !== null) return evmDryWithCash(params.chain);
     const r = poolBuyDry(params);
     if (!prover || params.chain !== "solana" || withdrawHandoff({ store: () => open(), notes: async () => openNoteStore(await open()), seed64: () => openSeed64(), prover: prover.vault }) === null) return r;
     let extra: string | null = null;
