@@ -386,7 +386,7 @@ class RpcFailed extends Error {
  *  account's Ws named after it signs in). */
 const stopOf = new WeakMap<readonly unknown[], AbortSignal>();
 /** A reader's route: its rpc, its gate (the route's), and the Retry-After of the route's latest 429 when it reads one. */
-type Asker = { rpc: JsonRpc; gate: ThrottleGate; hint?: () => number; lane?: HostLane };
+type Asker = { rpc: JsonRpc; gate: ThrottleGate; hint?: () => number; lane?: HostLane; turn?: "trade" | "pass" };
 async function call(a: Asker, method: string, params: readonly unknown[], signal?: AbortSignal): Promise<unknown> {
   signal?.throwIfAborted();
   if (signal !== undefined) stopOf.set(params, signal);
@@ -430,15 +430,16 @@ async function held(gate: ThrottleGate, by: number, sleep: Sleep, signal?: Abort
     signal?.throwIfAborted();
   }
 }
-/** One round of a reader on its gate: the gate's turn, the gate waited out, the host's pass turn (`lane`: the page's
- *  budget for the route's host, so the round's calls are held by it, not only counted), the round, the turn given back
- *  however the round ends. `round` gets the epoch its calls are sent in. */
-async function inTurn<T>(gate: ThrottleGate, by: number, sleep: Sleep, signal: AbortSignal | undefined, round: (sentIn: number) => Promise<T>, lane?: HostLane): Promise<T> {
+/** One round of a reader on its gate: the gate's turn, the gate waited out, the host's turn of `kind` (`lane`: the
+ *  page's budget for the route's host, so the round's calls are held by it, not only counted; a pass's unless the reader
+ *  holds what a trade waits for, ReaderOpts.turn), the round, the turn given back however the round ends. `round` gets
+ *  the epoch its calls are sent in. */
+async function inTurn<T>(gate: ThrottleGate, by: number, sleep: Sleep, signal: AbortSignal | undefined, round: (sentIn: number) => Promise<T>, lane?: HostLane, kind: "trade" | "pass" = "pass"): Promise<T> {
   const give = await gate.turn(signal);
   try {
     await held(gate, by, sleep, signal);
     // the lane's clock is performance.now: the bound as the time left from now; its requests the route's fetch counts
-    if (lane) await lane.turn("pass", signal, false, Number.isFinite(by) ? { by: performance.now() + (by - Date.now()) } : {});
+    if (lane) await lane.turn(kind, signal, false, Number.isFinite(by) ? { by: performance.now() + (by - Date.now()) } : {});
     return await round(gate.epoch());
   } finally {
     give();
@@ -510,7 +511,10 @@ function holdingsRoute(make: (fetch: SolanaFetch) => SolanaRpc, queue: "own" | "
 /** How a reader waits after a 429: gate is the route's (default: the reader's own for its rpc), wait429 the
  * transport's Retry-After of the latest 429 (the gate's wait when longer), sleep waits (tests only; a stop ends it). */
 type Sleep = (ms: number, signal?: AbortSignal) => Promise<void>;
-export type ReaderOpts = { wait429?: () => number; sleep?: Sleep; gate?: ThrottleGate; lane?: HostLane };
+/** `turn`: the host's turn each round takes on `lane`, "pass" unless the reader holds what a trade waits for: a sale's
+ *  own finder read at its tap, under its seed and sell locks, reads as a trade (../throttle.ts header; a pass there waited
+ *  10 to 17 s for the host's pass room while the page's background reads filled its window). */
+export type ReaderOpts = { wait429?: () => number; sleep?: Sleep; gate?: ThrottleGate; lane?: HostLane; turn?: "trade" | "pass" };
 function helperUrl(origin: string, chain: "base" | "robinhood"): string {
   let u: URL;
   try { u = new URL(origin); } catch { throw new Error("the helper origin must be an origin"); }
@@ -529,7 +533,7 @@ function slotted(a: unknown, what: string, min: number | undefined): Slotted<unk
 /** One Solana provider's reader (production: solanaHelperHoldings). */
 export function solanaHoldingsReader(rpc: SolanaRpc, o: ReaderOpts = {}): HoldingsReader {
   const sleep = o.sleep ?? sleepFor;
-  const a: Asker = { rpc, gate: o.gate ?? gateOf(rpc), ...(o.wait429 ? { hint: o.wait429 } : {}), ...(o.lane ? { lane: o.lane } : {}) };
+  const a: Asker = { rpc, gate: o.gate ?? gateOf(rpc), ...(o.wait429 ? { hint: o.wait429 } : {}), ...(o.lane ? { lane: o.lane } : {}), ...(o.turn ? { turn: o.turn } : {}) };
   const cfg = (min?: number) => ({ commitment: "finalized", ...(min === undefined ? {} : { minContextSlot: min }) });
   const balance = async (owner: string, min?: number, signal?: AbortSignal): Promise<Slotted<bigint>> => {
     const r = slotted(await call(a, "getBalance", [owner, cfg(min)], signal), "getBalance", min);
@@ -587,7 +591,7 @@ export function solanaHoldingsReader(rpc: SolanaRpc, o: ReaderOpts = {}): Holdin
             if (!is429(e)) throw e;
             return "429";
           }
-        }, a.lane);
+        }, a.lane, a.turn);
         if (ended === "met") break;
         if (ended === "lag") {
           await sleep(SOL_LAG_WAIT_MS);
@@ -614,10 +618,11 @@ export function solanaHoldingsReader(rpc: SolanaRpc, o: ReaderOpts = {}): Holdin
 }
 
 /** The Solana reader on the helper (POST /v1/rpc/solana), paced in the kit's provider queue (solanaPacedRpc) at
- * HOLDINGS_RPC_LIMIT on the readers' own queue for the route; a 429 waits the answer's Retry-After. */
-export function solanaHelperHoldings(origin: string): HoldingsReader {
+ * HOLDINGS_RPC_LIMIT on the readers' own queue for the route; a 429 waits the answer's Retry-After. `turn`: the host's
+ * turn its rounds take (ReaderOpts.turn). */
+export function solanaHelperHoldings(origin: string, turn: "trade" | "pass" = "pass"): HoldingsReader {
   const r = holdingsRoute((fetch) => solanaHelperRpc(origin, { fetch }));
-  return solanaHoldingsReader(r.rpc, { wait429: r.wait429, gate: r.gate, lane: r.lane });
+  return solanaHoldingsReader(r.rpc, { wait429: r.wait429, gate: r.gate, lane: r.lane, turn });
 }
 /** The Solana reader on a provider the device reaches directly (the testnet build's devnet RPC): one try a call and the
  *  route's gate, as the helper's, never the trade pair's client, whose retry asks a throttled provider up to four times
@@ -626,11 +631,11 @@ export function solanaHelperHoldings(origin: string): HoldingsReader {
  *  10 in 10 s it names (the URL's keyless limit is 40 a method). The route's other readers (solanaBuysAt) ask no
  *  getTokenAccountsByOwner and keep the URL's pace. */
 const publicHoldings = new WeakMap<Route, SolanaRpc>();
-export function solanaHoldingsAt(url: string): HoldingsReader {
+export function solanaHoldingsAt(url: string, turn: "trade" | "pass" = "pass"): HoldingsReader {
   const r = holdingsRoute((fetch) => solanaJsonRpc(url, { fetch }), "url");
   let rpc = publicHoldings.get(r);
   if (rpc === undefined) publicHoldings.set(r, (rpc = solanaPacedRpc((method, params) => r.rpc(method, params), HOLDINGS_PUBLIC_RPC_LIMIT)));
-  return solanaHoldingsReader(rpc, { wait429: r.wait429, gate: r.gate, lane: r.lane });
+  return solanaHoldingsReader(rpc, { wait429: r.wait429, gate: r.gate, lane: r.lane, turn });
 }
 
 /** A Solana pool's restored notes to its buys' Ws: its spends must be exactly its SPENT notes, each at jOf(ref). */
@@ -660,7 +665,7 @@ const BALANCE_OF = "0x70a08231"; // balanceOf(address)
 /** One EVM provider's reader (production: evmHelperHoldings): one block, then every call at its hash. */
 export function evmHoldingsReader(rpc: JsonRpc, tokens: readonly string[], o: ReaderOpts = {}): HoldingsReader {
   const sleep = o.sleep ?? sleepFor;
-  const a: Asker = { rpc, gate: o.gate ?? gateOf(rpc), ...(o.wait429 ? { hint: o.wait429 } : {}), ...(o.lane ? { lane: o.lane } : {}) };
+  const a: Asker = { rpc, gate: o.gate ?? gateOf(rpc), ...(o.wait429 ? { hint: o.wait429 } : {}), ...(o.lane ? { lane: o.lane } : {}), ...(o.turn ? { turn: o.turn } : {}) };
   const list = tokens.map((t) => toChecksum(t).toLowerCase());
   if (new Set(list).size !== list.length) throw new Error("evm tokens: a token twice");
   return {
@@ -679,7 +684,7 @@ export function evmHoldingsReader(rpc: JsonRpc, tokens: readonly string[], o: Re
             if (!is429(e)) throw e;
             return null;
           }
-        }, a.lane);
+        }, a.lane, a.turn);
         if (h !== null) return h;
       }
     },
@@ -917,7 +922,7 @@ export function solanaSoldOutIn(tx: unknown, w: string, mint: string): boolean {
 /** W's buy on one Solana route (production: solanaHelperBuys, solanaBuysAt), each call a round of the route's gate. */
 export function solanaBuyReader(rpc: SolanaRpc, pool: string, o: ReaderOpts = {}): SolanaBuyReader {
   const sleep = o.sleep ?? sleepFor;
-  const a: Asker = { rpc, gate: o.gate ?? gateOf(rpc), ...(o.wait429 ? { hint: o.wait429 } : {}), ...(o.lane ? { lane: o.lane } : {}) };
+  const a: Asker = { rpc, gate: o.gate ?? gateOf(rpc), ...(o.wait429 ? { hint: o.wait429 } : {}), ...(o.lane ? { lane: o.lane } : {}), ...(o.turn ? { turn: o.turn } : {}) };
   return {
     async read(w, signal, from) {
       const by = Date.now() + HOLDINGS_THROTTLE_MAX_MS;
@@ -925,7 +930,7 @@ export function solanaBuyReader(rpc: SolanaRpc, pool: string, o: ReaderOpts = {}
       // provider throttling one method (getTransaction) stays in doubt and is refused past the bound, never asked again
       // at each W because the other method answered (review of ae2cfe28, P3)
       const start = a.gate.epoch();
-      const ask = (method: string, params: readonly unknown[]): Promise<unknown> => inTurn(a.gate, by, sleep, signal, () => call(a, method, params, signal), a.lane);
+      const ask = (method: string, params: readonly unknown[]): Promise<unknown> => inTurn(a.gate, by, sleep, signal, () => call(a, method, params, signal), a.lane, a.turn);
       const done = <T>(v: T): T => (a.gate.answered(start), v);
       // newest first, page by page, to the oldest (or to `from`'s signature, not included)
       const sigs: { signature: string; err: unknown }[] = [];

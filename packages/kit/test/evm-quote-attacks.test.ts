@@ -5269,6 +5269,157 @@ test("SL6 card base-rpc-list-fix: a warm Base scan with its first two down and i
   }
 });
 
+// ------------------------------------------------------------------ a one-block answer (card evm-quote-rides-out-a-one-block-answer)
+// Helper live run 43475337487 (job 132057891754, 13 Nov, GitHub's runner): with Base's first two scan providers held at
+// HTTP 503, a warm base-hook quote ended too_many_pools in 1,239 ms ("the scan provider answers no logs of block
+// 57007269"), the next quote ok: one block has no halves, so its one short answer refused the quote. Each provider below
+// answers its first one-block scan batch short as SHORTS writes it, then as the chain is; the quote asks that block
+// again of the same provider and lands, on every provider of the list, and never hands it to the next.
+const SHORTS: [string, (calls: EvmRpcCall[], out: unknown[]) => string][] = [
+  ["an error for each getLogs, the block held", (calls, out) => JSON.stringify(out.map((o, i) => (calls[i]!.method === "eth_getLogs" ? { jsonrpc: "2.0", id: i, error: { code: -32603, message: "internal error" } } : o)))],
+  ["a body that is not a batch", () => JSON.stringify({ jsonrpc: "2.0", id: null, error: { code: -32603, message: "internal error" } })],
+];
+/** A scan provider over `inner` that answers its first `n` one-block getLogs batches with the body `shortOf` writes
+ *  from the batch's own answers; `ones` counts the one-block batches it was asked. */
+const shortAt = (host: string, inner: EvmRpc, shortOf: (calls: EvmRpcCall[], out: unknown[]) => string, n = 1) => {
+  let ones = 0;
+  const rpc = evmJsonRpc(`https://${host}`, (async (_u: unknown, init: { body: string }) => {
+    const calls = (JSON.parse(init.body) as { method: string; params: unknown[] }[]).map((c) => ({ method: c.method, params: c.params }));
+    const out = (await inner(calls)).map((x, id) => ({ ...(x as object), id }));
+    const f = getLogsOf(calls)[0];
+    if (f !== undefined && f.fromBlock === f.toBlock && ones++ < n) return new Response(shortOf(calls, out), { status: 200 });
+    return new Response(JSON.stringify(out), { status: 200 });
+  }) as unknown as typeof fetch, 16 << 20);
+  return { rpc, ones: () => ones };
+};
+/** A warm one-block quote: the token's scan read up to 5,000,000 by a quote before on the same list, the chain's head
+ *  now 5,000,001, the token's real pool made at 5,000,001; `list(inner)` is the list, `inner` the chain's scan answers. */
+const oneBlock = async (token: string, chainName: "base" | "robinhood", list: (inner: EvmRpc) => EvmRpc[], headNo = 5_000_001) => {
+  const n = list(scanner(5_000_000, [])).length;
+  await triQuote(token, Array.from({ length: n }, () => scanner(5_000_000, [])), chainName);
+  return { v: await triQuote(token, list(scanner(headNo, realAt(token, headNo))), chainName, headNo) };
+};
+/** The captured answer (base.api.pocket.network, a held base-hook quote's batch, 2026-11-13 18:0xZ from this Mac): each
+ *  call of a batch answered by a backend of its own, the first getLogs [], the block by hash, and the second getLogs
+ *  -32602 "block range extends beyond current head block: requested 57015119, head 57015002" from a backend 117 blocks
+ *  behind. Here a provider over `inner` whose second getLogs of a batch ending past `lagHead` is so answered the first
+ *  time its range is asked, as the lagging backend of one batch, and the next time from a backend that holds it;
+ *  `behind` counts those answers, `past` every getLogs batch ending past `lagHead`. */
+const laggard = (host: string, inner: EvmRpc, lagHead: number) => {
+  const seen = new Set<string>();
+  let behind = 0;
+  let past = 0;
+  const rpc = evmJsonRpc(`https://${host}`, (async (_u: unknown, init: { body: string }) => {
+    const calls = (JSON.parse(init.body) as { method: string; params: unknown[] }[]).map((c) => ({ method: c.method, params: c.params }));
+    const out: unknown[] = (await inner(calls)).map((x, id) => ({ ...(x as object), id }));
+    const i = calls.map((c, n) => (c.method === "eth_getLogs" ? n : -1)).filter((n) => n >= 0)[1];
+    const to = i === undefined ? 0 : Number((calls[i]!.params[0] as { toBlock: string }).toBlock);
+    if (to > lagHead) past++;
+    const range = i === undefined ? "" : `${(calls[i]!.params[0] as { fromBlock: string }).fromBlock}-${to}`;
+    if (i !== undefined && to > lagHead && !seen.has(range)) {
+      seen.add(range);
+      behind++;
+      out[i] = { jsonrpc: "2.0", id: i, error: { code: -32602, message: `block range extends beyond current head block: requested ${to}, head ${lagHead}` } };
+    }
+    return new Response(JSON.stringify(out), { status: 200 });
+  }) as unknown as typeof fetch, 16 << 20);
+  return { rpc, behind: () => behind, past: () => past };
+};
+
+test("OB5 a one-block scan batch answered short, then HTTP 503 at each ask again: rpc_error, never too_many_pools", { timeout: 60_000 }, async () => {
+  let ones = 0;
+  const r = await oneBlock("0x00000000000000000000000000000000005c4a01", "robinhood", (inner) => [
+    answering503("one.ob5.test"),
+    answering503("two.ob5.test"),
+    evmJsonRpc("https://three.ob5.test", rcFetch(inner, (calls) => {
+      const f = getLogsOf(calls)[0];
+      if (f === undefined || f.fromBlock !== f.toBlock) return null;
+      return ones++ === 0 ? new Response(JSON.stringify({ jsonrpc: "2.0", id: null, error: { code: -32603, message: "internal error" } }), { status: 200 }) : new Response("", { status: 503 });
+    }), 16 << 20),
+  ]);
+  assert.deepEqual(r.v, { accepted: false, code: "rpc_error" });
+  assert.equal(ones, 4);
+});
+
+test("OB4 the captured answer, a getLogs from a backend 117 blocks behind a block the provider holds: asked again whole of the same provider, the quote lands, on Robinhood's last, Base's last and a cold first with a spare", { timeout: 60_000 }, async () => {
+  // Robinhood's list, the first two down: one block on the third, the last
+  let l = laggard("three.ob4.test", scanner(0, []), 0);
+  let r = await oneBlock("0x00000000000000000000000000000000005c4901", "robinhood", (inner) => ((l = laggard("three.ob4.test", inner, 5_000_001 - 117)), [answering503("one.ob4.test"), answering503("two.ob4.test"), l.rpc]));
+  assert.deepEqual(r.v, below, "robinhood third");
+  assert.ok(l.behind() > 0);
+  // Base's list, the first two down, the third answering no logs: the newest 70 blocks on the fourth, the last
+  r = await oneBlock("0x00000000000000000000000000000000005c4902", "base", (inner) => {
+    const noLogs: EvmRpc = async (calls) => (await inner(calls)).map((o, i) => (calls[i]!.method === "eth_getLogs" ? { jsonrpc: "2.0", id: i, error: { code: -32000, message: "no logs" } } : o));
+    l = laggard("four.ob4.test", inner, 5_000_070 - 117);
+    return [answering503("one.ob4.test"), answering503("two.ob4.test"), noLogs, l.rpc];
+  }, 5_000_070);
+  assert.deepEqual(r.v, below, "base fourth");
+  // asked again whole, never as its halves: one batch behind, one that lands
+  assert.deepEqual([l.behind(), l.past()], [1, 2], "base fourth");
+  // a cold Robinhood scan's first, a spare behind it: its newest request answered so; the spare reads none
+  const c = rcFirst("0x000050e18ffa3f8f7ad170eb9cef160eb3ed1f50", (inner) => (l = laggard("first.ob4.test", inner, RC_HEAD - 117)).rpc);
+  assert.deepEqual(await c.run(), { accepted: false, code: "below_reference" }, "cold first");
+  assert.deepEqual([l.behind(), l.past()], [1, 2], "cold first");
+  assert.equal(c.spared(), 0, "cold first");
+});
+
+test("OB1 a one-block scan batch answered short once is asked again of the same provider: Robinhood's third, Base's fourth and a lone first, each the last of its list, land", { timeout: 60_000 }, async () => {
+  let k = 0;
+  for (const [shape, shortOf] of SHORTS) {
+    const id = () => "0x00000000000000000000000000000000005c47" + (++k).toString(16).padStart(2, "0");
+    // Robinhood's list: the first two down, the third the last
+    let s = shortAt("three.ob1.test", scanner(0, []), shortOf);
+    let r = await oneBlock(id(), "robinhood", (inner) => ((s = shortAt("three.ob1.test", inner, shortOf)), [answering503("one.ob1.test"), answering503("two.ob1.test"), s.rpc]));
+    assert.deepEqual(r.v, below, `robinhood third, ${shape}`);
+    assert.equal(s.ones(), 2, `robinhood third, ${shape}: one-block batches`);
+    // Base's list: the first two down, the third answering no logs (its block goes to the fourth whole), the fourth
+    // the last
+    r = await oneBlock(id(), "base", (inner) => {
+      const noLogs: EvmRpc = async (calls) => (await inner(calls)).map((o, i) => (calls[i]!.method === "eth_getLogs" ? { jsonrpc: "2.0", id: i, error: { code: -32000, message: "no logs" } } : o));
+      s = shortAt("four.ob1.test", inner, shortOf);
+      return [answering503("one.ob1.test"), answering503("two.ob1.test"), noLogs, s.rpc];
+    });
+    assert.deepEqual(r.v, below, `base fourth, ${shape}`);
+    assert.equal(s.ones(), 2, `base fourth, ${shape}: one-block batches`);
+    // a lone first
+    r = await oneBlock(id(), "base", (inner) => ((s = shortAt("one.ob1.test", inner, shortOf)), [s.rpc]));
+    assert.deepEqual(r.v, below, `lone first, ${shape}`);
+    assert.equal(s.ones(), 2, `lone first, ${shape}: one-block batches`);
+  }
+});
+
+test("OB2 a cold scan's first, with spares behind it, whose halves reach the real pool's block and answer it short once: asked again of the first, the spare reads none", { timeout: 60_000 }, async () => {
+  let k = 0;
+  for (const [shape, shortOf] of SHORTS) {
+    const coin = "0x000050e18ffa3f8f7ad170eb9cef160eb3ed1f3" + (++k).toString(16);
+    const at = RC_HEAD - 500_000;
+    let s: ReturnType<typeof shortAt> | undefined;
+    // the first answers an error for any range of more than one block that holds the real pool's block, so its halves
+    // reach that block alone (rcErr), and that block's first batch short
+    const c = rcFirst(coin, (inner) => (s = shortAt("first.ob2.test", rcErr(at, 1, "query timeout exceeded")(inner), shortOf)).rpc);
+    assert.deepEqual(await c.run(), { accepted: false, code: "below_reference" }, shape);
+    assert.equal(s!.ones(), 2, `${shape}: one-block batches`);
+    assert.equal(c.spared(), 0, shape);
+  }
+});
+
+test("OB3 a one-block scan batch answered short at every ask still refuses too_many_pools after SCAN_TRIES asks of the same provider, never the next's word", { timeout: 60_000 }, async () => {
+  let k = 0;
+  for (const [shape, shortOf] of SHORTS) {
+    // the last of the list: Robinhood's third
+    let s: ReturnType<typeof shortAt> | undefined;
+    const r = await oneBlock("0x00000000000000000000000000000000005c48" + (++k).toString(16).padStart(2, "0"), "robinhood", (inner) => [answering503("one.ob3.test"), answering503("two.ob3.test"), (s = shortAt("three.ob3.test", inner, shortOf, Infinity)).rpc]);
+    assert.deepEqual(r.v, { accepted: false, code: "too_many_pools" }, `robinhood third, ${shape}`);
+    assert.equal(s!.ones(), 4, `robinhood third, ${shape}: one-block batches`);
+    // a cold scan's first with a spare: the spare reads none of it
+    const coin = "0x000050e18ffa3f8f7ad170eb9cef160eb3ed1f4" + k.toString(16);
+    const c = rcFirst(coin, (inner) => (s = shortAt("first.ob3.test", rcErr(RC_HEAD - 500_000, 1, "query timeout exceeded")(inner), shortOf, Infinity)).rpc);
+    assert.deepEqual(await c.run(), { accepted: false, code: "too_many_pools" }, `cold first, ${shape}`);
+    assert.equal(s!.ones(), 4, `cold first, ${shape}: one-block batches`);
+    assert.equal(c.spared(), 0, `cold first, ${shape}`);
+  }
+});
+
 // card evm-rpc-spare-list, 6 Nov: a provider that does not keep the blocks a read asks (-32002 "keyless requests are
 // served for the most recent 5000 blocks only", rpc-robinhood.blockmachine.io, read 2026-11-05 19:48Z; live run
 // 42206377652) is passed over like one that is down: the quote's reads go on at the next two of the list, and two

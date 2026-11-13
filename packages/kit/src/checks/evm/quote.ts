@@ -1421,6 +1421,20 @@ const SCAN_BACKOFF_MS = 500;
 export const EVM_SCAN_HOLD_MS = 2_000;
 /** A scan request's tries at its smallest span: a timeout or a failure other than a throttle spends one. */
 const SCAN_TRIES = 4;
+/** The wait before a scan request is asked again whole of the same provider, times its try: one block answered short,
+ *  or logs behind a block the provider holds (scanPools `short`, `behind`). */
+const SCAN_AGAIN_MS = 250;
+/** A getLogs error that says the provider's logs end before the request's last block. base.api.pocket.network answers
+ *  each call of a batch from a backend of its own: one batch of a held base-hook quote answered its first getLogs [],
+ *  its second -32602 "block range extends beyond current head block: requested 57015119, head 57015002" and its block
+ *  57015119 by hash (card evm-quote-rides-out-a-one-block-answer, capture from this Mac, 2026-11-13 18:0xZ); Sentio,
+ *  blastapi and bloXroute answer the same words past their head (the venue's notes, SP3). The words only ever ask the
+ *  same provider again (scanPools `behind`), at most SCAN_TRIES - 1 times a scan: a provider that lies in them gains
+ *  three asks, never the next's word. */
+function logsBehind(e: unknown): boolean {
+  const o = e as { code?: unknown; message?: unknown } | null | undefined;
+  return o?.code === -32602 && typeof o.message === "string" && /^block range extends beyond current head block\b/.test(o.message);
+}
 const SCAN_BACKOFF_MAX_MS = 8_000;
 /** The scan provider's requests of one quote: the token's and each X's scans queue in the order they ask (the token's
  *  first), at most `limit` in flight, `limit` starting at the venue's `parallel` (nine scans that each sent their own
@@ -1562,7 +1576,8 @@ function scanGateOf(parallel: number, untilMs: number, spareNext = false, deadli
           // request goes to the next at once (card evm-rpc-spare-list: bloXroute answered every request 503 "No server
           // is available to handle this request" for 10 minutes, 2026-11-05 17:59-18:09Z; asked as its halves, each
           // 503 again); the last asks its halves, as before
-          // the provider answered: its halves are asked of it (scanPools `short`), at once, never again whole
+          // the provider answered: its halves are asked of it (scanPools `short`), at once, never again whole here (one
+          // block, which has no halves, is asked again whole there)
           if (e instanceof BadAnswer) throw new ScanAnswered("rpc_error", `the scan provider answered: ${e.message}`);
           if (spareNext && /^the provider answered HTTP 5\d\d$/.test(String((e as Error | null)?.message))) throw new ScanRefused("rpc_error", `the scan provider is out: ${(e as Error).message}`);
           if (e instanceof Unreachable) {
@@ -1677,6 +1692,8 @@ async function scanPools(
   let shorts = 0;
   // 2 x the starting requests, added as each set of them is built, + the levels' share (SCAN_SHORT_LEVEL)
   let shortMax = SCAN_SHORT_LEVEL * Math.ceil(Math.log2(first.span));
+  // the requests whose logs were behind a block their provider holds that the scan asks again whole (`behind` in one)
+  let behindLeft = SCAN_TRIES - 1;
   const jobsOf = (g: Each[], from: number, to: number, on = first, into = jobs): void => {
     // where the blocks up to the head are more than the next provider's span, their newest span of it is a request of
     // its own (reviews of 9c962b6d and 1277e8af): a backend a block or two behind its head answers null for that
@@ -1760,12 +1777,37 @@ async function scanPools(
     // and dropped with the quote's state reads, as any pool; past EVM_QUOTE_MAX_KEYS of them the quote refuses
     // too_many_pools. One block whose logs its provider still does not answer refuses too_many_pools: no request can
     // read that block's pools. A long run of halves ends at the quote's bound (rpc_error).
-    const short = () => {
+    // One block has no halves, so its short answer is asked again whole of the same provider, SCAN_TRIES asks in all,
+    // SCAN_AGAIN_MS times the try apart, each a halving request of the scan's budget (card
+    // evm-quote-rides-out-a-one-block-answer: helper live run 43475337487, job 132057891754, 13 Nov: with Base's first
+    // two held at HTTP 503, a warm quote ended too_many_pools on block 57007269 alone in 1,239 ms, the next quote ok;
+    // Pocket answers each call of a batch from a backend of its own, one of them up to 117 blocks behind, logsBehind).
+    // A retry that fails in any other way spends its try too and never goes to the next: a spare still never reads
+    // alone what the first answered. Every ask short, the quote refuses too_many_pools, as before; the last ask not
+    // answered, rpc_error.
+    const short = async (): Promise<void> => {
       if (b > a) {
         shorts += 2;
         if (shorts > shortMax) throw new ScanStop("rpc_error", "the scan provider answered errors past an honest split");
         return halves(splits);
       }
+      let shortLast = true;
+      for (let t = 1; t < SCAN_TRIES; t++) {
+        if (++shorts > shortMax) throw new ScanStop("rpc_error", "the scan provider answered errors past an honest split");
+        await new Promise((r) => setTimeout(r, SCAN_AGAIN_MS * t));
+        let said = false;
+        const again = await on.gate
+          .ask(rpc, calls, 1, fast)
+          .then(logsOf)
+          .catch((e) => {
+            if (e instanceof ScanStop) throw e;
+            said = e instanceof ScanAnswered;
+            return null;
+          });
+        if (again !== null && fine(again)) return void keep(again);
+        shortLast = said || again !== null;
+      }
+      if (!shortLast) throw new ScanStop("rpc_error", `the scan provider answered no logs of block ${a}`);
       throw new ScanStop("too_many_pools", `the scan provider answers no logs of block ${a}: it holds more pools than a request returns`);
     };
     // a transport failure (HTTP 5xx, a refused connection, a timeout, a lag) of a cold request of more than SCAN_ALONE
@@ -1776,7 +1818,14 @@ async function scanPools(
     const last = splits === 0 || b === a;
     let answered = false;
     let notYet = false;
-    const rs = await on.gate.ask(rpc, calls, last ? SCAN_TRIES : 1, fast).then(logsOf, (e) => {
+    // the provider holds the request's last block (its hash in the batch) and a getLogs of the batch says its logs end
+    // before it (logsBehind): a lag, as NotHeldYet's, from a backend of its own
+    const behindIn = (out: readonly unknown[]) => {
+      const h = (out[filters.length] as { result?: { hash?: unknown } | null } | null)?.result;
+      return typeof h?.hash === "string" && out.slice(0, filters.length).some((x) => logsBehind((x as { error?: unknown } | null)?.error));
+    };
+    let behind = false;
+    const rs = await on.gate.ask(rpc, calls, last ? SCAN_TRIES : 1, fast).then((out) => (behindIn(out) ? ((behind = true), null) : logsOf(out)), (e) => {
       if (e instanceof ScanAnswered) {
         answered = true;
         return null;
@@ -1791,7 +1840,23 @@ async function scanPools(
     // warm quote 9.5 to 11 s, 61 halves through its 2 at once, 2026-11-05 17:3xZ); its blocks are one round of the
     // next's requests at most, the newest, which M382 lets a spare read alone
     if (fast && on.next !== undefined) throw new ScanRefused("rpc_error", "the scan provider answered no logs");
-    if (answered || rs !== null) return short();
+    // logs behind a block the provider holds: asked again whole of the same provider, SCAN_AGAIN_MS on, at most
+    // behindLeft times a scan, never of the next (the block is held, so this is the provider's answer, SP3); still
+    // behind or short, or failed in any way, it is a short answer (halves, down to one block)
+    if (behind && behindLeft > 0) {
+      behindLeft--;
+      await new Promise((r) => setTimeout(r, SCAN_AGAIN_MS));
+      const again = await on.gate
+        .ask(rpc, calls, 1, fast)
+        .then((out) => (behindIn(out) ? null : logsOf(out)))
+        .catch((e) => {
+          if (e instanceof ScanStop) throw e;
+          return null;
+        });
+      if (again !== null && fine(again)) return void keep(again);
+      return short();
+    }
+    if (answered || behind || rs !== null) return short();
     if (alone) return halves(splits);
     // one whose last block the provider does not hold yet is asked again whole, its tries left (NotHeldYet)
     if (notYet) {

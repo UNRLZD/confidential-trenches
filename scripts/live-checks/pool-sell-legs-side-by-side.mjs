@@ -40,13 +40,15 @@ export const TURN = new RegExp(`(${N})=${N}\\?\\.opened;if\\(\\1\\)\\{if\\(await
 // neither a buy record nor the listing names (review of 55d4c6eb, P2-A: a W from before a sign out; card
 // wallets-found-in-one-read: one list for a sale's first read and its fallback), each other W its listing; the finder
 // list asked with the sale's stop; since card round-trip-costs-less a rent back's list (no W read) holds the passes off not
-// at all
-const LISTED = new RegExp(`wallets:async ${N}=>\\{let ${N}=(?:${N}===${N}\\?null:)?(${N})\\.preempt\\(\\),${N}=null;try\\{let (${N})=${N}\\?\\1\\.listed\\(\\)\\?\\?${N}\\(await\\(await ${N}\\.store\\(\\)\\)\\.get\\(\`meta\`,(?:${N}|\`owed/positions-sol\`)\\)\\):null,(${N})=${N};if\\(\\3===void 0\\)\\{let (${N})=await\\(await ${N}\\.store\\(\\)\\)\\.get\\(\`meta\`,\`owed/buy-sol\`\\)\\?\\?\\{\\};\\3=(${N})=>!Object\\.hasOwn\\(\\4,\\5\\)&&\\2\\?\\.has\\(\\5\\)!==!0\\}let ${N}=await (${N})\\(await ${N}\\(\\),${N},\\3,${N}\\),(${N})=(${N})=>\\2\\?\\.has\\(\\8\\)\\?new Map\\(\\2\\.get\\(\\8\\)\\):null;`);
+// at all; that finder list read at the host's trade turn for a sale's host, a pass's for any other (card
+// evm-quote-rides-out-a-one-block-answer: a sale's read behind the passes' room waited 10 to 17 s at the tap)
+const LISTED = new RegExp(`wallets:async ${N}=>\\{let ${N}=(?:${N}===${N}\\?null:)?(${N})\\.preempt\\(\\),${N}=null;try\\{let (${N})=(${N})\\?\\1\\.listed\\(\\)\\?\\?${N}\\(await\\(await ${N}\\.store\\(\\)\\)\\.get\\(\`meta\`,(?:${N}|\`owed/positions-sol\`)\\)\\):null,(${N})=${N};if\\(\\4===void 0\\)\\{let (${N})=await\\(await ${N}\\.store\\(\\)\\)\\.get\\(\`meta\`,\`owed/buy-sol\`\\)\\?\\?\\{\\};\\4=(${N})=>!Object\\.hasOwn\\(\\5,\\6\\)&&\\2\\?\\.has\\(\\6\\)!==!0\\}let ${N}=await (${N})\\(await ${N}\\(\\),${N},\\4,${N},\\3\\?\`trade\`:\`pass\`\\),(${N})=(${N})=>\\2\\?\\.has\\(\\9\\)\\?new Map\\(\\2\\.get\\(\\9\\)\\):null;`);
 // that list: no spent note, no seed read; else the Ws derived from the spent notes, the seed copy zeroed, and the finder
-// asked for only those the list's `read` names, side by side in its steps, under the stop it is given
-const LISTER = (f) => new RegExp(`[,;\\s]${f.replace(/\$/g, "\\$")}=async\\(${N},${N},(${N})=\\(\\)=>!0,(${N})\\)=>\\{let (${N})=await ${N}\\(${N},${N}\\);if\\(\\3\\.length===0\\)return\\[\\];let (${N})=await ${N}\\.seed64\\(\\),(${N});try\\{\\5=${N}\\(\\4,\\[\\{id:${N}\\.program,chain:\`sol\`,spent:\\3,reader:${N}\\(${N}\\)\\}\\]\\)\\}finally\\{\\4\\.fill\\(0\\)\\}[^]{0,120}?let ${N}=await ${N}\\(\\5,\\1,\\{together:!0,\\.\\.\\.\\2\\?\\{signal:\\2\\}:\\{\\}\\}\\)`);
+// asked for only those the list's `read` names, side by side in its steps, under the stop it is given, at the host's turn
+// it is given (a pass's when none)
+const LISTER = (f) => new RegExp(`[,;\\s]${f.replace(/\$/g, "\\$")}=async\\(${N},${N},(${N})=\\(\\)=>!0,(${N}),(${N})=\`pass\`\\)=>\\{let (${N})=await ${N}\\(${N},${N}\\);if\\(\\4\\.length===0\\)return\\[\\];let (${N})=await ${N}\\.seed64\\(\\),(${N});try\\{\\6=${N}\\(\\5,\\[\\{id:${N}\\.program,chain:\`sol\`,spent:\\4,reader:${N}\\(${N},\\3\\)\\}\\]\\)\\}finally\\{\\5\\.fill\\(0\\)\\}[^]{0,120}?let ${N}=await ${N}\\(\\6,\\1,\\{together:!0,\\.\\.\\.\\2\\?\\{signal:\\2\\}:\\{\\}\\}\\)`);
 const listedOf = (js) => {
-  const f = LISTED.exec(js)?.[6];
+  const f = LISTED.exec(js)?.[7];
   return f !== undefined && LISTER(f).test(js);
 };
 
