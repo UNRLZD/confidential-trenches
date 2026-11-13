@@ -94,6 +94,7 @@ export function depositQuoteHost(deps: DepositWireDeps): (params: Record<string,
       // no request id, no follow: no address goes out
       if (ctx === undefined) return;
       await deps.checked(ctx.id, got.result, { scope, index: before.deposit.index, u: before.deposit.id });
+      if (stopped()) return void (out = { error: "down" });
       out = { result: got.result };
     })().catch(() => {
       // a read that threw (the records not answering) is no rule's refusal: "not now" (card pool-read-down), which

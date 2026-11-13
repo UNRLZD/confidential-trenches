@@ -259,6 +259,21 @@ test("pool-deposit-follow floor: readSolanaPoolFloor reads the rent on both RPCs
   await assert.rejects(readSolanaPoolFloor([rpcOf("https://a.example", 5_000), rpcOf("https://b.example", null)], program, SOL_U));
   await assert.rejects(readSolanaPoolFloor([rpcOf("https://a.example", 5_000), rpcOf("https://b.example", 5_000, 6_000n)], program, SOL_U));
   await assert.rejects(readSolanaPoolFloor([rpcOf("https://a.example", 5_000), rpcOf("https://a.example", 5_000)], program, SOL_U));
+  // card helper-says-why-a-vendor-refused, delta review P3-5: the page's stop pulled before or during a read, no read
+  // starts after it, the fee read (its message names U_X) included
+  for (const [at, left] of [["before", []], ["getAccountInfo", ["getAccountInfo", "getAccountInfo"]], ["getLatestBlockhash", ["getAccountInfo", "getAccountInfo", "getLatestBlockhash"]]] as const) {
+    const stop = new AbortController();
+    if (at === "before") stop.abort();
+    const asked: string[] = [];
+    const watched = (url: string) => {
+      const r = rpcOf(url, 5_000);
+      const f = (async (method: string, params: readonly unknown[]) => (asked.push(method), method === at && stop.abort(), r(method, params))) as unknown as import("../../kit/src/trade/solana/send.ts").SolanaRpc;
+      Object.defineProperty(f, "url", { value: url });
+      return f;
+    };
+    await assert.rejects(readSolanaPoolFloor([watched("https://a.example"), watched("https://b.example")], program, SOL_U, stop.signal), { name: "AbortError" }, at);
+    assert.deepEqual(asked, left, at);
+  }
 });
 
 // card evm-deposit-route-mainnet: the floor of a quote into an EVM pool's U_X, read now on the pool's two RPCs (names no
@@ -518,7 +533,7 @@ test("a sign out during pool.address's floor read: no quote leaves, the answer i
 // deposit address to an RPC, the follow reads it on chain).
 test("a sign out at each of pool.address's waits: nothing after it runs (no records read, no floor read, no quote, no follow), the answer is down", async () => {
   const { quotesStop } = await import("../src/quotes-stop.ts");
-  for (const at of ["named", "read", "floor", "read again"] as const) {
+  for (const at of ["named", "read", "floor", "read again", "follow"] as const) {
     const w = world();
     const page = quotesStop();
     w.deps.stop = page.stopped;
@@ -533,15 +548,19 @@ test("a sign out at each of pool.address's waits: nothing after it runs (no reco
     const { read, floor, fetch: send, checked } = w.deps;
     w.deps.named = () => hold("named");
     w.deps.read = async (scope) => (await hold(steps.includes("read") ? "read again" : "read"), read(scope));
-    w.deps.floor = async (chain, wallet) => (await hold("floor"), floor!(chain, wallet));
+    let floorSignal: AbortSignal | undefined;
+    w.deps.floor = async (chain, wallet, signal) => ((floorSignal = signal), await hold("floor"), floor!(chain, wallet));
     w.deps.fetch = ((url: string | URL | Request, init?: RequestInit) => (steps.push("ask"), send!(url, init))) as typeof fetch;
-    w.deps.checked = async (...a) => (steps.push("follow"), checked!(...a));
+    w.deps.checked = async (...a) => (await hold("follow"), checked!(...a));
     const asked = ask(w, { chain: "solana", origin_asset: BASE_USDC, amount: "25" });
     while (!held) await new Promise((ok) => setImmediate(ok));
     page.signedOut();
     release();
     assert.deepEqual(await asked, { error: "down" }, at);
     assert.equal(steps.at(-1), at, `${at}: ${steps.join(", ")}`);
-    assert.equal(w.took.length, 0, at);
+    // the follow's write ran before the sign out was seen: it holds the op, but the answer names no address
+    assert.equal(w.took.length, at === "follow" ? 1 : 0, at);
+    // the floor read is handed the stop, so its own reads end too (readSolanaPoolCosts)
+    if (at !== "named" && at !== "read") assert.equal(floorSignal?.aborted, true, at);
   }
 });

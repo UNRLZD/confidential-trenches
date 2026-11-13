@@ -74,7 +74,7 @@ export interface PoolAddressDeps {
   /** The follow that takes a checked quote under request `id` on into X's pool; none, and no quote is answered. */
   /** The device's floor for a quote into X's pool to U_X, read at quote time on two RPCs (readSolanaPoolFloor); null
    *  when it has none for the chain. None given: no quote. */
-  floor?(chain: PoolChain, wallet: string): Promise<bigint | null>;
+  floor?(chain: PoolChain, wallet: string, signal?: AbortSignal): Promise<bigint | null>;
   checked?(id: string, chain: PoolChain, result: NonNullable<SignpageResults["pool.address"]["quote"]>, u: { scope: bigint; index: number; wallet: string; refundId: string }): Promise<void>;
   fetch?: typeof fetch;
   /** The page's stop for the quote's asks (card helper-says-why-a-vendor-refused, review P3). Once it aborts no ask
@@ -138,8 +138,8 @@ function aboveCap(amount: bigint, decimalsIn: number, reads: readonly [string, s
  * deposit tx at that RPC's latest blockhash; the fee is per signature, so the note's value, precommitment and the trees'
  * sizes do not move it), the higher of the two. A read that does not answer throws (the host answers down).
  */
-export async function readSolanaPoolFloor(rpcs: readonly [SolanaRpc, SolanaRpc], program: string, wallet: string): Promise<bigint> {
-  const { fee, rent } = await readSolanaPoolCosts(rpcs, program, wallet);
+export async function readSolanaPoolFloor(rpcs: readonly [SolanaRpc, SolanaRpc], program: string, wallet: string, signal?: AbortSignal): Promise<bigint> {
+  const { fee, rent } = await readSolanaPoolCosts(rpcs, program, wallet, signal);
   return solanaPoolDepositFloor(fee, rent);
 }
 
@@ -154,14 +154,18 @@ export async function readEvmPoolFloor(rpcs: readonly [EvmRpc, EvmRpc], pin: Evm
 }
 
 /** The reads readSolanaPoolFloor prices the floor at: the Rent sysvar on both RPCs, and the higher of the two RPCs' fee
- *  for a deposit message by `wallet`. */
-export async function readSolanaPoolCosts(rpcs: readonly [SolanaRpc, SolanaRpc], program: string, wallet: string): Promise<{ fee: bigint; rent: SolanaRent }> {
+ *  for a deposit message by `wallet`. `signal` aborted (the page signed out): no read starts after it, the fee read,
+ *  whose message names `wallet`, included; the call throws. */
+export async function readSolanaPoolCosts(rpcs: readonly [SolanaRpc, SolanaRpc], program: string, wallet: string, signal?: AbortSignal): Promise<{ fee: bigint; rent: SolanaRent }> {
+  signal?.throwIfAborted();
   const rent = await readSolanaRent(rpcs);
   const fees = await Promise.all(rpcs.map(async (rpc) => {
+    signal?.throwIfAborted();
     const bh = (await rpc("getLatestBlockhash", [{ commitment: "confirmed" }])) as { value?: { blockhash?: unknown } } | null;
     const blockhash = bh?.value?.blockhash;
     if (typeof blockhash !== "string") throw new Error("no blockhash");
     const { message } = solanaPoolDepositTx(program, wallet, { value: SOL_LADDER.min, precommitment: 1n }, { stateSize: 0, labelSize: 0 }, blockhash, rent);
+    signal?.throwIfAborted();
     const v = ((await rpc("getFeeForMessage", [base64.encode(message), { commitment: "confirmed" }])) as { value?: unknown } | null)?.value;
     if (!Number.isSafeInteger(v) || (v as number) < 0) throw new Error("no fee for the deposit message");
     return BigInt(v as number);
@@ -207,7 +211,7 @@ export function poolAddressHost(deps: PoolAddressDeps): (params: Record<string, 
 
       let floor: bigint | null;
       try {
-        floor = await deps.floor(chain, before.wallet);
+        floor = await deps.floor(chain, before.wallet, stop);
       } catch {
         return void (out = { error: "down" });
       }
@@ -266,6 +270,7 @@ export function poolAddressHost(deps: PoolAddressDeps): (params: Record<string, 
         time_estimate_s: timeEstimate,
       };
       await deps.checked(ctx.id, chain, quote, { scope: pool.scope, index: before.record.index, wallet: before.wallet, refundId: before.record.id });
+      if (stopped()) return void (out = { error: "down" });
       out = { result: { chain, address: before.wallet, asset, quote } };
     })().catch(() => {
       out = { error: "down" };

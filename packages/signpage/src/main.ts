@@ -214,6 +214,7 @@ let poolWithdraw: { chain: PoolChain; opId: string } | null = null;
 const quotes = quotesStop();
 const quotesStopped = quotes.stopped;
 const quotesSignedOut = quotes.signedOut;
+const quotesSignedIn = quotes.signedIn;
 // declared before the API starts below (its kinds read quotesStopped)
 if (framed) document.body.append(root);
 else {
@@ -313,10 +314,11 @@ else {
   const evmRoute = evmQuoteRoute({ network: PAGE_NETWORK, pool: (chain) => testnet?.evmPoolOf(chain) ?? null, wallet: evmWalletRpc, notes: () => pageNotes() });
   // the quote's floor on X's pool, read now on its two RPCs (pool-deposit-address.ts readSolanaPoolFloor on Solana,
   // readEvmPoolFloor on Base and Robinhood); none on a chain the page pins no pool on
-  const floorFor = async (chain: PoolChain, wallet: string): Promise<bigint | null> => {
+  // A sign out ends the Solana read before its fee read, which names U_X (the EVM floor names no account)
+  const floorFor = async (chain: PoolChain, wallet: string, signal?: AbortSignal): Promise<bigint | null> => {
     if (chain !== "solana") return evmRoute.floor(chain);
     const pair = solPair();
-    return pair !== null && PAGE_SOL_PIN !== undefined ? readSolanaPoolFloor(pair, PAGE_SOL_PIN.program, wallet) : null;
+    return pair !== null && PAGE_SOL_PIN !== undefined ? readSolanaPoolFloor(pair, PAGE_SOL_PIN.program, wallet, signal) : null;
   };
   const nearPair = () => [followRpc(NEAR_NETWORKS.mainnet.fastnear[0]), followRpc(NEAR_NETWORKS.mainnet.drpc)] as const;
   // from U_X alone (review H1): pool.deposit run with the op's own U_{s,i} as its fixed source, never the newest U
@@ -956,6 +958,8 @@ function settleTrades(ifDue = false): Promise<void> {
 // Where a sign-in landed (words.ts): the backup screen for a no-PRF seed this sign-in made, else signed in on the seed
 // stored, which may be another tab's (never its words then).
 async function landed(l: Landing): Promise<void> {
+  // signed in again: the page's quotes ask from now (src/quotes-stop.ts)
+  quotesSignedIn();
   namer.name(l.seed.entropy);
   // a deposit a reload cut short is finished now (src/pool-testnet.ts), not at the next ask; once the landing's naming
   // is written (card sol-pools-mainnet-pin, review P3-3): the run holds the seed lock shared across its RPC reads, which
@@ -1099,7 +1103,13 @@ async function signOut(): Promise<void> {
   // a Solana or EVM pool settle holds the seed lock shared, which the sign out waits for: each stops first
   testnet?.signingOut();
   // the handle is dropped only once the store has signed out: a refused sign out leaves it open and still held
-  await s.signOut();
+  try {
+    await s.signOut();
+  } catch (e) {
+    // a refused sign out leaves the page signed in: its quotes ask again
+    quotesSignedIn();
+    throw e;
+  }
   store = null;
   // after the store signed out: a deposit that landed while it waited cannot open the queue again (no seed)
   await testnet?.signedOut();

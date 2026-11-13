@@ -248,7 +248,7 @@ test("a sign out during deposit.quote's records read: no quote leaves, the answe
 // out during it, on the page's own stop (src/quotes-stop.ts, which swaps in a fresh signal): nothing after it runs.
 test("a sign out at each of deposit.quote's waits: nothing after it runs (no records read, no quote, no follow), the answer is down", async () => {
   const { quotesStop } = await import("../src/quotes-stop.ts");
-  for (const at of ["named", "read", "read again"] as const) {
+  for (const at of ["named", "read", "read again", "follow"] as const) {
     const page = quotesStop();
     const steps: string[] = [];
     let release!: () => void;
@@ -265,7 +265,7 @@ test("a sign out at each of deposit.quote's waits: nothing after it runs (no rec
       read: async () => (await hold(steps.includes("read") ? "read again" : "read"), SAVED),
       fetch: ((url: string | URL | Request, init?: RequestInit) => (steps.push("ask"), mock.fetch(url, init))) as typeof fetch,
       now: () => NOW,
-      checked: async () => void steps.push("follow"),
+      checked: () => hold("follow"),
       stop: page.stopped,
     })({ origin_asset: SOL_USDC, amount: "25" }, { id: "op-1" });
     while (!held) await new Promise((ok) => setImmediate(ok));
