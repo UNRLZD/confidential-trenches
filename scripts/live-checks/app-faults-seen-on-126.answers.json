@@ -1,0 +1,966 @@
+{
+ "good": {
+  "check": "app-faults-seen-on-126",
+  "at": "2026-11-13T06:26:06.276Z",
+  "source": "harness, terminal build apps/terminal/dist of this card (on 6393febc1), the stand-in shell signed out",
+  "browser": "157.0.8103.51",
+  "runs": [
+   {
+    "width": "phone",
+    "framed": true,
+    "drawn": true,
+    "reads": [
+     {
+      "dx": 0,
+      "labels": 2,
+      "cut": null
+     },
+     {
+      "dx": 4,
+      "labels": 2,
+      "cut": null
+     },
+     {
+      "dx": 8,
+      "labels": 2,
+      "cut": null
+     },
+     {
+      "dx": 12,
+      "labels": 2,
+      "cut": null
+     },
+     {
+      "dx": 16,
+      "labels": 2,
+      "cut": null
+     },
+     {
+      "dx": 20,
+      "labels": 2,
+      "cut": null
+     },
+     {
+      "dx": 24,
+      "labels": 2,
+      "cut": null
+     },
+     {
+      "dx": 28,
+      "labels": 2,
+      "cut": null
+     },
+     {
+      "dx": 32,
+      "labels": 2,
+      "cut": null
+     },
+     {
+      "dx": 36,
+      "labels": 2,
+      "cut": null
+     },
+     {
+      "dx": 40,
+      "labels": 2,
+      "cut": null
+     },
+     {
+      "dx": 44,
+      "labels": 2,
+      "cut": null
+     },
+     {
+      "dx": 48,
+      "labels": 2,
+      "cut": null
+     },
+     {
+      "dx": 52,
+      "labels": 2,
+      "cut": null
+     },
+     {
+      "dx": 56,
+      "labels": 2,
+      "cut": null
+     },
+     {
+      "dx": 60,
+      "labels": 2,
+      "cut": null
+     },
+     {
+      "dx": 64,
+      "labels": 2,
+      "cut": null
+     },
+     {
+      "dx": 68,
+      "labels": 2,
+      "cut": null
+     },
+     {
+      "dx": 72,
+      "labels": 2,
+      "cut": null
+     },
+     {
+      "dx": 76,
+      "labels": 3,
+      "cut": null
+     },
+     {
+      "dx": 80,
+      "labels": 3,
+      "cut": null
+     },
+     {
+      "dx": 84,
+      "labels": 3,
+      "cut": null
+     },
+     {
+      "dx": 88,
+      "labels": 3,
+      "cut": null
+     },
+     {
+      "dx": 92,
+      "labels": 3,
+      "cut": null
+     },
+     {
+      "dx": 96,
+      "labels": 2,
+      "cut": null
+     },
+     {
+      "dx": 100,
+      "labels": 2,
+      "cut": null
+     },
+     {
+      "dx": 104,
+      "labels": 2,
+      "cut": null
+     },
+     {
+      "dx": 108,
+      "labels": 2,
+      "cut": null
+     },
+     {
+      "dx": 112,
+      "labels": 2,
+      "cut": null
+     },
+     {
+      "dx": 116,
+      "labels": 2,
+      "cut": null
+     },
+     {
+      "dx": 120,
+      "labels": 2,
+      "cut": null
+     },
+     {
+      "dx": 124,
+      "labels": 2,
+      "cut": null
+     },
+     {
+      "dx": 128,
+      "labels": 2,
+      "cut": null
+     },
+     {
+      "dx": 132,
+      "labels": 2,
+      "cut": null
+     },
+     {
+      "dx": 136,
+      "labels": 2,
+      "cut": null
+     },
+     {
+      "dx": 140,
+      "labels": 2,
+      "cut": null
+     },
+     {
+      "dx": 144,
+      "labels": 2,
+      "cut": null
+     },
+     {
+      "dx": 148,
+      "labels": 2,
+      "cut": null
+     },
+     {
+      "dx": 152,
+      "labels": 2,
+      "cut": null
+     },
+     {
+      "dx": 156,
+      "labels": 2,
+      "cut": null
+     },
+     {
+      "dx": 160,
+      "labels": 2,
+      "cut": null
+     }
+    ]
+   },
+   {
+    "width": "desktop",
+    "framed": true,
+    "drawn": true,
+    "reads": [
+     {
+      "dx": 0,
+      "labels": 8,
+      "cut": null
+     },
+     {
+      "dx": 4,
+      "labels": 8,
+      "cut": null
+     },
+     {
+      "dx": 8,
+      "labels": 8,
+      "cut": null
+     },
+     {
+      "dx": 12,
+      "labels": 8,
+      "cut": null
+     },
+     {
+      "dx": 16,
+      "labels": 8,
+      "cut": null
+     },
+     {
+      "dx": 20,
+      "labels": 8,
+      "cut": null
+     },
+     {
+      "dx": 24,
+      "labels": 8,
+      "cut": null
+     },
+     {
+      "dx": 28,
+      "labels": 8,
+      "cut": null
+     },
+     {
+      "dx": 32,
+      "labels": 8,
+      "cut": null
+     },
+     {
+      "dx": 36,
+      "labels": 8,
+      "cut": null
+     },
+     {
+      "dx": 40,
+      "labels": 8,
+      "cut": null
+     },
+     {
+      "dx": 44,
+      "labels": 7,
+      "cut": null
+     },
+     {
+      "dx": 48,
+      "labels": 7,
+      "cut": null
+     },
+     {
+      "dx": 52,
+      "labels": 7,
+      "cut": null
+     },
+     {
+      "dx": 56,
+      "labels": 7,
+      "cut": null
+     },
+     {
+      "dx": 60,
+      "labels": 7,
+      "cut": null
+     },
+     {
+      "dx": 64,
+      "labels": 7,
+      "cut": null
+     },
+     {
+      "dx": 68,
+      "labels": 7,
+      "cut": null
+     },
+     {
+      "dx": 72,
+      "labels": 7,
+      "cut": null
+     },
+     {
+      "dx": 76,
+      "labels": 8,
+      "cut": null
+     },
+     {
+      "dx": 80,
+      "labels": 8,
+      "cut": null
+     },
+     {
+      "dx": 84,
+      "labels": 8,
+      "cut": null
+     },
+     {
+      "dx": 88,
+      "labels": 8,
+      "cut": null
+     },
+     {
+      "dx": 92,
+      "labels": 8,
+      "cut": null
+     },
+     {
+      "dx": 96,
+      "labels": 8,
+      "cut": null
+     },
+     {
+      "dx": 100,
+      "labels": 8,
+      "cut": null
+     },
+     {
+      "dx": 104,
+      "labels": 8,
+      "cut": null
+     },
+     {
+      "dx": 108,
+      "labels": 8,
+      "cut": null
+     },
+     {
+      "dx": 112,
+      "labels": 8,
+      "cut": null
+     },
+     {
+      "dx": 116,
+      "labels": 8,
+      "cut": null
+     },
+     {
+      "dx": 120,
+      "labels": 8,
+      "cut": null
+     },
+     {
+      "dx": 124,
+      "labels": 8,
+      "cut": null
+     },
+     {
+      "dx": 128,
+      "labels": 8,
+      "cut": null
+     },
+     {
+      "dx": 132,
+      "labels": 8,
+      "cut": null
+     },
+     {
+      "dx": 136,
+      "labels": 8,
+      "cut": null
+     },
+     {
+      "dx": 140,
+      "labels": 8,
+      "cut": null
+     },
+     {
+      "dx": 144,
+      "labels": 8,
+      "cut": null
+     },
+     {
+      "dx": 148,
+      "labels": 8,
+      "cut": null
+     },
+     {
+      "dx": 152,
+      "labels": 8,
+      "cut": null
+     },
+     {
+      "dx": 156,
+      "labels": 8,
+      "cut": null
+     },
+     {
+      "dx": 160,
+      "labels": 8,
+      "cut": null
+     },
+     {
+      "dx": 164,
+      "labels": 7,
+      "cut": null
+     },
+     {
+      "dx": 168,
+      "labels": 7,
+      "cut": null
+     },
+     {
+      "dx": 172,
+      "labels": 7,
+      "cut": null
+     },
+     {
+      "dx": 176,
+      "labels": 7,
+      "cut": null
+     },
+     {
+      "dx": 180,
+      "labels": 7,
+      "cut": null
+     },
+     {
+      "dx": 184,
+      "labels": 7,
+      "cut": null
+     },
+     {
+      "dx": 188,
+      "labels": 7,
+      "cut": null
+     },
+     {
+      "dx": 192,
+      "labels": 7,
+      "cut": null
+     },
+     {
+      "dx": 196,
+      "labels": 8,
+      "cut": null
+     },
+     {
+      "dx": 200,
+      "labels": 8,
+      "cut": null
+     }
+    ]
+   }
+  ]
+ },
+ "bad": {
+  "check": "app-faults-seen-on-126",
+  "at": "2026-11-13T06:26:27.698Z",
+  "source": "live https://confidential.unrealized.trade and https://ct-app.unrealized.trade, the helper as served, signed out, release 127 (app at main 8d8e7716a since 05:32Z)",
+  "browser": "157.0.8103.51",
+  "runs": [
+   {
+    "width": "phone",
+    "framed": true,
+    "drawn": true,
+    "reads": [
+     {
+      "dx": 0,
+      "labels": 2,
+      "cut": null
+     },
+     {
+      "dx": 4,
+      "labels": 2,
+      "cut": null
+     },
+     {
+      "dx": 8,
+      "labels": 2,
+      "cut": null
+     },
+     {
+      "dx": 12,
+      "labels": 2,
+      "cut": null
+     },
+     {
+      "dx": 16,
+      "labels": 2,
+      "cut": null
+     },
+     {
+      "dx": 20,
+      "labels": 2,
+      "cut": null
+     },
+     {
+      "dx": 24,
+      "labels": 2,
+      "cut": null
+     },
+     {
+      "dx": 28,
+      "labels": 2,
+      "cut": null
+     },
+     {
+      "dx": 32,
+      "labels": 2,
+      "cut": null
+     },
+     {
+      "dx": 36,
+      "labels": 2,
+      "cut": null
+     },
+     {
+      "dx": 40,
+      "labels": 2,
+      "cut": null
+     },
+     {
+      "dx": 44,
+      "labels": 2,
+      "cut": null
+     },
+     {
+      "dx": 48,
+      "labels": 2,
+      "cut": null
+     },
+     {
+      "dx": 52,
+      "labels": 2,
+      "cut": null
+     },
+     {
+      "dx": 56,
+      "labels": 2,
+      "cut": null
+     },
+     {
+      "dx": 60,
+      "labels": 2,
+      "cut": null
+     },
+     {
+      "dx": 64,
+      "labels": 2,
+      "cut": null
+     },
+     {
+      "dx": 68,
+      "labels": 2,
+      "cut": null
+     },
+     {
+      "dx": 72,
+      "labels": 2,
+      "cut": null
+     },
+     {
+      "dx": 76,
+      "labels": 2,
+      "cut": null
+     },
+     {
+      "dx": 80,
+      "labels": 2,
+      "cut": null
+     },
+     {
+      "dx": 84,
+      "labels": 2,
+      "cut": null
+     },
+     {
+      "dx": 88,
+      "labels": 3,
+      "cut": "left"
+     },
+     {
+      "dx": 92,
+      "labels": 3,
+      "cut": "left"
+     },
+     {
+      "dx": 96,
+      "labels": 3,
+      "cut": "left"
+     },
+     {
+      "dx": 100,
+      "labels": 3,
+      "cut": "left"
+     },
+     {
+      "dx": 104,
+      "labels": 3,
+      "cut": "left"
+     },
+     {
+      "dx": 108,
+      "labels": 3,
+      "cut": null
+     },
+     {
+      "dx": 112,
+      "labels": 3,
+      "cut": null
+     },
+     {
+      "dx": 116,
+      "labels": 3,
+      "cut": "right"
+     },
+     {
+      "dx": 120,
+      "labels": 2,
+      "cut": null
+     },
+     {
+      "dx": 124,
+      "labels": 2,
+      "cut": null
+     },
+     {
+      "dx": 128,
+      "labels": 2,
+      "cut": null
+     },
+     {
+      "dx": 132,
+      "labels": 2,
+      "cut": null
+     },
+     {
+      "dx": 136,
+      "labels": 2,
+      "cut": null
+     },
+     {
+      "dx": 140,
+      "labels": 2,
+      "cut": null
+     },
+     {
+      "dx": 144,
+      "labels": 2,
+      "cut": null
+     },
+     {
+      "dx": 148,
+      "labels": 2,
+      "cut": null
+     },
+     {
+      "dx": 152,
+      "labels": 2,
+      "cut": null
+     },
+     {
+      "dx": 156,
+      "labels": 2,
+      "cut": null
+     },
+     {
+      "dx": 160,
+      "labels": 2,
+      "cut": null
+     }
+    ]
+   },
+   {
+    "width": "desktop",
+    "framed": true,
+    "drawn": true,
+    "reads": [
+     {
+      "dx": 0,
+      "labels": 8,
+      "cut": null
+     },
+     {
+      "dx": 4,
+      "labels": 8,
+      "cut": null
+     },
+     {
+      "dx": 8,
+      "labels": 8,
+      "cut": null
+     },
+     {
+      "dx": 12,
+      "labels": 8,
+      "cut": null
+     },
+     {
+      "dx": 16,
+      "labels": 8,
+      "cut": null
+     },
+     {
+      "dx": 20,
+      "labels": 8,
+      "cut": null
+     },
+     {
+      "dx": 24,
+      "labels": 8,
+      "cut": null
+     },
+     {
+      "dx": 28,
+      "labels": 8,
+      "cut": null
+     },
+     {
+      "dx": 32,
+      "labels": 8,
+      "cut": null
+     },
+     {
+      "dx": 36,
+      "labels": 8,
+      "cut": null
+     },
+     {
+      "dx": 40,
+      "labels": 8,
+      "cut": null
+     },
+     {
+      "dx": 44,
+      "labels": 8,
+      "cut": "right"
+     },
+     {
+      "dx": 48,
+      "labels": 8,
+      "cut": "right"
+     },
+     {
+      "dx": 52,
+      "labels": 8,
+      "cut": "right"
+     },
+     {
+      "dx": 56,
+      "labels": 8,
+      "cut": "right"
+     },
+     {
+      "dx": 60,
+      "labels": 8,
+      "cut": "right"
+     },
+     {
+      "dx": 64,
+      "labels": 7,
+      "cut": null
+     },
+     {
+      "dx": 68,
+      "labels": 7,
+      "cut": null
+     },
+     {
+      "dx": 72,
+      "labels": 7,
+      "cut": null
+     },
+     {
+      "dx": 76,
+      "labels": 7,
+      "cut": null
+     },
+     {
+      "dx": 80,
+      "labels": 7,
+      "cut": null
+     },
+     {
+      "dx": 84,
+      "labels": 8,
+      "cut": "left"
+     },
+     {
+      "dx": 88,
+      "labels": 8,
+      "cut": "left"
+     },
+     {
+      "dx": 92,
+      "labels": 8,
+      "cut": "left"
+     },
+     {
+      "dx": 96,
+      "labels": 8,
+      "cut": null
+     },
+     {
+      "dx": 100,
+      "labels": 8,
+      "cut": null
+     },
+     {
+      "dx": 104,
+      "labels": 8,
+      "cut": null
+     },
+     {
+      "dx": 108,
+      "labels": 8,
+      "cut": null
+     },
+     {
+      "dx": 112,
+      "labels": 8,
+      "cut": null
+     },
+     {
+      "dx": 116,
+      "labels": 8,
+      "cut": null
+     },
+     {
+      "dx": 120,
+      "labels": 8,
+      "cut": null
+     },
+     {
+      "dx": 124,
+      "labels": 8,
+      "cut": null
+     },
+     {
+      "dx": 128,
+      "labels": 8,
+      "cut": null
+     },
+     {
+      "dx": 132,
+      "labels": 8,
+      "cut": null
+     },
+     {
+      "dx": 136,
+      "labels": 8,
+      "cut": null
+     },
+     {
+      "dx": 140,
+      "labels": 8,
+      "cut": null
+     },
+     {
+      "dx": 144,
+      "labels": 8,
+      "cut": null
+     },
+     {
+      "dx": 148,
+      "labels": 8,
+      "cut": null
+     },
+     {
+      "dx": 152,
+      "labels": 8,
+      "cut": null
+     },
+     {
+      "dx": 156,
+      "labels": 8,
+      "cut": null
+     },
+     {
+      "dx": 160,
+      "labels": 8,
+      "cut": null
+     },
+     {
+      "dx": 164,
+      "labels": 8,
+      "cut": "right"
+     },
+     {
+      "dx": 168,
+      "labels": 8,
+      "cut": "right"
+     },
+     {
+      "dx": 172,
+      "labels": 8,
+      "cut": "right"
+     },
+     {
+      "dx": 176,
+      "labels": 8,
+      "cut": "right"
+     },
+     {
+      "dx": 180,
+      "labels": 8,
+      "cut": "right"
+     },
+     {
+      "dx": 184,
+      "labels": 7,
+      "cut": null
+     },
+     {
+      "dx": 188,
+      "labels": 7,
+      "cut": null
+     },
+     {
+      "dx": 192,
+      "labels": 7,
+      "cut": null
+     },
+     {
+      "dx": 196,
+      "labels": 7,
+      "cut": null
+     },
+     {
+      "dx": 200,
+      "labels": 7,
+      "cut": null
+     }
+    ]
+   }
+  ]
+ }
+}

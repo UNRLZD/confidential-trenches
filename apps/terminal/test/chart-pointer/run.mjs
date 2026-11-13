@@ -10,7 +10,9 @@
 //     marks move with their candles, and on the phone the page does not scroll;
 //   - a wheel (desktop) or a pinch (phone) zooms about the pointer: the bar under it stays under it;
 //   - a dragged chart holds still when a live read changes a bar before the newest (a late trade);
-//   - on the desktop a hover on a mark's disc opens its card.
+//   - on the desktop a hover on a mark's disc opens its card;
+//   - dragged a few px at a time across more than one tick spacing, no time label is cut at the plot's edge (card
+//     app-faults-seen-on-126; the read is that card's live check's, scripts/live-checks/app-faults-seen-on-126.mjs).
 // The view is read from the chart host's data-view (the newest bar's x in the candle pane and the bar space, the plot's
 // own px, chart.ts); the pointer is the window's.
 //   node apps/terminal/test/chart-pointer/run.mjs [--shots <dir>] [--app <terminal dir>]     PASS exit 0, FAIL exit 1
@@ -21,6 +23,7 @@ import { fileURLToPath } from "node:url";
 import { APP_HOST, SIGN_HOST, harnessRoute } from "../../../../scripts/live-checks/app-in-shell.mjs";
 import { browserLabel } from "../../../../scripts/browsers.mjs";
 import { launchHarnessBrowser } from "../../../../scripts/harness-sockets.mjs";
+import { SPAN, sweep } from "../../../../scripts/live-checks/app-faults-seen-on-126.mjs";
 import { FIXTURE_NOW_MS, TOKENS } from "../token-page/fixtures.ts";
 
 const HELPER = "https://ct-api.unrealized.trade";
@@ -331,6 +334,15 @@ try {
         check(card && near(d.vx, p.x - fb.x, 1.5), `${tag}: a hover on a mark: card ${card ? "open" : "not open"}, the crosshair's line ${d.vx === null ? "not drawn" : `${(d.vx - (p.x - fb.x)).toFixed(1)} px off`} the pointer`);
         await shot("mark-hover");
       } else check(false, `${tag}: no trade mark inside the plot to hover`);
+    }
+
+    // 6. card app-faults-seen-on-126 (the walk of release 126 at 1440 and 390: the last time label read "01::"): dragged
+    // across more than one tick spacing a few px at a time, the time axis as drawn holds no label cut at either edge
+    {
+      if (!phone) await page.mouse.move(at(0.5, 0.95).x, at(0.5, 0.95).y);
+      const reads = await sweep(page, f, box, { touch: phone, span: phone ? SPAN.phone : SPAN.desktop, shot: () => shot("axis-cut") });
+      const cut = reads.filter((x) => x.cut !== null);
+      check(reads.length > 0 && reads.every((x) => x.labels >= 1) && cut.length === 0, `${tag}: the time axis over ${reads.length} drag offsets: ${cut.length} with a label cut at the plot's edge${cut.length ? ` (${cut.map((x) => `dx ${x.dx} ${x.cut}`).join(", ")})` : ""}, labels ${Math.min(...reads.map((x) => x.labels))} to ${Math.max(...reads.map((x) => x.labels))} (want none cut, at least one at each)`);
     }
     check(errors.length === 0, `${tag}: page errors ${errors.join(" | ")}`);
     await ctx.close();
