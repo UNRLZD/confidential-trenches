@@ -56,10 +56,10 @@ test("planted: a recording stops at the upstream cap: the request past it is ref
   const r = child(code, { FORK_RPC_PORT: String(port) });
   assert.ok(r.ok, r.out);
   const got = JSON.parse(r.out.trim().split("\n").at(-1));
-  assert.equal(got.cap, 400);
-  assert.equal(got.upstream, 400, "upstream asked 400 times, the 401st never");
-  assert.equal(got.ok, 400);
-  assert.match(got.last, /^502 Error: fork-rpc: 400 upstream requests, stopped \(eth_getBalance/);
+  assert.equal(got.cap, 1_000);
+  assert.equal(got.upstream, 1_000, "upstream asked 1,000 times, the 1,001st never");
+  assert.equal(got.ok, 1_000);
+  assert.match(got.last, /^502 Error: fork-rpc: 1000 upstream requests, stopped \(eth_getBalance/);
 });
 
 
@@ -127,7 +127,7 @@ test("an upstream that never answers is tried 5 times, each try bounded, then th
   assert.ok(Date.now() - at < 5_000, "bounded, not held");
 });
 
-test("planted: the cap is per upstream host: a host at 400 is asked nothing more while another host still answers, and a request with every host at the cap is refused (502)", () => {
+test("planted: the cap is per upstream host: a host at 1,000 is asked nothing more while another host still answers, and a request with every host at the cap is refused (502)", () => {
   const port = 43_000 + (process.pid % 2_000);
   const code = `
     process.argv.push("--book", "pools", "--");
@@ -162,10 +162,10 @@ test("planted: the cap is per upstream host: a host at 400 is asked nothing more
   const r = child(code, { FORK_RPC_PORT: String(port) });
   assert.ok(r.ok, r.out);
   const got = JSON.parse(r.out.trim().split("\n").at(-1));
-  assert.equal(got.cap, 400);
-  assert.deepEqual(Object.values(got.asked), [400, 400, 400], JSON.stringify(got.asked));
+  assert.equal(got.cap, 1_000);
+  assert.deepEqual(Object.values(got.asked), [1_000, 1_000, 1_000], JSON.stringify(got.asked));
   assert.equal(got.afterToFull, 0, "the host at the cap is asked nothing more");
   assert.ok(got.afterToOthers > 0, "another host still answers once one is at the cap");
-  assert.equal(got.ok, 1200);
-  assert.match(got.last, /^502 Error: fork-rpc: 400 upstream requests, stopped \(eth_getBalance/);
+  assert.equal(got.ok, 3_000);
+  assert.match(got.last, /^502 Error: fork-rpc: 1000 upstream requests, stopped \(eth_getBalance/);
 });

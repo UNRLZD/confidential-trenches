@@ -41,8 +41,10 @@ const forkBlock = (env, dflt, deployed) => {
 export const POOLS_FORK_BLOCKS = Object.freeze({ base: forkBlock("POOLS_FORK_BLOCK_BASE", 56_630_000, 54_325_671), robinhood: forkBlock("POOLS_FORK_BLOCK_ROBINHOOD", 112_859_537, 108_420_674) });
 /** The most upstream requests one recording sends to one host: a host at it is asked nothing more that run, and a
  *  request with no host of its list left is refused and the run stops, so a run that loops never floods a public RPC.
- *  Per host, since a copy run's list spreads its reads over several providers (Base pass B sent 462 in all). */
-export const UPSTREAM_CAP = 400;
+ *  Per host, since a copy run's list spreads its reads over several providers (Base pass B sent 462 in all), and 1,000:
+ *  a Robinhood pass asks about 600 of each of its three wide hosts (run 34, 13 Nov: 568 eth_getLogs and 561 full blocks,
+ *  each a key the book did not hold, stopped at 400 each). */
+export const UPSTREAM_CAP = 1_000;
 const SENT = new Map();
 const bookArg = process.argv.indexOf("--book");
 const BOOK = BOOKS[bookArg > 0 && process.argv.indexOf("--") > bookArg ? process.argv[bookArg + 1] : "forge"];
