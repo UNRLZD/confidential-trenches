@@ -15,7 +15,8 @@
 //   - since card helper-says-why-a-vendor-refused, pool.address reads the page's stop once as a request arrives and checks
 //     it after each wait (the namer's, both record reads, the floor read, the follow's write), and hands it to the floor
 //     read and the quote's ask; the page's floor hands it on to the Solana floor's reads, each checked before it starts
-//     (the fee read names U_X): a sign out during any of them answers down, with nothing after it run;
+//     (the fee read names U_X): a sign out during any of them answers not_allowed, as a signed-out page does, with
+//     nothing after it run;
 //   - a pool quote whose min out is under its context floor is refused "floor" after the kit's check, and a context floor
 //     under the ladders' least rungs (0.01 SOL, 0.001 ETH on Base and Robinhood) is refused (review F3).
 // What each does is held by the card's tests (packages/signpage/test/deposit-name.test.ts and
@@ -58,7 +59,7 @@ const READ_FN = (w) =>
 // The host: the answer's first value; the asked chain's pool; that scope's record read back; no origin: its address.
 const HOST_SRC = (h) =>
   `function ${esc(h)}\\(${N}\\)\\{return\\(${N},(${N})\\)=>\\{let (${N})=\\{error:${Q}(\\w+)${Q}\\}(?:,${N}=${N}\\.stop\\?\\.\\(\\),${N}=\\(\\)=>${N}\\?\\.aborted===!0)?;return\\{after:\\(async\\(\\)=>\\{let (${N})=${N}\\.chain,(${N})=${N}\\.pools\\(\\)\\.find\\(${N}=>${N}\\.chain===\\4\\);if\\(\\5===void 0\\)return;` +
-  `let ${N}=${N}\\[\\4\\],(${N})=${N}\\.origin_asset!==void 0\\|\\|${N}\\.amount!==void 0;(?:if\\(await ${N}\\.named\\?\\.\\(\\)\\.catch\\(\\(\\)=>\\{\\}\\),${N}\\(\\)\\)return void\\(\\2=\\{error:${Q}down${Q}\\}\\)|await ${N}\\.named\\?\\.\\(\\)\\.catch\\(\\(\\)=>\\{\\}\\));let (${N})=(${N})\\(await ${N}\\.read\\(\\5\\.scope\\),\\4,\\5\\.scope\\);(?:if\\(${N}\\(\\)\\)return void\\(\\2=\\{error:${Q}down${Q}\\}\\);)?if\\(!\\7\\)return;` +
+  `let ${N}=${N}\\[\\4\\],(${N})=${N}\\.origin_asset!==void 0\\|\\|${N}\\.amount!==void 0;(?:if\\(await ${N}\\.named\\?\\.\\(\\)\\.catch\\(\\(\\)=>\\{\\}\\),${N}\\(\\)\\)return void\\(\\2=\\{error:${Q}not_allowed${Q}\\}\\)|await ${N}\\.named\\?\\.\\(\\)\\.catch\\(\\(\\)=>\\{\\}\\));let (${N})=(${N})\\(await ${N}\\.read\\(\\5\\.scope\\),\\4,\\5\\.scope\\);(?:if\\(${N}\\(\\)\\)return void\\(\\2=\\{error:${Q}not_allowed${Q}\\}\\);)?if\\(!\\7\\)return;` +
   `if\\(!\\6\\)return void\\(\\2=\\{result:\\{chain:\\4,address:\\7\\.wallet,asset:${N}\\}\\}\\);`;
 const HOST = (h) => new RegExp(HOST_SRC(h));
 // ...and then, with no follow (`checked`) or no floor read passed, it returns before any quote is asked.
@@ -75,13 +76,13 @@ function stopsEachWait(js, h) {
   const [out, stop, deps, stopped] = m.slice(1).map(esc);
   const end = js.indexOf("function ", m.index + m[0].length);
   const body = js.slice(m.index, end < 0 ? undefined : end);
-  const down = `if\\(${stopped}\\(\\)\\)return void\\(${out}=\\{error:${Q}down${Q}\\}\\);`;
+  const stoppedAnswer = `if\\(${stopped}\\(\\)\\)return void\\(${out}=\\{error:${Q}not_allowed${Q}\\}\\);`;
   return (
-    new RegExp(`if\\(await ${deps}\\.named\\?\\.\\(\\)\\.catch\\(\\(\\)=>\\{\\}\\),${stopped}\\(\\)\\)return void\\(${out}=\\{error:${Q}down${Q}\\}\\);`).test(body) &&
-    (body.match(new RegExp(`=${N}\\(await ${deps}\\.read\\(${N}\\.scope\\),${N},${N}\\.scope\\);${down}`, "g")) ?? []).length === 2 &&
-    new RegExp(`=await ${deps}\\.floor\\(${N},${N}\\.wallet,${stop}\\)\\}catch\\{${out}=\\{error:${Q}down${Q}\\};return\\}${down}`).test(body) &&
+    new RegExp(`if\\(await ${deps}\\.named\\?\\.\\(\\)\\.catch\\(\\(\\)=>\\{\\}\\),${stopped}\\(\\)\\)return void\\(${out}=\\{error:${Q}not_allowed${Q}\\}\\);`).test(body) &&
+    (body.match(new RegExp(`=${N}\\(await ${deps}\\.read\\(${N}\\.scope\\),${N},${N}\\.scope\\);${stoppedAnswer}`, "g")) ?? []).length === 2 &&
+    new RegExp(`=await ${deps}\\.floor\\(${N},${N}\\.wallet,${stop}\\)\\}catch\\{${out}=\\{error:${Q}down${Q}\\};return\\}${stoppedAnswer}`).test(body) &&
     new RegExp(`=await ${N}\\(${N},${deps}\\.fetch,void 0,void 0,${stop}\\)\\}`).test(body) &&
-    new RegExp(`if\\(await ${deps}\\.checked\\([^;]*?\\),${stopped}\\(\\)\\)return void\\(${out}=\\{error:${Q}down${Q}\\}\\);${out}=\\{result:`).test(body) &&
+    new RegExp(`if\\(await ${deps}\\.checked\\([^;]*?\\),${stopped}\\(\\)\\)return void\\(${out}=\\{error:${Q}not_allowed${Q}\\}\\);${out}=\\{result:`).test(body) &&
     floorStopped(js, h)
   );
 }

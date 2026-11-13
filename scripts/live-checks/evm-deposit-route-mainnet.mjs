@@ -93,7 +93,7 @@ const ROUTE = (deps) =>
   );
 // main.ts: the route on the page's network, its pools and its wallet reader
 const ROUTE_CALL = (route) => new RegExp(`[,;](${N})=${esc(route)}\\(\\{network:(${N}),pool:(${N})=>(${N})\\?\\.evmPoolOf\\(\\3\\)\\?\\?null,wallet:(${N}=>void 0|${N}),notes:\\(\\)=>(${N})\\(\\)\\}\\)`);
-const FLOOR_WIRE = (m) => new RegExp(`=async\\((${N}),(${N})\\)=>\\{if\\(\\1!==${Q}solana${Q}\\)return ${esc(m)}\\.floor\\(\\1\\);`);
+const FLOOR_WIRE = (m) => new RegExp(`=async\\((${N}),(${N})(?:,${N})?\\)=>\\{if\\(\\1!==${Q}solana${Q}\\)return ${esc(m)}\\.floor\\(\\1\\);`);
 const DEPS_WIRE = (m) =>
   new RegExp(`=\\((${N}),(${N})\\)=>\\{if\\(\\1\\.chain!==${Q}solana${Q}\\)\\{let (${N})=${esc(m)}\\.deps\\(\\1\\.chain,(${N}),(${N})=>(${N})\\(\\5,\\2\\)\\);return \\3===null\\?null:\\{\\.\\.\\.\\3,noted:(${N}),open:(${N})\\}\\}`);
 // main.ts uxNoted (review P2a): the store's landed deposit note of (s,i) read on the page's notes

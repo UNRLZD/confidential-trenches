@@ -74,11 +74,11 @@ const PLANTED = [
   // card helper-says-why-a-vendor-refused: pool.address is handed the page's stop on sign out (src/main.ts quotesStopped)
   ["pool.address wired with no stop", new RegExp(`(=>${N}\\.quoted\\(${N},${N},${N},${N}\\)),stop:${N}\\}\\)`), "$1})", ["unfollowed"]],
   // re-review P2: the stop read once and checked after each wait, and the ask handed it
-  ["no stop check after the namer's wait", new RegExp(`if\\(await (${N})\\.named\\?\\.\\(\\)\\.catch\\(\\(\\)=>\\{\\}\\),${N}\\(\\)\\)return void\\(${N}=\\{error:\`down\`\\}\\);`), "await $1.named?.().catch(()=>{});", ["stopped"]],
-  ["no stop check after the floor read", new RegExp(`(\\}catch\\{${N}=\\{error:\`down\`\\};return\\})if\\(${N}\\(\\)\\)return void\\(${N}=\\{error:\`down\`\\}\\);(if\\(${N}===null\\)return;)`), "$1$2", ["stopped"]],
-  ["no stop check after the second record read", new RegExp(`(let ${N}=${N}\\(await ${N}\\.read\\(${N}\\.scope\\),${N},${N}\\.scope\\);)if\\(${N}\\(\\)\\)return void\\(${N}=\\{error:\`down\`\\}\\);(if\\(!${N}\\|\\|!${N}\\(${N},${N}\\)\\)return;)`), "$1$2", ["stopped"]],
+  ["no stop check after the namer's wait", new RegExp(`if\\(await (${N})\\.named\\?\\.\\(\\)\\.catch\\(\\(\\)=>\\{\\}\\),${N}\\(\\)\\)return void\\(${N}=\\{error:\`not_allowed\`\\}\\);`), "await $1.named?.().catch(()=>{});", ["stopped"]],
+  ["no stop check after the floor read", new RegExp(`(\\}catch\\{${N}=\\{error:\`down\`\\};return\\})if\\(${N}\\(\\)\\)return void\\(${N}=\\{error:\`not_allowed\`\\}\\);(if\\(${N}===null\\)return;)`), "$1$2", ["stopped"]],
+  ["no stop check after the second record read", new RegExp(`(let ${N}=${N}\\(await ${N}\\.read\\(${N}\\.scope\\),${N},${N}\\.scope\\);)if\\(${N}\\(\\)\\)return void\\(${N}=\\{error:\`not_allowed\`\\}\\);(if\\(!${N}\\|\\|!${N}\\(${N},${N}\\)\\)return;)`), "$1$2", ["stopped"]],
   // delta review P3-5, P3-6: the stop after the follow's write, handed to the floor read and on to its RPC reads
-  ["no stop check after the follow's write", new RegExp(`if\\(await (${N}\\.checked\\([^;]*?\\)),${N}\\(\\)\\)return void\\(${N}=\\{error:\`down\`\\}\\);`), "await $1;", ["stopped"]],
+  ["no stop check after the follow's write", new RegExp(`if\\(await (${N}\\.checked\\([^;]*?\\)),${N}\\(\\)\\)return void\\(${N}=\\{error:\`not_allowed\`\\}\\);`), "await $1;", ["stopped"]],
   ["the floor read not handed the stop", new RegExp(`(=await ${N}\\.floor\\(${N},${N}\\.wallet),${N}\\)\\}`), "$1)}", ["stopped"]],
   ["the page's floor keeps the stop from the Solana floor", new RegExp(`(\\?${N}\\(${N},${N}\\.program,${N}),${N}\\):null\\}`), "$1):null}", ["stopped"]],
   ["the Solana floor keeps it from its reads", new RegExp(`(\\{let\\{fee:${N},rent:${N}\\}=await ${N}\\(${N},${N},${N}),${N}\\);`), "$1);", ["stopped"]],
