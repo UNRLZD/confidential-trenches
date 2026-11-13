@@ -2078,7 +2078,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         throw e;
       }
     };
-    // the front taken at the tap's first read and kept to its take (tapRun)
+    // the front taken at the tap's first read and kept until the take is sent (the run's release) or the run ends (tapRun)
     const t = tapRun(() => proofs());
     // the proof this run's take handed out: what a follow of its note reads (pool-buy.ts poolBuyKind follow)
     let taken: ReadyProof<SolanaReleaseRequest> | null = null;
@@ -2098,23 +2098,13 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         if (list.length === 0) void proofs();
         return list;
       },
-      take: async (id, attempt, early, lastHeight) => {
-        try {
-          return (taken = await (await q()).take(id, attempt, early, lastHeight));
-        } finally {
-          t.end();
-        }
-      },
+      take: async (id, attempt, early, lastHeight) => (taken = await (await q()).take(id, attempt, early, lastHeight)),
       chainNow: () => chainNow(over.pool ?? { now: (signal) => solanaNow(rpcs(), signal) }),
       // a buy's pieces, all RESERVED or none (card buy-spends-several-pieces); the run's buy is the last, its tag 3
       takeSet: async (items, early, lastHeight) => {
-        try {
-          const got = await (await q()).takeSet(items, early, lastHeight);
-          taken = got[got.length - 1] ?? null;
-          return got;
-        } finally {
-          t.end();
-        }
+        const got = await (await q()).takeSet(items, early, lastHeight);
+        taken = got[got.length - 1] ?? null;
+        return got;
       },
       // the run ended "sent": its note is followed by the state reads' pass until its end is known (followBuys)
       follow: (post) => {
@@ -2160,7 +2150,10 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
           seed64.fill(0);
         }
       },
-      release,
+      release: () => {
+        t.end();
+        release();
+      },
       // the release read landed on both RPCs: the balance counts only the note's change until the settle writes it
       // (../../wallet/src/pool/balances.ts landed), and the app reads the state again
       landed: (noteId, attempt, withdrawn) => {
@@ -3159,11 +3152,12 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     withdrawing.add(opId);
     // the front taken at the tap and kept to the run's end (src/proof-front.ts tap): the tab that held it closes its
     // queues first, so every note it held is free for this run's plan, and no window switch closes a queue it drops from
-    const tapped = await front.tap();
+    let tapped: (() => void) | null = null;
     try {
+      tapped = await front.tap();
       await (ready.chain === "solana" ? withdrawRun(ready, opId) : evmWithdrawRun(ready.chain, ready, opId));
     } finally {
-      tapped();
+      tapped?.();
       withdrawing.delete(opId);
     }
   };
