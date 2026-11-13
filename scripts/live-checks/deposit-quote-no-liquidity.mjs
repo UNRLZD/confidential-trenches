@@ -21,6 +21,7 @@
 // request that reached the helper, another code or anything but a refusal, or no answer.
 // The quote is dry and answered here: nothing is signed, nothing of anyone's is named, nothing reaches the helper.
 // After: sign
+// Bundle: out a browser (its --local run is in test-browser: SIGN_HOST from this tree's build, every quote answered in the run)
 //   node scripts/live-checks/deposit-quote-no-liquidity.mjs [--url <SIGN_HOST url>] [--record <file>]
 //   node scripts/live-checks/deposit-quote-no-liquidity.mjs --local [<build dir>] [--record <file>]
 //     SIGN_HOST answered from a build dir as packages/signpage/scripts/deploy.mjs builds it (index.html and public/),

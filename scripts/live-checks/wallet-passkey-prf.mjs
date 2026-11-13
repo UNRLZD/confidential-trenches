@@ -57,6 +57,7 @@
 //     sign live run 42499353181: Backup pressed at 547 ms). A try inside the window is the step's, held or not; one that
 //     never lands inside ends the check INCONCLUSIVE with each try's ms, unless a line is BAD.
 // After: sign
+// Bundle: out a browser
 //   node scripts/live-checks/wallet-passkey-prf.mjs [--url <origin>] [--record <file>]
 //   node scripts/live-checks/wallet-passkey-prf.mjs --harness [--site <dir>] ...   the same steps on the app's browser
 //     harness (apps/terminal/test/harness) with SIGN_HOST's real name mapped to it, serving SIGN_HOST's build

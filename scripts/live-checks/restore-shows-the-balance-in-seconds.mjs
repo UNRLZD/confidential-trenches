@@ -12,6 +12,7 @@
 // walks' equality with the page's own walk is the packages' tests (packages/wallet/test/walk-lanes.test.ts,
 // packages/signpage/test/main-walk-workers.test.ts); the seconds are the browser run's.
 // After: sign --host sign
+// Bundle: read sign
 //   node scripts/live-checks/restore-shows-the-balance-in-seconds.mjs [--record <file>]
 //     PASS exit 0, FAIL exit 1, error exit 2
 // --record writes what the run read (the marks each file holds, its pin and its sha384, not the files), so the check's
@@ -113,4 +114,11 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     console.error(`CARD ${KEY} / live: ERROR ${e?.stack ?? e}`);
     process.exit(2);
   }
+}
+
+/** How scripts/ci/bundle-checks.mjs runs this check on a build (its `// Bundle: read` line): `f` answers from the build
+ *  folders as the host would; `dirs` names them (card ci-stops-costing-reruns, moved from bundle-checks.mjs). */
+export async function bundle(f) {
+  const m = await import(import.meta.url);
+  return m.judge(await m.collect({ fetchFn: f }));
 }

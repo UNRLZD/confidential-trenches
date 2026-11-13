@@ -17,6 +17,7 @@
 // Discover's stamp (row 5), the PumpSwap chart (row 4) and Discover's logos (live check discover-matches-the-main-app)
 // are held by their own tests and that check. A screenshot of each width is kept.
 // After: app
+// Bundle: out a browser (its --harness run is in test-browser)
 //   node scripts/live-checks/app-faults-seen-on-122.mjs [--shots <dir>] [--record <file>]
 //     the deployed APP_HOST (its bytes and headers as served), framed by the stand-in shell
 //   node scripts/live-checks/app-faults-seen-on-122.mjs --harness [--build <dir>] [--shots <dir>] [--record <file>]

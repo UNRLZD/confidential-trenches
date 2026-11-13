@@ -17,6 +17,7 @@
 // page. This file reaches no package code (the import check holds it). The PR's own build runs judge(read, { ledger:
 // false }) in scripts/ci/bundle-checks.mjs, since it is cut as a release only after its merge.
 // After: sign
+// Bundle: read sign
 //   node scripts/live-checks/pool-sell-share-across-wallets.mjs [--record <file>] [--answer <file>]
 // PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";
@@ -111,4 +112,11 @@ if (realpathSync(process.argv[1] ?? "") === realpathSync(fileURLToPath(import.me
     console.error(`ERROR ${KEY}: ${e?.message ?? e}`);
     process.exit(2);
   }
+}
+
+/** How scripts/ci/bundle-checks.mjs runs this check on a build (its `// Bundle: read` line): `f` answers from the build
+ *  folders as the host would; `dirs` names them (card ci-stops-costing-reruns, moved from bundle-checks.mjs). */
+export async function bundle(f) {
+  const m = await import(import.meta.url);
+  return m.judge(await m.read(f), { ledger: false });
 }

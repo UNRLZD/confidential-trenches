@@ -30,6 +30,7 @@
 // three asks of one request, each answered it, is 1Click's liquidity, not the page's: INCONCLUSIVE (exit 3), never PASS.
 // Any other refusal, status or answer is judged as before.
 // After: sign
+// Bundle: out a browser
 //   node scripts/live-checks/signpage-postmessage.mjs [--url <SIGN_HOST url>] [--record <file>]
 //   node scripts/live-checks/signpage-postmessage.mjs --local [<dir>] [--record <file>]
 //     the same probe with no network: Playwright answers SIGN_HOST from a build dir under that build's own _headers

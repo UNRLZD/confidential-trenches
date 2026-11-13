@@ -36,6 +36,7 @@
 // restore on SIGN_HOST reads; since card sol-pools-mainnet-pin the mainnet build pins the Solana pool
 // (src/pool-restore.ts pagePools), so its step 5 runs on that pool's deposit ids.
 // After: sign
+// Bundle: read sign
 //   node scripts/live-checks/wallet-restore-id-reader.mjs [--url <origin>] [--record <file>]
 //   node scripts/live-checks/wallet-restore-id-reader.mjs --local [--root <signpage dir>] [--record <file>]
 //     --local judges this tree's committed build and _headers (--root: another packages/signpage folder, as a checkout of
@@ -482,4 +483,11 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     console.error(`${KEY}: error: ${e?.message ?? e}`);
     process.exit(2);
   }
+}
+
+/** How scripts/ci/bundle-checks.mjs runs this check on a build (its `// Bundle: read` line): `f` answers from the build
+ *  folders as the host would; `dirs` names them (card ci-stops-costing-reruns, moved from bundle-checks.mjs). */
+export async function bundle(f) {
+  const m = await import(import.meta.url);
+  return m.judgeBundle(await m.readBundle(f));
 }

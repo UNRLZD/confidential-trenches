@@ -15,6 +15,7 @@
 // answer) is INCONCLUSIVE, never a pass.
 // The census that chose the spare (Chrome, 11 Nov) is in PROBE below and in the answers file.
 // After: sign
+// Bundle: out both public Solana seats' CORS answers to the page's origin and their mainnet reads of the stable accounts
 //   node scripts/live-checks/signpage-throttled-provider-has-a-spare.mjs [--record <file>]
 // PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3. --record writes the run, for the test's replay
 // (signpage-throttled-provider-has-a-spare.answers.json). Reads only: no key, no transaction, never the helper.

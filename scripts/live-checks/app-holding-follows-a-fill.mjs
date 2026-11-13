@@ -10,6 +10,7 @@
 // test/sell-positions/run.mjs in a browser, test/holding-follows-a-fill.test.ts) and by the devnet run's HELD verdict
 // (test/e2e/buy/run.mjs). The recorded answers are facts() over APP_HOST's build (apps/terminal/dist).
 // After: app
+// Bundle: read app
 //   node scripts/live-checks/app-holding-follows-a-fill.mjs [--record <file>] [--answer <file>]
 // PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";

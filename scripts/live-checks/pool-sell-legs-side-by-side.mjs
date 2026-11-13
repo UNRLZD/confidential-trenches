@@ -17,6 +17,7 @@
 // recorded answers are facts() over SIGN_HOST's index.html and the /app.js it pins. This file reaches no package code
 // (the import check holds it). The PR's own build runs judge(read) in scripts/ci/bundle-checks.mjs.
 // After: sign
+// Bundle: read sign
 //   node scripts/live-checks/pool-sell-legs-side-by-side.mjs [--record <file>] [--answer <file>]
 // PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";

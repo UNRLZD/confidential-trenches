@@ -17,6 +17,7 @@
 // mark missing from the bundle, or a provider that answered and did not reach the cut within the cap. The bundle part
 // (readBundle, judgeBundle) runs on a pull request's own build (scripts/ci/bundle-checks.mjs); the chain part is past it.
 // After: sign
+// Bundle: read sign
 //   node scripts/live-checks/pool-tree-read-waits-for-its-second.mjs [--record <file>] [--answer <file>]
 // PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3.
 import "../net-window.mjs";
@@ -167,4 +168,11 @@ if (realpathSync(process.argv[1] ?? "") === realpathSync(fileURLToPath(import.me
     console.error(`ERROR ${KEY}: ${e?.message ?? e}`);
     process.exit(EXIT.ERROR);
   }
+}
+
+/** How scripts/ci/bundle-checks.mjs runs this check on a build (its `// Bundle: read` line): `f` answers from the build
+ *  folders as the host would; `dirs` names them (card ci-stops-costing-reruns, moved from bundle-checks.mjs). */
+export async function bundle(f) {
+  const m = await import(import.meta.url);
+  return m.judgeBundle(await m.readBundle(f));
 }

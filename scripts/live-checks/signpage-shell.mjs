@@ -53,6 +53,7 @@
 // After: sign --engine chromium --live --width desktop
 // After: sign --engine firefox --live --width phone
 // After: sign --engine firefox --live --width desktop
+// Bundle: out a browser (its harness run is in test-browser: SIGN_HOST from this tree's build, Chromium at phone width; its Firefox and desktop runs are the live host's, Firefox's build is not on that runner)
 //   node scripts/live-checks/signpage-shell.mjs --engine webkit|chromium|firefox [--width phone|desktop] [--site <dir>] [--record <file>]
 //     at 390 x 844 (phone, the iPhone case) or 1440 x 900 (desktop, the default); the record names the width and the
 //     top window's own width as read

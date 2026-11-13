@@ -17,6 +17,7 @@
 // (/token/<chain>/<id>, apps/terminal/src/screens/discover/Discover.tsx), the one source on the row apart from the chain
 // badge this check judges; a row with no such link is a fault.
 // After: app
+// Bundle: out a browser and the helper
 //   node scripts/live-checks/app-launchpad-badges.mjs [--url <page>] [--build <dir>] [--shots <dir>] [--record <file>]
 //     PASS exit 0, FAIL exit 1, error exit 2
 // --record writes what the run read, so the check's test can replay it through judge(). A row is recorded by its `addr`

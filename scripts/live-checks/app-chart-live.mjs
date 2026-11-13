@@ -32,6 +32,7 @@
 //      full read (limit 500) a minute after the first, no console error and no page error in the terminal's frame.
 // A screenshot of every load is kept.
 // After: app
+// Bundle: out a browser and the helper
 //   node scripts/live-checks/app-chart-live.mjs [--build <dir>] [--shots <dir>] [--record <file>]
 //     PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3
 // --build serves that terminal build at APP_HOST's name inside the stand-in shell (app-in-shell.mjs harnessRoute), the

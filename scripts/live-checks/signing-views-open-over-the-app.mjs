@@ -15,6 +15,7 @@
 // forms under an app that takes the focus: it reads nothing); that no key and no paste reaches an app under a typed
 // screen on Chromium, Firefox and WebKit, by packages/signpage/scripts/focus-steal.e2e.mjs.
 // After: sign
+// Bundle: child sign --local
 //   node scripts/live-checks/signing-views-open-over-the-app.mjs [--record <file>]           the deployed SIGN_HOST
 //   node scripts/live-checks/signing-views-open-over-the-app.mjs --local [--record <file>]   this checkout's build
 //     PASS exit 0, FAIL exit 1, error exit 2

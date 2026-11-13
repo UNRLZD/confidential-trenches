@@ -30,6 +30,7 @@
 // token and each one skipped, with its bars or why it was not read. No token to walk in the lists: INCONCLUSIVE, saying how
 // many it read and why each was skipped; the check never passes on a chart it could not walk.
 // After: app
+// Bundle: out a browser and the helper
 //   node scripts/live-checks/app-legend-holds-still.mjs [--build <dir>] [--path <route>] [--shots <dir>] [--record <file>]
 //     PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3
 // --path opens that route instead of a picked token (a token page, /token/<chain>/<id>, or / for the top Trending token); --build serves that terminal build at APP_HOST's name inside the stand-in shell (app-in-shell.mjs harnessRoute,

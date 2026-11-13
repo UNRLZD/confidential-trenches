@@ -22,6 +22,7 @@
 // the wallet's and the signing page's tests at the commit.
 // After: helper
 // After: sign --part sign
+// Bundle: read sign
 //   node scripts/live-checks/withdraw-fee-busy-waits.mjs [--base <url>] [--record <file>]
 //   node scripts/live-checks/withdraw-fee-busy-waits.mjs --part sign [--sign <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3.
@@ -165,4 +166,11 @@ if (import.meta.main) {
     console.error(`live-check ${KEY}: ERROR: ${e.message}`);
     process.exit(EXIT.ERROR);
   }
+}
+
+/** How scripts/ci/bundle-checks.mjs runs this check on a build (its `// Bundle: read` line): `f` answers from the build
+ *  folders as the host would; `dirs` names them (card ci-stops-costing-reruns, moved from bundle-checks.mjs). */
+export async function bundle(f, { dirs, SIGN, readFileSync, path }) {
+  const m = await import(import.meta.url);
+  return m.judgeSign(await m.readSign(SIGN, f, m.pinOf(readFileSync(path.join(dirs.sign, "index.html"), "utf8"))));
 }

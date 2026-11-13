@@ -40,6 +40,7 @@
 // test/pool-withdraw-mainnet-reaches.test.ts, test/pool-mainnet-evm.test.ts, test/pool-deposit-evm-{base,robinhood}-mainnet.test.ts).
 // After: sign
 // After: helper --part helper
+// Bundle: read sign
 //   node scripts/live-checks/evm-deposit-on-mainnet.mjs [--local] [--part helper] [--record <file>]
 //   PASS exit 0, FAIL 1, error 2, INCONCLUSIVE 3. --local judges this tree's SIGN_HOST build (signBuilt) in SIGN_HOST's
 //   place; --part helper reads the chain, the fee and the helper only (a helper deploy changes nothing SIGN_HOST
@@ -310,4 +311,11 @@ if (realpathSync(process.argv[1] ?? "") === realpathSync(fileURLToPath(import.me
     console.error(`live-check ${KEY}: ERROR: ${e.message}`);
     process.exit(2);
   }
+}
+
+/** How scripts/ci/bundle-checks.mjs runs this check on a build (its `// Bundle: read` line): `f` answers from the build
+ *  folders as the host would; `dirs` names them (card ci-stops-costing-reruns, moved from bundle-checks.mjs). */
+export async function bundle(f) {
+  const m = await import(import.meta.url);
+  return m.judgeBundle(await m.readBundle(f));
 }

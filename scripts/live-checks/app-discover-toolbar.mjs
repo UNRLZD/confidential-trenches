@@ -12,6 +12,7 @@
 //     with its amount; Fewer flags leaves no drawn row whose dev reads at its line.
 // A state with no row to judge (nothing flagged, nothing under $10K) is still judged on what it drew, and is named.
 // After: app
+// Bundle: out a browser and the helper
 //   node scripts/live-checks/app-discover-toolbar.mjs [--build <dir>] [--shots <dir>] [--record <file>]
 //     PASS exit 0, FAIL exit 1, error exit 2
 // --build serves that terminal build at APP_HOST's name inside the stand-in shell (app-in-shell.mjs harnessRoute,

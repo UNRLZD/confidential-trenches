@@ -27,6 +27,7 @@
 // owner's funded run (card pool-sol-mainnet-run); the signed-in pinned flow is proven by
 // packages/signpage/test/main-mainnet-pools.test.ts on fakes.
 // After: sign
+// Bundle: out a browser
 //   node scripts/live-checks/signpage-pool-mainnet.mjs [--record <file>]
 //   node scripts/live-checks/signpage-pool-mainnet.mjs --local [<dir>] [--record <file>]
 //     --local: no network; Playwright answers SIGN_HOST from a build dir under its own _headers (default: this

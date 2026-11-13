@@ -12,6 +12,7 @@
 //   - CoinGecko's label: shown exactly when the read's X-Helper-Source names geckoterminal.
 // A screenshot of every load is kept.
 // After: app
+// Bundle: out a browser and the helper
 //   node scripts/live-checks/app-token-chart.mjs [--build <dir>] [--shots <dir>] [--record <file>]
 //     PASS exit 0, FAIL exit 1, error exit 2
 // --build serves that terminal build at APP_HOST's name inside the stand-in shell (app-in-shell.mjs harnessRoute), the

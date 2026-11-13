@@ -6,6 +6,7 @@
 //     device's own read of a token's decimals (ERC-20 decimals(), selector 0x313ce567), which no other kind has.
 // The markers are written out here, not read from the repo.
 // After: sign
+// Bundle: read sign
 //   node scripts/live-checks/signpage-pool-kinds.mjs [--site <dir>] [--record <file>] [--answer <file>]
 // --site reads a build folder (its index.html and public/app.js) in place of SIGN_HOST: the answer this tree's build
 // gives, which the deployed page must match. PASS exit 0, FAIL exit 1, error exit 2. --record writes the answer read;
@@ -58,4 +59,11 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     console.error(`ERROR signpage-pool-kinds: ${e?.message ?? e}`);
     process.exit(2);
   }
+}
+
+/** How scripts/ci/bundle-checks.mjs runs this check on a build (its `// Bundle: read` line): `f` answers from the build
+ *  folders as the host would; `dirs` names them (card ci-stops-costing-reruns, moved from bundle-checks.mjs). */
+export async function bundle(f, { dirs }) {
+  const m = await import(import.meta.url);
+  return m.judge(await m.read(dirs.sign));
 }

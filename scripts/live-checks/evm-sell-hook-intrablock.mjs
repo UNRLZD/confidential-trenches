@@ -23,6 +23,7 @@
 // (apps/terminal/scripts/deploy.mjs LIVE_CHECKS): the kit ships in the app's bundle and its bans fail open, so a pin
 // that changes or a provider that stops serving traces would turn Robinhood's trace evidence off without a sound.
 // After: app
+// Bundle: out EVM RPC traces and replays
 //   node scripts/live-checks/evm-sell-hook-intrablock.mjs [--record <file>]
 // A provider that does not know the transaction or its block yet (Robinhood makes a block every 0.1 s, and the newest
 // transactions are a second or so old: a trace answered null or "not found", a replay seat's "header not found" or

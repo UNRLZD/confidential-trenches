@@ -11,6 +11,7 @@
 // The recorded answers are facts() over packages/signpage/index.html and public/app.js as build-app.mjs wrote them in
 // each tree (mainnet, as SIGN_HOST serves; this file reaches no package code: the import check holds it).
 // After: sign
+// Bundle: out the release ledger: it holds the served /app.js to a written release list, so a planted bundle fails it whatever it plants (its replay holds the marks and the pin)
 //   node scripts/live-checks/kit-sol-pool-deposit-floor.mjs [--record <file>] [--answer <file>]
 // PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";

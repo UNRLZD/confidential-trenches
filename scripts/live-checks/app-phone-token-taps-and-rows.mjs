@@ -12,6 +12,7 @@
 //   - each of them at CLS 0 (every shift counted, the hadRecentInput exclusion not applied), inside SIGN_HOST's shell.
 // The rest of each load (CSP, integrity, console, text size) is app-shell's to judge.
 // After: app
+// Bundle: out a browser
 //   node scripts/live-checks/app-phone-token-taps-and-rows.mjs [--url <origin>] [--shots <dir>] [--record <file>]
 //     PASS exit 0, FAIL exit 1, error exit 2
 // --record writes what the run read (app-shell's record) to <file>; apps/terminal/test/bar10/run.mjs --record writes the

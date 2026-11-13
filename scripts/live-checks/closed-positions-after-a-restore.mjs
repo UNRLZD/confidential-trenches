@@ -15,6 +15,7 @@
 // The behaviour (the owner's three round trips of 12 Nov, restored on the published test seed) is the package's own
 // test: packages/signpage/test/restore-trades.test.ts.
 // After: sign --host sign
+// Bundle: read sign
 //   node scripts/live-checks/closed-positions-after-a-restore.mjs [--record <file>]
 //     PASS exit 0, FAIL exit 1, error exit 2
 // --record writes what the run read (the marks each file holds, its pin and its sha384, not the files), so the check's
@@ -112,4 +113,11 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     console.error(`CARD ${KEY} / live: ERROR ${e?.stack ?? e}`);
     process.exit(2);
   }
+}
+
+/** How scripts/ci/bundle-checks.mjs runs this check on a build (its `// Bundle: read` line): `f` answers from the build
+ *  folders as the host would; `dirs` names them (card ci-stops-costing-reruns, moved from bundle-checks.mjs). */
+export async function bundle(f) {
+  const m = await import(import.meta.url);
+  return m.judge(await m.collect({ fetchFn: f }));
 }

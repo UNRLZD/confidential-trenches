@@ -11,6 +11,7 @@
 // lists never reordered in the hold proves nothing either way: with no BAD line it is INCONCLUSIVE (exit 3), never a PASS.
 // The bundle cannot show this change (a row's React key is not in the built code's text), so the check reads the page.
 // After: app
+// Bundle: out a browser and the helper
 //   node scripts/live-checks/app-discover-rows-hold.mjs [--build <dir>] [--shots <dir>] [--record <file>]
 //     PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3
 // --build serves that terminal build at APP_HOST's name inside the stand-in shell (app-in-shell.mjs harnessRoute,

@@ -12,6 +12,7 @@
 // The mainnet build offers no hand-off until the release names mainnet's relayer (handoff.ts withdrawHandoff: null);
 // the code that pays the typed account is in the bundle either way, which is what this reads.
 // After: sign
+// Bundle: read sign
 //   node scripts/live-checks/wallet-withdraw-move-out.mjs [--url <origin>] [--record <file>]
 //   node scripts/live-checks/wallet-withdraw-move-out.mjs --local [--record <file>]   this tree's committed build
 //   PASS exit 0, FAIL exit 1, error exit 2. The record holds the script's path, integrity, size, sha384 and each
@@ -103,4 +104,11 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     console.error(`${KEY}: error: ${e?.message ?? e}`);
     process.exit(2);
   }
+}
+
+/** How scripts/ci/bundle-checks.mjs runs this check on a build (its `// Bundle: read` line): `f` answers from the build
+ *  folders as the host would; `dirs` names them (card ci-stops-costing-reruns, moved from bundle-checks.mjs). */
+export async function bundle(f, { SIGN }) {
+  const m = await import(import.meta.url);
+  return m.judge(await m.probe(SIGN, f));
 }
