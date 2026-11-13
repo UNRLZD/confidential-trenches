@@ -256,7 +256,7 @@ test("card evm-deposit-ready-in-ten-seconds: a send its first verdict read finds
   const rpcs = [at(ch.rpcs[0], 0), at(ch.rpcs[1], 1)] as const;
   const round = async () => (log.push("round"), { events: [...ch.c.events], finalBlock: ch.c.fin });
   const a = await runPoolDepositEvm(hostOf(ch, ns, { rpcs, round }), ASK);
-  assert.equal(a.stage, "filled");
+  assert.equal("stage" in a && a.stage, "filled");
   assert.equal((await ns.get(planned.id))!.state, "UNSPENT");
   const sent = log.findIndex((x) => x.includes("eth_sendRawTransaction"));
   const landing = log.slice(sent + 1);
