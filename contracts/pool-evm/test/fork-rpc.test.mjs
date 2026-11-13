@@ -126,3 +126,46 @@ test("an upstream that never answers is tried 5 times, each try bounded, then th
   assert.equal(calls, 5);
   assert.ok(Date.now() - at < 5_000, "bounded, not held");
 });
+
+test("planted: the cap is per upstream host: a host at 400 is asked nothing more while another host still answers, and a request with every host at the cap is refused (502)", () => {
+  const port = 43_000 + (process.pid % 2_000);
+  const code = `
+    process.argv.push("--book", "pools", "--");
+    const real = globalThis.fetch;
+    const asked = {};
+    const order = [];
+    globalThis.fetch = (url, init) => {
+      if (url.startsWith("http://127.0.0.1:")) return real(url, init);
+      const h = new URL(url).host;
+      asked[h] = (asked[h] ?? 0) + 1;
+      order.push(h);
+      return Promise.resolve(new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: "0x1" }), { status: 200 }));
+    };
+    const { serve, UPSTREAM_CAP } = await import(${JSON.stringify(MODULE)});
+    // one host of Base's three spent to the cap first: the planted world of a run whose reads one host took
+    const server = await serve({}, true);
+    const ask = async (i) => {
+      const r = await real("http://127.0.0.1:${port}/base", { method: "POST", body: JSON.stringify({ jsonrpc: "2.0", id: i, method: "eth_getBalance", params: ["0x" + i.toString(16).padStart(40, "0"), "0x1"] }) });
+      return r.status === 200 ? 200 : r.status + " " + (await r.text());
+    };
+    const statuses = [];
+    for (let i = 0; i < 3 * UPSTREAM_CAP + 1; i++) statuses.push(await ask(i));
+    server.close();
+    // the first host to reach the cap, and what the hosts were asked after it
+    let n = {}, full = null, after = [];
+    for (const h of order) {
+      if (full !== null) after.push(h);
+      n[h] = (n[h] ?? 0) + 1;
+      if (full === null && n[h] === UPSTREAM_CAP) full = h;
+    }
+    console.log(JSON.stringify({ cap: UPSTREAM_CAP, asked, full, afterToFull: after.filter((h) => h === full).length, afterToOthers: after.length, ok: statuses.filter((s) => s === 200).length, last: statuses.at(-1) }));`;
+  const r = child(code, { FORK_RPC_PORT: String(port) });
+  assert.ok(r.ok, r.out);
+  const got = JSON.parse(r.out.trim().split("\n").at(-1));
+  assert.equal(got.cap, 400);
+  assert.deepEqual(Object.values(got.asked), [400, 400, 400], JSON.stringify(got.asked));
+  assert.equal(got.afterToFull, 0, "the host at the cap is asked nothing more");
+  assert.ok(got.afterToOthers > 0, "another host still answers once one is at the cap");
+  assert.equal(got.ok, 1200);
+  assert.match(got.last, /^502 Error: fork-rpc: 400 upstream requests, stopped \(eth_getBalance/);
+});

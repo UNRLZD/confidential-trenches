@@ -39,10 +39,11 @@ const forkBlock = (env, dflt, deployed) => {
   return n;
 };
 export const POOLS_FORK_BLOCKS = Object.freeze({ base: forkBlock("POOLS_FORK_BLOCK_BASE", 56_630_000, 54_325_671), robinhood: forkBlock("POOLS_FORK_BLOCK_ROBINHOOD", 112_859_537, 108_420_674) });
-/** The most upstream requests one recording makes; past it the request is refused and the run stops, so a run that
- *  loops never floods a public RPC. */
+/** The most upstream requests one recording sends to one host: a host at it is asked nothing more that run, and a
+ *  request with no host of its list left is refused and the run stops, so a run that loops never floods a public RPC.
+ *  Per host, since a copy run's list spreads its reads over several providers (Base pass B sent 462 in all). */
 export const UPSTREAM_CAP = 400;
-let upstreamN = 0;
+const SENT = new Map();
 const bookArg = process.argv.indexOf("--book");
 const BOOK = BOOKS[bookArg > 0 && process.argv.indexOf("--") > bookArg ? process.argv[bookArg + 1] : "forge"];
 if (!BOOK) throw new Error("fork-rpc: --book is forge or pools");
@@ -119,8 +120,6 @@ export async function answer(book, chain, req, record) {
     console.error(`fork-rpc: not recorded for ${chain}: ${key}`);
     return { jsonrpc: "2.0", id: req.id, error: { code: -32000, message: `fork-rpc: not recorded for ${chain}: ${key}` } };
   }
-  if (++upstreamN > UPSTREAM_CAP) throw new Error(`fork-rpc: ${UPSTREAM_CAP} upstream requests, stopped (${key})`);
-  console.error(`fork-rpc: upstream ${upstreamN} ${chain}: ${key.slice(0, 160)}`);
   // each try is bounded (UPSTREAM_MS), then a failure that names the read: an upstream that never answers once held
   // anvil's fork reads, and so every request to the fork, for 300 s
   // a chain's upstreams in turn, one request after another (a list spreads a burst of fork reads over its providers),
@@ -136,10 +135,16 @@ export async function answer(book, chain, req, record) {
   // answered 403 to 711 of a Robinhood copy run's reads from one test machine, 13 Nov 09:1xZ, each try a backoff)
   const open = fit.filter((u) => !REFUSED.has(new URL(u).host));
   const list = open.length > 0 ? open : fit;
+  const sent = (u) => SENT.get(new URL(u).host) ?? 0;
+  if (list.every((u) => sent(u) >= UPSTREAM_CAP)) throw new Error(`fork-rpc: ${UPSTREAM_CAP} upstream requests, stopped (${key}): ${list.map((u) => new URL(u).host).join(", ")} each at the cap`);
   const first = (turn[chain] = ((turn[chain] ?? -1) + 1) % list.length);
   let got;
   for (let i = 0; i < 5 && !got; i++) {
-    const url = list[(first + i) % list.length];
+    // the next host with room: one at the cap is asked nothing more
+    const url = [...Array(list.length).keys()].map((k) => list[(first + i + k) % list.length]).find((u) => sent(u) < UPSTREAM_CAP);
+    if (url === undefined) break;
+    SENT.set(new URL(url).host, sent(url) + 1);
+    console.error(`fork-rpc: upstream ${new URL(url).host} ${sent(url)} ${chain}: ${key.slice(0, 160)}`);
     const t0 = Date.now();
     let outcome = "ok";
     try {
