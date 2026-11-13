@@ -23,7 +23,9 @@ import { fileURLToPath } from "node:url";
 
 const BOOKS = {
   forge: { file: "fixtures/fork-rpc.json", upstream: { base: "https://mainnet.base.org", robinhood: "https://rpc.mainnet.chain.robinhood.com" } },
-  pools: { file: "fixtures/fork-rpc-pools.json", upstream: { base: ["https://base-rpc.publicnode.com", "https://mainnet.base.org", "https://base.drpc.org"], robinhood: ["https://rpc.mainnet.chain.robinhood.com", "https://robinhood-rpc.publicnode.com", "https://robinhood.drpc.org"] } },
+  pools: { file: "fixtures/fork-rpc-pools.json", upstream: { base: ["https://base-rpc.publicnode.com", "https://mainnet.base.org", "https://base.drpc.org"], robinhood: ["https://rpc.mainnet.chain.robinhood.com", "https://robinhood-rpc.publicnode.com", "https://robinhood.drpc.org", "https://robinhood.api.pocket.network", "https://rpc-robinhood.globalstake.io"] } },
+  // Robinhood's last two (read 13 Nov 09:4xZ): Pocket answered a balance 200 blocks back and a 10,000-block
+  // eth_getLogs; globalstake the log read, and "historical state" for the balance (a failed try here, never recorded)
 };
 /** The pools' fork blocks: after each pool's deploy (wallet EVM_POOLS fromBlock 54,325,671 and 108,420,674). Base: read
  *  12 Nov 20:49Z as both providers' agreed head less a few hundred blocks. Robinhood: its own RPC's head less 200, read

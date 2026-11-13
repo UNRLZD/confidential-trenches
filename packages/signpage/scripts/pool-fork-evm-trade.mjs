@@ -524,7 +524,14 @@ if (process.env.FORK_FORCE_REFUSE === "1") {
   }
   record.carry = { ms: Date.now() - carryAt, done, wEthBefore: wAfterRefusal, wEthAfter: await ethOf(), notes: fresh.map((n) => ({ id: n.id, ref: n.ref.kind, value: n.leaf?.value ?? null })), open: (await w.get("meta", EVM_CARRY_OPEN_KEY))?.[Wf] ?? null };
   log("carry end", record.carry);
-  const ok = record.end === "refused" && holdings?.[proof.wallet.address]?.state === "withdrawn" && force.at !== null && done?.end === "carried" && fresh.length === 1;
+  // the carried note from the words alone: a fresh profile's restore (notes only, as step 1's) finds it UNSPENT, at
+  // the value the carry deposited
+  const back = await evmRestoreNotes({ seed64: seed64.slice(), pin: PIN, rpcs: pageEvmPoolRpcs(CHAIN), wallets: false });
+  record.carry.restore = { block: back.block, notes: back.notes.map((n) => ({ ref: n.ref.kind, state: n.state, value: n.leaf?.value ?? null })) };
+  log("carry restore", record.carry.restore);
+  const carried = fresh.length === 1 ? String(fresh[0].leaf?.value ?? "") : null;
+  const restored = back.notes.some((n) => n.ref.kind === fresh[0]?.ref.kind && n.state === "UNSPENT" && String(n.leaf?.value ?? "") === carried);
+  const ok = record.end === "refused" && holdings?.[proof.wallet.address]?.state === "withdrawn" && force.at !== null && done?.end === "carried" && fresh.length === 1 && restored;
   log("carry leg", { ok });
   await finish(ok ? 0 : 1);
 }

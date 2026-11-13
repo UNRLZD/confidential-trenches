@@ -24,9 +24,11 @@ test("an upstream that answers 403 is asked nothing more this run, while another
     return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: [] }));
   };
   for (let i = 0; i < 6; i++) assert.deepEqual((await answer({ robinhood: {} }, "robinhood", logs(1_000 + 100 * i, i), true)).result, []);
-  // the log reads go to the chain's own RPC and publicnode in turn (drpc serves no wide range): publicnode once, never again
+  // the log reads go to the wide-range upstreams in turn (drpc serves none): publicnode once, never again, and each of
+  // the six reads answered by another
   assert.equal(asked.filter((h) => h === "robinhood-rpc.publicnode.com").length, 1, asked.join(","));
-  assert.equal(asked.filter((h) => h === "rpc.mainnet.chain.robinhood.com").length, 6, asked.join(","));
+  assert.equal(asked.filter((h) => h !== "robinhood-rpc.publicnode.com").length, 6, asked.join(","));
+  assert.ok(!asked.includes("robinhood.drpc.org"), asked.join(","));
 });
 
 test("when every upstream left has answered 403, they are still asked: the read is named as failed, never sent nowhere", async (t) => {

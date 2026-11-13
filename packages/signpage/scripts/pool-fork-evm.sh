@@ -14,7 +14,9 @@ case "$CHAIN" in base) PORT=${ANVIL_PORT:-48601} ;; robinhood) PORT=${ANVIL_PORT
 # FORK_BLOCK: a block named at the run's start (a recent one, which every public provider still holds the state of)
 BLOCK=${FORK_BLOCK:-$(node -e 'import("./contracts/pool-evm/test/fork-rpc.mjs").then((m) => console.log(m.POOLS_FORK_BLOCKS[process.argv[1]]))' "$CHAIN")}
 [ -n "$BLOCK" ] || { echo "pool-fork-evm.sh: no fork block for $CHAIN" >&2; exit 2; }
-anvil --port "$PORT" --fork-url "http://127.0.0.1:${FORK_RPC_PORT:-47545}/$CHAIN" --fork-block-number "$BLOCK" --slots-in-an-epoch "$SLOTS" --no-storage-caching --silent &
+# a fork read waits up to 180 s: fork-rpc waits out each upstream 429 as named, and on a Robinhood copy only the
+# chain's own RPC served state (run 20, 13 Nov 09:41Z: anvil's 45 s default timed out on the sender's account)
+anvil --port "$PORT" --fork-url "http://127.0.0.1:${FORK_RPC_PORT:-47545}/$CHAIN" --fork-block-number "$BLOCK" --slots-in-an-epoch "$SLOTS" --no-storage-caching --timeout 180000 --silent &
 A=$!
 trap 'kill $A 2>/dev/null || true' EXIT
 for _ in $(seq 1 60); do
