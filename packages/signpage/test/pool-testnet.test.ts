@@ -800,7 +800,9 @@ test("review P2-1 and P2-2 of a34c1626, P2-1 and P3-3 of e3489b3b: every Solana 
   const sellHost = src.slice(src.indexOf("const sellHost = "), src.indexOf("const sell = (over.tradeKinds?.sell"));
   assert.equal([...sellHost.matchAll(/const signal = solanaStop\.signal;/g)].length, 1, "the sell host's take, when the host is made");
   assert.ok(sellHost.indexOf("const signal = solanaStop.signal;") < sellHost.indexOf("return {"), "taken before the host's first wait");
-  assert.match(sellHost, /await poolBuyWallets\(await store\(\), r, ask, signal\)/, "the sale's finder list on that stop");
+  // and at the host's trade turn when the host is a sale's (card evm-quote-rides-out-a-one-block-answer: buy-wallets.ts
+  // ReaderOpts.turn)
+  assert.match(sellHost, /await poolBuyWallets\(await store\(\), r, ask, signal, trade \? "trade" : "pass"\)/, "the sale's finder list on that stop, at a sale's trade turn");
   assert.match(sellHost, /\n {6}signal,\n/, "the host's own signal the same stop");
   assert.equal([...src.matchAll(/ signal: solanaStop\.signal,/g)].length, 1, "the buy host's");
   assert.equal([...src.matchAll(/outSignal: \(\) => solanaStop\.signal,/g)].length, 1);

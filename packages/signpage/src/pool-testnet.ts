@@ -2141,16 +2141,18 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   };
   const scope = pin === undefined ? null : solanaPoolOf(pin.program).scope;
   // the pool's Ws with their holdings, the one finder a sell and the positions use: on mainnet through the helper's keyed
-  // route, in the testnet build on one devnet RPC (the header's testnet-only choice); none: no read
-  const finderOf = (r: readonly [SolanaRpc, SolanaRpc]): HoldingsReader => over.holdings?.(r) ?? (POOL_TESTNET ? solanaHoldingsAt(TESTNET_RPCS.solana[0]) : solanaHelperHoldings(TRADE_HELPER));
-  // a sell's list: every W derived, the finder reading only those `read` asks for (buy-wallets.ts wantedBuyWallets)
-  const poolBuyWallets = async (notes: NoteStore, r: readonly [SolanaRpc, SolanaRpc], read: (address: string) => boolean | Promise<boolean> = () => true, signal?: AbortSignal): Promise<ListedBuyWallet[]> => {
+  // route, in the testnet build on one devnet RPC (the header's testnet-only choice); none: no read. `turn`: the host's
+  // turn its rounds take, a pass's but at a sale's tap, which holds what a trade waits for (buy-wallets.ts ReaderOpts)
+  const finderOf = (r: readonly [SolanaRpc, SolanaRpc], turn: "trade" | "pass" = "pass"): HoldingsReader => over.holdings?.(r) ?? (POOL_TESTNET ? solanaHoldingsAt(TESTNET_RPCS.solana[0], turn) : solanaHelperHoldings(TRADE_HELPER, turn));
+  // a sell's list: every W derived, the finder reading only those `read` asks for (buy-wallets.ts wantedBuyWallets), at
+  // `turn` on the host
+  const poolBuyWallets = async (notes: NoteStore, r: readonly [SolanaRpc, SolanaRpc], read: (address: string) => boolean | Promise<boolean> = () => true, signal?: AbortSignal, turn: "trade" | "pass" = "pass"): Promise<ListedBuyWallet[]> => {
     const spent = await spentNotesOf(notes, scope!);
     if (spent.length === 0) return [];
     const seed64 = await page.seed64();
     let derived: ReturnType<typeof derivedBuyWallets>;
     try {
-      derived = derivedBuyWallets(seed64, [{ id: pin!.program, chain: "sol", spent, reader: finderOf(r) }]);
+      derived = derivedBuyWallets(seed64, [{ id: pin!.program, chain: "sol", spent, reader: finderOf(r, turn) }]);
     } finally {
       seed64.fill(0);
     }
@@ -2628,7 +2630,10 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
             const records = ((await (await page.store()).get("meta", BUY_MINTS_KEY)) as Record<string, unknown> | undefined) ?? {};
             ask = (a) => !Object.hasOwn(records, a) && listed?.has(a) !== true;
           }
-          const got = await poolBuyWallets(await store(), r, ask, signal);
+          // a sale's read holds its seed and sell locks, so it takes the host's trade turn: as a pass it waited 10 to 17 s
+          // for the helper host's pass room while the page's background reads filled that window (main-mainnet-pools
+          // test, main 902b5efa1); a load's rent backs read nothing here (READS_NONE)
+          const got = await poolBuyWallets(await store(), r, ask, signal, trade ? "trade" : "pass");
           const kept = (a: string) => (listed?.has(a) ? new Map(listed.get(a)) : null);
           // the Ws the finder read, and those the listing names: the next pass's read (a W in neither: the pass reads it)
           found = got.flatMap((w) => {
