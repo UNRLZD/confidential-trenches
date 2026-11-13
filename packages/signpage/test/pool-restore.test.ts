@@ -2103,3 +2103,41 @@ test("L4: one chain's failed walk is the only walk a later load makes, asked aga
   assert.deepEqual(seen, ["evm"]);
   assert.equal(await w.store.get("meta", IDS_KEY()), undefined);
 });
+
+test("L5: a reload mid lane goes on past the last id the page read: two page lives read each deposit id once, but the one in flight at the reload", async () => {
+  // one page left alone: each id it asks, in order
+  const alone = nearOf();
+  const a = await world({ pools: () => SOL_ONLY, ids: alone.ids, ux: () => uxOf(new Map()).reads });
+  assert.equal(await a.r.auto(), "done");
+  await a.r.idle();
+  const ids = (log: readonly string[]): string[] => log.filter((x) => x.startsWith(`${FAST} `)).map((x) => x.slice(FAST.length + 1));
+  const once = [...new Set(ids(alone.log))];
+  assert.ok(once.length > 20, "a whole step 5 asks many ids");
+  // two page lives: the first reloads once 7 ids are asked (its seventh in flight), the next goes on
+  const first = nearOf();
+  let w!: World;
+  const asked = new Set<string>();
+  const cut = { rpcs: () => first.ids.rpcs().map((r) => ({ name: r.name, query: async (p: Record<string, unknown>) => {
+    const u = idOfU(p);
+    if (u !== "intents.near" && !asked.has(u)) {
+      asked.add(u);
+      if (asked.size === 7) w.r.signedOut();
+    }
+    return r.query(p as never);
+  } })) as unknown as readonly [NearRpc, NearRpc] };
+  w = await world({ pools: () => SOL_ONLY, ids: { ...first.ids, ...cut }, ux: () => uxOf(new Map()).reads });
+  assert.equal(await w.r.auto(), "done");
+  await w.r.idle();
+  const second = nearOf();
+  const next = poolRestore({ ...w.host, ids: second.ids });
+  assert.equal(await next.resume(), "done");
+  await next.idle();
+  const both = [...ids(first.log), ...ids(second.log)];
+  // every id one page reads, and no other
+  assert.deepEqual([...new Set(both)].sort(), [...once].sort());
+  // each id's views asked once a page life, but the one in flight at the reload, asked again by the next
+  const lives = (id: string): number => (ids(first.log).includes(id) ? 1 : 0) + (ids(second.log).includes(id) ? 1 : 0);
+  const twice = once.filter((id) => lives(id) > 1);
+  assert.ok(twice.length <= 1, `asked again after the reload: ${twice.length} ids`);
+  assert.equal(await w.store.get("meta", IDS_KEY()), undefined);
+});

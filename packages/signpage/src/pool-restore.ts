@@ -142,7 +142,7 @@ import { relayRpc } from "../../wallet/src/withdraw/relay.ts";
 import { base58, hex } from "@scure/base";
 import type { Deferred, KindContext } from "./api.ts";
 import { askOf, solanaPoolFollowDeps, type PoolUx, type PoolUxReads } from "./pool-deposit-follow.ts";
-import { pageRpc } from "./page-rpc.ts";
+import { pageRpc, type ReadKind } from "./page-rpc.ts";
 import { solanaPacedRpc } from "../../kit/src/trade/solana/send.ts";
 import { PAGE_SOL_CACHE, PAGE_SOL_MARK_BATCHES, PAGE_SOL_PIN, pageEvmHistory, pageEvmHold, pageEvmPoolRpcs, pageSolanaLister, pageSolanaSettleRpcs } from "./pool-testnet.ts";
 
@@ -264,7 +264,14 @@ async function readDepositIds(
   out: Step5Reasons,
   noted: (scope: bigint) => Promise<ReadonlySet<number>>,
   own: { lane: number; raise(scope: bigint, min: number): Promise<void> },
-  kept: { of(scope: bigint, laneHighest: readonly (number | null)[]): Promise<ReadonlyMap<number, number>>; add(scope: bigint, lane: number, readTo: number, highest: number | null): Promise<void> },
+  kept: {
+    of(scope: bigint, laneHighest: readonly (number | null)[]): Promise<ReadonlyMap<number, number>>;
+    add(scope: bigint, lane: number, readTo: number, highest: number | null): Promise<void>;
+    /** the lanes this run's marker holds part read, as restoreDepositIds' `from`, while their notes are as they were */
+    parts(scope: bigint, laneHighest: readonly (number | null)[]): Promise<ReadonlyMap<number, { readTo: number; highest: number | null }>>;
+    /** a lane read clean to `readTo`: kept on this run's marker, so a reload goes on past it */
+    part(scope: bigint, lane: number, readTo: number, highest: number | null, noteHighest: number | null): Promise<void>;
+  },
 ): Promise<void> {
   const { rpcs, pass, reader } = await letGo(keptIdReader(POOL_DEPOSIT_NETWORK, ids.rpcs, keep, { ...ids.opts, signal }), signal);
   // what an id read as money holds, by asset on both providers at the same pass, opened now beside the id reader on the
@@ -290,6 +297,10 @@ async function readDepositIds(
       first: own.lane,
       signal,
       done: await kept.of(scope, laneHighest),
+      // card a-load-proves-first-and-walks-the-restore-once: a lane an earlier page read part way goes on past its last
+      // clean id, and each clean id read is kept, so a reload never asks an id it already read
+      from: await kept.parts(scope, laneHighest),
+      progress: (lane: number, readTo: number, highest: number | null) => kept.part(scope, lane, readTo, highest, laneHighest[lane] ?? null),
       laneRead: async (x: LaneIds) => {
         if (x.lane === own.lane && x.reach === null) await own.raise(scope, coverTo(x));
         if (x.reach === null && x.unread.length === 0 && x.money.length === 0) await kept.add(scope, x.lane, x.readTo, laneHighest[x.lane] ?? null);
@@ -435,7 +446,8 @@ async function carryUx(ux: PoolUxReads, f: PoolUx, noted: boolean, signal: Abort
 export const RESTORE_UX_SOLANA = Object.freeze(["https://solana-rpc.publicnode.com", "https://solana.api.pocket.network"] as const);
 export function restoreUxSolanaRpcs(): readonly [SolanaRpc, SolanaRpc] | null {
   if (POOL_TESTNET) return null;
-  return [solanaPacedRpc(pageRpc(RESTORE_UX_SOLANA[0])), solanaPacedRpc(pageRpc(RESTORE_UX_SOLANA[1]))];
+  // step 5 runs behind the walk's end, in the background: its reads go as the page's passes do, behind every trade's
+  return [solanaPacedRpc(pageRpc(RESTORE_UX_SOLANA[0], "pass")), solanaPacedRpc(pageRpc(RESTORE_UX_SOLANA[1], "pass"))];
 }
 
 /**
@@ -462,13 +474,15 @@ const EVM_PAGE: Readonly<Record<"base" | "robinhood", EvmNetwork>> = POOL_TESTNE
 
 /** Every pool the page's network pins (PAGE_SOL_PIN, EVM_POOLS on the page's networks), each with the page's reads.
  *  `evmPins` is EVM_POOLS unless a test plants pins (as pools.ts's pagePoolsOf). */
-export function pagePools(evmPins: Readonly<Partial<Record<EvmNetwork, EvmPoolPin>>> = EVM_POOLS): RestorePool[] {
+export function pagePools(evmPins: Readonly<Partial<Record<EvmNetwork, EvmPoolPin>>> = EVM_POOLS, kind: ReadKind = "trade"): RestorePool[] {
   const out: RestorePool[] = [];
   // the NEAR vault of the page's network (NEAR_NETWORKS' vault and USDC, the scope withdraw/checks.ts computes), on the
   // release pair the withdraw reads it on (withdraw/handoff.ts: one FastNEAR URL and dRPC, at the provider's pace)
   const vault = vaultScope(PAGE_NETWORK);
   if (vault !== null) out.push({ chain: "near", network: PAGE_NETWORK, scope: vault, rpcs: () => [pacedNearRpc(NEAR_NETWORKS[PAGE_NETWORK].fastnear[0]), pacedNearRpc(NEAR_NETWORKS[PAGE_NETWORK].drpc)] });
-  if (PAGE_SOL_PIN !== undefined) out.push({ chain: "solana", program: PAGE_SOL_PIN.program, scope: solanaPoolOf(PAGE_SOL_PIN.program).scope, rpcs: pageSolanaSettleRpcs, lister: pageSolanaLister, cache: PAGE_SOL_CACHE, markBatches: PAGE_SOL_MARK_BATCHES });
+  // `kind`: a load's resume reads as the page's passes do ("pass": behind every trade's read, on the host's budget),
+  // a restore the user waits for (a sign-in's, a Retry's) as a trade
+  if (PAGE_SOL_PIN !== undefined) out.push({ chain: "solana", program: PAGE_SOL_PIN.program, scope: solanaPoolOf(PAGE_SOL_PIN.program).scope, rpcs: () => pageSolanaSettleRpcs(kind), lister: () => pageSolanaLister(kind), cache: PAGE_SOL_CACHE, markBatches: PAGE_SOL_MARK_BATCHES });
   for (const chain of ["base", "robinhood"] as const) {
     const pin = evmPins[EVM_PAGE[chain]];
     if (pin === undefined) continue;
@@ -478,7 +492,7 @@ export function pagePools(evmPins: Readonly<Partial<Record<EvmNetwork, EvmPoolPi
     // the page's pool list (pageEvmPoolRpcs, the deposit's too): the testnet pair on the testnet build, folded at build
     // time, so SIGN_HOST's bundle carries none of it; on mainnet the kit's pool list (card evm-pool-lists-mainnet). A
     // chain with no list is read by no one, and the run says so (stalled), never done
-    out.push({ chain: "evm", pin, scope, rpcs: pageEvmPoolRpcs(chain) === null ? null : () => pageEvmPoolRpcs(chain)! });
+    out.push({ chain: "evm", pin, scope, rpcs: pageEvmPoolRpcs(chain) === null ? null : () => pageEvmPoolRpcs(chain, kind)! });
   }
   return out;
 }
@@ -516,7 +530,13 @@ export const RESTORE_IDS_KEY = "owed/restore-ids";
  * A marker with no `walks` (one written before this card) owes every pool's walk, as before it.
  */
 type WalkOwed = { tries: number; next: number };
-type IdsOwed = { scopes: string[]; read?: Record<string, [number, number, number | null][]>; run?: string; walks?: Record<string, WalkOwed>; next?: number; answered?: true };
+type IdsOwed = { scopes: string[]; read?: Record<string, [number, number, number | null][]>; part?: Record<string, PartEntry[]>; run?: string; walks?: Record<string, WalkOwed>; next?: number; answered?: true };
+/** A lane step 5 left part way (`part`, by scope): its lane, the index it read to with nothing to tell, the lane's highest
+ *  with history then, and its highest note when kept (a lane whose notes moved is read from its start again). */
+type PartEntry = [number, number, number | null, number | null];
+const laneIndex = (x: unknown, lane: number, max = 0xffff_ffff): boolean => Number.isInteger(x) && (x as number) >= 0 && (x as number) <= max && (x as number) % RESTORE_LANES === lane;
+const partEntry = (x: unknown): boolean =>
+  Array.isArray(x) && x.length === 4 && Number.isInteger(x[0]) && x[0] >= 0 && x[0] < RESTORE_LANES && laneIndex(x[1], x[0]) && (x[2] === null || laneIndex(x[2], x[0], x[1])) && (x[3] === null || laneIndex(x[3], x[0]));
 /** The pauses before a failed walk is asked again on a later load, by its tries: the step 5 pauses' growth, the last
  *  repeated (a provider that refuses the page for good is asked once every 10 minutes, never on every load). */
 export const WALK_PAUSES_MS: readonly number[] = Object.freeze([0, 30_000, 120_000, 300_000, 600_000]);
@@ -545,6 +565,8 @@ const owedOf = (v: unknown): IdsOwed | null => {
   return {
     scopes: o.scopes,
     ...(read ? { read: o.read } : {}),
+    // a `part` of any other shape is dropped whole: those lanes are read from their start (more, never less)
+    ...(typeof o.part === "object" && o.part !== null && !Array.isArray(o.part) && Object.values(o.part as unknown as Record<string, unknown>).every((xs) => Array.isArray(xs) && xs.every(partEntry)) ? { part: o.part } : {}),
     ...(typeof o.run === "string" ? { run: o.run } : {}),
     // a `walks` of another shape is dropped, so the marker owes every walk (more read, never less)
     ...(walksOk(o.walks) ? { walks: o.walks } : {}),
@@ -689,7 +711,7 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
   // one run: the walk, its notes written (the floor), `first` told; then step 5, tried again by itself on a read that did
   // not answer. `owed`: a load's resume, which reads nothing when another tab removed the marker meanwhile
   const read = async (signal: AbortSignal, owed: boolean, first: (stage: RestoreStage) => void, run: { finding: boolean }): Promise<void> => {
-    const pools = (h.pools ?? pagePools)();
+    const pools = h.pools ? h.pools() : pagePools(EVM_POOLS, owed ? "pass" : "trade");
     const solana = h.solana ?? solanaRestoreNotes;
     const evm = h.evm ?? evmRestoreNotes;
     const vaultWalk = h.vault ?? nearVaultRestoreNotes;
@@ -984,7 +1006,23 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
                 const o = owedOf(v);
                 if (o === null || o.run !== runId) return undefined;
                 const k = scope.toString();
-                return { ...o, read: { ...o.read, [k]: [...(o.read?.[k] ?? []).filter(([l]) => l !== lane), [lane, readTo, highest]] } };
+                // a lane read whole leaves its part point
+                const part = { ...o.part, [k]: (o.part?.[k] ?? []).filter(([l]) => l !== lane) };
+                return { ...o, part, read: { ...o.read, [k]: [...(o.read?.[k] ?? []).filter(([l]) => l !== lane), [lane, readTo, highest]] } };
+              })),
+            ),
+          parts: async (scope: bigint, laneHighest: readonly (number | null)[]) => {
+            const o = owedOf(await seedHeld(async () => (await h.store()).get("meta", RESTORE_IDS_KEY)));
+            if (o?.run !== runId) return new Map();
+            return new Map((o.part?.[scope.toString()] ?? []).filter(([l, , , nh]) => nh === (laneHighest[l] ?? null)).map(([l, readTo, highest]) => [l, { readTo, highest }]));
+          },
+          part: (scope: bigint, lane: number, readTo: number, highest: number | null, noteHighest: number | null): Promise<void> =>
+            seedHeld(async () =>
+              void (await (await h.store()).update("meta", RESTORE_IDS_KEY, (v) => {
+                const o = owedOf(v);
+                if (o === null || o.run !== runId) return undefined;
+                const k = scope.toString();
+                return { ...o, part: { ...o.part, [k]: [...(o.part?.[k] ?? []).filter(([l]) => l !== lane), [lane, readTo, highest, noteHighest] as PartEntry] } };
               })),
             ),
         };

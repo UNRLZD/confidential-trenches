@@ -347,8 +347,8 @@ test("ids_end, ids_ux_push and seed_per_use_lock match this build's lines, never
     answered: "r.retry.length===0&&r.held.length===0",
     last: "a=i||n>x.length",
     told: "a?{retry:[],held:[],named:[...r.named,...r.held,...r.retry],tries:n,last:a}:{...r,tries:n,last:a}",
-    gone: "!g&&r.named.length===0&&await _(async()=>{let t=await e.store();mG(await t.get(`meta`,`owed/restore-ids`))?.run===y&&await t.delete(`meta`,fG)});return}",
-    pause: "if(a)return;await mG(x[n-1],t)}",
+    gone: "await _(async()=>{let t=await e.store(),o=mG(await t.get(`meta`,`owed/restore-ids`));if(o?.run!==y)return;if(!(o.walks===void 0?g:Object.keys(o.walks).length>0)&&!g&&r.named.length===0)return void await t.delete(`meta`,fG);let{next:c,...s}=o;await t.put(`meta`,fG,r.named.length===0?{...s,answered:!0}:(({answered:e,...t})=>t)(s))});return}",
+    pause: "if(await _(async()=>void await(await e.store()).update(`meta`,fG,e=>{let t=mG(e);if(t===null||t.run!==y)return;let{answered:r,next:c,...o}=t;return a?o:{...o,next:Date.now()+x[n-1]}})),a)return;await mG(x[n-1],t)}",
   };
   const end = (o = {}) => {
     const x = { ...good5, ...o };
@@ -365,11 +365,13 @@ test("ids_end, ids_ux_push and seed_per_use_lock match this build's lines, never
   assert.equal(n(end({ told: "a?{retry:[],held:[],named:[...r.named,...r.held],tries:n,last:a}:{...r,tries:n,last:a}" }), "ids_end"), 0, "the last try drops what is unread (silent: review P2-2)");
   assert.equal(n(end({ told: "a?{retry:r.retry,held:[],named:[...r.named,...r.held],tries:n,last:a}:{...r,tries:n,last:a}" }), "ids_end"), 0, "the 53f5e92f end: unread kept off the finding");
   assert.equal(n(end({ told: "a?{retry:[],held:r.held,named:[...r.named,...r.held,...r.retry],tries:n,last:a}:{...r,tries:n,last:a}" }), "ids_end"), 0, "held told twice");
-  assert.equal(n(end({ gone: "!g&&await _(async()=>{let t=await e.store();mG(await t.get(`meta`,`owed/restore-ids`))?.run===y&&await t.delete(`meta`,fG)});return}" }), "ids_end"), 0, "the marker removed with a finding (review P2-1)");
-  assert.equal(n(end({ gone: "await _(async()=>{let t=await e.store();mG(await t.get(`meta`,`owed/restore-ids`))?.run===y&&await t.delete(`meta`,fG)});return}" }), "ids_end"), 0, "the marker removed after a failed walk");
-  assert.equal(n(end({ gone: "!g&&r.named.length===0&&await _(async()=>{let t=await e.store();await t.delete(`meta`,fG)});return}" }), "ids_end"), 0, "another tab's marker removed (delta review P3-D)");
+  assert.equal(n(end({ gone: "await _(async()=>{let t=await e.store(),o=mG(await t.get(`meta`,`owed/restore-ids`));if(o?.run!==y)return;if(!(o.walks===void 0?g:Object.keys(o.walks).length>0)&&!g)return void await t.delete(`meta`,fG);let{next:c,...s}=o;await t.put(`meta`,fG,r.named.length===0?{...s,answered:!0}:(({answered:e,...t})=>t)(s))});return}" }), "ids_end"), 0, "the marker removed with a finding (review P2-1)");
+  assert.equal(n(end({ gone: "await _(async()=>{let t=await e.store(),o=mG(await t.get(`meta`,`owed/restore-ids`));if(o?.run!==y)return;if(!(o.walks===void 0?g:Object.keys(o.walks).length>0)&&r.named.length===0)return void await t.delete(`meta`,fG);let{next:c,...s}=o;await t.put(`meta`,fG,r.named.length===0?{...s,answered:!0}:(({answered:e,...t})=>t)(s))});return}" }), "ids_end"), 0, "the marker removed after a failed walk");
+  assert.equal(n(end({ gone: "await _(async()=>{let t=await e.store(),o=mG(await t.get(`meta`,`owed/restore-ids`));if(o?.run!==y)return;if(!g&&r.named.length===0)return void await t.delete(`meta`,fG);let{next:c,...s}=o;await t.put(`meta`,fG,r.named.length===0?{...s,answered:!0}:(({answered:e,...t})=>t)(s))});return}" }), "ids_end"), 0, "the marker removed while a walk is owed (card a-load-proves-first-and-walks-the-restore-once)");
+  assert.equal(n(end({ gone: "await _(async()=>{let t=await e.store(),o=mG(await t.get(`meta`,`owed/restore-ids`));if(!(o.walks===void 0?g:Object.keys(o.walks).length>0)&&!g&&r.named.length===0)return void await t.delete(`meta`,fG);let{next:c,...s}=o;await t.put(`meta`,fG,r.named.length===0?{...s,answered:!0}:(({answered:e,...t})=>t)(s))});return}" }), "ids_end"), 0, "another tab's marker removed (delta review P3-D)");
   assert.equal(n(end({ pause: "return}" }), "ids_end"), 0, "no retry: no pause before the next try (review P3-5)");
-  assert.equal(n(end({ pause: "if(a)return;await mG(x[0],t)}" }), "ids_end"), 0, "the pauses not growing");
+  assert.equal(n(end({ pause: "if(await _(async()=>void await(await e.store()).update(`meta`,fG,e=>{let t=mG(e);if(t===null||t.run!==y)return;let{answered:r,next:c,...o}=t;return a?o:{...o,next:Date.now()+x[n-1]}})),a)return;await mG(x[0],t)}" }), "ids_end"), 0, "the pauses not growing");
+  assert.equal(n(end({ pause: "if(await _(async()=>void await(await e.store()).update(`meta`,fG,e=>{let t=mG(e);if(t===null||t.run!==y)return;let{answered:r,next:c,...o}=t;return a?o:{...o,next:Date.now()}})),a)return;await mG(x[n-1],t)}" }), "ids_end"), 0, "a later load asks sooner than this page would (card a-load-proves-first-and-walks-the-restore-once)");
   assert.equal(n(end({ told: "{...r,tries:n,last:a}" }), "ids_end"), 0, "held never a finding");
   // the branch of a pool whose chain has no U_X reads (its `ux` null): its ids' reasons through the helper by kind, then
   // the unread chain on `named`, with nothing between them, then the next pool
@@ -548,12 +550,12 @@ test("a build of this tree whose step 5 end loses a list or retries a seed gone 
     ["ids_end", /&&[\w$]+\.held\.length===0/, ""],
     ["ids_end", /,\.\.\.[\w$]+\.held,/, ","],
     ["ids_end", /,\.\.\.[\w$]+\.retry\]/, "]"],
-    ["ids_end", /&&[\w$]+\.named\.length===0&&await/, "&&await"],
+    ["ids_end", /&&[\w$]+\.named\.length===0\)return void await/, ")return void await"],
     // review P3-5 of 53f5e92f: the walk's end always done, a finding written done, no retry at all
     ["ids_walk_end", /\?`stalled`:`done`/, "?`done`:`done`"],
     ["ids_tell", /stage:`stalled`,txs/, "stage:`done`,txs"],
     ["ids_tell", /if\(![\w$]+\.last\|\|![\w$]+\.finding\)return;/, "return;"],
-    ["ids_end", /if\(([\w$]+)\)return;await [\w$]+\([\w$]+\[[\w$]+-1\],[\w$]+\)\}$/, "return}"],
+    ["ids_end", /,([\w$]+)\)return;await [\w$]+\([\w$]+\[[\w$]+-1\],[\w$]+\)\}$/, ",$1)return}"],
     ["seed_per_use_lock", /throw new [\w$]+\(`signed out/, "throw Error(`signed out"],
     ["seed_per_use_lock", /throw new [\w$]+\(`other words/, "throw Error(`other words"],
     ["ids_ux_push", /\.named\.push\(`\$\{[\w$]+\.label\}: \$\{[\w$]+\}`\);continue\}$/, (s) => s.replace(".named.", ".retry.")],

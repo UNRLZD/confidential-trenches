@@ -163,9 +163,9 @@ const INTENTS_HELD = (i) =>
     `if\\(!Array\\.isArray\\(\\10\\)\\|\\|\\10\\.length!==\\8\\.length\\)throw Error\\(${Q}[^${Q}]*${Q}\\);return \\8\\.map\\(\\((${N}),(${N})\\)=>\\[\\11,${N}\\(\\10\\[\\12\\],${Q}[^${Q}]*${Q}\\)\\]\\)\\}`);
 const INTENTS = (x) => new RegExp(`[,; ]${esc(x)}=${Q}intents\\.near${Q}[,;]`);
 const UX_PAIR = new RegExp(
-  `var (${N})=Object\\.freeze\\(\\[${Q}https://solana-rpc\\.publicnode\\.com${Q},${Q}https://solana\\.api\\.pocket\\.network${Q}\\]\\);function (${N})\\(\\)\\{return\\[(${N})\\((${N})\\(\\1\\[0\\]\\)\\),\\3\\(\\4\\(\\1\\[1\\]\\)\\)\\]\\}` +
-    `function (${N})\\((${N}),(${N}),(${N}),(${N})=\\2\\)\\{if\\(\\6!==${Q}solana${Q}\\|\\|\\7===null\\|\\|\\8===void 0\\)return null;let (${N})=\\9\\(\\);if\\(\\10===null\\)return null;` +
-    `let (${N})=(${N})\\(\\{rpcs:\\10,program:\\8,deposit:\\7\\.deposit\\}\\);return\\{balances:\\11\\.balances,costs:\\11\\.costs,ladder:\\11\\.ladder,deposit:\\7\\.deposit\\}\\}`,
+  `var (${N})=Object\\.freeze\\(\\[${Q}https://solana-rpc\\.publicnode\\.com${Q},${Q}https://solana\\.api\\.pocket\\.network${Q}\\]\\);function (${N})\\(\\)\\{return\\[(${N})\\((${N})\\(\\1\\[0\\](,${Q}pass${Q})?\\)\\),\\3\\(\\4\\(\\1\\[1\\]\\5\\)\\)\\]\\}` +
+    `function (${N})\\((${N}),(${N}),(${N}),(${N})=\\2\\)\\{if\\(\\7!==${Q}solana${Q}\\|\\|\\8===null\\|\\|\\9===void 0\\)return null;let (${N})=\\10\\(\\);if\\(\\11===null\\)return null;` +
+    `let (${N})=(${N})\\(\\{rpcs:\\11,program:\\9,deposit:\\8\\.deposit\\}\\);return\\{balances:\\12\\.balances,costs:\\12\\.costs,ladder:\\12\\.ladder,deposit:\\8\\.deposit\\}\\}`,
 );
 // the kit's pacer at its default (keyless) limit: solanaPacedRpc(rpc, limit = SOLANA_KEYLESS_RPC_LIMIT)
 const PACED = (p) => new RegExp(`function ${esc(p)}\\((${N}),(${N})=(${N})\\)\\{`);
@@ -174,7 +174,7 @@ const KEYLESS = (l) => new RegExp(`[,; ]${esc(l)}=\\{windowMs:1e4,total:100,perM
 const FOLLOW_READER = (f) => new RegExp(`function ${esc(f)}\\((${N})\\)\\{let (${N})=(${N})=>Promise\\.all\\(\\[\\3\\(\\1\\.rpcs\\[0\\]\\),\\3\\(\\1\\.rpcs\\[1\\]\\)\\]\\);return\\{status:[^]{0,200}?balances:(${N})=>\\2\\(async (${N})=>${N}\\(await \\5\\(${Q}getBalance${Q},\\[\\4\\.u,\\{commitment:${Q}finalized${Q}\\}\\]\\)\\)\\)`);
 // the restore host's ux, bound to the host itself (its signedIn and written before it, its ended after), so a copy of
 // the ux line alone elsewhere is not the restore's
-const UX_WIRED = (c) => new RegExp(`written:\\(\\)=>void ${N}\\?\\.proofs\\(\\)\\.catch\\(\\(\\)=>\\{\\}\\),ux:(${N})=>${esc(c)}\\(\\1,(${N})\\(\\{chain:\\1,[^}]*\\},${N}\\),${N}\\?\\.program\\),ended:`);
+const UX_WIRED = (c) => new RegExp(`written:\\(\\)=>void ${N}\\?\\.proofs\\(\\)\\.catch\\(\\(\\)=>\\{\\}\\),(?:firstPass:\\(\\)=>${N}\\?\\.firstPass\\(\\)\\?\\?Promise\\.resolve\\(\\),)?ux:(${N})=>${esc(c)}\\(\\1,(${N})\\(\\{chain:\\1,[^}]*\\},${N}\\),${N}\\?\\.program\\),ended:`);
 const UX_ANY = (c) => new RegExp(`ux:(${N})=>${esc(c)}\\(`);
 // each marker's own words, once in the whole bundle, so no second copy of it rides beside the real one
 const WORDS = Object.freeze({
@@ -205,14 +205,14 @@ export function bundleFacts(index, js) {
   const intents = both && once(INTENTS_HELD(both[16]), js) ? INTENTS_HELD(both[16]).exec(js) : null;
   const pair = once(UX_PAIR, js) ? UX_PAIR.exec(js) : null;
   const paced = pair ? PACED(pair[3]).exec(js) : null;
-  const wired = pair && once(UX_ANY(pair[5]), js) && once(UX_WIRED(pair[5]), js) ? UX_WIRED(pair[5]).exec(js) : null;
+  const wired = pair && once(UX_ANY(pair[6]), js) && once(UX_WIRED(pair[6]), js) ? UX_WIRED(pair[6]).exec(js) : null;
   return {
     pin: /src="\/app\.js" integrity="([^"]+)"/.exec(index)?.[1] ?? null,
     sha384: `sha384-${createHash("sha384").update(js).digest("base64")}`,
     ux_read: !!read && once(WORDS.ux_read, js),
     ux_carry: !!read && !!carry && once(UX_NOTED(read[11], read[9], carry[1]), js) && once(WORDS.ux_carry, js),
     id_held: !!held && !!head && held[7] === head.groups.H && once(LET_GO(head.groups.lg), js) && inside(js, head, held) && !!ruled && !!token && once(MAINNET(token[1]), js) && !!both && !!intents && once(INTENTS(intents[7]), js) && once(WORDS.id_held, js),
-    ux_pair: !!pair && !!paced && once(KEYLESS(paced[3]), js) && once(FOLLOW_READER(pair[12]), js) && once(WORDS.ux_pair, js),
+    ux_pair: !!pair && !!paced && once(KEYLESS(paced[3]), js) && once(FOLLOW_READER(pair[13]), js) && once(WORDS.ux_pair, js),
     ux_wired: !!wired && once(FOLLOW_DEPS(wired[2]), js),
   };
 }

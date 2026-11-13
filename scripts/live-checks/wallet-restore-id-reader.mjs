@@ -161,7 +161,7 @@ const pairClass = (text) => {
 export const PAIR_WRONG = (text) => {
   const P = pairClass(text);
   if (P === null) return 0;
-  const stop = all(text, new RegExp(String.raw`\}catch\((${N})\)\{if\((${N})\.signal\?\.aborted\)throw \1;if\((${N})\.push\(\{i:(${N}),id:(${N}),error:\1 instanceof ${P}\?` + "`" + String.raw`\$\{\1\.message\}, read again` + "`" + String.raw`:(${N})\(\1\)\}\),`, "g"));
+  const stop = all(text, new RegExp(String.raw`\}catch\((${N})\)\{if\((${N})\.signal\?\.aborted\)throw \1;if\((?:${N}=!1,)?(${N})\.push\(\{i:(${N}),id:(${N}),error:\1 instanceof ${P}\?` + "`" + String.raw`\$\{\1\.message\}, read again` + "`" + String.raw`:(${N})\(\1\)\}\),`, "g"));
   if (stop.length < 1) return 0;
   const r = readerOf(text, P);
   return r !== null && all(text, rx(String.raw`function ${esc(r.SETUP)}\(`)).length === 1 ? 1 : 0;
@@ -213,7 +213,10 @@ export const ID_SIGNOUT = (text) => {
  * ids_end, three lines of the build each exactly once (review P3-5 of 53f5e92f: a build whose walk's end is always done,
  * whose finding writes done, or that never retries, passed the one-line marker):
  * - IDS_END_TRY, each try's end of step 5 (below, at MARK.ids_end), through its pause before the next try
- *   (`if(u)return;await mG(c[n-1],t)}`): a build with no retry has no pause;
+ *   (`,u)return;await mG(c[n-1],t)}`): a build with no retry has no pause; since card
+ *   a-load-proves-first-and-walks-the-restore-once the answered try removes its own run's marker only with no walk owed,
+ *   no failed walk and no finding (else it keeps it, answered), and a try left to read again writes its next ask the
+ *   pause after it, never sooner;
  * - IDS_WALK_END, the walk's end told off its reasons (`let S=f.length>0?`stalled`:`done`;m(S),`);
  * - IDS_TELL, a finding that marks the run and writes a stalled restore op when the newest is not one, under the seed
  *   lock, and the run's last try with nothing to tell after one writing the done op (delta review P3-B); the try's end
@@ -221,7 +224,7 @@ export const ID_SIGNOUT = (text) => {
  *   {kind:`restore`,stage:`stalled`,txs:[],created_ms:n()})}))`).
  * The count is 1 when all three hold, else 0.
  */
-export const IDS_END_TRY = /\.catch\(([\w$]+)=>\{if\(\1 instanceof ([\w$]+)\|\|([\w$]+)\.aborted\)throw \1;([\w$]+)\.retry\.push\(`step 5 did not finish: \$\{\1 instanceof Error\?\1\.message:`it threw`\}`\)\}\),\3\.throwIfAborted\(\);let ([\w$]+)=\4\.retry\.length===0&&\4\.held\.length===0,([\w$]+)=\5\|\|([\w$]+)>([\w$]+)\.length;if\(await [\w$]+\(\6\?\{retry:\[\],held:\[\],named:\[\.\.\.\4\.named,\.\.\.\4\.held,\.\.\.\4\.retry\],tries:\7,last:\6\}:\{\.\.\.\4,tries:\7,last:\6\}\),\5\)\{![\w$]+&&\4\.named\.length===0&&await [\w$]+\(async\(\)=>\{let ([\w$]+)=await [\w$]+\.store\(\);[\w$]+\(await \9\.get\(`meta`,(?:`owed\/restore-ids`|[\w$]+)\)\)\?\.run===[\w$]+&&await \9\.delete\(`meta`,[\w$]+\)\}\);return\}if\(\6\)return;await [\w$]+\(\8\[\7-1\],\3\)\}/g;
+export const IDS_END_TRY = /\.catch\(([\w$]+)=>\{if\(\1 instanceof ([\w$]+)\|\|([\w$]+)\.aborted\)throw \1;([\w$]+)\.retry\.push\(`step 5 did not finish: \$\{\1 instanceof Error\?\1\.message:`it threw`\}`\)\}\),\3\.throwIfAborted\(\);let ([\w$]+)=\4\.retry\.length===0&&\4\.held\.length===0,([\w$]+)=\5\|\|([\w$]+)>([\w$]+)\.length;if\(await [\w$]+\(\6\?\{retry:\[\],held:\[\],named:\[\.\.\.\4\.named,\.\.\.\4\.held,\.\.\.\4\.retry\],tries:\7,last:\6\}:\{\.\.\.\4,tries:\7,last:\6\}\),\5\)\{await [\w$]+\(async\(\)=>\{let ([\w$]+)=await [\w$]+\.store\(\),([\w$]+)=[\w$]+\(await \9\.get\(`meta`,(?:`owed\/restore-ids`|[\w$]+)\)\);if\(\10\?\.run!==[\w$]+\)return;if\(!\(\10\.walks===void 0\?([\w$]+):Object\.keys\(\10\.walks\)\.length>0\)&&!\11&&\4\.named\.length===0\)return void await \9\.delete\(`meta`,[\w$]+\);[\s\S]{0,300}?\}\);return\}if\(await [\w$]+\(async\(\)=>void await\(await [\w$]+\.store\(\)\)\.update\(`meta`,[\w$]+,[\s\S]{0,200}?return \6\?([\w$]+):\{\.\.\.\12,next:[\w$.]+\(\)\+\8\[\7-1\]\}\}\)\),\6\)return;await [\w$]+\(\8\[\7-1\],\3\)\}/g;
 export const IDS_WALK_END = /let ([\w$]+)=([\w$]+)\.length>0\?`stalled`:`done`;([\w$]+)\(\1\),/g;
 export const IDS_TELL = /\.named\.length===0\)\{if\(!([\w$]+)\.last\|\|!([\w$]+)\.finding\)return;\2\.finding=!1,await ([\w$]+)\(async\(\)=>\(await [\w$]+\.store\(\)\)\.put\(`ops`,crypto\.randomUUID\(\),\{kind:`restore`,stage:`done`,txs:\[\],created_ms:[\w$]+\(\)\}\)\)\}else \2\.finding=!0,await \3\(async\(\)=>\{[\s\S]{0,400}?!==`stalled`&&await [\w$]+\.put\(`ops`,crypto\.randomUUID\(\),\{kind:`restore`,stage:`stalled`,txs:\[\],created_ms:[\w$]+\(\)\}\)\}\)/g;
 export const IDS_END = (text) => ([IDS_END_TRY, IDS_WALK_END, IDS_TELL].every((re) => [...text.matchAll(re)].length === 1) ? 1 : 0);

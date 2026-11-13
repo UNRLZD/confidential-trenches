@@ -113,7 +113,7 @@ test("the bundle facts hold this build's lines, never a carry, a read or a held 
   assert.equal(mut(/(ux:[\w$]+=>[\w$]+\([\w$]+,)([\w$]+)\(\{chain:/, "$1zz$2({chain:").ux_wired, false, "other deps than the follow's");
   assert.equal(mut(/(\[`https:\/\/solana-rpc\.publicnode\.com`,)`https:\/\/solana\.api\.pocket\.network`\]\);function/, "$1`https://ct-api.unrealized.trade`]);function").ux_pair, false, "our helper as the second");
   assert.equal(mut(/(\[`https:\/\/solana-rpc\.publicnode\.com`,)`https:\/\/solana\.api\.pocket\.network`\]\);function/, "$1`https://api.mainnet-beta.solana.com`]);function").ux_pair, false, "the operator that refuses a page as the second");
-  assert.equal(mut(/return\[([\w$]+)\(([\w$]+)\(([\w$]+)\[0\]\)\),\1\(\2\(\3\[1\]\)\)\]\}/, "return[$1($2($3[0])),$2($3[1])]}").ux_pair, false, "the second unpaced");
+  assert.equal(mut(/return\[([\w$]+)\(([\w$]+)\(([\w$]+)\[0\],`pass`\)\),\1\(\2\(\3\[1\],`pass`\)\)\]\}/, "return[$1($2($3[0],`pass`)),$2($3[1],`pass`)]}").ux_pair, false, "the second unpaced");
   assert.equal(mut(/\[([\w$]+),\[([\w$]+),([\w$]+)\]\]=await Promise\.all\(\[([\w$]+)\(([\w$]+),([\w$]+)\),([\w$]+)\.balances/, "[$1,[$2,$3]]=await Promise.all([$4($5,$6),$7.balancez").ux_read, false, "the U_X not read");
   assert.equal(mut(/if\(!([\w$]+)\)return\{why:`holds \$\{String\(([\w$]+)\)\}, with no deposit note/, "if(!1)return{why:`holds ${String($2)}, with no deposit note").ux_carry, false, "a U_X with no note here carried");
   assert.equal(mut(/,([\w$]+)\.has\(([\w$]+)\.i\),/, ",!0,").ux_carry, false, "the store's word on the index not asked");
@@ -168,7 +168,7 @@ test("the bundle facts hold this build's lines, never a carry, a read or a held 
   const read = /,([\w$]+)=async\(([\w$]+),([\w$]+)\)=>\{if\(\3===void 0\)throw Error\(`no deposit index for its U_X`\);[^]*?`money`\)\}/.exec(js)[0];
   const carry = /async function ([\w$]+)\(([\w$]+),([\w$]+),([\w$]+),([\w$]+)\)\{let ([\w$]+)=null;for\(;;\)\{[^]*?\6=[\w$]+\}\}/.exec(js)[0];
   const held = /async function ([\w$]+)\(([\w$]+),([\w$]+)\)\{let ([\w$]+);try\{\4=await \2\(\3\)\}[^]*?return [\w$]+\}/.exec(js)[0];
-  const wired = /written:\(\)=>void [\w$]+\?\.proofs\(\)\.catch\(\(\)=>\{\}\),ux:[^]*?\),ended:/.exec(js)[0];
+  const wired = /written:\(\)=>void [\w$]+\?\.proofs\(\)\.catch\(\(\)=>\{\}\),(?:firstPass:\(\)=>[\w$]+\?\.firstPass\(\)\?\?Promise\.resolve\(\),)?ux:[^]*?\),ended:/.exec(js)[0];
   const broken = (from, to) => {
     const t = js.replace(from, to);
     assert.notEqual(t, js, String(from));

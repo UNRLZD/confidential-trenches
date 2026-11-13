@@ -1,0 +1,18 @@
+{
+ "_note": {
+  "good": "this card's SIGN_HOST build (mainnet): packages/signpage/index.html and public/app.js built at card/a-load-proves-first-and-walks-the-restore-once (build-app.mjs)",
+  "bad": "main 63cdf7cb4's build (mainnet): a load's resume reads beside the first proof pass and walks every pool while step 5 is owed: FAIL"
+ },
+ "good": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-+vKr7h3kAYK0n15gTJwTaDMsrGGTE6aCkomHlcWnATbOxhvgEqpDq/rJNzmo4gAG\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-+vKr7h3kAYK0n15gTJwTaDMsrGGTE6aCkomHlcWnATbOxhvgEqpDq/rJNzmo4gAG",
+  "first": true,
+  "walks": true
+ },
+ "bad": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-q/eobANRJkmfWDxW1bve67qc+YxcGnsemo6mgGO2sj4Amk/aIbJlEFfabuwDYdaK\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-q/eobANRJkmfWDxW1bve67qc+YxcGnsemo6mgGO2sj4Amk/aIbJlEFfabuwDYdaK",
+  "first": false,
+  "walks": false
+ }
+}

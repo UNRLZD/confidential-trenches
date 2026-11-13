@@ -152,6 +152,7 @@ export const CHANGED = [
   "scripts/live-checks/oneclick-fee-path-own-key.mjs",
   "scripts/live-checks/oneclick-partner-fee-live.mjs",
   "scripts/live-checks/pool-answer-unknown.mjs",
+  "scripts/live-checks/a-load-proves-first-and-walks-the-restore-once.mjs",
   "scripts/live-checks/pool-buy-filled-2s.mjs",
   "scripts/live-checks/sol-buy-reads-side-by-side.mjs",
   "scripts/live-checks/pool-buy-send-fast.mjs",
