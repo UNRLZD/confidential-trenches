@@ -93,8 +93,10 @@ export const MARKS = Object.freeze({
     (g) => [R`\}finally\{${esc(g.rel)}\?\.\(\)\}return ${esc(g.y)}\}`, R`wallets:async (${I})=>\{let (${I})=\1===(${I})\?null:(${I})\.preempt\(\),`, R`preempt:\(\)=>\{let (${I})=(${I})\.preempt\(\);return\(\)=>\1\.release\(\)\}`],
   ),
   "the page reads the restore's no-buy mark": tied(
-    re(R`buyNone:async (?<a>${I})=>Object\.hasOwn\(${I}\(await\(await ${I}\.store\(\)\)\.get\(` + "`meta`" + R`,(?<k>${I})\)\),\k<a>\)`),
-    (g) => [R`[,; ]${esc(g.k)}=` + "`owed/buy-sol-none`" + R`[,;]`],
+    // since card closed-positions-show-every-trade only the current read's mark (2) holds W as no buy; the old read's
+    // `true` (it stopped at a buy's first piece) is read again
+    re(R`buyNone:async (?<a>${I})=>(?<m>${I})\(await\(await ${I}\.store\(\)\)\.get\(` + "`meta`" + R`,(?<k>${I})\),\k<a>\)`),
+    (g) => [R`[,; ]${esc(g.k)}=` + "`owed/buy-sol-none`" + R`[,;]`, R`[,; ]${esc(g.m)}=\((${I}),(${I})\)=>${I}\(\1\)\[\2\]===2[,;]`],
   ),
   "the sell's rule refuses a sale that pays more than 100,000 lamports of priority (a price with no limit at 1,400,000 units, rounded up as the runtime charges it) and a sale's fee over 105,000, full or partial": tied(
     re(R`let (?<n>${I})=(?<hd>${I})\((?<d>${I})\.ixs\);if\((?<po>${I})\(\k<d>\.ixs,\k<n>\)>100000n\)return (?<x>${I})\(` + "`priority`" + R`\);`),
