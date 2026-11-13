@@ -44,4 +44,9 @@ test("the facts read from a bundle", () => {
   assert.equal(facts("", js.replace("||!u)", ")")).retry, null);
   assert.equal(facts("", js.replace("f=Hb(),p=", "f=[Ry,Ry],p=")).usedBySync, false);
   assert.equal(facts("", js.replace("new Map;", "[];")).pager, null);
+  // card restore-walks-every-pool-on-129: the pool pager's rules name its pages in flight on a narrow provider (the
+  // bundle of that card's tree: `slowHalves:!1,inFlight:4`); the same facts, the same verdict
+  const spread = facts("", js.replace("slowHalves:!1}", "slowHalves:!1,inFlight:4}"));
+  assert.deepEqual([spread.first, spread.max, spread.slowHalves, spread.usedBySync, typeof spread.retry], [100_000, 800_000, false, true, "string"]);
+  assert.equal(facts("", js.replace("slowHalves:!1}", "slowHalves:!0,inFlight:4}")).slowHalves, true);
 });
