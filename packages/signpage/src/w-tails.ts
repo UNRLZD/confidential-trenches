@@ -8,6 +8,7 @@
 // From the store alone: nothing here reads a chain or names W in a request. Each tail is counted in the balance
 // (state.deposit_wallets, beside each U_X's leftover) and carried to Cash by pool to Cash (src/pool-to-cash.ts).
 import type { PoolAsset, PoolChain } from "../../kit/src/signpage/messages.ts";
+import { WALLET_W_TAIL_PREFIX } from "@blindfill/wallet/store";
 
 export type WTail = { chain: PoolChain; address: string; l: string; j: number; amount: string };
 
@@ -38,4 +39,10 @@ export function wTailWallets(rows: readonly unknown[], decimals: (chain: PoolCha
     out.push({ chain: t.chain, address: t.address, asset: asset(t.chain), amount: frac === "" ? s.slice(0, s.length - d) : `${s.slice(0, s.length - d)}.${frac}` });
   }
   return out;
+}
+
+/** Every W tail record in the page's own wallet store (the frame's reader never lists them), read only. */
+export async function storedTails(st: { keys(s: "meta"): Promise<string[]>; get(s: "meta", k: string): Promise<unknown> }): Promise<unknown[]> {
+  const keys = (await st.keys("meta")).filter((k) => k.startsWith(WALLET_W_TAIL_PREFIX));
+  return Promise.all(keys.map((k) => st.get("meta", k).catch(() => undefined)));
 }

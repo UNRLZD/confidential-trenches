@@ -82,3 +82,22 @@ test("a W's tail (meta w-tail/sol/<address>, the vault lead's record) is counted
   ];
   assert.deepEqual(wTailWallets(rows, () => 9, () => "SOL"), [{ chain: "solana", address: "W1", asset: "SOL", amount: "0.004" }]);
 });
+
+test("the page reads each W tail the rent back wrote from its own wallet store, and nothing else in meta, as a deposit wallet; main.ts adds them to state.deposit_wallets beside each U_X's", async () => {
+  const { IDBFactory } = await import("fake-indexeddb");
+  const { openWalletStore } = await import("@blindfill/wallet/store");
+  const { owedRentBacks } = await import("../src/pool-sell.ts");
+  const { storedTails, wTailWallets } = await import("../src/w-tails.ts");
+  const s = await openWalletStore({ indexedDB: new IDBFactory() });
+  try {
+    const W = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";
+    await owedRentBacks(async () => s).tail!({ chain: "sol", address: W, l: "3", j: 1, amount: "2345678" });
+    await owedRentBacks(async () => s).put({ address: "other", l: "3", j: 2, mints: [], passes: 0 });
+    assert.deepEqual(wTailWallets(await storedTails(s), () => 9, () => "SOL"), [{ chain: "solana", address: W, asset: "SOL", amount: "0.002345678" }]);
+  } finally {
+    s.close();
+  }
+  const main = (await import("node:fs")).readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
+  assert.match(main, /withDepositWallets\(p, \[\s*\.\.\.depositWalletsOf\(await pageOps\(\)[^\n]*\n(?:\s*\/\/[^\n]*\n)?\s*\.\.\.wTailWallets\(await pageTails\(\)/);
+  assert.match(main, /async function pageTails\(\): Promise<unknown\[\]> \{\s*return storedTails\(await open\(\)\);/);
+});
