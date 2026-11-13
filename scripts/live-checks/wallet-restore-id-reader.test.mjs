@@ -442,14 +442,16 @@ const PLANTS = [
   // the pace by value
   ["busy_wait", "PACE: FastNEAR at 2.5 a second (the rate that earned its 3-minute block)", () => swap("fastnear:Object\\.freeze\\(\\{perSec:\\.39,burst:8\\}\\)", "perSec:.39", "perSec:2.5")],
   ["busy_wait", "PACE: FastNEAR's burst 8 -> 1000", () => swap("fastnear:Object\\.freeze\\(\\{perSec:\\.39,burst:8\\}\\)", "burst:8", "burst:1000")],
-  ["busy_wait", "PACE: dRPC at 35 a second", () => swap("drpc:Object\\.freeze\\(\\{perSec:3\\.5,burst:10\\}\\)", "3.5", "35")],
+  ["busy_wait", "PACE: dRPC at 35 a second", () => swap("drpc:Object\\.freeze\\(\\{perSec:10,burst:20\\}\\)", "perSec:10", "perSec:35")],
+  ["busy_wait", "PACE: the helper's seat at 50 a second", () => swap("seat:Object\\.freeze\\(\\{perSec:5,burst:5\\}\\)", "perSec:5", "perSec:50")],
+  ["busy_wait", "paceOf: the helper's seat paced as dRPC", () => swap("\\?`fastnear`:§\\.seat===§\\?`seat`:`drpc`\\]", "`seat`:", "`drpc`:")],
   ["busy_wait", "paceOf: no pace for any provider", () => swap("\\?\\{tat:0,every:0,burst:1,floor:0,holes:\\[\\]\\}:\\{tat:0,every:1e3/§\\.perSec,burst:§\\.burst,floor:0,holes:\\[\\]\\}", "every:1e3/", "every:0*")],
   ["busy_wait", "the slot never waits", () => plant(String.raw`function (?<f>§)\((?<a>§),(?<b>§)\)\{let §=\k<a>\.floor-[^}]*\}`, (_, g) => `function ${g.f}(${g.a},${g.b}){return ${g.b}}`)],
   ["busy_wait", "the busy hold holds nothing", () => plant(String.raw`function (?<f>§)\((?<a>§),(?<b>§),(?<c>§)\)\{\k<a>\.floor=Math\.max\([^}]*\}`, (_, g) => `function ${g.f}(${g.a},${g.b},${g.c}){}`)],
-  ["busy_wait", "pacedFetch never waits its slot", () => swap(String.raw`,(?<w>§)=§-§;\k<w>>0&&await new Promise`, ">0&&", ">0&&!1&&")],
+  ["busy_wait", "pacedFetch never waits its slot", () => swap(String.raw`,(?<w>§)=§-§;\k<w><=0\|\|await new Promise`, "<=0||", "<=0||!0||")],
   // delta review 4, P2-1 and P3-1: delta review 3's guard (only the queue's tail given back, by float equality), and a
   // give-back with no floor, each in every place it could come back
-  ["busy_wait", "an ended wait gives back only the queue's tail (delta review 3's `tat===mine` guard)", () => plant(String.raw`clearTimeout\(§\),(?<g>(?<G>§)\((?<p>§),(?<a>§)\)),§\(§\.reason\)`, (s, g) => s.replace(g.g, `${g.p}.tat===${g.a}&&${g.g}`))],
+  ["busy_wait", "an ended wait gives back only the queue's tail (delta review 3's `tat===mine` guard)", () => plant(String.raw`clearTimeout\(§\),(?<g>(?<G>§)\((?<p>§),(?<a>§)\)),§\(§\.reason\)`, (s, g) => s.replace(g.g, () => `${g.p}.tat===${g.a}&&${g.g}`))],
   ["busy_wait", "the slot given back comes off tat below the busy hold's floor (a give-back with no floor)", () => plant(String.raw`(?<p>§)\.holes\.pop\(\),\k<p>\.tat=Math\.max\(\k<p>\.tat-\k<p>\.every,\k<p>\.floor\)`, (_, g) => `${g.p}.holes.pop(),${g.p}.tat=${g.p}.tat-${g.p}.every`)],
   ["busy_wait", "the give-back's tail loop never stops at the busy hold's floor", () => swap(String.raw`>\.001\|\|§\.tat<=§\.floor\)break`, "||", "&&")],
   ["busy_wait", "the busy hold sets no floor (delta review 3's hold)", () => plant(String.raw`\{(?<h>§)\.floor=Math\.max\(\k<h>\.floor,(?<x>§\+§\+\(\k<h>\.burst-1\)\*\k<h>\.every)\),\k<h>\.tat=Math\.max\(\k<h>\.tat,\k<h>\.floor\)\}`, (_, g) => `{${g.h}.tat=Math.max(${g.h}.tat,${g.x})}`)],
@@ -471,7 +473,11 @@ const PLANTS = [
     const m = sites[k];
     return APP.slice(0, m.index) + "signal:AbortSignal.timeout(1e4)" + APP.slice(m.index + m[0].length);
   }]),
-  ["busy_wait", "pacedNearRpc hands nearRpc its own 10 s deadline", () => plant(String.raw`return §\(§\(§,§,null\),§\)\}`, (s) => s.replace(",null)", ",1e4)"))],
+  ["busy_wait", "pacedNearRpc hands nearRpc its own 10 s deadline", () => plant(String.raw`=§\(§,§,null\),§=async\(`, (s) => s.replace(",null)", ",1e4)"))],
+  ["busy_wait", "pacedNearRpc's reserve hands nearRpc a fetch with no deadline", () => plant(String.raw`=§\(§,§\(§,§\),null\),§=!1;`, (s) => s.replace(/,[\w$]+\(([\w$]+),[\w$]+\),null\)/, ",$1,null)"))],
+  ["busy_wait", "pacedNearRpc asks a 429 once (tries 4 -> 1)", () => swap(String.raw`\)\|\|§\+1>=4\|\|§\?\.aborted\)throw`, ">=4", ">=1")],
+  ["busy_wait", "pacedNearRpc's busy wait at most 10 s -> 1e9 ms", () => swap(String.raw`var §=1e4,§=§=>§ instanceof Error&&§\.status===429;`, "1e4", "1e9")],
+  ["busy_wait", "pacedNearRpc's busy wait not held on the pace", () => plant(String.raw`;§\(§,performance\.now\(\),§\)\}\},`, () => ";}},")],
   ["busy_wait", "RPC_TIMEOUT_MS 10 s -> 1e9 ms", () => { const to = /function [\w$]+\([\w$]+,[\w$]+=\(\.\.\.[\w$]+\)=>fetch\(\.\.\.[\w$]+\),[\w$]+=([\w$]+)\)\{/.exec(APP)[1]; return swap(String.raw`(?<![\w$.])${to.replace(/[$]/g, "\\$&")}=1e4[,;]`, "1e4", "1e9"); }],
   ["busy_wait", "pacedRpc marks every rpc paced (none takes a slot)", () => swap(String.raw`\{return §\(§\)&&§\.add\(§\),§\}`, "return ", "return 1||")],
   ["busy_wait", "the default sleep resolves at once", () => swap(String.raw`\(\)=>\{§\?\.removeEventListener\(` + "`abort`" + String.raw`,§\),§\(\)\},§\),§=\(\)=>\{clearTimeout\(§\),§\(§\.reason\)\};§\?\.addEventListener\(` + "`abort`" + String.raw`,§,\{once:!0\}\)\}\),§=class extends Error\{retryAfterMs`, "()},", "()},0&&")],
@@ -502,7 +508,7 @@ const PLANTS = [
   ["id_keep", "keptIdReader opens a new pass on any refusal", () => swap(String.raw`catch\((?<e>§)\)\{if\(!\(\k<e> instanceof §\)\)throw \k<e>\}let`, "if(!(", "if(!1&&!(")],
   ["id_keep", "step 5 reads with a new keep each run", () => plant(String.raw`let\{rpcs:§,pass:§,reader:§\}=await §\(§\(§,§\.rpcs,(?<k>§),\{`, (s, g) => s.replace(`,${g.k},{`, ",{answers:new Map,lasting:new Set},{"))],
   // card restore-first-sign-in-under-two-minutes: the kept reader opened through letGo on the run's signal, letGo its body
-  ["id_keep", "step 5's kept reader opened not let go", () => plant(String.raw`let\{rpcs:§,pass:§,reader:§\}=await (?<lg>§)\((?<call>§\(§,§\.rpcs,§,\{\.\.\.§\.opts,signal:(?<sig>§)\}\)),\k<sig>\)`, (s, g) => s.replace(`${g.lg}(${g.call},${g.sig})`, g.call))],
+  ["id_keep", "step 5's kept reader opened not let go", () => plant(String.raw`let\{rpcs:§,pass:§,reader:§\}=await (?<lg>§)\((?<call>§\(§,§\.rpcs,§,\{\.\.\.§\.opts,signal:(?<sig>§)\}\)),\k<sig>\)`, (s, g) => s.replace(`${g.lg}(${g.call},${g.sig})`, () => g.call))],
   ["id_keep", "letGo never stops at the abort", () => plant(String.raw`Promise\.reject\((?<t>§)\.reason\)\):new Promise\(\((?<n>§),(?<r>§)\)=>\{let (?<l>§)=\(\)=>\k<r>\(\k<t>\.reason\);\k<t>\.addEventListener\(` + "`abort`" + String.raw`,\k<l>,\{once:!0\}\),`, (s, g) => `Promise.reject(${g.t}.reason)):new Promise((${g.n},${g.r})=>{let ${g.l}=()=>${g.r}(${g.t}.reason);`)],
   // signing out drops it
   ["id_signout", "sign out keeps what the restore kept", () => plant(String.raw`signedOut:\(\)=>\{(?<a>§)\?\.abort\(\),§=§\(\)\}`, (s, g) => `signedOut:()=>{${g.a}?.abort()}`)],
@@ -530,7 +536,8 @@ test("a build of this tree whose step 5 end loses a list or retries a seed gone 
     assert.ok(hit, `${marker} found in the build`);
     const planted = hit[0].replace(from, to);
     assert.notEqual(planted, hit[0], `${marker}: ${from} planted`);
-    return js.replace(hit[0], planted);
+    // a function, so a minified name with `$$` in the planted text stays as built
+    return js.replace(hit[0], () => planted);
   };
   const cases = [
     ["ids_end", /if\([\w$]+ instanceof [\w$]+\|\|[\w$]+\.aborted\)throw [\w$]+;/, ""],
