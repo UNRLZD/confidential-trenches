@@ -8,6 +8,8 @@
 // dark and light, and reads, in each:
 //   - the terminal is inside the shell, and the visible header Deposit (the phone's balance pill with its +) opens the
 //     deposit sheet, one sheet only;
+//   - no deposit.assets before the Deposit control is touched (card app-faults-seen-on-124 fault 9: no page load asks
+//     it), and once in all for its intent and the opening;
 //   - the sheet asks deposit.assets, draws the first asset, and typing 15 sends one deposit.dry, with that asset and 15
 //     only, whose lines it draws (S4.3, You get $73.18);
 //   - Get address sends deposit.quote with the asset and 15 only, and the sheet draws the quote's own address (S4.13)
@@ -80,6 +82,9 @@ export function judge(rec) {
     say(r.framed === true, `${n}: ${r.framed ? "inside SIGN_HOST's shell" : "not inside SIGN_HOST's shell"}`);
     say(r.opened === 1, `${n}: the header's Deposit ${r.opened === 1 ? "opens the deposit sheet" : r.opened ? `opens ${r.opened} deposit sheets` : "opens nothing"}`);
     if (r.opened !== 1) continue;
+    // card app-faults-seen-on-124, fault 9: no page load asks the list; the control's intent and the opening ask it once
+    say(r.assetsBeforeTouch === 0, `${n}: before its Deposit is touched the page asks deposit.assets ${r.assetsBeforeTouch ?? "an unknown number of"} time(s), want none`);
+    say(r.assetsAsks === 1, `${n}: pointing at, pressing and opening Deposit ask deposit.assets ${r.assetsAsks ?? "an unknown number of"} time(s), want once`);
     say(r.assetsAsked === true, `${n}: the sheet ${r.assetsAsked ? "asks" : "never asks"} deposit.assets`);
     const dry = r.dry ?? [];
     const dryOk = dry.length === 1 && same(dry[0], { origin_asset: NEAR.origin_asset, amount: AMOUNT });
@@ -143,6 +148,9 @@ async function runOne(browser, w, scheme, shots, route) {
     run.framed = f !== null && originOf(page.url()) === SIGN_HOST;
     if (!f) return run;
     await f.waitForSelector(".tb [data-action='deposit']:not([disabled]), .phh [data-action='deposit']:not([disabled])", { timeout: READY_MS }).catch(() => {});
+    // the page settled with Deposit on and untouched: a load-time ask would have gone in its first effects
+    await page.waitForTimeout(1_000);
+    run.assetsBeforeTouch = (await asked(page)).filter((m) => m.type === "deposit.assets").length;
     await f.locator("[data-action='deposit']").filter({ visible: true }).first().click({ timeout: 5_000 }).catch(() => {});
     await f.waitForSelector("[data-sheet='deposit']", { timeout: 3_000 }).catch(() => {});
     run.opened = await f.locator("[data-sheet='deposit']").filter({ visible: true }).count();
@@ -151,6 +159,7 @@ async function runOne(browser, w, scheme, shots, route) {
     // the assets answered: the amount field is on; two keys typed inside the dry quote's pause
     await f.waitForSelector("[data-sheet='deposit'] [data-field='amount']:not([disabled])", { timeout: 5_000 }).catch(() => {});
     run.assetsAsked = (await asked(page)).some((m) => m.type === "deposit.assets");
+    run.assetsAsks = (await asked(page)).filter((m) => m.type === "deposit.assets").length;
     await f.locator("[data-field='amount']").filter({ visible: true }).first().pressSequentially(AMOUNT, { delay: 60, timeout: 3_000 }).catch(() => {});
     await f.waitForSelector("[data-sheet='deposit'][data-state='S4.3'] .dget .v .num", { timeout: 5_000 }).catch(() => {});
     await page.waitForTimeout(600);

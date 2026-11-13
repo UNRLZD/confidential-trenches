@@ -12,6 +12,7 @@ import { ExitIc, Ic } from "./icons.tsx";
 import { activity, amount, axisLabels, calendar, cents, closedRows, EDGES, filterActivity, filterRows, held, line, NO_FILTER, pct, portfolio, restored, shortAddress, signOf, stats, units, usd, walletRows } from "./model.ts";
 import type { CashPart, ClosedRow, PoolRow, Pools, Range, Row, Stats, Totals, WalletRow } from "./model.ts";
 import { chainOf } from "../market/pads.ts";
+import { useDepositIntent } from "../deposit/source.tsx";
 import { usePortfolioSource } from "./source.tsx";
 import type { PortfolioAction, PortfolioSource } from "./source.tsx";
 import { W } from "./W.tsx";
@@ -754,6 +755,7 @@ export function Plate() {
 // ------------------------------------------------------------------------------------------------------------ phone
 
 function PhoneTop({ src, t, pools, loading, offline, rows, ui, setUi, now }: HeadProps) {
+  const intent = useDepositIntent();
   const pts = line(src.data.series, ui.range, now);
   const v = (c: bigint | null, sign: bigint | null): ReactNode => (loading ? <Sk w={70} h={18} /> : c === null || !t ? "—" : <span className={sgn(sign)}>{usd(c, true)}</span>);
   return (
@@ -761,7 +763,7 @@ function PhoneTop({ src, t, pools, loading, offline, rows, ui, setUi, now }: Hea
       <div className="lbl"><W id="total" />{offline && <span className="tag warn" data-offline-tag><W id="offline" /></span>}</div>
       <div className="tot num">{loading ? <Sk w={220} h={46} /> : usd(t?.total ?? 0n)}</div>
       <div className="macts">
-        <button type="button" className="mbtn buy" data-control="deposit" onClick={() => src.act({ kind: "deposit" })}><Ic name="arrowDown" size={14} /><W id="deposit" /></button>
+        <button type="button" className="mbtn buy" data-control="deposit" {...intent} onClick={() => src.act({ kind: "deposit" })}><Ic name="arrowDown" size={14} /><W id="deposit" /></button>
         <button type="button" className="mbtn ghost" data-control="withdraw" onClick={() => src.act({ kind: "withdraw" })}><Ic name="arrowUp" size={14} /><W id="withdraw" /></button>
       </div>
       <div className="chartw">

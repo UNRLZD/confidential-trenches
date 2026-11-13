@@ -4,11 +4,14 @@
 //   good: this card's build served at APP_HOST's name (--harness): at 390 and 1440 NEAR's vault is Private balance's
 //         first row, the Positions tile opens to Coins and Reserve (69 cents on Solana) adding up to the tile, the
 //         desktop's Allocation draws Reserve, the phone has one Open and one Closed control and Closed turns on, and
-//         deposit.assets is asked before any sheet opens, whose first read draws the asset: PASS;
+//         the page load asks no deposit.assets, pressing Deposit asks it and the sheet's first read draws the asset: PASS;
 //   bad:  main's build before this card (2498306e9, --harness --build): no NEAR row, a Positions tile with no parts, no
-//         phone Closed control, deposit.assets asked only once a sheet opens: FAIL.
+//         phone Closed control, the sheet's first read the loading skeleton: FAIL;
+//   beforeFault9: the build before card app-faults-seen-on-124's fault 9 (24caa6cdc, --harness --build), which asks
+//         deposit.assets at the page load: FAIL.
 // Planted from the good run: Reserve a cent off, parts that do not add up to the tile, a pool list without NEAR first,
-// the loading skeleton on the sheet's first read, a missing Closed control, a run missing.
+// the loading skeleton on the sheet's first read, a list asked by the page load, a list never asked, a missing Closed
+// control, a run missing.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -30,7 +33,7 @@ const fails = (r, re) => {
   assert.ok(bad(r).some((l) => re.test(l)), r.lines.join("\n"));
 };
 
-test("recorded good answer: NEAR's row, Coins and Reserve, the phone's Closed control and the warm deposit list, both widths: PASS", () => {
+test("recorded good answer: NEAR's row, Coins and Reserve, the phone's Closed control and the deposit list asked on Deposit, none at load, both widths: PASS", () => {
   const r = judge(ANSWERS.good);
   assert.equal(r.ok, true, r.lines.join("\n"));
 });
@@ -38,7 +41,13 @@ test("recorded good answer: NEAR's row, Coins and Reserve, the phone's Closed co
 test("recorded bad answer: main's build before this card draws none of them: FAIL", () => {
   const r = judge(ANSWERS.bad);
   assert.equal(r.ok, false, r.lines.join("\n"));
-  for (const re of [/first row/, /Positions tile/, /deposit\.assets/]) assert.ok(bad(r).some((l) => re.test(l)), `${re}\n${r.lines.join("\n")}`);
+  for (const re of [/first row/, /Positions tile/, /first read after it opens is S4\.1/]) assert.ok(bad(r).some((l) => re.test(l)), `${re}\n${r.lines.join("\n")}`);
+});
+
+test("recorded beforeFault9 answer: the build that asks the deposit list at the page load: FAIL, on that line alone", () => {
+  const r = judge(ANSWERS.beforeFault9);
+  assert.equal(r.ok, false, r.lines.join("\n"));
+  assert.ok(bad(r).length > 0 && bad(r).every((l) => /is asked 1 time\(s\) by the page load/.test(l)), r.lines.join("\n"));
 });
 
 test("planted: Reserve a cent off fails, and so do parts that do not add up to the tile", () => {
@@ -51,9 +60,10 @@ test("planted: a pool list without NEAR's vault first fails", () => {
   fails(mut((rec) => run(rec, "phone").pools.shift()), /first row/);
 });
 
-test("planted: the loading skeleton on the sheet's first read, a list asked only on open, and a missing Closed control fail", () => {
+test("planted: the loading skeleton on the sheet's first read, a list asked by the page load or never, and a missing Closed control fail", () => {
   fails(mut((rec) => (run(rec, "desktop").firstState = "S4.1")), /first read after it opens is S4\.1, the assets' loading skeleton/);
-  fails(mut((rec) => (run(rec, "phone").warm = false)), /not asked until a sheet opens/);
+  fails(mut((rec) => (run(rec, "phone").loadAsks = 1)), /asked 1 time\(s\) by the page load/);
+  fails(mut((rec) => (run(rec, "desktop").asks = 0)), /asked 0 time\(s\) once Deposit is pressed/);
   fails(mut((rec) => (run(rec, "phone").control.closed = 0)), /0 Closed control/);
 });
 
