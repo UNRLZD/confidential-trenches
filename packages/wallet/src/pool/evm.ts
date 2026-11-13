@@ -1418,6 +1418,9 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
   // the device's held part (a.held): read at the first round; `fromHold` until the pool's views have proven it
   let read = a.held === undefined;
   let fromHold = false;
+  // card evm-deposit-on-mainnet: a held part of no leaf while the pool has leaves, kept only until a round's own trees
+  // from the logs past it are the pool's (round, below)
+  let emptyHeld = false;
   // what the device's record holds: its last block, its leaves and the time of the block it was written at (null: not
   // known), so a write comes only with new leaves or a day of blocks (review of 7eb8cfb9, P3-4)
   let writtenTo = heldTo;
@@ -1531,10 +1534,9 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
       await a.held!.drop(bad).catch(() => {});
     };
     // card evm-deposit-on-mainnet: a hold of no leaf while the pool has leaves (its first deposit landed past the
-    // finalized anchor the hold runs to) has no root for the root times to prove; this round's trees prove it instead
+    // finalized anchor the hold runs to) has no root for the root times to prove; the seats' trees prove it instead
     // (the pool's root binds every leaf, so trees of only the logs past the hold that are the pool's mean no leaf is at
-    // or below it), and seats' logs past it that do not make them drop it (below)
-    let emptyHeld = false;
+    // or below it), and any other end of their read but a lag drops it (below)
     if (fromHold) {
       // the held part proven, never judged by its size (review of 7eb8cfb9, P2-1): the pool keeps a time for every
       // root it made (State.sol:63-65, 172, 188), head state that is never pruned, so the roots of the held leaves and
@@ -1684,11 +1686,15 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
       return { got, why };
     };
     let { got, why } = await seats();
-    // a hold of no leaf whose logs past it, agreed by the seats and not a reorg, do not make the pool's trees is not the
-    // pool's: dropped, and the pool read from its deploy block in this round
-    if (emptyHeld && got !== null && got.wrong !== null) {
-      await dropHeld();
-      ({ got, why } = await seats());
+    // a hold of no leaf is kept only when the seats' trees from the logs past it are the pool's: past them not the
+    // pool's (not a reorg) or refused, it is dropped and the pool read from its deploy block in this round (a lag or a
+    // stop above keeps it unproven for the next round)
+    if (emptyHeld) {
+      emptyHeld = false;
+      if (got === null || got.wrong !== null) {
+        await dropHeld();
+        ({ got, why } = await seats());
+      }
     }
     // the sources: the held part is proven (above), so logs that do not make the pool's trees with it are the logs'
     // fault, never the hold's; with no two operators' same logs the round fails and the hold stays

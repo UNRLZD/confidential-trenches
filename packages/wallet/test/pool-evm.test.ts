@@ -3259,3 +3259,24 @@ test("card evm-deposit-on-mainnet: a pool given the page's sync reads its trees 
   }
   assert.throws(() => evmPool({ pin: PIN, ...pairs(pair(chain([]), chain([]))), sync: {} as never, relayFee: async () => answer(), epochFee: feeRule([]) }), /sync: an EVM tree sync/);
 });
+
+test("card evm-deposit-on-mainnet: a hold of no leaf over a real leaf is dropped when the seats refuse the logs past it, read from the deploy block in that round, never stuck, on Base and Robinhood", async () => {
+  const getLogsFrom = (l: string[]) => l.filter((x) => x.startsWith("eth_getLogs")).map((x) => Number(BigInt(x.match(/"fromBlock":"(0x[0-9a-f]+)"/)![1]!)));
+  for (const [network, chainId] of [["base", 8453n], ["robinhood", 4663n]] as const) {
+    const pin: EvmPoolPin = { ...PIN, network };
+    const d = longChain([...deps(PP, [10])], 800_000);
+    d.events.push({ block: 800_080, kind: "dep", leaf: BigInt(PP.commitments[1]!), label: BigInt(PP.labels[1]!) });
+    d.head = 800_100;
+    d.finalized = 800_050;
+    let g: unknown = { network, pool: POOL, fromBlock: 1n, to: 799_990n, events: [] };
+    const bad: EvmSyncHold = { read: async () => g as never, write: async (v) => void (g = v), drop: async () => void (g = null) };
+    // one seat refuses every page from past the hold (not a size, not a lag): the seats' read is refused, and the
+    // other, a source, gives the logs past the hold, which do not make the pool's trees
+    const refusing = { getLogs: ({ from }: { from: number }) => { if (from === 799_991) throw new Error("RPC error -32000: planted refusal"); } };
+    const lc: string[] = [];
+    const r = await evmTreeSync({ rpcs: pair(d, d, { chainId, log: lc, ...refusing }, { chainId }), pin, held: bad, ...noWait }).events();
+    assert.equal(r.events.length, 2, `${network}: both leaves`);
+    assert.ok(getLogsFrom(lc).includes(1), `${network}: read again from the deploy block: ${getLogsFrom(lc)}`);
+    assert.equal((g as EvmSyncHeld).events.length, 1, `${network}: the hold rewritten with the pool's leaf below the finalized anchor`);
+  }
+});
