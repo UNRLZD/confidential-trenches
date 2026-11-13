@@ -357,7 +357,7 @@ export async function carryEvmOwed(h: EvmCarryHost): Promise<EvmCarryOutcome[]> 
       // will); till then W's balance is its buy's, never carried
       const rest = rests[w] as Partial<EvmWBuyRecord> | undefined;
       if (rest !== undefined && rest.chain === h.chain) {
-        const by = typeof rest.sendBy === "string" && /^[0-9]{1,20}$/.test(rest.sendBy) ? BigInt(rest.sendBy) : null;
+        const by = typeof rest.signBy === "string" && /^[0-9]{1,20}$/.test(rest.signBy) ? BigInt(rest.signBy) : null;
         if (rest.end === undefined && (by === null || now() <= by + EVM_WBUY_CARRY_AFTER_MS)) continue;
         owed.push({ l, j, w, release: e, rest: true });
         continue;

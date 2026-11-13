@@ -40,6 +40,7 @@ import { openNoteStore, readNotes, refKey } from "../../wallet/src/notes/store.t
 import { writeRestored } from "../../wallet/src/notes/restore.ts";
 import { EVM_CHAIN_IDS, EVM_LADDER, EVM_POOLS, evmPoolScopeOf, evmTreeSync } from "../../wallet/src/pool/evm.ts";
 import { evmRestoreNotes } from "../../wallet/src/pool/evm-restore.ts";
+import { isRung } from "../../wallet/src/pool/ladder.ts";
 import { MAINNET_POOL_RPCS, testnetPool } from "../src/pool-testnet.ts";
 import { POOL_DEPOSIT_EVM_FOLLOW_MS, runPoolDepositEvm } from "../src/pool-deposit-evm.ts";
 
@@ -203,7 +204,10 @@ const states = async (ns) => (await mine(ns)).map((n) => `${refKey(n.ref)} ${n.s
 const A = await device();
 const host = A.host;
 const shorts = A.shorts;
-const RUNG = EVM_LADDER.min;
+// FORK_RUNG (wei): another rung of the ladder to deposit (a later step that spends part of a note, card
+// buy-any-amount-on-every-chain); the least rung when not set
+const RUNG = process.env.FORK_RUNG ? BigInt(process.env.FORK_RUNG) : EVM_LADDER.min;
+if (!isRung(EVM_LADDER, RUNG)) throw new Error(`FORK_RUNG ${RUNG} is not a rung of the ladder`);
 const ASK = { kind: "pool.deposit", chain: CHAIN, token: null, amount: RUNG, slippageBps: 0, decimals: 18 };
 const first = await runPoolDepositEvm(host(), ASK);
 const [U, need] = shorts.at(-1) ?? [];

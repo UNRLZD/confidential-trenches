@@ -1311,3 +1311,16 @@ test("card buy-any-amount-on-every-chain: a rest note released to another W (spe
   assert.equal(ch.sent.length, 0);
   assert.equal(rests.at(-1)!.end, "unsent");
 });
+
+test("card buy-any-amount-on-every-chain: a leg read back past the tap's time: the tap answers sent, and once every leg ends the late end is all of them (filled, both releases); every W let go", async () => {
+  const following = new Set<string>();
+  let clockRef: { t: bigint } | null = null;
+  const logs = () => (clockRef !== null && clockRef.t > NOW + BigInt(EVM_BUY_SETTLE_MS) + 10_000n ? [release(), release({ w: W2, nullifier: N2, tx: TX2 })] : [release()]);
+  const { h, seen } = host({ ready: [readyOf(), readyTwo()], following, ...both(logs) });
+  clockRef = seen.clock;
+  assert.deepEqual(await runEvmPoolBuy(h, TWO), { stage: "sent", txs: [{ chain: "base", hash: TX }] }, "the leg that ended is named");
+  const late = await lateOf(seen);
+  assert.deepEqual(late, { stage: "filled", txs: [{ chain: "base", hash: TX }, { chain: "base", hash: TX2 }] });
+  await turns(50);
+  assert.equal(following.size, 0, "no W left followed");
+});

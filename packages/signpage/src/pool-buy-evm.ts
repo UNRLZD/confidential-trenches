@@ -369,46 +369,46 @@ export async function runEvmPoolBuy(h: EvmPoolBuyHost, ask: PoolAsk): Promise<Ev
     const tapMore = (): boolean => live() && clock() - sentAt < BigInt(EVM_BUY_SETTLE_MS);
     // each leg's tap end (null: none in the tap's time), and its follow past the answer with no answer owed
     type End = { stage: TradeStage; txs: TxRef[] };
-    const follows: (() => Promise<End | null>)[] = [];
+    const follows = new Map<number, () => Promise<End | null>>();
     const taps = await Promise.all(
-      legs.map(async (l): Promise<End | null> => {
+      legs.map(async (l, i): Promise<End | null> => {
         if (l.kind === "whole") {
           const x = l.x;
           const w = lower(x.w);
           const mine = followed.has(w);
-          followed.delete(w);
           const slowAt = x.want.deadlineMs + BigInt(EVM_BUY_FOLLOW_MS);
-          const later = () => watch(h, x, live, (ms) => wait(clock() > slowAt ? EVM_BUY_SLOW_WAIT_MS : ms), clock, live).finally(() => void (mine && h.following?.delete(w)));
+          // W stays this run's to let go (the finally below) until its follow starts, which lets it go at its end
+          const later = () => {
+            followed.delete(w);
+            return watch(h, x, live, (ms) => wait(clock() > slowAt ? EVM_BUY_SLOW_WAIT_MS : ms), clock, live).finally(() => void (mine && h.following?.delete(w)));
+          };
           // a refusal is the helper's word, and the device never drops what it may own on a server's word: the leg
           // answers refused, its pending record stays, and the chain ends it (the follow: a Bought fills W's holding, no
           // release by the two-round final-block rule removes it, as the note's settle frees the note)
           if (l.refused) {
-            follows.push(later);
+            follows.set(i, later);
             return { stage: "refused", txs: [] };
           }
           const tap = await watch(h, x, tapMore, wait, clock, live);
-          if (tap === null) follows.push(later);
-          else if (mine) h.following?.delete(w);
+          if (tap === null) follows.set(i, later);
           return tap;
         }
         const slowAt = l.r.binding.request.relay.deadlineMs + BigInt(EVM_BUY_FOLLOW_MS);
         const later = () => finishRest(h, ask, plan, l.leg, l.st, quoted, live, (ms) => wait(clock() > slowAt ? EVM_BUY_SLOW_WAIT_MS : ms), clock, hold);
         if (l.refused) {
-          follows.push(later);
+          follows.set(i, later);
           return { stage: "refused", txs: [] };
         }
         const tap = await finishRest(h, ask, plan, l.leg, l.st, quoted, tapMore, wait, clock, hold);
-        if (tap === null) follows.push(later);
+        if (tap === null) follows.set(i, later);
         return tap;
       }),
     );
     const answer = legsEnd(taps);
-    if (follows.length === 0) return answer;
+    if (follows.size === 0) return answer;
     // a sign out ended the tap's reads: no follow (the settle pass decides at the next sign in)
     if (!live()) return answer.stage === "refused" ? answer : { stage: "sent", txs: [] };
-    const done = taps.map((t, i) => (t !== null && !legs[i]!.refused ? Promise.resolve(t) : null));
-    let k = 0;
-    const finals = done.map((d) => d ?? follows[k++]!().catch(() => null));
+    const finals = taps.map((t, i) => follows.get(i)?.().catch(() => null) ?? Promise.resolve(t));
     void Promise.all(finals).then((ends) => {
       // null: a sign out ended the reads, so nothing is settled after it (review P2-2)
       if (ends.some((e) => e === null) || !live()) return;

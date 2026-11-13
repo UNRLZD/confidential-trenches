@@ -33,13 +33,13 @@ type Chain = "base" | "robinhood";
 /** Each rest W's record, by W's address (lowercase): an owed/ key, the one meta keyspace the wallet store lets a caller
  *  write. Written before the release leaves; `hash` before W's buy leaves; `end` once that buy reads back or will never
  *  be sent. The carry pass carries a W of this record only (src/pool-carry-evm.ts), and only once it has its end or
- *  its `sendBy` is EVM_WBUY_CARRY_AFTER_MS past. */
+ *  its `signBy` is EVM_WBUY_CARRY_AFTER_MS past. */
 export const EVM_WBUY_KEY = "owed/wbuy-evm";
-export type EvmWBuyRecord = { chain: Chain; l: string; j: number; nullifier: string; deadlineMs: string; sendBy: string; spend: string; token: string; hash?: string; end?: "filled" | "reverted" | "unsent" };
+export type EvmWBuyRecord = { chain: Chain; l: string; j: number; nullifier: string; deadlineMs: string; signBy: string; spend: string; token: string; hash?: string; end?: "filled" | "reverted" | "unsent" };
 /** How long past its release's deadline W's own buy may still be signed: past it the run signs nothing and the change
  *  is carried back whole as rungs. */
 export const EVM_WBUY_SEND_MS = 120_000n;
-/** How long past `sendBy` the carry waits on a record with no end (a tab closed after W signed): by then W's one buy has
+/** How long past `signBy` the carry waits on a record with no end (a tab closed after W signed): by then W's one buy has
  *  landed or will never land. */
 export const EVM_WBUY_CARRY_AFTER_MS = 300_000n;
 
@@ -62,7 +62,7 @@ export type RestLeg = {
   from: bigint;
   token: string;
   decimals: number;
-  sendBy: bigint;
+  signBy: bigint;
   holding: EvmHolding;
 };
 
@@ -117,13 +117,13 @@ export async function prepRest(
   }
   const data = evmWithdrawCalldata(h.pin.pool, relay, r.proof, r.publicSignals, fee, sig);
   const w = r.wallet.address;
-  const sendBy = relay.deadlineMs + EVM_WBUY_SEND_MS;
+  const signBy = relay.deadlineMs + EVM_WBUY_SEND_MS;
   // the rest's record, written before anything leaves (the carry finds W's change from it and the chain's release); W's
   // holding, pending with no pool buy of its own (the load's follow reads only a pool buy's), once the release paid W
   // and before W signs its buy
   const holding: EvmHolding = { mint: lower(token), decimals, chain: h.chain, state: "pending", route: { venue: q.route.venue, adapter: lower(adapter), path: q.route } };
-  await writeRest(h, w, { chain: h.chain, l: r.wallet.l.toString(), j: r.wallet.j, nullifier: binding.nullifier.toString(), deadlineMs: relay.deadlineMs.toString(), sendBy: sendBy.toString(), spend: plan.rest.spend.toString(), token: lower(token) });
-  return { r, w, data, from, token, decimals, sendBy, holding };
+  await writeRest(h, w, { chain: h.chain, l: r.wallet.l.toString(), j: r.wallet.j, nullifier: binding.nullifier.toString(), deadlineMs: relay.deadlineMs.toString(), signBy: signBy.toString(), spend: plan.rest.spend.toString(), token: lower(token) });
+  return { r, w, data, from, token, decimals, signBy, holding };
 }
 
 /** The rest leg's read-back state, kept across the tap's reads and the follow's: each RPC's read stop, the release once
@@ -233,7 +233,7 @@ async function tokenHeld(rpcs: readonly [EvmRpc, EvmRpc], token: string, w: stri
 /** W's own buy of the rest, checked and signed (null past its window): the fresh quote and build, W's reads on both
  *  RPCs at one block, the rule, W's key; its hash kept in the rest's record before the bytes leave. */
 async function signRest(h: EvmPoolBuyHost, ask: PoolAsk, plan: EvmBuyPlan, leg: RestLeg, quoted: RestQuote, clock: () => bigint): Promise<{ raw: Uint8Array; hash: string; adapter: string } | null> {
-  const gone = (): boolean => h.stopped?.() === true || h.signal?.aborted === true || clock() >= leg.sendBy;
+  const gone = (): boolean => h.stopped?.() === true || h.signal?.aborted === true || clock() >= leg.signBy;
   if (plan.rest === null || gone()) return null;
   const spend = plan.rest.spend;
   const w = leg.w;

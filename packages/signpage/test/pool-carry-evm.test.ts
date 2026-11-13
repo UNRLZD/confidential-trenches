@@ -627,7 +627,7 @@ test("card buy-any-amount-on-every-chain: a rest W (its release a pool withdraw,
   ch.c.balance = [change, change];
   const { ns, ws } = await stores();
   await refused(ch, ns);
-  await ws.update("meta", WBUY_KEY, () => ({ [W]: { chain: "base", l: LABEL.toString(), j: 0, nullifier: "1", deadlineMs: "1", sendBy: "2", spend: "1", token: "0x" + "11".repeat(20), end: "filled" } }));
+  await ws.update("meta", WBUY_KEY, () => ({ [W]: { chain: "base", l: LABEL.toString(), j: 0, nullifier: "1", deadlineMs: "1", signBy: "2", spend: "1", token: "0x" + "11".repeat(20), end: "filled" } }));
   const h = hostOf(ch, ns, ws);
   assert.deepEqual(await carryEvmOwed(h), [{ w: W, end: "sent" }]);
   assert.equal(ch.c.helperAsked.length, 0, "a rest W is known from its record: no release transaction asked");
@@ -647,10 +647,10 @@ test("card buy-any-amount-on-every-chain: a rest W whose own buy has no end is n
   const { ns, ws } = await stores();
   await refused(ch, ns);
   const h = hostOf(ch, ns, ws);
-  const sendBy = BigInt(h.clock.t) + 1_000n;
-  await ws.update("meta", WBUY_KEY, () => ({ [W]: { chain: "base", l: LABEL.toString(), j: 0, nullifier: "1", deadlineMs: "1", sendBy: sendBy.toString(), spend: "1", token: "0x" + "11".repeat(20) } }));
+  const signBy = BigInt(h.clock.t) + 1_000n;
+  await ws.update("meta", WBUY_KEY, () => ({ [W]: { chain: "base", l: LABEL.toString(), j: 0, nullifier: "1", deadlineMs: "1", signBy: signBy.toString(), spend: "1", token: "0x" + "11".repeat(20) } }));
   assert.deepEqual(await carryEvmOwed(h), []);
   assert.equal(await ws.get("meta", EVM_CARRY_DONE_KEY), undefined, "never ended a withdraw");
-  h.clock.t = Number(sendBy + (REST.EVM_WBUY_CARRY_AFTER_MS as bigint)) + 1;
+  h.clock.t = Number(signBy + (REST.EVM_WBUY_CARRY_AFTER_MS as bigint)) + 1;
   assert.deepEqual(await carryEvmOwed(h), [{ w: W, end: "empty" }], "past the window: carried (here W holds under the least rung: its tail)");
 });

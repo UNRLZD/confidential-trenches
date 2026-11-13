@@ -2,7 +2,11 @@
 // it spends the note pool-fork-evm.mjs left in the pinned mainnet pool seconds before, sent through the helper's own
 // route and EVM sender run in this process, with nothing signed or sent on any real chain:
 //   node contracts/pool-evm/test/fork-rpc.mjs --book pools -- sh packages/signpage/scripts/pool-fork-evm.sh <base|robinhood> <S> <lag> <fork.json> \
-//     packages/signpage/scripts/pool-fork-evm-buy.mjs <base|robinhood> http://127.0.0.1:<port> <out.json> <token>
+//     packages/signpage/scripts/pool-fork-evm-buy.mjs <base|robinhood> http://127.0.0.1:<port> <out.json> <token> [<amount ETH>]
+// <amount>: the ETH that goes into swaps (card buy-any-amount-on-every-chain); the note's whole spend (its chunk less
+// the proof's fee) when not given. An amount under that spend buys the rest by the note's own W through the pinned
+// adapter after a whole release; the run then follows W's change back into the pool as rungs (the carry pass, at each
+// state read, a block mined past finalized for its landing) and writes W's balance after it: under the least rung.
 // (a long run: start it where a 30-minute job may run). The mainnet build: __SIGN_NETWORK__ is not set, so the pins and lists are
 // SIGN_HOST's (the wallet's EVM_POOLS, src/pool-testnet.ts MAINNET_POOL_RPCS and MAINNET_EVM_FEE_RPCS).
 // - Every request is answered on this machine: the chain's hosts the page and the kit name (the pool list, the fee
@@ -31,9 +35,9 @@ import { createRequire } from "node:module";
 import os from "node:os";
 import { IDBFactory } from "fake-indexeddb";
 
-const USAGE = "usage: pool-fork-evm-buy.mjs <base|robinhood> http://127.0.0.1:<port> <out.json> <token 0x...40 hex>";
-const [CHAIN, ANVIL, OUT, TOKEN] = process.argv.slice(2);
-if ((CHAIN !== "base" && CHAIN !== "robinhood") || !/^http:\/\/127\.0\.0\.1:\d+$/.test(ANVIL ?? "") || !OUT || !/^0x[0-9a-f]{40}$/.test(TOKEN ?? "")) {
+const USAGE = "usage: pool-fork-evm-buy.mjs <base|robinhood> http://127.0.0.1:<port> <out.json> <token 0x...40 hex> [<amount ETH>]";
+const [CHAIN, ANVIL, OUT, TOKEN, AMOUNT] = process.argv.slice(2);
+if ((CHAIN !== "base" && CHAIN !== "robinhood") || !/^http:\/\/127\.0\.0\.1:\d+$/.test(ANVIL ?? "") || !OUT || !/^0x[0-9a-f]{40}$/.test(TOKEN ?? "") || (AMOUNT !== undefined && !/^[0-9]+(\.[0-9]{1,18})?$/.test(AMOUNT))) {
   console.error(USAGE);
   process.exit(2);
 }
@@ -78,6 +82,9 @@ const { evmPoolVenues } = await import("../../kit/src/trade/evm/buy-unpinned.ts"
 const { poolKinds } = await import("../src/pool-kinds.ts");
 const { MAINNET_EVM_FEE_RPCS, MAINNET_POOL_HISTORY, MAINNET_POOL_RPCS, pageEvmPoolRpcs, testnetPool, testnetPoolDeps } = await import("../src/pool-testnet.ts");
 const { EVM_OWED_BACK_KEY, EVM_POSITION_COSTS_KEY } = await import("../src/pool-buy-evm.ts");
+const { EVM_WBUY_KEY } = await import("../src/pool-buy-evm-rest.ts");
+const { EVM_CARRY_DONE_KEY } = await import("../src/pool-carry-evm.ts");
+const { EVM_LADDER } = await import("../../wallet/src/pool/evm.ts");
 const { TRADE_HELPER } = await import("../src/trade.ts");
 const { handler } = await import("../../../apps/helper/src/server.ts");
 const { evmPoolSender } = await import("../../../apps/helper/src/pool/evm.ts");
@@ -251,15 +258,20 @@ if (ready.length === 0) {
 const proof = ready[0];
 log("ready", { ms: readyMs, proveMs: record.times.proveMs, note: proof.noteId, chunk: proof.chunk, fee: proof.binding.feeCap, root: proof.root, w: proof.wallet.address, epoch: proof.epochStartMs });
 
-// 3. the tap: pool.buy of the ready chunk into the token, 300 bps
+// 3. the tap: pool.buy into the token, 300 bps, of <amount> or the note's whole spend
 const units = (v, d) => {
   const s = v.toString().padStart(d + 1, "0");
   const f = s.slice(-d).replace(/0+$/, "");
   return f === "" ? s.slice(0, -d) : `${s.slice(0, -d)}.${f}`;
 };
-const amount = units(proof.chunk, 18);
+const amount = AMOUNT ?? units(proof.chunk - proof.binding.feeCap, 18);
 const stages = [];
 const ENDS = ["filled", "part_filled", "refused", "not_landed"];
+// the fork's clock set to the wall clock and a block mined at the tap, so the quotes' head is now (the kit refuses a head
+// over 30 s old: the proof's wait above can outlast it) and every block after it (the release, W's own buy) is too
+await anvil("anvil_setTime", [Math.floor(Date.now() / 1000)]);
+await anvil("evm_mine", []);
+log("tap head", { ageS: Math.round(Date.now() / 1000 - Number(BigInt((await anvil("eth_getBlockByNumber", ["latest", false])).timestamp))) });
 tapped = true;
 const tapAt = Date.now();
 const r = kinds["pool.buy"]({ chain: CHAIN, token: TOKEN, amount, slippage_bps: 300 }, { id: "buy", sha: "00", progress: (s) => (stages.push(s), log("progress", { stage: s, ms: Date.now() - tapAt })) });
@@ -303,4 +315,30 @@ record.tx = hash;
 record.block = rc?.blockNumber ? BigInt(rc.blockNumber) : null;
 record.status = rc?.status ?? null;
 log("receipt", { tx: hash, block: record.block, status: record.status, gasUsed: rc?.gasUsed ? BigInt(rc.gasUsed) : null, logs: rc?.logs?.length ?? null });
-await finish(record.end === "filled" && record.status === "0x1" ? 0 : 1);
+// 5. a rest W's change (card buy-any-amount-on-every-chain): the carry pass at each state read puts it back as rungs;
+// blocks mined past finalized (2 x slots) so its Deposited lands; W's balance after it, under the least rung
+const rest = (await w.get("meta", EVM_WBUY_KEY))?.[proof.wallet.address.toLowerCase()] ?? null;
+record.rest = rest;
+let carried = true;
+if (rest !== null) {
+  carried = false;
+  const changeAt = Date.now();
+  for (let i = 0; i < 60 && !carried; i++) {
+    await t.stateRead().catch(() => {});
+    await sleep(3_000);
+    await anvil("anvil_mine", ["0xc", "0x1"]);
+    const done = (await w.get("meta", EVM_CARRY_DONE_KEY))?.[proof.wallet.address.toLowerCase()] ?? null;
+    carried = done !== null;
+    if (i % 5 === 4 || carried) log("change", { done, notes: (await notesNow()).filter((n) => n.ref === "return" || n.ref === "second"), wBalance: BigInt(await anvil("eth_getBalance", [proof.wallet.address, "latest"])) });
+  }
+  record.change = {
+    ms: Date.now() - changeAt,
+    done: (await w.get("meta", EVM_CARRY_DONE_KEY))?.[proof.wallet.address.toLowerCase()] ?? null,
+    notes: (await notesNow()).filter((n) => n.ref === "return" || n.ref === "second"),
+    wBalance: BigInt(await anvil("eth_getBalance", [proof.wallet.address, "latest"])),
+    tokenOnW: BigInt(await anvil("eth_call", [{ to: TOKEN, data: "0x70a08231" + proof.wallet.address.slice(2).toLowerCase().padStart(64, "0") }, "latest"])),
+  };
+  carried = carried && record.change.wBalance < EVM_LADDER.min && record.change.notes.some((n) => n.state === "UNSPENT");
+  log("change end", record.change);
+}
+await finish(record.end === "filled" && record.status === "0x1" && carried ? 0 : 1);
