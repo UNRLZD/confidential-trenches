@@ -408,7 +408,11 @@ else {
         let read: Promise<NoteRecord[]> | null = null;
         const shared = () => (read ??= notes());
         const withVault = await withVaultBalance(s, shared, pageScope());
-        const pooled = await withPools(withVault, shared, r === null ? PAGE_POOLS : withSolanaRent(PAGE_POOLS, r), both?.ready, prices.get, both?.open, both?.landed, both?.making);
+        // and each U_X a follow left money at (card deposit-takes-each-pools-own-coin): the ops read after those notes, from
+        // the store alone, so a carry the pools count is never listed too (pool-deposit-follow.ts depositWalletsOf)
+        const pooled = await withPools(withVault, shared, r === null ? PAGE_POOLS : withSolanaRent(PAGE_POOLS, r), both?.ready, prices.get, both?.open, both?.landed, both?.making).then(async (p) =>
+          !p.signed_in || PAGE_POOLS.length === 0 ? p : withDepositWallets(p, depositWalletsOf(await pageOps().catch(() => []), (c) => POOL_ASSET_DECIMALS[POOL_ADDRESS_ASSET[c]], (c) => POOL_ADDRESS_ASSET[c])),
+        );
         prices.refresh((pooled.pools ?? []).map((p) => p.chain));
         // the tokens the pool's buys hold (src/positions.ts, card signpage-state-holdings): the last whole pass, never a
         // chain read inside this state read; the first signed-in read starts one, and a buy's or sell's end the next
@@ -421,13 +425,7 @@ else {
         const owed = s.signed_in && testnet ? await testnet.returning().catch(() => []) : [];
         // the notes the balance counted, so a W whose sweep's note is counted is not listed too
         const counted = owed.some((o) => o.sweep !== undefined) ? await shared().catch(() => null) : [];
-        const returned = withReturning(positioned, returningWallets(owed, prices.get("solana"), counted));
-        // each U_X a follow left money at (card deposit-takes-each-pools-own-coin): the ops read after the notes above,
-        // from the store alone, so a carry the pools count is never listed here too (pool-deposit-follow.ts
-        // depositWalletsOf)
-        if (!s.signed_in || PAGE_POOLS.length === 0) return returned;
-        const ops = await open().then(async (st) => Promise.all((await st.keys("ops")).map((k) => st.get("ops", k).catch(() => undefined)))).catch(() => null);
-        return ops === null ? returned : withDepositWallets(returned, depositWalletsOf(ops, (c) => POOL_ASSET_DECIMALS[POOL_ADDRESS_ASSET[c]], (c) => POOL_ADDRESS_ASSET[c]));
+        return withReturning(positioned, returningWallets(owed, prices.get("solana"), counted));
       }),
     // a store change, a new price read (or its next one due), the Rent read landing and a proof made
     watch: (fn) => {
@@ -1025,9 +1023,7 @@ const namer = depositNamer({
   held: async (chain, rec) => {
     const u = walletOf(chain, rec);
     if (u === null) return false;
-    const st = await open();
-    const ops = await Promise.all((await st.keys("ops")).map((k) => st.get("ops", k).catch(() => undefined)));
-    return uxHeldOf(ops, chain, u);
+    return uxHeldOf(await pageOps(), chain, u);
   },
 });
 // state.pools' notes (src/pools.ts): read only, with the wallet's readNotes on this page's own wallet store: no Web Lock,
@@ -1035,6 +1031,11 @@ const namer = depositNamer({
 // the frame keeps no note data. A function declaration, as the shell's state, made at the top, holds it.
 async function pageNotes(): Promise<NoteRecord[]> {
   return readNotes(await open());
+}
+// the ops store's records, read only (state.deposit_wallets, and the namer's held: pool-deposit-follow.ts uxHeldOf)
+async function pageOps(): Promise<unknown[]> {
+  const st = await open();
+  return Promise.all((await st.keys("ops")).map((k) => st.get("ops", k).catch(() => undefined)));
 }
 // pageNotes for the queue's readyWith: its failure kept as a value, so the turn ends and the state's withPools throws it
 // in its own catch
