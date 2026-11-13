@@ -13,7 +13,10 @@ import { replayer } from "./wallet-restore-transfer-rpcs.mjs";
 
 const A = JSON.parse(readFileSync(new URL("./evm-pool-reads-throttle.answers.json", import.meta.url), "utf8"));
 
-test("the recorded good run passes: the binding is made with every kind of read throttled once on both providers", async () => {
+// Retired 13 Nov: the sync now takes the newest block again within EVM_NEWEST_REUSE_MS (card evm-first-proof-inside-ten-seconds),
+// so it asks views at block hashes this Base Sepolia recording never held, and no test network is read again to record it
+// (owner, 12 Nov); each kind of read throttled once, then answered, is held by packages/wallet/test/pool-evm.test.ts (READS).
+test.skip("the recorded good run passes: the binding is made with every kind of read throttled once on both providers", async () => {
   const r = await check(replayer(A.good), { wait: false });
   assert.equal(r.ok, true, r.lines.join("\n"));
   assert.match(r.lines[0], /^base-sepolia: pool 0xeb967dfc1b4ffb22942f833c76866ea85fc42266 from block \d+: now \d+, the trees at epoch \d+ \(\d+ leaves\), bound for W 0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf at fee \d+ wei, deadline \d+, with \d+ reads throttled once on base-sepolia-rpc\.publicnode\.com, base-testnet\.api\.pocket\.network, sepolia\.base\.org \(eth_chainId, block finalized, block latest, block number, view, eth_getLogs; views of \d+ kinds\)$/);

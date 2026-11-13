@@ -49,14 +49,16 @@ const bridge = (k: number): EvmRpc =>
     { url: a.urls[k] },
   );
 
-/** What the sync read in its last round: the anchors (the lower tag block, then that number on both) and the views. */
+/** What the sync read in its last round: the anchors (the lower tag block; each RPC's block at that number, read by
+ *  number, or its tag's own answer where that names it: the wallet reads by number only where the tag named a higher
+ *  block, card evm-first-proof-inside-ten-seconds) and the views. */
 function lastRound(from: number) {
   const rs = calls.slice(from).filter((c) => c.result !== undefined);
   const anchor = (t: string) => {
-    const tops = [0, 1].map((k) => rs.filter((c) => c.k === k && c.method === "eth_getBlockByNumber" && c.params[0] === t).at(-1)?.result as { number: string } | undefined);
+    const tops = [0, 1].map((k) => rs.filter((c) => c.k === k && c.method === "eth_getBlockByNumber" && c.params[0] === t).at(-1)?.result as { number: string; hash: string } | undefined);
     if (tops.some((b) => b === undefined)) return null;
     const n = tops.map((b) => BigInt(b!.number)).reduce((x, y) => (x < y ? x : y));
-    const at = [0, 1].map((k) => rs.filter((c) => c.k === k && c.method === "eth_getBlockByNumber" && c.params[0] === `0x${n.toString(16)}`).at(-1)?.result as { hash: string } | undefined);
+    const at = [0, 1].map((k) => (rs.filter((c) => c.k === k && c.method === "eth_getBlockByNumber" && c.params[0] === `0x${n.toString(16)}`).at(-1)?.result as { hash: string } | undefined) ?? (BigInt(tops[k]!.number) === n ? tops[k] : undefined));
     return { number: n.toString(), hashes: at.map((b) => b?.hash ?? null) };
   };
   const newest = anchor(EVM_NEWEST_TAG);
