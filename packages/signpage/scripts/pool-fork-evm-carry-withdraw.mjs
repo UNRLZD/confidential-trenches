@@ -491,12 +491,17 @@ const outside = !PLAIN ? null : await guard("plain: the outside wallet", async (
   return a;
 });
 const plainSends = [];
-// one plain send from the outside wallet to U_X, at the held base fee, mined at once (anvil automines); its receipt read
+// one plain send from the outside wallet to U_X, at the held base fee, then a block mined at the wall clock (never
+// behind the head) so it is in one; its receipt read once the tx names its block (a receipt asked of a pending tx goes to
+// the fork's upstream, which does not know it: the 09:38Z run stopped there on fork-rpc's 502)
 const outsideSend = (what, value) => exclusive(async () => {
   await anvil("anvil_setNextBlockBaseFeePerGas", [hex(BASE_FEE)]);
   const hash = await anvil("eth_sendTransaction", [{ from: outside, to: ux.evm, value: hex(value) }]);
-  let rc = null;
-  for (let k = 0; k < 40 && rc === null; k++) (rc = await anvil("eth_getTransactionReceipt", [hash])) ?? (await sleep(250));
+  for (let k = 0; k < 40 && !(await anvil("eth_getTransactionByHash", [hash]))?.blockNumber; k++) {
+    await mineAt(Math.max(Number(BigInt((await head()).timestamp)) + 1, Math.floor(Date.now() / 1000)));
+    await sleep(250);
+  }
+  const rc = await anvil("eth_getTransactionReceipt", [hash]);
   txHashes.set(hash, what);
   const s = { what, hash, from: outside, to: ux.evm, value, status: rc?.status ?? null, block: rc?.blockNumber ? BigInt(rc.blockNumber) : null, uxBalance: BigInt(await anvil("eth_getBalance", [ux.evm, "latest"])) };
   plainSends.push(s);
