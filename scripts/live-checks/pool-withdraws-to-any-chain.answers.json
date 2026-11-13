@@ -1,0 +1,20 @@
+{
+  "_note": {
+    "good": "this card's SIGN_HOST build (mainnet): packages/signpage/index.html and public/app.js built at card/pool-withdraws-to-any-chain (build-app.mjs)",
+    "bad": "SIGN_HOST as served 2026-11-13T20:21Z (main before this card): no Chain picker, no exit request, no run pays a quote's deposit address: FAIL"
+  },
+  "good": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-TyfkyJcgrbc2OgF/TiaWrfqRx+Ge7dkDtbN7jHgiMwHuslCn+RF9+ZlHz7jdxWQA\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-TyfkyJcgrbc2OgF/TiaWrfqRx+Ge7dkDtbN7jHgiMwHuslCn+RF9+ZlHz7jdxWQA",
+    "picker": true,
+    "request": true,
+    "runs": 2
+  },
+  "bad": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-ZFe+Tuco9V0gMoeAq3pGbTr9OVAWP4zGQiqqJUeWF8FZUKFxRmGZF5p33bD9KVtx\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-ZFe+Tuco9V0gMoeAq3pGbTr9OVAWP4zGQiqqJUeWF8FZUKFxRmGZF5p33bD9KVtx",
+    "picker": false,
+    "request": false,
+    "runs": 0
+  }
+}
