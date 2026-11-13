@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { createPublicKey, verify } from "node:crypto";
 import { test } from "node:test";
 import { solanaDecodePoolRelease, solanaDecodeTransaction, VaultTree, type SolanaRpc, type VaultSnarkjsProof } from "@blindfill/kit";
-import { freshWallet, solanaContextOf, solanaPoolOf, wordsToSeed64, type SolanaReleaseRequest, type SolanaRestoredNote } from "@blindfill/kit/core";
+import { solanaContextOf, solanaPoolOf, wordsToSeed64, type SolanaReleaseRequest, type SolanaRestoredNote } from "@blindfill/kit/core";
 import type { ExitCtx } from "../src/chain.ts";
 import { b58decode, b58encode, solExitWith, solFeeWallet, type SolExitOver } from "../src/sol-out.ts";
 import { EXIT_SOL_CLUSTERS } from "../src/sol-rpc.ts";
@@ -152,8 +152,9 @@ test("(b) the release: fee payer F, W the recipient and a signer; the onward: W 
   const seed = wordsToSeed64(WORDS);
   const F = solFeeWallet(seed);
   F.secretKey.fill(0);
-  const W = freshWallet(seed, "sol", LABEL, 0);
-  W.secretKey.fill(0);
+  // W_{sol,77,0} of the test words (m/44'/501'/527881472'/681728428'), pinned: the exit derives no key of its own, and a
+  // drift of the wallet's derivation fails here
+  const W = { address: "5KWWcnta5aTAnCLgtPUCpyCu1D3spPzGr7x7thJWSyry" };
   const c = chain();
   c.balance.set(F.address, 1_000_000_000n);
   const lines: string[] = [];

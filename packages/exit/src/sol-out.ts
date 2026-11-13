@@ -39,7 +39,7 @@ import {
   type VaultProver,
   type VaultSnarkjsProof,
 } from "@blindfill/kit";
-import { changeIndex, freshWallet, noteSecrets, slip10Ed25519, solanaContextOf, solanaPool, solanaPoolOf, type SolanaRestoredNote, type SolanaRestoredSpend } from "@blindfill/kit/core";
+import { changeIndex, freshWallet, noteSecrets, solFirstAccount, solanaContextOf, solanaPool, solanaPoolOf, type SolanaRestoredNote, type SolanaRestoredSpend } from "@blindfill/kit/core";
 import type { ExitChain, ExitCtx, ExitResult } from "./chain.ts";
 import { fundedOrWait, units } from "./fund.ts";
 import { exitProver } from "./prover.ts";
@@ -48,8 +48,6 @@ import { exitSolScanSeed } from "./sol-scan.ts";
 
 /** The release's compute limit (pool-withdraw.ts POOL_WITHDRAW_CU: the program's own tests send a release at 400,000). */
 export const SOL_EXIT_RELEASE_CU = 400_000;
-/** The fee wallet's path: m/44'/501'/0'/0', every step hardened (SLIP-10 ed25519 takes only hardened steps). */
-export const SOL_FEE_WALLET_PATH: readonly number[] = Object.freeze([44, 501, 0, 0].map((x) => x + 0x8000_0000));
 /** Between two reads of a sent transaction, and between two sends of the same bytes. */
 const TX_POLL_MS = 2_000;
 /** A part's wait for an epoch or newest root that holds its leaf: one epoch and 30 s (pool-withdraw.ts WITHDRAW_BOUNDARY_LAG_MS). */
@@ -129,11 +127,11 @@ export function b58decode(s: string, len: number): Uint8Array | null {
 const b64 = (b: Uint8Array): string => Buffer.from(b).toString("base64");
 const unb64 = (s: string): Uint8Array => new Uint8Array(Buffer.from(s, "base64"));
 
-/** The fee wallet F of seed64: its address, and its 32-byte secret (the caller zeroes it). */
+/** The fee wallet F of seed64, the words' first Solana account (the wallet's derive/keys.ts solFirstAccount, through the
+ *  kit's core): its address, and its 32-byte secret (the caller zeroes it). */
 export function solFeeWallet(seed64: Uint8Array): { address: string; secretKey: Uint8Array } {
-  const { key, chainCode } = slip10Ed25519(seed64, [...SOL_FEE_WALLET_PATH]);
-  chainCode.fill(0);
-  return { address: b58encode(ed25519.getPublicKey(key)), secretKey: key };
+  const { address, secretKey } = solFirstAccount(seed64);
+  return { address, secretKey };
 }
 
 // ---------- reads on both RPCs ----------

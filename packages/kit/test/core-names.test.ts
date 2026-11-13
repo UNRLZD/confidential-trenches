@@ -30,7 +30,7 @@ const VALUES = [
   "evmRestoreNotes", "EVM_CHAIN_IDS", "EVM_POOLS", "evmMemoryHold", "evmPoolContextOf", "evmPoolScopeOf", "evmRelayDataBytes", "evmTreeSync", "jOf",
   "evmExitGasAddress", "evmExitSignSend", "evmExitW", "evmExitWithdrawCalldata", "evmExitWithdrawSignature", "EvmExitRefused",
   // card exit-with-only-the-words: the Solana pool's exit (W, the fee wallet's key, the pool's bind, a release's context)
-  "freshWallet", "slip10Ed25519", "solanaPool", "solanaContextOf",
+  "freshWallet", "solFirstAccount", "solanaPool", "solanaContextOf",
 ];
 const TYPES = ["LaneWalk", "NoteRef", "NoteRestore", "RestoredNote", "RestoredSpend", "BuiltMove", "MoveOutReadFor", "MoveOutRpc", "OwnKey", "RegisterOutReadFor", "WithdrawOutReadFor", "SettleReadFor", "DeleteReadFor", "SolanaRestoredNote", "SolanaRestoredSpend", "EvmRestoredNote", "EvmRestoredSpend", "EvmPoolPin", "EvmRelayData", "EvmRpc", "EvmExitProof", "EvmExitSigner", "EvmExitTx", "SolanaFeeAnswer", "SolanaReleaseRequest"];
 
