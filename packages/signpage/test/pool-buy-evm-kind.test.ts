@@ -319,6 +319,27 @@ test("host (P3-7): the pending write refuses a W that already has a holding (ano
   assert.deepEqual(s.data.get(`meta/${EVM_POSITION_COSTS_KEY}`), { [W]: filled });
 });
 
+test("host: a new buy of a note whose earlier buy never landed replaces that buy's pending record (the note freed at the agreed block, its record waiting for the final one); any other pending holding still refuses it", async () => {
+  const buy = (nullifier: string, deadlineMs: string) => ({ nullifier, from: "100", deadlineMs, minOut: "1", value: "1000", feeCap: "1", feeRecipient: "0x" + "fe".repeat(20) });
+  const earlier = { ...HOLDING, buy: buy("77", "1000") };
+  const s = store({ [`meta/${EVM_POSITION_COSTS_KEY}`]: { [W]: earlier } });
+  const h = evmBuyHost("base", PIN, NO_RPCS, new Set(), page({ store: s.store }).p);
+  // the same note's buy at the same deadline (another tab's run of it), another note's, or an earlier deadline: refused
+  for (const b of [buy("77", "1000"), buy("78", "2000"), buy("77", "999"), buy("77", "x")]) {
+    await assert.rejects(h.record(W, { ...HOLDING, buy: b }), /already has a holding/, JSON.stringify(b));
+  }
+  // a filled holding is never replaced by a pending one
+  const t = store({ [`meta/${EVM_POSITION_COSTS_KEY}`]: { [W]: { ...earlier, state: "filled" } } });
+  await assert.rejects(evmBuyHost("base", PIN, NO_RPCS, new Set(), page({ store: t.store }).p).record(W, { ...HOLDING, buy: buy("77", "2000") }), /already has a holding/);
+  // the same note's next buy, at a later deadline: written over the ended one
+  const next = { ...HOLDING, buy: buy("77", "2000") };
+  await h.record(W, next);
+  assert.deepEqual(s.data.get(`meta/${EVM_POSITION_COSTS_KEY}`), { [W]: next });
+  // and the earlier run's own end at the final block removes nothing of it
+  await h.unrecord(W, 77n, 1000n);
+  assert.deepEqual(s.data.get(`meta/${EVM_POSITION_COSTS_KEY}`), { [W]: next });
+});
+
 test("host (P2-2): record writes the store only while it is open (the page's held), never opening it; the page's sign-out signal and sign-out count reach the run (m53)", async () => {
   let opens = 0;
   const s = store();

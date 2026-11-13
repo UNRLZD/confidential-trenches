@@ -982,6 +982,36 @@ test("P2-A: a refused sale signed again is that sale: another amount waits (fail
   assert.ok(s2!.minOut - s2!.fee >= BigInt(first.least), "a floor no lower than the first's");
 });
 
+test("a refused sale past its deadline at the quote's agreed block holds nothing: another amount is signed at once on the same Sell nonce and note, with its own floor, while the first's record waits for the final block", async () => {
+  let x!: World;
+  x = await world({
+    send: async (n, body) => {
+      if (n === 1) throw new EvmSendRefused(422, "fee_low");
+      const s = sellOf(body.data);
+      x.land(s.minOut - s.fee);
+      return "0x" + "aa".repeat(32);
+    },
+  });
+  x.h.keep = () => {};
+  x.h.following = new Set();
+  x.h.wait = () => new Promise((r) => setTimeout(r, 1));
+  // a sign out at the end stops the two sales' follows (their records wait for the final block, which never comes here)
+  const out = new AbortController();
+  x.h.signal = out.signal;
+  assert.deepEqual(await runEvmPoolSell(x.h, HALF), { stage: "refused", txs: [] });
+  const first = (await openOf(x))[0]!;
+  // the chain's newest agreed block past the first sale's deadline: SellDelegate refuses it from then on
+  tick((EVM_SELL_DEADLINE_S + 30) * 1000);
+  const a = await runEvmPoolSell(x.h, ASK);
+  assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
+  const [s1, s2] = x.posts.map((p) => sellOf(p.data));
+  assert.notEqual(s2!.amount, s1!.amount, "another amount");
+  assert.equal(s2!.nonce, s1!.nonce, "the same Sell nonce: at most one of the two lands");
+  assert.equal(s2!.precommitment, s1!.precommitment, "the same note");
+  assert.ok(BigInt(first.deadline) < s2!.deadline);
+  out.abort();
+});
+
 test("review F4: a refusal that comes past the tap's bound is told as a late stage", async () => {
   let x!: World;
   let n = 0;

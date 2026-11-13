@@ -539,6 +539,15 @@ export type EvmBuyPage = {
   carry?(chain: Chain): void;
 };
 
+/** Whether `was`, W's holding, is an earlier buy of the note `now` buys: pending, the same nullifier, an earlier
+ *  deadline. */
+const endedBefore = (was: unknown, now: EvmHolding): boolean => {
+  const b = (was as Partial<EvmHolding> | null)?.buy;
+  const n = (x: unknown) => (typeof x === "string" && /^\d{1,20}$/.test(x) ? BigInt(x) : null);
+  const [then, at] = [n(b?.deadlineMs), n(now.buy?.deadlineMs)];
+  return (was as Partial<EvmHolding>)?.state === "pending" && b?.nullifier === now.buy?.nullifier && b?.nullifier !== undefined && then !== null && at !== null && then < at;
+};
+
 /** A W that already has a holding: the pending write is refused, so nothing is sent (review P3-7). */
 export class EvmHoldingTaken extends Error {
   constructor() {
@@ -577,12 +586,16 @@ export function evmBuyHost(chain: Chain, pin: EvmPoolPin, rpcs: readonly [EvmRpc
     send: (body) => evmPoolSend(TRADE_HELPER, body, page.fetch),
     settle: page.settle,
     // the pending write, before anything leaves, refuses a W that already has a holding (another tab's run of the same
-    // note, whose token it would overwrite); an end's write completes this run's own
+    // note, whose token it would overwrite); an end's write completes this run's own. One holding is not in the way: an
+    // earlier buy of this same note (its nullifier) at an earlier deadline, still pending. The note was proved again, so
+    // the pool's round freed it (wallet src/pool/evm-settle.ts: both RPCs agree on a block past that deadline with no
+    // release of it, PrivacyPool.sol:241 refusing it from then on): that buy can never land, and its record, which waits
+    // for the final block to end (src/evm-send.ts evmReleaseRead), never holds the note's money that long
     record: async (w, holding) => {
       const store = await page.held();
       await store.update("meta", EVM_POSITION_COSTS_KEY, (v) => {
         const all = typeof v === "object" && v !== null ? (v as Record<string, unknown>) : {};
-        if (holding.state === "pending" && all[w] !== undefined) throw new EvmHoldingTaken();
+        if (holding.state === "pending" && all[w] !== undefined && !endedBefore(all[w], holding)) throw new EvmHoldingTaken();
         return { ...all, [w]: holding };
       });
     },

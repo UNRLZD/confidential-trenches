@@ -433,7 +433,7 @@ async function signPicked(h: EvmSellHost, ask: PoolAsk, w: EvmSellWallet, same: 
   // an open sale signed again is that sale: its amount, and a floor no lower than its record's (review P2-A); another
   // amount, or a price under that floor, waits for the open sale's end
   const r = leg.note.resume;
-  if (r !== undefined && (built.amount !== BigInt(r.amount) || built.minOut - built.feeCap < BigInt(r.least))) return no("failed");
+  if (r !== undefined && !openSaleEnded(r, q) && (built.amount !== BigInt(r.amount) || built.minOut - built.feeCap < BigInt(r.least))) return no("failed");
   const auth = checkEvmAuthorization(sellAsk, ctx, leg.authNonce, leg.authReads, h.testnet);
   const signature = signEvmSell(key, ctx, built);
   const authorization = signEvmAuthorization(key, ctx, auth);
@@ -441,6 +441,12 @@ async function signPicked(h: EvmSellHost, ask: PoolAsk, w: EvmSellWallet, same: 
   const data = evmSellCalldata(built, built.feeCap, signature);
   return { s: { q, built, data, authorization, sig: Array.from(signature, (b) => b.toString(16).padStart(2, "0")).join("") }, leg: { ...leg, q } };
 }
+
+/** Whether an open sale can never land: the quote's block, the one both RPCs agree on, is past its deadline
+ *  (SellDelegate.sol:146 refuses a block past it, and no later block's time is lower). Its record still waits for the
+ *  final block to end (src/evm-send.ts evmDepositedRead), but W's token is the user's to sell again at once, any amount,
+ *  on the same Sell nonce and note: at most one sale of that nonce ever lands. */
+const openSaleEnded = (o: EvmOpenSell, q: EvmPoolSellQuote): boolean => /^\d{1,20}$/.test(o.deadline) && q.block.timestamp > BigInt(o.deadline);
 
 /** The read-back's state: each RPC's `stop`, and the round's want. */
 /** `mine`: the run's own Sell signatures (hex), each one it sent: a deposit whose transaction carries none of them is
@@ -497,9 +503,10 @@ async function sellLeg(h: EvmSellHost, ask: PoolAsk, w: EvmSellWallet, on: { sen
         precommitment: leg.note.precommitment.toString(),
         nonce: s.built.nonce.toString(),
         deadline: s.built.deadline.toString(),
-        // an open sale signed again keeps its first start and floor (signPicked holds the new one no lower)
+        // an open sale signed again keeps its first start and floor (signPicked holds the new one no lower); one past its
+        // deadline at the quote's agreed block can never land, so the new sale's floor is its own
         from: resume ? resume.from : (lo > EVM_SELL_LAG_BLOCKS ? lo - EVM_SELL_LAG_BLOCKS : 0n).toString(),
-        least: resume ? resume.least : least.toString(),
+        least: resume && !openSaleEnded(resume, s.q) ? resume.least : least.toString(),
       };
       if (h.following !== undefined && !h.following.has(note.id)) {
         h.following.add(note.id);
