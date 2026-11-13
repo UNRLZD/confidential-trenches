@@ -392,15 +392,23 @@ function stoppable(p: Promise<void>, signal?: AbortSignal): Promise<void> {
 //   (a paced queue's slot and a seat's failover that come after it included: each takes its signal when it runs),
 //   laneFetch refuses, and the page's own fetch (gatedFetch, installed by src/main.ts) refuses any request past the
 //   page's origin, whatever reader made it.
+/** A sign out's stop of every lane wait and of the gate: no step's failure, so a proof pass's line passes it through
+ *  untagged, as it does an abort (../pool/pool.ts failAs). */
+export class SignedOut extends Error {
+  constructor() {
+    super("signed out");
+    this.name = "SignedOut";
+  }
+}
 let laneStop = new AbortController();
 let gate = new AbortController();
 /** Ends every wait for a turn or a pause on every lane now (a sign out's tap), with `reason`; the gate stays as it is. */
-export function stopHostLaneWaits(reason: unknown = new Error("signed out")): void {
+export function stopHostLaneWaits(reason: unknown = new SignedOut()): void {
   laneStop.abort(reason);
   laneStop = gate.signal.aborted ? laneStop : new AbortController();
 }
 /** Closes the gate for this page's life (a sign out holding the seed lock), with `reason`; every wait ends too. */
-export function closeHostLanes(reason: unknown = new Error("signed out")): void {
+export function closeHostLanes(reason: unknown = new SignedOut()): void {
   if (!gate.signal.aborted) gate.abort(reason);
   stopHostLaneWaits(reason);
 }
