@@ -1,0 +1,349 @@
+{
+ "about": "good: this card's helper senders in process (record-local.mjs at the card's commit 04045265f17c625843dc6720ea29de6891d9ad5a); bad_before_card: the same at 87b6244ef08f139363960fdfea2794827b0c2862 (the check and record-local copied in), whose helper refuses every lone round on its shape",
+ "good": [
+  {
+   "cluster": "mainnet",
+   "program": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+   "pool": "7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8",
+   "reads": [
+    {
+     "asked": "fee",
+     "readAt": "2026-11-13T19:24:44.506Z",
+     "status": 200,
+     "headers": {
+      "content-type": "application/json",
+      "x-helper-commit": "04045265f17c625843dc6720ea29de6891d9ad5a"
+     },
+     "body": "{\"chain\":\"solana\",\"cluster\":\"mainnet\",\"program\":\"EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF\",\"pool\":\"7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8\",\"fee_payer\":\"EVbMkowetjQheydcvRB5DEL3mE4YraYr8bhxEv86c23s\",\"epoch_ms\":60000,\"epoch_start_ms\":1794597840000,\"fee\":\"1300000\",\"step\":\"100000\"}"
+    },
+    {
+     "asked": "round",
+     "readAt": "2026-11-13T19:24:44.523Z",
+     "status": 422,
+     "headers": {
+      "content-type": "application/json",
+      "x-helper-commit": "04045265f17c625843dc6720ea29de6891d9ad5a"
+     },
+     "body": "{\"error\":{\"code\":\"blockhash_not_found\"}}"
+    },
+    {
+     "asked": "round_one",
+     "readAt": "2026-11-13T19:24:44.524Z",
+     "status": 422,
+     "headers": {
+      "content-type": "application/json",
+      "x-helper-commit": "04045265f17c625843dc6720ea29de6891d9ad5a"
+     },
+     "body": "{\"error\":{\"code\":\"blockhash_not_found\"}}"
+    },
+    {
+     "asked": "two_wallets",
+     "readAt": "2026-11-13T19:24:44.526Z",
+     "status": 422,
+     "headers": {
+      "content-type": "application/json",
+      "x-helper-commit": "04045265f17c625843dc6720ea29de6891d9ad5a"
+     },
+     "body": "{\"error\":{\"code\":\"wallets_differ\"}}"
+    },
+    {
+     "asked": "nullifier_twice",
+     "readAt": "2026-11-13T19:24:44.528Z",
+     "status": 400,
+     "headers": {
+      "content-type": "application/json",
+      "x-helper-commit": "04045265f17c625843dc6720ea29de6891d9ad5a"
+     },
+     "body": "{\"error\":{\"code\":\"bad_shape\",\"detail\":\"a nullifier twice\"}}"
+    }
+   ]
+  },
+  {
+   "cluster": "devnet",
+   "program": "5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ",
+   "pool": "2S5wpE7U7GoJRVqox1dXmTQm38SmseG8A4F9eReWwYwr",
+   "reads": [
+    {
+     "asked": "fee",
+     "readAt": "2026-11-13T19:24:44.528Z",
+     "status": 200,
+     "headers": {
+      "content-type": "application/json",
+      "x-helper-commit": "04045265f17c625843dc6720ea29de6891d9ad5a"
+     },
+     "body": "{\"chain\":\"solana\",\"cluster\":\"devnet\",\"program\":\"5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ\",\"pool\":\"2S5wpE7U7GoJRVqox1dXmTQm38SmseG8A4F9eReWwYwr\",\"fee_payer\":\"EVbMkowetjQheydcvRB5DEL3mE4YraYr8bhxEv86c23s\",\"epoch_ms\":60000,\"epoch_start_ms\":1794597840000,\"fee\":\"1300000\",\"step\":\"100000\"}"
+    },
+    {
+     "asked": "round",
+     "readAt": "2026-11-13T19:24:44.536Z",
+     "status": 422,
+     "headers": {
+      "content-type": "application/json",
+      "x-helper-commit": "04045265f17c625843dc6720ea29de6891d9ad5a"
+     },
+     "body": "{\"error\":{\"code\":\"blockhash_not_found\"}}"
+    },
+    {
+     "asked": "round_one",
+     "readAt": "2026-11-13T19:24:44.537Z",
+     "status": 422,
+     "headers": {
+      "content-type": "application/json",
+      "x-helper-commit": "04045265f17c625843dc6720ea29de6891d9ad5a"
+     },
+     "body": "{\"error\":{\"code\":\"blockhash_not_found\"}}"
+    },
+    {
+     "asked": "two_wallets",
+     "readAt": "2026-11-13T19:24:44.539Z",
+     "status": 422,
+     "headers": {
+      "content-type": "application/json",
+      "x-helper-commit": "04045265f17c625843dc6720ea29de6891d9ad5a"
+     },
+     "body": "{\"error\":{\"code\":\"wallets_differ\"}}"
+    },
+    {
+     "asked": "nullifier_twice",
+     "readAt": "2026-11-13T19:24:44.541Z",
+     "status": 400,
+     "headers": {
+      "content-type": "application/json",
+      "x-helper-commit": "04045265f17c625843dc6720ea29de6891d9ad5a"
+     },
+     "body": "{\"error\":{\"code\":\"bad_shape\",\"detail\":\"a nullifier twice\"}}"
+    }
+   ]
+  },
+  {
+   "cluster": "devnet",
+   "program": "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8",
+   "pool": "92YuYhb4Cj2UM3JxFAWB2kyHcdaPkWCnoNkoUAZZK2cr",
+   "reads": [
+    {
+     "asked": "fee",
+     "readAt": "2026-11-13T19:24:44.541Z",
+     "status": 200,
+     "headers": {
+      "content-type": "application/json",
+      "x-helper-commit": "04045265f17c625843dc6720ea29de6891d9ad5a"
+     },
+     "body": "{\"chain\":\"solana\",\"cluster\":\"devnet\",\"program\":\"9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8\",\"pool\":\"92YuYhb4Cj2UM3JxFAWB2kyHcdaPkWCnoNkoUAZZK2cr\",\"fee_payer\":\"EVbMkowetjQheydcvRB5DEL3mE4YraYr8bhxEv86c23s\",\"epoch_ms\":60000,\"epoch_start_ms\":1794597840000,\"fee\":\"1300000\",\"step\":\"100000\"}"
+    },
+    {
+     "asked": "round",
+     "readAt": "2026-11-13T19:24:44.549Z",
+     "status": 422,
+     "headers": {
+      "content-type": "application/json",
+      "x-helper-commit": "04045265f17c625843dc6720ea29de6891d9ad5a"
+     },
+     "body": "{\"error\":{\"code\":\"blockhash_not_found\"}}"
+    },
+    {
+     "asked": "round_one",
+     "readAt": "2026-11-13T19:24:44.550Z",
+     "status": 422,
+     "headers": {
+      "content-type": "application/json",
+      "x-helper-commit": "04045265f17c625843dc6720ea29de6891d9ad5a"
+     },
+     "body": "{\"error\":{\"code\":\"blockhash_not_found\"}}"
+    },
+    {
+     "asked": "two_wallets",
+     "readAt": "2026-11-13T19:24:44.552Z",
+     "status": 422,
+     "headers": {
+      "content-type": "application/json",
+      "x-helper-commit": "04045265f17c625843dc6720ea29de6891d9ad5a"
+     },
+     "body": "{\"error\":{\"code\":\"wallets_differ\"}}"
+    },
+    {
+     "asked": "nullifier_twice",
+     "readAt": "2026-11-13T19:24:44.553Z",
+     "status": 400,
+     "headers": {
+      "content-type": "application/json",
+      "x-helper-commit": "04045265f17c625843dc6720ea29de6891d9ad5a"
+     },
+     "body": "{\"error\":{\"code\":\"bad_shape\",\"detail\":\"a nullifier twice\"}}"
+    }
+   ]
+  }
+ ],
+ "bad_before_card": [
+  {
+   "cluster": "mainnet",
+   "program": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+   "pool": "7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8",
+   "reads": [
+    {
+     "asked": "fee",
+     "readAt": "2026-11-13T19:24:05.079Z",
+     "status": 200,
+     "headers": {
+      "content-type": "application/json",
+      "x-helper-commit": "87b6244ef08f139363960fdfea2794827b0c2862"
+     },
+     "body": "{\"chain\":\"solana\",\"cluster\":\"mainnet\",\"program\":\"EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF\",\"pool\":\"7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8\",\"fee_payer\":\"912TPDo95qzFvb2vW6kbGShGd4HxPvzYrZ46bXzatn7S\",\"epoch_ms\":60000,\"epoch_start_ms\":1794597840000,\"fee\":\"1300000\",\"step\":\"100000\"}"
+    },
+    {
+     "asked": "round",
+     "readAt": "2026-11-13T19:24:05.095Z",
+     "status": 400,
+     "headers": {
+      "content-type": "application/json",
+      "x-helper-commit": "87b6244ef08f139363960fdfea2794827b0c2862"
+     },
+     "body": "{\"error\":{\"code\":\"bad_shape\",\"detail\":\"every transaction a tag 2 but the last, a tag 3\"}}"
+    },
+    {
+     "asked": "round_one",
+     "readAt": "2026-11-13T19:24:05.095Z",
+     "status": 400,
+     "headers": {
+      "content-type": "application/json",
+      "x-helper-commit": "87b6244ef08f139363960fdfea2794827b0c2862"
+     },
+     "body": "{\"error\":{\"code\":\"bad_shape\",\"detail\":\"not 2 to 4 transactions\"}}"
+    },
+    {
+     "asked": "two_wallets",
+     "readAt": "2026-11-13T19:24:05.097Z",
+     "status": 400,
+     "headers": {
+      "content-type": "application/json",
+      "x-helper-commit": "87b6244ef08f139363960fdfea2794827b0c2862"
+     },
+     "body": "{\"error\":{\"code\":\"bad_shape\",\"detail\":\"every transaction a tag 2 but the last, a tag 3\"}}"
+    },
+    {
+     "asked": "nullifier_twice",
+     "readAt": "2026-11-13T19:24:05.099Z",
+     "status": 400,
+     "headers": {
+      "content-type": "application/json",
+      "x-helper-commit": "87b6244ef08f139363960fdfea2794827b0c2862"
+     },
+     "body": "{\"error\":{\"code\":\"bad_shape\",\"detail\":\"every transaction a tag 2 but the last, a tag 3\"}}"
+    }
+   ]
+  },
+  {
+   "cluster": "devnet",
+   "program": "5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ",
+   "pool": "2S5wpE7U7GoJRVqox1dXmTQm38SmseG8A4F9eReWwYwr",
+   "reads": [
+    {
+     "asked": "fee",
+     "readAt": "2026-11-13T19:24:05.099Z",
+     "status": 200,
+     "headers": {
+      "content-type": "application/json",
+      "x-helper-commit": "87b6244ef08f139363960fdfea2794827b0c2862"
+     },
+     "body": "{\"chain\":\"solana\",\"cluster\":\"devnet\",\"program\":\"5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ\",\"pool\":\"2S5wpE7U7GoJRVqox1dXmTQm38SmseG8A4F9eReWwYwr\",\"fee_payer\":\"912TPDo95qzFvb2vW6kbGShGd4HxPvzYrZ46bXzatn7S\",\"epoch_ms\":60000,\"epoch_start_ms\":1794597840000,\"fee\":\"1300000\",\"step\":\"100000\"}"
+    },
+    {
+     "asked": "round",
+     "readAt": "2026-11-13T19:24:05.107Z",
+     "status": 400,
+     "headers": {
+      "content-type": "application/json",
+      "x-helper-commit": "87b6244ef08f139363960fdfea2794827b0c2862"
+     },
+     "body": "{\"error\":{\"code\":\"bad_shape\",\"detail\":\"every transaction a tag 2 but the last, a tag 3\"}}"
+    },
+    {
+     "asked": "round_one",
+     "readAt": "2026-11-13T19:24:05.107Z",
+     "status": 400,
+     "headers": {
+      "content-type": "application/json",
+      "x-helper-commit": "87b6244ef08f139363960fdfea2794827b0c2862"
+     },
+     "body": "{\"error\":{\"code\":\"bad_shape\",\"detail\":\"not 2 to 4 transactions\"}}"
+    },
+    {
+     "asked": "two_wallets",
+     "readAt": "2026-11-13T19:24:05.110Z",
+     "status": 400,
+     "headers": {
+      "content-type": "application/json",
+      "x-helper-commit": "87b6244ef08f139363960fdfea2794827b0c2862"
+     },
+     "body": "{\"error\":{\"code\":\"bad_shape\",\"detail\":\"every transaction a tag 2 but the last, a tag 3\"}}"
+    },
+    {
+     "asked": "nullifier_twice",
+     "readAt": "2026-11-13T19:24:05.111Z",
+     "status": 400,
+     "headers": {
+      "content-type": "application/json",
+      "x-helper-commit": "87b6244ef08f139363960fdfea2794827b0c2862"
+     },
+     "body": "{\"error\":{\"code\":\"bad_shape\",\"detail\":\"every transaction a tag 2 but the last, a tag 3\"}}"
+    }
+   ]
+  },
+  {
+   "cluster": "devnet",
+   "program": "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8",
+   "pool": "92YuYhb4Cj2UM3JxFAWB2kyHcdaPkWCnoNkoUAZZK2cr",
+   "reads": [
+    {
+     "asked": "fee",
+     "readAt": "2026-11-13T19:24:05.111Z",
+     "status": 200,
+     "headers": {
+      "content-type": "application/json",
+      "x-helper-commit": "87b6244ef08f139363960fdfea2794827b0c2862"
+     },
+     "body": "{\"chain\":\"solana\",\"cluster\":\"devnet\",\"program\":\"9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8\",\"pool\":\"92YuYhb4Cj2UM3JxFAWB2kyHcdaPkWCnoNkoUAZZK2cr\",\"fee_payer\":\"912TPDo95qzFvb2vW6kbGShGd4HxPvzYrZ46bXzatn7S\",\"epoch_ms\":60000,\"epoch_start_ms\":1794597840000,\"fee\":\"1300000\",\"step\":\"100000\"}"
+    },
+    {
+     "asked": "round",
+     "readAt": "2026-11-13T19:24:05.119Z",
+     "status": 400,
+     "headers": {
+      "content-type": "application/json",
+      "x-helper-commit": "87b6244ef08f139363960fdfea2794827b0c2862"
+     },
+     "body": "{\"error\":{\"code\":\"bad_shape\",\"detail\":\"every transaction a tag 2 but the last, a tag 3\"}}"
+    },
+    {
+     "asked": "round_one",
+     "readAt": "2026-11-13T19:24:05.119Z",
+     "status": 400,
+     "headers": {
+      "content-type": "application/json",
+      "x-helper-commit": "87b6244ef08f139363960fdfea2794827b0c2862"
+     },
+     "body": "{\"error\":{\"code\":\"bad_shape\",\"detail\":\"not 2 to 4 transactions\"}}"
+    },
+    {
+     "asked": "two_wallets",
+     "readAt": "2026-11-13T19:24:05.121Z",
+     "status": 400,
+     "headers": {
+      "content-type": "application/json",
+      "x-helper-commit": "87b6244ef08f139363960fdfea2794827b0c2862"
+     },
+     "body": "{\"error\":{\"code\":\"bad_shape\",\"detail\":\"every transaction a tag 2 but the last, a tag 3\"}}"
+    },
+    {
+     "asked": "nullifier_twice",
+     "readAt": "2026-11-13T19:24:05.123Z",
+     "status": 400,
+     "headers": {
+      "content-type": "application/json",
+      "x-helper-commit": "87b6244ef08f139363960fdfea2794827b0c2862"
+     },
+     "body": "{\"error\":{\"code\":\"bad_shape\",\"detail\":\"every transaction a tag 2 but the last, a tag 3\"}}"
+    }
+   ]
+  }
+ ]
+}
