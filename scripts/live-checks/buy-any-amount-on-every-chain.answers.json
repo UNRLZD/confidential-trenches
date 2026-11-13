@@ -1,0 +1,16 @@
+{
+ "good": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-QICvQW/Pnf21KN1YS/KdvtUaPhoWVUZ2er9siZKw+UFMsWUegczvlQLECL1eHecO\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-QICvQW/Pnf21KN1YS/KdvtUaPhoWVUZ2er9siZKw+UFMsWUegczvlQLECL1eHecO",
+  "evm_max": true,
+  "evm_rest": true,
+  "sol_max": true
+ },
+ "bad": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-N94bSrg2/Y73SjFl2fSvgA9chUzJY3tJrKsN4iLid2iF3idcXsRgb3U47IyY3gVp\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-N94bSrg2/Y73SjFl2fSvgA9chUzJY3tJrKsN4iLid2iF3idcXsRgb3U47IyY3gVp",
+  "evm_max": false,
+  "evm_rest": false,
+  "sol_max": false
+ }
+}
