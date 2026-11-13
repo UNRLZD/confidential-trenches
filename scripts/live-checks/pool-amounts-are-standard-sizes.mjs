@@ -14,11 +14,12 @@
 // Runs: pending pool-amounts-are-standard-sizes, it needs --from, the time this card's build went live on SIGN_HOST: the
 // release that ships it adds `// After: sign --from <that time>` here, so no run before it reads the old build's sizes
 //   node scripts/live-checks/pool-amounts-are-standard-sizes.mjs --from <ISO time of the fix's first transaction> [--record <file>] [--answer <file>]
-//     PASS exit 0, FAIL exit 1, error exit 2
+//     PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3 (an RPC that gives no answer after its retries)
 import "../net-window.mjs";
 import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { CHAIN_PAIR } from "./signpage-pool-pins.mjs";
+import { EXIT, rpcAnswer } from "./provider-answer.mjs";
 
 const KEY = "pool-amounts-are-standard-sizes";
 /** The mainnet Solana pool (packages/wallet/src/pool/solana.ts SOL_POOLS.mainnet's pool account). */
@@ -85,19 +86,19 @@ export function judge(rec) {
 }
 
 // ------------------------------------------------------------------------------------------------ the reads
+// each read through provider-answer.mjs rpcAnswer: a no-answer (no HTTP answer, a 429, a 5xx, a rate limit) is read
+// again with a growing pause, and after the last one the run is INCONCLUSIVE (exit 3), never FAIL or PASS
+class NoAnswer extends Error {}
 const callOn = (url) => async (method, params) => {
+  let a;
   for (let i = 0; i < 8; i++) {
-    const r = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) });
-    if (r.status === 429 || r.status >= 500) {
-      await new Promise((s) => setTimeout(s, 1_000 * 2 ** Math.min(i, 4)));
-      continue;
-    }
-    if (r.status !== 200) throw new Error(`${new URL(url).host}: HTTP ${r.status}`);
-    const j = await r.json();
-    if (j.error) throw new Error(`${new URL(url).host}: ${JSON.stringify(j.error).slice(0, 160)}`);
-    return j.result;
+    a = await rpcAnswer(url, method, params);
+    if (a.noAnswer === undefined) break;
+    await new Promise((s) => setTimeout(s, 1_000 * 2 ** Math.min(i, 4)));
   }
-  throw new Error(`${new URL(url).host}: throttled`);
+  if (a.noAnswer !== undefined) throw new NoAnswer(a.noAnswer);
+  if (a.error !== undefined) throw new Error(`${new URL(url).host}: ${JSON.stringify(a.error).slice(0, 160)}`);
+  return a.result;
 };
 
 /** The pool's successful finalized transactions on one RPC, oldest first: signature, block time, the pool's change. */
@@ -140,7 +141,11 @@ if (realpathSync(process.argv[1] ?? "") === realpathSync(fileURLToPath(import.me
     console.log(v.ok ? `PASS ${KEY}` : `FAIL ${KEY}`);
     process.exit(v.ok ? 0 : 1);
   } catch (e) {
+    if (e instanceof NoAnswer) {
+      console.error(`INCONCLUSIVE ${KEY}: ${e.message}`);
+      process.exit(EXIT.INCONCLUSIVE);
+    }
     console.error(`ERROR ${KEY}: ${e?.message ?? e}`);
-    process.exit(2);
+    process.exit(EXIT.ERROR);
   }
 }
