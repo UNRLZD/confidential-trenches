@@ -155,18 +155,43 @@ test("a request value is replaced: whole, by its start when long, and where the 
   assert.equal(safeMessage(m, [spaced]), "refund to <request field>");
 });
 
-// Review P1: a long message is cut before any pass over it, and each pass is linear, so no vendor answer (ANSWER_MAX)
-// and no request (PROXY_BODY_MAX) holds the helper's event loop.
-test("a hostile message of 64 KB or ANSWER_MAX is made safe in under 100 ms", () => {
-  for (const m of ["a.".repeat(32_000), "x-".repeat(32_000), "a.".repeat(ANSWER_MAX / 2), "9".repeat(ANSWER_MAX), "abc…".repeat(16_000)]) {
-    const t0 = performance.now();
-    safeMessage(m, []);
-    const ms = performance.now() - t0;
-    assert.ok(ms < 100, `${Math.round(ms)} ms on ${m.length} characters`);
+// Review P1: a long message is cut before any pass over it, so no vendor answer (ANSWER_MAX) and no request
+// (PROXY_BODY_MAX) holds the helper's event loop. The bound is counted, never timed (scripts/ci/no-wall-clock-asserts.mjs):
+// the longest string any regex or String search ran over while the work ran.
+const SEARCHES: readonly [object, PropertyKey, "this" | 0][] = [
+  [String.prototype, "replace", "this"], [String.prototype, "replaceAll", "this"], [String.prototype, "split", "this"],
+  [String.prototype, "indexOf", "this"], [String.prototype, "match", "this"], [String.prototype, "matchAll", "this"],
+  [RegExp.prototype, "exec", 0], [RegExp.prototype, "test", 0], [RegExp.prototype, Symbol.replace, 0], [RegExp.prototype, Symbol.split, 0],
+];
+async function longestSearched(work: () => unknown): Promise<number> {
+  let most = 0;
+  const undo = SEARCHES.map(([o, k, arg]) => {
+    const r = o as Record<PropertyKey, (...a: unknown[]) => unknown>;
+    const orig = r[k]!;
+    r[k] = function (this: unknown, ...a: unknown[]) {
+      const s = arg === "this" ? this : a[0];
+      if (typeof s === "string" && s.length > most) most = s.length;
+      return orig.apply(this, a);
+    };
+    return () => void (r[k] = orig);
+  });
+  try {
+    await work();
+  } finally {
+    for (const u of undo) u();
   }
-});
+  return most;
+}
 
-test("a vendor that echoes the caller's dotted property name holds handle() under 100 ms, and the name is not logged (cut at the last whole word)", async () => {
+for (const [name, m] of [["64 KB of a.", "a.".repeat(32_000)], ["64 KB of x-", "x-".repeat(32_000)], ["64 KB of abc…", "abc…".repeat(16_000)], ["ANSWER_MAX of a.", "a.".repeat(ANSWER_MAX / 2)], ["ANSWER_MAX of 9", "9".repeat(ANSWER_MAX)]] as const)
+  test(`a hostile message (${name}) is searched no further than VENDOR_MESSAGE_READ`, async () => {
+    let out = "";
+    assert.ok((await longestSearched(() => (out = safeMessage(m, [])))) <= VENDOR_MESSAGE_READ, name);
+    // one word past the read, with no whole word inside it: nothing of it is kept
+    assert.equal(out, "");
+  });
+
+test("a vendor that echoes the caller's dotted property name has handle() search no further than VENDOR_MESSAGE_READ, and the name is not logged (cut at the last whole word)", async () => {
   const key = "a.".repeat(30_000);
   const body = JSON.stringify({ ...JSON.parse(QUOTE), [key]: 1 });
   const lines: string[] = [];
@@ -176,10 +201,8 @@ test("a vendor that echoes the caller's dotted property name holds handle() unde
     sleep: async () => {},
     foldWait: () => new Promise<void>(() => {}),
   });
-  const t0 = performance.now();
-  await p.handle("oneclick", "/v0/quote", "", body, "203.0.113.7");
-  const ms = performance.now() - t0;
-  assert.ok(ms < 100, `a ${body.length} B request held handle() ${Math.round(ms)} ms`);
+  const most = await longestSearched(() => p.handle("oneclick", "/v0/quote", "", body, "203.0.113.7"));
+  assert.ok(most <= VENDOR_MESSAGE_READ, `a ${body.length} B request: a search over ${most} characters`);
   assert.deepEqual(lines, ['proxy oneclick /v0/quote answered 400, the vendor\'s: 400 "property "']);
 });
 
