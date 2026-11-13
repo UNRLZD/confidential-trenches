@@ -4,7 +4,7 @@
 // on every path.
 //
 // - G, the exit's gas wallet: the words' first EVM account, m/44'/60'/0'/0/0, the one every EVM wallet opens on (no W
-//   shares it: W's paths are four hardened steps, ./../derive/keys.ts walletPath). G signs only a call of the pool's
+//   shares it: W's paths are four hardened steps, ../derive/keys.ts walletPath). G signs only a call of the pool's
 //   withdraw (value 0, the calldata evmExitWithdrawCalldata makes); it pays the release's gas.
 // - W_{evm, l, j}, a note's fresh wallet: it signs the pool's EIP-712 Withdraw of its own note (PrivacyPool.sol:
 //   WITHDRAW_TYPEHASH, the Blindfill domain at version 1, the chain and the pool), which makes it the release's
@@ -13,12 +13,11 @@
 //   data, [], yParity, r, s]), s low.
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
-import { HDKey } from "@scure/bip32";
-import { evmAddress, freshWallet } from "../derive/keys.ts";
+import { EVM_FIRST_ACCOUNT_PATH, evmAddress, evmFirstAccount, freshWallet } from "../derive/keys.ts";
 import { evmRelayDataBytes, type EvmRelayData } from "./evm.ts";
 
-/** G's path: BIP-44 coin 60, account 0, external chain, index 0. */
-export const EVM_EXIT_GAS_PATH = "m/44'/60'/0'/0/0";
+/** G's path: BIP-44 coin 60, account 0, external chain, index 0 (derive/keys.ts evmFirstAccount). */
+export const EVM_EXIT_GAS_PATH = EVM_FIRST_ACCOUNT_PATH;
 
 export class EvmExitRefused extends Error {
   constructor(why: string) {
@@ -56,16 +55,7 @@ const addr = (a: string, what: string): string => (/^0x[0-9a-fA-F]{40}$/.test(a)
 // ---------- keys ----------
 
 /** G's key from seed64; the caller zeroes it. Never leaves this file. */
-function gasKey(seed64: Uint8Array): Uint8Array {
-  const root = HDKey.fromMasterSeed(seed64);
-  const node = root.derive(EVM_EXIT_GAS_PATH);
-  root.wipePrivateData();
-  const k = node.privateKey;
-  if (!k) return refuse("G: no key at its path");
-  const out = Uint8Array.from(k);
-  node.wipePrivateData();
-  return out;
-}
+const gasKey = (seed64: Uint8Array): Uint8Array => evmFirstAccount(seed64).secretKey;
 const addressOf = (key: Uint8Array): string => evmAddress(secp256k1.getPublicKey(key, true)).toLowerCase();
 
 /** G's address (lowercase): the words' first EVM account. */
@@ -76,6 +66,13 @@ export function evmExitGasAddress(seed64: Uint8Array): string {
   } finally {
     k.fill(0);
   }
+}
+
+/** W_{evm, l, j}'s address (lowercase), its key zeroed at once. */
+export function evmExitW(seed64: Uint8Array, l: bigint, j: number): string {
+  const w = freshWallet(seed64, "evm", l, j);
+  w.secretKey.fill(0);
+  return w.address.toLowerCase();
 }
 
 // ---------- the pool's withdraw ----------

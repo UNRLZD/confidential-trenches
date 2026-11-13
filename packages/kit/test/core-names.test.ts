@@ -27,8 +27,8 @@ const VALUES = [
   // card exit-pool-notes: the Solana pool's restore (its listed read included), its pool and scope, its two-RPC check
   "solanaRestoreNotes", "solanaPoolOf", "checkSolanaRpcs",
   // card exit-evm-pools-with-the-words: the Base and Robinhood pools' restore, pins, trees, context and the note's W
-  "evmRestoreNotes", "EVM_CHAIN_IDS", "EVM_POOLS", "evmMemoryHold", "evmPoolContextOf", "evmPoolScopeOf", "evmRelayDataBytes", "evmTreeSync", "freshWallet", "jOf",
-  "evmExitGasAddress", "evmExitSignSend", "evmExitWithdrawCalldata", "evmExitWithdrawSignature", "EvmExitRefused",
+  "evmRestoreNotes", "EVM_CHAIN_IDS", "EVM_POOLS", "evmMemoryHold", "evmPoolContextOf", "evmPoolScopeOf", "evmRelayDataBytes", "evmTreeSync", "jOf",
+  "evmExitGasAddress", "evmExitSignSend", "evmExitW", "evmExitWithdrawCalldata", "evmExitWithdrawSignature", "EvmExitRefused",
 ];
 const TYPES = ["LaneWalk", "NoteRef", "NoteRestore", "RestoredNote", "RestoredSpend", "BuiltMove", "MoveOutReadFor", "MoveOutRpc", "OwnKey", "RegisterOutReadFor", "WithdrawOutReadFor", "SettleReadFor", "DeleteReadFor", "SolanaRestoredNote", "SolanaRestoredSpend", "EvmRestoredNote", "EvmRestoredSpend", "EvmPoolPin", "EvmRelayData", "EvmRpc", "EvmExitProof", "EvmExitSigner", "EvmExitTx"];
 

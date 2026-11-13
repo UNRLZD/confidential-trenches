@@ -27,6 +27,7 @@ import {
   EVM_POOLS,
   evmExitGasAddress,
   evmExitSignSend,
+  evmExitW,
   evmExitWithdrawCalldata,
   evmExitWithdrawSignature,
   evmMemoryHold,
@@ -34,7 +35,6 @@ import {
   evmPoolScopeOf,
   evmRestoreNotes,
   evmTreeSync,
-  freshWallet,
   jOf,
   noteSecrets,
   type EvmPoolPin,
@@ -151,9 +151,7 @@ async function land(rpcs: readonly [EvmRpc, EvmRpc], raw: Uint8Array, hash: stri
 
 /** W_{evm, l, j}'s whole balance less its gas, to `to`: null when W holds less than its gas. */
 async function sweep(rpcs: readonly [EvmRpc, EvmRpc], chain: Chain, chainId: bigint, seed: Uint8Array, l: bigint, j: number, to: string, wait: (ms: number) => Promise<void>): Promise<{ hash: string; value: bigint } | null> {
-  const fresh = freshWallet(seed, "evm", l, j);
-  fresh.secretKey.fill(0);
-  const w = lower(fresh.address);
+  const w = evmExitW(seed, l, j);
   const b = await newest(rpcs);
   const tag = qty(b.number);
   const bal = await balanceOf(rpcs, w, tag);
@@ -232,14 +230,13 @@ export async function exitEvm(chain: Chain, ctx: ExitCtx, opts: ExitEvmOpts = {}
     const spent = noteSecrets(ctx.seed, n.ref);
     const change = noteSecrets(ctx.seed, { kind: "change", l, j });
     const refund = noteSecrets(ctx.seed, { kind: "refund", l, j }).precommitment;
-    const fresh = freshWallet(ctx.seed, "evm", l, j);
-    fresh.secretKey.fill(0);
+    const w = evmExitW(ctx.seed, l, j);
     // the newest roots both RPCs agree on, and a deadline from that block's time
     const nowMs = await sync.now();
     const trees = await sync.trees(nowMs + 1n, undefined, { newest: true });
     if (n.leaf.leafIndex >= BigInt(trees.stateTree.size)) refuse(`note at leaf ${n.leaf.leafIndex}: not under the newest root yet, run again`);
     const salt = hexOf(crypto.getRandomValues(new Uint8Array(16)));
-    const relay: EvmRelayData = { recipient: fresh.address, feeRecipient: pin.feeRecipient, feeCap: 0n, deadlineMs: nowMs + EXIT_EVM_DEADLINE_MS, refundPrecommitment: refund, salt };
+    const relay: EvmRelayData = { recipient: w, feeRecipient: pin.feeRecipient, feeCap: 0n, deadlineMs: nowMs + EXIT_EVM_DEADLINE_MS, refundPrecommitment: refund, salt };
     const context = evmPoolContextOf({ processooor: lower(pin.pool), relay }, scope);
     ctx.say(`${name}: proving the withdrawal of ${exitEth(n.leaf.value)}`);
     const made = await poolProveWithdraw(prover, {
@@ -267,7 +264,7 @@ export async function exitEvm(chain: Chain, ctx: ExitCtx, opts: ExitEvmOpts = {}
     txs.push(tx.hash);
     if (end !== "ok") refuse(`the release ${tx.hash} reverted on both RPCs`);
     left -= n.leaf.value;
-    ctx.say(`${name}: released ${exitEth(n.leaf.value)} to its one-time wallet ${fresh.address} (${tx.hash})`);
+    ctx.say(`${name}: released ${exitEth(n.leaf.value)} to its one-time wallet ${w} (${tx.hash})`);
     await sweepW(l, j);
   }
   return { chain, txs, sent: sent.toString(), left: left.toString() };
