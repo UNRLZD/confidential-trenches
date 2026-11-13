@@ -21,9 +21,9 @@ import type { Holdings, HoldingsReader } from "../../wallet/src/pool/buy-wallets
 import { solanaPoolOf } from "../../wallet/src/pool/solana.ts";
 import { freshWallet } from "../../wallet/src/derive/keys.ts";
 import { jOf } from "../../wallet/src/pool/queue.ts";
-import { keptPositions, passMemo, POSITION_COSTS_KEY, positionCost, POSITIONS_KEPT_KEY, POSITIONS_RETRIES, POSITIONS_SOLD_KEY, POSITIONS_SOLD_TX_KEY, POSITIONS_UNLANDED_KEY, positionsCache, positionsPass, recordBoughtOut, recordPoolBuy, usdOf, withPositions, type KeptPass, type PassMemo, type PassResult, type FoundWallet, type PassRun, type Position, type PositionCosts, type PositionsReads } from "../src/positions.ts";
+import { keptPositions, passMemo, returningWallets, withReturning, POSITION_COSTS_KEY, positionCost, POSITIONS_KEPT_KEY, POSITIONS_RETRIES, POSITIONS_SOLD_KEY, POSITIONS_SOLD_TX_KEY, POSITIONS_UNLANDED_KEY, positionsCache, positionsPass, recordBoughtOut, recordPoolBuy, usdOf, withPositions, type KeptPass, type PassMemo, type PassResult, type FoundWallet, type PassRun, type Position, type PositionCosts, type PositionsReads } from "../src/positions.ts";
 import { stateFor } from "../src/kit-version.ts";
-import { testnetPool as makePool, testnetPoolDeps } from "../src/pool-testnet.ts";
+import { BACKS_LOAD_MAX_MS, testnetPool as makePool, testnetPoolDeps } from "../src/pool-testnet.ts";
 import { poolKinds, type PoolRpc } from "../src/pool-kinds.ts";
 import { tokenDecimalsShown } from "../src/rules/pool.ts";
 import { BUY_MINTS_KEY, buyMints } from "../src/pool-sell.ts";
@@ -1773,8 +1773,16 @@ test("P2-2 (the load route): the rent backs a load resumes take the Ws through t
   await until(async () => ((await tp.positions()) ?? []).length === 1);
   c.state.fail = true;
   const before = c.calls.finder;
-  await tp.stateRead();
-  await until(() => timers.length === 1);
+  // past the load's drawn start of the rent backs (src/pool-testnet.ts BACKS_LOAD_MAX_MS)
+  const realNow = Date.now;
+  const opened = realNow();
+  Date.now = () => opened + BACKS_LOAD_MAX_MS;
+  try {
+    await tp.stateRead();
+    await until(() => timers.length === 1);
+  } finally {
+    Date.now = realNow;
+  }
   assert.equal(c.calls.finder, before + 1, "the pass's read alone: the rent back read no W's holdings");
 });
 
@@ -2232,4 +2240,43 @@ test("card sell-right-after-a-buy: W's record at the read-back is the record a f
   await recordBoughtOut(other, { ...FACTS, out: "9" });
   await recordPoolBuy(other, "b1", FACTS, { result: { stage: "not_landed", txs: [] } });
   assert.ok(Object.hasOwn(other.meta.get(POSITION_COSTS_KEY) as object, W1));
+});
+
+// review 2 P3-e of c0dd55d02: a leftover W's sweep waits out the device's gap, its money on W meanwhile; the page lists
+// each W whose owed record carries its last pass's read as RETURNING at the pool's price, so the app's total counts it on
+// its way. A record with no read (unproven, faulted), nothing on W, or no price lists nothing
+test("round-trip-costs-less P3-e: returningWallets lists each owed W with a read as RETURNING at the pool's price; withReturning carries them, valid at kit 1.9 and 1.8", () => {
+  const owed = [
+    { address: W1, lamports: "2039280" },
+    { address: W2 },
+    { address: "CTsw3333333333333333333333333333333333333333", lamports: "0" },
+  ];
+  const ws = returningWallets(owed, PRICE, []);
+  assert.deepEqual(ws, [{ chain: "solana", address: W1, role: "fresh", size: "0.305892", state: "RETURNING" }]);
+  assert.deepEqual(returningWallets(owed, null, []), [], "no price: nothing guessed");
+  assert.deepEqual(returningWallets([{ address: W1, lamports: "x" }], PRICE, []), [], "a record that is no number");
+  const s = withReturning(SIGNED_IN, ws);
+  assert.deepEqual(s.wallets, ws);
+  assert.equal(SIGNPAGE_RESULT_SCHEMAS.state(s), true, "kit 1.9");
+  assert.equal(V1_8_SCHEMAS.state(stateFor("1.8", s)), true, "kit-v1.8's own schema");
+  assert.equal(withReturning(SIGNED_IN, []), SIGNED_IN);
+  const out = { ...SIGNED_IN, signed_in: false } as unknown as SignpageState;
+  assert.equal(withReturning(out, ws), out, "signed out: never");
+});
+
+// the delta review of P3-e, item 6: a sweep sent and not landed yet (its note INCOMING, counted by no balance until
+// UNSPENT, wallet/src/pool/balances.ts) left W listed nowhere. W's record keeps its read and the sweep's signature; the
+// page lists W while that note is PLANNED or INCOMING (or no note carries it) and never once it is counted, read from
+// the notes the balance counted
+test("round-trip-costs-less P3-e: a W whose sweep is sent stays RETURNING until the sweep's note is counted, never in both totals", () => {
+  const sig = "5".repeat(88);
+  const owed = [{ address: W1, lamports: "2039280", sweep: sig }];
+  const note = (state: string) => [{ id: "n1", state, sends: [{ signature: sig, value: 1n, last_valid_block_height: 1n }] }] as never;
+  const listed = [{ chain: "solana", address: W1, role: "fresh", size: "0.305892", state: "RETURNING" }];
+  assert.deepEqual(returningWallets(owed, PRICE, note("INCOMING")), listed, "sent, not landed");
+  assert.deepEqual(returningWallets(owed, PRICE, note("PLANNED")), listed, "dropped: back on W");
+  assert.deepEqual(returningWallets(owed, PRICE, []), listed, "no note carries it");
+  for (const st of ["UNSPENT", "HELD", "RESERVED", "SPENT", "TAKEN"]) assert.deepEqual(returningWallets(owed, PRICE, note(st)), [], `${st}: the pool's`);
+  assert.deepEqual(returningWallets(owed, PRICE, null), [], "no notes read: none, never twice");
+  assert.deepEqual(returningWallets([{ address: W1, lamports: "2039280" }], PRICE, null), listed, "no sweep sent: no notes needed");
 });

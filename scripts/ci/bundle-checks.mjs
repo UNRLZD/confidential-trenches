@@ -54,6 +54,7 @@ export const IN_PROCESS = [
   viaRead("evm-sell-unfunded-sim-keeps-route", () => import("../live-checks/evm-sell-unfunded-sim-keeps-route.mjs")),
   viaRead("kit-deposit-calls", () => import("../live-checks/kit-deposit-calls.mjs")),
   viaRead("kit-frame-version", () => import("../live-checks/kit-frame-version.mjs")),
+  viaRead("signing-layer-says-when-it-closes", () => import("../live-checks/signing-layer-says-when-it-closes.mjs")),
   viaRead("kit-portfolio-reads", () => import("../live-checks/kit-portfolio-reads.mjs")),
   viaRead("kit-oneclick-pins-frozen", () => import("../live-checks/kit-oneclick-pins-frozen.mjs")),
   viaRead("pool-answer-unknown", () => import("../live-checks/pool-answer-unknown.mjs")),
@@ -78,6 +79,7 @@ export const IN_PROCESS = [
   viaRead("sol-w-sweep", () => import("../live-checks/sol-w-sweep.mjs")),
   viaRead("intents-u-registered-first", () => import("../live-checks/intents-u-registered-first.mjs")),
   viaRead("sol-rent-back-dust-burn", () => import("../live-checks/sol-rent-back-dust-burn.mjs")),
+  viaRead("round-trip-costs-less", () => import("../live-checks/round-trip-costs-less.mjs")),
   viaRead("sell-right-after-a-buy", () => import("../live-checks/sell-right-after-a-buy.mjs")),
   // cut as a release only after its merge: the marks and the pin, not the ledger
   { key: "sol-sell-deposit-back-floor", host: "sign", load: () => import("../live-checks/sol-sell-deposit-back-floor.mjs"), run: async (m, f) => m.judge(await m.read(f), { ledger: false }) },
@@ -207,6 +209,7 @@ export const OUT = {
   "discover-matches-the-main-app": "a browser and the helper",
   "app-pool-withdraw": "a browser",
   "app-hop-sync-lock": "a browser",
+  "app-lock-holds-until-the-layer-closes": "a browser (its --harness run is in test-browser)",
   "balances-per-chain": "a browser and chain RPCs",
   "app-export-every-wallet": "a browser",
   "evm-quote-warm-round": "EVM RPC quotes",
