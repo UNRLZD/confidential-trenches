@@ -1,7 +1,7 @@
 {
  "good": {
   "check": "screens-never-say-proof",
-  "at": "2026-11-13T08:35:32.512Z",
+  "at": "2026-11-13T09:02:00.858Z",
   "source": "harness, terminal build apps/terminal/dist, the stand-in shell signed in",
   "browser": "156.0.8078.79",
   "scripts": {
@@ -21,7 +21,8 @@
      "cta": {
       "kind": "live",
       "busy": "true",
-      "label": "Buy DJT"
+      "label": "Buy DJT",
+      "pulse": "trb-skp"
      }
     },
     "pools": {
@@ -44,7 +45,8 @@
      "cta": {
       "kind": "live",
       "busy": "true",
-      "label": "Buy DJT"
+      "label": "Buy DJT",
+      "pulse": "trb-skp"
      }
     },
     "pools": {
@@ -59,8 +61,8 @@
  },
  "bad": {
   "check": "screens-never-say-proof",
-  "at": "2026-11-13T08:35:53.435Z",
-  "source": "harness, terminal build .scratch/out/main-dist, the stand-in shell signed in",
+  "at": "2026-11-13T09:02:20.776Z",
+  "source": "harness, terminal build <build of main 4c1826a75>, the stand-in shell signed in",
   "browser": "156.0.8078.79",
   "scripts": {
    "read": 1,
@@ -84,7 +86,8 @@
      "cta": {
       "kind": "trade",
       "busy": null,
-      "label": "Buy DJT"
+      "label": "Buy DJT",
+      "pulse": "none"
      }
     },
     "pools": {
@@ -109,7 +112,8 @@
      "cta": {
       "kind": "trade",
       "busy": null,
-      "label": "Buy DJT"
+      "label": "Buy DJT",
+      "pulse": "none"
      }
     },
     "pools": {

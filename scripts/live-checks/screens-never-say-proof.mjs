@@ -9,7 +9,8 @@
 // /portfolio, then the deposit sheet from the header's Deposit (a fresh stand-in shell per width, so the pool's price stays inside
 // the kit's bound), and reads:
 //   - the trade box: on the pool path, no proof mark, no word of proof, ready or pending; the pool's balance shown (a
-//     dollar amount above $0), no Max line, and Buy with the busy look of a tap in flight (data-kind live, aria-busy);
+//     dollar amount above $0), no Max line, and Buy with the busy look of a tap in flight (data-kind live, aria-busy)
+//     and its label pulsing as the app's skeletons do (trb-skp), no word;
 //   - Portfolio's pool block: one column header, Balance, and no word of proof, ready or pending;
 //   - the deposit sheet as it opens: no word of proof, ready or pending;
 //   - the app's scripts (every script the frame loaded, and every script those name, fetched as served): none holds a
@@ -81,7 +82,7 @@ export function judge(rec) {
       say(b.marks === 0 && !NAMED.test(b.text ?? ""), `${n}: the trade box ${b.marks ? `holds ${b.marks} proof mark(s)` : NAMED.test(b.text ?? "") ? `says ${JSON.stringify(b.text)}` : "names no proof"}`);
       say(money(b.balance), `${n}: the pool's balance shows as ${JSON.stringify(b.balance)}, want a dollar amount above $0`);
       say(!/max/i.test(b.max ?? "") && !NAMED.test(b.max ?? ""), `${n}: the line above Buy ${b.max ? JSON.stringify(b.max) : "is empty"}, want no Max and no word while nothing can be spent yet`);
-      say(b.cta?.kind === "live" && b.cta?.busy === "true", `${n}: Buy ${JSON.stringify(b.cta)}, want the busy look of a tap in flight (live, aria-busy)`);
+      say(b.cta?.kind === "live" && b.cta?.busy === "true" && b.cta?.pulse === "trb-skp", `${n}: Buy ${JSON.stringify(b.cta)}, want the busy look of a tap in flight (live, aria-busy) with its label's pulse (trb-skp)`);
     }
     const p = r.pools;
     say(!!p && JSON.stringify(p.heads) === '["Balance"]' && !NAMED.test(p.text ?? ""), `${n}: Portfolio's pools ${p ? `head ${JSON.stringify(p.heads)}, ${NAMED.test(p.text ?? "") ? `say ${JSON.stringify(p.text)}` : "name no proof"}` : "not drawn"}`);
@@ -106,7 +107,7 @@ const BOX = (phone) => {
     text: el.innerText.replace(/\s+/g, " ").trim(),
     balance: t('[data-testid="trade-balance"]'),
     max: t('[data-testid="trade-max"]'),
-    cta: cta ? { kind: cta.getAttribute("data-kind"), busy: cta.getAttribute("aria-busy"), label: cta.textContent.trim() } : null,
+    cta: cta ? { kind: cta.getAttribute("data-kind"), busy: cta.getAttribute("aria-busy"), label: cta.textContent.trim(), pulse: getComputedStyle(cta.querySelector(".trb-ctaLbl") ?? cta).animationName } : null,
   };
 };
 const POOLS = () => {
@@ -153,7 +154,8 @@ async function terminal(page) {
 }
 
 async function runOne(browser, w, shots, route, scripts) {
-  const ctx = await browser.newContext({ viewport: w.viewport, deviceScaleFactor: w.deviceScaleFactor, isMobile: w.isMobile, hasTouch: w.hasTouch, colorScheme: "dark", reducedMotion: "reduce" });
+  // motion as a viewer with no preference has it: the busy Buy's pulse is part of what is read
+  const ctx = await browser.newContext({ viewport: w.viewport, deviceScaleFactor: w.deviceScaleFactor, isMobile: w.isMobile, hasTouch: w.hasTouch, colorScheme: "dark", reducedMotion: "no-preference" });
   const run = { width: w.name, framed: false, box: null, pools: null, deposit: null };
   try {
     await ctx.route("**/*", route);

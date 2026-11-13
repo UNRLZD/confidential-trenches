@@ -38,7 +38,7 @@ test("recorded bad answer: main's build says Making proof, draws Ready and Pendi
   for (const w of ["phone", "desktop"]) {
     assert.ok(bad(r).some((l) => l.startsWith(`BAD ${w}: the trade box holds 1 proof mark(s)`)), `${w}\n${r.lines.join("\n")}`);
     assert.ok(bad(r).some((l) => l.startsWith(`BAD ${w}: the line above Buy "Making proof"`)), `${w}\n${r.lines.join("\n")}`);
-    assert.ok(bad(r).some((l) => l.startsWith(`BAD ${w}: Buy {"kind":"trade"`)), `${w}\n${r.lines.join("\n")}`);
+    assert.ok(bad(r).some((l) => l.startsWith(`BAD ${w}: Buy {"kind":"trade"`) && l.includes('"pulse":"none"')), `${w}\n${r.lines.join("\n")}`);
     assert.ok(bad(r).some((l) => l.startsWith(`BAD ${w}: Portfolio's pools head ["Balance","Ready","Pending"]`)), `${w}\n${r.lines.join("\n")}`);
   }
   assert.ok(bad(r).some((l) => /^BAD the app's scripts: \d+ read, holding .*"Making proof"/.test(l)), r.lines.join("\n"));
@@ -50,7 +50,10 @@ test("planted: Max $0, or a word of proof, above Buy fails", () => {
   fails(mut((rec) => (rec.runs[0].box.max = "Max $0")), /want no Max/);
   fails(mut((rec) => (rec.runs[1].box.max = "Making proof")), /want no Max and no word/);
 });
-test("planted: Buy not busy fails", () => fails(mut((rec) => (rec.runs[1].box.cta = { ...rec.runs[1].box.cta, kind: "trade", busy: null })), /busy look/));
+test("planted: Buy not busy, or busy with no pulse, fails", () => {
+  fails(mut((rec) => (rec.runs[1].box.cta = { ...rec.runs[1].box.cta, kind: "trade", busy: null })), /busy look/);
+  fails(mut((rec) => (rec.runs[0].box.cta = { ...rec.runs[0].box.cta, pulse: "none" })), /label's pulse/);
+});
 test("planted: the balance as $0 or a dash fails", () => {
   fails(mut((rec) => (rec.runs[0].box.balance = "$0 available")), /pool's balance shows/);
   fails(mut((rec) => (rec.runs[0].box.balance = "— available")), /pool's balance shows/);

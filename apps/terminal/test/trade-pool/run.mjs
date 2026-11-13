@@ -193,6 +193,14 @@ try {
         const look = await cta.evaluate((b) => ({ kind: b.getAttribute("data-kind"), busy: b.getAttribute("aria-busy"), aria: b.getAttribute("aria-disabled"), native: b.disabled, label: b.textContent.trim() }));
         if (busyWant) check(look.kind === "live" && look.busy === "true" && look.aria === "true" && !look.native && look.label === "Buy TORCH", `${tag}: Buy ${JSON.stringify(look)}, want the busy look (live, aria-busy, aria-disabled, "Buy TORCH")`);
         else check(look.kind === "trade" && look.busy === null, `${tag}: Buy ${JSON.stringify(look)}, want no busy look`);
+        // the label's pulse (the app's skeleton pulse, opacity 1 to 0.55): on the busy Buy alone, and off under reduced motion
+        const pulse = async (motion) => {
+          await page.emulateMedia({ reducedMotion: motion });
+          return cta.evaluate((b) => getComputedStyle(b.querySelector(".trb-ctaLbl") ?? b).animationName);
+        };
+        const moving = await pulse("no-preference");
+        const still = await pulse("reduce");
+        check(moving === (busyWant ? "trb-skp" : "none") && still === "none", `${tag}: Buy's label animation ${moving} (reduced motion: ${still}), want ${busyWant ? "trb-skp" : "none"} (none)`);
         const gotBal = norm(await page.locator('[data-testid="trade-balance"]').innerText());
         check(gotBal === bal, `${tag}: balance "${gotBal}", want "${bal}"`);
         const gotLine = await settle(async () => norm(await page.locator('[data-testid="trade-max"]').innerText()), line);
