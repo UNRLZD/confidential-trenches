@@ -39,6 +39,10 @@ test("the marks read the new shapes, never the old ones", () => {
   const queueNew = "E instanceof Error?l.failed.push({noteId:e.id,error:Uk(E)}):e.leaf.leafIndex<BigInt(E.stateTree.size)&&D.push({n:e,trees:E,root:`newest`})";
   const queueOld = "e.ref.kind===`deposit`||e.ref.kind===`second`&&e.ref.id.id===`U`)&&(T??=await r.trees(d+1n,t,{newest:!0}),T instanceof Error?l.failed.push({noteId:e.id,error:Uk(T)}):D.push({n:e,trees:T,root:`newest`}))";
   assert.equal(has(queueNew)[KEYS[0]], true);
+  // the same rule with the failure's step named (card buy-spends-several-pieces: the pass's console line), as SIGN_HOST
+  // builds it from then on; any other reason is not this read's failure
+  assert.equal(has(queueNew.replace("error:Uk(E)}", "error:Uk(E),reason:`network`}"))[KEYS[0]], true);
+  assert.equal(has(queueNew.replace("error:Uk(E)}", "error:Uk(E),reason:`prover_failed`}"))[KEYS[0]], false);
   assert.equal(has(queueOld)[KEYS[0]], false);
   // the withdraw: the loop that proves on the newest root; the old one-shot newest read for a deposit's note is not it
   assert.equal(has("C),T=`epoch`;for(let e=!1;!S(w);){let t=await x(y+1n,{newest:!0});if(S(t)){w=t,T=`newest`,e&&(_=await g());break}")[KEYS[1]], true);
