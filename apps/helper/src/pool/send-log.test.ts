@@ -16,6 +16,9 @@ test("the line: outcome, status, ms and the note's fields, nothing else", () => 
   const l = poolSendLine({ chain: "solana", net: "mainnet", route: "send", status: 503, body: { error: { code: "not_landed" } }, ms: 43_637.4, note: { tag: 3, via: "jito", region: "frankfurt", bundle: true, end: "expired", rebroadcasts: 40, misses: 2, status: "failed" } });
   assert.equal(l, "pool send solana mainnet send outcome=not_landed status=503 ms=43637 tag=3 via=jito region=frankfurt bundle=named end=expired rebroadcasts=40 misses=2 engine=failed");
   assert.equal(poolSendLine({ chain: "solana", net: "mainnet", route: "send", status: 200, body: { signature: SIG }, ms: 900, note: { tag: 3, end: "filled" } }), "pool send solana mainnet send outcome=filled status=200 ms=900 tag=3 end=filled");
+  // card owners-solana-buy-lands: a tag 3's tip in lamports, digits only, else dropped
+  assert.equal(poolSendLine({ chain: "solana", net: "mainnet", route: "pieces", status: 200, body: { signatures: [SIG] }, ms: 900, note: { tag: 3, tip: "100000", end: "filled" } }), "pool send solana mainnet pieces outcome=filled status=200 ms=900 tag=3 tip=100000 end=filled");
+  assert.equal(poolSendLine({ chain: "solana", net: "mainnet", route: "send", status: 200, body: { signature: SIG }, ms: 900, note: { tag: 3, tip: "1e5 x", end: "filled" } }), "pool send solana mainnet send outcome=filled status=200 ms=900 tag=3 end=filled");
   // a plain send answers before its end: sent
   assert.equal(poolSendLine({ chain: "evm", net: "base", route: "sell", status: 200, body: { hash: `0x${"ab".repeat(32)}` }, ms: 12 }), "pool send evm base sell outcome=sent status=200 ms=12");
   // a code that is not one of ours, a net or a region that is not a word: never copied

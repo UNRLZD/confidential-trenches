@@ -20,9 +20,12 @@
 // - SOL_COPY_ONLY=<kind,...> runs those kinds only; SOL_COPY_STEPS=buy stops each after its buy.
 // - SOL_COPY_PLANT=mayhem-drop: the Mayhem coin's buy is built with its curve read as not Mayhem, so the buy names the
 //   plain fee recipient in place of the Mayhem one; the run must fail with pump's own error.
-// - SOL_COPY_FLOW=pieces (card buy-spends-several-pieces): the curve coin only, its engine stand-in landing each bundle,
+// - SOL_COPY_FLOW=pieces (card buy-spends-several-pieces): the curve coin only, on SOL_COPY_ENGINE (swallow by default),
 //   through pool-buy-pieces-devnet.mjs's copy-part1 in place of the flow: 6 notes of 0.01 SOL, a buy only 5 pay (refused,
-//   nothing sent), a buy of 2 pieces and Max of the 4 left, each one bundle of the pieces and the helper's tip.
+//   nothing sent), a buy of 2 pieces and Max of the 4 left, each carried as the helper's pieces route sends them (the tag 2s
+//   plain, then the tag 3, card owners-solana-buy-lands). SOL_COPY_SCENARIO=copy-takeable runs that scenario instead;
+//   SOL_COPY_SCENARIO=tag3-fail runs the driver's tag3-fail (FLOW_AFTER=stay): a buy of 2 pieces at 1 bp whose tag 3 pump
+//   refuses (F buys the coin first), its tag 2s landed; it passes when the page's rent back sweeps W's SOL into the pool.
 // - SOL_COPY_FLOW=plain (card deposit-takes-each-pools-own-coin): the curve coin's accounts only (no buy or sell), through
 //   pool-plain-send-copy.mjs in place of the flow: the page's pool.address for SOL on Solana (a plain send to U_X, no
 //   1Click), an outside wallet's two SystemProgram transfers to U_X (one lamport under the floor, then the top-up), the
@@ -52,12 +55,14 @@ if (!["pool", "pieces", "plain"].includes(FLOW)) throw new Error(`SOL_COPY_FLOW:
 const PIECES = FLOW === "pieces";
 const PLAIN = FLOW === "plain";
 if (PLAIN && (PLANT || (ONLY.length && ONLY.join() !== "curve") || STEPS !== "all")) throw new Error("SOL_COPY_FLOW=plain runs the curve coin alone, with no plant and every step");
-// the pieces driver's scenario: copy-part1 (the default), or copy-takeable (the Max past an epoch boundary, the load)
+// the pieces driver's scenario: copy-part1 (the default), copy-takeable (the Max past an epoch boundary, the load), or
+// tag3-fail (the tag 3 refused by pump once its tag 2s landed: W swept back into the pool)
 const SCENARIO = process.env.SOL_COPY_SCENARIO ?? "copy-part1";
-if (!["copy-part1", "copy-takeable"].includes(SCENARIO)) throw new Error(`SOL_COPY_SCENARIO: copy-part1 or copy-takeable, not ${SCENARIO}`);
+if (!["copy-part1", "copy-takeable", "tag3-fail"].includes(SCENARIO)) throw new Error(`SOL_COPY_SCENARIO: copy-part1, copy-takeable or tag3-fail, not ${SCENARIO}`);
 if (PIECES && (PLANT || (ONLY.length && ONLY.join() !== "curve") || STEPS !== "all")) throw new Error("SOL_COPY_FLOW=pieces runs the curve coin alone, with no plant and every step");
-const ENGINE = process.env.SOL_COPY_ENGINE ?? (PIECES ? "lands" : "swallow");
-if (PIECES && ENGINE !== "lands") throw new Error("SOL_COPY_FLOW=pieces needs the stand-in that lands each bundle");
+// since card owners-solana-buy-lands a buy of several pieces needs no engine to land (its tag 2s go plain, its tag 3 with
+// a plain copy), so the pieces flow runs on the default stand-in too, the one that never lands a bundle
+const ENGINE = process.env.SOL_COPY_ENGINE ?? "swallow";
 if (!["swallow", "busy", "refused", "lands"].includes(ENGINE)) throw new Error(`SOL_COPY_ENGINE: swallow, busy, refused or lands, not ${ENGINE}`);
 const log = (s) => console.log(`${new Date().toISOString()} copy: ${s}`);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -359,7 +364,13 @@ for (const kind of KINDS) {
     for (const s of f?.steps ?? []) {
       if (seen.has(s.signature)) continue;
       seen.add(s.signature);
-      const tx = await local("getTransaction", [s.signature, { encoding: "json", commitment: "confirmed", maxSupportedTransactionVersion: 0 }]);
+      // a send of the run's last moments (a rent back the sale started) may land after the driver ends: read it again
+      // for up to 30 s before it counts as not found
+      let tx = null;
+      for (let i = 0; i < 60 && !tx; i++) {
+        if (i > 0) await sleep(500);
+        tx = await local("getTransaction", [s.signature, { encoding: "json", commitment: "confirmed", maxSupportedTransactionVersion: 0 }]);
+      }
       records.push(txRecord(kind, s.step, s.signature, tx, Ws[s.step] ? { W: Ws[s.step] } : {}, (x) => base58.decode(x)));
     }
     for (const s of f?.simFails ?? []) records.push({ coin: kind, step: s.phase, ok: false, simulation: s });
@@ -439,14 +450,18 @@ for (const kind of KINDS) {
 }
 const record = {
   ...(PIECES ? { onlyTheOwnersRealTap: [
-    "the real Jito block engine landing the bundle of the pieces and the tip in one slot, at the real tip floor: the copy's stand-in sends each to the copy on its own, in order",
+    "the real Jito block engine and mainnet's leaders taking the tag 3 at its tip, and the plain tag 2s and plain copy landing under real load: the copy has no engine (its stand-in never lands a bundle) and one leader, itself",
     "the real tap to filled time: the copy has one local RPC, no network and no engine round trip",
     "the real fee payer and relay fees on the deployed helper: the copy's helper sender runs in this process with a fresh fee payer, the fee the kit's for the copy's rent",
     "the 151-block clock on real slot times on the real RPC pair: the copy's slots run on this machine's clock",
   ] } : {}),
   at: new Date().toISOString(),
   plainPrice,
-  what: PLAIN ? "the Solana pool's own coin sent straight to U_X on a local copy of mainnet (solana-test-validator, mainnet's feature set, mainnet accounts cloned): the page's pool.address plain-send answer, an outside wallet's two transfers, the follow's carry with no 1Click read, and a withdraw of the note" : PIECES ? "a buy of several pieces of the Solana pool balance on a local copy of mainnet (solana-test-validator, mainnet's feature set, mainnet accounts cloned): 6 notes of 0.01 SOL, a buy only 5 pay, a buy of 2 pieces and Max" : "deposit, buy, sell and withdraw of the Solana pool on a local copy of mainnet (solana-test-validator, mainnet's feature set, mainnet accounts cloned)",
+  what: PLAIN
+    ? "the Solana pool's own coin sent straight to U_X on a local copy of mainnet (solana-test-validator, mainnet's feature set, mainnet accounts cloned): the page's pool.address plain-send answer, an outside wallet's two transfers, the follow's carry with no 1Click read, and a withdraw of the note"
+    : PIECES
+      ? `a buy of several pieces of the Solana pool balance on a local copy of mainnet (solana-test-validator, mainnet's feature set, mainnet accounts cloned): ${SCENARIO === "tag3-fail" ? "2 notes of 0.01 SOL, a buy of 2 pieces at 1 bp whose tag 3 pump refuses after a front-run, its tag 2s landed, W swept back into the pool" : SCENARIO === "copy-takeable" ? "5 notes of 0.01 SOL, Max ready after a load and past an epoch boundary" : "6 notes of 0.01 SOL, a buy only 5 pay, a buy of 2 pieces and Max"}`
+      : "deposit, buy, sell and withdraw of the Solana pool on a local copy of mainnet (solana-test-validator, mainnet's feature set, mainnet accounts cloned)",
   validator: version,
   mainnetSlot: read.slot,
   rent: { mainnet: mainRent, copy: copyRent },
@@ -473,8 +488,12 @@ const record = {
 mkdirSync(dirname(OUT), { recursive: true });
 writeFileSync(OUT, JSON.stringify(record, null, 2) + "\n");
 log(`record ${OUT}: ${records.map((r) => `${r.coin}/${r.step} ${r.ok ? "ok" : "FAIL"}`).join(", ")}`);
-// the plant fails only with pump's own refusal of the buy, in the program's log
-const pumpRefused = (r) => r.coin === "mayhem" && r.step === "buy" && !r.ok && (r.simulation?.logsTail ?? r.logsTail ?? []).some((l) => l.includes(`Program ${SOLANA_PUMP_PROGRAM} failed`));
-const plantOk = PLANT ? records.some(pumpRefused) : true;
+// the plant fails only with pump's own refusal of the buy, in the program's log; so does tag3-fail's tag 3 (F bought
+// first, so its 1 bp min out fails), every other record ok
+const pumpRefused = (coin, step) => (r) => r.coin === coin && r.step === step && !r.ok && (r.simulation?.logsTail ?? r.logsTail ?? []).some((l) => l.includes(`Program ${SOLANA_PUMP_PROGRAM} failed`));
+const plantOk = PLANT ? records.some(pumpRefused("mayhem", "buy")) : true;
 if (PLANT) log(`plant ${PLANT}: ${plantOk ? "the buy failed with pump's own error" : "NOT refused by pump"}`);
-process.exit(records.length > 0 && (PLANT ? plantOk : records.every((r) => r.ok)) ? 0 : 1);
+const tag3Refused = pumpRefused("curve", "tag3-fail");
+const tag3Ok = PIECES && SCENARIO === "tag3-fail" ? records.some(tag3Refused) && records.every((r) => r.ok || tag3Refused(r)) : null;
+if (tag3Ok !== null) log(`tag3-fail: ${tag3Ok ? "the tag 3 refused by pump's own error, every other record ok" : "NOT as planted"}`);
+process.exit(records.length > 0 && (PLANT ? plantOk : tag3Ok ?? records.every((r) => r.ok)) ? 0 : 1);

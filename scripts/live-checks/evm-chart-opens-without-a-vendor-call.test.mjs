@@ -29,7 +29,7 @@ test("recorded good answer: nine trending Base tokens, every chart 200 from a so
 
 for (const [k, why] of [
   ["bad_429_on_a_cold_token", /answered 429 \(retry-after 58\)/],
-  ["bad_vendor_bars_named_ours", /own_from_s on a GeckoTerminal-only chart/],
+  ["bad_vendor_bars_named_ours", /own_from_s on a vendor-only chart/],
   ["bad_source_header_differs", /X-Helper-Source "geckoterminal"/],
   ["bad_empty_chart", /no bars \(src "chain"\): an empty chart for a trending token/],
   ["bad_opened_past_the_span", /opened after 80 s, over the page's 75 s/],
@@ -78,4 +78,23 @@ test("a chart that opened after a 429 cleared inside the span passes, its wait n
   const r = judge(run);
   assert.deepEqual(bad(r), []);
   assert.ok(r.lines.some((l) => l.endsWith("after 30 s of 429s")));
+});
+
+test("card charts-say-coingecko: ten trending Base charts from CoinGecko's paid plan (recorded good_coingecko, chain,coingecko on every one) PASS; a vendor-only coingecko chart holding own_from_s, or a name the helper never gives, FAILs", () => {
+  const r = judge(A.good_coingecko);
+  assert.deepEqual(bad(r), []);
+  assert.equal(r.ok, true);
+  assert.ok(A.good_coingecko.candles.every((c) => c.headers["x-helper-source"] === "chain,coingecko"));
+  const named = structuredClone(A.good_coingecko);
+  const c0 = named.candles[0];
+  const b0 = JSON.parse(c0.body);
+  c0.body = JSON.stringify({ ...b0, src: "chain,coingeckox" });
+  c0.headers["x-helper-source"] = "chain,coingeckox";
+  assert.equal(judge(named).ok, false);
+  const alone = structuredClone(A.good_coingecko);
+  const c1 = alone.candles.find((c) => JSON.parse(c.body).own_from_s !== undefined);
+  assert.ok(c1, "a chart with own_from_s");
+  c1.body = JSON.stringify({ ...JSON.parse(c1.body), src: "coingecko" });
+  c1.headers["x-helper-source"] = "coingecko";
+  assert.ok(bad(judge(alone)).some((l) => /own_from_s on a vendor-only chart/.test(l)), bad(judge(alone)).join("\n"));
 });

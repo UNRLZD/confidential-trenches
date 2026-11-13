@@ -6,8 +6,9 @@
 // that shape, bar for bar, is the chart's error state, never a partly drawn chart; no bars is the empty state.
 //
 // Attribution: GeckoTerminal's data carries CoinGecko's required label (API terms 4.4, 09 Data labels v2.0.5) while any
-// drawn bar is theirs, which the answer's X-Helper-Source names ("geckoterminal", or "chain,geckoterminal" for a Base
-// token whose older bars are theirs); "chain" alone is our own reads and draws no label.
+// drawn bar is theirs, which the answer's X-Helper-Source names: "geckoterminal" (the keyless API) or "coingecko" (the
+// paid plan), alone or after "chain" for a token whose older bars are theirs ("chain,coingecko"); "chain" alone is our
+// own reads and draws no label.
 import { HELPER_FETCH_INIT, HELPER_SOURCE_HEADER } from "@blindfill/kit";
 import type { MarketChain } from "../discover/fields.ts";
 import { price, usd } from "../discover/format.ts";
@@ -72,8 +73,10 @@ export const priceText = (v: string | number): string => (DECIMAL.test(String(v)
 /** A volume as Discover draws volume. */
 export const volumeText = (v: string | number): string => (DECIMAL.test(String(v)) ? usd(String(v)) : String(v));
 
-/** Whether a source names GeckoTerminal's data (a comma list, 06b `src`). */
-export const isGecko = (src: string | null): boolean => src !== null && src.split(",").some((s) => s.trim() === "geckoterminal");
+/** CoinGecko's sources: GeckoTerminal's keyless API and the paid plan (the helper's data/coingecko.ts CG_SRC). */
+const GECKO_SOURCES: ReadonlySet<string> = new Set(["geckoterminal", "coingecko"]);
+/** Whether a source names CoinGecko's data, either API (a comma list, 06b `src`). */
+export const isGecko = (src: string | null): boolean => src !== null && src.split(",").some((s) => GECKO_SOURCES.has(s.trim()));
 
 /** Decimals that keep three significant digits of the smallest price drawn, at least 2 and at most 20. */
 export function pricePrecision(bars: readonly Bar[]): number {

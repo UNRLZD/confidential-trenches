@@ -1,0 +1,280 @@
+{
+ "today": {
+  "check": "pool-balance-counts-the-remainder",
+  "at": "2026-11-13T11:29:49.585Z",
+  "source": "harness, terminal build apps/terminal/dist, the stand-in shell signed in",
+  "browser": "156.0.8078.79",
+  "account": {
+   "release": "harness-shell",
+   "api": 1,
+   "signed_in": true,
+   "way": "passkey",
+   "code_saved": true,
+   "vault_balance": "12.34",
+   "pools": [
+    {
+     "chain": "solana",
+     "asset": "SOL",
+     "balance": "0.5",
+     "price": {
+      "price": "15000000000",
+      "expo": -8,
+      "published_s": 1794569372,
+      "read_ms": 1794569372678
+     }
+    },
+    {
+     "chain": "base",
+     "asset": "ETH",
+     "balance": "0.01",
+     "price": {
+      "price": "300000000000",
+      "expo": -8,
+      "published_s": 1794569372,
+      "read_ms": 1794569372678
+     }
+    },
+    {
+     "chain": "robinhood",
+     "asset": "ETH",
+     "balance": "0",
+     "price": {
+      "price": "300000000000",
+      "expo": -8,
+      "published_s": 1794569372,
+      "read_ms": 1794569372678
+     }
+    }
+   ],
+   "deposit_wallets": [
+    {
+     "chain": "solana",
+     "address": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
+     "asset": "SOL",
+     "amount": "0.0125"
+    },
+    {
+     "chain": "base",
+     "address": "0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed",
+     "asset": "ETH",
+     "amount": "0.002"
+    },
+    {
+     "chain": "robinhood",
+     "address": "0xfB6916095ca1df60bB79Ce92cE3Ea74c37c5d359",
+     "asset": "ETH",
+     "amount": "0.0003"
+    }
+   ],
+   "wallets": [],
+   "positions": [],
+   "orders": [],
+   "held": [],
+   "ops": []
+  },
+  "page": {
+   "read": 4,
+   "named": 2,
+   "uses": 0
+  },
+  "scripts": {
+   "read": 1,
+   "found": [
+    "Send only SOL on Solana.",
+    "Send only ETH on Base.",
+    "Send only ETH on Robinhood."
+   ]
+  },
+  "runs": [
+   {
+    "width": "phone",
+    "framed": true,
+    "pools": {
+     "rows": [
+      [
+       "near",
+       "12340000"
+      ],
+      [
+       "solana",
+       "512500000"
+      ],
+      [
+       "base",
+       "12000000000000000"
+      ],
+      [
+       "robinhood",
+       "300000000000000"
+      ]
+     ],
+     "text": "Private balance Balance NEAR 12.34 USDC Solana 0.5125 SOL Base 0.012 ETH Robinhood 0.0003 ETH"
+    },
+    "cash": "$126.11"
+   },
+   {
+    "width": "desktop",
+    "framed": true,
+    "pools": {
+     "rows": [
+      [
+       "near",
+       "12340000"
+      ],
+      [
+       "solana",
+       "512500000"
+      ],
+      [
+       "base",
+       "12000000000000000"
+      ],
+      [
+       "robinhood",
+       "300000000000000"
+      ]
+     ],
+     "text": "Private balance Balance NEAR 12.34 USDC Solana 0.5125 SOL Base 0.012 ETH Robinhood 0.0003 ETH"
+    },
+    "cash": "$126.11"
+   }
+  ]
+ },
+ "bad": {
+  "check": "pool-balance-counts-the-remainder",
+  "at": "2026-11-13T11:30:10.275Z",
+  "source": "live https://ct-app.unrealized.trade, the stand-in shell signed in",
+  "browser": "156.0.8078.79",
+  "account": {
+   "release": "harness-shell",
+   "api": 1,
+   "signed_in": true,
+   "way": "passkey",
+   "code_saved": true,
+   "vault_balance": "12.34",
+   "pools": [
+    {
+     "chain": "solana",
+     "asset": "SOL",
+     "balance": "0.5",
+     "price": {
+      "price": "15000000000",
+      "expo": -8,
+      "published_s": 1794569391,
+      "read_ms": 1794569391445
+     }
+    },
+    {
+     "chain": "base",
+     "asset": "ETH",
+     "balance": "0.01",
+     "price": {
+      "price": "300000000000",
+      "expo": -8,
+      "published_s": 1794569391,
+      "read_ms": 1794569391445
+     }
+    },
+    {
+     "chain": "robinhood",
+     "asset": "ETH",
+     "balance": "0",
+     "price": {
+      "price": "300000000000",
+      "expo": -8,
+      "published_s": 1794569391,
+      "read_ms": 1794569391445
+     }
+    }
+   ],
+   "deposit_wallets": [
+    {
+     "chain": "solana",
+     "address": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
+     "asset": "SOL",
+     "amount": "0.0125"
+    },
+    {
+     "chain": "base",
+     "address": "0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed",
+     "asset": "ETH",
+     "amount": "0.002"
+    },
+    {
+     "chain": "robinhood",
+     "address": "0xfB6916095ca1df60bB79Ce92cE3Ea74c37c5d359",
+     "asset": "ETH",
+     "amount": "0.0003"
+    }
+   ],
+   "wallets": [],
+   "positions": [],
+   "orders": [],
+   "held": [],
+   "ops": []
+  },
+  "page": {
+   "read": 4,
+   "named": 2,
+   "uses": 0
+  },
+  "scripts": {
+   "read": 1,
+   "found": []
+  },
+  "runs": [
+   {
+    "width": "phone",
+    "framed": true,
+    "pools": {
+     "rows": [
+      [
+       "near",
+       "12340000"
+      ],
+      [
+       "solana",
+       "500000000"
+      ],
+      [
+       "base",
+       "10000000000000000"
+      ],
+      [
+       "robinhood",
+       "0"
+      ]
+     ],
+     "text": "Private balance Balance NEAR 12.34 USDC Solana 0.5 SOL Base 0.01 ETH Robinhood 0 ETH"
+    },
+    "cash": "$117.34"
+   },
+   {
+    "width": "desktop",
+    "framed": true,
+    "pools": {
+     "rows": [
+      [
+       "near",
+       "12340000"
+      ],
+      [
+       "solana",
+       "500000000"
+      ],
+      [
+       "base",
+       "10000000000000000"
+      ],
+      [
+       "robinhood",
+       "0"
+      ]
+     ],
+     "text": "Private balance Balance NEAR 12.34 USDC Solana 0.5 SOL Base 0.01 ETH Robinhood 0 ETH"
+    },
+    "cash": "$117.34"
+   }
+  ]
+ }
+}

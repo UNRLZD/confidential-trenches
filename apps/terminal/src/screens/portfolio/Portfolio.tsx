@@ -395,13 +395,14 @@ function PoolRows({ p, src, phone }: { p: Pools; src: PortfolioSource; phone?: b
   );
 }
 
-/** A pool row's Withdraw: the chain only goes to the mount (PortfolioAction pool-withdraw); off with nothing held. */
+/** A pool row's Withdraw: the chain only goes to the mount (PortfolioAction pool-withdraw); off with nothing in the pool
+ *  (money still at its deposit wallet is not the pool's to withdraw: its own export is under Wallets). */
 function PoolWithdraw({ r, on, act }: { r: PoolRow; on: boolean; act: PortfolioSource["act"] }) {
   if (r.chain === "near") return <span />;
   const chain = r.chain;
   const control = `pool-withdraw-${chain}`;
   return (
-    <button type="button" className="plw" data-control={control} aria-label={WORDS.withdraw.text} title={WORDS.withdraw.text} disabled={!on || r.balance === 0n} onClick={() => act({ kind: "pool-withdraw", chain })}>
+    <button type="button" className="plw" data-control={control} aria-label={WORDS.withdraw.text} title={WORDS.withdraw.text} disabled={!on || r.pooled === 0n} onClick={() => act({ kind: "pool-withdraw", chain })}>
       <Ic name="arrowUp" size={12} />
     </button>
   );

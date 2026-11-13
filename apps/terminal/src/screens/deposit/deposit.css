@@ -74,6 +74,7 @@
 .addrb .ca { font: 600 13px var(--font-ui); color: var(--text-1); display: flex; align-items: center; gap: 6px; }
 .addrb .ca .c { margin-left: 10px; } /* the chain, after the asset, only when its name is not the asset's (model.ts addressHeading) */
 .addrb .hex { font: 14px/1.55 var(--font-num); color: var(--text-1); text-align: center; letter-spacing: 0.02em; word-spacing: 0.35em; overflow-wrap: anywhere; }
+.addrb .dsend { font: 500 12px var(--font-ui); color: var(--warn); text-align: center; } /* a pool's send rule under its own-coin address (DepositSheet SEND_ONLY) */
 .addrb .kv { width: 100%; display: grid; grid-template-columns: 1fr 1fr 1fr; border-top: 1px solid var(--border-row); padding-top: 10px; }
 .addrb .kv .k { font: 11px var(--font-ui); color: var(--text-3); height: 14px; display: flex; align-items: center; }
 .addrb .kv .r { text-align: right; }

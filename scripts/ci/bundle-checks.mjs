@@ -139,6 +139,7 @@ export const CHILD_RUNS = [
 ];
 /** The deploys' checks left out, with the reason. */
 export const OUT = {
+  "owners-solana-buy-lands": "the helper's pieces route (a planted 2-piece buy) and mainnet's rent on two public RPCs; its bundle part, the kit's one tip for every set, is held on the sources by packages/kit/test/solana-pool-buy-pieces.test.ts and on a build by its own replay (owners-solana-buy-lands.test.mjs)",
   "hosts-main-on-top": "DNS on two resolvers, the CT logs, the hosts' response headers, the helper and the retired names",
   "signpage-skeleton": "response headers (the sign deploy's gate runs it on the build's _headers)",
   "app-host-gate": "response headers (the app deploy's gate reads the build's _headers)",
@@ -237,6 +238,7 @@ export const OUT = {
   "app-faults-seen-on-124": "a browser and SIGN_HOST's 1Click reads through the helper (its --harness run is in test-browser)",
   "app-faults-seen-on-126": "a browser and the helper's chart bars (its --harness run is in test-browser)",
   "screens-never-say-proof": "a browser (its --harness run is in test-browser)",
+  "pool-balance-counts-the-remainder": "a browser, and SIGN_HOST's deployed scripts beside the app's build",
   "terminal-harness-sign-spa": "Pages' answer to a path with no file (the index), which no build file holds",
   "near-view-rhea": "mainnet NEAR RPC reads of the Rhea pool and get_return on the two providers, never the build",
 };

@@ -201,3 +201,15 @@ test("the candles 429 that clears inside the span passes; one still standing aft
   const empty = edit("candles", (b) => (b.candles = []));
   assert.ok(bad(await run(empty)).some((l) => /candles: exactly the frozen fields in their wire forms: (keys|candles 0|own_from_s)/.test(l)));
 });
+
+test("card charts-say-coingecko: candles from CoinGecko's paid plan before our first bar (recorded good_coingecko, chain,coingecko) PASS; named by a name the helper never gives, FAIL", async () => {
+  const r = await run(A.good_coingecko);
+  assert.equal(r.ok, true, r.lines.join("\n"));
+  assert.equal(A.good_coingecko.reads.candles.headers["x-helper-source"], "chain,coingecko");
+  const rec = structuredClone(A.good_coingecko);
+  const b = JSON.parse(rec.reads.candles.body);
+  rec.reads.candles.body = JSON.stringify({ ...b, src: "chain,coingeckox" });
+  rec.reads.candles.headers["x-helper-source"] = "chain,coingeckox";
+  assert.equal((await run(rec)).ok, false);
+  assert.equal((await run(A.bad_not_deployed)).ok, false);
+});
