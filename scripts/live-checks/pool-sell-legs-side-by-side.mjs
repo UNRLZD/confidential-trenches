@@ -75,8 +75,11 @@ const youngOf = (js) => {
 export const WAIT = new RegExp(`(${N})=async (${N})=>\\{if\\(!${N}\\.hold\\(\\2\\)\\)return ${N}\\(\`failed\`,\`tap_bound\`\\);if\\((${N})&&\\((${N})=!0\\),await ${N}\\(${N}\\.wait,\\2,${N}\\.signal\\),${N}\\.stopped\\?\\.\\(\\)\\|\\|${N}\\.signal\\?\\.aborted\\)return ${N}\\(\`failed\`,\`stopped\`\\)\\}`);
 // the plan's wait: on the bound, marking the plan waited, a sign out refusing it
 export const PLAN_WAIT = new RegExp(`(${N})=async (${N})=>\\{if\\(!${N}\\.hold\\(\\2\\)\\)return ${N}\\(\`failed\`,\`tap_bound\`\\);if\\(${N}=!0,await ${N}\\(${N}\\.wait,\\2,${N}\\.signal\\),${N}\\.stopped\\?\\.\\(\\)\\|\\|${N}\\.signal\\?\\.aborted\\)return ${N}\\(\`failed\`,\`stopped\`\\)\\}`);
-// an old sale priced again, then a sale's attempt priced again with the young reads forgotten
-export const LOOP = new RegExp(`if\\(${N}=void 0,(${N})\\.reprice&&!(${N})\\.stopped\\?\\.\\(\\)\\)${N}\\(\\2\\.rpcs\\);`);
+// an old sale priced again, then a sale's attempt priced again with the young reads forgotten; since card
+// round-trip-costs-less the attempt's landing marks W's next sale's fee (capNext) first, and the reprice test is still
+// the whole condition
+const CAP_NEXT = `(?:\`stage\`in (${N})&&\\1\\.stage===\`not_landed\`\\?(${N})\\.add\\((${N})\\.address\\):\`stage\`in \\1&&\\(\\1\\.stage===\`filled\`\\|\\|\\1\\.stage===\`refused\`\\)&&\\2\\.delete\\(\\3\\.address\\),)?`;
+export const LOOP = new RegExp(`if\\(${N}=void 0,${CAP_NEXT}(${N})\\.reprice&&!(${N})\\.stopped\\?\\.\\(\\)\\)${N}\\(\\5\\.rpcs\\);`);
 const freshOf = (js) => {
   const w = WAIT.exec(js);
   if (!w || !PLAN_WAIT.test(js) || !LOOP.test(js)) return false;

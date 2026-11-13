@@ -11,7 +11,10 @@
 // 8da6b97f); the sale's reads unshared, shared past 4 s, shared on a failed read, never forgotten after a wait, or naming a W's read;
 // the young reads kept at a leg's turn; a sale's wait off the tap's bound, not marking it old, or not ended at a sign
 // out; the plan's wait off the bound; an old sale signed, or the plan's wait not making it old; a sale's simulation
-// refused while an earlier leg is in flight not priced again, or its cause naming no provider: each FAIL.
+// refused while an earlier leg is in flight not priced again, or its cause naming no provider: each FAIL. Since card
+// round-trip-costs-less the excerpt's loop line carries the sale's cap rule (capNext) before the reprice test, as that
+// card's build has it (the cap rule's names its build's, the rest the excerpt's): the reprice taken away there, or made
+// false behind it, FAILs; the loop as it was before that card still reads.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
@@ -84,9 +87,21 @@ test("planted in the bundle's excerpt: each break in place FAILs", () => {
     ["an old sale not priced again", "n.reprice&&!e.stopped?.())nR(e.rpcs);", "!1)nR(e.rpcs);", "fresh"],
     ["a simulation refused with an earlier leg in flight not priced again", "return o?.inFlight?.()&&", "return !1&&", "fresh"],
     ["a refused simulation's cause naming no provider", "[`RPC ${", "[`${", "fresh"],
+    ["an old sale not priced again behind the cap rule (card round-trip-costs-less)", "&&Bq.delete(r.address),n.reprice&&", "&&Bq.delete(r.address),!1&&n.reprice&&", "fresh"],
+    ["the cap rule as the whole condition (card round-trip-costs-less)", "&&Bq.delete(r.address),n.reprice&&!e.stopped?.())", "&&Bq.delete(r.address))", "fresh"],
+    ["the cap rule's mark not the attempt's own (card round-trip-costs-less)", "`stage`in c&&c.stage===`not_landed`", "`stage`in c&&s.stage===`not_landed`", "fresh"],
   ]) {
     const bad = js.replace(from, to);
     assert.notEqual(bad, js, what);
     assert.equal(facts(A.good.index, bad)[key], false, what);
   }
+});
+
+test("the loop as it was before card round-trip-costs-less, with no cap rule before the reprice test, still reads", () => {
+  const js = readFileSync(new URL("./pool-sell-legs-side-by-side.excerpt.txt", import.meta.url), "utf8");
+  const cap = "`stage`in c&&c.stage===`not_landed`?Bq.add(r.address):`stage`in c&&(c.stage===`filled`||c.stage===`refused`)&&Bq.delete(r.address),";
+  const before = js.replace(cap, "");
+  assert.notEqual(before, js);
+  assert.equal(facts(A.good.index, before).fresh, true);
+  assert.equal(facts(A.good.index, before.replace("n.reprice&&!e.stopped?.())nR(e.rpcs);", "!1)nR(e.rpcs);")).fresh, false);
 });
