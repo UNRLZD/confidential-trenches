@@ -1255,6 +1255,49 @@ function keyOfRoute(r: EvmV4Route): EvmPoolKey {
 const INITIALIZE = "dd466e674ea557f56295e2d0218a125ea4b4f0f6f3307b95f85e6110838d6438"; // Initialize(bytes32,address,address,uint24,int24,address,uint160,int24)
 type Spans = [number, number][];
 const SCANS = new Map<string, { spans: Spans; pools: EvmPoolKey[] }>();
+// The device's pool index of a chain (pool-index.ts evmPoolIndexSync: every Initialize log of the PoolManager, each span
+// proven on two readers of two operators), as its last whole sync served it: every pool to `through` (its N). A scan of a
+// currency that has no kept scan starts from it: the index's blocks from its first to N count as read, with the
+// currency's pools in them, so a quote asks the scan provider only the blocks past N (card evm-buy-and-sell-on-mainnet:
+// a cold quote of Base's 1M blocks on one public provider asked 101 to 129 log batches at the tap, ran past 30 s on
+// its 429s and refused). An index proves more than the scan it replaces, which one provider answers alone.
+const INDEXES = new Map<EvmPoolChain, { from: number; through: number; byCurrency: Map<string, EvmPoolKey[]> }>();
+/** Serves `sync`, a whole sync of `chain`'s pool index (evmPoolIndexSync: coversThrough N and every pool to N), to this
+ *  module's scans; one that is not whole, of another chain or PoolManager, or not newer than the one held changes
+ *  nothing. Returns whether it is now the one held. */
+export function evmPoolIndexUse(chain: EvmPoolChain, sync: { readonly index: { readonly chainId: number; readonly poolManager: string; readonly from: number } | null; readonly coversThrough: number | null; readonly pools: readonly { readonly key: EvmPoolKey }[] | null }): boolean {
+  const all = evmPoolVenues();
+  const pinned = typeof chain === "string" && Object.hasOwn(all, chain) ? all[chain] : undefined;
+  const pm = venue(chain).poolManager;
+  const ix = sync?.index;
+  const n = sync?.coversThrough;
+  if (pinned === undefined || pm === undefined || ix === null || ix === undefined || n === null || n === undefined || !Array.isArray(sync.pools)) return false;
+  if (ix.chainId !== pinned.chainId || typeof ix.poolManager !== "string" || lower(ix.poolManager) !== pm || !Number.isSafeInteger(ix.from) || !Number.isSafeInteger(n) || ix.from < 0 || n < ix.from) return false;
+  const held = INDEXES.get(chain);
+  if (held !== undefined && held.through >= n) return held.through === n && held.from === ix.from;
+  const byCurrency = new Map<string, EvmPoolKey[]>();
+  for (const p of sync.pools) {
+    const c0 = (p?.key as { currency0?: unknown } | undefined)?.currency0;
+    const k = typeof c0 === "string" ? keyOf(p.key, c0) : null;
+    if (k === null) continue;
+    for (const c of new Set([k.currency0, k.currency1])) append(byCurrency, c, k);
+  }
+  INDEXES.set(chain, { from: ix.from, through: n, byCurrency });
+  return true;
+}
+/** For the tests: forgets every chain's index (not in the kit's index). */
+export const evmPoolIndexReset = (): void => INDEXES.clear();
+/** The scan of currency `c` the index holds, from `floor` (the scan's oldest block) to its N, kept as a scan keeps its
+ *  own: none where no index covers past `floor`. */
+const indexScanOf = (chain: EvmPoolChain, kind: ScanKind, c: string, weth: string, floor: number): { spans: Spans; pools: EvmPoolKey[] } | undefined => {
+  const ix = INDEXES.get(chain);
+  if (ix === undefined || ix.through < floor) return undefined;
+  const pools = (ix.byCurrency.get(c) ?? []).filter((k) => {
+    const other = k.currency0 === c ? k.currency1 : k.currency0;
+    return kind === "all" || other === NATIVE || other === weth;
+  });
+  return { spans: [[Math.max(floor, ix.from), ix.through]], pools };
+};
 /** `spans` with [a, b] added, merged where they touch. */
 const withSpan = (spans: Spans, a: number, b: number): Spans => {
   const out: Spans = [];
@@ -1587,7 +1630,10 @@ async function scanPools(
   const floor = Math.max(0, head - s.depth + 1);
   const each = cs.map((c) => {
     const key = `${chain}:${kind}:${c}`;
-    const cached = SCANS.get(key);
+    // the device's own kept scan and the index's, where both are: their blocks and pools together
+    const own = SCANS.get(key);
+    const ixs = indexScanOf(chain, kind, c, weth, floor);
+    const cached = own === undefined || ixs === undefined ? (own ?? ixs) : { spans: withSpan(own.spans, ...ixs.spans[0]!), pools: [...new Map([...own.pools, ...ixs.pools].map((k) => [poolId(k), k])).values()] };
     const pools = cached === undefined ? [] : [...cached.pools];
     // the blocks read before, those still within the depth
     const spans: Spans = (cached?.spans ?? []).filter(([, b]) => b >= floor).map(([a, b]) => [Math.max(a, floor), b]);

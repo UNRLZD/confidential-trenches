@@ -762,6 +762,29 @@ test("N1a a seeded standard pool is held to the token's real pool the device's o
   assert.deepEqual(await quoteOn(pools, "0x00000000000000000000000000000000000a22a2", seededRoute("0x00000000000000000000000000000000000a22a2"), broken), { accepted: false, code: "rpc_error" });
 });
 
+test("card evm-buy-and-sell-on-mainnet: with the device's pool index served, a quote's scan asks only the blocks past the index's N, and the index's pool still holds a seeded one", async () => {
+  const { evmPoolIndexUse, evmPoolIndexReset } = quoteMod as unknown as { evmPoolIndexUse: (c: string, s: unknown) => boolean; evmPoolIndexReset: () => void };
+  const token = "0x00000000000000000000000000000000000a33a3";
+  const pools = [seeded(token), real(token)];
+  const sync = (o: Record<string, unknown> = {}, n: number | null = 4_999_990) => ({ index: { chainId: 8453, poolManager: PM, from: 4_000_001, ...o }, coversThrough: n, pools: [{ key: real(token).key }] });
+  try {
+    // an index of another chain, another PoolManager, or one not whole is never served
+    assert.equal(evmPoolIndexUse("base", sync({ chainId: 4663 })), false);
+    assert.equal(evmPoolIndexUse("base", sync({ poolManager: "0x0000000000000000000000000000000000000001" })), false);
+    assert.equal(evmPoolIndexUse("base", sync({}, null)), false);
+    assert.equal(evmPoolIndexUse("base", sync()), true);
+    // the scan provider holds no log of the real pool: the index's alone holds the seeded route, and the scan asks only
+    // the ten blocks past the index's N, one request (both topic positions)
+    const asked: [number, number][] = [];
+    assert.deepEqual(await quoteOn(pools, token, seededRoute(token), scanner(5_000_000, [], asked)), below);
+    assert.deepEqual(asked, [[4_999_991, 5_000_000], [4_999_991, 5_000_000]]);
+    // an older sync than the one held changes nothing
+    assert.equal(evmPoolIndexUse("base", sync({}, 4_999_000)), false);
+  } finally {
+    evmPoolIndexReset();
+  }
+});
+
 test("card evm-quote-head-watch: a scan provider that fails a full span (a timeout, too many logs) is asked by halves, and the real pool it finds still holds a seeded one", async () => {
   const token = "0x00000000000000000000000000000000000e71e7";
   const pools = [seeded(token), real(token)];
