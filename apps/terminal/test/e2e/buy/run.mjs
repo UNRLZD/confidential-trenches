@@ -17,8 +17,9 @@
 //   4. pool.deposit of 0.01 SOL, sent to the kit's frame of SIGN_HOST as the kit's own message (the testnet build has
 //      no screen that sends it: the sheet's deposit needs a 1Click quote, mainnet only);
 //   5. the token page of the devnet coin (its market row: market-token.json, a recorded mainnet answer with the devnet
-//      mint, since the helper's market data is mainnet only; the one read that is not live) shows the pool's proof
-//      making, then Proof ready; the run types the line's Max into the amount and taps Buy once;
+//      mint, since the helper's market data is mainnet only; the one read that is not live) shows no Max while the
+//      pool's money is made spendable, then the line "Max $N" with N above 0 (13 Nov 07:53Z: removed, the app names no
+//      proof: the run waits on that line); the run types the line's Max into the amount and taps Buy once;
 //   6. the box reaches Filled; the wallet W the buy filled holds the coin, read on both devnet RPCs;
 //   7. the box's Sell side opens once the signing page's state holds the position; 100% is sold in one tap and the box
 //      reaches Filled; W then holds none of the coin on both RPCs, and every transaction the page sent is read back on
@@ -52,7 +53,7 @@ export const MINT = "AoU3FWPvuFo7WLtP186k6U2hLZ3e44PGeJdFQHVJnw6P";
 const RUNG = 10_000_000n;
 const FEE = 5_000n;
 const WAIT_MS = 20_000;
-const PROOF_MS = 6 * 60_000;
+const MAX_MS = 6 * 60_000;
 const END_MS = 5 * 60_000;
 const PRICE_MS = 7 * 60_000;
 const HELD_MS = 60_000;
@@ -81,7 +82,7 @@ export function judge(rec) {
   say(rec.funded?.ok === true, `U funded ${rec.funded?.lamports ?? "-"} lamports, read back on both RPCs`);
   say(rec.deposit?.ok === true && ["sent", "filled"].includes(rec.deposit?.stage), `pool.deposit answered ${JSON.stringify(rec.deposit ?? null)}`);
   say(rec.box?.path === "pool", `the trade box on the pool path: ${rec.box?.path ?? "none"}`);
-  say(rec.box?.proofReady === true, `Proof ready drawn (${rec.box?.proofMs ?? "-"} ms after the deposit answered)`);
+  say(rec.box?.maxShown === true, `Max drawn (${rec.box?.maxMs ?? "-"} ms after the deposit answered)`);
   say(rec.buy?.taps === 1, `the buy tapped once: ${rec.buy?.taps ?? 0}`);
   say(rec.buy?.asks === 1 && rec.buy?.kind === "pool.buy", `one pool.buy sent: ${rec.buy?.asks ?? 0} ${rec.buy?.kind ?? ""}`);
   say(/^Filled\b/.test(rec.buy?.end ?? ""), `the box ended "${rec.buy?.end ?? "none"}"`);
@@ -470,34 +471,34 @@ export async function run({ plant = null, shots = null, restoreOnB = false } = {
     rec.deposit = await depositAsk();
     if (!rec.deposit.ok) throw new Error(`pool.deposit answered ${JSON.stringify(rec.deposit)}`);
 
-    // 5. the trade box: the pool path, the proof made in this browser, then Buy at the line's Max
-    step = "proof";
+    // 5. the trade box: the pool path, the money made spendable in this browser, then Buy at the line's Max
+    step = "max";
     const box = vis('[data-testid="trade-box"]');
     await box.waitFor({ timeout: WAIT_MS });
     rec.box = { path: await box.getAttribute("data-path") };
-    await shot("3-proof-making");
-    await vis('[data-testid="trade-proof"][data-proof="ready"]').waitFor({ timeout: PROOF_MS });
-    rec.box.proofReady = true;
-    rec.box.proofMs = Date.now() - depositAt;
-    rec.box.path = await box.getAttribute("data-path");
-    // Max needs the device's own SOL/USD read, used for 60 s from its publish (kit price/pool-usd.ts); devnet's Pyth
+    await shot("3-box");
+    // the line shows no Max while the notes are made spendable (the seconds to minutes after the deposit), and none
+    // without the device's own SOL/USD read, used for 60 s from its publish (kit price/pool-usd.ts); devnet's Pyth
     // SOL/USD feed publishes about every 5 minutes (read 9 Nov 20:44:58Z, then 20:50:05Z), so the line waits for one
     const lineEl = vis('[data-testid="trade-max"]');
-    const priceBy = Date.now() + PRICE_MS;
+    const priceBy = Date.now() + MAX_MS + PRICE_MS;
     let line = "";
     let max = null;
     while (Date.now() < priceBy) {
       line = (await lineEl.innerText()).replace(/\s+/g, " ").trim();
       max = line.match(/Max \$([\d,.]+)/)?.[1]?.replaceAll(",", "") ?? null;
-      if (max) break;
+      if (max && Number(max) > 0) break;
+      max = null;
       await page.waitForTimeout(500);
     }
     rec.box.line = line;
-    rec.box.priceMs = Date.now() - depositAt;
-    if (!max) throw new Error(`no Max on the line in ${PRICE_MS / 1000} s: "${line}"`);
+    if (!max) throw new Error(`no Max above $0 on the line in ${(MAX_MS + PRICE_MS) / 1000} s: "${line}"`);
+    rec.box.maxShown = true;
+    rec.box.maxMs = Date.now() - depositAt;
+    rec.box.path = await box.getAttribute("data-path");
     await vis(".trb-amount input").fill(max);
     await page.waitForTimeout(300);
-    await shot("4-proof-ready");
+    await shot("4-max");
     rec.buy = { taps: 0, asks: 0, amountUsd: max };
     if (plant === "no-buy") throw new Error("planted: the buy is cut (no tap)");
     step = "buy";

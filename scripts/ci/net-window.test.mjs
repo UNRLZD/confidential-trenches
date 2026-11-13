@@ -99,6 +99,7 @@ export const CHANGED = [
   "scripts/live-checks/hosts-main-on-top.mjs",
   "scripts/live-checks/helper-launchpad-origin.mjs",
   "scripts/live-checks/helper-live-bars-no-503.mjs",
+  "scripts/live-checks/chart-candles-never-429.mjs",
   "scripts/live-checks/helper-page-jup-429.mjs",
   "scripts/live-checks/helper-pool-senders.mjs",
   "scripts/live-checks/helper-proxy.mjs",
@@ -281,6 +282,7 @@ export const CHANGED = [
   "scripts/live-checks/restore-shows-the-balance-in-seconds.mjs",
   "scripts/live-checks/helper-says-why-a-vendor-refused.mjs",
   "scripts/live-checks/evm-first-proof-inside-ten-seconds.mjs",
+  "scripts/live-checks/screens-never-say-proof.mjs",
 ];
 
 // Scripts in the searched folders that open no connection from Node, and why.

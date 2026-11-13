@@ -704,16 +704,13 @@ export function amount(base: bigint, d: number): string {
   return show(base, 1_000_000_000n * one, 2, "B");
 }
 
-/** One chain's pool in its own asset: the private balance from the device's own notes, the part with a proof ready
- *  (null: no proof queue runs, drawn as a dash, never 0) and the rest, still being proved. Base units of the asset,
+/** One chain's pool in its own asset: the private balance from the device's own notes. Base units of the asset,
  *  decimals from the kit's table only. */
 export interface PoolRow {
   chain: Chain;
   asset: PoolAsset;
   decimals: number;
   balance: bigint;
-  ready: bigint | null;
-  pending: bigint | null;
 }
 
 /** loading: no state yet. offline: the signing page is down. unread: the page sent no pools (it cannot read the
@@ -726,17 +723,13 @@ export interface Pools {
 }
 
 /** The pool rows from the signing page's state: NEAR's first, the vault's USDC (vault_balance; the page's pool table
- *  never holds the vault, as cashParts reads it), with no proof queue sent for it, so Ready and Pending are null
- *  (dashes); then the pools in the page's order. A ready above the balance is held to it. */
+ *  never holds the vault, as cashParts reads it), then the pools in the page's order. */
 export function pools(s: SignpageState, offline = false): Pools {
   if (s.pools === undefined) return { view: offline ? "offline" : "unread", rows: [] };
-  const vault: PoolRow = { chain: "near", asset: "USDC", decimals: POOL_ASSET_DECIMALS.USDC, balance: baseUnits(s.vault_balance, POOL_ASSET_DECIMALS.USDC) ?? 0n, ready: null, pending: null };
+  const vault: PoolRow = { chain: "near", asset: "USDC", decimals: POOL_ASSET_DECIMALS.USDC, balance: baseUnits(s.vault_balance, POOL_ASSET_DECIMALS.USDC) ?? 0n };
   const rows = [vault, ...s.pools.map((p): PoolRow => {
     const decimals = POOL_ASSET_DECIMALS[p.asset];
-    const balance = baseUnits(p.balance, decimals) ?? 0n;
-    const r = p.ready === undefined ? null : baseUnits(p.ready, decimals) ?? 0n;
-    const ready = r === null ? null : r > balance ? balance : r;
-    return { chain: p.chain, asset: p.asset, decimals, balance, ready, pending: ready === null ? null : balance - ready };
+    return { chain: p.chain, asset: p.asset, decimals, balance: baseUnits(p.balance, decimals) ?? 0n };
   })];
   return { view: rows.some((r) => r.balance > 0n) ? "rows" : "empty", rows };
 }

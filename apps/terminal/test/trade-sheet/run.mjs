@@ -2,7 +2,7 @@
 // The phone trade sheet, every state (card app-phone-trade-sheet; A2.5, app.md:1450; 09-design-brief §6.5 and F14): the
 // trade box's fixture page (test/trade-box/fixtures.tsx ?sheet=1, the kit stub) built with vite and served on 127.0.0.1,
 // the box in the app's own TradeSheet with the safety grid under it, at 360 x 740, 390 x 844 and 430 x 932 (dpr 2,
-// touch), the page clock paused by Playwright. Per state (the trade box run's own table, plus the pool's two proof
+// touch), the page clock paused by Playwright. Per state (the trade box run's own table, plus the pool's two
 // lines): the open button opens the sheet, the main button in the sheet taps, and the box reads its state id, label,
 // time and the line above the button; the sheet is inside the window, holds the box, the route strip and the safety
 // grid; app-shell's BAR-10 rules (no text under 11 px, no tap box under 44 px, no horizontal scroll, no CSP violation);
@@ -42,9 +42,10 @@ const WIDTHS = [
 // its label, and the line above the button (the trade box run's table; the pool rows are card trade-box-pool's lines)
 const STATES = [
   ["S8.3", "f=ready", false, 0, null, "Buy TORCH", "Max $100"],
-  ["S8.3", "f=ready&pool=sol-ready", false, 0, null, "Buy TORCH", /^Proof ready Max \$\d/],
-  // no proof ready yet: no tap's spend, so no Max (the box's own rule, card trade-box-pool)
-  ["S8.3", "f=ready&pool=sol-making", false, 0, null, "Buy TORCH", "Making proof"],
+  ["S8.3", "f=ready&pool=sol-ready", false, 0, null, "Buy TORCH", /^Max \$\d/],
+  // money still being made spendable: no tap's spend, so no Max, and no word of it (13 Nov 07:53Z: removed, the app
+  // names no proof)
+  ["S8.3", "f=ready&pool=sol-making", false, 0, null, "Buy TORCH", ""],
   ["S8.9", "f=ready&route=1", true, 100, null, "Sending", "Max $100"],
   ["S8.10", "f=ready&route=1", true, 400, "0.4s", "Landing 0.4s", "Max $100"],
   ["S8.11", "f=slow&route=1", true, 6_200, "6.2s", "Slow 6.2s", "Max $100"],

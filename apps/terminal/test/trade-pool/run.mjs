@@ -6,13 +6,15 @@
 // The pools are stand-ins recorded from real runs (test/trade-box/fixtures.tsx): the devnet Solana pool's 0.01 SOL note
 // and the Base Sepolia pool's 0.001 ETH chunks. Per state: app-shell's BAR-10 rules (MEASURE), no external request, no
 // dialog. Then:
-//   - a proof ready on Solana: the balance line (`$N available`, UNRLZD's ticket) and Max are the pool's balance and one tap's most in USD ($0.93, $0.16), the line
-//     reads "Proof ready", every preset is off (all over one tap), and the button sends pool.buy with the USD in SOL,
+//   - spendable on Solana: the balance line (`$N available`, UNRLZD's ticket) and Max are the pool's balance and one tap's most in USD ($0.93, $0.16),
+//     every preset is off (all over one tap), and the button sends pool.buy with the USD in SOL,
 //     rounded down (0.001720236), never the vault's buy; it fills on the kit's stage in under 2 s (Filled 1.1s);
-//   - over one tap ($0.17) and a proof still making: the button is off and a tap sends nothing; the amount field is
-//     marked wrong over one tap, never while the proof is making;
-//   - a balance with no proof ready and none being made (ready "0", no making): no proof label at all, no Max, the button
-//     off and a tap sends nothing (the box never says a proof is coming when none is);
+//   - over one tap ($0.17): the button is off, a tap sends nothing and the amount field is marked wrong;
+//   - money the device is still making spendable (making above 0, or no ready yet after a load): the balance shows, no
+//     Max, and Buy has the busy look of a tap in flight (data-kind live, aria-busy, aria-disabled; no new word); a tap
+//     sends nothing and the amount field is never marked wrong;
+//   - a balance with nothing being made (ready "0", no making) and an empty pool: no Max, the button off, a tap sends nothing;
+//   - no box names a proof (13 Nov 07:53Z: removed, the app names no proof): no proof mark, no word of proof, ready or pending;
 //   - Base: a whole chunk's USD ($3.50) sends pool.buy for 0.001 ETH; any other amount ($3.00) sends nothing;
 //   - the presets row: Solana and the vault keep the four; on Base it is one button, the row's width, holding the chunk's
 //     USD ($3.50), whose tap fills 3.50 and sends that pool.buy; with no proof ready yet its value is unknown: "—", off;
@@ -48,24 +50,26 @@ const WIDTHS = [
   { name: "1440", viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, isMobile: false, hasTouch: false },
 ];
 const SCHEMES = ["dark", "light"];
-// the buy states: name, query, the path, the proof label, Bal, the line above the button, whether the button is on, the
-// request one tap sends (null: none)
+// the buy states: name, query, the path, whether Buy has the busy look (money being made spendable), Bal, the line above
+// the button, whether the button is on, the request one tap sends (null: none)
 const BUYS = [
-  ["sol-ready", "pool=sol-ready&amt=0.16", "pool", "ready", "$0.93 available", "Proof ready Max $0.16", true, { kind: "pool.buy", params: { chain: "solana", token: MINT, amount: "0.001720236", slippage_bps: 1000 } }],
-  ["sol-feedown", "pool=sol-ready&amt=0.16&fee=down", "pool", "ready", "$0.93 available", "Proof ready Max $0.16", true, { kind: "pool.buy", params: { chain: "solana", token: MINT, amount: "0.001720236", slippage_bps: 1000 } }],
-  ["sol-over", "pool=sol-ready&amt=0.17", "pool", "ready", "$0.93 available", "Proof ready Max $0.16", false, null],
-  ["sol-making", "pool=sol-making&amt=0.16", "pool", "making", "$0.93 available", "Making proof", false, null],
-  ["sol-none", "pool=sol-none&amt=0.16", "pool", null, "$0.93 available", "", false, null],
-  ["base-chunk", "pool=base-ready&amt=3.50", "pool", "ready", "$10.50 available", "Proof ready Max $3.50", true, { kind: "pool.buy", params: { chain: "base", token: EVM, amount: "0.001", slippage_bps: 1000 } }],
-  ["base-other", "pool=base-ready&amt=3", "pool", "ready", "$10.50 available", "Proof ready Max $3.50", false, null],
-  ["base-making", "pool=base-making&amt=3.50", "pool", "making", "$10.50 available", "Making proof", false, null],
-  ["vault", "amt=25", "vault", null, "$73.18 available", "Max $100", true, { kind: "buy", params: { chain: "solana", token: MINT, side: "buy", amount: "25.00", slippage_bps: 1000 } }],
+  ["sol-ready", "pool=sol-ready&amt=0.16", "pool", false, "$0.93 available", "Max $0.16", true, { kind: "pool.buy", params: { chain: "solana", token: MINT, amount: "0.001720236", slippage_bps: 1000 } }],
+  ["sol-feedown", "pool=sol-ready&amt=0.16&fee=down", "pool", false, "$0.93 available", "Max $0.16", true, { kind: "pool.buy", params: { chain: "solana", token: MINT, amount: "0.001720236", slippage_bps: 1000 } }],
+  ["sol-over", "pool=sol-ready&amt=0.17", "pool", false, "$0.93 available", "Max $0.16", false, null],
+  ["sol-making", "pool=sol-making&amt=0.16", "pool", true, "$0.93 available", "", false, null],
+  ["sol-load", "pool=sol-load&amt=0.16", "pool", true, "$0.93 available", "", false, null],
+  ["sol-none", "pool=sol-none&amt=0.16", "pool", false, "$0.93 available", "", false, null],
+  ["sol-empty", "pool=sol-empty", "pool", false, "$0 available", "", false, null],
+  ["base-chunk", "pool=base-ready&amt=3.50", "pool", false, "$10.50 available", "Max $3.50", true, { kind: "pool.buy", params: { chain: "base", token: EVM, amount: "0.001", slippage_bps: 1000 } }],
+  ["base-other", "pool=base-ready&amt=3", "pool", false, "$10.50 available", "Max $3.50", false, null],
+  ["base-making", "pool=base-making&amt=3.50", "pool", true, "$10.50 available", "", false, null],
+  ["vault", "amt=25", "vault", false, "$73.18 available", "Max $100", true, { kind: "buy", params: { chain: "solana", token: MINT, side: "buy", amount: "25.00", slippage_bps: 1000 } }],
 ];
 // the Fee row: on a Solana pool buy whose Max the box reads for the coin (coinTapKey), the typed amount's cost; none else
-const FEE = { "sol-ready": "Fee $0.14", "sol-feedown": "Fee —", "sol-over": "Fee $0.14", "sol-making": null, "sol-none": null, "base-chunk": null, "base-other": null, "base-making": null, vault: null };
+const FEE = { "sol-ready": "Fee $0.14", "sol-feedown": "Fee —", "sol-over": "Fee $0.14", "sol-making": null, "sol-load": null, "sol-none": null, "sol-empty": null, "base-chunk": null, "base-other": null, "base-making": null, vault: null };
 // the amount field marked wrong: over one tap, or not a whole chunk on Base; never while a proof is still making (the
 // amount is not what is wrong) or on an amount the pool can take
-const BAD = { "sol-ready": "false", "sol-feedown": "false", "sol-over": "true", "sol-making": "false", "sol-none": "false", "base-chunk": "false", "base-other": "true", "base-making": "false", vault: "false" };
+const BAD = { "sol-ready": "false", "sol-feedown": "false", "sol-over": "true", "sol-making": "false", "sol-load": "false", "sol-none": "false", "sol-empty": "false", "base-chunk": "false", "base-other": "true", "base-making": "false", vault: "false" };
 // the presets row as data-preset:disabled:text per button: the four on Solana (all over one tap's most on the pool, $100
 // over the vault's max); on Base the chunk's one button, "—" and off while no proof is ready
 const FOUR_OFF = "10.00:true:$10 25.00:true:$25 50.00:true:$50 100.00:true:$100";
@@ -74,7 +78,9 @@ const PRESET_ROW = {
   "sol-feedown": FOUR_OFF,
   "sol-over": FOUR_OFF,
   "sol-making": FOUR_OFF,
+  "sol-load": FOUR_OFF,
   "sol-none": FOUR_OFF,
+  "sol-empty": FOUR_OFF,
   "base-chunk": "3.50:false:$3.50",
   "base-other": "3.50:false:$3.50",
   "base-making": ":true:—",
@@ -173,21 +179,35 @@ let shots = 0;
 try {
   for (const w of WIDTHS) {
     for (const scheme of SCHEMES) {
-      for (const [name, query, pathWant, proof, bal, line, on, ask] of BUYS) {
+      for (const [name, query, pathWant, busyWant, bal, line, on, ask] of BUYS) {
         const tag = `${name} @${w.name} ${scheme}`;
         const { ctx, page, external, dialogs } = await open(browser, BOX, w, scheme, query, '[data-testid="trade-box"]');
         const box = page.locator('[data-testid="trade-box"]');
         const cta = page.locator('[data-testid="trade-cta"]');
         check((await box.getAttribute("data-path")) === pathWant, `${tag}: path ${await box.getAttribute("data-path")}, want ${pathWant}`);
-        const proofEl = page.locator('[data-testid="trade-proof"]');
-        check((proof === null ? (await proofEl.count()) === 0 : (await proofEl.getAttribute("data-proof")) === proof), `${tag}: proof label ${(await proofEl.count()) ? await proofEl.getAttribute("data-proof") : "none"}, want ${proof ?? "none"}`);
+        // 13 Nov 07:53Z: removed, the app names no proof: no proof mark, no word of it in the box
+        check((await page.locator('[data-testid="trade-proof"], [data-proof]').count()) === 0, `${tag}: a proof mark in the box`);
+        const boxText = norm(await box.innerText());
+        check(!/proo?f|\bready\b|pending/i.test(boxText), `${tag}: the box says ${JSON.stringify(boxText)}`);
+        // the busy look of a tap in flight while the money is being made spendable; the button's own label, no new word
+        const look = await cta.evaluate((b) => ({ kind: b.getAttribute("data-kind"), busy: b.getAttribute("aria-busy"), aria: b.getAttribute("aria-disabled"), native: b.disabled, label: b.textContent.trim() }));
+        if (busyWant) check(look.kind === "live" && look.busy === "true" && look.aria === "true" && !look.native && look.label === "Buy TORCH", `${tag}: Buy ${JSON.stringify(look)}, want the busy look (live, aria-busy, aria-disabled, "Buy TORCH")`);
+        else check(look.kind === "trade" && look.busy === null, `${tag}: Buy ${JSON.stringify(look)}, want no busy look`);
+        // the label's pulse (the app's skeleton pulse, opacity 1 to 0.55): on the busy Buy alone, and off under reduced motion
+        const pulse = async (motion) => {
+          await page.emulateMedia({ reducedMotion: motion });
+          return cta.evaluate((b) => getComputedStyle(b.querySelector(".trb-ctaLbl") ?? b).animationName);
+        };
+        const moving = await pulse("no-preference");
+        const still = await pulse("reduce");
+        check(moving === (busyWant ? "trb-skp" : "none") && still === "none", `${tag}: Buy's label animation ${moving} (reduced motion: ${still}), want ${busyWant ? "trb-skp" : "none"} (none)`);
         const gotBal = norm(await page.locator('[data-testid="trade-balance"]').innerText());
         check(gotBal === bal, `${tag}: balance "${gotBal}", want "${bal}"`);
         const gotLine = await settle(async () => norm(await page.locator('[data-testid="trade-max"]').innerText()), line);
         check(gotLine === line, `${tag}: the line above the button "${gotLine}", want "${line}"`);
         const marked = await page.locator(".trb-amount").getAttribute("data-bad");
         check(marked === BAD[name], `${tag}: the amount field marked wrong ${marked}, want ${BAD[name]}`);
-        check((await cta.isDisabled()) === !on, `${tag}: the button is ${(await cta.isDisabled()) ? "off" : "on"}, want ${on ? "on" : "off"}`);
+        check(busyWant || (await cta.isDisabled()) === !on, `${tag}: the button is ${(await cta.isDisabled()) ? "off" : "on"}, want ${on ? "on" : "off"}`);
         const presets = await page.$$eval('[data-testid="trade-presets"] [data-preset]', (bs) => bs.map((b) => `${b.getAttribute("data-preset")}:${b.disabled}:${b.textContent.trim()}`).join(" "));
         check(presets === PRESET_ROW[name], `${tag}: presets ${presets}, want ${PRESET_ROW[name]}`);
         // Base's one button fills the row, never a quarter of it
@@ -266,4 +286,4 @@ if (fails.length) {
   console.log(`FAIL ${fails.length} of ${checks} checks over ${n} states`);
   process.exit(1);
 }
-console.log(`PASS ${checks} checks over ${n} states (the pool buy, over one tap, a proof making, a Base chunk and not, Base's chunk button, the vault's buy; the pool and vault sell) at 390 and 1440, dark and light${SHOTS ? `; ${shots} shots in ${SHOTS}` : ""} on ${browserLabel(browser)}`);
+console.log(`PASS ${checks} checks over ${n} states (the pool buy, over one tap, money being made spendable (busy Buy), none coming, an empty pool, a Base chunk and not, Base's chunk button, the vault's buy; the pool and vault sell) at 390 and 1440, dark and light${SHOTS ? `; ${shots} shots in ${SHOTS}` : ""} on ${browserLabel(browser)}`);
