@@ -4,7 +4,8 @@
 //   1. each withdraw of the card's run record (evm-withdraw-mainnet.md, its Withdraw lines: the network, the release,
 //      W's onward send, To and the part in wei) reads back on both of its chain's pool RPCs (RPCS_OF: a testnet's
 //      signpage-evm-pool-buy.mjs RPCS, Base's and Robinhood's mainnet pool-evm-deploy.mjs MAINNETS), and the record
-//      names a withdraw on Base and on Robinhood, each from its testnet or its mainnet;
+//      names a withdraw on Base and on Robinhood, each from its testnet or its mainnet, and once it names a mainnet one,
+//      one on Base mainnet and one on Robinhood mainnet;
 //      - the release: PrivacyPool.withdraw (selector WITHDRAW_SELECTOR) to the network's pinned pool (PIN_OF: a testnet's
 //        evm-pool-pins.mjs PINS, a mainnet's evm-pools-on-mainnet.mjs PINS), on the network's own id, succeeded, with
 //        the pool's Withdrawn naming W;
@@ -64,6 +65,10 @@ export function judge(run) {
   let quiet = false;
   const chains = new Set(run.withdraws.map((t) => CHAIN_OF[t.network]));
   say(chains.has("base") && chains.has("robinhood"), `the record names a withdraw on Base and on Robinhood: ${run.withdraws.map((t) => t.network).join(", ") || "none"}`);
+  // once the record names one mainnet withdraw, it names one on each mainnet: a testnet line never stands in for a
+  // mainnet one (the mainnet lines are the owner's withdraw taps after the deploy, evm-withdraw-mainnet.md)
+  const mainnet = run.withdraws.filter((t) => t.network === "base" || t.network === "robinhood").map((t) => t.network);
+  if (mainnet.length > 0) say(mainnet.includes("base") && mainnet.includes("robinhood"), `the record names a mainnet withdraw on Base and on Robinhood once it names one: ${mainnet.join(", ")}`);
   for (const wd of run.withdraws) {
     const pin = PIN_OF[wd.network];
     const tag = `[${wd.network} ${wd.release.slice(0, 10)}]`;

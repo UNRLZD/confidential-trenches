@@ -152,7 +152,7 @@ const asMainnet = (rec, nets = Object.keys(MAIN)) => {
 };
 const lower = (s) => (typeof s === "string" ? s.toLowerCase() : s);
 
-test("a mainnet record: Withdraw lines on Base and Robinhood mainnet read on each mainnet's RPCs, at its pinned pool and chain id: PASS; a record mixing a mainnet and a testnet names both chains", async () => {
+test("a mainnet record: Withdraw lines on Base and Robinhood mainnet read on each mainnet's RPCs, at its pinned pool and chain id: PASS; a record mixing a mainnet and a testnet names both chains but no mainnet withdraw on Robinhood: FAIL on that line alone", async () => {
   assert.deepEqual(withdrawsOf("Withdraw: base 0x" + "a".repeat(64) + " 0x" + "b".repeat(64) + " 0x" + "C".repeat(40) + " 7\nWithdraw: robinhood 0x" + "1".repeat(64) + " 0x" + "2".repeat(64) + " 0x" + "3".repeat(40) + " 8").map((w) => w.network), ["base", "robinhood"]);
   const main = asMainnet(A.both);
   assert.deepEqual([...new Set(main.withdraws.map((w) => w.network))].sort(), ["base", "robinhood"]);
@@ -161,7 +161,7 @@ test("a mainnet record: Withdraw lines on Base and Robinhood mainnet read on eac
   assert.ok(r.lines.some((l) => l.includes(`to the pinned pool ${PIN_OF.base.pool} on chain 8453`)), r.lines.join("\n"));
   assert.ok(r.lines.some((l) => l.includes(`to the pinned pool ${PIN_OF.robinhood.pool} on chain 4663`)), r.lines.join("\n"));
   const mixed = await run(asMainnet(A.both, ["base-sepolia"]));
-  assert.equal(mixed.verdict, "PASS", mixed.lines.join("\n"));
+  assert.deepEqual(bad(mixed), ["BAD the record names a mainnet withdraw on Base and on Robinhood once it names one: base, base"], mixed.lines.join("\n"));
 });
 
 test("planted, a mainnet line: a release to the testnet's pool, on the testnet's chain id, or read on the testnet's RPCs, and a record with Base alone: FAIL", async () => {
@@ -176,7 +176,17 @@ test("planted, a mainnet line: a release to the testnet's pool, on the testnet's
   assert.equal(onTestRpcs.verdict, "FAIL");
   assert.ok(onTestRpcs.lines.filter((l) => l.startsWith("BAD [robinhood ")).length >= 4, onTestRpcs.lines.join("\n"));
   const baseAlone = await run({ ...main, withdraws: main.withdraws.filter((w) => w.network === "base") });
-  assert.deepEqual(bad(baseAlone), ["BAD the record names a withdraw on Base and on Robinhood: base, base"], baseAlone.lines.join("\n"));
+  assert.deepEqual(bad(baseAlone), ["BAD the record names a withdraw on Base and on Robinhood: base, base", "BAD the record names a mainnet withdraw on Base and on Robinhood once it names one: base, base"], baseAlone.lines.join("\n"));
   const twoBase = await run({ ...asMainnet(A.both, ["base-sepolia"]), withdraws: asMainnet(A.both, ["base-sepolia"]).withdraws.filter((w) => w.network.startsWith("base")) });
   assert.equal(twoBase.verdict, "FAIL", "Base mainnet and Base Sepolia are one chain");
+});
+
+test("a record that names a mainnet withdraw names one on Base and on Robinhood mainnet: one chain alone is a BAD line; the testnet lines never count for it", () => {
+  const w = (network) => ({ network, release: "0x" + "1".repeat(64), onward: "0x" + "2".repeat(64), to: "0x" + "3".repeat(40), part: "1" });
+  const line = (r) => r.lines.find((l) => l.includes("a mainnet withdraw on Base and on Robinhood"));
+  const page = A.both.page;
+  assert.equal(line(judge({ withdraws: A.both.withdraws, reads: [], page })), undefined, "a testnet-only record: no such line");
+  assert.match(line(judge({ withdraws: [...A.both.withdraws, w("base")], reads: [], page })), /^BAD .*: base$/);
+  assert.match(line(judge({ withdraws: [...A.both.withdraws, w("robinhood")], reads: [], page })), /^BAD .*: robinhood$/);
+  assert.match(line(judge({ withdraws: [w("base"), w("robinhood")], reads: [], page })), /^ok /);
 });
