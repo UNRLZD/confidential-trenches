@@ -114,3 +114,27 @@ test("evm-money-shows-and-spends-at-once: a sale's return note, landed at the he
   assert.equal(again.leaf?.leafIndex, 1n);
   assert.equal((await ns.landings()).get(n.id), 30n, "kept at its new block until final");
 });
+
+test("evm-money-shows-and-spends-at-once (re-review): a state read on a chain whose notes are all settled (final, nothing kept, nothing RESERVED) reads no seed and no round: the wallet's rule is asked before the seed", async () => {
+  const { w, ns } = await wallet();
+  // deposit 0 final at leaf 0 and spent long since: a note of the scope, nothing open
+  const n = await ns.add({ ref: D0, scope: SCOPE, precommitment: P(D0), state: "UNSPENT", leaf: { value: RUNG, label: L0, commitment: noteCommitment(RUNG, L0, P(D0)), leafIndex: 0n } });
+  await ns.move(n.id, "UNSPENT", "SPENT");
+  assert.equal((await ns.landings()).size, 0);
+  let seeds = 0;
+  let syncs = 0;
+  const t = testnetPool({ store: async () => w, seed64: async () => (seeds++, SEED64.slice()) }, {
+    prover: { vault: signalsProver(), stop: () => {} },
+    hardwareConcurrency: 2,
+    evmPin: (c) => (c === "base" ? PIN : undefined),
+    evmRpcs: unread,
+    evmSync: () => ({ events: async () => (syncs++, assert.fail("no round read")) }),
+    evmQueuePool: () => reorgedPool(),
+  });
+  await t.stateRead();
+  await t.stateRead();
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(seeds, 0, "no seed read: nothing open");
+  assert.equal(syncs, 0, "no round read");
+  assert.equal((await ns.get(n.id))!.state, "SPENT");
+});
