@@ -1099,11 +1099,11 @@ async function coinFloor(page: NearBuyPage, token: string, buyMin: bigint, sellI
   if (f < 1n) f = 1n;
   return sellIn !== null && sellIn > f ? sellIn : f;
 }
-/** The coin on W counts as the record's: at least its floor over its baseline. A rebuilt record with no floor (no buy
- *  swap of W's, or only Rhea's wrapped NEAR as a stand-in token) counts none; a live record with none (its swap not
- *  signed yet, or written before the floor was kept) counts any, as before. */
+/** The coin on W counts as the record's: at least its floor over its baseline. A record with no floor counts none: a
+ *  live one never sent a swap (every build writes the floor before its swap leaves, src/near-trade.ts's swap step), a
+ *  rebuilt one has no buy swap of W's (or only Rhea's wrapped NEAR as a stand-in token). */
 const coinCounts = (r: NearBuyRecord, held: bigint): boolean =>
-  r.swap !== undefined ? held >= BigInt(r.swap.before) + BigInt(r.swap.floor) && BigInt(r.swap.floor) > 0n : !r.id.startsWith(RESTORED_ID) && held > 0n;
+  r.swap !== undefined && held >= BigInt(r.swap.before) + BigInt(r.swap.floor) && BigInt(r.swap.floor) > 0n;
 /** The kept records awaiting their one read on the two providers, from the empty key's value. */
 function confirmsOf(kept: unknown): Map<string, NearBuyRecord> {
   const m = new Map<string, NearBuyRecord>();

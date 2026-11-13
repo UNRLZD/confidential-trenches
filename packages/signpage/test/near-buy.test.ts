@@ -391,7 +391,13 @@ test("P2-3 load: a sell is taken up for a paid W whose money is on its way home 
     ["a sale part filled", "part", { token: 0n, usdc: 0n }, false],
     ["1 USDC, no token", null, { token: 0n, usdc: 1_000_000n }, true],
     ["just under 1 USDC", null, { token: 0n, usdc: 999_999n }, false],
-    ["the token held, no sell asked", null, { token: 5n, usdc: 2_000_000n }, false],
+    // every build writes the floor before its swap leaves (src/near-trade.ts, swap step): a W holding its coin has one
+    ["the token held, no sell asked", "floor", { token: 5n, usdc: 2_000_000n }, false],
+    // a buy stopped before its swap (no floor: no swap ever left W) past its resumes: a stranger's dust on W never holds
+    // its USDC back
+    ["dust on a W whose buy stopped before its swap", "register", { token: 1n, usdc: 2_000_000n }, true],
+    // a buy stopped at its swap, its floor written and the swap landed, no fill read yet: its coin is its own
+    ["a buy at its swap, the floor written, the swap landed", "swap", { token: 5n, usdc: 2_000_000n }, false],
     ["W not read", null, {}, false],
   ] as const) {
     const v = await world([5_000_000n]);
@@ -414,6 +420,9 @@ test("P2-3 load: a sell is taken up for a paid W whose money is on its way home 
       const r = await recOf(v, "b1");
       await v.w.put("quotes", `${NEAR_BUY_KEY}b1`, { ...r, sell: { id: "s0", slippage_bps: 100, created_ms: 1, resumes: 0, stage: "part_filled", step: "done", txs: [] } });
     }
+    if (set === "floor") await v.w.put("quotes", `${NEAR_BUY_KEY}b1`, { ...(await recOf(v, "b1")), swap: { floor: "5", before: "0" } });
+    if (set === "register") await v.w.put("quotes", `${NEAR_BUY_KEY}b1`, { ...(await recOf(v, "b1")), stage: "sent", step: "register", resumes: NEAR_BUY_RESUMES });
+    if (set === "swap") await v.w.put("quotes", `${NEAR_BUY_KEY}b1`, { ...(await recOf(v, "b1")), stage: "sent", step: "swap", resumes: NEAR_BUY_RESUMES, swap: { floor: "5", before: "0" } });
     reads(page, w);
     const lines: string[] = [];
     page.log = (l) => void lines.push(l);
