@@ -130,12 +130,11 @@ test("a chart's read held past CANDLES_ANSWER_MS (a cold Solana chart waiting up
   };
   const port = await listen(handler(COMMIT, undefined, undefined, undefined, undefined, undefined, undefined, { candles } as never));
   const path = `/v1/market/candles?chain=solana&token=${BONK}&tf=15m`;
-  const t0 = Date.now();
   const first = await get(port, path, "198.18.4.1");
-  const ms = Date.now() - t0;
+  // answered before the read landed: the bound answered it, not the read
+  assert.equal(held, null, "the read was still out when the page was answered");
   assert.equal(first.status, 200, first.body);
   assert.deepEqual(shape([first]).filling, 1, first.body);
-  assert.ok(ms >= CANDLES_ANSWER_MS - 50 && ms < CANDLES_ANSWER_MS + 1_000, `answered in ${ms} ms`);
   await running;
   const next = await get(port, path, "198.18.4.1");
   assert.deepEqual(JSON.parse(next.body).candles, [BAR], "the read that went on is served");
