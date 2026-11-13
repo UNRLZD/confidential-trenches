@@ -159,6 +159,7 @@ export const OUT = {
   "wallet-passkey-prf": "a browser",
   "signpage-postmessage": "a browser",
   "signpage-shell": "a browser",
+  "sign-out-stops-the-pages-reads": "a browser (it runs signpage-shell's collect)",
   "signpage-signin-kinds": "a browser",
   "signpage-prover-host": "a browser",
   "signpage-prover-threads": "a browser",
