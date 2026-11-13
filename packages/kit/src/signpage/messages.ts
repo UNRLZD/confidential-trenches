@@ -254,7 +254,7 @@ export interface SignpageResults {
  *  back with the sale. Both absent with no amount or an amount over tap_max. `out` (kit 1.14, card
  *  solana-buy-preview-complete): with them, what that buy gets, in whole units of the token, at the device's own quote
  *  (the venue's own reads on both providers, its fees taken, before slippage) on the venue the buy takes; absent when
- *  that quote is not read. `with_cash` (card one-balance-buys-on-every-chain): the most one tap spends with its shortfall
+ *  that quote is not read. `with_cash` (kit 1.15, card one-balance-buys-on-every-chain): the most one tap spends with its shortfall
  *  moved from Cash first (src/cash-to-pool.ts), in the same whole units: tap_max plus what the largest Cash note buys of
  *  the pool's coin less the move's costs (the relayer's fee and the quote's margin); absent with no Cash to move. Display only: no request takes it. */
 export interface PoolBuyDry {
@@ -370,7 +370,7 @@ export interface ReadyEvent {
  * The page sends a client only the states, stages and facts its version reads. A change to what the page may send
  * (a state field, an op kind, a stage, a fact) raises it, and the page maps the version before it down.
  */
-export const SIGNPAGE_KIT_VERSION = "1.14";
+export const SIGNPAGE_KIT_VERSION = "1.15";
 
 /**
  * The client's half of the handshake, app to page (card kit-frame-version): its kit version, posted before every
@@ -415,7 +415,7 @@ export interface StateEvent {
  *   it comes;
  * - `out`: the token amount W received, a decimal string in the token's whole units, read from the transaction itself
  *   on both RPCs, the two the same and at least the buy's min out. Absent when they differ: never made up.
- * - `move` (card one-balance-buys-on-every-chain): "cash", told once when the tap moves its shortfall from Cash into the
+ * - `move` (kit 1.15, card one-balance-buys-on-every-chain): "cash", told once when the tap moves its shortfall from Cash into the
  *   chain's pool before it buys (src/cash-to-pool.ts), after the vault's move was checked and before it is made.
  * Addresses, an amount and a signature only: never a key, the 12 words or a note.
  */
