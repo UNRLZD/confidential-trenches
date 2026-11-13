@@ -1,6 +1,6 @@
 {
  "good": {
-  "at": "2026-11-13T21:48:22.143Z",
+  "at": "2026-11-13T22:23:25.164Z",
   "sign": {
    "source": "https://confidential.unrealized.trade/",
    "pageStatus": 200,
@@ -8,22 +8,26 @@
     {
      "url": "/app.js",
      "status": 200,
-     "integrity": "sha384-ionpfWHC49+iymQNgUncU2xcMvprtxpYNVHnSD38Tx1Q58IlDVaO4KColJVH4NvI",
-     "sha384": "sha384-ionpfWHC49+iymQNgUncU2xcMvprtxpYNVHnSD38Tx1Q58IlDVaO4KColJVH4NvI",
+     "integrity": "sha384-iPxXCcpdm+wluiF5N+5tnPukrNYp4YQ5sYb1Jx6RzGw01/UuGNAxVqH2a9Fq5d6y",
+     "sha384": "sha384-iPxXCcpdm+wluiF5N+5tnPukrNYp4YQ5sYb1Jx6RzGw01/UuGNAxVqH2a9Fq5d6y",
      "found": [
       "a plain release is read past, and is no buy only once old",
       "a no-buy mark counts only at this read's value",
       "an EVM trade's op is keyed by its chain and transaction",
       "the op names the units, the ETH at 18 decimals and its USD",
       "a filled buy writes it",
-      "a filled sale writes it"
+      "a filled sale writes it",
+      "the trades' read skips no wallet for its own buy record, only one a buy on this page runs for",
+      "a restore's pool events give each spend's transaction, fee and amount bought",
+      "a restore writes each EVM sale's op from its deposit back",
+      "the restore runs it once the notes are written"
      ]
     }
    ]
   }
  },
  "bad": {
-  "at": "2026-11-13T21:48:22.160Z",
+  "at": "2026-11-13T22:23:25.199Z",
   "sign": {
    "source": "https://confidential.unrealized.trade/",
    "pageStatus": 200,

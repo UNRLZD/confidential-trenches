@@ -13,8 +13,16 @@
 //   - a filled Base or Robinhood trade's op is keyed by its chain and transaction (src/pool-buy-evm.ts evmTradeKey);
 //   - it names the token units that moved, the ETH at 18 decimals and its USD when priced (evmTradeOp);
 //   - the buy's and the sale's filled ends write it (the read-backs' `traded`).
+// And two more gaps the same card closes: a buy whose run ended "sent" on a page closed before its follow wrote no op,
+// and the rebuild skipped every wallet with this device's own buy record; and a device restored or signed in again had
+// no Base or Robinhood trade at all. So the bundle also holds:
+//   - the rebuild's skip list is the marks and the page's running buys alone (src/sol-buy-records.ts tradesDone);
+//   - the EVM restore keeps each spend's transaction, fee and amount bought from the pool's events
+//     (packages/wallet/src/pool/evm-restore.ts), and writes each buy's and sale's op from them, run once the notes are
+//     written (src/pool-sell-evm.ts restoreEvmTrades, src/pool-restore.ts).
 // The behaviour is the package's own tests: packages/signpage/test/closed-pieces-buy.test.ts (mainnet's 18:05Z
-// transactions, red before), pool-buy-evm.test.ts and pool-sell-evm.test.ts ("trade op").
+// transactions, red before), pool-buy-evm.test.ts and pool-sell-evm.test.ts ("trade op"), restore-evm-trades.test.ts
+// (the CASHCAT round trip's recorded answers) and packages/wallet/test/pool-evm-restore.test.ts.
 // After: sign --host sign
 // Bundle: read sign
 //   node scripts/live-checks/closed-positions-show-every-trade.mjs [--record <file>]
@@ -40,6 +48,10 @@ export const MARKS = {
     ["the op names the units, the ETH at 18 decimals and its USD", new RegExp(`\\{units:${ID}\\(${ID},${ID}\\)\\},pool_amount:${ID}\\(${ID},18\\),\\.\\.\\.${ID}===null\\?\\{\\}:\\{amount_usd:${ID}\\}`)],
     ["a filled buy writes it", new RegExp(`traded\\?\\.\\(${ID}\\(${Q}buy${Q},${ID}\\.chain,${ID}\\.release\\.tx,`)],
     ["a filled sale writes it", new RegExp(`traded\\?\\.\\(${ID}\\(${Q}sell${Q},${ID}\\.chain,${ID}\\.deposit\\.tx,`)],
+    ["the trades' read skips no wallet for its own buy record, only one a buy on this page runs for", new RegExp(`done:async\\(\\)=>new Set\\(\\[\\.\\.\\.await ${ID}\\(await ${ID}\\.store\\(\\)\\),\\.\\.\\.${ID}\\]\\)`)],
+    ["a restore's pool events give each spend's transaction, fee and amount bought", new RegExp(`tx:${ID}\\(${ID}\\),fee:${ID}\\(${ID},2\\),out:${ID}\\.kind===${Q}buy${Q}\\?${ID}\\(${ID},6\\):null`)],
+    ["a restore writes each EVM sale's op from its deposit back", new RegExp(`${ID}\\(${Q}sell${Q},${ID}\\.chain,${ID}\\.tx,${ID}\\.token,null,null,${ID}\\.value,null,`)],
+    ["the restore runs it once the notes are written", new RegExp(`\\(\\{chain:${ID}\\.chain,read:${ID},store:await\\(${ID}\\.held\\?${ID}\\.held\\(\\):${ID}\\.store\\(\\)\\),spends:${ID}\\.spends,returns:${ID}\\.returns,signal:${ID}\\}\\)`)],
   ],
 };
 export const NAMES = { sign: MARKS.sign.map(([n]) => n) };
