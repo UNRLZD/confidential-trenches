@@ -493,6 +493,35 @@ test("sign-out-stops-the-pages-reads planted: no reload, a late or a signed-in n
   badLine(r, names);
 });
 
+// card ci-stops-costing-reruns (CI run 43419178373, test-browser 3, attempt 1): the words' open is answered first and
+// the frame taken out after (src/api.ts `then`, src/shell.ts seal), so on a loaded runner the frame's document can go
+// before it reads the answer: "no answer, layer open, 0 frames". src/shell.ts says so ("may reach the app before it
+// leaves; nothing waits on it"). That run passes; an answer that came and is not pending, the frame kept or the layer
+// closed still fail.
+test("the words' open whose answer the frame never read (it left first): PASS; with the frame kept, the layer closed or a wrong answer: FAIL", () => {
+  const unread = () => {
+    const rec = clone(ANSWERS.closes.chromium.phone);
+    const id = rec.steps.wordsIn.openId;
+    const n = rec.messages.length;
+    rec.messages = rec.messages.filter((m) => m.data?.id !== id);
+    assert.equal(rec.messages.length, n - 1, "one answer to the words' open in the record");
+    return rec;
+  };
+  const r = judge(unread());
+  assert.equal(r.ok, true, r.lines.join("\n"));
+  assert.ok(r.lines.some((l) => /^ok  signin\.open words: answered pending, or not at all once the frame left first; the layer opens and the frame leaves the document \(no answer, layer open, 0 frames\)$/.test(l)), r.lines.join("\n"));
+  const words = /^BAD signin\.open words: answered pending/;
+  const kept = unread();
+  kept.steps.wordsIn.layer.frames = 1;
+  const closed = unread();
+  closed.steps.wordsIn.layer.layerHidden = true;
+  for (const rec of [kept, closed]) {
+    const j = judge(rec);
+    assert.equal(j.ok, false, j.lines.join("\n"));
+    assert.ok(j.lines.some((l) => words.test(l)), j.lines.join("\n"));
+  }
+});
+
 // card signing-layer-says-when-it-closes (kit 1.13): an open kind answers { pending: true, closes: true } to an app whose
 // hello names 1.13, and the layer's close may post one { v: 1, type: "closed", id } for it. closes.chromium.phone: this
 // tree's build on the harness (13 Nov, Chrome 156): PASS. release128.<engine>.phone: the live page on release 128: PASS.

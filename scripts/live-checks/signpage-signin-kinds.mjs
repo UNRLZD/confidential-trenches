@@ -35,6 +35,7 @@
 //   Every screen above opens as a sheet over the app with the APP_HOST frame kept in the page under it (card
 //   signing-views-open-over-the-app); none of them has a field typed into, the one kind of screen that takes it out.
 // After: sign
+// Bundle: out a browser
 //   node scripts/live-checks/signpage-signin-kinds.mjs [--url <origin>] [--record <file>]
 //   node scripts/live-checks/signpage-signin-kinds.mjs --harness [--site <dir>] ...   the same steps on the app's
 //     browser harness (apps/terminal/test/harness) with SIGN_HOST's and APP_HOST's real names mapped to it, serving

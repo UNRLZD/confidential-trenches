@@ -20,6 +20,7 @@
 // test/refund-move.test.ts) and the wallet's (test/deposit-refund.test.ts, test/deposit-follow.test.ts), and that the
 // served files are that commit's build is signpage-release's.
 // After: sign
+// Bundle: read sign
 //   node scripts/live-checks/intents-u-registered-first.mjs [--record <file>] [--answer <file>]
 // PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";

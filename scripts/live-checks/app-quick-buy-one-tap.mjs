@@ -10,6 +10,7 @@
 // more; Retry sends the same amount once) is the terminal's own tests: apps/terminal/test/quick-buy.test.ts and
 // test/quick-buy/run.mjs at 360, 390 and 430.
 // After: app
+// Bundle: child app --root apps/terminal/dist
 //   node scripts/live-checks/app-quick-buy-one-tap.mjs [--url <url>] [--record <file>]
 //   node scripts/live-checks/app-quick-buy-one-tap.mjs --root <dir> [--record <file>]   the same read on a local build
 //     (apps/terminal/dist, built first) read from disk

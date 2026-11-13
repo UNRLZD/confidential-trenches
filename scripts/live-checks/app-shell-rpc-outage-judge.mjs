@@ -16,6 +16,7 @@
 //     double outage, which fails closed.
 // A load with no failed load of a release RPC passes on the first two. Other console errors are app-shell's to judge.
 // After: app
+// Bundle: out a browser
 //   node scripts/live-checks/app-shell-rpc-outage-judge.mjs [--url <origin>] [--shots <dir>] [--record <file>]
 //   node scripts/live-checks/app-shell-rpc-outage-judge.mjs --harness [--build <dir>] [--outage footer|footer-pair|solana|base|robinhood] ...
 //     the hosts' real names answered from local files (app-in-shell.mjs harnessRoute); --outage makes a real RPC outage

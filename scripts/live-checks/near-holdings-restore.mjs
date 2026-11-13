@@ -14,6 +14,7 @@
 //     exist.
 // A W's position rebuilt after a sign out is the money run's (card near-buy-and-sell-run-for-real's record), not this.
 // After: sign
+// Bundle: out the page's CSP header (signpage-skeleton pins it in the build's _headers), and the helper's record route's live answer
 //   node scripts/live-checks/near-holdings-restore.mjs [--record <file>]
 //   node scripts/live-checks/near-holdings-restore.mjs --local [--helper <origin>] [--record <file>]
 //     this tree's build (index.html, public/app.js, public/_headers) in place of SIGN_HOST's, and the helper at <origin>

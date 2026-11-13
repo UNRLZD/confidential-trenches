@@ -13,6 +13,7 @@
 // recorded answers are facts() over each host's build (apps/terminal/dist; packages/signpage index.html and
 // public/app.js, the build the deploy makes).
 // After: app sign
+// Bundle: read app
 //   node scripts/live-checks/sol-pool-buys-mayhem-coins.mjs [--record <file>] [--answer <file>]
 // PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";

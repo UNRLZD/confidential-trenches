@@ -10,6 +10,7 @@
 // The behaviour (each state's mark, amount and word at 390 and 1440, done with no word, the tick in the frame the end
 // arrives, Retry off with money off) is the terminal's own browser run: apps/terminal/test/signin-screens/run.mjs.
 // After: app
+// Bundle: child app --root apps/terminal/dist
 //   node scripts/live-checks/restore-notice-redraw.mjs [--url <url>] [--record <file>]
 //   node scripts/live-checks/restore-notice-redraw.mjs --root <dir> [--record <file>]   the same read on a local build
 //     (apps/terminal/dist, built first) read from disk

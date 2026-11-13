@@ -20,6 +20,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { headerLines, readChecks } from "./live-after.mjs";
 import { signBuilt } from "../signpage-built.mjs";
 
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -28,220 +29,61 @@ export const APP = "https://ct-app.unrealized.trade";
 export const SIGN_DIR = path.join(ROOT, "packages/signpage");
 export const APP_DIR = path.join(ROOT, "apps/terminal/dist");
 
-const viaRead = (key, load) => ({ key, host: "sign", load, run: async (m, f) => m.judge(await m.read(f)) });
-/** The checks run in this process: each loads scripts/live-checks/<key>.mjs (a static import, which check:imports reads). */
-export const IN_PROCESS = [
-  viaRead("signpage-withdraw-own-spend", () => import("../live-checks/signpage-withdraw-own-spend.mjs")),
-  viaRead("signpage-buy-own-spend", () => import("../live-checks/signpage-buy-own-spend.mjs")),
-  viaRead("sol-pool-buy-lands-on-mainnet", () => import("../live-checks/sol-pool-buy-lands-on-mainnet.mjs")),
-  viaRead("signpage-sent-read-back", () => import("../live-checks/signpage-sent-read-back.mjs")),
-  viaRead("pool-buy-filled-2s", () => import("../live-checks/pool-buy-filled-2s.mjs")),
-  viaRead("sol-buy-reads-side-by-side", () => import("../live-checks/sol-buy-reads-side-by-side.mjs")),
-  viaRead("signpage-error-after-timeout", () => import("../live-checks/signpage-error-after-timeout.mjs")),
-  // reads both builds (SIGN_HOST's withdraw screen, APP_HOST's Withdraw pick): run with the app's checks, which have both
-  { key: "withdraw-form-shows-what-you-can-send", host: "app", load: () => import("../live-checks/withdraw-form-shows-what-you-can-send.mjs"), run: async (m, f) => m.judge(await m.read(f)) },
-  viaRead("sol-buy-rent-back", () => import("../live-checks/sol-buy-rent-back.mjs")),
-  viaRead("pool-read-down", () => import("../live-checks/pool-read-down.mjs")),
-  viaRead("sell-first-read-waits-out-a-throttle", () => import("../live-checks/sell-first-read-waits-out-a-throttle.mjs")),
-  viaRead("start-reads-wait-out-a-throttle", () => import("../live-checks/start-reads-wait-out-a-throttle.mjs")),
-  viaRead("evm-pool-sync-wide-pages", () => import("../live-checks/evm-pool-sync-wide-pages.mjs")),
-  viaRead("evm-pools-on-mainnet", () => import("../live-checks/evm-pools-on-mainnet.mjs")),
-  viaRead("wallet-near-prepay-taken", () => import("../live-checks/wallet-near-prepay-taken.mjs")),
-  viaRead("held-deposit-way-out", () => import("../live-checks/held-deposit-way-out.mjs")),
-  // cut as a release only after its merge: the marks and the pin, not the ledger
-  { key: "signpage-state-holdings", host: "sign", load: () => import("../live-checks/signpage-state-holdings.mjs"), run: async (m, f) => m.judge(await m.read(f), { ledger: false }) },
-  viaRead("evm-sell-no-release-in-flight", () => import("../live-checks/evm-sell-no-release-in-flight.mjs")),
-  viaRead("evm-sell-unfunded-sim-keeps-route", () => import("../live-checks/evm-sell-unfunded-sim-keeps-route.mjs")),
-  viaRead("kit-deposit-calls", () => import("../live-checks/kit-deposit-calls.mjs")),
-  viaRead("kit-frame-version", () => import("../live-checks/kit-frame-version.mjs")),
-  viaRead("signing-layer-says-when-it-closes", () => import("../live-checks/signing-layer-says-when-it-closes.mjs")),
-  viaRead("kit-portfolio-reads", () => import("../live-checks/kit-portfolio-reads.mjs")),
-  viaRead("kit-oneclick-pins-frozen", () => import("../live-checks/kit-oneclick-pins-frozen.mjs")),
-  viaRead("pool-answer-unknown", () => import("../live-checks/pool-answer-unknown.mjs")),
-  viaRead("a-load-proves-first-and-walks-the-restore-once", () => import("../live-checks/a-load-proves-first-and-walks-the-restore-once.mjs")),
-  viaRead("oneclick-fee-path-own-key", () => import("../live-checks/oneclick-fee-path-own-key.mjs")),
-  viaRead("pool-deposit-sent-end", () => import("../live-checks/pool-deposit-sent-end.mjs")),
-  viaRead("pool-deposit-address", () => import("../live-checks/pool-deposit-address.mjs")),
-  viaRead("pool-deposit-follow", () => import("../live-checks/pool-deposit-follow.mjs")),
-  viaRead("evm-deposit-route-mainnet", () => import("../live-checks/evm-deposit-route-mainnet.mjs")),
-  viaRead("solana-release-reads-paced", () => import("../live-checks/solana-release-reads-paced.mjs")),
-  { key: "restore-shows-the-balance-in-seconds", host: "sign", load: () => import("../live-checks/restore-shows-the-balance-in-seconds.mjs"), run: async (m, f) => m.judge(await m.collect({ fetchFn: f })) },
-  viaRead("pool-buy-record-never-stays-sent", () => import("../live-checks/pool-buy-record-never-stays-sent.mjs")),
-  viaRead("solana-legs-checked", () => import("../live-checks/solana-legs-checked.mjs")),
-  viaRead("signers-own-bytes", () => import("../live-checks/signers-own-bytes.mjs")),
-  viaRead("solana-written-accounts-whole", () => import("../live-checks/solana-written-accounts-whole.mjs")),
-  viaRead("pool-sell-legs-side-by-side", () => import("../live-checks/pool-sell-legs-side-by-side.mjs")),
-  // the PR's build is cut as a release only after its merge, so its run reads the marks and the pin, not the ledger
-  { key: "pool-senders-next-page", host: "sign", load: () => import("../live-checks/pool-senders-next-page.mjs"), run: async (m, f) => m.judge(await m.read(f), { ledger: false }) },
-  { key: "sol-settle-failed-is-not-unspent", host: "sign", load: () => import("../live-checks/sol-settle-failed-is-not-unspent.mjs"), run: async (m, f) => m.judge(await m.read(f), { ledger: false }) },
-  { key: "signpage-throttled-read-is-not-asked-again-at-once", host: "sign", load: () => import("../live-checks/signpage-throttled-read-is-not-asked-again-at-once.mjs"), run: async (m, f) => m.judge(await m.read(f), { ledger: false }) },
-  viaRead("solana-teardown-cashback", () => import("../live-checks/solana-teardown-cashback.mjs")),
-  { key: "near-private-trading", host: "sign", load: () => import("../live-checks/near-private-trading.mjs"), run: async (m, f) => m.judge(await m.read(f), { ledger: false }) },
-  viaRead("sol-w-sweep", () => import("../live-checks/sol-w-sweep.mjs")),
-  viaRead("intents-u-registered-first", () => import("../live-checks/intents-u-registered-first.mjs")),
-  viaRead("sol-rent-back-dust-burn", () => import("../live-checks/sol-rent-back-dust-burn.mjs")),
-  viaRead("round-trip-costs-less", () => import("../live-checks/round-trip-costs-less.mjs")),
-  viaRead("sell-right-after-a-buy", () => import("../live-checks/sell-right-after-a-buy.mjs")),
-  // cut as a release only after its merge: the marks and the pin, not the ledger
-  { key: "sol-sell-deposit-back-floor", host: "sign", load: () => import("../live-checks/sol-sell-deposit-back-floor.mjs"), run: async (m, f) => m.judge(await m.read(f), { ledger: false }) },
-  { key: "app-holding-follows-a-fill", host: "app", load: () => import("../live-checks/app-holding-follows-a-fill.mjs"), run: async (m, f) => m.judge(await m.read(f)) },
-  { key: "app-sell-shows-what-you-receive", host: "app", load: () => import("../live-checks/app-sell-shows-what-you-receive.mjs"), run: async (m, f) => m.judge(await m.read(f)) },
-  { key: "buy-spends-several-pieces-screens", host: "app", load: () => import("../live-checks/buy-spends-several-pieces-screens.mjs"), run: async (m, f) => m.judge(await m.read(f)) },
-  { key: "sol-pool-buys-mayhem-coins", host: "app", load: () => import("../live-checks/sol-pool-buys-mayhem-coins.mjs"), run: async (m, f) => m.judge(await m.read(f)) },
-  { key: "pool-sell-share-across-wallets", host: "sign", load: () => import("../live-checks/pool-sell-share-across-wallets.mjs"), run: async (m, f) => m.judge(await m.read(f), { ledger: false }) },
-  // the bundle part only: the chain part reads the helper and two RPCs, past the build
-  { key: "wallet-mainnet-relayer-pins", host: "sign", load: () => import("../live-checks/wallet-mainnet-relayer-pins.mjs"), run: async (m, f) => m.judgeBundle(await m.readBundle(f)) },
-  // the bundle part only (the walk's reach): the CSP is the host's header and the providers' answers are past the build
-  { key: "wallet-restore-id-reader", host: "sign", load: () => import("../live-checks/wallet-restore-id-reader.mjs"), run: async (m, f) => m.judgeBundle(await m.readBundle(f)) },
-  // the bundle part only (no state read at an old block's tag, every pool seat named): the providers' answers are past the build
-  { key: "evm-deposit-note-stays-incoming", host: "sign", load: () => import("../live-checks/evm-deposit-note-stays-incoming.mjs"), run: async (m, f) => m.judgeBundleOnly(await m.readBundle(f)) },
-  // the bundle part only (the tree sync's wait, the -32004 read again, the withdraw's cause line): mainnet's cadence on
-  // two providers is past the build
-  { key: "pool-tree-read-waits-for-its-second", host: "sign", load: () => import("../live-checks/pool-tree-read-waits-for-its-second.mjs"), run: async (m, f) => m.judgeBundle(await m.readBundle(f)) },
-  viaRead("fresh-money-spendable-at-once", () => import("../live-checks/fresh-money-spendable-at-once.mjs")),
-  viaRead("every-lamport-can-move", () => import("../live-checks/every-lamport-can-move.mjs")),
-  // the bundle part only (step 5's U_X read and carry): the providers' answers are past the build
-  { key: "wallet-restore-reads-ux", host: "sign", load: () => import("../live-checks/wallet-restore-reads-ux.mjs"), run: async (m, f) => m.judgeBundle(await m.readBundle(f)) },
-  // the bundle part only (the one rule, the deposit address, the follow's reader, the withdraw): the pools on two RPCs
-  // and the helper's fee against the device's are past the build
-  { key: "evm-deposit-on-mainnet", host: "sign", load: () => import("../live-checks/evm-deposit-on-mainnet.mjs"), run: async (m, f) => m.judgeBundle(await m.readBundle(f)) },
-  viaRead("evm-first-proof-inside-ten-seconds", () => import("../live-checks/evm-first-proof-inside-ten-seconds.mjs")),
-  // the sign part only, against the pin of the build it serves (live: this checkout's): the index pins its /app.js and
-  // serves that file; the helper part reads the helper, past the build
-  { key: "withdraw-fee-busy-waits", host: "sign", load: () => import("../live-checks/withdraw-fee-busy-waits.mjs"), run: async (m, f, dirs) => m.judgeSign(await m.readSign(SIGN, f, m.pinOf(readFileSync(path.join(dirs.sign, "index.html"), "utf8")))) },
-  { key: "signpage-withdraw-form", host: "sign", load: () => import("../live-checks/signpage-withdraw-form.mjs"), run: async (m, f) => m.judge(await m.probe(SIGN, f)) },
-  { key: "wallet-withdraw-move-out", host: "sign", load: () => import("../live-checks/wallet-withdraw-move-out.mjs"), run: async (m, f) => m.judge(await m.probe(SIGN, f)) },
-  { key: "signpage-pool-kinds", host: "sign", load: () => import("../live-checks/signpage-pool-kinds.mjs"), run: async (m, _f, dirs) => m.judge(await m.read(dirs.sign)) },
-  { key: "app-harness-signin-e2e", host: "sign", load: () => import("../live-checks/app-harness-signin-e2e.mjs"), run: async (m, f) => m.judge(await m.probe(SIGN, APP, ["sign"], f)) },
-  { key: "app-harness-signin-e2e", host: "app", load: () => import("../live-checks/app-harness-signin-e2e.mjs"), run: async (m, f) => m.judge(await m.probe(SIGN, APP, ["app"], f)) },
-  { key: "portfolio-shows-pool-trades", host: "sign", load: () => import("../live-checks/portfolio-shows-pool-trades.mjs"), run: async (m, f) => m.judge(await m.collect({ hosts: ["sign"], fetchFn: f })) },
-  { key: "portfolio-shows-pool-trades", host: "app", load: () => import("../live-checks/portfolio-shows-pool-trades.mjs"), run: async (m, f) => m.judge(await m.collect({ hosts: ["app"], fetchFn: f })) },
-  { key: "closed-positions-after-a-restore", host: "sign", load: () => import("../live-checks/closed-positions-after-a-restore.mjs"), run: async (m, f) => m.judge(await m.collect({ fetchFn: f })) },
-  { key: "portfolio-counts-money-an-open-buy-holds", host: "sign", load: () => import("../live-checks/portfolio-counts-money-an-open-buy-holds.mjs"), run: async (m, f) => m.judge(await m.collect({ hosts: ["sign"], fetchFn: f })) },
-  { key: "portfolio-counts-money-an-open-buy-holds", host: "app", load: () => import("../live-checks/portfolio-counts-money-an-open-buy-holds.mjs"), run: async (m, f) => m.judge(await m.collect({ hosts: ["app"], fetchFn: f })) },
-];
+// Each check says how it runs here in its own header (card ci-stops-costing-reruns: three shared lists, appended to by every
+// card that added a check, made each ready branch conflict with the next merge; the hosts' lists moved to the checks'
+// After lines the same way, scripts/ci/live-after.mjs). One `// Bundle:` line per run, in the check's leading comment block:
+//   // Bundle: read <sign|app>          run in this process: the check's own bundle(fetch, { host, dirs, SIGN, APP,
+//                                       readFileSync, path }) when it exports one, else judge(await read(fetch))
+//   // Bundle: child <sign|app> <args>  run as a child process in the check's own local mode, with <args>
+//   // Bundle: out <reason>             not run here, and why
+// bundlePlan() reads them; a line it cannot read is a problem the test names, never a skipped check.
+export const BUNDLE_HOSTS = ["sign", "app"];
+
+/** The runs the checks' Bundle lines name under `root`: { inProcess, childRuns, out, problems }, each list by key. */
+export function bundlePlan(root = ROOT) {
+  const inProcess = [];
+  const childRuns = [];
+  const out = {};
+  const problems = [];
+  for (const [key, text] of Object.entries(readChecks(root))) {
+    const seen = new Set();
+    for (const value of headerLines(text, "Bundle")) {
+      const [mode, ...rest] = value.split(/\s+/);
+      const where = `${key}: "Bundle: ${value}"`;
+      if (mode === "out") {
+        const why = value.slice(3).trim();
+        if (!why) problems.push(`${where}: no reason`);
+        else if (Object.hasOwn(out, key)) problems.push(`${where}: left out twice`);
+        else out[key] = why;
+        continue;
+      }
+      const [host, ...args] = rest;
+      if (mode !== "read" && mode !== "child") {
+        problems.push(`${where}: the mode is read, child or out`);
+        continue;
+      }
+      if (!BUNDLE_HOSTS.includes(host)) {
+        problems.push(`${where}: the host is ${BUNDLE_HOSTS.join(" or ")}`);
+        continue;
+      }
+      if (mode === "read" && args.length) problems.push(`${where}: a read takes no arguments`);
+      const id = `${mode} ${host} ${args.join(" ")}`;
+      if (seen.has(id)) problems.push(`${where}: twice`);
+      seen.add(id);
+      if (mode === "read") inProcess.push({ key, host, load: () => import(`../live-checks/${key}.mjs`), run: async (m, f, dirs) => (typeof m.bundle === "function" ? m.bundle(f, { host, dirs, SIGN, APP, readFileSync, path }) : m.judge(await m.read(f))) });
+      else childRuns.push({ key, host, args });
+    }
+    if (Object.hasOwn(out, key) && seen.size) problems.push(`${key}: run here and left out`);
+  }
+  return { inProcess, childRuns, out, problems };
+}
+const PLAN = bundlePlan();
+/** The checks run in this process. */
+export const IN_PROCESS = PLAN.inProcess;
 /** The checks run in their own local mode, as a child process: the arguments after the check's path. */
-export const CHILD_RUNS = [
-  { key: "kit-renewal-read-bounded", host: "sign", args: ["--local"] },
-  { key: "signpage-buy-route-events", host: "sign", args: ["--local", "--host", "sign"] },
-  { key: "signpage-buy-route-events", host: "app", args: ["--local", "--host", "app"] },
-  { key: "app-buy-route-strip", host: "app", args: ["--root", "apps/terminal/dist"] },
-  { key: "app-quick-buy-one-tap", host: "app", args: ["--root", "apps/terminal/dist"] },
-  { key: "app-three-owner-labels", host: "app", args: ["--root", "apps/terminal/dist"] },
-  { key: "app-toast-clears-sheet-head", host: "app", args: ["--root", "apps/terminal/dist"] },
-  { key: "app-chart-controls", host: "app", args: ["--root", "apps/terminal/dist"] },
-  { key: "chart-drags-and-tracks-the-pointer", host: "app", args: ["--root", "apps/terminal/dist"] },
-  { key: "app-header-first-paint-auth", host: "app", args: ["--root", "apps/terminal/dist"] },
-  { key: "app-orders-coming-soon", host: "app", args: ["--root", "apps/terminal/dist"] },
-  { key: "restore-notice-redraw", host: "app", args: ["--root", "apps/terminal/dist"] },
-  { key: "words-nov8-final", host: "sign", args: ["--local", "--host", "sign"] },
-  { key: "words-nov8-final", host: "app", args: ["--local", "--host", "app"] },
-  { key: "signing-views-open-over-the-app", host: "sign", args: ["--local"] },
-];
+export const CHILD_RUNS = PLAN.childRuns;
 /** The deploys' checks left out, with the reason. */
-export const OUT = {
-  "owners-solana-buy-lands": "the helper's pieces route (a planted 2-piece buy) and mainnet's rent on two public RPCs; its bundle part, the kit's one tip for every set, is held on the sources by packages/kit/test/solana-pool-buy-pieces.test.ts and on a build by its own replay (owners-solana-buy-lands.test.mjs)",
-  "hosts-main-on-top": "DNS on two resolvers, the CT logs, the hosts' response headers, the helper and the retired names",
-  "signpage-skeleton": "response headers (the sign deploy's gate runs it on the build's _headers)",
-  "app-host-gate": "response headers (the app deploy's gate reads the build's _headers)",
-  "app-release-sri": "response headers (CSP, Integrity-Policy) the host adds",
-  "kit-sol-pool-deposit-floor": "the release ledger: it holds the served /app.js to a written release list, so a planted bundle fails it whatever it plants (its replay holds the marks and the pin)",
-  "page-evm-rpc-csp": "response headers (each page's served CSP connect-src; app-host-gate and signpage-skeleton pin it in the build's _headers)",
-  "evm-pool-lists-mainnet": "mainnet Base and Robinhood RPC reads of the pool's logs on each chain's two seats, and SIGN_HOST's response headers (connect-src), never the build",
-  "signpage-solana-trade": "the page's CSP header, and a run record's transactions on two RPCs",
-  "signpage-evm-pool-buy": "a run record's buys on two testnet RPCs each and the helper's send route; on the build, the mainnet refusal its bundle part reads is held by packages/signpage/test/pool-network.test.ts (pool.buy on Base and Robinhood not_allowed)",
-  "evm-withdraw-mainnet": "a run record's withdraws (each a release and W's onward send) on two testnet RPCs each; on the build, its bundle part is held by packages/signpage/scripts/build-network.test.mjs (the EVM withdraw's release in both builds)",
-  "signpage-evm-pool-sell": "a run record's sales on two testnet RPCs each and the helper's sell route; on the build, the mainnet refusal its bundle part reads is held by packages/signpage/test/pool-network.test.ts (pool.sell on Base and Robinhood not_allowed)",
-  "signpage-positions-evm": "a run record's Base Sepolia buy and sell, and W's balance, on two testnet RPCs; the testnet build's positions pass is held by packages/signpage/test/positions-evm.test.ts (the mainnet build pins no EVM pool)",
-  "signpage-withdraw-handoff": "the page's CSP header, and the testnet fee read on the release helper and RPCs",
-  "held-move-forgotten-tx": "the page's CSP header (signpage-skeleton pins it in the build's _headers), and a mainnet archival RPC read",
-  "near-holdings-restore": "the page's CSP header (signpage-skeleton pins it in the build's _headers), and the helper's record route's live answer",
-  "signpage-release": "the release list against what the host serves",
-  "signpage-release-at-deploy": "the newest committed release list against what the host serves (the sign deploy refuses a build that list does not name)",
-  "wallet-deposit-follow": "the helper's deposit status answer",
-  "pool-ready-no-flicker": "the devnet run record",
-  "signpage-pool-flow": "devnet RPC reads",
-  "signpage-pool-notes": "devnet RPC reads of the run",
-  "signpage-pool-withdraw-form": "devnet RPC reads of the run",
-  "signpage-pool-pins": "mainnet RPC reads of the pin's accounts and the helper's mainnet fee answer",
-  "signpage-throttled-provider-has-a-spare": "both public Solana seats' CORS answers to the page's origin and their mainnet reads of the stable accounts",
-  "near-quote-under-the-pace": "the helper's NEAR seat (its CORS answer to the page's origin, a mainnet read beside dRPC's, one page's 10 s window of reads); the bundle's naming of the seat is held by packages/kit/test/near-networks.test.ts and the page's wiring by packages/signpage/src/main.ts",
-  "pool-deposits": "devnet RPC reads of the run",
-  "wallet-passkey-prf": "a browser",
-  "signpage-postmessage": "a browser",
-  "signpage-shell": "a browser (its harness run is in test-browser: SIGN_HOST from this tree's build, Chromium at phone width; its Firefox and desktop runs are the live host's, Firefox's build is not on that runner)",
-  "sign-out-stops-the-pages-reads": "a browser (its harness run is in test-browser: signpage-shell's collect, Chromium at phone width)",
-  "signpage-signin-kinds": "a browser",
-  "signpage-prover-host": "a browser",
-  "signpage-prover-threads": "a browser",
-  "signpage-pool-price": "a browser",
-  "pool-usd-price-never-stale": "three minutes of mainnet Pyth reads on the page's own pair (its test holds its bundle marks on this tree's own build, planted)",
-  "signpage-pool-mainnet": "a browser",
-  "pool-restore-wired": "a browser",
-  "signpage-restores-near-vault-notes": "a browser (it runs pool-restore-wired)",
-  "kit-deposit-assets-dry": "a browser",
-  "deposit-quote-no-liquidity": "a browser (its --local run is in test-browser: SIGN_HOST from this tree's build, every quote answered in the run)",
-  "app-shell": "a browser",
-  "app-shell-rpc-outage-judge": "a browser",
-  "app-phone-token-taps-and-rows": "a browser",
-  "app-in-shell": "a browser (its --harness run is in test-browser)",
-  "app-discover-live": "a browser and the helper",
-  "app-no-test-token": "a browser and the helper",
-  "app-near-trading": "a browser and the helper (its test holds its bundle marks to the build's own writing)",
-  "app-launchpad-badges": "a browser and the helper",
-  "app-token-lower-panel": "the helper's holders answer",
-  "app-token-rail": "the helper's lists answer",
-  "app-header-search-chain": "the helper's lists and token answers (its behaviour run is in test:e2e)",
-  "app-token-route": "a browser and the helper",
-  "app-chains-evm": "a browser and the helper",
-  "app-chains-evm-rail": "a browser and the helper",
-  "rail-open-pushes-the-middle": "a browser and the helper",
-  "app-trade-box-mount": "a browser",
-  "app-a2-e2e": "the helper's market and devnet RPC answers, and the response headers APP_HOST adds",
-  "app-token-chart": "a browser and the helper",
-  "app-chart-live": "a browser and the helper",
-  "app-legend-holds-still": "a browser and the helper",
-  "app-discover-rows-hold": "a browser and the helper",
-  "app-verify-mount": "a browser and NEAR RPCs",
-  "verify-pools": "a browser and chain RPCs",
-  "verify-row-survives-one-provider": "a browser and chain RPCs",
-  "app-no-blank-pages": "a browser",
-  "app-footer-bar": "a browser and NEAR RPCs (its --harness run is in test:e2e)",
-  "app-portfolio-mount": "a browser (its --harness run is in test-browser)",
-  "trade-box-pool": "a browser",
-  "app-console-429": "the helper under load",
-  "trade-box-bal-cash": "a browser",
-  "portfolio-one-balance": "a browser",
-  "app-sell-mount": "a browser",
-  "app-list-age": "a browser and the helper",
-  "app-discover-toolbar": "a browser and the helper",
-  "discover-matches-the-main-app": "a browser and the helper",
-  "app-pool-withdraw": "a browser",
-  "app-hop-sync-lock": "a browser",
-  "app-lock-holds-until-the-layer-closes": "a browser (its --harness run is in test-browser)",
-  "signed-out-portfolio-and-account-say-what-appears": "a browser (its --harness run is in test-browser)",
-  "balances-per-chain": "a browser and chain RPCs",
-  "app-export-every-wallet": "a browser",
-  "evm-quote-warm-round": "EVM RPC quotes",
-  "evm-quote-lag-held": "EVM RPC quotes",
-  "evm-quote-read-gas-starve": "EVM RPC quotes",
-  "evm-pool-index": "EVM RPC index reads on the venue's two index readers",
-  "evm-sell-hook-intrablock": "EVM RPC traces and replays",
-  "device-evm-fee-read-walks-operators": "EVM RPC reads on the kit's read lists",
-  "evm-money-shows-and-spends-at-once": "EVM RPC reads of the page's two mainnet pool RPCs beside its build",
-  "evm-device-reads-need-no-old-state": "EVM RPC reads on the kit's read lists",
-  "rh-cold-quote": "EVM RPC quotes",
-  "token-page-fills-after": "a browser and the helper",
-  "app-deposit-mount": "a browser (its --harness run is in test-browser)",
-  "deposit-to-pool": "a browser (its --harness run is in test-browser)",
-  "app-faults-seen-on-122": "a browser (its --harness run is in test-browser)",
-  "app-faults-seen-on-124": "a browser and SIGN_HOST's 1Click reads through the helper (its --harness run is in test-browser)",
-  "app-faults-seen-on-126": "a browser and the helper's chart bars (its --harness run is in test-browser)",
-  "screens-never-say-proof": "a browser (its --harness run is in test-browser)",
-  "pool-balance-counts-the-remainder": "a browser, and SIGN_HOST's deployed scripts beside the app's build",
-  "terminal-harness-sign-spa": "Pages' answer to a path with no file (the index), which no build file holds",
-  "near-view-rhea": "mainnet NEAR RPC reads of the Rhea pool and get_return on the two providers, never the build",
-};
+export const OUT = PLAN.out;
 
 /** A fetch that answers from the build folders: SIGN_HOST's / and index.html, every other path public/<path>; APP_HOST's dist/<path>. */
 export function buildFetch({ sign, app }) {

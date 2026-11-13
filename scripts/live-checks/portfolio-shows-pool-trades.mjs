@@ -14,6 +14,8 @@
 // Each host's deploy runs its own half, so a host that lags does not fail the other's deploy.
 // After: app --host app
 // After: sign --host sign
+// Bundle: read sign
+// Bundle: read app
 //   node scripts/live-checks/portfolio-shows-pool-trades.mjs [--host app|sign] [--record <file>]
 //     PASS exit 0, FAIL exit 1, error exit 2 (no --host: both)
 // --record writes what the run read (the marks each file holds, its pin and its sha384, not the files), so the check's
@@ -120,4 +122,10 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     console.error(`CARD ${KEY} / live: ERROR ${e?.stack ?? e}`);
     process.exit(2);
   }
+}
+
+/** How scripts/ci/bundle-checks.mjs runs this check on a build (its `// Bundle: read` line): `f` answers from the build
+ *  folders as the host would; `dirs` names them (card ci-stops-costing-reruns, moved from bundle-checks.mjs). */
+export async function bundle(f, { host }) {
+  return judge(await collect({ hosts: [host], fetchFn: f }));
 }

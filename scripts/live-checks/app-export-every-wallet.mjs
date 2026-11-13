@@ -15,6 +15,7 @@
 // here; the check's test holds the two equal) was asked for at least once. A screenshot of each width, of its Wallets
 // rows in view, of the desktop export menu and of a phone sheet are kept.
 // After: app
+// Bundle: out a browser
 //   node scripts/live-checks/app-export-every-wallet.mjs [--shots <dir>] [--record <file>]
 //     the deployed APP_HOST (its bytes and headers as served, the helper live), framed by the stand-in shell
 //   node scripts/live-checks/app-export-every-wallet.mjs --harness [--build <dir>] [--shots <dir>] [--record <file>]

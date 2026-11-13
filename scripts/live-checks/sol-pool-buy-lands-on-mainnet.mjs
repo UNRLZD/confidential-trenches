@@ -10,6 +10,7 @@
 // sell box's preview prices the sale on mainnet the same way (src/pool-sell-dry.ts poolSellPays, its network the fee
 // and the priority). It does not prove a buy or a sell lands: only a mainnet tap does, read back on two RPCs.
 // After: sign
+// Bundle: read sign
 //   node scripts/live-checks/sol-pool-buy-lands-on-mainnet.mjs [--record <file>] [--answer <file>]
 // PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";

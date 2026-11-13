@@ -12,6 +12,7 @@
 // deploy.mjs checkDir), so a build that fails it is never uploaded. This file reaches no package code (the import check
 // holds it): its test holds PINNED_KEYS and PINS to the kit's own exports.
 // After: sign
+// Bundle: read sign
 //   node scripts/live-checks/kit-oneclick-pins-frozen.mjs [--record <file>] [--answer <file>]
 // PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";

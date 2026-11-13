@@ -13,6 +13,7 @@
 // (Max inside seconds of a load, no helper 429, one "restore: <chain> walked" line per chain a load) is a signed-in walk.
 // The recorded answers are facts() over each tree's packages/signpage/index.html and public/app.js.
 // After: sign
+// Bundle: read sign
 //   node scripts/live-checks/a-load-proves-first-and-walks-the-restore-once.mjs [--record <file>] [--answer <file>]
 // PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";

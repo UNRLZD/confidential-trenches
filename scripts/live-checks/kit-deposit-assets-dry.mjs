@@ -24,6 +24,7 @@
 // to the helper's 1Click proxy (url, method, body, and which of the two asks it followed). The helper is the real one in
 // every mode. A page before this card answers both kinds not_allowed.
 // After: sign
+// Bundle: out a browser
 //   node scripts/live-checks/kit-deposit-assets-dry.mjs [--url <SIGN_HOST url>] [--record <file>]
 //   node scripts/live-checks/kit-deposit-assets-dry.mjs --local <build dir> [--record <file>]
 //     the same run with Playwright answering SIGN_HOST from a build dir under its own _headers (the helper and 1Click

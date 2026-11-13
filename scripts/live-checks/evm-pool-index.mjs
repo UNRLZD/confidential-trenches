@@ -21,6 +21,7 @@
 // What it proves, and only that: the readers the deployed kit names serve the index's reads and agree. That quotes read
 // their pools from the index is card evm-pool-index-route's check.
 // After: app
+// Bundle: out EVM RPC index reads on the venue's two index readers
 //   node scripts/live-checks/evm-pool-index.mjs [--record <file>]
 // PASS exit 0, FAIL exit 1, error exit 2. --record writes the run, for the test's replay (evm-pool-index.answers.json:
 // its bad answer is this script run in a checkout of the kit before this card). Reads only: no key, no transaction, no

@@ -12,6 +12,7 @@
 // never asked, no request to a 1Click path (so no 429), every load READY, all inside 60 s. A run stops at the first
 // 429: that is the verdict, and no more of the helper's share is spent.
 // After: app
+// Bundle: out a browser and SIGN_HOST's 1Click reads through the helper (its --harness run is in test-browser)
 //   node scripts/live-checks/app-faults-seen-on-124.mjs [--shots <dir>] [--record <file>]
 //     the deployed SIGN_HOST and APP_HOST and the helper as served, as a signed-out visitor
 //   node scripts/live-checks/app-faults-seen-on-124.mjs --harness [--build <dir>] [--shots <dir>] [--record <file>]

@@ -17,6 +17,7 @@
 //     SuccessValue, included in block 223168356, and serves that block by height (the block an UNKNOWN_TRANSACTION is
 //     checked against, moveout.ts archivedState), each with access-control-allow-origin * or SIGN_ORIGIN.
 // After: sign
+// Bundle: out the page's CSP header (signpage-skeleton pins it in the build's _headers), and a mainnet archival RPC read
 //   node scripts/live-checks/held-move-forgotten-tx.mjs [--url <origin>] [--record <file>]
 //   node scripts/live-checks/held-move-forgotten-tx.mjs --local [--record <file>]   this tree's committed build and _headers
 //   PASS exit 0, FAIL exit 1, error exit 2. The record holds the CSP's connect-src, the script's path, integrity, size,

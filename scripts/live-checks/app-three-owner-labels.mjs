@@ -10,6 +10,7 @@
 // The behaviour itself (which rows fail, Buy and the presets off with no Retry, the dash on desktop and phone) is the
 // terminal's own tests: apps/terminal/test/three-owner-labels.test.ts, test/trade-box/run.mjs and test/portfolio/run.mjs.
 // After: app
+// Bundle: child app --root apps/terminal/dist
 //   node scripts/live-checks/app-three-owner-labels.mjs [--url <url>] [--record <file>]
 //   node scripts/live-checks/app-three-owner-labels.mjs --root <dir> [--record <file>]   the same read on a local build
 //     (apps/terminal/dist, built first) read from disk

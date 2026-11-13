@@ -18,6 +18,7 @@
 // connection (the first opens it), and the second's time (the round trip to the helper, which answers it at once) is
 // taken off the page read's. So a runner far from the helper, or a connection made anew, is not counted as the page's.
 // After: helper
+// Serial: jupiter-budget 20
 //   node scripts/live-checks/helper-token-page-cold.mjs [--base <url>] [--pairs <n>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the check's test can replay it.
 import "../net-window.mjs";

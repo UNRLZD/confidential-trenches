@@ -8,6 +8,7 @@
 //     at APP_HOST/token/<chain>/<id>, ready, with their token read 200 for that token.
 // Each part's own lines are kept, prefixed with its key.
 // After: app
+// Bundle: out a browser and the helper
 //   node scripts/live-checks/app-chains-evm.mjs [--build <dir>] [--shots <dir>] [--record <file>]
 //     PASS exit 0, FAIL exit 1, error exit 2
 // --build serves that terminal build at APP_HOST's name inside the stand-in shell, the helper still answered live;

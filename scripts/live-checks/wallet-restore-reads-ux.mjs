@@ -36,6 +36,7 @@
 //   - ux_wired: the restore host's U_X reads are built from the follows' own deps (the very function their `deps` calls),
 //     keyed by the pool's chain.
 // After: sign
+// Bundle: read sign
 //   node scripts/live-checks/wallet-restore-reads-ux.mjs [--local] [--with <url>] [--record <file>] [--answer <file>]
 // --local judges this tree's committed build (packages/signpage/index.html and public/app.js) in SIGN_HOST's place, the
 // providers still asked live; --with asks <url> in the second provider's place (a recorded bad answer). PASS exit 0,
@@ -365,4 +366,10 @@ if (realpathSync(process.argv[1] ?? "") === realpathSync(fileURLToPath(import.me
     console.error(`ERROR ${KEY}: ${e?.message ?? e}`);
     process.exit(2);
   }
+}
+
+/** How scripts/ci/bundle-checks.mjs runs this check on a build (its `// Bundle: read` line): `f` answers from the build
+ *  folders as the host would; `dirs` names them (card ci-stops-costing-reruns, moved from bundle-checks.mjs). */
+export async function bundle(f) {
+  return judgeBundle(await readBundle(f));
 }
