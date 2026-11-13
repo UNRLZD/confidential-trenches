@@ -1,0 +1,17 @@
+{
+ "_note": "good: this card's mainnet build (node packages/signpage/scripts/build-app.mjs on branch card/robinhood-note-spendable), its index and its app.js facts: the proving lock named and asked with steal and ifAvailable. bad: SIGN_HOST read 2026-11-13T21:55Z, before this card: no proving lock, so a note one tab proved stays HELD out of the tab in use.",
+ "good": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-0jCmdqcMBLYNtMyRB3dhubnQ0820jzm7icWgHbc35ZuvuXxbWOu37o6XDfe4iNpD\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-0jCmdqcMBLYNtMyRB3dhubnQ0820jzm7icWgHbc35ZuvuXxbWOu37o6XDfe4iNpD",
+  "lock": true,
+  "steal": true,
+  "ifAvailable": true
+ },
+ "bad": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-ZFe+Tuco9V0gMoeAq3pGbTr9OVAWP4zGQiqqJUeWF8FZUKFxRmGZF5p33bD9KVtx\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-ZFe+Tuco9V0gMoeAq3pGbTr9OVAWP4zGQiqqJUeWF8FZUKFxRmGZF5p33bD9KVtx",
+  "lock": false,
+  "steal": false,
+  "ifAvailable": true
+ }
+}
