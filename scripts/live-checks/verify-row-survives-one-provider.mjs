@@ -45,7 +45,8 @@ const refuse = (plants) => (route) => {
   }
   if (host(q.url()) !== plants[width]) return null;
   if (q.method() === "OPTIONS") return route.fulfill({ status: 204, headers: REFUSAL, body: "" });
-  return route.fulfill({ status: 400, headers: REFUSAL, body: JSON.stringify({ jsonrpc: "2.0", id: 1, error: { code: -32600, message: "planted refusal" } }) });
+  // the status is the refusal (pools.ts poolRpc throws on any status but 200); the body is no JSON-RPC answer
+  return route.fulfill({ status: 400, headers: REFUSAL, body: JSON.stringify({ error: "planted refusal" }) });
 };
 
 export function judge(rec) {
