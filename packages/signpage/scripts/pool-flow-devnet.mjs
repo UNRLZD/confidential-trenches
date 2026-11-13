@@ -281,6 +281,8 @@ const helperFetch = async (url, init) => {
   return r;
 };
 const t = testnetPool(page, { rpcs, prover: { vault, stop: () => {} }, tables: TABLES, fetch: helperFetch, ...(COPY ? { pin: copy.pin, holdings: copy.holdings } : {}) });
+// the page's host by a name the sell block's own `t` (the buy's transaction) does not hide
+const pageHost = t;
 const kinds = poolKinds({ ...testnetPoolDeps(t.flow), rpcs: (c) => (c === "solana" ? rpcs : testnetPoolDeps().rpcs(c)) });
 const ctx = (id) => ({ id, sha: "00", progress: (s) => log(`${id} progress ${JSON.stringify(s)}`) });
 // a kind answers at its send and its run goes on (the app learns the end from its state reads): each run holds the seed's
@@ -585,10 +587,18 @@ if (bought && process.env.FLOW_COPY_STOP !== "buy") {
   // the rent back (card sol-buy-rent-back): after the full sell, W's token account and volume accounts at finalized,
   // and W's own lamports: each closed (null) and W at 0 when it all came back; read once every transaction the page
   // sent is finalized (90 s at most), since the page reads its rent back at confirmed
+  // on a copy the page's sends are the copy's own list (sentTxs is filled only through the devnet fetch); since card
+  // every-lamport-can-move a full sell's note is its sweep's, so the run waits that sweep out, then settles it with a
+  // later load's state read, as the page does
+  const sentSigs = () => (COPY ? copy.sent.map((s) => s.signature) : sentTxs);
   for (let i = 0; i < 45; i++) {
-    const st = (await own("getSignatureStatuses", [sentTxs])).value;
+    const st = sentSigs().length ? (await own("getSignatureStatuses", [sentSigs()])).value : [];
     if (st.every((s) => s?.confirmationStatus === "finalized")) break;
     await sleep(2_000);
+  }
+  if ((await noteList()).some((n) => n.ref === "return" && n.state === "INCOMING")) {
+    await pageHost.stateRead();
+    await navigator.locks.request(WALLET_SEED_LOCK, { mode: "exclusive" }, () => {});
   }
   const info =async (a) => (await own("getAccountInfo", [a, { encoding: "base64", commitment: "finalized" }])).value;
   const program = (await info(MINT)).owner;

@@ -11,6 +11,7 @@ const SELL = `${W}/src/pool-sell.ts`;
 const KIT = `${W}/../kit/src/checks/solana/checks.ts`;
 const FLOW = `${W}/../kit/src/trade/solana/flow.ts`;
 const BUY = `${W}/src/pool-buy.ts`;
+const WITHDRAW = `${W}/src/pool-withdraw.ts`;
 const T = "test/pool-sell.test.ts";
 const K = "../kit/test/solana-teardown-rules.test.ts";
 const KF = "../kit/test/solana-flow.test.ts";
@@ -19,7 +20,13 @@ const TB = "test/pool-buy.test.ts";
 const TESTNET = `${W}/src/pool-testnet.ts`;
 const SPACING = `${W}/src/device-spacing.ts`;
 const TT = "test/pool-testnet.test.ts";
-// [name, file, the test that kills it, from, to]; from an array of [from, to] pairs plants each one (a rule held twice,
+// The full-sale tests that read the sweep's own transaction (its deposit, then the rest under the grid as one System
+// transfer to the pool's account): each fails in under a second when that transfer is missing or goes to W, while
+// with it gone 16 other sale tests wait out their 20 s each and the file passes the 180 s cap with no count (the
+// SURVIVED of L1 and L1b at be21a2a0d); those two mutants run these tests alone
+const FULL_SALE = "^(every lamport can move: a full sell on|a full sell on (pump|pumpswap): W's token account)";
+// [name, file, the test that kills it, from, to, and a name pattern the run takes, those tests alone]; from an array
+// of [from, to] pairs plants each one (a rule held twice,
 // as what W read as is: the pass's end names it W's own state, and the record keeps it only on those ends)
 export const M = [
   ["A10 a sweep priced on one RPC's lamports of W", SELL, T, '      if (a !== b) throw new Error("W\'s lamports differ on the two RPCs");\n', ""],
@@ -54,7 +61,7 @@ export const M = [
   ["D8b a held mint with no sell read taken as sold", SELL, T, 'sells.get(t.mint) ?? "no"', 'sells.get(t.mint) ?? "yes"'],
   ["D9 the burn list dropped", SELL, T, "const burn = holding.map((t) => t.ata);", "const burn: string[] = [];"],
   ["D10 the sell not recorded", SELL, T, "      owedRec.sell = { ...prior?.sell, [token]: { tx: base64.encode(signed), last: bhv.lastHeight } };\n", ""],
-  ["D11 a load passes no sell on", SELL, T, "mints: o.mints, wait, ...(o.sell ? { sell: o.sell } : {}) }", "mints: o.mints, wait }"],
+  ["D11 a load passes no sell on", SELL, T, "mints: o.mints, wait, ...(o.sell ? { sell: o.sell } : {}), ...(opts.ride", "mints: o.mints, wait, ...(opts.ride"],
   // the review of bf467ae7's named ones: X2 (F3), Y2, Y3, Y4, Y7 (F4), its read order and commitment (F5), and the
   // armed path's burn list (F6); and a sell read's fault counted for a mint W no longer holds
   ["review X2 a burn's next close of another account", KIT, K, " && next.data[0] === 9 && next.accounts[0]?.key === h?.address;\n          if (!h || h.kind !== \"token\" || h.burn", " && next.data[0] === 9;\n          if (!h || h.kind !== \"token\" || h.burn"],
@@ -82,7 +89,7 @@ export const M = [
   ["review 6 N12-seen-no-rules-version", SELL, T, "#${POOL_RENT_BACK_RULES}#", "#"],
   ["review 6 N16-owedAfter-no-reread", SELL, T, "    const now = (await h.owed?.list())?.find((r) => r.address === o.address) ?? o;", "    const now = o;"],
   ["review 6 N17-owedAfter-mints-not-merged", SELL, T, "mints: mintsOf(now.mints, o.mints), passes", "mints: now.mints, passes"],
-  ["review 6 N18-zero-with-claim-dropped", SELL, T, "if (lamports === 0n) return { end: owed > 0 ? (\"owed\" as const) : (\"nothing\" as const)", "if (lamports === 0n) return { end: \"nothing\" as const"],
+  ["review 6 N18-zero-with-claim-dropped", SELL, T, "if (lamports === 0n) return { end: owed + kept > 0 ? (\"owed\" as const) : (\"nothing\" as const)", "if (lamports === 0n) return { end: \"nothing\" as const"],
   ["review 6 N19-setup-fault-no-stop", SELL, T, "        await owedAfter(h, o, \"gave_up\");\n      });\n      if (!go) return true;", "        await owedAfter(h, o, \"gave_up\");\n      });\n      void go;"],
   ["review 6 N20-setup-fault-unlocked", SELL, T, "      const go = await withHolds(locks, address, true, wait, async () => {\n        const o = (await h.owed!.list()).find((r) => r.address === address);\n        if (!o) return;", "      const go = await (async (f: () => Promise<void>) => (await f(), true))(async () => {\n        const o = (await h.owed!.list()).find((r) => r.address === address);\n        if (!o) return;"],
   ["review 6 N21-sweep-refused-gives-up", SELL, T, "      if (now.k === \"refused\") return { end: \"refused\" as const, detail: now.why };", "      if (now.k === \"refused\") return { end: \"gave_up\" as const, detail: now.why };"],
@@ -104,9 +111,9 @@ export const M = [
   ["review 8 C6 the sell host loses bought", TESTNET, TT, "      owed: owedNoted(page.store),\n      bought: buyMints(page.store),\n", "      owed: owedNoted(page.store),\n"],
   ["review 8 C7 buyMints' get returns undefined", SELL, T, "return Object.hasOwn(all, address) ? all[address] : undefined;", "return undefined;"],
   // card sol-sell-deposit-back-floor: the deposit back under the kit's release floor is never built; the sale stays on W
-  ["floor F1 a deposit back under the floor built", SELL, T, "return { reserve, value: p.minOut - reserve < p.noteFloor ? 0n : p.minOut - reserve };", "return { reserve, value: p.minOut - reserve };"],
+  ["floor F1 a deposit back under the floor built", SELL, T, "return { reserve, value: note < p.noteFloor ? 0n : note };", "return { reserve, value: note };"],
   ["floor F2 no floor taken", SELL, T, '  if (typeof p.noteFloor !== "bigint" || p.noteFloor < SOLANA_POOL_MIN_DEPOSIT) return { refused: "quote_check_failed" };\n', ""],
-  ["floor F3 the pool's least deposit for the floor", SELL, T, "const noteFloor = solanaPoolNoteFloor(rent);", "const noteFloor = SOLANA_POOL_MIN_DEPOSIT;"],
+  ["floor F3 the pool's least deposit for the floor", SELL, T, "const noteFloor = solanaSellNoteFloor(rent);", "const noteFloor = SOLANA_POOL_MIN_DEPOSIT;"],
   ["floor F4 an eight under the floor kept, never the six", SELL, T, '      if (next && r.value === 0n) return no("quote_check_failed");\n', ""],
   ["floor F5 a value of 0 built as a deposit", SELL, T, "value === 0n ? steps : [...steps, depositIx(", "false ? steps : [...steps, depositIx("],
   ["floor F6 one RPC's read of the sell filled", SELL, T, "if (got[0].got === \"ok\" && got[1].got === \"ok\") return \"filled\";", "if (got[0].got === \"ok\" || got[1].got === \"ok\") return \"filled\";"],
@@ -140,7 +147,7 @@ export const M = [
   // a settled W read on neither seat (P2-4); an unproven W steady after its third pass (P2-6); the buy proven once on the
   // public seat; the positions held only while a W is read (P3-8)
   ["a1 the Ws found on the public seat", SELL, T, "const read = await findOn(rpcs[1], listed)", "const read = await findOn(rpcs[0], listed)"],
-  ["a2 a settled W passed again", SELL, T, "      if (r === undefined ? o.seen === undefined : o.seen !== r.seen) todo.push(address);", "      todo.push(address);"],
+  ["a2 a settled W passed again", SELL, T, "      if (r === undefined ? o.seen === undefined : o.seen !== r.seen || floored) todo.push(address);", "      todo.push(address);"],
   ["a3 the helper's silence passes a settled W", SELL, T, "r === undefined ? o.seen === undefined : o.seen !== r.seen", "r === undefined ? true : o.seen !== r.seen"],
   ["a4 a W the helper reads empty not listed empty", SELL, T, "      if (await settledSpent(address)) await Promise.resolve(h.owed.markEmpty?.(address)).catch(() => {});\n      continue;\n    }\n    todo.push(address);", "      continue;\n    }\n    todo.push(address);"],
   ["a5 a W the helper reads empty passed", SELL, T, "    if (!r.any) {\n      if (await settledSpent(address)) await Promise.resolve(h.owed.markEmpty?.(address)).catch(() => {});\n      continue;\n    }\n", ""],
@@ -160,11 +167,37 @@ export const M = [
   ["a19 the record's proven buy proven again", SELL, T, "  let proven = o.buy;\n", "  let proven: SolanaBuy | null | undefined = undefined;\n"],
   ["a20 a sale's rent back keeps no seen", SELL, T, "owedRec, hold, await seenOf(h, w.address, owedRec.mints))));", "owedRec, hold, undefined)));"],
   ["a21 a plain release's W read again on every load", SELL, T, "const x: RentBack = buy ? { ...given, mints: mintsOf(given.mints, [buy]), buy } : { ...given, buy: null, ...(o.found === true ? { bare: true as const } : unproven ? { unproven } : {}) };", "const x: RentBack = buy ? { ...given, mints: mintsOf(given.mints, [buy]), buy } : { ...given, buy: null, ...(o.found === true ? { bare: true as const } : { unproven: \"again\" as const }) };"],
-  ["c16 a W that ended at the floor still carries its amount", SELL, T, 'const lamports = e === "floor" ? undefined : kept.lamports !== undefined ? kept.lamports.toString() : last;', "const lamports = kept.lamports !== undefined ? kept.lamports.toString() : last;"],
+  // inverted 13 Nov 09:31Z (card every-lamport-can-move T3): a leftover is counted in the balance
+  ["c16 a W that ended at the floor carries no amount", SELL, T, 'const lamports = e === "floor" ? kept.lamports?.toString() :', 'const lamports = e === "floor" ? undefined :'],
   ["c17 a found W kept by a stranger's holding account alone keeps its seen", SELL, T, "r.steady && x.bare !== true ? seen", "r.steady ? seen"],
   ["c18 the sweep's record not written before its send", SELL, T, "    await x.swept?.(sw.one.signature, sw.value);\n", ""],
   ["c19 a pass that gives up drops the sweep's signature", SELL, T, " && e !== \"gave_up\" ? undefined : lastSweep", " ? undefined : lastSweep"],
-  ["c20 an owed end under the floor listed at W's lamports", SELL, T, "      if (value < floor && owed > 0 && (x.buy || since !== undefined)) x.read?.(value > 0n ? value : 0n);\n", ""],
+  ["c20 an owed W under the floor whose rest adds nothing still listed", SELL, T, "      if (value < floor && adds === 0n) x.unlisted?.();\n", "      if (value < floor && owed === 0 && adds === 0n) x.unlisted?.();\n"],
+  ["c20b an unlisted owed end keeps its last amount", SELL, T, "kept.unlisted === true ? undefined : ", ""],
+  // card every-lamport-can-move: the sweep's note on the grid, the rest under it paid as the sweep's priority
+  // review P3-1: the rest under the grid as one System transfer to the pool's account, in the sweep's transaction
+  ["lamport L1 the sweep's rest left on W", SELL, T, "const pay = under === 0n ? [] : [poolTransferIx(w.address, x.pool, under)];", "const pay: never[] = [];", FULL_SALE],
+  ["lamport L1b the sweep's rest sent to W", SELL, T, "[poolTransferIx(w.address, x.pool, under)]", "[poolTransferIx(w.address, w.address, under)]", FULL_SALE],
+  // card every-lamport-can-move T3: the ride (one spare piece released to W, then the sweep), on the passes that carry it
+  ["lamport T3a the ride left out", SELL, T, "if (value < floor && owed === 0 && adds > 0n && x.ride === true && !rode && h.ride !== undefined) return", "if (false) return"],
+  // the ride pays for itself: a rest no ride moves at a gain gets no ride and is not listed
+  ["lamport T3i a ride that cannot gain", SELL, T, "owed === 0 && adds > 0n && x.ride === true", "owed === 0 && x.ride === true"],
+  ["lamport T3j a W that cannot gain still listed", SELL, T, "      if (value < floor && adds === 0n) x.unlisted?.();\n", ""],
+  ["lamport T3k a W under the floor listed at its lamports", SELL, T, "(x.buy || since !== undefined)) x.read?.(adds);", "(x.buy || since !== undefined)) x.read?.(lamports);"],
+  ["lamport T3l a ride's gain without the relay fee", SELL, T, "  const lift = rest - fee;", "  const lift = rest;"],
+  // review P2-1 of T1+T2: a kept account counts as an owed claim, its close's fee left on W, the rest swept
+  ["lamport P21a a kept account holds the whole sale", SELL, T, "  if (owed > SOLANA_SWEEP_OWED_MAX || keep.some((k) => k.tokens === true)) return null;", "  if (owed > SOLANA_SWEEP_OWED_MAX || keep.length > owed) return null;"],
+  ["lamport P21c W's sellable tokens swept around", SELL, T, "  if (owed > SOLANA_SWEEP_OWED_MAX || keep.some((k) => k.tokens === true)) return null;", "  if (owed > SOLANA_SWEEP_OWED_MAX) return null;"],
+  ["lamport P21d the plan marks no sellable tokens", KIT, T, "...(burn.includes(address) && other !== undefined ? {} : { tokens: true as const })", "...({})"],
+  ["lamport P21b a kept account's fee not left on W", SELL, T, "solanaDepositRents(rent, sizes, held) - solanaSweepKeep(rent, owed, kept);", "solanaDepositRents(rent, sizes, held) - solanaSweepKeep(rent, owed);"],
+  ["lamport T3b a ride chunk off the list", WITHDRAW, T, [["for (const chunk of releaseSizesUpTo(r, n.value).reverse()) {\n      if (!isReleaseSize(r, chunk) || !changeMoves", "for (const chunk of Array.from({ length: Number(n.value / r.grid) }, (_, k) => BigInt(k + 1) * r.grid)) {\n      if (!changeMoves"]]],
+  ["lamport T3c a ride chunk whose change cannot move", WITHDRAW, T, "if (!isReleaseSize(r, chunk) || !changeMoves(r, n.value - chunk) || !fits(chunk)) continue;", "if (!isReleaseSize(r, chunk) || !fits(chunk)) continue;"],
+  ["lamport T3d the sale's rent back with no ride", SELL, T, "sale: true, ride: true, ", "sale: true, "],
+  ["lamport T3e a load's pass rides", SELL, T, "...(opts.ride === true ? { ride: true as const } : {})", "ride: true as const"],
+  ["lamport T3f a W at the floor not passed again for a tap's ride", SELL, T, "const floored = opts.ride === true && o.floor === true;", "const floored = false;"],
+  ["lamport T3g the floor end not marked", SELL, T, ', ...(e === "floor" ? { floor: true as const } : {})', ""],
+  ["lamport T3h no spare piece told as a plain floor end", SELL, T, "kept on W; no spare piece in the pool lifts it`", "kept on W`"],
+  ["lamport L2 the sweep's note at the exact rest", SELL, T, "      const { value, under } = solanaSweepOf(rest);\n", "      const { under } = solanaSweepOf(rest);\n      const value = rest;\n"],
   ["c21 a sent sweep's record at W's lamports, not the note's value", SELL, T, "    if (x.buy || x.bare === true) lamports = v;\n", ""],
   ["c22 a W read empty listed empty while its note is RESERVED", SELL, T, "if (await settledSpent(address)) await Promise.resolve(h.owed.markEmpty", "await Promise.resolve(h.owed.markEmpty"],
   ["c23 a held W passed", SELL, T, "      if (first && quiet(first)) {", "      if (false) {"],
@@ -195,7 +228,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const part = sweepPartOrExit(process.argv.slice(2), NAMES);
   const run = (only ? M.filter(([name]) => name.includes(only)) : M).filter((m) => part.pick(M.indexOf(m)));
   let killed = 0;
-  for (const [name, file, test, from, to] of run) {
+  for (const [name, file, test, from, to, pattern] of run) {
     const src = readFileSync(file, "utf8");
     const pairs = Array.isArray(from) ? from : [[from, to]];
     const once = pairs.find(([f]) => src.split(f).length !== 2);
@@ -208,7 +241,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     // a run past 180 s is killed, its process group with it (scripts/group-run.mjs)
     let r;
     try {
-      r = runSync("node", ["--test", "--test-timeout=20000", test], { cwd: W, encoding: "utf8", timeoutMs: 180_000 });
+      r = runSync("node", ["--test", "--test-timeout=20000", ...(pattern ? [`--test-name-pattern=${pattern}`] : []), test], { cwd: W, encoding: "utf8", timeoutMs: 180_000 });
     } finally {
       writeFileSync(file, src);
     }

@@ -323,11 +323,18 @@ const VIEW = { request_type: "view_account", finality: "final", account_id: "int
 test("the seat: 11 reads asked at once go out 5 at once, then one every 200 ms; the key never answers 429 and none goes to the keyless seat", () => onTestClock(async () => {
   const take = keyPace();
   const sent: number[] = [];
+  // the timers the pace set that have fired by each send: work done, never real time elapsed, so a loaded runner's slow
+  // work cannot fail the burst (the box at load 8, 13 Nov: "the first 5 at once" read real milliseconds)
+  let fired = 0;
+  const firedAt: number[] = [];
+  const set = globalThis.setTimeout;
+  globalThis.setTimeout = ((f: (...a: unknown[]) => void, ms?: number, ...a: unknown[]) => set((...x: unknown[]) => (fired++, f(...x)), ms, ...a)) as typeof setTimeout;
   let keyless = 0;
   let refused = 0;
   await withFetch((async (u: string) => {
     if (u === SEAT) {
       sent.push(performance.now());
+      firedAt.push(fired);
       return take() ? answer() : (refused++, busy("1"));
     }
     keyless++;
@@ -341,9 +348,10 @@ test("the seat: 11 reads asked at once go out 5 at once, then one every 200 ms; 
     assert.equal(refused, 0, "the device's pace keeps under the key's");
     assert.equal(keyless, 0);
     assert.equal(sent.length, 11);
-    assert.ok(sent.slice(0, 5).every((x) => x - t < 50), "the first 5 at once");
+    // the first 5 at once: none waited on a pace timer; each later read not before its own 200 ms slot on the clock
+    assert.deepEqual(firedAt.slice(0, 5), [0, 0, 0, 0, 0], "the first 5 at once");
     for (let k = 5; k < 11; k++) assert.ok(sent[k]! - t >= (k - 4) * 200 - 5, `read ${k} at ${sent[k]! - t} ms`);
-  });
+  }).finally(() => void (globalThis.setTimeout = set));
 }));
 
 test("the seat falls to FastNEAR's keyless URL when the helper is busy past its tries, down (5xx), slow or unreachable; never on a 4xx or the caller's own abort", async () => {

@@ -3,7 +3,8 @@
 // l.385-391 at research 6d3a34c; the proof pool, wallet.md W:732-746 and WU-11).
 //
 // - The ready set: up to readySetSize UNSPENT notes of the pool's scope, landed, each covering a rung, largest chunk
-//   first. A note's chunk is the largest rung at or below its value (./ladder.ts chunkOf); the proof withdraws exactly
+//   first. A note's chunk is the pool's (./pool.ts poolChunkOf: its piece rule's, ./pieces.ts, else the largest rung at
+//   or below its value, ./ladder.ts chunkOf); the proof withdraws exactly
 //   that. One proof per note, so taps in a row draw on several notes (the ladder's job).
 // - Epochs (./pool.ts): each pass works in the pool's current epoch. Every proof proves against the epoch root
 //   (trees(epoch start)), binds the deadline epoch start + lifeMs and the relayer's fee for the epoch, so every proof
@@ -64,8 +65,8 @@ import { poolProveWithdraw, type VaultProver } from "@blindfill/kit";
 import { changeIndex, freshWallet } from "../derive/index.ts";
 import { noteSecrets, type NoteRef } from "../notes/secrets.ts";
 import { heldBy, type NoteRecord, type NoteStore } from "../notes/store.ts";
-import { checkLadder, chunkOf } from "./ladder.ts";
-import { checkBinding, checkPool, cutOrEmpty, failAs, NEWEST_GRACE_MS, PassFail, NOW_REUSE_MS, TAKE_SLACK_MS, type ChainNow, type PassReason, type Pool, type PoolTrees, type ReadyProof } from "./pool.ts";
+import { checkLadder } from "./ladder.ts";
+import { checkBinding, checkPool, cutOrEmpty, poolChunkOf, failAs, NEWEST_GRACE_MS, PassFail, NOW_REUSE_MS, TAKE_SLACK_MS, type ChainNow, type PassReason, type Pool, type PoolTrees, type ReadyProof } from "./pool.ts";
 
 /** Proofs kept ready: min(hardwareConcurrency - 1, 3), at least 1, all made by the one prover in turn. */
 export function readySetSize(hardwareConcurrency: number | undefined): number {
@@ -158,8 +159,8 @@ export function jOf(ref: NoteRef): number {
 }
 
 const notHidden = (): boolean => (globalThis as { document?: { visibilityState?: string } }).document?.visibilityState !== "hidden";
-const byChunkThenLeaf = (l: Pool["ladder"]) => (x: NoteRecord, y: NoteRecord): number => {
-  const cx = chunkOf(l, x.leaf!.value)!, cy = chunkOf(l, y.leaf!.value)!;
+const byChunkThenLeaf = (l: Pick<Pool, "ladder" | "pieces">) => (x: NoteRecord, y: NoteRecord): number => {
+  const cx = poolChunkOf(l, x.leaf!.value)!, cy = poolChunkOf(l, y.leaf!.value)!;
   if (cx !== cy) return cx > cy ? -1 : 1;
   return x.leaf!.leafIndex < y.leaf!.leafIndex ? -1 : 1;
 };
@@ -275,7 +276,7 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
     const flight = inFlight.get(n.id)!;
     const tier = to === null ? ready : alt;
     const leaf = n.leaf!;
-    const chunk = chunkOf(pool.ladder, leaf.value)!;
+    const chunk = poolChunkOf(pool, leaf.value)!;
     const j = jOf(n.ref);
     const wl = to === null ? leaf.label : to.l;
     const wj = to === null ? j : to.j;
@@ -386,9 +387,9 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
         const n = byId.get(r.noteId);
         if (n === undefined || !heldBy(n, r.attempt)) m.delete(r.noteId);
       }
-    const byChunk = byChunkThenLeaf(pool.ladder);
-    const usable = (n: NoteRecord): boolean => n.scope === pool.scope && n.leaf !== undefined && chunkOf(pool.ladder, n.leaf.value) !== null && !skipped.has(n.id);
-    const small = all.filter((n) => n.scope === pool.scope && n.state === "UNSPENT" && n.leaf !== undefined && chunkOf(pool.ladder, n.leaf.value) === null).length;
+    const byChunk = byChunkThenLeaf(pool);
+    const usable = (n: NoteRecord): boolean => n.scope === pool.scope && n.leaf !== undefined && poolChunkOf(pool, n.leaf.value) !== null && !skipped.has(n.id);
+    const small = all.filter((n) => n.scope === pool.scope && n.state === "UNSPENT" && n.leaf !== undefined && poolChunkOf(pool, n.leaf.value) === null).length;
     if (small > 0) out.small = small;
     // tier 1: a note with no tier 1 proof, UNSPENT or held by its tier 2 proof
     const open = all.filter((n) => usable(n) && !ready.has(n.id) && (n.state === "UNSPENT" || (n.state === "HELD" && alt.has(n.id)))).sort(byChunk);

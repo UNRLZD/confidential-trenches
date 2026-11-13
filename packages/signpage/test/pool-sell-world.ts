@@ -236,6 +236,8 @@ export function chain(plant: Plant = {}) {
   pv.setBigUint64(49, BigInt(n0), true);
   pv.setBigUint64(49 + 1065, BigInt(l0), true);
   accounts.set(POOL, { owner: PROGRAM, lamports: 1, data: pool });
+  // the pinned relayer's account, a funded system account as on mainnet: the sweep pays its rest under the grid there
+  accounts.set(FEE_PAYER, { owner: "11111111111111111111111111111111", lamports: 5_000_000_000, data: new Uint8Array(0) });
   // each tree's leaves on its pages of 1,024 (state.rs page_for), each page at its rent for its length, as the program
   // leaves it (review M3: pages planted at 1 lamport hid the top-up)
   const leavesOf = { 0: Array.from({ length: n0 }, (_, i) => 1000n + BigInt(i)), 1: Array.from({ length: l0 }, (_, i) => vaultLabelOf(keccak_256, SCOPE, BigInt(i + 1))) };
@@ -327,6 +329,8 @@ export function chain(plant: Plant = {}) {
   /** Each deposit a landed transaction made: its precommitment and value; `sweep` when it was W's sweep (card
    *  sol-buy-rent-back: a transaction of the deposit alone). */
   const deposits: { pre: bigint; value: bigint; sweep: boolean }[] = [];
+  // whether a venue sell has landed (card every-lamport-can-move: a full sell lands with no deposit)
+  let sellLanded = false;
   let throttled = 0;
   let claimErred = 0;
   let wrongDone = false;
@@ -437,7 +441,9 @@ export function chain(plant: Plant = {}) {
     const m = solanaDecodeMessage(message);
     const signer = m.staticKeys[0]!;
     if (!dry && !ed25519.verify(tx.subarray(1, 65), message, base58.decode(signer))) throw new Error("signature");
-    const ix = m.instructions.at(-1)!;
+    // the pool's instruction where there is one (a sweep's deposit, before its transfer of the rest under the grid to the
+    // pool's account, review P3-1 of T1+T2), else the last
+    const ix = m.instructions.find((x) => m.staticKeys[x.programIndex] === PROGRAM) ?? m.instructions.at(-1)!;
     const keys = ix.accounts.map((i) => m.staticKeys[i]!);
     // a sell with no deposit back (card sol-sell-deposit-back-floor): the venue's sell alone, its whole min out to W,
     // which pays the fee and what the sell makes; W ends at 0 or rent-exempt
@@ -457,6 +463,7 @@ export function chain(plant: Plant = {}) {
       dv.setBigUint64(0, dv.getBigUint64(0, true) - sold, true);
       accounts.set(ataOf(signer), { ...t, data: d });
       for (const [x, owner, size] of made) accounts.set(x, { owner, lamports: Number(solanaRentMin(rent, size)), data: new Uint8Array(size) });
+      sellLanded = true;
       accounts.set(signer, { ...(accounts.get(signer) ?? { owner: "11111111111111111111111111111111", data: new Uint8Array(0), lamports: 0 }), lamports: Number(ends) });
       return;
     }
@@ -475,7 +482,15 @@ export function chain(plant: Plant = {}) {
       const at = solanaPoolPage(PROGRAM, tree, Number(pv.getBigUint64(tree === 0 ? 49 : 49 + 1065, true)));
       if (keys[2 + tree] !== at && !(keys.length === 8 && keys[6 + tree] === at)) throw new Error("WrongAccount");
     }
-    const cost = feeOf(m) + rentsOf(pre);
+    // System transfers from W in the same transaction (the sweep's rest under the grid), to whatever account each names,
+    // as the runtime moves them: each receiver credited and left at 0 or rent-exempt
+    const sends = m.instructions.filter((x) => m.staticKeys[x.programIndex] === "11111111111111111111111111111111" && x.data[0] === 2).map((x) => ({ to: m.staticKeys[x.accounts[1]!]!, v: new DataView(x.data.buffer, x.data.byteOffset + 4, 8).getBigUint64(0, true) }));
+    const paid = sends.reduce((t, x) => t + x.v, 0n);
+    for (const x of sends) {
+      const after = BigInt(accounts.get(x.to)?.lamports ?? 0) + x.v;
+      if (after > 0n && after < solanaRentMin(rent, accounts.get(x.to)?.data.length ?? 0)) throw new Error("InsufficientFundsForRent");
+    }
+    const cost = feeOf(m) + rentsOf(pre) + paid;
     // the venue's sell first: what W gets, less the cashback accounts it makes at W's cost
     const sellIx = m.instructions.find((x) => x.data.length === 24);
     let gets = 0n;
@@ -490,11 +505,13 @@ export function chain(plant: Plant = {}) {
     if (ends < 0n) throw new Error("InsufficientFunds");
     if (ends > 0n && ends < solanaRentMin(rent, 0)) throw new Error("InsufficientFundsForRent");
     if (dry) return;
+    for (const x of sends) accounts.set(x.to, { ...(accounts.get(x.to) ?? { owner: "11111111111111111111111111111111", data: new Uint8Array(0), lamports: 0 }), lamports: (accounts.get(x.to)?.lamports ?? 0) + Number(x.v) });
     deposit(pre, value);
     // the venue's sell (pump's and PumpSwap's sell(amount, min_out), 24 data bytes): W's tokens out, its min out in
     const sell = m.instructions.find((x) => x.data.length === 24);
     let got = 0n;
     if (sell) {
+      sellLanded = true;
       const sold = new DataView(sell.data.buffer, sell.data.byteOffset + 8, 8).getBigUint64(0, true);
       got = new DataView(sell.data.buffer, sell.data.byteOffset + 16, 8).getBigUint64(0, true);
       const t = accounts.get(ataOf(signer))!;
@@ -511,7 +528,8 @@ export function chain(plant: Plant = {}) {
         }
       }
     }
-    deposits.push({ pre, value, sweep: m.instructions.length === 1 });
+    // a sweep: a deposit with no venue sell (card every-lamport-can-move: its compute budget may come first)
+    deposits.push({ pre, value, sweep: sellIx === undefined });
     const wa = accounts.get(signer);
     if (wa) {
       const left = BigInt(wa.lamports) + got - value - cost;
@@ -525,7 +543,7 @@ export function chain(plant: Plant = {}) {
     const answer = (address: string): unknown => {
       if (p === 1 && plant.hideOn1 === address) return null;
       if (p === 1 && plant.ammHiddenOn1 && (address === ammVol || address === ammAta)) return null;
-      if (p === 1 && plant.owedOn1BeforeSell && deposits.length === 0 && (address === ammVol || address === solanaVolumeAccumulator(W.address, SOLANA_PUMP_PROGRAM))) {
+      if (p === 1 && plant.owedOn1BeforeSell && !sellLanded && (address === ammVol || address === solanaVolumeAccumulator(W.address, SOLANA_PUMP_PROGRAM))) {
         const d = new Uint8Array(137);
         d.set(base58.decode(W.address), 8);
         new DataView(d.buffer).setBigUint64(address === ammVol ? 74 : 90, 12_742_862n, true);
@@ -541,7 +559,7 @@ export function chain(plant: Plant = {}) {
     return (async (method: string, params: readonly unknown[]) => {
       log.push(`${p}:${method}`);
       calls.push({ p, method, params });
-      if (p === 1 && plant.throttle && deposits.length > 0 && throttled < plant.throttle.n) {
+      if (p === 1 && plant.throttle && sellLanded && throttled < plant.throttle.n) {
         const list = method === "getMultipleAccounts" ? (params[0] as string[]) : method === "getAccountInfo" ? [params[0] as string] : [];
         const hit = plant.throttle.on === "read" ? list.includes(ata) : method === "simulateTransaction" && (params[1] as { accounts?: unknown }).accounts !== undefined;
         if (throttled > 0 || hit) {
@@ -666,7 +684,8 @@ export function chain(plant: Plant = {}) {
             accounts.set(sm.staticKeys[0]!, { ...payer, lamports: payer.lamports - FEE });
             return sig;
           }
-          if (plant.teardownFails && !tearFailed && !txs.has(sig) && !sm.instructions.some((x) => sm.staticKeys[x.programIndex] === PROGRAM)) {
+          // a teardown frame: no deposit and no venue sell (card every-lamport-can-move: a full sell carries no deposit)
+          if (plant.teardownFails && !tearFailed && !txs.has(sig) && !sm.instructions.some((x) => sm.staticKeys[x.programIndex] === PROGRAM || x.data.length === 24)) {
             tearFailed = true;
             if (plant.teardownFails === "dust") {
               const t = accounts.get(ata)!;
@@ -701,7 +720,7 @@ export function chain(plant: Plant = {}) {
             heightAt.set(VF[v].slot + 1, plant.finalHeight ?? 1_000);
           }
           if (!txs.has(sig) && plant.lands !== false) {
-            if (plant.dustBeforeSell !== undefined && !frontDone && sm.staticKeys[sm.instructions.at(-1)!.programIndex] === PROGRAM && sm.instructions.some((x) => x.data.length === 24)) {
+            if (plant.dustBeforeSell !== undefined && !frontDone && sm.instructions.some((x) => x.data.length === 24 && sm.staticKeys[x.programIndex] !== PROGRAM)) {
               frontDone = true;
               const t = accounts.get(ata)!;
               const d = t.data.slice();
@@ -751,7 +770,8 @@ export function chain(plant: Plant = {}) {
           if (t && plant.unfinalSell && (params[1] as { commitment?: string } | undefined)?.commitment === "finalized" && solanaDecodeMessage(t.tx.subarray(65)).instructions.some((x) => x.data.length === 24)) return null;
           if (t && plant.unreadTeardown) {
             const tm = solanaDecodeMessage(t.tx.subarray(65));
-            if (!tm.instructions.some((x) => tm.staticKeys[x.programIndex] === PROGRAM)) return null;
+            // a teardown frame: no deposit and no venue sell (card every-lamport-can-move: a full sell carries no deposit)
+            if (!tm.instructions.some((x) => tm.staticKeys[x.programIndex] === PROGRAM || x.data.length === 24)) return null;
           }
           return t ? { slot: VF[v].slot, transaction: [base64.encode(t.tx), "base64"], meta: { err: t.err, ...(t.post && !plant.noPostBalances ? { postTokenBalances: p === 1 && plant.postDiffers ? t.post.map((e) => ({ ...(e as object), uiTokenAmount: { amount: "9", decimals: 6 } })) : t.post } : {}) } } : null;
         }

@@ -247,6 +247,7 @@ export const CHANGED = [
   "scripts/live-checks/intents-u-registered-first-run.mjs",
   "scripts/live-checks/sol-rent-back-dust-burn.mjs",
   "scripts/live-checks/round-trip-costs-less.mjs",
+  "scripts/live-checks/every-lamport-can-move.mjs",
   "scripts/live-checks/kit-sol-pool-deposit-floor.mjs",
   "scripts/live-checks/sol-sell-deposit-back-floor.mjs",
   "scripts/live-checks/pool-sell-share-across-wallets.mjs",

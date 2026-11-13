@@ -9,7 +9,9 @@
 //
 // - The plan (planPoolWithdraw): the pool's landed notes largest first, the fewest parts that send exactly the amount,
 //   each part at least the min part (rent(0), and the 2 x fee backstop) and each note's change 0 or at least the note
-//   floor (fee + W's fee + min part: a smaller change could never leave the pool, review #232 HIGH 2). Each chunk is
+//   floor (fee + W's fee + min part: a smaller change could never leave the pool, review #232 HIGH 2); with the pool's
+//   piece rule (card every-lamport-can-move) every part that does not take its whole note has its chunk on the grid,
+//   and the note floor is at least the rule's, so no change is ever off the grid or under a buy's floor. Each chunk is
 //   part + fee + W's fee, so exactly the part arrives at To. The fee is the device's own, from the Rent sysvar read on
 //   two RPCs (the kit's solanaPoolFee); W's fee is getFeeForMessage on both. Max fee is parts x (fee + W's fee), and a
 //   run whose plan costs more than the Max fee the screen drew stops before its first part (review #232 MEDIUM 1).
@@ -57,13 +59,14 @@ import { noteSecrets } from "../../wallet/src/notes/secrets.ts";
 import type { NoteRecord, NoteStore } from "../../wallet/src/notes/store.ts";
 import { checkBinding, PoolNoLeafError, type Pool, type PoolTrees, type ReadyProof } from "../../wallet/src/pool/pool.ts";
 import { jOf } from "../../wallet/src/pool/queue.ts";
+import { changeMoves, isReleaseSize, releaseSizesUpTo, type PieceRule } from "../../wallet/src/pool/pieces.ts";
 import { solanaPoolOf, type SolanaPoolPin, type SolanaReleaseRequest } from "../../wallet/src/pool/solana.ts";
 import { blockhashOf, pastOnBoth, readBack, releaseOf, rootIndex, sendAndSettle, treeSizes, type PoolBuyHost } from "./pool-buy.ts";
 import { checkSolanaOnwardSend, checkSolanaWithdraw, PoolRuleRefused, signSolana, SOLANA_RESERVED_KEYS, solanaWithdrawMinPart, withdrawNoteFloor, type PoolAsk, type WithdrawCosts } from "./rules/pool.ts";
 // moved to rules/pool.ts (card sol-buy-rent-back: the sweep's floor is the withdraw's note floor); named here still
 export { solanaWithdrawMinPart, withdrawNoteFloor, type WithdrawCosts } from "./rules/pool.ts";
 import { spendOwner, type HistoryPlaces } from "./pool-spend.ts";
-import { legCause } from "./pool-sell.ts";
+import { legCause, type PoolRide } from "./pool-sell.ts";
 // moved to pool-spend.ts (card signpage-buy-own-spend: pool-buy.ts reads them too, with no import cycle); named here still
 export { HISTORY_PAGE, HISTORY_PASS, spendOwner, type HistoryPlaces } from "./pool-spend.ts";
 
@@ -81,88 +84,158 @@ const capOf = (n: WithdrawSource, c: WithdrawCosts): bigint => n.value - c.fee -
 /** The plan reads at most this many notes, largest first: a withdraw's search stays bounded (3 choices a note). */
 export const WITHDRAW_PLAN_NOTES = 16;
 
-/** The notes a plan may draw on, largest first, each with its two kinds of part: all of it (`cap`), or a part in
- *  [minPart, flexHi] that leaves a change of at least the note floor (`flexHi` under minPart: none). */
-function choicesOf(notes: readonly WithdrawSource[], c: WithdrawCosts): { id: string; cap: bigint; flexHi: bigint }[] {
-  const floor = withdrawNoteFloor(c);
+/** The grid a plan's split parts keep to and the note floor no change may fall under (card every-lamport-can-move):
+ *  with the pool's piece rule (`pieces`, ../../wallet/src/pool/pieces.ts), every chunk that does not take its whole note
+ *  is a multiple of its grid, and every change is 0 or at least the larger of its floor and the withdraw's own; with
+ *  none (the EVM pools, until their own grid), any chunk, and the withdraw's floor. */
+function gridOf(c: WithdrawCosts): { g: bigint; floor: bigint } {
+  const own = withdrawNoteFloor(c);
+  if (c.pieces === undefined) return { g: 1n, floor: own };
+  return { g: c.pieces.grid, floor: c.pieces.floor > own ? c.pieces.floor : own };
+}
+
+/** The notes a plan may draw on, largest first, each with its choices: runs [lo, hi] of parts (part = chunk - fee - W's
+ *  fee) of step g, a point when lo = hi. With no piece rule: all of it (`cap`), or a part in [minPart, cap - floor] (any
+ *  chunk). With the pool's piece rule (card every-lamport-can-move): a chunk of one of the list's sizes
+ *  (../../wallet/src/pool/pieces.ts isReleaseSize) that leaves 0 or at least the floor, or the whole note once when it
+ *  is off the grid or under the floor (made before the rule: main's planner left 3,000,000 and 4,000,000 notes; review
+ *  P3-2 of 00d6bef00). `top`: the note's largest part. */
+type Choice = { id: string; runs: [bigint, bigint][]; top: bigint };
+function choicesOf(notes: readonly WithdrawSource[], c: WithdrawCosts): Choice[] {
+  const { floor } = gridOf(c);
+  const k = c.fee + c.wFee;
+  const r = c.pieces;
   return [...notes]
     .sort((x, y) => (x.value !== y.value ? (x.value > y.value ? -1 : 1) : x.id < y.id ? -1 : 1))
-    .map((n) => ({ id: n.id, cap: capOf(n, c), flexHi: capOf(n, c) - floor }))
-    .filter((n) => n.cap >= c.minPart)
+    .map((n) => {
+      const cap = capOf(n, c);
+      const runs: [bigint, bigint][] = [];
+      if (r === undefined) {
+        if (cap >= c.minPart) runs.push([cap, cap]);
+        if (cap - floor >= c.minPart) runs.push([c.minPart, cap - floor]);
+      } else {
+        if (cap >= c.minPart && (isReleaseSize(r, n.value) || n.value % r.grid !== 0n || n.value < r.floor)) runs.push([cap, cap]);
+        for (const size of n.value - floor >= r.floor ? releaseSizesUpTo(r, n.value - floor) : []) if (size - k >= c.minPart) runs.push([size - k, size - k]);
+      }
+      return { id: n.id, runs, top: runs.reduce((t, [, hi]) => (hi > t ? hi : t), 0n) };
+    })
+    .filter((n) => n.runs.length > 0)
     .slice(0, WITHDRAW_PLAN_NOTES);
 }
 
 /** What the notes can send to To: each note's largest part, for every note that gives at least the minimum. */
 export function poolWithdrawable(notes: readonly WithdrawSource[], c: WithdrawCosts): bigint {
-  return choicesOf(notes, c).reduce((t, n) => t + n.cap, 0n);
+  return choicesOf(notes, c).reduce((t, n) => t + n.top, 0n);
 }
 
-/** Every amount a plan can send, as closed intervals, sorted and merged: the sums of each note's none, all or flex. */
+/** Whether `x` is in one of plannableAmounts' runs: in [lo, hi] and lo apart from it by a whole number of `g`. */
+const inRun = ([lo, hi]: readonly [bigint, bigint], x: bigint, g: bigint): boolean => lo <= x && x <= hi && (x - lo) % g === 0n;
+
+/** Every amount a plan can send, as runs [lo, hi] of step g (gridOf: 1 with no piece rule, so each run is an interval),
+ *  every lo + k x g up to hi: the sums of each note's none or one choice, sorted by lo and merged within each residue. */
 export function plannableAmounts(notes: readonly WithdrawSource[], c: WithdrawCosts): [bigint, bigint][] {
+  const { g } = gridOf(c);
+  const res = (x: bigint): bigint => ((x % g) + g) % g;
   let r: [bigint, bigint][] = [[0n, 0n]];
   for (const n of choicesOf(notes, c)) {
-    const next = [...r, ...r.map(([lo, hi]) => [lo + n.cap, hi + n.cap] as [bigint, bigint])];
-    if (n.flexHi >= c.minPart) for (const [lo, hi] of r) next.push([lo + c.minPart, hi + n.flexHi]);
-    next.sort((x, y) => (x[0] < y[0] ? -1 : x[0] > y[0] ? 1 : 0));
+    const next = [...r];
+    for (const [clo, chi] of n.runs) for (const [lo, hi] of r) next.push([lo + clo, hi + chi]);
+    next.sort((x, y) => (res(x[0]) !== res(y[0]) ? (res(x[0]) < res(y[0]) ? -1 : 1) : x[0] < y[0] ? -1 : x[0] > y[0] ? 1 : 0));
     r = [];
     for (const iv of next) {
       const last = r[r.length - 1];
-      if (last && iv[0] <= last[1] + 1n) {
+      if (last && res(last[0]) === res(iv[0]) && iv[0] <= last[1] + g) {
         if (iv[1] > last[1]) last[1] = iv[1];
       } else r.push([iv[0], iv[1]]);
     }
   }
-  return r.filter(([, hi]) => hi > 0n).map(([lo, hi]) => [lo > 0n ? lo : 1n, hi]);
+  return r
+    .filter(([, hi]) => hi > 0n)
+    .map(([lo, hi]) => [lo > 0n ? lo : g, hi] as [bigint, bigint])
+    .sort((x, y) => (x[0] < y[0] ? -1 : x[0] > y[0] ? 1 : 0));
 }
-
 /** The plannable amounts nearest `amount` from below and above; none on a side with no plannable amount. */
 export function nearestPlannable(notes: readonly WithdrawSource[], amount: bigint, c: WithdrawCosts): { below?: bigint; above?: bigint } {
+  const { g } = gridOf(c);
   const out: { below?: bigint; above?: bigint } = {};
-  for (const [lo, hi] of plannableAmounts(notes, c)) {
-    if (lo <= amount && amount <= hi) return { below: amount, above: amount };
-    if (hi < amount) out.below = hi;
-    if (lo > amount && out.above === undefined) out.above = lo;
+  for (const run of plannableAmounts(notes, c)) {
+    const [lo, hi] = run;
+    if (inRun(run, amount, g)) return { below: amount, above: amount };
+    const below = amount > hi ? hi : amount >= lo ? lo + ((amount - lo) / g) * g : undefined;
+    const above = amount < lo ? lo : amount <= hi ? lo + ((amount - lo) / g + 1n) * g : undefined;
+    if (below !== undefined && (out.below === undefined || below > out.below)) out.below = below;
+    if (above !== undefined && above <= hi && (out.above === undefined || above < out.above)) out.above = above;
   }
   return out;
 }
 
-/** The parts that send exactly `amount` to To with the fewest parts (each part a fee), no part leaving a change
- *  between 0 and the note floor; null when no plan exists. */
+/** The parts that send `amount` to To with the fewest parts (each part a fee), no part leaving a change between 0 and
+ *  the note floor and every split part's chunk on the grid; null when no plan exists. Exactly `amount` when a plan sends
+ *  it; with a piece rule, else the least plannable amount above it by under one grid step (a split part's chunk rounds
+ *  up to the grid, and W sends all it holds to To, so up to 0.001 SOL more of the user's own money arrives than was
+ *  typed and nothing stays behind). */
 export function planPoolWithdraw(notes: readonly WithdrawSource[], amount: bigint, c: WithdrawCosts): WithdrawPart[] | null {
   if (amount < c.minPart || c.fee < 0n || c.wFee < 0n) return null;
-  if (!plannableAmounts(notes, c).some(([lo, hi]) => lo <= amount && amount <= hi)) return null;
+  const { g } = gridOf(c);
+  const runs = plannableAmounts(notes, c);
+  if (runs.some((run) => inRun(run, amount, g))) return planExact(notes, amount, c);
+  if (g === 1n) return null;
+  // the amounts under one grid step above: each run's least at or above `amount`; the plan of the fewest parts (each
+  // part a fee), then the least amount
+  let best: WithdrawPart[] | null = null;
+  for (const [lo, hi] of runs) {
+    const x = amount <= lo ? lo : lo + ((amount - lo + g - 1n) / g) * g;
+    if (x > hi || x - amount >= g) continue;
+    const plan = planExact(notes, x, c);
+    if (plan !== null && (best === null || plan.length < best.length)) best = plan;
+  }
+  return best;
+}
+
+function planExact(notes: readonly WithdrawSource[], amount: bigint, c: WithdrawCosts): WithdrawPart[] | null {
+  const { g } = gridOf(c);
   const ns = choicesOf(notes, c);
-  const rest = ns.map((_, i) => ns.slice(i).reduce((t, n) => t + n.cap, 0n));
-  type Pick = { i: number; flex: boolean };
-  // depth-first over notes, largest first, with at most k parts: `need` is what the flex parts must still give
-  const search = (i: number, need: bigint, flexLo: bigint, flexHi: bigint, k: number, picks: Pick[]): Pick[] | null => {
-    if (need >= flexLo && need <= flexHi && picks.length > 0) return picks;
-    if (i >= ns.length || picks.length >= k || need < flexLo || need > flexHi + rest[i]!) return null;
-    const n = ns[i]!;
-    if (n.cap <= need) {
-      const got = search(i + 1, need - n.cap, flexLo, flexHi, k, [...picks, { i, flex: false }]);
+  // most[i][j]: the most j of the notes from i on can give (their j largest tops), the search's bound
+  const most = ns.map((_, i) => {
+    const tops = ns.slice(i).map((n) => n.top).sort((a, b) => (a > b ? -1 : a < b ? 1 : 0));
+    const out = [0n];
+    for (const t of tops) out.push(out[out.length - 1]! + t);
+    return out;
+  });
+  type Pick = { i: number; run: [bigint, bigint] };
+  // depth-first over notes, largest first, with at most k parts, each note none or one of its choices: `need` is what
+  // the picks must give, at least their least sum and a whole number of g past it, at most their largest. A state that
+  // failed is never searched again: whether it can end depends only on the note, what is left of need past the least
+  // sum, the room between the least and the largest sum, and the parts left
+  const failed = new Set<string>();
+  const search = (i: number, need: bigint, lo: bigint, hi: bigint, k: number, picks: Pick[]): Pick[] | null => {
+    if (picks.length > 0 && need >= lo && need <= hi && (need - lo) % g === 0n) return picks;
+    const left = k - picks.length;
+    if (i >= ns.length || left <= 0 || need < lo) return null;
+    const room = most[i]![Math.min(left, ns.length - i)]!;
+    if (need > hi + room) return null;
+    const key = `${i}|${need - lo}|${hi - lo}|${left}`;
+    if (failed.has(key)) return null;
+    for (const run of ns[i]!.runs) {
+      const got = search(i + 1, need, lo + run[0], hi + run[1], k, [...picks, { i, run }]);
       if (got) return got;
     }
-    if (n.flexHi >= c.minPart) {
-      const got = search(i + 1, need, flexLo + c.minPart, flexHi + n.flexHi, k, [...picks, { i, flex: true }]);
-      if (got) return got;
-    }
-    return search(i + 1, need, flexLo, flexHi, k, picks);
+    const got = search(i + 1, need, lo, hi, k, picks);
+    if (!got) failed.add(key);
+    return got;
   };
-  for (let k = 1; k <= ns.length; k++) {
+  // the fewest parts up to three (each part a fee), then the first plan the largest-first search finds with any number:
+  // a bound on the search (16 notes of many sizes each), never a plan the screen and the run differ on (both call here)
+  for (const k of [...new Set([1, 2, 3, ns.length])].filter((x) => x <= ns.length)) {
     const picks = search(0, amount, 0n, 0n, k, []);
     if (!picks) continue;
-    // the flex parts: each its minimum, then the rest given largest note first up to each one's flex top
-    let left = amount - picks.filter((p) => !p.flex).reduce((t, p) => t + ns[p.i]!.cap, 0n) - BigInt(picks.filter((p) => p.flex).length) * c.minPart;
+    // each part its run's least, then the rest given in pick order up to each run's top, in whole g
+    let left = amount - picks.reduce((t, p) => t + p.run[0], 0n);
     const parts = picks.map((p) => {
-      const n = ns[p.i]!;
-      let part = n.cap;
-      if (p.flex) {
-        const more = left < n.flexHi - c.minPart ? left : n.flexHi - c.minPart;
-        part = c.minPart + more;
-        left -= more;
-      }
-      return { noteId: n.id, part, chunk: part + c.fee + c.wFee };
+      const more = left < p.run[1] - p.run[0] ? left : p.run[1] - p.run[0];
+      left -= more;
+      const part = p.run[0] + more;
+      return { noteId: ns[p.i]!.id, part, chunk: part + c.fee + c.wFee };
     });
     return left === 0n ? parts : null;
   }
@@ -341,7 +414,8 @@ export async function runPoolWithdraw(h: PoolWithdrawHost, ask: PoolAsk, to: str
     const rent = await readSolanaRent(h.rpcs);
     const fee = solanaPoolFee(rent);
     const wFee = await solanaOnwardFee(h.rpcs, h.pin);
-    const costs: WithdrawCosts = { fee, wFee, minPart: solanaWithdrawMinPart(rent, fee, wFee) };
+    // the pool's own piece rule (the wallet's solanaPool: SOL_PIECES), the one the screen's funds plan with
+    const costs: WithdrawCosts = { fee, wFee, minPart: solanaWithdrawMinPart(rent, fee, wFee), ...(h.pool.pieces !== undefined ? { pieces: h.pool.pieces } : {}) };
     const notes = await h.notes();
     // a note an op still owes a send for stays out of the plan: its W is this spend's W too (review #232b MEDIUM 1)
     const owedNotes = (await h.owedNotes?.()) ?? new Set<string>();
@@ -414,6 +488,55 @@ export async function runPoolWithdraw(h: PoolWithdrawHost, ask: PoolAsk, to: str
     return { ...end(pending ? "in_transit" : "stopped"), cause: legCause(e) };
   } finally {
     // the planned notes back to every queue (a failed write: they come back at the record's own deadline)
+    await h.keepOut?.([], 0n).catch(() => {});
+  }
+}
+
+/** A sale's ride (card every-lamport-can-move T3): the piece one of the pool's notes gives so that a sale's W, whose rest
+ *  is under the floor, reaches a note. The least size of the closed list (isReleaseSize) whose change still moves
+ *  (changeMoves) and that `fits`; of one size, the least note, then the first listed. null: no note gives one. */
+export function ridePiece(r: PieceRule, sources: readonly WithdrawSource[], fits: (chunk: bigint) => boolean): { noteId: string; chunk: bigint } | null {
+  let best: { noteId: string; chunk: bigint; value: bigint } | null = null;
+  for (const n of sources)
+    for (const chunk of releaseSizesUpTo(r, n.value).reverse()) {
+      if (!isReleaseSize(r, chunk) || !changeMoves(r, n.value - chunk) || !fits(chunk)) continue;
+      if (best === null || chunk < best.chunk || (chunk === best.chunk && n.value < best.value)) best = { noteId: n.id, chunk, value: n.value };
+      break;
+    }
+  return best === null ? null : { noteId: best.noteId, chunk: best.chunk };
+}
+
+/** A sale's ride (card every-lamport-can-move T3): one piece of the pool's own notes (ridePiece, the notes the withdraw
+ *  reads: withdrawSources less those an op still owes a send for) released to the sale's W `to` through the withdraw's
+ *  own part (onePart: the helper's bind, its fee the device's, the rule's check, the relay, the release read back on
+ *  both RPCs and its spend read at finalized), its change and refund the note's own (as the queue's tier 2: queue.ts
+ *  prove). No onward send: the sale's rent back sweeps W. `fits(got)`: whether what W gets (the chunk less the relay
+ *  fee) lifts W's rest to a note. "none": no note gives one, nothing released; "landed": the release read back and its
+ *  spend final; "unsure": a release that may still land (W's rent back stays owed and the next load sweeps it). */
+export async function runPoolRide(h: PoolWithdrawHost, to: { address: string; l: bigint; j: number }, fits: (got: bigint) => boolean): Promise<PoolRide> {
+  const ask: PoolAsk = { kind: "pool.withdraw", chain: "solana", token: null, amount: 0n, slippageBps: 0, decimals: 9 };
+  const pieces = h.pool.pieces;
+  if (pieces === undefined) return { state: "none" };
+  const { scope } = solanaPoolOf(h.pin.program);
+  const pool = solanaPoolAccount(h.pin.program);
+  const fee = solanaPoolFee(await readSolanaRent(h.rpcs));
+  const notes = await h.notes();
+  const owedNotes = (await h.owedNotes?.()) ?? new Set<string>();
+  const sources = withdrawSources(await notes.list(), scope).filter((n) => !owedNotes.has(n.id));
+  const p = ridePiece(pieces, sources, (chunk) => chunk > fee && fits(chunk - fee));
+  if (p === null) return { state: "none" };
+  // W never the pool's own keys nor a read-only key: the release would pay nothing W can sweep
+  if (toRefused(to.address, h.pin, pool, [])) stop("to");
+  const keep = (): Promise<void> => h.keepOut?.([p.noteId], keepSpan(h.pool)) ?? Promise.resolve();
+  try {
+    await keep();
+    // no owed onward and no kept release: nothing is sent from W but the sale's sweep
+    const { owe: _owe, keepRelease: _keep, ...quiet } = h;
+    const got = await onePart(quiet, ask, notes, { noteId: p.noteId, part: p.chunk - fee, chunk: p.chunk }, fee, 0n, pool, { to: to.address, last: true, feeCap: "0" }, () => {}, keep, to);
+    if (got.stage === "filled") return { state: "landed", signature: got.signature, got: p.chunk - fee };
+    if (got.stage === "refused" || got.stage === "not_landed") return { state: "stopped" };
+    return { state: "unsure", signature: got.signature };
+  } finally {
     await h.keepOut?.([], 0n).catch(() => {});
   }
 }
@@ -597,8 +720,9 @@ async function restedNotes(P: PoolWithdrawHost["pool"], list: readonly NoteRecor
 }
 
 /** One part's release to W: hold the note, prove part + fees to W, build, check, sign, RESERVED, then the send and
- *  its settle. The release is alone in its transaction (review #232 HIGH 1). */
-async function onePart(h: PoolWithdrawHost, ask: PoolAsk, notes: NoteStore, p: WithdrawPart, fee: bigint, wFee: bigint, pool: string, base: Pick<PendingOnward, "to" | "last" | "feeCap">, owing: (owed: PendingOnward) => void, keep: () => Promise<void> = async () => {}): Promise<{ stage: string; signature: string; l: bigint; j: number; releaseAccounts: string[] }> {
+ *  its settle. The release is alone in its transaction (review #232 HIGH 1). W is the note's own, or `to` (a sale's
+ *  ride, runPoolRide: W_{sol, to.l, to.j}, its change and refund still the note's own, as the queue's tier 2). */
+async function onePart(h: PoolWithdrawHost, ask: PoolAsk, notes: NoteStore, p: WithdrawPart, fee: bigint, wFee: bigint, pool: string, base: Pick<PendingOnward, "to" | "last" | "feeCap">, owing: (owed: PendingOnward) => void, keep: () => Promise<void> = async () => {}, to?: { l: bigint; j: number }): Promise<{ stage: string; signature: string; l: bigint; j: number; releaseAccounts: string[] }> {
   const P = h.pool;
   let seed: Uint8Array | null = null;
   let key: Uint8Array | null = null;
@@ -676,8 +800,10 @@ async function onePart(h: PoolWithdrawHost, ask: PoolAsk, notes: NoteStore, p: W
     }
     const deadlineMs = epochStartMs + P.lifeMs;
     const j = jOf(n.ref);
+    const wl = to === undefined ? leaf.label : to.l;
+    const wj = to === undefined ? j : to.j;
     seed = await h.seed64();
-    const w = freshWallet(seed, "sol", leaf.label, j);
+    const w = freshWallet(seed, "sol", wl, wj);
     w.secretKey.fill(0);
     const refundPrecommitment = noteSecrets(seed, { kind: "refund", l: leaf.label, j }).precommitment;
     const spent = noteSecrets(seed, n.ref);
@@ -703,7 +829,7 @@ async function onePart(h: PoolWithdrawHost, ask: PoolAsk, notes: NoteStore, p: W
       context: binding.context,
     });
     const r: ReadyProof<SolanaReleaseRequest> = {
-      noteId: p.noteId, attempt, poolId: P.id, wallet: { chain: "sol", l: leaf.label, j, path: w.path, address: w.address }, chunk: p.chunk,
+      noteId: p.noteId, attempt, poolId: P.id, wallet: { chain: "sol", l: wl, j: wj, path: w.path, address: w.address }, chunk: p.chunk,
       epochStartMs, deadlineMs, root, binding, proof: made.proof, publicSignals: made.publicSignals,
     };
     const sizes = await treeSizes(h, pool, wait);
@@ -725,7 +851,7 @@ async function onePart(h: PoolWithdrawHost, ask: PoolAsk, notes: NoteStore, p: W
     checkSolanaWithdraw(wire, ask, ctx, release, { blockhash: bh.blockhash, tables: {}, stateSize: sizes.stateSize, labelSize: sizes.label });
     // W, from the seed, right before it signs: it must be the proof's recipient the bytes were built and checked for
     seed = await h.seed64();
-    const signer = freshWallet(seed, "sol", leaf.label, j);
+    const signer = freshWallet(seed, "sol", wl, wj);
     key = signer.secretKey;
     seed.fill(0);
     seed = null;
@@ -771,7 +897,7 @@ async function onePart(h: PoolWithdrawHost, ask: PoolAsk, notes: NoteStore, p: W
     // the release's signature as the chain read it: the answer's own (this very transaction read back on both RPCs,
     // or the spend's own signature), never the helper's word
     const signature = a.txs[0]?.hash ?? "";
-    return { stage: a.stage, signature, l: leaf.label, j, releaseAccounts: accounts.map((x) => x.key) };
+    return { stage: a.stage, signature, l: wl, j: wj, releaseAccounts: accounts.map((x) => x.key) };
   } catch (e) {
     if (e instanceof PoolRuleRefused) stop("rule");
     throw e;
