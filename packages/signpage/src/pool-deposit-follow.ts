@@ -272,7 +272,8 @@ export function depositWalletsOf(ops: readonly unknown[], decimals: (chain: Pool
   for (const v of newest.values()) {
     // an in_pool op's left, ended or still read on to its deadline (its follow writes what U_X holds each round, 0 before a
     // carry: card one-balance-buys-on-every-chain)
-    if (v.stage !== "in_pool" || v.follow.left === undefined || !/^[0-9]{1,78}$/.test(v.follow.left)) continue;
+    // and a short deposit's (card leftovers-carry-to-cash: written each round it shows short)
+    if ((v.stage !== "in_pool" && v.stage !== "short") || v.follow.left === undefined || !/^[0-9]{1,78}$/.test(v.follow.left)) continue;
     const units = BigInt(v.follow.left);
     if (units === 0n) continue;
     const d = decimals(v.follow.chain);
@@ -387,7 +388,12 @@ export async function followPoolQuote(f: PoolFollowRecord, deps: PoolFollowDeps,
     // U_X holds over the quote's own floor but cannot pay a rung and its fee now (fees rose since the quote): the
     // existing short stage, so the screen tells it (re-read P3-2), until a top-up to U_X or lower fees let it go; never
     // once a rung of this follow is in the pool
-    if (end === "not_funded" && !landed) await show("short");
+    // what U_X holds is written as the op's left (card leftovers-carry-to-cash): a short deposit's money is counted and
+    // carried to Cash while no top-up comes
+    if (end === "not_funded" && !landed) {
+      await show("short");
+      await deps.holds?.(low);
+    }
     // its txs as both RPCs read them; a read that fails leaves them to the read before the end
     await carryTxs(txs).catch(() => {});
     return went;
@@ -476,6 +482,7 @@ export async function followPoolQuote(f: PoolFollowRecord, deps: PoolFollowDeps,
         // a plain send asks 1Click nothing: money under one deposit's floor at U_X, with nothing of U_X's landing, is short
         if (plain && low > base && !opened) {
           await show("short");
+          await deps.holds?.(low);
           paid = true;
         }
         const st = plain ? null : await deps.status(f, deps.signal);
