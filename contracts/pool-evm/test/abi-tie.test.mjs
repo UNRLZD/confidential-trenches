@@ -196,6 +196,12 @@ const MONEY_PATHS = {
     "EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)",
     "Withdraw(uint256 nullifier,uint256 context,uint256 value)",
   ],
+  "packages/wallet/src/pool/evm-exit.ts": [
+    // the exit's release from the words alone (card exit-evm-pools-with-the-words): its EIP-712 Withdraw and the call
+    "EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)",
+    "Withdraw(uint256 nullifier,uint256 context,uint256 value)",
+    "withdraw((address,bytes),(uint256[2],uint256[2][2],uint256[2],uint256[8]),uint256,bytes)",
+  ],
   "packages/wallet/src/pool/evm.ts": [
     "Bought(address,address,uint256,uint256,uint256,uint256,address,uint256)",
     "Deposited(address,uint256,uint256,uint256,uint256)",
