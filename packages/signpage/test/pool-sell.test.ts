@@ -5746,9 +5746,10 @@ test("the trees grow under a sale's deposit reads four times (four earlier legs'
   });
   const x = await saleCause(w, { rpcs, wait: async (ms: number) => void waits.push(ms) });
   assert.equal(x.rec.stage, "filled", `${x.cause} ${JSON.stringify(x.answer)}`);
-  const [s, l] = sizesNow(w);
   // card pool-amounts-are-standard-sizes: the sale's deposit back is a rung, and W's keep sweep deposits the rung of
-  // what it leaves on W after it fills
+  // what it leaves on W after it fills (it runs after the fill, so it is waited for: up to 2 s)
+  await until(async () => sizesNow(w)[0] >= 1_028);
+  const [s, l] = sizesNow(w);
   assert.deepEqual([s, l], [1_028, 1_028], "four deposits, the sale's own and its keep sweep's");
   assert.deepEqual(pagesNamed(w), [solanaPoolPage(PROGRAM, 0, 1_026), solanaPoolPage(PROGRAM, 1, 1_026)], "the pages at the sizes of the last read, after the fourth deposit");
   assert.ok(waits.filter((ms) => ms === POOL_SELL_SIZE_RETRY_MS).length <= 3, `the waits: ${waits.join(", ")}`);
