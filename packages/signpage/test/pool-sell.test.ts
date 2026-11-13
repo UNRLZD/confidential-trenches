@@ -6184,7 +6184,15 @@ test("round-trip-costs-less a: a W sold in another browser with enough on it: cl
   assert.equal(w.c.deposits.filter((d) => d.sweep).length, 1);
   restAfterSweep(w);
   await settle(w);
-  assert.equal(await resumeRentBacks(w.host, fakeLocks()), false, "W read empty: nothing more");
+  // card pool-amounts-are-standard-sizes: W keeps the rest past the sweep's rung; read the same, no pass and no send
+  assert.equal(await resumeRentBacks(w.host, fakeLocks()), false, "W read as it was: nothing more");
+  const told = w.told.length;
+  const sweeps = w.c.deposits.length;
+  assert.equal(await resumeRentBacks(w.host, fakeLocks()), false);
+  assert.deepEqual([w.told.length, w.c.deposits.length], [told, sweeps], "W read the same: no pass, nothing sent");
+  // once its rest is gone (W at 0), W reads empty once, then is never read again
+  w.c.accounts.delete(W.address);
+  await resumeRentBacks(w.host, fakeLocks());
   const calls = log.length;
   await resumeRentBacks(w.host, fakeLocks());
   assert.equal(log.length, calls, "an empty W is never read again");
