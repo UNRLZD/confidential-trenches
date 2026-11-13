@@ -13,7 +13,7 @@ import { noteCommitment, noteSecrets, type NoteRef } from "../src/notes/secrets.
 import { openNoteStore, refKey, type NoteStore } from "../src/notes/store.ts";
 import { openWalletStore } from "../src/store/index.ts";
 import { evmPoolScopeOf, type EvmPoolEvent } from "../src/pool/evm.ts";
-import { EvmNotFinalError, SECOND_GAP, evmClaimTaken, evmNextNote, evmRestore } from "../src/pool/evm-restore.ts";
+import { EvmNotFinalError, SECOND_GAP, evmClaimTaken, evmNextNote, evmRestore, evmTakenNotes } from "../src/pool/evm-restore.ts";
 import { jOf } from "../src/pool/queue.ts";
 
 const SEED = d.wordsToSeed64(d.entropyToWords(new Uint8Array(16)));
@@ -109,23 +109,35 @@ test("evmClaimTaken: an INCOMING deposit note whose send reverted goes UNSPENT a
   await assert.rejects(evmClaimTaken(other, evmNextNote(SEED, SCOPE, events, RET, FINAL).taken), /another note/);
 });
 
-test("a stranger's Deposited above the finalized block is pending: passed over for the next note, never written, and taken once its block is final", async () => {
+// card evm-money-shows-and-spends-at-once: a take above the finalized block is the user's note at once (written, marked
+// landed with its block), and still pending for the signature: passed over for the next note
+test("head: a Deposited above the finalized block is taken and written at once, marked landed, and passed over for the next note", async () => {
   const events = pool([{ pre: P(RET), value: MIN_DEPOSIT }, { pre: P(Rn(0)), value: MIN_DEPOSIT }]); // blocks 10 and 11
   const got = evmNextNote(SEED, SCOPE, events, RET, 10n);
-  assert.deepEqual(got.taken.map((t) => refKey(t.ref)), [refKey(RET)]);
+  assert.deepEqual(got.taken.map((t) => [refKey(t.ref), t.landed]), [[refKey(RET), undefined], [refKey(Rn(0)), { block: 11n, fin: 10n }]]);
   assert.deepEqual(got.pending.map(refKey), [refKey(Rn(0))]);
   assert.deepEqual(got.next.ref, Rn(1), "the tail's precommitment is never signed on");
   const ns = await store();
   const planned = await ns.add({ ref: RET, scope: SCOPE, precommitment: P(RET), state: "PLANNED" });
-  await ns.add({ ref: Rn(0), scope: SCOPE, precommitment: P(Rn(0)), state: "PLANNED" }).catch(() => undefined);
   await evmClaimTaken(ns, got.taken);
   const byRef = new Map((await ns.list()).map((n) => [refKey(n.ref), n]));
   assert.equal(byRef.get(refKey(RET))!.id, planned.id);
   assert.equal(byRef.get(refKey(RET))!.state, "UNSPENT");
-  assert.notEqual(byRef.get(refKey(Rn(0)))?.state, "UNSPENT", "the tail's note is not stored as money");
-  // the next round, block 11 final: taken
-  assert.deepEqual(evmNextNote(SEED, SCOPE, events, RET, 11n).taken.map((t) => refKey(t.ref)), [refKey(RET), refKey(Rn(0))]);
+  assert.equal((await ns.landings()).get(byRef.get(refKey(RET))!.id), undefined, "final: no block kept");
+  assert.equal(byRef.get(refKey(Rn(0)))!.state, "UNSPENT", "the tail's note is the user's money now");
+  assert.equal((await ns.landings()).get(byRef.get(refKey(Rn(0)))!.id), 11n);
   assert.throws(() => evmNextNote(SEED, SCOPE, events, RET, -1n), /finalBlock/);
+});
+
+test("head: a deposit note taken in a block not final yet is the user's note at once (evmTakenNotes), while no note past it is signed (evmNextNote waits)", async () => {
+  const events = poolAt([{ pre: P(U0), value: RUNG, block: 20n }]);
+  const got = evmTakenNotes(SEED, SCOPE, events, U0, 15n);
+  assert.deepEqual(got.taken.map((t) => [refKey(t.ref), t.leaf.value, t.landed]), [[refKey(U0), RUNG, { block: 20n, fin: 15n }]]);
+  assert.match(got.wait!, /not final yet/);
+  assert.throws(() => evmNextNote(SEED, SCOPE, events, U0, 15n), EvmNotFinalError);
+  const ns = await store();
+  const [n] = await evmClaimTaken(ns, got.taken);
+  assert.equal(n!.state, "UNSPENT");
 });
 
 /** Deposited events at the given blocks, in log order. */

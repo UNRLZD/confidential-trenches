@@ -1,6 +1,7 @@
 // pool.deposit on an EVM pool (card pool-deposits, slice 3): a one-time wallet U of the device puts ETH into the pinned
-// pool on its own chain (Base, Robinhood), and each note is stored landed only once a Deposited naming its
-// precommitment is final on both RPCs. The rules are the Solana runner's (src/pool-deposit.ts), on the EVM's reads:
+// pool on its own chain (Base, Robinhood), and each note is stored landed once a Deposited naming its precommitment is
+// in the newest block both RPCs agree on by hash (card evm-money-shows-and-spends-at-once; a reorg that drops it backs
+// the note out again, wallet src/pool/evm-settle.ts). The rules are the Solana runner's (src/pool-deposit.ts), on the EVM's reads:
 //
 // - The source: U = U^evm_{s,i} (derive/keys.ts depositIdEvm), s the pinned pool's scope. The newest U this scope has
 //   landed a note from stays the source while it covers a rung and its fee; else the U of the index the note store plans
@@ -20,8 +21,8 @@
 //   and the run goes on to the next note. If none names it, the run reads and simulates once more before not_funded.
 // - The note goes PLANNED -> INCOMING with its send { hash, nonce, value } written BEFORE eth_sendRawTransaction leaves
 //   for both RPCs; a send built again is written first too (addEvmSend), at the note's recorded value.
-// - The verdict: a Deposited naming the precommitment at the round's finalized block (both RPCs, evmTreeSync's events
-//   and evmNextNote) moves the note to UNSPENT with its leaf; one at another value is a take, the note restored at that
+// - The verdict: a Deposited naming the precommitment at the round's newest agreed block (both RPCs, evmTreeSync's
+//   events and evmTakenNotes) moves the note to UNSPENT with its leaf, marked landed while above the finalized block; one at another value is a take, the note restored at that
 //   value. A send is dead ONLY when U's nonce has passed it at a block final on BOTH RPCs (spentFinal: the nonce read
 //   at the newest block by its hash, that block then final by its header), read before the round, and no
 //   Deposited names the precommitment on either (final or not): then it is built again from fresh reads at the new nonce on the SAME note,
@@ -39,8 +40,8 @@
 //   Deposited is final only ~1,000 s on), so a run that ends with no end (filled, or part_filled with no note of the ask
 //   still INCOMING) hands the kind the ask's notes still INCOMING (`left`, kept in memory as each send leaves), and the
 //   kind reads each by its own record, with no lock held and nothing written, every POOL_DEPOSIT_EVM_FOLLOW_MS. Landed:
-//   its record UNSPENT at its value, or a Deposited naming its precommitment at or below the round's finalized block, at
-//   its value. Dead only when taken (a final Deposited at another value: the pool refuses a used precommitment). U's
+//   its record UNSPENT at its value, or a Deposited naming its precommitment at the round's newest agreed block, at its
+//   value. Dead only when taken (a final Deposited at another value: the pool refuses a used precommitment). U's
 //   nonce past every send of it (its highest) at a block final on BOTH RPCs (spentFinal), read before a round with no
 //   Deposited naming it, is
 //   no end: the pass builds the note again at U's new nonce, so the reads start it (`settle`) and follow the new send.
@@ -58,7 +59,7 @@ import { noteSecrets, type NoteRef } from "../../wallet/src/notes/secrets.ts";
 import type { EvmPoolSend, NoteRecord, NoteState, NoteStore } from "../../wallet/src/notes/store.ts";
 import { evmAgreedBlock, EvmLagError, evmPoolScopeOf, evmRetryLag, EvmUnansweredError, EVM_CHAIN_IDS, EVM_LADDER, EVM_READ_TRY_MS, type EvmNetwork, type EvmPoolEvent, type EvmPoolPin, type EvmRpc } from "../../wallet/src/pool/evm.ts";
 import { SolanaRpcTransportError } from "../../kit/src/trade/solana/send.ts";
-import { evmClaimTaken, evmNextNote, EvmNotFinalError } from "../../wallet/src/pool/evm-restore.ts";
+import { evmClaimTaken, evmNextNote, EvmNotFinalError, evmTakenNotes } from "../../wallet/src/pool/evm-restore.ts";
 import { evmSameChainDeposit } from "../../wallet/src/pool/same-chain.ts";
 import { ladderSplit } from "../../wallet/src/pool/ladder.ts";
 import { WALLET_SEED_LOCK } from "@blindfill/wallet/store";
@@ -119,7 +120,7 @@ export type PoolDepositEvmLeft = { notes: { precommitment: bigint; value: bigint
  *  ~1,000 s after it lands, and each read is a round of the pool's events). */
 export const POOL_DEPOSIT_EVM_FOLLOW_MS = 10_000;
 /** How long a note's send is read every POOL_DEPOSIT_EVM_FOLLOW_MS as one that may land: the slowest Deposited finality
- *  measured (Robinhood testnet, 1,439 s: POOL_DEPOSIT_EVM_READS) and a minute for the send to be mined. Past it, a read
+ *  measured (Robinhood testnet, 1,439 s, read 2026-11-07 06:12Z) and a minute for the send to be mined. Past it, a read
  *  that stays "may land" (a send held in a mempool and never mined, so U's nonce never passes it) backs off as
  *  a quiet one, never stopped (delta review low 1). Counted per note as on Solana (POOL_DEPOSIT_LANDING_MS). */
 export const POOL_DEPOSIT_EVM_LANDING_MS = 1_500_000;
@@ -127,11 +128,12 @@ export const POOL_DEPOSIT_EVM_LANDING_MS = 1_500_000;
 /** The priority fee U offers, wei per gas: 0.01 gwei, above what Base's blocks include at (a tip that never lands
  *  holds U's nonce); Robinhood (Nitro) ignores it. */
 export const EVM_DEPOSIT_PRIORITY_CAP = 10_000_000n;
-/** Verdict reads the ask's own send gets in its run, POOL_DEPOSIT_EVM_WAIT_MS apart. One: a Deposited is final on
- *  both RPCs only after Base 1,061 s, Base Sepolia 1,341 s, Robinhood 1,088 s, Robinhood testnet 1,439 s (measured on
- *  two public RPCs per chain, 2026-11-07 06:12Z), so no wait inside a run sees it, and a run holding the deposit lock
- *  that long would hold every other deposit. The note settles in the load and state-read pass (settle). */
-export const POOL_DEPOSIT_EVM_READS = 1;
+/** Verdict reads the ask's own send gets in its run, POOL_DEPOSIT_EVM_WAIT_MS apart. Two: the note lands once the
+ *  newest block both RPCs agree on holds its Deposited (card evm-money-shows-and-spends-at-once), and the first read
+ *  comes right after the send, before a block holds it (Base's blocks 200 ms apart, Robinhood's 110 ms), so the second,
+ *  2 s on, lands it in the run; finality (Base 1,061 s, Robinhood 1,088 s, 2026-11-07 06:12Z) is never waited on here.
+ *  A send that misses both settles in the load and state-read pass (settle). */
+export const POOL_DEPOSIT_EVM_READS = 2;
 export const POOL_DEPOSIT_EVM_WAIT_MS = 2_000;
 /** A run builds one note's send again at most this many times (each only once the last is dead on both RPCs, or
  *  reached neither). */
@@ -229,12 +231,15 @@ const sameRef = (a: NoteRef, b: NoteRef): boolean => JSON.stringify(a, (_, v) =>
  *  hash (a send again of the very bytes restarts EVM_DEPOSIT_RESEND_MS). */
 type Run = { h: PoolDepositEvmHost; store: NoteStore; seed: Uint8Array; scope: bigint; chainId: bigint; keys: Uint8Array[]; ask: PoolAsk; sentAt: Map<string, bigint> };
 const nowOf = (r: Run): bigint => BigInt(Math.floor((r.h.now ?? Date.now)()));
-const sleepOf = (h: PoolDepositEvmHost) => h.wait ?? ((ms: number) => new Promise<void>((ok) => setTimeout(ok, ms)));
+/** The run's wait: the host's, else a timer a sign out (signal) or a stop ends at once (pool-deposit.ts followWait). */
+const sleepOf = (h: PoolDepositEvmHost) => h.wait ?? ((ms: number) => followWait(ms, h.signal && h.stop ? AbortSignal.any([h.signal, h.stop]) : (h.signal ?? h.stop)));
+/** Ended by a sign out (signal) or a stop: no read and no write after it. */
+const ended = (h: PoolDepositEvmHost): boolean => h.signal?.aborted === true || h.stop?.aborted === true;
 
 /** U's reads at one block both RPCs hold: the block, U's nonce and the base fee (agreed; each RPC's reading kept for
  *  the rule's own check) and its balance (each RPC's). */
 async function accountReads(r: Run, u: string): Promise<{ block: bigint; tag: string; baseFee: bigint; baseFees: [bigint, bigint]; nonce: bigint; nonces: [bigint, bigint]; balance: [bigint, bigint] }> {
-  const sleep = (ms: number) => (r.h.wait ?? ((x: number) => new Promise<void>((ok) => setTimeout(ok, x))))(ms);
+  const sleep = sleepOf(r.h);
   // the newest block both hold (a lag read again), then its base fee as each RPC answers it: the two the same
   const blk = await evmRetryLag(() => evmAgreedBlock(r.h.rpcs, "latest", undefined, sleep), sleep);
   const tag = qty(blk.number);
@@ -315,8 +320,8 @@ type Try =
  */
 async function tryNote(r: Run, first: Extract<NoteRef, { kind: "deposit" }>, again: NoteRecord | null, want: bigint, atNonce?: bigint): Promise<Try> {
   const round = await r.h.round();
-  // the pick: the device never signs a precommitment the pool already holds (signer guard)
-  const pick = evmNextNote(r.seed, r.scope, round.events, first, round.finalBlock);
+  // every take the newest agreed block holds is the user's note now (card evm-money-shows-and-spends-at-once)
+  const pick = evmTakenNotes(r.seed, r.scope, round.events, first, round.finalBlock);
   if (pick.taken.length > 0) {
     const all = await r.store.list();
     const fresh = pick.taken.filter((t) => !all.some((n) => sameRef(n.ref, t.ref) && LANDED.includes(n.state)));
@@ -326,6 +331,9 @@ async function tryNote(r: Run, first: Extract<NoteRef, { kind: "deposit" }>, aga
       if (again === null) return { kind: "claimed" };
     }
   }
+  // the pick: the device never signs a precommitment the pool already holds (signer guard), nor a note past one whose
+  // block is not final yet (its EvmNotFinalError reaches pool-kinds as busy)
+  evmNextNote(r.seed, r.scope, round.events, first, round.finalBlock);
   const id = depositIdEvm(r.seed, first.s, first.i);
   r.keys.push(id.secretKey);
   const u = id.address;
@@ -448,20 +456,15 @@ async function verdictOf(r: Run, n: NoteRecord, kept: (n: NoteRecord) => void = 
     }
   }
   const round = await r.h.round();
-  let pick: ReturnType<typeof evmNextNote>;
-  try {
-    pick = evmNextNote(r.seed, r.scope, round.events, first, round.finalBlock);
-  } catch (e) {
-    if (e instanceof EvmNotFinalError) return { kind: "pending" }; // a Deposited not final yet: never dead
-    throw e;
-  }
+  // landed once the newest block both RPCs agree on holds its Deposited (card evm-money-shows-and-spends-at-once), final
+  // or not: a reorg that drops it backs the note out again (wallet evm-settle.ts)
+  const pick = evmTakenNotes(r.seed, r.scope, round.events, first, round.finalBlock);
   if (pick.taken.some((t) => sameRef(t.ref, n.ref))) {
+    if (ended(r.h)) return { kind: "pending" }; // a sign out or a stop while the round was read: nothing written
     for (const c of await evmClaimTaken(r.store, pick.taken)) r.h.landed?.(c);
     const now = (await r.store.get(n.id))!;
     return { kind: "landed", note: now, filled: now.leaf?.value === n.evmSends?.[0]?.value };
   }
-  // a Deposited naming it in a block not final yet: pending, never dead
-  if (pick.pending.some((p) => sameRef(p, n.ref))) return { kind: "pending" };
   if (last === undefined) return { kind: "dead" }; // INCOMING with no send: nothing left the device for it
   if (fault !== null) throw fault.e;
   // dead only when U's nonce passed the send at a block final on BOTH RPCs, that block within the round's final
@@ -494,9 +497,19 @@ async function follow(r: Run, n: NoteRecord, reads: number, wait: (ms: number) =
   let note = n;
   let rebuilds = 0;
   for (let k = 0; k < reads; k++) {
+    // a sign out or a stop before the wait, during it (the run's wait ends at once) or after it: no read again
+    if (k > 0 && ended(r.h)) return { kind: "pending" };
     if (k > 0) await wait(POOL_DEPOSIT_EVM_WAIT_MS);
+    if (k > 0 && ended(r.h)) return { kind: "pending" };
     // the kept block back as stored, while the note is the one this follow reads (INCOMING, its sends as read)
-    const v = await verdictOf(r, note, (x) => void (x.state === "INCOMING" && x.evmSends?.length === note.evmSends?.length && (note = x)));
+    // a read that fails with a read left (a provider's logs behind the pool's state at the newest block, right after the
+    // send) is read again at the next read, never the run's answer; the last read's failure stands. So the run holds its
+    // send at most one more POOL_DEPOSIT_EVM_WAIT_MS and one read (POOL_DEPOSIT_EVM_READS 2), and a failed read after a
+    // sign out (signal) or a stop is never read again: it ends the run at once
+    const v = await verdictOf(r, note, (x) => void (x.state === "INCOMING" && x.evmSends?.length === note.evmSends?.length && (note = x))).catch((e: unknown) => {
+      if (k + 1 < reads && !r.h.signal?.aborted && !r.h.stop?.aborted) return { kind: "pending" as const };
+      throw e;
+    });
     if (v.kind === "landed") return { kind: "landed", note: v.note, filled: v.filled, hash: note.evmSends?.at(-1)?.hash };
     if (v.kind === "pending") continue;
     // dead on both RPCs: the same note again from fresh reads at U's new nonce; reached neither: at its own nonce
@@ -547,7 +560,8 @@ async function noteEndEvm(h: PoolDepositEvmHost, n: PoolDepositEvmLeft["notes"][
   stopped(h);
   const round = await h.round(h.signal);
   const d = round.events.find((e) => e.kind === "deposit" && e.precommitment === n.precommitment);
-  if (d !== undefined) return d.block > round.finalBlock ? null : d.value === n.value ? "landed" : "dead";
+  // landed at the newest agreed block; dead (taken at another value) only once final, a verdict that never comes back
+  if (d !== undefined) return d.value === n.value ? "landed" : d.block > round.finalBlock ? null : "dead";
   if (fault !== null) throw fault.e;
   return spent !== null && round.finalBlock >= spent ? "expired" : null;
 }
@@ -610,7 +624,7 @@ async function depositRunEvm(h: PoolDepositEvmHost, ask: PoolAsk | null, at: { f
   const landedTxs: TxRef[] = [];
   const sentTxs: TxRef[] = [];
   const chain = ask?.chain ?? (h.pin.network === "robinhood" || h.pin.network === "robinhood-testnet" ? "robinhood" : "base");
-  const wait = h.wait ?? ((ms: number) => new Promise<void>((ok) => setTimeout(ok, ms)));
+  const wait = sleepOf(h);
   // the ask's own notes that landed this run (each counted whether or not a tx is named for it)
   let landed = 0;
   // a send of the pass (an earlier note's, sent again) may land too: the run is never "failed" past it

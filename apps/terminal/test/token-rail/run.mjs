@@ -6,7 +6,7 @@
 //   - the width mode, read off the desktop grid's first track and the rail's own box: the full rail (340 layout px) from
 //     1500 css px, the slim rail (78: the rings and the expand button) from 1180, no rail under it (and no lists read
 //     for it: the page's one read of / is the only one);
-//   - the full rail's Trending and New chips (Trending pressed), its rows the Trending column as Discover orders it, each
+//   - the full rail's chips as UNRLZD's rail (owner 12 Nov parity): Trending, Watchlist, New, Hot, Graduating (Trending pressed), its rows the Trending column as Discover orders it, each
 //     a link to /token/solana/<mint>, the page's own token marked (aria-current);
 //   - the header's strip whole in every mode (no tile cut, clear of the trade column and the rail: the design's one-row
 //     rule), no horizontal scroll, no text under 11 px, no layout shift from the first paint (CLS 0), no page error;
@@ -207,7 +207,7 @@ try {
         const cur = p.rows.filter((r) => r.current === "page").map((r) => r.token);
         check(cur.length === 1 && cur[0] === top, `${tag}: the marked row(s) ${JSON.stringify(cur)}, want the page's ${top}`);
         if (w.mode === "full") {
-          check(JSON.stringify(p.chips) === JSON.stringify(["Trending:true", "New:false"]), `${tag}: chips ${JSON.stringify(p.chips)}`);
+          check(JSON.stringify(p.chips) === JSON.stringify(["Trending:true", "Watchlist:false", "New:false", "Hot:false", "Graduating:false"]), `${tag}: chips ${JSON.stringify(p.chips)}`);
           check(!p.expand, `${tag}: the expand button drawn on the full rail`);
           check(p.rows.every((r) => r.sym), `${tag}: a full row with no symbol drawn`);
         } else {
@@ -241,7 +241,7 @@ try {
         if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `rail-${w.name}-click.png`) });
         await f.locator('[data-testid="token-rail"] .tkr-chip[data-list="new"]').click();
         const nw = await readPage(f);
-        check(JSON.stringify(nw.rows.map((r) => r.token)) === JSON.stringify(NEW) && JSON.stringify(nw.chips) === JSON.stringify(["Trending:false", "New:true"]), `${tag}: New shows ${nw.rows.length} rows (want the New column's ${NEW.length}), chips ${JSON.stringify(nw.chips)}`);
+        check(JSON.stringify(nw.rows.map((r) => r.token)) === JSON.stringify(NEW) && JSON.stringify(nw.chips) === JSON.stringify(["Trending:false", "Watchlist:false", "New:true", "Hot:false", "Graduating:false"]), `${tag}: New shows ${nw.rows.length} rows (want the New column's ${NEW.length}), chips ${JSON.stringify(nw.chips)}`);
         if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `rail-${w.name}-new.png`) });
         const pick = NEW.find((t) => t !== next);
         await f.locator(`[data-testid="token-rail"] [data-token="${pick}"] a`).click();
@@ -254,7 +254,7 @@ try {
         const ex = await readPage(f);
         check(ex.open === "true" && Math.abs(ex.railW - 340) <= 1, `${tag}: expand drew the rail ${ex.railW} wide (open ${ex.open}), want 340`);
         check(ex.mainLeft === before.mainLeft && ex.tracks === before.tracks, `${tag}: expanding moved the page (main ${before.mainLeft} -> ${ex.mainLeft}, tracks ${before.tracks} -> ${ex.tracks})`);
-        check(JSON.stringify(ex.chips) === JSON.stringify(["Trending:true", "New:false"]) && ex.rows.every((r) => r.sym), `${tag}: the expanded rail: chips ${JSON.stringify(ex.chips)}, rows with text ${ex.rows.filter((r) => r.sym).length}/${ex.rows.length}`);
+        check(JSON.stringify(ex.chips) === JSON.stringify(["Trending:true", "Watchlist:false", "New:false", "Hot:false", "Graduating:false"]) && ex.rows.every((r) => r.sym), `${tag}: the expanded rail: chips ${JSON.stringify(ex.chips)}, rows with text ${ex.rows.filter((r) => r.sym).length}/${ex.rows.length}`);
         if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `rail-${w.name}-expanded.png`) });
         const next = TRENDING[2];
         await f.locator(`[data-testid="token-rail"] [data-token="${next}"] a`).click();

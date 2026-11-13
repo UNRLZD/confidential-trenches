@@ -5,7 +5,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { HeldMarket, SignpageClientSnapshot, SignpageState } from "@blindfill/kit";
-import { heldData, heldRefs } from "../src/screens/portfolio/held.ts";
+import { heldData, heldRefs, marketRefs } from "../src/screens/portfolio/held.ts";
 import { line, portfolio } from "../src/screens/portfolio/model.ts";
 
 const H = 3_600_000;
@@ -36,6 +36,28 @@ const markets: HeldMarket[] = [
 test("the refs: each held token once, chain and token only", () => {
   assert.deepEqual(heldRefs(state), [{ chain: "base", token: "0xAbC" }, { chain: "solana", token: "MINTA" }]);
   assert.deepEqual(heldRefs(null), []);
+});
+
+test("the market read also names every token the device traded, so Closed draws a coin's name and picture, not its first six characters (the signed-in walk of release 124, 12 Nov: '78GaXF')", () => {
+  const traded: SignpageState = {
+    ...state,
+    ops: [
+      ...state.ops,
+      { id: "b2", kind: "buy", stage: "filled", txs: [], created_ms: NOW - H, chain: "solana", token: "CLOSED1", amount_usd: "1" },
+      { id: "s2", kind: "sell", stage: "filled", txs: [], created_ms: NOW - H / 2, chain: "solana", token: "CLOSED1", units: "10" },
+      { id: "s3", kind: "sell", stage: "filled", txs: [], created_ms: NOW - H / 3, chain: "near", token: "wrap.near", units: "1" },
+      { id: "d1", kind: "pool_deposit", chain: "solana", stage: "in_pool", txs: [], created_ms: NOW - H } as SignpageState["ops"][number],
+    ],
+  };
+  assert.deepEqual(marketRefs(traded), [
+    { chain: "base", token: "0xAbC" },
+    { chain: "near", token: "wrap.near" },
+    { chain: "solana", token: "CLOSED1" },
+    { chain: "solana", token: "MINTA" },
+  ]);
+  // the price history stays the open positions'
+  assert.deepEqual(heldRefs(traded), [{ chain: "base", token: "0xAbC" }, { chain: "solana", token: "MINTA" }]);
+  assert.deepEqual(marketRefs(null), []);
 });
 
 test("a held token draws the kit's symbol, name and price; one it names nothing for draws as before; no route mark", () => {

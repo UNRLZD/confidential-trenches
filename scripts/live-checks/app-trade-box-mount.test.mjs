@@ -2,12 +2,15 @@
 // (app-trade-box-mount.answers.json), each read on 3 Nov by app-trade-box-mount.mjs collect() in headless Chrome, signed
 // out, HELPER_HOST live:
 //   good: this card's build served at APP_HOST's name inside the stand-in shell (--build): at 1440 the right column holds the
-//         box (Bal —, the exit plan off, Sign in to trade, S8.1) with the 12-cell grid under it matching the page's own
+//         box (— available, the exit plan off, Sign in to trade, S8.1) with the 12-cell grid under it matching the page's own
 //         token read, and the button opens the sign-in sheet; at 390 the bar's Buy opens the sheet with the same box and
 //         grid, and its button opens the sign-in sheet above it: PASS;
+//         Recorded again on 12 Nov from the ui-parity tree's build (entry at 2026-11-12T22:37Z), on the token's own page,
+//         app-sell-mount's PATH (the phone's / draws the Trenches list since UNRLZD parity), with the grid's first three
+//         labels UNRLZD's (Top 10, Dev, Snipers) and the balance line `— available`: PASS;
 //   bad:  APP_HOST's build before this card (card app-token-route's a3b7068): the right column is empty and the Buy button
 //         opens nothing: FAIL.
-// Planted from the good run: a balance of $0, a Buy button in place of Sign in to trade, an exit plan left on, "available",
+// Planted from the good run: a balance of $0 or the old `Bal —`, a Buy button in place of Sign in to trade, an exit plan left on,
 // a box left of the chart or outside its column, the grid above the Route & fees line, a wrong or missing grid cell, a token
 // read for another token, a sheet outside the window, a sign-in sheet under the trade sheet or not opened.
 import assert from "node:assert/strict";
@@ -38,7 +41,7 @@ test("recorded good answer: the box and its grid in the right column and in the 
   }
   const desk = ANSWERS.good.loads[0].page.box;
   assert.equal(desk.cells.length, CELLS.length);
-  assert.deepEqual([desk.state, desk.balance, desk.cta.text], ["S8.1", "Bal —", "Sign in to trade"]);
+  assert.deepEqual([desk.state, desk.balance, desk.cta.text], ["S8.1", "— available", "Sign in to trade"]);
 });
 
 test("recorded bad answer: the build before this card (an empty right column, the Buy button opens nothing): FAIL", () => {
@@ -48,13 +51,13 @@ test("recorded bad answer: the build before this card (an empty right column, th
   some(r, /^BAD phone .*the Buy button did not open the trade sheet/);
 });
 
-test("planted: a balance of $0, a Buy button, an exit plan left on, and the word available each fail", () => {
-  some(mut((rec) => { rec.loads[0].page.box.balance = "Bal $0"; }), /the balance reads "Bal \$0"/);
+test("planted: a balance of $0 (or the old Bal line), a Buy button and an exit plan left on each fail", () => {
+  some(mut((rec) => { rec.loads[0].page.box.balance = "$0 available"; }), /the balance reads "\$0 available"/);
+  some(mut((rec) => { rec.loads[0].page.box.balance = "Bal —"; }), /the balance reads "Bal —", not "— available"/);
   some(mut((rec) => { rec.loads[0].page.box.cta.text = "Buy DJT"; }), /the main button reads "Buy DJT"/);
   some(mut((rec) => { rec.loads[0].page.box.cta.disabled = true; }), /the main button is disabled/);
   some(mut((rec) => { rec.loads[0].page.box.exit.pressed = "true"; }), /the exit plan is not off/);
   some(mut((rec) => { rec.loads[0].page.box.state = "S8.3"; }), /not S8\.1/);
-  some(mut((rec) => { rec.loads[0].page.box.text += " 48.20 available"; }), /says "available"/);
 });
 
 test("card app-orders-coming-soon: the block with Coming soon and no switch passes; Coming soon beside a switch, or other words, fail", () => {
@@ -74,10 +77,10 @@ test("planted: a box left of the chart, outside its column or the window, or a g
 });
 
 test("planted: a grid cell that is not what the token read holds, or a missing cell, fails", () => {
-  some(mut((rec) => { rec.loads[0].page.box.cells[0].value = "99%"; }), /cell 0 \(Top 10 %\)/);
+  some(mut((rec) => { rec.loads[0].page.box.cells[0].value = "99%"; }), /cell 0 \(Top 10\)/);
   some(mut((rec) => { rec.loads[0].page.box.cells[8].cross = !rec.loads[0].page.box.cells[8].cross; }), /cell 8 \(Mint auth\)/);
   some(mut((rec) => { rec.loads[0].page.box.cells[3].tone = "bad"; }), /cell 3 \(Holders\)/);
-  some(mut((rec) => { rec.loads[0].page.box.cells[1].label = "Dev"; }), /cell 1 \(Dev %\)/);
+  some(mut((rec) => { rec.loads[0].page.box.cells[1].label = "Dev %"; }), /cell 1 \(Dev\)/);
   some(mut((rec) => { rec.loads[0].page.box.cells.pop(); }), /11 grid cells, not 12/);
   // the read the grid is held to changes: a token read that holds a tax makes a 0% cell wrong
   some(mut((rec) => { rec.loads[0].token.read.risk.tax = { buy_bps: 500, sell_bps: 500 }; }), /cell 7 \(Tax\)/);

@@ -64,11 +64,11 @@ export function judge(rec) {
     if (!r.box) bad.push("no trade box");
     else if (r.kind === "cash") {
       if (r.box.path === "pool") bad.push("the box is on the pool path with no pool");
-      if (bal !== `Bal ${r.header}`) bad.push(`the box's Bal is ${JSON.stringify(bal)}, the header's ${r.header ?? "none"}`);
+      if (bal !== `${r.header} available`) bad.push(`the box's Bal is ${JSON.stringify(bal)}, the header's ${r.header ?? "none"}`);
     } else {
       if (r.box.path !== "pool") bad.push(`the box is on the ${r.box.path ?? "unmarked"} path, not the pool's`);
       if (bal === null) bad.push("the box draws no Bal");
-      else if (bal === `Bal ${r.header}`) bad.push(`the box's Bal is the header's Cash (${bal}), not the pool's`);
+      else if (bal === `${r.header} available`) bad.push(`the box's Bal is the header's Cash (${bal}), not the pool's`);
     }
     if (!r.shot) bad.push("no screenshot");
     say(bad.length === 0, `${n}: ${bad.length ? bad.join("; ") : `the header ${r.header}, the box's ${JSON.stringify(bal)} on the ${r.box.path} path`}`);

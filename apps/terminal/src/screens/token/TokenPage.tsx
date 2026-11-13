@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ReactNode } from "react";
+import type { ReactNode, RefObject } from "react";
 import type { KLineData } from "klinecharts";
 import { useParams } from "react-router";
 import { parseTokenRoute } from "../../routes/routes.ts";
 import type { MarketChain } from "../discover/fields.ts";
 import { DASH } from "../discover/format.ts";
 import { Avatar } from "../market/Avatar.tsx";
+import { padOf } from "../market/pads.ts";
 import { text as signinWord } from "../signin/Word.tsx";
 import { SafetyGrid } from "../trade/SafetyGrid.tsx";
 import { safetyCells } from "../trade/safety.ts";
@@ -21,7 +22,9 @@ import type { Bar, CandleData, ChartTf } from "./candles.ts";
 import { fitBars, fitPrice, INDICATORS, isAuto, liveBars, mountChart, setDisplay, setIndicators, setScale, unmountChart } from "./chart.ts";
 import type { Drawn, IndicatorId, Scale } from "./chart.ts";
 import { About, LowerPanel } from "./LowerPanel.tsx";
-import { Rail } from "./Rail.tsx";
+import { PhoneTrenches } from "./PhoneTrenches.tsx";
+import { DrawToolbar } from "./draw/DrawToolbar.tsx";
+import { Rail, useMedia } from "./Rail.tsx";
 import { TradeMarks } from "./TradeMarks.tsx";
 import { useTrades } from "./trades.ts";
 import type { Tape, Trade as TapeTrade } from "./trades.ts";
@@ -29,9 +32,10 @@ import { keepRoom, legendRoom, legendText, priceRoom, useRoom } from "./legend.t
 import type { LegendRoom } from "./legend.ts";
 import { coinUsd, factors, QUOTE, scaleBars, supplyOf, unitDrawn, volumeIn } from "./units.ts";
 import type { ChartUnit } from "./units.ts";
-import { copyText, readWatch, shareHref, toggleWatch, tokenLinks, tokenView } from "./model.ts";
-import type { TokenView } from "./model.ts";
+import { copyText, LINK_MARK, readWatch, shareHref, toggleWatch, tokenLinks, tokenView } from "./model.ts";
+import type { TokenLink, TokenView } from "./model.ts";
 import { useToken, useTopToken } from "./source.ts";
+import { flashNum, useFlash } from "./useFlash.ts";
 import type { TokenData } from "./source.ts";
 import { WORDS } from "./words.ts";
 import type { WordId } from "./words.ts";
@@ -45,7 +49,7 @@ import "./token.css";
 // the trade box (S8) and what the bar's buttons open.
 //
 // Card app-trade-box-mount puts the trade box and the safety grid under it (the token read's row and risk) in the
-// desktop's right column, signed out as designed (S8.1: `Bal —`, the exit plan off, `Sign in to trade`), and opens the
+// desktop's right column, signed out as designed (S8.1: `— available`, the exit plan off, `Sign in to trade`), and opens the
 // same box in a bottom sheet from the phone bar's Buy, Sell and quick buys. The signed-in money path is trade-box-pool's.
 // Card app-phone-trade-sheet moves the sheet to trade/TradeSheet.tsx: its box stays mounted when it closes, so a running
 // buy is drawn where it is on the next open; a pushed page (/token/<chain>/<id>) has no tab bar, its bar at the bottom.
@@ -65,18 +69,20 @@ const SkLine = ({ cls, w }: { cls: string; w: number }) => <span className={`${c
 /** The identity line's skeleton: the filled line holds a mono age and address, so its height is the mono face's line. */
 const SkMeta = ({ w }: { w: number }) => <span className="tkp-meta tkp-sk" style={{ width: w }} aria-hidden="true"><span className="tkp-num">{"\u00a0"}</span></span>;
 
-function Tile({ label, value, dir, tone, k }: { label: WordId; value: string | null; dir?: string; tone?: string; k: string }) {
+function Tile({ label, value, dir, tone, k, flash }: { label: WordId; value: string | null; dir?: string; tone?: string; k: string; flash?: RefObject<HTMLSpanElement | null> }) {
   return (
     <div className="tkp-tile" data-k={k}>
       <span className="tkp-lbl"><W id={label} /></span>
-      {value === null ? <SkLine cls="tkp-val" w={64} /> : <span className="tkp-val" data-dir={dir} data-tone={tone}>{value}</span>}
+      {value === null ? <SkLine cls="tkp-val" w={64} /> : <span className="tkp-val" ref={flash} data-dir={dir} data-tone={tone}>{value}</span>}
     </div>
   );
 }
 
 // R5's line icons (assets/app.js I, drawn by P.ic in a 12 box): the identity's links, star, copy, share and back
 const ICONS: Record<string, readonly (string | readonly [string, Record<string, number>])[]> = {
-  link: ["M5 7l2-2", "M4.2 5.2L3 6.4a2 2 0 002.8 2.8L7 8", "M7.8 6.8L9 5.6a2 2 0 00-2.8-2.8L5 4"],
+  // the token's website (UNRLZD components/icons.tsx web) and its chain's explorer (a block)
+  web: [["circle", { cx: 6, cy: 6, r: 4.5 }], "M1.5 6h9", "M6 1.5c1.4 1.3 2 2.8 2 4.5s-.6 3.2-2 4.5c-1.4-1.3-2-2.8-2-4.5s.6-3.2 2-4.5z"],
+  explorer: ["M6 1.3l4.2 2.3v4.8L6 10.7 1.8 8.4V3.6z", "M1.8 3.6L6 5.9l4.2-2.3", "M6 5.9v4.8"],
   search: [["circle", { cx: 5.2, cy: 5.2, r: 3.7 }], "M8 8l2.8 2.8"],
   star: ["M6 1.2l1.5 3 3.3.5-2.4 2.3.6 3.3L6 8.8l-3 1.5.6-3.3-2.4-2.3 3.3-.5z"],
   copy: [["rect", { x: 4, y: 4, width: 6.5, height: 6.5, rx: 1.2 }], "M8 4V2.7c0-.7-.5-1.2-1.2-1.2H2.7c-.7 0-1.2.5-1.2 1.2v4.1c0 .7.5 1.2 1.2 1.2H4"],
@@ -147,6 +153,37 @@ function Star({ v, cls, size }: { v: TokenView; cls: string; size: number }) {
   );
 }
 
+/** X's and Telegram's official marks in the text colour, verbatim from UNRLZD's components/social/BrandMark.tsx (X:
+ *  about.x.com brand toolkit, x-logo.zip › logo.svg; Telegram: telegram.org/img/t_logo.svg, the plane knocked out of its
+ *  circle), each in a square box inset 10% a side so a solid mark sits at the line icons' weight. */
+const BRAND = {
+  x: {
+    vb: "-136.2 -122.7 1472.4 1472.4",
+    d: "M714.163 519.284L1160.89 0H1055.03L667.137 450.887L357.328 0H0L468.492 681.821L0 1226.37H105.866L515.491 750.218L842.672 1226.37H1200L714.137 519.284H714.163ZM569.165 687.828L521.697 619.934L144.011 79.6944H306.615L611.412 515.685L658.88 583.579L1055.08 1150.3H892.476L569.165 687.854V687.828Z",
+  },
+  telegram: {
+    vb: "-12.8 -12.8 153.6 153.6",
+    d: "M64 0a64 64 0 1 1 0 128a64 64 0 1 1 0-128Z M28.9700376,63.3244248 C47.6273373,55.1957357 60.0684594,49.8368063 66.2934036,47.2476366 C84.0668845,39.855031 87.7600616,38.5708563 90.1672227,38.528 C90.6966555,38.5191258 91.8804274,38.6503351 92.6472251,39.2725385 C93.294694,39.7979149 93.4728387,40.5076237 93.5580865,41.0057381 C93.6433345,41.5038525 93.7494885,42.63857 93.6651041,43.5252052 C92.7019529,53.6451182 88.5344133,78.2034783 86.4142057,89.5379542 C85.5170662,94.3339958 83.750571,95.9420841 82.0403991,96.0994568 C78.3237996,96.4414641 75.5015827,93.6432685 71.9018743,91.2836143 C66.2690414,87.5912212 63.0868492,85.2926952 57.6192095,81.6896017 C51.3004058,77.5256038 55.3966232,75.2369981 58.9976911,71.4967761 C59.9401076,70.5179421 76.3155302,55.6232293 76.6324771,54.2720454 C76.6721165,54.1030573 76.7089039,53.4731496 76.3346867,53.1405352 C75.9604695,52.8079208 75.4081573,52.921662 75.0095933,53.0121213 C74.444641,53.1403447 65.4461175,59.0880351 48.0140228,70.8551922 C45.4598218,72.6091037 43.1463059,73.4636682 41.0734751,73.4188859 C38.7883453,73.3695169 34.3926725,72.1268388 31.1249416,71.0646282 C27.1169366,69.7617838 23.931454,69.0729605 24.208838,66.8603276 C24.3533167,65.7078514 25.9403832,64.5292172 28.9700376,63.3244248 Z",
+  },
+} as const;
+function Brand({ b, size }: { b: keyof typeof BRAND; size: number }) {
+  return (
+    <svg className="tkp-ic" width={size} height={size} viewBox={BRAND[b].vb} fill="currentColor" aria-hidden="true">
+      <path d={BRAND[b].d} fillRule={b === "telegram" ? "evenodd" : undefined} />
+    </svg>
+  );
+}
+
+/** A link's own mark (model.ts LINK_MARK): the pad's page is its logo (market/pads.ts), as the avatar's badge draws it. */
+function LinkMark({ l, launchpad }: { l: TokenLink; launchpad: string | null }) {
+  const m = LINK_MARK[l.id];
+  if (m === "x") return <Brand b="x" size={12} />;
+  if (m === "telegram") return <Brand b="telegram" size={14} />;
+  const pad = m === "pad" ? padOf(launchpad) : null;
+  if (pad) return <img className="tkp-padmark" src={pad.logo} width={16} height={16} alt="" />;
+  return <Ic n={m === "search" ? "search" : m === "web" ? "web" : "explorer"} size={m === "search" ? 12 : 13} />;
+}
+
 /** The link icons (R5 socials and explorers): only those with data behind them (model.ts tokenLinks). */
 function Links({ v }: { v: TokenView }) {
   return (
@@ -155,8 +192,8 @@ function Links({ v }: { v: TokenView }) {
         // the token's own links are named by their address (data); the search and the explorer by their words
         const name = l.id === "xSearch" ? WORDS.searchX.text : l.id === "explorer" ? WORDS[l.name].text : l.label;
         return (
-          <a key={l.id} className="tkp-ib" href={l.href} target="_blank" rel="noopener noreferrer" aria-label={name} title={name} data-link={l.id}>
-            <Ic n={l.id === "xSearch" ? "search" : "link"} size={l.id === "xSearch" ? 12 : 13} />
+          <a key={l.id} className="tkp-ib" href={l.href} target="_blank" rel="noopener noreferrer" aria-label={name} title={name} data-link={l.id} data-mark={LINK_MARK[l.id]}>
+            <LinkMark l={l} launchpad={v.launchpad} />
           </a>
         );
       })}
@@ -233,6 +270,8 @@ const RANGES: readonly { id: string; ms: number | null; tf: ChartTf | null }[] =
 interface ChartState {
   sym: string | null;
   chain: MarketChain | null;
+  /** The token's id on its chain (the drawings are kept per token). */
+  token: string | null;
   tf: ChartTf;
   /** A timeframe picked; `range` true when a bottom-bar range picked it (the range stays on). */
   onTf: (t: ChartTf, range?: boolean) => void;
@@ -481,6 +520,9 @@ function Chart({ c, phone }: { c: ChartState; phone?: boolean }) {
   return (
     <section className="tkp-chart" data-slot="chart" data-chart={s} aria-label={WORDS.chart.text}>
       {!phone && <Toolbar c={c} unit={unit} />}
+      <div className="tkp-plotrow">
+      {/* the drawing toolbar (draw/, UNRLZD's): its box from the first paint, so the chart's arrival moves nothing */}
+      <DrawToolbar chart={version > 0 && c.chain && c.token ? (drawn.current?.chart ?? null) : null} tokenId={c.chain && c.token ? `${c.chain}/${c.token}` : ""} scale={f.price} compact={phone === true} />
       <div className="tkp-plot" data-drawn={ready !== null} data-unit={`${unit.mc ? "mc" : "price"}/${unit.quote ? "coin" : "usd"}`} onMouseLeave={() => setAt(null)} onPointerUp={() => drawn.current && setAuto(isAuto(drawn.current))}>
         <div className="tkp-kc" ref={host} data-testid="chart-canvas" />
         {ready && c.ctl.trades && c.sym && <TradeMarks chart={drawn.current?.chart ?? null} bars={ready.bars} tf={ready.tf} factor={f.price} symbol={c.sym} phone={phone === true} version={version} trades={c.trades} />}
@@ -494,6 +536,7 @@ function Chart({ c, phone }: { c: ChartState; phone?: boolean }) {
           </span>
         )}
         {phone && gecko && <span className="tkp-vendor tkp-vendor-ph" data-testid="chart-vendor"><W id="gecko" /></span>}
+      </div>
       </div>
       {!phone && <BottomBar c={c} gecko={gecko} auto={auto} onAuto={onAuto} />}
       {phone && (
@@ -520,7 +563,7 @@ function Ticket({ r, t, toast }: { r: Ready; t: Trade; toast?: boolean }) {
   return (
     <>
       <TradeView t={t} symbol={row.symbol} toast={toast} footer={<SafetyGrid row={row} risk={risk} nowMs={r.nowMs} filling={r.data.filling === true} />} />
-      <About row={row} />
+      <About row={row} links={r.data.links} />
     </>
   );
 }
@@ -529,6 +572,10 @@ function Ticket({ r, t, toast }: { r: Ready; t: Trade; toast?: boolean }) {
 const taxOf = (r: Ready) => safetyCells(r.data.row, r.data.risk, r.nowMs).find((c) => c.id === "tax")!;
 
 function Desktop({ v, r, c, t, tape }: { v: TokenView | null; r: Ready | null; c: ChartState; t: Trade; tape: Tape }) {
+  // the MC and the Price flash gain / loss when they move, never on a token switch (useFlash, UNRLZD's header)
+  const fkey = v ? `${v.chain}/${v.token}` : "";
+  const mcRef = useFlash<HTMLSpanElement>(flashNum(r?.data.row.mc_usd), fkey);
+  const priceRef = useFlash<HTMLSpanElement>(flashNum(r?.data.row.price_usd), fkey);
   // null draws the tile's skeleton: the page is loading, or its row is still filling (card token-page-fills-after)
   const s = (x: string | null | undefined) => (v === null ? null : (x ?? null));
   const tax = r ? taxOf(r) : null;
@@ -563,13 +610,13 @@ function Desktop({ v, r, c, t, tape }: { v: TokenView | null; r: Ready | null; c
           </div>
           <div className="tkp-strip">
             <div className="tkp-mc">
-              <span className="tkp-lbl"><W id="mc" /></span>
-              {v?.mc != null ? <span className="tkp-mcval">{v.mc}</span> : <SkLine cls="tkp-mcval" w={120} />}
+              <span className="tkp-lbl"><W id="mcLong" /></span>
+              {v?.mc != null ? <span className="tkp-mcval" ref={mcRef}>{v.mc}</span> : <SkLine cls="tkp-mcval" w={120} />}
             </div>
-            <Tile k="price" label="price" value={s(v?.priceTile)} />
-            <Tile k="change" label="change" value={s(v?.chgTile)} dir={v?.chg?.dir} />
+            <Tile k="price" label="price" value={s(v?.priceTile)} flash={priceRef} />
+            <Tile k="change" label="change" value={arrowed(s(v?.chgTile))} dir={v?.chg?.dir} />
             <Tile k="tax" label="tax" value={tax?.text ?? null} tone={tax?.tone} />
-            <Tile k="vol" label="vol" value={s(v?.vol)} />
+            <Tile k="vol" label="vol24" value={s(v?.vol)} />
             <Tile k="liq" label={v?.curve.on ? "inCurve" : "liq"} value={s(v?.liq)} />
             <Tile k="holders" label="holders" value={s(v?.holders)} />
           </div>
@@ -583,6 +630,9 @@ function Desktop({ v, r, c, t, tape }: { v: TokenView | null; r: Ready | null; c
     </div>
   );
 }
+
+/** The 24h change with UNRLZD's arrow (lib/format fmtArrowPct there): +11.27% is ▲ 11.27%, −4.10% is ▼ 4.10%. */
+const arrowed = (t: string | null): string | null => (t === null ? null : t.replace(/^\+/, "▲ ").replace(/^\u2212/, "▼ "));
 
 /** The sheet's head row (R5 token-390.html tradeSheet ms-head): the token's avatar, the symbol over the price. */
 function SheetHead({ v }: { v: TokenView }) {
@@ -612,6 +662,7 @@ function back() {
 
 function Phone({ v, r, c, t, tape }: { v: TokenView | null; r: Ready | null; c: ChartState; t: Trade; tape: Tape }) {
   const sheet = useTradeSheet();
+  const priceRef = useFlash<HTMLSpanElement>(flashNum(r?.data.row.price_usd), v ? `${v.chain}/${v.token}` : "");
   // the price and its change keep the room of the longest each has drawn for this token, so a read again that changes
   // their length moves nothing after them (legend.ts priceRoom, useRoom)
   const priceN = useRoom(v?.token, v?.price ? priceRoom(v.price) : 0);
@@ -632,7 +683,7 @@ function Phone({ v, r, c, t, tape }: { v: TokenView | null; r: Ready | null; c: 
       </div>
       <div className="tkp-hero">
         <div className="tkp-pricerow">
-          {v?.price != null ? <span className="tkp-price" style={{ minWidth: `calc(${priceN} * (1ch - 0.06em))` }}>{v.price}</span> : <SkLine cls="tkp-price" w={160} />}
+          {v?.price != null ? <span className="tkp-price" ref={priceRef} style={{ minWidth: `calc(${priceN} * (1ch - 0.06em))` }}>{v.price}</span> : <SkLine cls="tkp-price" w={160} />}
           {v?.chg && <span className="tkp-chg" data-dir={v.chg.dir} style={{ minWidth: `calc(${chgN}ch + 16px)` }}>{v.chg.text}</span>}
           {v?.chg && <span className="tkp-h24"><W id="h24" /></span>}
         </div>
@@ -725,7 +776,7 @@ export function TokenPage({ data, nowMs, onRetry, pushed = false }: { data: Toke
   const v = data.status === "ready" ? tokenView(data.row, nowMs, data.filling === true, data.links) : null;
   const ready = data.status === "ready" ? { data, nowMs } : null;
   // the coin unit's price: the device's own read the trade box holds (signed in, on a chain with a pool), else none
-  const c: ChartState = { sym: v?.symbol ?? null, chain: row?.chain ?? null, tf, onTf, data: candles, retry, ctl, set, supply: supplyOf(row), coin: coinUsd(trade.price), trades: tape.trades };
+  const c: ChartState = { sym: v?.symbol ?? null, chain: row?.chain ?? null, token: row?.token ?? null, tf, onTf, data: candles, retry, ctl, set, supply: supplyOf(row), coin: coinUsd(trade.price), trades: tape.trades };
   return (
     <section className="tkp" data-token-page={data.status} data-pushed={pushed || undefined} data-token={v?.token} data-filling={v?.filling} aria-busy={v === null || v.filling} aria-label={v === null ? WORDS.loading.text : undefined}>
       <Desktop v={v} r={ready} c={c} t={trade} tape={tape} />
@@ -736,9 +787,13 @@ export function TokenPage({ data, nowMs, onRetry, pushed = false }: { data: Toke
 
 /** The token route. /token/<chain>/<id> draws that token (source.ts); a chain the terminal does not draw is the page's
  *  not-found, with no read. / draws the top Trending token on the shell's chain filter. */
+/** The phone's width (shell.css): under it, / is the Trenches list (owner 12 Nov), not the top token's page. */
+const PHONE_MEDIA = "(max-width: 767.98px)";
+
 export function TokenRoute() {
   const params = useParams();
-  if (params.chain === undefined) return <TopToken />;
+  const phone = useMedia(PHONE_MEDIA);
+  if (params.chain === undefined) return phone ? <PhoneTrenches /> : <TopToken />;
   const t = parseTokenRoute(params);
   if (!t) return <TokenPage data={{ status: "empty" }} nowMs={0} onRetry={() => {}} pushed />;
   return <ReadToken key={`${t.chain}/${t.id}`} chain={t.chain} id={t.id} />;

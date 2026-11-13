@@ -9,7 +9,9 @@
 // - A throttle (HTTP 429, a 5xx, -32029 or -32429 in a 200) pauses the host for every reader by the one rule (from 1 s,
 //   doubling to 10 s, a Retry-After when longer; api.devnet.solana.com exposes none to a page), and the read that met it
 //   is asked again once, after that pause; an answer that is not JSON, a stall or a dropped connection is asked again
-//   once after the retry's backoff. A sign out ends every wait on every host at once (stopHostLaneWaits). Never a third ask, and never a wait that would end past the call's bound: the call
+//   once after the retry's backoff. A sign out's tap ends every wait on every host at once (stopHostLaneWaits), and once
+//   its store holds the seed lock the page's gate closes (closeHostLanes): no call is asked or asked again after it, and
+//   the page reloads. Never a third ask, and never a wait that would end past the call's bound: the call
 //   then rejects naming its fault (SolanaRpcTransportError). So a trade's read waits for its turn at most
 //   TRADE_TURN_MAX_MS + PROBE_HELD_MAX_MS (15 s) from the turn's start, the host's pause (at most 10 s) and the probes
 //   after it (each read parked ahead may be one) together, then its bound (3.5 s; 12 s for a settle's
@@ -18,7 +20,7 @@
 import { readSolanaReference, type SolanaReference, type SolanaReferenceRequest } from "../../kit/src/trade/solana/pool.ts";
 import { HELPER_FETCH_INIT } from "../../kit/src/helper/v1.ts";
 import { SOLANA_RPC_RETRY, SolanaRpcTransportError, solanaHelperRpc, solanaJsonRpc, solanaSameProvider, solanaWrappedRpc, type SolanaFetch, type SolanaRpc, type SolanaRpcRetry } from "../../kit/src/trade/solana/send.ts";
-import { HostPaused, hostLane, laneSignal } from "../../wallet/src/throttle.ts";
+import { HostPaused, gateSignal, hostLane } from "../../wallet/src/throttle.ts";
 
 /** Whose read it is: a trade's own (first on its host) or a background pass's (on its host's budget). */
 export type ReadKind = "trade" | "pass";
@@ -43,7 +45,10 @@ export function lanedRpc(url: string, o: { kind?: ReadKind; retry?: SolanaRpcRet
   const once = (ms: number, method: string, params: readonly unknown[]): Promise<unknown> =>
     solanaJsonRpc(url, { ...(o.init ? { init: o.init } : {}), ...(o.fetch ? { fetch: o.fetch } : {}), retry: { deadlineMs: ms, backoffMs: ms } })(method, params);
   // every outcome reported to the lane: the gate's pause, and the probe's settle when this read was it
-  const ask = async (end: number, method: string, params: readonly unknown[]): Promise<unknown> => {
+  // `stop`: the caller's signal and the page's gate (gateSignal), so an ask after the gate closed during the call is never
+  // sent (card sign-out-stops-the-pages-reads); its waits for a turn also end at a sign out's tap (HostLane.turn)
+  const ask = async (end: number, stop: AbortSignal, method: string, params: readonly unknown[]): Promise<unknown> => {
+    stop.throwIfAborted();
     const sentIn = lane.gate.epoch();
     try {
       const r = await once(Math.max(1, Math.floor(end - performance.now())), method, params);
@@ -57,41 +62,48 @@ export function lanedRpc(url: string, o: { kind?: ReadKind; retry?: SolanaRpcRet
   };
   // asked again once: after the host's pause (a throttle) or the retry's backoff (any other fault), a background read
   // on the host's budget too, never past the call's bound
-  const again = async (end: number, e: unknown, method: string, params: readonly unknown[]): Promise<unknown> => {
+  const again = async (end: number, stop: AbortSignal, e: unknown, method: string, params: readonly unknown[]): Promise<unknown> => {
     if (!(e instanceof SolanaRpcTransportError)) throw e;
+    // a sign out during the call: no ask again (its answer, whatever it was, is the call's end)
+    if (stop.aborted) throw e;
     if (!throttles(e)) {
       if (performance.now() + retry.backoffMs >= end) throw e;
-      await sleep(retry.backoffMs, laneSignal(o.signal));
+      await sleep(retry.backoffMs, stop);
     }
     // its turn again, whichever kind, held to the read's bound: the turn waits the host's pause (another reader's 429
     // may move it on meanwhile: a paid devnet run of 11 Nov, a deposit's re-ask sent into it drew a 429 and doubled it)
     // and the probe after it; a wait that would pass `end` is refused at once, nothing counted, and the read ends on
     // its 429 (the review of 321509e2: a 3.5 s read slept a pause moved to 9 s, then threw at 9.4 s, its turn counted)
     try {
-      await lane.turn(kind, o.signal, true, { reports: true, by: end });
+      await lane.turn(kind, stop, true, { reports: true, by: end });
     } catch (x) {
       if (x instanceof HostPaused) throw e;
       throw x;
     }
-    return ask(end, method, params);
+    return ask(end, stop, method, params);
   };
   // its bound from its turn on
-  const go = (method: string, params: readonly unknown[]): Promise<unknown> => {
+  const go = (stop: AbortSignal, method: string, params: readonly unknown[]): Promise<unknown> => {
     const end = performance.now() + retry.deadlineMs;
     // a seat's member with a spare after it (seatRpc) is not asked again after any provider fault (a throttle, a 5xx, no
     // connection, a stall to its bound, an answer that is no JSON): the read goes to the spare
-    return ask(end, method, params).catch((e: unknown) => (o.spare === true && e instanceof SolanaRpcTransportError ? Promise.reject(e) : again(end, e, method, params)));
+    return ask(end, stop, method, params).catch((e: unknown) => (o.spare === true && e instanceof SolanaRpcTransportError ? Promise.reject(e) : again(end, stop, e, method, params)));
   };
   // a read whose turn is open now goes out in this tick (a paced queue's slot calls it as its own)
   // (a trade's turn refused past its TRADE_TURN_MAX_MS is the host's throttle, never sent: HostPaused)
   const rpc = (method: string, params: readonly unknown[]): Promise<unknown> => {
+    // the caller's signal and the page's gate: every ask of this call ends at either
+    const stop = gateSignal(o.signal);
+    // the gate closed (a sign out; throttle.ts): a call made after it, a paced slot's or a seat's failover included, is
+    // refused here, never sent or counted
+    if (stop.aborted) return Promise.reject(stop.reason);
     if (!lane.open(kind))
-      return lane.turn(kind, o.signal, true, { reports: true }).then(
-        () => go(method, params),
+      return lane.turn(kind, stop, true, { reports: true }).then(
+        () => go(stop, method, params),
         (x: unknown) => Promise.reject(x instanceof HostPaused ? new SolanaRpcTransportError("http_429", "the host stayed paused past the read's turn", 0, lane.host) : x),
       );
     lane.took(kind);
-    return go(method, params);
+    return go(stop, method, params);
   };
   return Object.assign(rpc, { url: href });
 }
