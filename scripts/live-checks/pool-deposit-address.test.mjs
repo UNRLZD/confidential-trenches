@@ -43,6 +43,14 @@ test("recorded bad answer beforeStop: FAIL on unfollowed and stopped", () => {
   assert.deepEqual(v.lines, bad("unfollowed", "stopped"));
 });
 
+// card deposit-takes-each-pools-own-coin: main 6de76338d's build, whose pool.address gates every origin on mainnet and
+// has one record read and one follow write after the quote, fails on those two marks alone
+test("recorded bad answer beforePlain: FAIL on unfollowed and stopped", () => {
+  const v = judge(ANSWERS.beforePlain);
+  assert.equal(v.ok, false);
+  assert.deepEqual(v.lines, bad("unfollowed", "stopped"));
+});
+
 test("planted on the good answer: each fact taken away FAILs", () => {
   const g = ANSWERS.good;
   assert.deepEqual(judge({ ...g, sha384: "sha384-other" }).lines, ["BAD SIGN_HOST's served /app.js is not the one index.html pins"]);
@@ -76,9 +84,14 @@ const PLANTED = [
   // re-review P2: the stop read once and checked after each wait, and the ask handed it
   ["no stop check after the namer's wait", new RegExp(`if\\(await (${N})\\.named\\?\\.\\(\\)\\.catch\\(\\(\\)=>\\{\\}\\),${N}\\(\\)\\)return void\\(${N}=\\{error:\`not_allowed\`\\}\\);`), "await $1.named?.().catch(()=>{});", ["stopped"]],
   ["no stop check after the floor read", new RegExp(`(\\}catch\\{${N}=\\{error:\`down\`\\};return\\})if\\(${N}\\(\\)\\)return void\\(${N}=\\{error:\`not_allowed\`\\}\\);(if\\(${N}===null\\)return;)`), "$1$2", ["stopped"]],
-  ["no stop check after the second record read", new RegExp(`(let ${N}=${N}\\(await ${N}\\.read\\(${N}\\.scope\\),${N},${N}\\.scope\\);)if\\(${N}\\(\\)\\)return void\\(${N}=\\{error:\`not_allowed\`\\}\\);(if\\(!${N}\\|\\|!${N}\\(${N},${N}\\)\\)return;)`), "$1$2", ["stopped"]],
+  ["no stop check after the second record read", new RegExp(`(let ${N}=${N}\\(await ${N}\\.read\\(${N}\\.scope\\),${N},${N}\\.scope\\);)if\\(${N}\\(\\)\\)return void\\(${N}=\\{error:\`not_allowed\`\\}\\);(if\\(!${N}\\|\\|!${N}\\(${N},${N}\\)\\)return;)(?=let )`), "$1$2", ["stopped"]],
+  // card deposit-takes-each-pools-own-coin: the plain send's own second record read and its follow's write
+  ["no stop check after a plain send's second record read", new RegExp(`(,${N}=${N}\\(await ${N}\\.read\\(${N}\\.scope\\),${N},${N}\\.scope\\);)if\\(${N}\\(\\)\\)return void\\(${N}=\\{error:\`not_allowed\`\\}\\);(if\\(!${N}\\|\\|!${N}\\(${N},${N}\\)\\)return;)(?=if\\(await )`), "$1$2", ["stopped"]],
+  ["no stop check after a plain send's follow write", new RegExp(`if\\(await (${N}\\.checked\\([^;]*?\\)),${N}\\(\\)\\)return void\\(${N}=\\{error:\`not_allowed\`\\}\\);(?=${N}=\\{result:\\{chain:${N},address:${N}\\.wallet,asset:${N},quote:${N}\\}\\};return\\})`), "await $1;", ["stopped"]],
+  ["a plain send for any origin", /Object\.hasOwn\(BE,e\)&&t===BE\[e\]/, "!0", ["unfollowed"]],
+  ["a plain send of another coin on Base", /base:`nep141:base\.omft\.near`,robinhood/, "base:`nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near`,robinhood", ["unfollowed"]],
   // delta review P3-5, P3-6: the stop after the follow's write, handed to the floor read and on to its RPC reads
-  ["no stop check after the follow's write", new RegExp(`if\\(await (${N}\\.checked\\([^;]*?\\)),${N}\\(\\)\\)return void\\(${N}=\\{error:\`not_allowed\`\\}\\);`), "await $1;", ["stopped"]],
+  ["no stop check after the follow's write", new RegExp(`if\\(await (${N}\\.checked\\([^;]*?\\)),${N}\\(\\)\\)return void\\(${N}=\\{error:\`not_allowed\`\\}\\);(?=${N}=\\{result:\\{chain:${N},address:${N}\\.wallet,asset:${N},quote:${N}\\}\\}\\}\\))`), "await $1;", ["stopped"]],
   ["the floor read not handed the stop", new RegExp(`(=await ${N}\\.floor\\(${N},${N}\\.wallet),${N}\\)\\}`), "$1)}", ["stopped"]],
   ["the page's floor keeps the stop from the Solana floor", new RegExp(`(\\?${N}\\(${N},${N}\\.program,${N}),${N}\\):null\\}`), "$1):null}", ["stopped"]],
   ["the Solana floor keeps it from its reads", new RegExp(`(\\{let\\{fee:${N},rent:${N}\\}=await ${N}\\(${N},${N},${N}),${N}\\);`), "$1);", ["stopped"]],
@@ -88,8 +101,10 @@ const PLANTED = [
   ["the quote's ask not handed the stop", new RegExp(`(,${N}\\.fetch,void 0,void 0),${N}\\)\\}`), "$1)}", ["stopped"]],
   // with no floor read wired, none is handed the stop either
   ["pool.address wired with no floor read", new RegExp(`,floor:${N},checked:`), ",checked:", ["unfollowed", "stopped"]],
-  ["no floor-read gate", new RegExp(`\\|\\|${N}\\.floor===void 0\\|\\|`), "||", ["unfollowed"]],
-  ["no network gate (review F2)", new RegExp(`\\|\\|${N}\\.network!==\`mainnet\`\\)return;`), ")return;", ["unfollowed"]],
+  ["no floor-read gate", new RegExp(`\\|\\|${N}\\.floor===void 0\\)return;`), ")return;", ["unfollowed"]],
+  ["no network gate (review F2)", new RegExp(`if\\(!${N}&&${N}\\.network!==\`mainnet\`\\)return;`), "", ["unfollowed"]],
+  // card deposit-takes-each-pools-own-coin: the network gate held for every origin but the plain send's
+  ["the network gate skipped for every origin", new RegExp(`if\\(!(${N})&&${N}\\.network!==\`mainnet\`\\)return;`), "if(!$1&&!1)return;", ["unfollowed"]],
   ["the page's network not passed (review F2)", new RegExp(`(\\{pools:${N},)network:${N},(read:)`), "$1$2", ["unfollowed"]],
   ["no pool floor (review F3)", new RegExp(`return (${N})\\.minAmountOut<${N}\\.floor&&${N}\\(\`floor\`\\)`), "return $1", ["floored"]],
   ["a context floor under the rung let through (review F3)", new RegExp(`\\|\\|(${N})\\.floor<${N}\\[\\1\\.chain\\]\\)&&`), ")&&", ["floored"]],

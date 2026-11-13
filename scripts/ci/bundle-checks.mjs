@@ -177,6 +177,7 @@ export const OUT = {
   "signpage-restores-near-vault-notes": "a browser (it runs pool-restore-wired)",
   "kit-deposit-assets-dry": "a browser",
   "deposit-quote-no-liquidity": "a browser, and the helper's real answer to the last ask",
+  "deposit-takes-each-pools-own-coin": "a browser, the helper's 1Click answers and each pool's mainnet RPC reads (its run is kit-deposit-assets-dry's collect)",
   "app-shell": "a browser",
   "app-shell-rpc-outage-judge": "a browser",
   "app-phone-token-taps-and-rows": "a browser",

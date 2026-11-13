@@ -94,10 +94,12 @@ const LOOP = new RegExp(
   `(${N})=async\\((${N}),(${N})\\)=>\\{let (${N})=${N}\\((${N})\\.ladder,\\2,\\3\\.perRung,\\3\\.keep\\);if\\(\\4===0n\\)return!1;let\\{end:(${N}),txs:${N}\\}=await \\5\\.deposit\\((${N}),\\4,\\5\\.signal\\),(${N})=\\(\\6===${Q}filled${Q}\\|\\|\\6===${Q}part_filled${Q}\\)&&!await (${N})\\(\\);` +
     `return \\8&&\\((${N})=!0,await (${N})\\(${Q}in_pool${Q}\\)\\),\\6===${Q}not_funded${Q}&&!\\10&&await \\11\\(${Q}short${Q}\\),` +
     // the round: a landed note of U_X's counts only with none landing and once this quote's own SUCCESS is read (re-read
+    // P2-1), or, on a plain send (card deposit-takes-each-pools-own-coin: no 1Click quote, U_X itself its address), once
+    // the chain showed its money at U_X (in_transit before its carry, written first; short under the floor)
     // P2-1); the lower balance; the costs only once it holds a rung; at or over the floor, the carry; else, landed, no
     // in_pool and no end while a note of U_X's is landing
     `[^]{0,700}?let (${N})=await \\9\\(\\);!\\10&&!\\12&&(${N})&&\\5\\.noted!==void 0&&await \\5\\.noted\\(\\7\\)&&\\(\\10=!0\\);` +
-    `let\\[(${N}),(${N})\\]=await \\5\\.balances\\(\\7\\),(${N})=\\14<\\15\\?\\14:\\15,(${N})=\\16>=\\5\\.ladder\\.min\\?${N}\\(await \\5\\.costs\\(\\7\\)\\):null;if\\(\\17!==null&&\\16>=\\17\\.floor\\)await \\1\\(\\16,\\17\\)&&\\((${N})=!0\\);` +
+    `let\\[(${N}),(${N})\\]=await \\5\\.balances\\(\\7\\),(${N})=\\14<\\15\\?\\14:\\15,(${N})=\\16>=\\5\\.ladder\\.min\\?${N}\\(await \\5\\.costs\\(\\7\\)\\):null;if\\(\\17!==null&&\\16>=\\17\\.floor\\)(?:${N}&&!\\10&&\\(await \\11\\(${Q}in_transit${Q}\\),\\13=!0\\),)?await \\1\\(\\16,\\17\\)&&\\((${N})=!0\\);` +
     `else if\\(\\10\\)\\{if\\(!\\12&&(${N})!==${Q}in_pool${Q}&&await \\11\\(${Q}in_pool${Q}\\),!\\12&&await \\5\\.past\\(\\7\\)\\)` +
     `[^]{0,1200}?\\.status===${Q}SUCCESS${Q}&&\\(\\13=!0\\),`,
 );

@@ -9,7 +9,9 @@
 //     wait, and nothing more; it answers the asked chain's own pool, from that pool scope's record read back (the seed
 //     backed up), the address on Solana the one-time id's own key and on an EVM pool the record's EVM address;
 //   - a cross-chain quote (an origin asset or an amount) with no follow or floor read wired, or on a page whose pools are not pinned on
-//     mainnet (the only network 1Click pays out on), is refused: the answer starts not_allowed and the host returns
+//     mainnet (the only network 1Click pays out on) unless it is the pool's own coin on its own chain (card
+//     deposit-takes-each-pools-own-coin: a plain send to U_X, asking 1Click nothing, the origin equal to the chain's
+//     entry of the destination table), is refused: the answer starts not_allowed and the host returns
 //     before any quote is asked when the page passes no `checked`, no `floor` or its network is not mainnet; the page passes
 //     its own network (review F2), and since card pool-deposit-follow the follow's `quoted`, the price and the floor read;
 //   - since card helper-says-why-a-vendor-refused, pool.address reads the page's stop once as a request arrives and checks
@@ -62,8 +64,20 @@ const HOST_SRC = (h) =>
   `let ${N}=${N}\\[\\4\\],(${N})=${N}\\.origin_asset!==void 0\\|\\|${N}\\.amount!==void 0;(?:if\\(await ${N}\\.named\\?\\.\\(\\)\\.catch\\(\\(\\)=>\\{\\}\\),${N}\\(\\)\\)return void\\(\\2=\\{error:${Q}not_allowed${Q}\\}\\)|await ${N}\\.named\\?\\.\\(\\)\\.catch\\(\\(\\)=>\\{\\}\\));let (${N})=(${N})\\(await ${N}\\.read\\(\\5\\.scope\\),\\4,\\5\\.scope\\);(?:if\\(${N}\\(\\)\\)return void\\(\\2=\\{error:${Q}not_allowed${Q}\\}\\);)?if\\(!\\7\\)return;` +
   `if\\(!\\6\\)return void\\(\\2=\\{result:\\{chain:\\4,address:\\7\\.wallet,asset:${N}\\}\\}\\);`;
 const HOST = (h) => new RegExp(HOST_SRC(h));
-// ...and then, with no follow (`checked`) or no floor read passed, it returns before any quote is asked.
-const GATE = (h) => new RegExp(`${HOST_SRC(h)}if\\(\\1===void 0\\|\\|(${N})\\.checked===void 0\\|\\|\\9\\.floor===void 0\\|\\|\\9\\.network!==${Q}mainnet${Q}\\)return;`);
+// ...and then, with no follow (`checked`) or no floor read passed, it returns before any quote is asked; and off mainnet,
+// unless the origin is the pool's own coin on its own chain (card deposit-takes-each-pools-own-coin: a plain send to
+// U_X, which asks 1Click nothing): the test is the origin equal to the chain's own entry of the destination table
+// (POOL_DEPOSIT_DESTINATION, PLAIN_TABLE below), nothing wider.
+const GATE = (h) => new RegExp(`${HOST_SRC(h)}if\\(\\1===void 0\\|\\|(${N})\\.checked===void 0\\|\\|\\9\\.floor===void 0\\)return;let (${N})=${N}\\.origin_asset;if\\(typeof \\10!=${Q}string${Q}\\)return;let (${N})=(${N})\\(\\4,\\10\\);if\\(!\\11&&\\9\\.network!==${Q}mainnet${Q}\\)return;`);
+const PLAIN_FN = (f) => new RegExp(`${esc(f)}=\\((${N}),(${N})\\)=>Object\\.hasOwn\\((${N}),\\1\\)&&\\2===\\3\\[\\1\\]`);
+const PLAIN_TABLE = (t) => new RegExp(`${esc(t)}=Object\\.freeze\\(\\{solana:${Q}nep141:sol\\.omft\\.near${Q},base:${Q}nep141:base\\.omft\\.near${Q},robinhood:${Q}nep141:hood\\.omft\\.near${Q}\\}\\)`);
+/** The gate's plain-send test is the destination table's own entry for the chain (card deposit-takes-each-pools-own-coin). */
+function plainGated(js, h) {
+  const g = GATE(h).exec(js);
+  if (!g) return false;
+  const t = PLAIN_FN(g[12]).exec(js)?.[3];
+  return !!t && PLAIN_TABLE(t).test(js);
+}
 const WIRED = (h) => new RegExp(`"pool\\.address":${esc(h)}\\(\\{pools:${N},network:${N},read:${N}\\.depositRead,named:\\(\\)=>${N}\\.named\\(\\),priced:${N},floor:${N},checked:\\((${N}),(${N}),(${N}),(${N})\\)=>${N}\\.quoted\\(\\1,\\2,\\3,\\4\\),stop:${N}\\}\\)`);
 // pool-deposit-quote.ts: the kit's check with no vault floor, then the quote's own floor (card pool-deposit-follow: the
 // least rung plus the deposit's cost, which that card's live check holds).
@@ -79,10 +93,13 @@ function stopsEachWait(js, h) {
   const stoppedAnswer = `if\\(${stopped}\\(\\)\\)return void\\(${out}=\\{error:${Q}not_allowed${Q}\\}\\);`;
   return (
     new RegExp(`if\\(await ${deps}\\.named\\?\\.\\(\\)\\.catch\\(\\(\\)=>\\{\\}\\),${stopped}\\(\\)\\)return void\\(${out}=\\{error:${Q}not_allowed${Q}\\}\\);`).test(body) &&
-    (body.match(new RegExp(`=${N}\\(await ${deps}\\.read\\(${N}\\.scope\\),${N},${N}\\.scope\\);${stoppedAnswer}`, "g")) ?? []).length === 2 &&
+    // the records read before, and again before the answer: on a 1Click quote and on a plain send (card
+    // deposit-takes-each-pools-own-coin), each checked against the stop
+    (body.match(new RegExp(`=${N}\\(await ${deps}\\.read\\(${N}\\.scope\\),${N},${N}\\.scope\\);${stoppedAnswer}`, "g")) ?? []).length === 3 &&
     new RegExp(`=await ${deps}\\.floor\\(${N},${N}\\.wallet,${stop}\\)\\}catch\\{${out}=\\{error:${Q}down${Q}\\};return\\}${stoppedAnswer}`).test(body) &&
     new RegExp(`=await ${N}\\(${N},${deps}\\.fetch,void 0,void 0,${stop}\\)\\}`).test(body) &&
-    new RegExp(`if\\(await ${deps}\\.checked\\([^;]*?\\),${stopped}\\(\\)\\)return void\\(${out}=\\{error:${Q}not_allowed${Q}\\}\\);${out}=\\{result:`).test(body) &&
+    // the follow's write, then the stop, then the answer: on a 1Click quote and on a plain send
+    (body.match(new RegExp(`if\\(await ${deps}\\.checked\\([^;]*?\\),${stopped}\\(\\)\\)return void\\(${out}=\\{error:${Q}not_allowed${Q}\\}\\);(?:return void\\()?${out}=\\{result:`, "g")) ?? []).length === 2 &&
     floorStopped(js, h)
   );
 }
@@ -117,7 +134,7 @@ export function facts(index, js) {
     namesEach: SCOPES.test(js) && EACH.test(js),
     namesRecord: PLAN.test(js) && EVM_NAME.test(js),
     sameChain: !!read && HOST(host ?? "").exec(js)?.[8] === read,
-    unfollowed: !!host && WIRED(host).test(js) && GATE(host).exec(js)?.[3] === "not_allowed",
+    unfollowed: !!host && WIRED(host).test(js) && GATE(host).exec(js)?.[3] === "not_allowed" && plainGated(js, host),
     stopped: !!host && stopsEachWait(js, host),
     floored: !!ladders && LADDER(ladders[1], "1000000", "10000000").test(js) && LADDER(ladders[2], "100000000000000", "1000000000000000").test(js),
   };
@@ -128,7 +145,7 @@ export const WHY = {
   namesEach: "the namer does not name each pool's scope (an EVM pool as Base or Robinhood), or one scope that fails stops the rest",
   namesRecord: "a pool's record is not written from its scope's planned index and one-time id, or an EVM pool's carries no EVM address (or its key is not zeroed)",
   sameChain: "pool.address does not answer the asked chain's own pool from that scope's record read back (Solana: the one-time id's key; EVM: the record's address)",
-  unfollowed: "a cross-chain quote with no follow wired, or on a page not pinned on mainnet, is not refused not_allowed before any quote is asked, or pool.address is not wired with its pools, network, read, wait, price, floor read, the follow's quoted and the page's stop",
+  unfollowed: "a cross-chain quote with no follow wired, or on a page not pinned on mainnet (other than the pool's own coin on its own chain, a plain send), is not refused not_allowed before any quote is asked, or pool.address is not wired with its pools, network, read, wait, price, floor read, the follow's quoted and the page's stop",
   stopped: "pool.address does not read the page's stop once as a request arrives, check it after each wait (the namer's, both record reads, the floor read, the follow's write) and hand it to the floor read and the quote's ask, or the floor read does not hand it on to its RPC reads: a sign out during one may still send a quote or a read",
   floored: "a pool quote whose min out is under its floor, or whose floor is under the pool's smallest deposit (0.01 SOL; 0.001 ETH on Base and Robinhood), is not refused floor",
 };
