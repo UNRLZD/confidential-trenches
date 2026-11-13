@@ -5,7 +5,7 @@
 // that money stays on U_X), green after.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { CARRY_UNSENT_MS, CARRY_VAULT_MIN, carryLeftovers, carryOpenKey, leftoverSources, type LeftoverCarryDeps } from "../src/leftover-carry.ts";
+import { CARRY_UNSENT_MS, CARRY_VAULT_MIN, carryLeftovers, carryOpenKey, clearLeftover, leftoverSources, worthUsdc, type LeftoverCarryDeps } from "../src/leftover-carry.ts";
 import type { CarryEnd, CarryOpen, CarrySender, CarrySource } from "../src/carry-cash.ts";
 import { depositWalletsOf } from "../src/pool-deposit-follow.ts";
 
@@ -132,4 +132,47 @@ test("a short deposit's money is counted in the balance as soon as its follow wr
   const list = (v: unknown) => depositWalletsOf([v], () => 18, () => "ETH");
   assert.deepEqual(list(op("short", "400000000000000", { chain: "base" })), [{ chain: "base", address: U, asset: "ETH", amount: "0.0004" }]);
   assert.deepEqual(list(op("short", undefined, { chain: "base" })), []);
+});
+
+test("a wallet whose carry is open is followed first, whatever the draw", async () => {
+  const other = "0x5555555555555555555555555555555555555555";
+  const open: CarryOpen = { to: DEPOSIT, amount: "5", quote: "carry/robinhood/x", quotedMs: "1", sends: [{ hash: "0xaa", value: "5", sentMs: "2", nonce: "4" }] };
+  const w = world({ open, ends: ["pending"], ops: [op("in_pool", "9", { final: true, u: other, created: 1 }), op("in_pool", LEFT.toString(), { final: true, created: 2 })] });
+  const d = { ...w.d, draw: (n: number) => n - 1 };
+  assert.equal((await carryLeftovers({ ...d, draw: () => 0 }))?.src.address, U);
+});
+
+test("worth at the device's price: SOL at 73.8 USD, ETH at 1919 USD; none with no price", () => {
+  assert.equal(worthUsdc({ price: "7380000000", expo: -8 }, 1_000_000n, 9), 73_800n);
+  assert.equal(worthUsdc({ price: "191900000000", expo: -8 }, LEFT, 18), 1_907_677n);
+  assert.equal(worthUsdc(null, 1n, 9), null);
+});
+
+test("cleared where counted: the U_X's newest op's left set to 0 in the wallet's own store, a W's tail record deleted", async () => {
+  const { IDBFactory } = await import("fake-indexeddb");
+  const { openWalletStore } = await import("@blindfill/wallet/store");
+  const st = await openWalletStore({ indexedDB: new IDBFactory() });
+  try {
+    await st.put("ops", "a", op("in_pool", "5", { final: true, created: 1 }));
+    await st.put("ops", "b", op("in_pool", LEFT.toString(), { final: true, created: 2 }));
+    await clearLeftover(st, { chain: "robinhood", kind: "ux", address: U, s: "7", i: 3 });
+    assert.equal(((await st.get("ops", "b")) as { follow: { left: string } }).follow.left, "0");
+    assert.equal(((await st.get("ops", "a")) as { follow: { left: string } }).follow.left, "5", "an older op as it was");
+    const W = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";
+    await st.update("meta", `w-tail/sol/${W}`, () => ({ chain: "sol", address: W, l: "3", j: 1, amount: "7" }));
+    await clearLeftover(st, { chain: "solana", kind: "w", address: W, l: "3", j: 1 });
+    assert.equal(await st.get("meta", `w-tail/sol/${W}`), undefined);
+    // the open carry's key is one the store takes, and its write moves no seed
+    await st.put("meta", carryOpenKey({ chain: "solana", address: W }), { to: "x" });
+  } finally {
+    st.close();
+  }
+});
+
+test("main.ts runs the carry after the moves resume, one tab's pass at a time, stopped by the sign out", async () => {
+  const main = (await import("node:fs")).readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
+  assert.match(main, /\.then\(\(\) => resumeMoves\?\.\(\)\)\s*\.catch\(\(\) => \{\}\)\s*(?:\/\/[^\n]*\n\s*)?\.then\(\(\) => void carryLoop\?\.\(\)\.catch\(\(\) => \{\}\)\)/);
+  assert.match(main, /locks\.request\("ct-carry-cash", \{ ifAvailable: true \}/);
+  assert.match(main, /const signal = withdrawWait\.signal;\s*const sol = /);
+  assert.match(main, /sources: async \(\) => leftoverSources\(await pageOps\(\)\.catch\(\(\) => \[\]\), await pageTails\(\)\.catch\(\(\) => \[\]\)\)/);
 });

@@ -19,6 +19,10 @@ import { wTailOf } from "./w-tails.ts";
 
 /** The vault's least deposit, USDC base units (contracts/vault/src/constants.rs MIN_DEPOSIT; kit ONECLICK_VAULT_MIN_OUT). */
 export const CARRY_VAULT_MIN = 1_000_000n;
+/** The wait between passes while nothing is on its way (none to carry, under the floor, a refusal). */
+export const CARRY_PASS_MS = 2 * 60_000;
+/** The wait while a send is on its way: it is read again this soon, until it lands or dies. */
+export const CARRY_FOLLOW_MS = 15_000;
 /** An open carry with nothing sent is dropped and quoted again past this age (a deposit quote's own life is longer). */
 export const CARRY_UNSENT_MS = 10 * 60_000;
 
@@ -50,7 +54,12 @@ export type CarryPass = { src: CarrySource; end: CarryEnd | "under" | "refused" 
 export async function carryLeftovers(d: LeftoverCarryDeps): Promise<CarryPass> {
   const all = (await d.sources()).filter((s) => d.sender(s.chain) !== null);
   if (all.length === 0) return null;
-  const src = all[(d.draw ?? drawUniform)(all.length)]!;
+  // a wallet whose carry is open is followed to its end first (its money must not count both on the wallet and on its way
+  // into Cash for long); else one drawn at random
+  const opened: CarrySource[] = [];
+  for (const s of all) if ((await d.open(s).catch(() => undefined)) !== undefined) opened.push(s);
+  const from = opened.length > 0 ? opened : all;
+  const src = from[(d.draw ?? drawUniform)(from.length)]!;
   const sender = d.sender(src.chain)!;
   const keep = (o: CarryOpen) => d.keep(src, o);
   const ended = async (end: CarryEnd): Promise<CarryPass> => {
@@ -115,6 +124,27 @@ function isUxOp(v: unknown): v is { kind: "pool_deposit"; stage: string; created
   const f = o.follow as Record<string, unknown> | undefined;
   return o.kind === "pool_deposit" && typeof o.stage === "string" && typeof o.created_ms === "number" && typeof f === "object" && f !== null &&
     (f.chain === "solana" || f.chain === "base" || f.chain === "robinhood") && typeof f.u === "string" && typeof f.s === "string" && /^[0-9]{1,78}$/.test(f.s) && Number.isSafeInteger(f.i) && (f.i as number) >= 0;
+}
+
+/** `amount` base units of a coin at `decimals` in USDC base units at the device's price (`price` x 10^`expo` USD a
+ *  coin), rounded down; null with no price. */
+export function worthUsdc(p: { price: string; expo: number } | null | undefined, amount: bigint, decimals: number): bigint | null {
+  if (p == null || !/^[0-9]{1,40}$/.test(p.price) || !Number.isSafeInteger(p.expo)) return null;
+  const e = 6 + p.expo - decimals;
+  const v = amount * BigInt(p.price);
+  return e >= 0 ? v * 10n ** BigInt(e) : v / 10n ** BigInt(-e);
+}
+
+/** The leftover carried, cleared where the balance counted it: a U_X's newest op's `left` set to 0 (a later deposit to
+ *  U_X writes its own), a W's tail record deleted. */
+export async function clearLeftover(st: { keys(s: "ops"): Promise<string[]>; get(s: "ops", k: string): Promise<unknown>; update(s: "ops", k: string, f: (v: unknown) => unknown): Promise<unknown>; delete(s: "meta", k: string): Promise<void> }, src: CarrySource): Promise<void> {
+  if (src.kind === "w") return st.delete("meta", `w-tail/sol/${src.address}`);
+  let newest: { id: string; at: number } | null = null;
+  for (const id of await st.keys("ops")) {
+    const v = await st.get("ops", id).catch(() => undefined);
+    if (isUxOp(v) && v.follow.chain === src.chain && v.follow.u === src.address && (newest === null || v.created_ms > newest.at)) newest = { id, at: v.created_ms };
+  }
+  if (newest !== null) await st.update("ops", newest.id, (v) => (isUxOp(v) && v.follow.left !== "0" ? { ...v, follow: { ...v.follow, left: "0" } } : undefined));
 }
 
 /** The meta key of a wallet's open carry (meta owed/: the frame's reader never lists it, its write moves no seed). */
