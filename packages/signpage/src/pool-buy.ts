@@ -11,6 +11,10 @@
 //   in order by the helper: the tag 2s first, then the tag 3 once they landed (a tag 2 may land without the buy, its
 //   money then waiting in W until the rent back sweeps it). Every note is taken (RESERVED) before anything leaves, each read back,
 //   settled and owned on its own (sendAndSettle). One piece is the plain buy below.
+// - The legs (card buy-any-amount-on-every-chain): a tap no single W's set pays splits across disjoint W sets, the
+//   partition the balance's Max sums (solanaLegsPlan on ../../wallet/src/pool/balances.ts solanaTapLegs), the largest
+//   leg first, each up to its own most. Each leg is a buy run of its own on its own W, side by side (runPoolBuyLegs),
+//   asking its part: every rule below holds for each leg as for any buy. The tap is filled only when every leg filled.
 // - The proof: one the wallet's proof queue made ahead (../../wallet/src/pool/queue.ts). Its release is read off the proof itself:
 //   the 256 bytes of A, B (imaginary part first) and C, the hashes, the chunk and the depths from its public signals,
 //   the fee, caps, deadline and salt from its binding, whose context must be the program's context of those fields
@@ -124,7 +128,8 @@ import { SIGNPAGE_ROUTE_OUT } from "../../kit/src/signpage/schema.ts";
 import { freshWallet } from "../../wallet/src/derive/keys.ts";
 import { throttleWaitMs, type ThrottleBounds } from "../../wallet/src/throttle.ts";
 import type { ChainNow, ReadyProof } from "../../wallet/src/pool/pool.ts";
-import { solanaContextOf, solanaPoolOf, type SolanaPoolPin, type SolanaReleaseRequest } from "../../wallet/src/pool/solana.ts";
+import { SOL_PIECES, solanaContextOf, solanaPoolOf, type SolanaPoolPin, type SolanaReleaseRequest } from "../../wallet/src/pool/solana.ts";
+import { carriedChunk, solanaTapLegs, solanaTapSpendOf, type TapPiece, type TapSet, type TapSpendOf } from "../../wallet/src/pool/balances.ts";
 import { WALLET_SEED_LOCK } from "@blindfill/wallet/store";
 import { checkSolanaBuy, checkSolanaCarry, PoolRuleRefused, signSolana, type PoolAsk, type SolanaBuyPiece } from "./rules/pool.ts";
 import { carriesOf, carryOk, roundsOf } from "./pool-carry.ts";
@@ -669,6 +674,65 @@ export function pickPieces<P extends PickPiece>(list: readonly P[], pays: (set: 
   return (best as { set: P[] } | null)?.set ?? null;
 }
 
+/** One leg of a split tap (card buy-any-amount-on-every-chain): its W, the notes it may release (its own note first)
+ *  and what it spends. */
+export type PoolBuyLeg = { address: string; ids: readonly string[]; amount: bigint };
+/** What a ready proof gives a leg plan: its note, its W, whether W is its own note's, its chunk, fee cap and tip cap. */
+export type LegPiece = { readonly noteId: string; readonly own?: true; readonly chunk: bigint; readonly wallet: { readonly address: string }; readonly binding: { readonly feeCap: bigint; readonly request?: unknown } };
+
+/**
+ * The legs a tap of `amount` spends when no single W's set pays it (card buy-any-amount-on-every-chain): the ready
+ * proofs as W sets (one per own note's proof: the other notes bound to that W, each once, with the change a tap would
+ * carry, `valueOf` the note's value), partitioned as the balance's Max partitions them (../../wallet/src/pool/balances.ts
+ * solanaTapLegs on the same `spendOf`, so Max is what the legs spend), each note in one leg only. The amount fills the
+ * largest leg first, each up to its spend, so a tap runs the fewest legs; null when every leg's spend is less than the
+ * amount. Several pieces' sets only with `max` above 1.
+ */
+export function solanaLegsPlan(list: readonly LegPiece[], valueOf: (noteId: string) => bigint | undefined, spendOf: TapSpendOf, amount: bigint, max: number = SOLANA_POOL_BUY_PIECES_MAX): PoolBuyLeg[] | null {
+  if (amount <= 0n) return null;
+  const pieceOf = (p: LegPiece): TapPiece => {
+    const tipCap = (p.binding.request as { tipCap?: unknown } | undefined)?.tipCap;
+    return { chunk: p.chunk, feeCap: p.binding.feeCap, tipCap: typeof tipCap === "bigint" ? tipCap : undefined };
+  };
+  const byW = new Map<string, LegPiece[]>();
+  // a carried change's stand-in (pool-carry.ts carriesOf) is no proof of its own: the plan weighs carries from the values
+  for (const p of list) if (!p.noteId.endsWith("#change")) byW.set(p.wallet.address, [...(byW.get(p.wallet.address) ?? []), p]);
+  const sets: TapSet[] = [];
+  for (const [address, group] of byW)
+    for (const own of group.filter((p) => p.own === true)) {
+      const seen = new Set([own.noteId]);
+      const others = group.filter((p) => p !== own && !seen.has(p.noteId) && (seen.add(p.noteId), true)).map((p) => {
+        const piece = pieceOf(p);
+        const v = valueOf(p.noteId);
+        const k = v === undefined ? null : carriedChunk(SOL_PIECES, v, p.chunk);
+        return k === null ? { id: p.noteId, piece } : { id: p.noteId, piece, carried: { ...piece, chunk: k } };
+      });
+      sets.push({ address, ownId: own.noteId, own: pieceOf(own), others });
+    }
+  // the balance's own bound on a spend: never below 0, never over the chunks
+  const spend = (ps: readonly TapPiece[]): bigint => {
+    const s = spendOf(ps);
+    const sum = ps.reduce((a, x) => a + x.chunk, 0n);
+    if (typeof s !== "bigint" || s > sum) throw new Error(`the spend of ${sum} in chunks is not a bigint at most them`);
+    return s < 0n ? 0n : s;
+  };
+  const legs = solanaTapLegs(sets, spend, max).sort((x, y) => (x.spend > y.spend ? -1 : x.spend < y.spend ? 1 : 0));
+  const out: PoolBuyLeg[] = [];
+  let rest = amount;
+  for (const l of legs) {
+    if (rest === 0n) break;
+    const a = rest < l.spend ? rest : l.spend;
+    out.push({ address: l.address, ids: l.ids, amount: a });
+    rest -= a;
+  }
+  return rest > 0n ? null : out;
+}
+
+/** How one run reads the ready proofs: `split`, a tap its kind may split into legs when no single W's set pays it (the
+ *  run then answers the plan, `{ legs }`, before any claim, signature or send); `leg`, one leg's run: only the proofs
+ *  bound to its W, never a note of another leg. */
+export type PoolBuyScope = { split?: true; leg?: { address: string; not: ReadonlySet<string> } };
+
 /** One piece's tag 2 (card buy-spends-several-pieces): the compute limit and the release to W, its change note at
  *  `stateSize`, the fee payer and W signing; two zeroed signature slots, then the message. The same transaction a
  *  withdraw's release is (pool-withdraw.ts), checked by the same rule (rules/pool.ts checkSolanaBuy's pieces). */
@@ -737,11 +801,17 @@ export async function resumePieces(o: { owed: PiecesOwed; state(noteId: string):
  *  signs rests on a read from before a wait; the Rent sysvar is kept per provider across the attempts (keptReads). A
  *  sign out ends the wait, and the buy answers failed, nothing taken or signed. */
 export async function runPoolBuy(host: PoolBuyHost, ask: PoolAsk, waits: ReadWaits = readWaits(clockOf(host))): Promise<PoolBuyAnswer> {
-  const h: PoolBuyHost = Object.assign(Object.create(host) as PoolBuyHost, { rpcs: keptReads(host.rpcs, solanaStableReads(null)) });
-  return readsWaited((at) => buyRun(h, ask, at), h.wait, h.signal, waits);
+  return runPoolBuyScoped(host, ask, waits, {}) as Promise<PoolBuyAnswer>;
 }
 
-async function buyRun(h: PoolBuyHost, ask: PoolAsk, at: { fault?: unknown }): Promise<PoolBuyAnswer> {
+/** runPoolBuy in a scope (PoolBuyScope): a tap that may split answers its legs' plan instead of not_funded when no
+ *  single W's set pays it and its legs do; a leg's run picks only from its own W's proofs, never another leg's note. */
+export async function runPoolBuyScoped(host: PoolBuyHost, ask: PoolAsk, waits: ReadWaits, scope: PoolBuyScope): Promise<PoolBuyAnswer | { legs: PoolBuyLeg[] }> {
+  const h: PoolBuyHost = Object.assign(Object.create(host) as PoolBuyHost, { rpcs: keptReads(host.rpcs, solanaStableReads(null)) });
+  return readsWaited((at) => buyRun(h, ask, at, scope), h.wait, h.signal, waits);
+}
+
+async function buyRun(h: PoolBuyHost, ask: PoolAsk, at: { fault?: unknown }, scope: PoolBuyScope = {}): Promise<PoolBuyAnswer | { legs: PoolBuyLeg[] }> {
   let seed: Uint8Array | null = null;
   let key: Uint8Array | null = null;
   let claim: string[] | null = null;
@@ -762,7 +832,9 @@ async function buyRun(h: PoolBuyHost, ask: PoolAsk, at: { fault?: unknown }): Pr
     const token = ask.token!;
     const pool = solanaPoolAccount(h.pin.program);
     // a note this run claimed (a first round's own note, held for the buy's round) stays this run's to pick
-    const mine = (list: readonly Ready[]): Ready[] => list.filter((p) => p.wallet.chain === "sol" && (!h.claimed?.has(p.noteId) || claim?.includes(p.noteId) === true));
+    // a leg's run (card buy-any-amount-on-every-chain): only its W's proofs, never a note another leg of the tap holds
+    const leg = scope.leg;
+    const mine = (list: readonly Ready[]): Ready[] => list.filter((p) => p.wallet.chain === "sol" && (!h.claimed?.has(p.noteId) || claim?.includes(p.noteId) === true) && (leg === undefined || (p.wallet.address === leg.address && !leg.not.has(p.noteId))));
     // the ready proofs first: none (or every one held by another tap of this page) and no read is made
     if (mine(await h.ready()).length === 0) return no("not_funded");
     // the pool's time for the take, read beside the first round (card sol-buy-reads-side-by-side); a failed read is the
@@ -864,7 +936,16 @@ async function buyRun(h: PoolBuyHost, ask: PoolAsk, at: { fault?: unknown }): Pr
       const values: ReadonlyMap<string, bigint> | null = landed === null && h.carry && h.takeSet && h.sendPieces && h.piecesOwed ? await h.carry.values(now.map((p) => p.noteId)) : null;
       const weighed: Ready[] = values === null ? now : carriesOf(now, (id) => values.get(id));
       const picked = pickPieces(weighed, pays, max);
-      if (picked === null) return no("not_funded");
+      if (picked === null) {
+        // no single W's set pays the ask (card buy-any-amount-on-every-chain): a tap that may split answers its legs, the
+        // ready proofs partitioned as Max partitions them, on this run's venue, rent and tip, before any claim; each leg
+        // is then a run of its own, checked by every rule as any buy is
+        if (scope.split && leg === undefined && landed === null) {
+          const legs = solanaLegsPlan(now, (id) => values?.get(id), solanaTapSpendOf(rent, venue, tipOf), ask.amount, max);
+          if (legs !== null && legs.length > 1) return { legs };
+        }
+        return no("not_funded");
+      }
       // a root the pick needs whose read failed (kept by the last-seen list's lookups): that fault, as the read's own
       for (const p of picked)
         for (const k of [rootKey(0, p.publicSignals[3]), rootKey(1, p.publicSignals[5])]) if (faults.has(k)) throw faults.get(k);
@@ -1327,12 +1408,101 @@ export async function lateBuyEnd(n: { state: string; attempt?: string } | undefi
 
 type Locks = Pick<LockManager, "request">;
 
+/** The page's host of one buy run (pool-testnet.ts buyHost): its hosts given back, its end, and the follow of a run
+ *  that ended "sent". */
+export type PoolBuyKindHost = PoolBuyHost & { release?(): void; end?(): void; follow?(post: (stage: "filled" | "not_landed") => void): void };
+
+/** Decimal amounts in whole units ("1234.5", "7") summed exactly; null when one is not such a decimal. */
+export function sumUnits(xs: readonly string[]): string | null {
+  let d = 0;
+  for (const x of xs) {
+    const m = /^(0|[1-9][0-9]{0,77})(?:\.([0-9]{1,78}))?$/.exec(x);
+    if (m === null) return null;
+    d = Math.max(d, (m[2] ?? "").length);
+  }
+  const total = xs.reduce((t, x) => {
+    const [i, f = ""] = x.split(".");
+    return t + BigInt(i! + f.padEnd(d, "0"));
+  }, 0n);
+  return unitsOf(total, d);
+}
+
+/** A split tap's stage from its legs' (null: a leg that answered an error, nothing of it filled): filled only when
+ *  every leg filled; "sent" while any leg's end is not known; part_filled when some filled and the rest did not;
+ *  refused when every leg that ran was refused; else not_landed; null when every leg answered an error. */
+export function legsStage(stages: readonly (TradeStage | null)[]): TradeStage | null {
+  const ran = stages.filter((x): x is TradeStage => x !== null);
+  if (ran.length === 0) return null;
+  if (ran.length === stages.length && ran.every((x) => x === "filled")) return "filled";
+  if (ran.includes("sent") || ran.includes("signed")) return "sent";
+  if (ran.some((x) => x === "filled" || x === "part_filled")) return "part_filled";
+  return ran.every((x) => x === "refused") ? "refused" : "not_landed";
+}
+
+/**
+ * The legs of a split tap (card buy-any-amount-on-every-chain), side by side, each a buy run of its own on its own
+ * host (hosts[i]) in its leg's scope (its W's proofs, never another leg's note), asking its own amount: every rule a
+ * buy meets checks each leg (its reference for exactly its amount, its min out at the tap's slippage, checkSolanaBuy on
+ * every byte, W derived to its proof's recipient). A leg that fails is a buy that failed, as any: its release lands on
+ * its W or nothing does, and its owed record and W's sweep return what W holds, as for one buy.
+ * `tell.sent`: once every leg's transaction read back on both RPCs (each leg's sent), their signatures in leg order.
+ * `tell.route`: the first leg's W, venue and transaction; the amount out once, the sum over the legs (each read on both
+ * RPCs by its own leg): when every leg told its own, else at the end the sum of those that did.
+ * The answer: the legs' txs in leg order under legsStage's stage; when no leg ran (each an error), the first leg's error.
+ */
+export async function runPoolBuyLegs(
+  hosts: readonly PoolBuyKindHost[], legs: readonly PoolBuyLeg[], ask: PoolAsk, waits: ReadWaits,
+  tell: { sent(txs: TxRef[]): void; route(x: BuyRoute): void },
+  run: typeof runPoolBuyScoped = runPoolBuyScoped,
+): Promise<{ answer: PoolBuyAnswer; stages: (TradeStage | null)[] }> {
+  if (hosts.length !== legs.length || legs.length === 0) return { answer: { error: "failed" }, stages: [] };
+  const sigs: (string | undefined)[] = legs.map(() => undefined);
+  const outs: (string | undefined)[] = legs.map(() => undefined);
+  let toldOut = false;
+  const outNow = (all: boolean): void => {
+    const got = outs.filter((x): x is string => x !== undefined);
+    if (toldOut || got.length === 0 || (all && got.length < legs.length)) return;
+    const sum = sumUnits(got);
+    if (sum === null || !ROUTE_OUT.test(sum)) return;
+    toldOut = true;
+    tell.route({ out: sum });
+  };
+  const answers = await Promise.all(legs.map((l, i) => {
+    const h = hosts[i]!;
+    const not = new Set(legs.flatMap((x, k) => (k === i ? [] : x.ids)));
+    const sent = (signature: string): void => {
+      sigs[i] = signature;
+      // this leg's transaction read back: its hosts go back now, as one buy's do
+      h.release?.();
+      if (sigs.every((x) => x !== undefined)) tell.sent(sigs.map((hash) => ({ chain: "solana", hash: hash! })));
+    };
+    const route = (x: BuyRoute): void => {
+      if ("out" in x) {
+        outs[i] = x.out;
+        outNow(true);
+      } else if (i === 0) tell.route(x);
+    };
+    return run({ ...h, sent, route }, { ...ask, amount: l.amount }, waits, { leg: { address: l.address, not } }).then(
+      (a): PoolBuyAnswer => ("legs" in a ? { error: "failed" } : a),
+      (): PoolBuyAnswer => ({ error: "failed" }),
+    );
+  }));
+  outNow(false);
+  const stages = answers.map((a) => ("stage" in a ? a.stage : null));
+  const stage = legsStage(stages);
+  if (stage === null) return { answer: answers[0]!, stages };
+  return { answer: { stage, txs: answers.flatMap((a) => ("stage" in a ? a.txs : [])) }, stages };
+}
+
 /** The pool.buy kind: one run per tap under the seed's shared lock (sign out waits for it), answered "sent" with its
  *  signature once that reads back on both RPCs as this very transaction (sendAndSettle's sent), or at the run's end
  *  with the run's own answer; the run's final stage is always posted as progress as well. A run that ends "sent" (its
  *  end not known: the reads ran out, or a throw after its early answer) hands the page `follow`, and the end the page's
- *  own reads of its note find later goes out as progress too, once (card pool-buy-record-never-stays-sent). */
-export function poolBuyKind(host: () => PoolBuyHost & { release?(): void; end?(): void; follow?(post: (stage: "filled" | "not_landed") => void): void }, locks: Locks | null = globalThis.navigator?.locks ?? null) {
+ *  own reads of its note find later goes out as progress too, once (card pool-buy-record-never-stays-sent).
+ *  A tap no single W's set pays (card buy-any-amount-on-every-chain) runs its legs (runPoolBuyLegs), each on a host of
+ *  its own: answered "sent" once every leg's transaction read back, its end the legs' (legsStage), and a leg that ended
+ *  "sent" followed on its own host, the tap's end posted once every followed leg's end is known. */
+export function poolBuyKind(host: () => PoolBuyKindHost, locks: Locks | null = globalThis.navigator?.locks ?? null) {
   return (ask: PoolAsk, ctx: KindContext | null): HostRefusal | Running<"pool.buy"> => {
     if (ask.kind !== "pool.buy" || ask.chain !== "solana" || !locks) return { error: "not_allowed" };
     // the tap's one bound, from its arrival (before its locks)
@@ -1343,7 +1513,8 @@ export function poolBuyKind(host: () => PoolBuyHost & { release?(): void; end?()
     let early = false;
     // the run's final stage, posted once
     let ended = false;
-    let h: ReturnType<typeof host> | null = null;
+    // the follow of a run that ended "sent": the one run's host's, or a split tap's legs'
+    let follow: ((post: (stage: TradeStage) => void) => void) | null = null;
     const end = (stage: TradeStage): void => {
       if (ended) return;
       ended = true;
@@ -1352,7 +1523,7 @@ export function poolBuyKind(host: () => PoolBuyHost & { release?(): void; end?()
       if (stage !== "sent") return;
       let late = false;
       try {
-        h?.follow?.((x) => {
+        follow?.((x) => {
           if (late) return;
           late = true;
           ctx?.progress(x);
@@ -1365,15 +1536,42 @@ export function poolBuyKind(host: () => PoolBuyHost & { release?(): void; end?()
     const answered = new Promise<void>((r) => (give = r));
     const run = duringTrade(locks, () =>
       locks.request(WALLET_SEED_LOCK, { mode: "shared" }, async () => {
-        const h0 = (h = host());
+        const h0 = host();
+        const hosts: PoolBuyKindHost[] = [h0];
+        follow = (post) => h0.follow?.(post);
         try {
-          const a = await runPoolBuy({ ...h0, sent: (signature) => {
+          let a: PoolBuyAnswer | { legs: PoolBuyLeg[] } = await runPoolBuyScoped({ ...h0, sent: (signature) => {
             if (!answer) (answer = { result: { stage: "sent", txs: [{ chain: "solana", hash: signature }] } }), (early = true);
             give();
             // its transaction read back: its hosts go back now (the read-backs to Final are a trade's reads, first on
             // their host all the same), so the page's background reads and the sell box's preview go on beside them
             h0.release?.();
-          }, route: (x) => ctx?.route?.(x) }, ask, waits);
+          }, route: (x) => ctx?.route?.(x) }, ask, waits, { split: true });
+          if ("legs" in a) {
+            // a split tap: the plan run sent nothing; leg 0 runs on its host, every other leg on a new one
+            const legs = a.legs;
+            for (let i = 1; i < legs.length; i++) hosts.push(host());
+            const got = await runPoolBuyLegs(hosts, legs, ask, waits, {
+              sent: (txs) => {
+                if (!answer) (answer = { result: { stage: "sent", txs } }), (early = true);
+                give();
+              },
+              route: (x) => ctx?.route?.(x),
+            });
+            a = got.answer;
+            // each leg that ended "sent" followed on its own host; the tap's end posted once each of theirs is known
+            follow = (post) => {
+              const stages = [...got.stages];
+              const open = stages.flatMap((x, i) => (x === "sent" ? [i] : []));
+              for (const i of open)
+                hosts[i]!.follow?.((x) => {
+                  if (stages[i] !== "sent") return;
+                  stages[i] = x;
+                  const s = legsStage(stages);
+                  if (s !== null && s !== "sent") post(s);
+                });
+            };
+          }
           if (!answer) answer = "error" in a ? { error: a.error } : { result: a };
           // the run's stage goes out as progress too, answered early or not: an answer that comes only at the run's end
           // (no read-back within the client's 10 s) is one the kit's client has dropped, and the app waits on progress
@@ -1383,7 +1581,7 @@ export function poolBuyKind(host: () => PoolBuyHost & { release?(): void; end?()
           if ("stage" in a) end(a.stage);
           else if (early) end("sent");
         } finally {
-          h0.end?.();
+          for (const x of hosts) x.end?.();
         }
       }))
       .catch(() => {
