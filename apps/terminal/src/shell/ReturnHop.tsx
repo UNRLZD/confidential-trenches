@@ -8,7 +8,7 @@ import { useSignpage } from "./signpage-frame.tsx";
 // Opening one of the five open kinds on SIGN_HOST's shell (return-hop.ts). A screen calls hop(kind, params, view): the
 // tapped control is locked at once, in hop() itself (hop-gate.ts), and a second tap does nothing; the kind is posted to
 // the shell. The shell's ok means the flow is set up and its screen is coming over the app in place: the lock holds
-// until that screen takes this frame's focus, nothing navigates, and the flow's outcome arrives through the state events. A
+// until that screen closes (hop-gate.ts), nothing navigates, and the flow's outcome arrives through the state events. A
 // refused or failed kind, or one with no answer within the kit's window for it, unlocks the control and keeps the
 // outcome as `failed` (the control, why, and its Retry), which the screen draws in place with HopLine
 // (screens/signin/HopLine.tsx), so a tap never ends in nothing.
@@ -40,7 +40,7 @@ export function ReturnHopProvider({ children }: { children: ReactNode }) {
   const gate = useMemo(
     () =>
       hopGate({
-        request: client ? (kind, params) => client.request(kind, params).outcome : null,
+        request: client ? (kind, params) => client.request(kind, params) : null,
         lock: setLocked,
         fail: setFailed,
         after: (ms, fn) => {
@@ -51,6 +51,20 @@ export function ReturnHopProvider({ children }: { children: ReactNode }) {
         taken: (fn) => {
           addEventListener("blur", fn, { once: true });
           return () => removeEventListener("blur", fn);
+        },
+        // SIGN_HOST's closed notice for the open (kit 1.13): null for an ok that carried no `closes`
+        closed: (id, fn) => client?.onClosed(id, fn) ?? null,
+        // this frame's window has the focus again: only a live frame takes it, never one inert under the sheet
+        returned: (fn) => {
+          if (document.hasFocus()) {
+            let on = true;
+            queueMicrotask(() => {
+              if (on) fn();
+            });
+            return () => void (on = false);
+          }
+          addEventListener("focus", fn, { once: true });
+          return () => removeEventListener("focus", fn);
         },
       }),
     [client],

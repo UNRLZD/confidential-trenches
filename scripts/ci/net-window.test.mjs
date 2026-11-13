@@ -197,6 +197,7 @@ export const CHANGED = [
   "scripts/live-checks/signpage-buy-own-spend.mjs",
   "scripts/live-checks/sol-pool-buy-lands-on-mainnet.mjs",
   "scripts/live-checks/signpage-error-after-timeout.mjs",
+  "scripts/live-checks/signing-layer-says-when-it-closes.mjs",
   "scripts/live-checks/evm-withdraw-mainnet.mjs",
   "scripts/live-checks/signpage-evm-pool-buy.mjs",
   "scripts/live-checks/signpage-evm-pool-sell.mjs",
