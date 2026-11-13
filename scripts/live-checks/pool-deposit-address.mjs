@@ -12,6 +12,9 @@
 //     mainnet (the only network 1Click pays out on), is refused: the answer starts not_allowed and the host returns
 //     before any quote is asked when the page passes no `checked`, no `floor` or its network is not mainnet; the page passes
 //     its own network (review F2), and since card pool-deposit-follow the follow's `quoted`, the price and the floor read;
+//   - since card helper-says-why-a-vendor-refused, pool.address reads the page's stop once as a request arrives and checks
+//     it after each wait (the namer's, both record reads, the floor read), and hands it to the quote's ask: a sign out
+//     during any of them answers down, with nothing after it run;
 //   - a pool quote whose min out is under its context floor is refused "floor" after the kit's check, and a context floor
 //     under the ladders' least rungs (0.01 SOL, 0.001 ETH on Base and Robinhood) is refused (review F3).
 // What each does is held by the card's tests (packages/signpage/test/deposit-name.test.ts and
@@ -53,8 +56,8 @@ const READ_FN = (w) =>
   new RegExp(`function (${N})\\(${N},${N},${N}\\)\\{if\\(!${N}\\|\\|!${N}\\.status\\|\\|!${N}\\.deposit\\|\\|${N}\\(${N}\\.status\\)\\|\\|${N}\\.deposit\\.scope!==${N}\\.toString\\(\\)\\)return null;let ${N}=${esc(w)}\\(${N},${N}\\.deposit\\);`);
 // The host: the answer's first value; the asked chain's pool; that scope's record read back; no origin: its address.
 const HOST_SRC = (h) =>
-  `function ${esc(h)}\\(${N}\\)\\{return\\(${N},(${N})\\)=>\\{let (${N})=\\{error:${Q}(\\w+)${Q}\\};return\\{after:\\(async\\(\\)=>\\{let (${N})=${N}\\.chain,(${N})=${N}\\.pools\\(\\)\\.find\\(${N}=>${N}\\.chain===\\4\\);if\\(\\5===void 0\\)return;` +
-  `let ${N}=${N}\\[\\4\\],(${N})=${N}\\.origin_asset!==void 0\\|\\|${N}\\.amount!==void 0;await ${N}\\.named\\?\\.\\(\\)\\.catch\\(\\(\\)=>\\{\\}\\);let (${N})=(${N})\\(await ${N}\\.read\\(\\5\\.scope\\),\\4,\\5\\.scope\\);if\\(!\\7\\)return;` +
+  `function ${esc(h)}\\(${N}\\)\\{return\\(${N},(${N})\\)=>\\{let (${N})=\\{error:${Q}(\\w+)${Q}\\}(?:,${N}=${N}\\.stop\\?\\.\\(\\),${N}=\\(\\)=>${N}\\?\\.aborted===!0)?;return\\{after:\\(async\\(\\)=>\\{let (${N})=${N}\\.chain,(${N})=${N}\\.pools\\(\\)\\.find\\(${N}=>${N}\\.chain===\\4\\);if\\(\\5===void 0\\)return;` +
+  `let ${N}=${N}\\[\\4\\],(${N})=${N}\\.origin_asset!==void 0\\|\\|${N}\\.amount!==void 0;(?:if\\(await ${N}\\.named\\?\\.\\(\\)\\.catch\\(\\(\\)=>\\{\\}\\),${N}\\(\\)\\)return void\\(\\2=\\{error:${Q}down${Q}\\}\\)|await ${N}\\.named\\?\\.\\(\\)\\.catch\\(\\(\\)=>\\{\\}\\));let (${N})=(${N})\\(await ${N}\\.read\\(\\5\\.scope\\),\\4,\\5\\.scope\\);(?:if\\(${N}\\(\\)\\)return void\\(\\2=\\{error:${Q}down${Q}\\}\\);)?if\\(!\\7\\)return;` +
   `if\\(!\\6\\)return void\\(\\2=\\{result:\\{chain:\\4,address:\\7\\.wallet,asset:${N}\\}\\}\\);`;
 const HOST = (h) => new RegExp(HOST_SRC(h));
 // ...and then, with no follow (`checked`) or no floor read passed, it returns before any quote is asked.
@@ -62,6 +65,23 @@ const GATE = (h) => new RegExp(`${HOST_SRC(h)}if\\(\\1===void 0\\|\\|(${N})\\.ch
 const WIRED = (h) => new RegExp(`"pool\\.address":${esc(h)}\\(\\{pools:${N},network:${N},read:${N}\\.depositRead,named:\\(\\)=>${N}\\.named\\(\\),priced:${N},floor:${N},checked:\\((${N}),(${N}),(${N}),(${N})\\)=>${N}\\.quoted\\(\\1,\\2,\\3,\\4\\),stop:${N}\\}\\)`);
 // pool-deposit-quote.ts: the kit's check with no vault floor, then the quote's own floor (card pool-deposit-follow: the
 // least rung plus the deposit's cost, which that card's live check holds).
+// card helper-says-why-a-vendor-refused: the stop read once (the answer, the stop, the deps, the check), then each wait
+const STOP_HEAD = (h) =>
+  new RegExp(`function ${esc(h)}\\(${N}\\)\\{return\\(${N},${N}\\)=>\\{let (${N})=\\{error:${Q}not_allowed${Q}\\},(${N})=(${N})\\.stop\\?\\.\\(\\),(${N})=\\(\\)=>\\2\\?\\.aborted===!0;return\\{after:`);
+function stopsEachWait(js, h) {
+  const m = STOP_HEAD(h).exec(js);
+  if (!m) return false;
+  const [out, stop, deps, stopped] = m.slice(1).map(esc);
+  const end = js.indexOf("function ", m.index + m[0].length);
+  const body = js.slice(m.index, end < 0 ? undefined : end);
+  const down = `if\\(${stopped}\\(\\)\\)return void\\(${out}=\\{error:${Q}down${Q}\\}\\);`;
+  return (
+    new RegExp(`if\\(await ${deps}\\.named\\?\\.\\(\\)\\.catch\\(\\(\\)=>\\{\\}\\),${stopped}\\(\\)\\)return void\\(${out}=\\{error:${Q}down${Q}\\}\\);`).test(body) &&
+    (body.match(new RegExp(`=${N}\\(await ${deps}\\.read\\(${N}\\.scope\\),${N},${N}\\.scope\\);${down}`, "g")) ?? []).length === 2 &&
+    new RegExp(`=await ${deps}\\.floor\\(${N},${N}\\.wallet\\)\\}catch\\{${out}=\\{error:${Q}down${Q}\\};return\\}${down}`).test(body) &&
+    new RegExp(`=await ${N}\\(${N},${deps}\\.fetch,void 0,void 0,${stop}\\)\\}`).test(body)
+  );
+}
 const FLOOR = new RegExp(`let (${N})=${N}\\(${N},${N},\\{\\.\\.\\.${N}\\.check,intoVault:!1\\}\\);return \\1\\.minAmountOut<(${N})\\.floor&&${N}\\(${Q}floor${Q}\\)`);
 // ...with the context floor refused under the pool's least rung per chain.
 const CTX_FLOOR = new RegExp(`\\(typeof (${N})\\.floor!=${Q}bigint${Q}\\|\\|\\1\\.floor<(${N})\\[\\1\\.chain\\]\\)&&${N}\\(${Q}floor${Q}\\)`);
@@ -85,6 +105,7 @@ export function facts(index, js) {
     namesRecord: PLAN.test(js) && EVM_NAME.test(js),
     sameChain: !!read && HOST(host ?? "").exec(js)?.[8] === read,
     unfollowed: !!host && WIRED(host).test(js) && GATE(host).exec(js)?.[3] === "not_allowed",
+    stopped: !!host && stopsEachWait(js, host),
     floored: !!ladders && LADDER(ladders[1], "1000000", "10000000").test(js) && LADDER(ladders[2], "100000000000000", "1000000000000000").test(js),
   };
 }
@@ -95,6 +116,7 @@ export const WHY = {
   namesRecord: "a pool's record is not written from its scope's planned index and one-time id, or an EVM pool's carries no EVM address (or its key is not zeroed)",
   sameChain: "pool.address does not answer the asked chain's own pool from that scope's record read back (Solana: the one-time id's key; EVM: the record's address)",
   unfollowed: "a cross-chain quote with no follow wired, or on a page not pinned on mainnet, is not refused not_allowed before any quote is asked, or pool.address is not wired with its pools, network, read, wait, price, floor read, the follow's quoted and the page's stop",
+  stopped: "pool.address does not read the page's stop once as a request arrives, check it after each wait (the namer's, both record reads, the floor read) and hand it to the quote's ask: a sign out during one may still send a quote or a read",
   floored: "a pool quote whose min out is under its floor, or whose floor is under the pool's smallest deposit (0.01 SOL; 0.001 ETH on Base and Robinhood), is not refused floor",
 };
 

@@ -5,7 +5,8 @@
 // (pool-deposit-address.excerpt.txt, cut from this build's public/app.js: the pools' list and the namer, the namer, the
 // record read, the host and its wiring): each rule the card adds taken away, and
 // pool.address wired with no follow or no floor read, the network or floor-read gate, or the pool floor taken away
-// (review F2, F3): the mark it rests on FAILs. good: re-recorded at card pool-deposit-follow's build. The namer's line
+// (review F2, F3), and each stop check (card helper-says-why-a-vendor-refused): the mark it rests on FAILs. good: re-recorded
+// at card pool-deposit-follow's build, then at card helper-says-why-a-vendor-refused's, its excerpt re-cut from that build. The namer's line
 // re-cut from card signpage-passes-yield-to-a-trade's build (its lock-free read before nameDeposit), its name kept.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -33,11 +34,12 @@ for (const k of ["bad", "liveBefore"]) {
   });
 }
 
-// card helper-says-why-a-vendor-refused: pool.address is handed the page's stop; SIGN_HOST before it fails on that mark alone
-test("recorded bad answer beforeStop: FAIL on unfollowed alone", () => {
+// card helper-says-why-a-vendor-refused: pool.address is handed the page's stop and checks it after each wait; SIGN_HOST
+// before it fails on those two marks alone
+test("recorded bad answer beforeStop: FAIL on unfollowed and stopped", () => {
   const v = judge(ANSWERS.beforeStop);
   assert.equal(v.ok, false);
-  assert.deepEqual(v.lines, bad("unfollowed"));
+  assert.deepEqual(v.lines, bad("unfollowed", "stopped"));
 });
 
 test("planted on the good answer: each fact taken away FAILs", () => {
@@ -66,10 +68,15 @@ const PLANTED = [
   ["a Solana wallet read from the record's EVM address", new RegExp(`\\?(${N})\\.evm===void 0\\?${N}\\.encode\\(${N}\\.decode\\(${N}\\.id\\)\\):null:`), "?$1.evm:", ["sameChain"]],
   ["the first pool, not the asked chain's", new RegExp(`\\.pools\\(\\)\\.find\\(${N}=>${N}\\.chain===${N}\\)`), ".pools()[0]", ["sameChain", "unfollowed"]],
   ["no follow gate", new RegExp(`(if\\()${N}===void 0\\|\\|${N}\\.checked===void 0\\|\\|`), "$1", ["unfollowed"]],
-  ["the answer starts down, not not_allowed", new RegExp(`=\\{error:\`not_allowed\`\\}(;return\\{after:\\(async\\(\\)=>\\{let ${N}=${N}\\.chain,${N}=${N}\\.pools\\(\\))`), "={error:`down`}$1", ["unfollowed"]],
+  ["the answer starts down, not not_allowed", new RegExp(`=\\{error:\`not_allowed\`\\}((?:,${N}=${N}\\.stop\\?\\.\\(\\),${N}=\\(\\)=>${N}\\?\\.aborted===!0)?;return\\{after:\\(async\\(\\)=>\\{let ${N}=${N}\\.chain,${N}=${N}\\.pools\\(\\))`), "={error:`down`}$1", ["unfollowed", "stopped"]],
   ["pool.address wired with no follow", new RegExp(`,checked:\\((${N}),(${N}),(${N}),(${N})\\)=>${N}\\.quoted\\(\\1,\\2,\\3,\\4\\),`), ",", ["unfollowed"]],
   // card helper-says-why-a-vendor-refused: pool.address is handed the page's stop on sign out (src/main.ts quotesStopped)
   ["pool.address wired with no stop", new RegExp(`(=>${N}\\.quoted\\(${N},${N},${N},${N}\\)),stop:${N}\\}\\)`), "$1})", ["unfollowed"]],
+  // re-review P2: the stop read once and checked after each wait, and the ask handed it
+  ["no stop check after the namer's wait", new RegExp(`if\\(await (${N})\\.named\\?\\.\\(\\)\\.catch\\(\\(\\)=>\\{\\}\\),${N}\\(\\)\\)return void\\(${N}=\\{error:\`down\`\\}\\);`), "await $1.named?.().catch(()=>{});", ["stopped"]],
+  ["no stop check after the floor read", new RegExp(`(\\}catch\\{${N}=\\{error:\`down\`\\};return\\})if\\(${N}\\(\\)\\)return void\\(${N}=\\{error:\`down\`\\}\\);(if\\(${N}===null\\)return;)`), "$1$2", ["stopped"]],
+  ["no stop check after the second record read", new RegExp(`(let ${N}=${N}\\(await ${N}\\.read\\(${N}\\.scope\\),${N},${N}\\.scope\\);)if\\(${N}\\(\\)\\)return void\\(${N}=\\{error:\`down\`\\}\\);(if\\(!${N}\\|\\|!${N}\\(${N},${N}\\)\\)return;)`), "$1$2", ["stopped"]],
+  ["the quote's ask not handed the stop", new RegExp(`(,${N}\\.fetch,void 0,void 0),${N}\\)\\}`), "$1)}", ["stopped"]],
   ["pool.address wired with no floor read", new RegExp(`,floor:${N},checked:`), ",checked:", ["unfollowed"]],
   ["no floor-read gate", new RegExp(`\\|\\|${N}\\.floor===void 0\\|\\|`), "||", ["unfollowed"]],
   ["no network gate (review F2)", new RegExp(`\\|\\|${N}\\.network!==\`mainnet\`\\)return;`), ")return;", ["unfollowed"]],
