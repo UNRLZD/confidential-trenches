@@ -150,7 +150,11 @@ test("F2 no input of W's signer takes a digest: an EIP-7702 delegation of W to t
   // gives a chain's pinned sale tip, a constant: no key and no digest
   // evmPoolProvidersOf (trade/evm/buy-unpinned.ts, card robinhood-mainnet-rpcs) takes a venue and gives its pool's RPC
   // URL list (poolProviders, else providers): no key and no digest
-  assert.deepEqual(Object.keys(kit).filter((k) => /^evmPool/.test(k)).sort(), ["evmPoolBuildQuoted", "evmPoolBuildSell", "evmPoolBuyQuote", "evmPoolChainFee", "evmPoolChainFeeReads", "evmPoolFee", "evmPoolGas", "evmPoolProvidersOf", "evmPoolRouteData", "evmPoolSellQuote", "evmPoolSellTip", "evmPoolSignBuy", "evmPoolSignSell", "evmPoolSignSellAuthorization", "evmPoolSignSimSell", "evmPoolVenues"]);
+  // evmPoolBuyQuoteTap and evmPoolIndexRefresh (trade/evm/buy-tap.ts, card evm-buy-and-sell-on-mainnet): the tap's
+  // quote order over evmPoolBuyQuote (a chain, a token, an amount and a slippage in, a checked quote out) and the pool
+  // index's refresh (a chain, the index kept, a fetch): their file imports quote and index readers, the venue and hook
+  // lists only, and no key, signer or hash; no key and no digest
+  assert.deepEqual(Object.keys(kit).filter((k) => /^evmPool/.test(k)).sort(), ["evmPoolBuildQuoted", "evmPoolBuildSell", "evmPoolBuyQuote", "evmPoolBuyQuoteTap", "evmPoolChainFee", "evmPoolChainFeeReads", "evmPoolFee", "evmPoolGas", "evmPoolIndexRefresh", "evmPoolProvidersOf", "evmPoolRouteData", "evmPoolSellQuote", "evmPoolSellTip", "evmPoolSignBuy", "evmPoolSignSell", "evmPoolSignSellAuthorization", "evmPoolSignSimSell", "evmPoolVenues"]);
 });
 
 test("F2b W signs only the buy object the builder returned: a copy, an edit or a hand-made buy is refused", () => {
