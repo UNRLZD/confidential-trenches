@@ -150,7 +150,11 @@ export const MUTANTS = [
   ["kit", 'if (level === "current" || level === "1.12") return all;', 'if (level === "current") return all;'],
   ["kit", 'const CURRENT_FROM = SIGNPAGE_KIT_VERSION.split(".").map(Number) as [number, number];', "const CURRENT_FROM = [1, 12] as [number, number];"],
   // the level not read, not reset on a ready, an answer's kind not passed, a replay not shaped
-  ["api", "if (kit !== null) return void (level = kitLevel(kit));", "if (kit !== null) return;"],
+  ["api", "if (kit !== null) return void ((level = kitLevel(kit)), (hello = true));", "if (kit !== null) return;"],
+  // card signing-layer-says-when-it-closes (review P3-2): the closed notice sent with no hello since the last ready
+  ["api", "if (kit !== null) return void ((level = kitLevel(kit)), (hello = true));", "if (kit !== null) return void (level = kitLevel(kit));"],
+  ["api", "    hello = false;\n    queue = queue.then", "    queue = queue.then"],
+  ["api", "    if (!hello || level !== \"current\") return;", "    if (level !== \"current\") return;"],
   ["api", "      level = KIT_DEFAULT;\n", ""],
   ["api", "    post(answer, kind);", "    post(answer);"],
   ["api", "first.answer ? post(first.answer, first.kind)", "first.answer ? post(first.answer)"],

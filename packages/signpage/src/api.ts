@@ -254,7 +254,9 @@ export function startApi(host: ApiHost): { idle(): Promise<void>; ready(): void;
   // the app's kit version, as a hello named it (src/kit-version.ts)
   let level: KitLevel = KIT_DEFAULT;
   // a hello read since the last ready: `level` names the frame's own document, never the one a ready said went (its reset
-  // waits in the queue; review P3-2 of card signing-layer-says-when-it-closes)
+  // waits in the queue; review P3-2 of card signing-layer-says-when-it-closes). Cleared by the ready at once; a hello the
+  // old document sent before it, read after, sets it again, but the reset queued behind that hello sets `level` back to
+  // kit-v1.4 in the same run of the queue, before any timer's closed() can read the two
   let hello = false;
   // the message as the app's kit reads it, or null when it reads none of it; `kind`: an answer's request kind
   const shaped = (msg: SignpageAnswer | ReadyEvent | StateEvent | ProgressEvent | ProgressRouteEvent | ClosedEvent, kind?: SignpageKind): unknown => {
@@ -373,7 +375,6 @@ export function startApi(host: ApiHost): { idle(): Promise<void>; ready(): void;
     hello = false;
     queue = queue.then(() => {
       level = KIT_DEFAULT;
-      hello = false;
       sent = null;
     });
     post({ v: 1, type: "ready", release: RELEASE, api: API });

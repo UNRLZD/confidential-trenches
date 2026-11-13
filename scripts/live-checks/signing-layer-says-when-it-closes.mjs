@@ -6,8 +6,9 @@
 //     else, posted only once a hello read since the frame's last ready named the current level
 //     (`closed:e=>{i&&r===\`current\`&&o({v:1,type:\`closed\`,id:e})}`), through the one post that sends what the
 //     shaper returns (`o=(t,n)=>{let r=a(t,n);r!==null&&e.parent.postMessage(r,`); the hello sets the level and the flag
-//     together (`return void(r=Jg(l),i=!0)`), and each ready clears the flag at once and again in its queued reset
-//     (`p=()=>{i=!1,d=d.then(()=>{r=\`1.4\`,i=!1,`); it is the bundle's one `type:\`closed\``;
+//     together (`return void(r=Jg(l),i=!0)`), and each ready clears the flag at once, its queued reset setting the level
+//     back after any hello the old document sent before it (`p=()=>{i=!1,d=d.then(()=>{r=\`1.4\`,`); it is the bundle's
+//     one `type:\`closed\``;
 //   - the shell (src/shell.ts) records each open's id over the frame it opened over (`open`), moves the ids shown on to
 //     be told at its close and wakes the frame (`close`), takes an open that showed no layer the same way (`told`), and
 //     calls the notice once, from its one `.closed(` call: in the timer that wakes the kept frame PROTECT_MS (500 ms)
@@ -64,7 +65,7 @@ export function facts(index, js) {
   // the notice's post is the one through the shaper; its level and flag the ones a hello sets, the flag cleared by ready
   const post = notice ? new RegExp(`(?:^|[^\\w$.])${esc(notice[4])}=\\(([\\w$]+),([\\w$]+)\\)=>\\{let ([\\w$]+)=[\\w$]+\\(\\1,\\2\\);\\3!==null&&[\\w$]+\\.parent\\.postMessage\\(\\3,`).exec(js) : null;
   const level = notice ? new RegExp(`return void\\(${esc(notice[3])}=[\\w$]+\\([\\w$]+\\),${esc(notice[2])}=!0\\)`).test(js) : false;
-  const fresh = notice ? new RegExp(`=\\(\\)=>\\{${esc(notice[2])}=!1,([\\w$]+)=\\1\\.then\\(\\(\\)=>\\{${esc(notice[3])}=\`[^\`]+\`,${esc(notice[2])}=!1,`).test(js) : false;
+  const fresh = notice ? new RegExp(`=\\(\\)=>\\{${esc(notice[2])}=!1,([\\w$]+)=\\1\\.then\\(\\(\\)=>\\{${esc(notice[3])}=\`[^\`]+\`,`).test(js) : false;
   const timer = TIMER.exec(js);
   const open = OPEN.exec(js);
   const close = CLOSE.exec(js);
@@ -115,7 +116,7 @@ export function judge(a) {
   else {
     if (typeof a.post !== "string") bad("the closed notice does not go through the shaper's one post");
     if (a.level !== true) bad("the closed notice's level is not the one a hello sets: an older kit may be sent it");
-    if (a.fresh !== true) bad("a ready does not clear the closed notice's hello at once and in its queued reset: a new app document may be sent it at the old one's level");
+    if (a.fresh !== true) bad("a ready does not clear the closed notice's hello at once, its queued reset setting the level back: a new app document may be sent it at the old one's level");
     if (a.notices !== 1) bad(`the bundle holds ${Number.isInteger(a.notices) ? a.notices : "no count of"} closed notices, not exactly one`);
   }
   if (typeof a?.timer !== "string") bad("the shell does not tell an open's close from the timer that wakes the kept frame, after it is live, once per open, only for a layer over that frame");

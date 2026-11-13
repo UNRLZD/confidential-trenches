@@ -19,7 +19,7 @@ const TOLD = "BAD the shell has no told: an open that ends with no layer shown i
 const TIED = "BAD the shell's open, close, told and waking timer do not share one list of ids to tell, one done set and one frame: an open may be told twice or never";
 const RUN = "BAD the page's opens do not end through one run that opens the id's layer or else has the shell tell it: an open that shows no layer is never told";
 const LAYER = "BAD the page's layer opens without its open's id: the shell records nothing to tell";
-const FRESH = "BAD a ready does not clear the closed notice's hello at once and in its queued reset: a new app document may be sent it at the old one's level";
+const FRESH = "BAD a ready does not clear the closed notice's hello at once, its queued reset setting the level back: a new app document may be sent it at the old one's level";
 
 test("recorded good answer: this card's build tells a kit 1.13 app once, after its frame is live, that an open's layer closed: PASS", () => {
   const v = judge(ANSWERS.good);
@@ -77,7 +77,7 @@ test("planted on the good answer: each fact taken away FAILs", () => {
 });
 
 test("the facts read from a bundle", () => {
-  const api = "o=(t,n)=>{let r=a(t,n);r!==null&&e.parent.postMessage(r,`*`)};let l=qg(a);if(l!==null)return void(r=Jg(l),i=!0);let p=()=>{i=!1,d=d.then(()=>{r=`1.4`,i=!1,s=null}),o({v:1,type:`ready`})};return{idle:()=>d,ready:p,closed:e=>{i&&r===`current`&&o({v:1,type:`closed`,id:e})}}";
+  const api = "o=(t,n)=>{let r=a(t,n);r!==null&&e.parent.postMessage(r,`*`)};let l=qg(a);if(l!==null)return void(r=Jg(l),i=!0);let p=()=>{i=!1,d=d.then(()=>{r=`1.4`,s=null}),o({v:1,type:`ready`})};return{idle:()=>d,ready:p,closed:e=>{i&&r===`current`&&o({v:1,type:`closed`,id:e})}}";
   const shell =
     "open(e=!1,t){t===void 0||y.has(t)||_.some(e=>e.id===t)||v.some(e=>e.id===t)||_.push({id:t,over:o}),i.hidden=!1}," +
     "close(){if(i.hidden=!0,g=null,v.push(..._),_=[],!o){a.hidden=!1,u=setTimeout(()=>d(e),FH)}S(o)}," +
@@ -95,7 +95,7 @@ test("the facts read from a bundle", () => {
   assert.equal(f(api.replace("return void(r=Jg(l),i=!0)", "return void(q=Jg(l),i=!0)")).level, false, "the notice gated on another variable");
   assert.equal(f(api.replace("return void(r=Jg(l),i=!0)", "return void(r=Jg(l))")).level, false, "a hello that sets no flag");
   assert.equal(f(api.replace("p=()=>{i=!1,", "p=()=>{")).fresh, false, "a ready that clears the flag only in its queued reset");
-  assert.equal(f(api.replace("r=`1.4`,i=!1,", "r=`1.4`,")).fresh, false, "a ready whose queued reset keeps the flag");
+  assert.equal(f(api.replace("d=d.then(()=>{r=`1.4`,", "d=d.then(()=>{")).fresh, false, "a ready whose queued reset leaves the level");
   assert.equal(f(api.replace("closed:e=>{i&&", "closed:e=>{")).notice, null, "the notice with no hello flag");
   assert.equal(f(api.replace("id:e})}", "id:e,at:1})}")).notice, null, "the notice carries more");
   assert.equal(f(api.replace("id:e})}", "id:`x`})}")).notice, null, "the notice carries another id");
