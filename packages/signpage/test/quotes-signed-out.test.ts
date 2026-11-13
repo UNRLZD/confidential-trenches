@@ -32,7 +32,8 @@ test("every way the page learns it is signed out ends the quotes' asks", () => {
 test("every quote host gets the page's stop: deposit.quote, pool.address and the sheet's reads on both pages", () => {
   assert.match(MAIN, /"deposit\.quote": depositQuoteHost\(\{[^\n]*stop: quotesStopped \}\)/);
   assert.match(MAIN, /"pool\.address": poolAddressHost\(\{[^\n]*stop: quotesStopped \}\)/);
-  assert.equal(MAIN.split("depositReadHosts({ stop: quotesStopped })").length - 1, 2);
+  // and each page's pool floors (card deposit-takes-each-pools-own-coin: deposit.assets lists each pool's own coin)
+  assert.equal(MAIN.split("depositReadHosts({ stop: quotesStopped, poolFloor: pagePoolFloor })").length - 1, 2);
   assert.equal(MAIN.split("depositReadHosts(").length - 1, 2);
   // declared before the API starts, which reads it as the page loads, from the page's one stop (src/quotes-stop.ts)
   assert.ok(MAIN.indexOf("const quotesStopped") < MAIN.indexOf("stop: quotesStopped"));
