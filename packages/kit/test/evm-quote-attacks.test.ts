@@ -5297,17 +5297,16 @@ const shortAt = (host: string, inner: EvmRpc, shortOf: (calls: EvmRpcCall[], out
 const oneBlock = async (token: string, chainName: "base" | "robinhood", list: (inner: EvmRpc) => EvmRpc[], headNo = 5_000_001) => {
   const n = list(scanner(5_000_000, [])).length;
   await triQuote(token, Array.from({ length: n }, () => scanner(5_000_000, [])), chainName);
-  const t = performance.now();
-  const v = await triQuote(token, list(scanner(headNo, realAt(token, headNo))), chainName, headNo);
-  return { v, ms: Math.round(performance.now() - t) };
+  return { v: await triQuote(token, list(scanner(headNo, realAt(token, headNo))), chainName, headNo) };
 };
 /** The captured answer (base.api.pocket.network, a held base-hook quote's batch, 2026-11-13 18:0xZ from this Mac): each
  *  call of a batch answered by a backend of its own, the first getLogs [], the block by hash, and the second getLogs
  *  -32602 "block range extends beyond current head block: requested 57015119, head 57015002" from a backend 117 blocks
- *  behind. Here a provider over `inner` whose second getLogs of a batch ending past `lagHead` is so answered for `ms`
- *  after the first such answer; `behind` counts them, `past` every getLogs batch ending past `lagHead`. */
-const laggard = (host: string, inner: EvmRpc, lagHead: number, ms = 200) => {
-  let since: number | undefined;
+ *  behind. Here a provider over `inner` whose second getLogs of a batch ending past `lagHead` is so answered the first
+ *  time its range is asked, as the lagging backend of one batch, and the next time from a backend that holds it;
+ *  `behind` counts those answers, `past` every getLogs batch ending past `lagHead`. */
+const laggard = (host: string, inner: EvmRpc, lagHead: number) => {
+  const seen = new Set<string>();
   let behind = 0;
   let past = 0;
   const rpc = evmJsonRpc(`https://${host}`, (async (_u: unknown, init: { body: string }) => {
@@ -5316,8 +5315,9 @@ const laggard = (host: string, inner: EvmRpc, lagHead: number, ms = 200) => {
     const i = calls.map((c, n) => (c.method === "eth_getLogs" ? n : -1)).filter((n) => n >= 0)[1];
     const to = i === undefined ? 0 : Number((calls[i]!.params[0] as { toBlock: string }).toBlock);
     if (to > lagHead) past++;
-    if (i !== undefined && to > lagHead && (since === undefined || performance.now() - since < ms)) {
-      since ??= performance.now();
+    const range = i === undefined ? "" : `${(calls[i]!.params[0] as { fromBlock: string }).fromBlock}-${to}`;
+    if (i !== undefined && to > lagHead && !seen.has(range)) {
+      seen.add(range);
       behind++;
       out[i] = { jsonrpc: "2.0", id: i, error: { code: -32602, message: `block range extends beyond current head block: requested ${to}, head ${lagHead}` } };
     }
@@ -5356,7 +5356,6 @@ test("OB4 the captured answer, a getLogs from a backend 117 blocks behind a bloc
   assert.deepEqual(r.v, below, "base fourth");
   // asked again whole, never as its halves: one batch behind, one that lands
   assert.deepEqual([l.behind(), l.past()], [1, 2], "base fourth");
-  console.log(`OB4 base fourth: ${r.ms} ms, ${l.behind()} answers behind`);
   // a cold Robinhood scan's first, a spare behind it: its newest request answered so; the spare reads none
   const c = rcFirst("0x000050e18ffa3f8f7ad170eb9cef160eb3ed1f50", (inner) => (l = laggard("first.ob4.test", inner, RC_HEAD - 117)).rpc);
   assert.deepEqual(await c.run(), { accepted: false, code: "below_reference" }, "cold first");
@@ -5386,7 +5385,6 @@ test("OB1 a one-block scan batch answered short once is asked again of the same 
     r = await oneBlock(id(), "base", (inner) => ((s = shortAt("one.ob1.test", inner, shortOf)), [s.rpc]));
     assert.deepEqual(r.v, below, `lone first, ${shape}`);
     assert.equal(s.ones(), 2, `lone first, ${shape}: one-block batches`);
-    console.log(`OB1 ${shape}: the lone first's quote ${r.ms} ms`);
   }
 });
 
