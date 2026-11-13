@@ -47,7 +47,7 @@
 import { HELPER_BIND_RECORD_WALLETS_MAX, HELPER_BIND_TRADE_CODES, HELPER_CODE_STATUS, HELPER_FETCH_INIT, type HelperBindRecord, type HelperBindRecordRequest, type HelperBindRecordState, type HelperBindTradeRequest } from "../../kit/src/helper/v1.ts";
 import { NEAR_NETWORKS, type NearNetwork, type NearRpc } from "../../kit/src/near/networks.ts";
 import { NEAR_RHEA, rheaQuote } from "../../kit/src/near/rhea.ts";
-import { nearFeeBuyerReceives, nearTokenFeeView } from "../../kit/src/near/token-fee.ts";
+import { nearFeeBuyerReceives, nearTokenFeeView, type NearTokenFee } from "../../kit/src/near/token-fee.ts";
 import { vaultSync, vaultSyncStart, type VaultSpendRow } from "../../kit/src/vault/sync.ts";
 import { readNearHeld, readNearSwapPair, readNearSwapWallet, type NearSwapWalletArgs, type NearSwapWalletState } from "../../kit/src/trade/near/wallet.ts";
 import type { BuyRoute, TxRef } from "../../kit/src/signpage/messages.ts";
@@ -171,8 +171,8 @@ export type NearBuyPage = {
   readWallet?(a: Pick<NearSwapWalletArgs, "wallet" | "side" | "token">): Promise<NearSwapWalletState>;
   /** The token's decimals (readNearDecimals on rpcs() unless given). */
   decimals?(token: string): Promise<number>;
-  /** What reaches W of `paid` sent by the exchange, the token's buy fee taken off (a quote's fee read unless given). */
-  buyerReceives?(token: string, paid: bigint): Promise<bigint>;
+  /** The token's own fee as a buy's quote reads it (a quote's fee read unless given). */
+  tokenFee?(token: string): Promise<NearTokenFee>;
   /** The quote's candidate pools (near-pools.ts rheaPoolsKept). */
   pools(token: string): Promise<number[]>;
   locks?: LockManager;
@@ -1102,13 +1102,19 @@ export type NearHoldingsReads = {
 
 /** The least of `token` on W that counts as W's coin: W's own buy swap's min_amount_out as it reaches W (the token's
  *  buy fee taken off, as the quote reads it: a mainnet launchpad token only, every other token has none), and no less
- *  than what W's own sell swap sent in when it signed one. page.buyerReceives replaces the fee read in tests. */
+ *  than what W's own sell swap sent in when it signed one. A fee read as not known (an unread view, code not pinned)
+ *  is no floor: it throws, so W is read again later, never kept with a floor its own coin may be under. page.tokenFee
+ *  replaces the fee read in tests. */
 async function coinFloor(page: NearBuyPage, token: string, buyMin: bigint, sellIn: bigint | null): Promise<bigint> {
   let f = buyMin;
-  if (page.buyerReceives) f = await page.buyerReceives(token, buyMin);
-  else if (page.network === "mainnet" && nearTokenFeeView(token) !== null) {
-    const q = await rheaQuote({ network: page.network, rpcs: page.rpcs(), side: "buy", token, amountIn: VAULT_CONSTANTS.MIN_DEPOSIT, pools: await page.pools(token) });
-    f = nearFeeBuyerReceives(q.fee, NEAR_RHEA[page.network].exchange, buyMin);
+  const fee = page.tokenFee
+    ? await page.tokenFee(token)
+    : page.network === "mainnet" && nearTokenFeeView(token) !== null
+      ? (await rheaQuote({ network: page.network, rpcs: page.rpcs(), side: "buy", token, amountIn: VAULT_CONSTANTS.MIN_DEPOSIT, pools: await page.pools(token) })).fee
+      : null;
+  if (fee !== null) {
+    if (fee.unknown) throw new Error("the token's fee is not known");
+    f = nearFeeBuyerReceives(fee, NEAR_RHEA[page.network].exchange, buyMin);
   }
   if (f < 1n) f = 1n;
   return sellIn !== null && sellIn > f ? sellIn : f;
