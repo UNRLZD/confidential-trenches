@@ -2729,3 +2729,119 @@ test("pieces: resumePieces on a reload mid-buy and after: RESERVED keeps, the bu
   assert.equal(await resumePieces({ owed, state: async () => "SPENT", owner: async () => { throw new Error("HTTP 503"); }, strand: async () => assert.fail("never stranded") }), 0);
   assert.deepEqual([...owed.all.keys()], ["A"]);
 });
+
+// ---------- card buy-spends-its-change-in-the-same-tap: a recorded two-round run ----------
+
+/** A two-round tap: W's own note (note-1), a 0.012 note (note-2) whose piece is 0.005, and its 0.007 change (note-3,
+ *  proved to W once round 1 settled). Every RPC read but the transactions is world()'s; getTransaction (any commitment)
+ *  and W's history answer each landed transaction under the helper's name for it; the settle reads a note spent once its
+ *  transaction landed. `round1`: whether round 1 lands. */
+async function twoRounds(round1: "lands" | "never") {
+  const own = pieceProof("note-1", BigInt("0x" + Buffer.from(unhex(r.nullifier_hash)).toString("hex")), BigInt(r.withdrawn), true);
+  const parent = pieceProof("note-2", 777n, 5_000_000n);
+  const change = pieceProof("note-3", 888n, 7_000_000n);
+  const s = await setup("pump", SPEND);
+  // more than the own note and the 0.005 piece pay, at most what the 0.007 change adds
+  const spend = solanaPoolBuyMaxSpend([relOf(own), relOf(parent)], s.venue, SOLANA_POOL_JITO_TIP, rent) + 1_000_000n;
+  assert.ok(spend <= solanaPoolBuyMaxSpend([relOf(own), relOf(parent), relOf(change)], s.venue, SOLANA_POOL_JITO_TIP, rent));
+  const w = await world({ readies: [[parent, own]] });
+  const log: string[] = [];
+  const landed = new Map<string, Uint8Array>(); // the chain: each landed transaction by its signature
+  const spentNotes = new Set<string>();
+  let stage = 1;
+  let n = 0;
+  const sigOf = (): string => base58.encode(new Uint8Array(64).fill(20 + n++));
+  const lands = (sig: string, tx: Uint8Array, notes: readonly string[]): void => {
+    if (round1 === "never" && stage === 1) return;
+    const t = tx.slice();
+    t.set(base58.decode(sig), 1);
+    landed.set(sig, t);
+    for (const id of notes) spentNotes.add(id);
+  };
+  const owed = owedMem();
+  w.host.piecesOwed = owed;
+  w.host.ready = async () => (stage === 1 ? [parent, own] : [change, own]);
+  w.host.carry = {
+    values: async (ids) => new Map(ids.flatMap((id) => (id === "note-2" ? [[id, 12_000_000n] as const] : id === "note-1" ? [[id, BigInt(r.withdrawn)] as const] : []))),
+    prove: async (parentId, to) => {
+      log.push(`prove:${parentId}->${to.address === W.address ? "W" : to.address}`);
+      stage = 2;
+      return change;
+    },
+  };
+  const byId = new Map([own, parent, change].map((p) => [p.noteId, p]));
+  w.host.take = async (id, attempt) => {
+    log.push(`take:${id}`);
+    assert.equal(attempt, byId.get(id)!.attempt);
+    return byId.get(id)!;
+  };
+  w.host.takeSet = async (items) => {
+    log.push(`takeSet:${items.map((x) => x.noteId).join(",")}`);
+    return items.map((x) => byId.get(x.noteId)!);
+  };
+  const sent: Uint8Array[][] = [];
+  w.host.send = async (_pool, tx) => {
+    log.push(`send:${(await owed.list()).length === 1 ? "owed" : "not-owed"}`);
+    sent.push([tx.slice()]);
+    const sig = sigOf();
+    lands(sig, tx, ["note-2"]);
+    return { signature: sig };
+  };
+  w.host.sendPieces = async (_pool, txs) => {
+    log.push(`sendPieces:${txs.length}`);
+    sent.push(txs.map((t) => t.slice()));
+    const sigs = txs.map(() => sigOf());
+    txs.forEach((t, i) => lands(sigs[i]!, t, [["note-3", "note-1"][i]!]));
+    return { signatures: sigs };
+  };
+  const verdict = (id: string) => ({ kind: spentNotes.has(id) ? ("spent" as const) : ("unspent" as const) });
+  w.host.settle = async (id) => (log.push(`settle:${id}`), verdict(id));
+  w.host.settleSet = async (ids) => (log.push(`settleSet:${ids.join(",")}`), ids.map(verdict));
+  const [r0, r1] = w.host.rpcs;
+  const wrap = (rpc: SolanaRpc): SolanaRpc =>
+    (async (method: string, params: readonly unknown[]) => {
+      if (method === "getTransaction") {
+        const tx = landed.get(params[0] as string);
+        return tx === undefined ? null : { slot: TX_SLOT, transaction: [base64.encode(tx), "base64"], meta: { err: null, loadedAddresses: loadedOf(tx, s.addresses) } };
+      }
+      if (method === "getSignaturesForAddress") {
+        if ((params[1] as { before?: string }).before !== undefined) return [];
+        return [...landed.keys()].reverse().map((signature) => ({ signature, slot: TX_SLOT, err: null }));
+      }
+      return rpc(method, params);
+    }) as SolanaRpc;
+  w.host.rpcs = [wrap(r0), wrap(r1)];
+  w.host.reads = 10;
+  return { w, spend, log, sent, owed };
+}
+
+test("card buy-spends-its-change-in-the-same-tap: a buy past the ready pieces releases the 0.012 note's piece to W alone (round 1), reads it back, settles it, proves its 0.007 change to W, then buys with the change and the own note (round 2): filled", async () => {
+  const x = await twoRounds("lands");
+  const a = await runPoolBuy(x.w.host, { ...ASK, amount: x.spend });
+  assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
+  // round 1: the parent's tag 2 alone, owed before it leaves, settled, its change proved to the same W; round 2: the
+  // change's tag 2 and the own note's tag 3, taken together
+  assert.deepEqual(x.log.filter((l) => !l.startsWith("settle")), ["take:note-2", "send:owed", "prove:note-2->W", "takeSet:note-3,note-1", "sendPieces:2"]);
+  assert.ok(x.log.indexOf("settle:note-2") > x.log.indexOf("send:owed") && x.log.indexOf("settle:note-2") < x.log.indexOf("prove:note-2->W"), "round 1 settled before its change is proved");
+  const msgOf = (tx: Uint8Array) => solanaDecodeMessage(tx.subarray(1 + 64 * tx[0]!));
+  const [[one], [two, three]] = x.sent as [[Uint8Array], [Uint8Array, Uint8Array]];
+  for (const tx of [one!, two!, three!]) {
+    assert.ok(ed25519.verify(tx.subarray(65, 129), tx.subarray(129), base58.decode(W.address)), "W signed it");
+    assert.equal(msgOf(tx).staticKeys[1], W.address, "to the one W");
+  }
+  // round 1 is a tag 2 alone: the 0.012 note's 0.005 piece; round 2's tag 2 the 0.007 change, then the tag 3
+  assert.equal(msgOf(one!).instructions.at(-1)!.data[0], 2);
+  assert.equal(solanaDecodePoolRelease(msgOf(one!).instructions.at(-1)!.data).withdrawnValue, 5_000_000n);
+  assert.equal(solanaDecodePoolRelease(msgOf(two!).instructions.at(-1)!.data).withdrawnValue, 7_000_000n);
+  assert.equal(msgOf(three!).instructions.at(-1)!.data[0], 3);
+});
+
+test("card buy-spends-its-change-in-the-same-tap: round 1 that never lands sends no buy: no change proved, nothing more sent, and W's owed record stays for the state reads", async () => {
+  const x = await twoRounds("never");
+  x.w.host.finalHeight = undefined;
+  const a = await runPoolBuy(x.w.host, { ...ASK, amount: x.spend });
+  assert.ok("stage" in a && a.stage !== "filled", JSON.stringify(a));
+  assert.equal(x.log.some((l) => l.startsWith("prove") || l.startsWith("takeSet") || l.startsWith("sendPieces")), false, x.log.join(","));
+  assert.equal(x.sent.length, 1);
+  assert.equal((await x.owed.list()).length, 1, "W stays found");
+});

@@ -757,7 +757,8 @@ async function buyRun(h: PoolBuyHost, ask: PoolAsk, at: { fault?: unknown }): Pr
     if (ask.kind !== "pool.buy" || ask.chain !== "solana" || ask.token === null || pinned === null || pinned.length === 0) no("not_allowed");
     const token = ask.token!;
     const pool = solanaPoolAccount(h.pin.program);
-    const mine = (list: readonly Ready[]): Ready[] => list.filter((p) => p.wallet.chain === "sol" && !h.claimed?.has(p.noteId));
+    // a note this run claimed (a first round's own note, held for the buy's round) stays this run's to pick
+    const mine = (list: readonly Ready[]): Ready[] => list.filter((p) => p.wallet.chain === "sol" && (!h.claimed?.has(p.noteId) || claim?.includes(p.noteId) === true));
     // the ready proofs first: none (or every one held by another tap of this page) and no read is made
     if (mine(await h.ready()).length === 0) return no("not_funded");
     // the pool's time for the take, read beside the first round (card sol-buy-reads-side-by-side); a failed read is the
