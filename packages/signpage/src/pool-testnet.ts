@@ -1677,19 +1677,19 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   const evmSightHold = async (chain: "base" | "robinhood", signal: AbortSignal): Promise<void> => {
     const e = evmPool(chain);
     if (e === null || signal.aborted) return;
-    const pool =
-      over.evmQueuePool?.(chain) ??
-      walletEvmPool({
-        pin: e.pin,
-        rpcs: e.passRpcs,
-        feeRpcs: pageEvmFeeRpcs(chain, "pass"),
-        feeHold: evmFeeHoldOf(e.pin),
-        held: pageEvmHold(e.pin, () => (page.held ? page.held() : page.store())),
-        history: [...e.passList, ...pageEvmHistory(e.pin)],
-        ...(typeof (e.passSync as Partial<EvmTreeSync>).trees === "function" ? { sync: e.passSync as EvmTreeSync } : {}),
-        relayFee: (ep, s) => evmPoolRelayFee(e.pin.pool, ep, s, over.fetch),
-        epochFee: evmEpochFee,
-      });
+    // the queue's pass pool's arguments (openEvmQueue), not the queue's pool itself
+    const args: Parameters<typeof walletEvmPool>[0] = {
+      pin: e.pin,
+      rpcs: e.passRpcs,
+      feeRpcs: pageEvmFeeRpcs(chain, "pass"),
+      feeHold: evmFeeHoldOf(e.pin),
+      held: pageEvmHold(e.pin, () => (page.held ? page.held() : page.store())),
+      history: [...e.passList, ...pageEvmHistory(e.pin)],
+      ...(typeof (e.passSync as Partial<EvmTreeSync>).trees === "function" ? { sync: e.passSync as EvmTreeSync } : {}),
+      relayFee: (ep, s) => evmPoolRelayFee(e.pin.pool, ep, s, over.fetch),
+      epochFee: evmEpochFee,
+    };
+    const pool = over.evmQueuePool?.(chain) ?? walletEvmPool(args);
     const holdFee = (pool as Partial<Pick<EvmPoolOf, "holdFee">>).holdFee;
     if (typeof holdFee !== "function") return;
     const now = await pool.now(signal);
