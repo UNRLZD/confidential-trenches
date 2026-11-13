@@ -1,14 +1,14 @@
 {
- "_note": "Card deposit-takes-each-pools-own-coin. good: this card's signing page (packages/signpage built at the card branch, dadffe34a plus its test commit, served by Playwright as SIGN_HOST under its own _headers; the real helper and the pools' mainnet RPCs) read 2026-11-13T09:27:49.695Z: deposit.assets lists the three USDC rows, then SOL on solana 0.0135864, ETH on base 0.001021041255599516 and ETH on robinhood 0.001052642294848, each the pool's floor read then, max_usd 1000; the page asked 1Click about no pool coin: PASS. bad: main 6de76338d's signing page, built the same way, read 2026-11-13T09:28:08.802Z: the USDC rows alone: FAIL.",
+ "_note": "Card deposit-takes-each-pools-own-coin. good: this card's signing page (packages/signpage built at the card branch, b420b177b plus the Min rounded up to six decimals, served by Playwright as SIGN_HOST under its own _headers; the real helper and the pools' mainnet RPCs) read 2026-11-13T09:59:27.318Z: deposit.assets lists the three USDC rows, then SOL on solana 0.013587, ETH on base 0.001022 and ETH on robinhood 0.001053, each the pool's floor read then rounded up to six decimals, max_usd 1000; the page asked 1Click about no pool coin: PASS. bad: main 6de76338d's signing page, built the same way, read 2026-11-13T09:28:08.802Z: the USDC rows alone: FAIL.",
  "good": {
   "source": "local, SIGN_HOST answered from packages/signpage's build (index.html and public/ copied)",
-  "at": "2026-11-13T09:27:49.695Z",
+  "at": "2026-11-13T09:59:27.318Z",
   "browser": "157.0.8103.51",
   "signUrl": "https://confidential.unrealized.trade/",
   "ready": true,
   "ids": {
-   "assets": "d07b6bba-81e3-4cf3-a07d-f5b06cfec5e3",
-   "dry": "70b019f7-9e78-4000-a8cc-599ae795e9c0"
+   "assets": "6513d3c6-62ec-4485-b1b4-69651f47651e",
+   "dry": "aaab49e3-30fb-490b-8d4f-2a1be9e09579"
   },
   "asked": {
    "origin_asset": "nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near",
@@ -16,7 +16,7 @@
   },
   "log": [
    {
-    "t": 52.599999994039536,
+    "t": 49.5,
     "origin": "https://confidential.unrealized.trade",
     "fromParent": true,
     "data": {
@@ -27,12 +27,12 @@
     }
    },
    {
-    "t": 3127.199999988079,
+    "t": 3128.800000011921,
     "origin": "https://confidential.unrealized.trade",
     "fromParent": true,
     "data": {
      "v": 1,
-     "id": "d07b6bba-81e3-4cf3-a07d-f5b06cfec5e3",
+     "id": "6513d3c6-62ec-4485-b1b4-69651f47651e",
      "ok": true,
      "result": {
       "assets": [
@@ -41,7 +41,7 @@
         "chain": "near",
         "symbol": "USDC",
         "decimals": 6,
-        "min": "1.016028",
+        "min": "1.016003",
         "max_usd": "1000"
        },
        {
@@ -49,7 +49,7 @@
         "chain": "solana",
         "symbol": "USDC",
         "decimals": 6,
-        "min": "1.016129",
+        "min": "1.016104",
         "max_usd": "1000"
        },
        {
@@ -57,7 +57,7 @@
         "chain": "base",
         "symbol": "USDC",
         "decimals": 6,
-        "min": "1.016129",
+        "min": "1.016104",
         "max_usd": "1000"
        },
        {
@@ -65,7 +65,7 @@
         "chain": "solana",
         "symbol": "SOL",
         "decimals": 9,
-        "min": "0.0135864",
+        "min": "0.013587",
         "max_usd": "1000"
        },
        {
@@ -73,7 +73,7 @@
         "chain": "base",
         "symbol": "ETH",
         "decimals": 18,
-        "min": "0.001021041255599516",
+        "min": "0.001022",
         "max_usd": "1000"
        },
        {
@@ -81,7 +81,7 @@
         "chain": "robinhood",
         "symbol": "ETH",
         "decimals": 18,
-        "min": "0.001052642294848",
+        "min": "0.001053",
         "max_usd": "1000"
        }
       ]
@@ -89,17 +89,17 @@
     }
    },
    {
-    "t": 3853.9000000059605,
+    "t": 3827.5999999940395,
     "origin": "https://confidential.unrealized.trade",
     "fromParent": true,
     "data": {
      "v": 1,
-     "id": "70b019f7-9e78-4000-a8cc-599ae795e9c0",
+     "id": "aaab49e3-30fb-490b-8d4f-2a1be9e09579",
      "ok": true,
      "result": {
-      "amount_out_usd": "24.990548",
-      "min_amount_out_usd": "24.740642",
-      "fee_usd": "0.009452",
+      "amount_out_usd": "24.992693",
+      "min_amount_out_usd": "24.742766",
+      "fee_usd": "0.007307",
       "time_estimate_s": 20
      }
     }
@@ -129,7 +129,7 @@
      "refundType": "INTENTS",
      "recipient": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
      "recipientType": "DESTINATION_CHAIN",
-     "deadline": "2026-11-13T09:57:43.060Z"
+     "deadline": "2026-11-13T10:29:20.933Z"
     },
     "status": 201
    },
@@ -149,7 +149,7 @@
      "refundType": "INTENTS",
      "recipient": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
      "recipientType": "DESTINATION_CHAIN",
-     "deadline": "2026-11-13T09:57:43.060Z"
+     "deadline": "2026-11-13T10:29:20.934Z"
     },
     "status": 201
    },
@@ -169,7 +169,7 @@
      "refundType": "INTENTS",
      "recipient": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
      "recipientType": "DESTINATION_CHAIN",
-     "deadline": "2026-11-13T09:57:43.060Z"
+     "deadline": "2026-11-13T10:29:20.934Z"
     },
     "status": 201
    },
@@ -189,15 +189,15 @@
      "refundType": "INTENTS",
      "recipient": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
      "recipientType": "DESTINATION_CHAIN",
-     "deadline": "2026-11-13T09:57:45.418Z"
+     "deadline": "2026-11-13T10:29:23.239Z"
     },
     "status": 201
    }
   ],
-  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-6pf9mPiGh0Lsx7rAUdEI3HbsXvtRfWZAq6kZrQ8DEydFDXFgyjGFGRTa3rtplsCQ\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-CLGTr7ESmMWZIVST1VcM3iPXpdGE4m3hnVTg1O9UA47LeQeOoZrPj5PgceMotGDD\"></script>\n  </head>\n  <body></body>\n</html>\n",
   "appJs": {
    "status": 200,
-   "sha384": "sha384-6pf9mPiGh0Lsx7rAUdEI3HbsXvtRfWZAq6kZrQ8DEydFDXFgyjGFGRTa3rtplsCQ"
+   "sha384": "sha384-CLGTr7ESmMWZIVST1VcM3iPXpdGE4m3hnVTg1O9UA47LeQeOoZrPj5PgceMotGDD"
   },
   "errors": [],
   "oneclick": {
@@ -317,7 +317,7 @@
     "refundType": "INTENTS",
     "recipient": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
     "recipientType": "DESTINATION_CHAIN",
-    "deadline": "2026-11-13T09:57:48.797Z"
+    "deadline": "2026-11-13T10:29:26.552Z"
    },
    "quote": {
     "status": 201,
@@ -325,15 +325,15 @@
      "quote": {
       "amountIn": "25000000",
       "amountInFormatted": "25.0",
-      "amountInUsd": "24.987925000000",
+      "amountInUsd": "24.988575000000",
       "minAmountIn": "25000000",
-      "amountOut": "24990548",
-      "amountOutFormatted": "24.990548",
-      "amountOutUsd": "24.978477565316",
-      "minAmountOut": "24740642",
+      "amountOut": "24992693",
+      "amountOutFormatted": "24.992693",
+      "amountOutUsd": "24.981271339299",
+      "minAmountOut": "24742766",
       "timeEstimate": 20,
       "refundFee": "0",
-      "withdrawFee": "4403"
+      "withdrawFee": "4378"
      },
      "quoteRequest": {
       "dry": true,
@@ -348,7 +348,7 @@
       "refundType": "INTENTS",
       "recipient": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
       "recipientType": "DESTINATION_CHAIN",
-      "deadline": "2026-11-13T09:57:48.797Z",
+      "deadline": "2026-11-13T10:29:26.552Z",
       "confidentiality": "public",
       "quoteWaitingTimeMs": 0,
       "insured": false,
@@ -359,8 +359,8 @@
        }
       ]
      },
-     "timestamp": "2026-11-13T09:27:48.917Z",
-     "correlationId": "dc0dad37-b484-470f-9adb-7a090edab492"
+     "timestamp": "2026-11-13T09:59:26.676Z",
+     "correlationId": "0aeaa8c3-7d96-478e-bca2-6cb8d97c0b96"
     }
    }
   }

@@ -303,11 +303,13 @@ export async function depositAssetsKind(ctx: DepositReadContext = {}): Promise<D
     assets.push({ origin_asset: a.id, chain: a.chain, symbol: "USDC", decimals: USDC_DECIMALS, min: decimal(min, USDC_DECIMALS),
       max_usd: decimal(HELPER_BIND_DEPOSIT_CAP, USDC_DECIMALS) });
   });
-  // each pool's own coin, sent straight to U_X: its minimum the pool's floor read now
+  // each pool's own coin, sent straight to U_X: its minimum the pool's floor read now, rounded up to six decimals (an
+  // 18-decimal Min is no amount to read or type, and rounded up it still clears the floor the plain send is held to)
   floors.forEach((floor, i) => {
     const c = DEPOSIT_POOL_COINS[i]!;
     if (typeof floor !== "bigint" || floor <= 0n) return;
-    assets.push({ origin_asset: c.id, chain: c.chain, symbol: c.symbol, decimals: c.decimals, min: decimal(floor, c.decimals),
+    const step = 10n ** BigInt(Math.max(0, c.decimals - 6));
+    assets.push({ origin_asset: c.id, chain: c.chain, symbol: c.symbol, decimals: c.decimals, min: decimal(((floor + step - 1n) / step) * step, c.decimals),
       max_usd: decimal(HELPER_BIND_DEPOSIT_CAP, USDC_DECIMALS) });
   });
   return assets.length > 0 ? { ok: true, result: { assets } } : no("not_available");

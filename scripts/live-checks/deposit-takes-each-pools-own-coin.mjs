@@ -4,8 +4,8 @@
 // Robinhood beside the USDC rows. What it holds, on the served page, signed out (the sheet's first read):
 //   - deposit.assets lists SOL on solana (nep141:sol.omft.near, 9 decimals), ETH on base (nep141:base.omft.near, 18) and
 //     ETH on robinhood (nep141:hood.omft.near, 18), each once, after every USDC row, each with max_usd "1000" and a min
-//     that is the pool's floor read now: above the pool's least rung (0.01 SOL, 0.001 ETH: one deposit from U_X costs a
-//     fee, and on Solana the rent U_X keeps) and under two rungs;
+//     that is the pool's floor read now, rounded up to six decimals: above the pool's least rung (0.01 SOL, 0.001 ETH: one
+//     deposit from U_X costs a fee, and on Solana the rent U_X keeps) and under two rungs;
 //   - no request the page sends to the helper's 1Click proxy names a pool's own coin: 1Click is asked nothing for a
 //     plain send (the USDC rows' probes are kit-deposit-assets-dry's to judge).
 // The plain send's address (pool.address with the pool's own coin) needs a signed-in seed, which this run never has:
@@ -90,6 +90,7 @@ export function judge(a) {
       if (min === null) bad(`${label}: min ${show(x.min)} is not an amount of ${c.symbol}`);
       else if (min <= c.rung) bad(`${label}: min ${x.min} is not above the pool's least rung: one deposit from U_X costs more than the rung`);
       else if (min >= 2n * c.rung) bad(`${label}: min ${x.min} is two rungs or more, not the pool's floor`);
+      else if ((x.min.split(".")[1] ?? "").length > 6) bad(`${label}: min ${x.min} has more than six decimals, want the floor rounded up to six`);
     }
   }
   for (const q of a?.helper ?? []) {

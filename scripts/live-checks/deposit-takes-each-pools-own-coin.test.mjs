@@ -4,8 +4,8 @@
 //     floor: PASS.
 //   bad: main 6de76338d's signing page: the USDC rows alone: FAIL.
 // Planted on good: a pool coin missing, listed twice or before a USDC row, another chain, symbol or decimals, a min at
-// or under the rung or of two rungs, another max_usd, no USDC row, a 1Click ask about a pool coin, no ready, a refusal:
-// FAIL each.
+// or under the rung, of two rungs or finer than six decimals, another max_usd, no USDC row, a 1Click ask about a pool
+// coin, no ready, a refusal: FAIL each.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -59,6 +59,7 @@ test("planted on good: each way the rows can be wrong: FAIL each", () => {
     "a min under the rung": (a) => (row(a, base).min = "0.0005"),
     "a min of two rungs": (a) => (row(a, hood).min = "0.002"),
     "a min that is no amount": (a) => (row(a, sol).min = "0.0000000001"),
+    "a min finer than six decimals": (a) => (row(a, base).min = "0.001021041255599516"),
     "another max_usd": (a) => (row(a, base).max_usd = "500"),
     "no USDC row": (a) => (answerOf(a).result.assets = rows(a).filter((x) => x.symbol !== "USDC")),
     "a 1Click ask about a pool coin": (a) => a.helper.push({ phase: "assets", url: "https://ct-api.unrealized.trade/v1/proxy/oneclick/v0/quote", method: "POST", body: { dry: true, originAsset: sol }, status: 201 }),

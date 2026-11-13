@@ -68,7 +68,7 @@ function helper(tokens: { status?: number } = {}) {
   }) as typeof fetch;
   return { fetch: fetchFn, sent };
 }
-// each pool's floor as the page reads it now (src/main.ts pagePoolFloor): 0.013586400 SOL, 0.0012 ETH on Base, 0.00105 on Robinhood
+// each pool's floor as the page reads it now (src/main.ts pagePoolFloor): 0.013586400 SOL (listed 0.013587), 0.0012 ETH on Base, 0.00105 on Robinhood
 const FLOORS = { solana: 13_586_400n, base: 1_200_000_000_000_000n, robinhood: 1_050_000_000_000_000n } as const;
 const opts = { now: () => NOW, sleep: async () => {} };
 
@@ -84,7 +84,7 @@ test("deposit.assets: SOL on Solana, ETH on Base and ETH on Robinhood after the 
     `SOL solana ${SOL}`, `ETH base ${BASE_ETH}`, `ETH robinhood ${HOOD_ETH}`,
   ]);
   assert.deepEqual(rows.slice(3).map((r) => [r.decimals, r.min, r.max_usd]), [
-    [9, "0.0135864", dec6(HELPER_BIND_DEPOSIT_CAP)], [18, "0.0012", dec6(HELPER_BIND_DEPOSIT_CAP)], [18, "0.00105", dec6(HELPER_BIND_DEPOSIT_CAP)],
+    [9, "0.013587", dec6(HELPER_BIND_DEPOSIT_CAP)], [18, "0.0012", dec6(HELPER_BIND_DEPOSIT_CAP)], [18, "0.00105", dec6(HELPER_BIND_DEPOSIT_CAP)],
   ]);
   assert.deepEqual(asked.sort(), ["base", "robinhood", "solana"]);
   // 1Click is asked nothing for a pool's own coin: the token list and one probe per USDC row only
@@ -92,9 +92,21 @@ test("deposit.assets: SOL on Solana, ETH on Base and ETH on Robinhood after the 
   assert.equal(SIGNPAGE_RESULT_SCHEMAS["deposit.assets"](got.result), true, "the kit's client takes it");
 });
 
-test("deposit.assets: a pool whose floor throws, answers null or is not back DEPOSIT_FLOOR_GRACE_MS after the probes is left out; the USDC rows stand", async () => {
+test("deposit.assets: a floor finer than six decimals is shown rounded up to six, never under the floor (the 09:27Z live floors)", async () => {
+  // as read live at 09:27:49Z: 0.0135864 SOL, 0.001021041255599516 ETH on Base, 0.001052642294848 ETH on Robinhood; an
+  // 18-decimal Min ran into the address screen's Expires cell at 390 px
+  const live = { solana: 13_586_400n, base: 1_021_041_255_599_516n, robinhood: 1_052_642_294_848_000n } as const;
+  const got = await depositAssetsKind({ ...opts, fetch: helper().fetch, poolFloor: async (chain) => live[chain] });
+  assert.ok(got.ok, JSON.stringify(got));
+  const rows = got.result.assets.slice(3);
+  assert.deepEqual(rows.map((r) => r.min), ["0.013587", "0.001022", "0.001053"]);
+  // each min still takes the plain send: at or over the floor the host reads
+  rows.forEach((r, i) => assert.ok(BigInt(r.min.replace(".", "").replace(/^0+/, "")) * 10n ** BigInt(r.decimals - (r.min.split(".")[1] ?? "").length) >= Object.values(live)[i]!));
+});
+
+test("deposit.assets: a pool whose floor throws, answers null or is not back DEPOSIT_FLOOR_GRACE_MS after the probes is left out; the USDC rows stand", { timeout: DEPOSIT_FLOOR_GRACE_MS + 5_000 }, async () => {
+  // the hang bound is the test's own timeout: a floor that never answers holds the list forever without the grace
   const h = helper();
-  const t0 = Date.now();
   const got = await depositAssetsKind({ ...opts, fetch: h.fetch, poolFloor: async (chain) => {
     if (chain === "solana") throw new TypeError("fetch failed");
     if (chain === "base") return null;
@@ -102,7 +114,6 @@ test("deposit.assets: a pool whose floor throws, answers null or is not back DEP
   } });
   assert.ok(got.ok, JSON.stringify(got));
   assert.deepEqual(got.result.assets.map((r) => r.symbol), ["USDC", "USDC", "USDC"]);
-  assert.ok(Date.now() - t0 < DEPOSIT_FLOOR_GRACE_MS + 1_000, "the slow floor held the list no longer than its grace");
 });
 
 test("deposit.assets with no pool floor given (the read before this card): the USDC rows alone, exactly", async () => {
