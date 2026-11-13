@@ -311,6 +311,33 @@ test("a remake whose bind is refused (no relay fee for the new epoch yet) keeps 
   assert.equal(q.ready().find((r) => r.noteId === y!.noteId)!.epochStartMs, START + E);
 });
 
+// Base mainnet copies of 13 Nov, a landing 46 s and 50 s into its period whose pass
+// bound past the boundary: the proof, done 17 to 19 s after it on the newest root, was late and never listed
+test("a pass whose epoch ends before a newest-root proof makes none for it, and the next pass runs at once in the new epoch", async () => {
+  const v = await vaultWith([usd(2)]);
+  const pool = fakePool(v);
+  const q = queue(v, pool);
+  await q.refresh();
+  pool.t.now = START + E - 4_000n;
+  const dep = await landDeposit(v, pool, usd(50), 1000n);
+  const bind = pool.bind.bind(pool);
+  // the bind that reads the pool's time 20 s past the boundary (the newest-root grace is 15 s)
+  pool.bind = async (b, s) => {
+    if (b.epochStartMs === START) {
+      pool.t.now = START + E + 20_000n;
+      b.readNow?.({ ms: pool.t.now, at: performance.now(), wall: Date.now() });
+    }
+    return bind(b, s);
+  };
+  const out = await q.refresh();
+  assert.deepEqual(out.failed, []);
+  const r = q.ready().find((x) => x.noteId === dep.id);
+  assert.ok(r, "the deposit's note is ready after one refresh");
+  assert.equal(r.epochStartMs, START + E, "made in the new epoch");
+  assert.equal(r.root, "epoch", "under the new epoch's cut");
+  assert.equal(r.publicSignals[3], pool.rootAt(START + E).state.toString());
+});
+
 test("a deposit's own note is proved at once on the newest root, and on the epoch root at the next epoch", async () => {
   const v = await vaultWith([usd(2)]);
   const pool = fakePool(v);
