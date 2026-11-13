@@ -186,10 +186,11 @@ export const MUTANTS = [
   // a full sell carries no deposit (card every-lamport-can-move)
   ['if (p.full && last.program === pin.program) return refuse("deposit_full");', "", SELL],
   // card sol-sell-deposit-back-floor: the deposit back's floor, at the rent read, refused by name; under it the venue's
-  // sell alone, drawn with no deposit, to W (card every-lamport-can-move: the piece floor, the kit's up to the grid)
+  // sell alone, drawn with no deposit, to W (card every-lamport-can-move: the piece floor, the kit's up to a rung since card pool-amounts-are-standard-sizes)
   ["const kept = minOut - reserve < solanaSellNoteFloor(rent);", "const kept = minOut - reserve < SOLANA_POOL_MIN_DEPOSIT;", SELL],
-  ["  return up > SOL_NOTE_FLOOR ? up : SOL_NOTE_FLOOR;", "  return f;", FLOORT],
-  ["  return up > SOL_NOTE_FLOOR ? up : SOL_NOTE_FLOOR;", "  return up;", FLOORT],
+  // card pool-amounts-are-standard-sizes: the floor rounded up to a rung, never under the piece floor
+  ["  while (r < f) r = releaseSizesUpTo(SOL_RULE, r * 3n)[0]!;", "  while (r < f) r += SOL_GRID;", FLOORT],
+  ["  while (r < f) r = releaseSizesUpTo(SOL_RULE, r * 3n)[0]!;", "  r = ((f + SOL_GRID - 1n) / SOL_GRID) * SOL_GRID;", FLOORT],
   ['if (kept && last.program === pin.program) return refuse("deposit_floor");', "", SELL],
   ["const sell = bare ? body : body.slice(0, -1);", "const sell = body.slice(0, -1);", SELL],
   ['  if (rent === undefined || typeof rent.lamportsPerByte !== "bigint" || rent.lamportsPerByte < 1n || rent.lamportsPerByte > 1_000_000n || (rent.factor !== 1n && rent.factor !== 2n)) return refuse("reserve");\n', "", SELL],

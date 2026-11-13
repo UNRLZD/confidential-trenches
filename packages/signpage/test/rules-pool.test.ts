@@ -997,9 +997,9 @@ test("Solana sell: a deposit back under the sale's note floor (the pool's piece 
     assert.throws(() => sell(at, [...steps(at), depositIx({ value: noteFloor })], { ...PART, rent: r as never }), refusedAs("reserve"), JSON.stringify(r, (_, v) => String(v)));
   }
   // the floor follows the rent read: where the kit's release floor passes the piece floor (here 3 x mainnet's rent:
-  // 7,800,000, up to the grid 8,000,000) the same deposit is under it
+  // 7,800,000, up to a rung 10,000,000 since card pool-amounts-are-standard-sizes) the same deposit is under it
   const steep = { lamportsPerByte: 15_240n, factor: 1n } as SolanaSellSurplus["rent"];
-  assert.ok(solanaSellNoteFloor(steep) > noteFloor && solanaSellNoteFloor(steep) % SOL_GRID === 0n, String(solanaSellNoteFloor(steep)));
+  assert.equal(solanaSellNoteFloor(steep), 10_000_000n);
   assert.throws(() => sell(at, [...steps(at), depositIx({ value: noteFloor })], { ...PART, rent: steep }), refusedAs("deposit_floor"));
 });
 
