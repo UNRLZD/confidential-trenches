@@ -64,7 +64,13 @@ const FLOOR_WIRE = (u) =>
     `[,;]${esc(u)}=async\\((${N}),(${N})(?:,${N})?\\)=>\\{if\\(\\1!==${Q}solana${Q}\\)return ${N}\\.floor\\(\\1\\);` +
       `let (${N})=${N}\\(\\);return \\3!==null&&${N}!==void 0\\?${N}\\(\\3,${N}\\.program,\\2(?:,${N})?\\):null\\}`,
   );
-const FOLLOW_INST = (f) => new RegExp(`[,;]${esc(f)}=${N}\\?null:${N}\\(\\{store:\\(\\)=>${N}\\(\\),decimals:${N}=>${N}\\[${N}\\[${N}\\]\\],deps:\\((${N}),(${N})\\)=>(${N})\\(\\1,\\2\\)\\}\\)`);
+// (card deposit-takes-each-pools-own-coin, delta review P2-b: an ended op's U_X read again on a restore's paced reads,
+// after a drawn wait)
+const FOLLOW_INST = (f) =>
+  new RegExp(
+    `[,;]${esc(f)}=${N}\\?null:${N}\\(\\{store:\\(\\)=>${N}\\(\\),decimals:${N}=>${N}\\[${N}\\[${N}\\]\\],deps:\\((${N}),(${N})\\)=>(${N})\\(\\1,\\2\\),` +
+      `again:(${N})=>${N}\\(\\4,\\3\\(\\{chain:\\4,s:${Q}${Q},i:0,u:${Q}${Q},refund_id:${Q}${Q},address:${Q}${Q},deadline_ms:0,origin:${Q}${Q},min_out:${Q}${Q}\\},${N}\\),[^]{0,120}?\\),againWait:(${N})=>${N}\\(\\5\\)\\}\\)`,
+  );
 // (card evm-deposit-route-mainnet: Base's and Robinhood's deps go first, its own check's mark; the deposit from U_X and
 // the refund mover are one function each, shared by every chain)
 const FOLLOW_DEPS = (d) =>
@@ -101,7 +107,7 @@ const LOOP = new RegExp(
     // reads, in_transit before its carry, written first; the lower balance; the costs only once it holds a rung; at or
     // over the floor, the carry; else, landed, no in_pool and no end while a note of U_X's is landing
     `[^]{0,700}?let (${N})=await \\10\\(\\);\\15&&\\((${N})=!0\\),!\\13&&!\\15&&\\12&&\\5\\.noted!==void 0&&await \\5\\.noted\\(\\7\\)&&\\(\\13=!0\\);` +
-    `let\\[(${N}),(${N})\\]=await \\5\\.balances\\(\\7\\),(${N})=\\17<\\18\\?\\17:\\18;\\11&&\\19<(${N})&&\\(\\20=\\19\\);let (${N})=\\19>=\\5\\.ladder\\.min\\?${N}\\(await \\5\\.costs\\(\\7\\)\\):null;` +
+    `let\\[(${N}),(${N})\\]=await \\5\\.balances\\(\\7\\),(${N})=\\17<\\18\\?\\17:\\18;\\11&&\\19<(${N})&&\\(\\20=\\19\\);let (${N})=\\19>=\\5\\.ladder\\.min\\?await ${N}\\(\\):null;` +
     `if\\(\\21!==null&&\\19>=\\21\\.floor\\)\\11&&!\\13&&\\19>\\20&&\\(await \\14\\(${Q}in_transit${Q}\\),\\12=!0\\),await \\1\\(\\19,\\21\\)&&\\(\\16=!0\\),\\8&&\\(\\16=!0\\);` +
     `else if\\(\\13\\)\\{if\\(!\\15&&(${N})!==${Q}in_pool${Q}&&await \\14\\(${Q}in_pool${Q}\\),!\\15&&await \\5\\.past\\(\\7\\)\\)` +
     `[^]{0,1200}?\\.status===${Q}SUCCESS${Q}&&\\(\\12=!0\\),`,
