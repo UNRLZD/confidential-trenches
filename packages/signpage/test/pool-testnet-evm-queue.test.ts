@@ -1117,3 +1117,56 @@ test("a page open across the turn keeps the period before's proof takeable while
   await t.signedOut();
 });
 
+
+// card sign-out-stops-the-pages-reads: another tab's sign out reaches this page as signedOut alone (main.ts, the store's
+// "signout" event: no signingOut, which only this tab's Sign out calls). It stops the EVM reads this tab's sign out stops:
+// the turn pass's hold, its reads on a real EVM pool over counting RPCs, holds one read open at the sign out; once that
+// read answers, no call to the pool's or the fee list's RPCs starts.
+test("card sign-out-stops-the-pages-reads: another tab's sign out (signedOut alone) stops the turn pass's hold in flight: no EVM RPC call starts after it", { timeout: 20_000 }, async () => {
+  const { w, ns } = await wallet();
+  const asked: string[] = [];
+  const c = emptyChain(asked);
+  // every call counted as it starts; the first newest-block read after `gated` is set waits for `free`
+  const calls: string[] = [];
+  let gated = false;
+  let hit = false;
+  let free!: () => void;
+  const gate = new Promise<void>((r) => (free = r));
+  const counted = (r: EvmRpc): EvmRpc =>
+    Object.assign(async (method: string, params: readonly unknown[]) => {
+      calls.push(`${r.url} ${method}`);
+      if (gated && !hit && method === "eth_getBlockByNumber" && params[0] === "latest") {
+        hit = true;
+        await gate;
+      }
+      return r(method, params);
+    }, { url: r.url });
+  const pair = [counted(c.pair[0]), counted(c.pair[1])] as const;
+  const fees = c.fees.map(counted);
+  let signedIn = true;
+  const o = { now: 1_800_000_010_000 };
+  const tt = turnTimers(o);
+  const t = testnetPool(page(w, () => signedIn), {
+    prover: { vault: signalsProver(), stop: () => {} },
+    evmPin: (x) => (x === "base" ? PIN : undefined),
+    evmRpcs: () => [...pair],
+    evmSync: () => ({ events: async () => assert.fail("no RESERVED note") }),
+    evmQueuePool: () => walletEvmPool({ pin: PIN, rpcs: pair, feeRpcs: fees, relayFee: async () => assert.fail("no bind: the pool holds no leaf"), epochFee: evmEpochFee, sleep: async () => {} }) as Pool<unknown>,
+    evmTurn: tt.evmTurn,
+  } as Parameters<typeof testnetPool>[1]);
+  // the turn armed with no note (no pass); a note lands; the turn's pass opens the queue and holds the period's fee
+  await t.stateRead();
+  await landed(ns);
+  gated = true;
+  o.now = 1_800_000_063_500;
+  const turn = tt.set.at(-1)!.f() as Promise<void>;
+  while (!hit) await new Promise((r) => setTimeout(r, 1));
+  // another tab signed out: the seed is gone, and main.ts calls signedOut alone
+  signedIn = false;
+  await t.signedOut();
+  const atSignOut = calls.length;
+  free();
+  await turn;
+  await new Promise((r) => setTimeout(r, 30));
+  assert.deepEqual(calls.slice(atSignOut), [], "no EVM RPC call after another tab's sign out");
+});
