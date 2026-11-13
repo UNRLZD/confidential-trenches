@@ -7219,7 +7219,8 @@ test("P1-2: a stranger's 1 unit of USDC in W's USDC account never holds the swee
 
 // Review P3 2 of 1d3b96d9c: a tap's ride passes a W whose last pass ended at the floor even when the helper's read of
 // the account's Ws fails that run (no `seen` to compare): before, such a W was passed only when the read named it.
-test("P3 2: a tap's ride passes a W left at the floor when the helper's find read fails, and its ride sweeps it to 0", async () => {
+// Card pool-amounts-are-standard-sizes: the pass runs, and no ride: W keeps its rest, listed at it.
+test("P3 2: a tap's pass with ride passes a W left at the floor when the helper's find read fails; no ride runs, W keeps its rest", async () => {
   const { w } = await soldElsewhere(2_150_000);
   await resumeRentBacks(w.host, fakeLocks());
   assert.equal(w.owed.get(W.address)?.floor, true);
@@ -7229,17 +7230,23 @@ test("P3 2: a tap's ride passes a W left at the floor when the helper's find rea
   // the run's first read on the helper's seat, the find read (the Rent sysvar first), fails once
   let failed = false;
   around(w, 1, (m, params, r) => (!failed && m === "getMultipleAccounts" && (params[0] as string[])[0] === SOLANA_RENT_SYSVAR ? ((failed = true), Promise.reject(new Error("HTTP 503"))) : r(m, params)));
+  const told = w.told.length;
+  const onW = w.c.accounts.get(W.address)!.lamports;
   await resumeRentBacks(w.host, fakeLocks(), { ride: true });
   assert.ok(failed, "the find read failed");
-  assert.deepEqual(rides.map((r) => r.to), [W.address], JSON.stringify(w.told.slice(-3)));
-  assert.equal(w.c.deposits.filter((d) => d.sweep).length, 1);
-  restAfterSweep(w);
+  assert.ok(w.told.length > told && w.told.at(-1)?.state === "floor", JSON.stringify(w.told.slice(-3)));
+  assert.deepEqual(rides.map((r) => r.to), [], JSON.stringify(w.told.slice(-3)));
+  assert.equal(w.c.deposits.filter((d) => d.sweep).length, 0);
+  assert.equal(w.c.accounts.get(W.address)!.lamports, onW, "W keeps its rest");
+  assert.equal(w.owed.get(W.address)?.lamports, "3501520", "listed at its rest");
 });
 
 // Review P3 3 of 1d3b96d9c: a ride whose release lands but whose second sweep, priced again, still ends under the floor
 // (what reached W less than the first try priced: a page another deposit opened, say): the record ends at the floor,
 // marked so the next tap's ride passes it again, and listed meanwhile at what it adds; that next ride sweeps it to 0.
-test("P3 3: a ride whose second sweep ends at the floor is marked and listed, and the next tap's ride sweeps W to 0", async () => {
+// Card pool-amounts-are-standard-sizes: no ride runs, so a W at the floor stays marked and listed at its rest across
+// taps, W keeping its lamports.
+test("P3 3: a W at the floor stays marked and listed at its rest across taps; no ride runs, nothing is swept", async () => {
   const { w } = await soldElsewhere(2_150_000);
   await resumeRentBacks(w.host, fakeLocks());
   assert.equal(w.owed.get(W.address)?.floor, true);
@@ -7251,16 +7258,17 @@ test("P3 3: a ride whose second sweep ends at the floor is marked and listed, an
     w.c.accounts.set(to.address, { ...acc, lamports: acc.lamports + 1 });
     return { state: "landed", signature: "short", got: 1n };
   };
+  const onW = w.c.accounts.get(W.address)!.lamports;
   await resumeRentBacks(w.host, fakeLocks(), { ride: true });
-  assert.equal(short, 1, "the ride ran");
-  assert.equal(w.c.deposits.filter((d) => d.sweep).length, 0, "the second sweep at the floor: none sent");
+  assert.equal(short, 0, "no ride");
+  assert.equal(w.c.deposits.filter((d) => d.sweep).length, 0, "at the floor: none sent");
   const rec = w.owed.get(W.address)!;
-  assert.equal(rec.floor, true, "marked for the next tap's ride");
-  assert.ok(rec.lamports !== undefined && BigInt(rec.lamports) > 0n, "listed meanwhile");
+  assert.equal(rec.floor, true, "still marked at the floor");
+  assert.equal(rec.lamports, "3501520", "listed at its rest");
   const { rides, ride } = riding([{ id: "spare", value: 10_000_000n }]);
   w.host.ride = ride(w);
   await resumeRentBacks(w.host, fakeLocks(), { ride: true });
-  assert.deepEqual(rides.map((r) => r.to), [W.address]);
-  assert.equal(w.c.deposits.filter((d) => d.sweep).length, 1);
-  restAfterSweep(w);
+  assert.deepEqual(rides.map((r) => r.to), []);
+  assert.equal(w.c.deposits.filter((d) => d.sweep).length, 0);
+  assert.equal(w.c.accounts.get(W.address)!.lamports, onW, "W keeps its lamports");
 });
