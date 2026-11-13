@@ -8,11 +8,15 @@
 // public mainnet RPCs, is one size on both and one the served bundle accepts. So it also fails the day pump grows Global
 // again. It does not prove a buy lands: that is the pool's LiteSVM buy and sell on mainnet's code
 // (contracts/pool-solana/svm-tests, fixtures/venues/pump.json) and the kit's test at the released commit.
+// An RPC that answers nothing usable is its no-answer (provider-answer.mjs), never a wrong answer: with fewer than two
+// sizes read the check is INCONCLUSIVE. On a pull request's build (scripts/ci/bundle-checks.mjs) `bundle` judges the
+// build alone: its pin, and a size check that takes GLOBAL_SIZE_AT_CARD, the size mainnet held when this card landed.
 // After: sign
 // Bundle: read sign
 //   node scripts/live-checks/pump-curve-upgrade-still-buys.mjs [--record <file>] [--answer <file>]
-// PASS exit 0, FAIL exit 1, error exit 2.
+// PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3.
 import "../net-window.mjs";
+import { EXIT, rpcAnswer, verdictOf } from "./provider-answer.mjs";
 import { createHash } from "node:crypto";
 import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -23,6 +27,8 @@ export const RPCS = ["https://api.mainnet-beta.solana.com", "https://solana-rpc.
 const PUMP = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P";
 /** pump's Global, the PDA of ["global"] under pump's program (the kit's PUMP_GLOBAL). */
 export const PUMP_GLOBAL = "4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4Jjaxnjf";
+/** Global's size on both RPCs after pump's upgrade of 2026-11-13 20:12:28Z (slot 469057462). */
+export const GLOBAL_SIZE_AT_CARD = 1096;
 const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}`;
 const esc = (s) => s.replace(/[$]/g, "\\$");
 
@@ -47,47 +53,72 @@ export function facts(index, js, globalSizes) {
   return { index, sha384: sha384(js), accepts: acceptedSizes(js), globalSizes };
 }
 
-/** The verdict on an answer { index, sha384, accepts, globalSizes }. */
+/** The build's own lines: SIGN_HOST's pin, and the sizes the bundle's check accepts (or null with a BAD line). */
+function bundleLines(a, lines) {
+  const pin = /src="\/app\.js" integrity="([^"]+)"/.exec(a?.index ?? "")?.[1];
+  if (!pin) lines.push("BAD SIGN_HOST's index.html pins no /app.js");
+  else if (pin !== a.sha384) lines.push("BAD SIGN_HOST's served /app.js is not the one index.html pins");
+  const accepts = Array.isArray(a?.accepts) && a.accepts.length > 0 && a.accepts.every((n) => Number.isSafeInteger(n) && n > 0) ? a.accepts : null;
+  if (!accepts) lines.push("BAD the served bundle has no check of pump Global's size");
+  return accepts;
+}
+
+/** The verdict on an answer { index, sha384, accepts, globalSizes, noAnswers }: FAIL on a bad build or a mainnet size
+ *  the build refuses; INCONCLUSIVE when an RPC gave no size (its no-answer named); else PASS. */
 export function judge(a) {
   const lines = [];
-  const bad = (m) => lines.push(`BAD ${m}`);
-  const pin = /src="\/app\.js" integrity="([^"]+)"/.exec(a?.index ?? "")?.[1];
-  if (!pin) bad("SIGN_HOST's index.html pins no /app.js");
-  else if (pin !== a.sha384) bad("SIGN_HOST's served /app.js is not the one index.html pins");
-  const accepts = Array.isArray(a?.accepts) && a.accepts.length > 0 && a.accepts.every((n) => Number.isSafeInteger(n) && n > 0) ? a.accepts : null;
-  if (!accepts) bad("the served bundle has no check of pump Global's size");
-  const sizes = Array.isArray(a?.globalSizes) && a.globalSizes.length === RPCS.length ? a.globalSizes : [];
-  const ok = sizes.length === RPCS.length && sizes.every((n) => Number.isSafeInteger(n) && n > 0);
-  if (!ok) bad("pump Global was not read on both RPCs");
-  else if (sizes.some((n) => n !== sizes[0])) bad(`the RPCs read pump Global at different sizes: ${sizes.join(", ")}`);
-  else if (accepts && !accepts.includes(sizes[0])) bad(`pump Global is ${sizes[0]} bytes on mainnet and the served bundle accepts only ${accepts.join(" or ")}`);
+  const accepts = bundleLines(a, lines);
+  const raw = Array.isArray(a?.globalSizes) && a.globalSizes.length === RPCS.length ? a.globalSizes : [null, null];
+  const sizes = raw.filter((n) => Number.isSafeInteger(n) && n > 0);
+  const wrong = raw.filter((n) => n !== null && !(Number.isSafeInteger(n) && n > 0)).length;
+  for (const why of Array.isArray(a?.noAnswers) ? a.noAnswers : []) lines.push(`--  ${why}`);
+  const quiet = sizes.length + wrong < RPCS.length;
+  if (wrong) lines.push(`BAD ${wrong} RPC(s) answered with no pump Global`);
+  else if (quiet) lines.push(`--  pump Global read on ${sizes.length} of ${RPCS.length} RPCs: INCONCLUSIVE`);
+  else if (sizes.some((n) => n !== sizes[0])) lines.push(`BAD the RPCs read pump Global at different sizes: ${sizes.join(", ")}`);
+  else if (accepts && !accepts.includes(sizes[0])) lines.push(`BAD pump Global is ${sizes[0]} bytes on mainnet and the served bundle accepts only ${accepts.join(" or ")}`);
+  const bad = lines.some((l) => l.startsWith("BAD"));
+  const verdict = verdictOf(bad, quiet);
+  return { ok: verdict === "PASS", verdict, lines };
+}
+
+/** The build alone (scripts/ci/bundle-checks.mjs): its pin, and a size check that takes GLOBAL_SIZE_AT_CARD. */
+export function judgeBundle(a) {
+  const lines = [];
+  const accepts = bundleLines(a, lines);
+  if (accepts && !accepts.includes(GLOBAL_SIZE_AT_CARD)) lines.push(`BAD the bundle accepts only ${accepts.join(" or ")}, not the ${GLOBAL_SIZE_AT_CARD}-byte Global`);
   return { ok: lines.length === 0, lines };
 }
 
-/** Global's size on one RPC: its base64 data's length, when the account is pump's and not executable. */
+/** Global's size on one RPC, or its no-answer: the account's base64 data length, when it is pump's and not executable;
+ *  any other answer is a wrong one (size 0, judged). */
 async function globalSize(url, fetchFn) {
-  const r = await fetchFn(url, {
-    method: "POST", headers: { "content-type": "application/json" }, redirect: "error",
-    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getAccountInfo", params: [PUMP_GLOBAL, { encoding: "base64", commitment: "confirmed" }] }),
-  });
-  if (r.status !== 200) throw new Error(`${url}: HTTP ${r.status}`);
-  const text = await r.text();
-  if (text.length > 64 * 1024) throw new Error(`${url}: answer of ${text.length} bytes`);
-  const v = JSON.parse(text)?.result?.value;
-  if (!v || v.owner !== PUMP || v.executable !== false || !Array.isArray(v.data) || v.data[1] !== "base64" || typeof v.data[0] !== "string") return null;
-  return Buffer.from(v.data[0], "base64").length;
+  const a = await rpcAnswer(url, "getAccountInfo", [PUMP_GLOBAL, { encoding: "base64", commitment: "confirmed" }], { fetchFn, redirect: "error" });
+  if (a.noAnswer !== undefined) return { noAnswer: a.noAnswer };
+  const v = a.result?.value;
+  if (a.error !== undefined || !v || v.owner !== PUMP || v.executable !== false || !Array.isArray(v.data) || v.data[1] !== "base64" || typeof v.data[0] !== "string" || v.data[0].length > 64 * 1024) return { size: 0 };
+  return { size: Buffer.from(v.data[0], "base64").length };
+}
+
+const getter = (fetchFn) => async (path) => {
+  const r = await fetchFn(`${SIGN}${path}`, { redirect: "error" });
+  if (r.status !== 200) throw new Error(`${path}: HTTP ${r.status}`);
+  return r.text();
+};
+
+export async function bundle(fetchFn = fetch) {
+  const get = getter(fetchFn);
+  const [index, js] = [await get("/"), await get("/app.js")];
+  return judgeBundle(facts(index, js, []));
 }
 
 export async function read(fetchFn = fetch) {
-  const get = async (path) => {
-    const r = await fetchFn(`${SIGN}${path}`, { redirect: "error" });
-    if (r.status !== 200) throw new Error(`${path}: HTTP ${r.status}`);
-    return r.text();
-  };
+  const get = getter(fetchFn);
   const [index, js] = [await get("/"), await get("/app.js")];
-  const sizes = [];
-  for (const url of RPCS) sizes.push(await globalSize(url, fetchFn));
-  return facts(index, js, sizes);
+  const reads = [];
+  for (const url of RPCS) reads.push(await globalSize(url, fetchFn));
+  const noAnswers = reads.filter((r) => r.noAnswer !== undefined).map((r) => r.noAnswer);
+  return { ...facts(index, js, reads.map((r) => r.size ?? null)), ...(noAnswers.length ? { noAnswers } : {}) };
 }
 
 if (realpathSync(process.argv[1] ?? "") === realpathSync(fileURLToPath(import.meta.url))) {
@@ -100,8 +131,8 @@ if (realpathSync(process.argv[1] ?? "") === realpathSync(fileURLToPath(import.me
     if (arg("--record")) writeFileSync(arg("--record"), `${JSON.stringify(answer)}\n`);
     const v = judge(answer);
     for (const l of v.lines) console.log(l);
-    console.log(v.ok ? `PASS ${KEY}` : `FAIL ${KEY}`);
-    process.exit(v.ok ? 0 : 1);
+    console.log(`${v.verdict} ${KEY}`);
+    process.exit(EXIT[v.verdict]);
   } catch (e) {
     console.error(`ERROR ${KEY}: ${e?.message ?? e}`);
     process.exit(2);

@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { acceptedSizes, judge } from "./pump-curve-upgrade-still-buys.mjs";
+import { acceptedSizes, judge, judgeBundle } from "./pump-curve-upgrade-still-buys.mjs";
 
 const ANSWERS = JSON.parse(readFileSync(new URL("./pump-curve-upgrade-still-buys.answers.json", import.meta.url), "utf8"));
 
@@ -30,11 +30,26 @@ test("planted on the good answer: each fact taken away FAILs", () => {
   assert.deepEqual(judge({ ...g, index: "<html></html>" }).lines, ["BAD SIGN_HOST's index.html pins no /app.js"]);
   assert.deepEqual(judge({ ...g, accepts: null }).lines, ["BAD the served bundle has no check of pump Global's size"]);
   assert.deepEqual(judge({ ...g, accepts: [] }).lines, ["BAD the served bundle has no check of pump Global's size"]);
-  assert.deepEqual(judge({ ...g, globalSizes: [1096, null] }).lines, ["BAD pump Global was not read on both RPCs"]);
-  assert.deepEqual(judge({ ...g, globalSizes: [1096] }).lines, ["BAD pump Global was not read on both RPCs"]);
+  assert.deepEqual(judge({ ...g, globalSizes: [1096, 0] }).lines, ["BAD 1 RPC(s) answered with no pump Global"]);
+  assert.equal(judge({ ...g, globalSizes: [1096, 0] }).verdict, "FAIL");
   assert.deepEqual(judge({ ...g, globalSizes: [1096, 1104] }).lines, ["BAD the RPCs read pump Global at different sizes: 1096, 1104"]);
   assert.deepEqual(judge({ ...g, globalSizes: [1104, 1104] }).lines, ["BAD pump Global is 1104 bytes on mainnet and the served bundle accepts only 1088 or 1096"]);
   assert.equal(judge(null).ok, false);
+});
+
+test("an RPC that answers nothing usable is INCONCLUSIVE, never PASS, and never hides a bad build", () => {
+  const g = ANSWERS.good;
+  const v = judge({ ...g, globalSizes: [1096, null], noAnswers: ["solana-rpc.publicnode.com HTTP 429: 429 Too Many Requests"] });
+  assert.equal(v.verdict, "INCONCLUSIVE");
+  assert.deepEqual(v.lines, ["--  solana-rpc.publicnode.com HTTP 429: 429 Too Many Requests", "--  pump Global read on 1 of 2 RPCs: INCONCLUSIVE"]);
+  assert.equal(judge({ ...g, globalSizes: [1096] }).verdict, "INCONCLUSIVE");
+  assert.equal(judge({ ...g, sha384: "sha384-other", globalSizes: [null, null] }).verdict, "FAIL");
+});
+
+test("on a build alone (bundle-checks): the good build PASSes, the 1,088-only one FAILs", () => {
+  assert.deepEqual(judgeBundle(ANSWERS.good), { ok: true, lines: [] });
+  assert.deepEqual(judgeBundle(ANSWERS.bad).lines, ["BAD the bundle accepts only 1088, not the 1096-byte Global"]);
+  assert.deepEqual(judgeBundle({ ...ANSWERS.good, accepts: null }).lines, ["BAD the served bundle has no check of pump Global's size"]);
 });
 
 test("the size parser reads both minified shapes and nothing else", () => {
