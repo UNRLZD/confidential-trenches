@@ -65,7 +65,8 @@ for (const chain of ["base", "robinhood"] as const) {
         while (2 ** depth < size) depth++;
         answered.clear();
         const chainFee = await walked(() => evmBindChainFee(walk, chain as EvmNetwork, b, depth));
-        return { block: b.number.toString(), depth, chainFee: chainFee.toString() };
+        // the block's base fee the pair agreed on: bind's fee is the kit's evmPoolFee at it (evm-deposit-on-mainnet.mjs)
+        return { block: b.number.toString(), depth, chainFee: chainFee.toString(), baseFeePerGas: String(b.baseFeePerGas) };
       }, sleep);
       const used = list.filter((u) => answered.has(u));
       tries.push({ start: new Date(start).toISOString(), ok: true, ...got, hosts: used.map((u) => new URL(u).host), operators: used.map(evmRpcOperator) });

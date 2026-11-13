@@ -55,7 +55,7 @@ import type { TxRef, WithdrawStage } from "../../kit/src/signpage/messages.ts";
 import { freshWallet } from "../../wallet/src/derive/keys.ts";
 import { noteSecrets } from "../../wallet/src/notes/secrets.ts";
 import type { NoteRecord, NoteStore } from "../../wallet/src/notes/store.ts";
-import { checkBinding, type Pool, type ReadyProof } from "../../wallet/src/pool/pool.ts";
+import { checkBinding, PoolNoLeafError, type Pool, type PoolTrees, type ReadyProof } from "../../wallet/src/pool/pool.ts";
 import { jOf } from "../../wallet/src/pool/queue.ts";
 import { solanaPoolOf, type SolanaPoolPin, type SolanaReleaseRequest } from "../../wallet/src/pool/solana.ts";
 import { blockhashOf, pastOnBoth, readBack, releaseOf, rootIndex, sendAndSettle, treeSizes, type PoolBuyHost } from "./pool-buy.ts";
@@ -583,15 +583,16 @@ const keepSpan = (P: PoolWithdrawHost["pool"]): bigint => P.epochMs + WITHDRAW_B
  *  6.7 s on a laptop, run 6d; a slow phone several times that): past it the note is another's and the part stops. */
 export const WITHDRAW_FREE_MS = 30_000;
 
-/** The landed notes under the pool's epoch root now (leaf index below the epoch tree's size); null when the read fails,
- *  so the plan draws on every note and each part reads its own roots. */
+/** The landed notes under the pool's epoch root now (leaf index below the epoch tree's size); none when the epoch root
+ *  holds no leaf (PoolNoLeafError); null when the read fails, so the plan draws on every note and each part reads its own
+ *  roots. */
 async function restedNotes(P: PoolWithdrawHost["pool"], list: readonly NoteRecord[]): Promise<ReadonlySet<string> | null> {
   try {
     const nowMs = await P.now();
     const size = BigInt((await P.trees(nowMs - (nowMs % P.epochMs), AbortSignal.timeout(WITHDRAW_TREES_MS))).stateTree.size);
     return new Set(list.filter((n) => n.leaf !== undefined && n.leaf.leafIndex < size).map((n) => n.id));
-  } catch {
-    return null;
+  } catch (e) {
+    return e instanceof PoolNoLeafError ? new Set() : null;
   }
 }
 
@@ -629,11 +630,14 @@ async function onePart(h: PoolWithdrawHost, ask: PoolAsk, notes: NoteStore, p: W
     const left = { ms: P.epochMs + WITHDRAW_BOUNDARY_LAG_MS };
     // a provider's read still short of the cut past the sync's own waits (solana.ts, code not_reached) is a lag, as the
     // EVM sync's anchor lag is: read again a second later out of the budget, and stopped only once it is spent
-    const read = async (cut: bigint, opts?: Parameters<typeof P.trees>[2]): ReturnType<typeof P.trees> => {
+    // a cut that holds no leaf (an empty pool's first leaf landing this epoch: PoolNoLeafError) is a cut that does not
+    // hold the note: null, so the newest root is taken at once
+    const read = async (cut: bigint, opts?: Parameters<typeof P.trees>[2]): Promise<PoolTrees | null> => {
       for (;;) {
         try {
           return await P.trees(cut, AbortSignal.timeout(WITHDRAW_TREES_MS), opts);
         } catch (e) {
+          if (e instanceof PoolNoLeafError) return null;
           if ((e as { code?: unknown } | null)?.code !== "not_reached" || left.ms <= 0n) throw e;
           const ms = left.ms < 1_000n ? left.ms : 1_000n;
           await wait(Number(ms));
@@ -641,7 +645,7 @@ async function onePart(h: PoolWithdrawHost, ask: PoolAsk, notes: NoteStore, p: W
         }
       }
     };
-    const holds = (t: Awaited<ReturnType<typeof P.trees>>): boolean => leaf.leafIndex < BigInt(t.stateTree.size);
+    const holds = (t: PoolTrees | null): t is PoolTrees => t !== null && leaf.leafIndex < BigInt(t.stateTree.size);
     let epochStartMs = nowMs - (nowMs % P.epochMs);
     let trees = await read(epochStartMs);
     let root: "epoch" | "newest" = "epoch";

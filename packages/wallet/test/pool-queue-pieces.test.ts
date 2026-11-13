@@ -303,3 +303,42 @@ test("takeSet: one attempt that is not the ready one is refused before any write
   for (const r of set) assert.equal(await state(r.noteId), "RESERVED");
   assert.equal(q.ready().length, 0, "the tier 1 proofs of the notes taken go with them");
 });
+
+// an empty pool's first leaves, landed this epoch: the pool's trees refuse the epoch cut (PoolNoLeafError, as wallet
+// pool/evm.ts and solana.ts do). Tier 2's own epoch read (src/pool/queue.ts, on a pass whose tier 1 read none) takes it as
+// trees of no leaf too, so the pieces are made on the newest root in their first minute, never a failed pass
+test("tiers on an empty pool's first leaves: the epoch cut refused as no leaf, tier 1 and then tier 2 are made on the newest root (before: tier 2's pass threw)", async () => {
+  const { PoolNoLeafError } = await import("../src/pool/pool.ts");
+  const v = await vaultWith(VALUES);
+  const pool = piecesPool(v);
+  const all = pool.trees;
+  const cuts: boolean[] = [];
+  pool.trees = async (before, signal, opts) => {
+    cuts.push(opts?.newest === true);
+    if (opts?.newest !== true) throw new PoolNoLeafError(`no leaf before ${before}`);
+    return all(before, signal, opts);
+  };
+  const q = queue(v, pool as Pool<unknown>);
+  const first = await q.refresh();
+  assert.deepEqual(first.failed, []);
+  assert.equal(first.made.length, 3, "tier 1 on the newest root");
+  const second = await q.refresh();
+  assert.deepEqual(second.failed, [], "tier 2's pass: no failure");
+  assert.equal(second.made.length, 3, "tier 2's pieces made");
+  assert.ok(q.ready().every((r) => r.root === "newest"), "every proof on the newest root");
+  assert.equal(cuts.filter((x) => !x).length, 2, "each pass read the epoch cut once: tier 1's, then tier 2's own");
+});
+
+test("cutOrEmpty: a cut that holds no leaf reads as trees of no leaf; every other refusal is thrown as it came", async () => {
+  const { cutOrEmpty, PoolNoLeafError, PoolReadError } = await import("../src/pool/pool.ts");
+  const empty = await cutOrEmpty(Promise.reject(new PoolNoLeafError("no leaf before 1")));
+  assert.equal(empty.stateTree.size, 0);
+  assert.equal(empty.labelTree.size, 0);
+  assert.equal(empty.stateRoot, 0n);
+  assert.equal(empty.labelRoot, 0n);
+  for (const e of [new PoolReadError("rpc_disagree", "the two RPCs apart"), new Error("no leaf before 1"), new TypeError("fetch failed")]) {
+    await assert.rejects(cutOrEmpty(Promise.reject(e)), (x: unknown) => x === e, `${e.name}: ${e.message} is thrown as it came`);
+  }
+  const t = { stateTree: new VaultTree([1n]), labelTree: new VaultTree([2n]), stateRoot: 1n, labelRoot: 2n };
+  assert.equal(await cutOrEmpty(Promise.resolve(t)), t, "an answer is passed through");
+});

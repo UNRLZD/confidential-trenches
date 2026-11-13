@@ -106,3 +106,15 @@ for (const [name, from, to, fails] of PLANTED) {
     assert.deepEqual(judge(f).lines, bad(...fails), name);
   });
 }
+
+// card evm-deposit-on-mainnet: depositFrom's Solana branch under the one rule (the pool's withdraw in the build,
+// src/pool-testnet.ts poolWayOut) reads as before; the rule's clause standing in for the pin guard does not
+test("planted in the excerpt: depositFrom's Solana branch with the withdraw rule beside the pin guard: PASS; the rule in the pin guard's place: FAIL on fromUX", () => {
+  const site = /n===void 0\?\{error:`not_allowed`\}:S\(i,r,t\)/;
+  assert.equal((JS.match(new RegExp(site.source, "g")) ?? []).length, 1, "the plant's site is in the build once");
+  const pinned = (js) => facts(INDEX.replace(/integrity="sha384-[^"]+"/, `integrity="${facts("", js).sha384}"`), js);
+  const ruled = JS.replace(site, "n===void 0||!X(`solana`)?{error:`not_allowed`}:S(i,r,t)");
+  assert.deepEqual(judge(pinned(ruled)).lines, [], "the rule beside the pin guard");
+  const dropped = JS.replace(site, "!X(`solana`)?{error:`not_allowed`}:S(i,r,t)");
+  assert.deepEqual(judge(pinned(dropped)).lines, bad("fromUX"), "the pin guard dropped for the rule");
+});

@@ -249,6 +249,37 @@ test("trees refuses an RPC that has not reached the cut, two RPCs that differ, a
   await assert.rejects(poolWith(pair(relChain(), relChain())).trees(T(0) * 1000n), /no leaf before/);
 });
 
+// a stop names its cause by code (pool-sell.ts legCause), never by message, so each refusal
+// of a tree read carries one, its words kept (before: a plain Error, no code)
+test("each refusal of a tree read carries its code: rpc_disagree, root_mismatch, time_back, page_changed, no_leaf, not_reached", async () => {
+  const before = T(5) * 1000n + 1n;
+  const coded = (code: string, words: RegExp) => (e: unknown) => {
+    assert.match(String((e as Error).message), words);
+    assert.equal((e as { code?: unknown }).code, code, String((e as Error).message));
+    return true;
+  };
+  const off = relChain(500, (e, i) => { if (i === 2) e[31] ^= 1; });
+  await assert.rejects(poolWith(pair(relChain(), off)).trees(before), coded("rpc_disagree", /tree 0: the two RPCs differ at leaf 2/));
+  const short: Chain = { ...relChain(), accounts: new Map([...pages(0, REL_STATE.slice(0, 5)), ...pages(1, REL_LABELS)]) };
+  await assert.rejects(poolWith(pair(relChain(), short)).trees(before), coded("rpc_disagree", /differ below the cut/));
+  const forged = relChain(500, (e, i) => { if (i === 5) e[63] ^= 1; });
+  await assert.rejects(poolWith(pair(forged, forged)).trees(before), coded("root_mismatch", /not the page's root/));
+  const back = relChain(500, (e, i) => { if (i === 3) new DataView(e.buffer, e.byteOffset).setBigInt64(64, T(1), true); });
+  await assert.rejects(poolWith(pair(back, back)).trees(before), coded("time_back", /a time goes back at leaf 3/));
+  await assert.rejects(poolWith(pair(relChain(), relChain())).trees(T(0) * 1000n), coded("no_leaf", /no leaf before/));
+  const lag: Chain = { ...relChain(), time: () => T(5) - 1n };
+  await assert.rejects(poolWith(pair(relChain(), lag)).trees(before), coded("not_reached", /has not reached/));
+  // a page the sync read and kept, served with other bytes at a later slot by both RPCs
+  const [a, b] = [relChain(), relChain()];
+  const p = poolWith(pair(a, b));
+  await p.trees(before);
+  for (const c of [a, b]) {
+    c.accounts = new Map([...pages(0, REL_STATE, (e, i) => { if (i === 2) e[31] ^= 1; }), ...pages(1, REL_LABELS)]);
+    c.slot += 10;
+  }
+  await assert.rejects(p.trees(before), coded("page_changed", /tree 0: page 0 changed since it was read/));
+});
+
 test("now is the lower of the two RPCs' finalized block times", async () => {
   const a: Chain = { ...relChain(), time: () => 1_800_000_500n };
   const b: Chain = { ...relChain(), time: () => 1_800_000_499n };
