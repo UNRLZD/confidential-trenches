@@ -1,15 +1,15 @@
 {
- "_note": "Card deposit-quote-no-liquidity (after review ruling a: the display read asks once). good: this card's signing page (packages/signpage's build at the card's tree, served by Playwright as SIGN_HOST under its own _headers) read 2026-11-10T19:44:38.926Z: deposit.dry for 25 USDC from Solana, every quote request answered here with 1Click's no-liquidity 400 (the body the deployed helper passed at 2026-11-10T19:06:57Z): one ask, then not_available: PASS. deployed: the deployed SIGN_HOST read 2026-11-10T19:44:40.688Z, the same run: one ask, not_available: PASS (the display read never re-asked before this card either). bad: this card's first head (d9bbdcd5), whose display read asked again: read 2026-11-10T19:12:41Z, its first two asks answered here and the third sent to the real helper (201): three asks and the quote lines: FAIL. No run reached the helper but bad's third ask.",
+ "_note": "Card deposit-quote-no-liquidity, read again for release 128 (since a704c14fb, card helper-says-why-a-vendor-refused, every quote path asks a 1Click 400 that is not about the request again inside the one ask's window, the display read too). good: the signing page built from main 4c1826a75 (packages/signpage's build, served by Playwright as SIGN_HOST under its own _headers; --local --record) read 2026-11-13T08:01:14.597Z: deposit.dry for 25 USDC from Solana, every quote request answered here with 1Click's no-liquidity 400 (the body the deployed helper passed at 2026-11-10T19:06:57Z): 3 asks of the same request at 0, 507, 1513 ms from the first, then not_available: PASS. deployed: the deployed SIGN_HOST on release 128 read 2026-11-13T08:01:58.509Z (--record), the same run: 3 asks at 0, 506, 1511 ms, not_available: PASS. bad: the card's first head read 2026-11-10T19:12:41.647Z, whose third ask was let through to the helper and whose answer was the quote lines: FAIL. The planted cases are made from good in the test, never recorded.",
  "good": {
   "source": "local, SIGN_HOST answered from packages/signpage's build (index.html and public/ copied)",
-  "at": "2026-11-10T19:44:38.926Z",
-  "browser": "157.0.8103.38",
+  "at": "2026-11-13T08:01:14.597Z",
+  "browser": "156.0.8078.79",
   "signUrl": "https://confidential.unrealized.trade/",
   "ready": true,
-  "id": "d41b17bd-8859-4d28-b768-dd11e5497243",
+  "id": "bb16702b-862f-4be9-8910-b1a3a53b16fe",
   "log": [
    {
-    "t": 1794339878861.2002,
+    "t": 1794556873040.8,
     "fromParent": true,
     "data": {
      "v": 1,
@@ -19,11 +19,11 @@
     }
    },
    {
-    "t": 1794339878871.7002,
+    "t": 1794556874571.3,
     "fromParent": true,
     "data": {
      "v": 1,
-     "id": "d41b17bd-8859-4d28-b768-dd11e5497243",
+     "id": "bb16702b-862f-4be9-8910-b1a3a53b16fe",
      "ok": false,
      "error": {
       "code": "not_available"
@@ -33,7 +33,7 @@
   ],
   "quotes": [
    {
-    "t": 1794339878870,
+    "t": 1794556873055,
     "body": {
      "dry": true,
      "swapType": "EXACT_INPUT",
@@ -46,27 +46,69 @@
      "refundType": "INTENTS",
      "recipient": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
      "recipientType": "DESTINATION_CHAIN",
-     "deadline": "2026-11-10T20:14:38.869Z"
+     "deadline": "2026-11-13T08:31:13.051Z"
     },
     "status": 400,
     "message": "No liquidity available",
     "planted": true,
-    "answeredT": 1794339878871
+    "answeredT": 1794556873057
+   },
+   {
+    "t": 1794556873562,
+    "body": {
+     "dry": true,
+     "swapType": "EXACT_INPUT",
+     "slippageTolerance": 100,
+     "originAsset": "nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near",
+     "depositType": "ORIGIN_CHAIN",
+     "destinationAsset": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+     "amount": "25000000",
+     "refundTo": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+     "refundType": "INTENTS",
+     "recipient": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+     "recipientType": "DESTINATION_CHAIN",
+     "deadline": "2026-11-13T08:31:13.051Z"
+    },
+    "status": 400,
+    "message": "No liquidity available",
+    "planted": true,
+    "answeredT": 1794556873563
+   },
+   {
+    "t": 1794556874568,
+    "body": {
+     "dry": true,
+     "swapType": "EXACT_INPUT",
+     "slippageTolerance": 100,
+     "originAsset": "nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near",
+     "depositType": "ORIGIN_CHAIN",
+     "destinationAsset": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+     "amount": "25000000",
+     "refundTo": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+     "refundType": "INTENTS",
+     "recipient": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+     "recipientType": "DESTINATION_CHAIN",
+     "deadline": "2026-11-13T08:31:13.051Z"
+    },
+    "status": 400,
+    "message": "No liquidity available",
+    "planted": true,
+    "answeredT": 1794556874569
    }
   ],
-  "answeredT": 1794339878871.7002,
+  "answeredT": 1794556874571.3,
   "errors": []
  },
  "deployed": {
   "source": "live",
-  "at": "2026-11-10T19:44:40.688Z",
-  "browser": "157.0.8103.38",
+  "at": "2026-11-13T08:01:58.509Z",
+  "browser": "156.0.8078.79",
   "signUrl": "https://confidential.unrealized.trade/",
   "ready": true,
-  "id": "9685d008-0913-40c7-ab22-f3576dead1c9",
+  "id": "704c3fd4-2726-4a49-92f6-d8a5be36d524",
   "log": [
    {
-    "t": 1794339880627.4001,
+    "t": 1794556916949.4001,
     "fromParent": true,
     "data": {
      "v": 1,
@@ -76,11 +118,11 @@
     }
    },
    {
-    "t": 1794339880633.1,
+    "t": 1794556918480.3,
     "fromParent": true,
     "data": {
      "v": 1,
-     "id": "9685d008-0913-40c7-ab22-f3576dead1c9",
+     "id": "704c3fd4-2726-4a49-92f6-d8a5be36d524",
      "ok": false,
      "error": {
       "code": "not_available"
@@ -90,7 +132,7 @@
   ],
   "quotes": [
    {
-    "t": 1794339880632,
+    "t": 1794556916965,
     "body": {
      "dry": true,
      "swapType": "EXACT_INPUT",
@@ -103,15 +145,57 @@
      "refundType": "INTENTS",
      "recipient": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
      "recipientType": "DESTINATION_CHAIN",
-     "deadline": "2026-11-10T20:14:40.631Z"
+     "deadline": "2026-11-13T08:31:56.961Z"
     },
     "status": 400,
     "message": "No liquidity available",
     "planted": true,
-    "answeredT": 1794339880632
+    "answeredT": 1794556916967
+   },
+   {
+    "t": 1794556917471,
+    "body": {
+     "dry": true,
+     "swapType": "EXACT_INPUT",
+     "slippageTolerance": 100,
+     "originAsset": "nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near",
+     "depositType": "ORIGIN_CHAIN",
+     "destinationAsset": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+     "amount": "25000000",
+     "refundTo": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+     "refundType": "INTENTS",
+     "recipient": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+     "recipientType": "DESTINATION_CHAIN",
+     "deadline": "2026-11-13T08:31:56.961Z"
+    },
+    "status": 400,
+    "message": "No liquidity available",
+    "planted": true,
+    "answeredT": 1794556917473
+   },
+   {
+    "t": 1794556918476,
+    "body": {
+     "dry": true,
+     "swapType": "EXACT_INPUT",
+     "slippageTolerance": 100,
+     "originAsset": "nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near",
+     "depositType": "ORIGIN_CHAIN",
+     "destinationAsset": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+     "amount": "25000000",
+     "refundTo": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+     "refundType": "INTENTS",
+     "recipient": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+     "recipientType": "DESTINATION_CHAIN",
+     "deadline": "2026-11-13T08:31:56.961Z"
+    },
+    "status": 400,
+    "message": "No liquidity available",
+    "planted": true,
+    "answeredT": 1794556918478
    }
   ],
-  "answeredT": 1794339880633.1,
+  "answeredT": 1794556918480.3,
   "errors": []
  },
  "bad": {

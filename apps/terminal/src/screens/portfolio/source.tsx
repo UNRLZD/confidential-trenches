@@ -50,8 +50,9 @@ const MARKET_MS = 15_000;
 const HISTORY_MS = 600_000;
 
 /** The held tokens' market reads (card market-token-reads): the kit's held read and each token's history, read again on
- *  their cadence while the screen is open; the helper is sent the token list only. */
-function useHeldReads(state: SignpageState | null): { markets: HeldMarket[]; history: ReadonlyMap<string, readonly HeldBar[]> } {
+ *  their cadence while the screen is open; the helper is sent the token list only. Exported for the screen's fixture
+ *  page, which runs these reads against a stand-in helper. */
+export function useHeldReads(state: SignpageState | null): { markets: HeldMarket[]; history: ReadonlyMap<string, readonly HeldBar[]> } {
   const refs = heldRefs(state);
   const named = marketRefs(state);
   const key = `${refs.map((r) => heldKey(r.chain, r.token)).join(",")}|${named.map((r) => heldKey(r.chain, r.token)).join(",")}`;

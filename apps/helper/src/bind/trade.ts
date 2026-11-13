@@ -120,6 +120,11 @@ export type TradeReads = {
   hopsReal(hops: readonly { pool: number; tokenIn: string; tokenOut: string }[]): Promise<boolean>;
 };
 
+/** POST /v1/bind/record's read (bind/record.ts): payoutLanded for each wallet, with the spends list read once. */
+export type RecordReads = {
+  payoutsLanded(wallets: readonly string[]): Promise<boolean[]>;
+};
+
 export type CarriedEntry = TxRef & {
   sha256: string;
   trade: string;
@@ -595,7 +600,7 @@ const SPENDS_PAGE = 100;
  * recipient as read; a row counts once it reads paid, or settled with refund_value 0 (withdraw/send.ts: a bounced
  * payout is refund_pending, then settled with its amount as refund_value), which never changes after.
  */
-export function createTradeReads(rpcs: readonly [Rpc, Rpc], vault: string, usdc: string, now: () => number = Date.now, exchange: string = NEAR_RHEA.mainnet.exchange): TradeReads {
+export function createTradeReads(rpcs: readonly [Rpc, Rpc], vault: string, usdc: string, now: () => number = Date.now, exchange: string = NEAR_RHEA.mainnet.exchange): TradeReads & RecordReads {
   const send = createSendReads(rpcs, { vault, token: usdc });
   const at = () => agreedBlock(rpcs, now);
   const byRecipient = new Map<string, number[]>();
@@ -676,6 +681,28 @@ export function createTradeReads(rpcs: readonly [Rpc, Rpc], vault: string, usdc:
         }
       }
       return false;
+    },
+    async payoutsLanded(wallets) {
+      const b = await at();
+      const fresh = new Map<number, Record<string, unknown>>();
+      const run = indexing.then(() => catchUp(b, fresh));
+      indexing = run.catch(() => undefined);
+      await run;
+      // a row indexed at an earlier block and not landed then is read again at b with its whole page of SPENDS_PAGE
+      // rows, each page once: a page names no one row, so no read singles out a wallet's row
+      const pages = new Set<number>();
+      for (const w of wallets) for (const i of byRecipient.get(w) ?? []) if (!delivered.has(i) && !fresh.has(i)) pages.add(i - (i % SPENDS_PAGE));
+      for (const from of pages) (await pagesAt(rpcs, vault, "spends", b.height, from, SPENDS_PAGE)).forEach((row, k) => fresh.set(from + k, row));
+      return wallets.map((w) =>
+        (byRecipient.get(w) ?? []).some((i) => {
+          if (delivered.has(i)) return true;
+          const row = fresh.get(i);
+          if (row === undefined || row.recipient !== w) throw new Error("spends: the row is not this recipient's");
+          if (!landed(row)) return false;
+          delivered.add(i);
+          return true;
+        }),
+      );
     },
   };
 }

@@ -19,6 +19,18 @@ const NOW = Date.parse("2026-11-01T18:00:00Z");
 const NEAR: Asset = { id: "nep141:wrap.near", chain: "NEAR", symbol: "NEAR", min: "2.1", max_usd: "1000" };
 // card deposit-to-pool-pools (review P1): a second asset to switch to while a quote is pending
 const SOL_A: Asset = { id: "nep141:sol.omft.near", chain: "Solana", symbol: "SOL", min: "0.01", max_usd: "1000" };
+// card deposit-pool-picks-its-own-coin: every place's own coin listed, each after another coin on its chain, so the
+// list's order alone never draws it
+const OWN_COINS: Asset[] = [
+  { id: "nep141:usdc.near", chain: "NEAR", symbol: "USDC", min: "1", max_usd: "1000" },
+  NEAR,
+  { id: "nep141:usdc-sol.omft.near", chain: "Solana", symbol: "USDC", min: "1", max_usd: "1000" },
+  SOL_A,
+  { id: "nep141:usdc-base.omft.near", chain: "Base", symbol: "USDC", min: "1", max_usd: "1000" },
+  { id: "nep141:base.omft.near", chain: "Base", symbol: "ETH", min: "0.001", max_usd: "1000" },
+  { id: "nep141:usdc-rh.omft.near", chain: "Robinhood", symbol: "USDC", min: "1", max_usd: "1000" },
+  { id: "nep141:rh.omft.near", chain: "Robinhood", symbol: "ETH", min: "0.001", max_usd: "1000" },
+];
 const DRY: DryQuote = { amount_out_usd: "73.18", min_amount_out_usd: "72.45", fee_usd: "0.62", time_estimate_s: 37 };
 const CHECKED: SignpageResults["deposit.quote"] = {
   deposit_address: "8b0c4e2f61a94d7cb35e0f1a7d29c6e48f5a3b1d07e9c2a64f8d1b5e3a7c9f20",
@@ -107,6 +119,7 @@ export const FIXTURES: Record<string, Fx> = {
   "pool-down": { flaky: { solana: ["down", "down", "down", "down", "down", "down"] } },
   // review P1: the quote held until __release(), NEAR and SOL to pick from
   hold: { hold: true, assets: [NEAR, SOL_A] },
+  "own-coins": { assets: OWN_COINS, pools: { solana: true, base: true, robinhood: true } },
   "pool-other-chain": { poolQuote: { ok: true, value: { ...POOL_ANSWER, chain: "base", asset: "ETH" } } },
 };
 

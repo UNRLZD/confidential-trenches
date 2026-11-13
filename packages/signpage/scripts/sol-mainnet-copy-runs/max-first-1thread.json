@@ -1,0 +1,1114 @@
+{
+  "onlyTheOwnersRealTap": [
+    "the real Jito block engine landing the bundle of the pieces and the tip in one slot, at the real tip floor: the copy's stand-in sends each to the copy on its own, in order",
+    "the real tap to filled time: the copy has one local RPC, no network and no engine round trip",
+    "the real fee payer and relay fees on the deployed helper: the copy's helper sender runs in this process with a fresh fee payer, the fee the kit's for the copy's rent",
+    "the 151-block clock on real slot times on the real RPC pair: the copy's slots run on this machine's clock"
+  ],
+  "at": "2026-11-13T06:34:53.269Z",
+  "what": "a buy of several pieces of the Solana pool balance on a local copy of mainnet (solana-test-validator, mainnet's feature set, mainnet accounts cloned): 6 notes of 0.01 SOL, a buy only 5 pay, a buy of 2 pieces and Max",
+  "validator": {
+    "feature-set": 3383571666,
+    "solana-core": "4.3.2"
+  },
+  "mainnetSlot": 468827389,
+  "rent": {
+    "mainnet": "d813000000000000000000000000f03f32",
+    "copy": "d813000000000000000000000000f03f32"
+  },
+  "clock": [
+    {
+      "wallMs": 1794551592588,
+      "confirmed": {
+        "slot": 33,
+        "time": 1794551592
+      },
+      "finalized": {
+        "slot": 33,
+        "time": 1794551592
+      }
+    },
+    {
+      "wallMs": 1794551593096,
+      "confirmed": {
+        "slot": 35,
+        "time": 1794551592
+      },
+      "finalized": {
+        "slot": 35,
+        "time": 1794551592
+      }
+    }
+  ],
+  "mainnetReads": 5,
+  "plant": null,
+  "copyTables": {},
+  "engine": "lands",
+  "coins": {
+    "curve": {
+      "mint": "CXC2nBQVp4qVLhgkPGooVyqz9bmhPAp44vNVT7NCsN4e",
+      "list": "new",
+      "symbol": "TEST"
+    }
+  },
+  "skippedCoins": [
+    {
+      "kind": "curve",
+      "mint": "AMXF8KALEE45cx4GJ21hcLEjHrmVQeoVXJoqN2pBpump",
+      "why": "venue_not_built: the curve is not quoted in SOL"
+    }
+  ],
+  "cloned": {
+    "accounts": [
+      "7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8",
+      "ELkTShr5bKWSwntTpF238dq3r5ha2oVsNyApMk19x4AJ",
+      "EesTGaxwD6izcU1Nr78dk346UqoNA11SQbsbRQkg2pYn",
+      "So11111111111111111111111111111111111111112",
+      "4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4Jjaxnjf",
+      "62qc2CNXwrYqQScmEdiZFFAnJR262PxWEuNQtxfafNgV",
+      "Ce6TQqeHC9p8KetsN6JsjHK7UTZk7nasjjnr7XxXp9F1",
+      "Hq2wp8uJ9jCPsYgNHex8RtqdvMPfVGoYwjvF1ATiwn2Y",
+      "8Wf5TiAheLUqBrKXeYg2JtAFFMWtKdG2BSFgqUcPVwTt",
+      "5YxQFdt3Tr9zJLvkFccqXVUwhdTWJQc1fFg2YPbxvxeD",
+      "9M4giFFMxmFGXtc3feFzRai56WbBqehoSeRE5GK7gf7",
+      "GXPFM2caqTtQYC2cJ5yJRi9VDkpsYZXzYdwYpGnLmtDL",
+      "3BpXnfJaUTiwXnJNe7Ej1rcbzqTTQUvLShZaWazebsVR",
+      "5cjcW9wExnJJiqgLjq7DEG75Pm6JBgE1hNv4B2vHXUW6",
+      "EHAAiTxcdDwQ3U4bU6YcMsQGaekdzLS3B5SmYo46kJtL",
+      "5eHhjP8JaYkz83CWwvGU2uMUXefd3AazWGx4gpcuEEYD",
+      "A7hAgCzFw14fejgCp387JUJRMNyz4j89JKnhtKU8piqW",
+      "BShWZ8FbDPYGpoc1ebj4TiELvVFmBQwW4XMYuLtQoHYZ",
+      "ADaUMid9yfUytqMBgopwjb2DTLSokTSzL1zt6iGPaS49",
+      "HFqU5x63VTqvQss8hp11i4wVV8bD44PvwucfZ2bU7gRe",
+      "DfXygSm4jCyNCybVYYK6DwvWqjKee8pbDmJGcLWNDXjh",
+      "DttWaMuVvTiduZRnguLF7jNxTgiMBZ1hyAumKUiL2KRL",
+      "ADuUkR4vqLUMWXxW9gh6D6L8pMSawimctcNZ5pGwDcEt",
+      "96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5",
+      "Cw8CFyM9FkoMi7K7Crf6HNQqf4uEMzpKw6QNghXLvLkY",
+      "3AVi9Tg9Uo68tJfuvoKvqKNWKkC5wPdSSdeBnizKZ6jT",
+      "CXC2nBQVp4qVLhgkPGooVyqz9bmhPAp44vNVT7NCsN4e",
+      "A8W9ZaY3tV7r55PyxXhffh8aKcmXkpiCsC77j2Nr8Dxf",
+      "31buocgurD4Gjq4W6z23JmYJrTtnkUYNFyWKNBvLxMDm",
+      "ADyA8hdefvWN2dbGGWFotbzWxrAvLW83WG6QCVXvJKqw",
+      "5PHirr8joyTMp9JMm6nW7hNDVyEYdkzDqazxPD7RaTjx",
+      "GesfTA3X2arioaHp8bbKdjG9vJtskViWACZoYvxp4twS",
+      "C93K8DX4YsABYJtHX9awzgZW3LWzBqBVezEbbLJH4yet",
+      "4budycTjhs9fD6xw62VBducVTNgMgJJ5BgtKq7mAZwn6",
+      "Bckr4rY4rUGvWtwqC9mnWN35LKzfPRcmsoMRYq6DFEjN",
+      "8SBKzEQU4nLSzcwF4a74F2iaUDQyTfjGndn6qUWBnrpR",
+      "9tvBjCQ4m3954ESgxW9PnBPvW8afHEjKpkNEAdfN2D8U",
+      "4UQeTP1T39KZ9Sfxzo3WR5skgsaP6NZa87BAkuazLEKH",
+      "CoRuMWRuDAsjB5SDMmYEcDuyQyaH3L2vVFvwBy1FF8Kr",
+      "8sNeir4QsLsJdYpc9RZacohhK1Y5FLU3nC5LXgYB4aa6",
+      "21L1QB6DJ9HBvePgwN6jFuK3UT9mq2SgTq1oJ7D6cNiV",
+      "Fh9HmeLNUMVCvejxCtCL2DbYaRyBFVJ5xrWkLnMH6fdk",
+      "2i3uCDzDhr3pSvMPF5uBpUckLAv7XGdo2a8soiqNJMHk",
+      "463MEnMeGyJekNZFQSTUABBEbLnvMTALbT6ZmsxAbAdq",
+      "BZeq7y8ajn5Pjpy5KjEhF6eBY2H9ippTpqCtQLQPsmJf",
+      "6AUH3WEHucYZyC61hqpqYUWVto5qA5hjHuNQ32GNnNxA",
+      "ghSBUgyxyvyurm1vJBkU4rUyLJoUipCZhFeiBogKCSy",
+      "LEtAFNkdb8iNejugBDjnkkpKST5SbmZx5H1hAZE7c92",
+      "53qXZL6xeJ4XcsRgYjsVhhh1FUPVs5JGka6N3nnRkB7r",
+      "7mVjap1aCvMe5BdKkKdEao4biu1n8wuLKerf5152xHuo",
+      "8RhWX5yPkPQF1tDmDjTzxWXRzR1E5zXWGdpAi7Q6RFCR",
+      "9CXQY74YjN4y9yzpyowtwHhyPCkQ3fnZf5RLPymP55Lg",
+      "AwpeNBaQMKapN834yuKcVvSbyxNsLrNEcCFwxX6uYCqU",
+      "B3DXFHBR6HSHR57dYYyTfQXmJkyj9786ndAnpE6wjYKE",
+      "C2UC192MmYATdEpra4AtYqYapMqTNGs6htpfQFowjDZh",
+      "GJ61ojoB7aDLGWHYCFHVpJN681XLgxPQ2QVfFwShBbvx",
+      "GyTUGdPFyj1X53uQNBtuw4QXx7LQfbYtCLjvWM8WY7B2"
+    ],
+    "programs": [
+      "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+      "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+      "pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ",
+      "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
+      "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+      "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA"
+    ],
+    "absentOnMainnet": [
+      "ECSchKJGQPtfHC4TLFp78Ao9g51EawTgmQPbmA1cFb5y",
+      "9uZjezZDJjNyqz4gvQkALs9ksHA7UqmdPHsJi5Zjv7Ge",
+      "DPxwD8WbxAvdtyttcdcy3KVJHgPnoApYTKxJV1XNUp7e",
+      "4cm3UsthwwvUVRENQD41bGFBZHPuwSN7ZJuwzURWjR4s",
+      "4Tc9yhqQXeenZ9pKDWQ3CtvM3fwDpkcAX35oKgbkn3rL",
+      "Fpw4DFc2ekWm86yvSrDZehUCZ3A6Yqf6UbiykjE2PUTv",
+      "CN7pZF5QhkKqttqSqHWr69UmmempZzjDeFUfW9mQQg3G",
+      "ABPBxUaBdYZoWzbkT23LJFABqfgWWALSocQZjmkMHJu2",
+      "9kH875fLN578jyQiSVxYwj7Wzu3XGomtM444MhUZWvCW"
+    ],
+    "tablesReset": [
+      "BShWZ8FbDPYGpoc1ebj4TiELvVFmBQwW4XMYuLtQoHYZ"
+    ]
+  },
+  "records": [
+    {
+      "coin": "curve",
+      "step": "deposit-0",
+      "signature": "26ULP19TRCkbkgXWGmpFmD6KCgbTp4Zg2c314Pxn7DZkqGkdHdUZ8ZsCQnrpwHZDMAo84CxKP9igBNAQ2eoxLEwA",
+      "found": true,
+      "slot": 45,
+      "blockTime": 1794551594,
+      "ok": true,
+      "err": null,
+      "cu": 20924,
+      "cuLimit": null,
+      "fee": 5000,
+      "accounts": 9,
+      "lookups": [],
+      "programs": [
+        "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF"
+      ]
+    },
+    {
+      "coin": "curve",
+      "step": "deposit-1",
+      "signature": "57RYDrSSkxywSvVURFj3bugTWGbx6dUnmu8MyLJasZ2irzaa76VNniQDBQpynVkMK6fnqdUNPcqLAa6KpPhb8dWi",
+      "found": true,
+      "slot": 80,
+      "blockTime": 1794551601,
+      "ok": true,
+      "err": null,
+      "cu": 24213,
+      "cuLimit": null,
+      "fee": 5000,
+      "accounts": 9,
+      "lookups": [],
+      "programs": [
+        "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF"
+      ]
+    },
+    {
+      "coin": "curve",
+      "step": "deposit-2",
+      "signature": "27JrEMDUMUvEbEu2Hqf1zAqMGsP2qDvUc9V8j4kgebTTRBuU3z7S7LMkFJWCCJBvrRDKbMiaYSgENeRUqYx6u4cS",
+      "found": true,
+      "slot": 88,
+      "blockTime": 1794551602,
+      "ok": true,
+      "err": null,
+      "cu": 21703,
+      "cuLimit": null,
+      "fee": 5000,
+      "accounts": 9,
+      "lookups": [],
+      "programs": [
+        "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF"
+      ]
+    },
+    {
+      "coin": "curve",
+      "step": "deposit-3",
+      "signature": "43jRTZL4Bo3eMvZxzXddHjWg3ReXgQhwPYGnNvQM1YJw2N12BK7zg6XQEZ3umJGCSXFEjWqcEquR7ftQ3Uq4pENi",
+      "found": true,
+      "slot": 147,
+      "blockTime": 1794551613,
+      "ok": true,
+      "err": null,
+      "cu": 23388,
+      "cuLimit": null,
+      "fee": 5000,
+      "accounts": 9,
+      "lookups": [],
+      "programs": [
+        "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF"
+      ]
+    },
+    {
+      "coin": "curve",
+      "step": "deposit-4",
+      "signature": "5jNEu1Z6tjFQadEXdF2sJmzCAoPpYjhUJhjLUftyXk86f9ZZa2KKZ385dAdygBzb71juvqJpE3BVpyo8CQg7ZiUj",
+      "found": true,
+      "slot": 229,
+      "blockTime": 1794551629,
+      "ok": true,
+      "err": null,
+      "cu": 21853,
+      "cuLimit": null,
+      "fee": 5000,
+      "accounts": 9,
+      "lookups": [],
+      "programs": [
+        "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF"
+      ]
+    },
+    {
+      "coin": "curve",
+      "step": "pieces",
+      "ok": true,
+      "exit": 0,
+      "why": "Max at 4 pieces 33 ms after the deposits, 59043 ms after a load; Max tapped 16 s past a boundary: ; samples offering a late proof: 0; proofs 18, p50 4799 ms, max 5138 ms"
+    }
+  ],
+  "runs": {
+    "curve": {
+      "exit": 0,
+      "pieces": {
+        "at": "2026-11-13T06:33:13.616Z",
+        "scenario": "copy-takeable",
+        "after": "stay",
+        "plant": "none",
+        "expect": "swept",
+        "cluster": "mainnet copy",
+        "program": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+        "table": "pinned",
+        "mint": "CXC2nBQVp4qVLhgkPGooVyqz9bmhPAp44vNVT7NCsN4e",
+        "seed": "/tmp/sol-copy-My2Lba/curve/run-2026-11-13T06-33-13-585Z.seed",
+        "F": "EAemi8RMbutMU2m9cjoeBTHu9dbaDCiytsMuXoE7B1ox",
+        "helper": {
+          "base": "the copy's sender, in process",
+          "commit": null
+        },
+        "deposits": [
+          {
+            "U": "8baprWMrgXXg4dyLA1iMeXWk6WJLsQLrGysz1X8EhHpv",
+            "answer": {
+              "result": {
+                "stage": "sent",
+                "txs": [
+                  {
+                    "chain": "solana",
+                    "hash": "26ULP19TRCkbkgXWGmpFmD6KCgbTp4Zg2c314Pxn7DZkqGkdHdUZ8ZsCQnrpwHZDMAo84CxKP9igBNAQ2eoxLEwA"
+                  }
+                ]
+              }
+            },
+            "times": {
+              "answer": 27,
+              "\"filled\"": 1046,
+              "ended": 1047
+            }
+          },
+          {
+            "U": "7XLadrDijs3hofZNGcQ4RosjY5APH11ghGtqhto6M6f7",
+            "answer": {
+              "result": {
+                "stage": "sent",
+                "txs": [
+                  {
+                    "chain": "solana",
+                    "hash": "57RYDrSSkxywSvVURFj3bugTWGbx6dUnmu8MyLJasZ2irzaa76VNniQDBQpynVkMK6fnqdUNPcqLAa6KpPhb8dWi"
+                  }
+                ]
+              }
+            },
+            "times": {
+              "answer": 4895,
+              "\"filled\"": 5914,
+              "ended": 5914
+            }
+          },
+          {
+            "U": "3st4NDR44ccQ8ZHiikMsWQPjbrhkxe15PkK3GHbqbFvT",
+            "answer": {
+              "result": {
+                "stage": "sent",
+                "txs": [
+                  {
+                    "chain": "solana",
+                    "hash": "27JrEMDUMUvEbEu2Hqf1zAqMGsP2qDvUc9V8j4kgebTTRBuU3z7S7LMkFJWCCJBvrRDKbMiaYSgENeRUqYx6u4cS"
+                  }
+                ]
+              }
+            },
+            "times": {
+              "answer": 43,
+              "\"filled\"": 5675,
+              "ended": 5675
+            }
+          },
+          {
+            "U": "64Lxbo8MXnD7hp8EwRmqScAztyXXNqio6fy9RxSiwQs6",
+            "answer": {
+              "result": {
+                "stage": "sent",
+                "txs": [
+                  {
+                    "chain": "solana",
+                    "hash": "43jRTZL4Bo3eMvZxzXddHjWg3ReXgQhwPYGnNvQM1YJw2N12BK7zg6XQEZ3umJGCSXFEjWqcEquR7ftQ3Uq4pENi"
+                  }
+                ]
+              }
+            },
+            "times": {
+              "answer": 39,
+              "\"filled\"": 10076,
+              "ended": 10076
+            }
+          },
+          {
+            "U": "6URjgF1y6VuxiZDYxZSQ3KQ3B8Zb4hgVWikRsszUQ7jn",
+            "answer": {
+              "result": {
+                "stage": "sent",
+                "txs": [
+                  {
+                    "chain": "solana",
+                    "hash": "5jNEu1Z6tjFQadEXdF2sJmzCAoPpYjhUJhjLUftyXk86f9ZZa2KKZ385dAdygBzb71juvqJpE3BVpyo8CQg7ZiUj"
+                  }
+                ]
+              }
+            },
+            "times": {
+              "answer": 4651,
+              "\"filled\"": 5665,
+              "ended": 5665
+            }
+          }
+        ],
+        "ready": {
+          "ms": 33,
+          "tapMax": "0.02944652"
+        },
+        "load": {
+          "ms": 59043,
+          "tapMax": "0.02944652"
+        },
+        "boundaries": [],
+        "timeline": [
+          {
+            "page": "A",
+            "phase": "ready",
+            "at": 1794551630109,
+            "pool": 1794551629000,
+            "intoEpoch": 49000,
+            "tapMax": "0.02944652",
+            "pieces": 4,
+            "making": 0,
+            "proofs": [
+              {
+                "note": "da0e2cb2",
+                "own": true,
+                "root": "newest",
+                "epoch": 1794551580000
+              },
+              {
+                "note": "bf95da71",
+                "own": true,
+                "root": "newest",
+                "epoch": 1794551580000
+              },
+              {
+                "note": "bf95da71",
+                "own": false,
+                "root": "newest",
+                "epoch": 1794551580000
+              },
+              {
+                "note": "e4a3256e",
+                "own": true,
+                "root": "newest",
+                "epoch": 1794551580000
+              },
+              {
+                "note": "e4a3256e",
+                "own": false,
+                "root": "newest",
+                "epoch": 1794551580000
+              },
+              {
+                "note": "d4c2011a",
+                "own": false,
+                "root": "newest",
+                "epoch": 1794551580000
+              }
+            ]
+          },
+          {
+            "page": "L",
+            "phase": "load",
+            "at": 1794551631125,
+            "pool": 1794551631000,
+            "intoEpoch": 51000,
+            "tapMax": "0",
+            "pieces": null,
+            "making": 0,
+            "proofs": []
+          },
+          {
+            "page": "L",
+            "phase": "load",
+            "at": 1794551632126,
+            "pool": 1794551631000,
+            "intoEpoch": 51000,
+            "tapMax": "0",
+            "pieces": null,
+            "making": 0,
+            "proofs": []
+          },
+          {
+            "page": "L",
+            "phase": "load",
+            "at": 1794551637143,
+            "pool": 1794551637000,
+            "intoEpoch": 57000,
+            "tapMax": "0.00334652",
+            "pieces": 1,
+            "making": 1,
+            "proofs": [
+              {
+                "note": "da0e2cb2",
+                "own": true,
+                "root": "newest",
+                "epoch": 1794551580000
+              },
+              {
+                "note": "bf95da71",
+                "own": false,
+                "root": "newest",
+                "epoch": 1794551580000
+              }
+            ]
+          },
+          {
+            "page": "L",
+            "phase": "load",
+            "at": 1794551646703,
+            "pool": 1794551646000,
+            "intoEpoch": 6000,
+            "tapMax": "0.02074652",
+            "pieces": null,
+            "making": 1,
+            "proofs": [
+              {
+                "note": "da0e2cb2",
+                "own": true,
+                "root": "newest",
+                "epoch": 1794551580000
+              },
+              {
+                "note": "bf95da71",
+                "own": false,
+                "root": "newest",
+                "epoch": 1794551580000
+              },
+              {
+                "note": "e4a3256e",
+                "own": false,
+                "root": "newest",
+                "epoch": 1794551580000
+              }
+            ]
+          },
+          {
+            "page": "L",
+            "phase": "load",
+            "at": 1794551651627,
+            "pool": null,
+            "intoEpoch": null,
+            "tapMax": "0",
+            "pieces": null,
+            "making": 4,
+            "proofs": []
+          },
+          {
+            "page": "L",
+            "phase": "load",
+            "at": 1794551661031,
+            "pool": 1794551660000,
+            "intoEpoch": 20000,
+            "tapMax": "0",
+            "pieces": null,
+            "making": 4,
+            "proofs": []
+          },
+          {
+            "page": "L",
+            "phase": "load",
+            "at": 1794551666057,
+            "pool": 1794551665000,
+            "intoEpoch": 25000,
+            "tapMax": "0.00334652",
+            "pieces": 1,
+            "making": 3,
+            "proofs": [
+              {
+                "note": "da0e2cb2",
+                "own": true,
+                "root": "epoch",
+                "epoch": 1794551640000
+              }
+            ]
+          },
+          {
+            "page": "L",
+            "phase": "load",
+            "at": 1794551671050,
+            "pool": 1794551670000,
+            "intoEpoch": 30000,
+            "tapMax": "0.01204652",
+            "pieces": 2,
+            "making": 2,
+            "proofs": [
+              {
+                "note": "da0e2cb2",
+                "own": true,
+                "root": "epoch",
+                "epoch": 1794551640000
+              },
+              {
+                "note": "bf95da71",
+                "own": false,
+                "root": "epoch",
+                "epoch": 1794551640000
+              }
+            ]
+          },
+          {
+            "page": "L",
+            "phase": "load",
+            "at": 1794551680485,
+            "pool": 1794551680000,
+            "intoEpoch": 40000,
+            "tapMax": "0.02944652",
+            "pieces": 4,
+            "making": 1,
+            "proofs": [
+              {
+                "note": "da0e2cb2",
+                "own": true,
+                "root": "epoch",
+                "epoch": 1794551640000
+              },
+              {
+                "note": "bf95da71",
+                "own": false,
+                "root": "epoch",
+                "epoch": 1794551640000
+              },
+              {
+                "note": "e4a3256e",
+                "own": false,
+                "root": "epoch",
+                "epoch": 1794551640000
+              },
+              {
+                "note": "d4c2011a",
+                "own": false,
+                "root": "epoch",
+                "epoch": 1794551640000
+              }
+            ]
+          },
+          {
+            "page": "L",
+            "phase": "load",
+            "at": 1794551685474,
+            "pool": 1794551685000,
+            "intoEpoch": 45000,
+            "tapMax": "0.02944652",
+            "pieces": 4,
+            "making": 1,
+            "proofs": [
+              {
+                "note": "da0e2cb2",
+                "own": true,
+                "root": "epoch",
+                "epoch": 1794551640000
+              },
+              {
+                "note": "bf95da71",
+                "own": true,
+                "root": "epoch",
+                "epoch": 1794551640000
+              },
+              {
+                "note": "bf95da71",
+                "own": false,
+                "root": "epoch",
+                "epoch": 1794551640000
+              },
+              {
+                "note": "e4a3256e",
+                "own": false,
+                "root": "epoch",
+                "epoch": 1794551640000
+              },
+              {
+                "note": "d4c2011a",
+                "own": false,
+                "root": "epoch",
+                "epoch": 1794551640000
+              }
+            ]
+          },
+          {
+            "page": "L",
+            "phase": "load",
+            "at": 1794551690175,
+            "pool": 1794551690000,
+            "intoEpoch": 50000,
+            "tapMax": "0.02944652",
+            "pieces": 4,
+            "making": 0,
+            "proofs": [
+              {
+                "note": "da0e2cb2",
+                "own": true,
+                "root": "epoch",
+                "epoch": 1794551640000
+              },
+              {
+                "note": "bf95da71",
+                "own": true,
+                "root": "epoch",
+                "epoch": 1794551640000
+              },
+              {
+                "note": "bf95da71",
+                "own": false,
+                "root": "epoch",
+                "epoch": 1794551640000
+              },
+              {
+                "note": "e4a3256e",
+                "own": true,
+                "root": "epoch",
+                "epoch": 1794551640000
+              },
+              {
+                "note": "e4a3256e",
+                "own": false,
+                "root": "epoch",
+                "epoch": 1794551640000
+              },
+              {
+                "note": "d4c2011a",
+                "own": false,
+                "root": "epoch",
+                "epoch": 1794551640000
+              }
+            ]
+          },
+          {
+            "page": "L",
+            "phase": "load",
+            "at": 1794551691175,
+            "pool": 1794551691000,
+            "intoEpoch": 51000,
+            "tapMax": "0.02944652",
+            "pieces": 4,
+            "making": 0,
+            "proofs": [
+              {
+                "note": "da0e2cb2",
+                "own": true,
+                "root": "epoch",
+                "epoch": 1794551640000
+              },
+              {
+                "note": "bf95da71",
+                "own": true,
+                "root": "epoch",
+                "epoch": 1794551640000
+              },
+              {
+                "note": "bf95da71",
+                "own": false,
+                "root": "epoch",
+                "epoch": 1794551640000
+              },
+              {
+                "note": "e4a3256e",
+                "own": true,
+                "root": "epoch",
+                "epoch": 1794551640000
+              },
+              {
+                "note": "e4a3256e",
+                "own": false,
+                "root": "epoch",
+                "epoch": 1794551640000
+              },
+              {
+                "note": "d4c2011a",
+                "own": false,
+                "root": "epoch",
+                "epoch": 1794551640000
+              }
+            ]
+          },
+          {
+            "page": "L",
+            "phase": "load",
+            "at": 1794551692176,
+            "pool": 1794551692000,
+            "intoEpoch": 52000,
+            "tapMax": "0.02944652",
+            "pieces": 4,
+            "making": 0,
+            "proofs": [
+              {
+                "note": "da0e2cb2",
+                "own": true,
+                "root": "epoch",
+                "epoch": 1794551640000
+              },
+              {
+                "note": "bf95da71",
+                "own": true,
+                "root": "epoch",
+                "epoch": 1794551640000
+              },
+              {
+                "note": "bf95da71",
+                "own": false,
+                "root": "epoch",
+                "epoch": 1794551640000
+              },
+              {
+                "note": "e4a3256e",
+                "own": true,
+                "root": "epoch",
+                "epoch": 1794551640000
+              },
+              {
+                "note": "e4a3256e",
+                "own": false,
+                "root": "epoch",
+                "epoch": 1794551640000
+              },
+              {
+                "note": "d4c2011a",
+                "own": false,
+                "root": "epoch",
+                "epoch": 1794551640000
+              }
+            ]
+          }
+        ],
+        "passes": [
+          {
+            "page": "A",
+            "phase": "ready",
+            "at": 1794551630109,
+            "ms": 13,
+            "made": 0,
+            "remade": 0,
+            "failed": []
+          },
+          {
+            "page": "L",
+            "phase": "load",
+            "at": 1794551631125,
+            "ms": 29901,
+            "made": 6,
+            "remade": 0,
+            "failed": []
+          },
+          {
+            "page": "L",
+            "phase": "load",
+            "at": 1794551661275,
+            "ms": 28889,
+            "made": 0,
+            "remade": 6,
+            "failed": []
+          },
+          {
+            "page": "L",
+            "phase": "load",
+            "at": 1794551690414,
+            "ms": 10,
+            "made": 0,
+            "remade": 0,
+            "failed": []
+          },
+          {
+            "page": "L",
+            "phase": "load",
+            "at": 1794551690673,
+            "ms": 10,
+            "made": 0,
+            "remade": 0,
+            "failed": []
+          },
+          {
+            "page": "L",
+            "phase": "load",
+            "at": 1794551690933,
+            "ms": 8,
+            "made": 0,
+            "remade": 0,
+            "failed": []
+          },
+          {
+            "page": "L",
+            "phase": "load",
+            "at": 1794551691191,
+            "ms": 9,
+            "made": 0,
+            "remade": 0,
+            "failed": []
+          },
+          {
+            "page": "L",
+            "phase": "load",
+            "at": 1794551691450,
+            "ms": 7,
+            "made": 0,
+            "remade": 0,
+            "failed": []
+          },
+          {
+            "page": "L",
+            "phase": "load",
+            "at": 1794551691708,
+            "ms": 7,
+            "made": 0,
+            "remade": 0,
+            "failed": []
+          },
+          {
+            "page": "L",
+            "phase": "load",
+            "at": 1794551691966,
+            "ms": 7,
+            "made": 0,
+            "remade": 0,
+            "failed": []
+          },
+          {
+            "page": "L",
+            "phase": "load",
+            "at": 1794551692224,
+            "ms": 7,
+            "made": 0,
+            "remade": 0,
+            "failed": []
+          },
+          {
+            "page": "L",
+            "phase": "load",
+            "at": 1794551692481,
+            "ms": 8,
+            "made": 0,
+            "remade": 0,
+            "failed": []
+          },
+          {
+            "page": "L",
+            "phase": "load",
+            "at": 1794551692739,
+            "ms": 8,
+            "made": 0,
+            "remade": 0,
+            "failed": []
+          },
+          {
+            "page": "L",
+            "phase": "load",
+            "at": 1794551692997,
+            "ms": 8,
+            "made": 0,
+            "remade": 0,
+            "failed": []
+          }
+        ],
+        "proveMs": {
+          "n": 18,
+          "p50": 4799,
+          "max": 5138
+        },
+        "offeredLate": 0,
+        "ok": true,
+        "why": "Max at 4 pieces 33 ms after the deposits, 59043 ms after a load; Max tapped 16 s past a boundary: ; samples offering a late proof: 0; proofs 18, p50 4799 ms, max 5138 ms",
+        "stages": [
+          {
+            "page": "A",
+            "kind": "pool.deposit",
+            "stage": "filled",
+            "ms": 1046
+          },
+          {
+            "page": "A",
+            "kind": "pool.deposit",
+            "stage": "filled",
+            "ms": 5914
+          },
+          {
+            "page": "A",
+            "kind": "pool.deposit",
+            "stage": "filled",
+            "ms": 5675
+          },
+          {
+            "page": "A",
+            "kind": "pool.deposit",
+            "stage": "filled",
+            "ms": 10076
+          },
+          {
+            "page": "A",
+            "kind": "pool.deposit",
+            "stage": "filled",
+            "ms": 5665
+          }
+        ],
+        "proofs": [
+          {
+            "at": 1794551601183,
+            "ms": 5019
+          },
+          {
+            "at": 1794551608240,
+            "ms": 5138
+          },
+          {
+            "at": 1794551613242,
+            "ms": 4969
+          },
+          {
+            "at": 1794551618975,
+            "ms": 4878
+          },
+          {
+            "at": 1794551623840,
+            "ms": 4839
+          },
+          {
+            "at": 1794551629038,
+            "ms": 4749
+          },
+          {
+            "at": 1794551637141,
+            "ms": 4755
+          },
+          {
+            "at": 1794551641919,
+            "ms": 4759
+          },
+          {
+            "at": 1794551646690,
+            "ms": 4748
+          },
+          {
+            "at": 1794551651466,
+            "ms": 4751
+          },
+          {
+            "at": 1794551656253,
+            "ms": 4765
+          },
+          {
+            "at": 1794551661024,
+            "ms": 4748
+          },
+          {
+            "at": 1794551666056,
+            "ms": 4751
+          },
+          {
+            "at": 1794551670873,
+            "ms": 4800
+          },
+          {
+            "at": 1794551675696,
+            "ms": 4799
+          },
+          {
+            "at": 1794551680478,
+            "ms": 4763
+          },
+          {
+            "at": 1794551685311,
+            "ms": 4808
+          },
+          {
+            "at": 1794551690153,
+            "ms": 4823
+          }
+        ],
+        "sent": [
+          "26ULP19TRCkbkgXWGmpFmD6KCgbTp4Zg2c314Pxn7DZkqGkdHdUZ8ZsCQnrpwHZDMAo84CxKP9igBNAQ2eoxLEwA",
+          "57RYDrSSkxywSvVURFj3bugTWGbx6dUnmu8MyLJasZ2irzaa76VNniQDBQpynVkMK6fnqdUNPcqLAa6KpPhb8dWi",
+          "27JrEMDUMUvEbEu2Hqf1zAqMGsP2qDvUc9V8j4kgebTTRBuU3z7S7LMkFJWCCJBvrRDKbMiaYSgENeRUqYx6u4cS",
+          "43jRTZL4Bo3eMvZxzXddHjWg3ReXgQhwPYGnNvQM1YJw2N12BK7zg6XQEZ3umJGCSXFEjWqcEquR7ftQ3Uq4pENi",
+          "5jNEu1Z6tjFQadEXdF2sJmzCAoPpYjhUJhjLUftyXk86f9ZZa2KKZ385dAdygBzb71juvqJpE3BVpyo8CQg7ZiUj"
+        ],
+        "told": [],
+        "steps": [
+          {
+            "step": "deposit-0",
+            "signature": "26ULP19TRCkbkgXWGmpFmD6KCgbTp4Zg2c314Pxn7DZkqGkdHdUZ8ZsCQnrpwHZDMAo84CxKP9igBNAQ2eoxLEwA"
+          },
+          {
+            "step": "deposit-0",
+            "signature": "26ULP19TRCkbkgXWGmpFmD6KCgbTp4Zg2c314Pxn7DZkqGkdHdUZ8ZsCQnrpwHZDMAo84CxKP9igBNAQ2eoxLEwA"
+          },
+          {
+            "step": "deposit-1",
+            "signature": "57RYDrSSkxywSvVURFj3bugTWGbx6dUnmu8MyLJasZ2irzaa76VNniQDBQpynVkMK6fnqdUNPcqLAa6KpPhb8dWi"
+          },
+          {
+            "step": "deposit-1",
+            "signature": "57RYDrSSkxywSvVURFj3bugTWGbx6dUnmu8MyLJasZ2irzaa76VNniQDBQpynVkMK6fnqdUNPcqLAa6KpPhb8dWi"
+          },
+          {
+            "step": "deposit-2",
+            "signature": "27JrEMDUMUvEbEu2Hqf1zAqMGsP2qDvUc9V8j4kgebTTRBuU3z7S7LMkFJWCCJBvrRDKbMiaYSgENeRUqYx6u4cS"
+          },
+          {
+            "step": "deposit-2",
+            "signature": "27JrEMDUMUvEbEu2Hqf1zAqMGsP2qDvUc9V8j4kgebTTRBuU3z7S7LMkFJWCCJBvrRDKbMiaYSgENeRUqYx6u4cS"
+          },
+          {
+            "step": "deposit-3",
+            "signature": "43jRTZL4Bo3eMvZxzXddHjWg3ReXgQhwPYGnNvQM1YJw2N12BK7zg6XQEZ3umJGCSXFEjWqcEquR7ftQ3Uq4pENi"
+          },
+          {
+            "step": "deposit-3",
+            "signature": "43jRTZL4Bo3eMvZxzXddHjWg3ReXgQhwPYGnNvQM1YJw2N12BK7zg6XQEZ3umJGCSXFEjWqcEquR7ftQ3Uq4pENi"
+          },
+          {
+            "step": "deposit-4",
+            "signature": "5jNEu1Z6tjFQadEXdF2sJmzCAoPpYjhUJhjLUftyXk86f9ZZa2KKZ385dAdygBzb71juvqJpE3BVpyo8CQg7ZiUj"
+          },
+          {
+            "step": "deposit-4",
+            "signature": "5jNEu1Z6tjFQadEXdF2sJmzCAoPpYjhUJhjLUftyXk86f9ZZa2KKZ385dAdygBzb71juvqJpE3BVpyo8CQg7ZiUj"
+          }
+        ],
+        "sendLines": [],
+        "engineCalls": [],
+        "simFails": [],
+        "fee": "1300000"
+      },
+      "tail": [
+        "(node:3763334) ExperimentalWarning: SQLite is an experimental feature and might change at any time",
+        "(Use `node --trace-warnings ...` to show where the warning was created)",
+        "2026-11-13T06:33:13.538Z copy: the mainnet build on http://127.0.0.1:32639 and http://localhost:32639; pool 7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8; fee payer TpZizHv5kK7rW8y3QRSaKYneYXEbmVmDSpcqUnCuTTp; fee 1300000; engine stand-in lands",
+        "2026-11-13T06:33:13.585Z the run's seed is kept at /tmp/sol-copy-My2Lba/curve/run-2026-11-13T06-33-13-585Z.seed (FLOW_RESUME=/tmp/sol-copy-My2Lba/curve/run-2026-11-13T06-33-13-585Z.seed signs its words in again)",
+        "2026-11-13T06:33:13.616Z copy helper: GET /v1/health is not served on the copy (404)",
+        "2026-11-13T06:33:13.616Z the helper at the copy's sender, in process: commit null",
+        "2026-11-13T06:33:14.122Z F EAemi8RMbutMU2m9cjoeBTHu9dbaDCiytsMuXoE7B1ox funded by the copy's airdrop: 26JgJSsQsJTFJaxJAzHNUhXyowWDxMKpGyLjPDWrv3a3KZRsVTtgQcFFJb6bkNh9UhuJM6xVhySEnsvh3Vo9NaSw",
+        "2026-11-13T06:33:14.661Z A pool.deposit answered {\"result\":{\"stage\":\"sent\",\"txs\":[{\"chain\":\"solana\",\"hash\":\"26ULP19TRCkbkgXWGmpFmD6KCgbTp4Zg2c314Pxn7DZkqGkdHdUZ8ZsCQnrpwHZDMAo84CxKP9igBNAQ2eoxLEwA\"}]}}",
+        "2026-11-13T06:33:15.680Z A pool.deposit progress \"filled\"",
+        "2026-11-13T06:33:16.149Z A helper GET /v1/pool/fee: HTTP 200",
+        "2026-11-13T06:33:21.229Z A pool.deposit answered {\"result\":{\"stage\":\"sent\",\"txs\":[{\"chain\":\"solana\",\"hash\":\"57RYDrSSkxywSvVURFj3bugTWGbx6dUnmu8MyLJasZ2irzaa76VNniQDBQpynVkMK6fnqdUNPcqLAa6KpPhb8dWi\"}]}}",
+        "2026-11-13T06:33:22.248Z A pool.deposit progress \"filled\"",
+        "2026-11-13T06:33:22.804Z A pool.deposit answered {\"result\":{\"stage\":\"sent\",\"txs\":[{\"chain\":\"solana\",\"hash\":\"27JrEMDUMUvEbEu2Hqf1zAqMGsP2qDvUc9V8j4kgebTTRBuU3z7S7LMkFJWCCJBvrRDKbMiaYSgENeRUqYx6u4cS\"}]}}",
+        "2026-11-13T06:33:28.437Z A pool.deposit progress \"filled\"",
+        "2026-11-13T06:33:33.805Z A pool.deposit answered {\"result\":{\"stage\":\"sent\",\"txs\":[{\"chain\":\"solana\",\"hash\":\"43jRTZL4Bo3eMvZxzXddHjWg3ReXgQhwPYGnNvQM1YJw2N12BK7zg6XQEZ3umJGCSXFEjWqcEquR7ftQ3Uq4pENi\"}]}}",
+        "2026-11-13T06:33:43.842Z A pool.deposit progress \"filled\"",
+        "2026-11-13T06:33:49.086Z A pool.deposit answered {\"result\":{\"stage\":\"sent\",\"txs\":[{\"chain\":\"solana\",\"hash\":\"5jNEu1Z6tjFQadEXdF2sJmzCAoPpYjhUJhjLUftyXk86f9ZZa2KKZ385dAdygBzb71juvqJpE3BVpyo8CQg7ZiUj\"}]}}",
+        "2026-11-13T06:33:50.100Z A pool.deposit progress \"filled\"",
+        "2026-11-13T06:33:50.142Z ready: Max at 4 pieces 33 ms after the last deposit's end (0.02944652)",
+        "2026-11-13T06:33:52.376Z L helper GET /v1/pool/fee: HTTP 200",
+        "2026-11-13T06:34:21.298Z L helper GET /v1/pool/fee: HTTP 200",
+        "2026-11-13T06:34:50.168Z load: Max at 4 pieces 59043 ms after the load (0.02944652)",
+        "2026-11-13T06:34:53.256Z PASS copy-takeable: Max at 4 pieces 33 ms after the deposits, 59043 ms after a load; Max tapped 16 s past a boundary: ; samples offering a late proof: 0; proofs 18, p50 4799 ms, max 5138 ms",
+        ""
+      ]
+    }
+  },
+  "cannotShow": [
+    "whether a block builder or a leader includes the transaction: the copy has no Jito block engine and one leader, itself; the helper's engine is a local stand-in (busy, refused, swallowing or landing the bundle) and its plain copies go to the copy",
+    "the real engines' answers and their timing: the stand-in answers at once",
+    "a graduated coin's buy on mainnet's own PumpSwap table: mainnet has none yet, so the copy makes one with the same list (contracts/pool-solana/scripts/venue-table.mjs's steps) from a key it funds",
+    "priority fee levels: the copy's only transactions are the run's own, so no fee market",
+    "rate limits of real providers: the page reads the copy's one RPC under two names",
+    "the helper's mainnet fee payer: the copy's fee payer is a fresh local key (the pool program binds the fee payer only through the proof's context, release.rs, so any key it signs with is accepted)",
+    "mainnet's slot and clock: the copy starts near slot 0 on this machine's clock; accounts are as of the clone slot"
+  ]
+}

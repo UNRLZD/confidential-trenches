@@ -22,6 +22,8 @@
 import { realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { launchBrowser } from "../browsers.mjs";
+import { launchHarnessBrowser } from "../harness-sockets.mjs";
 import { collect, judge as shellJudge } from "./signpage-shell.mjs";
 
 const KEY = "sign-out-stops-the-pages-reads";
@@ -61,7 +63,9 @@ if (isMain) {
     const engine = arg("--engine") ?? "chromium";
     if (engine !== "chromium") throw new Error("--engine must be chromium (the passkey accounts are its virtual authenticator's)");
     const site = arg("--site");
-    const rec = await collect({ engine, site: site && path.resolve(site), live: process.argv.includes("--live"), width: arg("--width") ?? "phone" });
+    const live = process.argv.includes("--live");
+    // the harness browser off the live host: a socket or a request the run does not answer fails the run
+    const rec = await collect({ engine, site: site && path.resolve(site), live, width: arg("--width") ?? "phone", launch: live ? launchBrowser : launchHarnessBrowser });
     const out = arg("--record");
     if (out) writeFileSync(out, `${JSON.stringify(rec, null, 1)}\n`);
     const r = judge(rec);

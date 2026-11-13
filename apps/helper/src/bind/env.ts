@@ -15,6 +15,7 @@ import { HELPER_CODE_STATUS, HELPER_INTENTS_CODES, NEAR_RHEA } from "@blindfill/
 import { decodeSignedDelegate } from "./checks.ts";
 import { type CreateDeps, deliveryReads, onStatusAnswer } from "./create.ts";
 import { carryTrade, createTradeReads, createTradeStore, isTradeBody, type TradeAnswer, type TradeDeps } from "./trade.ts";
+import { parseRecordBody, readRecords, type RecordAnswer, type RecordDeps } from "./record.ts";
 import { carryDeposit, createFileStore, createSendReads, nearRpc, relayerKey, RPC_TIMEOUT_MS, startLockRounds, startRelayer, type Answer, type Rpc, type SendDeps } from "./send.ts";
 import { readUrls, tokenHeld, tokenWatchesFromEnv, WATCHED, type TokenNetwork, type TokenWatch } from "../token-status/status.ts";
 import { isAccountId } from "../withdraw/checks.ts";
@@ -65,6 +66,11 @@ export type BindSender = {
    * health body must stay within the kit's 1 KB (review FIX 1).
    */
   carried?(): Partial<Record<TokenNetwork, string>>;
+  /**
+   * POST /v1/bind/record for a parsed body (card near-holdings-restore, record.ts): the named network's trade store,
+   * read only, for each asked W the vault paid. A network this helper does not carry is bad_shape, as a trade's is.
+   */
+  record?(body: unknown): Promise<RecordAnswer>;
 };
 
 const STATUS: Record<string, number> = HELPER_CODE_STATUS;
@@ -175,6 +181,8 @@ export function bindSenderFromEnv(
   const creates = new Map<TokenNetwork, CreateDeps>();
   /** Each started network's trade carry (trade.ts, card relayer-near-trade): the same relayer, its own store. */
   const trades = new Map<TokenNetwork, TradeDeps>();
+  /** Each started network's record read (record.ts): the trade carry's store and the same reads, its spends index shared. */
+  const records = new Map<TokenNetwork, RecordDeps>();
   const stops: (() => void)[] = [];
   const init = async (net: Net): Promise<SendDeps> => {
     const token = WATCHED[net.network].token;
@@ -201,9 +209,11 @@ export function bindSenderFromEnv(
       stops.push(startLockRounds(deps));
       creates.set(net.network, { token, delivery: deliveryReads(rpcs, token), store, relayer });
       tradeStore = createTradeStore(join(storeDir, `trade-${net.network}`));
+      const tradeReads = createTradeReads(rpcs, net.vault, token, Date.now, NEAR_RHEA[net.network].exchange);
+      records.set(net.network, { reads: tradeReads, store: tradeStore });
       trades.set(net.network, {
         cfg: { network: net.network, marginK: BigInt(k) },
-        reads: createTradeReads(rpcs, net.vault, token, Date.now, NEAR_RHEA[net.network].exchange),
+        reads: tradeReads,
         store: tradeStore,
         relayer,
         held: async () => tokenHeld(await deps.tokenStatus("higher")),
@@ -283,6 +293,17 @@ export function bindSenderFromEnv(
         return no("upstream");
       }
       return carryDeposit(body, deps);
+    },
+    async record(body) {
+      const p = parseRecordBody(body);
+      const net = p === null ? undefined : [...carried.values()].find((n) => n.network === p.network);
+      if (p === null || net === undefined) return { status: STATUS.bad_shape ?? 400, body: { error: { code: "bad_shape" } } };
+      try {
+        await started(net);
+      } catch {
+        return { status: STATUS.upstream ?? 503, body: { error: { code: "upstream" } } };
+      }
+      return readRecords(p.wallets, records.get(net.network)!);
     },
     warm: () => {
       carried.forEach((net) => void warmNet(net));
