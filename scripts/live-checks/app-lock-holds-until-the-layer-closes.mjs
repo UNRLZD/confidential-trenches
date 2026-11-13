@@ -11,6 +11,7 @@
 // signin.open, the way still locked with no line through the other id's notice, and unlocked with no line within
 // UNLOCK_MS of its own.
 // After: app
+// Bundle: out a browser (its --harness run is in test-browser)
 //   node scripts/live-checks/app-lock-holds-until-the-layer-closes.mjs [--shots <dir>] [--record <file>]
 //     the deployed APP_HOST (its bytes and headers as served, the helper live), framed by the stand-in shell
 //   node scripts/live-checks/app-lock-holds-until-the-layer-closes.mjs --harness [--build <dir>] [--shots <dir>] [--record <file>]

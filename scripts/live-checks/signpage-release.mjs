@@ -6,6 +6,7 @@
 // SIGN_HOST https://confidential.unrealized.trade, APP_HOST https://ct-app.unrealized.trade.
 // After: app --host app
 // After: sign --host sign
+// Bundle: out the release list against what the host serves
 //   node scripts/live-checks/signpage-release.mjs --host sign|app [--record <file>]
 //     after a deploy: that one host against this checkout's own build (release-list.mjs --print --host), so a host
 //     that lags main fails only its own deploy's check, never the other host's

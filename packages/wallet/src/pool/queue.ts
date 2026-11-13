@@ -101,6 +101,11 @@ export { PassFail, type PassReason } from "./pool.ts";
 // a bind's read that got no answer keeps its own error (callers read its class: a throttle's wait, an EVM read's
 // EvmUnansweredError), so the pass names it by that class: "network", never the fee_refused of a refusal
 const UNANSWERED = new Set(["SolanaRpcTransportError", "EvmUnansweredError", "EvmOperatorsUnanswered", "EvmLagError", "TimeoutError"]);
+/** A newest-root proof whose epoch ended before it was made: made, it would be late
+ *  NEWEST_GRACE_MS past the boundary and never listed (Base mainnet copies of 13 Nov: a landing 46 s and 50 s into its
+ *  period, its pass's bind past the boundary, its proof done 18.8 s and 17.3 s after it). The pass makes none, and the
+ *  queue runs the next pass at once, in the new epoch, where the note is under the epoch's cut. */
+class EpochTurned extends Error {}
 const bindFail = (e: unknown): never => failAs(UNANSWERED.has(String((e as { name?: unknown } | null)?.name)) ? "network" : "fee_refused")(e);
 /** `small`: the pool's UNSPENT landed notes below its smallest rung, never proved (none: absent). */
 export type QueuePass = { made: string[]; remade: string[]; failed: { noteId: string; error: string; reason?: PassReason }[]; small?: number };
@@ -291,7 +296,14 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
     const readNowOf = (c: ChainNow): void => {
       if (seen === undefined || c.ms >= seen.ms) seen = { ms: c.ms, at: mono() - (performance.now() - c.at), wall: c.wall };
     };
+    // a newest-root proof is made only while its epoch is the pool's current one, before and after its bind
+    const turned = (): void => {
+      const t = nowSeen();
+      if (root === "newest" && t !== undefined && t >= epochStartMs + pool.epochMs) throw new EpochTurned(`epoch ${epochStartMs} ended at ${t}: made in the next`);
+    };
+    turned();
     const binding = await pool.bind({ chunk, wallet: { address: w.address, publicKey: w.publicKey }, refundPrecommitment, epochStartMs, deadlineMs, ...(now === undefined ? {} : { now }), readNow: readNowOf }, signal).catch(bindFail);
+    turned();
     try {
       checkBinding(pool as Pool, binding, chunk);
     } catch (e) {
@@ -362,6 +374,8 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
 
   type Todo = { n: NoteRecord; trees: PoolTrees; root: "epoch" | "newest"; prev?: ReadyProof<R>; to?: To };
 
+  // set by a pass that met its epoch's end before a newest-root proof (EpochTurned): refresh runs the next pass at once
+  let turnedIn = false;
   async function pass(signal?: AbortSignal): Promise<QueuePass> {
     live();
     const out = NOTHING();
@@ -488,7 +502,8 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
           await prove(t.n, prover, t.trees, t.root, start, t.prev, t.to ?? null, signal);
           (t.prev !== undefined ? out.remade : out.made).push(t.n.id);
         } catch (e) {
-          out.failed.push({ noteId: t.n.id, error: msg(e), ...(e instanceof PassFail ? { reason: e.reason } : {}) });
+          if (e instanceof EpochTurned) turnedIn = true;
+          else out.failed.push({ noteId: t.n.id, error: msg(e), ...(e instanceof PassFail ? { reason: e.reason } : {}) });
         } finally {
           inFlight.delete(t.n.id);
         }
@@ -547,7 +562,15 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
   };
   return {
     refresh(signal) {
-      const run = passes.then(() => pass(signal));
+      const run = passes.then(async () => {
+        turnedIn = false;
+        const one = await pass(signal);
+        if (!turnedIn || closed || signal?.aborted) return one;
+        // the epoch turned under a newest-root proof: the next pass now, in the new epoch, its work told with this one's
+        turnedIn = false;
+        const two = await pass(signal);
+        return { ...two, made: [...one.made, ...two.made], remade: [...one.remade, ...two.remade], failed: [...one.failed, ...two.failed] };
+      });
       passes = run.catch(() => undefined);
       return run;
     },

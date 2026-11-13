@@ -28,6 +28,7 @@
 // This file reaches no package code (the import check holds it): its test holds TABLES to the kit's own exports. The
 // parser is the kit's own dev dependency, loaded through the kit's package.json as pool-sol-deploy.mjs loads snarkjs.
 // After: sign
+// Bundle: read sign
 //   node scripts/live-checks/oneclick-fee-path-own-key.mjs [--record <file>] [--answer <file>]
 // PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";

@@ -38,7 +38,7 @@
 //     build, a Solana token page) in a serial group, one matrix entry, or lists it exempt with the reason: two such checks
 //     in separate jobs spend one shared window between them and a page reads chain (run 42332950254 attempt 1);
 //   - every check each host's plan runs exists, with its test and its recorded answers, and none reads the
-//     environment (a check that needs a secret is listed SKIPPED, never run); each run gives every flag its check's
+//     environment (a check that needs a secret has a `// Skipped:` header line, never run); each run gives every flag its check's
 //     usage line needs (live-plan's planFor refuses a run that lacks one).
 import { existsSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import path from "node:path";
@@ -348,7 +348,7 @@ export async function planProblems(host, root = ROOT) {
       if (seen.has(abs) || !existsSync(abs)) return;
       seen.add(abs);
       const text = readFileSync(abs, "utf8");
-      if (/\bprocess\.env\b/.test(text)) p.push(`${host}: ${k} reads the environment (${path.relative(root, abs)}): list it SKIPPED, a run holds no secret`);
+      if (/\bprocess\.env\b/.test(text)) p.push(`${host}: ${k} reads the environment (${path.relative(root, abs)}): give it a \`// Skipped: <reason> <detail>\` header line, a run holds no secret`);
       for (const m of text.matchAll(/(?:\bfrom\s+|\bimport\s*\(\s*|\bimport\s+)["'](\.{1,2}\/[^"']+\.mjs)["']/g)) {
         const next = path.join(path.dirname(f), m[1]);
         if (next.startsWith("scripts/")) walk(next);
@@ -396,7 +396,7 @@ export function budgetProblems(host, plan, root = ROOT) {
           return next.startsWith("scripts/") && reads(next);
         });
       };
-      if (reads(path.join("scripts/live-checks", `${k}.mjs`))) p.push(`${host}: ${k} reads the helper's Jupiter budget (${BUDGET_READS.source.replace(/\\\//g, "/")}) in a job of its own: put it in a serial group (SERIAL_GROUPS in scripts/ci/helper-live-checks.mjs) so it runs one after another with the others, or list it in BUDGET_EXEMPT with the reason it spends none`);
+      if (reads(path.join("scripts/live-checks", `${k}.mjs`))) p.push(`${host}: ${k} reads the helper's Jupiter budget (${BUDGET_READS.source.replace(/\\\//g, "/")}) in a job of its own: give it a \`// Serial: <group> <position>\` header line so it runs one after another with the others (scripts/ci/helper-live-checks.mjs SERIAL_GROUPS), or a \`// Budget-exempt: <reason>\` line with the reason it spends none`);
     }
   }
   return p;

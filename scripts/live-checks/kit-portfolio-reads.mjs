@@ -14,6 +14,7 @@
 // That a kit 1.8 app or older is sent each op with no detail (its client drops the op for one) is kit-frame-version's
 // (After: sign), which reads the 1.8 level and its strip on the same build.
 // After: sign
+// Bundle: read sign
 //   node scripts/live-checks/kit-portfolio-reads.mjs [--url <origin>] [--record <file>]
 //   node scripts/live-checks/kit-portfolio-reads.mjs --local [--record <file>]   this tree's build
 //   PASS exit 0, FAIL exit 1, error exit 2. The record holds the script's path, integrity, size, sha384 and each mark's

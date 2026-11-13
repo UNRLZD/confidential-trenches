@@ -10,6 +10,7 @@
 // it fails when SIGN_HOST answers a path with no file otherwise (a 404.html shipped, the _headers file served) or the
 // harness does not fall back, since then the two differ.
 // After: sign
+// Bundle: out Pages' answer to a path with no file (the index), which no build file holds
 //   node scripts/live-checks/terminal-harness-sign-spa.mjs [--record <file>]
 //     PASS exit 0, FAIL exit 1, error exit 2
 import "../net-window.mjs";

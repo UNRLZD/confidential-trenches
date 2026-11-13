@@ -13,6 +13,7 @@
 // A line missing from the shell check's verdict is BAD: a build before the card signs out with no reload, so its run has
 // no such line (or the line is BAD).
 // After: sign --engine chromium --live --width phone
+// Bundle: out a browser (its harness run is in test-browser: signpage-shell's collect, Chromium at phone width)
 //   node scripts/live-checks/sign-out-stops-the-pages-reads.mjs --engine chromium --live --width phone [--record <f>]
 //     the deployed SIGN_HOST (confidential.unrealized.trade), as signpage-shell.mjs reads it
 //   node scripts/live-checks/sign-out-stops-the-pages-reads.mjs --engine chromium [--site <dir>] [--record <f>]

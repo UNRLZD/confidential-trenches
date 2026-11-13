@@ -36,6 +36,7 @@
 //   - Done closes the sheet, and Portfolio's Solana row reads that balance (data-balance only; absent before).
 // A screenshot of the To row, a pool picked, the addresses and the deposited states is kept per width and scheme.
 // After: app
+// Bundle: out a browser (its --harness run is in test-browser)
 //   node scripts/live-checks/deposit-to-pool.mjs [--shots <dir>] [--record <file>]
 //     the deployed APP_HOST (its bytes and headers as served), framed by the stand-in shell
 //   node scripts/live-checks/deposit-to-pool.mjs --harness [--build <dir>] [--shots <dir>] [--record <file>]

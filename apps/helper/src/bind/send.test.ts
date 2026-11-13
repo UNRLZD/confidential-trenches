@@ -1885,11 +1885,14 @@ test("RECHECK R4: the settle never re-sends U's stored delegate once the token w
   store.close();
 });
 
-test("RECHECK R5: every provider's `tx` lags behind a landed prepay for a while: it is never judged dropped, and P is prepaid once", async () => {
+// Card helper-recheck-r5-no-clock: no time here but the relayer's own outcome bound (OUTCOME_WAIT_MS), so the wait ends
+// when the hidden tx shows (its third round), never at a 2 s bound a loaded runner passed (run 43434127183: in_flight at
+// 2544 ms). A hang is the test's own timeout.
+test("RECHECK R5: every provider's `tx` lags behind a landed prepay for a while: it is never judged dropped, and P is prepaid once", { timeout: 60_000 }, async () => {
   const node = new Node();
   const u = node.user();
   const store = newStore();
-  const relayer = node.relayer(2_000);
+  const relayer = node.relayer(OUTCOME_WAIT_MS);
   const real = relayer.send;
   relayer.send = (a, g, before) => real(a, g, (tx) => (before(tx), a.kind === "storage_prepay" && node.hideTx.size === 0 && node.hideTx.set(tx.tx_hash, 6), undefined));
   ok(await carryDeposit(signed(u, P, 101n, node.final + 100n), node.deps(store, relayer)));

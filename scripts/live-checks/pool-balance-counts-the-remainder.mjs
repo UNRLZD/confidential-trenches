@@ -15,6 +15,7 @@
 // page names it only there, the app's side is read but cannot reach a user: the verdict is INCONCLUSIVE (exit 3), never
 // PASS (the page's side is the wallet lead's, on card deposit-takes-each-pools-own-coin).
 // After: app
+// Bundle: out a browser, and SIGN_HOST's deployed scripts beside the app's build
 //   node scripts/live-checks/pool-balance-counts-the-remainder.mjs [--shots <dir>] [--record <file>]
 //     the deployed APP_HOST (its bytes and headers as served, the helper live), framed by the stand-in shell
 //   node scripts/live-checks/pool-balance-counts-the-remainder.mjs --harness [--build <dir>] [--shots <dir>] [--record <file>]

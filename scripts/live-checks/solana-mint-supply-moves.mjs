@@ -33,6 +33,7 @@
 // RPCs for a burn, and --burn-until (epoch ms) ends those reads by then, inside BURN_BUDGET_MS (card
 // live-run-red-means-the-build). The verdict rule is the same: no burn read in the window is INCONCLUSIVE, never PASS.
 // After: helper
+// Serial: jupiter-budget 10 first: once its two dry builds are made it lets the next check start and reads public RPCs for a burn beside them, to its deadline (live-serial.mjs RELEASES)
 //   node scripts/live-checks/solana-mint-supply-moves.mjs [--base <helper origin>] [--token <mint>] [--burn <mint>] [--rounds <n>] [--burn-until <epoch ms>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, no burn seen or error exit 2. --record writes every answer the run read, so the test
 //   can replay it.

@@ -16,6 +16,7 @@
 // kept legs alone; the margin's two sides; the sign point's blockhash on the wires) and packages/signpage/test/
 // trade.test.ts (a dropped leg is in no answer, no later pick and no repeated id); no real trade runs here.
 // After: sign
+// Bundle: child sign --local
 //   node scripts/live-checks/kit-renewal-read-bounded.mjs [--record <file>]
 //     SIGN_HOST as deployed: https://confidential.unrealized.trade/
 //   node scripts/live-checks/kit-renewal-read-bounded.mjs --local [--record <file>]

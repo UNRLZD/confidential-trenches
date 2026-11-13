@@ -15,6 +15,7 @@
 //   - the token page answers 200 with a `links` object whose every value is an http(s) URL;
 //   - each busy pump.fun token's tape holds at least one trade in a read made within FRESH_MS of the first.
 // After: helper
+// Serial: jupiter-budget 50 a page check (the lists, one listed pump.fun token's page and three tapes): last of the pages, before the builds
 //   node scripts/live-checks/token-page-data-complete-and-fast.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";

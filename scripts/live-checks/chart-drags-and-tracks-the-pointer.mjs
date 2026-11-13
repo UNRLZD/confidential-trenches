@@ -11,6 +11,7 @@
 // a pinch's anchor, a late trade, at 1440 with DPR 1 and 2 and at 390) is the terminal's browser run,
 // apps/terminal/test/chart-pointer/run.mjs.
 // After: app
+// Bundle: child app --root apps/terminal/dist
 //   node scripts/live-checks/chart-drags-and-tracks-the-pointer.mjs [--url <url>] [--record <file>]
 //   node scripts/live-checks/chart-drags-and-tracks-the-pointer.mjs --root <dir> [--record <file>]   a local build
 //     (apps/terminal/dist, built first) read from disk

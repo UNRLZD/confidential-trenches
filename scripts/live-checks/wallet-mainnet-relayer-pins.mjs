@@ -17,6 +17,7 @@
 // A pin the release leaves null FAILs its part. It sends nothing and moves no money. scripts/ci/bundle-checks.mjs runs
 // the bundle part on a pull request's own build (readBundle and judgeBundle, which read only the build).
 // After: sign
+// Bundle: read sign
 //   node scripts/live-checks/wallet-mainnet-relayer-pins.mjs [--record <file>] [--answer <file>]
 // PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";
@@ -265,4 +266,10 @@ if (realpathSync(process.argv[1] ?? "") === realpathSync(fileURLToPath(import.me
     console.error(`ERROR ${KEY}: ${e?.message ?? e}`);
     process.exit(2);
   }
+}
+
+/** How scripts/ci/bundle-checks.mjs runs this check on a build (its `// Bundle: read` line): `f` answers from the build
+ *  folders as the host would; `dirs` names them (card ci-stops-costing-reruns, moved from bundle-checks.mjs). */
+export async function bundle(f) {
+  return judgeBundle(await readBundle(f));
 }
