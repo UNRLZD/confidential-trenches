@@ -9,10 +9,14 @@
 // trades toolbar are other cards'. The data and its formats are lower.ts's.
 import { useEffect, useState } from "react";
 import type { MarketRow } from "../discover/fields.ts";
-import { DASH } from "../discover/format.ts";
-import { aboutView, holdersSummary, holderViews, tapeViews, useHolders } from "./lower.ts";
+import { DASH, usd } from "../discover/format.ts";
+import { curve } from "../market/curve.ts";
+import { padOf } from "../market/pads.ts";
+import type { SocialLinks } from "./model.ts";
+import { WORDS } from "./words.ts";
+import { aboutView, holdersSummary, holderViews, pausedTape, tapeViews, useHolders } from "./lower.ts";
 import { W } from "./TokenPage.tsx";
-import type { Tape } from "./trades.ts";
+import type { Tape, Trade } from "./trades.ts";
 import { supplyOf } from "./units.ts";
 import "./lower.css";
 
@@ -41,9 +45,9 @@ const Empty = () => <div className="tkl-empty" data-testid="lower-empty"><W id="
 
 const Creator = () => <span className="tkl-tag"><W id="creatorTag" /></span>;
 
-function Trades({ row, tape, phone, nowMs }: { row: MarketRow; tape: Tape; phone: boolean; nowMs: number }) {
+function Trades({ row, tape, phone, nowMs, shown }: { row: MarketRow; tape: Tape; phone: boolean; nowMs: number; shown: readonly Trade[] }) {
   if (tape.status === "loading") return <Skel n={8} />;
-  const rows = tapeViews(tape.trades, { supply: supplyOf(row), creator: row.creator ?? null, nowMs });
+  const rows = tapeViews(shown, { supply: supplyOf(row), creator: row.creator ?? null, nowMs });
   return (
     <div className="tkl-body">
       <div className="tkl-thead tkl-tr" data-testid="trades-heads">
@@ -132,6 +136,12 @@ export function LowerPanel({ row, decimals, tape, phone = false }: { row: Market
   const holders = useHolders(row?.chain ?? null, row?.token ?? null, tab === "holders");
   const nowMs = useNow(tab === "trades" && tape.trades.length > 0);
   const sum = row ? holdersSummary(holders.status === "ready" ? holders.read : null, row) : null;
+  // Pause holds the trades list (UNRLZD's: only this button, never a hover; the pill resumes and counts what arrived);
+  // a new token starts live
+  const [frozen, setFrozen] = useState<{ token: string; trades: readonly Trade[] } | null>(null);
+  const held = frozen && frozen.token === row?.token ? frozen.trades : null;
+  const view = pausedTape(tape.trades, held);
+  const canPause = tab === "trades" && row !== null && tape.trades.length > 0;
   const tabBtn = (k: Tab) => (
     <button key={k} type="button" role="tab" className="tkl-tab" aria-selected={tab === k} data-testid={`lower-tab-${k}`} onClick={() => setTab(k)}>
       {k === "trades" ? (
@@ -152,16 +162,30 @@ export function LowerPanel({ row, decimals, tape, phone = false }: { row: Market
     <section className="tkl" data-testid="lower-panel" data-tab={tab} data-phone={phone || undefined}>
       <div className="tkl-tabs" role="tablist" data-testid="lower-tabs">
         {(phone ? (["trades", "holders", "orders"] as const) : (["holders", "trades", "orders"] as const)).map(tabBtn)}
+        {canPause &&
+          (held ? (
+            <button type="button" className="tkl-pause on" data-testid="trades-paused" onClick={() => setFrozen(null)}>
+              <W id="paused" />
+              {view.fresh > 0 && <span className="tkl-pausen">{WORDS.pausedNew.text.replace("{n}", String(view.fresh))}</span>}
+            </button>
+          ) : (
+            <button type="button" className="tkl-pause" data-testid="trades-pause" onClick={() => setFrozen({ token: row.token, trades: tape.trades })}>
+              <W id="tradesPause" />
+            </button>
+          ))}
       </div>
       {tab === "orders" ? (
         <div className="tkl-empty" role="tabpanel" data-testid="orders-soon" data-place="token-orders"><W id="soon" /></div>
-      ) : row === null ? <Skel n={8} /> : tab === "trades" ? <Trades row={row} tape={tape} phone={phone} nowMs={nowMs} /> : <Holders row={row} decimals={decimals} top={sum!.top} state={holders} />}
+      ) : row === null ? <Skel n={8} /> : tab === "trades" ? <Trades row={row} tape={tape} phone={phone} nowMs={nowMs} shown={view.shown} /> : <Holders row={row} decimals={decimals} top={sum!.top} state={holders} />}
     </section>
   );
 }
 
-/** About (R5 U.about): the four change windows, the 5m tiles and the 24h buys and sells as a flow bar. */
-export function About({ row }: { row: MarketRow }) {
+/** About (R5 U.about), brought to the live UNRLZD About's parity (owner 12 Nov; UNRLZD ticket/AboutPanel.tsx): the
+ *  origin line (Launched on {pad} by {creator}), the curve bar on a curve token or Liquidity and 24h vol on a pool one,
+ *  the four change windows, the 5m tiles, a buys / sells flow bar per window the row serves (24h, 1h, 5m), and the
+ *  token's links (Website, Twitter, Telegram, Search on X). Only what the helper serves: an unknown value is the dash. */
+export function About({ row, links = {} }: { row: MarketRow; links?: SocialLinks }) {
   const a = aboutView(row);
   const five = [
     ["vol5m", a.five.vol, "plain"],
@@ -169,11 +193,33 @@ export function About({ row }: { row: MarketRow }) {
     ["sells5m", a.five.sells, "sell"],
     ["net5m", a.five.net, a.five.netTone],
   ] as const;
+  const pad = padOf(row.launchpad);
+  const creator = typeof row.creator === "string" && row.creator !== "" ? row.creator : null;
+  const short = creator && creator.length > 12 ? `${creator.slice(0, 4)}…${creator.slice(-4)}` : creator;
+  const c = curve(row);
+  const xSearch = "https://x.com/search?q=" + encodeURIComponent("$" + row.symbol + " OR " + row.token);
   return (
     <section className="tkl-about" data-testid="ticket-about">
       <div className="tkl-ahead">
         <span title={row.symbol}><W id="about" /> {row.symbol}</span>
+        {(pad || short) && (
+          <span className="tkl-origin" data-testid="about-origin" title={creator ?? undefined}>
+            {pad ? WORDS.launchedOn.text.replace("{pad}", pad.name) : WORDS.launchedBy.text.replace("{creator}", short!)}
+            {pad && short && <> {WORDS.by.text} <span className="tkl-mono">{short}</span></>}
+          </span>
+        )}
       </div>
+      {c.on ? (
+        <div className="tkl-curve" data-testid="about-curve">
+          <div><span><W id="curveProgress" /></span><span className="tkl-mono">{Math.floor(row.curve_bps! / 100)}%</span></div>
+          <div className="tkl-curvebar"><div style={{ width: `${Math.min(100, row.curve_bps! / 100)}%` }} /></div>
+        </div>
+      ) : (
+        <div className="tkl-liq" data-testid="about-liq">
+          <div><span><W id="liq" /></span><span className="tkl-mono">{usd(row.liq_usd)}</span></div>
+          <div><span><W id="sortVol" /></span><span className="tkl-mono">{usd(row.vol_24h_usd)}</span></div>
+        </div>
+      )}
       <div className="tkl-changes" data-testid="about-windows">
         {a.windows.map((w) => (
           <div key={w.id} className="tkl-change" data-tone={w.tone}>
@@ -190,15 +236,24 @@ export function About({ row }: { row: MarketRow }) {
           </div>
         ))}
       </div>
-      <div className="tkl-flow" data-testid="about-flow">
-        <div>
-          <span><span className="tkl-mono">{a.flow.buys}</span> <span className="tkl-flowlbl"><W id="flowBuys" /></span></span>
-          <span><span className="tkl-mono">{a.flow.sells}</span> <span className="tkl-flowlbl"><W id="flowSells" /></span></span>
+      {a.flows.map((f) => (
+        <div key={f.win} className="tkl-flow" data-testid={f.win === "24h" ? "about-flow" : `about-flow-${f.win}`}>
+          <div>
+            <span><span className="tkl-mono">{f.buys}</span> <span className="tkl-flowlbl"><W id="flowBuys" /></span></span>
+            <span className="tkl-flowwin">{f.win}</span>
+            <span><span className="tkl-mono">{f.sells}</span> <span className="tkl-flowlbl"><W id="flowSells" /></span></span>
+          </div>
+          <div className="tkl-flowbar" data-unknown={f.buyPct === null}>
+            <div style={{ width: `${f.buyPct ?? 50}%` }} />
+            <div />
+          </div>
         </div>
-        <div className="tkl-flowbar" data-unknown={a.flow.buyPct === null}>
-          <div style={{ width: `${a.flow.buyPct ?? 50}%` }} />
-          <div />
-        </div>
+      ))}
+      <div className="tkl-links" data-testid="about-links">
+        {links.site && <a className="tkl-link" href={links.site} target="_blank" rel="noopener noreferrer" data-testid="about-web"><W id="website" /></a>}
+        {links.x && <a className="tkl-link" href={links.x} target="_blank" rel="noopener noreferrer" data-testid="about-x"><W id="twitter" /></a>}
+        {links.telegram && <a className="tkl-link" href={links.telegram} target="_blank" rel="noopener noreferrer" data-testid="about-tg"><W id="telegram" /></a>}
+        <a className="tkl-link" href={xSearch} target="_blank" rel="noopener noreferrer"><W id="searchX" /></a>
       </div>
     </section>
   );

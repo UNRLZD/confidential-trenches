@@ -1286,45 +1286,71 @@ test("card helper-evm-range-cap-walk: a read no provider refuses pages at its wi
   assert.deepEqual(pages.map(([n]) => n), [...Array(9).fill(10_000), 5_001]);
 });
 
-// review P3-4 of 53f5e92f (card restore-first-sign-in-under-two-minutes): the restore writes a note only from a block
-// that never moves, as the deposit path does (evmNextNote's finalBlock): one whose leaf is above the round's finalized
-// anchor is left to a later restore with its spend, so the page never lands a PLANNED note on a block a reorg can drop
-test("P3-4: a note whose leaf is in a block above the finalized anchor is not restored this round, nor its spend; once final it is", async () => {
+// card evm-money-shows-and-spends-at-once: the restore is the chain at the newest block both RPCs agree on by hash (the
+// round's anchor), never at its finalized block: a deposit seconds old restores UNSPENT, a release seconds old restores
+// its note SPENT, and a finalized answer stale or far behind changes nothing the restore shows. Each note whose leaf is
+// above the round's finalized block carries `landed` (its block and that finalized block), so the store can back it out
+// if a reorg drops it (evm-settle.ts); a note at or below it carries none and never backs out.
+test("head: a stale finalized answer changes nothing the restore shows", async () => {
   const { world } = seeded();
-  const all = await clean();
-  // at 30 the buy (block 20) is final and the withdraw (block 40) is not; at 15 neither, nor the buy's change note
-  for (const [fin, spent] of [[30, 1], [15, 0]] as const) {
-    const low = { ...world, finalized: fin };
-    const r = await restore(pair(low, low), wpair(low));
-    const final = all.notes.filter((n) => world.pool[Number(n.leaf.leafIndex)]!.block <= fin);
-    assert.ok(final.length > 0 && final.length < all.notes.length, `${fin}: ${final.length} of ${all.notes.length} final`);
-    assert.deepEqual(r.notes.map((n) => refKey(n.ref)), final.map((n) => refKey(n.ref)), String(fin));
-    assert.equal(r.spends.length, spent, String(fin));
-    assert.deepEqual(r.wallets.map((s) => s.note), r.spends.map((s) => s.note), String(fin));
+  const want = await clean();
+  // one RPC answers a finalized block far back (block 1), the other one 10 blocks behind its head
+  for (const [fa, fb] of [[1, 90], [90, 1], [1, 1]] as const) {
+    const r = await restore(pair({ ...world, finalized: fa }, { ...world, finalized: fb }), wpair(world));
+    assert.deepEqual(r.notes.map((n) => [refKey(n.ref), n.state]), want.notes.map((n) => [refKey(n.ref), n.state]), `${fa}/${fb}`);
+    assert.deepEqual(r.spends.map((x) => [x.note, x.block]), want.spends.map((x) => [x.note, x.block]), `${fa}/${fb}`);
+    assert.equal(r.block, 100n);
   }
 });
 
-// delta review P3-E: the round restores what a chain ending at its finalized block gives: a spend above it is no spend
-// yet, so its note stays UNSPENT and its change is not dropped (a filter after the whole restore wrote the deposit at
-// block 10 SPENT on its spend at block 20, at fin 10)
-test("P3-E: at a finalized block below a spend, the restore is the one of a chain ending there: the note UNSPENT, no spend, the change kept", async () => {
+test("head: a deposit 4 s old restores UNSPENT, marked landed above the finalized block, and so does one in the newest agreed block itself", async () => {
   const { world } = seeded();
-  const unspent = (r: Awaited<ReturnType<typeof restore>>) => r.notes.filter((n) => n.state === "UNSPENT").reduce((a, n) => a + n.leaf.value, 0n);
-  for (const fin of [30, 19, 15, 10]) {
-    const low = { ...world, finalized: fin };
-    const r = await restore(pair(low, low), wpair(low));
-    const cut = { ...world, pool: world.pool.filter((e) => e.block <= fin), finalized: fin };
-    const want = await restore(pair(cut, cut), wpair(cut));
-    assert.ok(want.notes.length > 0, `${fin}: a note at or below it`);
-    assert.deepEqual(r.notes.map((n) => [refKey(n.ref), n.state]), want.notes.map((n) => [refKey(n.ref), n.state]), `${fin}: the notes`);
-    assert.deepEqual(r.spends.map((x) => [x.note, x.block]), want.spends.map((x) => [x.note, x.block]), `${fin}: the spends`);
-    assert.deepEqual(r.elsewhere.map((x) => x.note), want.elsewhere.map((x) => x.note), `${fin}: elsewhere`);
-    assert.equal(unspent(r), unspent(want), `${fin}: unspent`);
-    if (fin === 10) {
-      assert.ok(r.notes.every((n) => n.state === "UNSPENT"), "10: the deposit at block 10 UNSPENT");
-      assert.equal(r.spends.length, 0, "10: no spend");
-    }
-  }
+  const d2: NoteRef = { kind: "deposit", s: SCOPE, i: 2 };
+  const label = vaultLabelOf(keccak_256, SCOPE, BigInt(world.pool.filter((e) => e.kind === "deposit").length + 1));
+  // block 98: two blocks (4 s) behind the head at 100; the finalized block is 90
+  world.pool.push({ block: 98, kind: "deposit", state: noteCommitment(10n ** 15n, label, P(d2)), label, value: 10n ** 15n, pre: P(d2) });
+  const r = await restore(pair(world, world), wpair(world));
+  const n = r.notes.find((x) => refKey(x.ref) === refKey(d2));
+  assert.ok(n !== undefined, "the deposit at block 98 is restored");
+  assert.equal(n.state, "UNSPENT");
+  assert.deepEqual(n.landed, { block: 98n, fin: 90n });
+  // a note at or below the finalized block carries no landing mark: it never backs out
+  assert.ok(r.notes.filter((x) => refKey(x.ref) !== refKey(d2)).every((x) => x.landed === undefined));
+  // the next deposit in block 100, the newest block both RPCs agree on: restored too
+  const d3: NoteRef = { kind: "deposit", s: SCOPE, i: 3 };
+  const label3 = vaultLabelOf(keccak_256, SCOPE, BigInt(world.pool.filter((e) => e.kind === "deposit").length + 1));
+  world.pool.push({ block: 100, kind: "deposit", state: noteCommitment(10n ** 15n, label3, P(d3)), label: label3, value: 10n ** 15n, pre: P(d3) });
+  const r3 = await restore(pair(world, world), wpair(world));
+  assert.equal(byKey(r3).get(refKey(d3)), "UNSPENT", "the deposit in the head block is restored");
+  assert.deepEqual(r3.notes.find((x) => refKey(x.ref) === refKey(d3))?.landed, { block: 100n, fin: 90n });
+});
+
+test("head: a release 2 s old restores its note SPENT and its change UNSPENT, the change marked landed at the release's block", async () => {
+  const { world, d1 } = seeded();
+  const l1 = vaultLabelOf(keccak_256, SCOPE, 3n);
+  const c: NoteRef = { kind: "change", l: l1, j: 0 };
+  world.pool.push({ block: 99, kind: "withdraw", state: noteCommitment(10n ** 15n, l1, P(c)), value: 10n ** 15n, nul: N(d1), to: W(l1, 0) });
+  const r = await restore(pair(world, world), wpair(world));
+  assert.equal(byKey(r).get(refKey(d1)), "SPENT");
+  const ch = r.notes.find((x) => refKey(x.ref) === refKey(c))!;
+  assert.equal(ch.state, "UNSPENT");
+  assert.equal(ch.leaf.value, 10n ** 15n);
+  assert.deepEqual(ch.landed, { block: 99n, fin: 90n });
+  assert.deepEqual(r.spends.find((s) => s.note === refKey(d1))?.block, 99n);
+  // device B's restore while device A's release of d1 is still on its way (not landed): d1 shows UNSPENT, whole; once
+  // it lands (above), SPENT with its change: B shows the chain at the head, never a spend the chain does not hold
+  const before = await restore(pair(seeded().world, seeded().world), wpair(seeded().world));
+  assert.equal(byKey(before).get(refKey(d1)), "UNSPENT");
+});
+
+test("head: two RPCs that hold two blocks at the newest height are a retry, then refused, never one RPC's word; one behind the other reads at the lower", async () => {
+  const { world } = seeded();
+  const waits: number[] = [];
+  const other = { ...world, hashOf: (n: number) => (n === 100 ? h32("another block 100") : world.hashOf(n)) };
+  await assert.rejects(restore(pair(world, other), wpair(world), { sleep: async (ms) => void waits.push(ms) }), (e: Error) => e instanceof EvmLagError && /two RPCs hold different blocks at 100/.test(e.message));
+  assert.equal(waits.length, EVM_LAG_TRIES - 1);
+  const r = await restore(pair(world, { ...world, head: 99 }), wpair(world));
+  assert.equal(r.block, 99n);
 });
 
 // card restore-first-sign-in-under-two-minutes: as the Solana walk (pool-solana.test.ts), the EVM walk yields to the
@@ -1369,4 +1395,35 @@ test("the EVM walk and the notes after it never hold the event loop, and end at 
   assert.ok(reads > 0, "aborted during the walk");
   assert.ok(c.reads() - 500 <= WALK_SLICE_MS + 2, `at most a slice after the abort (${c.reads() - 500} steps)`);
   assert.equal(calls.length, reads, "no read after it");
+});
+
+// card sign-out-stops-the-pages-reads: the signing page's restore (wallets: false) stops at its signal's abort, a sign
+// out's. For every call of a whole restore in turn, the abort comes while that call is in flight: once it answers, no
+// call to the pool's RPCs starts, whatever read it was (a block, a view, a log page) and whatever was still to come.
+// Calls counted only.
+test("card sign-out-stops-the-pages-reads: an abort while any one of the restore's pool reads is in flight starts no call after it", { timeout: 60_000 }, async () => {
+  const { world } = seeded();
+  const whole: NonNullable<Over["log"]> = [];
+  await evmRestoreNotes({ seed64: SEED, pin: PIN, rpcs: pair(world, world, { log: whole }, { log: whole }), wallets: false, gap: 4, sleep: async () => {} });
+  assert.ok(whole.length > 10, `a whole restore reads (${whole.length} calls)`);
+  for (let k = 0; k < whole.length; k++) {
+    const ac = new AbortController();
+    let started = 0;
+    let atAbort = -1;
+    const wrap = (r: EvmRpc): EvmRpc =>
+      Object.assign(async (method: string, params: readonly unknown[]) => {
+        started++;
+        // the sign out comes as its own step after this call went out (both seats of one agreed read go out together)
+        if (started === k + 1)
+          queueMicrotask(() => {
+            atAbort = started;
+            ac.abort(new Error("signed out"));
+          });
+        return r(method, params);
+      }, { url: r.url });
+    const [a, b] = pair(world, world);
+    await evmRestoreNotes({ seed64: SEED, pin: PIN, rpcs: [wrap(a), wrap(b)], wallets: false, gap: 4, signal: ac.signal, sleep: async () => {} }).catch(() => {});
+    assert.ok(atAbort > 0, `call ${k + 1} was made`);
+    assert.equal(started - atAbort, 0, `aborted at call ${k + 1}: no call after it`);
+  }
 });

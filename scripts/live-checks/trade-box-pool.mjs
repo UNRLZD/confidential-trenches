@@ -33,10 +33,12 @@ const KEY = "trade-box-pool";
 export const APP_HOST = "https://ct-app.unrealized.trade";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const HELPER_HOST = "https://ct-api.unrealized.trade";
-/** The devnet Solana pool after the recorded 0.01 SOL deposit, with the proof ready ("ready") or still making ("making"). */
+/** The devnet Solana pool after the recorded 0.01 SOL deposit, with the proof ready ("ready") or still making ("making"):
+ *  the state names what the device is proving now (`making`, kit 1.12), since the box says a proof is coming only then
+ *  (card buy-spends-several-pieces: a balance with no proof ready and none being made draws no label). */
 export const POOL = {
   ready: { chain: "solana", asset: "SOL", balance: "0.01", ready: "0.01", tap_max: "0.00173608" },
-  making: { chain: "solana", asset: "SOL", balance: "0.01", ready: "0" },
+  making: { chain: "solana", asset: "SOL", balance: "0.01", ready: "0", making: "0.01" },
 };
 /** The signed-in state the stand-in shell sends: cash in the vault too, so a box on the vault's path would buy from it. */
 export const account = (proof) => ({

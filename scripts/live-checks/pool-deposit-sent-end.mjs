@@ -15,8 +15,9 @@
 //     the round the block U's nonce was spent at (spentFinal: U's nonce at the newest block both RPCs hold, by its hash,
 //     past on both; final once both finalized headers are at or past it with its hash at its number on both), a read
 //     that fails held until the round is read; no Deposited "expired" only once the round's finalized block is at or past
-//     that block, a held fault thrown only then; a Deposited above the finalized block no end; landed only at the note's
-//     value;
+//     that block, a held fault thrown only then; a Deposited in the round at the note's value landed at once, final or
+//     not (card evm-money-shows-and-spends-at-once); at another value "dead" only once final, above the finalized block
+//     no end;
 //   - EVM run's hand-off: the seed and keys zeroed before the store read, then the ask's notes still INCOMING;
 //   - each run: a rung's (an EVM note's) landing posts no stage, since "filled" ends the trade in the app;
 //   - each kind: filled, or part_filled with no open note, is the end, posted once (after the answer: the answer's own
@@ -83,10 +84,11 @@ const SPENT = new RegExp(
 );
 // noteEndEvm (see the header): its sends' highest nonce, the newest handed to the reads; U's nonce through spentFinal
 // (by name) with the record's kept block at that nonce or the follow's, the sign-out wait and the stop, its fault held;
-// the stop before the round; a Deposited above the finalized block no end; the fault thrown only with no Deposited; no
+// the stop before the round; a Deposited at the note's value landed, at another one dead only once final; the fault
+// thrown only with no Deposited; no
 // Deposited "expired" only once the round's finalized block is at or past the block U's nonce was spent at
 const EVM_END = (spent, wait, stop) => new RegExp(
-  `(${N})=\\(await (${N})\\.records\\(\\)\\)\\.find\\(${N}=>${N}\\.scope===${N}&&${N}\\.precommitment===${N}\\.precommitment\\);if\\(\\1!==void 0&&\\1\\.state!==${Q}INCOMING${Q}\\)return \\1\\.state===${Q}PLANNED${Q}\\?null:\\1\\.leaf\\?\\.value===(${N})\\.value\\?${Q}landed${Q}:${Q}dead${Q};let (${N})=\\(\\1\\?\\.evmSends\\?\\?\\[\\]\\)\\.reduce\\(\\((${N}),(${N})\\)=>\\6\\.nonce>\\5\\?\\6\\.nonce:\\5,\\3\\.nonce\\),(${N})=\\1\\?\\.evmSends\\?\\.\\[\\1\\.evmSends\\.length-1\\];\\7!==void 0&&${N}\\(\\7\\.hash\\);let (${N})=\\1\\?\\.evmSpent!==void 0&&\\1\\.evmSpent\\.nonce===\\4\\?\\{number:\\1\\.evmSpent\\.number,hash:\\1\\.evmSpent\\.hash\\}:void 0,(${N})=null,(${N})=null;try\\{let (${N})=${Q}\\$\\{\\3\\.precommitment\\}:\\$\\{\\4\\}${Q},(${N})=await (?:${spent})\\(\\2\\.rpcs,\\3\\.u,\\4,(${N})\\.has\\(\\11\\)\\?\\13\\.get\\(\\11\\):\\8,(${N})=>\\(\\2\\.wait\\?\\?\\((${N})=>(?:${wait})\\(\\15,\\2\\.signal\\)\\)\\)\\(\\14\\),\\2\\.signal,\\(\\)=>(?:${stop})\\(\\2\\)\\);\\9=\\12\\.final,\\13\\.set\\(\\11,\\12\\.kept\\)\\}catch\\((${N})\\)\\{\\10=\\{(?:e:\\16|(?=e\\})\\16)\\}\\}(?:${stop})\\(\\2\\);let (${N})=await \\2\\.round\\(\\2\\.signal\\),(${N})=\\17\\.events\\.find\\(${N}=>${N}\\.kind===${Q}deposit${Q}&&${N}\\.precommitment===\\3\\.precommitment\\);if\\(\\18!==void 0\\)return \\18\\.block>\\17\\.finalBlock\\?null:\\18\\.value===\\3\\.value\\?${Q}landed${Q}:${Q}dead${Q};if\\(\\10!==null\\)throw \\10\\.e;return \\9!==null&&\\17\\.finalBlock>=\\9\\?${Q}expired${Q}:null\\}`,
+  `(${N})=\\(await (${N})\\.records\\(\\)\\)\\.find\\(${N}=>${N}\\.scope===${N}&&${N}\\.precommitment===${N}\\.precommitment\\);if\\(\\1!==void 0&&\\1\\.state!==${Q}INCOMING${Q}\\)return \\1\\.state===${Q}PLANNED${Q}\\?null:\\1\\.leaf\\?\\.value===(${N})\\.value\\?${Q}landed${Q}:${Q}dead${Q};let (${N})=\\(\\1\\?\\.evmSends\\?\\?\\[\\]\\)\\.reduce\\(\\((${N}),(${N})\\)=>\\6\\.nonce>\\5\\?\\6\\.nonce:\\5,\\3\\.nonce\\),(${N})=\\1\\?\\.evmSends\\?\\.\\[\\1\\.evmSends\\.length-1\\];\\7!==void 0&&${N}\\(\\7\\.hash\\);let (${N})=\\1\\?\\.evmSpent!==void 0&&\\1\\.evmSpent\\.nonce===\\4\\?\\{number:\\1\\.evmSpent\\.number,hash:\\1\\.evmSpent\\.hash\\}:void 0,(${N})=null,(${N})=null;try\\{let (${N})=${Q}\\$\\{\\3\\.precommitment\\}:\\$\\{\\4\\}${Q},(${N})=await (?:${spent})\\(\\2\\.rpcs,\\3\\.u,\\4,(${N})\\.has\\(\\11\\)\\?\\13\\.get\\(\\11\\):\\8,(${N})=>\\(\\2\\.wait\\?\\?\\((${N})=>(?:${wait})\\(\\15,\\2\\.signal\\)\\)\\)\\(\\14\\),\\2\\.signal,\\(\\)=>(?:${stop})\\(\\2\\)\\);\\9=\\12\\.final,\\13\\.set\\(\\11,\\12\\.kept\\)\\}catch\\((${N})\\)\\{\\10=\\{(?:e:\\16|(?=e\\})\\16)\\}\\}(?:${stop})\\(\\2\\);let (${N})=await \\2\\.round\\(\\2\\.signal\\),(${N})=\\17\\.events\\.find\\(${N}=>${N}\\.kind===${Q}deposit${Q}&&${N}\\.precommitment===\\3\\.precommitment\\);if\\(\\18!==void 0\\)return \\18\\.value===\\3\\.value\\?${Q}landed${Q}:\\18\\.block>\\17\\.finalBlock\\?null:${Q}dead${Q};if\\(\\10!==null\\)throw \\10\\.e;return \\9!==null&&\\17\\.finalBlock>=\\9\\?${Q}expired${Q}:null\\}`,
 );
 // the EVM run's hand-off: seed and keys zeroed first, then each kept note still INCOMING; a store read that fails hands
 // every kept note over as open (low 5)
@@ -149,7 +151,7 @@ export const WHY = {
   solEnd: "a Solana deposit's end is read off its captured sends, before its mark, with a read after the sign out, or told not_landed while the pass builds it again: the app may hear not_landed for a deposit that lands; or the reads are not handed its newest send",
   solLeft: "a Solana run hands the reads sends it already settled, or no hand-off at all",
   solKind: "a Solana deposit whose run ends with a send still open (or throws past it) tells the app nothing more, or part filled while it may still land",
-  evmEnd: "an EVM deposit's end is read off its first send, before U's nonce, on a Deposited not final, with a read after the sign out, or told not_landed while the pass builds it again; or the reads are not handed its newest send",
+  evmEnd: "an EVM deposit's end is read off its first send, before U's nonce, on a take at another value not final, with a read after the sign out, or told not_landed while the pass builds it again; or the reads are not handed its newest send",
   evmLeft: "an EVM run hands the reads nothing, reads the store before zeroing the seed and keys, or hands no note over when that read fails (part_filled told while a note may land, or nothing after sent)",
   evmKind: "an EVM deposit whose run ends with a send still open tells the app nothing more, or part filled while it may still land",
   solRung: "a Solana rung's landing is posted as filled, which ends the trade in the app at the first rung",

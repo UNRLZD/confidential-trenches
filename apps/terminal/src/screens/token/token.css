@@ -24,6 +24,8 @@
 .tkp-ib::after { content: ""; position: absolute; inset: -9px -1px; }
 .tkp-ib:hover { color: var(--text-1); }
 .tkp-ib[data-on="true"] { color: var(--paper, #f4f4f2); }
+/* a pad's link is its logo (TokenPage LinkMark), round as the avatar's badge draws it (the file is an opaque square) */
+.tkp-padmark { display: block; width: 16px; height: 16px; border-radius: 50%; }
 .tkp-copy { position: relative; display: flex; flex: none; padding: 0; border: 0; background: transparent; color: var(--text-3); cursor: pointer; }
 .tkp-copy::after { content: ""; position: absolute; inset: -12px -8px -12px -12px; }
 .tkp-copy:hover, .tkp-mca:hover { color: var(--text-2); }
@@ -41,6 +43,8 @@
    the first paint, so the main column never moves when the rail's rows land */
 .tkp-desk { height: 100%; display: grid; grid-template-columns: 340px minmax(0, 1fr) 440px; gap: 8px; padding: 0 8px 8px; }
 @media (max-width: 1499.98px) { .tkp-desk { grid-template-columns: 78px minmax(0, 1fr) 440px; } }
+/* the rail folded by its « (Rail.tsx, kept on this device): its rings column, as under 1500 */
+.tkp-desk:has(> .tkr[data-collapsed="true"]) { grid-template-columns: 78px minmax(0, 1fr) 440px; }
 @media (max-width: 1179.98px) { .tkp-desk { grid-template-columns: minmax(0, 1fr) 440px; } .tkp-desk > .tkr { display: none; } }
 .tkp-main { display: flex; flex-direction: column; gap: 8px; min-width: 0; min-height: 0; }
 .tkp-head { flex: none; display: flex; align-items: center; gap: 14px; padding: 6px 4px 2px; flex-wrap: nowrap; }
@@ -64,6 +68,8 @@
 /* a tile is drawn for 8 characters (discover/format.ts priceTile, usdTile; model.ts changeTile), skeleton or value,
    so the strip's width never follows the data */
 .tkp-tile .tkp-val { min-width: 8ch; text-align: center; }
+/* the 24h change carries UNRLZD's arrow (▲ 12.90%): its value holds that width from the first paint, so nothing moves when it lands (BAR-10 CLS 0) */
+.tkp-tile[data-k="change"] .tkp-val { min-width: 10ch; }
 .tkp-tile { flex: none; min-width: 96px; padding: 8px 14px; border-radius: 10px; background: var(--bg-panel); display: flex; flex-direction: column; align-items: center; gap: 4px; }
 
 .tkp-chart { flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--bg-panel); border: 1px solid var(--border-panel); border-radius: 10px; overflow: hidden; }
@@ -72,7 +78,9 @@
 .tkp-tf[aria-pressed="true"] { background: var(--bg-raised); color: var(--text-1); }
 /* a timeframe the helper does not serve for this chain (1s off Solana): drawn, not usable */
 .tkp-tf:disabled { opacity: 0.35; cursor: default; }
-.tkp-plot { position: relative; flex: 1; min-height: 0; background-image: repeating-linear-gradient(to bottom, transparent 0, transparent 63px, #161616 63px, #161616 64px); }
+/* the chart row: the drawing toolbar's column, then the plot (UNRLZD ChartPanel .row / .chartWrap) */
+.tkp-plotrow { position: relative; flex: 1; min-height: 0; display: flex; }
+.tkp-plot { position: relative; flex: 1; min-width: 0; min-height: 0; background-image: repeating-linear-gradient(to bottom, transparent 0, transparent 63px, #161616 63px, #161616 64px); }
 .tkp-plotsk { position: absolute; inset: 14px 62px 20px 12px; }
 /* the chart (card app-token-chart): the library's canvas fills the plot, which keeps its size in every state; the CSS
    grid stands for the chart only until bars are drawn. Legend after R5 unrlzd.css .cp-legend, .cp-lg* */
@@ -137,6 +145,9 @@
   .tkp-mca::before { content: ""; position: absolute; left: 50%; top: 50%; width: max(100%, 44px); height: max(100%, 44px); transform: translate(-50%, -50%); }
   .tkp-mca .tkp-ca { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .tkp-hero .tkp-meta > .tkp-mca { flex: 0 1 auto; }
+  /* the name keeps its width up to 40% of the line and the address gives way (UNRLZD mobile/token .name): shrinking with
+     the address left a 390 px phone "Ju…" of Jupiter (owner 13 Nov) */
+  .tkp-hero .tkp-meta > .tkp-name { flex: none; max-width: 40%; }
   /* the link row (R5 mt-links): the identity's link icons, under the address */
   /* one row of a fixed height, empty or full, drawn before the token answers (R5 .mlinks: one row) */
   .tkp-links { display: flex; align-items: center; gap: 6px; flex-wrap: nowrap; height: 28px; }
@@ -154,8 +165,11 @@
   .tkp-dot { width: 3px; height: 3px; border-radius: 50%; background: var(--text-3); }
   .tkp-meta > .tkp-ca { max-width: none; }
   .tkp-chart { margin-top: 14px; border: 0; border-radius: 0; background: transparent; }
-  .tkp-plot { flex: none; height: 300px; }
-  .tkp-legend { left: 16px; max-width: calc(100% - 96px); }
+  .tkp-plotrow { flex: none; }
+  /* the plot fills its row's width beside the drawing toolbar (a row: flex none would size it to its 0-wide canvas) */
+  .tkp-plot { flex: 1 1 0; height: 300px; }
+  /* clear of the drawing tools' toggle over the plot's top-left (UNRLZD ChartPanel .legend at 699 px: left 52) */
+  .tkp-legend { left: 52px; max-width: calc(100% - 138px); }
   .tkp-tfs-ph { height: auto; justify-content: space-between; padding: 10px 12px 0; border: 0; }
   /* seven timeframes in one row at 360 (7 x 46 + the row's 24 of padding): each still a 44 px tap target */
   .tkp-tfs-ph .tkp-tf { height: 44px; min-width: 46px; border-radius: 12px; font-size: 14px; }
@@ -185,3 +199,6 @@
   .tkp-ssym { font-size: 18px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .tkp-sprice { font: 13px var(--font-num); font-variant-numeric: tabular-nums; color: var(--text-2); }
 }
+/* the flashed figures (useFlash) are their own paint layers, as UNRLZD's header figures (Header.module.css .mcVal,
+   .tileVal): each flash frame repaints the figure, not the screen's layer under it; position moves nothing */
+.tkp-mcval, .tkp-tile[data-k="price"] .tkp-val, .tkp-price { position: relative; }

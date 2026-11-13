@@ -36,7 +36,8 @@ const fails = (r, re) => {
 
 test("the state's pool is the devnet one: a 0.01 SOL note, one tap's most by the kit's rule (1,736,080 lamports)", () => {
   assert.deepEqual(POOL.ready, { chain: "solana", asset: "SOL", balance: "0.01", ready: "0.01", tap_max: "0.00173608" });
-  assert.equal(POOL.making.ready, "0");
+  // the making state names a proof being made: without `making` the box draws no label (red on release 125, live run 43328445607)
+  assert.deepEqual(POOL.making, { chain: "solana", asset: "SOL", balance: "0.01", ready: "0", making: "0.01" });
 });
 
 test("recorded good answer: the pool path, the state's proof label, no vault buy, at both widths: PASS", () => {

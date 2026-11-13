@@ -184,6 +184,12 @@ try {
       if (!f) await page.waitForTimeout(100);
     }
     if (!f) throw new Error(`${w.name}: no APP_HOST frame inside the shell`);
+    if (w.isMobile) {
+      // the phone's / is the Trenches list (owner 12 Nov, "Phone home: Trenches list"): the chart is a row's tap away
+      const row = f.locator('[data-testid="phone-trenches-row"]').first();
+      await row.waitFor({ timeout: 10_000 }).catch(() => {});
+      await row.tap().catch(() => {});
+    }
     const ok = await f.waitForSelector(`${box} .tkp-plot[data-drawn="true"]`, { timeout: 15_000 }).then(() => true, () => false);
     if (!ok) {
       const state = await f.evaluate(() => ({ url: location.href, page: document.querySelector("[data-token-page]")?.getAttribute("data-token-page") ?? null, chart: [...document.querySelectorAll("[data-chart]")].map((e) => e.getAttribute("data-chart")), text: document.body.innerText.slice(0, 300) }));

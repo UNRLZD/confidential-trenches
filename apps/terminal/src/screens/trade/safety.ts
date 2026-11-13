@@ -9,7 +9,7 @@ import { curve } from "../market/curve.ts";
 import type { WordId } from "./words.ts";
 
 /** The token read's `risk` part as far as the grid reads it. A field the read leaves out is unknown. */
-export type RiskRead = Partial<Record<"insiders_bps" | "tax" | "lp" | "honeypot", { v?: unknown } | null | undefined>>;
+export type RiskRead = Partial<Record<"insiders_bps" | "tax" | "lp" | "honeypot" | "top10_bps" | "dev_bps" | "snipers_bps" | "holders" | "liq_usd" | "age_s" | "mint_auth" | "freeze_auth", { v?: unknown } | null | undefined>>;
 
 /** plain: no verdict; warn: amber; bad: coral; unknown: no value. The first three cells draw plain as `good` (green). */
 export type Tone = "good" | "plain" | "warn" | "bad" | "unknown";
@@ -56,9 +56,16 @@ const valueOf = (f: { v?: unknown } | null | undefined): unknown => (typeof f ==
 /** The twelve cells, in R5's order. `nowMs` is the clock the age is drawn against. */
 export function safetyCells(row: MarketRow, risk: RiskRead | null | undefined, nowMs: number): Cell[] {
   const r = risk ?? {};
-  const top10 = shareCell("top10", row.top10_bps, (b) => (b === null ? null : b / 100 >= LINE.top10 ? "x" : "check"));
-  const dev = shareCell("dev", row.dev_bps, () => "dev");
-  const snipers = shareCell("snipers", row.snipers_bps, () => "sniper");
+  // the row's field, else the token read's own `risk` field for it (the helper reads some on chain that the list row
+  // leaves null: a Solana token's dev share, for one); never a guess
+  const or = (rowV: unknown, k: keyof RiskRead): unknown => (rowV === null || rowV === undefined ? valueOf(r[k]) : rowV);
+  const top10 = shareCell("top10", or(row.top10_bps, "top10_bps"), (b) => (b === null ? null : b / 100 >= LINE.top10 ? "x" : "check"));
+  const dev = shareCell("dev", or(row.dev_bps, "dev_bps"), () => "dev");
+  const snipers = shareCell("snipers", or(row.snipers_bps, "snipers_bps"), () => "sniper");
+  const holdersV = or(row.holders, "holders");
+  const liqV = or(row.liq_usd, "liq_usd");
+  const ageS = valueOf(r.age_s);
+  const createdS = typeof row.created_s === "number" ? row.created_s : typeof ageS === "number" && Number.isFinite(ageS) ? Math.floor(nowMs / 1000) - ageS : null;
   const insiders = shareCell("insiders", valueOf(r.insiders_bps), () => null);
   const plain = (id: "holders" | "liq" | "age", text: string): Cell => ({ id, text, icon: null, tone: text === DASH ? "unknown" : "plain" });
   // the transfer fee on a buy or a sell, whichever is higher; none is 0%
@@ -76,13 +83,13 @@ export function safetyCells(row: MarketRow, risk: RiskRead | null | undefined, n
     top10,
     dev,
     snipers,
-    plain("holders", count(row.holders)),
-    plain("liq", usd(row.liq_usd)),
-    plain("age", age(row.created_s, nowMs)),
+    plain("holders", count(typeof holdersV === "number" ? holdersV : null)),
+    plain("liq", usd(typeof liqV === "string" ? liqV : null)),
+    plain("age", age(createdS, nowMs)),
     insiders,
     tax,
-    authCell("mintAuth", row.mint_auth),
-    authCell("freezeAuth", row.freeze_auth),
+    authCell("mintAuth", or(row.mint_auth, "mint_auth")),
+    authCell("freezeAuth", or(row.freeze_auth, "freeze_auth")),
     lp,
     honeypot,
   ];

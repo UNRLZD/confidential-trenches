@@ -742,7 +742,10 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
         // write of every pool's notes did: no floor after it writes, and the run ends on its error once the walks settle
         let floors: Promise<unknown> = Promise.resolve();
         let floorFailed: { e: unknown } | null = null;
-        const floor = (scope: bigint, notes: readonly RestoredNote[]): Promise<void> => {
+        // Once a pool's floor has written, the page says so in one line, the chain's name alone (card
+        // restore-shows-the-balance-in-seconds: the live check reads when the first balance is the restored one); a
+        // floor that fails, or one after a failed one, says nothing
+        const floor = (chain: "solana" | "near" | "base" | "robinhood", scope: bigint, notes: readonly RestoredNote[]): Promise<void> => {
           const r = floors.then(async () => {
             if (floorFailed !== null) return;
             await seedHeld(async () => {
@@ -756,6 +759,7 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
                 ns.close();
               }
             });
+            console.info(`restore: ${chain} walked`);
             if (notes.length > 0) h.written?.();
           }).catch((e: unknown) => void (floorFailed ??= { e }));
           floors = r;
@@ -765,19 +769,19 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
           if (p.rpcs === null) throw new Error("no reads on this page");
           if (p.chain === "near") {
             const notes = (await letGo(vaultWalk({ network: p.network, rpcs: p.rpcs(), seed64: seed, signal, turn, ...walkers }), signal)).notes;
-            await floor(p.scope, notes);
+            await floor("near", p.scope, notes);
             return notes;
           }
           if (p.chain === "solana") {
             const lister = p.lister?.();
             const notes = (await letGo(solana({ seed64: seed, program: p.program, rpcs: p.rpcs(), ...(lister ? { lister } : {}), ...(p.cache ? { cache: p.cache } : {}), ...(p.markBatches ? { markBatches: p.markBatches } : {}), signal, turn: solanaTurn, ...walkers }), signal)).notes;
-            await floor(p.scope, notes);
+            await floor("solana", p.scope, notes);
             return notes;
           }
           // the notes only: no W's Transfer logs are read (wallets: false)
           // the page's hold (the deposit's sync's too) and its history sources (card evm-pool-leaves-any-source)
           const r = await letGo(evm({ seed64: seed, pin: p.pin, rpcs: p.rpcs(), signal, wallets: false, held: pageEvmHold(p.pin, () => h.held ? h.held() : h.store()), history: pageEvmHistory(p.pin), turn, ...walkers }), signal);
-          await floor(p.scope, r.notes);
+          await floor(chainOf(p), p.scope, r.notes);
           // each buy's record again from its own transaction, so a restored W sells on its buy's route (card
           // signpage-evm-pool-sell, pool-sell-evm.ts restoreEvmHoldings: no read names W or a transaction); the testnet
           // build only: it asks the pool's public RPCs for the Bought logs and the whole block at each of one device's

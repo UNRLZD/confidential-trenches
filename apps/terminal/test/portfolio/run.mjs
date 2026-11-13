@@ -129,14 +129,19 @@ const check = (ok, what) => ok || fails.push(what);
 const states = (page) => page.locator(".pf").getAttribute("data-states").then((s) => (s ?? "").split(" "));
 
 let BASE = "";
+const LOGO = "https://ct-api.unrealized.trade/v1/logo/";
 async function open(browser, w, f) {
   const ctx = await browser.newContext({ viewport: w.viewport, deviceScaleFactor: w.deviceScaleFactor, isMobile: w.isMobile, hasTouch: w.hasTouch, reducedMotion: "reduce", timezoneId: "UTC", colorScheme: SCHEME });
   await ctx.addInitScript(INIT);
   const page = await ctx.newPage();
   await page.clock.install({ time: NOW - 1000 });
   await page.clock.pauseAt(NOW);
+  // each token avatar asks the helper for its logo (Avatar.tsx logoUrl, GET /v1/logo/{chain}/{token}; the signed-in walk of release 124, 12 Nov:
+  // Closed drew "78GaXF" with no picture): answered here as the helper answers a token it has no logo for, a 404, so
+  // each keeps its initials. Our own host, so not an external request; anything else leaving the page still is.
+  await page.route((u) => u.href.startsWith(LOGO), (r) => r.fulfill({ status: 404, body: "" }));
   const external = [];
-  page.on("request", (r) => !r.url().startsWith(BASE) && !r.url().startsWith("data:") && external.push(r.url()));
+  page.on("request", (r) => !r.url().startsWith(BASE) && !r.url().startsWith("data:") && !r.url().startsWith(LOGO) && external.push(r.url()));
   await page.goto(`${BASE}/?f=${f}`);
   await page.waitForSelector(".pf");
   await page.evaluate(() => document.fonts.ready);
@@ -227,12 +232,21 @@ try {
           const box = b.getBoundingClientRect();
           const clipped = [...b.querySelectorAll("span")].filter((e) => e.getClientRects().length && e.scrollWidth > e.clientWidth + 0.5 && getComputedStyle(e).display !== "inline").map((e) => e.textContent);
           const rows = [...b.querySelectorAll("[data-pool]")].filter((x) => x.getAttribute("data-pool") !== "unread").map((x) => [...x.children].map((c) => c.textContent));
-          return { view: b.getAttribute("data-pools"), rows, inside: box.bottom <= panel.bottom + 0.5 && box.right <= panel.right + 0.5, clipped };
+          // every row drawn without a scroll: its cells end above the bottom of the box that shows them (desktop's
+          // Where it is scrolls, so a row past it is hidden though the block sits in the panel; the signed-in walk of release 124, 12 Nov, 1440 x 900:
+          // Robinhood, the 4th row, cut off the bottom of Private balance)
+          const sc = b.closest(".eqbrk");
+          const edge = Math.min(panel.bottom, sc ? sc.getBoundingClientRect().bottom : panel.bottom);
+          // the row's words and numbers (not Withdraw's tap box or its HopLine, padded past the line on purpose)
+          const cells = (x) => [...x.children].filter((c) => !c.matches(".plw, .hopline"));
+          const hidden = [...b.querySelectorAll("[data-pool]")].filter((x) => cells(x).some((c) => c.getBoundingClientRect().bottom > edge + 0.5)).map((x) => x.getAttribute("data-pool"));
+          return { view: b.getAttribute("data-pools"), rows, inside: box.bottom <= panel.bottom + 0.5 && box.right <= panel.right + 0.5, clipped, hidden, scroll: sc ? [sc.scrollHeight, sc.clientHeight] : null };
         }, phone ? ".pfm .pools" : ".pfd .pools");
         const [view, rows] = POOLS[f];
         check(r?.view === view, `${tag}: pools view ${r?.view}, want ${view}`);
         if (rows) check(JSON.stringify(r.rows) === JSON.stringify(rows), `${tag}: pool rows ${JSON.stringify(r?.rows)}`);
         check(r?.inside && r.clipped.length === 0, `${tag}: pool block outside its panel or clipped ${JSON.stringify(r)}`);
+        check(r?.hidden.length === 0, `${tag}: pool rows past the bottom of what shows them ${JSON.stringify(r?.hidden)} (scroll ${JSON.stringify(r?.scroll)})`);
       }
       // the S10 row bars need a full list: the open buy's fixture holds one row
       if (want === "S10.3" && !phone && !f.startsWith("openbuy")) {
