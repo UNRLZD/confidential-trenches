@@ -2040,6 +2040,12 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         void settleReserved().catch(() => {});
       },
       seed64: page.seed64,
+      // W's buy mint, written before the send: the rent back after a later sell holds while W holds any of it
+      bought: buyMints(page.store),
+      send: (pool, tx) => helperPoolSend(pool, tx, over.fetch),
+      sendPieces: (pool, txs) => helperPoolSendPieces(pool, txs, over.fetch),
+      // a buy of several pieces' owed record, before its take (resumePieces, on the state reads)
+      piecesOwed: piecesOwedOf(page.store),
       // a buy that spends its change in the same tap (card buy-spends-its-change-in-the-same-tap): the notes' values, and a
       // first round's change (the note its settle wrote, parent the released note) proved to that round's W
       carry: {
@@ -2055,12 +2061,6 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
           return (await q()).proveFor(c.id, to, solanaStop.signal);
         },
       },
-      // W's buy mint, written before the send: the rent back after a later sell holds while W holds any of it
-      bought: buyMints(page.store),
-      send: (pool, tx) => helperPoolSend(pool, tx, over.fetch),
-      sendPieces: (pool, txs) => helperPoolSendPieces(pool, txs, over.fetch),
-      // a buy of several pieces' owed record, before its take (resumePieces, on the state reads)
-      piecesOwed: piecesOwedOf(page.store),
       // the received token's decimals, for W's buy record (src/positions.ts recordPoolBuy), and kept for the session: read
       // on both RPCs with the amount, so a sell of it asks no decimals read (card sell-first-read-waits-out-a-throttle)
       outDecimals: (wallet, d, mint) => {
