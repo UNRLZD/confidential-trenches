@@ -36,7 +36,13 @@
 //     no request names an address or id the words' account's requests to the pinned hosts carried (none that the first
 //     account's requests or the page's own code carry; a live run must find at least one); a state asked again
 //     answers signed out;
-//   - every message the frame gets is ready, an answer or a state event, each state exact;
+//   - an open kind (signin.open, signout) is answered exactly { pending: true }, or since card
+//     signing-layer-says-when-it-closes (kit 1.13, the version this probe's hello names) exactly { pending: true,
+//     closes: true }; closes false or any other key is BAD;
+//   - every message the frame gets is ready, an answer, a state event or a closed notice ({ v: 1, type: "closed", id },
+//     once, for an open answered closes: true), each state exact. That the notice reaches the app is not judged here:
+//     every open this run makes ends with the app's document gone (the typed words take the frame out, a passkey
+//     Saved loads the frame again, a sign out reloads the top window), the one ending the page tells nothing of;
 //   - the frame cannot be sent to another origin: set to https://example.com, no request for it is made (CSP frame-src);
 //   - no request goes to any host but SIGN_HOST and APP_HOST, but a pinned pool's host while signed in (below).
 // Each event must come within EVENT_MS of its step. The APP_HOST page is this check's own (APP_PAGE): it speaks the
@@ -125,6 +131,7 @@ const show = (s) =>
     : "none";
 const isEvent = (d) => isObj(d) && d.v === 1 && d.type === "state" && !Object.hasOwn(d, "id") && sameKeys(d, ["v", "type", "state"]);
 const isAnswer = (d) => isObj(d) && d.v === 1 && typeof d.id === "string" && d.ok === true && sameKeys(d, ["v", "id", "ok", "result"]);
+const isClosed = (d) => isObj(d) && d.v === 1 && d.type === "closed" && typeof d.id === "string" && sameKeys(d, ["v", "type", "id"]);
 const isRefusal = (d) => isObj(d) && d.v === 1 && typeof d.id === "string" && d.ok === false && sameKeys(d, ["v", "id", "ok", "error"]);
 
 /** The addresses and ids a recorded request carries in its path, query or calls: hex of 40 digits or more (an EVM
@@ -171,7 +178,13 @@ export function judge(rec) {
     const a = answer(id)?.data;
     return !!a && a.ok === false && sameKeys(a, ["v", "id", "ok", "error"]) && sameKeys(a.error, ["code"]) && a.error.code === "not_allowed";
   };
-  const pending = (id) => sameKeys(result(id), ["pending"]) && result(id).pending === true;
+  // an open kind's ok answer: { pending: true }, or since card signing-layer-says-when-it-closes (kit 1.13) to an app
+  // that said hello as 1.13 or later { pending: true, closes: true } (the kit's schema takes closes only as true);
+  // closes false or any other key is no pending answer
+  const pending = (id) => {
+    const r = result(id);
+    return (sameKeys(r, ["pending"]) || (sameKeys(r, ["pending", "closes"]) && r.closes === true)) && r.pending === true;
+  };
   const full = (way) => (s) => exactState(s) && s.signed_in === true && s.way === way && s.code_saved === true;
 
   const v = rec.view ?? {};
@@ -276,9 +289,14 @@ export function judge(rec) {
 
   // a state is an event's, or an answer's whose result says signed_in (nav, reload and signin.open answer others)
   const states = msgs.flatMap((m) => (isEvent(m.data) ? [m.data.state] : isAnswer(m.data) && isObj(m.data.result) && Object.hasOwn(m.data.result, "signed_in") ? [m.data.result] : []));
-  const other = msgs.filter((m) => !isEvent(m.data) && !isAnswer(m.data) && !isRefusal(m.data) && m.data?.type !== "ready");
+  // a closed notice (card signing-layer-says-when-it-closes) is the type and an id alone, for an open answered
+  // closes: true, once per open; any other is another message
+  const closing = new Set(msgs.filter((m) => isAnswer(m.data) && sameKeys(m.data.result, ["pending", "closes"])).map((m) => m.data.id));
+  const told = new Set();
+  const closedOk = (d) => isClosed(d) && closing.has(d.id) && !told.has(d.id) && !!told.add(d.id);
+  const other = msgs.filter((m) => !isEvent(m.data) && !isAnswer(m.data) && !isRefusal(m.data) && m.data?.type !== "ready" && !closedOk(m.data));
   say(states.length >= 4 && states.every(exactState) && other.length === 0,
-    `every message is ready, an answer or a state event, each state exact (${states.length} states, ${other.length} other)`);
+    `every message is ready, an answer, a state event or one closed notice for an open answered closes, each state exact (${states.length} states, ${told.size} closed, ${other.length} other)`);
   const strayFrame = (rec.requests ?? []).filter((x) => x.host === new URL(STRANGER).host);
   say(st.stranger?.done === true && strayFrame.length === 0,
     `the frame cannot be sent to ${STRANGER} (${st.stranger?.done ? `${strayFrame.length} requests for it` : "not tried"})`);
