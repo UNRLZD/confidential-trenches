@@ -386,6 +386,8 @@ for (const kind of KINDS) {
   runs[kind].proofWait = f?.proofWait ?? null;
   runs[kind].buySend = { lines: (f?.sendLines ?? []).filter((x) => x.phase === "buy").map((x) => x.line), sendStartMs: sendAt?.at ?? null, helperMs: sendAt?.ms ?? null, filledMs: filledAt?.at ?? null, sendToFilledMs: sendAt && filledAt ? filledAt.at - sendAt.at : null, engineCalls: f?.engineCalls ?? [] };
   log(`${kind} buy send: ${JSON.stringify(runs[kind].buySend)}`);
+  // the device's spacing stamps (pool-flow-devnet.mjs): each with the count of transactions sent before it
+  log(`${kind} device stamps: ${JSON.stringify(f?.stamps ?? null)} over ${JSON.stringify((f?.steps ?? []).map((x) => [x.step, x.signature.slice(0, 8)]))}`);
   if (withdraw && !withdraw.sent) records.push({ coin: kind, step: "withdraw", ok: false, op: withdraw.op ?? null, view: withdraw.view?.state ?? null, tail: runs[kind].withdraw.tail.slice(-8) });
   if (!f) records.push({ coin: kind, step: "flow", ok: false, exit: flow.code, tail: flow.out.split("\n").slice(-15) });
 }
