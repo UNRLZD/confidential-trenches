@@ -1373,12 +1373,12 @@ test("take writes the last height and nullifier it is handed on the RESERVED not
   assert.equal((await v.ns.marks()).has(b!.noteId), false);
 });
 
-// card evm-deposit-on-mainnet: an empty pool's first deposit is buyable in its first minute. The pool's trees refuse a
+// an empty pool's first deposit is buyable in its first minute. The pool's trees refuse a
 // cut that holds no leaf (the wallet's PoolNoLeafError, a plain Error before it was typed); the queue's epoch read takes
 // that as an epoch tree of no leaf, so the note is proved on the newest root in the same pass.
 const NoLeaf = (((await import("../src/pool/pool.ts")) as { PoolNoLeafError?: new (m: string) => Error }).PoolNoLeafError ?? Error);
 
-test("(card evm-deposit-on-mainnet) the EVM pool's shape: an empty pool whose first leaf lands this epoch: the queue's pass makes its proof on the newest root, one the pool holds (before: the pass failed)", async () => {
+test("the EVM pool's shape: an empty pool whose first leaf lands this epoch: the queue's pass makes its proof on the newest root, one the pool holds (before: the pass failed)", async () => {
   const v = await vaultWith([]);
   v.stateLeaves.length = 0;
   v.labelLeaves.length = 0;
@@ -1404,7 +1404,7 @@ test("(card evm-deposit-on-mainnet) the EVM pool's shape: an empty pool whose fi
   assert.equal(fresh!.wallet.address, W("evm", dep.ref, dep.leaf!.label));
 });
 
-test("(card evm-deposit-on-mainnet) the Solana pool's shape, the wallet's real tree sync: an empty pool whose first leaf lands this epoch: the queue's pass makes its proof on the newest root (before: the pass failed)", async () => {
+test("the Solana pool's shape, the wallet's real tree sync: an empty pool whose first leaf lands this epoch: the queue's pass makes its proof on the newest root (before: the pass failed)", async () => {
   const v = await vaultWith([]);
   v.stateLeaves.length = 0;
   v.labelLeaves.length = 0;

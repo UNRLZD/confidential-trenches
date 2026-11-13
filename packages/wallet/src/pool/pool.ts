@@ -45,8 +45,8 @@ import type { Ladder } from "./ladder.ts";
 /** A pool's two trees, holding every leaf it has, and its newest roots, read on two RPCs. */
 export type PoolTrees = { stateTree: VaultTree; labelTree: VaultTree; stateRoot: bigint; labelRoot: bigint };
 
-/** trees(beforeMs)'s answer for a cut that holds no leaf (an empty pool's first leaf landing this epoch, card
- *  evm-deposit-on-mainnet): not a fault, the cut holds no note, so a caller takes the newest root at once. `code`: the
+/** trees(beforeMs)'s answer for a cut that holds no leaf (an empty pool's first leaf landing this epoch): not a fault,
+ *  the cut holds no note, so a caller takes the newest root at once. `code`: the
  *  cause a stop names (pool-sell.ts legCause), never the message. */
 export class PoolNoLeafError extends Error {
   readonly code = "no_leaf";

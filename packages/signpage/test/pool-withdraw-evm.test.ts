@@ -499,7 +499,7 @@ type RunPlant = {
   /** the pool's trees refuse a cut that holds no leaf, as the wallet's do (wallet pool/evm.ts trees: "no leaf before") */
   noLeaf?: boolean;
 };
-// the wallet's refusal of a cut with no leaf: its typed PoolNoLeafError (card evm-deposit-on-mainnet), a plain Error before
+// the wallet's refusal of a cut with no leaf: its typed PoolNoLeafError, a plain Error before
 const NoLeaf = (((await import("../../wallet/src/pool/pool.ts")) as { PoolNoLeafError?: new (m: string) => Error }).PoolNoLeafError ?? Error);
 async function runWorld(plant: RunPlant = {}) {
   const ws = await openWalletStore({ indexedDB: new IDBFactory() });
@@ -1187,7 +1187,7 @@ const rootsOf = (world: Awaited<ReturnType<typeof runWorld>>): bigint[] => {
   return roots;
 };
 
-test("(card evm-deposit-on-mainnet) an empty pool's first leaf, landed this epoch: the epoch cut holds no leaf (the wallet's PoolNoLeafError), so the part proves at once on the newest root, one the pool holds, and sends (before: stopped)", async () => {
+test("an empty pool's first leaf, landed this epoch: the epoch cut holds no leaf (the wallet's PoolNoLeafError), so the part proves at once on the newest root, one the pool holds, and sends (before: stopped)", async () => {
   for (const change of [false, true]) {
     const world = await runWorld({ change, thisEpoch: true, noLeaf: true });
     const roots = rootsOf(world);
@@ -1204,7 +1204,7 @@ test("(card evm-deposit-on-mainnet) an empty pool's first leaf, landed this epoc
   }
 });
 
-test("(card evm-deposit-on-mainnet) beside it, a pool with older leaves and the note landed this epoch: the epoch cut holds the older leaf, so the plan and the run are the ones the pool gave before (the same binds, the newest root, sent)", async () => {
+test("beside it, a pool with older leaves and the note landed this epoch: the epoch cut holds the older leaf, so the plan and the run are the ones the pool gave before (the same binds, the newest root, sent)", async () => {
   const runs = [];
   for (const noLeaf of [false, true]) {
     const world = await runWorld({ thisEpoch: true, rested: [10n ** 14n], noLeaf });

@@ -128,7 +128,7 @@ test("planted: each EVM withdraw site off the rule, or not read, is a FAIL on th
   assert.equal(spoil((a) => delete a.page.withdrawSites).verdict, "FAIL", "not read");
 });
 
-test("the withdraw sites on planted bundles, in the minified shape of this card's build: each one folded behind a constant (POOL_TESTNET on SIGN_HOST) reads false", () => {
+test("the withdraw sites on planted bundles, in the minified shape of this build: each one folded behind a constant (POOL_TESTNET on SIGN_HOST) reads false", () => {
   const Q = "`";
   const js =
     "var X=Object.freeze({solana:!0,base:!0,robinhood:!0}),F=(e,t=X)=>t[e]===!0;" +

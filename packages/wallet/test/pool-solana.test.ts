@@ -248,7 +248,7 @@ test("trees refuses an RPC that has not reached the cut, two RPCs that differ, a
   await assert.rejects(poolWith(pair(relChain(), relChain())).trees(T(0) * 1000n), /no leaf before/);
 });
 
-// card evm-deposit-on-mainnet: a stop names its cause by code (pool-sell.ts legCause), never by message, so each refusal
+// a stop names its cause by code (pool-sell.ts legCause), never by message, so each refusal
 // of a tree read carries one, its words kept (before: a plain Error, no code)
 test("each refusal of a tree read carries its code: rpc_disagree, root_mismatch, time_back, page_changed, no_leaf, not_reached", async () => {
   const before = T(5) * 1000n + 1n;

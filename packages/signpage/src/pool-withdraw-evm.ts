@@ -663,7 +663,7 @@ async function onePart(h: EvmWithdrawHost, ask: PoolAsk, notes: NoteStore, p: Wi
     // one budget for every wait of this part on chain time
     const left = { ms: P.epochMs + EVM_WITHDRAW_BOUNDARY_LAG_MS };
     // a cut that holds no leaf (an empty pool's first leaf landing this epoch: PoolNoLeafError) is a cut that does not
-    // hold the note: null, so the newest root is taken at once (card evm-deposit-on-mainnet)
+    // hold the note: null, so the newest root is taken at once
     const read = (cut: bigint, opts?: { newest?: boolean }): Promise<PoolTrees | null> =>
       P.trees(cut, AbortSignal.timeout(EVM_WITHDRAW_TREES_MS), opts).catch((e: unknown) => {
         if (e instanceof PoolNoLeafError) return null;

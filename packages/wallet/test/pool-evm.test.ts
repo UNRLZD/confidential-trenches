@@ -3167,7 +3167,7 @@ test("review of 39a4c67a, P3-4: Tenderly's cap, named in its error's data, pages
   assert.ok(pages.slice(0, -1).every((n) => n === 1_000), `pages: ${[...new Set(pages)].join(", ")}`);
 });
 
-// card evm-deposit-on-mainnet: a stop names its cause by code (pool-sell.ts legCause), never by message, so each refusal
+// a stop names its cause by code (pool-sell.ts legCause), never by message, so each refusal
 // of a tree read carries one, its words kept (before: a plain Error, or a named one with no code)
 test("each refusal of the EVM tree read carries its code: rpc_disagree, root_mismatch, no_agreed_logs, no_leaf, lag, unanswered", async () => {
   const coded = (code: string, words: RegExp) => (e: unknown) => {

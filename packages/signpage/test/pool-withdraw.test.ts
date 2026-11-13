@@ -1669,7 +1669,7 @@ test("review of 418af7d5: withdraw, a release with no signature to read back who
   assert.ok(t - Number(NOW) <= POOL_BUY_SETTLE_MS + 2_000, `${t - Number(NOW)} ms`);
 });
 
-// card evm-deposit-on-mainnet, on Solana: a cut that holds no leaf is refused, as the wallet's tree sync refuses it
+// on Solana: a cut that holds no leaf is refused, as the wallet's tree sync refuses it
 // (solana.ts: "no leaf before"; the typed PoolNoLeafError, a plain Error before it was typed)
 const NoLeaf = (((await import("../../wallet/src/pool/pool.ts")) as { PoolNoLeafError?: new (m: string) => Error }).PoolNoLeafError ?? Error);
 function cutRefusingEmpty(times: readonly bigint[]) {
@@ -1682,7 +1682,7 @@ function cutRefusingEmpty(times: readonly bigint[]) {
     };
 }
 
-test("(card evm-deposit-on-mainnet) an empty pool's leaves all landed this epoch: the epoch cut holds no leaf, so the note proves at once on the newest root, one the pool holds, and sends (before: stopped)", async () => {
+test("an empty pool's leaves all landed this epoch: the epoch cut holds no leaf, so the note proves at once on the newest root, one the pool holds, and sends (before: stopped)", async () => {
   const waits: number[] = [];
   // the note is the pool's first leaf (leaf 0), landed after the epoch began (NOW is 1 s into it); leaves 1 and 2 after now
   const wd = await world([30_000_000n, 1_000n, 1_000n], { trees: cutRefusingEmpty([NOW - 1n, NOW + 29_000n, NOW + 29_001n]), wait: async (ms) => void waits.push(ms) });
@@ -1695,7 +1695,7 @@ test("(card evm-deposit-on-mainnet) an empty pool's leaves all landed this epoch
   assert.deepEqual(waits.filter((ms) => ms >= 1_000), [], `no boundary wait: ${waits}`);
 });
 
-test("(card evm-deposit-on-mainnet) beside it, on Solana: a pool with an older leaf and the note landed this epoch plans and proves as before on a pool that refuses an empty cut", async () => {
+test("beside it, on Solana: a pool with an older leaf and the note landed this epoch plans and proves as before on a pool that refuses an empty cut", async () => {
   for (const amount of [2_000_000n + MIN, 25_000_000n]) {
     const ends = [];
     for (const trees of [cutTrees, cutRefusingEmpty([NOW - 30_000n, NOW - 1n, NOW + 29_000n])]) {
