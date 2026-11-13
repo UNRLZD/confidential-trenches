@@ -168,8 +168,9 @@ export type PoolBuyHost = {
   cluster: "mainnet" | "devnet";
   /** Two RPCs of different operators. */
   rpcs: readonly [SolanaRpc, SolanaRpc];
-  /** The queue's ready proofs (never taken by reading them); the queue is opened first when it is not. */
-  ready(): Promise<readonly ReadyProof<SolanaReleaseRequest>[]>;
+  /** The queue's ready proofs a take hands out (never taken by reading them); the queue is opened first when it is not.
+   *  With `early`, on the take's own clock (queue.ts readyAt), so the pick never picks a proof its take refuses late. */
+  ready(early?: Promise<ChainNow>): Promise<readonly ReadyProof<SolanaReleaseRequest>[]>;
   /** The queue's take of this attempt: HELD -> RESERVED, written before it returns, with the signed transaction's last
    *  block height (blockhashOf's lastHeight); refused, the note HELD, when the note's ready proof is another attempt. */
   take(noteId: string, attempt: string, early?: Promise<ChainNow>, lastHeight?: bigint): Promise<ReadyProof<SolanaReleaseRequest>>;
@@ -775,6 +776,8 @@ async function buyRun(h: PoolBuyHost, ask: PoolAsk, at: { fault?: unknown }): Pr
     const tipOf = (k: number): bigint => solanaPoolBuyTip(h.cluster, k);
     // each root's leaf index, found once: absent when it is on no page or not on both RPCs at one index
     const roots = new Map<string, number | null>();
+    // each root whose read failed, by its key: thrown only by a pick that needs it
+    const faults = new Map<string, unknown>();
     const rootKey = (tree: 0 | 1, root: string): string => `${tree}:${root}`;
     const indexOf = (p: Ready): { state: number; label: number } | null => {
       const state = roots.get(rootKey(0, p.publicSignals[3]));
@@ -796,14 +799,24 @@ async function buyRun(h: PoolBuyHost, ask: PoolAsk, at: { fault?: unknown }): Pr
       if (own.length === 0) return no("venue_not_pinned");
       // round 2: each ready proof's root indexes not found yet (the sizes name the newest page), the venue, then the
       // device's blockhash and slot, started last (the venue's read and a page past the first start after it: below)
-      const lookups: Promise<void>[] = [];
-      for (const p of mine(await h.ready()))
-        for (const [tree, size, root] of [[0, sizes.state, p.publicSignals[3]], [1, sizes.label, p.publicSignals[5]]] as const) {
-          const k = rootKey(tree, root);
-          if (roots.has(k)) continue;
-          roots.set(k, null);
-          lookups.push(rootIndex(h, tree, size, dec(root)).then((i) => void roots.set(k, i), (e) => (e instanceof Refused ? undefined : Promise.reject(e))));
-        }
+      // `keep`: a read that fails is kept as that root's fault, not thrown: the list on the last-seen time may name a proof
+      // the pick never takes, and its root's read fault must not cost the buy a wait (review P3-3 of b8df326b6); the
+      // pick throws it only when its set needs that root. The take's own list throws at once, as before
+      const lookUp = (list: readonly Ready[], keep: boolean): Promise<void> => {
+        const got: Promise<void>[] = [];
+        for (const p of mine(list))
+          for (const [tree, size, root] of [[0, sizes.state, p.publicSignals[3]], [1, sizes.label, p.publicSignals[5]]] as const) {
+            const k = rootKey(tree, root);
+            if (roots.has(k)) continue;
+            roots.set(k, null);
+            got.push(rootIndex(h, tree, size, dec(root)).then((i) => void roots.set(k, i), (e) => (e instanceof Refused ? undefined : keep ? void faults.set(k, e) : Promise.reject(e))));
+          }
+        return Promise.all(got).then(() => {});
+      };
+      // the roots of the proofs listed now, at once, and of those the pick reads on the take's own time once the early
+      // read is in, in this round beside the venue and the blockhash: a proof only the take's clock lists is looked up
+      // too (review P3-2 of b57f4eb28), and the round never waits for the early read first (review P2-1 of 92ae9ded1)
+      const lookups: Promise<void>[] = [lookUp(await h.ready(), true), h.ready(early).then((l) => lookUp(l, false))];
       const venueRead: Promise<SolanaPoolBuyVenue> = readSolanaPoolBuyVenue(h.rpcs, kind, token, ...(h.pick ? [h.pick] : []));
       // the slot is read before some of its round's reads end (the venue's a microtask on, a root page past the first
       // after the page before it): when the round ends over POOL_BUY_SLOT_STALE_MS after the slot was answered, the
@@ -822,9 +835,15 @@ async function buyRun(h: PoolBuyHost, ask: PoolAsk, at: { fault?: unknown }): Pr
       const pays = (set: readonly Ready[]): boolean =>
         solanaPoolBuyFunds(set.map((p) => ({ withdrawnValue: p.chunk, relayFee: p.binding.request.relayFee })), venue, { spend: ask.amount, tip: tipOf(set.length) }, rent).problem === null;
       const max = h.takeSet && h.sendPieces ? SOLANA_POOL_BUY_PIECES_MAX : 1;
-      const now = mine(await h.ready());
+      // the takeable ones at the take's own time (the early read it takes on): a proof its take would refuse late (a
+      // newest-root one past its grace while its remake runs) is never picked, so a set that pays only with it is
+      // not_funded here, before any claim, never a take that fails
+      const now = mine(await h.ready(early));
       const picked = pickPieces(now, pays, max);
       if (picked === null) return no("not_funded");
+      // a root the pick needs whose read failed (kept by the last-seen list's lookups): that fault, as the read's own
+      for (const p of picked)
+        for (const k of [rootKey(0, p.publicSignals[3]), rootKey(1, p.publicSignals[5])]) if (faults.has(k)) throw faults.get(k);
       let set = picked;
       // a piece on a root not looked up yet (remade during the reads): read once more; past that, the best set whose
       // roots are all found, or refused (a proof for another root is refused before anything is signed)

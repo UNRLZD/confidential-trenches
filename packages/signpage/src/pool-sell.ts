@@ -71,6 +71,7 @@ import { vaultLabelOf } from "../../kit/src/vault/shapes.ts";
 import type { ErrorCode, TradeStage, TxRef } from "../../kit/src/signpage/messages.ts";
 import { HELPER_SOLANA_BLOCK_HEADER } from "../../kit/src/helper/v1.ts";
 import { freshWallet } from "../../wallet/src/derive/keys.ts";
+import { PassFail } from "../../wallet/src/pool/pool.ts";
 import { noteCommitment, noteSecrets, type NoteRef } from "../../wallet/src/notes/secrets.ts";
 import { refKey, type Leaf, type NoteRecord, type NoteStore } from "../../wallet/src/notes/store.ts";
 import type { ListedBuyWallet } from "../../wallet/src/pool/buy-wallets.ts";
@@ -718,6 +719,8 @@ type LegAnswer = { stage: TradeStage; txs: TxRef[] } | { error: PoolSellError; c
  *  HTTP code its text names, digits only); and the two functions it was thrown in, from its stack. Never its text, which can
  *  name a URL or a key. */
 export function legCause(e: unknown): string {
+  // a proof pass's tag (PassFail) names its cause: the cause's class, code and frames, never the wrap's
+  if (e instanceof PassFail) return legCause(e.cause);
   try {
     const x = e as { name?: unknown; code?: unknown; fault?: unknown; message?: unknown; stack?: unknown } | null;
     const name = typeof x?.name === "string" && /^[\w$]{1,40}$/.test(x.name) ? x.name : "thrown";

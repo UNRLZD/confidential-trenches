@@ -79,7 +79,10 @@ export const vendorSeedMax = (totals: readonly number[]): number => Math.ceil((M
 /** The 1Click calls one deposit sheet open sends within a second (card deposit-sheet-oneclick-budget): deposit.assets
  *  reads the token list, then one dry quote per release asset at once (packages/signpage/src/rules/deposit-dry.ts
  *  depositAssetsKind over DEPOSIT_ASSET_CHAINS, the kit's ONECLICK_USDC_ASSETS in order), and deposit.dry one dry quote:
- *  5 for the 3 assets, one client's share of 1Click, so no other client's load can refuse it. */
+ *  5 for the 3 assets, one client's share of 1Click, so no other client's load can refuse it. That is while 1Click
+ *  quotes: in a spell of its 400s not about the request, each dry quote is asked up to 3 times inside its 10 s
+ *  (packages/wallet/src/deposit/quote.ts askDepositQuoteAgain), so one open sends up to 13 (1 + 3 x 3 + 3), past the
+ *  share from its sixth (packages/signpage/test/deposit-dry-count.test.ts holds 13). */
 export const DEPOSIT_SHEET_CALLS = ONECLICK_USDC_ASSETS.length + 2;
 /** A vendor's budget is counted over its own window: every vendor below publishes a per-minute limit. */
 export const VENDOR_WINDOW_MS = 60_000;
@@ -110,7 +113,9 @@ export const VENDOR_WINDOW_MS = 60_000;
  *   latency (a draw is counted by its whole second, and reaches 1Click up to a timeout later) can only make our count
  *   short of 1Click's, and one 429 holds every call for its 60 s reset. Share DEPOSIT_SHEET_CALLS 5: one deposit sheet
  *   open, within a second, and no override may name less (PROXY_MIN_SHARE). At 50 and 2 the sheet's third call went
- *   only as lent, and from the eighth sheet in a minute it answered 429 busy or 503 with 1Click idle.
+ *   only as lent, and from the eighth sheet in a minute it answered 429 busy or 503 with 1Click idle. The share fits a
+ *   sheet while 1Click quotes; in a spell of its 400s one open sends up to 13 (DEPOSIT_SHEET_CALLS), each past the
+ *   fifth only as lent.
  */
 export const PROXY_BUDGETS: Readonly<Record<VendorName, BudgetLimits>> = {
   jupiter: { total: 60, perClient: 4, windowMs: VENDOR_WINDOW_MS, reserve: 34, lend: true },
@@ -155,9 +160,185 @@ const KEY_SHAPE = /^[\x21-\x7e]{8,4096}$/; // printable ASCII, no space or line 
  *  the call's Server-Timing entries for the helper's own reads that name them (the token page's Jupiter search): its
  *  wait for the budget's room (budget), for the vendor's hold or turn (turn), each 429 the vendor answered (429), and
  *  the send (send). */
-export type ProxyAnswer = { status: number; headers: Record<string, string>; body: string; why?: string; timing?: string[] };
+export type ProxyAnswer = { status: number; headers: Record<string, string>; body: string; why?: string; timing?: string[]; said?: Said };
 type Fetch = (url: string, init: RequestInit) => Promise<Response>;
-type Read = { status: number; body: string; fetchedAt: string; timing?: string[] };
+type Read = { status: number; body: string; fetchedAt: string; timing?: string[]; said?: Said };
+/** What the vendor itself answered a call the proxy refused or passed on as not 2xx, for its log line (card
+ *  helper-says-why-a-vendor-refused), never sent: its status, and its message as read (VENDOR_MESSAGE_MAX at most, made
+ *  safe by safeMessage), null when the vendor's body held none; `message` left out when no body was read. */
+type Said = { status?: number; message?: string | null };
+/** The most of a vendor's message one log line keeps. */
+export const VENDOR_MESSAGE_MAX = 200;
+/** The window over which identical lines are folded into one with a count (card helper-says-why-a-vendor-refused): the
+ *  helper's log keeps 2 MB in all (deploy/compose.yaml: json-file max-size 1m, max-file 2), so a crowd's identical
+ *  refusals, one a request, would push the lines that name a cause out of it. [design: the refusal log's 10 s,
+ *  limits.ts LIMIT_WINDOW_MS] */
+export const SAID_FOLD_MS = 10_000;
+/** The most distinct lines one fold window holds; past it, lines are counted, not kept. */
+export const SAID_FOLD_KEYS = 256;
+/** The vendor's message from its JSON body: `message` (a string, or strings joined), else `error` as a string or its
+ *  `message`; null when it holds none. Hostile input: only strings are read. */
+export function messageOf(text: string): string | null {
+  let b: unknown;
+  try {
+    b = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  if (typeof b !== "object" || b === null) return null;
+  const o = b as Record<string, unknown>;
+  const m = o.message;
+  if (typeof m === "string") return m;
+  if (Array.isArray(m) && m.length > 0 && m.every((x) => typeof x === "string")) return m.slice(0, 8).join("; ");
+  const e = o.error;
+  if (typeof e === "string") return e;
+  const em = typeof e === "object" && e !== null ? (e as Record<string, unknown>).message : undefined;
+  if (typeof em === "string") return em;
+  return null;
+}
+/** The most of a vendor's message safeMessage reads (card helper-says-why-a-vendor-refused, review P1): a longer one is
+ *  cut to it at its last whole word before any pass over it, so no pass costs more than it does whatever the vendor sent
+ *  (ANSWER_MAX is 4 MB). The VENDOR_MESSAGE_MAX a line keeps come from it. */
+export const VENDOR_MESSAGE_READ = 2_048;
+/** The most values of the caller's request a message is made safe against; past it the vendor's message is withheld
+ *  from the line. With VENDOR_MESSAGE_READ and VALUE_HEAD it bounds the work: at most 256 searches of at most 64
+ *  characters over at most 2,048. */
+export const REQUEST_VALUES_MAX = 256;
+/** A request value longer than this is found by its first VALUE_HEAD characters, and the message ends where they stand
+ *  (what follows may be the rest of the value). */
+export const VALUE_HEAD = 64;
+/** Every value of the caller's request of 3 characters or more, longest first: its JSON body's leaves and its query's
+ *  values. No log line may carry one, since a vendor's message can echo what it was sent. Left out (re-review P2): the
+ *  body's keys and its all-caps enum leaves (EXACT_INPUT, ORIGIN_CHAIN), the request's own schema, which is what a
+ *  refusal names to say why ("recipient is not valid", "supports only ORIGIN_CHAIN refundType"); an address used as a
+ *  key is still caught as an address (addressWord). null past REQUEST_VALUES_MAX. */
+export function requestValues(body: string, rawQuery: string): string[] | null {
+  const out = new Set<string>();
+  const add = (v: string): boolean => {
+    if (v.length >= 3 && !ENUM.test(v)) out.add(v);
+    return out.size <= REQUEST_VALUES_MAX;
+  };
+  const walk = (v: unknown, depth: number): boolean => {
+    if (depth > 32) return true;
+    if (typeof v === "string" || typeof v === "number" || typeof v === "bigint") return add(String(v));
+    if (Array.isArray(v)) return v.every((x) => walk(x, depth + 1));
+    if (typeof v === "object" && v !== null) return Object.values(v).every((x) => walk(x, depth + 1));
+    return true;
+  };
+  if (body !== "") {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(body);
+    } catch {
+      // a body that is not JSON is never echoed into a line: the vendor's message is kept only through the words below
+    }
+    if (parsed !== undefined && !walk(parsed, 0)) return null;
+  }
+  for (const v of new URLSearchParams(rawQuery).values()) if (!add(v)) return null;
+  return [...out].sort((a, b) => b.length - a.length);
+}
+/** An enum leaf of a request: the vendor's own words, never the user's. */
+const ENUM = /^[A-Z][A-Z_]+$/;
+/** The last label a NEAR named account may end in (near, tg, sweat, testnet), or the 64-hex implicit account a
+ *  sub-account sits under. */
+const NEAR_TOP = /^(near|tg|sweat|testnet|[0-9a-f]{64})$/;
+/** A word of a message: a run of letters, digits, "_", ".", "-" and "…". Matched once over the message, never backed
+ *  into (one character class), so the pass is linear in it. */
+const WORD = /[0-9A-Za-z_.\-…]+/g;
+const EDGE = new Set([".", "-", "…"]);
+/**
+ * True when a word is an address or a part of one, whatever the request held: an EVM address or hash (0x and 6 hex
+ * digits or more), a hex id of 32 or more (a NEAR implicit account), a base58 run of 32 or more (a Solana key or
+ * address, glued to others by "_", "." or "-" too), a shortened one ("9ddc51…", "0x8335...2913"), or a NEAR named
+ * account in any case (a dotted name whose last label is in NEAR_TOP). A shortened one is 3 letters or digits and two
+ * dots or more, or the ellipsis. What no pattern catches: a bare top-level name
+ * ("alice") or a name under a top-level name not in NEAR_TOP, which reads as any other word; a value of the request is
+ * caught however it reads (requestValues).
+ */
+function addressWord(w: string): boolean {
+  if (/[0-9A-Za-z]{3}(\.{2,}|…)/.test(w)) return true;
+  let a = 0;
+  let b = w.length;
+  while (a < b && EDGE.has(w[a]!)) a++;
+  while (b > a && EDGE.has(w[b - 1]!)) b--;
+  const t = w.slice(a, b);
+  const lower = t.toLowerCase();
+  if (/^[a-z0-9_-]+(\.[a-z0-9_-]+)+$/.test(lower) && NEAR_TOP.test(lower.slice(lower.lastIndexOf(".") + 1))) return true;
+  return t.split(/[_.\-…]+/).some((p) => /^0x[0-9a-f]{6,}$/i.test(p) || /^[0-9a-f]{32,}$/i.test(p) || /^[1-9A-HJ-NP-Za-km-z]{32,}$/.test(p));
+}
+const DIGITS = /^[0-9]+$/;
+const digitAt = (s: string, i: number): boolean => /[0-9]/.test(s.charAt(i)); // "" past either end
+/** `s` with `v` replaced wherever it stands, glued to other letters or not (delta review P2-1: "recipientx<U>" and
+ *  "<U>s" hide nothing). A number is the one exception: replaced only where no digit touches it, so the 100 of a
+ *  slippage inside the vendor's "1000000" stays, and "amount25000000" or "25000000wei" do not. A value longer than
+ *  VALUE_HEAD is found by its first VALUE_HEAD characters, and the message ends there. */
+function valueReplaced(s: string, v: string): string {
+  if (v.length > VALUE_HEAD) {
+    const at = s.indexOf(v.slice(0, VALUE_HEAD));
+    return at < 0 ? s : `${s.slice(0, at)}<request field>`;
+  }
+  if (!DIGITS.test(v)) return s.split(v).join("<request field>");
+  let out = "";
+  let from = 0;
+  for (let at = s.indexOf(v); at >= 0; at = s.indexOf(v, at + 1)) {
+    if (at < from || digitAt(s, at - 1) || digitAt(s, at + v.length)) continue;
+    out += `${s.slice(from, at)}<request field>`;
+    from = at + v.length;
+  }
+  return out + s.slice(from);
+}
+const FIELD = "<request field>";
+/** `s` cut at its last whole word (a word cut in two is one no pattern knows) at most VENDOR_MESSAGE_READ less one
+ *  FIELD long, so the tail check's FIELD keeps it within VENDOR_MESSAGE_READ. */
+function cutToRead(s: string): string {
+  let i = VENDOR_MESSAGE_READ - FIELD.length;
+  while (i > 0 && !/\s/.test(s[i - 1]!)) i--;
+  return s.slice(0, i);
+}
+/** Percent-encoding decoded up to DECODE_ROUNDS times, ASCII only (a byte past it is left as written). */
+const DECODE_ROUNDS = 3;
+const decodedAscii = (s: string): string => s.replace(/%([0-9A-Fa-f]{2})/g, (x, h: string) => (parseInt(h, 16) < 0x80 ? String.fromCharCode(parseInt(h, 16)) : x));
+/**
+ * A vendor's message made safe for one log line, no step searching more than VENDOR_MESSAGE_READ characters: cut to
+ * fit it at its last whole word (cutToRead); every default-ignorable mark stripped (zero-width, direction, soft hyphen, variation and tag
+ * characters, fillers: each hides a word from a search); %XX decoded up to DECODE_ROUNDS times until unchanged, and a
+ * run of three %XX or more left after that replaced; every request value replaced (valueReplaced), the message cut to
+ * cut again (cutToRead) whenever a replacement grew it past VENDOR_MESSAGE_READ, and a value's start where a cut message ends; every
+ * control and line-separator character a space; every address word replaced (addressWord); cut to VENDOR_MESSAGE_MAX
+ * characters. `values` null (past REQUEST_VALUES_MAX): the message is withheld. What it cannot know, by design: a
+ * value the vendor rewrites (a prefix of it, an amount with separators, a deadline in another format).
+ */
+export function safeMessage(m: string, values: readonly string[] | null): string {
+  if (values === null) return "(withheld: the request held too many values)";
+  let s = m;
+  const cut = s.length > VENDOR_MESSAGE_READ;
+  if (cut) s = cutToRead(s);
+  // marks that hide a word from a search, stripped (never a space, which would split it)
+  s = s.replace(/\p{Default_Ignorable_Code_Point}/gu, "");
+  for (let r = 0; r < DECODE_ROUNDS; r++) {
+    const d = decodedAscii(s);
+    if (d === s) break;
+    s = d;
+  }
+  s = s.replace(/(%[0-9A-Fa-f]{2}){3,}/g, "<encoded>");
+  for (const v of values) {
+    s = valueReplaced(s, v);
+    // "<request field>" is longer than a short value: the next search stays within VENDOR_MESSAGE_READ
+    if (s.length > VENDOR_MESSAGE_READ) s = cutToRead(s);
+  }
+  // a value whose start ends the read's cut: its first characters, cut from the rest. A cut ends at whitespace, so only a
+  // value holding one is found here; a cut after the value pass leaves none (each value was there whole, and replaced)
+  if (cut)
+    for (const v of values)
+      for (let p = Math.max(0, s.length - VALUE_HEAD); p <= s.length - 3; p++)
+        if (v.startsWith(s.slice(p))) {
+          s = `${s.slice(0, p)}<request field>`;
+          break;
+        }
+  s = s.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, " ");
+  s = s.replace(WORD, (w) => (addressWord(w) ? "<address>" : w));
+  return [...s].slice(0, VENDOR_MESSAGE_MAX).join("");
+}
 /** `peers` (card helper-deploy-reads-fast): the other helpers on the same keys (shared-calls.ts callsFiles), whose calls
  *  every draw that may reach a vendor counts first, and to which each such draw is told at once. */
 export type Peers = { read(): unknown; write(calls: Record<string, number[]>): void };
@@ -165,7 +346,7 @@ export type Peers = { read(): unknown; write(calls: Record<string, number[]>): v
  *  (a turn's wait, a send's duration: the turn log line and Server-Timing), performance.now by default. A test injects both
  *  so an elapsed time is a value it sets, never the machine's speed (card helper-jup-log-clock: "answered 200 in 1 ms" on a
  *  busy CI runner where 0 was expected). */
-type Deps = { fetch?: Fetch; now?: () => number; mono?: () => number; sleep?: (ms: number) => Promise<void>; peers?: Peers; log?: (line: string) => void; burstMs?: number };
+type Deps = { fetch?: Fetch; now?: () => number; mono?: () => number; sleep?: (ms: number) => Promise<void>; peers?: Peers; log?: (line: string) => void; burstMs?: number; foldWait?: (ms: number) => Promise<void> };
 
 const error = (status: number, code: string): ProxyAnswer => ({ status, headers: {}, body: JSON.stringify({ error: { code } }) });
 /**
@@ -216,6 +397,20 @@ function keyForms(keys: Partial<Record<VendorName, string>>): Buffer[] {
     for (const f of [k, b.toString("base64").replace(/=+$/, ""), b.toString("base64url"), encodeURIComponent(k)]) forms.add(f);
   }
   return [...forms].map((f) => Buffer.from(f, "utf8"));
+}
+
+/** Every string of a parsed JSON value, its keys included, one a line (no key form holds a line break, KEY_SHAPE), so a
+ *  key the JSON spelt escaped is read as it is. Walked without recursion: a 4 MB answer may nest deep. */
+function decodedStrings(v: unknown): string {
+  const out: string[] = [];
+  const todo: unknown[] = [v];
+  while (todo.length > 0) {
+    const x = todo.pop();
+    if (typeof x === "string") out.push(x);
+    else if (Array.isArray(x)) for (const y of x) todo.push(y);
+    else if (typeof x === "object" && x !== null) for (const [k, y] of Object.entries(x)) out.push(k), todo.push(y);
+  }
+  return out.join("\n");
 }
 
 /** A reset header in seconds from now, or an epoch in seconds or milliseconds; Retry-After also as an HTTP date. */
@@ -586,7 +781,7 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
           // one a turn (BURST_MS / burst), so the hold's end is no burst (fold 6)
           if (PACED.has(name)) recoverUntil.set(name, budget.heldUntil(name) + burstMs);
           if (refusals < SENDS_429) continue;
-          return notReady("429", `${name} provider 429`, heldS(), waits());
+          return { ...notReady("429", `${name} provider 429`, heldS(), waits()), said: { status: 429 } };
         }
         if (r.status >= 500 && r.status < 600) {
           await r.body?.cancel();
@@ -594,7 +789,7 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
             await sleep(RETRY_FAILED_MS);
             continue;
           }
-          return UPSTREAM("5xx", `${name} 5xx`, waits());
+          return { ...UPSTREAM("5xx", `${name} 5xx`, waits()), said: { status: r.status } };
         }
         text = await readBody(r);
       } catch (e) {
@@ -607,18 +802,23 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
         return UPSTREAM(timeout ? "timeout" : "send", `${name} ${timeout ? "timeout" : "send"}`, waits());
       }
       const fetchedAt = new Date(now()).toISOString();
+      // card helper-says-why-a-vendor-refused: what the vendor answered, for the log line of an answer that is not 2xx
+      const said: Said = { status: r.status, ...(text === undefined ? {} : { message: messageOf(text) }) };
       // our key refused (401, 403), or an answer we cannot pass as JSON data
-      if (r.status === 401 || r.status === 403) return UPSTREAM("key", `${name} key`, waits());
-      if (r.status < 200 || (r.status >= 300 && r.status < 400)) return UPSTREAM("answer", `${name} answer`, waits());
-      if (text === undefined || !/^application\/([a-z0-9.+-]+\+)?json\s*(;|$)/i.test(r.headers.get("content-type") ?? "")) return UPSTREAM("answer", `${name} answer`, waits());
+      if (r.status === 401 || r.status === 403) return { ...UPSTREAM("key", `${name} key`, waits()), said };
+      if (r.status < 200 || (r.status >= 300 && r.status < 400)) return { ...UPSTREAM("answer", `${name} answer`, waits()), said };
+      if (text === undefined || !/^application\/([a-z0-9.+-]+\+)?json\s*(;|$)/i.test(r.headers.get("content-type") ?? "")) return { ...UPSTREAM("answer", `${name} answer`, waits()), said: { status: r.status } };
+      let parsed: unknown;
       try {
-        JSON.parse(text);
+        parsed = JSON.parse(text);
       } catch {
-        return UPSTREAM("answer", `${name} answer`, waits());
+        return { ...UPSTREAM("answer", `${name} answer`, waits()), said: { status: r.status } };
       }
-      if (holdsKey(text)) return UPSTREAM("answer", `${name} answer`, waits());
+      // card helper-says-why-a-vendor-refused, review P3: a key holding ", \ or / is spelt escaped in JSON; its decoded
+      // strings are read too, only when the text holds an escape (re-review P3: every answer's walk cost 4 times its parse)
+      if (holdsKey(text) || (text.includes("\\") && holdsKey(decodedStrings(parsed)))) return { ...UPSTREAM("answer", `${name} answer`, waits()), said: { status: r.status } };
       const timing = [...waits(), `send;dur=${Math.round(mono() - sentAt)}`];
-      return { status: r.status, body: text, fetchedAt, timing };
+      return { status: r.status, body: text, fetchedAt, timing, ...(r.status >= 200 && r.status < 300 ? {} : { said }) };
     }
   }
 
@@ -630,7 +830,7 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
    * caller's, which goes ahead of the helper's background reads for a PACED vendor's turn: every call with a client, and
    * an own read a caller waits for (the token page's cold search).
    */
-  async function handle(vendor: string, path: string, rawQuery: string, body: string, client?: string, reserved = false, waitMs?: number, caller = client !== undefined): Promise<ProxyAnswer> {
+  async function answer(vendor: string, path: string, rawQuery: string, body: string, client?: string, reserved = false, waitMs?: number, caller = client !== undefined): Promise<ProxyAnswer> {
     // card helper-page-jup-429: an own read nobody waits for (the lists, a held page's refresh) waits up to a window
     // (BURST_MS) for its turn, so a burst that filled the window delays it, never drops it
     const wait = waitMs ?? (reserved && !caller ? BURST_MS : QUEUE_WAIT_MS);
@@ -727,7 +927,72 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
       out = await call(name, v, up, path, qs, up.method === "POST" ? body : "", reserved, by, caller, client);
     }
     if (!("fetchedAt" in out)) return source(out.timing ? { ...out, timing: [`budget;dur=${Math.round(budgetMs)}`, ...out.timing] } : out);
-    return source({ status: out.status, headers: { [HELPER_FETCHED_AT_HEADER]: out.fetchedAt }, body: out.body, ...(out.timing ? { timing: [`budget;dur=${Math.round(budgetMs)}`, ...out.timing] } : {}) });
+    return source({ status: out.status, headers: { [HELPER_FETCHED_AT_HEADER]: out.fetchedAt }, body: out.body, ...(out.timing ? { timing: [`budget;dur=${Math.round(budgetMs)}`, ...out.timing] } : {}), ...(out.said ? { said: out.said } : {}) });
+  }
+
+  /** Identical lines in the fold window (SAID_FOLD_MS): the first is written at once, the rest counted and written as one
+   *  line when the window ends. */
+  const folded = new Map<string, number>();
+  let foldedOver = 0;
+  let folding = false;
+  function sayOnce(line: string): void {
+    const n = folded.get(line);
+    if (n !== undefined) folded.set(line, n + 1);
+    else if (folded.size >= SAID_FOLD_KEYS) foldedOver++;
+    else {
+      folded.set(line, 0);
+      log(line);
+    }
+    if (folding) return;
+    folding = true;
+    // its own timer, never the proxy's `sleep` (a test's virtual clock would move for it), and one that never holds the
+    // process open (a test's end, the helper's stop)
+    const windowEnd = deps.foldWait ? deps.foldWait(SAID_FOLD_MS) : new Promise<void>((ok) => setTimeout(ok, SAID_FOLD_MS).unref());
+    void windowEnd.then(() => {
+      for (const [l, more] of folded) if (more > 0) log(`${l} (and ${more} more in ${SAID_FOLD_MS / 1000} s)`);
+      if (foldedOver > 0) log(`proxy: ${foldedOver} more answers not 2xx in ${SAID_FOLD_MS / 1000} s, past ${SAID_FOLD_KEYS} distinct lines`);
+      folded.clear();
+      foldedOver = 0;
+      folding = false;
+    });
+  }
+  /** Causes of a 503 that are the vendor's own (Cause): its 429, its failure, its silence, never reached, its refusal of
+   *  our key, an answer we could not pass. "held" and "budget" are ours. */
+  const VENDOR_CAUSES: ReadonlySet<string> = new Set(["429", "5xx", "timeout", "send", "key", "answer"]);
+  /**
+   * One proxied call (answer), and card helper-says-why-a-vendor-refused: an answer that is not 2xx is logged in one line,
+   * "proxy <vendor> <path> answered <status>, <ours|the vendor's>: <what>", folded with the same line in SAID_FOLD_MS.
+   * The vendor's: its status (and the 503's cause), and its message made safe (safeMessage); ours: the refusal's name.
+   * The answer's Server-Timing gains refusal;desc="vendor" or refusal;desc="ours", for our Node live check: a browser on
+   * SIGN_HOST cannot read the header (it is not exposed and names no Timing-Allow-Origin), and the device tells a refusal
+   * by its status and body (packages/wallet/src/deposit/quote.ts refusalOf).
+   * A vendor or path not on the list is never written as the caller wrote it; no query, body field, key or client.
+   */
+  async function handle(vendor: string, path: string, rawQuery: string, body: string, client?: string, reserved = false, waitMs?: number, caller = client !== undefined): Promise<ProxyAnswer> {
+    const a = await answer(vendor, path, rawQuery, body, client, reserved, waitMs, caller);
+    const { said, ...out } = a;
+    if (a.status >= 200 && a.status < 300) return out;
+    const known = Object.hasOwn(VENDORS, vendor);
+    const where = !known ? "(a vendor not on the list)" : Object.hasOwn(VENDORS[vendor as VendorName].paths, path) ? `${vendor} ${path}` : `${vendor} (a path not on the list)`;
+    const cause = /cause;desc="([a-z0-9]+)"/.exec((a.timing ?? []).join(","))?.[1];
+    const theirs = said !== undefined || (cause !== undefined && VENDOR_CAUSES.has(cause));
+    let what: string;
+    if (theirs) {
+      const status = said?.status;
+      what = status === undefined ? (cause ?? "unnamed") : cause === undefined || cause === "429" ? String(status) : `${status} (${cause})`;
+      if (said && "message" in said) what += said.message === null || said.message === undefined ? " (no message)" : ` ${JSON.stringify(holdsKey(said.message) ? "(withheld: it held a key)" : safeMessage(said.message, requestValues(body, rawQuery)))}`;
+    } else {
+      let code: unknown;
+      try {
+        code = (JSON.parse(a.body) as { error?: { code?: unknown } })?.error?.code;
+      } catch {
+        // our own bodies are JSON
+      }
+      what = a.why ?? (typeof code === "string" ? code : "unnamed");
+    }
+    sayOnce(`proxy ${where} answered ${a.status}, ${theirs ? "the vendor's" : "ours"}: ${what}`);
+    // and on the answer, in its Server-Timing, so our live check tells a vendor's refusal from ours (never a browser: not exposed)
+    return { ...out, timing: [...(out.timing ?? []), `refusal;desc="${theirs ? "vendor" : "ours"}"`] };
   }
 
   return {

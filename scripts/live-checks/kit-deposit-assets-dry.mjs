@@ -38,9 +38,11 @@
 // --record writes the answer: everything judge() reads, so the test can replay it. PASS exit 0, FAIL exit 1, error
 // exit 2; the last line is "PASS kit-deposit-assets-dry" or "FAIL kit-deposit-assets-dry", each failure a "BAD ..." line.
 // Card deposit-quote-no-liquidity: the run records each helper answer's status and a 400's message. These two reads ask
-// each quote once (wallet/src/deposit/quote.ts askDepositQuote; only the committed asks re-ask), so a read refused
-// not_available after 1Click's 400 "No liquidity available" to that one ask (an asset left out of deposit.assets, or
-// deposit.dry), and a keyless comparison quote 1Click answers that 400, are 1Click's liquidity, not the page's:
+// each quote once, and card helper-says-why-a-vendor-refused: twice again at most on a 1Click 400 not about the request
+// (wallet/src/deposit/quote.ts askDepositQuoteAgain, DEVICE_ASKS_MAX), so a read refused not_available after 1Click's 400
+// "No liquidity available" to each of its asks (an asset left out of deposit.assets, or deposit.dry), and a keyless
+// comparison quote 1Click answers that 400, are 1Click's liquidity, not the page's (a refused read's BAD line names the
+// helper's answers to its quotes):
 // INCONCLUSIVE (exit 3, its last line "INCONCLUSIVE kit-deposit-assets-dry"), never PASS. Any other refusal, status or
 // answer stays a FAIL.
 import "../net-window.mjs";
@@ -53,6 +55,7 @@ import { launchBrowser } from "../browsers.mjs";
 import { SIGNPAGE_KIT_VERSION } from "../../packages/kit/src/index.ts";
 import { named } from "./record-names.mjs";
 import { signBuilt } from "../signpage-built.mjs";
+import { saidOf, saidPart } from "./vendor-said.mjs";
 
 const KEY = "kit-deposit-assets-dry";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -91,9 +94,11 @@ export function dec(s) {
 const ONE = 10n ** BigInt(SCALE);
 const show = (v) => JSON.stringify(v);
 
-/** The asks the page makes of one display quote (wallet/src/deposit/quote.ts askDepositQuote): one; a page that asks a
- *  display quote again on no liquidity is not this card's. */
+/** The asks the page makes of one display quote: one first (wallet/src/deposit/quote.ts askDepositQuote), and card
+ *  helper-says-why-a-vendor-refused: asked again twice at most on a 1Click 400 not about the request (askDepositQuoteAgain,
+ *  NO_LIQUIDITY_PAUSES_MS), so up to DEVICE_ASKS_MAX; a page before it asks once. More is not the page's. */
 export const DEVICE_ASKS = 1;
+export const DEVICE_ASKS_MAX = 3;
 const NO_LIQUIDITY = /^No liquidity available\b/;
 const MESSAGE_MAX = 120;
 /** True when a recorded helper answer is 1Click's no-liquidity 400. */
@@ -102,7 +107,7 @@ const noLiquidity = (r) => r?.status === 400 && typeof r.message === "string" &&
  *  answered 1Click's no-liquidity 400. deposit.assets probes each asset at one amount, so its asks are named by origin. */
 export function noLiquidityAsks(a, phase, origin, amount) {
   const asks = (a?.helper ?? []).filter((r) => r?.phase === phase && r.method === "POST" && r.url === `${HELPER_1CLICK}/v0/quote` && r.body?.originAsset === origin && (amount === undefined || r.body?.amount === amount));
-  return asks.length === DEVICE_ASKS && asks.every(noLiquidity);
+  return asks.length >= DEVICE_ASKS && asks.length <= DEVICE_ASKS_MAX && asks.every(noLiquidity);
 }
 /** A verdict's exit code: PASS 0, FAIL 1, INCONCLUSIVE 3 (an error exits 2), as scripts/ci/live-rerun.mjs reads them. */
 export const EXIT = Object.freeze({ PASS: 0, FAIL: 1, INCONCLUSIVE: 3 });
@@ -127,6 +132,19 @@ export function judge(a) {
       return null;
     }
   })();
+  // card helper-says-why-a-vendor-refused: what the helper answered the read's quotes when it refused them, each message
+  // with its count, as the run recorded them (MESSAGE_MAX each)
+  const whyOf = (kind) => {
+    const phase = kind === "deposit.assets" ? "assets" : "dry";
+    const refused = (a?.helper ?? []).filter((r) => r?.phase === phase && r.url === `${HELPER_1CLICK}/v0/quote` && Number.isInteger(r.status) && r.status !== 200 && r.status !== 201);
+    if (refused.length === 0) return "";
+    const counts = new Map();
+    for (const r of refused) {
+      const k = `${r.status}${saidPart(typeof r.message === "string" ? r.message : null)}`;
+      counts.set(k, (counts.get(k) ?? 0) + 1);
+    }
+    return ` (the helper answered its quotes ${[...counts].map(([k, n]) => `${k} x${n}`).join(", ")})`;
+  };
   const answerTo = (id) => (a?.log ?? []).filter((m) => m.fromParent && m.origin === signOrigin && id && m.data?.id === id).map((m) => m.data);
   const answered = (kind, id, noQuote = () => false) => {
     const got = answerTo(id);
@@ -141,7 +159,7 @@ export function judge(a) {
     }
     if (r.ok !== true) {
       const code = r.error?.code;
-      bad(`${kind} answered ${r.ok === false ? `refused ${show(code)}` : "neither ok nor refused"}, want ok`);
+      bad(`${kind} answered ${r.ok === false ? `refused ${show(code)}` : "neither ok nor refused"}, want ok${whyOf(kind)}`);
       if (r.ok === false && !CODES.includes(code)) bad(`${kind} refused with ${show(code)}, not one of the card's codes`);
       return null;
     }
@@ -319,10 +337,9 @@ async function pageRun(browser, { signUrl, dir }) {
     entry.status = res.status();
     if (res.status() === 400)
       reads.push(res.text().then((t) => {
-        try {
-          const m = JSON.parse(t)?.message;
-          if (typeof m === "string") entry.message = m.slice(0, MESSAGE_MAX);
-        } catch {}
+        // card helper-says-why-a-vendor-refused: also a list of messages or an error string (vendor-said.mjs)
+        const m = saidOf(t);
+        if (m !== null) entry.message = [...m].slice(0, MESSAGE_MAX).join("");
       }, () => {}));
   });
   let phase = "assets";

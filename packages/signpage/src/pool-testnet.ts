@@ -54,8 +54,8 @@ import { HELPER_FETCH_INIT, HELPER_V1_PATHS } from "../../kit/src/helper/v1.ts";
 import type { VaultProver } from "../../kit/src/prover/prove.ts";
 import { WALLET_SEED_LOCK, type WalletStore } from "@blindfill/wallet/store";
 import { openNoteStore, readNotes, readReservedMarks, type NoteRecord, type NoteStore } from "../../wallet/src/notes/store.ts";
-import { chainNow, type Pool, type ReadyProof } from "../../wallet/src/pool/pool.ts";
-import { openProofQueue, type ProofQueue, type QueuePass } from "../../wallet/src/pool/queue.ts";
+import { chainNow, failAs, type Pool, type ReadyProof } from "../../wallet/src/pool/pool.ts";
+import { openProofQueue, PassFail, type ProofQueue, type QueuePass } from "../../wallet/src/pool/queue.ts";
 import { poolDepositKind, type PoolDepositFrom, type PoolDepositHost } from "./pool-deposit.ts";
 import { proverHost } from "./prover-host.ts";
 import { SOLANA_PUBLIC_SEAT, TRADE_HELPER, type TradeStore } from "./trade.ts";
@@ -222,6 +222,25 @@ export const POOL_WITHDRAW_BUILT: Readonly<Record<"solana" | "base" | "robinhood
  *  every trade open only on a chain whose withdraw is in the same build, so money never goes where the page cannot take
  *  it out. `built`: POOL_WITHDRAW_BUILT, or a test's plant. */
 export const poolWayOut = (chain: PoolChain, built: Readonly<Partial<Record<PoolChain, boolean>>> = POOL_WITHDRAW_BUILT): boolean => built[chain] === true;
+/** The codes a proof pass's console line names, in its order (the queue's PassReason and its notes under the least rung). */
+export const PASS_CODES = ["network", "fee_refused", "prover_failed", "too_small", "held_elsewhere"] as const;
+/**
+ * A proof pass's console line (card buy-spends-several-pieces): `pool pass: <chain> failed <code>=<count> ...`, for a
+ * pass whose notes failed (each by the step the queue names, ../../wallet/src/pool/queue.ts PassFail), that left notes
+ * under the pool's smallest rung unproved, or that failed whole at a pool read (`thrown`); null when none. Codes and
+ * counts only: never a note, an address, an amount, an epoch or an error's text, so DevTools and a walk read why no proof
+ * is ready and nothing of the account.
+ */
+export function passLine(chain: string, pass: QueuePass | undefined, thrown?: unknown): string | null {
+  const n = new Map<string, number>();
+  const add = (code: string, k = 1): void => void n.set(code, (n.get(code) ?? 0) + k);
+  for (const f of pass?.failed ?? []) if (f.reason !== undefined) add(f.reason);
+  if (pass?.small !== undefined && pass.small > 0) add("too_small", pass.small);
+  if (thrown instanceof PassFail) add(thrown.reason);
+  const parts = PASS_CODES.filter((c) => n.has(c)).map((c) => `${c}=${n.get(c)}`);
+  return parts.length === 0 ? null : `pool pass: ${chain} failed ${parts.join(" ")}`;
+}
+
 /** The buys of several pieces owed their end (pool-buy.ts OwedPieces), in the wallet store's meta/owed/pieces-sol (meta/owed/
  *  is never read or listed by the frame), by W's address. */
 export const piecesOwedOf = (store: () => Promise<Pick<TradeStore, "get" | "update">>): PiecesOwed => {
@@ -634,7 +653,10 @@ async function helperFee(url: string, signal: AbortSignal | undefined, fetchFn: 
   const res = await askWhileBusy(() => {
     const timeout = AbortSignal.timeout(FEE_TIMEOUT_MS);
     return fetchFn(url, { ...HELPER_FETCH_INIT, redirect: "error", method: "GET", signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
-  }, { signal, sleep });
+  }, { signal, sleep }).catch(failAs("network"));
+  // a fee read that got no answer (no connection, no answer in time, still busy: a 429 or a 5xx) is "network" on the
+  // pass's line; the helper's refusal (any other status) and an answer the bind refuses are fee_refused
+  if (res.status === 429 || res.status >= 500) throw new PassFail("network", new Error(`pool fee: HTTP ${res.status}`));
   if (res.status !== 200) throw new Error(`pool fee: HTTP ${res.status}`);
   // the helper's fee answer is this small (its v1 table's limit for GET /v1/pool/fee)
   const FEE_ANSWER_MAX = HELPER_V1_PATHS.find((p) => p.method === "GET" && p.path === "/v1/pool/fee")!.limitBytes!;
@@ -788,6 +810,14 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     }
   };
   const watchers = new Set<() => void>();
+  // each chain's last "pool pass:" line, printed again only when it changes (card buy-spends-several-pieces)
+  const passLines = new Map<string, string>();
+  const logPass = (chain: string, pass: QueuePass | undefined, thrown?: unknown): void => {
+    const line = passLine(chain, pass, thrown) ?? "";
+    if (line === (passLines.get(chain) ?? "")) return;
+    passLines.set(chain, line);
+    if (line !== "") console.log(line);
+  };
   // a release read landed on both RPCs (a Solana or EVM buy's, a withdraw's): what it took out of the pool goes on the
   // note's mark in the store (../../wallet/src/notes/store.ts ReservedMark), so every tab and a reload count only the
   // note's change until the settle writes it (../../wallet/src/pool/balances.ts landed); then the app reads the state
@@ -805,9 +835,11 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     const p = (open ??= openQueue());
     try {
       const pass = await (await p).queue.refresh();
+      logPass("solana", pass);
       if (pass.made.length > 0 || pass.remade.length > 0) for (const f of watchers) f();
       return pass;
-    } catch {
+    } catch (e) {
+      logPass("solana", undefined, e);
       // a queue that could not open (no seed: signed out) is dropped, so the next landing opens it again
       if (open === p) await p.then(() => {}, () => void (open = null));
       return null;
@@ -975,9 +1007,11 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     if (p === undefined) evmQueues.set(chain, (p = openEvmQueue(chain)));
     try {
       const pass = await (await p).queue.refresh();
+      logPass(chain, pass);
       if (pass.made.length > 0 || pass.remade.length > 0) for (const f of watchers) f();
       return pass;
-    } catch {
+    } catch (e) {
+      logPass(chain, undefined, e);
       // a queue that could not open (no seed: signed out) is dropped, so the next landing opens it again
       const q = p;
       if (evmQueues.get(chain) === q) await q.then(() => {}, () => void (evmQueues.get(chain) === q && evmQueues.delete(chain)));
@@ -1470,8 +1504,9 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       // a sign out ends the buy's waits before its signature (read-waits.ts waitUnless): this session's stop
       signal: solanaStop.signal,
       // none ready (a page that has landed no deposit since it loaded has run no pass): a pass starts for the next tap
-      ready: async () => {
-        const list = (await q()).ready();
+      ready: async (early) => {
+        const queue = await q();
+        const list = early === undefined ? queue.ready() : await queue.readyAt(early);
         if (list.length === 0) void proofs();
         return list;
       },
@@ -2365,11 +2400,12 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     }
     const p = (async () => {
       try {
-        if (settling) {
-          if (open !== null) statePass();
-          return await settling;
-        }
         const mine = (await readNotes(await page.store())).filter((n) => n.scope === scope);
+        // the next buy's proofs (card signpage-pool-pins) before any settle step: a page that loads with the pool's
+        // notes landed opens the queue, and each read while it is open makes the epoch's proofs again, one pass at a
+        // time; a settle that throws or waits (a deposit run, a sell's verdict, a buy's owed pieces) never holds them back
+        if (open !== null || mine.some((n) => n.state === "UNSPENT" || n.state === "HELD")) statePass();
+        if (settling) return await settling;
         if (mine.some((n) => n.state === "INCOMING")) await settleSolana();
         // a failed reserved pass never holds back a send owed (the money on W): the finish below still runs
         if (mine.some((n) => n.state === "RESERVED") || lateBuys.size > 0) await settleReserved().catch(() => {});
@@ -2381,9 +2417,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         }
         // a sell's note left INCOMING, or a sell with no deposit back (no note) left sent: both settled by the sell's verdict
         if (mine.some((n) => n.state === "INCOMING" && (n.ref.kind === "return" || (n.ref.kind === "second" && n.ref.id.id === "R"))) || (await keptSells(page.store).list().catch(() => [])).length > 0) await settleSells();
-        // the next buy's proofs (card signpage-pool-pins): a page that loads with the pool's notes landed opens the
-        // queue, and each read while it is open makes the epoch's proofs again, one pass at a time
-        if (open !== null || mine.some((n) => n.state === "UNSPENT" || n.state === "HELD")) statePass();
+        // a note a settle step landed (INCOMING -> UNSPENT) is proved too: one more pass after the running one
+        if (mine.some((n) => n.state === "INCOMING") && (open !== null || (await readNotes(await page.store())).some((n) => n.scope === scope && n.state === "UNSPENT"))) statePass();
         await finishOnward();
         // a sell request whose page closed before it signed: refused "failed", so its id is never id_reused for good
         if (locks && !deadSettled) {

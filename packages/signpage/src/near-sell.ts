@@ -4,13 +4,18 @@
 // nearBuyFlow: this module holds no key, no seed and no address of its own; the page binds them.
 //
 // The steps, strictly in order, each logged once through deps.log with its outcome:
-//   1. read: W (the wallet the token's buy is bound to, A11) read on both providers (deps.readWallet, side sell): the
-//      token W holds, its key nonce, its USDC registration.
-//   2. quote: the device's own two-provider quote token -> USDC for what W holds (a fee the seller pays on top is left
-//      out of the amount, the kit's nearSellAmount, and that amount quoted again). The quote must be the request's own,
-//      and its floor at least the vault's least deposit, else amount_too_low before anything is signed.
-//   3. register: W not registered on USDC: the registration round signed alone, sent, and read back (bounded).
-//   4. swap: a fresh quote and the swap round, signed by W only after the kit's nearSwapCheck passed in the wallet's
+//   1. read: W (the wallet the token's buy is bound to, A11) read light on both providers (deps.held, side sell): the
+//      token W holds and its USDC registration.
+//   2. quote: the device's own two-provider quote token -> USDC for what W holds, with W read at the quote's block
+//      (deps.pair, the kit's readNearSwapPair; card near-quote-under-the-pace), a fee the seller pays on top left out
+//      of the amount (the kit's nearSellAmount) and that amount quoted again. A pair that throws (a lag between the
+//      providers, a busy one) is asked again, bounded (NEAR_BUY_READ_TRIES), then quote_check_failed with nothing
+//      signed. The quote must be the request's own, and its floor at least the vault's least deposit, else
+//      amount_too_low before anything is signed.
+//   3. register: W not registered on USDC: the registration round signed alone from the quote's pair, sent, and read
+//      back light (bounded).
+//   4. swap: a fresh pair (W, the quote and the USDC baseline at one block) and the swap round signed from it, by W
+//      only after the kit's nearSwapCheck passed in the wallet's
 //      signer (min out from this quote and the user's slippage, never the helper's word; the bound token is the buy
 //      record's, deps.wallet's, never the request's). A swap that failed on chain with its token back in W
 //      (carry_failed) goes back to 2 for what W holds, at most NEAR_SELL_SWAPS_MAX swaps.
@@ -42,7 +47,7 @@
 // { stage: "sent", txs } with every tx so far, and the stop's code and its cause go to deps.stop (the page's record).
 import { HELPER_BIND_DEPOSIT_CAP, HELPER_BIND_DEPOSIT_CODES, HELPER_BIND_TRADE_CODES, type HelperBindTradeRequest, type HelperNearTrade } from "../../kit/src/helper/v1.ts";
 import { NEAR_NETWORKS, type NearNetwork } from "../../kit/src/near/networks.ts";
-import type { RheaQuote, RheaQuoteArgs } from "../../kit/src/near/rhea.ts";
+import type { RheaQuote } from "../../kit/src/near/rhea.ts";
 import { nearSellAmount } from "../../kit/src/near/token-fee.ts";
 import { NEAR_SWAP_SLIPPAGE_MAX_BPS, nearSwapCalls, nearSwapFloor, type NearSwapCall, type NearSwapRequest } from "../../kit/src/trade/near/swap.ts";
 import type { NearSwapWalletArgs, NearSwapWalletState } from "../../kit/src/trade/near/wallet.ts";
@@ -55,7 +60,7 @@ import { noteCommitment, noteSecrets, type NoteRef } from "../../wallet/src/note
 import { refKey, type NoteStore } from "../../wallet/src/notes/store.ts";
 import { landNote } from "../../wallet/src/notes/restore.ts";
 import type { HostAnswer, HostRefusal, KindContext, Running } from "./api.ts";
-import { NEAR_BUY_READ_TRIES, NEAR_BUY_READ_WAIT_MS, type NearHelperAnswer } from "./near-trade.ts";
+import { NEAR_BUY_READ_TRIES, NEAR_BUY_READ_WAIT_MS, type NearHeldState, type NearHelperAnswer, type NearPair, type NearPairAsk } from "./near-trade.ts";
 import { legCause } from "./pool-sell.ts";
 
 export type NearSellAsk = { token: string; slippageBps: number };
@@ -86,8 +91,11 @@ export type NearSellDeps = {
   helper(body: HelperBindTradeRequest): Promise<NearHelperAnswer>;
   /** The kit's readNearSwapWallet with the network and its pair bound. */
   readWallet(a: Pick<NearSwapWalletArgs, "wallet" | "side" | "token">): Promise<NearSwapWalletState>;
-  /** The kit's rheaQuote with the network, its pair and the candidate pools bound. */
-  quote(a: Pick<RheaQuoteArgs, "side" | "token" | "amountIn">): Promise<RheaQuote>;
+  /** The kit's readNearSwapPair with the network, its pair and the candidate pools bound: W and the quote at one block
+   *  (`baseline`: W's balance of that token at the same block). */
+  pair(a: NearPairAsk): Promise<NearPair>;
+  /** W's light read (the kit's readNearHeld), for the waits that only ask "has it arrived"; absent: readWallet. */
+  held?(a: Pick<NearSwapWalletArgs, "wallet" | "side" | "token">): Promise<NearHeldState>;
   /** The wallet's signNearSwapDelegates with the seed bound (the page opens the seed under its lock: may be async). */
   sign: (...a: Parameters<DropSeed<typeof signNearSwapDelegates>>) => Awaitable<SignedNearSwapDelegate[]>;
   /** The sale's k-th note (0: W's return note; k > 0: its R second arrival k - 1 on NEAR), written PLANNED when absent
@@ -197,8 +205,28 @@ async function runSell(deps: NearSellDeps, ask: NearSellAsk): Promise<NearSellAn
       return fail(step, last === null ? "read_failed" : missed);
     };
 
+    // W's light read, asked again (reads only) until `done` holds: the waits that only ask "has it arrived"
+    const lightUntil = async (step: NearSellStep, side: "buy" | "sell", done: (s: NearHeldState) => boolean, missed: string): Promise<NearHeldState> => {
+      if (!deps.held) return readUntil(step, side, done, missed);
+      let last: NearHeldState | null = null;
+      for (let i = 0; i < NEAR_BUY_READ_TRIES; i++) {
+        if (i > 0) await deps.wait(NEAR_BUY_READ_WAIT_MS);
+        let s: NearHeldState;
+        try {
+          s = await deps.held({ wallet: wallet.id, side, token: ask.token });
+        } catch {
+          last = null;
+          continue;
+        }
+        if (s.account !== wallet.id) return fail(step, "read_failed");
+        last = s;
+        if (done(s)) return s;
+      }
+      return fail(step, last === null ? "read_failed" : missed);
+    };
+
     // 1. what W holds of the token (side sell: the token sent, USDC received)
-    const first = await readUntil("read", "sell", () => true, "read_failed");
+    const first = await lightUntil("read", "sell", () => true, "read_failed");
     say("read", first.held > 0n ? "token held" : "no token");
 
     // the last trade delegate signed for this sell, by this run or one before it (the sell's record): no deposit is
@@ -212,24 +240,34 @@ async function runSell(deps: NearSellDeps, ask: NearSellAsk): Promise<NearSellAn
     if (signedLast !== null && (typeof signedLast !== "object" || typeof signedLast.nonce !== "bigint" || typeof signedLast.mbh !== "bigint")) fail("read", "read_failed");
     // 2-5, again on a fresh quote after a swap that failed on chain with its input back in W (the helper's carry_failed:
     // the swap's side is freed for W, at most NEAR_SELL_SWAPS_MAX swaps per side per W), never more often than that
-    let s = first;
+    let s: NearHeldState = first;
     for (let swaps = 1; s.held > 0n; swaps++) {
       const held = s.held;
-      // 2. the quote of the amount W sells: all it holds, less a fee the seller pays on top
-      const quoted = async (amountIn: bigint): Promise<RheaQuote> => {
-        let q: RheaQuote;
-        try {
-          q = await deps.quote({ side: "sell", token: ask.token, amountIn });
-        } catch {
-          return fail("quote", "quote_check_failed");
+      // 2. the quote of the amount W sells (all it holds, less a fee the seller pays on top), with W read at the same block
+      // (deps.pair): what a round signs from is never older than what it signs against. Asked again, bounded, as the
+      // buy's fresh pair is, when a read throws (a provider lagging or busy); `want`: W read again until it holds
+      const fresh = async (step: NearSellStep, amountIn: bigint, want: (x: NearSwapWalletState) => boolean = () => true, baseline?: string): Promise<{ s: NearSwapWalletState; q: RheaQuote; base?: bigint }> => {
+        for (let i = 0; i < NEAR_BUY_READ_TRIES; i++) {
+          if (i > 0) await deps.wait(NEAR_BUY_READ_WAIT_MS);
+          let r: NearPair;
+          try {
+            r = await deps.pair({ side: "sell", token: ask.token, amountIn, wallet: wallet.id, ...(baseline === undefined ? {} : { baseline }) });
+          } catch {
+            continue;
+          }
+          const { state: x, quote: q } = r;
+          if (x.account !== wallet.id) return fail(step, "read_failed");
+          if (q.network !== deps.network || q.side !== "sell" || q.token !== ask.token || q.amountIn !== amountIn) return fail("quote", "quote_check_failed");
+          if (baseline !== undefined && typeof r.baseline !== "bigint") return fail(step, "read_failed");
+          // proceeds the vault would refuse are never sold for: nothing is signed (the token stays in W)
+          if (nearSwapFloor(q.venueOut, ask.slippageBps) < MIN) return fail("quote", "amount_too_low");
+          if (!want(x)) continue;
+          say("quote", "quote");
+          return { s: x, q, ...(r.baseline === undefined ? {} : { base: r.baseline }) };
         }
-        if (q.network !== deps.network || q.side !== "sell" || q.token !== ask.token || q.amountIn !== amountIn) fail("quote", "quote_check_failed");
-        // proceeds the vault would refuse are never sold for: nothing is signed (the token stays in W)
-        if (nearSwapFloor(q.venueOut, ask.slippageBps) < MIN) fail("quote", "amount_too_low");
-        say("quote", "quote");
-        return q;
+        return fail("quote", "quote_check_failed");
       };
-      let q = await quoted(held);
+      let { s: seen, q } = await fresh("quote", held);
       let amount: bigint;
       try {
         amount = nearSellAmount(q.fee, q.exchange, held);
@@ -237,7 +275,7 @@ async function runSell(deps: NearSellDeps, ask: NearSellAsk): Promise<NearSellAn
         return fail("quote", "quote_check_failed");
       }
       if (amount <= 0n) fail("quote", "quote_check_failed");
-      if (amount !== held) q = await quoted(amount);
+      if (amount !== held) ({ s: seen, q } = await fresh("quote", amount));
       const request: NearSwapRequest = { network: deps.network, side: "sell", token: ask.token, amountIn: amount, wallet: wallet.id, slippageBps: ask.slippageBps };
       const tradeOf = (x: RheaQuote): HelperNearTrade => ({
         network: deps.network,
@@ -303,23 +341,25 @@ async function runSell(deps: NearSellDeps, ask: NearSellAsk): Promise<NearSellAn
         await send(step, { trade: tradeOf(x), signed_delegates: signed.map((d) => d.signed_delegate) }, calls.length);
       };
 
-      // 3. W's registration on USDC, its own round
-      if (!s.registered) {
-        await round("register", q, s, false);
-        s = await readUntil("register", "sell", (x) => x.registered, "not_registered");
+      // 3. W's registration on USDC, its own round, signed from the pair's read
+      if (!seen.registered) {
+        await round("register", q, seen, false);
+        await lightUntil("register", "sell", (x) => x.registered, "not_registered");
         say("register", "registered");
       } else say("register", "already registered");
-      if (s.held < amount) fail("swap", "not_funded");
 
-      // 4. the swap on a fresh quote, from the nonce read after the registration; USDC W holds before it
-      const before = await readUntil("swap", "buy", () => true, "read_failed");
-      const fresh = await quoted(amount);
+      // 4. the swap on a fresh pair, W read at the quote's block, its nonce past the registration (read again until it
+      // reads registered); the USDC W holds at that block is the baseline of what the swap pays
+      const swapPair = await fresh("swap", amount, (x) => x.registered, NEAR_NETWORKS[deps.network].usdc);
+      if (swapPair.s.held < amount) fail("swap", "not_funded");
+      const before = swapPair.base!;
+      s = swapPair.s;
       try {
-        await round("swap", fresh, s, true);
+        await round("swap", swapPair.q, swapPair.s, true);
       } catch (e) {
         if (!(e instanceof Stop) || e.code !== "carry_failed" || swaps >= NEAR_SELL_SWAPS_MAX) throw e;
         // the swap failed on chain: W asked again once its token is back (its nonce past the failed swap's)
-        const spent = s.nonce;
+        const spent = swapPair.s.nonce;
         s = await readUntil("swap", "sell", (x) => x.held > 0n && x.nonce > spent, "carry_failed");
         say("swap", "asked again");
         continue;
@@ -327,8 +367,8 @@ async function runSell(deps: NearSellDeps, ask: NearSellAsk): Promise<NearSellAn
       say("swap", "swapped");
 
       // 5. what W received in USDC against the floor (USDC carries no fee of its own)
-      const floor = nearSwapFloor(fresh.venueOut, ask.slippageBps);
-      await readUntil("receive", "buy", (x) => x.held - before.held >= floor, "received_below_floor");
+      const floor = nearSwapFloor(swapPair.q.venueOut, ask.slippageBps);
+      await lightUntil("receive", "buy", (x) => x.held - before >= floor, "received_below_floor");
       say("receive", "received");
       break;
     }

@@ -184,6 +184,7 @@ export const CHANGED = [
   "scripts/live-checks/sol-settle-failed-is-not-unspent.mjs",
   "scripts/live-checks/signpage-throttled-read-is-not-asked-again-at-once.mjs",
   "scripts/live-checks/signpage-throttled-provider-has-a-spare.mjs",
+  "scripts/live-checks/near-quote-under-the-pace.mjs",
   "scripts/live-checks/sell-first-read-waits-out-a-throttle.mjs",
   "scripts/live-checks/sell-right-after-a-buy.mjs",
   "scripts/live-checks/start-reads-wait-out-a-throttle.mjs",
@@ -275,6 +276,7 @@ export const CHANGED = [
   "scripts/live-checks/pool-sol-mainnet-run.record.mjs",
   "scripts/live-checks/withdraw-form-shows-what-you-can-send.mjs",
   "scripts/live-checks/restore-shows-the-balance-in-seconds.mjs",
+  "scripts/live-checks/helper-says-why-a-vendor-refused.mjs",
 ];
 
 // Scripts in the searched folders that open no connection from Node, and why.

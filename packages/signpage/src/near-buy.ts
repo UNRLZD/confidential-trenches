@@ -38,7 +38,7 @@
 import { HELPER_BIND_TRADE_CODES, HELPER_CODE_STATUS, HELPER_FETCH_INIT, type HelperBindTradeRequest } from "../../kit/src/helper/v1.ts";
 import { NEAR_NETWORKS, type NearNetwork, type NearRpc } from "../../kit/src/near/networks.ts";
 import { rheaQuote } from "../../kit/src/near/rhea.ts";
-import { readNearSwapWallet, type NearSwapWalletArgs, type NearSwapWalletState } from "../../kit/src/trade/near/wallet.ts";
+import { readNearHeld, readNearSwapPair, readNearSwapWallet, type NearSwapWalletArgs, type NearSwapWalletState } from "../../kit/src/trade/near/wallet.ts";
 import type { BuyRoute, TxRef } from "../../kit/src/signpage/messages.ts";
 import { VAULT_CONSTANTS } from "../../kit/src/vault/shapes.ts";
 import { RELEASE_BIND_URL, SEND_TIMEOUT_MS } from "../../wallet/src/deposit/delegate.ts";
@@ -53,7 +53,7 @@ import { bindRpc, type BindRpc } from "../../wallet/src/deposit/bind.ts";
 import type { HostRefusal, KindContext, Running } from "./api.ts";
 import { nearReturnMove, nearSellFlow, nearSellNote, type NearSellDeps, type NearSellStep } from "./near-sell.ts";
 import type { NearSellAsk } from "./rules/near-trade.ts";
-import { nearBuyFlow, runNearBuy, type NearBuyAsk, type NearBuyBegun, type NearBuyDeps, type NearBuyProgress, type NearHelperAnswer, type NearPayoutEnd } from "./near-trade.ts";
+import { nearBuyFlow, runNearBuy, type NearBuyAsk, type NearBuyBegun, type NearBuyDeps, type NearBuyProgress, type NearHeldState, type NearHelperAnswer, type NearPair, type NearPairAsk, type NearPayoutEnd } from "./near-trade.ts";
 import { nearView } from "./near-pools.ts";
 import { unitsOf } from "./pool-buy.ts";
 import { legCause } from "./pool-sell.ts";
@@ -165,8 +165,41 @@ export type NearBuyPage = {
   log?: (line: string) => void;
 };
 
-const readW = (page: NearBuyPage, a: Pick<NearSwapWalletArgs, "wallet" | "side" | "token">): Promise<NearSwapWalletState> =>
+/** What the NEAR reads need of the page. */
+type NearReadsPage = Pick<NearBuyPage, "network" | "rpcs" | "pools" | "readWallet">;
+/** The NEAR buy's and sell's reads of W and the quote on the page's pair, bound once for both flows (card
+ *  near-quote-under-the-pace; test/near-reads-count.test.ts counts each step's reads on them). */
+export function nearReads(page: NearReadsPage): Pick<NearBuyDeps, "readWallet" | "quote" | "pair" | "held"> {
+  return {
+    readWallet: (a) => readW(page, a),
+    quote: async (a) => rheaQuote({ network: page.network, rpcs: page.rpcs(), ...a, pools: await page.pools(a.token) }),
+    pair: (a) => pairOf(page, a),
+    held: (a) => heldOf(page, a),
+  };
+}
+const readW = (page: NearReadsPage, a: Pick<NearSwapWalletArgs, "wallet" | "side" | "token">): Promise<NearSwapWalletState> =>
   page.readWallet ? page.readWallet(a) : readNearSwapWallet({ network: page.network, rpcs: page.rpcs(), ...a });
+/** W and the quote at one block: the kit's readNearSwapPair on rpcs(). A page given its own W read (page.readWallet)
+ *  has that read, then the quote, and its baseline from W's read of the other side. */
+const pairOf = async (page: NearReadsPage, a: NearPairAsk): Promise<NearPair> => {
+  const pools = await page.pools(a.token);
+  if (!page.readWallet) return readNearSwapPair({ network: page.network, rpcs: page.rpcs(), wallet: a.wallet, side: a.side, token: a.token, amountIn: a.amountIn, pools, ...(a.baseline === undefined ? {} : { baseline: a.baseline }) });
+  const state = await page.readWallet({ wallet: a.wallet, side: a.side, token: a.token });
+  const quote = await rheaQuote({ network: page.network, rpcs: page.rpcs(), side: a.side, token: a.token, amountIn: a.amountIn, pools });
+  const other = a.side === "buy" ? "sell" : "buy";
+  if (a.baseline === undefined) return { state, quote };
+  if (a.baseline !== (a.side === "buy" ? a.token : NEAR_NETWORKS[page.network].usdc)) throw new Error("a baseline of the token W receives only");
+  return { state, quote, baseline: (await page.readWallet({ wallet: a.wallet, side: other, token: a.token })).held };
+};
+/** W's light read: what it holds of the token it sends and its registration on the one it receives (the kit's
+ *  readNearHeld on rpcs()), or page.readWallet when the page is given its own. */
+const heldOf = async (page: NearReadsPage, a: Pick<NearSwapWalletArgs, "wallet" | "side" | "token">): Promise<NearHeldState> => {
+  if (page.readWallet) return page.readWallet(a);
+  const usdc = NEAR_NETWORKS[page.network].usdc;
+  const [sent, received] = a.side === "buy" ? [usdc, a.token] : [a.token, usdc];
+  const h = await readNearHeld({ network: page.network, rpcs: page.rpcs(), wallet: a.wallet, token: sent, on: received });
+  return { account: h.account, height: h.height, held: h.held, registered: h.registered === true };
+};
 const isObj = (x: unknown): x is Record<string, unknown> => typeof x === "object" && x !== null && !Array.isArray(x);
 const ended = (r: NearBuyRecord) => r.stage === "filled" || r.stage === "refused";
 /** A buy the buy's own run may take up again: not ended, not resumed too often, its W not taken by a sell, and not
@@ -469,8 +502,7 @@ export function depsOf(page: NearBuyPage, only: string | null, id: string, route
       }
     },
     helper: (body) => sendNearTrade(body, page.fetchFn),
-    readWallet: (a) => readW(page, a),
-    quote: async (a) => rheaQuote({ network: page.network, rpcs: page.rpcs(), ...a, pools: await page.pools(a.token) }),
+    ...nearReads(page),
     sign: (given, request, q, s, bound) =>
       page.seedLock(async () => {
         const r = rec!;
@@ -790,8 +822,7 @@ export function sellDepsOf(page: NearBuyPage, only: string | null, id: string, s
       if (Array.isArray(a.tx_hashes)) await addTxs(a.tx_hashes);
       return a;
     },
-    readWallet: (a) => readW(page, a),
-    quote: async (a) => rheaQuote({ network: page.network, rpcs: page.rpcs(), ...a, pools: await page.pools(a.token) }),
+    ...(({ quote: _q, ...r }) => r)(nearReads(page)),
     sign: (l, j, given, request, q, s, bound) =>
       withSeed((seed) => {
         const r = rec!;

@@ -43,6 +43,9 @@ const STEPS = process.env.SOL_COPY_STEPS ?? "all"; // "buy": deposit and buy onl
 const FLOW = process.env.SOL_COPY_FLOW ?? "pool";
 if (!["pool", "pieces"].includes(FLOW)) throw new Error(`SOL_COPY_FLOW: pool or pieces, not ${FLOW}`);
 const PIECES = FLOW === "pieces";
+// the pieces driver's scenario: copy-part1 (the default), or copy-takeable (the Max past an epoch boundary, the load)
+const SCENARIO = process.env.SOL_COPY_SCENARIO ?? "copy-part1";
+if (!["copy-part1", "copy-takeable"].includes(SCENARIO)) throw new Error(`SOL_COPY_SCENARIO: copy-part1 or copy-takeable, not ${SCENARIO}`);
 if (PIECES && (PLANT || (ONLY.length && ONLY.join() !== "curve") || STEPS !== "all")) throw new Error("SOL_COPY_FLOW=pieces runs the curve coin alone, with no plant and every step");
 const ENGINE = process.env.SOL_COPY_ENGINE ?? (PIECES ? "lands" : "swallow");
 if (PIECES && ENGINE !== "lands") throw new Error("SOL_COPY_FLOW=pieces needs the stand-in that lands each bundle");
@@ -327,8 +330,8 @@ for (const kind of KINDS) {
   writeFileSync(cfg, JSON.stringify({ rpcs: URLS, feePayerKeyFile: fpFile, dir, mint: c.mint, engine: ENGINE, plant: kind === "mayhem" ? PLANT : "" }));
   const flowOut = join(dir, "flow.json");
   if (PIECES) {
-    log(`${kind} ${c.mint}: copy-part1 of pool-buy-pieces-devnet.mjs`);
-    const r = await runNode(["packages/signpage/scripts/pool-buy-pieces-devnet.mjs", "copy-part1", "pinned", c.mint, flowOut], { FLOW_COPY: cfg });
+    log(`${kind} ${c.mint}: ${SCENARIO} of pool-buy-pieces-devnet.mjs`);
+    const r = await runNode(["packages/signpage/scripts/pool-buy-pieces-devnet.mjs", SCENARIO, "pinned", c.mint, flowOut], { FLOW_COPY: cfg });
     const f = existsSync(flowOut) ? JSON.parse(readFileSync(flowOut, "utf8")) : null;
     runs[kind] = { exit: r.code, pieces: f, tail: r.out.split("\n").slice(-30) };
     const Ws = { "buy-2": f?.two?.W ?? null, max: f?.max?.W ?? null };

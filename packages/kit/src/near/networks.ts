@@ -32,13 +32,25 @@ export const NEAR_NETWORKS = {
   // first, the keyless public one the NEAR docs list (docs.near.org/api/rpc/providers), then FastNEAR's own, whose docs
   // call it paid. Both answered keyless with CORS * on 8 Nov 2026: `tx` with wait_until NONE read a 2 Nov testnet tx
   // FINAL and an unsent hash UNKNOWN_TRANSACTION, where the pair keeps about 100,000 to 230,000 mainnet blocks.
-  mainnet: { usdc: "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1", vault: "vault.confidential.unrlzd.near", fastnear: [NEAR_RPC_URLS[0], NEAR_RPC_URLS[1]], drpc: NEAR_RPC_URLS[2], archival: ["https://archival-rpc.mainnet.near.org", "https://archival-rpc.mainnet.fastnear.com"] }, // near-rpc-operators: one operator (the archival list, every one asked)
+  // seat: the release helper's POST /v1/rpc/near?keyed=only (card near-quote-under-the-pace), FastNEAR's key and
+  // nothing else (the helper's rpc.ts NEAR_SEAT; any other operator's URL there is its 503): one of the network's
+  // FastNEAR seats for the pair rule, at the key's pace, so the signing page's trade reads stay off the keyless 0.39 a
+  // second. null where the helper has no NEAR route (testnet).
+  mainnet: {
+    usdc: "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+    vault: "vault.confidential.unrlzd.near",
+    fastnear: [NEAR_RPC_URLS[0], NEAR_RPC_URLS[1]],
+    drpc: NEAR_RPC_URLS[2],
+    archival: ["https://archival-rpc.mainnet.near.org", "https://archival-rpc.mainnet.fastnear.com"], // near-rpc-operators: one operator (the archival list, every one asked)
+    seat: "https://ct-api.unrealized.trade/v1/rpc/near?keyed=only", // near-rpc-operators: one operator (a table row: the seat is read with dRPC, never with the archival list)
+  },
   testnet: {
     usdc: "bf-usdc-20261101t022248.testnet", // gitleaks:allow (a public account id)
     vault: "vault.bf-vt-20261102t071444.testnet", // gitleaks:allow (a public account id)
     fastnear: ["https://test.rpc.fastnear.com", "https://rpc.testnet.near.org"], // near-rpc-operators: one operator (alternatives; the pair is one of these and drpc)
     drpc: "https://near-testnet.drpc.org",
     archival: ["https://archival-rpc.testnet.near.org", "https://archival-rpc.testnet.fastnear.com"], // near-rpc-operators: one operator (the archival list, every one asked)
+    seat: null,
   },
 } as const;
 // Frozen, so no code on the page can point a network at another USDC contract, vault or RPC after load.
@@ -53,6 +65,12 @@ export const NEAR_RPC_METHOD = "query";
 export interface NearRpc {
   name: string;
   query(params: Record<string, unknown>, signal?: AbortSignal): Promise<unknown>;
+  /**
+   * A paced provider's next turn, waited for and held: the provider it gives back sends its first query at once,
+   * without waiting for another turn (the wallet's pacedNearRpc). Two height reads that must be of one moment take both
+   * providers' turns first, then ask both at once (rhea.ts nearFinal). Absent: the provider is not paced on the device.
+   */
+  reserve?(signal?: AbortSignal): Promise<NearRpc>;
 }
 
 /** An HTTP answer that is not the provider's JSON-RPC one: its status, and its Retry-After in ms when it sent one. */
@@ -69,16 +87,17 @@ export function rpcHttpError(res: { status: number; headers: { get(name: string)
 }
 
 /**
- * The network whose release pair `rpcs` is, or null: exactly one of its FastNEAR URLs and its dRPC URL, in either
- * order, each provider named by the exact URL it reads (nearRpc's name). The one rule for every path that reads NEAR
- * on two RPCs: two hosts of one operator are one read, so two of them, or any other name, give null.
+ * The network whose release pair `rpcs` is, or null: exactly one of its FastNEAR seats (one of its FastNEAR URLs, or
+ * the helper's FastNEAR seat `seat`) and its dRPC URL, in either order, each provider named by the exact URL it reads
+ * (nearRpc's name). The one rule for every path that reads NEAR on two RPCs: two hosts of one operator are one read, so
+ * two of them (the helper's seat with a FastNEAR URL among them), or any other name, give null.
  */
 export function nearPairNetwork(rpcs: unknown): NearNetwork | null {
   if (!Array.isArray(rpcs) || rpcs.length !== 2) return null;
   const names = rpcs.map((r: unknown) => (typeof r === "object" && r !== null && typeof (r as NearRpc).query === "function" ? (r as NearRpc).name : undefined));
   for (const network of Object.keys(NEAR_NETWORKS) as NearNetwork[]) {
     const net = NEAR_NETWORKS[network];
-    const fast = (n: unknown) => (net.fastnear as readonly unknown[]).includes(n);
+    const fast = (n: unknown) => (net.fastnear as readonly unknown[]).includes(n) || (net.seat !== null && n === net.seat);
     if ((fast(names[0]) && names[1] === net.drpc) || (names[0] === net.drpc && fast(names[1]))) return network;
   }
   return null;
@@ -86,7 +105,8 @@ export function nearPairNetwork(rpcs: unknown): NearNetwork | null {
 /** The refusal's words for a pair that is not the network's (or, with none named, not any network's). */
 export function nearPairRule(network?: NearNetwork): string {
   const nets = network === undefined ? (Object.keys(NEAR_NETWORKS) as NearNetwork[]) : [network];
-  return `the RPCs must be one of ${nets.map((n) => `${NEAR_NETWORKS[n].fastnear.join(", ")} and ${NEAR_NETWORKS[n].drpc}`).join("; or ")}, exactly`;
+  const seats = (n: NearNetwork) => [...NEAR_NETWORKS[n].fastnear, ...(NEAR_NETWORKS[n].seat === null ? [] : [NEAR_NETWORKS[n].seat])];
+  return `the RPCs must be one of ${nets.map((n) => `${seats(n).join(", ")} and ${NEAR_NETWORKS[n].drpc}`).join("; or ")}, exactly`;
 }
 
 /**

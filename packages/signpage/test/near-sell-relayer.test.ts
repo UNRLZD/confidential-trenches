@@ -18,6 +18,7 @@ import type { Relayer, TxOutcome, TxRef } from "../../../apps/helper/src/bind/se
 import type { KindContext } from "../src/api.ts";
 import { sendNearTrade } from "../src/near-buy.ts";
 import { nearSellFlow, type NearSellAnswer, type NearSellDeps, type NearTradeSigned } from "../src/near-sell.ts";
+import { fakePair, type WithQuote } from "./near-pair-fake.ts";
 
 const SEED = wordsToSeed64(entropyToWords(new Uint8Array(16))); // the published all-zero vector (a8.json)
 const USDC = NEAR_NETWORKS.mainnet.usdc;
@@ -96,7 +97,7 @@ function world(o: { start?: Partial<Chain>; lag?: number; rec?: TradeRecord } = 
   // the sale's notes: each lands with what it is given
   const notes: { id: string; state: string; amount: bigint | null }[] = [];
   let trade: NearTradeSigned | null = null;
-  const deps: NearSellDeps = {
+  const deps: NearSellDeps & WithQuote = {
     network: "mainnet",
     wallet: () => ({ id: W, l: L, j: J, token: TOKEN }),
     helper: (body) => sendNearTrade(body, fetchFn),
@@ -105,6 +106,7 @@ function world(o: { start?: Partial<Chain>; lag?: number; rec?: TradeRecord } = 
       chain.height += 1;
       return { account: a.wallet, height: chain.height, blockHash: "b", nonce: chain.nonce, held: a.side === "sell" ? chain.token : chain.usdc, registered: chain.usdcRegistered && reads > (o.lag ?? 0), storageMin: MIN, lostfound: 0n };
     },
+    pair: fakePair(() => deps),
     quote: async (a): Promise<RheaQuote> => ({
       network: "mainnet",
       exchange: NEAR_RHEA.mainnet.exchange,
@@ -165,7 +167,8 @@ test("the sell through the relayer's handler: W already registered on USDC, the 
 });
 
 test("a second registration (a provider behind shows W unregistered on USDC, the handler reads it registered): already_registered, the read decides, the swap goes on", async () => {
-  const v = world({ lag: 1 });
+  // behind for W's first two reads: the light read, and the W read of the quote's pair the registration is signed from
+  const v = world({ lag: 2 });
   const a = await v.run();
   assert.deepEqual(codes(v.answers), ["already_registered", "ok"]);
   assert.equal(v.answers[0]!.status, 409);
