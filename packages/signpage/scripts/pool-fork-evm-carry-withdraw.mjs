@@ -508,13 +508,25 @@ const into = Date.now() % EPOCH;
 if (into > 1_000) await sleep(EPOCH - into + 250);
 const carryAt = Date.now();
 const balanceBefore = await balanceOf(A.w);
+// the page's state reads in the carry and the first-leaf watch: one every STATE_READ_MS. Each runs the RESERVED and
+// unfinal settle's round on the pool's seats as trade reads (src/pool-testnet.ts reserveEvm), so one every 500 ms (the
+// 03:16Z and 03:42Z runs) kept the seats' lanes full and the proof queue's first round, a pass read there, waited 25 s
+// for its turn; the page asks no such pace (the app asks state at its own taps and the page pushes it on a change)
+const STATE_READ_MS = 5_000;
+let stateReadAt = 0;
+const stateReadDue = async (pool) => {
+  if (Date.now() - stateReadAt < STATE_READ_MS) return;
+  stateReadAt = Date.now();
+  await pool.stateRead().catch(() => {});
+};
 await anvil("anvil_setBalance", [ux.evm, hex(floor)]);
 let shownMs = null;
 let finalizedAt = null;
 for (let k = 0; k < 240 && shownMs === null; k++) {
   await sleep(500);
-  // the page's state reads, as SIGN_HOST runs them while it is open: they settle the INCOMING note once its block is final
-  await t.stateRead().catch(() => {});
+  // the page's state reads, as SIGN_HOST runs them while it is open (a state read is the app's ask or a change the page
+  // pushes, never a timer of its own: src/api.ts): one every STATE_READ_MS here, while the balance is looked at every 500 ms
+  await stateReadDue(t);
   if ((await balanceOf(A.w)) >= balanceBefore + EVM_LADDER.min) shownMs = Date.now() - carryAt;
   // the deposit sent: its block made final, as on the chain after its lag
   else if (finalizedAt === null && (await mine(A.w)).some((n) => n.state === "INCOMING" && (n.evmSends ?? []).length > 0)) {
@@ -535,7 +547,8 @@ const first = { sizeBefore, depositBlock: depRc ? BigInt(depRc.blockNumber) : nu
 // each URL kept, read directly), after the send so the tap is not held: the epoch cut at the tap's epoch start, refused
 // as no leaf (PoolNoLeafError code no_leaf), then the newest root; and the state root the release bound (its proof's
 // public signal 3, read from its calldata: withdraw((address,bytes),(uint256[2],uint256[2][2],uint256[2],uint256[8]),
-// uint256,bytes), the signals words 9 to 16), which must be that newest root and the pool's own root at the deposit block
+// uint256,bytes), the signals words 9 to 16), which must be the pool's own root at the deposit block: the newest root at
+// the part's time, its one leaf (the newest read here comes after the send, the change leaf in it: kept as read)
 const ROOT_SEL = "0x" + Buffer.from(keccak_256(new TextEncoder().encode("currentRoot()"))).toString("hex").slice(0, 8);
 const noLeafRead = async (op, cutMs) => {
   const direct = (url) => Object.assign((m, p) => anvil(m, p), { url });
@@ -549,13 +562,13 @@ const noLeafRead = async (op, cutMs) => {
     boundStateRoot = BigInt("0x" + tx.input.slice(10 + 64 * 12, 10 + 64 * 13));
   }
   const poolRootAtDeposit = depRc === null ? null : BigInt(await anvil("eth_call", [{ to: PIN.pool, data: ROOT_SEL }, depRc.blockNumber]));
-  return { cut, cutMs, newestStateRoot: newest?.stateRoot ?? null, newestSize: newest?.stateTree.size ?? null, boundStateRoot, poolRootAtDeposit };
+  return { cut, cutMs, newestAfterSendStateRoot: newest?.stateRoot ?? null, newestAfterSendSize: newest?.stateTree.size ?? null, boundStateRoot, poolRootAtDeposit };
 };
 await guard("first leaf: a ready proof inside its first minute", async () => {
   let found = null;
   let reads = 0;
   while (found === null && depAtMs !== null && depNote !== undefined && Date.now() < depAtMs + 50_000) {
-    await t.stateRead().catch(() => {});
+    await stateReadDue(t);
     reads++;
     const { ready } = await t.readyWith(async () => null);
     found = (ready ?? []).find((p) => p.noteId === depNote.id) ?? null;
@@ -577,7 +590,7 @@ await guard("withdraw: the first leaf, tapped inside its first minute", async ()
   txsOf(o.op, "withdraw first leaf");
   const got = (await toBalance()) - toWas;
   const noLeaf = await noLeafRead(o.op, epochOf(tapChainMs));
-  step("withdraw: the first leaf, tapped inside its first minute", { ...first, sizeAtTap: size, depthAtTap: depthOfSize(size), tapChainMs, tapEpochStartMs: epochOf(tapChainMs), tapMsAfterDeposit: tapChainMs - depAtMs, runMs, sentMs: seenAt.wfirst.wallMs - s, end, ...o, arrived: got, asked: ready.amount, noLeaf }, end === "sent" && got === ready.amount && sizeAtDep === 1 && epochOf(tapChainMs) === epochOf(depAtMs) && noLeaf.cut === "no_leaf" && noLeaf.boundStateRoot !== null && noLeaf.boundStateRoot === noLeaf.newestStateRoot && noLeaf.boundStateRoot === noLeaf.poolRootAtDeposit);
+  step("withdraw: the first leaf, tapped inside its first minute", { ...first, sizeAtTap: size, depthAtTap: depthOfSize(size), tapChainMs, tapEpochStartMs: epochOf(tapChainMs), tapMsAfterDeposit: tapChainMs - depAtMs, runMs, sentMs: seenAt.wfirst.wallMs - s, end, ...o, arrived: got, asked: ready.amount, noLeaf }, end === "sent" && got === ready.amount && sizeAtDep === 1 && epochOf(tapChainMs) === epochOf(depAtMs) && noLeaf.cut === "no_leaf" && noLeaf.boundStateRoot !== null && noLeaf.boundStateRoot === noLeaf.poolRootAtDeposit);
 });
 await guard("withdraw: the second, at depth 1", async () => {
   const AMOUNT = "0.0001";
