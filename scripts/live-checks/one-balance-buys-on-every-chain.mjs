@@ -38,8 +38,15 @@ const IMPLICIT = new RegExp(`(${N})=/\\^\\[0-9a-f\\]\\{64\\}\\$/`, "g");
 const checkOf = (rule) => new RegExp(`\`error\`in (${N})\\|\\|!${esc(rule)}\\.test\\(\\1\\.address\\)\\|\\|\\1\\.amountIn!==(${N})\\|\\|\\1\\.minOut<(${N})\\)return`);
 /** The move's follow op id. */
 const MOVE_ID = new RegExp(`\`cash/\\$\\{${N}\\}/\\$\\{${N}\\.now\\(\\)\\}\``);
-/** The tap: the shortfall asked of the mover, the app told, then the wait. */
-const TAP = new RegExp(`(${N})=await (${N})\\.tapMax\\((${N})\\);if\\(\\1<(${N})\\.amount&&await \\2\\.need\\(\\4\\.amount-\\1\\)\\)\\{try\\{${N}\\?\\.route\\?\\.\\(\\{move:\`cash\`\\}\\)\\}catch\\{\\}`);
+/** The tap: the shortfall asked of the mover, the app told, then the wait. Its tap read only when Cash or a move on its
+ *  way can add to it (`any()`), and since pool.move the move's op id told with it; the form before either read too. */
+const TAP = new RegExp(
+  [
+    `(${N})=await (${N})\\.tapMax\\((${N})\\);if\\(\\1<(${N})\\.amount&&await \\2\\.need\\(\\4\\.amount-\\1\\)\\)\\{try\\{${N}\\?\\.route\\?\\.\\(\\{move:\`cash\`\\}\\)\\}catch\\{\\}`,
+    `(${N})=await (${N})\\.any\\(\\)\\?await \\6\\.tapMax\\((${N})\\):(${N})\\.amount;if\\(\\5<\\8\\.amount&&await \\6\\.need\\(\\8\\.amount-\\5\\)\\)\\{try\\{${N}\\?\\.route\\?\\.\\(\\{move:\`cash\`\\}\\)\\}catch\\{\\}`,
+    `(${N})=await (${N})\\.any\\(\\)\\?await \\10\\.tapMax\\((${N})\\):(${N})\\.amount,(${N})=\\9<\\12\\.amount\\?await \\10\\.need\\(\\12\\.amount-\\9\\):null;if\\(\\13!==null\\)\\{try\\{${N}\\?\\.route\\?\\.\\(\\{move:\`cash\`,op:\\13\\}\\)\\}catch\\{\\}`,
+  ].join("|"),
+);
 /** pool.buy.dry's answer with with_cash. */
 const MAX = new RegExp(`\\{\\.\\.\\.(${N}),result:\\{\\.\\.\\.\\1\\.result,with_cash:${N}\\}\\}`);
 /** kit-v1.14's level in the version chain, and its strip of with_cash. */

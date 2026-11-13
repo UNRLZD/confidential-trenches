@@ -2,7 +2,8 @@
 // (one-balance-buys-on-every-chain.answers.json). good: this card's SIGN_HOST build: PASS. liveBefore: SIGN_HOST as
 // served before this card: FAIL, every mark named. Planted on the good one: another script, no pin, each mark taken
 // away: each FAIL; and each mark's minified line as this card's build spells it, changed so its rule no longer holds:
-// each FAIL.
+// each FAIL. The good answer is re-read from the build at 55538dc73 on (a tap reads its venue only when Cash or a
+// move on its way can add to it).
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
@@ -37,7 +38,7 @@ const JS = [
   "Ox=/^[0-9a-f]{64}$/,Oz=/^[0-9a-f]{64}$/;",
   "let u=`cash/${n}/${e.now()}`,d={error:`not_allowed`};",
   "if(`error`in d||!Oz.test(d.address)||d.amountIn!==c||d.minOut<o)return a>0n;",
-  "let s=await o.tapMax(i);if(s<n.amount&&await o.need(n.amount-s)){try{r?.route?.({move:`cash`})}catch{}}",
+  "let s=await o.any()?await o.tapMax(i):n.amount;if(s<n.amount&&await o.need(n.amount-s)){try{r?.route?.({move:`cash`})}catch{}}",
   "return e!==null&&`result`in e&&n!==null?{...e,result:{...e.result,with_cash:n}}:e;",
   "return i(Th[0],Th[1])?`current`:i(1,14)?`1.14`:i(1,13)?`1.13`:`1.4`}",
   "Gh=(e,t)=>{if(typeof t!=`object`||!t||e!==`pool.buy.dry`)return t;let{with_cash:n,...r}=t;return r};",
@@ -60,6 +61,8 @@ test("the minified lines this card's build spells: PASS; each one changed so its
     ["tap", JS.replace("await o.need(n.amount-s)", "!1")],
     ["tap", JS.replace("o.need(n.amount-s)", "o.need(n.amount)")],
     ["tap", JS.replace("r?.route?.({move:`cash`})", "0")],
+    // the tap read when nothing can add to it is skipped the other way round: a tap with Cash never read
+    ["tap", JS.replace("await o.any()?await o.tapMax(i):n.amount", "await o.any()?n.amount:await o.tapMax(i)")],
     // no with_cash in the dry answer
     ["max", JS.replace(",with_cash:n}", "}")],
     // kit-v1.14 read in full, or with_cash never stripped
@@ -71,4 +74,16 @@ test("the minified lines this card's build spells: PASS; each one changed so its
     assert.notEqual(js, JS, `${mark}: the cut changed nothing`);
     assert.deepEqual(judge(facts(INDEX(js), js)).lines, [`BAD ${SAYS[mark]}`], `${mark}: ${js.slice(0, 80)}`);
   }
+});
+
+test("the tap as each build spells it: before any() (15b7ae910), with any() (part 1), and with the move op told (pool.move): PASS; the op one never asking the mover, or telling another op: FAIL", () => {
+  const forms = [
+    "let s=await o.tapMax(i);if(s<n.amount&&await o.need(n.amount-s)){try{r?.route?.({move:`cash`})}catch{}}",
+    "let s=await o.any()?await o.tapMax(i):n.amount;if(s<n.amount&&await o.need(n.amount-s)){try{r?.route?.({move:`cash`})}catch{}}",
+    "let s=await o.any()?await o.tapMax(i):n.amount,c=s<n.amount?await o.need(n.amount-s):null;if(c!==null){try{r?.route?.({move:`cash`,op:c})}catch{}}",
+  ];
+  for (const f of forms) assert.equal(facts("", f).tap, true, f);
+  const op = forms[2];
+  assert.equal(facts("", op.replace("await o.need(n.amount-s)", "null")).tap, false);
+  assert.equal(facts("", op.replace("op:c})", "op:s})")).tap, false);
 });
