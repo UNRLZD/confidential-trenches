@@ -1425,6 +1425,28 @@ test("a W's history the reader cannot tell is no buy: none at all, a listed tran
   assert.deepEqual(l2.log.map((l) => l.method), ["getSignaturesForAddress", "getSignaturesForAddress", "getTransaction", "getTransaction"]);
 });
 
+// Card closed-positions-show-every-trade: a buy of several pieces (card owners-solana-buy-lands) pays W by plain
+// releases (tag 2, W a signer) before its own tag 3, as 33SLRx then 55LqP9 did on mainnet at 18:05Z on 13 Nov. Read at
+// the first tag 2 alone, W was "none" for good: no buy record, no trades, so a device signed in again listed neither the
+// coin nor its closed round trip.
+test("a buy of several pieces: W's plain releases before its tag 3 are read past, and the buy with its trades is W's; a release with no tag 3 is none only once W moved on or it is old", async () => {
+  const piece = (n: number) => txOf({ signers: [FEE_PAYER, W], ix: [{ program: BUY_POOL, to: W, tag: 2 }], post: [] });
+  const sale = txOf({ signers: [W], pre: [tb(4, MINT_A, W, 5_000_000n)], post: [tb(4, MINT_A, W, 0n)] });
+  // newest first: the sale, the tag 3, two pieces
+  const h = { sigs: [{ signature: "sell", err: null }, { signature: "buy", err: null }, { signature: "p2", err: null }, { signature: "p1", err: null }], txs: new Map<string, unknown>([["p1", piece(1)], ["p2", piece(2)], ["buy", buyTx()], ["sell", sale]]) };
+  const got = await solanaBuyReader(historyRpc(new Map([[W, h]])).rpc, BUY_POOL).read(W);
+  assert.ok(got !== null && got !== "none", `the buy read past the pieces, not ${JSON.stringify(got)}`);
+  assert.deepEqual({ mint: got.mint, txs: got.txs?.map((t) => t.signature), soldOut: got.soldOut }, { mint: MINT_A, txs: ["buy", "sell"], soldOut: true }, "the tag 3 is the buy, the sale after it");
+  // the pieces landed and their tag 3 not yet: no answer, read again later, never none
+  const fresh = (t: unknown) => ({ ...(t as object), blockTime: Math.floor(Date.now() / 1000) });
+  const young = { sigs: [{ signature: "p1", err: null }], txs: new Map<string, unknown>([["p1", fresh(piece(1))]]) };
+  const yr = historyRpc(new Map([[W, young]]));
+  assert.equal(await solanaBuyReader(yr.rpc, BUY_POOL).read(W), null, "a fresh release with no tag 3 yet");
+  // a release, then W's own send out of it with no buy (its pieces swept back): none, for good
+  const swept = { sigs: [{ signature: "sweep", err: null }, { signature: "p1", err: null }], txs: new Map<string, unknown>([["p1", fresh(piece(1))], ["sweep", txOf({ signers: [W] })]]) };
+  assert.equal(await solanaBuyReader(historyRpc(new Map([[W, swept]])).rpc, BUY_POOL).read(W), "none", "W moved on with no buy");
+});
+
 // Review of 42a99f81 (c): each buy read's call is a round of its gate, and its answer clears the gate's doubt, as the
 // finder's round does; without it the gate stays in doubt after a 429 however many reads go through since
 test("a buy read's answer clears its gate's doubt after a 429", async () => {

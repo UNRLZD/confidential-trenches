@@ -1,0 +1,41 @@
+{
+ "good": {
+  "at": "2026-11-13T21:48:22.143Z",
+  "sign": {
+   "source": "https://confidential.unrealized.trade/",
+   "pageStatus": 200,
+   "js": [
+    {
+     "url": "/app.js",
+     "status": 200,
+     "integrity": "sha384-ionpfWHC49+iymQNgUncU2xcMvprtxpYNVHnSD38Tx1Q58IlDVaO4KColJVH4NvI",
+     "sha384": "sha384-ionpfWHC49+iymQNgUncU2xcMvprtxpYNVHnSD38Tx1Q58IlDVaO4KColJVH4NvI",
+     "found": [
+      "a plain release is read past, and is no buy only once old",
+      "a no-buy mark counts only at this read's value",
+      "an EVM trade's op is keyed by its chain and transaction",
+      "the op names the units, the ETH at 18 decimals and its USD",
+      "a filled buy writes it",
+      "a filled sale writes it"
+     ]
+    }
+   ]
+  }
+ },
+ "bad": {
+  "at": "2026-11-13T21:48:22.160Z",
+  "sign": {
+   "source": "https://confidential.unrealized.trade/",
+   "pageStatus": 200,
+   "js": [
+    {
+     "url": "/app.js",
+     "status": 200,
+     "integrity": "sha384-ZFe+Tuco9V0gMoeAq3pGbTr9OVAWP4zGQiqqJUeWF8FZUKFxRmGZF5p33bD9KVtx",
+     "sha384": "sha384-ZFe+Tuco9V0gMoeAq3pGbTr9OVAWP4zGQiqqJUeWF8FZUKFxRmGZF5p33bD9KVtx",
+     "found": []
+    }
+   ]
+  }
+ }
+}

@@ -66,6 +66,10 @@ import { solanaTradeLeg } from "./trade-fill.ts";
 
 /** The Ws whose history was read for good with no buy, in the wallet store's meta, by W's address. */
 export const BUY_NONE_KEY = "owed/buy-sol-none";
+/** A W's "read, no buy" mark. A mark written before card closed-positions-show-every-trade (`true`) may be a buy of
+ *  several pieces read at its first piece as no buy (buy-wallets.ts solanaBuyReader), so it counts as no mark: W is
+ *  read again, once, and the read writes this one or W's buy. */
+export const BUY_NONE_MARK = 2;
 /** The Ws whose trades were read to W's sale in full (true), or up to a signature (a SolanaTradesFrom cursor), in the
  *  wallet store's meta, by W's address. */
 export const TRADES_READ_KEY = "owed/trades-sol-read";
@@ -98,6 +102,8 @@ export type TradesStore = {
   update(store: "meta" | "ops", key: string, f: (v: unknown) => unknown): Promise<unknown>;
 };
 const recordOf = (v: unknown): Record<string, unknown> => (v !== null && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {});
+/** Whether W has a "read, no buy" mark in `marks` (BUY_NONE_KEY's record) of this reader's (BUY_NONE_MARK). */
+export const buyNoneMarked = (marks: unknown, w: string): boolean => recordOf(marks)[w] === BUY_NONE_MARK;
 const fromOf = (v: unknown): SolanaTradesFrom | null => {
   const r = recordOf(v);
   return typeof r.after === "string" && typeof r.mint === "string" && typeof r.program === "string" ? { after: r.after, mint: r.mint, program: r.program } : null;
@@ -108,7 +114,8 @@ const fromOf = (v: unknown): SolanaTradesFrom | null => {
 export async function tradesDone(st: Pick<TradesStore, "get">, buyKey: string): Promise<ReadonlySet<string>> {
   const own = Object.entries(recordOf(await st.get("meta", buyKey))).flatMap(([a, r]) => (recordOf(r).rebuilt === true ? [] : [a]));
   const final = Object.entries(recordOf(await st.get("meta", TRADES_READ_KEY))).flatMap(([a, v]) => (v === true ? [a] : []));
-  return new Set([...own, ...Object.keys(recordOf(await st.get("meta", BUY_NONE_KEY))), ...final]);
+  const none = Object.entries(recordOf(await st.get("meta", BUY_NONE_KEY))).flatMap(([a, v]) => (v === BUY_NONE_MARK ? [a] : []));
+  return new Set([...own, ...none, ...final]);
 }
 
 /** Where each W still holding is read on from (its "trades read" cursor; see the top). */

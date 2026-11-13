@@ -5,8 +5,8 @@
 // FAIL on the rules it moved (the empty listing while a note is RESERVED, the counted passes, the held W, every rent
 // back's claim, the listing) and on the sale's stamp, the trade lock and the load's start. Planted on the good one:
 // another /app.js, no pin, each mark taken away: each FAIL; and the good build's lines (round-trip-costs-less.excerpt.txt,
-// cut from its public/app.js; since card every-lamport-can-move that card's build) with one rule changed: each FAIL on
-// that rule's mark alone.
+// cut from its public/app.js; since card every-lamport-can-move that card's build; the no-buy mark's read as card
+// closed-positions-show-every-trade's build has it) with one rule changed: each FAIL on that rule's mark alone.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
@@ -83,7 +83,8 @@ test("the good build's lines carry every mark; each with its rule changed FAILs 
     ["let n=t===qY?null:Xe.preempt(),", "let n=Xe.preempt(),", 5],
     // the no-buy mark
     ["T2=`owed/buy-sol-none`", "T2=`owed/buy-sol`", 6],
-    ["buyNone:async t=>Object.hasOwn(nt(await(await e.store()).get(`meta`,T2)),t)", "buyNone:async t=>!1", 6],
+    ["buyNone:async t=>Mk(await(await e.store()).get(`meta`,T2),t)", "buyNone:async t=>!1", 6],
+    ["Mk=(e,t)=>nt(e)[t]===2,", "Mk=(e,t)=>Object.hasOwn(nt(e),t),", 6],
     // the sell rule: the priority cap, rounded up, a limit's absence 1,400,000; the fee a sale names, full or partial
     ["if(LA(d.ixs,f)>100000n)return X(`priority`);", "", 7],
     [">100000n)return X(`priority`)", ">1000000n)return X(`priority`)", 7],

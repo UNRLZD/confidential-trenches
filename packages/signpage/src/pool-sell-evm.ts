@@ -62,7 +62,7 @@
 //   balance), the token and the pool's logs over a block range; the sale's own transaction when the helper names one.
 //   Nothing here logs.
 import { keccak_256 } from "@noble/hashes/sha3.js";
-import type { TradeStage, TxRef } from "../../kit/src/signpage/messages.ts";
+import type { PoolStatePrice, TradeStage, TxRef } from "../../kit/src/signpage/messages.ts";
 import { evmPoolSellQuote, evmSellRevertedPools, EVM_QUOTE_MAX_AGE_MS, type EvmPoolSellQuote, type EvmPoolSellQuoteRequest } from "../../kit/src/checks/evm/quote.ts";
 import { evmBuyRouteOf, evmPoolVenues, venuePins, type EvmPoolChain, type EvmPoolVenueList, type EvmRoute } from "../../kit/src/trade/evm/buy-unpinned.ts";
 import { evmPoolBuildSell, type EvmPoolSell, type EvmPoolSellFields } from "../../kit/src/trade/evm/sell.ts";
@@ -79,7 +79,7 @@ import { jOf } from "../../wallet/src/pool/queue.ts";
 import { WALLET_SEED_LOCK, type WalletStore } from "@blindfill/wallet/store";
 import { checkEvmAuthorization, checkEvmSell, checkEvmSellSim, PoolRuleRefused, signEvmAuthorization, signEvmSell, signEvmSellSim, tokenDecimalsOf, type PoolAsk, type PoolContext } from "./rules/pool.ts";
 import { EvmSendBusy, EvmSendRefused, evmBuyCalldataRead, evmSellSelector, evmDepositedRead, evmHeadNumber, evmSellCalldata, evmSellSend, evmSellVerdict, type EvmDepositedRead, type EvmSellAuthorization, type EvmSellVerdict } from "./evm-send.ts";
-import { EVM_BUY_HEAD_SPREAD, EVM_BUY_LAG_BLOCKS, EVM_BUY_LAG_MS, EVM_POSITION_COSTS_KEY, type EvmHolding } from "./pool-buy-evm.ts";
+import { EVM_BUY_HEAD_SPREAD, EVM_BUY_LAG_BLOCKS, EVM_BUY_LAG_MS, EVM_POSITION_COSTS_KEY, evmTradeOp, writeEvmTradeOp, type EvmHolding, type EvmTradeOp } from "./pool-buy-evm.ts";
 import { ERC20_DECIMALS, keptTokenDecimals, type PoolRpc } from "./pool-kinds.ts";
 import { stageOfLegs, type PoolSellAnswer, type PoolSellLeg } from "./pool-sell.ts";
 import { clockOf as readClockOf, readWaits, stopOf, tapDone, tapWaits, waitsOn, waitUnless, type ReadWaits } from "./read-waits.ts";
@@ -94,7 +94,9 @@ type Chain = "base" | "robinhood";
 export const EVM_OPEN_SELLS_KEY = "owed/sell-evm";
 /** One open sale (decimal strings): written before its bytes leave, its deadline raised before a second signature
  *  leaves, dropped at its end. */
-export type EvmOpenSell = { note: string; chain: Chain; w: string; token: string; amount: string; precommitment: string; nonce: string; deadline: string; from: string; least: string; tx?: string };
+/** `decimals` (card closed-positions-show-every-trade): the token's, as the request named them, for the sale's trade op;
+ *  absent from a record written before it (the op then names no units). */
+export type EvmOpenSell = { note: string; chain: Chain; w: string; token: string; amount: string; precommitment: string; nonce: string; deadline: string; from: string; least: string; tx?: string; decimals?: number };
 
 /** A Sell's life, s: under the kit's EVM_POOL_SELL_DEADLINE_MAX_S (600), past the helper's send margin (60 s) with room
  *  for the busy waits. */
@@ -193,6 +195,10 @@ export type EvmSellHost = {
   late?(a: { stage: TradeStage; txs: TxRef[] }): void;
   /** The sale's Deposited, the same on both RPCs (evmSellVerdict), and its block: the page's positions read at no lower one. */
   deposited?(o: EvmOpenSell, block: bigint): void;
+  /** A filled sale read back (the tap's run or a load's follow): its trade op written (pool-buy-evm.ts writeEvmTradeOp). */
+  traded?(op: EvmTradeOp): Promise<void>;
+  /** The chain's pool asset's USD price as the page read it (src/pool-price.ts), for the op's USD; null: none. */
+  price?(): PoolStatePrice | null;
   signal?: AbortSignal;
   /** The session's sign out, aborted at its tap: it ends a wait between the reads' attempts (read-waits.ts waitUnless). */
   stop?: AbortSignal;
@@ -505,6 +511,7 @@ async function sellLeg(h: EvmSellHost, ask: PoolAsk, w: EvmSellWallet, on: { sen
         w: w.w,
         token: lower(ask.token!),
         amount: s.built.amount.toString(),
+        decimals: ask.decimals,
         precommitment: leg.note.precommitment.toString(),
         nonce: s.built.nonce.toString(),
         deadline: s.built.deadline.toString(),
@@ -722,6 +729,11 @@ async function watch(h: EvmSellHost, x: Watch, more: () => boolean, wait: (ms: n
       const inputs = await Promise.all(h.rpcs.map((rpc) => rpc("eth_getTransactionByHash", [v.deposit.tx]).then((t) => (t as { input?: unknown } | null)?.input, () => undefined)));
       // both read and neither carries one of them; a read that fails tells nothing, and the fill stands
       if (inputs.every((i) => typeof i === "string") && !inputs.some((i) => x.mine!.some((m) => lower(i as string).includes(m)))) return { lost: true };
+    }
+    // the trade's op: the token units W sold, and what the sale put back into the pool, what came out of the venue
+    if (v.end === "filled") {
+      const dec = Number.isSafeInteger(x.open.decimals) ? x.open.decimals! : null;
+      await h.traded?.(evmTradeOp("sell", h.chain, v.deposit.tx, x.open.token, BigInt(x.open.amount), dec, v.deposit.value, h.price?.() ?? null, Number(clock()))).catch(() => {});
     }
     return { stage: v.end === "filled" ? "filled" : "refused", txs };
   }
@@ -949,6 +961,8 @@ export type EvmSellPage = {
   /** The session's sign out, aborted at its tap (EvmSellHost.stop). */
   stop?: AbortSignal;
   stopped?(): boolean;
+  /** The chain's pool asset's USD price as the page read it (src/pool-price.ts), for a trade op's USD; null: none. */
+  price?(chain: Chain): PoolStatePrice | null;
 };
 
 const recordsOf = (v: unknown): Record<string, unknown> => (typeof v === "object" && v !== null ? { ...(v as Record<string, unknown>) } : {});
@@ -973,6 +987,9 @@ export function evmSellHost(chain: Chain, pin: EvmPoolPin, scope: bigint, rpcs: 
     reverted: evmSellRevertedPools,
     send: (body) => evmSellSend(TRADE_HELPER, body, page.fetch, page.signal),
     open: async () => recordsOf(await (await page.held()).get("meta", EVM_OPEN_SELLS_KEY)) as Record<string, EvmOpenSell>,
+    price: () => page.price?.(chain) ?? null,
+    // into the store while it is open
+    traded: async (op) => writeEvmTradeOp(await page.held(), op),
     record: async (o) => void (await (await page.held()).update("meta", EVM_OPEN_SELLS_KEY, (v) => ({ ...recordsOf(v), [o.note]: o }))),
     unrecord: async (note, deadline) =>
       void (await (await page.held()).update("meta", EVM_OPEN_SELLS_KEY, (v) => {

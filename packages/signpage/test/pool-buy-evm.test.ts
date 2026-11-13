@@ -244,6 +244,23 @@ test("filled: one Bought for the nullifier, the same on both RPCs, paying W the 
   assert.equal(seen.settles, 1, "the settle pass ends the RESERVED note");
 });
 
+// Card closed-positions-show-every-trade: a Base or Robinhood buy wrote no op, so the app's Activity and Portfolio's
+// closed positions never saw it (CASHCAT on Robinhood, 13 Nov 21:05Z, 0xd55fa259). Its filled end now gives the trade's
+// op: the token W received, the chunk less the sender's fee into the venue, and its USD at the page's own price.
+test("filled: the buy's trade op, its chain, token, units, the ETH into the venue and its USD at the page's price", async () => {
+  const { h } = host(both([release()]));
+  const ops: Record<string, unknown>[] = [];
+  // 3,000 USD an ETH
+  const price = { price: "300000000000", expo: -8, published_s: 1, read_ms: 1 };
+  const got = await runEvmPoolBuy({ ...h, traded: async (op: Record<string, unknown>) => void ops.push(op), price: () => price } as EvmPoolBuyHost, ASK);
+  assert.deepEqual(got, { stage: "filled", txs: [{ chain: "base", hash: TX }] });
+  assert.equal(ops.length, 1, "one trade op for the filled buy");
+  const { created_ms, ...rest } = ops[0]!;
+  assert.ok(Number.isSafeInteger(created_ms), "its time");
+  const wei = CHUNK - FEE;
+  assert.deepEqual(rest, { kind: "buy", stage: "filled", txs: [{ chain: "base", hash: TX }], chain: "base", token: TOKEN.toLowerCase(), units: "40", pool_amount: R.poolUnits(wei, 18), amount_usd: R.poolUnits(wei * 300_000_000_000n, 26) });
+});
+
 // card fresh-money-spendable-at-once: a tap spends one whole chunk, the ask's; among proofs of that chunk one on the
 // epoch root goes before one on the newest root (a note that landed this epoch), which is spent only when it alone is
 // the amount
