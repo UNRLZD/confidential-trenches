@@ -22,7 +22,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { LIMIT_CODES, RATE_LIMIT, RETRY, check, makerSpares, spareVerdict, throttled } from "./evm-rpc-spare-list.mjs";
+import { APP_ORIGIN, LIMIT_CODES, RATE_LIMIT, RETRY, check, makerSpares, preflight, spareVerdict, throttled } from "./evm-rpc-spare-list.mjs";
 import { LIMIT_CODES as SHARED_LIMIT_CODES, RATE_LIMIT as SHARED_RATE_LIMIT, RETRY as SHARED_RETRY } from "./provider-answer.mjs";
 
 const A = JSON.parse(readFileSync(new URL("./evm-rpc-spare-list.answers.json", import.meta.url), "utf8"));
@@ -196,6 +196,33 @@ test("card evm-spare-check-reads-a-throttle-as-no-answer: a maker spare is read 
   const run = structuredClone(A.throttledSpare);
   run.makers.robinhood = quiet;
   has(check(run).lines, /^INCONCLUSIVE helper robinhood maker spare 4663\.rpc\.thirdweb\.com: chain id HTTP 429 You are using a public-good RPC/);
+});
+
+test("card evm-spare-check-reads-a-throttle-as-no-answer: a scan spare's preflight is read again once on a 429, then recorded as answered", async () => {
+  RETRY.ms = 0;
+  const u = "https://robinhood.api.pocket.network";
+  const t = A.thirdweb429;
+  const cors = { "access-control-allow-origin": APP_ORIGIN, "access-control-allow-headers": "content-type" };
+  const fetchOf = (throttles) => {
+    let n = 0;
+    const f = async (_url, init) => {
+      if (init.method === "OPTIONS") n++;
+      if (n <= throttles) return new Response(init.method === "OPTIONS" ? null : t.body, { status: init.method === "OPTIONS" ? 204 : 429 });
+      return init.method === "OPTIONS" ? new Response(null, { status: 204, headers: cors }) : Response.json({ jsonrpc: "2.0", id: 1, result: "0x1" }, { headers: cors });
+    };
+    return { f, asked: () => n };
+  };
+  const once = fetchOf(1);
+  const p = (await preflight([u], once.f))[u];
+  assert.equal(once.asked(), 2);
+  assert.deepEqual(p, { status: 204, allow: APP_ORIGIN, headers: "content-type", post: APP_ORIGIN, postStatus: 200 });
+  const twice = fetchOf(2);
+  const q = (await preflight([u], twice.f))[u];
+  assert.equal(twice.asked(), 2, "read again once, never more");
+  assert.equal(q.postStatus, 429);
+  const run = structuredClone(A.goodSpare);
+  run.preflight[u] = q;
+  assert.equal(check(run).verdict, "INCONCLUSIVE");
 });
 
 test("card evm-spare-check-reads-a-throttle-as-no-answer: the check's throttle words and codes are provider-answer.mjs's", () => {
