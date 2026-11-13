@@ -13,7 +13,7 @@ const SRC = fileURLToPath(new URL("../src/", import.meta.url));
 const CORE_FILE = path.join(SRC, "core.ts");
 const WALLET = fileURLToPath(new URL("../../wallet/", import.meta.url));
 
-/** The values core exports, and its types: 51 names in all. */
+/** The values core exports, and its types: 74 names in all. */
 const VALUES = [
   "RESTORE_GAP", "RESTORE_LANES", "entropyToWords", "noteCommitment", "noteSecrets", "refKey", "restoreNotes", "restorePages", "typedSeed", "walkLane", "wordsToSeed64",
   // card exit-ids-out: the ids' keys and their moves out
@@ -26,8 +26,11 @@ const VALUES = [
   "changeIndex", "buildVaultWithdrawOut", "buildDeleteOut", "SETTLE_BLOCKS", "closeRefundsRan", "keyNonceAt",
   // card exit-pool-notes: the Solana pool's restore (its listed read included), its pool and scope, its two-RPC check
   "solanaRestoreNotes", "solanaPoolOf", "checkSolanaRpcs",
+  // card exit-evm-pools-with-the-words: the Base and Robinhood pools' restore, pins, trees, context and the note's W
+  "evmRestoreNotes", "EVM_CHAIN_IDS", "EVM_POOLS", "evmMemoryHold", "evmPoolContextOf", "evmPoolScopeOf", "evmRelayDataBytes", "evmTreeSync", "jOf",
+  "evmExitGasAddress", "evmExitSignSend", "evmExitW", "evmExitWithdrawCalldata", "evmExitWithdrawSignature", "EvmExitRefused",
 ];
-const TYPES = ["LaneWalk", "NoteRef", "NoteRestore", "RestoredNote", "RestoredSpend", "BuiltMove", "MoveOutReadFor", "MoveOutRpc", "OwnKey", "RegisterOutReadFor", "WithdrawOutReadFor", "SettleReadFor", "DeleteReadFor", "SolanaRestoredNote", "SolanaRestoredSpend"];
+const TYPES = ["LaneWalk", "NoteRef", "NoteRestore", "RestoredNote", "RestoredSpend", "BuiltMove", "MoveOutReadFor", "MoveOutRpc", "OwnKey", "RegisterOutReadFor", "WithdrawOutReadFor", "SettleReadFor", "DeleteReadFor", "SolanaRestoredNote", "SolanaRestoredSpend", "EvmRestoredNote", "EvmRestoredSpend", "EvmPoolPin", "EvmRelayData", "EvmRpc", "EvmExitProof", "EvmExitSigner", "EvmExitTx"];
 
 /** Every name core.ts exports, as its export declarations write them (types included). */
 function declaredNames(file: string): string[] {
@@ -55,7 +58,7 @@ test("core re-exports the wallet's own code by relative path, not a copy", () =>
   for (const s of src.statements) {
     if (!ts.isExportDeclaration(s)) continue;
     const spec = (s.moduleSpecifier as ts.StringLiteral).text;
-    assert.match(spec, /^\.\.\/\.\.\/wallet\/src\/(notes\/(restore|secrets|store)|signin\/words|derive\/keys|deposit\/(moveout|account)|arming\/accounts|pool\/(solana-restore|solana))\.ts$/, spec);
+    assert.match(spec, /^\.\.\/\.\.\/wallet\/src\/(notes\/(restore|secrets|store)|signin\/words|derive\/keys|deposit\/(moveout|account)|arming\/accounts|pool\/(solana-restore|solana|evm-restore|evm|queue|evm-exit))\.ts$/, spec);
   }
 });
 

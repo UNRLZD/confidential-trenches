@@ -8,7 +8,8 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@blindfill/kit": "workspace:*"
+    "@blindfill/kit": "workspace:*",
+    "snarkjs": "0.7.5"
   },
   "devDependencies": {
     "@types/node": "24.10.1"
