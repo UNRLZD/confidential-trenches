@@ -1,8 +1,8 @@
 {
  "_note": "good: this card's mainnet build (node packages/signpage/scripts/build-app.mjs on branch card/robinhood-note-spendable), its index and its app.js facts: the proving lock named and asked with steal and ifAvailable, and the queues lock named. bad: SIGN_HOST read 2026-11-13T22:31Z, before this card: no proving lock, so a note one tab proved stays HELD out of the tab in use. bad_tap: the mainnet build of this card's first commit d638031c: the proving lock with no queues lock, so a buy tapped in a tab without the front is refused and a window switch mid-buy refuses it.",
  "good": {
-  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-LER7yZumMFvWWIYR2rhsrLFKG7Ky4gKyvFJZsavPgMZ9gAITidEvhL3kcpob0ob9\"></script>\n  </head>\n  <body></body>\n</html>\n",
-  "sha384": "sha384-LER7yZumMFvWWIYR2rhsrLFKG7Ky4gKyvFJZsavPgMZ9gAITidEvhL3kcpob0ob9",
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-bARVDNLzN7pROVFW4hxXL5WsvDv97/30qgp2Nw9P5mqBiTMBDhrXdIsfzNyBDMhM\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-bARVDNLzN7pROVFW4hxXL5WsvDv97/30qgp2Nw9P5mqBiTMBDhrXdIsfzNyBDMhM",
   "lock": true,
   "steal": true,
   "ifAvailable": true,
