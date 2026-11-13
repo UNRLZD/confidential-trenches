@@ -12,6 +12,12 @@
 //   - sell: the Sell typed data W signs (packages/kit/src/trade/evm/sell-unpinned.ts) and the sale's open record
 //     (src/pool-sell-evm.ts EVM_OPEN_SELLS_KEY, followed until its return lands in the pool);
 //   - pins: both mainnet pools (evm-pools-on-mainnet.mjs PINS), and no testnet pool.
+//   - quotes (read only, never signed or sent; skipped with --local, as on a pull request's build): each chain's pool
+//     index synced cold on its two readers and served, then the helper's top QUOTE_ROWS list rows by liquidity, each
+//     quoted by the tap's own quote (the kit's evmPoolBuyQuoteTap) once cold and WARM_RUNS times warm. Each tap ends
+//     in a quote or a refusal whose name is true (NAMED), asks at most EVM_BUY_TAP_QUOTES kit quotes, gets no 429, and
+//     each warm tap ends within WARM_MAX_MS. The index sync's limits are reported, never judged, until each
+//     chain's index ships with the release.
 // What each part does is held by the signing page's tests (test/pool-carry-evm.test.ts, test/pool-evm-trade-open.test.ts,
 // test/pool-mainnet-evm.test.ts, scripts/build-network.test.mjs). scripts/ci/bundle-checks.mjs runs read and judge on
 // a pull request's own build.
@@ -28,6 +34,8 @@ import { pageFacts as depositFacts } from "./evm-deposit-on-mainnet.mjs";
 import { PINS } from "./evm-pools-on-mainnet.mjs";
 import { WITHDRAW_MARKS } from "./evm-withdraw-mainnet.mjs";
 import { EXIT } from "./provider-answer.mjs";
+import { EVM_BUY_TAP_QUOTES, evmPoolBuyQuote, evmPoolBuyQuoteTap, evmPoolIndexRefresh } from "../../packages/kit/src/index.ts";
+import { HELPER } from "./evm-deposit-on-mainnet.mjs";
 
 export const KEY = "evm-buy-and-sell-on-mainnet";
 export const SIGN = "https://confidential.unrealized.trade";
@@ -42,6 +50,16 @@ export const MARKS = Object.freeze({
 });
 /** The testnet pools (the kit's evmTestnetVenues): none in SIGN_HOST's build. */
 export const TESTNET_POOLS = Object.freeze(["0xeb967dfc1b4ffb22942f833c76866ea85fc42266", "0xed9fac860e6bc5e932455232eedca8b71c44da4d"]);
+
+/** The quotes part: rows read per chain, warm runs per row, the warm bound, the buy (0.00098 ETH) and its slippage. */
+export const QUOTE_ROWS = 5;
+export const WARM_RUNS = 3;
+export const WARM_MAX_MS = 2_000;
+export const QUOTE_AMOUNT = 980_000_000_000_000n;
+/** A tap's refusal whose name is true and shown: the coin has no route a buy may take (not_allowed), more pools than a
+ *  quote reads (too_many_pools, the kit's bound), or no standard or pinned pool the device can price it against
+ *  (no_reference). Any other (no_quote, quote_check_failed, a provider's fault) fails. */
+export const NAMED = Object.freeze(["not_allowed", "too_many_pools", "no_reference"]);
 
 /** What the check keeps of SIGN_HOST's build: its pin and sha384, the rule, and each part's marks found. */
 export function pageFacts(index, js) {
@@ -60,6 +78,29 @@ export function pageFacts(index, js) {
   };
 }
 
+/** The quotes part's lines (see the header). */
+function judgeQuotes(qs, say) {
+  for (const chain of ["base", "robinhood"]) {
+    const c = qs?.chains?.[chain];
+    const ix = c?.index;
+    say(ix?.served === true, `[${chain}] the pool index synced and served: ${ix ? `${ix.pools} pools to ${ix.covers} in ${ix.ms} ms, limited ${JSON.stringify(ix.limited)}` : "not read"}`);
+    say(Array.isArray(c?.rows) && c.rows.length > 0, `[${chain}] the helper's list rows read: ${c?.rows?.length ?? 0}`);
+    for (const r of c?.rows ?? []) {
+      const runs = Array.isArray(r.runs) ? r.runs : [];
+      const ends = runs.map((u) => (u.ok ? "ok" : u.code)).join(",");
+      const s429 = runs.reduce((n, u) => n + Object.values(u.hosts ?? {}).reduce((m, h) => m + (h.s429 ?? 0), 0), 0);
+      const most = Math.max(0, ...runs.map((u) => u.quotes ?? Infinity));
+      // a refusal as much as a quote: the user waits on either
+      const warm = runs.filter((u) => u.kind === "warm").map((u) => u.ms);
+      const ms = runs.map((u) => `${u.kind} ${u.ms}`).join(", ");
+      say(runs.length === 1 + WARM_RUNS && runs.every((u) => u.ok === true || NAMED.includes(u.code)), `[${chain}] ${r.symbol} ${r.coin} ends in a quote or a true named refusal: ${ends || "no run"}`);
+      say(most <= EVM_BUY_TAP_QUOTES, `[${chain}] ${r.symbol} asks ${most} kit quotes a tap at most (bound ${EVM_BUY_TAP_QUOTES})`);
+      say(s429 === 0, `[${chain}] ${r.symbol} taps got ${s429} answers of 429`);
+      say(warm.every((x) => x <= WARM_MAX_MS), `[${chain}] ${r.symbol} warm taps end within ${WARM_MAX_MS} ms: ${ms}`);
+    }
+  }
+}
+
 /** The verdict on one run { page }: { ok, verdict, lines }. */
 export function judge(run) {
   const lines = [];
@@ -75,8 +116,66 @@ export function judge(run) {
   const pools = Object.values(PINS).map((x) => x.pool);
   say(Array.isArray(p?.pools) && pools.every((x) => p.pools.includes(x)), `[SIGN_HOST] the build pins both mainnet pools: ${p?.pools?.join(", ") || "none"}`);
   say(Array.isArray(p?.testnet) && p.testnet.length === 0, `[SIGN_HOST] the build names no testnet pool: ${p?.testnet?.join(", ") || "none"}`);
+  if (run?.quotes !== undefined) judgeQuotes(run.quotes, say);
   const verdict = lines.some((l) => l.startsWith("BAD")) ? "FAIL" : "PASS";
   return { ok: verdict === "PASS", verdict, lines };
+}
+
+/** The quotes part of a run (see the header), real mainnet reads only: { chains: { base, robinhood } }. */
+export async function readQuotes(fetchFn = fetch) {
+  const counts = {};
+  const real = globalThis.fetch;
+  const counted = async (url, init) => {
+    const host = new URL(typeof url === "string" ? url : url.url).host;
+    const c = (counts[host] ??= { requests: 0, s429: 0 });
+    c.requests++;
+    const r = await fetchFn(url, init);
+    if (r.status === 429) c.s429++;
+    return r;
+  };
+  globalThis.fetch = counted;
+  const take = () => {
+    const out = structuredClone(counts);
+    for (const k of Object.keys(counts)) delete counts[k];
+    return out;
+  };
+  try {
+    const chains = {};
+    for (const chain of ["base", "robinhood"]) {
+      take();
+      const t = performance.now();
+      const { sync, served } = await evmPoolIndexRefresh(chain, null, counted);
+      const index = { ms: Math.round(performance.now() - t), served, covers: sync?.coversThrough ?? null, pools: sync?.pools?.length ?? null, error: sync?.error?.code ?? null, limited: sync?.stats?.limited ?? null, hosts: take() };
+      const r = await fetchFn(`${HELPER}/v1/market/lists?chain=${chain}`, { redirect: "error" });
+      if (r.status !== 200) throw new Error(`helper lists ${chain}: HTTP ${r.status}`);
+      const lists = (await r.json())?.lists ?? {};
+      const seen = new Map();
+      for (const v of Object.values(lists)) for (const x of Array.isArray(v) ? v : []) if (typeof x?.token === "string" && !seen.has(x.token)) seen.set(x.token, x);
+      const top = [...seen.values()].sort((a, b) => Number(b.liq_usd ?? 0) - Number(a.liq_usd ?? 0)).slice(0, QUOTE_ROWS);
+      const rows = [];
+      for (const x of top) {
+        const runs = [];
+        for (const kind of ["cold", ...Array(WARM_RUNS).fill("warm")]) {
+          let quotes = 0;
+          take();
+          const t0 = performance.now();
+          let end;
+          try {
+            const q = await evmPoolBuyQuoteTap({ chain, token: x.token, amountIn: QUOTE_AMOUNT, slippageBps: 300 }, { quote: (req) => (quotes++, evmPoolBuyQuote(req)) });
+            end = { ok: true, route: q.route };
+          } catch (e) {
+            end = { ok: false, code: e?.code ?? "thrown", message: String(e?.message ?? e).slice(0, 200) };
+          }
+          runs.push({ kind, ms: Math.round(performance.now() - t0), quotes, ...end, hosts: take() });
+        }
+        rows.push({ coin: x.token, symbol: String(x.symbol ?? "").slice(0, 32), liq_usd: x.liq_usd ?? null, runs });
+      }
+      chains[chain] = { index, rows };
+    }
+    return { readAt: new Date().toISOString(), chains };
+  } finally {
+    globalThis.fetch = real;
+  }
 }
 
 /** SIGN_HOST's index and /app.js (or this tree's build). */
@@ -102,6 +201,7 @@ if (realpathSync(process.argv[1] ?? "") === realpathSync(fileURLToPath(import.me
   const a = process.argv.slice(2);
   try {
     const run = await read(fetch, a.includes("--local"));
+    if (!a.includes("--local")) run.quotes = await readQuotes(fetch);
     if (a.includes("--record")) writeFileSync(a[a.indexOf("--record") + 1], `${JSON.stringify(run, null, 1)}\n`);
     const { verdict, lines } = judge(run);
     for (const l of lines) console.log(l);
