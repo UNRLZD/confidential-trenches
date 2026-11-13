@@ -2053,24 +2053,24 @@ test("a sign out while the walk's read is in flight ends the run at once though 
 
 // card a-load-proves-first-and-walks-the-restore-once (a): a load's resume walks nothing before the load's first proof
 // passes settle; it hands the page its bound, past which a pass that never started is not waited for
+// Card pool-restore-l1-no-clock: the walk is shown after the settle by their order in one log, never by Date.now
+// arithmetic (a 150 ms setTimeout may resolve a hair before Date.now has moved 150 ms: PR 723 run 43435268644)
 test("L1: a load's resume walks nothing before the first proof passes settle, and hands them its bound", async () => {
-  const walks: number[] = [];
-  const solana = (async () => (walks.push(Date.now()), { notes: [], spends: [] })) as never;
+  const order: string[] = [];
+  const solana = (async () => (order.push("walk"), { notes: [], spends: [] })) as never;
   // the first pass settles 150 ms after the resume is asked
   let settle!: () => void;
-  const first = new Promise<void>((r) => (settle = r));
+  const first = new Promise<void>((r) => (settle = () => (order.push("settled"), r())));
   const bounds: number[] = [];
   const w = await world({ pools: () => SOL_ONLY, solana, firstPass: (ms: number) => (bounds.push(ms), first), firstPassMaxMs: 60_000 } as Partial<PoolRestoreHost>);
   await w.store.put("meta", IDS_KEY(), { scopes: [SOL_SCOPE.toString()] });
-  const asked = Date.now();
   const run = w.r.resume();
   await new Promise((ok) => setTimeout(ok, 150));
-  assert.deepEqual(walks, [], "no walk before the first pass settled");
+  assert.deepEqual(order, [], "no walk before the first pass settled");
   settle();
   assert.notEqual(await run, null);
   await w.r.idle();
-  assert.equal(walks.length, 1);
-  assert.ok(walks[0]! - asked >= 150);
+  assert.deepEqual(order, ["settled", "walk"], "one walk, after the first pass settled");
   assert.deepEqual(bounds, [60_000]);
   // the page's bound when none is given
   const v = await world({ pools: () => SOL_ONLY, solana, firstPass: async (ms: number) => void bounds.push(ms) } as Partial<PoolRestoreHost>);
