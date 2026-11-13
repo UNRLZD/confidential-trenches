@@ -399,6 +399,8 @@ test("P2-3 load: a sell is taken up for a paid W whose money is on its way home 
     ["dust on a W whose buy stopped before its swap", "register", { token: 1n, usdc: 2_000_000n } as { token: bigint; usdc: bigint }, true],
     // a buy stopped at its swap, its floor written and the swap landed, no fill read yet: its coin is its own
     ["a buy at its swap, the floor written, the swap landed", "swap", { token: 5n, usdc: 2_000_000n }, false],
+    // W held 500 of the token before its swap (the baseline): 1200 is under 500 + its floor of 1000, so no coin of its
+    ["a coin under its floor over its baseline", "before", { token: 1200n, usdc: 2_000_000n }, true],
     ["W not read", null, {}, false],
   ] as const) {
     const v = await world([5_000_000n]);
@@ -427,6 +429,7 @@ test("P2-3 load: a sell is taken up for a paid W whose money is on its way home 
       const { swap: _s, ...r } = await recOf(v, "b1");
       await v.w.put("quotes", `${NEAR_BUY_KEY}b1`, { ...r, stage: "sent", step: "register", resumes: NEAR_BUY_RESUMES });
     }
+    if (set === "before") await v.w.put("quotes", `${NEAR_BUY_KEY}b1`, { ...(await recOf(v, "b1")), stage: "sent", step: "swap", resumes: NEAR_BUY_RESUMES, swap: { floor: "1000", before: "500" } });
     if (set === "swap") await v.w.put("quotes", `${NEAR_BUY_KEY}b1`, { ...(await recOf(v, "b1")), stage: "sent", step: "swap", resumes: NEAR_BUY_RESUMES, swap: { floor: "5", before: "0" } });
     reads(page, w);
     // the dust row: W's USDC is moved into the vault (the move given, so the amount is seen), never stopped at a quote
